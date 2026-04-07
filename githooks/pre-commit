@@ -29,13 +29,37 @@ elif [ -f "go.mod" ]; then
   PROJECT_LANG="go"
 fi
 
+# Check if this is a documentation-only project (no source code)
+# Such projects have only markdown, yaml, json, skills, docs - no actual code
+if [ -z "$PROJECT_LANG" ]; then
+  # Count source code files
+  CODE_FILES=$(find . -type f \( -name "*.py" -o -name "*.js" -o -name "*.ts" -o -name "*.tsx" -o -name "*.java" -o -name "*.go" -o -name "*.rs" -o -name "*.cpp" -o -name "*.c" -o -name "*.swift" -o -name "*.kt" \) 2>/dev/null | wc -l)
+  
+  if [ "$CODE_FILES" -eq 0 ]; then
+    PROJECT_LANG="documentation-only"
+    echo ""
+    echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+    echo "   📚 DOCUMENTATION-ONLY PROJECT DETECTED"
+    echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+    echo ""
+    echo "This project contains no source code files."
+    echo "Skipping static analysis and test gates."
+    echo ""
+    echo "Proceeding with documentation-only checks..."
+  fi
+fi
+
 # ============================================================================
 # Gate 1: Static Analysis (MANDATORY - fail if tool not available)
 # ============================================================================
 echo ""
 echo "→ Gate 1: Static analysis..."
 
-if [ "$PROJECT_LANG" == "typescript" ]; then
+if [ "$PROJECT_LANG" == "documentation-only" ]; then
+  # Documentation-only project - skip static analysis
+  echo "✅ Skipped (no source code to analyze)."
+  
+elif [ "$PROJECT_LANG" == "typescript" ]; then
   # TypeScript: require tsc + ESLint
   if ! command -v tsc &> /dev/null; then
     echo ""
@@ -216,6 +240,8 @@ if [ "$PROJECT_LANG" == "typescript" ] || [ "$PROJECT_LANG" == "python" ]; then
 elif [ "$PROJECT_LANG" == "go" ]; then
   # Go already linted in Gate 1 via golangci-lint
   echo "✅ Linting already completed in Gate 1 (golangci-lint)."
+elif [ "$PROJECT_LANG" == "documentation-only" ]; then
+  echo "✅ Skipped (no source code to lint)."
 fi
 
 # ============================================================================
@@ -286,10 +312,16 @@ elif [ "$PROJECT_LANG" == "go" ]; then
     exit 1
   fi
   echo "✅ Go tests passed."
+
+elif [ "$PROJECT_LANG" == "documentation-only" ]; then
+  # Documentation-only project - no tests required
+  HAS_TEST_CONFIG=true
+  echo "✅ Skipped (no source code to test)."
 fi
 
 # Check if test configuration was found
-if [ "$HAS_TEST_CONFIG" == "false" ]; then
+# Skip this check for documentation-only projects
+if [ "$HAS_TEST_CONFIG" == "false" ] && [ "$PROJECT_LANG" != "documentation-only" ]; then
   echo ""
   echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
   echo "   ❌ ENVIRONMENT ERROR - COMMIT BLOCKED"
@@ -393,6 +425,10 @@ elif [ "$PROJECT_LANG" == "go" ]; then
     exit 1
   fi
   echo "✅ Coverage check passed."
+
+elif [ "$PROJECT_LANG" == "documentation-only" ]; then
+  # Documentation-only project - no coverage required
+  echo "✅ Skipped (no source code for coverage)."
 fi
 
 echo ""

@@ -27,6 +27,25 @@ if [[ "$CURRENT_BRANCH" == "main" || "$CURRENT_BRANCH" == "master" ]]; then
   exit 0
 fi
 
+# ============================================================================
+# Check if this is a documentation-only project (no source code)
+# ============================================================================
+# Count source code files in the repo
+CODE_FILES=$(find . -type f \( -name "*.py" -o -name "*.js" -o -name "*.ts" -o -name "*.tsx" -o -name "*.java" -o -name "*.go" -o -name "*.rs" -o -name "*.cpp" -o -name "*.c" -o -name "*.swift" -o -name "*.kt" \) -not -path "./.git/*" 2>/dev/null | wc -l)
+
+if [ "$CODE_FILES" -eq 0 ]; then
+  echo ""
+  echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+  echo "   📚 DOCUMENTATION-ONLY PROJECT DETECTED"
+  echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+  echo ""
+  echo "This project contains no source code files."
+  echo "Skipping code walkthrough (no code to review)."
+  echo ""
+  echo "Proceeding with push..."
+  exit 0
+fi
+
 # Get diff stats
 DIFF_STATS=$(git diff origin/main...HEAD --stat 2>/dev/null || git diff origin/master...HEAD --stat 2>/dev/null)
 
