@@ -1,0 +1,269 @@
+#!/bin/bash
+# Pre-push Hook - Code Walkthrough Trigger
+#
+# DESIGN PRINCIPLE: Zero tolerance - fail on missing capabilities
+# If OpenCode CLI not available → BLOCK push and notify user to fix environment
+# User is responsible for ensuring environment is ready for AI automation.
+#
+# Uses Delphi method to achieve consensus on code quality before pushing.
+#
+# Install: cp this-file .git/hooks/pre-push && chmod +x .git/hooks/pre-push
+
+echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+echo "   CODE WALKTHROUGH - PRE-PUSH CHECK"
+echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+
+# Get current branch
+CURRENT_BRANCH=$(git rev-parse --abbrev-ref HEAD)
+
+# Get remote and branch being pushed
+REMOTE="$1"
+URL="$2"
+
+# Skip for main/master branches (should use PR workflow)
+if [[ "$CURRENT_BRANCH" == "main" || "$CURRENT_BRANCH" == "master" ]]; then
+  echo "⚠️ Pushing to main/master. Consider using PR workflow instead."
+  echo "Proceeding without code walkthrough..."
+  exit 0
+fi
+
+# Get diff stats
+DIFF_STATS=$(git diff origin/main...HEAD --stat 2>/dev/null || git diff origin/master...HEAD --stat 2>/dev/null)
+
+if [ -z "$DIFF_STATS" ]; then
+  echo "No changes to review. Proceeding..."
+  exit 0
+fi
+
+# Count files and lines
+FILES_CHANGED=$(echo "$DIFF_STATS" | tail -1 | grep -oE '[0-9]+ file' | grep -oE '[0-9]+' || echo "0")
+LINES_ADDED=$(git diff origin/main...HEAD --shortstat 2>/dev/null | grep -oE '[0-9]+ insertion' | grep -oE '[0-9]+' || echo "0")
+LINES_DELETED=$(git diff origin/main...HEAD --shortstat 2>/dev/null | grep -oE '[0-9]+ deletion' | grep -oE '[0-9]+' || echo "0")
+
+echo ""
+echo "Branch: $CURRENT_BRANCH"
+echo "Files changed: $FILES_CHANGED"
+echo "Lines: +$LINES_ADDED -$LINES_DELETED"
+echo ""
+
+# ============================================================================
+# MANDATORY: Check if OpenCode CLI is available
+# ============================================================================
+if ! command -v opencode &> /dev/null; then
+  echo ""
+  echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+  echo "   ❌ ENVIRONMENT ERROR - PUSH BLOCKED"
+  echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+  echo ""
+  echo "OpenCode CLI is NOT installed."
+  echo ""
+  echo "Code walkthrough is MANDATORY for pushing to remote."
+  echo "Without OpenCode, multi-model review cannot be performed."
+  echo ""
+  echo "Your responsibility: Install OpenCode CLI to enable code walkthrough."
+  echo ""
+  echo "Install commands:"
+  echo "  curl -fsSL https://raw.githubusercontent.com/anthropics/anthropic-quickstarts/main/opencode/install.sh | sh"
+  echo "  or: pip install opencode"
+  echo "  or: npm install -g @anthropic/opencode"
+  echo ""
+  echo "After installation, retry the push."
+  echo ""
+  exit 1
+fi
+
+# ============================================================================
+# Check if code-walkthrough skill is available
+# ============================================================================
+OPENCODE_SKILLS=$(opencode skills list 2>/dev/null)
+if ! echo "$OPENCODE_SKILLS" | grep -q "code-walkthrough"; then
+  echo ""
+  echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+  echo "   ❌ ENVIRONMENT ERROR - PUSH BLOCKED"
+  echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+  echo ""
+  echo "code-walkthrough skill is NOT installed in OpenCode."
+  echo ""
+  echo "Code walkthrough is MANDATORY for pushing to remote."
+  echo ""
+  echo "Your responsibility: Install the code-walkthrough skill."
+  echo ""
+  echo "Install commands:"
+  echo "  opencode skills install code-walkthrough"
+  echo "  or manually copy skill to ~/.config/opencode/skills/code-walkthrough/"
+  echo ""
+  exit 1
+fi
+
+# ============================================================================
+# Size limits - BLOCK if exceeded (no bypass for large changes)
+# ============================================================================
+MAX_FILES=20
+MAX_LINES=500
+
+if [ "$FILES_CHANGED" -gt "$MAX_FILES" ]; then
+  echo ""
+  echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+  echo "   ❌ CHANGE SIZE ERROR - PUSH BLOCKED"
+  echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+  echo ""
+  echo "Large change detected: $FILES_CHANGED files > $MAX_FILES limit."
+  echo ""
+  echo "Large changes cannot be properly reviewed in a single walkthrough."
+  echo "Split into smaller, focused commits for proper quality assurance."
+  echo ""
+  echo "Recommendation:"
+  echo "  1. Split this branch into smaller PRs (max 20 files each)"
+  echo "  2. Or use explicit PR workflow with staged reviews"
+  echo ""
+  echo "Quality gates require manageable change size."
+  echo ""
+  exit 1
+fi
+
+if [ "$((LINES_ADDED + LINES_DELETED))" -gt "$MAX_LINES" ]; then
+  echo ""
+  echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+  echo "   ❌ CHANGE SIZE ERROR - PUSH BLOCKED"
+  echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+  echo ""
+  echo "Large diff detected: +$LINES_ADDED -$LINES_DELETED > $MAX_LINES limit."
+  echo ""
+  echo "Large diffs cannot be properly reviewed in a single walkthrough."
+  echo "Split into smaller, focused commits for proper quality assurance."
+  echo ""
+  echo "Recommendation:"
+  echo "  1. Split this change into smaller commits"
+  echo "  2. Each commit should be focused and reviewable"
+  echo ""
+  echo "Quality gates require manageable change size."
+  echo ""
+  exit 1
+fi
+
+# ============================================================================
+# Trigger code walkthrough via OpenCode
+# ============================================================================
+echo "Triggering code walkthrough via OpenCode..."
+echo ""
+
+# Create a temporary file with the diff
+DIFF_FILE=$(mktemp)
+git diff origin/main...HEAD > "$DIFF_FILE" 2>/dev/null || git diff origin/master...HEAD > "$DIFF_FILE" 2>/dev/null
+
+# Create a temporary file for output
+OUTPUT_FILE=$(mktemp)
+
+echo "┌─────────────────────────────────────────────────────────────┐"
+echo "│  CODE WALKTHROUGH (Delphi Method)                           │"
+echo "│                                                              │"
+echo "│  Running multi-model review...                              │"
+echo "│                                                              │"
+echo "│  ─────────────────────────────────────────                  │"
+
+# Call code-walkthrough skill via opencode
+# Using timeout to prevent indefinite hanging
+TIMEOUT_SECONDS=300
+
+if timeout $TIMEOUT_SECONDS opencode code-walkthrough --diff "$DIFF_FILE" --output "$OUTPUT_FILE" 2>&1; then
+  echo "│  ✓ Review completed                                         │"
+  echo "└─────────────────────────────────────────────────────────────┘"
+  echo ""
+  
+  # Read the decision from output
+  if [ -f "$OUTPUT_FILE" ]; then
+    DECISION=$(grep -E "^(APPROVED|REQUEST_CHANGES)" "$OUTPUT_FILE" | head -1)
+    
+    if [ "$DECISION" == "APPROVED" ]; then
+      echo "✓ Code walkthrough passed"
+      echo ""
+      rm -f "$DIFF_FILE" "$OUTPUT_FILE"
+      exit 0
+    elif [ "$DECISION" == "REQUEST_CHANGES" ]; then
+      echo "✗ Code walkthrough failed"
+      echo ""
+      echo "Issues found:"
+      grep -A 100 "ISSUES:" "$OUTPUT_FILE" | head -30
+      echo ""
+      echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+      echo "   ❌ CODE WALKTHROUGH FAILED - PUSH BLOCKED"
+      echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+      echo ""
+      echo "Fix the issues identified by the multi-model review."
+      echo "Run manually for details: /code-walkthrough"
+      echo ""
+      rm -f "$DIFF_FILE" "$OUTPUT_FILE"
+      exit 1
+    else
+      echo ""
+      echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+      echo "   ❌ REVIEW OUTPUT ERROR - PUSH BLOCKED"
+      echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+      echo ""
+      echo "Could not determine decision from code walkthrough output."
+      echo ""
+      echo "Expected: APPROVED or REQUEST_CHANGES"
+      echo "Received: $DECISION"
+      echo ""
+      echo "This indicates a problem with the code-walkthrough skill."
+      echo "Report this issue and retry after fixing."
+      echo ""
+      rm -f "$DIFF_FILE" "$OUTPUT_FILE"
+      exit 1
+    fi
+  else
+    echo ""
+    echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+    echo "   ❌ REVIEW OUTPUT ERROR - PUSH BLOCKED"
+    echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+    echo ""
+    echo "Output file not found after code walkthrough."
+    echo ""
+    echo "This indicates a problem with the code-walkthrough skill."
+    echo "Report this issue and retry after fixing."
+    echo ""
+    rm -f "$DIFF_FILE" "$OUTPUT_FILE"
+    exit 1
+  fi
+else
+  EXIT_CODE=$?
+  echo "│  ✗ Code walkthrough failed (exit code: $EXIT_CODE)           │"
+  echo "└─────────────────────────────────────────────────────────────┘"
+  echo ""
+  
+  if [ $EXIT_CODE -eq 124 ]; then
+    # Timeout exit code
+    echo ""
+    echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+    echo "   ❌ TIMEOUT ERROR - PUSH BLOCKED"
+    echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+    echo ""
+    echo "Code walkthrough timed out after $TIMEOUT_SECONDS seconds."
+    echo ""
+    echo "Possible causes:"
+    echo "  1. Models are slow or unavailable"
+    echo "  2. Diff is too complex for quick review"
+    echo "  3. Network/API issues"
+    echo ""
+    echo "Retry after addressing the timeout issue."
+    echo ""
+  else
+    echo ""
+    echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+    echo "   ❌ EXECUTION ERROR - PUSH BLOCKED"
+    echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+    echo ""
+    echo "Code walkthrough execution failed with exit code: $EXIT_CODE"
+    echo ""
+    echo "Possible causes:"
+    echo "  1. Model API unavailable or misconfigured"
+    echo "  2. code-walkthrough skill has errors"
+    echo "  3. OpenCode CLI internal error"
+    echo ""
+    echo "Fix the environment issue and retry."
+    echo ""
+  fi
+  
+  rm -f "$DIFF_FILE" "$OUTPUT_FILE"
+  exit 1
+fi
