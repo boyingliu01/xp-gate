@@ -46,4 +46,4 @@ htmlcov/
 # Temporary
 *.tmp
 *.temp
-.cache/
+.cache/.worktrees/
