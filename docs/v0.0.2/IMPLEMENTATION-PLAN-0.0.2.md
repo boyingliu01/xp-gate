@@ -1,0 +1,978 @@
+# 0.0.2 Implementation Plan
+
+## 实施概览
+
+本计划详细描述了如何将Harness-First Architecture从设计转化为实际代码，分为4个Phase，预计2-3周完成。
+
+**设计依据** ：
+- Martin Fowler Harness Engineering (2026.04)
+- AgentSpec运行时强制框架 (arXiv 2025.03)
+- Anthropic Claude Code Auto Mode (2026.03)
+
+---
+
+## Phase 1: 核心Hook框架 (Week 1)
+
+### 1.1 项目结构调整
+
+```
+xp-workflow-automation/
+├── src/
+│   ├── hooks/                    # NEW: Hook系统
+│   │   ├── types.ts              # Hook类型定义
+│   │   ├── engine.ts             # Hook执行引擎
+│   │   ├── registry.ts           # Hook注册中心
+│   │   ├── validators/           # 通用验证器
+│   │   │   ├── common.ts
+│   │   │   └── evidence.ts
+│   │   └── hooks/                # Skill-specific hooks
+│   │       ├── delphi-review/
+│   │       ├── xp-consensus/
+│   │       └── code-walkthrough/
+│   ├── schema/                   # NEW: 结构化输出Schema
+│   │   ├── types.ts
+│   │   ├── validator.ts
+│   │   └── schemas/
+│   │       ├── delphi-review.ts
+│   │       └── common.ts
+│   ├── retry/                    # NEW: 重试与升级协议
+│   │   ├── types.ts
+│   │   ├── protocol.ts
+│   │   └── strategies/
+│   ├── skills/                   # EXISTING: Skill实现
+│   │   └── ...
+│   └── utils/
+│       └── logger.ts
+├── tests/
+│   ├── unit/hooks/
+│   ├── integration/
+│   └── fixtures/
+└── docs/
+    └── ...
+```
+
+### 1.2 基础类型定义
+
+**文件: `src/hooks/types.ts`**
+
+```typescript
+/**
+ * Hook执行上下文
+ */
+export interface HookContext {
+  /** Skill名称 */
+  skillName: string;
+  
+  /** 当前阶段 */
+  phase: string;
+  
+  /** 执行数据 */
+  data: Record<string, any>;
+  
+  /** 执行元数据 */
+  metadata: {
+    /** 开始时间 */
+    startTime: number;
+    
+    /** 尝试次数 */
+    attemptCount: number;
+    
+    /** 模型ID */
+    modelId: string;
+    
+    /** 执行ID */
+    executionId: string;
+  };
+  
+  /** 之前hook的结果 */
+  previousResults?: HookExecutionResult[];
+}
+
+/**
+ * Hook执行结果
+ */
+export interface HookResult {
+  /** 状态 */
+  status: 'PASSED' | 'BLOCKED' | 'WARNING' | 'FAILED';
+  
+  /** 消息 */
+  message: string;
+  
+  /** 详细数据 */
+  details?: Record<string, any>;
+  
+  /** 建议动作 */
+  action: string;
+  
+  /** 是否可重试 */
+  retryable: boolean;
+  
+  /** 升级信息 */
+  escalation?: {
+    /** 升级级别 */
+    level: 'LOW' | 'MEDIUM' | 'HIGH' | 'CRITICAL';
+    
+    /** 升级原因 */
+    reason: string;
+    
+    /** 建议的更强模型 */
+    recommendedModel?: string;
+  };
+}
+
+/**
+ * Hook函数类型
+ */
+export type HookFunction = (
+  context: HookContext,
+  params: Record<string, any>
+) => Promise<HookResult>;
+
+/**
+ * Hook注册信息
+ */
+export interface HookRegistration {
+  /** Hook ID */
+  id: string;
+  
+  /** Hook名称 */
+  name: string;
+  
+  /** 描述 */
+  description: string;
+  
+  /** Hook函数 */
+  hook: HookFunction;
+  
+  /** 是否强制 */
+  mandatory: boolean;
+  
+  /** 是否阻断 */
+  blocking: boolean;
+  
+  /** 超时时间(ms) */
+  timeout?: number;
+  
+  /** 依赖的其他hooks */
+  dependsOn?: string[];
+  
+  /** 适用场景 */
+  applicableTo?: string[];
+}
+
+/**
+ * Hook执行记录
+ */
+export interface HookExecutionRecord {
+  executionId: string;
+  hookId: string;
+  phase: string;
+  context: HookContext;
+  result: HookResult;
+  executionTime: number;
+  timestamp: string;
+}
+
+/**
+ * 阶段执行结果
+ */
+export interface PhaseExecutionResult {
+  phase: string;
+  status: 'PASSED' | 'BLOCKED' | 'ERROR' | 'WARNING';
+  hookResults: HookExecutionResult[];
+  message?: string;
+  blockingHook?: string;
+  error?: string;
+  warnings?: string[];
+}
+
+/**
+ * 执行选项
+ */
+export interface ExecutionOptions {
+  defaultTimeout?: number;
+  continueOnWarning?: boolean;
+  maxRetries?: number;
+  retryDelay?: number;
+}
+
+// ============================================
+// Phase 2: Hook Engine Implementation
+// ============================================
+
+/**
+ * Hook Engine 实现架构
+ */
+export class HookEngine {
+  private hooks: Map<string, HookRegistration> = new Map();
+  private executionHistory: HookExecutionRecord[] = [];
+  private executionLocks: Map<string, Promise<void>> = new Map(); // 防止并发执行冲突
+
+  /**
+   * 注册Hook
+   */
+  register(hook: HookRegistration): void {
+    this.hooks.set(hook.id, hook);
+    logger.info(`Hook registered: ${hook.id} (${hook.name})`);
+  }
+
+  /**
+   * 执行阶段的所有Hooks (添加锁机制防止竞态条件)
+   */
+  async executePhase(
+    phase: string,
+    context: HookContext,
+    options: ExecutionOptions = {}
+  ): Promise<PhaseExecutionResult> {
+    // 检查是否已有执行中的相同phase
+    const lockKey = `${context.metadata.executionId}-${phase}`;
+    if (this.executionLocks.has(lockKey)) {
+      logger.warn(`Phase ${phase} is already executing, waiting...`);
+      await this.executionLocks.get(lockKey);
+    }
+    
+    // 创建执行锁
+    let releaseLock: () => void;
+    const lockPromise = new Promise<void>((resolve) => {
+      releaseLock = resolve;
+    });
+    this.executionLocks.set(lockKey, lockPromise);
+    
+    try {
+      const phaseHooks = this.getHooksForPhase(phase);
+      const results: HookExecutionResult[] = [];
+
+      logger.info(`Executing phase: ${phase} (${phaseHooks.length} hooks)`);
+
+    for (const hook of phaseHooks) {
+      // 检查依赖是否满足
+      if (hook.dependsOn) {
+        const unmetDeps = hook.dependsOn.filter(depId => 
+          !results.some(r => r.hookId === depId && r.result.status === 'PASSED')
+        );
+        
+        if (unmetDeps.length > 0) {
+          results.push({
+            hookId: hook.id,
+            hookName: hook.name,
+            result: {
+              status: 'FAILED',
+              message: `Dependencies not met: ${unmetDeps.join(', ')}`,
+              action: 'RESOLVE_DEPENDENCIES',
+              retryable: false
+            },
+            executionTime: 0,
+            timestamp: new Date().toISOString()
+          });
+          continue;
+        }
+      }
+
+      const startTime = Date.now();
+      
+      try {
+        const result = await this.executeWithTimeout(
+          hook,
+          context,
+          hook.timeout || options.defaultTimeout || 30000
+        );
+
+        const executionTime = Date.now() - startTime;
+        
+        results.push({
+          hookId: hook.id,
+          hookName: hook.name,
+          result,
+          executionTime,
+          timestamp: new Date().toISOString()
+        });
+
+        // 记录执行历史
+        this.executionHistory.push({
+          executionId: context.metadata.executionId,
+          hookId: hook.id,
+          phase,
+          context,
+          result,
+          executionTime,
+          timestamp: new Date().toISOString()
+        });
+
+        // 如果是mandatory且blocking，失败时立即阻断
+        if (hook.mandatory && hook.blocking && result.status === 'BLOCKED') {
+          logger.error(`Mandatory blocking hook failed: ${hook.id}`);
+          return {
+            phase,
+            status: 'BLOCKED',
+            hookResults: results,
+            blockingHook: hook.id,
+            message: result.message,
+            action: result.action
+          };
+        }
+
+        // 如果是mandatory且非blocking但FAILED，记录但不阻断
+        if (hook.mandatory && result.status === 'FAILED') {
+          logger.warn(`Mandatory hook failed (non-blocking): ${hook.id}`);
+        }
+
+      } catch (error) {
+        logger.error(`Hook execution failed: ${hook.id}`, error);
+        
+        const executionTime = Date.now() - startTime;
+        
+        results.push({
+          hookId: hook.id,
+          hookName: hook.name,
+          result: {
+            status: 'FAILED',
+            message: `Execution error: ${error.message}`,
+            action: 'CHECK_HOOK_IMPLEMENTATION',
+            retryable: false
+          },
+          executionTime,
+          timestamp: new Date().toISOString()
+        });
+
+        if (hook.mandatory && hook.blocking) {
+          this.executionLocks.delete(lockKey);
+          releaseLock!();
+          return {
+            phase,
+            status: 'ERROR',
+            hookResults: results,
+            error: error.message,
+            blockingHook: hook.id
+          };
+        }
+      }
+    }
+
+    // 所有hooks执行完毕
+    const blockedHooks = results.filter(r => r.result.status === 'BLOCKED');
+    const failedHooks = results.filter(r => r.result.status === 'FAILED');
+    const warningHooks = results.filter(r => r.result.status === 'WARNING');
+
+    if (blockedHooks.length > 0) {
+      this.executionLocks.delete(lockKey);
+      releaseLock!();
+      return {
+        phase,
+        status: 'BLOCKED',
+        hookResults: results,
+        message: `${blockedHooks.length} hook(s) blocked execution`,
+        action: 'REVIEW_BLOCKERS'
+      };
+    }
+
+    if (failedHooks.length > 0 && !options.continueOnWarning) {
+      this.executionLocks.delete(lockKey);
+      releaseLock!();
+      return {
+        phase,
+        status: 'ERROR',
+        hookResults: results,
+        message: `${failedHooks.length} hook(s) failed execution`,
+        action: 'CHECK_HOOK_IMPLEMENTATIONS'
+      };
+    }
+
+    this.executionLocks.delete(lockKey);
+    releaseLock!();
+    return {
+      phase,
+      status: 'PASSED',
+      hookResults: results,
+      warnings: warningHooks.length > 0 ? warningHooks.map(h => ({
+        hook: h.hookId,
+        message: h.result.message
+      })) : undefined
+    };
+  }
+
+  private async executeWithTimeout(
+    hook: HookRegistration,
+    context: HookContext,
+    timeoutMs: number
+  ): Promise<HookResult> {
+    return new Promise(async (resolve, reject) => {
+      const timer = setTimeout(() => {
+        reject(new Error(`Hook ${hook.id} timed out after ${timeoutMs}ms`));
+      }, timeoutMs);
+
+      try {
+        const result = await hook.hook(context, {});
+        clearTimeout(timer);
+        resolve(result);
+      } catch (error) {
+        clearTimeout(timer);
+        reject(error);
+      }
+    });
+  }
+
+  private getHooksForPhase(phase: string): HookRegistration[] {
+    return Array.from(this.hooks.values())
+      .filter(h => h.id.startsWith(phase))
+      .sort((a, b) => a.id.localeCompare(b.id));
+  }
+
+  /**
+   * 获取执行历史
+   */
+  getExecutionHistory(filter?: {
+    phase?: string;
+    hookId?: string;
+    executionId?: string;
+  }): HookExecutionRecord[] {
+    let history = [...this.executionHistory];
+    
+    if (filter?.phase) {
+      history = history.filter(h => h.phase === filter.phase);
+    }
+    
+    if (filter?.hookId) {
+      history = history.filter(h => h.hookId === filter.hookId);
+    }
+    
+    if (filter?.executionId) {
+      history = history.filter(h => h.executionId === filter.executionId);
+    }
+    
+    return history;
+  }
+
+  /**
+   * 清空执行历史
+   */
+  clearExecutionHistory(): void {
+    this.executionHistory = [];
+  }
+}
+
+// ============================================
+// Phase 3: Delphi Review Hooks
+// ============================================
+
+/**
+ * Delphi Review Skill的专用Hooks
+ */
+
+// 3.1 verifyPhase0Complete
+export async function verifyPhase0Complete(
+  context: HookContext,
+  params: {}
+): Promise<HookResult> {
+  const { document, expertConfig } = context.data.phase0 || {};
+  
+  const checks = [
+    {
+      name: '文档存在且非空',
+      check: () => document && document.content && document.content.length > 0,
+      error: '文档不存在或为空'
+    },
+    {
+      name: '文档可读性验证',
+      check: () => {
+        // 检查文档是否包含不可读字符或格式错误
+        const hasValidStructure = document.content.includes('#') || 
+                                   document.content.includes('##') ||
+                                   document.content.length > 100;
+        return hasValidStructure;
+      },
+      error: '文档结构不合法或内容过少'
+    },
+    {
+      name: '专家配置已定义',
+      check: () => expertConfig && 
+                   Array.isArray(expertConfig.experts) && 
+                   expertConfig.experts.length >= 2,
+      error: '专家配置未定义或少于2位专家'
+    },
+    {
+      name: '专家配置有效',
+      check: () => {
+        return expertConfig.experts.every((e: any) => 
+          e.id && e.model && e.role
+        );
+      },
+      error: '专家配置缺少必要字段(id/model/role)'
+    }
+  ];
+  
+  const failedChecks = checks.filter(c => !c.check());
+  
+  if (failedChecks.length > 0) {
+    return {
+      status: 'BLOCKED',
+      message: `Phase 0验证失败: ${failedChecks.map(c => c.error).join(', ')}`,
+      details: {
+        failedChecks: failedChecks.map(c => c.name),
+        documentExists: !!document,
+        documentLength: document?.content?.length || 0,
+        expertCount: expertConfig?.experts?.length || 0
+      },
+      action: 'FIX_PHASE0_PREREQUISITES',
+      retryable: false,
+      escalation: {
+        level: 'HIGH',
+        reason: 'Phase 0是后续所有阶段的基础，必须完全满足'
+      }
+    };
+  }
+  
+  return {
+    status: 'PASSED',
+    message: 'Phase 0验证通过: 文档可读，专家配置有效',
+    details: {
+      documentLength: document.content.length,
+      expertCount: expertConfig.experts.length,
+      experts: expertConfig.experts.map((e: any) => ({ id: e.id, model: e.model, role: e.role }))
+    },
+    action: 'PROCEED_TO_ROUND1',
+    retryable: false
+  };
+}
+
+// 3.2 verifyAllExpertsResponded
+export async function verifyAllExpertsResponded(
+  context: HookContext,
+  params: { min_experts: number }
+): Promise<HookResult> {
+  const round = context.data.currentRound;
+  const responses = round?.responses || [];
+  
+  logger.debug(`verifyAllExpertsResponded: received=${responses.length}, expected=${params.min_experts}`);
+  
+  // 检查1: 数量验证
+  if (responses.length < params.min_experts) {
+    const missingExpertIds = findMissingExperts(context, params.min_experts);
+    
+    return {
+      status: 'BLOCKED',
+      message: `验证失败: 只有${responses.length}/${params.min_experts}位专家响应。缺少: ${missingExpertIds.join(', ')}`,
+      details: {
+        received: responses.length,
+        expected: params.min_experts,
+        missing: missingExpertIds,
+        receivedExpertIds: responses.map(r => r.expertId),
+        round: round?.roundNumber
+      },
+      action: 'WAIT_FOR_ALL_EXPERTS',
+      retryable: true,
+      escalation: {
+        level: 'MEDIUM',
+        reason: 'Delphi方法要求所有专家参与，部分响应无法形成有效共识'
+      }
+    };
+  }
+  
+  // 检查2: 内容验证（非空）
+  const emptyResponses = responses.filter(r => !r.content || r.content.trim().length < 50);
+  if (emptyResponses.length > 0) {
+    return {
+      status: 'BLOCKED',
+      message: `检测到${emptyResponses.length}位专家的响应内容为空或过少（<50字符）`,
+      details: {
+        emptyExperts: emptyResponses.map(r => r.expertId),
+        contentLengths: responses.map(r => ({
+          expertId: r.expertId,
+          length: r.content?.length || 0
+        }))
+      },
+      action: 'REQUEST_COMPLETE_RESPONSE',
+      retryable: true,
+      escalation: {
+        level: 'MEDIUM',
+        reason: '空响应或过少内容无法进行有效评审'
+      }
+    };
+  }
+  
+  // 检查3: 时间戳验证（防止缓存/复用旧响应）
+  const now = Date.now();
+  const staleThreshold = 5 * 60 * 1000; // 5分钟
+  const staleResponses = responses.filter(r => {
+    const age = now - (r.timestamp || 0);
+    return age > staleThreshold;
+  });
+  
+  if (staleResponses.length > 0) {
+    return {
+      status: 'WARNING',
+      message: `检测到${staleResponses.length}位专家的响应可能来自缓存（超过5分钟）`,
+      details: {
+        staleExperts: staleResponses.map(r => r.expertId),
+        responseAges: responses.map(r => ({
+          expertId: r.expertId,
+          age: now - (r.timestamp || 0)
+        }))
+      },
+      action: 'VERIFY_FRESHNESS',
+      retryable: true,
+      escalation: {
+        level: 'LOW',
+        reason: '可能复用旧响应，需要验证新鲜度'
+      }
+    };
+  }
+  
+  // 检查4: 专家ID唯一性
+  const expertIds = responses.map(r => r.expertId);
+  const duplicates = expertIds.filter((id, index) => expertIds.indexOf(id) !== index);
+  if (duplicates.length > 0) {
+    return {
+      status: 'BLOCKED',
+      message: `检测到重复的专家响应: ${duplicates.join(', ')}`,
+      details: {
+        duplicates: [...new Set(duplicates)],
+        allExpertIds: expertIds
+      },
+      action: 'DEDUPLICATE_RESPONSES',
+      retryable: true,
+      escalation: {
+        level: 'HIGH',
+        reason: '重复响应可能导致评审结果被错误计算'
+      }
+    };
+  }
+  
+  // 所有检查通过
+  return {
+    status: 'PASSED',
+    message: `所有${params.min_experts}位专家已完成有效响应`,
+    details: {
+      experts: responses.map(r => r.expertId),
+      avgResponseLength: Math.round(
+        responses.reduce((sum, r) => sum + (r.content?.length || 0), 0) / responses.length
+      ),
+      minResponseLength: Math.min(...responses.map(r => r.content?.length || 0)),
+      maxResponseLength: Math.max(...responses.map(r => r.content?.length || 0))
+    },
+    action: 'PROCEED_TO_NEXT_PHASE',
+    retryable: false
+  };
+}
+
+/**
+ * 辅助函数: 查找缺失的专家
+ */
+function findMissingExperts(context: HookContext, expectedCount: number): string[] {
+  const expectedIds = Array.from({ length: expectedCount }, (_, i) => 
+    String.fromCharCode(65 + i) // A, B, C, ...
+  );
+  
+  const receivedIds = context.data.currentRound?.responses?.map((r: any) => r.expertId) || [];
+  
+  return expectedIds.filter(id => !receivedIds.includes(id));
+}
+
+// 3.3 verifyNoFabricatedResults
+export async function verifyNoFabricatedResults(
+  context: HookContext,
+  params: {}
+): Promise<HookResult> {
+  const reviews = context.data.currentRound?.responses || [];
+  const document = context.data.document;
+  
+  if (!document || !document.content) {
+    return {
+      status: 'FAILED',
+      message: '无法验证：原始文档不存在',
+      details: { hasDocument: !!document },
+      action: 'PROVIDE_DOCUMENT',
+      retryable: false
+    };
+  }
+  
+  const fabricatedIssues: Array<{ expert: string; issue: string; reason: string }> = [];
+  
+  for (const review of reviews) {
+    // 验证1: 检查引用的位置是否真实存在
+    for (const issue of review.issues || []) {
+      if (issue.location) {
+        const content = extractContentAtLocation(document, issue.location);
+        
+        if (!content) {
+          fabricatedIssues.push({
+            expert: review.expertId,
+            issue: issue.description,
+            reason: `引用的位置"${issue.location}"在文档中不存在`
+          });
+          continue;
+        }
+        
+        // 验证内容是否与问题描述匹配
+        if (!isContentMatchingIssue(content, issue.description)) {
+          fabricatedIssues.push({
+            expert: review.expertId,
+            issue: issue.description,
+            reason: `引用位置的内容与问题描述不匹配。位置内容: "${content.substring(0, 100)}..."`
+          });
+        }
+      }
+    }
+    
+    // 验证2: 使用另一个模型进行交叉验证（抽样，可配置）
+    const crossValidationRate = params.crossValidationRate ?? 0.3; // 默认30%，可通过参数配置
+    if (Math.random() < crossValidationRate) {
+      const crossValidation = await crossValidateReview(review, document);
+      
+      if (!crossValidation.valid) {
+        fabricatedIssues.push({
+          expert: review.expertId,
+          issue: '交叉验证失败',
+          reason: crossValidation.reason
+        });
+      }
+    }
+  }
+  
+  if (fabricatedIssues.length > 0) {
+    return {
+      status: 'BLOCKED',
+      message: `检测到${fabricatedIssues.length}个可能虚构的评审结果`,
+      details: {
+        fabricatedIssues,
+        severity: 'CRITICAL',
+        expertsWithIssues: [...new Set(fabricatedIssues.map(i => i.expert))],
+        recommendation: '重新执行评审，确保所有引用位置真实存在且内容匹配'
+      },
+      action: 'REEXECUTE_WITH_VERIFICATION',
+      retryable: true,
+      escalation: {
+        level: 'HIGH',
+        reason: '检测到虚构评审结果，可能表明模型在shortcut-taking'
+      }
+    };
+  }
+  
+  return {
+    status: 'PASSED',
+    message: '未发现虚构的评审结果',
+    details: {
+      verificationMethods: ['位置验证', '内容匹配', '交叉验证(30%抽样)'],
+      reviewsValidated: reviews.length,
+      issuesChecked: reviews.reduce((sum, r) => sum + (r.issues?.length || 0), 0)
+    },
+    action: 'PROCEED',
+    retryable: false
+  };
+}
+
+// 辅助函数
+function extractContentAtLocation(document: any, location: string): string | null {
+  // 实现位置解析逻辑
+  // 支持格式: "行号"、"章节标题"、"第X章"等
+  
+  // 尝试作为行号解析
+  const lineNumber = parseInt(location, 10);
+  if (!isNaN(lineNumber)) {
+    const lines = document.content.split('\n');
+    if (lineNumber >= 1 && lineNumber <= lines.length) {
+      return lines[lineNumber - 1];
+    }
+  }
+  
+  // 尝试作为章节标题查找
+  const headingPattern = new RegExp(`^#+\\s*${location}\\s*$`, 'm');
+  const match = document.content.match(headingPattern);
+  if (match) {
+    const startIndex = match.index!;
+    const endIndex = document.content.indexOf('\n#', startIndex + 1);
+    return document.content.substring(
+      startIndex, 
+      endIndex === -1 ? undefined : endIndex
+    );
+  }
+  
+  return null;
+}
+
+function isContentMatchingIssue(content: string, issueDescription: string): boolean {
+  // 简化的内容匹配逻辑
+  // 实际实现可能需要更复杂的NLP匹配或LLM辅助判断
+  
+  const contentLower = content.toLowerCase();
+  const issueLower = issueDescription.toLowerCase();
+  
+  // 提取关键词（简单的空格分词）
+  const keywords = issueLower.split(/\s+/).filter(w => w.length > 3);
+  
+  // 至少有一个关键词匹配
+  return keywords.some(keyword => contentLower.includes(keyword));
+}
+
+async function crossValidateReview(
+  review: any, 
+  document: any
+): Promise<{ valid: boolean; reason?: string }> {
+  // 使用另一个模型进行交叉验证的实现
+  // 参考AgentSpec论文的LLM生成规则思路
+  
+  try {
+    // 实际实现中，这里会调用另一个LLM来验证评审的合理性
+    // 例如：让另一个模型检查评审中提到的所有问题是否真实存在
+    
+    // 模拟验证逻辑
+    const hasCriticalIssues = review.issues?.some((i: any) => i.severity === 'CRITICAL');
+    const hasLocationReferences = review.issues?.every((i: any) => i.location);
+    
+    if (hasCriticalIssues && !hasLocationReferences) {
+      return {
+        valid: false,
+        reason: 'Critical issues must have location references'
+      };
+    }
+    
+    return { valid: true };
+  } catch (error) {
+    return {
+      valid: false,
+      reason: `Cross-validation error: ${error.message}`
+    };
+  }
+}
+
+// ============================================
+// Phase 4: Retry Protocol & Consensus Engine
+// ============================================
+
+/**
+ * 三级重试 + 升级协议
+ * 参考Anthropic的Auto Mode分类器决策
+ */
+
+export interface RetryConfig {
+  maxRetries: number;
+  baseDelay: number;
+  escalationModels: string[];
+}
+
+export class ConsensusEngine {
+  private retryConfig: RetryConfig = {
+    maxRetries: 3,
+    baseDelay: 5000,
+    escalationModels: [
+      'glm-4-flash',      // Attempt 1
+      'qwen3.5-plus',     // Attempt 2  
+      'claude-sonnet-4.5' // Attempt 3 (升级到更强模型)
+    ]
+  };
+
+  /**
+   * 执行带重试的Delphi评审
+   */
+  async executeWithRetry(
+    context: HookContext,
+    phase: string
+  ): Promise<PhaseExecutionResult> {
+    let attempt = 0;
+    let lastResult: PhaseExecutionResult | null = null;
+
+    while (attempt < this.retryConfig.maxRetries) {
+      attempt++;
+      
+      // 升级模型
+      const modelId = this.retryConfig.escalationModels[
+        Math.min(attempt - 1, this.retryConfig.escalationModels.length - 1)
+      ];
+      
+      logger.info(`Delphi execution attempt ${attempt} with model ${modelId}`);
+      
+      // 执行评审
+      lastResult = await this.executePhaseWithModel(context, phase, modelId);
+      
+      if (lastResult.status === 'PASSED') {
+        return lastResult;
+      }
+      
+      // 检查是否可重试
+      const canRetry = lastResult.hookResults?.some(
+        r => r.result.retryable && r.result.status === 'BLOCKED'
+      );
+      
+      if (!canRetry || attempt >= this.retryConfig.maxRetries) {
+        break;
+      }
+      
+      // 等待后重试
+      await this.delay(this.retryConfig.baseDelay * attempt);
+    }
+
+    // 所有重试都失败，返回最后一次结果
+    return lastResult!;
+  }
+
+  private async executePhaseWithModel(
+    context: HookContext,
+    phase: string,
+    modelId: string
+  ): Promise<PhaseExecutionResult> {
+    // 更新context中的模型ID
+    context.metadata.modelId = modelId;
+    
+    // 使用Hook Engine执行
+    const engine = new HookEngine();
+    await this.registerDelphiHooks(engine);
+    
+    return engine.executePhase(phase, context);
+  }
+
+  private delay(ms: number): Promise<void> {
+    return new Promise(resolve => setTimeout(resolve, ms));
+  }
+
+  /**
+   * 注册Delphi评审专用Hooks
+   */
+  private async registerDelphiHooks(engine: HookEngine): Promise<void> {
+    // 已在Phase 3中定义的hooks
+    engine.register({
+      id: 'delphi-phase0',
+      name: 'verifyPhase0Complete',
+      description: '验证Phase 0准备完成',
+      hook: verifyPhase0Complete,
+      mandatory: true,
+      blocking: true,
+      timeout: 30000
+    });
+
+    engine.register({
+      id: 'delphi-round1',
+      name: 'verifyAllExpertsResponded',
+      description: '验证所有专家已响应',
+      hook: verifyAllExpertsResponded,
+      mandatory: true,
+      blocking: true,
+      timeout: 300000  // 5分钟等待所有专家
+    });
+
+    engine.register({
+      id: 'delphi-fabrication',
+      name: 'verifyNoFabricatedResults',
+      description: '验证无虚构结果',
+      hook: verifyNoFabricatedResults,
+      mandatory: true,
+      blocking: true,
+      timeout: 60000
+    });
+  }
+}
+
+// ============================================
+// 参考资料
+// ============================================
+
+/**
+ * 实现参考：
+ * 1. Martin Fowler - Harness Engineering (2026.04)
+ *    https://martinfowler.com/articles/harness-engineering.html
+ * 
+ * 2. AgentSpec - Runtime Verification (arXiv 2025.03)
+ *    https://arxiv.org/html/2503.18666v1
+ * 
+ * 3. Anthropic Claude Code Auto Mode (2026.03)
+ *    https://www.anthropic.com/engineering/claude-code-auto-mode
+ */
+
