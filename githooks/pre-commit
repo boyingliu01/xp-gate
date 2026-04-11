@@ -55,11 +55,11 @@ fi
 echo ""
 echo "→ Gate 1: Static analysis..."
 
-if [ "$PROJECT_LANG" == "documentation-only" ]; then
+if [ "$PROJECT_LANG" = "documentation-only" ]; then
   # Documentation-only project - skip static analysis
   echo "✅ Skipped (no source code to analyze)."
   
-elif [ "$PROJECT_LANG" == "typescript" ]; then
+elif [ "$PROJECT_LANG" = "typescript" ]; then
   # TypeScript: require tsc + ESLint
   if ! command -v tsc &> /dev/null; then
     echo ""
@@ -98,7 +98,7 @@ elif [ "$PROJECT_LANG" == "typescript" ]; then
   # Run TypeScript check
   npx tsc --noEmit 2>&1 | head -30
   TSC_EXIT=$?
-  if [ $TSC_EXIT -ne 0 ]; then
+  if [ "$TSC_EXIT" -ne 0 ]; then
     echo ""
     echo "❌ TYPE ERRORS. Commit blocked."
     echo "Fix the type errors above before committing."
@@ -108,9 +108,9 @@ elif [ "$PROJECT_LANG" == "typescript" ]; then
   
   # Run ESLint
   if [ -f ".eslintrc.json" ] || [ -f ".eslintrc.js" ] || [ -f "eslint.config.js" ]; then
-    npx eslint $CHANGED_FILES --max-warnings=0 2>&1 | head -30
+    npx eslint "$CHANGED_FILES" --max-warnings=0 2>&1 | head -30
     ESLINT_EXIT=$?
-    if [ $ESLINT_EXIT -ne 0 ]; then
+    if [ "$ESLINT_EXIT" -ne 0 ]; then
       echo ""
       echo "❌ LINT ERRORS. Commit blocked."
       echo "Fix the lint errors above before committing."
@@ -119,7 +119,7 @@ elif [ "$PROJECT_LANG" == "typescript" ]; then
     echo "✅ ESLint passed."
   fi
 
-elif [ "$PROJECT_LANG" == "python" ]; then
+elif [ "$PROJECT_LANG" = "python" ]; then
   # Python: require Ruff (100x faster than Flake8) + optional mypy for type check
   if ! command -v ruff &> /dev/null; then
     echo ""
@@ -143,9 +143,9 @@ elif [ "$PROJECT_LANG" == "python" ]; then
   fi
   
   # Run Ruff (includes syntax, lint, complexity checks)
-  ruff check $CHANGED_FILES 2>&1 | head -30
+  ruff check "$CHANGED_FILES" 2>&1 | head -30
   RUFF_EXIT=$?
-  if [ $RUFF_EXIT -ne 0 ]; then
+  if [ "$RUFF_EXIT" -ne 0 ]; then
     echo ""
     echo "❌ RUFF ERRORS. Commit blocked."
     echo "Fix the lint errors above before committing."
@@ -157,9 +157,9 @@ elif [ "$PROJECT_LANG" == "python" ]; then
   
   # Optional: Type checking with mypy (if installed)
   if command -v mypy &> /dev/null; then
-    mypy $CHANGED_FILES --ignore-missing-imports 2>&1 | head -30
+    mypy "$CHANGED_FILES" --ignore-missing-imports 2>&1 | head -30
     MYPY_EXIT=$?
-    if [ $MYPY_EXIT -ne 0 ]; then
+    if [ "$MYPY_EXIT" -ne 0 ]; then
       echo ""
       echo "❌ TYPE ERRORS (mypy). Commit blocked."
       echo "Fix the type errors above before committing."
@@ -168,7 +168,7 @@ elif [ "$PROJECT_LANG" == "python" ]; then
     echo "✅ mypy type check passed."
   fi
 
-elif [ "$PROJECT_LANG" == "go" ]; then
+elif [ "$PROJECT_LANG" = "go" ]; then
   # Go: require golangci-lint
   if ! command -v golangci-lint &> /dev/null; then
     echo ""
@@ -190,7 +190,7 @@ elif [ "$PROJECT_LANG" == "go" ]; then
   
   golangci-lint run 2>&1 | head -30
   GO_LINT_EXIT=$?
-  if [ $GO_LINT_EXIT -ne 0 ]; then
+  if [ "$GO_LINT_EXIT" -ne 0 ]; then
     echo ""
     echo "❌ LINT ERRORS (golangci-lint). Commit blocked."
     echo "Fix the lint errors above before committing."
@@ -226,10 +226,10 @@ echo "→ Gate 2: Additional linting..."
 # For TypeScript/Python, Gate 1 already covered lint via tsc/ESLint/Ruff
 # This gate runs additional project-specific lint if configured
 
-if [ "$PROJECT_LANG" == "typescript" ] || [ "$PROJECT_LANG" == "python" ]; then
+if [ "$PROJECT_LANG" = "typescript" ] || [ "$PROJECT_LANG" = "python" ]; then
   # Already linted in Gate 1 - this is optional additional lint
   if [ -f ".pre-commit-config.yaml" ] && command -v pre-commit &> /dev/null; then
-    pre-commit run --files $CHANGED_FILES 2>&1
+    pre-commit run --files "$CHANGED_FILES" 2>&1
     if [ $? -ne 0 ]; then
       echo "❌ PRE-COMMIT FAILED. Commit blocked."
       exit 1
@@ -237,10 +237,10 @@ if [ "$PROJECT_LANG" == "typescript" ] || [ "$PROJECT_LANG" == "python" ]; then
     echo "✅ pre-commit hooks passed."
   fi
   
-elif [ "$PROJECT_LANG" == "go" ]; then
+elif [ "$PROJECT_LANG" = "go" ]; then
   # Go already linted in Gate 1 via golangci-lint
   echo "✅ Linting already completed in Gate 1 (golangci-lint)."
-elif [ "$PROJECT_LANG" == "documentation-only" ]; then
+elif [ "$PROJECT_LANG" = "documentation-only" ]; then
   echo "✅ Skipped (no source code to lint)."
 fi
 
@@ -252,14 +252,14 @@ echo "→ Gate 3: Unit tests..."
 
 HAS_TEST_CONFIG=false
 
-if [ "$PROJECT_LANG" == "typescript" ]; then
+if [ "$PROJECT_LANG" = "typescript" ]; then
   # TypeScript: require test script in package.json
   if [ -f "package.json" ]; then
     if grep -q "\"test\"" package.json; then
       HAS_TEST_CONFIG=true
       npm test -- --bail --reporters=min 2>&1 | tail -30
       TEST_EXIT=$?
-      if [ $TEST_EXIT -ne 0 ]; then
+      if [ "$TEST_EXIT" -ne 0 ]; then
         echo ""
         echo "❌ TESTS FAILED. Commit blocked."
         echo "Fix failing tests before committing."
@@ -269,7 +269,7 @@ if [ "$PROJECT_LANG" == "typescript" ]; then
     fi
   fi
 
-elif [ "$PROJECT_LANG" == "python" ]; then
+elif [ "$PROJECT_LANG" = "python" ]; then
   # Python: require pytest configuration
   if [ -f "pytest.ini" ] || [ -f "pyproject.toml" ] || [ -f "setup.cfg" ]; then
     if grep -q "pytest" pyproject.toml 2>/dev/null || [ -f "pytest.ini" ] || grep -q "\[tool:pytest\]" setup.cfg 2>/dev/null; then
@@ -290,7 +290,7 @@ elif [ "$PROJECT_LANG" == "python" ]; then
       fi
       pytest --tb=short -q 2>&1 | tail -30
       TEST_EXIT=$?
-      if [ $TEST_EXIT -ne 0 ]; then
+      if [ "$TEST_EXIT" -ne 0 ]; then
         echo ""
         echo "❌ PYTEST FAILED. Commit blocked."
         echo "Fix failing tests before committing."
@@ -300,12 +300,12 @@ elif [ "$PROJECT_LANG" == "python" ]; then
     fi
   fi
 
-elif [ "$PROJECT_LANG" == "go" ]; then
+elif [ "$PROJECT_LANG" = "go" ]; then
   # Go: require go test
   HAS_TEST_CONFIG=true
   go test ./... 2>&1 | tail -30
   TEST_EXIT=$?
-  if [ $TEST_EXIT -ne 0 ]; then
+  if [ "$TEST_EXIT" -ne 0 ]; then
     echo ""
     echo "❌ GO TESTS FAILED. Commit blocked."
     echo "Fix failing tests before committing."
@@ -313,7 +313,7 @@ elif [ "$PROJECT_LANG" == "go" ]; then
   fi
   echo "✅ Go tests passed."
 
-elif [ "$PROJECT_LANG" == "documentation-only" ]; then
+elif [ "$PROJECT_LANG" = "documentation-only" ]; then
   # Documentation-only project - no tests required
   HAS_TEST_CONFIG=true
   echo "✅ Skipped (no source code to test)."
@@ -321,7 +321,7 @@ fi
 
 # Check if test configuration was found
 # Skip this check for documentation-only projects
-if [ "$HAS_TEST_CONFIG" == "false" ] && [ "$PROJECT_LANG" != "documentation-only" ]; then
+if [ "$HAS_TEST_CONFIG" = "false" ] && [ "$PROJECT_LANG" != "documentation-only" ]; then
   echo ""
   echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
   echo "   ❌ ENVIRONMENT ERROR - COMMIT BLOCKED"
@@ -332,14 +332,14 @@ if [ "$HAS_TEST_CONFIG" == "false" ] && [ "$PROJECT_LANG" != "documentation-only
   echo "Tests are MANDATORY for quality gates."
   echo ""
   echo "Your responsibility:"
-  if [ "$PROJECT_LANG" == "typescript" ]; then
+  if [ "$PROJECT_LANG" = "typescript" ]; then
     echo "  1. Add 'test' script to package.json"
     echo "     Example: \"test\": \"jest\" or \"test\": \"vitest\""
     echo ""
     echo "  Install test framework:"
     echo "     npm install -D jest"
     echo "     or: npm install -D vitest"
-  elif [ "$PROJECT_LANG" == "python" ]; then
+elif [ "$PROJECT_LANG" = "python" ]; then
     echo "  1. Add pytest configuration to pyproject.toml"
     echo "     Example: [tool.pytest.ini_options]"
     echo ""
@@ -358,11 +358,11 @@ fi
 echo ""
 echo "→ Gate 4: Coverage check..."
 
-if [ "$PROJECT_LANG" == "typescript" ]; then
+if [ "$PROJECT_LANG" = "typescript" ]; then
   if [ -f "package.json" ] && grep -q "\"test:coverage\"" package.json; then
     npm run test:coverage 2>&1 | tail -20
     COV_EXIT=$?
-    if [ $COV_EXIT -ne 0 ]; then
+    if [ "$COV_EXIT" -ne 0 ]; then
       echo ""
       echo "❌ COVERAGE FAILED. Commit blocked."
       exit 1
@@ -385,14 +385,14 @@ if [ "$PROJECT_LANG" == "typescript" ]; then
     exit 1
   fi
 
-elif [ "$PROJECT_LANG" == "python" ]; then
+elif [ "$PROJECT_LANG" = "python" ]; then
   if command -v pytest &> /dev/null; then
     # Check if pytest-cov is available
     pip show pytest-cov &>/dev/null || pip3 show pytest-cov &>/dev/null
     if [ $? -eq 0 ]; then
       pytest --cov=. --cov-report=term-missing --tb=short -q 2>&1 | tail -30
       COV_EXIT=$?
-      if [ $COV_EXIT -ne 0 ]; then
+      if [ "$COV_EXIT" -ne 0 ]; then
         echo ""
         echo "❌ COVERAGE FAILED. Commit blocked."
         exit 1
@@ -415,18 +415,18 @@ elif [ "$PROJECT_LANG" == "python" ]; then
     fi
   fi
 
-elif [ "$PROJECT_LANG" == "go" ]; then
+elif [ "$PROJECT_LANG" = "go" ]; then
   # Go coverage is built-in
   go test -cover ./... 2>&1 | tail -20
   COV_EXIT=$?
-  if [ $COV_EXIT -ne 0 ]; then
+  if [ "$COV_EXIT" -ne 0 ]; then
     echo ""
     echo "❌ COVERAGE FAILED. Commit blocked."
     exit 1
   fi
   echo "✅ Coverage check passed."
 
-elif [ "$PROJECT_LANG" == "documentation-only" ]; then
+elif [ "$PROJECT_LANG" = "documentation-only" ]; then
   # Documentation-only project - no coverage required
   echo "✅ Skipped (no source code for coverage)."
 fi

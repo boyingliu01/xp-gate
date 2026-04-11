@@ -193,12 +193,12 @@ if timeout $TIMEOUT_SECONDS opencode code-walkthrough --diff "$DIFF_FILE" --outp
   if [ -f "$OUTPUT_FILE" ]; then
     DECISION=$(grep -E "^(APPROVED|REQUEST_CHANGES)" "$OUTPUT_FILE" | head -1)
     
-    if [ "$DECISION" == "APPROVED" ]; then
+    if [ "$DECISION" = "APPROVED" ]; then
       echo "✓ Code walkthrough passed"
       echo ""
       rm -f "$DIFF_FILE" "$OUTPUT_FILE"
       exit 0
-    elif [ "$DECISION" == "REQUEST_CHANGES" ]; then
+    elif [ "$DECISION" = "REQUEST_CHANGES" ]; then
       echo "✗ Code walkthrough failed"
       echo ""
       echo "Issues found:"
@@ -250,7 +250,7 @@ else
   echo "└─────────────────────────────────────────────────────────────┘"
   echo ""
   
-  if [ $EXIT_CODE -eq 124 ]; then
+  if [ "$EXIT_CODE" -eq 124 ]; then
     # Timeout exit code
     echo ""
     echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
