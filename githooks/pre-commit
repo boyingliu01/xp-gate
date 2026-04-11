@@ -32,8 +32,8 @@ fi
 # Check if this is a documentation-only project (no source code)
 # Such projects have only markdown, yaml, json, skills, docs - no actual code
 if [ -z "$PROJECT_LANG" ]; then
-  # Count source code files
-  CODE_FILES=$(find . -type f \( -name "*.py" -o -name "*.js" -o -name "*.ts" -o -name "*.tsx" -o -name "*.java" -o -name "*.go" -o -name "*.rs" -o -name "*.cpp" -o -name "*.c" -o -name "*.swift" -o -name "*.kt" \) 2>/dev/null | wc -l)
+  # Count source code files (including shell scripts)
+  CODE_FILES=$(find . -type f \( -name "*.py" -o -name "*.js" -o -name "*.ts" -o -name "*.tsx" -o -name "*.java" -o -name "*.go" -o -name "*.rs" -o -name "*.cpp" -o -name "*.c" -o -name "*.swift" -o -name "*.kt" -o -name "*.sh" \) -not -path "./.git/*" 2>/dev/null | wc -l)
   
   if [ "$CODE_FILES" -eq 0 ]; then
     PROJECT_LANG="documentation-only"
@@ -429,6 +429,64 @@ elif [ "$PROJECT_LANG" = "go" ]; then
 elif [ "$PROJECT_LANG" = "documentation-only" ]; then
   # Documentation-only project - no coverage required
   echo "✅ Skipped (no source code for coverage)."
+fi
+
+# ============================================================================
+# Gate 5: Shell Script Check (MANDATORY for .sh files)
+# ============================================================================
+echo ""
+echo "→ Gate 5: Shell script syntax check..."
+
+# Check if any shell scripts are in the commit
+SHELL_FILES=$(echo "$CHANGED_FILES" | grep '\.sh$' || true)
+
+if [ -n "$SHELL_FILES" ]; then
+  echo "Found shell scripts: $SHELL_FILES"
+  
+  # Try shellcheck first (best option)
+  if command -v shellcheck &> /dev/null; then
+    shellcheck "$SHELL_FILES" 2>&1 | head -30
+    SHELL_EXIT=$?
+    if [ "$SHELL_EXIT" -ne 0 ]; then
+      echo ""
+      echo "❌ SHELLCHECK FAILED. Commit blocked."
+      echo "Fix the shell script errors above."
+      exit 1
+    fi
+    echo "✅ shellcheck passed."
+  else
+    # Fallback to bash -n syntax check
+    echo "ℹ️  shellcheck not installed, using bash -n for syntax check."
+    echo "   Recommend: pip install shellcheck or apt install shellcheck"
+    
+    for sh_file in $SHELL_FILES; do
+      if bash -n "$sh_file" 2>&1; then
+        echo "✅ Syntax OK: $sh_file"
+      else
+        echo ""
+        echo "❌ SYNTAX ERROR: $sh_file"
+        echo "Fix the shell script syntax errors."
+        exit 1
+      fi
+    done
+    
+    # Also check with zsh if available (for zsh compatibility)
+    if command -v zsh &> /dev/null; then
+      for sh_file in $SHELL_FILES; do
+        if zsh -n "$sh_file" 2>&1; then
+          echo "✅ zsh syntax OK: $sh_file"
+        else
+          echo ""
+          echo "❌ ZSH SYNTAX ERROR: $sh_file"
+          echo "The script may have issues on zsh systems."
+          echo "Common issue: using == instead of = in [ ] comparisons"
+          exit 1
+        fi
+      done
+    fi
+  fi
+else
+  echo "✅ No shell scripts changed."
 fi
 
 echo ""
