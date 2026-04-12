@@ -58,7 +58,9 @@ description: "测试与 Specification 对齐验证引擎。确保测试准确反
 │  Phase 0: 准备                                               │
 │  ├─ 验证 specification.yaml 存在                             │
 │  ├─ 验证 tests/ 目录存在                                     │
-│  └─ ❌ 缺失 → BLOCK + 通知用户                               │
+│  └─ ❌ 缺失 → BLOCK + 提示用户                               │
+│      └─ 提示: "先完成需求流程:                                │
+│              brainstorming → delphi-review → specification-generator" │
 │                                                              │
 │  Phase 1: 对齐验证 (可修改测试)                               │
 │  ├─ 解析 specification.yaml (YAML parser)                    │
@@ -85,6 +87,31 @@ description: "测试与 Specification 对齐验证引擎。确保测试准确反
 │  Terminal State: ✅ ALL_TESTS_PASS                           │
 │                                                              │
 └─────────────────────────────────────────────────────────────┘
+```
+
+---
+
+## ⚠️ Phase 0 缺失 Specification 处理
+
+### 错误提示格式
+
+如果 `specification.yaml` 不存在，必须 BLOCK 并提供清晰的流程指引：
+
+```
+❌ BLOCKED: specification.yaml 不存在
+
+要生成 specification.yaml，请先完成需求流程：
+
+流程步骤:
+1. brainstorming      → 需求探索，生成设计文档
+2. delphi-review      → 需求评审（多轮直到 APPROVED）
+3. specification-generator → 从 APPROVED 的设计文档生成 specification.yaml
+
+为什么必须这样？
+- 在 delphi-review APPROVED 后生成，避免设计文档修改时 spec 也需重新生成
+- 遵循"问题发现越早修复成本越低"原则
+
+请先完成上述流程，然后再运行 test-specification-alignment。
 ```
 
 ---

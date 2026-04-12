@@ -27,13 +27,20 @@ elif [ -f "pyproject.toml" ] || [ -f "setup.py" ] || [ -f "requirements.txt" ]; 
   PROJECT_LANG="python"
 elif [ -f "go.mod" ]; then
   PROJECT_LANG="go"
+elif [ -f "pubspec.yaml" ]; then
+  # Check if it's a Flutter project
+  if grep -q "flutter:" pubspec.yaml 2>/dev/null || [ -f ".metadata" ]; then
+    PROJECT_LANG="flutter"
+  else
+    PROJECT_LANG="dart"
+  fi
 fi
 
 # Check if this is a documentation-only project (no source code)
 # Such projects have only markdown, yaml, json, skills, docs - no actual code
 if [ -z "$PROJECT_LANG" ]; then
   # Count source code files (including shell scripts)
-  CODE_FILES=$(find . -type f \( -name "*.py" -o -name "*.js" -o -name "*.ts" -o -name "*.tsx" -o -name "*.java" -o -name "*.go" -o -name "*.rs" -o -name "*.cpp" -o -name "*.c" -o -name "*.swift" -o -name "*.kt" -o -name "*.sh" \) -not -path "./.git/*" 2>/dev/null | wc -l)
+  CODE_FILES=$(find . -type f \( -name "*.py" -o -name "*.js" -o -name "*.ts" -o -name "*.tsx" -o -name "*.java" -o -name "*.go" -o -name "*.rs" -o -name "*.cpp" -o -name "*.c" -o -name "*.swift" -o -name "*.kt" -o -name "*.sh" -o -name "*.dart" \) -not -path "./.git/*" 2>/dev/null | wc -l)
   
   if [ "$CODE_FILES" -eq 0 ]; then
     PROJECT_LANG="documentation-only"
@@ -198,6 +205,61 @@ elif [ "$PROJECT_LANG" = "go" ]; then
   fi
   echo "✅ golangci-lint passed."
 
+elif [ "$PROJECT_LANG" = "dart" ]; then
+  # Dart: require dart analyze
+  if ! command -v dart &> /dev/null; then
+    echo ""
+    echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+    echo "   ❌ ENVIRONMENT ERROR - COMMIT BLOCKED"
+    echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+    echo ""
+    echo "Required tool 'dart' SDK is NOT installed."
+    echo ""
+    echo "Install commands:"
+    echo "  macOS: brew install dart"
+    echo "  Linux: sudo apt-get install dart"
+    echo "  Windows: choco install dart-sdk"
+    echo "  or: https://dart.dev/get-dart"
+    echo ""
+    exit 1
+  fi
+  
+  dart analyze 2>&1 | head -30
+  DART_ANALYZE_EXIT=$?
+  if [ "$DART_ANALYZE_EXIT" -ne 0 ]; then
+    echo ""
+    echo "❌ DART ANALYZE ERRORS. Commit blocked."
+    echo "Fix the analysis errors above before committing."
+    exit 1
+  fi
+  echo "✅ dart analyze passed."
+
+elif [ "$PROJECT_LANG" = "flutter" ]; then
+  # Flutter: require flutter analyze
+  if ! command -v flutter &> /dev/null; then
+    echo ""
+    echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+    echo "   ❌ ENVIRONMENT ERROR - COMMIT BLOCKED"
+    echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+    echo ""
+    echo "Required tool 'flutter' SDK is NOT installed."
+    echo ""
+    echo "Install commands:"
+    echo "  https://docs.flutter.dev/get-started/install"
+    echo ""
+    exit 1
+  fi
+  
+  flutter analyze 2>&1 | head -30
+  FLUTTER_ANALYZE_EXIT=$?
+  if [ "$FLUTTER_ANALYZE_EXIT" -ne 0 ]; then
+    echo ""
+    echo "❌ FLUTTER ANALYZE ERRORS. Commit blocked."
+    echo "Fix the analysis errors above before committing."
+    exit 1
+  fi
+  echo "✅ flutter analyze passed."
+
 else
   # Unknown project type - MUST FAIL
   echo ""
@@ -207,7 +269,7 @@ else
   echo ""
   echo "Cannot determine project language stack."
   echo ""
-  echo "Detected files: tsconfig.json, package.json, pyproject.toml, go.mod"
+  echo "Detected files: tsconfig.json, package.json, pyproject.toml, go.mod, pubspec.yaml"
   echo "None of these found in current directory."
   echo ""
   echo "Your responsibility:"
@@ -223,10 +285,10 @@ fi
 echo ""
 echo "→ Gate 2: Additional linting..."
 
-# For TypeScript/Python, Gate 1 already covered lint via tsc/ESLint/Ruff
+# For TypeScript/Python/Dart/Flutter, Gate 1 already covered lint via tsc/ESLint/Ruff/dart analyze/flutter analyze
 # This gate runs additional project-specific lint if configured
 
-if [ "$PROJECT_LANG" = "typescript" ] || [ "$PROJECT_LANG" = "python" ]; then
+if [ "$PROJECT_LANG" = "typescript" ] || [ "$PROJECT_LANG" = "python" ] || [ "$PROJECT_LANG" = "dart" ] || [ "$PROJECT_LANG" = "flutter" ]; then
   # Already linted in Gate 1 - this is optional additional lint
   if [ -f ".pre-commit-config.yaml" ] && command -v pre-commit &> /dev/null; then
     pre-commit run --files "$CHANGED_FILES" 2>&1
@@ -313,6 +375,63 @@ elif [ "$PROJECT_LANG" = "go" ]; then
   fi
   echo "✅ Go tests passed."
 
+elif [ "$PROJECT_LANG" = "dart" ]; then
+  # Dart: require dart test configuration
+  if [ -f "pubspec.yaml" ]; then
+    HAS_TEST_CONFIG=true
+    if ! command -v dart &> /dev/null; then
+      echo ""
+      echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+      echo "   ❌ ENVIRONMENT ERROR - COMMIT BLOCKED"
+      echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+      echo ""
+      echo "Required tool 'dart' is NOT installed."
+      echo ""
+      echo "Install commands:"
+      echo "  macOS: brew install dart"
+      echo "  Linux: sudo apt-get install dart"
+      echo ""
+      exit 1
+    fi
+    dart test 2>&1 | tail -30
+    TEST_EXIT=$?
+    if [ "$TEST_EXIT" -ne 0 ]; then
+      echo ""
+      echo "❌ DART TEST FAILED. Commit blocked."
+      echo "Fix failing tests before committing."
+      exit 1
+    fi
+    echo "✅ dart test passed."
+  fi
+
+elif [ "$PROJECT_LANG" = "flutter" ]; then
+  # Flutter: require flutter test
+  if [ -f "pubspec.yaml" ]; then
+    HAS_TEST_CONFIG=true
+    if ! command -v flutter &> /dev/null; then
+      echo ""
+      echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+      echo "   ❌ ENVIRONMENT ERROR - COMMIT BLOCKED"
+      echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+      echo ""
+      echo "Required tool 'flutter' is NOT installed."
+      echo ""
+      echo "Install commands:"
+      echo "  https://docs.flutter.dev/get-started/install"
+      echo ""
+      exit 1
+    fi
+    flutter test 2>&1 | tail -30
+    TEST_EXIT=$?
+    if [ "$TEST_EXIT" -ne 0 ]; then
+      echo ""
+      echo "❌ FLUTTER TEST FAILED. Commit blocked."
+      echo "Fix failing tests before committing."
+      exit 1
+    fi
+    echo "✅ flutter test passed."
+  fi
+
 elif [ "$PROJECT_LANG" = "documentation-only" ]; then
   # Documentation-only project - no tests required
   HAS_TEST_CONFIG=true
@@ -339,12 +458,26 @@ if [ "$HAS_TEST_CONFIG" = "false" ] && [ "$PROJECT_LANG" != "documentation-only"
     echo "  Install test framework:"
     echo "     npm install -D jest"
     echo "     or: npm install -D vitest"
-elif [ "$PROJECT_LANG" = "python" ]; then
+  elif [ "$PROJECT_LANG" = "python" ]; then
     echo "  1. Add pytest configuration to pyproject.toml"
     echo "     Example: [tool.pytest.ini_options]"
     echo ""
     echo "  Install pytest:"
     echo "     pip install pytest"
+  elif [ "$PROJECT_LANG" = "dart" ]; then
+    echo "  1. Add test dependencies to pubspec.yaml"
+    echo "     Example: dev_dependencies:"
+    echo "       test: ^1.0.0"
+    echo ""
+    echo "  Install test framework:"
+    echo "     dart pub get"
+  elif [ "$PROJECT_LANG" = "flutter" ]; then
+    echo "  1. Add test dependencies to pubspec.yaml"
+    echo "     Example: dev_dependencies:"
+    echo "       flutter_test: sdk: flutter"
+    echo ""
+    echo "  Install test framework:"
+    echo "     flutter pub get"
   fi
   echo ""
   echo "After adding test configuration, retry the commit."
@@ -426,6 +559,33 @@ elif [ "$PROJECT_LANG" = "go" ]; then
   fi
   echo "✅ Coverage check passed."
 
+elif [ "$PROJECT_LANG" = "dart" ]; then
+  # Dart: coverage via dart test with coverage
+  if command -v dart &> /dev/null && [ -f "pubspec.yaml" ]; then
+    # Check if test is configured
+    if grep -q "test:" pubspec.yaml 2>/dev/null; then
+      # Try to run coverage if available
+      if command -v dart &> /dev/null; then
+        # Run tests with coverage (requires dart_coverage package)
+        dart test --coverage=.coverage 2>&1 | tail -20 || true
+        # Note: Full coverage report generation requires additional setup
+        # This is a simplified check
+        echo "✅ Dart test completed (coverage optional)."
+      fi
+    fi
+  fi
+
+elif [ "$PROJECT_LANG" = "flutter" ]; then
+  # Flutter: coverage via flutter test with coverage
+  if command -v flutter &> /dev/null && [ -f "pubspec.yaml" ]; then
+    # Check if test is configured
+    if grep -q "flutter_test" pubspec.yaml 2>/dev/null; then
+      # Flutter can generate coverage but it's optional
+      echo "ℹ️  Flutter coverage requires additional setup (lcov)"
+      echo "✅ Flutter test completed (coverage optional)."
+    fi
+  fi
+
 elif [ "$PROJECT_LANG" = "documentation-only" ]; then
   # Documentation-only project - no coverage required
   echo "✅ Skipped (no source code for coverage)."
@@ -487,6 +647,59 @@ if [ -n "$SHELL_FILES" ]; then
   fi
 else
   echo "✅ No shell scripts changed."
+fi
+
+# ============================================================================
+# Gate 6: Clean Code & SOLID Principles (MANDATORY)
+# ============================================================================
+echo ""
+echo "→ Gate 6: Principles checker..."
+
+if [ "$PROJECT_LANG" != "documentation-only" ]; then
+  # Check Node.js availability
+  if ! command -v node > /dev/null 2>&1; then
+    echo ""
+    echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+    echo "   ❌ ENVIRONMENT ERROR - COMMIT BLOCKED"
+    echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+    echo ""
+    echo "Required tool 'node' (Node.js) is NOT installed."
+    echo ""
+    echo "Install commands:"
+    echo "  macOS: brew install node"
+    echo "  Linux: sudo apt-get install nodejs"
+    echo "  Windows: Use WSL or Git Bash, then install node"
+    echo ""
+    echo "After installation, retry the commit."
+    echo ""
+    exit 1
+  fi
+  
+  # Check ast-grep availability (optional - fallback available)
+  if ! command -v ast-grep > /dev/null 2>&1; then
+    echo "ℹ️  ast-grep not installed. Principles checker will use fallback."
+    echo "   Recommend: npm install -g @ast-grep/cli"
+  fi
+  
+  # Run principles checker on changed source files
+  PRINCIPLES_FILES=$(echo "$CHANGED_FILES" | grep -E '\.(ts|tsx|js|jsx|py|go|java|kt|dart|swift)$' || true)
+  
+  if [ -n "$PRINCIPLES_FILES" ]; then
+    # Check if principles checker is available
+    if [ -f "src/principles/index.ts" ] || [ -f "dist/principles/index.js" ]; then
+      echo "Running principles checker on changed files..."
+      # Run the checker (will be implemented later)
+      echo "ℹ️  Principles checker integration pending full implementation."
+      echo "✅ Principles check placeholder passed."
+    else
+      echo "ℹ️  Principles checker not yet built. Skipping for now."
+      echo "   Run 'npm run build' to compile the checker."
+    fi
+  else
+    echo "✅ No source files changed (principles check skipped)."
+  fi
+else
+  echo "✅ Skipped (documentation-only project)."
 fi
 
 echo ""

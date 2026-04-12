@@ -1,0 +1,40 @@
+{
+  "name": "@xp-workflow-automation/clean-code-checker",
+  "version": "1.0.0",
+  "description": "AI-powered clean code and SOLID principles checker",
+  "main": "dist/src/principles/index.js",
+  "bin": {
+    "clean-code-checker": "./bin/checker.js"
+  },
+  "scripts": {
+    "build": "tsc",
+    "dev": "tsx src/principles/index.ts",
+    "test": "vitest",
+    "lint": "eslint src/**/*.ts",
+    "prepare": "npm run build"
+  },
+  "keywords": [
+    "clean-code",
+    "solid",
+    "code-quality",
+    "linter"
+  ],
+  "author": "",
+  "license": "MIT",
+  "devDependencies": {
+    "@types/node": "^20.0.0",
+    "typescript": "^5.0.0",
+    "tsx": "^4.0.0",
+    "@types/vitest": "^0.34.0",
+    "@typescript-eslint/eslint-plugin": "^6.0.0",
+    "@typescript-eslint/parser": "^6.0.0",
+    "eslint": "^8.0.0"
+  },
+  "dependencies": {
+    "ast-grep": "^0.20.0",
+    "yargs": "^17.7.2"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  }
+}

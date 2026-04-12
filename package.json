@@ -1,0 +1,33 @@
+{
+  "name": "xp-workflow-automation",
+  "version": "1.0.0",
+  "description": "XP Workflow Automation - Clean Code & SOLID Principles Checker",
+  "type": "module",
+  "engines": {
+    "node": ">=18.x"
+  },
+  "scripts": {
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "test:coverage": "vitest run --coverage",
+    "build": "tsc",
+    "lint": "eslint src --ext .ts",
+    "principles": "node src/principles/index.js"
+  },
+  "dependencies": {
+    "@ast-grep/cli": "latest"
+  },
+  "devDependencies": {
+    "@vitest/coverage-v8": "^1.6.1",
+    "typescript": "^5.3.0",
+    "vitest": "^1.6.1"
+  },
+  "keywords": [
+    "clean-code",
+    "solid",
+    "principles",
+    "code-quality",
+    "ast-grep"
+  ],
+  "license": "MIT"
+}

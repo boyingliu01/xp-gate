@@ -1,0 +1,27 @@
+{
+  "eval_id": 2,
+  "eval_name": "generate-spec-for-api-module",
+  "prompt": "Generate specification.yaml for an API module that handles CRUD operations for user profiles. Requirements: 1) GET /api/users returns list of users, 2) POST /api/users creates new user, 3) PUT /api/users/:id updates user, 4) DELETE /api/users/:id deletes user. Include API contracts with request/response schemas, edge cases for pagination and authentication.",
+  "assertions": [
+    {
+      "name": "has_api_contracts",
+      "description": "specification.yaml must have api_contracts section"
+    },
+    {
+      "name": "has_4_endpoints",
+      "description": "api_contracts must have 4 endpoints (GET, POST, PUT, DELETE)"
+    },
+    {
+      "name": "has_request_response",
+      "description": "Each endpoint must have request and response defined"
+    },
+    {
+      "name": "has_edge_cases",
+      "description": "Requirements must have edge_cases section"
+    },
+    {
+      "name": "has_security_considerations",
+      "description": "Requirements must have security_considerations section"
+    }
+  ]
+}

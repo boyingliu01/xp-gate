@@ -32,6 +32,44 @@ description: "XP Pair Programming AI 共识引擎。Driver + Navigator 双阶段
 
 - `/xp-consensus` 命令
 
+### ⚠️ 前置条件检查 (MANDATORY)
+
+**在 Round 1 开始前必须检查 specification.yaml 是否存在：**
+
+```
+xp-consensus Round 1 开始前
+    │
+    ├─ 检查 specification.yaml 是否存在
+    │      ├─ 存在 → 使用作为 requirements 输入 ✅
+    │      └─ 不存在 → BLOCK
+    │              → 提示: "先完成需求评审流程"
+    │              → 流程: brainstorming → delphi-review → specification-generator
+    │
+    ▼
+Driver AI 输入:
+    ├─ requirements: specification.yaml 的 requirements 部分
+    ├─ acceptance_criteria: specification.yaml 的 AC 部分
+    ├─ design_decisions: specification.yaml 的 DD 部分
+```
+
+---
+
+## 输入来源
+
+### specification.yaml 结构
+
+Driver AI 从 `specification.yaml` 解析以下内容：
+
+| 输入字段 | 来源 | 用途 |
+|----------|------|------|
+| `requirements[].id` | REQ-XXX-XXX | 测试命名依据 |
+| `requirements[].description` | 需求描述 | Driver 理解需求 |
+| `requirements[].acceptance_criteria` | AC-XXX-XX | 测试断言依据 |
+| `requirements[].edge_cases` | 边界条件 | 边界测试生成 |
+| `requirements[].security_considerations` | 安全要点 | 安全测试生成 |
+| `design_decisions` | DD-XXX | 实现决策依据 |
+| `api_contracts` | API 定义 | API 测试生成 |
+
 ---
 
 ## 核心流程

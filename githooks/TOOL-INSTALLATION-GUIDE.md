@@ -19,34 +19,6 @@
 | **Oxlint** (可选) | 极速预检 | **50-100x faster** | `npm install -D oxlint` |
 | **Jest/Vitest** | 单元测试 | 标准 | `npm install -D jest` 或 `npm install -D vitest` |
 
-**pre-commit 需要的 package.json scripts:**
-```json
-{
-  "scripts": {
-    "test": "jest",
-    "test:coverage": "jest --coverage"
-  }
-}
-```
-
-**Biome 配置 (推荐 - 10-20x faster):**
-```json
-// biome.json
-{
-  "linter": {
-    "enabled": true,
-    "rules": {
-      "recommended": true
-    }
-  },
-  "formatter": {
-    "enabled": true
-  }
-}
-```
-
----
-
 ### Python 项目
 
 | 工具 | 用途 | 性能 | 安装命令 |
@@ -56,42 +28,6 @@
 | **pytest** | 单元测试 | 标准 | `pip install pytest` |
 | **pytest-cov** | 测试覆盖率 | 标准 | `pip install pytest-cov` |
 
-**Ruff 配置 (pyproject.toml):**
-```toml
-[tool.ruff]
-line-length = 88
-target-version = "py39"
-
-[tool.ruff.lint]
-select = [
-  "E",   # pycodestyle errors
-  "W",   # pycodestyle warnings
-  "F",   # pyflakes
-  "I",   # isort
-  "C",   # flake8-comprehensions
-  "B",   # flake8-bugbear
-  "UP",  # pyupgrade
-  "ARG", # flake8-unused-arguments
-  "C90", # mccabe complexity
-]
-ignore = []
-
-[tool.ruff.lint.mccabe]
-max-complexity = 10
-
-[tool.ruff.format]
-quote-style = "double"
-```
-
-**pytest 配置 (pyproject.toml):**
-```toml
-[tool.pytest.ini_options]
-testpaths = ["tests"]
-addopts = "-v --tb=short"
-```
-
----
-
 ### Go 项目
 
 | 工具 | 用途 | 性能 | 安装命令 |
@@ -99,47 +35,28 @@ addopts = "-v --tb=short"
 | **golangci-lint** | 60+ lint rules | 并行优化 | `go install github.com/golangci/golangci-lint/cmd/golangci-lint@latest` |
 | **go test** | 单元测试 + 覆盖率 | 内置 | Go 自带 |
 
-**golangci-lint 配置 (.golangci.yml):**
-```yaml
-linters:
-  enable:
-    # 基础检查
-    - gofmt
-    - goimports
-    - govet
-    - errcheck
-    
-    # 复杂度 (SOLID/SRP)
-    - cyclop
-    - gocognit
-    - funlen
-    
-    # 代码质量
-    - revive
-    - gocritic
-    
-    # 重复代码
-    - dupl
-    
-    # 安全
-    - gosec
-    
-linters-settings:
-  cyclop:
-    max-complexity: 10
-  funlen:
-    lines: 60
-    statements: 40
-```
+### Dart 项目
 
----
+| 工具 | 用途 | 性能 | 安装命令 |
+|------|------|------|----------|
+| **dart** | Dart SDK | 必需 | `brew install dart` 或 [官网](https://dart.dev/get-dart) |
+| **dart analyze** | 静态分析 | **快速** (<5s) | 内置于 Dart SDK |
+| **dart test** | 单元测试 | 标准 | 内置于 Dart SDK |
 
-## pre-push 工具
+### Flutter 项目
 
-| 工具 | 用途 | 安装命令 |
-|------|------|----------|
-| **OpenCode CLI** | 多模型代码走查 | 参考 OpenCode 官方安装文档 |
-| **code-walkthrough skill** | Delphi 代码评审 | `opencode skills install code-walkthrough` |
+| 工具 | 用途 | 性能 | 安装命令 |
+|------|------|------|----------|
+| **flutter** | Flutter SDK | 必需 | [官网](https://docs.flutter.dev/get-started/install) |
+| **flutter analyze** | 静态分析 | 标准 | 内置于 Flutter SDK |
+| **flutter test** | 单元测试 | 标准 | 内置于 Flutter SDK |
+
+### Node.js (Principles Checker)
+
+| 工具 | 用途 | 性能 | 安装命令 |
+|------|------|------|----------|
+| **Node.js** | 运行环境 | 必需 (>=18.x) | `brew install node` 或 [官网](https://nodejs.org/) |
+| **ast-grep** | AST 分析引擎 | **175x faster** | `npm install -g @ast-grep/cli` |
 
 ---
 
@@ -147,147 +64,77 @@ linters-settings:
 
 ### TypeScript 项目
 ```bash
-# 安装核心工具
 npm install -D typescript eslint jest
-
-# 或使用 Biome（推荐，更快）
-npm install -D biome
-
-# 添加 package.json scripts
-npm pkg set scripts.test="jest"
-npm pkg set scripts.test:coverage="jest --coverage"
 ```
 
 ### Python 项目
 ```bash
-# 安装核心工具（Ruff 100x faster）
 pip install ruff mypy pytest pytest-cov
-
-# 或使用 pipx（推荐）
-pipx install ruff
-pipx install mypy
-pip install pytest pytest-cov  # pytest 通常安装在项目环境
 ```
 
 ### Go 项目
 ```bash
-# 安装 golangci-lint
 go install github.com/golangci/golangci-lint/cmd/golangci-lint@latest
+```
 
-# 创建配置文件
-cat > .golangci.yml << 'EOF'
-linters:
-  enable:
-    - gofmt
-    - govet
-    - errcheck
-    - cyclop
-    - funlen
-EOF
+### Dart 项目
+```bash
+# macOS
+brew install dart
+# Linux
+sudo apt-get install dart
+```
+
+### Flutter 项目
+```bash
+# 参考: https://docs.flutter.dev/get-started/install
+```
+
+### Node.js (Principles Checker)
+```bash
+# macOS
+brew install node
+# Linux
+sudo apt-get install nodejs
+# Optional: ast-grep for AST-based analysis
+npm install -g @ast-grep/cli
 ```
 
 ---
 
 ## 验证环境是否准备好
 
-### TypeScript 验证
+### Dart 验证
 ```bash
-# 检查工具可用性
-command -v tsc && echo "✅ tsc installed"
-command -v eslint && echo "✅ eslint installed"
-command -v npx && echo "✅ npx installed"
-
-# 检查 package.json scripts
-grep '"test"' package.json && echo "✅ test script exists"
-grep '"test:coverage"' package.json && echo "✅ coverage script exists"
-
-# 运行测试验证
-npm test && echo "✅ tests passing"
+command -v dart && echo "✅ dart installed"
+dart analyze && echo "✅ dart analyze passing"
+dart test && echo "✅ dart test passing"
 ```
 
-### Python 验证
+### Flutter 验证
 ```bash
-# 检查工具可用性
-command -v ruff && echo "✅ ruff installed"
-command -v mypy && echo "✅ mypy installed"
-command -v pytest && echo "✅ pytest installed"
-
-# 运行 Ruff 验证
-ruff check . && echo "✅ ruff passing"
-
-# 运行 pytest 验证
-pytest && echo "✅ pytest passing"
-pytest --cov=. && echo "✅ coverage available"
+command -v flutter && echo "✅ flutter installed"
+flutter analyze && echo "✅ flutter analyze passing"
+flutter test && echo "✅ flutter test passing"
 ```
 
-### Go 验证
+### Node.js 验证
 ```bash
-# 检查工具可用性
-command -v golangci-lint && echo "✅ golangci-lint installed"
-
-# 运行 lint 验证
-golangci-lint run && echo "✅ lint passing"
-
-# 运行测试验证
-go test ./... && echo "✅ tests passing"
-go test -cover ./... && echo "✅ coverage available"
-```
-
----
-
-## 错误示例
-
-### ❌ 错误：工具未安装
-```
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-   ❌ ENVIRONMENT ERROR - COMMIT BLOCKED
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-
-Required tool 'ruff' is NOT installed.
-
-Your responsibility: Install the tool to enable quality gates.
-
-Install commands:
-  pip install ruff
-  or: pipx install ruff
-
-After installation, retry the commit.
-```
-
-### ✅ 正确：工具已安装
-```
-→ Gate 1: Static analysis...
-✅ Ruff lint check passed.
-✅ mypy type check passed.
-
-→ Gate 3: Unit tests...
-✅ pytest passed.
-
-→ Gate 4: Coverage check...
-✅ Coverage check passed.
-
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-   ✅ ALL GATES PASSED
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+node --version && echo "✅ Node.js installed (need >=18.x)"
+npm --version && echo "✅ npm installed"
+# Optional
+ast-grep --version && echo "✅ ast-grep installed"
 ```
 
 ---
 
 ## Clean Code / SOLID 原则检查覆盖
 
-| 检查项 | TypeScript (Biome) | Python (Ruff) | Go (golangci-lint) |
-|--------|-------------------|---------------|---------------------|
-| 语法错误 | ✅ | ✅ | ✅ (govet) |
-| 复杂度分析 | ✅ | ✅ (C90, PLR09) | ✅ (cyclop, gocognit) |
-| 重复代码 | ⚠️ 有限 | ⚠️ 需 dupl 插件 | ✅ (dupl) |
-| 类型检查 | ✅ (tsc) | ✅ (mypy) | ✅ (内置) |
-| Clean Code | ✅ | ✅ | ✅ (revive, gocritic) |
-| SOLID 原则 | ⚠️ 需自定义 | ⚠️ 需自定义 | ✅ (cyclop, iface) |
-
-**额外 SOLID 检查建议:**
-- 使用 **Semgrep** 自定义规则检查 SOLID 原则
-- 配置复杂度阈值限制（SRP 原则）
-- 使用接口检查器（ISP 原则）
+| 检查项 | TypeScript | Python | Go | Dart | Flutter |
+|--------|-----------|--------|-----|------|--------|
+| 语法错误 | ✅ | ✅ | ✅ | ✅ | ✅ |
+| 复杂度分析 | ✅ | ✅ | ✅ | ✅ | ✅ |
+| 类型检查 | ✅ | ✅ | ✅ | ✅ | ✅ |
 
 ---
 
@@ -296,13 +143,13 @@ After installation, retry the commit.
 | 语言 | 核心工具 | 安装命令 |
 |------|---------|----------|
 | TypeScript | tsc + ESLint + Jest | `npm install -D typescript eslint jest` |
-| TypeScript (推荐) | **Biome** | `npm install -D biome` |
-| Python | **Ruff** + mypy + pytest | `pip install ruff mypy pytest pytest-cov` |
-| Go | **golangci-lint** | `go install github.com/golangci/golangci-lint/cmd/golangci-lint@latest` |
+| Python | Ruff + mypy + pytest | `pip install ruff mypy pytest pytest-cov` |
+| Go | golangci-lint | `go install github.com/golangci/golangci-lint/cmd/golangci-lint@latest` |
+| Dart | dart analyze + dart test | `brew install dart` |
+| Flutter | flutter analyze + flutter test | [官网安装](https://docs.flutter.dev/get-started/install) |
 
-**安装后必须验证:**
-1. `command -v <tool>` 检查工具可用
-2. 运行 `npm test` / `pytest` / `go test` 验证测试
-3. 运行 lint 工具验证无错误
+**性能原则**: 选择最快的代码检查工具
+- Dart 项目优先使用 `dart analyze`（不依赖 Flutter 框架，启动更快）
+- Flutter 项目使用 `flutter analyze`（包含 Flutter 特定规则）
 
 **环境准备好后，AI 才能自动执行质量门禁。**

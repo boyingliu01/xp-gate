@@ -1,0 +1,27 @@
+{
+  "eval_id": 1,
+  "eval_name": "generate-spec-from-approved-design",
+  "prompt": "Generate a specification.yaml from the approved design document. The design document describes a user authentication module with JWT-based authentication. Key requirements: 1) Users can login with correct credentials, 2) Login fails with wrong credentials, 3) Token refresh mechanism. Generate the specification with REQ-AUTH IDs, AC IDs in Gherkin format, and design decisions about JWT usage.",
+  "assertions": [
+    {
+      "name": "has_specification_id",
+      "description": "specification.yaml must have specification.id field in format SPEC-XXX-XXX"
+    },
+    {
+      "name": "has_requirements",
+      "description": "specification.yaml must have at least 3 requirements"
+    },
+    {
+      "name": "has_acceptance_criteria",
+      "description": "Each requirement must have acceptance_criteria with given/when/then"
+    },
+    {
+      "name": "has_design_decisions",
+      "description": "specification.yaml must have design_decisions with rationale"
+    },
+    {
+      "name": "valid_yaml_format",
+      "description": "Output must be valid YAML syntax"
+    }
+  ]
+}
