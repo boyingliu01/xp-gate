@@ -686,14 +686,29 @@ if [ "$PROJECT_LANG" != "documentation-only" ]; then
   
   if [ -n "$PRINCIPLES_FILES" ]; then
     # Check if principles checker is available
-    if [ -f "src/principles/index.ts" ] || [ -f "dist/principles/index.js" ]; then
+    if [ -f "src/principles/index.ts" ]; then
       echo "Running principles checker on changed files..."
-      # Run the checker (will be implemented later)
-      echo "ℹ️  Principles checker integration pending full implementation."
-      echo "✅ Principles check placeholder passed."
+      
+      # Run the checker via npx tsx
+      if command -v npx > /dev/null 2>&1; then
+        npx tsx src/principles/index.ts --files "$PRINCIPLES_FILES" --changed-only 2>&1 | head -50
+        PRINCIPLES_EXIT=$?
+        
+        if [ "$PRINCIPLES_EXIT" -ne 0 ]; then
+          echo ""
+          echo "❌ PRINCIPLES VIOLATIONS DETECTED. Commit blocked."
+          echo "Fix the clean code/SOLID violations above before committing."
+          exit 1
+        fi
+        echo "✅ Principles check passed."
+      else
+        echo "ℹ️  npx not available. Skipping principles check."
+        echo "   Install Node.js to enable principles checking."
+      fi
     else
-      echo "ℹ️  Principles checker not yet built. Skipping for now."
-      echo "   Run 'npm run build' to compile the checker."
+      echo "ℹ️  Principles checker not found in this project."
+      echo "   Available at: ~/.config/opencode/git-hooks-template"
+      echo "✅ Principles check skipped (checker not in project)."
     fi
   else
     echo "✅ No source files changed (principles check skipped)."
