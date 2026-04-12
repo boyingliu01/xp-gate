@@ -1,9 +1,9 @@
 import { Rule, Violation, Adapter } from './types';
 import { loadConfig } from './config';
 import { TypeScriptAdapter } from './adapters/typescript';
-import { BaseAdapter } from './adapters/base';
 import { extname } from 'path';
 
+export { Violation } from './types';
 export interface AnalysisOptions {
   enabledRules?: string[];
 }

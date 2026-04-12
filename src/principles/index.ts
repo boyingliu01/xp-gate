@@ -7,6 +7,11 @@ import { magicNumbersRule } from './rules/clean-code/magic-numbers';
 import { godClassRule } from './rules/clean-code/god-class';
 import { deepNestingRule } from './rules/clean-code/deep-nesting';
 import { tooManyParamsRule } from './rules/clean-code/too-many-params';
+import { srpRule } from './rules/solid/srp';
+import { ocpRule } from './rules/solid/ocp';
+import { lspRule } from './rules/solid/lsp';
+import { ispRule } from './rules/solid/isp';
+import { dipRule } from './rules/solid/dip';
 
 interface CLIOptions {
   files: string[];
@@ -57,7 +62,12 @@ function getAllRules() {
     magicNumbersRule,
     godClassRule,
     deepNestingRule,
-    tooManyParamsRule
+    tooManyParamsRule,
+    srpRule,
+    ocpRule,
+    lspRule,
+    ispRule,
+    dipRule
   ];
 }
 
@@ -92,7 +102,9 @@ export async function main(args: string[]): Promise<number> {
   return 0;
 }
 
-if (require.main === module) {
+const isMainModule = import.meta.url === `file://${process.argv[1].replace(/\\/g, '/')}`;
+
+if (isMainModule) {
   const args = process.argv.slice(2);
   main(args)
     .then(exitCode => process.exit(exitCode))
