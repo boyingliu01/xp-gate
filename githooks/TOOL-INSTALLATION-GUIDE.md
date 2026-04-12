@@ -58,6 +58,14 @@
 | **Node.js** | 运行环境 | 必需 (>=18.x) | `brew install node` 或 [官网](https://nodejs.org/) |
 | **ast-grep** | AST 分析引擎 | **175x faster** | `npm install -g @ast-grep/cli` |
 
+### Cyclomatic Complexity (Gate 7)
+
+| 工具 | 用途 | 语言覆盖 | 安装命令 |
+|------|------|----------|----------|
+| **lizard** | 函数级复杂度 | TS/Python/Go/Java/Swift | `pip3 install --user lizard` |
+| **dart_code_linter** | Dart 复杂度 | Dart/Flutter | `dart pub add --dev dart_code_linter` |
+| **detekt** | Kotlin 复杂度 | Kotlin | Gradle plugin 或 CLI |
+
 ---
 
 ## 快速安装脚本
@@ -100,6 +108,14 @@ sudo apt-get install nodejs
 npm install -g @ast-grep/cli
 ```
 
+### Cyclomatic Complexity (lizard)
+```bash
+# Install lizard for function-level complexity analysis
+pip3 install --user lizard
+# Verify installation
+~/.local/bin/lizard --version
+```
+
 ---
 
 ## 验证环境是否准备好
@@ -124,6 +140,12 @@ node --version && echo "✅ Node.js installed (need >=18.x)"
 npm --version && echo "✅ npm installed"
 # Optional
 ast-grep --version && echo "✅ ast-grep installed"
+```
+
+### Lizard (Cyclomatic Complexity) 验证
+```bash
+~/.local/bin/lizard --version && echo "✅ lizard installed"
+~/.local/bin/lizard -C 10 -w src/ && echo "✅ complexity within threshold"
 ```
 
 ---

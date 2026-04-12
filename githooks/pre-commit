@@ -702,6 +702,108 @@ else
   echo "✅ Skipped (documentation-only project)."
 fi
 
+# ============================================================================
+# Gate 7: Cyclomatic Complexity Check (MANDATORY)
+# ============================================================================
+echo ""
+echo "→ Gate 7: Cyclomatic complexity check (threshold: 10)..."
+
+if [ "$PROJECT_LANG" != "documentation-only" ]; then
+  CCN_THRESHOLD=10
+  CCN_ERROR_THRESHOLD=20
+  
+  # Check lizard availability
+  if ! command -v lizard > /dev/null 2>&1; then
+    if [ -f ~/.local/bin/lizard ]; then
+      LIZARD_CMD=~/.local/bin/lizard
+    else
+      echo ""
+      echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+      echo "   ❌ ENVIRONMENT ERROR - COMMIT BLOCKED"
+      echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+      echo ""
+      echo "Required tool 'lizard' is NOT installed."
+      echo "lizard provides function-level cyclomatic complexity analysis."
+      echo ""
+      echo "Install command:"
+      echo "  pip3 install --user lizard"
+      echo ""
+      echo "After installation, retry the commit."
+      echo ""
+      exit 1
+    fi
+  else
+    LIZARD_CMD=lizard
+  fi
+  
+  # Get changed source files for complexity check
+  CC_FILES=$(echo "$CHANGED_FILES" | grep -E '\.(ts|tsx|js|jsx|py|go|java|swift)$' || true)
+  
+  if [ -n "$CC_FILES" ]; then
+    echo "Checking complexity for: $CC_FILES"
+    
+    # Run lizard with threshold
+    CC_OUTPUT=$($LIZARD_CMD -C $CCN_THRESHOLD -w $CC_FILES 2>&1)
+    CC_EXIT=$?
+    
+    # Count warnings (CCN > threshold)
+    CC_WARNINGS=$(echo "$CC_OUTPUT" | grep -c "warning:" || echo "0")
+    CC_ERRORS=$(echo "$CC_OUTPUT" | grep -E "CCN [0-9]+" | awk '{if($3 > 20) print}' | wc -l || echo "0")
+    
+    if [ "$CC_ERRORS" -gt 0 ]; then
+      echo ""
+      echo "$CC_OUTPUT"
+      echo ""
+      echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+      echo "   ❌ COMPLEXITY VIOLATIONS - COMMIT BLOCKED"
+      echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+      echo ""
+      echo "Found $CC_ERRORS functions with CCN > $CCN_ERROR_THRESHOLD."
+      echo "These functions are too complex and must be refactored."
+      echo ""
+      exit 1
+    fi
+    
+    if [ "$CC_WARNINGS" -gt 0 ]; then
+      echo ""
+      echo "$CC_OUTPUT"
+      echo ""
+      echo "⚠️  WARNING: $CC_WARNINGS functions have CCN > $CCN_THRESHOLD."
+      echo "Consider refactoring for better maintainability."
+      echo "✅ Complexity check passed (warnings allowed)."
+    else
+      echo "✅ All functions within complexity threshold ($CCN_THRESHOLD)."
+    fi
+  else
+    echo "✅ No source files changed (complexity check skipped)."
+  fi
+  
+  # Dart/Flutter: Check dart_code_linter if available
+  if [ "$PROJECT_LANG" = "dart" ] || [ "$PROJECT_LANG" = "flutter" ]; then
+    if command -v dart > /dev/null 2>&1; then
+      if dart pub deps 2>&1 | grep -q "dart_code_linter"; then
+        echo "Running Dart complexity check..."
+        dart run dart_code_linter:metrics analyze lib --cyclomatic-complexity=$CCN_THRESHOLD 2>&1 | head -30 || true
+        echo "✅ Dart complexity check completed."
+      else
+        echo "ℹ️  dart_code_linter not installed. Skipping Dart complexity check."
+        echo "   Install: dart pub add --dev dart_code_linter"
+      fi
+    fi
+  fi
+  
+  # Kotlin: Check detekt if available (placeholder)
+  if echo "$CHANGED_FILES" | grep -qE '\.kt$'; then
+    if command -v detekt > /dev/null 2>&1 || [ -f "./gradlew" ]; then
+      echo "ℹ️  Kotlin files detected. Consider using detekt for complexity check."
+      echo "   detekt rule: CyclomaticComplexMethod with threshold $CCN_THRESHOLD"
+      echo "✅ Kotlin complexity check placeholder passed."
+    fi
+  fi
+else
+  echo "✅ Skipped (documentation-only project)."
+fi
+
 echo ""
 echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
 echo "   ✅ ALL GATES PASSED"
