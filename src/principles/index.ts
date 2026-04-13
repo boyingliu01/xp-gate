@@ -7,6 +7,9 @@ import { magicNumbersRule } from './rules/clean-code/magic-numbers';
 import { godClassRule } from './rules/clean-code/god-class';
 import { deepNestingRule } from './rules/clean-code/deep-nesting';
 import { tooManyParamsRule } from './rules/clean-code/too-many-params';
+import { missingErrorHandlingRule } from './rules/clean-code/missing-error-handling';
+import { unusedImportsRule } from './rules/clean-code/unused-imports';
+import { codeDuplicationRule } from './rules/clean-code/code-duplication';
 import { srpRule } from './rules/solid/srp';
 import { ocpRule } from './rules/solid/ocp';
 import { lspRule } from './rules/solid/lsp';
@@ -63,6 +66,9 @@ function getAllRules() {
     godClassRule,
     deepNestingRule,
     tooManyParamsRule,
+    missingErrorHandlingRule,
+    unusedImportsRule,
+    codeDuplicationRule,
     srpRule,
     ocpRule,
     lspRule,
