@@ -94,6 +94,125 @@ pre-push hook
 
 ---
 
+## Principles Module Integration
+
+### Clean Code & SOLID 原则检查
+
+作为代码走查的一部分，自动运行 principles checker 分析：
+
+```yaml
+principles_module:
+  enabled: true
+  trigger: pre-push
+  rules:
+    - clean-code.all      # 9 rules
+    - solid.all           # 5 rules
+  integration_point: expert_prompt
+  output_format: principles_findings section
+```
+
+### Principles 检查流程
+
+```
+git push
+    │
+    ▼
+pre-push hook
+    │
+    ├─→ Step 1: Principles Checker
+    │         │
+    │         ├─→ 检测变更文件语言
+    │         ├─→ 选择对应 Adapter
+    │         ├─→ 运行 14 个规则
+    │         │      │
+    │         │      ├─→ Clean Code (9 rules)
+    │         │      │   - long-function (>50 lines)
+    │         │      │   - large-file (>500 lines)
+    │         │      │   - magic-numbers (非语义数字)
+    │         │      │   - god-class (>15 methods)
+    │         │      │   - deep-nesting (>4 levels)
+    │         │      │   - too-many-params (>7)
+    │         │      │   - missing-error-handling (IO 无 try-catch)
+    │         │      │   - unused-imports (未使用的导入)
+    │         │      │   - code-duplication (>15% 相似度)
+    │         │      │
+    │         │      ├─→ SOLID (5 rules)
+    │         │      │   - srp (单一职责)
+    │         │      │   - ocp (开闭原则)
+    │         │      │   - lsp (里氏替换)
+    │         │      │   - isp (接口隔离)
+    │         │      │   - dip (依赖倒置)
+    │         │      │
+    │         │      └─→ 输出 violations
+    │         │
+    │         └─→ Step 2: Delphi Code Walkthrough
+    │                  │
+    │                  ├─→ Expert A 评审 (含 principles_findings)
+    │                  ├─→ Expert B 评审 (含 principles_findings)
+    │                  └─→ 共共识检查
+    │
+    └─→ 允许/阻塞推送
+```
+
+### Principles Findings 输出格式
+
+在 Expert 评审报告中添加 `principles_findings` 章节：
+
+```markdown
+## Principles Findings
+
+### Clean Code Violations
+
+| Rule | Severity | File | Line | Description |
+|------|----------|------|------|-------------|
+| clean-code.long-function | warning | src/api.ts | 45 | Function "processData" exceeds 50 lines |
+| clean-code.deep-nesting | warning | src/utils.ts | 12 | Nesting depth 5 > threshold 4 |
+
+### SOLID Violations
+
+| Rule | Severity | File | Line | Description |
+|------|----------|------|------|-------------|
+| solid.srp | warning | src/user.ts | 1 | Class has 18 methods (>15 threshold) |
+| solid.dip | warning | src/service.ts | 23 | Direct instantiation of UserRepository |
+
+### Summary
+- Total violations: [N]
+- Errors: [N]
+- Warnings: [N]
+- Infos: [N]
+```
+
+### Principles 检查与 Delphi 评审的关系
+
+| Principles 结果 | Delphi 评审行为 |
+|-----------------|-----------------|
+| 无 violations | Expert 正常评审，无额外关注点 |
+| 有 info 级别 | Expert 评审时参考，不阻塞 |
+| 有 warning 级别 | Expert 必须在评审中提及并给出意见 |
+| 有 error 级别 | **自动阻塞推送**，无需 Delphi 评审 |
+
+### 阈值配置
+
+项目级配置文件 `.principlesrc` 可覆盖默认阈值：
+
+```json
+{
+  "rules": {
+    "clean-code": {
+      "long-function": { "threshold": 50 },
+      "god-class": { "threshold": 15 },
+      "deep-nesting": { "threshold": 4 }
+    },
+    "solid": {
+      "srp": { "methodThreshold": 15 },
+      "isp": { "methodThreshold": 10 }
+    }
+  }
+}
+```
+
+---
+
 ## 输出格式
 
 ### Expert 评审输出
