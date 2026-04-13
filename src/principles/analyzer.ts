@@ -1,6 +1,12 @@
 import { Rule, Violation, Adapter } from './types';
 import { loadConfig } from './config';
 import { TypeScriptAdapter } from './adapters/typescript';
+import { PythonAdapter } from './adapters/python';
+import { GoAdapter } from './adapters/go';
+import { JavaAdapter } from './adapters/java';
+import { KotlinAdapter } from './adapters/kotlin';
+import { DartAdapter } from './adapters/dart';
+import { SwiftAdapter } from './adapters/swift';
 import { extname } from 'path';
 
 export { Violation } from './types';
@@ -46,6 +52,13 @@ export function getAdapterForFile(filePath: string): Adapter | null {
     '.tsx': TypeScriptAdapter,
     '.js': TypeScriptAdapter,
     '.jsx': TypeScriptAdapter,
+    '.py': PythonAdapter,
+    '.go': GoAdapter,
+    '.java': JavaAdapter,
+    '.kt': KotlinAdapter,
+    '.kts': KotlinAdapter,
+    '.dart': DartAdapter,
+    '.swift': SwiftAdapter,
   };
   
   const AdapterClass = adapterMap[ext];
