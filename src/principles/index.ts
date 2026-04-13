@@ -108,14 +108,14 @@ export async function main(args: string[]): Promise<number> {
   return 0;
 }
 
-const isMainModule = import.meta.url === `file://${process.argv[1].replace(/\\/g, '/')}`;
-
-if (isMainModule) {
-  const args = process.argv.slice(2);
-  main(args)
-    .then(exitCode => process.exit(exitCode))
-    .catch(err => {
-      console.error('Analysis failed:', err.message);
-      process.exit(1);
-    });
-}
+const args = process.argv.slice(2);
+main(args)
+  .then(exitCode => {
+    if (exitCode !== 0) {
+      process.exit(exitCode);
+    }
+  })
+  .catch(err => {
+    console.error('Analysis failed:', err.message);
+    process.exit(1);
+  });

@@ -9,7 +9,7 @@ import { DartAdapter } from './adapters/dart';
 import { SwiftAdapter } from './adapters/swift';
 import { extname } from 'path';
 
-export { Violation } from './types';
+export type { Violation } from './types';
 export interface AnalysisOptions {
   enabledRules?: string[];
 }
