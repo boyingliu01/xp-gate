@@ -1,0 +1,83 @@
+{
+  "rules": {
+    "clean-code": {
+      "long-function": {
+        "enabled": true,
+        "threshold": 50,
+        "severity": "warning"
+      },
+      "large-file": {
+        "enabled": true,
+        "threshold": 500,
+        "severity": "warning"
+      },
+      "god-class": {
+        "enabled": true,
+        "threshold": 15,
+        "severity": "warning"
+      },
+      "deep-nesting": {
+        "enabled": true,
+        "threshold": 4,
+        "severity": "warning"
+      },
+      "too-many-params": {
+        "enabled": true,
+        "threshold": 7,
+        "severity": "info"
+      },
+      "magic-numbers": {
+        "enabled": true,
+        "exclude": [0, 1, -1, 2, 10, 100, 1000, 60, 24, 7, 30, 365, 256, 1024],
+        "severity": "info"
+      },
+      "missing-error-handling": {
+        "enabled": true,
+        "severity": "warning"
+      },
+      "unused-imports": {
+        "enabled": true,
+        "severity": "info"
+      },
+      "code-duplication": {
+        "enabled": true,
+        "threshold": 15,
+        "severity": "warning"
+      }
+    },
+    "solid": {
+      "srp": {
+        "enabled": true,
+        "methodThreshold": 15,
+        "severity": "warning"
+      },
+      "ocp": {
+        "enabled": true,
+        "severity": "info"
+      },
+      "lsp": {
+        "enabled": true,
+        "severity": "info"
+      },
+      "isp": {
+        "enabled": true,
+        "methodThreshold": 10,
+        "severity": "info"
+      },
+      "dip": {
+        "enabled": true,
+        "exclude": ["Date", "Map", "Set", "Error", "Array", "Object", "Promise"],
+        "severity": "warning"
+      }
+    }
+  },
+  "output": {
+    "format": "console",
+    "show-score": true,
+    "colorize": true
+  },
+  "performance": {
+    "mode": "changed-files-only",
+    "mediumProjectDefinition": "10000 lines / 500 files"
+  }
+}

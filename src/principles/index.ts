@@ -1,5 +1,5 @@
 import { analyze, getAdapterForFile, AnalysisResult } from './analyzer';
-import { formatConsole, formatJSON, formatSummary } from './reporter';
+import { formatConsole, formatJSON, formatSummary, formatSARIF } from './reporter';
 import { loadConfig } from './config';
 import { longFunctionRule } from './rules/clean-code/long-function';
 import { largeFileRule } from './rules/clean-code/large-file';
@@ -18,7 +18,7 @@ import { dipRule } from './rules/solid/dip';
 
 interface CLIOptions {
   files: string[];
-  format: 'console' | 'json';
+  format: 'console' | 'json' | 'sarif';
   changedOnly: boolean;
   showScore: boolean;
 }
@@ -42,7 +42,7 @@ export function parseArgs(args: string[]): CLIOptions {
       i++;
     } else if (arg === '--format') {
       const formatArg = args[i + 1];
-      if (formatArg === 'json' || formatArg === 'console') {
+      if (formatArg === 'json' || formatArg === 'console' || formatArg === 'sarif') {
         options.format = formatArg;
       }
       i++;
@@ -81,7 +81,7 @@ export async function main(args: string[]): Promise<number> {
   const options = parseArgs(args);
   
   if (options.files.length === 0) {
-    console.error('Usage: principles-checker --files <file1> <file2> ... [--format console|json] [--changed-only]');
+    console.error('Usage: principles-checker --files <file1> <file2> ... [--format console|json|sarif] [--changed-only]');
     return 1;
   }
   
@@ -92,6 +92,8 @@ export async function main(args: string[]): Promise<number> {
   
   const output = options.format === 'json' 
     ? formatJSON(result)
+    : options.format === 'sarif'
+    ? formatSARIF(result)
     : formatConsole(result);
   
   console.log(output);
