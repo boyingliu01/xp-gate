@@ -2,6 +2,25 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.0.4] - 2026-04-14
+
+### Fixed
+- **Issue #7**: Code walkthrough pre-push hook CLI invocation error
+  - Root cause: OpenCode CLI doesn't support skill subcommands
+  - Solution: Replace CLI call with file validation (`.code-walkthrough-result.json`)
+  - Hook validates: commit match, verdict=APPROVED, not expired (<1hr)
+  - Skill executes in Agent session, writes result file
+  - Decision: "mandatory but manually triggered" quality gate
+- **Delphi Review**: code-walkthrough Round 1-3 → APPROVED (Expert A/B 9/10)
+
+### Changed
+- `githooks/pre-push`: 305 → 145 lines (file validation only)
+- `skills/code-walkthrough/SKILL.md`: 276 → 469 lines (added result output)
+- OpenCode environment: synced with latest fixes
+
+### Added
+- **specification-generator UPDATE mode**: Modify existing spec with Delphi review
+
 ## [0.0.3] - 2026-04-14
 
 ### Added

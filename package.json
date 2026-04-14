@@ -1,6 +1,6 @@
 {
   "name": "xp-workflow-automation",
-  "version": "1.0.0",
+  "version": "0.0.4",
   "description": "XP Workflow Automation - Clean Code & SOLID Principles Checker",
   "type": "module",
   "engines": {
