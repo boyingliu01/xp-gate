@@ -34,6 +34,28 @@ elif [ -f "pubspec.yaml" ]; then
   else
     PROJECT_LANG="dart"
   fi
+elif [ -f "CMakeLists.txt" ] || [ -f "Makefile" ]; then
+  CPP_FILES=$(find . -maxdepth 2 -name "*.cpp" -o -name "*.cxx" -o -name "*.cc" -not -path "./.git/*" 2>/dev/null | head -1)
+  OBJC_FILES=$(find . -maxdepth 2 -name "*.m" -o -name "*.mm" -not -path "./.git/*" 2>/dev/null | head -1)
+  if [ -n "$CPP_FILES" ]; then
+    PROJECT_LANG="cpp"
+  elif [ -n "$OBJC_FILES" ]; then
+    PROJECT_LANG="objectivec"
+  fi
+elif [ -f "*.xcodeproj" ] || [ -d "*.xcworkspace" ]; then
+  # Xcode project - Objective-C or Swift
+  OBJC_FILES=$(find . -maxdepth 2 -name "*.m" -o -name "*.mm" -not -path "./.git/*" 2>/dev/null | head -1)
+  if [ -n "$OBJC_FILES" ]; then
+    PROJECT_LANG="objectivec"
+  fi
+elif [ -f "pom.xml" ] || [ -f "build.gradle" ] || [ -f "build.gradle.kts" ]; then
+  # Check if it's Kotlin or Java
+  KOTLIN_FILES=$(find . -name "*.kt" -not -path "./.git/*" 2>/dev/null | wc -l)
+  if [ "$KOTLIN_FILES" -gt 0 ]; then
+    PROJECT_LANG="kotlin"
+  else
+    PROJECT_LANG="java"
+  fi
 fi
 
 # Check if this is a documentation-only project (no source code)
@@ -260,6 +282,409 @@ elif [ "$PROJECT_LANG" = "flutter" ]; then
   fi
   echo "✅ flutter analyze passed."
 
+elif [ "$PROJECT_LANG" = "cpp" ]; then
+  # C++: PRIMARY - clang-tidy, SUPPLEMENTAL - cppcheck
+  
+  # PRIMARY: clang-tidy - blocks on errors
+  if ! command -v clang-tidy &> /dev/null; then
+    echo ""
+    echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+    echo "   ❌ ENVIRONMENT ERROR - COMMIT BLOCKED"
+    echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+    echo ""
+    echo "Required tool 'clang-tidy' is NOT installed."
+    echo ""
+    echo "clang-tidy is the official C++ linter from LLVM."
+    echo ""
+    echo "Install commands:"
+    echo "  macOS: brew install llvm"
+    echo "  Ubuntu/Debian: sudo apt-get install clang-tidy"
+    echo "  Fedora: sudo dnf install clang-tools-extra"
+    echo ""
+    exit 1
+  fi
+  
+  echo "Running clang-tidy (PRIMARY C++ checker)..."
+  
+  # Get changed C++ files
+  CPP_CHANGED_FILES=$(echo "$CHANGED_FILES" | grep -E '\.(cpp|cxx|cc|c|hpp|h)$' || true)
+  if [ -n "$CPP_CHANGED_FILES" ]; then
+    # Run clang-tidy with common checks
+    clang-tidy $CPP_CHANGED_FILES -- \
+      -std=c++17 \
+      -Wall -Wextra \
+      -I. -I./include \
+      2>&1 | head -50
+    
+    CLANG_TIDY_EXIT=$?
+    if [ "$CLANG_TIDY_EXIT" -ne 0 ]; then
+      echo ""
+      echo "❌ CLANG-TIDY ERRORS. Commit blocked."
+      echo "Fix the issues above before committing."
+      exit 1
+    fi
+    echo "✅ clang-tidy passed."
+  fi
+  
+  # SUPPLEMENTAL: cppcheck - also blocks on errors
+  if command -v cppcheck &> /dev/null; then
+    echo "Running cppcheck (SUPPLEMENTAL C++ checker)..."
+    
+    CPP_CHANGED_FILES=$(echo "$CHANGED_FILES" | grep -E '\.(cpp|cxx|cc|c|hpp|h)$' || true)
+    if [ -n "$CPP_CHANGED_FILES" ]; then
+      cppcheck --enable=all \
+        --error-exitcode=1 \
+        --std=c++17 \
+        --suppress=missingIncludeSystem \
+        $CPP_CHANGED_FILES \
+        2>&1 | head -30
+      
+      CPPCHECK_EXIT=$?
+      if [ "$CPPCHECK_EXIT" -ne 0 ]; then
+        echo ""
+        echo "❌ CPPCHECK ERRORS. Commit blocked."
+        echo "Fix the issues above before committing."
+        exit 1
+      fi
+      echo "✅ cppcheck passed."
+    fi
+  else
+    echo "ℹ️  cppcheck not installed. Skipping supplemental check."
+    echo "   Install with: apt-get install cppcheck  (or brew install cppcheck)"
+  fi
+
+
+elif [ "$PROJECT_LANG" = "java" ]; then
+  # Java: require Maven or Gradle with CheckStyle, PMD, and SpotBugs
+  echo "  Detected Java project"
+  
+  # Determine build tool
+  if [ -f "pom.xml" ]; then
+    BUILD_TOOL="maven"
+  elif [ -f "build.gradle" ] || [ -f "build.gradle.kts" ]; then
+    BUILD_TOOL="gradle"
+  else
+    echo ""
+    echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+    echo "   ❌ ENVIRONMENT ERROR - COMMIT BLOCKED"
+    echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+    echo ""
+    echo "Java project detected but no build configuration found."
+    echo "Expected: pom.xml (Maven) or build.gradle/build.gradle.kts (Gradle)"
+    echo ""
+    exit 1
+  fi
+  
+  if [ "$BUILD_TOOL" = "maven" ]; then
+    # Check for Maven
+    if ! command -v mvn &> /dev/null; then
+      echo ""
+      echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+      echo "   ❌ ENVIRONMENT ERROR - COMMIT BLOCKED"
+      echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+      echo ""
+      echo "Required tool 'mvn' (Maven) is NOT installed."
+      echo ""
+      echo "Maven is required for Java static analysis."
+      echo ""
+      echo "Install commands:"
+      echo "  macOS: brew install maven"
+      echo "  Linux: sudo apt-get install maven"
+      echo "  Windows: https://maven.apache.org/download.cgi"
+      echo ""
+      exit 1
+    fi
+    
+    # CheckStyle (style enforcement)
+    echo "  Running CheckStyle..."
+    mvn checkstyle:check -q 2>&1 | head -30
+    CHECKSTYLE_EXIT=$?
+    if [ "$CHECKSTYLE_EXIT" -ne 0 ]; then
+      echo ""
+      echo "❌ CHECKSTYLE ERRORS. Commit blocked."
+      echo "Fix style violations before committing."
+      echo "Run: mvn checkstyle:checkstyle to see full report"
+      exit 1
+    fi
+    echo "✅ CheckStyle passed."
+    
+    # PMD v7 (quality analysis)
+    echo "  Running PMD..."
+    mvn pmd:pmd -q 2>&1 | head -30
+    PMD_EXIT=$?
+    if [ "$PMD_EXIT" -ne 0 ]; then
+      echo ""
+      echo "❌ PMD ERRORS. Commit blocked."
+      echo "Fix code quality issues before committing."
+      echo "Run: mvn pmd:pmd to see full report"
+      exit 1
+    fi
+    
+    # Check PMD violations
+    if [ -f "target/pmd.xml" ]; then
+      PMD_VIOLATIONS=$(grep -o 'priority="[1-5]"' target/pmd.xml 2>/dev/null | wc -l)
+      if [ "$PMD_VIOLATIONS" -gt 0 ]; then
+        echo ""
+        echo "❌ PMD VIOLATIONS FOUND. Commit blocked."
+        echo "Found $PMD_VIOLATIONS PMD violations."
+        echo "Run: mvn pmd:pmd to see full report"
+        exit 1
+      fi
+    fi
+    echo "✅ PMD passed."
+    
+    # SpotBugs (bug detection)
+    echo "  Running SpotBugs..."
+    mvn spotbugs:check -q 2>&1 | head -30
+    SPOTBUGS_EXIT=$?
+    if [ "$SPOTBUGS_EXIT" -ne 0 ]; then
+      echo ""
+      echo "❌ SPOTBUGS ERRORS. Commit blocked."
+      echo "Fix potential bugs before committing."
+      echo "Run: mvn spotbugs:gui to see full report"
+      exit 1
+    fi
+    echo "✅ SpotBugs passed."
+    
+  elif [ "$BUILD_TOOL" = "gradle" ]; then
+    # Check for Gradle wrapper or gradle
+    if [ -f "./gradlew" ]; then
+      GRADLE_CMD="./gradlew"
+    elif command -v gradle &> /dev/null; then
+      GRADLE_CMD="gradle"
+    else
+      echo ""
+      echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+      echo "   ❌ ENVIRONMENT ERROR - COMMIT BLOCKED"
+      echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+      echo ""
+      echo "Required tool 'gradle' is NOT installed."
+      echo ""
+      echo "Gradle is required for Java static analysis."
+      echo ""
+      echo "Install commands:"
+      echo "  macOS: brew install gradle"
+      echo "  Linux: sudo apt-get install gradle"
+      echo "  Windows: https://gradle.org/install/"
+      echo ""
+      exit 1
+    fi
+    
+    # CheckStyle (style enforcement)
+    echo "  Running CheckStyle..."
+    $GRADLE_CMD checkstyleMain -q 2>&1 | head -30
+    CHECKSTYLE_EXIT=$?
+    if [ "$CHECKSTYLE_EXIT" -ne 0 ]; then
+      echo ""
+      echo "❌ CHECKSTYLE ERRORS. Commit blocked."
+      echo "Fix style violations before committing."
+      echo "Run: $GRADLE_CMD checkstyleMain to see full report"
+      exit 1
+    fi
+    echo "✅ CheckStyle passed."
+    
+    # PMD v7 (quality analysis)
+    echo "  Running PMD..."
+    $GRADLE_CMD pmdMain -q 2>&1 | head -30
+    PMD_EXIT=$?
+    if [ "$PMD_EXIT" -ne 0 ]; then
+      echo ""
+      echo "❌ PMD ERRORS. Commit blocked."
+      echo "Fix code quality issues before committing."
+      echo "Run: $GRADLE_CMD pmdMain to see full report"
+      exit 1
+    fi
+    echo "✅ PMD passed."
+    
+    # SpotBugs (bug detection)
+    echo "  Running SpotBugs..."
+    $GRADLE_CMD spotbugsMain -q 2>&1 | head -30
+    SPOTBUGS_EXIT=$?
+    if [ "$SPOTBUGS_EXIT" -ne 0 ]; then
+      echo ""
+      echo "❌ SPOTBUGS ERRORS. Commit blocked."
+      echo "Fix potential bugs before committing."
+      echo "Run: $GRADLE_CMD spotbugsMain to see full report"
+      exit 1
+    fi
+    echo "✅ SpotBugs passed."
+  fi
+
+elif [ "$PROJECT_LANG" = "kotlin" ]; then
+  # Kotlin: PRIMARY - detekt (blocks), SUPPLEMENTAL - ktlint (warns)
+  
+  # PRIMARY: detekt - blocks on violations
+  DETEKT_AVAILABLE=false
+  
+  if command -v detekt &> /dev/null; then
+    # CLI detekt is available
+    DETEKT_AVAILABLE=true
+    echo "Running detekt (CLI)..."
+    
+    # Get only Kotlin files from changed files
+    KOTLIN_CHANGED=$(echo "$CHANGED_FILES" | grep "\.kt$" || true)
+    if [ -n "$KOTLIN_CHANGED" ]; then
+      detekt --input "$KOTLIN_CHANGED" 2>&1 | head -30
+      DETEKT_EXIT=${PIPESTATUS[0]}
+      if [ "$DETEKT_EXIT" -ne 0 ]; then
+        echo ""
+        echo "❌ DETEKT ERRORS. Commit blocked."
+        echo "Fix the detekt errors above before committing."
+        exit 1
+      fi
+    fi
+    echo "✅ detekt passed."
+    
+  elif [ -f "./gradlew" ]; then
+    # Check if detekt plugin is configured in Gradle
+    if grep -q "io.gitlab.arturbosch.detekt" build.gradle* 2>/dev/null || [ -f "detekt.yml" ]; then
+      DETEKT_AVAILABLE=true
+      echo "Running detekt (Gradle plugin)..."
+      ./gradlew detekt 2>&1 | head -30
+      GRADLE_EXIT=${PIPESTATUS[0]}
+      if [ "$GRADLE_EXIT" -ne 0 ]; then
+        echo ""
+        echo "❌ DETEKT ERRORS. Commit blocked."
+        echo "Fix the detekt errors above before committing."
+        exit 1
+      fi
+      echo "✅ Gradle detekt passed."
+    fi
+  fi
+  
+  # If detekt is not available, block the commit
+  if [ "$DETEKT_AVAILABLE" = "false" ]; then
+    echo ""
+    echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+    echo "   ❌ ENVIRONMENT ERROR - COMMIT BLOCKED"
+    echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+    echo ""
+    echo "Required tool 'detekt' is NOT installed."
+    echo ""
+    echo "detekt is the PRIMARY static analysis tool for Kotlin."
+    echo "It provides: complexity checks, style violations, bug detection."
+    echo ""
+    echo "Install options:"
+    echo "  CLI: brew install detekt"
+    echo "       or download from https://github.com/detekt/detekt/releases"
+    echo ""
+    echo "  Gradle: Add to build.gradle:"
+    echo "    plugins {"
+    echo "      id 'io.gitlab.arturbosch.detekt' version '1.23.0'"
+    echo "    }"
+    echo ""
+    echo "After installation, retry the commit."
+    echo ""
+    exit 1
+  fi
+  
+  # SUPPLEMENTAL: ktlint (formatting only - warning, does NOT block)
+  if command -v ktlint &> /dev/null; then
+    echo "Running ktlint (supplemental formatting check)..."
+    
+    KOTLIN_CHANGED=$(echo "$CHANGED_FILES" | grep "\.kt$" || true)
+    if [ -n "$KOTLIN_CHANGED" ]; then
+      ktlint "$KOTLIN_CHANGED" 2>&1 | head -20
+      KTLINT_EXIT=${PIPESTATUS[0]}
+      if [ "$KTLINT_EXIT" -ne 0 ]; then
+        echo ""
+        echo "⚠️  ktlint formatting suggestions (supplemental check, non-blocking)"
+        echo "   Run 'ktlint -F' to auto-fix formatting issues."
+      else
+        echo "✅ ktlint formatting check passed."
+      fi
+    fi
+  else
+    echo "ℹ️  ktlint not installed. Skipping supplemental formatting check."
+    echo "   Install with: brew install ktlint"
+  fi
+
+elif [ "$PROJECT_LANG" = "objectivec" ]; then
+  # Objective-C: PRIMARY - scan-build (Clang Static Analyzer), SUPPLEMENTAL - oclint
+  
+  # PRIMARY: scan-build - blocks on errors
+  SCAN_BUILD_AVAILABLE=false
+  
+  if command -v scan-build &> /dev/null; then
+    SCAN_BUILD_AVAILABLE=true
+    echo "Running scan-build (Clang Static Analyzer - PRIMARY)..."
+    
+    # Get changed Objective-C files
+    OBJC_CHANGED_FILES=$(echo "$CHANGED_FILES" | grep -E '\.(m|mm)$' || true)
+    if [ -n "$OBJC_CHANGED_FILES" ]; then
+      # Run scan-build with common checks
+      # scan-build requires a build command - we'll check for xcodebuild or make
+      if command -v xcodebuild &> /dev/null && [ -f "*.xcodeproj" ]; then
+        scan-build xcodebuild -sdk iphonesimulator -destination 'platform=iOS Simulator,name=iPhone 14' 2>&1 | head -50
+      elif [ -f "Makefile" ]; then
+        scan-build make 2>&1 | head -50
+      else
+        # Fallback: analyze individual files
+        for file in $OBJC_CHANGED_FILES; do
+          scan-build clang -fsyntax-only -x objective-c "$file" 2>&1 | head -20
+        done
+      fi
+      
+      SCAN_BUILD_EXIT=${PIPESTATUS[0]}
+      if [ "$SCAN_BUILD_EXIT" -ne 0 ]; then
+        echo ""
+        echo "❌ SCAN-BUILD ERRORS. Commit blocked."
+        echo "Fix the static analyzer issues above before committing."
+        exit 1
+      fi
+    fi
+    echo "✅ scan-build passed."
+  fi
+  
+  # If scan-build is not available, block the commit
+  if [ "$SCAN_BUILD_AVAILABLE" = "false" ]; then
+    echo ""
+    echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+    echo "   ❌ ENVIRONMENT ERROR - COMMIT BLOCKED"
+    echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+    echo ""
+    echo "Required tool 'scan-build' (Clang Static Analyzer) is NOT installed."
+    echo ""
+    echo "scan-build is the PRIMARY static analysis tool for Objective-C."
+    echo "It provides: memory leak detection, null pointer checks, dead store analysis."
+    echo ""
+    echo "Install commands:"
+    echo "  macOS: brew install llvm"
+    echo "         scan-build is part of LLVM/Clang tools"
+    echo ""
+    echo "After installation, retry the commit."
+    echo ""
+    exit 1
+  fi
+  
+  # SUPPLEMENTAL: oclint (metrics only - warning, does NOT block)
+  if command -v oclint &> /dev/null; then
+    echo "Running oclint (SUPPLEMENTAL metrics check)..."
+    
+    OBJC_CHANGED_FILES=$(echo "$CHANGED_FILES" | grep -E '\.(m|mm)$' || true)
+    if [ -n "$OBJC_CHANGED_FILES" ]; then
+      oclint -enable-global-analysis \
+        -max-priority-1=0 \
+        -max-priority-2=0 \
+        -max-priority-3=9999 \
+        $OBJC_CHANGED_FILES \
+        2>&1 | head -30
+      
+      OCLINT_EXIT=${PIPESTATUS[0]}
+      if [ "$OCLINT_EXIT" -ne 0 ]; then
+        echo ""
+        echo "⚠️  oclint metrics suggestions (SUPPLEMENTAL check, non-blocking)"
+        echo "   oclint reports code quality metrics but does NOT block commits."
+        echo "   Consider addressing high-priority violations to improve code quality."
+      else
+        echo "✅ oclint metrics check passed."
+      fi
+    fi
+  else
+    echo "ℹ️  oclint not installed. Skipping supplemental metrics check."
+    echo "   Install with: brew install oclint"
+  fi
+
 else
   # Unknown project type - MUST FAIL
   echo ""
@@ -302,6 +727,15 @@ if [ "$PROJECT_LANG" = "typescript" ] || [ "$PROJECT_LANG" = "python" ] || [ "$P
 elif [ "$PROJECT_LANG" = "go" ]; then
   # Go already linted in Gate 1 via golangci-lint
   echo "✅ Linting already completed in Gate 1 (golangci-lint)."
+elif [ "$PROJECT_LANG" = "kotlin" ]; then
+  # Kotlin already linted in Gate 1 via detekt
+  echo "✅ Linting already completed in Gate 1 (detekt)."
+elif [ "$PROJECT_LANG" = "java" ]; then
+  # Java already linted in Gate 1 via CheckStyle/PMD/SpotBugs
+  echo "✅ Linting already completed in Gate 1 (CheckStyle/PMD/SpotBugs)."
+elif [ "$PROJECT_LANG" = "objectivec" ]; then
+  # Objective-C already linted in Gate 1 via scan-build
+  echo "✅ Linting already completed in Gate 1 (scan-build)."
 elif [ "$PROJECT_LANG" = "documentation-only" ]; then
   echo "✅ Skipped (no source code to lint)."
 fi
@@ -432,10 +866,169 @@ elif [ "$PROJECT_LANG" = "flutter" ]; then
     echo "✅ flutter test passed."
   fi
 
+elif [ "$PROJECT_LANG" = "kotlin" ]; then
+  # Kotlin: require Gradle or Maven test configuration
+  if [ -f "pom.xml" ] || [ -f "build.gradle" ] || [ -f "build.gradle.kts" ]; then
+    HAS_TEST_CONFIG=true
+    
+    # Check for test task in build.gradle or pom.xml
+    HAS_TESTS=false
+    if [ -f "build.gradle" ] || [ -f "build.gradle.kts" ]; then
+      if [ -f "./gradlew" ]; then
+        if ./gradlew tasks --all 2>&1 | grep -q "test" || [ -d "src/test" ]; then
+          HAS_TESTS=true
+        fi
+      fi
+    elif [ -f "pom.xml" ]; then
+      if [ -d "src/test" ]; then
+        HAS_TESTS=true
+      fi
+    fi
+    
+    if [ "$HAS_TESTS" = "true" ]; then
+      if [ -f "./gradlew" ]; then
+        ./gradlew test 2>&1 | tail -30
+        TEST_EXIT=${PIPESTATUS[0]}
+      elif [ -f "pom.xml" ] && command -v mvn &> /dev/null; then
+        mvn test 2>&1 | tail -30
+        TEST_EXIT=${PIPESTATUS[0]}
+      else
+        echo ""
+        echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+        echo "   ❌ ENVIRONMENT ERROR - COMMIT BLOCKED"
+        echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+        echo ""
+        echo "Test configuration found but build tool is not available."
+        echo ""
+        echo "For Gradle projects: Ensure ./gradlew exists and is executable."
+        echo "For Maven projects: Ensure 'mvn' is installed."
+        echo ""
+        exit 1
+      fi
+      
+      if [ "$TEST_EXIT" -ne 0 ]; then
+        echo ""
+        echo "❌ KOTLIN TESTS FAILED. Commit blocked."
+        echo "Fix failing tests before committing."
+        exit 1
+      fi
+      echo "✅ Kotlin tests passed."
+    else
+      echo "✅ No tests found in src/test (skipping test execution)."
+    fi
+  fi
+
 elif [ "$PROJECT_LANG" = "documentation-only" ]; then
   # Documentation-only project - no tests required
   HAS_TEST_CONFIG=true
   echo "✅ Skipped (no source code to test)."
+
+elif [ "$PROJECT_LANG" = "java" ]; then
+  # Java: require Maven or Gradle with tests
+  if [ -f "pom.xml" ] || [ -f "build.gradle" ] || [ -f "build.gradle.kts" ]; then
+    HAS_TEST_CONFIG=true
+    
+    # Check for test directory
+    if [ -d "src/test" ]; then
+      # Determine build tool and run tests
+      if [ -f "pom.xml" ]; then
+        # Maven project
+        if ! command -v mvn &> /dev/null; then
+          echo ""
+          echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+          echo "   ❌ ENVIRONMENT ERROR - COMMIT BLOCKED"
+          echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+          echo ""
+          echo "Test configuration found but 'mvn' is NOT installed."
+          echo ""
+          echo "Install command:"
+          echo "  macOS: brew install maven"
+          echo "  Linux: sudo apt-get install maven"
+          echo ""
+          exit 1
+        fi
+        
+        mvn test -q 2>&1 | tail -30
+        TEST_EXIT=$?
+        if [ "$TEST_EXIT" -ne 0 ]; then
+          echo ""
+          echo "❌ JAVA TESTS FAILED. Commit blocked."
+          echo "Fix failing tests before committing."
+          exit 1
+        fi
+        echo "✅ Java tests passed (Maven)."
+        
+      elif [ -f "build.gradle" ] || [ -f "build.gradle.kts" ]; then
+        # Gradle project
+        if [ -f "./gradlew" ]; then
+          GRADLE_CMD="./gradlew"
+        elif command -v gradle &> /dev/null; then
+          GRADLE_CMD="gradle"
+        else
+          echo ""
+          echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+          echo "   ❌ ENVIRONMENT ERROR - COMMIT BLOCKED"
+          echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+          echo ""
+          echo "Test configuration found but Gradle is NOT available."
+          echo ""
+          echo "Install command:"
+          echo "  macOS: brew install gradle"
+          echo "  Linux: sudo apt-get install gradle"
+          echo ""
+          exit 1
+        fi
+        
+        $GRADLE_CMD test -q 2>&1 | tail -30
+        TEST_EXIT=$?
+        if [ "$TEST_EXIT" -ne 0 ]; then
+          echo ""
+          echo "❌ JAVA TESTS FAILED. Commit blocked."
+          echo "Fix failing tests before committing."
+          exit 1
+        fi
+        echo "✅ Java tests passed (Gradle)."
+      fi
+    else
+      echo "✅ No tests found in src/test (skipping test execution)."
+    fi
+  fi
+
+elif [ "$PROJECT_LANG" = "objectivec" ]; then
+  # Objective-C: require xcodebuild test or XCTest
+  HAS_TEST_CONFIG=true
+  
+  # Check for Xcode project
+  if [ -f "*.xcodeproj" ] || [ -d "*.xcworkspace" ]; then
+    # Check for xcodebuild
+    if ! command -v xcodebuild &> /dev/null; then
+      echo ""
+      echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+      echo "   ❌ ENVIRONMENT ERROR - COMMIT BLOCKED"
+      echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+      echo ""
+      echo "Required tool 'xcodebuild' is NOT available."
+      echo "xcodebuild is required for Objective-C testing."
+      echo ""
+      echo "Install Xcode from the App Store or:"
+      echo "  https://developer.apple.com/xcode/"
+      echo ""
+      exit 1
+    fi
+    
+    # Run tests
+    xcodebuild test -scheme Default -destination 'platform=iOS Simulator,name=iPhone 14' 2>&1 | tail -30
+    TEST_EXIT=${PIPESTATUS[0]}
+    if [ "$TEST_EXIT" -ne 0 ]; then
+      echo ""
+      echo "❌ OBJECTIVE-C TESTS FAILED. Commit blocked."
+      echo "Fix failing tests before committing."
+      exit 1
+    fi
+    echo "✅ Objective-C tests passed."
+  else
+    echo "✅ No Xcode project found (skipping test execution)."
+  fi
 fi
 
 # Check if test configuration was found
@@ -586,9 +1179,79 @@ elif [ "$PROJECT_LANG" = "flutter" ]; then
     fi
   fi
 
+elif [ "$PROJECT_LANG" = "kotlin" ]; then
+  # Kotlin: coverage via Gradle JaCoCo or Kover plugin
+  if [ -f "build.gradle" ] || [ -f "build.gradle.kts" ]; then
+    if [ -f "./gradlew" ]; then
+      # Check if JaCoCo or Kover is configured
+      if grep -q "jacoco" build.gradle* 2>/dev/null || grep -q "kover" build.gradle* 2>/dev/null || [ -f "gradle/jacoco.gradle" ]; then
+        ./gradlew test jacocoTestReport 2>&1 | tail -30 || ./gradlew test koverHtmlReport 2>&1 | tail -30
+        COV_EXIT=$?
+        if [ "$COV_EXIT" -ne 0 ]; then
+          echo ""
+          echo "❌ COVERAGE FAILED. Commit blocked."
+          exit 1
+        fi
+        echo "✅ Coverage check passed."
+      else
+        echo "ℹ️  No coverage plugin (JaCoCo/Kover) configured."
+        echo "   Add to build.gradle:"
+        echo "     plugins { id 'jacoco' }"
+        echo "     or: id 'org.jetbrains.kotlinx.kover' version '0.7.0'"
+        echo "✅ Coverage check skipped (plugin not configured)."
+      fi
+    fi
+  fi
+
 elif [ "$PROJECT_LANG" = "documentation-only" ]; then
   # Documentation-only project - no coverage required
   echo "✅ Skipped (no source code for coverage)."
+
+elif [ "$PROJECT_LANG" = "java" ]; then
+  # Java: coverage via Maven JaCoCo or Gradle JaCoCo plugin
+  if [ -f "pom.xml" ]; then
+    # Maven project - check for JaCoCo
+    if grep -q "jacoco-maven-plugin" pom.xml 2>/dev/null; then
+      mvn jacoco:check -q 2>&1 | tail -30
+      COV_EXIT=$?
+      if [ "$COV_EXIT" -ne 0 ]; then
+        echo ""
+        echo "❌ COVERAGE FAILED. Commit blocked."
+        exit 1
+      fi
+      echo "✅ Coverage check passed (JaCoCo)."
+    else
+      echo "ℹ️  No JaCoCo plugin configured in pom.xml."
+      echo "   Add to pom.xml:"
+      echo '     <plugin>'
+      echo '       <groupId>org.jacoco</groupId>'
+      echo '       <artifactId>jacoco-maven-plugin</artifactId>'
+      echo '       <version>0.8.11</version>'
+      echo '     </plugin>'
+      echo "✅ Coverage check skipped (plugin not configured)."
+    fi
+  elif [ -f "build.gradle" ] || [ -f "build.gradle.kts" ]; then
+    # Gradle project - check for JaCoCo
+    if grep -q "jacoco" build.gradle* 2>/dev/null; then
+      if [ -f "./gradlew" ]; then
+        ./gradlew jacocoTestReport -q 2>&1 | tail -30
+      elif command -v gradle &> /dev/null; then
+        gradle jacocoTestReport -q 2>&1 | tail -30
+      fi
+      COV_EXIT=$?
+      if [ "$COV_EXIT" -ne 0 ]; then
+        echo ""
+        echo "❌ COVERAGE FAILED. Commit blocked."
+        exit 1
+      fi
+      echo "✅ Coverage check passed (JaCoCo)."
+    else
+      echo "ℹ️  No JaCoCo plugin configured in build.gradle."
+      echo "   Add to build.gradle:"
+      echo "     plugins { id 'jacoco' }"
+      echo "✅ Coverage check skipped (plugin not configured)."
+    fi
+  fi
 fi
 
 # ============================================================================
@@ -682,7 +1345,7 @@ if [ "$PROJECT_LANG" != "documentation-only" ]; then
   fi
   
   # Run principles checker on changed source files
-  PRINCIPLES_FILES=$(echo "$CHANGED_FILES" | grep -E '\.(ts|tsx|js|jsx|py|go|java|kt|dart|swift)$' || true)
+  PRINCIPLES_FILES=$(echo "$CHANGED_FILES" | grep -E '\.(ts|tsx|js|jsx|py|go|java|kt|dart|swift|cpp|c|hpp|h|m|mm)$' || true)
   
   if [ -n "$PRINCIPLES_FILES" ]; then
     # Check if principles checker is available
@@ -752,7 +1415,7 @@ if [ "$PROJECT_LANG" != "documentation-only" ]; then
   fi
   
   # Get changed source files for complexity check
-  CC_FILES=$(echo "$CHANGED_FILES" | grep -E '\.(ts|tsx|js|jsx|py|go|java|swift)$' || true)
+  CC_FILES=$(echo "$CHANGED_FILES" | grep -E '\.(ts|tsx|js|jsx|py|go|java|swift|cpp|c|m|mm)$' || true)
   
   if [ -n "$CC_FILES" ]; then
     echo "Checking complexity for: $CC_FILES"
@@ -813,6 +1476,84 @@ if [ "$PROJECT_LANG" != "documentation-only" ]; then
       echo "ℹ️  Kotlin files detected. Consider using detekt for complexity check."
       echo "   detekt rule: CyclomaticComplexMethod with threshold $CCN_THRESHOLD"
       echo "✅ Kotlin complexity check placeholder passed."
+    fi
+  fi
+else
+  echo "✅ Skipped (documentation-only project)."
+fi
+
+# ============================================================================
+# Gate 8: Boy Scout Rule (MANDATORY for legacy projects)
+# ============================================================================
+echo ""
+echo "→ Gate 8: Boy Scout Rule enforcement..."
+
+if [ "$PROJECT_LANG" != "documentation-only" ]; then
+  # Check if baseline file exists
+  if [ ! -f ".warnings-baseline.json" ]; then
+    echo "ℹ️  No baseline file found (.warnings-baseline.json)."
+    echo "   Boy Scout Rule is optional for new projects."
+    echo "   To enable: Run 'npx tsx src/principles/boy-scout.ts --init-baseline'"
+    echo "✅ Boy Scout Rule skipped (no baseline)."
+  else
+    # Check boy-scout.ts CLI availability
+    if [ -f "src/principles/boy-scout.ts" ]; then
+      # Separate new files and modified files from git diff
+      NEW_FILES=$(git diff --cached --name-only --diff-filter=A | tr '\n' ',' | sed 's/,$//')
+      MODIFIED_FILES=$(git diff --cached --name-only --diff-filter=M | tr '\n' ',' | sed 's/,$//')
+      
+      if [ -z "$NEW_FILES" ] && [ -z "$MODIFIED_FILES" ]; then
+        echo "✅ No new or modified files to check (Boy Scout Rule)."
+      else
+        echo "Running Boy Scout Rule enforcement..."
+        
+        # Run boy-scout CLI
+        BOY_SCOUT_OUTPUT=$(npx tsx src/principles/boy-scout.ts \
+          --new-files "$NEW_FILES" \
+          --modified-files "$MODIFIED_FILES" \
+          --baseline ".warnings-baseline.json" \
+          2>&1)
+        
+        BOY_SCOUT_EXIT=$?
+        
+        if [ "$BOY_SCOUT_EXIT" -ne 0 ]; then
+          echo ""
+          echo "$BOY_SCOUT_OUTPUT"
+          echo ""
+          echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+          echo "   ❌ BOY SCOUT RULE VIOLATION - COMMIT BLOCKED"
+          echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+          echo ""
+          echo "Boy Scout Rule: Leave the code cleaner than you found it."
+          echo ""
+          echo "Requirements:"
+          echo "  - NEW files must have zero warnings"
+          echo "  - MODIFIED files cannot increase warnings"
+          echo "  - Files with <=5 warnings must clear to zero"
+          echo ""
+          echo "Fix the violations above or update the baseline:"
+          echo "  npx tsx src/principles/boy-scout.ts --init-baseline"
+          echo ""
+          exit 1
+        fi
+        
+        # Check for violations in output
+        VIOLATION_COUNT=$(echo "$BOY_SCOUT_OUTPUT" | grep -c '"enforcement": "BLOCK"' || echo "0")
+        
+        if [ "$VIOLATION_COUNT" -gt 0 ]; then
+          echo ""
+          echo "$BOY_SCOUT_OUTPUT"
+          echo ""
+          echo "❌ Boy Scout Rule violations detected."
+          echo "Fix the warnings before committing."
+          exit 1
+        fi
+        
+        echo "✅ Boy Scout Rule passed."
+      fi
+    else
+      echo "ℹ️  boy-scout.ts CLI not found. Skipping Boy Scout Rule."
+      echo "   Expected: src/principles/boy-scout.ts"
     fi
   fi
 else

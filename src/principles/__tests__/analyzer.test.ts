@@ -6,7 +6,7 @@
 
 import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { analyze, AnalysisResult } from '../analyzer';
-import { Rule, Violation, Adapter } from '../types';
+import { Rule, Violation, Adapter, Severity } from '../types';
 import { loadConfig } from '../config';
 
 describe('analyzer.ts - Rule Orchestration Engine', () => {
@@ -30,14 +30,14 @@ describe('analyzer.ts - Rule Orchestration Engine', () => {
       id: 'clean-code.long-function',
       name: 'Long Function Rule',
       threshold: 50,
-      severity: 'warning',
+      severity: 'warning' as Severity,
       check: vi.fn().mockReturnValue([
         {
           file: 'test.ts',
           line: 1,
           ruleId: 'clean-code.long-function',
           message: 'Function "testFunc" is too long: 60 lines (maximum: 50)',
-          severity: 'warning'
+          severity: 'warning' as Severity
         }
       ])
     };
@@ -73,14 +73,14 @@ describe('analyzer.ts - Rule Orchestration Engine', () => {
           id: 'clean-code.large-file',
           name: 'Large File Rule',
           threshold: 500,
-          severity: 'warning',
+          severity: 'warning' as Severity,
           check: vi.fn().mockReturnValue([
             {
               file: 'test.ts',
               line: 1,
               ruleId: 'clean-code.large-file',
               message: 'File is too large: 600 lines',
-              severity: 'warning'
+              severity: 'warning' as Severity
             }
           ])
         } as Rule
@@ -102,7 +102,7 @@ describe('analyzer.ts - Rule Orchestration Engine', () => {
         id: 'clean-code.disabled-rule',
         name: 'Disabled Rule',
         threshold: 10,
-        severity: 'info',
+        severity: 'info' as Severity,
         check: vi.fn().mockReturnValue([])
       };
       
@@ -120,7 +120,7 @@ describe('analyzer.ts - Rule Orchestration Engine', () => {
         id: 'clean-code.passing',
         name: 'Passing Rule',
         threshold: 50,
-        severity: 'warning',
+        severity: 'warning' as Severity,
         check: vi.fn().mockReturnValue([])
       };
       
@@ -151,14 +151,14 @@ describe('analyzer.ts - Rule Orchestration Engine', () => {
           id: 'test.error',
           name: 'Error Rule',
           threshold: 10,
-          severity: 'error',
+          severity: 'error' as Severity,
           check: vi.fn().mockReturnValue([
             {
               file: 'test.ts',
               line: 1,
               ruleId: 'test.error',
               message: 'Error violation',
-              severity: 'error'
+              severity: 'error' as Severity
             }
           ])
         } as Rule,
@@ -166,14 +166,14 @@ describe('analyzer.ts - Rule Orchestration Engine', () => {
           id: 'test.info',
           name: 'Info Rule',
           threshold: 10,
-          severity: 'info',
+          severity: 'info' as Severity,
           check: vi.fn().mockReturnValue([
             {
               file: 'test.ts',
               line: 2,
               ruleId: 'test.info',
               message: 'Info violation',
-              severity: 'info'
+              severity: 'info' as Severity
             }
           ])
         } as Rule
@@ -211,7 +211,7 @@ it('should skip files that do not match adapter language', async () => {
         id: 'error.rule',
         name: 'Error Rule',
         threshold: 10,
-        severity: 'warning',
+        severity: 'warning' as Severity,
         check: vi.fn().mockImplementation(() => {
           throw new Error('Rule check failed');
         })

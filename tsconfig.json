@@ -10,8 +10,9 @@
     "rootDir": "./src",
     "declaration": true,
     "declarationMap": true,
-    "sourceMap": true
+    "sourceMap": true,
+    "types": ["node"]
   },
   "include": ["src/**/*"],
-  "exclude": ["node_modules", "dist", "src/_wip"]
+  "exclude": ["node_modules", "dist", "src/_wip", "src/**/__tests__/**", "src/**/*.test.ts", "src/**/*.spec.ts"]
 }

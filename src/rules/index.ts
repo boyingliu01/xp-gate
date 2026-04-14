@@ -1,4 +1,8 @@
-import { Config, Rule } from '../src/principles/types.js';
+import { Rule } from '../principles/types';
+
+interface Config {
+  rules: Record<string, Record<string, { enabled: boolean; threshold?: number; severity?: string }>>;
+}
 
 /**
  * Load the appropriate rules for analysis

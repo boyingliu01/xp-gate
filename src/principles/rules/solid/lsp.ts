@@ -23,7 +23,7 @@ export const lspRule: Rule = {
           for (const methodSignature of methodParams) {
             const paramsMatch = methodSignature.match(/\(([^)]+)\)/);
             if (paramsMatch) {
-              const params = paramsMatch[1].split(',').map(p => p.trim());
+              const params = paramsMatch[1].split(',').map((p: string) => p.trim());
               
               for (const param of params) {
                 if (param.includes(':')) {

@@ -1,0 +1,418 @@
+specification:
+  id: SPEC-QG-001
+  name: Quality Gate Enhancement
+  version: "1.0.0"
+  source_document: docs/quality-gate-enhancement-design-v1.0.md
+  delphi_status: APPROVED
+  
+  requirements:
+    # ============================================================
+    # Requirement 1: Language Coverage Extension
+    # ============================================================
+    - id: REQ-QG-001
+      description: Extend quality gate system to support all 6 primary languages used by the company
+      priority: MUST
+      context: |
+        Company uses multiple languages as primary development stack:
+        - Java (backend services)
+        - JavaScript/TypeScript (frontend)
+        - C++ (embedded/performance)
+        - Python (data/AI)
+        - Objective-C (iOS legacy)
+        - Kotlin (Android)
+      
+      acceptance_criteria:
+        # Pre-commit Hook Integration
+        - id: AC-QG-001-01
+          given: A Java project with pom.xml or build.gradle exists
+          when: User attempts to commit changes
+          then: Pre-commit hook runs CheckStyle + PMD v7 + SpotBugs analysis and blocks on failures
+        
+        - id: AC-QG-001-02
+          given: A Kotlin project with .kt files exists
+          when: User attempts to commit changes
+          then: Pre-commit hook runs detekt (PRIMARY) + ktlint (SUPPLEMENTAL) analysis
+        
+        - id: AC-QG-001-03
+          given: A C++ project with CMakeLists.txt or Makefile exists
+          when: User attempts to commit changes
+          then: Pre-commit hook runs clang-tidy (PRIMARY) + cppcheck (SUPPLEMENTAL) analysis
+        
+        - id: AC-QG-001-04
+          given: An Objective-C project with .m or .mm files exists
+          when: User attempts to commit changes
+          then: Pre-commit hook runs scan-build (PRIMARY) + oclint (SUPPLEMENTAL) analysis
+        
+        # Principles Checker Adapters
+        - id: AC-QG-001-05
+          given: A C++ source file (.cpp, .cxx, .cc, .c, .hpp, .h) is provided
+          when: Principles checker runs analysis
+          then: CppAdapter correctly extracts functions and classes using regex patterns
+        
+        - id: AC-QG-001-06
+          given: An Objective-C source file (.m, .mm) is provided
+          when: Principles checker runs analysis
+          then: ObjectiveCAdapter correctly extracts @implementation and method declarations
+        
+        # CCN Support
+        - id: AC-QG-001-07
+          given: Changed files include C++ (.cpp, .c) or Objective-C (.m, .mm) files
+          when: Gate 7 Cyclomatic Complexity check runs
+          then: lizard correctly analyzes complexity for all supported languages
+        
+        # Language Detection
+        - id: AC-QG-001-08
+          given: Project root contains .m or .mm files or .xcodeproj directory
+          when: Pre-commit hook determines project language
+          then: PROJECT_LANG is correctly set to "objectivec"
+        
+        - id: AC-QG-001-09
+          given: Project root contains pom.xml with .kt files
+          when: Pre-commit hook determines project language
+          then: PROJECT_LANG is correctly set to "kotlin"
+      
+      edge_cases:
+        - Mixed language projects (e.g., Java + Kotlin in same repo)
+        - Header files (.h) that could be C or C++
+        - Objective-C++ files (.mm) with C++ and ObjC mixed
+        
+      security_considerations:
+        - clang-tidy must not expose compile_commands.json contents
+        - scan-build output must be sanitized before display
+      
+      test_coverage_requirements:
+        unit: true
+        integration: true
+        threshold: 80
+      
+      gap_analysis:
+        java: "MEDIUM - adapter exists, needs pre-commit"
+        javascript: "LOW - via TypeScript adapter"
+        typescript: "NONE - fully supported"
+        cpp: "HIGH - no support before this enhancement"
+        python: "NONE - fully supported"
+        objectivec: "HIGH - no support before this enhancement"
+        kotlin: "MEDIUM - needs pre-commit integration"
+
+    # ============================================================
+    # Requirement 2: Boy Scout Rule Implementation
+    # ============================================================
+    - id: REQ-QG-002
+      description: Implement differential warning enforcement for historical projects (Boy Scout Rule)
+      priority: MUST
+      context: |
+        Boy Scout Rule: "Always leave the campground cleaner than you found it."
+        
+        Current gap:
+        - No file classification mechanism (new vs modified vs unchanged)
+        - No baseline storage (warning history per file)
+        - No warning delta tracking
+        - All-or-nothing enforcement (no differential)
+      
+      acceptance_criteria:
+        # File Classification
+        - id: AC-QG-002-01
+          given: Git staged changes include added (A) and modified (M) files
+          when: Boy Scout module runs file classification
+          then: classifyFiles correctly separates newFiles and modifiedFiles arrays
+        
+        # Baseline Storage
+        - id: AC-QG-002-02
+          given: A baseline file .warnings-baseline.json exists with previous warning counts
+          when: Boy Scout module loads baseline
+          then: loadBaseline returns Record<string, BaselineEntry> with correct data
+        
+        - id: AC-QG-002-03
+          given: Analysis results need to be stored
+          when: saveBaseline is called
+          then: .warnings-baseline.json is updated with new warning counts
+        
+        # New File Enforcement
+        - id: AC-QG-002-04
+          given: A new file (status=NEW) has currentWarnings > 0
+          when: calculateDelta processes the file
+          then: enforcement is BLOCK with reason "New files must have zero warnings"
+        
+        - id: AC-QG-002-05
+          given: A new file (status=NEW) has currentWarnings = 0
+          when: calculateDelta processes the file
+          then: enforcement is PASS with reason "New file with zero warnings"
+        
+        # Modified File Enforcement
+        - id: AC-QG-002-06
+          given: A modified file has currentWarnings > baselineWarnings (delta > 0)
+          when: calculateDelta processes the file
+          then: enforcement is BLOCK with reason about added warnings
+        
+        - id: AC-QG-002-07
+          given: A modified file has baselineWarnings <= 5 AND currentWarnings > 0
+          when: calculateDelta processes the file
+          then: enforcement is BLOCK with reason about clearing to zero
+        
+        - id: AC-QG-002-08
+          given: A modified file has currentWarnings < baselineWarnings (delta < 0)
+          when: calculateDelta processes the file
+          then: enforcement is PASS with reason about improvement
+        
+        # Baseline Initialization
+        - id: AC-QG-002-09
+          given: A historical project needs baseline initialization
+          when: initBaseline is called with file list
+          then: .warnings-baseline.json is created with current warning counts
+        
+        # Gate 8 Integration
+        - id: AC-QG-002-10
+          given: Pre-commit hook detects .warnings-baseline.json exists
+          when: Gate 8 Boy Scout Rule runs
+          then: boy-scout.ts CLI is invoked with correct parameters
+        
+        - id: AC-QG-002-11
+          given: Any file violates Boy Scout Rule
+          when: Gate 8 enforcement completes
+          then: Commit is blocked with detailed violation report
+        
+      edge_cases:
+        - Empty file list (no changes)
+        - Baseline file corrupted or invalid JSON
+        - Very large baseline file (>1000 entries)
+        - Concurrent baseline modifications
+        
+      security_considerations:
+        - Baseline file must not expose sensitive code information
+        - CLI arguments must be validated before processing
+      
+      test_coverage_requirements:
+        unit: true
+        integration: true
+        threshold: 80
+      
+      enforcement_rules:
+        new_files: "zero_tolerance"
+        modified_files: "decrease_or_maintain"
+        threshold_to_clear: 5
+        update_baseline_on_pass: true
+
+  # ============================================================
+  # Design Decisions (from Delphi Review)
+  # ============================================================
+  design_decisions:
+    - id: DD-QG-001
+      description: Use clang-tidy as PRIMARY C++ checker, cppcheck as SUPPLEMENTAL
+      rationale: clang-tidy supports modern C++ (11/14/17/20/23), 200+ checks, auto-fixes. cppcheck is lightweight for fast preliminary scan.
+      alternatives_considered:
+        - "cppcheck only - lacks modern C++ support"
+        - "clang AST integration - requires libclang setup"
+    
+    - id: DD-QG-002
+      description: Use scan-build (Clang Static Analyzer) as PRIMARY ObjC checker
+      rationale: Apple standard, built into Xcode, path-sensitive analysis for iOS/macOS specific issues
+      alternatives_considered:
+        - "oclint only - metrics focused, limited detection"
+        - "External commercial tools - cost prohibitive"
+    
+    - id: DD-QG-003
+      description: Use CheckStyle + PMD v7 + SpotBugs for Java (company standard)
+      rationale: Company already uses these tools. PMD v7 brings 2-3x performance improvement. SpotBugs operates at bytecode level for bug detection.
+      alternatives_considered:
+        - "SonarQube only - requires server setup"
+        - "NullAway mandatory - may block initially, use as recommended"
+    
+    - id: DD-QG-004
+      description: Use regex-based extraction for C++/ObjC AST (Phase 1)
+      rationale: ast-grep does NOT support C++/Objective-C. Regex fallback allows basic rule checking (long-function, large-file, god-class). Phase 2 can integrate libclang for full AST.
+      alternatives_considered:
+        - "Wait for libclang - blocks Phase 1 delivery"
+        - "Skip C++/ObjC principles - incomplete coverage"
+    
+    - id: DD-QG-005
+      description: TypeScript/Bash bridge for Boy Scout CLI
+      rationale: TypeScript handles delta calculation logic cleanly. Bash handles git integration and file classification. npx tsx provides clean CLI interface.
+      alternatives_considered:
+        - "Pure Bash - complex JSON parsing"
+        - "Python module - adds dependency"
+    
+    - id: DD-QG-006
+      description: Zero-tolerance for PRIMARY tools, warn-only for SUPPLEMENTAL
+      rationale: Blocks on missing clang-tidy/scan-build/detekt. Warns on missing cppcheck/oclint/ktlint. Follows existing zero-tolerance principle.
+      alternatives_considered:
+        - "Relaxed mode - weak enforcement"
+        - "Skip missing tools silently - no user notification"
+
+  # ============================================================
+  # API Contracts
+  # ============================================================
+  api_contracts:
+    - interface: boy-scout.ts CLI
+      commands:
+        - command: "npx tsx src/principles/boy-scout.ts --new-files <files> --modified-files <files> --baseline <path>"
+          input:
+            new_files: "comma-separated file paths"
+            modified_files: "comma-separated file paths"
+            baseline: ".warnings-baseline.json path"
+          output:
+            format: "JSON"
+            fields:
+              - "overallStatus: PASS | BLOCK"
+              - "violations: DeltaResult[]"
+              - "summary: { totalFiles, passedFiles, blockedFiles }"
+            exit_code:
+              pass: 0
+              block: 1
+        
+        - command: "npx tsx src/principles/boy-scout.ts --init-baseline [files]"
+          input:
+            files: "optional comma-separated file paths (defaults to all source files)"
+          output:
+            file: ".warnings-baseline.json created"
+            console: "Files scanned, files with warnings, total warnings"
+
+    - interface: DeltaResult
+      type: "object"
+      fields:
+        - name: "file"
+          type: "string"
+          description: "File path"
+        - name: "status"
+          type: "'NEW' | 'MODIFIED' | 'UNCHANGED'"
+          description: "File change status"
+        - name: "baselineWarnings"
+          type: "number"
+          description: "Warning count from baseline"
+        - name: "currentWarnings"
+          type: "number"
+          description: "Current warning count"
+        - name: "delta"
+          type: "number"
+          description: "currentWarnings - baselineWarnings"
+        - name: "enforcement"
+          type: "'PASS' | 'BLOCK'"
+          description: "Enforcement decision"
+        - name: "reason"
+          type: "string"
+          description: "Explanation of enforcement decision"
+
+  # ============================================================
+  # Tool Matrix
+  # ============================================================
+  tool_matrix:
+    java:
+      primary: ["CheckStyle", "PMD v7", "SpotBugs"]
+      supplemental: ["NullAway"]
+      notes: "Company existing tools, PMD v7 upgrade required for 2-3x speed"
+    
+    kotlin:
+      primary: ["detekt"]
+      supplemental: ["ktlint"]
+      notes: "detekt for 200+ rules, ktlint for formatting only"
+    
+    cpp:
+      primary: ["clang-tidy"]
+      supplemental: ["cppcheck"]
+      notes: "clang-tidy for modern C++, cppcheck for fast preliminary scan"
+    
+    objectivec:
+      primary: ["scan-build (Clang Static Analyzer)"]
+      supplemental: ["oclint"]
+      notes: "scan-build built into Xcode, oclint for metrics only"
+    
+    python:
+      primary: ["Ruff"]
+      supplemental: ["mypy"]
+      notes: "Ruff 100x faster than flake8, already optimal"
+    
+    go:
+      primary: ["golangci-lint"]
+      supplemental: []
+      notes: "60+ linters combined, already optimal"
+    
+    typescript:
+      primary: ["ESLint"]
+      supplemental: ["tsc --noEmit"]
+      notes: "Standard, already supported"
+
+  # ============================================================
+  # Quality Gate Structure
+  # ============================================================
+  gates:
+    - gate: 1
+      name: "Static Analysis"
+      description: "Language-specific static analysis tools"
+      mandatory: true
+    
+    - gate: 2
+      name: "Additional Linting"
+      description: "Optional additional lint via pre-commit config"
+      mandatory: false
+    
+    - gate: 3
+      name: "Unit Tests"
+      description: "Run unit tests via language-specific test runner"
+      mandatory: true
+    
+    - gate: 4
+      name: "Coverage"
+      description: "Check test coverage >= 80%"
+      mandatory: true
+    
+    - gate: 5
+      name: "Shell Check"
+      description: "Shell script quality via shellcheck"
+      mandatory: true
+    
+    - gate: 6
+      name: "Principles Checker"
+      description: "Clean Code & SOLID principles validation"
+      mandatory: true
+    
+    - gate: 7
+      name: "Cyclomatic Complexity"
+      description: "CCN threshold check (warning: 5, block: 10)"
+      mandatory: true
+    
+    - gate: 8
+      name: "Boy Scout Rule"
+      description: "Differential warning enforcement"
+      mandatory: true
+      condition: "Only when .warnings-baseline.json exists"
+
+  # ============================================================
+  # Success Metrics
+  # ============================================================
+  success_metrics:
+    language_extension:
+      languages_supported: 6
+      pre_commit_coverage: "100% for primary languages"
+      principles_coverage: "100% for primary languages"
+      ccn_coverage: "100% for primary languages"
+    
+    boy_scout_rule:
+      new_files_blocked: "100% when warnings > 0"
+      modified_files_blocked: "100% when delta > 0"
+      legacy_files_cleared: "tracking enabled"
+      baseline_storage_overhead: "<50KB for medium projects"
+
+  # ============================================================
+  # Configuration
+  # ============================================================
+  configuration:
+    principlesrc:
+      boyScoutRule:
+        enabled: true
+        baselineFile: ".warnings-baseline.json"
+        thresholdToClear: 5
+        newFilePolicy: "zero-tolerance"
+        modifiedFilePolicy: "decrease-or-maintain"
+        updateBaselineOnPass: true
+      
+      thresholds:
+        long_function: 50
+        god_class: 15
+        deep_nesting: 4
+        ccn_warning: 5
+        ccn_block: 10
+      
+      coverage:
+        branches: 80
+        functions: 80
+        lines: 80
+        statements: 80

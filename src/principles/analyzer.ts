@@ -7,6 +7,8 @@ import { JavaAdapter } from './adapters/java';
 import { KotlinAdapter } from './adapters/kotlin';
 import { DartAdapter } from './adapters/dart';
 import { SwiftAdapter } from './adapters/swift';
+import { ObjectiveCAdapter } from './adapters/objectivec';
+import { CppAdapter } from './adapters/cpp';
 import { extname } from 'path';
 
 export type { Violation } from './types';
@@ -42,7 +44,7 @@ export interface AnalysisResult {
   errors: string[];
 }
 
-export type AdapterFactory = (filePath: string) => Adapter;
+export type AdapterFactory = (filePath: string) => Adapter | null;
 
 export function getAdapterForFile(filePath: string): Adapter | null {
   const ext = extname(filePath).toLowerCase();
@@ -59,6 +61,14 @@ export function getAdapterForFile(filePath: string): Adapter | null {
     '.kts': KotlinAdapter,
     '.dart': DartAdapter,
     '.swift': SwiftAdapter,
+    '.m': ObjectiveCAdapter,
+    '.mm': ObjectiveCAdapter,
+    '.cpp': CppAdapter,
+    '.cxx': CppAdapter,
+    '.cc': CppAdapter,
+    '.c': CppAdapter,
+    '.hpp': CppAdapter,
+    '.h': CppAdapter,
   };
   
   const AdapterClass = adapterMap[ext];
@@ -94,12 +104,16 @@ export async function analyze(
   }
   
   for (const file of files) {
-    let adapter: Adapter;
+    let adapter: Adapter | null;
     
     if (typeof adapterOrFactory === 'function') {
       adapter = adapterOrFactory(file);
     } else {
       adapter = adapterOrFactory;
+    }
+    
+    if (!adapter) {
+      continue;
     }
     
     const language = adapter.detectLanguage();
