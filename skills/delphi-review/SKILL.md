@@ -471,6 +471,34 @@ description: "Delphi共识评审：多轮匿名评审直到专家达成一致意
 - **CANNOT claim complete**
 - **MUST BLOCK 并通知用户**
 
+**⭐ APPROVED 后必做：调用 specification-generator**
+
+IF 最终裁决是 APPROVED，评审完成后必须提示用户下一步：
+
+```
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+   ✅ DELPHI REVIEW APPROVED
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+设计文档已通过评审，现在可以进入下一阶段。
+
+⭐ Next Step: 生成或更新 specification.yaml
+
+设计文档已稳定，请调用 specification-generator 生成/更新规范文件：
+
+  /specification-generator
+
+或直接回答 "generate spec"，我将自动调用 specification-generator。
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+```
+
+**为什么必须调用 specification-generator？**
+
+1. specification.yaml 是 test-specification-alignment 的输入
+2. 没有 specification.yaml → test-specification-alignment 进入 legacy mode（不推荐）
+3. 每次 APPROVED 后都应该检查并更新 specification.yaml
+
 **门禁代码示例**:
 ```typescript
 function validateTerminalState(reviewResult: DelphiResult): TerminalState {
