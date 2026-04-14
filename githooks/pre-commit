@@ -7,6 +7,74 @@
 #
 # Blocks commits that fail quality gates
 
+# ============================================================================
+# Helper Functions
+# ============================================================================
+
+# Parse LCOV file and return coverage percentage
+# Usage: parse_lcov_coverage <lcov_file>
+# Returns: coverage percentage (e.g., "85.5")
+parse_lcov_coverage() {
+  local lcov_file="$1"
+  local total_lines=0
+  local covered_lines=0
+  
+  if [ ! -f "$lcov_file" ]; then
+    echo "0"
+    return
+  fi
+  
+  # Extract LF (Lines Found) and LH (Lines Hit) from lcov.info
+  while IFS= read -r line; do
+    case "$line" in
+      LF:*)
+        total_lines=$(echo "$line" | sed 's/LF://')
+        ;;
+      LH:*)
+        covered_lines=$(echo "$line" | sed 's/LH://')
+        ;;
+    esac
+  done < "$lcov_file"
+  
+  if [ "$total_lines" -gt 0 ]; then
+    # Calculate percentage using awk for floating point
+    awk "BEGIN {printf \"%.1f\", ($covered_lines / $total_lines) * 100}"
+  else
+    echo "0"
+  fi
+}
+
+# Run command in subdirectory if PROJECT_SUBDIR is set
+# Usage: run_in_subdir <command>
+run_in_subdir() {
+  local cmd="$1"
+  
+  if [ -n "$PROJECT_SUBDIR" ] && [ "$PROJECT_SUBDIR" != "." ]; then
+    # Run command in subdirectory, then return to original directory
+    pushd "$PROJECT_SUBDIR" > /dev/null 2>&1
+    eval "$cmd"
+    local exit_code=$?
+    popd > /dev/null 2>&1
+    return $exit_code
+  else
+    # Run in current directory
+    eval "$cmd"
+    return $?
+  fi
+}
+
+# Check if file exists in subdirectory
+# Usage: file_exists_in_subdir <filename>
+file_exists_in_subdir() {
+  local filename="$1"
+  
+  if [ -n "$PROJECT_SUBDIR" ] && [ "$PROJECT_SUBDIR" != "." ]; then
+    [ -f "$PROJECT_SUBDIR/$filename" ]
+  else
+    [ -f "$filename" ]
+  fi
+}
+
 echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
 echo "   QUALITY GATES - PRE-COMMIT CHECK"
 echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
@@ -58,6 +126,89 @@ elif [ -f "pom.xml" ] || [ -f "build.gradle" ] || [ -f "build.gradle.kts" ]; the
   fi
 fi
 
+# If not found at root, search subdirectories (max depth 2) for project manifests
+# This supports mixed/hybrid project structures like:
+#   root: Documentation + scripts
+#   subdirectory: Flutter/TypeScript/Python/Go project
+PROJECT_SUBDIR=""
+if [ -z "$PROJECT_LANG" ]; then
+  # Search for TypeScript/JavaScript projects
+  TSCONFIG_SUB=$(find . -maxdepth 2 -name "tsconfig.json" -not -path "./.git/*" -not -path "./node_modules/*" 2>/dev/null | head -1)
+  if [ -n "$TSCONFIG_SUB" ]; then
+    PROJECT_LANG="typescript"
+    PROJECT_SUBDIR=$(dirname "$TSCONFIG_SUB")
+  fi
+  
+  # Search for Python projects
+  if [ -z "$PROJECT_LANG" ]; then
+    PYPROJECT_SUB=$(find . -maxdepth 2 -name "pyproject.toml" -not -path "./.git/*" 2>/dev/null | head -1)
+    if [ -n "$PYPROJECT_SUB" ]; then
+      PROJECT_LANG="python"
+      PROJECT_SUBDIR=$(dirname "$PYPROJECT_SUB")
+    fi
+  fi
+  
+  # Search for Go projects
+  if [ -z "$PROJECT_LANG" ]; then
+    GOMOD_SUB=$(find . -maxdepth 2 -name "go.mod" -not -path "./.git/*" 2>/dev/null | head -1)
+    if [ -n "$GOMOD_SUB" ]; then
+      PROJECT_LANG="go"
+      PROJECT_SUBDIR=$(dirname "$GOMOD_SUB")
+    fi
+  fi
+  
+  # Search for Flutter/Dart projects
+  if [ -z "$PROJECT_LANG" ]; then
+    PUBSPEC_SUB=$(find . -maxdepth 2 -name "pubspec.yaml" -not -path "./.git/*" 2>/dev/null | head -1)
+    if [ -n "$PUBSPEC_SUB" ]; then
+      if grep -q "flutter:" "$PUBSPEC_SUB" 2>/dev/null || [ -f "$(dirname "$PUBSPEC_SUB")/.metadata" ]; then
+        PROJECT_LANG="flutter"
+      else
+        PROJECT_LANG="dart"
+      fi
+      PROJECT_SUBDIR=$(dirname "$PUBSPEC_SUB")
+    fi
+  fi
+  
+  # Search for Java/Kotlin projects
+  if [ -z "$PROJECT_LANG" ]; then
+    POM_SUB=$(find . -maxdepth 2 -name "pom.xml" -not -path "./.git/*" 2>/dev/null | head -1)
+    GRADLE_SUB=$(find . -maxdepth 2 -name "build.gradle" -not -path "./.git/*" 2>/dev/null | head -1)
+    if [ -n "$POM_SUB" ] || [ -n "$GRADLE_SUB" ]; then
+      MANIFEST_FILE="${POM_SUB:-$GRADLE_SUB}"
+      PROJECT_SUBDIR=$(dirname "$MANIFEST_FILE")
+      # Check for Kotlin files in subdirectory
+      KOTLIN_COUNT=$(find "$PROJECT_SUBDIR" -name "*.kt" -not -path "*/.git/*" 2>/dev/null | wc -l)
+      if [ "$KOTLIN_COUNT" -gt 0 ]; then
+        PROJECT_LANG="kotlin"
+      else
+        PROJECT_LANG="java"
+      fi
+    fi
+  fi
+  
+  # Search for C++ projects
+  if [ -z "$PROJECT_LANG" ]; then
+    CMAKE_SUB=$(find . -maxdepth 2 -name "CMakeLists.txt" -not -path "./.git/*" 2>/dev/null | head -1)
+    if [ -n "$CMAKE_SUB" ]; then
+      PROJECT_LANG="cpp"
+      PROJECT_SUBDIR=$(dirname "$CMAKE_SUB")
+    fi
+  fi
+  
+  # Report detected subdirectory project
+  if [ -n "$PROJECT_SUBDIR" ] && [ -n "$PROJECT_LANG" ]; then
+    echo ""
+    echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+    echo "   📁 SUBDIRECTORY PROJECT DETECTED"
+    echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+    echo ""
+    echo "Language: $PROJECT_LANG"
+    echo "Location: $PROJECT_SUBDIR/"
+    echo ""
+  fi
+fi
+
 # Check if this is a documentation-only project (no source code)
 # Such projects have only markdown, yaml, json, skills, docs - no actual code
 if [ -z "$PROJECT_LANG" ]; then
@@ -76,6 +227,16 @@ if [ -z "$PROJECT_LANG" ]; then
     echo ""
     echo "Proceeding with documentation-only checks..."
   fi
+fi
+
+# Switch to subdirectory if detected (for mixed/hybrid projects)
+# All subsequent gates will run in the subdirectory context
+ORIGINAL_DIR=""
+if [ -n "$PROJECT_SUBDIR" ] && [ "$PROJECT_SUBDIR" != "." ] && [ "$PROJECT_LANG" != "documentation-only" ]; then
+  ORIGINAL_DIR=$(pwd)
+  cd "$PROJECT_SUBDIR"
+  echo "Working in: $PROJECT_SUBDIR/"
+  echo ""
 fi
 
 # ============================================================================
@@ -1153,31 +1314,121 @@ elif [ "$PROJECT_LANG" = "go" ]; then
   echo "✅ Coverage check passed."
 
 elif [ "$PROJECT_LANG" = "dart" ]; then
-  # Dart: coverage via dart test with coverage
-  if command -v dart &> /dev/null && [ -f "pubspec.yaml" ]; then
-    # Check if test is configured
-    if grep -q "test:" pubspec.yaml 2>/dev/null; then
-      # Try to run coverage if available
-      if command -v dart &> /dev/null; then
-        # Run tests with coverage (requires dart_coverage package)
-        dart test --coverage=.coverage 2>&1 | tail -20 || true
-        # Note: Full coverage report generation requires additional setup
-        # This is a simplified check
-        echo "✅ Dart test completed (coverage optional)."
-      fi
-    fi
-  fi
+   # Dart: coverage with threshold enforcement (90% line coverage)
+   COVERAGE_THRESHOLD=${DART_COVERAGE_THRESHOLD:-90}
+   
+   if command -v dart &> /dev/null && [ -f "pubspec.yaml" ]; then
+     # Check if test is configured
+     if grep -q "test:" pubspec.yaml 2>/dev/null; then
+       echo "Running Dart tests with coverage..."
+       
+       # Run tests with coverage
+       dart test --coverage=.coverage 2>&1 | tail -30
+       DART_TEST_EXIT=$?
+       
+       if [ "$DART_TEST_EXIT" -ne 0 ]; then
+         echo ""
+         echo "❌ DART TEST FAILED. Commit blocked."
+         exit 1
+       fi
+       
+       # Check for coverage data
+       if [ -d ".coverage" ]; then
+         # Convert to lcov format using coverage package
+         if dart pub deps 2>&1 | grep -q "coverage"; then
+           dart run coverage:format_coverage --lcov --in=.coverage --out=coverage/lcov.info --report-on=lib 2>&1 || true
+         fi
+       fi
+       
+       # Parse coverage if lcov.info exists
+       if [ -f "coverage/lcov.info" ]; then
+         COVERAGE_PERCENT=$(parse_lcov_coverage "coverage/lcov.info")
+         
+         echo ""
+         echo "Coverage: $COVERAGE_PERCENT% (threshold: $COVERAGE_THRESHOLD%)"
+         
+         if [ "$COVERAGE_PERCENT" -lt "$COVERAGE_THRESHOLD" ]; then
+           echo ""
+           echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+           echo "   ❌ COVERAGE BELOW THRESHOLD - COMMIT BLOCKED"
+           echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+           echo ""
+           echo "Line coverage: $COVERAGE_PERCENT% (required: $COVERAGE_THRESHOLD%)"
+           echo ""
+           echo "Add more tests to increase coverage."
+           echo "View coverage: genhtml coverage/lcov.info -o coverage/html"
+           echo ""
+           exit 1
+         fi
+         echo "✅ Coverage threshold passed ($COVERAGE_PERCENT% ≥ $COVERAGE_THRESHOLD%)."
+       else
+         echo "ℹ️  No coverage data generated."
+         echo "   Install coverage package: dart pub add --dev coverage"
+         echo "✅ Dart test passed (coverage optional without coverage package)."
+       fi
+     else
+       echo "ℹ️  No test dependency in pubspec.yaml."
+       echo "✅ Coverage check skipped."
+     fi
+   fi
 
-elif [ "$PROJECT_LANG" = "flutter" ]; then
-  # Flutter: coverage via flutter test with coverage
-  if command -v flutter &> /dev/null && [ -f "pubspec.yaml" ]; then
-    # Check if test is configured
-    if grep -q "flutter_test" pubspec.yaml 2>/dev/null; then
-      # Flutter can generate coverage but it's optional
-      echo "ℹ️  Flutter coverage requires additional setup (lcov)"
-      echo "✅ Flutter test completed (coverage optional)."
-    fi
-  fi
+ elif [ "$PROJECT_LANG" = "flutter" ]; then
+   # Flutter: coverage with threshold enforcement (90% line coverage)
+   COVERAGE_THRESHOLD=${FLUTTER_COVERAGE_THRESHOLD:-90}
+   
+   if command -v flutter &> /dev/null && [ -f "pubspec.yaml" ]; then
+     # Check if test is configured
+     if grep -q "flutter_test" pubspec.yaml 2>/dev/null; then
+       echo "Running Flutter tests with coverage..."
+       
+       # Run tests with coverage
+       flutter test --coverage 2>&1 | tail -30
+       FLUTTER_TEST_EXIT=$?
+       
+       if [ "$FLUTTER_TEST_EXIT" -ne 0 ]; then
+         echo ""
+         echo "❌ FLUTTER TEST FAILED. Commit blocked."
+         exit 1
+       fi
+       
+       # Parse coverage from lcov.info
+       if [ -f "coverage/lcov.info" ]; then
+         COVERAGE_PERCENT=$(parse_lcov_coverage "coverage/lcov.info")
+         
+         echo ""
+         echo "Coverage: $COVERAGE_PERCENT% (threshold: $COVERAGE_THRESHOLD%)"
+         
+         if [ "$COVERAGE_PERCENT" -lt "$COVERAGE_THRESHOLD" ]; then
+           echo ""
+           echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+           echo "   ❌ COVERAGE BELOW THRESHOLD - COMMIT BLOCKED"
+           echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+           echo ""
+           echo "Line coverage: $COVERAGE_PERCENT% (required: $COVERAGE_THRESHOLD%)"
+           echo ""
+           echo "Add more tests to increase coverage."
+           echo "View coverage: genhtml coverage/lcov.info -o coverage/html"
+           echo ""
+           exit 1
+         fi
+         echo "✅ Coverage threshold passed ($COVERAGE_PERCENT% ≥ $COVERAGE_THRESHOLD%)."
+       else
+         echo ""
+         echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+         echo "   ❌ NO COVERAGE DATA - COMMIT BLOCKED"
+         echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+         echo ""
+         echo "Coverage is MANDATORY for Flutter projects."
+         echo ""
+         echo "Run: flutter test --coverage"
+         echo ""
+         exit 1
+       fi
+     else
+       echo "ℹ️  No flutter_test dependency in pubspec.yaml."
+       echo "✅ Coverage check skipped."
+     fi
+   fi
 
 elif [ "$PROJECT_LANG" = "kotlin" ]; then
   # Kotlin: coverage via Gradle JaCoCo or Kover plugin
@@ -1564,4 +1815,10 @@ echo ""
 echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
 echo "   ✅ ALL GATES PASSED"
 echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+
+# Switch back to original directory if we were in a subdirectory
+if [ -n "$ORIGINAL_DIR" ]; then
+  cd "$ORIGINAL_DIR"
+fi
+
 exit 0
