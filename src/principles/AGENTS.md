@@ -1,17 +1,21 @@
 # PRINCIPLES CHECKER MODULE
 
-**Generated:** 2026-04-13
-**Commit:** 281ee00
+**Generated:** 2026-04-14
+**Commit:** 324d7ce
 
 ## OVERVIEW
-Clean Code & SOLID principles checker with 14 rules and 7 language adapters. Gate 6 of pre-commit hook.
+Clean Code & SOLID principles checker with 14 rules and 9 language adapters. Gate 6 of pre-commit hook. Includes Boy Scout Rule enforcement and baseline storage for historical projects.
 
 ## STRUCTURE
 ```
 src/principles/
-├── adapters/     # Language-specific AST adapters (7 languages)
+├── adapters/     # Language-specific AST adapters (9 languages)
 │   ├── typescript.ts, python.ts, go.ts, java.ts
 │   ├── kotlin.ts, dart.ts, swift.ts
+│   ├── cpp.ts          # Regex-based C++ extraction
+│   └── objectivec.ts   # Regex-based Objective-C extraction
+├── boy-scout.ts  # Differential warning enforcement (Gate 8)
+├── baseline.ts   # Warning history storage (.warnings-baseline.json)
 ├── rules/
 │   ├── clean-code/  # 9 rules (long-function, large-file, god-class, etc.)
 │   └── solid/       # 5 rules (srp, ocp, lsp, isp, dip)
@@ -25,16 +29,22 @@ src/principles/
 ## WHERE TO LOOK
 | Task | Location | Notes |
 |------|----------|-------|
-| Rule Engine | analyzer.ts | Orchestrates 14 rules, 7 adapters |
+| Rule Engine | analyzer.ts | Orchestrates 14 rules, 9 adapters |
 | CLI Entry | index.ts | `getAllRules()` returns all rules |
 | Output Formats | reporter.ts | SARIF 2.1.0, JSON, Console |
 | Thresholds | config.ts + .principlesrc | Defaults + project overrides |
+| Boy Scout Rule | boy-scout.ts | classifyFiles, calculateDelta, enforceBoyScoutRule |
+| Baseline Storage | baseline.ts | loadBaseline, saveBaseline, initBaseline |
+| Objective-C Adapter | adapters/objectivec.ts | Regex extraction for .m/.mm files |
+| C++ Adapter | adapters/cpp.ts | Regex extraction for .cpp/.c files |
 
 ## CONVENTIONS
-- TDD implemented: 166 tests, 94.35% coverage
+- TDD implemented: 257 tests, 85%+ coverage
 - Rule ID format: `clean-code.long-function`, `solid.srp`
 - Severity levels: error (block), warning (block), info (log only)
 - SARIF output includes rule descriptions + default levels
+- Boy Scout Rule: new files zero-tolerance, modified files decrease-or-maintain
+- Test annotations: @test REQ-XXX, @covers AC-XXX required
 
 ## ANTI-PATTERNS
 - Do NOT use `as any` or `@ts-ignore` in rule implementations
