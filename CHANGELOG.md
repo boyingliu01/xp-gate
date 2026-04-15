@@ -2,6 +2,35 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.0.5] - 2026-04-15
+
+### Added
+- **Gate 9: Architecture Quality** - Clean Architecture layer boundary validation
+  - TypeScript: archlint (@archlinter/cli) >= 2.0.0
+  - Python: deply >= 0.5.0
+  - Go: goarchtest
+  - Java: ArchUnit
+  - C++: Phase 2 roadmap (requires `.skip-architecture-cpp` marker)
+- **architecture.yaml** template with layer definitions and rules
+  - 14 architecture rules: ARCH-001 to ARCH-014
+  - Layer boundary enforcement (Domain, Application, Infrastructure, Presentation)
+  - Circular dependency detection
+  - Baseline/ratchet mode support
+  - SARIF output integration
+- **version-parser.ts**: Tool version compatibility checker
+- **Gate 9 bats tests**: 18 test cases for shell script validation
+
+### Changed
+- Gate count: 8 → 9 (added Architecture Quality)
+- TOOL-INSTALLATION-GUIDE.md: Added architecture tool installation
+- README.md: Added Gate 9 documentation
+- specification.yaml: Added REQ-ARCH-001 to REQ-ARCH-009
+
+### Delphi Review Verified
+- Round 1 → Round 2 → APPROVED (100% consensus, 9.67/10 confidence)
+- Experts: delphi-reviewer-architecture, delphi-reviewer-technical, delphi-reviewer-feasibility
+- Critical issues fixed: tool name, version checks, C++ skip marker
+
 ## [0.0.4] - 2026-04-14
 
 ### Fixed
