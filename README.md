@@ -24,6 +24,26 @@ AI-powered development workflow tools with consensus engines and quality gates f
 | 6 | Principles | Clean Code + SOLID |
 | 7 | CCN | Cyclomatic complexity (≤5 warn, ≤10 block) |
 | 8 | Boy Scout | Differential warning enforcement |
+| 9 | Architecture | Clean Architecture layer boundaries |
+
+### Gate 9: Architecture Quality
+
+Enforces Clean Architecture principles using language-specific tools:
+
+| Language | Tool | Rules |
+|----------|------|-------|
+| TypeScript | archlint (@archlinter/cli) | Layer dependency direction, boundary violations |
+| Python | Deply | Layer isolation, import validation |
+| Go | goarchtest | Architecture test patterns |
+| Java | ArchUnit | Layer constraints, naming conventions |
+| C++ | ⚠️ Not supported (Phase 2) | Requires `.skip-architecture-cpp` marker |
+
+**Configuration**: Create `architecture.yaml` in project root to define layers and rules.
+
+**Rules enforced**:
+- ARCH-001 to ARCH-004: Layer boundary enforcement (Domain, Application, Infrastructure, Presentation)
+- ARCH-005 to ARCH-007: Circular dependency detection
+- ARCH-008 to ARCH-010: Type location validation
 
 ## Installation
 
@@ -46,7 +66,7 @@ chmod +x .git/hooks/pre-commit .git/hooks/pre-push
 ### Git Workflow
 ```bash
 # Commit with quality gates
-git commit  # Runs pre-commit (8 Gates)
+git commit  # Runs pre-commit (9 Gates)
 
 # Push with AI code review
 git push    # Runs pre-push (multi-expert Delphi review)

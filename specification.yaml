@@ -1,9 +1,11 @@
 specification:
   id: SPEC-QG-001
-  name: Quality Gate Enhancement
-  version: "1.0.0"
+  name: Quality Gate Enhancement + Gate 9 Architecture Quality
+  version: "2.0.0"
   source_document: docs/quality-gate-enhancement-design-v1.0.md
   delphi_status: APPROVED
+  gate_9_source: .sisyphus/plans/gate-9-architecture-quality.md
+  gate_9_delphi_status: APPROVED
   
   requirements:
     # ============================================================
@@ -192,6 +194,181 @@ specification:
         threshold_to_clear: 5
         update_baseline_on_pass: true
 
+    # ============================================================
+    # Requirement 3: Gate 9 Architecture Quality Validation
+    # ============================================================
+    - id: REQ-ARCH-001
+      description: TypeScript projects must have architecture validation using archlint (@archlinter/cli) with version >= 2.0.0
+      priority: MUST
+      context: |
+        Gate 9 fills architecture-level quality check gap:
+        - Layer boundary violations (Domain importing Infrastructure)
+        - Dependency direction (Clean Architecture: outer → inner only)
+        - Circular dependencies across layers
+        
+        Tool: archlint (@archlinter/cli), NOT architecture-linter
+        - Package: @archlinter/cli
+        - CLI command: archlint
+        - Rust implementation: ~100ms performance
+      
+      acceptance_criteria:
+        - id: AC-ARCH-001-01
+          given: TypeScript project with tsconfig.json exists
+          when: Gate 9 runs in pre-commit
+          then: archlint command is checked for availability (exit 1 if missing)
+        
+        - id: AC-ARCH-001-02
+          given: archlint is installed
+          when: Version check runs
+          then: Version must be >= 2.0.0 (exit 1 if incompatible)
+        
+        - id: AC-ARCH-001-03
+          given: archlint version compatible
+          when: Architecture validation runs
+          then: archlint analyze --output sarif executes successfully
+        
+        - id: AC-ARCH-001-04
+          given: Baseline file exists (.architecture-baseline.json)
+          when: Architecture validation runs
+          then: Uses --baseline mode to check for new violations only
+      
+      architecture_rules:
+        - ARCH-001: Domain isolation (ERROR)
+        - ARCH-002: Application layer boundary (ERROR)
+        - ARCH-003: Presentation layer boundary (ERROR)
+        - ARCH-004: Infrastructure layer boundary (ERROR)
+        - ARCH-005: Cross-layer cycles (ERROR)
+    
+    - id: REQ-ARCH-002
+      description: Python projects must have architecture validation using Deply with version >= 0.8.0
+      priority: SHOULD
+      
+      acceptance_criteria:
+        - id: AC-ARCH-002-01
+          given: Python project with pyproject.toml and deply.yaml exists
+          when: Gate 9 runs in pre-commit
+          then: deply command is checked for availability (exit 1 if missing)
+        
+        - id: AC-ARCH-002-02
+          given: deply is installed
+          when: Version check runs
+          then: Version must be >= 0.8.0 (exit 1 if incompatible)
+        
+        - id: AC-ARCH-002-03
+          given: deply version compatible
+          when: Architecture validation runs
+          then: deply analyze executes successfully
+    
+    - id: REQ-ARCH-003
+      description: Go projects must have architecture validation using go test with Go version >= 1.18
+      priority: SHOULD
+      
+      acceptance_criteria:
+        - id: AC-ARCH-003-01
+          given: Go project with go.mod and architecture_test.go exists
+          when: Gate 9 runs in pre-commit
+          then: go test -run Architecture -v executes successfully
+        
+        - id: AC-ARCH-003-02
+          given: Go version check runs
+          when: Go toolchain version is detected
+          then: Go version must be >= 1.18 for generics support
+    
+    - id: REQ-ARCH-004
+      description: Java projects must have architecture validation using ArchUnit via Maven
+      priority: SHOULD
+      
+      acceptance_criteria:
+        - id: AC-ARCH-004-01
+          given: Java project with pom.xml and src/test/java/architecture exists
+          when: Gate 9 runs in pre-commit
+          then: mvn test -Dtest=*ArchitectureTest executes successfully
+        
+        - id: AC-ARCH-004-02
+          given: Maven check runs
+          when: mvn command is detected
+          then: mvn must be available (exit 1 if missing)
+    
+    - id: REQ-ARCH-005
+      description: C++ projects must be detected and blocked until Phase 5 implementation or explicit skip marker
+      priority: MUST
+      
+      acceptance_criteria:
+        - id: AC-ARCH-005-01
+          given: C++ project with .cpp/.hpp files exists
+          when: Gate 9 runs in pre-commit
+          then: has_cpp_files() detects C++ files correctly
+        
+        - id: AC-ARCH-005-02
+          given: C++ files detected AND no .skip-architecture-cpp marker
+          when: Gate 9 runs
+          then: BLOCKED with exit 1 and clear error message
+        
+        - id: AC-ARCH-005-03
+          given: C++ files detected AND .skip-architecture-cpp marker exists
+          when: Gate 9 runs
+          then: Warning message shown, gate passes (exit 0)
+        
+        - id: AC-ARCH-005-04
+          given: .skip-architecture-cpp file exists
+          when: User reviews the project
+          then: File should be committed to repo (dot prefix indicates config)
+    
+    - id: REQ-ARCH-006
+      description: Gate 9 must support architecture.yaml configuration with layer definitions
+      priority: MUST
+      
+      acceptance_criteria:
+        - id: AC-ARCH-006-01
+          given: architecture.yaml exists in project root
+          when: Gate 9 runs
+          then: Configuration is loaded and used for validation
+        
+        - id: AC-ARCH-006-02
+          given: No architecture.yaml exists
+          when: Gate 9 runs
+          then: Gate skips with warning message (exit 0)
+    
+    - id: REQ-ARCH-007
+      description: Gate 9 must output SARIF 2.1.0 format for IDE/GitHub Actions integration
+      priority: MUST
+      
+      acceptance_criteria:
+        - id: AC-ARCH-007-01
+          given: Architecture violations found
+          when: archlint runs with --output sarif
+          then: SARIF JSON file is generated
+        
+        - id: AC-ARCH-007-02
+          given: SARIF output file exists
+          when: File is parsed
+          then: SARIF follows 2.1.0 schema
+    
+    - id: REQ-ARCH-008
+      description: Gate 9 must support baseline/ratchet mode for gradual adoption
+      priority: SHOULD
+      
+      acceptance_criteria:
+        - id: AC-ARCH-008-01
+          given: .architecture-baseline.json exists
+          when: Gate 9 runs
+          then: Only new violations are reported
+        
+        - id: AC-ARCH-008-02
+          given: Baseline mode enabled in config
+          when: New violation appears
+          then: Gate BLOCKS with exit 1
+    
+    - id: REQ-ARCH-009
+      description: Gate 9 must skip documentation-only projects without source code
+      priority: MUST
+      
+      acceptance_criteria:
+        - id: AC-ARCH-009-01
+          given: Documentation-only project detected
+          when: Gate 9 runs
+          then: Gate skips with warning (exit 0)
+
   # ============================================================
   # Design Decisions (from Delphi Review)
   # ============================================================
@@ -237,6 +414,56 @@ specification:
       alternatives_considered:
         - "Relaxed mode - weak enforcement"
         - "Skip missing tools silently - no user notification"
+    
+    - id: DD-ARCH-001
+      description: Use archlint (@archlinter/cli) as primary TypeScript architecture validation tool
+      rationale: |
+        - Built-in SARIF output for IDE/GitHub Actions integration
+        - CLI-first design perfect for pre-commit hooks
+        - Baseline/diff mode for gradual adoption
+        - Rust implementation provides fast performance (~100ms)
+        - Configurable layer rules
+      alternatives_considered:
+        - ArchUnitTS: Test-based, requires Jest/Vitest setup, no SARIF
+        - dependency-cruiser: Strong cycle detection but SARIF requires custom plugin
+        - architecture-linter (wrong package): Different tool, npm package exists but low usage
+    
+    - id: DD-ARCH-002
+      description: Create separate Gate 9 instead of extending Gate 6 Principles
+      rationale: |
+        - Clear separation: Gate 6 checks code quality, Gate 9 checks architecture quality
+        - Principles are code-level rules (long functions, god classes)
+        - Architecture is module-level rules (layer boundaries, dependency direction)
+      alternatives_considered:
+        - Extend Gate 6: Would mix code-level and module-level checks
+    
+    - id: DD-ARCH-003
+      description: Set baseline.enabled = false by default for new projects
+      rationale: |
+        - New projects should start with zero violations mindset
+        - Baseline mode is ONLY for historical projects
+      alternatives_considered:
+        - Baseline enabled by default: Creates technical debt mindset
+    
+    - id: DD-ARCH-004
+      description: C++ projects use hard fail with explicit skip marker (.skip-architecture-cpp)
+      rationale: |
+        - Zero tolerance principle: unsupported languages must be explicitly acknowledged
+        - Dot prefix indicates config file (should be committed to repo)
+      alternatives_considered:
+        - Soft warning: Would violate zero tolerance principle
+    
+    - id: DD-ARCH-005
+      description: Add version checks for all language tools (TypeScript, Python, Go)
+      rationale: |
+        - CLI interfaces differ across versions
+        - Ensures compatibility before execution
+    
+    - id: DD-ARCH-006
+      description: Use robust version parsing with grep -oE and cut -d.
+      rationale: |
+        - Handles various version formats (v2.0.0, 2.0.0, archlint 2.0.0)
+        - More reliable than simple regex matching
 
   # ============================================================
   # API Contracts
@@ -374,6 +601,24 @@ specification:
       description: "Differential warning enforcement"
       mandatory: true
       condition: "Only when .warnings-baseline.json exists"
+    
+    - gate: 9
+      name: "Architecture Quality"
+      description: "Clean Architecture layer validation with archlint"
+      mandatory: true
+      condition: "Only when architecture.yaml exists"
+      tools:
+        typescript: "archlint (@archlinter/cli)"
+        python: "Deply"
+        go: "go test -run Architecture"
+        java: "ArchUnit (mvn test)"
+        cpp: "Phase 5 future work (hard fail + skip marker)"
+      rules:
+        - ARCH-001: Domain isolation (ERROR)
+        - ARCH-002: Application boundary (ERROR)
+        - ARCH-003: Presentation boundary (ERROR)
+        - ARCH-004: Infrastructure boundary (ERROR)
+        - ARCH-005: Cross-layer cycles (ERROR)
 
   # ============================================================
   # Success Metrics
@@ -416,3 +661,29 @@ specification:
         functions: 80
         lines: 80
         statements: 80
+      
+      architecture:
+        baselineFile: ".architecture-baseline.json"
+        baselineEnabled: false
+        configFile: "architecture.yaml"
+        outputFormat: "sarif"
+        layers:
+          domain: "src/domain/**"
+          application: "src/application/**"
+          infrastructure: "src/infrastructure/**"
+          presentation: "src/presentation/**"
+        rules:
+          ARCH-001: { enabled: true, severity: error }
+          ARCH-002: { enabled: true, severity: error }
+          ARCH-003: { enabled: true, severity: error }
+          ARCH-004: { enabled: true, severity: error }
+          ARCH-005: { enabled: true, severity: error }
+          ARCH-006: { enabled: false }
+          ARCH-007: { enabled: false }
+          ARCH-008: { enabled: false }
+          ARCH-009: { enabled: false }
+          ARCH-010: { enabled: false }
+          ARCH-011: { enabled: false }
+          ARCH-012: { enabled: false }
+          ARCH-013: { enabled: false }
+          ARCH-014: { enabled: false }

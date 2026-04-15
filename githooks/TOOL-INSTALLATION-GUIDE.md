@@ -66,6 +66,20 @@
 | **dart_code_linter** | Dart 复杂度 | Dart/Flutter | `dart pub add --dev dart_code_linter` |
 | **detekt** | Kotlin 复杂度 | Kotlin | Gradle plugin 或 CLI |
 
+### Architecture Quality (Gate 9)
+
+| 工具 | 用途 | 语言覆盖 | 安装命令 |
+|------|------|----------|----------|
+| **archlint** (@archlinter/cli) | Clean Architecture 层级检查 | TypeScript | `npm install -g @archlinter/cli` |
+| **Deply** | 依赖注入和层级分析 | Python | `pip install deply` |
+| **goarchtest** | Go 架构测试 | Go | `go get github.com/fdaines/go-archtest` |
+| **ArchUnit** | Java 架构约束 | Java | Maven/Gradle dependency |
+
+> **重要**: Gate 9 使用 `archlint` (来自 `@archlinter/cli` 包)，不是 `architecture-linter`
+> - `archlint` = Rust 实现，高性能，GitHub 130+ stars
+> - CLI 命令: `archlint` 或 `npx @archlinter/cli`
+> - 最低版本要求: 2.0.0
+
 ---
 
 ## 快速安装脚本
@@ -110,10 +124,43 @@ npm install -g @ast-grep/cli
 
 ### Cyclomatic Complexity (lizard)
 ```bash
-# Install lizard for function-level complexity analysis
 pip3 install --user lizard
-# Verify installation
 ~/.local/bin/lizard --version
+```
+
+### Architecture Quality (Gate 9)
+
+#### TypeScript 项目
+```bash
+npm install -g @archlinter/cli
+archlint --version
+```
+
+#### Python 项目
+```bash
+pip install deply
+deply --version
+```
+
+#### Go 项目
+```bash
+go get github.com/fdaines/go-archtest
+```
+
+#### Java 项目
+```bash
+# Maven
+# Add to pom.xml:
+# <dependency>
+#   <groupId>com.tngtech.archunit</groupId>
+#   <artifactId>archunit</artifactId>
+#   <version>1.0.0</version>
+#   <scope>test</scope>
+# </dependency>
+
+# Gradle
+# Add to build.gradle:
+# testImplementation 'com.tngtech.archunit:archunit:1.0.0'
 ```
 
 ---
@@ -148,6 +195,30 @@ ast-grep --version && echo "✅ ast-grep installed"
 ~/.local/bin/lizard -C 10 -w src/ && echo "✅ complexity within threshold"
 ```
 
+### Architecture Quality (Gate 9) 验证
+
+#### TypeScript
+```bash
+archlint --version && echo "✅ archlint installed (need >= 2.0.0)"
+# 或使用 npx
+npx @archlinter/cli --version
+```
+
+#### Python
+```bash
+deply --version && echo "✅ deply installed (need >= 0.5.0)"
+```
+
+#### Go
+```bash
+go test -run Architecture ./... && echo "✅ go architecture tests passing"
+```
+
+#### Java
+```bash
+mvn test -Dtest=*ArchitectureTest && echo "✅ ArchUnit tests passing"
+```
+
 ---
 
 ## Clean Code / SOLID 原则检查覆盖
@@ -164,11 +235,12 @@ ast-grep --version && echo "✅ ast-grep installed"
 
 | 语言 | 核心工具 | 安装命令 |
 |------|---------|----------|
-| TypeScript | tsc + ESLint + Jest | `npm install -D typescript eslint jest` |
-| Python | Ruff + mypy + pytest | `pip install ruff mypy pytest pytest-cov` |
-| Go | golangci-lint | `go install github.com/golangci/golangci-lint/cmd/golangci-lint@latest` |
+| TypeScript | tsc + ESLint + Jest + archlint | `npm install -D typescript eslint jest && npm install -g @archlinter/cli` |
+| Python | Ruff + mypy + pytest + Deply | `pip install ruff mypy pytest pytest-cov deply` |
+| Go | golangci-lint + goarchtest | `go install github.com/golangci/golangci-lint/cmd/golangci-lint@latest && go get github.com/fdaines/go-archtest` |
 | Dart | dart analyze + dart test | `brew install dart` |
 | Flutter | flutter analyze + flutter test | [官网安装](https://docs.flutter.dev/get-started/install) |
+| Java | ArchUnit | Maven/Gradle dependency |
 
 **性能原则**: 选择最快的代码检查工具
 - Dart 项目优先使用 `dart analyze`（不依赖 Flutter 框架，启动更快）
