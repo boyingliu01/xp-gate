@@ -1,0 +1,200 @@
+# Architecture Configuration for Gate 9
+# Version: 1
+# 
+# This file defines Clean Architecture layer boundaries and rules.
+# Place this file in your project root to enable Gate 9 architecture validation.
+#
+# Installation:
+#   npm install -g @archlinter/cli
+#   # or use npx
+#   npx @archlinter/cli check --config architecture.yaml
+
+version: 1
+
+# Layer definitions (project-specific)
+# Customize these patterns to match your project structure
+layers:
+  domain:
+    pattern: "src/domain/**"
+    description: "Core business logic, entities, and domain rules"
+    allowedImports: ["src/shared/**"]
+    forbiddenImports: ["src/infrastructure/**", "src/application/**", "src/presentation/**"]
+    
+  application:
+    pattern: "src/application/**"
+    description: "Application services, use cases, and business workflows"
+    allowedImports: ["src/domain/**", "src/shared/**"]
+    forbiddenImports: ["src/infrastructure/**", "src/presentation/**"]
+    
+  infrastructure:
+    pattern: "src/infrastructure/**"
+    description: "External services, databases, APIs, and technical implementations"
+    allowedImports: ["src/application/**", "src/domain/**", "src/shared/**"]
+    forbiddenImports: ["src/presentation/**"]
+    
+  presentation:
+    pattern: "src/presentation/**"
+    description: "UI components, controllers, and user-facing interfaces"
+    allowedImports: ["src/application/**", "src/domain/**", "src/shared/**"]
+    forbiddenImports: []
+
+# Rule activation and severity
+# 
+# Severity levels:
+#   - error: Blocks commit, must be fixed immediately
+#   - warning: Shows warning but allows commit
+#   - info: Informational only, no blocking
+#
+# Architecture Rules:
+#   ARCH-001: Domain isolation - Domain must not import from outer layers
+#   ARCH-002: Application boundary - Application must not import Infrastructure/Presentation
+#   ARCH-003: Presentation boundary - Presentation must not import Domain directly
+#   ARCH-004: Infrastructure boundary - Infrastructure must not import Presentation
+#   ARCH-005: Cross-layer cycles - No circular dependencies across layers
+#   ARCH-006: Within-layer cycles - No circular dependencies within same layer
+#   ARCH-007: Module-level cycles - No circular dependencies between modules
+#   ARCH-008: Repository location - Repositories must be in Infrastructure layer
+#   ARCH-009: Service location - Domain services must be in Domain layer
+#   ARCH-010: Controller location - Controllers must be in Presentation layer
+#   ARCH-011: LCOM threshold - Lack of Cohesion of Methods metric
+#   ARCH-012: CBO threshold - Coupling Between Objects metric
+#   ARCH-013: Fan-out threshold - Number of outgoing dependencies
+#   ARCH-014: Fan-in threshold - Number of incoming dependencies
+
+rules:
+  ARCH-001:  # Domain isolation
+    enabled: true
+    severity: error
+    description: "Domain layer must not import from Infrastructure/Application/Presentation"
+    
+  ARCH-002:  # Application boundary
+    enabled: true
+    severity: error
+    description: "Application layer must not import from Infrastructure/Presentation"
+    
+  ARCH-003:  # Presentation to Domain boundary
+    enabled: true
+    severity: error
+    description: "Presentation layer must not import from Domain directly (must go through Application)"
+    
+  ARCH-004:  # Infrastructure boundary
+    enabled: true
+    severity: error
+    description: "Infrastructure layer must not import from Presentation"
+    
+  ARCH-005:  # Cross-layer cycles
+    enabled: true
+    severity: error
+    description: "No circular dependencies across different layers"
+    
+  ARCH-006:  # Within-layer cycles
+    enabled: false  # Disable for gradual adoption
+    severity: warning
+    description: "No circular dependencies within the same layer"
+    
+  ARCH-007:  # Module-level cycles
+    enabled: false  # Advanced, optional
+    severity: warning
+    description: "No circular dependencies between modules"
+    
+  ARCH-008:  # Repository location
+    enabled: true
+    severity: error
+    description: "Repository interfaces in Domain, implementations in Infrastructure"
+    
+  ARCH-009:  # Domain service location
+    enabled: true
+    severity: error
+    description: "Domain services must reside in Domain layer"
+    
+  ARCH-010:  # Controller location
+    enabled: true
+    severity: error
+    description: "Controllers/Handlers must reside in Presentation layer"
+
+  # Coupling metrics (optional, advanced)
+  ARCH-011:  # LCOM
+    enabled: false
+    severity: warning
+    threshold: 0.8
+    description: "Lack of Cohesion of Methods - high values indicate god classes"
+    
+  ARCH-012:  # CBO
+    enabled: false
+    severity: warning
+    threshold: 10
+    description: "Coupling Between Objects - high values indicate tight coupling"
+    
+  ARCH-013:  # Fan-out
+    enabled: false
+    severity: warning
+    threshold: 7
+    description: "Number of outgoing dependencies"
+    
+  ARCH-014:  # Fan-in
+    enabled: false
+    severity: info
+    threshold: 20
+    description: "Number of incoming dependencies"
+
+# Baseline for gradual adoption (like Gate 8 Boy Scout Rule)
+# 
+# IMPORTANT: New projects should start with enabled: false
+# Baseline mode is ONLY for historical projects with existing violations
+#
+# How it works:
+#   1. Run initial analysis to capture existing violations
+#   2. Store violations in .architecture-baseline.json
+#   3. Future commits check against baseline - new violations are blocked
+#   4. Existing violations can be fixed incrementally
+#
+# To enable baseline mode for existing project:
+#   npx @archlinter/cli baseline --init
+baseline:
+  enabled: false  # Default: false for new projects
+  file: ".architecture-baseline.json"
+  mode: "ratchet"  # Allow existing violations, block new ones
+
+# Output configuration
+output:
+  format: sarif  # sarif | json | console
+  file: "architecture-report.sarif.json"
+  
+  # SARIF format is recommended for:
+  #   - GitHub Actions integration
+  #   - VS Code SARIF viewer extension
+  #   - Consistent with Gate 6 Principles output
+
+# Integration settings
+integration:
+  # Skip Gate 9 for documentation-only projects
+  # (Projects with only .md, .txt, .rst files)
+  documentationOnlySkip: true
+  
+  # Zero tolerance - block commit if architecture tool is missing
+  # Set to false to allow commits without tool (WARNING mode)
+  toolRequired: true
+  
+  # Language-specific settings
+  languages:
+    typescript:
+      tool: "@archlinter/cli"
+      minVersion: "2.0.0"
+      
+    python:
+      tool: "deply"
+      minVersion: "0.5.0"
+      
+    go:
+      tool: "go test"  # Uses goarchtest
+      minVersion: ""  # Built-in
+      
+    java:
+      tool: "archunit"
+      minVersion: "1.0.0"
+      
+    cpp:
+      # C++ is not supported in Phase 1
+      # Requires explicit skip marker: .skip-architecture-cpp
+      supported: false
+      skipMarker: ".skip-architecture-cpp"

@@ -1811,6 +1811,167 @@ else
   echo "✅ Skipped (documentation-only project)."
 fi
 
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+# Gate 9: Architecture Quality Validation
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+echo ""
+echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+echo "  Gate 9: Architecture Quality"
+echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+
+# Documentation-only projects skip this gate
+if is_documentation_only; then
+  echo "⚠️  Documentation-only project: Skipping architecture gate"
+else
+  # Check if architecture config exists
+  if [ ! -f "architecture.yaml" ] && [ ! -f ".architecturerc" ]; then
+    echo "⚠️  No architecture configuration found: Skipping"
+    echo "   Create architecture.yaml to enable this gate"
+  else
+    # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+    # TypeScript Projects (archlint)
+    # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+    if [ -f "tsconfig.json" ]; then
+      echo "📋 TypeScript: Running archlint (@archlinter/cli)"
+      
+      # Check tool availability (zero tolerance)
+      if ! command -v archlint &> /dev/null; then
+        echo "❌ BLOCKED: archlint not installed"
+        echo "   Install: npm install -g @archlinter/cli"
+        echo "   Or: npm install @archlinter/cli --save-dev"
+        echo "   Note: Package name is @archlinter/cli, NOT architecture-linter"
+        exit 1
+      fi
+      
+      # Check version compatibility
+      # archlint --version output format: e.g., "archlint v2.0.0" or "2.0.0"
+      ARCHLINT_VERSION=$(archlint --version 2>/dev/null | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' | head -1)
+      if [ -z "$ARCHLINT_VERSION" ]; then
+        echo "⚠️  Warning: Could not parse archlint version, proceeding anyway"
+      else
+        # Parse major version
+        MAJOR_VERSION=$(echo "$ARCHLINT_VERSION" | cut -d. -f1)
+        if [ "$MAJOR_VERSION" -lt 2 ]; then
+          echo "❌ BLOCKED: archlint version incompatible"
+          echo "   Current: $ARCHLINT_VERSION"
+          echo "   Required: >= 2.0.0"
+          echo "   Update: npm update @archlinter/cli"
+          exit 1
+        fi
+      fi
+      
+      # Run with baseline mode if configured
+      if [ -f ".architecture-baseline.json" ]; then
+        archlint analyze --baseline .architecture-baseline.json --output sarif || exit 1
+      else
+        archlint analyze --output sarif || exit 1
+      fi
+      
+      echo "✅ TypeScript architecture validation passed"
+    fi
+    
+    # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+    # Python Projects (Deply)
+    # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+    if [ -f "pyproject.toml" ] && [ -f "deply.yaml" ]; then
+      echo "📋 Python: Running Deply"
+      
+      if ! command -v deply &> /dev/null; then
+        echo "❌ BLOCKED: deply not installed"
+        echo "   Install: pip install deply"
+        exit 1
+      fi
+      
+      # Check version compatibility (minimum 0.8.0)
+      DEPLY_VERSION=$(deply --version 2>/dev/null | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' | head -1)
+      if [ -n "$DEPLY_VERSION" ]; then
+        DEPLY_MAJOR=$(echo "$DEPLY_VERSION" | cut -d. -f1)
+        DEPLY_MINOR=$(echo "$DEPLY_VERSION" | cut -d. -f2)
+        # Accept versions >= 0.8.0
+        if [ "$DEPLY_MAJOR" -eq 0 ] && [ "$DEPLY_MINOR" -lt 8 ]; then
+          echo "❌ BLOCKED: deply version incompatible"
+          echo "   Current: $DEPLY_VERSION"
+          echo "   Required: >= 0.8.0"
+          echo "   Update: pip install --upgrade deply"
+          exit 1
+        fi
+      fi
+      
+      deply analyze || exit 1
+      echo "✅ Python architecture validation passed"
+    fi
+    
+    # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+    # Go Projects (go test)
+    # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+    if [ -f "go.mod" ] && [ -f "architecture_test.go" ]; then
+      echo "📋 Go: Running architecture tests"
+      
+      # Go doesn't have a standalone tool, uses go test
+      # Verify go toolchain version (minimum Go 1.18 for generics support)
+      GO_VERSION=$(go version 2>/dev/null | grep -oE 'go[0-9]+\.[0-9]+' | sed 's/go//')
+      if [ -n "$GO_VERSION" ]; then
+        GO_MAJOR=$(echo "$GO_VERSION" | cut -d. -f1)
+        GO_MINOR=$(echo "$GO_VERSION" | cut -d. -f2)
+        if [ "$GO_MAJOR" -lt 1 ] || ([ "$GO_MAJOR" -eq 1 ] && [ "$GO_MINOR" -lt 18 ]); then
+          echo "❌ BLOCKED: Go version incompatible"
+          echo "   Current: go$GO_VERSION"
+          echo "   Required: >= go1.18"
+          exit 1
+        fi
+      fi
+      
+      go test -run Architecture -v || exit 1
+      echo "✅ Go architecture validation passed"
+    fi
+    
+    # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+    # Java Projects (ArchUnit)
+    # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+    if [ -f "pom.xml" ] && [ -d "src/test/java/architecture" ]; then
+      echo "📋 Java: Running ArchUnit tests"
+      
+      # Maven doesn't need explicit version check - pom.xml controls versions
+      # But verify maven is available
+      if ! command -v mvn &> /dev/null; then
+        echo "❌ BLOCKED: mvn not installed"
+        echo "   Install: Apache Maven"
+        exit 1
+      fi
+      
+      mvn test -Dtest=*ArchitectureTest || exit 1
+      echo "✅ Java architecture validation passed"
+    fi
+    
+    # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+    # C++ Projects (Phase 5 - Future Work)
+    # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+    # Helper function to detect C++ files
+    has_cpp_files() {
+      find . -type f \( -name "*.cpp" -o -name "*.cxx" -o -name "*.cc" -o -name "*.hpp" -o -name "*.h" \) \
+        -not -path "*/node_modules/*" -not -path "*/.git/*" | head -1 | grep -q .
+    }
+    
+    if has_cpp_files; then
+      # Use dot prefix to indicate this is a config file (should be committed)
+      if [ -f ".skip-architecture-cpp" ]; then
+        echo "⚠️  C++ architecture validation: Explicitly skipped"
+        echo "   Reason: Gate 9 does not support C++ yet (Phase 5 future work)"
+        echo "   Skip marker: .skip-architecture-cpp (committed to repo)"
+        echo "   To enable: Remove .skip-architecture-cpp and implement custom checker"
+      else
+        echo "❌ BLOCKED: C++ project detected but Gate 9 not implemented"
+        echo "   C++ requires custom solution - see src/principles/adapters/cpp.ts"
+        echo "   Options:"
+        echo "     1. Add .skip-architecture-cpp marker file (commit to repo)"
+        echo "     2. Implement custom C++ layer checker (Phase 5 roadmap)"
+        echo "     3. Wait for Phase 5 implementation"
+        exit 1
+      fi
+    fi
+  fi
+fi
+
 echo ""
 echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
 echo "   ✅ ALL GATES PASSED"
