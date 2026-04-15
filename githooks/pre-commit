@@ -1671,9 +1671,28 @@ if [ "$PROJECT_LANG" != "documentation-only" ]; then
   if [ -n "$CC_FILES" ]; then
     echo "Checking complexity for: $CC_FILES"
     
-    # Run lizard with threshold
-    CC_OUTPUT=$($LIZARD_CMD -C $CCN_THRESHOLD -w $CC_FILES 2>&1)
+    # Run lizard with CCN threshold only (lizard has no -w parameter)
+    # Valid params: -C CCN (complexity), -L LENGTH (function length)
+    CC_OUTPUT=$($LIZARD_CMD -C $CCN_THRESHOLD $CC_FILES 2>&1)
     CC_EXIT=$?
+    
+    # If lizard command failed (wrong params or tool error), block commit
+    if [ "$CC_EXIT" -ne 0 ]; then
+      echo ""
+      echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+      echo "   ❌ LIZARD COMMAND FAILED - COMMIT BLOCKED"
+      echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+      echo ""
+      echo "lizard command execution failed with exit code $CC_EXIT"
+      echo ""
+      echo "Output:"
+      echo "$CC_OUTPUT"
+      echo ""
+      echo "This is a critical bug - complexity check must not be skipped."
+      echo "Ensure lizard is correctly installed and invoked."
+      echo ""
+      exit 1
+    fi
     
     # Count warnings (CCN > threshold)
     CC_WARNINGS=$(echo "$CC_OUTPUT" | grep -c "warning:" || echo "0")
@@ -1820,7 +1839,7 @@ echo "  Gate 9: Architecture Quality"
 echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
 
 # Documentation-only projects skip this gate
-if is_documentation_only; then
+if [ "$PROJECT_LANG" = "documentation-only" ]; then
   echo "⚠️  Documentation-only project: Skipping architecture gate"
 else
   # Check if architecture config exists
@@ -1844,28 +1863,19 @@ else
       fi
       
       # Check version compatibility
-      # archlint --version output format: e.g., "archlint v2.0.0" or "2.0.0"
+      # archlint --version output format: e.g., "archlint 0.16.0" or "0.16.0"
       ARCHLINT_VERSION=$(archlint --version 2>/dev/null | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' | head -1)
       if [ -z "$ARCHLINT_VERSION" ]; then
         echo "⚠️  Warning: Could not parse archlint version, proceeding anyway"
       else
-        # Parse major version
-        MAJOR_VERSION=$(echo "$ARCHLINT_VERSION" | cut -d. -f1)
-        if [ "$MAJOR_VERSION" -lt 2 ]; then
-          echo "❌ BLOCKED: archlint version incompatible"
-          echo "   Current: $ARCHLINT_VERSION"
-          echo "   Required: >= 2.0.0"
-          echo "   Update: npm update @archlinter/cli"
-          exit 1
-        fi
+        echo "   archlint version: $ARCHLINT_VERSION"
+        # archlint current stable version is 0.16.x, no strict version requirement yet
+        # Will add version check when major breaking changes occur
       fi
       
-      # Run with baseline mode if configured
-      if [ -f ".architecture-baseline.json" ]; then
-        archlint analyze --baseline .architecture-baseline.json --output sarif || exit 1
-      else
-        archlint analyze --output sarif || exit 1
-      fi
+      # Run archlint scan with SARIF output
+      # CLI: archlint [-f format] [-r report_file] [path]
+      archlint -f sarif -r architecture-report.sarif.json . 2>&1 || exit 1
       
       echo "✅ TypeScript architecture validation passed"
     fi
