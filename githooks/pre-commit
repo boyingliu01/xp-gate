@@ -1838,14 +1838,60 @@ echo "━━━━━━━━━━━━━━━━━━━━━━━━�
 echo "  Gate 9: Architecture Quality"
 echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
 
-# Documentation-only projects skip this gate
+# Documentation-only projects skip this gate (intentional: pure documentation has no architectural layers)
 if [ "$PROJECT_LANG" = "documentation-only" ]; then
   echo "⚠️  Documentation-only project: Skipping architecture gate"
+  echo "   Reason: Pure documentation projects have no architectural layer concepts"
 else
-  # Check if architecture config exists
+  # Check if architecture config exists - BLOCK if missing (zero tolerance principle)
+  # This aligns with Gate 1-8 behavior: missing required config = BLOCK
   if [ ! -f "architecture.yaml" ] && [ ! -f ".architecturerc" ]; then
-    echo "⚠️  No architecture configuration found: Skipping"
-    echo "   Create architecture.yaml to enable this gate"
+    # Use ANSI colors for better UX (red for blocking, yellow for guidance)
+    if [ -t 1 ]; then
+      RED='\033[31m'
+      YELLOW='\033[33m'
+      NC='\033[0m' # No Color
+    else
+      RED=''
+      YELLOW=''
+      NC=''
+    fi
+    
+    echo "${RED}❌ BLOCKED${NC}: Gate 9 requires architecture.yaml or .architecturerc"
+    echo "   Gate 9 enforces Clean Architecture layer boundaries (zero tolerance principle)"
+    echo ""
+    echo "   Required fields in configuration:"
+    echo "     - version: 1"
+    echo "     - layers: (at least one layer definition)"
+    echo "     - rules: (optional, defaults to ARCH-001-010 enabled)"
+    echo ""
+    echo "   Quick fix options:"
+    echo ""
+    echo "   1. Download template from GitHub:"
+    echo "      curl -O https://raw.githubusercontent.com/boyingliu01/xp-workflow-automation/main/architecture.yaml"
+    echo ""
+    echo "   2. Create minimal config manually:"
+    echo "      cat > architecture.yaml << 'EOF'"
+    echo "      version: 1"
+    echo "      layers:"
+    echo "        domain:"
+    echo "          pattern: \"src/domain/**\""
+    echo "      EOF"
+    echo ""
+    echo "   3. Use JSON format (.architecturerc):"
+    echo "      cat > .architecturerc << 'EOF'"
+    echo "      {"
+    echo "        \"version\": 1,"
+    echo "        \"layers\": {"
+    echo "          \"domain\": { \"pattern\": \"src/domain/**\" }"
+    echo "        }"
+    echo "      }"
+    echo "      EOF"
+    echo ""
+    echo "   Documentation: githooks/TOOL-INSTALLATION-GUIDE.md"
+    echo "   Migration: Existing projects must add config file before first commit after upgrade"
+    echo ""
+    exit 1
   else
     # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
     # TypeScript Projects (archlint)

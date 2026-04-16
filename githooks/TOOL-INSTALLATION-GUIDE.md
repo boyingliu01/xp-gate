@@ -221,6 +221,118 @@ mvn test -Dtest=*ArchitectureTest && echo "✅ ArchUnit tests passing"
 
 ---
 
+## architecture.yaml 配置指南 (Gate 9)
+
+### ⚠️ 重要提示
+
+**Gate 9 现在遵循零容忍原则**：如果 `architecture.yaml` 或 `.architecturerc` 缺失，commit 将被 **阻塞**。
+
+这与 Gate 1-8 的行为一致（工具缺失 = 阻塞）。
+
+### 必需字段
+
+| 字段 | 说明 | 是否必需 |
+|------|------|---------|
+| `version` | 配置版本，当前为 `1` | **必需** |
+| `layers` | 层级定义，至少定义一个 layer | **必需** |
+| `rules` | 架构规则配置 | 可选（默认启用 ARCH-001-010） |
+
+### 最小配置示例
+
+#### YAML 格式 (architecture.yaml)
+
+```yaml
+version: 1
+layers:
+  domain:
+    pattern: "src/domain/**"
+```
+
+#### JSON 格式 (.architecturerc)
+
+```json
+{
+  "version": 1,
+  "layers": {
+    "domain": {
+      "pattern": "src/domain/**"
+    }
+  }
+}
+```
+
+### 逐步配置策略
+
+**第一步**：创建最小配置（上述示例）
+
+**第二步**：添加更多层级
+
+```yaml
+version: 1
+layers:
+  domain:
+    pattern: "src/domain/**"
+    description: "Core business logic"
+    allowedImports: ["src/shared/**"]
+    forbiddenImports: ["src/infrastructure/**", "src/application/**"]
+  
+  application:
+    pattern: "src/application/**"
+    description: "Application services"
+    allowedImports: ["src/domain/**", "src/shared/**"]
+    forbiddenImports: ["src/infrastructure/**", "src/presentation/**"]
+  
+  infrastructure:
+    pattern: "src/infrastructure/**"
+    description: "External services"
+    allowedImports: ["src/application/**", "src/domain/**", "src/shared/**"]
+    forbiddenImports: ["src/presentation/**"]
+  
+  presentation:
+    pattern: "src/presentation/**"
+    description: "UI components"
+    allowedImports: ["src/application/**", "src/domain/**", "src/shared/**"]
+```
+
+**第三步**：启用特定规则
+
+```yaml
+rules:
+  ARCH-001:  # Domain isolation
+    enabled: true
+    severity: error
+  
+  ARCH-002:  # Application boundary
+    enabled: true
+    severity: error
+  
+  ARCH-005:  # Cross-layer cycles
+    enabled: true
+    severity: error
+```
+
+### 获取完整模板
+
+```bash
+# 下载完整模板
+curl -O https://raw.githubusercontent.com/boyingliu01/xp-workflow-automation/main/architecture.yaml
+```
+
+### 迁移指南（Breaking Change）
+
+**升级后首次 commit 将被阻塞**：
+
+1. 这是故意设计（零容忍原则）
+2. 无绕过标志（与 Gate 1-8 一致）
+3. 需要创建 architecture.yaml 或 .architecturerc
+
+**CI/CD 环境**：
+- CI 必须同样有配置文件
+- 建议：将 architecture.yaml 加入 CI setup scripts
+- 紧急绕过：`skip_gate_9=true` 环境变量（仅记录日志）
+
+---
+
 ## Clean Code / SOLID 原则检查覆盖
 
 | 检查项 | TypeScript | Python | Go | Dart | Flutter |

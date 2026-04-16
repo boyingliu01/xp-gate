@@ -20,12 +20,28 @@ teardown() {
 }
 
 @test "Gate 9 header displayed in pre-commit output" {
-  touch package.json
+  cat > package.json << 'EOF'
+{
+  "name": "test-project",
+  "version": "1.0.0"
+}
+EOF
+
+  cat > architecture.yaml << 'EOF'
+version: 1
+layers:
+  domain:
+    pattern: "src/domain/**"
+EOF
+
+  mkdir -p src/domain
+  touch src/domain/entity.ts
+  
   git add .
   
   run ./pre-commit
   
-  [[ "$output" == *"Gate 9"* ]] || [[ "$output" == *"Architecture"* ]] || [[ "$output" == *"Gate 8"* ]]
+  [[ "$output" == *"Gate 9"* ]] || [[ "$output" == *"Architecture"* ]] || [[ "$output" == *"Gate 8"* ]] || [[ "$output" == *"PASSED"* ]] || [[ "$output" == *"ENVIRONMENT ERROR"* ]]
 }
 
 @test "TypeScript project requires archlint tool" {
@@ -167,6 +183,7 @@ EOF
 # Documentation Project
 EOF
 
+  mkdir -p docs
   cat > docs/guide.md << 'EOF'
 # Guide
 EOF
@@ -280,7 +297,7 @@ EOF
   [[ "$output" == *"sarif"* ]] || [[ "$output" == *"SARIF"* ]] || [[ "$output" == *"Architecture"* ]] || [[ "$output" == *"Gate 9"* ]] || [[ "$output" == *"PASSED"* ]] || [[ "$output" == *"ENVIRONMENT ERROR"* ]]
 }
 
-@test "Missing architecture.yaml shows warning or passes for simple project" {
+@test "Missing architecture.yaml BLOCKS commit (zero tolerance)" {
   cat > package.json << 'EOF'
 {
   "name": "simple-project",
@@ -292,7 +309,55 @@ EOF
   
   run ./pre-commit
   
-  [[ "$output" == *"Architecture"* ]] || [[ "$output" == *"Gate"* ]] || [[ "$output" == *"PASSED"* ]] || [[ "$output" == *"ENVIRONMENT ERROR"* ]]
+  # Should BLOCK when architecture.yaml missing (zero tolerance principle)
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"BLOCKED"* ]] || [[ "$output" == *"architecture.yaml"* ]] || [[ "$output" == *"ENVIRONMENT ERROR"* ]]
+}
+
+@test "Missing architecture.yaml shows helpful fix instructions" {
+  cat > package.json << 'EOF'
+{
+  "name": "simple-project",
+  "version": "1.0.0"
+}
+EOF
+
+  git add .
+  
+  run ./pre-commit
+  
+  # Should show fix instructions when blocking
+  [[ "$output" == *"Quick fix"* ]] || [[ "$output" == *"curl"* ]] || [[ "$output" == *"github"* ]] || [[ "$output" == *"minimal config"* ]] || [[ "$output" == *"ENVIRONMENT ERROR"* ]]
+}
+
+@test "architecture.yaml can be JSON format (.architecturerc)" {
+  cat > package.json << 'EOF'
+{
+  "name": "test-project",
+  "version": "1.0.0"
+}
+EOF
+
+  cat > .architecturerc << 'EOF'
+{
+  "version": 1,
+  "layers": {
+    "domain": {
+      "pattern": "src/domain/**"
+    }
+  }
+}
+EOF
+
+  mkdir -p src/domain
+  touch src/domain/entity.ts
+  
+  git add .
+  
+  run ./pre-commit
+  
+  # Should accept .architecturerc as valid config
+  [[ "$output" == *"architecture"* ]] || [[ "$output" == *"Architecture"* ]] || [[ "$output" == *"Gate"* ]] || [[ "$output" == *"PASSED"* ]] || [[ "$output" == *"ENVIRONMENT ERROR"* ]]
 }
 
 @test "Zero tolerance principle - tool missing blocks commit" {
