@@ -16,6 +16,22 @@ cp githooks/pre-push .git/hooks/pre-push
 chmod +x .git/hooks/pre-commit .git/hooks/pre-push
 ```
 
+## Delphi Review Setup
+
+The delphi-review skill requires configuration before use. It is **not** plug-and-play out of the box — you must define your own models.
+
+```bash
+# 1. Copy the template
+cp skills/delphi-review/.delphi-config.json.example .delphi-config.json
+
+# 2. Add agent definitions to your opencode.json
+#    See skills/delphi-review/opencode.json.delphi.example for the template
+
+# 3. Replace YOUR_PROVIDER/YOUR_MODEL with your actual provider and model names
+```
+
+See [skills/delphi-review/INSTALL.md](skills/delphi-review/INSTALL.md) for the full setup guide.
+
 ## Quality Gates
 
 All commits must pass the 8-gate quality system:

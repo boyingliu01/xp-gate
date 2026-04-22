@@ -223,12 +223,16 @@ Session B (Navigator Phase 1):
 
 ## Agent 配置
 
-| 角色 | Agent | 模型 | Skills |
-|------|-------|------|--------|
-| Driver | `build` | GLM-5 | coding-standards, tdd-workflow |
-| Navigator Phase 1 | `oracle` | MiniMax M2.5 | review |
-| Navigator Phase 2 | `oracle` | MiniMax M2.5 | review, security-review |
-| Arbiter | `oracle` | GLM-5 | - |
+xp-consensus 使用以下 agent 角色配置：
+
+| 角色 | Agent | 技能加载 |
+|------|-------|---------|
+| Driver | `build` | coding-standards, tdd-workflow |
+| Navigator Phase 1 | `oracle` | review |
+| Navigator Phase 2 | `oracle` | review, security-review |
+| Arbiter | `oracle` | - |
+
+> 模型选择由各用户在 `opencode.json` 中自行配置。
 
 ---
 
@@ -240,8 +244,8 @@ Session B (Navigator Phase 1):
 BEFORE Round 1:
   ├─ 检查 build agent 可用性
   ├─ 检查 oracle agent 可用性
-  ├─ 检查模型 API 连通性 (Qwen3.5-Plus, MiniMax M2.5)
-  └─ 检查 Gate 1 工具可用性 (tsc/ESLint/Ruff/golangci-lint)
+  ├─ 检查配置的模型 API 连通性
+  └─ 检查 Gate 1 工具可用性 (tsc/ESLint/Ruff/golangci-lint) Gate 1 工具可用性 (tsc/ESLint/Ruff/golangci-lint)
 
 IF 任何检查失败:
   → BLOCK 共识流程

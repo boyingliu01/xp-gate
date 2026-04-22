@@ -77,17 +77,39 @@ description: "Delphi共识评审：多轮匿名评审直到专家达成一致意
 | `experts: 2` | 2位 (默认) | 代码变更、小型设计 |
 | `experts: 3` | 3位 | 架构决策、需求文档、关键设计 |
 
-### 模型分配
+### 专家角色
 
-| 专家角色 | 2专家模式 | 3专家模式 |
-|---------|----------|----------|
-| Expert A | Qwen3.5-Plus | Qwen3.5-Plus |
-| Expert B | MiniMax M2.5 | Kimi K2.5 |
-| Expert C | - | MiniMax M2.5 |
+Delphi 评审需要 **2-3 位不同模型的 AI 专家**，避免同源偏见（同一厂商的模型可能有一致的盲区）。每个专家角色关注不同的评审视角：
 
-> **模型选择理由**:
-> - **Expert A (Qwen3.5-Plus)**: 阿里旗舰模型，推理能力强，适合架构和需求评审
-> - **Expert B (MiniMax M2.5/Kimi K2.5)**: 不同视角，避免同源偏见
+| 角色 | 视角 | 推荐特征 |
+|------|------|----------|
+| **Expert A (Lead)** | 架构 + 需求对齐 + 系统设计 | 推理能力强，适合高层分析 |
+| **Expert B (Technical)** | 实现细节 + 代码正确性 + 边界情况 | 代码理解能力强，适合技术审查 |
+| **Expert C (Feasibility)** *(3专家模式)* | 可行性 + 风险评估 + 执行复杂度 | 综合分析能力强，能发现实践风险 |
+
+> **⚠️ 重要**：至少选择 **两家不同厂商** 的模型。同一厂商的同源模型可能导致一致的盲点。
+
+### 模型映射配置
+
+Skill 本身不绑定具体模型。安装者需要在自己的 OpenCode 配置中声明模型映射：
+
+**步骤 1**：复制 `.delphi-config.json.example` 为 `.delphi-config.json`
+
+**步骤 2**：在 `opencode.json` 的 `agent` 区块添加 `delphi-reviewer-*` 子 agent
+
+**步骤 3**：将 `YOUR_PROVIDER/YOUR_MODEL` 替换为自己可用的模型
+
+详见 [INSTALL.md](./INSTALL.md) 完整安装指南。
+
+### 推荐配置示例
+
+以下为作者自用配置，仅作参考。安装者应根据自身 provider 替换：
+
+| 专家角色 | 作者配置 | 替代建议 |
+|---------|---------|---------|
+| Expert A (Lead) | Qwen3.5-Plus | 任意强推理模型（Claude、GPT-4、Gemini 等） |
+| Expert B (Technical) | Kimi K2.5 | 任意代码理解强的模型 |
+| Expert C (Feasibility) | MiniMax M2.5 | 任意综合分析强的模型 |
 
 ### 共识阈值
 
@@ -590,23 +612,23 @@ User: "评审这个需求文档: [文档]"
 
 → 配置: experts=3 (需求文档重要)
 
-→ Round 1: GLM-5, Kimi, MiniMax 独立评审
-   - GLM-5: REQUEST_CHANGES (2 Critical, 3 Major)
-   - Kimi: REQUEST_CHANGES (1 Critical, 2 Major)
-   - MiniMax: APPROVED (0 Critical, 1 Major)
+→ Round 1: Expert A/B/C 独立评审（使用各自配置的模型）
+   - Expert A: REQUEST_CHANGES (2 Critical, 3 Major)
+   - Expert B: REQUEST_CHANGES (1 Critical, 2 Major)
+   - Expert C: APPROVED (0 Critical, 1 Major)
 
 → 共识检查: 1/3 APPROVED, 问题共识 60%
 → 状态: 需要继续
 
 → Round 2: 交换意见
-   - GLM-5 看到 Kimi 和 MiniMax 的评审
-   - Kimi 看到 GLM-5 和 MiniMax 的评审
-   - MiniMax 看到 GLM-5 和 Kimi 的评审
-   
+   - Expert A 看到 Expert B 和 C 的评审
+   - Expert B 看到 Expert A 和 C 的评审
+   - Expert C 看到 Expert A 和 B 的评审
+
 → Round 2 结果:
-   - GLM-5: REQUEST_CHANGES (维持)
-   - Kimi: REQUEST_CHANGES (维持)
-   - MiniMax: REQUEST_CHANGES (调整为同意 Critical 1)
+   - Expert A: REQUEST_CHANGES (维持)
+   - Expert B: REQUEST_CHANGES (维持)
+   - Expert C: REQUEST_CHANGES (调整为同意 Critical 1)
 
 → 共识检查: 0/3 APPROVED, 问题共识 85%
 → 状态: 仍未 APPROVED
@@ -619,9 +641,9 @@ User: "评审这个需求文档: [文档]"
 → 修复方案: 针对所有 Critical Issues 修复
 
 → 重新评审 (Round 2 起步)
-   - GLM-5: APPROVED
-   - Kimi: APPROVED
-   - MiniMax: APPROVED
+   - Expert A: APPROVED
+   - Expert B: APPROVED
+   - Expert C: APPROVED
 
 → 共识: 100% APPROVED
 

@@ -54,9 +54,9 @@ pre-push hook
     │
     ├─→ 触发 Delphi 评审
     │         │
-    │         ├─→ Expert A (Qwen3.5-Plus) 匿名评审
+    │         ├─→ Expert A (配置模型) 匿名评审
     │         │
-    │         ├─→ Expert B (MiniMax M2.5) 匿名评审
+    │         ├─→ Expert B (配置模型) 匿名评审
     │         │
     │         ├─→ 共识检查
     │         │      │
@@ -75,11 +75,15 @@ pre-push hook
 
 ## Agent 配置
 
-| 专家 | 模型 | 角色 |
+Code walkthrough 使用 delphi-review 中定义的专家角色配置。专家模型映射在项目的 `.delphi-config.json` 中声明，并在 `opencode.json` 的 `agent` 区块定义。
+
+| 专家 | 视角 | 配置 |
 |------|------|------|
-| Expert A | Qwen3.5-Plus | 架构 + 设计评审 |
-| Expert B | MiniMax M2.5 | 实现 + 代码质量评审 |
-| Expert C (仲裁) | Qwen3.5-Plus | 冲突裁决 |
+| Expert A | 架构 + 设计评审 | `.delphi-config.json` → `experts.architecture` |
+| Expert B | 实现 + 代码质量 | `.delphi-config.json` → `experts.technical` |
+| Expert C (仲裁) | 冲突裁决 | `.delphi-config.json` → `experts.feasibility` |
+
+> ⚠️ **注意**: 至少配置 **两个不同 provider** 的模型。详见 [delphi-review/INSTALL.md](../delphi-review/INSTALL.md)。
 
 ---
 

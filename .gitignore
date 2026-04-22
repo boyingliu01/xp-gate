@@ -12,6 +12,9 @@ __pycache__/
 .env.local
 .env.*.local
 
+# Delphi review (user-specific model config)
+.delphi-config.json
+
 # IDEs
 .idea/
 .vscode/

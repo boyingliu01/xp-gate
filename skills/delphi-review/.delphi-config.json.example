@@ -1,0 +1,31 @@
+{
+  "$schema": "./.delphi-config.schema.json",
+  "version": 1,
+  "description": "Delphi review expert mapping — customize with your own models. Copy to .delphi-config.json and edit.",
+  "num_experts": 3,
+  "experts": {
+    "architecture": {
+      "agent_name": "delphi-reviewer-architecture",
+      "perspective": "Architecture and requirements alignment",
+      "requirements_alignment": true,
+      "model_hint": "Use a model with strong reasoning capabilities (e.g., Claude Sonnet, GPT-4o, Qwen-Plus)"
+    },
+    "technical": {
+      "agent_name": "delphi-reviewer-technical",
+      "perspective": "Technical implementation, code correctness, edge cases",
+      "requirements_alignment": true,
+      "model_hint": "Use a model with strong code understanding (e.g., Claude Haiku, Qwen-Coder, DeepSeek-Coder)"
+    },
+    "feasibility": {
+      "agent_name": "delphi-reviewer-feasibility",
+      "perspective": "Feasibility analysis, risk assessment, execution complexity",
+      "requirements_alignment": true,
+      "model_hint": "Use a model with strong analytical capabilities (e.g., Claude Opus, GPT-4, Gemini Pro)"
+    }
+  },
+  "consensus": {
+    "threshold_percent": 91,
+    "max_review_rounds": 5,
+    "cross_provider_required": true
+  }
+}
