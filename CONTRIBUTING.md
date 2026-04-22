@@ -51,9 +51,15 @@ All commits must pass the 8-gate quality system:
 
 ### Before Implementation
 
+**Option A: Manual Workflow**
 1. **MANDATORY**: Run `/delphi-review` for design decisions
 2. Get APPROVED verdict from Delphi consensus
 3. Create `specification.yaml` with requirements and ACs
+
+**Option B: Sprint Flow (推荐)**
+1. Run `/sprint-flow "[需求描述]"` to execute the full Think → Plan → Build → Review → Ship pipeline
+2. The sprint-flow skill automatically chains: office-hours → autoplan → delphi-review → specification-generator → xp-consensus → cross-model-review → ship
+3. Key pause points require user confirmation (taste decisions, approval gates, user acceptance)
 
 ### During Implementation
 

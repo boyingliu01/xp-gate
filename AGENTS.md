@@ -5,7 +5,7 @@
 **Branch:** main
 
 ## OVERVIEW
-XP Workflow Automation project - AI-powered development workflow tools with consensus engines and quality gates. Implements XP pair programming AI consensus (xp-consensus), code walkthroughs (code-walkthrough), test-specification alignment, Boy Scout Rule enforcement, and multi-language principles checker.
+XP Workflow Automation project - AI-powered development workflow tools with consensus engines and quality gates. Implements Sprint Flow (One-Shot Sprint 自动流水线), XP pair programming AI consensus (xp-consensus), code walkthroughs (code-walkthrough), test-specification alignment, Boy Scout Rule enforcement, and multi-language principles checker.
 
 ## STRUCTURE
 ```
@@ -13,6 +13,10 @@ XP Workflow Automation project - AI-powered development workflow tools with cons
 ├── docs/          # Documentation files and version specs
 ├── githooks/      # Pre-commit (8 Gates) and pre-push quality gate scripts
 ├── skills/        # AI workflow automations and consensus engines
+│   ├── sprint-flow/            # One-Shot Sprint 自动流水线 (Think → Plan → Build → Review → Ship)
+│   │   ├── SKILL.md            # Main skill definition
+│   │   ├── references/         # Phase-specific execution instructions (7 phases)
+│   │   └── templates/          # Output templates (pain document, emergent issues, sprint summary)
 │   ├── code-reviewer/        # Static code quality analysis + SARIF output
 │   ├── code-walkthrough/     # Multi-expert Delphi code review
 │   ├── delphi-review/        # Delphi consensus methodology (MANDATORY before implementation)
@@ -30,6 +34,7 @@ XP Workflow Automation project - AI-powered development workflow tools with cons
 | Task | Location | Notes |
 |------|----------|-------|
 | Git Quality Gates | ./githooks/ | Contains pre-commit (8 Gates) and pre-push hooks |
+| Sprint Flow | ./skills/sprint-flow/ | One-Shot Sprint 自动流水线 (7 phases, 3 templates) |
 | Boy Scout Rule | ./src/principles/boy-scout.ts | Differential warning enforcement for historical projects |
 | Baseline Storage | ./src/principles/baseline.ts | Warning history per file (.warnings-baseline.json) |
 | Objective-C Adapter | ./src/principles/adapters/objectivec.ts | Regex-based extraction for .m/.mm files |
@@ -55,6 +60,7 @@ XP Workflow Automation project - AI-powered development workflow tools with cons
 | calculateDelta | Function | src/principles/boy-scout.ts | N/A | Warning delta calculation for Boy Scout Rule |
 | loadBaseline | Function | src/principles/baseline.ts | N/A | Load warning history from .warnings-baseline.json |
 | XP Consensus | Skill System | skills/xp-consensus/ | N/A | Driver-Navigator-Arbiter workflow |
+| Sprint Flow | Skill System | skills/sprint-flow/ | N/A | One-Shot Sprint (Think → Plan → Build → Review → Ship) |
 | Code Walkthrough | Skill System | skills/code-walkthrough/ | N/A | Delphi-method code review |
 | Test Alignment | Skill System | skills/test-specification-alignment/ | N/A | Test-specification verification |
 | Delphi Review | Skill System | skills/delphi-review/ | N/A | Multi-expert consensus (MANDATORY before impl) |
@@ -97,6 +103,7 @@ git commit  # -> pre-commit (static analysis, lint, test, coverage, principles, 
 git push    # -> pre-push (multi-expert AI code review)
 
 # Manual execution of automation tools
+/sprint-flow "开发访谈机器人，支持多轮对话"
 /code-walkthrough
 /xp-consensus
 /test-specification-alignment

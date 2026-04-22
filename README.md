@@ -5,6 +5,7 @@ AI-powered development workflow tools with consensus engines and quality gates f
 ## Features
 
 - **XP Consensus Engine** - Driver + Navigator + Arbiter decision workflow using Delphi method
+- **Sprint Flow** - One-Shot Sprint 自动流水线 (Think → Plan → Build → Review → Ship)
 - **Code Walkthrough** - Multi-expert post-commit code review before push
 - **Delphi Review** - MANDATORY consensus review before any implementation/design decisions
 - **Test-Specification Alignment** - Two-phase verification ensuring tests match requirements
@@ -74,6 +75,9 @@ git push    # Runs pre-push (multi-expert Delphi review)
 
 ### Manual Skill Execution
 ```bash
+# One-Shot Sprint (自动流水线)
+/sprint-flow "开发访谈机器人，支持多轮对话"
+
 # XP consensus workflow
 /xp-consensus
 
@@ -174,6 +178,20 @@ Each skill is defined as `SKILL.md` (markdown, not executable code):
 
 ```
 skills/
+├── sprint-flow/                   # One-Shot Sprint 自动流水线
+│   ├── SKILL.md                   # Main skill definition
+│   ├── references/                # Phase-specific execution instructions
+│   │   ├── phase-0-think.md
+│   │   ├── phase-1-plan.md
+│   │   ├── phase-2-build.md
+│   │   ├── phase-3-review.md
+│   │   ├── phase-4-uat.md
+│   │   ├── phase-5-feedback.md
+│   │   └── phase-6-ship.md
+│   └── templates/                 # Output templates
+│       ├── pain-document-template.md
+│       ├── emergent-issues-template.md
+│       └── sprint-summary-template.md
 ├── xp-consensus/SKILL.md        # Driver-Navigator-Arbiter workflow
 ├── code-walkthrough/SKILL.md    # Multi-expert Delphi review
 ├── delphi-review/SKILL.md       # MANDATORY before implementation
