@@ -192,7 +192,7 @@ ast-grep --version && echo "✅ ast-grep installed"
 ### Lizard (Cyclomatic Complexity) 验证
 ```bash
 ~/.local/bin/lizard --version && echo "✅ lizard installed"
-~/.local/bin/lizard -C 10 -w src/ && echo "✅ complexity within threshold"
+~/.local/bin/lizard -C 10 src/ && echo "✅ complexity within threshold"
 ```
 
 ### Architecture Quality (Gate 9) 验证
