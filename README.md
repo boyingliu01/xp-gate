@@ -25,9 +25,9 @@ AI-powered development workflow tools with quality gates and multi-expert review
 | 3 | 单元测试 | 全部通过 |
 | 4 | 测试覆盖率 | ≥80% |
 | 5 | Shell 脚本语法 | 零错误 |
-| 6 | Clean Code + SOLID | 零违规 |
+| 6 | Clean Code + SOLID | 零错误（警告由 Gate 8 处理）|
 | 7 | 圈复杂度 | ≤5 警告，≤10 阻断 |
-| 8 | 童子军规则 | 警告数不增加 |
+| 8 | 童子军规则（统一）| 新文件零告警，修改文件告警数不增加 |
 | 9 | 架构质量 | 层边界不违规 |
 
 ### 2. Delphi Review（AI 多专家评审）

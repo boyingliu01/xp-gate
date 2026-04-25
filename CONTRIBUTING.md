@@ -36,16 +36,16 @@ See [skills/delphi-review/INSTALL.md](skills/delphi-review/INSTALL.md) for the f
 
 All commits must pass the 8-gate quality system:
 
-| Gate | Check | Threshold |
-|------|-------|-----------|
-| 1 | TypeScript strict | No errors |
-| 2 | ESLint | No warnings |
-| 3 | Tests | All pass |
-| 4 | Coverage | ≥80% |
-| 5 | Shell check | No errors |
-| 6 | Principles | No violations |
-| 7 | CCN | ≤5 warn, ≤10 block |
-| 8 | Boy Scout | No warning increase |
+| Gate | 检查内容 | 标准 |
+|------|---------|------|
+| 1 | TypeScript 严格模式 | 零错误 |
+| 2 | ESLint 代码风格 | 零告警 |
+| 3 | 单元测试 | 全部通过 |
+| 4 | 测试覆盖率 | ≥80% |
+| 5 | Shell 脚本语法 | 零错误 |
+| 6 | Clean Code + SOLID | 零错误（warnings 由 Gate 8 处理） |
+| 7 | 圈复杂度 | ≤5 警告，≤10 阻断 |
+| 8 | 童子军规则（统一） | 新文件零告警；修改文件：警告数不增加；≤5 告警必须清零 |
 
 ## Pull Request Process
 
@@ -98,6 +98,12 @@ describe('Feature', () => {
 - Empty catch blocks
 - Skipping quality gates via flags
 - Modifying frozen tests in Phase 2
+
+### Historical Projects
+
+**首次提交**：自动从当前 violations 创建基线
+**后续提交**：修改的文件警告数必须下降或持平
+**新文件**：零容忍（任何警告都会阻止提交）
 
 ## Push Limits
 

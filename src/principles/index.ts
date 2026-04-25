@@ -77,6 +77,8 @@ function getAllRules() {
   ];
 }
 
+export { getAllRules };
+
 export async function main(args: string[]): Promise<number> {
   const options = parseArgs(args);
   
@@ -111,13 +113,15 @@ export async function main(args: string[]): Promise<number> {
 }
 
 const args = process.argv.slice(2);
-main(args)
-  .then(exitCode => {
-    if (exitCode !== 0) {
-      process.exit(exitCode);
-    }
-  })
-  .catch(err => {
-    console.error('Analysis failed:', err.message);
-    process.exit(1);
-  });
+if (typeof require !== 'undefined' && require.main === module) {
+  main(args)
+    .then(exitCode => {
+      if (exitCode !== 0) {
+        process.exit(exitCode);
+      }
+    })
+    .catch(err => {
+      console.error('Analysis failed:', err.message);
+      process.exit(1);
+    });
+}

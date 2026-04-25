@@ -1,11 +1,54 @@
-import fs from 'fs/promises';
-import path from 'path';
+import * as fs from 'fs/promises';
+import { extname } from 'path';
+import { analyze, getAdapterForFile } from './analyzer';
+import { getAllRules } from './index';
 
 interface FileClassification {
   new: string[];
   modified: string[];
   deleted: string[];
   renamed: { oldPath: string; newPath: string }[];
+}
+
+// Exported helper to get warning counts for a batch of files using the principles checker
+export async function analyzeWarningsForFiles(filesInput: string | string[]): Promise<Record<string, number>> {
+  const files = (typeof filesInput === 'string' ? filesInput.split(',') : filesInput)
+    .flatMap(f => f.split(',').map(s => s.trim()))
+    .filter(f => f);
+  if (files.length === 0) {
+    return {};
+  }
+
+  const rules = getAllRules();
+  const result = await analyze(files, rules, getAdapterForFile);
+
+  const fileWarnings: Record<string, number> = {};
+  
+  // Initialize all requested files with 0 warnings
+  for (const file of files) {
+    fileWarnings[file] = 0;
+  }
+  
+  // Count violations per file
+  for (const violation of result.violations) {
+    // Only count warnings and errors (ignore info level)
+    if (violation.severity === 'warning' || violation.severity === 'error') {
+      fileWarnings[violation.file] = (fileWarnings[violation.file] || 0) + 1;
+    }
+  }
+  
+  return fileWarnings;
+}
+
+async function getWarningCountForFile(filePath: string): Promise<number> {
+  try {
+    // Try batching all files together first, but for this individual function, we simulate
+    const currentWarnings = await analyzeWarningsForFiles([filePath]);
+    return currentWarnings[filePath] || 0;
+  } catch (error) {
+    // Fallback to ensure the function can handle cases where real file analysis is not feasible
+    return 0;
+  }
 }
 
 interface BaselineEntry {
@@ -111,27 +154,36 @@ export function calculateDelta(
     deltaResult.delta = currentWarnings;
     if (currentWarnings > 0) {
       deltaResult.enforcement = 'BLOCK';
-      deltaResult.reason = 'New files must have zero warnings (Boy Scout Rule)';
+      deltaResult.reason = `New files must have zero warnings (currently: ${currentWarnings}). Boy Scout Rule: Leave the code cleaner than you found it.`;
     } else {
       deltaResult.enforcement = 'PASS';
       deltaResult.reason = 'New file with zero warnings';
     }
   } else {
-    deltaResult.delta = currentWarnings - deltaResult.baselineWarnings;
-    
-    if (currentWarnings > deltaResult.baselineWarnings) {
-      deltaResult.enforcement = 'BLOCK';
-      deltaResult.reason = 'Modified files cannot introduce new warnings (Boy Scout Rule)';
-    } 
-    else if (deltaResult.baselineWarnings <= 5 && currentWarnings > 0) {
-      deltaResult.enforcement = 'BLOCK';
-      deltaResult.reason = `Files with <=5 warnings must clear to zero (currently: ${currentWarnings}/${deltaResult.baselineWarnings}). Boy Scout Rule: Leave the code cleaner than you found it.`;
-    }
-    else {
+    // For modified files with no baseline (new to baseline due to auto-init), treat as special case
+    if (!baselineEntry) {
+      // Auto-initialized file, allow current warnings as the new baseline, just verify this doesn't increase warnings
       deltaResult.enforcement = 'PASS';
-      deltaResult.reason = deltaResult.delta < 0 
-        ? 'Warnings decreased from previous baseline' 
-        : 'No new warnings introduced and file already had more than 5 warnings';
+      deltaResult.reason = 'File added to baseline with current warning count';
+    } else {
+      deltaResult.delta = currentWarnings - deltaResult.baselineWarnings;
+      
+      if (currentWarnings > deltaResult.baselineWarnings) {
+        deltaResult.enforcement = 'BLOCK';
+        deltaResult.reason = `Modified files cannot increase warnings (${currentWarnings} > ${deltaResult.baselineWarnings}). Boy Scout Rule: Leave the code cleaner than you found it.`;
+      } 
+      else if (deltaResult.baselineWarnings <= 5 && currentWarnings > 0) {
+        deltaResult.enforcement = 'BLOCK';
+        deltaResult.reason = `Files with <=5 warnings must clear to zero (currently: ${currentWarnings}/${deltaResult.baselineWarnings}). Boy Scout Rule: Leave the code cleaner than you found it.`;
+      }
+      else {
+        deltaResult.enforcement = 'PASS';
+        deltaResult.reason = deltaResult.delta < 0 
+          ? `Warnings decreased by ${Math.abs(deltaResult.delta)}` 
+          : currentWarnings === 0
+          ? 'All warnings cleared'
+          : 'No new warnings introduced';
+      }
     }
   }
 
@@ -159,11 +211,12 @@ export function enforceBoyScoutRule(deltas: DeltaResult[]): EnforcementResult {
 }
 
 export async function initBaseline(files: string[]): Promise<Record<string, BaselineEntry>> {
+  const currentWarnings = await analyzeWarningsForFiles(files);
   const baseline: Record<string, BaselineEntry> = {};
 
   for (const file of files) {
     try {
-      const warningCount = await getWarningCountForFile(file);
+      const warningCount = currentWarnings[file] || 0;
       if (warningCount > 0) {
         baseline[file] = {
           totalWarnings: warningCount,
@@ -178,25 +231,28 @@ export async function initBaseline(files: string[]): Promise<Record<string, Base
   return baseline;
 }
 
-async function getWarningCountForFile(filePath: string): Promise<number> {
-  const ext = path.extname(filePath);
-  
-  if (ext === '.ts' || ext === '.tsx' || ext === '.js' || ext === '.jsx') {
-    try {
-      const content = await fs.readFile(filePath, 'utf-8');
-      let warningCount = 0;
-      for (const line of content.split('\n')) {
-        if (line.includes('console.log(') || line.includes('// TODO:') || line.includes('var ')) {
-          warningCount++;
-        }
-      }
-      return warningCount;
-    } catch (error) {
-      return 0;
+ /**
+ * Initializes baseline from current violations for the specified files
+ */
+async function autoInitBaseline(
+  files: string[], 
+  baselinePath: string
+): Promise<Record<string, BaselineEntry>> {
+  const currentWarnings = await analyzeWarningsForFiles(files);
+  const baseline: Record<string, BaselineEntry> = {};
+
+  for (const file of files) {
+    const count = currentWarnings[file] || 0;
+    if (count > 0) {
+      baseline[file] = {
+        totalWarnings: count,
+        lastAnalyzed: new Date().toISOString(),
+      };
     }
   }
-  
-  return 0;
+
+  await saveBaseline(baselinePath, baseline);
+  return baseline;
 }
 
 async function main(): Promise<number> {
@@ -243,17 +299,17 @@ function parseArgs(args: string[]): any {
     const arg = args[i];
     
     if (arg === '--new-files') {
-      parsed.newFiles = args[i + 1]?.split(',') || [];
+      parsed.newFiles = args[i + 1]?.split(',').map((s: string) => s.trim()).filter(Boolean) || [];
       i++;
     } else if (arg === '--modified-files') {
-      parsed.modifiedFiles = args[i + 1]?.split(',') || [];
+      parsed.modifiedFiles = args[i + 1]?.split(',').map((s: string) => s.trim()).filter(Boolean) || [];
       i++;
     } else if (arg === '--baseline') {
       parsed.baselinePath = args[i + 1];
       i++;
     } else if (arg === '--init-baseline') {
       parsed.command = 'init-baseline';
-      parsed.files = args[i + 1]?.split(',') || [];
+      parsed.files = args[i + 1]?.split(',').map((s: string) => s.trim()).filter(Boolean) || [];
       i++;
     } else if (arg === '--help' || arg === '-h') {
       showHelp();
@@ -290,12 +346,39 @@ async function initBaselineCommand(files: string[]): Promise<void> {
 }
 
 async function runEnforcement(newFiles: string[], modifiedFiles: string[], baselinePath: string): Promise<EnforcementResult> {
+  const allFiles = [...newFiles.filter(f => f.trim()), ...modifiedFiles.filter(f => f.trim())];
+  const currentWarnings = await analyzeWarningsForFiles(allFiles);
+  
   const baseline = await loadBaseline(baselinePath);
+  
+  // Check for missing baseline entries for modified files
+  const missingBaselineEntries: string[] = [];
+  for (const file of modifiedFiles) {
+    if (!baseline[file]) {
+      missingBaselineEntries.push(file);
+    }
+  }
+  
+  // If there are missing baseline entries, auto-initialize them
+  if (missingBaselineEntries.length > 0) {
+    for (const file of missingBaselineEntries) {
+      const warningCount = currentWarnings[file] || 0;
+      if (warningCount > 0) {
+        baseline[file] = {
+          totalWarnings: warningCount,
+          lastAnalyzed: new Date().toISOString(),
+        };
+      }
+    }
+    // Save the updated baseline
+    await saveBaseline(baselinePath, baseline);
+    console.log(`ℹ️  Auto-initialized baseline for ${missingBaselineEntries.length} files`);
+  }
   
   const deltaResults: DeltaResult[] = [];
 
   for (const file of newFiles) {
-    const warningCount = await getWarningCountForFile(file);
+    const warningCount = currentWarnings[file] || 0;
     const delta = calculateDelta(null, warningCount, 'NEW');
     delta.file = file;
     deltaResults.push(delta);
@@ -303,7 +386,7 @@ async function runEnforcement(newFiles: string[], modifiedFiles: string[], basel
   
   for (const file of modifiedFiles) {
     const baselineEntry = baseline[file] || null;
-    const warningCount = await getWarningCountForFile(file);
+    const warningCount = currentWarnings[file] || 0;
     const delta = calculateDelta(baselineEntry, warningCount, 'MODIFIED');
     delta.file = file;
     deltaResults.push(delta);
@@ -312,7 +395,8 @@ async function runEnforcement(newFiles: string[], modifiedFiles: string[], basel
   return enforceBoyScoutRule(deltaResults);
 }
 
-if (require.main === module) {
+if ((typeof require !== 'undefined' && require.main === module) || 
+    (typeof require === 'undefined' && process.argv[1]?.includes('boy-scout'))) {
   main()
     .then(code => process.exit(code))
     .catch(error => {
@@ -323,5 +407,6 @@ if (require.main === module) {
 
 export {
   initBaselineCommand,
-  runEnforcement
+  runEnforcement,
+  autoInitBaseline
 };
