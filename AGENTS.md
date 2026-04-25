@@ -18,8 +18,7 @@ XP Workflow Automation project - AI-powered development workflow tools with cons
 │   │   ├── references/         # Phase-specific execution instructions (7 phases)
 │   │   └── templates/          # Output templates (pain document, emergent issues, sprint summary)
 │   ├── delphi-review/          # Delphi consensus methodology (design + code-walkthrough dual modes)
-│   ├── test-specification-alignment/  # Test-requirement alignment verification  
-│   └── code-reviewer/          # Static code quality analysis + SARIF output
+│   └── test-specification-alignment/  # Test-requirement alignment verification
 ├── src/principles/    # Clean Code & SOLID checker (14 rules, 9 language adapters)
 │   ├── boy-scout.ts   # Differential warning enforcement
 │   ├── baseline.ts    # Warning history storage
@@ -36,7 +35,6 @@ XP Workflow Automation project - AI-powered development workflow tools with cons
 | Sprint Flow | ./skills/sprint-flow/ | One-Shot Sprint 自动流水线 (7 phases, 3 templates) |
 | Delphi Review | ./skills/delphi-review/ | MANDATORY before implementation (design + code-walkthrough dual modes) |
 | Test Alignment | ./skills/test-specification-alignment/ | Requirements-test alignment verification |
-| Code Reviewer | ./skills/code-reviewer/ | Static analysis + SARIF output for IDE integration |
 | Boy Scout Rule | ./src/principles/boy-scout.ts | Differential warning enforcement for historical projects |
 | Baseline Storage | ./src/principles/baseline.ts | Warning history per file (.warnings-baseline.json) |
 | Principles Checker | ./src/principles/ | Clean Code (9) + SOLID (5) rules, 9 language adapters |
@@ -57,7 +55,6 @@ XP Workflow Automation project - AI-powered development workflow tools with cons
 | Sprint Flow | Skill System | skills/sprint-flow/ | N/A | One-Shot Sprint (Think → Plan → Build → Review → Ship) |
 | Delphi Review | Skill System | skills/delphi-review/ | N/A | Multi-expert consensus (MANDATORY before impl, dual modes) |
 | Test Alignment | Skill System | skills/test-specification-alignment/ | N/A | Test-specification verification |
-| Code Reviewer | Skill System | skills/code-reviewer/ | N/A | Static analysis + SARIF output |
 
 ## CONVENTIONS
 - All quality gates in githooks are "zero tolerance" - tools must be available or operations are blocked

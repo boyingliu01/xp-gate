@@ -10,7 +10,7 @@
 
 - `autoplan` (gstack) — CEO → Design → Eng 自动流水线
 - `delphi-review` — 多轮匿名评审直到共识
-- `specification-generator` — 生成 specification.yaml
+- specification.yaml 从 APPROVED 设计文档自动生成（无需独立 skill）
 
 ---
 

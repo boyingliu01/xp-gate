@@ -42,7 +42,7 @@ MVP 版本: v1.0
 | office-hours | 1 | ✅ | Pain Document 生成 |
 | autoplan | 1 | ✅/⚠️ | [taste_decisions 数量] |
 | delphi-review | [N] rounds | ✅ APPROVED | [Round 数量] |
-| specification-generator | 1 | ✅ | specification.yaml |
+| specification.yaml | 1 | ✅ | specification.yaml |
 | BUILD (TDD + review) | 1 | ✅ APPROVED | [Gate 1 失败次数] |
 | test-driven-development | [N] | ✅ | [BUILD (TDD + review) 内部调用] |
 | cross-model-review | [N] rounds | ✅ APPROVED | [Round 数量] |

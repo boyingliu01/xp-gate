@@ -188,8 +188,7 @@ skills/
 │       ├── emergent-issues-template.md
 │       └── sprint-summary-template.md
 ├── delphi-review/SKILL.md         # MANDATORY before implementation (design + code-walkthrough dual modes)
-├── test-specification-alignment/SKILL.md  # Two-phase verification
-└── code-reviewer/SKILL.md         # Static analysis + SARIF
+└── test-specification-alignment/SKILL.md  # Two-phase verification
 ```
 
 ## Conventions
