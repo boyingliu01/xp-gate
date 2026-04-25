@@ -1,209 +1,192 @@
 # XP Workflow Automation
 
-AI-powered development workflow tools with consensus engines and quality gates for XP pair programming.
+AI-powered development workflow tools with quality gates and multi-expert review.
 
-## Features
+---
 
-- **Sprint Flow** - One-Shot Sprint 自动流水线 (Think → Plan → Build → Review → Ship) using superpowers TDD + review
-- **Delphi Review** - MANDATORY consensus review before any implementation/design decisions (supports design and code-walkthrough modes)
-- **Test-Specification Alignment** - Two-phase verification ensuring tests match requirements
-- **Principles Checker** - Clean Code (9) + SOLID (5) rules with 9 language adapters
-- **Boy Scout Rule** - Differential warning enforcement for historical projects
-- **8-Gate Quality System** - Pre-commit hooks blocking bad code
-- **Quality Gates Code of Conduct** - Zero-tolerance policy prohibiting `--no-verify` bypass
+## Why
 
-## Quality Gates
+开发过程中常见的问题：**没有门禁导致坏代码提交、没有评审导致设计缺陷、没有需求对齐导致测试遗漏。** 这个项目提供了一套可以独立或组合使用的质量门禁和 AI 评审工具，让每次 commit 和 push 都经过自动验证，重大设计决策经过多专家共识。
 
-| Gate | Name | Purpose |
-|------|------|---------|
-| 1 | Static Analysis | TypeScript strict mode |
-| 2 | Linting | ESLint checks |
-| 3 | Unit Tests | vitest execution |
-| 4 | Coverage | 80% threshold |
-| 5 | Shell Check | shellcheck validation |
-| 6 | Principles | Clean Code + SOLID |
-| 7 | CCN | Cyclomatic complexity (≤5 warn, ≤10 block) |
-| 8 | Boy Scout | Differential warning enforcement |
-| 9 | Architecture | Clean Architecture layer boundaries |
+---
 
-### Gate 9: Architecture Quality
+## What
 
-Enforces Clean Architecture principles using language-specific tools:
+三大模块，可以任意组合使用：
 
-| Language | Tool | Rules |
-|----------|------|-------|
-| TypeScript | archlint (@archlinter/cli) | Layer dependency direction, boundary violations |
-| Python | Deply | Layer isolation, import validation |
-| Go | goarchtest | Architecture test patterns |
-| Java | ArchUnit | Layer constraints, naming conventions |
-| C++ | ⚠️ Not supported (Phase 2) | Requires `.skip-architecture-cpp` marker |
+### 1. 质量门禁（纯确定性代码，不需要 AI）
 
-**Configuration**: Create `architecture.yaml` in project root to define layers and rules.
+每次 `git commit` 和 `git push` 时自动运行 9 道质量关卡，任何一项失败都会阻止操作：
 
-**Rules enforced**:
-- ARCH-001 to ARCH-004: Layer boundary enforcement (Domain, Application, Infrastructure, Presentation)
-- ARCH-005 to ARCH-007: Circular dependency detection
-- ARCH-008 to ARCH-010: Type location validation
+| Gate | 检查内容 | 标准 |
+|------|---------|------|
+| 1 | TypeScript 严格模式 | 零错误 |
+| 2 | ESLint 代码风格 | 零告警 |
+| 3 | 单元测试 | 全部通过 |
+| 4 | 测试覆盖率 | ≥80% |
+| 5 | Shell 脚本语法 | 零错误 |
+| 6 | Clean Code + SOLID | 零违规 |
+| 7 | 圈复杂度 | ≤5 警告，≤10 阻断 |
+| 8 | 童子军规则 | 警告数不增加 |
+| 9 | 架构质量 | 层边界不违规 |
 
-## Installation
+### 2. Delphi Review（AI 多专家评审）
+
+多专家匿名评审，直到所有专家达成共识（≥91%）：
+- **Design 模式**：评审需求文档、设计文档、架构决策
+- **Code Walkthrough 模式**：评审 git 代码变更，自动输出评审结果文件
+
+### 3. Sprint Flow（一键编排器）
+
+自动串联完整开发流程：`Think → Plan → Build → Review → Ship`。也可以用一句话启动：`/sprint-flow "开发用户登录"`
+
+---
+
+## How
+
+### Step 1: 安装
+
+每个组件都可以**独立安装**，不需要安装整个项目。
+
+#### 快速安装（全部门禁 + 所有 AI 组件）
 
 ```bash
-# Clone repository
 git clone https://github.com/boyingliu01/xp-workflow-automation.git
 cd xp-workflow-automation
 
-# Install dependencies
-npm install
+# 安装全部门禁（pre-commit + pre-push）
+bash scripts/install-all.sh
 
-# Setup git hooks
-cp githooks/pre-commit .git/hooks/pre-commit
-cp githooks/pre-push .git/hooks/pre-push
-chmod +x .git/hooks/pre-commit .git/hooks/pre-push
+# 安装 AI 评审组件
+bash scripts/install-principles-cli.sh
+bash scripts/install-delphi-review.sh
+bash scripts/install-test-spec-alignment.sh
+bash scripts/install-sprint-flow.sh
 ```
 
-## Usage
+#### 按需安装
 
-### Git Workflow
+| 组件 | 一句话 | 安装命令 |
+|------|--------|---------|
+| **Pre-Commit 门禁** | git commit 自动运行 9 项检查 | `bash scripts/install-pre-commit.sh` |
+| **Pre-Push 门禁** | git push 前验证代码走查结果 | `bash scripts/install-pre-push.sh` |
+| **质量门禁包** | Pre-Commit + Pre-Push 一起装 | `bash scripts/install-all.sh` |
+| **Principles Checker** | 独立命令行：Clean Code + SOLID 检查 | `bash scripts/install-principles-cli.sh` |
+| **Delphi Review** | AI 多专家评审 | `bash scripts/install-delphi-review.sh` |
+| **Test-Spec Alignment** | 测试与需求对齐验证 | `bash scripts/install-test-spec-alignment.sh` |
+| **Sprint Flow** | 一键 Sprint 编排器 | `bash scripts/install-sprint-flow.sh` |
+
+> Delphi Review 需要额外配置：复制 `.delphi-config.json.example` 为 `.delphi-config.json`，填入你的 LLM API key 和模型信息。
+
+### Step 2: 使用
+
+#### 日常开发（安装后自动运行）
+
 ```bash
-# Commit with quality gates
-git commit  # Runs pre-commit (9 Gates)
-
-# Push with AI code review
-git push    # Runs pre-push (multi-expert Delphi review)
+git commit   # 自动运行 9 道门禁，失败则阻止提交
+git push     # 自动验证 Delphi 评审结果，未通过则阻止推送
 ```
 
-### Manual Skill Execution
+#### AI 评审工具
+
 ```bash
-# One-Shot Sprint (自动流水线)
-/sprint-flow "开发访谈机器人，支持多轮对话"
-# Phase 2 uses: test-driven-development (superpowers) + freeze + review
-
-# Delphi review (supports design and code-walkthrough modes)
-/delphi-review                  # Design mode (default)
-/delphi-review --mode code-walkthrough  # Code walkthrough mode (git push review)
-
-# Test-specification alignment
-/test-specification-alignment
+/delphi-review                              # 设计评审（默认模式）
+/delphi-review --mode code-walkthrough      # 代码走查（push 前评审代码变更）
+/test-specification-alignment               # 验证测试覆盖所有需求
 ```
 
-### Principles Checker CLI
+#### 一键 Sprint 流程
+
 ```bash
-# Check files for Clean Code + SOLID violations
+/sprint-flow "开发用户登录功能"    # Think → Plan → Build → Review → Ship 全自动
+```
+
+#### Principles Checker（独立命令行）
+
+```bash
+# 检查代码规范
 npx tsx src/principles/index.ts --files "src/**/*.ts" --format console
 
-# SARIF output for IDE integration
-npx tsx src/principles/index.ts --files "src/**/*.ts" --format sarif > results.sarif
-```
+# 输出 SARIF 格式（IDE/CI 集成）
+npx tsx src/principles/index.ts --files "src/**/*.ts" --format sarif
 
-### Boy Scout Rule
-```bash
-# Initialize baseline for historical project
+# 历史项目初始化（童子军规则）
 npx tsx src/principles/boy-scout.ts --init-baseline
-
-# Enforce differential warnings
-npx tsx src/principles/boy-scout.ts \
-  --new-files src/new-feature.ts \
-  --modified-files src/existing.ts \
-  --baseline .warnings-baseline.json
 ```
 
-## Language Support
+### Step 3: 零容忍政策
 
-| Language | Adapter | Analyzer Tools |
-|----------|---------|----------------|
-| TypeScript | TypeScriptAdapter | tsc, ESLint |
-| Python | PythonAdapter | Ruff, mypy |
-| Go | GoAdapter | golangci-lint |
-| Java | JavaAdapter | CheckStyle, PMD, SpotBugs |
-| Kotlin | KotlinAdapter | detekt, ktlint |
-| Dart | DartAdapter | dart analyze |
-| Swift | SwiftAdapter | swiftlint |
-| C++ | CppAdapter | clang-tidy, cppcheck |
-| Objective-C | ObjectiveCAdapter | scan-build, oclint |
+质量门禁是刚性的，不允许绕过：
+
+- ❌ 禁止使用 `git commit --no-verify` 绕过预提交检查
+- ❌ 禁止使用 `git push --no-verify` 绕过推送检查
+- ❌ 禁止伪造评审结果文件
+- ❌ 禁止因为"变更很小"跳过评审
+
+详见 [`githooks/QUALITY-GATES-CODE-OF-CONDUCT.md`](githooks/QUALITY-GATES-CODE-OF-CONDUCT.md)。
+
+---
 
 ## Configuration
 
-### .principlesrc
+### .principlesrc — 自定义检查阈值
+
 ```json
 {
   "rules": {
     "clean-code": {
-      "long-function": { "enabled": true, "threshold": 50 },
-      "god-class": { "enabled": true, "threshold": 15 },
-      "deep-nesting": { "enabled": true, "threshold": 4 }
+      "long-function": { "threshold": 50 },
+      "god-class": { "threshold": 15 },
+      "deep-nesting": { "threshold": 4 }
     },
     "solid": {
-      "srp": { "enabled": true, "methodThreshold": 15 },
-      "dip": { "enabled": true }
+      "srp": { "methodThreshold": 15 }
     }
-  },
-  "performance": {
-    "mode": "changed-files-only"
   }
 }
 ```
 
-### specification.yaml
-Requirements and acceptance criteria (auto-generated from APPROVED design docs):
+### architecture.yaml — 架构规则
+
 ```yaml
-specification:
-  source: "docs/plans/2026-04-14-auth-design.md"
-  generated: "2026-04-14"
-  requirements:
-    - description: "User login with password"
-      acceptance_criteria:
-        - given: "valid username and password"
-          when: "POST /login"
-          then: "returns 200 + JWT token"
+layers:
+  - name: domain
+    allowed_imports: [domain]
+  - name: application
+    allowed_imports: [domain, application]
+  - name: presentation
+    allowed_imports: [domain, application, presentation]
 ```
 
-### Test Annotations
-```typescript
-/**
- * @test REQ-XXX Feature implementation
- * @intent Verify correct behavior
- * @covers AC-XXX-01, AC-XXX-02
- */
-describe('Feature', () => { ... });
-```
+### specification.yaml — 自动生成
 
-## Skills Architecture
+从 APPROVED 设计文档自动生成，不需要手动编辑。
 
-Each skill is defined as `SKILL.md` (markdown, not executable code):
+---
 
-```
-skills/
-├── sprint-flow/                   # One-Shot Sprint 自动流水线
-│   ├── SKILL.md                   # Main skill definition
-│   ├── references/                # Phase-specific execution instructions
-│   │   ├── phase-0-think.md
-│   │   ├── phase-1-plan.md
-│   │   ├── phase-2-build.md       # TDD + freeze + review (replaces xp-consensus)
-│   │   ├── phase-3-review.md
-│   │   ├── phase-4-uat.md
-│   │   ├── phase-5-feedback.md
-│   │   └── phase-6-ship.md
-│   └── templates/                 # Output templates
-│       ├── pain-document-template.md
-│       ├── emergent-issues-template.md
-│       └── sprint-summary-template.md
-├── delphi-review/SKILL.md         # MANDATORY before implementation (design + code-walkthrough dual modes)
-└── test-specification-alignment/SKILL.md  # Two-phase verification
-```
+## Language Support
 
-## Conventions
+Principles Checker 支持 9 种语言的语法和分析：
 
-- **Zero-tolerance**: Quality gates block if tools unavailable
-- **Delphi consensus**: Multi-expert anonymous review until ≥91% agreement
-- **Boy Scout Rule**: Leave code cleaner than found
-- **Test annotations**: @test, @intent, @covers required
-- **Push limits**: Max 20 files, 500 LOC per push
+| 语言 | 分析工具 | 架构验证工具 |
+|------|---------|-------------|
+| TypeScript | tsc, ESLint | archlint |
+| Python | Ruff, mypy | Deply |
+| Go | golangci-lint | goarchtest |
+| Java | CheckStyle, PMD, SpotBugs | ArchUnit |
+| Kotlin | detekt, ktlint | — |
+| Dart | dart analyze | — |
+| Swift | swiftlint | — |
+| C++ | clang-tidy, cppcheck | — |
+| Objective-C | scan-build, oclint | — |
 
-## Documentation
+---
 
-- [Installation Guide](./githooks/TOOL-INSTALLATION-GUIDE.md)
-- [Gate Validation Guide](./docs/gate-validation-guide.md)
-- [Principles Configuration](./docs/principlesrc-configuration.md)
+## Sharing with Team
+
+每个安装脚本都是独立的，可以单独分发给同事使用，不需要克隆整个仓库。也可以分享仓库地址，让对方按需安装需要的组件。
+
+---
 
 ## License
 
