@@ -58,7 +58,7 @@ All commits must pass the 8-gate quality system:
 
 **Option B: Sprint Flow (推荐)**
 1. Run `/sprint-flow "[需求描述]"` to execute the full Think → Plan → Build → Review → Ship pipeline
-2. The sprint-flow skill automatically chains: office-hours → autoplan → delphi-review → specification-generator → xp-consensus → cross-model-review → ship
+2. The sprint-flow skill automatically chains: office-hours → autoplan → delphi-review → specification-generator → TDD + review → cross-model-review → ship
 3. Key pause points require user confirmation (taste decisions, approval gates, user acceptance)
 
 ### During Implementation
@@ -70,9 +70,9 @@ All commits must pass the 8-gate quality system:
 
 ### Before Merge
 
-1. Run `/xp-consensus` for final verification
-2. Get Arbiter APPROVED with confidence ≥8
-3. Ensure all ACs have passing tests
+1. Run `/test-specification-alignment` for final verification
+2. Ensure all ACs have passing tests
+3. Run `/delphi-review --mode code-walkthrough` (or let pre-push hook trigger it)
 
 ## Coding Standards
 

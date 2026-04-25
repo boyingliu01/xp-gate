@@ -54,6 +54,6 @@ skills/test-specification-alignment/
 ```
 
 ## NOTES
-- Integrates with xp-consensus before Arbiter review
+- Integrates with BUILD (TDD + review) before Arbiter review
 - Mandated before gstack-ship release
 - Uses freeze skill to lock test directories during Phase 2

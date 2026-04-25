@@ -43,8 +43,8 @@ MVP 版本: v1.0
 | autoplan | 1 | ✅/⚠️ | [taste_decisions 数量] |
 | delphi-review | [N] rounds | ✅ APPROVED | [Round 数量] |
 | specification-generator | 1 | ✅ | specification.yaml |
-| xp-consensus | 1 | ✅ APPROVED | [Gate 1 失败次数] |
-| test-driven-development | [N] | ✅ | [xp-consensus 内部调用] |
+| BUILD (TDD + review) | 1 | ✅ APPROVED | [Gate 1 失败次数] |
+| test-driven-development | [N] | ✅ | [BUILD (TDD + review) 内部调用] |
 | cross-model-review | [N] rounds | ✅ APPROVED | [Round 数量] |
 | test-specification-alignment | 1 | ✅ | [覆盖率] |
 | browse | 1 | ✅ | [QA 通过] |

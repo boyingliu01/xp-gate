@@ -1,6 +1,6 @@
 ---
 name: test-specification-alignment
-description: "测试与 Specification 对齐验证引擎。确保测试准确反映需求和设计。两阶段执行：Phase 1 验证对齐（可修改测试），Phase 2 执行测试（禁止修改测试）。MANDATORY before any release. TRIGGER: 'run tests', 'verify tests', before xp-consensus Arbiter, before gstack-ship."
+description: "测试与 Specification 对齐验证引擎。确保测试准确反映需求和设计。两阶段执行：Phase 1 验证对齐（可修改测试），Phase 2 执行测试（禁止修改测试）。MANDATORY before any release. TRIGGER: 'run tests', 'verify tests', before BUILD (TDD + review) Arbiter, before gstack-ship."
 ---
 
 # Test-Specification Alignment Engine
@@ -23,7 +23,7 @@ description: "测试与 Specification 对齐验证引擎。确保测试准确反
 
 ### 自动触发
 
-- xp-consensus Round 1 后（Driver 输出 tests）
+- BUILD (TDD + review) Round 1 后（Driver 输出 tests）
 - Gate 1 验证前
 - gstack-ship 发布前
 
@@ -322,10 +322,10 @@ specification_issue_flow:
 
 ## 与现有 Skills 集成
 
-### 与 xp-consensus 集成
+### 与 BUILD (TDD + review) 集成
 
 ```
-xp-consensus Round 1: Driver
+BUILD (TDD + review) Round 1: Driver
 ├─ 输出: sealed{code, decisions} + public{tests}
 └────────────────────────────────────────────┘
                     │
@@ -341,7 +341,7 @@ Gate 1 (verification-loop)
 └────────────────────────────────────────────┘
                     │
                     ▼
-xp-consensus Round 3: Arbiter
+BUILD (TDD + review) Round 3: Arbiter
 └─ 收到 test-specification-alignment 结果
 ```
 

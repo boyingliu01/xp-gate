@@ -1,42 +1,23 @@
-# Phase 2: BUILD（One-Shot 执行）
+# Phase 2: BUILD（TDD + 盲评 + 验证）
 
 ## 目标
 
-TDD 执行，Gate 1 验证通过。生成 MVP v1。
+TDD 执行，盲评验证，Gate 1 验证通过。生成 MVP v1。
 
 ---
 
 ## 调用 Skills
 
-- `xp-consensus` — Driver + Navigator + Arbiter（**内含 TDD 执行**）
+替代原 xp-consensus，使用 superpowers 成熟 skill 组合：
 
-⚠️ **关键澄清**: sprint-flow 不单独调用 TDD skill，TDD 由 xp-consensus 内部执行。
-
----
-
-## xp-consensus 与 TDD 的关系
-
-```
-xp-consensus skill 内部流程:
-  ├─ Round 1: Driver AI
-  │   ├─ 内建调用 test-driven-development skill（RED → GREEN）
-  │   ├─ Driver 先写测试（根据 specification.yaml 的 acceptance_criteria）
-  │   ├─ Driver 再写最小实现代码
-  │   └─ 输出: tests + code
-  │
-  ├─ Gate 1: Pre-Arbiter Static Analysis（xp-consensus 内建）
-  │   ├─ TypeScript strict + ESLint + Test execution
-  │   ├─ ⚠️ Gate 1 仅负责"编译/语法层面"验证
-  │   └─ 失败: 自动修复 (max 3) → 回退 Round 1
-  │
-  └─ Round 2-3: Navigator + Arbiter 评审
-
-sprint-flow 的职责边界:
-  ├─ sprint-flow 仅调用 xp-consensus（一次调用）
-  ├─ xp-consensus 内部会调用 test-driven-development skill
-  ├─ sprint-flow 不会额外调用 TDD（避免重复）
-  └─ 语言特定 TDD 通过 xp-consensus 的 language 参数选择
-```
+| 步骤 | Skill | 来源 | 说明 |
+|------|-------|------|------|
+| 1 | `test-driven-development` | superpowers | RED → GREEN → REFACTOR 铁律 |
+| 2 | `freeze` | gstack | 锁定业务代码，盲评隔离 |
+| 3 | `requesting-code-review` | superpowers | 独立 agent 盲评（隔离状态） |
+| 4 | `unfreeze` | gstack | 解锁业务代码 |
+| 5 | `verification-before-completion` | superpowers | 测试 + lint 证据优先 |
+| 6 | 成本监控 | sprint-flow 编排层 | 超阈值 BLOCK + 用户决策 |
 
 ---
 
@@ -44,66 +25,108 @@ sprint-flow 的职责边界:
 
 ### Step 1: 读取 specification.yaml
 
-从 `.sprint-state/phase-outputs/specification.yaml` 读取 specification。
+从 `.sprint-state/phase-outputs/specification.yaml` 读取 specification（如存在）。
+如不存在，从 Phase 1 输出的设计文档中提取需求。
 
-### Step 2: 调用 xp-consensus skill
+### Step 2: TDD 执行（test-driven-development）
 
 ```bash
-skill(name="xp-consensus", user_message="--spec specification.yaml --lang [springboot/django/golang]")
+skill(name="test-driven-development", user_message="实现 [需求描述]，基于 specification.yaml")
 ```
 
-xp-consensus 执行流程：
+**TDD 铁律**：
+1. 🔴 **RED**: 先写测试（根据 specification.yaml 的 acceptance_criteria）
+2. 🟢 **GREEN**: 写最小实现代码让测试通过
+3. 🔵 **REFACTOR**: 重构代码，保持测试通过
 
-#### Round 1: Driver AI (build agent)
-- 内部调用 test-driven-development skill
-- TDD: 先写测试 (RED) → 再写代码 (GREEN)
-- 输入: specification.yaml
-- 输出: sealed{code, decisions} + public{tests, results}
+**语言特定 TDD**（通过 `--lang` 参数选择）：
 
-#### Gate 1: Pre-Arbiter Static Analysis
-- TypeScript strict + ESLint + Test execution
-- 失败: 自动修复 (max 3 次)
-  - 每次失败后自动修复代码
-  - 修复后重新运行 Gate 1
-  - max 3 次失败 → ⚠️ 暂停等待用户决定
-- 通过: 进入 Navigator 评审
+| 语言 | 调用的 TDD skill |
+|------|-----------------|
+| Spring Boot | `springboot-tdd` |
+| Django | `django-tdd` |
+| Go | `golang-testing` |
 
-#### Round 2 Phase 1: Navigator 盲评 (oracle agent)
-- 输入: requirements + tests + results
-- ⚠️ sealed.code 被 freeze 锁定
-- 输出: checkList
+**输出**: tests + code
 
-#### Round 2 Phase 2: Navigator 验证 (oracle agent)
-- 输入: code (解锁) + checkList
-- 输出: verdict + confidence
+### Step 3: 盲评隔离（freeze）
 
-#### Round 3: Arbiter AI (oracle agent)
-- 输入: Driver output + Navigator verdict + Gate 1 result
-- 置信度阈值: ≥8 APPROVE, <6 REQUEST_CHANGES
-- 输出: APPROVED / REQUEST_CHANGES
+```bash
+skill(name="freeze", user_message="--target src/**/*.ts --exclude **/*.test.ts")
+```
 
-**如果 REQUEST_CHANGES**:
-- 自动回退 Round 1 重新执行
-- 不暂停，自动迭代
+锁定所有业务代码文件，排除测试文件。
+Navigator agent 在盲评阶段将无法访问业务代码。
 
-**如果 APPROVED**:
-- 进入 Phase 3
+### Step 4: 独立盲评（requesting-code-review）
+
+```bash
+skill(name="requesting-code-review", user_message="盲评需求: [需求] + 测试: [测试文件] + 测试结果: [结果]")
+```
+
+**关键**: 盲评 agent 只接收需求 + 测试 + 测试结果，**不传业务代码**（freeze 锁定中）。
+
+**输出**: review findings（问题清单 + 建议）
+
+### Step 5: 解锁业务代码（unfreeze）
+
+```bash
+skill(name="unfreeze", user_message="--target src/**/*.ts")
+```
+
+解锁业务代码文件，允许后续步骤访问。
+
+### Step 6: 验证（verification-before-completion）
+
+```bash
+skill(name="verification-before-completion", user_message="验证实现完整性")
+```
+
+**验证内容**：
+- 测试全部通过
+- Lint 无错误
+- 覆盖率 ≥ 80%
+- 证据优先：必须运行命令并确认输出
+
+**失败处理**：
+- 自动修复 max 3 次
+- 每次失败后修复代码，重新运行验证
+- max 3 次失败 → ⚠️ 暂停等待用户决定
+
+### Step 7: 成本监控（sprint-flow 编排层）
+
+sprint-flow 编排层监控本次 Phase 2 的成本：
+
+| 阈值 | 值 | 处理 |
+|------|-----|------|
+| 单任务阈值 | $0.15 | BLOCK + 提示用户决定 |
+| 日阈值 | $1.00 | BLOCK + 提示用户决定 |
+
+**零降级原则**: 成本超阈值时，必须 BLOCK 并通知用户，由用户决定是否继续。AI 不能自动跳过验证步骤。
 
 ---
 
-### Step 3: 保存 MVP v1
+## 关键行为保留（原 xp-consensus 17 状态机）
 
-保存到 `<project-root>/.sprint-state/phase-outputs/mvp-v1/`
+| 原状态 | 含义 | 新处理方案 |
+|--------|------|-----------|
+| `CIRCUIT_BREAKER_TRIGGERED` | 成本/资源超阈值 | sprint-flow 编排层监控成本，超阈值 BLOCK + 用户决策 |
+| `ROLLBACK_TO_ROUND1` | Gate 1 失败自动修复 → 回退 | verification-before-completion 失败 → 修复 max 3 次 → 仍失败 BLOCK |
+| `GATE1_FAILED`/`GATE1_COMPLETE` | 区分可修复 vs 致命失败 | verification-before-completion 内置此区分 |
+| `GATE2_RUNNING` | Security Scan 集成 | gstack `security-scan` skill 替代 |
+| `SEALED_CODE_ISOLATION` | freeze 技术隔离 | **保留 freeze skill 调用** |
 
 ---
 
-## 语言特定参数
+## Skill 间数据流契约
 
-| 语言 | xp-consensus 参数 | 内部调用的 TDD skill |
-|------|-------------------|---------------------|
-| Spring Boot | `--lang springboot` | springboot-tdd |
-| Django | `--lang django` | django-tdd |
-| Go | `--lang golang` | golang-testing |
+| 步骤 | Skill | 输入 | 输出 | 失败回退 |
+|------|-------|------|------|----------|
+| 1 | test-driven-development | 需求描述 + 现有代码上下文 | 测试 + 代码 (RED→GREEN→REFACTOR) | 修复 max 3 次 → BLOCK |
+| 2 | freeze | 业务代码文件路径 | 锁定状态确认 | ❌ BLOCK |
+| 3 | requesting-code-review | 需求 + 测试 + 测试结果（**不传业务代码**） | review findings | 继续（记录 findings） |
+| 4 | unfreeze | 业务代码文件路径 | 解锁状态确认 | ❌ BLOCK |
+| 5 | verification-before-completion | 测试执行结果 | pass/fail 证据 | 修复 max 3 次 → BLOCK |
 
 ---
 
@@ -111,8 +134,8 @@ xp-consensus 执行流程：
 
 | 暂停点 | 触发条件 | 用户操作 |
 |--------|---------|---------|
-| Gate 1 max 3 失败 | Gate 1 失败超过 3 次 | 用户决定修复或放弃 |
-| Arbiter REQUEST | 自动回退 Round 1（不暂停） | 自动迭代直到 APPROVED |
+| 验证 max 3 失败 | verification-before-completion 失败超过 3 次 | 用户决定修复或放弃 |
+| 成本超阈值 | 单任务 >$0.15 或日 >$1.00 | 用户决定继续或暂停 |
 
 ---
 

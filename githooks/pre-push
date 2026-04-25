@@ -4,7 +4,7 @@
 # DESIGN: Hook validates result file, Skill executes review
 # No CLI skill invocation - avoids OpenCode architecture mismatch
 #
-# See: docs/plans/code-walkthrough-pre-push-design-v2.md
+# See: docs/plans/delphi-review --mode code-walkthrough-pre-push-design-v2.md
 #
 # Install: cp this-file .git/hooks/pre-push && chmod +x .git/hooks/pre-push
 
@@ -22,11 +22,40 @@ if [[ "$CURRENT_BRANCH" == "main" || "$CURRENT_BRANCH" == "master" ]]; then
   exit 0
 fi
 
-# Documentation-only project check
-CODE_FILES=$(find . -type f \( -name "*.py" -o -name "*.js" -o -name "*.ts" -o -name "*.tsx" -o -name "*.java" -o -name "*.go" -o -name "*.rs" -o -name "*.cpp" -o -name "*.c" -o -name "*.swift" -o -name "*.kt" \) -not -path "./.git/*" 2>/dev/null | wc -l)
+# Get files being pushed in this push operation
+# pre-push receives stdin with ref information
+PUSHED_FILES=""
+while read local_ref local_sha remote_ref remote_sha; do
+  if [ "$remote_sha" = "0000000000000000000000000000000000000000" ]; then
+    # New branch - compare against empty tree
+    PUSHED_FILES=$(git diff-tree -r --name-only HEAD)
+  else
+    # Existing branch - compare against what we're pushing from
+    PUSHED_FILES=$(git diff-tree -r --name-only "$remote_sha" "$local_sha")
+  fi
+done
 
-if [ "$CODE_FILES" -eq 0 ]; then
-  echo "📚 Documentation-only project. Skipping..."
+if [ -z "$PUSHED_FILES" ]; then
+  echo "📚 No files changed in push. Skipping walkthrough."
+  exit 0
+fi
+
+# Determine if pushed files contain ONLY documentation/non-source files
+DOC_ONLY=true
+SOURCE_EXTENSIONS="\.py$|\.js$|\.ts$|\.tsx$|\.java$|\.go$|\.rs$|\.cpp$|\.c$|\.swift$|\.kt$|\.sh$|\.dart$|\.m$|\.mm$|\.h$|\.hpp$"
+
+for file in $PUSHED_FILES; do
+  if echo "$file" | grep -qE "$SOURCE_EXTENSIONS"; then
+    DOC_ONLY=false
+    break
+  fi
+done
+
+# Documentation-only changes (no source code) → skip walkthrough
+if [ "$DOC_ONLY" = "true" ]; then
+  echo "📚 Documentation-only push (no source code files)."
+  echo "   Files: $(echo "$PUSHED_FILES" | tr '\n' ', ' | sed 's/,$//')"
+  echo "   ✅ No code review required. Proceeding with push..."
   exit 0
 fi
 
@@ -76,7 +105,7 @@ if [ ! -f "$RESULT_FILE" ]; then
   echo ""
   echo "Before pushing, run code walkthrough in your Agent session:"
   echo ""
-  echo "  /code-walkthrough"
+  echo "  /delphi-review --mode code-walkthrough"
   echo ""
   echo "After APPROVED verdict, retry this push."
   echo ""
@@ -114,7 +143,7 @@ if ! jq empty "$RESULT_FILE" 2>/dev/null; then
   echo ""
   echo "$RESULT_FILE is not valid JSON."
   echo ""
-  echo "Re-run: /code-walkthrough"
+  echo "Re-run: /delphi-review --mode code-walkthrough"
   echo ""
   exit 1
 fi
@@ -146,7 +175,7 @@ if [ "$RESULT_COMMIT" != "$CURRENT_COMMIT" ]; then
   echo "  Expected: $CURRENT_COMMIT"
   echo "  Found: $RESULT_COMMIT"
   echo ""
-  echo "Re-run: /code-walkthrough"
+  echo "Re-run: /delphi-review --mode code-walkthrough"
   echo ""
   exit 1
 fi
@@ -169,7 +198,7 @@ if [ "$RESULT_VERDICT" != "APPROVED" ]; then
     echo ""
   fi
   
-  echo "Fix issues and re-run: /code-walkthrough"
+  echo "Fix issues and re-run: /delphi-review --mode code-walkthrough"
   echo ""
   exit 1
 fi
@@ -185,7 +214,7 @@ if [[ "$CURRENT_TIME" > "$RESULT_EXPIRES" ]]; then
   echo "  Expired: $RESULT_EXPIRES"
   echo "  Current: $CURRENT_TIME"
   echo ""
-  echo "Re-run: /code-walkthrough"
+  echo "Re-run: /delphi-review --mode code-walkthrough"
   echo ""
   exit 1
 fi

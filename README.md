@@ -4,14 +4,13 @@ AI-powered development workflow tools with consensus engines and quality gates f
 
 ## Features
 
-- **XP Consensus Engine** - Driver + Navigator + Arbiter decision workflow using Delphi method
-- **Sprint Flow** - One-Shot Sprint 自动流水线 (Think → Plan → Build → Review → Ship)
-- **Code Walkthrough** - Multi-expert post-commit code review before push
-- **Delphi Review** - MANDATORY consensus review before any implementation/design decisions
+- **Sprint Flow** - One-Shot Sprint 自动流水线 (Think → Plan → Build → Review → Ship) using superpowers TDD + review
+- **Delphi Review** - MANDATORY consensus review before any implementation/design decisions (supports design and code-walkthrough modes)
 - **Test-Specification Alignment** - Two-phase verification ensuring tests match requirements
 - **Principles Checker** - Clean Code (9) + SOLID (5) rules with 9 language adapters
 - **Boy Scout Rule** - Differential warning enforcement for historical projects
 - **8-Gate Quality System** - Pre-commit hooks blocking bad code
+- **Quality Gates Code of Conduct** - Zero-tolerance policy prohibiting `--no-verify` bypass
 
 ## Quality Gates
 
@@ -77,15 +76,11 @@ git push    # Runs pre-push (multi-expert Delphi review)
 ```bash
 # One-Shot Sprint (自动流水线)
 /sprint-flow "开发访谈机器人，支持多轮对话"
+# Phase 2 uses: test-driven-development (superpowers) + freeze + review
 
-# XP consensus workflow
-/xp-consensus
-
-# Code walkthrough
-/code-walkthrough
-
-# Delphi review
-/delphi-review
+# Delphi review (supports design and code-walkthrough modes)
+/delphi-review                  # Design mode (default)
+/delphi-review --mode code-walkthrough  # Code walkthrough mode (git push review)
 
 # Test-specification alignment
 /test-specification-alignment
@@ -149,17 +144,17 @@ npx tsx src/principles/boy-scout.ts \
 ```
 
 ### specification.yaml
-Requirements and acceptance criteria in YAML format:
+Requirements and acceptance criteria (auto-generated from APPROVED design docs):
 ```yaml
 specification:
-  id: SPEC-XXX
+  source: "docs/plans/2026-04-14-auth-design.md"
+  generated: "2026-04-14"
   requirements:
-    - id: REQ-XXX
+    - description: "User login with password"
       acceptance_criteria:
-        - id: AC-XXX-01
-          given: ...
-          when: ...
-          then: ...
+        - given: "valid username and password"
+          when: "POST /login"
+          then: "returns 200 + JWT token"
 ```
 
 ### Test Annotations
@@ -183,7 +178,7 @@ skills/
 │   ├── references/                # Phase-specific execution instructions
 │   │   ├── phase-0-think.md
 │   │   ├── phase-1-plan.md
-│   │   ├── phase-2-build.md
+│   │   ├── phase-2-build.md       # TDD + freeze + review (replaces xp-consensus)
 │   │   ├── phase-3-review.md
 │   │   ├── phase-4-uat.md
 │   │   ├── phase-5-feedback.md
@@ -192,11 +187,10 @@ skills/
 │       ├── pain-document-template.md
 │       ├── emergent-issues-template.md
 │       └── sprint-summary-template.md
-├── xp-consensus/SKILL.md        # Driver-Navigator-Arbiter workflow
-├── code-walkthrough/SKILL.md    # Multi-expert Delphi review
-├── delphi-review/SKILL.md       # MANDATORY before implementation
+├── delphi-review/SKILL.md         # MANDATORY before implementation (design + code-walkthrough dual modes)
+├── specification-generator/SKILL.md  # Lightweight spec auto-generation from APPROVED design docs
 ├── test-specification-alignment/SKILL.md  # Two-phase verification
-└── code-reviewer/SKILL.md       # Static analysis + SARIF
+└── code-reviewer/SKILL.md         # Static analysis + SARIF
 ```
 
 ## Conventions

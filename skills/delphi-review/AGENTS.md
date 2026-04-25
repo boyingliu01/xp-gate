@@ -48,4 +48,4 @@ skills/delphi-review/
 
 ## NOTES
 - Implements traditional Delphi method for anonymous expert consensus
-- Used by xp-consensus and code-walkthrough systems
+- Used by code-walkthrough mode

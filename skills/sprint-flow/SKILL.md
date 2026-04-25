@@ -2,7 +2,7 @@
 name: sprint-flow
 description: >
   One-Shot Sprint 自动流水线。单一入口，自动串联 Think → Plan → Build → 
-  Review → Ship 流程。整合 autoplan + delphi-review + xp-consensus + 
+  Review → Ship 流程。整合 autoplan + delphi-review + TDD + review + 
   cross-model-review + ship 等现有 Skills。关键节点暂停等待用户决策。
   承认 Emergent Requirements 限制，设计用户验收环节。
   
@@ -49,7 +49,9 @@ Phase 0: THINK → office-hours → Pain Document
 Phase 1: PLAN → autoplan → ⚠️ (如有taste_decisions，暂停等用户确认)
            → delphi-review → ⚠️ (等待 APPROVED)
            → specification-generator → specification.yaml
-Phase 2: BUILD → xp-consensus (内建TDD) → ⚠️ (Gate 1 失败超过 max 3)
+Phase 2: BUILD → test-driven-development (RED→GREEN→REFACTOR)
+           → freeze (盲评隔离) → requesting-code-review → unfreeze
+           → verification-before-completion → ⚠️ (验证失败超过 max 3)
            → MVP v1
 Phase 3: REVIEW → cross-model-review → test-specification-alignment
            → browse → ⚠️ (验证失败)
@@ -68,8 +70,8 @@ Phase 6: SHIP → ship → ⚠️ (等待发布确认)
 |-----------|---------|---------|-------------|
 | Phase 1 | autoplan surfacing taste_decisions | 用户确认每个决策 | 确认后自动继续 |
 | Phase 1 | delphi-review 未 APPROVED | 修复并重新评审 | APPROVED 后自动继续 |
-| Phase 2 | Gate 1 失败超过 max 3 | 用户决定修复或放弃 | Gate 1 通过后自动继续 |
-| Phase 2 | Arbiter REQUEST_CHANGES | 自动回退 Round 1（不暂停） | APPROVED 后自动继续 |
+| Phase 2 | 验证失败超过 max 3 | 用户决定修复或放弃 | 验证通过后自动继续 |
+| Phase 2 | 成本超阈值 | 用户决定继续或暂停 | 用户确认后自动继续 |
 | Phase 3 | browse 发现问题 | 回退 Phase 2（不暂停） | 验证通过后自动继续 |
 | **Phase 4** | ⚠️ **必须人工验收** | 用户实际使用后确认 | 用户确认后继续 |
 | Phase 6 | ship PR 创建 | 用户确认合并 | 合并后自动继续 |
@@ -91,10 +93,31 @@ Phase 6: SHIP → ship → ⚠️ (等待发布确认)
 - IF autoplan AUTO_APPROVED + 无 taste_decisions → 跳过 delphi-review
 - IF autoplan NEEDS_REVIEW OR taste_decisions > 0 → 调用 delphi-review
 
-### Phase 2: BUILD（One-Shot 执行）
-- `xp-consensus` — Driver + Navigator + Arbiter（**内含 TDD 执行**）
-- ⚠️ sprint-flow 不单独调用 TDD，TDD 由 xp-consensus 内部执行
-- 语言特定：`springboot-tdd` / `django-tdd` / `golang-testing`（通过 xp-consensus 参数选择）
+### Phase 2: BUILD（TDD + 盲评 + 验证）
+
+**替代原 xp-consensus**：使用 superpowers 成熟 skill 组合，保留关键行为（freeze 隔离、熔断回退、成本监控）。
+
+| 步骤 | Skill | 说明 |
+|------|-------|------|
+| 1 | `test-driven-development` (superpowers) | RED → GREEN → REFACTOR 铁律执行 |
+| 2 | `freeze` (gstack) | 锁定业务代码，盲评 agent 只能访问测试 |
+| 3 | `requesting-code-review` (superpowers) | 独立 agent 盲评业务代码（隔离状态） |
+| 4 | `unfreeze` (gstack) | 解锁业务代码 |
+| 5 | `verification-before-completion` (superpowers) | 运行测试 + lint，证据优先 |
+| 6 | 成本监控（sprint-flow 编排层） | 超阈值 BLOCK + 用户决策 |
+
+**关键行为保留**（原 xp-consensus 17 状态机中的真实边缘情况）：
+
+| 原状态 | 新处理方案 |
+|--------|-----------|
+| `CIRCUIT_BREAKER_TRIGGERED` | sprint-flow 编排层监控成本，超阈值 BLOCK + 用户决策 |
+| `ROLLBACK_TO_ROUND1` | verification-before-completion 失败 → 修复 max 3 次 → 仍失败 BLOCK |
+| `GATE1_FAILED`/`GATE1_COMPLETE` | verification-before-completion 内置此区分 |
+| `GATE2_RUNNING` | gstack `security-scan` skill 替代 |
+| `SEALED_CODE_ISOLATION` | 保留 freeze skill 调用 |
+
+**语言特定 TDD**：通过 `--lang` 参数选择：
+- `springboot-tdd` / `django-tdd` / `golang-testing`
 
 ### Phase 3: REVIEW + TEST（验证）
 - `cross-model-review` — Alternating 对抗评审
@@ -162,7 +185,6 @@ Phase 6: SHIP → ship → ⚠️ (等待发布确认)
 
 /sprint-flow "开发并发任务调度器" --lang golang
 # Phase 2 自动调用 golang-testing
-```
 
 ---
 
@@ -214,7 +236,7 @@ Sprint 结束时 (Phase 6 完成):
 # Phase 1: autoplan 发现 2 个 taste_decisions → ⚠️ 暂停
 # 用户确认决策后 → delphi-review → Round 1 REQUEST_CHANGES
 # 修复 → Round 2 APPROVED → specification.yaml
-# Phase 2: xp-consensus → TDD → Gate 1 通过 → MVP v1
+# Phase 2: TDD + freeze + review → verification → MVP v1
 # Phase 3: cross-model-review APPROVED → browse QA 通过
 # Phase 4: ⚠️ 用户验收 → 发现 1 个 Major emergent issue
 # Phase 5: learn → 记录 → Sprint 2 Pain Document
@@ -248,7 +270,7 @@ Sprint 结束时 (Phase 6 完成):
 
 所有被调用的 Skills 保持独立可用：
 - 用户可以直接调用 `delphi-review` 单独评审
-- 用户可以直接调用 `xp-consensus` 单独执行
+- 用户可以直接调用 `test-driven-development` 单独执行 TDD
 - sprint-flow 只是自动串联调用，不替代底层 Skills
 
 ---
