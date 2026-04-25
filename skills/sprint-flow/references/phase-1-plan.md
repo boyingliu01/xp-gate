@@ -2,7 +2,7 @@
 
 ## 目标
 
-多模型评审，达成 APPROVED 共识。生成 specification.yaml 作为后续执行的依据。
+多模型评审，达成 APPROVED 共识。后续步骤自动从 APPROVED 设计文档提取 specification.yaml。
 
 ---
 
@@ -103,13 +103,14 @@ delphi-review 执行：
 
 ---
 
-### Step 3: 调用 specification-generator
+### Step 3: 从 APPROVED 设计文档提取 specification.yaml
 
-```bash
-skill(name="specification-generator", user_message="[autoplan 输出 或 delphi-review 共识报告]")
+设计文档 APPROVED 后，自动提取需求 + AC 生成轻量 specification.yaml（无需独立 skill）：
+
 ```
-
-生成 specification.yaml：
+# 自动完成: 读取设计文档 → 提取 requirements → 生成 specification.yaml
+# specification.yaml 用于 test-spec-alignment 验证
+```
 
 ```yaml
 specification:

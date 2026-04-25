@@ -18,7 +18,6 @@ XP Workflow Automation project - AI-powered development workflow tools with cons
 │   │   ├── references/         # Phase-specific execution instructions (7 phases)
 │   │   └── templates/          # Output templates (pain document, emergent issues, sprint summary)
 │   ├── delphi-review/          # Delphi consensus methodology (design + code-walkthrough dual modes)
-│   ├── specification-generator/# Lightweight spec auto-generation from APPROVED design docs
 │   ├── test-specification-alignment/  # Test-requirement alignment verification  
 │   └── code-reviewer/          # Static code quality analysis + SARIF output
 ├── src/principles/    # Clean Code & SOLID checker (14 rules, 9 language adapters)
@@ -36,7 +35,6 @@ XP Workflow Automation project - AI-powered development workflow tools with cons
 | Quality Gate Code of Conduct | ./githooks/QUALITY-GATES-CODE-OF-CONDUCT.md | Zero-tolerance policy, --no-verify prohibition |
 | Sprint Flow | ./skills/sprint-flow/ | One-Shot Sprint 自动流水线 (7 phases, 3 templates) |
 | Delphi Review | ./skills/delphi-review/ | MANDATORY before implementation (design + code-walkthrough dual modes) |
-| Specification Generator | ./skills/specification-generator/ | Lightweight spec auto-generation from design docs |
 | Test Alignment | ./skills/test-specification-alignment/ | Requirements-test alignment verification |
 | Code Reviewer | ./skills/code-reviewer/ | Static analysis + SARIF output for IDE integration |
 | Boy Scout Rule | ./src/principles/boy-scout.ts | Differential warning enforcement for historical projects |

@@ -188,7 +188,6 @@ skills/
 │       ├── emergent-issues-template.md
 │       └── sprint-summary-template.md
 ├── delphi-review/SKILL.md         # MANDATORY before implementation (design + code-walkthrough dual modes)
-├── specification-generator/SKILL.md  # Lightweight spec auto-generation from APPROVED design docs
 ├── test-specification-alignment/SKILL.md  # Two-phase verification
 └── code-reviewer/SKILL.md         # Static analysis + SARIF
 ```

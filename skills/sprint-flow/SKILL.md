@@ -48,7 +48,7 @@ maturity: beta
 Phase 0: THINK → office-hours → Pain Document
 Phase 1: PLAN → autoplan → ⚠️ (如有taste_decisions，暂停等用户确认)
            → delphi-review → ⚠️ (等待 APPROVED)
-           → specification-generator → specification.yaml
+           → 自动生成 specification.yaml（无需独立 skill）
 Phase 2: BUILD → test-driven-development (RED→GREEN→REFACTOR)
            → freeze (盲评隔离) → requesting-code-review → unfreeze
            → verification-before-completion → ⚠️ (验证失败超过 max 3)
@@ -87,7 +87,7 @@ Phase 6: SHIP → ship → ⚠️ (等待发布确认)
 ### Phase 1: PLAN（共识评审）
 - `autoplan` (gstack) — CEO → Design → Eng 自动流水线
 - `delphi-review` — 多轮匿名评审直到共识
-- `specification-generator` — 生成 specification.yaml
+- **specification.yaml** — 自动生成（无需独立 skill）
 
 **条件分支逻辑**:
 - IF autoplan AUTO_APPROVED + 无 taste_decisions → 跳过 delphi-review

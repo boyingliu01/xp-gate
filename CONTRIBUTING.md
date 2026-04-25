@@ -58,7 +58,7 @@ All commits must pass the 8-gate quality system:
 
 **Option B: Sprint Flow (推荐)**
 1. Run `/sprint-flow "[需求描述]"` to execute the full Think → Plan → Build → Review → Ship pipeline
-2. The sprint-flow skill automatically chains: office-hours → autoplan → delphi-review → specification-generator → TDD + review → cross-model-review → ship
+2. The sprint-flow skill automatically chains: office-hours → autoplan → delphi-review → TDD + review → cross-model-review → ship
 3. Key pause points require user confirmation (taste decisions, approval gates, user acceptance)
 
 ### During Implementation

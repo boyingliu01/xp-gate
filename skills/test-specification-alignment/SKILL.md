@@ -105,7 +105,7 @@ description: "测试与 Specification 对齐验证引擎。确保测试准确反
 流程步骤:
 1. brainstorming      → 需求探索，生成设计文档
 2. delphi-review      → 需求评审（多轮直到 APPROVED）
-3. specification-generator → 从 APPROVED 的设计文档生成 specification.yaml
+3. spec 自动生成（从 APPROVED 设计文档提取 specification.yaml）
 
 为什么必须这样？
 - 在 delphi-review APPROVED 后生成，避免设计文档修改时 spec 也需重新生成
