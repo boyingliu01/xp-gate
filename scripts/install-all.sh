@@ -4,7 +4,7 @@
 #   1. Project's .git/hooks/ (for current project)
 #   2. OpenCode global template ~/.config/opencode/git-hooks-template/
 #
-# Usage: ./githooks/install.sh [--force] [--project-only] [--global-only]
+# Usage: bash scripts/install-all.sh [--force] [--project-only] [--global-only]
 
 set -e
 
@@ -63,7 +63,7 @@ done
 echo ""
 echo "→ Step 3: Determining installation targets..."
 
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../githooks" && pwd)"
 PROJECT_HOOKS_DIR="$GIT_DIR/hooks"
 OPENCODE_TEMPLATE_DIR="$HOME/.config/opencode/git-hooks-template"
 
@@ -152,8 +152,7 @@ echo "  • 'git push'   → Pre-push review runs automatically"
 echo ""
 echo "Shell: $SHELL_NAME (verified)"
 echo ""
-echo "To bypass: git commit --no-verify"
-echo "To reinstall: ./githooks/install.sh --force"
+echo "To reinstall: bash scripts/install-all.sh --force"
 echo ""
 
 exit 0

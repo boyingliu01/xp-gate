@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
 # Pre-Push Hook (Delphi Code Walkthrough) Installation Script
-# Usage: bash githooks/install-pre-push.sh [--force]
+# Usage: bash scripts/install-pre-push.sh [--force]
 set -e
 
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../githooks" && pwd)"
 
 if ! git rev-parse --git-dir &>/dev/null; then
   echo "❌ Not a git repository"

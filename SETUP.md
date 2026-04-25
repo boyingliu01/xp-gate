@@ -12,8 +12,8 @@
 
 | 组件 | 一句话 | 安装命令 |
 |------|--------|---------|
-| **Pre-Commit 门禁** | git commit 自动检查：类型检查、lint、测试、覆盖率、代码规范、复杂度 | `bash githooks/install-pre-commit.sh` |
-| **Pre-Push 门禁** | git push 前验证代码走查结果 | `bash githooks/install-pre-push.sh` |
+| **Pre-Commit 门禁** | git commit 自动检查：类型检查、lint、测试、覆盖率、代码规范、复杂度 | `bash scripts/install-pre-commit.sh` |
+| **Pre-Push 门禁** | git push 前验证代码走查结果 | `bash scripts/install-pre-push.sh` |
 | **Principles Checker** | 静态代码分析工具：Clean Code + SOLID 检查 | `bash scripts/install-principles-cli.sh` |
 | **Delphi Review** | 多专家评审设计文档和代码 | `bash scripts/install-delphi-review.sh` |
 | **Test-Spec Alignment** | 测试与需求对齐验证 | `bash scripts/install-test-spec-alignment.sh` |
@@ -23,7 +23,7 @@
 
 | 组合包 | 包含 | 安装命令 |
 |--------|------|---------|
-| **质量门禁包** | Pre-Commit + Pre-Push + Principles Checker + 行为准则 | `bash githooks/install.sh` |
+| **质量门禁包** | Pre-Commit + Pre-Push + Principles Checker + 行为准则 | `bash scripts/install-all.sh` |
 | **AI 评审包** | Delphi Review + Test-Spec Alignment | 分别安装两个 |
 | **完整工作流** | 所有组件 | 分别安装所有 |
 
@@ -49,7 +49,7 @@ Gate 9: 架构质量检查
 
 **安装**：
 ```bash
-bash githooks/install-pre-commit.sh
+bash scripts/install-pre-commit.sh
 ```
 
 **依赖**：
@@ -66,7 +66,7 @@ bash githooks/install-pre-commit.sh
 
 **安装**：
 ```bash
-bash githooks/install-pre-push.sh
+bash scripts/install-pre-push.sh
 ```
 
 **依赖**：无（脚本本身不需要外部依赖）
@@ -179,8 +179,8 @@ bash scripts/install-sprint-flow.sh
 
 ```bash
 # 只安装门禁，不需要任何 AI skill
-bash githooks/install-pre-commit.sh
-bash githooks/install-pre-push.sh
+bash scripts/install-pre-commit.sh
+bash scripts/install-pre-push.sh
 ```
 
 commit 和 push 时自动运行质量检查。不用 AI，不用 Prompt。
@@ -198,7 +198,7 @@ bash scripts/install-delphi-review.sh
 
 ```bash
 # 安装所有
-bash githooks/install.sh
+bash scripts/install-all.sh
 bash scripts/install-delphi-review.sh
 bash scripts/install-test-spec-alignment.sh
 bash scripts/install-sprint-flow.sh
@@ -222,7 +222,7 @@ git clone https://github.com/boyingliu01/xp-workflow-automation.git
 cd xp-workflow-automation
 
 # 选择需要的组件安装
-bash githooks/install-pre-commit.sh
+bash scripts/install-pre-commit.sh
 bash scripts/install-delphi-review.sh
 # ...
 ```

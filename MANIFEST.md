@@ -14,8 +14,8 @@ components:
     name: "Pre-Commit Hook (9 Gates)"
     description: "Static analysis, lint, test, coverage, shell check, principles (Clean Code + SOLID), cyclomatic complexity, Boy Scout Rule, architecture quality"
     type: git-hook
-    install_command: "bash <(curl -fsSL https://raw.githubusercontent.com/boyingliu01/xp-workflow-automation/repo-main/githooks/install-pre-commit.sh)"
-    local_install: "bash githooks/install-pre-commit.sh"
+    install_command: "bash <(curl -fsSL https://raw.githubusercontent.com/boyingliu01/xp-workflow-automation/repo-main/scripts/install-pre-commit.sh)"
+    local_install: "bash scripts/install-pre-commit.sh"
     requires:
       - node (>=20)
       - npm
@@ -29,8 +29,8 @@ components:
     name: "Pre-Push Hook (Delphi Code Walkthrough)"
     description: "Multi-expert AI code review before git push. Validates .code-walkthrough-result.json from Delphi review."
     type: git-hook
-    install_command: "bash <(curl -fsSL https://raw.githubusercontent.com/boyingliu01/xp-workflow-automation/repo-main/githooks/install-pre-push.sh)"
-    local_install: "bash githooks/install-pre-push.sh"
+    install_command: "bash <(curl -fsSL https://raw.githubusercontent.com/boyingliu01/xp-workflow-automation/repo-main/scripts/install-pre-push.sh)"
+    local_install: "bash scripts/install-pre-push.sh"
     requires: []
     recommends:
       - delphi-review skill
@@ -105,8 +105,8 @@ bundles:
     name: "Quality Gates Bundle"
     description: "All git hooks + principles CLI + quality standards"
     components: [pre-commit, pre-push, principles-cli, quality-gates-code-of-conduct]
-    install_command: "bash <(curl -fsSL https://raw.githubusercontent.com/boyingliu01/xp-workflow-automation/repo-main/githooks/install.sh)"
-    local_install: "bash githooks/install.sh"
+    install_command: "bash <(curl -fsSL https://raw.githubusercontent.com/boyingliu01/xp-workflow-automation/repo-main/scripts/install-all.sh)"
+    local_install: "bash scripts/install-all.sh"
 
   - id: ai-review
     name: "AI Code Review Bundle"
@@ -118,7 +118,7 @@ bundles:
     name: "Full Sprint Workflow"
     description: "All components including sprint-flow orchestrator"
     components: [quality-gates, ai-review, sprint-flow]
-    install_command: "bash githooks/install.sh && bash scripts/install-delphi-review.sh && bash scripts/install-test-spec-alignment.sh && bash scripts/install-sprint-flow.sh"
+    install_command: "bash scripts/install-all.sh && bash scripts/install-delphi-review.sh && bash scripts/install-test-spec-alignment.sh && bash scripts/install-sprint-flow.sh"
 ```
 
 ## Dependency Graph
