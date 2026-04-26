@@ -1,7 +1,8 @@
 """Tests for engine/grader.py — evaluation grading functionality."""
 
 import pytest
-from engine.grader import Grader, EvalCase, EvalAssertion, JudgeResult
+from unittest.mock import MagicMock
+from engine.grader import Grader, EvalCase, EvalAssertion, JudgeResult, AssertionResult
 
 
 class TestGrader:
@@ -231,3 +232,163 @@ class TestGrader:
         assert grader._get_weight_multiplier(0) == 1  # Clamped to 1
         assert grader._get_weight_multiplier(5) == 3  # Clamped to 3
         assert grader._get_weight_multiplier(10) == 3  # Clamped to 3
+
+
+def test_grade_output_with_llm_judge():
+    """Test grading with LLM judge enabled."""
+    mock_llm_client = MagicMock()
+    grader = Grader(llm_client=mock_llm_client)
+    
+    eval_case = EvalCase(
+        id=10,
+        name="llm_judge_test",
+        category="normal",
+        prompt="Test with LLM judge",
+        expected_output="Expected output",
+        assertions=[
+            EvalAssertion(name="contains_test", type="contains", value="test", weight=1)
+        ]
+    )
+    
+    model_output = "This is a test output"
+    result = grader.grade_output(eval_case, model_output)
+    
+    assert result["eval_id"] == 10
+    assert result["total_weighted_score"] == 1
+    assert result["total_possible_score"] == 1
+    assert result["pass_rate"] == 1.0
+    assert result["final_passed"] is True
+
+
+def test_grade_output_unknown_assertion_type():
+    """Test grading with unknown assertion type."""
+    grader = Grader()
+    
+    eval_case = EvalCase(
+        id=11,
+        name="unknown_type_test",
+        category="normal",
+        prompt="Test with unknown assertion type",
+        expected_output="Expected output",
+        assertions=[
+            EvalAssertion(name="unknown_type", type="unknown_type", value="test", weight=1)
+        ]
+    )
+    
+    model_output = "This is a test output"
+    result = grader.grade_output(eval_case, model_output)
+    
+    # The unknown assertion should fail with low confidence
+    assert result["total_weighted_score"] == 0
+    assert result["total_possible_score"] == 1
+    assert result["pass_rate"] == 0.0
+    assert result["assertion_results"][0]["passed"] is False
+    assert result["assertion_results"][0]["confidence"] == 0.0
+    assert "Unknown assertion type" in result["assertion_results"][0]["reason"]
+
+
+def test_grade_output_invalid_regex():
+    """Test grading with invalid regex assertion."""
+    grader = Grader()
+    
+    eval_case = EvalCase(
+        id=12,
+        name="invalid_regex_test",
+        category="normal",
+        prompt="Test with invalid regex",
+        expected_output="Expected output",
+        assertions=[
+            EvalAssertion(name="invalid_regex", type="regex", value="[unclosed_bracket", weight=1)
+        ]
+    )
+    
+    model_output = "This is a test output"
+    result = grader.grade_output(eval_case, model_output)
+    
+    # The invalid regex should fail with low confidence
+    assert result["total_weighted_score"] == 0
+    assert result["total_possible_score"] == 1
+    assert result["pass_rate"] == 0.0
+    assert result["assertion_results"][0]["passed"] is False
+    assert result["assertion_results"][0]["confidence"] == 0.0
+    assert "Invalid regex pattern" in result["assertion_results"][0]["reason"]
+
+
+def test_llm_judge_method():
+    """Test the _llm_judge method directly."""
+    grader = Grader()
+    
+    eval_case = EvalCase(
+        id=13,
+        name="judge_test",
+        category="normal",
+        prompt="Test judge method",
+        expected_output="Expected output",
+        assertions=[]
+    )
+    
+    # Test with no assertions
+    assertion_results = []
+    judge_result = grader._llm_judge(eval_case, "model output", assertion_results)
+    
+    assert judge_result.passed is False
+    assert judge_result.confidence == 0.0
+    assert "No assertions to evaluate" in judge_result.reasoning
+    
+    # Test with some passing assertions
+    assertion_results = [
+        AssertionResult(
+            assertion=EvalAssertion(name="test", type="contains", value="test", weight=1),
+            passed=True,
+            confidence=1.0,
+            reason="Passed"
+        ),
+        AssertionResult(
+            assertion=EvalAssertion(name="test2", type="contains", value="test2", weight=1),
+            passed=False,
+            confidence=1.0,
+            reason="Failed"
+        )
+    ]
+    
+    judge_result = grader._llm_judge(eval_case, "model output with test", assertion_results)
+    
+    assert judge_result.passed is True  # More than 50% passed
+    assert judge_result.confidence == 0.5  # 1 out of 2 passed
+    assert "1/2 assertions passed" in judge_result.reasoning
+
+
+def test_llm_judge_with_low_confidence():
+    """Test LLM judge with low confidence scenario."""
+    grader = Grader()
+    
+    eval_case = EvalCase(
+        id=14,
+        name="low_confidence_test",
+        category="normal",
+        prompt="Test low confidence",
+        expected_output="Expected output",
+        assertions=[
+            EvalAssertion(name="test", type="contains", value="test", weight=1)
+        ]
+    )
+    
+    # Create assertion results with low confidence
+    assertion_results = [
+        AssertionResult(
+            assertion=EvalAssertion(name="test", type="contains", value="test", weight=1),
+            passed=True,
+            confidence=0.3,  # Low confidence
+            reason="Passed with low confidence"
+        )
+    ]
+    
+    judge_result = grader._llm_judge(eval_case, "model output with test", assertion_results)
+    
+    # The judge confidence is calculated based on passed ratio, not individual assertion confidence
+    assert judge_result.passed is True  # Still passed since ratio is 100%
+    assert judge_result.confidence == 1.0  # Because 1/1 assertions passed (100%)
+
+
+if __name__ == "__main__":
+    pytest.main([__file__])
