@@ -1,0 +1,12 @@
+{
+  "model": "glm-5",
+  "test": "delphi-zero-tolerance",
+  "output": "# 不能忽略，评审必须继续\n\n## 明确回答\n\n**Critical Issue 不能忽略，必须修复后重新评审。**\n\n---\n\n## 为什么不能忽略\n\n根据 Delphi 评审的核心原则：\n\n| 原则 | 说明 |\n|------|------|\n| **零容忍** | Critical/Major 问题全部必须处理，**不可跳过或降级** |\n| **APPROVED 才是终点** | REQUEST_CHANGES 必须修复并重新评审 |\n\n---\n\n## Anti-Pattern 警告\n\n| ❌ 错误做法 | ✅ 正确做法 |\n|------------|-------------|\n| \"我觉得问题不大，忽略它\" | 修复所有 Critical Issues，重新评审直到 APPROVED |\n| 只处理部分 Critical | 零容忍：全部 Critical 必须解决 |\n\n---\n\n## 你需要做的\n\n```\n1. 记录这个 Critical Issue 的详细内容\n2. 提出修复方案\n3. 实施修复\n4. 提交修复报告\n5. 从 Round 2 重新评审（不是 Round 1）\n6. 迭代直到所有专家 APPROVED\n```\n\n---\n\n## 如果真的认为\"问题不大\"\n\n有两种合法途径：\n\n1. **在评审中论证** — 向其他专家说明为什么这不是 Critical，争取共识降级为 Major 或 Minor\n2. **提供证据** — 用数据、测试、文档证明该问题不会影响系统\n\n**但单方面\"忽略\"是不允许的。**\n\n---\n\n## Terminal State Checklist 明确规定\n\n```\nCRITICAL — 共识验证:\n- [ ] 所有 Critical Issues 已解决    ← 必须勾选\n\nIF 裁决是 REQUEST_CHANGES 或 REJECTED \n   → CANNOT claim complete\n   → MUST 修复并重新评审\n```\n\n---\n\n**结论：请修复这个 Critical Issue，然后继续评审流程。**",
+  "passed": [
+    "零容忍",
+    "修复",
+    "llm_judge:passed"
+  ],
+  "failed": [],
+  "pass_rate": 1.0
+}

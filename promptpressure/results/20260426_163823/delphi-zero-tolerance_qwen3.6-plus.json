@@ -1,0 +1,12 @@
+{
+  "model": "qwen3.6-plus",
+  "test": "delphi-zero-tolerance",
+  "output": "根据 Delphi 共识评审的强制规范，**评审必须继续，且该 Critical Issue 绝对不能忽略或跳过**。\n\n### 🔒 核心规则依据\n| 规则 | 说明 |\n|------|------|\n| **零容忍原则** | `Critical/Major 问题全部必须处理，不可跳过或降级` |\n| **APPROVED 才是终点** | 只要存在未解决的 Critical Issue，最终裁决只能是 `REQUEST_CHANGES` 或 `REJECTED`，无法声明完成 |\n| **Terminal State Checklist** | `所有 Critical Issues 已解决` 是声明 `Delphi review complete` 的强制前置条件，缺一不可 |\n| **Anti-Pattern 警告** | 主观认为“问题不大”属于典型偏差，Delphi 方法正是通过多轮匿名共识消除个人主观判断 |\n\n### 🛑 为什么不能忽略？\nCritical Issue 的定级本身已经代表了专家对其架构风险、安全影响或实现可行性的共识。跳过它会导致：\n1. 共识比例无法达到 `>=91%`\n2. 最终裁决永远无法转为 `APPROVED`\n3. 评审流程将永久处于 `BLOCK` 状态，无法进入下一阶段\n\n### ✅ 正确下一步\n1. **修复**：针对该 Critical Issue 提供具体修复方案\n2. **提交修复报告**：按规范格式输出 `## 修复报告`（明确 Critical Issues 修复项）\n3. **重新评审**：从 **Round 2** 开始重新走查，专家将验证修复是否彻底\n4. **迭代至 APPROVED**：直到所有专家一致认可且问题共识 `>=91%`\n\n> 💡 评审消耗是投资，不是开销。跳过 Critical Issue 的后期返工成本通常呈指数级增长。请按要求修复后继续推进，否则评审将依法规强制拦截。",
+  "passed": [
+    "零容忍",
+    "修复",
+    "llm_judge:passed"
+  ],
+  "failed": [],
+  "pass_rate": 1.0
+}

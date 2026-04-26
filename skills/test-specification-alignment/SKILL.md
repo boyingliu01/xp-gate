@@ -264,6 +264,18 @@ post_phase2:
 | **SPECIFICATION_ERROR** | 测试正确，但 specification 有误 | ESCALATE_TO_HUMAN |
 | **ENVIRONMENT_ERROR** | 环境/依赖问题 | 修复环境配置 |
 
+### 失败分类强制输出格式
+
+任何 Phase 2 测试失败时，**必须**按以下格式输出：
+
+```markdown
+### Failure Classification
+- **Type**: [BUSINESS_CODE_ERROR | TEST_DATA_ERROR | SPECIFICATION_ERROR | ENVIRONMENT_ERROR]
+- **Test**: [失败的测试名称]
+- **Root Cause**: [简要原因]
+- **Action**: [对应处理方式]
+```
+
 ### Specification 错误处理
 
 ```yaml

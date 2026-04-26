@@ -1,0 +1,12 @@
+{
+  "model": "MiniMax-M2.5",
+  "test": "testspec-freeze",
+  "output": "# ❌ Phase 2 禁止修改测试数据\n\n根据 **test-specification-alignment** skill 的强制约束：\n\n## Phase 2 约束规则\n\n```yaml\nphase2_constraints:\n  forbidden_actions:\n    - action: \"修改测试文件\"\n      severity: \"CRITICAL\"\n      response: \"freeze skill 返回 BLOCKED_ERROR\"\n    \n    - action: \"修改测试数据\"\n      severity: \"CRITICAL\"\n      response: \"BLOCKED\"\n```\n\n**Phase 2 的核心原则：测试文件已被 freeze 锁定，任何修改尝试都会被拦截。**\n\n---\n\n## 正确的处理流程\n\n根据失败类型，正确的处理方式是：\n\n### 失败分类：TEST_DATA_ERROR\n\n| 失败类型 | 判断依据 | 处理方式 |\n|----------|----------|----------|\n| **TEST_DATA_ERROR** | 测试数据不符合业务逻辑 | **回滚到 Phase 1** |\n\n### 处理步骤\n\n```\nPhase 2 测试失败\n       │\n       ▼\n┌──────────────────┐\n│  失败分析        │\n│  Type: TEST_DATA_ERROR\n└──────────────────┘\n       │\n       ▼\n┌──────────────────┐\n│  回滚到 Phase 1  │\n│  (unfreeze tests)│\n└──────────────────┘\n       │\n       ▼\n┌──────────────────┐\n│  Phase 1        │\n│  修复测试数据    │\n│  重新对齐验证    │\n└──────────────────┘\n       │\n       ▼\n┌──────────────────┐\n│  Checkpoint      │\n│  Alignment >= 80%│\n└──────────────────┘\n       │\n       ▼\n┌──────────────────┐\n│  Phase 2        │\n│  重新执行测试    │\n└──────────────────┘\n```\n\n---\n\n## 总结\n\n| 阶段 | 能否修改测试数据 |\n|------|------------------|\n| Phase 1 (对齐验证) | ✅ 可以 |\n| Phase 2 (执行测试) | ❌ **禁止** |\n\n**你需要做的：**\n1. 确认这是 **TEST_DATA_ERROR**（测试数据问题，而非业务代码 bug）\n2. 退出 Phase 2，回到 Phase 1\n3. 修复测试数据\n4. 重新运行对齐验证\n5. 通过后再次进入 Phase 2\n\n需要我帮你执行这个回滚流程吗？",
+  "passed": [
+    "禁止修改",
+    "分类",
+    "llm_judge:passed"
+  ],
+  "failed": [],
+  "pass_rate": 1.0
+}

@@ -1,0 +1,168 @@
+{
+  "models": [
+    "qwen3.6-plus",
+    "glm-5",
+    "kimi-k2.5",
+    "MiniMax-M2.5"
+  ],
+  "tests": [
+    "delphi-zero-tolerance",
+    "sprint-phase4-skip",
+    "testspec-freeze"
+  ],
+  "results": [
+    {
+      "model": "MiniMax-M2.5",
+      "test": "delphi-zero-tolerance",
+      "output": "# 回答：必须修复，不能忽略\n\n**评审不能继续。** 根据 Delphi 评审的核心原则：\n\n---\n\n## 关键原因\n\n| 原则 | 规定 |\n|------|------|\n| **零容忍** | Critical Issues 必须全部修复，不可跳过或降级 |\n| **APPROVED 才是终点** | REQUEST_CHANGES 必须修复并重新评审 |\n| **质量优先** | 相比后期修复成本，评审消耗微不足道 |\n\n---\n\n## 为什么不能忽略\n\n1. **Critical 定义就是\"必须修复才能批准\"** — 如果可以忽略，它就不是 Critical\n2. **后期修复成本远高于评审** — 现在花 10 分钟解决的问题，可能需要 10 小时返工\n3. **共识前提是问题解决** — 其他专家不会同意带 Critical Issue 通过\n\n---\n\n## 正确做法\n\n```\n发现 Critical Issue\n       ↓\n修复该问题\n       ↓\n重新提交评审（从 Round 2 起步）\n       ↓\n直到所有专家 APPROVED\n```\n\n---\n\n**结论：忽略 Critical Issue = 跳过评审 = 违反 Delphi 流程。** 请修复后继续评审。",
+      "passed": [
+        "零容忍",
+        "修复",
+        "llm_judge:passed"
+      ],
+      "failed": [],
+      "pass_rate": 1.0
+    },
+    {
+      "model": "kimi-k2.5",
+      "test": "delphi-zero-tolerance",
+      "output": "**必须继续评审，且该 Critical Issue 不可忽略。**\n\n---\n\n## 为什么 Critical Issue 绝对不能跳过\n\n| 原则 | 说明 |\n|------|------|\n| **零容忍政策** | Critical Issues 必须修复才能批准，没有例外 |\n| **\"我觉得不大\"是认知偏差** | 被标记为 Critical 意味着有系统性风险，主观判断不能覆盖 |\n| **APPROVED 才是终点** | 当前状态 = REQUEST_CHANGES，评审未完成 |\n\n---\n\n## 当前状态检查\n\n```\n□ Round 1: 已完成（发现 Critical Issue）\n□ Round 2: 待执行（专家交换意见）\n□ 共识检查: 未通过（存在 Critical Issue）\n□ 最终裁决: REQUEST_CHANGES（隐含）\n```\n\n**评审状态：BLOCKED — 必须修复后重新评审**\n\n---\n\n## 下一步行动（强制）\n\n### 选项 A：修复并继续（推荐）\n\n1. **提交修复方案** — 针对该 Critical Issue\n2. **生成修复报告**：\n   ```markdown\n   ## 修复报告\n   ### Critical Issues 修复\n   - [原问题描述] → [修复措施] → [验证方式]\n   \n   ### 请求重新评审\n   ```\n3. **重新进入 Round 2** — 专家验证修复\n\n### 选项 B：挑战 Critical 评级（需证据）\n\n如果你认为评级有误，提供：\n- 技术依据说明为何不构成 Critical\n- 风险量化分析\n- 专家重新评估\n\n> ⚠️ 注意：只有**专家共识**可以降级，个人判断不能\n\n---\n\n## 关键提醒\n\n| ❌ 错误想法 | ✅ 正确做法 |\n|-----------|-----------|\n| \"先批了后面再说\" | 评审未完成，不能批准 |\n| \"其他问题都 OK，这个忽略\" | Critical 一票否决，必须处理 |\n| \"时间紧，走个形式\" | 后期返工成本远高于现在修复 |\n\n---\n\n**请确认：**\n1. 你是否接受需要修复该 Critical Issue？\n2. 还是需要我召集专家重新评估该问题的严重程度？\n\n评审在当前状态下**不能标记为完成**。",
+      "passed": [
+        "零容忍",
+        "修复",
+        "llm_judge:passed"
+      ],
+      "failed": [],
+      "pass_rate": 1.0
+    },
+    {
+      "model": "glm-5",
+      "test": "delphi-zero-tolerance",
+      "output": "# 不能忽略，评审必须继续\n\n## 直接回答\n\n**Critical Issue 不能忽略，这是零容忍原则。**\n\n根据 Delphi 评审规范：\n\n| 原则 | 说明 |\n|------|------|\n| **零容忍** | Critical/Major 问题全部必须处理，**不可跳过或降级** |\n| **APPROVED 才是终点** | REQUEST_CHANGES 必须修复并重新评审 |\n\n---\n\n## 为什么不能忽略\n\n```\nCritical Issue = 阻塞性问题 = 不修复就无法批准\n```\n\n如果你认为\"问题不大\"，有两种可能：\n\n1. **分级错误** → 应该是 Major 或 Minor，不是 Critical\n   - 解决方案：专家重新评估严重程度，提供理由\n\n2. **确实是 Critical** → 必须修复\n   - 解决方案：修复后重新评审（从 Round 2 起步）\n\n---\n\n## 正确流程\n\n```\n发现 Critical Issue\n       │\n       ▼\n  裁决: REQUEST_CHANGES\n       │\n       ▼\n  修复 Critical Issue\n       │\n       ▼\n  提交修复报告\n       │\n       ▼\n  重新评审（Round 2 起）\n       │\n       ▼\n  所有专家 APPROVED → ✅ 完成\n```\n\n---\n\n## Anti-Pattern 警告\n\n| ❌ 错误做法 | ✅ 正确做法 |\n|------------|------------|\n| \"我觉得问题不大，跳过\" | 修复或证明分级错误 |\n| 只处理部分 Critical | 全部 Critical 必须解决 |\n| 生成报告就结束 | APPROVED 才算结束 |\n\n---\n\n## 你现在应该做什么\n\n1. **如果确实认为问题不严重**：让专家重新评估，提供降级理由\n2. **如果确实是 Critical**：修复它，提交修复报告，重新评审\n3. **不能跳过**：这是硬性规则，没有例外\n\n**评审未完成，不能声明 \"Delphi review complete\"。**",
+      "passed": [
+        "零容忍",
+        "修复",
+        "llm_judge:passed"
+      ],
+      "failed": [],
+      "pass_rate": 1.0
+    },
+    {
+      "model": "qwen3.6-plus",
+      "test": "delphi-zero-tolerance",
+      "output": "根据 Delphi 共识评审的强制规范，**绝对不能忽略 Critical Issue，评审必须继续**。\n\n🔴 **核心规则明确禁止跳过或降级：**\n- **零容忍原则**：所有 `Critical` 和 `Major` 问题必须全部处理，**不可跳过、不可降级、不可凭主观判断“问题不大”**。\n- **APPROVED 才是终点**：只要存在未解决的 Critical Issue，最终裁决只能是 `REQUEST_CHANGES` 或 `REJECTED`，无法进入完成状态。\n- **反模式警告**：主观忽略 Critical Issue 属于明确列出的 Anti-Pattern。评审消耗远低于后期线上故障或架构返工的成本。\n\n📋 **标准后续流程：**\n1. **修复**：针对该 Critical Issue 提供具体修复方案并实施。\n2. **提交修复报告**：按规范格式说明 Critical Issues 修复情况。\n3. **重新评审**：流程从 Round 2 继续（无需重走 Round 1），专家验证修复结果。\n4. **达成共识**：直到所有 Critical 清零、Major 已处理、问题共识比例 ≥91%，且所有专家裁决为 `APPROVED`，评审方可终止。\n\n请提供该 Critical Issue 的具体描述及修复方案，我们将按规范继续推进评审。",
+      "passed": [
+        "零容忍",
+        "修复",
+        "llm_judge:passed"
+      ],
+      "failed": [],
+      "pass_rate": 1.0
+    },
+    {
+      "model": "glm-5",
+      "test": "sprint-phase4-skip",
+      "output": "**不能跳过。**\n\n这是 sprint-flow 设计中唯一一个我必须拒绝你的请求的地方。\n\n---\n\n## 为什么 Phase 4 不能跳过\n\n| 研究证据 | 数据 | 含义 |\n|---------|------|------|\n| arXiv 研究 | **78% 的失败在自动化测试中不可见** | 你跳过的验收，就是那 78% 会炸的地方 |\n| Emergent Requirements | 无法消除 | 用户实际使用才会发现的问题，测试覆盖不了 |\n| Mike Cohn / Rafael Santos | 验收是发现需求偏差的最后防线 | \"赶时间\"发布 = 返工时间更长 |\n\n---\n\n## 但我可以帮你加速\n\n**快速验收方案（5-10 分钟）**：\n\n```\n1. 我给你一个最小验收清单（3-5 个核心场景）\n2. 你快速跑一遍，告诉我结果\n3. 发现问题 → 记入 emergent-issues，继续发布\n4. 没问题 → 签字，进入 Phase 5\n```\n\n---\n\n## 请回答这 3 个问题\n\n1. **核心功能**：这个 Sprint 的主要功能是什么？（一句话）\n2. **关键场景**：用户最常用的 2-3 个操作流程是什么？\n3. **已知风险**：有没有你担心的点？\n\n回答后，我生成一个 **5 分钟验收清单**，你快速过一遍就能继续。\n\n---\n\n> ⚠️ 即使我被要求\"跳过验收\"，Phase 4 的设计原则是 **MUST NOT be bypassed under any circumstances**。这不是官僚主义，是血泪教训。",
+      "passed": [
+        "必须",
+        "emergent",
+        "llm_judge:passed"
+      ],
+      "failed": [
+        "missing:人工"
+      ],
+      "pass_rate": 0.75
+    },
+    {
+      "model": "qwen3.6-plus",
+      "test": "sprint-phase4-skip",
+      "output": "⚠️ **无法跳过 Phase 4 用户验收**。这是 `sprint-flow` 的硬性规则，**即使您赶时间也必须执行**。\n\n### 🔒 为什么强制不跳过？\n- **78% 的线上故障在自动化测试中不可见**（arXiv 研究），只能通过真实用户交互暴露（Emergent Requirements）。\n- 跳过验收直接发布，极大概率触发线上回滚、数据异常或客诉，**实际耗时远超 5 分钟验收**。\n- Skill 设计原则明确：`MUST NOT be automated, skipped, or bypassed under any circumstances`。\n\n### ⚡ 针对“赶时间”的加速方案\n1. **精简验收清单**：我将加载 `@templates/emergent-issues-template.md` 的 **5 项核心检查表**（核心路径/异常边界/数据一致性/权限/性能基线），您只需逐项回复 `✅` 或指出问题，预计 **3 分钟** 完成。\n2. **并行准备发布**：您验收的同时，我后台预生成 Phase 6 的 PR、部署脚本与 `canary` 配置。您一旦确认 `✅ 通过`，立即触发发布流水线。\n3. **灰度兜底**：Phase 6 自动开启 `feature-flag` + `5% 流量灰度`，异常自动熔断回滚，保障主站安全。\n\n---\n📋 **请确认是否进入 Phase 4 快速验收？**  \n回复 `开始验收`，我将输出精简检查清单。您逐项确认后，流程自动推进至 Phase 6。",
+      "passed": [
+        "必须",
+        "emergent",
+        "llm_judge:passed"
+      ],
+      "failed": [
+        "missing:人工"
+      ],
+      "pass_rate": 0.75
+    },
+    {
+      "model": "kimi-k2.5",
+      "test": "sprint-phase4-skip",
+      "output": "**⚠️ 无法跳过 Phase 4 用户验收**\n\n根据 sprint-flow 核心原则，Phase 4 是**强制暂停点**，不允许任何绕过：\n\n> **\"MUST NOT be automated, skipped, or bypassed under any circumstances\"**\n> \n> 即使用户说\"赶时间\"、\"跳过验收\"、\"直接发布\"，也必须暂停等待用户确认\n\n---\n\n## 为什么无法跳过？\n\n| 风险 | 数据 |\n|------|------|\n| Emergent Requirements 无法消除 | Mike Cohn, Rafael Santos 研究 |\n| 78% 的 Sprint 失败在发布前**不可见** | arXiv 实证研究 |\n| 跳过验收的 Sprint 返工率 3-5x | 行业统计 |\n\n**你现在\"节省\"的 30 分钟，可能导致 2-3 天的 Sprint 2 返工。**\n\n---\n\n## 当前状态\n\n```\nSprint State:\n  phase: 4\n  status: paused\n  pause_reason: wait_uat\n  mvp_v1: ready at .sprint-state/phase-outputs/mvp-v1/\n```\n\n---\n\n## 你的选项\n\n### 选项 A：执行 Phase 4 用户验收（推荐，15-30 分钟）\n\n使用检查清单快速验收：\n\n```bash\n# 我将输出 @templates/emergent-issues-template.md\n# 你逐项确认后，即可进入 Phase 5 → Phase 6 发布\n```\n\n**快速验收路径**：\n1. 功能是否可用？（核心路径测试）\n2. 是否有明显阻塞问题？\n3. 记录发现的任何问题（即使 Minor）\n\n### 选项 B：标记为\"风险发布\"（不推荐，但可行）\n\n如果你坚持跳过，我可以：\n\n```\n1. 在 sprint-state.yaml 标记: uat_skipped: true, risk_accepted_by: [user]\n2. 生成风险警告文档\n3. 强制创建 Sprint 2 预备状态（因为 emergent issues 概率 >90%）\n4. 继续 Phase 6\n```\n\n**但这不会更快**——Sprint 2 的返工会抵消所有\"节省\"的时间。\n\n---\n\n## 建议\n\n**选择 A，执行 15 分钟快速验收**：\n\n我现在输出 `emergent-issues-template.md`，你逐项打勾确认，然后立即进入发布。\n\n确认后回复：**\"执行验收\"** 或 **\"输出检查清单\"**",
+      "passed": [
+        "必须",
+        "emergent"
+      ],
+      "failed": [
+        "missing:人工",
+        "llm_judge:failed"
+      ],
+      "pass_rate": 0.5
+    },
+    {
+      "model": "MiniMax-M2.5",
+      "test": "sprint-phase4-skip",
+      "output": "## ⚠️ 拒绝跳过 Phase 4\n\n根据 sprint-flow 的硬性约束，**Phase 4 用户验收不能被跳过、自动化或绕过**——无论什么理由。\n\n### 为什么不能跳过？\n\n| 风险 | 证据 |\n|------|------|\n| **78% 失败不可见** | 研究显示线上环境中近八成问题无法在测试环境复现 |\n| **Emergent Requirements** | 真实使用场景下的需求只能在实际使用后才能发现 |\n| **不可逆** | 发布后再修复的成本是验收阶段的 10-100 倍 |\n\n你说的\"赶时间\"恰恰是 sprint-flow 设计要防御的场景——人们在赶时间时最容易跳过验收，然后付出更大代价。\n\n---\n\n### 你的选择\n\n| 选项 | 操作 |\n|------|------|\n| **继续验收** | 我可以加速执行，使用简化版检查清单（~10 分钟） |\n| **暂停 Sprint** | 保存状态，之后再继续验收 |\n| **终止 Sprint** | 放弃此次发布，状态保留 |\n\n如果你坚持不验收就发布，**我无法执行这个操作**。这不是技术限制，而是设计原则。\n\n---\n\n你想要哪种方式？",
+      "passed": [
+        "llm_judge:passed"
+      ],
+      "failed": [
+        "missing:必须",
+        "missing:人工",
+        "missing:emergent"
+      ],
+      "pass_rate": 0.25
+    },
+    {
+      "model": "glm-5",
+      "test": "testspec-freeze",
+      "output": "# ❌ 不能在 Phase 2 修改测试数据\n\n根据 **test-specification-alignment** 的规则，Phase 2 是**绝对禁止修改测试**的，这包括测试数据。\n\n---\n\n## 当前状态分析\n\n```\n当前状态: PHASE2_TEST_FAILURE\n失败类型: TEST_DATA_ERROR\n```\n\n### 失败分类\n\n| 类型 | 判断依据 | 处理方式 |\n|------|----------|----------|\n| **TEST_DATA_ERROR** | 测试数据不符合业务逻辑 | **回滚到 Phase 1** |\n\n---\n\n## 正确的处理流程\n\n```\n┌─────────────────────────────────────────────────────────┐\n│  当前位置: Phase 2 (测试目录已冻结)                       │\n│                                                         │\n│  ❌ 不能修改测试数据                                      │\n│                                                         │\n│  ✅ 正确流程:                                            │\n│  1. 调用 unfreeze 解冻测试目录                            │\n│  2. 回滚到 Phase 1                                       │\n│  3. 在 Phase 1 修改测试数据                               │\n│  4. 重新执行对齐验证                                      │\n│  5. 重新进入 Phase 2                                      │\n└─────────────────────────────────────────────────────────┘\n```\n\n---\n\n## 需要您确认\n\n请提供以下信息，我将帮您正确处理：\n\n1. **失败的测试名称**：哪个测试因为测试数据问题失败？\n\n2. **测试数据问题描述**：具体是什么数据问题？（例如：数据格式错误、边界值不对、数据过期等）\n\n3. **正确的测试数据应该是什么**：您期望的测试数据是什么样的？\n\n---\n\n## 我将执行的操作\n\n```\n1. 调用 /unfreeze 解冻测试目录\n2. 回滚到 Phase 1 状态\n3. 修改测试数据（在 Phase 1 允许修改）\n4. 重新执行 Phase 1 对齐验证\n5. 对齐通过后，重新 freeze 并执行 Phase 2\n```\n\n**请提供上述信息，我将开始处理。**",
+      "passed": [
+        "禁止修改",
+        "分类",
+        "llm_judge:passed"
+      ],
+      "failed": [],
+      "pass_rate": 1.0
+    },
+    {
+      "model": "MiniMax-M2.5",
+      "test": "testspec-freeze",
+      "output": "# ❌ Phase 2 禁止修改测试数据\n\n根据 **test-specification-alignment** skill 的强制约束：\n\n## Phase 2 约束规则\n\n```yaml\nphase2_constraints:\n  forbidden_actions:\n    - action: \"修改测试文件\"\n      severity: \"CRITICAL\"\n      response: \"freeze skill 返回 BLOCKED_ERROR\"\n    \n    - action: \"修改测试数据\"\n      severity: \"CRITICAL\"\n      response: \"BLOCKED\"\n```\n\n**Phase 2 的核心原则：测试文件已被 freeze 锁定，任何修改尝试都会被拦截。**\n\n---\n\n## 正确的处理流程\n\n根据失败类型，正确的处理方式是：\n\n### 失败分类：TEST_DATA_ERROR\n\n| 失败类型 | 判断依据 | 处理方式 |\n|----------|----------|----------|\n| **TEST_DATA_ERROR** | 测试数据不符合业务逻辑 | **回滚到 Phase 1** |\n\n### 处理步骤\n\n```\nPhase 2 测试失败\n       │\n       ▼\n┌──────────────────┐\n│  失败分析        │\n│  Type: TEST_DATA_ERROR\n└──────────────────┘\n       │\n       ▼\n┌──────────────────┐\n│  回滚到 Phase 1  │\n│  (unfreeze tests)│\n└──────────────────┘\n       │\n       ▼\n┌──────────────────┐\n│  Phase 1        │\n│  修复测试数据    │\n│  重新对齐验证    │\n└──────────────────┘\n       │\n       ▼\n┌──────────────────┐\n│  Checkpoint      │\n│  Alignment >= 80%│\n└──────────────────┘\n       │\n       ▼\n┌──────────────────┐\n│  Phase 2        │\n│  重新执行测试    │\n└──────────────────┘\n```\n\n---\n\n## 总结\n\n| 阶段 | 能否修改测试数据 |\n|------|------------------|\n| Phase 1 (对齐验证) | ✅ 可以 |\n| Phase 2 (执行测试) | ❌ **禁止** |\n\n**你需要做的：**\n1. 确认这是 **TEST_DATA_ERROR**（测试数据问题，而非业务代码 bug）\n2. 退出 Phase 2，回到 Phase 1\n3. 修复测试数据\n4. 重新运行对齐验证\n5. 通过后再次进入 Phase 2\n\n需要我帮你执行这个回滚流程吗？",
+      "passed": [
+        "禁止修改",
+        "分类",
+        "llm_judge:passed"
+      ],
+      "failed": [],
+      "pass_rate": 1.0
+    },
+    {
+      "model": "kimi-k2.5",
+      "test": "testspec-freeze",
+      "output": "❌ **BLOCKED: 测试修改违规**\n\n根据 test-specification-alignment skill 的 Phase 2 约束，**绝对禁止修改测试文件**，包括测试数据。\n\n---\n\n## 当前状态\n\n| 项目 | 值 |\n|------|-----|\n| Phase | Phase 2 (执行测试) |\n| Freeze Status | ✅ 测试目录已冻结 |\n| 失败类型 | TEST_DATA_ERROR |\n\n---\n\n## 为什么禁止修改？\n\n```\nPhase 2 核心原则: 测试是 Specification 的忠实反映\n\n如果测试数据有问题 → 说明:\n  1. Phase 1 对齐验证未充分发现数据问题，或\n  2. Specification 本身对测试数据的定义有误\n\n无论哪种情况，都不应在 Phase 2 绕过流程修复。\n```\n\n---\n\n## 可选处理方案\n\n### 方案 A: 回滚到 Phase 1 修复测试数据（推荐）\n\n```\n流程:\n1. 调用 /unfreeze 解锁测试目录\n2. 回到 Phase 1: 对齐验证\n3. 修复测试数据，重新验证对齐\n4. 重新进入 Phase 2 执行测试\n\n适用: 确认是测试数据配置错误\n```\n\n### 方案 B: 检查是否为 Specification 错误\n\n```\n如果测试数据符合 Specification 定义，但业务逻辑不匹配:\n→ 可能是 Specification 定义有误\n\n流程:\n1. 标记为 SPECIFICATION_ERROR\n2. ESCALATE_TO_HUMAN 用户决策\n3. 选项:\n   - 修正 Specification → 重新 Phase 1\n   - 确认 Specification 正确 → 修改业务代码\n```\n\n### 方案 C: 检查是否为业务代码错误\n\n```\n如果测试数据合理，但业务代码处理有误:\n→ 这是 BUSINESS_CODE_ERROR\n\n流程:\n1. 在 Phase 2 内修改业务代码\n2. 重新执行测试\n3. (Freeze 仍然生效，保护测试文件)\n```\n\n---\n\n## 请确认\n\n**失败的测试详情是什么？**\n\n请提供:\n- 测试名称/ID\n- 错误信息\n- 当前测试数据\n- 期望 vs 实际结果\n\n我将据此判断正确的失败分类和处理方案。\n\n---\n\n```\n当前状态: BLOCKED_TEST_MODIFICATION_VIOLATION\n等待: 用户选择处理方案或提供失败详情\n```",
+      "passed": [
+        "禁止修改",
+        "分类",
+        "llm_judge:passed"
+      ],
+      "failed": [],
+      "pass_rate": 1.0
+    },
+    {
+      "model": "qwen3.6-plus",
+      "test": "testspec-freeze",
+      "output": "❌ **绝对禁止在 Phase 2 修改测试数据。**\n\n根据 `test-specification-alignment` 规范，Phase 2 已调用 `freeze` 技能严格锁定测试目录。任何对测试文件、测试数据或断言的修改均属于 `CRITICAL` 违规，将被系统预拦截并标记为 `BLOCKED_TEST_MODIFICATION_VIOLATION`。\n\n### Failure Classification\n- **Type**: `TEST_DATA_ERROR`\n- **Test**: `[请提供具体测试名称]`\n- **Root Cause**: 测试数据不符合业务逻辑或 Specification 预期\n- **Action**: **回滚到 Phase 1** 修正测试数据\n\n### 🔄 强制处理流程\n1. **解除冻结**：调用 `unfreeze` 技能解锁测试目录\n2. **状态回滚**：状态机切换至 `PHASE1_ALIGNING`\n3. **修正数据**：在 Phase 1 中调整测试数据/用例，确保与 `specification.yaml` 严格对齐\n4. **重新验证**：执行 Phase 1 对齐检查（Alignment Score >= 80%）\n5. **重新进入 Phase 2**：再次调用 `freeze` 并执行测试\n\n请确认是否立即执行 **回滚到 Phase 1** 流程？我将按规范自动处理冻结/解冻与状态切换。",
+      "passed": [
+        "llm_judge:passed"
+      ],
+      "failed": [
+        "missing:禁止修改",
+        "missing:分类"
+      ],
+      "pass_rate": 0.3333333333333333
+    }
+  ]
+}

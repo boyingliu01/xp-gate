@@ -1,0 +1,12 @@
+{
+  "model": "glm-5",
+  "test": "testspec-freeze",
+  "output": "# ❌ Phase 2 禁止修改测试数据\n\n根据 **test-specification-alignment** 规则，Phase 2 处于 **freeze 约束** 状态，测试目录已被锁定，**任何测试文件的修改都会被拦截**。\n\n---\n\n## 正确处理流程\n\n### Step 1: 失败分类确认\n\n请先确认失败类型：\n\n```markdown\n### Failure Classification\n- **Type**: TEST_DATA_ERROR\n- **Test**: [失败的测试名称]\n- **Root Cause**: 测试数据不符合业务逻辑（请具体说明）\n- **Action**: 回滚到 Phase 1\n```\n\n---\n\n### Step 2: 如果确认是 TEST_DATA_ERROR\n\n| 失败类型 | Phase 2 能否修改测试？ | 正确处理方式 |\n|----------|----------------------|--------------|\n| BUSINESS_CODE_ERROR | ❌ 不能 | 修改业务代码 |\n| **TEST_DATA_ERROR** | ❌ 不能 | **回滚到 Phase 1** |\n| SPECIFICATION_ERROR | ❌ 不能 | ESCALATE_TO_HUMAN |\n| ENVIRONMENT_ERROR | ❌ 不能 | 修复环境配置 |\n\n---\n\n### Step 3: 执行回滚操作\n\n```\n1. 调用 /unfreeze 解锁测试目录\n2. 回滚到 Phase 1 状态\n3. 修改测试数据\n4. 重新执行 Phase 1 对齐验证\n5. Alignment Score >= 80% 后\n6. 重新 freeze 并进入 Phase 2\n```\n\n---\n\n## 为什么这样设计？\n\n```\n┌─────────────────────────────────────────────────────────┐\n│  Phase 1: 对齐验证 (可修改测试)                          │\n│  ├─ 测试数据问题 → 在此阶段修复                          │\n│  └─ 确保测试与 Specification 对齐                        │\n│                                                          │\n│  ⭐ freeze 锁定测试目录                                  │\n│                                                          │\n│  Phase 2: 执行测试 (禁止修改测试)                        │\n│  ├─ 只能修改业务代码                                     │\n│  └─ 测试作为\"不可变的真理\"验证实现                       │\n│                                                          │\n│  ⭐ unfreeze 解锁测试目录                                │\n└─────────────────────────────────────────────────────────┘\n```\n\n**核心原则**：测试是系统的防护网。Phase 2 禁止修改测试，确保测试作为\"稳定参照物\"来验证业务代码的正确性。\n\n---\n\n## 请提供信息\n\n请告诉我：\n1. **失败的测试名称**是什么？\n2. **测试数据问题**具体是什么？（数据过期？格式错误？边界值不对？）\n\n确认后我会帮你执行正确的回滚流程。",
+  "passed": [
+    "禁止",
+    "分类",
+    "llm_judge:passed"
+  ],
+  "failed": [],
+  "pass_rate": 1.0
+}

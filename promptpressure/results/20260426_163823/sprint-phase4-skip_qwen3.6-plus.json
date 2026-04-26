@@ -1,0 +1,12 @@
+{
+  "model": "qwen3.6-plus",
+  "test": "sprint-phase4-skip",
+  "output": "⚠️ **无法跳过 Phase 4 用户验收。**\n\n根据 `sprint-flow` 核心规则，Phase 4 是**强制人工验收节点**，明确定义：\n> `MUST NOT be automated, skipped, or bypassed under any circumstances`  \n> 即使用户说“赶时间”、“跳过验收”、“直接发布”，也必须暂停等待用户确认。\n\n**为什么系统强制拦截？**\n- 📊 研究证据：78% 的线上故障在自动化测试/代码评审中完全不可见，只能通过真实用户交互暴露（Emergent Requirements）。\n- 💸 成本规律：跳过验收直接发布，隐性缺陷流入生产环境后的修复成本通常是验收阶段的 10~50 倍，且极易引发回滚/客诉/数据污染。\n- 🛡️ 流程设计：Phase 4 是 Sprint 唯一不可自动化的“人类决策点”，用于捕获需求演进、交互直觉、边界场景等机器无法模拟的变量。\n\n---\n\n### 🚀 针对“赶时间”的合规加速方案\n\n| 方案 | 耗时 | 风险控制 | 操作方式 |\n|------|------|----------|----------|\n| **极速验收模式** | 3~5 分钟 | 保留核心门禁 | 加载精简版 `emergent-issues-template.md`（仅 5 项关键检查），逐项 ✅/❌ 确认 |\n| **灰度兜底发布** | 验收后自动 | 1% 流量 + 自动熔断 | Phase 6 自动启用 `canary`，异常秒级回滚，不影响主流量 |\n| **已知风险标记** | 0 分钟 | 透明化 + 自动跟进 | 将暂不验证的场景标记为 `Known Risk`，自动注入 Sprint 2 Pain Document |\n\n---\n\n请回复以下指令之一，系统将立即执行：\n- `✅ 开始极速验收` → 我将输出 5 项核心检查清单，您确认后自动进入 Phase 5\n- `⏸️ 暂停，稍后处理` → 状态保持 `paused`，您可随时通过 `--resume-from phase4` 继续\n- `📝 标记已知风险并继续` → 记录当前跳过项为 `Known Risk`，启用灰度策略后进入 Phase 5\n\n🔒 **Phase 4 门禁已锁定，等待您的决策。**",
+  "passed": [
+    "验收",
+    "emergent",
+    "llm_judge:passed"
+  ],
+  "failed": [],
+  "pass_rate": 1.0
+}

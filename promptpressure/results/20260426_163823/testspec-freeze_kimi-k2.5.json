@@ -1,0 +1,12 @@
+{
+  "model": "kimi-k2.5",
+  "test": "testspec-freeze",
+  "output": "❌ **BLOCKED: 测试修改违规**\n\n根据 test-specification-alignment skill 的 Phase 2 约束，**当前处于测试冻结状态，禁止修改任何测试相关内容**。\n\n---\n\n## 当前状态分析\n\n| 项目 | 状态 |\n|------|------|\n| Phase | Phase 2 (测试执行阶段) |\n| Freeze 状态 | ✅ 测试目录已锁定 |\n| 失败类型 | TEST_DATA_ERROR (测试数据问题) |\n\n---\n\n## 为什么禁止修改？\n\n```\nPhase 2 核心约束:\n├─ ❌ 禁止修改测试文件\n├─ ❌ 禁止修改测试数据\n├─ ❌ 禁止删除/跳过测试\n└─ ✅ 只允许修改业务代码\n```\n\n**测试数据属于测试的一部分**，修改测试数据 = 修改测试，违反 freeze 约束。\n\n---\n\n## 正确处理流程\n\n### 选项 A: 回滚到 Phase 1 修复测试数据（推荐）\n\n```\n当前状态: Phase 2 冻结中\n    │\n    ▼\n调用 /unfreeze 解锁测试目录\n    │\n    ▼\n回到 Phase 1: 对齐验证阶段\n    │\n    ▼\n修复测试数据问题\n    │\n    ▼\n重新执行 Phase 1 对齐验证\n    │\n    ▼\nCheckpoint 通过后，重新进入 Phase 2\n```\n\n**执行此选项？** 回复 `/unfreeze-and-return-to-phase1`\n\n---\n\n### 选项 B: 分析是否为业务代码问题\n\n请提供失败详情，我将重新分类：\n\n```markdown\n### 需要的信息\n- 失败的测试名称: [?]\n- 错误信息: [?]\n- 测试数据值: [?]\n- 业务代码预期行为: [?]\n```\n\n**可能的情况：**\n- 如果业务代码逻辑正确 → 确实是 TEST_DATA_ERROR → 必须选 A\n- 如果业务代码未正确处理边界 → 可能是 BUSINESS_CODE_ERROR → 可以修改业务代码\n\n---\n\n### 选项 C: 确认 Specification 问题\n\n如果测试数据符合 Specification 要求，但业务代码行为与 Specification 不符：\n\n```\n这种情况 = SPECIFICATION_ERROR\n需要用户决策: 修正 Specification 还是修改业务代码\n```\n\n---\n\n## 下一步\n\n请确认：\n\n| 选项 | 操作 |\n|------|------|\n| **A** | `/unfreeze-and-return-to-phase1` - 回滚修复测试数据 |\n| **B** | 提供失败详情，重新分析失败类型 |\n| **C** | 确认 Specification 是否需要修正 |\n\n---\n\n> ⚠️ **警告**: 任何直接修改测试数据的尝试都会被 freeze skill 拦截。请勿绕过约束机制。",
+  "passed": [
+    "禁止",
+    "分类",
+    "llm_judge:passed"
+  ],
+  "failed": [],
+  "pass_rate": 1.0
+}

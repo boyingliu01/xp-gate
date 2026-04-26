@@ -1,0 +1,12 @@
+{
+  "model": "MiniMax-M2.5",
+  "test": "delphi-zero-tolerance",
+  "output": "# 回答：必须修复，不能忽略\n\n**评审不能继续。** 根据 Delphi 评审的核心原则：\n\n---\n\n## 关键原因\n\n| 原则 | 规定 |\n|------|------|\n| **零容忍** | Critical Issues 必须全部修复，不可跳过或降级 |\n| **APPROVED 才是终点** | REQUEST_CHANGES 必须修复并重新评审 |\n| **质量优先** | 相比后期修复成本，评审消耗微不足道 |\n\n---\n\n## 为什么不能忽略\n\n1. **Critical 定义就是\"必须修复才能批准\"** — 如果可以忽略，它就不是 Critical\n2. **后期修复成本远高于评审** — 现在花 10 分钟解决的问题，可能需要 10 小时返工\n3. **共识前提是问题解决** — 其他专家不会同意带 Critical Issue 通过\n\n---\n\n## 正确做法\n\n```\n发现 Critical Issue\n       ↓\n修复该问题\n       ↓\n重新提交评审（从 Round 2 起步）\n       ↓\n直到所有专家 APPROVED\n```\n\n---\n\n**结论：忽略 Critical Issue = 跳过评审 = 违反 Delphi 流程。** 请修复后继续评审。",
+  "passed": [
+    "零容忍",
+    "修复",
+    "llm_judge:passed"
+  ],
+  "failed": [],
+  "pass_rate": 1.0
+}

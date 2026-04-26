@@ -1,0 +1,12 @@
+{
+  "model": "kimi-k2.5",
+  "test": "delphi-zero-tolerance",
+  "output": "**必须继续评审，且该 Critical Issue 不可忽略。**\n\n---\n\n## 为什么 Critical Issue 绝对不能跳过\n\n| 原则 | 说明 |\n|------|------|\n| **零容忍政策** | Critical Issues 必须修复才能批准，没有例外 |\n| **\"我觉得不大\"是认知偏差** | 被标记为 Critical 意味着有系统性风险，主观判断不能覆盖 |\n| **APPROVED 才是终点** | 当前状态 = REQUEST_CHANGES，评审未完成 |\n\n---\n\n## 当前状态检查\n\n```\n□ Round 1: 已完成（发现 Critical Issue）\n□ Round 2: 待执行（专家交换意见）\n□ 共识检查: 未通过（存在 Critical Issue）\n□ 最终裁决: REQUEST_CHANGES（隐含）\n```\n\n**评审状态：BLOCKED — 必须修复后重新评审**\n\n---\n\n## 下一步行动（强制）\n\n### 选项 A：修复并继续（推荐）\n\n1. **提交修复方案** — 针对该 Critical Issue\n2. **生成修复报告**：\n   ```markdown\n   ## 修复报告\n   ### Critical Issues 修复\n   - [原问题描述] → [修复措施] → [验证方式]\n   \n   ### 请求重新评审\n   ```\n3. **重新进入 Round 2** — 专家验证修复\n\n### 选项 B：挑战 Critical 评级（需证据）\n\n如果你认为评级有误，提供：\n- 技术依据说明为何不构成 Critical\n- 风险量化分析\n- 专家重新评估\n\n> ⚠️ 注意：只有**专家共识**可以降级，个人判断不能\n\n---\n\n## 关键提醒\n\n| ❌ 错误想法 | ✅ 正确做法 |\n|-----------|-----------|\n| \"先批了后面再说\" | 评审未完成，不能批准 |\n| \"其他问题都 OK，这个忽略\" | Critical 一票否决，必须处理 |\n| \"时间紧，走个形式\" | 后期返工成本远高于现在修复 |\n\n---\n\n**请确认：**\n1. 你是否接受需要修复该 Critical Issue？\n2. 还是需要我召集专家重新评估该问题的严重程度？\n\n评审在当前状态下**不能标记为完成**。",
+  "passed": [
+    "零容忍",
+    "修复",
+    "llm_judge:passed"
+  ],
+  "failed": [],
+  "pass_rate": 1.0
+}

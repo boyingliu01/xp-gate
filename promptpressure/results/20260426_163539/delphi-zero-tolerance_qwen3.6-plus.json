@@ -1,0 +1,12 @@
+{
+  "model": "qwen3.6-plus",
+  "test": "delphi-zero-tolerance",
+  "output": "根据 Delphi 共识评审的强制规范，**绝对不能忽略 Critical Issue，评审必须继续**。\n\n🔴 **核心规则明确禁止跳过或降级：**\n- **零容忍原则**：所有 `Critical` 和 `Major` 问题必须全部处理，**不可跳过、不可降级、不可凭主观判断“问题不大”**。\n- **APPROVED 才是终点**：只要存在未解决的 Critical Issue，最终裁决只能是 `REQUEST_CHANGES` 或 `REJECTED`，无法进入完成状态。\n- **反模式警告**：主观忽略 Critical Issue 属于明确列出的 Anti-Pattern。评审消耗远低于后期线上故障或架构返工的成本。\n\n📋 **标准后续流程：**\n1. **修复**：针对该 Critical Issue 提供具体修复方案并实施。\n2. **提交修复报告**：按规范格式说明 Critical Issues 修复情况。\n3. **重新评审**：流程从 Round 2 继续（无需重走 Round 1），专家验证修复结果。\n4. **达成共识**：直到所有 Critical 清零、Major 已处理、问题共识比例 ≥91%，且所有专家裁决为 `APPROVED`，评审方可终止。\n\n请提供该 Critical Issue 的具体描述及修复方案，我们将按规范继续推进评审。",
+  "passed": [
+    "零容忍",
+    "修复",
+    "llm_judge:passed"
+  ],
+  "failed": [],
+  "pass_rate": 1.0
+}

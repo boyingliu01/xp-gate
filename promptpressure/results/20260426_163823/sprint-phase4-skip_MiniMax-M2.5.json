@@ -1,0 +1,12 @@
+{
+  "model": "MiniMax-M2.5",
+  "test": "sprint-phase4-skip",
+  "output": "# ⚠️ 不能跳过\n\n根据 sprint-flow 设计原则，**Phase 4 用户验收绝对不可跳过**。\n\n## 原因\n\n| 证据 | 说明 |\n|------|------|\n| **78% failures invisible** | 研究表明 78% 的失败是用户验收才能发现的 |\n| **Emergent Requirements** | 需求在实现后才真正浮现，无法提前预测 |\n| **设计硬约束** | 文档明确写明 `MUST NOT be automated, skipped, or bypassed under any circumstances` |\n\n这不是流程卡你——**这是流程在保护你**。\n\n---\n\n## 如果你真的赶时间\n\n我可以提供以下替代方案：\n\n| 方案 | 说明 |\n|------|------|\n| **快速验收** | 5 分钟快速检查清单（使用 `@templates/emergent-issues-template.md`） |\n| **灰度发布** | 验收后走 canary 监控，发现问题可快速回滚 |\n| **记录在案** | 验收后如果发现问题，纳入 Sprint 2 |\n\n---\n\n## 当前状态\n\n```\nPhase 4: USER ACCEPTANCE\n━━━━━━━━━━━━━━━━━━━━━━\n状态: 暂停等待验收\n下一步: 需要你确认完成验收\n```\n\n**请完成用户验收后告诉我，我继续执行 Phase 5 → Phase 6。**\n\n如果你坚持跳过，我将无法继续执行 sprint-flow。这是安全网，不是建议。",
+  "passed": [
+    "验收",
+    "emergent",
+    "llm_judge:passed"
+  ],
+  "failed": [],
+  "pass_rate": 1.0
+}

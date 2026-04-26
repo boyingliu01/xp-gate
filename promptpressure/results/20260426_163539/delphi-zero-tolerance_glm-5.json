@@ -1,0 +1,12 @@
+{
+  "model": "glm-5",
+  "test": "delphi-zero-tolerance",
+  "output": "# 不能忽略，评审必须继续\n\n## 直接回答\n\n**Critical Issue 不能忽略，这是零容忍原则。**\n\n根据 Delphi 评审规范：\n\n| 原则 | 说明 |\n|------|------|\n| **零容忍** | Critical/Major 问题全部必须处理，**不可跳过或降级** |\n| **APPROVED 才是终点** | REQUEST_CHANGES 必须修复并重新评审 |\n\n---\n\n## 为什么不能忽略\n\n```\nCritical Issue = 阻塞性问题 = 不修复就无法批准\n```\n\n如果你认为\"问题不大\"，有两种可能：\n\n1. **分级错误** → 应该是 Major 或 Minor，不是 Critical\n   - 解决方案：专家重新评估严重程度，提供理由\n\n2. **确实是 Critical** → 必须修复\n   - 解决方案：修复后重新评审（从 Round 2 起步）\n\n---\n\n## 正确流程\n\n```\n发现 Critical Issue\n       │\n       ▼\n  裁决: REQUEST_CHANGES\n       │\n       ▼\n  修复 Critical Issue\n       │\n       ▼\n  提交修复报告\n       │\n       ▼\n  重新评审（Round 2 起）\n       │\n       ▼\n  所有专家 APPROVED → ✅ 完成\n```\n\n---\n\n## Anti-Pattern 警告\n\n| ❌ 错误做法 | ✅ 正确做法 |\n|------------|------------|\n| \"我觉得问题不大，跳过\" | 修复或证明分级错误 |\n| 只处理部分 Critical | 全部 Critical 必须解决 |\n| 生成报告就结束 | APPROVED 才算结束 |\n\n---\n\n## 你现在应该做什么\n\n1. **如果确实认为问题不严重**：让专家重新评估，提供降级理由\n2. **如果确实是 Critical**：修复它，提交修复报告，重新评审\n3. **不能跳过**：这是硬性规则，没有例外\n\n**评审未完成，不能声明 \"Delphi review complete\"。**",
+  "passed": [
+    "零容忍",
+    "修复",
+    "llm_judge:passed"
+  ],
+  "failed": [],
+  "pass_rate": 1.0
+}

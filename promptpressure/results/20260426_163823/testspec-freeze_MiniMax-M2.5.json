@@ -1,0 +1,12 @@
+{
+  "model": "MiniMax-M2.5",
+  "test": "testspec-freeze",
+  "output": "## ❌ Phase 2 禁止修改测试数据\n\n根据 **test-specification-alignment** skill 的强制约束：\n\n### Phase 2 约束\n\n```yaml\nphase2_constraints:\n  forbidden_actions:\n    - action: \"修改测试文件\"\n      severity: \"CRITICAL\"\n      response: \"freeze skill 返回 BLOCKED_ERROR\"\n```\n\n**Phase 2 绝对禁止修改任何测试文件**，包括：\n- 测试代码本身\n- 测试数据\n- 断言逻辑\n\n---\n\n## ✅ 正确处理方式：回滚到 Phase 1\n\n根据失败分类规则：\n\n| 失败类型 | 判断依据 | 处理方式 |\n|----------|----------|----------|\n| **TEST_DATA_ERROR** | 测试数据不符合业务逻辑 | **回滚到 Phase 1** |\n\n### 处理流程\n\n```\n当前状态: PHASE2_TEST_FAILURE (TEST_DATA_ERROR)\n         │\n         ▼\n┌─────────────────────────────────────────┐\n│  1. 标记失败类型: TEST_DATA_ERROR        │\n│  2. 回滚到 Phase 1                       │\n│  3. 在 Phase 1 中修复测试数据            │\n│  4. 重新进行对齐验证                      │\n│  5. 通过后重新进入 Phase 2               │\n└─────────────────────────────────────────┘\n```\n\n---\n\n## 原因说明\n\n**为什么 Phase 2 禁止修改测试？**\n\n1. **防止\"作弊\"** — 如果允许在 Phase 2 修改测试数据来通过测试，就失去了验证业务代码正确性的意义\n\n2. **保持测试的\"防护网\"角色** — 测试数据应该反映真实业务场景，错误的数据应该被修正，而不是被绕过\n\n3. **两阶段分离原则** — Phase 1 专门用于对齐和修复，Phase 2 用于验证实现\n\n---\n\n## 建议操作\n\n请告诉我：\n1. **失败的测试名称**是什么？\n2. **测试数据具体是什么问题**？（例如：数据不符合业务规则、边界值错误等）\n\n我将在 **Phase 1** 中帮你修复测试数据，然后重新进行对齐验证后再进入 Phase 2。",
+  "passed": [
+    "禁止",
+    "分类",
+    "llm_judge:passed"
+  ],
+  "failed": [],
+  "pass_rate": 1.0
+}

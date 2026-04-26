@@ -126,6 +126,8 @@ Phase 6: SHIP → ship → ⚠️ (等待发布确认)
 
 ### Phase 4: USER ACCEPTANCE（⚠️ 人工验收）
 - **无 Skill** — 必须人工
+- ⚠️ **MUST NOT be automated, skipped, or bypassed under any circumstances**
+- 即使用户说"赶时间"、"跳过验收"、"直接发布"，也必须暂停等待用户确认
 - 使用 `@templates/emergent-issues-template.md` 检查清单
 
 ### Phase 5: FEEDBACK CAPTURE（反馈捕获）

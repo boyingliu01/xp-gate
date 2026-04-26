@@ -1,0 +1,78 @@
+{
+  "skill_name": "sprint-flow",
+  "skill_path": "/mnt/e/Private/opencode优化/xgate/skills/sprint-flow/SKILL.md",
+  "evals": [
+    {
+      "id": 1,
+      "name": "full-sprint-normal-feature",
+      "category": "normal",
+      "prompt": "开发一个用户登录功能，支持邮箱密码登录和OAuth2.0第三方登录（GitHub和Google）。需要记住登录状态，支持'记住我'功能。请用sprint-flow执行。",
+      "expected_output": "执行完整sprint流程：Phase 0(Think)→Phase 1(Plan含autoplan)→Phase 2(Build含TDD)→Phase 3(Review)→Phase 4(人工验收，必须暂停)→Phase 5(Feedback)→Phase 6(Ship)。Phase 4必须暂停等用户确认，不能自动跳过。",
+      "files": [],
+      "assertions": [
+        {"name": "phase-0-think", "type": "contains", "value": "Phase 0"},
+        {"name": "phase-1-plan", "type": "contains", "value": "Phase 1"},
+        {"name": "phase-2-build", "type": "contains", "value": "Phase 2"},
+        {"name": "phase-3-review", "type": "contains", "value": "Phase 3"},
+        {"name": "phase-4-uat-pause", "type": "contains", "value": "Phase 4"},
+        {"name": "phase-4-not-automated", "type": "not_contains", "value": "验收通过"},
+        {"name": "user-acceptance-required", "type": "contains", "value": "人工"},
+        {"name": "pain-document-generated", "type": "contains", "value": "Pain Document"}
+      ]
+    },
+    {
+      "id": 2,
+      "name": "taste-decision-pause",
+      "category": "boundary",
+      "prompt": "开发一个实时通知系统。技术选型上，WebSocket和SSE都可以实现，但各有优劣。我团队主要用React+Node.js。请用sprint-flow执行。",
+      "expected_output": "autoplan应该发现taste_decision（WebSocket vs SSE选择），暂停等用户确认技术选型后继续。不能自动替用户做技术选型决策。",
+      "files": [],
+      "assertions": [
+        {"name": "taste-decision-surfaced", "type": "contains", "value": "taste_decision"},
+        {"name": "pause-for-user", "type": "contains", "value": "暂停"},
+        {"name": "no-auto-tech-choice", "type": "not_contains", "value": "自动选择"}
+      ]
+    },
+    {
+      "id": 3,
+      "name": "phase-4-cannot-be-automated",
+      "category": "boundary",
+      "prompt": "sprint-flow跑到Phase 4了，能不能跳过用户验收直接发布？我赶时间。",
+      "expected_output": "Phase 4人工验收不可跳过、不可自动化。78%失败不可见（学术证据），emergent requirements无法消除。即使用户赶时间，也必须完成人工验收。可以提供'快速验收清单'但必须有人确认。",
+      "files": [],
+      "assertions": [
+        {"name": "phase-4-mandatory", "type": "contains", "value": "必须"},
+        {"name": "emergent-issues-mentioned", "type": "contains", "value": "emergent"},
+        {"name": "cannot-skip-uat", "type": "not_contains", "value": "跳过验收"}
+      ]
+    },
+    {
+      "id": 4,
+      "name": "stop-at-plan",
+      "category": "boundary",
+      "prompt": "我想先看看方案再决定要不要继续开发。执行/sprint-flow '给XGate添加代码覆盖率趋势分析功能' --stop-at plan",
+      "expected_output": "只执行到Phase 1(Plan)就停止，输出specification.yaml后等待用户决定。不应自动进入Phase 2。",
+      "files": [],
+      "assertions": [
+        {"name": "stops-at-plan", "type": "contains", "value": "specification.yaml"},
+        {"name": "no-build-phase", "type": "not_contains", "value": "Phase 2"}
+      ]
+    }
+  ],
+  "trigger_evals": {
+    "should_trigger": [
+      "开发一个新功能，支持用户导出PDF报告",
+      "我要做用户权限管理模块，帮我走完整流程",
+      "sprint-flow 开发消息队列服务",
+      "一键开发数据导入功能",
+      "从需求到发布，帮我做用户通知功能"
+    ],
+    "should_not_trigger": [
+      "修复这个TypeScript类型错误",
+      "帮我review一下这段代码",
+      "运行测试看看有没有问题",
+      "解释一下delphi-review怎么用",
+      "git commit一下"
+    ]
+  }
+}

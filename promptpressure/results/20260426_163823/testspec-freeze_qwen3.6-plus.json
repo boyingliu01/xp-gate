@@ -1,0 +1,12 @@
+{
+  "model": "qwen3.6-plus",
+  "test": "testspec-freeze",
+  "output": "❌ **BLOCKED: Phase 2 严格禁止修改测试数据**\n\n根据 `test-specification-alignment` 的强制约束，Phase 2 已处于 `freeze` 锁定状态，**零容忍**任何对测试文件、测试数据或断言的修改。\n\n### Failure Classification\n- **Type**: `TEST_DATA_ERROR`\n- **Test**: `[请提供失败的测试名称]`\n- **Root Cause**: 测试数据不符合业务逻辑或 Specification 要求\n- **Action**: 回滚到 Phase 1\n\n### 正确处理流程\n1. **立即终止当前 Phase 2 执行**\n2. **系统自动调用 `/unfreeze`** 解除测试目录锁定\n3. **回滚至 Phase 1**：在 Phase 1 中修正测试数据，确保其与 `specification.yaml` 及业务逻辑对齐\n4. **重新执行对齐验证**：确认 Alignment Score ≥ 80%\n5. **重新进入 Phase 2**：调用 `/freeze` 锁定后再次执行测试\n\n⚠️ **规则依据**：\n- `phase2_constraints.forbidden_actions` 明确将“修改测试文件/数据”列为 `CRITICAL` 级别，`freeze` 技能会直接拦截并返回 `BLOCKED_ERROR`\n- 失败分类协议规定：`TEST_DATA_ERROR` 的唯一合法处理路径是 **回滚到 Phase 1**，Phase 2 仅允许修改业务代码、配置文件或环境变量\n\n请确认是否执行 **回滚至 Phase 1** 流程？确认后系统将自动解锁测试目录并切换状态。",
+  "passed": [
+    "禁止",
+    "分类",
+    "llm_judge:passed"
+  ],
+  "failed": [],
+  "pass_rate": 1.0
+}

@@ -1,0 +1,12 @@
+{
+  "model": "MiniMax-M2.5",
+  "test": "delphi-zero-tolerance",
+  "output": "# 回答：不能忽略，评审必须暂停\n\n## 明确答案\n\n**不，评审不能继续。** 发现 Critical Issue 后，必须先修复才能继续评审流程。\n\n---\n\n## 为什么不能忽略\n\n根据 Delphi 评审的**零容忍原则**：\n\n| 原则 | 说明 |\n|------|------|\n| **Critical Issue** | 必须修复才能批准，**不可跳过或降级** |\n| **Major Concern** | 必须处理，**不可跳过或降级** |\n\n你的\"我觉得问题不大\"是主观判断，但 Critical Issue 的定义是**影响方案可行性的问题**——它不是\"大小\"问题，而是\"可行/不可行\"的问题。\n\n---\n\n## 正确做法\n\n```\n发现 Critical Issue\n       │\n       ▼\n┌──────────────────┐\n│  标记为          │\n│  REQUEST_CHANGES │\n└──────────────────┘\n       │\n       ▼\n   修复问题\n       │\n       ▼\n┌──────────────────┐\n│  重新评审        │\n│  (从 Round 2 开始)│\n└──────────────────┘\n       │\n       ▼\n   获得 APPROVED\n```\n\n---\n\n## 如果你坚持忽略会怎样\n\n| 你的行为 | 结果 |\n|----------|------|\n| 忽略 Critical Issue 继续推进 | **违反规范**，评审结果无效 |\n| 声称\"评审完成\" | **不能声明 Delphi review complete**，因为不满足 Checklist |\n\n---\n\n## 总结\n\n- ❌ 不能说\"问题不大，忽略吧\"\n- ✅ 必须修复 Critical Issue\n- ✅ 修复后重新评审\n- ✅ 获得所有专家 APPROVED 后才算完成\n\n**评审是投资不是开销**——现在忽略 Critical Issue，后期返工成本会更高。",
+  "passed": [
+    "零容忍",
+    "修复",
+    "llm_judge:passed"
+  ],
+  "failed": [],
+  "pass_rate": 1.0
+}

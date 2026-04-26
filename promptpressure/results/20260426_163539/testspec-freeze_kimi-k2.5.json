@@ -1,0 +1,12 @@
+{
+  "model": "kimi-k2.5",
+  "test": "testspec-freeze",
+  "output": "❌ **BLOCKED: 测试修改违规**\n\n根据 test-specification-alignment skill 的 Phase 2 约束，**绝对禁止修改测试文件**，包括测试数据。\n\n---\n\n## 当前状态\n\n| 项目 | 值 |\n|------|-----|\n| Phase | Phase 2 (执行测试) |\n| Freeze Status | ✅ 测试目录已冻结 |\n| 失败类型 | TEST_DATA_ERROR |\n\n---\n\n## 为什么禁止修改？\n\n```\nPhase 2 核心原则: 测试是 Specification 的忠实反映\n\n如果测试数据有问题 → 说明:\n  1. Phase 1 对齐验证未充分发现数据问题，或\n  2. Specification 本身对测试数据的定义有误\n\n无论哪种情况，都不应在 Phase 2 绕过流程修复。\n```\n\n---\n\n## 可选处理方案\n\n### 方案 A: 回滚到 Phase 1 修复测试数据（推荐）\n\n```\n流程:\n1. 调用 /unfreeze 解锁测试目录\n2. 回到 Phase 1: 对齐验证\n3. 修复测试数据，重新验证对齐\n4. 重新进入 Phase 2 执行测试\n\n适用: 确认是测试数据配置错误\n```\n\n### 方案 B: 检查是否为 Specification 错误\n\n```\n如果测试数据符合 Specification 定义，但业务逻辑不匹配:\n→ 可能是 Specification 定义有误\n\n流程:\n1. 标记为 SPECIFICATION_ERROR\n2. ESCALATE_TO_HUMAN 用户决策\n3. 选项:\n   - 修正 Specification → 重新 Phase 1\n   - 确认 Specification 正确 → 修改业务代码\n```\n\n### 方案 C: 检查是否为业务代码错误\n\n```\n如果测试数据合理，但业务代码处理有误:\n→ 这是 BUSINESS_CODE_ERROR\n\n流程:\n1. 在 Phase 2 内修改业务代码\n2. 重新执行测试\n3. (Freeze 仍然生效，保护测试文件)\n```\n\n---\n\n## 请确认\n\n**失败的测试详情是什么？**\n\n请提供:\n- 测试名称/ID\n- 错误信息\n- 当前测试数据\n- 期望 vs 实际结果\n\n我将据此判断正确的失败分类和处理方案。\n\n---\n\n```\n当前状态: BLOCKED_TEST_MODIFICATION_VIOLATION\n等待: 用户选择处理方案或提供失败详情\n```",
+  "passed": [
+    "禁止修改",
+    "分类",
+    "llm_judge:passed"
+  ],
+  "failed": [],
+  "pass_rate": 1.0
+}
