@@ -1,6 +1,6 @@
 ---
 name: delphi-review
-description: "Delphi共识评审：多轮匿名评审直到专家达成一致意见。支持design/code-walkthrough双模式。支持2位或3位专家。MANDATORY before any implementation, design, or architecture decisions. Invoke when user submits requirements, design docs, code PRs, or requests review."
+description: "Delphi consensus review: multi-round anonymous expert review until unanimous APPROVAL. Supports design/code-walkthrough modes. 2-3 experts from different providers. MANDATORY before implementation, design, or architecture decisions. Trigger: 'review this design', '评审这个需求', 'design review', '多专家评审', 'consensus review', 'code walkthrough', 'push review', or any request for multi-expert review of requirements, design docs, architecture, or PRs."
 ---
 
 # Delphi Consensus Review
@@ -22,7 +22,7 @@ description: "Delphi共识评审：多轮匿名评审直到专家达成一致意
 |------|------|
 | Token 是投资 | 相比后期修复成本，评审消耗微不足道 |
 | APPROVED 才是终点 | REQUEST_CHANGES 必须修复并重新评审 |
-| 零容忍 | 所有 Critical/Major 问题必须处理，不能只修 Critical |
+| 零容忍 | Critical/Major 问题全部必须处理，不可跳过或降级 |
 
 详见：Anti-Patterns 章节。
 
@@ -216,7 +216,7 @@ Phase 0: 准备 → Round 1: 匿名独立评审 → 共识检查
 | ❌ 错误 | ✅ 正确 |
 |---------|---------|
 | Round 1 → 生成报告 → "评审完成"（未 APPROVED） | 迭代直到 APPROVED，修复后重新评审 |
-| 只修 Critical，忽略 Major | 零容忍：所有 Critical/Major 都必须处理 |
+| 只处理 Critical，忽略 Major | 零容忍：Critical/Major 全部必须处理，不可跳过或降级 |
 | 单专家自评 | 至少 2 位不同 provider 的专家 |
 | 用户说"时间紧急"就跳过 | 评审是投资不是开销，跳过后期返工成本更高 |
 | "专家几乎一致"就通过 | "几乎" = 不一致，继续到 >=91% |
