@@ -1,0 +1,75 @@
+{
+  "skill_name": "test-specification-alignment",
+  "skill_path": "/mnt/e/Private/opencode优化/xgate/skills/test-specification-alignment/SKILL.md",
+  "evals": [
+    {
+      "id": 1,
+      "name": "aligned-tests-pass",
+      "category": "normal",
+      "prompt": "项目有specification.yaml定义了3个requirements和6个acceptance criteria。测试文件中有对应的@test REQ-001, @intent, @covers AC-001-01标注。请验证测试与specification的对齐情况。",
+      "expected_output": "执行完整两阶段流程：Phase 1验证对齐（检查@test/@intent/@covers标签、测试覆盖率、AC映射完整性）→对齐分数>=80%→Phase 2执行测试（冻结测试目录，禁止修改）→报告对齐结果。",
+      "files": [],
+      "assertions": [
+        {"name": "phase-1-executed", "type": "contains", "value": "Phase 1"},
+        {"name": "phase-2-executed", "type": "contains", "value": "Phase 2"},
+        {"name": "freeze-mentioned", "type": "contains", "value": "freeze"},
+        {"name": "alignment-score", "type": "regex", "value": "[0-9]+%"},
+        {"name": "test-annotations-checked", "type": "contains", "value": "@test"}
+      ]
+    },
+    {
+      "id": 2,
+      "name": "misaligned-tests-detected",
+      "category": "boundary",
+      "prompt": "项目有specification.yaml定义了5个requirements，但测试文件中只有2个@test标签，3个requirement没有对应测试。请验证对齐情况。",
+      "expected_output": "Phase 1应该检测到3个requirement缺少测试覆盖，对齐分数<80%。给出具体缺失项：哪些REQ没有@test标签，哪些AC没有@covers。可能需要Phase 1中添加缺失测试。",
+      "files": [],
+      "assertions": [
+        {"name": "missing-coverage-detected", "type": "contains", "value": "缺失"},
+        {"name": "low-alignment-score", "type": "contains", "value": "<80%"},
+        {"name": "specific-gaps-listed", "type": "contains", "value": "REQ"}
+      ]
+    },
+    {
+      "id": 3,
+      "name": "phase-2-freeze-enforcement",
+      "category": "boundary",
+      "prompt": "Phase 2执行测试时，有一个测试因为测试数据问题失败了。能不能修改一下测试数据让测试通过？",
+      "expected_output": "Phase 2期间绝对禁止修改测试文件（freeze约束）。失败应被分类（业务代码问题/测试数据问题/Specification问题/环境问题），但不能通过修改测试来解决。应告知这是零容忍原则。",
+      "files": [],
+      "assertions": [
+        {"name": "freeze-enforced", "type": "contains", "value": "禁止修改"},
+        {"name": "no-test-modification", "type": "not_contains", "value": "修改测试"},
+        {"name": "failure-classification", "type": "contains", "value": "分类"}
+      ]
+    },
+    {
+      "id": 4,
+      "name": "legacy-mode-no-specification",
+      "category": "boundary",
+      "prompt": "项目没有specification.yaml文件，需要验证测试覆盖率是否足够。请运行test-specification-alignment。",
+      "expected_output": "没有specification.yaml时进入legacy模式。应提示用户先通过delphi-review获得APPROVED后自动生成specification.yaml，而不是在没有spec的情况下进行对齐验证。",
+      "files": [],
+      "assertions": [
+        {"name": "specification-required", "type": "contains", "value": "specification.yaml"},
+        {"name": "legacy-mode-or-guidance", "type": "regex", "value": "(legacy|生成|delphi-review)"}
+      ]
+    }
+  ],
+  "trigger_evals": {
+    "should_trigger": [
+      "验证测试是否覆盖所有需求",
+      "测试和需求对齐了吗",
+      "run tests and check specification alignment",
+      "发布前验证测试覆盖率",
+      "verify tests before release"
+    ],
+    "should_not_trigger": [
+      "写一个新功能",
+      "帮我部署到生产环境",
+      "修复一个bug",
+      "代码review",
+      "设计数据库schema"
+    ]
+  }
+}

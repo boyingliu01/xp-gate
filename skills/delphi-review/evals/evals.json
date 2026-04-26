@@ -1,0 +1,82 @@
+{
+  "skill_name": "delphi-review",
+  "skill_path": "/mnt/e/Private/opencode优化/xgate/skills/delphi-review/SKILL.md",
+  "evals": [
+    {
+      "id": 1,
+      "name": "design-mode-full-review",
+      "category": "normal",
+      "prompt": "我需要评审一份设计文档：我们要给XGate项目添加一个自动生成CHANGELOG的功能。功能包括：1) 从git log提取commit信息 2) 按照conventional commits分类 3) 生成markdown格式的changelog 4) 支持自定义模板。请用delphi-review评审这个设计。",
+      "expected_output": "执行完整的Delphi评审流程：Phase 0验证→Round 1匿名独立评审(至少2位Expert)→Round 2交换意见→共识检查(>=91%)→Terminal State Checklist→如果APPROVED则生成specification.yaml。绝不能只做Round 1就停止。",
+      "files": [],
+      "assertions": [
+        {"name": "round-1-executed", "type": "contains", "value": "Round 1"},
+        {"name": "round-2-executed", "type": "contains", "value": "Round 2"},
+        {"name": "consensus-check", "type": "contains", "value": "91%"},
+        {"name": "terminal-state-checklist", "type": "contains", "value": "Terminal State"},
+        {"name": "expert-a-present", "type": "contains", "value": "Expert A"},
+        {"name": "expert-b-present", "type": "contains", "value": "Expert B"},
+        {"name": "anonymity-mentioned", "type": "contains", "value": "匿名"},
+        {"name": "verdict-present", "type": "regex", "value": "(APPROVED|REQUEST_CHANGES|REJECTED)"}
+      ]
+    },
+    {
+      "id": 2,
+      "name": "design-mode-flawed-document",
+      "category": "boundary",
+      "prompt": "请评审以下架构决策：我们打算用单个SQLite文件存储所有用户数据、日志、审计记录和缓存。这样部署简单，只需要一个文件。请用delphi-review评审。",
+      "expected_output": "Expert应该识别出这个设计的严重问题（单文件SQLite不适合多用途、缺乏扩展性、并发问题等），给出REQUEST_CHANGES而非盲目APPROVED。仍需执行完整多轮流程。",
+      "files": [],
+      "assertions": [
+        {"name": "round-1-executed", "type": "contains", "value": "Round 1"},
+        {"name": "critical-issues-found", "type": "contains", "value": "Critical"},
+        {"name": "verdict-not-blind-approved", "type": "contains", "value": "REQUEST_CHANGES"}
+      ]
+    },
+    {
+      "id": 3,
+      "name": "code-walkthrough-mode",
+      "category": "normal",
+      "prompt": "我修改了几个文件准备push，需要做代码走查。变更包括：1) 新增了boy-scout.ts的calculateDelta函数 2) 修改了baseline.ts的loadBaseline函数 3) 添加了3个新的clean-code规则。请用code-walkthrough模式评审。",
+      "expected_output": "执行code-walkthrough模式：运行Principles Checker→Expert A架构评审(含principles_findings)→Expert B实现评审(含principles_findings)→共识检查→写入.code-walkthrough-result.json文件。",
+      "files": [],
+      "assertions": [
+        {"name": "code-walkthrough-mode", "type": "contains", "value": "code-walkthrough"},
+        {"name": "principles-findings", "type": "contains", "value": "Principles Findings"},
+        {"name": "expert-a-review", "type": "contains", "value": "Expert A"},
+        {"name": "expert-b-review", "type": "contains", "value": "Expert B"},
+        {"name": "result-file-generated", "type": "contains", "value": ".code-walkthrough-result.json"},
+        {"name": "consensus-check", "type": "contains", "value": "共识"}
+      ]
+    },
+    {
+      "id": 4,
+      "name": "zero-tolerance-enforcement",
+      "category": "boundary",
+      "prompt": "评审时发现了一个Critical Issue，但我觉得这个问题不大，可以忽略。评审还需要继续吗？",
+      "expected_output": "必须坚持零容忍原则：Critical Issues不可忽略，必须修复后重新评审。不能因为用户认为问题不大就跳过。应明确告知零容忍原则并拒绝跳过。",
+      "files": [],
+      "assertions": [
+        {"name": "zero-tolerance-enforced", "type": "contains", "value": "零容忍"},
+        {"name": "critical-not-skippable", "type": "not_contains", "value": "可以忽略"},
+        {"name": "requires-fix", "type": "contains", "value": "修复"}
+      ]
+    }
+  ],
+  "trigger_evals": {
+    "should_trigger": [
+      "我需要多个专家来评审这个架构设计",
+      "评审这份需求文档，确保没有遗漏",
+      "设计评审：我们的微服务拆分方案",
+      "代码走查，准备push了",
+      "delphi review this design doc"
+    ],
+    "should_not_trigger": [
+      "帮我写一个单元测试",
+      "这段代码有bug，帮我修一下",
+      "创建一个新的React组件",
+      "部署到生产环境",
+      "解释一下这个函数的作用"
+    ]
+  }
+}

@@ -1,0 +1,150 @@
+specification:
+  meta:
+    name: "Skill Effectiveness Validation Framework"
+    version: "1.0.0"
+    generated_from: "Pain Document 2026-04-26"
+    delphi_approved: false  # Skipping formal delphi-review for validation methodology (not production code)
+
+  requirements:
+    - id: REQ-001
+      description: "为3个LLM-dependent skill创建eval测试用例集"
+      priority: critical
+      skills_impacted: [delphi-review, sprint-flow, test-specification-alignment]
+
+    - id: REQ-002
+      description: "对每个skill执行with-skill vs without-skill交叉验证，量化skill增量价值"
+      priority: critical
+      skills_impacted: [delphi-review, sprint-flow, test-specification-alignment]
+
+    - id: REQ-003
+      description: "对每个skill执行多轮稳定性测试，量化执行一致性"
+      priority: high
+      skills_impacted: [delphi-review, sprint-flow, test-specification-alignment]
+
+    - id: REQ-004
+      description: "验证skill触发准确性（description是否导致正确触发/不触发）"
+      priority: high
+      skills_impacted: [delphi-review, sprint-flow, test-specification-alignment]
+
+    - id: REQ-005
+      description: "为每个skill生成量化验证报告，含L1-L4指标"
+      priority: critical
+      skills_impacted: [delphi-review, sprint-flow, test-specification-alignment]
+
+    - id: REQ-006
+      description: "创建可复用的验证框架文档，供后续skill验证使用"
+      priority: medium
+      skills_impacted: []
+
+  acceptance_criteria:
+    - id: AC-001-01
+      requirement: REQ-001
+      criteria: "每个skill有>=3个eval测试用例，覆盖正常/边界/失效场景"
+      test_type: integration
+
+    - id: AC-002-01
+      requirement: REQ-002
+      criteria: "每个skill有with-skill和without-skill的对比基准数据"
+      test_type: integration
+
+    - id: AC-002-02
+      requirement: REQ-002
+      criteria: "交叉验证结果可量化：pass_rate差值、token差值、时间差值"
+      test_type: integration
+
+    - id: AC-003-01
+      requirement: REQ-003
+      criteria: "每个skill执行>=3次相同prompt，记录输出方差"
+      test_type: integration
+
+    - id: AC-003-02
+      requirement: REQ-003
+      criteria: "稳定性报告包含步骤遵循率的一致性指标"
+      test_type: integration
+
+    - id: AC-004-01
+      requirement: REQ-004
+      criteria: "每个skill有>=5个should-trigger和>=5个should-not-trigger测试query"
+      test_type: integration
+
+    - id: AC-005-01
+      requirement: REQ-005
+      criteria: "每个skill有独立验证报告，含L1触发率、L2正确率、L3遵循率、L4稳定性分数"
+      test_type: manual
+
+    - id: AC-005-02
+      requirement: REQ-005
+      criteria: "报告包含具体改进建议（基于验证数据）"
+      test_type: manual
+
+    - id: AC-006-01
+      requirement: REQ-006
+      criteria: "验证框架文档包含：工具选择指南、测试用例模板、报告模板、执行SOP"
+      test_type: manual
+
+  design_decisions:
+    - id: DD-001
+      decision: "验证范围限于XGate项目3个核心skill（不含用户级第三方skill）"
+      rationale: "先验证自有skill，框架跑通后再扩展"
+      alternatives_considered: ["验证所有LLM-dependent skill（范围过大）", "只验证1个skill（不够全面）"]
+
+    - id: DD-002
+      decision: "使用Anthropic skill-creator eval框架做深度交叉验证 + promptfoo做回归基线"
+      rationale: "skill-creator原生集成最佳，promptfoo更适合CI/CD和长期回归"
+      alternatives_considered: ["只用skill-creator", "只用promptfoo", "从零构建自定义框架"]
+
+    - id: DD-003
+      decision: "验证深度为L1-L4（触发准确性+输出正确性+步骤遵循+执行稳定性），L5 CI/CD留待后续迭代"
+      rationale: "L1-L4覆盖核心质量指标，L5需要基础设施支持"
+      alternatives_considered: ["只做L1-L2（太浅）", "L1-L5全做（太重，首次验证不需要）"]
+
+    - id: DD-004
+      decision: "跳过对验证方案本身的delphi-review（此为验证方法论，非生产代码）"
+      rationale: "验证框架是工具性产出，不需要共识评审；如有重大设计问题在Phase 4人工验收时发现"
+      alternatives_considered: ["对验证方案做完整delphi-review（过度工程化）"]
+
+  skill_risk_profile:
+    delphi-review:
+      risk_level: high
+      failure_modes:
+        - "Round 1后停止，不执行Round 2交换意见"
+        - "Expert评审质量不符合skill定义标准"
+        - "共识计算错误（91%阈值被忽略）"
+        - "code-walkthrough模式未写入结果文件"
+      critical_steps:
+        - "Phase 0 文档验证"
+        - "Round 1 匿名独立评审"
+        - "Round 2 交换意见"
+        - "共识检查（>=91%）"
+        - "Terminal State Checklist验证"
+        - "APPROVED后生成specification.yaml（design mode）"
+        - "写入.code-walkthrough-result.json（code-walkthrough mode）"
+
+    sprint-flow:
+      risk_level: high
+      failure_modes:
+        - "跳过Phase 0 Think直接进入Plan"
+        - "忽略taste_decisions暂停点"
+        - "Phase 4人工验收被自动化跳过"
+        - "emergent issues未被记录"
+      critical_steps:
+        - "Phase 0: office-hours痛点发现"
+        - "Phase 1: autoplan条件分支"
+        - "Phase 1: taste_decisions暂停等用户确认"
+        - "Phase 1: delphi-review（如需要）"
+        - "Phase 2: xp-consensus含TDD"
+        - "Phase 4: 人工验收（不可自动化）"
+        - "Phase 6: ship + canary"
+
+    test-specification-alignment:
+      risk_level: medium
+      failure_modes:
+        - "Phase 2中修改冻结测试"
+        - "specification解析产生幻觉"
+        - "对齐分数计算偏差"
+        - "跳过Phase 1直接执行Phase 2"
+      critical_steps:
+        - "Phase 1: 验证对齐（可修改测试）"
+        - "Phase 2: 执行测试（禁止修改，freeze约束）"
+        - "失败分类（业务/测试数据/Spec/环境）"
+        - "对齐分数计算（>=80%）"
