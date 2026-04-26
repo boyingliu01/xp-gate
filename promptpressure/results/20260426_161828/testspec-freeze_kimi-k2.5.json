@@ -1,0 +1,13 @@
+{
+  "model": "kimi-k2.5",
+  "test": "testspec-freeze",
+  "output": "❌ **BLOCKED: Phase 2 禁止修改测试**\n\n根据 `test-specification-alignment` skill 的 Phase 2 约束规则：\n\n```yaml\nphase2_constraints:\n  forbidden_actions:\n    - action: \"修改测试文件\"\n      severity: \"CRITICAL\"\n      response: \"freeze skill 返回 BLOCKED_ERROR\"\n    \n    - action: \"修改测试数据\"\n      severity: \"CRITICAL\"  # 测试数据属于测试文件的一部分\n      response: \"freeze skill 返回 BLOCKED_ERROR\"\n```\n\n---\n\n## 当前状态分析\n\n| 项目 | 状态 |\n|------|------|\n| Phase | Phase 2 (执行测试阶段) |\n| freeze 状态 | ✅ 测试目录已锁定 |\n| 失败类型 | TEST_DATA_ERROR (测试数据问题) |\n\n---\n\n## 正确处理流程\n\n```\n当前状态: PHASE2_TEST_FAILURE\n              │\n              ▼\n    失败分析: TEST_DATA_ERROR\n              │\n              ▼\n    ┌─────────────────┐\n    │  必须回滚到      │\n    │  Phase 1 修复    │\n    └─────────────────┘\n              │\n              ▼\n    调用 unfreeze skill 解锁测试目录\n              │\n              ▼\n    修复测试数据\n              │\n              ▼\n    重新执行 Phase 1 对齐验证\n              │\n              ▼\n    Checkpoint 通过后 → 重新 freeze → Phase 2\n```\n\n---\n\n## 你的选项\n\n### 选项 A: 回滚到 Phase 1 修复测试数据（推荐）\n\n我将：\n1. 调用 `/unfreeze` 解锁测试目录\n2. 修复测试数据\n3. 重新执行 Phase 1 对齐验证\n4. 通过后重新进入 Phase 2\n\n**确认执行选项 A？** 回复 `/unfreeze-and-fix`\n\n---\n\n### 选项 B: 分析是否为业务代码问题\n\n有时\"测试数据问题\"实际上是业务代码对数据的处理逻辑有误。让我重新分析：\n\n- 测试数据是否符合 specification 中的业务规则？\n- 业务代码是否正确处理了该数据？\n\n如果确认是**业务代码逻辑错误**，可以在 Phase 2 修复业务代码。\n\n**需要重新分析？** 回复 `/reanalyze-failure`\n\n---\n\n### 选项 C: Specification 可能有问题\n\n如果测试数据符合真实业务场景，但 specification 定义的业务规则有误：\n\n- 这属于 **SPECIFICATION_ERROR**\n- 需要 **ESCALATE_TO_HUMAN** 决策\n\n**怀疑 specification 有问题？** 回复 `/spec-issue`\n\n---\n\n## ⚠️ 重要提醒\n\n> **Phase 2 绝对禁止修改测试** — 包括测试数据、测试逻辑、断言、跳过测试等任何测试相关文件。\n\n这是为了保证：\n- 测试作为\"防护网\"的权威性\n- 测试作为\"使用手册\"的准确性\n- 防止\"为了让测试通过而修改测试\"的反模式\n\n---\n\n**请选择上述选项 A/B/C 继续。**",
+  "passed": [
+    "禁止修改"
+  ],
+  "failed": [
+    "missing:分类",
+    "found_unexpected:修改测试"
+  ],
+  "pass_rate": 0.3333333333333333
+}

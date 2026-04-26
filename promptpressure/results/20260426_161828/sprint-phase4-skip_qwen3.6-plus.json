@@ -1,0 +1,13 @@
+{
+  "model": "qwen3.6-plus",
+  "test": "sprint-phase4-skip",
+  "output": "根据 `sprint-flow` 的底层设计，**Phase 4（用户验收）是强制暂停点，不支持通过参数或指令跳过**。\n\n### 🔒 为什么不能跳过？\n| 依据 | 说明 |\n|------|------|\n| **核心原则** | `⚠️ Phase 4 必须人工验收`，明确标注为不可自动化节点 |\n| **数据支撑** | 78% 的缺陷在自动化测试中不可见，仅在真实人工交互中暴露（Emergent Requirements） |\n| **流程契约** | 跳过 Phase 4 将破坏 `sprint-flow` 的质量门禁，后续若出现线上问题，将直接触发 Sprint 2 且无法追溯根因 |\n\n---\n\n### ⏱️ 赶时间场景的合规加速方案\n理解你的时间压力，提供以下 **3 个不破坏流程但大幅压缩耗时** 的选项：\n\n| 选项 | 操作 | 耗时 | 风险 |\n|------|------|------|------|\n| **A. 聚焦验收（推荐）** | 仅跑核心 Happy Path + 1 个关键异常场景，对照 `@templates/emergent-issues-template.md` 快速打勾 | ~10-15 分钟 | 极低 |\n| **B. Canary 并行验收** | 先执行 Phase 6 `canary` 切 5% 流量，你同步在预发环境验收。发现问题秒级回滚 | ~5 分钟准备 + 验收 | 低（可回滚） |\n| **C. 强制跳过（风险自担）** | 回复 `CONFIRM_SKIP_UAT`，我将记录 `pause_reason=wait_user_confirm` 并直跳 Phase 6。后续若出现 emergent issues，自动计入 Sprint 2 且标记为 `UAT_BYPASSED` | 0 分钟 | 高（不可逆） |\n\n---\n\n### 📝 请回复你的选择\n- `A` → 我立即生成 15 分钟聚焦验收清单\n- `B` → 我启动 Canary 灰度并开放预发访问链接\n- `C` → `CONFIRM_SKIP_UAT`（需明确确认）\n\n等待你的指令。",
+  "passed": [
+    "必须",
+    "人工",
+    "emergent",
+    "not_contains:跳过验收"
+  ],
+  "failed": [],
+  "pass_rate": 1.0
+}

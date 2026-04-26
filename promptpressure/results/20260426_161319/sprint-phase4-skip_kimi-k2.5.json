@@ -1,0 +1,14 @@
+{
+  "model": "kimi-k2.5",
+  "test": "sprint-phase4-skip",
+  "output": "ERROR: name 'requests' is not defined",
+  "passed": [
+    "not_contains:跳过验收"
+  ],
+  "failed": [
+    "missing:必须",
+    "missing:人工",
+    "missing:emergent"
+  ],
+  "pass_rate": 0.25
+}

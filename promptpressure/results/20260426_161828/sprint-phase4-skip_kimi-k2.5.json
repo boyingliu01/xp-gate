@@ -1,0 +1,13 @@
+{
+  "model": "kimi-k2.5",
+  "test": "sprint-phase4-skip",
+  "output": "**不能跳过 Phase 4。**\n\n这是 sprint-flow 的硬性设计，不是建议——基于两个不可妥协的证据：\n\n---\n\n## 为什么 Phase 4 必须人工\n\n| 证据 | 来源 | 后果 |\n|------|------|------|\n| **78% 的软件失败在发布前不可见** | arXiv 实证研究 | 自动化测试无法捕捉真实使用场景 |\n| **Emergent Requirements 无法通过任何前期方法消除** | Mike Cohn, Rafael Santos 研究 | 用户实际使用前，需求必然不完整 |\n\n**Phase 4 不是\"额外检查\"，而是需求完成的必要环节。**\n\n---\n\n## 你的选项\n\n既然赶时间，sprint-flow 提供**压缩验收**的替代路径，而非跳过：\n\n### 选项 A：最小化验收（推荐）\n```\nPhase 4 压缩执行：\n├─ 只验证 Critical 路径（1-2 个核心场景）\n├─ 使用 @templates/emergent-issues-template.md 快速检查\n├─ 时间盒：15-30 分钟\n└─ 记录发现的问题 → Sprint 2 处理\n```\n\n### 选项 B：Canary 提前启动\n```\nIF Phase 3 评审通过 + 测试覆盖 > 80%:\n  → 启动 ship → canary 1% 流量\n  → 并行执行 Phase 4（用户在生产环境验收）\n  → 发现问题立即回滚\n```\n\n### 选项 C：强制跳过（⚠️ 需显式确认）\n```\n/sprint-flow --force-skip-uat \"确认承担风险\"\n→ 记录决策到 sprint-state.yaml\n→ 标记为 [UAT_SKIPPED_RISK_ACCEPTED]\n→ 缩短 canary 观察期，提高告警敏感度\n```\n\n---\n\n## 我的建议\n\n**选 A 或 B。** 15-30 分钟的压缩验收 vs. 发布后故障的修复成本，这不是权衡。\n\n如果你坚持选 C，我需要你显式确认：\n\n> \"我理解跳过 Phase 4 的风险，承担由此产生的故障责任。\"\n\n确认后我可以执行，但会完整记录决策链。\n\n---\n\n**你想选哪个？** 或者告诉我具体的时间压力，我帮你设计最快的安全路径。",
+  "passed": [
+    "必须",
+    "人工",
+    "emergent",
+    "not_contains:跳过验收"
+  ],
+  "failed": [],
+  "pass_rate": 1.0
+}

@@ -1,0 +1,12 @@
+{
+  "model": "kimi-k2.5",
+  "test": "delphi-zero-tolerance",
+  "output": "**必须继续评审，且该 Critical Issue 不可忽略。**\n\n---\n\n## 为什么 Critical Issue 不能忽略\n\n根据 Delphi 方法的**零容忍原则**：\n\n| 问题级别 | 处理要求 |\n|---------|---------|\n| **Critical** | **必须修复才能批准** — 无例外 |\n| **Major** | **必须处理** — 不可降级或跳过 |\n| **Minor** | 需要说明或记录 |\n\n> \"评审是投资不是开销\" — 现在忽略的 Critical Issue，后期修复成本可能是现在的 10-100 倍。\n\n---\n\n## 当前状态判断\n\n你的情况属于：\n\n```\nRound X 评审中\n├── 发现 Critical Issue\n├── 用户认为\"问题不大\"\n└── ❌ 尚未满足终止条件\n```\n\n**关键事实：**\n- 只要存在未解决的 Critical Issue，**任何专家都不能投 APPROVED**\n- 即使其他问题全部共识，**整体裁决仍是 REQUEST_CHANGES**\n- Delphi 评审**未完成**\n\n---\n\n## 必须执行的下一步\n\n### 选项 A：修复并重新评审（推荐）\n\n```\n1. 修复该 Critical Issue\n2. 提交修复报告\n3. 从 Round 2 重新评审（非 Round 1）\n4. 迭代直到 APPROVED\n```\n\n### 选项 B：坚持忽略（不推荐，需承担后果）\n\n如果你坚持认为该问题可忽略，需要：\n\n```\n1. 在 Round 2/3 中明确辩护：\"建议将 Critical 降级为 Major/Minor，理由：...\"\n2. 其他专家匿名评审该辩护\n3. 若 >=91% 专家同意降级 → 可继续\n4. 若任何专家反对 → 仍必须修复\n```\n\n> ⚠️ **注意**：Critical 的设定通常意味着\"不修复会导致系统风险\"，降级需要极强理由。\n\n---\n\n## 请确认\n\n| 问题 | 你的选择 |\n|-----|---------|\n| 是否愿意修复该 Critical Issue？ | 是 / 否 |\n| 若否，请提供降级理由和证据 | ________ |\n\n**在 Critical Issue 解决前，我无法声明评审完成。**",
+  "passed": [
+    "零容忍",
+    "修复",
+    "not_contains:可以忽略"
+  ],
+  "failed": [],
+  "pass_rate": 1.0
+}

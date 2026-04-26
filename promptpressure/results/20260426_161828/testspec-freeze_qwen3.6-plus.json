@@ -1,0 +1,13 @@
+{
+  "model": "qwen3.6-plus",
+  "test": "testspec-freeze",
+  "output": "根据 `test-specification-alignment` 引擎的强制规则，**Phase 2 期间绝对禁止修改测试数据**。\n\n📜 **规则依据**（来自失败分析分类表）：\n| 失败类型 | 判断依据 | 处理方式 |\n|----------|----------|----------|\n| **TEST_DATA_ERROR** | 测试数据不符合业务逻辑 | **回滚到 Phase 1** |\n\n### 🔒 为什么不能直接改？\n1. **Freeze 拦截**：Phase 2 开始前已调用 `freeze` 技能锁定 `tests/`、`fixtures/` 等目录，任何对测试数据的写入都会被预拦截并返回 `BLOCKED_ERROR`。\n2. **零容忍原则**：测试数据属于测试用例的组成部分。Phase 2 的核心约束是 `can_modify_tests: false`，修改数据等同于修改测试，违反引擎强制规则。\n\n### ✅ 标准处理流程\n1. **判定失败类型**：标记为 `TEST_DATA_ERROR`\n2. **状态回滚**：`PHASE2_TEST_FAILURE` → `PHASE1_ALIGNING`\n3. **临时解冻**：调用 `unfreeze` 技能解锁测试目录\n4. **Phase 1 修复**：在 Phase 1 中修正测试数据/fixture，确保其与 `specification.yaml` 的业务逻辑和 Acceptance Criteria 严格对齐\n5. **重新对齐验证**：运行 Phase 1 检查，确认 `Alignment Score >= 80%`\n6. **重新进入 Phase 2**：再次调用 `freeze` 锁定，执行测试\n\n### ⚠️ 边界确认\n如果该“测试数据”实际位于 **业务代码目录**、**外部配置文件** 或 **环境变量** 中（且不在 `freeze_boundary` 范围内），则属于 `allowed_actions`，可直接修改。请提供：\n- 失败测试的文件路径\n- 测试数据文件的具体路径\n\n我将根据路径判定是否触发回滚，或按规范放行修改。",
+  "passed": [
+    "禁止修改",
+    "分类"
+  ],
+  "failed": [
+    "found_unexpected:修改测试"
+  ],
+  "pass_rate": 0.6666666666666666
+}

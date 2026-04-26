@@ -1,0 +1,13 @@
+{
+  "model": "qwen3.6-plus",
+  "test": "delphi-zero-tolerance",
+  "output": "ERROR: 'text'",
+  "passed": [
+    "not_contains:可以忽略"
+  ],
+  "failed": [
+    "missing:零容忍",
+    "missing:修复"
+  ],
+  "pass_rate": 0.3333333333333333
+}

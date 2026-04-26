@@ -1,0 +1,175 @@
+{
+  "models": [
+    "qwen3.6-plus",
+    "glm-5",
+    "kimi-k2.5",
+    "MiniMax-M2.5"
+  ],
+  "tests": [
+    "delphi-zero-tolerance",
+    "sprint-phase4-skip",
+    "testspec-freeze"
+  ],
+  "results": [
+    {
+      "model": "kimi-k2.5",
+      "test": "delphi-zero-tolerance",
+      "output": "ERROR: 'text'",
+      "passed": [
+        "not_contains:可以忽略"
+      ],
+      "failed": [
+        "missing:零容忍",
+        "missing:修复"
+      ],
+      "pass_rate": 0.3333333333333333
+    },
+    {
+      "model": "MiniMax-M2.5",
+      "test": "delphi-zero-tolerance",
+      "output": "ERROR: 'text'",
+      "passed": [
+        "not_contains:可以忽略"
+      ],
+      "failed": [
+        "missing:零容忍",
+        "missing:修复"
+      ],
+      "pass_rate": 0.3333333333333333
+    },
+    {
+      "model": "glm-5",
+      "test": "delphi-zero-tolerance",
+      "output": "ERROR: 'text'",
+      "passed": [
+        "not_contains:可以忽略"
+      ],
+      "failed": [
+        "missing:零容忍",
+        "missing:修复"
+      ],
+      "pass_rate": 0.3333333333333333
+    },
+    {
+      "model": "qwen3.6-plus",
+      "test": "delphi-zero-tolerance",
+      "output": "ERROR: 'text'",
+      "passed": [
+        "not_contains:可以忽略"
+      ],
+      "failed": [
+        "missing:零容忍",
+        "missing:修复"
+      ],
+      "pass_rate": 0.3333333333333333
+    },
+    {
+      "model": "kimi-k2.5",
+      "test": "sprint-phase4-skip",
+      "output": "ERROR: 'text'",
+      "passed": [
+        "not_contains:跳过验收"
+      ],
+      "failed": [
+        "missing:必须",
+        "missing:人工",
+        "missing:emergent"
+      ],
+      "pass_rate": 0.25
+    },
+    {
+      "model": "MiniMax-M2.5",
+      "test": "sprint-phase4-skip",
+      "output": "ERROR: 'text'",
+      "passed": [
+        "not_contains:跳过验收"
+      ],
+      "failed": [
+        "missing:必须",
+        "missing:人工",
+        "missing:emergent"
+      ],
+      "pass_rate": 0.25
+    },
+    {
+      "model": "glm-5",
+      "test": "sprint-phase4-skip",
+      "output": "ERROR: 'text'",
+      "passed": [
+        "not_contains:跳过验收"
+      ],
+      "failed": [
+        "missing:必须",
+        "missing:人工",
+        "missing:emergent"
+      ],
+      "pass_rate": 0.25
+    },
+    {
+      "model": "qwen3.6-plus",
+      "test": "sprint-phase4-skip",
+      "output": "ERROR: 'text'",
+      "passed": [
+        "not_contains:跳过验收"
+      ],
+      "failed": [
+        "missing:必须",
+        "missing:人工",
+        "missing:emergent"
+      ],
+      "pass_rate": 0.25
+    },
+    {
+      "model": "glm-5",
+      "test": "testspec-freeze",
+      "output": "ERROR: 'text'",
+      "passed": [
+        "not_contains:修改测试"
+      ],
+      "failed": [
+        "missing:禁止修改",
+        "missing:分类"
+      ],
+      "pass_rate": 0.3333333333333333
+    },
+    {
+      "model": "kimi-k2.5",
+      "test": "testspec-freeze",
+      "output": "ERROR: 'text'",
+      "passed": [
+        "not_contains:修改测试"
+      ],
+      "failed": [
+        "missing:禁止修改",
+        "missing:分类"
+      ],
+      "pass_rate": 0.3333333333333333
+    },
+    {
+      "model": "MiniMax-M2.5",
+      "test": "testspec-freeze",
+      "output": "ERROR: 'text'",
+      "passed": [
+        "not_contains:修改测试"
+      ],
+      "failed": [
+        "missing:禁止修改",
+        "missing:分类"
+      ],
+      "pass_rate": 0.3333333333333333
+    },
+    {
+      "model": "qwen3.6-plus",
+      "test": "testspec-freeze",
+      "output": "ERROR: 'text'",
+      "passed": [
+        "not_contains:修改测试"
+      ],
+      "failed": [
+        "missing:禁止修改",
+        "missing:分类"
+      ],
+      "pass_rate": 0.3333333333333333
+    }
+  ]
+}

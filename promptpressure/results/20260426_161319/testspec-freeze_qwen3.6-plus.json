@@ -1,0 +1,13 @@
+{
+  "model": "qwen3.6-plus",
+  "test": "testspec-freeze",
+  "output": "ERROR: name 'requests' is not defined",
+  "passed": [
+    "not_contains:修改测试"
+  ],
+  "failed": [
+    "missing:禁止修改",
+    "missing:分类"
+  ],
+  "pass_rate": 0.3333333333333333
+}

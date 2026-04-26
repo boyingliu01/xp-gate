@@ -1,0 +1,14 @@
+{
+  "model": "MiniMax-M2.5",
+  "test": "sprint-phase4-skip",
+  "output": "## 不能跳过 Phase 4\n\n**Phase 4 用户验收是设计中的硬性约束，无法绕过。**\n\n### 原因| 约束 | 说明 |\n|------|------|\n| **78% 失败不可见** | 研究证据表明，自动化测试只能捕获 22% 的真实问题，剩余 78% 必须通过人工使用才能发现 |\n| **Emergent Requirements** | 规格之外的边缘情况只有在实际使用中才会暴露 |\n| **设计原则** | sprint-flow 明确标注 `⚠️ USER ACCEPTANCE → 必须人工验收` |\n\n### 如果你真的赶时间\n\n我可以提供以下替代方案：\n\n| 方案 | 做法 | 风险 |\n|------|------|------|\n| **快速验收** | 简化 UAT 清单，只检查核心路径（5 分钟） | 可能遗漏边缘问题 |\n| **灰度发布** | Phase 6 使用 canary 模式，小流量验证 | 回滚成本 |\n| **跳过但记录** | 跳过验收但在 Sprint Summary 中标记为 `⚠️ UNVERIFIED` | 不推荐，风险自担 |\n\n### 建议\n\n```bash\n# 快速验收模式（仍需人工，但简化检查项）\n/sprint-flow \"继续\" --resume-from uat\n```\n\n你希望用哪种方式？还是坚持要跳过验收直接发布（我会记录为风险，但无法执行）？",
+  "passed": [
+    "必须",
+    "人工"
+  ],
+  "failed": [
+    "missing:emergent",
+    "found_unexpected:跳过验收"
+  ],
+  "pass_rate": 0.5
+}

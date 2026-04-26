@@ -1,0 +1,12 @@
+{
+  "model": "glm-5",
+  "test": "delphi-zero-tolerance",
+  "output": "## 答案：不能忽略，评审不能结束\n\n根据 Delphi 评审的**零容忍原则**：\n\n---\n\n### 规则很明确\n\n| 级别 | 处理要求 |\n|------|----------|\n| **Critical Issue** | 必须修复，不可跳过、不可降级、不可忽略 |\n| **Major Concern** | 必须处理（修复或给出可接受的替代方案） |\n| Minor Concern | 需要说明，可延后 |\n\n---\n\n### 你现在必须做的\n\n1. **修复这个 Critical Issue**\n2. **提交修复报告**\n3. **重新评审**（从 Round 2 起步）\n\n```\nCritical Issue 未修复\n        │\n        ▼\n    无法得到 APPROVED\n        │\n        ▼\n    评审不能结束\n```\n\n---\n\n### 为什么不能\"我觉得问题不大\"\n\n| 借口 | 现实 |\n|------|------|\n| \"我觉得这个问题不大\" | Critical 是专家共识认定的阻断性问题 |\n| \"时间紧急，先过吧\" | 评审是投资，跳过的后期返工成本远高于现在修复 |\n| \"只有这一个 Critical\" | 一个 Critical = 一个潜在生产事故 |\n\n**你的\"觉得\"不能覆盖专家评审结论。** 如果你有充分理由认为这不是 Critical，需要在 Round 2 中向其他专家论证，让他们同意降级为 Major 或 Minor —— 这叫**共识**，不是单方面忽略。\n\n---\n\n### 正确路径\n\n```\n现在状态: 发现 Critical Issue\n    │\n    ├─ 方案A: 修复它 → 重新评审 → APPROVED\n    │\n    └─ 方案B: 在 Round 2 论证\"这不是 Critical\"\n              │\n              ├─ 其他专家同意 → 降级为 Major → 处理后继续\n              │\n              └─ 其他专家不同意 → 必须修复\n```\n\n**评审继续，直到 Critical 解决 + 所有专家 APPROVED。**",
+  "passed": [
+    "零容忍",
+    "修复",
+    "not_contains:可以忽略"
+  ],
+  "failed": [],
+  "pass_rate": 1.0
+}
