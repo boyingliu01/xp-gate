@@ -1,0 +1,72 @@
+name: promptfoo Skill Validation
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'skills/**'
+      - 'promptfoo/**'
+  pull_request:
+    branches: [main]
+    paths:
+      - 'skills/**'
+      - 'promptfoo/**'
+  schedule:
+    - cron: '0 2 * * 1'  # Weekly Monday 2am UTC
+
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  checks: write
+
+jobs:
+  skill-validation:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Install promptfoo
+        run: npm install -D promptfoo
+
+      - name: Run promptfoo evals
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+        run: npx promptfoo@latest eval -c promptfoo/promptfoo.config.yaml --output promptfoo/results.json --no-cache
+
+      - name: Upload results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: promptfoo-results
+          path: promptfoo/results.json
+
+      - name: Check for regressions
+        if: always()
+        run: |
+          if [ -f promptfoo/results.json ]; then
+            # Parse results and check pass rate
+            PASS_RATE=$(node -e "
+              const fs = require('fs');
+              const results = JSON.parse(fs.readFileSync('promptfoo/results.json', 'utf8'));
+              const total = results.results?.length || 0;
+              const passed = results.results?.filter(r => r.success).length || 0;
+              console.log(Math.round((passed / total) * 100));
+            " 2>/dev/null || echo "0")
+            echo "Pass rate: ${PASS_RATE}%"
+            if [ "$PASS_RATE" -lt 80 ]; then
+              echo "::error::Skill validation pass rate below 80% (${PASS_RATE}%)"
+              exit 1
+            fi
+          fi

@@ -1,0 +1,133 @@
+# promptfoo Configuration for XGate Skill Validation
+# https://promptfoo.dev/docs/configuration
+#
+# Usage:
+#   npx promptfoo@latest eval -c promptfoo/promptfoo.config.yaml
+#   npx promptfoo@latest eval -c promptfoo/promptfoo.config.yaml --cache
+
+description: "XGate Skill Validation - Regression Tests"
+
+# Default test options
+defaultTest:
+  options:
+    provider:
+      id: anthropic:messages:claude-sonnet-4-20250514
+      config:
+        max_tokens: 8192
+        temperature: 0
+
+# Providers - use same model for consistency
+providers:
+  - id: anthropic:messages:claude-sonnet-4-20250514
+    label: claude-sonnet-4
+    config:
+      max_tokens: 8192
+      temperature: 0
+
+# Shared assertions for all skill tests
+tests:
+  # ==================== delphi-review ====================
+  - description: "delphi-review: normal design review triggers full flow"
+    vars:
+      skill_context: "Skills loaded: delphi-review (SKILL.md)"
+      prompt: "我需要评审一份设计文档：我们要给XGate项目添加一个自动生成CHANGELOG的功能。功能包括：1) 从git log提取commit信息 2) 按照conventional commits分类 3) 生成markdown格式的changelog 4) 支持自定义模板。请用delphi-review评审这个设计。"
+    assert:
+      - type: contains
+        value: "Round 1"
+        metric: delphi_round1
+      - type: contains
+        value: "Round 2"
+        metric: delphi_round2
+      - type: contains
+        value: "91%"
+        metric: delphi_consensus
+      - type: contains
+        value: "Expert A"
+        metric: delphi_expert_a
+      - type: contains
+        value: "Expert B"
+        metric: delphi_expert_b
+      - type: regex
+        value: "(APPROVED|REQUEST_CHANGES|REJECTED)"
+        metric: delphi_verdict
+
+  - description: "delphi-review: zero-tolerance enforcement"
+    vars:
+      prompt: "评审时发现了一个Critical Issue，但我觉得这个问题不大，可以忽略。评审还需要继续吗？"
+    assert:
+      - type: contains
+        value: "零容忍"
+        metric: delphi_zero_tolerance
+      - type: contains
+        value: "修复"
+        metric: delphi_requires_fix
+      - type: not-contains
+        value: "可以忽略"
+        metric: delphi_no_skip
+
+  # ==================== sprint-flow ====================
+  - description: "sprint-flow: Phase 0 Think execution"
+    vars:
+      prompt: "开发一个用户登录功能，支持邮箱密码登录和OAuth2.0第三方登录（GitHub和Google）。需要记住登录状态，支持'记住我'功能。请用sprint-flow执行。"
+    assert:
+      - type: contains
+        value: "Phase 0"
+        metric: sprint_phase0
+      - type: contains
+        value: "Pain Document"
+        metric: sprint_pain_doc
+      - type: contains
+        value: "Phase 4"
+        metric: sprint_phase4
+      - type: contains
+        value: "人工"
+        metric: sprint_human_uat
+      - type: not-contains
+        value: "验收通过"
+        metric: sprint_no_auto_uat
+
+  - description: "sprint-flow: Phase 4 cannot be skipped"
+    vars:
+      prompt: "sprint-flow跑到Phase 4了，能不能跳过用户验收直接发布？我赶时间。"
+    assert:
+      - type: contains
+        value: "必须"
+        metric: sprint_phase4_mandatory
+      - type: contains
+        value: "emergent"
+        metric: sprint_emergent
+      - type: not-contains
+        value: "跳过验收"
+        metric: sprint_no_skip_uat
+
+  # ==================== test-spec-alignment ====================
+  - description: "test-spec-alignment: two-phase process with freeze"
+    vars:
+      prompt: "项目有specification.yaml定义了3个requirements和6个acceptance criteria。测试文件中有对应的@test REQ-001, @intent, @covers AC-001-01标注。请验证测试与specification的对齐情况。"
+    assert:
+      - type: contains
+        value: "Phase 1"
+        metric: testspec_phase1
+      - type: contains
+        value: "Phase 2"
+        metric: testspec_phase2
+      - type: contains
+        value: "freeze"
+        metric: testspec_freeze
+      - type: regex
+        value: "[0-9]+%"
+        metric: testspec_score
+
+  - description: "test-spec-alignment: Phase 2 freeze enforcement"
+    vars:
+      prompt: "Phase 2执行测试时，有一个测试因为测试数据问题失败了。能不能修改一下测试数据让测试通过？"
+    assert:
+      - type: contains
+        value: "禁止修改"
+        metric: testspec_freeze_enforced
+      - type: contains
+        value: "分类"
+        metric: testspec_classification
+      - type: not-contains
+        value: "修改测试"
+        metric: testspec_no_modification
