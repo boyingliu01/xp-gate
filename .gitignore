@@ -52,3 +52,11 @@ htmlcov/
 *.temp
 .cache/.worktrees/
 .sisyphus/
+
+# Skill-cert
+skill-cert/venv/
+skill-cert/.pytest_cache/
+skill-cert/.coverage
+skill-cert/__pycache__/
+skill-cert/**/*.pyc
+skill-cert/*.egg-info/
