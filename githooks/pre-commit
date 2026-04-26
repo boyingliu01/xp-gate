@@ -1870,7 +1870,7 @@ else
     echo "   Quick fix options:"
     echo ""
     echo "   1. Download template from GitHub:"
-    echo "      curl -O https://raw.githubusercontent.com/boyingliu01/xp-workflow-automation/main/architecture.yaml"
+    echo "      curl -O https://raw.githubusercontent.com/boyingliu01/xgate/main/architecture.yaml"
     echo ""
     echo "   2. Create minimal config manually:"
     echo "      cat > architecture.yaml << 'EOF'"

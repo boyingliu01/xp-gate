@@ -1,7 +1,7 @@
 {
-  "name": "xp-workflow-automation",
+  "name": "xgate",
   "version": "0.0.6",
-  "description": "XP Workflow Automation - Clean Code & SOLID Principles Checker",
+  "description": "XGate - Quality Gate & AI Review for Every Commit",
   "type": "module",
   "engines": {
     "node": ">=18.x"

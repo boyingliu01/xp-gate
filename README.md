@@ -1,6 +1,6 @@
-# XP Workflow Automation
+# XGate
 
-AI-powered development workflow tools with quality gates and multi-expert review.
+AI-powered development workflow tools with 9 quality gates and multi-expert review.
 
 ---
 
@@ -51,8 +51,8 @@ AI-powered development workflow tools with quality gates and multi-expert review
 #### 快速安装（全部门禁 + 所有 AI 组件）
 
 ```bash
-git clone https://github.com/boyingliu01/xp-workflow-automation.git
-cd xp-workflow-automation
+git clone https://github.com/boyingliu01/xgate.git
+cd xgate
 
 # 安装全部门禁（pre-commit + pre-push）
 bash scripts/install-all.sh

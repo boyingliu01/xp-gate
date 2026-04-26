@@ -1,5 +1,5 @@
 {
-  "name": "@xp-workflow-automation/clean-code-checker",
+  "name": "@xgate/clean-code-checker",
   "version": "1.0.0",
   "description": "AI-powered clean code and SOLID principles checker",
   "main": "dist/src/principles/index.js",

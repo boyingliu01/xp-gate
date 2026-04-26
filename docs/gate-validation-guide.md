@@ -251,7 +251,7 @@ func (g *GodClass) Method2() {}
 ### Gate 6 Not Running
 
 1. Check if `src/principles/index.ts` exists in project
-2. If not, copy from xp-workflow-automation
+2. If not, copy from xgate
 3. Or configure principles checker path in `.principlesrc`
 
 ### Gate 7 Not Running

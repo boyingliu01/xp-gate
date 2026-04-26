@@ -8,7 +8,7 @@
 
 ## 1. Executive Summary
 
-This document outlines the architecture for a language-agnostic Clean Code and SOLID principle checking system for the xp-workflow-automation project. The system uses the **Adapter Pattern** to separate universal principles from language-specific AST parsers, with **ast-grep** as the core analysis engine.
+This document outlines the architecture for a language-agnostic Clean Code and SOLID principle checking system for the XGate project. The system uses the **Adapter Pattern** to separate universal principles from language-specific AST parsers, with **ast-grep** as the core analysis engine.
 
 ---
 
@@ -52,7 +52,7 @@ This document outlines the architecture for a language-agnostic Clean Code and S
 ## 4. Directory Structure
 
 ```
-xp-workflow-automation/
+XGate/
 ├── src/
 │   └── principles/                          # CORE - Language-agnostic
 │       ├── index.ts                         # Main entry point

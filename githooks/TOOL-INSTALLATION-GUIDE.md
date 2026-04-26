@@ -315,7 +315,7 @@ rules:
 
 ```bash
 # 下载完整模板
-curl -O https://raw.githubusercontent.com/boyingliu01/xp-workflow-automation/main/architecture.yaml
+curl -O https://raw.githubusercontent.com/boyingliu01/xgate/main/architecture.yaml
 ```
 
 ### 迁移指南（Breaking Change）

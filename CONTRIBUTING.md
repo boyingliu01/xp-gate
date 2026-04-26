@@ -1,4 +1,4 @@
-# Contributing to XP Workflow Automation
+# Contributing to XGate
 
 Thank you for your interest in contributing!
 
@@ -6,8 +6,8 @@ Thank you for your interest in contributing!
 
 ```bash
 # Clone and install
-git clone https://github.com/boyingliu01/xp-workflow-automation.git
-cd xp-workflow-automation
+git clone https://github.com/boyingliu01/xgate.git
+cd xgate
 npm install
 
 # Setup git hooks (MANDATORY)

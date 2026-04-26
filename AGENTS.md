@@ -5,7 +5,7 @@
 **Branch:** main
 
 ## OVERVIEW
-XP Workflow Automation project - AI-powered development workflow tools with consensus engines and quality gates. Implements Sprint Flow (One-Shot Sprint 自动流水线), Delphi review with dual modes (design + code-walkthrough), test-specification alignment, lightweight specification auto-generation, Boy Scout Rule enforcement, multi-language principles checker, and Zero-Tolerance quality gate enforcement.
+XGate — 9质量门禁 + AI多专家评审的自动化开发工作流。 Implements Sprint Flow (One-Shot Sprint 自动流水线), Delphi review with dual modes (design + code-walkthrough), test-specification alignment, lightweight specification auto-generation, Boy Scout Rule enforcement, multi-language principles checker, and Zero-Tolerance quality gate enforcement.
 
 ## STRUCTURE
 ```

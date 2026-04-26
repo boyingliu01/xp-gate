@@ -107,7 +107,7 @@ All notable changes to this project will be documented in this file.
 ## [0.0.1] - 2025-03-XX
 
 ### Added
-- Initial XP Workflow Automation framework
+- Initial XGate framework
 - Principles checker with Clean Code + SOLID rules
 - Git hooks framework
 - Basic skill structure

@@ -1,4 +1,4 @@
-# Delphi Consensus Report - XP Workflow Automation Design Document
+# Delphi Consensus Report - XGate Design Document
 
 ## Review Metadata
 
