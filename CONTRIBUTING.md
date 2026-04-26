@@ -34,7 +34,7 @@ See [skills/delphi-review/INSTALL.md](skills/delphi-review/INSTALL.md) for the f
 
 ## Quality Gates
 
-All commits must pass the 8-gate quality system:
+All commits must pass the 9-gate quality system:
 
 | Gate | 检查内容 | 标准 |
 |------|---------|------|
@@ -46,6 +46,7 @@ All commits must pass the 8-gate quality system:
 | 6 | Clean Code + SOLID | 零错误（warnings 由 Gate 8 处理） |
 | 7 | 圈复杂度 | ≤5 警告，≤10 阻断 |
 | 8 | 童子军规则（统一） | 新文件零告警；修改文件：警告数不增加；≤5 告警必须清零 |
+| 9 | 架构质量 | 层边界不违规 |
 
 ## Pull Request Process
 

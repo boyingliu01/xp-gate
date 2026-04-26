@@ -11,20 +11,28 @@ XP Workflow Automation project - AI-powered development workflow tools with cons
 ```
 ./
 ├── docs/          # Documentation files and version specs
+│   └── plans/     # Design documents and Delphi consensus reports
 ├── githooks/      # Pre-commit (9 Gates) and pre-push quality gate scripts
+│   └── __tests__/ # Bats test suite
 ├── skills/        # AI workflow automations and consensus engines
-│   ├── sprint-flow/            # One-Shot Sprint 自动流水线 (Think → Plan → Build → Review → Ship)
-│   │   ├── SKILL.md            # Main skill definition
-│   │   ├── references/         # Phase-specific execution instructions (7 phases)
-│   │   └── templates/          # Output templates (pain document, emergent issues, sprint summary)
-│   ├── delphi-review/          # Delphi consensus methodology (design + code-walkthrough dual modes)
-│   └── test-specification-alignment/  # Test-requirement alignment verification
-├── src/principles/    # Clean Code & SOLID checker (14 rules, 9 language adapters)
-│   ├── boy-scout.ts   # Differential warning enforcement
-│   ├── baseline.ts    # Warning history storage
-│   └── adapters/      # C++, Objective-C, TypeScript, Python, Go, Java, Kotlin, Dart, Swift
-├── scripts/           # Benchmark and utility scripts
-└── .principlesrc      # Custom quality thresholds config
+│   ├── sprint-flow/            # One-Shot Sprint 自动流水线
+│   ├── delphi-review/          # Delphi consensus methodology
+│   └── test-specification-alignment/  # Test-requirement alignment
+├── src/
+│   ├── architecture/   # Version parsing and architecture validation
+│   ├── principles/     # Clean Code & SOLID checker (14 rules, 9 adapters)
+│   │   ├── adapters/   # C++, Objective-C, TypeScript, Python, Go, Java, Kotlin, Dart, Swift
+│   │   ├── rules/      # clean-code/ (9 rules) + solid/ (5 rules)
+│   │   ├── boy-scout.ts  # Differential warning enforcement (Gate 8)
+│   │   └── baseline.ts   # Warning history storage
+│   ├── rules/         # Shared rule index
+│   ├── security/      # Security scanning stubs
+│   └── _wip/          # Work-in-progress reference code
+├── scripts/           # Install scripts and benchmark utilities
+├── tests/             # Integration tests and fixtures
+├── specification.yaml # Auto-generated requirements
+├── architecture.yaml  # Clean Architecture layer rules
+└── .warnings-baseline.json # Boy Scout Rule warning history
 ```
 
 ## WHERE TO LOOK
@@ -38,8 +46,11 @@ XP Workflow Automation project - AI-powered development workflow tools with cons
 | Boy Scout Rule | ./src/principles/boy-scout.ts | Differential warning enforcement for historical projects |
 | Baseline Storage | ./src/principles/baseline.ts | Warning history per file (.warnings-baseline.json) |
 | Principles Checker | ./src/principles/ | Clean Code (9) + SOLID (5) rules, 9 language adapters |
+| Version Parser | ./src/architecture/version-parser.ts | Architecture version detection |
 | Specification | ./specification.yaml | Auto-generated YAML requirements and acceptance criteria |
+| Architecture Rules | ./architecture.yaml | Clean Architecture layer boundaries |
 | Installation | ./githooks/TOOL-INSTALLATION-GUIDE.md | Tooling setup guide |
+| Integration Tests | ./tests/integration/ | Hook integration test fixtures |
 
 ## CODE MAP
 | Symbol | Type | Location | Refs | Role |
@@ -65,7 +76,7 @@ XP Workflow Automation project - AI-powered development workflow tools with cons
 - Magic numbers whitelist: [0, 1, -1, 2, 10, 100, 1000, 60, 24, 7, 30, 365, 256, 1024]
 - Coverage threshold: 80% (branches, functions, lines, statements)
 - Push limits: max 20 files or 500 LOC per push
-- Boy Scout Rule: new files zero-tolerance, modified files decrease-or-maintain warnings
+- Boy Scout Rule: auto-initializes baseline on first touch; modified files cannot increase warnings; ≤5 baseline warnings must clear to zero; new files zero-tolerance
 - Test annotations: @test REQ-XXX, @intent, @covers AC-XXX required for specification alignment
 - Specification.yaml is auto-generated after delphi-review APPROVED; no manual editing required
 
@@ -76,7 +87,7 @@ XP Workflow Automation project - AI-powered development workflow tools with cons
 - Do NOT claim Delphi review complete without APPROVED verdict
 - Do NOT auto-degrade quality gates on cost/environment issues - MUST BLOCK and notify user
 - Do NOT modify frozen tests during Phase 2 execution
-- Do NOT skip Boy Scout Rule when .warnings-baseline.json exists
+- Do NOT skip Boy Scout Rule (always runs — auto-initializes baseline when missing)
 - Do NOT use `git push --no-verify` to skip code review (per QUALITY-GATES-CODE-OF-CONDUCT.md)
 
 ## UNIQUE STYLES
@@ -85,7 +96,7 @@ XP Workflow Automation project - AI-powered development workflow tools with cons
 - Freeze/unfreeze mechanism protects test files during Phase 2 execution
 - SARIF 2.1.0 output format for IDE/GitHub Actions integration
 - Skills defined as SKILL.md files (markdown) not executable code
-- Differential warning enforcement via Boy Scout Rule (baseline.json tracking)
+- Differential warning enforcement via Boy Scout Rule (auto-baseline initialization)
 - Regex-based AST extraction for C++ and Objective-C (Phase 1 approach)
 - Quality Gates Code of Conduct enforces zero-tolerance for tool-reported errors
 
@@ -102,7 +113,11 @@ git push    # -> pre-push (Delphi code walkthrough review)
 /test-specification-alignment
 
 # Principles checker (Clean Code + SOLID)
-npx tsx src/principles/index.ts --files "src/**/*.ts" --format sarif
+npx tsx src/principles/index.ts --files "src/**/*.ts" --format console
+
+# Boy Scout Rule (standalone)
+npx tsx src/principles/boy-scout.ts --new-files a.ts --modified-files b.ts --baseline .warnings-baseline.json
+npx tsx src/principles/boy-scout.ts --init-baseline
 ```
 
 ## NOTES

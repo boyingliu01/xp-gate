@@ -39,11 +39,11 @@ src/principles/
 | C++ Adapter | adapters/cpp.ts | Regex extraction for .cpp/.c files |
 
 ## CONVENTIONS
-- TDD implemented: 257 tests, 85%+ coverage
+- TDD implemented: 32 test files across adapters, rules, and core modules
 - Rule ID format: `clean-code.long-function`, `solid.srp`
 - Severity levels: error (block), warning (block), info (log only)
 - SARIF output includes rule descriptions + default levels
-- Boy Scout Rule: new files zero-tolerance, modified files decrease-or-maintain
+- Boy Scout Rule: auto-initializes baseline on first touch; modified files cannot increase warnings; ≤5 baseline warnings must clear to zero
 - Test annotations: @test REQ-XXX, @covers AC-XXX required
 
 ## ANTI-PATTERNS
@@ -64,6 +64,6 @@ npx tsx src/principles/index.ts --files "src/**/*.ts" --config .principlesrc
 ```
 
 ## NOTES
-- Gate 6 of pre-commit hook (7 gates total)
+- Gate 6 of pre-commit hook (9 gates total)
 - Performance: 95ms for 28 files, ~340ms estimated for 100 files
 - Memory: ~102MB (Node.js baseline unavoidable)
