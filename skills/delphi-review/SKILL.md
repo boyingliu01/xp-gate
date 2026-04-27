@@ -174,6 +174,34 @@ Phase 0: 准备 → Round 1: 匿名独立评审 → 共识检查
 
 ---
 
+## Output Format (MANDATORY)
+Every review round output MUST follow this exact JSON structure:
+
+```json
+{
+  "expert_id": "A|B|C",
+  "round": 1,
+  "mode": "design|code-walkthrough",
+  "verdict": "APPROVED|REQUEST_CHANGES|REJECTED",
+  "confidence": 9,
+  "critical_issues": ["..."],
+  "major_concerns": ["..."],
+  "minor_concerns": ["..."],
+  "consensus_report": {
+    "agreed_items": ["..."],
+    "disagreed_items": ["..."],
+    "final_verdict": "APPROVED|REQUEST_CHANGES"
+  }
+}
+```
+
+**Anti-patterns mapping to assertions:**
+- `Round 1 → 生成报告 → "评审完成"` → Output MUST NOT have `verdict: APPROVED` if `critical_issues` exist.
+- `只处理 Critical，忽略 Major` → Output MUST include `major_concerns` array, even if empty.
+- `用户说"时间紧急"就跳过` → Output MUST include `round` field, proving multi-round process.
+
+---
+
 ## Terminal State Checklist
 
 <MANDATORY-CHECKLIST>

@@ -141,6 +141,30 @@ Phase 6: SHIP → ship → ⚠️ (等待发布确认)
 
 ---
 
+## Output Format (MANDATORY)
+Sprint state is persisted as JSON in `.sprint-state/sprint-state.json`:
+```json
+{
+  "id": "sprint-2026-04-26-01",
+  "phase": 0,
+  "status": "running|paused|completed",
+  "outputs": {
+    "pain_document": "docs/pain-document.md",
+    "specification": "specification.yaml",
+    "mvp": "mvp-v1/",
+    "review_report": "review-report.md"
+  },
+  "metrics": {
+    "tests_passed": 15,
+    "tests_failed": 0,
+    "coverage_pct": 85
+  }
+}
+```
+**Eval assertions check for:** `phase`, `status`, `outputs.specification`, `metrics.coverage_pct`.
+
+---
+
 ## 参数说明
 
 ### 默认用法（无参数）

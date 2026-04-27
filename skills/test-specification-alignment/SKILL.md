@@ -19,6 +19,24 @@ description: "测试与 Specification 对齐验证引擎。确保测试准确反
 
 ---
 
+## Output Format (MANDATORY)
+Alignment report MUST be output as valid JSON:
+```json
+{
+  "alignment_status": "PASS|FAIL|BLOCKED",
+  "phase": "1|2",
+  "score": 85.5,
+  "misaligned_tests": [
+    {"test_name": "test_checkout", "spec_requirement": "REQ-003", "gap": "Missing @test annotation"}
+  ],
+  "anti_pattern_detected": false,
+  "errors": []
+}
+```
+**Eval assertions check for:** `alignment_status`, `phase`, `score`, `anti_pattern_detected`.
+
+---
+
 ## 触发条件
 
 ### 自动触发

@@ -261,7 +261,7 @@ Minimum requirements:
         if total_workflow_steps > 0:
             for step in skill_spec.get("workflow_steps", []):
                 step_name = step.get("name", "") if isinstance(step, dict) else str(step)
-                if any(step_name.lower() in val.lower() for val in assertion_set):
+                if any(step_name.lower() in str(val).lower() for val in assertion_set):
                     covered_workflow_steps += 1
             workflow_coverage = covered_workflow_steps / total_workflow_steps
         else:
@@ -272,7 +272,7 @@ Minimum requirements:
         if total_anti_patterns > 0:
             for pattern in skill_spec.get("anti_patterns", []):
                 pattern_lower = str(pattern).lower()
-                if any(pattern_lower in val.lower() for val in assertion_set):
+                if any(pattern_lower in str(val).lower() for val in assertion_set):
                     covered_anti_patterns += 1
             anti_pattern_coverage = covered_anti_patterns / total_anti_patterns
         else:
@@ -283,7 +283,7 @@ Minimum requirements:
         if total_output_formats > 0:
             for fmt in skill_spec.get("output_format", []):
                 fmt_lower = str(fmt).lower()
-                if any(fmt_lower in val.lower() for val in assertion_set):
+                if any(fmt_lower in str(val).lower() for val in assertion_set):
                     covered_output_formats += 1
             output_coverage = covered_output_formats / total_output_formats
         else:

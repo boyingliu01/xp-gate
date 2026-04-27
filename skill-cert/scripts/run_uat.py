@@ -8,13 +8,35 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from engine.config import SkillCertConfig
 from engine.analyzer import parse_skill_md
-from engine.testgen import EvalGenerator
 from adapters.anthropic_compat import AnthropicCompatAdapter
-from engine.grader import Grader
+from engine.grader import Grader, EvalAssertion
 from engine.metrics import MetricsCalculator
 from engine.reporter import Reporter
 
 PROJECT_ROOT = Path("/mnt/e/Private/opencode优化/xgate")
+
+def load_eval_cases(skill_name, spec, adapter):
+    import os, json as j
+    cache = Path(f"results/{skill_name}-evals-cache.json")
+    if cache.exists():
+        print(f"  Loading cached eval cases...")
+        return json.loads(cache.read_text())
+    
+    from engine.testgen import EvalGenerator
+    gen = EvalGenerator()
+    prompt = gen._prepare_generation_prompt(spec)
+    try:
+        resp = adapter.chat([{"role": "user", "content": prompt}])
+        evals = gen._parse_evals_response(resp)
+        cases = evals.get("eval_cases", evals.get("evals", []))
+        if cases:
+            cache.write_text(json.dumps(cases, ensure_ascii=False))
+            return cases
+    except Exception as e:
+        print(f"  LLM gen failed: {e}, using template")
+    
+    tmpl = gen.minimum_evals_template
+    return tmpl.get("eval_cases", tmpl.get("evals", []))
 
 def run_single_skill(skill_path, output_dir):
     output_dir.mkdir(parents=True, exist_ok=True)
@@ -29,42 +51,57 @@ def run_single_skill(skill_path, output_dir):
         return None
     mc = config.models[0]
     primary = mc.model_name
+    adapter = AnthropicCompatAdapter(base_url=mc.base_url, api_key=mc.api_key, model=primary, fallback_model=mc.fallback_model)
     
     print(f"\n[Phase 0] Parsing SKILL.md...")
     spec = parse_skill_md(skill_path)
     print(f"  Name: {spec['name']}, confidence={spec['parse_confidence']:.2f}")
     print(f"  Steps: {len(spec['workflow_steps'])}, Anti-patterns: {len(spec['anti_patterns'])}")
     
-    print(f"\n[Phase 1] Generating eval cases...")
-    adapter = AnthropicCompatAdapter(base_url=mc.base_url, api_key=mc.api_key, model=primary, fallback_model=mc.fallback_model)
-    gen = EvalGenerator()
-    evals = gen.generate_evals_with_convergence(spec, adapter, adapter)
-    eval_cases = evals.get("eval_cases", evals.get("evals", []))
-    eval_count = len(eval_cases)
-    print(f"  Generated {eval_count} eval cases")
+    print(f"\n[Phase 1] Loading eval cases...")
+    eval_cases = load_eval_cases(skill_name, spec, adapter)
+    print(f"  Loaded {len(eval_cases)} eval cases")
     
-    if eval_count == 0:
+    if not eval_cases:
         print("❌ No eval cases")
         return None
     
-    print(f"\n[Phase 2] Evaluating with model: {primary}...")
+    print(f"\n[Phase 2] Executing eval cases with {primary}...")
     prompts = [{"messages": [{"role": "user", "content": e.get("input", e.get("prompt", ""))}]} for e in eval_cases]
+    t0 = time.time()
     outputs = adapter.batch_chat(prompts)
+    print(f"  Completed {len(outputs)} responses in {time.time()-t0:.0f}s")
     
+    print(f"\n[Phase 2] Grading...")
     grader = Grader()
     all_gradings = []
     for eval_case, output in zip(eval_cases, outputs):
-        grading = grader.grade_output(eval_case, output)
+        assertions_raw = eval_case.get("assertions", [])
+        assertions = []
+        for a in assertions_raw:
+            if isinstance(a, dict):
+                try:
+                    assertions.append(EvalAssertion(**a))
+                except Exception:
+                    pass
+        ec_obj = type('EvalCase', (), {
+            "id": eval_case.get("id", 0),
+            "name": eval_case.get("name", "unknown"),
+            "category": eval_case.get("category", "normal"),
+            "prompt": eval_case.get("input", eval_case.get("prompt", "")),
+            "assertions": assertions,
+        })()
+        grading = grader.grade_output(ec_obj, output)
         grading["run"] = "with-skill"
         grading["model"] = primary
         all_gradings.append(grading)
-        passed = sum(1 for a in grading.get("assertions", []) if a.get("passed"))
+        passed = sum(1 for a in grading.get("assertions", []) if getattr(a, "passed", False))
         total = len(grading.get("assertions", []))
-        print(f"  {eval_case.get('name', '?')}: {passed}/{total} assertions passed")
+        print(f"  {eval_case.get('name', '?')}: {passed}/{total} passed")
     
-    calc = MetricsCalculator()
-    metrics = calc.calculate_metrics(all_gradings, spec)
     print(f"\n[Phase 4] Metrics:")
+    calc = MetricsCalculator()
+    metrics = calc.calculate_metrics(all_gradings)
     print(f"  L1 Trigger Accuracy: {metrics.get('l1_trigger_accuracy', 0):.2%}")
     print(f"  L2 Delta: {metrics.get('l2_with_without_skill_delta', 0):.2%}")
     print(f"  L3 Step Adherence: {metrics.get('l3_step_adherence', 0):.2%}")
@@ -76,7 +113,7 @@ def run_single_skill(skill_path, output_dir):
     md_report, json_report = reporter.generate_report(
         metrics,
         {"overall_drift": "none", "overall_verdict": "PASS"},
-        {"total_evaluations": eval_count, "avg_pass_rate": metrics.get('l1_trigger_accuracy', 0),
+        {"total_evaluations": len(eval_cases), "avg_pass_rate": metrics.get('l1_trigger_accuracy', 0),
          "critical_passed": 0, "critical_total": 0, "important_passed": 0, "important_total": 0,
          "normal_passed": 0, "normal_total": 0}
     )
@@ -96,9 +133,13 @@ def main():
         p = PROJECT_ROOT / "skills" / name / "SKILL.md"
         if p.exists():
             skill_paths.append((name, str(p)))
+    p = Path.home() / ".config" / "opencode" / "skills" / "gstack" / "plan-eng-review" / "SKILL.md"
+    if p.exists():
+        skill_paths.append(("plan-eng-review", str(p)))
     print(f"Found {len(skill_paths)} skills to evaluate")
     
     output_dir = Path("results")
+    output_dir.mkdir(exist_ok=True)
     results = {}
     for name, path in skill_paths:
         try:

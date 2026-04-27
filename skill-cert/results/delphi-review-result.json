@@ -1,0 +1,48 @@
+{
+  "verdict": "PASS_WITH_CAVEATS",
+  "overall_score": 0.6295720320231386,
+  "metrics": {
+    "l1_trigger_accuracy": 0.4,
+    "l2_with_without_skill_delta": 0.5302083333333333,
+    "l3_step_adherence": 0.8888888888888888,
+    "l4_execution_stability": 0.6991909058703325
+  },
+  "drift_analysis": {
+    "overall_drift": "none",
+    "overall_verdict": "PASS"
+  },
+  "evaluation_coverage": {
+    "total_evaluations": 8,
+    "avg_pass_rate": 0.4,
+    "assertion_breakdown": {
+      "critical": {
+        "passed": 0,
+        "total": 0
+      },
+      "important": {
+        "passed": 0,
+        "total": 0
+      },
+      "normal": {
+        "passed": 0,
+        "total": 0
+      }
+    }
+  },
+  "improvement_suggestions": [
+    "Improve trigger accuracy - skill may not be properly detecting trigger conditions",
+    "Address execution instability - results vary significantly across runs",
+    "Several areas need improvement to reach optimal performance"
+  ],
+  "timestamp": "",
+  "config": {
+    "total_evaluations": 8,
+    "avg_pass_rate": 0.4,
+    "critical_passed": 0,
+    "critical_total": 0,
+    "important_passed": 0,
+    "important_total": 0,
+    "normal_passed": 0,
+    "normal_total": 0
+  }
+}
