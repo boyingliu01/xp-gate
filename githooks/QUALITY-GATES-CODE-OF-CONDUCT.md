@@ -77,14 +77,12 @@ git push      # pre-push 验证通过后才允许
 
 | 门禁 | 工具 | 失败处理 | 允许跳过？ |
 |------|------|---------|-----------|
-| Gate 1: 静态分析 | tsc/ruff/clang-tidy 等 | 修复错误后重试 | ❌ 不允许 |
-| Gate 2: Linting | ESLint/Ruff/detekt 等 | 修复规范后重试 | ❌ 不允许 |
-| Gate 3: 单元测试 | vitest/pytest/go test 等 | 修复测试/代码 | ❌ 不允许 |
-| Gate 4: 覆盖率 | coverage 工具 | 增加测试覆盖 | ❌ 不允许 |
-| Gate 5: Shell 检查 | shellcheck | 修复语法 | ❌ 不允许 |
-| Gate 6: Principles | principles checker | 修复代码异味 | ❌ 不允许 |
-| Gate 7: CCN | lizard | 降低复杂度 | ❌ 不允许 |
-| Gate 8: Boy Scout | boy-scout.ts | 减少警告数 | ❌ 不允许 |
+| Gate 1: 代码质量 | tsc/ruff/clang-tidy/ESLint/flake8 等 | 修复错误后重试 | ❌ 不允许 |
+| Gate 2: 重复代码 | jscpd/pylint-dup 等 | 减少重复代码 | ❌ 不允许 |
+| Gate 3: 圈复杂度 | lizard | 降低复杂度 | ❌ 不允许 |
+| Gate 4: Principles | principles checker | 修复代码异味 | ❌ 不允许 |
+| Gate 5: 测试 + 覆盖率 | vitest/pytest/go test 等 | 增加测试覆盖 | ❌ 不允许 |
+| Gate 6: 架构 + 童子军 | archlint + boy-scout.ts | 修复架构/减少警告 | ❌ 不允许 |
 | Pre-push: Code Walkthrough | delphi-review | 修复专家提出的问题 | ❌ 不允许 |
 
 ---

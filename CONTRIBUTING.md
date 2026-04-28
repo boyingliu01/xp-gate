@@ -34,19 +34,16 @@ See [skills/delphi-review/INSTALL.md](skills/delphi-review/INSTALL.md) for the f
 
 ## Quality Gates
 
-All commits must pass the 9-gate quality system:
+All commits must pass the 6-gate quality system:
 
 | Gate | 检查内容 | 标准 |
 |------|---------|------|
-| 1 | TypeScript 严格模式 | 零错误 |
-| 2 | ESLint 代码风格 | 零告警 |
-| 3 | 单元测试 | 全部通过 |
-| 4 | 测试覆盖率 | ≥80% |
-| 5 | Shell 脚本语法 | 零错误 |
-| 6 | Clean Code + SOLID | 零错误（warnings 由 Gate 8 处理） |
-| 7 | 圈复杂度 | ≤5 警告，≤10 阻断 |
-| 8 | 童子军规则（统一） | 新文件零告警；修改文件：警告数不增加；≤5 告警必须清零 |
-| 9 | 架构质量 | 层边界不违规 |
+| 1 | 代码质量 (Static + Lint + Shell) | 零错误 |
+| 2 | 重复代码检测 | ≤5% 相似度 |
+| 3 | 圈复杂度 | ≤5 警告，≤10 阻断 |
+| 4 | Clean Code + SOLID | 零错误 |
+| 5 | 单元测试 + 覆盖率 | 全部通过 + ≥80% |
+| 6 | 架构质量 + 童子军规则 | 层边界不违规 + 警告不增加 |
 
 ## Pull Request Process
 

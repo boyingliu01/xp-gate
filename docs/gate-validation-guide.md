@@ -1,4 +1,4 @@
-# Gate 6 & Gate 7 Validation Guide
+# Principles Gate 4 & Gate 3 Complexity Validation Guide
 
 **Purpose:** Validate the principles checker and CCN gates work correctly in other projects.
 
@@ -22,7 +22,7 @@ cp ~/.config/opencode/git-hooks-template/pre-push .git/hooks/pre-push
 chmod +x .git/hooks/pre-commit .git/hooks/pre-push
 ```
 
-## Step 2: Test Gate 6 (Principles Checker)
+## Step 2: Test Gate 4 (Principles Checker)
 
 ### Manual Test
 
@@ -66,10 +66,10 @@ export class UserService {
 }
 ```
 
-### Expected Gate 6 Output
+### Expected Gate 4 Output
 
 ```text
-→ Gate 6: Principles checker...
+→ Gate 4: Principles checker...
 Running principles checker on changed files...
 
 📁 test.ts
@@ -94,13 +94,13 @@ Fix the clean code/SOLID violations above before committing.
 
 ### Verification Checklist
 
-- [ ] Gate 6 runs when TypeScript/Python/Go/Java/Kotlin/Dart/Swift files are changed
+- [ ] Gate 4 runs when TypeScript/Python/Go/Java/Kotlin/Dart/Swift files are changed
 - [ ] Violations are reported with file, line, rule ID, and message
 - [ ] Commit is blocked when violations exist
-- [ ] Gate 6 skips when no source files changed
-- [ ] Gate 6 shows fallback message when ast-grep not installed
+- [ ] Gate 4 skips when no source files changed
+- [ ] Gate 4 shows fallback message when ast-grep not installed
 
-## Step 3: Test Gate 7 (CCN Complexity Check)
+## Step 3: Test Gate 3 (Complexity Check)
 
 ### Manual Test
 
@@ -137,10 +137,10 @@ export function complexDecision(data: any) {
 }
 ```
 
-### Expected Gate 7 Output
+### Expected Gate 3 Output
 
 ```text
-→ Gate 7: Cyclomatic complexity check (threshold: 5)...
+→ Gate 3: Cyclomatic complexity check (threshold: 5)...
 
 complex.ts:10: warning: complexDecision has 15 NLOC, 12 CCN, 89 token
   ⚠️  WARNING: Function CCN (12) exceeds warning threshold (5)
@@ -154,11 +154,11 @@ Refactor to reduce cyclomatic complexity below 10.
 
 ### Verification Checklist
 
-- [ ] Gate 7 runs when source files are changed
+- [ ] Gate 3 runs when source files are changed
 - [ ] CCN warnings shown when complexity > 5
 - [ ] CCN blocking when complexity > 10
 - [ ] Commit blocked when CCN > 10
-- [ ] Gate 7 skips when no source files changed
+- [ ] Gate 3 skips when no source files changed
 
 ## Step 4: Test Clean Commit
 
@@ -190,7 +190,7 @@ export class DataProcessor {
 ### Expected Output
 
 ```text
-→ Gate 6: Principles checker...
+→ Gate 4: Principles checker...
 ✓ No violations found
 
 Files checked: 1
@@ -198,7 +198,7 @@ Rules run: 14
 Execution time: 15ms
 ✅ Principles check passed.
 
-→ Gate 7: Cyclomatic complexity check (threshold: 5)...
+→ Gate 3: Cyclomatic complexity check (threshold: 5)...
 clean.ts:4: fetchData has 3 NLOC, 1 CCN, 28 token
 clean.ts:8: DataProcessor.constructor has 3 NLOC, 1 CCN, 18 token
 clean.ts:13: DataProcessor.process has 3 NLOC, 2 CCN, 32 token
@@ -248,13 +248,13 @@ func (g *GodClass) Method2() {}
 
 ## Troubleshooting
 
-### Gate 6 Not Running
+### Gate 4 Not Running
 
 1. Check if `src/principles/index.ts` exists in project
 2. If not, copy from xgate
 3. Or configure principles checker path in `.principlesrc`
 
-### Gate 7 Not Running
+### Gate 3 Not Running
 
 1. Check if `lizard` is installed: `lizard --version`
 2. Install: `pip install lizard`
@@ -276,8 +276,8 @@ rules:
 
 ## Success Criteria
 
-- [ ] Gate 6 blocks commits with Clean Code/SOLID violations
-- [ ] Gate 7 blocks commits with CCN > 10
+- [ ] Gate 4 blocks commits with Clean Code/SOLID violations
+- [ ] Gate 3 blocks commits with CCN > 10
 - [ ] Both gates pass on clean code
 - [ ] Language-specific rules work correctly
 - [ ] Thresholds are configurable per project

@@ -1,8 +1,8 @@
-# Architecture Configuration for Gate 9
+# Architecture Configuration for Gate 6
 # Version: 1
 # 
 # This file defines Clean Architecture layer boundaries and rules.
-# Place this file in your project root to enable Gate 9 architecture validation.
+# Place this file in your project root to enable Gate 6 architecture validation.
 #
 # Installation:
 #   npm install -g @archlinter/cli
@@ -137,7 +137,7 @@ rules:
     threshold: 20
     description: "Number of incoming dependencies"
 
-# Baseline for gradual adoption (like Gate 8 Boy Scout Rule)
+# Baseline for gradual adoption (like Boy Scout Rule in Gate 6)
 # 
 # IMPORTANT: New projects should start with enabled: false
 # Baseline mode is ONLY for historical projects with existing violations
@@ -163,11 +163,11 @@ output:
   # SARIF format is recommended for:
   #   - GitHub Actions integration
   #   - VS Code SARIF viewer extension
-  #   - Consistent with Gate 6 Principles output
+  #   - Consistent with Gate 4 Principles output
 
 # Integration settings
 integration:
-  # Skip Gate 9 for documentation-only projects
+  # Skip Gate 6 for documentation-only projects
   # (Projects with only .md, .txt, .rst files)
   documentationOnlySkip: true
   

@@ -58,7 +58,7 @@
 | **Node.js** | 运行环境 | 必需 (>=18.x) | `brew install node` 或 [官网](https://nodejs.org/) |
 | **ast-grep** | AST 分析引擎 | **175x faster** | `npm install -g @ast-grep/cli` |
 
-### Cyclomatic Complexity (Gate 7)
+### Cyclomatic Complexity (Gate 3)
 
 | 工具 | 用途 | 语言覆盖 | 安装命令 |
 |------|------|----------|----------|
@@ -66,7 +66,7 @@
 | **dart_code_linter** | Dart 复杂度 | Dart/Flutter | `dart pub add --dev dart_code_linter` |
 | **detekt** | Kotlin 复杂度 | Kotlin | Gradle plugin 或 CLI |
 
-### Architecture Quality (Gate 9)
+### Architecture Quality (Gate 6)
 
 | 工具 | 用途 | 语言覆盖 | 安装命令 |
 |------|------|----------|----------|
@@ -75,7 +75,7 @@
 | **goarchtest** | Go 架构测试 | Go | `go get github.com/fdaines/go-archtest` |
 | **ArchUnit** | Java 架构约束 | Java | Maven/Gradle dependency |
 
-> **重要**: Gate 9 使用 `archlint` (来自 `@archlinter/cli` 包)，不是 `architecture-linter`
+> **重要**: Gate 6 使用 `archlint` (来自 `@archlinter/cli` 包)，不是 `architecture-linter`
 > - `archlint` = Rust 实现，高性能，GitHub 130+ stars
 > - CLI 命令: `archlint` 或 `npx @archlinter/cli`
 > - 最低版本要求: 2.0.0
@@ -128,7 +128,7 @@ pip3 install --user lizard
 ~/.local/bin/lizard --version
 ```
 
-### Architecture Quality (Gate 9)
+### Architecture Quality (Gate 6)
 
 #### TypeScript 项目
 ```bash
@@ -195,7 +195,7 @@ ast-grep --version && echo "✅ ast-grep installed"
 ~/.local/bin/lizard -C 10 src/ && echo "✅ complexity within threshold"
 ```
 
-### Architecture Quality (Gate 9) 验证
+### Architecture Quality (Gate 6) 验证
 
 #### TypeScript
 ```bash
@@ -221,13 +221,13 @@ mvn test -Dtest=*ArchitectureTest && echo "✅ ArchUnit tests passing"
 
 ---
 
-## architecture.yaml 配置指南 (Gate 9)
+## architecture.yaml 配置指南 (Gate 6)
 
 ### ⚠️ 重要提示
 
-**Gate 9 现在遵循零容忍原则**：如果 `architecture.yaml` 或 `.architecturerc` 缺失，commit 将被 **阻塞**。
+**Gate 6 现在遵循零容忍原则**：如果 `architecture.yaml` 或 `.architecturerc` 缺失，commit 将被 **阻塞**。
 
-这与 Gate 1-8 的行为一致（工具缺失 = 阻塞）。
+这与 Gate 1-5 的行为一致（工具缺失 = 阻塞）。
 
 ### 必需字段
 
@@ -323,7 +323,7 @@ curl -O https://raw.githubusercontent.com/boyingliu01/xgate/main/architecture.ya
 **升级后首次 commit 将被阻塞**：
 
 1. 这是故意设计（零容忍原则）
-2. 无绕过标志（与 Gate 1-8 一致）
+2. 无绕过标志（与 Gate 1-5 一致）
 3. 需要创建 architecture.yaml 或 .architecturerc
 
 **CI/CD 环境**：

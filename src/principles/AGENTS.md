@@ -4,7 +4,7 @@
 **Commit:** 324d7ce
 
 ## OVERVIEW
-Clean Code & SOLID principles checker with 14 rules and 9 language adapters. Gate 6 of pre-commit hook. Includes Boy Scout Rule enforcement and baseline storage for historical projects.
+Clean Code & SOLID principles checker with 14 rules and 9 language adapters. Gate 4 of pre-commit hook. Includes Boy Scout Rule enforcement and baseline storage for historical projects.
 
 ## STRUCTURE
 ```
@@ -14,7 +14,7 @@ src/principles/
 │   ├── kotlin.ts, dart.ts, swift.ts
 │   ├── cpp.ts          # Regex-based C++ extraction
 │   └── objectivec.ts   # Regex-based Objective-C extraction
-├── boy-scout.ts  # Differential warning enforcement (Gate 8)
+├── boy-scout.ts  # Differential warning enforcement (part of Gate 6)
 ├── baseline.ts   # Warning history storage (.warnings-baseline.json)
 ├── rules/
 │   ├── clean-code/  # 9 rules (long-function, large-file, god-class, etc.)
@@ -64,6 +64,6 @@ npx tsx src/principles/index.ts --files "src/**/*.ts" --config .principlesrc
 ```
 
 ## NOTES
-- Gate 6 of pre-commit hook (9 gates total)
+- Gate 4 of pre-commit hook (6 gates total)
 - Performance: 95ms for 28 files, ~340ms estimated for 100 files
 - Memory: ~102MB (Node.js baseline unavoidable)

@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Pre-Commit Hook (9 Gates) Installation Script
+# Pre-Commit Hook (6 Gates) Installation Script
 # Usage: bash scripts/install-pre-commit.sh [--force]
 set -e
 
@@ -25,7 +25,7 @@ chmod +x "$TARGET"
 
 echo "✅ Pre-commit hook installed → $TARGET"
 echo ""
-echo "9 Gates: TypeScript/Lint/Tests/Coverage/Shell/Principles/CCN/BoyScout/Architecture"
+echo "6 Gates: Code Quality, Dup Code, Complexity, Principles, Tests, Architecture"
 echo ""
 echo "Required runtime: node >=20"
 echo "Recommended: lizard (cyclomatic complexity), archlint (architecture validation)"

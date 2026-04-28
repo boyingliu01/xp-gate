@@ -11,7 +11,7 @@ Each component can be installed independently. No component requires sprint-flow
 ```yaml
 components:
   - id: pre-commit
-    name: "Pre-Commit Hook (9 Gates)"
+    name: "Pre-Commit Hook (6 Gates)"
     description: "Static analysis, lint, test, coverage, shell check, principles (Clean Code + SOLID), cyclomatic complexity, Boy Scout Rule, architecture quality"
     type: git-hook
     install_command: "bash <(curl -fsSL https://raw.githubusercontent.com/boyingliu01/xgate/repo-main/scripts/install-pre-commit.sh)"

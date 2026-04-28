@@ -65,7 +65,7 @@ bash scripts/install-sprint-flow.sh
 
 | 组件 | 一句话 | 安装命令 |
 |------|--------|---------|
-| **Pre-Commit 门禁** | git commit 自动运行 9 项检查 | `bash scripts/install-pre-commit.sh` |
+| **Pre-Commit 门禁** | git commit 自动运行 6 项检查 | `bash scripts/install-pre-commit.sh` |
 | **Pre-Push 门禁** | git push 前验证代码走查结果 | `bash scripts/install-pre-push.sh` |
 | **质量门禁包** | Pre-Commit + Pre-Push 一起装 | `bash scripts/install-all.sh` |
 | **Principles Checker** | 独立命令行：Clean Code + SOLID 检查 | `bash scripts/install-principles-cli.sh` |
@@ -80,7 +80,7 @@ bash scripts/install-sprint-flow.sh
 #### 日常开发（安装后自动运行）
 
 ```bash
-git commit   # 自动运行 9 道门禁，失败则阻止提交
+git commit   # 自动运行 6 道门禁，失败则阻止提交
 git push     # 自动验证 Delphi 评审结果，未通过则阻止推送
 ```
 
