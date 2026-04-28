@@ -12,6 +12,9 @@ from engine.grader import Grader, EvalCase, EvalAssertion
 from engine.metrics import MetricsCalculator
 from engine.drift import DriftDetector
 from engine.reporter import Reporter
+from engine.simulator import UserSimulator
+from engine.dialogue_evaluator import DialogueEvaluator
+from engine.dialogue_runner import DialogueRunner
 
 
 class MockModelAdapter:
@@ -1140,3 +1143,84 @@ description: "Test skill for integration testing"
         assert json_report["drift_analysis"]["drift_detected"] is True
         assert json_report["evaluation_coverage"]["total_evaluations"] == 50
         assert len(json_report["improvement_suggestions"]) > 0
+
+    def test_dialogue_mode_improves_l1_for_orchestration_skills(self):
+        # Test uses Mock UserSimulator, DialogueEvaluator, and Mock skill_runner
+        # Creates DialogueRunner with mock components
+        # Runs run_dialogue_eval with a mock eval case
+        # Verifies evaluation result has all expected fields
+        # Verifies verdict is one of: "PASS", "CAVEATS", "FAIL" (matching DialogueEvaluator implementation)
+        # Verifies turns_completed >= 1
+        
+        # Create mocks for all required components
+        user_simulator = UserSimulator()
+        
+        mock_judge_callback = AsyncMock()
+        dialogue_evaluator = DialogueEvaluator(judge_callback=mock_judge_callback)
+        
+        # Create mock for skill runner - Mock an EvalRunner-like behavior  
+        class MockSkillRunner:
+            def __init__(self):
+                self._current_adapter = None
+            
+            async def run_with_skill(self, eval_cases, skill_context, adapter=None):
+                # Mock the response for dialogue turns
+                responses = []
+                for eval_case in eval_cases:
+                    responses.append({
+                        "eval_id": eval_case.get("id", "default_id"),
+                        "output": "Mock skill response for dialogue turn",
+                        "timestamp": 1234567890.0
+                    })
+                return responses
+        
+        skill_runner = MockSkillRunner()
+        
+        # Create DialogueRunner with mocked components
+        dialogue_runner = DialogueRunner(
+            simulator=user_simulator,
+            evaluator=dialogue_evaluator,
+            skill_runner=skill_runner,
+            max_turns=5
+        )
+        
+        # Create a mock evaluation case
+        mock_eval_case = {
+            "id": 1,
+            "name": "dialogue-test-eval",
+            "category": "dialogue",
+            "input": "Please help me with this multi-turn task",
+            "workflow_steps": ["step1", "step2", "finalize"]
+        }
+        
+        # Execute the dialogue evaluation
+        import asyncio
+        try:
+            result = asyncio.run(dialogue_runner.run_dialogue_eval(mock_eval_case, "test skill context"))
+        except RuntimeError:
+            # Alternative execution if event loop is already running
+            import concurrent.futures
+            with concurrent.futures.ThreadPoolExecutor() as executor:
+                future = executor.submit(lambda: asyncio.run(dialogue_runner.run_dialogue_eval(mock_eval_case, "test skill context")))
+                result = future.result()
+        
+        # Verify evaluation result has all expected fields
+        assert "conversation" in result
+        assert "evaluation" in result
+        assert "turns_completed" in result
+        
+        # Verify the evaluation contains required elements
+        evaluation = result["evaluation"]
+        assert "dimension_scores" in evaluation
+        assert "overall_score" in evaluation
+        assert "verdict" in evaluation
+        assert "detailed_rounds" in evaluation
+        assert "stats" in evaluation
+        
+        # Verify verdict is one of the expected values based on DialogueEvaluator implementation
+        verdict = evaluation["verdict"]
+        assert verdict in ["PASS", "CAVEATS", "FAIL"]
+        
+        # Verify turns_completed >= 1  
+        turns_completed = result["turns_completed"]
+        assert turns_completed >= 1

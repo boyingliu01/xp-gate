@@ -1,0 +1,4 @@
+{"role": "user", "content": "I need to add auth to my API"}
+{"role": "assistant", "content": "Sure, what type of auth? JWT, OAuth?"}
+{"role": "user", "content": "JWT with refresh tokens"}
+{"role": "assistant", "content": "Here's the implementation...", "tool_use": null}
