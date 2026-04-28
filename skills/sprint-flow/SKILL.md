@@ -333,3 +333,24 @@ Sprint 结束时 (Phase 6 完成):
 | Emergent requirements 无法消除 | Mike Cohn, Rafael Santos | Phase 4 人工设计 |
 | 78% failures invisible | arXiv research | Phase 4 必要性证明 |
 | Think → Plan → Build → Ship | gstack ETHOS | 整体流程设计 |
+## Output Format (MANDATORY)
+Sprint state is persisted as JSON in `.sprint-state/sprint-state.json`:
+```json
+{
+  "id": "sprint-2026-04-26-01",
+  "phase": 0,
+  "status": "running|paused|completed",
+  "outputs": {
+    "pain_document": "docs/pain-document.md",
+    "specification": "specification.yaml",
+    "mvp": "mvp-v1/",
+    "review_report": "review-report.md"
+  },
+  "metrics": {
+    "tests_passed": 15,
+    "tests_failed": 0,
+    "coverage_pct": 85
+  }
+}
+```
+**Eval assertions check for:** `phase`, `status`, `outputs.specification`, `metrics.coverage_pct`.

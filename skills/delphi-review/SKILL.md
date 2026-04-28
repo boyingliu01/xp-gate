@@ -275,3 +275,18 @@ Every review round output MUST follow this exact JSON structure:
 6. ✅ 用户已确认
 
 **缺少任何一项 = 未完成**
+## Output Format (MANDATORY)
+Every delphi review round MUST output valid JSON:
+```json
+{
+  "skill_name": "delphi-review",
+  "mode": "design|code-walkthrough",
+  "phase": "Round 1|Round 2|Round 3|Consensus",
+  "expert_id": "A|B|C",
+  "verdict": "APPROVED|REQUEST_CHANGES|REJECTED",
+  "confidence": 8,
+  "issues": [{"id": "string", "severity": "critical|major|minor", "description": "string"}],
+  "consensus_report": {"status": "pending|consensus|disagreement"}
+}
+```
+**Eval assertions check for:** `verdict` enum values, `confidence` range, `issues` structure, `consensus_report.status`.

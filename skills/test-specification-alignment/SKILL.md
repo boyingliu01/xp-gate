@@ -580,3 +580,18 @@ legacy_mode:
 |------|------|------|
 | V1.0 | 2026-04-06 | 初始设计 |
 | V2.0 | 2026-04-06 | Delphi Review 共识版本 |
+## Output Format (MANDATORY)
+Alignment report MUST be output as valid JSON:
+```json
+{
+  "alignment_status": "PASS|FAIL|BLOCKED",
+  "phase": "1|2",
+  "score": 85.5,
+  "misaligned_tests": [
+    {"test_name": "test_checkout", "spec_requirement": "REQ-003", "gap": "Missing @test annotation"}
+  ],
+  "anti_pattern_detected": false,
+  "errors": []
+}
+```
+**Eval assertions check for:** `alignment_status`, `phase`, `score`, `anti_pattern_detected`.
