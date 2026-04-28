@@ -16,19 +16,16 @@ AI-powered development workflow tools with 9 quality gates and multi-expert revi
 
 ### 1. 质量门禁（纯确定性代码，不需要 AI）
 
-每次 `git commit` 和 `git push` 时自动运行 9 道质量关卡，任何一项失败都会阻止操作：
+每次 `git commit` 和 `git push` 时自动运行 6 道质量关卡，任何一项失败都会阻止操作：
 
 | Gate | 检查内容 | 标准 |
 |------|---------|------|
-| 1 | TypeScript 严格模式 | 零错误 |
-| 2 | ESLint 代码风格 | 零告警 |
-| 3 | 单元测试 | 全部通过 |
-| 4 | 测试覆盖率 | ≥80% |
-| 5 | Shell 脚本语法 | 零错误 |
-| 6 | Clean Code + SOLID | 零错误（警告由 Gate 8 处理）|
-| 7 | 圈复杂度 | ≤5 警告，≤10 阻断 |
-| 8 | 童子军规则（统一）| 新文件零告警，修改文件告警数不增加 |
-| 9 | 架构质量 | 层边界不违规 |
+| 1 | 代码质量 (Static + Lint + Shell) | 零错误 |
+| 2 | 重复代码检测 | ≤5% 相似度 |
+| 3 | 圈复杂度 | ≤5 警告，≤10 阻断 |
+| 4 | Clean Code + SOLID | 零错误 |
+| 5 | 单元测试 + 覆盖率 | 全部通过 + ≥80% |
+| 6 | 架构质量 + 童子军规则 | 层边界不违规 + 警告不增加 |
 
 ### 2. Delphi Review（AI 多专家评审）
 

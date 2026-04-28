@@ -1,126 +1,113 @@
 # PROJECT KNOWLEDGE BASE
 
-**Generated:** 2026-04-14
-**Commit:** 324d7ce
+**Generated:** 2026-04-29
+**Commit:** 9715a21
 **Branch:** main
 
 ## OVERVIEW
-XGate — 9质量门禁 + AI多专家评审的自动化开发工作流。 Implements Sprint Flow (One-Shot Sprint 自动流水线), Delphi review with dual modes (design + code-walkthrough), test-specification alignment, lightweight specification auto-generation, Boy Scout Rule enforcement, multi-language principles checker, and Zero-Tolerance quality gate enforcement.
+XGate — 6质量门禁（合并自原版9个）+ AI多专家评审的自动化开发工作流 + Skill-Cert 评测引擎。Implements Sprint Flow, Delphi review (design + code-walkthrough), test-specification alignment, Boy Scout Rule enforcement, multi-language principles checker, and a Python-based skill certification system.
 
 ## STRUCTURE
 ```
 ./
-├── docs/          # Documentation files and version specs
-│   └── plans/     # Design documents and Delphi consensus reports
-├── githooks/      # Pre-commit (9 Gates) and pre-push quality gate scripts
-│   └── __tests__/ # Bats test suite
-├── skills/        # AI workflow automations and consensus engines
-│   ├── sprint-flow/            # One-Shot Sprint 自动流水线
-│   ├── delphi-review/          # Delphi consensus methodology
-│   └── test-specification-alignment/  # Test-requirement alignment
+├── githooks/         # Pre-commit (6 Gates) and pre-push hooks
+│   ├── pre-commit    # Refactored: 6 type-based gates using language adapters
+│   ├── adapter-common.sh        # Language detection & routing
+│   └── adapters/     # TypeScript/Python/Go/Shell analysis scripts
+├── skills/           # AI workflow skills (SKILL.md, not executable)
+│   ├── sprint-flow/
+│   ├── delphi-review/
+│   └── test-specification-alignment/
+├── skill-cert/       # Python skill evaluation engine (NEW)
+│   ├── engine/       # analyzer, simulator, evaluator, runner, replay
+│   ├── tests/        # Mock-first tests, zero real LLM calls
+│   ├── configs/      # User profiles (clear/vague/chaotic)
+│   └── prompts/      # Judge templates
 ├── src/
-│   ├── architecture/   # Version parsing and architecture validation
-│   ├── principles/     # Clean Code & SOLID checker (14 rules, 9 adapters)
-│   │   ├── adapters/   # C++, Objective-C, TypeScript, Python, Go, Java, Kotlin, Dart, Swift
-│   │   ├── rules/      # clean-code/ (9 rules) + solid/ (5 rules)
-│   │   ├── boy-scout.ts  # Differential warning enforcement (Gate 8)
-│   │   └── baseline.ts   # Warning history storage
-│   ├── rules/         # Shared rule index
-│   ├── security/      # Security scanning stubs
-│   └── _wip/          # Work-in-progress reference code
-├── scripts/           # Install scripts and benchmark utilities
-├── tests/             # Integration tests and fixtures
-├── specification.yaml # Auto-generated requirements
-├── architecture.yaml  # Clean Architecture layer rules
-└── .warnings-baseline.json # Boy Scout Rule warning history
+│   ├── principles/   # Clean Code (9 rules) + SOLID (5 rules), 9 language adapters
+│   ├── architecture/ # Architecture validation
+│   ├── rules/        # Shared rule index
+│   └── _wip/         # Reference / staging area
+├── docs/             # Design docs and implementation plans
+├── scripts/          # Component install scripts
+├── specification.yaml  # Req (auto-generated)
+├── architecture.yaml   # Arch rules
+└── .warnings-baseline.json  # Boy Scout Rule history
 ```
 
 ## WHERE TO LOOK
 | Task | Location | Notes |
 |------|----------|-------|
-| Git Quality Gates | ./githooks/ | Contains pre-commit (9 Gates) and pre-push hooks |
-| Quality Gate Code of Conduct | ./githooks/QUALITY-GATES-CODE-OF-CONDUCT.md | Zero-tolerance policy, --no-verify prohibition |
-| Sprint Flow | ./skills/sprint-flow/ | One-Shot Sprint 自动流水线 (7 phases, 3 templates) |
-| Delphi Review | ./skills/delphi-review/ | MANDATORY before implementation (design + code-walkthrough dual modes) |
-| Test Alignment | ./skills/test-specification-alignment/ | Requirements-test alignment verification |
-| Boy Scout Rule | ./src/principles/boy-scout.ts | Differential warning enforcement for historical projects |
-| Baseline Storage | ./src/principles/baseline.ts | Warning history per file (.warnings-baseline.json) |
-| Principles Checker | ./src/principles/ | Clean Code (9) + SOLID (5) rules, 9 language adapters |
-| Version Parser | ./src/architecture/version-parser.ts | Architecture version detection |
-| Specification | ./specification.yaml | Auto-generated YAML requirements and acceptance criteria |
-| Architecture Rules | ./architecture.yaml | Clean Architecture layer boundaries |
-| Installation | ./githooks/TOOL-INSTALLATION-GUIDE.md | Tooling setup guide |
-| Integration Tests | ./tests/integration/ | Hook integration test fixtures |
+| Git Quality Gates | ./githooks/pre-commit | 6 Gates: Code Quality, Dup Code, Complexity, Principles, Tests, Architecture |
+| Language Adapters | ./githooks/adapters/ | TS/Python/Go/Shell specific static analysis + lint + test |
+| Gate Code of Conduct | ./githooks/QUALITY-GATES-CODE-OF-CONDUCT.md | Zero-tolerance policy, --no-verify prohibition |
+| Sprint Flow | ./skills/sprint-flow/ | Think → Plan → Build → Review → Ship |
+| Delphi Review | ./skills/delphi-review/ | Multi-expert consensus (design + code-walkthrough modes) |
+| Test Alignment | ./skills/test-specification-alignment/ | Test-specification verification |
+| Skill-Cert Engine | ./skill-cert/engine/ | Python: self-generating eval cases, 5-dim scoring |
+| Boy Scout Rule | ./src/principles/boy-scout.ts | Differential warning enforcement |
+| Principles Checker | ./src/principles/ | 14 rules × 9 language adapters |
 
 ## CODE MAP
 | Symbol | Type | Location | Refs | Role |
 |--------|------|----------|------|------|
-| Pre-commit hooks | Bash script | githooks/pre-commit | N/A | 9 Gates: static analysis, lint, test, coverage, shell check, principles, CCN, Boy Scout, Architecture |
-| Pre-push hooks | Bash script | githooks/pre-push | N/A | Delphi code walkthrough (via delphi-review code-walkthrough mode) |
-| analyze | Function | src/principles/analyzer.ts | N/A | Rule orchestration engine, 9 adapters registered |
-| getAllRules | Function | src/principles/index.ts | N/A | CLI entry, 14 rules (9 Clean Code + 5 SOLID) |
-| formatSARIF | Function | src/principles/reporter.ts | N/A | SARIF 2.1.0 output for IDE integration |
-| classifyFiles | Function | src/principles/boy-scout.ts | N/A | File classification (NEW/MODIFIED/UNCHANGED) |
-| calculateDelta | Function | src/principles/boy-scout.ts | N/A | Warning delta calculation for Boy Scout Rule |
-| loadBaseline | Function | src/principles/baseline.ts | N/A | Load warning history from .warnings-baseline.json |
-| Sprint Flow | Skill System | skills/sprint-flow/ | N/A | One-Shot Sprint (Think → Plan → Build → Review → Ship) |
-| Delphi Review | Skill System | skills/delphi-review/ | N/A | Multi-expert consensus (MANDATORY before impl, dual modes) |
-| Test Alignment | Skill System | skills/test-specification-alignment/ | N/A | Test-specification verification |
+| Pre-commit hook | Bash script | githooks/pre-commit | N/A | 6 Gates via language adapter routing |
+| adapter-common.sh | Bash | githooks/adapter-common.sh | N/A | detect_project_lang(), route_to_adapter() |
+| UserSimulator | Python class | skill-cert/engine/simulator.py | N/A | 3 user profiles (clear/vague/chaotic) |
+| DialogueEvaluator | Python class | skill-cert/engine/dialogue_evaluator.py | N/A | 5-dim heuristic scoring |
+| DialogueRunner | Python class | skill-cert/engine/dialogue_runner.py | N/A | Multi-turn execution orchestrator |
+| HistoryReplay | Python class | skill-cert/engine/replay.py | N/A | JSONL session import + comparison |
+| analyze | Function | src/principles/analyzer.ts | N/A | Rule orchestration engine |
+| getAllRules | Function | src/principles/index.ts | N/A | CLI entry, 14 rules |
 
 ## CONVENTIONS
-- All quality gates in githooks are "zero tolerance" - tools must be available or operations are blocked
-- **No bypassing gates**: `--no-verify` is strictly prohibited when tools report errors (see githooks/QUALITY-GATES-CODE-OF-CONDUCT.md)
-- Use Delphi method for multi-expert consensus (delphi-review design/code-walkthrough modes)
-- Two-phase test verification: Phase 1 (align tests with spec), Phase 2 (execute locked tests)
-- Custom thresholds via `.principlesrc`: long-function 50, god-class 15, deep-nesting 4, CCN warning 5, CCN block 10
+- **6 Gates now** (was 9): Code Quality(1+2+5), Dup Code(new), Complexity(7), Principles(6), Tests(3+4), Architecture(8+9)
+- All gates zero-tolerance — tool unavailable → SKIP for that language, NOT block
+- **No bypassing gates**: `--no-verify` strictly prohibited
+- Custom thresholds via `.principlesrc`: long-function 50, god-class 15, deep-nesting 4
 - Magic numbers whitelist: [0, 1, -1, 2, 10, 100, 1000, 60, 24, 7, 30, 365, 256, 1024]
-- Coverage threshold: 80% (branches, functions, lines, statements)
+- Coverage threshold: 80%
 - Push limits: max 20 files or 500 LOC per push
-- Boy Scout Rule: auto-initializes baseline on first touch; modified files cannot increase warnings; ≤5 baseline warnings must clear to zero; new files zero-tolerance
-- Test annotations: @test REQ-XXX, @intent, @covers AC-XXX required for specification alignment
-- Specification.yaml is auto-generated after delphi-review APPROVED; no manual editing required
+- Boy Scout Rule: auto-baseline on first touch; modified files cannot increase warnings
+- Skill-Cert: Mock-first testing, all eval cases use AsyncMock, zero real LLM in tests
 
 ## ANTI-PATTERNS (THIS PROJECT)
-- Do NOT skip test-specification alignment when tests need modification in Phase 2
-- Do NOT exceed 20 file changes or 500 LOC changes per git push
-- Do NOT bypass githooks quality gates via command-line flags (especially `--no-verify`)
+- Do NOT bypass quality gates via `--no-verify`
 - Do NOT claim Delphi review complete without APPROVED verdict
-- Do NOT auto-degrade quality gates on cost/environment issues - MUST BLOCK and notify user
-- Do NOT modify frozen tests during Phase 2 execution
-- Do NOT skip Boy Scout Rule (always runs — auto-initializes baseline when missing)
-- Do NOT use `git push --no-verify` to skip code review (per QUALITY-GATES-CODE-OF-CONDUCT.md)
+- Do NOT skip Boy Scout Rule — always runs
+- Do NOT hardcode tool paths — use adapter routing (detect_project_lang)
+- Do NOT add print() to source code (use logging)
+- Do NOT use skill-cert on main branch without worktree isolation
 
 ## UNIQUE STYLES
-- Lightweight specification.yaml auto-generated from APPROVED design docs (no version management, no conflict detection)
-- JSDoc-style tags (@test, @intent, @covers) link tests to requirements
-- Freeze/unfreeze mechanism protects test files during Phase 2 execution
-- SARIF 2.1.0 output format for IDE/GitHub Actions integration
-- Skills defined as SKILL.md files (markdown) not executable code
-- Differential warning enforcement via Boy Scout Rule (auto-baseline initialization)
-- Regex-based AST extraction for C++ and Objective-C (Phase 1 approach)
-- Quality Gates Code of Conduct enforces zero-tolerance for tool-reported errors
+- Skills are SKILL.md (markdown), not executable code
+- Output Contract section required in every SKILL.md (machine-readable JSON)
+- Skill-Cert self-generates eval cases via LLM → review → fill-gaps loop
+- Language adapters route to TS/Py/Go/Shell specific tools automatically
+- Lightweight spec.yaml auto-generated from APPROVED design docs
+- SARIF 2.1.0 output for IDE/CI integration
 
 ## COMMANDS
 ```bash
-# Git workflow with quality gates
-git commit  # -> pre-commit (9 Gates)
-git push    # -> pre-push (Delphi code walkthrough review)
+# Git workflow
+git commit  # → pre-commit (6 Gates via adapter routing)
+git push    # → pre-push (Delphi code walkthrough)
 
-# Manual execution of automation tools
-/sprint-flow "开发访谈机器人，支持多轮对话"
-/delphi-review                          # Design mode (default)
-/delphi-review --mode code-walkthrough  # Code walkthrough mode (git push review)
-/test-specification-alignment
+# AI review tools
+/delphi-review                              # Design review
+/delphi-review --mode code-walkthrough      # Code walkthrough (push review)
+/sprint-flow "开发用户登录"                   # One-shot sprint
+/test-specification-alignment               # Test-spec alignment
 
-# Principles checker (Clean Code + SOLID)
+# Principles checker
 npx tsx src/principles/index.ts --files "src/**/*.ts" --format console
+npx tsx src/principles/index.ts --files "src/**/*.ts" --format sarif
 
-# Boy Scout Rule (standalone)
-npx tsx src/principles/boy-scout.ts --new-files a.ts --modified-files b.ts --baseline .warnings-baseline.json
-npx tsx src/principles/boy-scout.ts --init-baseline
+# Skill-Cert (Python)
+cd skill-cert && PYTHONPATH=. python3 scripts/run_uat.py --skill /path/to/SKILL.md --mode dialogue
 ```
 
 ## NOTES
-- This project implements enterprise-grade AI-assisted development workflow
-- Quality gates block operations until required tools are available
-- Documentation-only projects skip code analysis but still verify specifications
+- Local commits (9715a21) ahead of origin/main (244b225) by 12 commits — push needed
+- skill-cert/ is a Python subproject with own pyproject.toml and venv
+- promptpressure/ and promptfoo/ are test infrastructure, not core
