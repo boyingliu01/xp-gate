@@ -1145,20 +1145,13 @@ description: "Test skill for integration testing"
         assert len(json_report["improvement_suggestions"]) > 0
 
     def test_dialogue_mode_improves_l1_for_orchestration_skills(self):
-        # Test uses Mock UserSimulator, DialogueEvaluator, and Mock skill_runner
-        # Creates DialogueRunner with mock components
-        # Runs run_dialogue_eval with a mock eval case
-        # Verifies evaluation result has all expected fields
-        # Verifies verdict is one of: "PASS", "CAVEATS", "FAIL" (matching DialogueEvaluator implementation)
-        # Verifies turns_completed >= 1
-        
         # Create mocks for all required components
         user_simulator = UserSimulator()
         
         mock_judge_callback = AsyncMock()
         dialogue_evaluator = DialogueEvaluator(judge_callback=mock_judge_callback)
         
-        # Create mock for skill runner - Mock an EvalRunner-like behavior  
+        # Create mock for skill runner - Mock an EvalRunner-like behavior
         class MockSkillRunner:
             def __init__(self):
                 self._current_adapter = None
@@ -1221,6 +1214,6 @@ description: "Test skill for integration testing"
         verdict = evaluation["verdict"]
         assert verdict in ["PASS", "CAVEATS", "FAIL"]
         
-        # Verify turns_completed >= 1  
+        # Verify turns_completed >= 1
         turns_completed = result["turns_completed"]
         assert turns_completed >= 1

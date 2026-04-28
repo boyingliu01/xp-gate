@@ -13,6 +13,32 @@ description: Evaluate and certify AI skills — auto-parse SKILL.md, generate te
 skill-cert --skill /path/to/SKILL.md [--models m1,m2] [--output ./results/]
 ```
 
+## 评测模式
+
+### 单轮模式（默认）
+用于简单技能，快速验证基本功能。
+
+```bash
+# 单轮模式（默认，适用于简单技能）
+skill-cert --skill /path/to/SKILL.md --mode single
+```
+
+### 多轮对话模式
+用于编排类技能，模拟真实用户交互场景。
+
+```bash
+# 对话模式（用于编排技能）
+skill-cert --skill /path/to/SKILL.md --mode dialogue --max-turns 10
+```
+
+### 重放模式
+用于回归测试，使用历史会话数据进行验证。
+
+```bash
+# 重放模式（用于回归测试）
+skill-cert --skill /path/to/SKILL.md --mode replay --session session.jsonl
+```
+
 ## 评测流程
 
 ### Phase 0: Skill 解析
