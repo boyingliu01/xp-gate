@@ -2,6 +2,7 @@
 import sys
 import json
 import time
+import argparse
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
@@ -10,7 +11,7 @@ from engine.config import SkillCertConfig
 from engine.analyzer import parse_skill_md
 from adapters.anthropic_compat import AnthropicCompatAdapter
 from engine.grader import Grader, EvalAssertion
-from engine.metrics import MetricsCalculator
+from engine.metrics import MetricsCalculator  
 from engine.reporter import Reporter
 
 PROJECT_ROOT = Path("/mnt/e/Private/opencode优化/xgate")
@@ -128,6 +129,19 @@ def run_single_skill(skill_path, output_dir):
     return json_report
 
 def main():
+    parser = argparse.ArgumentParser(description="Run SkillCert UAT")
+    parser.add_argument("--mode", choices=["single", "dialogue", "replay"], 
+                       default="single", help="Execution mode")
+    parser.add_argument("--max-turns", type=int, default=10, 
+                       help="Maximum conversation turns for dialogue mode")
+    parser.add_argument("--profiles", nargs="+", default=[],
+                       help="List of profile names for dialogue mode")
+    
+    args = parser.parse_args()
+    
+    # Show parsed arguments for verification
+    print(f"Mode: {args.mode}, Max Turns: {args.max_turns}, Profiles: {args.profiles}")
+
     skill_paths = []
     for name in ["delphi-review", "sprint-flow", "test-specification-alignment"]:
         p = PROJECT_ROOT / "skills" / name / "SKILL.md"
@@ -143,8 +157,14 @@ def main():
     results = {}
     for name, path in skill_paths:
         try:
-            result = run_single_skill(path, output_dir)
-            results[name] = result
+            # Add different execution logic based on mode
+            if args.mode == "dialogue":
+                # For dialogue mode, we'd need to use DialogueRunner
+                print(f"Running {name} in dialogue mode (not implemented in this basic version)")
+                # TODO: implement actual dialogue mode logic here using DialogueRunner
+            else:
+                result = run_single_skill(path, output_dir)
+                results[name] = result
         except Exception as e:
             print(f"❌ {name} failed: {e}")
             import traceback
