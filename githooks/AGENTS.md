@@ -21,8 +21,7 @@ githooks/
 | Task | Location | Notes |
 |------|----------|-------|
 | Pre-commit Gates | pre-commit:60-2000+ | Gate 1-6: Code Quality, Dup Code, Complexity, Principles, Tests, Architecture |
-| Gate 6 Architecture | pre-commit | archlint, Deply, goarchtest, ArchUnit language-specific |
-| Gate 6 Boy Scout | pre-commit:1769+ | Differential warning enforcement via boy-scout.ts CLI |
+| Gate 6 Architecture + Boy Scout | pre-commit:1769+ | archlint + boy-scout.ts: differential warning enforcement |
 | CCN Thresholds | pre-commit | CCN_THRESHOLD=5, CCN_ERROR_THRESHOLD=10 |
 | Pre-push Review | pre-push | Delphi code walkthrough via `delphi-review --mode code-walkthrough` |
 | Zero-Tolerance Policy | QUALITY-GATES-CODE-OF-CONDUCT.md | Prohibits --no-verify bypass |
@@ -31,9 +30,9 @@ githooks/
 ## CONVENTIONS
 - **Zero-tolerance**: Hooks block if tools unavailable
 - Must install required tools for language stack before committing
-- Gate 6: Architecture quality (Clean Architecture boundary validation)
+- Gate 6: Architecture quality + Boy Scout Rule (Clean Architecture boundary validation + differential warning enforcement)
 - Gate 3: Cyclomatic complexity (CCN >5 warn, CCN >10 block)
-- Gate 6: Boy Scout Rule (unified — auto-initializes baseline when missing)
+- Gate 5: Boy Scout Rule (unified — auto-initializes baseline when missing)
 - Pre-push hook checks for size limits (max 20 files, 500 LOC)
 - Documentation-only projects skip code analysis but verify specs
 - Boy Scout Rule: new files zero-tolerance; modified files cannot increase warnings; ≤5 warnings must clear to zero
@@ -45,7 +44,7 @@ githooks/
 - Do NOT use `--no-verify` to bypass gate failures (per CODE-OF-CONDUCT.md)
 
 ## UNIQUE STYLES
-- **6-gate** pre-commit structure (Gate 4: Principles, Gate 7: CCN, Gate 6: Boy Scout, Gate 6: Architecture)
+- **6-gate** pre-commit structure (Gate 1: Code Quality, Gate 2: Dup Code, Gate 3: CCN, Gate 4: Principles, Gate 5: Tests, Gate 6: Architecture + Boy Scout)
 - Fail-fast approach (blocks if tools not available)
 - Automated integration with OpenCode CLI
 - Multi-language stack detection (9 language adapters)
