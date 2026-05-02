@@ -12,7 +12,7 @@
     "test:coverage": "vitest run --coverage",
     "build": "tsc",
     "lint": "eslint src --ext .ts",
-    "principles": "node src/principles/index.js"
+    "principles": "npx tsx src/principles/index.ts"
   },
   "dependencies": {
     "@ast-grep/cli": "latest"

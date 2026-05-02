@@ -1,7 +1,7 @@
 # SKILLS/TEST-SPECIFICATION-ALIGNMENT KNOWLEDGE BASE
 
-**Generated:** 2026-04-11
-**Commit:** f125a3b
+**Generated:** 2026-05-02
+**Commit:** 1f6bc7d
 **Branch:** main
 
 ## OVERVIEW

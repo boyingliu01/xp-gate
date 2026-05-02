@@ -1,6 +1,6 @@
 # XGate
 
-AI-powered development workflow tools with 9 quality gates and multi-expert review.
+AI-powered development workflow tools with 6 quality gates and multi-expert review.
 
 ---
 

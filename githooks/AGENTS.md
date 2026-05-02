@@ -1,7 +1,7 @@
 # GITHOOKS KNOWLEDGE BASE
 
-**Generated:** 2026-04-14
-**Commit:** 324d7ce
+**Generated:** 2026-05-02
+**Commit:** 1f6bc7d
 **Branch:** main
 
 ## OVERVIEW
@@ -12,6 +12,8 @@ Git quality gates: pre-commit (6 Gates) and pre-push (Delphi code walkthrough vi
 githooks/
 ├── pre-commit                    # 6 Gates quality check before commit
 ├── pre-push                      # Code walkthrough validator before push
+├── adapter-common.sh             # Language detection & routing
+├── adapters/                     # TypeScript/Python/Go/Shell analysis scripts
 ├── QUALITY-GATES-CODE-OF-CONDUCT.md  # Zero-tolerance enforcement policy
 ├── __tests__/                    # Bats tests
 └── TOOL-INSTALLATION-GUIDE.md    # Setup documentation
@@ -20,6 +22,7 @@ githooks/
 ## WHERE TO LOOK
 | Task | Location | Notes |
 |------|----------|-------|
+| Language Adapters | adapters/ | TypeScript/Python/Go/Shell specific static analysis + lint + test |
 | Pre-commit Gates | pre-commit:60-2000+ | Gate 1-6: Code Quality, Dup Code, Complexity, Principles, Tests, Architecture |
 | Gate 6 Architecture + Boy Scout | pre-commit:1769+ | archlint + boy-scout.ts: differential warning enforcement |
 | CCN Thresholds | pre-commit | CCN_THRESHOLD=5, CCN_ERROR_THRESHOLD=10 |

@@ -1,7 +1,7 @@
 # SKILLS/DEPHI-REVIEW KNOWLEDGE BASE
 
-**Generated:** 2026-04-11
-**Commit:** f125a3b
+**Generated:** 2026-05-02
+**Commit:** 1f6bc7d
 **Branch:** main
 
 ## OVERVIEW
@@ -10,7 +10,10 @@ Delphi Consensus Review - Multi-round anonymous review system to reach expert co
 ## STRUCTURE
 ```
 skills/delphi-review/
-└── SKILL.md              # Core Delphi review methodology
+├── SKILL.md              # Core Delphi review methodology
+├── INSTALL.md            # Setup instructions
+├── references/           # Code walkthrough mode specification
+└── .delphi-config.json.example  # 3-expert config template
 ```
 
 ## WHERE TO LOOK
