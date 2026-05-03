@@ -7,8 +7,8 @@ All notable changes to this project will be documented in this file.
 ### Added
 - **Gate 9: Architecture Quality** - Clean Architecture layer boundary validation
   - TypeScript: archlint (@archlinter/cli) >= 2.0.0
-  - Python: deply >= 0.5.0
-  - Go: goarchtest
+  - Python: import-linter >= 2.0.0
+  - Go: arch-go >= 1.7.0
   - Java: ArchUnit
   - C++: Phase 2 roadmap (requires `.skip-architecture-cpp` marker)
 - **architecture.yaml** template with layer definitions and rules

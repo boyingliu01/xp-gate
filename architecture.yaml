@@ -182,12 +182,12 @@ integration:
       minVersion: "2.0.0"
       
     python:
-      tool: "deply"
-      minVersion: "0.5.0"
+      tool: "import-linter"
+      minVersion: "2.0.0"
       
     go:
-      tool: "go test"  # Uses goarchtest
-      minVersion: ""  # Built-in
+      tool: "arch-go"
+      minVersion: "1.7.0"
       
     java:
       tool: "archunit"

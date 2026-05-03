@@ -168,8 +168,8 @@ Principles Checker 支持 9 种语言的语法和分析：
 | 语言 | 分析工具 | 架构验证工具 |
 |------|---------|-------------|
 | TypeScript | tsc, ESLint | archlint |
-| Python | Ruff, mypy | Deply |
-| Go | golangci-lint | goarchtest |
+| Python | Ruff, mypy | import-linter |
+| Go | golangci-lint | arch-go |
 | Java | CheckStyle, PMD, SpotBugs | ArchUnit |
 | Kotlin | detekt, ktlint | — |
 | Dart | dart analyze | — |

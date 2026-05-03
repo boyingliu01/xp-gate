@@ -71,8 +71,8 @@
 | 工具 | 用途 | 语言覆盖 | 安装命令 |
 |------|------|----------|----------|
 | **archlint** (@archlinter/cli) | Clean Architecture 层级检查 | TypeScript | `npm install -g @archlinter/cli` |
-| **Deply** | 依赖注入和层级分析 | Python | `pip install deply` |
-| **goarchtest** | Go 架构测试 | Go | `go get github.com/fdaines/go-archtest` |
+| **import-linter** | 依赖和层级约束检查 | Python | `pip install import-linter` |
+| **arch-go** | Go 架构测试 | Go | `go install github.com/arch-go/arch-go@latest` |
 | **ArchUnit** | Java 架构约束 | Java | Maven/Gradle dependency |
 
 > **重要**: Gate 6 使用 `archlint` (来自 `@archlinter/cli` 包)，不是 `architecture-linter`
@@ -180,13 +180,13 @@ archlint --version
 
 #### Python 项目
 ```bash
-pip install deply
-deply --version
+pip install import-linter
+import-linter --version
 ```
 
 #### Go 项目
 ```bash
-go get github.com/fdaines/go-archtest
+go install github.com/arch-go/arch-go@latest
 ```
 
 #### Java 项目
@@ -248,7 +248,7 @@ npx @archlinter/cli --version
 
 #### Python
 ```bash
-deply --version && echo "✅ deply installed (need >= 0.5.0)"
+import-linter --version && echo "✅ import-linter installed (need >= 2.0.0)"
 ```
 
 #### Go
@@ -419,8 +419,8 @@ command -v cppcheck && echo "✅ cppcheck installed"
 | 语言 | 核心工具 | 安装命令 |
 |------|---------|----------|
 | TypeScript | tsc + ESLint + Jest + archlint | `npm install -D typescript eslint jest && npm install -g @archlinter/cli` |
-| Python | Ruff + mypy + pytest + Deply | `pip install ruff mypy pytest pytest-cov deply` |
-| Go | golangci-lint + goarchtest | `go install github.com/golangci/golangci-lint/cmd/golangci-lint@latest && go get github.com/fdaines/go-archtest` |
+| Python | Ruff + mypy + pytest + import-linter | `pip install ruff mypy pytest pytest-cov import-linter` |
+| Go | golangci-lint + arch-go | `go install github.com/golangci/golangci-lint/cmd/golangci-lint@latest && go install github.com/arch-go/arch-go@latest` |
 | Dart | dart analyze + dart test | `brew install dart` |
 | Flutter | flutter analyze + flutter test | [官网安装](https://docs.flutter.dev/get-started/install) |
 | Java | CheckStyle + PMD + JUnit | `brew install checkstyle pmd` |

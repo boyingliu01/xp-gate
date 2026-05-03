@@ -245,34 +245,34 @@ specification:
       
       acceptance_criteria:
         - id: AC-ARCH-002-01
-          given: Python project with pyproject.toml and deply.yaml exists
+          given: Python project with pyproject.toml and .import-linter.yml exists
           when: Gate 9 runs in pre-commit
-          then: deply command is checked for availability (exit 1 if missing)
+          then: lint-imports command is checked for availability (exit 1 if missing)
         
         - id: AC-ARCH-002-02
-          given: deply is installed
+          given: import-linter is installed
           when: Version check runs
-          then: Version must be >= 0.8.0 (exit 1 if incompatible)
+          then: Version must be >= 2.0.0 (exit 1 if incompatible)
         
         - id: AC-ARCH-002-03
-          given: deply version compatible
+          given: import-linter version compatible
           when: Architecture validation runs
-          then: deply analyze executes successfully
+          then: lint-imports executes successfully
     
     - id: REQ-ARCH-003
-      description: Go projects must have architecture validation using go test with Go version >= 1.18
+      description: Go projects must have architecture validation using arch-go >= 1.7.0
       priority: SHOULD
       
       acceptance_criteria:
         - id: AC-ARCH-003-01
-          given: Go project with go.mod and architecture_test.go exists
+          given: Go project with go.mod and arch-go.yml exists
           when: Gate 9 runs in pre-commit
-          then: go test -run Architecture -v executes successfully
+          then: arch-go check executes successfully
         
         - id: AC-ARCH-003-02
-          given: Go version check runs
-          when: Go toolchain version is detected
-          then: Go version must be >= 1.18 for generics support
+          given: arch-go is installed
+          when: Version check runs
+          then: arch-go version must be >= 1.7.0
     
     - id: REQ-ARCH-004
       description: Java projects must have architecture validation using ArchUnit via Maven
