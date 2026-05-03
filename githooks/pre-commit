@@ -7,14 +7,21 @@
 # Converts 9 sequential gates into 6 type-based comprehensive gates
 # Sourced from adapter-common.sh and language-specific adapters
 
-# Source the common adapter functions
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-source "$SCRIPT_DIR/adapter-common.sh" 2>/dev/null || {
-  echo "Error: Cannot source adapter-common.sh"
+# Source the common adapter functions — try project-local path first, fallback to script dir
+ADAPTER_DIR=""
+if [ -f "$(git rev-parse --show-toplevel 2>/dev/null)/githooks/adapter-common.sh" ]; then
+  ADAPTER_DIR="$(git rev-parse --show-toplevel 2>/dev/null)/githooks"
+fi
+if [ -z "$ADAPTER_DIR" ]; then
+  SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+  ADAPTER_DIR="$SCRIPT_DIR"
+fi
+source "$ADAPTER_DIR/adapter-common.sh" 2>/dev/null || {
+  echo "Error: Cannot source adapter-common.sh from $ADAPTER_DIR"
   exit 1
 }
 
-PROJECT_ROOT="$(cd "$SCRIPT_DIR/../.." 2>/dev/null || echo "$SCRIPT_DIR/..")"
+PROJECT_ROOT="$(git rev-parse --show-toplevel 2>/dev/null || echo "$(cd "$SCRIPT_DIR/../.." 2>/dev/null || echo "$SCRIPT_DIR/..")" )"
 if [[ -d "$PROJECT_ROOT/node_modules/.bin" ]]; then
   export PATH="$PROJECT_ROOT/node_modules/.bin:$PATH"
 fi
@@ -388,7 +395,7 @@ elif [ "$PROJECT_LANG" = "shell" ] || echo "$CHANGED_FILES" | grep -qE '\.sh$' |
 
 else
   # Route to appropriate adapter for other languages
-  if source "$SCRIPT_DIR/adapters/${PROJECT_LANG}.sh" 2>/dev/null; then
+  if source "$ADAPTER_DIR/adapters/${PROJECT_LANG}.sh" 2>/dev/null; then
     echo "Running static analysis for $PROJECT_LANG..."
     run_static_analysis | head -30 2>/dev/null
     ANALYSIS_EXIT=$?
@@ -629,8 +636,8 @@ else
   echo "Running tests..."
   
   # Route to appropriate test runner via adapter
-  if [ "${PROJECT_LANG}" != "unknown" ] && [ -f "$SCRIPT_DIR/adapters/${PROJECT_LANG}.sh" ]; then
-    if source "$SCRIPT_DIR/adapters/${PROJECT_LANG}.sh" 2>/dev/null; then
+  if [ "${PROJECT_LANG}" != "unknown" ] && [ -f "$ADAPTER_DIR/adapters/${PROJECT_LANG}.sh" ]; then
+    if source "$ADAPTER_DIR/adapters/${PROJECT_LANG}.sh" 2>/dev/null; then
       TESTS_OUTPUT=$(run_tests 2>&1)
       TESTS_EXIT_CODE=$?
       echo "$TESTS_OUTPUT" | head -50
@@ -651,8 +658,8 @@ else
   # Next, run coverage check
   echo "Running coverage check..."
   
-  if [ "${PROJECT_LANG}" != "unknown" ] && [ -f "$SCRIPT_DIR/adapters/${PROJECT_LANG}.sh" ]; then
-    if source "$SCRIPT_DIR/adapters/${PROJECT_LANG}.sh" 2>/dev/null; then 
+  if [ "${PROJECT_LANG}" != "unknown" ] && [ -f "$ADAPTER_DIR/adapters/${PROJECT_LANG}.sh" ]; then
+    if source "$ADAPTER_DIR/adapters/${PROJECT_LANG}.sh" 2>/dev/null; then 
       # For languages where we want strict coverage, override run_coverage behavior
       case "$PROJECT_LANG" in
         "typescript")
