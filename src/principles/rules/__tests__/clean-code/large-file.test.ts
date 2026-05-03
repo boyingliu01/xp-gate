@@ -59,4 +59,15 @@ describe('largeFileRule', () => {
   it('should use the correct threshold', () => {
     expect(largeFileRule.threshold).toEqual(500);
   });
+
+  it('should return empty violations when adapter throws error', () => {
+    const mockAdapterThatThrows: any = {
+      ...mockAdapter,
+      countLines: () => { throw new Error('Adapter failed'); }
+    };
+    
+    const violations = largeFileRule.check('test.ts', mockAdapterThatThrows);
+    
+    expect(violations).toHaveLength(0);
+  });
 });

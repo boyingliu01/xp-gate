@@ -76,3 +76,13 @@ describe('magicNumbersRule', () => {
     expect(magicNumbersRule.threshold).toEqual(10);
   });
 });
+  it('should return empty violations when adapter throws error', () => {
+    const mockAdapterThatThrows = {
+      ...mockAdapter,
+      extractFunctions: () => { throw new Error('Adapter failed'); }
+    };
+    
+    const violations = magicNumbersRule.check('test.ts', mockAdapterThatThrows as any);
+    
+    expect(violations).toHaveLength(0);
+  });

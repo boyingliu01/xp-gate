@@ -60,4 +60,15 @@ function deeplyNested() {
     expect(deepNestingRule.threshold).toBe(4);
     expect(deepNestingRule.severity).toBe('warning');
   });
+
+  it('should return empty violations when adapter throws error', () => {
+    const mockAdapterThatThrows = {
+      ...mockAdapter,
+      extractFunctions: () => { throw new Error('Adapter failed'); }
+    };
+    
+    const violations = deepNestingRule.check('test.ts', mockAdapterThatThrows as any);
+    
+    expect(violations.length).toBe(0);
+  });
 });

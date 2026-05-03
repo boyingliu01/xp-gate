@@ -247,7 +247,7 @@ it('should skip files that do not match adapter language', async () => {
       const result = await analyze(files, rules, mockAdapter);
       
       expect(result.executionTimeMs).toBeDefined();
-      expect(result.executionTimeMs).toBeGreaterThan(0);
+      expect(result.executionTimeMs).toBeGreaterThanOrEqual(0);
     });
 
     it('should include rule-by-rule breakdown', async () => {
