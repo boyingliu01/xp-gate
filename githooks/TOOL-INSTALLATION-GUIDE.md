@@ -343,6 +343,48 @@ curl -O https://raw.githubusercontent.com/boyingliu01/xgate/main/architecture.ya
 
 ---
 
+---
+
+## PowerShell 项目
+
+| 工具 | 用途 | 性能 | 安装命令 |
+|------|------|------|----------|
+| **PSScriptAnalyzer** | 静态分析 + linting（60+ 规则） | 标准 | `Install-Module PSScriptAnalyzer -Scope CurrentUser` |
+| **Pester** | 单元/集成测试（BDD 风格）| 标准 | `Install-Module Pester -Scope CurrentUser` |
+
+### PowerShell 验证
+
+```powershell
+# PSScriptAnalyzer
+Invoke-ScriptAnalyzer -Path . -Recurse -Severity Error,Warning
+
+# Pester 测试
+Invoke-Pester -CI
+
+# Pester 覆盖率
+Invoke-Pester -CI -CodeCoverage (Get-ChildItem -Path . -Filter *.ps1 -Recurse -Exclude *.Tests.ps1)
+```
+
+### 已知限制
+
+| Gate | 状态 | 原因 |
+|------|------|------|
+| Gate 1 代码质量 | ✅ 已支持 | PSScriptAnalyzer |
+| Gate 2 重复代码 | ⚠️ 跳过 | jscpd 不支持 .ps1 |
+| Gate 3 圈复杂度 | ⚠️ 跳过 | lizard 不支持 .ps1 |
+| Gate 4 原则检查 | ⚠️ 跳过 | 无 PowerShell Clean Code/SOLID 工具 |
+| Gate 5 测试 + 覆盖率 | ✅ 已支持 | Pester |
+| Gate 6 架构 | ⚠️ 跳过 | 无 PowerShell 架构工具 |
+
+### 快速安装
+
+```powershell
+Install-Module PSScriptAnalyzer -Scope CurrentUser -Force
+Install-Module Pester -Scope CurrentUser -Force
+```
+
+---
+
 ## 总结
 
 | 语言 | 核心工具 | 安装命令 |
@@ -353,6 +395,7 @@ curl -O https://raw.githubusercontent.com/boyingliu01/xgate/main/architecture.ya
 | Dart | dart analyze + dart test | `brew install dart` |
 | Flutter | flutter analyze + flutter test | [官网安装](https://docs.flutter.dev/get-started/install) |
 | Java | ArchUnit | Maven/Gradle dependency |
+| PowerShell | PSScriptAnalyzer + Pester | `Install-Module PSScriptAnalyzer -Scope CurrentUser; Install-Module Pester -Scope CurrentUser` |
 
 **性能原则**: 选择最快的代码检查工具
 - Dart 项目优先使用 `dart analyze`（不依赖 Flutter 框架，启动更快）

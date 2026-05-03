@@ -138,6 +138,8 @@ elif [ -f "pom.xml" ] || [ -f "build.gradle" ] || [ -f "build.gradle.kts" ]; the
   else
     PROJECT_LANG="java"
   fi
+elif [ -n "$(find . -maxdepth 2 -name "*.ps1" -not -path "./.git/*" 2>/dev/null | head -1)" ] || [ -f "*.ps1" ]; then
+  PROJECT_LANG="powershell"
 fi
 
 # If not found at root, search subdirectories (max depth 2) for project manifests
@@ -227,7 +229,7 @@ fi
 # Such projects have only markdown, yaml, json, skills, docs - no actual code
 if [ -z "$PROJECT_LANG" ]; then
   # Count source code files (including shell scripts)
-  CODE_FILES=$(find . -type f \( -name "*.py" -o -name "*.js" -o -name "*.ts" -o -name "*.tsx" -o -name "*.java" -o -name "*.go" -o -name "*.rs" -o -name "*.cpp" -o -name "*.c" -o -name "*.swift" -o -name "*.kt" -o -name "*.sh" -o -name "*.dart" \) -not -path "./.git/*" 2>/dev/null | wc -l)
+  CODE_FILES=$(find . -type f \( -name "*.py" -o -name "*.js" -o -name "*.ts" -o -name "*.tsx" -o -name "*.java" -o -name "*.go" -o -name "*.rs" -o -name "*.cpp" -o -name "*.c" -o -name "*.swift" -o -name "*.kt" -o -name "*.sh" -o -name "*.dart" -o -name "*.ps1" \) -not -path "./.git/*" 2>/dev/null | wc -l)
   
   if [ "$CODE_FILES" -eq 0 ]; then
     PROJECT_LANG="documentation-only"
@@ -469,6 +471,10 @@ elif [ "$PROJECT_LANG" = "go" ]; then
   fi
   echo "✅ PASSED - Go duplicate code check completed."
 
+elif [ "$PROJECT_LANG" = "powershell" ]; then
+  echo "ℹ️  No PowerShell-native duplicate detector (jscpd does not support .ps1)"
+  echo "✅ PASSED - Skipped (no standardized tool for PowerShell duplicate detection)"
+
 elif [ "$PROJECT_LANG" = "shell" ]; then
   echo "ℹ️  Duplicate detection not typically used for shell scripts"
   echo "✅ PASSED - Skipped (shell scripts, no standardized dup tool)"
@@ -496,6 +502,10 @@ fi
 
 if [ "$PROJECT_LANG" = "documentation-only" ]; then
   echo "✅ PASSED - Skipped (documentation project)."
+
+elif [ "$PROJECT_LANG" = "powershell" ]; then
+  echo "ℹ️  No PowerShell principles checker available"
+  echo "✅ PASSED - Skipped (no PowerShell Clean Code / SOLID tool)"
   
 else
   CCN_THRESHOLD=5
@@ -758,7 +768,11 @@ fi
 
 if [ "$PROJECT_LANG" = "documentation-only" ]; then
   echo "     ✅ Skipped (documentation project)."
-  
+
+elif [ "$PROJECT_LANG" = "powershell" ]; then
+  echo "     ℹ️  No PowerShell architecture tooling available"
+  echo "     ✅ Architecture validation (SKIP, no tool for PowerShell)"
+
 else
   # Check if architecture config exists
   if [ -f "architecture.yaml" ] || [ -f ".architecturerc" ]; then

@@ -12,6 +12,8 @@ detect_project_lang() {
     echo "go"
   elif [[ -n "$(find . -name "*.sh" -type f | head -n 1)" ]] || [[ -n "$(find . -name "Dockerfile" -o -name "*.dockerfile" -type f | head -n 1)" ]]; then
     echo "shell"
+  elif [[ -n "$(find . -name "*.ps1" -type f -not -path "./.git/*" | head -n 1)" ]]; then
+    echo "powershell"
   else
     # Fallback: check for any language-specific files
     if [[ -n "$(find . -name "*.ts" -o -name "*.tsx" -type f | head -n 1)" ]]; then
@@ -20,10 +22,12 @@ detect_project_lang() {
       echo "python"
     elif [[ -n "$(find . -name "*.go" -type f | head -n 1)" ]]; then
       echo "go"
-    elif [[ -n "$(find . -name "*.sh" -type f | head -n 1)" ]]; then
-      echo "shell"
-    else
-      echo "unknown"
+      elif [[ -n "$(find . -name "*.sh" -type f | head -n 1)" ]]; then
+        echo "shell"
+      elif [[ -n "$(find . -name "*.ps1" -type f -not -path "./.git/*" | head -n 1)" ]]; then
+        echo "powershell"
+      else
+        echo "unknown"
     fi
   fi
 }
