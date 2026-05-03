@@ -415,6 +415,8 @@ else
     echo "✅ PASSED - Code Quality Gate (no specific checks available)."
   fi
 fi
+GATE_1_STATUS="PASS"
+GATE_1_TOOL="${PROJECT_LANG}"
 
 # ============================================================================
 # GATE 2: Duplicate Code Detection (NEW gate)
@@ -486,6 +488,7 @@ else
     echo "✅ PASSED - No source files detected for duplicate checking."
   fi
 fi
+GATE_2_STATUS="PASS"
 
 # ============================================================================
 # GATE 3: Cyclomatic Complexity Check (Old Gate 7)
@@ -550,6 +553,7 @@ else
     fi
   fi
 fi
+GATE_3_STATUS="PASS"
 
 # ============================================================================
 # GATE 4: Principles Checker (Old Gate 6 - Clean Code + SOLID)
@@ -608,6 +612,7 @@ else
     echo "✅ PASSED - No source files changed (principles check skipped)."
   fi
 fi
+GATE_4_STATUS="PASS"
 
 # ============================================================================
 # GATE 5: Tests & Coverage Combined (Combines Old Gates 3 - Tests and 4 - Coverage)
@@ -751,6 +756,7 @@ else
     echo "✅ PASSED - Coverage check completed."
   fi
 fi
+GATE_5_STATUS="PASS"
 
 # ============================================================================
 # GATE 6: Architecture & Tech Debt (Combines Old Gate 8 - Boy Scout and Gate 9 - Architecture)
@@ -920,24 +926,132 @@ else
     echo "     ✅ Boy Scout Rule (SKIP, not available in project)"
   fi
 fi
-
-echo ""
-echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-echo "   ✅ ALL 6 GATES PASSED"
-echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-echo ""
-echo "Gates completed:"
-echo "  Gate 1: Code Quality - Static analysis + linting"
-echo "  Gate 2: Duplicate Code - Duplication detection"
-echo "  Gate 3: Complexity - Cyclomatic complexity check" 
-echo "  Gate 4: Principles - Clean code + SOLID"
-echo "  Gate 5: Tests - Unit tests + coverage (80%+)"
-echo "  Gate 6: Architecture - Architecture validation & tech debt"
-echo ""
+GATE_6_STATUS="PASS"
 
 # Switch back to original directory if we were in a subdirectory
 if [ -n "$ORIGINAL_DIR" ]; then
   cd "$ORIGINAL_DIR" 
 fi
+
+# ============================================================================
+# QUALITY REPORT GENERATION
+# ============================================================================
+
+generate_quality_report() {
+  local REPORT_FILE="quality-report.json"
+  local HISTORY_FILE=".quality-history.jsonl"
+  local COMMIT_HASH
+  local TIMESTAMP
+  local PASSED_COUNT=0
+  local TOTAL_GATES=6
+
+  COMMIT_HASH=$(git rev-parse HEAD 2>/dev/null || echo "unknown")
+  TIMESTAMP=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
+
+  for gate in 1 2 3 4 5 6; do
+    local status_var="GATE_${gate}_STATUS"
+    if [ "${!status_var}" = "PASS" ] || [ "${!status_var}" = "SKIP" ]; then
+      PASSED_COUNT=$((PASSED_COUNT + 1))
+    fi
+  done
+
+  local SCORE=0
+  if command -v bc >/dev/null 2>&1; then
+    SCORE=$(echo "scale=1; ($PASSED_COUNT / $TOTAL_GATES) * 10" | bc)
+  else
+    SCORE=$(awk "BEGIN {printf \"%.1f\", ($PASSED_COUNT / $TOTAL_GATES) * 10}")
+  fi
+
+  local BS_PASSED=0
+  local BS_BLOCKED=0
+  if [ -n "$BOY_SCOUT_OUTPUT" ]; then
+    BS_PASSED=$(echo "$BOY_SCOUT_OUTPUT" | grep -o '"passedFiles": [0-9]*' | grep -o '[0-9]*' || echo "0")
+    BS_BLOCKED=$(echo "$BOY_SCOUT_OUTPUT" | grep -o '"blockedFiles": [0-9]*' | grep -o '[0-9]*' || echo "0")
+  fi
+
+  local COV_PCT="${COVERAGE_PERCENT:-N/A}"
+
+  cat > "$REPORT_FILE" << ENDJSON
+{
+  "reportVersion": "1.0",
+  "generatedAt": "$TIMESTAMP",
+  "commit": "$COMMIT_HASH",
+  "project": "${PWD##*/}",
+  "language": "$PROJECT_LANG",
+  "overall": {
+    "gatesPassed": $PASSED_COUNT,
+    "gatesTotal": $TOTAL_GATES,
+    "score": $SCORE,
+    "verdict": "$([ "$PASSED_COUNT" -eq "$TOTAL_GATES" ] && echo "PASS" || echo "PARTIAL")"
+  },
+  "gates": {
+    "gate1": {
+      "name": "Code Quality (Static + Lint + Shell)",
+      "status": "${GATE_1_STATUS:-PASS}",
+      "tool": "${GATE_1_TOOL:-auto}"
+    },
+    "gate2": {
+      "name": "Duplicate Code",
+      "status": "${GATE_2_STATUS:-PASS}",
+      "metric": "similarity <= 5%"
+    },
+    "gate3": {
+      "name": "Cyclomatic Complexity",
+      "status": "${GATE_3_STATUS:-PASS}",
+      "threshold": "${CCN_THRESHOLD:-5}",
+      "errorThreshold": "${CCN_ERROR_THRESHOLD:-10}",
+      "warnings": ${CC_WARNINGS:-0}
+    },
+    "gate4": {
+      "name": "Clean Code + SOLID",
+      "status": "${GATE_4_STATUS:-PASS}",
+      "warnings": ${WARNING_COUNT:-0}
+    },
+    "gate5": {
+      "name": "Tests + Coverage",
+      "status": "${GATE_5_STATUS:-PASS}",
+      "coverage": "${COV_PCT}",
+      "threshold": "80%"
+    },
+    "gate6": {
+      "name": "Architecture + Boy Scout Rule",
+      "status": "${GATE_6_STATUS:-PASS}",
+      "boyScoutPassed": $BS_PASSED,
+      "boyScoutBlocked": $BS_BLOCKED
+    }
+  },
+  "sarif": {
+    "version": "2.1.0",
+    "schemas": ["https://schemastore.azurewebsites.net/schemas/json/sarif-2.1.0-rtm.5.json"]
+  }
+}
+ENDJSON
+
+  echo "{\"timestamp\":\"$TIMESTAMP\",\"commit\":\"$COMMIT_HASH\",\"score\":$SCORE,\"passed\":$PASSED_COUNT,\"total\":$TOTAL_GATES}" >> "$HISTORY_FILE"
+
+  echo ""
+  echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+  echo "  📊 Quality Report — $TIMESTAMP"
+  echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+  echo ""
+  printf "  %-45s %s\n" "Gate 1: Code Quality" "${GATE_1_STATUS:-PASS}"
+  printf "  %-45s %s\n" "Gate 2: Duplicate Code" "${GATE_2_STATUS:-PASS}"
+  printf "  %-45s %s (warnings: ${CC_WARNINGS:-0})\n" "Gate 3: Complexity" "${GATE_3_STATUS:-PASS}"
+  printf "  %-45s %s (warnings: ${WARNING_COUNT:-0})\n" "Gate 4: Principles" "${GATE_4_STATUS:-PASS}"
+  printf "  %-45s %s (coverage: ${COV_PCT}%%)\n" "Gate 5: Tests + Coverage" "${GATE_5_STATUS:-PASS}"
+  printf "  %-45s %s\n" "Gate 6: Architecture + Boy Scout" "${GATE_6_STATUS:-PASS}"
+  echo ""
+  echo "  Overall Score: $SCORE/10 | $PASSED_COUNT/$TOTAL_GATES gates passed"
+  echo "  Report saved: $REPORT_FILE"
+  echo "  History saved: $HISTORY_FILE"
+  echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+  echo ""
+
+  if git ls-files --error-unmatch "$REPORT_FILE" >/dev/null 2>&1; then
+    git add "$REPORT_FILE" 2>/dev/null
+  fi
+}
+
+generate_quality_report
 
 exit 0
