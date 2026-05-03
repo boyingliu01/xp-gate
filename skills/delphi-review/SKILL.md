@@ -225,13 +225,34 @@ Every review round output MUST follow this exact JSON structure:
 **Final Requirements:**
 - [ ] 共识报告生成并保存
 - [ ] 用户已确认报告
+- [ ] ⭐ **IF APPROVED (design mode): 提示用户生成 specification.yaml，如用户同意则调用 specification-generator**
 
 **IF 裁决是 REQUEST_CHANGES 或 REJECTED → CANNOT claim complete, MUST 修复并重新评审**
 **IF 任何条件未满足 → CANNOT claim complete, MUST BLOCK 并通知用户**
 
 ### ⭐ APPROVED 后必做
 
-**Design mode**: 自动生成 specification.yaml（从设计文档提取需求）。specification.yaml 是 test-specification-alignment 的输入，没有它 test-spec 会进入不推荐的 legacy mode。
+**Design mode**:
+
+1. **Automatic: 生成 specification.yaml** — 从设计文档提取需求到 specification.yaml。这是 test-specification-alignment 的输入，没有它 test-spec 会进入不推荐的 legacy mode。
+
+2. **必须提示用户** — Delphi review APPROVED 后，agent 必须主动输出以下提示：
+
+   ```
+   ⭐ Delphi review APPROVED 完成！
+
+   Next Step: 生成 specification.yaml
+
+   设计文档已稳定，现在可以生成 specification.yaml 用于后续的 test-specification-alignment 验证。
+
+   是否现在生成？
+   - 回答 "yes" 或 "generate spec" → 我将调用 specification-generator 自动生成
+   - 回答 "no" 或 "later" → 稍后手动调用 /specification-generator
+   ```
+
+3. **如果用户同意** → 立即调用 `task(subagent_type="deep", load_skills=["specification-generator"], prompt="基于以下 APPROVED 设计文档生成 specification.yaml: [粘贴设计文档内容]")`
+
+4. **生成完成后** → 将 specification.yaml 包含在提交中，标记为 "auto-generated from Delphi review consensus"
 
 **Code-walkthrough mode**: 写入 `.code-walkthrough-result.json`（commit hash 匹配 HEAD，expires = timestamp + 1小时）。详见 `references/code-walkthrough.md`。
 
