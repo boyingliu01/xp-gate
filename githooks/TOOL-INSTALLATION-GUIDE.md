@@ -82,6 +82,48 @@
 
 ---
 
+## Java 项目
+
+| 工具 | 用途 | 安装命令 |
+|------|------|----------|
+| **CheckStyle** | 代码风格 | `brew install checkstyle` 或 Maven/Gradle plugin |
+| **PMD** | 静态分析 | `brew install pmd` 或 [官网](https://pmd.github.io/) |
+| **JUnit** | 单元测试 | Maven/Gradle test dependency |
+| **JaCoCo** | 覆盖率 | Maven/Gradle plugin |
+
+## Kotlin 项目
+
+| 工具 | 用途 | 安装命令 |
+|------|------|----------|
+| **ktlint** | Lint + 格式化 | `brew install ktlint` |
+| **detekt** | 静态分析 + 复杂度 | [官网](https://detekt.dev/) 或 Gradle plugin |
+
+## Swift 项目
+
+| 工具 | 用途 | 安装命令 |
+|------|------|----------|
+| **SwiftLint** | Lint + 代码风格 | `brew install swiftlint` |
+| **swift test** | 单元测试 | Swift Package Manager 内置 |
+| **swiftcov** | 覆盖率 | `brew install swiftcov` |
+
+## C/C++ 项目
+
+| 工具 | 用途 | 安装命令 |
+|------|------|----------|
+| **clang-tidy** | 静态分析 | `sudo apt install clang-tidy` 或 LLVM |
+| **cppcheck** | 静态分析 | `sudo apt install cppcheck` |
+| **CMake + CTest** | 测试 | `sudo apt install cmake` |
+| **gcovr** | 覆盖率 | `pip install gcovr` |
+
+## Objective-C 项目
+
+| 工具 | 用途 | 安装命令 |
+|------|------|----------|
+| **OCLint** | 静态分析 | `brew install oclint` |
+| **clang-tidy** | 静态分析 | `brew install llvm` |
+
+---
+
 ## 快速安装脚本
 
 ### TypeScript 项目
@@ -333,6 +375,35 @@ curl -O https://raw.githubusercontent.com/boyingliu01/xgate/main/architecture.ya
 
 ---
 
+## 新增语言验证
+
+### Java 验证
+```bash
+command -v checkstyle && echo "✅ checkstyle installed"
+command -v pmd && echo "✅ pmd installed"
+mvn test && echo "✅ Maven tests passing"
+```
+
+### Kotlin 验证
+```bash
+command -v ktlint && echo "✅ ktlint installed"
+ktlint "**/*.kt" && echo "✅ ktlint passing"
+```
+
+### Swift 验证
+```bash
+command -v swiftlint && echo "✅ swiftlint installed"
+swiftlint lint && echo "✅ swiftlint passing"
+```
+
+### C++ 验证
+```bash
+command -v clang-tidy && echo "✅ clang-tidy installed"
+command -v cppcheck && echo "✅ cppcheck installed"
+```
+
+---
+
 ## Clean Code / SOLID 原则检查覆盖
 
 | 检查项 | TypeScript | Python | Go | Dart | Flutter |
@@ -352,7 +423,11 @@ curl -O https://raw.githubusercontent.com/boyingliu01/xgate/main/architecture.ya
 | Go | golangci-lint + goarchtest | `go install github.com/golangci/golangci-lint/cmd/golangci-lint@latest && go get github.com/fdaines/go-archtest` |
 | Dart | dart analyze + dart test | `brew install dart` |
 | Flutter | flutter analyze + flutter test | [官网安装](https://docs.flutter.dev/get-started/install) |
-| Java | ArchUnit | Maven/Gradle dependency |
+| Java | CheckStyle + PMD + JUnit | `brew install checkstyle pmd` |
+| Kotlin | ktlint + detekt | `brew install ktlint` |
+| Swift | SwiftLint + swift test | `brew install swiftlint` |
+| C++ | clang-tidy + cppcheck | `sudo apt install clang-tidy cppcheck` |
+| ObjC | OCLint + clang-tidy | `brew install oclint` |
 
 **性能原则**: 选择最快的代码检查工具
 - Dart 项目优先使用 `dart analyze`（不依赖 Flutter 框架，启动更快）

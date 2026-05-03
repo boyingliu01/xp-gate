@@ -3,23 +3,49 @@
 # Common adapter functions for language detection and routing
 
 detect_project_lang() {
-  # Determine language based on project files
   if [[ -f "tsconfig.json" ]]; then
     echo "typescript"
   elif [[ -f "pyproject.toml" ]] || [[ -f "requirements.txt" ]] || [[ -f "setup.py" ]]; then
     echo "python"
   elif [[ -f "go.mod" ]]; then
     echo "go"
+  elif [[ -f "build.gradle" ]] || [[ -f "build.gradle.kts" ]]; then
+    if [[ -n "$(find . -name "*.kt" -type f | head -n 1)" ]]; then
+      echo "kotlin"
+    else
+      echo "java"
+    fi
+  elif [[ -f "pom.xml" ]]; then
+    echo "java"
+  elif [[ -f "pubspec.yaml" ]]; then
+    echo "dart"
+  elif [[ -f "Package.swift" ]]; then
+    echo "swift"
+  elif [[ -f "CMakeLists.txt" ]] || [[ -n "$(find . -name "*.cpp" -o -name "*.cc" -type f | head -n 1)" ]]; then
+    echo "cpp"
+  elif [[ -n "$(find . -name "*.m" -o -name "*.mm" -type f | head -n 1)" ]]; then
+    echo "objectivec"
   elif [[ -n "$(find . -name "*.sh" -type f | head -n 1)" ]] || [[ -n "$(find . -name "Dockerfile" -o -name "*.dockerfile" -type f | head -n 1)" ]]; then
     echo "shell"
   else
-    # Fallback: check for any language-specific files
     if [[ -n "$(find . -name "*.ts" -o -name "*.tsx" -type f | head -n 1)" ]]; then
       echo "typescript"
     elif [[ -n "$(find . -name "*.py" -type f | head -n 1)" ]]; then
       echo "python"
     elif [[ -n "$(find . -name "*.go" -type f | head -n 1)" ]]; then
       echo "go"
+    elif [[ -n "$(find . -name "*.kt" -type f | head -n 1)" ]]; then
+      echo "kotlin"
+    elif [[ -n "$(find . -name "*.java" -type f | head -n 1)" ]]; then
+      echo "java"
+    elif [[ -n "$(find . -name "*.dart" -type f | head -n 1)" ]]; then
+      echo "dart"
+    elif [[ -n "$(find . -name "*.swift" -type f | head -n 1)" ]]; then
+      echo "swift"
+    elif [[ -n "$(find . -name "*.cpp" -o -name "*.cc" -o -name "*.c" -o -name "*.h" -type f | head -n 1)" ]]; then
+      echo "cpp"
+    elif [[ -n "$(find . -name "*.m" -o -name "*.mm" -type f | head -n 1)" ]]; then
+      echo "objectivec"
     elif [[ -n "$(find . -name "*.sh" -type f | head -n 1)" ]]; then
       echo "shell"
     else
