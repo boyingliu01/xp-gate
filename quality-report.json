@@ -1,0 +1,53 @@
+{
+  "reportVersion": "1.0",
+  "generatedAt": "2026-05-03T18:28:19Z",
+  "commit": "d44af37252bab28a1e0eb02c54e943d1db92f1f9",
+  "project": "xgate",
+  "language": "typescript",
+  "overall": {
+    "gatesPassed": 6,
+    "gatesTotal": 6,
+    "score": 10.0,
+    "verdict": "PASS"
+  },
+  "gates": {
+    "gate1": {
+      "name": "Code Quality (Static + Lint + Shell)",
+      "status": "PASS",
+      "tool": "typescript"
+    },
+    "gate2": {
+      "name": "Duplicate Code",
+      "status": "PASS",
+      "metric": "similarity <= 5%"
+    },
+    "gate3": {
+      "name": "Cyclomatic Complexity",
+      "status": "PASS",
+      "threshold": "5",
+      "errorThreshold": "10",
+      "warnings": 0
+    },
+    "gate4": {
+      "name": "Clean Code + SOLID",
+      "status": "PASS",
+      "warnings": 0
+    },
+    "gate5": {
+      "name": "Tests + Coverage",
+      "status": "PASS",
+      "coverage": "N/A",
+      "threshold": "80%"
+    },
+    "gate6": {
+      "name": "Architecture + Boy Scout Rule",
+      "status": "PASS",
+      "boyScoutPassed": 2,
+      "boyScoutBlocked": 0
+    }
+  },
+  "sarif": {
+    "version": "2.1.0",
+    "schemas": ["https://schemastore.azurewebsites.net/schemas/json/sarif-2.1.0-rtm.5.json"]
+  }
+}
