@@ -97,4 +97,15 @@ class DataClass {
     expect(godClassRule.threshold).toBe(15);
     expect(godClassRule.severity).toBe('warning');
   });
+
+  it('should return empty violations when adapter throws error', () => {
+    const mockAdapterThatThrows = {
+      ...mockAdapter,
+      extractClasses: () => { throw new Error('Adapter failed'); }
+    };
+    
+    const violations = godClassRule.check('test.ts', mockAdapterThatThrows as any);
+    
+    expect(violations.length).toBe(0);
+  });
 });

@@ -27,7 +27,14 @@ run_lint() {
 run_tests() {
   if command -v npx >/dev/null 2>&1; then
     echo "Running TypeScript tests..."
-    npx jest --passWithNoTests
+    if npx vitest --version >/dev/null 2>&1; then
+      npx vitest run
+    elif npx jest --version >/dev/null 2>&1; then
+      npx jest --passWithNoTests
+    else
+      echo "No test runner available (vitest or jest required)"
+      return 1
+    fi
     return $?
   else
     echo "npx not available, skipping TypeScript tests"
@@ -38,7 +45,14 @@ run_tests() {
 run_coverage() {
   if command -v npx >/dev/null 2>&1; then
     echo "Running TypeScript coverage..."
-    npx jest --coverage
+    if npx vitest --version >/dev/null 2>&1; then
+      npx vitest run --coverage
+    elif npx jest --version >/dev/null 2>&1; then
+      npx jest --coverage
+    else
+      echo "No test runner available for coverage"
+      return 1
+    fi
     return $?
   else
     echo "npx not available, skipping TypeScript coverage"

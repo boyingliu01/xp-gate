@@ -81,4 +81,41 @@ class DateService {
   it('should use threshold from config', () => {
     expect(dipRule.severity).toBe('warning');
   });
+
+  it('should return empty violations when adapter throws error', () => {
+    const mockAdapterThatThrows = {
+      ...mockAdapter,
+      extractClasses: () => { throw new Error('Adapter failed'); }
+    };
+    
+    const violations = dipRule.check('test.ts', mockAdapterThatThrows as any);
+    
+    expect(violations.length).toBe(0);
+  });
+
+  it('should exclude built-in types (Date, Map, Set, etc.)', () => {
+    const mockAdapterWithBuiltins = {
+      ...mockAdapter,
+      extractClasses: () => [{
+        name: 'Service',
+        line: 1,
+        code: `class Service { run() { return new Date(); } }`
+      }]
+    };
+    const violations = dipRule.check('test.ts', mockAdapterWithBuiltins as any);
+    expect(violations.length).toBe(0);
+  });
+
+  it('should exclude Factory and Builder patterns', () => {
+    const mockAdapterWithFactory = {
+      ...mockAdapter,
+      extractClasses: () => [{
+        name: 'Client',
+        line: 1,
+        code: `class Client { create() { return new UserFactory(); } }`
+      }]
+    };
+    const violations = dipRule.check('test.ts', mockAdapterWithFactory as any);
+    expect(violations.length).toBe(0);
+  });
 });

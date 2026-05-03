@@ -46,4 +46,15 @@ describe('isp.ts - Interface Segregation Principle Rule', () => {
     expect(ispRule.threshold).toBe(10);
     expect(ispRule.severity).toBe('info');
   });
+
+  it('should return empty violations when adapter throws error', () => {
+    const mockAdapterThatThrows = {
+      ...mockAdapter,
+      extractInterfaces: () => { throw new Error('Adapter failed'); }
+    };
+    
+    const violations = ispRule.check('test.ts', mockAdapterThatThrows as any);
+    
+    expect(violations.length).toBe(0);
+  });
 });

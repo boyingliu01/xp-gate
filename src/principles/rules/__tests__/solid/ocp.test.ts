@@ -55,4 +55,15 @@ class DerivedClass extends BaseClass {
   it('should use severity from config', () => {
     expect(ocpRule.severity).toBe('info');
   });
+
+  it('should return empty violations when adapter throws error', () => {
+    const mockAdapterThatThrows = {
+      ...mockAdapter,
+      extractClasses: () => { throw new Error('Adapter failed'); }
+    };
+    
+    const violations = ocpRule.check('test.ts', mockAdapterThatThrows as any);
+    
+    expect(violations.length).toBe(0);
+  });
 });

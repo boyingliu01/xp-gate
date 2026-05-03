@@ -75,4 +75,15 @@ describe('srp.ts - Single Responsibility Principle Rule', () => {
     expect(srpRule.threshold).toBe(15);
     expect(srpRule.severity).toBe('warning');
   });
+
+  it('should return empty violations when adapter throws error', () => {
+    const mockAdapterThatThrows = {
+      ...mockAdapter,
+      extractClasses: () => { throw new Error('Adapter failed'); }
+    };
+    
+    const violations = srpRule.check('test.ts', mockAdapterThatThrows as any);
+    
+    expect(violations.length).toBe(0);
+  });
 });

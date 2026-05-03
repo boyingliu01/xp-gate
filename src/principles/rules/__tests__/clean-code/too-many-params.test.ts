@@ -46,4 +46,15 @@ describe('too-many-params.ts - Too Many Parameters Rule', () => {
     expect(tooManyParamsRule.threshold).toBe(7);
     expect(tooManyParamsRule.severity).toBe('info');
   });
+
+  it('should return empty violations when adapter throws error', () => {
+    const mockAdapterThatThrows = {
+      ...mockAdapter,
+      extractFunctions: () => { throw new Error('Adapter failed'); }
+    };
+    
+    const violations = tooManyParamsRule.check('test.ts', mockAdapterThatThrows as any);
+    
+    expect(violations.length).toBe(0);
+  });
 });

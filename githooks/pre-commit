@@ -523,7 +523,7 @@ else
       CC_OUTPUT=$($LIZARD_CMD -C $CCN_THRESHOLD $CC_FILES 2>&1 || true)
       
       # Parse warning count from the summary table: "Warning cnt   8"
-      CC_WARNINGS=$(echo "$CC_OUTPUT" | grep "Warning cnt" | awk '{print $NF}' || echo "0")
+      CC_WARNINGS=$(echo "$CC_OUTPUT" | grep "Warning cnt" | awk '{print $NF}' | tr -d '[:space:]' || echo "0")
       CC_WARNINGS=${CC_WARNINGS:-0}
       
       # Count functions with CCN > CCN_ERROR_THRESHOLD (these block)
@@ -575,7 +575,7 @@ else
         if npx tsx src/principles/index.ts --files $PRINCIPLES_FILES --format json > /tmp/principles-output.json 2>/dev/null; then
           # Check severity levels 
           ERROR_COUNT=$(grep -c '"severity":"error"' /tmp/principles-output.json 2>/dev/null || echo "0")
-          WARNING_COUNT=$(grep -c '"severity":"warning"' /tmp/principles-output.json 2>/dev/null || echo "0")
+          WARNING_COUNT=$(grep -c '"severity":"warning"' /tmp/principles-output.json 2>/dev/null | tr -d '[:space:]' || echo "0")
           
           if [ "$ERROR_COUNT" -gt 0 ]; then
             echo ""
@@ -626,8 +626,9 @@ else
   # Route to appropriate test runner via adapter
   if [ "${PROJECT_LANG}" != "unknown" ] && [ -f "$SCRIPT_DIR/adapters/${PROJECT_LANG}.sh" ]; then
     if source "$SCRIPT_DIR/adapters/${PROJECT_LANG}.sh" 2>/dev/null; then
-      run_tests | head -50 2>/dev/null
+      TESTS_OUTPUT=$(run_tests 2>&1)
       TESTS_EXIT_CODE=$?
+      echo "$TESTS_OUTPUT" | head -50
       if [ "$TESTS_EXIT_CODE" -ne 0 ]; then
         echo ""
         echo "❌ BLOCKED - Tests FAILED"
@@ -656,8 +657,9 @@ else
             COV_EXIT=$?
           else
             echo "No coverage script in package.json, running coverage check..."
-            run_coverage | head -30 2>/dev/null
+            run_coverage_output=$(run_coverage 2>&1)
             COV_EXIT=$?
+            echo "$run_coverage_output" | head -30
           fi
           ;;
         "python")
@@ -665,8 +667,9 @@ else
             pytest --cov=. --cov-fail-under=80 --tb=short
             COV_EXIT=$?
           else
-            run_coverage | head -30 2>/dev/null
+            run_coverage_output=$(run_coverage 2>&1)
             COV_EXIT=$?
+            echo "$run_coverage_output" | head -30
           fi
           ;;
         "go")
@@ -683,13 +686,15 @@ else
           ;;
         "shell")
           # Shell doesn't typically have coverage, just run what's available
-          run_coverage | head -10 2>/dev/null
+          shell_cov_output=$(run_coverage 2>&1)
           COV_EXIT=$?
+          echo "$shell_cov_output" | head -10
           echo "ℹ️  Shell coverage not typically measured"
           ;;
         *)
-          run_coverage | head -30 2>/dev/null
+          default_cov_output=$(run_coverage 2>&1)
           COV_EXIT=$?
+          echo "$default_cov_output" | head -30
           ;;
       esac
     else
@@ -765,8 +770,10 @@ else
     # Different architecture tools per language
     case "$PROJECT_LANG" in
       "typescript")
-        if ! require_tool "archlint" "Gate 8" "npm install -g @archlinter/cli"; then
-          echo "     ✅ Architecture validation (SKIP, no tool)"
+        if ! require_tool "archlint" "Gate 6" "npm install -g @archlinter/cli"; then
+          echo "     ❌ BLOCKED - archlint not installed"
+          echo "     Install with: npm install -g @archlinter/cli"
+          exit 1
         else
           echo "     Running archlint for TypeScript..."
           archlint scan . -f table --quiet 2>&1 | tail -30 || echo "⚠️  Architectural smells detected (pre-existing, continuing)"
@@ -774,22 +781,35 @@ else
         fi
         ;;
       "python")
-        if require_tool "deply" "Gate 8" "pip install deply"; then
-          echo "     Running Deply for Python..."
-          deply analyze 2>&1 | head -20 || echo "⚠️  Architecture check completed (may have issues)"
-          echo "     ✅ Python architecture validation completed."
+        if [ -f ".import-linter.yml" ] || [ -f "import_linter_config.yml" ]; then
+          if require_tool "lint-imports" "Gate 6" "pip install import-linter"; then
+            echo "     Running import-linter for Python..."
+            lint-imports 2>&1 | head -20
+            echo "     ✅ Python architecture validation completed."
+          else
+            echo "     ❌ BLOCKED - import-linter not installed"
+            echo "     Install with: pip install import-linter"
+            exit 1
+          fi
         else
-          echo "     ✅ Architecture validation (SKIP, no tool)"
+          echo "     ℹ️  No .import-linter.yml found - skipping Python architecture"
+          echo "     ✅ Python architecture validation (SKIP, no config)"
         fi
         ;;
       "go")
-        if [ -f "architecture_test.go" ]; then
-          echo "     Running Go architecture tests..."
-          go test -run Architecture -v 2>&1 | head -20 || echo "⚠️  Architecture test completed (may have warnings)"
-          echo "     ✅ Go architecture validation completed."
+        if [ -f "arch-go.yaml" ] || [ -f "arch-go.yml" ]; then
+          if require_tool "arch-go" "Gate 6" "go install github.com/arch-go/arch-go@latest"; then
+            echo "     Running arch-go for Go..."
+            arch-go check 2>&1 | head -20
+            echo "     ✅ Go architecture validation completed."
+          else
+            echo "     ❌ BLOCKED - arch-go not installed"
+            echo "     Install with: go install github.com/arch-go/arch-go@latest"
+            exit 1
+          fi
         else
-          echo "     ℹ️  No architecture_test.go found - skipping"
-          echo "     ✅ Architecture validation (SKIP, no test file)"
+          echo "     ℹ️  No arch-go.yaml found - skipping Go architecture"
+          echo "     ✅ Go architecture validation (SKIP, no config)"
         fi
         ;;
       "java")
@@ -814,7 +834,31 @@ else
         ;;
     esac
   else
-    echo "     ✅ No architecture config - skipping"
+    # Architecture config is REQUIRED — BLOCK if missing
+    if [ -f ".architecture-skip" ]; then
+      echo "     ⚠️  Architecture config missing but .architecture-skip present — allowed to skip"
+      echo "     ✅ Architecture validation (SKIP, .architecture-skip exemption)"
+    else
+      echo ""
+      echo "❌ ARCHITECTURE CONFIG MISSING - COMMIT BLOCKED"
+      echo "   Required configuration file 'architecture.yaml' is NOT found."
+      echo "   Architecture Quality Gate requires explicit architecture constraints."
+      echo ""
+      echo "   Create architecture.yaml with:"
+      echo "     layers:"
+      echo "       - name: api"
+      echo "         paths: [\"src/api/**\"]"
+      echo "       - name: domain"
+      echo "         paths: [\"src/domain/**\"]"
+      echo "         allowed_imports: [domain]"
+      echo "       - name: infrastructure"
+      echo "         paths: [\"src/infrastructure/**\"]"
+      echo "         allowed_imports: [domain, infrastructure]"
+      echo ""
+      echo "   After creating architecture.yaml, retry the commit."
+      echo "   (To skip with warning, create .architecture-skip file)"
+      exit 1
+    fi
   fi
 fi
 

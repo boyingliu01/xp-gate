@@ -48,4 +48,15 @@ class DerivedRepo extends BaseRepo {
   it('should use severity from config', () => {
     expect(lspRule.severity).toBe('info');
   });
+
+  it('should return empty violations when adapter throws error', () => {
+    const mockAdapterThatThrows = {
+      ...mockAdapter,
+      extractClasses: () => { throw new Error('Adapter failed'); }
+    };
+    
+    const violations = lspRule.check('test.ts', mockAdapterThatThrows as any);
+    
+    expect(violations.length).toBe(0);
+  });
 });
