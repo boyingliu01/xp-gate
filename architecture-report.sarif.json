@@ -183,6 +183,91 @@
             {
               "physicalLocation": {
                 "artifactLocation": {
+                  "uri": "src/principles/rules/index.ts"
+                },
+                "region": {
+                  "startLine": 1
+                }
+              }
+            }
+          ],
+          "message": {
+            "text": "Barrel File Abuse\n\nReason: Excessive re-exports in index file. Large barrel files can lead to unnecessary coupling and slower build times.\n\nRecommendations:\nSplit the barrel file or import directly from sub-modules"
+          },
+          "ruleId": "barrel_file"
+        },
+        {
+          "level": "warning",
+          "locations": [
+            {
+              "physicalLocation": {
+                "artifactLocation": {
+                  "uri": "src/principles/baseline.ts"
+                },
+                "region": {
+                  "endColumn": 31,
+                  "endLine": 163,
+                  "startColumn": 9,
+                  "startLine": 163
+                }
+              }
+            }
+          ],
+          "message": {
+            "text": "Unused Class Method detected\n\nReason: The symbol is defined but not imported by any other file or used locally.\n\nRecommendations:\nRemove the unused symbol if it is truly no longer needed\nCheck if it should be an internal helper or if it was meant to be exported and used"
+          },
+          "ruleId": "dead_symbols"
+        },
+        {
+          "level": "warning",
+          "locations": [
+            {
+              "physicalLocation": {
+                "artifactLocation": {
+                  "uri": "src/principles/baseline.ts"
+                },
+                "region": {
+                  "endColumn": 54,
+                  "endLine": 234,
+                  "startColumn": 15,
+                  "startLine": 234
+                }
+              }
+            }
+          ],
+          "message": {
+            "text": "Unused Symbol detected\n\nReason: The symbol is defined but not imported by any other file or used locally.\n\nRecommendations:\nRemove the unused symbol if it is truly no longer needed\nCheck if it should be an internal helper or if it was meant to be exported and used"
+          },
+          "ruleId": "dead_symbols"
+        },
+        {
+          "level": "warning",
+          "locations": [
+            {
+              "physicalLocation": {
+                "artifactLocation": {
+                  "uri": "src/principles/boy-scout.ts"
+                },
+                "region": {
+                  "endColumn": 19,
+                  "endLine": 411,
+                  "startColumn": 3,
+                  "startLine": 411
+                }
+              }
+            }
+          ],
+          "message": {
+            "text": "Unused Symbol detected\n\nReason: The symbol is defined but not imported by any other file or used locally.\n\nRecommendations:\nRemove the unused symbol if it is truly no longer needed\nCheck if it should be an internal helper or if it was meant to be exported and used"
+          },
+          "ruleId": "dead_symbols"
+        },
+        {
+          "level": "warning",
+          "locations": [
+            {
+              "physicalLocation": {
+                "artifactLocation": {
                   "uri": "src/principles/adapters/cpp.ts"
                 },
                 "region": {
@@ -198,6 +283,50 @@
             "text": "Function `CppAdapter.getCodeBlock` has high cyclomatic complexity (33)\n\nReason: High cyclomatic complexity indicates that the function has too many decision points (if, for, while, etc.), making it difficult to understand, test, and maintain.\n\nRecommendations:\nExtract complex nested logic into smaller, focused helper functions\nUse early returns to reduce nesting depth\nSimplify logical expressions\nConsider using design patterns like Strategy or Command for complex branching\nBreak down large switch statements"
           },
           "ruleId": "cyclomatic_complexity"
+        },
+        {
+          "level": "warning",
+          "locations": [
+            {
+              "physicalLocation": {
+                "artifactLocation": {
+                  "uri": "src/principles/rules/solid/lsp.ts"
+                },
+                "region": {
+                  "endColumn": 4,
+                  "endLine": 55,
+                  "startColumn": 10,
+                  "startLine": 11
+                }
+              }
+            }
+          ],
+          "message": {
+            "text": "Function `<anonymous>` is too deeply nested (depth: 8)\n\nReason: Deeply nested code structures (if, for, while, etc.) make the logic hard to follow and increase the risk of bugs.\n\nRecommendations:\nRefactor using guard clauses, early returns, or extract nested blocks into separate functions"
+          },
+          "ruleId": "deep_nesting"
+        },
+        {
+          "level": "warning",
+          "locations": [
+            {
+              "physicalLocation": {
+                "artifactLocation": {
+                  "uri": "src/principles/boy-scout.ts"
+                },
+                "region": {
+                  "endColumn": 31,
+                  "endLine": 138,
+                  "startColumn": 17,
+                  "startLine": 138
+                }
+              }
+            }
+          ],
+          "message": {
+            "text": "Function `calculateDelta` is too deeply nested (depth: 5)\n\nReason: Deeply nested code structures (if, for, while, etc.) make the logic hard to follow and increase the risk of bugs.\n\nRecommendations:\nRefactor using guard clauses, early returns, or extract nested blocks into separate functions"
+          },
+          "ruleId": "deep_nesting"
         },
         {
           "level": "warning",
@@ -471,21 +600,21 @@
             {
               "physicalLocation": {
                 "artifactLocation": {
-                  "uri": "src/principles/boy-scout.ts"
+                  "uri": "src/principles/index.ts"
                 },
                 "region": {
-                  "endColumn": 31,
-                  "endLine": 138,
+                  "endColumn": 26,
+                  "endLine": 26,
                   "startColumn": 17,
-                  "startLine": 138
+                  "startLine": 26
                 }
               }
             }
           ],
           "message": {
-            "text": "Function `calculateDelta` is too deeply nested (depth: 5)\n\nReason: Deeply nested code structures (if, for, while, etc.) make the logic hard to follow and increase the risk of bugs.\n\nRecommendations:\nRefactor using guard clauses, early returns, or extract nested blocks into separate functions"
+            "text": "Function `parseArgs` has high cognitive complexity (18)\n\nReason: High cognitive complexity indicates that the function is difficult to understand and maintain due to complex logic and deep nesting.\n\nRecommendations:\nExtract nested blocks into well-named helper functions\nUse early returns (guard clauses) to flatten the code\nSimplify complex boolean expressions\nReplace nested if/else with polymorphism or a lookup table\nBreak down large loops into smaller processing steps"
           },
-          "ruleId": "deep_nesting"
+          "ruleId": "cognitive_complexity"
         },
         {
           "level": "warning",
@@ -505,9 +634,9 @@
             }
           ],
           "message": {
-            "text": "Function `<anonymous>` is too deeply nested (depth: 8)\n\nReason: Deeply nested code structures (if, for, while, etc.) make the logic hard to follow and increase the risk of bugs.\n\nRecommendations:\nRefactor using guard clauses, early returns, or extract nested blocks into separate functions"
+            "text": "Function `<anonymous>` has high cognitive complexity (42)\n\nReason: High cognitive complexity indicates that the function is difficult to understand and maintain due to complex logic and deep nesting.\n\nRecommendations:\nExtract nested blocks into well-named helper functions\nUse early returns (guard clauses) to flatten the code\nSimplify complex boolean expressions\nReplace nested if/else with polymorphism or a lookup table\nBreak down large loops into smaller processing steps"
           },
-          "ruleId": "deep_nesting"
+          "ruleId": "cognitive_complexity"
         },
         {
           "level": "warning",
@@ -550,50 +679,6 @@
           ],
           "message": {
             "text": "Function `BaselineStorage.validate` has high cognitive complexity (25)\n\nReason: High cognitive complexity indicates that the function is difficult to understand and maintain due to complex logic and deep nesting.\n\nRecommendations:\nExtract nested blocks into well-named helper functions\nUse early returns (guard clauses) to flatten the code\nSimplify complex boolean expressions\nReplace nested if/else with polymorphism or a lookup table\nBreak down large loops into smaller processing steps"
-          },
-          "ruleId": "cognitive_complexity"
-        },
-        {
-          "level": "warning",
-          "locations": [
-            {
-              "physicalLocation": {
-                "artifactLocation": {
-                  "uri": "src/principles/index.ts"
-                },
-                "region": {
-                  "endColumn": 26,
-                  "endLine": 26,
-                  "startColumn": 17,
-                  "startLine": 26
-                }
-              }
-            }
-          ],
-          "message": {
-            "text": "Function `parseArgs` has high cognitive complexity (18)\n\nReason: High cognitive complexity indicates that the function is difficult to understand and maintain due to complex logic and deep nesting.\n\nRecommendations:\nExtract nested blocks into well-named helper functions\nUse early returns (guard clauses) to flatten the code\nSimplify complex boolean expressions\nReplace nested if/else with polymorphism or a lookup table\nBreak down large loops into smaller processing steps"
-          },
-          "ruleId": "cognitive_complexity"
-        },
-        {
-          "level": "warning",
-          "locations": [
-            {
-              "physicalLocation": {
-                "artifactLocation": {
-                  "uri": "src/principles/adapters/cpp.ts"
-                },
-                "region": {
-                  "endColumn": 23,
-                  "endLine": 83,
-                  "startColumn": 11,
-                  "startLine": 83
-                }
-              }
-            }
-          ],
-          "message": {
-            "text": "Function `CppAdapter.getCodeBlock` has high cognitive complexity (64)\n\nReason: High cognitive complexity indicates that the function is difficult to understand and maintain due to complex logic and deep nesting.\n\nRecommendations:\nExtract nested blocks into well-named helper functions\nUse early returns (guard clauses) to flatten the code\nSimplify complex boolean expressions\nReplace nested if/else with polymorphism or a lookup table\nBreak down large loops into smaller processing steps"
           },
           "ruleId": "cognitive_complexity"
         },
@@ -647,28 +732,6 @@
             {
               "physicalLocation": {
                 "artifactLocation": {
-                  "uri": "src/principles/rules/solid/lsp.ts"
-                },
-                "region": {
-                  "endColumn": 4,
-                  "endLine": 55,
-                  "startColumn": 10,
-                  "startLine": 11
-                }
-              }
-            }
-          ],
-          "message": {
-            "text": "Function `<anonymous>` has high cognitive complexity (42)\n\nReason: High cognitive complexity indicates that the function is difficult to understand and maintain due to complex logic and deep nesting.\n\nRecommendations:\nExtract nested blocks into well-named helper functions\nUse early returns (guard clauses) to flatten the code\nSimplify complex boolean expressions\nReplace nested if/else with polymorphism or a lookup table\nBreak down large loops into smaller processing steps"
-          },
-          "ruleId": "cognitive_complexity"
-        },
-        {
-          "level": "warning",
-          "locations": [
-            {
-              "physicalLocation": {
-                "artifactLocation": {
                   "uri": "src/principles/reporter.ts"
                 },
                 "region": {
@@ -691,84 +754,21 @@
             {
               "physicalLocation": {
                 "artifactLocation": {
-                  "uri": "src/principles/baseline.ts"
+                  "uri": "src/principles/adapters/cpp.ts"
                 },
                 "region": {
-                  "endColumn": 31,
-                  "endLine": 163,
-                  "startColumn": 9,
-                  "startLine": 163
+                  "endColumn": 23,
+                  "endLine": 83,
+                  "startColumn": 11,
+                  "startLine": 83
                 }
               }
             }
           ],
           "message": {
-            "text": "Unused Class Method detected\n\nReason: The symbol is defined but not imported by any other file or used locally.\n\nRecommendations:\nRemove the unused symbol if it is truly no longer needed\nCheck if it should be an internal helper or if it was meant to be exported and used"
+            "text": "Function `CppAdapter.getCodeBlock` has high cognitive complexity (64)\n\nReason: High cognitive complexity indicates that the function is difficult to understand and maintain due to complex logic and deep nesting.\n\nRecommendations:\nExtract nested blocks into well-named helper functions\nUse early returns (guard clauses) to flatten the code\nSimplify complex boolean expressions\nReplace nested if/else with polymorphism or a lookup table\nBreak down large loops into smaller processing steps"
           },
-          "ruleId": "dead_symbols"
-        },
-        {
-          "level": "warning",
-          "locations": [
-            {
-              "physicalLocation": {
-                "artifactLocation": {
-                  "uri": "src/principles/baseline.ts"
-                },
-                "region": {
-                  "endColumn": 54,
-                  "endLine": 234,
-                  "startColumn": 15,
-                  "startLine": 234
-                }
-              }
-            }
-          ],
-          "message": {
-            "text": "Unused Symbol detected\n\nReason: The symbol is defined but not imported by any other file or used locally.\n\nRecommendations:\nRemove the unused symbol if it is truly no longer needed\nCheck if it should be an internal helper or if it was meant to be exported and used"
-          },
-          "ruleId": "dead_symbols"
-        },
-        {
-          "level": "warning",
-          "locations": [
-            {
-              "physicalLocation": {
-                "artifactLocation": {
-                  "uri": "src/principles/boy-scout.ts"
-                },
-                "region": {
-                  "endColumn": 19,
-                  "endLine": 411,
-                  "startColumn": 3,
-                  "startLine": 411
-                }
-              }
-            }
-          ],
-          "message": {
-            "text": "Unused Symbol detected\n\nReason: The symbol is defined but not imported by any other file or used locally.\n\nRecommendations:\nRemove the unused symbol if it is truly no longer needed\nCheck if it should be an internal helper or if it was meant to be exported and used"
-          },
-          "ruleId": "dead_symbols"
-        },
-        {
-          "level": "warning",
-          "locations": [
-            {
-              "physicalLocation": {
-                "artifactLocation": {
-                  "uri": "src/principles/rules/index.ts"
-                },
-                "region": {
-                  "startLine": 1
-                }
-              }
-            }
-          ],
-          "message": {
-            "text": "Barrel File Abuse\n\nReason: Excessive re-exports in index file. Large barrel files can lead to unnecessary coupling and slower build times.\n\nRecommendations:\nSplit the barrel file or import directly from sub-modules"
-          },
-          "ruleId": "barrel_file"
+          "ruleId": "cognitive_complexity"
         }
       ],
       "tool": {
@@ -780,6 +780,20 @@
               "id": "code_clone",
               "shortDescription": {
                 "text": "Code Clone"
+              }
+            },
+            {
+              "helpUri": "https://archlinter.github.io/archlint/detectors/barrel_file.html",
+              "id": "barrel_file",
+              "shortDescription": {
+                "text": "Barrel File Abuse"
+              }
+            },
+            {
+              "helpUri": "https://archlinter.github.io/archlint/detectors/dead_symbols.html",
+              "id": "dead_symbols",
+              "shortDescription": {
+                "text": "Dead Symbol"
               }
             },
             {
@@ -801,20 +815,6 @@
               "id": "cognitive_complexity",
               "shortDescription": {
                 "text": "High Cognitive Complexity"
-              }
-            },
-            {
-              "helpUri": "https://archlinter.github.io/archlint/detectors/dead_symbols.html",
-              "id": "dead_symbols",
-              "shortDescription": {
-                "text": "Dead Symbol"
-              }
-            },
-            {
-              "helpUri": "https://archlinter.github.io/archlint/detectors/barrel_file.html",
-              "id": "barrel_file",
-              "shortDescription": {
-                "text": "Barrel File Abuse"
               }
             }
           ],

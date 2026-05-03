@@ -1,0 +1,13 @@
+# yaml-language-server: $schema=https://raw.githubusercontent.com/archlinter/archlint/main/resources/archlint.schema.json
+ignore:
+- '**/*.test.ts'
+- '**/*.test.js'
+- '**/*.spec.ts'
+- '**/*.spec.js'
+- '**/__tests__/**'
+- '**/__mocks__/**'
+- '**/test/**'
+- '**/tests/**'
+- '**/__fixtures__/**'
+- '**/*.mock.ts'
+- '**/*.mock.js'

@@ -75,3 +75,24 @@ check_if_tool_available() {
     return 1
   fi
 }
+
+require_tool() {
+  local tool_name="$1"
+  local gate_name="${2:-Gate}"
+  local install_hint="${3:-}"
+  
+  if command -v "$tool_name" >/dev/null 2>&1; then
+    return 0
+  fi
+  
+  if command -v npx >/dev/null 2>&1 && npx --no-install "$tool_name" --version >/dev/null 2>&1; then
+    return 0
+  fi
+  
+  echo "❌ BLOCKED - Required tool '$tool_name' not available for $gate_name"
+  if [[ -n "$install_hint" ]]; then
+    echo "   Install: $install_hint"
+  fi
+  echo "   Per QUALITY-GATES-CODE-OF-CONDUCT.md: tool unavailable = BLOCK, not SKIP"
+  return 1
+}

@@ -1,9 +1,8 @@
 #!/bin/bash
 # OpenCode Quality Gates - Pre-Commit Hook - Refactored 6-Type-Based Gates
 # 
-# DESIGN PRINCIPLE: Zero tolerance - fail on missing capabilities
-# If tool not available → SKIP for that language (not blocking), unless required globally
-# Each gate handles availability checks as appropriate
+# DESIGN PRINCIPLE: Zero tolerance - tool unavailable = BLOCK (per CODE-OF-CONDUCT.md)
+# Each gate requires its tools to be installed; missing tools block the commit.
 #
 # Converts 9 sequential gates into 6 type-based comprehensive gates
 # Sourced from adapter-common.sh and language-specific adapters
@@ -14,6 +13,11 @@ source "$SCRIPT_DIR/adapter-common.sh" 2>/dev/null || {
   echo "Error: Cannot source adapter-common.sh"
   exit 1
 }
+
+PROJECT_ROOT="$(cd "$SCRIPT_DIR/../.." 2>/dev/null || echo "$SCRIPT_DIR/..")"
+if [[ -d "$PROJECT_ROOT/node_modules/.bin" ]]; then
+  export PATH="$PROJECT_ROOT/node_modules/.bin:$PATH"
+fi
 
 # ============================================================================
 # Helper Functions
@@ -423,34 +427,22 @@ if [ "$PROJECT_LANG" = "documentation-only" ]; then
   echo "✅ PASSED - Skipped (no source code to analyze)."
   
 elif [ "$PROJECT_LANG" = "typescript" ]; then
-  if command -v jscpd &> /dev/null; then
-    echo "Running jscpd for duplicate code detection..."
-    jscpd "$CHANGED_FILES" 2>&1 | head -30
-    JSCPD_EXIT=$?
-    if [ "$JSCPD_EXIT" -ne 0 ]; then
-      echo "ℹ️  jscpd found duplicated code (warning, not blocking by default)"
-      echo "   Consider refactoring duplicate code blocks."
-    fi
-    echo "✅ PASSED - jscpd duplicate code check completed."
-  elif command -v npx &> /dev/null; then
-    echo "Running jscpd with npx..."
-    npx jscpd "$CHANGED_FILES" 2>&1 | head -30
-    JSCPD_NPX_EXIT=$?
-    if [ "$JSCPD_NPX_EXIT" -ne 0 ]; then
-      echo "ℹ️  jscpd found duplicated code (warning, not blocking by default)"
-      echo "   Consider refactoring duplicate code blocks."
-    fi
-    echo "✅ PASSED - npx jscpd duplicate code check completed."
-  else
-    echo "ℹ️  jscpd not available - Skipping duplicate code detection"
-    echo "ℹ️  Install jscpd with 'npm install -g jscpd' for duplicate code detection"
-    echo "✅ PASSED - Duplicate code check (SKIP, tool not available)"
+  if ! require_tool "jscpd" "Gate 2" "npm install -D jscpd"; then
+    exit 1
   fi
+  
+  echo "Running jscpd for duplicate code detection..."
+  jscpd "$CHANGED_FILES" 2>&1 | head -30
+  JSCPD_EXIT=$?
+  if [ "$JSCPD_EXIT" -ne 0 ]; then
+    echo "ℹ️  jscpd found duplicated code (warning, not blocking by default)"
+    echo "   Consider refactoring duplicate code blocks."
+  fi
+  echo "✅ PASSED - jscpd duplicate code check completed."
 
 elif [ "$PROJECT_LANG" = "python" ]; then
   if command -v pylint &> /dev/null; then
     echo "Running pylint duplicate detection..."
-    # Disable all rules except duplicate-code
     pylint --disable=all --enable=duplicate-code $(echo "$CHANGED_FILES" | grep "\.py$")
     DUPLICATE_EXIT=$?
     if [ "$DUPLICATE_EXIT" -ne 0 ]; then
@@ -458,40 +450,38 @@ elif [ "$PROJECT_LANG" = "python" ]; then
     else
       echo "✅ PASSED - pylint found no duplicates."
     fi
+  elif require_tool "ruff" "Gate 2" "pip install ruff"; then
+    ruff check --select=DUP $(echo "$CHANGED_FILES" | grep "\.py$") 2>&1 | head -30
+    echo "✅ PASSED - ruff duplicate code check completed."
   else
-    echo "ℹ️  pylint not available - Skipping duplicate code detection for Python"
-    echo "✅ PASSED - Duplicate code check (SKIP, no tool available)"
+    exit 1
   fi
 
 elif [ "$PROJECT_LANG" = "go" ]; then
-  if command -v jscpd &> /dev/null; then
-    echo "Running jscpd for Go duplicate code detection..."
-    FILES_TO_CHECK=$(echo "$CHANGED_FILES" | grep "\.go$" | head -20)  # Limit to avoid too much processing
-    if [ -n "$FILES_TO_CHECK" ]; then
-      jscpd $FILES_TO_CHECK 2>&1 | head -10
-    fi
-    echo "✅ PASSED - Go duplicate code check (SKIP - not typically enforced)"
-  else
-    echo "ℹ️  jscpd not available - Skipping duplicate code detection for Go"
-    echo "✅ PASSED - Duplicate code check (SKIP, tool not available)"
+  if ! require_tool "jscpd" "Gate 2" "npm install -D jscpd"; then
+    exit 1
   fi
+  
+  echo "Running jscpd for Go duplicate code detection..."
+  FILES_TO_CHECK=$(echo "$CHANGED_FILES" | grep "\.go$" | head -20)
+  if [ -n "$FILES_TO_CHECK" ]; then
+    jscpd $FILES_TO_CHECK 2>&1 | head -10
+  fi
+  echo "✅ PASSED - Go duplicate code check completed."
 
 elif [ "$PROJECT_LANG" = "shell" ]; then
   echo "ℹ️  Duplicate detection not typically used for shell scripts"
   echo "✅ PASSED - Skipped (shell scripts, no standardized dup tool)"
 
 else
-  # Generic handler - try to use appropriate tools based on project type
   SOURCE_FILES=$(echo "$CHANGED_FILES" | grep -E '\.(ts|tsx|js|jsx|py|go|java|scala|kt|cpp|c|h|rs|php|dart|swift)$')
   if [ -n "$SOURCE_FILES" ]; then
-    if command -v jscpd &> /dev/null; then
-      echo "Running jscpd for duplicate code detection..."
-      jscpd $SOURCE_FILES 2>&1 | head -15
-      echo "✅ PASSED - jscpd check completed."
-    else
-      echo "ℹ️  jscpd not available for this language stack"
-      echo "✅ PASSED - Duplicate check (SKIP, tool not available)"
+    if ! require_tool "jscpd" "Gate 2" "npm install -D jscpd"; then
+      exit 1
     fi
+    echo "Running jscpd for duplicate code detection..."
+    jscpd $SOURCE_FILES 2>&1 | head -15
+    echo "✅ PASSED - jscpd check completed."
   else
     echo "✅ PASSED - No source files detected for duplicate checking."
   fi
