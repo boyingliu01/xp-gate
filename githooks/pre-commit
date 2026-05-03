@@ -765,22 +765,20 @@ else
     # Different architecture tools per language
     case "$PROJECT_LANG" in
       "typescript")
-        if command -v archlint &> /dev/null; then
-          echo "     Running archlint for TypeScript..."
-          archlint -f sarif -r architecture-report.sarif.json . 2>&1 | head -20 || echo "⚠️  Architectural smells detected (pre-existing, continuing)"
-          echo "     ✅ TypeScript architecture validation completed."
-        else
-          echo "     ℹ️  archlint not available - skipping"
+        if ! require_tool "archlint" "Gate 8" "npm install -g @archlinter/cli"; then
           echo "     ✅ Architecture validation (SKIP, no tool)"
+        else
+          echo "     Running archlint for TypeScript..."
+          archlint scan . -f table --quiet 2>&1 | tail -30 || echo "⚠️  Architectural smells detected (pre-existing, continuing)"
+          echo "     ✅ TypeScript architecture validation completed."
         fi
         ;;
       "python")
-        if command -v deply &> /dev/null; then
+        if require_tool "deply" "Gate 8" "pip install deply"; then
           echo "     Running Deply for Python..."
           deply analyze 2>&1 | head -20 || echo "⚠️  Architecture check completed (may have issues)"
           echo "     ✅ Python architecture validation completed."
         else
-          echo "     ℹ️  deply not available - skipping"
           echo "     ✅ Architecture validation (SKIP, no tool)"
         fi
         ;;
