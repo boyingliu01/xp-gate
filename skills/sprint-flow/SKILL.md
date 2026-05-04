@@ -2,7 +2,7 @@
 name: sprint-flow
 description: >
   One-Shot Sprint 自动流水线。单一入口，自动串联 Think → Plan → Build → 
-  Review → Ship 流程。整合 autoplan + delphi-review + TDD + review + 
+  Review → Ship 流程。整合 brainstorming + autoplan + delphi-review + TDD +
   delphi-review --mode code-walkthrough + ship 等现有 Skills。关键节点暂停等待用户决策。
   承认 Emergent Requirements 限制，设计用户验收环节。
   
@@ -46,7 +46,7 @@ maturity: beta
 调用 `/sprint-flow "[需求描述]"` 后，自动执行以下流程：
 
 ```
-Phase 0: THINK → office-hours → Pain Document
+Phase 0: THINK → brainstorming → ⚠️ HARD-GATE: 设计未批准 → 不可进入实现 → Design Document
 Phase 1: PLAN → autoplan → ⚠️ (如有taste_decisions，暂停等用户确认)
            → delphi-review → ⚠️ (等待 APPROVED)
            → 自动生成 specification.yaml（无需独立 skill）
@@ -69,6 +69,7 @@ Phase 6: SHIP → ship → ⚠️ (等待发布确认)
 
 | 暂停点位置 | 触发条件 | 用户操作 | 自动恢复条件 |
 |-----------|---------|---------|-------------|
+| **Phase 0** | ⚠️ **设计未 APPROVED (HARD-GATE)** | 根据反馈修改设计 | 设计 APPROVED 后继续 |
 | Phase 1 | autoplan surfacing taste_decisions | 用户确认每个决策 | 确认后自动继续 |
 | Phase 1 | delphi-review 未 APPROVED | 修复并重新评审 | APPROVED 后自动继续 |
 | Phase 2 | 验证失败超过 max 3 | 用户决定修复或放弃 | 验证通过后自动继续 |
@@ -81,9 +82,10 @@ Phase 6: SHIP → ship → ⚠️ (等待发布确认)
 
 ## 各 Phase 调用的 Skills
 
-### Phase 0: THINK（痛点发现）
-- `office-hours` (gstack) — YC Partner 六个强制问题
-- 可选补充：`plan-ceo-review` (SCOPE EXPANSION mode)
+### Phase 0: THINK（需求探索与设计）
+- `brainstorming` (superpowers) — **HARD-GATE**: 设计未批准 → 不可进入实现
+- 输出: 结构化设计文档 → 直接作为 Phase 1 PLAN 的输入
+- 替代原因: office-hours 的 YC 六问适合新产品方向验证，brainstorming 的"设计批准才可进入实现"机制更适合 sprint-flow 场景
 
 ### Phase 1: PLAN（共识评审）
 - `autoplan` (gstack) — CEO → Design → Eng 自动流水线
@@ -289,7 +291,8 @@ Sprint 结束时 (Phase 6 完成):
 /sprint-flow "开发访谈机器人，支持多轮对话"
 
 # 输出：
-# Phase 0: 生成 docs/pain-document.md
+# Phase 0: brainstorming 需求探索 → 设计文档 → ⚠️ HARD-GATE: 等待用户 APPROVED
+# 用户 APPROVED → 自动进入 Phase 1
 # Phase 1: autoplan 发现 2 个 taste_decisions → ⚠️ 暂停
 # 用户确认决策后 → delphi-review → Round 1 REQUEST_CHANGES
 # 修复 → Round 2 APPROVED → specification.yaml
@@ -364,24 +367,3 @@ Sprint 结束时 (Phase 6 完成):
 | Emergent requirements 无法消除 | Mike Cohn, Rafael Santos | Phase 4 人工设计 |
 | 78% failures invisible | arXiv research | Phase 4 必要性证明 |
 | Think → Plan → Build → Ship | gstack ETHOS | 整体流程设计 |
-## Output Format (MANDATORY)
-Sprint state is persisted as JSON in `.sprint-state/sprint-state.json`:
-```json
-{
-  "id": "sprint-2026-04-26-01",
-  "phase": 0,
-  "status": "running|paused|completed",
-  "outputs": {
-    "pain_document": "docs/pain-document.md",
-    "specification": "specification.yaml",
-    "mvp": "mvp-v1/",
-    "review_report": "review-report.md"
-  },
-  "metrics": {
-    "tests_passed": 15,
-    "tests_failed": 0,
-    "coverage_pct": 85
-  }
-}
-```
-**Eval assertions check for:** `phase`, `status`, `outputs.specification`, `metrics.coverage_pct`.

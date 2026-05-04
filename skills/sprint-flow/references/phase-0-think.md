@@ -1,113 +1,115 @@
-# Phase 0: THINK（痛点发现）
+# Phase 0: THINK（需求探索与设计）
 
 ## 目标
 
-发现真实痛点，不是"我想做什么"。使用 YC Partner 六个强制问题验证需求真实性。
+使用 brainstorming skill 进行结构化需求探索，输出经用户批准的设计文档。
+
+**关键变更（ISSUE30）**: 从 `office-hours` 切换到 `brainstorming`，原因:
+- brainstorming 有 **HARD-GATE**（设计未批准 → 不可进入实现），防止 "觉得已经理解了就直接开始写代码"
+- brainstorming 输出结构化设计文档，可直接作为 Phase 1 PLAN 的输入
+- office-hours 的 YC 六问适合新产品方向验证，brainstorming 更适合"具体功能实现前设计"的场景
 
 ---
 
 ## 调用 Skills
 
-- `office-hours` (gstack) — YC Partner 六个强制问题
-- 可选补充：`plan-ceo-review` (SCOPE EXPANSION mode)
+- `brainstorming` (superpowers) — **HARD-GATE**: 设计未批准 → 不可进入实现
+- 可选补充：`office-hours` (gstack) — 当用户需求非常模糊、需要先验证产品方向时
+
+---
+
+## HARD-GATE 机制
+
+```
+DO NOT enter Phase 1 (PLAN) or do any implementation
+until the brainstorming design has been APPROVED by the user.
+```
+
+这是 sprint-flow 的关键安全门。brainstorming skill 内部会执行：
+
+1. **Explore project context** — 检查文件、文档、最近 commits
+2. **Ask clarifying questions** — 一次一个，理解目的/约束/成功标准
+3. **Propose approaches** — 2-3 个方案，含 trade-offs 和建议
+4. **Present design** — 分节展示，每节获得用户批准
+5. **Write design doc** — 保存到 `docs/plans/YYYY-MM-DD-<topic>-design.md`
+6. **Transition to implementation** — brainstorming 自动调用 writing-plans
+
+**sprint-flow 编排层行为**:
+- 收到 brainstorming APPROVED 设计文档后，自动进入 Phase 1
+- 如果 brainstorming 未完成（用户未 APPROVED），BLOCK 并等待
 
 ---
 
 ## 执行步骤
 
-### Step 1: 调用 office-hours skill
+### Step 1: 调用 brainstorming skill
 
-```bash
-skill(name="office-hours", user_message="[需求描述]")
+```
+skill(name="brainstorming", user_message="[需求描述]")
 ```
 
-office-hours 会执行六个强制问题：
+brainstorming 内部流程:
 
-1. **需求现实是什么？** (Demand Reality)
-   - 真实用户是否真的需要这个？
-   - 现在有什么替代方案？
-   - 为什么他们还没有用替代方案？
-
-2. **当前状态是什么？** (Status Quo)
-   - 用户现在怎么解决这个问题？
-   - 他们的现状有多糟糕？
-
-3. **绝望的具体性是什么？** (Desperate Specificity)
-   - 能否描述一个具体的用户场景？
-   - 这个场景有多绝望？
-
-4. **最窄的切入点是什么？** (Narrowest Wedge)
-   - 最小的可行切入点是什么？
-   - 不要"大而全"，要"小而精"
-
-5. **你观察到了什么？** (Observation)
-   - 你自己是否观察到这个问题？
-   - 数据或访谈支持吗？
-
-6. **未来适配如何？** (Future-fit)
-   - 这个需求在未来 3-5 年是否仍然存在？
-   - 是否会被技术变化淘汰？
-
-### Step 2: 生成 Pain Document
-
-基于 office-hours 的输出，生成 Pain Document：
-
-```markdown
-# Pain Document - [需求名称]
-
-## 生成日期
-YYYY-MM-DD
-
-## 需求现实
-[来自 office-hours 的回答]
-
-## 当前状态
-[...]
-
-## 绝望的具体性
-[...]
-
-## 最窄切入点
-[...]
-
-## 观察证据
-[...]
-
-## 未来适配
-[...]
-
-## Pain Statement (一句话痛点)
-[用一句话描述为什么这是真实痛点]
-
-## Proposed Solution (建议方案)
-[基于六个问题推导出的初步方案]
+```
+Explore project context → Ask clarifying questions → Propose 2-3 approaches
+→ Present design sections → User approves design? → YES → Write design doc
+→ Invoke writing-plans skill
 ```
 
-### Step 3: 保存 Pain Document
+**注意**: brainstorming 内部会自动调用 `writing-plans` 创建实现计划，该计划直接作为 Phase 1 的输入。
 
-保存到 `<project-root>/.sprint-state/phase-outputs/pain-document.md`
+### Step 2: 等待 HARD-GATE APPROVED
+
+```
+⚠️ HARD-GATE: 设计未 APPROVED → 不可进入 Phase 1
+
+等待用户审批 brainstorming 输出的设计文档。
+```
+
+sprint-flow 编排层检查:
+- [ ] 设计文档已保存 (`docs/plans/YYYY-MM-DD-<topic>-design.md`)
+- [ ] 用户已 APPROVED
+- [ ] 无未解决的 blocking questions
+
+如果任一条件不满足 → **BLOCK**，等待用户确认。
+
+### Step 3: 保存设计文档路径
+
+```
+设计文档路径写入 sprint-state，供 Phase 1 使用。
+```
+
+保存到 `<project-root>/.sprint-state/phase-outputs/design-doc.md`（内容为设计文档路径引用，或直接复制设计文档）。
+
+---
+
+## 可选补充: office-hours（方向验证）
+
+当用户输入非常模糊时（如 "我想做一个 AI 工具" 而不是 "开发用户登录功能"），可以先调用 `office-hours` 验证产品方向，再进入 brainstorming 详细设计：
+
+```
+skill(name="office-hours", user_message="[模糊需求描述]")
+// → Pain Document → 再进入 brainstorming 详细设计
+```
+
+**使用场景**:
+- 用户描述的是一个新产品/新功能方向，而非具体功能
+- 需要先验证"是否值得做"再进入"怎么做"
+
+**如果不满足以上条件**: 直接跳过 office-hours，只使用 brainstorming。
 
 ---
 
 ## 暂停点
 
-**无** — Phase 0 完成后自动进入 Phase 1
-
----
-
-## 可选补充
-
-如果用户想要更激进的需求探索，可以调用：
-
-```bash
-skill(name="plan-ceo-review", user_message="SCOPE EXPANSION: [需求描述]")
-```
-
-plan-ceo-review 会在 office-hours 基础上进一步挑战需求边界，提出可能的扩张方向。
+| 暂停点 | 触发条件 | 用户操作 | 自动恢复条件 |
+|--------|---------|---------|-------------|
+| **HARD-GATE** | brainstorming 设计未 APPROVED | 用户审批设计文档 | 设计 APPROVED 后自动进入 Phase 1 |
 
 ---
 
 ## 输出
 
-- Pain Document (`docs/pain-document.md` 或 `.sprint-state/phase-outputs/pain-document.md`)
-- 进入 Phase 1 自动执行
+- Design Document (`docs/plans/YYYY-MM-DD-<topic>-design.md`)
+- Implementation Plan（brainstorming 内部 writing-plans 输出）
+- 进入 Phase 1 自动执行（使用设计文档作为输入）
