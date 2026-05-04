@@ -15,13 +15,16 @@
 **Web 前端项目额外注入**:
 - `design-shotgun` (gstack) — 生成多版 UI 设计变体，用于探索不同的设计方案
 
+**Mobile 项目额外注入** (`--type mobile-flutter` / `mobile-react-native`):
+- `design-shotgun` (gstack) — 移动端 UI 设计探索（Web 项目相同，适用 Flutter Web / RN 项目）
+
 ---
 
 ## 执行步骤
 
 ### Step 0: Web 前端项目 — 调用 design-shotgun（如适用）
 
-**IF project_type is web-nextjs / web-react / web-vue:**
+**IF project_type is web-nextjs / web-react / web-vue / mobile-flutter / mobile-react-native:**
 
 ```bash
 skill(name="design-shotgun", user_message="[Pain Document 内容 + 需求描述]")

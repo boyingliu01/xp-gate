@@ -42,7 +42,7 @@ fi
 
 # Determine if pushed files contain ONLY documentation/non-source files
 DOC_ONLY=true
-SOURCE_EXTENSIONS="\.py$|\.js$|\.ts$|\.tsx$|\.java$|\.go$|\.rs$|\.cpp$|\.c$|\.swift$|\.kt$|\.sh$|\.dart$|\.m$|\.mm$|\.h$|\.hpp$"
+SOURCE_EXTENSIONS="\.py$|\.js$|\.ts$|\.tsx$|\.java$|\.go$|\.rs$|\.cpp$|\.c$|\.swift$|\.kt$|\.sh$|\.dart$|\.ps1$|\.m$|\.mm$|\.h$|\.hpp$"
 
 for file in $PUSHED_FILES; do
   if echo "$file" | grep -qE "$SOURCE_EXTENSIONS"; then

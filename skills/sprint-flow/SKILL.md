@@ -21,7 +21,7 @@ description: >
   --resume-from <phase>: 从指定阶段继续，跳过前面阶段
   --phase <phase>: 只执行单个阶段 (think-only/plan-only/build-only/review-only/ship-only)
   --lang <language>: 指定项目语言 (springboot/django/golang)
-  --type <project_type>: 指定项目类型 (web-nextjs/web-react/web-vue/backend-django/backend-go/backend-springboot)
+  --type <project_type>: 指定项目类型 (web-nextjs/web-react/web-vue/mobile-flutter/mobile-react-native/backend-django/backend-go/backend-springboot)
   --spec <file>: 使用已有的 specification.yaml 文件
 
 maturity: beta
@@ -237,6 +237,8 @@ Sprint state is persisted as JSON in `.sprint-state/sprint-state.json`:
 | `package.json` + `next.config.js` | `web-nextjs` |
 | `package.json` + `vite.config.ts` + `react` 依赖 | `web-react` |
 | `package.json` + `vue` 依赖 | `web-vue` |
+| `pubspec.yaml` + `flutter:` | `mobile-flutter` |
+| `package.json` + `react-native` 依赖 or `ios/` + `android/` | `mobile-react-native` |
 | `go.mod` | `backend-go` |
 | `pom.xml` | `backend-springboot` |
 | `manage.py` 或 `pyproject.toml` (django) | `backend-django` |
@@ -244,12 +246,19 @@ Sprint state is persisted as JSON in `.sprint-state/sprint-state.json`:
 
 ### 项目类型到 Skill 注入映射
 
-| Phase | Backend (default) | Web Frontend |
-|-------|------------------|-------------|
-| Phase 1 (PLAN) | `autoplan` + `delphi-review` | + `design-shotgun` (UI 设计多版探索) |
-| Phase 2 (BUILD) | TDD + blind-review | (同 backend) |
-| Phase 3 (REVIEW) | `delphi-review --mode code-walkthrough` + `test-specification-alignment` | + `qa` (系统化 QA) + `design-review` (视觉审计) + `benchmark` (Core Web Vitals) |
-| Browse | `localhost:3000` | 支持部署 URL + 表单/交互测试 |
+| Phase | Backend (default) | Web Frontend | Mobile |
+|-------|------------------|-------------|--------|
+| Phase 0 (THINK) | `brainstorming` | (同) | (同) |
+| Phase 1 (PLAN) | `autoplan` + `delphi-review` | + `design-shotgun` | (同 web) |
+| Phase 2 (BUILD) | TDD + blind-review | (同 backend) | + `vercel-react-native-skills` (RN) / `flutter-review` (Flutter) |
+| Phase 3 (REVIEW) | `delphi-review --mode code-walkthrough` + `test-specification-alignment` | + `qa` + `design-review` + `benchmark` | Flutter: `flutter-test` / RN: `detox E2E` |
+| Phase 5 (FEEDBACK) | `learn` + `retro` | (同) | (同) |
+| Phase 6 (SHIP) | `finishing-a-development-branch` + `ship` | (同) | + platform deploy (可选) |
+| Browse | `localhost:3000` | 部署 URL + 表单/交互 | Flutter Web / RN Web 测试 |
+
+**Mobile 专属工具链**:
+- **Flutter**: `flutter analyze`, `flutter test`, `flutter build`, `pub publish`
+- **React Native**: `metro`, `detox`, `jest`, `react-native run-ios/android`
 
 ---
 

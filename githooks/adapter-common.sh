@@ -18,7 +18,13 @@ detect_project_lang() {
   elif [[ -f "pom.xml" ]]; then
     echo "java"
   elif [[ -f "pubspec.yaml" ]]; then
-    echo "dart"
+    if grep -q "flutter:" "pubspec.yaml" 2>/dev/null || [[ -f ".metadata" ]]; then
+      echo "flutter"
+    else
+      echo "dart"
+    fi
+  elif [[ -n "$(find . -name "*.ps1" -type f | head -n 1)" ]]; then
+    echo "powershell"
   elif [[ -f "Package.swift" ]]; then
     echo "swift"
   elif [[ -f "CMakeLists.txt" ]] || [[ -n "$(find . -name "*.cpp" -o -name "*.cc" -type f | head -n 1)" ]]; then

@@ -20,6 +20,11 @@ Web 前端项目额外增加：系统化 QA、视觉审计、性能基线。
 - `design-review` (gstack) — 线上 UI 视觉审计（间距、层级、AI slop 检测）
 - `benchmark` (gstack) — Core Web Vitals 性能基线
 
+**Mobile 项目额外注入** (`--type mobile-flutter` / `mobile-react-native`):
+- `flutter-test` — Flutter 单元测试 + widget 测试 (Flutter only)
+- Detox E2E — React Native 端到端测试 (RN only)
+- `flutter-review` (user) — Flutter 代码审查 (Flutter only)
+
 ---
 
 ## 执行步骤
@@ -99,6 +104,31 @@ benchmark 测量：
 - Core Web Vitals (LCP, FID, CLS)
 - 资源大小
 - 与上次部署对比
+
+### Step 2.8: Mobile — Flutter 测试（如适用）
+
+**IF project_type is mobile-flutter:**
+
+```bash
+flutter test --coverage 2>&1 | tail -20
+```
+
+flutter-test 输出:
+- 测试通过率
+- 覆盖率统计
+- Widget 测试结果
+
+### Step 2.9: Mobile — React Native 测试（如适用）
+
+**IF project_type is mobile-react-native:**
+
+```bash
+npx detox test 2>&1 | tail -20
+```
+
+RN E2E 输出:
+- Detox 测试结果
+- 模拟器/真机行为验证
 
 ### Step 3: 调用 browse skill
 

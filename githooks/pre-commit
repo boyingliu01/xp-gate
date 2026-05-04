@@ -110,8 +110,16 @@ fi
 
 # Determine project language stack
 PROJECT_LANG=""
-if [ -f "tsconfig.json" ] || [ -f "package.json" ]; then
-  PROJECT_LANG="typescript"
+if [ -f "package.json" ]; then
+  # Check if it's a React Native project
+  HAS_RN=$(grep -q "react-native" package.json 2>/dev/null && echo "yes" || echo "no")
+  HAS_IOS=$([ -d "ios" ] && echo "yes" || echo "no")
+  HAS_ANDROID=$([ -d "android" ] && echo "yes" || echo "no")
+  if [ "$HAS_RN" = "yes" ] || { [ "$HAS_IOS" = "yes" ] && [ "$HAS_ANDROID" = "yes" ]; }; then
+    PROJECT_LANG="react-native"
+  else
+    PROJECT_LANG="typescript"
+  fi
 elif [ -f "pyproject.toml" ] || [ -f "setup.py" ] || [ -f "requirements.txt" ]; then
   PROJECT_LANG="python"
 elif [ -f "go.mod" ]; then
@@ -123,6 +131,8 @@ elif [ -f "pubspec.yaml" ]; then
   else
     PROJECT_LANG="dart"
   fi
+elif [ -n "$(find . -name '*.ps1' -not -path './.git/*' -maxdepth 2 | head -1)" ]; then
+  PROJECT_LANG="powershell"
 elif [ -f "CMakeLists.txt" ] || [ -f "Makefile" ]; then
   CPP_FILES=$(find . -maxdepth 2 -name "*.cpp" -o -name "*.cxx" -o -name "*.cc" -not -path "./.git/*" 2>/dev/null | head -1)
   OBJC_FILES=$(find . -maxdepth 2 -name "*.m" -o -name "*.mm" -not -path "./.git/*" 2>/dev/null | head -1)
@@ -153,11 +163,16 @@ fi
 #   subdirectory: Flutter/TypeScript/Python/Go project
 PROJECT_SUBDIR=""
 if [ -z "$PROJECT_LANG" ]; then
-  # Search for TypeScript/JavaScript projects
+  # Search for TypeScript/JavaScript projects (excluding React Native)
   TSCONFIG_SUB=$(find . -maxdepth 2 -name "tsconfig.json" -not -path "./.git/*" -not -path "./node_modules/*" 2>/dev/null | head -1)
   if [ -n "$TSCONFIG_SUB" ]; then
-    PROJECT_LANG="typescript"
     PROJECT_SUBDIR=$(dirname "$TSCONFIG_SUB")
+    # Check if it's React Native
+    if [ -f "$PROJECT_SUBDIR/package.json" ] && grep -q "react-native" "$PROJECT_SUBDIR/package.json" 2>/dev/null; then
+      PROJECT_LANG="react-native"
+    else
+      PROJECT_LANG="typescript"
+    fi
   fi
   
   # Search for Python projects
@@ -217,6 +232,26 @@ if [ -z "$PROJECT_LANG" ]; then
     fi
   fi
   
+  # Search for React Native projects (ios/ + android/ directories)
+  if [ -z "$PROJECT_LANG" ]; then
+    RN_SUB=$(find . -maxdepth 2 -type d -name "ios" -not -path "./.git/*" 2>/dev/null | head -1)
+    if [ -n "$RN_SUB" ]; then
+      PROJECT_SUBDIR=$(dirname "$RN_SUB")
+      if [ -d "$PROJECT_SUBDIR/android" ] || [ -f "$PROJECT_SUBDIR/package.json" ]; then
+        PROJECT_LANG="react-native"
+      fi
+    fi
+  fi
+  
+  # Search for PowerShell projects
+  if [ -z "$PROJECT_LANG" ]; then
+    PS_SUB=$(find . -maxdepth 2 -name "*.ps1" -not -path "./.git/*" 2>/dev/null | head -1)
+    if [ -n "$PS_SUB" ]; then
+      PROJECT_LANG="powershell"
+      PROJECT_SUBDIR=$(dirname "$PS_SUB")
+    fi
+  fi
+  
   # Report detected subdirectory project
   if [ -n "$PROJECT_SUBDIR" ] && [ -n "$PROJECT_LANG" ]; then
     echo ""
@@ -234,7 +269,7 @@ fi
 # Such projects have only markdown, yaml, json, skills, docs - no actual code
 if [ -z "$PROJECT_LANG" ]; then
   # Count source code files (including shell scripts)
-  CODE_FILES=$(find . -type f \( -name "*.py" -o -name "*.js" -o -name "*.ts" -o -name "*.tsx" -o -name "*.java" -o -name "*.go" -o -name "*.rs" -o -name "*.cpp" -o -name "*.c" -o -name "*.swift" -o -name "*.kt" -o -name "*.sh" -o -name "*.dart" \) -not -path "./.git/*" 2>/dev/null | wc -l)
+  CODE_FILES=$(find . -type f \( -name "*.py" -o -name "*.js" -o -name "*.ts" -o -name "*.tsx" -o -name "*.java" -o -name "*.go" -o -name "*.rs" -o -name "*.cpp" -o -name "*.c" -o -name "*.swift" -o -name "*.kt" -o -name "*.sh" -o -name "*.dart" -o -name "*.ps1" \) -not -path "./.git/*" 2>/dev/null | wc -l)
   
   if [ "$CODE_FILES" -eq 0 ]; then
     PROJECT_LANG="documentation-only"
