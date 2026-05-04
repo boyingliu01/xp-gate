@@ -3,7 +3,7 @@ name: sprint-flow
 description: >
   One-Shot Sprint 自动流水线。单一入口，自动串联 Think → Plan → Build → 
   Review → Ship 流程。整合 autoplan + delphi-review + TDD + review + 
-  cross-model-review + ship 等现有 Skills。关键节点暂停等待用户决策。
+  delphi-review --mode code-walkthrough + ship 等现有 Skills。关键节点暂停等待用户决策。
   承认 Emergent Requirements 限制，设计用户验收环节。
   
   TRIGGER: 
@@ -21,6 +21,7 @@ description: >
   --resume-from <phase>: 从指定阶段继续，跳过前面阶段
   --phase <phase>: 只执行单个阶段 (think-only/plan-only/build-only/review-only/ship-only)
   --lang <language>: 指定项目语言 (springboot/django/golang)
+  --type <project_type>: 指定项目类型 (web-nextjs/web-react/web-vue/backend-django/backend-go/backend-springboot)
   --spec <file>: 使用已有的 specification.yaml 文件
 
 maturity: beta
@@ -53,7 +54,7 @@ Phase 2: BUILD → test-driven-development (RED→GREEN→REFACTOR)
            → freeze (盲评隔离) → requesting-code-review → unfreeze
            → verification-before-completion → ⚠️ (验证失败超过 max 3)
            → MVP v1
-Phase 3: REVIEW → cross-model-review → test-specification-alignment
+Phase 3: REVIEW → delphi-review --mode code-walkthrough → test-specification-alignment
            → browse → ⚠️ (验证失败)
 Phase 4: ⚠️ ⚠️ USER ACCEPTANCE → 必须人工验收 → Emergent Issues List
 Phase 5: FEEDBACK → learn → Sprint 2 Pain Document
@@ -120,7 +121,7 @@ Phase 6: SHIP → ship → ⚠️ (等待发布确认)
 - `springboot-tdd` / `django-tdd` / `golang-testing`
 
 ### Phase 3: REVIEW + TEST（验证）
-- `cross-model-review` — Alternating 对抗评审
+- `delphi-review --mode code-walkthrough` — 多专家匿名代码走查（代替 cross-model-review）
 - `test-specification-alignment` — 测试与 Spec 对齐验证
 - `browse` (gstack) — 浏览器自动化测试
 
@@ -211,6 +212,36 @@ Sprint state is persisted as JSON in `.sprint-state/sprint-state.json`:
 
 /sprint-flow "开发并发任务调度器" --lang golang
 # Phase 2 自动调用 golang-testing
+```
+
+### --type（指定项目类型）
+
+```bash
+/sprint-flow "开发用户登录页面" --type web-nextjs
+/sprint-flow "开发 REST API" --type backend-django
+# 默认: 从项目文件自动检测
+```
+
+自动检测逻辑（按顺序检查）：
+
+| 检测条件 | 类型 |
+|---------|------|
+| `package.json` + `next.config.js` | `web-nextjs` |
+| `package.json` + `vite.config.ts` + `react` 依赖 | `web-react` |
+| `package.json` + `vue` 依赖 | `web-vue` |
+| `go.mod` | `backend-go` |
+| `pom.xml` | `backend-springboot` |
+| `manage.py` 或 `pyproject.toml` (django) | `backend-django` |
+| 无匹配 | `backend-cli` |
+
+### 项目类型到 Skill 注入映射
+
+| Phase | Backend (default) | Web Frontend |
+|-------|------------------|-------------|
+| Phase 1 (PLAN) | `autoplan` + `delphi-review` | + `design-shotgun` (UI 设计多版探索) |
+| Phase 2 (BUILD) | TDD + blind-review | (同 backend) |
+| Phase 3 (REVIEW) | `delphi-review --mode code-walkthrough` + `test-specification-alignment` | + `qa` (系统化 QA) + `design-review` (视觉审计) + `benchmark` (Core Web Vitals) |
+| Browse | `localhost:3000` | 支持部署 URL + 表单/交互测试 |
 
 ---
 

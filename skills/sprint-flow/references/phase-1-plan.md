@@ -12,9 +12,29 @@
 - `delphi-review` — 多轮匿名评审直到共识
 - specification.yaml 从 APPROVED 设计文档自动生成（无需独立 skill）
 
+**Web 前端项目额外注入**:
+- `design-shotgun` (gstack) — 生成多版 UI 设计变体，用于探索不同的设计方案
+
 ---
 
 ## 执行步骤
+
+### Step 0: Web 前端项目 — 调用 design-shotgun（如适用）
+
+**IF project_type is web-nextjs / web-react / web-vue:**
+
+```bash
+skill(name="design-shotgun", user_message="[Pain Document 内容 + 需求描述]")
+```
+
+design-shotgun 执行：
+- 生成多个 AI 设计变体
+- 打开比较板展示不同设计方案
+- 收集结构化反馈并迭代
+
+输出: 多个设计方案（用于 autoplan 的 plan-design-review）
+
+**IF backend project:** 跳过此步骤，直接进入 Step 1。
 
 ### Step 1: 调用 autoplan skill
 
