@@ -3,24 +3,38 @@
   "version": 1,
   "description": "Delphi review expert mapping — customize with your own models. Copy to .delphi-config.json and edit.",
   "num_experts": 3,
+  "model_policy": {
+    "domestic_only": true,
+    "description": "Only domestic Chinese open-source models are allowed. NEVER use Anthropic, OpenAI, Google, or other foreign expensive models.",
+    "allowed_models": [
+      "glm-5.1", "glm-5.0",
+      "kimi-k2.6", "kimi-k2.5",
+      "minimax-m2.7", "minimax-m2.5",
+      "qwen3.6-plus", "qwen3.5-plus",
+      "deepseek-v4-pro", "deepseek-v4-lite"
+    ]
+  },
   "experts": {
     "architecture": {
       "agent_name": "delphi-reviewer-architecture",
       "perspective": "Architecture and requirements alignment",
       "requirements_alignment": true,
-      "model_hint": "Use a model with strong reasoning capabilities (e.g., Claude Sonnet, GPT-4o, Qwen-Plus)"
+      "recommended_model": "deepseek-v4-pro",
+      "alternatives": ["qwen3.6-plus", "glm-5.1"]
     },
     "technical": {
       "agent_name": "delphi-reviewer-technical",
       "perspective": "Technical implementation, code correctness, edge cases",
       "requirements_alignment": true,
-      "model_hint": "Use a model with strong code understanding (e.g., Claude Haiku, Qwen-Coder, DeepSeek-Coder)"
+      "recommended_model": "kimi-k2.6",
+      "alternatives": ["deepseek-v4-pro", "minimax-m2.7"]
     },
     "feasibility": {
       "agent_name": "delphi-reviewer-feasibility",
       "perspective": "Feasibility analysis, risk assessment, execution complexity",
       "requirements_alignment": true,
-      "model_hint": "Use a model with strong analytical capabilities (e.g., Claude Opus, GPT-4, Gemini Pro)"
+      "recommended_model": "qwen3.6-plus",
+      "alternatives": ["kimi-k2.6", "glm-5.1"]
     }
   },
   "consensus": {

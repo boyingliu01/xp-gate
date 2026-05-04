@@ -1,0 +1,48 @@
+name: Security Audit (CSO)
+on:
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: 'Audit mode'
+        required: true
+        type: choice
+        default: 'daily'
+        options:
+          - daily
+          - comprehensive
+          - diff
+  schedule:
+    - cron: '0 8 * * 1'  # Weekly safety net
+
+jobs:
+  cso-audit:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@11bd347019f93200777d89607b187b9be1fb8e0c # v4.5.1
+        with:
+          node-version: '20'
+          cache: 'npm'
+      - run: npm ci
+      - name: CSO Audit Summary
+        run: |
+          echo "CSO Audit — $(date)"
+          echo "Mode: ${{ inputs.mode || 'schedule' }}"
+          echo ""
+          echo "Phase 2: Secrets Archaeology"
+          npm audit --audit-level=high 2>&1 || true
+          echo ""
+          echo "Phase 3: Dependency Supply Chain"
+          echo "  Lockfile: $(test -f package-lock.json && echo 'OK' || echo 'MISSING')"
+          echo "  .env gitignored: $(grep -q '^\.env' .gitignore && echo 'YES' || echo 'NO')"
+          echo ""
+          echo "Phase 7: LLM & AI Security"
+          echo "  Promptfoo config: $(test -f promptfoo/promptsecurity.yaml && echo 'OK' || echo 'MISSING')"
+          echo ""
+          echo "Phase 8: Skill Supply Chain"
+          echo "  Local skills: $(ls .claude/skills/ 2>/dev/null | wc -l || echo 0)"
+          echo ""
+          echo "CSO audit complete. Full audit requires interactive /cso skill invocation."

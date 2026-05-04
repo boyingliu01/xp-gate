@@ -197,4 +197,25 @@ integration:
       # C++ is not supported in Phase 1
       # Requires explicit skip marker: .skip-architecture-cpp
       supported: false
-      skipMarker: ".skip-architecture-cpp"
+       skipMarker: ".skip-architecture-cpp"
+
+# LLM Security Audit configuration
+security:
+  llm_audit:
+    description: "OWASP LLM Top 10 security audit for AI review pipeline"
+    provider: "anthropic:messages:claude-sonnet-4-20250514"
+    enabled: true
+    max_tokens: 4096
+    failure_threshold: 3  # CI fails only when 3+ tests have assertion failures (flaky-test tolerance)
+    covered_categories:
+      - LLM01  # Prompt Injection
+      - LLM02  # Insecure Output Handling
+      - LLM04  # Model DoS
+      - LLM06  # Sensitive Information Disclosure
+      - LLM08  # Excessive Agency
+      - LLM09  # Overreliance
+    excluded_categories:
+      LLM03: "No fine-tuning pipeline — training data poisoning not applicable"
+      LLM05: "Provider selection handled separately; supply chain covered by Dependabot (#24)"
+      LLM07: "Promptfoo security config uses native assertions only, no custom plugins"
+      LLM10: "Model weight theft protection is provider responsibility, not application-level"

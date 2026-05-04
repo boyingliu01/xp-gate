@@ -49,6 +49,34 @@ description: "Delphi consensus review: multi-round anonymous expert review until
 | 3 专家 | A(架构) + B(实现) + C(可行性仲裁) | 架构决策、需求文档 |
 
 > ⚠️ 至少选择 **两家不同 provider** 的模型，避免同源盲点。模型映射见 `INSTALL.md`。
+> 
+> ### 模型选择策略（强制）
+> 
+> **MUST 使用国产开源模型**，严禁使用国外昂贵模型（Anthropic Claude、OpenAI GPT、Google Gemini 等）。
+> 
+> **允许的模型列表**（从以下国产开源模型厂家中选择）：
+> 
+> | 厂家 | 可选模型 |
+> |------|---------|
+> | 智谱 GLM | `glm-5.1`, `glm-5.0` |
+> | 月之暗面 Kimi | `kimi-k2.6`, `kimi-k2.5` |
+> | MiniMax | `minimax-m2.7`, `minimax-m2.5` |
+> | 阿里 Qwen | `qwen3.6-plus`, `qwen3.5-plus` |
+> | 深度求索 DeepSeek | `deepseek-v4-pro`, `deepseek-v4-lite` |
+> 
+> **专家分配建议**：
+> 
+> | Expert | 推荐模型 | 备选 |
+> |--------|---------|------|
+> | Expert A (架构) | `deepseek-v4-pro` | `qwen3.6-plus`, `glm-5.1` |
+> | Expert B (技术) | `kimi-k2.6` | `deepseek-v4-pro`, `minimax-m2.7` |
+> | Expert C (可行性) | `qwen3.6-plus` | `kimi-k2.6`, `glm-5.1` |
+> 
+> **关键原则**：
+> - ✅ 三个专家必须来自 **至少 2 家不同厂家**（如 DeepSeek + Kimi + Qwen）
+> - ❌ 禁止使用 Anthropic、OpenAI、Google 等国外模型
+> - ❌ 禁止三个专家全部使用同一厂家模型
+> - ⚠️ 成本控制：`deepseek-v4-lite`、`kimi-k2.5`、`qwen3.5-plus` 作为轻量备选
 
 ### 共识阈值
 
@@ -269,6 +297,8 @@ Every review round output MUST follow this exact JSON structure:
 | 单专家自评 | 至少 2 位不同 provider 的专家 |
 | 用户说"时间紧急"就跳过 | 评审是投资不是开销，跳过后期返工成本更高 |
 | "专家几乎一致"就通过 | "几乎" = 不一致，继续到 >=91% |
+| 使用 Anthropic/GPT/Gemini 等国外昂贵模型 | 必须使用国产开源模型（DeepSeek, Qwen, Kimi, GLM, MiniMax） |
+| 三个专家使用同一厂家模型 | 必须来自至少 2 家不同厂家 |
 
 **Code-walkthrough 专属 Anti-Patterns**: 详见 `references/code-walkthrough.md`。
 

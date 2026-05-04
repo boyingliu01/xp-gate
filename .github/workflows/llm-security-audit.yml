@@ -1,0 +1,30 @@
+name: LLM Security Audit
+on:
+  pull_request:
+    paths:
+      - 'skills/**/*.md'
+      - 'promptfoo/**'
+      - 'architecture.yaml'
+  workflow_dispatch:
+
+jobs:
+  security:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+      - run: npm ci
+      - run: npx promptfoo eval --config promptfoo/promptsecurity.yaml --fail-on-error
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+      - name: Upload Report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: llm-security-report
+          path: promptfoo/output/
+          retention-days: 90

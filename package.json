@@ -11,12 +11,13 @@
     "test:watch": "vitest",
     "test:coverage": "vitest run --coverage",
     "test:mutation": "npx stryker run",
+    "security:llm": "npx promptfoo eval --config promptfoo/promptsecurity.yaml",
     "build": "tsc",
     "lint": "eslint src --ext .ts",
     "principles": "npx tsx src/principles/index.ts"
   },
   "dependencies": {
-    "@ast-grep/cli": "latest"
+    "@ast-grep/cli": "^0.36.2"
   },
   "devDependencies": {
     "@stryker-mutator/core": "^8.7.1",
