@@ -1,7 +1,7 @@
 {
   "reportVersion": "1.0",
-  "generatedAt": "2026-05-05T03:58:16Z",
-  "commit": "256ae5631a4f4d729bb7c81cb90b44002e6e7ef2",
+  "generatedAt": "2026-05-05T06:31:23Z",
+  "commit": "dc2495fa50ef863d4ba041ad896be11a1f3c5eb9",
   "project": "xgate",
   "language": "typescript",
   "overall": {
@@ -42,7 +42,7 @@
     "gate6": {
       "name": "Architecture + Boy Scout Rule",
       "status": "PASS",
-      "boyScoutPassed": 1,
+      "boyScoutPassed": 2,
       "boyScoutBlocked": 0
     }
   },

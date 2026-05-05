@@ -25,6 +25,9 @@ Web 前端项目额外增加：系统化 QA、视觉审计、性能基线。
 - Detox E2E — React Native 端到端测试 (RN only)
 - `flutter-review` (user) — Flutter 代码审查 (Flutter only)
 
+**Backend 项目额外注入** (`--type backend-go` / `backend-springboot` / `backend-django`):
+- API Testing — 后端 API 自动化测试
+
 ---
 
 ## 执行步骤
@@ -130,6 +133,28 @@ RN E2E 输出:
 - Detox 测试结果
 - 模拟器/真机行为验证
 
+### Step 2.10: API 自动化测试（后端项目如适用）
+
+**IF project_type is backend-go/backend-springboot/backend-django:**
+
+```bash
+skill(name="api-test", user_message="针对 [API endpoint] 运行自动化测试")
+```
+
+**Backend 类型支持**:
+- **Go (backend-go)**: 使用 httpbakery 或原生 net/http 测试
+- **Spring Boot (backend-springboot)**: 使用 RestAssured 或 TestRestTemplate  
+- **Django (backend-django)**: 使用 Django REST framework 测试客户端或 pytest-django
+
+**API 测试覆盖**:
+- 所有 API 端点测试 (GET, POST, PUT, DELETE)
+- 响应状态码验证
+- 响应数据结构验证（符合 Spec）
+- 认证端点测试
+- 错误处理测试 (400, 401, 403, 404, 500)
+
+API 测试失败 → 自动回退 Phase 2 修复。
+
 ### Step 3: 调用 browse skill
 
 ```
@@ -173,6 +198,7 @@ browse 执行：
 | test-alignment 失败 | 自动回退 Phase 2（不暂停） | 自动迭代 |
 | qa 发现问题 (web) | 自动回退修复（不暂停） | 自动迭代 |
 | design-review 发现问题 (web) | 自动回退修复（不暂停） | 自动迭代 |
+| api-test 失败 (backend) | 自动回退 Phase 2（不暂停） | 自动迭代 |
 | browse 发现问题 | 自动回退 Phase 2（不暂停） | 自动迭代 |
 
 ---
@@ -182,5 +208,6 @@ browse 执行：
 - `.code-walkthrough-result.json`（pre-push hook 验证）
 - Review Report (`review-report.md`)
 - Web 前端附加: QA report + design-review report + benchmark baseline
+- Backend 附加: API test report
 - 验证通过的 MVP
 - 进入 Phase 4 ⚠️ **必须人工验收**

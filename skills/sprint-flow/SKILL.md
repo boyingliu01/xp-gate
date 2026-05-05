@@ -22,7 +22,8 @@ description: >
   --phase <phase>: 只执行单个阶段 (think-only/plan-only/build-only/review-only/ship-only)
   --lang <language>: 指定项目语言 (springboot/django/golang)
   --type <project_type>: 指定项目类型 (web-nextjs/web-react/web-vue/mobile-flutter/mobile-react-native/backend-django/backend-go/backend-springboot)
-  --spec <file>: 使用已有的 specification.yaml 文件
+   --spec <file>: 使用已有的 specification.yaml 文件
+   --with-performance: 启用负载/压力测试（后端项目）
 
 maturity: beta
 ---
@@ -130,6 +131,15 @@ Phase 6: SHIP → finishing-a-development-branch (4 选项) → ship / land-and-
 - `delphi-review --mode code-walkthrough` — 多专家匿名代码走查（代替 cross-model-review）
 - `test-specification-alignment` — 测试与 Spec 对齐验证
 - `browse` (gstack) — 浏览器自动化测试
+- `k6` / `locust` / `gatling` — 负载/压力测试（可选，后端项目）
+
+### 负载/压力测试（可选）
+- **适用项目**：主要用于后端服务的压力测试 (k6/Locust/Gatling)，Web 前端已有 `benchmark` 技能覆盖 Core Web Vitals、加载时间和资源大小等性能指标
+- **Phase 3 技能注入**：可根据项目类型自动选择合适的负载测试工具 (`k6` for Go-based services, `locust` for Python services, `gatling` for JVM-based services)  
+- **集成方式**：可作为 Phase 3 的可选扩展，在 code-walkthrough 之后执行，与基准测试形成完整性能验证链条
+- **配置文件**：通过 `.sprint-load-test.yaml` 进行配置（待实现），包含并发用户数、持续时间、SLA 指标等参数
+- **触发条件**：后端项目可通过 `--type backend-*` 自动启用，或通过 `--with-performance` 标志手动启用
+- **Web 项目补充说明**：对于 Web 前端项目，现有的 `benchmark` 技能已处理页面加载性能、Core Web Vitals 等前端性能指标；负载/压力测试主要针对服务器端承载能力
 
 ### Phase 4: USER ACCEPTANCE（⚠️ 人工验收）
 - **无 Skill** — 必须人工
@@ -230,8 +240,8 @@ Sprint state is persisted as JSON in `.sprint-state/sprint-state.json`:
 # 默认: 从项目文件自动检测
 ```
 
-自动检测逻辑（按顺序检查）：
-
+ 自动检测逻辑（按顺序检查）：
+ 
 | 检测条件 | 类型 |
 |---------|------|
 | `package.json` + `next.config.js` | `web-nextjs` |
@@ -239,22 +249,22 @@ Sprint state is persisted as JSON in `.sprint-state/sprint-state.json`:
 | `package.json` + `vue` 依赖 | `web-vue` |
 | `pubspec.yaml` + `flutter:` | `mobile-flutter` |
 | `package.json` + `react-native` 依赖 or `ios/` + `android/` | `mobile-react-native` |
-| `go.mod` | `backend-go` |
-| `pom.xml` | `backend-springboot` |
-| `manage.py` 或 `pyproject.toml` (django) | `backend-django` |
+| `go.mod` | `backend-go` （可选 k6 负载测试）|
+| `pom.xml` | `backend-springboot` （可选 gatling 负载测试）|
+| `manage.py` 或 `pyproject.toml` (django) | `backend-django` （可选 locust 负载测试）|
 | 无匹配 | `backend-cli` |
 
 ### 项目类型到 Skill 注入映射
 
-| Phase | Backend (default) | Web Frontend | Mobile |
-|-------|------------------|-------------|--------|
-| Phase 0 (THINK) | `brainstorming` | (同) | (同) |
-| Phase 1 (PLAN) | `autoplan` + `delphi-review` | + `design-shotgun` | (同 web) |
-| Phase 2 (BUILD) | TDD + blind-review | (同 backend) | + `vercel-react-native-skills` (RN) / `flutter-review` (Flutter) |
-| Phase 3 (REVIEW) | `delphi-review --mode code-walkthrough` + `test-specification-alignment` | + `qa` + `design-review` + `benchmark` | Flutter: `flutter-test` / RN: `detox E2E` |
-| Phase 5 (FEEDBACK) | `learn` + `retro` | (同) | (同) |
-| Phase 6 (SHIP) | `finishing-a-development-branch` + `ship` | (同) | + platform deploy (可选) |
-| Browse | `localhost:3000` | 部署 URL + 表单/交互 | Flutter Web / RN Web 测试 |
+| Phase | Backend (default) | Web Frontend | Mobile | Load/Performance Testing |
+|-------|------------------|-------------|--------|--------------------------|
+| Phase 0 (THINK) | `brainstorming` | (同) | (同) | (通用) |
+| Phase 1 (PLAN) | `autoplan` + `delphi-review` | + `design-shotgun` | (同 web) | (同) |
+| Phase 2 (BUILD) | TDD + blind-review | (同 backend) | + `vercel-react-native-skills` (RN) / `flutter-review` (Flutter) | (同) |
+| Phase 3 (REVIEW) | `delphi-review --mode code-walkthrough` + `test-specification-alignment` + `k6` / `locust` / `gatling` | + `qa` + `design-review` + `benchmark` | Flutter: `flutter-test` / RN: `detox E2E` | k6/locust/gatling (补充 API 测试后的负载测试验证) |
+| Phase 5 (FEEDBACK) | `learn` + `retro` | (同) | (同) | (同) |
+| Phase 6 (SHIP) | `finishing-a-development-branch` + `ship` | (同) | + platform deploy (可选) | (同) |
+| Browse | `localhost:3000` | 部署 URL + 表单/交互 | Flutter Web / RN Web 测试 | (专用负载测试) |
 
 **Mobile 专属工具链**:
 - **Flutter**: `flutter analyze`, `flutter test`, `flutter build`, `pub publish`

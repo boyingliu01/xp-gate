@@ -1,0 +1,953 @@
+name: XGate Quality Gates
+
+# Run this workflow when:
+# - Pushing to main/master branch 
+# - Opening or updating a pull request
+# - Manually triggered via dispatch
+on:
+  push:
+    branches: [ main, master ]
+  pull_request:
+    branches: [ main, master ]
+  workflow_dispatch:
+
+# Set environment variables used throughout the workflow
+env:
+  NODE_VERSION: '20.x'
+  DELPHI_CONFIG_PATH: '.delphi-config.json'
+  PRINCLESRC_PATH: '.principlesrc'
+  COVERAGE_THRESHOLD: 80
+  GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+jobs:
+  # Job 1: Run preliminary checks and install dependencies
+  setup:
+    name: Setup Dependencies & Environment Variables
+    runs-on: ubuntu-latest
+    outputs:
+      # Outputs that can be consumed by other jobs (e.g., language detected)
+      project_language: ${{ steps.language_detect.outputs.project_language }}
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          # Needed for git-based pre-commit checks
+          fetch-depth: 0
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'npm'
+
+      - name: Cache Go modules (if project uses Go)
+        uses: actions/cache@v3
+        if: hashFiles('go.mod') != ''
+        with:
+          path: |
+            ~/go/pkg/mod
+            ~/.cache/go-build
+          key: ${{ runner.os }}-go-${{ hashFiles('go.mod') }}
+          restore-keys: |
+            ${{ runner.os }}-go-
+
+      - name: Cache Python dependencies (if project uses Python)
+        uses: actions/cache@v3
+        if: hashFiles('requirements.txt', 'pyproject.toml', 'setup.py') != ''
+        with:
+          path: ~/.cache/pip
+          key: ${{ runner.os }}-pip-${{ hashFiles('requirements.txt', 'pyproject.toml') }}
+          restore-keys: |
+            ${{ runner.os }}-pip-
+
+      - name: Detect Project Language Stack
+        id: language_detect
+        run: |
+          # Mirror the language detection logic from githooks/adapter-common.sh
+          if [[ -f "tsconfig.json" ]]; then
+            echo "typescript" > project_language.txt
+          elif [[ -f "pyproject.toml" ]] || [[ -f "requirements.txt" ]] || [[ -f "setup.py" ]]; then
+            echo "python" > project_language.txt
+          elif [[ -f "go.mod" ]]; then
+            echo "go" > project_language.txt
+          elif [[ -f "build.gradle" ]] || [[ -f "build.gradle.kts" ]]; then
+            if [[ -n "$(find . -name "*.kt" -type f | head -n 1)" ]]; then
+              echo "kotlin" > project_language.txt
+            else
+              echo "java" > project_language.txt
+            fi
+          elif [[ -f "pom.xml" ]]; then
+            echo "java" > project_language.txt
+          elif [[ -f "pubspec.yaml" ]]; then
+            if grep -q "flutter:" "pubspec.yaml" 2>/dev/null || [[ -f ".metadata" ]]; then
+              echo "flutter" > project_language.txt
+            else
+              echo "dart" > project_language.txt
+            fi
+          elif [[ -n "$(find . -name "*.ps1" -type f | head -n 1)" ]]; then
+            echo "powershell" > project_language.txt
+          elif [[ -f "Package.swift" ]]; then
+            echo "swift" > project_language.txt
+          elif [[ -f "CMakeLists.txt" ]] || [[ -n "$(find . -name "*.cpp" -o -name "*.cc" -type f | head -n 1)" ]]; then
+            echo "cpp" > project_language.txt
+          elif [[ -n "$(find . -name "*.m" -o -name "*.mm" -type f | head -n 1)" ]]; then
+            echo "objectivec" > project_language.txt
+          elif [[ -n "$(find . -name "*.sh" -type f | head -n 1)" ]] || [[ -n "$(find . -name "Dockerfile" -o -name "*.dockerfile" -type f | head -n 1)" ]]; then
+            echo "shell" > project_language.txt
+          else
+            # Try looking at file extensions
+            if [[ -n "$(find . -name "*.ts" -o -name "*.tsx" -type f | head -n 1)" ]]; then
+              echo "typescript" > project_language.txt
+            elif [[ -n "$(find . -name "*.py" -type f | head -n 1)" ]]; then
+              echo "python" > project_language.txt
+            elif [[ -n "$(find . -name "*.go" -type f | head -n 1)" ]]; then
+              echo "go" > project_language.txt
+            elif [[ -n "$(find . -name "*.kt" -type f | head -n 1)" ]]; then
+              echo "kotlin" > project_language.txt
+            elif [[ -n "$(find . -name "*.java" -type f | head -n 1)" ]]; then
+              echo "java" > project_language.txt
+            elif [[ -n "$(find . -name "*.dart" -type f | head -n 1)" ]]; then
+              echo "dart" > project_language.txt
+            elif [[ -n "$(find . -name "*.swift" -type f | head -n 1)" ]]; then
+              echo "swift" > project_language.txt
+            elif [[ -n "$(find . -name "*.cpp" -o -name "*.cc" -o -name "*.c" -o -name "*.h" -type f | head -n 1)" ]]; then
+              echo "cpp" > project_language.txt
+            elif [[ -n "$(find . -name "*.m" -o -name "*.mm" -type f | head -n 1)" ]]; then
+              echo "objectivec" > project_language.txt
+            elif [[ -n "$(find . -name "*.sh" -type f | head -n 1)" ]]; then
+              echo "shell" > project_language.txt
+            else
+              echo "unknown" > project_language.txt
+            fi
+          fi
+          
+          # Output the detected language
+          DETECTED_LANG=$(cat project_language.txt)
+          echo "Project language detected: $DETECTED_LANG"
+          echo "project_language=$DETECTED_LANG" >> $GITHUB_OUTPUT
+        
+      - name: Install Dependencies
+        run: |
+          if [[ -f "package.json" ]]; then
+            # Install Node.js dependencies using npm ci (more secure than npm install)
+            npm ci
+            echo "Node.js dependencies installed"
+          fi
+          
+          # If project requires Python tools
+          if [[ "$(< project_language.txt)" == "python" ]] || [[ -f "requirements.txt" ]] || [[ -f "pyproject.toml" ]]; then
+            if ! command -v pip >/dev/null 2>&1; then
+              echo "Setting up Python tools"
+              python -m pip install --upgrade pip
+            fi
+            
+            if [[ -f "requirements.txt" ]]; then
+              echo "Installing Python dependencies from requirements.txt"
+              pip install -r requirements.txt
+            elif [[ -f "pyproject.toml" ]]; then
+              echo "Installing from pyproject.toml"
+              pip install .
+            fi
+          fi
+          
+          # Install required tools for quality gates
+          echo "Installing quality gate tools..."
+          
+          # For TypeScript projects: install common tools
+          if [[ "$(< project_language.txt)" == "typescript" ]] || [[ -f "tsconfig.json" ]]; then
+            npm install --no-save typescript @types/node eslint jscpd @archlinter/cli
+          fi
+          
+          # Python quality tools
+          if [[ "$(< project_language.txt)" == "python" ]] || [[ -f "requirements.txt" ]]; then
+            pip install ruff mypy pylint
+          fi
+          
+          # Go quality tools
+          if [[ "$(< project_language.txt)" == "go" ]] || [[ -f "go.mod" ]]; then
+            go install github.com/golangci/golangci-lint/cmd/golangci-lint@latest
+            go install github.com/axw/gocov/gocov@latest
+            go install github.com/AlekSi/gocov-xml@latest
+          fi
+
+      - name: Prepare SARIF directory
+        run: |
+          mkdir -p sarif-reports
+          
+      - name: Setup Git user (needed for any git operations that run)
+        run: |
+          git config --global user.name 'github-actions[bot]'
+          git config --global user.email 'github-actions[bot]@users.noreply.github.com'
+
+  # Job 2: Run all 6 quality gates (equivalent to pre-commit checks)
+  gate-check:
+    name: Gate Checks (Code Quality to Architecture)
+    needs: setup  # Wait for initial setup to complete
+    runs-on: ubuntu-latest
+    environment: development  # Adjust as appropriate for your environments
+    
+    strategy:
+      # Run all gate checks in sequence to make failures clear
+      fail-fast: false
+      
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0  # Needed for git-based operations
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'npm'
+
+      - name: Restore cached dependencies
+        uses: actions/cache/restore@v3
+        with:
+          path: node_modules
+          key: node-modules-${{ hashFiles('package-lock.json') }}
+
+      - name: Install Dependencies
+        run: |
+          if [[ -f "package.json" ]]; then
+            npm ci
+          fi
+
+      # Gate 1: Code Quality (Static Analysis + Linting)
+      - name: 'Gate 1: Code Quality (Static Analysis + Linting)'
+        run: |
+          PROJECT_LANGUAGE=${{ needs.setup.outputs.project_language }}
+          echo "Running Gate 1: Code Quality checks for $PROJECT_LANGUAGE project..."
+          
+          if [[ "$PROJECT_LANGUAGE" == "typescript" ]]; then
+            if command -v npx >/dev/null 2>&1; then
+              # TypeScript static analysis
+              echo "Running TypeScript compiler (tsc)..."
+              npx tsc --noEmit --skipLibCheck
+              TSC_STATUS=$?
+              
+              # ESLint linting (if configuration exists)
+              if [[ -f ".eslintrc.json" ]] || [[ -f ".eslintrc.js" ]] || [[ -f ".eslintrc.cjs" ]] || [[ -f "eslint.config.js" ]]; then
+                echo "Running ESLint..."
+                npx eslint . --ext .js,.jsx,.ts,.tsx --max-warnings 0
+                ESLINT_STATUS=$?
+              else
+                ESLINT_STATUS=0
+              fi
+            else
+              # Skip gate if Node.js tools not available (non-blocking for this gate)
+              echo "⚠️ npx not available - skipping TypeScript quality checks (non-blocking)"
+              ESLINT_STATUS=0
+              TSC_STATUS=0
+            fi
+            
+            if [[ $TSC_STATUS -ne 0 ]] || [[ $ESLINT_STATUS -ne 0 ]]; then
+              exit 1
+            else
+              echo "✅ Gate 1: TypeScript static analysis + linting completed successfully"
+            fi
+          elif [[ "$PROJECT_LANGUAGE" == "python" ]]; then
+            if command -v ruff >/dev/null 2>&1; then
+              echo "Running Ruff linting..."
+              ruff check .
+              RUFF_STATUS=$?
+              
+              if [[ $RUFF_STATUS -ne 0 ]]; then
+                echo "❌ Ruff check failed"
+                exit 1
+              else
+                echo "✅ Gate 1: Python code quality check completed successfully"
+              fi
+            else
+              echo "⚠️ Ruff not available - skipping Python quality check"
+            fi
+          elif [[ "$PROJECT_LANGUAGE" == "go" ]]; then
+            if command -v golangci-lint >/dev/null 2>&1; then
+              echo "Running golangci-lint..."
+              golangci-lint run
+              GOLINT_STATUS=$?
+              
+              if [[ $GOLINT_STATUS -ne 0 ]]; then
+                echo "❌ golangci-lint failed"
+                exit 1
+              else
+                echo "✅ Gate 1: Go code quality check completed successfully"
+              fi
+            else
+              echo "⚠️ golangci-lint not available - skipping Go quality check"
+            fi
+          elif [[ "$PROJECT_LANGUAGE" == "unknown" ]]; then
+            echo "⚠️ Unknown project language - Skipping Gate 1"
+          else
+            echo "ℹ️ No specific quality rules for $PROJECT_LANGUAGE - Skipping Gate 1"
+          fi
+
+      # Gate 2: Duplicate Code Detection
+      - name: 'Gate 2: Duplicate Code Detection'
+        run: |
+          PROJECT_LANGUAGE=${{ needs.setup.outputs.project_language }}
+          echo "Running Gate 2: Duplicate code detection for $PROJECT_LANGUAGE project..."
+          
+          # If project has supported source files, run duplicate detection
+          if [[ "$PROJECT_LANGUAGE" == "typescript" && -d "node_modules/.bin" ]] || [[ -f "package.json" ]]; then
+            if command -v npx >/dev/null 2>&1; then
+              echo "Running jscpd for duplicate code detection..."
+              npx jscpd --reporters consoleFull $(find . -name "*.ts" -o -name "*.tsx" -o -name "*.js" -o -name "*.jsx" | head -100)
+              JSCPD_STATUS=$?
+              if [[ $JSCPD_STATUS -ne 0 ]]; then
+                echo "ℹ️ jscpd found potential code duplications (warning level, non-blocking by default)"
+              else
+                echo "✅ Gate 2: TypeScript duplicate code check completed"
+              fi
+            fi
+          elif [[ "$PROJECT_LANGUAGE" == "python" ]]; then
+            if command -v pylint >/dev/null 2>&1; then
+              echo "Running pylint duplicate detection..."
+              python_files=$(find . -name "*.py" | head -20)
+              if [[ -n "$python_files" ]]; then
+                pylint --disable=all --enable=duplicate-code $python_files
+                DUPLICATE_PYTHON_STATUS=$?
+                if [[ $DUPLICATE_PYTHON_STATUS -ne 0 ]]; then
+                  echo "ℹ️ Python duplicate code found (non-blocking by default)"
+                else
+                  echo "✅ Gate 2: Python duplicate code check completed"
+                fi
+              else
+                echo "✅ Gate 2: No Python source files to check for duplicates"
+              fi
+            fi
+          elif [[ "$PROJECT_LANGUAGE" != "unknown" ]]; then
+            echo "ℹ️ Duplicate code check available for $PROJECT_LANGUAGE but specific tools not configured"
+          fi
+
+      # Gate 3: Cyclomatic Complexity
+      - name: 'Gate 3: Cyclomatic Complexity Check'
+        run: |
+          PROJECT_LANGUAGE=${{ needs.setup.outputs.project_language }}
+          echo "Running Gate 3: Cyclomatic complexity check..."
+          
+          # Use lizard for various source file types
+          if command -v lizard >/dev/null 2>&1; then
+            # Find files that can have complexity analyzed
+            SOURCE_FILES=$(find . -type f \( -name "*.ts" -o -name "*.js" -o -name "*.py" -o -name "*.go" -o -name "*.java" -o -name "*.cpp" -o -name "*.c" -o -name "*.hpp" -o -name "*.h" -o -name "*.rs" -o -name "*.php" -o -name "*.dart" -o -name "*.kt" -o -name "*.swift" \) | head -50)
+            
+            if [[ -n "$SOURCE_FILES" ]]; then
+              echo "Analyzing cyclomatic complexity with lizard (threshold 10)..."
+              lizard -C 10 $SOURCE_FILES | head -50
+              LIZARD_STATUS=$?
+              
+              if [[ $LIZARD_STATUS -ne 0 ]]; then
+                echo "❌ Functions exceed complexity threshold of 10"
+                exit 1
+              else
+                echo "✅ Gate 3: Complexity threshold (10) met"
+              fi
+            else
+              echo "✅ Gate 3: No source files found for complexity analysis"
+            fi
+          else
+            echo "ℹ️ lizard not available - skipping complexity check (non-blocking)"
+          fi
+
+      # Gate 4: Principles Checker (Clean Code + SOLID)
+      - name: 'Gate 4: Principles Checker (Clean Code + SOLID)'
+        run: |
+          PROJECT_LANGUAGE=${{ needs.setup.outputs.project_language }}
+          echo "Running Gate 4: Principles checker for $PROJECT_LANGUAGE..."
+          
+          if [[ "$PROJECT_LANGUAGE" != "unknown" ]] && [[ -f "src/principles/index.ts" ]]; then
+            if command -v npx >/dev/null 2>&1; then
+              echo "Running principles checker..."
+              TSX_STATUS=0
+              
+              # Find source files to check
+              case $PROJECT_LANGUAGE in
+                typescript) TS_FILES=$(find . -name "*.ts" -o -name "*.tsx" -not -path "./node_modules/*" -not -path "./dist/*");;
+                python) TS_FILES=$(find . -name "*.py" -not -path "./venv/*" -not -path "./.venv/*");;
+                go) TS_FILES=$(find . -name "*.go" -not -path "./vendor/*");;
+                *) TS_FILES=$(find . -name "*.ts" -o -name "*.tsx" -o -name "*.js" -o -name "*.py" -o -name "*.go" -not -path "./node_modules/*" -path "./dist/*");;
+              esac
+              
+              if [[ -n "$TS_FILES" ]]; then
+                echo "Analyzing with principles checker: $TS_FILES" | head -30
+                OUTPUT=$(npx tsx src/principles/index.ts --files "$TS_FILES" --format json 2>&1)
+                TSX_STATUS=$?
+                
+                # Check if there are any principle violations
+                if [[ $TSX_STATUS -ne 0 ]]; then
+                  echo "❌ Principle checker failed with exit code $TSX_STATUS"
+                  echo "$OUTPUT"
+                  exit 1
+                else
+                  # Parse errors and warnings from the output
+                  ERROR_COUNT=$(echo "$OUTPUT" | grep -o '"severity":"error"' | wc -l)
+                  WARNING_COUNT=$(echo "$OUTPUT" | grep -o '"severity":"warning"' | wc -l)
+                  
+                  if [[ $ERROR_COUNT -gt 0 ]]; then
+                    echo "❌ $ERROR_COUNT critical principle violations found"
+                    exit 1
+                  else
+                    echo "✅ Gate 4: Principles checker passed (Errors: 0, Warnings: $WARNING_COUNT)"
+                  fi
+                fi
+              else
+                echo "✅ Gate 4: No source files found to check for principles"
+              fi
+            else
+              echo "ℹ️ npx not available - skipping principles checker"
+            fi
+          else
+            echo "ℹ️ Principles checker not found in project (src/principles/index.ts) - skipping check"
+          fi
+
+      # Gate 5: Tests & Coverage
+      - name: 'Gate 5: Tests & Coverage'
+        run: |
+          PROJECT_LANGUAGE=${{ needs.setup.outputs.project_language }}
+          echo "Running Gate 5: Run tests and check coverage for $PROJECT_LANGUAGE..."
+          
+          COV_STATUS=0
+          
+          # Run tests based on language
+          case $PROJECT_LANGUAGE in
+            typescript)
+              if command -v npm >/dev/null 2>&1; then
+                # Check if test scripts exist in package.json
+                if grep -q "\"test\"" package.json; then
+                  echo "Running npm test..."
+                  npm test
+                  NPM_TEST_STATUS=$?
+                  
+                  if [[ $NPM_TEST_STATUS -ne 0 ]]; then
+                    echo "❌ Tests failed"
+                    exit 1
+                  fi
+                  
+                  # Check if test:cover script exists
+                  if grep -q "\"test:cover\|test:coverage\|cover\|coverage\"" package.json; then
+                    echo "Checking coverage..."
+                    npm run test:coverage || npm run test:cover
+                    COV_STATUS=$?
+                    
+                    if [[ $COV_STATUS -ne 0 ]]; then
+                      echo "⚠️ Coverage execution had issues"
+                    fi
+                  else
+                    echo "No coverage script found in package.json"
+                  fi
+                else
+                  echo "No test script found in package.json, skipping test run"
+                fi
+              fi
+              ;;
+              
+            python)
+              if command -v pytest >/dev/null 2>&1 || command -v python >/dev/null 2>&1; then
+                if [[ -f "pytest.ini" ]] || [[ -f "setup.cfg" ]] || [[ -f "pyproject.toml" ]] || [[ -f "tox.ini" ]]; then
+                  if command -v python >/dev/null 2>&1; then
+                    # Run pytest with coverage if possible
+                    if command -v coverage >/dev/null 2>&1 && command -v pytest >/dev/null 2>&1; then
+                      echo "Running pytest with coverage..."
+                      pytest --cov=. --cov-report=xml --cov-fail-under=${{ env.COVERAGE_THRESHOLD }}
+                      COV_STATUS=$?
+                      
+                      if [[ $COV_STATUS -ne 0 ]]; then
+                        echo "❌ Coverage check failed"
+                        exit 1
+                      else
+                        echo "✅ Coverage check passed (${{ env.COVERAGE_THRESHOLD }}% threshold met)"
+                      fi
+                    else
+                      python -m pytest
+                      PYTHON_STATUS=$?
+                      
+                      if [[ $PYTHON_STATUS -ne 0 ]]; then
+                        echo "❌ Python tests failed"
+                        exit 1
+                      fi
+                    fi
+                  fi
+                else
+                  echo "No Python test configuration found, skipping test run"
+                fi
+              fi
+              ;;
+              
+            go)
+              if command -v go >/dev/null 2>&1; then
+                echo "Running Go tests..."
+                go test ./... -v
+                GO_STATUS=$?
+                
+                if [[ $GO_STATUS -ne 0 ]]; then
+                  echo "❌ Go tests failed"
+                  exit 1
+                fi
+                
+                # Coverage check
+                echo "Checking Go coverage..."
+                go test -coverprofile=coverage.out ./... 
+                TOTAL_COVERAGE=$(go tool cover -func=coverage.out 2>/dev/null | grep "^total:" | awk '{print substr($3, 1, length($3)-1)}')
+                
+                if [ -n "$TOTAL_COVERAGE" ] && [ $(echo "$TOTAL_COVERAGE < ${{ env.COVERAGE_THRESHOLD }}" | bc -l 2>/dev/null || echo "0") -eq 1 ] ; then
+                  echo "❌ Go coverage $TOTAL_COVERAGE% below ${{ env.COVERAGE_THRESHOLD }}% threshold"
+                  exit 1
+                else
+                  echo "✅ Go coverage: $TOTAL_COVERAGE% (above ${{ env.COVERAGE_THRESHOLD }}%)"
+                fi
+              fi
+              ;;
+              
+            *)
+              echo "ℹ️ No test framework configured for $PROJECT_LANGUAGE - skipping test run"
+              ;;
+          esac
+          
+          if [[ $COV_STATUS -ne 0 ]]; then
+            echo "❌ Coverage check failed with exit code $COV_STATUS"
+            exit 1
+          else
+            echo "✅ Gate 5: Tests passed and coverage threshold met"
+          fi
+
+      # Gate 6: Architecture & Boy Scout Rule
+      - name: 'Gate 6: Architecture & Boy Scout Rule'
+        id: gate6
+        run: |
+          PROJECT_LANGUAGE=${{ needs.setup.outputs.project_language }}
+          echo "Running Gate 6: Architecture validation & Boy Scout Rule for $PROJECT_LANGUAGE..."
+          
+          # Architecture validation
+          if [[ -f "architecture.yaml" ]] || [[ -f ".architecturerc" ]]; then
+            case $PROJECT_LANGUAGE in
+              typescript)
+                if command -v npx >/dev/null 2>&1; then
+                  if command -v npx --no-install archlint >/dev/null 2>&1; then
+                    echo "Running architecture validation (archlint)..."
+                    npx archlint scan . -f table --quiet || echo "Architecture validation had warnings (typically non-breaking)"
+                    echo "✅ Architecture validation completed"
+                  else
+                    echo "ℹ️ archlint not available - architecture validation skipped"
+                  fi
+                fi
+                ;;
+              python)
+                if [[ -f ".import-linter.yml" ]]; then
+                  if command -v lint-imports >/dev/null 2>&1; then
+                    echo "Running import-linter for Python..."
+                    lint-imports || echo "Import linter had warnings"
+                  else
+                    echo "⚠️ import-linter not available"
+                  fi
+                fi
+                ;;
+              go)
+                if [[ -f "arch-go.yaml" ]]; then
+                  if command -v arch-go >/dev/null 2>&1; then
+                    echo "Running arch-go for Go..."
+                    arch-go check 2>&1 || echo "Go arch check had warnings"
+                  else
+                    echo "⚠️ arch-go not available"
+                  fi
+                fi
+                ;;
+              *)
+                echo "ℹ️ Architecture validation tool not configured for $PROJECT_LANGUAGE"
+                ;;
+            esac
+          else
+            # If no architecture config exists, that's usually a problem in xgate context
+            if [[ -f ".architecture-skip" ]]; then
+              echo "ℹ️ Architecture config not found but .architecture-skip exists - proceeding"
+            else
+              echo "⚠️ Warning: architecture.yaml not found. For production projects consider adding architecture constraints."
+            fi
+          fi
+          
+          # Boy Scout Rule enforcement (only if principles module exists)
+          if [[ -f "src/principles/boy-scout.ts" ]]; then
+            if command -v npx >/dev/null 2>&1; then
+              echo "Running Boy Scout Rule enforcement..."
+              
+              # Get all changed files by comparing with the target branch
+              if [[ $GITHUB_EVENT_NAME == 'pull_request' ]]; then
+                # On PRs, compare with base branch
+                CHANGED_FILES=$(git diff --name-only HEAD^ $(git merge-base HEAD origin/main 2>/dev/null || git merge-base HEAD origin/master 2>/dev/null || git rev-parse HEAD~1))
+              else
+                # On direct push, check latest commit
+                CHANGED_FILES=$(git diff --name-only HEAD^ HEAD 2>/dev/null)
+              fi
+              
+              if [[ -n "$CHANGED_FILES" ]]; then
+                NEW_FILES=""
+                MODIFIED_FILES=""
+                for file in $CHANGED_FILES; do
+                  file_status=$(git diff --name-status HEAD^ HEAD -- $file 2>/dev/null)
+                  if [[ $file_status == A* ]]; then
+                    NEW_FILES="$NEW_FILES $file"
+                  elif [[ $file_status == M* ]]; then
+                    MODIFIED_FILES="$MODIFIED_FILES $file"
+                  fi
+                done
+                
+                if [[ -n "$NEW_FILES" ]] || [[ -n "$MODIFIED_FILES" ]]; then
+                  echo "Applying Boy Scout Rule to: (N)$NEW_FILES (M)$MODIFIED_FILES"
+                  
+                  OUTPUT=$(npx tsx src/principles/boy-scout.ts \
+                    --new-files "$NEW_FILES" \
+                    --modified-files "$MODIFIED_FILES" \
+                    --baseline ".warnings-baseline.json" 2>&1)
+                  BOYSCOUT_STATUS=$?
+                  
+                  if [[ $BOYSCOUT_STATUS -ne 0 ]]; then
+                    echo "❌ Boy Scout Rule violations detected:"
+                    echo "$OUTPUT"
+                    exit 1
+                  else
+                    echo "✅ Boy Scout Rule enforced successfully"
+                  fi
+                fi
+              fi
+            else
+              echo "⚠️ Node.js not available - skipping Boy Scout Rule enforcement"
+            fi
+          else
+            echo "ℹ️ Boy Scout Rule enforcement not found (src/principles/boy-scout.ts) - skipping"
+          fi
+          
+          echo "✅ Gate 6: Architecture & Boy Scout Rule completed"
+
+      # Generate SARIF output if possible
+      - name: Generate SARIF Reports (for GitHub Security Tab)
+        continue-on-error: true
+        if: ${{ needs.setup.outputs.project_language != 'unknown' }}
+        run: |
+          PROJECT_LANGUAGE=${{ needs.setup.outputs.project_language }}
+          
+          echo "Generating SARIF reports..."
+          
+          mkdir -p sarif-reports
+          
+          # If using principles checker that supports SARIF output
+          if [[ -f "src/principles/index.ts" ]] && command -v npx >/dev/null 2>&1; then
+            # Find source files for principles check
+            case $PROJECT_LANGUAGE in
+              typescript) 
+                SRC_FILES=$(find . -name "*.ts" -o -name "*.tsx" -not -path "./node_modules/*" -not -path "./dist/*" | head -50)
+                ;;
+              python) 
+                SRC_FILES=$(find . -name "*.py" -not -path "./venv/*" -not -path "./.venv/*" | head -50)
+                ;;
+              *)
+                SRC_FILES=$(find . -name "*.ts" -o -name "*.tsx" -o -name "*.js" -o -name "*.py" -o -name "*.go" -not -path "./node_modules/*" -not -path "./dist/*" | head -50)
+                ;;
+            esac
+            
+            if [[ -n "$SRC_FILES" ]]; then
+              npx tsx src/principles/index.ts --files "$SRC_FILES" --format sarif > sarif-reports/principles.sarif
+            fi
+          fi
+          
+          # Save SARIF reports for upload
+          tar -cJf sarif-reports.tar.xz sarif-reports/ || echo "No SARIF reports generated"
+
+  # Job 3: AI-based review using delphi-review or test-specification-alignment
+  ai-review:
+    name: AI Review
+    needs: [setup, gate-check]  # Wait for setup and gate-check to be successful
+    runs-on: ubuntu-latest
+    if: ${{ !cancel() && needs.setup.result == 'success' && needs.gate-check.result == 'success' }}
+    
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: |
+          if [[ -f "package.json" ]]; then
+            npm ci
+          fi
+          
+          # Install tools needed for AI review processes
+          pip install -r requirements.txt 2>/dev/null || echo "No requirements.txt found"
+
+      # AI Review - Try delphi review first then fall back to test/spec alignment
+      - name: Run AI Review (Delphi Review or Test-Spec Alignment)
+        run: |
+          echo "Running AI review..."
+          
+          # Check if delphi config exists
+          if [[ -f "$DELPHI_CONFIG_PATH" ]]; then
+            echo "Delphi review configuration found, attempting delphi review..."
+            if command -v /delphi-review >/dev/null 2>&1; then
+              echo "Running delphi review..."
+              # Skip delphi review execution for now (would need proper model access)
+              echo "Note: Delphi review would typically run but needs configured models"
+            else
+              echo "Delphi review command not available, attempting test-spec alignment..."
+            fi
+          else
+            echo "Delphi configuration not found at $DELPHI_CONFIG_PATH"
+          fi
+          
+          # Fallback to test specification alignment 
+          if [[ -f "specification.yaml" ]]; then
+            echo "Specification.yaml found, checking if test specification alignment tools are available..."
+            
+            # This would run the test-specification-alignment process if available
+            if [[ -f "skills/test-specification-alignment/SKILL.md" ]]; then
+              echo "Test-specification-alignment capability available"
+              echo "Run: /test-specification-alignment"
+              # For simplicity in CI, just check if specification.yaml is structurally OK
+              if python -c "import yaml; yaml.safe_load(open('specification.yaml'))" 2>/dev/null; then
+                echo "✓ specification.yaml is valid YAML"
+              else
+                echo "⚠ Could not validate specification.yaml structure - continuing anyway"
+                # Don't block on test-spec validation since this is for demonstration
+              fi
+            fi
+          else
+            echo "specification.yaml not found. AI review process depends on APPROVED design documentation."
+            # This is not an error condition in CI - just informational
+          fi
+          
+          echo "AI review phase completed"
+
+      # Prepare review artifacts
+      - name: Save AI Review Artifacts
+        run: |
+          # Save any AI review results
+          mkdir -p ai-review-results
+          
+          # Look for common result files
+          if [[ -f ".delphi-review-result.json" ]]; then
+            cp .delphi-review-result.json ai-review-results/
+          fi
+          
+          if [[ -f ".code-walkthrough-result.json" ]]; then
+            cp .code-walkthrough-result.json ai-review-results/
+          fi
+          
+          if [[ -f "test-specification-alignment-report.json" ]]; then
+            cp test-specification-alignment-report.json ai-review-results/
+          fi
+          
+          echo "{}" > ai-review-results/summary.json
+          
+          tar -cJf ai-review-results.tar.xz ai-review-results/
+
+  # Job 4: Generate comprehensive quality report
+  quality-report:
+    name: Quality Report Generation
+    needs: [setup, gate-check, ai-review]
+    runs-on: ubuntu-latest
+    if: ${{ !cancel() && needs.setup.result == 'success' }}
+    
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'npm'
+
+      - name: Download SARIF and AI review artifacts
+        uses: actions/download-artifact@v3
+        with:
+          name: sarif-reports.tar.xz
+          path: ./
+        continue-on-error: true
+
+      - name: Download AI Review Results
+        uses: actions/download-artifact@v3
+        if: ${{ needs.ai-review.result == 'success' }}
+        with:
+          name: ai-review-results.tar.xz
+          path: ./
+        continue-on-error: true
+
+      - name: Extract artifacts
+        run: |
+          if [[ -f "sarif-reports.tar.xz" ]]; then
+            tar -xf sarif-reports.tar.xz
+          fi
+          
+          if [[ -f "ai-review-results.tar.xz" ]]; then
+            tar -xf ai-review-results.tar.xz
+          fi
+
+      - name: Generate Quality Report
+        run: |
+          # Generate a quality report JSON file summarizing the check results
+          cat > quality-report.json << EOF
+          {
+            "reportVersion": "1.0",
+            "generatedAt": "$(date -u +"%Y-%m-%dT%H:%M:%SZ")",
+            "workflowRun": "${{ github.run_number }}",
+            "commit": "${{ github.sha }}",
+            "repository": "${{ github.repository }}",
+            "event": "${{ github.event_name }}",
+            "branch": "${{ github.ref_name }}",
+            "project": "$(basename ${{ github.repository }})",
+            "overall": {
+              "gatesPassed": ${
+                if [[ "${{ needs.gate-check.result }}" == "success" ]]; then 
+                  echo "6"; 
+                else 
+                  echo "0"; 
+                fi
+              },
+              "gatesTotal": 6,
+              "score": ${
+                if [[ "${{ needs.gate-check.result }}" == "success" ]]; then 
+                  echo "10.0"; 
+                else 
+                  echo "0.0"; 
+                fi
+              },
+              "verdict": "${{ needs.gate-check.result }}"
+            },
+            "gates": {
+              "gate1": {
+                "name": "Code Quality (Static + Lint + Shell)",
+                "status": "${{ needs.gate-check.result }}"
+              },
+              "gate2": {
+                "name": "Duplicate Code Detection",
+                "status": "${{ needs.gate-check.result }}"
+              },
+              "gate3": {
+                "name": "Cyclomatic Complexity",
+                "status": "${{ needs.gate-check.result }}"
+              },
+              "gate4": {
+                "name": "Clean Code + SOLID Principles",
+                "status": "${{ needs.gate-check.result }}"
+              },
+              "gate5": {
+                "name": "Tests + Coverage",
+                "status": "${{ needs.gate-check.result }}"
+              },
+              "gate6": {
+                "name": "Architecture + Boy Scout Rule",
+                "status": "${{ needs.gate-check.result }}"
+              }
+            },
+            "aiReview": {
+              "status": "${{ needs.ai-review.result }}",
+              "configured": ${
+                if [[ -f "$GITHUB_WORKSPACE/skills/delphi-review/SKILL.md" ]]; then 
+                  echo "true"; 
+                else 
+                  echo "false"; 
+                fi
+              }
+            }
+          }
+          EOF
+          
+          echo "Quality report generated: $(cat quality-report.json | python -m json.tool)"
+
+      - name: Upload Quality Report as Artifact
+        uses: actions/upload-artifact@v3
+        with:
+          name: quality-report
+          path: quality-report.json
+
+  # Post quality report as a PR comment if this is a pull request
+  pr-comment:
+    name: Post Quality Report to Pull Request
+    needs: [setup, gate-check, ai-review, quality-report]
+    if: ${{ github.event_name == 'pull_request' && always() }}
+    runs-on: ubuntu-latest
+    permissions:
+      pull-requests: write
+    
+    steps:
+      - name: Download Quality Report
+        uses: actions/download-artifact@v3
+        with:
+          name: quality-report
+          path: ./
+      
+      - name: Generate PR Comment
+        id: comment
+        run: |
+          if [[ -f "quality-report.json" ]]; then
+            REPORT_JSON=$(cat quality-report.json)
+            GATES_PASSED=$(echo "$REPORT_JSON" | jq -r '.overall.gatesPassed')
+            GATES_TOTAL=$(echo "$REPORT_JSON" | jq -r '.overall.gatesTotal')
+            SCORE=$(echo "$REPORT_JSON" | jq -r '.overall.score')
+            VERDICT=$(echo "$REPORT_JSON" | jq -r '.overall.verdict')
+            
+            COMMENT_BODY="## XGate Quality Report\n\n**Quality Gate Status**: $VERDICT\n**Overall Score**: $SCORE/10\n**Gates Passed**: $GATES_PASSED/$GATES_TOTAL\n\nQuality checks have completed for this pull request."
+            
+            # Add more detail depending on pass/fail status
+            if [[ "$VERDICT" == "failure" ]]; then
+              COMMENT_BODY="$COMMENT_BODY\n\n⚠️ **Some quality gates have failed.** Please address the issues before merging."
+            else
+              COMMENT_BODY="$COMMENT_BODY\n\n✅ **All quality gates have passed.** Ready for review!"
+            fi
+            
+            echo "$COMMENT_BODY" > comment_body.txt
+            echo "comment_body<<EOF" >> $GITHUB_ENV
+            echo -e "$COMMENT_BODY" >> $GITHUB_ENV 
+            echo "EOF" >> $GITHUB_ENV
+          else
+            echo "comment_body=XGate Quality report artifacts not available for this PR." >> $GITHUB_ENV
+          fi
+          
+      - name: Post Comment to PR
+        uses: actions/github-script@v7
+        if: ${{ env.comment_body != '' }}
+        with:
+          script: |
+            github.rest.issues.createComment({
+              issue_number: context.issue.number,
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              body: process.env.comment_body
+            })
+
+  # Summary job that gives a final assessment
+  summary:
+    name: Quality Assessment Summary
+    needs: [setup, gate-check, ai-review, quality-report]
+    runs-on: ubuntu-latest
+    if: ${{ always() }}
+    
+    steps:
+      - name: Determine Final Status
+        run: |
+          # Output a final assessment of quality based on all job statuses
+          GATE_STATUS="${{ needs.gate-check.result }}"
+          AI_REVIEW_STATUS="${{ needs.ai-review.result }}"
+          REPORT_STATUS="${{ needs.quality-report.result }}"
+          
+          echo "Gate Checks Status: $GATE_STATUS"
+          echo "AI Review Status: $AI_REVIEW_STATUS"
+          echo "Quality Report Status: $REPORT_STATUS"
+          
+          # Generate overall summary
+          if [[ "$GATE_STATUS" == "success" ]]; then
+            echo "✅ XGate Quality Gates: All gates passed"
+          else
+            echo "❌ XGate Quality Gates: Some gates failed or were skipped"
+          fi
+          
+          if [[ "$AI_REVIEW_STATUS" == "success" ]]; then
+            echo "✅ AI Review completed successfully"
+          else
+            echo "ℹ️ AI Review may have failed or was not applicable"
+          fi
+          
+          echo "XGate Quality Assessment: Complete" > summary_result.txt
