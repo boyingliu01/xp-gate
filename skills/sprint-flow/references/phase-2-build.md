@@ -136,7 +136,7 @@ sprint-flow 编排层监控本次 Phase 2 的成本：
 | `CIRCUIT_BREAKER_TRIGGERED` | 成本/资源超阈值 | sprint-flow 编排层监控成本，超阈值 BLOCK + 用户决策 |
 | `ROLLBACK_TO_ROUND1` | Gate 1 失败自动修复 → 回退 | verification-before-completion 失败 → 修复 max 3 次 → 仍失败 BLOCK |
 | `GATE1_FAILED`/`GATE1_COMPLETE` | 区分可修复 vs 致命失败 | verification-before-completion 内置此区分 |
-| `GATE2_RUNNING` | Security Scan 集成 | gstack `security-scan` skill 替代 |
+| `GATE2_RUNNING` | Security Scan 集成 | `cso` (gstack) Phase 1-6 安全审计替代 |
 | `SEALED_CODE_ISOLATION` | freeze 技术隔离 | **保留 freeze skill 调用** |
 
 ---

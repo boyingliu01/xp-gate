@@ -120,7 +120,7 @@ Phase 6: SHIP → finishing-a-development-branch (4 选项) → ship / land-and-
 | `CIRCUIT_BREAKER_TRIGGERED` | sprint-flow 编排层监控成本，超阈值 BLOCK + 用户决策 |
 | `ROLLBACK_TO_ROUND1` | verification-before-completion 失败 → 修复 max 3 次 → 仍失败 BLOCK |
 | `GATE1_FAILED`/`GATE1_COMPLETE` | verification-before-completion 内置此区分 |
-| `GATE2_RUNNING` | gstack `security-scan` skill 替代 |
+| `GATE2_RUNNING` | `cso` (gstack) — Phase 1-6 安全审计替代 |
 | `SEALED_CODE_ISOLATION` | 保留 freeze skill 调用 |
 
 **语言特定 TDD**：通过 `--lang` 参数选择：
