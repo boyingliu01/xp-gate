@@ -1,6 +1,6 @@
 {
   "name": "xgate",
-  "version": "0.0.6",
+  "version": "0.1.0",
   "description": "XGate - Quality Gate & AI Review for Every Commit",
   "type": "module",
   "engines": {

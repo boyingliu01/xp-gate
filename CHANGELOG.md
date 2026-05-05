@@ -2,7 +2,56 @@
 
 All notable changes to this project will be documented in this file.
 
-## [0.0.5] - 2026-04-15
+## [0.1.0] - 2026-05-05
+
+### Added
+- **Sprint Flow 全流程编排** — 一键启动 Think→Plan→Build→Review→Ship 7 阶段开发流水线
+- **Phase 0: THINK** — brainstorming 需求探索，HARD-GATE 设计未批准不可实现
+- **Phase 2: PARALLEL BUILD** — dispatching-parallel-agents 并行任务分发，executing-plans 隔离执行
+- **Phase 3: REVIEW** — browse 浏览器自动化测试，test-spec-alignment 测试对齐
+- **Phase 5: FEEDBACK** — retro 工程回顾，systematic-debugging 根因调试
+- **Phase 6: SHIP** — finishing-a-development-branch 4 选项发布决策 (merge/PR/discard/keep)
+- **Web 前端支持** — web-nextjs/web-react/web-vue 项目类型检测
+  - design-shotgun UI 设计多版探索、qa 系统化测试、design-review 视觉审计、benchmark Core Web Vitals
+- **移动端支持** — mobile-flutter/mobile-react-native 项目类型检测
+  - flutter.sh 适配器 (flutter analyze/test)、flutter-test integration
+- **CI/CD 集成** — GitHub Actions workflow (.github/workflows/quality-gates.yml)
+- **负载/压力测试** — k6/locust/gatling 工具映射、.sprint-load-test.yaml 规范
+- **API 测试** — Phase 3 API 自动化测试支持 (Go/Spring Boot/Django)
+- **安全审计** — gstack/cso 全面替代 security-scan (15 phases 安全审计)
+- **完整文档体系**：
+  - README.md 全面重写 (381 lines，12 语言适配器 + Sprint Flow 流程图 + 配置说明)
+  - ARCHITECTURE.md 新增 (818 lines，5 层架构图 + 分层详解 + 数据流)
+  - CAPABILITIES.md 新增 (300 lines，完整能力清单矩阵)
+- **project type 自动检测** — 8 种项目类型 (web/mobile/backend)
+
+### Changed
+- **Sprint Flow Phase 0** — office-hours → brainstorming (HARD-GATE 机制)
+- **Sprint Flow Phase 3** — cross-model-review → delphi-review --mode code-walkthrough
+- **6 道质量门禁适配 Flutter/PowerShell** — flutter.sh + powershell.sh 适配器
+- **pre-commit 钩子** — 支持 React Native 检测 (package.json + react-native)
+- **adapter-common.sh** — flutter/powershell 语言检测
+
+### Fixed
+- #6: specification-generator 触发器集成到 delphi-review
+- #11/#13/#15: 管道退出码、pytest 误报、分支覆盖率
+- #17: 6 个新语言适配器 (cpp/swift/objectivec/dart/flutter/powershell)
+- #18: PowerShell 质量门禁
+- #20: 质量门禁报告汇总
+- #21: Stryker Mutation Testing Gate
+- #26: cross-model-review → delphi-review --mode code-walkthrough
+- #28: Web 前端项目支持
+- #29: dispatching-parallel-agents 并行执行
+- #30: Phase 0 brainstorming 替代 office-hours
+- #31: Phase 6 finishing-a-development-branch
+- #32: Phase 5 retro + systematic-debugging
+- #33: 移动端支持 (Flutter/RN)
+- security-scan → cso 安全能力覆盖验证
+
+### Language Support (12 adapters)
+TypeScript, Python, Go, Shell, Java, Kotlin, C++, Swift, Objective-C, Dart, Flutter, PowerShell
+
+## [0.0.6] - 2026-04-30
 
 ### Added
 - **Gate 9: Architecture Quality** - Clean Architecture layer boundary validation
