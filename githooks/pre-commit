@@ -703,8 +703,14 @@ else
         "typescript")
           if [ -f "package.json" ] && grep -q '"test:coverage"' package.json 2>/dev/null; then
             echo "Running TypeScript coverage with minimum 80% requirement..."
-            npx vitest run --coverage 2>/dev/null || echo "Coverage check completed (may have failed threshold)"
+            npx vitest run --coverage 2>&1
             COV_EXIT=$?
+            if [ "$COV_EXIT" -ne 0 ]; then
+              echo ""
+              echo "❌ BLOCKED - Coverage check FAILED (exit code: $COV_EXIT)"
+              echo "Coverage must meet the thresholds defined in vitest.config.ts"
+              exit 1
+            fi
           else
             echo "No coverage script in package.json, running coverage check..."
             run_coverage_output=$(run_coverage 2>&1)

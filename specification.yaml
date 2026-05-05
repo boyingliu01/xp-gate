@@ -621,6 +621,57 @@ specification:
         - ARCH-005: Cross-layer cycles (ERROR)
 
   # ============================================================
+  # REQ-QG-003: Gate Activation Verification (ref: docs/incidents/test-spec-blind-spot-analysis.md)
+  # ============================================================
+  - id: REQ-QG-003
+    title: Gate Activation Verification
+    description: |
+      Ensure all mandatory quality gates are ACTIVE (not SKIP) when their required
+      tools and configurations are present. This prevents the "coded but not activated"
+      class of defects where gate code exists but outputs SKIP because dependencies
+      (config files, tools, adapters) were never installed.
+    priority: Critical
+    status: implemented
+    source_document: docs/incidents/test-spec-blind-spot-analysis.md
+
+    acceptance_criteria:
+      - id: AC-GATE-ACTIVATION-01
+        given: The project has all required gate tools installed and configured
+        when: git commit is executed
+        then: >
+          Gate 1 (ESLint) outputs "✅ PASSED - ESLint linting" (not "No ESLint configuration found - Skipping")
+      - id: AC-GATE-ACTIVATION-02
+        given: lizard is installed and available in PATH or ~/.local/bin/lizard
+        when: git commit is executed with source file changes
+        then: >
+          Gate 3 (Cyclomatic Complexity) outputs "✅ PASSED" with complexity data (not "SKIP, tool not available")
+      - id: AC-GATE-ACTIVATION-03
+        given: vitest with @vitest/coverage-v8 is installed and test:coverage script exists
+        when: git commit is executed
+        then: >
+          Gate 5 (Coverage) produces a non-zero coverage percentage (not silent PASS with 0% or N/A%)
+      - id: AC-GATE-ACTIVATION-04
+        given: Any mandatory gate outputs "SKIP" for a tool that IS installed and configured
+        when: Pre-commit hook completes
+        then: The hook must emit a warning message indicating the gate was skipped despite tool availability
+      - id: AC-GATE-ACTIVATION-05
+        given: A pre-commit hook run completes
+        when: The quality report is generated
+        then: >
+          No mandatory gate shows status "SKIP" unless the corresponding tool is genuinely unavailable
+          (per QUALITY-GATES-CODE-OF-CONDUCT.md: zero-tolerance, tool unavailable = BLOCK)
+
+    dependents:
+      - REQ-QG-001 (Quality Gate Extension)
+      - REQ-QG-002 (Boy Scout Rule)
+
+    test_coverage_requirements:
+      unit: true
+      integration: true
+      e2e: true
+      threshold: 80
+
+  # ============================================================
   # Success Metrics
   # ============================================================
   success_metrics:
