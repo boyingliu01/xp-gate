@@ -1,7 +1,7 @@
 {
   "reportVersion": "1.0",
-  "generatedAt": "2026-05-05T15:43:04Z",
-  "commit": "fedfc3f0d3b895b359ff5bc2a979721f235f2500",
+  "generatedAt": "2026-05-05T16:17:59Z",
+  "commit": "5cc87d107f793bd871bf5be31136482592cd2b0e",
   "project": "xgate",
   "language": "typescript",
   "overall": {
@@ -26,7 +26,7 @@
       "status": "PASS",
       "threshold": "5",
       "errorThreshold": "10",
-      "warnings": 0
+      "warnings": Rt
     },
     "gate4": {
       "name": "Clean Code + SOLID",
@@ -42,7 +42,7 @@
     "gate6": {
       "name": "Architecture + Boy Scout Rule",
       "status": "PASS",
-      "boyScoutPassed": 2,
+      "boyScoutPassed": 9,
       "boyScoutBlocked": 0
     }
   },

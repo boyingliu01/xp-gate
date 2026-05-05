@@ -1,5 +1,5 @@
-import { analyze, getAdapterForFile, AnalysisResult } from './analyzer';
-import { formatConsole, formatJSON, formatSummary, formatSARIF } from './reporter';
+import { analyze, getAdapterForFile } from './analyzer';
+import { formatConsole, formatJSON, formatSARIF } from './reporter';
 import { loadConfig } from './config';
 import { longFunctionRule } from './rules/clean-code/long-function';
 import { largeFileRule } from './rules/clean-code/large-file';
@@ -23,6 +23,8 @@ interface CLIOptions {
   showScore: boolean;
 }
 
+const VALID_FORMATS: readonly string[] = ['json', 'console', 'sarif'] as const;
+
 export function parseArgs(args: string[]): CLIOptions {
   const options: CLIOptions = {
     files: [],
@@ -32,26 +34,23 @@ export function parseArgs(args: string[]): CLIOptions {
   };
   
   for (let i = 0; i < args.length; i++) {
-    const arg = args[i];
-    
-    if (arg === '--files') {
-      const filesArg = args[i + 1];
-      if (filesArg) {
-        options.files = filesArg.split(' ').filter(f => f.trim());
-      }
-      i++;
-    } else if (arg === '--format') {
-      const formatArg = args[i + 1];
-      if (formatArg === 'json' || formatArg === 'console' || formatArg === 'sarif') {
-        options.format = formatArg;
-      }
-      i++;
-    } else if (arg === '--changed-only') {
-      options.changedOnly = true;
-    } else if (arg === '--show-score') {
-      options.showScore = true;
-    } else if (!arg.startsWith('--')) {
-      options.files.push(arg);
+    switch (args[i]) {
+      case '--files':
+        const next = args[++i];
+        if (next) options.files = next.split(' ').filter(f => f.trim());
+        break;
+      case '--format':
+        const fmt = args[++i];
+        if (fmt && VALID_FORMATS.includes(fmt)) options.format = fmt as 'json' | 'console' | 'sarif';
+        break;
+      case '--changed-only':
+        options.changedOnly = true;
+        break;
+      case '--show-score':
+        options.showScore = true;
+        break;
+      default:
+        if (!args[i].startsWith('--')) options.files.push(args[i]);
     }
   }
   
@@ -87,29 +86,18 @@ export async function main(args: string[]): Promise<number> {
     return 1;
   }
   
-  const config = await loadConfig();
+  await loadConfig();
   const rules = getAllRules();
-  
   const result = await analyze(options.files, rules, getAdapterForFile);
   
-  const output = options.format === 'json' 
-    ? formatJSON(result)
-    : options.format === 'sarif'
-    ? formatSARIF(result)
-    : formatConsole(result);
+  const formatters: Record<string, (r: typeof result) => string> = {
+    json: formatJSON,
+    sarif: formatSARIF,
+    console: formatConsole,
+  };
+  console.log(formatters[options.format](result));
   
-  console.log(output);
-  
-  if (result.summary.totalViolations > 0) {
-    const hasBlocking = result.violations.some(v => 
-      v.severity === 'error' || v.severity === 'warning'
-    );
-    if (hasBlocking) {
-      return 1;
-    }
-  }
-  
-  return 0;
+  return result.summary.totalViolations > 0 ? 1 : 0;
 }
 
 const args = process.argv.slice(2);

@@ -547,16 +547,15 @@ else
   CCN_ERROR_THRESHOLD=10  # Changed from 15 to 10 as per standard practice
   
   # Check lizard availability
-  if ! command -v lizard > /dev/null 2>&1; then
-    if [ -f ~/.local/bin/lizard ]; then
-      LIZARD_CMD=~/.local/bin/lizard
-    else
-      echo "ℹ️  lizard not installed - Skipping complexity check (non-blocking)"
-      echo "ℹ️  Install with: pip3 install --user lizard"
-      echo "✅ PASSED - Complexity check (SKIP, tool not available)"
-    fi
-  else
+  LIZARD_CMD=""
+  if command -v lizard > /dev/null 2>&1; then
     LIZARD_CMD=lizard
+  elif [ -f ~/.local/bin/lizard ]; then
+    LIZARD_CMD=~/.local/bin/lizard
+  fi
+  
+  if [ -n "$LIZARD_CMD" ]; then
+    LIZARD_PATH=$(eval echo "$LIZARD_CMD")
     
     # Get changed source files for complexity check
     CC_FILES=$(echo "$CHANGED_FILES" | grep -E '\.(ts|tsx|js|jsx|py|go|java|swift|cpp|c|hpp|h|m|mm|kt)$' || true)
@@ -565,7 +564,7 @@ else
       echo "Checking complexity for source files..."
       
       # Run lizard with CCN threshold
-      CC_OUTPUT=$($LIZARD_CMD -C $CCN_THRESHOLD $CC_FILES 2>&1 || true)
+      CC_OUTPUT=$($LIZARD_PATH -C $CCN_THRESHOLD $CC_FILES 2>&1 || true)
       
       # Parse warning count from the summary table: "Warning cnt   8"
       CC_WARNINGS=$(echo "$CC_OUTPUT" | grep "Warning cnt" | awk '{print $NF}' | tr -d '[:space:]' || echo "0")
@@ -593,6 +592,10 @@ else
     else
       echo "✅ PASSED - No source files to check for complexity."
     fi
+  else
+    echo "ℹ️  lizard not installed - Skipping complexity check (non-blocking)"
+    echo "ℹ️  Install with: pip3 install --user lizard"
+    echo "✅ PASSED - Complexity check (SKIP, tool not available)"
   fi
 fi
 GATE_3_STATUS="PASS"
@@ -700,7 +703,7 @@ else
         "typescript")
           if [ -f "package.json" ] && grep -q '"test:coverage"' package.json 2>/dev/null; then
             echo "Running TypeScript coverage with minimum 80% requirement..."
-            npx jest --coverage --coverageThreshold='{"global":{"lines":80}}' 2>/dev/null || echo "Coverage check completed (may have failed threshold)"
+            npx vitest run --coverage 2>/dev/null || echo "Coverage check completed (may have failed threshold)"
             COV_EXIT=$?
           else
             echo "No coverage script in package.json, running coverage check..."
@@ -930,10 +933,14 @@ else
     else
       # Run Boy Scout Rule enforcement
       if command -v npx &> /dev/null; then
-        BOY_SCOUT_OUTPUT=$(npx tsx src/principles/boy-scout.ts \
-          --new-files "$NEW_FILES" \
-          --modified-files "$MODIFIED_FILES" \
-          --baseline ".warnings-baseline.json" 2>&1)
+        # Skip if no files to check
+        if [ -z "$(echo "$NEW_FILES" | tr -d ' ')" ] && [ -z "$(echo "$MODIFIED_FILES" | tr -d ' ')" ]; then
+          echo "     ✅ No new or modified source files for Boy Scout check."
+        else
+          BOY_SCOUT_OUTPUT=$(npx tsx src/principles/boy-scout.ts \
+            --new-files "$(echo "$NEW_FILES" | tr ' ' ',')" \
+            --modified-files "$(echo "$MODIFIED_FILES" | tr ' ' ',')" \
+            --baseline ".warnings-baseline.json" 2>&1)
         
         BOY_SCOUT_EXIT=$?
         
@@ -949,7 +956,8 @@ else
         fi
         
         # Check output for violations
-        VIOLATION_COUNT=$(echo "$BOY_SCOUT_OUTPUT" | grep -c '"enforcement": "BLOCK"' || echo "0")
+        VIOLATION_COUNT=$(echo "$BOY_SCOUT_OUTPUT" | grep -c '"enforcement": "BLOCK"' 2>/dev/null || true)
+        VIOLATION_COUNT=${VIOLATION_COUNT:-0}
         if [ "$VIOLATION_COUNT" -gt 0 ]; then
           echo "$BOY_SCOUT_OUTPUT"
           echo ""
@@ -958,6 +966,7 @@ else
         fi
         
         echo "     ✅ PASSED - Boy Scout Rule compliance."
+        fi
       else
         echo "     ℹ️  npx not available - skipping Boy Scout Rule"
         echo "     ✅ Boy Scout Rule (SKIP, Node.js not available)"
