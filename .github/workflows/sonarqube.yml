@@ -1,4 +1,4 @@
-name: SonarQube SAST + SCA
+name: SonarQube SAST + SCA (optional)
 on:
   push:
     branches: [main, develop]
@@ -7,17 +7,21 @@ on:
 
 permissions:
   contents: read
-  checks: write
-  issues: write
-  pull-requests: write
-  security-events: write
 
 jobs:
   sonarqube:
     name: SonarQube SAST + SCA
+    if: ${{ vars.SONARQUBE_ENABLED == 'true' }}
     runs-on: ubuntu-latest
 
     steps:
+      - name: Check SONAR_TOKEN
+        run: |
+          if [ -z "${{ secrets.SONAR_TOKEN }}" ]; then
+            echo "SONAR_TOKEN not configured — skipping SonarQube scan"
+            exit 0
+          fi
+
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
