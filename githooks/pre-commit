@@ -985,6 +985,61 @@ else
 fi
 GATE_6_STATUS="PASS"
 
+# ============================================================================
+# GATE 7: Secret Scanning (gitleaks)
+# Detects secrets (API keys, passwords, tokens) in staged files
+# Tool: gitleaks -- https://github.com/gitleaks/gitleaks
+# ============================================================================
+
+2>&1 echo ""
+2>&1 echo "→ Gate 7: Secret scanning (gitleaks)..."
+
+# Gitleaks availability check
+GITLEAKS_CMD=""
+if command -v gitleaks >/dev/null 2>&1; then
+  GITLEAKS_CMD="gitleaks"
+elif [ -f "$HOME/.local/bin/gitleaks" ]; then
+  GIBLEAKS_CMD="$HOME/.local/bin/gitleaks"
+fi
+
+if [ -n "$GITLEAKS_CMD" ]; then
+  GITLEAKS_CONFIG=""
+  if [ -f ".gitleaks.toml" ]; then
+    GITLEAKS_CONFIG="--config=.gitleaks.toml"
+  fi
+
+  # Run gitleaks on staged changes only (pre-commit mode for speed)
+  GITLEAKS_OUTPUT=$($GITLEAKS_CMD git --pre-commit --redact --no-banner $GITLEAKS_CONFIG --report-format=json --report-path=/tmp/gitleaks-report.json 2>&1)
+  GITLEAKS_EXIT=$?
+
+  if [ "$GITLEAKS_EXIT" -eq 0 ]; then
+    echo "     ✅ PASSED - No secrets detected."
+    GATE_7_STATUS="PASS"
+  elif [ "$GITLEAKS_EXIT" -eq 1 ]; then
+    # Secrets found — output details
+    echo "$GITLEAKS_OUTPUT"
+    echo ""
+    echo "❌ BLOCKED - Secrets detected in staged files."
+    echo ""
+    echo "Remediation options:"
+    echo "  1. Remove the secret and use environment variables instead"
+    echo "  2. Add a false positive to .gitleaks.toml allowlist"
+    echo "  3. Use git secret or vault for sensitive data"
+    echo ""
+    echo "See: https://github.com/gitleaks/gitleaks"
+    exit 1
+  else
+    echo "     ⚠️  gitleaks exited with code $GITLEAKS_EXIT - skipping gate"
+    echo "     ✅ Secret Scanning (SKIP, gitleaks error)"
+    GATE_7_STATUS="SKIP"
+  fi
+else
+  echo "     ℹ️  gitleaks not installed — secret scanning unavailable"
+  echo "     Install: brew install gitleaks (macOS) | scripts/install-gitleaks.sh (Linux)"
+  echo "     ✅ Secret Scanning (SKIP, gitleaks not installed)"
+  GATE_7_STATUS="SKIP"
+fi
+
 # Switch back to original directory if we were in a subdirectory
 if [ -n "$ORIGINAL_DIR" ]; then
   cd "$ORIGINAL_DIR" 
@@ -1000,12 +1055,12 @@ generate_quality_report() {
   local COMMIT_HASH
   local TIMESTAMP
   local PASSED_COUNT=0
-  local TOTAL_GATES=6
+    local TOTAL_GATES=7
 
   COMMIT_HASH=$(git rev-parse HEAD 2>/dev/null || echo "unknown")
   TIMESTAMP=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
 
-  for gate in 1 2 3 4 5 6; do
+  for gate in 1 2 3 4 5 6 7; do
     local status_var="GATE_${gate}_STATUS"
     if [ "${!status_var}" = "PASS" ] || [ "${!status_var}" = "SKIP" ]; then
       PASSED_COUNT=$((PASSED_COUNT + 1))
@@ -1075,6 +1130,11 @@ generate_quality_report() {
       "status": "${GATE_6_STATUS:-PASS}",
       "boyScoutPassed": $BS_PASSED,
       "boyScoutBlocked": $BS_BLOCKED
+    },
+    "gate7": {
+      "name": "Secret Scanning",
+      "status": "${GATE_7_STATUS:-PASS}",
+      "tool": "gitleaks"
     }
   },
   "sarif": {
@@ -1097,6 +1157,7 @@ ENDJSON
   printf "  %-45s %s (warnings: ${WARNING_COUNT:-0})\n" "Gate 4: Principles" "${GATE_4_STATUS:-PASS}"
   printf "  %-45s %s (coverage: ${COV_PCT}%%)\n" "Gate 5: Tests + Coverage" "${GATE_5_STATUS:-PASS}"
   printf "  %-45s %s\n" "Gate 6: Architecture + Boy Scout" "${GATE_6_STATUS:-PASS}"
+  printf "  %-45s %s\n" "Gate 7: Secret Scanning" "${GATE_7_STATUS:-PASS}"
   echo ""
   echo "  Overall Score: $SCORE/10 | $PASSED_COUNT/$TOTAL_GATES gates passed"
   echo "  Report saved: $REPORT_FILE"

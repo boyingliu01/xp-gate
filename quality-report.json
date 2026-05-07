@@ -1,12 +1,12 @@
 {
   "reportVersion": "1.0",
-  "generatedAt": "2026-05-05T17:33:36Z",
-  "commit": "65e08089c20279c879c70ca36b9fb611dc44e43b",
+  "generatedAt": "2026-05-07T12:51:33Z",
+  "commit": "bb16881ae754a5f4b5ad320cd9a34f10f534e5de",
   "project": "xgate",
   "language": "typescript",
   "overall": {
-    "gatesPassed": 6,
-    "gatesTotal": 6,
+    "gatesPassed": 7,
+    "gatesTotal": 7,
     "score": 10.0,
     "verdict": "PASS"
   },
@@ -42,8 +42,13 @@
     "gate6": {
       "name": "Architecture + Boy Scout Rule",
       "status": "PASS",
-      "boyScoutPassed": 5,
+      "boyScoutPassed": 10,
       "boyScoutBlocked": 0
+    },
+    "gate7": {
+      "name": "Secret Scanning",
+      "status": "PASS",
+      "tool": "gitleaks"
     }
   },
   "sarif": {

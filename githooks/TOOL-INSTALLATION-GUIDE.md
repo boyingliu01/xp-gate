@@ -66,6 +66,14 @@
 | **dart_code_linter** | Dart 复杂度 | Dart/Flutter | `dart pub add --dev dart_code_linter` |
 | **detekt** | Kotlin 复杂度 | Kotlin | Gradle plugin 或 CLI |
 
+### Secret Scanning (Gate 7)
+
+| 工具 | 用途 | 推荐 | 安装命令 |
+|------|------|------|----------|
+| **gitleaks** | 密钥/密码检测 | ✅ 推荐 | `brew install gitleaks` (macOS) |
+| | | | `bash scripts/install-gitleaks.sh` (Linux) |
+| **trufflehog** | 深度密钥验证 | CI 补充 | `go install github.com/trufflesecurity/trufflehog/v3@latest` |
+
 ### Architecture Quality (Gate 6)
 
 | 工具 | 用途 | 语言覆盖 | 安装命令 |

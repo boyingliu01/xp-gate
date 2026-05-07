@@ -1,0 +1,57 @@
+title = "XGate Secret Detection Configuration"
+
+[extend]
+useDefault = true
+
+[allowlist]
+description = "Global allowlist for XGate project"
+
+paths = [
+  # Lock files and dependencies
+  '''(?:^|/)(?:package-lock\.json|yarn\.lock|pnpm-lock\.yaml|poetry\.lock|Pipfile\.lock)$''',
+  '''(?:^|/)node_modules(?:/.*)?$''',
+  '''(?:^|/)vendor(?:/.*)?$''',
+
+  # Build artifacts
+  '''(?:^|/)(?:dist|build|coverage|\.coverage)(?:/.*)?$''',
+  '''\.(?:jpg|jpeg|png|gif|svg|pdf|zip|tar|gz|bin)$''',
+
+  # IDE and cache files
+  '''\.(?:vscode|idea|mypy_cache|pytest_cache|tox)(?:/.*)?$''',
+  '''\.git(?:/.*)?$''',
+
+  # Test fixtures (intentional test credentials)
+  '''(?:^|/)test(?:s)?/(?:fixtures?|data|mock)(?:/.*)?$''',
+  '''(?:^|/)__tests__/(?:fixtures?|data)(?:/.*)?$''',
+
+  # Documentation
+  '''\.md$''',
+  '''docs/(?:.*)$''',
+  '''(?:^|/)examples?(?:/.*)?$''',
+]
+
+regexes = [
+  # Test/example values
+  '''(?i)(?:test|example|dummy|fake|placeholder|changeme)''',
+  # Local development patterns
+  '''(?:localhost|127\.0\.0\.1|0\.0\.0\.0)''',
+  # Example API keys
+  '''(?:your-|my-)?(?:api|secret|key|token)-(?:here|example)''',
+  # Common test credentials
+  '''(?:password|pass|pwd)\s*[=:]\s*(?:test|123|password)''',
+]
+
+stopwords = [
+  "EXAMPLE",
+  "example",
+  "PLACEHOLDER",
+  "placeholder",
+  "CHANGEME",
+  "changeme",
+  "test",
+  "TEST",
+  "dummy",
+  "DUMMY",
+  "fake",
+  "FAKE",
+]

@@ -1,0 +1,49 @@
+name: SonarQube SAST + SCA
+on:
+  push:
+    branches: [main, develop]
+  pull_request:
+    types: [opened, synchronize, reopened]
+
+permissions:
+  contents: read
+  checks: write
+  issues: write
+  pull-requests: write
+  security-events: write
+
+jobs:
+  sonarqube:
+    name: SonarQube SAST + SCA
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Run tests with coverage
+        run: npx vitest run --coverage
+
+      - name: SonarQube Scan
+        uses: SonarSource/sonarqube-scan-action@v4.2.1
+        env:
+          SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
+          SONAR_HOST_URL: ${{ secrets.SONAR_HOST_URL }}
+        with:
+          args: >
+            -Dsonar.projectKey=${{ github.repository }}
+            -Dsonar.projectName=${{ github.repository }}
+            -Dsonar.sources=src/
+            -Dsonar.tests=src/__tests__/,src/**/*.test.*,src/**/*.spec.*
+            -Dsonar.javascript.lcov.reportPaths=coverage/lcov.info
+            -Dsonar.coverage.exclusions=**/__tests__/**,**/*.test.ts,**/*.spec.ts,**/dist/**,**/node_modules/**
+            -Dsonar.language=ts
