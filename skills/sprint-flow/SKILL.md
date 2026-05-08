@@ -22,8 +22,15 @@ description: >
   --phase <phase>: 只执行单个阶段 (think-only/plan-only/build-only/review-only/ship-only)
   --lang <language>: 指定项目语言 (springboot/django/golang)
   --type <project_type>: 指定项目类型 (web-nextjs/web-react/web-vue/mobile-flutter/mobile-react-native/backend-django/backend-go/backend-springboot)
-   --spec <file>: 使用已有的 specification.yaml 文件
-   --with-performance: 启用负载/压力测试（后端项目）
+ 可选参数:
+   --stop-at <phase>: 执行到指定阶段后停止 (think/plan/build/review/ship)
+   --resume-from <phase>: 从指定阶段继续，跳过前面阶段
+   --phase <phase>: 只执行单个阶段 (think-only/plan-only/build-only/review-only/ship-only)
+   --lang <language>: 指定项目语言 (springboot/django/golang)
+   --type <project_type>: 指定项目类型 (web-nextjs/web-react/web-vue/mobile-flutter/mobile-react-native/backend-django/backend-go/backend-springboot)
+    --spec <file>: 使用已有的 specification.yaml 文件
+    --with-performance: 启用负载/压力测试（后端项目）
+    --mode <build_mode>: 指定 Phase 2 构建模式 (parallel / story-iterative / ralph-loop)
 
 maturity: beta
 ---
@@ -100,6 +107,15 @@ Phase 6: SHIP → finishing-a-development-branch (4 选项) → ship / land-and-
 - IF autoplan NEEDS_REVIEW OR taste_decisions > 0 → 调用 delphi-review
 
 ### Phase 2: BUILD（TDD + 并行执行 + 盲评 + 验证）
+
+**模式选择**:
+- **默认模式** (parallel): `dispatching-parallel-agents` — 一次性并行执行所有需求
+- **ralph-loop 模式** (iterative): 逐故事迭代，每次处理一个 story，上下文不累积。参见 `@references/phase-2-build-ralph.md`
+
+**何时使用 ralph-loop 模式**: 通过 `--mode story-iterative` 或 `--mode ralph-loop` 启用
+- 需求 > 3 个 stories / token limit 紧 / 预计构建 > 30 分钟 / 跨多模块变更
+
+**默认模式执行流程**（原有流程不变）：
 
 **替代原 xp-consensus**：使用 superpowers 成熟 skill 组合，保留关键行为（freeze 隔离、熔断回退、成本监控）。
 
@@ -347,6 +363,18 @@ Sprint 结束时 (Phase 6 完成):
 /sprint-flow "开发 REST API" --lang django
 # Phase 2 自动调用 django-tdd + django-verification
 # Gate 1 包含 Django 特定的验证（migrations, linting, coverage）
+```
+
+### 示例 4：Ralph-Loop 模式（降低 Token 消耗）
+
+```bash
+/sprint-flow "开发完整用户认证系统" --mode story-iterative
+# Phase 2 使用 ralph-loop 模式：逐 story 迭代
+# 每个 story 独立 dispatch，上下文不累积
+# 适用于大功能（stories > 3），可节约 40-67% token
+
+/sprint-flow "开发用户认证" --mode ralph-loop --spec stories.json
+# 使用预定义的 stories.json 执行 ralph-loop
 ```
 
 ---

@@ -1,0 +1,262 @@
+[
+  {
+    "id": "ralph-001",
+    "name": "specification.yaml 作为输入源验证",
+    "description": "验证 ralph-loop 使用 specification.yaml 中的 REQ 作为迭代单元，而非 stories.json",
+    "input": {
+      "specification": {
+        "requirements": [
+          { "id": "REQ-001", "description": "创建 User Model", "acceptance_criteria": [{ "id": "AC-001-01", "criteria": "email unique" }], "status": "pending" },
+          { "id": "REQ-002", "description": "实现密码加密", "depends_on": ["REQ-001"], "status": "pending" }
+        ]
+      }
+    },
+    "expected": {
+      "input_source": "specification.yaml",
+      "iteration_units": ["REQ-001", "REQ-002"],
+      "no_stories_json": true
+    }
+  },
+  {
+    "id": "ralph-002",
+    "name": "拓扑排序 + 依赖顺序",
+    "description": "验证 REQ 按 depends_on 拓扑排序，同层按 priority 升序",
+    "input": {
+      "requirements": [
+        { "id": "REQ-003", "depends_on": ["REQ-002"], "priority": 3 },
+        { "id": "REQ-001", "depends_on": [], "priority": 1 },
+        { "id": "REQ-002", "depends_on": ["REQ-001"], "priority": 2 }
+      ]
+    },
+    "expected": {
+      "sorted_order": ["REQ-001", "REQ-002", "REQ-003"],
+      "algorithm": "Kahn's topological sort"
+    }
+  },
+  {
+    "id": "ralph-003",
+    "name": "循环依赖检测",
+    "description": "REQ 存在循环依赖时 → BLOCK + 报告循环链",
+    "input": {
+      "requirements": [
+        { "id": "REQ-001", "depends_on": ["REQ-002"] },
+        { "id": "REQ-002", "depends_on": ["REQ-003"] },
+        { "id": "REQ-003", "depends_on": ["REQ-001"] }
+      ]
+    },
+    "expected": {
+      "status": "blocked",
+      "cycle_detected": true,
+      "cycle_chain": "REQ-001 → REQ-002 → REQ-003 → REQ-001"
+    }
+  },
+  {
+    "id": "ralph-004",
+    "name": "Learnings 双层分类 — permanent 自动升级",
+    "description": "被 ≥2 个 REQ 引用的 learnings 自动升级为 permanent",
+    "input": {
+      "learnings": [
+        { "id": 1, "text": "migration files in src/migrations/", "ref_count": 1, "scope": "contextual" },
+        { "id": 2, "text": "Auth middleware before validation", "ref_count": 3, "scope": "interface" }
+      ]
+    },
+    "expected": {
+      "permanent": [
+        { "id": 2, "reason": "ref_count >= 2 AND scope == interface" }
+      ],
+      "contextual": [
+        { "id": 1, "reason": "ref_count < 2 AND scope != interface" }
+      ]
+    }
+  },
+  {
+    "id": "ralph-005",
+    "name": "Subagent 上下文隔离 — 不传递历史对话",
+    "description": "每个 subagent context 仅包含：当前 REQ + AC + permanent/contextual/retry-failures + AGENTS.md + git log -5",
+    "input": {
+      "current_req": "REQ-003",
+      "learnings": { "permanent": ["rule1"], "contextual": ["tip1", "tip2"] },
+      "agents_md": "project conventions",
+      "git_log": "commit1, commit2"
+    },
+    "expected": {
+      "context_sources": ["current_req", "acceptance_criteria", "permanent_learnings", "contextual_learnings", "agents_md", "git_log"],
+      "no_historical_dialogue": true,
+      "context_is_bounded": true
+    }
+  },
+  {
+    "id": "ralph-006",
+    "name": "三层验证 Gate — 失败不提交",
+    "description": "验证失败 → 不 commit → retry（L1: typecheck+lint, L2: all tests, L3: coverage）",
+    "input": {
+      "verification": { "l1": "fail", "l2": "skipped", "l3": "skipped" },
+      "retry_count": 0,
+      "max_retries": 3
+    },
+    "expected": {
+      "committed": false,
+      "retry": true,
+      "new_retry_count": 1,
+      "run_all_tests_on_next_try": true
+    }
+  },
+  {
+    "id": "ralph-007",
+    "name": "全量回归测试 — 不只跑 @test REQ-XXX",
+    "description": "REQ-003 完成后，L2 验证跑 ALL tests（包括 @test REQ-001, @test REQ-002），不只跑 @test REQ-003",
+    "input": {
+      "current_req": "REQ-003",
+      "available_tests": ["test_REQ-001", "test_REQ-002", "test_REQ-003"],
+      "test_scope": "all"
+    },
+    "expected": {
+      "tests_run": ["test_REQ-001", "test_REQ-002", "test_REQ-003"],
+      "scope": "full_regression",
+      "not_just_current_req": true
+    }
+  },
+  {
+    "id": "ralph-008",
+    "name": "Retry 失败上下文注入",
+    "description": "retry 时注入上次失败的错误摘要，不是重复相同上下文",
+    "input": {
+      "retry_count": 1,
+      "last_failure": { "linter": ["unused-var at line 42"], "tests": ["test_login fails: 401 != 200"] }
+    },
+    "expected": {
+      "context_extended": true,
+      "failure_summary": "Linter: unused-var at line 42. Tests: test_login fails",
+      "instruction": "请使用不同的实现方式"
+    }
+  },
+  {
+    "id": "ralph-009",
+    "name": "BLOCK 状态 — 依赖级联",
+    "description": "上游 REQ-001 blocked → REQ-002, REQ-003 自动 blocked(含依赖链)",
+    "input": {
+      "requirements": [
+        { "id": "REQ-001", "status": "blocked", "reason": "max_retry_exceeded" },
+        { "id": "REQ-002", "depends_on": ["REQ-001"], "status": "pending" },
+        { "id": "REQ-003", "depends_on": ["REQ-002"], "status": "pending" }
+      ]
+    },
+    "expected": {
+      "REQ-001_status": "blocked",
+      "REQ-002_status": "blocked(auto)",
+      "REQ-003_status": "blocked(auto)",
+      "dependency_chain": "REQ-001(blocked) → REQ-002 → REQ-003"
+    }
+  },
+  {
+    "id": "ralph-010",
+    "name": "PARTIAL 状态行为",
+    "description": "部分完成时：已 done commits 保留，Phase 3 仅检查 done REQs",
+    "input": {
+      "reqs_done": 4,
+      "reqs_total": 6,
+      "reqs_blocked": 1,
+      "reqs_skipped": 1,
+      "status": "partial"
+    },
+    "expected": {
+      "commits_retained": true,
+      "phase3_scope": "done_reqs_only",
+      "spec_alignment_scope": "partial",
+      "report": "4/6 REQ 完成，1 blocked，1 skipped"
+    }
+  },
+  {
+    "id": "ralph-011",
+    "name": "AGENTS.md 由 orchestrator 统一更新",
+    "description": "subagent 不直接写 AGENTS.md，输出 agentmd_addition 字段给 orchestrator",
+    "input": {
+      "subagent_output": { "agentmd_addition": "## ralph-loop: REQ-003 (api endpoint)\n- Patterns: REST CRUD" },
+      "orchestrator_action": "read_agents_md → append → commit"
+    },
+    "expected": {
+      "agens_md_updated_by": "orchestrator",
+      "no_subagent_direct_write": true,
+      "no_race_condition": true
+    }
+  },
+  {
+    "id": "ralph-012",
+    "name": "状态输出格式 — v3.0",
+    "description": "输出 JSON 必须符合 v3.0 state format",
+    "input": {
+      "output": {
+        "skill_name": "ralph-loop",
+        "version": "2.0.0",
+        "specification_source": "specification.yaml",
+        "requirements": { "total": 6, "done": 2, "pending": 3, "blocked": 1, "skipped": 0 },
+        "learnings": { "permanent": ["..."], "contextual": ["..."] },
+        "topology_order": ["REQ-001", "REQ-002", "REQ-003"]
+      }
+    },
+    "expected": {
+      "valid": true,
+      "assertions": [
+        "done + pending + blocked + skipped == total",
+        "learnings has permanent and contextual arrays",
+        "topology_order exists and is non-empty"
+      ]
+    }
+  },
+  {
+    "id": "ralph-013",
+    "name": "崩溃恢复 — checkpoint 机制",
+    "description": "主进程崩溃后，从 checkpoint 恢复，跳过已 done REQs",
+    "input": {
+      "checkpoint": {
+        "iteration": 3,
+        "done_reqs": ["REQ-001", "REQ-002"],
+        "last_commit": "ralph-loop: REQ-002"
+      },
+      "recover_from": "crash"
+    },
+    "expected": {
+      "next_req": "REQ-003",
+      "skip_reqs": ["REQ-001", "REQ-002"],
+      "commits_retained": true,
+      "no_redo_committed": true
+    }
+  },
+  {
+    "id": "ralph-014",
+    "name": "REQ 粒度过大检测",
+    "description": "REQ 超时 2 次后 BLOCK + 提示用户拆分",
+    "input": {
+      "req": "REQ-004",
+      "timeout_count": 2,
+      "max_timeout": 300
+    },
+    "expected": {
+      "status": "blocked",
+      "message": "REQ-004 过大，建议拆分为多个子 REQ",
+      "user_options": ["split", "skip", "continue"]
+    }
+  },
+  {
+    "id": "ralph-015",
+    "name": "Subagent dispatch — OpenCode task()",
+    "description": "验证 dispatch 使用 task() 工具，带正确 input contract",
+    "input": {
+      "req": "REQ-001",
+      "dispatch_method": "task(category=build, load_skills=[test-driven-development], timeout=300)",
+      "context": {
+        "requirement": "REQ-001: 创建 User Model",
+        "permanent_learnings": ["auth middleware before validation"],
+        "contextual_learnings": ["migration files in src/migrations/"],
+        "agents_md": "project conventions",
+        "git_log": "commit1, commit2, commit3"
+      }
+    },
+    "expected": {
+      "dispatched": true,
+      "timeout_configured": true,
+      "skills_loaded": ["test-driven-development"],
+      "context_bounded": true
+    }
+  }
+]
