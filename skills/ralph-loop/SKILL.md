@@ -1,16 +1,17 @@
 ---
 name: ralph-loop
 description: >
-  REQ-level iterative build mode inspired by Ralph. Processes ONE REQ at a time
-  from specification.yaml with clean isolated context per subagent dispatch, persists
+  Default Phase 2 BUILD mode for Sprint-Flow. Processes ONE REQ at a time from
+  specification.yaml with clean isolated context per subagent dispatch, persists
   memory via git history + classified learnings, runs full regression tests on each
-  REQ, and only commits on verification pass. Designed to reduce token consumption from
-  linear context accumulation to per-REQ fixed budgets. Use when: long tasks, >3 REQs,
-  token limits, context overflow risk. NOT for: single-file fixes, quick scripts.
-maturity: beta
+  REQ, and only commits on verification pass. Designed to reduce token consumption
+  from linear context accumulation to per-REQ fixed budgets (40-67% savings).
+  Token-constraint is the default — every Phase 2 uses this mode automatically.
+  Use `--mode parallel` to opt into the legacy all-at-once mode if needed.
+maturity: stable
 ---
 
-# Ralph Loop — REQ-Level Iterative Build
+# Ralph Loop — Default REQ-Level Iterative Build
 
 ## 核心原则
 
@@ -24,31 +25,21 @@ maturity: beta
 | **浓缩型分类学习** | permanent（架构级）+ contextual（最近 3 条）双层 learnings |
 | **AGENTS.md 统一更新** | orchestrator 统一写，subagent 不直接修改 — 无竞态 |
 
----
+## 作为 Phase 2 默认行为
 
-## 与 Sprint-Flow 的关系
-
-Ralph Loop 是 Sprint-Flow **Phase 2 BUILD 的可选替代模式**：
+Ralph Loop 是 Sprint-Flow **Phase 2 BUILD 的默认模式**：
 
 ```
-Sprint-Flow Phase 2 默认模式:
-  dispatching-parallel-agents → 所有需求一次性并行执行 → 一个大 MVP
-  上下文随 REQ 线性增长
+Sprint-Flow Phase 2 (默认):
+  ralph-loop → 逐 REQ 迭代 → 每次干净上下文 → 全量回归 → token 节约 40-67%
 
-Sprint-Flow Phase 2 ralph-loop 模式:
-  逐 REQ 迭代 → 每个 REQ 独立 dispatch（干净上下文）→ 全量回归 → 上下文不累积
+Sprint-Flow Phase 2 --mode parallel (可选):
+  dispatching-parallel-agents → 所有需求一次性并行 → 上下文线性增长
 ```
 
-**何时选择 ralph-loop 模式**：
-- 需求 > 3 个 REQs（大功能）
-- 已知 token limit 紧（服务商限流）
-- 预计构建阶段 > 30 分钟
-- 跨多个模块的变更（前端 + 后端 + 数据库）
+**为什么它是默认**: 每个 Sprint 都受 token limit 约束。累积模式在 3+ REQs 时限流频率显著上升。ralph-loop 确保每个 REQ 的 token 预算独立可控。
 
-**何时使用默认模式**：
-- 单文件改动
-- 1-2 个 REQs 的小需求
-- 已有足够的 context window 余量
+**切换回并行模式**: `/sprint-flow "需求" --mode parallel`
 
 ---
 
@@ -228,13 +219,17 @@ PENDING → in_progress → done (commit)
 
 ## 与 Sprint-Flow 集成
 
-**启用方式**：
+**默认启用**：Phase 2 BUILD 自动使用 ralph-loop 模式。
 
 ```bash
-/sprint-flow "开发用户登录" --mode story-iterative
+/sprint-flow "开发用户登录"
+# → Phase 2 自动使用 ralph-loop 模式
+
+/sprint-flow "开发小改动" --mode parallel
+# → 可选：切换回旧有的并行模式
 ```
 
-Phase 2 BUILD 自动切换到 ralph-loop 流程。Phase 0, 1, 3-6 行为完全不变。
+Phase 0, 1, 3-6 行为完全不变。
 
 **与 test-specification-alignment 完全兼容**：
 - Test alignment 仍解析 specification.yaml (REQ/AC 不变)

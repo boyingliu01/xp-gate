@@ -1,17 +1,18 @@
 # Ralph-Loop Design Doc — Story-Level Iterative Build for XGate
 
-> **目标**: 在 XGate Sprint-Flow Phase 2 BUILD 引入"逐 story 迭代 + 上下文重置"模式，解决长任务 token 累积膨胀导致限流的问题。
-> **版本**: v2.0 (Round 1 Delphi 修复)
+> **目标**: 将 ralph-loop 作为 Sprint-Flow Phase 2 BUILD 的 **默认模式**。逐 REQ 迭代 + 上下文重置，解决长任务 token 累积膨胀导致限流的问题。旧有并行模式可通过 `--mode parallel` 切换。
+> **版本**: v4.0 (ralph-loop = 默认行为)
 
 ---
 
 ## 1. Problem Statement
 
-当前 Sprint-Flow Phase 2 BUILD 采用"一次性并行 dispatch 所有需求"模式，整个 BUILD 阶段在 **一个 session 里持续运行**。每多处理一个需求，上下文窗口就线性膨胀一轮。对于 > 3 个 stories 的大功能，早期阶段的上下文持续累积到后期，导致：
-
-- Token 消耗不可控（5 stories ~50k, 10 stories ~150k）
+**历史背景**: Sprint-Flow 的 Phase 2 BUILD 原采用"一次性并行 dispatch 所有需求"模式，整个 BUILD 阶段在一个 session 里持续运行。这导致：
+- Token 消耗不可控（5 REQs ~50k, 10 REQs ~150k）
 - 频繁触发服务商限流
 - 后期生成质量因上下文噪声而下降
+
+**v4.0 变更**: ralph-loop 从"可选模式"升级为 **默认模式**。每个 Sprint 默认使用逐 REQ 迭代构建。旧有并行模式保留为 `--mode parallel` 选项。
 
 ---
 
@@ -198,19 +199,16 @@ specification.yaml                    .sprint-state/ralph-loop/
 Sprint-Flow:
   Phase 0: THINK → brainstorming
   Phase 1: PLAN → autoplan + delphi-review → specification.yaml
-  Phase 2: BUILD
-      ├── 默认模式: dispatching-parallel-agents (一次性并行)
-      └── ralph-loop 模式: 逐 REQ 迭代 (新增)
-                              └── /sprint-flow "需求" --mode story-iterative
+  Phase 2: BUILD (默认 = ralph-loop 逐 REQ 迭代)
+      └── /sprint-flow "需求"        → ralph-loop 模式
+      └── /sprint-flow "需求" --mode parallel → 旧有并行模式
   Phase 3: REVIEW → delphi-review code-walkthrough + test-specification-alignment
   Phase 4: USER ACCEPTANCE (Phase 4)
   Phase 5: FEEDBACK
   Phase 6: SHIP
 ```
 
-**ralph-loop 仅替换 Phase 2 BUILD**。Phase 3-6 的行为完全不变：
-- Phase 3 的 `delphi-review --mode code-walkthrough` 对 ralph-loop 生成的 commits 做代码走查（所有 REQ 的 commits 合并为一个变更集评审）
-- Phase 3 的 `test-specification-alignment` 继续解析 specification.yaml（REQ/AC 格式不变）
+**ralph-loop 是 Phase 2 默认行为**。旧有并行模式仅用于小改动或 token 充足场景。Phase 3-6 行为完全不变。
 
 ### 3.3 与 test-specification-alignment 的兼容性
 

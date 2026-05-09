@@ -30,7 +30,7 @@ description: >
    --type <project_type>: 指定项目类型 (web-nextjs/web-react/web-vue/mobile-flutter/mobile-react-native/backend-django/backend-go/backend-springboot)
     --spec <file>: 使用已有的 specification.yaml 文件
     --with-performance: 启用负载/压力测试（后端项目）
-    --mode <build_mode>: 指定 Phase 2 构建模式 (parallel / story-iterative / ralph-loop)
+    --mode <build_mode>: 指定 Phase 2 构建模式。默认 = ralph-loop（逐 REQ 迭代，token 节约）。parallel = 旧有并行模式（一次性 dispatch 所有需求）
 
 maturity: beta
 ---
@@ -106,16 +106,11 @@ Phase 6: SHIP → finishing-a-development-branch (4 选项) → ship / land-and-
 - IF autoplan AUTO_APPROVED + 无 taste_decisions → 跳过 delphi-review
 - IF autoplan NEEDS_REVIEW OR taste_decisions > 0 → 调用 delphi-review
 
-### Phase 2: BUILD（TDD + 并行执行 + 盲评 + 验证）
+### Phase 2: BUILD（ralph-loop 默认 + TDD + 盲评 + 验证）
 
-**模式选择**:
-- **默认模式** (parallel): `dispatching-parallel-agents` — 一次性并行执行所有需求
-- **ralph-loop 模式** (iterative): 逐故事迭代，每次处理一个 story，上下文不累积。参见 `@references/phase-2-build-ralph.md`
+**默认模式**: `ralph-loop` — 逐 REQ 迭代构建。每个 REQ dispatch 独立 subagent，干净上下文，全量回归测试。Token 节约 40-67%。参见 `skills/ralph-loop/SKILL.md`。
 
-**何时使用 ralph-loop 模式**: 通过 `--mode story-iterative` 或 `--mode ralph-loop` 启用
-- 需求 > 3 个 stories / token limit 紧 / 预计构建 > 30 分钟 / 跨多模块变更
-
-**默认模式执行流程**（原有流程不变）：
+**可选并行模式**: 通过 `--mode parallel` 启用 `dispatching-parallel-agents`（旧有行为，一次性并行执行所有需求，上下文线性增长）。仅在明确需要并行速度且 token 充足时使用。
 
 **替代原 xp-consensus**：使用 superpowers 成熟 skill 组合，保留关键行为（freeze 隔离、熔断回退、成本监控）。
 
@@ -365,16 +360,12 @@ Sprint 结束时 (Phase 6 完成):
 # Gate 1 包含 Django 特定的验证（migrations, linting, coverage）
 ```
 
-### 示例 4：Ralph-Loop 模式（降低 Token 消耗）
+### 示例 4：使用 --mode parallel（旧有并行模式）
 
 ```bash
-/sprint-flow "开发完整用户认证系统" --mode story-iterative
-# Phase 2 使用 ralph-loop 模式：逐 story 迭代
-# 每个 story 独立 dispatch，上下文不累积
-# 适用于大功能（stories > 3），可节约 40-67% token
-
-/sprint-flow "开发用户认证" --mode ralph-loop --spec stories.json
-# 使用预定义的 stories.json 执行 ralph-loop
+/sprint-flow "修改单行配置" --mode parallel
+# 小改动可使用旧有并行模式，一次 dispatch 完成
+# 注意：默认 ralph-loop 模式已覆盖绝大多数场景
 ```
 
 ---
