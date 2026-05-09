@@ -2,6 +2,30 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.1.1] - 2026-05-09
+
+### Added
+- **ralph-loop skill** — REQ 级别迭代构建模式，Delphi 双专家 APPROVED (9/10)
+- **逐 REQ 迭代** — 每个 REQ dispatch 独立 subagent，干净上下文，token 节约 40-67%
+- **全量回归测试** — 每个 REQ 完成后运行 ALL tests，检测跨 REQ 回归
+- **拓扑排序** — Kahn's algorithm 处理 depends_on 依赖，循环依赖自动检测
+- **分类 Learnings** — permanent（架构级始终传递）+ contextual（最近 3 条滑动窗口）
+- **3 层验证 Gate** — L1: typecheck+lint → L2: 全量测试 → L3: coverage ≥ 80%
+- **崩溃恢复** — atomic checkpoint + git history 天然持久
+- **完整的 eval 测试集** — 15 个测试用例覆盖所有关键路径
+- **Phase 2 BUILD ralph-loop 模式** — sprint-flow 文档已更新
+
+### Changed
+- **Phase 2 BUILD 默认行为** — ralph-loop 从"可选模式"升级为默认模式
+  - `/sprint-flow "需求"` → 自动使用 ralph-loop 逐 REQ 迭代
+  - `/sprint-flow "需求" --mode parallel` → 旧有并行模式（可选）
+- **maturity**: ralph-loop beta → stable
+
+### Documents
+- docs/ralph-loop-design.md v4.0 — 完整设计文档 + Delphi 评审记录
+- skills/ralph-loop/references/phase-2-build-ralph.md — 集成文档重写
+- skills/sprint-flow/SKILL.md — Phase 2 默认行为更新，参数交互更新
+
 ## [0.1.0] - 2026-05-05
 
 ### Added
