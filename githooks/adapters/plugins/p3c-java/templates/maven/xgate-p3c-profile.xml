@@ -1,0 +1,81 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  p3c-pmd Maven profile for XGate Java quality gate.
+  Provides Alibaba Java Coding Guidelines checks via PMD.
+
+  Usage:
+    mvn clean compile pmd:check -P xgate-p3c
+    mvn clean compile pmd:check -P xgate-p3c -Dpmd.failOnViolation=true
+
+  Rules covered: 54 rules across 10 categories
+    - ali-comment, ali-concurrent, ali-constant, ali-exception,
+      ali-flowcontrol, ali-naming, ali-oop, ali-orm, ali-other, ali-set
+-->
+<profile>
+  <id>xgate-p3c</id>
+  <activation>
+    <file>
+      <exists>${project.basedir}/src/main</exists>
+    </file>
+  </activation>
+  <build>
+    <plugins>
+      <plugin>
+        <groupId>org.apache.maven.plugins</groupId>
+        <artifactId>maven-pmd-plugin</artifactId>
+        <version>3.21.2</version>
+        <configuration>
+          <targetJdk>${java.version}</targetJdk>
+          <rulesets>
+            <ruleset>/rulesets/java/ali-comment.xml</ruleset>
+            <ruleset>/rulesets/java/ali-concurrent.xml</ruleset>
+            <ruleset>/rulesets/java/ali-constant.xml</ruleset>
+            <ruleset>/rulesets/java/ali-exception.xml</ruleset>
+            <ruleset>/rulesets/java/ali-flowcontrol.xml</ruleset>
+            <ruleset>/rulesets/java/ali-naming.xml</ruleset>
+            <ruleset>/rulesets/java/ali-oop.xml</ruleset>
+            <ruleset>/rulesets/java/ali-orm.xml</ruleset>
+            <ruleset>/rulesets/java/ali-other.xml</ruleset>
+            <ruleset>/rulesets/java/ali-set.xml</ruleset>
+          </rulesets>
+          <printFailingErrors>true</printFailingErrors>
+          <failOnViolation>true</failOnViolation>
+          <includeTestSourceDirectory>true</includeTestSourceDirectory>
+          <outputEncoding>UTF-8</outputEncoding>
+          <analysisCache>true</analysisCache>
+          <maxWarnings>0</maxWarnings>
+        </configuration>
+        <executions>
+          <execution>
+            <id>p3c-check</id>
+            <phase>verify</phase>
+            <goals>
+              <goal>check</goal>
+            </goals>
+            <configuration>
+              <failOnViolation>${pmd.failOnViolation}</failOnViolation>
+            </configuration>
+          </execution>
+          <execution>
+            <id>p3c-cpd</id>
+            <phase>verify</phase>
+            <goals>
+              <goal>cpd-check</goal>
+            </goals>
+            <configuration>
+              <failOnViolation>true</failOnViolation>
+              <minimumTokens>100</minimumTokens>
+            </configuration>
+          </execution>
+        </executions>
+        <dependencies>
+          <dependency>
+            <groupId>com.alibaba.p3c</groupId>
+            <artifactId>p3c-pmd</artifactId>
+            <version>2.1.1</version>
+          </dependency>
+        </dependencies>
+      </plugin>
+    </plugins>
+  </build>
+</profile>

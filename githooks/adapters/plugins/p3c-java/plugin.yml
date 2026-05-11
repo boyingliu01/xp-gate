@@ -1,0 +1,30 @@
+---
+id: p3c-java
+name: Alibaba Java Coding Guidelines (p3c-pmd)
+version: 2.1.1
+languages: [java]
+description: >
+  阿里巴巴 Java 开发手册规范检查，基于 p3c-pmd 实现。
+  覆盖 54 条规则，10 个检查类别，是浩鲸科技等国内企业 Java 规范的基线。
+author: Alibaba Group (p3c project)
+rules_count: 54
+severity: error
+categories:
+  - ali-comment:     Javadoc 和注释规约 (6 条)
+  - ali-concurrent:  并发编程规约 (8 条)
+  - ali-constant:    常量定义规约 (3 条)
+  - ali-exception:   异常处理规约 (4 条)
+  - ali-flowcontrol: 控制语句规约 (6 条)
+  - ali-naming:      命名规约 (9 条)
+  - ali-oop:         OOP 规约 (7 条)
+  - ali-orm:         ORM/SQL 规约 (5 条)
+  - ali-other:       其他规约 (3 条)
+  - ali-set:         集合处理规约 (3 条)
+maven:
+  profile: xgate-p3c
+  profile_file: templates/maven/xgate-p3c-profile.xml
+  install_script: scripts/install-maven-p3c.sh
+gradle:
+  config_file: templates/gradle/xgate-p3c-gradle.gradle
+  install_script: scripts/install-gradle-p3c.sh
+rules_path: https://github.com/alibaba/p3c/tree/master/p3c-pmd/src/main/resources/rulesets/java

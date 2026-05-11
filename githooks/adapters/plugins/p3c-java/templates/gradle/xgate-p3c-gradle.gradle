@@ -1,0 +1,68 @@
+// =============================================================================
+// p3c-pmd Gradle configuration for XGate Java quality gate.
+// Provides Alibaba Java Coding Guidelines checks via PMD.
+//
+// Usage:
+//   ./gradlew pmdMain
+//   ./gradlew build -P p3cCheck
+//
+// Rules covered: 54 rules across 10 categories
+// =============================================================================
+
+plugins {
+    id 'pmd'
+}
+
+pmd {
+    // PMD 6.55.0+ includes p3c-pmd 2.1.1 compatibility
+    toolVersion = '6.55.0'
+    ruleSetFiles = files(
+        "https://raw.githubusercontent.com/alibaba/p3c/master/p3c-pmd/src/main/resources/rulesets/java/ali-comment.xml",
+        "https://raw.githubusercontent.com/alibaba/p3c/master/p3c-pmd/src/main/resources/rulesets/java/ali-concurrent.xml",
+        "https://raw.githubusercontent.com/alibaba/p3c/master/p3c-pmd/src/main/resources/rulesets/java/ali-constant.xml",
+        "https://raw.githubusercontent.com/alibaba/p3c/master/p3c-pmd/src/main/resources/rulesets/java/ali-exception.xml",
+        "https://raw.githubusercontent.com/alibaba/p3c/master/p3c-pmd/src/main/resources/rulesets/java/ali-flowcontrol.xml",
+        "https://raw.githubusercontent.com/alibaba/p3c/master/p3c-pmd/src/main/resources/rulesets/java/ali-naming.xml",
+        "https://raw.githubusercontent.com/alibaba/p3c/master/p3c-pmd/src/main/resources/rulesets/java/ali-oop.xml",
+        "https://raw.githubusercontent.com/alibaba/p3c/master/p3c-pmd/src/main/resources/rulesets/java/ali-orm.xml",
+        "https://raw.githubusercontent.com/alibaba/p3c/master/p3c-pmd/src/main/resources/rulesets/java/ali-other.xml",
+        "https://raw.githubusercontent.com/alibaba/p3c/master/p3c-pmd/src/main/resources/rulesets/java/ali-set.xml"
+    )
+    ruleSets = [] // Clear default PMD rule sets, use only p3c rules
+    consoleOutput = true
+    ignoreFailures = project.hasProperty('p3cIgnoreFailures')
+    maxFailures = 0 // Block on any violation
+    reportsDir = file("$buildDir/reports/pmd")
+
+    // Optimize for CI/commit hook: only check changed files
+    incrementalAnalysis = true
+    incrementalAnalysisCacheFile = file("$buildDir/pmd/main.cache")
+
+    // Include test source directory
+    source = sourceSets.main.allJava + sourceSets.test.allJava
+}
+
+// Task alias for xgate integration
+task xgateP3cCheck(type: Pmd) {
+    description = 'Run p3c-pmd checks for xgate quality gate'
+    group = 'verification'
+    ruleSetFiles = pmd.ruleSetFiles
+    ruleSets = []
+    consoleOutput = true
+    ignoreFailures = false
+    maxFailures = 0
+    source = sourceSets.main.allJava + sourceSets.test.allJava
+    reports {
+        html.required = true
+        xml.required = true
+    }
+}
+
+// Make build depend on p3c check when P3C is enabled
+project.afterEvaluate {
+    if (project.hasProperty('p3cCheck')) {
+        tasks.named('build').configure {
+            dependsOn tasks.named('xgateP3cCheck')
+        }
+    }
+}
