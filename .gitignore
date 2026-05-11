@@ -52,6 +52,7 @@ htmlcov/
 *.temp
 .cache/.worktrees/
 .sisyphus/
+.sprint-state/
 
 # Skill-cert
 skill-cert/venv/

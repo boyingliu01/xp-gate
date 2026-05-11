@@ -70,6 +70,7 @@ Phase 1: 迭代循环 (max_iterations=15 默认)
     │
     ├── PASS → git commit → 标记 done
     │        → 写 learnings（分类为 permanent/contextual）
+    │        → 调用 `gstack/learn` 及时总结经验教训
     │        → orchestrator 统一更新 AGENTS.md
     │        → 原子写 checkpoint
     │        → 继续下一个 READY REQ

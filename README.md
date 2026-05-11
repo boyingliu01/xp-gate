@@ -82,10 +82,11 @@ THINK → PLAN → BUILD → REVIEW → USER ACCEPT → FEEDBACK → SHIP
 git clone https://github.com/boyingliu01/xgate.git
 cd xgate
 
-# 安装 Git Hooks（必须）
-cp githooks/pre-commit .git/hooks/pre-commit
-cp githooks/pre-push .git/hooks/pre-push
-chmod +x .git/hooks/pre-commit .git/hooks/pre-push
+# 安装 Git Hooks（必须）— 安装 hooks + adapter 基础设施
+bash githooks/install.sh
+
+# 验证安装
+bash githooks/verify.sh
 
 # 可选：安装 npm 依赖（用于 TypeScript 项目）
 npm install
@@ -105,7 +106,17 @@ cp skills/delphi-review/.delphi-config.json.example .delphi-config.json
 npx tsx src/principles/index.ts --help
 ```
 
-### 组件化安装脚本
+### 推荐：统一安装脚本
+
+```bash
+# 一键安装 Git Hooks + adapter 基础设施
+bash githooks/install.sh
+
+# 验证安装完整性
+bash githooks/verify.sh
+```
+
+### 组件化安装脚本（按需）
 
 ```bash
 # 仅安装 Git Hooks
@@ -126,17 +137,17 @@ XGate 支持 **12 种语言**，通过适配器自动检测和路由：
 
 | 语言 | 适配器文件 | 静态分析 | 测试框架 | 复杂度检测 |
 |------|-----------|---------|---------|-----------|
-| TypeScript | `adapter-typescript.sh` | ESLint | Jest/Vitest | ts-complex |
-| Python | `adapter-python.sh` | Ruff/Black | pytest | radon |
-| Go | `adapter-go.sh` | gofmt/govet | go test | gocyclo |
+| TypeScript | `adapter-typescript.sh` | ESLint | Jest/Vitest | lizard ✅ |
+| Python | `adapter-python.sh` | Ruff/Black | pytest | lizard ✅ |
+| Go | `adapter-go.sh` | gofmt/govet | go test | lizard ✅ |
+| Java | `adapter-java.sh` | Checkstyle | JUnit | lizard ✅ |
+| Kotlin | `adapter-kotlin.sh` | ktlint | JUnit | lizard ✅ |
+| C++ | `adapter-cpp.sh` | clang-tidy | GoogleTest | lizard ✅ |
+| Swift | `adapter-swift.sh` | swiftlint | XCTest | lizard ✅ |
+| Objective-C | `adapter-objc.sh` | oclint | XCTest | lizard ✅ |
 | Shell | `adapter-shell.sh` | shellcheck | bats | 自定义 |
 | Dart | `adapter-dart.sh` | dart analyze | dart test | 自定义 |
 | Flutter | `adapter-flutter.sh` | flutter analyze | flutter test | 自定义 |
-| Java | `adapter-java.sh` | Checkstyle | JUnit | PMD |
-| Kotlin | `adapter-kotlin.sh` | ktlint | JUnit | detekt |
-| C++ | `adapter-cpp.sh` | clang-tidy | GoogleTest | cppcheck |
-| Swift | `adapter-swift.sh` | swiftlint | XCTest | 自定义 |
-| Objective-C | `adapter-objc.sh` | oclint | XCTest | 自定义 |
 | PowerShell | `adapter-powershell.sh` | PSScriptAnalyzer | Pester | 自定义 |
 
 适配器位于 `githooks/adapters/`，自动根据文件扩展名选择。
@@ -236,23 +247,36 @@ brainstorm    autoplan    parallel-dev   code-walk     manual        learn +    
 
 ## AI 技能集成
 
-XGate 集成 15+ 个专业 AI 技能：
+XGate 集成 15+ 个专业 AI 技能，按 Sprint Flow 阶段排列：
 
 | 技能 | 来源 | 用途 | 触发时机 |
 |------|------|------|---------|
 | brainstorming | superpowers | 需求探索、方案设计 | Phase 0 |
 | autoplan | gstack | CEO/设计/工程自动评审 | Phase 1 |
 | delphi-review | xgate | 多专家匿名共识 | Phase 1, 3 |
-| dispatching-parallel-agents | superpowers | 并行任务分发 | Phase 2 |
-| executing-plans | superpowers | 计划执行 | Phase 2 |
-| finishing-a-development-branch | superpowers | 分支收尾决策 | Phase 6 |
-| retro | gstack | 工程复盘 | Phase 5 |
-| systematic-debugging | superpowers | 根因调试 | Phase 5 |
-| cso | gstack | 安全审计 | 定期/发布前 |
+| ralph-loop | xgate | **REQ 级迭代构建**（Phase 2 **默认模式**），Token 节约 40-67% | Phase 2 |
+| test-specification-alignment | xgate | 测试对齐验证 | Phase 2, 3 |
 | qa | gstack | Web QA 测试 | Phase 3 |
 | design-review | gstack | 设计审计 | Phase 3 |
 | benchmark | gstack | 性能基准 | Phase 3 |
-| test-specification-alignment | xgate | 测试对齐验证 | Phase 3 |
+| systematic-debugging | superpowers | 根因调试 | Phase 3, 5 |
+| retro | gstack | 工程复盘 | Phase 5 |
+| learn | gstack | 经验教训总结 | **Phase 5**，每个 REQ 完成时也会调用 |
+| finishing-a-development-branch | superpowers | 分支收尾决策 | Phase 6 |
+| dispatching-parallel-agents | superpowers | 并行任务分发 | Phase 2（可选模式） |
+| executing-plans | superpowers | 计划执行 | Phase 2（可选模式） |
+| cso | gstack | 安全审计 | 定期/发布前 |
+
+### Phase 2 构建模式说明
+
+Sprint Flow 的 Phase 2 BUILD 有两种模式：
+
+| 模式 | 说明 | 默认 |
+|------|------|------|
+| **ralph-loop** | **REQ 级迭代构建**（默认模式），Token 节约 40-67%，干净上下文 | ✅ 默认 |
+| 并行模式 | 使用 `dispatching-parallel-agents` + `executing-plans` | ❌ 可选 |
+
+> **learn 调用时机**：ralph-loop 内部使用自有 learnings 分类机制（permanent/contextual），通过 progress.log 持久化。此外 Phase 5 FEEDBACK 阶段调用 `gstack/learn` 进行 Sprint 级复盘。用户期望在每个 REQ 完成时也调用 learn 及时总结经验。
 
 ### 模型选择（强制国产）
 
@@ -330,10 +354,11 @@ rules:
 # 安装依赖
 npm install
 
-# 设置 Git Hooks（必须）
-cp githooks/pre-commit .git/hooks/pre-commit
-cp githooks/pre-push .git/hooks/pre-push
-chmod +x .git/hooks/pre-commit .git/hooks/pre-push
+# 设置 Git Hooks（必须）— 安装 hooks + adapter 基础设施
+bash githooks/install.sh --force
+
+# 验证安装完整性
+bash githooks/verify.sh
 ```
 
 ### 提交规范
@@ -376,6 +401,7 @@ Copyright (c) 2024-2025 XGate Contributors
 ## 相关链接
 
 - [Sprint Flow 详细文档](./skills/sprint-flow/SKILL.md)
+- [Ralph Loop 构建模式](./skills/ralph-loop/SKILL.md) — Phase 2 默认 REQ 级迭代构建，Token 节约 40-67%
 - [Delphi 评审规范](./skills/delphi-review/SKILL.md)
 - [测试对齐验证](./skills/test-specification-alignment/SKILL.md)
 - [质量门禁守则](./githooks/QUALITY-GATES-CODE-OF-CONDUCT.md)
