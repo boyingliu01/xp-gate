@@ -1,0 +1,148 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  WhaleCloud Java Coding Standards Maven profile for XGate.
+  Layered on top of p3c-pmd baseline — adds 74 mandatory + 32 recommended
+  WhaleCloud-internal rules not covered by Alibaba p3c-pmd.
+
+  Usage:
+    mvn clean verify -P xgate-whalecloud-java
+    mvn clean verify -P xgate-whalecloud-java -Dpmd.failOnViolation=true
+
+  Depends on: p3c-pmd profile (xgate-p3c) must also be active.
+
+  Rules covered: 106 rules across 8 categories
+    - wc-collection:    集合处理增强 (12 条)
+    - wc-concurrent:    并发编程增强 (14 条)
+    - wc-exception:     异常处理规范 (11 条)
+    - wc-logging:       日志输出规范 (7 条)
+    - wc-security:      安全管理规范 (10 条)
+    - wc-resource:      资源管理规范 (6 条)
+    - wc-style:         编码风格规范 (18 条)
+    - wc-performance:   性能优化规范 (8 条)
+-->
+<profile>
+  <id>xgate-whalecloud-java</id>
+  <activation>
+    <file>
+      <exists>${project.basedir}/src/main</exists>
+    </file>
+  </activation>
+  <build>
+    <plugins>
+      <!-- PMD with custom WhaleCloud ruleset (extends p3c-pmd) -->
+      <plugin>
+        <groupId>org.apache.maven.plugins</groupId>
+        <artifactId>maven-pmd-plugin</artifactId>
+        <version>3.21.2</version>
+        <configuration>
+          <targetJdk>${java.version}</targetJdk>
+          <rulesets>
+            <!-- BASELINE: Alibaba p3c-pmd (54 rules) -->
+            <ruleset>/rulesets/java/ali-comment.xml</ruleset>
+            <ruleset>/rulesets/java/ali-concurrent.xml</ruleset>
+            <ruleset>/rulesets/java/ali-constant.xml</ruleset>
+            <ruleset>/rulesets/java/ali-exception.xml</ruleset>
+            <ruleset>/rulesets/java/ali-flowcontrol.xml</ruleset>
+            <ruleset>/rulesets/java/ali-naming.xml</ruleset>
+            <ruleset>/rulesets/java/ali-oop.xml</ruleset>
+            <ruleset>/rulesets/java/ali-orm.xml</ruleset>
+            <ruleset>/rulesets/java/ali-other.xml</ruleset>
+            <ruleset>/rulesets/java/ali-set.xml</ruleset>
+            <!-- OVERLAY: WhaleCloud custom rules -->
+            <ruleset>${project.basedir}/config/pmd/whalecloud-ruleset.xml</ruleset>
+          </rulesets>
+          <printFailingErrors>true</printFailingErrors>
+          <failOnViolation>true</failOnViolation>
+          <includeTestSourceDirectory>true</includeTestSourceDirectory>
+          <outputEncoding>UTF-8</outputEncoding>
+          <analysisCache>true</analysisCache>
+          <maxWarnings>0</maxWarnings>
+        </configuration>
+        <executions>
+          <execution>
+            <id>whalecloud-pmd-check</id>
+            <phase>verify</phase>
+            <goals>
+              <goal>check</goal>
+            </goals>
+            <configuration>
+              <failOnViolation>${pmd.failOnViolation}</failOnViolation>
+            </configuration>
+          </execution>
+          <execution>
+            <id>whalecloud-cpd-check</id>
+            <phase>verify</phase>
+            <goals>
+              <goal>cpd-check</goal>
+            </goals>
+            <configuration>
+              <failOnViolation>true</failOnViolation>
+              <minimumTokens>100</minimumTokens>
+            </configuration>
+          </execution>
+        </executions>
+        <dependencies>
+          <!-- p3c-pmd baseline -->
+          <dependency>
+            <groupId>com.alibaba.p3c</groupId>
+            <artifactId>p3c-pmd</artifactId>
+            <version>2.1.1</version>
+          </dependency>
+        </dependencies>
+      </plugin>
+
+      <!-- CheckStyle with WhaleCloud customized ruleset -->
+      <plugin>
+        <groupId>org.apache.maven.plugins</groupId>
+        <artifactId>maven-checkstyle-plugin</artifactId>
+        <version>3.3.1</version>
+        <configuration>
+          <configLocation>${project.basedir}/config/checkstyle/whalecloud-checkstyle.xml</configLocation>
+          <includeTestSourceDirectory>true</includeTestSourceDirectory>
+          <consoleOutput>true</consoleOutput>
+          <failsOnError>true</failsOnError>
+          <linkXRef>false</linkXRef>
+        </configuration>
+        <executions>
+          <execution>
+            <id>whalecloud-checkstyle</id>
+            <phase>verify</phase>
+            <goals>
+              <goal>check</goal>
+            </goals>
+          </execution>
+        </executions>
+      </plugin>
+
+      <!-- SpotBugs + FindSecBugs for security analysis -->
+      <plugin>
+        <groupId>com.github.spotbugs</groupId>
+        <artifactId>spotbugs-maven-plugin</artifactId>
+        <version>4.7.3.5</version>
+        <configuration>
+          <includeFilterFile>${project.basedir}/config/spotbugs/whalecloud-spotbugs.xml</includeFilterFile>
+          <effort>Max</effort>
+          <threshold>Low</threshold>
+          <failOnError>true</failOnError>
+          <includeTests>false</includeTests>
+        </configuration>
+        <executions>
+          <execution>
+            <id>whalecloud-spotbugs</id>
+            <phase>verify</phase>
+            <goals>
+              <goal>check</goal>
+            </goals>
+          </execution>
+        </executions>
+        <dependencies>
+          <dependency>
+            <groupId>com.h3xstream.findsecbugs</groupId>
+            <artifactId>findsecbugs-plugin</artifactId>
+            <version>1.12.0</version>
+          </dependency>
+        </dependencies>
+      </plugin>
+    </plugins>
+  </build>
+</profile>

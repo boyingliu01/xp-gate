@@ -1,0 +1,17 @@
+---
+id: WC-STYLE-001
+name: 严格把控类成员变量和方法访问控制
+severity: error  # error=阻断, warning=警告
+source: J000064
+tool: auto  # auto-manual-auto: detected by tool / manual check / AST-grep
+category: wc-style
+description: |
+  严格把控类成员变量和方法访问控制
+
+  对应浩鲸规范 J000064。
+
+check:
+  type: ast-grep  # ast-grep / pmd-custom / spotbugs / checkstyle / manual
+  pattern: TODO
+
+notes: "Access modifier discipline"

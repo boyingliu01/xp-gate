@@ -1,0 +1,17 @@
+---
+id: WC-COLLECT-010
+name: 合理利用集合的有序性和稳定性
+severity: warning  # error=阻断, warning=警告
+source: J000012
+tool: auto  # auto-manual-auto: detected by tool / manual check / AST-grep
+category: wc-collection
+description: |
+  合理利用集合的有序性和稳定性
+
+  对应浩鲸规范 J000012。
+
+check:
+  type: ast-grep  # ast-grep / pmd-custom / spotbugs / checkstyle / manual
+  pattern: TODO
+
+notes: "TreeSet vs HashSet selection"

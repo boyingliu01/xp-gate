@@ -1,0 +1,14 @@
+---
+id: GEN-0006
+name: 通过功能命名。
+severity: warning
+tool: auto
+category: wc-style
+description: |
+  通过功能命名。
+
+  Auto-extracted from book299-20132-Python语言编码规范.txt.
+
+check:
+  type: ast-grep
+  pattern: TODO

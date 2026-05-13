@@ -1,0 +1,14 @@
+---
+id: C建-3-1
+name: 避免或少用全局变量和局部静态变量
+severity: info
+tool: auto
+category: wc-style
+description: |
+  避免或少用全局变量和局部静态变量
+
+  Auto-extracted from book299-4081-C++编程规范.txt.
+
+check:
+  type: ast-grep
+  pattern: TODO

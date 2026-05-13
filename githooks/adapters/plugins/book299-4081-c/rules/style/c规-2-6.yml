@@ -1,0 +1,14 @@
+---
+id: C规-2-6
+name: 新增文件采用doxygen文件头代码注释风格
+severity: error
+tool: auto
+category: wc-style
+description: |
+  新增文件采用doxygen文件头代码注释风格
+
+  Auto-extracted from book299-4081-C++编程规范.txt.
+
+check:
+  type: ast-grep
+  pattern: TODO

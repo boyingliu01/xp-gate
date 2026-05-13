@@ -1,0 +1,17 @@
+---
+id: WC-CONCUR-001
+name: 获取单例对象需保证线程安全
+severity: error  # error=阻断, warning=警告
+source: J000014
+tool: auto  # auto-manual-auto: detected by tool / manual check / AST-grep
+category: wc-concurrency
+description: |
+  获取单例对象需保证线程安全
+
+  对应浩鲸规范 J000014。
+
+check:
+  type: ast-grep  # ast-grep / pmd-custom / spotbugs / checkstyle / manual
+  pattern: TODO
+
+notes: "Singleton thread safety"

@@ -1,0 +1,17 @@
+---
+id: WC-STYLE-004
+name: 不使用float/double进行精确数值计算
+severity: error  # error=阻断, warning=警告
+source: J000070
+tool: auto  # auto-manual-auto: detected by tool / manual check / AST-grep
+category: wc-style
+description: |
+  不使用float/double进行精确数值计算
+
+  对应浩鲸规范 J000070。
+
+check:
+  type: ast-grep  # ast-grep / pmd-custom / spotbugs / checkstyle / manual
+  pattern: TODO
+
+notes: "PMD:AvoidDecimalLiteralsInBigDecimalConstructor"

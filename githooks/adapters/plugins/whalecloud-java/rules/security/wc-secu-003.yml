@@ -1,0 +1,17 @@
+---
+id: WC-SECU-003
+name: 优先使用Spring RestTemplate进行HTTP请求
+severity: error  # error=阻断, warning=警告
+source: J000076
+tool: auto  # auto-manual-auto: detected by tool / manual check / AST-grep
+category: wc-security
+description: |
+  优先使用Spring RestTemplate进行HTTP请求
+
+  对应浩鲸规范 J000076。
+
+check:
+  type: ast-grep  # ast-grep / pmd-custom / spotbugs / checkstyle / manual
+  pattern: TODO
+
+notes: "HTTP client abstraction"

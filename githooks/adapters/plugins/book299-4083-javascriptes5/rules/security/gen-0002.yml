@@ -1,0 +1,14 @@
+---
+id: GEN-0002
+name: 前端应用，主要涉及到nginx的基础镜像，需要使用国际业务运营中心-平台技术部提供的基础安全镜像（规范来源：          严重生产故障3791904）  
+severity: error
+tool: auto
+category: wc-security
+description: |
+  前端应用，主要涉及到nginx的基础镜像，需要使用国际业务运营中心-平台技术部提供的基础安全镜像（规范来源：          严重生产故障3791904）  
+
+  Auto-extracted from book299-4083-JavaScript(ES5)语言编码规范.txt.
+
+check:
+  type: ast-grep
+  pattern: TODO

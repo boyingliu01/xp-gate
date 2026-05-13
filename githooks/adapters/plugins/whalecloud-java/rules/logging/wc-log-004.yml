@@ -1,0 +1,17 @@
+---
+id: WC-LOG-004
+name: 异常信息包括案发现场和堆栈信息
+severity: error  # error=阻断, warning=警告
+source: J000056
+tool: auto  # auto-manual-auto: detected by tool / manual check / AST-grep
+category: wc-logging
+description: |
+  异常信息包括案发现场和堆栈信息
+
+  对应浩鲸规范 J000056。
+
+check:
+  type: ast-grep  # ast-grep / pmd-custom / spotbugs / checkstyle / manual
+  pattern: TODO
+
+notes: "Context + stacktrace"

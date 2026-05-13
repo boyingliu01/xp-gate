@@ -1,0 +1,14 @@
+---
+id: GEN-0032
+name: 代码质量不高但能正常运行，或者还没有实现的代码用# TODO:声明。
+severity: warning
+tool: auto
+category: wc-style
+description: |
+  代码质量不高但能正常运行，或者还没有实现的代码用# TODO:声明。
+
+  Auto-extracted from book299-20132-Python语言编码规范.txt.
+
+check:
+  type: ast-grep
+  pattern: TODO

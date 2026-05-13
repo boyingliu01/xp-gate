@@ -1,0 +1,14 @@
+---
+id: C建-5-4
+name: 最有可能执行的语句放在if else结构前面
+severity: info
+tool: auto
+category: wc-style
+description: |
+  最有可能执行的语句放在if else结构前面
+
+  Auto-extracted from book299-4081-C++编程规范.txt.
+
+check:
+  type: ast-grep
+  pattern: TODO

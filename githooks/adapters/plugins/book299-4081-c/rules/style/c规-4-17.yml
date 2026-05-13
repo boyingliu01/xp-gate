@@ -1,0 +1,14 @@
+---
+id: C规-4-17
+name: 检查所有来源于外部数据的值和子程序所有输入参数的值
+severity: error
+tool: auto
+category: wc-style
+description: |
+  检查所有来源于外部数据的值和子程序所有输入参数的值
+
+  Auto-extracted from book299-4081-C++编程规范.txt.
+
+check:
+  type: ast-grep
+  pattern: TODO

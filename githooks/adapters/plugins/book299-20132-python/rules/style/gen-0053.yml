@@ -1,0 +1,14 @@
+---
+id: GEN-0053
+name: 禁止混用空格和 Tab。
+severity: error
+tool: auto
+category: wc-style
+description: |
+  禁止混用空格和 Tab。
+
+  Auto-extracted from book299-20132-Python语言编码规范.txt.
+
+check:
+  type: ast-grep
+  pattern: TODO

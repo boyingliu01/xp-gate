@@ -1,0 +1,17 @@
+---
+id: WC-STYLE-006
+name: 数据库表数值类型主键定义成Long
+severity: error  # error=阻断, warning=警告
+source: J000074
+tool: auto  # auto-manual-auto: detected by tool / manual check / AST-grep
+category: wc-style
+description: |
+  数据库表数值类型主键定义成Long
+
+  对应浩鲸规范 J000074。
+
+check:
+  type: ast-grep  # ast-grep / pmd-custom / spotbugs / checkstyle / manual
+  pattern: TODO
+
+notes: "Integer overflow prevention"

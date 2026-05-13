@@ -1,0 +1,14 @@
+---
+id: GEN-0060
+name: 每个导入应该独占一行。
+severity: error
+tool: auto
+category: wc-style
+description: |
+  每个导入应该独占一行。
+
+  Auto-extracted from book299-20132-Python语言编码规范.txt.
+
+check:
+  type: ast-grep
+  pattern: TODO

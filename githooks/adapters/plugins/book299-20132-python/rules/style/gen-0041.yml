@@ -1,0 +1,14 @@
+---
+id: GEN-0041
+name: 关于函数的几个方面应该在特定的小节中进行描述记录，这几个方面如下文所述。每节应该以一个标题行开始，标题行以冒号结尾。除标题行外，节的其他内容应被缩进 2 个空格
+severity: info
+tool: auto
+category: wc-style
+description: |
+  关于函数的几个方面应该在特定的小节中进行描述记录，这几个方面如下文所述。每节应该以一个标题行开始，标题行以冒号结尾。除标题行外，节的其他内容应被缩进 2 个空格
+
+  Auto-extracted from book299-20132-Python语言编码规范.txt.
+
+check:
+  type: ast-grep
+  pattern: TODO

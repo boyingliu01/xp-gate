@@ -1,0 +1,14 @@
+---
+id: C原-1-1
+name: 简明优先，避免复杂
+severity: warning
+tool: auto
+category: wc-style
+description: |
+  简明优先，避免复杂
+
+  Auto-extracted from book299-4081-C++编程规范.txt.
+
+check:
+  type: ast-grep
+  pattern: TODO

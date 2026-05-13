@@ -1,0 +1,17 @@
+---
+id: WC-EXCEPT-006
+name: 不在finally块中使用return
+severity: error  # error=阻断, warning=警告
+source: J000044
+tool: auto  # auto-manual-auto: detected by tool / manual check / AST-grep
+category: wc-exception
+description: |
+  不在finally块中使用return
+
+  对应浩鲸规范 J000044。
+
+check:
+  type: ast-grep  # ast-grep / pmd-custom / spotbugs / checkstyle / manual
+  pattern: TODO
+
+notes: "PMD:ReturnFromFinallyBlock"

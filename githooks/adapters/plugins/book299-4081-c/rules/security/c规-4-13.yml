@@ -1,0 +1,14 @@
+---
+id: C规-4-13
+name: 禁止使用strcpy/sprintf/vsprintf等不安全操作函数
+severity: error
+tool: auto
+category: wc-security
+description: |
+  禁止使用strcpy/sprintf/vsprintf等不安全操作函数
+
+  Auto-extracted from book299-4081-C++编程规范.txt.
+
+check:
+  type: ast-grep
+  pattern: TODO

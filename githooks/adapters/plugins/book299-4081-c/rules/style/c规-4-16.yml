@@ -1,0 +1,14 @@
+---
+id: C规-4-16
+name: 程序实现应尽量避免采用递归的形式
+severity: error
+tool: auto
+category: wc-style
+description: |
+  程序实现应尽量避免采用递归的形式
+
+  Auto-extracted from book299-4081-C++编程规范.txt.
+
+check:
+  type: ast-grep
+  pattern: TODO

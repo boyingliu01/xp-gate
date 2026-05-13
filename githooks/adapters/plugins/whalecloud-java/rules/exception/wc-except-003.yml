@@ -1,0 +1,17 @@
+---
+id: WC-EXCEPT-003
+name: catch时分清稳定和非稳定代码
+severity: error  # error=阻断, warning=警告
+source: J000041
+tool: auto  # auto-manual-auto: detected by tool / manual check / AST-grep
+category: wc-exception
+description: |
+  catch时分清稳定和非稳定代码
+
+  对应浩鲸规范 J000041。
+
+check:
+  type: ast-grep  # ast-grep / pmd-custom / spotbugs / checkstyle / manual
+  pattern: TODO
+
+notes: "Stable vs unstable code separation"

@@ -1,0 +1,14 @@
+---
+id: GEN-0005
+name: 包命名采用全小写命名。
+severity: error
+tool: auto
+category: wc-style
+description: |
+  包命名采用全小写命名。
+
+  Auto-extracted from book299-20132-Python语言编码规范.txt.
+
+check:
+  type: ast-grep
+  pattern: TODO

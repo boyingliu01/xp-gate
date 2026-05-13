@@ -1,0 +1,14 @@
+---
+id: GEN-0024
+name: 一般情况下源程序的有效注释量必须在 30%以上。
+severity: warning
+tool: auto
+category: wc-style
+description: |
+  一般情况下源程序的有效注释量必须在 30%以上。
+
+  Auto-extracted from book299-20132-Python语言编码规范.txt.
+
+check:
+  type: ast-grep
+  pattern: TODO

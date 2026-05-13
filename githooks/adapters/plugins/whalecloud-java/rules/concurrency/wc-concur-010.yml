@@ -1,0 +1,17 @@
+---
+id: WC-CONCUR-010
+name: volatile解决内存可见性但无法解决原子性
+severity: warning  # error=阻断, warning=警告
+source: J000027
+tool: auto  # auto-manual-auto: detected by tool / manual check / AST-grep
+category: wc-concurrency
+description: |
+  volatile解决内存可见性但无法解决原子性
+
+  对应浩鲸规范 J000027。
+
+check:
+  type: ast-grep  # ast-grep / pmd-custom / spotbugs / checkstyle / manual
+  pattern: TODO
+
+notes: "AtomicInteger over volatile int"

@@ -1,0 +1,17 @@
+---
+id: WC-STYLE-011
+name: 避免重复创建字符串对象
+severity: error  # error=阻断, warning=警告
+source: J000123
+tool: auto  # auto-manual-auto: detected by tool / manual check / AST-grep
+category: wc-style
+description: |
+  避免重复创建字符串对象
+
+  对应浩鲸规范 J000123。
+
+check:
+  type: ast-grep  # ast-grep / pmd-custom / spotbugs / checkstyle / manual
+  pattern: TODO
+
+notes: "String literal reuse"

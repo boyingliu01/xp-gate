@@ -1,0 +1,14 @@
+---
+id: GEN-0042
+name: Args:
+severity: info
+tool: auto
+category: wc-style
+description: |
+  Args:
+
+  Auto-extracted from book299-20132-Python语言编码规范.txt.
+
+check:
+  type: ast-grep
+  pattern: TODO

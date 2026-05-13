@@ -1,0 +1,17 @@
+---
+id: WC-COLLECT-006
+name: Collection addAll时需对每个元素类型检查
+severity: error  # error=阻断, warning=警告
+source: J000006
+tool: auto  # auto-manual-auto: detected by tool / manual check / AST-grep
+category: wc-collection
+description: |
+  Collection addAll时需对每个元素类型检查
+
+  对应浩鲸规范 J000006。
+
+check:
+  type: ast-grep  # ast-grep / pmd-custom / spotbugs / checkstyle / manual
+  pattern: TODO
+
+notes: "Type safety in bulk operations"

@@ -1,0 +1,14 @@
+---
+id: GEN-0043
+name: Returns: (或者 Yields: 用于生成器)
+severity: info
+tool: auto
+category: wc-style
+description: |
+  Returns: (或者 Yields: 用于生成器)
+
+  Auto-extracted from book299-20132-Python语言编码规范.txt.
+
+check:
+  type: ast-grep
+  pattern: TODO

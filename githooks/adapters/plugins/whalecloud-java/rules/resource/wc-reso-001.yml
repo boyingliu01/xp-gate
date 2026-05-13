@@ -1,0 +1,17 @@
+---
+id: WC-RESO-001
+name: 避免静态块中执行复杂逻辑
+severity: error  # error=阻断, warning=警告
+source: J000051
+tool: auto  # auto-manual-auto: detected by tool / manual check / AST-grep
+category: wc-resource
+description: |
+  避免静态块中执行复杂逻辑
+
+  对应浩鲸规范 J000051。
+
+check:
+  type: ast-grep  # ast-grep / pmd-custom / spotbugs / checkstyle / manual
+  pattern: TODO
+
+notes: "Static initializer complexity"

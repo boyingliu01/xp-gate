@@ -1,0 +1,14 @@
+---
+id: GEN-0030
+name: 如果需要注释的内容太多，需附加文档进行说明，注释时加上"参见《****》"。
+severity: warning
+tool: auto
+category: wc-style
+description: |
+  如果需要注释的内容太多，需附加文档进行说明，注释时加上"参见《****》"。
+
+  Auto-extracted from book299-20132-Python语言编码规范.txt.
+
+check:
+  type: ast-grep
+  pattern: TODO

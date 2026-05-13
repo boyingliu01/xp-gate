@@ -1,0 +1,14 @@
+---
+id: GEN-0062
+name: 使用 from import 形式的导入，一行只能导入一个库，特殊情况下可以使用逗号分开导入多个库。
+severity: warning
+tool: auto
+category: wc-style
+description: |
+  使用 from import 形式的导入，一行只能导入一个库，特殊情况下可以使用逗号分开导入多个库。
+
+  Auto-extracted from book299-20132-Python语言编码规范.txt.
+
+check:
+  type: ast-grep
+  pattern: TODO

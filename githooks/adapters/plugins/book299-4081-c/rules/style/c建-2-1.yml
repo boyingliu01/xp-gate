@@ -1,0 +1,14 @@
+---
+id: C建-2-1
+name: 单函数行数应控制在200-300行以内
+severity: info
+tool: auto
+category: wc-style
+description: |
+  单函数行数应控制在200-300行以内
+
+  Auto-extracted from book299-4081-C++编程规范.txt.
+
+check:
+  type: ast-grep
+  pattern: TODO

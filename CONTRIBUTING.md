@@ -10,10 +10,11 @@ git clone https://github.com/boyingliu01/xgate.git
 cd xgate
 npm install
 
-# Setup git hooks (MANDATORY)
-cp githooks/pre-commit .git/hooks/pre-commit
-cp githooks/pre-push .git/hooks/pre-push
-chmod +x .git/hooks/pre-commit .git/hooks/pre-push
+# Setup git hooks (MANDATORY) — installs hooks + adapter infrastructure
+bash githooks/install.sh --force
+
+# Verify installation
+bash githooks/verify.sh
 ```
 
 ## Delphi Review Setup

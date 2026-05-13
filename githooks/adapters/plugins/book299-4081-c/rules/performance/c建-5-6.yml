@@ -1,0 +1,14 @@
+---
+id: C建-5-6
+name: 尽量避免在性能要求较高的for语句中嵌套if语句
+severity: info
+tool: auto
+category: wc-performance
+description: |
+  尽量避免在性能要求较高的for语句中嵌套if语句
+
+  Auto-extracted from book299-4081-C++编程规范.txt.
+
+check:
+  type: ast-grep
+  pattern: TODO

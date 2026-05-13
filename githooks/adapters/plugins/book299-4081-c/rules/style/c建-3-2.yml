@@ -1,0 +1,14 @@
+---
+id: C建-3-2
+name: 类之间要独立，尽量不能有逻辑上的依赖
+severity: info
+tool: auto
+category: wc-style
+description: |
+  类之间要独立，尽量不能有逻辑上的依赖
+
+  Auto-extracted from book299-4081-C++编程规范.txt.
+
+check:
+  type: ast-grep
+  pattern: TODO

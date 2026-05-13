@@ -1,0 +1,14 @@
+---
+id: C建-5-2
+name: 尽量避免在循环中对全局变量/静态变量进行访问或者修改
+severity: info
+tool: auto
+category: wc-style
+description: |
+  尽量避免在循环中对全局变量/静态变量进行访问或者修改
+
+  Auto-extracted from book299-4081-C++编程规范.txt.
+
+check:
+  type: ast-grep
+  pattern: TODO

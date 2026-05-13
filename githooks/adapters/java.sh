@@ -1,7 +1,16 @@
 #!/usr/bin/env bash
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# Plugin directory
 PLUGIN_DIR="$SCRIPT_DIR/plugins/p3c-java"
+WHALECLOUD_PLUGIN_DIR="$SCRIPT_DIR/plugins/whalecloud-java"
+
+_is_whalecloud_enabled() {
+  # Check if whalecloud-java plugin is enabled
+  [ -d "$WHALECLOUD_PLUGIN_DIR" ] && \
+    ([ -f "config/pmd/whalecloud-ruleset.xml" ] || \
+     grep -q 'xgate-whalecloud-java\|xgateWhalecloudCheck' pom.xml build.gradle build.gradle.kts 2>/dev/null)
+}
 
 _detect_java_build() {
   if [ -f "pom.xml" ]; then
@@ -43,6 +52,9 @@ run_static_analysis() {
 
   # p3c-pmd check (Alibaba coding guidelines) — primary Java quality gate
   _run_p3c_check "$build_system"
+
+  # WhaleCloud Java Coding Standards — overlay on top of p3c-pmd
+  _run_whalecloud_check "$build_system"
 
   return 0
 }
@@ -136,4 +148,44 @@ _run_p3c_check() {
 
   echo "  ℹ️  No Maven/Gradle project — Skipping p3c-pmd"
   return 0
+}
+
+_run_whalecloud_check() {
+  local build_system="$1"
+
+  if ! _is_whalecloud_enabled; then
+    return 0
+  fi
+
+  echo "  Running WhaleCloud Java Coding Standards check..."
+
+  if [ "$build_system" = "maven" ]; then
+    if grep -q '<id>xgate-whalecloud-java</id>' pom.xml 2>/dev/null; then
+      mvn pmd:check checkstyle:check spotbugs:check \
+        -P xgate-whalecloud-java -Dpmd.failOnViolation=true \
+        2>&1 | tail -30
+      return "${PIPESTATUS[0]}"
+    else
+      echo "  ⚠️  whalecloud-java profile not installed in pom.xml"
+      echo "  To enable: bash $WHALECLOUD_PLUGIN_DIR/scripts/install-maven-whalecloud.sh"
+      return 0
+    fi
+
+  elif [ "$build_system" = "gradle" ]; then
+    if grep -q 'xgateWhalecloudCheck' build.gradle 2>/dev/null || \
+       grep -q 'xgateWhalecloudCheck' build.gradle.kts 2>/dev/null; then
+      gradle xgateWhalecloudCheck --quiet 2>&1 | tail -20
+      return "${PIPESTATUS[0]}"
+    else
+      echo "  ⚠️  whalecloud-java not configured in Gradle build"
+      echo "  To enable: bash $WHALECLOUD_PLUGIN_DIR/scripts/install-gradle-whalecloud.sh"
+      return 0
+    fi
+  fi
+
+  return 0
+}
+
+run_whalecloud_check() {
+  _run_whalecloud_check "$(_detect_java_build)"
 }

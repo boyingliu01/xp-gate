@@ -1,0 +1,14 @@
+---
+id: GEN-0064
+name: 使用绝对(absolute)import，因为这样通常更易读，在 import 系统没有正确配置（比如中的路径以 sys.path 结束）的情况下，也会有更好的
+severity: warning
+tool: auto
+category: wc-style
+description: |
+  使用绝对(absolute)import，因为这样通常更易读，在 import 系统没有正确配置（比如中的路径以 sys.path 结束）的情况下，也会有更好的
+
+  Auto-extracted from book299-20132-Python语言编码规范.txt.
+
+check:
+  type: ast-grep
+  pattern: TODO

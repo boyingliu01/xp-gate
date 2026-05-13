@@ -1,0 +1,14 @@
+---
+id: GEN-0010
+name: 当接口已有文档说明且主要是被用作调用时，也可以使用函数的命名约定。
+severity: warning
+tool: auto
+category: wc-style
+description: |
+  当接口已有文档说明且主要是被用作调用时，也可以使用函数的命名约定。
+
+  Auto-extracted from book299-20132-Python语言编码规范.txt.
+
+check:
+  type: ast-grep
+  pattern: TODO

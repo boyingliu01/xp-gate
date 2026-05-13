@@ -1,0 +1,73 @@
+// WhaleCloud Java Coding Standards Gradle config for XGate.
+// Layered on top of p3c-pmd baseline — adds 74 mandatory + 32 recommended
+// WhaleCloud-internal rules not covered by Alibaba p3c-pmd.
+//
+// Usage:
+//   ./gradlew xgateWhalecloudCheck
+//
+// Depends on: p3c-pmd config (xgateP3cCheck) must also be active.
+
+plugins {
+    id 'java'
+    id 'pmd'
+    id 'checkstyle'
+    id 'com.github.spotbugs' version '5.2.5'
+}
+
+// PMD configuration: p3c-pmd baseline + WhaleCloud overlay
+pmd {
+    consoleOutput = true
+    toolVersion = '7.7.0'
+    ruleSetFiles = files(
+        'config/pmd/whalecloud-ruleset.xml'
+    )
+    ruleSets = [
+        '/rulesets/java/ali-comment.xml',
+        '/rulesets/java/ali-concurrent.xml',
+        '/rulesets/java/ali-constant.xml',
+        '/rulesets/java/ali-exception.xml',
+        '/rulesets/java/ali-flowcontrol.xml',
+        '/rulesets/java/ali-naming.xml',
+        '/rulesets/java/ali-oop.xml',
+        '/rulesets/java/ali-orm.xml',
+        '/rulesets/java/ali-other.xml',
+        '/rulesets/java/ali-set.xml'
+    ]
+    sourceSets = [sourceSets.main, sourceSets.test]
+}
+
+// CheckStyle with WhaleCloud customized ruleset
+checkstyle {
+    toolVersion = '10.21.3'
+    configFile = file('config/checkstyle/whalecloud-checkstyle.xml')
+    sourceSets = [sourceSets.main, sourceSets.test]
+}
+
+// SpotBugs + FindSecBugs for security analysis
+spotbugs {
+    toolVersion = '4.7.3'
+    includeFilter = file('config/spotbugs/whalecloud-spotbugs.xml')
+    effort = 'max'
+    reportLevel = 'low'
+    sourceSets = [sourceSets.main]
+}
+
+dependencies {
+    spotbugsPlugins 'com.h3xstream.findsecbugs:findsecbugs-plugin:1.12.0'
+}
+
+// Combined WhaleCloud check task
+task xgateWhalecloudCheck {
+    description = 'Run all WhaleCloud Java coding standard checks (p3c-pmd + overlay + security)'
+    group = 'Verification'
+    dependsOn 'pmdMain', 'pmdTest', 'checkstyleMain', 'checkstyleTest', 'spotbugsMain'
+}
+
+// Install script: copies config files from plugin to project
+def whalecloudConfigDir = "${projectDir}/config"
+task installWhalecloudConfig(type: Copy) {
+    from "${pluginDir}/templates/gradle/config/"
+    into whalecloudConfigDir
+    description = 'Install WhaleCloud rule configuration files into project'
+    group = 'XGate'
+}

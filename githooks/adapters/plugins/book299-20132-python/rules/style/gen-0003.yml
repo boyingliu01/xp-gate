@@ -1,0 +1,14 @@
+---
+id: GEN-0003
+name: 名字可以有两个或三个单词组成，但不应多于 4 个，控制在 3 至 30个字母以内。
+severity: warning
+tool: auto
+category: wc-style
+description: |
+  名字可以有两个或三个单词组成，但不应多于 4 个，控制在 3 至 30个字母以内。
+
+  Auto-extracted from book299-20132-Python语言编码规范.txt.
+
+check:
+  type: ast-grep
+  pattern: TODO

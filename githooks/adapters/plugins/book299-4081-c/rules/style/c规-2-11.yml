@@ -1,0 +1,14 @@
+---
+id: C规-2-11
+name: 宏与常量命名全大写加下划线
+severity: error
+tool: auto
+category: wc-style
+description: |
+  宏与常量命名全大写加下划线
+
+  Auto-extracted from book299-4081-C++编程规范.txt.
+
+check:
+  type: ast-grep
+  pattern: TODO

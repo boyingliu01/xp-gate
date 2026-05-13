@@ -57,10 +57,11 @@ githooks/
 
 ## COMMANDS
 ```bash
-# Install hooks (manual process)
-cp githooks/pre-commit .git/hooks/pre-commit
-cp githooks/pre-push .git/hooks/pre-push
-chmod +x .git/hooks/pre-commit .git/hooks/pre-push
+# Install hooks (project root)
+bash githooks/install.sh [--force]
+
+# Verify installation
+bash githooks/verify.sh
 ```
 
 ## NOTES

@@ -1,0 +1,14 @@
+---
+id: GEN-0056
+name: 使用 1 个空行来分隔类中的方法(method)定义。
+severity: error
+tool: auto
+category: wc-style
+description: |
+  使用 1 个空行来分隔类中的方法(method)定义。
+
+  Auto-extracted from book299-20132-Python语言编码规范.txt.
+
+check:
+  type: ast-grep
+  pattern: TODO

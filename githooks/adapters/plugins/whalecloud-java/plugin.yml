@@ -1,0 +1,45 @@
+---
+id: whalecloud-java
+name: WhaleCloud Java Coding Standards
+version: 1.0.0
+languages: [java]
+description: >
+  浩鲸科技 Java 编码规范增强插件。在 p3c-pmd (Aribaba) 54 条规则基线之上，
+  叠加 74 条浩鲸企业内部强制规则 + 32 条推荐规则 + 安全篇规范。
+  覆盖集合处理、并发编程、异常处理、日志规范、安全管理、资源管理、编码风格、性能优化 8 大类别。
+author: WhaleCloud Technology (浩鲸科技)
+depends_on:
+  - id: p3c-java
+    version: ">=2.1.1"
+    required: true
+    reason: "p3c-pmd 提供 54 条 Alibaba 规范作为基线"
+rules_count: 106  # 74 mandatory + 32 recommended
+rules_count_by_severity:
+  error: 74   # 强制
+  warning: 32 # 推荐
+categories:
+  # === 集合处理 (Collections) ===
+  - wc-collection: 集合处理增强 (12 条) — subList/addAll/asList/map视图等 p3c 未覆盖的陷阱
+  # === 并发编程 (Concurrency) ===
+  - wc-concurrent: 并发编程增强 (14 条) — 锁策略/双重检查锁/HashMap死循环/p3c未覆盖的同步陷阱
+  # === 异常处理 (Exception Handling) ===
+  - wc-exception: 异常处理规范 (11 条) — 异常分类处理/finally规范/异常匹配/异常流程控制
+  # === 日志规范 (Logging) ===
+  - wc-logging: 日志输出规范 (7 条) — 占位符/级别判断/重复打印/国际化/生产环境debug
+  # === 安全管理 (Security) ===
+  - wc-security: 安全管理规范 (10 条) — SQL注入加密/MDF5/SQL注入/HTTP超时/HttpClient
+  # === 资源管理 (Resource Management) ===
+  - wc-resource: 资源管理规范 (6 条) — 资源关闭/finally-return/静态块/响应关闭
+  # === 编码风格 (Code Style) ===
+  - wc-style: 编码风格规范 (18 条) — 访问控制/赋值语句/类型转换/POJO/序列化
+  # === 性能优化 (Performance) ===
+  - wc-performance: 性能优化规范 (8 条) — 字符串连接/正则预编译/I/O缓冲/内存管理
+  # === 安全篇 (Security Chapter) ===
+  - wc-security-chapter: 安全开发规范 (安全篇) — SQL/XML/日志/命令注入, 路径标准化, Zip炸弹
+maven:
+  profile: xgate-whalecloud-java
+  profile_file: templates/maven/xgate-whalecloud-profile.xml
+  install_script: scripts/install-maven-whalecloud.sh
+gradle:
+  config_file: templates/gradle/xgate-whalecloud-gradle.gradle
+  install_script: scripts/install-gradle-whalecloud.sh

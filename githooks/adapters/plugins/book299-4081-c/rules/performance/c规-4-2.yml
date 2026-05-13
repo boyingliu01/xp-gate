@@ -1,0 +1,14 @@
+---
+id: C规-4-2
+name: 必须对动态申请的内存做有效性管理
+severity: error
+tool: auto
+category: wc-performance
+description: |
+  必须对动态申请的内存做有效性管理
+
+  Auto-extracted from book299-4081-C++编程规范.txt.
+
+check:
+  type: ast-grep
+  pattern: TODO

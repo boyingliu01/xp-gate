@@ -1,0 +1,17 @@
+---
+id: WC-STYLE-017
+name: 日期格式化年份统一使用小写y
+severity: error  # error=阻断, warning=警告
+source: J000063
+tool: auto  # auto-manual-auto: detected by tool / manual check / AST-grep
+category: wc-style
+description: |
+  日期格式化年份统一使用小写y
+
+  对应浩鲸规范 J000063。
+
+check:
+  type: ast-grep  # ast-grep / pmd-custom / spotbugs / checkstyle / manual
+  pattern: TODO
+
+notes: "yyyy vs YYYY confusion"

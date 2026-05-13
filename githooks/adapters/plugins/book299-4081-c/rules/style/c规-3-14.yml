@@ -1,0 +1,14 @@
+---
+id: C规-3-14
+name: 禁止使用goto语句
+severity: error
+tool: auto
+category: wc-style
+description: |
+  禁止使用goto语句
+
+  Auto-extracted from book299-4081-C++编程规范.txt.
+
+check:
+  type: ast-grep
+  pattern: TODO
