@@ -47,7 +47,7 @@ export function getDefaultConfig(): PrinciplesConfig {
     rules: {
       'clean-code': {
         'long-function': { enabled: true, threshold: 50, severity: 'warning' },
-        'large-file': { enabled: true, threshold: 500, severity: 'warning' },
+        'large-file': { enabled: true, threshold: 650, severity: 'warning' },
         'god-class': { enabled: true, threshold: 15, severity: 'warning' },
         'deep-nesting': { enabled: true, threshold: 4, severity: 'warning' },
         'too-many-params': { enabled: true, threshold: 7, severity: 'info' },

@@ -54,6 +54,10 @@ htmlcov/
 .sisyphus/
 .sprint-state/
 
+# Mutation testing
+.mutation-baseline.json
+.stryker-report.json
+
 # Skill-cert
 skill-cert/venv/
 skill-cert/.pytest_cache/

@@ -25,13 +25,16 @@ fi
 # Get files being pushed in this push operation
 # pre-push receives stdin with ref information
 PUSHED_FILES=""
+TS_FILES=""
 while read local_ref local_sha remote_ref remote_sha; do
   if [ "$remote_sha" = "0000000000000000000000000000000000000000" ]; then
     # New branch - compare against empty tree
     PUSHED_FILES=$(git diff-tree -r --name-only HEAD)
+    TS_FILES=$(git diff-tree -r --name-only HEAD | grep '\.ts$' || true)
   else
     # Existing branch - compare against what we're pushing from
     PUSHED_FILES=$(git diff-tree -r --name-only "$remote_sha" "$local_sha")
+    TS_FILES=$(git diff-tree -r --name-only "$remote_sha" "$local_sha" | grep '\.ts$' || true)
   fi
 done
 
@@ -217,6 +220,83 @@ if [[ "$CURRENT_TIME" > "$RESULT_EXPIRES" ]]; then
   echo "Re-run: /delphi-review --mode code-walkthrough"
   echo ""
   exit 1
+fi
+
+# ============================================================================
+# GATE M: MUTATION TESTING
+# ============================================================================
+echo ""
+echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+echo "   GATE M: MUTATION TESTING"
+echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+
+# Source adapter-common.sh for utility functions
+ADAPTER_COMMON="$(dirname "$0")/adapter-common.sh"
+if [[ ! -f "$ADAPTER_COMMON" ]]; then
+  ADAPTER_COMMON="githooks/adapter-common.sh"
+fi
+# shellcheck source=githooks/adapter-common.sh
+source "$ADAPTER_COMMON" 2>/dev/null || {
+  echo "⚠️ Could not source adapter-common.sh. SKIP — Gate M."
+}
+
+# Only run for TypeScript projects
+if [[ ! -f "package.json" ]] || [[ ! -f "tsconfig.json" ]]; then
+  echo "📚 Not a TypeScript project. SKIP — Gate M."
+else
+  # Check if mutation testing is configured
+  if ! detect_mutation_testable 2>/dev/null; then
+    echo "⚠️ Stryker config not found or @stryker-mutator not installed."
+    echo "   SKIP — Gate M mutation testing."
+  else
+    # Filter to source files (exclude tests)
+    CHANGED_SOURCE_FILES=$(echo "$TS_FILES" | grep -v '__tests__' | grep -v '\.test\.' | grep -v '\.spec\.' | grep -v '\.d\.ts$' || true)
+
+    if [ -z "$CHANGED_SOURCE_FILES" ]; then
+      echo "📚 No changed TypeScript source files. SKIP — Gate M."
+    else
+      echo "🧬 Running mutation tests on changed files..."
+      echo "$CHANGED_SOURCE_FILES"
+
+      # Run mutation gate with 120s timeout
+      MUTATION_OUTPUT=$(mktemp)
+      timeout 120s npx tsx src/mutation/gate-m.ts --changed-files "$CHANGED_SOURCE_FILES" > "$MUTATION_OUTPUT" 2>&1
+      MUTATION_EXIT=$?
+
+      case $MUTATION_EXIT in
+        0)
+          echo "✅ Gate M: PASS"
+          # Update baseline after successful mutation test
+          if [ -f ".stryker-baseline.json" ]; then
+            echo "📝 Updating mutation baseline..."
+            cp ".stryker-baseline.json" ".stryker-baseline.json.prev" 2>/dev/null || true
+          fi
+          ;;
+        1)
+          echo ""
+          echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+          echo "   ❌ GATE M FAILED - PUSH BLOCKED"
+          echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+          echo ""
+          cat "$MUTATION_OUTPUT"
+          echo ""
+          rm -f "$MUTATION_OUTPUT"
+          exit 1
+          ;;
+        124)
+          echo "⏱️ Gate M: TIMEOUT (120s). Mutation testing incomplete."
+          echo "   Allowing push with warning — review mutation coverage manually."
+          ;;
+        *)
+          echo "⚠️ Gate M: Unexpected exit code $MUTATION_EXIT"
+          cat "$MUTATION_OUTPUT"
+          echo "   Allowing push with warning."
+          ;;
+      esac
+
+      rm -f "$MUTATION_OUTPUT"
+    fi
+  fi
 fi
 
 # ============================================================================

@@ -1,0 +1,7 @@
+{
+  "$schema": "./node_modules/jscpd/json/schema/jscpd-schema.json",
+  "ignore": [
+    "**/__tests__/**",
+    "**/*.test.ts"
+  ]
+}

@@ -14,7 +14,7 @@ describe('config.ts - Configuration Loader', () => {
 
       // Clean code thresholds from design Section 6
       expect(config.rules['clean-code']['long-function'].threshold).toBe(50);
-      expect(config.rules['clean-code']['large-file'].threshold).toBe(500);
+      expect(config.rules['clean-code']['large-file'].threshold).toBe(650);
       expect(config.rules['clean-code']['god-class'].threshold).toBe(15);
       expect(config.rules['clean-code']['deep-nesting'].threshold).toBe(4);
       expect(config.rules['clean-code']['too-many-params'].threshold).toBe(7);

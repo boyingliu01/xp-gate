@@ -476,7 +476,7 @@ elif [ "$PROJECT_LANG" = "typescript" ]; then
   fi
   
   echo "Running jscpd for duplicate code detection..."
-  jscpd "$CHANGED_FILES" 2>&1 | head -30
+  jscpd --config jscpd.conf.json "$CHANGED_FILES" 2>&1 | head -30
   JSCPD_EXIT=$?
   if [ "$JSCPD_EXIT" -ne 0 ]; then
     echo "ℹ️  jscpd found duplicated code (warning, not blocking by default)"

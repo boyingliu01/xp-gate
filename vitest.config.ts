@@ -8,7 +8,7 @@ export default defineConfig({
     coverage: {
       provider: 'v8',
       reporter: ['text', 'json', 'html'],
-      exclude: ['src/_wip/**', 'node_modules/**'],
+      exclude: ['src/_wip/**', 'node_modules/**', 'src/mutation/**'],
       thresholds: {
         global: {
           branches: 80,

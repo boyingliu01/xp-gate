@@ -128,3 +128,19 @@ require_tool() {
   echo "   Per QUALITY-GATES-CODE-OF-CONDUCT.md: tool unavailable = BLOCK, not SKIP"
   return 1
 }
+
+detect_mutation_testable() {
+  if [[ ! -f "stryker.conf.json" ]] && [[ ! -f "stryker.prepush.conf.json" ]]; then
+    return 1
+  fi
+
+  if [[ -f "package.json" ]] && grep -qE '"@stryker-mutator[^"]*"' package.json 2>/dev/null; then
+    return 0
+  fi
+
+  if command -v npx >/dev/null 2>&1 && npx --no-install stryker --version >/dev/null 2>&1; then
+    return 0
+  fi
+
+  return 1
+}

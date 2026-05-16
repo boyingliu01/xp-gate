@@ -1,0 +1,12 @@
+{
+  "_comment": "Pre-push incremental mutation testing config. Extends stryker.conf.json conceptually (JSON has no native extend). CI uses stryker.conf.json; pre-push uses this config.",
+  "$schema": "./node_modules/@stryker-mutator/core/schema/stryker-schema.json",
+  "testRunner": "vitest",
+  "coverageAnalysis": "perTest",
+  "timeoutMS": 10000,
+  "timeoutFactor": 2.0,
+  "reporters": ["clear-text", "json"],
+  "jsonReporter": {
+    "fileName": ".stryker-report.json"
+  }
+}

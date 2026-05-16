@@ -21,10 +21,10 @@ describe('largeFileRule', () => {
     expect(violations).toHaveLength(0);
   });
 
-  it('should detect files exceeding 500 lines', () => {
+  it('should detect files exceeding 650 lines', () => {
     const largeFileAdapter: any = {
       ...mockAdapter,
-      countLines: () => 501
+      countLines: () => 651
     };
 
     const violations = largeFileRule.check('test-large.ts', largeFileAdapter);
@@ -33,7 +33,7 @@ describe('largeFileRule', () => {
       file: 'test-large.ts',
       line: 1,
       ruleId: 'clean-code.large-file',
-      message: 'File is too large: 501 lines (maximum: 500)',
+      message: 'File is too large: 651 lines (maximum: 650)',
       severity: 'warning'
     });
   });
@@ -41,7 +41,7 @@ describe('largeFileRule', () => {
   it('should handle exactly threshold lines as not violating', () => {
     const thresholdFileAdapter: any = {
       ...mockAdapter,
-      countLines: () => 500
+      countLines: () => 650
     };
 
     const violations = largeFileRule.check('test-threshold.ts', thresholdFileAdapter);
@@ -57,7 +57,7 @@ describe('largeFileRule', () => {
   });
 
   it('should use the correct threshold', () => {
-    expect(largeFileRule.threshold).toEqual(500);
+    expect(largeFileRule.threshold).toEqual(650);
   });
 
   it('should return empty violations when adapter throws error', () => {

@@ -199,7 +199,9 @@ brainstorm    autoplan    parallel-dev   code-walk     manual        learn +    
 
 ## 质量门禁详解
 
-每次 `git commit` 自动执行 6 道门禁：
+每次 `git commit` 自动执行 6 道门禁，每次 `git push` 自动执行 Gate M：
+
+### Pre-commit（6 道门禁）
 
 | 门禁 | 检查内容 | 阈值 | 失败行为 |
 |------|---------|------|---------|
@@ -209,6 +211,12 @@ brainstorm    autoplan    parallel-dev   code-walk     manual        learn +    
 | Gate 4 | Clean Code + SOLID | 零错误 | 阻断提交 |
 | Gate 5 | 单元测试 + 覆盖率 | 全部通过 + ≥80% | 阻断提交 |
 | Gate 6 | 架构合规 + 童子军规则 | 无新增警告 | 阻断提交 |
+
+### Pre-push（Gate M）
+
+| 门禁 | 检查内容 | 阈值 | 失败行为 |
+|------|---------|------|---------|
+| Gate M | 变异测试得分 | 默认 60%，关键路径 80% | 阻断推送 |
 
 ### Clean Code 规则（9 条）
 
@@ -342,6 +350,28 @@ rules:
   "max_rounds": 5,
   "timeout": 3600
 }
+```
+
+### .mutation-critical-paths（关键路径配置）
+
+```json
+{
+  "criticalPaths": ["src/core/", "src/handlers/"],
+  "threshold": 80
+}
+```
+
+### 变异测试命令
+
+```bash
+# 初始化本地 baseline（全量扫描，首次启用时）
+npm run mutation:baseline:init
+
+# 增量推送时触发 Gate M
+git push
+
+# 查看增量变异报告
+npm run mutation:incremental -- --changed-files "src/foo.ts,src/bar.ts"
 ```
 
 ---

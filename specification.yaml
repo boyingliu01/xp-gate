@@ -672,6 +672,91 @@ specification:
       threshold: 80
 
   # ============================================================
+  # Requirement 4: Gate M — Mutation Testing Quality Gate (Pre-Push)
+  # Source: docs/plans/2026-05-16-gate8-mutation-testing-precommit.md
+  # Delphi Status: APPROVED (Round 2)
+  # ============================================================
+  - id: REQ-MUT-001
+    title: Gate M Mutation Testing Quality Gate
+    description: |
+      Implement a pre-push quality gate that uses Stryker mutation testing to validate
+      test effectiveness beyond code coverage. The gate runs incrementally on changed files
+      with a 120s timeout, compares against local baseline, and blocks push if mutation
+      score falls below configurable thresholds.
+    priority: MUST
+    status: planned
+    source_document: docs/plans/2026-05-16-gate8-mutation-testing-precommit.md
+
+    acceptance_criteria:
+      - id: AC-MUT-001-01
+        given: A new source file with mutation score 65%
+        when: Pre-push Gate M runs
+        then: Push is allowed (score >= default threshold 60%)
+
+      - id: AC-MUT-001-02
+        given: A new source file with mutation score 55%
+        when: Pre-push Gate M runs
+        then: Push is BLOCKED (score < default threshold 60%)
+
+      - id: AC-MUT-001-03
+        given: A critical-path source file with mutation score 75%
+        when: Pre-push Gate M runs
+        then: Push is BLOCKED (score < critical threshold 80%)
+
+      - id: AC-MUT-001-04
+        given: A modified source file with baseline score 60% and new score 58%
+        when: Pre-push Gate M runs
+        then: Push is BLOCKED (score below baseline, regression not allowed)
+
+      - id: AC-MUT-001-05
+        given: A modified source file with baseline score 60% and new score 62%
+        when: Pre-push Gate M runs
+        then: Push is allowed (score improved above baseline)
+
+      - id: AC-MUT-001-06
+        given: A large commit with >10 changed files causing Stryker to exceed 120s timeout
+        when: Pre-push Gate M runs
+        then: Warning is emitted, push is allowed (timeout does not block)
+
+      - id: AC-MUT-001-07
+        given: A test file missing @intent JSDoc annotation
+        when: Pre-push Gate M runs test intent check
+        then: Warning is emitted, push is not blocked
+
+      - id: AC-MUT-001-08
+        given: No source files are in the current push
+        when: Pre-push Gate M runs
+        then: Gate M is SKIPPED with pass status
+
+      - id: AC-MUT-001-09
+        given: First-time setup with no local baseline
+        when: Developer runs npm run mutation:baseline:init
+        then: .mutation-baseline.json is generated locally (gitignored)
+
+      - id: AC-MUT-001-10
+        given: A test file with explicit @mutation-threshold: 75 and source score 70%
+        when: Pre-push Gate M runs
+        then: Push is BLOCKED (score < declared threshold 75%)
+
+    edge_cases:
+      - Stryker process killed by timeout (exit code 124) with incomplete report
+      - Baseline file corrupted or malformed JSON
+      - Source file exists but corresponding test file does not
+      - Mixed human-written and AI-generated tests in same file (threshold ambiguity)
+      - Stryker config missing or invalid (dry-run validation fails)
+      - CI baseline download fails (network issue, fallback to local or threshold-only)
+
+    security_considerations:
+      - Stryker report output must not contain source code snippets in CI artifacts
+      - Baseline file must not expose sensitive file paths or internal structure
+      - timeout command must not leak partial Stryker state on interruption
+
+    test_coverage_requirements:
+      unit: true
+      integration: true
+      threshold: 80
+
+  # ============================================================
   # Success Metrics
   # ============================================================
   success_metrics:
