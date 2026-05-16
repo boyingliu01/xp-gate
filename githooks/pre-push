@@ -16,12 +16,6 @@ CURRENT_BRANCH=$(git rev-parse --abbrev-ref HEAD)
 REMOTE="$1"
 URL="$2"
 
-# Skip for main/master
-if [[ "$CURRENT_BRANCH" == "main" || "$CURRENT_BRANCH" == "master" ]]; then
-  echo "⚠️ Pushing to main/master. Proceeding..."
-  exit 0
-fi
-
 # Get files being pushed in this push operation
 # pre-push receives stdin with ref information
 PUSHED_FILES=""
@@ -97,6 +91,11 @@ echo ""
 # VALIDATE CODE WALKTHROUGH RESULT FILE
 # ============================================================================
 RESULT_FILE=".code-walkthrough-result.json"
+
+# Skip Delphi walkthrough for main/master - Gate M still runs
+if [[ "$CURRENT_BRANCH" == "main" || "$CURRENT_BRANCH" == "master" ]]; then
+  echo "⚠️ Pushing to main/master - Delphi walkthrough skipped"
+else
 
 if [ ! -f "$RESULT_FILE" ]; then
   echo ""
@@ -324,4 +323,5 @@ fi
 
 echo ""
 echo "Proceeding with push..."
+fi
 exit 0
