@@ -266,8 +266,17 @@ npm run dashboard
 # 打开 http://localhost:3000
 ```
 
-Dashboard 读取本地数据：
-- `.quality-history.jsonl` — 每次提交的分数历史
+Dashboard 包含 4 个视图 + PDF 导出：
+| 视图 | 说明 |
+|------|------|
+| Score Trend | 提交质量评分趋势折线图 |
+| Gate Pass Rate | 各 Gate 历史通过率柱状图 |
+| Metrics Trend | 复杂度告警数、童子军阻断数趋势 |
+| Latest Gate Status | 最新一次各 Gate 状态表 |
+| Export PDF | 导出 PDF 报告（含总结 + Gate 表 + 历史） |
+
+数据文件：
+- `.quality-history.jsonl` — 每次提交的评分、Gate 状态、指标
 - `quality-report.json` — 最新门禁详情
 
 ---
