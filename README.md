@@ -257,6 +257,21 @@ brainstorm    autoplan    parallel-dev   code-walk     manual        learn +    
 
 ---
 
+## Web Dashboard
+
+查看扫描历史和趋势：
+
+```bash
+npm run dashboard
+# 打开 http://localhost:3000
+```
+
+Dashboard 读取本地数据：
+- `.quality-history.jsonl` — 每次提交的分数历史
+- `quality-report.json` — 最新门禁详情
+
+---
+
 ## AI 技能集成
 
 XGate 集成 15+ 个专业 AI 技能，按 Sprint Flow 阶段排列：
