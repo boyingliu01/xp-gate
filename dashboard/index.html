@@ -1,0 +1,35 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>XGate Quality Dashboard</title>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <header>
+    <h1>XGate Quality Dashboard</h1>
+    <p class="subtitle">Local scan history and trends</p>
+  </header>
+  
+  <main>
+    <section class="summary">
+      <h2>Summary</h2>
+      <div id="summary-cards"></div>
+    </section>
+    
+    <section class="charts">
+      <h2>Score Trend</h2>
+      <canvas id="score-chart"></canvas>
+    </section>
+    
+    <section class="gates">
+      <h2>Gate History</h2>
+      <div id="gate-table"></div>
+    </section>
+  </main>
+  
+  <script src="dashboard.js"></script>
+</body>
+</html>
