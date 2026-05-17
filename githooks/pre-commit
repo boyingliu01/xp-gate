@@ -1327,7 +1327,20 @@ generate_quality_report() {
 }
 ENDJSON
 
-  echo "{\"timestamp\":\"$TIMESTAMP\",\"commit\":\"$COMMIT_HASH\",\"score\":$SCORE,\"passed\":$PASSED_COUNT,\"total\":$TOTAL_GATES}" >> "$HISTORY_FILE"
+  # Build per-gate JSON fragment for history
+  local GATES_JSON="{"
+  GATES_JSON="${GATES_JSON}\"gate1\":{\"status\":\"${GATE_1_STATUS:-PASS}\",\"name\":\"Code Quality\"},"
+  GATES_JSON="${GATES_JSON}\"gate2\":{\"status\":\"${GATE_2_STATUS:-PASS}\",\"name\":\"Duplicate Code\"},"
+  GATES_JSON="${GATES_JSON}\"gate3\":{\"status\":\"${GATE_3_STATUS:-PASS}\",\"name\":\"Complexity\",\"warnings\":${CC_WARNINGS:-0}},"
+  GATES_JSON="${GATES_JSON}\"gate4\":{\"status\":\"${GATE_4_STATUS:-PASS}\",\"name\":\"Principles\",\"warnings\":${WARNING_COUNT:-0}},"
+  GATES_JSON="${GATES_JSON}\"gate5\":{\"status\":\"${GATE_5_STATUS:-PASS}\",\"name\":\"Tests+Coverage\",\"coverage\":\"${COV_PCT}\"},"
+  GATES_JSON="${GATES_JSON}\"gate6\":{\"status\":\"${GATE_6_STATUS:-PASS}\",\"name\":\"Architecture+BoyScout\",\"bsBlocked\":${BS_BLOCKED}},"
+  GATES_JSON="${GATES_JSON}\"gate7\":{\"status\":\"${GATE_7_STATUS:-PASS}\",\"name\":\"IaC Security\"},"
+  GATES_JSON="${GATES_JSON}\"gate8\":{\"status\":\"${GATE_8_STATUS:-PASS}\",\"name\":\"Secret Scanning\"},"
+  GATES_JSON="${GATES_JSON}\"gate9\":{\"status\":\"${GATE_9_STATUS:-PASS}\",\"name\":\"SAST Security\"}}"
+  GATES_JSON="${GATES_JSON}}"
+
+  echo "{\"timestamp\":\"$TIMESTAMP\",\"commit\":\"$COMMIT_HASH\",\"score\":$SCORE,\"passed\":$PASSED_COUNT,\"total\":$TOTAL_GATES,\"gates\":$GATES_JSON,\"coverage\":\"$COV_PCT\",\"complexityWarnings\":${CC_WARNINGS:-0},\"principleWarnings\":${WARNING_COUNT:-0},\"boyScoutBlocked\":${BS_BLOCKED}}" >> "$HISTORY_FILE"
 
   echo ""
   echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"

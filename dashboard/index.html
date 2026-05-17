@@ -5,12 +5,15 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>XGate Quality Dashboard</title>
   <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf-autotable/3.8.2/jspdf.plugin.autotable.min.js"></script>
   <link rel="stylesheet" href="/dashboard/style.css">
 </head>
 <body>
   <header>
     <h1>XGate Quality Dashboard</h1>
     <p class="subtitle">Local scan history and trends</p>
+    <button id="export-pdf" class="export-btn">Export PDF</button>
   </header>
   
   <main>
@@ -24,8 +27,18 @@
       <canvas id="score-chart"></canvas>
     </section>
     
+    <section class="charts">
+      <h2>Gate Pass Rate</h2>
+      <canvas id="gate-pass-chart"></canvas>
+    </section>
+    
+    <section class="charts" id="metrics-section">
+      <h2>Metrics Trend</h2>
+      <canvas id="metrics-chart"></canvas>
+    </section>
+    
     <section class="gates">
-      <h2>Gate History</h2>
+      <h2>Latest Gate Status</h2>
       <div id="gate-table"></div>
     </section>
   </main>
