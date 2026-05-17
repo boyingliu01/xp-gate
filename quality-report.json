@@ -1,7 +1,7 @@
 {
   "reportVersion": "1.0",
-  "generatedAt": "2026-05-16T23:59:41Z",
-  "commit": "09d817b6f2eefb5930aa53eacfeb655238e65d64",
+  "generatedAt": "2026-05-17T00:08:05Z",
+  "commit": "e96b3a1f25ea9cfb33734e47819c117759cd3793",
   "project": "xgate",
   "language": "typescript",
   "overall": {
@@ -26,7 +26,7 @@
       "status": "PASS",
       "threshold": "5",
       "errorThreshold": "10",
-      "warnings": Rt
+      "warnings": 0
     },
     "gate4": {
       "name": "Clean Code + SOLID",
