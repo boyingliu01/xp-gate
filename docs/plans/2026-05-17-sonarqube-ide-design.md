@@ -1,243 +1,168 @@
-# SonarQube for IDE 集成方案
+# Semgrep Gate 8 — Pre-commit Security Scan
 
 **Date:** 2026-05-17
 **Issue:** #44
-**Status:** APPROVED
+**Status:** Phase 0 APPROVED → Phase 1 delphi-review
 **Author:** Sisyphus
 
 ---
 
 ## 1. 概述
 
-为 XGate 用户提供 **SonarQube for IDE** 的集成方案，实现编码过程中的即时质量反馈。
+在 pre-commit hook 新增 **Gate 8（Semgrep 安全扫描）**，用 `semgrep` CLI 对 staged files 做增量 SAST 分析。
 
-**核心价值**：
-- XGate pre-commit hook 反馈延迟 < 30s
-- SonarQube for IDE 提供 **编码时实时提示**（< 1s）
-- 两者互补：IDE 预防问题 → pre-commit 最终验证
+**核心约束**：代码完全留在本地，不发到任何外部服务。
 
 ---
 
-## 2. 核心任务
+## 2. 工具选型决策
 
-### 任务 1：调研 SonarQube for IDE 版本差异
+### 为什么是 Semgrep（不是 sonar-scanner）
 
-| 版本 | 价格 | 功能 | 适用场景 |
-|------|------|------|---------|
-| **Community (免费)** | $0 | 基础规则、本地分析 | 个人项目、开源项目 |
-| **Developer (付费)** | $9/月/用户 | 高级规则、SonarQube 服务器连接 | 团队开发、私有代码 |
-| **Enterprise** | 定制 | 自定义规则、CI 集成 | 大型企业 |
+| 维度 | Semgrep | sonar-scanner → SaaS | sonar-scanner → CE |
+|------|--------|---------------------|-------------------|
+| 代码是否外发 | **❌ 本地** | ✅ 外发到 Sonar 云 | ❌ 本地（需 Docker） |
+| 安全扫描（漏洞） | ✅ GA | ✅ | ❌ Community Build 无 SAST |
+| TypeScript | ✅ GA | ✅ | ✅ |
+| Python | ✅ GA | ✅ | ✅ |
+| Go | ✅ GA | ✅ | ✅ |
+| pre-commit gate 适配 | ✅ 原生 | ⚠️ SaaS 不适合 | ⚠️ Docker 依赖 |
+| 部署复杂度 | **免部署**（pip/brew） | 免 | Docker + DB |
+| 成本 | 免费 | $32/月（私有项目） | 免费 |
 
-**决策**：XGate 默认推荐 **Community 版**（免费），私有项目可升级到 Developer 版。
-
----
-
-### 任务 2：IDE 集成文档
-
-#### VS Code 集成
-
-**插件**：SonarQube (by SonarSource)
-**安装**：
-```bash
-# 通过 VS Code 扩展市场搜索 "SonarQube"
-# 或使用命令行
-code --install-extension sonarsource.sonarlint-vscode
-```
-
-**配置** (`.vscode/settings.json`)：
-```json
-{
-  "sonarlint.connectedMode.project": {
-    "connectionId": "SONARQUBE",
-    "projectKey": "xgate"
-  },
-  "sonarlint.additionalRulesetPlugins": [
-    "sonar-ts",
-    "sonar-python",
-    "sonar-java"
-  ],
-  "sonarlint.output.showSonarLogs": true,
-  "sonarlint.showBottomPanelOnFindViolation": true
-}
-```
-
-**扩展推荐** (`.vscode/extensions.json`)：
-```json
-{
-  "recommendations": [
-    "sonarsource.sonarlint-vscode",
-    "dbaeumer.vscode-eslint",
-    "ms-python.python",
-    "ms-vscode.vscode-typescript"
-  ]
-}
-```
-
-#### JetBrains 集成
-
-**插件**：SonarLint
-**安装**：
-```
-Settings → Plugins → Search "SonarLint" → Install
-```
-
-**配置**：
-```
-Tools → SonarLint → Connect to SonarQube
-→ Select project → Configure bindings
-```
-
-#### Vim/Neovim 集成
-
-**插件**：coc-sonarlint (通过 coc.nvim)
-**安装** (vim-plug)：
-```vim
-Plug 'neoclide/coc.nvim', {'branch': 'release'}
-Plug 'coc-extensions/coc-sonarlint'
-```
-
-**配置** (`~/.config/nvim/init.vim`)：
-```vim
-let g:coc_global_extensions = ['coc-sonarlint']
-let g:sonarlint_enabled = 1
-```
+**结论**：Semgrep 是唯一同时满足"本地 + 安全扫描 + 免部署 + 免费"的方案。
 
 ---
 
-### 任务 3：XGate 规则与 Sonar 规则映射
+## 3. Gate 8 逻辑
 
-| XGate 规则 | Sonar 规则 | 冲突处理 |
-|-----------|-----------|---------|
-| Gate 1 (代码质量) | SonarLint 基础规则 | **互补**：Sonar 实时提示，Gate 最终验证 |
-| Gate 4 (Clean Code) | `rules:sonar:clean-code` | **去重**：XGate 优先，Sonar 辅助 |
-| Gate 6 (架构) | `rules:sonar:architecture` | **独立**：XGate 架构规则更严格 |
+**位置**: `githooks/pre-commit`（Gate 7 之后，约 line 1137+）
+**触发**: pre-commit 时自动执行，与 Gate 7 gitleaks 并行执行（OR 逻辑：任一阻断则整体阻断）
 
-**关键决策**：
-- **避免重复警告**：在 `.vscode/settings.json` 中禁用与 XGate 重复的 Sonar 规则
-- **优先级**：XGate pre-commit 门禁为准，Sonar 作为辅助提示
+### 流程
 
-**禁用重复规则** (`.vscode/settings.json`)：
-```json
-{
-  "sonarlint.filteredRules": [
-    "typescript:S3776",  // 圈复杂度（Gate 3 已覆盖）
-    "python:S103",       // 行长度（Gate 4 已覆盖）
-    "java:S1192",        // 重复字符串（Gate 2 已覆盖）
-    "javascript:S3776"   // 函数复杂度（Gate 3 已覆盖）
-  ]
-}
+```
+1. 检测 semgrep CLI 可用性
+   → 缺失 → SKIP（显示安装提示）
+
+2. 获取 staged files（过滤支持语言）
+   git diff --cached --name-only --diff-filter=ACM
+   → 空 → SKIP
+   仅对 Semgrep 支持语言运行：.ts .tsx .py .go .java .js .jsx .c .cpp .cs .rb .php .scala .swift
+
+3. 运行 semgrep（本地规则）
+   semgrep --config=auto --json <files>
+   说明：--config=auto 首次运行需联网拉取规则缓存，后续离线可用。
+   为确保完全本地，建议预先运行一次 semgrep --config=p/security-audit 预缓存规则。
+
+4. 解析 JSON 结果
+   SECURITY SEVERITY:
+   - CRITICAL/HIGH → 阻断提交
+   - MEDIUM/LOW → 警告，不阻断
+   RULES VIOLATION（非 security）：
+   - 规则违反（code smell 类） → 警告，不阻断，单独分类
+
+5. 错误处理
+   - semgrep 运行错误（返回码 3+） → SKIP（不阻断）
+   - 无 semgrep → SKIP
+   - 有漏洞 → 阻断
+
+6. 更新质量报告
+```
+
+### 阻断策略
+
+| 类型 | 等级 | Gate 行为 |
+|------|------|-----------|
+| 安全漏洞 | CRITICAL / HIGH | **阻断提交** |
+| 安全漏洞 | MEDIUM / LOW | ⚠️ 警告，不阻断 |
+| 规则违反（code smell） | 任意 | ⚠️ 警告，不阻断（单独分类） |
+| semgrep 缺失/运行错误 | — | SKIP（不阻断） |
+
+---
+
+## 4. 输出格式
+
+**阻断输出**：
+```
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+   GATE 8: Semgrep Security Gate
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  CRITICAL/HIGH: 2  ❌ BLOCKED
+  MEDIUM/LOW:    1  ⚠️  warning
+  Code Smells:   3  ⚠️  warning
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  ❌ BLOCKED — Critical/High vulnerability found
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  [SEMGREP] Insecure SQL construction
+  src/db/query.ts:12 → severity:HIGH
+
+  Run 'npx semgrep' to review all findings.
+```
+
+**警告输出**：
+```
+  Gate 8: Semgrep — PASS (0 critical/high)
+  ⚠️  1 MEDIUM, 3 code smells — see below
+```
+
+**通过输出**：
+```
+  Gate 8: Semgrep — PASS (0 critical/high issues)
+```
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+   GATE 8: Semgrep Security Gate
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  Critical/High: 2  ❌ BLOCKED
+  Medium: 1        ⚠️  warning
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  ❌ BLOCKED — Critical vulnerability found
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  [SEMGREP] Insecure SQL construction
+  src/db/query.ts:12 → severity:HIGH
+```
+
+**通过输出**：
+```
+  Gate 8: Semgrep — PASS (0 critical/high issues)
 ```
 
 ---
 
-### 任务 4：IDE 状态同步评估
-
-**需求**：将 Sonar 问题自动转为 XGate TODO
-
-**方案对比**：
-
-| 方案 | 复杂度 | 价值 | 建议 |
-|------|--------|------|------|
-| **TODO 注释同步** | 低 | 中 | ✅ 推荐 |
-| **GitHub Issue 自动创建** | 中 | 高 | ⚠️ 可选 |
-| **XGate Dashboard 集成** | 高 | 中 | ❌ Phase 2 |
-
-**TODO 同步实现**：
-```typescript
-// 检测 Sonar 问题 → 自动添加 TODO 注释
-// 文件：src/ide-sync.ts
-function syncSonarToTodo(sonarIssue: SonarIssue): void {
-  const todoComment = `// TODO[XGate-${sonarIssue.ruleId}]: ${sonarIssue.message}`;
-  // 插入到问题位置
-}
-```
-
-**决策**：Phase 1 仅实现 **TODO 注释同步**（低复杂度），Phase 2 评估 GitHub Issue 同步。
-
----
-
-## 3. 输出物
-
-### 文档
-
-- `docs/IDE-INTEGRATION.md` — 完整集成指南
-- `.vscode/settings.json` — VS Code 配置模板
-- `.vscode/extensions.json` — VS Code 扩展推荐
-- `skills/sonarqube-ide/SKILL.md` — on-demand 查询 Sonar 状态 Skill
-
-### 代码
-
-- `src/ide-sync.ts` — IDE 状态同步工具（Phase 1）
-- `scripts/setup-ide.sh` — IDE 环境一键配置脚本
-
----
-
-## 4. 安装脚本
+## 5. 安装与规则预缓存
 
 ```bash
-#!/usr/bin/env bash
-# scripts/setup-ide.sh
+# macOS
+brew install semgrep
 
-set -e
+# Linux
+curl -L https://semgrep.s3.amazonaws.com/latest/semgrep > /tmp/semgrep && chmod +x /tmp/semgrep && sudo mv /tmp/semgrep /usr/local/bin/
 
-echo "🔧 配置 VS Code..."
+# pip
+pip install semgrep
 
-# 安装 SonarLint 插件
-code --install-extension sonarsource.sonarlint-vscode --force
+# 验证
+semgrep --version
 
-# 复制配置模板
-cp .vscode/settings.json.example .vscode/settings.json
-cp .vscode/extensions.json.example .vscode/extensions.json
+# 首次预缓存安全规则（确保后续完全离线可用）
+semgrep --config=p/security-audit
 
-echo "✅ VS Code 配置完成"
-echo "   重启 VS Code 以生效"
+# 可选：预缓存完整 auto 规则
+semgrep --config=auto
 ```
 
 ---
 
-## 5. 测试验证
+## 6. 冲突说明
 
-| 验证项 | 方法 |
-|--------|------|
-| SonarLint 安装 | `code --list-extensions` 查看 |
-| 规则映射正确 | 添加问题代码，验证仅显示非重复警告 |
-| TODO 同步 | 添加 Sonar 问题，验证 TODO 注释生成 |
-| 多 IDE 支持 | 在 VS Code/JetBrains/Vim 分别测试 |
+| 原 issue | 变更 |
+|---------|------|
+| #44 SonarQube for IDE | 改 Semgrep（数据主权原因） |
+| #46 SonarQube MCP Server | 取消（Semgrep 替代） |
 
 ---
 
-## 6. 关键决策
+## 7. Phase B 可选
 
-| 决策 | 方案 | 理由 |
-|------|------|------|
-| 免费 vs 付费版本 | Community (免费) | XGate 用户多为个人/小团队，免费版足够 |
-| 规则冲突处理 | XGate 优先，Sonar 辅助 | pre-commit 门禁为准，IDE 仅辅助 |
-| 状态同步范围 | TODO 注释 → GitHub Issue | 渐进式：先实现低复杂度方案 |
-| IDE 支持优先级 | VS Code > JetBrains > Vim | 覆盖 80% 用户，Vim 为可选 |
-
----
-
-## 7. 实施计划
-
-### Phase 1 (MVP)
-
-- [x] 调研 SonarQube 版本差异
-- [x] 编写 IDE 集成文档
-- [x] 提供 `.vscode/settings.json` 和 `.vscode/extensions.json` 模板
-- [ ] 实现 TODO 同步工具
-- [ ] 创建安装脚本
-
-### Phase 2 (可选)
-
-- [ ] GitHub Issue 自动创建
-- [ ] XGate Dashboard 集成
-- [ ] 自定义规则扩展
-
----
-
-## 8. 参考链接
-
-- [SonarQube for IDE](https://www.sonarsource.com/products/sonarqube/ide/)
-- [VS Code 插件文档](https://docs.sonarsource.com/sonarqube-for-ide/vs-code/)
-- [SonarLint 规则文档](https://docs.sonarsource.com/sonarlint/)
-
+- **Skill `/semgrep`** — on-demand 调用 Semgrep 获取安全问题摘要
+- **Web Dashboard** — 展示扫描历史、问题趋势（数据来自本地 JSON 输出）
