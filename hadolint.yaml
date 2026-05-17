@@ -1,0 +1,22 @@
+# Hadolint configuration for XGate
+# https://github.com/hadolint/hadolint
+
+# Ignore specific rules
+ignored:
+  - DL3008  # Pin versions in apt get install
+  - DL3028  # Pin Ruby gem versions
+  - DL3007  # Prevent using latest version
+
+# Custom rules (if needed)
+# custom-rules:
+#   - id: DL9999
+#     description: Custom rule description
+#     url: https://example.com/rule
+#     tags:
+#       - security
+
+# Failure thresholds
+failure-threshold: error
+
+# Output format
+format: stylish

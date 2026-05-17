@@ -133,7 +133,7 @@ bash scripts/install-all.sh
 
 ## 语言支持
 
-XGate 支持 **12 种语言**，通过适配器自动检测和路由：
+XGate 支持 **13 种语言** + IaC 文件，通过适配器自动检测和路由：
 
 | 语言 | 适配器文件 | 静态分析 | 测试框架 | 复杂度检测 |
 |------|-----------|---------|---------|-----------|
@@ -145,12 +145,16 @@ XGate 支持 **12 种语言**，通过适配器自动检测和路由：
 | C++ | `adapter-cpp.sh` | clang-tidy | GoogleTest | lizard ✅ |
 | Swift | `adapter-swift.sh` | swiftlint | XCTest | lizard ✅ |
 | Objective-C | `adapter-objc.sh` | oclint | XCTest | lizard ✅ |
-| Shell | `adapter-shell.sh` | shellcheck | bats | 自定义 |
-| Dart | `adapter-dart.sh` | dart analyze | dart test | 自定义 |
-| Flutter | `adapter-flutter.sh` | flutter analyze | flutter test | 自定义 |
-| PowerShell | `adapter-powershell.sh` | PSScriptAnalyzer | Pester | 自定义 |
+| Shell | `adapter-shell.sh` | shellcheck | bats | lizard ✅ |
+| C | `adapter-c.sh` | clang-tidy | GoogleTest | lizard ✅ |
+| Dart | `adapter-dart.sh` | dart analyze | dart test | lizard ✅ |
+| Flutter | `adapter-flutter.sh` | flutter analyze | flutter test | lizard ✅ |
+| PowerShell | `adapter-powershell.sh` | PSScriptAnalyzer | Pester | lizard ✅ |
+| IaC (Terraform/K8s/Docker) | `adapter-iac.sh` | checkov/hadolint/kube-score/tflint | N/A | N/A |
 
 适配器位于 `githooks/adapters/`，自动根据文件扩展名选择。
+
+> **plugins/ 扩展目录**：`githooks/adapters/plugins/` 包含第三方扩展工具（如 alibaba-java/p3c、book299-20132-python 等），可按需安装以增强特定语言检查能力。
 
 ---
 

@@ -1,0 +1,36 @@
+# Kube-score configuration for XGate
+# https://github.com/zegl/kube-score
+
+# Enable/disable specific checks
+checks:
+  # Pod: Container image
+  - id: container-image-tag
+    enabled: true
+    
+  # Pod: Container resources
+  - id: container-resources
+    enabled: true
+    
+  # Pod: Container security context
+  - id: container-security-context
+    enabled: true
+    
+  # Deployment: App labels
+  - id: deployment-app-labels
+    enabled: true
+    
+  # Service: Selector match
+  - id: service-selector-match
+    enabled: true
+
+# Ignore specific checks for specific files
+# ignore-checks:
+#   - container-image-tag:
+#     - "tests/*"
+
+# Output format
+output: human
+
+# Severity threshold
+# All CRITICAL and above will fail
+severity: critical

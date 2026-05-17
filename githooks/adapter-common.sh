@@ -45,7 +45,11 @@ detect_project_lang() {
     elif [[ -n "$(find . -name "*.java" -type f | head -n 1)" ]]; then
       echo "java"
     elif [[ -n "$(find . -name "*.dart" -type f | head -n 1)" ]]; then
-      echo "dart"
+      if grep -q "flutter:" "pubspec.yaml" 2>/dev/null || [[ -f ".flutter" ]]; then
+        echo "flutter"
+      else
+        echo "dart"
+      fi
     elif [[ -n "$(find . -name "*.swift" -type f | head -n 1)" ]]; then
       echo "swift"
     elif [[ -n "$(find . -name "*.cpp" -o -name "*.cc" -o -name "*.c" -o -name "*.h" -type f | head -n 1)" ]]; then
@@ -127,6 +131,35 @@ require_tool() {
   fi
   echo "   Per QUALITY-GATES-CODE-OF-CONDUCT.md: tool unavailable = BLOCK, not SKIP"
   return 1
+}
+
+# Detect if project has IaC files (Terraform, Kubernetes, Docker)
+detect_iac_project() {
+  local has_iac=false
+  
+  # Check for Terraform files
+  if [[ -n "$(find . -maxdepth 2 -name "*.tf" -not -path "./.git/*" 2>/dev/null | head -1)" ]]; then
+    has_iac=true
+  fi
+  
+  # Check for Kubernetes manifests (YAML with apiVersion/kind)
+  if [[ -n "$(find . -maxdepth 2 ( -name "*.yaml" -o -name "*.yml" ) -not -path "./.git/*" 2>/dev/null | head -1)" ]]; then
+    local yaml_file=$(find . -maxdepth 2 ( -name "*.yaml" -o -name "*.yml" ) -not -path "./.git/*" 2>/dev/null | head -1)
+    if grep -qE "^(apiVersion|kind):" "$yaml_file" 2>/dev/null; then
+      has_iac=true
+    fi
+  fi
+  
+  # Check for Dockerfiles
+  if [[ -n "$(find . -maxdepth 2 -name "Dockerfile" -o -name "*.dockerfile" -not -path "./.git/*" 2>/dev/null | head -1)" ]]; then
+    has_iac=true
+  fi
+  
+  if [ "$has_iac" = true ]; then
+    echo "iac"
+  else
+    echo ""
+  fi
 }
 
 detect_mutation_testable() {

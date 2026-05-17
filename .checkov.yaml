@@ -1,0 +1,41 @@
+# Checkov configuration for XGate
+# https://www.checkov.io/
+
+# Skip specific checks (add your exclusions here)
+# skip_check:
+#   - CKV_AWS_1  # Example: Skip AWS credential check
+
+# Only run specific checks (uncomment to use)
+# check:
+#   - CKV_AWS_2
+
+# Skip checks for specific files
+# skip_file:
+#   - "tests/**"
+#   - "examples/**"
+
+# Custom policies directory
+# custom_policies: "./policies/"
+
+# Output formats
+# output:
+#   - cli
+#   - json
+#   - junitxml
+
+# Severity filter
+# severity:
+#   - high
+#   - critical
+
+# Resource types to scan
+# resource:
+#   - aws_s3_bucket
+#   - aws_security_group
+
+# Framework filters
+# framework:
+#   - terraform
+#   - terraform_plan
+#   - dockerfile
+#   - kubernetes
