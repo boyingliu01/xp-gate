@@ -107,10 +107,34 @@ install_hooks() {
 
 if [[ "$INSTALL_MODE" = "both" ]] || [[ "$INSTALL_MODE" = "project-only" ]]; then
     install_hooks "$PROJECT_HOOKS_DIR" "Project"
+    # Install adapter infrastructure to project
+    PROJECT_GITHOOKS_DIR="$(git rev-parse --show-toplevel)/githooks"
+    if [ -d "$PROJECT_GITHOOKS_DIR" ] && [ "$SCRIPT_DIR" != "$PROJECT_GITHOOKS_DIR" ]; then
+        mkdir -p "$PROJECT_GITHOOKS_DIR/adapters"
+        if [[ -f "$SCRIPT_DIR/adapter-common.sh" ]]; then
+            cp "$SCRIPT_DIR/adapter-common.sh" "$PROJECT_GITHOOKS_DIR/adapter-common.sh"
+            echo "${GREEN}✅ adapter-common.sh → Project githooks/${NC}"
+        fi
+        cp -n "$SCRIPT_DIR/adapters/"*.sh "$PROJECT_GITHOOKS_DIR/adapters/" 2>/dev/null || true
+        echo "${GREEN}✅ adapters/*.sh → Project githooks/adapters/${NC}"
+    fi
 fi
+
+install_adapters_to_target() {
+    TARGET_DIR="$1"
+    LABEL="$2"
+    mkdir -p "$TARGET_DIR/adapters"
+    if [[ -f "$SCRIPT_DIR/adapter-common.sh" ]]; then
+        cp "$SCRIPT_DIR/adapter-common.sh" "$TARGET_DIR/adapter-common.sh"
+        echo "${GREEN}✅ adapter-common.sh → $LABEL${NC}"
+    fi
+    cp -n "$SCRIPT_DIR/adapters/"*.sh "$TARGET_DIR/adapters/" 2>/dev/null || true
+    echo "${GREEN}✅ adapters/*.sh → $LABEL${NC}"
+}
 
 if [[ "$INSTALL_MODE" = "both" ]] || [[ "$INSTALL_MODE" = "global-only" ]]; then
     install_hooks "$OPENCODE_TEMPLATE_DIR" "Global template"
+    install_adapters_to_target "$OPENCODE_TEMPLATE_DIR" "Global template"
 fi
 
 # Step 5: Verify syntax
