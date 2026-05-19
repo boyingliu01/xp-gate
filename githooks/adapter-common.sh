@@ -143,8 +143,8 @@ detect_iac_project() {
   fi
   
   # Check for Kubernetes manifests (YAML with apiVersion/kind)
-  if [[ -n "$(find . -maxdepth 2 ( -name "*.yaml" -o -name "*.yml" ) -not -path "./.git/*" 2>/dev/null | head -1)" ]]; then
-    local yaml_file=$(find . -maxdepth 2 ( -name "*.yaml" -o -name "*.yml" ) -not -path "./.git/*" 2>/dev/null | head -1)
+  if [[ -n "$(find . -maxdepth 2 \( -name "*.yaml" -o -name "*.yml" \) -not -path "./.git/*" 2>/dev/null | head -1)" ]]; then
+    local yaml_file=$(find . -maxdepth 2 \( -name "*.yaml" -o -name "*.yml" \) -not -path "./.git/*" 2>/dev/null | head -1)
     if grep -qE "^(apiVersion|kind):" "$yaml_file" 2>/dev/null; then
       has_iac=true
     fi
@@ -162,17 +162,26 @@ detect_iac_project() {
   fi
 }
 
+# Stryker 9.x config files (new format, takes priority)
 detect_mutation_testable() {
-  if [[ ! -f "stryker.conf.json" ]] && [[ ! -f "stryker.prepush.conf.json" ]]; then
-    return 1
+  if [[ -f "stryker.config.mjs" ]] || [[ -f "stryker.config.js" ]] || \
+     [[ -f "stryker.config.cjs" ]] || [[ -f "stryker.config.json" ]]; then
+    if [[ -f "package.json" ]] && grep -qE '"@stryker-mutator[^"]*"' package.json 2>/dev/null; then
+      return 0
+    fi
+    if command -v npx >/dev/null 2>&1 && npx --no-install stryker --version >/dev/null 2>&1; then
+      return 0
+    fi
   fi
 
-  if [[ -f "package.json" ]] && grep -qE '"@stryker-mutator[^"]*"' package.json 2>/dev/null; then
-    return 0
-  fi
-
-  if command -v npx >/dev/null 2>&1 && npx --no-install stryker --version >/dev/null 2>&1; then
-    return 0
+  # Legacy Stryker config files (backwards compatibility)
+  if [[ -f "stryker.conf.json" ]] || [[ -f "stryker.prepush.conf.json" ]]; then
+    if [[ -f "package.json" ]] && grep -qE '"@stryker-mutator[^"]*"' package.json 2>/dev/null; then
+      return 0
+    fi
+    if command -v npx >/dev/null 2>&1 && npx --no-install stryker --version >/dev/null 2>&1; then
+      return 0
+    fi
   fi
 
   return 1
