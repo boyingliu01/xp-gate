@@ -18,8 +18,22 @@ if [ -z "$ADAPTER_DIR" ]; then
 fi
 source "$ADAPTER_DIR/adapter-common.sh" 2>/dev/null || {
   echo "Error: Cannot source adapter-common.sh from $ADAPTER_DIR"
-  exit 1
+  exit
 }
+
+# Trap: ensure quality report generated on ANY exit (pass or fail).
+# Using a guard prevents recursion when 'exit' is called from inside the trap.
+_QUALITY_REPORT_DONE=0
+_quality_report_on_exit() {
+  if [ "$_QUALITY_REPORT_DONE" = "1" ]; then
+    exit
+    return
+  fi
+  _QUALITY_REPORT_DONE=1
+  generate_quality_report
+  exit
+}
+trap '_quality_report_on_exit' EXIT
 
 PROJECT_ROOT="$(git rev-parse --show-toplevel 2>/dev/null || echo "$(cd "$SCRIPT_DIR/../.." 2>/dev/null || echo "$SCRIPT_DIR/..")" )"
 if [[ -d "$PROJECT_ROOT/node_modules/.bin" ]]; then
@@ -320,7 +334,7 @@ elif [ "$PROJECT_LANG" = "typescript" ]; then
       echo ""
       echo "❌ BLOCKED - TYPE ERRORS detected"
       echo "Fix the type errors above before committing."
-      exit 1
+      exit
     fi
     echo "✅ PASSED - TypeScript static analysis."
     
@@ -333,7 +347,7 @@ elif [ "$PROJECT_LANG" = "typescript" ]; then
         echo ""
         echo "❌ BLOCKED - LINT ERRORS detected"
         echo "Fix the lint errors above before committing."
-        exit 1
+        exit
       fi
       echo "✅ PASSED - ESLint linting."
     else
@@ -356,7 +370,7 @@ elif [ "$PROJECT_LANG" = "python" ]; then
       echo "❌ BLOCKED - RUFF ERRORS detected"
       echo "Fix the lint errors above before committing."
       echo "Tip: Run 'ruff check --fix' to auto-fix some issues."
-      exit 1
+      exit
     fi
     echo "✅ PASSED - Ruff linting."
     
@@ -369,7 +383,7 @@ elif [ "$PROJECT_LANG" = "python" ]; then
         echo ""
         echo "❌ BLOCKED - MYPI TYPE ERRORS detected"
         echo "Fix the type errors above before committing."
-        exit 1
+        exit
       fi
       echo "✅ PASSED - mypy type checking."
     else
@@ -390,7 +404,7 @@ elif [ "$PROJECT_LANG" = "go" ]; then
       echo ""
       echo "❌ BLOCKED - GOLANGCI-LINT ERRORS detected"
       echo "Fix the lint errors above before committing."
-      exit 1
+      exit
     fi
     echo "✅ PASSED - golangci-lint."
   fi
@@ -405,7 +419,7 @@ elif [ "$PROJECT_LANG" = "shell" ] || echo "$CHANGED_FILES" | grep -qE '\.sh$' |
       echo ""
       echo "❌ BLOCKED - SHELLCHECK ERRORS detected"
       echo "Fix the shell script errors above."
-      exit 1
+      exit
     fi
     echo "✅ PASSED - Shellcheck completed."
   else
@@ -418,7 +432,7 @@ elif [ "$PROJECT_LANG" = "shell" ] || echo "$CHANGED_FILES" | grep -qE '\.sh$' |
           bash -n "$sh_file"
           if [ $? -ne 0 ]; then
             echo "❌ BLOCKED - SYNTAX ERROR in $sh_file"
-            exit 1
+            exit
           fi
         fi
       done
@@ -472,7 +486,7 @@ if [ "$PROJECT_LANG" = "documentation-only" ]; then
   
 elif [ "$PROJECT_LANG" = "typescript" ]; then
   if ! require_tool "jscpd" "Gate 2" "npm install -D jscpd"; then
-    exit 1
+    exit
   fi
   
   echo "Running jscpd for duplicate code detection..."
@@ -498,12 +512,12 @@ elif [ "$PROJECT_LANG" = "python" ]; then
     ruff check --select=DUP $(echo "$CHANGED_FILES" | grep "\.py$") 2>&1 | head -30
     echo "✅ PASSED - ruff duplicate code check completed."
   else
-    exit 1
+    exit
   fi
 
 elif [ "$PROJECT_LANG" = "go" ]; then
   if ! require_tool "jscpd" "Gate 2" "npm install -D jscpd"; then
-    exit 1
+    exit
   fi
   
   echo "Running jscpd for Go duplicate code detection..."
@@ -521,7 +535,7 @@ else
   SOURCE_FILES=$(echo "$CHANGED_FILES" | grep -E '\.(ts|tsx|js|jsx|py|go|java|scala|kt|cpp|c|h|rs|php|dart|swift)$')
   if [ -n "$SOURCE_FILES" ]; then
     if ! require_tool "jscpd" "Gate 2" "npm install -D jscpd"; then
-      exit 1
+      exit
     fi
     echo "Running jscpd for duplicate code detection..."
     jscpd $SOURCE_FILES 2>&1 | head -15
@@ -578,7 +592,7 @@ else
         echo ""
         echo "❌ BLOCKED - Functions with CCN > $CCN_ERROR_THRESHOLD found."
         echo "Refactor high-complexity functions to keep below $CCN_ERROR_THRESHOLD complexity."
-        exit 1
+        exit
       fi
       
       if [ "$CC_WARNINGS" -gt 0 ]; then
@@ -634,7 +648,7 @@ else
             echo "  - SOLID principle violations"
             echo "  - architectural violations"
             npx tsx src/principles/index.ts --files $PRINCIPLES_FILES --format console
-            exit 1
+            exit
           fi
           
           echo "✅ PASSED - Principles checker (no errors found)."
@@ -682,7 +696,7 @@ else
       if [ "$TESTS_EXIT_CODE" -ne 0 ]; then
         echo ""
         echo "❌ BLOCKED - Tests FAILED"
-        exit 1
+        exit
       else
         echo "✅ PASSED - Unit tests passed."
       fi
@@ -709,7 +723,7 @@ else
               echo ""
               echo "❌ BLOCKED - Coverage check FAILED (exit code: $COV_EXIT)"
               echo "Coverage must meet the thresholds defined in vitest.config.ts"
-              exit 1
+              exit
             fi
           else
             echo "No coverage script in package.json, running coverage check..."
@@ -734,7 +748,7 @@ else
             TOTAL_COVERAGE=$(go tool cover -func=coverage.out 2>/dev/null | grep "^total:" | awk '{print substr($3, 1, length($3)-1)}')
             if [ -n "$TOTAL_COVERAGE" ] && (( $(echo "$TOTAL_COVERAGE < 80" | bc -l 2>/dev/null || echo "0") )); then
               echo "❌ BLOCKED - Go coverage $TOTAL_COVERAGE% below 80% threshold"
-              exit 1
+              exit
             fi
             echo "Go coverage: $TOTAL_COVERAGE%"
             COV_EXIT=0
@@ -771,7 +785,7 @@ else
         " 2>/dev/null || echo "none")
         if [ "$COVERAGE_PERCENT" != "none" ] && [ "$COVERAGE_PERCENT" -lt 80 ]; then
           echo "❌ BLOCKED - TypeScript coverage ${COVERAGE_PERCENT}% below 80% threshold"
-          exit 1
+          exit
         fi
         echo "TypeScript coverage: ${COVERAGE_PERCENT}%"
       fi
@@ -782,7 +796,7 @@ else
         COVERAGE_PERCENT=$(coverage report --format=total 2>/dev/null | grep -o '[0-9]*%' | head -1 | tr -d '%') || echo "no_cover"
         if [ -n "$COVERAGE_PERCENT" ] && [ "$COVERAGE_PERCENT" != "no_cover" ] && [ "$COVERAGE_PERCENT" -lt 80 ]; then
           echo "❌ BLOCKED - Python coverage ${COVERAGE_PERCENT}% below 80% threshold"
-          exit 1
+          exit
         fi
         echo "Python coverage: ${COVERAGE_PERCENT}%"
       fi
@@ -792,7 +806,7 @@ else
         COVERAGE_PERCENT=$(parse_lcov_coverage "coverage/lcov.info")
         if [ "$COVERAGE_PERCENT" != "0" ] && [ "$COVERAGE_PERCENT" -lt 80 ]; then
           echo "❌ BLOCKED - Flutter/Dart coverage ${COVERAGE_PERCENT}% below 80% threshold"
-          exit 1
+          exit
         fi
         echo "Flutter/Dart coverage: ${COVERAGE_PERCENT}%"
       fi
@@ -802,7 +816,7 @@ else
   if [ "$COV_EXIT" -ne 0 ]; then
     echo ""
     echo "❌ BLOCKED - Coverage check FAILED"
-    exit 1
+    exit
   else
     echo "✅ PASSED - Coverage check completed."
   fi
@@ -830,7 +844,7 @@ else
         if ! require_tool "archlint" "Gate 6" "npm install -g @archlinter/cli"; then
           echo "     ❌ BLOCKED - archlint not installed"
           echo "     Install with: npm install -g @archlinter/cli"
-          exit 1
+          exit
         else
           echo "     Running archlint for TypeScript..."
           archlint scan . -f table --quiet 2>&1 | tail -30 || echo "⚠️  Architectural smells detected (pre-existing, continuing)"
@@ -846,7 +860,7 @@ else
           else
             echo "     ❌ BLOCKED - import-linter not installed"
             echo "     Install with: pip install import-linter"
-            exit 1
+            exit
           fi
         else
           echo "     ℹ️  No .import-linter.yml found - skipping Python architecture"
@@ -862,7 +876,7 @@ else
           else
             echo "     ❌ BLOCKED - arch-go not installed"
             echo "     Install with: go install github.com/arch-go/arch-go@latest"
-            exit 1
+            exit
           fi
         else
           echo "     ℹ️  No arch-go.yaml found - skipping Go architecture"
@@ -914,7 +928,7 @@ else
       echo ""
       echo "   After creating architecture.yaml, retry the commit."
       echo "   (To skip with warning, create .architecture-skip file)"
-      exit 1
+      exit
     fi
   fi
 fi
@@ -958,7 +972,7 @@ else
           echo "  - NEW files: must have zero warnings"
           echo "  - MODIFIED files: cannot increase warnings from baseline"
           echo "  - Files with ≤5 warnings: must clear to zero"
-          exit 1
+          exit
         fi
         
         # Check output for violations
@@ -968,7 +982,7 @@ else
           echo "$BOY_SCOUT_OUTPUT"
           echo ""
           echo "❌ BLOCKED - Boy Scout Rule violations detected ($VIOLATION_COUNT)"
-          exit 1
+          exit
         fi
         
         echo "     ✅ PASSED - Boy Scout Rule compliance."
@@ -1021,7 +1035,7 @@ else
       echo "Fix the security issues above before committing."
       echo "Tip: Install checkov for comprehensive IaC scanning: pip install checkov"
       GATE_7_STATUS="FAIL"
-      exit 1
+      exit
     fi
   else
     echo "ℹ️  SKIP - IaC adapter not found"
@@ -1072,7 +1086,7 @@ if [ -n "$GITLEAKS_CMD" ]; then
     echo "  3. Use git secret or vault for sensitive data"
     echo ""
     echo "See: https://github.com/gitleaks/gitleaks"
-    exit 1
+    exit
   else
     echo "     ⚠️  gitleaks exited with code $GITLEAKS_EXIT - skipping gate"
     echo "     ✅ Secret Scanning (SKIP, gitleaks error)"
@@ -1200,7 +1214,7 @@ except:
         echo "$FINDING_DETAILS"
         echo "  Run 'semgrep scan --config=p/security-audit' to review all findings."
         GATE_9_STATUS="FAIL"
-        exit 1
+        exit
       else
         echo ""
         echo "     ✅ PASSED - No critical/high vulnerabilities"
@@ -1224,14 +1238,15 @@ fi
 # ============================================================================
 
 generate_quality_report() {
-  local REPORT_FILE="quality-report.json"
   local HISTORY_FILE=".quality-history.jsonl"
   local COMMIT_HASH
   local TIMESTAMP
+  local BRANCH
   local PASSED_COUNT=0
-    local TOTAL_GATES=9
+  local TOTAL_GATES=9
 
   COMMIT_HASH=$(git rev-parse HEAD 2>/dev/null || echo "unknown")
+  BRANCH=$(git rev-parse --abbrev-ref HEAD 2>/dev/null || echo "unknown")
   TIMESTAMP=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
 
   for gate in 1 2 3 4 5 6 7 8 9; do
@@ -1257,13 +1272,30 @@ generate_quality_report() {
 
   local COV_PCT="${COVERAGE_PERCENT:-N/A}"
 
+  # ── Build failed-tests list from TESTS_OUTPUT (Gate 5) ──────────────────────────────
+  local FAILED_TESTS_JSON="[]"
+  if [ -n "$TESTS_OUTPUT" ] && echo "$TESTS_OUTPUT" | grep -qi "fail\|error\|FAILED"; then
+    # Extract failure lines: "FAIL src/foo.test.ts" or "  ✗ test name"
+    local FAIL_LINES
+    FAIL_LINES=$(echo "$TESTS_OUTPUT" | grep -E "^\s*(FAIL|✗|failed|AssertionError)" | head -10 | \
+      sed 's/"/\\"/g' | awk '{ printf "%s%s%s", sep, "\"", $0; sep="," }')
+    if [ -n "$FAIL_LINES" ]; then
+      FAILED_TESTS_JSON="[$FAIL_LINES]"
+    fi
+  fi
+
+  # ── Branch-level quality status file ─────────────────────────────────────────────
+  local STATUS_DIR=".xgate/quality-status"
+  local REPORT_FILE="${STATUS_DIR}/${BRANCH}.json"
+  mkdir -p "$STATUS_DIR"
+
   cat > "$REPORT_FILE" << ENDJSON
 {
-  "reportVersion": "1.0",
+  "reportVersion": "1.1",
   "generatedAt": "$TIMESTAMP",
+  "branch": "$BRANCH",
   "commit": "$COMMIT_HASH",
-  "project": "${PWD##*/}",
-  "language": "$PROJECT_LANG",
+  "language": "${PROJECT_LANG:-unknown}",
   "overall": {
     "gatesPassed": $PASSED_COUNT,
     "gatesTotal": $TOTAL_GATES,
@@ -1271,63 +1303,61 @@ generate_quality_report() {
     "verdict": "$([ "$PASSED_COUNT" -eq "$TOTAL_GATES" ] && echo "PASS" || echo "PARTIAL")"
   },
   "gates": {
-    "gate1": {
+    "gate1_static_analysis": {
       "name": "Code Quality (Static + Lint + Shell)",
       "status": "${GATE_1_STATUS:-PASS}",
       "tool": "${GATE_1_TOOL:-auto}"
     },
-    "gate2": {
+    "gate2_dup_code": {
       "name": "Duplicate Code",
       "status": "${GATE_2_STATUS:-PASS}",
       "metric": "similarity <= 5%"
     },
-    "gate3": {
+    "gate3_complexity": {
       "name": "Cyclomatic Complexity",
       "status": "${GATE_3_STATUS:-PASS}",
       "threshold": "${CCN_THRESHOLD:-5}",
       "errorThreshold": "${CCN_ERROR_THRESHOLD:-10}",
       "warnings": ${CC_WARNINGS:-0}
     },
-    "gate4": {
+    "gate4_principles": {
       "name": "Clean Code + SOLID",
       "status": "${GATE_4_STATUS:-PASS}",
       "warnings": ${WARNING_COUNT:-0}
     },
-    "gate5": {
+    "gate5_tests": {
       "name": "Tests + Coverage",
       "status": "${GATE_5_STATUS:-PASS}",
-      "coverage": "${COV_PCT}",
-      "threshold": "80%"
+      "thresholds": { "lines": 80, "functions": 80, "branches": 70, "statements": 80 },
+      "actual": { "coverage": "${COV_PCT}" },
+      "failedTests": $FAILED_TESTS_JSON
     },
-    "gate6": {
+    "gate6_arch_boyscout": {
       "name": "Architecture + Boy Scout Rule",
       "status": "${GATE_6_STATUS:-PASS}",
       "boyScoutPassed": $BS_PASSED,
       "boyScoutBlocked": $BS_BLOCKED
     },
-    "gate7": {
+    "gate7_iac_security": {
       "name": "IaC Security Scanning",
       "status": "${GATE_7_STATUS:-PASS}",
       "tools": "checkov, hadolint, kube-score, tflint"
     },
-    "gate8": {
+    "gate8_secret_scanning": {
       "name": "Secret Scanning",
       "status": "${GATE_8_STATUS:-PASS}",
       "tool": "gitleaks"
     },
-    "gate9": {
+    "gate9_sast": {
       "name": "SAST Security Scan",
       "status": "${GATE_9_STATUS:-PASS}",
       "tool": "semgrep"
-    },
-    "sarif": {
-    "version": "2.1.0",
-    "schemas": ["https://schemastore.azurewebsites.net/schemas/json/sarif-2.1.0-rtm.5.json"]
+    }
   }
 }
 ENDJSON
 
-  # Build per-gate JSON fragment for history
+  # ── History append (unchanged — append-only for trend) ────────────────────────────
   local GATES_JSON="{"
   GATES_JSON="${GATES_JSON}\"gate1\":{\"status\":\"${GATE_1_STATUS:-PASS}\",\"name\":\"Code Quality\"},"
   GATES_JSON="${GATES_JSON}\"gate2\":{\"status\":\"${GATE_2_STATUS:-PASS}\",\"name\":\"Duplicate Code\"},"
@@ -1340,8 +1370,9 @@ ENDJSON
   GATES_JSON="${GATES_JSON}\"gate9\":{\"status\":\"${GATE_9_STATUS:-PASS}\",\"name\":\"SAST Security\"}}"
   GATES_JSON="${GATES_JSON}}"
 
-  echo "{\"timestamp\":\"$TIMESTAMP\",\"commit\":\"$COMMIT_HASH\",\"score\":$SCORE,\"passed\":$PASSED_COUNT,\"total\":$TOTAL_GATES,\"gates\":$GATES_JSON,\"coverage\":\"$COV_PCT\",\"complexityWarnings\":${CC_WARNINGS:-0},\"principleWarnings\":${WARNING_COUNT:-0},\"boyScoutBlocked\":${BS_BLOCKED}}" >> "$HISTORY_FILE"
+  echo "{\"timestamp\":\"$TIMESTAMP\",\"commit\":\"$COMMIT_HASH\",\"branch\":\"$BRANCH\",\"score\":$SCORE,\"passed\":$PASSED_COUNT,\"total\":$TOTAL_GATES,\"gates\":$GATES_JSON,\"coverage\":\"$COV_PCT\",\"complexityWarnings\":${CC_WARNINGS:-0},\"principleWarnings\":${WARNING_COUNT:-0},\"boyScoutBlocked\":${BS_BLOCKED}}" >> "$HISTORY_FILE"
 
+  # ── Console output ────────────────────────────────────────────────────────
   echo ""
   echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
   echo "  📊 Quality Report — $TIMESTAMP"
@@ -1358,16 +1389,12 @@ ENDJSON
   printf "  %-45s %s\n" "Gate 9: SAST Security" "${GATE_9_STATUS:-PASS}"
   echo ""
   echo "  Overall Score: $SCORE/10 | $PASSED_COUNT/$TOTAL_GATES gates passed"
-  echo "  Report saved: $REPORT_FILE"
+  echo "  Branch status: $REPORT_FILE"
   echo "  History saved: $HISTORY_FILE"
   echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
   echo ""
-
-  if git ls-files --error-unmatch "$REPORT_FILE" >/dev/null 2>&1; then
-    git add "$REPORT_FILE" 2>/dev/null
-  fi
 }
 
 generate_quality_report
 
-exit 0
+exit
