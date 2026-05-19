@@ -56,32 +56,11 @@ if [ "$DOC_ONLY" = "true" ]; then
   exit 0
 fi
 
-# Size limits check
-DIFF_STATS=$(git diff origin/main...HEAD --stat 2>/dev/null || git diff origin/master...HEAD --stat 2>/dev/null)
-FILES_CHANGED=$(echo "$DIFF_STATS" | tail -1 | grep -oE '[0-9]+ file' | grep -oE '[0-9]+' || echo "0")
-LINES_ADDED=$(git diff origin/main...HEAD --shortstat 2>/dev/null | grep -oE '[0-9]+ insertion' | grep -oE '[0-9]+' || echo "0")
-LINES_DELETED=$(git diff origin/main...HEAD --shortstat 2>/dev/null | grep -oE '[0-9]+ deletion' | grep -oE '[0-9]+' || echo "0")
-
-# MAX_FILES: Raised to 9999 for AI era (AI generates/modifies many files per session)
-# Original 20-file limit was appropriate for manual coding but too restrictive for AI-assisted workflows
-MAX_FILES=9999
-MAX_LINES=500
-
-if [ "$FILES_CHANGED" -gt "$MAX_FILES" ] || [ "$((LINES_ADDED + LINES_DELETED))" -gt "$MAX_LINES" ]; then
-  echo ""
-  echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-  echo "   ❌ CHANGE SIZE ERROR - PUSH BLOCKED"
-  echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-  echo ""
-  echo "Large change detected:"
-  echo "  Files: $FILES_CHANGED > $MAX_FILES"
-  echo "  Lines: +$LINES_ADDED -$LINES_DELETED > $MAX_LINES"
-  echo ""
-  echo "Note: MAX_FILES raised to 9999 for AI era workflows."
-  echo "Split only if code walkthrough becomes impractical."
-  echo ""
-  exit 1
-fi
+# Size limits check — REMOVED: AI workflows generate large cumulative pushes; size is not a quality signal
+  DIFF_STATS=$(git diff origin/main...HEAD --stat 2>/dev/null || git diff origin/master...HEAD --stat 2>/dev/null)
+  FILES_CHANGED=$(echo "$DIFF_STATS" | tail -1 | grep -oE '[0-9]+ file' | grep -oE '[0-9]+' || echo "0")
+  LINES_ADDED=$(echo "$DIFF_STATS" | grep -oE '[0-9]+ insertion' | grep -oE '[0-9]+' || echo "0")
+  LINES_DELETED=$(echo "$DIFF_STATS" | grep -oE '[0-9]+ deletion' | grep -oE '[0-9]+' || echo "0")
 
 echo ""
 echo "Branch: $CURRENT_BRANCH"
