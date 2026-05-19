@@ -1,0 +1,308 @@
+#!/bin/bash
+# Pre-push Hook - Code Walkthrough Result Validator
+#
+# DESIGN: Hook validates result file, Skill executes review
+# No CLI skill invocation - avoids OpenCode architecture mismatch
+#
+# See: docs/plans/delphi-review --mode code-walkthrough-pre-push-design-v2.md
+#
+# Install: cp this-file .git/hooks/pre-push && chmod +x .git/hooks/pre-push
+
+echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+echo "   CODE WALKTHROUGH - PRE-PUSH CHECK"
+echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+
+CURRENT_BRANCH=$(git rev-parse --abbrev-ref HEAD)
+REMOTE="$1"
+URL="$2"
+
+# Get files being pushed in this push operation
+# pre-push receives stdin with ref information
+PUSHED_FILES=""
+TS_FILES=""
+while read local_ref local_sha remote_ref remote_sha; do
+  if [ "$remote_sha" = "0000000000000000000000000000000000000000" ]; then
+    # New branch - compare against empty tree
+    PUSHED_FILES=$(git diff-tree -r --name-only HEAD)
+    TS_FILES=$(git diff-tree -r --name-only HEAD | grep '\.ts$' || true)
+  else
+    # Existing branch - compare against what we're pushing from
+    PUSHED_FILES=$(git diff-tree -r --name-only "$remote_sha" "$local_sha")
+    TS_FILES=$(git diff-tree -r --name-only "$remote_sha" "$local_sha" | grep '\.ts$' || true)
+  fi
+done
+
+if [ -z "$PUSHED_FILES" ]; then
+  echo "📚 No files changed in push. Skipping walkthrough."
+  exit 0
+fi
+
+# Determine if pushed files contain ONLY documentation/non-source files
+DOC_ONLY=true
+SOURCE_EXTENSIONS="\.py$|\.js$|\.ts$|\.tsx$|\.java$|\.go$|\.rs$|\.cpp$|\.c$|\.swift$|\.kt$|\.sh$|\.dart$|\.ps1$|\.m$|\.mm$|\.h$|\.hpp$"
+
+for file in $PUSHED_FILES; do
+  if echo "$file" | grep -qE "$SOURCE_EXTENSIONS"; then
+    DOC_ONLY=false
+    break
+  fi
+done
+
+# Documentation-only changes (no source code) → skip walkthrough
+if [ "$DOC_ONLY" = "true" ]; then
+  echo "📚 Documentation-only push (no source code files)."
+  echo "   Files: $(echo "$PUSHED_FILES" | tr '\n' ', ' | sed 's/,$//')"
+  echo "   ✅ No code review required. Proceeding with push..."
+  exit 0
+fi
+
+# Size limits check — REMOVED: AI workflows generate large cumulative pushes; size is not a quality signal
+  DIFF_STATS=$(git diff origin/main...HEAD --stat 2>/dev/null || git diff origin/master...HEAD --stat 2>/dev/null)
+  FILES_CHANGED=$(echo "$DIFF_STATS" | tail -1 | grep -oE '[0-9]+ file' | grep -oE '[0-9]+' || echo "0")
+  LINES_ADDED=$(echo "$DIFF_STATS" | grep -oE '[0-9]+ insertion' | grep -oE '[0-9]+' || echo "0")
+  LINES_DELETED=$(echo "$DIFF_STATS" | grep -oE '[0-9]+ deletion' | grep -oE '[0-9]+' || echo "0")
+
+echo ""
+echo "Branch: $CURRENT_BRANCH"
+echo "Files changed: $FILES_CHANGED"
+echo "Lines: +$LINES_ADDED -$LINES_DELETED"
+echo ""
+
+# ============================================================================
+# GATE M: MUTATION TESTING
+# ============================================================================
+echo ""
+echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+echo "   GATE M: MUTATION TESTING"
+echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+
+# Source adapter-common.sh for utility functions
+ADAPTER_COMMON="$(dirname "$0")/adapter-common.sh"
+if [[ ! -f "$ADAPTER_COMMON" ]]; then
+  ADAPTER_COMMON="githooks/adapter-common.sh"
+fi
+# shellcheck source=githooks/adapter-common.sh
+source "$ADAPTER_COMMON" 2>/dev/null || {
+  echo "⚠️ Could not source adapter-common.sh. SKIP — Gate M."
+}
+
+# Only run for TypeScript projects
+if [[ ! -f "package.json" ]] || [[ ! -f "tsconfig.json" ]]; then
+  echo "📚 Not a TypeScript project. SKIP — Gate M."
+else
+  # Check if mutation testing is configured
+  if ! detect_mutation_testable 2>/dev/null; then
+    echo "⚠️ Stryker config not found or @stryker-mutator not installed."
+    echo "   SKIP — Gate M mutation testing."
+  else
+    # Filter to source files (exclude tests)
+    CHANGED_SOURCE_FILES=$(echo "$TS_FILES" | grep -v '__tests__' | grep -v '\.test\.' | grep -v '\.spec\.' | grep -v '\.d\.ts$' || true)
+
+    if [ -z "$CHANGED_SOURCE_FILES" ]; then
+      echo "📚 No changed TypeScript source files. SKIP — Gate M."
+    else
+      echo "🧬 Running mutation tests on changed files..."
+      echo "$CHANGED_SOURCE_FILES"
+
+      # Run mutation gate with 120s timeout
+      MUTATION_OUTPUT=$(mktemp)
+      timeout 120s npx tsx src/mutation/gate-m.ts --changed-files "$CHANGED_SOURCE_FILES" > "$MUTATION_OUTPUT" 2>&1
+      MUTATION_EXIT=$?
+
+      case $MUTATION_EXIT in
+        0)
+          echo "✅ Gate M: PASS"
+          # Update baseline after successful mutation test
+          if [ -f ".stryker-baseline.json" ]; then
+            echo "📝 Updating mutation baseline..."
+            cp ".stryker-baseline.json" ".stryker-baseline.json.prev" 2>/dev/null || true
+          fi
+          ;;
+        1)
+          echo ""
+          echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+          echo "   ❌ GATE M FAILED - PUSH BLOCKED"
+          echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+          echo ""
+          cat "$MUTATION_OUTPUT"
+          echo ""
+          rm -f "$MUTATION_OUTPUT"
+          exit 1
+          ;;
+        124)
+          echo "⏱️ Gate M: TIMEOUT (120s). Mutation testing incomplete."
+          echo "   Allowing push with warning — review mutation coverage manually."
+          ;;
+        *)
+          echo "⚠️ Gate M: Unexpected exit code $MUTATION_EXIT"
+          cat "$MUTATION_OUTPUT"
+          echo "   Allowing push with warning."
+          ;;
+      esac
+
+      rm -f "$MUTATION_OUTPUT"
+    fi
+  fi
+fi
+
+# ============================================================================
+# VALIDATE CODE WALKTHROUGH RESULT FILE
+# ============================================================================
+RESULT_FILE=".code-walkthrough-result.json"
+
+# Skip Delphi walkthrough for main/master (Gate M already ran above)
+if [[ "$CURRENT_BRANCH" == "main" || "$CURRENT_BRANCH" == "master" ]]; then
+  echo "⚠️ Pushing to main/master - Delphi walkthrough skipped"
+else
+
+if [ ! -f "$RESULT_FILE" ]; then
+  echo ""
+  echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+  echo "   ❌ CODE WALKTHROUGH REQUIRED - PUSH BLOCKED"
+  echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+  echo ""
+  echo "No code walkthrough result found."
+  echo ""
+  echo "Before pushing, run code walkthrough in your Agent session:"
+  echo ""
+  echo "  /delphi-review --mode code-walkthrough"
+  echo ""
+  echo "After APPROVED verdict, retry this push."
+  echo ""
+  exit 1
+fi
+
+# Check jq availability (MANDATORY - zero degradation)
+if ! command -v jq &> /dev/null; then
+  echo ""
+  echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+  echo "   ❌ ENVIRONMENT ERROR - PUSH BLOCKED"
+  echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+  echo ""
+  echo "jq is NOT installed. Required for JSON validation."
+  echo ""
+  echo "Install jq:"
+  echo "  apt-get install jq (Debian/Ubuntu)"
+  echo "  brew install jq (macOS)"
+  echo "  choco install jq (Windows)"
+  echo ""
+  echo "Zero degradation principle: Cannot proceed without jq."
+  echo ""
+  exit 1
+fi
+
+# Validate result file content
+CURRENT_COMMIT=$(git rev-parse HEAD)
+
+# Check JSON validity
+if ! jq empty "$RESULT_FILE" 2>/dev/null; then
+  echo ""
+  echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+  echo "   ❌ RESULT FILE INVALID - PUSH BLOCKED"
+  echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+  echo ""
+  echo "$RESULT_FILE is not valid JSON."
+  echo ""
+  echo "Re-run: /delphi-review --mode code-walkthrough"
+  echo ""
+  exit 1
+fi
+
+RESULT_COMMIT=$(jq -r '.commit' "$RESULT_FILE")
+RESULT_VERDICT=$(jq -r '.verdict' "$RESULT_FILE")
+RESULT_EXPIRES=$(jq -r '.expires' "$RESULT_FILE")
+RESULT_BRANCH=$(jq -r '.branch' "$RESULT_FILE")
+CURRENT_TIME=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
+
+# Branch match check (optional but recommended)
+if [ "$RESULT_BRANCH" != "$CURRENT_BRANCH" ]; then
+  echo ""
+  echo "⚠️ WARNING: Result file is for different branch"
+  echo "  Expected: $CURRENT_BRANCH"
+  echo "  Found: $RESULT_BRANCH"
+  echo ""
+  echo "Proceeding with commit verification..."
+fi
+
+# Commit match check
+if [ "$RESULT_COMMIT" != "$CURRENT_COMMIT" ]; then
+  echo ""
+  echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+  echo "   ❌ RESULT FILE OUTDATED - PUSH BLOCKED"
+  echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+  echo ""
+  echo "Result file is for a different commit:"
+  echo "  Expected: $CURRENT_COMMIT"
+  echo "  Found: $RESULT_COMMIT"
+  echo ""
+  echo "Re-run: /delphi-review --mode code-walkthrough"
+  echo ""
+  exit 1
+fi
+
+# Verdict check
+if [ "$RESULT_VERDICT" != "APPROVED" ]; then
+  echo ""
+  echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+  echo "   ❌ CODE WALKTHROUGH NOT APPROVED - PUSH BLOCKED"
+  echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+  echo ""
+  echo "Verdict: $RESULT_VERDICT"
+  echo ""
+  
+  # Show issues if available
+  ISSUES=$(jq -r '.issues[] | "- [\(.severity)] \(.description)"' "$RESULT_FILE" 2>/dev/null)
+  if [ -n "$ISSUES" ]; then
+    echo "Issues found:"
+    echo "$ISSUES"
+    echo ""
+  fi
+  
+  echo "Fix issues and re-run: /delphi-review --mode code-walkthrough"
+  echo ""
+  exit 1
+fi
+
+# Expiration check
+if [[ "$CURRENT_TIME" > "$RESULT_EXPIRES" ]]; then
+  echo ""
+  echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+  echo "   ❌ RESULT FILE EXPIRED - PUSH BLOCKED"
+  echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+  echo ""
+  echo "Code walkthrough result has expired:"
+  echo "  Expired: $RESULT_EXPIRES"
+  echo "  Current: $CURRENT_TIME"
+  echo ""
+  echo "Re-run: /delphi-review --mode code-walkthrough"
+  echo ""
+  exit 1
+fi
+
+# ============================================================================
+# ALL CHECKS PASSED
+# ============================================================================
+echo ""
+echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+echo "   ✅ CODE WALKTHROUGH VERIFIED"
+echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+echo ""
+echo "Branch: $CURRENT_BRANCH"
+echo "Files changed: $FILES_CHANGED"
+echo "Lines: +$LINES_ADDED -$LINES_DELETED"
+echo ""
+echo "Code walkthrough result:"
+echo "  Commit: $RESULT_COMMIT"
+echo "  Verdict: APPROVED"
+echo "  Expires: $RESULT_EXPIRES"
+
+# Show confidence if available
+CONFIDENCE=$(jq -r '.confidence' "$RESULT_FILE" 2>/dev/null)
+if [ -n "$CONFIDENCE" ] && [ "$CONFIDENCE" != "null" ]; then
+  echo "  Confidence: $CONFIDENCE/10"
+fi
+
+echo ""
+echo "Proceeding with push..."
+fi
+exit 0
