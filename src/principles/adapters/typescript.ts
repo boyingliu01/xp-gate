@@ -58,6 +58,33 @@ export class TypeScriptAdapter extends BaseAdapter implements Adapter {
     return this.fileContent.split('\n').length;
   }
 
+  extractExports(): unknown[] {
+    const exportMatches = [];
+    
+    const exportRegex = /^(export\s+(default\s+)?(async\s+)?(function|const|class|let|var|type|interface|enum)\s+\w+)/gm;
+    let match;
+    
+    while ((match = exportRegex.exec(this.fileContent)) !== null) {
+      exportMatches.push({
+        name: match[0],
+        type: 'export',
+        line: this.getLineNumber(match.index)
+      });
+    }
+    
+    const reExportRegex = /^export\s*{/gm;
+    let reMatch;
+    while ((reMatch = reExportRegex.exec(this.fileContent)) !== null) {
+      exportMatches.push({
+        name: reMatch[0],
+        type: 're-export',
+        line: this.getLineNumber(reMatch.index)
+      });
+    }
+    
+    return exportMatches;
+  }
+
   private getLineNumber(position: number): number {
     const lines = this.fileContent.substring(0, position).split('\n');
     return lines.length;

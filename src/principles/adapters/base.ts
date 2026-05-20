@@ -34,6 +34,10 @@ export abstract class BaseAdapter implements Adapter {
   abstract extractFunctions(): unknown[];
   abstract extractClasses(): unknown[];
 
+  extractExports(): unknown[] {
+    return [];
+  }
+
   countLines(): number {
     return this.fileContent.split('\n').length;
   }

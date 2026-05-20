@@ -260,7 +260,8 @@ brainstorm    autoplan    parallel-dev   code-walk     manual        learn +    
 - CC-006: 命名规范检查
 - CC-007: 注释质量
 - CC-008: 重复代码检测
-- CC-009: 魔法数字检查
+ - CC-009: 魔法数字检查
+- CC-010: 单模块导出数 ≤10 个
 
 ### SOLID 规则（5 条）
 
@@ -368,7 +369,8 @@ Sprint Flow 的 Phase 2 BUILD 有两种模式：
   "max-parameters": 4,
   "complexity-threshold": 10,
   "magic-numbers-whitelist": [0, 1, -1, 2, 10, 100, 1000, 60, 24, 7, 30, 365, 256, 1024],
-  "coverage-threshold": 80
+  "coverage-threshold": 80,
+  "max-exports": 10
 }
 ```
 

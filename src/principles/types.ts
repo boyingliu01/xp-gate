@@ -22,5 +22,6 @@ export interface Adapter {
   parseAST: () => unknown;
   extractFunctions: () => unknown[];
   extractClasses: () => unknown[];
+  extractExports: () => unknown[];
   countLines: () => number;
 }

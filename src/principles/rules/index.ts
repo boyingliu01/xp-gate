@@ -7,6 +7,7 @@ export { tooManyParamsRule } from './clean-code/too-many-params';
 export { missingErrorHandlingRule } from './clean-code/missing-error-handling';
 export { unusedImportsRule } from './clean-code/unused-imports';
 export { codeDuplicationRule } from './clean-code/code-duplication';
+export { manyExportsRule } from './clean-code/many-exports';
 
 export { srpRule } from './solid/srp';
 export { ocpRule } from './solid/ocp';

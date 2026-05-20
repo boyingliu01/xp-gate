@@ -22,6 +22,7 @@ interface PrinciplesConfig {
       'missing-error-handling': RuleConfig;
       'unused-imports': RuleConfig;
       'code-duplication': RuleConfig;
+      'many-exports': RuleConfig;
     };
     'solid': {
       'srp': RuleConfig;
@@ -58,7 +59,8 @@ export function getDefaultConfig(): PrinciplesConfig {
         },
         'missing-error-handling': { enabled: true, severity: 'warning' },
         'unused-imports': { enabled: true, severity: 'info' },
-        'code-duplication': { enabled: true, threshold: 15, severity: 'warning' }
+        'code-duplication': { enabled: true, threshold: 15, severity: 'warning' },
+        'many-exports': { enabled: true, threshold: 10, severity: 'warning' }
       },
       'solid': {
         'srp': { enabled: true, methodThreshold: 15, severity: 'warning' },

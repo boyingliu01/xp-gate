@@ -10,6 +10,7 @@ import { tooManyParamsRule } from './rules/clean-code/too-many-params';
 import { missingErrorHandlingRule } from './rules/clean-code/missing-error-handling';
 import { unusedImportsRule } from './rules/clean-code/unused-imports';
 import { codeDuplicationRule } from './rules/clean-code/code-duplication';
+import { manyExportsRule } from './rules/clean-code/many-exports';
 import { srpRule } from './rules/solid/srp';
 import { ocpRule } from './rules/solid/ocp';
 import { lspRule } from './rules/solid/lsp';
@@ -68,6 +69,7 @@ function getAllRules() {
     missingErrorHandlingRule,
     unusedImportsRule,
     codeDuplicationRule,
+    manyExportsRule,
     srpRule,
     ocpRule,
     lspRule,
