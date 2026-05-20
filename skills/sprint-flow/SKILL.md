@@ -95,11 +95,13 @@ Phase 6: SHIP → finishing-a-development-branch (4 选项) → ship / land-and-
 ### Phase 1: PLAN（共识评审）
 - `autoplan` (gstack) — CEO → Design → Eng 自动流水线
 - `delphi-review` — 多轮匿名评审直到共识
-- **specification.yaml** — 自动生成（无需独立 skill）
+- `to-issues` — 将 APPROVED 的 PRD/spec 拆解为垂直切片 Issue（HITL/AFK + 依赖图 + effort 估算）
+- **specification.yaml** — 自动生成（含 User Stories 段）
 
 **条件分支逻辑**:
 - IF autoplan AUTO_APPROVED + 无 taste_decisions → 跳过 delphi-review
 - IF autoplan NEEDS_REVIEW OR taste_decisions > 0 → 调用 delphi-review
+- delphi-review APPROVED → 生成 specification.yaml（含 user_stories[]） → **调用 /to-issues** 拆解为垂直切片 → slices-manifest.json → Phase 2 按 execution_order 执行
 
 ### Phase 1→2: GITHOOKS-GATE（质量门禁安装检查）
 
@@ -117,9 +119,11 @@ Phase 6: SHIP → finishing-a-development-branch (4 选项) → ship / land-and-
 
 ### Phase 2: BUILD（ralph-loop 默认 + TDD + 盲评 + 验证）
 
-**默认模式**: `ralph-loop` — 逐 REQ 迭代构建。每个 REQ dispatch 独立 subagent，干净上下文，全量回归测试。Token 节约 40-67%。参见 `skills/ralph-loop/SKILL.md`。
+**输入**: `slices-manifest.json`（由 Phase 1 `/to-issues` 生成），按 `execution_order` 逐个执行。
 
-**可选并行模式**: 通过 `--mode parallel` 启用 `dispatching-parallel-agents`（旧有行为，一次性并行执行所有需求，上下文线性增长）。仅在明确需要并行速度且 token 充足时使用。
+**默认模式**: `ralph-loop` — 逐 REQ/切片 迭代构建。每个切片（REQ）dispatch 独立 subagent，干净上下文，全量回归测试。Token 节约 40-67%。参见 `skills/ralph-loop/SKILL.md`。
+
+**并行模式**: 通过 `--mode parallel` 启用 `dispatching-parallel-agents`。仅分发无依赖的 AFK 切片（通过 `dependency_graph` 判定）。HITL 切片需人工确认后才可分发。
 
 **替代原 xp-consensus**：使用 superpowers 成熟 skill 组合，保留关键行为（freeze 隔离、熔断回退、成本监控）。
 

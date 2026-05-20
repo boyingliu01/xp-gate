@@ -58,11 +58,19 @@ Alignment report MUST be output as valid JSON:
 
 | 组成部分 | 文件 | 格式 |
 |----------|------|------|
+| User Stories | `specification.yaml` → `user_stories[]` | YAML: id, actor, feature, benefit, linked_requirements |
 | Requirements | `specification.yaml` | YAML |
-| User Stories | `specification.yaml` | YAML |
 | Acceptance Criteria | `specification.yaml` | YAML |
 | Design Decisions | `specification.yaml` | YAML |
 | API Contracts | `specification.yaml` | YAML |
+
+**User Stories 追溯链**：
+```
+US-001 (actor/feature/benefit)
+  → REQ-XXX-001 (requirement)
+    → AC-XXX-001-01 (acceptance criteria)
+      → test('REQ-XXX-001: ...') (@test annotation)
+```
 
 ---
 
