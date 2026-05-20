@@ -2,6 +2,7 @@ const fs = require('fs');
 const path = require('path');
 
 const SKILLS_DIR = path.join(process.env.HOME, '.config', 'opencode', 'skills');
+const OPENCODE_DIR = path.join(process.env.HOME, '.config', 'opencode');
 
 const REQUIRED_DEPS = [
   { name: 'superpowers', minVersion: '1.0.0' },
@@ -10,13 +11,24 @@ const REQUIRED_DEPS = [
 
 async function checkDeps() {
   for (const dep of REQUIRED_DEPS) {
-    const skillDir = path.join(SKILLS_DIR, dep.name);
+    const possiblePaths = [
+      path.join(SKILLS_DIR, dep.name),
+      path.join(OPENCODE_DIR, dep.name)
+    ];
     
-    if (!fs.existsSync(skillDir)) {
+    let depDir = null;
+    for (const p of possiblePaths) {
+      if (fs.existsSync(p)) {
+        depDir = p;
+        break;
+      }
+    }
+    
+    if (!depDir) {
       return { ok: false, missing: dep.name };
     }
     
-    const version = await getSkillVersion(skillDir);
+    const version = await getSkillVersion(depDir);
     if (version && compareVersions(version, dep.minVersion) < 0) {
       return {
         ok: false,
