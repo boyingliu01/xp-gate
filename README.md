@@ -5,6 +5,7 @@
 [![Git Hooks](https://img.shields.io/badge/Git%20Hooks-6%20Gates-green)](./githooks)
 [![AI Review](https://img.shields.io/badge/AI%20Review-Delphi%20≥91%25-blue)](./skills/delphi-review)
 [![Sprint Flow](https://img.shields.io/badge/Sprint%20Flow-Think→Ship-purple)](./skills/sprint-flow)
+[![npm](https://img.shields.io/badge/npm-install%20--g%20xgate-blue?logo=npm)](src/npm-package)
 
 ---
 
@@ -75,6 +76,23 @@ THINK → PLAN → BUILD → REVIEW → USER ACCEPT → FEEDBACK → SHIP
 
 ## 快速开始
 
+### 方式零：零安装（推荐 — AI Agent 友好）
+
+```bash
+# npm 全局安装（无需 clone 仓库）
+npm install -g xgate
+
+# 初始化项目（安装 hooks）
+cd your-project
+xgate init
+
+# 按需安装 AI 技能
+xgate install-skill sprint-flow
+xgate install-skill delphi-review
+xgate install-skill test-spec
+xgate install-skill ralph-loop
+```
+
 ### 方式一：独立安装（仅门禁）
 
 ```bash
@@ -128,6 +146,16 @@ bash scripts/install-skills.sh
 # 安装全部
 bash scripts/install-all.sh
 ```
+
+### xgate CLI 命令速查
+
+| 命令 | 说明 |
+|------|------|
+| `xgate init` | 初始化项目，安装 hooks + adapters |
+| `xgate install-skill <name>` | 从 GitHub 下载并安装 Skill |
+| `xgate update-skill <name>` | 更新已安装的 Skill |
+| `xgate uninstall-skill <name> --force` | 卸载 Skill |
+| `xgate --version` | 查看版本 |
 
 ---
 

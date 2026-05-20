@@ -2,6 +2,28 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.1.2] - 2026-05-20
+
+### Added
+- **xgate npm 包** — `npm install -g xgate` 零安装体验，无需 clone 仓库
+- **`xgate init`** — 初始化项目，自动安装 hooks + adapters + 依赖检测
+- **`xgate install-skill <name>`** — 从 GitHub 按需下载并安装 AI 技能
+- **`xgate update-skill <name>`** — 更新已安装的 Skill 到最新版本
+- **`xgate uninstall-skill <name>`** — 卸载指定 Skill
+- **依赖检测** — `detect-deps.js` 支持 superpowers/gstack 版本检查
+- **安装回滚机制** — 安装失败自动恢复备份，保证干净状态
+- **离线缓存** — `xgate install-skill --offline` 使用本地缓存
+- **配置文件** — `~/.config/xgate/xgate.json` 记录已安装 Skills 和元数据
+
+### Changed
+- **快速开始** — README 新增 "方式零：零安装（推荐）"
+- **依赖检测路径** — 同时搜索 `~/.config/opencode/skills/` 和 `~/.config/opencode/` 两个位置
+
+### Documents
+- 设计文档：docs/plans/2026-05-19-xgate-zero-install-design.md v2.0
+- 评审报告：docs/plans/2026-05-19-xgate-zero-install-consensus-report.md
+- 需求规格：docs/plans/2026-05-19-xgate-zero-install-specification.yaml
+
 ## [0.1.1] - 2026-05-09
 
 ### Added

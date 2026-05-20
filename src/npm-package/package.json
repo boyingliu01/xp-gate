@@ -1,6 +1,6 @@
 {
   "name": "xgate",
-  "version": "1.0.0",
+  "version": "0.1.2",
   "description": "AI-driven development workflow: 6 quality gates + Delphi review + Sprint Flow",
   "bin": {
     "xgate": "./bin/xgate.js"

@@ -4,12 +4,38 @@ This file is machine-readable. LLM agents: parse this to discover all installabl
 
 ---
 
+## Zero-Install (v0.1.2+)
+
+The entire xgate tool can be installed without cloning the repository:
+
+```bash
+npm install -g xgate
+xgate init
+```
+
+---
+
 ## Installable Components
 
 Each component can be installed independently. No component requires sprint-flow.
 
 ```yaml
 components:
+  - id: xgate-npm
+    name: "XGate npm Package (Zero-Install)"
+    description: "Complete xgate via npm global install. No clone needed. Includes: git hooks, adapters, CLI, skill downloader"
+    type: npm-package
+    install_command: "npm install -g xgate"
+    subcommands:
+      - "xgate init"
+      - "xgate install-skill <name>"
+      - "xgate update-skill <name>"
+      - "xgate uninstall-skill <name> --force"
+    requires:
+      - node (>=18)
+      - npm
+    optional: false
+
   - id: pre-commit
     name: "Pre-Commit Hook (6 Gates)"
     description: "Static analysis, lint, test, coverage, shell check, principles (Clean Code + SOLID), cyclomatic complexity, Boy Scout Rule, architecture quality"
