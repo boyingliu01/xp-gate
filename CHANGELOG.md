@@ -2,6 +2,27 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.2.0] - 2026-05-21
+
+### Added
+- **`/to-issues` skill** — 垂直切片问题拆分，Delphi Round 2 APPROVED (3/3)
+- **`/improve-codebase-architecture` skill** — 定期架构健康检查，发现架构腐化和死代码
+- **CC-010: Many Exports Rule** — 单模块导出数 ≤10 个（named exports + re-exports），解决#61 分层架构治理问题
+- **brainstorming 增强** — 自动创建 `CONTEXT.md` + `ADR` 记录共享语言，Delphi Round 2 APPROVED (3/3)
+- **Delphi Review 增强** — specification.yaml 新增 User Stories 层级，增加 US→REQ→AC→test 追溯链
+- **Sprint Flow 集成 `/to-issues`** — Phase 1 PLAN 和 Phase 2 BUILD 融入任务拆解流程
+- **Matt Pocock 5 Skills 融合分析文档** — `docs/fusion/matt-pocock-skills-vs-xgate-analysis.md`
+
+### Changed
+- **Clean Code 规则** — 9→10 条（新增 many-exports CC-010）
+- **README.md** — 新增"最大化 XGate 价值"实战指南章节
+- **sprint-flow** — Phase 1→2 融入 `/to-issues` 任务拆解
+- **13 语言适配器** — TypeScriptAdapter 新增 `extractExports()` 方法
+- **Brainstorming** — 增加 CONTEXT.md 惰性创建机制（≥2 领域术语才生成）
+
+### Documents
+- `docs/fusion/matt-pocock-skills-vs-xgate-analysis.md` — 融合矩阵与执行状态
+
 ## [0.1.2] - 2026-05-20
 
 ### Added

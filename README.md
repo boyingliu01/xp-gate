@@ -250,7 +250,7 @@ brainstorm    autoplan    parallel-dev   code-walk     manual        learn +    
 |------|---------|------|---------|
 | Gate M | 变异测试得分 | 默认 60%，关键路径 80% | 阻断推送 |
 
-### Clean Code 规则（9 条）
+### Clean Code 规则（10 条）
 
 - CC-001: 函数长度 ≤50 行
 - CC-002: 嵌套深度 ≤4 层
@@ -260,7 +260,7 @@ brainstorm    autoplan    parallel-dev   code-walk     manual        learn +    
 - CC-006: 命名规范检查
 - CC-007: 注释质量
 - CC-008: 重复代码检测
- - CC-009: 魔法数字检查
+- CC-009: 魔法数字检查
 - CC-010: 单模块导出数 ≤10 个
 
 ### SOLID 规则（5 条）
@@ -316,9 +316,11 @@ XGate 集成 15+ 个专业 AI 技能，按 Sprint Flow 阶段排列：
 
 | 技能 | 来源 | 用途 | 触发时机 |
 |------|------|------|---------|
-| brainstorming | superpowers | 需求探索、方案设计 | Phase 0 |
+| brainstorming | superpowers | 需求探索、方案设计，自动创建 CONTEXT.md + ADR | Phase 0 |
+| to-issues | xgate | **垂直切片 Issue 拆分**——将需求拆解为可独立交付的 Issue | Phase 0→1 |
 | autoplan | gstack | CEO/设计/工程自动评审 | Phase 1 |
-| delphi-review | xgate | 多专家匿名共识 | Phase 1, 3 |
+| delphi-review | xgate | 多专家匿名共识（新增 User Stories→REQ→AC 追溯链） | Phase 1, 3 |
+| improve-codebase-architecture | xgate | **定期架构健康检查**——发现死代码、架构腐化、覆盖下降 | 定期 |
 | ralph-loop | xgate | **REQ 级迭代构建**（Phase 2 **默认模式**），Token 节约 40-67% | Phase 2 |
 | test-specification-alignment | xgate | 测试对齐验证 | Phase 2, 3 |
 | qa | gstack | Web QA 测试 | Phase 3 |
@@ -354,6 +356,91 @@ Sprint Flow 的 Phase 2 BUILD 有两种模式：
 | Expert C (可行性) | qwen3.6-plus | kimi-k2.6, glm-5.1 |
 
 **关键原则：** 三个专家必须来自 **至少 2 家不同厂家**。
+
+---
+
+## 最大化 XGate 价值
+
+XGate 不只是一个工具——它是一套 AI 辅助开发的纪律体系。以下实战指南帮你榨取每一分价值。
+
+### 1. 每天这样用（开发者日常流程）
+
+```
+写需求 → /sprint-flow "XXX"  → 自动走完 7 阶段  → 审查 PR  → merge
+```
+
+**最简路径：** 一条命令启动全流程：
+```bash
+/sprint-flow "开发用户认证模块，支持 JWT 和 OAuth2" --type web-nextjs
+```
+
+Sprint Flow 会自动走完：
+- Phase 0: brainstorming 探索需求，生成设计文档
+- Phase 1: autoplan + delphi-review 多专家评审设计（≥91% 共识才放行）
+- Phase 2: ralph-loop **逐 REQ 迭代构建**（每个 REQ 干净上下文，节省 40-67% token）
+- Phase 3-6: 代码走查、用户验收、复盘、发布
+
+> **关键：** 不要跳过 delphi-review 环节。设计未通过 HARD-GATE 就写代码，等于裸奔。
+
+### 2. 6 道门禁：零容忍，但不折腾
+
+质量门禁在每次 `git commit` 时**自动运行**，无需手动触发。门禁的意义：
+
+- **第一次用门禁会痛苦**——历史代码积累的问题集中暴露。正确做法：先跑一次全量扫描建立 baseline，开启**童子军规则**后，只保证"修改不恶化"
+- **工具不可用 = SKIP，不阻断**——门禁是辅助，不是路障。某语言的工具装不上，该语言的检查会自动跳过，不影响其他语言
+- **`--no-verify` 严格禁止**——绕过门禁等于放弃保护
+
+### 3. 先设计，后编码（HARD-GATE）
+
+XGate 的核心纪律：**设计未通过，禁止写一行代码**。
+
+```
+THINK (brainstorming) → PLAN (autoplan) → delphi-review (3 专家共识) → 才轮到 BUILD
+```
+
+- `/to-issues`：需求拆成垂直切片式 Issue，每个 Issue 可独立交付
+- brainstorming 自动生成 `CONTEXT.md` 和 `ADR` 记录——共享语言比个人脑嗨重要
+- 3 位中国模型专家匿名评审，91% 共识阈值——避免单人视角盲区
+
+### 4. 定期体检（/improve-codebase-architecture）
+
+门禁只管提交那一刻的质量，不管长期健康。定期运行架构健康检查：
+- 发现死代码、架构腐化、测试覆盖下降
+- 给出修复优先级，不阻断日常工作
+
+### 5. Web Dashboard：趋势比单次重要
+
+```bash
+npm run dashboard
+```
+
+看 **Score Trend** 和 **Gate Pass Rate** 的趋势线，不要盯着单次分数。趋势向上说明流程在起作用。
+
+### 6. 童子军规则：历史项目也能用
+
+童子军规则（Boy Scout Rule）是 XGate 对存量项目的关键：
+
+| 文件状态 | 门禁要求 |
+|---------|---------|
+| 新文件 | 零警告，全量通过 |
+| 已修改 | 警告数持平或下降 |
+| 未触碰 | 不检查 |
+
+这意味着你不需要在第一天修完所有历史债务，只要保证"每次修改都比原来好"。
+
+### 7. 模型选择：国产多厂家交叉
+
+Delphi 评审的 3 位专家必须来自**至少 2 家不同厂家**，避免单一模型的系统性盲区：
+
+| 专家 | 推荐模型 | 备选 |
+|------|---------|------|
+| Expert A (架构) | deepseek-v4-pro | qwen3.6-plus |
+| Expert B (技术) | kimi-k2.6 | deepseek-v4-pro |
+| Expert C (可行性) | qwen3.6-plus | kimi-k2.6 |
+
+### 8. 经验沉淀：/learn
+
+每个 Sprint 结束后调用 `/learn` 总结经验教训。XGate 会分类存储（permanent / contextual），在后续 REQ 中自动传递——**同样的坑只踩一次**。
 
 ---
 
