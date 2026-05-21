@@ -28,7 +28,7 @@ skills/delphi-review/
 
 ## CONVENTIONS
 - Experts work anonymously in Round 1 to avoid bias
-- Iterative review till consensus reached (>=91% agreement)
+- Iterative review till consensus reached (>=95% agreement)
 - Zero tolerance quality checks required
 - No skipping rounds when disagreement occurs
 
@@ -40,7 +40,7 @@ skills/delphi-review/
 ## UNIQUE STYLES
 - Anonymous expert reviews
 - Multiple rounds until full agreement
-- Statistical consensus measurement (>=91% threshold)
+- Statistical consensus measurement (>=95% threshold)
 - Mandatory agreement before approval
 
 ## COMMANDS

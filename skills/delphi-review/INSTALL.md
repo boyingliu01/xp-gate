@@ -96,7 +96,7 @@ The skill requires at least 2 experts for code changes, 3 for architecture decis
 | `experts.architecture` | Architecture reviewer configuration | Required |
 | `experts.technical` | Technical reviewer configuration | Required |
 | `experts.feasibility` | Feasibility reviewer configuration | Required for 3-expert mode |
-| `consensus.threshold_percent` | Agreement threshold | 91 |
+    | `consensus.threshold_percent` | Agreement threshold | 95 |
 | `consensus.max_review_rounds` | Maximum review rounds | 5 |
 | `consensus.cross_provider_required` | Require different providers | true |
 

@@ -21,7 +21,7 @@
 | `xp-consensus` | Driver+Navigator+Arbiter TDD 共识 | ~426 行 | delphi-review, specification.yaml, freeze |
 | `code-walkthrough` | git push 前多专家代码走查 | ~474 行 | delphi-review, principles |
 | `code-reviewer` | Clean Code + SOLID 静态分析 | ~317 行 + `src/principles/` | 无（独立工具） |
-| `specification-generator` | specification.yaml 生命周期管理 | ~919 行 | delphi-review |
+| `specification-generator` | specification.yaml 生命周期管理 | ~959 行 | delphi-review |
 | `test-specification-alignment` | 测试与 spec 两阶段对齐验证 | ~552 行 | specification.yaml, freeze |
 | `sprint-flow` | One-Shot 流水线编排器 | ~287 行 | 以上所有 skills |
 
@@ -48,7 +48,7 @@
 
 | 维度 | 分析 |
 |------|------|
-| 独特性 | 多轮匿名评审 + >=91% 共识 + 迭代直到 APPROVED + 修复回炉重评 |
+| 独特性 | 多轮匿名评审 + >=95% 共识 + 迭代直到 APPROVED + 修复回炉重评 |
 | gstack/superpowers 等价物 | 无。`cross-model-review` 是对抗式评审（找茬），不是共识驱动 |
 | 下游依赖 | xp-consensus、code-walkthrough、sprint-flow 都依赖它 |
 | 结论 | **不可替代，必须保留** |

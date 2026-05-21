@@ -16,7 +16,7 @@
 | Experts | 3 (architecture decision) |
 | Category | ultrabrain (hard logic) |
 | Rounds | 2 |
-| Threshold | >=91% consensus |
+| Threshold | >=95% consensus |
 | Result | APPROVED after fixes |
 
 ---
@@ -147,7 +147,7 @@ These were noted but do not block approval:
 
 | Gate | Requirement | Status |
 |------|-------------|--------|
-| Consensus Threshold | >=91% | ✅ 100% |
+| Consensus Threshold | >=95% | ✅ 100% |
 | Verdict | APPROVED | ✅ 3/3 APPROVED |
 | Critical Issues | All resolved | ✅ 0 remaining |
 | Major Concerns | All handled | ✅ 0 blocking |

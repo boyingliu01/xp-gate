@@ -393,7 +393,7 @@ IF 任何检查失败:
 | `confidence` | number | 整体置信度 (1-10) |
 | `experts` | array | 专家评审结果 |
 | `issues` | array | 未解决的问题（如有） |
-| `consensus_ratio` | number | 问题共识比例 (≥0.91 为共识) |
+| `consensus_ratio` | number | 问题共识比例 (≥0.95 为共识) |
 
 **有效期机制**：
 

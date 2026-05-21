@@ -11,7 +11,7 @@ Web 前端项目额外增加：系统化 QA、视觉审计、性能基线。
 ## 调用 Skills
 
 **所有项目**:
-- `delphi-review --mode code-walkthrough` — 多专家匿名代码走查（2-3 domestic models, >=91% consensus）
+- `delphi-review --mode code-walkthrough` — 多专家匿名代码走查（2-3 domestic models, >=95% consensus）
 - `test-specification-alignment` — 测试与 Spec 对齐验证
 - `browse` (gstack) — 浏览器自动化测试
 
@@ -43,7 +43,7 @@ delphi code-walkthrough 执行：
 - Round 1: 匿名独立评审（防止 anchoring bias）
 - Round 2: 交换意见，响应关切
 - Round 3: 最终立场（如需）
-- >=91% 共识 + APPROVED 才通过
+- >=95% 共识 + APPROVED 才通过
 
 **如果 REQUEST_CHANGES**:
 - ⚠️ 暂停等待用户修复 Critical Issues + 处理 Major Concerns

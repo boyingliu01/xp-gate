@@ -205,7 +205,7 @@ TypeScript, Python, Go, Shell, Java, Kotlin, C++, Swift, Objective-C, Dart, Flut
 ### Added
 - **Hook-based Quality Gates**: Code-level enforcement replacing soft prompt constraints
 - **Iron Law Workflow**: Mandatory verification before implementation
-- **Delphi Review System**: Multi-expert consensus (≥91% threshold)
+- **Delphi Review System**: Multi-expert consensus (≥95% threshold)
 - **XP Consensus Engine**: Driver + Navigator + Arbiter decision workflow
 - **Code Walkthrough**: Multi-model post-commit review
 - **Test-Specification Alignment**: Two-phase verification

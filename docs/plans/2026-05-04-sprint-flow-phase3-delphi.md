@@ -19,8 +19,8 @@ Sprint-flow Phase 3 references `cross-model-review` — a skill that:
 | Capability | cross-model-review | delphi code-walkthrough |
 |-----------|-------------------|------------------------|
 | Multi-model review | Requires 2 different AI models | 2-3 domestic models (DeepSeek/Kimi/Qwen) |
-| Multi-round | Alternating writer/reviewer, max 8 rounds | Anonymous multi-round, >=91% consensus |
-| Consensus | Binary agree/disagree | Statistical consensus (>=91%) |
+| Multi-round | Alternating writer/reviewer, max 8 rounds | Anonymous multi-round, >=95% consensus |
+| Consensus | Binary agree/disagree | Statistical consensus (>=95%) |
 | Anonymity | Not anonymous | Round 1 fully anonymous |
 | Gate integration | None | ✅ pre-push `.code-walkthrough-result.json` |
 | Domestic model compliance | ❌ Needs foreign models | ✅ Domestic-only enforced by policy |
@@ -64,7 +64,7 @@ cross-model-review (Alternating mode, max 8 rounds)
 ```
 To:
 ```
-delphi-review --mode code-walkthrough (2-3 domestic experts, >=91% consensus)
+delphi-review --mode code-walkthrough (2-3 domestic experts, >=95% consensus)
 → .code-walkthrough-result.json output
 → IF APPROVED → continue to test-specification-alignment
 → IF REQUEST_CHANGES → pause for user, fix issues, re-review

@@ -38,7 +38,7 @@
     }
   },
   "consensus": {
-    "threshold_percent": 91,
+    "threshold_percent": 95,
     "max_review_rounds": 5,
     "cross_provider_required": true
   }

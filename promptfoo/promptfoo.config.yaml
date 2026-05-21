@@ -39,7 +39,7 @@ tests:
         value: "Round 2"
         metric: delphi_round2
       - type: contains
-        value: "91%"
+        value: "95%"
         metric: delphi_consensus
       - type: contains
         value: "Expert A"
