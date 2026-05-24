@@ -1,7 +1,7 @@
 const fs = require('fs');
 const path = require('path');
 
-const CONFIG_DIR = path.join(process.env.HOME, '.config', 'xgate');
+const CONFIG_DIR = path.join(process.env.HOME, '.config', 'xp-gate');
 const CACHE_DIR = path.join(CONFIG_DIR, 'cache');
 const SKILLS_DIR = path.join(process.env.HOME, '.config', 'opencode', 'skills');
 
@@ -10,7 +10,7 @@ async function uninstallSkill(name, options = {}) {
   
   if (!name) {
     console.error('Error: Skill name required');
-    console.error('Usage: xgate uninstall-skill <name> [--force]');
+    console.error('Usage: xp-gate uninstall-skill <name> [--force]');
     return 1;
   }
   
@@ -48,7 +48,7 @@ async function uninstallSkill(name, options = {}) {
 }
 
 function getConfig() {
-  const configFile = path.join(CONFIG_DIR, 'xgate.json');
+  const configFile = path.join(CONFIG_DIR, 'xp-gate.json');
   if (fs.existsSync(configFile)) {
     try {
       return JSON.parse(fs.readFileSync(configFile, 'utf8'));
@@ -58,7 +58,7 @@ function getConfig() {
 }
 
 function saveConfig(config) {
-  const configFile = path.join(CONFIG_DIR, 'xgate.json');
+  const configFile = path.join(CONFIG_DIR, 'xp-gate.json');
   fs.writeFileSync(configFile, JSON.stringify(config, null, 2));
 }
 

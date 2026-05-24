@@ -7,14 +7,14 @@ const { checkDeps } = require('./detect-deps.js');
 const { downloadFromGitHub } = require('./download-skill.js');
 const { rollback } = require('./rollback.js');
 
-const CONFIG_DIR = path.join(process.env.HOME, '.config', 'xgate');
+const CONFIG_DIR = path.join(process.env.HOME, '.config', 'xp-gate');
 const SKILLS_DIR = path.join(process.env.HOME, '.config', 'opencode', 'skills');
 
 const SKILLS_REGISTRY = {
-  'sprint-flow': { repo: 'boyingliu01/xgate', path: 'skills/sprint-flow' },
-  'delphi-review': { repo: 'boyingliu01/xgate', path: 'skills/delphi-review' },
-  'test-spec': { repo: 'boyingliu01/xgate', path: 'skills/test-spec' },
-  'ralph-loop': { repo: 'boyingliu01/xgate', path: 'skills/ralph-loop' }
+  'sprint-flow': { repo: 'boyingliu01/xp-gate', path: 'skills/sprint-flow' },
+  'delphi-review': { repo: 'boyingliu01/xp-gate', path: 'skills/delphi-review' },
+  'test-spec': { repo: 'boyingliu01/xp-gate', path: 'skills/test-spec' },
+  'ralph-loop': { repo: 'boyingliu01/xp-gate', path: 'skills/ralph-loop' }
 };
 
 async function installSkill(name, options = {}) {
@@ -161,7 +161,7 @@ function ensureConfigDir() {
 }
 
 function getConfig() {
-  const configFile = path.join(CONFIG_DIR, 'xgate.json');
+  const configFile = path.join(CONFIG_DIR, 'xp-gate.json');
   if (fs.existsSync(configFile)) {
     try {
       return JSON.parse(fs.readFileSync(configFile, 'utf8'));
@@ -171,7 +171,7 @@ function getConfig() {
 }
 
 function updateConfig(updates) {
-  const configFile = path.join(CONFIG_DIR, 'xgate.json');
+  const configFile = path.join(CONFIG_DIR, 'xp-gate.json');
   const config = getConfig();
   Object.assign(config, updates);
   fs.writeFileSync(configFile, JSON.stringify(config, null, 2));

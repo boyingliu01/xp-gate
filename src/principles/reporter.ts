@@ -48,7 +48,7 @@ export function formatSARIF(result: AnalysisResult): string {
           driver: {
             name: 'Principles Checker',
             version: '1.0.0',
-            informationUri: 'https://github.com/boyingliu01/xgate',
+            informationUri: 'https://github.com/boyingliu01/xp-gate',
             rules: ruleDescriptors
           }
         },

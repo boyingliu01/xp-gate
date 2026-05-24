@@ -1,4 +1,4 @@
-# Ralph-Loop Design Doc — Story-Level Iterative Build for XGate
+# Ralph-Loop Design Doc — Story-Level Iterative Build for XP-Gate
 
 > **目标**: 将 ralph-loop 作为 Sprint-Flow Phase 2 BUILD 的 **默认模式**。逐 REQ 迭代 + 上下文重置，解决长任务 token 累积膨胀导致限流的问题。旧有并行模式可通过 `--mode parallel` 切换。
 > **版本**: v4.0 (ralph-loop = 默认行为)
@@ -20,7 +20,7 @@
 
 ### 2.1 核心理念（借鉴 Ralph）
 
-| Ralph 机制 | XGate 适配 |
+| Ralph 机制 | XP-Gate 适配 |
 |---|---|
 | 每次迭代 = 全新 AI 实例 | 每个 REQ dispatch 独立 subagent |
 | 按故事执行 | 按 specification.yaml 中的 REQ 逐个执行 |

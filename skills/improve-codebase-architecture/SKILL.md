@@ -7,7 +7,7 @@ description: Find deepening opportunities in a codebase, informed by domain lang
 
 周期性架构健康检查：发现 **shallow module → deep module** 的深度化机会。目标是提升可测试性、AI 可导航性、模块边界清晰度。
 
-与 XGate 质量门禁的分工：
+与 XP-Gate 质量门禁的分工：
 | 机制 | 时机 | 作用 |
 |------|------|------|
 | **6 道门禁** | 每次 commit | 被动拦截明显问题（函数过长、重复代码等） |
@@ -15,7 +15,7 @@ description: Find deepening opportunities in a codebase, informed by domain lang
 
 ---
 
-## 术语（与 XGate Principles 一致）
+## 术语（与 XP-Gate Principles 一致）
 
 | 术语 | 定义 |
 |------|------|
@@ -102,7 +102,7 @@ description: Find deepening opportunities in a codebase, informed by domain lang
 
 ---
 
-## 与 XGate 集成
+## 与 XP-Gate 集成
 
 ### 触发时机
 ```

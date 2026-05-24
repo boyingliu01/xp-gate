@@ -174,7 +174,7 @@ Phase 6: SHIP → finishing-a-development-branch (4 选项) → ship / land-and-
 **检查结果处理**:
 - ✅ 全部存在 → 直接进入 Phase 2 BUILD
 - ❌ 部分/全部缺失 → 运行 `githooks/install.sh` 安装（包括 `.git/hooks/pre-commit`、`.git/hooks/pre-push`、`githooks/adapter-common.sh`、`githooks/adapters/`）
-  - 如果 githooks/ 目录不存在于项目根目录（即当前项目不是 xgate） → 从 xgate 仓库拉取 `githooks/` 目录结构
+  - 如果 githooks/ 目录不存在于项目根目录（即当前项目不是 xp-gate） → 从 xp-gate 仓库拉取 `githooks/` 目录结构
   - 安装完成后再次 `verify.sh` 确认
 
 **核心原则**: 没有质量门禁的代码不可进入 BUILD 阶段。**GITHOOKS-GATE 失败 → 不可编码。**

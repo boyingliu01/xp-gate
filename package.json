@@ -1,7 +1,7 @@
 {
-  "name": "xgate",
+  "name": "xp-gate",
   "version": "0.1.0",
-  "description": "XGate - Quality Gate & AI Review for Every Commit",
+  "description": "XP-Gate - Quality Gate & AI Review for Every Commit",
   "type": "module",
   "engines": {
     "node": ">=18.x"

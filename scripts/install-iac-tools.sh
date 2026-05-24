@@ -1,6 +1,6 @@
 #!/bin/bash
 
-# Install IaC scanning tools for XGate
+# Install IaC scanning tools for XP-Gate
 # Supports: Terraform, Kubernetes, Docker, CloudFormation
 # Tools: checkov (recommended), hadolint, kube-score, tflint
 
@@ -10,7 +10,7 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(dirname "$SCRIPT_DIR")"
 
 echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-echo "  XGate IaC Tools Installation"
+echo "  XP-Gate IaC Tools Installation"
 echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
 echo ""
 echo "This script installs IaC scanning tools:"

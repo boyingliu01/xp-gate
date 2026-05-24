@@ -1,5 +1,5 @@
 #!/bin/bash
-# promptfoo Setup Script for XGate
+# promptfoo Setup Script for XP-Gate
 # Run once to install promptfoo and generate baseline
 #
 # Prerequisites: Node.js 20+, ANTHROPIC_API_KEY set in environment

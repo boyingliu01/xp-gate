@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# XGate: Install gitleaks for pre-commit secret scanning
+# XP-Gate: Install gitleaks for pre-commit secret scanning
 # Usage: bash scripts/install-gitleaks.sh
 
 detect_os() {

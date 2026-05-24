@@ -1,7 +1,7 @@
-# XGate Zero-Install Delphi Consensus Report
+# XP-Gate Zero-Install Delphi Consensus Report
 
 **Date**: 2026-05-19
-**Design Document**: docs/plans/2026-05-19-xgate-zero-install-design.md
+**Design Document**: docs/plans/2026-05-19-xp-gate-zero-install-design.md
 **Status**: APPROVED
 
 ## Round Summary
@@ -15,7 +15,7 @@
 
 ### Expert A (架构) - Critical Issues
 1. 缺少错误处理设计：install-skill 失败后的回滚机制未定义
-2. 版本管理缺失：未说明如何处理 xgate 核心包与 Skills 的版本兼容性
+2. 版本管理缺失：未说明如何处理 xp-gate 核心包与 Skills 的版本兼容性
 3. 权限问题未考虑：npm install -g 需要全局写权限，企业环境可能受限
 
 ### Expert B (实现) - Critical Issues
@@ -35,15 +35,15 @@
 | Issue | 修复 | 决策 |
 |--------|------|------|
 | 错误处理缺失 | 新增 `lib/rollback.js` 回滚机制 + 重试 3 次 + checksum 校验 | 决策 8 |
-| 版本管理缺失 | semver 版本控制 + 兼容性矩阵 + `xgate install-skill <name>@<version>` | 决策 5 |
+| 版本管理缺失 | semver 版本控制 + 兼容性矩阵 + `xp-gate install-skill <name>@<version>` | 决策 5 |
 | npm 发布配置缺失 | `package.json` + `publishConfig` + `npm publish` 流程 | 决策 4 |
 | install-skill 细节缺失 | GitHub API + tarball + checksum + 解压到目标目录 | 决策 7 |
-| 离线安装不完整 | `~/.config/xgate/cache/` + `xgate install-skill --offline` | 决策 9 |
+| 离线安装不完整 | `~/.config/xp-gate/cache/` + `xp-gate install-skill --offline` | 决策 9 |
 | 权限问题 | 错误提示 `sudo` 或检查目录权限 | 决策 8 |
-| 更新机制缺失 | `xgate update-skill <name>` + `xgate update-skill --all` | 决策 10 |
-| 卸载机制缺失 | `xgate uninstall-skill <name>` | 决策 10 |
+| 更新机制缺失 | `xp-gate update-skill <name>` + `xp-gate update-skill --all` | 决策 10 |
+| 卸载机制缺失 | `xp-gate uninstall-skill <name>` | 决策 10 |
 | 依赖检测过于简单 | `lib/detect-deps.js` 版本检测 + init 时一次检测 | 决策 6 |
-| 目录结构不完整 | `~/.config/xgate/xgate.json` 配置文件 | 决策 2 |
+| 目录结构不完整 | `~/.config/xp-gate/xp-gate.json` 配置文件 | 决策 2 |
 
 ## Final Verdict
 
@@ -90,6 +90,6 @@
 
 ## Reference
 
-- Design: docs/plans/2026-05-19-xgate-zero-install-design.md (v2.0)
+- Design: docs/plans/2026-05-19-xp-gate-zero-install-design.md (v2.0)
 - llm-wiki MCP: https://github.com/boyingliu01/llm-wiki
-- xgate current install: scripts/install-all.sh
+- xp-gate current install: scripts/install-all.sh

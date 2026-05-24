@@ -98,7 +98,7 @@ else
       -Dsonar.sources="$(echo "$STAGED_FILES" | tr '\n' ',')" \
       -Dsonar.host.url="${SONAR_HOST_URL:-https://sonarcloud.io}" \
       -Dsonar.token="${SONAR_TOKEN:-}" \
-      -Dsonar.projectKey="${SONAR_PROJECT_KEY:-xgate}" \
+      -Dsonar.projectKey="${SONAR_PROJECT_KEY:-xp-gate}" \
       --quiet 2>&1)
     SONAR_EXIT=$?
 

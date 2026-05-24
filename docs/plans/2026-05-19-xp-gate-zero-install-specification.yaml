@@ -1,33 +1,33 @@
 ---
-name: xgate-zero-install
+name: xp-gate-zero-install
 version: 1.0.0
 date: 2026-05-19
 status: approved
 source: delphi-review APPROVED
-design: docs/plans/2026-05-19-xgate-zero-install-design.md
+design: docs/plans/2026-05-19-xp-gate-zero-install-design.md
 ---
 
 ## Overview
 
-XGate Zero-Install enables AI agents to use XGate without cloning the repository:
+XP-Gate Zero-Install enables AI agents to use XP-Gate without cloning the repository:
 
 ```bash
-npm install -g xgate                    # install core (hooks + CLI)
-xgate init                             # initialize project
-xgate install-skill sprint-flow        # install Skill on-demand
-xgate update-skill sprint-flow         # update Skill
-xgate uninstall-skill sprint-flow      # remove Skill
+npm install -g xp-gate                    # install core (hooks + CLI)
+xp-gate init                             # initialize project
+xp-gate install-skill sprint-flow        # install Skill on-demand
+xp-gate update-skill sprint-flow         # update Skill
+xp-gate uninstall-skill sprint-flow      # remove Skill
 ```
 
 ## Package Structure
 
 ```json
 {
-  "name": "xgate",
+  "name": "xp-gate",
   "version": "1.0.0",
-  "bin": { "xgate": "./bin/xgate.js" },
+  "bin": { "xp-gate": "./bin/xp-gate.js" },
   "files": ["bin/", "hooks/", "adapters/", "lib/"],
-  "repository": { "type": "git", "url": "https://github.com/boyingliu01/xgate" },
+  "repository": { "type": "git", "url": "https://github.com/boyingliu01/xp-gate" },
   "publishConfig": { "registry": "https://npm.pkg.github.com" }
 }
 ```
@@ -36,29 +36,29 @@ xgate uninstall-skill sprint-flow      # remove Skill
 
 | Command | Description |
 |---------|-----------|
-| `xgate init` | Initialize project, detect deps, guide user |
-| `xgate install-skill <name>[@<version>]` | Install Skill from GitHub |
-| `xgate update-skill <name>` | Update Skill to latest/specified version |
-| `xgate uninstall-skill <name>` | Remove Skill |
-| `xgate --version` | Show version |
-| `xgate --help` | Show help |
+| `xp-gate init` | Initialize project, detect deps, guide user |
+| `xp-gate install-skill <name>[@<version>]` | Install Skill from GitHub |
+| `xp-gate update-skill <name>` | Update Skill to latest/specified version |
+| `xp-gate uninstall-skill <name>` | Remove Skill |
+| `xp-gate --version` | Show version |
+| `xp-gate --help` | Show help |
 
 ## Requirements
 
 ### Core Requirements
 
 - id: REQ-ZI-001
-  description: Install xgate core without git clone
+  description: Install xp-gate core without git clone
   priority: MUST
   acceptance_criteria:
     - id: AC-ZI-001-01
       given: A machine with npm installed
-      when: User runs `npm install -g xgate`
-      then: xgate CLI is available and `xgate --version` shows version
+      when: User runs `npm install -g xp-gate`
+      then: xp-gate CLI is available and `xp-gate --version` shows version
 
     - id: AC-ZI-001-02
-      given: xgate installed
-      when: User runs `xgate init`
+      given: xp-gate installed
+      when: User runs `xp-gate init`
       then: Hooks are installed to .git/hooks/ and OpenCode template
 
 ### Skill Installation Requirements
@@ -68,18 +68,18 @@ xgate uninstall-skill sprint-flow      # remove Skill
   priority: MUST
   acceptance_criteria:
     - id: AC-ZI-002-01
-      given: xgate installed, GitHub accessible
-      when: User runs `xgate install-skill sprint-flow`
+      given: xp-gate installed, GitHub accessible
+      when: User runs `xp-gate install-skill sprint-flow`
       then: SKILL.md is downloaded and installed to ~/.config/opencode/skills/sprint-flow/
 
     - id: AC-ZI-002-02
-      given: xgate installed, GitHub not accessible
-      when: User runs `xgate install-skill sprint-flow --offline`
+      given: xp-gate installed, GitHub not accessible
+      when: User runs `xp-gate install-skill sprint-flow --offline`
       then: Skill is installed from local cache if available
 
     - id: AC-ZI-002-03
-      given: xgate installed
-      when: User runs `xgate install-skill sprint-flow@1.0.0`
+      given: xp-gate installed
+      when: User runs `xp-gate install-skill sprint-flow@1.0.0`
       then: Specific version is installed
 
 ### Dependency Detection Requirements
@@ -89,13 +89,13 @@ xgate uninstall-skill sprint-flow      # remove Skill
   priority: MUST
   acceptance_criteria:
     - id: AC-ZI-003-01
-      given: xgate installed, superpowers not installed
-      when: User runs `xgate install-skill sprint-flow`
+      given: xp-gate installed, superpowers not installed
+      when: User runs `xp-gate install-skill sprint-flow`
       then: Error shown with instructions to install superpowers
 
     - id: AC-ZI-003-02
-      given: xgate installed, superpowers version incompatible
-      when: User runs `xgate install-skill sprint-flow`
+      given: xp-gate installed, superpowers version incompatible
+      when: User runs `xp-gate install-skill sprint-flow`
       then: Error shown with required minimum version
 
 ### Error Handling Requirements
@@ -106,17 +106,17 @@ xgate uninstall-skill sprint-flow      # remove Skill
   acceptance_criteria:
     - id: AC-ZI-004-01
       given: Network timeout during install
-      when: xgate install-skill runs
+      when: xp-gate install-skill runs
       then: Retry 3 times, then error with helpful message
 
     - id: AC-ZI-004-02
       given: Checksum mismatch after download
-      when: xgate install-skill runs
+      when: xp-gate install-skill runs
       then: Delete corrupted file, show error
 
     - id: AC-ZI-004-03
       given: Install failure
-      when: xgate install-skill runs
+      when: xp-gate install-skill runs
       then: Rollback to previous state, clean temp files
 
 ### Update/Uninstall Requirements
@@ -127,12 +127,12 @@ xgate uninstall-skill sprint-flow      # remove Skill
   acceptance_criteria:
     - id: AC-ZI-005-01
       given: Sprint-flow installed
-      when: User runs `xgate update-skill sprint-flow`
+      when: User runs `xp-gate update-skill sprint-flow`
       then: Sprint-flow is updated to latest version
 
     - id: AC-ZI-005-02
       given: Sprint-flow installed
-      when: User runs `xgate uninstall-skill sprint-flow`
+      when: User runs `xp-gate uninstall-skill sprint-flow`
       then: Sprint-flow is removed and cache is cleaned
 
 ## Design Decisions
@@ -147,7 +147,7 @@ Rationale: Minimizes initial install size, AI agents only fetch what's needed
 Choice: semver with compatibility matrix
 Rationale: Predictable versioning, clear compatibility guarantees
 
-| xgate | Skills |
+| xp-gate | Skills |
 |-------|-------|
 | 1.0.x | 1.0.x |
 | 1.1.x | 1.0.x, 1.1.x |
@@ -155,21 +155,21 @@ Rationale: Predictable versioning, clear compatibility guarantees
 
 ### DD-ZI-03: Dependency Detection Timing
 
-Choice: Detect once at `xgate init`, not at each Skill install
+Choice: Detect once at `xp-gate init`, not at each Skill install
 Rationale: Avoids repeated detection overhead, simpler UX
 
 ### DD-ZI-04: Offline Support
 
-Choice: Local cache at ~/.config/xgate/cache/
+Choice: Local cache at ~/.config/xp-gate/cache/
 Rationale: Enables offline Skill install after initial download
 
 ## File Locations
 
 | Path | Description |
 |------|------------|
-| `~/.config/xgate/xgate.json` | Config (installed skills, version) |
-| `~/.config/xgate/cache/` | Offline cache |
-| `~/.config/xgate/backup/<id>/` | Rollback backups |
+| `~/.config/xp-gate/xp-gate.json` | Config (installed skills, version) |
+| `~/.config/xp-gate/cache/` | Offline cache |
+| `~/.config/xp-gate/backup/<id>/` | Rollback backups |
 | `~/.config/opencode/skills/<name>/` | Installed Skills |
 | `.git/hooks/` | Project hooks |
 | `~/.config/opencode/git-hooks-template/` | OpenCode global template |
@@ -187,7 +187,7 @@ Rationale: Enables offline Skill install after initial download
 
 | ID | Description | Method |
 |----|------------|-------|
-| T-001 | Clean install: `npm install -g xgate` | Script |
+| T-001 | Clean install: `npm install -g xp-gate` | Script |
 | T-002 | init creates hooks in .git/hooks/ | Script |
 | T-003 | install-skill downloads SKILL.md | Verify file exists |
 | T-004 | install-skill with --offline uses cache | Mock |

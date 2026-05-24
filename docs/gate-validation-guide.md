@@ -251,7 +251,7 @@ func (g *GodClass) Method2() {}
 ### Gate 4 Not Running
 
 1. Check if `src/principles/index.ts` exists in project
-2. If not, copy from xgate
+2. If not, copy from xp-gate
 3. Or configure principles checker path in `.principlesrc`
 
 ### Gate 3 Not Running

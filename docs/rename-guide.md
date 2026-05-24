@@ -1,8 +1,8 @@
-# XGate 目录改名指南
+# XP-Gate 目录改名指南
 
 ## 背景
 
-将本地项目目录从 `xp-workflow-automation` 改名为 `xgate`，与 GitHub 仓库名一致。
+将本地项目目录从 `xp-workflow-automation` 改名为 `xp-gate`，与 GitHub 仓库名一致。
 
 改名会影响 OpenCode 的 session 查找（通过 `project.worktree` 路径匹配），需要同步更新 SQLite 数据库。
 
@@ -18,7 +18,7 @@ cp /home/boyingliu01/.local/share/opencode/opencode.db /home/boyingliu01/.local/
 
 ```bash
 cd /mnt/e/Private/opencode优化
-mv xp-workflow-automation xgate
+mv xp-workflow-automation xp-gate
 ```
 
 ### Step 3: 更新 OpenCode 数据库
@@ -26,11 +26,11 @@ mv xp-workflow-automation xgate
 ```bash
 # 更新 project 表的 worktree 路径
 sqlite3 /home/boyingliu01/.local/share/opencode/opencode.db \
-  "UPDATE project SET worktree='/mnt/e/Private/opencode优化/xgate' WHERE worktree='/mnt/e/Private/opencode优化/xp-workflow-automation';"
+  "UPDATE project SET worktree='/mnt/e/Private/opencode优化/xp-gate' WHERE worktree='/mnt/e/Private/opencode优化/xp-workflow-automation';"
 
 # 更新 session 表的 directory 路径
 sqlite3 /home/boyingliu01/.local/share/opencode/opencode.db \
-  "UPDATE session SET directory='/mnt/e/Private/opencode优化/xgate' WHERE directory='/mnt/e/Private/opencode优化/xp-workflow-automation';"
+  "UPDATE session SET directory='/mnt/e/Private/opencode优化/xp-gate' WHERE directory='/mnt/e/Private/opencode优化/xp-workflow-automation';"
 ```
 
 ### Step 4: 验证
@@ -38,11 +38,11 @@ sqlite3 /home/boyingliu01/.local/share/opencode/opencode.db \
 ```bash
 # 确认 project 记录已更新
 sqlite3 /home/boyingliu01/.local/share/opencode/opencode.db \
-  "SELECT id, worktree FROM project WHERE worktree LIKE '%xgate%';"
+  "SELECT id, worktree FROM project WHERE worktree LIKE '%xp-gate%';"
 
 # 确认 session 数量不变（应为 210 个）
 sqlite3 /home/boyingliu01/.local/share/opencode/opencode.db \
-  "SELECT COUNT(*) FROM session WHERE directory='/mnt/e/Private/opencode优化/xgate';"
+  "SELECT COUNT(*) FROM session WHERE directory='/mnt/e/Private/opencode优化/xp-gate';"
 
 # 确认旧路径无残留
 sqlite3 /home/boyingliu01/.local/share/opencode/opencode.db \
@@ -57,7 +57,7 @@ sqlite3 /home/boyingliu01/.local/share/opencode/opencode.db \
 ### Step 5: 在新目录启动 OpenCode
 
 ```bash
-cd /mnt/e/Private/opencode优化/xgate
+cd /mnt/e/Private/opencode优化/xp-gate
 opencode
 ```
 
@@ -75,7 +75,7 @@ cp /home/boyingliu01/.local/share/opencode/opencode.db.bak /home/boyingliu01/.lo
 
 ```bash
 cd /mnt/e/Private/opencode优化
-mv xgate xp-workflow-automation
+mv xp-gate xp-workflow-automation
 ```
 
 ## 原理说明

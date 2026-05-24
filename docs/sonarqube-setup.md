@@ -2,7 +2,7 @@
 
 ## 概述
 
-XGate 已集成 SonarQube Cloud（SAST + SCA），在 PR/push 时自动扫描安全漏洞和依赖风险。
+XP-Gate 已集成 SonarQube Cloud（SAST + SCA），在 PR/push 时自动扫描安全漏洞和依赖风险。
 
 ## 快速开始
 
@@ -11,7 +11,7 @@ XGate 已集成 SonarQube Cloud（SAST + SCA），在 PR/push 时自动扫描安
 1. 访问 [SonarCloud](https://sonarcloud.io/)
 2. 使用 GitHub 账号登录
 3. 点击 **+** → **Analyze new project**
-4. 选择 `boyingliu01/xgate`
+4. 选择 `boyingliu01/xp-gate`
 5. 选择 **Free plan**（2.5k LOC 免费）
 
 ### 2. 配置 GitHub Secrets
@@ -64,7 +64,7 @@ brew install sonar-scanner
 
 # 运行扫描
 sonar-scanner \
-  -Dsonar.projectKey=xgate \
+  -Dsonar.projectKey=xp-gate \
   -Dsonar.sources=src/ \
   -Dsonar.host.url=https://sonarcloud.io \
   -Dsonar.token=$SONAR_TOKEN
@@ -87,6 +87,6 @@ sonar-scanner \
 | 问题 | 解决方案 |
 |------|---------|
 | `SONAR_TOKEN` 缺失 | 检查 GitHub Secrets 配置 |
-| 项目未找到 | 确认 SonarCloud 中项目 key 为 `xgate` |
+| 项目未找到 | 确认 SonarCloud 中项目 key 为 `xp-gate` |
 | 覆盖率未显示 | 确保 vitest 生成 `coverage/lcov.info` |
 | Quality Gate 失败 | 查看 SonarCloud 具体 issue 并修复 |

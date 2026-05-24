@@ -3,7 +3,7 @@
 **Version:** 0.0.6
 
 ## OVERVIEW
-Reference guides and design history for XGate project.
+Reference guides and design history for XP-Gate project.
 
 ## STRUCTURE
 ```

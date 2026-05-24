@@ -1299,7 +1299,7 @@ generate_quality_report() {
   fi
 
   # ── Branch-level quality status file ─────────────────────────────────────────────
-  local STATUS_DIR=".xgate/quality-status"
+  local STATUS_DIR=".xp-gate/quality-status"
   local REPORT_FILE="${STATUS_DIR}/${BRANCH}.json"
   mkdir -p "$STATUS_DIR"
 

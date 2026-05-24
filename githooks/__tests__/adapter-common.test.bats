@@ -42,9 +42,9 @@ setup() {
 }
 
 @test "route_to_adapter routes to correct adapter for current language" {
-  # In xgate project (has tsconfig.json), should route to typescript adapter
+  # In xp-gate project (has tsconfig.json), should route to typescript adapter
   run route_to_adapter "static_analysis"
-  # Should succeed because we're in xgate project with tsconfig.json
+  # Should succeed because we're in xp-gate project with tsconfig.json
   [ "$status" -eq 0 ]
 }
 

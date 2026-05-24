@@ -7,30 +7,30 @@ const { checkDeps } = require('../lib/detect-deps.js');
 
 const COMMANDS = {
   init: {
-    description: 'Initialize xgate in current project',
+    description: 'Initialize xp-gate in current project',
     fn: init
   },
   'install-skill': {
-    description: 'Install a xgate skill from GitHub',
+    description: 'Install a xp-gate skill from GitHub',
     fn: installSkill,
-    usage: 'xgate install-skill <name>[@<version>] [--offline] [--verbose] [--force]'
+    usage: 'xp-gate install-skill <name>[@<version>] [--offline] [--verbose] [--force]'
   },
   'update-skill': {
     description: 'Update installed skill(s)',
     fn: updateSkill,
-    usage: 'xgate update-skill [<name>] [--all] [--check]'
+    usage: 'xp-gate update-skill [<name>] [--all] [--check]'
   },
   'uninstall-skill': {
-    description: 'Uninstall a xgate skill',
+    description: 'Uninstall a xp-gate skill',
     fn: uninstallSkill,
-    usage: 'xgate uninstall-skill <name> [--force]'
+    usage: 'xp-gate uninstall-skill <name> [--force]'
   }
 };
 
 function printHelp() {
-  console.log('xgate - AI development workflow tool');
+  console.log('xp-gate - AI development workflow tool');
   console.log('');
-  console.log('Usage: xgate <command> [options]');
+  console.log('Usage: xp-gate <command> [options]');
   console.log('');
   console.log('Commands:');
   for (const [name, cmd] of Object.entries(COMMANDS)) {
@@ -47,7 +47,7 @@ function main() {
   
   if (args.includes('--version')) {
     const pkg = require('../package.json');
-    console.log(`xgate v${pkg.version}`);
+    console.log(`xp-gate v${pkg.version}`);
     return;
   }
   
@@ -68,7 +68,7 @@ function main() {
     const name = subargs[0];
     if (!name) {
       console.error('Error: Skill name required');
-      console.error('Usage: xgate install-skill <name>[@<version>]');
+      console.error('Usage: xp-gate install-skill <name>[@<version>]');
       process.exit(1);
       return;
     }
@@ -88,7 +88,7 @@ function main() {
     const name = subargs[0];
     if (!name) {
       console.error('Error: Skill name required');
-      console.error('Usage: xgate uninstall-skill <name>');
+      console.error('Usage: xp-gate uninstall-skill <name>');
       process.exit(1);
       return;
     }

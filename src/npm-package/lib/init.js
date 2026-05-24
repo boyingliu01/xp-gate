@@ -2,12 +2,12 @@ const fs = require('fs');
 const path = require('path');
 const { checkDeps } = require('./detect-deps.js');
 
-const CONFIG_DIR = path.join(process.env.HOME, '.config', 'xgate');
-const CONFIG_FILE = path.join(CONFIG_DIR, 'xgate.json');
+const CONFIG_DIR = path.join(process.env.HOME, '.config', 'xp-gate');
+const CONFIG_FILE = path.join(CONFIG_DIR, 'xp-gate.json');
 const TEMPLATE_DIR = path.join(process.env.HOME, '.config', 'opencode', 'git-hooks-template');
 
 async function init(args) {
-  console.log('XGate Initialization');
+  console.log('XP-Gate Initialization');
   console.log('====================\n');
   
   const installMode = args.includes('--core-only') ? 'core' : 
@@ -16,7 +16,7 @@ async function init(args) {
   const gitDir = getGitDir();
   if (!gitDir) {
     console.error('Error: Not a git repository');
-    console.error('Run xgate init from inside a git repository');
+    console.error('Run xp-gate init from inside a git repository');
     return 1;
   }
   

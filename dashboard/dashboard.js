@@ -200,7 +200,7 @@ async function exportPDF() {
   
   // Title
   doc.setFontSize(20);
-  doc.text('XGate Quality Report', 14, 22);
+  doc.text('XP-Gate Quality Report', 14, 22);
   
   // Summary
   doc.setFontSize(12);
@@ -249,7 +249,7 @@ async function exportPDF() {
     styles: { fontSize: 9 }
   });
   
-  doc.save(`xgate-quality-${latest.commit.slice(0,7)}.pdf`);
+  doc.save(`xp-gate-quality-${latest.commit.slice(0,7)}.pdf`);
 }
 
 function setupExportButton() {

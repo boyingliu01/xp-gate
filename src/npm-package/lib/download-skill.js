@@ -4,7 +4,7 @@ const fs = require('fs');
 const path = require('path');
 const crypto = require('crypto');
 
-const CONFIG_DIR = path.join(process.env.HOME, '.config', 'xgate');
+const CONFIG_DIR = path.join(process.env.HOME, '.config', 'xp-gate');
 const CACHE_DIR = path.join(CONFIG_DIR, 'cache');
 
 async function downloadFromGitHub(repo, pathInRepo, version = 'main') {

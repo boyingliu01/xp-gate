@@ -1,12 +1,12 @@
-# XGate Capability Matrix
+# XP-Gate Capability Matrix
 
-**XGate** 是一套 AI 驱动的开发工作流工具集，提供 6 道质量门禁和多专家评审机制，确保代码提交前的自动化验证和设计决策的共识达成。
+**XP-Gate** 是一套 AI 驱动的开发工作流工具集，提供 6 道质量门禁和多专家评审机制，确保代码提交前的自动化验证和设计决策的共识达成。
 
 ---
 
 ## 1. Overview
 
-XGate 整合质量门禁、AI 多专家评审和 Sprint 流程编排三大核心模块。质量门禁在每次 `git commit` 时自动运行 6 项检查，任何失败都会阻止提交。Delphi Review 采用多轮匿名评审机制，直到所有专家达成共识（≥95%）。Sprint Flow 提供一键式完整开发流程编排，从需求探索到发布部署全程自动化。
+XP-Gate 整合质量门禁、AI 多专家评审和 Sprint 流程编排三大核心模块。质量门禁在每次 `git commit` 时自动运行 6 项检查，任何失败都会阻止提交。Delphi Review 采用多轮匿名评审机制，直到所有专家达成共识（≥95%）。Sprint Flow 提供一键式完整开发流程编排，从需求探索到发布部署全程自动化。
 
 ---
 
@@ -57,7 +57,7 @@ XGate 整合质量门禁、AI 多专家评审和 Sprint 流程编排三大核心
 
 ## 3. Language Support Matrix
 
-XGate 支持 12 种编程语言的质量门禁和静态分析：
+XP-Gate 支持 12 种编程语言的质量门禁和静态分析：
 
 | 语言 | 静态分析 | Lint | 测试 | 覆盖率 | 架构验证 | 适配器 |
 |------|---------|------|------|--------|---------|--------|
@@ -178,7 +178,7 @@ Phase 6: SHIP ────────┘
 
 ## 6. AI Skills Integration Map
 
-XGate 集成的 AI Skills 体系：
+XP-Gate 集成的 AI Skills 体系：
 
 ### 核心 AI Skills
 
@@ -240,9 +240,9 @@ XGate 集成的 AI Skills 体系：
 
 ---
 
-## 8. Comparison: XGate vs Standard CI/CD
+## 8. Comparison: XP-Gate vs Standard CI/CD
 
-| 维度 | XGate | 标准 CI/CD |
+| 维度 | XP-Gate | 标准 CI/CD |
 |------|-------|-----------|
 | **集成层级** | 本地 git hooks + AI Skills | 远程 CI 服务器 |
 | **反馈延迟** | 提交前即时反馈（<30s） | 推送到 CI 后（分钟级） |
@@ -260,17 +260,17 @@ XGate 集成的 AI Skills 体系：
 
 ### 组合建议
 
-XGate 专注于**提交前质量门禁**和**AI 辅助评审**，可与标准 CI/CD **互补使用**:
+XP-Gate 专注于**提交前质量门禁**和**AI 辅助评审**，可与标准 CI/CD **互补使用**:
 
 ```
-本地开发 ──→ git commit ──→ XGate 6 Gates ──→ ✅ 通过
+本地开发 ──→ git commit ──→ XP-Gate 6 Gates ──→ ✅ 通过
                                             └──→ ❌ 阻断修复
                                                   │
                                                   ▼
 git push ──→ CI/CD Pipeline ──→ Build/Test/Deploy
 ```
 
-**最佳实践**: XGate 保证提交质量，CI/CD 处理构建和部署。
+**最佳实践**: XP-Gate 保证提交质量，CI/CD 处理构建和部署。
 
 ---
 

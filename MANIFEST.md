@@ -6,11 +6,11 @@ This file is machine-readable. LLM agents: parse this to discover all installabl
 
 ## Zero-Install (v0.1.2+)
 
-The entire xgate tool can be installed without cloning the repository:
+The entire xp-gate tool can be installed without cloning the repository:
 
 ```bash
-npm install -g xgate
-xgate init
+npm install -g xp-gate
+xp-gate init
 ```
 
 ---
@@ -21,16 +21,16 @@ Each component can be installed independently. No component requires sprint-flow
 
 ```yaml
 components:
-  - id: xgate-npm
-    name: "XGate npm Package (Zero-Install)"
-    description: "Complete xgate via npm global install. No clone needed. Includes: git hooks, adapters, CLI, skill downloader"
+  - id: xp-gate-npm
+    name: "XP-Gate npm Package (Zero-Install)"
+    description: "Complete xp-gate via npm global install. No clone needed. Includes: git hooks, adapters, CLI, skill downloader"
     type: npm-package
-    install_command: "npm install -g xgate"
+    install_command: "npm install -g xp-gate"
     subcommands:
-      - "xgate init"
-      - "xgate install-skill <name>"
-      - "xgate update-skill <name>"
-      - "xgate uninstall-skill <name> --force"
+      - "xp-gate init"
+      - "xp-gate install-skill <name>"
+      - "xp-gate update-skill <name>"
+      - "xp-gate uninstall-skill <name> --force"
     requires:
       - node (>=18)
       - npm
@@ -40,7 +40,7 @@ components:
     name: "Pre-Commit Hook (6 Gates)"
     description: "Static analysis, lint, test, coverage, shell check, principles (Clean Code + SOLID), cyclomatic complexity, Boy Scout Rule, architecture quality"
     type: git-hook
-    install_command: "bash <(curl -fsSL https://raw.githubusercontent.com/boyingliu01/xgate/repo-main/scripts/install-pre-commit.sh)"
+    install_command: "bash <(curl -fsSL https://raw.githubusercontent.com/boyingliu01/xp-gate/repo-main/scripts/install-pre-commit.sh)"
     local_install: "bash scripts/install-pre-commit.sh"
     requires:
       - node (>=20)
@@ -55,7 +55,7 @@ components:
     name: "Pre-Push Hook (Delphi Code Walkthrough)"
     description: "Multi-expert AI code review before git push. Validates .code-walkthrough-result.json from Delphi review."
     type: git-hook
-    install_command: "bash <(curl -fsSL https://raw.githubusercontent.com/boyingliu01/xgate/repo-main/scripts/install-pre-push.sh)"
+    install_command: "bash <(curl -fsSL https://raw.githubusercontent.com/boyingliu01/xp-gate/repo-main/scripts/install-pre-push.sh)"
     local_install: "bash scripts/install-pre-push.sh"
     requires: []
     recommends:
@@ -67,7 +67,7 @@ components:
     name: "Principles Checker CLI"
     description: "Clean Code (9 rules) + SOLID (5 rules) static checker with 9 language adapters. Outputs SARIF 2.1.0. Includes Boy Scout Rule enforcement."
     type: cli-tool
-    install_command: "bash <(curl -fsSL https://raw.githubusercontent.com/boyingliu01/xgate/repo-main/scripts/install-principles-cli.sh)"
+    install_command: "bash <(curl -fsSL https://raw.githubusercontent.com/boyingliu01/xp-gate/repo-main/scripts/install-principles-cli.sh)"
     local_install: "bash scripts/install-principles-cli.sh"
     requires:
       - node (>=20)
@@ -81,7 +81,7 @@ components:
     name: "Delphi Review Skill"
     description: "Multi-expert anonymous consensus review. Two modes: design (default) and code-walkthrough. MANDATORY before implementation."
     type: ai-skill
-    install_command: "bash <(curl -fsSL https://raw.githubusercontent.com/boyingliu01/xgate/repo-main/scripts/install-delphi-review.sh)"
+    install_command: "bash <(curl -fsSL https://raw.githubusercontent.com/boyingliu01/xp-gate/repo-main/scripts/install-delphi-review.sh)"
     local_install: "bash scripts/install-delphi-review.sh"
     requires:
       - OpenCode or Claude Code
@@ -93,7 +93,7 @@ components:
     name: "Test-Specification Alignment Skill"
     description: "Two-phase test verification ensuring tests match requirements. Phase 1: verify alignment, Phase 2: execute with frozen tests."
     type: ai-skill
-    install_command: "bash <(curl -fsSL https://raw.githubusercontent.com/boyingliu01/xgate/repo-main/scripts/install-test-spec-alignment.sh)"
+    install_command: "bash <(curl -fsSL https://raw.githubusercontent.com/boyingliu01/xp-gate/repo-main/scripts/install-test-spec-alignment.sh)"
     local_install: "bash scripts/install-test-spec-alignment.sh"
     requires: []
     recommends:
@@ -105,7 +105,7 @@ components:
     name: "Sprint Flow Skill (Orchestrator)"
     description: "One-Shot Sprint 自动流水线. Orchestrates: office-hours → autoplan → delphi-review → TDD → review → ship. Optional composite."
     type: ai-skill
-    install_command: "bash <(curl -fsSL https://raw.githubusercontent.com/boyingliu01/xgate/repo-main/scripts/install-sprint-flow.sh)"
+    install_command: "bash <(curl -fsSL https://raw.githubusercontent.com/boyingliu01/xp-gate/repo-main/scripts/install-sprint-flow.sh)"
     local_install: "bash scripts/install-sprint-flow.sh"
     requires: []
     recommends:
@@ -131,7 +131,7 @@ bundles:
     name: "Quality Gates Bundle"
     description: "All git hooks + principles CLI + quality standards"
     components: [pre-commit, pre-push, principles-cli, quality-gates-code-of-conduct]
-    install_command: "bash <(curl -fsSL https://raw.githubusercontent.com/boyingliu01/xgate/repo-main/scripts/install-all.sh)"
+    install_command: "bash <(curl -fsSL https://raw.githubusercontent.com/boyingliu01/xp-gate/repo-main/scripts/install-all.sh)"
     local_install: "bash scripts/install-all.sh"
 
   - id: ai-review

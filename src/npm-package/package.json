@@ -1,9 +1,9 @@
 {
-  "name": "xgate",
+  "name": "xp-gate",
   "version": "0.2.0",
   "description": "AI-driven development workflow: 6 quality gates + Delphi review + Sprint Flow",
   "bin": {
-    "xgate": "./bin/xgate.js"
+    "xp-gate": "./bin/xp-gate.js"
   },
   "files": [
     "bin/",
@@ -13,7 +13,7 @@
   ],
   "repository": {
     "type": "git",
-    "url": "https://github.com/boyingliu01/xgate"
+    "url": "https://github.com/boyingliu01/xp-gate"
   },
   "publishConfig": {
     "registry": "https://npm.pkg.github.com"
@@ -25,7 +25,7 @@
     "test": "echo \"Run tests\" && exit 0"
   },
   "keywords": [
-    "xgate",
+    "xp-gate",
     "quality-gates",
     "delphi-review",
     "sprint-flow",

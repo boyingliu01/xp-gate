@@ -1,4 +1,4 @@
-# Contributing to XGate
+# Contributing to XP-Gate
 
 Thank you for your interest in contributing!
 
@@ -6,8 +6,8 @@ Thank you for your interest in contributing!
 
 ```bash
 # Clone and install
-git clone https://github.com/boyingliu01/xgate.git
-cd xgate
+git clone https://github.com/boyingliu01/xp-gate.git
+cd xp-gate
 npm install
 
 # Setup git hooks (MANDATORY) — installs hooks + adapter infrastructure

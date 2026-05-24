@@ -11,39 +11,39 @@ All notable changes to this project will be documented in this file.
 - **brainstorming 增强** — 自动创建 `CONTEXT.md` + `ADR` 记录共享语言，Delphi Round 2 APPROVED (3/3)
 - **Delphi Review 增强** — specification.yaml 新增 User Stories 层级，增加 US→REQ→AC→test 追溯链
 - **Sprint Flow 集成 `/to-issues`** — Phase 1 PLAN 和 Phase 2 BUILD 融入任务拆解流程
-- **Matt Pocock 5 Skills 融合分析文档** — `docs/fusion/matt-pocock-skills-vs-xgate-analysis.md`
+- **Matt Pocock 5 Skills 融合分析文档** — `docs/fusion/matt-pocock-skills-vs-xp-gate-analysis.md`
 
 ### Changed
 - **Clean Code 规则** — 9→10 条（新增 many-exports CC-010）
-- **README.md** — 新增"最大化 XGate 价值"实战指南章节
+- **README.md** — 新增"最大化 XP-Gate 价值"实战指南章节
 - **sprint-flow** — Phase 1→2 融入 `/to-issues` 任务拆解
 - **13 语言适配器** — TypeScriptAdapter 新增 `extractExports()` 方法
 - **Brainstorming** — 增加 CONTEXT.md 惰性创建机制（≥2 领域术语才生成）
 
 ### Documents
-- `docs/fusion/matt-pocock-skills-vs-xgate-analysis.md` — 融合矩阵与执行状态
+- `docs/fusion/matt-pocock-skills-vs-xp-gate-analysis.md` — 融合矩阵与执行状态
 
 ## [0.1.2] - 2026-05-20
 
 ### Added
-- **xgate npm 包** — `npm install -g xgate` 零安装体验，无需 clone 仓库
-- **`xgate init`** — 初始化项目，自动安装 hooks + adapters + 依赖检测
-- **`xgate install-skill <name>`** — 从 GitHub 按需下载并安装 AI 技能
-- **`xgate update-skill <name>`** — 更新已安装的 Skill 到最新版本
-- **`xgate uninstall-skill <name>`** — 卸载指定 Skill
+- **xp-gate npm 包** — `npm install -g xp-gate` 零安装体验，无需 clone 仓库
+- **`xp-gate init`** — 初始化项目，自动安装 hooks + adapters + 依赖检测
+- **`xp-gate install-skill <name>`** — 从 GitHub 按需下载并安装 AI 技能
+- **`xp-gate update-skill <name>`** — 更新已安装的 Skill 到最新版本
+- **`xp-gate uninstall-skill <name>`** — 卸载指定 Skill
 - **依赖检测** — `detect-deps.js` 支持 superpowers/gstack 版本检查
 - **安装回滚机制** — 安装失败自动恢复备份，保证干净状态
-- **离线缓存** — `xgate install-skill --offline` 使用本地缓存
-- **配置文件** — `~/.config/xgate/xgate.json` 记录已安装 Skills 和元数据
+- **离线缓存** — `xp-gate install-skill --offline` 使用本地缓存
+- **配置文件** — `~/.config/xp-gate/xp-gate.json` 记录已安装 Skills 和元数据
 
 ### Changed
 - **快速开始** — README 新增 "方式零：零安装（推荐）"
 - **依赖检测路径** — 同时搜索 `~/.config/opencode/skills/` 和 `~/.config/opencode/` 两个位置
 
 ### Documents
-- 设计文档：docs/plans/2026-05-19-xgate-zero-install-design.md v2.0
-- 评审报告：docs/plans/2026-05-19-xgate-zero-install-consensus-report.md
-- 需求规格：docs/plans/2026-05-19-xgate-zero-install-specification.yaml
+- 设计文档：docs/plans/2026-05-19-xp-gate-zero-install-design.md v2.0
+- 评审报告：docs/plans/2026-05-19-xp-gate-zero-install-consensus-report.md
+- 需求规格：docs/plans/2026-05-19-xp-gate-zero-install-specification.yaml
 
 ## [0.1.1] - 2026-05-09
 
@@ -223,7 +223,7 @@ TypeScript, Python, Go, Shell, Java, Kotlin, C++, Swift, Objective-C, Dart, Flut
 ## [0.0.1] - 2025-03-XX
 
 ### Added
-- Initial XGate framework
+- Initial XP-Gate framework
 - Principles checker with Clean Code + SOLID rules
 - Git hooks framework
 - Basic skill structure

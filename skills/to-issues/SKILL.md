@@ -1,6 +1,6 @@
 ---
 name: to-issues
-description: Break a plan, spec, or PRD into independently-grabbable issues using tracer-bullet vertical slices. Use when user wants to convert a plan into issues, create implementation tickets, or break down work into vertical slices. Integrates with XGate sprint-flow Phase 1.
+description: Break a plan, spec, or PRD into independently-grabbable issues using tracer-bullet vertical slices. Use when user wants to convert a plan into issues, create implementation tickets, or break down work into vertical slices. Integrates with XP-Gate sprint-flow Phase 1.
 ---
 
 # To Issues — Vertical Slice Breakdown
@@ -20,7 +20,7 @@ description: Break a plan, spec, or PRD into independently-grabbable issues usin
 | **HITL** | Human-In-The-Loop — 需要人工决策（架构选择、设计评审）才能继续 |
 | **AFK** | Away-From-Keyboard — 可完全由 agent 自主实现并合并 |
 | **Blocking** | 依赖关系：此切片必须在哪些切片完成后才能开始 |
-| **Deep Module** | 封装大量功能于简单接口背后的模块（XGate Principles 概念） |
+| **Deep Module** | 封装大量功能于简单接口背后的模块（XP-Gate Principles 概念） |
 
 ---
 
@@ -232,7 +232,7 @@ slice-N
 
 ---
 
-## 与 XGate Sprint Flow 集成
+## 与 XP-Gate Sprint Flow 集成
 
 完整 7 阶段流程中 to-issues 的位置及切片在各阶段的生命周期：
 

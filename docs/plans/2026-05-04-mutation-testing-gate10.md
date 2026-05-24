@@ -10,7 +10,7 @@
 
 ## 1. Motivation
 
-XGate Gate 5 currently only validates code coverage (≥80%). However, coverage metrics have largely lost meaning in the AI era:
+XP-Gate Gate 5 currently only validates code coverage (≥80%). However, coverage metrics have largely lost meaning in the AI era:
 
 | Source | Key Finding |
 |--------|-------------|
@@ -26,7 +26,7 @@ Core problem: AI-generated tests verify "what code currently does" rather than "
 
 ### 2.1 Tool Selection
 
-**Stryker Mutator** for TypeScript (xgate's primary language):
+**Stryker Mutator** for TypeScript (xp-gate's primary language):
 
 | Component | Package (NPM scope: @stryker-mutator) |
 |-----------|----------|

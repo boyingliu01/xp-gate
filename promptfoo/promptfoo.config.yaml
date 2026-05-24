@@ -1,11 +1,11 @@
-# promptfoo Configuration for XGate Skill Validation
+# promptfoo Configuration for XP-Gate Skill Validation
 # https://promptfoo.dev/docs/configuration
 #
 # Usage:
 #   npx promptfoo@latest eval -c promptfoo/promptfoo.config.yaml
 #   npx promptfoo@latest eval -c promptfoo/promptfoo.config.yaml --cache
 
-description: "XGate Skill Validation - Regression Tests"
+description: "XP-Gate Skill Validation - Regression Tests"
 
 # Default test options
 defaultTest:
