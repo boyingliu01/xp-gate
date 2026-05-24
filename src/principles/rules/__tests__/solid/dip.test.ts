@@ -3,7 +3,7 @@ import { dipRule } from '../../solid/dip';
 
 const mockAdapter = {
   detectLanguage: () => 'typescript',
-  parseAST: () => {},
+  parseAST: () => undefined,
   extractFunctions: () => [],
   extractClasses: () => [],
   countLines: () => 0
@@ -28,7 +28,7 @@ class UserService {
       }]
     };
     
-    const violations = dipRule.check('test.ts', mockAdapterWithDirectInstantiation as any);
+    const violations = dipRule.check('test.ts', mockAdapterWithDirectInstantiation as never);
     
     expect(violations.length).toBeGreaterThan(0);
     expect(violations[0].ruleId).toBe('solid.dip');
@@ -52,7 +52,7 @@ class UserService {
       }]
     };
     
-    const violations = dipRule.check('test.ts', mockAdapterWithDI as any);
+    const violations = dipRule.check('test.ts', mockAdapterWithDI as never);
     
     expect(violations.length).toBe(0);
   });
@@ -73,7 +73,7 @@ class DateService {
       }]
     };
     
-    const violations = dipRule.check('test.ts', mockAdapterWithValueObjects as any);
+    const violations = dipRule.check('test.ts', mockAdapterWithValueObjects as never);
     
     expect(violations.length).toBe(0);
   });
@@ -88,7 +88,7 @@ class DateService {
       extractClasses: () => { throw new Error('Adapter failed'); }
     };
     
-    const violations = dipRule.check('test.ts', mockAdapterThatThrows as any);
+    const violations = dipRule.check('test.ts', mockAdapterThatThrows as never);
     
     expect(violations.length).toBe(0);
   });
@@ -102,7 +102,7 @@ class DateService {
         code: `class Service { run() { return new Date(); } }`
       }]
     };
-    const violations = dipRule.check('test.ts', mockAdapterWithBuiltins as any);
+    const violations = dipRule.check('test.ts', mockAdapterWithBuiltins as never);
     expect(violations.length).toBe(0);
   });
 
@@ -115,7 +115,7 @@ class DateService {
         code: `class Client { create() { return new UserFactory(); } }`
       }]
     };
-    const violations = dipRule.check('test.ts', mockAdapterWithFactory as any);
+    const violations = dipRule.check('test.ts', mockAdapterWithFactory as never);
     expect(violations.length).toBe(0);
   });
 });

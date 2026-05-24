@@ -5,9 +5,8 @@
  */
 
 import { describe, it, expect, beforeEach, vi } from 'vitest';
-import { analyze, AnalysisResult } from '../analyzer';
-import { Rule, Violation, Adapter, Severity } from '../types';
-import { loadConfig } from '../config';
+import { analyze } from '../analyzer';
+import { Rule, Adapter, Severity } from '../types';
 
 describe('analyzer.ts - Rule Orchestration Engine', () => {
   let mockAdapter: Adapter;
@@ -22,6 +21,7 @@ describe('analyzer.ts - Rule Orchestration Engine', () => {
         { name: 'testFunc', startLine: 1, length: 60 }
       ]),
       extractClasses: vi.fn().mockReturnValue([]),
+      extractExports: vi.fn().mockReturnValue([]),
       countLines: vi.fn().mockReturnValue(100)
     };
     
@@ -94,7 +94,6 @@ describe('analyzer.ts - Rule Orchestration Engine', () => {
     });
 
     it('should filter rules by enabled config', async () => {
-      const config = await loadConfig();
       const files = ['test.ts'];
       
       // Mock a disabled rule
@@ -106,7 +105,7 @@ describe('analyzer.ts - Rule Orchestration Engine', () => {
         check: vi.fn().mockReturnValue([])
       };
       
-      const result = await analyze(files, [mockRule, disabledRule], mockAdapter, {
+      await analyze(files, [mockRule, disabledRule], mockAdapter, {
         enabledRules: ['clean-code.long-function']
       });
       
@@ -201,7 +200,7 @@ it('should skip files that do not match adapter language', async () => {
         };
       };
       
-      const result = await analyze(files, [mockRule], adapterFactory);
+      await analyze(files, [mockRule], adapterFactory);
       
       expect(mockRule.check).toHaveBeenCalledTimes(1);
     });

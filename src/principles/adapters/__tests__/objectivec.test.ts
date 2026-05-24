@@ -1,6 +1,5 @@
 import { describe, it, expect, vi } from 'vitest';
 import { ObjectiveCAdapter } from '../objectivec';
-import type { Adapter } from '../../types';
 
 vi.mock('fs', () => ({
   readFileSync: vi.fn(),
@@ -130,7 +129,7 @@ void logDebug(const char *msg) {
     const adapter = new ObjectiveCAdapter('Helper.m');
     const functions = adapter.extractFunctions();
     expect(Array.isArray(functions)).toBe(true);
-    expect(functions.some(fn => (fn as any).type === 'function')).toBe(true);
+    expect(functions.some(fn => (fn as {type: string}).type === 'function')).toBe(true);
   });
 
   /**
@@ -146,8 +145,8 @@ void logDebug(const char *msg) {
     const adapter = new ObjectiveCAdapter('MyClass.m');
     const classes = adapter.extractClasses();
     expect(Array.isArray(classes)).toBe(true);
-    expect(classes.some(cls => (cls as any).name === 'MyClass')).toBe(true);
-    expect(classes.some(cls => (cls as any).type === 'implementation')).toBe(true);
+    expect(classes.some(cls => (cls as {name: string}).name === 'MyClass')).toBe(true);
+    expect(classes.some(cls => (cls as {type: string}).type === 'implementation')).toBe(true);
   });
 
   /**
@@ -163,8 +162,8 @@ void logDebug(const char *msg) {
     const adapter = new ObjectiveCAdapter('MyProtocol.m');
     const classes = adapter.extractClasses();
     expect(Array.isArray(classes)).toBe(true);
-    expect(classes.some(cls => (cls as any).name === 'MyProtocol')).toBe(true);
-    expect(classes.some(cls => (cls as any).type === 'interface')).toBe(true);
+    expect(classes.some(cls => (cls as {name: string}).name === 'MyProtocol')).toBe(true);
+    expect(classes.some(cls => (cls as {type: string}).type === 'interface')).toBe(true);
   });
 
   /**
@@ -200,7 +199,7 @@ void logDebug(const char *msg) {
     const adapter = new ObjectiveCAdapter('ChildClass.m');
     const classes = adapter.extractClasses();
     expect(Array.isArray(classes)).toBe(true);
-    expect(classes.some(cls => (cls as any).name === 'ChildClass')).toBe(true);
+    expect(classes.some(cls => (cls as {name: string}).name === 'ChildClass')).toBe(true);
   });
 
   /**
@@ -406,7 +405,7 @@ static inline int fastAdd(int a, int b) {
     const adapter = new ObjectiveCAdapter('FastMath.m');
     const functions = adapter.extractFunctions();
     expect(Array.isArray(functions)).toBe(true);
-    expect(functions.some(fn => (fn as any).type === 'function')).toBe(true);
+    expect(functions.some(fn => (fn as {type: string}).type === 'function')).toBe(true);
   });
 
   /**
@@ -422,7 +421,7 @@ static inline int fastAdd(int a, int b) {
 `);
     const adapter = new ObjectiveCAdapter('LineTest.m');
     const functions = adapter.extractFunctions();
-    expect(functions.every(fn => typeof (fn as any).line === 'number')).toBe(true);
+    expect(functions.every(fn => typeof (fn as {line: number}).line === 'number')).toBe(true);
   });
 
   /**
@@ -443,6 +442,6 @@ static inline int fastAdd(int a, int b) {
 `);
     const adapter = new ObjectiveCAdapter('CodeBlockTest.m');
     const functions = adapter.extractFunctions();
-    expect(functions.every(fn => typeof (fn as any).code === 'string')).toBe(true);
+    expect(functions.every(fn => typeof (fn as {code: string}).code === 'string')).toBe(true);
   });
 });

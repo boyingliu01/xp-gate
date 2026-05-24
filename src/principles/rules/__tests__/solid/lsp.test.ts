@@ -3,7 +3,7 @@ import { lspRule } from '../../solid/lsp';
 
 const mockAdapter = {
   detectLanguage: () => 'typescript',
-  parseAST: () => {},
+  parseAST: () => undefined,
   extractFunctions: () => [],
   extractClasses: () => [],
   countLines: () => 0
@@ -20,7 +20,7 @@ describe('lsp.ts - Liskov Substitution Principle Rule', () => {
       }]
     };
     
-    const violations = lspRule.check('test.ts', mockAdapterWithViolation as any);
+    const violations = lspRule.check('test.ts', mockAdapterWithViolation as never);
     
     expect(violations.length).toBeGreaterThan(0);
     expect(violations[0].ruleId).toBe('solid.lsp');
@@ -40,7 +40,7 @@ class DerivedRepo extends BaseRepo {
       }]
     };
     
-    const violations = lspRule.check('test.ts', mockAdapterWithProperOverride as any);
+    const violations = lspRule.check('test.ts', mockAdapterWithProperOverride as never);
     
     expect(violations.length).toBe(0);
   });
@@ -55,7 +55,7 @@ class DerivedRepo extends BaseRepo {
       extractClasses: () => { throw new Error('Adapter failed'); }
     };
     
-    const violations = lspRule.check('test.ts', mockAdapterThatThrows as any);
+    const violations = lspRule.check('test.ts', mockAdapterThatThrows as never);
     
     expect(violations.length).toBe(0);
   });

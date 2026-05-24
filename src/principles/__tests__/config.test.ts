@@ -4,7 +4,7 @@
  * @covers clean-code-solid-checker-design Section 11
  */
 
-import { describe, it, expect, beforeEach } from 'vitest';
+import { describe, it, expect } from 'vitest';
 import { loadConfig, getDefaultConfig } from '../config';
 
 describe('config.ts - Configuration Loader', () => {

@@ -1,4 +1,4 @@
-import { Rule, Violation } from '../../types';
+import { Rule, Violation, Severity } from '../../types';
 import { getDefaultConfig } from '../../config';
 
 const config = getDefaultConfig();
@@ -7,12 +7,23 @@ export const godClassRule: Rule = {
   id: 'clean-code.god-class',
   name: 'God Class Rule',
   threshold: config.rules['clean-code']['god-class'].threshold ?? 15,
-  severity: config.rules['clean-code']['god-class'].severity as any,
-  check: (file: string, adapter: any): Violation[] => {
+  severity: config.rules['clean-code']['god-class'].severity as Severity,
+  check: (file: string, adapter: unknown): Violation[] => {
     const violations: Violation[] = [];
     
     try {
-      const classes = adapter.extractClasses() || [];
+      interface ClassObject {
+        code?: string;
+        line: number;
+        name: string;
+      }
+      
+      interface TypedAdapter {
+        extractClasses?: () => ClassObject[] | undefined;
+      }
+      
+      const typedAdapter = adapter as TypedAdapter;
+      const classes = typedAdapter.extractClasses?.() || [];
       
       for (const cls of classes) {
         const methodMatches = cls.code?.match(/(get|set)\s+\w+\s*\(|\w+\s*\([^)]*\)\s*{/g) || [];
@@ -32,12 +43,11 @@ export const godClassRule: Rule = {
             message: `Class "${cls.name}" has too many methods: ${methodCount} (maximum: ${
               config.rules['clean-code']['god-class'].threshold
             })`,
-            severity: config.rules['clean-code']['god-class'].severity as any
+            severity: config.rules['clean-code']['god-class'].severity as Severity
           });
         }
       }
-    } catch (error) {
-    }
+    } catch { }
     
     return violations;
   }

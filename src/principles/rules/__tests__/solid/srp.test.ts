@@ -3,7 +3,7 @@ import { srpRule } from '../../solid/srp';
 
 const mockAdapter = {
   detectLanguage: () => 'typescript',
-  parseAST: () => {},
+  parseAST: () => undefined,
   extractFunctions: () => [],
   extractClasses: () => [],
   countLines: () => 0
@@ -25,7 +25,7 @@ describe('srp.ts - Single Responsibility Principle Rule', () => {
       }]
     };
     
-    const violations = srpRule.check('test.ts', mockAdapterWithManyMethods as any);
+    const violations = srpRule.check('test.ts', mockAdapterWithManyMethods as never);
     
     expect(violations.length).toBeGreaterThan(0);
     expect(violations[0].ruleId).toBe('solid.srp');
@@ -47,7 +47,7 @@ describe('srp.ts - Single Responsibility Principle Rule', () => {
       }]
     };
     
-    const violations = srpRule.check('test.ts', mockAdapterWithImportDiversity as any);
+    const violations = srpRule.check('test.ts', mockAdapterWithImportDiversity as never);
     
     expect(violations.length).toBeGreaterThan(0);
     expect(violations[0].message).toContain('import');
@@ -66,7 +66,7 @@ describe('srp.ts - Single Responsibility Principle Rule', () => {
       }]
     };
     
-    const violations = srpRule.check('test.ts', mockAdapterWithFocusedClass as any);
+    const violations = srpRule.check('test.ts', mockAdapterWithFocusedClass as never);
     
     expect(violations.length).toBe(0);
   });
@@ -82,7 +82,7 @@ describe('srp.ts - Single Responsibility Principle Rule', () => {
       extractClasses: () => { throw new Error('Adapter failed'); }
     };
     
-    const violations = srpRule.check('test.ts', mockAdapterThatThrows as any);
+    const violations = srpRule.check('test.ts', mockAdapterThatThrows as never);
     
     expect(violations.length).toBe(0);
   });

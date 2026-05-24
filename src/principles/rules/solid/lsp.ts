@@ -7,14 +7,15 @@ export const lspRule: Rule = {
   id: 'solid.lsp',
   name: 'Liskov Substitution Principle Rule',
   threshold: 0,
-  severity: config.rules['solid']['lsp'].severity as any,
-  check: (file: string, adapter: any): Violation[] => {
+  severity: config.rules['solid']['lsp'].severity as "error" | "warning" | "info",
+  check: (file: string, adapter: import('../../types').Adapter): Violation[] => {
     const violations: Violation[] = [];
     
     try {
       const classes = adapter.extractClasses() || [];
       
-      for (const cls of classes) {
+      for (const raw of classes) {
+        const cls = raw as { code?: string; line?: number; name?: string };
         if (!cls.code) continue;
         
         if (cls.code.includes('extends')) {
@@ -32,13 +33,13 @@ export const lspRule: Rule = {
                     const paramType = typeMatch[1];
                     const primitiveTypes = ['string', 'number', 'boolean', 'any', 'void', 'null', 'undefined', 'Object', 'Array'];
                     
-                    if (!primitiveTypes.includes(paramType) && !paramType.startsWith(cls.name)) {
+                    if (!primitiveTypes.includes(paramType) && !(cls.name && paramType.startsWith(cls.name))) {
                       violations.push({
                         file,
-                        line: cls.line,
+                        line: cls.line ?? 0,
                         ruleId: 'solid.lsp',
                         message: `Possible LSP violation in "${cls.name}". Parameter type "${paramType}" may not be compatible with base class contract.`,
-                        severity: config.rules['solid']['lsp'].severity as any
+                        severity: config.rules['solid']['lsp'].severity as "error" | "warning" | "info"
                       });
                     }
                   }
@@ -48,8 +49,7 @@ export const lspRule: Rule = {
           }
         }
       }
-    } catch (error) {
-    }
+    } catch { }
     
     return violations;
   }

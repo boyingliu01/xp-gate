@@ -40,7 +40,6 @@ export class CppAdapter extends BaseAdapter implements Adapter {
     const constructorRegex = /([\w:]+)\s*\([^)]*\)\s*:\s*[\w_]+\s*\([^)]*\)/g;
     while ((match = constructorRegex.exec(this.fileContent)) !== null) {
       const constructorName = match[1];
-      const className = constructorName.split('::').pop();
       
       functionMatches.push({
         name: constructorName,

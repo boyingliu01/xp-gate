@@ -1,5 +1,4 @@
 import fs from 'fs/promises';
-import path from 'path';
 
 interface BaselineEntry {
   eslint?: { warnings: number; errors: number };
@@ -33,7 +32,7 @@ class BaselineStorage {
       await fs.access(baselinePath);
       const baselineContent = await fs.readFile(baselinePath, 'utf-8');
       return JSON.parse(baselineContent);
-    } catch (error) {
+    } catch {
       return {};
     }
   }
@@ -212,7 +211,7 @@ class BaselineStorage {
           })
         );
 
-        const rejectedPromises = promiseResults.filter(r => r.status === 'rejected') as Array<{ status: 'rejected'; reason: any }>;
+        const rejectedPromises = promiseResults.filter(r => r.status === 'rejected') as Array<{ status: 'rejected'; reason: unknown }>;
         if (rejectedPromises.length > 0) {
           console.error('Some files failed to analyze:', rejectedPromises.map(r => r.reason));
         }

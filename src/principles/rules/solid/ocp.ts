@@ -7,14 +7,15 @@ export const ocpRule: Rule = {
   id: 'solid.ocp',
   name: 'Open/Closed Principle Rule',
   threshold: 0,
-  severity: config.rules['solid']['ocp'].severity as any,
-  check: (file: string, adapter: any): Violation[] => {
+  severity: config.rules['solid']['ocp'].severity as "error" | "warning" | "info",
+  check: (file: string, adapter: import('../../types').Adapter): Violation[] => {
     const violations: Violation[] = [];
     
     try {
       const classes = adapter.extractClasses() || [];
       
-      for (const cls of classes) {
+      for (const raw of classes) {
+        const cls = raw as { code?: string; line?: number; name?: string };
         if (!cls.code) continue;
         
         const extendsMatch = cls.code.match(/extends\s+(\w+)/);
@@ -24,16 +25,15 @@ export const ocpRule: Rule = {
           if (cls.code.includes(`class ${baseClass}`)) {
             violations.push({
               file,
-              line: cls.line,
+              line: cls.line ?? 1,
               ruleId: 'solid.ocp',
               message: `Possible modification of base class "${baseClass}" while extending. Extension should not require modifying the base.`,
-              severity: config.rules['solid']['ocp'].severity as any
+              severity: config.rules['solid']['ocp'].severity as "error" | "warning" | "info"
             });
           }
         }
       }
-    } catch (error) {
-    }
+    } catch { }
     
     return violations;
   }

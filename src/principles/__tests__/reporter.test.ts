@@ -5,7 +5,7 @@
  */
 
 import { describe, it, expect } from 'vitest';
-import { formatConsole, formatJSON, formatSummary, ReporterOutput } from '../reporter';
+import { formatConsole, formatJSON, formatSummary } from '../reporter';
 import { AnalysisResult, Violation } from '../analyzer';
 
 describe('reporter.ts - Output Formatting', () => {

@@ -4,7 +4,7 @@ import { longFunctionRule } from '../../clean-code/long-function';
 // Mock adapter for testing
 const mockAdapter = {
   detectLanguage: () => 'typescript',
-  parseAST: () => {},
+  parseAST: () => undefined,
   extractFunctions: () => [],
   extractClasses: () => [],
   countLines: (content: string) => content.split('\n').length
@@ -19,7 +19,7 @@ describe('longFunctionRule', () => {
       ]
     };
 
-    const violations = longFunctionRule.check('test.ts', mockShortAdapter as any);
+    const violations = longFunctionRule.check('test.ts', mockShortAdapter as never);
     expect(violations).toHaveLength(0);
   });
 
@@ -31,7 +31,7 @@ describe('longFunctionRule', () => {
       ]
     };
 
-    const violations = longFunctionRule.check('test.ts', mockLongAdapter as any);
+    const violations = longFunctionRule.check('test.ts', mockLongAdapter as never);
     expect(violations).toHaveLength(1);
     expect(violations[0]).toEqual({
       file: 'test.ts',
@@ -51,7 +51,7 @@ describe('longFunctionRule', () => {
       ]
     };
 
-    const violations = longFunctionRule.check('test.ts', mockMultiAdapter as any);
+    const violations = longFunctionRule.check('test.ts', mockMultiAdapter as never);
     expect(violations).toHaveLength(1);
     expect(violations[0].ruleId).toEqual('clean-code.long-function');
     expect(violations[0].message).toContain('alsoLongFunction');
@@ -76,7 +76,7 @@ describe('longFunctionRule', () => {
       extractFunctions: () => { throw new Error('Adapter failed'); }
     };
     
-    const violations = longFunctionRule.check('test.ts', mockAdapterThatThrows as any);
+    const violations = longFunctionRule.check('test.ts', mockAdapterThatThrows as never);
     
     expect(violations).toHaveLength(0);
   });

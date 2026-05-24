@@ -3,7 +3,7 @@ import { codeDuplicationRule } from '../../clean-code/code-duplication';
 
 const mockAdapter = {
   detectLanguage: () => 'typescript',
-  parseAST: () => {},
+  parseAST: () => undefined,
   extractFunctions: () => [],
   extractClasses: () => [],
   countLines: () => 0
@@ -16,7 +16,7 @@ describe('code-duplication.ts - Code Duplication Rule', () => {
       duplicationPercentage: 25
     };
     
-    const violations = codeDuplicationRule.check('test.ts', mockAdapterWithDuplication as any);
+    const violations = codeDuplicationRule.check('test.ts', mockAdapterWithDuplication as never);
     
     expect(violations.length).toBe(1);
     expect(violations[0].ruleId).toBe('clean-code.code-duplication');
@@ -29,7 +29,7 @@ describe('code-duplication.ts - Code Duplication Rule', () => {
       duplicationPercentage: 10
     };
     
-    const violations = codeDuplicationRule.check('test.ts', mockAdapterWithLowDuplication as any);
+    const violations = codeDuplicationRule.check('test.ts', mockAdapterWithLowDuplication as never);
     
     expect(violations.length).toBe(0);
   });
@@ -40,7 +40,7 @@ describe('code-duplication.ts - Code Duplication Rule', () => {
       duplicationPercentage: 15
     };
     
-    const violations = codeDuplicationRule.check('test.ts', mockAdapterAtThreshold as any);
+    const violations = codeDuplicationRule.check('test.ts', mockAdapterAtThreshold as never);
     
     expect(violations.length).toBe(0);
   });
@@ -51,7 +51,7 @@ describe('code-duplication.ts - Code Duplication Rule', () => {
   });
 
   it('should return empty array when adapter.duplicationPercentage is undefined', () => {
-    const violations = codeDuplicationRule.check('test.ts', mockAdapter as any);
+    const violations = codeDuplicationRule.check('test.ts', mockAdapter as never);
     
     expect(violations).toEqual([]);
   });
@@ -62,7 +62,7 @@ describe('code-duplication.ts - Code Duplication Rule', () => {
       duplicationPercentage: () => { throw new Error('jscpd error'); }
     };
     
-    const violations = codeDuplicationRule.check('test.ts', mockAdapterThrowing as any);
+    const violations = codeDuplicationRule.check('test.ts', mockAdapterThrowing as never);
     
     expect(violations).toEqual([]);
   });
@@ -76,7 +76,7 @@ describe('code-duplication.ts - Code Duplication Rule', () => {
       ]
     };
     
-    const violations = codeDuplicationRule.check('test.ts', mockAdapterWithDuplication as any);
+    const violations = codeDuplicationRule.check('test.ts', mockAdapterWithDuplication as never);
     
     expect(violations.length).toBe(1);
     expect(violations[0].message).toContain('30%');

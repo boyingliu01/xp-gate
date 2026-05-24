@@ -3,7 +3,7 @@ import { tooManyParamsRule } from '../../clean-code/too-many-params';
 
 const mockAdapter = {
   detectLanguage: () => 'typescript',
-  parseAST: () => {},
+  parseAST: () => undefined,
   extractFunctions: () => [],
   extractClasses: () => [],
   countLines: () => 0
@@ -21,7 +21,7 @@ describe('too-many-params.ts - Too Many Parameters Rule', () => {
       }]
     };
     
-    const violations = tooManyParamsRule.check('test.ts', mockAdapterWithManyParams as any);
+    const violations = tooManyParamsRule.check('test.ts', mockAdapterWithManyParams as never);
     
     expect(violations.length).toBe(1);
     expect(violations[0].ruleId).toBe('clean-code.too-many-params');
@@ -37,7 +37,7 @@ describe('too-many-params.ts - Too Many Parameters Rule', () => {
       }]
     };
     
-    const violations = tooManyParamsRule.check('test.ts', mockAdapterWithNormalParams as any);
+    const violations = tooManyParamsRule.check('test.ts', mockAdapterWithNormalParams as never);
     
     expect(violations.length).toBe(0);
   });
@@ -53,7 +53,7 @@ describe('too-many-params.ts - Too Many Parameters Rule', () => {
       extractFunctions: () => { throw new Error('Adapter failed'); }
     };
     
-    const violations = tooManyParamsRule.check('test.ts', mockAdapterThatThrows as any);
+    const violations = tooManyParamsRule.check('test.ts', mockAdapterThatThrows as never);
     
     expect(violations.length).toBe(0);
   });

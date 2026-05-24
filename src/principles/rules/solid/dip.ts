@@ -11,14 +11,15 @@ export const dipRule: Rule = {
   id: 'solid.dip',
   name: 'Dependency Inversion Principle Rule',
   threshold: 0,
-  severity: config.rules['solid']['dip'].severity as any,
-  check: (file: string, adapter: any): Violation[] => {
+  severity: config.rules['solid']['dip'].severity as 'error' | 'warning' | 'info',
+  check: (file: string, adapter: import('../../types').Adapter): Violation[] => {
     const violations: Violation[] = [];
     
     try {
       const classes = adapter.extractClasses() || [];
       
-      for (const cls of classes) {
+      for (const cls_any of classes) {
+        const cls = cls_any as {code?: string; line?: number};
         if (!cls.code) continue;
         
         const newMatches = cls.code.match(/new\s+(\w+)\s*\(/g) || [];
@@ -36,16 +37,14 @@ export const dipRule: Rule = {
           
           violations.push({
             file,
-            line: cls.line,
+            line: cls.line || 0,
             ruleId: 'solid.dip',
             message: `Direct instantiation detected: new ${className}(). Prefer dependency injection for flexibility.`,
-            severity: config.rules['solid']['dip'].severity as any
+            severity: config.rules['solid']['dip'].severity as 'error' | 'warning' | 'info'
           });
         }
       }
-    } catch (error) {
-    }
-    
+    } catch { }
     return violations;
   }
 };

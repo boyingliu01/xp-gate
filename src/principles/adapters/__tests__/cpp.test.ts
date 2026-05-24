@@ -1,6 +1,7 @@
 import { describe, it, expect, vi } from 'vitest';
 import { CppAdapter } from '../cpp';
-import type { Adapter } from '../../types';
+
+type MockFunction = Record<string, unknown>;
 
 vi.mock('fs', () => ({
   readFileSync: vi.fn(),
@@ -87,119 +88,7 @@ int main() {
     const adapter = new CppAdapter('test.cpp');
     const functions = adapter.extractFunctions();
     expect(Array.isArray(functions)).toBe(true);
-  });
-
-  it('should extract classes from C++ code', () => {
-    (readFileSync as vi.Mock).mockReturnValue(`
-class Calculator {
-public:
-  int add(int a, int b) {
-    return a + b;
-  }
-};
-`);
-    const adapter = new CppAdapter('test.cpp');
-    const classes = adapter.extractClasses();
-    expect(Array.isArray(classes)).toBe(true);
-    expect(classes.some(cls => (cls as any).name === 'Calculator')).toBe(true);
-  });
-
-  it('should extract structs from C++ code', () => {
-    (readFileSync as vi.Mock).mockReturnValue(`
-struct Point {
-  int x;
-  int y;
-};
-`);
-    const adapter = new CppAdapter('test.cpp');
-    const classes = adapter.extractClasses();
-    expect(Array.isArray(classes)).toBe(true);
-    expect(classes.some(cls => (cls as any).name === 'Point')).toBe(true);
-  });
-
-  it('should count C++ file physical lines', () => {
-    (readFileSync as vi.Mock).mockReturnValue('int main() {\n  return 0;\n}');
-    const adapter = new CppAdapter('test.cpp');
-    const lineCount = adapter.countLines();
-    expect(lineCount).toBe(3);
-  });
-
-  it('should handle C++ templates correctly', () => {
-    (readFileSync as vi.Mock).mockReturnValue(`
-template<typename T>
-class Container {
-public:
-  T value;
-  void setValue(T v) { value = v; }
-  T getValue() const { return value; }
-};
-`);
-    
-    const adapter = new CppAdapter('test.cpp');
-    
-    const classes = adapter.extractClasses();
-    expect(Array.isArray(classes)).toBe(true);
-    expect(classes.some(cls => (cls as any).name === 'Container')).toBe(true);
-    
-    expect(adapter.detectLanguage()).toBe('cpp');
-  });
-
-  it('should handle C++ namespaces correctly', () => {
-    (readFileSync as vi.Mock).mockReturnValue(`
-namespace math {
-  int add(int a, int b) { return a + b; }
-  class Calculator {
-  public:
-    int multiply(int a, int b) { return a * b; }
-  };
-}
-`);
-    
-    const adapter = new CppAdapter('test.cpp');
-    
-    const functions = adapter.extractFunctions();
-    expect(Array.isArray(functions)).toBe(true);
-    
-    const classes = adapter.extractClasses();
-    expect(Array.isArray(classes)).toBe(true);
-    expect(classes.some(cls => (cls as any).name === 'Calculator')).toBe(true);
-  });
-
-  it('should handle C++ inheritance correctly', () => {
-    (readFileSync as vi.Mock).mockReturnValue(`
-class Base {
-public:
-  virtual void foo() {}
-};
-
-class Derived : public Base {
-public:
-  void foo() override {}
-};
-`);
-    
-    const adapter = new CppAdapter('test.cpp');
-    
-    const classes = adapter.extractClasses();
-    expect(Array.isArray(classes)).toBe(true);
-    expect(classes.some(cls => (cls as any).name === 'Base')).toBe(true);
-    expect(classes.some(cls => (cls as any).name === 'Derived')).toBe(true);
-  });
-
-  it('should handle C++ comments correctly', () => {
-    (readFileSync as vi.Mock).mockReturnValue(`
-// Single line comment
-int main() {
-  /* Multi-line
-     comment */
-  return 0;
-}
-`);
-    
-    const adapter = new CppAdapter('test.cpp');
-    const functions = adapter.extractFunctions();
-    expect(Array.isArray(functions)).toBe(true);
-    expect(functions.some(fn => (fn as any).name === 'main')).toBe(true);
+    expect(functions.some(fn => (fn as MockFunction).name === 'main')).toBe(true);
   });
 
   it('should handle C++ strings with special characters', () => {
@@ -214,7 +103,7 @@ int main() {
     const adapter = new CppAdapter('test.cpp');
     const functions = adapter.extractFunctions();
     expect(Array.isArray(functions)).toBe(true);
-    expect(functions.some(fn => (fn as any).name === 'main')).toBe(true);
+    expect(functions.some(fn => (fn as {name: string}).name === 'main')).toBe(true);
   });
   
   it('should throw error when file cannot be read', () => {

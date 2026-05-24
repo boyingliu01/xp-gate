@@ -1,6 +1,5 @@
 import { describe, it, expect, vi } from 'vitest';
 import { PythonAdapter } from '../python';
-import type { Adapter } from '../../types';
 
 vi.mock('fs', () => ({
   readFileSync: vi.fn(),
@@ -43,7 +42,7 @@ describe('PythonAdapter', () => {
     const adapter = new PythonAdapter('test.py');
     const functions = adapter.extractFunctions();
     expect(Array.isArray(functions)).toBe(true);
-    expect(functions.some(fn => (fn as any).name === 'test_fn')).toBe(true);
+    expect(functions.some(fn => (fn as {name: string}).name === 'test_fn')).toBe(true);
   });
 
   it('should extract classes from Python AST', () => {
@@ -51,7 +50,7 @@ describe('PythonAdapter', () => {
     const adapter = new PythonAdapter('test.py');
     const classes = adapter.extractClasses();
     expect(Array.isArray(classes)).toBe(true);
-    expect(classes.some(cls => (cls as any).name === 'TestClass')).toBe(true);
+    expect(classes.some(cls => (cls as {name: string}).name === 'TestClass')).toBe(true);
   });
 
   it('should count Python file physical lines', () => {

@@ -5,21 +5,15 @@ import { BaselineStorage, BaselineEntry } from '../baseline';
 describe('Baseline Storage', () => {
   const mockBaselinePath = '.warnings-baseline.json';
   let baselineStorage: BaselineStorage;
-  let originalAccess: any;
-  let originalReadFile: any;
-  let originalWriteFile: any;
 
   beforeEach(() => {
     baselineStorage = new BaselineStorage();
-    originalAccess = fs.access;
-    originalReadFile = fs.readFile;
-    originalWriteFile = fs.writeFile;
   });
 
   afterEach(() => {
-    (fs.access as any).mockRestore?.();
-    (fs.readFile as any).mockRestore?.();
-    (fs.writeFile as any).mockRestore?.();
+    (fs.access as unknown as {mockRestore?: () => void}).mockRestore?.();
+    (fs.readFile as unknown as {mockRestore?: () => void}).mockRestore?.();
+    (fs.writeFile as unknown as {mockRestore?: () => void}).mockRestore?.();
     vi.resetAllMocks();
   });
 

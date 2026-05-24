@@ -1,5 +1,4 @@
 import { Rule, Violation, Adapter } from './types';
-import { loadConfig } from './config';
 import { TypeScriptAdapter } from './adapters/typescript';
 import { PythonAdapter } from './adapters/python';
 import { GoAdapter } from './adapters/go';
@@ -86,7 +85,6 @@ export async function analyze(
   options?: AnalysisOptions
 ): Promise<AnalysisResult> {
   const startTime = Date.now();
-  const config = await loadConfig();
   const errors: string[] = [];
   
   const violations: Violation[] = [];

@@ -54,8 +54,8 @@ describe('index.ts - CLI Entry Point', () => {
 
   describe('main', () => {
     beforeEach(() => {
-      vi.spyOn(console, 'log').mockImplementation(() => {});
-      vi.spyOn(console, 'error').mockImplementation(() => {});
+      vi.spyOn(console, 'log').mockImplementation(() => undefined);
+      vi.spyOn(console, 'error').mockImplementation(() => undefined);
     });
 
     it('should return 1 when no files provided', async () => {

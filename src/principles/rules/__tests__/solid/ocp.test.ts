@@ -3,7 +3,7 @@ import { ocpRule } from '../../solid/ocp';
 
 const mockAdapter = {
   detectLanguage: () => 'typescript',
-  parseAST: () => {},
+  parseAST: () => undefined,
   extractFunctions: () => [],
   extractClasses: () => [],
   countLines: () => 0
@@ -27,7 +27,7 @@ class DerivedClass extends BaseClass {
       }]
     };
     
-    const violations = ocpRule.check('test.ts', mockAdapterWithModification as any);
+    const violations = ocpRule.check('test.ts', mockAdapterWithModification as never);
     
     expect(violations.length).toBeGreaterThan(0);
     expect(violations[0].ruleId).toBe('solid.ocp');
@@ -47,7 +47,7 @@ class DerivedClass extends BaseClass {
       }]
     };
     
-    const violations = ocpRule.check('test.ts', mockAdapterWithProperExtension as any);
+    const violations = ocpRule.check('test.ts', mockAdapterWithProperExtension as never);
     
     expect(violations.length).toBe(0);
   });
@@ -62,7 +62,7 @@ class DerivedClass extends BaseClass {
       extractClasses: () => { throw new Error('Adapter failed'); }
     };
     
-    const violations = ocpRule.check('test.ts', mockAdapterThatThrows as any);
+    const violations = ocpRule.check('test.ts', mockAdapterThatThrows as never);
     
     expect(violations.length).toBe(0);
   });

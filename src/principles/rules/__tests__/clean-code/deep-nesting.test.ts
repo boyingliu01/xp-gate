@@ -3,7 +3,7 @@ import { deepNestingRule } from '../../clean-code/deep-nesting';
 
 const mockAdapter = {
   detectLanguage: () => 'typescript',
-  parseAST: () => {},
+  parseAST: () => undefined,
   extractFunctions: () => [],
   extractClasses: () => [],
   countLines: () => 0
@@ -35,7 +35,7 @@ function deeplyNested() {
       }]
     };
     
-    const violations = deepNestingRule.check('test.ts', mockAdapterWithDeepNesting as any);
+    const violations = deepNestingRule.check('test.ts', mockAdapterWithDeepNesting as never);
     
     expect(violations.length).toBe(1);
     expect(violations[0].ruleId).toBe('clean-code.deep-nesting');
@@ -51,7 +51,7 @@ function deeplyNested() {
       }]
     };
     
-    const violations = deepNestingRule.check('test.ts', mockAdapterWithNormalNesting as any);
+    const violations = deepNestingRule.check('test.ts', mockAdapterWithNormalNesting as never);
     
     expect(violations.length).toBe(0);
   });
@@ -67,7 +67,7 @@ function deeplyNested() {
       extractFunctions: () => { throw new Error('Adapter failed'); }
     };
     
-    const violations = deepNestingRule.check('test.ts', mockAdapterThatThrows as any);
+    const violations = deepNestingRule.check('test.ts', mockAdapterThatThrows as never);
     
     expect(violations.length).toBe(0);
   });

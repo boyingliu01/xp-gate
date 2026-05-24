@@ -4,9 +4,8 @@
  * @covers REQ-MUT-001 AC-001, AC-002, AC-004
  */
 
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';
 import fs from 'fs/promises';
-import path from 'path';
 
 // We need to test parseArgs and filterSourceFiles from gate-m
 // Import the module and test its public interface

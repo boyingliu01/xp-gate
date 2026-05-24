@@ -1,6 +1,5 @@
 import { describe, it, expect, vi } from 'vitest';
 import { TypeScriptAdapter } from '../typescript';
-import type { Adapter } from '../../types';
 
 vi.mock('fs', () => ({
   readFileSync: vi.fn(),
@@ -51,7 +50,7 @@ describe('TypeScriptAdapter', () => {
     const adapter = new TypeScriptAdapter('test.ts');
     const functions = adapter.extractFunctions();
     expect(Array.isArray(functions)).toBe(true);
-    expect(functions.some(fn => (fn as any).name === 'testFn')).toBe(true);
+    expect(functions.some(fn => (fn as {name: string}).name === 'testFn')).toBe(true);
   });
 
   it('should extract classes from TypeScript AST', () => {
@@ -59,7 +58,7 @@ describe('TypeScriptAdapter', () => {
     const adapter = new TypeScriptAdapter('test.ts');
     const classes = adapter.extractClasses();
     expect(Array.isArray(classes)).toBe(true);
-    expect(classes.some(cls => (cls as any).name === 'TestClass')).toBe(true);
+    expect(classes.some(cls => (cls as {name: string}).name === 'TestClass')).toBe(true);
   });
 
   it('should count TypeScript file physical lines', () => {

@@ -4,25 +4,25 @@ import { largeFileRule } from '../../clean-code/large-file';
 // Mock adapter for testing
 const mockAdapter = {
   detectLanguage: () => 'typescript',
-  parseAST: () => {},
+  parseAST: () => undefined,
   extractFunctions: () => [],
   extractClasses: () => [],
-  countLines: (fileName: string) => 10 // Default to small file
+  countLines: (_fileName: string) => 10 // Default to small file
 };
 
 describe('largeFileRule', () => {
   it('should return an empty array when file has fewer than 500 lines', () => {
-    const shortFileAdapter: any = {
+    const shortFileAdapter = {
       ...mockAdapter,
       countLines: () => 499
-    };
+    } as never;
 
     const violations = largeFileRule.check('test-short.ts', shortFileAdapter);
     expect(violations).toHaveLength(0);
   });
 
   it('should detect files exceeding 650 lines', () => {
-    const largeFileAdapter: any = {
+    const largeFileAdapter: never = {
       ...mockAdapter,
       countLines: () => 651
     };
@@ -39,7 +39,7 @@ describe('largeFileRule', () => {
   });
 
   it('should handle exactly threshold lines as not violating', () => {
-    const thresholdFileAdapter: any = {
+    const thresholdFileAdapter: never = {
       ...mockAdapter,
       countLines: () => 650
     };
@@ -61,7 +61,7 @@ describe('largeFileRule', () => {
   });
 
   it('should return empty violations when adapter throws error', () => {
-    const mockAdapterThatThrows: any = {
+    const mockAdapterThatThrows: never = {
       ...mockAdapter,
       countLines: () => { throw new Error('Adapter failed'); }
     };

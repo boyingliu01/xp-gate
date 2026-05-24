@@ -1,4 +1,4 @@
-import { SprintTrace, IterationSummary, Prediction } from './types';
+import { SprintTrace, IterationSummary } from './types';
 
 export function analyzeTrace(trace: SprintTrace): IterationSummary[] {
   const failures = trace.tool_calls.filter((tc) => !tc.success);
@@ -51,18 +51,18 @@ export function analyzeTrace(trace: SprintTrace): IterationSummary[] {
   return summaries;
 }
 
-function inferRootCause(failures: SprintTrace['tool_calls']): string {
-  const repeated = failures.length > 1;
-  const names = [...new Set(failures.map((f) => f.skill_name))];
+function inferRootCause(_failures: SprintTrace['tool_calls']): string {
+  const repeated = _failures.length > 1;
+  const names = [...new Set(_failures.map((f) => f.skill_name))];
 
   if (repeated) {
     return `Repeated failure in ${names[0]} across multiple invocations`;
   }
 
-  return `Single-point failure in ${names[0]} at phase ${failures[0]?.phase}`;
+  return `Single-point failure in ${names[0]} at phase ${_failures[0]?.phase}`;
 }
 
-function generateSuggestion(skillName: string, failures: SprintTrace['tool_calls']): string {
+function generateSuggestion(skillName: string, _failures: SprintTrace['tool_calls']): string {
   return `Investigate ${skillName} failure pattern; check skill invocation mapping and parameter routing`;
 }
 

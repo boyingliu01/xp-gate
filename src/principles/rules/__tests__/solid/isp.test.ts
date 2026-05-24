@@ -3,7 +3,7 @@ import { ispRule } from '../../solid/isp';
 
 const mockAdapter = {
   detectLanguage: () => 'typescript',
-  parseAST: () => {},
+  parseAST: () => undefined,
   extractFunctions: () => [],
   extractClasses: () => [],
   countLines: () => 0
@@ -20,7 +20,7 @@ describe('isp.ts - Interface Segregation Principle Rule', () => {
       }]
     };
     
-    const violations = ispRule.check('test.ts', mockAdapterWithFatInterface as any);
+    const violations = ispRule.check('test.ts', mockAdapterWithFatInterface as never);
     
     expect(violations.length).toBeGreaterThan(0);
     expect(violations[0].ruleId).toBe('solid.isp');
@@ -37,7 +37,7 @@ describe('isp.ts - Interface Segregation Principle Rule', () => {
       }]
     };
     
-    const violations = ispRule.check('test.ts', mockAdapterWithFocusedInterface as any);
+    const violations = ispRule.check('test.ts', mockAdapterWithFocusedInterface as never);
     
     expect(violations.length).toBe(0);
   });
@@ -53,7 +53,7 @@ describe('isp.ts - Interface Segregation Principle Rule', () => {
       extractInterfaces: () => { throw new Error('Adapter failed'); }
     };
     
-    const violations = ispRule.check('test.ts', mockAdapterThatThrows as any);
+    const violations = ispRule.check('test.ts', mockAdapterThatThrows as never);
     
     expect(violations.length).toBe(0);
   });

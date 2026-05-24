@@ -1,5 +1,4 @@
 import * as fs from 'fs/promises';
-import { extname } from 'path';
 import { analyze, getAdapterForFile } from './analyzer';
 import { getAllRules } from './index';
 
@@ -38,17 +37,6 @@ export async function analyzeWarningsForFiles(filesInput: string | string[]): Pr
   }
   
   return fileWarnings;
-}
-
-async function getWarningCountForFile(filePath: string): Promise<number> {
-  try {
-    // Try batching all files together first, but for this individual function, we simulate
-    const currentWarnings = await analyzeWarningsForFiles([filePath]);
-    return currentWarnings[filePath] || 0;
-  } catch (error) {
-    // Fallback to ensure the function can handle cases where real file analysis is not feasible
-    return 0;
-  }
 }
 
 interface BaselineEntry {
@@ -126,7 +114,7 @@ export async function loadBaseline(baselinePath: string): Promise<Record<string,
     await fs.access(baselinePath);
     const baselineContent = await fs.readFile(baselinePath, 'utf-8');
     return JSON.parse(baselineContent);
-  } catch (error) {
+  } catch {
     return {};
   }
 }
@@ -223,7 +211,7 @@ export async function initBaseline(files: string[]): Promise<Record<string, Base
           lastAnalyzed: new Date().toISOString(),
         };
       }
-    } catch (error) {
+    } catch (error: unknown) {
       console.error(`Failed to analyze file for baseline: ${file}`, error);
     }
   }
@@ -262,10 +250,10 @@ async function main(): Promise<number> {
   
   if (parsed.command === 'init-baseline') {
     try {
-      await initBaselineCommand(parsed.files || []);
+      await initBaselineCommand((parsed.files ?? []) as string[]);
       console.log('Baseline initialized successfully');
       return 0;
-    } catch (error) {
+    } catch (error: unknown) {
       console.error('Error initializing baseline:', error);
       return 1;
     }
@@ -273,22 +261,22 @@ async function main(): Promise<number> {
   
   try {
     const enforcementResult = await runEnforcement(
-      parsed.newFiles || [],
-      parsed.modifiedFiles || [],
-      parsed.baselinePath || '.warnings-baseline.json'
+      (parsed.newFiles ?? []) as string[],
+      (parsed.modifiedFiles ?? []) as string[],
+      (parsed.baselinePath as string) || '.warnings-baseline.json'
     );
     
     console.log(JSON.stringify(enforcementResult, null, 2));
     
     return enforcementResult.overallStatus === 'PASS' ? 0 : 1;
-  } catch (error) {
+  } catch (error: unknown) {
     console.error('Error during enforcement:', error);
     return 1;
   }
 }
 
-function parseArgs(args: string[]): any {
-  const parsed: any = {
+function parseArgs(args: string[]): Record<string, unknown> {
+const parsed: Record<string, unknown> = {
     command: null,
     newFiles: [],
     modifiedFiles: [],

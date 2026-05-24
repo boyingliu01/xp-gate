@@ -3,7 +3,7 @@ import { unusedImportsRule } from '../../clean-code/unused-imports';
 
 const mockAdapter = {
   detectLanguage: () => 'typescript',
-  parseAST: () => {},
+  parseAST: () => undefined,
   extractFunctions: () => [],
   extractClasses: () => [],
   countLines: () => 0
@@ -19,7 +19,7 @@ describe('unused-imports.ts - Unused Imports Rule', () => {
       ]
     };
     
-    const violations = unusedImportsRule.check('test.ts', mockAdapterWithUnusedImport as any);
+    const violations = unusedImportsRule.check('test.ts', mockAdapterWithUnusedImport as never);
     
     expect(violations.length).toBe(1);
     expect(violations[0].ruleId).toBe('clean-code.unused-imports');
@@ -35,7 +35,7 @@ describe('unused-imports.ts - Unused Imports Rule', () => {
       ]
     };
     
-    const violations = unusedImportsRule.check('test.ts', mockAdapterWithUsedImports as any);
+    const violations = unusedImportsRule.check('test.ts', mockAdapterWithUsedImports as never);
     
     expect(violations.length).toBe(0);
   });
@@ -49,7 +49,7 @@ describe('unused-imports.ts - Unused Imports Rule', () => {
       ]
     };
     
-    const violations = unusedImportsRule.check('test.ts', mockAdapterWithTypeImports as any);
+    const violations = unusedImportsRule.check('test.ts', mockAdapterWithTypeImports as never);
     
     expect(violations.length).toBe(0);
   });
@@ -64,7 +64,7 @@ describe('unused-imports.ts - Unused Imports Rule', () => {
       ]
     };
     
-    const violations = unusedImportsRule.check('test.ts', mockAdapterWithMultipleUnused as any);
+    const violations = unusedImportsRule.check('test.ts', mockAdapterWithMultipleUnused as never);
     
     expect(violations.length).toBe(2);
   });
@@ -74,7 +74,7 @@ describe('unused-imports.ts - Unused Imports Rule', () => {
   });
 
   it('should return empty array when adapter.imports is undefined', () => {
-    const violations = unusedImportsRule.check('test.ts', mockAdapter as any);
+    const violations = unusedImportsRule.check('test.ts', mockAdapter as never);
     
     expect(violations).toEqual([]);
   });
@@ -85,7 +85,7 @@ describe('unused-imports.ts - Unused Imports Rule', () => {
       imports: () => { throw new Error('Parse error'); }
     };
     
-    const violations = unusedImportsRule.check('test.ts', mockAdapterThrowing as any);
+    const violations = unusedImportsRule.check('test.ts', mockAdapterThrowing as never);
     
     expect(violations).toEqual([]);
   });
@@ -99,7 +99,7 @@ describe('unused-imports.ts - Unused Imports Rule', () => {
       ]
     };
     
-    const violations = unusedImportsRule.check('test.ts', mockAdapterWithNamespaceImport as any);
+    const violations = unusedImportsRule.check('test.ts', mockAdapterWithNamespaceImport as never);
     
     expect(violations.length).toBe(1);
     expect(violations[0].message).toContain('lodash');

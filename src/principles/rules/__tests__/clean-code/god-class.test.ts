@@ -3,7 +3,7 @@ import { godClassRule } from '../../clean-code/god-class';
 
 const mockAdapter = {
   detectLanguage: () => 'typescript',
-  parseAST: () => {},
+  parseAST: () => undefined,
   extractFunctions: () => [],
   extractClasses: () => [],
   countLines: () => 0
@@ -39,7 +39,7 @@ class GodClass {
       }]
     };
     
-    const violations = godClassRule.check('test.ts', mockAdapterWithGodClass as any);
+    const violations = godClassRule.check('test.ts', mockAdapterWithGodClass as never);
     
     expect(violations.length).toBe(1);
     expect(violations[0].ruleId).toBe('clean-code.god-class');
@@ -63,7 +63,7 @@ class SmallClass {
       }]
     };
     
-    const violations = godClassRule.check('test.ts', mockAdapterWithSmallClass as any);
+    const violations = godClassRule.check('test.ts', mockAdapterWithSmallClass as never);
     
     expect(violations.length).toBe(0);
   });
@@ -88,7 +88,7 @@ class DataClass {
       }]
     };
     
-    const violations = godClassRule.check('test.ts', mockAdapterWithGetters as any);
+    const violations = godClassRule.check('test.ts', mockAdapterWithGetters as never);
     
     expect(violations.length).toBe(0);
   });
@@ -104,7 +104,7 @@ class DataClass {
       extractClasses: () => { throw new Error('Adapter failed'); }
     };
     
-    const violations = godClassRule.check('test.ts', mockAdapterThatThrows as any);
+    const violations = godClassRule.check('test.ts', mockAdapterThatThrows as never);
     
     expect(violations.length).toBe(0);
   });

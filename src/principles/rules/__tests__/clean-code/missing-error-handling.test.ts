@@ -3,7 +3,7 @@ import { missingErrorHandlingRule } from '../../clean-code/missing-error-handlin
 
 const mockAdapter = {
   detectLanguage: () => 'typescript',
-  parseAST: () => {},
+  parseAST: () => undefined,
   extractFunctions: () => [],
   extractClasses: () => [],
   countLines: () => 0
@@ -27,7 +27,7 @@ async function loadData(url: string) {
       }]
     };
     
-    const violations = missingErrorHandlingRule.check('test.ts', mockAdapterWithIO as any);
+    const violations = missingErrorHandlingRule.check('test.ts', mockAdapterWithIO as never);
     
     expect(violations.length).toBe(1);
     expect(violations[0].ruleId).toBe('clean-code.missing-error-handling');
@@ -51,7 +51,7 @@ async function readConfig(path: string) {
       }]
     };
     
-    const violations = missingErrorHandlingRule.check('test.ts', mockAdapterWithIO as any);
+    const violations = missingErrorHandlingRule.check('test.ts', mockAdapterWithIO as never);
     
     expect(violations.length).toBe(1);
     expect(violations[0].ruleId).toBe('clean-code.missing-error-handling');
@@ -81,7 +81,7 @@ async function loadDataSafe(url: string) {
       }]
     };
     
-    const violations = missingErrorHandlingRule.check('test.ts', mockAdapterWithHandledIO as any);
+    const violations = missingErrorHandlingRule.check('test.ts', mockAdapterWithHandledIO as never);
     
     expect(violations.length).toBe(0);
   });
@@ -102,7 +102,7 @@ function calculateTotal(items: Item[]) {
       }]
     };
     
-    const violations = missingErrorHandlingRule.check('test.ts', mockAdapterWithPureFunction as any);
+    const violations = missingErrorHandlingRule.check('test.ts', mockAdapterWithPureFunction as never);
     
     expect(violations.length).toBe(0);
   });
@@ -124,7 +124,7 @@ async function fetchUser(id: string) {
       }]
     };
     
-    const violations = missingErrorHandlingRule.check('test.ts', mockAdapterWithAxios as any);
+    const violations = missingErrorHandlingRule.check('test.ts', mockAdapterWithAxios as never);
     
     expect(violations.length).toBe(1);
     expect(violations[0].ruleId).toBe('clean-code.missing-error-handling');
@@ -140,7 +140,7 @@ async function fetchUser(id: string) {
       extractFunctions: () => { throw new Error('Parse error'); }
     };
     
-    const violations = missingErrorHandlingRule.check('test.ts', mockAdapterThrowing as any);
+    const violations = missingErrorHandlingRule.check('test.ts', mockAdapterThrowing as never);
     
     expect(violations).toEqual([]);
   });
@@ -164,7 +164,7 @@ async function processData() {
       }]
     };
     
-    const violations = missingErrorHandlingRule.check('test.ts', mockAdapterWithMultipleIO as any);
+    const violations = missingErrorHandlingRule.check('test.ts', mockAdapterWithMultipleIO as never);
     
     // Should detect at least one violation (function needs try-catch)
     expect(violations.length).toBeGreaterThanOrEqual(1);

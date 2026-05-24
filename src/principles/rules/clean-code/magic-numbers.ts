@@ -1,4 +1,4 @@
-import { Rule, Violation } from '../../types';
+import { Rule, Violation, Severity } from '../../types';
 import { getDefaultConfig } from '../../config';
 
 const config = getDefaultConfig();
@@ -9,24 +9,33 @@ export const magicNumbersRule: Rule = {
   id: 'clean-code.magic-numbers',
   name: 'Magic Numbers Rule',
   threshold: 10,
-  severity: config.rules['clean-code']['magic-numbers'].severity as any,
-  check: (file: string, adapter: any): Violation[] => {
+  severity: config.rules['clean-code']['magic-numbers'].severity as Severity,
+  check: (file: string, adapter: unknown): Violation[] => {
     const violations: Violation[] = [];
     
     try {
-      const ast = adapter.parseAST();
+      interface NumberObject {
+        value: number;
+        line: number;
+      }
       
-      let magicNumbers: { value: number, line: number }[] = [];
+      interface TypedAdapter {
+        parseAST?: () => unknown | undefined;
+        extract?: () => NumberObject[] | undefined;
+      }
+      
+      const typedAdapter = adapter as TypedAdapter;
+      
+      let magicNumbers: NumberObject[] = [];
       
       try {
-        if (typeof adapter.extract !== 'undefined') {
-          const literals = adapter.extract();
+        if (typeof typedAdapter.extract !== 'undefined') {
+          const literals = typedAdapter.extract?.();
           if (literals && Array.isArray(literals)) {
             magicNumbers = literals;
           }
         }
-      } catch (e) {
-      }
+      } catch { }
       
       const filteredNumbers = magicNumbers.filter(numObj => {
         const numValue = numObj.value;
@@ -39,12 +48,11 @@ export const magicNumbersRule: Rule = {
           line: numObj.line,
           ruleId: 'clean-code.magic-numbers',
           message: `Potential magic number detected: ${numObj.value}. Consider using a named constant instead.`,
-          severity: config.rules['clean-code']['magic-numbers'].severity as any
+          severity: config.rules['clean-code']['magic-numbers'].severity as Severity
         });
       });
       
-    } catch (error) {
-    }
+    } catch { }
     
     return violations;
   }
