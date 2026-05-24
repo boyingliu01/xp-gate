@@ -33,6 +33,8 @@ detect_project_lang() {
     echo "objectivec"
   elif [[ -n "$(find . -name "*.sh" -type f | head -n 1)" ]] || [[ -n "$(find . -name "Dockerfile" -o -name "*.dockerfile" -type f | head -n 1)" ]]; then
     echo "shell"
+  elif [[ -n "$(find . -name "*.ps1" -type f -not -path "./.git/*" | head -n 1)" ]]; then
+    echo "powershell"
   else
     if [[ -n "$(find . -name "*.ts" -o -name "*.tsx" -type f | head -n 1)" ]]; then
       echo "typescript"
@@ -58,6 +60,8 @@ detect_project_lang() {
       echo "objectivec"
     elif [[ -n "$(find . -name "*.sh" -type f | head -n 1)" ]]; then
       echo "shell"
+    elif [[ -n "$(find . -name "*.ps1" -type f -not -path "./.git/*" | head -n 1)" ]]; then
+      echo "powershell"
     else
       echo "unknown"
     fi
