@@ -71,3 +71,6 @@ skill-cert/*.egg-info/
 
 # Worktrees
 .worktrees/
+
+# .omo runtime data (keep templates/config, exclude run-continuation session files)
+.omo/run-continuation/
