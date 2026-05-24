@@ -292,7 +292,7 @@ brainstorm    autoplan    parallel-dev   code-walk     manual        learn +    
 
 ```bash
 npm run dashboard
-# 打开 http://localhost:3000
+# 打开 http://localhost:3333
 ```
 
 Dashboard 包含 4 个视图 + PDF 导出：
