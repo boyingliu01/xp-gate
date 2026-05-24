@@ -1,0 +1,130 @@
+specification:
+  id: SPEC-OBS-001
+  name: "AHE-inspired Observability Infrastructure for Skills"
+  version: "1.0.0"
+  linked_issue: "#62"
+  status: "APPROVED"
+  approval_date: "2026-05-22"
+  approval_method: "Delphi Round 2 (2/3 majority, 3 expert design review)"
+  minority_concerns:
+    - expert: "C (Feasibility)"
+      concern: "ralph-loop AHE sync scope"
+      resolution: "Synchronized in P0 (Option A) via component decomposition"
+
+  # User Stories
+  user_stories:
+    - id: US-001
+      actor: "skill maintainer"
+      feature: "decompose a SKILL.md into ablation-ready orthogonal components"
+      benefit: "I can modify one component independently and attribute pass rate changes to that specific component"
+      linked_requirements: ["REQ-OBS-001", "REQ-OBS-002"]
+
+    - id: US-002
+      actor: "evolution agent"
+      feature: "machine-readable change manifest for skill modifications"
+      benefit: "I can programmatically track, analyze, and predict the impact of skill changes over time"
+      linked_requirements: ["REQ-OBS-003", "REQ-OBS-004"]
+
+    - id: US-003
+      actor: "sprint orchestrator"
+      feature: "post-sprint trace analysis without modifying opencode core"
+      benefit: "I can analyze sprint execution patterns and identify failure hotspots without embedding runtime dependencies"
+      linked_requirements: ["REQ-OBS-005"]
+
+    - id: US-004
+      actor: "project admin"
+      feature: "observable skill health baseline and trend metrics"
+      benefit: "I can see if skills are improving or regressing across sprints rather than relying on intuition"
+      linked_requirements: ["REQ-OBS-006"]
+
+  requirements:
+    - id: REQ-OBS-001
+      description: "Decompose sprint-flow SKILL.md into 5 AHE-aligned orthogonal components stored in references/components/"
+      acceptance_criteria:
+        - id: AC-OBS-001-01
+          description: "5 component files exist: system-prompt.md, tool-descriptions.md, middleware.md, skill-invocations.md, memory.md"
+        - id: AC-OBS-001-02
+          description: "SKILL.md remains the single entry point (429 lines, agent consumption unchanged)"
+        - id: AC-OBS-001-03
+          description: "Each component maps to specific SKILL.md line ranges (see P0 mapping table)"
+
+    - id: REQ-OBS-002
+      description: "Decompose ralph-loop SKILL.md into 5 AHE-aligned orthogonal components (sync with sprint-flow)"
+      acceptance_criteria:
+        - id: AC-OBS-002-01
+          description: "5 component files exist in ralph-loop/references/components/"
+        - id: AC-OBS-002-02
+          description: "Component structure matches sprint-flow convention for cross-skill consistency"
+
+    - id: REQ-OBS-003
+      description: "Create evolution-log.md (human-readable) for cumulative skill change tracking"
+      acceptance_criteria:
+        - id: AC-OBS-003-01
+          description: "Each entry includes: trigger, root cause, component changes, prediction, outcome, files changed"
+        - id: AC-OBS-003-02
+          description: "Initial entry (Iteration 001) documents P0 creation"
+
+    - id: REQ-OBS-004
+      description: "Create evolution-history.json (machine-readable) with defined TypeScript schema"
+      acceptance_criteria:
+        - id: AC-OBS-004-01
+          description: "Schema includes: id, date, trigger, root_cause, component_changes, files_changed, prediction, actual_outcome"
+        - id: AC-OBS-004-02
+          description: "JSON validates against Draft-2020-12 $schema"
+        - id: AC-OBS-004-03
+          description: "Initial iteration record created"
+
+    - id: REQ-OBS-005
+      description: "P1 Phase: Design src/debugger/ as sidecar offline process (no opencode core modification)"
+      acceptance_criteria:
+        - id: AC-OBS-005-01
+          description: "debugger reads post-sprint JSONL logs (no runtime callbacks)"
+        - id: AC-OBS-005-02
+          description: "Zero modification to opencode core required"
+
+    - id: REQ-OBS-006
+      description: "Establish observable skill health baselines (pass rate, token/sprint, sprint duration)"
+      acceptance_criteria:
+        - id: AC-OBS-006-01
+          description: "Baseline metrics defined: pass_rate, avg_token_per_sprint, avg_sprint_duration"
+        - id: AC-OBS-006-02
+          description: "Trigger thresholds defined: perf-regression <80% consecutive 2 rounds"
+        - id: AC-OBS-006-03
+          description: "Component change frequency tracking via evolution-history.json aggregation"
+
+  design_decisions:
+    - id: DD-001
+      decision: "SKILL.md remains single file (not split into 5 independent files)"
+      rationale: "Agent consumption protocol requires single entry point for backward compatibility. Components are optional deep-dive references."
+      alternatives_considered:
+        - "Split SKILL.md into 5 independent files (rejected: breaks agent loading)"
+        - "SKILL.md as thin manifest with include directives (rejected: unverified @file support)"
+
+    - id: DD-002
+      decision: "Debugger sidecar architecture (not embedded in opencode core)"
+      rationale: "Avoids core modification dependency; post-sprint offline analysis is sufficient for evolution tracking."
+
+    - id: DD-003
+      decision: "ralph-loop synced in P0 (Option A)"
+      rationale: "Addresses Delphi Round 2 minority concern; prevents component reference inconsistency between coupled skills."
+
+    - id: DD-004
+      decision: "AHE component count: 5 (not 7)"
+      rationale: "XGate Skills ARE the tools (already modular); sub-agents and skills map to existing XGate skill system."
+
+  delphi_review:
+    round1: "REQUEST_CHANGES (3/3 experts, confidence 7.3/10)"
+    round2: "APPROVED (2/3 majority, confidence 8/10)"
+    critical_fixes: 3
+    major_fixes: 7
+    reviewers:
+      - expert: "A (Architecture)"
+        round2_verdict: "APPROVED"
+        confidence: 9
+      - expert: "B (Technical)"
+        round2_verdict: "APPROVED"
+        confidence: 9
+      - expert: "C (Feasibility)"
+        round2_verdict: "REQUEST_CHANGES"
+        confidence: 6
+        concern: "ralph-loop sync scope"
