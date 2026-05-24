@@ -105,16 +105,28 @@ Phase 6: SHIP → finishing-a-development-branch (4 选项) → ship / land-and-
 |------|------|------|
 | 0 | **检测当前环境** | 运行 `git rev-parse --git-dir` 和 `git rev-parse --git-common-dir`。如果 `GIT_DIR != GIT_COMMON`：已在 worktree 中 → 输出 "Already in isolated worktree" → 进入 Phase 0 |
 | 1 | **检查保护分支** | 获取当前分支名 `git branch --show-current`。保护分支列表: `main, master, develop, trunk, mainline`。保护分支 → 强制创建 worktree。非保护分支 → 依然创建 worktree（推荐，不阻断） |
-| 2 | **创建 worktree** | 检测已有 sprint NN 编号（`ls .worktrees/sprint/ | sort | tail -1`，自动确定下一个编号，首个从 01 开始）。运行 `git worktree add .worktrees/sprint/sprint-YYYY-MM-DD-NN -b sprint/YYYY-MM-DD-NN`。`cd` 到新 worktree 目录 |
-| 3 | **项目 setup** | 检测项目类型: `package.json` → `npm install`, `go.mod` → `go mod download`, `pyproject.toml` → `pip/poetry install` |
-| 4 | **.gitignore 校验** | 运行 `git check-ignore -q .worktrees`。如果未忽略 → 将 `.worktrees/` 添加到 `.gitignore` → `git add .gitignore` → `git commit -m 'chore: ignore .worktrees directory'` |
-| 5 | **Sprint State 记录** | 写入 `.sprint-state/sprint-state.json` 的 `isolation` 对象 |
-| 6 | **基线验证** | 如果项目有测试: 运行测试确认基线通过。测试失败 → 输出失败信息 → 询问用户是否继续 |
+| 2 | **创建 worktree** | 创建目录: `mkdir -p .worktrees/sprint`。检测已有 NN 编号: `ls .worktrees/sprint/ 2>/dev/null | grep -oE '[0-9]{2}$' | sort -n | tail -1`（取最后两位数字，数值排序，取最大），NN = 结果 + 1（无结果则从 01 开始）。运行 `git worktree add .worktrees/sprint/sprint-YYYY-MM-DD-NN -b sprint/YYYY-MM-DD-NN`。**注意**: `cd` 在 AI agent 单次工具调用中不保持状态，步骤 3-6 必须通过 `workdir` 参数或 `&&` 链式命令在新 worktree 目录下执行 |
+| 3 | **项目 setup** | 在 worktree 目录下: 检测项目类型: `package.json` → `npm install`, `go.mod` → `go mod download`, `pyproject.toml` → `pip/poetry install` |
+| 4 | **.gitignore 校验** | 在**仓库根目录**（非 worktree）执行: `git check-ignore -q .worktrees`。如果未忽略 → 将 `.worktrees/` 添加到 `.gitignore` → `git add .gitignore` → `git commit -m 'chore: ignore .worktrees directory'` |
+| 5 | **Sprint State 记录** | `mkdir -p .sprint-state` 在 worktree 目录下。写入 `.sprint-state/sprint-state.json`（如已存在则合并，保留原有字段），新增/更新 `isolation` 对象，设置 `phase: -1`，`status: "running"` |
+| 6 | **基线验证** | 在 worktree 目录下: 检测测试方式（package.json 有 "test" script → `npm test`, go.mod → `go test ./...`, pyproject.toml → `pytest`）。测试失败 → 输出失败信息 → 询问用户是否继续 |
 
 **参数处理**:
-- `--no-isolate`: 跳过自动创建，输出 ⚠️ 警告 `'未创建 worktree 隔离，在 {branch} 分支上直接运行 sprint 有污染风险'` → 进入 Phase 0
-- `--branch-name <name>`: 使用自定义分支名（默认自动生成 `sprint/YYYY-MM-DD-NN`），worktree 路径相应变为 `.worktrees/sprint/<name>`
-- `--force`: 强制在当前分支继续（即使已是保护分支），输出 ⚠️ 警告 `'使用 --force 在 {branch} 分支上直接运行 sprint，如有代码污染风险请自行承担'` → 进入 Phase 0
+
+- `--no-isolate`: 跳过自动创建，输出 ⚠️ 警告 `'[WARN] 未创建 worktree 隔离，在 {branch} 分支上直接运行 sprint 有污染风险'` → 进入 Phase 0
+- `--branch-name <name>`: 使用自定义分支名（默认自动生成 `sprint/YYYY-MM-DD-NN`），分支名中的 `/` 在 worktree 路径中自动替换为 `-`（如 `feat/user-login` → 分支名 `feat/user-login`，路径 `.worktrees/sprint/feat-user-login`）
+- `--force`: 强制在当前分支继续（即使已是保护分支），**要求用户显式确认**: 输出 ⚠️ 警告 `'[WARN] 使用 --force 在 {branch} 分支上直接运行 sprint。此操作绕过隔离保护，请确认风险。'` → 等待用户确认（"继续" / "取消"） → 确认后进入 Phase 0
+
+**参数交互规则**:
+
+| 参数组合 | 行为 |
+|---------|------|
+| `--no-isolate` 单独 | 跳过隔离，输出警告 → Phase 0 |
+| `--force` 单独 | 跳过隔离，要求确认 → Phase 0 |
+| `--no-isolate` + `--branch-name` | `--branch-name` 忽略，仅 `--no-isolate` 生效 |
+| `--force` + `--branch-name` | `--branch-name` 忽略，仅 `--force` 生效 |
+| `--no-isolate` + `--force` | 等效，输出 `--no-isolate` 警告 → Phase 0 |
+| `--resume-from build` + `--no-isolate` | `--resume-from` 优先，直接跳过 Phase -1 |
 
 **错误处理和回退**:
 | 错误场景 | 回退行为 |
@@ -134,6 +146,8 @@ Phase 6: SHIP → finishing-a-development-branch (4 选项) → ship / land-and-
   }
 }
 ```
+
+> **清理提示**: Sprint 完成（Phase 6 SHIP）后，执行 `git worktree remove <worktree_path>` 清理 worktree 目录，同时保留 `.sprint-state/` 中的历史记录。
 
 ### Phase 0: THINK（需求探索与设计）
 - `brainstorming` (superpowers) — **HARD-GATE**: 设计未批准 → 不可进入实现
@@ -444,24 +458,44 @@ Sprint 结束时 (Phase 6 完成):
 # 注意：默认 ralph-loop 模式已覆盖绝大多数场景
 ```
 
+### 示例 4b：仅验证隔离（--stop-at isolate）
+
+```bash
+/sprint-flow "开发用户登录" --stop-at isolate
+# → 仅执行 Phase -1 ISOLATE
+# → 检测 main 分支 → 创建 worktree → setup → .gitignore → baseline
+# → 输出 worktree 路径 → 停止
+# 适用场景：手动验证隔离是否正常创建，后续手动决定是否继续
+```
+
 ### 示例 5：Worktree 隔离（默认行为）
 
 ```bash
 /sprint-flow "开发用户登录"
 # Phase -1 ISOLATE:
 # → 检测当前在 main 分支（保护分支）→ 强制创建 worktree
+# → mkdir -p .worktrees/sprint
+# → 检测已有 NN 编号（.worktrees/sprint/ | grep -oE '[0-9]{2}$' | sort -n | tail -1）
 # → git worktree add .worktrees/sprint/sprint-2026-05-24-01 -b sprint/2026-05-24-01
-# → cd 到新 worktree → npm install → .gitignore 校验 → 基线测试
+# → 在 worktree 目录下: npm install → 基线测试 → .sprint-state/ 记录
 # → 进入 Phase 0 THINK...
 
 # 跳过隔离（⚠️ 有污染风险）
 /sprint-flow "开发用户登录" --no-isolate
-# → ⚠️ 未创建 worktree 隔离，在 main 分支上直接运行 sprint 有污染风险
+# → [WARN] 未创建 worktree 隔离，在 main 分支上直接运行 sprint 有污染风险
 # → 直接进入 Phase 0
+
+# 强制跳过（需用户确认）
+/sprint-flow "开发用户登录" --force
+# → [WARN] 使用 --force 在 main 分支上直接运行 sprint → 等待用户确认 → 确认后进入 Phase 0
 
 # 自定义分支名
 /sprint-flow "开发用户登录" --branch-name feat/user-login
-# → git worktree add .worktrees/sprint/feat-user-login -b feat/user-login
+# → 分支名: feat/user-login（保留 /）
+# → worktree 路径: .worktrees/sprint/feat-user-login（/ 替换为 -）
+
+# 🧹 Sprint 完成后清理
+git worktree remove .worktrees/sprint/sprint-2026-05-24-01
 ```
 
 ---
@@ -478,6 +512,7 @@ Sprint 结束时 (Phase 6 完成):
 ## References
 
 详细指令文件位于 `@references/`:
+- `@references/phase-minus-1-isolate.md` — Phase -1 详细指令
 - `@references/phase-0-think.md` — Phase 0 详细指令
 - `@references/phase-1-plan.md` — Phase 1 详细指令
 - `@references/phase-2-build.md` — Phase 2 详细指令
