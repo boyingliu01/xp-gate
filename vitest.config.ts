@@ -4,7 +4,7 @@ export default defineConfig({
   test: {
     globals: true,
     environment: 'node',
-    exclude: ['src/_wip/**', 'node_modules/**', '.worktrees/**'],
+    exclude: ['src/_wip/**', 'node_modules/**', '.opencode/**', '.omo/**', '.worktrees/**'],
     coverage: {
       provider: 'v8',
       reporter: ['text', 'json', 'html'],
