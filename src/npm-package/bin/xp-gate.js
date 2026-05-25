@@ -66,8 +66,8 @@ function main() {
   const subargs = args.slice(1);
   
   if (command === 'init' || command === 'setup-global') {
-    const args = command === 'setup-global' ? ['--global'] : subargs;
-    init(args).then(code => process.exit(code));
+    const initArgs = command === 'setup-global' ? ['--global'] : subargs;
+    init(initArgs).then(code => process.exit(code));
     return;
   }
   

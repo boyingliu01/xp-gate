@@ -9,7 +9,8 @@
     "bin/",
     "hooks/",
     "adapters/",
-    "lib/"
+    "lib/",
+    "adapter-common.sh"
   ],
   "repository": {
     "type": "git",
