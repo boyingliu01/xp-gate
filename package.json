@@ -7,6 +7,7 @@
     "node": ">=18.x"
   },
   "scripts": {
+    "prepare": "bash scripts/sync-version.sh",
     "test": "vitest run",
     "test:watch": "vitest",
     "test:coverage": "vitest run --coverage",

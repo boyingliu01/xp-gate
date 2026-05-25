@@ -23,6 +23,8 @@
     "node": ">=18.0.0"
   },
   "scripts": {
+    "prepare": "bash ../../scripts/sync-version.sh",
+    "postinstall": "bash ../../scripts/sync-version.sh",
     "test": "echo \"Run tests\" && exit 0"
   },
   "keywords": [
