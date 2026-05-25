@@ -591,7 +591,8 @@ else
       CC_OUTPUT=$($LIZARD_PATH -C $CCN_THRESHOLD $CC_FILES 2>&1 || true)
       
       # Parse warning count from the summary table: "Warning cnt   8"
-      CC_WARNINGS=$(echo "$CC_OUTPUT" | grep "Warning cnt" | awk '{print $NF}' | tr -d '[:space:]' || echo "0")
+      # Use anchored grep to avoid matching lizard table headers (e.g. "Rt" column)
+      CC_WARNINGS=$(echo "$CC_OUTPUT" | grep "^Warning cnt" | awk '{print $NF}' | tr -d '[:space:]' | sed 's/[^0-9]//g' || true)
       CC_WARNINGS=${CC_WARNINGS:-0}
       
       # Count functions with CCN > CCN_ERROR_THRESHOLD (these block)
@@ -646,9 +647,11 @@ else
       if command -v npx > /dev/null 2>&1; then
         # Run principles checker and store results
         if npx tsx src/principles/index.ts --files $PRINCIPLES_FILES --format json > /tmp/principles-output.json 2>/dev/null; then
-          # Check severity levels 
-          ERROR_COUNT=$(grep -c '"severity":"error"' /tmp/principles-output.json 2>/dev/null || echo "0")
-          WARNING_COUNT=$(grep -c '"severity":"warning"' /tmp/principles-output.json 2>/dev/null | tr -d '[:space:]' || echo "0")
+          # Check severity levels
+          ERROR_COUNT=$(grep -c '"severity":"error"' /tmp/principles-output.json 2>/dev/null || true)
+          ERROR_COUNT=${ERROR_COUNT:-0}
+          WARNING_COUNT=$(grep -c '"severity":"warning"' /tmp/principles-output.json 2>/dev/null || true)
+          WARNING_COUNT=${WARNING_COUNT:-0}
           
           if [ "$ERROR_COUNT" -gt 0 ]; then
             echo ""

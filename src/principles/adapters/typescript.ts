@@ -20,37 +20,35 @@ export class TypeScriptAdapter extends BaseAdapter implements Adapter {
 
   extractFunctions(): unknown[] {
     const functionMatches = [];
-    
     const fnRegex = /(export\s+)?(async\s+)?function\s+(\w+)\s*\([^)]*\)\s*[:\w\s]*{/g;
     let match;
-    
+
     while ((match = fnRegex.exec(this.fileContent)) !== null) {
       functionMatches.push({
         name: match[3],
         type: 'function',
         line: this.getLineNumber(match.index),
-        code: this.getCodeBlock(match.index)
+        code: this.extractCodeBlock(match.index)
       });
     }
-    
+
     return functionMatches;
   }
 
   extractClasses(): unknown[] {
     const classMatches = [];
-    
     const classRegex = /(export\s+)?class\s+(\w+)\s*(extends\s+[\w.]+)?\s*{/g;
     let match;
-    
+
     while ((match = classRegex.exec(this.fileContent)) !== null) {
       classMatches.push({
         name: match[2],
         type: 'class',
         line: this.getLineNumber(match.index),
-        code: this.getCodeBlock(match.index)
+        code: this.extractCodeBlock(match.index)
       });
     }
-    
+
     return classMatches;
   }
 
@@ -60,10 +58,9 @@ export class TypeScriptAdapter extends BaseAdapter implements Adapter {
 
   extractExports(): unknown[] {
     const exportMatches = [];
-    
     const exportRegex = /^(export\s+(default\s+)?(async\s+)?(function|const|class|let|var|type|interface|enum)\s+\w+)/gm;
     let match;
-    
+
     while ((match = exportRegex.exec(this.fileContent)) !== null) {
       exportMatches.push({
         name: match[0],
@@ -71,7 +68,7 @@ export class TypeScriptAdapter extends BaseAdapter implements Adapter {
         line: this.getLineNumber(match.index)
       });
     }
-    
+
     const reExportRegex = /^export\s*{/gm;
     let reMatch;
     while ((reMatch = reExportRegex.exec(this.fileContent)) !== null) {
@@ -81,42 +78,7 @@ export class TypeScriptAdapter extends BaseAdapter implements Adapter {
         line: this.getLineNumber(reMatch.index)
       });
     }
-    
-    return exportMatches;
-  }
 
-  private getLineNumber(position: number): number {
-    const lines = this.fileContent.substring(0, position).split('\n');
-    return lines.length;
-  }
-  
-  private getCodeBlock(startPos: number): string {
-    let braceCount = 0;
-    let inBlock = false;
-    let endPos = startPos;
-    
-    for (let i = startPos; i < this.fileContent.length; i++) {
-      const char = this.fileContent[i];
-      
-      if (char === '{' && !inBlock) {
-        inBlock = true;
-        braceCount = 1;
-      } else if (char === '{' && inBlock) {
-        braceCount++;
-      } else if (char === '}' && inBlock) {
-        braceCount--;
-        if (braceCount === 0) {
-          endPos = i + 1;
-          break;
-        }
-      }
-    }
-    
-    if (endPos > startPos) {
-      return this.fileContent.substring(startPos, endPos);
-    }
-    
-    const code = this.fileContent.substring(startPos);
-    return code.substring(0, Math.min(100, code.length)); 
+    return exportMatches;
   }
 }

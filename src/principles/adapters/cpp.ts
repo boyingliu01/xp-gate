@@ -21,52 +21,50 @@ export class CppAdapter extends BaseAdapter implements Adapter {
 
   extractFunctions(): unknown[] {
     const functionMatches = [];
-    
     const fnRegex = /(\w+[\s*]+)+([\w:]+[:]+)?([~]?\w+)\s*\([^)]*\)\s*(const\s*)?\s*(override\s*)?\s*(final\s*)?\s*(noexcept\s*)?\s*(->\s*[\w<>:&*\s]+)?\s*[{;]/g;
     let match;
-    
+
     while ((match = fnRegex.exec(this.fileContent)) !== null) {
       const funcName = match[3] || 'unknown';
       const fullName = match[2] ? match[2] + funcName : funcName;
-      
+
       functionMatches.push({
         name: fullName.replace(/::$/, ''),
         type: 'function',
         line: this.getLineNumber(match.index),
-        code: this.getCodeBlock(match.index)
+        code: this.extractCodeBlock(match.index)
       });
     }
-    
+
     const constructorRegex = /([\w:]+)\s*\([^)]*\)\s*:\s*[\w_]+\s*\([^)]*\)/g;
     while ((match = constructorRegex.exec(this.fileContent)) !== null) {
       const constructorName = match[1];
-      
+
       functionMatches.push({
         name: constructorName,
         type: 'constructor',
         line: this.getLineNumber(match.index),
-        code: this.getCodeBlock(match.index)
+        code: this.extractCodeBlock(match.index)
       });
     }
-    
+
     return functionMatches;
   }
 
   extractClasses(): unknown[] {
     const classMatches = [];
-    
     const classRegex = /\b(class|struct)\s+(\w+)\s*(:\s*(public|protected|private)\s+[\w:]+)?\s*\{/g;
     let match;
-    
+
     while ((match = classRegex.exec(this.fileContent)) !== null) {
       classMatches.push({
         name: match[2],
         type: match[1],
         line: this.getLineNumber(match.index),
-        code: this.getCodeBlock(match.index)
+        code: this.extractCodeBlock(match.index)
       });
     }
-    
+
     return classMatches;
   }
 
@@ -74,23 +72,18 @@ export class CppAdapter extends BaseAdapter implements Adapter {
     return this.fileContent.split('\n').length;
   }
 
-  private getLineNumber(position: number): number {
-    const lines = this.fileContent.substring(0, position).split('\n');
-    return lines.length;
-  }
-  
-  private getCodeBlock(startPos: number): string {
+  override extractCodeBlock(startPos: number, maxFallback: number = 200): string {
     let braceCount = 0;
     let inBlock = false;
     let endPos = startPos;
     let inString = false;
     let stringChar = '';
     let inComment = false;
-    
+
     for (let i = startPos; i < this.fileContent.length; i++) {
       const char = this.fileContent[i];
       const nextChar = this.fileContent[i + 1] || '';
-      
+
       if (!inString && !inComment) {
         if (char === '/' && nextChar === '/') {
           while (i < this.fileContent.length && this.fileContent[i] !== '\n') {
@@ -110,7 +103,7 @@ export class CppAdapter extends BaseAdapter implements Adapter {
         }
         continue;
       }
-      
+
       if (!inComment) {
         if (!inString && (char === '"' || char === "'")) {
           inString = true;
@@ -127,7 +120,7 @@ export class CppAdapter extends BaseAdapter implements Adapter {
           }
         }
       }
-      
+
       if (!inString && !inComment) {
         if (char === '{' && !inBlock) {
           inBlock = true;
@@ -143,12 +136,12 @@ export class CppAdapter extends BaseAdapter implements Adapter {
         }
       }
     }
-    
+
     if (endPos > startPos) {
       return this.fileContent.substring(startPos, endPos);
     }
-    
+
     const code = this.fileContent.substring(startPos);
-    return code.substring(0, Math.min(200, code.length)); 
+    return code.substring(0, Math.min(maxFallback, code.length));
   }
 }

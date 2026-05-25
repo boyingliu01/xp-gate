@@ -1,0 +1,50 @@
+{
+	"$schema": "https://opencode.ai/config.json",
+	"provider": {
+		"whalecloud": {
+			"npm": "@ai-sdk/openai-compatible",
+			"name": "whalecloud",
+			"options": {
+				"baseURL": "https://lab.iwhalecloud.com/gpt-proxy",
+				"apiKey": "ailab_YL+F7NNalGHNiJUHB46TaCAiMPJk2Q9PrgOcdm2aSqbEHUtxgnQjudORt2Z5BxP2BZ/qMmtBdRHHxCg6rcDlWf+CpV6em2iubEdJzVy5AiDQ"
+			},
+			"models": {
+				"deepseek-v4-flash": {
+					"name": "deepseek-v4-flash",
+					"modalities": {
+						"input": ["text", "image"],
+						"output": ["text"]
+					},
+					"options": {
+						"thinking": {
+							"type": "enabled",
+							"budgetTokens": 8192
+						}
+					},
+					"limit": {
+						"context": 1000000,
+						"output": 300000
+					}
+				}
+			}
+		}
+	},
+	"model": "whalecloud/deepseek-v4-flash",
+	"default_agent": "sisyphus",
+	"compaction": {
+		"auto": true,
+		"prune": true,
+		"reserved": 50000
+	},
+	"plugin": ["oh-my-openagent"],
+	"permission": {
+		"*": "allow",
+		"bash": {
+			"*": "allow",
+			"pkill *": "deny",
+			"kill *": "deny",
+			"rm -rf *": "deny"
+		}
+	},
+	"lsp": true
+}

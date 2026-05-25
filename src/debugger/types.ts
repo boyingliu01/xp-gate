@@ -32,19 +32,6 @@ export interface ActualOutcome {
   prediction_correct: boolean;
 }
 
-export interface IterationEntry {
-  id: number;
-  date: string;
-  trigger: TriggerType;
-  issue?: string;
-  root_cause: string;
-  component_changes: ComponentName[];
-  files_changed: string[];
-  prediction: Prediction;
-  actual_outcome: ActualOutcome | null;
-  delphi_review?: string;
-}
-
 export interface IterationSummary {
   problem: string;
   root_cause: string;

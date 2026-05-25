@@ -20,10 +20,9 @@ export class PythonAdapter extends BaseAdapter implements Adapter {
 
   extractFunctions(): unknown[] {
     const functionMatches = [];
-    
     const fnRegex = /(async\s+)?def\s+(\w+)\s*\([^)]*\)\s*:/g;
     let match;
-    
+
     while ((match = fnRegex.exec(this.fileContent)) !== null) {
       functionMatches.push({
         name: match[2],
@@ -32,16 +31,15 @@ export class PythonAdapter extends BaseAdapter implements Adapter {
         code: this.getCodeBlock(match.index)
       });
     }
-    
+
     return functionMatches;
   }
 
   extractClasses(): unknown[] {
     const classMatches = [];
-    
     const classRegex = /class\s+(\w+)(\s*\([^)]*\))?\s*:/g;
     let match;
-    
+
     while ((match = classRegex.exec(this.fileContent)) !== null) {
       classMatches.push({
         name: match[1],
@@ -50,13 +48,8 @@ export class PythonAdapter extends BaseAdapter implements Adapter {
         code: this.getCodeBlock(match.index)
       });
     }
-    
-    return classMatches;
-  }
 
-  private getLineNumber(position: number): number {
-    const lines = this.fileContent.substring(0, position).split('\n');
-    return lines.length;
+    return classMatches;
   }
 
   private getCodeBlock(startPos: number): string {

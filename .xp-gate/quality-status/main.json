@@ -1,0 +1,65 @@
+{
+  "reportVersion": "1.1",
+  "generatedAt": "2026-05-25T06:00:45Z",
+  "branch": "main",
+  "commit": "e76e08493831246675adfc1b4a6350787aadc791",
+  "language": "typescript",
+  "overall": {
+    "gatesPassed": 9,
+    "gatesTotal": 9,
+    "score": 10.0,
+    "verdict": "PASS"
+  },
+  "gates": {
+    "gate1_static_analysis": {
+      "name": "Code Quality (Static + Lint + Shell)",
+      "status": "PASS",
+      "tool": "typescript"
+    },
+    "gate2_dup_code": {
+      "name": "Duplicate Code",
+      "status": "PASS",
+      "metric": "similarity <= 5%"
+    },
+    "gate3_complexity": {
+      "name": "Cyclomatic Complexity",
+      "status": "PASS",
+      "threshold": "5",
+      "errorThreshold": "10",
+      "warnings": Rt
+    },
+    "gate4_principles": {
+      "name": "Clean Code + SOLID",
+      "status": "PASS",
+      "warnings": 0
+    },
+    "gate5_tests": {
+      "name": "Tests + Coverage",
+      "status": "PASS",
+      "thresholds": { "lines": 80, "functions": 80, "branches": 70, "statements": 80 },
+      "actual": { "coverage": "N/A" },
+      "failedTests": []
+    },
+    "gate6_arch_boyscout": {
+      "name": "Architecture + Boy Scout Rule",
+      "status": "PASS",
+      "boyScoutPassed": 1,
+      "boyScoutBlocked": 0
+    },
+    "gate7_iac_security": {
+      "name": "IaC Security Scanning",
+      "status": "PASS",
+      "tools": "checkov, hadolint, kube-score, tflint"
+    },
+    "gate8_secret_scanning": {
+      "name": "Secret Scanning",
+      "status": "PASS",
+      "tool": "gitleaks"
+    },
+    "gate9_sast": {
+      "name": "SAST Security Scan",
+      "status": "SKIP",
+      "tool": "semgrep"
+    }
+  }
+}

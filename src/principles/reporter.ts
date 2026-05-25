@@ -1,12 +1,5 @@
 import { AnalysisResult, Violation } from './analyzer';
 
-export interface ReporterOutput {
-  console: string;
-  json: string;
-  summary: string;
-  sarif: string;
-}
-
 export function formatSARIF(result: AnalysisResult): string {
   const ruleDescriptors = Object.keys(result.ruleResults).map(ruleId => ({
     id: ruleId,

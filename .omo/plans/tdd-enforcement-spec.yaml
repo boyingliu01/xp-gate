@@ -1,0 +1,768 @@
+specification:
+  id: SPEC-TDD-001
+  name: "TDD Iron Rule + Mock Minimization Enforcement"
+  version: "1.0.0"
+  source_document: ".omo/plans/tdd-enforcement-design.md"
+  delphi_status: APPROVED
+
+  requirements:
+    # ============================================================
+    # Requirement 1: TDD Iron Rule in AGENTS.md
+    # ============================================================
+    - id: REQ-TDD-001
+      title: "TDD Iron Rule in AGENTS.md"
+      description: |
+        Add TDD Iron Rule to AGENTS.md CONVENTIONS section. Every new feature/fix
+        must have failing test written before implementation code. No production
+        code without corresponding test.
+      priority: MUST
+
+      acceptance_criteria:
+        - id: AC-TDD-001-01
+          given: "AGENTS.md is reviewed"
+          when: "CONVENTIONS section is examined"
+          then: 'Contains "TDD Iron Rule" stating tests MUST be written before implementation code'
+
+        - id: AC-TDD-001-02
+          given: "AGENTS.md is reviewed"
+          when: "CONVENTIONS section is examined"
+          then: 'Contains rule: "No production code without corresponding test"'
+
+        - id: AC-TDD-001-03
+          given: "AGENTS.md is reviewed"
+          when: "ANTI-PATTERNS section is examined"
+          then: 'Contains "Do NOT write production code before corresponding test exists"'
+
+      edge_cases:
+        - "Configuration files and type definitions may not need tests (handled by @no-test annotation)"
+
+      test_coverage_requirements:
+        unit: false
+        integration: false
+        documentation_review: true
+
+    # ============================================================
+    # Requirement 2: Integration-First Testing Convention
+    # ============================================================
+    - id: REQ-TDD-002
+      title: "Integration-First Testing Convention"
+      description: |
+        Add Integration-First Testing convention to AGENTS.md. Prefer real-environment
+        tests over mocked tests. Use integration tests (real DB, real collaborators,
+        tmpdir for I/O) wherever feasible.
+      priority: MUST
+
+      acceptance_criteria:
+        - id: AC-TDD-002-01
+          given: "AGENTS.md is reviewed"
+          when: "CONVENTIONS section is examined"
+          then: 'Contains "Integration-First Testing" convention'
+
+        - id: AC-TDD-002-02
+          given: "AGENTS.md is reviewed"
+          when: "CONVENTIONS section is examined"
+          then: "Specifies using integration tests with real DB, real collaborators, tmpdir for I/O"
+
+        - id: AC-TDD-002-03
+          given: "AGENTS.md is reviewed"
+          when: "CONVENTIONS section is examined"
+          then: 'Skill-Cert Mock-first is scoped as "(external subproject)" limitation'
+
+        - id: AC-TDD-002-04
+          given: "AGENTS.md is reviewed"
+          when: "CONVENTIONS section is examined"
+          then: 'Project-level convention states "Integration-first, mock only for external dependencies"'
+
+      edge_cases:
+        - "Skill-Cert subproject (Python) retains Mock-first for LLM evals"
+
+      test_coverage_requirements:
+        unit: false
+        integration: false
+        documentation_review: true
+
+    # ============================================================
+    # Requirement 3: Mock Minimization with @mock-justified
+    # ============================================================
+    - id: REQ-TDD-003
+      title: "Mock Minimization with @mock-justified Annotation"
+      description: |
+        Add Mock Minimization convention to AGENTS.md. Mocks allowed ONLY for:
+        external services, network calls, time-dependent code, non-deterministic behavior.
+        Business logic MUST use real collaborators. Mock density > 30% requires
+        @mock-justified annotation in test file with reason text (min 10 chars).
+      priority: MUST
+
+      acceptance_criteria:
+        - id: AC-TDD-003-01
+          given: "AGENTS.md is reviewed"
+          when: "CONVENTIONS section is examined"
+          then: 'Contains "Mock Minimization" rule with allowed mock cases listed'
+
+        - id: AC-TDD-003-02
+          given: "AGENTS.md is reviewed"
+          when: "CONVENTIONS section is examined"
+          then: 'States "Business logic MUST use real collaborators"'
+
+        - id: AC-TDD-003-03
+          given: "AGENTS.md is reviewed"
+          when: "ANTI-PATTERNS section is examined"
+          then: 'Contains "Do NOT use mocks for pure business logic or in-memory operations"'
+
+        - id: AC-TDD-003-04
+          given: "AGENTS.md is reviewed"
+          when: "ANTI-PATTERNS section is examined"
+          then: 'Contains "Do NOT exceed 30% mock density without @mock-justified annotation"'
+
+        - id: AC-TDD-003-05
+          given: "A test file with mock density > 30%"
+          when: "@mock-justified annotation is present"
+          then: 'Annotation format is "// @mock-justified: <reason>" with reason >= 10 characters'
+
+        - id: AC-TDD-003-06
+          given: "A test file with mock density > 30%"
+          when: "@mock-justified has no reason text or reason < 10 chars"
+          then: "Annotation is NOT considered valid justification"
+
+      edge_cases:
+        - "Mock density exactly at 30% does not require justification"
+        - "@mock-justified without colon+reason text is invalid"
+
+      test_coverage_requirements:
+        unit: false
+        integration: false
+        documentation_review: true
+
+    # ============================================================
+    # Requirement 4: Test-Source File Pairing Check (WARNING)
+    # ============================================================
+    - id: REQ-TDD-004
+      title: "Test-Source File Pairing Check in pre-commit Gate 5"
+      description: |
+        Add test-source file pairing check to pre-commit Gate 5. For each new source
+        file, verify a corresponding test file exists. This is a WARNING only - does
+        NOT block commit. Supports multiple languages (TS/Python/Go/Java/Kotlin/C++/Swift/Dart/Ruby).
+      priority: MUST
+
+      acceptance_criteria:
+        - id: AC-TDD-004-01
+          given: "A new .ts file is staged without corresponding .test.ts or .spec.ts"
+          when: "git commit is executed"
+          then: "WARNING message is output but commit proceeds (exit 0)"
+
+        - id: AC-TDD-004-02
+          given: "A new .ts file is staged with corresponding .test.ts"
+          when: "git commit is executed"
+          then: "No pairing warning is output"
+
+        - id: AC-TDD-004-03
+          given: "A new .py file is staged without test_*.py or *_test.py"
+          when: "git commit is executed"
+          then: "WARNING message is output but commit proceeds"
+
+        - id: AC-TDD-004-04
+          given: "A new .go file is staged without corresponding *_test.go"
+          when: "git commit is executed"
+          then: "WARNING message is output but commit proceeds"
+
+        - id: AC-TDD-004-05
+          given: "A new index.ts, types.ts, constants.ts, or __init__.py is staged"
+          when: "git commit is executed"
+          then: "No pairing warning (excluded file types)"
+
+        - id: AC-TDD-004-06
+          given: "A new .d.ts or .pyi file is staged"
+          when: "git commit is executed"
+          then: "No pairing warning (declaration files excluded)"
+
+        - id: AC-TDD-004-07
+          given: 'A new source file contains "// @no-test" annotation'
+          when: "git commit is executed"
+          then: "No pairing warning (explicitly skipped)"
+
+        - id: AC-TDD-004-08
+          given: "A new .java or .kt file is staged"
+          when: "git commit is executed"
+          then: "Checks for *Test.java or *Test.kt patterns in src/test/java or src/test/kotlin"
+
+        - id: AC-TDD-004-09
+          given: "A new .cpp, .cc, .cxx, or .c file is staged"
+          when: "git commit is executed"
+          then: "Checks for *_test.*, *Test.*, or test_*.* patterns"
+
+        - id: AC-TDD-004-10
+          given: "A new .swift file is staged"
+          when: "git commit is executed"
+          then: "Checks for *Tests.swift pattern"
+
+        - id: AC-TDD-004-11
+          given: "A new .dart file is staged"
+          when: "git commit is executed"
+          then: "Checks for *_test.dart pattern"
+
+        - id: AC-TDD-004-12
+          given: "A new .rb file is staged"
+          when: "git commit is executed"
+          then: "Checks for test_*.rb or *_test.rb pattern"
+
+        - id: AC-TDD-004-13
+          given: "A new .rs (Rust) file is staged"
+          when: "git commit is executed"
+          then: "No pairing check (Rust uses inline #[cfg(test)])"
+
+        - id: AC-TDD-004-14
+          given: "Multiple new source files without tests are staged"
+          when: "git commit is executed"
+          then: "Warning count shows total number of files without tests"
+
+      edge_cases:
+        - "Mixed language projects with different test file conventions"
+        - "Files in __tests__ directories are treated as test files, not source files"
+        - "Glob patterns for Java/Kotlin test file locations"
+
+      test_coverage_requirements:
+        unit: false
+        integration: true
+        e2e: true
+
+    # ============================================================
+    # Requirement 5: Mock Density ADVISORY in pre-commit
+    # ============================================================
+    - id: REQ-TDD-005
+      title: "Mock Density Advisory in pre-commit Gate 5"
+      description: |
+        Add mock density scanning to pre-commit Gate 5 for changed test files.
+        30% threshold triggers ADVISORY message. 50% threshold triggers ADVISORY
+        with suggestion to add @mock-justified. Pure bash implementation using grep
+        and awk - no npx tsx overhead. Supports TypeScript and Python test files.
+      priority: MUST
+
+      acceptance_criteria:
+        - id: AC-TDD-005-01
+          given: "A changed test file has mock density between 30% and 50%"
+          when: "git commit is executed"
+          then: 'MOCK DENSITY ADVISORY message is output with percentage'
+
+        - id: AC-TDD-005-02
+          given: "A changed test file has mock density > 50% without @mock-justified"
+          when: "git commit is executed"
+          then: 'MOCK DENSITY advisory message is output suggesting @mock-justified'
+
+        - id: AC-TDD-005-03
+          given: "A changed test file has mock density > 50% with valid @mock-justified"
+          when: "git commit is executed"
+          then: 'MOCK DENSITY message shows "(justified)" status'
+
+        - id: AC-TDD-005-04
+          given: "A changed test file has mock density < 30%"
+          when: "git commit is executed"
+          then: "No mock density message is output"
+
+        - id: AC-TDD-005-05
+          given: "Mock density check runs on macOS (BSD grep)"
+          when: "git commit is executed"
+          then: "Check works correctly (uses grep -o, not grep -oP)"
+
+        - id: AC-TDD-005-06
+          given: "Mock density check runs on Linux (GNU grep)"
+          when: "git commit is executed"
+          then: "Check works correctly"
+
+        - id: AC-TDD-005-07
+          given: "Mock density calculation runs"
+          when: "Denominator is computed"
+          then: "Uses non-empty, non-comment lines only (excludes blank lines, // comments, /* */ lines, # comments)"
+
+        - id: AC-TDD-005-08
+          given: "Mock counting runs"
+          when: "Keywords are matched"
+          then: "Counts precise patterns: jest.mock, vi.mock, jest.spyOn, vi.spyOn, jest.fn, vi.fn, mockResolvedValue, mockRejectedValue, mockReturnValue, mockImplementation, createMock, mockReset, mockClear, mockRestore, MagicMock, unittest.mock, .patch(, gomock, mockgen, .EXPECT()"
+
+        - id: AC-TDD-005-09
+          given: "Mock density check runs"
+          when: "Float comparison is needed"
+          then: "Uses awk for comparison, NOT bc"
+
+        - id: AC-TDD-005-10
+          given: "No test files are changed in the commit"
+          when: "git commit is executed"
+          then: "Mock density check is skipped silently"
+
+        - id: AC-TDD-005-11
+          given: "Mock density check runs on .test.ts, .spec.ts, .test.tsx, .spec.tsx, .test.js, .spec.js, .test.py, .spec.py, .test.go, .spec.go files"
+          when: "git commit is executed"
+          then: "All matching test file patterns are scanned"
+
+        - id: AC-TDD-005-12
+          given: "A commit proceeds with mock density advisories"
+          when: "Pre-commit hook completes"
+          then: "Exit code is 0 (advisory does NOT block)"
+
+      edge_cases:
+        - "Test file with zero non-empty lines (density = 0)"
+        - "Mock keywords in comments (not code) - grep counts them"
+        - "Multiple test files changed in same commit"
+
+      test_coverage_requirements:
+        unit: false
+        integration: true
+        e2e: true
+
+    # ============================================================
+    # Requirement 6: Mock Density BLOCK in pre-push Gate M
+    # ============================================================
+    - id: REQ-TDD-006
+      title: "Mock Density Block in pre-push Gate M"
+      description: |
+        Add mock density blocking check to pre-push Gate M. Test files with mock
+        density > 50% without valid @mock-justified annotation will BLOCK the push.
+        This is the enforcement tier - advisory in pre-commit, block in pre-push.
+      priority: MUST
+
+      acceptance_criteria:
+        - id: AC-TDD-006-01
+          given: "A pushed test file has mock density > 50% without @mock-justified"
+          when: "git push is executed"
+          then: "Push is BLOCKED with exit 1 and error message"
+
+        - id: AC-TDD-006-02
+          given: "A pushed test file has mock density > 50% with valid @mock-justified (reason >= 10 chars)"
+          when: "git push is executed"
+          then: 'Push proceeds with "WARNING" message (justified)'
+
+        - id: AC-TDD-006-03
+          given: "A pushed test file has mock density between 30% and 50%"
+          when: "git push is executed"
+          then: "ADVISORY message is output, push proceeds"
+
+        - id: AC-TDD-006-04
+          given: "A pushed test file has mock density < 30%"
+          when: "git push is executed"
+          then: '"acceptable" message is output, push proceeds'
+
+        - id: AC-TDD-006-05
+          given: "Multiple test files are pushed, one exceeds 50% without justification"
+          when: "git push is executed"
+          then: "Push is BLOCKED (any single violation blocks the entire push)"
+
+        - id: AC-TDD-006-06
+          given: "TypeScript test files (.test.ts, .spec.ts, .test.tsx, .spec.tsx) are pushed"
+          when: "git push is executed"
+          then: "Mock density check runs on all TypeScript test files"
+
+        - id: AC-TDD-006-07
+          given: "Python test files (_test.py, test_*.py) are pushed"
+          when: "git push is executed"
+          then: "Mock density check runs on all Python test files"
+
+        - id: AC-TDD-006-08
+          given: "No test files are in the push"
+          when: "git push is executed"
+          then: "Gate M mock density check is skipped"
+
+        - id: AC-TDD-006-09
+          given: "Mock density block check runs"
+          when: "@mock-justified validation runs"
+          then: 'Requires "// @mock-justified: <reason>" with reason >= 10 characters'
+
+        - id: AC-TDD-006-10
+          given: "Push is blocked due to mock density"
+          when: "Error message is displayed"
+          then: "Shows message with: Reduce mocks OR add @mock-justified with min 10 char explanation"
+
+      edge_cases:
+        - "Push contains only non-test files"
+        - "@mock-justified on single line vs multi-line comment"
+        - "Mixed TS and Python test files in same push"
+
+      test_coverage_requirements:
+        unit: false
+        integration: true
+        e2e: true
+
+    # ============================================================
+    # Requirement 7: detect-ai-test.ts Enhancement
+    # ============================================================
+    - id: REQ-TDD-007
+      title: "detect-ai-test.ts @mock-justified and Python Support"
+      description: |
+        Enhance detect-ai-test.ts to recognize @mock-justified annotation with
+        reason validation. Add Python test file support detecting unittest.mock,
+        MagicMock, patch, mock_open and related keywords.
+      priority: SHOULD
+
+      acceptance_criteria:
+        - id: AC-TDD-007-01
+          given: "A TypeScript test file with @mock-justified: external API wrapper, no sandbox"
+          when: "detect-ai-test.ts analyzes the file"
+          then: "hasMockJustified is true"
+
+        - id: AC-TDD-007-02
+          given: "A TypeScript test file with // @mock-justified (no reason text)"
+          when: "detect-ai-test.ts analyzes the file"
+          then: "hasMockJustified is false"
+
+        - id: AC-TDD-007-03
+          given: "A TypeScript test file with @mock-justified: short"
+          when: "detect-ai-test.ts analyzes the file"
+          then: "hasMockJustified is false (reason < 10 chars)"
+
+        - id: AC-TDD-007-04
+          given: "AITestDetectionResult type is defined"
+          when: "Type is examined"
+          then: "Includes hasMockJustified boolean field"
+
+        - id: AC-TDD-007-05
+          given: "A Python test file (test_*.py or *_test.py) is analyzed"
+          when: "detect-ai-test.ts runs"
+          then: "Detects unittest.mock, MagicMock, patch, mock_open keywords"
+
+        - id: AC-TDD-007-06
+          given: "A Python test file with @mock-justified annotation"
+          when: "detect-ai-test.ts analyzes the file"
+          then: "hasMockJustified is correctly set based on reason text length"
+
+        - id: AC-TDD-007-07
+          given: "The @mock-justified regex pattern is /@mock-justified with 10+ chars after colon"
+          when: "Pattern is applied"
+          then: "Matches both // @mock-justified: reason and # @mock-justified: reason"
+
+      edge_cases:
+        - "@mock-justified with exactly 10 characters of reason text"
+        - "@mock-justified with trailing whitespace after reason"
+
+      test_coverage_requirements:
+        unit: true
+        integration: false
+        threshold: 80
+
+    # ============================================================
+    # Requirement 8: test-driven-development Skill Mock Guidelines
+    # ============================================================
+    - id: REQ-TDD-008
+      title: "test-driven-development Skill Mock Usage Guidelines"
+      description: |
+        Add Mock Usage Guidelines section to skills/test-driven-development/SKILL.md
+        (npm distribution source). Defines when to use mocks, when NOT to use mocks,
+        and the 30% mock density rule with @mock-justified requirement.
+      priority: MUST
+
+      acceptance_criteria:
+        - id: AC-TDD-008-01
+          given: "skills/test-driven-development/SKILL.md is reviewed"
+          when: "File is examined"
+          then: 'Contains "Mock Usage Guidelines (MANDATORY)" section'
+
+        - id: AC-TDD-008-02
+          given: "Mock Usage Guidelines section is examined"
+          when: '"When to use mocks" list is reviewed'
+          then: "Lists exactly 5 allowed cases: External API/HTTP, Database I/O, File system I/O, Time-dependent code, Non-deterministic behavior"
+
+        - id: AC-TDD-008-03
+          given: "Mock Usage Guidelines section is examined"
+          when: '"When NOT to use mocks" list is reviewed'
+          then: "Lists: Pure business logic, In-memory data transformations, Validation logic, State machines"
+
+        - id: AC-TDD-008-04
+          given: "Mock Usage Guidelines section is examined"
+          when: "Mock Density Rule is reviewed"
+          then: "States > 30% mock lines require @mock-justified comment explaining why integration test is not feasible"
+
+        - id: AC-TDD-008-05
+          given: "Specific mock tool recommendations are examined"
+          when: "Guidelines are reviewed"
+          then: "Recommends: testcontainers/nock for HTTP, sqlite-in-memory/testcontainers for DB, tmpdir/memfs for FS"
+
+      edge_cases:
+        - "File is in npm package distribution path (src/npm-package/skills/)"
+
+      test_coverage_requirements:
+        unit: false
+        integration: false
+        documentation_review: true
+
+    # ============================================================
+    # Requirement 9: sprint-flow Phase 2 Mock Minimization Guidance
+    # ============================================================
+    - id: REQ-TDD-009
+      title: "sprint-flow Phase 2 Mock Minimization Guidance"
+      description: |
+        Add Mock Minimization guidance to skills/sprint-flow/SKILL.md Phase 2 BUILD
+        section. Guides agents to use integration-first testing with real DB and
+        collaborators during sprint execution.
+      priority: SHOULD
+
+      acceptance_criteria:
+        - id: AC-TDD-009-01
+          given: "skills/sprint-flow/SKILL.md is reviewed"
+          when: "Phase 2 BUILD Step 1 is examined"
+          then: 'Contains "Mock Minimization" subsection'
+
+        - id: AC-TDD-009-02
+          given: "Mock Minimization subsection is examined"
+          when: "Default strategy is reviewed"
+          then: "States: Default to integration-first with real DB (sqlite-in-memory), real collaborators"
+
+        - id: AC-TDD-009-03
+          given: "Mock Minimization subsection is examined"
+          when: "Allowed mock cases are reviewed"
+          then: "States: Mock ONLY external services, network calls, I/O boundaries"
+
+        - id: AC-TDD-009-04
+          given: "Mock Minimization subsection is examined"
+          when: "Density rule is reviewed"
+          then: "States: If mock density > 30%, add @mock-justified annotation"
+
+        - id: AC-TDD-009-05
+          given: "Mock Minimization subsection is examined"
+          when: "Gate M reference is reviewed"
+          then: "States: Phase 3 Gate M will verify mock density on push"
+
+      edge_cases:
+        - "Sprint flow uses ralph-loop mode vs parallel mode - guidance applies to both"
+
+      test_coverage_requirements:
+        unit: false
+        integration: false
+        documentation_review: true
+
+    # ============================================================
+    # Requirement 10: Skill-Cert Mock-first Scope Limitation
+    # ============================================================
+    - id: REQ-TDD-010
+      title: "Skill-Cert Mock-first Scope Limitation"
+      description: |
+        Scope the existing "Mock-first testing" convention in AGENTS.md to only
+        apply to the Skill-Cert external subproject. Project-level convention must
+        be Integration-first. This resolves the contradiction between the issue
+        requirements and the existing AGENTS.md convention.
+      priority: MUST
+
+      acceptance_criteria:
+        - id: AC-TDD-010-01
+          given: "AGENTS.md CONVENTIONS section is reviewed"
+          when: "Skill-Cert convention is examined"
+          then: 'Reads "Skill-Cert (external subproject): Mock-first for LLM evals (AsyncMock, zero real LLM calls)"'
+
+        - id: AC-TDD-010-02
+          given: "AGENTS.md CONVENTIONS section is reviewed"
+          when: "Project-level convention is examined"
+          then: 'Reads "Project tests (xp-gate core): Integration-first, mock only for external dependencies"'
+
+        - id: AC-TDD-010-03
+          given: "AGENTS.md is reviewed"
+          when: 'Original "Mock-first testing" text is searched'
+          then: "No longer exists as a project-wide convention"
+
+        - id: AC-TDD-010-04
+          given: "CONTRIBUTING.md is reviewed"
+          when: "Testing section is examined"
+          then: "Updated to reflect mock strategy and @mock-justified format"
+
+      edge_cases:
+        - "Skill-Cert project is in separate directory (~/.config/opencode/skills/skill-cert/)"
+        - "Skill-Cert tests are Python, not TypeScript"
+
+      test_coverage_requirements:
+        unit: false
+        integration: false
+        documentation_review: true
+
+  # ============================================================
+  # Design Decisions (from Design Document)
+  # ============================================================
+  design_decisions:
+    - id: DD-TDD-001
+      description: "Test-source pairing check is WARNING only, not BLOCK"
+      rationale: |
+        Git cannot verify temporal order of file creation (test-first vs test-later
+        in same commit). True "test-first" ordering is enforced by Agent skills
+        (Layer 1 + Layer 4). File coexistence check is the best automated proxy.
+      alternatives_considered:
+        - "BLOCK on missing tests - too aggressive for incremental adoption"
+        - "Skip entirely - no automated enforcement"
+
+    - id: DD-TDD-002
+      description: "Mock density is ADVISORY in pre-commit, BLOCK in pre-push"
+      rationale: |
+        Two-tier enforcement gives developers feedback early (commit-time) while
+        reserving hard enforcement for the push gate. 30% to 50% range is the
+        improvement window.
+      alternatives_considered:
+        - "BLOCK at 30% in pre-commit - too aggressive initially"
+        - "ADVISORY only - no enforcement teeth"
+
+    - id: DD-TDD-003
+      description: "Pure bash grep for mock density, not npx tsx"
+      rationale: |
+        Pre-commit performance is critical. npx tsx has significant startup overhead.
+        Pure bash grep + awk is instant and portable across macOS (BSD grep) and
+        Linux (GNU grep).
+      alternatives_considered:
+        - "npx tsx detect-ai-test.ts - too slow for pre-commit"
+        - "Python script - adds dependency"
+
+    - id: DD-TDD-004
+      description: "awk for float comparison, not bc"
+      rationale: "bc is not available on all systems. awk is universal."
+      alternatives_considered:
+        - "bc for floating point - macOS compatibility issues"
+        - "Integer-only arithmetic - loses precision"
+
+    - id: DD-TDD-005
+      description: "grep -o for portability, not grep -oP"
+      rationale: "grep -P (Perl regex) is GNU-specific. grep -o works on both macOS BSD grep and GNU grep."
+      alternatives_considered:
+        - "grep -oP - fails on macOS"
+        - "sed/awk extraction - more complex"
+
+    - id: DD-TDD-006
+      description: "@mock-justified requires reason text (min 10 chars)"
+      rationale: |
+        Bare @mock-justified annotation without explanation provides no value.
+        Minimum 10 characters forces developer to articulate why integration
+        test is not feasible.
+      alternatives_considered:
+        - "No reason required - annotation alone is enough"
+        - "5 char minimum - too short to be meaningful"
+
+    - id: DD-TDD-007
+      description: "Exclude index, types, constants, __init__, .d.ts, .pyi from pairing check"
+      rationale: "These files are infrastructure/boilerplate that typically don't need dedicated test files."
+      alternatives_considered:
+        - "Check all files - excessive false positives"
+        - "Manual whitelist per project - too much maintenance"
+
+    - id: DD-TDD-008
+      description: "Rust tests use inline #[cfg(test)], skip pairing check"
+      rationale: "Rust convention is to write tests inline in the same file, not in separate test files."
+      alternatives_considered:
+        - "Check for mod tests blocks - complex pattern matching"
+
+    - id: DD-TDD-009
+      description: "Thresholds: 30% ADVISORY, 50% BLOCK"
+      rationale: |
+        30% follows existing detect-ai-test.ts AI detection threshold as starting point.
+        30% to 50% range is the improvement window. Above 50% requires justification.
+        After initial implementation, run baseline scan and adjust thresholds.
+      alternatives_considered:
+        - "20% ADVISORY, 40% BLOCK - too aggressive"
+        - "40% ADVISORY, 60% BLOCK - too lenient"
+
+    - id: DD-TDD-010
+      description: "Configurable thresholds via environment variables"
+      rationale: |
+        XP_GATE_MOCK_DENSITY_WARNING=30 and XP_GATE_MOCK_DENSITY_BLOCK=50
+        allow teams to adjust thresholds without code changes.
+      alternatives_considered:
+        - "Hardcoded thresholds - inflexible"
+        - "Config file - adds setup complexity"
+
+  # ============================================================
+  # Acceptance Criteria Summary (from Design Document Section 6)
+  # ============================================================
+  acceptance_summary:
+    - id: ACC-001
+      description: "New .ts file without corresponding test produces WARNING output (does not block)"
+      verification: "Create src/foo.ts without foo.test.ts, git commit should output WARNING"
+
+    - id: ACC-002
+      description: "New .go file with corresponding _test.go produces no WARNING"
+      verification: "Create src/bar.go + bar_test.go, git commit should have no pairing warning"
+
+    - id: ACC-003
+      description: "New index.ts / types.ts are automatically skipped"
+      verification: "Create src/index.ts, git commit should have no pairing warning"
+
+    - id: ACC-004
+      description: "Test mock density 30-50% produces ADVISORY output"
+      verification: "Modify test file to 40% mock density, commit should output ADVISORY"
+
+    - id: ACC-005
+      description: "Test mock density > 50% without @mock-justified blocks push"
+      verification: "High mock density test file push should fail"
+
+    - id: ACC-006
+      description: "@mock-justified with valid reason text allows push to pass"
+      verification: "High mock density + valid annotation should pass push"
+
+    - id: ACC-007
+      description: "@mock-justified without reason text is not recognized as valid"
+      verification: "@mock-justified without colon+reason should still block push"
+
+    - id: ACC-008
+      description: "AGENTS.md Skill-Cert Mock-first scoped to subproject only"
+      verification: "Document review confirms limitation"
+
+    - id: ACC-009
+      description: "macOS (BSD grep) mock density check works correctly"
+      verification: "On macOS, commit with mocks should output correct density"
+
+  # ============================================================
+  # Changed Files List
+  # ============================================================
+  changed_files:
+    - file: AGENTS.md
+      change_type: EDIT
+      description: "Add TDD/Mock iron rules, scope Skill-Cert convention"
+
+    - file: githooks/pre-commit
+      change_type: EDIT
+      description: "Gate 5 add pairing check (WARNING) + mock density ADVISORY"
+
+    - file: githooks/pre-push
+      change_type: EDIT
+      description: "Gate M add mock density gate (50% BLOCK)"
+
+    - file: src/mutation/detect-ai-test.ts
+      change_type: EDIT
+      description: "Add @mock-justified annotation recognition + Python support"
+
+    - file: src/mutation/types.ts
+      change_type: EDIT
+      description: "AITestDetectionResult add hasMockJustified field"
+
+    - file: skills/sprint-flow/SKILL.md
+      change_type: EDIT
+      description: "Phase 2 add mock minimization guidance"
+
+    - file: skills/test-driven-development/SKILL.md
+      change_type: EDIT
+      description: "Add Mock Usage Guidelines (npm distribution source)"
+
+    - file: CONTRIBUTING.md
+      change_type: EDIT
+      description: "Update testing section with mock strategy and @mock-justified format"
+
+  # ============================================================
+  # Rollback Strategy
+  # ============================================================
+  rollback_strategy:
+    - condition: "Gate 5 pairing check causes too many false positives"
+      action: "Can be disabled via package.json setting tdd-pairing-check false"
+      default: "Enabled (zero tolerance)"
+
+    - condition: "Mock density thresholds prove unreasonable"
+      action: "Adjust via XP_GATE_MOCK_DENSITY_WARNING and XP_GATE_MOCK_DENSITY_BLOCK environment variables"
+
+  # ============================================================
+  # Layered Test Strategy
+  # ============================================================
+  test_strategy:
+    integration_tests:
+      default: true
+      scenarios: "Business logic, DB operations, state machines"
+      mock_allowed: false
+      tools: "sqlite-in-memory, tmpdir, real collaborators"
+
+    boundary_integration:
+      scenarios: "HTTP calls, file system"
+      mock_allowed: true
+      scope: "boundary only"
+      tools: "testcontainers, nock, memfs"
+
+    pure_mock:
+      scenarios: "External uncontrollable services, time-dependent code"
+      mock_allowed: true
+      requirement: "@mock-justified required"
+      tools: "jest.mock, vi.fn, spy"

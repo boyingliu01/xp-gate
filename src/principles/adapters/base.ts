@@ -49,4 +49,38 @@ export abstract class BaseAdapter implements Adapter {
       throw new Error(`Could not read file: ${filePath}`);
     }
   }
+
+  protected getLineNumber(position: number): number {
+    return this.fileContent.substring(0, position).split('\n').length;
+  }
+
+  protected extractCodeBlock(startPos: number, maxFallback: number = 100): string {
+    let braceCount = 0;
+    let inBlock = false;
+    let endPos = startPos;
+
+    for (let i = startPos; i < this.fileContent.length; i++) {
+      const char = this.fileContent[i];
+
+      if (char === '{' && !inBlock) {
+        inBlock = true;
+        braceCount = 1;
+      } else if (char === '{' && inBlock) {
+        braceCount++;
+      } else if (char === '}' && inBlock) {
+        braceCount--;
+        if (braceCount === 0) {
+          endPos = i + 1;
+          break;
+        }
+      }
+    }
+
+    if (endPos > startPos) {
+      return this.fileContent.substring(startPos, endPos);
+    }
+
+    const code = this.fileContent.substring(startPos);
+    return code.substring(0, Math.min(maxFallback, code.length));
+  }
 }
