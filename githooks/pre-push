@@ -76,10 +76,17 @@ echo "━━━━━━━━━━━━━━━━━━━━━━━━�
 echo "   GATE M: MUTATION TESTING"
 echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
 
-# Source adapter-common.sh for utility functions
-ADAPTER_COMMON="$(dirname "$0")/adapter-common.sh"
-if [[ ! -f "$ADAPTER_COMMON" ]]; then
-  ADAPTER_COMMON="githooks/adapter-common.sh"
+# Source adapter-common.sh — 3-tier resolution (global → project → script dir)
+ADAPTER_COMMON=""
+GLOBAL_ADAPTER_DIR="$HOME/.config/xp-gate/adapters"
+PROJECT_GITHOOKS="$(git rev-parse --show-toplevel 2>/dev/null)/githooks"
+
+if [[ -f "$GLOBAL_ADAPTER_DIR/adapter-common.sh" ]]; then
+  ADAPTER_COMMON="$GLOBAL_ADAPTER_DIR/adapter-common.sh"
+elif [[ -f "$PROJECT_GITHOOKS/adapter-common.sh" ]]; then
+  ADAPTER_COMMON="$PROJECT_GITHOOKS/adapter-common.sh"
+elif [[ -f "$(dirname "$0")/adapter-common.sh" ]]; then
+  ADAPTER_COMMON="$(dirname "$0")/adapter-common.sh"
 fi
 # shellcheck source=githooks/adapter-common.sh
 source "$ADAPTER_COMMON" 2>/dev/null || {

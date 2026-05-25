@@ -6,9 +6,15 @@ const { uninstallSkill } = require('../lib/uninstall-skill.js');
 const { checkDeps } = require('../lib/detect-deps.js');
 
 const COMMANDS = {
-  init: {
-    description: 'Initialize xp-gate in current project',
-    fn: init
+  'init': {
+    description: 'Initialize xp-gate (use --global for all projects)',
+    fn: init,
+    usage: 'xp-gate init [--global]'
+  },
+  'setup-global': {
+    description: 'Set up xp-gate globally for all git projects',
+    fn: init,
+    usage: 'xp-gate setup-global'
   },
   'install-skill': {
     description: 'Install a xp-gate skill from GitHub',
@@ -59,8 +65,9 @@ function main() {
   const command = args[0];
   const subargs = args.slice(1);
   
-  if (command === 'init') {
-    init(subargs).then(code => process.exit(code));
+  if (command === 'init' || command === 'setup-global') {
+    const args = command === 'setup-global' ? ['--global'] : subargs;
+    init(args).then(code => process.exit(code));
     return;
   }
   

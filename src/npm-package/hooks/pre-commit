@@ -7,17 +7,25 @@
 # Converts 9 sequential gates into 6 type-based comprehensive gates
 # Sourced from adapter-common.sh and language-specific adapters
 
-# Source the common adapter functions — try project-local path first, fallback to script dir
+# Source the common adapter functions — 3-tier resolution:
+# 1. Global: ~/.config/xp-gate/adapters (for core.hooksPath global setup)
+# 2. Project-local: <repo>/githooks/ (for per-project init)
+# 3. Script dir: hooks directory containing this script (fallback)
 ADAPTER_DIR=""
-if [ -f "$(git rev-parse --show-toplevel 2>/dev/null)/githooks/adapter-common.sh" ]; then
-  ADAPTER_DIR="$(git rev-parse --show-toplevel 2>/dev/null)/githooks"
-fi
-if [ -z "$ADAPTER_DIR" ]; then
+GLOBAL_ADAPTER_DIR="$HOME/.config/xp-gate/adapters"
+PROJECT_GITHOOKS="$(git rev-parse --show-toplevel 2>/dev/null)/githooks"
+
+if [ -f "$GLOBAL_ADAPTER_DIR/adapter-common.sh" ]; then
+  ADAPTER_DIR="$GLOBAL_ADAPTER_DIR"
+elif [ -f "$PROJECT_GITHOOKS/adapter-common.sh" ]; then
+  ADAPTER_DIR="$PROJECT_GITHOOKS"
+else
   SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
   ADAPTER_DIR="$SCRIPT_DIR"
 fi
 source "$ADAPTER_DIR/adapter-common.sh" 2>/dev/null || {
   echo "Error: Cannot source adapter-common.sh from $ADAPTER_DIR"
+  echo "Run: xp-gate init (per-project) or xp-gate setup-global (all projects)"
   exit
 }
 
