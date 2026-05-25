@@ -27,6 +27,33 @@
       },
       "actual_outcome": null,
       "delphi_review": "Sync modification per Delphi Round 2 minority concern resolution"
+    },
+    {
+      "id": 2,
+      "date": "2026-05-25",
+      "trigger": "bug-fix-and-feature-enhancement",
+      "issue": "#66 (test-infra-first + dispatch category fix)",
+      "root_cause": "category='build' was invalid, causing silent skill load failures. Test infrastructure was not checked before TDD dispatch, leading to subagents reinventing test helpers.",
+      "component_changes": ["middleware", "tools", "memory", "skill-invocations", "evals"],
+      "files_changed": [
+        "skills/ralph-loop/SKILL.md",
+        "skills/ralph-loop/references/components/tool-descriptions.md",
+        "skills/ralph-loop/references/components/middleware.md",
+        "skills/ralph-loop/references/components/skill-invocations.md",
+        "skills/ralph-loop/references/components/memory.md",
+        "skills/ralph-loop/evals/evals.json",
+        "skills/ralph-loop/templates/progress-log.md",
+        "skills/ralph-loop/evolution-log.md",
+        "skills/ralph-loop/evolution-history.json"
+      ],
+      "prediction": {
+        "metric": "tdd-enforcement-rate",
+        "direction": "up",
+        "delta_pct": 40,
+        "risk": "test-infra dispatch may fail if no subagent available; mitigated by fallback inline generation"
+      },
+      "actual_outcome": null,
+      "delphi_review": "code-walkthrough Round 1 REQUEST_CHANGES → fixed state machine inconsistency + reference cleanup"
     }
   ]
 }

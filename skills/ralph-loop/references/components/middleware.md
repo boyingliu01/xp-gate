@@ -27,7 +27,7 @@ test_infra_check → [needs infra?] → test_infra_dispatch → FAIL → retry (
         │               │                        │                      │
         │               │ infra ready            │ pass                 │ pass
         ▼               ▼                        ▼                      ▼
-     in_progress   test_infra_ready ─────────→ continue           BLOCK/fallback
+     in_progress   test_infra_ready ─────────→ TDD → regression     BLOCK/fallback
 ```
 
 ## 熔断机制

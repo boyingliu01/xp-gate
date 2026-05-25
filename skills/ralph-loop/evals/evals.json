@@ -271,7 +271,7 @@
     "expected": {
       "test_infra_dispatched": true,
       "business_code_dispatched": false,
-      "infra_retry_count": 0,
+      "infra_action": "generate_new",
       "infra_max_retries": 2
     }
   },

@@ -29,7 +29,7 @@ task(category="unspecified-high", load_skills=["test-driven-development"], promp
 
 ## 上游依赖
 
-从 `slices-manifest.json` 获取 REQ 列表（由 `to-issues` skill 生成）
+从 `specification.yaml` 获取 REQ 列表（由 `to-issues` skill 生成）
 
 ## AHE 分类
 

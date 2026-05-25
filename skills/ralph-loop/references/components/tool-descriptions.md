@@ -10,7 +10,7 @@
 
 | 步骤 | 动作 | 说明 |
 |------|------|------|
-| 1 | 加载当前 REQ | 从 slices-manifest.json 获取下一个 REQ |
+| 1 | 加载当前 REQ | 从 specification.yaml 获取下一个 READY REQ |
 | 2 | 加载 learnings | 从 progress.log 加载 permanent + contextual learnings |
 | 3 | 测试基础设施检查 | 检查 test-utils.ts 是否存在且导出 createTestApp()、withTestDb()。不存在 → dispatch test-infra subagent，retry max 2，失败 → BLOCK/fallback |
 | 4 | TDD (RED→GREEN→REFACTOR) | test-driven-development skill（含 TDD 铁律 + Mock 边界注入）|

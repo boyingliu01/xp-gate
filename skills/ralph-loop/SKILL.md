@@ -227,7 +227,8 @@ PENDING → test_infra_check → [infra needed?] → test_infra_dispatch
 | test_infra_check | in_progress | test-utils.ts 已存在且接口完整 |
 | test_infra_dispatch | test_infra_ready | 测试基础设施生成完成 |
 | test_infra_dispatch | blocked | retry max 2 仍失败 |
-| test_infra_dispatch | in_progress | fallback inline 生成（记录 warning）|
+| test_infra_dispatch | test_infra_ready | fallback inline 生成成功（记录 warning）|
+| test_infra_ready | in_progress | 测试基础设施就绪，dispatch 业务代码 subagent |
 | in_progress | done | L1+L1b+L2+L3 全部通过 |
 | in_progress | retry | 验证失败, n<3 |
 | retry | done | 验证通过 |
