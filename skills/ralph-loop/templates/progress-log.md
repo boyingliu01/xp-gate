@@ -11,6 +11,7 @@ Topology Order: [REQ-001, REQ-002, ...]
 
 **Status**: PASS / FAIL / TIMEOUT / BLOCKED
 **Retry count**: 0
+**Test infra**: generated / existing / skipped
 **Files changed**: [file1, file2, ...]
 **Learnings**:
 - `[permanent]` migration files must be in src/migrations/
@@ -24,6 +25,7 @@ Topology Order: [REQ-001, REQ-002, ...]
 **Status**: PASS
 **Retry count**: 1
 **Failure injected**: Linter: unused-var at line 42
+**Test infra**: existing (createTestApp, withTestDb)
 **Files changed**: [file1, file2, ...]
 **Learnings**:
 - `[permanent]` Auth middleware must run before validation

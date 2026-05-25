@@ -243,7 +243,7 @@
     "description": "验证 dispatch 使用 task() 工具，带正确 input contract",
     "input": {
       "req": "REQ-001",
-      "dispatch_method": "task(category=build, load_skills=[test-driven-development], timeout=300)",
+      "dispatch_method": "task(category=unspecified-high, load_skills=[test-driven-development], timeout=300)",
       "context": {
         "requirement": "REQ-001: 创建 User Model",
         "permanent_learnings": ["auth middleware before validation"],
@@ -257,6 +257,55 @@
       "timeout_configured": true,
       "skills_loaded": ["test-driven-development"],
       "context_bounded": true
+    }
+  },
+  {
+    "id": "ralph-016",
+    "name": "首次 REQ，无 test-utils.ts — dispatch test-infra 子任务",
+    "description": "验证首个 REQ 执行时，若 test-utils.ts 不存在，先 dispatch 测试基础设施 subagent，不直接 dispatch 业务代码",
+    "input": {
+      "req": "REQ-001",
+      "test_utils_exists": false,
+      "infra_check_result": "missing"
+    },
+    "expected": {
+      "test_infra_dispatched": true,
+      "business_code_dispatched": false,
+      "infra_retry_count": 0,
+      "infra_max_retries": 2
+    }
+  },
+  {
+    "id": "ralph-017",
+    "name": "后续 REQ，test-utils.ts 已存在且接口完整 — 跳过 test-infra",
+    "description": "验证后续 REQ 执行时，若 test-utils.ts 已存在且导出 createTestApp() 和 withTestDb()，直接 dispatch 业务代码",
+    "input": {
+      "req": "REQ-003",
+      "test_utils_exists": true,
+      "exports": ["createTestApp", "withTestDb"],
+      "infra_check_result": "complete"
+    },
+    "expected": {
+      "test_infra_dispatched": false,
+      "business_code_dispatched": true,
+      "infra_summary_injected": true
+    }
+  },
+  {
+    "id": "ralph-018",
+    "name": "test-utils.ts 存在但接口不完整 — dispatch test-infra 增量补充",
+    "description": "验证 test-utils.ts 存在但缺少必需接口（如只有 createTestApp 缺少 withTestDb）时，dispatch test-infra 增量补充",
+    "input": {
+      "req": "REQ-002",
+      "test_utils_exists": true,
+      "exports": ["createTestApp"],
+      "missing_exports": ["withTestDb"],
+      "infra_check_result": "partial"
+    },
+    "expected": {
+      "test_infra_dispatched": true,
+      "business_code_dispatched": false,
+      "infra_action": "incremental_add_missing_exports"
     }
   }
 ]
