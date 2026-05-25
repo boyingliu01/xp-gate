@@ -214,6 +214,12 @@ Phase 6: SHIP → finishing-a-development-branch (4 选项) → ship / land-and-
 **语言特定 TDD**：通过 `--lang` 参数选择：
 - `springboot-tdd` / `django-tdd` / `golang-testing`
 
+**Mock Minimization**（Phase 2 强制）：
+- 默认使用 integration-first：real DB (sqlite-in-memory), real collaborators
+- Mock 仅用于：external services, network calls, I/O boundaries
+- Mock 密度 > 30% 时必须添加 `// @mock-justified: <reason>` 注解（理由最少 10 字符）
+- Phase 3 Gate M 会在 push 时验证 mock 密度
+
 ### Phase 3: REVIEW + TEST（验证）
 - `delphi-review --mode code-walkthrough` — 多专家匿名代码走查（代替 cross-model-review）
 - `test-specification-alignment` — 测试与 Spec 对齐验证
