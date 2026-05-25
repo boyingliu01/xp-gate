@@ -74,3 +74,7 @@ skill-cert/*.egg-info/
 
 # .omo runtime data (keep templates/config, exclude run-continuation session files)
 .omo/run-continuation/
+
+# OpenCode runtime (project-level overrides managed globally)
+.opencode/
+.opencode.delete/
