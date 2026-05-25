@@ -2,6 +2,11 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.3.1] - 2026-05-25
+
+### Fixed
+- **Pre-push hook crash** — Gate M 不再因 `src/mutation/gate-m.ts` 不存在而崩溃，改为优雅跳过并输出警告（fixes #63）
+
 ## [0.2.0] - 2026-05-21
 
 ### Added

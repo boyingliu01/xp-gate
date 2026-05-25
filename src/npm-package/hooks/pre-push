@@ -111,43 +111,48 @@ else
       echo "🧬 Running mutation tests on changed files..."
       echo "$CHANGED_SOURCE_FILES"
 
-      # Run mutation gate with 120s timeout
-      MUTATION_OUTPUT=$(mktemp)
-      timeout 120s npx tsx src/mutation/gate-m.ts --changed-files "$CHANGED_SOURCE_FILES" > "$MUTATION_OUTPUT" 2>&1
-      MUTATION_EXIT=$?
+      # Check if mutation gate script exists
+      if [[ ! -f "src/mutation/gate-m.ts" ]]; then
+        echo "⚠️ Gate M script (src/mutation/gate-m.ts) not found. SKIP — Gate M."
+      else
+        # Run mutation gate with 120s timeout
+        MUTATION_OUTPUT=$(mktemp)
+        timeout 120s npx tsx src/mutation/gate-m.ts --changed-files "$CHANGED_SOURCE_FILES" > "$MUTATION_OUTPUT" 2>&1
+        MUTATION_EXIT=$?
 
-      case $MUTATION_EXIT in
-        0)
-          echo "✅ Gate M: PASS"
-          # Update baseline after successful mutation test
-          if [ -f ".stryker-baseline.json" ]; then
-            echo "📝 Updating mutation baseline..."
-            cp ".stryker-baseline.json" ".stryker-baseline.json.prev" 2>/dev/null || true
-          fi
-          ;;
-        1)
-          echo ""
-          echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-          echo "   ❌ GATE M FAILED - PUSH BLOCKED"
-          echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-          echo ""
-          cat "$MUTATION_OUTPUT"
-          echo ""
-          rm -f "$MUTATION_OUTPUT"
-          exit 1
-          ;;
-        124)
-          echo "⏱️ Gate M: TIMEOUT (120s). Mutation testing incomplete."
-          echo "   Allowing push with warning — review mutation coverage manually."
-          ;;
-        *)
-          echo "⚠️ Gate M: Unexpected exit code $MUTATION_EXIT"
-          cat "$MUTATION_OUTPUT"
-          echo "   Allowing push with warning."
-          ;;
-      esac
+        case $MUTATION_EXIT in
+          0)
+            echo "✅ Gate M: PASS"
+            # Update baseline after successful mutation test
+            if [ -f ".stryker-baseline.json" ]; then
+              echo "📝 Updating mutation baseline..."
+              cp ".stryker-baseline.json" ".stryker-baseline.json.prev" 2>/dev/null || true
+            fi
+            ;;
+          1)
+            echo ""
+            echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+            echo "   ❌ GATE M FAILED - PUSH BLOCKED"
+            echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+            echo ""
+            cat "$MUTATION_OUTPUT"
+            echo ""
+            rm -f "$MUTATION_OUTPUT"
+            exit 1
+            ;;
+          124)
+            echo "⏱️ Gate M: TIMEOUT (120s). Mutation testing incomplete."
+            echo "   Allowing push with warning — review mutation coverage manually."
+            ;;
+          *)
+            echo "⚠️ Gate M: Unexpected exit code $MUTATION_EXIT"
+            cat "$MUTATION_OUTPUT"
+            echo "   Allowing push with warning."
+            ;;
+        esac
 
-      rm -f "$MUTATION_OUTPUT"
+        rm -f "$MUTATION_OUTPUT"
+      fi
     fi
   fi
 fi
