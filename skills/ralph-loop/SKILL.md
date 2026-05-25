@@ -53,8 +53,21 @@ Phase 1: 迭代循环 (max_iterations=15 默认)
     │
     ├── 取下一个 READY REQ（依赖已满足，优先级最高）
     │
+    ├── 测试基础设施检查
+    │     1. 检查 test-utils.ts（或等效文件）是否存在
+    │     2. 检查必需接口契约：createTestApp()、withTestDb()
+    │     3. 不存在或接口缺失 → dispatch "生成测试基础设施" subagent
+    │        retry max 2 → 仍失败 → BLOCK 或 fallback inline 生成
+    │     4. 与业务代码合并为同一 commit
+    │
+    ├── 注入测试基础设施摘要到业务代码 subagent context：
+    │     【已有测试基础设施】test-utils.ts 已存在，导出以下 API：
+    │     - createTestApp(): 创建应用实例 + 真实测试依赖
+    │     - withTestDb(): 测试数据库生命周期（seed + cleanup）
+    │     必须 import 这些函数，禁止重新手搓同名 helper。
+    │
     ├── Dispatch 独立 subagent
-    │     使用: task(category="build", load_skills=["test-driven-development"], timeout=300)
+    │     使用: task(category="unspecified-high", load_skills=["test-driven-development"], timeout=300)
     │     Context:
     │       - 当前 REQ + 所有 AC
     │       - permanent learnings（架构决策，始终传入）
@@ -62,6 +75,16 @@ Phase 1: 迭代循环 (max_iterations=15 默认)
     │       - retry-failures（仅 retry 时注入失败原因）
     │       - AGENTS.md（项目约定）
     │       - git log --oneline -5
+    │       - 【TDD 铁律】RED → GREEN → REFACTOR。任何模块必须先写测试再写实现。
+    │       - 【Mock 边界】（覆盖 TDD skill 默认策略）
+    │           ✅ MOCK: 外部 HTTP API、LLM 调用、第三方平台（钉钉/微信）
+    │           ✅ MOCK: 时间/随机数/UUID（注入依赖）
+    │           ❌ NO MOCK: 数据库操作（用真实测试库或 sqlite-in-memory）
+    │           ❌ NO MOCK: HTTP 路由（用 app.inject() 真实注入）
+    │           ❌ NO MOCK: 模板引擎（用真实 Nunjucks/Jinja 渲染）
+    │           ❌ NO MOCK: 纯业务逻辑（用真实输入输出）
+    │       - 【Mock 密度上限】测试中 mock/spy/fn 引用行数 > 总测试行数 30% 时，
+    │           必须添加 // @mock-justified: <至少10字符理由> 注释说明为何无法用集成测试。
     │
     ├── Subagent 完成 → 三层验证
     │     ├── L1: typecheck + lint → FAIL? → retry
@@ -161,6 +184,7 @@ specification:
 | 层级 | 范围 | 工具 | 失败行为 |
 |------|------|------|---------|
 | L1 | 变更文件 | `lsp_diagnostics` + linter | retry |
+| L1b | 测试先行比率 | 新增测试行数 / (新增测试 + 新增实现) ≥ 40% | retry |
 | L2 | **全量测试**（不只是 @test REQ-XXX） | 项目测试框架 | retry |
 | L3 | 整体覆盖率 ≥ 80% | coverage report | retry |
 
@@ -169,32 +193,43 @@ specification:
 ## 状态机
 
 ```
-PENDING → in_progress → done (commit)
-       │                  │
-       │  depend not met  │ all done → COMPLETE
-       │  ┌───────────────┘
-       ▼  │
-    PENDING (waiting)
-       │
-       │  fail
-       ▼
-    RETRY (n≤3, 注入上次错误)
-       │
-       │  n≥3
-       ▼
-    BLOCKED → 用户决策 (skip/manual/stop/rollback)
-       │
-       │  依赖上游 blocked → 自动 blocked(含依赖链)
-       ▼
-    auto-blocked REQs
+PENDING → test_infra_check → [infra needed?] → test_infra_dispatch
+                                       │                    │
+                                       │ FAIL               │ pass
+                                       │ (max 2 retry)      │
+                                       ▼                    ▼
+                                   BLOCK/fallback      test_infra_ready → in_progress → done (commit)
+                                       │                  │
+                                       │  depend not met  │ all done → COMPLETE
+                                       │  ┌───────────────┘
+                                       ▼  │
+                                    PENDING (waiting)
+                                       │
+                                       │  fail
+                                       ▼
+                                    RETRY (n≤3, 注入上次错误)
+                                       │
+                                       │  n≥3
+                                       ▼
+                                    BLOCKED → 用户决策 (skip/manual/stop/rollback)
+                                       │
+                                       │  依赖上游 blocked → 自动 blocked(含依赖链)
+                                       ▼
+                                    auto-blocked REQs
 ```
 
 **REQ 状态转换规则**：
 
 | 从 | 到 | 触发 |
-|---|---|---|---|
-| pending | in_progress | 拓扑排序轮到 + 依赖已满足 |
-| in_progress | done | L1+L2+L3 全部通过 |
+|---|---|---|
+| pending | test_infra_check | 拓扑排序轮到 + 依赖已满足 |
+| test_infra_check | test_infra_dispatch | test-utils.ts 不存在或接口缺失 |
+| test_infra_check | in_progress | test-utils.ts 已存在且接口完整 |
+| test_infra_dispatch | test_infra_ready | 测试基础设施生成完成 |
+| test_infra_dispatch | blocked | retry max 2 仍失败 |
+| test_infra_dispatch | test_infra_ready | fallback inline 生成成功（记录 warning）|
+| test_infra_ready | in_progress | 测试基础设施就绪，dispatch 业务代码 subagent |
+| in_progress | done | L1+L1b+L2+L3 全部通过 |
 | in_progress | retry | 验证失败, n<3 |
 | retry | done | 验证通过 |
 | retry | blocked | n≥3 仍失败 |

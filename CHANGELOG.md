@@ -2,6 +2,21 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.3.1.1] - 2026-05-25
+
+### Fixed
+- **ralph-loop dispatch** — `category="build"` (invalid) → `category="unspecified-high"`，修复 skill 静默加载失败
+- **TDD 纪律注入** — subagent context 显式注入 TDD 铁律 + Mock 边界，不再依赖 `load_skills` 软约束
+- **测试基础设施先行** — 业务代码 dispatch 前检查 test-utils.ts 存在性及接口契约（createTestApp, withTestDb）
+- **状态机一致性** — 新增 test_infra_check/dispatch/ready 状态，所有路径经 test_infra_ready 再进 in_progress
+- **引用一致性** — `slices-manifest.json` → `specification.yaml` 在 2 个组件文档中修正
+
+### Added
+- **L1b 测试先行比率门** — 新增测试行数 / (新增测试 + 新增实现) ≥ 40%
+- **4 个 eval 用例** — ralph-015 (category 修正) + ralph-016/017/018 (test-infra 场景覆盖)
+- **Progress Log 增强** — `**Test infra**` 字段（generated/existing/skipped/fallback）
+- **Memory.md 扩展** — Progress Log Schema 新增 `test_infra_status` 字段定义
+
 ## [0.3.1] - 2026-05-25
 
 ### Fixed
