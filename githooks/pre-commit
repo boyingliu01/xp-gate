@@ -692,8 +692,174 @@ GATE_4_STATUS="PASS"
 
 if [ "$PROJECT_LANG" = "documentation-only" ]; then
   echo "✅ PASSED - Skipped (documentation project)."
-  
+
 else
+  # ========================================================================
+  # Gate 5a: Test-Source File Pairing Check (WARNING only)
+  # Checks coexistence, not temporal order. True "test-first" enforced by
+  # Agent skills (Layer 1 + Layer 4).
+  # ========================================================================
+  NEW_SOURCE_FILES=$(git diff --cached --name-only --diff-filter=A | grep -E '\.(ts|tsx|py|go|java|kt|kts|cpp|cc|cxx|c|swift|dart|rb|rs)$' | grep -v '__tests__' | grep -v '\.test\.' | grep -v '\.spec\.' | grep -v '__snapshots__' || true)
+
+  if [ -n "$NEW_SOURCE_FILES" ]; then
+    PAIRING_WARNINGS=0
+    for src_file in $NEW_SOURCE_FILES; do
+      base="${src_file%.*}"
+      ext="${src_file##*.}"
+      filename="${base##*/}"
+      dir="$(dirname "$src_file")"
+
+      # Skip excluded files: index/barrel, types, interfaces, constants, declarations
+      case "$filename" in
+        index|types|interfaces|constants|__init__) continue ;;
+      esac
+      case "$ext" in
+        d.ts|pyi) continue ;;
+      esac
+      # Skip files with // @no-test annotation
+      if grep -q '@no-test' "$src_file" 2>/dev/null; then
+        continue
+      fi
+
+      # Check common test file patterns (language-specific)
+      TEST_FOUND=false
+      case "$ext" in
+        ts|tsx|js|jsx)
+          patterns=(
+            "${base}.test.${ext}"
+            "${base}.spec.${ext}"
+            "${dir}/__tests__/${filename}.test.${ext}"
+            "${dir}/__tests__/${filename}.spec.${ext}"
+            "tests/${filename}.test.${ext}"
+            "tests/${filename}.spec.${ext}"
+          )
+          ;;
+        py)
+          patterns=(
+            "tests/${filename}_test.py"
+            "tests/test_${filename}.py"
+            "${dir}/tests/test_${filename}.py"
+            "${base}_test.py"
+          )
+          ;;
+        go)
+          patterns=(
+            "${base}_test.go"
+            "${dir}/${filename}_test.go"
+          )
+          ;;
+        java|kt|kts)
+          patterns=(
+            "${base}Test.${ext}"
+            "src/test/java/**/${filename}Test.${ext}"
+            "src/test/kotlin/**/${filename}Test.${ext}"
+          )
+          ;;
+        cpp|cc|cxx|c)
+          patterns=(
+            "${base}_test.${ext}"
+            "${base}Test.${ext}"
+            "${dir}/test_${filename}.${ext}"
+          )
+          ;;
+        swift)
+          patterns=(
+            "${base}Tests.swift"
+            "${dir}/${filename}Tests.swift"
+          )
+          ;;
+        dart)
+          patterns=("${base}_test.${ext}")
+          ;;
+        rb)
+          patterns=(
+            "${dir}/test_${filename}.rb"
+            "${base}_test.rb"
+          )
+          ;;
+        rs)
+          # Rust tests are typically inline with #[cfg(test)]
+          continue
+          ;;
+        *) continue ;;
+      esac
+
+      for pattern in "${patterns[@]}"; do
+        if [[ "$pattern" == *'*'* ]]; then
+          found=$(find . -path "*/${pattern}" -type f 2>/dev/null | head -1)
+          if [ -n "$found" ]; then TEST_FOUND=true; break; fi
+        elif [ -f "$pattern" ]; then
+          TEST_FOUND=true
+          break
+        fi
+      done
+
+      if [ "$TEST_FOUND" = false ]; then
+        echo "⚠️  TEST PAIRING WARNING: New source file without corresponding test: $src_file"
+        echo "   Expected patterns for .${ext}: ${patterns[0]}, ${patterns[1]:-...}"
+        echo "   Or: Add '// @no-test' annotation if this file doesn't need tests"
+        PAIRING_WARNINGS=$((PAIRING_WARNINGS + 1))
+      fi
+    done
+
+    if [ "$PAIRING_WARNINGS" -gt 0 ]; then
+      echo ""
+      echo "⚠️  $PAIRING_WARNINGS new source file(s) without corresponding tests"
+      echo "   This is a WARNING — commit proceeds. TDD order enforced by Agent skills."
+      echo "   To suppress for specific files, add '// @no-test' at the top."
+    fi
+  fi
+
+  # ========================================================================
+  # Gate 5b: Mock Density ADVISORY Scan (pure bash — no npx tsx overhead)
+  # 30% = ADVISORY, 50% = suggests @mock-justified. Does NOT block commit.
+  # ========================================================================
+  CHANGED_TEST_FILES=$(git diff --cached --name-only | grep -E '\.(test|spec)\.(ts|tsx|js|jsx|py|go)$' || true)
+
+  if [ -n "$CHANGED_TEST_FILES" ]; then
+    echo "Checking mock density in test files..."
+    for test_file in $CHANGED_TEST_FILES; do
+      if [ -f "$test_file" ]; then
+        # Count mock keyword references (precise patterns only)
+        MOCK_COUNT=0
+        for kw in 'jest\.mock' 'vi\.mock' 'jest\.spyOn' 'vi\.spyOn' 'jest\.fn' 'vi\.fn' \
+                  'mockResolvedValue' 'mockRejectedValue' 'mockReturnValue' 'mockImplementation' \
+                  'createMock' 'mockReset' 'mockClear' 'mockRestore' 'MagicMock' 'unittest\.mock' \
+                  '\.patch(' 'gomock' 'mockgen' '.EXPECT()'; do
+          c=$(grep -o -c "$kw" "$test_file" 2>/dev/null || echo "0")
+          MOCK_COUNT=$((MOCK_COUNT + c))
+        done
+
+        # Count total non-empty, non-comment lines for density denominator
+        TOTAL_LINES=$(grep -v '^\s*$' "$test_file" | grep -v '^\s*//' | grep -v '^\s*\*' | grep -v '^\s*#' | wc -l | awk '{print $1}')
+
+        if [ "$TOTAL_LINES" -gt 0 ] 2>/dev/null; then
+          MOCK_DENSITY=$(awk "BEGIN {printf \"%.1f\", ($MOCK_COUNT / $TOTAL_LINES) * 100}")
+        else
+          MOCK_DENSITY="0"
+        fi
+
+        THRESHOLD_30=$(awk "BEGIN {print ($MOCK_DENSITY > 30) ? 1 : 0}")
+        THRESHOLD_50=$(awk "BEGIN {print ($MOCK_DENSITY > 50) ? 1 : 0}")
+
+        # Check for @mock-justified annotation with reason text (min 10 chars)
+        HAS_JUSTIFIED=$(grep -qE '@mock-justified\s*:\s*.{10,}' "$test_file" 2>/dev/null && echo "true" || echo "false")
+
+        if [ "$THRESHOLD_50" = "1" ]; then
+          if [ "$HAS_JUSTIFIED" = "false" ]; then
+            echo "⚠️  MOCK DENSITY: $test_file — ${MOCK_DENSITY}% (exceeds 50%)"
+            echo "   Consider: integration test with real collaborators"
+            echo "   Or: Add '// @mock-justified: <reason>' (min 10 char explanation)"
+          else
+            echo "📝 MOCK DENSITY: $test_file — ${MOCK_DENSITY}% (justified)"
+          fi
+        elif [ "$THRESHOLD_30" = "1" ]; then
+          echo "ℹ️  MOCK DENSITY ADVISORY: $test_file — ${MOCK_DENSITY}% (consider reducing mocks)"
+        fi
+      fi
+    done
+  fi
+
   # First, run tests using adapter system
   echo "Running tests..."
   

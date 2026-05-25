@@ -146,6 +146,81 @@ else
 fi
 
 # ============================================================================
+# GATE M2: MOCK DENSITY CHECK (BLOCK at 50%, ADVISORY at 30%)
+# ============================================================================
+echo ""
+echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+echo "   GATE M2: MOCK DENSITY CHECK"
+echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+
+# Collect TS and Python test files from pushed files
+ALL_PUSHED_TEST_FILES=""
+TS_TEST_FILES=$(echo "$TS_FILES" | grep -E '\.(test|spec)\.(ts|tsx)$' || true)
+PY_TEST_FILES=$(echo "$PUSHED_FILES" | grep -E '(_test\.py|test_.*\.py)$' || true)
+
+if [ -n "$TS_TEST_FILES" ]; then
+  ALL_PUSHED_TEST_FILES="$TS_TEST_FILES"
+fi
+if [ -n "$PY_TEST_FILES" ]; then
+  ALL_PUSHED_TEST_FILES="$ALL_PUSHED_TEST_FILES $PY_TEST_FILES"
+fi
+
+if [ -z "$ALL_PUSHED_TEST_FILES" ]; then
+  echo "✅ No test files in push. SKIP — Mock density check."
+else
+  MOCK_BLOCKED=false
+
+  for test_file in $ALL_PUSHED_TEST_FILES; do
+    if [ -f "$test_file" ]; then
+      # Count mock keyword references (precise patterns only)
+      MOCK_COUNT=0
+      for kw in 'jest\.mock' 'vi\.mock' 'jest\.spyOn' 'vi\.spyOn' 'jest\.fn' 'vi\.fn' \
+                'mockResolvedValue' 'mockRejectedValue' 'mockReturnValue' 'mockImplementation' \
+                'createMock' 'mockReset' 'mockClear' 'mockRestore' 'MagicMock' 'unittest\.mock' \
+                '\.patch(' 'gomock' 'mockgen' '.EXPECT()'; do
+        c=$(grep -o -c "$kw" "$test_file" 2>/dev/null || echo "0")
+        MOCK_COUNT=$((MOCK_COUNT + c))
+      done
+
+      # Count total non-empty, non-comment lines for density denominator
+      TOTAL_LINES=$(grep -v '^\s*$' "$test_file" | grep -v '^\s*//' | grep -v '^\s*\*' | grep -v '^\s*#' | wc -l | awk '{print $1}')
+
+      if [ "$TOTAL_LINES" -gt 0 ] 2>/dev/null; then
+        MOCK_DENSITY=$(awk "BEGIN {printf \"%.1f\", ($MOCK_COUNT / $TOTAL_LINES) * 100}")
+      else
+        MOCK_DENSITY="0"
+      fi
+
+      THRESHOLD_50=$(awk "BEGIN {print ($MOCK_DENSITY > 50) ? 1 : 0}")
+      THRESHOLD_30=$(awk "BEGIN {print ($MOCK_DENSITY > 30) ? 1 : 0}")
+
+      # Check for @mock-justified annotation with reason text (min 10 chars)
+      HAS_JUSTIFIED=$(grep -qE '@mock-justified\s*:\s*.{10,}' "$test_file" 2>/dev/null && echo "true" || echo "false")
+
+      if [ "$THRESHOLD_50" = "1" ]; then
+        if [ "$HAS_JUSTIFIED" = "false" ]; then
+          echo "❌ BLOCKED: $test_file — Mock density ${MOCK_DENSITY}% exceeds 50% threshold"
+          echo "   Must: Reduce mocks OR add '// @mock-justified: <reason>' (min 10 char explanation)"
+          MOCK_BLOCKED=true
+        else
+          echo "⚠️  WARNING: $test_file — Mock density ${MOCK_DENSITY}% (justified by annotation)"
+        fi
+      elif [ "$THRESHOLD_30" = "1" ]; then
+        echo "ℹ️  ADVISORY: $test_file — Mock density ${MOCK_DENSITY}% (consider integration tests)"
+      else
+        echo "✅ $test_file — Mock density ${MOCK_DENSITY}% (acceptable)"
+      fi
+    fi
+  done
+
+  if [ "$MOCK_BLOCKED" = true ]; then
+    echo ""
+    echo "❌ PUSH BLOCKED — Mock density too high without justification"
+    exit 1
+  fi
+fi
+
+# ============================================================================
 # VALIDATE CODE WALKTHROUGH RESULT FILE
 # ============================================================================
 RESULT_FILE=".code-walkthrough-result.json"
