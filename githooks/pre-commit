@@ -896,10 +896,9 @@ else
   
   # Next, run coverage check
   echo "Running coverage check..."
-  
+
   if [ "${PROJECT_LANG}" != "unknown" ] && [ -f "$ADAPTER_DIR/adapters/${PROJECT_LANG}.sh" ]; then
-    if source "$ADAPTER_DIR/adapters/${PROJECT_LANG}.sh" 2>/dev/null; then 
-      # For languages where we want strict coverage, override run_coverage behavior
+    if source "$ADAPTER_DIR/adapters/${PROJECT_LANG}.sh" 2>/dev/null; then
       case "$PROJECT_LANG" in
         "typescript")
           if [ -f "package.json" ] && grep -q '"test:coverage"' package.json 2>/dev/null; then
@@ -910,10 +909,10 @@ else
               echo ""
               echo "❌ BLOCKED - Coverage check FAILED (exit code: $COV_EXIT)"
               echo "Coverage must meet the thresholds defined in vitest.config.ts"
-              exit
+              exit 1
             fi
           else
-            echo "No coverage script in package.json, running coverage check..."
+            echo "No 'test:coverage' script in package.json, running coverage via adapter..."
             run_coverage_output=$(run_coverage 2>&1)
             COV_EXIT=$?
             echo "$run_coverage_output" | head -30
@@ -924,6 +923,7 @@ else
             pytest --cov=. --cov-fail-under=80 --tb=short
             COV_EXIT=$?
           else
+            echo "pytest/coverage not available, running coverage via adapter..."
             run_coverage_output=$(run_coverage 2>&1)
             COV_EXIT=$?
             echo "$run_coverage_output" | head -30
@@ -935,14 +935,13 @@ else
             TOTAL_COVERAGE=$(go tool cover -func=coverage.out 2>/dev/null | grep "^total:" | awk '{print substr($3, 1, length($3)-1)}')
             if [ -n "$TOTAL_COVERAGE" ] && (( $(echo "$TOTAL_COVERAGE < 80" | bc -l 2>/dev/null || echo "0") )); then
               echo "❌ BLOCKED - Go coverage $TOTAL_COVERAGE% below 80% threshold"
-              exit
+              exit 1
             fi
             echo "Go coverage: $TOTAL_COVERAGE%"
             COV_EXIT=0
           fi
           ;;
         "shell")
-          # Shell doesn't typically have coverage, just run what's available
           shell_cov_output=$(run_coverage 2>&1)
           COV_EXIT=$?
           echo "$shell_cov_output" | head -10
@@ -955,58 +954,135 @@ else
           ;;
       esac
     else
-      COV_EXIT=0  # Default to success if no adapter
+      # Adapter source failed — warn and let Stage 2 attempt file-based enforcement
+      echo "⚠️  Could not source ${PROJECT_LANG} adapter, will check coverage files directly..."
+      COV_EXIT=0
     fi
   else
-    COV_EXIT=0  # Default to success if no adapter
+    # No adapter available — warn and let Stage 2 attempt file-based enforcement
+    echo "⚠️  No adapter for ${PROJECT_LANG}, will check coverage files directly..."
+    COV_EXIT=0
   fi
-  
-  # For languages that support strict coverage checking
+
+  # ============================================================================
+  # Stage 2: UNCONDITIONAL coverage percentage enforcement
+  # Always attempt to parse coverage from available sources. If percentage
+  # can be determined and is < 80% → BLOCK. If no data found → warn.
+  # ============================================================================
+  COVERAGE_ENFORCED=false
+
   case "$PROJECT_LANG" in
     "typescript")
+      COVERAGE_ENFORCED=true
       if [ -f "coverage/coverage-summary.json" ]; then
         COVERAGE_PERCENT=$(node -e "
-        const fs = require('fs');
-        const data = JSON.parse(fs.readFileSync('coverage/coverage-summary.json', 'utf8'));
-        console.log(Math.round(data.total.lines.pct));
-        " 2>/dev/null || echo "none")
-        if [ "$COVERAGE_PERCENT" != "none" ] && [ "$COVERAGE_PERCENT" -lt 80 ]; then
-          echo "❌ BLOCKED - TypeScript coverage ${COVERAGE_PERCENT}% below 80% threshold"
-          exit
+          try {
+            const fs = require('fs');
+            const data = JSON.parse(fs.readFileSync('coverage/coverage-summary.json', 'utf8'));
+            console.log(Math.round(data.total.lines.pct));
+          } catch(e) { console.log('parse_error'); }
+        " 2>/dev/null)
+        if [ "$COVERAGE_PERCENT" != "parse_error" ] && [ -n "$COVERAGE_PERCENT" ]; then
+          if [ "$COVERAGE_PERCENT" -lt 80 ]; then
+            echo "❌ BLOCKED - TypeScript coverage ${COVERAGE_PERCENT}% below 80% threshold"
+            exit 1
+          fi
+          echo "TypeScript coverage: ${COVERAGE_PERCENT}% ✅ (≥ 80%)"
+        else
+          echo "⚠️  Could not parse TypeScript coverage from coverage/coverage-summary.json"
         fi
-        echo "TypeScript coverage: ${COVERAGE_PERCENT}%"
+      else
+        echo "⚠️  coverage/coverage-summary.json not found. If vitest --coverage was used, check vitest.config.ts coverageDirectory."
       fi
       ;;
     "python")
-      if command -v coverage &> /dev/null && [ -f ".coverage" ]; then
-        # If pytest-cov was used, this gets coverage percentage
-        COVERAGE_PERCENT=$(coverage report --format=total 2>/dev/null | grep -o '[0-9]*%' | head -1 | tr -d '%') || echo "no_cover"
-        if [ -n "$COVERAGE_PERCENT" ] && [ "$COVERAGE_PERCENT" != "no_cover" ] && [ "$COVERAGE_PERCENT" -lt 80 ]; then
-          echo "❌ BLOCKED - Python coverage ${COVERAGE_PERCENT}% below 80% threshold"
-          exit
+      COVERAGE_ENFORCED=true
+      if command -v coverage &> /dev/null; then
+        COVERAGE_PERCENT=""
+        if [ -f ".coverage" ]; then
+          COVERAGE_PERCENT=$(coverage report --format=total 2>/dev/null | grep -o '[0-9]*%' | head -1 | tr -d '%') || true
         fi
-        echo "Python coverage: ${COVERAGE_PERCENT}%"
+        if [ -z "$COVERAGE_PERCENT" ] && [ -f "coverage/.coverage" ]; then
+          COVERAGE_PERCENT=$(coverage report --format=total -i coverage 2>/dev/null | grep -o '[0-9]*%' | head -1 | tr -d '%') || true
+        fi
+        if [ -n "$COVERAGE_PERCENT" ]; then
+          if [ "$COVERAGE_PERCENT" -lt 80 ]; then
+            echo "❌ BLOCKED - Python coverage ${COVERAGE_PERCENT}% below 80% threshold"
+            exit 1
+          fi
+          echo "Python coverage: ${COVERAGE_PERCENT}% ✅ (≥ 80%)"
+        else
+          echo "⚠️  Could not determine Python coverage percentage. Ensure pytest-cov or coverage.py data exists."
+        fi
+      else
+        echo "⚠️  coverage.py not available, cannot enforce Python coverage threshold."
       fi
       ;;
+    "go")
+      # Go enforcement already handled inline in Stage 1 (lines 933-942)
+      ;;
+    "shell")
+      # Shell coverage not typically measured
+      ;;
     "dart"|"flutter")
+      COVERAGE_ENFORCED=true
       if [ -f "coverage/lcov.info" ]; then
-        COVERAGE_PERCENT=$(parse_lcov_coverage "coverage/lcov.info")
-        if [ "$COVERAGE_PERCENT" != "0" ] && [ "$COVERAGE_PERCENT" -lt 80 ]; then
-          echo "❌ BLOCKED - Flutter/Dart coverage ${COVERAGE_PERCENT}% below 80% threshold"
-          exit
+        COVERAGE_PERCENT=$(parse_lcov_coverage "coverage/lcov.info" 2>/dev/null) || COVERAGE_PERCENT="0"
+        if [ "$COVERAGE_PERCENT" != "0" ] && [ -n "$COVERAGE_PERCENT" ]; then
+          if [ "$COVERAGE_PERCENT" -lt 80 ]; then
+            echo "❌ BLOCKED - Flutter/Dart coverage ${COVERAGE_PERCENT}% below 80% threshold"
+            exit 1
+          fi
+          echo "Flutter/Dart coverage: ${COVERAGE_PERCENT}% ✅ (≥ 80%)"
+        else
+          echo "⚠️  Could not determine Flutter/Dart coverage percentage from lcov.info."
         fi
-        echo "Flutter/Dart coverage: ${COVERAGE_PERCENT}%"
+      else
+        echo "⚠️  coverage/lcov.info not found. Ensure dart test --coverage was run."
+      fi
+      ;;
+    *)
+      # Default: attempt to parse coverage from common formats regardless of language
+      COVERAGE_ENFORCED=true
+      COVERAGE_PERCENT=""
+      if [ -f "coverage/coverage-summary.json" ]; then
+        COVERAGE_PERCENT=$(node -e "
+          try {
+            const fs = require('fs');
+            const data = JSON.parse(fs.readFileSync('coverage/coverage-summary.json', 'utf8'));
+            console.log(Math.round(data.total.lines.pct));
+          } catch(e) { console.log('parse_error'); }
+        " 2>/dev/null) || COVERAGE_PERCENT=""
+      elif [ -f "coverage/lcov.info" ]; then
+        if command -v parse_lcov_coverage &> /dev/null; then
+          COVERAGE_PERCENT=$(parse_lcov_coverage "coverage/lcov.info" 2>/dev/null) || COVERAGE_PERCENT=""
+        else
+          COVERAGE_PERCENT=$(grep -oP 'SF:.*' coverage/lcov.info 2>/dev/null | wc -l || echo "0")
+          # Simple fallback: check lcov for coverage percentage
+          COVERAGE_PERCENT=$(grep -oP 'coverage: \K[0-9]+%' coverage/lcov.info 2>/dev/null | head -1 | tr -d '%') || COVERAGE_PERCENT=""
+        fi
+      fi
+      if [ -n "$COVERAGE_PERCENT" ] && [ "$COVERAGE_PERCENT" != "parse_error" ] && [ "$COVERAGE_PERCENT" -gt 0 ]; then
+        if [ "$COVERAGE_PERCENT" -lt 80 ]; then
+          echo "❌ BLOCKED - ${PROJECT_LANG} coverage ${COVERAGE_PERCENT}% below 80% threshold"
+          exit 1
+        fi
+        echo "${PROJECT_LANG} coverage: ${COVERAGE_PERCENT}% ✅ (≥ 80%)"
+      else
+        echo "⚠️  Could not determine ${PROJECT_LANG} coverage percentage. No standard coverage report files found."
       fi
       ;;
   esac
-  
+
   if [ "$COV_EXIT" -ne 0 ]; then
     echo ""
     echo "❌ BLOCKED - Coverage check FAILED"
-    exit
-  else
-    echo "✅ PASSED - Coverage check completed."
+    exit 1
   fi
+  if [ "$COVERAGE_ENFORCED" = false ]; then
+    echo "ℹ️  Coverage enforcement not applicable for ${PROJECT_LANG}"
+  fi
+  echo "✅ PASSED - Coverage check completed."
 fi
 GATE_5_STATUS="PASS"
 

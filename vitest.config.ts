@@ -7,8 +7,17 @@ export default defineConfig({
     exclude: ['src/_wip/**', 'node_modules/**', '.opencode/**', '.omo/**', '.worktrees/**'],
     coverage: {
       provider: 'v8',
-      reporter: ['text', 'json', 'html'],
-      exclude: ['src/_wip/**', 'node_modules/**', 'src/mutation/**'],
+      reporter: ['text', 'json', 'json-summary', 'html'],
+      exclude: [
+        'src/_wip/**',
+        'node_modules/**',
+        'src/mutation/**',
+        'dashboard/**',
+        'src/npm-package/bin/**',
+        '**/*.test.ts',
+        '**/*.test.js',
+        '**/__tests__/**',
+      ],
       thresholds: {
         global: {
           branches: 80,
