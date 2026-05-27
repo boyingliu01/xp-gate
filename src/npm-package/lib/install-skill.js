@@ -1,5 +1,6 @@
 const fs = require('fs');
 const path = require('path');
+const os = require('os');
 const https = require('https');
 const http = require('http');
 const { execSync } = require('child_process');
@@ -7,8 +8,11 @@ const { checkDeps } = require('./detect-deps.js');
 const { downloadFromGitHub } = require('./download-skill.js');
 const { rollback } = require('./rollback.js');
 
-const CONFIG_DIR = path.join(process.env.HOME, '.config', 'xp-gate');
-const SKILLS_DIR = path.join(process.env.HOME, '.config', 'opencode', 'skills');
+// Cross-platform home directory resolution
+const HOME = process.env.HOME || process.env.USERPROFILE || os.homedir();
+
+const CONFIG_DIR = path.join(HOME, '.config', 'xp-gate');
+const SKILLS_DIR = path.join(HOME, '.config', 'opencode', 'skills');
 
 const SKILLS_REGISTRY = {
   'sprint-flow': { repo: 'boyingliu01/xp-gate', path: 'skills/sprint-flow' },

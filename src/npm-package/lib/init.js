@@ -1,10 +1,11 @@
 const fs = require('fs');
 const path = require('path');
+const os = require('os');
 const { checkDeps } = require('./detect-deps.js');
 const { checkBash } = require('./detect-deps.js');
 
-// Cross-platform home directory resolution
-const HOME_DIR = process.env.HOME || process.env.USERPROFILE;
+// Cross-platform home directory resolution with os.homedir() fallback
+const HOME_DIR = process.env.HOME || process.env.USERPROFILE || os.homedir();
 
 const CONFIG_DIR = path.join(HOME_DIR, '.config', 'xp-gate');
 const CONFIG_FILE = path.join(CONFIG_DIR, 'xp-gate.json');

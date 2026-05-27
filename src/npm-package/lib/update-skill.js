@@ -1,8 +1,12 @@
 const fs = require('fs');
 const path = require('path');
+const os = require('os');
 
-const CONFIG_DIR = path.join(process.env.HOME, '.config', 'xp-gate');
-const SKILLS_DIR = path.join(process.env.HOME, '.config', 'opencode', 'skills');
+// Cross-platform home directory resolution
+const HOME = process.env.HOME || process.env.USERPROFILE || os.homedir();
+
+const CONFIG_DIR = path.join(HOME, '.config', 'xp-gate');
+const SKILLS_DIR = path.join(HOME, '.config', 'opencode', 'skills');
 
 async function updateSkill(name, options = {}) {
   const { all = false, check = false, verbose = false } = options;

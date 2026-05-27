@@ -1,8 +1,13 @@
 const fs = require('fs');
 const path = require('path');
+const os = require('os');
 
-const CONFIG_DIR = path.join(process.env.HOME, '.config', 'xp-gate');
+// Cross-platform home directory resolution
+const HOME = process.env.HOME || process.env.USERPROFILE || os.homedir();
+
+const CONFIG_DIR = path.join(HOME, '.config', 'xp-gate');
 const BACKUP_DIR = path.join(CONFIG_DIR, 'backup');
+const SKILLS_DIR = path.join(HOME, '.config', 'opencode', 'skills');
 
 async function rollback(installId) {
   const backupDir = path.join(BACKUP_DIR, installId);
@@ -16,7 +21,7 @@ async function rollback(installId) {
   const entries = fs.readdirSync(backupDir);
   for (const entry of entries) {
     const src = path.join(backupDir, entry);
-    const dest = path.join(process.env.HOME, '.config', 'opencode', 'skills', entry);
+    const dest = path.join(SKILLS_DIR, entry);
     
     if (fs.existsSync(src)) {
       if (fs.existsSync(dest)) {
@@ -33,7 +38,7 @@ async function rollback(installId) {
 
 async function createBackup(installId, skillName) {
   const backupDir = path.join(BACKUP_DIR, installId);
-  const targetDir = path.join(process.env.HOME, '.config', 'opencode', 'skills', skillName);
+  const targetDir = path.join(SKILLS_DIR, skillName);
   
   if (!fs.existsSync(targetDir)) {
     return null;

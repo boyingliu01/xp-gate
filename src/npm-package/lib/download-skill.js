@@ -2,9 +2,13 @@ const https = require('https');
 const http = require('http');
 const fs = require('fs');
 const path = require('path');
+const os = require('os');
 const crypto = require('crypto');
 
-const CONFIG_DIR = path.join(process.env.HOME, '.config', 'xp-gate');
+// Cross-platform home directory resolution
+const HOME = process.env.HOME || process.env.USERPROFILE || os.homedir();
+
+const CONFIG_DIR = path.join(HOME, '.config', 'xp-gate');
 const CACHE_DIR = path.join(CONFIG_DIR, 'cache');
 
 async function downloadFromGitHub(repo, pathInRepo, version = 'main') {

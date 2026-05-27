@@ -1,9 +1,17 @@
 const fs = require('fs');
 const path = require('path');
+const os = require('os');
 const { execSync } = require('child_process');
 
-const SKILLS_DIR = path.join(process.env.HOME || process.env.USERPROFILE, '.config', 'opencode', 'skills');
-const OPENCODE_DIR = path.join(process.env.HOME || process.env.USERPROFILE, '.config', 'opencode');
+/**
+ * Resolve the user's home directory cross-platform.
+ * Fallback chain: HOME → USERPROFILE → os.homedir()
+ * This covers all known Windows/Linux/macOS/edge cases.
+ */
+const HOME = process.env.HOME || process.env.USERPROFILE || os.homedir();
+
+const SKILLS_DIR = path.join(HOME, '.config', 'opencode', 'skills');
+const OPENCODE_DIR = path.join(HOME, '.config', 'opencode');
 
 const REQUIRED_DEPS = [
   { name: 'superpowers', minVersion: '1.0.0' },
