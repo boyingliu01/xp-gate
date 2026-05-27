@@ -5,7 +5,7 @@
 [![Git Hooks](https://img.shields.io/badge/Git%20Hooks-6%20Gates-green)](./githooks)
 [![AI Review](https://img.shields.io/badge/AI%20Review-Delphi%20≥95%25-blue)](./skills/delphi-review)
 [![Sprint Flow](https://img.shields.io/badge/Sprint%20Flow-Think→Ship-purple)](./skills/sprint-flow)
-[![npm](https://img.shields.io/badge/npm-install%20--g%20xp-gate-blue?logo=npm)](src/npm-package)
+[![GitHub package](https://img.shields.io/badge/GitHub%20Packages-npm%20install%20--g%20xp--gate-blue?logo=npm)](src/npm-package)
 
 ---
 
@@ -87,21 +87,58 @@ THINK → PLAN → BUILD → REVIEW → USER ACCEPT → FEEDBACK → SHIP
 
 ## 快速开始
 
-### 方式零：零安装（推荐 — AI Agent 友好）
+### 方式零：全局安装 xp-gate CLI
+
+> **注意**: xp-gate 目前发布在 GitHub Packages，需要使用 npm 认证安装。
+
+#### 前置条件
+
+- **Linux/macOS**: 已安装 [Git](https://git-scm.com) + **bash**（系统自带）
+- **Windows**: 已安装 Git + 必须安装 Git Bash（安装时勾选 "Git Bash Here"）
+
+#### 1. 生成 GitHub Personal Access Token (PAT)
+
+xp-gate 使用 GitHub Packages 托管，需要 PAT 认证：
 
 ```bash
-# npm 全局安装（无需 clone 仓库）
-npm install -g xp-gate
+# 访问 https://github.com/settings/tokens
+# 创建一个新 token，勾选权限: read:packages
+# 记录生成的 token（ghp_xxxxxxxxxxxx）
+```
 
-# 初始化项目（安装 hooks）
+#### 2. npm 认证
+
+在用户目录创建 `.npmrc`：
+
+```bash
+# Linux/macOS
+echo "//npm.pkg.github.com/:_authToken=YOUR_GITHUB_TOKEN" > ~/.npmrc
+
+# Windows PowerShell
+echo "//npm.pkg.github.com/:_authToken=YOUR_GITHUB_TOKEN" > $env:USERPROFILE\.npmrc
+```
+
+#### 3. 安装 xp-gate CLI
+
+```bash
+# 全局安装
+npm install -g xp-gate
+```
+
+> 如仍遇到 404，确认 `.npmrc` 中的 token 有效，且 npm registry 配置正确。
+
+#### 4. 初始化项目
+
+```bash
+# 进入你的项目目录
 cd your-project
+
+# 安装 Git Hooks（每个项目只需一次）
 xp-gate init
 
-# 按需安装 AI 技能
+# 按需安装 AI 技能（可选）
 xp-gate install-skill sprint-flow
 xp-gate install-skill delphi-review
-xp-gate install-skill test-spec
-xp-gate install-skill ralph-loop
 ```
 
 ### 方式一：独立安装（仅门禁）
