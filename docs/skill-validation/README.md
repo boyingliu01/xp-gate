@@ -1,4 +1,4 @@
-# XGate Skill 验证文档
+# XP-Gate Skill 验证文档
 
 > 生成日期：2026-04-26
 > 状态：所有验证完成，3 个 LLM-dependent skill 全部通过

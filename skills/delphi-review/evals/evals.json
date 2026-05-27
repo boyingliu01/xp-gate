@@ -1,12 +1,12 @@
 {
   "skill_name": "delphi-review",
-  "skill_path": "/mnt/e/Private/opencode优化/xgate/skills/delphi-review/SKILL.md",
+  "skill_path": "skills/delphi-review/SKILL.md",
   "evals": [
     {
       "id": 1,
       "name": "design-mode-full-review",
       "category": "normal",
-      "prompt": "我需要评审一份设计文档：我们要给XGate项目添加一个自动生成CHANGELOG的功能。功能包括：1) 从git log提取commit信息 2) 按照conventional commits分类 3) 生成markdown格式的changelog 4) 支持自定义模板。请用delphi-review评审这个设计。",
+      "prompt": "我需要评审一份设计文档：我们要给XP-Gate项目添加一个自动生成CHANGELOG的功能。功能包括：1) 从git log提取commit信息 2) 按照conventional commits分类 3) 生成markdown格式的changelog 4) 支持自定义模板。请用delphi-review评审这个设计。",
       "expected_output": "执行完整的Delphi评审流程：Phase 0验证→Round 1匿名独立评审(至少2位Expert)→Round 2交换意见→共识检查(>=95%)→Terminal State Checklist→如果APPROVED则生成specification.yaml。绝不能只做Round 1就停止。",
       "files": [],
       "assertions": [

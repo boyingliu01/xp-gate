@@ -4,7 +4,7 @@
 
 ## Entry 001 — 2026-05-22 — AHE Observability Infrastructure (P0)
 
-- **Trigger**: new-feature — Issue #62: 为 XGate Skills 建立可观测性基础设施
+- **Trigger**: new-feature — Issue #62: 为 XP-Gate Skills 建立可观测性基础设施
 - **Evidence**: GitHub Issue #62 描述 — 无法做消融实验，反馈无法积累，迭代依赖直觉
 - **Root Cause**: SKILL.md 单文件结构导致组件级修改无法归因到具体组件
 - **Change Made**:

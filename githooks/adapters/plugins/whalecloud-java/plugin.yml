@@ -37,9 +37,9 @@ categories:
   # === 安全篇 (Security Chapter) ===
   - wc-security-chapter: 安全开发规范 (安全篇) — SQL/XML/日志/命令注入, 路径标准化, Zip炸弹
 maven:
-  profile: xgate-whalecloud-java
-  profile_file: templates/maven/xgate-whalecloud-profile.xml
+  profile: xp-gate-whalecloud-java
+  profile_file: templates/maven/xp-gate-whalecloud-profile.xml
   install_script: scripts/install-maven-whalecloud.sh
 gradle:
-  config_file: templates/gradle/xgate-whalecloud-gradle.gradle
+  config_file: templates/gradle/xp-gate-whalecloud-gradle.gradle
   install_script: scripts/install-gradle-whalecloud.sh

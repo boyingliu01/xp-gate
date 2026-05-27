@@ -21,10 +21,10 @@ categories:
   - ali-other:       其他规约 (3 条)
   - ali-set:         集合处理规约 (3 条)
 maven:
-  profile: xgate-p3c
-  profile_file: templates/maven/xgate-p3c-profile.xml
+  profile: xp-gate-p3c
+  profile_file: templates/maven/xp-gate-p3c-profile.xml
   install_script: scripts/install-maven-p3c.sh
 gradle:
-  config_file: templates/gradle/xgate-p3c-gradle.gradle
+  config_file: templates/gradle/xp-gate-p3c-gradle.gradle
   install_script: scripts/install-gradle-p3c.sh
 rules_path: https://github.com/alibaba/p3c/tree/master/p3c-pmd/src/main/resources/rulesets/java

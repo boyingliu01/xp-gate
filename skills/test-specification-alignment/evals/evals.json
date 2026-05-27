@@ -1,6 +1,6 @@
 {
   "skill_name": "test-specification-alignment",
-  "skill_path": "/mnt/e/Private/opencode优化/xgate/skills/test-specification-alignment/SKILL.md",
+  "skill_path": "skills/test-specification-alignment/SKILL.md",
   "evals": [
     {
       "id": 1,

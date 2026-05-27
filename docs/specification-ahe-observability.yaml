@@ -110,7 +110,7 @@ specification:
 
     - id: DD-004
       decision: "AHE component count: 5 (not 7)"
-      rationale: "XGate Skills ARE the tools (already modular); sub-agents and skills map to existing XGate skill system."
+      rationale: "XP-Gate Skills ARE the tools (already modular); sub-agents and skills map to existing XP-Gate skill system."
 
   delphi_review:
     round1: "REQUEST_CHANGES (3/3 experts, confidence 7.3/10)"

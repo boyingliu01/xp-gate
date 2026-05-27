@@ -14,7 +14,7 @@ if [ ! -f "build.gradle" ] && [ ! -f "build.gradle.kts" ]; then
 fi
 
 echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-echo "   XGate: Installing WhaleCloud Java Coding Standards"
+echo "   XP-Gate: Installing WhaleCloud Java Coding Standards"
 echo "   for Gradle project"
 echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
 echo ""
@@ -22,10 +22,10 @@ echo ""
 GRADLE_FILE="build.gradle"
 [ -f "build.gradle.kts" ] && GRADLE_FILE="build.gradle.kts"
 
-if grep -q 'xgateWhalecloudCheck\|whalecloud-ruleset' "$GRADLE_FILE"; then
+if grep -q 'XP-GateWhalecloudCheck\|whalecloud-ruleset' "$GRADLE_FILE"; then
   echo "✅ WhaleCloud standard already configured in $GRADLE_FILE"
   echo ""
-  echo "To run: ./gradlew xgateWhalecloudCheck"
+  echo "To run: ./gradlew XP-GateWhalecloudCheck"
   exit 0
 fi
 
@@ -33,7 +33,7 @@ echo "Installing into $GRADLE_FILE..."
 
 cat >> "$GRADLE_FILE" << 'APPEND'
 
-// ─── XGate: WhaleCloud Java Coding Standards ───
+// ─── XP-Gate: WhaleCloud Java Coding Standards ───
 plugins {
     id 'pmd'
     id 'checkstyle'
@@ -76,7 +76,7 @@ dependencies {
     spotbugsPlugins 'com.h3xstream.findsecbugs:findsecbugs-plugin:1.12.0'
 }
 
-task xgateWhalecloudCheck {
+task XP-GateWhalecloudCheck {
     description = 'Run WhaleCloud Java coding standard checks'
     group = 'Verification'
     dependsOn 'pmdMain', 'pmdTest', 'checkstyleMain', 'checkstyleTest', 'spotbugsMain'
@@ -91,7 +91,7 @@ echo "   Usage"
 echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
 echo ""
 echo "  # Run WhaleCloud quality checks:"
-echo "  ./gradlew xgateWhalecloudCheck"
+echo "  ./gradlew XP-GateWhalecloudCheck"
 echo ""
-echo "  # This integrates into xgate pre-commit Gate 1"
+echo "  # This integrates into XP-Gate pre-commit Gate 1"
 echo ""

@@ -2,7 +2,7 @@
 
 ## Overview
 
-This framework provides a systematic methodology for validating LLM-dependent skills in the XGate project. It combines Anthropic's skill-creator eval pipeline with promptfoo regression testing.
+This framework provides a systematic methodology for validating LLM-dependent skills in the XP-Gate project. It combines Anthropic's skill-creator eval pipeline with promptfoo regression testing.
 
 ## Tool Selection Guide
 

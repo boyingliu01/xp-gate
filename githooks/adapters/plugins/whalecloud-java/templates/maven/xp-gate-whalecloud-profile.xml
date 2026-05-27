@@ -1,14 +1,14 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <!--
-  WhaleCloud Java Coding Standards Maven profile for XGate.
+  WhaleCloud Java Coding Standards Maven profile for XP-Gate.
   Layered on top of p3c-pmd baseline — adds 74 mandatory + 32 recommended
   WhaleCloud-internal rules not covered by Alibaba p3c-pmd.
 
   Usage:
-    mvn clean verify -P xgate-whalecloud-java
-    mvn clean verify -P xgate-whalecloud-java -Dpmd.failOnViolation=true
+    mvn clean verify -P XP-Gate-whalecloud-java
+    mvn clean verify -P XP-Gate-whalecloud-java -Dpmd.failOnViolation=true
 
-  Depends on: p3c-pmd profile (xgate-p3c) must also be active.
+  Depends on: p3c-pmd profile (XP-Gate-p3c) must also be active.
 
   Rules covered: 106 rules across 8 categories
     - wc-collection:    集合处理增强 (12 条)
@@ -21,7 +21,7 @@
     - wc-performance:   性能优化规范 (8 条)
 -->
 <profile>
-  <id>xgate-whalecloud-java</id>
+  <id>XP-Gate-whalecloud-java</id>
   <activation>
     <file>
       <exists>${project.basedir}/src/main</exists>

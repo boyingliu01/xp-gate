@@ -1,18 +1,18 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <!--
-  p3c-pmd Maven profile for XGate Java quality gate.
+  p3c-pmd Maven profile for XP-Gate Java quality gate.
   Provides Alibaba Java Coding Guidelines checks via PMD.
 
   Usage:
-    mvn clean compile pmd:check -P xgate-p3c
-    mvn clean compile pmd:check -P xgate-p3c -Dpmd.failOnViolation=true
+    mvn clean compile pmd:check -P XP-Gate-p3c
+    mvn clean compile pmd:check -P XP-Gate-p3c -Dpmd.failOnViolation=true
 
   Rules covered: 54 rules across 10 categories
     - ali-comment, ali-concurrent, ali-constant, ali-exception,
       ali-flowcontrol, ali-naming, ali-oop, ali-orm, ali-other, ali-set
 -->
 <profile>
-  <id>xgate-p3c</id>
+  <id>XP-Gate-p3c</id>
   <activation>
     <file>
       <exists>${project.basedir}/src/main</exists>

@@ -1,5 +1,5 @@
 #!/bin/bash
-# Install p3c-pmd into a Gradle project for xgate Java quality gate.
+# Install p3c-pmd into a Gradle project for XP-Gate Java quality gate.
 # Usage: bash scripts/install-gradle-p3c.sh [project_root]
 
 set -e
@@ -15,7 +15,7 @@ if [ ! -f "build.gradle" ] && [ ! -f "build.gradle.kts" ]; then
 fi
 
 echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-echo "   XGate: Installing p3c-pmd for Gradle projects"
+echo "   XP-Gate: Installing p3c-pmd for Gradle projects"
 echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
 echo ""
 
@@ -26,7 +26,7 @@ elif [ -f "build.gradle.kts" ]; then
   GRADLE_FILE="build.gradle.kts"
 fi
 
-if grep -q 'xgateP3cCheck\|p3c-pmd' "$GRADLE_FILE" 2>/dev/null; then
+if grep -q 'XP-GateP3cCheck\|p3c-pmd' "$GRADLE_FILE" 2>/dev/null; then
   echo "✅ p3c-pmd already configured in $GRADLE_FILE"
   exit 0
 fi
@@ -34,12 +34,12 @@ fi
 echo "ℹ️  Appending p3c-pmd configuration to $GRADLE_FILE..."
 {
   echo ""
-  echo "// XGate: Alibaba p3c-pmd quality gate"
-  echo "apply from: '$PLUGIN_DIR/templates/gradle/xgate-p3c-gradle.gradle'"
+  echo "// XP-Gate: Alibaba p3c-pmd quality gate"
+  echo "apply from: '$PLUGIN_DIR/templates/gradle/xp-gate-p3c-gradle.gradle'"
   echo ""
 } >> "$GRADLE_FILE"
 
 echo ""
 echo "✅ p3c-pmd installed successfully!"
 echo ""
-echo "  # Run: ./gradlew xgateP3cCheck"
+echo "  # Run: ./gradlew XP-GateP3cCheck"

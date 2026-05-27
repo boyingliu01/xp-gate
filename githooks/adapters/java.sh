@@ -9,7 +9,7 @@ _is_whalecloud_enabled() {
   # Check if whalecloud-java plugin is enabled
   [ -d "$WHALECLOUD_PLUGIN_DIR" ] && \
     ([ -f "config/pmd/whalecloud-ruleset.xml" ] || \
-     grep -q 'xgate-whalecloud-java\|xgateWhalecloudCheck' pom.xml build.gradle build.gradle.kts 2>/dev/null)
+     grep -q 'xp-gate-whalecloud-java\|xpGateWhalecloudCheck' pom.xml build.gradle build.gradle.kts 2>/dev/null)
 }
 
 _detect_java_build() {
@@ -105,9 +105,9 @@ _run_p3c_check() {
   echo "  Running p3c-pmd Alibaba Coding Guidelines check..."
 
   if [ "$build_system" = "maven" ]; then
-    if grep -q '<id>xgate-p3c</id>' pom.xml 2>/dev/null; then
+    if grep -q '<id>xp-gate-p3c</id>' pom.xml 2>/dev/null; then
       # Profile already installed — use it
-      mvn pmd:check -P xgate-p3c -Dpmd.failOnViolation=true 2>&1 | tail -30
+      mvn pmd:check -P xp-gate-p3c -Dpmd.failOnViolation=true 2>&1 | tail -30
       return "${PIPESTATUS[0]}"
     else
       # Profile not installed — run inline with p3c-pmd dependency
@@ -135,9 +135,9 @@ _run_p3c_check() {
     fi
 
   elif [ "$build_system" = "gradle" ]; then
-    if grep -q 'xgateP3cCheck\|p3c-pmd' build.gradle 2>/dev/null || \
-       grep -q 'xgateP3cCheck\|p3c-pmd' build.gradle.kts 2>/dev/null; then
-      gradle xgateP3cCheck --quiet 2>&1 | tail -20
+    if grep -q 'xp-gateP3cCheck\|p3c-pmd' build.gradle 2>/dev/null || \
+       grep -q 'xp-gateP3cCheck\|p3c-pmd' build.gradle.kts 2>/dev/null; then
+      gradle xp-gateP3cCheck --quiet 2>&1 | tail -20
       return "${PIPESTATUS[0]}"
     else
       echo "  ℹ️  p3c-pmd not configured in Gradle build"
@@ -160,9 +160,9 @@ _run_whalecloud_check() {
   echo "  Running WhaleCloud Java Coding Standards check..."
 
   if [ "$build_system" = "maven" ]; then
-    if grep -q '<id>xgate-whalecloud-java</id>' pom.xml 2>/dev/null; then
+    if grep -q '<id>xp-gate-whalecloud-java</id>' pom.xml 2>/dev/null; then
       mvn pmd:check checkstyle:check spotbugs:check \
-        -P xgate-whalecloud-java -Dpmd.failOnViolation=true \
+        -P xp-gate-whalecloud-java -Dpmd.failOnViolation=true \
         2>&1 | tail -30
       return "${PIPESTATUS[0]}"
     else
@@ -172,9 +172,9 @@ _run_whalecloud_check() {
     fi
 
   elif [ "$build_system" = "gradle" ]; then
-    if grep -q 'xgateWhalecloudCheck' build.gradle 2>/dev/null || \
-       grep -q 'xgateWhalecloudCheck' build.gradle.kts 2>/dev/null; then
-      gradle xgateWhalecloudCheck --quiet 2>&1 | tail -20
+    if grep -q 'xp-gateWhalecloudCheck' build.gradle 2>/dev/null || \
+       grep -q 'xp-gateWhalecloudCheck' build.gradle.kts 2>/dev/null; then
+      gradle xp-gateWhalecloudCheck --quiet 2>&1 | tail -20
       return "${PIPESTATUS[0]}"
     else
       echo "  ⚠️  whalecloud-java not configured in Gradle build"

@@ -29,7 +29,7 @@
 
 ### 2.1 当前状态
 
-XGate v0.1.0 已实现基于 Stryker 的变异测试（CI-only），但：
+XP-Gate v0.1.0 已实现基于 Stryker 的变异测试（CI-only），但：
 - **pre-commit/pre-push 不触发** — 开发者本地提交时无法感知测试有效性
 - **Gate 5 只管覆盖率** — `coverage ≥ 80%` 但 mutation score 可能只有 20%
 - **AI 生成测试过度 mock** — 覆盖率虚高，实际 bug 检测能力极低

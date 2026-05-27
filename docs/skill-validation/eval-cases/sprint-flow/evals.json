@@ -1,6 +1,6 @@
 {
   "skill_name": "sprint-flow",
-  "skill_path": "/mnt/e/Private/opencode优化/xgate/skills/sprint-flow/SKILL.md",
+  "skill_path": "skills/sprint-flow/SKILL.md",
   "evals": [
     {
       "id": 1,
@@ -50,7 +50,7 @@
       "id": 4,
       "name": "stop-at-plan",
       "category": "boundary",
-      "prompt": "我想先看看方案再决定要不要继续开发。执行/sprint-flow '给XGate添加代码覆盖率趋势分析功能' --stop-at plan",
+      "prompt": "我想先看看方案再决定要不要继续开发。执行/sprint-flow '给XP-Gate添加代码覆盖率趋势分析功能' --stop-at plan",
       "expected_output": "只执行到Phase 1(Plan)就停止，输出specification.yaml后等待用户决定。不应自动进入Phase 2。",
       "files": [],
       "assertions": [

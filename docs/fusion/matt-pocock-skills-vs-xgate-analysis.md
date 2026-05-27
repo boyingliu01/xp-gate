@@ -1,4 +1,4 @@
-# Matt Pocock Skills vs XGate 融合分析
+# Matt Pocock Skills vs XP-Gate 融合分析
 
 **日期**: 2026-05-20
 **来源**: https://www.aihero.dev/5-agent-skills-i-use-every-day + https://github.com/mattpocock/skills
@@ -17,27 +17,27 @@
 
 ### Skill 1: `/grill-me` vs `brainstorming` — **增强**
 
-| 维度 | Matt | XGate | 结论 |
+| 维度 | Matt | XP-Gate | 结论 |
 |---|---|---|---|
 | 核心目的 | 需求澄清 | 需求探索 → 完整设计 | 重叠互补 |
-| 交互方式 | 一问一答遍历设计树 | 多阶段：方案→设计→审批 | XGate 更全面 |
-| Shared Language | CONTEXT.md + ADRs维护 | **无** | **XGate 缺失** |
+| 交互方式 | 一问一答遍历设计树 | 多阶段：方案→设计→审批 | XP-Gate 更全面 |
+| Shared Language | CONTEXT.md + ADRs维护 | **无** | **XP-Gate 缺失** |
 
 **融合行动**: 在 brainstorming 中引入 CONTEXT.md + ADR 维护能力（grill-with-docs 机制）
 
 ### Skill 2: `/to-prd` vs `delphi-review` → `specification.yaml` — **增强**
 
-| 维度 | Matt | XGate | 结论 |
+| 维度 | Matt | XP-Gate | 结论 |
 |---|---|---|---|
-| User Stories | ✅ 强制 | ❌ **无** | **XGate 缺失** |
+| User Stories | ✅ 强制 | ❌ **无** | **XP-Gate 缺失** |
 | Implementation Decisions | ✅ 记录 | delphi 隐含 | 部分重叠 |
-| Issue Tracker | 提交 GitHub Issue | 无集成 | **XGate 缺失** |
+| Issue Tracker | 提交 GitHub Issue | 无集成 | **XP-Gate 缺失** |
 
 **融合行动**: specification 生成中增加 User Stories 段
 
 ### Skill 3: `/to-issues` — **新增**
 
-| 维度 | Matt | XGate | 结论 |
+| 维度 | Matt | XP-Gate | 结论 |
 |---|---|---|---|
 | 垂直切片拆解 | ✅ tracer bullet | ❌ **完全缺失** | **P0 优先级** |
 | HITL/AFK 标注 | ✅ | ❌ | 缺失 |
@@ -47,15 +47,15 @@
 
 ### Skill 4: `/tdd` vs `test-driven-development` — **保持**
 
-XGate 的 TDD 已 >= Matt 的。无需替代，可选吸收 vertical slice 术语。
+XP-Gate 的 TDD 已 >= Matt 的。无需替代，可选吸收 vertical slice 术语。
 
 ### Skill 5: `/improve-codebase-architecture` — **新增互补**
 
-| 维度 | Matt | XGate | 结论 |
+| 维度 | Matt | XP-Gate | 结论 |
 |---|---|---|---|
 | 核心概念 | Deep/Shallow modules, seams, locality | Clean Code 9 rules + SOLID 5 rules | **互补** |
 | 时机 | 定期（主动改善） | 每次 commit（被动拦截） | 不同场景 |
-| Deletion Test | ✅ | ❌ **无** | **XGate 缺失** |
+| Deletion Test | ✅ | ❌ **无** | **XP-Gate 缺失** |
 
 **融合行动**: 新增独立 skill，Phase 5 后周期性调用
 

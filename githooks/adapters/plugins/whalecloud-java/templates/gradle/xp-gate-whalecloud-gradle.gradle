@@ -1,11 +1,11 @@
-// WhaleCloud Java Coding Standards Gradle config for XGate.
+// WhaleCloud Java Coding Standards Gradle config for XP-Gate.
 // Layered on top of p3c-pmd baseline — adds 74 mandatory + 32 recommended
 // WhaleCloud-internal rules not covered by Alibaba p3c-pmd.
 //
 // Usage:
-//   ./gradlew xgateWhalecloudCheck
+//   ./gradlew XP-GateWhalecloudCheck
 //
-// Depends on: p3c-pmd config (xgateP3cCheck) must also be active.
+// Depends on: p3c-pmd config (XP-GateP3cCheck) must also be active.
 
 plugins {
     id 'java'
@@ -57,7 +57,7 @@ dependencies {
 }
 
 // Combined WhaleCloud check task
-task xgateWhalecloudCheck {
+task XP-GateWhalecloudCheck {
     description = 'Run all WhaleCloud Java coding standard checks (p3c-pmd + overlay + security)'
     group = 'Verification'
     dependsOn 'pmdMain', 'pmdTest', 'checkstyleMain', 'checkstyleTest', 'spotbugsMain'
@@ -69,5 +69,5 @@ task installWhalecloudConfig(type: Copy) {
     from "${pluginDir}/templates/gradle/config/"
     into whalecloudConfigDir
     description = 'Install WhaleCloud rule configuration files into project'
-    group = 'XGate'
+    group = 'XP-Gate'
 }

@@ -54,8 +54,8 @@ htmlcov/
 .sisyphus/
 .sprint-state/
 
-# XGate quality status (per-branch, local-only — not shared across devs)
-.xgate/quality-status/
+# XP-Gate quality status (per-branch, local-only — not shared across devs)
+.xp-gate/quality-status/
 
 # Mutation testing
 .mutation-baseline.json

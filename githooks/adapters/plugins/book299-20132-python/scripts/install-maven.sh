@@ -8,13 +8,13 @@ if [ ! -f "pom.xml" ]; then
   echo "❌ No pom.xml found"
   exit 1
 fi
-if grep -q "<id>xgate-$(basename "$PLUGIN_DIR")</id>" pom.xml; then
+if grep -q "<id>xp-gate-$(basename "$PLUGIN_DIR")</id>" pom.xml; then
   echo "✅ Already installed"
   exit 0
 fi
 cat >> pom.xml << 'APPEND'
-<!-- Auto-generated XGate plugin profile -->
+<!-- Auto-generated XP-Gate plugin profile -->
 <!-- See plugin documentation for details -->
-<profiles><profile><id>xgate-AUTO</id></profile></profiles>
+<profiles><profile><id>xp-gate-AUTO</id></profile></profiles>
 APPEND
 echo "✅ Plugin profile installed"

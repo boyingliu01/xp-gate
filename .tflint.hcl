@@ -1,4 +1,4 @@
-# TFLint configuration for XGate
+# TFLint configuration for XP-Gate
 # https://github.com/terraform-linters/tflint
 
 plugin "terraform" {

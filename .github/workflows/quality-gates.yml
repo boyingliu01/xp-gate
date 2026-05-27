@@ -1,4 +1,4 @@
-name: XGate Quality Gates
+name: XP-Gate Quality Gates
 
 # Run this workflow when:
 # - Pushing to main/master branch 
@@ -557,7 +557,7 @@ jobs:
                 ;;
             esac
           else
-            # If no architecture config exists, that's usually a problem in xgate context
+            # If no architecture config exists, that's usually a problem in XP-Gate context
             if [[ -f ".architecture-skip" ]]; then
               echo "ℹ️ Architecture config not found but .architecture-skip exists - proceeding"
             else
@@ -889,7 +889,7 @@ jobs:
             SCORE=$(echo "$REPORT_JSON" | jq -r '.overall.score')
             VERDICT=$(echo "$REPORT_JSON" | jq -r '.overall.verdict')
             
-            COMMENT_BODY="## XGate Quality Report\n\n**Quality Gate Status**: $VERDICT\n**Overall Score**: $SCORE/10\n**Gates Passed**: $GATES_PASSED/$GATES_TOTAL\n\nQuality checks have completed for this pull request."
+            COMMENT_BODY="## XP-Gate Quality Report\n\n**Quality Gate Status**: $VERDICT\n**Overall Score**: $SCORE/10\n**Gates Passed**: $GATES_PASSED/$GATES_TOTAL\n\nQuality checks have completed for this pull request."
             
             # Add more detail depending on pass/fail status
             if [[ "$VERDICT" == "failure" ]]; then
@@ -903,7 +903,7 @@ jobs:
             echo -e "$COMMENT_BODY" >> $GITHUB_ENV 
             echo "EOF" >> $GITHUB_ENV
           else
-            echo "comment_body=XGate Quality report artifacts not available for this PR." >> $GITHUB_ENV
+            echo "comment_body=XP-Gate Quality report artifacts not available for this PR." >> $GITHUB_ENV
           fi
           
       - name: Post Comment to PR
@@ -939,9 +939,9 @@ jobs:
           
           # Generate overall summary
           if [[ "$GATE_STATUS" == "success" ]]; then
-            echo "✅ XGate Quality Gates: All gates passed"
+            echo "✅ XP-Gate Quality Gates: All gates passed"
           else
-            echo "❌ XGate Quality Gates: Some gates failed or were skipped"
+            echo "❌ XP-Gate Quality Gates: Some gates failed or were skipped"
           fi
           
           if [[ "$AI_REVIEW_STATUS" == "success" ]]; then
@@ -950,4 +950,4 @@ jobs:
             echo "ℹ️ AI Review may have failed or was not applicable"
           fi
           
-          echo "XGate Quality Assessment: Complete" > summary_result.txt
+          echo "XP-Gate Quality Assessment: Complete" > summary_result.txt

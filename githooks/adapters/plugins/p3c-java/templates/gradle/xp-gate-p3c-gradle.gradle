@@ -1,5 +1,5 @@
 // =============================================================================
-// p3c-pmd Gradle configuration for XGate Java quality gate.
+// p3c-pmd Gradle configuration for XP-Gate Java quality gate.
 // Provides Alibaba Java Coding Guidelines checks via PMD.
 //
 // Usage:
@@ -42,9 +42,9 @@ pmd {
     source = sourceSets.main.allJava + sourceSets.test.allJava
 }
 
-// Task alias for xgate integration
-task xgateP3cCheck(type: Pmd) {
-    description = 'Run p3c-pmd checks for xgate quality gate'
+// Task alias for XP-Gate integration
+task XP-GateP3cCheck(type: Pmd) {
+    description = 'Run p3c-pmd checks for XP-Gate quality gate'
     group = 'verification'
     ruleSetFiles = pmd.ruleSetFiles
     ruleSets = []
@@ -62,7 +62,7 @@ task xgateP3cCheck(type: Pmd) {
 project.afterEvaluate {
     if (project.hasProperty('p3cCheck')) {
         tasks.named('build').configure {
-            dependsOn tasks.named('xgateP3cCheck')
+            dependsOn tasks.named('XP-GateP3cCheck')
         }
     }
 }

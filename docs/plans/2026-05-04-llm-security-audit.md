@@ -6,7 +6,7 @@
 
 ## 1. Motivation
 
-XGate's Delphi Review and Sprint Flow depend on LLM calls. Current security is limited to PromptPressure's basic adversarial prompts — no systematic OWASP LLM security testing.
+XP-Gate's Delphi Review and Sprint Flow depend on LLM calls. Current security is limited to PromptPressure's basic adversarial prompts — no systematic OWASP LLM security testing.
 
 ---
 

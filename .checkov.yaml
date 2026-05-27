@@ -1,4 +1,4 @@
-# Checkov configuration for XGate
+# Checkov configuration for XP-Gate
 # https://www.checkov.io/
 
 # Skip specific checks (add your exclusions here)

@@ -5,7 +5,7 @@
 # This script:
 # 1. Detects if pom.xml exists
 # 2. Installs whalecloud config files (PMD/CheckStyle/SpotBugs rulesets)
-# 3. Merges xgate-whalecloud-java profile into pom.xml
+# 3. Merges xp-gate-whalecloud-java profile into pom.xml
 # 4. Outputs usage instructions
 
 set -e
@@ -22,7 +22,7 @@ if [ ! -f "pom.xml" ]; then
 fi
 
 echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-echo "   XGate: Installing WhaleCloud Java Coding Standards"
+echo "   XP-Gate: Installing WhaleCloud Java Coding Standards"
 echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
 echo ""
 echo "This adds 106 rules (74 mandatory + 32 recommended) on"
@@ -146,12 +146,12 @@ fi
 echo ""
 
 # Step 2: Install Maven profile
-PROFILE_FILE="$PLUGIN_DIR/templates/maven/xgate-whalecloud-profile.xml"
+PROFILE_FILE="$PLUGIN_DIR/templates/maven/xp-gate-whalecloud-profile.xml"
 
-if grep -q '<id>xgate-whalecloud-java</id>' pom.xml; then
-  echo "Step 2: xgate-whalecloud-java profile already exists in pom.xml"
+if grep -q '<id>xp-gate-whalecloud-java</id>' pom.xml; then
+  echo "Step 2: xp-gate-whalecloud-java profile already exists in pom.xml"
 else
-  echo "Step 2: Installing xgate-whalecloud-java profile into pom.xml..."
+  echo "Step 2: Installing xp-gate-whalecloud-java profile into pom.xml..."
 
   if grep -q '<profiles>' pom.xml; then
     PROFILES_END_LINE=$(grep -n '</profiles>' pom.xml | head -1 | cut -d: -f1)
@@ -159,7 +159,7 @@ else
       head -n $((PROFILES_END_LINE - 1)) pom.xml > pom.xml.tmp
       {
         echo ""
-        echo "    <!-- XGate: WhaleCloud Java Coding Standards profile -->"
+        echo "    <!-- XP-Gate: WhaleCloud Java Coding Standards profile -->"
         sed 's/^/    /' "$PROFILE_FILE"
         echo ""
       } >> pom.xml.tmp
@@ -172,7 +172,7 @@ else
       head -n $((PROJECT_END_LINE - 1)) pom.xml > pom.xml.tmp
       {
         echo ""
-        echo "  <!-- XGate: WhaleCloud Java Coding Standards profile -->"
+        echo "  <!-- XP-Gate: WhaleCloud Java Coding Standards profile -->"
         echo "  <profiles>"
         sed 's/^/    /' "$PROFILE_FILE"
         echo ""
@@ -192,10 +192,10 @@ echo "   Usage"
 echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
 echo ""
 echo "  # Run WhaleCloud Java quality checks:"
-echo "  mvn clean verify -P xgate-whalecloud-java"
+echo "  mvn clean verify -P xp-gate-whalecloud-java"
 echo ""
 echo "  # Run with both p3c-pmd and WhaleCloud:"
-echo "  mvn clean verify -P xgate-p3c,xgate-whalecloud-java"
+echo "  mvn clean verify -P xp-gate-p3c,xp-gate-whalecloud-java"
 echo ""
-echo "  # This will be integrated into xgate pre-commit Gate 1"
+echo "  # This will be integrated into XP-Gate pre-commit Gate 1"
 echo ""

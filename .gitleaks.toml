@@ -1,10 +1,10 @@
-title = "XGate Secret Detection Configuration"
+title = "XP-Gate Secret Detection Configuration"
 
 [extend]
 useDefault = true
 
 [allowlist]
-description = "Global allowlist for XGate project"
+description = "Global allowlist for XP-Gate project"
 
 paths = [
   # Lock files and dependencies

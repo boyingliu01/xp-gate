@@ -1,10 +1,10 @@
 #!/bin/bash
-# Install p3c-pmd into a Maven project for xgate Java quality gate.
+# Install p3c-pmd into a Maven project for XP-Gate Java quality gate.
 # Usage: bash scripts/install-maven-p3c.sh [project_root]
 #
 # This script:
 # 1. Detects if pom.xml exists
-# 2. Merges xgate-p3c profile into pom.xml (or creates profile snippet)
+# 2. Merges xp-gate-p3c profile into pom.xml (or creates profile snippet)
 # 3. Outputs instructions for running p3c check
 
 set -e
@@ -21,17 +21,17 @@ if [ ! -f "pom.xml" ]; then
 fi
 
 echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-echo "   XGate: Installing p3c-pmd for Java quality gate"
+echo "   XP-Gate: Installing p3c-pmd for Java quality gate"
 echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
 echo ""
 
-PROFILE_FILE="$PLUGIN_DIR/templates/maven/xgate-p3c-profile.xml"
+PROFILE_FILE="$PLUGIN_DIR/templates/maven/xp-gate-p3c-profile.xml"
 
 # Check if p3c profile already exists
-if grep -q '<id>xgate-p3c</id>' pom.xml; then
+if grep -q '<id>xp-gate-p3c</id>' pom.xml; then
   echo "✅ p3c-pmd profile already exists in pom.xml"
   echo ""
-  echo "To run: mvn clean verify -P xgate-p3c"
+  echo "To run: mvn clean verify -P xp-gate-p3c"
   exit 0
 fi
 
@@ -52,7 +52,7 @@ if grep -q '<profiles>' pom.xml; then
     head -n $((PROFILES_END_LINE - 1)) pom.xml > pom.xml.tmp
     {
       echo ""
-      echo "    <!-- XGate: Alibaba p3c-pmd quality gate profile -->"
+      echo "    <!-- XP-Gate: Alibaba p3c-pmd quality gate profile -->"
       sed 's/^/    /' "$TEMP_PROFILE"
       echo ""
     } >> pom.xml.tmp
@@ -69,7 +69,7 @@ else
     head -n $((PROJECT_END_LINE - 1)) pom.xml > pom.xml.tmp
     {
       echo ""
-      echo "  <!-- XGate: Alibaba p3c-pmd quality gate profile -->"
+      echo "  <!-- XP-Gate: Alibaba p3c-pmd quality gate profile -->"
       echo "  <profiles>"
       sed 's/^/    /' "$PROFILE_FILE"
       echo ""
@@ -89,10 +89,10 @@ echo "   Usage"
 echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
 echo ""
 echo "  # Run p3c-pmd checks:"
-echo "  mvn clean verify -P xgate-p3c"
+echo "  mvn clean verify -P xp-gate-p3c"
 echo ""
 echo "  # Run with fail on violation:"
-echo "  mvn clean verify -P xgate-p3c -Dpmd.failOnViolation=true"
+echo "  mvn clean verify -P xp-gate-p3c -Dpmd.failOnViolation=true"
 echo ""
-echo "  # This will be integrated into xgate pre-commit Gate 1"
+echo "  # This will be integrated into XP-Gate pre-commit Gate 1"
 echo ""

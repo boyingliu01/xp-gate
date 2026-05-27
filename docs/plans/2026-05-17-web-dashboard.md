@@ -23,13 +23,13 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>XGate Quality Dashboard</title>
+  <title>XP-Gate Quality Dashboard</title>
   <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
   <link rel="stylesheet" href="style.css">
 </head>
 <body>
   <header>
-    <h1>XGate Quality Dashboard</h1>
+    <h1>XP-Gate Quality Dashboard</h1>
     <p class="subtitle">Local scan history and trends</p>
   </header>
   
@@ -229,7 +229,7 @@ git commit -m "feat(#47): add dashboard styles"
 **Step 1: Create data loading logic**
 
 ```javascript
-// dashboard.js - XGate Quality Dashboard
+// dashboard.js - XP-Gate Quality Dashboard
 
 async function loadHistory() {
   try {

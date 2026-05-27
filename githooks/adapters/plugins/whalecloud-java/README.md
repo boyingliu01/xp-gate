@@ -22,7 +22,7 @@
 
 ```
 ┌─────────────────────────────────────────┐
-│           xgate-pre-commit              │
+│           xp-gate-pre-commit              │
 │              Gate 1                     │
 ├─────────────────────────────────────────┤
 │  whalecloud-java (106 条)               │
@@ -55,13 +55,13 @@ bash githooks/adapters/plugins/whalecloud-java/scripts/install-gradle-whalecloud
 
 ```bash
 # Maven
-mvn clean verify -P xgate-whalecloud-java
+mvn clean verify -P xp-gate-whalecloud-java
 
 # 同时运行 p3c-pmd + whalecloud（推荐）
-mvn clean verify -P xgate-p3c,xgate-whalecloud-java
+mvn clean verify -P xp-gate-p3c,xp-gate-whalecloud-java
 
 # Gradle
-./gradlew xgateWhalecloudCheck
+./gradlew xp-gateWhalecloudCheck
 ```
 
 ## 检查工具链

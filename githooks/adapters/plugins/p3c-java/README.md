@@ -27,7 +27,7 @@
 bash githooks/adapters/plugins/p3c-java/scripts/install-maven-p3c.sh
 ```
 
-安装后会自动将 `xgate-p3c` profile 注入 pom.xml。
+安装后会自动将 `xp-gate-p3c` profile 注入 pom.xml。
 
 ### Gradle 项目
 
@@ -39,10 +39,10 @@ bash githooks/adapters/plugins/p3c-java/scripts/install-gradle-p3c.sh
 
 ```bash
 # Maven
-mvn clean verify -P xgate-p3c
+mvn clean verify -P xp-gate-p3c
 
 # Gradle
-./gradlew xgateP3cCheck
+./gradlew xp-gateP3cCheck
 ```
 
 ## 插件结构
@@ -52,8 +52,8 @@ p3c-java/
 ├── plugin.yml                              # 插件元数据
 ├── README.md                               # 说明文档
 ├── templates/
-│   ├── maven/xgate-p3c-profile.xml        # Maven profile 模板
-│   └── gradle/xgate-p3c-gradle.gradle     # Gradle 配置模板
+│   ├── maven/xp-gate-p3c-profile.xml        # Maven profile 模板
+│   └── gradle/xp-gate-p3c-gradle.gradle     # Gradle 配置模板
 └── scripts/
     ├── install-maven-p3c.sh               # Maven 安装脚本
     └── install-gradle-p3c.sh              # Gradle 安装脚本

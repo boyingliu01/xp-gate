@@ -1,4 +1,4 @@
-# Delphi Consensus Report - XGate Design Document
+# Delphi Consensus Report - XP-Gate Design Document
 
 ## Review Metadata
 

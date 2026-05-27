@@ -1128,10 +1128,10 @@ index.ts (CLI) → analyzer.ts → getAdapterForFile() → Rule.check() → repo
 
 ## Appendix B: Reference Files
 
-- `/mnt/e/Private/opencode优化/XGate/githooks/pre-commit` - Existing hook
-- `/mnt/e/Private/opencode优化/XGate/src/principles/analyzer.ts` - Adapter factory
-- `/mnt/e/Private/opencode优化/XGate/src/principles/adapters/base.ts` - Adapter interface
-- `/mnt/e/Private/opencode优化/XGate/.principlesrc` - Configuration example
+- `/mnt/e/Private/opencode优化/XP-Gate/githooks/pre-commit` - Existing hook
+- `/mnt/e/Private/opencode优化/XP-Gate/src/principles/analyzer.ts` - Adapter factory
+- `/mnt/e/Private/opencode优化/XP-Gate/src/principles/adapters/base.ts` - Adapter interface
+- `/mnt/e/Private/opencode优化/XP-Gate/.principlesrc` - Configuration example
 
 ---
 

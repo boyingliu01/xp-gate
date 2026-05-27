@@ -18,7 +18,7 @@ setup() {
   [ -f ".archlint.yaml" ]
 }
 
-@test "architecture.yaml exists for XGate custom rules" {
+@test "architecture.yaml exists for XP-Gate custom rules" {
   [ -f "architecture.yaml" ]
 }
 
