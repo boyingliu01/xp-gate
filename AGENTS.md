@@ -124,3 +124,10 @@ npx tsx src/principles/index.ts --files "src/**/*.ts" --format sarif
 ## NOTES
 - skill-cert/ is a Python subproject with own pyproject.toml and venv
 - promptpressure/ and promptfoo/ are test infrastructure, not core
+
+## LEARNINGS (from retrospectives)
+
+### 2026-05-28 Retro
+
+1. **Systematic global scan before closing bug fixes** — When fixing a bug reported in a single file (e.g., `process.env.HOME` usage), always scan the **entire codebase** for the same pattern before committing. The `/sprint-flow` bug (#73) report only listed 2 files, but a full scan revealed 4 additional files with the same issue. Rule: `grep -rn 'process.env.HOME' src/` should run **before** claiming a fix complete.
+2. **main branch pre-push Gate M skips code-walkthrough** — Delphi code-walkthrough pre-push gate is intentionally skipped when pushing to `main`/`master`. This is **by design** (avoids blocking main pushes on review file checks), but means main has one fewer quality gate. Mitigation: always ship via feature branch + PR so pre-push review still triggers on the feature branch.
