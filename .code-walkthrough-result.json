@@ -1,18 +1,38 @@
 {
-  "commit": "655a15b380815e31954ecb26ad7e5c8c7a80b133",
-  "branch": "sprint/2026-05-24-01",
-  "timestamp": "2026-05-24T12:00:00Z",
-  "expires": "2026-05-24T13:00:00Z",
+  "commit": "915aabdb51c2a57368ca23eecf92b1037fb872e6",
+  "branch": "sprint/2026-05-26-01",
+  "timestamp": "2026-05-27T12:55:00Z",
+  "expires": "2026-05-27T13:55:00Z",
   "verdict": "APPROVED",
-  "confidence": 9,
+  "confidence": 8.5,
   "experts": [
-    { "id": "Expert A", "verdict": "APPROVED", "confidence": 9 },
-    { "id": "Expert B", "verdict": "APPROVED", "confidence": 9 }
+    { "id": "Expert A", "verdict": "APPROVED", "confidence": 9, "role": "architecture" },
+    { "id": "Expert B", "verdict": "APPROVED", "confidence": 8, "role": "implementation" }
   ],
-  "issues": [],
+  "issues": [
+    {
+      "id": "B-01",
+      "severity": "high",
+      "description": "command -v parse_lcov_coverage never finds shell functions — * default case lcov branch is dead code",
+      "location": "githooks/pre-commit:1057",
+      "fix": "Replace command -v with declare -f or call the function directly"
+    },
+    {
+      "id": "B-02",
+      "severity": "high",
+      "description": "grep -oP 'SF:.*' | wc -l counts source files, not coverage percentage",
+      "location": "githooks/pre-commit:1060",
+      "fix": "Replace with actual LCOV LF/LH calculation or call parse_lcov_coverage directly"
+    },
+    {
+      "id": "A1",
+      "severity": "medium",
+      "description": "Dead code in * default case lcov fallback — grep patterns incorrect for LCOV format",
+      "location": "githooks/pre-commit:1059-1062"
+    }
+  ],
   "consensus_ratio": 1.0,
-  "files_reviewed": 1,
-  "lines_added": 132,
-  "lines_deleted": 17,
-  "review_description": "Phase -1 ISOLATE: git worktree isolation for sprint-flow"
+  "files_reviewed": 17,
+  "lines_added": 3490,
+  "lines_deleted": 59
 }
