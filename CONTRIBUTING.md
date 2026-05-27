@@ -4,6 +4,9 @@ Thank you for your interest in contributing!
 
 ## Development Setup
 
+> **Windows 用户**: 需安装 [Git for Windows](https://git-scm.com/download/win)，确保 `bash` 在 PATH 中可用。
+> 安装后 Git Bash 会自动将 `git.exe` 所在目录加入 PATH。
+
 ```bash
 # Clone and install
 git clone https://github.com/boyingliu01/xp-gate.git

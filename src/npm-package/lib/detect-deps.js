@@ -1,13 +1,80 @@
 const fs = require('fs');
 const path = require('path');
+const { execSync } = require('child_process');
 
-const SKILLS_DIR = path.join(process.env.HOME, '.config', 'opencode', 'skills');
-const OPENCODE_DIR = path.join(process.env.HOME, '.config', 'opencode');
+const SKILLS_DIR = path.join(process.env.HOME || process.env.USERPROFILE, '.config', 'opencode', 'skills');
+const OPENCODE_DIR = path.join(process.env.HOME || process.env.USERPROFILE, '.config', 'opencode');
 
 const REQUIRED_DEPS = [
   { name: 'superpowers', minVersion: '1.0.0' },
   { name: 'gstack', minVersion: '1.0.0' }
 ];
+
+/**
+ * Check if bash is available on the system.
+ * XP-Gate hooks are bash scripts — Windows users need Git Bash installed.
+ * @returns {{ok: boolean, path?: string, message?: string}}
+ */
+function checkBash() {
+  try {
+    // Try 'bash' first (works on Linux/macOS and when Git Bash is in PATH)
+    const result = execSync('bash --version', {
+      encoding: 'utf8',
+      stdio: ['ignore', 'pipe', 'pipe']
+    });
+    const versionMatch = result.match(/version\s+([^\s]+)/);
+    return {
+      ok: true,
+      path: 'bash',
+      version: versionMatch ? versionMatch[1] : 'unknown'
+    };
+  } catch (e) {
+    // On Windows with Git Bash, try common locations
+    const bashPaths = [
+      // Git for Windows
+      'C:\\Program Files\\Git\\bin\\bash.exe',
+      'C:\\Program Files\\Git\\usr\\bin\\bash.exe',
+      'C:\\Program Files (x86)\\Git\\bin\\bash.exe',
+      'C:\\Program Files (x86)\\Git\\usr\\bin\\bash.exe',
+      // MSYS2
+      'C:\\msys64\\usr\\bin\\bash.exe',
+      // Cygwin
+      'C:\\cygwin64\\bin\\bash.exe',
+    ];
+
+    for (const bashPath of bashPaths) {
+      try {
+        const result = execSync(`"${bashPath}" --version`, {
+          encoding: 'utf8',
+          stdio: ['ignore', 'pipe', 'pipe']
+        });
+        const versionMatch = result.match(/version\s+([^\s]+)/);
+        return {
+          ok: true,
+          path: bashPath,
+          version: versionMatch ? versionMatch[1] : 'unknown'
+        };
+      } catch {
+        // Try next path
+      }
+    }
+
+    // Windows-specific guidance
+    if (process.platform === 'win32') {
+      return {
+        ok: false,
+        message: 'bash not found. Windows users must install [Git for Windows](https://git-scm.com/download/win).\n' +
+          '   During installation, ensure "Git Bash Here" is checked — this adds bash.exe to PATH.\n' +
+          '   After installation, restart your terminal and run `npm install` again.'
+      };
+    }
+
+    return {
+      ok: false,
+      message: 'bash not found. Please install bash and ensure it is in PATH.'
+    };
+  }
+}
 
 async function checkDeps() {
   for (const dep of REQUIRED_DEPS) {
@@ -79,4 +146,4 @@ function compareVersions(a, b) {
   return 0;
 }
 
-module.exports = { checkDeps };
+module.exports = { checkDeps, checkBash };

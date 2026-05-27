@@ -74,6 +74,17 @@ THINK → PLAN → BUILD → REVIEW → USER ACCEPT → FEEDBACK → SHIP
 
 ---
 
+## 环境要求
+
+| 依赖 | 最低版本 | 说明 |
+|------|---------|------|
+| Node.js | ≥18.x | npm 包运行时 |
+| Git | ≥2.38 | 版本控制 |
+| **Git Bash** | 任意 | **Windows 用户必须安装** — 所有 shell 脚本和 git hooks 依赖 bash |
+| **Git for Windows** | 任意 | [下载](https://git-scm.com/download/win) — 安装时勾选 "Git Bash Here"，会自动把 `bash.exe` 加入 PATH |
+
+> Linux/macOS 用户已自带 bash，无需额外安装。
+
 ## 快速开始
 
 ### 方式零：零安装（推荐 — AI Agent 友好）

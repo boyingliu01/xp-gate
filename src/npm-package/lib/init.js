@@ -1,10 +1,14 @@
 const fs = require('fs');
 const path = require('path');
 const { checkDeps } = require('./detect-deps.js');
+const { checkBash } = require('./detect-deps.js');
 
-const CONFIG_DIR = path.join(process.env.HOME, '.config', 'xp-gate');
+// Cross-platform home directory resolution
+const HOME_DIR = process.env.HOME || process.env.USERPROFILE;
+
+const CONFIG_DIR = path.join(HOME_DIR, '.config', 'xp-gate');
 const CONFIG_FILE = path.join(CONFIG_DIR, 'xp-gate.json');
-const TEMPLATE_DIR = path.join(process.env.HOME, '.config', 'opencode', 'git-hooks-template');
+const TEMPLATE_DIR = path.join(HOME_DIR, '.config', 'opencode', 'git-hooks-template');
 const GLOBAL_HOOKS_DIR = path.join(CONFIG_DIR, 'hooks');
 const GLOBAL_ADAPTERS_DIR = path.join(CONFIG_DIR, 'adapters');
 
@@ -85,6 +89,15 @@ function updateConfig(updates) {
 async function init(args) {
   console.log('XP-Gate Initialization');
   console.log('====================\n');
+
+  // Check bash availability (required for shell hooks)
+  const bashCheck = checkBash();
+  if (bashCheck.ok) {
+    console.log(`Bash: ✓ ${bashCheck.path} (v${bashCheck.version})\n`);
+  } else {
+    console.warn(`Bash: ✗ NOT FOUND`);
+    console.warn(`  ${bashCheck.message}\n`);
+  }
 
   logDeps(await checkDeps());
 
