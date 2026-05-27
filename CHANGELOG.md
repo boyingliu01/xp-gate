@@ -2,6 +2,19 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.3.2.0] - 2026-05-28
+
+### Fixed
+- **sync-version.sh CRLF** — 去掉 `set -euo pipefail` → `set -eu`，Windows Git Bash 不再报错 `$'\r': command not found` 和 `invalid option name`（fixes #74-A）
+- **Ship workflow version drift** — pre-commit hook 新增 Gate 0 版本门禁，在 main/master/develop 等保护分支上强制 VERSION/CHANGELOG 更新，防止绕过 ship 流程（fixes #74）
+
+### Added
+- **.gitattributes** — `*.sh text eol=lf` 确保所有 shell 脚本统一 LF 行尾，彻底解决跨平台 CRLF 问题
+- **Sprint-Flow Phase 7 LAND** — 集成 `land-and-deploy` skill，PR 创建后自动 merge + 等 CI + canary health check（fixes #71-A）
+- **Sprint-Flow Phase 8 CLEANUP** — 自动 `git worktree remove` + sprint-state.json 更新 + 残留检测（fixes #71-B）
+- **Gate 0 version consistency check** — 保护分支提交需包含 VERSION 或 CHANGELOG.md 变更，绕过条件收紧为 `chore:/docs:/release:` 前缀 + 无源码变更
+- **Phase 7 health check + auto-rollback** — SLA 指标（HTTP 200, 错误率 <1%, p99 <2s），部署失败自动 `git revert` merge commit
+
 ## [0.3.1.1] - 2026-05-25
 
 ### Fixed

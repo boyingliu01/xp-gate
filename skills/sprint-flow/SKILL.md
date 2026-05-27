@@ -20,9 +20,9 @@ description: >
   --no-isolate: 跳过自动 worktree 隔离（⚠️ 在保护分支上有污染风险）
   --branch-name <name>: 自定义分支名（默认自动生成 sprint/YYYY-MM-DD-NN）
   --force: 强制在当前分支继续（即使已是保护分支，⚠️ 输出警告）
-  --stop-at <phase>: 执行到指定阶段后停止 (isolate/think/plan/build/review/ship)
+  --stop-at <phase>: 执行到指定阶段后停止 (isolate/think/plan/build/review/ship/land/cleanup)
   --resume-from <phase>: 从指定阶段继续，跳过前面阶段
-  --phase <phase>: 只执行单个阶段 (isolate-only/think-only/plan-only/build-only/review-only/ship-only)
+  --phase <phase>: 只执行单个阶段 (isolate-only/think-only/plan-only/build-only/review-only/ship-only/land-only/cleanup-only)
   --lang <language>: 指定项目语言 (springboot/django/golang)
   --type <project_type>: 指定项目类型 (web-nextjs/web-react/web-vue/mobile-flutter/mobile-react-native/backend-django/backend-go/backend-springboot)
   --spec <file>: 使用已有的 specification.yaml 文件
@@ -67,9 +67,12 @@ Phase 3: REVIEW → delphi-review --mode code-walkthrough → test-specification
            → browse → ⚠️ (验证失败)
 Phase 4: ⚠️ ⚠️ USER ACCEPTANCE → 必须人工验收 → Emergent Issues List
 Phase 5: FEEDBACK → learn + retro（工程回顾）+ systematic-debugging（根因调试）
-Phase 6: SHIP → finishing-a-development-branch (4 选项) → ship / land-and-deploy
-           → canary → Sprint Summary
-           → IF emergent issues → Sprint 2
+Phase 6: SHIP → finishing-a-development-branch (4 选项) → ship (PR 路径)
+            → PR 创建完成
+Phase 7: ⚠️ LAND → land-and-deploy → merge PR + wait CI + canary health check
+            → deploy verification + auto-rollback on failure
+Phase 8: CLEANUP → git worktree remove + sprint-state.json update → status: merged
+            → Sprint Summary → IF emergent issues → Sprint 2
 ```
 
 ---
@@ -88,6 +91,8 @@ Phase 6: SHIP → finishing-a-development-branch (4 选项) → ship / land-and-
 | **Phase 4** | ⚠️ **必须人工验收** | 用户实际使用后确认 | 用户确认后继续 |
 | Phase 6 | finishing-a-development-branch | 用户选择 4 选项 (merge/PR/discard/keep) | 确认后自动继续 |
 | Phase 6 | ship PR 创建（PR 路径）| 用户确认合并 | 合并后自动继续 |
+| **Phase 7** | **land-and-deploy 完成/失败** | **用户确认合并结果 / 处理部署失败** | **确认/修复后继续** |
+| **Phase 8** | **worktree 清理完成/失败** | **用户确认清理 / 手动处理残留** | **确认后结束流程** |
 
 ---
 
@@ -245,13 +250,43 @@ Phase 6: SHIP → finishing-a-development-branch (4 选项) → ship / land-and-
 - `retro` (gstack) — 工程回顾：提交历史、工作模式、代码质量趋势
 - `systematic-debugging` (superpowers) — 根因调试（反馈中的 bug 做根因分析，Iron Law：无调查无修复）
 
-### Phase 6: SHIP + DEPLOY（发布）
+### Phase 6: SHIP（发布准备）
 - **⚠️ GITHOOKS-GATE**: 再次验证 hooks 完整性（Phase 2 的 TDD 编码已触发提交，SHIP 阶段还会再次提交）
   - 运行 `githooks/verify.sh` → 缺失 → `githooks/install.sh` → 阻断直至修复
 - **`finishing-a-development-branch`** (superpowers) — 结构化完成流：4 选项（merge / PR / discard / keep）
 - `ship` (gstack) — 创建 PR（PR 路径时使用）
-- `land-and-deploy` (gstack) — 合并部署
-- `canary` (gstack) — 监控告警
+- Phase 6 输出：PR URL（用于 Phase 7 输入）
+
+### Phase 7: ⚠️ LAND（合并 + 部署）
+- 输入：Phase 6 输出的 PR URL
+- 调用：`land-and-deploy` skill
+- 流程：
+  1. Merge PR（`gh pr merge --squash`）
+  2. 等待 CI 完成（poll `gh pr checks` 直到 success 或 10min timeout）
+  3. 等待 Deploy 完成（如已配置，10min timeout）
+  4. **Canary Health Check**（如已配置部署平台）：
+     - 健康检查端点：项目根路径 `/` 或自定义 `/.well-known/health`
+     - SLA 指标：HTTP 200 响应 + 错误率 <1% + p99 响应 <2s
+     - 超时策略：最长 5 分钟，每 10s polling 一次
+     - 部署**失败**时的回滚：`git revert` 最后一次 merge commit + 输出 `[ERROR] Deploy failed, auto-rolled back merge`
+- 条件跳过：无部署配置时，仅执行 merge + CI checks，跳过 deploy/canary
+- 输出：部署状态 + Canary 报告（成功/失败/跳过）
+
+### Phase 8: CLEANUP（清理 + 总结）
+- 执行时机：Phase 7 LAND 成功后（或 Phase 6 Option 1 本地 Merge 后）
+- 动作：
+  1. 检测 worktree 是否存在：`[ -d <worktree_path> ]`
+  2. `git worktree remove <worktree_path>` 删除 worktree
+     - **原子性保障**: 如果首次失败（权限问题），重试最多 3 次，间隔 1s
+     - 如果仍失败：输出 `[WARN] Failed to remove worktree, please manually run: git worktree remove <path>`
+  3. 检测残留目录：`[ -d <worktree_path> ]` → 如果仍有残留，输出警告
+  4. 更新 `.sprint-state/sprint-state.json`：
+     - `phase: 8`
+     - `status: "merged"` 或 `"completed"`
+  5. 输出 Cleanup Report + Sprint Summary
+- 条件跳过：`--no-isolate` 路径（无 worktree 可清理）
+- 输出：`[CLEANUP] Worktree removed:` + 残留检测（✅ clean / ⚠️ residual）
+- IF emergent issues → Sprint 2
 
 ---
 
@@ -365,6 +400,8 @@ Sprint state is persisted as JSON in `.sprint-state/sprint-state.json`:
 | Phase 3 (REVIEW) | `delphi-review --mode code-walkthrough` + `test-specification-alignment` + `k6` / `locust` / `gatling` | + `qa` + `design-review` + `benchmark` | Flutter: `flutter-test` / RN: `detox E2E` | k6/locust/gatling (补充 API 测试后的负载测试验证) |
 | Phase 5 (FEEDBACK) | `learn` + `retro` | (同) | (同) | (同) |
 | Phase 6 (SHIP) | `finishing-a-development-branch` + `ship` | (同) | + platform deploy (可选) | (同) |
+| Phase 7 (LAND) | `land-and-deploy` + canary | (同) | (同) | (同) |
+| Phase 8 (CLEANUP) | worktree remove + state update | (同) | (同) | (同) |
 | Browse | `localhost:3000` | 部署 URL + 表单/交互 | Flutter Web / RN Web 测试 | (专用负载测试) |
 
 **Mobile 专属工具链**:

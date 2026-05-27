@@ -9,7 +9,7 @@
 #   修改 VERSION 后，运行此脚本自动同步
 #   或作为 prepare/postinstall hook 自动执行
 
-set -euo pipefail
+set -eu
 
 ROOT_DIR="$(cd "$(dirname "$0")/.." && pwd)"
 VERSION_FILE="$ROOT_DIR/VERSION"

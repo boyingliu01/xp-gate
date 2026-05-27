@@ -1,6 +1,6 @@
 {
   "name": "xp-gate",
-  "version": "0.3.1",
+  "version": "0.3.2",
   "description": "AI-driven development workflow: 6 quality gates + Delphi review + Sprint Flow",
   "bin": {
     "xp-gate": "./bin/xp-gate.js"
