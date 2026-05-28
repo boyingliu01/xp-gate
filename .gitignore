@@ -78,3 +78,4 @@ skill-cert/*.egg-info/
 # OpenCode runtime (project-level overrides managed globally)
 .opencode/
 .opencode.delete/
+.worktrees/

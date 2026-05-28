@@ -1,0 +1,107 @@
+specification:
+  id: SPEC-FIX-ISSUES-001
+  name: Fix Open Issues #68 (Karpathy Principles) + #66 (Admin Template Guidelines)
+  version: "1.0.0"
+  source_document: docs/sprint-fix-open-issues-design.md
+  delphi_status: APPROVED
+
+  requirements:
+    # ============================================================
+    # Requirement 1: Karpathy Principles Injection
+    # ============================================================
+    - id: REQ-FIX-001
+      description: Inject Karpathy Engineering Principles (Surgical Changes + Goal-Driven Execution) into xp-gate global AI coding discipline
+      priority: MUST
+
+      context: |
+        Issue #68 proposes introducing Karpathy's two principles:
+        - Principle 3: Surgical Changes — Only touch code that must be touched, only clean up chaos you created
+        - Principle 4: Goal-Driven Execution — Define success criteria, loop until verified
+
+        Approved implementation approach (Delphi Round 2):
+        1. AGENTS.md gets new section "AI CODING DISCIPLINE (Karpathy Principles)"
+        2. init.js gets idempotent inject_karpathy_principles() function
+        3. sprint-flow SKILL.md references these principles in Phase 0 THINK
+
+      acceptance_criteria:
+        - id: AC-FIX-001-01
+          given: AGENTS.md exists in the project
+          when: AGENTS.md is reviewed
+          then: It contains "## AI CODING DISCIPLINE (Karpathy Principles)" section with Principle 3 and Principle 4
+
+        - id: AC-FIX-001-02
+          given: init.js inject_karpathy_principles() function
+          when: The function runs on a project where Karpathy Principles already exist in AGENTS.md
+          then: The function detects existing content via full section header check and skips injection (idempotency)
+
+        - id: AC-FIX-001-03
+          given: init.js inject_karpathy_principles() function
+          when: The function runs on a project without Karpathy Principles
+          then: The function appends the section to AGENTS.md
+
+        - id: AC-FIX-001-04
+          given: xp-gate init is executed in a temporary directory
+          when: The target project's AGENTS.md is inspected
+          then: It contains the Karpathy Principles section
+
+        - id: AC-FIX-001-05
+          given: xp-gate init is executed twice in the same temporary directory
+          when: The second init completes
+          then: The Karpathy Principles section appears exactly once (no duplication)
+
+        - id: AC-FIX-001-06
+          given: The existing test suite
+          when: npm test is run
+          then: All existing tests pass without regression
+
+    # ============================================================
+    # Requirement 2: Admin Template Guidelines (Phase 1 - Documentation Only)
+    # ============================================================
+    - id: REQ-FIX-002
+      description: Create admin template guidelines documentation covering 6 maintainability rule categories
+      priority: SHOULD
+
+      context: |
+        Issue #66 identifies 6 recurring rework patterns in AI-generated admin interfaces:
+        1. Route file bloat (819-line monolith)
+        2. Inconsistent test architecture (4 different patterns)
+        3. Nunjucks comparison operator precedence traps
+        4. Repeated data transformation logic
+        5. Auth middleware design blind spots
+        6. HTMX + Alpine.js mixed architecture confusion
+
+        Phase 1 scope (this sprint): Documentation only
+        Phase 2 scope (future): Code generation automation
+
+      acceptance_criteria:
+        - id: AC-FIX-002-01
+          given: The skills directory
+          when: skills/admin-template-guidelines/SKILL.md is created
+          then: It contains all 6 rule categories with constraints and code examples, following standard SKILL.md frontmatter format (name, description, maturity)
+
+        - id: AC-FIX-002-02
+          given: The docs directory
+          when: docs/admin-template-guidelines.md is created
+          then: It contains detailed code examples for each of the 6 rules (route splitting, test helpers, Nunjucks parentheses, View Model Mapper, auth protection, HTMX+Alpine separation)
+
+        - id: AC-FIX-002-03
+          given: AGENTS.md
+          when: AGENTS.md is reviewed
+          then: It references the admin-template-guidelines skill in the "期望 xp-gate 生成的代码" section
+
+      phase_2_dependencies: |
+        Future sprint: sprint-flow BUILD phase needs to dynamically load admin-template-guidelines skill via load_skills.
+        The exact injection point in sprint-flow/SKILL.md Phase 2 BUILD is to be designed.
+
+  user_stories:
+    - id: US-FIX-001
+      description: As a developer using xp-gate init, I want Karpathy Principles automatically injected into my project's AGENTS.md so that my AI coding sessions follow surgical changes and goal-driven execution
+      linked_req: REQ-FIX-001
+
+    - id: US-FIX-002
+      description: As a developer generating admin interfaces, I want xp-gate to provide a SKILL.md with 6 maintainability rules so that my generated code avoids the 6 common rework patterns
+      linked_req: REQ-FIX-002
+
+    - id: US-FIX-003
+      description: As a developer running xp-gate init multiple times, I want the init process to be idempotent so that my AGENTS.md doesn't get duplicated sections
+      linked_req: REQ-FIX-001

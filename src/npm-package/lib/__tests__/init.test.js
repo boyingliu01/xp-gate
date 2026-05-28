@@ -265,4 +265,63 @@ describe('init', () => {
     expect(logSpy).toHaveBeenCalledWith('XP-Gate Initialization');
     expect(logSpy).toHaveBeenCalledWith('====================\n');
   });
+
+  // --- injectKarpathyPrinciples tests ---
+
+  it('injectKarpathyPrinciples appends section when AGENTS.md exists without Karpathy Principles', async () => {
+    fs.mkdirSync(path.join(tmpProject, '.git', 'hooks'), { recursive: true });
+    mockExecSuccess();
+    setupValidDeps();
+    const agentsMd = path.join(tmpProject, 'AGENTS.md');
+    fs.writeFileSync(agentsMd, '# Project\n\nSome content.\n');
+
+    const { init } = require('../init');
+    const result = await init(['--core-only']);
+    expect(result).toBe(0);
+
+    const content = fs.readFileSync(agentsMd, 'utf8');
+    expect(content).toContain('## AI CODING DISCIPLINE (Karpathy Principles)');
+    expect(content).toContain('原则 3: Surgical Changes');
+    expect(content).toContain('原则 4: Goal-Driven Execution');
+  });
+
+  it('injectKarpathyPrinciples is idempotent — second init does not duplicate section', async () => {
+    fs.mkdirSync(path.join(tmpProject, '.git', 'hooks'), { recursive: true });
+    mockExecSuccess();
+    setupValidDeps();
+    const agentsMd = path.join(tmpProject, 'AGENTS.md');
+    fs.writeFileSync(agentsMd, '# Project\n\nSome content.\n');
+
+    const { init } = require('../init');
+    await init(['--core-only']);
+    await init(['--core-only']);
+
+    const content = fs.readFileSync(agentsMd, 'utf8');
+    const matches = content.match(/## AI CODING DISCIPLINE \(Karpathy Principles\)/g);
+    expect(matches).toBeTruthy();
+    expect(matches.length).toBe(1);
+  });
+
+  it('injectKarpathyPrinciples appends when AGENTS.md has reference to Karpathy but no section header', async () => {
+    fs.mkdirSync(path.join(tmpProject, '.git', 'hooks'), { recursive: true });
+    mockExecSuccess();
+    setupValidDeps();
+    const agentsMd = path.join(tmpProject, 'AGENTS.md');
+    fs.writeFileSync(agentsMd, '# Project\n\nSee Karpathy Principles at https://example.com\n');
+
+    const { init } = require('../init');
+    await init(['--core-only']);
+
+    const content = fs.readFileSync(agentsMd, 'utf8');
+    expect(content).toContain('## AI CODING DISCIPLINE (Karpathy Principles)');
+  });
+
+  it('injectKarpathyPrinciples skips gracefully when AGENTS.md does not exist', async () => {
+    fs.mkdirSync(path.join(tmpProject, '.git', 'hooks'), { recursive: true });
+    mockExecSuccess();
+    setupValidDeps();
+    const { init } = require('../init');
+    const result = await init(['--core-only']);
+    expect(result).toBe(0);
+  });
 });

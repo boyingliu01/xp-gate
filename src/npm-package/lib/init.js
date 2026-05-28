@@ -143,6 +143,8 @@ async function installLocal(args) {
   ensureConfigDir();
   updateConfig({ lastInit: new Date().toISOString(), mode: 'local' });
 
+  injectKarpathyPrinciples(projectRoot);
+
   console.log('\nInstallation complete!');
   console.log('Run git commit to trigger quality gates');
   return 0;
@@ -183,6 +185,51 @@ async function setupGlobal(args) {
   console.log('All git repositories will now use xp-gate quality gates.');
   console.log('Per-project adapters can still override by creating <repo>/githooks/');
   return 0;
+}
+
+function injectKarpathyPrinciples(projectRoot) {
+  const agentsPath = path.join(projectRoot, 'AGENTS.md');
+  if (!fs.existsSync(agentsPath)) return;
+
+  let content;
+  try {
+    content = fs.readFileSync(agentsPath, 'utf8');
+  } catch (e) {
+    console.warn(`  Warning: could not read AGENTS.md: ${e.message}`);
+    return;
+  }
+
+  if (content.includes('## AI CODING DISCIPLINE (Karpathy Principles)')) return;
+
+  const section = `
+## AI CODING DISCIPLINE (Karpathy Principles)
+
+**原则 3: Surgical Changes（外科手术式改动）**
+- 只碰必须碰的代码。只清理自己制造的混乱。
+- 编辑现有代码时，不"优化"相邻代码、注释或 formatting
+- 不重构没坏的东西
+- 匹配现有代码风格，即使 AI 更喜欢另一种
+- 发现无关的死代码 → 提及但不要删除（除非用户明确要求）
+- 自己的改动产生的 orphaned import/variable/function → 必须清理
+- 判定标准: 每一行改动都应能直接追溯到用户的请求
+
+**原则 4: Goal-Driven Execution（目标驱动执行）**
+- 定义成功标准。循环直到验证。
+- 把指令转化为可验证目标：
+  - "加验证" → "写测试 → 让测试通过"
+  - "修 bug" → "写复现测试 → 让测试通过"
+  - "重构 X" → "确保重构前后测试都通过"
+- 多步骤任务列出验证点
+- 改完任何代码后必须运行测试确认无 regression
+
+`;
+
+  try {
+    fs.appendFileSync(agentsPath, section, 'utf8');
+    console.log('  Karpathy Principles injected into AGENTS.md');
+  } catch (e) {
+    console.warn(`  Warning: could not write to AGENTS.md: ${e.message}`);
+  }
 }
 
 module.exports = { init };

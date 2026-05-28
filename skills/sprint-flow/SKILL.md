@@ -53,7 +53,7 @@ maturity: beta
 ```
 Phase -1: ISOLATE → ⚠️ 检测保护分支(main/master/develop/trunk/mainline) → 强制创建 git worktree
             → 已在 worktree 中 → 跳过 → 项目 setup → .gitignore 校验 → sprint-state isolation 记录
-Phase 0: THINK → brainstorming → ⚠️ HARD-GATE: 设计未批准 → 不可进入实现 → Design Document
+Phase 0: THINK → brainstorming → ⚠️ HARD-GATE: 设计未批准 → 不可进入实现 → Design Document (AI编辑行为约束: 原则3 Surgical Changes, 验证循环要求: 原则4 Goal-Driven Execution - 见 AGENTS.md "## AI CODING DISCIPLINE (Karpathy Principles)")
 Phase 1: PLAN → autoplan → ⚠️ (如有taste_decisions，暂停等用户确认)
            → delphi-review → ⚠️ (等待 APPROVED)
            → 自动生成 specification.yaml（无需独立 skill）
@@ -585,3 +585,4 @@ git worktree remove .worktrees/sprint/sprint-2026-05-24-01
 | Emergent requirements 无法消除 | Mike Cohn, Rafael Santos | Phase 4 人工设计 |
 | 78% failures invisible | arXiv research | Phase 4 必要性证明 |
 | Think → Plan → Build → Ship | gstack ETHOS | 整体流程设计 |
+
