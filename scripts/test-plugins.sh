@@ -102,10 +102,29 @@ else
   fail "xp-gate-check exited $exit_code on missing file (expected 0)"
 fi
 
+# Test 8: OpenCode plugin TypeScript compilation
+echo ""
+echo "Test 8: OpenCode TypeScript compilation"
+cd "$REPO_ROOT/plugins/opencode"
+if [ -d "node_modules" ]; then
+  if npx tsc --noEmit >/dev/null 2>&1; then
+    pass "opencode tsc --noEmit passes"
+  else
+    fail "opencode tsc --noEmit failed"
+  fi
+else
+  npm install --no-fund --no-audit >/dev/null 2>&1
+  if npx tsc --noEmit >/dev/null 2>&1; then
+    pass "opencode tsc --noEmit passes (after install)"
+  else
+    fail "opencode tsc --noEmit failed after install"
+  fi
+fi
+cd "$REPO_ROOT"
+
 # Summary
 echo ""
 echo "=== Summary ==="
-echo "Passed: $PASS"
 echo "Failed: $FAIL"
 
 if [ "$FAIL" -gt 0 ]; then

@@ -26,7 +26,8 @@ case "$FILE_PATH" in
 esac
 
 # Resolve repo root from script location (avoids dependence on CLAUDE_PLUGIN_ROOT env var)
-# Plugin is at plugins/claude-code/bin/, repo root is 3 levels up
+# Plugin is at plugins/claude-code/bin/, repo root is 3 dirname calls up:
+#   bin/ → claude-code/ → plugins/ → repo-root/
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 REPO_ROOT="$(dirname "$(dirname "$(dirname "$SCRIPT_DIR")")")"
 
