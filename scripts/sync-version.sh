@@ -15,6 +15,8 @@ ROOT_DIR="$(cd "$(dirname "$0")/.." && pwd)"
 VERSION_FILE="$ROOT_DIR/VERSION"
 ROOT_PKG="$ROOT_DIR/package.json"
 NPM_PKG="$ROOT_DIR/src/npm-package/package.json"
+CLAUDE_PLUGIN="$ROOT_DIR/plugins/claude-code/.claude-plugin/plugin.json"
+OPENCODE_PLUGIN="$ROOT_DIR/plugins/opencode/package.json"
 
 if [ ! -f "$VERSION_FILE" ]; then
   echo "[sync-version] ERROR: VERSION file not found at $VERSION_FILE"
@@ -51,6 +53,28 @@ if [ -f "$NPM_PKG" ]; then
     fs.writeFileSync('$NPM_PKG', JSON.stringify(pkg, null, 2) + '\n');
   "
   echo "[sync-version] src/npm-package/package.json -> $NPM_VERSION"
+fi
+
+# --- Claude Code plugin manifest ---
+if [ -f "$CLAUDE_PLUGIN" ]; then
+  node -e "
+    const fs = require('fs');
+    const pkg = JSON.parse(fs.readFileSync('$CLAUDE_PLUGIN', 'utf8'));
+    pkg.version = '$NPM_VERSION';
+    fs.writeFileSync('$CLAUDE_PLUGIN', JSON.stringify(pkg, null, 2) + '\n');
+  "
+  echo "[sync-version] plugins/claude-code/.claude-plugin/plugin.json -> $NPM_VERSION"
+fi
+
+# --- OpenCode plugin package.json ---
+if [ -f "$OPENCODE_PLUGIN" ]; then
+  node -e "
+    const fs = require('fs');
+    const pkg = JSON.parse(fs.readFileSync('$OPENCODE_PLUGIN', 'utf8'));
+    pkg.version = '$NPM_VERSION';
+    fs.writeFileSync('$OPENCODE_PLUGIN', JSON.stringify(pkg, null, 2) + '\n');
+  "
+  echo "[sync-version] plugins/opencode/package.json -> $NPM_VERSION"
 fi
 
 echo "[sync-version] OK — all package.json version fields synced from VERSION ($FULL_VERSION)"

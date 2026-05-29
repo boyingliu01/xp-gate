@@ -9,7 +9,13 @@
   "homepage": "https://github.com/boyingliu01/xp-gate",
   "repository": "https://github.com/boyingliu01/xp-gate",
   "license": "MIT",
-  "keywords": ["quality-gates", "sprint-flow", "delphi-review", "xp", "ai-development"],
+  "keywords": [
+    "quality-gates",
+    "sprint-flow",
+    "delphi-review",
+    "xp",
+    "ai-development"
+  ],
   "skills": "./skills/",
   "hooks": "./hooks/hooks.json"
 }
