@@ -87,6 +87,36 @@ THINK → PLAN → BUILD → REVIEW → USER ACCEPT → FEEDBACK → SHIP
 
 ## 快速开始
 
+### 方式 -1：作为 IDE 插件安装 (v0.4.0+)
+
+XP-Gate 现在同时支持 Claude Code 和 OpenCode 插件分发，提供 IDE 内即时质量检查 + AI 工作流技能。
+
+**Claude Code 插件**：
+```bash
+# 从 GitHub 安装
+/plugin install boyingliu01/xp-gate
+```
+
+提供：
+- 7 个 AI 技能 (sprint-flow, delphi-review, test-specification-alignment, ralph-loop, test-driven-development, improve-codebase-architecture, to-issues)
+- PostToolUse hook：每次 Edit/Write 自动运行 principles 检查
+- 优雅降级：xp-gate CLI 未安装时记录提示，不阻塞会话
+
+**OpenCode 插件**：
+```json
+// opencode.json
+{
+  "plugin": ["./plugins/opencode"]
+}
+```
+
+提供：
+- 7 个 AI 技能（同 Claude）
+- 3 个工具：`gate-check`、`gate-principles`、`gate-arch`
+- 与 Claude 插件共享同一份 SKILL.md 文件
+
+> **注意**：插件不提供 git hooks（平台限制）。完整 git 质量门禁仍需通过 npm 包安装（方式零）。两种方式可同时启用：插件提供 IDE 集成，npm 包提供 git enforcement。
+
 ### 方式零：全局安装 xp-gate CLI
 
 > **注意**: xp-gate 目前发布在 GitHub Packages，需要使用 npm 认证安装。

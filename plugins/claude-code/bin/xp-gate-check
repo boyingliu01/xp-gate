@@ -1,0 +1,47 @@
+#!/bin/bash
+# xp-gate-check: Quality gate wrapper for Claude Code plugin
+# Usage: xp-gate-check <file_path>
+#
+# Graceful degradation: if xp-gate CLI unavailable, logs warning to stderr and exits 0.
+# This script always exits 0 to avoid blocking Claude Code sessions.
+
+set -euo pipefail
+
+FILE_PATH="${1:-}"
+
+if [ -z "$FILE_PATH" ]; then
+  exit 0
+fi
+
+# Skip if file doesn't exist
+[ -f "$FILE_PATH" ] || exit 0
+
+# Skip non-source files
+case "$FILE_PATH" in
+  *.ts|*.tsx|*.js|*.jsx|*.py|*.go|*.java|*.kt|*.rb|*.rs)
+    ;;
+  *)
+    exit 0
+    ;;
+esac
+
+# Resolve repo root from script location (avoids dependence on CLAUDE_PLUGIN_ROOT env var)
+# Plugin is at plugins/claude-code/bin/, repo root is 3 dirname calls up:
+#   bin/ → claude-code/ → plugins/ → repo-root/
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+REPO_ROOT="$(dirname "$(dirname "$(dirname "$SCRIPT_DIR")")")"
+
+if command -v xp-gate >/dev/null 2>&1; then
+  # xp-gate globally installed — run principles check on the file
+  npx -y tsx "${REPO_ROOT}/src/principles/index.ts" --files "$FILE_PATH" --format console 2>&1 || true
+elif [ -f "${REPO_ROOT}/src/principles/index.ts" ]; then
+  # Fallback: run principles checker directly from repo source
+  echo "[XP-Gate] Running principles check (xp-gate CLI not installed)" >&2
+  npx -y tsx "${REPO_ROOT}/src/principles/index.ts" --files "$FILE_PATH" --format console 2>&1 || true
+else
+  # Graceful degradation: log once per session
+  echo "[XP-Gate] Quality check skipped: xp-gate not installed. Run 'npm install -g xp-gate'" >&2
+fi
+
+# Always exit 0 to avoid blocking the Claude session
+exit 0

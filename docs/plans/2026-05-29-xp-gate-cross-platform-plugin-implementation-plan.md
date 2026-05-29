@@ -17,9 +17,10 @@
 ### Task 1: Project Structure Setup
 
 **Files:**
-- Create: `plugins/claud-code/` directory structure
+- Create: `plugins/claude-code/` directory structure
 - Create: `plugins/opencode/` directory structure
 - Create: `.gitignore` additions for plugin build artifacts
+- Verify: plugins/ directory does not already exist, create fresh
 
 **Step 1: Create plugin directory structure**
 
@@ -131,7 +132,7 @@ Create `plugins/claude-code/hooks/hooks.json`:
         "hooks": [
           {
             "type": "command",
-            "command": "\"${CLAUDE_PLUGIN_ROOT}\"/bin/xp-gate-check \"${TOOL_INPUT_FILE}\" 2>/dev/null || true"
+            "command": "\"$CLAUDE_PLUGIN_ROOT\"/bin/xp-gate-check \"${TOOL_INPUT_FILE}\""
           }
         ]
       }
@@ -151,7 +152,7 @@ Create `plugins/claude-code/hooks/hooks.json`:
 }
 ```
 
-**Note:** The `|| true` ensures the hook doesn't block the session if xp-gate isn't installed. This is intentional for graceful degradation.
+**Note (Delphi A-C1, M1, B-M1):** The `$CLAUDE_PLUGIN_ROOT` variable (not `${CLAUDE_PLUGIN_ROOT}`) is set by Claude Code at hook invocation time. The `|| true` wrapper is removed from hooks.json — the bin/xp-gate-check script itself handles graceful degradation and always exits 0, but logs warnings to stderr instead of swallowing errors silently.
 
 **Step 2: Create bin/xp-gate-check wrapper**
 
@@ -162,8 +163,7 @@ Create `plugins/claude-code/bin/xp-gate-check`:
 # xp-gate-check: Quality gate wrapper for Claude Code plugin
 # Usage: xp-gate-check <file_path>
 #
-# This script checks if xp-gate is installed globally and runs quality checks.
-# If not installed, it exits silently (graceful degradation).
+# Graceful degradation: if xp-gate CLI unavailable, logs warning and exits 0.
 
 set -euo pipefail
 
@@ -173,10 +173,8 @@ if [ -z "$FILE_PATH" ]; then
   exit 0
 fi
 
-# Skip if file doesn't exist
 [ -f "$FILE_PATH" ] || exit 0
 
-# Skip non-source files
 case "$FILE_PATH" in
   *.ts|*.tsx|*.js|*.jsx|*.py|*.go|*.java|*.kt|*.rb|*.rs)
     ;;
@@ -185,15 +183,27 @@ case "$FILE_PATH" in
     ;;
 esac
 
-# Check if xp-gate is installed globally
+# Resolve repo root: plugin is in plugins/claude-code/, repo is 2 levels up
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+REPO_ROOT="$(dirname "$(dirname "$SCRIPT_DIR")")"
+
 if command -v xp-gate >/dev/null 2>&1; then
-  # Run principles checker on the file only (not full hook suite)
-  npx -y tsx "$(dirname "$0")"/../../src/principles/index.ts --files "$FILE_PATH" --format console 2>/dev/null || true
+  npx -y tsx "${REPO_ROOT}/src/principles/index.ts" --files "$FILE_PATH" --format console 2>&1 || true
+elif [ -f "${REPO_ROOT}/src/principles/index.ts" ]; then
+  echo "[XP-Gate] Running principles check (xp-gate CLI not installed)" >&2
+  npx -y tsx "${REPO_ROOT}/src/principles/index.ts" --files "$FILE_PATH" --format console 2>&1 || true
+else
+  echo "[XP-Gate] Quality check skipped: xp-gate not installed. Run 'npm install -g xp-gate'" >&2
 fi
 
-# Always exit 0 to avoid blocking the session
+# Always exit 0 to avoid blocking the Claude session
 exit 0
 ```
+
+**Delphi fixes applied:**
+- C1: Uses absolute path resolution from script location, not `CLAUDE_PLUGIN_ROOT` variable
+- M1: Logs warning to stderr instead of `2>/dev/null` silent swallow
+- B-M1: Path is absolute (derived from SCRIPT_DIR → REPO_ROOT), not relative
 
 **Step 3: Make executable**
 
@@ -275,66 +285,51 @@ Expected: FAIL (script doesn't exist yet)
 Create `scripts/copy-skills.sh`:
 
 ```bash
-#!/bin/bash
-# copy-skills.sh: Copy skills to plugin directories
-# Usage: copy-skills.sh --source <skills_dir> --dest <target_dir> [--include <pattern>]
-
+#!/usr/bin/env bash
 set -euo pipefail
 
-SOURCE=""
-DEST=""
-INCLUDE="*"
+SOURCE_DIR=""
+DEST_DIR=""
 
 while [[ $# -gt 0 ]]; do
-  case "$1" in
+  case $1 in
     --source)
-      SOURCE="$2"
+      SOURCE_DIR="$2"
       shift 2
       ;;
     --dest)
-      DEST="$2"
-      shift 2
-      ;;
-    --include)
-      INCLUDE="$2"
+      DEST_DIR="$2"
       shift 2
       ;;
     *)
-      echo "Unknown option: $1"
+      echo "Unknown option: $1" >&2
       exit 1
       ;;
   esac
 done
 
-if [ -z "$SOURCE" ] || [ -z "$DEST" ]; then
-  echo "Usage: copy-skills.sh --source <skills_dir> --dest <target_dir> [--include <pattern>]"
-  echo "  --source    Directory containing skills"
-  echo "  --dest      Target directory for plugin skills"
-  echo "  --include   Glob pattern for skill directories (default: *)"
+if [[ ! -d "$SOURCE_DIR" ]]; then
+  echo "Error: Source directory not found: $SOURCE_DIR" >&2
   exit 1
 fi
 
-if [ ! -d "$SOURCE" ]; then
-  echo "Error: Source directory does not exist: $SOURCE"
-  exit 1
-fi
+mkdir -p "$DEST_DIR"
 
-# Create destination if it doesn't exist
-mkdir -p "$DEST"
+count=0
 
-# Copy skills
-SKILL_COUNT=0
-for skill_dir in "$SOURCE"/$INCLUDE; do
-  if [ -d "$skill_dir" ] && [ -f "$skill_dir/SKILL.md" ]; then
-    skill_name=$(basename "$skill_dir")
-    mkdir -p "$DEST/$skill_name"
-    cp -r "$skill_dir"/* "$DEST/$skill_name/"
-    SKILL_COUNT=$((SKILL_COUNT + 1))
+# Copy full skill directories (not just SKILL.md)
+for skill_dir in "$SOURCE_DIR"/*/; do
+  skill_name=$(basename "$skill_dir")
+  skill_md="$skill_dir/SKILL.md"
+
+  if [[ -f "$skill_md" ]]; then
+    cp -r "$skill_dir" "$DEST_DIR/"
     echo "Copied: $skill_name"
+    ((count++))
   fi
 done
 
-echo "Total skills copied: $SKILL_COUNT"
+echo "Total skills copied: $count"
 ```
 
 **Step 4: Make executable and run test**
@@ -360,12 +355,98 @@ git commit -m "feat: add skill copy script for plugin builds"
 
 ---
 
-### Task 5: Claude Code Plugin - Skills Packaging
+### Task 5: Build Script (Both Platforms)
 
 **Files:**
-- Modify: `scripts/copy-skills.sh` (already created in Task 4)
-- Create: `scripts/build-claude-plugin.sh`
-- Test: Build script verifies all 7 skills copied
+- Create: `scripts/build-plugin.sh` (generic, parameterized by platform)
+- Test: Build script verifies all skills copied for target platform
+
+**Rationale:** Addresses Delphi M3 — a single generic script serves both Claude Code and OpenCode, eliminating >95% code duplication.
+
+**Step 1: Create build-plugin.sh**
+
+Create `scripts/build-plugin.sh`:
+
+```bash
+#!/bin/bash
+# build-plugin.sh: Build a plugin package for a target platform
+# Usage: scripts/build-plugin.sh --platform claude-code|opencode
+
+set -euo pipefail
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+REPO_ROOT="$(dirname "$SCRIPT_DIR")"
+PLATFORM=""
+
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --platform)
+      PLATFORM="$2"
+      shift 2
+      ;;
+    *)
+      echo "Unknown option: $1"
+      exit 1
+      ;;
+  esac
+done
+
+if [ -z "$PLATFORM" ]; then
+  echo "Usage: build-plugin.sh --platform claude-code|opencode"
+  exit 1
+fi
+
+PLUGIN_DIR="$REPO_ROOT/plugins/$PLATFORM"
+SKILLS_SOURCE="$REPO_ROOT/skills"
+
+if [ ! -d "$SKILLS_SOURCE" ]; then
+  echo "Error: Skills directory not found: $SKILLS_SOURCE"
+  exit 1
+fi
+
+echo "Building $PLATFORM plugin..."
+bash "$SCRIPT_DIR/copy-skills.sh" --source "$SKILLS_SOURCE" --dest "$PLUGIN_DIR/skills"
+
+EXPECTED_SKILLS=(
+  "sprint-flow" "delphi-review" "test-specification-alignment"
+  "ralph-loop" "test-driven-development" "improve-codebase-architecture" "to-issues"
+)
+
+MISSING=0
+for skill in "${EXPECTED_SKILLS[@]}"; do
+  if [ ! -f "$PLUGIN_DIR/skills/$skill/SKILL.md" ]; then
+    echo "Missing: $skill/SKILL.md"
+    MISSING=$((MISSING + 1))
+  fi
+done
+
+if [ "$MISSING" -gt 0 ]; then
+  echo "Error: $MISSING skills missing from $PLATFORM plugin"
+  exit 1
+fi
+
+echo "Build complete: 7 skills packaged for $PLATFORM"
+```
+
+**Step 2: Make executable**
+
+```bash
+chmod +x scripts/build-plugin.sh
+```
+
+**Step 3: Test both platforms**
+
+```bash
+bash scripts/build-plugin.sh --platform claude-code
+bash scripts/build-plugin.sh --platform opencode
+```
+
+**Step 4: Commit**
+
+```bash
+git add scripts/build-plugin.sh
+git commit -m "feat: add generic plugin build script (both platforms)"
+```
 
 **Step 1: Create build-claude-plugin.sh**
 
@@ -509,11 +590,16 @@ Create `plugins/opencode/package.json`:
     "build": "bun build index.ts --outdir dist --target bun",
     "check": "tsc --noEmit"
   },
-  "devDependencies": {
+  "dependencies": {
     "@opencode-ai/plugin": "^0.0.1"
+  },
+  "devDependencies": {
+    "typescript": "^5.4.0"
   }
 }
 ```
+
+**Note (Delphi B-M2, C-M2):** `@opencode-ai/plugin` must be in `dependencies` (runtime), not `devDependencies`. TypeScript compilation requires it at runtime.
 
 **Step 2: Create tsconfig.json**
 
@@ -720,100 +806,25 @@ git commit -m "feat: add OpenCode plugin with 3 quality gate tools"
 ### Task 7: OpenCode Plugin - Skills Packaging
 
 **Files:**
-- Create: `scripts/build-opencode-plugin.sh`
-- Modify: `plugins/opencode/` to include skills/ directory
-- Test: Build script copies all 7 skills
+- Use `scripts/build-plugin.sh --platform opencode` (generic script from Task 5)
+- Test: Build script copies all skills for OpenCode
 
-**Step 1: Create build-opencode-plugin.sh**
-
-Create `scripts/build-opencode-plugin.sh`:
+**Step 1: Run build for OpenCode platform**
 
 ```bash
-#!/bin/bash
-# build-opencode-plugin.sh: Build the OpenCode plugin package
-# Usage: scripts/build-opencode-plugin.sh [--clean]
-
-set -euo pipefail
-
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-REPO_ROOT="$(dirname "$SCRIPT_DIR")"
-PLUGIN_DIR="$REPO_ROOT/plugins/opencode"
-SKILLS_SOURCE="$REPO_ROOT/skills"
-
-# Clean if requested
-if [[ "${1:-}" == "--clean" ]]; then
-  echo "Cleaning existing plugin skills..."
-  rm -rf "$PLUGIN_DIR/skills/"*
-fi
-
-echo "Building OpenCode plugin..."
-echo "Source: $SKILLS_SOURCE"
-echo "Target: $PLUGIN_DIR/skills"
-
-# Check if skills directory exists
-if [ ! -d "$SKILLS_SOURCE" ]; then
-  echo "Error: Skills directory not found: $SKILLS_SOURCE"
-  exit 1
-fi
-
-# Copy all skills
-bash "$SCRIPT_DIR/copy-skills.sh" --source "$SKILLS_SOURCE" --dest "$PLUGIN_DIR/skills"
-
-# Verify all expected skills are present
-EXPECTED_SKILLS=(
-  "sprint-flow"
-  "delphi-review"
-  "test-specification-alignment"
-  "ralph-loop"
-  "test-driven-development"
-  "improve-codebase-architecture"
-  "to-issues"
-)
-
-MISSING=0
-for skill in "${EXPECTED_SKILLS[@]}"; do
-  if [ ! -f "$PLUGIN_DIR/skills/$skill/SKILL.md" ]; then
-    echo "Missing: $skill/SKILL.md"
-    MISSING=$((MISSING + 1))
-  fi
-done
-
-if [ "$MISSING" -gt 0 ]; then
-  echo "Error: $MISSING skills missing from plugin"
-  exit 1
-fi
-
-echo ""
-echo "Build complete: ${EXPECTED_SKILLS[@]} skills packaged"
-echo "Plugin location: $PLUGIN_DIR"
+bash scripts/build-plugin.sh --platform opencode
 ```
 
-**Step 2: Make executable**
+Expected output: All 8 skills copied (sprint-flow, delphi-review, test-specification-alignment, ralph-loop, test-driven-development, improve-codebase-architecture, to-issues, admin-template-guidelines).
 
-```bash
-chmod +x scripts/build-opencode-plugin.sh
-```
-
-**Step 3: Run build script**
-
-```bash
-bash scripts/build-opencode-plugin.sh
-```
-
-Expected output: All 7 skills copied.
-
-**Step 4: Commit**
-
-```bash
-git add scripts/build-opencode-plugin.sh plugins/opencode/skills/
-git commit -m "feat: package skills into OpenCode plugin"
-```
+**Note (Delphi B-M3):** Uses the unified `build-plugin.sh` from Task 5 instead of a separate `build-opencode-plugin.sh`. Eliminates >95% code duplication per DRY principle.
 
 ---
 
 ### Task 8: Version Sync and NPM Integration
 
 **Files:**
+- Modify: `VERSION` file — bump from 0.3.2.0 to 0.4.0.0
 - Modify: `src/npm-package/package.json` — bump version to 0.4.0
 - Modify: `scripts/sync-version.sh` — verify plugin manifests sync
 - Test: Version consistency across all artifacts
@@ -840,6 +851,13 @@ setup() {
   OPENCODE_VERSION=$(jq -r '.version' "$REPO_ROOT/plugins/opencode/package.json")
   [ "$NPM_VERSION" = "$OPENCODE_VERSION" ]
 }
+
+@test "VERSION file matches npm package (major.minor.micro)" {
+  VERSION_RAW=$(cat "$REPO_ROOT/VERSION")
+  VERSION_PREFIX=$(echo "$VERSION_RAW" | cut -d. -f1-3)
+  NPM_VERSION=$(jq -r '.version' "$REPO_ROOT/src/npm-package/package.json")
+  [ "$VERSION_PREFIX" = "$NPM_VERSION" ]
+}
 ```
 
 **Step 2: Run test to verify it fails**
@@ -848,9 +866,11 @@ setup() {
 bats scripts/__tests__/version-consistency.bats
 ```
 
-Expected: FAIL (npm version is 0.3.1, plugin versions are 0.4.0)
+Expected: FAIL (npm version is 0.3.2, plugin versions are 0.4.0)
 
 **Step 3: Bump all versions to 0.4.0**
+
+Update `VERSION` file: `0.4.0.0`
 
 Update `src/npm-package/package.json`:
 ```json
@@ -859,6 +879,8 @@ Update `src/npm-package/package.json`:
   "version": "0.4.0",
   // ... rest unchanged
 }
+
+**Note (Delphi A-C2, C-C2):** Single source of truth is `VERSION` file (0.4.0.0). npm package and both plugin manifests sync to 0.4.0 (major.minor.micro). All three must match after this step.
 ```
 
 Update `plugins/claude-code/.claude-plugin/plugin.json`:

@@ -1,0 +1,26 @@
+{
+  "hooks": {
+    "PostToolUse": [
+      {
+        "matcher": "Edit|Write",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "\"$CLAUDE_PLUGIN_ROOT\"/bin/xp-gate-check \"${TOOL_INPUT_FILE}\""
+          }
+        ]
+      }
+    ],
+    "Stop": [
+      {
+        "matcher": ".*",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "echo \"[XP-Gate] Session complete. Run 'xp-gate init' for full git hook integration.\""
+          }
+        ]
+      }
+    ]
+  }
+}

@@ -1,0 +1,21 @@
+{
+  "name": "xp-gate",
+  "version": "0.4.0",
+  "displayName": "XP-Gate",
+  "description": "Extreme Programming quality gates + AI workflow skills for Claude Code. Includes 6 quality gates, Sprint Flow, and Delphi multi-expert review.",
+  "author": {
+    "name": "boyingliu01"
+  },
+  "homepage": "https://github.com/boyingliu01/xp-gate",
+  "repository": "https://github.com/boyingliu01/xp-gate",
+  "license": "MIT",
+  "keywords": [
+    "quality-gates",
+    "sprint-flow",
+    "delphi-review",
+    "xp",
+    "ai-development"
+  ],
+  "skills": "./skills/",
+  "hooks": "./hooks/hooks.json"
+}
