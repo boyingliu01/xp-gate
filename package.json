@@ -17,6 +17,11 @@
     "mutation:incremental": "npx tsx src/mutation/gate-m.ts",
     "security:llm": "npx promptfoo eval --config promptfoo/promptsecurity.yaml",
     "build": "tsc",
+    "build:claude-plugin": "bash scripts/build-plugin.sh --platform claude-code",
+    "build:opencode-plugin": "bash scripts/build-plugin.sh --platform opencode",
+    "build:plugins": "npm run build:claude-plugin && npm run build:opencode-plugin",
+    "build:all": "npm run build && npm run build:plugins",
+    "test:plugins": "bash scripts/test-plugins.sh",
     "lint": "eslint src --ext .ts",
     "principles": "npx tsx src/principles/index.ts",
     "dashboard": "node dashboard/serve.js"
