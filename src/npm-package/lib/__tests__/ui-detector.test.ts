@@ -2,7 +2,7 @@
  * @test ui-detector
  * @intent Verify detectUiSprint correctly identifies UI file changes
  */
-import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { execSync } from 'child_process';
 
 vi.mock('child_process', () => ({
@@ -126,6 +126,75 @@ describe('ui-detector', () => {
       const result = detectUiSprint();
       expect(result.isUiSprint).toBe(true);
       expect(result.matchedFiles.length).toBe(2);
+    });
+  });
+
+  describe('parseRenamedFile', () => {
+    it('should extract new path from renamed file', async () => {
+      const { parseRenamedFile } = await import('../ui-detector');
+      expect(parseRenamedFile('views/a.html → views/b.html')).toBe('views/b.html');
+    });
+
+    it('should return original path for non-renamed files', async () => {
+      const { parseRenamedFile } = await import('../ui-detector');
+      expect(parseRenamedFile('src/auth.ts')).toBe('src/auth.ts');
+    });
+  });
+
+  describe('getFileExtension', () => {
+    it('should extract file extension', async () => {
+      const { getFileExtension } = await import('../ui-detector');
+      expect(getFileExtension('src/auth.ts')).toBe('.ts');
+      expect(getFileExtension('views/index.njk')).toBe('.njk');
+      expect(getFileExtension('styles/main.css')).toBe('.css');
+    });
+
+    it('should return empty string for files without extension', async () => {
+      const { getFileExtension } = await import('../ui-detector');
+      expect(getFileExtension('Makefile')).toBe('');
+    });
+  });
+
+  describe('hasUiPathPattern', () => {
+    it('should return true for views/ directory', async () => {
+      const { hasUiPathPattern } = await import('../ui-detector');
+      expect(hasUiPathPattern('views/index.html')).toBe(true);
+    });
+
+    it('should return true for components/ directory', async () => {
+      const { hasUiPathPattern } = await import('../ui-detector');
+      expect(hasUiPathPattern('src/components/button.tsx')).toBe(true);
+    });
+
+    it('should return false for non-UI paths', async () => {
+      const { hasUiPathPattern } = await import('../ui-detector');
+      expect(hasUiPathPattern('src/utils/helper.ts')).toBe(false);
+    });
+  });
+
+  describe('getFileMatchRules', () => {
+    it('should return template rule for .html files', async () => {
+      const { getFileMatchRules } = await import('../ui-detector');
+      const rules = getFileMatchRules('views/index.html');
+      expect(rules).toContain('template-.html');
+    });
+
+    it('should return component rule for .tsx in components/', async () => {
+      const { getFileMatchRules } = await import('../ui-detector');
+      const rules = getFileMatchRules('src/components/Button.tsx');
+      expect(rules).toContain('component-.tsx');
+    });
+
+    it('should return empty for .tsx outside UI directories', async () => {
+      const { getFileMatchRules } = await import('../ui-detector');
+      const rules = getFileMatchRules('src/hooks/useAuth.tsx');
+      expect(rules).toEqual([]);
+    });
+
+    it('should return style rule for .css in views/', async () => {
+      const { getFileMatchRules } = await import('../ui-detector');
+      const rules = getFileMatchRules('views/styles/main.css');
+      expect(rules).toContain('style-.css');
     });
   });
 });
