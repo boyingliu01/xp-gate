@@ -1,59 +1,56 @@
 # SKILLS/TEST-SPECIFICATION-ALIGNMENT KNOWLEDGE BASE
 
-**Generated:** 2026-05-02
-**Commit:** 1f6bc7d
+**Generated:** 2026-05-30
+**Commit:** 4517f2b
 **Branch:** main
+**Version:** v0.5.1
 
 ## OVERVIEW
-Test-Specification Alignment Engine - Two-stage validation ensuring tests accurately reflect requirements and design specs.
+Test-Specification Alignment Engine — two-stage validation ensuring tests accurately reflect requirements and design specs.
 
 ## STRUCTURE
 ```
 skills/test-specification-alignment/
-├── SKILL.md              # Core alignment engine definition
-└── references/          # Supporting documentation
+├── SKILL.md              # Core alignment workflow (2-phase)
+├── AGENTS.md             # This file
+├── evals/                # Evaluation test cases
+└── references/           # Supporting documentation
 ```
 
 ## WHERE TO LOOK
 | Task | Location | Notes |
 |------|----------|-------|
-| Core Logic | SKILL.md | Main alignment workflow |
-| Two-Stage Flow | SKILL.md | Phase 1 (align) + Phase 2 (execute) |
-
-## CODE MAP
-| Symbol | Type | Location | Refs | Role |
-|--------|------|----------|------|------|
-| Phase 1 | Align Verification | SKILL.md | N/A | Test alignment with specification |
-| Phase 2 | Execute Tests | SKILL.md | N/A | Test execution with freezes |
-| Freeze Mechanism | Constraint | SKILL.md | N/A | Prevent test modifications during Phase 2 |
+| Core workflow | SKILL.md | Phase 1 (align) + Phase 2 (execute) |
+| Freeze mechanism | SKILL.md | Prevents test modifications during Phase 2 |
 
 ## CONVENTIONS
-- Phase 1 allows test modifications to align with specification
-- Phase 2 prohibits any test modifications (freeze enforced)
+- Phase 1 (Align): test modifications ALLOWED to align with specification
+- Phase 2 (Execute): test modifications FORBIDDEN (freeze enforced)
 - Minimum 80% alignment score required to pass
-- All @test, @intent, @covers tags must be present
+- All `@test`, `@intent`, `@covers` JSDoc tags mandatory in test files
+- Test annotations trace to REQ-XXX and AC-XXX
 
 ## ANTI-PATTERNS (THIS PROJECT)
 - Do NOT modify tests during Phase 2 execution
 - Do NOT proceed with low alignment score (<80%)
 - Do NOT skip specification validation if specification exists
+- Do NOT delete test files in Phase 2 (freeze intercepts)
+- Do NOT modify assertions when tests fail (modify business code instead)
+- Missing @test tags → test rejected
 
 ## UNIQUE STYLES
 - Two-phase separation (modify vs. execute)
-- Freeze/unfreeze test protection
-- YAML specification-driven validation
-- Structured JSDoc tag requirements
+- Freeze/unfreeze test protection mechanism
+- YAML specification-driven validation (specification.yaml)
+- Structured JSDoc tag requirements (@test, @intent, @covers)
 
 ## COMMANDS
 ```bash
-# Trigger test-specification alignment
-/test-specification-alignment
-
-# Check specification alignment
-/verify-tests
+/test-specification-alignment   # Run alignment check
 ```
 
 ## NOTES
-- Integrates with BUILD (TDD + review) before Arbiter review
-- Mandated before gstack-ship release
+- Runs during BUILD (Phase 2) after TDD
+- Mandatory before gstack-ship release
+- Integrates with test-driven-development skill
 - Uses freeze skill to lock test directories during Phase 2
