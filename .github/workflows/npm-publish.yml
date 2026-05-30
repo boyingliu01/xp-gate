@@ -1,0 +1,62 @@
+name: npm-publish
+
+on:
+  push:
+    branches: [main]
+    paths: [VERSION]
+
+permissions:
+  contents: read
+  id-token: write
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          registry-url: 'https://registry.npmjs.org'
+
+      - name: Verify VERSION file
+        id: version
+        run: |
+          VERSION=$(cat VERSION | tr -d '[:space:]')
+          if [ -z "$VERSION" ]; then
+            echo "ERROR: VERSION file is empty"
+            exit 1
+          fi
+          echo "version=$VERSION" >> $GITHUB_OUTPUT
+          echo "Publishing xp-gate@$VERSION"
+
+      - name: Check existing version
+        run: |
+          VERSION=$(cat VERSION | tr -d '[:space:]')
+          if npm view xp-gate@$VERSION version 2>/dev/null; then
+            echo "ERROR: Version $VERSION already exists on npm"
+            exit 1
+          fi
+          echo "Version $VERSION is available on npm"
+
+      - name: Sync package content
+        working-directory: src/npm-package
+        run: node scripts/sync-package-content.js
+
+      - name: Verify tarball size
+        working-directory: src/npm-package
+        run: |
+          SIZE=$(npm pack --dry-run --json 2>/dev/null | jq '.[0].size')
+          echo "Tarball size: $SIZE bytes"
+          if [ "$SIZE" -ge 2097152 ]; then
+            echo "FAIL: tarball >= 2MB (limit is 2097152 bytes)"
+            exit 1
+          fi
+          echo "PASS: tarball under 2MB"
+
+      - name: npm publish with provenance
+        working-directory: src/npm-package
+        run: npm publish --provenance --access public
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
