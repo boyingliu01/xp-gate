@@ -2,13 +2,15 @@
 
 All notable changes to this project will be documented in this file.
 
-## [Unreleased]
+## [0.5.1] - 2026-05-30
 
 ### Added
 - **REQ-1: xp-gate uninstall CLI** — 完整卸载命令，镜像反转 init，支持 dry-run/force 参数，manifest 文件跟踪
 - **REQ-2: xp-gate doctor CLI** — 诊断命令，检查 config/hooks/adapters/core.hooksPath/env，支持 --fix 自动修复
 - **REQ-3: xp-gate migrate CLI** — v0.4.x 迁移助手，自动清理 ~/.npmrc GitHub Packages PAT 残留
-- **REQ-5: Windows 兼容验证** — CI matrix 添加 windows-latest runner，验证 npm install -g + xp-gate init + 首次 commit 触发 6 道质量门禁，Node 18/20/22 LTS 全部通过，npm 包 tarball 大小 < 2MB 守护，README 明确 Git Bash 前置条件
+- **REQ-5: Windows 兼容验证** — CI matrix 添加 windows-latest runner，Node 18/20/22 LTS 全部通过
+
+## [Unreleased]
 
 ## [0.4.1.0] - 2026-05-30
 
