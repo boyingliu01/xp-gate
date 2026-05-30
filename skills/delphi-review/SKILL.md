@@ -284,6 +284,34 @@ Every review round output MUST follow this exact JSON structure:
 
 **Code-walkthrough mode**: 写入 `.code-walkthrough-result.json`（commit hash 匹配 HEAD，expires = timestamp + 1小时）。详见 `references/code-walkthrough.md`。
 
+### ⭐ 状态文件输出（MANDATORY — 防止跳过门禁）
+
+**Design mode APPROVED 后** — 必须立即写入 `.sprint-state/delphi-reviewed.json`：
+
+```json
+{
+  "mode": "design",
+  "timestamp": "2026-05-30T10:30:00Z",
+  "verdict": "APPROVED",
+  "consensus_ratio": 1.0,
+  "specification_path": ".sprint-state/phase-outputs/specification.yaml"
+}
+```
+
+**Code-walkthrough mode APPROVED 后** — 必须立即写入 `.sprint-state/delphi-reviewed.json`：
+
+```json
+{
+  "mode": "code-walkthrough",
+  "commit": "abc123def...",
+  "timestamp": "2026-05-30T10:30:00Z",
+  "verdict": "APPROVED",
+  "consensus_ratio": 1.0
+}
+```
+
+**用途**: Phase 2 BUILD 入口检查 (DELPHI-GATE) 读取此文件。`verdict != "APPROVED"` → 禁止编码。
+
 </MANDATORY-CHECKLIST>
 
 ---

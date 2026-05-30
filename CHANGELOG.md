@@ -2,6 +2,16 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.4.1.0] - 2026-05-30
+
+### Fixed
+- **Issue #80: Delphi-review skip prevention** — LLM 可跳过 delphi-review 直接进入 BUILD，新增三层防御架构：L1 PreToolUse Hook 物理拦截 (IDE 层)、L2 DELPHI-GATE Phase 2 入口门禁 (SKILL.md)、L3 状态文件输出 (delphi-review APPROVED 后生成 .sprint-state/delphi-reviewed.json)
+- **Issue #82: Phase 5 FEEDBACK bypass** — Phase 4 推迟后跳过 Phase 5 直接进入 Phase 6，新增 Phase 4→5→6 双重硬门禁：Phase 5 声明"不可跳过" + Phase 6 入口验证 feedback-log.md 存在
+
+### Added
+- **plugins/claude-code/bin/delphi-review-guard.sh** — PreToolUse Hook 守卫脚本，检查 .sprint-state/delphi-reviewed.json，不支持 jq 时优雅降级
+- **middleware.md 状态机增强** — 添加 DELPHI-GATE + Phase 5 硬门禁转换规则（"永远不可自动跳过"）
+
 ## [0.3.2.0] - 2026-05-28
 
 ### Fixed

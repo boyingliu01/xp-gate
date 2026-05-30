@@ -28,10 +28,13 @@ Phase 6: SHIP → finishing-a-development-branch → canary → Sprint Summary
 | Phase 0 | **HARD-GATE** | 设计未 APPROVED | 修改设计文档 | 设计 APPROVED 后继续 |
 | Phase 1 | taste_decisions | autoplan 发现未决议事项 | 用户确认每个决策 | 确认后自动继续 |
 | Phase 1 | delphi-review | 未 APPROVED（REQUEST_CHANGES） | 修复并重新评审 | APPROVED 后自动继续 |
+| **Phase 2** | **DELPHI-GATE** | delphi-reviewed.json 不存在或 verdict != APPROVED | 返回 Phase 1 完成 delphi-review | APPROVED 后继续 |
 | Phase 2 | 验证失败 | 超过 max 3 次失败 | 用户决定修复或放弃 | 验证通过后自动继续 |
 | Phase 2 | 成本超阈值 | token 成本 > 阈值 | 用户决定继续或暂停 | 用户确认后自动继续 |
 | Phase 3 | browse 发现问题 | QA 失败 | 回退 Phase 2 | 验证通过后自动继续 |
 | **Phase 4** | **必须人工验收** | 进入 Phase 4 | 用户实际使用后确认 | **无法自动恢复** |
+| **Phase 5** | **FEEDBACK 硬门禁** | Phase 4 完成后进入 | 执行 learn + retro → 生成 feedback-log.md | feedback-log.md 存在后继续 |
+| **Phase 6** | **Phase 5 门禁验证** | Phase 5 未完成 | 验证 feedback-log.md → 不存在 → 返回 Phase 5 | feedback-log.md 存在后继续 |
 | Phase 6 | finishing-a-branch | 分支收尾 | 用户 4 选 1 | 确认后自动继续 |
 | Phase 6 | ship PR | PR 路径需要合并 | 用户确认合并 | 合并后自动继续 |
 
@@ -41,7 +44,10 @@ Phase 6: SHIP → finishing-a-development-branch → canary → Sprint Summary
 |---------|---------|------|
 | Phase N 完成 | Phase N+1 | 无阻塞条件 |
 | Phase 0 HARD-GATE 未通过 | Phase 0 (重试) | 设计未 APPROVED |
+| Phase 2 DELPHI-GATE 未通过 | Phase 1 (回退) | delphi-review not APPROVED |
 | Phase 4 人工验收未完成 | Phase 4 (等待) | **永远不可自动跳过** |
+| Phase 4 确认完成 | Phase 5 | **必须执行，不可跳过** |
+| Phase 5 未完成 (feedback-log.md 不存在) | Phase 5 (等待) | **永远不可自动跳过** |
 | Phase 2 验证失败 > 3 次 | BLOCK (用户决策) | 熔断机制 |
 | Phase 2 成本超限 | BLOCK (用户决策) | 熔断机制 |
 

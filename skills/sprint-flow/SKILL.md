@@ -89,6 +89,7 @@ Phase 8: CLEANUP → git worktree remove + sprint-state.json update → status: 
 | Phase 2 | 成本超阈值 | 用户决定继续或暂停 | 用户确认后自动继续 |
 | Phase 3 | browse 发现问题 | 回退 Phase 2（不暂停） | 验证通过后自动继续 |
 | **Phase 4** | ⚠️ **必须人工验收** | 用户实际使用后确认 | 用户确认后继续 |
+| **Phase 5** | ⚠️ **必须执行，不可跳过 (HARD-GATE)** | Phase 5 完成后进入 Phase 6 | `feedback-log.md` 生成后自动继续 |
 | Phase 6 | finishing-a-development-branch | 用户选择 4 选项 (merge/PR/discard/keep) | 确认后自动继续 |
 | Phase 6 | ship PR 创建（PR 路径）| 用户确认合并 | 合并后自动继续 |
 | **Phase 7** | **land-and-deploy 完成/失败** | **用户确认合并结果 / 处理部署失败** | **确认/修复后继续** |
@@ -184,7 +185,16 @@ Phase 8: CLEANUP → git worktree remove + sprint-state.json update → status: 
 
 **核心原则**: 没有质量门禁的代码不可进入 BUILD 阶段。**GITHOOKS-GATE 失败 → 不可编码。**
 
-### Phase 2: BUILD（ralph-loop 默认 + TDD + 盲评 + 验证）
+### Phase 2: BUILD（DELPHI-GATE → ralph-loop 默认 + TDD + 盲评 + 验证）
+
+**⚠️ DELPHI-GATE（BUILD 入口门禁）**:
+Phase 2 第一步必须执行 DELPHI-GATE 检查。没有 delphi-review APPROVED → 不可编码。
+
+检查步骤:
+1. 读取 `.sprint-state/delphi-reviewed.json`
+2. 验证文件存在 → 不存在 → 输出 `[BLOCKED] delphi-review not APPROVED. 必须先完成 Phase 1 的 delphi-review。` → 返回 Phase 1
+3. 验证 `verdict` 字段 == `"APPROVED"` → 不等于 → 同上 BLOCK
+4. ✅ 通过 → 进入 BUILD 编码
 
 **输入**: `slices-manifest.json`（由 Phase 1 `/to-issues` 生成），按 `execution_order` 逐个执行。
 
@@ -246,11 +256,13 @@ Phase 8: CLEANUP → git worktree remove + sprint-state.json update → status: 
 - 使用 `@templates/emergent-issues-template.md` 检查清单
 
 ### Phase 5: FEEDBACK CAPTURE（反馈捕获）
+- ⚠️ **HARD-GATE: Phase 5 不可跳过。Phase 4 完成后（无论验收通过/跳过/推迟）→ 必须进入 Phase 5 → 完成后才能进入 Phase 6。**
 - `learn` (gstack) — 模式记录
 - `retro` (gstack) — 工程回顾：提交历史、工作模式、代码质量趋势
 - `systematic-debugging` (superpowers) — 根因调试（反馈中的 bug 做根因分析，Iron Law：无调查无修复）
 
 ### Phase 6: SHIP（发布准备）
+- ⚠️ **HARD-GATE: Phase 5 未完成 → 不可进入 Phase 6。验证 `.sprint-state/phase-outputs/feedback-log.md` 存在。**
 - **⚠️ GITHOOKS-GATE**: 再次验证 hooks 完整性（Phase 2 的 TDD 编码已触发提交，SHIP 阶段还会再次提交）
   - 运行 `githooks/verify.sh` → 缺失 → `githooks/install.sh` → 阻断直至修复
 - **`finishing-a-development-branch`** (superpowers) — 结构化完成流：4 选项（merge / PR / discard / keep）

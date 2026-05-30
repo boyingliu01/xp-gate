@@ -17,6 +17,23 @@
 
 ## 执行步骤
 
+### Step 0: ⚠️ PHASE 5 硬门禁验证（不可跳过）
+
+**必须首先验证 Phase 5 已完成**:
+
+```bash
+if [ ! -f ".sprint-state/phase-outputs/feedback-log.md" ]; then
+  echo "[BLOCKED] Phase 5 FEEDBACK not completed. feedback-log.md not found."
+  echo "Phase 5 must execute: learn + retro → generate feedback-log.md"
+  echo "Return to Phase 5 before proceeding to SHIP."
+  exit 1
+fi
+echo "✅ Phase 5 FEEDBACK verified — feedback-log.md exists"
+```
+
+**失败**: ⚠️ BLOCK → 返回 Phase 5 执行 learn + retro
+**通过**: 进入 Step 1
+
 ### Step 1: 最终验证
 
 ```
