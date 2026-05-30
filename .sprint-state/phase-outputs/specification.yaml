@@ -1,0 +1,157 @@
+# specification.yaml — Sprint 2: xp-gate Uninstall UX Optimization
+# Auto-generated from Delphi review consensus (Round 2 APPROVED)
+# Parent: sprint-2026-05-30-01 (v0.5.0)
+
+specification:
+  id: sprint-2026-05-30-02
+  version: 0.5.1
+  title: "xp-gate Uninstall 体验优化"
+  status: approved
+  approved_by: "Delphi Round 2 Consensus (2 experts)"
+
+user_stories:
+  - id: US-01
+    title: "用户一键完整卸载 xp-gate"
+    description: "作为 xp-gate 用户，我希望运行 xp-gate uninstall 能自动检测我的安装模式并完整清理所有痕迹，这样我可以在不需要时干净移除工具"
+    priority: P0
+    reqs: [REQ-1]
+
+  - id: US-02
+    title: "用户诊断 xp-gate 安装状态"
+    description: "作为 xp-gate 用户，我希望运行 xp-gate doctor 能快速诊断安装是否正常，这样我能知道是否需要修复"
+    priority: P1
+    reqs: [REQ-2]
+
+  - id: US-03
+    title: "v0.4.x 用户迁移到 v0.5.x"
+    description: "作为从 v0.4.x 升级的用户，我希望 xp-gate migrate 能自动检测并清理 GitHub Packages 残留配置"
+    priority: P1
+    reqs: [REQ-3]
+
+  - id: US-04
+    title: "文档完整覆盖新命令"
+    description: "作为新用户，我希望 README 中包含 uninstall/doctor/migrate 的使用说明"
+    priority: P2
+    reqs: [REQ-4]
+
+reqs:
+  - id: REQ-1
+    title: "xp-gate uninstall CLI"
+    description: "实现镜像反转 init 的完整卸载命令，支持 local/global 模式智能检测，dry-run/force 参数"
+    user_story: US-01
+    priority: P0
+    files:
+      - new: src/npm-package/lib/uninstall.js
+      - modify: src/npm-package/bin/xp-gate.js
+      - new: src/npm-package/lib/__tests__/uninstall.test.js
+    acs:
+      - AC-01
+      - AC-02
+      - AC-03
+      - AC-04
+      - AC-08
+      - AC-09
+      - AC-11
+
+  - id: REQ-2
+    title: "xp-gate doctor CLI"
+    description: "诊断命令：检查 config、hooks、adapters、core.hooksPath、环境依赖，支持 --fix 自动修复"
+    user_story: US-02
+    priority: P1
+    depends_on: [REQ-1]
+    files:
+      - new: src/npm-package/lib/doctor.js
+      - modify: src/npm-package/bin/xp-gate.js
+      - new: src/npm-package/lib/__tests__/doctor.test.js
+    acs:
+      - AC-05
+      - AC-08
+      - AC-10
+
+  - id: REQ-3
+    title: "xp-gate migrate CLI"
+    description: "迁移助手：检测 ~/.npmrc 中的 npm.pkg.github.com PAT 配置，清理旧版缓存"
+    user_story: US-03
+    priority: P1
+    depends_on: []
+    files:
+      - new: src/npm-package/lib/migrate.js
+      - modify: src/npm-package/bin/xp-gate.js
+      - new: src/npm-package/lib/__tests__/migrate.test.js
+    acs:
+      - AC-06
+
+  - id: REQ-4
+    title: "文档更新"
+    description: "README/CHANGELOG/MANIFEST 中新增 uninstall/doctor/migrate 命令说明"
+    user_story: US-04
+    priority: P2
+    depends_on: [REQ-1, REQ-2, REQ-3]
+    files:
+      - modify: README.md
+      - modify: CHANGELOG.md
+      - modify: MANIFEST.md
+    acs:
+      - AC-07
+
+acs:
+  - id: AC-01
+    description: "xp-gate uninstall 在 local 模式下完整清理 hooks + adapters"
+    test: "init → uninstall → 验证文件不存在"
+
+  - id: AC-02
+    description: "xp-gate uninstall 在 global 模式下 unset core.hooksPath"
+    test: "init --global → uninstall → 验证 git config core.hooksPath 已 remove"
+
+  - id: AC-03
+    description: "xp-gate uninstall --dry-run 不修改任何文件"
+    test: "dry-run → 验证所有文件仍在"
+
+  - id: AC-04
+    description: "非 xp-gate 的 hooks 文件不被误删"
+    test: "创建自定义 pre-commit → uninstall → 验证仍在"
+
+  - id: AC-05
+    description: "xp-gate doctor 正确诊断健康/损坏状态"
+    test: "完整安装 → doctor → 输出包含所有 checks ✓"
+
+  - id: AC-06
+    description: "xp-gate migrate 清理 ~/.npmrc 中的 PAT 行"
+    test: "mock ~/.npmrc → migrate --dry-run → 验证"
+
+  - id: AC-07
+    description: "文档与实现一致"
+    test: "手动验证 README/CHANGELOG"
+
+  - id: AC-08
+    description: "卸载中途失败后 doctor 可检测不完整状态"
+    test: "mock 权限错误 → uninstall → doctor 输出包含 partial uninstall 信息"
+
+  - id: AC-09
+    description: "已卸载状态下再次 uninstall 输出干净信息（幂等）"
+    test: "uninstall 两次 → 第二次输出 'No xp-gate installation found'"
+
+  - id: AC-10
+    description: "doctor --fix 仅在 mode === active 时执行修复"
+    test: "设置 mode=uninstalled → doctor --fix → 不执行修复"
+
+  - id: AC-11
+    description: "Manifest 存在时 uninstall 使用 sha256 而非仅特征字符串"
+    test: "init → 修改 manifest sha256 → uninstall --dry-run → 显示 fallback 到 signature 检测"
+
+risks:
+  - id: R-01
+    description: "uninstall 误删用户自定义 hooks"
+    mitigation: "manifest sha256 验证 + 特征字符串 fallback + dry-run 预览"
+
+  - id: R-02
+    description: "global uninstall 影响其他项目"
+    mitigation: "明确提示 + 确认步骤 + core.hooksPath 值匹配检查"
+
+  - id: R-03
+    description: "migrate 清理 PAT 影响其他 registry"
+    mitigation: "仅匹配 //npm.pkg.github.com/:_authToken= 行"
+
+  - id: R-04
+    description: "部分失败导致不一致状态"
+    mitigation: "pre-delete backup + 操作重排序 + 幂等重试 + doctor 诊断"

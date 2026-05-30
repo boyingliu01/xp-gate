@@ -1,0 +1,28 @@
+{
+  "id": "sprint-2026-05-30-02",
+  "phase": 6,
+  "status": "completed",
+  "verdict": "SHIPPED",
+  "pause_reason": "none",
+  "isolation": {
+    "worktree_path": ".worktrees/sprint/sprint-2026-05-30-02",
+    "branch": "sprint/2026-05-30-02",
+    "created_from": "main",
+    "created_from_commit": "dc84906afabcad4350ca6366b9b889f58ff4f622"
+  },
+  "sprint_goal": "Sprint 2: xp-gate uninstall UX optimization — uninstall CLI, doctor CLI, migrate CLI, docs",
+  "parent_sprint": "sprint-2026-05-30-01",
+  "pr": "https://github.com/boyingliu01/xp-gate/pull/93",
+  "outputs": {
+    "design_doc": "docs/plans/2026-05-30-xp-gate-uninstall-design.md",
+    "specification": ".sprint-state/phase-outputs/specification.yaml",
+    "delphi_report": ".sprint-state/delphi-reviewed.json",
+    "feedback_log": ".sprint-state/phase-outputs/feedback-log.md"
+  },
+  "metrics": {
+    "tests_passed": 571,
+    "tests_failed": 0,
+    "test_files": 50,
+    "commits": 8
+  }
+}

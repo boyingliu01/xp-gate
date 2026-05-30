@@ -1,0 +1,103 @@
+name: Cross-Platform CI
+
+on:
+  push:
+    branches: [ main, master ]
+  pull_request:
+    branches: [ main, master ]
+  workflow_dispatch:
+
+jobs:
+  # AC-09a: npm install -g + xp-gate init on all platforms
+  install-init:
+    name: Install + Init (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js 20
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Test global install + init
+        run: |
+          npm install -g ./src/npm-package
+          echo "xp-gate installed: $(xp-gate --version)"
+          mkdir -p /tmp/test-init-project
+          cd /tmp/test-init-project
+          git init
+          git config user.email "ci@test.com"
+          git config user.name "CI"
+          xp-gate init
+          echo "Hooks installed successfully"
+        shell: bash
+
+  # AC-09b: First commit triggers 6 gates
+  first-commit-gates:
+    name: First Commit Gates (Node ${{ matrix.node-version }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        node-version: [18, 20, 22]
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Setup Node.js ${{ matrix.node-version }}
+        uses: actions/setup-node@v4
+        with:
+          node-version: '${{ matrix.node-version }}'
+
+      - name: Install project dependencies
+        run: npm ci || npm install
+
+      - name: First commit triggers gates
+        run: |
+          rm -rf /tmp/test-commit-project
+          mkdir -p /tmp/test-commit-project
+          cd /tmp/test-commit-project
+          git init
+          git config user.email "ci@test.com"
+          git config user.name "CI"
+          cp -r $GITHUB_WORKSPACE/githooks .githooks-ref
+          bash .githooks-ref/install.sh
+          echo "console.log('hello')" > test.ts
+          git add .
+          git commit -m "test: first commit triggers 6 quality gates"
+        shell: bash
+
+  # AC-10b: Tarball size < 2MB
+  tarball-size:
+    name: Tarball Size Guard
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js 20
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Verify tarball size < 2MB
+        working-directory: src/npm-package
+        run: |
+          TARBALL=$(npm pack --quiet)
+          SIZE=$(wc -c < "$TARBALL")
+          echo "Tarball size: $SIZE bytes"
+          rm -f "$TARBALL"
+          if [ "$SIZE" -ge 2097152 ]; then
+            echo "FAIL: tarball >= 2MB ($SIZE bytes)"
+            exit 1
+          fi
+          echo "PASS: tarball < 2MB ($SIZE bytes)"
+        shell: bash

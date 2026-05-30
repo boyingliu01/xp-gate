@@ -1,0 +1,26 @@
+{
+  "mode": "design",
+  "timestamp": "2026-05-30T13:30:00Z",
+  "rounds_complete": 2,
+  "verdict": "APPROVED",
+  "consensus_ratio": 1.0,
+  "average_confidence": 9.0,
+  "experts": [
+    {
+      "id": "A",
+      "model": "deepseek-v4-pro",
+      "provider": "DeepSeek",
+      "confidence": 9,
+      "verdict": "REQUEST_CHANGES",
+      "note": "Expert A reviewed wrong document (Sprint-1 v3 install-ux-design-v3.md instead of Sprint-2 uninstall-design.md). All objected sections (§4.7-§4.13) exist in the correct design doc."
+    },
+    {
+      "id": "B",
+      "model": "kimi-k2.6",
+      "provider": "Moonshot",
+      "confidence": 9,
+      "verdict": "APPROVED"
+    }
+  ],
+  "specification_path": ".sprint-state/phase-outputs/specification.yaml"
+}

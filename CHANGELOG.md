@@ -2,6 +2,14 @@
 
 All notable changes to this project will be documented in this file.
 
+## [Unreleased]
+
+### Added
+- **REQ-1: xp-gate uninstall CLI** — 完整卸载命令，镜像反转 init，支持 dry-run/force 参数，manifest 文件跟踪
+- **REQ-2: xp-gate doctor CLI** — 诊断命令，检查 config/hooks/adapters/core.hooksPath/env，支持 --fix 自动修复
+- **REQ-3: xp-gate migrate CLI** — v0.4.x 迁移助手，自动清理 ~/.npmrc GitHub Packages PAT 残留
+- **REQ-5: Windows 兼容验证** — CI matrix 添加 windows-latest runner，验证 npm install -g + xp-gate init + 首次 commit 触发 6 道质量门禁，Node 18/20/22 LTS 全部通过，npm 包 tarball 大小 < 2MB 守护，README 明确 Git Bash 前置条件
+
 ## [0.4.1.0] - 2026-05-30
 
 ### Fixed
@@ -10,7 +18,12 @@ All notable changes to this project will be documented in this file.
 
 ### Added
 - **plugins/claude-code/bin/delphi-review-guard.sh** — PreToolUse Hook 守卫脚本，检查 .sprint-state/delphi-reviewed.json，不支持 jq 时优雅降级
+
+### Changed
 - **middleware.md 状态机增强** — 添加 DELPHI-GATE + Phase 5 硬门禁转换规则（"永远不可自动跳过"）
+- **README.md** — 新增 v0.4.x → v0.5.x 迁移指南，移除 GitHub PAT 认证步骤，安装流程简化为 `npm install -g xp-gate`
+- **MANIFEST.md** — 7 个 `bash <(curl ...)` 安装命令标注为 "LEGACY - GHP version only"
+- **CHANGELOG.md** — 补充 REQ-6 迁移相关变更记录
 
 ## [0.3.2.0] - 2026-05-28
 

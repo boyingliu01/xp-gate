@@ -1,6 +1,7 @@
 const fs = require('fs');
 const path = require('path');
 const os = require('os');
+const crypto = require('crypto');
 const { checkDeps } = require('./detect-deps.js');
 const { checkBash } = require('./detect-deps.js');
 
@@ -87,6 +88,133 @@ function updateConfig(updates) {
   fs.writeFileSync(CONFIG_FILE, JSON.stringify(config, null, 2));
 }
 
+function sha256File(filePath) {
+  try {
+    const content = fs.readFileSync(filePath);
+    return crypto.createHash('sha256').update(content).digest('hex');
+  } catch {
+    return null;
+  }
+}
+
+function generateManifest(srcDir, projectRoot) {
+  const manifest = {
+    version: 1,
+    files: {},
+    injectedSections: {}
+  };
+
+  const gitDir = path.join(projectRoot, '.git');
+  const hooksDir = path.join(gitDir, 'hooks');
+  const githooksDir = path.join(projectRoot, 'githooks');
+
+  // Hooks
+  ['pre-commit', 'pre-push'].forEach(hook => {
+    const hookPath = path.join(hooksDir, hook);
+    if (fs.existsSync(hookPath)) {
+      const stat = fs.statSync(hookPath);
+      manifest.files[`.git/hooks/${hook}`] = {
+        sha256: sha256File(hookPath),
+        size: stat.size
+      };
+    }
+  });
+
+  // adapter-common.sh
+  const adapterCommonPath = path.join(githooksDir, 'adapter-common.sh');
+  if (fs.existsSync(adapterCommonPath)) {
+    const stat = fs.statSync(adapterCommonPath);
+    manifest.files['githooks/adapter-common.sh'] = {
+      sha256: sha256File(adapterCommonPath),
+      size: stat.size
+    };
+  }
+
+  // Adapter scripts
+  const adaptersDir = path.join(githooksDir, 'adapters');
+  if (fs.existsSync(adaptersDir)) {
+    fs.readdirSync(adaptersDir).forEach(f => {
+      const fPath = path.join(adaptersDir, f);
+      if (fs.statSync(fPath).isFile()) {
+        const stat = fs.statSync(fPath);
+        manifest.files[`githooks/adapters/${f}`] = {
+          sha256: sha256File(fPath),
+          size: stat.size
+        };
+      }
+    });
+  }
+
+  // Template dir note
+  manifest.templateDir = TEMPLATE_DIR;
+
+  // Injected sections
+  const agentsPath = path.join(projectRoot, 'AGENTS.md');
+  if (fs.existsSync(agentsPath)) {
+    try {
+      const content = fs.readFileSync(agentsPath, 'utf8');
+      if (content.includes('## AI CODING DISCIPLINE (Karpathy Principles)')) {
+        manifest.injectedSections['AGENTS.md'] = '## AI CODING DISCIPLINE (Karpathy Principles)';
+      }
+    } catch {}
+  }
+
+  return manifest;
+}
+
+function generateGlobalManifest(srcDir) {
+  const manifest = {
+    version: 1,
+    files: {},
+    gitConfig: {}
+  };
+
+  // Global hooks
+  ['pre-commit', 'pre-push'].forEach(hook => {
+    const hookPath = path.join(GLOBAL_HOOKS_DIR, hook);
+    if (fs.existsSync(hookPath)) {
+      const stat = fs.statSync(hookPath);
+      manifest.files[`hooks/${hook}`] = {
+        sha256: sha256File(hookPath),
+        size: stat.size
+      };
+    }
+  });
+
+  // adapter-common.sh
+  const adapterCommonPath = path.join(GLOBAL_ADAPTERS_DIR, 'adapter-common.sh');
+  if (fs.existsSync(adapterCommonPath)) {
+    const stat = fs.statSync(adapterCommonPath);
+    manifest.files['adapters/adapter-common.sh'] = {
+      sha256: sha256File(adapterCommonPath),
+      size: stat.size
+    };
+  }
+
+  // Adapter scripts
+  if (fs.existsSync(GLOBAL_ADAPTERS_DIR)) {
+    fs.readdirSync(GLOBAL_ADAPTERS_DIR).forEach(f => {
+      const fPath = path.join(GLOBAL_ADAPTERS_DIR, f);
+      if (fs.statSync(fPath).isFile() && f !== 'adapter-common.sh') {
+        const stat = fs.statSync(fPath);
+        manifest.files[`adapters/${f}`] = {
+          sha256: sha256File(fPath),
+          size: stat.size
+        };
+      }
+    });
+  }
+
+  // git config
+  manifest.gitConfig = {
+    'core.hooksPath': GLOBAL_HOOKS_DIR
+  };
+
+  manifest.templateDir = TEMPLATE_DIR;
+
+  return manifest;
+}
+
 async function init(args) {
   console.log('XP-Gate Initialization');
   console.log('====================\n');
@@ -141,7 +269,9 @@ async function installLocal(args) {
   fs.mkdirSync(path.join(TEMPLATE_DIR, 'adapters'), { recursive: true });
 
   ensureConfigDir();
-  updateConfig({ lastInit: new Date().toISOString(), mode: 'local' });
+
+  const manifest = generateManifest(srcDir, projectRoot);
+  updateConfig({ lastInit: new Date().toISOString(), mode: 'local', manifest });
 
   injectKarpathyPrinciples(projectRoot);
 
@@ -179,7 +309,9 @@ async function setupGlobal(args) {
   }
 
   ensureConfigDir();
-  updateConfig({ lastInit: new Date().toISOString(), mode: 'global' });
+
+  const manifest = generateGlobalManifest(srcDir);
+  updateConfig({ lastInit: new Date().toISOString(), mode: 'global', manifest });
 
   console.log('\nGlobal setup complete!');
   console.log('All git repositories will now use xp-gate quality gates.');
