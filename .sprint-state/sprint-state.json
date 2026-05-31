@@ -1,20 +1,31 @@
 {
-  "id": "sprint-2026-05-31-01",
+  "id": "sprint-2026-05-31-02",
   "phase": 2,
   "status": "completed",
   "isolation": {
-    "worktree_path": ".worktrees/sprint/sprint-2026-05-31-01",
-    "branch": "sprint/2026-05-31-01",
+    "worktree_path": ".worktrees/sprint/sprint-2026-05-31-02",
+    "branch": "sprint/2026-05-31-02",
     "created_from": "main",
-    "created_from_commit": "d5ad35e"
+    "created_from_commit": "d0f3fdb"
   },
-  "issues": [83, 86, 87, 88, 90],
+  "issues": [
+    79
+  ],
   "outputs": {
-    "test_file": "src/npm-package/lib/__tests__/npm-package.test.js"
+    "design_doc": "docs/plans/2026-05-31-issue-79-ui-sprint-detection-design.md",
+    "specification": ".sprint-state/phase-outputs/specification.yaml",
+    "delphi_reviewed": ".sprint-state/delphi-reviewed.json",
+    "files_changed": [
+      "githooks/pre-push",
+      "src/npm-package/lib/ui-detector.ts",
+      "src/npm-package/lib/audit-log.ts",
+      "src/npm-package/lib/ui-review.ts",
+      "src/npm-package/bin/xp-gate.js",
+      ".gitignore"
+    ]
   },
   "metrics": {
-    "tests_passed": 10,
-    "tests_failed": 0,
-    "coverage_pct": 100
+    "tests_passed": 25,
+    "tests_failed": 0
   }
 }

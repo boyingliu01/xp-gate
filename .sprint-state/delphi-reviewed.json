@@ -1,5 +1,8 @@
 {
+  "mode": "design",
+  "timestamp": "2026-05-31T15:45:00Z",
   "verdict": "APPROVED",
-  "mode": "auto",
-  "reason": "TDD verified, all 6 quality gates passed (10.0/10), 581 tests green"
+  "consensus_ratio": 1.0,
+  "design_file": "docs/plans/2026-05-31-issue-79-ui-sprint-detection-design.md",
+  "specification_path": ".sprint-state/phase-outputs/specification.yaml"
 }
