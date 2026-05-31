@@ -1,28 +1,20 @@
 {
-  "id": "sprint-2026-05-30-02",
-  "phase": 6,
+  "id": "sprint-2026-05-31-01",
+  "phase": 2,
   "status": "completed",
-  "verdict": "SHIPPED",
-  "pause_reason": "none",
   "isolation": {
-    "worktree_path": ".worktrees/sprint/sprint-2026-05-30-02",
-    "branch": "sprint/2026-05-30-02",
+    "worktree_path": ".worktrees/sprint/sprint-2026-05-31-01",
+    "branch": "sprint/2026-05-31-01",
     "created_from": "main",
-    "created_from_commit": "dc84906afabcad4350ca6366b9b889f58ff4f622"
+    "created_from_commit": "d5ad35e"
   },
-  "sprint_goal": "Sprint 2: xp-gate uninstall UX optimization — uninstall CLI, doctor CLI, migrate CLI, docs",
-  "parent_sprint": "sprint-2026-05-30-01",
-  "pr": "https://github.com/boyingliu01/xp-gate/pull/93",
+  "issues": [83, 86, 87, 88, 90],
   "outputs": {
-    "design_doc": "docs/plans/2026-05-30-xp-gate-uninstall-design.md",
-    "specification": ".sprint-state/phase-outputs/specification.yaml",
-    "delphi_report": ".sprint-state/delphi-reviewed.json",
-    "feedback_log": ".sprint-state/phase-outputs/feedback-log.md"
+    "test_file": "src/npm-package/lib/__tests__/npm-package.test.js"
   },
   "metrics": {
-    "tests_passed": 571,
+    "tests_passed": 10,
     "tests_failed": 0,
-    "test_files": 50,
-    "commits": 8
+    "coverage_pct": 100
   }
 }

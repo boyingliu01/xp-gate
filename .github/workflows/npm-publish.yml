@@ -30,12 +30,12 @@ jobs:
             exit 1
           fi
           echo "version=$VERSION" >> $GITHUB_OUTPUT
-          echo "Publishing xp-gate@$VERSION"
+          echo "Publishing @boyingliu01/xp-gate@$VERSION"
 
       - name: Check existing version
         run: |
           VERSION=$(cat VERSION | tr -d '[:space:]')
-          if npm view xp-gate@$VERSION version 2>/dev/null; then
+          if npm view @boyingliu01/xp-gate@$VERSION version 2>/dev/null; then
             echo "ERROR: Version $VERSION already exists on npm"
             exit 1
           fi

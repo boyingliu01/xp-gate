@@ -1,5 +1,5 @@
 {
-  "name": "xp-gate",
+  "name": "@boyingliu01/xp-gate",
   "version": "0.5.1",
   "description": "AI-driven development workflow: 6 quality gates + Delphi review + Sprint Flow",
   "bin": {
@@ -18,7 +18,10 @@
     "type": "git",
     "url": "https://github.com/boyingliu01/xp-gate"
   },
-  "publishConfig": {},
+  "publishConfig": {
+    "registry": "https://registry.npmjs.org",
+    "access": "public"
+  },
   "engines": {
     "node": ">=18.0.0"
   },

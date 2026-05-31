@@ -40,7 +40,7 @@ elif [ -f "${REPO_ROOT}/src/principles/index.ts" ]; then
   npx -y tsx "${REPO_ROOT}/src/principles/index.ts" --files "$FILE_PATH" --format console 2>&1 || true
 else
   # Graceful degradation: log once per session
-  echo "[XP-Gate] Quality check skipped: xp-gate not installed. Run 'npm install -g xp-gate'" >&2
+  echo "[XP-Gate] Quality check skipped: xp-gate not installed. Run 'npm install -g @boyingliu01/xp-gate'" >&2
 fi
 
 # Always exit 0 to avoid blocking the Claude session
