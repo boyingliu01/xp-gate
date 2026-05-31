@@ -5,7 +5,7 @@
 [![Git Hooks](https://img.shields.io/badge/Git%20Hooks-6%20Gates-green)](./githooks)
 [![AI Review](https://img.shields.io/badge/AI%20Review-Delphi%20≥95%25-blue)](./skills/delphi-review)
 [![Sprint Flow](https://img.shields.io/badge/Sprint%20Flow-Think→Ship-purple)](./skills/sprint-flow)
-[![npm package](https://img.shields.io/badge/npm%20registry-npm%20install%20--g%20xp--gate-blue?logo=npm)](src/npm-package)
+[![npm package](https://img.shields.io/badge/npm%20registry-npm%20install%20--g%20%40boyingliu01%2Fxp--gate-blue?logo=npm)](src/npm-package)
 
 > **v0.5.1**: xp-gate 已从 GitHub Packages 迁移到公共 npm registry。新增 `xp-gate uninstall` / `doctor` / `migrate` 命令。旧版用户请阅读下方迁移指南。
 
@@ -65,8 +65,8 @@ node -e "const fs=require('fs'),p=require('path').join(require('os').homedir(),'
 ### Step 3: 安装新版
 
 ```bash
-# 直接从公共 npm 安装，无需 PAT！
-npm install -g xp-gate
+# 直接从公共 npm 安装 scoped 包，无需 PAT！
+npm install -g @boyingliu01/xp-gate
 ```
 
 ### Step 4: 初始化项目
@@ -182,7 +182,7 @@ XP-Gate 现在同时支持 Claude Code 和 OpenCode 插件分发，提供 IDE �
 
 ```bash
 # 全局安装（无需 PAT，公共 npm registry）
-npm install -g xp-gate
+npm install -g @boyingliu01/xp-gate
 ```
 
 #### 初始化项目

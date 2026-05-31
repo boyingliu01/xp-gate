@@ -33,7 +33,7 @@ export const XpGatePlugin: Plugin = async (input) => {
             const text = await result.text()
             return text || "[XP-Gate] Check complete."
           } catch (err: unknown) {
-            return `[XP-Gate] xp-gate CLI not found.\nInstall: npm install -g xp-gate\n${err instanceof Error ? err.message : ""}`
+            return `[XP-Gate] xp-gate CLI not found.\nInstall: npm install -g @boyingliu01/xp-gate\n${err instanceof Error ? err.message : ""}`
           }
         },
       }),
