@@ -1,157 +1,122 @@
-# specification.yaml — Sprint 2: xp-gate Uninstall UX Optimization
-# Auto-generated from Delphi review consensus (Round 2 APPROVED)
-# Parent: sprint-2026-05-30-01 (v0.5.0)
+# specification.yaml — Issue #79: UI Sprint Detection & Forced Quality Gates
+# Auto-generated from Delphi review consensus (Round 3 APPROVED, 2 experts, 100%)
+# Parent: sprint-2026-05-31-02
 
 specification:
-  id: sprint-2026-05-30-02
-  version: 0.5.1
-  title: "xp-gate Uninstall 体验优化"
+  id: sprint-2026-05-31-02
+  issue: 79
+  title: "feat: UI sprint detection & forced quality gates"
   status: approved
-  approved_by: "Delphi Round 2 Consensus (2 experts)"
+  approved_by: "Delphi Round 3 Consensus (Expert A: 9/10, Expert C: 9/10)"
+  design_doc: "docs/plans/2026-05-31-issue-79-ui-sprint-detection-design.md"
 
 user_stories:
-  - id: US-01
-    title: "用户一键完整卸载 xp-gate"
-    description: "作为 xp-gate 用户，我希望运行 xp-gate uninstall 能自动检测我的安装模式并完整清理所有痕迹，这样我可以在不需要时干净移除工具"
+  - id: US-001
+    title: "UI Sprint Auto-Detection"
+    description: "As a developer, I want xp-gate to automatically detect when my push contains UI changes, so that appropriate quality gates are enforced"
     priority: P0
-    reqs: [REQ-1]
+    acs: [AC-001-01, AC-001-02, AC-001-03, AC-001-04, AC-001-05, AC-001-06]
 
-  - id: US-02
-    title: "用户诊断 xp-gate 安装状态"
-    description: "作为 xp-gate 用户，我希望运行 xp-gate doctor 能快速诊断安装是否正常，这样我能知道是否需要修复"
+  - id: US-002
+    title: "Pre-push UI Gate Enforcement"
+    description: "As a team, I want the pre-push hook to block pushes with unreviewed UI changes"
+    priority: P0
+    acs: [AC-002-01, AC-002-02, AC-002-03, AC-002-04, AC-002-05, AC-002-06, AC-002-07, AC-002-08]
+
+  - id: US-003
+    title: "Bypass with Audit Trail"
+    description: "As an on-call developer, I want to bypass the UI gate for hotfixes with mandatory audit logging"
     priority: P1
-    reqs: [REQ-2]
+    acs: [AC-003-01, AC-003-02, AC-003-03, AC-003-04, AC-003-05]
 
-  - id: US-03
-    title: "v0.4.x 用户迁移到 v0.5.x"
-    description: "作为从 v0.4.x 升级的用户，我希望 xp-gate migrate 能自动检测并清理 GitHub Packages 残留配置"
+  - id: US-004
+    title: "Sprint Flow UI Review Auto-trigger"
+    description: "As a sprint user, I want UI review to be automatically triggered when my sprint produces UI changes"
     priority: P1
-    reqs: [REQ-3]
+    acs: [AC-004-01, AC-004-02, AC-004-03]
 
-  - id: US-04
-    title: "文档完整覆盖新命令"
-    description: "作为新用户，我希望 README 中包含 uninstall/doctor/migrate 的使用说明"
+  - id: US-005
+    title: "Non-Sprint Flow UI Review CLI"
+    description: "As a non-sprint developer, I want a simple xp-gate ui-review command"
     priority: P2
-    reqs: [REQ-4]
+    acs: [AC-005-01, AC-005-02, AC-005-03]
 
 reqs:
   - id: REQ-1
-    title: "xp-gate uninstall CLI"
-    description: "实现镜像反转 init 的完整卸载命令，支持 local/global 模式智能检测，dry-run/force 参数"
-    user_story: US-01
+    title: "ui-detector.ts --push-mode"
     priority: P0
+    user_stories: [US-001]
     files:
-      - new: src/npm-package/lib/uninstall.js
-      - modify: src/npm-package/bin/xp-gate.js
-      - new: src/npm-package/lib/__tests__/uninstall.test.js
-    acs:
-      - AC-01
-      - AC-02
-      - AC-03
-      - AC-04
-      - AC-08
-      - AC-09
-      - AC-11
+      - modify: src/npm-package/lib/ui-detector.ts
+      - modify: src/npm-package/lib/__tests__/ui-detector.test.ts
+    summary: "Add --push-mode --from-stdin (reads from pre-push PUSHED_FILES) and --check-branch flags"
 
   - id: REQ-2
-    title: "xp-gate doctor CLI"
-    description: "诊断命令：检查 config、hooks、adapters、core.hooksPath、环境依赖，支持 --fix 自动修复"
-    user_story: US-02
-    priority: P1
-    depends_on: [REQ-1]
+    title: "Pre-push GATE UI section"
+    priority: P0
+    user_stories: [US-002]
     files:
-      - new: src/npm-package/lib/doctor.js
-      - modify: src/npm-package/bin/xp-gate.js
-      - new: src/npm-package/lib/__tests__/doctor.test.js
-    acs:
-      - AC-05
-      - AC-08
-      - AC-10
+      - modify: githooks/pre-push
+    summary: "~60 lines added after Gate M2. Validates .ui-gate-result.json. main/master skip. Merged error messages"
 
   - id: REQ-3
-    title: "xp-gate migrate CLI"
-    description: "迁移助手：检测 ~/.npmrc 中的 npm.pkg.github.com PAT 配置，清理旧版缓存"
-    user_story: US-03
+    title: "Bypass + Audit Logging"
     priority: P1
-    depends_on: []
+    user_stories: [US-003]
     files:
-      - new: src/npm-package/lib/migrate.js
-      - modify: src/npm-package/bin/xp-gate.js
-      - new: src/npm-package/lib/__tests__/migrate.test.js
-    acs:
-      - AC-06
+      - new: src/npm-package/lib/audit-log.ts
+      - modify: githooks/pre-push
+      - modify: .gitignore
+    summary: "XP_GATE_SKIP_UI_GATES=1 + XP_GATE_BYPASS_REASON. .audit-log.jsonl (100 entry cap). .ui-gate-result.json in .gitignore"
 
   - id: REQ-4
-    title: "文档更新"
-    description: "README/CHANGELOG/MANIFEST 中新增 uninstall/doctor/migrate 命令说明"
-    user_story: US-04
+    title: "xp-gate ui-review CLI"
     priority: P2
-    depends_on: [REQ-1, REQ-2, REQ-3]
+    user_stories: [US-005]
     files:
-      - modify: README.md
-      - modify: CHANGELOG.md
-      - modify: MANIFEST.md
-    acs:
-      - AC-07
+      - new: src/npm-package/lib/ui-review.ts
+    summary: "Helper CLI for non-sprint developers to generate .ui-gate-result.json"
+
+  - id: REQ-5
+    title: "Sprint Flow Phase 3 integration"
+    priority: P1
+    user_stories: [US-004]
+    files:
+      - modify: skills/sprint-flow (orchestration)
+    summary: "--check-branch at Phase 3 entry → triggers /design-review + /qa-only"
 
 acs:
-  - id: AC-01
-    description: "xp-gate uninstall 在 local 模式下完整清理 hooks + adapters"
-    test: "init → uninstall → 验证文件不存在"
+  - id: AC-001-01: Template files trigger UI detection anywhere
+  - id: AC-001-02: Component files trigger only in UI paths
+  - id: AC-001-03: Style files trigger only in UI paths
+  - id: AC-001-04: stdin-based file input (--from-stdin)
+  - id: AC-001-05: .ui-gate-ignore config exclusions
+  - id: AC-001-06: Default exclusions (node_modules, tests, dist)
+  - id: AC-002-01: GATE UI runs between M2 and walkthrough
+  - id: AC-002-02: main/master skip
+  - id: AC-002-03: Result file existence check
+  - id: AC-002-04: Commit hash match
+  - id: AC-002-05: Verdict == APPROVED
+  - id: AC-002-06: Not expired (< 24h)
+  - id: AC-002-07: Merged error for dual result files
+  - id: AC-002-08: .gitignore compliance
+  - id: AC-003-01: Env var bypass
+  - id: AC-003-02: Reason validation (≥10 chars)
+  - id: AC-003-03: Audit log JSONL write
+  - id: AC-003-04: 100 entry retention cap
+  - id: AC-003-05: >3 bypasses/30day retro trigger
+  - id: AC-004-01: Phase 3 --check-branch trigger
+  - id: AC-004-02: Auto-trigger /design-review + /qa-only
+  - id: AC-004-03: Result file generation
+  - id: AC-005-01: xp-gate ui-review command
+  - id: AC-005-02: Calls design-review + qa-only
+  - id: AC-005-03: Generates .ui-gate-result.json
 
-  - id: AC-02
-    description: "xp-gate uninstall 在 global 模式下 unset core.hooksPath"
-    test: "init --global → uninstall → 验证 git config core.hooksPath 已 remove"
+constraints:
+  - "No direct gstack invocation from bash"
+  - "npx tsx mandatory for TS projects"
+  - "Result file format aligned with code-walkthrough pattern"
 
-  - id: AC-03
-    description: "xp-gate uninstall --dry-run 不修改任何文件"
-    test: "dry-run → 验证所有文件仍在"
-
-  - id: AC-04
-    description: "非 xp-gate 的 hooks 文件不被误删"
-    test: "创建自定义 pre-commit → uninstall → 验证仍在"
-
-  - id: AC-05
-    description: "xp-gate doctor 正确诊断健康/损坏状态"
-    test: "完整安装 → doctor → 输出包含所有 checks ✓"
-
-  - id: AC-06
-    description: "xp-gate migrate 清理 ~/.npmrc 中的 PAT 行"
-    test: "mock ~/.npmrc → migrate --dry-run → 验证"
-
-  - id: AC-07
-    description: "文档与实现一致"
-    test: "手动验证 README/CHANGELOG"
-
-  - id: AC-08
-    description: "卸载中途失败后 doctor 可检测不完整状态"
-    test: "mock 权限错误 → uninstall → doctor 输出包含 partial uninstall 信息"
-
-  - id: AC-09
-    description: "已卸载状态下再次 uninstall 输出干净信息（幂等）"
-    test: "uninstall 两次 → 第二次输出 'No xp-gate installation found'"
-
-  - id: AC-10
-    description: "doctor --fix 仅在 mode === active 时执行修复"
-    test: "设置 mode=uninstalled → doctor --fix → 不执行修复"
-
-  - id: AC-11
-    description: "Manifest 存在时 uninstall 使用 sha256 而非仅特征字符串"
-    test: "init → 修改 manifest sha256 → uninstall --dry-run → 显示 fallback 到 signature 检测"
-
-risks:
-  - id: R-01
-    description: "uninstall 误删用户自定义 hooks"
-    mitigation: "manifest sha256 验证 + 特征字符串 fallback + dry-run 预览"
-
-  - id: R-02
-    description: "global uninstall 影响其他项目"
-    mitigation: "明确提示 + 确认步骤 + core.hooksPath 值匹配检查"
-
-  - id: R-03
-    description: "migrate 清理 PAT 影响其他 registry"
-    mitigation: "仅匹配 //npm.pkg.github.com/:_authToken= 行"
-
-  - id: R-04
-    description: "部分失败导致不一致状态"
-    mitigation: "pre-delete backup + 操作重排序 + 幂等重试 + doctor 诊断"
+out_of_scope:
+  - "gstack skill implementation (design-review, qa)"
+  - "CI workflow changes"

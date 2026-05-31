@@ -48,6 +48,11 @@ const COMMANDS = {
     description: 'Diagnose xp-gate installation health',
     fn: doctor,
     usage: 'xp-gate doctor [--fix]'
+  },
+  'ui-review': {
+    description: 'Run UI review for non-sprint developers (generates .ui-gate-result.json)',
+    fn: null,
+    usage: 'xp-gate ui-review'
   }
 };
 
@@ -135,6 +140,18 @@ function main() {
   if (command === 'doctor') {
     doctor(subargs).then(code => process.exit(code));
     return;
+  }
+
+  if (command === 'ui-review') {
+    const { execSync } = require('child_process');
+    const path = require('path');
+    const uiReviewPath = path.join(__dirname, '..', 'lib', 'ui-review.ts');
+    try {
+      execSync(`npx -y tsx "${uiReviewPath}"`, { stdio: 'inherit' });
+      process.exit(0);
+    } catch (err) {
+      process.exit(1);
+    }
   }
   
   console.error(`Unknown command: ${command}`);
