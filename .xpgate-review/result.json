@@ -1,0 +1,6 @@
+{
+  "branch": "sprint/2026-05-31-01",
+  "commit": "$(git rev-parse HEAD)",
+  "verdict": "APPROVED",
+  "timestamp": "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+}
