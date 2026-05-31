@@ -233,6 +233,81 @@ else
 fi
 
 # ============================================================================
+# GATE UI: UI SPRINT DETECTION & RESULT VALIDATION
+# ============================================================================
+echo ""
+echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+echo "   GATE UI: UI SPRINT QUALITY GATES"
+echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+
+# Skip on main/master (pre-reviewed via PR)
+if [[ "$CURRENT_BRANCH" == "main" || "$CURRENT_BRANCH" == "master" ]]; then
+  echo "⚠️ Pushing to main/master — UI Gate skipped (pre-reviewed via PR)"
+else
+  # Check bypass
+  if [[ "$XP_GATE_SKIP_UI_GATES" == "1" ]]; then
+    if [[ -z "$XP_GATE_BYPASS_REASON" || ${#XP_GATE_BYPASS_REASON// /} -lt 10 ]]; then
+      echo "❌ XP_GATE_BYPASS_REASON required (min 10 non-whitespace chars)"
+      exit 1
+    fi
+    echo "⚠️  UI Gate BYPASSED — reason: $XP_GATE_BYPASS_REASON"
+    AUDIT_ENTRY="{\"timestamp\":\"$(date -u +%Y-%m-%dT%H:%M:%SZ)\",\"branch\":\"$CURRENT_BRANCH\",\"commit\":\"$(git rev-parse HEAD)\",\"user\":\"$(git config user.name || echo 'unknown')\",\"reason\":\"$XP_GATE_BYPASS_REASON\",\"bypass_type\":\"ui-gates\"}"
+    echo "$AUDIT_ENTRY" >> .audit-log.jsonl
+  else
+    # Detect UI changes in pushed files
+    UI_DETECTION=$(echo "$PUSHED_FILES" | npx -y tsx src/npm-package/lib/ui-detector.ts --push-mode --from-stdin 2>/dev/null) || true
+    
+    IS_UI_SPRINT=$(echo "$UI_DETECTION" | jq -r '.isUiSprint' 2>/dev/null || echo "false")
+    
+    if [[ "$IS_UI_SPRINT" == "true" ]]; then
+      UI_RESULT_FILE=".ui-gate-result.json"
+      MISSING_RESULTS=()
+      
+      if [[ ! -f "$UI_RESULT_FILE" ]]; then
+        MISSING_RESULTS+=("$UI_RESULT_FILE")
+      fi
+      
+      if [[ ${#MISSING_RESULTS[@]} -gt 0 ]]; then
+        echo ""
+        echo "❌ UI sprint detected — missing result file(s):"
+        for f in "${MISSING_RESULTS[@]}"; do echo "  - $f"; done
+        echo ""
+        echo "Before pushing, run: /design-review + /qa-only in your Agent session"
+        echo "Or for non-sprint flows: xp-gate ui-review"
+        echo ""
+        echo "Sprint Flow: Phase 3 automatically triggers these when UI changes detected."
+        exit 1
+      fi
+      
+      # Validate result file
+      RESULT_COMMIT=$(jq -r '.commit' "$UI_RESULT_FILE" 2>/dev/null)
+      RESULT_VERDICT=$(jq -r '.verdict' "$UI_RESULT_FILE" 2>/dev/null)
+      RESULT_EXPIRES=$(jq -r '.expires' "$UI_RESULT_FILE" 2>/dev/null)
+      
+      if [[ "$RESULT_COMMIT" != "$(git rev-parse HEAD)" ]]; then
+        echo "❌ .ui-gate-result.json outdated — expected commit $(git rev-parse HEAD), got $RESULT_COMMIT"
+        exit 1
+      fi
+      
+      if [[ "$RESULT_VERDICT" != "APPROVED" ]]; then
+        echo "❌ .ui-gate-result.json verdict: $RESULT_VERDICT (must be APPROVED)"
+        exit 1
+      fi
+      
+      CURRENT_TIME=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+      if [[ "$CURRENT_TIME" > "$RESULT_EXPIRES" ]]; then
+        echo "❌ .ui-gate-result.json expired ($RESULT_EXPIRES)"
+        exit 1
+      fi
+      
+      echo "✅ Gate UI: PASS — UI changes reviewed and approved"
+    else
+      echo "ℹ️  No UI changes detected — skipping UI Gate"
+    fi
+  fi
+fi
+
+# ============================================================================
 # VALIDATE CODE WALKTHROUGH RESULT FILE
 # ============================================================================
 RESULT_FILE=".code-walkthrough-result.json"
