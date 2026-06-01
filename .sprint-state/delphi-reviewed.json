@@ -1,8 +1,18 @@
 {
   "mode": "design",
-  "timestamp": "2026-05-31T15:45:00Z",
+  "timestamp": "2026-06-02T01:30:00Z",
   "verdict": "APPROVED",
   "consensus_ratio": 1.0,
-  "design_file": "docs/plans/2026-05-31-issue-79-ui-sprint-detection-design.md",
-  "specification_path": ".sprint-state/phase-outputs/specification.yaml"
+  "design_file": "docs/plans/2026-06-02-issue-78-mock-layering-strategy.md",
+  "specification_path": "",
+  "experts": {
+    "A": { "role": "architecture", "rounds": 2, "final_verdict": "APPROVED", "confidence": 8 },
+    "B": { "role": "technical", "rounds": 2, "final_verdict": "APPROVED", "confidence": 9 }
+  },
+  "deferred_to_v2": [
+    "isExternalImport() bare internal path classification",
+    "M2/M3 dependency in CI workflow YAML",
+    "__tests__/foo.e2e.test.ts nested boundary test coverage",
+    "Monorepo workspace glob existsSync guard"
+  ]
 }

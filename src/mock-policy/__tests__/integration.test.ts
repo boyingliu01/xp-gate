@@ -549,7 +549,7 @@ describe('runGateM3 — end-to-end gate runner', () => {
     expect(stripeViolations.length).toBeGreaterThan(0);
   });
 
-  it('respects config severity — violations are warning by default, status remains pass', async () => {
+  it('respects config severity — block when severity is error', async () => {
     const errorConfig = join(tmpDir, '.mockpolicyrc');
     writeFileSync(errorConfig, JSON.stringify({ severity: 'error' }));
 
@@ -567,10 +567,9 @@ describe('runGateM3 — end-to-end gate runner', () => {
 
     const result = await runGateM3([testFile], tmpDir);
 
-    // violations always have severity:'warning' (hardcoded in validateFile),
-    // so config.severity alone does not change status to 'block'
-    expect(result.status).toBe('pass');
-    expect(result.exitCode).toBe(0);
+    // With severity=error, violations get severity='error' → status='block'
+    expect(result.status).toBe('block');
+    expect(result.exitCode).toBe(1);
     expect(result.violations.length).toBeGreaterThan(0);
   });
 

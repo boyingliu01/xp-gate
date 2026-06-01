@@ -52,10 +52,10 @@ function countTestLines(content: string): number {
 }
 
 export function detectTestLayer(testFilePath: string): TestLayer {
-  if (testFilePath.includes('.e2e.') || testFilePath.includes('/e2e/')) {
+  if (testFilePath.includes('.e2e.') || testFilePath.includes('/e2e/') || testFilePath.startsWith('e2e/')) {
     return 'e2e';
   }
-  if (testFilePath.includes('.integration.') || testFilePath.includes('/integration/')) {
+  if (testFilePath.includes('.integration.') || testFilePath.includes('/integration/') || testFilePath.startsWith('integration/')) {
     return 'integration';
   }
   if (testFilePath.includes('/__tests__/') || testFilePath.includes('.test.') || testFilePath.includes('.spec.')) {

@@ -261,7 +261,7 @@ run_gate_m3() {
     return 0
   fi
 
-  if [[ ! -f "$project_root/src/mock-policy/gate-m3.ts" ]]; then
+  if [[ ! -f "./src/mock-policy/gate-m3.ts" ]]; then
     echo "   SKIP — module not found"
     return 0
   fi
@@ -287,7 +287,7 @@ run_gate_m3() {
     [[ -n "$f" ]] && args+=("$f")
   done <<< "$test_files"
 
-  if npx tsx "$project_root/src/mock-policy/gate-m3.ts" "${args[@]}"; then
+  if npx tsx "./src/mock-policy/gate-m3.ts" "${args[@]}"; then
     echo "✅ Gate M3: PASS"
     return 0
   else

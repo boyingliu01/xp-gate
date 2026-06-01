@@ -14,10 +14,12 @@ import { classifyDependency } from './scope-scanner';
 class MockDecisionEngine {
   private readonly scope: ProjectScope;
   private readonly config: MockPolicyConfig;
+  private readonly projectRoot: string;
 
-  constructor(scope: ProjectScope, config: MockPolicyConfig) {
+  constructor(scope: ProjectScope, config: MockPolicyConfig, projectRoot?: string) {
     this.scope = scope;
     this.config = config;
+    this.projectRoot = projectRoot || process.cwd();
   }
 
   /**
@@ -54,7 +56,7 @@ class MockDecisionEngine {
       importPath,
       this.scope,
       {
-        projectRoot: process.cwd(),
+        projectRoot: this.projectRoot,
         imports: [importPath],
         boundary: this.config.projectBoundary,
       },

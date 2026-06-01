@@ -1,28 +1,31 @@
 import { readFile } from 'fs/promises';
+import { join } from 'path';
 import { loadMockPolicyConfig } from './config';
 import { scanProjectScope } from './scope-scanner';
 import MockDecisionEngine from './mock-decision-engine';
 import { MockPolicyResult, MockPolicyViolation, MockStrategy } from './types';
 import { detectTestLayer } from '../mutation/detect-ai-test';
-import type { TestLayer } from '../mutation/types';
 
 function filterTestFiles(files: string[]): string[] {
   return files.filter(f => f.endsWith('.test.ts') || f.endsWith('.spec.ts'));
 }
 
 function collectImports(testContent: string): string[] {
-  // Match: import X from 'y', import { X } from 'y', import type { X } from 'y'
-  // Also: const X = await import('y'), import('y')
   const importRegex = /import\s*(?:type\s*)?(?:\{[^}]*\}|\*\s+as\s+\w+|\w+)?\s*(?:from\s*)?['"]([^'"]+)['"]/g;
+  const requireRegex = /(?:const|let|var)\s+(?:\{[^}]*\}|\w+)\s*=\s*require\s*\(\s*['"]([^'"]+)['"]\s*\)/g;
   const dynamicImportRegex = /import\s*\(\s*['"]([^'"]+)['"]\s*\)/g;
+  const exportFromRegex = /export\s+(?:type\s+)?(?:\{[^}]*\}|\*\s+as\s+\w+|\*|\w+)\s+from\s+['"]([^'"]+)['"]/g;
+
   const imports: string[] = [];
   let match: RegExpExecArray | null;
-  while ((match = importRegex.exec(testContent)) !== null) {
-    imports.push(match[1]);
+
+  const patterns = [importRegex, requireRegex, dynamicImportRegex, exportFromRegex];
+  for (const regex of patterns) {
+    while ((match = regex.exec(testContent)) !== null) {
+      imports.push(match[1]);
+    }
   }
-  while ((match = dynamicImportRegex.exec(testContent)) !== null) {
-    imports.push(match[1]);
-  }
+
   return [...new Set(imports)];
 }
 
@@ -30,6 +33,7 @@ function detectMockUsage(testContent: string, importPath: string): MockStrategy 
   const escaped = importPath.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
   const mockPatterns = [
     new RegExp(`(?:vi|jest)\\.(?:do)?mock\\(['"]${escaped}['"]`),
+    new RegExp(`(?:vi|jest)\\.spyOn\\([^,]+,['"]${escaped}['"]`),
   ];
   return mockPatterns.some(p => p.test(testContent)) ? 'mock' : 'real';
 }
@@ -37,8 +41,11 @@ function detectMockUsage(testContent: string, importPath: string): MockStrategy 
 async function validateFile(
   testFile: string,
   engine: MockDecisionEngine,
+  projectRoot: string,
+  severity: 'warning' | 'error',
 ): Promise<MockPolicyViolation[]> {
-  const content = await readFile(testFile, 'utf-8');
+      const fullPath = testFile.startsWith('/') ? testFile : join(projectRoot, testFile);
+  const content = await readFile(fullPath, 'utf-8');
   const layer = detectTestLayer(testFile);
   const imports = collectImports(content);
   const violations: MockPolicyViolation[] = [];
@@ -55,11 +62,10 @@ async function validateFile(
         actualStrategy,
         expectedStrategy: decision.strategy,
         reason: decision.reason,
-        severity: 'warning',
+        severity,
       });
     }
 
-    // Check: pending mocks require @mock-justified annotation
     if (decision.pendingRemoval && actualStrategy === 'mock') {
       const hasRemovalAnnotation = content.includes(
         '@mock-justified'
@@ -72,7 +78,7 @@ async function validateFile(
           actualStrategy: 'mock',
           expectedStrategy: 'mock',
           reason: `Pending dependency "${importPath}" requires @mock-justified annotation with removal plan`,
-          severity: 'warning',
+          severity,
         });
       }
     }
@@ -97,12 +103,14 @@ export async function runGateM3(
   }
 
   const config = await loadMockPolicyConfig(projectRoot);
+  const severity: 'warning' | 'error' = config.severity;
 
   // Collect all imports from all test files
   const allImports: string[] = [];
   for (const testFile of testFiles) {
     try {
-      const content = await readFile(testFile, 'utf-8');
+  const fullPath = testFile.startsWith('/') ? testFile : join(projectRoot, testFile);
+      const content = await readFile(fullPath, 'utf-8');
       allImports.push(...collectImports(content));
     } catch {
       // File not readable — skip
@@ -115,7 +123,7 @@ export async function runGateM3(
     boundary: config.projectBoundary,
   });
 
-  const engine = new MockDecisionEngine(scope, config);
+  const engine = new MockDecisionEngine(scope, config, projectRoot);
   const allViolations: MockPolicyViolation[] = [];
 
   let integrationCount = 0;
@@ -123,11 +131,12 @@ export async function runGateM3(
     const layer = detectTestLayer(testFile);
     if (layer === 'integration') integrationCount++;
 
-    const violations = await validateFile(testFile, engine);
+    const violations = await validateFile(testFile, engine, projectRoot, severity);
     allViolations.push(...violations);
   }
 
-  const blocked = config.severity === 'error' && allViolations.some(v => v.severity === 'error');
+  const hasBlockableViolations = allViolations.some(v => v.severity === 'error');
+  const blocked = severity === 'error' && hasBlockableViolations;
 
   return {
     exitCode: blocked ? 1 : 0,
@@ -156,12 +165,12 @@ export async function main(args: string[]): Promise<number> {
   if (result.violations.length > 0) {
     console.log('\nViolations:');
     for (const v of result.violations) {
-      const icon = v.severity === 'error' ? '✗' : '⚠';
+      const icon = v.severity === 'error' ? String.fromCodePoint(0x2717) : String.fromCodePoint(0x26A0);
       console.log(`  ${icon} ${v.file}: ${v.reason}`);
     }
   }
 
-  const label = result.status === 'block' ? '✗ BLOCK' : '✓ PASS';
+  const label = result.status === 'block' ? `${String.fromCodePoint(0x2717)} BLOCK` : `${String.fromCodePoint(0x2713)} PASS`;
   console.log(`\n${label}  Integration tests: ${result.scores.integrationTests}  Pending mocks: ${result.scores.pendingMocks}`);
 
   return result.exitCode;

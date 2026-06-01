@@ -1,13 +1,25 @@
 {
-  "id": "sprint-2026-06-01-14",
-  "phase": -1,
+  "id": "sprint-2026-06-02-01",
+  "phase": 3,
   "status": "running",
   "isolation": {
-    "worktree_path": ".worktrees/sprint/sprint-2026-06-01-14",
-    "branch": "sprint/2026-06-01-14",
+    "worktree_path": ".worktrees/sprint/sprint-2026-06-02-01",
+    "branch": "sprint/2026-06-02-01",
     "created_from": "main",
-    "created_from_commit": "ab8d342"
+    "created_from_commit": "923b090"
   },
-  "outputs": {},
-  "metrics": {}
+  "outputs": {
+    "design_doc": "docs/plans/2026-06-02-issue-78-mock-layering-strategy.md",
+    "delphi_round_1": ".sprint-state/phase-outputs/delphi-round-1-report.md",
+    "delphi_round_2": ".sprint-state/phase-outputs/delphi-round-2-report.md",
+    "delphi_reviewed": ".sprint-state/delphi-reviewed.json",
+    "mvp": "src/mock-policy/"
+  },
+  "metrics": {
+    "tests_total": 693,
+    "tests_new": 112,
+    "files_new": 11,
+    "files_modified": 3,
+    "commits": 6
+  }
 }
