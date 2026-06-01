@@ -156,15 +156,15 @@ Phase 8: CLEANUP → git worktree remove + sprint-state.json update → status: 
 > **清理提示**: Sprint 完成（Phase 6 SHIP）后，执行 `git worktree remove <worktree_path>` 清理 worktree 目录，同时保留 `.sprint-state/` 中的历史记录。
 
 ### Phase 0: THINK（需求探索与设计）
-- `brainstorming` (superpowers) — **HARD-GATE**: 设计未批准 → 不可进入实现
+- **Subagent dispatch**: orchestrator 通过 `task(category="deep", load_skills=["brainstorming"])` 启动独立 session
+- 输入: Phase -1 summary（worktree 路径）+ 用户原始需求
 - 输出: 结构化设计文档 → 直接作为 Phase 1 PLAN 的输入
-- 替代原因: office-hours 的 YC 六问适合新产品方向验证，brainstorming 的"设计批准才可进入实现"机制更适合 sprint-flow 场景
+- **HARD-GATE**: 设计未批准 → 不可进入实现
 
 ### Phase 1: PLAN（共识评审）
-- `autoplan` (gstack) — CEO → Design → Eng 自动流水线
-- `delphi-review` — 多轮匿名评审直到共识
-- `to-issues` — 将 APPROVED 的 PRD/spec 拆解为垂直切片 Issue（HITL/AFK + 依赖图 + effort 估算）
-- **specification.yaml** — 自动生成（含 User Stories 段）
+- **Subagent dispatch**: orchestrator 通过 `task(category="deep", load_skills=["autoplan", "delphi-review", "to-issues"])` 启动独立 session
+- 输入: phase-0-summary.md + 设计文档
+- 输出: `specification.yaml`（含 user_stories[]）+ `slices-manifest.json`
 
 **条件分支逻辑**:
 - IF autoplan AUTO_APPROVED + 无 taste_decisions → 跳过 delphi-review
@@ -236,7 +236,10 @@ Phase 2 第一步必须执行 DELPHI-GATE 检查。没有 delphi-review APPROVED
 - Phase 3 Gate M 会在 push 时验证 mock 密度
 
 ### Phase 3: REVIEW + TEST（验证）
-- `delphi-review --mode code-walkthrough` — 多专家匿名代码走查（代替 cross-model-review）
+- **Subagent dispatch**: orchestrator 通过 `task(category="deep", load_skills=["delphi-review", "test-specification-alignment"])` 启动独立 session
+- 输入: phase-2-summary.md + MVP 代码
+- 输出: 评审报告 + 测试对齐结果
+- `delphi-review --mode code-walkthrough` — 多专家匿名代码走查
 - `test-specification-alignment` — 测试与 Spec 对齐验证
 - `browse` (gstack) — 浏览器自动化测试
 - `k6` / `locust` / `gatling` — 负载/压力测试（可选，后端项目）
@@ -255,21 +258,32 @@ Phase 2 第一步必须执行 DELPHI-GATE 检查。没有 delphi-review APPROVED
 - 即使用户说"赶时间"、"跳过验收"、"直接发布"，也必须暂停等待用户确认
 - 使用 `@templates/emergent-issues-template.md` 检查清单
 
-### Phase 5: FEEDBACK CAPTURE（反馈捕获）
-- ⚠️ **HARD-GATE: Phase 5 不可跳过。Phase 4 完成后（无论验收通过/跳过/推迟）→ 必须进入 Phase 5 → 完成后才能进入 Phase 6。**
-- `learn` (gstack) — 模式记录
-- `retro` (gstack) — 工程回顾：提交历史、工作模式、代码质量趋势
-- `systematic-debugging` (superpowers) — 根因调试（反馈中的 bug 做根因分析，Iron Law：无调查无修复）
+### Phase 5: FEEDBACK CAPTURE（反馈获）
+- **Subagent dispatch**: orchestrator 通过 `task(category="quick", load_skills=["learn", "retro", "systematic-debugging"])` 启动独立 session
+- 输入: phase-4-summary.md（验收结果）+ emergent-issues.md（如有）
+- 输出: `feedback-log.md`
+- **HARD-GATE**: Phase 5 不可跳过。Phase 4 完成后 → 必须进入 Phase 5 → 完成后才能进入 Phase 6。
+- **`learn` (gstack)** — Sprint 级复盘（这是 /learn 在本项目中的主要调用时机）
+  - ralph-loop 已在 BUILD Phase 内部实现 per-REQ learn（permanent/contextual 分类）
+  - Phase 5 额外进行 Sprint 级复盘，总结全 Phase 经验
+- **`retro` (gstack)** — 工程回顾：提交历史、工作模式、代码质量趋势
+- **`systematic-debugging` (superpowers)** — 根因调试
 
 ### Phase 6: SHIP（发布准备）
-- ⚠️ **HARD-GATE: Phase 5 未完成 → 不可进入 Phase 6。验证 `.sprint-state/phase-outputs/feedback-log.md` 存在。**
+- **Subagent dispatch**: orchestrator 通过 `task(category="quick", load_skills=["finishing-a-development-branch", "ship"])` 启动独立 session
+- 输入: phase-5-summary.md + feedback-log.md
+- 输出: PR URL
+- **HARD-GATE**: Phase 5 未完成 → 不可进入 Phase 6。验证 `.sprint-state/phase-outputs/feedback-log.md` 存在。
 - **⚠️ GITHOOKS-GATE**: 再次验证 hooks 完整性（Phase 2 的 TDD 编码已触发提交，SHIP 阶段还会再次提交）
   - 运行 `githooks/verify.sh` → 缺失 → `githooks/install.sh` → 阻断直至修复
 - **`finishing-a-development-branch`** (superpowers) — 结构化完成流：4 选项（merge / PR / discard / keep）
 - `ship` (gstack) — 创建 PR（PR 路径时使用）
 - Phase 6 输出：PR URL（用于 Phase 7 输入）
 
-### Phase 7: ⚠️ LAND（合并 + 部署）
+### Phase 7:  LAND（合并 + 部署）
+- **Subagent dispatch**: orchestrator 通过 `task(category="deep", load_skills=["land-and-deploy"])` 启动独立 session
+- 输入: phase-6-summary.md + PR URL
+- 输出: 部署状态 + Canary 报告
 - 输入：Phase 6 输出的 PR URL
 - 调用：`land-and-deploy` skill
 - 流程：
@@ -302,7 +316,116 @@ Phase 2 第一步必须执行 DELPHI-GATE 检查。没有 delphi-review APPROVED
 
 ---
 
-## Output Format (MANDATORY)
+## 编排层规则（Orchestration Rules）
+
+### Phase Subagent Dispatch Matrix
+
+| Phase | 名称 | Subagent? | Category | load_skills Orchestrator 执行者 |
+|-------|------|:---------:|----------|-------------|----------------|
+| -1 | ISOLATE | ❌ | Bash（直接执行）| 无 | orchestrator |
+| 0 | THINK | ✅ | `deep` | `["brainstorming"]` | subagent |
+| 1 | PLAN | ✅ | `deep` | `["autoplan", "delphi-review", "to-issues"]` | subagent |
+| 2 | BUILD | ✅(已有) | ralph-loop | `["test-driven-development"]` | subagent |
+| 3 | REVIEW | ✅ | `deep` | `["delphi-review", "test-specification-alignment"]` | subagent |
+| 4 | USER ACCEPT | ❌ | **强制人工** | 无 | 用户 |
+| 5 | FEEDBACK | ✅ | `quick` | `["learn", "retro", "systematic-debugging"]` | subagent |
+| 6 | SHIP | ✅ | `quick` | `["finishing-a-development-branch", "ship"]` | subagent |
+| 7 | LAND | ✅ | `deep` | `["land-and-deploy"]` | subagent |
+| 8 | CLEANUP | ❌ | Bash（直接执行）| 无 | orchestrator |
+
+**上下文隔离原则**：
+- 每个 Subagent 在**独立 session** 中启动，不继承 orchestrator 的对话历史
+- orchestrator session 仅接收 subagent 的最终结果摘要（~13,000 tokens/sprint）
+- 现代模型百万 token 上下文 + 缓存命中 → 单 sprint 不会触发 overflow
+
+### CONTEXT INHERITANCE
+
+每个 Phase subagent 启动时，上下文仅通过以下路径继承：
+
+| Phase | 加载来源 | 内容 |
+|-------|---------|------|
+| Phase -1 | 无前置（Bash 操作） | 用户原始需求 + 当前分支状态 |
+| Phase 0 | phase--1-summary（仅路径） | 隔离环境信息（worktree 路径） |
+| Phase 1 | phase-0-summary.md + design-doc | 设计决策 + 结构化规格 |
+| Phase 2 | phase-1-summary.md + specification.yaml | 评审结论 + REQ 列表 |
+| Phase 3 | phase-2-summary.md + MVP 代码 | 构建结果 |
+| Phase 4 | — | **人工验收**，无需加载 |
+| Phase 5 | phase-3-summary.md + emergent-issues.md | 验证结论 |
+| Phase 6 | phase-5-summary.md + feedback-log.md | 复盘结论 |
+| Phase 7 | phase-6-summary.md + PR URL | 发布准备 |
+| Phase 8 | phase-7-summary（Bash 操作） | 部署结果 |
+
+**隔离原则**：每个 Phase subagent 在干净上下文中启动。
+输入仅限上表对应的摘要文件和一级产出物。
+不包含前一 Phase 的完整对话、中间文件、失败尝试。
+
+### PHASE TRANSITION RULES
+
+每个 Phase subagent 完成后，必须按顺序执行以下步骤：
+
+1. **写入 Phase 摘要**：创建 `.sprint-state/phase-outputs/phase-{N}-summary.md`
+   - 格式：YAML frontmatter + Markdown body（body ≤ 50 行）
+   - 大小限制：≤ 40,000 字符（≈ 10,000 tokens）
+
+2. **更新 sprint-state.json**：
+   - `phase`: 当前阶段编号
+   - `outputs`: 新增当前阶段输出文件路径
+
+3. **等待用户确认 checkpoint**（如适用）
+
+### Phase Summary 格式（YAML Frontmatter Schema）
+
+每个 `phase-N-summary.md` 必须包含以下 YAML frontmatter：
+
+```markdown
+---
+phase: -1
+phase_name: ISOLATE
+status: completed
+outputs:
+  - path: ".worktrees/sprint/sprint-YYYY-MM-DD-NN"
+    type: directory
+decisions:
+  - title: "Worktree isolation enabled"
+    rationale: "Prevent main branch pollution"
+unresolved_issues: []
+next_phase_context: "Worktree created at {path}. All subsequent edits MUST use this workdir."
+---
+
+## Phase Summary
+{简明摘要，不超过 50 行}
+```
+
+**必填字段**: `phase`, `phase_name`, `status`, `outputs`, `decisions`, `next_phase_context`
+**可选字段**: `unresolved_issues`
+
+### Phase Transition Gate
+
+Orchestrator dispatch 下一 Phase 前必须执行验证：
+
+```bash
+SUMMARY=".sprint-state/phase-outputs/phase-${N}-summary.md"
+[ -f "$SUMMARY" ] || { echo "[BLOCK] phase-${summary 不存在"; exit 1; }
+FRONTMARKERS=$(grep -c "^---" "$SUMMARY" 2>/dev/null || echo 0)
+[ "$FRONTMARKERS" -ge 2 ] || { echo "[BLOCK] YAML frontmatter 格式不完整"; exit 1; }
+grep -q "^phase:" "$SUMMARY" || { echo "[BLOCK] 缺少 phase 字段"; exit 1; }
+grep -q "^decisions:" "$SUMMARY" || { echo "[BLOCK] 缺少 decisions 字段"; exit 1; }
+grep -q "^next_phase_context:" "$SUMMARY" || { echo "[BLOCK] 缺少 next_phase_context"; exit 1; }
+CHARS=$(wc -c < "$SUMMARY")
+[ "$CHARS" -le 40000 ] || { echo "[BLOCK] 摘要超出大小限制 (${CHARS}/40000 chars)"; exit 1; }
+```
+
+**由 orchestrator 强制执行**，不依赖 subagent 自觉遵守。
+验证失败 → BLOCK，不可 dispatch 下一 Phase。
+
+### WORKTREE ENFORCEMENT（Issue #84）
+
+Phase -1 执行完毕后，**所有后续操作（Phase 0 到 Phase 8）的文件编辑、命令执行 MUST 在 worktree 目录下执行**：
+
+- **工作目录**：所有 Bash 命令必须通过 `workdir` 参数或 `&&` 链式命令在 worktree 路径下执行
+- **文件写入**：所有 `write`、`edit` 工具的 `filePath` 必须位于 `isolation.worktree_path` 下
+- **验证步骤**：Phase 0 开始前，输出 `[WORKTREE] 后续所有操作将在 {worktree_path} 中进行`
+- **例外**：`.gitignore` 校验（Phase -1 表步 4）和 `git worktree remove`（Phase 8 清理）在仓库根目录执行
 Sprint state is persisted as JSON in `.sprint-state/sprint-state.json`:
 ```json
 {

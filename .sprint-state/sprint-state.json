@@ -1,20 +1,23 @@
 {
-  "id": "sprint-2026-05-31-01",
-  "phase": 2,
+  "id": "sprint-2026-06-01-03",
+  "phase": 1,
   "status": "completed",
+  "pause_reason": "none",
   "isolation": {
-    "worktree_path": ".worktrees/sprint/sprint-2026-05-31-01",
-    "branch": "sprint/2026-05-31-01",
+    "worktree_path": ".worktrees/sprint/sprint-2026-06-01-03",
+    "branch": "sprint/2026-06-01-03",
     "created_from": "main",
-    "created_from_commit": "d5ad35e"
+    "created_from_commit": "4517f2b"
   },
-  "issues": [83, 86, 87, 88, 90],
   "outputs": {
-    "test_file": "src/npm-package/lib/__tests__/npm-package.test.js"
+    "design_doc": "docs/plans/2026-06-01-user-feedback-form-design.md",
+    "phase_0_summary": ".sprint-state/phase-outputs/phase-0-summary.md",
+    "phase_1_summary": ".sprint-state/phase-outputs/phase-1-summary.md",
+    "issues_addressed": ["#81", "#84", "#89"]
   },
   "metrics": {
-    "tests_passed": 10,
-    "tests_failed": 0,
-    "coverage_pct": 100
+    "design_approved": true,
+    "hard_gate_passed": true,
+    "skill_evals_passed": 7
   }
 }
