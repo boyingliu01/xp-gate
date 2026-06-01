@@ -258,7 +258,7 @@ Phase 2 第一步必须执行 DELPHI-GATE 检查。没有 delphi-review APPROVED
 - 即使用户说"赶时间"、"跳过验收"、"直接发布"，也必须暂停等待用户确认
 - 使用 `@templates/emergent-issues-template.md` 检查清单
 
-### Phase 5: FEEDBACK CAPTURE（反馈获）
+### Phase 5: FEEDBACK CAPTURE（反馈获取）
 - **Subagent dispatch**: orchestrator 通过 `task(category="quick", load_skills=["learn", "retro", "systematic-debugging"])` 启动独立 session
 - 输入: phase-4-summary.md（验收结果）+ emergent-issues.md（如有）
 - 输出: `feedback-log.md`
@@ -350,7 +350,7 @@ Phase 2 第一步必须执行 DELPHI-GATE 检查。没有 delphi-review APPROVED
 | Phase 2 | phase-1-summary.md + specification.yaml | 评审结论 + REQ 列表 |
 | Phase 3 | phase-2-summary.md + MVP 代码 | 构建结果 |
 | Phase 4 | — | **人工验收**，无需加载 |
-| Phase 5 | phase-3-summary.md + emergent-issues.md | 验证结论 |
+| Phase 5 | phase-4-summary.md + emergent-issues.md | 验收结论 |
 | Phase 6 | phase-5-summary.md + feedback-log.md | 复盘结论 |
 | Phase 7 | phase-6-summary.md + PR URL | 发布准备 |
 | Phase 8 | phase-7-summary（Bash 操作） | 部署结果 |
@@ -405,13 +405,15 @@ Orchestrator dispatch 下一 Phase 前必须执行验证：
 
 ```bash
 SUMMARY=".sprint-state/phase-outputs/phase-${N}-summary.md"
-[ -f "$SUMMARY" ] || { echo "[BLOCK] phase-${summary 不存在"; exit 1; }
+[ -f "$SUMMARY" ] || { echo "[BLOCK] phase-${N}-summary 不存在"; exit 1; }
 FRONTMARKERS=$(grep -c "^---" "$SUMMARY" 2>/dev/null || echo 0)
 [ "$FRONTMARKERS" -ge 2 ] || { echo "[BLOCK] YAML frontmatter 格式不完整"; exit 1; }
 grep -q "^phase:" "$SUMMARY" || { echo "[BLOCK] 缺少 phase 字段"; exit 1; }
+grep -q "^phase_name:" "$SUMMARY" || { echo "[BLOCK] 缺少 phase_name 字段"; exit 1; }
+grep -q "^status:" "$SUMMARY" || { echo "[BLOCK] 缺少 status 字段"; exit 1; }
 grep -q "^decisions:" "$SUMMARY" || { echo "[BLOCK] 缺少 decisions 字段"; exit 1; }
 grep -q "^next_phase_context:" "$SUMMARY" || { echo "[BLOCK] 缺少 next_phase_context"; exit 1; }
-CHARS=$(wc -c < "$SUMMARY")
+CHARS=$(wc -c < "$SUMMARY" | tr -d ' ')
 [ "$CHARS" -le 40000 ] || { echo "[BLOCK] 摘要超出大小限制 (${CHARS}/40000 chars)"; exit 1; }
 ```
 
