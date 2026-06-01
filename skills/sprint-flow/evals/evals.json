@@ -51,11 +51,63 @@
       "name": "stop-at-plan",
       "category": "boundary",
       "prompt": "我想先看看方案再决定要不要继续开发。执行/sprint-flow '给XP-Gate添加代码覆盖率趋势分析功能' --stop-at plan",
-      "expected_output": "只执行到Phase 1(Plan)就停止，输出specification.yaml后等待用户决定。不应自动进入Phase 2。",
+      "expected_output": "只执行到Phase 1(Plan)后停止，输出specification.yaml并等待用户决定。不应自动进入Phase 2。",
       "files": [],
       "assertions": [
         {"name": "stops-at-plan", "type": "contains", "value": "specification.yaml"},
         {"name": "no-build-phase", "type": "not_contains", "value": "Phase 2"}
+      ]
+    },
+    {
+      "id": 5,
+      "name": "phase-subagent-dispatch",
+      "category": "normal",
+      "prompt": "sprint-flow '开发一个用户反馈表单功能'，请执行 Phase 0 THINK 阶段",
+      "expected_output": "Phase 0 THINK 必须通过独立 subagent 执行（task with category=deep 和 load_skills=['brainstorming']），而不是在同一 session 内。subagent 输入应包含 phase--1-summary 的 worktree 路径。输出设计文档。",
+      "files": [],
+      "assertions": [
+        {"name": "subagent-dispatch-think", "type": "contains", "value": "category"},
+        {"name": "brainstorming-skill-loaded", "type": "contains", "value": "brainstorming"},
+        {"name": "design-doc-output", "type": "contains", "value": "设计文"}
+      ]
+    },
+    {
+      "id": 6,
+      "name": "context-inheritance-across-phases",
+      "category": "normal",
+      "prompt": "sprint-flow 进入 Phase 3 REVIEW 阶段，前两个阶段已完成。Phase 1 产出了 specification.yaml，Phase 2 产出了 MVP 代码。",
+      "expected_output": "Phase 3 必须加载 phase-2-summary.md 和 MVP 作为输入。Phase summary 应包含 YAML frontmatter 和必填字段（phase, decisions, next_phase_context）。",
+      "files": [],
+      "assertions": [
+        {"name": "load-phase-2-summary", "type": "contains", "value": "phase-2-summary"},
+        {"name": "yaml-frontmatter-schema", "type": "contains", "value": "frontmatter"},
+        {"name": "reviews-existing-code", "type": "contains", "value": "MVP"}
+      ]
+    },
+    {
+      "id": 7,
+      "name": "phase-transition-gate-enforcement",
+      "category": "boundary",
+      "prompt": "sprint-flow Phase 1 完成后，Phase summary 文件忘记写了，直接要进入 Phase 2。会发生什么？",
+      "expected_output": "Phase Transition Gate 检查 phase-1-summary.md 是否存在。如果缺失，必须 BLOCK 不可 dispatch Phase 2。orchestrator 强制执行验证。",
+      "files": [],
+      "assertions": [
+        {"name": "gate-blocks-missing-summary", "type": "contains", "value": "BLOCK"},
+        {"name": "summary-required", "type": "contains", "value": "summary"},
+        {"name": "orchestrator-enforces", "type": "contains", "value": "orchestrator"}
+      ]
+    },
+    {
+      "id": 8,
+      "name": "worktree-enforcement-issue-84",
+      "category": "boundary",
+      "prompt": "sprint-flow Phase -1 创建了 worktree，但 agent 开始在主目录编辑文件而不是在 worktree 目录下。这有什么问题？",
+      "expected_output": "指出 Phase -1 完成后，所有后续文件编辑必须在 worktree 目录下执行。主目录编辑不会同步到 worktree，导致 merge conflicts 和文件遗漏。",
+      "files": [],
+      "assertions": [
+        {"name": "worktree-required", "type": "contains", "value": "worktree"},
+        {"name": "all-edits-in-worktree", "type": "contains", "value": "所有"},
+        {"name": "merge-conflict-risk", "type": "contains", "value": "merge"}
       ]
     }
   ],
