@@ -6,11 +6,42 @@
 
 import { describe, it, expect, vi } from 'vitest';
 import fs from 'fs/promises';
-import { detectAITestCharacteristics } from '../detect-ai-test';
+import { detectAITestCharacteristics, detectTestLayer } from '../detect-ai-test';
 
 vi.mock('fs/promises');
 
 describe('detect-ai-test.ts - AI Test Detection', () => {
+  describe('detectTestLayer', () => {
+    it('should return unit for __tests__ paths', () => {
+      expect(detectTestLayer('src/__tests__/user.test.ts')).toBe('unit');
+    });
+
+    it('should return e2e for .e2e. paths', () => {
+      expect(detectTestLayer('src/e2e/login.e2e.test.ts')).toBe('e2e');
+      expect(detectTestLayer('src/e2e/api.test.ts')).toBe('e2e');
+    });
+
+    it('should return integration for .integration. paths', () => {
+      expect(detectTestLayer('src/integration/user.integration.test.ts')).toBe('integration');
+      expect(detectTestLayer('src/integration/db.test.ts')).toBe('integration');
+    });
+
+    it('should return unit for .test. and .spec. paths', () => {
+      expect(detectTestLayer('src/services/user.test.ts')).toBe('unit');
+      expect(detectTestLayer('src/services/user.spec.ts')).toBe('unit');
+    });
+
+    it('should return unknown for non-test paths', () => {
+      expect(detectTestLayer('src/services/user.ts')).toBe('unknown');
+      expect(detectTestLayer('README.md')).toBe('unknown');
+    });
+
+    it('should prioritize e2e over other patterns', () => {
+      expect(detectTestLayer('src/__tests__/login.e2e.test.ts')).toBe('e2e');
+      expect(detectTestLayer('src/integration/user.e2e.test.ts')).toBe('e2e');
+    });
+  });
+
   describe('detectAITestCharacteristics', () => {
     it('should return isAiGenerated=true when mock density > 30%', async () => {
       const mockContent = `
