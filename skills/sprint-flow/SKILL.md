@@ -67,8 +67,7 @@ Phase 3: REVIEW → delphi-review --mode code-walkthrough → test-specification
            → browse → ⚠️ (验证失败)
 Phase 4: ⚠️ ⚠️ USER ACCEPTANCE → 必须人工验收 → Emergent Issues List
 Phase 5: FEEDBACK → learn + retro（工程回顾）+ systematic-debugging（根因调试）
-Phase 6: SHIP → finishing-a-development-branch (4 选项) → ship (PR 路径)
-            → PR 创建完成
+Phase 6: SHIP → finishing-a-development-branch (4 选项) → ship (PR 路径) → **自动进入 Phase 7**
 Phase 7: ⚠️ LAND → land-and-deploy → merge PR + wait CI + canary health check
             → deploy verification + auto-rollback on failure
 Phase 8: CLEANUP → git worktree remove + sprint-state.json update → status: merged
@@ -90,7 +89,7 @@ Phase 8: CLEANUP → git worktree remove + sprint-state.json update → status: 
 | Phase 3 | browse 发现问题 | 回退 Phase 2（不暂停） | 验证通过后自动继续 |
 | **Phase 4** | ⚠️ **必须人工验收** | 用户实际使用后确认 | 用户确认后继续 |
 | **Phase 5** | ⚠️ **必须执行，不可跳过 (HARD-GATE)** | Phase 5 完成后进入 Phase 6 | `feedback-log.md` 生成后自动继续 |
-| Phase 6 | finishing-a-development-branch | 用户选择 4 选项 (merge/PR/discard/keep) | 确认后自动继续 |
+| Phase 6 | finishing-a-development-branch | 用户选择 4 选项 (merge/PR/discard/keep) | PR 路径自动继续到 Phase 7 |
 | Phase 6 | ship PR 创建（PR 路径）| 用户确认合并 | 合并后自动继续 |
 | **Phase 7** | **land-and-deploy 完成/失败** | **用户确认合并结果 / 处理部署失败** | **确认/修复后继续** |
 | **Phase 8** | **worktree 清理完成/失败** | **用户确认清理 / 手动处理残留** | **确认后结束流程** |
