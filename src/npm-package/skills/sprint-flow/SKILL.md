@@ -320,9 +320,9 @@ Phase 2 第一步必须执行 DELPHI-GATE 检查。没有 delphi-review APPROVED
 
 ### Phase Subagent Dispatch Matrix
 
-| Phase | 名称 | Subagent? | Category | load_skills Orchestrator 执行者 |
-|-------|------|:---------:|----------|-------------|----------------|
-| -1 | ISOLATE | ❌ | Bash（直接执行）| 无 | orchestrator |
+| Phase | 名称 | Subagent? | Category | load_skills | 执行者 |
+|-------|------|:---------:|----------|-------------|--------|
+| -1 | ISOLATE | ❌ | Bash（直接执行） | 无 | orchestrator |
 | 0 | THINK | ✅ | `deep` | `["brainstorming"]` | subagent |
 | 1 | PLAN | ✅ | `deep` | `["autoplan", "delphi-review", "to-issues"]` | subagent |
 | 2 | BUILD | ✅(已有) | ralph-loop | `["test-driven-development"]` | subagent |
@@ -331,7 +331,7 @@ Phase 2 第一步必须执行 DELPHI-GATE 检查。没有 delphi-review APPROVED
 | 5 | FEEDBACK | ✅ | `quick` | `["learn", "retro", "systematic-debugging"]` | subagent |
 | 6 | SHIP | ✅ | `quick` | `["finishing-a-development-branch", "ship"]` | subagent |
 | 7 | LAND | ✅ | `deep` | `["land-and-deploy"]` | subagent |
-| 8 | CLEANUP | ❌ | Bash（直接执行）| 无 | orchestrator |
+| 8 | CLEANUP | ❌ | Bash（直接执行） | 无 | orchestrator |
 
 **上下文隔离原则**：
 - 每个 Subagent 在**独立 session** 中启动，不继承 orchestrator 的对话历史
@@ -349,7 +349,7 @@ Phase 2 第一步必须执行 DELPHI-GATE 检查。没有 delphi-review APPROVED
 | Phase 1 | phase-0-summary.md + design-doc | 设计决策 + 结构化规格 |
 | Phase 2 | phase-1-summary.md + specification.yaml | 评审结论 + REQ 列表 |
 | Phase 3 | phase-2-summary.md + MVP 代码 | 构建结果 |
-| Phase 4 | — | **人工验收**，无需加载 |
+| Phase 4 | — | **人工验收**。Phase 4 不产生 subagent summary，但用户验收结果记录在 `.sprint-state/phase-outputs/emergent-issues.md`（如有 emergent issues）。Phase 5 加载此文件。 |
 | Phase 5 | phase-4-summary.md + emergent-issues.md | 验收结论 |
 | Phase 6 | phase-5-summary.md + feedback-log.md | 复盘结论 |
 | Phase 7 | phase-6-summary.md + PR URL | 发布准备 |
@@ -358,6 +358,11 @@ Phase 2 第一步必须执行 DELPHI-GATE 检查。没有 delphi-review APPROVED
 **隔离原则**：每个 Phase subagent 在干净上下文中启动。
 输入仅限上表对应的摘要文件和一级产出物。
 不包含前一 Phase 的完整对话、中间文件、失败尝试。
+
+**特殊场景**：
+- `--resume-from <phase>`：跳过前置 Phase，直接从指定 Phase 启动。此时要求该 Phase 的前置摘要文件已存在。例如 `--resume-from build` 要求 `phase-1-summary.md` 和 `specification.yaml` 已存在。orchestrator 仍执行 Phase Transition Gate 验证。
+- `--no-isolate`：跳过 Phase -1 ISOLATE，直接在当前分支执行。Phase 0 无 `phase--1-summary` 可用，上下文继承来源为用户原始需求 + 当前 git 状态。所有后续 Phase 的 worktree enforcement 不适用（无 worktree），但仍需保持代码隔离。
+- `next_phase_context` 中的 `{path}` 等变量占位符在实际写入时被替换为具体值。示例中的 `{path}` 应替换为实际 worktree 路径（如 `.worktrees/sprint/sprint-2026-06-01-01`）。
 
 ### PHASE TRANSITION RULES
 
@@ -412,6 +417,7 @@ grep -q "^phase:" "$SUMMARY" || { echo "[BLOCK] 缺少 phase 字段"; exit 1; }
 grep -q "^phase_name:" "$SUMMARY" || { echo "[BLOCK] 缺少 phase_name 字段"; exit 1; }
 grep -q "^status:" "$SUMMARY" || { echo "[BLOCK] 缺少 status 字段"; exit 1; }
 grep -q "^decisions:" "$SUMMARY" || { echo "[BLOCK] 缺少 decisions 字段"; exit 1; }
+grep -q "^outputs:" "$SUMMARY" || { echo "[BLOCK] 缺少 outputs 字段"; exit 1; }
 grep -q "^next_phase_context:" "$SUMMARY" || { echo "[BLOCK] 缺少 next_phase_context"; exit 1; }
 CHARS=$(wc -c < "$SUMMARY" | tr -d ' ')
 [ "$CHARS" -le 40000 ] || { echo "[BLOCK] 摘要超出大小限制 (${CHARS}/40000 chars)"; exit 1; }
