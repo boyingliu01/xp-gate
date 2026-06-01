@@ -53,6 +53,10 @@ maturity: beta
 ```
 Phase -1: ISOLATE → ⚠️ 检测保护分支(main/master/develop/trunk/mainline) → 强制创建 git worktree
             → 已在 worktree 中 → 跳过 → 项目 setup → .gitignore 校验 → sprint-state isolation 记录
+Phase -0.5: AUTO-ESTIMATE → 自动评估需求规模 → ⚠️ 展示评估结果，用户确认
+            → 轻量：跳过 brainstorming + delphi-review，直接 Phase 2 BUILD
+            → 标准：正常流程 Phase 0-4
+            → 复杂：完整流程 Phase 0-8 + 风险警告
 Phase 0: THINK → brainstorming → ⚠️ HARD-GATE: 设计未批准 → 不可进入实现 → Design Document (AI编辑行为约束: 原则3 Surgical Changes, 验证循环要求: 原则4 Goal-Driven Execution - 见 AGENTS.md "## AI CODING DISCIPLINE (Karpathy Principles)")
 Phase 1: PLAN → autoplan → ⚠️ (如有taste_decisions，暂停等用户确认)
            → delphi-review → ⚠️ (等待 APPROVED)
@@ -82,6 +86,7 @@ Phase 8: CLEANUP → git worktree remove + sprint-state.json update → status: 
 | 暂停点位置 | 触发条件 | 用户操作 | 自动恢复条件 |
 |-----------|---------|---------|-------------|
 | **Phase -1** | ⚠️ **保护分支强制隔离 / --no-isolate 跳过** | 输出 ⚠️ 警告或自动创建 worktree | 自动创建或用户确认后继续 |
+| **Phase -0.5** | **AUTO-ESTIMATE 结果展示** | 接受建议 / 修改流程 / 取消 | 用户确认后按路由继续 |
 | **Phase 0** | ⚠️ **设计未 APPROVED (HARD-GATE)** | 根据反馈修改设计 | 设计 APPROVED 后继续 |
 | Phase 1 | autoplan surfacing taste_decisions | 用户确认每个决策 | 确认后自动继续 |
 | Phase 1 | delphi-review 未 APPROVED | 修复并重新评审 | APPROVED 后自动继续 |
@@ -154,6 +159,68 @@ Phase 8: CLEANUP → git worktree remove + sprint-state.json update → status: 
 ```
 
 > **清理提示**: Sprint 完成（Phase 6 SHIP）后，执行 `git worktree remove <worktree_path>` 清理 worktree 目录，同时保留 `.sprint-state/` 中的历史记录。
+
+### Phase -0.5: AUTO-ESTIMATE（自动化规模评估与流程路由）
+
+**执行时机**: Phase -1 ISOLATE 完成后、Phase 0 THINK 之前。**自动执行**。
+
+**目的**: 自动评估需求规模，匹配适度流程，避免小需求走重量级流程造成资源浪费。不依赖人/AI 主观判断，而是通过代码结构分析提供客观指标。
+
+**详细指令**: 参见 `references/phase-minus-0-5-auto-estimate.md`
+
+#### 快速参考
+
+**步骤**:
+1. **识别需求类型** — 删除/修改已存在代码 → 立即分析；新增功能 → brainstorming 后分析
+2. **收集指标** — 引用计数 (`grep -rn`)、跨模块依赖 (目录分布)、循环依赖、Public API 暴露、测试文件数
+3. **汇总评估** — 综合打分 → 轻量 / 标准 / 复杂
+4. **输出结果** — 使用 `templates/auto-estimate-output-template.md` 标准格式
+5. **用户确认** — 接受建议 / 修改流程 / 取消
+6. **路由执行** — 按最终级别进入对应 Phase
+
+**路由决策表**:
+
+| 评估结果 | 路由 | 说明 |
+|---------|------|------|
+| **轻量** (引用 ≤3, 同模块，无循环依赖) | 跳过 Phase 0 brainstorming + Phase 1 delphi-review → 直接进入 Phase 2 BUILD | 小改动不需要完整流程 |
+| **标准** (引用 4-10, 跨 1-2 模块) | 正常流程 Phase 0-4 | 标准 sprint |
+| **复杂** (引用 >10 或 循环依赖 或 跨 3+ 模块) | 完整 Phase 0-8 + 风险警告 | 高风险需求 |
+
+**输出模板**: `templates/auto-estimate-output-template.md`
+**学习日志**: `templates/auto-estimate-learning-log.md`（记录用户 override，用于阈值优化）
+
+**输出格式**:
+```
++-------------------------------------------------------------+
+| AUTO-ESTIMATE 评估结果                                        |
++-------------------------------------------------------------+
+| 需求：{task_description}                                      |
+| 类型：{change_type}                                          |
+|                                                             |
+| [{impact_level}] Impact: {impact_label}                      |
+|                                                             |
+| 引用：{ref_count} 处                                          |
+| 跨模块：{cross_module_count} 个 ({module_list})               |
+| 循环依赖：{circular_dep_status}                               |
+| Public API：{public_api_count} 个                             |
+|                                                             |
+| 建议流程：{recommended_flow}                                  |
+|                                                             |
+| {risk_warning}                                               |
+|                                                             |
+| [接受建议]  [修改流程]  [取消]                                 |
++-------------------------------------------------------------+
+```
+
+**纠偏机制**:
+- **接受建议**: 按推荐流程执行，记录 `user_decision: "accepted"`
+- **修改流程**: 用户选择其他级别，记录 `override_reason` 到 `.sprint-state/auto-estimate-learning.json`
+- **取消**: 停止本次 sprint
+
+**⚠️ 轻量路由的特殊处理**:
+- 轻量路由跳过 Phase 0 brainstorming 和 Phase 1 delphi-review
+- 但仍然执行 Phase 1→2 的 GITHOOKS-GATE 检查
+- Phase 2 BUILD 仍然执行完整 TDD + 盲评 + 验证
 
 ### Phase 0: THINK（需求探索与设计）
 - **Subagent dispatch**: orchestrator 通过 `task(category="deep", load_skills=["brainstorming"])` 启动独立 session
@@ -347,6 +414,7 @@ Phase 2 第一步必须执行 DELPHI-GATE 检查。没有 delphi-review APPROVED
 | Phase | 名称 | Subagent? | Category | load_skills | 执行者 |
 |-------|------|:---------:|----------|-------------|--------|
 | -1 | ISOLATE | ❌ | Bash（直接执行） | 无 | orchestrator |
+| -0.5 | AUTO-ESTIMATE | ❌ | Bash（直接执行） | 无 | orchestrator |
 | 0 | THINK | ✅ | `deep` | `["brainstorming"]` | subagent |
 | 1 | PLAN | ✅ | `deep` | `["autoplan", "delphi-review", "to-issues"]` | subagent |
 | 2 | BUILD | ✅(已有) | ralph-loop | `["test-driven-development"]` | subagent |
@@ -469,6 +537,22 @@ Sprint state is persisted as JSON in `.sprint-state/sprint-state.json`:
     "branch": "sprint/2026-04-26-01",
     "created_from": "main",
     "created_from_commit": "abc123def..."
+  },
+  "auto_estimate": {
+    "change_type": "删除已存在代码|修改已存在代码|新增功能|Bug修复",
+    "metrics": {
+      "ref_count": 12,
+      "cross_module_count": 3,
+      "modules": ["auth", "user", "admin"],
+      "circular_dep": true,
+      "public_api_count": 5,
+      "test_file_count": 4
+    },
+    "estimated_level": "轻量|标准|复杂",
+    "recommended_flow": "轻量流程 (Phase 2-3)|标准流程 (Phase 0-4)|完整 Sprint Flow (Phase 0-8)",
+    "risk_warnings": ["循环依赖: user ↔ plane"],
+    "user_decision": "accepted|overridden|cancelled",
+    "override_reason": null
   },
   "outputs": {
     "pain_document": "docs/pain-document.md",
