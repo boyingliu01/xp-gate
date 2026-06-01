@@ -318,6 +318,30 @@ Phase 2 第一步必须执行 DELPHI-GATE 检查。没有 delphi-review APPROVED
 
 ## 编排层规则（Orchestration Rules）
 
+### Agent Dispatch Rules
+
+| Agent Type | 适用场景 | 不适用场景 | 超时处理 |
+|-----------|---------|-----------|---------|
+| `explore` (bare) | **窄搜索**：单个关键词/pattern，已知文件位置 | 多角度宽泛搜索，读取大文件，3+ search angles | >5min → cancel + 用 `deep` 重试 |
+| `librarian` (bare) | **外部参考**：API 文档、OSS 示例 | 内部代码库宽泛探索 | >5min → cancel + 用 `deep` 重试 |
+| `task(category="deep")` | **复杂研究**：多模块分析，架构决策 | 单文件 trivial fix | 无限制 |
+| `task(category="unspecified-high")` | **高 effort 实现**：新模块、重构 | 单行修改 | 无限制 |
+
+**关键规则**：
+
+1. Bare `explore` agent 本质是 contextual grep，**不是研究 agent**。如果任务涉及：
+   - 3+ 个独立搜索角度
+   - 读取多个大文件（>200 行）
+   - 需要跨层分析（如"查 ralph-loop + .sprint-state/ + token 阈值 + phase transition"）
+   
+   → **必须用 `task(category="deep", load_skills=[...])` 替代**
+
+2. 如果 `explore` agent >5 分钟未返回 → cancel 并立即用 `task(category="deep")` 重试。不要等待。
+
+3. **并行 explore 仍然是正确模式**。2-4 个窄搜索 explore agent 并行执行是高效且推荐的。问题在于给单一 explore agent 分配宽泛任务。
+
+**issue #83 根因**：`bg_1abf2ed9` 被分配了 4 个独立搜索角度的宽泛任务（ralph-loop context + .sprint-state/ + token threshold + phase transition），bare explore agent 超时丢失 session。同批的 `bg_5ecf590d`（窄搜索 OpenCode compaction API）3m35s 正常完成。
+
 ### Phase Subagent Dispatch Matrix
 
 | Phase | 名称 | Subagent? | Category | load_skills | 执行者 |
