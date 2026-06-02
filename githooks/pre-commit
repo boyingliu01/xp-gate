@@ -423,6 +423,52 @@ if [ -z "$PROJECT_LANG" ]; then
   fi
 fi
 
+# ============================================================================
+# Audit helper — records gate execution to .xp-gate/audit.jsonl
+# NEVER blocks commit on failure (try/catch around npx tsx).
+# Usage: record_gate_audit <gate_id> <gate_name> <passed> <issues_found> <start_ms>
+# ============================================================================
+AUDIT_SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+PROJECT_ROOT_FOR_AUDIT="$(git rev-parse --show-toplevel 2>/dev/null || echo "$AUDIT_SCRIPT_DIR/../..")"
+
+record_gate_audit() {
+  local gate_id="$1"
+  local gate_name="$2"
+  local passed="$3"
+  local issues_found="$4"
+  local start_ms="$5"
+  local end_ms
+  end_ms=$(date +%s%3N 2>/dev/null || python3 -c "import time;print(int(time.time()*1000))" 2>/dev/null || echo "0")
+  local duration_ms=$((end_ms - start_ms))
+  if [ "$duration_ms" -lt 0 ] 2>/dev/null; then
+    duration_ms=0
+  fi
+
+  # Determine gate result: PASS or FAIL based on status variable
+  local gate_result="true"
+  if [ "$passed" != "PASS" ] && [ "$passed" != "SKIP" ]; then
+    gate_result="false"
+  fi
+
+  # Fire-and-forget: audit must never block the commit
+  {
+    npx tsx "${PROJECT_ROOT_FOR_AUDIT}/src/npm-package/lib/gate-audit.ts" record \
+      --gate-id "$gate_id" \
+      --gate-name "$gate_name" \
+      --passed "$gate_result" \
+      --issues-found "$issues_found" \
+      --duration-ms "$duration_ms" \
+      --trigger commit \
+      2>/dev/null
+  } &
+  disown 2>/dev/null || true
+}
+
+# Get milliseconds timestamp (used by gates for duration measurement)
+gate_start_ms() {
+  date +%s%3N 2>/dev/null || python3 -c "import time;print(int(time.time()*1000))" 2>/dev/null || echo "0"
+}
+
 # Switch to subdirectory if detected (for mixed/hybrid projects)
 # All subsequent gates will run in the subdirectory context
 ORIGINAL_DIR=""
@@ -437,8 +483,9 @@ fi
 # GATE 1: Code Quality (Static Analysis + Linting + Shell Check combined)
 # Combination of: Old Gates 1 (Static), Gate 2 (Linting), Gate 5 (Shell Check)
 # ============================================================================
-2>&1 echo ""
-2>&1 echo "→ Gate 1: Code Quality (static analysis + linting)..."
+ 2>&1 echo ""
+ 2>&1 echo "→ Gate 1: Code Quality (static analysis + linting)..."
+GATE_1_START=$(gate_start_ms)
 
 if [ "$PROJECT_LANG" = "documentation-only" ]; then
   # Documentation-only project - skip static analysis
@@ -597,13 +644,15 @@ else
 fi
 GATE_1_STATUS="PASS"
 GATE_1_TOOL="${PROJECT_LANG}"
+record_gate_audit "gate-1" "code-quality" "$GATE_1_STATUS" "0" "$GATE_1_START"
 
 # ============================================================================
 # GATE 2: Duplicate Code Detection (NEW gate)
 # Uses jscpd, or similar tools, specific to language
 # ============================================================================
-2>&1 echo ""
-2>&1 echo "→ Gate 2: Duplicate code detection..."
+ 2>&1 echo ""
+ 2>&1 echo "→ Gate 2: Duplicate code detection..."
+GATE_2_START=$(gate_start_ms)
 
 if [ "$PROJECT_LANG" = "documentation-only" ]; then
   echo "✅ PASSED - Skipped (no source code to analyze)."
@@ -673,13 +722,15 @@ else
   fi
 fi
 GATE_2_STATUS="PASS"
+record_gate_audit "gate-2" "duplicate-code" "$GATE_2_STATUS" "0" "$GATE_2_START"
 
 # ============================================================================
 # GATE 3: Cyclomatic Complexity Check (Old Gate 7)
 # Uses lizard - keeps existing logic for consistency
 # ============================================================================
-2>&1 echo ""
-2>&1 echo "→ Gate 3: Cyclomatic complexity..."
+ 2>&1 echo ""
+ 2>&1 echo "→ Gate 3: Cyclomatic complexity..."
+GATE_3_START=$(gate_start_ms)
 
 if [ "$PROJECT_LANG" = "documentation-only" ]; then
   echo "✅ PASSED - Skipped (documentation project)."
@@ -746,13 +797,15 @@ else
   fi
 fi
 GATE_3_STATUS="PASS"
+record_gate_audit "gate-3" "complexity" "$GATE_3_STATUS" "${CC_WARNINGS:-0}" "$GATE_3_START"
 
 # ============================================================================
 # GATE 4: Principles Checker (Old Gate 6 - Clean Code + SOLID)
 # Reuses existing principles checker logic
 # ============================================================================
-2>&1 echo ""
-2>&1 echo "→ Gate 4: Principles checker (Clean Code + SOLID)..."
+ 2>&1 echo ""
+ 2>&1 echo "→ Gate 4: Principles checker (Clean Code + SOLID)..."
+GATE_4_START=$(gate_start_ms)
 
 if [ "$PROJECT_LANG" = "documentation-only" ]; then
   echo "✅ PASSED - Skipped (documentation project)."
@@ -807,13 +860,15 @@ else
   fi
 fi
 GATE_4_STATUS="PASS"
+record_gate_audit "gate-4" "principles" "$GATE_4_STATUS" "${WARNING_COUNT:-0}" "$GATE_4_START"
 
 # ============================================================================
 # GATE 5: Tests & Coverage Combined (Combines Old Gates 3 - Tests and 4 - Coverage)
 # Uses adapter system to run tests + coverage for language
 # ============================================================================
-2>&1 echo ""
-2>&1 echo "→ Gate 5: Tests & coverage..."
+ 2>&1 echo ""
+ 2>&1 echo "→ Gate 5: Tests & coverage..."
+GATE_5_START=$(gate_start_ms)
 
 if [ "$PROJECT_LANG" = "documentation-only" ]; then
   echo "✅ PASSED - Skipped (documentation project)."
@@ -1199,12 +1254,14 @@ else
   echo "✅ PASSED - Coverage check completed."
 fi
 GATE_5_STATUS="PASS"
+record_gate_audit "gate-5" "tests-coverage" "$GATE_5_STATUS" "0" "$GATE_5_START"
 
 # ============================================================================
 # GATE 6: Architecture & Tech Debt (Combines Old Gate 8 - Boy Scout and Gate 9 - Architecture)
 # ============================================================================
-2>&1 echo ""
-2>&1 echo "→ Gate 6: Architecture & tech debt..."
+ 2>&1 echo ""
+ 2>&1 echo "→ Gate 6: Architecture & tech debt..."
+GATE_6_START=$(gate_start_ms)
 
 # First Part: Architecture Validation (previously Gate 9)
 2>&1 echo "   └─ Architecture validation:"
@@ -1379,6 +1436,7 @@ else
   fi
 fi
 GATE_6_STATUS="PASS"
+record_gate_audit "gate-6" "architecture-boy-scout" "$GATE_6_STATUS" "${BS_BLOCKED:-0}" "$GATE_6_START"
 
 # ============================================================================
 
@@ -1387,8 +1445,9 @@ GATE_6_STATUS="PASS"
 # Detects security issues in Infrastructure as Code files
 # Tools: checkov (recommended), hadolint, kube-score, tflint
 # ============================================================================
-2>&1 echo ""
-2>&1 echo "→ Gate 7: IaC Security Scanning (Terraform, Kubernetes, Docker)..."
+ 2>&1 echo ""
+ 2>&1 echo "→ Gate 7: IaC Security Scanning (Terraform, Kubernetes, Docker)..."
+GATE_7_START=$(gate_start_ms)
 
 # Check if any IaC files are changed
 IAC_FILES=$(git diff --cached --name-only --diff-filter=ACM 2>/dev/null | grep -E "\.(tf|yaml|yml)$|Dockerfile" || true)
@@ -1424,6 +1483,7 @@ else
     GATE_7_STATUS="SKIP"
   fi
 fi
+record_gate_audit "gate-7" "iac-security" "$GATE_7_STATUS" "0" "$GATE_7_START"
 
 
 # GATE 8: Secret Scanning (gitleaks)
@@ -1431,8 +1491,9 @@ fi
 # Tool: gitleaks -- https://github.com/gitleaks/gitleaks
 # ============================================================================
 
-2>&1 echo ""
-2>&1 echo "→ Gate 8: Secret scanning (gitleaks)..."
+ 2>&1 echo ""
+ 2>&1 echo "→ Gate 8: Secret scanning (gitleaks)..."
+GATE_8_START=$(gate_start_ms)
 
 # Gitleaks availability check
 GITLEAKS_CMD=""
@@ -1479,6 +1540,7 @@ else
   echo "     ✅ Secret Scanning (SKIP, gitleaks not installed)"
   GATE_8_STATUS="SKIP"
 fi
+record_gate_audit "gate-8" "secret-scanning" "$GATE_8_STATUS" "0" "$GATE_8_START"
 
 # Switch back to original directory if we were in a subdirectory
 if [ -n "$ORIGINAL_DIR" ]; then
@@ -1491,8 +1553,9 @@ fi
 # Tool: semgrep -- https://semgrep.dev
 # ============================================================================
 
-2>&1 echo ""
-2>&1 echo "→ Gate 9: Semgrep SAST Security Scan..."
+ 2>&1 echo ""
+ 2>&1 echo "→ Gate 9: Semgrep SAST Security Scan..."
+GATE_9_START=$(gate_start_ms)
 
 GATE_9_STATUS="PASS"
 
@@ -1613,9 +1676,7 @@ except:
     fi
   fi
 fi
-
-# ============================================================================
-# QUALITY REPORT GENERATION
+record_gate_audit "gate-9" "sast-security" "$GATE_9_STATUS" "0" "$GATE_9_START"
 # ============================================================================
 
 generate_quality_report() {

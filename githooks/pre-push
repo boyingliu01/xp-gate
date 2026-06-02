@@ -192,9 +192,8 @@ else
       for kw in 'jest\.mock' 'vi\.mock' 'jest\.spyOn' 'vi\.spyOn' 'jest\.fn' 'vi\.fn' \
                 'mockResolvedValue' 'mockRejectedValue' 'mockReturnValue' 'mockImplementation' \
                 'createMock' 'mockReset' 'mockClear' 'mockRestore' 'MagicMock' 'unittest\.mock' \
-                '\.patch(' 'gomock' 'mockgen' '\.EXPECT()'; do
-        c=$(grep -o "$kw" "$test_file" 2>/dev/null | wc -l || echo "0")
-        # Guard against empty/non-numeric values that break bash arithmetic
+                '\.patch(' 'gomock' 'mockgen' '.EXPECT()'; do
+        c=$(grep -o "$kw" "$test_file" 2>/dev/null | wc -l || true)
         c=${c//[^0-9]/}
         c=${c:-0}
         MOCK_COUNT=$((MOCK_COUNT + c))

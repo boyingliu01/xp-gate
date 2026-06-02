@@ -1,25 +1,19 @@
 {
-  "id": "sprint-2026-06-02-01",
-  "phase": 3,
+  "id": "sprint-2026-06-02-14",
+  "phase": 2,
   "status": "running",
   "isolation": {
-    "worktree_path": ".worktrees/sprint/sprint-2026-06-02-01",
-    "branch": "sprint/2026-06-02-01",
+    "worktree_path": ".worktrees/sprint/sprint-2026-06-02-14",
+    "branch": "sprint/2026-06-02-14",
     "created_from": "main",
-    "created_from_commit": "923b090"
+    "created_from_commit": "e5ec8631f31ce05c3e05270e066e42839f71547e"
   },
   "outputs": {
-    "design_doc": "docs/plans/2026-06-02-issue-78-mock-layering-strategy.md",
-    "delphi_round_1": ".sprint-state/phase-outputs/delphi-round-1-report.md",
-    "delphi_round_2": ".sprint-state/phase-outputs/delphi-round-2-report.md",
-    "delphi_reviewed": ".sprint-state/delphi-reviewed.json",
-    "mvp": "src/mock-policy/"
-  },
-  "metrics": {
-    "tests_total": 693,
-    "tests_new": 112,
-    "files_new": 11,
-    "files_modified": 3,
-    "commits": 6
+    "design_doc": "~/.gstack/projects/boyingliu01-xp-gate/boyingliu01-sprint/2026-06-02-14-design-20260602-143000.md",
+    "delphi_review": ".sprint-state/delphi-reviewed.json",
+    "audit_logger": "src/npm-package/lib/gate-audit.ts",
+    "audit_cli": "src/npm-package/bin/xp-gate.js",
+    "audit_tests": "src/npm-package/lib/__tests__/gate-audit.test.ts",
+    "hook_integration": "githooks/pre-commit"
   }
 }
