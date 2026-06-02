@@ -657,7 +657,7 @@ jobs:
     name: AI Review
     needs: [setup, gate-check]  # Wait for setup and gate-check to be successful
     runs-on: ubuntu-latest
-    if: ${{ !cancel() && needs.setup.result == 'success' && needs.gate-check.result == 'success' }}
+    if: ${{ !cancelled() && needs.setup.result == 'success' && needs.gate-check.result == 'success' }}
     
     steps:
       - name: Checkout repository
@@ -748,7 +748,7 @@ jobs:
     name: Quality Report Generation
     needs: [setup, gate-check, ai-review]
     runs-on: ubuntu-latest
-    if: ${{ !cancel() && needs.setup.result == 'success' }}
+    if: ${{ !cancelled() && needs.setup.result == 'success' }}
     
     steps:
       - name: Checkout repository
