@@ -293,7 +293,7 @@ jobs:
           if [[ "$PROJECT_LANGUAGE" == "typescript" && -d "node_modules/.bin" ]] || [[ -f "package.json" ]]; then
             if command -v npx >/dev/null 2>&1; then
               echo "Running jscpd for duplicate code detection..."
-              npx jscpd --reporters consoleFull $(find . -name "*.ts" -o -name "*.tsx" -o -name "*.js" -o -name "*.jsx" | head -100)
+              npx jscpd --reporters consoleFull $(find . \( -name "*.ts" -o -name "*.tsx" -o -name "*.js" -o -name "*.jsx" \) -not -path "./node_modules/*" -not -path "./dist/*" | head -100)
               JSCPD_STATUS=$?
               if [[ $JSCPD_STATUS -ne 0 ]]; then
                 echo "ℹ️ jscpd found potential code duplications (warning level, non-blocking by default)"
@@ -304,7 +304,7 @@ jobs:
           elif [[ "$PROJECT_LANGUAGE" == "python" ]]; then
             if command -v pylint >/dev/null 2>&1; then
               echo "Running pylint duplicate detection..."
-              python_files=$(find . -name "*.py" | head -20)
+              python_files=$(find . \( -name "*.py" \) -not -path "./venv/*" -not -path "./.venv/*" -not -path "./node_modules/*" | head -20)
               if [[ -n "$python_files" ]]; then
                 pylint --disable=all --enable=duplicate-code $python_files
                 DUPLICATE_PYTHON_STATUS=$?
@@ -363,10 +363,10 @@ jobs:
               
               # Find source files to check
               case $PROJECT_LANGUAGE in
-                typescript) TS_FILES=$(find . -name "*.ts" -o -name "*.tsx" -not -path "./node_modules/*" -not -path "./dist/*");;
-                python) TS_FILES=$(find . -name "*.py" -not -path "./venv/*" -not -path "./.venv/*");;
-                go) TS_FILES=$(find . -name "*.go" -not -path "./vendor/*");;
-                *) TS_FILES=$(find . -name "*.ts" -o -name "*.tsx" -o -name "*.js" -o -name "*.py" -o -name "*.go" -not -path "./node_modules/*" -path "./dist/*");;
+                typescript) TS_FILES=$(find . \( -name "*.ts" -o -name "*.tsx" \) -not -path "./node_modules/*" -not -path "./dist/*");;
+                python) TS_FILES=$(find . \( -name "*.py" \) -not -path "./venv/*" -not -path "./.venv/*");;
+                go) TS_FILES=$(find . \( -name "*.go" \) -not -path "./vendor/*");;
+                *) TS_FILES=$(find . \( -name "*.ts" -o -name "*.tsx" -o -name "*.js" -o -name "*.py" -o -name "*.go" \) -not -path "./node_modules/*" -not -path "./dist/*");;
               esac
               
               if [[ -n "$TS_FILES" ]]; then
@@ -634,13 +634,13 @@ jobs:
             # Find source files for principles check
             case $PROJECT_LANGUAGE in
               typescript) 
-                SRC_FILES=$(find . -name "*.ts" -o -name "*.tsx" -not -path "./node_modules/*" -not -path "./dist/*" | head -50)
+                SRC_FILES=$(find . \( -name "*.ts" -o -name "*.tsx" \) -not -path "./node_modules/*" -not -path "./dist/*" | head -50)
                 ;;
               python) 
-                SRC_FILES=$(find . -name "*.py" -not -path "./venv/*" -not -path "./.venv/*" | head -50)
+                SRC_FILES=$(find . \( -name "*.py" \) -not -path "./venv/*" -not -path "./.venv/*" | head -50)
                 ;;
               *)
-                SRC_FILES=$(find . -name "*.ts" -o -name "*.tsx" -o -name "*.js" -o -name "*.py" -o -name "*.go" -not -path "./node_modules/*" -not -path "./dist/*" | head -50)
+                SRC_FILES=$(find . \( -name "*.ts" -o -name "*.tsx" -o -name "*.js" -o -name "*.py" -o -name "*.go" \) -not -path "./node_modules/*" -not -path "./dist/*" | head -50)
                 ;;
             esac
             
@@ -761,14 +761,14 @@ jobs:
           cache: 'npm'
 
       - name: Download SARIF and AI review artifacts
-        uses: actions/download-artifact@v3
+        uses: actions/download-artifact@v4
         with:
           name: sarif-reports.tar.xz
           path: ./
         continue-on-error: true
 
       - name: Download AI Review Results
-        uses: actions/download-artifact@v3
+        uses: actions/download-artifact@v4
         if: ${{ needs.ai-review.result == 'success' }}
         with:
           name: ai-review-results.tar.xz
@@ -787,6 +787,20 @@ jobs:
 
       - name: Generate Quality Report
         run: |
+          # Determine gate results
+          if [[ "${{ needs.gate-check.result }}" == "success" ]]; then 
+            GATES_PASSED=6; SCORE="10.0"
+          else 
+            GATES_PASSED=0; SCORE="0.0"
+          fi
+          
+          # Check if delphi-review is configured
+          if [[ -f "$GITHUB_WORKSPACE/skills/delphi-review/SKILL.md" ]]; then 
+            DELPHI_CONFIGURED="true"
+          else 
+            DELPHI_CONFIGURED="false"
+          fi
+
           # Generate a quality report JSON file summarizing the check results
           cat > quality-report.json << EOF
           {
@@ -799,21 +813,9 @@ jobs:
             "branch": "${{ github.ref_name }}",
             "project": "$(basename ${{ github.repository }})",
             "overall": {
-              "gatesPassed": ${
-                if [[ "${{ needs.gate-check.result }}" == "success" ]]; then 
-                  echo "6"; 
-                else 
-                  echo "0"; 
-                fi
-              },
+              "gatesPassed": $GATES_PASSED,
               "gatesTotal": 6,
-              "score": ${
-                if [[ "${{ needs.gate-check.result }}" == "success" ]]; then 
-                  echo "10.0"; 
-                else 
-                  echo "0.0"; 
-                fi
-              },
+              "score": $SCORE,
               "verdict": "${{ needs.gate-check.result }}"
             },
             "gates": {
@@ -844,13 +846,7 @@ jobs:
             },
             "aiReview": {
               "status": "${{ needs.ai-review.result }}",
-              "configured": ${
-                if [[ -f "$GITHUB_WORKSPACE/skills/delphi-review/SKILL.md" ]]; then 
-                  echo "true"; 
-                else 
-                  echo "false"; 
-                fi
-              }
+              "configured": $DELPHI_CONFIGURED
             }
           }
           EOF
@@ -858,7 +854,7 @@ jobs:
           echo "Quality report generated: $(cat quality-report.json | python -m json.tool)"
 
       - name: Upload Quality Report as Artifact
-        uses: actions/upload-artifact@v3
+        uses: actions/upload-artifact@v4
         with:
           name: quality-report
           path: quality-report.json
@@ -874,7 +870,7 @@ jobs:
     
     steps:
       - name: Download Quality Report
-        uses: actions/download-artifact@v3
+        uses: actions/download-artifact@v4
         with:
           name: quality-report
           path: ./
