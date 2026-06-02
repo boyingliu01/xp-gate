@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import MockDecisionEngine from '../mock-decision-engine';
-import type { ProjectScope, MockPolicyConfig, TestLayer, MockDecision } from '../types';
+import type { ProjectScope, MockPolicyConfig, TestLayer } from '../types';
 
 /**
  * @test MockDecisionEngine decision logic

@@ -4,7 +4,7 @@
  * @covers AUDIT-001-01, AUDIT-001-02, AUDIT-001-03, AUDIT-001-04, AUDIT-001-05, AUDIT-001-06
  */
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
-import { existsSync, mkdirSync, rmSync, readFileSync, writeFileSync, statSync } from 'fs';
+import { existsSync, mkdirSync, rmSync, readFileSync, writeFileSync } from 'fs';
 import { join } from 'path';
 import {
   appendAuditEntry,

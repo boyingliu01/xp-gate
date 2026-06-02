@@ -1,4 +1,4 @@
-import { ProjectScope, MockDecision, DependencyScope, MockPolicyConfig, TestLayer } from './types';
+import { ProjectScope, MockDecision, MockPolicyConfig, TestLayer } from './types';
 import { classifyDependency } from './scope-scanner';
 
 /**

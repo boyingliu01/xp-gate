@@ -13,7 +13,7 @@ import { scanProjectScope } from '../scope-scanner';
 import MockDecisionEngine from '../mock-decision-engine';
 import { runGateM3 } from '../gate-m3';
 import { detectTestLayer } from '../../mutation/detect-ai-test';
-import type { MockPolicyConfig, TestLayer } from '../types';
+import type { MockPolicyConfig } from '../types';
 
 // ---------------------------------------------------------------------------
 // Local helpers (mirrors gate-m3.ts internals)

@@ -1,6 +1,6 @@
 import { existsSync } from 'fs';
 import { readFile } from 'fs/promises';
-import { join, relative, resolve, sep } from 'path';
+import { join, resolve } from 'path';
 import type { ProjectScope, DependencyScope } from './types';
 
 /**

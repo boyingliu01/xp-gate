@@ -230,7 +230,7 @@ jobs:
               # ESLint linting (if configuration exists)
               if [[ -f ".eslintrc.json" ]] || [[ -f ".eslintrc.js" ]] || [[ -f ".eslintrc.cjs" ]] || [[ -f "eslint.config.js" ]]; then
                 echo "Running ESLint..."
-                npx eslint . --ext .js,.jsx,.ts,.tsx --max-warnings 0
+                npx eslint . --max-warnings 0
                 ESLINT_STATUS=$?
               else
                 ESLINT_STATUS=0
