@@ -1,0 +1,28 @@
+{
+  "version": 1,
+  "layers": {
+    "unit": {
+      "mockPolicy": "lenient",
+      "requireRealForImplemented": false,
+      "allowExternalMock": true,
+      "requirePendingRemoval": false,
+      "maxMockDensity": 100
+    },
+    "integration": {
+      "mockPolicy": "strict",
+      "requireRealForImplemented": true,
+      "allowExternalMock": true,
+      "requirePendingRemoval": true,
+      "maxMockDensity": 30
+    },
+    "e2e": {
+      "mockPolicy": "strict",
+      "requireRealForImplemented": true,
+      "allowExternalMock": false,
+      "requirePendingRemoval": false,
+      "maxMockDensity": 0
+    }
+  },
+  "projectBoundary": ["src/**"],
+  "severity": "warning"
+}

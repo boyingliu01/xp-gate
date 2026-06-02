@@ -106,7 +106,7 @@ describe('BaselineStorage - extended coverage', () => {
 
     it('logs errors via console.error when warningCountFunction rejects', async () => {
       const storage = new BaselineStorage({ batchSize: 5 });
-      const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+      const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => { /* noop */ });
       const files = ['ok.ts', 'fail.ts'];
 
       const warningFn = async (file: string) => {

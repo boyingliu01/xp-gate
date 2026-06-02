@@ -53,6 +53,11 @@ const COMMANDS = {
     description: 'Run UI review for non-sprint developers (generates .ui-gate-result.json)',
     fn: null,
     usage: 'xp-gate ui-review'
+  },
+  'audit': {
+    description: 'Gate audit logging (record, --tail, --stats)',
+    fn: null,
+    usage: 'xp-gate audit [--tail [N]|--stats|record --gate-id X --gate-name Y ...]'
   }
 };
 
@@ -153,10 +158,130 @@ function main() {
       process.exit(1);
     }
   }
+
+  if (command === 'audit') {
+    handleAudit(subargs);
+    return;
+  }
   
   console.error(`Unknown command: ${command}`);
   printHelp();
   process.exit(1);
+}
+
+function handleAudit(args) {
+  const path = require('path');
+  const auditPath = path.join(__dirname, '..', 'lib', 'gate-audit.ts');
+
+  // --tail [N]
+  const tailIdx = args.indexOf('--tail');
+  if (tailIdx !== -1) {
+    const count = parseInt(args[tailIdx + 1] || '20', 10);
+    try {
+      const { readTailEntries } = require(auditPath);
+      const entries = readTailEntries(count);
+      if (entries.length === 0) {
+        console.log('No audit entries found.');
+        return;
+      }
+      printAuditTable(entries);
+    } catch (err) {
+      console.error('Error reading audit entries:', err.message);
+      process.exit(1);
+    }
+    return;
+  }
+
+  // --stats
+  if (args.includes('--stats')) {
+    try {
+      const { computeStats } = require(auditPath);
+      const stats = computeStats();
+      if (stats.length === 0) {
+        console.log('No audit data found.');
+        return;
+      }
+      printStatsTable(stats);
+    } catch (err) {
+      console.error('Error computing stats:', err.message);
+      process.exit(1);
+    }
+    return;
+  }
+
+  // record --gate-id X --gate-name Y --passed true/false ...
+  if (args[0] === 'record') {
+    try {
+      const { appendAuditEntry } = require(auditPath);
+      const rest = args.slice(1);
+      const opts = {};
+      for (let i = 0; i < rest.length; i++) {
+        if (rest[i].startsWith('--') && i + 1 < rest.length) {
+          opts[rest[i].slice(2)] = rest[i + 1];
+          i++;
+        }
+      }
+      const entry = {
+        timestamp: new Date().toISOString(),
+        gate_id: opts['gate-id'] || 'unknown',
+        gate_name: opts['gate-name'] || 'unknown',
+        passed: opts['passed'] === 'true',
+        issues_found: parseInt(opts['issues-found'] || '0', 10),
+        duration_ms: parseInt(opts['duration-ms'] || '0', 10),
+        trigger: opts['trigger'] || 'manual',
+        repo_path: process.cwd(),
+        commit_hash: opts['commit-hash'] || 'HEAD',
+      };
+      appendAuditEntry(entry);
+    } catch (err) {
+      console.error('Error recording audit entry:', err.message);
+      process.exit(1);
+    }
+    return;
+  }
+
+  console.error('Error: Unknown audit subcommand or missing flag');
+  console.error('Usage:');
+  console.error('  xp-gate audit record --gate-id X --gate-name Y --passed true/false --issues-found N --duration-ms N --trigger commit');
+  console.error('  xp-gate audit --tail [N]     (default: 20)');
+  console.error('  xp-gate audit --stats');
+  process.exit(1);
+}
+
+function printAuditTable(entries) {
+  console.log('');
+  console.log('Recent Audit Entries:');
+  console.log('┌─────────────────────┬──────────┬─────────────────────┬────────┬────────┬───────────┬──────────┐');
+  console.log('│ Timestamp           │ Gate     │ Name                │ Passed │ Issues │ Duration  │ Trigger  │');
+  console.log('├─────────────────────┼──────────┼─────────────────────┼────────┼────────┼───────────┼──────────┤');
+  for (const e of entries) {
+    const ts = e.timestamp ? e.timestamp.slice(0, 19) : 'N/A';
+    const gid = (e.gate_id || '').padEnd(8);
+    const gname = (e.gate_name || '').slice(0, 19).padEnd(19);
+    const pass = (e.passed ? 'Y' : 'N').padEnd(6);
+    const issues = String(e.issues_found ?? 0).padEnd(6);
+    const dur = String(e.duration_ms ?? 0).padEnd(9);
+    const trig = (e.trigger || 'manual').padEnd(8);
+    console.log(`│ ${ts} │ ${gid} │ ${gname} │ ${pass} │ ${issues} │ ${dur} │ ${trig} │`);
+  }
+  console.log('└─────────────────────┴──────────┴─────────────────────┴────────┴────────┴───────────┴──────────┘');
+  console.log(`Total: ${entries.length} entries`);
+}
+
+function printStatsTable(stats) {
+  console.log('');
+  console.log('Gate Statistics:');
+  console.log('┌──────────────────┬────────┬────────┬────────────┐');
+  console.log('│ Gate             │ Pass%  │ Avg ms │ Issues Avg │');
+  console.log('├──────────────────┼────────┼────────┼────────────┤');
+  for (const s of stats) {
+    const gid = (s.gate_id || '').slice(0, 16).padEnd(16);
+    const pp = (s.pass_pct || 'N/A').padEnd(6);
+    const avg = String(s.avg_ms ?? 0).padEnd(6);
+    const iss = String(s.avg_issues ?? 0).padEnd(10);
+    console.log(`│ ${gid} │ ${pp} │ ${avg} │ ${iss} │`);
+  }
+  console.log('└──────────────────┴────────┴────────┴────────────┘');
 }
 
 function parseOptions(args) {
