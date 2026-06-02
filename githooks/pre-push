@@ -192,9 +192,8 @@ else
       for kw in 'jest\.mock' 'vi\.mock' 'jest\.spyOn' 'vi\.spyOn' 'jest\.fn' 'vi\.fn' \
                 'mockResolvedValue' 'mockRejectedValue' 'mockReturnValue' 'mockImplementation' \
                 'createMock' 'mockReset' 'mockClear' 'mockRestore' 'MagicMock' 'unittest\.mock' \
-                '\.patch(' 'gomock' 'mockgen' '\.EXPECT()'; do
-        c=$(grep -o "$kw" "$test_file" 2>/dev/null | wc -l || echo "0")
-        # Guard against empty/non-numeric values that break bash arithmetic
+                '\.patch(' 'gomock' 'mockgen' '.EXPECT()'; do
+        c=$(grep -o "$kw" "$test_file" 2>/dev/null | wc -l || true)
         c=${c//[^0-9]/}
         c=${c:-0}
         MOCK_COUNT=$((MOCK_COUNT + c))
@@ -240,6 +239,75 @@ else
     exit 1
   fi
 fi
+
+# ============================================================================
+# Gate M3: Mock Layering Strategy
+# Validates mock policies based on test layer and dependency scope
+# Runs only in non-main branches, TypeScript projects with the module available
+# ============================================================================
+run_gate_m3() {
+  local changed_files="$1"
+  local project_root="$2"
+
+  echo ""
+  echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+  echo "   GATE M3: MOCK LAYERING STRATEGY"
+  echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+
+  # Skip on main/master
+  if [[ "$CURRENT_BRANCH" == "main" || "$CURRENT_BRANCH" == "master" ]]; then
+    echo "   SKIP — pushing to main/master"
+    return 0
+  fi
+
+  if [[ ! -f "./src/mock-policy/gate-m3.ts" ]]; then
+    echo "   SKIP — module not found"
+    return 0
+  fi
+
+  if [[ ! -f "package.json" ]] || [[ ! -f "tsconfig.json" ]]; then
+    echo "   SKIP — TypeScript only"
+    return 0
+  fi
+
+  # Filter to test files only
+  local test_files=$(echo "$changed_files" | grep -E '\.(test|spec)\.ts$' || true)
+
+  if [[ -z "$test_files" ]]; then
+    echo "   SKIP — no test files changed"
+    return 0
+  fi
+
+  echo "   Changed test files: $(echo "$test_files" | wc -l)"
+
+  # Convert to array safely (handles spaces in filenames)
+  local args=()
+  while IFS= read -r f; do
+    [[ -n "$f" ]] && args+=("$f")
+  done <<< "$test_files"
+
+  if npx tsx "./src/mock-policy/gate-m3.ts" "${args[@]}"; then
+    echo "✅ Gate M3: PASS"
+    return 0
+  else
+    local exit_code=$?
+    if [[ "$exit_code" -eq 1 ]]; then
+      echo ""
+      echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+      echo "   ❌ GATE M3 FAILED - PUSH BLOCKED"
+      echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+      echo ""
+      echo "Mock layering violations found. Review and fix or adjust"
+      echo ".mockpolicyrc severity to 'warning' for advisory mode."
+      echo ""
+      return 1
+    fi
+    echo "⚠️ Gate M3: Unexpected error — allowing push with warning"
+    return 0
+  fi
+}
+
+run_gate_m3 "$TS_FILES" "$PROJECT_ROOT"
 
 # ============================================================================
 # GATE UI: UI SPRINT DETECTION & RESULT VALIDATION

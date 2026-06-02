@@ -204,21 +204,21 @@ function processOutput(input: string, repoRoot: string): void {
     .map(parseRenamedFile)
     .filter((f) => f.length > 0);
   const result = collectUiMatches(files, repoRoot);
-  // eslint-disable-next-line no-console
+   
   console.log(JSON.stringify(result, null, 2));
   process.exit(result.isUiSprint ? 0 : 1);
 }
 
-function runCheckBranch(repoRoot: string): void {
+function runCheckBranch(_repoRoot: string): void {
   const result = detectUiSprint('HEAD');
-  // eslint-disable-next-line no-console
+   
   console.log(JSON.stringify(result, null, 2));
   process.exit(result.isUiSprint ? 0 : 1);
 }
 
-function runDefault(repoRoot: string): void {
+function runDefault(_repoRoot: string): void {
   const result = detectUiSprint();
-  // eslint-disable-next-line no-console
+   
   console.log(JSON.stringify(result, null, 2));
   process.exit(result.isUiSprint ? 0 : 1);
 }

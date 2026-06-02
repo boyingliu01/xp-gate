@@ -26,20 +26,22 @@ fi
 source "$ADAPTER_DIR/adapter-common.sh" 2>/dev/null || {
   echo "Error: Cannot source adapter-common.sh from $ADAPTER_DIR"
   echo "Run: xp-gate init (per-project) or xp-gate setup-global (all projects)"
-  exit
+  exit 1
 }
 
 # Trap: ensure quality report generated on ANY exit (pass or fail).
 # Using a guard prevents recursion when 'exit' is called from inside the trap.
+# IMPORTANT: Captures exit status FIRST so generate_quality_report cannot override it.
 _QUALITY_REPORT_DONE=0
 _quality_report_on_exit() {
+  local _saved_exit=$?
   if [ "$_QUALITY_REPORT_DONE" = "1" ]; then
-    exit
+    exit $_saved_exit
     return
   fi
   _QUALITY_REPORT_DONE=1
-  generate_quality_report
-  exit
+  generate_quality_report 2>/dev/null || true
+  exit $_saved_exit
 }
 trap '_quality_report_on_exit' EXIT
 
@@ -47,6 +49,9 @@ PROJECT_ROOT="$(git rev-parse --show-toplevel 2>/dev/null || echo "$(cd "$SCRIPT
 if [[ -d "$PROJECT_ROOT/node_modules/.bin" ]]; then
   export PATH="$PROJECT_ROOT/node_modules/.bin:$PATH"
 fi
+
+# Ensure pipe failures propagate exit codes through | head/tail/grep
+set -o pipefail
 
 # ============================================================================
 # Helper Functions
@@ -270,8 +275,8 @@ elif [ -f "pubspec.yaml" ]; then
 elif [ -n "$(find . -name '*.ps1' -not -path './.git/*' -maxdepth 2 | head -1)" ]; then
   PROJECT_LANG="powershell"
 elif [ -f "CMakeLists.txt" ] || [ -f "Makefile" ]; then
-  CPP_FILES=$(find . -maxdepth 2 -name "*.cpp" -o -name "*.cxx" -o -name "*.cc" -not -path "./.git/*" 2>/dev/null | head -1)
-  OBJC_FILES=$(find . -maxdepth 2 -name "*.m" -o -name "*.mm" -not -path "./.git/*" 2>/dev/null | head -1)
+  CPP_FILES=$(find . -maxdepth 2 \( -name "*.cpp" -o -name "*.cxx" -o -name "*.cc" \) -not -path "./.git/*" 2>/dev/null | head -1)
+  OBJC_FILES=$(find . -maxdepth 2 \( -name "*.m" -o -name "*.mm" \) -not -path "./.git/*" 2>/dev/null | head -1)
   if [ -n "$CPP_FILES" ]; then
     PROJECT_LANG="cpp"
   elif [ -n "$OBJC_FILES" ]; then
@@ -279,7 +284,7 @@ elif [ -f "CMakeLists.txt" ] || [ -f "Makefile" ]; then
   fi
 elif [ -f "*.xcodeproj" ] || [ -d "*.xcworkspace" ]; then
   # Xcode project - Objective-C or Swift
-  OBJC_FILES=$(find . -maxdepth 2 -name "*.m" -o -name "*.mm" -not -path "./.git/*" 2>/dev/null | head -1)
+  OBJC_FILES=$(find . -maxdepth 2 \( -name "*.m" -o -name "*.mm" \) -not -path "./.git/*" 2>/dev/null | head -1)
   if [ -n "$OBJC_FILES" ]; then
     PROJECT_LANG="objectivec"
   fi
@@ -423,6 +428,52 @@ if [ -z "$PROJECT_LANG" ]; then
   fi
 fi
 
+# ============================================================================
+# Audit helper — records gate execution to .xp-gate/audit.jsonl
+# NEVER blocks commit on failure (try/catch around npx tsx).
+# Usage: record_gate_audit <gate_id> <gate_name> <passed> <issues_found> <start_ms>
+# ============================================================================
+AUDIT_SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+PROJECT_ROOT_FOR_AUDIT="$(git rev-parse --show-toplevel 2>/dev/null || echo "$AUDIT_SCRIPT_DIR/../..")"
+
+record_gate_audit() {
+  local gate_id="$1"
+  local gate_name="$2"
+  local passed="$3"
+  local issues_found="$4"
+  local start_ms="$5"
+  local end_ms
+  end_ms=$(date +%s%3N 2>/dev/null || python3 -c "import time;print(int(time.time()*1000))" 2>/dev/null || echo "0")
+  local duration_ms=$((end_ms - start_ms))
+  if [ "$duration_ms" -lt 0 ] 2>/dev/null; then
+    duration_ms=0
+  fi
+
+  # Determine gate result: PASS or FAIL based on status variable
+  local gate_result="true"
+  if [ "$passed" != "PASS" ] && [ "$passed" != "SKIP" ]; then
+    gate_result="false"
+  fi
+
+  # Fire-and-forget: audit must never block the commit
+  {
+    npx tsx "${PROJECT_ROOT_FOR_AUDIT}/src/npm-package/lib/gate-audit.ts" record \
+      --gate-id "$gate_id" \
+      --gate-name "$gate_name" \
+      --passed "$gate_result" \
+      --issues-found "$issues_found" \
+      --duration-ms "$duration_ms" \
+      --trigger commit \
+      2>/dev/null
+  } &
+  disown 2>/dev/null || true
+}
+
+# Get milliseconds timestamp (used by gates for duration measurement)
+gate_start_ms() {
+  date +%s%3N 2>/dev/null || python3 -c "import time;print(int(time.time()*1000))" 2>/dev/null || echo "0"
+}
+
 # Switch to subdirectory if detected (for mixed/hybrid projects)
 # All subsequent gates will run in the subdirectory context
 ORIGINAL_DIR=""
@@ -437,8 +488,9 @@ fi
 # GATE 1: Code Quality (Static Analysis + Linting + Shell Check combined)
 # Combination of: Old Gates 1 (Static), Gate 2 (Linting), Gate 5 (Shell Check)
 # ============================================================================
-2>&1 echo ""
-2>&1 echo "→ Gate 1: Code Quality (static analysis + linting)..."
+ 2>&1 echo ""
+ 2>&1 echo "→ Gate 1: Code Quality (static analysis + linting)..."
+GATE_1_START=$(gate_start_ms)
 
 if [ "$PROJECT_LANG" = "documentation-only" ]; then
   # Documentation-only project - skip static analysis
@@ -458,20 +510,26 @@ elif [ "$PROJECT_LANG" = "typescript" ]; then
       echo ""
       echo "❌ BLOCKED - TYPE ERRORS detected"
       echo "Fix the type errors above before committing."
-      exit
+      exit 1
     fi
     echo "✅ PASSED - TypeScript static analysis."
     
     # Run ESLint linting if config exists
     if [ -f ".eslintrc.json" ] || [ -f ".eslintrc.js" ] || [ -f ".eslintrc.cjs" ] || [ -f "eslint.config.js" ]; then
       echo "Running ESLint linting..."
-      npx eslint "$CHANGED_FILES" --ext .js,.jsx,.ts,.tsx --max-warnings 0 2>&1 | head -30
-      ESLINT_EXIT=$?
+      # Filter to only TS/JS files - ESLint config ignores non-matching files
+      ESLINT_FILES=$(echo "$CHANGED_FILES" | grep -E '\.(ts|tsx|js|jsx)$' || true)
+      if [ -n "$ESLINT_FILES" ]; then
+        npx eslint $ESLINT_FILES --max-warnings 0 --no-warn-ignored 2>&1 | head -30
+        ESLINT_EXIT=$?
+      else
+        ESLINT_EXIT=0
+      fi
       if [ "$ESLINT_EXIT" -ne 0 ]; then
         echo ""
         echo "❌ BLOCKED - LINT ERRORS detected"
         echo "Fix the lint errors above before committing."
-        exit
+        exit 1
       fi
       echo "✅ PASSED - ESLint linting."
     else
@@ -494,7 +552,7 @@ elif [ "$PROJECT_LANG" = "python" ]; then
       echo "❌ BLOCKED - RUFF ERRORS detected"
       echo "Fix the lint errors above before committing."
       echo "Tip: Run 'ruff check --fix' to auto-fix some issues."
-      exit
+      exit 1
     fi
     echo "✅ PASSED - Ruff linting."
     
@@ -507,7 +565,7 @@ elif [ "$PROJECT_LANG" = "python" ]; then
         echo ""
         echo "❌ BLOCKED - MYPI TYPE ERRORS detected"
         echo "Fix the type errors above before committing."
-        exit
+        exit 1
       fi
       echo "✅ PASSED - mypy type checking."
     else
@@ -528,7 +586,7 @@ elif [ "$PROJECT_LANG" = "go" ]; then
       echo ""
       echo "❌ BLOCKED - GOLANGCI-LINT ERRORS detected"
       echo "Fix the lint errors above before committing."
-      exit
+      exit 1
     fi
     echo "✅ PASSED - golangci-lint."
   fi
@@ -543,7 +601,7 @@ elif [ "$PROJECT_LANG" = "shell" ] || echo "$CHANGED_FILES" | grep -qE '\.sh$' |
       echo ""
       echo "❌ BLOCKED - SHELLCHECK ERRORS detected"
       echo "Fix the shell script errors above."
-      exit
+      exit 1
     fi
     echo "✅ PASSED - Shellcheck completed."
   else
@@ -556,7 +614,7 @@ elif [ "$PROJECT_LANG" = "shell" ] || echo "$CHANGED_FILES" | grep -qE '\.sh$' |
           bash -n "$sh_file"
           if [ $? -ne 0 ]; then
             echo "❌ BLOCKED - SYNTAX ERROR in $sh_file"
-            exit
+            exit 1
           fi
         fi
       done
@@ -597,20 +655,22 @@ else
 fi
 GATE_1_STATUS="PASS"
 GATE_1_TOOL="${PROJECT_LANG}"
+record_gate_audit "gate-1" "code-quality" "$GATE_1_STATUS" "0" "$GATE_1_START"
 
 # ============================================================================
 # GATE 2: Duplicate Code Detection (NEW gate)
 # Uses jscpd, or similar tools, specific to language
 # ============================================================================
-2>&1 echo ""
-2>&1 echo "→ Gate 2: Duplicate code detection..."
+ 2>&1 echo ""
+ 2>&1 echo "→ Gate 2: Duplicate code detection..."
+GATE_2_START=$(gate_start_ms)
 
 if [ "$PROJECT_LANG" = "documentation-only" ]; then
   echo "✅ PASSED - Skipped (no source code to analyze)."
   
 elif [ "$PROJECT_LANG" = "typescript" ]; then
   if ! require_tool "jscpd" "Gate 2" "npm install -D jscpd"; then
-    exit
+    exit 1
   fi
   
   echo "Running jscpd for duplicate code detection..."
@@ -636,12 +696,12 @@ elif [ "$PROJECT_LANG" = "python" ]; then
     ruff check --select=DUP $(echo "$CHANGED_FILES" | grep "\.py$") 2>&1 | head -30
     echo "✅ PASSED - ruff duplicate code check completed."
   else
-    exit
+    exit 1
   fi
 
 elif [ "$PROJECT_LANG" = "go" ]; then
   if ! require_tool "jscpd" "Gate 2" "npm install -D jscpd"; then
-    exit
+    exit 1
   fi
   
   echo "Running jscpd for Go duplicate code detection..."
@@ -663,7 +723,7 @@ else
   SOURCE_FILES=$(echo "$CHANGED_FILES" | grep -E '\.(ts|tsx|js|jsx|py|go|java|scala|kt|cpp|c|h|rs|php|dart|swift)$')
   if [ -n "$SOURCE_FILES" ]; then
     if ! require_tool "jscpd" "Gate 2" "npm install -D jscpd"; then
-      exit
+      exit 1
     fi
     echo "Running jscpd for duplicate code detection..."
     jscpd $SOURCE_FILES 2>&1 | head -15
@@ -673,13 +733,15 @@ else
   fi
 fi
 GATE_2_STATUS="PASS"
+record_gate_audit "gate-2" "duplicate-code" "$GATE_2_STATUS" "0" "$GATE_2_START"
 
 # ============================================================================
 # GATE 3: Cyclomatic Complexity Check (Old Gate 7)
 # Uses lizard - keeps existing logic for consistency
 # ============================================================================
-2>&1 echo ""
-2>&1 echo "→ Gate 3: Cyclomatic complexity..."
+ 2>&1 echo ""
+ 2>&1 echo "→ Gate 3: Cyclomatic complexity..."
+GATE_3_START=$(gate_start_ms)
 
 if [ "$PROJECT_LANG" = "documentation-only" ]; then
   echo "✅ PASSED - Skipped (documentation project)."
@@ -725,7 +787,7 @@ else
         echo ""
         echo "❌ BLOCKED - Functions with CCN > $CCN_ERROR_THRESHOLD found."
         echo "Refactor high-complexity functions to keep below $CCN_ERROR_THRESHOLD complexity."
-        exit
+        exit 1
       fi
       
       if [ "$CC_WARNINGS" -gt 0 ]; then
@@ -746,13 +808,15 @@ else
   fi
 fi
 GATE_3_STATUS="PASS"
+record_gate_audit "gate-3" "complexity" "$GATE_3_STATUS" "${CC_WARNINGS:-0}" "$GATE_3_START"
 
 # ============================================================================
 # GATE 4: Principles Checker (Old Gate 6 - Clean Code + SOLID)
 # Reuses existing principles checker logic
 # ============================================================================
-2>&1 echo ""
-2>&1 echo "→ Gate 4: Principles checker (Clean Code + SOLID)..."
+ 2>&1 echo ""
+ 2>&1 echo "→ Gate 4: Principles checker (Clean Code + SOLID)..."
+GATE_4_START=$(gate_start_ms)
 
 if [ "$PROJECT_LANG" = "documentation-only" ]; then
   echo "✅ PASSED - Skipped (documentation project)."
@@ -783,7 +847,7 @@ else
             echo "  - SOLID principle violations"
             echo "  - architectural violations"
             npx tsx src/principles/index.ts --files $PRINCIPLES_FILES --format console
-            exit
+            exit 1
           fi
           
           echo "✅ PASSED - Principles checker (no errors found)."
@@ -807,13 +871,15 @@ else
   fi
 fi
 GATE_4_STATUS="PASS"
+record_gate_audit "gate-4" "principles" "$GATE_4_STATUS" "${WARNING_COUNT:-0}" "$GATE_4_START"
 
 # ============================================================================
 # GATE 5: Tests & Coverage Combined (Combines Old Gates 3 - Tests and 4 - Coverage)
 # Uses adapter system to run tests + coverage for language
 # ============================================================================
-2>&1 echo ""
-2>&1 echo "→ Gate 5: Tests & coverage..."
+ 2>&1 echo ""
+ 2>&1 echo "→ Gate 5: Tests & coverage..."
+GATE_5_START=$(gate_start_ms)
 
 if [ "$PROJECT_LANG" = "documentation-only" ]; then
   echo "✅ PASSED - Skipped (documentation project)."
@@ -997,7 +1063,7 @@ else
       if [ "$TESTS_EXIT_CODE" -ne 0 ]; then
         echo ""
         echo "❌ BLOCKED - Tests FAILED"
-        exit
+        exit 1
       else
         echo "✅ PASSED - Unit tests passed."
       fi
@@ -1199,12 +1265,14 @@ else
   echo "✅ PASSED - Coverage check completed."
 fi
 GATE_5_STATUS="PASS"
+record_gate_audit "gate-5" "tests-coverage" "$GATE_5_STATUS" "0" "$GATE_5_START"
 
 # ============================================================================
 # GATE 6: Architecture & Tech Debt (Combines Old Gate 8 - Boy Scout and Gate 9 - Architecture)
 # ============================================================================
-2>&1 echo ""
-2>&1 echo "→ Gate 6: Architecture & tech debt..."
+ 2>&1 echo ""
+ 2>&1 echo "→ Gate 6: Architecture & tech debt..."
+GATE_6_START=$(gate_start_ms)
 
 # First Part: Architecture Validation (previously Gate 9)
 2>&1 echo "   └─ Architecture validation:"
@@ -1225,7 +1293,7 @@ else
         if ! require_tool "archlint" "Gate 6" "npm install -g @archlinter/cli"; then
           echo "     ❌ BLOCKED - archlint not installed"
           echo "     Install with: npm install -g @archlinter/cli"
-          exit
+          exit 1
         else
           echo "     Running archlint for TypeScript..."
           archlint scan . -f table --quiet 2>&1 | tail -30 || echo "⚠️  Architectural smells detected (pre-existing, continuing)"
@@ -1241,7 +1309,7 @@ else
           else
             echo "     ❌ BLOCKED - import-linter not installed"
             echo "     Install with: pip install import-linter"
-            exit
+            exit 1
           fi
         else
           echo "     ℹ️  No .import-linter.yml found - skipping Python architecture"
@@ -1257,7 +1325,7 @@ else
           else
             echo "     ❌ BLOCKED - arch-go not installed"
             echo "     Install with: go install github.com/arch-go/arch-go@latest"
-            exit
+            exit 1
           fi
         else
           echo "     ℹ️  No arch-go.yaml found - skipping Go architecture"
@@ -1309,7 +1377,7 @@ else
       echo ""
       echo "   After creating architecture.yaml, retry the commit."
       echo "   (To skip with warning, create .architecture-skip file)"
-      exit
+      exit 1
     fi
   fi
 fi
@@ -1353,7 +1421,7 @@ else
           echo "  - NEW files: must have zero warnings"
           echo "  - MODIFIED files: cannot increase warnings from baseline"
           echo "  - Files with ≤5 warnings: must clear to zero"
-          exit
+          exit 1
         fi
         
         # Check output for violations
@@ -1363,7 +1431,7 @@ else
           echo "$BOY_SCOUT_OUTPUT"
           echo ""
           echo "❌ BLOCKED - Boy Scout Rule violations detected ($VIOLATION_COUNT)"
-          exit
+          exit 1
         fi
         
         echo "     ✅ PASSED - Boy Scout Rule compliance."
@@ -1379,6 +1447,7 @@ else
   fi
 fi
 GATE_6_STATUS="PASS"
+record_gate_audit "gate-6" "architecture-boy-scout" "$GATE_6_STATUS" "${BS_BLOCKED:-0}" "$GATE_6_START"
 
 # ============================================================================
 
@@ -1387,8 +1456,9 @@ GATE_6_STATUS="PASS"
 # Detects security issues in Infrastructure as Code files
 # Tools: checkov (recommended), hadolint, kube-score, tflint
 # ============================================================================
-2>&1 echo ""
-2>&1 echo "→ Gate 7: IaC Security Scanning (Terraform, Kubernetes, Docker)..."
+ 2>&1 echo ""
+ 2>&1 echo "→ Gate 7: IaC Security Scanning (Terraform, Kubernetes, Docker)..."
+GATE_7_START=$(gate_start_ms)
 
 # Check if any IaC files are changed
 IAC_FILES=$(git diff --cached --name-only --diff-filter=ACM 2>/dev/null | grep -E "\.(tf|yaml|yml)$|Dockerfile" || true)
@@ -1416,7 +1486,7 @@ else
       echo "Fix the security issues above before committing."
       echo "Tip: Install checkov for comprehensive IaC scanning: pip install checkov"
       GATE_7_STATUS="FAIL"
-      exit
+      exit 1
     fi
   else
     echo "ℹ️  SKIP - IaC adapter not found"
@@ -1424,6 +1494,7 @@ else
     GATE_7_STATUS="SKIP"
   fi
 fi
+record_gate_audit "gate-7" "iac-security" "$GATE_7_STATUS" "0" "$GATE_7_START"
 
 
 # GATE 8: Secret Scanning (gitleaks)
@@ -1431,8 +1502,9 @@ fi
 # Tool: gitleaks -- https://github.com/gitleaks/gitleaks
 # ============================================================================
 
-2>&1 echo ""
-2>&1 echo "→ Gate 8: Secret scanning (gitleaks)..."
+ 2>&1 echo ""
+ 2>&1 echo "→ Gate 8: Secret scanning (gitleaks)..."
+GATE_8_START=$(gate_start_ms)
 
 # Gitleaks availability check
 GITLEAKS_CMD=""
@@ -1467,7 +1539,7 @@ if [ -n "$GITLEAKS_CMD" ]; then
     echo "  3. Use git secret or vault for sensitive data"
     echo ""
     echo "See: https://github.com/gitleaks/gitleaks"
-    exit
+    exit 1
   else
     echo "     ⚠️  gitleaks exited with code $GITLEAKS_EXIT - skipping gate"
     echo "     ✅ Secret Scanning (SKIP, gitleaks error)"
@@ -1479,6 +1551,7 @@ else
   echo "     ✅ Secret Scanning (SKIP, gitleaks not installed)"
   GATE_8_STATUS="SKIP"
 fi
+record_gate_audit "gate-8" "secret-scanning" "$GATE_8_STATUS" "0" "$GATE_8_START"
 
 # Switch back to original directory if we were in a subdirectory
 if [ -n "$ORIGINAL_DIR" ]; then
@@ -1491,8 +1564,9 @@ fi
 # Tool: semgrep -- https://semgrep.dev
 # ============================================================================
 
-2>&1 echo ""
-2>&1 echo "→ Gate 9: Semgrep SAST Security Scan..."
+ 2>&1 echo ""
+ 2>&1 echo "→ Gate 9: Semgrep SAST Security Scan..."
+GATE_9_START=$(gate_start_ms)
 
 GATE_9_STATUS="PASS"
 
@@ -1595,7 +1669,7 @@ except:
         echo "$FINDING_DETAILS"
         echo "  Run 'semgrep scan --config=p/security-audit' to review all findings."
         GATE_9_STATUS="FAIL"
-        exit
+        exit 1
       else
         echo ""
         echo "     ✅ PASSED - No critical/high vulnerabilities"
@@ -1613,9 +1687,7 @@ except:
     fi
   fi
 fi
-
-# ============================================================================
-# QUALITY REPORT GENERATION
+record_gate_audit "gate-9" "sast-security" "$GATE_9_STATUS" "0" "$GATE_9_START"
 # ============================================================================
 
 generate_quality_report() {
@@ -1778,4 +1850,4 @@ ENDJSON
 
 generate_quality_report
 
-exit
+exit 0

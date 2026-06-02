@@ -45,9 +45,20 @@ export interface StrykerReport {
   files?: Record<string, StrykerFileReport>;
 }
 
+export type TestLayer = 'unit' | 'integration' | 'e2e' | 'unknown';
+
+export interface MockDensityInfo {
+  density: number;
+  mockCount: number;
+  totalTestLines: number;
+  layer: TestLayer;
+  pendingMocks: number;
+}
+
 export interface AITestDetectionResult {
   isAiGenerated: boolean;
   mockDensity: number;
+  layer: TestLayer;
   explicitThreshold?: number;
   annotations: {
     hasTest: boolean;

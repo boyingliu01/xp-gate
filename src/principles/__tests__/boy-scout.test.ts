@@ -41,7 +41,8 @@ import { analyze } from '../analyzer';
 import { getAllRules } from '../index';
 
 const mockAnalyze = vi.mocked(analyze);
-const mockGetAllRules = vi.mocked(getAllRules);
+const _mockGetAllRules = vi.mocked(getAllRules);
+void _mockGetAllRules;
 const mockReadFile = vi.mocked(readFile);
 const mockAccess = vi.mocked(access);
 const mockWriteFile = vi.mocked(writeFile);
