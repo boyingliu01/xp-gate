@@ -185,20 +185,29 @@ else
   for test_file in $ALL_PUSHED_TEST_FILES; do
     if [ -f "$test_file" ]; then
       # Count mock keyword references (precise patterns only)
+      # Use grep -o piped to wc -l for reliable single-number output (grep -c can emit
+      # multi-line output with filenames under some grep versions, causing bash arithmetic
+      # syntax errors). grep -o extracts each match on its own line, wc -l counts them.
       MOCK_COUNT=0
       for kw in 'jest\.mock' 'vi\.mock' 'jest\.spyOn' 'vi\.spyOn' 'jest\.fn' 'vi\.fn' \
                 'mockResolvedValue' 'mockRejectedValue' 'mockReturnValue' 'mockImplementation' \
                 'createMock' 'mockReset' 'mockClear' 'mockRestore' 'MagicMock' 'unittest\.mock' \
-                '\.patch(' 'gomock' 'mockgen' '.EXPECT()'; do
-        c=$(grep -o -c "$kw" "$test_file" 2>/dev/null || echo "0")
+                '\.patch(' 'gomock' 'mockgen' '\.EXPECT()'; do
+        c=$(grep -o "$kw" "$test_file" 2>/dev/null | wc -l || echo "0")
+        # Guard against empty/non-numeric values that break bash arithmetic
+        c=${c//[^0-9]/}
+        c=${c:-0}
         MOCK_COUNT=$((MOCK_COUNT + c))
       done
 
       # Count total non-empty, non-comment lines for density denominator
       TOTAL_LINES=$(grep -v '^\s*$' "$test_file" | grep -v '^\s*//' | grep -v '^\s*\*' | grep -v '^\s*#' | wc -l | awk '{print $1}')
+      TOTAL_LINES=${TOTAL_LINES//[^0-9]/}
+      TOTAL_LINES=${TOTAL_LINES:-0}
 
       if [ "$TOTAL_LINES" -gt 0 ] 2>/dev/null; then
         MOCK_DENSITY=$(awk "BEGIN {printf \"%.1f\", ($MOCK_COUNT / $TOTAL_LINES) * 100}")
+        MOCK_DENSITY=${MOCK_DENSITY:-"0"}
       else
         MOCK_DENSITY="0"
       fi
