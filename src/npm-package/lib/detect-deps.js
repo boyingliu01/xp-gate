@@ -18,14 +18,6 @@ const REQUIRED_DEPS = [
   { name: 'gstack', minVersion: '1.0.0' }
 ];
 
-// Platform-specific dependency profiles
-// All platforms require superpowers + gstack; only the skill directory differs
-const PLATFORM_PROFILES = {
-  opencode: { requiredDeps: REQUIRED_DEPS, skillsDirs: [SKILLS_DIR, OPENCODE_DIR] },
-  qoder:    { requiredDeps: REQUIRED_DEPS, skillsDirs: [path.join(HOME, '.qoder', 'skills')] },
-  'claude-code': { requiredDeps: REQUIRED_DEPS, skillsDirs: [SKILLS_DIR, OPENCODE_DIR] },
-};
-
 /**
  * Check if bash is available on the system.
  * XP-Gate hooks are bash scripts — Windows users need Git Bash installed.
@@ -92,14 +84,12 @@ function checkBash() {
   }
 }
 
-async function checkDeps(platform = 'opencode') {
-  const profile = PLATFORM_PROFILES[platform] || PLATFORM_PROFILES.opencode;
-  const { requiredDeps, skillsDirs } = profile;
-
-  // All platforms require superpowers + gstack
-
-  for (const dep of requiredDeps) {
-    const possiblePaths = skillsDirs.map(dir => path.join(dir, dep.name));
+async function checkDeps() {
+  for (const dep of REQUIRED_DEPS) {
+    const possiblePaths = [
+      path.join(SKILLS_DIR, dep.name),
+      path.join(OPENCODE_DIR, dep.name)
+    ];
     
     let depDir = null;
     for (const p of possiblePaths) {

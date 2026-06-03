@@ -95,18 +95,10 @@ describe('install-skill', () => {
 
   function setupValidDeps() {
     ['superpowers', 'gstack'].forEach((name) => {
-      // opencode dir
       const dir = path.join(skillsDir(), name);
       fs.mkdirSync(dir, { recursive: true });
       fs.writeFileSync(
         path.join(dir, 'package.json'),
-        JSON.stringify({ version: '2.0.0' })
-      );
-      // qoder dir
-      const qdir = path.join(qoderSkillsDir(), name);
-      fs.mkdirSync(qdir, { recursive: true });
-      fs.writeFileSync(
-        path.join(qdir, 'package.json'),
         JSON.stringify({ version: '2.0.0' })
       );
     });
@@ -330,49 +322,5 @@ describe('install-skill', () => {
     expect(result).toBe(1);
     expect(console.warn).not.toHaveBeenCalled();
     expect(console.error).toHaveBeenCalledWith('Error: Failed to download test-spec');
-  });
-
-  // --- Qoder platform tests ---
-
-  function qoderSkillsDir() {
-    return path.join(tmpHome, '.qoder', 'skills');
-  }
-
-  it('qoder platform requires superpowers/gstack deps before installing', async () => {
-    // Do NOT call setupValidDeps() — no superpowers/gstack present
-    const { installSkill } = require('../install-skill');
-    const result = await installSkill('sprint-flow', { platform: 'qoder' });
-
-    expect(result).toBe(1);
-    expect(console.error).toHaveBeenCalledWith(expect.stringContaining('superpowers'));
-  });
-
-  it('qoder platform installs to ~/.qoder/skills/ instead of ~/.config/opencode/skills/', async () => {
-    setupValidDeps(); // Qoder also needs superpowers/gstack
-    mockHttpsGet({ statusCode: 200, body: '# Qoder Skill' });
-
-    const { installSkill } = require('../install-skill');
-    const result = await installSkill('sprint-flow', { platform: 'qoder' });
-
-    expect(result).toBe(0);
-    // Verify installed in Qoder directory
-    const qoderFile = path.join(qoderSkillsDir(), 'sprint-flow', 'SKILL.md');
-    expect(fs.existsSync(qoderFile)).toBe(true);
-    expect(fs.readFileSync(qoderFile, 'utf8')).toContain('Qoder Skill');
-
-    // Verify NOT installed in opencode directory
-    const opencodeFile = path.join(skillsDir(), 'sprint-flow', 'SKILL.md');
-    expect(fs.existsSync(opencodeFile)).toBe(false);
-  });
-
-  it('default platform still requires deps and installs to opencode dir', async () => {
-    // Without setupValidDeps, default platform should fail on dep check
-    const { installSkill } = require('../install-skill');
-    const result = await installSkill('sprint-flow');
-
-    expect(result).toBe(1);
-    expect(console.error).toHaveBeenCalledWith(
-      expect.stringContaining('superpowers is required')
-    );
   });
 });

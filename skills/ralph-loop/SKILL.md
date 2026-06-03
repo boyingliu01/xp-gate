@@ -297,46 +297,6 @@ Phase 0, 1, 3-6 行为完全不变。
 
 ---
 
-## Qoder 平台适配
-
-### Subagent Dispatch（替代 OpenCode 的 `task()` API）
-
-在 Qoder 环境中，ralph-loop 的 subagent 派发使用以下方式：
-
-| 原调用 | Qoder 替代 | 说明 |
-|---------|------------|------|
-| `task(category="unspecified-high", load_skills=["test-driven-development"])` | **orchestrator 直接执行** | ralph-loop 逐 REQ 迭代，每个 REQ 在干净上下文中执行，不需要独立 subagent |
-| `gstack/learn` | **Qoder Memory 系统** | permanent learnings → `UpdateMemory`；contextual learnings → 会话上下文 |
-
-### Learnings 持久化（替代 gstack/learn）
-
-ralph-loop 的 learnings 分类机制在 Qoder 中通过 Memory 系统实现更优雅的持久化：
-
-| Learnings 类型 | 原方案 | Qoder 替代 |
-|---------------|--------|------------|
-| **permanent** | progress.log + AGENTS.md | `UpdateMemory`（project_introduction / expert_experience / development_practice_specification 类型） |
-| **contextual** | progress.log（最近 3 条） | 当前会话上下文传递，不持久化 |
-| **Sprint retro** | gstack/learn | Phase 5 结束时 `UpdateMemory` 写入 |
-
-**执行方式**：每个 REQ 完成后，orchestrator 调用 `UpdateMemory` 存储 permanent learnings：
-- 架构决策 → `expert_experience` 类型
-- 接口约定/全局规范 → `development_practice_specification` 类型
-- 项目结构发现 → `project_introduction` 类型
-
-### 三层验证 Gate 增强（替代 PostToolUse Hook）
-
-在 Qoder 中，三层验证 Gate 增加 principles 检查步骤：
-
-| 层级 | 原验证 | Qoder 增强 |
-|------|--------|------------|
-| L1 | typecheck + lint | + **principles check**（`npx -y tsx src/principles/index.ts --files <changed> --format console`） |
-| L2 | 全量测试 | 无变化 |
-| L3 | coverage ≥ 80% | 无变化 |
-
-> **注意**：principles check 仅在 src/principles/ 存在时执行（非 xp-gate 项目跳过）。
-
----
-
 ## Anti-Patterns
 
 | ❌ 错误 | ✅ 正确 |

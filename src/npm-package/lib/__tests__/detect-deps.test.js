@@ -206,38 +206,4 @@ describe('detect-deps', () => {
     expect(result.ok).toBe(false);
     expect(result.versionMismatch.found).toBe('0.0.1');
   });
-
-  // --- Qoder platform tests ---
-
-  it('qoder platform requires superpowers/gstack like other platforms', async () => {
-    // Qoder requires superpowers + gstack, fails when missing
-    const { checkDeps } = require('../detect-deps');
-    const result = await checkDeps('qoder');
-    expect(result.ok).toBe(false);
-    expect(result.missing).toBe('superpowers');
-  });
-
-  it('qoder platform checks ~/.qoder/skills/ directory', async () => {
-    // Qoder uses ~/.qoder/skills/ not ~/.config/opencode/skills/
-    const { checkDeps } = require('../detect-deps');
-    const result = await checkDeps('qoder');
-    expect(result.ok).toBe(false);
-    expect(result.missing).toBeDefined();
-  });
-
-  it('claude-code platform behaves like default opencode (requires deps)', async () => {
-    // claude-code platform profile requires the same deps as opencode
-    const { checkDeps } = require('../detect-deps');
-    const result = await checkDeps('claude-code');
-    expect(result.ok).toBe(false);
-    expect(result.missing).toBe('superpowers');
-  });
-
-  it('unknown platform falls back to opencode profile', async () => {
-    const { checkDeps } = require('../detect-deps');
-    const result = await checkDeps('unknown-platform');
-    // Falls back to opencode profile → requires deps → fails
-    expect(result.ok).toBe(false);
-    expect(result.missing).toBe('superpowers');
-  });
 });
