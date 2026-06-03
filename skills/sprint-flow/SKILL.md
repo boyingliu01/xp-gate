@@ -46,10 +46,10 @@ maturity: beta
 - 多平台适配（Claude Code, OpenCode, Qoder）
 
 **Out of Scope:**
-- 底层 Skill 的内部实现（各 Skill 保持独立）
-- 具体业务代码编写
-- CI/CD pipeline 配置（由项目自身负责）
-- 生产环境部署（仅到 PR 创建 + merge）
+- Does NOT handle internal Skill implementation (each Skill remains independent)
+- Does NOT write business code
+- Does NOT configure CI/CD pipelines (project's own responsibility)
+- Does NOT deploy to production (only up to PR creation + merge)
 
 ## Security Notes
 
@@ -60,11 +60,12 @@ maturity: beta
 - 文档中 `+ platform deploy` 等描述仅表示可选的部署步骤映射，**不是可执行命令**
 - sprint-flow 不下载、安装或执行任何外部二进制文件
 
-**permissions**:
-- `git`: read/write（worktree 操作、branch 操作、commit）
-- `gh` (GitHub CLI): read/write（PR 创建、merge、CI 查询）
-- `filesystem`: read/write（限于项目目录和 `.worktrees/` 目录）
-- `network`: read-only（CI 状态查询、canary health check）
+## Permissions
+
+- `git`: read/write (worktree, branch, commit)
+- `gh` (GitHub CLI): read/write (PR create, merge, CI query)
+- `filesystem`: read/write (project dir + `.worktrees/` only)
+- `network`: read-only (CI status, canary health)
 
 ## 核心原则
 

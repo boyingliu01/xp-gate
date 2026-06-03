@@ -5,6 +5,19 @@ description: "Delphi consensus review: multi-round anonymous expert review until
 
 # Delphi Consensus Review
 
+## Scope
+
+**In Scope:**
+- Multi-round anonymous expert consensus review (design + code-walkthrough modes)
+- 2-3 experts from different providers with statistical consensus (>= 91%)
+- Structured verdict: APPROVED / PASS_WITH_CAVEATS / REQUEST_CHANGES
+- Domestic models only (no Anthropic/OpenAI/Google)
+
+**Out of Scope:**
+- Does NOT implement code changes (review only, implementation is separate)
+- Does NOT replace testing or CI/CD verification
+- Does NOT handle deployment or release decisions
+
 ## 核心原则
 
 **Delphi 方法只有一个目的：得到所有专家一致认可的可行方案。**
