@@ -83,7 +83,6 @@ skill-cert/*.egg-info/
 # Plugin build artifacts (skills copied during build, not committed)
 plugins/claude-code/skills/
 plugins/opencode/skills/
-plugins/qoder/skills/
 plugins/**/*.lock
 plugins/**/*.js.map
 plugins/opencode/dist/

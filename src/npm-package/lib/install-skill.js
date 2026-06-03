@@ -13,13 +13,6 @@ const HOME = process.env.HOME || process.env.USERPROFILE || os.homedir();
 
 const CONFIG_DIR = path.join(HOME, '.config', 'xp-gate');
 const SKILLS_DIR = path.join(HOME, '.config', 'opencode', 'skills');
-const QODER_SKILLS_DIR = path.join(HOME, '.qoder', 'skills');
-
-// Platform-specific skill directories
-const PLATFORM_SKILLS_DIRS = {
-  opencode: SKILLS_DIR,
-  qoder: QODER_SKILLS_DIR,
-};
 
 const SKILLS_REGISTRY = {
   'sprint-flow': { repo: 'boyingliu01/xp-gate', path: 'skills/sprint-flow' },
@@ -29,16 +22,14 @@ const SKILLS_REGISTRY = {
 };
 
 async function installSkill(name, options = {}) {
-  const { offline = false, verbose = false, force = false, platform = 'opencode' } = options;
-
-  // All platforms require superpowers + gstack
-  const depCheck = await checkDeps(platform);
+  const { offline = false, verbose = false, force = false } = options;
+  
+  const depCheck = await checkDeps();
   if (!depCheck.ok) {
     if (depCheck.missing) {
       console.error(`Error: ${depCheck.missing} is required but not installed`);
-      console.error('Please install superpowers and gstack first:');
-      console.error('  superpowers: https://github.com/obra/superpowers');
-      console.error('  gstack:      https://github.com/garrytan/gstack');
+      console.error('Please install superpowers and gstack first');
+      console.error('See: https://github.com/boyingliu01/superpowers');
       return 1;
     }
     if (depCheck.versionMismatch) {
@@ -55,8 +46,7 @@ async function installSkill(name, options = {}) {
     return 1;
   }
   
-  const targetSkillsDir = PLATFORM_SKILLS_DIRS[platform] || SKILLS_DIR;
-  const targetDir = path.join(targetSkillsDir, name);
+  const targetDir = path.join(SKILLS_DIR, name);
   if (fs.existsSync(targetDir) && !force) {
     console.error(`Error: ${name} is already installed`);
     console.error('Use --force to overwrite');

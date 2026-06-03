@@ -316,54 +316,6 @@ Every review round output MUST follow this exact JSON structure:
 
 ---
 
-## Qoder 平台适配
-
-在 Qoder IDE 中，delphi-review 的多专家评审通过以下方式实现：
-
-### 多模型评审（替代 OpenCode 的多 agent 配置）
-
-利用 Qoder 的多模型访问能力（类似 coding plan），通过 Agent subagent 派发不同模型完成 Expert A/B/C 评审：
-
-| 专家 | 角色 | Qoder Subagent 映射 | 说明 |
-|------|------|---------------------|------|
-| Expert A (架构) | 架构审查 | **plan-agent** subagent | 适合架构级分析 |
-| Expert B (技术) | 实现审查 | **CodeReview** subagent | 代码审查天然适合 |
-| Expert C (可行性) | 可行性仲裁 | **plan-agent** subagent（不同 prompt） | 与 Expert A 使用不同的评审 prompt |
-
-**执行流程**：
-1. orchestrator 准备评审材料（设计文档/代码变更）
-2. 分别派发 2-3 个 Agent subagent，每个 subagent 携带对应专家的 system prompt
-3. 收集各专家评审结果 → 合并为共识报告
-4. 如未达成共识 → 迭代（携带其他专家意见重新评审）
-
-### 专家配置
-
-专家→模型映射通过 `.qoder/delphi-config.json` 配置：
-
-```json
-{
-  "experts": {
-    "A": { "role": "architecture", "model_hint": "deepseek-v4-pro" },
-    "B": { "role": "implementation", "model_hint": "kimi-k2.6" },
-    "C": { "role": "feasibility", "model_hint": "qwen3.6-plus" }
-  },
-  "consensus_threshold": 0.95,
-  "max_rounds": 5
-}
-```
-
-> **注意**：`model_hint` 是建议模型，实际使用的模型取决于 Qoder 的模型调度策略。
-
-### 降级方案
-
-如果多模型 subagent 调用不可用，降级为**单模型多角色模式**：
-- 同一模型分别扮演 Expert A/B/C（不同 system prompt）
-- 明确标注降级警告：`[DEGRADED] 单模型多角色模式，失去跨 provider 匿名性保护`
-
-详细配置和执行指南参见 `references/qoder-multi-model.md`。
-
----
-
 ## Anti-Patterns
 
 | ❌ 错误 | ✅ 正确 |

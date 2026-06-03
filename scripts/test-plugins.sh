@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # test-plugins.sh: Integration tests for plugin build pipeline
-# Verifies Claude Code, OpenCode, and Qoder plugins build correctly with valid manifests.
+# Verifies both Claude Code and OpenCode plugins build correctly with valid manifests.
 
 set -euo pipefail
 
@@ -20,8 +20,6 @@ echo "Test 1: Directory structure"
 [ -d "$REPO_ROOT/plugins/claude-code/hooks" ] && pass "claude-code/hooks/" || fail "claude-code/hooks/ missing"
 [ -d "$REPO_ROOT/plugins/claude-code/bin" ] && pass "claude-code/bin/" || fail "claude-code/bin/ missing"
 [ -d "$REPO_ROOT/plugins/opencode" ] && pass "opencode/" || fail "opencode/ missing"
-[ -d "$REPO_ROOT/plugins/qoder" ] && pass "qoder/" || fail "qoder/ missing"
-[ -d "$REPO_ROOT/plugins/qoder/widgets" ] && pass "qoder/widgets/" || fail "qoder/widgets/ missing"
 
 # Test 2: Manifests are valid JSON
 echo ""
@@ -73,17 +71,11 @@ if bash "$REPO_ROOT/scripts/build-plugin.sh" --platform opencode >/dev/null 2>&1
 else
   fail "opencode build failed"
 fi
-if bash "$REPO_ROOT/scripts/build-plugin.sh" --platform qoder >/dev/null 2>&1; then
-  pass "qoder build succeeds"
-else
-  fail "qoder build failed"
-fi
 
 # Test 6: All expected skills present in built plugins
 echo ""
 echo "Test 6: Skill packaging"
 EXPECTED_SKILLS=(sprint-flow delphi-review test-specification-alignment ralph-loop test-driven-development improve-codebase-architecture to-issues)
-QODER_EXTRA_SKILLS=(admin-template-guidelines)
 for skill in "${EXPECTED_SKILLS[@]}"; do
   if [ -f "$REPO_ROOT/plugins/claude-code/skills/$skill/SKILL.md" ]; then
     pass "claude-code/skills/$skill/SKILL.md"
@@ -95,45 +87,7 @@ for skill in "${EXPECTED_SKILLS[@]}"; do
   else
     fail "opencode/skills/$skill/SKILL.md missing"
   fi
-  if [ -f "$REPO_ROOT/plugins/qoder/skills/$skill/SKILL.md" ]; then
-    pass "qoder/skills/$skill/SKILL.md"
-  else
-    fail "qoder/skills/$skill/SKILL.md missing"
-  fi
 done
-# Qoder-specific extra skill
-for skill in "${QODER_EXTRA_SKILLS[@]}"; do
-  if [ -f "$REPO_ROOT/plugins/qoder/skills/$skill/SKILL.md" ]; then
-    pass "qoder/skills/$skill/SKILL.md"
-  else
-    fail "qoder/skills/$skill/SKILL.md missing"
-  fi
-done
-
-# Test 6b: Qoder widget templates
-echo ""
-echo "Test 6b: Qoder widget templates"
-for widget in quality-report.html sprint-dashboard.html; do
-  if [ -f "$REPO_ROOT/plugins/qoder/widgets/$widget" ]; then
-    pass "qoder/widgets/$widget"
-  else
-    fail "qoder/widgets/$widget missing"
-  fi
-done
-
-# Test 6c: Qoder has no hooks.json (platform constraint)
-echo ""
-echo "Test 6c: Qoder platform constraints"
-if [ ! -f "$REPO_ROOT/plugins/qoder/hooks/hooks.json" ]; then
-  pass "qoder has no hooks.json (correct)"
-else
-  fail "qoder should not have hooks.json"
-fi
-if [ ! -d "$REPO_ROOT/plugins/qoder/bin" ]; then
-  pass "qoder has no bin/ directory (correct)"
-else
-  fail "qoder should not have bin/ directory"
-fi
 
 # Test 7: xp-gate-check graceful degradation
 echo ""
