@@ -5,6 +5,20 @@ description: "测试与 Specification 对齐验证引擎。确保测试准确反
 
 # Test-Specification Alignment Engine
 
+## Scope
+
+**In Scope:**
+- 测试与 specification.yaml 的对齐验证（两阶段）
+- Phase 1 对齐验证（可修改测试）+ Phase 2 执行测试（禁止修改）
+- freeze/unfreeze 测试目录锁定
+- 失败分类：业务代码 / 测试数据 / Specification / 环境
+- 多语言支持：TypeScript, Python, Go
+
+**Out of Scope:**
+- specification.yaml 的生成（由 sprint-flow Phase 1 负责）
+- 业务代码编写与修改
+- 测试框架选择与配置
+
 ## 核心原则
 
 **测试是系统的防护网，也是系统的使用手册。测试必须准确反映原始需求和设计方案。**
@@ -74,7 +88,7 @@ US-001 (actor/feature/benefit)
 
 ---
 
-## 核心流程
+## Workflow (核心流程)
 
 ```
 ┌─────────────────────────────────────────────────────────────┐

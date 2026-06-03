@@ -5,6 +5,20 @@ description: "测试与 Specification 对齐验证引擎。确保测试准确反
 
 # Test-Specification Alignment Engine
 
+## Scope
+
+**In Scope:**
+- 测试与 specification.yaml 的对齐验证（两阶段）
+- Phase 1 对齐验证（可修改测试）+ Phase 2 执行测试（禁止修改）
+- freeze/unfreeze 测试目录锁定
+- 失败分类：业务代码 / 测试数据 / Specification / 环境
+- 多语言支持：TypeScript, Python, Go
+
+**Out of Scope:**
+- specification.yaml 的生成（由 sprint-flow Phase 1 负责）
+- 业务代码编写与修改
+- 测试框架选择与配置
+
 ## 核心原则
 
 **测试是系统的防护网，也是系统的使用手册。测试必须准确反映原始需求和设计方案。**
@@ -74,7 +88,7 @@ US-001 (actor/feature/benefit)
 
 ---
 
-## 核心流程
+## Workflow (核心流程)
 
 ```
 ┌─────────────────────────────────────────────────────────────┐
@@ -566,6 +580,29 @@ legacy_mode:
 - **MUST BLOCK 并记录违规**
 
 </MANDATORY-CHECKLIST>
+
+---
+
+## Qoder 平台适配
+
+### freeze 机制替代（替代 gstack/freeze skill）
+
+在 Qoder 环境中，freeze/unfreeze 通过 sprint-flow 的 **Pre-Edit Gate** 替代：
+- Phase 2 执行期间，orchestrator 禁止修改测试目录下的文件
+- 此约束通过 SKILL.md 指令强制执行（非物理阻断）
+- orchestrator 在每次文件编辑前检查：如果目标文件位于测试目录且当前处于 Phase 2 freeze 状态，则 **BLOCK**
+
+### Agent 配置适配
+
+| 原配置 | Qoder 替代 | 说明 |
+|---------|------------|------|
+| Phase 1 Agent (Qwen3.5-Plus) | **orchestrator 直接执行** | YAML 解析 + AST 解析由 orchestrator 内联完成 |
+| Phase 2 Agent (GLM-5) | **orchestrator 直接执行** | 测试执行由 orchestrator 通过 Bash 工具完成 |
+
+### Qoder 集成点
+
+- Phase 3 REVIEW 完成后，使用 genui `show_widget` 展示对齐报告摘要
+- 对齐分数记录通过 `UpdateMemory` 持久化（development_test_specification 类型）
 
 ---
 
