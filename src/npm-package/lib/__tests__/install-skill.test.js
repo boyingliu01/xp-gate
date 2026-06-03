@@ -95,10 +95,18 @@ describe('install-skill', () => {
 
   function setupValidDeps() {
     ['superpowers', 'gstack'].forEach((name) => {
+      // opencode dir
       const dir = path.join(skillsDir(), name);
       fs.mkdirSync(dir, { recursive: true });
       fs.writeFileSync(
         path.join(dir, 'package.json'),
+        JSON.stringify({ version: '2.0.0' })
+      );
+      // qoder dir
+      const qdir = path.join(qoderSkillsDir(), name);
+      fs.mkdirSync(qdir, { recursive: true });
+      fs.writeFileSync(
+        path.join(qdir, 'package.json'),
         JSON.stringify({ version: '2.0.0' })
       );
     });
@@ -330,18 +338,17 @@ describe('install-skill', () => {
     return path.join(tmpHome, '.qoder', 'skills');
   }
 
-  it('qoder platform skips dep check (installs without superpowers/gstack)', async () => {
+  it('qoder platform requires superpowers/gstack deps before installing', async () => {
     // Do NOT call setupValidDeps() — no superpowers/gstack present
-    mockHttpsGet({ statusCode: 200, body: '# Sprint Flow Qoder' });
-
     const { installSkill } = require('../install-skill');
     const result = await installSkill('sprint-flow', { platform: 'qoder' });
 
-    expect(result).toBe(0);
-    expect(console.log).toHaveBeenCalledWith('✓ sprint-flow installed');
+    expect(result).toBe(1);
+    expect(console.error).toHaveBeenCalledWith(expect.stringContaining('superpowers'));
   });
 
   it('qoder platform installs to ~/.qoder/skills/ instead of ~/.config/opencode/skills/', async () => {
+    setupValidDeps(); // Qoder also needs superpowers/gstack
     mockHttpsGet({ statusCode: 200, body: '# Qoder Skill' });
 
     const { installSkill } = require('../install-skill');

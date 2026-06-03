@@ -31,21 +31,20 @@ const SKILLS_REGISTRY = {
 async function installSkill(name, options = {}) {
   const { offline = false, verbose = false, force = false, platform = 'opencode' } = options;
 
-  // Qoder platform has no superpowers/gstack dependency
-  if (platform !== 'qoder') {
-    const depCheck = await checkDeps();
-    if (!depCheck.ok) {
-      if (depCheck.missing) {
-        console.error(`Error: ${depCheck.missing} is required but not installed`);
-        console.error('Please install superpowers and gstack first');
-        console.error('See: https://github.com/boyingliu01/superpowers');
-        return 1;
-      }
-      if (depCheck.versionMismatch) {
-        console.error(`Error: ${depCheck.versionMismatch.name} version too old`);
-        console.error(`Need: ${depCheck.versionMismatch.required}, Found: ${depCheck.versionMismatch.found}`);
-        return 1;
-      }
+  // All platforms require superpowers + gstack
+  const depCheck = await checkDeps(platform);
+  if (!depCheck.ok) {
+    if (depCheck.missing) {
+      console.error(`Error: ${depCheck.missing} is required but not installed`);
+      console.error('Please install superpowers and gstack first:');
+      console.error('  superpowers: https://github.com/obra/superpowers');
+      console.error('  gstack:      https://github.com/garrytan/gstack');
+      return 1;
+    }
+    if (depCheck.versionMismatch) {
+      console.error(`Error: ${depCheck.versionMismatch.name} version too old`);
+      console.error(`Need: ${depCheck.versionMismatch.required}, Found: ${depCheck.versionMismatch.found}`);
+      return 1;
     }
   }
   
