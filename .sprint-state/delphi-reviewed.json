@@ -1,8 +1,14 @@
 {
   "mode": "design",
-  "timestamp": "2026-05-31T15:45:00Z",
+  "timestamp": "2026-06-02T14:45:00Z",
   "verdict": "APPROVED",
   "consensus_ratio": 1.0,
-  "design_file": "docs/plans/2026-05-31-issue-79-ui-sprint-detection-design.md",
-  "specification_path": ".sprint-state/phase-outputs/specification.yaml"
+  "round": 2,
+  "expert_verdicts": {
+    "A": {"role": "architecture", "verdict": "APPROVED", "confidence": 8},
+    "B": {"role": "technical", "verdict": "APPROVED", "confidence": 9},
+    "C": {"role": "feasibility", "verdict": "APPROVED", "confidence": 8}
+  },
+  "notes": "All Critical and Major issues from Round 1 resolved in Round 2. One remaining minor concern from Expert A: TSX cold-start may exceed 50ms budget on first commit. Can be addressed in implementation via .js compilation or warm/cold distinction documentation.",
+  "design_doc": "~/.gstack/projects/boyingliu01-xp-gate/boyingliu01-sprint/2026-06-02-14-design-20260602-143000.md"
 }
