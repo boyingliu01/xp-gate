@@ -1,0 +1,63 @@
+{
+  "timestamp": "2026-06-03T10:04:44Z",
+  "trigger": "pre-push",
+  "branch": "sprint/2026-06-02-15",
+  "commit": "bdd86aa7e1c249c2de235bd841643e5fffedf11e",
+  "changed_files": [
+    ".code-walkthrough-result.json",
+    ".github/workflows/quality-gates.yml",
+    ".mockpolicyrc",
+    ".quality-history.jsonl",
+    ".sprint-state/delphi-reviewed.json",
+    ".sprint-state/sprint-state.json",
+    ".warnings-baseline.json",
+    ".xp-gate/audit.jsonl",
+    ".xp-gate/reports/pre-push/2026-06-03-095823.json",
+    "VERSION",
+    "docs/plans/2026-06-02-issue-78-mock-layering-strategy.md",
+    "eslint.config.js",
+    "package-lock.json",
+    "package.json",
+    "plugins/claude-code/.claude-plugin/plugin.json",
+    "plugins/opencode/package.json",
+    "src/mock-policy/AGENTS.md",
+    "src/mock-policy/__tests__/config.test.ts",
+    "src/mock-policy/__tests__/integration.test.ts",
+    "src/mock-policy/__tests__/mock-decision-engine.test.ts",
+    "src/mock-policy/__tests__/scope-scanner.test.ts",
+    "src/mock-policy/config.ts",
+    "src/mock-policy/mock-decision-engine.ts",
+    "src/mock-policy/schema.ts",
+    "src/mock-policy/scope-scanner.ts",
+    "src/mock-policy/types.ts",
+    "src/mutation/__tests__/detect-ai-test.test.ts",
+    "src/mutation/detect-ai-test.ts",
+    "src/mutation/types.ts",
+    "src/npm-package/bin/xp-gate.js",
+    "src/npm-package/lib/ui-detector.ts",
+    "src/npm-package/package.json",
+    "src/principles/__tests__/baseline.test.ts",
+    "src/principles/__tests__/boy-scout.test.ts"
+  ],
+  "overall": {
+    "score": "0.0/10",
+    "gates_passed": 0,
+    "gates_total": 1,
+    "verdict": "BLOCKED"
+  },
+  "gates": [
+    {
+      "id": "M",
+      "name": "Mutation + Code Walkthrough + UI Gates",
+      "status": "BLOCKED",
+      "details": {
+        "remote": "origin",
+        "url": "https://github.com/boyingliu01/xp-gate.git"
+      }
+    }
+  ],
+  "warnings": [],
+  "errors": [
+    "pre-push hook exited with code 1"
+  ]
+}
