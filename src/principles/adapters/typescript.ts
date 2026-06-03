@@ -11,11 +11,7 @@ export class TypeScriptAdapter extends BaseAdapter implements Adapter {
   }
 
   parseAST(): unknown {
-    return {
-      content: this.fileContent,
-      language: 'typescript',
-      filePath: this.filePath
-    };
+    return this.createParseResult('typescript');
   }
 
   extractFunctions(): unknown[] {
@@ -24,12 +20,7 @@ export class TypeScriptAdapter extends BaseAdapter implements Adapter {
     let match;
 
     while ((match = fnRegex.exec(this.fileContent)) !== null) {
-      functionMatches.push({
-        name: match[3],
-        type: 'function',
-        line: this.getLineNumber(match.index),
-        code: this.extractCodeBlock(match.index)
-      });
+      functionMatches.push(this.createCodeMatch(match[3], 'function', match.index));
     }
 
     return functionMatches;
@@ -41,19 +32,10 @@ export class TypeScriptAdapter extends BaseAdapter implements Adapter {
     let match;
 
     while ((match = classRegex.exec(this.fileContent)) !== null) {
-      classMatches.push({
-        name: match[2],
-        type: 'class',
-        line: this.getLineNumber(match.index),
-        code: this.extractCodeBlock(match.index)
-      });
+      classMatches.push(this.createCodeMatch(match[2], 'class', match.index));
     }
 
     return classMatches;
-  }
-
-  countLines(): number {
-    return this.fileContent.split('\n').length;
   }
 
   extractExports(): unknown[] {
