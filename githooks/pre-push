@@ -15,6 +15,54 @@ echo "━━━━━━━━━━━━━━━━━━━━━━━━�
 CURRENT_BRANCH=$(git rev-parse --abbrev-ref HEAD)
 REMOTE="$1"
 URL="$2"
+_PRE_PUSH_REPORT_DONE=0
+
+write_pre_push_report() {
+  local exit_code="$1"
+  local timestamp report_ts reports_dir report_file commit_hash verdict
+  timestamp=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
+  report_ts=$(date -u +"%Y-%m-%d-%H%M%S")
+  reports_dir=".xp-gate/reports/pre-push"
+  report_file="${reports_dir}/${report_ts}.json"
+  commit_hash=$(git rev-parse HEAD 2>/dev/null || echo "unknown")
+  verdict=$([ "$exit_code" -eq 0 ] && echo "PASS" || echo "BLOCKED")
+  mkdir -p "$reports_dir"
+  python3 - <<PY 2>/dev/null || true
+import json
+from pathlib import Path
+pushed_files = '''${PUSHED_FILES:-}'''.splitlines()
+report = {
+  'timestamp': '$timestamp',
+  'trigger': 'pre-push',
+  'branch': '$CURRENT_BRANCH',
+  'commit': '$commit_hash',
+  'changed_files': [f for f in pushed_files if f],
+  'overall': {
+    'score': '10.0/10' if '$verdict' == 'PASS' else '0.0/10',
+    'gates_passed': 1 if '$verdict' == 'PASS' else 0,
+    'gates_total': 1,
+    'verdict': '$verdict',
+  },
+  'gates': [
+    {'id': 'M', 'name': 'Mutation + Code Walkthrough + UI Gates', 'status': '$verdict', 'details': {'remote': '$REMOTE', 'url': '$URL'}}
+  ],
+  'warnings': [],
+  'errors': [] if '$verdict' == 'PASS' else ['pre-push hook exited with code $exit_code'],
+}
+Path('$report_file').write_text(json.dumps(report, indent=2) + '\n')
+PY
+}
+
+_pre_push_report_on_exit() {
+  local saved_exit=$?
+  if [ "$_PRE_PUSH_REPORT_DONE" = "1" ]; then
+    exit "$saved_exit"
+  fi
+  _PRE_PUSH_REPORT_DONE=1
+  write_pre_push_report "$saved_exit"
+  exit "$saved_exit"
+}
+trap '_pre_push_report_on_exit' EXIT
 
 # Get files being pushed in this push operation
 # pre-push receives stdin with ref information
@@ -192,9 +240,8 @@ else
       for kw in 'jest\.mock' 'vi\.mock' 'jest\.spyOn' 'vi\.spyOn' 'jest\.fn' 'vi\.fn' \
                 'mockResolvedValue' 'mockRejectedValue' 'mockReturnValue' 'mockImplementation' \
                 'createMock' 'mockReset' 'mockClear' 'mockRestore' 'MagicMock' 'unittest\.mock' \
-                '\.patch(' 'gomock' 'mockgen' '\.EXPECT()'; do
-        c=$(grep -o "$kw" "$test_file" 2>/dev/null | wc -l || echo "0")
-        # Guard against empty/non-numeric values that break bash arithmetic
+                '\.patch(' 'gomock' 'mockgen' '.EXPECT()'; do
+        c=$(grep -o "$kw" "$test_file" 2>/dev/null | wc -l || true)
         c=${c//[^0-9]/}
         c=${c:-0}
         MOCK_COUNT=$((MOCK_COUNT + c))
@@ -240,6 +287,75 @@ else
     exit 1
   fi
 fi
+
+# ============================================================================
+# Gate M3: Mock Layering Strategy
+# Validates mock policies based on test layer and dependency scope
+# Runs only in non-main branches, TypeScript projects with the module available
+# ============================================================================
+run_gate_m3() {
+  local changed_files="$1"
+  local project_root="$2"
+
+  echo ""
+  echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+  echo "   GATE M3: MOCK LAYERING STRATEGY"
+  echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+
+  # Skip on main/master
+  if [[ "$CURRENT_BRANCH" == "main" || "$CURRENT_BRANCH" == "master" ]]; then
+    echo "   SKIP — pushing to main/master"
+    return 0
+  fi
+
+  if [[ ! -f "./src/mock-policy/gate-m3.ts" ]]; then
+    echo "   SKIP — module not found"
+    return 0
+  fi
+
+  if [[ ! -f "package.json" ]] || [[ ! -f "tsconfig.json" ]]; then
+    echo "   SKIP — TypeScript only"
+    return 0
+  fi
+
+  # Filter to test files only
+  local test_files=$(echo "$changed_files" | grep -E '\.(test|spec)\.ts$' || true)
+
+  if [[ -z "$test_files" ]]; then
+    echo "   SKIP — no test files changed"
+    return 0
+  fi
+
+  echo "   Changed test files: $(echo "$test_files" | wc -l)"
+
+  # Convert to array safely (handles spaces in filenames)
+  local args=()
+  while IFS= read -r f; do
+    [[ -n "$f" ]] && args+=("$f")
+  done <<< "$test_files"
+
+  if npx tsx "./src/mock-policy/gate-m3.ts" "${args[@]}"; then
+    echo "✅ Gate M3: PASS"
+    return 0
+  else
+    local exit_code=$?
+    if [[ "$exit_code" -eq 1 ]]; then
+      echo ""
+      echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+      echo "   ❌ GATE M3 FAILED - PUSH BLOCKED"
+      echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+      echo ""
+      echo "Mock layering violations found. Review and fix or adjust"
+      echo ".mockpolicyrc severity to 'warning' for advisory mode."
+      echo ""
+      return 1
+    fi
+    echo "⚠️ Gate M3: Unexpected error — allowing push with warning"
+    return 0
+  fi
+}
+
+run_gate_m3 "$TS_FILES" "$PROJECT_ROOT"
 
 # ============================================================================
 # GATE UI: UI SPRINT DETECTION & RESULT VALIDATION
