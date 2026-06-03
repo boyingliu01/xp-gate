@@ -19,10 +19,10 @@ const REQUIRED_DEPS = [
 ];
 
 // Platform-specific dependency profiles
-// Qoder has no external skill dependencies (superpowers/gstack not required)
+// All platforms require superpowers + gstack; only the skill directory differs
 const PLATFORM_PROFILES = {
   opencode: { requiredDeps: REQUIRED_DEPS, skillsDirs: [SKILLS_DIR, OPENCODE_DIR] },
-  qoder:    { requiredDeps: [],              skillsDirs: [path.join(HOME, '.qoder', 'skills')] },
+  qoder:    { requiredDeps: REQUIRED_DEPS, skillsDirs: [path.join(HOME, '.qoder', 'skills')] },
   'claude-code': { requiredDeps: REQUIRED_DEPS, skillsDirs: [SKILLS_DIR, OPENCODE_DIR] },
 };
 
@@ -96,10 +96,7 @@ async function checkDeps(platform = 'opencode') {
   const profile = PLATFORM_PROFILES[platform] || PLATFORM_PROFILES.opencode;
   const { requiredDeps, skillsDirs } = profile;
 
-  // Qoder and other platforms with no hard dependencies pass immediately
-  if (requiredDeps.length === 0) {
-    return { ok: true, platform };
-  }
+  // All platforms require superpowers + gstack
 
   for (const dep of requiredDeps) {
     const possiblePaths = skillsDirs.map(dir => path.join(dir, dep.name));

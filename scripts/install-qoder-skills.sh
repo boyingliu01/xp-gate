@@ -73,14 +73,120 @@ echo "Installing xp-gate skills for Qoder ($MODE mode)..."
 echo "Source:  $SKILLS_SOURCE"
 echo "Target:  $TARGET_DIR"
 
+# Create target directories
+mkdir -p "$TARGET_DIR"
+mkdir -p "$WIDGET_TARGET"
+
+# ──────────────────────────────────────────────
+# Dependency check: superpowers + gstack
+# xp-gate requires these regardless of platform
+# ──────────────────────────────────────────────
+SUPERPOWERS_REPO="https://github.com/obra/superpowers.git"
+GSTACK_REPO="https://github.com/garrytan/gstack.git"
+CACHE_DIR="${XDG_CACHE_HOME:-$HOME/.cache}/xp-gate-deps"
+
+check_dep() {
+  local name="$1"
+  local indicator="$2"
+  if [ -f "$TARGET_DIR/$indicator/SKILL.md" ]; then
+    return 0
+  fi
+  return 1
+}
+
+install_dep() {
+  local name="$1"
+  local repo="$2"
+  local clone_dir="$CACHE_DIR/$name"
+
+  echo ""
+  echo "  Installing $name..."
+  mkdir -p "$CACHE_DIR"
+
+  if [ -d "$clone_dir" ]; then
+    echo "  Updating cached $name..."
+    (cd "$clone_dir" && git pull --ff-only 2>/dev/null) || true
+  else
+    echo "  Cloning $name..."
+    git clone --single-branch --depth 1 "$repo" "$clone_dir" 2>&1
+  fi
+
+  # Copy skills based on project structure
+  if [ -d "$clone_dir/skills" ]; then
+    # superpowers: skills/ subdirectory
+    for skill_dir in "$clone_dir/skills"/*/; do
+      [ -d "$skill_dir" ] || continue
+      skill_name=$(basename "$skill_dir")
+      if [ -f "$skill_dir/SKILL.md" ]; then
+        cp -r "$skill_dir" "$TARGET_DIR/$skill_name"
+        echo "    ✓ $name/$skill_name"
+      fi
+    done
+  else
+    # gstack: skills at root level (each subdirectory with SKILL.md)
+    for skill_dir in "$clone_dir"/*/; do
+      [ -d "$skill_dir" ] || continue
+      skill_name=$(basename "$skill_dir")
+      if [ -f "$skill_dir/SKILL.md" ]; then
+        cp -r "$skill_dir" "$TARGET_DIR/$skill_name"
+        echo "    ✓ $name/$skill_name"
+      fi
+    done
+    # Also copy root-level SKILL.md and supporting dirs
+    if [ -f "$clone_dir/SKILL.md" ]; then
+      mkdir -p "$TARGET_DIR/$name"
+      cp "$clone_dir/SKILL.md" "$TARGET_DIR/$name/SKILL.md"
+      [ -d "$clone_dir/bin" ] && cp -r "$clone_dir/bin" "$TARGET_DIR/$name/bin"
+      [ -d "$clone_dir/lib" ] && cp -r "$clone_dir/lib" "$TARGET_DIR/$name/lib"
+      echo "    ✓ $name (root)"
+    fi
+  fi
+}
+
+echo ""
+echo "Checking dependencies..."
+DEPS_MISSING=0
+
+if check_dep "superpowers" "brainstorming"; then
+  echo "  ✓ superpowers (found)"
+else
+  echo "  ✗ superpowers (not found)"
+  DEPS_MISSING=1
+fi
+
+if check_dep "gstack" "ship"; then
+  echo "  ✓ gstack (found)"
+else
+  echo "  ✗ gstack (not found)"
+  DEPS_MISSING=1
+fi
+
+if [ "$DEPS_MISSING" -eq 1 ]; then
+  echo ""
+  echo "xp-gate requires superpowers and gstack. Auto-installing..."
+
+  if ! check_dep "superpowers" "brainstorming"; then
+    install_dep "superpowers" "$SUPERPOWERS_REPO"
+  fi
+
+  if ! check_dep "gstack" "ship"; then
+    install_dep "gstack" "$GSTACK_REPO"
+  fi
+
+  echo ""
+  echo "  Dependencies installed."
+fi
+
+# ──────────────────────────────────────────────
+# Install xp-gate skills
+# ──────────────────────────────────────────────
+echo ""
+echo "Installing xp-gate skills..."
+
 if [ ! -d "$SKILLS_SOURCE" ]; then
   echo "Error: Skills source directory not found: $SKILLS_SOURCE" >&2
   exit 1
 fi
-
-# Create target directories
-mkdir -p "$TARGET_DIR"
-mkdir -p "$WIDGET_TARGET"
 
 # Expected skills (all 8 for Qoder — includes admin-template-guidelines)
 EXPECTED_SKILLS=(

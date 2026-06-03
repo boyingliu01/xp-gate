@@ -209,20 +209,20 @@ describe('detect-deps', () => {
 
   // --- Qoder platform tests ---
 
-  it('returns ok:true immediately for qoder platform (no hard deps)', async () => {
-    // Qoder has no superpowers/gstack dependency — should pass even with empty dirs
+  it('qoder platform requires superpowers/gstack like other platforms', async () => {
+    // Qoder requires superpowers + gstack, fails when missing
     const { checkDeps } = require('../detect-deps');
     const result = await checkDeps('qoder');
-    expect(result.ok).toBe(true);
-    expect(result.platform).toBe('qoder');
+    expect(result.ok).toBe(false);
+    expect(result.missing).toBe('superpowers');
   });
 
-  it('qoder platform passes even when superpowers/gstack are completely absent', async () => {
-    // No skill directories at all — qoder should still pass
+  it('qoder platform checks ~/.qoder/skills/ directory', async () => {
+    // Qoder uses ~/.qoder/skills/ not ~/.config/opencode/skills/
     const { checkDeps } = require('../detect-deps');
     const result = await checkDeps('qoder');
-    expect(result.ok).toBe(true);
-    expect(result.missing).toBeUndefined();
+    expect(result.ok).toBe(false);
+    expect(result.missing).toBeDefined();
   });
 
   it('claude-code platform behaves like default opencode (requires deps)', async () => {
