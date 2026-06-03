@@ -18,6 +18,14 @@ const REQUIRED_DEPS = [
   { name: 'gstack', minVersion: '1.0.0' }
 ];
 
+// Platform-specific dependency profiles
+// Qoder has no external skill dependencies (superpowers/gstack not required)
+const PLATFORM_PROFILES = {
+  opencode: { requiredDeps: REQUIRED_DEPS, skillsDirs: [SKILLS_DIR, OPENCODE_DIR] },
+  qoder:    { requiredDeps: [],              skillsDirs: [path.join(HOME, '.qoder', 'skills')] },
+  'claude-code': { requiredDeps: REQUIRED_DEPS, skillsDirs: [SKILLS_DIR, OPENCODE_DIR] },
+};
+
 /**
  * Check if bash is available on the system.
  * XP-Gate hooks are bash scripts — Windows users need Git Bash installed.
@@ -84,12 +92,17 @@ function checkBash() {
   }
 }
 
-async function checkDeps() {
-  for (const dep of REQUIRED_DEPS) {
-    const possiblePaths = [
-      path.join(SKILLS_DIR, dep.name),
-      path.join(OPENCODE_DIR, dep.name)
-    ];
+async function checkDeps(platform = 'opencode') {
+  const profile = PLATFORM_PROFILES[platform] || PLATFORM_PROFILES.opencode;
+  const { requiredDeps, skillsDirs } = profile;
+
+  // Qoder and other platforms with no hard dependencies pass immediately
+  if (requiredDeps.length === 0) {
+    return { ok: true, platform };
+  }
+
+  for (const dep of requiredDeps) {
+    const possiblePaths = skillsDirs.map(dir => path.join(dir, dep.name));
     
     let depDir = null;
     for (const p of possiblePaths) {

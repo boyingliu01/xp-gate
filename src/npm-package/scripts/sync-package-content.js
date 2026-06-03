@@ -14,7 +14,7 @@ const CORE_SKILLS = [
   'ralph-loop',
 ];
 
-const PLUGINS = ['claude-code'];
+const PLUGINS = ['claude-code', 'qoder'];
 
 function rmrf(target) {
   if (!fs.existsSync(target)) return;

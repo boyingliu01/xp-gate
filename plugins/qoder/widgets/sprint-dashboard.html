@@ -1,0 +1,172 @@
+<style>
+  :root {
+    --sd-bg: var(--vscode-editor-background, #1e1e1e);
+    --sd-fg: var(--vscode-editor-foreground, #d4d4d4);
+    --sd-border: var(--vscode-panel-border, #333);
+    --sd-pass: var(--vscode-testing-iconPassed, #73c991);
+    --sd-fail: var(--vscode-testing-iconFailed, #f14c4c);
+    --sd-skip: var(--vscode-descriptionForeground, #888);
+    --sd-accent: var(--vscode-focusBorder, #007acc);
+    --sd-card-bg: var(--vscode-editor-widget-background, #252526);
+    --sd-active: var(--vscode-charts-yellow, #e5c07b);
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { font-family: var(--vscode-font-family, 'Segoe UI', sans-serif); color: var(--sd-fg); background: var(--sd-bg); padding: 16px; }
+  .sd-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 16px; }
+  .sd-header h2 { font-size: 16px; font-weight: 600; }
+  .sd-status-badge { padding: 4px 12px; border-radius: 4px; font-size: 12px; font-weight: 600; text-transform: uppercase; }
+  .sd-status-badge.running { background: color-mix(in srgb, var(--sd-accent) 20%, transparent); color: var(--sd-accent); border: 1px solid var(--sd-accent); }
+  .sd-status-badge.paused { background: color-mix(in srgb, var(--sd-active) 20%, transparent); color: var(--sd-active); border: 1px solid var(--sd-active); }
+  .sd-status-badge.completed, .sd-status-badge.merged { background: color-mix(in srgb, var(--sd-pass) 20%, transparent); color: var(--sd-pass); border: 1px solid var(--sd-pass); }
+  .sd-meta { font-size: 12px; color: var(--sd-skip); margin-bottom: 16px; }
+  .sd-phase-track { display: flex; align-items: center; gap: 4px; margin-bottom: 20px; overflow-x: auto; padding-bottom: 4px; }
+  .sd-phase { display: flex; flex-direction: column; align-items: center; min-width: 72px; }
+  .sd-phase-dot { width: 28px; height: 28px; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-size: 11px; font-weight: 700; border: 2px solid var(--sd-border); color: var(--sd-skip); background: var(--sd-bg); }
+  .sd-phase-dot.done { background: color-mix(in srgb, var(--sd-pass) 20%, transparent); border-color: var(--sd-pass); color: var(--sd-pass); }
+  .sd-phase-dot.active { background: color-mix(in srgb, var(--sd-accent) 25%, transparent); border-color: var(--sd-accent); color: var(--sd-accent); animation: pulse 1.5s infinite; }
+  .sd-phase-dot.future { border-color: var(--sd-border); color: var(--sd-skip); }
+  .sd-phase-label { font-size: 10px; margin-top: 4px; color: var(--sd-skip); text-align: center; white-space: nowrap; }
+  .sd-phase-label.active { color: var(--sd-accent); font-weight: 600; }
+  .sd-phase-label.done { color: var(--sd-pass); }
+  .sd-phase-line { width: 16px; height: 2px; background: var(--sd-border); margin-bottom: 20px; }
+  .sd-phase-line.done { background: var(--sd-pass); }
+  @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.6; } }
+  .sd-section { margin-bottom: 16px; }
+  .sd-section h3 { font-size: 14px; font-weight: 600; margin-bottom: 10px; padding-bottom: 6px; border-bottom: 1px solid var(--sd-border); }
+  .sd-progress-row { display: flex; align-items: center; gap: 10px; margin-bottom: 10px; }
+  .sd-progress-row .label { font-size: 13px; min-width: 100px; }
+  .sd-progress-row .bar-track { flex: 1; height: 10px; background: var(--sd-border); border-radius: 5px; overflow: hidden; }
+  .sd-progress-row .bar-fill { height: 100%; border-radius: 5px; background: var(--sd-accent); transition: width 0.4s ease; }
+  .sd-progress-row .count { font-size: 13px; font-weight: 600; min-width: 60px; text-align: right; }
+  .sd-outputs { display: grid; grid-template-columns: repeat(auto-fill, minmax(180px, 1fr)); gap: 8px; }
+  .sd-output-item { background: var(--sd-card-bg); border: 1px solid var(--sd-border); border-radius: 4px; padding: 8px 10px; font-size: 12px; }
+  .sd-output-item .key { color: var(--sd-skip); font-size: 11px; }
+  .sd-output-item .val { margin-top: 2px; font-weight: 500; word-break: break-all; }
+  .sd-metrics { display: flex; gap: 12px; flex-wrap: wrap; margin-bottom: 16px; }
+  .sd-metric-card { background: var(--sd-card-bg); border: 1px solid var(--sd-border); border-radius: 6px; padding: 10px 14px; text-align: center; min-width: 100px; }
+  .sd-metric-card .value { font-size: 22px; font-weight: 700; color: var(--sd-accent); }
+  .sd-metric-card .label { font-size: 11px; color: var(--sd-skip); margin-top: 2px; }
+  .sd-learnings { list-style: none; }
+  .sd-learnings li { padding: 6px 0; font-size: 12px; border-bottom: 1px solid var(--sd-border); }
+  .sd-learnings li:last-child { border-bottom: none; }
+  .sd-learnings .cat { display: inline-block; padding: 1px 6px; border-radius: 3px; font-size: 10px; font-weight: 600; background: var(--sd-card-bg); border: 1px solid var(--sd-border); margin-right: 6px; }
+  .sd-empty { text-align: center; padding: 32px; color: var(--sd-skip); font-size: 13px; }
+</style>
+
+<div id="sd-root"></div>
+
+<script>
+(function() {
+  const data = window.__WIDGET_DATA__ || {};
+  const root = document.getElementById('sd-root');
+
+  if (!data || (!data.phase && !data.id && !data.status)) {
+    root.innerHTML = '<div class="sd-empty">No sprint state data available.<br>Start a sprint with /sprint-flow to see the dashboard.</div>';
+    return;
+  }
+
+  const PHASES = [
+    { num: -1, name: 'ISOLATE' },
+    { num: 0, name: 'THINK' },
+    { num: 1, name: 'PLAN' },
+    { num: 2, name: 'BUILD' },
+    { num: 3, name: 'REVIEW' },
+    { num: 4, name: 'UAT' },
+    { num: 5, name: 'FEEDBACK' },
+    { num: 6, name: 'SHIP' },
+    { num: 7, name: 'LAND' },
+    { num: 8, name: 'CLEANUP' }
+  ];
+
+  const currentPhase = data.phase !== undefined ? data.phase : -2;
+  const status = data.status || 'unknown';
+  const outputs = data.outputs || {};
+  const metrics = data.metrics || {};
+  const learnings = data.learnings || [];
+
+  let html = '';
+
+  // Header
+  html += '<div class="sd-header">';
+  html += '<h2>Sprint' + (data.id ? ' — ' + esc(data.id) : '') + '</h2>';
+  const statusCls = ['running', 'paused', 'completed', 'merged'].includes(status) ? status : 'running';
+  html += '<span class="sd-status-badge ' + statusCls + '">' + esc(status) + '</span>';
+  html += '</div>';
+
+  // Phase progress track
+  html += '<div class="sd-phase-track">';
+  for (let i = 0; i < PHASES.length; i++) {
+    const p = PHASES[i];
+    if (i > 0) {
+      const lineCls = p.num <= currentPhase ? 'done' : '';
+      html += '<div class="sd-phase-line ' + lineCls + '"></div>';
+    }
+    let dotCls = 'future';
+    if (p.num < currentPhase) dotCls = 'done';
+    else if (p.num === currentPhase) dotCls = 'active';
+    const lblCls = p.num < currentPhase ? 'done' : p.num === currentPhase ? 'active' : '';
+    const icon = p.num < currentPhase ? '✓' : p.num === currentPhase ? '▶' : String(p.num);
+    html += '<div class="sd-phase">';
+    html += '<div class="sd-phase-dot ' + dotCls + '">' + icon + '</div>';
+    html += '<div class="sd-phase-label ' + lblCls + '">' + esc(p.name) + '</div>';
+    html += '</div>';
+  }
+  html += '</div>';
+
+  // Metrics cards
+  if (metrics.tests_passed !== undefined || metrics.coverage_pct !== undefined || metrics.tests_failed !== undefined) {
+    html += '<div class="sd-metrics">';
+    if (metrics.tests_passed !== undefined) {
+      html += '<div class="sd-metric-card"><div class="value">' + metrics.tests_passed + '</div><div class="label">Tests Passed</div></div>';
+    }
+    if (metrics.tests_failed !== undefined) {
+      html += '<div class="sd-metric-card"><div class="value" style="color:' + (metrics.tests_failed > 0 ? 'var(--sd-fail)' : 'var(--sd-pass)') + '">' + metrics.tests_failed + '</div><div class="label">Tests Failed</div></div>';
+    }
+    if (metrics.coverage_pct !== undefined) {
+      html += '<div class="sd-metric-card"><div class="value" style="color:' + (metrics.coverage_pct >= 80 ? 'var(--sd-pass)' : 'var(--sd-fail)') + '">' + metrics.coverage_pct + '%</div><div class="label">Coverage</div></div>';
+    }
+    html += '</div>';
+  }
+
+  // REQ progress
+  if (data.req_progress || data.reqs) {
+    const rp = data.req_progress || {};
+    const done = rp.done || 0;
+    const totalReqs = rp.total || (data.reqs ? data.reqs.length : 0);
+    const pct = totalReqs > 0 ? Math.round((done / totalReqs) * 100) : 0;
+    html += '<div class="sd-section"><h3>REQ Progress</h3>';
+    html += '<div class="sd-progress-row">';
+    html += '<span class="label">Completed</span>';
+    html += '<div class="bar-track"><div class="bar-fill" style="width:' + pct + '%"></div></div>';
+    html += '<span class="count">' + done + '/' + totalReqs + '</span>';
+    html += '</div></div>';
+  }
+
+  // Phase outputs
+  const outputKeys = Object.keys(outputs);
+  if (outputKeys.length > 0) {
+    html += '<div class="sd-section"><h3>Phase Outputs</h3>';
+    html += '<div class="sd-outputs">';
+    for (const key of outputKeys) {
+      html += '<div class="sd-output-item"><div class="key">' + esc(key) + '</div><div class="val">' + esc(outputs[key]) + '</div></div>';
+    }
+    html += '</div></div>';
+  }
+
+  // Learnings
+  if (learnings.length > 0) {
+    html += '<div class="sd-section"><h3>Recent Learnings</h3>';
+    html += '<ul class="sd-learnings">';
+    const recent = learnings.slice(-5).reverse();
+    for (const l of recent) {
+      const cat = l.category || 'general';
+      html += '<li><span class="cat">' + esc(cat) + '</span>' + esc(l.summary || l.text || JSON.stringify(l)) + '</li>';
+    }
+    html += '</ul></div>';
+  }
+
+  root.innerHTML = html;
+
+  function esc(s) { const d = document.createElement('div'); d.textContent = String(s); return d.innerHTML; }
+})();
+</script>

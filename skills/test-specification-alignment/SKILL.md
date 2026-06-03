@@ -569,6 +569,29 @@ legacy_mode:
 
 ---
 
+## Qoder 平台适配
+
+### freeze 机制替代（替代 gstack/freeze skill）
+
+在 Qoder 环境中，freeze/unfreeze 通过 sprint-flow 的 **Pre-Edit Gate** 替代：
+- Phase 2 执行期间，orchestrator 禁止修改测试目录下的文件
+- 此约束通过 SKILL.md 指令强制执行（非物理阻断）
+- orchestrator 在每次文件编辑前检查：如果目标文件位于测试目录且当前处于 Phase 2 freeze 状态，则 **BLOCK**
+
+### Agent 配置适配
+
+| 原配置 | Qoder 替代 | 说明 |
+|---------|------------|------|
+| Phase 1 Agent (Qwen3.5-Plus) | **orchestrator 直接执行** | YAML 解析 + AST 解析由 orchestrator 内联完成 |
+| Phase 2 Agent (GLM-5) | **orchestrator 直接执行** | 测试执行由 orchestrator 通过 Bash 工具完成 |
+
+### Qoder 集成点
+
+- Phase 3 REVIEW 完成后，使用 genui `show_widget` 展示对齐报告摘要
+- 对齐分数记录通过 `UpdateMemory` 持久化（development_test_specification 类型）
+
+---
+
 ## Anti-Patterns
 
 | 错误 | 正确 |

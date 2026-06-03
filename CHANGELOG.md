@@ -12,6 +12,28 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+## [0.7.0.0] — 2026-06-03
+
+### Added
+- **Qoder IDE 插件支持** — 新增 `plugins/qoder/` 平台插件，包含 8 个 AI Skill（较 Claude/OpenCode 多 admin-template-guidelines）
+- **genui Widget 质量报告** — `plugins/qoder/widgets/quality-report.html`，6 道门禁状态卡片 + Delphi 共识 + 测试对齐分数
+- **genui Widget Sprint 仪表板** — `plugins/qoder/widgets/sprint-dashboard.html`，Phase 进度条 + REQ 进度 + Learnings
+- **Pre-Edit Gate** — sprint-flow SKILL.md 内嵌强制性检查指令，替代 Claude Code 的 Hook 物理拦截
+- **多模型评审适配** — delphi-review 利用 Qoder 内置多模型能力 + subagent 派发，降级为单模型多角色
+- **Memory 系统集成** — ralph-loop learnings 通过 UpdateMemory 持久化，替代 gstack/learn
+- **CodeReview subagent** — Phase 3 REVIEW 和 delphi-review 集成 Qoder CodeReview subagent
+- **browser-use MCP** — 替代 browse skill，支持导航/点击/截图
+- **Qoder 安装脚本** — `scripts/install-qoder-skills.sh` 支持 --global / --local 两种安装模式
+- **npm CLI 扩展** — `xp-gate install-skill --platform qoder` 支持 Qoder 平台，跳过 superpowers/gstack 依赖检查
+- **构建系统三平台支持** — build-plugin.sh、package.json、sync-package-content.js、test-plugins.sh 全部新增 qoder 目标
+- **improve-codebase-architecture Canvas** — 新增架构可视化输出步骤，使用 genui Widget + Mermaid 渲染
+
+### Changed
+- **build-plugin.sh** — case 分支新增 qoder，Qoder 构建验证 8 个 Skill（含 admin-template-guidelines）
+- **test-plugins.sh** — 新增 Qoder 目录结构、8 个 Skill、Widget 模板、无 hooks.json 等测试用例
+- **plugins/AGENTS.md** — 新增 Qoder 平台结构描述和安装命令
+- **README.md** — 新增 Qoder 插件段落和三平台能力对比表
+
 ## [0.4.1.0] - 2026-05-30
 
 ### Fixed

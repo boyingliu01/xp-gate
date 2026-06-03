@@ -263,6 +263,25 @@ Phase 2 第一步必须执行 DELPHI-GATE 检查。没有 delphi-review APPROVED
 3. 验证 `verdict` 字段 == `"APPROVED"` → 不等于 → 同上 BLOCK
 4. ✅ 通过 → 进入 BUILD 编码
 
+**⚠️ Qoder Pre-Edit Gate（MANDATORY — 替代 Claude Code 的 delphi-review-guard.sh Hook）**:
+
+在 Qoder 环境中，由于没有 PreToolUse/PostToolUse 文件系统钩子，orchestrator **MUST** 在每次文件编辑/写入操作之前执行以下检查：
+
+1. 检查 `.sprint-state/` 目录是否存在 → 不存在 → 跳过检查（非 sprint 项目）
+2. 读取 `.sprint-state/delphi-reviewed.json` → 文件不存在 → **BLOCK**: 输出 `[DELPHI-GATE] delphi-review not APPROVED. 请先运行 /delphi-review`
+3. `verdict` != `"APPROVED"` → **BLOCK**
+4. `verdict` == `"APPROVED"` → 允许编辑
+
+此检查在 Phase 2 至 Phase 6 期间持续生效。orchestrator 不可绕过此检查。
+
+**Post-REQ Principles Check（替代 Claude Code 的 PostToolUse xp-gate-check Hook）**:
+
+每个 REQ 完成后（ralph-loop 三层验证 Gate 之后），orchestrator **MUST** 运行：
+```bash
+npx -y tsx src/principles/index.ts --files "<changed_files>" --format console
+```
+如果 src/principles/ 不存在（非 xp-gate 项目），则跳过此步骤。
+
 **输入**: `slices-manifest.json`（由 Phase 1 `/to-issues` 生成），按 `execution_order` 逐个执行。
 
 **默认模式**: `ralph-loop` — 逐 REQ/切片 迭代构建。每个切片（REQ）dispatch 独立 subagent，干净上下文，全量回归测试。Token 节约 40-67%。参见 `skills/ralph-loop/SKILL.md`。
@@ -424,6 +443,55 @@ Phase 2 第一步必须执行 DELPHI-GATE 检查。没有 delphi-review APPROVED
 | 6 | SHIP | ✅ | `quick` | `["finishing-a-development-branch", "ship"]` | subagent |
 | 7 | LAND | ✅ | `deep` | `["land-and-deploy"]` | subagent |
 | 8 | CLEANUP | ❌ | Bash（直接执行） | 无 | orchestrator |
+
+### Qoder Agent Dispatch Mapping（Qoder 平台替代方案）
+
+在 Qoder 环境中，OpenCode 的 `task()` API 和 superpowers/gstack 外部 skill 不可用。以下映射表说明每个 Phase 在 Qoder 中的执行方式：
+
+| Phase | 原 task()/skill 调用 | Qoder 替代方案 | 说明 |
+|-------|----------------------|--------------|------|
+| -1 ISOLATE | Bash 直接执行 | **Bash 直接执行**（无变化） | git worktree 操作平台无关 |
+| -0.5 AUTO-ESTIMATE | Bash 直接执行 | **Bash 直接执行**（无变化） | grep -rn 平台无关 |
+| 0 THINK | `task(deep, brainstorming)` | **plan-agent subagent** | 需求探索与设计适合 plan-agent |
+| 1 PLAN | `task(deep, autoplan+delphi+to-issues)` | **plan-agent subagent** | 规划类任务 |
+| 2 BUILD | `ralph-loop` + 外部 skill | **orchestrator 直接执行** | ralph-loop 逐 REQ 迭代，不需要独立 subagent |
+| 2 步骤 4 | `requesting-code-review` | **CodeReview subagent** | 代码盲评天然适合 CodeReview agent |
+| 2 步骤 6 | `verification-before-completion` | **orchestrator 内联** | 运行测试 + lint + coverage + principles |
+| 3 REVIEW | `task(deep, delphi+test-spec)` | **CodeReview subagent** + **browser-use MCP** | 代码走查 + 浏览器自动化 |
+| 4 ACCEPT | 强制人工 | **强制人工**（无变化） | 必须人工验收 |
+| 5 FEEDBACK | `task(quick, learn+retro+debug)` | **plan-agent** + **Memory 系统** | 回顾分析 + UpdateMemory 持久化 |
+| 6 SHIP | `task(quick, finishing-branch+ship)` | **orchestrator 直接执行** | git + gh CLI 操作平台无关 |
+| 7 LAND | `task(deep, land-and-deploy)` | **orchestrator 直接执行** | gh pr merge + CI polling |
+| 8 CLEANUP | Bash 直接执行 | **Bash 直接执行**（无变化） | git worktree remove 平台无关 |
+
+**Qoder 外部 Skill 降级表**（替代 superpowers/gstack 依赖）：
+
+| 外部 Skill | 来源 | Qoder 替代方案 |
+|-----------|------|----------------|
+| brainstorming | superpowers | orchestrator 内联需求探索对话 |
+| autoplan | gstack | plan-agent 分析代码库生成计划 |
+| freeze / unfreeze | gstack | Qoder Pre-Edit Gate 替代（见上方） |
+| requesting-code-review | superpowers | **CodeReview subagent** |
+| verification-before-completion | superpowers | orchestrator 运行测试+lint+coverage+principles |
+| learn / retro | gstack | Qoder **Memory 系统**（UpdateMemory / SearchMemory） |
+| browse | gstack | **browser-use MCP** 工具（navigate_page, click, fill, take_screenshot） |
+| ship / finishing-a-development-branch | superpowers/gstack | orchestrator 执行 git + gh CLI |
+| systematic-debugging | superpowers | orchestrator 内联分析错误日志 |
+| land-and-deploy / canary | gstack | orchestrator 执行 gh + curl/Invoke-RestMethod |
+| dispatching-parallel-agents | superpowers | orchestrator 按 dependency_graph 顺序执行 |
+| executing-plans | superpowers | orchestrator 直接执行 |
+
+**Qoder genui Widget 集成**：
+
+Phase 3 REVIEW 完成后，orchestrator **SHOULD** 使用 genui `show_widget` MCP 工具展示质量报告：
+- Widget 模板：`plugins/qoder/widgets/quality-report.html`
+- 数据源：读取项目根目录的 `quality-report.json`
+
+Sprint 执行过程中，用户可通过 `/sprint-status` 触发 genui `show_widget` 展示 Sprint 仪表板：
+- Widget 模板：`plugins/qoder/widgets/sprint-dashboard.html`
+- 数据源：`.sprint-state/sprint-state.json`
+
+详细适配规则参见 `references/qoder-adaptation.md`。
 
 **上下文隔离原则**：
 - 每个 Subagent 在**独立 session** 中启动，不继承 orchestrator 的对话历史

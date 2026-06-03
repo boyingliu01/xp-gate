@@ -22,7 +22,7 @@ const COMMANDS = {
   'install-skill': {
     description: 'Install a xp-gate skill from GitHub',
     fn: installSkill,
-    usage: 'xp-gate install-skill <name>[@<version>] [--offline] [--verbose] [--force]'
+    usage: 'xp-gate install-skill <name>[@<version>] [--offline] [--verbose] [--force] [--platform opencode|qoder]'
   },
   'update-skill': {
     description: 'Update installed skill(s)',
@@ -103,7 +103,7 @@ function main() {
     const name = subargs[0];
     if (!name) {
       console.error('Error: Skill name required');
-      console.error('Usage: xp-gate install-skill <name>[@<version>]');
+      console.error('Usage: xp-gate install-skill <name>[@<version>] [--platform opencode|qoder]');
       process.exit(1);
       return;
     }
@@ -285,13 +285,18 @@ function printStatsTable(stats) {
 }
 
 function parseOptions(args) {
-  const options = { offline: false, verbose: false, force: false, all: false, check: false };
-  for (const arg of args) {
+  const options = { offline: false, verbose: false, force: false, all: false, check: false, platform: 'opencode' };
+  for (let i = 0; i < args.length; i++) {
+    const arg = args[i];
     if (arg === '--offline') options.offline = true;
     if (arg === '--verbose') options.verbose = true;
     if (arg === '--force') options.force = true;
     if (arg === '--all') options.all = true;
     if (arg === '--check') options.check = true;
+    if (arg === '--platform' && i + 1 < args.length) {
+      options.platform = args[i + 1];
+      i++;
+    }
   }
   return options;
 }

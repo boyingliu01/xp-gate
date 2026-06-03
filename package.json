@@ -1,6 +1,6 @@
 {
   "name": "xp-gate",
-  "version": "0.6.0.0",
+  "version": "0.7.0.0"
   "description": "XP-Gate - Quality Gate & AI Review for Every Commit",
   "type": "module",
   "engines": {
@@ -19,7 +19,8 @@
     "build": "tsc",
     "build:claude-plugin": "bash scripts/build-plugin.sh --platform claude-code",
     "build:opencode-plugin": "bash scripts/build-plugin.sh --platform opencode",
-    "build:plugins": "npm run build:claude-plugin && npm run build:opencode-plugin",
+    "build:qoder-plugin": "bash scripts/build-plugin.sh --platform qoder",
+    "build:plugins": "npm run build:claude-plugin && npm run build:opencode-plugin && npm run build:qoder-plugin",
     "build:all": "npm run build && npm run build:plugins",
     "test:plugins": "bash scripts/test-plugins.sh",
     "lint": "eslint src --ext .ts",

@@ -1,0 +1,163 @@
+<style>
+  :root {
+    --qr-bg: var(--vscode-editor-background, #1e1e1e);
+    --qr-fg: var(--vscode-editor-foreground, #d4d4d4);
+    --qr-border: var(--vscode-panel-border, #333);
+    --qr-pass: var(--vscode-testing-iconPassed, #73c991);
+    --qr-fail: var(--vscode-testing-iconFailed, #f14c4c);
+    --qr-skip: var(--vscode-descriptionForeground, #888);
+    --qr-accent: var(--vscode-focusBorder, #007acc);
+    --qr-card-bg: var(--vscode-editor-widget-background, #252526);
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { font-family: var(--vscode-font-family, 'Segoe UI', sans-serif); color: var(--qr-fg); background: var(--qr-bg); padding: 16px; }
+  .qr-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 16px; }
+  .qr-header h2 { font-size: 16px; font-weight: 600; }
+  .qr-verdict { padding: 4px 12px; border-radius: 4px; font-size: 13px; font-weight: 600; }
+  .qr-verdict.pass { background: color-mix(in srgb, var(--qr-pass) 20%, transparent); color: var(--qr-pass); border: 1px solid var(--qr-pass); }
+  .qr-verdict.fail { background: color-mix(in srgb, var(--qr-fail) 20%, transparent); color: var(--qr-fail); border: 1px solid var(--qr-fail); }
+  .qr-meta { font-size: 12px; color: var(--qr-skip); margin-bottom: 16px; display: flex; gap: 16px; }
+  .qr-score-bar { display: flex; align-items: center; gap: 8px; margin-bottom: 20px; }
+  .qr-score-bar .bar-track { flex: 1; height: 8px; background: var(--qr-border); border-radius: 4px; overflow: hidden; }
+  .qr-score-bar .bar-fill { height: 100%; border-radius: 4px; transition: width 0.4s ease; }
+  .qr-score-bar .bar-fill.pass { background: var(--qr-pass); }
+  .qr-score-bar .bar-fill.fail { background: var(--qr-fail); }
+  .qr-score-bar .score-label { font-size: 14px; font-weight: 600; min-width: 48px; text-align: right; }
+  .qr-gates { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 10px; margin-bottom: 20px; }
+  .qr-gate-card { background: var(--qr-card-bg); border: 1px solid var(--qr-border); border-radius: 6px; padding: 12px; display: flex; align-items: flex-start; gap: 10px; }
+  .qr-gate-icon { width: 28px; height: 28px; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-size: 14px; flex-shrink: 0; }
+  .qr-gate-icon.pass { background: color-mix(in srgb, var(--qr-pass) 20%, transparent); color: var(--qr-pass); }
+  .qr-gate-icon.fail { background: color-mix(in srgb, var(--qr-fail) 20%, transparent); color: var(--qr-fail); }
+  .qr-gate-icon.skip { background: color-mix(in srgb, var(--qr-skip) 20%, transparent); color: var(--qr-skip); }
+  .qr-gate-info { flex: 1; min-width: 0; }
+  .qr-gate-name { font-size: 13px; font-weight: 500; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .qr-gate-detail { font-size: 11px; color: var(--qr-skip); margin-top: 2px; }
+  .qr-section { margin-bottom: 16px; }
+  .qr-section h3 { font-size: 14px; font-weight: 600; margin-bottom: 10px; padding-bottom: 6px; border-bottom: 1px solid var(--qr-border); }
+  .qr-delphi-row { display: flex; align-items: center; gap: 10px; padding: 6px 0; font-size: 13px; }
+  .qr-delphi-row .expert-badge { padding: 2px 8px; border-radius: 3px; font-size: 11px; font-weight: 600; background: var(--qr-card-bg); border: 1px solid var(--qr-border); }
+  .qr-delphi-row .verdict-tag { margin-left: auto; font-weight: 500; }
+  .qr-delphi-row .verdict-tag.approved { color: var(--qr-pass); }
+  .qr-delphi-row .verdict-tag.rejected { color: var(--qr-fail); }
+  .qr-metrics { display: flex; gap: 12px; flex-wrap: wrap; }
+  .qr-metric { background: var(--qr-card-bg); border: 1px solid var(--qr-border); border-radius: 6px; padding: 12px 16px; text-align: center; min-width: 120px; }
+  .qr-metric .value { font-size: 24px; font-weight: 700; }
+  .qr-metric .label { font-size: 11px; color: var(--qr-skip); margin-top: 4px; }
+  .qr-metric .value.pass { color: var(--qr-pass); }
+  .qr-metric .value.fail { color: var(--qr-fail); }
+  .qr-empty { text-align: center; padding: 32px; color: var(--qr-skip); font-size: 13px; }
+</style>
+
+<div id="qr-root"></div>
+
+<script>
+(function() {
+  const data = window.__WIDGET_DATA__ || {};
+  const root = document.getElementById('qr-root');
+
+  if (!data || (!data.overall && !data.gates)) {
+    root.innerHTML = '<div class="qr-empty">No quality report data available.<br>Run the quality gates pipeline to generate a report.</div>';
+    return;
+  }
+
+  const overall = data.overall || {};
+  const gates = data.gates || {};
+  const delphi = data.delphi || null;
+  const testAlign = data.testAlignment || null;
+  const isPass = overall.verdict === 'PASS';
+
+  let html = '';
+
+  // Header
+  html += '<div class="qr-header">';
+  html += '<h2>Quality Report' + (data.project ? ' — ' + esc(data.project) : '') + '</h2>';
+  html += '<span class="qr-verdict ' + (isPass ? 'pass' : 'fail') + '">' + esc(overall.verdict || 'N/A') + '</span>';
+  html += '</div>';
+
+  // Meta
+  if (data.generatedAt || data.commit) {
+    html += '<div class="qr-meta">';
+    if (data.generatedAt) html += '<span>Generated: ' + esc(formatDate(data.generatedAt)) + '</span>';
+    if (data.commit) html += '<span>Commit: ' + esc(data.commit.substring(0, 8)) + '</span>';
+    if (data.language) html += '<span>Language: ' + esc(data.language) + '</span>';
+    html += '</div>';
+  }
+
+  // Score bar
+  const passed = overall.gatesPassed || 0;
+  const total = overall.gatesTotal || 0;
+  const score = overall.score || 0;
+  const pct = total > 0 ? Math.round((passed / total) * 100) : 0;
+  html += '<div class="qr-score-bar">';
+  html += '<div class="bar-track"><div class="bar-fill ' + (isPass ? 'pass' : 'fail') + '" style="width:' + pct + '%"></div></div>';
+  html += '<span class="score-label">' + passed + '/' + total + '</span>';
+  html += '</div>';
+
+  // Gate cards
+  html += '<div class="qr-gates">';
+  const gateKeys = Object.keys(gates).sort();
+  for (const key of gateKeys) {
+    const g = gates[key];
+    const status = (g.status || 'SKIP').toUpperCase();
+    const icon = status === 'PASS' ? '✓' : status === 'FAIL' ? '✗' : '—';
+    const cls = status === 'PASS' ? 'pass' : status === 'FAIL' ? 'fail' : 'skip';
+    html += '<div class="qr-gate-card">';
+    html += '<div class="qr-gate-icon ' + cls + '">' + icon + '</div>';
+    html += '<div class="qr-gate-info">';
+    html += '<div class="qr-gate-name">' + esc(g.name || key) + '</div>';
+    let detail = '';
+    if (g.tool) detail += 'Tool: ' + esc(g.tool);
+    if (g.metric) detail += (detail ? ' · ' : '') + esc(g.metric);
+    if (g.threshold) detail += (detail ? ' · ' : '') + 'Threshold: ' + esc(g.threshold);
+    if (g.coverage) detail += (detail ? ' · ' : '') + 'Coverage: ' + esc(g.coverage);
+    if (g.warnings !== undefined) detail += (detail ? ' · ' : '') + 'Warnings: ' + g.warnings;
+    if (!detail) detail = status;
+    html += '<div class="qr-gate-detail">' + detail + '</div>';
+    html += '</div></div>';
+  }
+  html += '</div>';
+
+  // Delphi Review section
+  if (delphi) {
+    html += '<div class="qr-section"><h3>Delphi Review</h3>';
+    if (delphi.experts) {
+      for (const exp of delphi.experts) {
+        const vCls = (exp.verdict || '').toUpperCase() === 'APPROVED' ? 'approved' : 'rejected';
+        html += '<div class="qr-delphi-row">';
+        html += '<span class="expert-badge">' + esc(exp.id || '?') + '</span>';
+        html += '<span>' + esc(exp.role || '') + '</span>';
+        html += '<span class="verdict-tag ' + vCls + '">' + esc(exp.verdict || 'N/A') + '</span>';
+        html += '</div>';
+      }
+    }
+    if (delphi.consensus !== undefined) {
+      html += '<div class="qr-delphi-row"><span>Consensus</span><span class="verdict-tag ' + (delphi.consensus >= 0.95 ? 'approved' : 'rejected') + '">' + Math.round(delphi.consensus * 100) + '%</span></div>';
+    }
+    html += '</div>';
+  }
+
+  // Metrics section (test alignment + coverage)
+  const hasMetrics = testAlign || (overall.coverage_pct !== undefined);
+  if (hasMetrics) {
+    html += '<div class="qr-section"><h3>Metrics</h3><div class="qr-metrics">';
+    if (testAlign) {
+      const alignScore = testAlign.score || 0;
+      const alignCls = alignScore >= 80 ? 'pass' : 'fail';
+      html += '<div class="qr-metric"><div class="value ' + alignCls + '">' + alignScore + '%</div><div class="label">Test-Spec Alignment</div></div>';
+    }
+    if (overall.coverage_pct !== undefined) {
+      const covCls = overall.coverage_pct >= 80 ? 'pass' : 'fail';
+      html += '<div class="qr-metric"><div class="value ' + covCls + '">' + overall.coverage_pct + '%</div><div class="label">Coverage</div></div>';
+    }
+    if (overall.score !== undefined) {
+      html += '<div class="qr-metric"><div class="value">' + overall.score + '</div><div class="label">Overall Score</div></div>';
+    }
+    html += '</div></div>';
+  }
+
+  root.innerHTML = html;
+
+  function esc(s) { const d = document.createElement('div'); d.textContent = String(s); return d.innerHTML; }
+  function formatDate(iso) { try { return new Date(iso).toLocaleString(); } catch { return iso; } }
+})();
+</script>
