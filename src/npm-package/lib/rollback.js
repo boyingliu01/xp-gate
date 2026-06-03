@@ -1,6 +1,7 @@
 const fs = require('fs');
 const path = require('path');
 const os = require('os');
+const { copyDirRecursive } = require('./shared-utils');
 
 // Cross-platform home directory resolution
 const HOME = process.env.HOME || process.env.USERPROFILE || os.homedir();
@@ -49,22 +50,6 @@ async function createBackup(installId, skillName) {
   copyDirRecursive(targetDir, backupDir);
   
   return backupDir;
-}
-
-function copyDirRecursive(src, dest) {
-  fs.mkdirSync(dest, { recursive: true });
-  const entries = fs.readdirSync(src, { withFileTypes: true });
-  
-  for (const entry of entries) {
-    const srcPath = path.join(src, entry.name);
-    const destPath = path.join(dest, entry.name);
-    
-    if (entry.isDirectory()) {
-      copyDirRecursive(srcPath, destPath);
-    } else {
-      fs.copyFileSync(srcPath, destPath);
-    }
-  }
 }
 
 function cleanupBackup(installId) {

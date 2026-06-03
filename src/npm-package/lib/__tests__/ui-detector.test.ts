@@ -114,7 +114,63 @@ describe('ui-detector', () => {
     it('should handle git command failure gracefully', async () => {
       mockExecSync.mockImplementation(() => {
         throw new Error('git not available');
-      });
+  describe('collectUiMatches and detectUiSprint', () => {
+    it('should detect UI files in components directory', async () => {
+      const { collectUiMatches } = await import('../ui-detector');
+      const result = collectUiMatches(['src/components/Button.tsx', 'src/utils/helper.ts']);
+      expect(result.isUiSprint).toBe(true);
+      expect(result.matchedFiles).toEqual(['src/components/Button.tsx']);
+      expect(result.matchedRules.length).toBeGreaterThan(0);
+    });
+
+    it('should exclude test files from matching', async () => {
+      const { collectUiMatches } = await import('../ui-detector');
+      const result = collectUiMatches(['src/components/Button.test.tsx']);
+      expect(result.isUiSprint).toBe(false);
+      expect(result.matchedFiles).toEqual([]);
+    });
+
+    it('should exclude coverage directory files', async () => {
+      const { collectUiMatches } = await import('../ui-detector');
+      const result = collectUiMatches(['coverage/components/Coverage.tsx']);
+      expect(result.isUiSprint).toBe(false);
+    });
+
+    it('should handle empty file list', async () => {
+      const { collectUiMatches } = await import('../ui-detector');
+      const result = collectUiMatches([]);
+      expect(result.isUiSprint).toBe(false);
+      expect(result.matchedFiles).toEqual([]);
+    });
+
+    it('should collect multiple UI files', async () => {
+      const { collectUiMatches } = await import('../ui-detector');
+      const result = collectUiMatches([
+        'src/components/Header.tsx',
+        'src/utils/api.ts',
+        'views/styles/app.css',
+      ]);
+      expect(result.isUiSprint).toBe(true);
+      expect(result.matchedFiles).toHaveLength(2);
+    });
+
+    it('should aggregate unique rules across files', async () => {
+      const { collectUiMatches } = await import('../ui-detector');
+      const result = collectUiMatches([
+        'src/components/Button.tsx',
+        'src/components/Card.tsx',
+      ]);
+      expect(result.isUiSprint).toBe(true);
+      expect(result.matchedFiles.length).toBeGreaterThan(0);
+    });
+
+    it('should respect .ui-gate-ignore patterns', async () => {
+      const { collectUiMatches } = await import('../ui-detector');
+      const withoutIgnore = collectUiMatches(['legacy/components/Old.tsx']);
+      expect(withoutIgnore.isUiSprint).toBe(true);
+    });
+  });
+});
       const { detectUiSprint } = await import('../ui-detector');
       const result = detectUiSprint();
       expect(result.isUiSprint).toBe(false);
@@ -195,6 +251,61 @@ describe('ui-detector', () => {
       const { getFileMatchRules } = await import('../ui-detector');
       const rules = getFileMatchRules('views/styles/main.css');
       expect(rules).toContain('style-.css');
+    });
+  });
+
+  describe('collectUiMatches', () => {
+    it('should detect UI files in components directory', async () => {
+      const { collectUiMatches } = await import('../ui-detector');
+      const result = collectUiMatches(['src/components/Button.tsx', 'src/utils/helper.ts']);
+      expect(result.isUiSprint).toBe(true);
+      expect(result.matchedFiles).toEqual(['src/components/Button.tsx']);
+      expect(result.matchedRules.length).toBeGreaterThan(0);
+    });
+
+    it('should exclude __tests__ directory files', async () => {
+      const { collectUiMatches } = await import('../ui-detector');
+      const result = collectUiMatches(['src/__tests__/Button.test.tsx']);
+      expect(result.isUiSprint).toBe(false);
+    });
+
+    it('should exclude src/__snapshots__ directory files', async () => {
+      const { collectUiMatches } = await import('../ui-detector');
+      const result = collectUiMatches(['src/__snapshots__/Button.test.tsx.snap']);
+      expect(result.isUiSprint).toBe(false);
+    });
+
+    it('should handle empty file list', async () => {
+      const { collectUiMatches } = await import('../ui-detector');
+      const result = collectUiMatches([]);
+      expect(result.isUiSprint).toBe(false);
+    });
+
+    it('should collect multiple UI files', async () => {
+      const { collectUiMatches } = await import('../ui-detector');
+      const result = collectUiMatches([
+        'src/components/Header.tsx',
+        'src/utils/api.ts',
+        'views/styles/app.css',
+      ]);
+      expect(result.isUiSprint).toBe(true);
+      expect(result.matchedFiles).toHaveLength(2);
+    });
+
+    it('should collect unique rules across files', async () => {
+      const { collectUiMatches } = await import('../ui-detector');
+      const result = collectUiMatches([
+        'src/components/Button.tsx',
+        'src/components/Card.tsx',
+      ]);
+      expect(result.isUiSprint).toBe(true);
+      expect(result.matchedFiles.length).toBeGreaterThan(0);
+    });
+
+    it('should respect .ui-gate-ignore patterns', async () => {
+      const { collectUiMatches } = await import('../ui-detector');
+      const withoutIgnore = collectUiMatches(['legacy/components/Old.tsx']);
+      expect(withoutIgnore.isUiSprint).toBe(true);
     });
   });
 });
