@@ -11,6 +11,8 @@ import {
   readTailEntries,
   computeStats,
   rotateIfNeeded,
+  parseCliOptions,
+  getCommitHash,
   type GateAuditEntry,
 } from '../gate-audit';
 
@@ -114,6 +116,28 @@ describe('gate-audit', () => {
       const tail = readTailEntries(undefined, repoRoot);
       expect(tail.length).toBe(20);
     });
+
+    it('should skip malformed JSON lines', () => {
+      const repoRoot = join(TEST_DIR, 'malformed-tail');
+      const logDir = join(repoRoot, '.xp-gate');
+      mkdirSync(logDir, { recursive: true });
+      writeFileSync(
+        join(logDir, 'audit.jsonl'),
+        `not-json\n${JSON.stringify(makeEntry({ repo_path: repoRoot, gate_id: 'gate-valid' }))}\n`,
+        'utf8',
+      );
+      const tail = readTailEntries(10, repoRoot);
+      expect(tail.length).toBe(1);
+      expect(tail[0].gate_id).toBe('gate-valid');
+    });
+
+    it('should return empty array for empty log file', () => {
+      const repoRoot = join(TEST_DIR, 'empty-log');
+      const logDir = join(repoRoot, '.xp-gate');
+      mkdirSync(logDir, { recursive: true });
+      writeFileSync(join(logDir, 'audit.jsonl'), '', 'utf8');
+      expect(readTailEntries(10, repoRoot)).toEqual([]);
+    });
   });
 
   describe('computeStats', () => {
@@ -152,6 +176,41 @@ describe('gate-audit', () => {
 
       const stats = computeStats(repoRoot);
       expect(stats[0].avg_issues).toBe(2.67);
+    });
+
+    it('should return empty array for empty stats log', () => {
+      const repoRoot = join(TEST_DIR, 'empty-stats-log');
+      const logDir = join(repoRoot, '.xp-gate');
+      mkdirSync(logDir, { recursive: true });
+      writeFileSync(join(logDir, 'audit.jsonl'), '', 'utf8');
+      expect(computeStats(repoRoot)).toEqual([]);
+    });
+
+    it('should skip malformed lines during stats aggregation', () => {
+      const repoRoot = join(TEST_DIR, 'malformed-stats');
+      const logDir = join(repoRoot, '.xp-gate');
+      mkdirSync(logDir, { recursive: true });
+      writeFileSync(
+        join(logDir, 'audit.jsonl'),
+        `${JSON.stringify(makeEntry({ repo_path: repoRoot, gate_id: 'gate-1' }))}\n{bad json}\n`,
+        'utf8',
+      );
+      const stats = computeStats(repoRoot);
+      expect(stats).toHaveLength(1);
+      expect(stats[0].gate_id).toBe('gate-1');
+    });
+  });
+
+  describe('CLI helpers', () => {
+    it('should parse CLI options and skip dangling flags', () => {
+      expect(parseCliOptions(['--gate-id', 'gate-1', '--passed', 'true', '--dangling'])).toEqual({
+        'gate-id': 'gate-1',
+        passed: 'true',
+      });
+    });
+
+    it('should return a commit hash string or unknown', () => {
+      expect(typeof getCommitHash()).toBe('string');
     });
   });
 

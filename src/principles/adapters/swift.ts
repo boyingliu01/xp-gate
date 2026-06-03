@@ -11,11 +11,7 @@ export class SwiftAdapter extends BaseAdapter implements Adapter {
   }
 
   parseAST(): unknown {
-    return {
-      content: this.fileContent,
-      language: 'swift',
-      filePath: this.filePath
-    };
+    return this.createParseResult('swift');
   }
 
   extractFunctions(): unknown[] {
@@ -24,12 +20,7 @@ export class SwiftAdapter extends BaseAdapter implements Adapter {
     let match;
 
     while ((match = fnRegex.exec(this.fileContent)) !== null) {
-      functionMatches.push({
-        name: match[1],
-        type: 'function',
-        line: this.getLineNumber(match.index),
-        code: this.extractCodeBlock(match.index)
-      });
+      functionMatches.push(this.createCodeMatch(match[1], 'function', match.index));
     }
 
     return functionMatches;
@@ -41,12 +32,7 @@ export class SwiftAdapter extends BaseAdapter implements Adapter {
     let match;
 
     while ((match = classRegex.exec(this.fileContent)) !== null) {
-      classMatches.push({
-        name: match[1],
-        type: 'class',
-        line: this.getLineNumber(match.index),
-        code: this.extractCodeBlock(match.index)
-      });
+      classMatches.push(this.createCodeMatch(match[1], 'class', match.index));
     }
 
     return classMatches;

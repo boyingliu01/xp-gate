@@ -38,6 +38,23 @@ export abstract class BaseAdapter implements Adapter {
     return [];
   }
 
+  protected createParseResult(language: string): unknown {
+    return {
+      content: this.fileContent,
+      language,
+      filePath: this.filePath,
+    };
+  }
+
+  protected createCodeMatch(name: string, type: string, index: number): unknown {
+    return {
+      name,
+      type,
+      line: this.getLineNumber(index),
+      code: this.extractCodeBlock(index),
+    };
+  }
+
   countLines(): number {
     return this.fileContent.split('\n').length;
   }
@@ -52,6 +69,11 @@ export abstract class BaseAdapter implements Adapter {
 
   protected getLineNumber(position: number): number {
     return this.fileContent.substring(0, position).split('\n').length;
+  }
+
+  protected fallbackCodeBlock(startPos: number, maxFallback: number): string {
+    const code = this.fileContent.substring(startPos);
+    return code.substring(0, Math.min(maxFallback, code.length));
   }
 
   protected extractCodeBlock(startPos: number, maxFallback: number = 100): string {
@@ -80,7 +102,6 @@ export abstract class BaseAdapter implements Adapter {
       return this.fileContent.substring(startPos, endPos);
     }
 
-    const code = this.fileContent.substring(startPos);
-    return code.substring(0, Math.min(maxFallback, code.length));
+    return this.fallbackCodeBlock(startPos, maxFallback);
   }
 }

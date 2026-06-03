@@ -11,11 +11,7 @@ export class DartAdapter extends BaseAdapter implements Adapter {
   }
 
   parseAST(): unknown {
-    return {
-      content: this.fileContent,
-      language: 'dart',
-      filePath: this.filePath
-    };
+    return this.createParseResult('dart');
   }
 
   extractFunctions(): unknown[] {
@@ -25,12 +21,8 @@ export class DartAdapter extends BaseAdapter implements Adapter {
 
     while ((match = fnRegex.exec(this.fileContent)) !== null) {
       if (match[2] !== 'class' && match[2] !== 'interface' && match[2] !== 'abstract') {
-        functionMatches.push({
-          name: match[2],
-          type: match[1] ? 'async_function' : 'function',
-          line: this.getLineNumber(match.index),
-          code: this.extractCodeBlock(match.index)
-        });
+        const type = match[1] ? 'async_function' : 'function';
+        functionMatches.push(this.createCodeMatch(match[2], type, match.index));
       }
     }
 
@@ -43,12 +35,8 @@ export class DartAdapter extends BaseAdapter implements Adapter {
     let match;
 
     while ((match = classRegex.exec(this.fileContent)) !== null) {
-      classMatches.push({
-        name: match[2],
-        type: match[1] ? 'abstract_class' : 'class',
-        line: this.getLineNumber(match.index),
-        code: this.extractCodeBlock(match.index)
-      });
+      const type = match[1] ? 'abstract_class' : 'class';
+      classMatches.push(this.createCodeMatch(match[2], type, match.index));
     }
 
     return classMatches;
