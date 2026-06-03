@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
-# build-plugin.sh: Build a plugin package for a target platform (Claude Code or OpenCode)
-# Usage: scripts/build-plugin.sh --platform claude-code|opencode
+# build-plugin.sh: Build a plugin package for a target platform (Claude Code, OpenCode, or Qoder)
+# Usage: scripts/build-plugin.sh --platform claude-code|opencode|qoder
 #
 # Unified build script (Delphi M3 fix) — eliminates duplication between Claude and OpenCode builds.
 
@@ -24,15 +24,15 @@ while [[ $# -gt 0 ]]; do
 done
 
 if [ -z "$PLATFORM" ]; then
-  echo "Usage: build-plugin.sh --platform claude-code|opencode" >&2
+  echo "Usage: build-plugin.sh --platform claude-code|opencode|qoder" >&2
   exit 1
 fi
 
 case "$PLATFORM" in
-  claude-code|opencode)
+  claude-code|opencode|qoder)
     ;;
   *)
-    echo "Error: --platform must be 'claude-code' or 'opencode' (got: $PLATFORM)" >&2
+    echo "Error: --platform must be 'claude-code', 'opencode', or 'qoder' (got: $PLATFORM)" >&2
     exit 1
     ;;
 esac
@@ -64,15 +64,29 @@ fi
 bash "$SCRIPT_DIR/copy-skills.sh" --source "$SKILLS_SOURCE" --dest "$PLUGIN_DIR/skills"
 
 # Verify expected skills (matching skills/ directory)
-EXPECTED_SKILLS=(
-  "sprint-flow"
-  "delphi-review"
-  "test-specification-alignment"
-  "ralph-loop"
-  "test-driven-development"
-  "improve-codebase-architecture"
-  "to-issues"
-)
+# Qoder includes admin-template-guidelines (8 skills), others have 7
+if [ "$PLATFORM" = "qoder" ]; then
+  EXPECTED_SKILLS=(
+    "sprint-flow"
+    "delphi-review"
+    "test-specification-alignment"
+    "ralph-loop"
+    "test-driven-development"
+    "improve-codebase-architecture"
+    "to-issues"
+    "admin-template-guidelines"
+  )
+else
+  EXPECTED_SKILLS=(
+    "sprint-flow"
+    "delphi-review"
+    "test-specification-alignment"
+    "ralph-loop"
+    "test-driven-development"
+    "improve-codebase-architecture"
+    "to-issues"
+  )
+fi
 
 MISSING=0
 for skill in "${EXPECTED_SKILLS[@]}"; do
@@ -90,3 +104,14 @@ fi
 echo ""
 echo "Build complete: ${#EXPECTED_SKILLS[@]} skills packaged for $PLATFORM"
 echo "Plugin location: $PLUGIN_DIR"
+
+# Qoder-specific: verify widget templates exist
+if [ "$PLATFORM" = "qoder" ]; then
+  WIDGET_DIR="$PLUGIN_DIR/widgets"
+  if [ -d "$WIDGET_DIR" ]; then
+    WIDGET_COUNT=$(find "$WIDGET_DIR" -name '*.html' -type f | wc -l | tr -d ' ')
+    echo "Widget templates: $WIDGET_COUNT file(s)"
+  else
+    echo "Warning: Widget directory not found: $WIDGET_DIR" >&2
+  fi
+fi

@@ -100,6 +100,30 @@ description: Find deepening opportunities in a codebase, informed by domain lang
 - 生成重构计划（含文件列表、步骤顺序、风险点）
 - 调用 test-driven-development skill 执行重构（保持行为不变）
 
+### 6. Qoder 架构可视化（可选）
+
+在 Qoder 环境中，完成步骤 2-4 的分析后，orchestrator **SHOULD** 使用 genui Widget 展示模块依赖关系图：
+
+**执行方式**：
+1. 收集分析结果：模块列表、shallow/deep 评级、seam 位置、依赖方向
+2. 调用 `show_widget` 展示架构关系图：
+
+```
+show_widget(
+  title = "architecture_analysis",
+  widget_code = "<style>...</style><div id='arch-root'></div><script>...</script>",
+  data = {
+    modules: [{name, depth, files, seams}],
+    dependencies: [{from, to, type}],
+    candidates: [{id, problem, solution, affected_modules}]
+  }
+)
+```
+
+Widget 应使用 Mermaid (cdn.jsdelivr.net) 渲染依赖方向图，shallow 模块用虚线边框，deep 模块用实线边框，seam 位置用菱形标记。
+
+> **降级**：如果 genui 不可用，以文本 Mermaid 代码块输出架构图。
+
 ---
 
 ## 与 XP-Gate 集成

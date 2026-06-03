@@ -171,6 +171,35 @@ XP-Gate 现在同时支持 Claude Code 和 OpenCode 插件分发，提供 IDE �
 
 > **注意**：插件不提供 git hooks（平台限制）。完整 git 质量门禁仍需通过 npm 包安装（方式零）。两种方式可同时启用：插件提供 IDE 集成，npm 包提供 git enforcement。
 
+**Qoder 插件**：
+```bash
+# 用户级安装（所有项目可用）
+bash scripts/install-qoder-skills.sh --global
+
+# 项目级安装
+bash scripts/install-qoder-skills.sh --local
+```
+
+提供：
+- 8 个 AI 技能（含 admin-template-guidelines 编码规范）
+- genui Widget 质量报告面板和 Sprint 状态仪表板
+- Pre-Edit Gate（嵌入式检查，替代 Hook 物理拦截）
+- 多模型评审（利用 Qoder 内置多模型能力 + subagent 派发）
+- Memory 系统集成（learnings 持久化）
+- CodeReview subagent 深度集成
+- browser-use MCP 替代 browse skill
+
+| 能力 | Claude Code | OpenCode | Qoder |
+|------|:-----------:|:--------:|:-----:|
+| AI Skills | 7 | 7 | **8** |
+| Git Hooks | ✅ | ❌ | ❌ |
+| Pre-Edit Gate | Hook 物理拦截 | 无 | **嵌入式 SKILL.md 指令** |
+| Widget UI | ❌ | ❌ | **genui Widget** |
+| Memory | ❌ | ❌ | **UpdateMemory/SearchMemory** |
+| CodeReview Agent | ❌ | ❌ | **CodeReview subagent** |
+| Browser MCP | ❌ | ❌ | **browser-use** |
+| 多模型评审 | 直调 API | 直调 API | **subagent 派发** |
+
 ### 方式零：全局安装 xp-gate CLI
 
 #### 前置条件
