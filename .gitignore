@@ -90,3 +90,4 @@ plugins/opencode/dist/
 plugins/opencode/node_modules/
 .ui-gate-result.json
 .audit-log.jsonl
+.code-walkthrough-result.json
