@@ -1,122 +1,33 @@
-# specification.yaml — Issue #79: UI Sprint Detection & Forced Quality Gates
-# Auto-generated from Delphi review consensus (Round 3 APPROVED, 2 experts, 100%)
-# Parent: sprint-2026-05-31-02
-
-specification:
-  id: sprint-2026-05-31-02
-  issue: 79
-  title: "feat: UI sprint detection & forced quality gates"
-  status: approved
-  approved_by: "Delphi Round 3 Consensus (Expert A: 9/10, Expert C: 9/10)"
-  design_doc: "docs/plans/2026-05-31-issue-79-ui-sprint-detection-design.md"
+---
+version: "1.0"
+generated_from: "docs/plans/2026-06-04-skill-version-sync-design.md"
+sprint: "sprint-2026-06-04-03"
+---
 
 user_stories:
-  - id: US-001
-    title: "UI Sprint Auto-Detection"
-    description: "As a developer, I want xp-gate to automatically detect when my push contains UI changes, so that appropriate quality gates are enforced"
-    priority: P0
-    acs: [AC-001-01, AC-001-02, AC-001-03, AC-001-04, AC-001-05, AC-001-06]
-
-  - id: US-002
-    title: "Pre-push UI Gate Enforcement"
-    description: "As a team, I want the pre-push hook to block pushes with unreviewed UI changes"
-    priority: P0
-    acs: [AC-002-01, AC-002-02, AC-002-03, AC-002-04, AC-002-05, AC-002-06, AC-002-07, AC-002-08]
-
-  - id: US-003
-    title: "Bypass with Audit Trail"
-    description: "As an on-call developer, I want to bypass the UI gate for hotfixes with mandatory audit logging"
-    priority: P1
-    acs: [AC-003-01, AC-003-02, AC-003-03, AC-003-04, AC-003-05]
-
-  - id: US-004
-    title: "Sprint Flow UI Review Auto-trigger"
-    description: "As a sprint user, I want UI review to be automatically triggered when my sprint produces UI changes"
-    priority: P1
-    acs: [AC-004-01, AC-004-02, AC-004-03]
-
-  - id: US-005
-    title: "Non-Sprint Flow UI Review CLI"
-    description: "As a non-sprint developer, I want a simple xp-gate ui-review command"
-    priority: P2
-    acs: [AC-005-01, AC-005-02, AC-005-03]
-
-reqs:
   - id: REQ-1
-    title: "ui-detector.ts --push-mode"
-    priority: P0
-    user_stories: [US-001]
-    files:
-      - modify: src/npm-package/lib/ui-detector.ts
-      - modify: src/npm-package/lib/__tests__/ui-detector.test.ts
-    summary: "Add --push-mode --from-stdin (reads from pre-push PUSHED_FILES) and --check-branch flags"
+    title: "Phase 6 SHIP VERSION-GATE"
+    description: "As a sprint-flow user, I want Phase 6 SHIP to enforce VERSION bump so that every completed sprint publishes a new npm version."
+    acceptance_criteria:
+      - "Phase 6 SHIP 段落包含 VERSION-GATE HARD-GATE 规则"
+      - "VERSION-GATE 要求默认 bump PATCH 位（MICRO 重置为 0）"
+      - "VERSION-GATE 要求运行 sync-version.sh 同步到所有 package.json"
+      - "VERSION-GATE 要求更新 CHANGELOG.md"
+      - "VERSION-GATE 要求验证 git diff VERSION 确认变更"
+      - "此规则与变更类型无关 — 纯 skill 变更也必须 bump PATCH"
 
   - id: REQ-2
-    title: "Pre-push GATE UI section"
-    priority: P0
-    user_stories: [US-002]
-    files:
-      - modify: githooks/pre-push
-    summary: "~60 lines added after Gate M2. Validates .ui-gate-result.json. main/master skip. Merged error messages"
+    title: "Skill 变更触发 skill-cert CI"
+    description: "As a project maintainer, I want skill file changes to automatically trigger skill-cert evaluation in CI so that skill quality is verified."
+    acceptance_criteria:
+      - "quality-gates.yml 包含 skill-cert-check job"
+      - "skill-cert-check 仅在 skills/ 目录有变更时触发"
+      - "skill-cert-check 安装 skill-cert Python 工具并运行评估"
+      - "skill-cert-check 使用 continue-on-error 避免 skill-cert 未安装时阻断 CI"
 
   - id: REQ-3
-    title: "Bypass + Audit Logging"
-    priority: P1
-    user_stories: [US-003]
-    files:
-      - new: src/npm-package/lib/audit-log.ts
-      - modify: githooks/pre-push
-      - modify: .gitignore
-    summary: "XP_GATE_SKIP_UI_GATES=1 + XP_GATE_BYPASS_REASON. .audit-log.jsonl (100 entry cap). .ui-gate-result.json in .gitignore"
-
-  - id: REQ-4
-    title: "xp-gate ui-review CLI"
-    priority: P2
-    user_stories: [US-005]
-    files:
-      - new: src/npm-package/lib/ui-review.ts
-    summary: "Helper CLI for non-sprint developers to generate .ui-gate-result.json"
-
-  - id: REQ-5
-    title: "Sprint Flow Phase 3 integration"
-    priority: P1
-    user_stories: [US-004]
-    files:
-      - modify: skills/sprint-flow (orchestration)
-    summary: "--check-branch at Phase 3 entry → triggers /design-review + /qa-only"
-
-acs:
-  - id: AC-001-01: Template files trigger UI detection anywhere
-  - id: AC-001-02: Component files trigger only in UI paths
-  - id: AC-001-03: Style files trigger only in UI paths
-  - id: AC-001-04: stdin-based file input (--from-stdin)
-  - id: AC-001-05: .ui-gate-ignore config exclusions
-  - id: AC-001-06: Default exclusions (node_modules, tests, dist)
-  - id: AC-002-01: GATE UI runs between M2 and walkthrough
-  - id: AC-002-02: main/master skip
-  - id: AC-002-03: Result file existence check
-  - id: AC-002-04: Commit hash match
-  - id: AC-002-05: Verdict == APPROVED
-  - id: AC-002-06: Not expired (< 24h)
-  - id: AC-002-07: Merged error for dual result files
-  - id: AC-002-08: .gitignore compliance
-  - id: AC-003-01: Env var bypass
-  - id: AC-003-02: Reason validation (≥10 chars)
-  - id: AC-003-03: Audit log JSONL write
-  - id: AC-003-04: 100 entry retention cap
-  - id: AC-003-05: >3 bypasses/30day retro trigger
-  - id: AC-004-01: Phase 3 --check-branch trigger
-  - id: AC-004-02: Auto-trigger /design-review + /qa-only
-  - id: AC-004-03: Result file generation
-  - id: AC-005-01: xp-gate ui-review command
-  - id: AC-005-02: Calls design-review + qa-only
-  - id: AC-005-03: Generates .ui-gate-result.json
-
-constraints:
-  - "No direct gstack invocation from bash"
-  - "npx tsx mandatory for TS projects"
-  - "Result file format aligned with code-walkthrough pattern"
-
-out_of_scope:
-  - "gstack skill implementation (design-review, qa)"
-  - "CI workflow changes"
+    title: "插件副本同步"
+    description: "As a project maintainer, I want updated SKILL.md to be synced to all plugin directories."
+    acceptance_criteria:
+      - "通过 copy-skills.sh 同步到 claude-code, opencode, qoder 三个插件目录"
+      - "所有插件副本中的 sprint-flow SKILL.md 包含 VERSION-GATE 规则"

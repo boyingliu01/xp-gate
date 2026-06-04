@@ -1,14 +1,18 @@
 {
-  "sprint_id": "sprint-2026-06-04-02",
-  "branch": "sprint/2026-06-04-02",
+  "id": "sprint-2026-06-04-03",
+  "task_description": "修复 skill-only 变更不触发版本号更新的问题：skill markdown 变更也需要版本 bump，避免版本号混乱",
   "phase": -1,
   "status": "running",
-  "task": "按优先级处理所有 open issues (#128, #107, #122, #123, #129, #124)",
+  "started_at": "2026-06-04T20:00:00Z",
   "isolation": {
-    "worktree_path": ".worktrees/sprint/sprint-2026-06-04-02",
-    "branch": "sprint/2026-06-04-02",
+    "worktree_path": ".worktrees/sprint/sprint-2026-06-04-03",
+    "branch": "sprint/2026-06-04-03",
     "created_from": "main",
-    "created_from_commit": "1b19caec9adadb823da4dddff500243f51f81cbc"
+    "created_from_commit": "48c6dfb"
   },
-  "outputs": {}
+  "phase_history": [
+    { "phase": -1, "phase_name": "ISOLATE", "status": "running", "started_at": "2026-06-04T20:00:00Z" }
+  ],
+  "outputs": {},
+  "metrics": {}
 }

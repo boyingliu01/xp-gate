@@ -1,6 +1,32 @@
 ---
 name: sprint-flow
 description: >
+  One-Shot Sprint 自动流水线。单一入口，自动串联 Think → Plan → Build → 
+  Review → Ship 流程。整合 brainstorming + autoplan + delphi-review + TDD +
+  delphi-review --mode code-walkthrough + ship 等现有 Skills。关键节点暂停等待用户决策。
+  承认 Emergent Requirements 限制，设计用户验收环节。
+  
+  TRIGGER: 
+  - "开发新功能"
+  - "实现 X"
+  - "start sprint"
+  - "一键开发"
+  - "/sprint-flow"
+  用法: /sprint-flow "[需求描述]"
+  示例: /sprint-flow "开发访谈机器人，支持多轮对话"
+  可选参数:
+  --no-isolate: 跳过自动 worktree 隔离（⚠️ 在保护分支上有污染风险）
+  --branch-name <name>: 自定义分支名（默认自动生成 sprint/YYYY-MM-DD-NN）
+  --force: 强制在当前分支继续（即使已是保护分支，⚠️ 输出警告）
+  --stop-at <phase>: 执行到指定阶段后停止 (isolate/think/plan/build/review/ship/land/cleanup)
+  --resume-from <phase>: 从指定阶段继续，跳过前面阶段
+  --phase <phase>: 只执行单个阶段 (isolate-only/think-only/plan-only/build-only/review-only/ship-only/land-only/cleanup-only)
+  --lang <language>: 指定项目语言 (springboot/django/golang)
+  --type <project_type>: 指定项目类型 (web-nextjs/web-react/web-vue/mobile-flutter/mobile-react-native/backend-django/backend-go/backend-springboot)
+  --spec <file>: 使用已有的 specification.yaml 文件
+  --with-performance: 启用负载/压力测试（后端项目）
+  --mode <build_mode>: 指定 Phase 2 构建模式。默认 = ralph-loop（逐 REQ 迭代，token 节约）。parallel = 旧有并行模式（一次性 dispatch 所有需求）
+  --status: 查看当前 Sprint 进度看板（不执行任何阶段，仅读取 sprint-state.json 并渲染进度）
   Use when asked to "开发新功能", "实现 X", "start sprint", "一键开发", or "/sprint-flow" for end-to-end feature development.
 maturity: beta
 ---
@@ -452,6 +478,13 @@ Phase 2 第一步必须执行 DELPHI-GATE 检查。没有 delphi-review APPROVED
 - **HARD-GATE**: Phase 5 未完成 → 不可进入 Phase 6。验证 `.sprint-state/phase-outputs/feedback-log.md` 存在。
 - **⚠️ GITHOOKS-GATE**: 再次验证 hooks 完整性（Phase 2 的 TDD 编码已触发提交，SHIP 阶段还会再次提交）
   - 运行 `githooks/verify.sh` → 缺失 → `githooks/install.sh` → 阻断直至修复
+- **⚠️ VERSION-GATE**: Phase 6 提交前必须 bump VERSION 文件（与变更类型无关）
+  - 默认 bump PATCH 位（如 `0.6.0.0` → `0.6.1.0`，MICRO 重置为 0）
+  - 重大新功能 bump MINOR 位（如 `0.6.0.0` → `0.7.0.0`），Breaking change bump MAJOR 位
+  - 运行 `bash scripts/sync-version.sh` 同步到所有 package.json（root、npm-package、claude-plugin、opencode）
+  - 更新 `CHANGELOG.md` 添加本次变更记录（含变更类型说明：skill-only / code / mixed）
+  - 验证：`git diff VERSION` 确认版本号已变更，未变更 → 阻断
+  - **此规则与变更类型无关** — 纯 skill 变更（仅 .md 文件）也必须 bump PATCH，确保每次 sprint 都触发 npm 发布
 - **`finishing-a-development-branch`** (superpowers) — 结构化完成流：4 选项（merge / PR / discard / keep）
 - `ship` (gstack) — 创建 PR（PR 路径时使用）
 - Phase 6 输出：PR URL（用于 Phase 7 输入）
@@ -583,8 +616,20 @@ Phase 2 第一步必须执行 DELPHI-GATE 检查。没有 delphi-review APPROVED
 2. **更新 sprint-state.json**：
    - `phase`: 当前阶段编号
    - `outputs`: 新增当前阶段输出文件路径
+   - `phase_history`: 追加或更新当前阶段的记录
+     - Phase 开始时：追加 `{ "phase": N, "phase_name": "NAME", "status": "running", "started_at": "<ISO 8601>", "completed_at": null, "duration_seconds": null }`
+     - Phase 完成时：更新对应条目，填充 `completed_at`（ISO 8601）和 `duration_seconds`（`completed_at - started_at` 的秒数）
+     - Phase 跳过时（如轻量路由跳过 Phase 0 brainstorming）：设置 `status: "skipped"`
 
 3. **等待用户确认 checkpoint**（如适用）
+
+4. **展示进度看板**：读取 `sprint-state.json`，使用 `@templates/sprint-progress-template.md` 渲染进度看板
+   - 渲染规则：已完成阶段显示 ✅ + 耗时，当前阶段 🔄，待做 ⬜，跳过 ⏭️，失败 ❌
+   - 进度条：`[████▓░░░░░░] {pct}%`（已完成数/总阶段数 11）
+   - 下一步行动：根据当前阶段 + 状态，从模板的"下一步行动表"中查找对应提示
+   - 输出物路径：列出 `outputs` 中已有的文件路径
+   - 时机：每个 Phase 完成后的 transition 阶段自动展示，用户无需请求
+   - 向后兼容：旧版 `sprint-state.json` 缺少 `phase_history` 时，从 `phase` 字段推断状态
 
 ### Phase Summary 格式（YAML Frontmatter Schema）
 
@@ -646,8 +691,10 @@ Sprint state is persisted as JSON in `.sprint-state/sprint-state.json`:
 ```json
 {
   "id": "sprint-2026-04-26-01",
+  "task_description": "开发访谈机器人，支持多轮对话",
   "phase": -1,
   "status": "running|paused|completed",
+  "started_at": "2026-04-26T10:00:00Z",
   "isolation": {
     "worktree_path": ".worktrees/sprint/sprint-2026-04-26-01",
     "branch": "sprint/2026-04-26-01",
@@ -670,6 +717,16 @@ Sprint state is persisted as JSON in `.sprint-state/sprint-state.json`:
     "user_decision": "accepted|overridden|cancelled",
     "override_reason": null
   },
+  "phase_history": [
+    {
+      "phase": -1,
+      "phase_name": "ISOLATE",
+      "status": "completed",
+      "started_at": "2026-04-26T10:00:00Z",
+      "completed_at": "2026-04-26T10:03:00Z",
+      "duration_seconds": 180
+    }
+  ],
   "outputs": {
     "pain_document": "docs/pain-document.md",
     "specification": "specification.yaml",
@@ -683,7 +740,19 @@ Sprint state is persisted as JSON in `.sprint-state/sprint-state.json`:
   }
 }
 ```
-**Eval assertions check for:** `phase`, `status`, `isolation.branch`, `outputs.specification`, `metrics.coverage_pct`.
+
+**新增字段说明**:
+- `task_description`: Sprint 需求描述（Phase -1 启动时写入）
+- `started_at`: Sprint 启动时间戳（Phase -1 启动时写入，ISO 8601 格式）
+- `phase_history`: 阶段历史数组，每个元素记录阶段的执行信息：
+  - `phase`: 阶段编号
+  - `phase_name`: 阶段名称
+  - `status`: completed / running / failed / skipped
+  - `started_at`: 阶段开始时间（ISO 8601）
+  - `completed_at`: 阶段完成时间（null 表示未完成）
+  - `duration_seconds`: 耗时秒数（null 表示未完成）
+
+**Eval assertions check for:** `phase`, `status`, `isolation.branch`, `outputs.specification`, `metrics.coverage_pct`, `phase_history`, `task_description`.
 
 ---
 
@@ -721,6 +790,24 @@ Sprint state is persisted as JSON in `.sprint-state/sprint-state.json`:
 # → 只执行 Phase 3 的评审
 # 适用场景：单独验证某个阶段
 ```
+
+### --status（查看 Sprint 进度）
+
+```bash
+/sprint-flow --status
+# → 读取 .sprint-state/sprint-state.json
+# → 渲染进度看板（使用 @templates/sprint-progress-template.md）
+# → 不执行任何 Phase，仅展示当前状态
+# 适用场景：碎片时间恢复时快速查看进度、中断后确认当前阶段和下一步操作
+```
+
+**行为规则**：
+- 读取 `.sprint-state/sprint-state.json` 获取 `id`, `task_description`, `phase`, `status`, `phase_history`, `outputs`, `isolation`
+- 扫描 `.sprint-state/phase-outputs/phase-*-summary.md` 获取各阶段 `status` 和 `phase_name`
+- 如果 `sprint-state.json` 不存在 → 输出 `[INFO] 未找到活跃的 Sprint。请先运行 /sprint-flow "[需求描述]" 启动新 Sprint。`
+- 如果 `status == "completed"` → 展示完整看板 + `[INFO] Sprint 已完成。` + Sprint Summary 路径
+- `--status` 可与其他参数组合：`--status --resume-from build` → 先展示状态，再提示 "将从 Phase 2 BUILD 继续"
+- 向后兼容：旧版 `sprint-state.json` 缺少 `phase_history`/`task_description` 时，按模板"向后兼容"规则渲染
 
 ### --lang（指定项目语言）
 
@@ -1022,6 +1109,65 @@ When ending or pausing, output:
 - `@templates/pain-document-template.md` — Pain Document 模板
 - `@templates/emergent-issues-template.md` — Emergent Issues 检查清单
 - `@templates/sprint-summary-template.md` — Sprint Summary 模板
+- `@templates/sprint-progress-template.md` — Sprint 进度看板（每个 Phase 完成后 + `--status` 查询时渲染）
+
+---
+
+## Anti-Patterns
+
+| ❌ 错误 | ✅ 正确 |
+|---|---|
+| 在保护分支 (main/master) 上直接执行 sprint | Phase -1 自动创建 worktree 隔离 |
+| 跳过 Phase 4 用户验收（"赶时间"） | Phase 4 是 HARD-GATE，必须人工验收 |
+| Phase 2 不安装 Git Hooks 就开始编码 | GITHOOKS-GATE 检查必须先于 BUILD |
+| 单个 subagent 处理所有 REQ | ralph-loop 逐 REQ 迭代，每个 REQ 独立上下文 |
+| 验证失败仍 commit | 验证不通过的代码不 commit |
+| 跳过 Phase 5 FEEDBACK 直接 SHIP | Phase 5 是 HARD-GATE，不可跳过 |
+| --force 在生产分支上运行不确认 | --force 必须等待用户显式确认风险 |
+| Phase 6 SHIP 后不清理 worktree | Phase 8 CLEANUP 必须执行 git worktree remove |
+
+---
+
+## Output Format (MANDATORY)
+
+Sprint-flow orchestrator MUST output phase transition status as valid JSON:
+
+```json
+{
+  "skill_name": "sprint-flow",
+  "sprint_id": "sprint-YYYY-MM-DD-NN",
+  "current_phase": 2,
+  "phase_name": "BUILD",
+  "status": "running|paused|completed|failed",
+  "isolation": {
+    "worktree_path": ".worktrees/sprint/sprint-YYYY-MM-DD-NN",
+    "branch": "sprint/YYYY-MM-DD-NN"
+  },
+  "progress": {
+    "total_phases": 11,
+    "completed_phases": 4,
+    "percentage": 36,
+    "phase_history": [
+      { "phase": -1, "phase_name": "ISOLATE", "status": "completed", "started_at": "2026-06-02T14:30:00Z", "completed_at": "2026-06-02T14:33:00Z", "duration_seconds": 180 },
+      { "phase": -0.5, "phase_name": "AUTO-ESTIMATE", "status": "completed", "started_at": "2026-06-02T14:33:00Z", "completed_at": "2026-06-02T14:34:00Z", "duration_seconds": 60 },
+      { "phase": 0, "phase_name": "THINK", "status": "completed", "started_at": "2026-06-02T14:34:00Z", "completed_at": "2026-06-02T14:59:00Z", "duration_seconds": 1500 },
+      { "phase": 1, "phase_name": "PLAN", "status": "completed", "started_at": "2026-06-02T14:59:00Z", "completed_at": "2026-06-02T15:17:00Z", "duration_seconds": 1080 },
+      { "phase": 2, "phase_name": "BUILD", "status": "running", "started_at": "2026-06-02T15:17:00Z", "completed_at": null, "duration_seconds": null }
+    ]
+  },
+  "outputs": {
+    "specification": "specification.yaml",
+    "mvp": "mvp-v1/"
+  },
+  "metrics": {
+    "tests_passed": 15,
+    "tests_failed": 0,
+    "coverage_pct": 85
+  }
+}
+```
+
+**Eval assertions check for:** `phase`, `status`, `isolation.branch`, `outputs.specification`, `metrics.coverage_pct`, `progress.phase_history`.
 
 ---
 

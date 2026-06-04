@@ -914,10 +914,75 @@ jobs:
               body: process.env.comment_body
             })
 
+  # Skill-cert evaluation: triggered when skill files change
+  skill-cert-check:
+    name: Skill-Cert Evaluation
+    needs: setup
+    runs-on: ubuntu-latest
+    if: github.event_name == 'pull_request'
+    continue-on-error: true
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Detect skill file changes
+        id: detect
+        run: |
+          CHANGED_SKILLS=$(git diff --name-only origin/${{ github.base_ref }}...HEAD -- skills/ 2>/dev/null | \
+            grep -oP 'skills/\K[^/]+' | sort -u || echo "")
+          if [ -z "$CHANGED_SKILLS" ]; then
+            echo "No skill files changed, skipping skill-cert"
+            echo "has_changes=false" >> $GITHUB_OUTPUT
+          else
+            echo "Changed skills: $CHANGED_SKILLS"
+            echo "has_changes=true" >> $GITHUB_OUTPUT
+            echo "changed_skills=$CHANGED_SKILLS" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Setup Python
+        if: steps.detect.outputs.has_changes == 'true'
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install skill-cert
+        if: steps.detect.outputs.has_changes == 'true'
+        run: |
+          if [ -d "skill-cert" ] && [ -f "skill-cert/pyproject.toml" ]; then
+            cd skill-cert
+            python -m venv venv
+            source venv/bin/activate
+            pip install -e .
+            echo "skill-cert installed successfully"
+          else
+            echo "::warning::skill-cert directory not found or missing pyproject.toml, skipping evaluation"
+            echo "SKIP_CERT=true" >> $GITHUB_ENV
+          fi
+
+      - name: Run skill-cert on changed skills
+        if: steps.detect.outputs.has_changes == 'true' && env.SKIP_CERT != 'true'
+        run: |
+          cd skill-cert
+          source venv/bin/activate
+          CHANGED="${{ steps.detect.outputs.changed_skills }}"
+          EXIT_CODE=0
+          for skill in $CHANGED; do
+            if [ -d "../skills/$skill" ]; then
+              echo "=== skill-cert evaluate: $skill ==="
+              python -m skill_cert evaluate --skill "../skills/$skill" --output json || EXIT_CODE=$?
+              echo "skill-cert $skill: exit code $EXIT_CODE"
+            else
+              echo "::warning::Skill directory ../skills/$skill not found, skipping"
+            fi
+          done
+          exit $EXIT_CODE
+
   # Summary job that gives a final assessment
   summary:
     name: Quality Assessment Summary
-    needs: [setup, gate-check, ai-review, quality-report]
+    needs: [setup, gate-check, ai-review, quality-report, skill-cert-check]
     runs-on: ubuntu-latest
     if: ${{ always() }}
     
@@ -928,10 +993,12 @@ jobs:
           GATE_STATUS="${{ needs.gate-check.result }}"
           AI_REVIEW_STATUS="${{ needs.ai-review.result }}"
           REPORT_STATUS="${{ needs.quality-report.result }}"
+          SKILL_CERT_STATUS="${{ needs.skill-cert-check.result }}"
           
           echo "Gate Checks Status: $GATE_STATUS"
           echo "AI Review Status: $AI_REVIEW_STATUS"
           echo "Quality Report Status: $REPORT_STATUS"
+          echo "Skill-Cert Status: $SKILL_CERT_STATUS"
           
           # Generate overall summary
           if [[ "$GATE_STATUS" == "success" ]]; then
