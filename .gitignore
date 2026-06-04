@@ -68,6 +68,7 @@ skill-cert/.coverage
 skill-cert/__pycache__/
 skill-cert/**/*.pyc
 skill-cert/*.egg-info/
+results/
 
 # Worktrees
 .worktrees/
@@ -89,3 +90,4 @@ plugins/opencode/dist/
 plugins/opencode/node_modules/
 .ui-gate-result.json
 .audit-log.jsonl
+.code-walkthrough-result.json

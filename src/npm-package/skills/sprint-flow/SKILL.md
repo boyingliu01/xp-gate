@@ -78,6 +78,39 @@ Expected behavior: do not run sprint-flow; route to investigation/explanation in
 
 # Sprint Flow Skill
 
+## Scope
+
+**In Scope:**
+- Sprint 全流程编排（Phase -1 ISOLATE 到 Phase 8 CLEANUP）
+- Git worktree 隔离与环境准备
+- 自动规模评估与流程路由（轻量/标准/复杂）
+- 多 Skill 串联调用（brainstorming, autoplan, delphi-review, TDD, ralph-loop 等）
+- 关键节点暂停与用户决策
+- 状态持久化（sprint-state.json）
+- 多平台适配（Claude Code, OpenCode, Qoder）
+
+**Out of Scope:**
+- Does NOT handle internal Skill implementation (each Skill remains independent)
+- Does NOT write business code
+- Does NOT configure CI/CD pipelines (project's own responsibility)
+- Does NOT deploy to production (only up to PR creation + merge)
+
+## Security Notes
+
+- sprint-flow **不执行任何破坏性命令**（no `rm -rf`, `git push --force`, `DROP TABLE` 等）
+- `git worktree remove` 仅删除 sprint 创建的临时 worktree 目录，不影响主仓库
+- Phase 6 SHIP 仅创建 PR（`gh pr create`），不自动 merge（除非用户显式确认）
+- Phase 7 LAND 使用 `gh pr merge --squash`（非 force push），merge 前等待 CI 通过
+- 文档中 `+ platform deploy` 等描述仅表示可选的部署步骤映射，**不是可执行命令**
+- sprint-flow 不下载、安装或执行任何外部二进制文件
+
+## Permissions
+
+- `git`: read/write (worktree, branch, commit)
+- `gh` (GitHub CLI): read/write (PR create, merge, CI query)
+- `filesystem`: read/write (project dir + `.worktrees/` only)
+- `network`: read-only (CI status, canary health)
+
 ## 核心原则
 
 | 原则 | 说明 |
@@ -986,6 +1019,52 @@ When ending or pausing, output:
 - `@templates/pain-document-template.md` — Pain Document 模板
 - `@templates/emergent-issues-template.md` — Emergent Issues 检查清单
 - `@templates/sprint-summary-template.md` — Sprint Summary 模板
+
+---
+
+## Anti-Patterns
+
+| ❌ 错误 | ✅ 正确 |
+|---|---|
+| 在保护分支 (main/master) 上直接执行 sprint | Phase -1 自动创建 worktree 隔离 |
+| 跳过 Phase 4 用户验收（"赶时间"） | Phase 4 是 HARD-GATE，必须人工验收 |
+| Phase 2 不安装 Git Hooks 就开始编码 | GITHOOKS-GATE 检查必须先于 BUILD |
+| 单个 subagent 处理所有 REQ | ralph-loop 逐 REQ 迭代，每个 REQ 独立上下文 |
+| 验证失败仍 commit | 验证不通过的代码不 commit |
+| 跳过 Phase 5 FEEDBACK 直接 SHIP | Phase 5 是 HARD-GATE，不可跳过 |
+| --force 在生产分支上运行不确认 | --force 必须等待用户显式确认风险 |
+| Phase 6 SHIP 后不清理 worktree | Phase 8 CLEANUP 必须执行 git worktree remove |
+
+---
+
+## Output Format (MANDATORY)
+
+Sprint-flow orchestrator MUST output phase transition status as valid JSON:
+
+```json
+{
+  "skill_name": "sprint-flow",
+  "sprint_id": "sprint-YYYY-MM-DD-NN",
+  "current_phase": 2,
+  "phase_name": "BUILD",
+  "status": "running|paused|completed|failed",
+  "isolation": {
+    "worktree_path": ".worktrees/sprint/sprint-YYYY-MM-DD-NN",
+    "branch": "sprint/YYYY-MM-DD-NN"
+  },
+  "outputs": {
+    "specification": "specification.yaml",
+    "mvp": "mvp-v1/"
+  },
+  "metrics": {
+    "tests_passed": 15,
+    "tests_failed": 0,
+    "coverage_pct": 85
+  }
+}
+```
+
+**Eval assertions check for:** `phase`, `status`, `isolation.branch`, `outputs.specification`, `metrics.coverage_pct`.
 
 ---
 
