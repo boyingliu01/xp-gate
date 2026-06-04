@@ -12,6 +12,16 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+## [0.6.1] - 2026-06-04
+
+### Added
+- **sprint-flow VERSION-GATE** — Phase 6 SHIP 强制每个 sprint bump PATCH 版本，确保 skill-only 变更也触发 npm 发布
+- **skill-cert CI job** — quality-gates.yml 新增 skill-cert-check job，PR 中 skills/ 目录变更时自动触发 skill-cert 评估（continue-on-error）
+- **sprint progress dashboard** — 进度看板模板 + `--status` 参数（sprint-2026-06-04-01 交付）
+
+### Changed
+- **版本 bump 规则** — 每完成一个 sprint 统一 bump PATCH，不区分 skill/code 变更类型
+
 ## [0.4.1.0] - 2026-05-30
 
 ### Fixed

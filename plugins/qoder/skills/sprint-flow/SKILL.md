@@ -12,10 +12,8 @@ description: >
   - "start sprint"
   - "一键开发"
   - "/sprint-flow"
-  
   用法: /sprint-flow "[需求描述]"
   示例: /sprint-flow "开发访谈机器人，支持多轮对话"
-  
   可选参数:
   --no-isolate: 跳过自动 worktree 隔离（⚠️ 在保护分支上有污染风险）
   --branch-name <name>: 自定义分支名（默认自动生成 sprint/YYYY-MM-DD-NN）
@@ -29,9 +27,80 @@ description: >
   --with-performance: 启用负载/压力测试（后端项目）
   --mode <build_mode>: 指定 Phase 2 构建模式。默认 = ralph-loop（逐 REQ 迭代，token 节约）。parallel = 旧有并行模式（一次性 dispatch 所有需求）
   --status: 查看当前 Sprint 进度看板（不执行任何阶段，仅读取 sprint-state.json 并渲染进度）
-
+  Use when asked to "开发新功能", "实现 X", "start sprint", "一键开发", or "/sprint-flow" for end-to-end feature development.
 maturity: beta
 ---
+
+## Triggers
+
+| Trigger Type | Phrases |
+|--------------|---------|
+| **中文** | "开发新功能", "实现 X", "start sprint", "一键开发", "/sprint-flow", "开发用户登录", "创建 XXX 模块" |
+| **English** | "implement feature", "build X", "start sprint", "one-shot development", "create XXX", "develop new functionality" |
+
+**Usage**: `/sprint-flow "[需求描述]"`
+
+**Examples**:
+- `/sprint-flow "开发访谈机器人，支持多轮对话"`
+- `/sprint-flow "实现用户认证模块，支持 OAuth2"`
+- `/sprint-flow "开发 REST API 端点"`
+
+**Optional Parameters**:
+- `--no-isolate`: Skip auto worktree isolation (⚠️ risk of polluting protected branches)
+- `--branch-name <name>`: Custom branch name (default: `sprint/YYYY-MM-DD-NN`)
+- `--force`: Force continue on current branch even if protected (⚠️ requires explicit confirmation)
+- `--stop-at <phase>`: Stop after specified phase (isolate/think/plan/build/review/ship/land/cleanup)
+- `--resume-from <phase>`: Resume from specified phase, skipping earlier phases
+- `--phase <phase>`: Execute only single phase (isolate-only/think-only/plan-only/build-only/review-only/ship-only/land-only/cleanup-only)
+- `--lang <language>`: Specify project language (springboot/django/golang)
+- `--type <project_type>`: Specify project type (web-nextjs/web-react/web-vue/mobile-flutter/mobile-react-native/backend-django/backend-go/backend-springboot)
+- `--spec <file>`: Use existing specification.yaml file
+- `--with-performance`: Enable load/stress testing (backend projects)
+- `--mode <build_mode>`: Phase 2 build mode. Default = ralph-loop (REQ-level iteration, token-efficient). parallel = legacy all-at-once mode
+
+---
+
+## Scope
+
+**What this skill does**:
+- Automates the full 7-phase development pipeline from requirement to production
+- Integrates existing skills (brainstorming, autoplan, delphi-review, TDD, ship, etc.)
+- Enforces quality gates and hard transitions between phases
+- Captures emergent requirements and feedback for continuous improvement
+
+**What this skill does NOT do**:
+- Replace individual skills — users can still call `delphi-review`, `test-driven-development`, etc. directly
+- Bypass quality gates or user confirmations at critical checkpoints
+- Automatically merge to main without explicit user approval (Phase 6/7)
+- Handle non-development tasks (bug reports, code review requests without implementation, questions)
+
+**Applicable scenarios**:
+- New feature development
+- Module creation
+- End-to-end implementation of user stories
+- Sprint-level planning and execution
+
+**Not applicable**:
+- Single bug fixes (use `/investigate` or direct TDD)
+- Code review requests (use `/review` or `delphi-review --mode code-walkthrough`)
+- Architecture questions (use `/plan-eng-review`)
+- Simple explanations or documentation requests
+
+## Examples
+
+### Example 1: Full feature sprint
+User: `/sprint-flow "开发用户认证模块，支持登录、登出、权限检查"`
+Expected behavior: create/verify isolated worktree, run estimate, produce design/spec, build with TDD, review, wait for manual acceptance, then prepare ship path.
+Expected output: phase summaries, `specification.yaml`, verification evidence, and PR URL if the user chooses PR shipping.
+
+### Example 2: Stop after planning
+User: `/sprint-flow "开发 REST API" --stop-at plan`
+Expected behavior: complete isolate/estimate/think/plan, produce specification and slices, then stop without implementation.
+Expected output: phase-1 summary and clear next command to resume from build.
+
+### Example 3: Should not trigger
+User: "解释一下这个函数为什么报错"
+Expected behavior: do not run sprint-flow; route to investigation/explanation instead.
 
 # Sprint Flow Skill
 
@@ -133,6 +202,35 @@ Phase 8: CLEANUP → git worktree remove + sprint-state.json update → status: 
 | Phase 6 | ship PR 创建（PR 路径）| 用户确认合并 | 合并后自动继续 |
 | **Phase 7** | **land-and-deploy 完成/失败** | **用户确认合并结果 / 处理部署失败** | **确认/修复后继续** |
 | **Phase 8** | **worktree 清理完成/失败** | **用户确认清理 / 手动处理残留** | **确认后结束流程** |
+
+---
+
+## Workflow Steps
+
+| Step | Phase | Name | Key Actions | Output |
+|------|-------|------|-------------|--------|
+| 1 | **-1** | **ISOLATE** | Detect protected branch → Create git worktree → Setup project → Validate .gitignore → Record sprint state | Worktree path |
+| 2 | **-0.5** | **AUTO-ESTIMATE** | Analyze code structure → Count references → Assess cross-module impact → Classify (lightweight/standard/complex) | Impact assessment + flow recommendation |
+| 3 | **0** | **THINK** | brainstorming → Generate design doc + CONTEXT.md + ADR | Design document |
+| 4 | **1** | **PLAN** | autoplan → delphi-review (if needed) → Generate specification.yaml + slices-manifest.json | specification.yaml |
+| 5 | **2** | **BUILD** | GITHOOKS-GATE → ralph-loop (default) or parallel → TDD → freeze → blind review → verification | MVP code |
+| 6 | **3** | **REVIEW** | delphi-review --mode code-walkthrough → test-specification-alignment → browse QA → benchmark (optional) | Review report |
+| 7 | **4** | **USER ACCEPT** | **Manual verification** → Capture emergent issues | Emergent issues list |
+| 8 | **5** | **FEEDBACK** | learn → retro → systematic-debugging | feedback-log.md |
+| 9 | **6** | **SHIP** | finishing-a-development-branch → ship (create PR) | PR URL |
+| 10 | **7** | **LAND** | land-and-deploy → merge PR → wait CI → canary health check → rollback on failure | Deploy status |
+| 11 | **8** | **CLEANUP** | Safe worktree removal → Update sprint state → Sprint summary | Cleanup report |
+
+**Phase Flow**:
+```
+ISOLATE → AUTO-ESTIMATE → THINK → PLAN → [GITHOOKS-GATE] → BUILD → REVIEW → USER ACCEPT → FEEDBACK → SHIP → LAND → CLEANUP
+```
+
+**Hard Gates**:
+- **Phase 0→1**: Design must be APPROVED by delphi-review (≥91% consensus)
+- **Phase 1→2**: GITHOOKS-GATE (hooks must be installed) + DELPHI-GATE (spec must be APPROVED)
+- **Phase 4→5**: User acceptance must be completed (mandatory manual step)
+- **Phase 5→6**: feedback-log.md must exist (HARD-GATE)
 
 ---
 
@@ -377,6 +475,13 @@ Phase 2 第一步必须执行 DELPHI-GATE 检查。没有 delphi-review APPROVED
 - **HARD-GATE**: Phase 5 未完成 → 不可进入 Phase 6。验证 `.sprint-state/phase-outputs/feedback-log.md` 存在。
 - **⚠️ GITHOOKS-GATE**: 再次验证 hooks 完整性（Phase 2 的 TDD 编码已触发提交，SHIP 阶段还会再次提交）
   - 运行 `githooks/verify.sh` → 缺失 → `githooks/install.sh` → 阻断直至修复
+- **⚠️ VERSION-GATE**: Phase 6 提交前必须 bump VERSION 文件（与变更类型无关）
+  - 默认 bump PATCH 位（如 `0.6.0.0` → `0.6.1.0`，MICRO 重置为 0）
+  - 重大新功能 bump MINOR 位（如 `0.6.0.0` → `0.7.0.0`），Breaking change bump MAJOR 位
+  - 运行 `bash scripts/sync-version.sh` 同步到所有 package.json（root、npm-package、claude-plugin、opencode）
+  - 更新 `CHANGELOG.md` 添加本次变更记录（含变更类型说明：skill-only / code / mixed）
+  - 验证：`git diff VERSION` 确认版本号已变更，未变更 → 阻断
+  - **此规则与变更类型无关** — 纯 skill 变更（仅 .md 文件）也必须 bump PATCH，确保每次 sprint 都触发 npm 发布
 - **`finishing-a-development-branch`** (superpowers) — 结构化完成流：4 选项（merge / PR / discard / keep）
 - `ship` (gstack) — 创建 PR（PR 路径时使用）
 - Phase 6 输出：PR URL（用于 Phase 7 输入）
@@ -399,21 +504,28 @@ Phase 2 第一步必须执行 DELPHI-GATE 检查。没有 delphi-review APPROVED
 - 条件跳过：无部署配置时，仅执行 merge + CI checks，跳过 deploy/canary
 - 输出：部署状态 + Canary 报告（成功/失败/跳过）
 
-### Phase 8: CLEANUP（清理 + 总结）
-- 执行时机：Phase 7 LAND 成功后（或 Phase 6 Option 1 本地 Merge 后）
-- 动作：
-  1. 检测 worktree 是否存在：`[ -d <worktree_path> ]`
-  2. `git worktree remove <worktree_path>` 删除 worktree
-     - **原子性保障**: 如果首次失败（权限问题），重试最多 3 次，间隔 1s
-     - 如果仍失败：输出 `[WARN] Failed to remove worktree, please manually run: git worktree remove <path>`
-  3. 检测残留目录：`[ -d <worktree_path> ]` → 如果仍有残留，输出警告
-  4. 更新 `.sprint-state/sprint-state.json`：
-     - `phase: 8`
-     - `status: "merged"` 或 `"completed"`
-  5. 输出 Cleanup Report + Sprint Summary
-- 条件跳过：`--no-isolate` 路径（无 worktree 可清理）
-- 输出：`[CLEANUP] Worktree removed:` + 残留检测（✅ clean / ⚠️ residual）
-- IF emergent issues → Sprint 2
+### Phase 8: CLEANUP（安全清理 + 总结）
+
+**执行时机**: Phase 7 LAND 成功后（或 Phase 6 Option 1 本地 Merge 后）
+
+**动作**:
+1. **检测 worktree 是否存在**: `[ -d <worktree_path> ]`
+2. **安全清理**: 
+   - **⚠️ 禁止使用通配符或递归 shell 删除命令** — 必须先列出 `isolation.worktree_path` 并确认只清理本 sprint worktree
+   - 首选 git worktree 管理命令清理该精确路径；失败时重试最多 3 次，间隔 1s
+   - 如果仍失败：输出 `[WARN] Worktree cleanup failed; list the target path and ask the user to clean it manually`
+   - ** NEVER delete arbitrary directories** — 只删除本 sprint 创建的 `isolation.worktree_path`
+3. **残留检测**: `[ -d <worktree_path> ]` → 如果仍有残留，输出警告 `[WARN] 检测到残留目录，请手动检查：<worktree_path>`
+4. **更新 `.sprint-state/sprint-state.json`**:
+   - `phase: 8`
+   - `status: "merged"` 或 `"completed"`
+5. **输出 Cleanup Report + Sprint Summary**
+
+**条件跳过**: `--no-isolate` 路径（无 worktree 可清理）
+
+**输出**: `[CLEANUP] Worktree removed:` + 残留检测（✅ clean / ⚠️ residual）
+
+**IF emergent issues → Sprint 2**
 
 ---
 
@@ -859,7 +971,7 @@ Sprint 结束时 (Phase 6 完成):
 # → mkdir -p .worktrees/sprint
 # → 检测已有 NN 编号（.worktrees/sprint/ | grep -oE '[0-9]{2}$' | sort -n | tail -1）
 # → git worktree add .worktrees/sprint/sprint-2026-05-24-01 -b sprint/2026-05-24-01
-# → 在 worktree 目录下: npm install → 基线测试 → .sprint-state/ 记录
+# → 在 worktree 目录下：npm install → 基线测试 → .sprint-state/ 记录
 # → 进入 Phase 0 THINK...
 
 # 跳过隔离（⚠️ 有污染风险）
@@ -873,11 +985,13 @@ Sprint 结束时 (Phase 6 完成):
 
 # 自定义分支名
 /sprint-flow "开发用户登录" --branch-name feat/user-login
-# → 分支名: feat/user-login（保留 /）
-# → worktree 路径: .worktrees/sprint/feat-user-login（/ 替换为 -）
+# → 分支名：feat/user-login（保留 /）
+# → worktree 路径：.worktrees/sprint/feat-user-login（/ 替换为 -）
 
-# 🧹 Sprint 完成后清理
-git worktree remove .worktrees/sprint/sprint-2026-05-24-01
+# Sprint 完成后安全清理：先列出本 sprint 的 isolation.worktree_path
+# 仅清理 sprint-state 中记录的精确 worktree 路径
+# 禁止使用通配符或递归 shell 删除命令
+# 如果自动清理失败，输出目标路径并要求用户手动处理
 ```
 
 ---
@@ -888,6 +1002,87 @@ git worktree remove .worktrees/sprint/sprint-2026-05-24-01
 - 用户可以直接调用 `delphi-review` 单独评审
 - 用户可以直接调用 `test-driven-development` 单独执行 TDD
 - sprint-flow 只是自动串联调用，不替代底层 Skills
+
+---
+
+## Anti-Patterns
+
+| 错误 | 正确 |
+|------|------|
+| 把普通问答、解释、代码检索请求路由到 sprint-flow | 仅在用户明确要求开发/实现/一键开发完整需求时触发 sprint-flow |
+| 跳过 Phase -1 隔离，直接在 main/master/develop 上改代码 | 默认创建 worktree；除非用户显式使用 `--no-isolate` 或 `--force` 并确认风险 |
+| 未完成 Phase -0.5 AUTO-ESTIMATE 就套用完整重流程 | 先评估轻量/标准/复杂，再按推荐流程或用户确认后的流程执行 |
+| Plan 阶段跳过 Delphi 评审直接 Build | 标准/复杂需求必须经过 autoplan + delphi-review；未 APPROVED 禁止编码 |
+| 跳过 TDD 直接实现代码 | Phase 2 必须遵循 RED → GREEN → REFACTOR，测试与实现一起交付 |
+| 跳过用户验收直接 Ship | Phase 4 USER ACCEPTANCE 必须人工完成；不得自动化、跳过或伪造 |
+| 验证失败后继续追加随机修改 | 最多 3 次修复循环；仍失败则 BLOCK 并请求用户决策 |
+| 未生成 Phase Summary 就进入下一阶段 | 每个 Phase 必须写入 `.sprint-state/phase-outputs/phase-{N}-summary.md` 并通过 transition gate |
+
+## Output Format
+
+See [Output Contract](#output-contract) below for the canonical machine-readable output schema.
+
+### Eval Assertions
+- `phase`, `phase_name`, `status`, `outputs`, `decisions`, `next_phase_context`
+- `id`, `isolation.worktree_path`, `isolation.branch`, `metrics.coverage_pct`
+
+## Output Contract
+
+### Machine-Readable Outputs
+
+**Phase Summary** (all automated Phases must output):
+```markdown
+---
+phase: <N>
+phase_name: <NAME>
+status: completed|paused|failed
+outputs:
+  - path: "path/to/output"
+    type: file|directory
+decisions:
+  - title: "Decision title"
+    rationale: "Rationale for decision"
+unresolved_issues: []
+next_phase_context: "Context needed by next phase"
+---
+
+## Phase Summary
+Concise summary, <= 50 lines.
+```
+
+**Sprint State JSON** (all Phases must maintain):
+```json
+{
+  "id": "sprint-YYYY-MM-DD-NN",
+  "phase": <N>,
+  "status": "running|paused|completed|failed",
+  "isolation": {
+    "worktree_path": ".worktrees/sprint/sprint-YYYY-MM-DD-NN",
+    "branch": "sprint/YYYY-MM-DD-NN"
+  },
+  "outputs": {},
+  "metrics": {}
+}
+```
+
+### Final User-Facing Output
+
+When ending or pausing, output:
+- Current Phase and status
+- Generated file paths
+- Passed/failed validation commands
+- Next user decision required (if applicable)
+- PR URL (Phase 6 success) or cleanup report (Phase 8 success)
+
+## Security Notes
+
+- Sprint Flow 会执行 git 操作（worktree、branch、commit、PR、merge），在受保护分支上默认必须隔离。
+- 不得使用 `--no-verify` 绕过 quality gates；hook 失败必须修复根因。
+- 不得自动推送、创建 PR、merge 或 deploy，除非用户请求的流程明确进入 Ship/Land 阶段并已通过前置 gate。
+- 不得修改、打印或提交 `.delphi-config.json`、API keys、tokens、cookies、SSH keys 等敏感信息。
+- Phase 7 deploy/canary 失败时必须报告失败并按配置回滚；不可静默忽略部署失败。
+- Phase 4 用户验收不可由模型代替；人工验收是发布安全边界。
+- worktree 清理只允许删除本 sprint 创建的 `isolation.worktree_path`，不得删除任意用户目录。
 
 ---
 
@@ -970,6 +1165,52 @@ Sprint-flow orchestrator MUST output phase transition status as valid JSON:
 ```
 
 **Eval assertions check for:** `phase`, `status`, `isolation.branch`, `outputs.specification`, `metrics.coverage_pct`, `progress.phase_history`.
+
+---
+
+## Anti-Patterns
+
+| ❌ 错误 | ✅ 正确 |
+|---|---|
+| 在保护分支 (main/master) 上直接执行 sprint | Phase -1 自动创建 worktree 隔离 |
+| 跳过 Phase 4 用户验收（"赶时间"） | Phase 4 是 HARD-GATE，必须人工验收 |
+| Phase 2 不安装 Git Hooks 就开始编码 | GITHOOKS-GATE 检查必须先于 BUILD |
+| 单个 subagent 处理所有 REQ | ralph-loop 逐 REQ 迭代，每个 REQ 独立上下文 |
+| 验证失败仍 commit | 验证不通过的代码不 commit |
+| 跳过 Phase 5 FEEDBACK 直接 SHIP | Phase 5 是 HARD-GATE，不可跳过 |
+| --force 在生产分支上运行不确认 | --force 必须等待用户显式确认风险 |
+| Phase 6 SHIP 后不清理 worktree | Phase 8 CLEANUP 必须执行 git worktree remove |
+
+---
+
+## Output Format (MANDATORY)
+
+Sprint-flow orchestrator MUST output phase transition status as valid JSON:
+
+```json
+{
+  "skill_name": "sprint-flow",
+  "sprint_id": "sprint-YYYY-MM-DD-NN",
+  "current_phase": 2,
+  "phase_name": "BUILD",
+  "status": "running|paused|completed|failed",
+  "isolation": {
+    "worktree_path": ".worktrees/sprint/sprint-YYYY-MM-DD-NN",
+    "branch": "sprint/YYYY-MM-DD-NN"
+  },
+  "outputs": {
+    "specification": "specification.yaml",
+    "mvp": "mvp-v1/"
+  },
+  "metrics": {
+    "tests_passed": 15,
+    "tests_failed": 0,
+    "coverage_pct": 85
+  }
+}
+```
+
+**Eval assertions check for:** `phase`, `status`, `isolation.branch`, `outputs.specification`, `metrics.coverage_pct`.
 
 ---
 
