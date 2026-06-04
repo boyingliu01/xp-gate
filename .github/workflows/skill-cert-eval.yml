@@ -1,0 +1,137 @@
+name: skill-cert Evaluation
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'skills/**'
+  pull_request:
+    branches: [main]
+    paths:
+      - 'skills/**'
+  schedule:
+    - cron: '0 3 * * 1'  # Weekly Monday 3am UTC
+
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  checks: write
+
+jobs:
+  skill-cert-eval:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+
+    strategy:
+      fail-fast: false
+      matrix:
+        skill:
+          - name: sprint-flow
+            path: skills/sprint-flow/SKILL.md
+          - name: ralph-loop
+            path: skills/ralph-loop/SKILL.md
+          - name: delphi-review
+            path: skills/delphi-review/SKILL.md
+          - name: test-specification-alignment
+            path: skills/test-specification-alignment/SKILL.md
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install skill-cert
+        run: |
+          pip install git+https://github.com/boyingliu01/skill-cert.git
+
+      - name: Run skill-cert evaluation — ${{ matrix.skill.name }}
+        env:
+          SKILL_CERT_API_KEY: ${{ secrets.SKILL_CERT_API_KEY }}
+          SKILL_CERT_MODELS: ${{ vars.SKILL_CERT_MODELS || '' }}
+        run: |
+          mkdir -p results/skill-cert
+          skill-cert \
+            --skill "${{ matrix.skill.path }}" \
+            --output "results/skill-cert/${{ matrix.skill.name }}.json" \
+            --timeout 600
+
+      - name: Upload results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: skill-cert-${{ matrix.skill.name }}
+          path: results/skill-cert/${{ matrix.skill.name }}.json
+
+      - name: Validate report completeness
+        if: always()
+        run: |
+          REPORT="results/skill-cert/${{ matrix.skill.name }}.json"
+          if [ ! -f "$REPORT" ]; then
+            echo "::error::Report not generated for ${{ matrix.skill.name }}"
+            exit 1
+          fi
+
+          # Check required fields
+          node -e "
+            const fs = require('fs');
+            const report = JSON.parse(fs.readFileSync('$REPORT', 'utf8'));
+            const errors = [];
+
+            // L6: Cost analysis
+            if (!report.cost_analysis) {
+              errors.push('Missing cost_analysis');
+            } else if (!report.cost_analysis.total_cost && report.cost_analysis.marker !== 'local/free') {
+              errors.push('cost_analysis.total_cost must be > 0 or marker must be local/free');
+            }
+
+            // L7: Latency analysis
+            if (!report.latency_analysis) {
+              errors.push('Missing latency_analysis');
+            } else {
+              for (const field of ['p50', 'p95', 'p99']) {
+                if (report.latency_analysis[field] === undefined) {
+                  errors.push('latency_analysis.' + field + ' is missing');
+                }
+              }
+            }
+
+            // L5: Security scan — BLOCKING
+            if (!report.security_scan) {
+              errors.push('Missing security_scan');
+            } else if (report.security_scan.high_findings > 0) {
+              errors.push('BLOCKING: security_scan.high_findings = ' + report.security_scan.high_findings + ' (must be 0)');
+            }
+
+            if (errors.length > 0) {
+              for (const e of errors) console.error('::error::' + e);
+              process.exit(1);
+            }
+            console.log('Report validation: OK');
+            console.log('  cost:', report.cost_analysis?.total_cost || report.cost_analysis?.marker || 'N/A');
+            console.log('  latency p50:', report.latency_analysis?.p50 || 'N/A');
+            console.log('  security: high_findings =', report.security_scan?.high_findings || 0);
+          "
+
+      - name: Check verdict
+        run: |
+          REPORT="results/skill-cert/${{ matrix.skill.name }}.json"
+          VERDICT=$(node -e "
+            const fs = require('fs');
+            const r = JSON.parse(fs.readFileSync('$REPORT', 'utf8'));
+            console.log(r.verdict || 'UNKNOWN');
+          ")
+          echo "Verdict: $VERDICT"
+          if [ "$VERDICT" = "FAIL" ]; then
+            echo "::error::skill-cert verdict: FAIL for ${{ matrix.skill.name }}"
+            exit 1
+          fi

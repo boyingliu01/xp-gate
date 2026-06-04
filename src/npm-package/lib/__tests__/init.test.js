@@ -24,6 +24,7 @@ describe('init', () => {
     vi.resetModules();
     delete require.cache[require.resolve('../init')];
     delete require.cache[require.resolve('../detect-deps.js')];
+    delete require.cache[require.resolve('../shared-paths')];
     logSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
     warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
     errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
@@ -102,6 +103,13 @@ describe('init', () => {
   });
 
   it('init([]) with missing superpowers warns Missing dependencies', async () => {
+    // Mock execSync to make auto-install fail immediately
+    vi.spyOn(childProcess, 'execSync').mockImplementation((cmd) => {
+      if (typeof cmd === 'string' && cmd.includes('git clone')) {
+        throw new Error('git clone not available in test');
+      }
+      return '';
+    });
     const { init } = require('../init');
     const result = await init([]);
     expect(result).toBe(0);
@@ -110,6 +118,13 @@ describe('init', () => {
   });
 
   it('init([]) with versionMismatch warns version detail', async () => {
+    // Mock execSync to make auto-install fail immediately
+    vi.spyOn(childProcess, 'execSync').mockImplementation((cmd) => {
+      if (typeof cmd === 'string' && cmd.includes('git clone')) {
+        throw new Error('git clone not available in test');
+      }
+      return '';
+    });
     // superpowers too old, gstack good
     const sp = path.join(skillsDir(), 'superpowers');
     fs.mkdirSync(sp, { recursive: true });

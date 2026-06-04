@@ -27,6 +27,7 @@ describe('uninstall', () => {
     delete require.cache[require.resolve('../uninstall')];
     delete require.cache[require.resolve('../init')];
     delete require.cache[require.resolve('../detect-deps.js')];
+    delete require.cache[require.resolve('../shared-paths')];
     logSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
     warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
     errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});

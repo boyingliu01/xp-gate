@@ -436,9 +436,12 @@ Phase 2 第一步必须执行 DELPHI-GATE 检查。没有 delphi-review APPROVED
 - 输入: phase-4-summary.md（验收结果）+ emergent-issues.md（如有）
 - 输出: `feedback-log.md`
 - **HARD-GATE**: Phase 5 不可跳过。Phase 4 完成后 → 必须进入 Phase 5 → 完成后才能进入 Phase 6。
-- **`learn` (gstack)** — Sprint 级复盘（这是 /learn 在本项目中的主要调用时机）
+- **`learn` (gstack)** — Sprint 级复盘（**Phase 5 必须自动调用，不依赖手动触发**）
+  - **默认提炼模板**（无需用户额外输入）：
+    > 提炼总结并保存可复用的经验教训，把大模型不知道、并且犯错后无法立即发现和纠正的知识保存下来。如果是对其他项目也有价值的，就保存成全局记忆，否则保存为项目记忆。
   - ralph-loop 已在 BUILD Phase 内部实现 per-REQ learn（permanent/contextual 分类）
   - Phase 5 额外进行 Sprint 级复盘，总结全 Phase 经验
+  - **learnings 自动注入**：`/learn export` 时自动 append 到 CLAUDE.md / AGENTS.md 末尾形成 `## Project Learnings` 章节
 - **`retro` (gstack)** — 工程回顾：提交历史、工作模式、代码质量趋势
 - **`systematic-debugging` (superpowers)** — 根因调试
 
