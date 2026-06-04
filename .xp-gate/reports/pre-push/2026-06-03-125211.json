@@ -1,0 +1,38 @@
+{
+  "timestamp": "2026-06-03T12:52:11Z",
+  "trigger": "pre-push",
+  "branch": "sprint/fix-remaining-issues",
+  "commit": "0c1d38bf5b5b68a05b6ae3e95037fd696f65ca89",
+  "changed_files": [
+    "0c1d38bf5b5b68a05b6ae3e95037fd696f65ca89",
+    ".xp-gate/reports/pre-push/2026-06-03-100253.json",
+    ".xp-gate/reports/pre-push/2026-06-03-100321.json",
+    ".xp-gate/reports/pre-push/2026-06-03-100444.json",
+    ".xp-gate/reports/pre-push/2026-06-03-100523.json",
+    "src/npm-package/lib/__tests__/ui-detector.test.ts",
+    "src/npm-package/lib/install-skill.js",
+    "src/npm-package/lib/rollback.js",
+    "src/npm-package/lib/shared-utils.js"
+  ],
+  "overall": {
+    "score": "0.0/10",
+    "gates_passed": 0,
+    "gates_total": 1,
+    "verdict": "BLOCKED"
+  },
+  "gates": [
+    {
+      "id": "M",
+      "name": "Mutation + Code Walkthrough + UI Gates",
+      "status": "BLOCKED",
+      "details": {
+        "remote": "origin",
+        "url": "https://github.com/boyingliu01/xp-gate.git"
+      }
+    }
+  ],
+  "warnings": [],
+  "errors": [
+    "pre-push hook exited with code 1"
+  ]
+}

@@ -12,11 +12,7 @@ export class CppAdapter extends BaseAdapter implements Adapter {
   }
 
   parseAST(): unknown {
-    return {
-      content: this.fileContent,
-      language: 'cpp',
-      filePath: this.filePath
-    };
+    return this.createParseResult('cpp');
   }
 
   extractFunctions(): unknown[] {
@@ -28,24 +24,14 @@ export class CppAdapter extends BaseAdapter implements Adapter {
       const funcName = match[3] || 'unknown';
       const fullName = match[2] ? match[2] + funcName : funcName;
 
-      functionMatches.push({
-        name: fullName.replace(/::$/, ''),
-        type: 'function',
-        line: this.getLineNumber(match.index),
-        code: this.extractCodeBlock(match.index)
-      });
+      functionMatches.push(this.createCodeMatch(fullName.replace(/::$/, ''), 'function', match.index));
     }
 
     const constructorRegex = /([\w:]+)\s*\([^)]*\)\s*:\s*[\w_]+\s*\([^)]*\)/g;
     while ((match = constructorRegex.exec(this.fileContent)) !== null) {
       const constructorName = match[1];
 
-      functionMatches.push({
-        name: constructorName,
-        type: 'constructor',
-        line: this.getLineNumber(match.index),
-        code: this.extractCodeBlock(match.index)
-      });
+      functionMatches.push(this.createCodeMatch(constructorName, 'constructor', match.index));
     }
 
     return functionMatches;
@@ -57,19 +43,10 @@ export class CppAdapter extends BaseAdapter implements Adapter {
     let match;
 
     while ((match = classRegex.exec(this.fileContent)) !== null) {
-      classMatches.push({
-        name: match[2],
-        type: match[1],
-        line: this.getLineNumber(match.index),
-        code: this.extractCodeBlock(match.index)
-      });
+      classMatches.push(this.createCodeMatch(match[2], match[1], match.index));
     }
 
     return classMatches;
-  }
-
-  countLines(): number {
-    return this.fileContent.split('\n').length;
   }
 
   override extractCodeBlock(startPos: number, maxFallback: number = 200): string {
@@ -141,7 +118,6 @@ export class CppAdapter extends BaseAdapter implements Adapter {
       return this.fileContent.substring(startPos, endPos);
     }
 
-    const code = this.fileContent.substring(startPos);
-    return code.substring(0, Math.min(maxFallback, code.length));
+    return this.fallbackCodeBlock(startPos, maxFallback);
   }
 }

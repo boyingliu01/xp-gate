@@ -1,23 +1,19 @@
 ---
 name: test-specification-alignment
-description: "测试与 Specification 对齐验证引擎。确保测试准确反映需求和设计。两阶段执行：Phase 1 验证对齐（可修改测试），Phase 2 执行测试（禁止修改测试）。MANDATORY before any release. TRIGGER: 'run tests', 'verify tests', before BUILD (TDD + review) Arbiter, before gstack-ship."
+description: "Use when asked to run tests, verify tests, align tests with specification.yaml, before BUILD verification, or before release/ship."
 ---
 
 # Test-Specification Alignment Engine
 
-## Scope
+## Workflow Steps
 
-**In Scope:**
-- 测试与 specification.yaml 的对齐验证（两阶段）
-- Phase 1 对齐验证（可修改测试）+ Phase 2 执行测试（禁止修改）
-- freeze/unfreeze 测试目录锁定
-- 失败分类：业务代码 / 测试数据 / Specification / 环境
-- 多语言支持：TypeScript, Python, Go
-
-**Out of Scope:**
-- specification.yaml 的生成（由 sprint-flow Phase 1 负责）
-- 业务代码编写与修改
-- 测试框架选择与配置
+1. **Load Phase 0** — Verify `specification.yaml` and `tests/` directory exist; BLOCK if missing with clear guidance to complete brainstorming → delphi-review → specification-generator flow first
+2. **Phase 1 Alignment (Modify Allowed)** — Parse specification.yaml (YAML) + test files (AST); validate alignment rules; generate alignment report; optionally fix tests to align with requirements; require score ≥80% to proceed
+3. **Coverage Mapping** — Map each REQ-* to at least one test case with `@test` annotation; map each AC-* to at least one assertion; verify test intent declarations (`@test`, `@intent`, `@covers` tags)
+4. **Pre-Phase 2 Freeze** — Invoke `/freeze` skill to lock test directories (`tests/`, `test/`, `__tests__/`, `*.test.ts`, `*.spec.ts`, `*_test.py`, etc.); return confirmation before proceeding
+5. **Phase 2 Execution (Frozen)** — Run all tests; Agent is BLOCKED from modifying/deleting/skipping tests; analyze failures into 4 categories: BUSINESS_CODE_ERROR, TEST_DATA_ERROR, SPECIFICATION_ERROR, ENVIRONMENT_ERROR; SPECIFICATION_ERROR requires ESCALATE_TO_HUMAN
+6. **Failure Classification** — For each failing test, output classification in mandatory format with Type, Test, Root Cause, Action fields; if SPECIFICATION_ERROR detected, offer user options (A: fix spec → re-Phase 1, B: confirm spec → modify code, C: clarify ambiguity)
+7. **JSON Report Output** — Generate alignment report as valid JSON with fields: `alignment_status` (PASS|FAIL|BLOCKED), `phase` (1|2), `score`, `misaligned_tests[]`, `anti_pattern_detected`, `errors[]`; Terminal State: ✅ ALL_TESTS_PASS
 
 ## 核心原则
 
@@ -48,6 +44,89 @@ Alignment report MUST be output as valid JSON:
 }
 ```
 **Eval assertions check for:** `alignment_status`, `phase`, `score`, `anti_pattern_detected`.
+
+---
+
+## Triggers
+
+### Automatic Triggers
+- BUILD (TDD + review) Round 1 after Driver outputs tests
+- Gate 1 verification before proceeding
+- gstack-ship release before deployment
+
+### Manual Triggers
+- `/test-specification-alignment` command
+- `/verify-tests` command
+- "run tests" phrase
+- "verify tests" phrase
+- before gstack-ship
+
+---
+
+## Scope
+
+### IN Scope
+- Validation of test alignment against `specification.yaml` (Requirements, User Stories, Acceptance Criteria)
+- Phase 1: Test modification to improve alignment (add missing tests, fix annotations, correct intent)
+- Phase 2: Test execution with frozen test files (no modifications allowed)
+- Failure classification into BUSINESS_CODE_ERROR, TEST_DATA_ERROR, SPECIFICATION_ERROR, ENVIRONMENT_ERROR
+- JSON report generation with alignment status, score, misaligned tests, and errors
+
+### OUT Scope
+- Modifying `specification.yaml` during Phase 2 (requires ESCALATE_TO_HUMAN)
+- Skipping or deleting tests to make tests pass
+- Modifying test assertions to force tests to pass
+- Business logic implementation (handled by BUILD phase)
+- Environment configuration issues (handled separately)
+
+### Boundaries
+- **Start**: After BUILD (TDD + review) Round 1 outputs tests
+- **End**: Terminal State ✅ ALL_TESTS_PASS or ESCALATE_TO_HUMAN for specification issues
+- **Inputs**: `specification.yaml`, `tests/` directory
+- **Outputs**: Alignment report (JSON), test execution report, failure classification
+
+---
+
+## Examples
+
+### Example 1: Normal Trigger (Should Execute)
+**User Input**: "run tests for login feature" or `/test-specification-alignment`
+
+**Expected Flow**:
+1. Load Phase 0: Check `specification.yaml` exists → ✅ Found
+2. Check `tests/` directory exists → ✅ Found
+3. Phase 1: Parse spec and tests → Alignment score 85% → ✅ Pass threshold
+4. Pre-Phase 2: Call `/freeze tests/` → ✅ Locked
+5. Phase 2: Run tests → 12 passed, 0 failed → ✅ ALL_TESTS_PASS
+6. Output JSON report with `alignment_status: "PASS"`, `phase: "2"`, `score: 85`
+7. Call `/unfreeze tests/` → ✅ Unlocked
+8. Terminal State: ✅ Test-specification-alignment complete
+
+---
+
+### Example 2: Should NOT Trigger (Missing Specification)
+**User Input**: "run tests" in a project without `specification.yaml`
+
+**Expected Flow**:
+1. Load Phase 0: Check `specification.yaml` exists → ❌ Not Found
+2. BLOCK with message:
+   ```
+   ❌ BLOCKED: specification.yaml 不存在
+
+   要生成 specification.yaml，请先完成需求流程：
+
+   流程步骤:
+   1. brainstorming      → 需求探索，生成设计文档
+   2. delphi-review      → 需求评审 (多轮直到 APPROVED)
+   3. spec 自动生成 (从 APPROVED 设计文档提取 specification.yaml)
+
+   为什么必须这样？
+   - 在 delphi-review APPROVED 后生成，避免设计文档修改时 spec 也需重新生成
+   - 遵循"问题发现越早修复成本越低"原则
+
+   请先完成上述流程，然后再运行 test-specification-alignment。
+   ```
+3. Terminal State: ❌ BLOCKED_MISSING_SPECIFICATION
 
 ---
 
@@ -88,7 +167,7 @@ US-001 (actor/feature/benefit)
 
 ---
 
-## Workflow (核心流程)
+## 核心流程
 
 ```
 ┌─────────────────────────────────────────────────────────────┐
@@ -583,29 +662,6 @@ legacy_mode:
 
 ---
 
-## Qoder 平台适配
-
-### freeze 机制替代（替代 gstack/freeze skill）
-
-在 Qoder 环境中，freeze/unfreeze 通过 sprint-flow 的 **Pre-Edit Gate** 替代：
-- Phase 2 执行期间，orchestrator 禁止修改测试目录下的文件
-- 此约束通过 SKILL.md 指令强制执行（非物理阻断）
-- orchestrator 在每次文件编辑前检查：如果目标文件位于测试目录且当前处于 Phase 2 freeze 状态，则 **BLOCK**
-
-### Agent 配置适配
-
-| 原配置 | Qoder 替代 | 说明 |
-|---------|------------|------|
-| Phase 1 Agent (Qwen3.5-Plus) | **orchestrator 直接执行** | YAML 解析 + AST 解析由 orchestrator 内联完成 |
-| Phase 2 Agent (GLM-5) | **orchestrator 直接执行** | 测试执行由 orchestrator 通过 Bash 工具完成 |
-
-### Qoder 集成点
-
-- Phase 3 REVIEW 完成后，使用 genui `show_widget` 展示对齐报告摘要
-- 对齐分数记录通过 `UpdateMemory` 持久化（development_test_specification 类型）
-
----
-
 ## Anti-Patterns
 
 | 错误 | 正确 |
@@ -625,6 +681,10 @@ legacy_mode:
 |------|------|------|
 | V1.0 | 2026-04-06 | 初始设计 |
 | V2.0 | 2026-04-06 | Delphi Review 共识版本 |
+| V2.1 | 2026-06-02 | Added parser-friendly sections: Workflow Steps (7 steps), Triggers (5+ phrases), Scope (IN/OUT/Boundaries), Examples (2 scenarios) |
+
+---
+
 ## Output Format (MANDATORY)
 Alignment report MUST be output as valid JSON:
 ```json
