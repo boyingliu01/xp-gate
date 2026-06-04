@@ -69,6 +69,7 @@ describe('install-skill', () => {
     vi.resetModules();
     delete require.cache[require.resolve('../install-skill')];
     delete require.cache[require.resolve('../detect-deps')];
+    delete require.cache[require.resolve('../shared-paths')];
     delete require.cache[require.resolve('../download-skill')];
     delete require.cache[require.resolve('../rollback')];
     vi.spyOn(console, 'log').mockImplementation(() => {});

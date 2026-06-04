@@ -1,18 +1,15 @@
 const fs = require('fs');
 const path = require('path');
-const os = require('os');
 const crypto = require('crypto');
-const { checkDeps } = require('./detect-deps.js');
-const { checkBash } = require('./detect-deps.js');
-
-// Cross-platform home directory resolution with os.homedir() fallback
-const HOME_DIR = process.env.HOME || process.env.USERPROFILE || os.homedir();
-
-const CONFIG_DIR = path.join(HOME_DIR, '.config', 'xp-gate');
-const CONFIG_FILE = path.join(CONFIG_DIR, 'xp-gate.json');
-const TEMPLATE_DIR = path.join(HOME_DIR, '.config', 'opencode', 'git-hooks-template');
-const GLOBAL_HOOKS_DIR = path.join(CONFIG_DIR, 'hooks');
-const GLOBAL_ADAPTERS_DIR = path.join(CONFIG_DIR, 'adapters');
+const { checkDeps, checkBash, autoInstallDeps, detectPlatform } = require('./detect-deps.js');
+const {
+  HOME_DIR,
+  CONFIG_DIR,
+  CONFIG_FILE,
+  TEMPLATE_DIR,
+  GLOBAL_HOOKS_DIR,
+  GLOBAL_ADAPTERS_DIR,
+} = require('./shared-paths.js');
 
 function copyHooks(srcDir, destDir) {
   ['pre-commit', 'pre-push'].forEach(hook => {
@@ -52,6 +49,35 @@ function logDeps(depCheck) {
   } else {
     console.log('Dependencies: OK\n');
   }
+}
+
+/**
+ * Detect which AI agent platform is in use and check/auto-install deps.
+ * @param {string} platform - 'opencode' | 'claude-code' | 'qoder'
+ */
+async function checkAndInstallDeps(platform) {
+  const depCheck = await checkDeps(platform);
+  if (depCheck.ok) {
+    logDeps(depCheck);
+    return depCheck;
+  }
+
+  // Auto-install missing deps
+  console.log(`Checking dependencies (platform: ${platform})...`);
+  const installResult = await autoInstallDeps(platform);
+  if (installResult.ok) {
+    console.log('Dependencies: OK (auto-installed)\n');
+    return { ok: true };
+  }
+
+  // Auto-install failed — report and continue with warning
+  logDeps(depCheck);
+  if (installResult.errors) {
+    for (const err of installResult.errors) {
+      console.warn(`  Auto-install failed for ${err.name}: ${err.message}`);
+    }
+  }
+  return depCheck;
 }
 
 function printUsage() {
@@ -228,7 +254,10 @@ async function init(args) {
     console.warn(`  ${bashCheck.message}\n`);
   }
 
-  logDeps(await checkDeps());
+  // Detect platform and check/auto-install dependencies
+  const platform = detectPlatform();
+  console.log(`Platform: ${platform}\n`);
+  await checkAndInstallDeps(platform);
 
   const installMode = args.includes('--global') ? 'global' :
                       args.includes('--core-only') ? 'local' :

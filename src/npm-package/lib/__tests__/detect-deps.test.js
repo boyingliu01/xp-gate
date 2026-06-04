@@ -1,6 +1,8 @@
 /**
  * @test detect-deps
- * @intent Verify checkDeps() correctly detects missing/present/outdated dependencies
+ * @intent Verify checkDeps() correctly detects missing/present/outdated dependencies across platforms,
+ *         detectPlatform() identifies the correct AI agent platform,
+ *         and autoInstallDeps() handles install scenarios
  */
 const fs = require('fs');
 const path = require('path');
@@ -16,6 +18,7 @@ describe('detect-deps', () => {
     process.env.HOME = tmpHome;
     vi.resetModules();
     delete require.cache[require.resolve('../detect-deps')];
+    delete require.cache[require.resolve('../shared-paths')];
   });
 
   afterEach(() => {
@@ -24,8 +27,10 @@ describe('detect-deps', () => {
     vi.restoreAllMocks();
   });
 
-  function makeSkillDir(skillName, contents = {}) {
-    const dir = path.join(tmpHome, '.config', 'opencode', 'skills', skillName);
+  function makeSkillDir(skillName, contents = {}, baseDir) {
+    const dir = baseDir
+      ? path.join(baseDir, skillName)
+      : path.join(tmpHome, '.config', 'opencode', 'skills', skillName);
     fs.mkdirSync(dir, { recursive: true });
     if (contents.packageJson) {
       fs.writeFileSync(path.join(dir, 'package.json'), JSON.stringify(contents.packageJson));
@@ -47,6 +52,8 @@ describe('detect-deps', () => {
     }
     return dir;
   }
+
+  // ── checkDeps: backward-compatible tests (default platform = opencode) ──
 
   it('returns ok:false missing:superpowers when no deps exist', async () => {
     const { checkDeps } = require('../detect-deps');
@@ -127,7 +134,6 @@ describe('detect-deps', () => {
   });
 
   it('returns ok:true (no version check) when package.json has no version and no SKILL.md', async () => {
-    // getSkillVersion returns null → skips version check → ok
     makeSkillDir('superpowers', { packageJson: {} });
     makeSkillDir('gstack', { packageJson: {} });
     const { checkDeps } = require('../detect-deps');
@@ -147,13 +153,8 @@ describe('detect-deps', () => {
   });
 
   it('returns null version when neither package.json nor SKILL.md exist (skips version check)', async () => {
-    // Create empty dirs (no metadata files)
-    fs.mkdirSync(path.join(tmpHome, '.config', 'opencode', 'skills', 'superpowers'), {
-      recursive: true,
-    });
-    fs.mkdirSync(path.join(tmpHome, '.config', 'opencode', 'skills', 'gstack'), {
-      recursive: true,
-    });
+    fs.mkdirSync(path.join(tmpHome, '.config', 'opencode', 'skills', 'superpowers'), { recursive: true });
+    fs.mkdirSync(path.join(tmpHome, '.config', 'opencode', 'skills', 'gstack'), { recursive: true });
     const { checkDeps } = require('../detect-deps');
     const result = await checkDeps();
     expect(result.ok).toBe(true);
@@ -164,17 +165,14 @@ describe('detect-deps', () => {
     makeSkillDir('gstack', { packageJson: { version: '1.0.0' } });
     const { checkDeps } = require('../detect-deps');
     const result = await checkDeps();
-    // superpowers version=null → skips version check → ok
     expect(result.ok).toBe(true);
   });
 
-  it('compareVersions handles partial versions (e.g. 1.0 treated as 1.0.0)', async () => {
-    // version "1.0" in SKILL.md regex requires X.Y.Z so won't match; use package.json
+  it('compareVersions handles partial versions (e.g. 1 treated as 1.0.0)', async () => {
     makeSkillDir('superpowers', { packageJson: { version: '1' } });
     makeSkillDir('gstack', { packageJson: { version: '1.0.0' } });
     const { checkDeps } = require('../detect-deps');
     const result = await checkDeps();
-    // '1' parsed as [1] vs [1,0,0] → equal at index 0; index 1: 0 vs 0; index 2: 0 vs 0 → equal → passes
     expect(result.ok).toBe(true);
   });
 
@@ -196,14 +194,187 @@ describe('detect-deps', () => {
   });
 
   it('prefers SKILLS_DIR over OPENCODE_DIR when both exist', async () => {
-    // Put low version in SKILLS_DIR, high in OPENCODE_DIR
     makeSkillDir('superpowers', { packageJson: { version: '0.0.1' } });
     makeOpencodeDir('superpowers', { packageJson: { version: '2.0.0' } });
     makeSkillDir('gstack', { packageJson: { version: '1.0.0' } });
     const { checkDeps } = require('../detect-deps');
     const result = await checkDeps();
-    // Should use SKILLS_DIR (first in possiblePaths) → 0.0.1 fails
     expect(result.ok).toBe(false);
     expect(result.versionMismatch.found).toBe('0.0.1');
+  });
+
+  // ── Platform-specific tests (Issue #128) ──
+
+  describe('checkDeps with platform parameter', () => {
+    it('qoder: checks ~/.qoder/skills/ for dependencies', async () => {
+      const qoderSkills = path.join(tmpHome, '.qoder', 'skills');
+      makeSkillDir('superpowers', { packageJson: { version: '2.0.0' } }, path.join(qoderSkills, 'superpowers'));
+      makeSkillDir('gstack', { packageJson: { version: '1.0.0' } }, path.join(qoderSkills, 'gstack'));
+      const { checkDeps } = require('../detect-deps');
+      const result = await checkDeps('qoder');
+      expect(result.ok).toBe(true);
+    });
+
+    it('qoder: returns missing when qoder skills dir is empty', async () => {
+      fs.mkdirSync(path.join(tmpHome, '.qoder', 'skills'), { recursive: true });
+      const { checkDeps } = require('../detect-deps');
+      const result = await checkDeps('qoder');
+      expect(result.ok).toBe(false);
+      expect(result.missing).toBe('superpowers');
+    });
+
+    it('claude-code: checks ~/.claude/skills/ for dependencies', async () => {
+      const claudeSkills = path.join(tmpHome, '.claude', 'skills');
+      makeSkillDir('superpowers', { packageJson: { version: '2.0.0' } }, path.join(claudeSkills, 'superpowers'));
+      makeSkillDir('gstack', { packageJson: { version: '1.0.0' } }, path.join(claudeSkills, 'gstack'));
+      const { checkDeps } = require('../detect-deps');
+      const result = await checkDeps('claude-code');
+      expect(result.ok).toBe(true);
+    });
+
+    it('claude-code: returns missing when claude skills dir is empty', async () => {
+      fs.mkdirSync(path.join(tmpHome, '.claude', 'skills'), { recursive: true });
+      const { checkDeps } = require('../detect-deps');
+      const result = await checkDeps('claude-code');
+      expect(result.ok).toBe(false);
+      expect(result.missing).toBe('superpowers');
+    });
+
+    it('unknown platform falls back to opencode profile', async () => {
+      makeSkillDir('superpowers', { packageJson: { version: '2.0.0' } });
+      makeSkillDir('gstack', { packageJson: { version: '1.0.0' } });
+      const { checkDeps } = require('../detect-deps');
+      const result = await checkDeps('unknown-platform');
+      expect(result.ok).toBe(true);
+    });
+
+    it('qoder platform does NOT find deps in opencode dir', async () => {
+      // Put deps in opencode dir but NOT in qoder dir
+      makeSkillDir('superpowers', { packageJson: { version: '2.0.0' } });
+      makeSkillDir('gstack', { packageJson: { version: '1.0.0' } });
+      const { checkDeps } = require('../detect-deps');
+      const result = await checkDeps('qoder');
+      expect(result.ok).toBe(false);
+      expect(result.missing).toBe('superpowers');
+    });
+  });
+
+  // ── detectPlatform tests ──
+
+  describe('detectPlatform', () => {
+    it('returns "qoder" when ~/.qoder/skills/ exists', () => {
+      fs.mkdirSync(path.join(tmpHome, '.qoder', 'skills'), { recursive: true });
+      const { detectPlatform } = require('../detect-deps');
+      expect(detectPlatform()).toBe('qoder');
+    });
+
+    it('returns "claude-code" when ~/.claude/skills/ exists', () => {
+      fs.mkdirSync(path.join(tmpHome, '.claude', 'skills'), { recursive: true });
+      const { detectPlatform } = require('../detect-deps');
+      expect(detectPlatform()).toBe('claude-code');
+    });
+
+    it('returns "opencode" as default when no platform dirs exist', () => {
+      const { detectPlatform } = require('../detect-deps');
+      expect(detectPlatform()).toBe('opencode');
+    });
+
+    it('prefers qoder over claude-code when both exist', () => {
+      fs.mkdirSync(path.join(tmpHome, '.qoder', 'skills'), { recursive: true });
+      fs.mkdirSync(path.join(tmpHome, '.claude', 'skills'), { recursive: true });
+      const { detectPlatform } = require('../detect-deps');
+      expect(detectPlatform()).toBe('qoder');
+    });
+  });
+
+  // ── getSkillsDirs tests ──
+
+  describe('getSkillsDirs', () => {
+    it('returns opencode paths for opencode platform', () => {
+      const { getSkillsDirs } = require('../detect-deps');
+      const dirs = getSkillsDirs('opencode');
+      expect(dirs[0]).toContain('.config');
+      expect(dirs[0]).toContain('opencode');
+    });
+
+    it('returns qoder paths for qoder platform', () => {
+      const { getSkillsDirs } = require('../detect-deps');
+      const dirs = getSkillsDirs('qoder');
+      expect(dirs[0]).toContain('.qoder');
+    });
+
+    it('returns claude-code paths for claude-code platform', () => {
+      const { getSkillsDirs } = require('../detect-deps');
+      const dirs = getSkillsDirs('claude-code');
+      expect(dirs[0]).toContain('.claude');
+    });
+  });
+
+  // ── PLATFORM_PROFILES tests ──
+
+  describe('PLATFORM_PROFILES', () => {
+    it('all platforms have requiredDeps defined', () => {
+      const { PLATFORM_PROFILES } = require('../detect-deps');
+      expect(PLATFORM_PROFILES.opencode.requiredDeps.length).toBe(2);
+      expect(PLATFORM_PROFILES.qoder.requiredDeps.length).toBe(2);
+      expect(PLATFORM_PROFILES['claude-code'].requiredDeps.length).toBe(2);
+    });
+
+    it('all platforms have skillsDirs defined', () => {
+      const { PLATFORM_PROFILES } = require('../detect-deps');
+      expect(PLATFORM_PROFILES.opencode.skillsDirs.length).toBeGreaterThan(0);
+      expect(PLATFORM_PROFILES.qoder.skillsDirs.length).toBeGreaterThan(0);
+      expect(PLATFORM_PROFILES['claude-code'].skillsDirs.length).toBeGreaterThan(0);
+    });
+  });
+
+  // ── autoInstallDeps tests ──
+
+  describe('autoInstallDeps', () => {
+    it('returns ok:true with empty installed when deps already exist', async () => {
+      makeSkillDir('superpowers', { packageJson: { version: '2.0.0' } });
+      makeSkillDir('gstack', { packageJson: { version: '1.0.0' } });
+      const { autoInstallDeps } = require('../detect-deps');
+      const result = await autoInstallDeps();
+      expect(result.ok).toBe(true);
+      expect(result.installed).toEqual([]);
+    });
+
+    it('creates skills directory if it does not exist', async () => {
+      const { autoInstallDeps } = require('../detect-deps');
+      // Mock execSync to avoid actual git clone
+      const { execSync } = require('child_process');
+      vi.spyOn(require('child_process'), 'execSync').mockImplementation((cmd) => {
+        // Simulate successful clone by creating the target dir
+        const match = cmd.match(/"([^"]+)"$/);
+        if (match) {
+          fs.mkdirSync(match[1], { recursive: true });
+          fs.writeFileSync(path.join(match[1], 'package.json'), JSON.stringify({ version: '2.0.0' }));
+        }
+        return '';
+      });
+
+      const result = await autoInstallDeps();
+      // Should have attempted to install
+      expect(result.ok).toBe(true);
+      expect(result.installed).toContain('superpowers');
+      expect(result.installed).toContain('gstack');
+
+      vi.restoreAllMocks();
+    });
+
+    it('returns errors when git clone fails', async () => {
+      const { autoInstallDeps } = require('../detect-deps');
+      vi.spyOn(require('child_process'), 'execSync').mockImplementation(() => {
+        throw new Error('git not found');
+      });
+
+      const result = await autoInstallDeps();
+      expect(result.ok).toBe(false);
+      expect(result.errors.length).toBeGreaterThan(0);
+      expect(result.errors[0].message).toContain('git not found');
+
+      vi.restoreAllMocks();
+    });
   });
 });

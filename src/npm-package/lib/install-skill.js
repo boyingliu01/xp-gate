@@ -1,18 +1,14 @@
 const fs = require('fs');
 const path = require('path');
-const os = require('os');
 const https = require('https');
 const http = require('http');
 const { execSync } = require('child_process');
-const { checkDeps } = require('./detect-deps.js');
+const { checkDeps, detectPlatform } = require('./detect-deps.js');
 const { downloadFromGitHub } = require('./download-skill.js');
 const { rollback } = require('./rollback.js');
+const { HOME_DIR, CONFIG_DIR } = require('./shared-paths.js');
 
-// Cross-platform home directory resolution
-const HOME = process.env.HOME || process.env.USERPROFILE || os.homedir();
-
-const CONFIG_DIR = path.join(HOME, '.config', 'xp-gate');
-const SKILLS_DIR = path.join(HOME, '.config', 'opencode', 'skills');
+const SKILLS_DIR = path.join(HOME_DIR, '.config', 'opencode', 'skills');
 
 const SKILLS_REGISTRY = {
   'sprint-flow': { repo: 'boyingliu01/xp-gate', path: 'skills/sprint-flow' },
@@ -24,7 +20,8 @@ const SKILLS_REGISTRY = {
 async function installSkill(name, options = {}) {
   const { offline = false, verbose = false, force = false } = options;
   
-  const depCheck = await checkDeps();
+  const platform = detectPlatform();
+  const depCheck = await checkDeps(platform);
   if (!depCheck.ok) {
     if (depCheck.missing) {
       console.error(`Error: ${depCheck.missing} is required but not installed`);
