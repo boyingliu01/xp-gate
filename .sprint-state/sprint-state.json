@@ -1,19 +1,25 @@
 {
-  "id": "sprint-2026-06-02-14",
-  "phase": 2,
+  "id": "sprint-2026-06-04-01",
+  "task_description": "为 sprint-flow 添加进度看板功能：每个 Phase 完成后展示整体进展，新增 --status 参数",
+  "phase": -1,
   "status": "running",
+  "started_at": "2026-06-04T11:25:00Z",
   "isolation": {
-    "worktree_path": ".worktrees/sprint/sprint-2026-06-02-14",
-    "branch": "sprint/2026-06-02-14",
-    "created_from": "main",
-    "created_from_commit": "e5ec8631f31ce05c3e05270e066e42839f71547e"
+    "worktree_path": ".worktrees/sprint/sprint-2026-06-04-01",
+    "branch": "sprint/2026-06-04-01",
+    "created_from": "fix/skill-cert-p0",
+    "created_from_commit": "f222cac"
   },
-  "outputs": {
-    "design_doc": "~/.gstack/projects/boyingliu01-xp-gate/boyingliu01-sprint/2026-06-02-14-design-20260602-143000.md",
-    "delphi_review": ".sprint-state/delphi-reviewed.json",
-    "audit_logger": "src/npm-package/lib/gate-audit.ts",
-    "audit_cli": "src/npm-package/bin/xp-gate.js",
-    "audit_tests": "src/npm-package/lib/__tests__/gate-audit.test.ts",
-    "hook_integration": "githooks/pre-commit"
-  }
+  "phase_history": [
+    {
+      "phase": -1,
+      "phase_name": "ISOLATE",
+      "status": "running",
+      "started_at": "2026-06-04T11:25:00Z",
+      "completed_at": null,
+      "duration_seconds": null
+    }
+  ],
+  "outputs": {},
+  "metrics": {}
 }

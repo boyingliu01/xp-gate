@@ -1,0 +1,56 @@
+{
+  "$comment": [
+    "Delphi Review Agent Configuration Template",
+    "===========================================",
+    "Copy the relevant 'agent' block below into your opencode.json.",
+    "Replace YOUR_PROVIDER/YOUR_MODEL with your actual provider and model names.",
+    "At least 2 of the 3 agents should use different providers for cross-bias protection."
+  ],
+
+  "$example_providers": {
+    "OpenAI": "openai/gpt-4o",
+    "Anthropic": "anthropic/claude-sonnet-4-20250514",
+    "Ali_Bailian": "bailian-coding-plan/qwen3.6-plus",
+    "Google_Gemini": "google/gemini-2.5-pro",
+    "DeepSeek": "deepseek/deepseek-chat"
+  },
+
+  "agent": {
+    "delphi-reviewer-architecture": {
+      "description": "Delphi expert reviewer for architecture perspective. Focuses on requirements alignment, system design, and high-level coherence.",
+      "mode": "subagent",
+      "model": "YOUR_PROVIDER/YOUR_MODEL_A",
+      "prompt": "You are a Delphi expert reviewer specializing in architecture and requirements alignment. Review the input for: 1) Alignment with stated goals 2) Architectural coherence 3) System-level implications 4) Trade-offs and alternatives. Output structured review with verdict (APPROVED/REQUEST_CHANGES/REJECTED) and confidence level.",
+      "tools": {
+        "read": true,
+        "bash": true,
+        "write": false,
+        "edit": false
+      }
+    },
+    "delphi-reviewer-technical": {
+      "description": "Delphi expert reviewer for technical depth. Focuses on implementation details, code correctness, and edge cases. Used in delphi-review.",
+      "mode": "subagent",
+      "model": "YOUR_PROVIDER/YOUR_MODEL_B",
+      "prompt": "You are a Delphi expert reviewer specializing in technical implementation. Review the input for: 1) Implementation correctness 2) Code quality and patterns 3) Edge cases and error handling 4) Performance implications. Output structured review with verdict (APPROVED/REQUEST_CHANGES/REJECTED) and confidence level.",
+      "tools": {
+        "read": true,
+        "bash": true,
+        "write": false,
+        "edit": false
+      }
+    },
+    "delphi-reviewer-feasibility": {
+      "description": "Delphi expert reviewer for feasibility analysis. Focuses on practical constraints, risks, and execution viability. Used in delphi-review.",
+      "mode": "subagent",
+      "model": "YOUR_PROVIDER/YOUR_MODEL_C",
+      "prompt": "You are a Delphi expert reviewer specializing in feasibility and risk analysis. Review the input for: 1) Practical constraints (time, resources, dependencies) 2) Risk identification and mitigation 3) Execution complexity 4) Alternative approaches. Output structured review with verdict (APPROVED/REQUEST_CHANGES/REJECTED) and confidence level.",
+      "tools": {
+        "read": true,
+        "bash": true,
+        "write": false,
+        "edit": false
+      }
+    }
+  }
+}

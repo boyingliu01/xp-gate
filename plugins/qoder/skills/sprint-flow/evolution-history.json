@@ -1,0 +1,39 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Sprint Flow Evolution History",
+  "description": "Machine-readable change manifest for AHE-inspired skill evolution. Updated after each skill modification.",
+  "iterations": [
+    {
+      "id": 1,
+      "date": "2026-05-22",
+      "trigger": "new-feature",
+      "issue": "#62",
+      "root_cause": "SKILL.md monolith prevents component-level ablation experiments. No observable feedback accumulation. Iteration driven by intuition, not evidence.",
+      "component_changes": ["middleware", "tools", "memory"],
+      "files_changed": [
+        "skills/sprint-flow/references/components/system-prompt.md",
+        "skills/sprint-flow/references/components/tool-descriptions.md",
+        "skills/sprint-flow/references/components/middleware.md",
+        "skills/sprint-flow/references/components/skill-invocations.md",
+        "skills/sprint-flow/references/components/memory.md",
+        "skills/sprint-flow/evolution-log.md",
+        "skills/sprint-flow/evolution-history.json",
+        "skills/ralph-loop/references/components/system-prompt.md",
+        "skills/ralph-loop/references/components/tool-descriptions.md",
+        "skills/ralph-loop/references/components/middleware.md",
+        "skills/ralph-loop/references/components/skill-invocations.md",
+        "skills/ralph-loop/references/components/memory.md",
+        "skills/ralph-loop/evolution-log.md",
+        "skills/ralph-loop/evolution-history.json"
+      ],
+      "prediction": {
+        "metric": "component-attribution-accuracy",
+        "direction": "up",
+        "delta_pct": 100,
+        "risk": "No measurable impact yet; metrics depend on P1 debugger implementation"
+      },
+      "actual_outcome": null,
+      "delphi_review": "Round 2 APPROVED (2/3 majority, minority concern: ralph-loop sync)"
+    }
+  ]
+}

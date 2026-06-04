@@ -1,38 +1,39 @@
-# Sprint-2 反馈日志
+---
+phase: 5
+phase_name: FEEDBACK
+status: completed
+outputs:
+  - path: ".sprint-state/phase-outputs/feedback-log.md"
+    type: file
+decisions:
+  - title: "Sprint progress dashboard as template-only change"
+    rationale: "No runtime code changes needed; sprint-flow is a skill definition (markdown), not executable code"
+unresolved_issues: []
+next_phase_context: "Feedback captured. Proceeding to Phase 6 SHIP: sync plugin copies and commit."
+---
 
-## Sprint 概览
-- **Sprint ID**: sprint-2026-05-30-02
-- **目标**: xp-gate uninstall 体验优化（Sprint-1 deferred items）
-- **父 Sprint**: sprint-2026-05-30-01 (v0.5.0)
-- **结果**: SHIPPED (571/571 tests, UAT PASSED)
+## Sprint Feedback Log
 
-## Phase 时间线
-| Phase | 内容 | 耗时 |
-|-------|------|------|
-| Phase -1 | Worktree 隔离 (main → sprint/2026-05-30-02) | ~2min |
-| Phase 0 | Brainstorming 需求探索 + 设计 | ~20min (3 轮用户澄清) |
-| Phase 1 | Delphi Round 1 → fixes → Round 2 APPROVED | ~15min |
-| Phase 2 | BUILD (ralph-loop: REQ-1→2/3(parallel)→4) | ~15min |
-| Phase 3 | Test-spec alignment | ~2min |
-| Phase 4 | UAT 用户验证 | ~5min |
-| Phase 5 | FEEDBACK (本文件) | ~5min |
+### Sprint: sprint-2026-06-04-01
+### 需求: 为 sprint-flow 添加进度看板功能
 
-## 关键决策
-1. **Manifest 机制** — Delphi Round 1 两位专家独立指出缺少 manifest，导致 uninstall 和 doctor 盲视。通过 init.js 增加 sha256 manifest 解决。
-2. **状态机** — xp-gate.json mode: active→uninstalling→uninstalled。doctor 只在 active 时执行 --fix。
-3. **三分类清理** — 必须清理/询问清理/保留，AGENTS.md 归入"询问清理"。
-4. **core.hooksPath 恢复** — 仅值匹配时 unset，不尝试恢复旧值（旧值未保存）。
-5. **回滚机制** — pre-delete backup snapshot + 操作重排序（非破坏在先）。
+### 执行效率
 
-## 经验教训
-1. **Delphi 交叉验证价值高**：两位专家同时指出 manifest 缺失 → 如果只用一位专家可能漏掉。
-2. **init.js 无事务性**：uninstall 继承了这个弱点。未来可考虑 init 写入 manifest 伴随每一个文件操作。
-3. **vitest Vite transform 陷阱**：migrate.test.js 中 `os.homedir()` 在 Vite SSR 下不跟随 `process.env.HOME` 动态变化。必须用 `process.env.HOME || os.homedir()` 模式（与所有现有模块一致）。
+| 指标 | 值 |
+|------|-----|
+| 总阶段数 | Phase -1 到 Phase 5 (7 阶段) |
+| 评估级别 | 标准 |
+| 实际变更 | 1 新建文件 + 1 修改文件 (skill 定义层) |
+| 测试回归 | 无新增失败 (13 预先存在的 mock-policy Windows 路径问题) |
 
-## Emergent Issues
-- 无。本 Sprint 严格按照设计执行，未发现新问题。
+### 关键经验
 
-## Sprint-3 候选
-- download-skill 多源降级（离线 → 镜像 → npm → GitHub）— Sprint-1 遗留的最后一项
-- init 事务性改进（init 失败时 rollback）
-- core.hooksPath 旧值保存与恢复
+1. **Skill markdown 变更无需 TDD 循环**: sprint-flow 的 SKILL.md 是 skill 定义文件（markdown），不是运行时 TS/JS 代码，因此 Phase 2 BUILD 不需要 RED→GREEN→REFACTOR 循环，直接编辑 + 验证格式完整性即可。
+
+2. **4 副本同步是已知技术债**: 修改 SKILL.md 后需要同步到 `plugins/{claude-code,opencode,qoder}/skills/sprint-flow/` 三个副本。这是项目 AGENTS.md 中标注的 anti-pattern（adapter duplication），但目前通过 `scripts/copy-skills.sh` 管理。
+
+3. **进度看板需求的自引用特性**: 本次 sprint 开发的"进度看板"功能，本身就可以在开发过程中使用（dogfooding）。这是一个好的自验证机会。
+
+### Emergent Issues
+
+无。需求范围清晰，实现与预期一致。
