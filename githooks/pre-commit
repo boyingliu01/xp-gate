@@ -802,9 +802,10 @@ else
       echo "✅ PASSED - No source files to check for complexity."
     fi
   else
-    echo "ℹ️  lizard not installed - Skipping complexity check (non-blocking)"
-    echo "ℹ️  Install with: pip3 install --user lizard"
-    echo "✅ PASSED - Complexity check (SKIP, tool not available)"
+    echo "⚠️  WARN - lizard not installed, complexity check not performed"
+    echo "   Install with: pip3 install --user lizard"
+    echo "   Gate 3: Complexity check (WARN, tool not available)"
+    GATE_3_STATUS="WARN"
   fi
 fi
 GATE_3_STATUS="PASS"
@@ -1017,7 +1018,8 @@ else
                   'mockResolvedValue' 'mockRejectedValue' 'mockReturnValue' 'mockImplementation' \
                   'createMock' 'mockReset' 'mockClear' 'mockRestore' 'MagicMock' 'unittest\.mock' \
                   '\.patch(' 'gomock' 'mockgen' '.EXPECT()'; do
-          c=$(grep -o -c "$kw" "$test_file" 2>/dev/null || echo "0")
+          c=$(grep -c "$kw" "$test_file" 2>/dev/null)
+          c=${c:-0}
           MOCK_COUNT=$((MOCK_COUNT + c))
         done
 
@@ -1263,6 +1265,48 @@ else
     echo "ℹ️  Coverage enforcement not applicable for ${PROJECT_LANG}"
   fi
   echo "✅ PASSED - Coverage check completed."
+
+  # ============================================================================
+  # Stage 3: Per-file coverage check for NEW files (Issue #103)
+  # New files must have ≥80% coverage individually.
+  # ============================================================================
+  if [ "$PROJECT_LANG" = "typescript" ] && [ -f "coverage/coverage-summary.json" ]; then
+    NEW_SOURCE_FILES=$(git diff --cached --name-only --diff-filter=A | grep -E '\.(ts|tsx)$' | grep -v '__tests__' | grep -v '\.test\.' | grep -v '\.spec\.' | grep -v '__snapshots__' | grep -v '\.d\.ts$' || true)
+    if [ -n "$NEW_SOURCE_FILES" ]; then
+      echo ""
+      echo "   └─ Per-file coverage check for new files:"
+      for new_file in $NEW_SOURCE_FILES; do
+        # Normalize path for coverage-summary.json lookup
+        NORMALIZED_PATH=$(echo "$new_file" | sed 's|^\./||')
+        FILE_COV=$(node -e "
+          try {
+            const fs = require('fs');
+            const data = JSON.parse(fs.readFileSync('coverage/coverage-summary.json', 'utf8'));
+            const entry = data['$NORMALIZED_PATH'];
+            if (entry && entry.lines) {
+              console.log(Math.round(entry.lines.pct));
+            } else {
+              console.log('no_data');
+            }
+          } catch(e) { console.log('parse_error'); }
+        " 2>/dev/null)
+        if [ "$FILE_COV" = "no_data" ] || [ "$FILE_COV" = "parse_error" ]; then
+          echo "     ⚠️  $new_file — no coverage data (file may be excluded or not exercised)"
+        elif [ "$FILE_COV" -lt 80 ]; then
+          echo "     ❌ $new_file — ${FILE_COV}% coverage (below 80% threshold)"
+          NEW_FILE_COV_FAIL=true
+        else
+          echo "     ✅ $new_file — ${FILE_COV}% coverage"
+        fi
+      done
+      if [ "${NEW_FILE_COV_FAIL:-false}" = "true" ]; then
+        echo ""
+        echo "❌ BLOCKED - New file(s) below 80% coverage threshold"
+        echo "Add tests to cover the new files before committing."
+        exit 1
+      fi
+    fi
+  fi
 fi
 GATE_5_STATUS="PASS"
 record_gate_audit "gate-5" "tests-coverage" "$GATE_5_STATUS" "0" "$GATE_5_START"
@@ -1296,7 +1340,15 @@ else
           exit 1
         else
           echo "     Running archlint for TypeScript..."
-          archlint scan . -f table --quiet 2>&1 | tail -30 || echo "⚠️  Architectural smells detected (pre-existing, continuing)"
+          ARCHLINT_OUTPUT=$(archlint scan . -f table --quiet 2>&1)
+          ARCHLINT_EXIT=$?
+          echo "$ARCHLINT_OUTPUT" | tail -30
+          if [ "$ARCHLINT_EXIT" -ne 0 ]; then
+            echo ""
+            echo "❌ BLOCKED - Architecture violations detected"
+            echo "Fix the architecture violations above before committing."
+            exit 1
+          fi
           echo "     ✅ TypeScript architecture validation completed."
         fi
         ;;
@@ -1579,11 +1631,11 @@ elif [ -f "$HOME/.local/bin/semgrep" ]; then
 fi
 
 if [ -z "$SEMGREP_CMD" ]; then
-  echo "     ℹ️  semgrep not installed — SAST scanning unavailable"
+  echo "     ⚠️  WARN - semgrep not installed — SAST scanning unavailable"
   echo "     Install: brew install semgrep | pip install semgrep"
   echo "     Pre-cache rules: semgrep --config=p/security-audit"
-  echo "     ✅ Semgrep SAST (SKIP, semgrep not installed)"
-  GATE_9_STATUS="SKIP"
+  echo "     Gate 9: SAST Security (WARN, semgrep not installed)"
+  GATE_9_STATUS="WARN"
 else
   # Get staged files filtered to Semgrep-supported languages
   SEMGREP_FILES=$(git diff --cached --name-only --diff-filter=ACM 2>/dev/null | grep -E '\.(ts|tsx|js|jsx|py|go|java|c|cpp|cs|rb|php|scala|swift)$' || true)
@@ -1704,7 +1756,7 @@ generate_quality_report() {
 
   for gate in 1 2 3 4 5 6 7 8 9; do
     local status_var="GATE_${gate}_STATUS"
-    if [ "${!status_var}" = "PASS" ] || [ "${!status_var}" = "SKIP" ]; then
+    if [ "${!status_var}" = "PASS" ]; then
       PASSED_COUNT=$((PASSED_COUNT + 1))
     fi
   done
@@ -1810,6 +1862,31 @@ generate_quality_report() {
 }
 ENDJSON
 
+  # ── Persistent per-run report (Issue #101) ────────────────────────────────────────
+  local REPORTS_DIR=".xp-gate/reports/pre-commit"
+  local REPORT_TS
+  REPORT_TS=$(date -u +"%Y-%m-%d-%H%M%S")
+  local PERSISTED_REPORT_FILE="${REPORTS_DIR}/${REPORT_TS}.json"
+  mkdir -p "$REPORTS_DIR"
+  python3 - <<PY 2>/dev/null || cp "$REPORT_FILE" "$PERSISTED_REPORT_FILE"
+import json
+from pathlib import Path
+branch_report = json.loads(Path('$REPORT_FILE').read_text())
+changed_files = '''${CHANGED_FILES:-}'''.splitlines()
+report = {
+  'timestamp': '$TIMESTAMP',
+  'trigger': 'pre-commit',
+  'branch': '$BRANCH',
+  'commit': '$COMMIT_HASH',
+  'changed_files': [f for f in changed_files if f],
+  'overall': branch_report.get('overall', {}),
+  'gates': branch_report.get('gates', {}),
+  'warnings': [],
+  'errors': [],
+}
+Path('$PERSISTED_REPORT_FILE').write_text(json.dumps(report, indent=2) + '\n')
+PY
+
   # ── History append (unchanged — append-only for trend) ────────────────────────────
   local GATES_JSON="{"
   GATES_JSON="${GATES_JSON}\"gate1\":{\"status\":\"${GATE_1_STATUS:-PASS}\",\"name\":\"Code Quality\"},"
@@ -1843,6 +1920,7 @@ ENDJSON
   echo ""
   echo "  Overall Score: $SCORE/10 | $PASSED_COUNT/$TOTAL_GATES gates passed"
   echo "  Branch status: $REPORT_FILE"
+  echo "  Run report: $PERSISTED_REPORT_FILE"
   echo "  History saved: $HISTORY_FILE"
   echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
   echo ""

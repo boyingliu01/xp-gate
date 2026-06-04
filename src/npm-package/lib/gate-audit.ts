@@ -177,64 +177,44 @@ export function computeStats(
  * Renames current file to .1, shifts existing archives.
  * Keeps at most MAX_ARCHIVES archived files.
  */
-export function rotateIfNeeded(logPath: string): void {
-  if (!existsSync(logPath)) {
-    return;
-  }
-
-  let stats;
+function shouldRotate(logPath: string): boolean {
+  if (!existsSync(logPath)) return false;
   try {
-    stats = statSync(logPath);
+    return statSync(logPath).size >= MAX_FILE_BYTES;
   } catch {
-    return;
+    return false;
   }
+}
 
-  if (stats.size < MAX_FILE_BYTES) {
-    return;
-  }
-
-  // Shift archives: .2 -> .3, .1 -> .2
+function shiftOldArchives(logPath: string): void {
   for (let i = MAX_ARCHIVES; i >= 2; i--) {
     const from = `${logPath}.${i - 1}`;
     const to = `${logPath}.${i}`;
     if (existsSync(from)) {
-      try {
-        renameSync(from, to);
-      } catch {
-        // Race condition or permission issue — skip
-      }
-    }
-  }
-
-  // Current -> .1
-  const firstArchive = `${logPath}.1`;
-  if (existsSync(firstArchive)) {
-    try {
-      renameSync(firstArchive, `${logPath}.2`);
-    } catch {
-      // Skip on error
-    }
-  }
-
-  try {
-    renameSync(logPath, firstArchive);
-  } catch {
-    // If rename fails, truncate the current file instead
-    try {
-      writeFileSync(logPath, '', 'utf8');
-    } catch {
-      console.error('[xp-gate audit] Failed to rotate or truncate log:', logPath);
+      try { renameSync(from, to); } catch { /* skip */ }
     }
   }
 }
 
-// ── CLI entry point (direct invocation from hooks) ───────────────────────────
+function archiveCurrent(logPath: string): void {
+  const first = `${logPath}.1`;
+  if (existsSync(first)) {
+    try { renameSync(first, `${logPath}.2`); } catch { /* skip */ }
+  }
+  try {
+    renameSync(logPath, first);
+  } catch {
+    try { writeFileSync(logPath, '', 'utf8'); } catch { /* skip */ }
+  }
+}
 
-/**
- * When called directly via `npx tsx gate-audit.ts record --gate-id ...`,
- * this block handles CLI argument parsing and appends the entry.
- */
-if (require.main === module) {
+export function rotateIfNeeded(logPath: string): void {
+  if (!shouldRotate(logPath)) return;
+  shiftOldArchives(logPath);
+  archiveCurrent(logPath);
+}
+
+function runCli(): void {
   const args = process.argv.slice(2);
   const command = args[0];
 
@@ -258,7 +238,11 @@ if (require.main === module) {
   }
 }
 
-function parseCliOptions(args: string[]): Record<string, string> {
+if (require.main === module) {
+  runCli();
+}
+
+export function parseCliOptions(args: string[]): Record<string, string> {
   const opts: Record<string, string> = {};
   for (let i = 0; i < args.length; i++) {
     if (args[i].startsWith('--') && i + 1 < args.length) {
@@ -269,7 +253,7 @@ function parseCliOptions(args: string[]): Record<string, string> {
   return opts;
 }
 
-function getCommitHash(): string {
+export function getCommitHash(): string {
   try {
     const { execSync } = require('child_process');
     return execSync('git rev-parse HEAD', { encoding: 'utf8', stdio: ['pipe', 'pipe', 'pipe'] }).trim();

@@ -10,22 +10,27 @@ function filterTestFiles(files: string[]): string[] {
   return files.filter(f => f.endsWith('.test.ts') || f.endsWith('.spec.ts'));
 }
 
-function collectImports(testContent: string): string[] {
-  const importRegex = /import\s*(?:type\s*)?(?:\{[^}]*\}|\*\s+as\s+\w+|\w+)?\s*(?:from\s*)?['"]([^'"]+)['"]/g;
-  const requireRegex = /(?:const|let|var)\s+(?:\{[^}]*\}|\w+)\s*=\s*require\s*\(\s*['"]([^'"]+)['"]\s*\)/g;
-  const dynamicImportRegex = /import\s*\(\s*['"]([^'"]+)['"]\s*\)/g;
-  const exportFromRegex = /export\s+(?:type\s+)?(?:\{[^}]*\}|\*\s+as\s+\w+|\*|\w+)\s+from\s+['"]([^'"]+)['"]/g;
+const IMPORT_REGEXES = [
+  /import\s*(?:type\s*)?(?:\{[^}]*\}|\*\s+as\s+\w+|\w+)?\s*(?:from\s*)?['"]([^'"]+)['"]/g,
+  /(?:const|let|var)\s+(?:\{[^}]*\}|\w+)\s*=\s*require\s*\(\s*['"]([^'"]+)['"]\s*\)/g,
+  /import\s*\(\s*['"]([^'"]+)['"]\s*\)/g,
+  /export\s+(?:type\s+)?(?:\{[^}]*\}|\*\s+as\s+\w+|\*|\w+)\s+from\s+['"]([^'"]+)['"]/g,
+];
 
-  const imports: string[] = [];
+function extractMatches(regex: RegExp, content: string): string[] {
+  const results: string[] = [];
   let match: RegExpExecArray | null;
-
-  const patterns = [importRegex, requireRegex, dynamicImportRegex, exportFromRegex];
-  for (const regex of patterns) {
-    while ((match = regex.exec(testContent)) !== null) {
-      imports.push(match[1]);
-    }
+  while ((match = regex.exec(content)) !== null) {
+    results.push(match[1]);
   }
+  return results;
+}
 
+function collectImports(testContent: string): string[] {
+  const imports: string[] = [];
+  for (const regex of IMPORT_REGEXES) {
+    imports.push(...extractMatches(regex, testContent));
+  }
   return [...new Set(imports)];
 }
 
@@ -38,53 +43,89 @@ function detectMockUsage(testContent: string, importPath: string): MockStrategy 
   return mockPatterns.some(p => p.test(testContent)) ? 'mock' : 'real';
 }
 
+function buildStrategyViolation(
+  testFile: string,
+  importPath: string,
+  actualStrategy: MockStrategy,
+  expectedStrategy: MockStrategy,
+  reason: string,
+  severity: 'warning' | 'error',
+): MockPolicyViolation {
+  return {
+    file: testFile,
+    line: 0,
+    dependency: importPath,
+    actualStrategy,
+    expectedStrategy,
+    reason,
+    severity,
+  };
+}
+
+function buildPendingRemovalViolation(
+  testFile: string,
+  importPath: string,
+  severity: 'warning' | 'error',
+): MockPolicyViolation {
+  return buildStrategyViolation(
+    testFile,
+    importPath,
+    'mock',
+    'mock',
+    `Pending dependency "${importPath}" requires @mock-justified annotation with removal plan`,
+    severity,
+  );
+}
+
+function validateImport(
+  testFile: string,
+  content: string,
+  importPath: string,
+  engine: MockDecisionEngine,
+  layer: ReturnType<typeof detectTestLayer>,
+  severity: 'warning' | 'error',
+): MockPolicyViolation[] {
+  const decision = engine.decide(importPath, layer);
+  const actualStrategy = detectMockUsage(content, importPath);
+  const violations: MockPolicyViolation[] = [];
+
+  if (decision.strategy !== actualStrategy) {
+    violations.push(buildStrategyViolation(
+      testFile,
+      importPath,
+      actualStrategy,
+      decision.strategy,
+      decision.reason,
+      severity,
+    ));
+  }
+
+  if (decision.pendingRemoval && actualStrategy === 'mock' && !content.includes('@mock-justified')) {
+    violations.push(buildPendingRemovalViolation(testFile, importPath, severity));
+  }
+
+  return violations;
+}
+
 async function validateFile(
   testFile: string,
   engine: MockDecisionEngine,
   projectRoot: string,
   severity: 'warning' | 'error',
 ): Promise<MockPolicyViolation[]> {
-      const fullPath = testFile.startsWith('/') ? testFile : join(projectRoot, testFile);
+  const fullPath = testFile.startsWith('/') ? testFile : join(projectRoot, testFile);
   const content = await readFile(fullPath, 'utf-8');
   const layer = detectTestLayer(testFile);
   const imports = collectImports(content);
-  const violations: MockPolicyViolation[] = [];
 
-  for (const importPath of imports) {
-    const decision = engine.decide(importPath, layer);
-    const actualStrategy = detectMockUsage(content, importPath);
-
-    if (decision.strategy !== actualStrategy) {
-      violations.push({
-        file: testFile,
-        line: 0,
-        dependency: importPath,
-        actualStrategy,
-        expectedStrategy: decision.strategy,
-        reason: decision.reason,
-        severity,
-      });
-    }
-
-    if (decision.pendingRemoval && actualStrategy === 'mock') {
-      const hasRemovalAnnotation = content.includes(
-        '@mock-justified'
-      );
-      if (!hasRemovalAnnotation) {
-        violations.push({
-          file: testFile,
-          line: 0,
-          dependency: importPath,
-          actualStrategy: 'mock',
-          expectedStrategy: 'mock',
-          reason: `Pending dependency "${importPath}" requires @mock-justified annotation with removal plan`,
-          severity,
-        });
-      }
-    }
-  }
-
-  return violations;
+  return imports.flatMap(importPath => validateImport(
+    testFile,
+    content,
+    importPath,
+    engine,
+    layer,
+    severity,
+  ));
 }
 
 export async function runGateM3(

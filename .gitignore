@@ -90,6 +90,4 @@ plugins/opencode/dist/
 plugins/opencode/node_modules/
 .ui-gate-result.json
 .audit-log.jsonl
-
-# Sprint worktree isolation
-.worktrees/
+.code-walkthrough-result.json
