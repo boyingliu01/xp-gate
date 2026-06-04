@@ -1,6 +1,6 @@
 ---
 name: delphi-review
-description: "Delphi consensus review: multi-round anonymous expert review until unanimous APPROVAL. Supports design/code-walkthrough modes. 2-3 experts from different providers. MANDATORY before implementation, design, or architecture decisions. Trigger: 'review this design', '评审这个需求', 'design review', '多专家评审', 'consensus review', 'code walkthrough', 'push review', or any request for multi-expert review of requirements, design docs, architecture, or PRs."
+description: "Use when asked to review a design, plan, or architecture; before implementation starts; or when multi-expert consensus is needed. Triggers: 'review this design', '评审这个需求', 'design review', '多专家评审', 'consensus review', 'code walkthrough', 'push review', 'architecture review', 'PR review', or any request for multi-expert evaluation of requirements, design docs, or PRs."
 ---
 
 # Delphi Consensus Review
@@ -27,7 +27,7 @@ description: "Delphi consensus review: multi-round anonymous expert review until
 1. **匿名性** — Round 1 专家互不知道对方意见
 2. **迭代** — 多轮直到共识，不是固定轮数
 3. **受控反馈** — 每轮看到其他专家意见
-4. **统计共识** — >=95% 一致才算共识
+4. **统计共识** — >=91% 一致才算共识
 
 ### 质量优先
 
@@ -95,24 +95,24 @@ description: "Delphi consensus review: multi-round anonymous expert review until
 
 | 阈值 | 说明 |
 |------|------|
-| **>=95%** | 推荐默认 |
+| **>=91%** | 推荐默认 |
 | 100% | 完全一致（更严格） |
 
 ---
 
-## 完整流程
+## Delphi 评审执行过程
 
 ```
 Phase 0: 准备 → Round 1: 匿名独立评审 → 共识检查
     │
-    ├─ 一致 + >=95% + APPROVED → ✅ 完成
+    ├─ 一致 + >=91% + APPROVED → ✅ 完成
     │
-    └─ 不一致 或 <95% 或 REQUEST_CHANGES
+    └─ 不一致 或 <91% 或 REQUEST_CHANGES
           │
           ▼
        Round 2: 交换意见 → 共识检查
           │
-          ├─ 一致 + >=95% + APPROVED → ✅ 完成
+          ├─ 一致 + >=91% + APPROVED → ✅ 完成
           │
           └─ 仍分歧 或 REQUEST_CHANGES
                 │
@@ -215,14 +215,96 @@ Phase 0: 准备 → Round 1: 匿名独立评审 → 共识检查
 
 ---
 
+## Triggers
+
+This skill activates on any request for multi-expert review. Common triggers:
+
+**English:**
+- "review this design"
+- "design review"
+- "architecture review"
+- "consensus review"
+- "code walkthrough"
+- "push review"
+- "multi-expert review"
+- "PR review"
+
+**Chinese:**
+- "评审这个需求"
+- "多专家评审"
+- "设计评审"
+- "架构评审"
+- "代码走查"
+
+**Related commands:**
+- `/delphi-review` - Design review mode
+- `/delphi-review --mode code-walkthrough` - Pre-push code walkthrough
+
+---
+
+## Workflow Steps
+
+1. **Determine mode** - Design review (default) or code-walkthrough (--mode code-walkthrough)
+2. **Dispatch anonymous experts** - 2-3 experts from ≥2 different domestic model providers
+3. **Collect Round 1 independent reviews** - Anonymous, no cross-expert bias
+4. **Synthesize feedback** - Measure consensus, identify disagreements
+5. **Run Round 2+ until consensus** - Exchange opinions, iterate until ≥91% agreement
+6. **Block on unresolved Critical/Major** - Zero-tolerance: all Critical/Major must be resolved
+7. **Emit verdict** - APPROVED (with specification.yaml) or REQUEST_CHANGES (fix + re-review)
+
+**Consensus threshold:** ≥91% (project standard for Delphi review approval)
+**Model policy:** Domestic models only (DeepSeek, Qwen, Kimi, GLM, MiniMax). Foreign models (Anthropic/OpenAI/Google) forbidden.
+
+---
+
+## Scope
+
+**IN Scope:**
+- Design document review (requirements, architecture, PRDs)
+- Pre-implementation planning review
+- Code walkthrough (git push validation, max 20 files/500 LOC)
+- Multi-expert consensus building
+- Specification extraction (design → specification.yaml)
+
+**OUT Scope:**
+- Single-expert review (use `/review` instead)
+- Post-implementation review (use `/requesting-code-review`)
+- Security audit (use `/security-research` or `/cso`)
+- Performance benchmarking (use `/benchmark`)
+
+---
+
+## Examples
+
+**Example 1: Design review**
+```bash
+/delphi-review
+```
+→ 3 experts review design doc → consensus report + specification.yaml
+
+**Example 2: Code walkthrough**
+```bash
+/delphi-review --mode code-walkthrough
+```
+→ Pre-push validation → .code-walkthrough-result.json
+
+**Example 3: Chinese trigger**
+```
+User: 评审这个需求文档
+→ Auto-detects delphi-review trigger → dispatches experts
+```
+
+---
+
 ## Output Format (MANDATORY)
-Every review round output MUST follow this exact JSON structure:
+
+Every review round output MUST follow this exact JSON structure for design mode:
 
 ```json
 {
   "expert_id": "A|B|C",
   "round": 1,
-  "mode": "design|code-walkthrough",
+  "mode": "design",
   "verdict": "APPROVED|REQUEST_CHANGES|REJECTED",
   "confidence": 9,
   "critical_issues": ["..."],
@@ -231,10 +313,13 @@ Every review round output MUST follow this exact JSON structure:
   "consensus_report": {
     "agreed_items": ["..."],
     "disagreed_items": ["..."],
-    "final_verdict": "APPROVED|REQUEST_CHANGES"
+    "final_verdict": "APPROVED|REQUEST_CHANGES",
+    "consensus_ratio": 0.95
   }
 }
 ```
+
+**For code-walkthrough mode**, output follows `.code-walkthrough-result.json` schema (see `references/code-walkthrough.md`).
 
 **Anti-patterns mapping to assertions:**
 - `Round 1 → 生成报告 → "评审完成"` → Output MUST NOT have `verdict: APPROVED` if `critical_issues` exist.
@@ -255,7 +340,7 @@ Every review round output MUST follow this exact JSON structure:
 - [ ] Round 2+ 完成（交换意见 / 最终立场）
 
 **CRITICAL — 共识验证:**
-- [ ] 问题共识比例 >=95%
+- [ ] 问题共识比例 >=91%
 - [ ] 所有 Critical Issues 已解决
 - [ ] 所有 Major Concerns 已处理
 
@@ -337,7 +422,7 @@ Every review round output MUST follow this exact JSON structure:
 | 只处理 Critical，忽略 Major | 零容忍：Critical/Major 全部必须处理，不可跳过或降级 |
 | 单专家自评 | 至少 2 位不同 provider 的专家 |
 | 用户说"时间紧急"就跳过 | 评审是投资不是开销，跳过后期返工成本更高 |
-| "专家几乎一致"就通过 | "几乎" = 不一致，继续到 >=95% |
+| "专家几乎一致"就通过 | "几乎" = 不一致，继续到 >=91% |
 | 使用 Anthropic/GPT/Gemini 等国外昂贵模型 | 必须使用国产开源模型（DeepSeek, Qwen, Kimi, GLM, MiniMax） |
 | 三个专家使用同一厂家模型 | 必须来自至少 2 家不同厂家 |
 
@@ -352,7 +437,7 @@ Every review round output MUST follow this exact JSON structure:
 | "这只是小变更" | 所有变更都需要评审 |
 | "Round 1 就够了" | 不够，必须多轮直到共识 |
 | "生成报告就完成了" | APPROVED 才算完成 |
-| "2/3 同意就是共识" | 还要检查问题共识比例 >=95% |
+| "2/3 同意就是共识" | 还要检查问题共识比例 >=91% |
 
 ---
 
@@ -360,25 +445,10 @@ Every review round output MUST follow this exact JSON structure:
 
 **Delphi 评审完成的唯一标准：**
 1. ✅ 所有专家裁决 APPROVED
-2. ✅ 问题共识 >=95%
+2. ✅ 问题共识 >=91%
 3. ✅ 所有 Critical Issues 已修复验证
 4. ✅ 所有 Major Concerns 已处理
 5. ✅ 共识报告已生成
 6. ✅ 用户已确认
 
 **缺少任何一项 = 未完成**
-## Output Format (MANDATORY)
-Every delphi review round MUST output valid JSON:
-```json
-{
-  "skill_name": "delphi-review",
-  "mode": "design|code-walkthrough",
-  "phase": "Round 1|Round 2|Round 3|Consensus",
-  "expert_id": "A|B|C",
-  "verdict": "APPROVED|REQUEST_CHANGES|REJECTED",
-  "confidence": 8,
-  "issues": [{"id": "string", "severity": "critical|major|minor", "description": "string"}],
-  "consensus_report": {"status": "pending|consensus|disagreement"}
-}
-```
-**Eval assertions check for:** `verdict` enum values, `confidence` range, `issues` structure, `consensus_report.status`.

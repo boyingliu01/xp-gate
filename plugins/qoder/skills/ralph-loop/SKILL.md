@@ -1,13 +1,6 @@
 ---
 name: ralph-loop
-description: >
-  Default Phase 2 BUILD mode for Sprint-Flow. Processes ONE REQ at a time from
-  specification.yaml with clean isolated context per subagent dispatch, persists
-  memory via git history + classified learnings, runs full regression tests on each
-  REQ, and only commits on verification pass. Designed to reduce token consumption
-  from linear context accumulation to per-REQ fixed budgets (40-67% savings).
-  Token-constraint is the default — every Phase 2 uses this mode automatically.
-  Use `--mode parallel` to opt into the legacy all-at-once mode if needed.
+description: Use when executing Sprint-Flow Phase 2 BUILD, processing one REQ, building the next requirement, iterating with clean context, or requiring full regression per requirement.
 maturity: stable
 ---
 
@@ -24,6 +17,25 @@ maturity: stable
 | **Git 持久记忆** | 代码变更 + checkpoint 天然持久，不需要在 prompt 里反复解释 |
 | **浓缩型分类学习** | permanent（架构级）+ contextual（最近 3 条）双层 learnings |
 | **AGENTS.md 统一更新** | orchestrator 统一写，subagent 不直接修改 — 无竞态 |
+
+---
+
+## Triggers
+
+**关键词触发**：ralph-loop, process one REQ, build next requirement, Phase 2 BUILD, iterate REQ, isolated REQ build, clean context, full regression
+
+**使用场景**：
+- 执行 Sprint-Flow Phase 2 BUILD 阶段
+- 从 specification.yaml 读取需求逐个实现
+- 需要控制每个 REQ 的 token 预算
+- 防止上下文污染（前一个 REQ 的实现细节影响后一个 REQ）
+- 需要全量回归测试保证不引入回归
+- 需要持久化 learnings 供后续 REQ 参考
+
+**何时不使用**：
+- 需求数量极少（1-2 个）且相互独立，可以并行
+- 紧急热修复，不需要完整 Sprint Flow
+- 明确使用 `--mode parallel` 切换到并行模式
 
 ## 作为 Phase 2 默认行为
 
@@ -294,6 +306,165 @@ Phase 0, 1, 3-6 行为完全不变。
 ```
 
 **Eval assertions**: `done + pending + blocked + skipped == total`, `iteration <= max_iterations`.
+
+---
+
+## Workflow Steps (Mandatory Execution Order)
+
+**每个 REQ 必须按以下顺序执行，不得跳过或重排**：
+
+1. **Load next READY REQ**
+   - 从 specification.yaml 读取下一个依赖已满足的 REQ
+   - 检查 priority 和 status (pending 状态)
+   - 构建依赖图，确认无循环依赖
+
+2. **Create isolated context**
+   - 清空前一个 REQ 的对话历史
+   - 注入：当前 REQ + AC + permanent learnings + contextual learnings (最近 3 条)
+   - 注入：AGENTS.md + git log --oneline -5 + 测试基础设施摘要
+
+3. **Dispatch build subagent**
+   - 使用 `task(category="unspecified-high", load_skills=["test-driven-development"], timeout=300)`
+   - 强制 TDD 流程：RED → GREEN → REFACTOR
+   - 强制执行 Mock 边界策略（详见 Mock 边界表）
+
+4. **Run full regression tests**
+   - L1: typecheck + lint on changed files
+   - L1b: 检查测试先行比率 (新增测试行数 / 总新增行数 ≥ 40%)
+   - **L2: 全量测试运行**（不只是 @test 当前 REQ 的测试）
+   - L3: 检查整体覆盖率 ≥ 80%
+
+5. **Fix until green or block**
+   - 失败 → retry (max 3 次，每次注入失败摘要)
+   - 第 3 次仍失败 → BLOCK → 等待用户决策 (skip/manual/stop/rollback)
+   - 通过 → git commit + 标记 done
+
+6. **Persist learnings**
+   - 分类为 permanent（架构级）或 contextual（临时性）
+   - 自动升级条件：被≥2 个 REQ 引用 或 涉及接口/数据结构
+   - 调用 `gstack/learn` 总结经验教训
+
+7. **Update sprint state**
+   - orchestrator 统一更新 AGENTS.md（append `## ralph-loop: [REQ-XXX title]`）
+   - 原子写 checkpoint (progress.log)
+   - 继续下一个 READY REQ
+
+**禁止行为**：
+- ❌ 跳过测试基础设施检查
+- ❌ 只运行部分测试（必须全量回归）
+- ❌ 验证失败仍 commit
+- ❌ 多个 subagent 同时写 AGENTS.md
+- ❌ 修改前一个 REQ 的代码（除非修复回归）
+
+---
+
+## Scope
+
+**In Scope**：
+- Phase 2 BUILD 阶段的 REQ 级迭代构建
+- 从 specification.yaml 读取需求并逐个实现
+- 测试先行（TDD）+ 全量回归测试
+- 持久化 learnings 供后续 REQ 参考
+- 依赖排序和循环依赖检测
+- 崩溃恢复（从 checkpoint 继续）
+
+**Out of Scope**：
+- Phase 0-1 (THINK/PLAN) 的需求分析和设计
+- Phase 3-6 (REVIEW/USER ACCEPT/FEEDBACK/SHIP) 的后续阶段
+- 并行模式（需显式使用 `--mode parallel` 切换到 `dispatching-parallel-agents`）
+- 紧急热修复（应使用标准 sprint-flow 或手动处理）
+- 非 specification.yaml 定义的需求（临时需求应先纳入 spec 再执行）
+
+---
+
+## Examples
+
+**Example 1: 标准 Sprint Flow 启动**
+```bash
+/sprint-flow "开发用户登录功能，支持 JWT 和 OAuth2" --type web-nextjs
+# → Phase 0-1 完成设计评审后，Phase 2 自动进入 ralph-loop 模式
+# → 按拓扑顺序处理 REQ-001 (User Model) → REQ-002 (Auth Middleware) → REQ-003 (Login API)
+```
+
+**Example 2: 单个 REQ 构建**
+```bash
+/ralph-loop
+# → 从 specification.yaml 读取下一个 READY REQ
+# → 创建孤立上下文，dispatch TDD subagent
+# → 全量回归测试通过后 commit
+```
+
+**Example 3: 处理阻塞 REQ**
+```
+REQ-005 失败 3 次 → BLOCKED
+→ 用户决策：
+  - skip: 跳过此 REQ，继续 REQ-006
+  - manual: 手动修复后重新 dispatch
+  - stop: 停止整个 ralph-loop，保留已 done commits
+  - rollback: git reset 回上一个稳定版本
+```
+
+**Example 4: 崩溃恢复**
+```bash
+# 系统崩溃后重新启动
+/ralph-loop --resume
+# → 检测 progress.log → 跳过已 done REQs
+# → 从最后一个 pending REQ 继续，无需重做已完成工作
+```
+
+**Example 5: 测试基础设施缺失**
+```
+REQ-001 开始 → 检查 test-utils.ts → 不存在
+→ dispatch "生成测试基础设施" subagent
+→ retry max 2 次 → 仍失败 → BLOCK 或 fallback inline 生成
+→ 基础设施就绪后继续业务代码开发
+```
+
+---
+
+## Output Contract (Mandatory Checklist)
+
+**每个 REQ 完成时必须输出以下结构化检查清单**：
+
+```markdown
+## REQ-XXX: [Title] - Execution Summary
+
+**Status**: ✅ PASS / ❌ FAIL (retry n/3) / 🚫 BLOCKED
+
+**Context Isolation**:
+- [ ] Previous REQ context cleared
+- [ ] Permanent learnings injected (N items)
+- [ ] Contextual learnings injected (≤3 items)
+- [ ] Test infrastructure confirmed ready
+
+**TDD Compliance**:
+- [ ] Tests written BEFORE implementation
+- [ ] Test/implementation ratio ≥ 40%
+- [ ] Mock usage justified (if >30% mock density)
+
+**Verification Layers**:
+- [ ] L1: typecheck + lint pass
+- [ ] L1b: Test-first ratio check pass
+- [ ] L2: **FULL regression tests** (all tests, not just @test REQ-XXX)
+- [ ] L3: coverage ≥ 80%
+
+**Learnings Persisted**:
+- [ ] Permanent: [N items, list key ones]
+- [ ] Contextual: [N items, sliding window]
+- [ ] `gstack/learn` called
+
+**State Updated**:
+- [ ] AGENTS.md updated (orchestrator)
+- [ ] progress.log atomically written
+- [ ] Git commit created (if PASS)
+
+**Next Step**: [REQ-YYY title / COMPLETE / BLOCKED]
+```
+
+**Eval Criteria** (Issue #120, #121):
+- ✅ L2 pass: Structured execution plan visible (checklist format)
+- ✅ L3 pass: All 7 workflow steps followed, full regression tests run
+- ❌ Fail: Missing checklist, partial tests, context pollution
 
 ---
 

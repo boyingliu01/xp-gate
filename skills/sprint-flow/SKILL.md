@@ -475,6 +475,13 @@ Phase 2 第一步必须执行 DELPHI-GATE 检查。没有 delphi-review APPROVED
 - **HARD-GATE**: Phase 5 未完成 → 不可进入 Phase 6。验证 `.sprint-state/phase-outputs/feedback-log.md` 存在。
 - **⚠️ GITHOOKS-GATE**: 再次验证 hooks 完整性（Phase 2 的 TDD 编码已触发提交，SHIP 阶段还会再次提交）
   - 运行 `githooks/verify.sh` → 缺失 → `githooks/install.sh` → 阻断直至修复
+- **⚠️ VERSION-GATE**: Phase 6 提交前必须 bump VERSION 文件（与变更类型无关）
+  - 默认 bump PATCH 位（如 `0.6.0.0` → `0.6.1.0`，MICRO 重置为 0）
+  - 重大新功能 bump MINOR 位（如 `0.6.0.0` → `0.7.0.0`），Breaking change bump MAJOR 位
+  - 运行 `bash scripts/sync-version.sh` 同步到所有 package.json（root、npm-package、claude-plugin、opencode）
+  - 更新 `CHANGELOG.md` 添加本次变更记录（含变更类型说明：skill-only / code / mixed）
+  - 验证：`git diff VERSION` 确认版本号已变更，未变更 → 阻断
+  - **此规则与变更类型无关** — 纯 skill 变更（仅 .md 文件）也必须 bump PATCH，确保每次 sprint 都触发 npm 发布
 - **`finishing-a-development-branch`** (superpowers) — 结构化完成流：4 选项（merge / PR / discard / keep）
 - `ship` (gstack) — 创建 PR（PR 路径时使用）
 - Phase 6 输出：PR URL（用于 Phase 7 输入）

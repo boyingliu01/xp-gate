@@ -1,7 +1,13 @@
 {
-  "mode": "code-walkthrough",
-  "commit": "f222cac0b4b52a23482f2e6162bd7a2851ea960e",
-  "timestamp": "2026-06-03T12:00:00Z",
+  "mode": "design",
+  "timestamp": "2026-06-04T20:15:00Z",
   "verdict": "APPROVED",
-  "consensus_ratio": 1.0
+  "consensus_ratio": 1.0,
+  "experts": [
+    {"id": "A", "role": "architecture", "verdict": "APPROVED", "confidence": 9},
+    {"id": "B", "role": "implementation", "verdict": "APPROVED", "confidence": 8}
+  ],
+  "rounds": 2,
+  "critical_issues_resolved": ["MICRO→npm PATCH mapping causes version downgrade — resolved by using PATCH-only bump"],
+  "specification_path": ".sprint-state/phase-outputs/specification.yaml"
 }

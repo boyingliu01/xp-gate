@@ -1,39 +1,19 @@
----
-phase: 5
-phase_name: FEEDBACK
-status: completed
-outputs:
-  - path: ".sprint-state/phase-outputs/feedback-log.md"
-    type: file
-decisions:
-  - title: "Sprint progress dashboard as template-only change"
-    rationale: "No runtime code changes needed; sprint-flow is a skill definition (markdown), not executable code"
-unresolved_issues: []
-next_phase_context: "Feedback captured. Proceeding to Phase 6 SHIP: sync plugin copies and commit."
----
+# Sprint Feedback Log — sprint-2026-06-04-03
 
-## Sprint Feedback Log
+## Sprint 目标
+修复 skill-only 变更不触发版本号更新的问题
 
-### Sprint: sprint-2026-06-04-01
-### 需求: 为 sprint-flow 添加进度看板功能
+## 关键经验
 
-### 执行效率
+### 1. Delphi Review 的价值体现
+初始方案（MICRO→npm PATCH 映射）存在数学上的必然缺陷：两个独立计数器（PATCH + MICRO）不能无损映射到一个位置。Round 1 两位专家都发现了版本降级风险。修复后的方案（统一 bump PATCH）更简单、更可靠。
 
-| 指标 | 值 |
-|------|-----|
-| 总阶段数 | Phase -1 到 Phase 5 (7 阶段) |
-| 评估级别 | 标准 |
-| 实际变更 | 1 新建文件 + 1 修改文件 (skill 定义层) |
-| 测试回归 | 无新增失败 (13 预先存在的 mock-policy Windows 路径问题) |
+### 2. 版本策略应简洁
+用户反馈明确："每完成一个迭代，第三版本号+1，与修改内容无关"。这比复杂的 MICRO/PATCH 区分方案更实用。简单规则 > 复杂映射。
 
-### 关键经验
+### 3. mock-policy 测试是已知技术债
+13 个 Windows 路径兼容性测试失败已记录为 Issue #133，需后续专项修复。
 
-1. **Skill markdown 变更无需 TDD 循环**: sprint-flow 的 SKILL.md 是 skill 定义文件（markdown），不是运行时 TS/JS 代码，因此 Phase 2 BUILD 不需要 RED→GREEN→REFACTOR 循环，直接编辑 + 验证格式完整性即可。
-
-2. **4 副本同步是已知技术债**: 修改 SKILL.md 后需要同步到 `plugins/{claude-code,opencode,qoder}/skills/sprint-flow/` 三个副本。这是项目 AGENTS.md 中标注的 anti-pattern（adapter duplication），但目前通过 `scripts/copy-skills.sh` 管理。
-
-3. **进度看板需求的自引用特性**: 本次 sprint 开发的"进度看板"功能，本身就可以在开发过程中使用（dogfooding）。这是一个好的自验证机会。
-
-### Emergent Issues
-
-无。需求范围清晰，实现与预期一致。
+## 改进建议
+- skill-cert CI job 的实际效果需要 skill-cert 工具完善后才能验证（目前 continue-on-error）
+- 考虑将 VERSION-GATE 检查也加入 CI 层（双重保障），而非仅依赖 SKILL.md 流程规则
