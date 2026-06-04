@@ -1,16 +1,15 @@
 const fs = require('fs');
 const path = require('path');
-const os = require('os');
 const crypto = require('crypto');
+const {
+  HOME_DIR,
+  CONFIG_DIR,
+  CONFIG_FILE,
+  TEMPLATE_DIR,
+  GLOBAL_HOOKS_DIR,
+  GLOBAL_ADAPTERS_DIR,
+} = require('./shared-paths.js');
 
-// Cross-platform home directory resolution
-const HOME_DIR = process.env.HOME || process.env.USERPROFILE || os.homedir();
-
-const CONFIG_DIR = path.join(HOME_DIR, '.config', 'xp-gate');
-const CONFIG_FILE = path.join(CONFIG_DIR, 'xp-gate.json');
-const TEMPLATE_DIR = path.join(HOME_DIR, '.config', 'opencode', 'git-hooks-template');
-const GLOBAL_HOOKS_DIR = path.join(CONFIG_DIR, 'hooks');
-const GLOBAL_ADAPTERS_DIR = path.join(CONFIG_DIR, 'adapters');
 const BACKUP_DIR = path.join(CONFIG_DIR, '.uninstall-backup');
 
 /**
