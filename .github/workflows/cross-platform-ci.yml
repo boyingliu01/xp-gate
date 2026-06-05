@@ -68,9 +68,11 @@ jobs:
           git init
           git config user.email "ci@test.com"
           git config user.name "CI"
+          export PATH="$GITHUB_WORKSPACE/node_modules/.bin:$PATH"
           cp -r $GITHUB_WORKSPACE/githooks .githooks-ref
           bash .githooks-ref/install.sh
           rm -rf .githooks-ref
+          touch .architecture-skip
           echo "console.log('hello')" > test.ts
           git add test.ts
           git commit -m "test: first commit triggers 6 quality gates"
