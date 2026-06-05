@@ -33,18 +33,18 @@
 | **适合场景** | Claude Code 原生 skill 的首次验证和迭代优化 |
 | **使用成本** | 免费（消耗 Claude Code token） |
 
-### 方案 B: promptfoo
+### 方案 B: external regression eval tooling
 
 | 项目 | 详情 |
 |------|------|
-| **来源** | 开源社区（已被 OpenAI 收购） |
+| **来源** | 外部 skill-cert 项目统一承载 |
 | **验证维度** | L1 + L2 + L4 |
-| **核心方法** | YAML 声明式测试配置，支持确定性断言 + LLM-as-judge |
-| **开源** | ✅ MIT License |
-| **优点** | CI/CD 友好（可集成到 GitHub Actions）；支持多模型对比；红队测试模块 |
-| **缺点** | 需要自己写测试用例 YAML；不专门针对 skill 文件 |
-| **适合场景** | 回归测试、每周自动检测 skill 退化 |
-| **使用成本** | 免费开源，消耗各模型 API 费用 |
+| **核心方法** | 声明式测试配置，支持确定性断言 + LLM-as-judge |
+| **开源** | 由 skill-cert 依赖栈决定 |
+| **优点** | 与 skill 创建/修改流程绑定；支持多模型对比；可集成安全评测 |
+| **缺点** | 不属于 xp-gate 运行时职责，需要在外部项目维护测试用例 |
+| **适合场景** | skill 创建/修改时的回归测试和退化检测 |
+| **使用成本** | 取决于外部评测工具和模型 API 费用 |
 
 ### 方案 C: LangSmith
 
@@ -98,7 +98,7 @@
 | **适合场景** | 多模型/多 skill 对比 benchmark |
 | **使用成本** | 免费 |
 
-### 方案 G: PromptPressure
+### 方案 G: external drift evaluation
 
 | 项目 | 详情 |
 |------|------|
@@ -184,7 +184,7 @@
 |---------|---------|------|
 | **首次验证新 skill** | A (skill-creator) | 原生集成，with/without 交叉验证最直接 |
 | **检测 skill 被忽略/跳步骤** | L (自定义 checklist) + I (Process Evaluation) | 最直接对应 skill 定义的步骤 |
-| **检测模型更新后的回归** | B (promptfoo) + G (PromptPressure) | CI/CD 集成 + 行为漂移检测 |
+| **检测模型更新后的回归** | external skill-cert project | skill 创建/修改时回归检测 + 行为漂移检测 |
 | **跨模型对比 skill 效果** | F (Calibra) | 专为多模型 benchmark 设计 |
 | **检测幻觉** | E (DeepEval) | 50+ 预置指标含幻觉检测 |
 | **团队级验证管理** | K (Braintrust) | 协作友好 |
@@ -201,17 +201,17 @@
 - **产出**: 3 个 skill 的 evals/evals.json + 交叉验证报告
 - **状态**: ✅ 已完成
 
-### 第二层：回归检测（建议后续配置）
-- **工具**: promptfoo
-- **做法**: 每周自动运行 evals/evals.json，对比基线 benchmark.json
+### 第二层：回归检测（外部 skill-cert）
+- **工具**: external skill-cert project
+- **做法**: skill 创建/修改时运行 evals/evals.json，对比基线 benchmark.json
 - **触发**: skill 修改后、模型更新后
-- **成本**: 低（YAML 配置 + CI 集成）
+- **成本**: 由外部评测工具和模型 API 决定
 
-### 第三层：行为漂移检测（可选）
-- **工具**: PromptPressure
-- **做法**: 模型大版本更新后，运行对抗 prompt 检测 skill 行为是否漂移
-- **触发**: Claude/OpenAI 发布新模型版本时
-- **成本**: 中（需要配置 190 个 prompt）
+### 第三层：行为漂移检测（外部 skill-cert）
+- **工具**: external skill-cert project
+- **做法**: 模型大版本更新后，在外部 skill-cert 项目运行对抗 prompt 检测 skill 行为是否漂移
+- **触发**: 模型发布新版本时
+- **成本**: 由外部评测工具和模型 API 决定
 
 ---
 
@@ -223,4 +223,4 @@
 2. **定义可量化断言**（contains / not_contains / regex）→ 客观评分
 3. **建立基线**（benchmark.json）→ 后续检测回归
 4. **定期重跑**（CI/CD）→ 检测模型更新带来的退化
-5. **行为压力测试**（PromptPressure）→ 检测边界条件下的漂移
+5. **行为压力测试**（external skill-cert project）→ 检测边界条件下的漂移

@@ -70,8 +70,9 @@ jobs:
           git config user.name "CI"
           cp -r $GITHUB_WORKSPACE/githooks .githooks-ref
           bash .githooks-ref/install.sh
+          rm -rf .githooks-ref
           echo "console.log('hello')" > test.ts
-          git add .
+          git add test.ts
           git commit -m "test: first commit triggers 6 quality gates"
         shell: bash
 
@@ -91,10 +92,8 @@ jobs:
       - name: Verify tarball size < 2MB
         working-directory: src/npm-package
         run: |
-          TARBALL=$(npm pack --quiet)
-          SIZE=$(wc -c < "$TARBALL")
+          SIZE=$(npm pack --dry-run --json 2>/dev/null | jq '.[0].size')
           echo "Tarball size: $SIZE bytes"
-          rm -f "$TARBALL"
           if [ "$SIZE" -ge 2097152 ]; then
             echo "FAIL: tarball >= 2MB ($SIZE bytes)"
             exit 1
