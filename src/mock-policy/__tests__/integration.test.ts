@@ -6,7 +6,7 @@
 
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { mkdirSync, writeFileSync, rmSync } from 'fs';
-import { join } from 'path';
+import { dirname, join } from 'path';
 import { tmpdir } from 'os';
 import { readFile } from 'fs/promises';
 import { scanProjectScope } from '../scope-scanner';
@@ -277,7 +277,7 @@ describe('Full pipeline: scanProjectScope → MockDecisionEngine → validateFil
     const testFile = join(tmpDir, testFileRelative);
 
     // Write test file on disk
-    const parentDir = testFile.substring(0, testFile.lastIndexOf('/'));
+    const parentDir = dirname(testFile);
     mkdirSync(parentDir, { recursive: true });
     writeFileSync(testFile, testContent);
 

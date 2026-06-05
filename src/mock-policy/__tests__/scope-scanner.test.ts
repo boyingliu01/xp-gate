@@ -6,7 +6,7 @@
 
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { mkdirSync, writeFileSync, rmSync } from 'fs';
-import { join } from 'path';
+import { join, resolve } from 'path';
 import { tmpdir } from 'os';
 import {
   simpleGlobMatch,
@@ -163,19 +163,19 @@ describe('isExternalImport', () => {
 describe('resolveToRealPath', () => {
   it('replaces @/ prefix with src/', () => {
     const result = resolveToRealPath('@/components/Button', '/project');
-    expect(result).toBe('/project/src/components/Button');
+    expect(result).toBe(resolve('/project', 'src/components/Button'));
   });
 
   it('preserves paths without @/ alias', () => {
     const result = resolveToRealPath('./foo/bar', '/project');
     // resolve normalizes ./ away
-    expect(result).toBe('/project/foo/bar');
+    expect(result).toBe(resolve('/project', 'foo/bar'));
   });
 
   it('resolves absolute paths correctly', () => {
     const result = resolveToRealPath('/absolute/path', '/project');
     // Absolute paths remain absolute (resolve treats them as-is)
-    expect(result).toBe('/absolute/path');
+    expect(result).toBe(resolve('/absolute/path'));
   });
 });
 
@@ -316,7 +316,8 @@ describe('classifyDependency', () => {
 
   it('uses existCache when provided', () => {
     const cache = new Map<string, boolean>();
-    cache.set('/fake/project/src/foo', true);
+    // Cache key must match the resolved path that classifyDependency computes internally
+    cache.set(resolveToRealPath('@/foo', '/fake/project'), true);
 
     const result = classifyDependency('@/foo', baseScope, {
       ...baseOptions,

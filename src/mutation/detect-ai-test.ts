@@ -52,13 +52,15 @@ function countTestLines(content: string): number {
 }
 
 export function detectTestLayer(testFilePath: string): TestLayer {
-  if (testFilePath.includes('.e2e.') || testFilePath.includes('/e2e/') || testFilePath.startsWith('e2e/')) {
+  // Normalize separators for cross-platform matching (Windows uses \)
+  const normalized = testFilePath.replace(/\\/g, '/');
+  if (normalized.includes('.e2e.') || normalized.includes('/e2e/') || normalized.startsWith('e2e/')) {
     return 'e2e';
   }
-  if (testFilePath.includes('.integration.') || testFilePath.includes('/integration/') || testFilePath.startsWith('integration/')) {
+  if (normalized.includes('.integration.') || normalized.includes('/integration/') || normalized.startsWith('integration/')) {
     return 'integration';
   }
-  if (testFilePath.includes('/__tests__/') || testFilePath.includes('.test.') || testFilePath.includes('.spec.')) {
+  if (normalized.includes('/__tests__/') || normalized.includes('.test.') || normalized.includes('.spec.')) {
     return 'unit';
   }
   return 'unknown';

@@ -1,5 +1,5 @@
 import { readFile } from 'fs/promises';
-import { join } from 'path';
+import { isAbsolute, join } from 'path';
 import { loadMockPolicyConfig } from './config';
 import { scanProjectScope } from './scope-scanner';
 import MockDecisionEngine from './mock-decision-engine';
@@ -113,7 +113,7 @@ async function validateFile(
   projectRoot: string,
   severity: 'warning' | 'error',
 ): Promise<MockPolicyViolation[]> {
-  const fullPath = testFile.startsWith('/') ? testFile : join(projectRoot, testFile);
+  const fullPath = isAbsolute(testFile) ? testFile : join(projectRoot, testFile);
   const content = await readFile(fullPath, 'utf-8');
   const layer = detectTestLayer(testFile);
   const imports = collectImports(content);
@@ -150,7 +150,7 @@ export async function runGateM3(
   const allImports: string[] = [];
   for (const testFile of testFiles) {
     try {
-  const fullPath = testFile.startsWith('/') ? testFile : join(projectRoot, testFile);
+      const fullPath = isAbsolute(testFile) ? testFile : join(projectRoot, testFile);
       const content = await readFile(fullPath, 'utf-8');
       allImports.push(...collectImports(content));
     } catch {
