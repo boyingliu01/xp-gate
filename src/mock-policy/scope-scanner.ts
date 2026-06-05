@@ -1,6 +1,6 @@
 import { existsSync } from 'fs';
 import { readFile } from 'fs/promises';
-import { join, resolve } from 'path';
+import { isAbsolute, join, resolve } from 'path';
 import type { ProjectScope, DependencyScope } from './types';
 
 /**
@@ -105,8 +105,8 @@ export function isExternalImport(importPath: string, options: ScanOptions): bool
     return false;
   }
 
-  // Absolute imports starting with / are internal
-  if (importPath.startsWith('/')) {
+  // Absolute imports (Unix /... or Windows C:\...) are internal
+  if (isAbsolute(importPath)) {
     return false;
   }
 
