@@ -28,6 +28,16 @@ describe('init', () => {
     logSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
     warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
     errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+    vi.spyOn(childProcess, 'spawnSync').mockImplementation((cmd, args) => {
+      if (cmd === 'git' && Array.isArray(args) && args[0] === 'clone') {
+        return {
+          status: 1,
+          stdout: Buffer.from(''),
+          stderr: Buffer.from('git clone disabled in test (default stub)'),
+        };
+      }
+      return { status: 0, stdout: Buffer.from(''), stderr: Buffer.from('') };
+    });
   });
 
   afterEach(() => {
@@ -56,7 +66,21 @@ describe('init', () => {
     });
   }
 
+  function stubSpawnGitClone(status = 0, stderr = '') {
+    vi.spyOn(childProcess, 'spawnSync').mockImplementation((cmd, args) => {
+      if (cmd === 'git' && Array.isArray(args) && args[0] === 'clone') {
+        return {
+          status,
+          stdout: Buffer.from(''),
+          stderr: Buffer.from(stderr),
+        };
+      }
+      return { status: 0, stdout: Buffer.from(''), stderr: Buffer.from('') };
+    });
+  }
+
   function mockExecSuccess() {
+    stubSpawnGitClone(1, 'git clone disabled in test');
     execSpy = vi.spyOn(childProcess, 'execSync').mockImplementation((cmd) => {
       if (cmd === 'git rev-parse --git-dir') {
         return path.join(tmpProject, '.git') + '\n';
@@ -69,6 +93,7 @@ describe('init', () => {
   }
 
   function mockExecGitDirOnly() {
+    stubSpawnGitClone(1, 'git clone disabled in test');
     execSpy = vi.spyOn(childProcess, 'execSync').mockImplementation((cmd) => {
       if (cmd === 'git rev-parse --git-dir') {
         return path.join(tmpProject, '.git') + '\n';
@@ -81,6 +106,7 @@ describe('init', () => {
   }
 
   function mockExecFail() {
+    stubSpawnGitClone(1, 'git clone disabled in test');
     execSpy = vi.spyOn(childProcess, 'execSync').mockImplementation(() => {
       throw new Error('Not a git repo');
     });
@@ -103,12 +129,15 @@ describe('init', () => {
   });
 
   it('init([]) with missing superpowers warns Missing dependencies', async () => {
-    // Mock execSync to make auto-install fail immediately
-    vi.spyOn(childProcess, 'execSync').mockImplementation((cmd) => {
-      if (typeof cmd === 'string' && cmd.includes('git clone')) {
-        throw new Error('git clone not available in test');
+    vi.spyOn(childProcess, 'spawnSync').mockImplementation((cmd, args) => {
+      if (cmd === 'git' && Array.isArray(args) && args[0] === 'clone') {
+        return {
+          status: 1,
+          stdout: Buffer.from(''),
+          stderr: Buffer.from('git clone not available in test'),
+        };
       }
-      return '';
+      return { status: 0, stdout: Buffer.from(''), stderr: Buffer.from('') };
     });
     const { init } = require('../init');
     const result = await init([]);
@@ -118,14 +147,16 @@ describe('init', () => {
   });
 
   it('init([]) with versionMismatch warns version detail', async () => {
-    // Mock execSync to make auto-install fail immediately
-    vi.spyOn(childProcess, 'execSync').mockImplementation((cmd) => {
-      if (typeof cmd === 'string' && cmd.includes('git clone')) {
-        throw new Error('git clone not available in test');
+    vi.spyOn(childProcess, 'spawnSync').mockImplementation((cmd, args) => {
+      if (cmd === 'git' && Array.isArray(args) && args[0] === 'clone') {
+        return {
+          status: 1,
+          stdout: Buffer.from(''),
+          stderr: Buffer.from('git clone not available in test'),
+        };
       }
-      return '';
+      return { status: 0, stdout: Buffer.from(''), stderr: Buffer.from('') };
     });
-    // superpowers too old, gstack good
     const sp = path.join(skillsDir(), 'superpowers');
     fs.mkdirSync(sp, { recursive: true });
     fs.writeFileSync(path.join(sp, 'package.json'), JSON.stringify({ version: '0.0.1' }));

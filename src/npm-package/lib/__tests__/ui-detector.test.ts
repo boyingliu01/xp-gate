@@ -1,15 +1,32 @@
 /**
  * @test ui-detector
  * @intent Verify detectUiSprint correctly identifies UI file changes
+ * @covers Issue #155 — getChangedFiles must use spawnSync (array args) to prevent
+ *         shell-meta injection via baseBranch parameter
  */
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { execSync } from 'child_process';
+import { spawnSync } from 'child_process';
 
 vi.mock('child_process', () => ({
-  execSync: vi.fn(),
+  spawnSync: vi.fn(),
+  // Keep execSync as a vi.fn so any unintentional callers fail loudly
+  execSync: vi.fn(() => {
+    throw new Error('execSync must not be used: command injection risk (Issue #155)');
+  }),
 }));
 
-const mockExecSync = vi.mocked(execSync);
+const mockSpawnSync = vi.mocked(spawnSync);
+
+function mockSpawnReturn(stdout: string) {
+  mockSpawnSync.mockReturnValue({
+    pid: 1,
+    stdout: Buffer.from(stdout),
+    stderr: Buffer.from(''),
+    status: 0,
+    signal: null,
+    output: [null, stdout, ''],
+  } as unknown as ReturnType<typeof spawnSync>);
+}
 
 describe('ui-detector', () => {
   beforeEach(() => {
@@ -18,7 +35,7 @@ describe('ui-detector', () => {
 
   describe('detectUiSprint', () => {
     it('should return false for empty diff', async () => {
-      mockExecSync.mockReturnValue('');
+      mockSpawnReturn('');
       const { detectUiSprint } = await import('../ui-detector');
       const result = detectUiSprint();
       expect(result.isUiSprint).toBe(false);
@@ -27,14 +44,14 @@ describe('ui-detector', () => {
     });
 
     it('should return false for pure backend changes', async () => {
-      mockExecSync.mockReturnValue('src/auth.ts\nsrc/db.ts\n');
+      mockSpawnReturn('src/auth.ts\nsrc/db.ts\n');
       const { detectUiSprint } = await import('../ui-detector');
       const result = detectUiSprint('main');
       expect(result.isUiSprint).toBe(false);
     });
 
     it('should return true for template files in view directories', async () => {
-      mockExecSync.mockReturnValue('views/index.njk\n');
+      mockSpawnReturn('views/index.njk\n');
       const { detectUiSprint } = await import('../ui-detector');
       const result = detectUiSprint();
       expect(result.isUiSprint).toBe(true);
@@ -43,7 +60,7 @@ describe('ui-detector', () => {
     });
 
     it('should return true for component files in view directories', async () => {
-      mockExecSync.mockReturnValue('src/components/Button.tsx\n');
+      mockSpawnReturn('src/components/Button.tsx\n');
       const { detectUiSprint } = await import('../ui-detector');
       const result = detectUiSprint();
       expect(result.isUiSprint).toBe(true);
@@ -51,28 +68,28 @@ describe('ui-detector', () => {
     });
 
     it('should return false for component files NOT in view directories', async () => {
-      mockExecSync.mockReturnValue('src/hooks/useAuth.tsx\n');
+      mockSpawnReturn('src/hooks/useAuth.tsx\n');
       const { detectUiSprint } = await import('../ui-detector');
       const result = detectUiSprint();
       expect(result.isUiSprint).toBe(false);
     });
 
     it('should return true for style files in view directories', async () => {
-      mockExecSync.mockReturnValue('views/styles/main.css\n');
+      mockSpawnReturn('views/styles/main.css\n');
       const { detectUiSprint } = await import('../ui-detector');
       const result = detectUiSprint();
       expect(result.isUiSprint).toBe(true);
     });
 
     it('should return false for style files NOT in view directories', async () => {
-      mockExecSync.mockReturnValue('src/index.css\n');
+      mockSpawnReturn('src/index.css\n');
       const { detectUiSprint } = await import('../ui-detector');
       const result = detectUiSprint();
       expect(result.isUiSprint).toBe(false);
     });
 
     it('should return true for mixed changes (backend + UI)', async () => {
-      mockExecSync.mockReturnValue('src/auth.ts\nviews/login.html\n');
+      mockSpawnReturn('src/auth.ts\nviews/login.html\n');
       const { detectUiSprint } = await import('../ui-detector');
       const result = detectUiSprint();
       expect(result.isUiSprint).toBe(true);
@@ -80,7 +97,7 @@ describe('ui-detector', () => {
     });
 
     it('should return true for renamed UI files', async () => {
-      mockExecSync.mockReturnValue('views/a.html → views/b.html\n');
+      mockSpawnReturn('views/a.html → views/b.html\n');
       const { detectUiSprint } = await import('../ui-detector');
       const result = detectUiSprint();
       expect(result.isUiSprint).toBe(true);
@@ -88,24 +105,25 @@ describe('ui-detector', () => {
     });
 
     it('should return false for pure documentation changes', async () => {
-      mockExecSync.mockReturnValue('docs/README.md\n');
+      mockSpawnReturn('docs/README.md\n');
       const { detectUiSprint } = await import('../ui-detector');
       const result = detectUiSprint();
       expect(result.isUiSprint).toBe(false);
     });
 
     it('should use main as default base branch', async () => {
-      mockExecSync.mockReturnValue('');
+      mockSpawnReturn('');
       const { detectUiSprint } = await import('../ui-detector');
       detectUiSprint();
-      expect(mockExecSync).toHaveBeenCalledWith(
-        expect.stringContaining('git diff --name-only main..HEAD'),
+      expect(mockSpawnSync).toHaveBeenCalledWith(
+        'git',
+        ['diff', '--name-only', 'main..HEAD'],
         expect.any(Object)
       );
     });
 
     it('should handle git command failure gracefully', async () => {
-      mockExecSync.mockImplementation(() => {
+      mockSpawnSync.mockImplementation(() => {
         throw new Error('git not available');
       });
       const { detectUiSprint } = await import('../ui-detector');
@@ -113,8 +131,36 @@ describe('ui-detector', () => {
       expect(result.isUiSprint).toBe(false);
     });
 
+    it('should treat non-zero git exit status as failure (Issue #155)', async () => {
+      mockSpawnSync.mockReturnValue({
+        pid: 1,
+        stdout: Buffer.from(''),
+        stderr: Buffer.from('fatal: bad revision'),
+        status: 128,
+        signal: null,
+        output: [null, '', 'fatal: bad revision'],
+      } as unknown as ReturnType<typeof spawnSync>);
+      const { detectUiSprint } = await import('../ui-detector');
+      const result = detectUiSprint('main');
+      expect(result.isUiSprint).toBe(false);
+    });
+
+    it('should not interpret shell metacharacters in baseBranch (Issue #155)', async () => {
+      mockSpawnReturn('');
+      const { getChangedFiles } = await import('../ui-detector');
+      const malicious = 'main; touch /tmp/xp-gate-pwned';
+      getChangedFiles(malicious);
+      expect(mockSpawnSync).toHaveBeenCalledWith(
+        'git',
+        ['diff', '--name-only', `${malicious}..HEAD`],
+        expect.objectContaining({ shell: false })
+      );
+      const callArgs = mockSpawnSync.mock.calls[0];
+      expect(Array.isArray(callArgs[1])).toBe(true);
+    });
+
     it('should handle multiple UI files across different types', async () => {
-      mockExecSync.mockReturnValue('views/index.njk\nsrc/components/Button.tsx\nsrc/auth.ts\n');
+      mockSpawnReturn('views/index.njk\nsrc/components/Button.tsx\nsrc/auth.ts\n');
       const { detectUiSprint } = await import('../ui-detector');
       const result = detectUiSprint();
       expect(result.isUiSprint).toBe(true);
@@ -124,21 +170,21 @@ describe('ui-detector', () => {
 
   describe('getChangedFiles', () => {
     it('parses git diff output into file array', async () => {
-      mockExecSync.mockReturnValue('src/a.ts\nsrc/b.ts\n');
+      mockSpawnReturn('src/a.ts\nsrc/b.ts\n');
       const { getChangedFiles } = await import('../ui-detector');
       const files = getChangedFiles('main');
       expect(files).toEqual(['src/a.ts', 'src/b.ts']);
     });
 
     it('returns empty array for empty diff', async () => {
-      mockExecSync.mockReturnValue('');
+      mockSpawnReturn('');
       const { getChangedFiles } = await import('../ui-detector');
       const files = getChangedFiles('main');
       expect(files).toEqual([]);
     });
 
     it('filters out empty lines', async () => {
-      mockExecSync.mockReturnValue('src/a.ts\n\nsrc/b.ts\n');
+      mockSpawnReturn('src/a.ts\n\nsrc/b.ts\n');
       const { getChangedFiles } = await import('../ui-detector');
       const files = getChangedFiles('main');
       expect(files).toEqual(['src/a.ts', 'src/b.ts']);
