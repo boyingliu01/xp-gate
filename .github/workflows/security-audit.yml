@@ -40,7 +40,7 @@ jobs:
           echo "  .env gitignored: $(grep -q '^\.env' .gitignore && echo 'YES' || echo 'NO')"
           echo ""
           echo "Phase 7: LLM & AI Security"
-          echo "  (LLM/AI security evals migrated to external skill-cert project; see issue #140)"
+          echo "  (out of scope for xp-gate; see issue #140)"
           echo ""
           echo "Phase 8: Skill Supply Chain"
           echo "  Local skills: $(ls .claude/skills/ 2>/dev/null | wc -l || echo 0)"

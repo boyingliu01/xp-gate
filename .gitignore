@@ -56,6 +56,13 @@ htmlcov/
 
 # XP-Gate quality status (per-branch, local-only — not shared across devs)
 .xp-gate/quality-status/
+.xp-gate/reports/
+.xpgate-review/
+
+# Per-commit/branch report artifacts (local-only transient output)
+.test-alignment-report.json
+.warnings-baseline.json
+.audit-log.jsonl
 
 # Mutation testing
 .mutation-baseline.json
@@ -88,6 +95,9 @@ plugins/**/*.lock
 plugins/**/*.js.map
 plugins/opencode/dist/
 plugins/opencode/node_modules/
+plugins/opencode/package-lock.json
+
+# Gate result artifacts (per-run, transient)
 .ui-gate-result.json
-.audit-log.jsonl
 .code-walkthrough-result.json
+architecture-report.sarif.json
