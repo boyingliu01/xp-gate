@@ -78,6 +78,63 @@ export function getAdapterForFile(filePath: string): Adapter | null {
   return new AdapterClass(filePath);
 }
 
+function resolveAdapter(
+  file: string,
+  adapterOrFactory: Adapter | AdapterFactory,
+): Adapter | null {
+  if (typeof adapterOrFactory === 'function') {
+    return adapterOrFactory(file);
+  }
+  return adapterOrFactory;
+}
+
+function computeSummary(
+  violations: Violation[],
+  fileResults: Record<string, FileResult>,
+  rulesToRun: Rule[],
+): AnalysisSummary {
+  let errorCount = 0;
+  let warningCount = 0;
+  let infoCount = 0;
+  for (const v of violations) {
+    if (v.severity === 'error') errorCount++;
+    else if (v.severity === 'warning') warningCount++;
+    else infoCount++;
+  }
+  return {
+    totalViolations: violations.length,
+    errorCount,
+    warningCount,
+    infoCount,
+    filesChecked: Object.keys(fileResults).length,
+    rulesRun: rulesToRun.length,
+  };
+}
+
+function runRuleOnFile(
+  file: string,
+  rule: Rule,
+  adapter: Adapter,
+  violations: Violation[],
+  fileResult: FileResult,
+  ruleResult: RuleResult,
+  errors: string[],
+): void {
+  ruleResult.filesChecked++;
+  try {
+    const ruleViolations = rule.check(file, adapter);
+    if (ruleViolations.length > 0) {
+      violations.push(...ruleViolations);
+      fileResult.violations.push(...ruleViolations);
+      fileResult.ruleIds.push(rule.id);
+      ruleResult.violationCount += ruleViolations.length;
+    }
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    errors.push(`Rule ${rule.id} failed on ${file}: ${msg}`);
+  }
+}
+
 export async function analyze(
   files: string[],
   rules: Rule[],
@@ -86,81 +143,37 @@ export async function analyze(
 ): Promise<AnalysisResult> {
   const startTime = Date.now();
   const errors: string[] = [];
-  
   const violations: Violation[] = [];
   const fileResults: Record<string, FileResult> = {};
   const ruleResults: Record<string, RuleResult> = {};
-  
+
   const enabledRules = options?.enabledRules ?? rules.map(r => r.id);
   const rulesToRun = rules.filter(r => enabledRules.includes(r.id));
-  
+
   for (const rule of rulesToRun) {
-    ruleResults[rule.id] = {
-      violationCount: 0,
-      filesChecked: 0
-    };
+    ruleResults[rule.id] = { violationCount: 0, filesChecked: 0 };
   }
-  
+
   for (const file of files) {
-    let adapter: Adapter | null;
-    
-    if (typeof adapterOrFactory === 'function') {
-      adapter = adapterOrFactory(file);
-    } else {
-      adapter = adapterOrFactory;
-    }
-    
-    if (!adapter) {
-      continue;
-    }
-    
-    const language = adapter.detectLanguage();
-    
-    if (language === 'unknown') {
-      continue;
-    }
-    
-    fileResults[file] = {
-      violations: [],
-      ruleIds: []
-    };
-    
+    const adapter = resolveAdapter(file, adapterOrFactory);
+    if (!adapter || adapter.detectLanguage() === 'unknown') continue;
+
+    const fileResult: FileResult = { violations: [], ruleIds: [] };
+    fileResults[file] = fileResult;
+
     for (const rule of rulesToRun) {
-      ruleResults[rule.id].filesChecked++;
-      
-      try {
-        const ruleViolations = rule.check(file, adapter);
-        
-        if (ruleViolations.length > 0) {
-          violations.push(...ruleViolations);
-          fileResults[file].violations.push(...ruleViolations);
-          fileResults[file].ruleIds.push(rule.id);
-          ruleResults[rule.id].violationCount += ruleViolations.length;
-        }
-      } catch (err) {
-        const errorMsg = err instanceof Error ? err.message : String(err);
-        errors.push(`Rule ${rule.id} failed on ${file}: ${errorMsg}`);
-      }
+      runRuleOnFile(file, rule, adapter, violations, fileResult, ruleResults[rule.id], errors);
     }
   }
-  
-  const endTime = Date.now();
-  
-  const summary: AnalysisSummary = {
-    totalViolations: violations.length,
-    errorCount: violations.filter(v => v.severity === 'error').length,
-    warningCount: violations.filter(v => v.severity === 'warning').length,
-    infoCount: violations.filter(v => v.severity === 'info').length,
-    filesChecked: Object.keys(fileResults).length,
-    rulesRun: rulesToRun.length
-  };
-  
+
+  const summary = computeSummary(violations, fileResults, rulesToRun);
+
   return {
     violations,
     summary,
     fileResults,
     ruleResults,
-    executionTimeMs: endTime - startTime,
-    errors
+    executionTimeMs: Date.now() - startTime,
+    errors,
   };
 }

@@ -20,32 +20,7 @@ import type { MockPolicyConfig } from '../types';
 // Must match the implementation in gate-m3.ts to test the same logic.
 // ---------------------------------------------------------------------------
 
-function collectImports(testContent: string): string[] {
-  const importRegex = /import\s*(?:type\s*)?(?:\{[^}]*\}|\*\s+as\s+\w+|\w+)?\s*(?:from\s*)?['"]([^'"]+)['"]/g;
-  const dynamicImportRegex = /import\s*\(\s*['"]([^'"]+)['"]\s*\)/g;
-  const imports: string[] = [];
-  let match: RegExpExecArray | null;
-  while ((match = importRegex.exec(testContent)) !== null) {
-    imports.push(match[1]);
-  }
-  while ((match = dynamicImportRegex.exec(testContent)) !== null) {
-    imports.push(match[1]);
-  }
-  return [...new Set(imports)];
-}
-
-function detectMockUsage(testContent: string, importPath: string): 'mock' | 'real' {
-  const escaped = importPath.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-  const mockPatterns = [
-    new RegExp(`(?:vi|jest)\\.(?:do)?mock\\(['"]${escaped}['"]`),
-  ];
-  return mockPatterns.some(p => p.test(testContent)) ? 'mock' : 'real';
-}
-
-async function validateFile(
-  testFile: string,
-  engine: MockDecisionEngine,
-): Promise<Array<{
+interface ImportViolation {
   file: string;
   line: number;
   dependency: string;
@@ -53,19 +28,16 @@ async function validateFile(
   expectedStrategy: string;
   reason: string;
   severity: string;
-}>> {
+}
+
+async function validateFile(
+  testFile: string,
+  engine: MockDecisionEngine,
+): Promise<ImportViolation[]> {
   const content = await readFile(testFile, 'utf-8');
   const layer = detectTestLayer(testFile);
   const imports = collectImports(content);
-  const violations: Array<{
-    file: string;
-    line: number;
-    dependency: string;
-    actualStrategy: string;
-    expectedStrategy: string;
-    reason: string;
-    severity: string;
-  }> = [];
+  const violations: ImportViolation[] = [];
 
   for (const importPath of imports) {
     const decision = engine.decide(importPath, layer);
@@ -100,6 +72,22 @@ async function validateFile(
   }
 
   return violations;
+}
+
+function collectImports(testContent: string): string[] {
+  const importRegex = /import\s*(?:type\s*)?(?:\{[^}]*\}|\*\s+as\s+\w+|\w+)?\s*(?:from\s*)?['"]([^'"]+)['"]/g;
+  const dynamicImportRegex = /import\s*\(\s*['"]([^'"]+)['"]\s*\)/g;
+  const staticImports = [...testContent.matchAll(importRegex)].map(m => m[1]);
+  const dynamicImports = [...testContent.matchAll(dynamicImportRegex)].map(m => m[1]);
+  return [...new Set([...staticImports, ...dynamicImports])];
+}
+
+function detectMockUsage(testContent: string, importPath: string): 'mock' | 'real' {
+  const escaped = importPath.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  const mockPatterns = [
+    new RegExp(`(?:vi|jest)\\.(?:do)?mock\\(['"]${escaped}['"]`),
+  ];
+  return mockPatterns.some(p => p.test(testContent)) ? 'mock' : 'real';
 }
 
 // ---------------------------------------------------------------------------
