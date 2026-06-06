@@ -116,6 +116,17 @@ jobs:
           });
           CFG
 
+          # Test for status.ts (ensures coverage includes both source files)
+          cat > __tests__/status.test.ts << 'STATUS_TEST'
+          import { describe, it, expect } from 'vitest';
+          import { httpStatus } from '../status';
+          describe('httpStatus', () => {
+            it('returns OK for 200', () => { expect(httpStatus(200)).toBe('OK'); });
+            it('returns Not Found for 404', () => { expect(httpStatus(404)).toBe('Not Found'); });
+            it('returns Unknown for unmapped codes', () => { expect(httpStatus(999)).toBe('Unknown'); });
+          });
+          STATUS_TEST
+
           # Install vitest + typescript locally for Gate 5 coverage + Gate 1 tsc check
           # vitest 3.x supports Node 18; vitest 4.x requires Node 20+ (uses node:inspector/promises)
           npm init -y > /dev/null 2>&1
