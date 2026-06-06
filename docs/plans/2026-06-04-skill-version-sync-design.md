@@ -17,7 +17,6 @@ xp-gate 由两大组件构成：
 对 skill 进行调优时（仅修改 .md 文件），开发者往往不会 bump VERSION 文件。这导致：
 1. npm publish 不触发 → 用户安装不到最新的 skill 更新
 2. 版本号与实际发布内容不一致 → 版本混乱
-3. Skill 变更缺少质量验证 → 没有 skill-cert 评估来验证 skill 质量
 
 ## 设计方案
 
@@ -57,40 +56,7 @@ MICRO 仅在 sprint 内部迭代时使用，每次 sprint SHIP 后 MICRO 重置�
   - 此规则与变更类型无关 — 纯 skill 变更也必须 bump PATCH
 ```
 
-#### 2. `.github/workflows/quality-gates.yml` — Skill 变更触发 skill-cert
-
-在 quality-gates 工作流中新增一个 job，当 PR 包含 skill 文件变更时自动触发 skill-cert 评估：
-
-```yaml
-skill-cert-check:
-  if: contains(github.event.pull_request.changed_files, 'skills/')
-  runs-on: ubuntu-latest
-  steps:
-    - uses: actions/checkout@v4
-    - name: Setup Python
-      uses: actions/setup-python@v5
-      with:
-        python-version: '3.12'
-    - name: Install skill-cert
-      run: |
-        cd skill-cert
-        python -m venv venv
-        source venv/bin/activate
-        pip install -e .
-    - name: Run skill-cert on changed skills
-      run: |
-        # 检测变更的 skill 目录并逐一评估
-        CHANGED_SKILLS=$(git diff --name-only origin/main...HEAD -- skills/ | \
-          grep -oP 'skills/\K[^/]+' | sort -u)
-        for skill in $CHANGED_SKILLS; do
-          echo "=== skill-cert: $skill ==="
-          cd skill-cert && source venv/bin/activate
-          python -m skill_cert evaluate --skill "../skills/$skill" --output json
-          cd ..
-        done
-```
-
-#### 3. 插件副本同步
+#### 2. 插件副本同步
 
 通过 `scripts/copy-skills.sh` 同步更新后的 SKILL.md 到 3 个插件目录（claude-code, opencode, qoder）。
 
@@ -106,7 +72,6 @@ skill-cert-check:
 | 风险 | 影响 | 缓解措施 |
 |------|------|---------|
 | PATCH 频繁增长（每个 sprint +1） | 低 | 符合 semver 规范，不影响用户 |
-| skill-cert 未安装时 CI 失败 | 中 | CI 中使用 `continue-on-error` 或条件跳过 |
 | 开发者忘记 bump VERSION | 中 | Phase 6 VERSION-GATE 强制 + CI 检测 |
 
 ### 向后兼容

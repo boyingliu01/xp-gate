@@ -50,8 +50,7 @@ export class CppAdapter extends BaseAdapter implements Adapter {
   }
 
   override extractCodeBlock(startPos: number, maxFallback: number = 200): string {
-    let braceCount = 0;
-    let inBlock = false;
+    const state = { inBlock: false, braceCount: 0 };
     let endPos = startPos;
     let inString = false;
     let stringChar = '';
@@ -99,17 +98,10 @@ export class CppAdapter extends BaseAdapter implements Adapter {
       }
 
       if (!inString && !inComment) {
-        if (char === '{' && !inBlock) {
-          inBlock = true;
-          braceCount = 1;
-        } else if (char === '{' && inBlock) {
-          braceCount++;
-        } else if (char === '}' && inBlock) {
-          braceCount--;
-          if (braceCount === 0) {
-            endPos = i + 1;
-            break;
-          }
+        const result = this.advanceBraceTracker(char, i, state);
+        if (result.closed) {
+          endPos = result.endPos;
+          break;
         }
       }
     }

@@ -7,6 +7,23 @@ All notable changes to this project will be documented in this file.
 ### Added
 - **`npm-publish.yml` 自动同步 GitHub Releases** — 在 npm publish 步骤之后追加 git tag + GitHub Release 自动创建（基于 CHANGELOG.md 提取对应版本的 release notes），并把 `permissions.contents` 提升至 `write`、`fetch-depth: 0`。tag/release 创建均为幂等（已存在则更新或跳过）。修复 GitHub Releases 长期停留在 v0.3.1.0 的问题。
 
+## [0.7.2] - 2026-06-06
+
+### Removed
+- **Issue #140 — skill evaluation/certification artifacts** — 彻底清理 xp-gate 中所有与 skill 评估/验证/认证无关的历史残留内容：
+  - 删除 `docs/skill-validation/` 完整目录（validation framework、methodology、summary、eval-cases、promptpressure）
+  - 删除 `docs/skill-validation-framework.md` 和 `docs/skill-validation-methodology-landscape.md`
+  - 删除 `docs/plans/*skill-cert*` 3 份设计文档
+  - 删除 `docs/fusion/matt-pocock-skills-vs-xgate-analysis.md`
+  - 删除 `skills/*/evals/` 和 `skills/*/evolution-*` 共 8 个源文件 + npm-package 镜像副本中 6 个对应文件
+  - 删除 `.github/workflows/skill-cert-eval.yml` 独立 workflow
+  - 从 `.github/workflows/quality-gates.yml` 移除 `skill-cert-check` job 及相关引用
+  - 清理 `AGENTS.md`、`CAPABILITIES.md`、`docs/AGENTS.md` 中所有 skill-cert 耦合描述
+- **Root 目录清理**：
+  - 删除残留 `architecture-report.sarif.json`
+  - 移动 `specification-fix-issues.yaml` → `docs/plans/`
+  - 更新 `.gitignore` 覆盖 transient 报告文件
+
 ## [0.7.1] - 2026-06-06
 
 ### Fixed

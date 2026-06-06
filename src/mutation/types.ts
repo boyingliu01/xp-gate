@@ -30,30 +30,7 @@ export interface GateMResult {
   errors: string[];
 }
 
-export interface StrykerFileReport {
-  mutationScore: number;
-  nrOfMutants: number;
-  nrOfKilledMutants: number;
-  nrOfSurvivedMutants: number;
-}
-
-export interface StrykerReport {
-  mutationScore: number;
-  nrOfMutants: number;
-  nrOfKilledMutants: number;
-  nrOfSurvivedMutants: number;
-  files?: Record<string, StrykerFileReport>;
-}
-
 export type TestLayer = 'unit' | 'integration' | 'e2e' | 'unknown';
-
-export interface MockDensityInfo {
-  density: number;
-  mockCount: number;
-  totalTestLines: number;
-  layer: TestLayer;
-  pendingMocks: number;
-}
 
 export interface AITestDetectionResult {
   isAiGenerated: boolean;
@@ -91,4 +68,3 @@ export interface ScoreEvaluation {
   passed: boolean;
   isRegression: boolean;
 }
-// test

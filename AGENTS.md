@@ -49,7 +49,7 @@ XP-Gate — 6质量门禁（合并自原版9个）+ AI多专家评审的自动�
 │   ├── sync-version.sh  # VERSION → 4 package.json files
 │   └── test-plugins.sh  # 28 plugin integration tests
 ├── dashboard/          # Quality web dashboard (serve.js, dashboard.js)
-├── .github/workflows/  # 7 CI pipelines: quality-gates, npm-publish, cross-platform-ci, sonarqube, security-audit, mutation-test, skill-cert-eval
+├── .github/workflows/  # 6 CI pipelines: quality-gates, npm-publish, cross-platform-ci, sonarqube, security-audit, mutation-test
 ├── specification.yaml  # Req (auto-generated from APPROVED design docs)
 ├── architecture.yaml   # Arch rules (ARCH-001 to ARCH-014)
 ├── VERSION             # Single source of truth (MAJOR.MINOR.PATCH.MICRO format)
@@ -107,7 +107,7 @@ XP-Gate — 6质量门禁（合并自原版9个）+ AI多专家评审的自动�
 - VERSION file: single source of truth (MAJOR.MINOR.PATCH.MICRO), sync-version.sh propagates to 4 package.json files
 - Delphi review: ≥91% consensus, 3 experts from ≥2 different providers, domestic models only
 - ralph-loop: Phase 2 BUILD default mode, REQ-level iteration, saves 40-67% tokens vs parallel
-- Skill validation/security eval infrastructure lives in external skill-cert project; xp-gate only distributes/invokes skills
+- xp-gate scope is strictly skill packaging, install/update/uninstall, distribution, plugin bundling, and runtime invocation. It does NOT own skill validation, evaluation, or certification — those concerns belong to separate external tooling and are intentionally out of scope here.
 
 ## ANTI-PATTERNS (THIS PROJECT)
 - Do NOT bypass quality gates via `--no-verify`
@@ -119,7 +119,7 @@ XP-Gate — 6质量门禁（合并自原版9个）+ AI多专家评审的自动�
 - Do NOT leave empty catch blocks
 - Do NOT skip quality gates via flags
 - Do NOT modify frozen tests in Phase 2
-- Do NOT use skill-cert on main branch without worktree isolation
+- Do NOT re-introduce skill validation/evaluation/certification artifacts (evals/, evolution-*, validation framework docs, eval workflows) — out of scope per issue #140
 - Do NOT duplicate adapter files between githooks/adapters/ and src/npm-package/adapters/ (known tech debt)
 - Do NOT skip delphi-review before coding — HARD-GATE blocks implementation
 - Do NOT use foreign models (Anthropic/OpenAI/Google) in Delphi review
@@ -177,8 +177,7 @@ xp-gate migrate             # Clean up v0.4.x残留 (GitHub Packages → npm)
 ```
 
 ## NOTES
-- skill-cert/ is an external Python subproject (separate install, own pyproject.toml + venv)
-- Skill validation/security eval directories no longer exist in xp-gate — use external skill-cert project for creation/update-time skill evaluation
+- Skill validation/evaluation/certification is out of scope for xp-gate (see issue #140). The repo only distributes and invokes skills.
 - .worktrees/ contains sprint and windows-compat worktrees
 - coverage/ directory contains vitest HTML reports (not committed)
 - dashboard/ contains static web dashboard files

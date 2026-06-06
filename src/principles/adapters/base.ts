@@ -76,25 +76,42 @@ export abstract class BaseAdapter implements Adapter {
     return code.substring(0, Math.min(maxFallback, code.length));
   }
 
+  /**
+   * Advance brace tracker by one character. Returns updated state and signals when
+   * a balanced block closes so callers can break out of their scan loop.
+   */
+  protected advanceBraceTracker(
+    char: string,
+    index: number,
+    state: { inBlock: boolean; braceCount: number },
+  ): { closed: boolean; endPos: number } {
+    if (char === '{' && !state.inBlock) {
+      state.inBlock = true;
+      state.braceCount = 1;
+      return { closed: false, endPos: index };
+    }
+    if (char === '{' && state.inBlock) {
+      state.braceCount += 1;
+      return { closed: false, endPos: index };
+    }
+    if (char === '}' && state.inBlock) {
+      state.braceCount -= 1;
+      if (state.braceCount === 0) {
+        return { closed: true, endPos: index + 1 };
+      }
+    }
+    return { closed: false, endPos: index };
+  }
+
   protected extractCodeBlock(startPos: number, maxFallback: number = 100): string {
-    let braceCount = 0;
-    let inBlock = false;
+    const state = { inBlock: false, braceCount: 0 };
     let endPos = startPos;
 
     for (let i = startPos; i < this.fileContent.length; i++) {
-      const char = this.fileContent[i];
-
-      if (char === '{' && !inBlock) {
-        inBlock = true;
-        braceCount = 1;
-      } else if (char === '{' && inBlock) {
-        braceCount++;
-      } else if (char === '}' && inBlock) {
-        braceCount--;
-        if (braceCount === 0) {
-          endPos = i + 1;
-          break;
-        }
+      const result = this.advanceBraceTracker(this.fileContent[i], i, state);
+      if (result.closed) {
+        endPos = result.endPos;
+        break;
       }
     }
 
