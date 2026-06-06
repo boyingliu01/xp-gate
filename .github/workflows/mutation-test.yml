@@ -29,7 +29,28 @@ jobs:
           node-version: '20'
           cache: 'npm'
       - run: npm ci
-      - run: npx stryker run
+      - name: Run mutation tests
+        id: mutation
+        run: |
+          npx stryker run &
+          STRYKER_PID=$!
+
+          # Watchdog: warn when approaching 45-minute CI timeout
+          WARNED=0
+          while kill -0 $STRYKER_PID 2>/dev/null; do
+            sleep 60
+            ELAPSED=$((SECONDS / 60))
+            if [ "$ELAPSED" -ge 35 ] && [ "$WARNED" -eq 0 ]; then
+              echo "::warning::Mutation testing has run ${ELAPSED} min — approaching 45 min CI timeout. Consider increasing timeout or optimizing slow tests."
+              WARNED=1
+            fi
+          done
+
+          wait $STRYKER_PID
+          exit_code=$?
+          echo "duration_seconds=$SECONDS" >> "$GITHUB_OUTPUT"
+          exit $exit_code
+
       - name: Upload Mutation Report
         if: always()
         uses: actions/upload-artifact@v4
@@ -37,3 +58,38 @@ jobs:
           name: mutation-report
           path: reports/mutation/
           retention-days: 30
+
+      - name: Comment on timeout failure
+        if: failure() && steps.mutation.outputs.duration_seconds != '' && steps.mutation.outputs.duration_seconds >= 2400
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const duration = parseInt(process.env.DURATION || '0', 10);
+            const minutes = Math.round(duration / 60);
+            const body = [
+              '⏰ **Mutation testing timed out**',
+              '',
+              `Duration: ${minutes} minutes (limit: 45 min)`,
+              '',
+              '**Likely causes:**',
+              '- Recent changes to `src/core/` or `src/principles/` increased test count',
+              '- New tests have long runtimes (>30s each)',
+              '- Stryker config timeout needs tuning',
+              '',
+              '**Suggested actions:**',
+              '- Run `npm run test:mutation` locally to reproduce',
+              '- Consider splitting critical-paths into separate matrix jobs',
+              '- See [#150](../../issues/150) for context on this watchdog',
+            ].join('\n');
+
+            github.rest.issues.createComment({
+              issue_number: context.issue.number,
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              body: body,
+            }).catch(() => {
+              // Not a PR (push event) — skip comment
+              console.log('Not a PR context, skipping comment');
+            });
+        env:
+          DURATION: ${{ steps.mutation.outputs.duration_seconds }}
