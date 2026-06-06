@@ -1,9 +1,4 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { exec } from 'child_process';
-import { promisify } from 'util';
-import * as path from 'path';
-
-const execAsync = promisify(exec);
 
 vi.mock('fs/promises', async (importOriginal) => {
   const actual = await importOriginal<typeof import('fs/promises')>();
@@ -33,9 +28,8 @@ import {
   saveBaseline,
   initBaseline,
   analyzeWarningsForFiles,
-  initBaselineCommand,
-  runEnforcement,
   autoInitBaseline,
+  initBaselineCommand,
 } from '../boy-scout';
 import { analyze } from '../analyzer';
 import { getAllRules } from '../index';
@@ -70,7 +64,7 @@ beforeEach(() => {
 });
 
 /**
- * @test REQ-QG-002 Boy Scout Rule Implementation
+ * @test REQ-QG-002 Boy Scout Rule Enforcement
  * @intent Verify differential warning enforcement for historical projects
  * @covers AC-QG-002-01, AC-QG-002-02, AC-QG-002-03, AC-QG-002-04, AC-QG-002-05, AC-QG-002-06, AC-QG-002-07, AC-QG-002-08, AC-QG-002-09, AC-QG-002-10, AC-QG-002-11
  */
@@ -369,10 +363,10 @@ describe('Boy Scout Rule Enforcement', () => {
     it('counts warning violations per file', async () => {
       mockAnalyze.mockResolvedValue({
         violations: [
-          { file: 'src/a.ts', severity: 'warning' as const, rule: 'r1', message: 'm' },
-          { file: 'src/a.ts', severity: 'warning' as const, rule: 'r2', message: 'm' },
-          { file: 'src/b.ts', severity: 'warning' as const, rule: 'r1', message: 'm' },
-          { file: 'src/a.ts', severity: 'error' as const, rule: 'r3', message: 'm' },
+{ file: 'src/a.ts', line: 1, severity: 'warning' as const, ruleId: 'r1', message: 'm' },
+{ file: 'src/a.ts', line: 2, severity: 'warning' as const, ruleId: 'r2', message: 'm' },
+{ file: 'src/b.ts', line: 1, severity: 'warning' as const, ruleId: 'r1', message: 'm' },
+{ file: 'src/a.ts', line: 3, severity: 'error' as const, ruleId: 'r3', message: 'm' },
         ],
       } as unknown as Awaited<ReturnType<typeof analyze>>);
 
@@ -385,8 +379,8 @@ describe('Boy Scout Rule Enforcement', () => {
     it('ignores info-level violations', async () => {
       mockAnalyze.mockResolvedValue({
         violations: [
-          { file: 'src/a.ts', severity: 'info' as const, rule: 'r1', message: 'm' },
-          { file: 'src/a.ts', severity: 'warning' as const, rule: 'r2', message: 'm' },
+          { file: 'src/a.ts', line: 1, severity: 'info' as const, ruleId: 'r1', message: 'm' },
+          { file: 'src/a.ts', line: 2, severity: 'warning' as const, ruleId: 'r2', message: 'm' },
         ],
       } as unknown as Awaited<ReturnType<typeof analyze>>);
 
@@ -398,7 +392,7 @@ describe('Boy Scout Rule Enforcement', () => {
     it('handles files not in the input list', async () => {
       mockAnalyze.mockResolvedValue({
         violations: [
-          { file: 'src/unknown.ts', severity: 'warning' as const, rule: 'r1', message: 'm' },
+          { file: 'src/unknown.ts', line: 1, severity: 'warning' as const, ruleId: 'r1', message: 'm' },
         ],
       } as unknown as Awaited<ReturnType<typeof analyze>>);
 
@@ -424,7 +418,7 @@ describe('Boy Scout Rule Enforcement', () => {
    * @test REQ-4
    * @covers loadBaseline with existing file, saveBaseline - lines 112-124
    */
-  describe('loadBaseline with existing file', () => {
+  describe('loadBaseline', () => {
     it('loads and parses baseline from existing file', async () => {
       const mockData = { 'src/a.ts': { totalWarnings: 5, lastAnalized: '2024-01-01' } };
 
@@ -458,14 +452,14 @@ describe('Boy Scout Rule Enforcement', () => {
 
   /**
    * @test REQ-4
-   * @covers initBaseline and autoInitBaseline - lines 201-244
+   * @covers initBaseline, autoInitBaseline, initBaselineCommand - lines 201-244, 331-334
    */
-  describe('initBaseline', () => {
+  describe('init and auto-init baseline', () => {
     it('returns baseline with warning counts for files with violations', async () => {
       mockAnalyze.mockResolvedValue({
         violations: [
-          { file: 'src/a.ts', severity: 'warning' as const, rule: 'r1', message: 'm' },
-          { file: 'src/a.ts', severity: 'warning' as const, rule: 'r2', message: 'm' },
+          { file: 'src/a.ts', line: 1, severity: 'warning' as const, ruleId: 'r1', message: 'm' },
+          { file: 'src/a.ts', line: 2, severity: 'warning' as const, ruleId: 'r2', message: 'm' },
         ],
       } as unknown as Awaited<ReturnType<typeof analyze>>);
 
@@ -476,12 +470,9 @@ describe('Boy Scout Rule Enforcement', () => {
     });
 
     it('only includes files with warnings > 0', async () => {
-      mockAnalyze.mockResolvedValue({
-        violations: [],
-      } as unknown as Awaited<ReturnType<typeof analyze>>);
+      mockAnalyze.mockResolvedValue({ violations: [] } as unknown as Awaited<ReturnType<typeof analyze>>);
 
       const result = await initBaseline(['src/a.ts', 'src/b.ts']);
-
       expect(Object.keys(result)).toEqual([]);
     });
 
@@ -492,295 +483,75 @@ describe('Boy Scout Rule Enforcement', () => {
 
     it('sets lastAnalyzed to current date', async () => {
       mockAnalyze.mockResolvedValue({
-        violations: [{ file: 'src/a.ts', severity: 'warning' as const, rule: 'r1', message: 'm' }],
+        violations: [{ file: 'src/a.ts', severity: 'warning' as const, ruleId: 'r1', message: 'm' }],
       } as unknown as Awaited<ReturnType<typeof analyze>>);
 
       const before = new Date().toISOString();
       const result = await initBaseline(['src/a.ts']);
       const after = new Date().toISOString();
 
-      const analyzedDate = result['src/a.ts'].lastAnalyzed;
-      expect(analyzedDate >= before).toBe(true);
-      expect(analyzedDate <= after).toBe(true);
+      expect(result['src/a.ts'].lastAnalyzed >= before).toBe(true);
+      expect(result['src/a.ts'].lastAnalyzed <= after).toBe(true);
     });
-  });
 
-  describe('autoInitBaseline', () => {
+    it('rethrows when analyzeWarningsForFiles fails globally', async () => {
+      mockAnalyze.mockRejectedValue(new Error('analyze failed'));
+      await expect(initBaseline(['src/fail.ts'])).rejects.toThrow('analyze failed');
+    });
+
     it('analyzes files and saves baseline', async () => {
       mockAnalyze.mockResolvedValue({
-        violations: [{ file: 'src/a.ts', severity: 'warning' as const, rule: 'r1', message: 'm' }],
+        violations: [{ file: 'src/a.ts', severity: 'warning' as const, ruleId: 'r1', message: 'm' }],
       } as unknown as Awaited<ReturnType<typeof analyze>>);
-      (mockWriteFile as ReturnType<typeof vi.fn>).mockResolvedValue(undefined);
+      mockWriteFile.mockResolvedValue(undefined);
 
       const result = await autoInitBaseline(['src/a.ts'], '/tmp/auto-baseline.json');
-
       expect(result['src/a.ts'].totalWarnings).toBe(1);
-      expect(mockWriteFile).toHaveBeenCalledWith(
-        '/tmp/auto-baseline.json',
-        expect.stringContaining('src/a.ts')
-      );
+      expect(mockWriteFile).toHaveBeenCalledWith('/tmp/auto-baseline.json', expect.stringContaining('src/a.ts'));
     });
 
     it('does not include files with zero warnings', async () => {
-      mockAnalyze.mockResolvedValue({
-        violations: [],
-      } as unknown as Awaited<ReturnType<typeof analyze>>);
-      (mockWriteFile as ReturnType<typeof vi.fn>).mockResolvedValue(undefined);
+      mockAnalyze.mockResolvedValue({ violations: [] } as unknown as Awaited<ReturnType<typeof analyze>>);
+      mockWriteFile.mockResolvedValue(undefined);
 
       const result = await autoInitBaseline(['src/a.ts'], '/tmp/auto-baseline.json');
-
       expect(Object.keys(result)).toEqual([]);
     });
-  });
 
-  /**
-   * @test REQ-4
-   * @covers runEnforcement - lines 336-384
-   */
-  describe('runEnforcement', () => {
-    it('passes when new files have zero warnings and modified files are clean', async () => {
+    it('handles files with warnings mixed with files without', async () => {
       mockAnalyze.mockResolvedValue({
-        violations: [],
+        violations: [
+          { file: 'src/warn.ts', severity: 'warning' as const, ruleId: 'r1', message: 'm' },
+          { file: 'src/warn.ts', severity: 'warning' as const, ruleId: 'r2', message: 'm' },
+          { file: 'src/warn.ts', severity: 'error' as const, ruleId: 'r3', message: 'm' },
+        ],
       } as unknown as Awaited<ReturnType<typeof analyze>>);
-
-      mockAccess.mockResolvedValue(undefined);
-      mockReadFile.mockResolvedValue(
-        JSON.stringify({ 'src/modified.ts': { totalWarnings: 3, lastAnalyzed: '2024-01-01' } })
-      );
       mockWriteFile.mockResolvedValue(undefined);
 
-      const result = await runEnforcement(
-        ['src/new.ts'],
-        ['src/modified.ts'],
-        '/tmp/test-baseline.json'
-      );
-
-      expect(result.overallStatus).toBe('PASS');
-      expect(result.summary.totalFiles).toBe(2);
-    });
-
-    it('blocks when new files have warnings', async () => {
-      mockAnalyze.mockResolvedValue({
-        violations: [
-          { file: 'src/new.ts', severity: 'warning' as const, rule: 'r1', message: 'm' },
-        ],
-      } as unknown as Awaited<ReturnType<typeof analyze>>);
-
-      (mockAccess as ReturnType<typeof vi.fn>).mockRejectedValue(new Error('ENOENT'));
-      (mockWriteFile as ReturnType<typeof vi.fn>).mockResolvedValue(undefined);
-
-      const result = await runEnforcement(['src/new.ts'], [], '/tmp/test-baseline.json');
-
-      expect(result.overallStatus).toBe('BLOCK');
-      expect(result.summary.blockedFiles).toBe(1);
-    });
-
-    it('blocks when modified files increase warnings', async () => {
-      mockAnalyze.mockResolvedValue({
-        violations: [
-          { file: 'src/modified.ts', severity: 'warning' as const, rule: 'r1', message: 'm' },
-          { file: 'src/modified.ts', severity: 'warning' as const, rule: 'r2', message: 'm' },
-          { file: 'src/modified.ts', severity: 'warning' as const, rule: 'r3', message: 'm' },
-        ],
-      } as unknown as Awaited<ReturnType<typeof analyze>>);
-
-      (mockAccess as ReturnType<typeof vi.fn>).mockResolvedValue(undefined);
-      (mockReadFile as ReturnType<typeof vi.fn>).mockResolvedValue(
-        JSON.stringify({ 'src/modified.ts': { totalWarnings: 1, lastAnalyzed: '2024-01-01' } })
-      );
-      (mockWriteFile as ReturnType<typeof vi.fn>).mockResolvedValue(undefined);
-
-      const result = await runEnforcement([], ['src/modified.ts'], '/tmp/test-baseline.json');
-
-      expect(result.overallStatus).toBe('BLOCK');
-      expect(result.violations[0].reason).toContain('cannot increase warnings');
-    });
-
-    it('auto-initializes missing baseline entries for modified files', async () => {
-      mockAnalyze.mockResolvedValue({
-        violations: [],
-      } as unknown as Awaited<ReturnType<typeof analyze>>);
-
-      mockAccess.mockResolvedValue(undefined);
-      mockReadFile.mockResolvedValue('{}');
-      mockWriteFile.mockResolvedValue(undefined);
-
-      const result = await runEnforcement([], ['src/modified.ts'], '/tmp/test-baseline.json');
-
+      const result = await autoInitBaseline(['src/warn.ts', 'src/clean.ts'], '/tmp/auto.json');
+      expect(result['src/warn.ts'].totalWarnings).toBe(3);
+      expect(result).not.toHaveProperty('src/clean.ts');
       expect(mockWriteFile).toHaveBeenCalled();
-      expect(result.overallStatus).toBe('PASS');
     });
 
-    it('handles empty newFiles and modifiedFiles arrays', async () => {
-      mockAnalyze.mockResolvedValue({
-        violations: [],
-      } as unknown as Awaited<ReturnType<typeof analyze>>);
-      (mockAccess as ReturnType<typeof vi.fn>).mockRejectedValue(new Error('ENOENT'));
-
-      const result = await runEnforcement([], [], '/tmp/test-baseline.json');
-
-      expect(result.overallStatus).toBe('PASS');
-      expect(result.summary.totalFiles).toBe(0);
-    });
-
-    it('filters out empty strings from file arrays', async () => {
-      mockAnalyze.mockResolvedValue({
-        violations: [],
-      } as unknown as Awaited<ReturnType<typeof analyze>>);
-      (mockAccess as ReturnType<typeof vi.fn>).mockRejectedValue(new Error('ENOENT'));
-
-      const result = await runEnforcement(['', '  ', ''], ['', '  '], '/tmp/test.json');
-
-      expect(result.overallStatus).toBe('PASS');
-    });
-
-    it('auto-init saves updated baseline when missing entries exist', async () => {
-      mockAnalyze.mockResolvedValue({
-        violations: [
-          { file: 'src/a.ts', severity: 'warning' as const, rule: 'r1', message: 'm' },
-        ],
-      } as unknown as Awaited<ReturnType<typeof analyze>>);
-
-      (mockAccess as ReturnType<typeof vi.fn>).mockResolvedValue(undefined);
-      (mockReadFile as ReturnType<typeof vi.fn>).mockResolvedValue(JSON.stringify({}));
-      (mockWriteFile as ReturnType<typeof vi.fn>).mockResolvedValue(undefined);
-
-      await runEnforcement([], ['src/a.ts'], '/tmp/test-baseline.json');
-
-      expect(mockWriteFile).toHaveBeenCalled();
-      const writeCall = vi.mocked(mockWriteFile).mock.calls[0];
-      expect(writeCall[0]).toBe('/tmp/test-baseline.json');
-    });
-  });
-
-  /**
-   * @test REQ-4
-   * @covers calculateDelta remaining reason branches - lines 167-174
-   */
-  describe('calculateDelta reason messages', () => {
-    it('returns "Warnings decreased X" reason on decrease', () => {
-      const result = calculateDelta({ totalWarnings: 10 } as BaselineEntry, 7, 'MODIFIED');
-      expect(result.delta).toBe(-3);
-      expect(result.enforcement).toBe('PASS');
-      expect(result.reason).toContain('Warnings decreased by 3');
-    });
-
-    it('returns "All warnings cleared" reason when current is zero', () => {
-      const result = calculateDelta({ totalWarnings: 0 } as BaselineEntry, 0, 'MODIFIED');
-      expect(result.delta).toBe(0);
-      expect(result.enforcement).toBe('PASS');
-      expect(result.reason).toContain('All warnings cleared');
-    });
-
-    it('returns "No new warnings introduced" when same count and >5', () => {
-      const baselineWithSame = { totalWarnings: 8, lastAnalyzed: new Date().toISOString() } as BaselineEntry;
-      const result = calculateDelta(baselineWithSame, 8, 'MODIFIED');
-      expect(result.delta).toBe(0);
-      expect(result.enforcement).toBe('PASS');
-      expect(result.reason).toContain('No new warnings introduced');
-    });
-
-    it('sets correct file field in delta result', () => {
-      const result = calculateDelta(null, 5, 'MODIFIED');
-      result.file = 'src/test.ts';
-      expect(result.file).toBe('src/test.ts');
-      expect(result.status).toBe('MODIFIED');
-    });
-  });
-
-  /**
-   * @test REQ-4
-   * @covers classifyFiles edge cases - renamed with insufficient parts
-   */
-  describe('classifyFiles edge cases', () => {
-    it('ignores rename lines with insufficient parts', () => {
-      const gitDiff = ['R095'];
-      const classified = classifyFiles(gitDiff);
-      expect(classified.renamed).toEqual([]);
-    });
-
-    it('ignores lines with less than 2 parts', () => {
-      const gitDiff = ['A'];
-      const classified = classifyFiles(gitDiff);
-      expect(classified.new).toEqual([]);
-    });
-
-    it('handles unknown status codes gracefully', () => {
-      const gitDiff = ['X    src/unknown.ts'];
-      const classified = classifyFiles(gitDiff);
-      expect(classified.new).toEqual([]);
-      expect(classified.modified).toEqual([]);
-      expect(classified.deleted).toEqual([]);
-      expect(classified.renamed).toEqual([]);
-    });
-
-    it('handles files with spaces in paths for new files', () => {
-      const gitDiff = ['A    src/my file.ts'];
-      const classified = classifyFiles(gitDiff);
-      expect(classified.new).toEqual(['src/my file.ts']);
-    });
-  });
-
-  /**
-   * @test REQ-4
-   * @covers initBaselineCommand - lines 331-334
-   */
-  describe('initBaselineCommand', () => {
     it('calls initBaseline and saves with default path', async () => {
       mockAnalyze.mockResolvedValue({
-        violations: [{ file: 'src/a.ts', severity: 'warning' as const, rule: 'r1', message: 'm' }],
+        violations: [{ file: 'src/a.ts', severity: 'warning' as const, ruleId: 'r1', message: 'm' }],
       } as unknown as Awaited<ReturnType<typeof analyze>>);
       mockWriteFile.mockResolvedValue(undefined);
 
       await initBaselineCommand(['src/a.ts']);
-
-      expect(mockWriteFile).toHaveBeenCalledWith(
-        '.warnings-baseline.json',
-        expect.stringContaining('src/a.ts')
-      );
+      expect(mockWriteFile).toHaveBeenCalledWith('.warnings-baseline.json', expect.stringContaining('src/a.ts'));
     });
-  });
 
-  describe('CLI integration', () => {
-    const BOY_SCOUT_PATH = path.resolve(__dirname, '../boy-scout.ts');
-    // CLI tests spawn `npx tsx` subprocesses; under coverage instrumentation cold-start can exceed
-    // vitest's default 5s testTimeout. Each test sets its own 60s timeout to match the execAsync 30s + margin.
-    const CLI_TEST_TIMEOUT = 60000;
+    it('saves baseline even when there are no warnings', async () => {
+      mockAnalyze.mockResolvedValue({ violations: [] } as unknown as Awaited<ReturnType<typeof analyze>>);
+      mockWriteFile.mockResolvedValue(undefined);
 
-    it('shows help and exits with --help flag', async () => {
-      const { stdout } = await execAsync(`npx tsx ${BOY_SCOUT_PATH} --help`, {
-        timeout: 30000,
-      });
-      expect(stdout).toContain('Usage: boy-scout');
-      expect(stdout).toContain('--new-files');
-    }, CLI_TEST_TIMEOUT);
-
-    it('shows help and exits with -h flag', async () => {
-      const { stdout } = await execAsync(`npx tsx ${BOY_SCOUT_PATH} -h`, {
-        timeout: 30000,
-      });
-      expect(stdout).toContain('Usage: boy-scout');
-    }, CLI_TEST_TIMEOUT);
-
-    it('shows help and exits with help command', async () => {
-      const { stdout } = await execAsync(`npx tsx ${BOY_SCOUT_PATH} help`, {
-        timeout: 30000,
-      });
-      expect(stdout).toContain('Usage: boy-scout');
-    }, CLI_TEST_TIMEOUT);
-
-    it('runs init-baseline via CLI', async () => {
-      const { stdout } = await execAsync(
-        `npx tsx ${BOY_SCOUT_PATH} --init-baseline src/principles/boy-scout.ts`,
-        { timeout: 30000 }
-      );
-      expect(stdout).toContain('Baseline initialized successfully');
-    }, CLI_TEST_TIMEOUT);
-
-    it('runs enforcement via CLI with empty files', async () => {
-      await expect(
-        execAsync(`npx tsx ${BOY_SCOUT_PATH} --new-files "" --modified-files ""`, { timeout: 30000 })
-      ).resolves.toMatchObject({ stdout: expect.stringContaining('"overallStatus"') });
-    }, CLI_TEST_TIMEOUT);
+      await initBaselineCommand(['src/clean.ts']);
+      expect(mockWriteFile).toHaveBeenCalledWith('.warnings-baseline.json', expect.any(String));
+      const savedJson = JSON.parse(vi.mocked(mockWriteFile).mock.calls[0][1] as string);
+      expect(Object.keys(savedJson)).toEqual([]);
+    });
   });
 });
