@@ -72,9 +72,55 @@ jobs:
           cp -r $GITHUB_WORKSPACE/githooks .githooks-ref
           bash .githooks-ref/install.sh
           rm -rf .githooks-ref
+
+          # Gate 6: Architecture skip file
           touch .architecture-skip
-          echo "console.log('hello')" > test.ts
-          git add test.ts
+
+          # Gate 1 (Code Quality) + Gate 2 (Dup Code) + Gate 4 (Principles):
+          echo "export function greet(name: string): string { return 'hello ' + name; }" > test.ts
+
+          # Gate 3 (Complexity): function with multiple branches (CCN ~5, under 10 threshold)
+          cat > status.ts << 'TS'
+          export function httpStatus(code: number): string {
+            if (code === 200) return 'OK';
+            if (code === 201) return 'Created';
+            if (code === 400) return 'Bad Request';
+            if (code === 404) return 'Not Found';
+            if (code === 500) return 'Internal Server Error';
+            return 'Unknown';
+          }
+          TS
+
+          # Gate 5 (Tests + Coverage): test file + vitest config
+          mkdir -p __tests__
+          cat > __tests__/test.test.ts << 'TEST'
+          import { describe, it, expect } from 'vitest';
+          import { greet } from '../test';
+          describe('greet', () => {
+            it('returns greeting', () => {
+              expect(greet('world')).toBe('hello world');
+            });
+          });
+          TEST
+
+          cat > vitest.config.ts << 'CFG'
+          import { defineConfig } from 'vitest/config';
+          export default defineConfig({
+            test: {
+              coverage: {
+                provider: 'v8',
+                reporter: ['json-summary'],
+                thresholds: { global: { lines: 0 } },
+              },
+            },
+          });
+          CFG
+
+          # Install vitest locally for Gate 5 coverage check
+          npm init -y > /dev/null 2>&1
+          npm install vitest --save-dev > /dev/null 2>&1
+
+          git add -A
           git commit -m "test: first commit triggers 6 quality gates"
         shell: bash
 
