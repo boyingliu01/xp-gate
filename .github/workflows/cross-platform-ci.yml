@@ -102,3 +102,29 @@ jobs:
           fi
           echo "PASS: tarball < 2MB ($SIZE bytes)"
         shell: bash
+
+  # Mirror Parity Guard: src/npm-package/skills/ and src/npm-package/plugins/ must equal canonical sources
+  # Prevents silent divergence between source-of-truth and npm-distributed copies (C-CRIT-2)
+  mirror-parity:
+    name: Mirror Parity (npm-package vs canonical)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js 20
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Run sync and verify no diff
+        run: |
+          node src/npm-package/scripts/sync-package-content.js
+          if ! git diff --exit-code src/npm-package/skills src/npm-package/plugins; then
+            echo ""
+            echo "FAIL: src/npm-package/skills or src/npm-package/plugins is out of sync with canonical sources."
+            echo "Run locally: node src/npm-package/scripts/sync-package-content.js && git add src/npm-package && git commit"
+            exit 1
+          fi
+          echo "PASS: npm-package mirror matches canonical sources"
+        shell: bash

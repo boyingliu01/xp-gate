@@ -197,7 +197,7 @@ integration:
       # C++ is not supported in Phase 1
       # Requires explicit skip marker: .skip-architecture-cpp
       supported: false
-       skipMarker: ".skip-architecture-cpp"
+      skipMarker: ".skip-architecture-cpp"
 
 # LLM Security Audit configuration
 # DEPRECATED (2026-06-05): LLM/AI security evaluation migrated to external
@@ -220,5 +220,5 @@ security:
     excluded_categories:
       LLM03: "No fine-tuning pipeline — training data poisoning not applicable"
       LLM05: "Provider selection handled separately; supply chain covered by Dependabot (#24)"
-      LLM07: "Promptfoo security config uses native assertions only, no custom plugins"
+      LLM07: "Custom plugin attack surface evaluated in external skill-cert project (see issue #140)"
       LLM10: "Model weight theft protection is provider responsibility, not application-level"
