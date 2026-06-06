@@ -12,6 +12,15 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+## [0.6.2] - 2026-06-04
+
+### Added
+- **sprint progress renderer** — `scripts/render-sprint-progress.cjs` 可执行 Node.js 脚本，读取 sprint-state.json 并输出 ASCII 进度看板（替代纯声明式模板渲染）
+
+### Changed
+- **sprint-flow SKILL.md** — PHASE TRANSITION RULES Step 4 和 `--status` 参数改为调用 `node scripts/render-sprint-progress.cjs`（确定性渲染，不再依赖 AI 主动执行模板）
+- **plugin/skill 副本同步** — qoder + npm-package sprint-flow SKILL.md 同步更新
+
 ## [0.6.1] - 2026-06-04
 
 ### Added
