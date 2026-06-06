@@ -496,23 +496,30 @@ if [ "$PROJECT_LANG" = "documentation-only" ]; then
   # Documentation-only project - skip static analysis
   echo "✅ PASSED - Skipped (no source code to analyze)."
    
-elif [ "$PROJECT_LANG" = "typescript" ]; then
-  # TypeScript: static analysis (tsc) + linting (eslint) 
+  elif [ "$PROJECT_LANG" = "typescript" ]; then
+  # TypeScript: static analysis (tsc) + linting (eslint)
   if ! command -v npx &> /dev/null; then
     echo "ℹ️  SKIP - npx not available (non-blocking for TypeScript)"
     echo "✅ PASSED - Code Quality Gate (SKIP)"
-  else  
-    # Run TypeScript type checking
-    echo "Running TypeScript static analysis (tsc)..."
-    npx tsc --noEmit --skipLibCheck 2>&1 | head -30
-    TSC_EXIT=$?
-    if [ "$TSC_EXIT" -ne 0 ]; then
-      echo ""
-      echo "❌ BLOCKED - TYPE ERRORS detected"
-      echo "Fix the type errors above before committing."
-      exit 1
+  else
+    # Verify tsc is real TypeScript compiler (npx may fetch deprecated tsc@2.0.4 placeholder)
+    TSC_OUTPUT=$(npx tsc --version 2>&1)
+    if echo "$TSC_OUTPUT" | grep -q "Version"; then
+      # Run TypeScript type checking
+      echo "Running TypeScript static analysis ($TSC_OUTPUT)..."
+      npx tsc --noEmit --skipLibCheck 2>&1 | head -30
+      TSC_EXIT=$?
+      if [ "$TSC_EXIT" -ne 0 ]; then
+        echo ""
+        echo "❌ BLOCKED - TYPE ERRORS detected"
+        echo "Fix the type errors above before committing."
+        exit 1
+      fi
+      echo "✅ PASSED - TypeScript static analysis."
+    else
+      echo "ℹ️  SKIP - tsc not properly installed ($TSC_OUTPUT)"
+      echo "Install typescript (npm install typescript --save-dev) for type checking."
     fi
-    echo "✅ PASSED - TypeScript static analysis."
     
     # Run ESLint linting if config exists
     if [ -f ".eslintrc.json" ] || [ -f ".eslintrc.js" ] || [ -f ".eslintrc.cjs" ] || [ -f "eslint.config.js" ]; then

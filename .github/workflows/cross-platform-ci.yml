@@ -116,9 +116,9 @@ jobs:
           });
           CFG
 
-          # Install vitest locally for Gate 5 coverage check
+          # Install vitest + typescript locally for Gate 5 coverage + Gate 1 tsc check
           npm init -y > /dev/null 2>&1
-          npm install vitest --save-dev > /dev/null 2>&1
+          npm install vitest typescript --save-dev > /dev/null 2>&1
 
           git add -A
           git commit -m "test: first commit triggers 6 quality gates"
