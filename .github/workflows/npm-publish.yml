@@ -7,7 +7,7 @@ on:
   workflow_dispatch:
 
 permissions:
-  contents: read
+  contents: write   # needed to create git tags and GitHub Releases
   id-token: write
 
 jobs:
@@ -15,31 +15,38 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0   # full history so we can check existing tags
 
       - uses: actions/setup-node@v4
         with:
           node-version: '20'
           registry-url: 'https://registry.npmjs.org'
 
-      - name: Verify VERSION file
+      - name: Compute versions
         id: version
         run: |
-          VERSION=$(cat VERSION | tr -d '[:space:]')
-          if [ -z "$VERSION" ]; then
+          FULL_VERSION=$(cat VERSION | tr -d '[:space:]')
+          if [ -z "$FULL_VERSION" ]; then
             echo "ERROR: VERSION file is empty"
             exit 1
           fi
-          echo "version=$VERSION" >> $GITHUB_OUTPUT
-          echo "Publishing @boyingliu01/xp-gate@$VERSION"
+          # VERSION uses MAJOR.MINOR.PATCH.MICRO; npm + git tag use MAJOR.MINOR.PATCH
+          NPM_VERSION=$(echo "$FULL_VERSION" | awk -F. '{print $1"."$2"."$3}')
+          TAG="v${NPM_VERSION}"
+          echo "full_version=$FULL_VERSION" >> $GITHUB_OUTPUT
+          echo "npm_version=$NPM_VERSION" >> $GITHUB_OUTPUT
+          echo "tag=$TAG" >> $GITHUB_OUTPUT
+          echo "Publishing @boyingliu01/xp-gate@$NPM_VERSION (from VERSION $FULL_VERSION), tag $TAG"
 
       - name: Check existing version
         run: |
-          VERSION=$(cat VERSION | tr -d '[:space:]')
-          if npm view @boyingliu01/xp-gate@$VERSION version 2>/dev/null; then
-            echo "ERROR: Version $VERSION already exists on npm"
+          NPM_VERSION="${{ steps.version.outputs.npm_version }}"
+          if npm view @boyingliu01/xp-gate@$NPM_VERSION version 2>/dev/null; then
+            echo "ERROR: Version $NPM_VERSION already exists on npm"
             exit 1
           fi
-          echo "Version $VERSION is available on npm"
+          echo "Version $NPM_VERSION is available on npm"
 
       - name: Sync package content
         working-directory: src/npm-package
@@ -61,3 +68,60 @@ jobs:
         run: npm publish --provenance --access public
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+
+      # --- Post-publish: keep GitHub Releases in sync with npm ---
+
+      - name: Extract release notes from CHANGELOG
+        id: notes
+        run: |
+          NPM_VERSION="${{ steps.version.outputs.npm_version }}"
+          NOTES_FILE="$(mktemp)"
+          if [ -f CHANGELOG.md ]; then
+            # Pull the section between "## [<version>]" and the next "## [" heading
+            awk -v ver="$NPM_VERSION" '
+              $0 ~ "^## \\[" ver "\\]" { flag=1; next }
+              flag && /^## \[/ { flag=0 }
+              flag { print }
+            ' CHANGELOG.md > "$NOTES_FILE"
+          fi
+          if [ ! -s "$NOTES_FILE" ]; then
+            echo "Release ${{ steps.version.outputs.tag }} of @boyingliu01/xp-gate" > "$NOTES_FILE"
+            echo "" >> "$NOTES_FILE"
+            echo "Auto-generated from VERSION bump. See CHANGELOG.md for details." >> "$NOTES_FILE"
+          fi
+          echo "notes_file=$NOTES_FILE" >> $GITHUB_OUTPUT
+          echo "----- Release notes preview -----"
+          cat "$NOTES_FILE"
+          echo "---------------------------------"
+
+      - name: Create git tag and GitHub Release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          TAG="${{ steps.version.outputs.tag }}"
+          NPM_VERSION="${{ steps.version.outputs.npm_version }}"
+          NOTES_FILE="${{ steps.notes.outputs.notes_file }}"
+
+          # Skip cleanly if tag already exists (idempotent — manual tag, re-run, etc.)
+          if git ls-remote --tags --exit-code origin "refs/tags/$TAG" >/dev/null 2>&1; then
+            echo "Tag $TAG already exists on origin — skipping tag creation."
+          else
+            git config user.name  "github-actions[bot]"
+            git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+            git tag -a "$TAG" -m "Release $TAG (@boyingliu01/xp-gate@$NPM_VERSION)"
+            git push origin "$TAG"
+          fi
+
+          # Create the release if missing; otherwise refresh notes
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            echo "GitHub Release $TAG already exists — updating notes."
+            gh release edit "$TAG" \
+              --title "$TAG — @boyingliu01/xp-gate@$NPM_VERSION" \
+              --notes-file "$NOTES_FILE" \
+              --latest
+          else
+            gh release create "$TAG" \
+              --title "$TAG — @boyingliu01/xp-gate@$NPM_VERSION" \
+              --notes-file "$NOTES_FILE" \
+              --latest
+          fi
