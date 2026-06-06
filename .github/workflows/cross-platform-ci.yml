@@ -117,8 +117,9 @@ jobs:
           CFG
 
           # Install vitest + typescript locally for Gate 5 coverage + Gate 1 tsc check
+          # vitest 3.x supports Node 18; vitest 4.x requires Node 20+ (uses node:inspector/promises)
           npm init -y > /dev/null 2>&1
-          npm install vitest typescript @vitest/coverage-v8 --save-dev > /dev/null 2>&1
+          npm install 'vitest@3' typescript '@vitest/coverage-v8@3' --save-dev > /dev/null 2>&1
 
           git add -A
           git commit -m "test: first commit triggers 6 quality gates"
