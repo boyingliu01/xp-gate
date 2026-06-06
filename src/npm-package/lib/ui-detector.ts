@@ -1,4 +1,4 @@
-import { execSync } from 'child_process';
+import { spawnSync } from 'child_process';
 import { readFileSync, existsSync } from 'fs';
 import { join } from 'path';
 
@@ -75,6 +75,19 @@ function getFullExclusions(repoRoot?: string): string[] {
   return [...UI_GATE_DEFAULT_EXCLUSIONS, ...loadUiGateIgnore(repoRoot)];
 }
 
+function runGitDiff(baseBranch: string): string {
+  const result = spawnSync(
+    'git',
+    ['diff', '--name-only', `${baseBranch}..HEAD`],
+    { stdio: ['pipe', 'pipe', 'pipe'], shell: false, encoding: 'utf8' }
+  );
+  if (result.status !== 0) {
+    const stderr = String(result.stderr ?? '').trim();
+    throw new Error(stderr || `git diff exited with status ${result.status}`);
+  }
+  return String(result.stdout ?? '').trim();
+}
+
 export function detectUiSprint(baseBranch: string = 'main'): UiDetectionResult {
   try {
     const files = getChangedFiles(baseBranch);
@@ -88,18 +101,11 @@ export function detectUiSprint(baseBranch: string = 'main'): UiDetectionResult {
 }
 
 export function getChangedFiles(baseBranch: string): string[] {
-  const diffOutput = execSync(`git diff --name-only ${baseBranch}..HEAD`, {
-    encoding: 'utf8',
-    stdio: ['pipe', 'pipe', 'pipe'],
-  }).trim();
-
-  if (diffOutput === '') {
-    return [];
-  }
-
+  const diffOutput = runGitDiff(baseBranch);
+  if (diffOutput === '') return [];
   return diffOutput
     .split('\n')
-    .filter((f) => f.length > 0)
+    .filter((f: string) => f.length > 0)
     .map(parseRenamedFile);
 }
 

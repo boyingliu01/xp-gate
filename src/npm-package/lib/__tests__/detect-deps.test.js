@@ -342,20 +342,14 @@ describe('detect-deps', () => {
 
     it('creates skills directory if it does not exist', async () => {
       const { autoInstallDeps } = require('../detect-deps');
-      // Mock execSync to avoid actual git clone
-      const { execSync } = require('child_process');
-      vi.spyOn(require('child_process'), 'execSync').mockImplementation((cmd) => {
-        // Simulate successful clone by creating the target dir
-        const match = cmd.match(/"([^"]+)"$/);
-        if (match) {
-          fs.mkdirSync(match[1], { recursive: true });
-          fs.writeFileSync(path.join(match[1], 'package.json'), JSON.stringify({ version: '2.0.0' }));
-        }
-        return '';
+      vi.spyOn(require('child_process'), 'spawnSync').mockImplementation((cmd, args) => {
+        const destPath = args[args.length - 1];
+        fs.mkdirSync(destPath, { recursive: true });
+        fs.writeFileSync(path.join(destPath, 'package.json'), JSON.stringify({ version: '2.0.0' }));
+        return { status: 0, stdout: Buffer.from(''), stderr: Buffer.from('') };
       });
 
       const result = await autoInstallDeps();
-      // Should have attempted to install
       expect(result.ok).toBe(true);
       expect(result.installed).toContain('superpowers');
       expect(result.installed).toContain('gstack');
@@ -365,7 +359,7 @@ describe('detect-deps', () => {
 
     it('returns errors when git clone fails', async () => {
       const { autoInstallDeps } = require('../detect-deps');
-      vi.spyOn(require('child_process'), 'execSync').mockImplementation(() => {
+      vi.spyOn(require('child_process'), 'spawnSync').mockImplementation(() => {
         throw new Error('git not found');
       });
 
@@ -373,6 +367,45 @@ describe('detect-deps', () => {
       expect(result.ok).toBe(false);
       expect(result.errors.length).toBeGreaterThan(0);
       expect(result.errors[0].message).toContain('git not found');
+
+      vi.restoreAllMocks();
+    });
+
+    it('returns errors when git clone exits non-zero (Issue #155)', async () => {
+      const { autoInstallDeps } = require('../detect-deps');
+      vi.spyOn(require('child_process'), 'spawnSync').mockImplementation(() => ({
+        status: 128,
+        stdout: Buffer.from(''),
+        stderr: Buffer.from('fatal: repository not found'),
+      }));
+
+      const result = await autoInstallDeps();
+      expect(result.ok).toBe(false);
+      expect(result.errors.length).toBeGreaterThan(0);
+      expect(result.errors[0].message).toMatch(/repository not found|git clone failed|exit/i);
+
+      vi.restoreAllMocks();
+    });
+
+    it('passes repoUrl as argv[] argument, never via shell string (Issue #155)', async () => {
+      const { autoInstallDeps } = require('../detect-deps');
+      const spy = vi.spyOn(require('child_process'), 'spawnSync').mockImplementation((cmd, args) => {
+        const destPath = args[args.length - 1];
+        fs.mkdirSync(destPath, { recursive: true });
+        fs.writeFileSync(path.join(destPath, 'package.json'), JSON.stringify({ version: '2.0.0' }));
+        return { status: 0, stdout: Buffer.from(''), stderr: Buffer.from('') };
+      });
+
+      await autoInstallDeps();
+
+      expect(spy).toHaveBeenCalled();
+      for (const call of spy.mock.calls) {
+        const [cmd, args, opts] = call;
+        expect(cmd).toBe('git');
+        expect(Array.isArray(args)).toBe(true);
+        expect(args[0]).toBe('clone');
+        expect(opts && opts.shell).not.toBe(true);
+      }
 
       vi.restoreAllMocks();
     });

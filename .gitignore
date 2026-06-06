@@ -67,6 +67,7 @@ htmlcov/
 # Mutation testing
 .mutation-baseline.json
 .stryker-report.json
+.stryker-tmp/
 
 # Skill-cert
 skill-cert/venv/

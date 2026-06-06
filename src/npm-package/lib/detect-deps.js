@@ -179,89 +179,91 @@ async function checkDeps(platform = 'opencode') {
  * @param {string} [platform='opencode'] - AI agent platform
  * @returns {Promise<{ok: boolean, installed?: string[], errors?: Array<{name: string, message: string}>}>}
  */
+function runGitClone(repoUrl, destPath) {
+  const cp = require('child_process');
+  const result = cp.spawnSync(
+    'git',
+    ['clone', '--depth', '1', repoUrl, destPath],
+    { stdio: ['ignore', 'pipe', 'pipe'], timeout: 120000, shell: false }
+  );
+  if (result.status === 0) return;
+  const stderr = String(result.stderr ?? '').trim();
+  throw new Error(stderr || `git clone exited with status ${result.status}`);
+}
+
+function ensureTargetDir(targetDir) {
+  if (fs.existsSync(targetDir)) return null;
+  try {
+    fs.mkdirSync(targetDir, { recursive: true });
+    return null;
+  } catch (e) {
+    return { name: 'mkdir', message: `Cannot create skills directory: ${e.message}` };
+  }
+}
+
+function versionMismatchError(versionMismatch) {
+  return {
+    name: versionMismatch.name,
+    message: `version mismatch: need ${versionMismatch.required}, found ${versionMismatch.found} (auto-install cannot upgrade)`,
+  };
+}
+
+function depExistsIn(skillsDirs, depName) {
+  for (const baseDir of skillsDirs) {
+    if (fs.existsSync(path.join(baseDir, depName))) return true;
+  }
+  return false;
+}
+
+function safeRemove(destPath) {
+  try {
+    if (fs.existsSync(destPath)) {
+      fs.rmSync(destPath, { recursive: true, force: true });
+    }
+  } catch {
+    // best-effort cleanup of partial clone
+  }
+}
+
+function installOneDep(dep, targetDir) {
+  const destPath = path.join(targetDir, dep.name);
+  const repoUrl = `https://github.com/${dep.repo}.git`;
+  try {
+    console.log(`  ${dep.name}: not found → installing from ${repoUrl} ...`);
+    runGitClone(repoUrl, destPath);
+    console.log(`  ${dep.name}: OK`);
+    return { ok: true };
+  } catch (e) {
+    const message = e.message || 'git clone failed';
+    console.warn(`  ${dep.name}: FAILED (${message})`);
+    safeRemove(destPath);
+    return { ok: false, error: { name: dep.name, message } };
+  }
+}
+
 async function autoInstallDeps(platform = 'opencode') {
   const skillsDirs = getSkillsDirs(platform);
-  const targetDir = skillsDirs[0]; // Install to the primary skills directory
+  const targetDir = skillsDirs[0];
 
-  if (!fs.existsSync(targetDir)) {
-    try {
-      fs.mkdirSync(targetDir, { recursive: true });
-    } catch (e) {
-      return {
-        ok: false,
-        errors: [{ name: 'mkdir', message: `Cannot create skills directory: ${e.message}` }]
-      };
-    }
-  }
+  const mkdirErr = ensureTargetDir(targetDir);
+  if (mkdirErr) return { ok: false, errors: [mkdirErr] };
 
-  const check = await checkDeps(platform);
-  if (check.ok) {
-    return { ok: true, installed: [] };
+  const depCheck = await checkDeps(platform);
+  if (depCheck.ok) return { ok: true, installed: [] };
+  if (depCheck.versionMismatch) {
+    return { ok: false, installed: [], errors: [versionMismatchError(depCheck.versionMismatch)] };
   }
 
   const errors = [];
   const installed = [];
-
-  // Check each dep: missing → install, version mismatch → can't auto-fix
-  const depCheck = await checkDeps(platform);
-  if (depCheck.ok) {
-    return { ok: true, installed: [] };
-  }
-
-  // If the issue is version mismatch, auto-install can't help
-  if (depCheck.versionMismatch) {
-    return {
-      ok: false,
-      installed: [],
-      errors: [{
-        name: depCheck.versionMismatch.name,
-        message: `version mismatch: need ${depCheck.versionMismatch.required}, found ${depCheck.versionMismatch.found} (auto-install cannot upgrade)`
-      }]
-    };
-  }
-
   for (const dep of REQUIRED_DEPS) {
-    // Re-check if this specific dep is missing
-    let exists = false;
-    for (const baseDir of skillsDirs) {
-      if (fs.existsSync(path.join(baseDir, dep.name))) {
-        exists = true;
-        break;
-      }
-    }
-    if (exists) continue;
-
-    const destPath = path.join(targetDir, dep.name);
-    const repoUrl = `https://github.com/${dep.repo}.git`;
-
-    try {
-      console.log(`  ${dep.name}: not found → installing from ${repoUrl} ...`);
-      const cp = require('child_process');
-      cp.execSync(`git clone --depth 1 "${repoUrl}" "${destPath}"`, {
-        encoding: 'utf8',
-        stdio: ['ignore', 'pipe', 'pipe'],
-        timeout: 120000, // 2 minute timeout
-      });
-      installed.push(dep.name);
-      console.log(`  ${dep.name}: OK`);
-    } catch (e) {
-      errors.push({ name: dep.name, message: e.message || 'git clone failed' });
-      console.warn(`  ${dep.name}: FAILED (${e.message || 'unknown error'})`);
-      // Clean up partial clone
-      try {
-        if (fs.existsSync(destPath)) {
-          fs.rmSync(destPath, { recursive: true, force: true });
-        }
-      } catch {
-        // Ignore cleanup failures
-      }
-    }
+    if (depExistsIn(skillsDirs, dep.name)) continue;
+    const result = installOneDep(dep, targetDir);
+    if (result.ok) installed.push(dep.name);
+    else errors.push(result.error);
   }
 
-  if (errors.length > 0) {
-    return { ok: false, installed, errors };
-  }
-
+  if (errors.length > 0) return { ok: false, installed, errors };
   return { ok: true, installed };
 }
 
