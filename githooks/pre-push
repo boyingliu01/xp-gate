@@ -479,7 +479,16 @@ if ! command -v jq &> /dev/null; then
 fi
 
 # Validate result file content
+# SHA self-reference paradox fix: if the result file was committed as part of
+# HEAD, its content references HEAD^ (the commit being reviewed), not HEAD.
 CURRENT_COMMIT=$(git rev-parse HEAD)
+if git diff-tree --no-commit-id --name-only -r HEAD 2>/dev/null | grep -qx "$RESULT_FILE"; then
+  # Result file is part of the latest commit — compare against the reviewed commit
+  EXPECTED_COMMIT=$(git rev-parse HEAD^ 2>/dev/null || echo "unknown")
+else
+  # Result file is working-tree only — compare against current HEAD
+  EXPECTED_COMMIT="$CURRENT_COMMIT"
+fi
 
 # Check JSON validity
 if ! jq empty "$RESULT_FILE" 2>/dev/null; then
@@ -512,15 +521,15 @@ if [ "$RESULT_BRANCH" != "$CURRENT_BRANCH" ]; then
 fi
 
 # Commit match check
-if [ "$RESULT_COMMIT" != "$CURRENT_COMMIT" ]; then
+if [ "$RESULT_COMMIT" != "$EXPECTED_COMMIT" ]; then
   echo ""
   echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
   echo "   ❌ RESULT FILE OUTDATED - PUSH BLOCKED"
   echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
   echo ""
   echo "Result file is for a different commit:"
-  echo "  Expected: $CURRENT_COMMIT"
-  echo "  Found: $RESULT_COMMIT"
+    echo "  Expected: $EXPECTED_COMMIT"
+    echo "  Found: $RESULT_COMMIT"
   echo ""
   echo "Re-run: /delphi-review --mode code-walkthrough"
   echo ""
