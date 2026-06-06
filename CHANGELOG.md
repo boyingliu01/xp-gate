@@ -2,6 +2,11 @@
 
 All notable changes to this project will be documented in this file.
 
+## [Unreleased]
+
+### Added
+- **`npm-publish.yml` 自动同步 GitHub Releases** — 在 npm publish 步骤之后追加 git tag + GitHub Release 自动创建（基于 CHANGELOG.md 提取对应版本的 release notes），并把 `permissions.contents` 提升至 `write`、`fetch-depth: 0`。tag/release 创建均为幂等（已存在则更新或跳过）。修复 GitHub Releases 长期停留在 v0.3.1.0 的问题。
+
 ## [0.7.1] - 2026-06-06
 
 ### Fixed
@@ -25,8 +30,6 @@ All notable changes to this project will be documented in this file.
 - **REQ-2: xp-gate doctor CLI** — 诊断命令，检查 config/hooks/adapters/core.hooksPath/env，支持 --fix 自动修复
 - **REQ-3: xp-gate migrate CLI** — v0.4.x 迁移助手，自动清理 ~/.npmrc GitHub Packages PAT 残留
 - **REQ-5: Windows 兼容验证** — CI matrix 添加 windows-latest runner，Node 18/20/22 LTS 全部通过
-
-## [Unreleased]
 
 ## [0.6.2] - 2026-06-04
 
