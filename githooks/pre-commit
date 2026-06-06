@@ -591,11 +591,16 @@ elif [ "$PROJECT_LANG" = "go" ]; then
     echo "✅ PASSED - golangci-lint."
   fi
 
-elif [ "$PROJECT_LANG" = "shell" ] || echo "$CHANGED_FILES" | grep -qE '\.sh$' || find . -name "*.sh" -type f | head -n 1; then
-  # Shell: For shell files, use shellcheck directly
-  if command -v shellcheck &> /dev/null; then
-    echo "Running shellcheck on shell scripts..."
-    shellcheck $(echo "$CHANGED_FILES" | grep '\.sh$' || echo "."/*.sh ./**/**/*.sh 2>/dev/null) 2>&1 | head -30
+elif [ "$PROJECT_LANG" = "shell" ] || echo "$CHANGED_FILES" | grep -qE '\.sh$'; then
+  # Shell: check staged shell files only. Installed hook adapters are infrastructure,
+  # not project changes, and should not be linted on unrelated commits.
+  SHELL_FILES=$(echo "$CHANGED_FILES" | grep '\.sh$' || true)
+
+  if [ -z "$SHELL_FILES" ]; then
+    echo "✅ PASSED - No staged shell scripts to check."
+  elif command -v shellcheck &> /dev/null; then
+    echo "Running shellcheck on staged shell scripts..."
+    shellcheck $SHELL_FILES 2>&1 | head -30
     SHELLCHECK_EXIT=$?
     if [ "$SHELLCHECK_EXIT" -ne 0 ]; then
       echo ""
@@ -606,22 +611,17 @@ elif [ "$PROJECT_LANG" = "shell" ] || echo "$CHANGED_FILES" | grep -qE '\.sh$' |
     echo "✅ PASSED - Shellcheck completed."
   else
     echo "ℹ️  shellcheck not available - Attempting basic syntax check"
-    # Basic check for shell script files
-    SHELL_FILES=$(echo "$CHANGED_FILES" | grep '\.sh$' || find . -name "*.sh" -type f 2>/dev/null | head -10)
-    if [ -n "$SHELL_FILES" ]; then
-      for sh_file in $SHELL_FILES; do
-        if [ -f "$sh_file" ]; then
-          bash -n "$sh_file"
-          if [ $? -ne 0 ]; then
-            echo "❌ BLOCKED - SYNTAX ERROR in $sh_file"
-            exit 1
-          fi
+    # Basic check for staged shell script files
+    for sh_file in $SHELL_FILES; do
+      if [ -f "$sh_file" ]; then
+        bash -n "$sh_file"
+        if [ $? -ne 0 ]; then
+          echo "❌ BLOCKED - SYNTAX ERROR in $sh_file"
+          exit 1
         fi
-      done
-      echo "✅ PASSED - Basic shell script syntax check."
-    else
-      echo "✅ PASSED - No shell scripts to check."
-    fi
+      fi
+    done
+    echo "✅ PASSED - Basic shell script syntax check."
   fi
 
 else

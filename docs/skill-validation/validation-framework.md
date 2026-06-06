@@ -2,7 +2,7 @@
 
 ## Overview
 
-This framework provides a systematic methodology for validating LLM-dependent skills in the XP-Gate project. It combines Anthropic's skill-creator eval pipeline with promptfoo regression testing.
+This framework provides a systematic methodology for validating LLM-dependent skills before they are distributed by XP-Gate. Regression and security evaluation now belongs to the external skill-cert project; XP-Gate itself only distributes and invokes approved skills.
 
 ## Tool Selection Guide
 
@@ -10,9 +10,9 @@ This framework provides a systematic methodology for validating LLM-dependent sk
 |---------|------|-------------|
 | Cross-validation (with vs without skill) | skill-creator eval | First-time validation, skill improvement |
 | Trigger accuracy | skill-creator description optimization | Skill not firing or over-firing |
-| Regression detection | promptfoo | CI/CD integration, weekly regression checks |
+| Regression detection | external skill-cert evals | Creation/update-time regression checks |
 | Cross-model benchmarking | Calibra | Testing across different LLM providers |
-| Behavioral stability | PromptPressure | Multi-turn drift detection |
+| Behavioral stability | external drift evaluation | Model-update drift detection |
 | Step adherence | Custom checklist (this framework) | Verifying skill workflow compliance |
 
 ## Test Case Template
@@ -127,8 +127,8 @@ Each skill validation produces a report:
 4. Generate validation report
 5. File improvement issues if any L1-L4 metric below threshold
 
-### Regression Check (Weekly)
-1. Run existing evals/evals.json through promptfoo
+### Regression Check (Creation/Update Time)
+1. Run existing evals/evals.json through the external skill-cert project
 2. Compare against baseline benchmark.json
 3. Alert if any metric drops below threshold
 

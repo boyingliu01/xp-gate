@@ -1,5 +1,7 @@
 # LLM Security Audit — Design Document (Round 2 Revised)
 
+> **DEPRECATED (2026-06-05)**: The implementation described here (promptfoo + `llm-security-audit.yml` + `security:llm` npm script) was removed in PR #139. LLM/AI security evaluation has migrated to the external **skill-cert** project; tracking issue: #140. This document is preserved as historical design context only — do **not** treat its workflow/script/path references as current architecture.
+
 **Issue**: #22 | **Priority**: P0 | **Status**: Round 2
 
 ---

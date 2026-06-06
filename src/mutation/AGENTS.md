@@ -53,6 +53,6 @@ npm run mutation:incremental -- --changed-files "src/foo.ts,src/bar.ts"
 
 ## NOTES
 - Pre-push hook triggers Gate M + Gate M2
-- Mutation testing CI: .github/workflows/mutation-test.yml (15min timeout)
+- Mutation testing CI: .github/workflows/mutation-test.yml (45min timeout)
 - Stryker config: stryker.conf.json (principles), stryker.prepush.conf.json (pre-push)
 - Coverage exclude: src/mutation/** excluded from vitest coverage

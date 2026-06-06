@@ -41,7 +41,7 @@
 | `{circular_dep_status}` | 循环依赖状态 | ✅ 无 / ⚠️ 存在 (A ↔ B) |
 | `{public_api_count}` | Public API 暴露数 | 5 |
 | `{additional_metrics}` | 附加指标（可选行） | 测试文件：4 个 / 影响范围：3 层调用 |
-| `{recommended_flow}` | 建议流程描述 | 轻量流程 (Phase 2-3) |
+| `{recommended_flow}` | 建议流程描述 | 轻量流程 (Phase 0-3, reduced-intensity Delphi) |
 | `{risk_warning}` | 风险警告（可选块） | ⚠️ 此操作涉及循环依赖… |
 | 操作按钮 | 用户确认选项 | 接受建议 / 修改流程 / 取消 |
 
@@ -72,9 +72,9 @@
 +-------------------------------------------------------------+
 | 选择流程级别：                                                |
 |                                                             |
-| [1] 轻量流程 — 直接编码 + 基础验证 (Phase 2-3)               |
-| [2] 标准流程 — brainstorming + BUILD + REVIEW (Phase 0-4)    |
-| [3] 完整流程 — 完整 Sprint Flow (Phase 0-8)                  |
+| [1] 轻量流程 — minimal THINK + 简化 Delphi + BUILD/REVIEW (Phase 0-3) |
+| [2] 标准流程 — brainstorming + Delphi + BUILD + REVIEW (Phase 0-4)    |
+| [3] 完整流程 — 完整 Sprint Flow (Phase 0-8)                          |
 |                                                             |
 | 修改原因（必填）：____________________                        |
 |                                                             |
@@ -107,9 +107,11 @@
 
 | 评估结果 | 路由 | 说明 |
 |---------|------|------|
-| **轻量** (引用 ≤3, 同模块，无循环依赖) | Phase 2-3（跳过 brainstorming + delphi-review） | 直接编码 + 基础验证 |
+| **轻量** (引用 ≤3, 同模块，无循环依赖) | Phase 0-3（minimal THINK → 简化 Delphi 评审 → BUILD/REVIEW） | 低强度执行，仍需 DELPHI-GATE APPROVED |
 | **标准** (引用 4-10, 跨 1-2 模块) | Phase 0-4（完整 THINK → BUILD → REVIEW） | 标准 sprint |
 | **复杂** (引用 >10 或 循环依赖 或 跨 3+ 模块) | Phase 0-8（完整 sprint-flow） | 完整流程 + 风险警告 |
+
+**所有流程路线均需在 Phase 2 前获得 delphi-review APPROVED verdict。**
 
 ## 学习闭环
 

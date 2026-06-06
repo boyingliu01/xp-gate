@@ -182,9 +182,26 @@ find . -name "*{target}*.test.*" -o -name "*{target}*.spec.*" | grep -v node_mod
 
 | 流程级别 | 路由 |
 |---------|------|
-| **轻量** | → Phase 2 BUILD（跳过 Phase 0 brainstorming、Phase 1 delphi-review） |
+| **轻量** | → Phase 0 THINK（reduced-intensity 流程，见 references/force-levels.md） |
 | **标准** | → Phase 0 THINK（正常流程） |
 | **复杂** | → Phase 0 THINK（完整流程 + 风险警告提示） |
+
+**DELPHI-GATE invariant**: 所有流程级别（轻量/标准/复杂）的 Phase 2 BUILD 启动前，**必须**检查 `.sprint-state/delphi-reviewed.json` 的 verdict 为 `APPROVED`。未通过 delphi-review 直接路由到 BUILD 属于严重违规。
+
+**轻量级的正确理解**: 轻量级意味着 reduced-intensity 的 delphi-review（**2 专家、1 轮、2/2 APPROVED、较短上下文**），**不是**跳过 delphi-review，**不是** 1 专家评审。见 references/force-levels.md 的轻量级流程定义。
+
+**自动 escalation 规则**（检测到以下情况时，自动提升流程级别）:
+
+| 触发条件 | 原级别 | 提升级别 | 理由 |
+|---------|--------|---------|------|
+| 风险警告（循环依赖、Public API > 5） | 轻量 | 标准 | 技术风险需要标准流程 |
+| 多位专家 disagreement 或 REQUEST_CHANGES | 轻量/标准 | 复杂 | 意见分歧需要更全面评审 |
+| 涉及文件数 > 10 或 LOC > 500 | 轻量 | 标准 | 超出轻量级预算 |
+| 修改公共 API（export 接口） | 轻量/标准 | 复杂 | API 变更影响范围广 |
+| 检测到循环依赖 | 任何级别 | 复杂 | 架构风险强制复杂流程 |
+| 相关测试文件缺失或覆盖率 < 80% | 轻量/标准 | 标准 | 需要补充测试 |
+
+**跨参考**: 详见 references/force-levels.md 的各级别流程定义和强制规则。
 
 ---
 
@@ -198,6 +215,8 @@ git diff --stat HEAD 2>/dev/null  # 如果有局部修改
 ```
 
 **处理**: 如果预估改动 < 20 行且涉及 ≤ 2 个文件，自动判定为「轻量」并告知用户，不强制展示完整 AUTO-ESTIMATE 面板。
+
+**注意**: 轻量级仍需要完整的 Sprint Flow 流程（包括 delphi-review），只是 reduced-intensity。见 references/force-levels.md 的轻量级定义。**不会**绕过 DELPHI-GATE 直接路由到 BUILD。
 
 ### 场景 2: 无法提取目标关键词
 
