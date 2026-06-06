@@ -8,18 +8,24 @@ const PKG_ROOT = path.resolve(__dirname, '..');
 const REPO_ROOT = path.resolve(PKG_ROOT, '..', '..');
 
 const CORE_SKILLS = [
-  'sprint-flow',
+  'admin-template-guidelines',
   'delphi-review',
-  'test-specification-alignment',
+  'improve-codebase-architecture',
   'ralph-loop',
+  'sprint-flow',
+  'test-driven-development',
+  'test-specification-alignment',
+  'to-issues',
 ];
 
-const PLUGINS = ['claude-code'];
+const PLUGINS = ['claude-code', 'opencode', 'qoder'];
 
 function rmrf(target) {
   if (!fs.existsSync(target)) return;
   fs.rmSync(target, { recursive: true, force: true });
 }
+
+const SKIP_DIRS = new Set(['node_modules', '.git', 'dist', 'coverage', '.opencode']);
 
 function copyDir(src, dest) {
   if (!fs.existsSync(src)) {
@@ -29,6 +35,7 @@ function copyDir(src, dest) {
   fs.mkdirSync(dest, { recursive: true });
   const entries = fs.readdirSync(src, { withFileTypes: true });
   for (const entry of entries) {
+    if (SKIP_DIRS.has(entry.name)) continue;
     const srcPath = path.join(src, entry.name);
     const destPath = path.join(dest, entry.name);
     if (entry.isDirectory()) {
