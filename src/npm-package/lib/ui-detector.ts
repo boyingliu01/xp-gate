@@ -45,11 +45,11 @@ export function isExcluded(filePath: string, exclusions: string[]): boolean {
 }
 
 function matchGlob(filePath: string, pattern: string): boolean {
-  // Convert simplified glob to regex
+  // Escape literal dots first, then replace placeholders with regex
   const regex = pattern
+    .replace(/\./g, '\\.')
     .replace(/_STARSTAR_/g, '.*')
-    .replace(/_STAR_/g, '[^/]*')
-    .replace(/\./g, '\\.');
+    .replace(/_STAR_/g, '[^/]*');
   const re = new RegExp(`^${regex}$`);
   return re.test(filePath);
 }

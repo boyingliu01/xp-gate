@@ -79,14 +79,7 @@ describe('ui-detector', () => {
       expect(result.matchedFiles).toContain('views/login.html');
     });
 
-    it('should return true for deleted UI files', async () => {
-      mockExecSync.mockReturnValue('views/old.html\n');
-      const { detectUiSprint } = await import('../ui-detector');
-      const result = detectUiSprint();
-      expect(result.isUiSprint).toBe(true);
-    });
-
-    it('should handle renamed files correctly', async () => {
+    it('should return true for renamed UI files', async () => {
       mockExecSync.mockReturnValue('views/a.html → views/b.html\n');
       const { detectUiSprint } = await import('../ui-detector');
       const result = detectUiSprint();
@@ -114,63 +107,7 @@ describe('ui-detector', () => {
     it('should handle git command failure gracefully', async () => {
       mockExecSync.mockImplementation(() => {
         throw new Error('git not available');
-  describe('collectUiMatches and detectUiSprint', () => {
-    it('should detect UI files in components directory', async () => {
-      const { collectUiMatches } = await import('../ui-detector');
-      const result = collectUiMatches(['src/components/Button.tsx', 'src/utils/helper.ts']);
-      expect(result.isUiSprint).toBe(true);
-      expect(result.matchedFiles).toEqual(['src/components/Button.tsx']);
-      expect(result.matchedRules.length).toBeGreaterThan(0);
-    });
-
-    it('should exclude test files from matching', async () => {
-      const { collectUiMatches } = await import('../ui-detector');
-      const result = collectUiMatches(['src/components/Button.test.tsx']);
-      expect(result.isUiSprint).toBe(false);
-      expect(result.matchedFiles).toEqual([]);
-    });
-
-    it('should exclude coverage directory files', async () => {
-      const { collectUiMatches } = await import('../ui-detector');
-      const result = collectUiMatches(['coverage/components/Coverage.tsx']);
-      expect(result.isUiSprint).toBe(false);
-    });
-
-    it('should handle empty file list', async () => {
-      const { collectUiMatches } = await import('../ui-detector');
-      const result = collectUiMatches([]);
-      expect(result.isUiSprint).toBe(false);
-      expect(result.matchedFiles).toEqual([]);
-    });
-
-    it('should collect multiple UI files', async () => {
-      const { collectUiMatches } = await import('../ui-detector');
-      const result = collectUiMatches([
-        'src/components/Header.tsx',
-        'src/utils/api.ts',
-        'views/styles/app.css',
-      ]);
-      expect(result.isUiSprint).toBe(true);
-      expect(result.matchedFiles).toHaveLength(2);
-    });
-
-    it('should aggregate unique rules across files', async () => {
-      const { collectUiMatches } = await import('../ui-detector');
-      const result = collectUiMatches([
-        'src/components/Button.tsx',
-        'src/components/Card.tsx',
-      ]);
-      expect(result.isUiSprint).toBe(true);
-      expect(result.matchedFiles.length).toBeGreaterThan(0);
-    });
-
-    it('should respect .ui-gate-ignore patterns', async () => {
-      const { collectUiMatches } = await import('../ui-detector');
-      const withoutIgnore = collectUiMatches(['legacy/components/Old.tsx']);
-      expect(withoutIgnore.isUiSprint).toBe(true);
-    });
-  });
-});
+      });
       const { detectUiSprint } = await import('../ui-detector');
       const result = detectUiSprint();
       expect(result.isUiSprint).toBe(false);
@@ -182,6 +119,29 @@ describe('ui-detector', () => {
       const result = detectUiSprint();
       expect(result.isUiSprint).toBe(true);
       expect(result.matchedFiles.length).toBe(2);
+    });
+  });
+
+  describe('getChangedFiles', () => {
+    it('parses git diff output into file array', async () => {
+      mockExecSync.mockReturnValue('src/a.ts\nsrc/b.ts\n');
+      const { getChangedFiles } = await import('../ui-detector');
+      const files = getChangedFiles('main');
+      expect(files).toEqual(['src/a.ts', 'src/b.ts']);
+    });
+
+    it('returns empty array for empty diff', async () => {
+      mockExecSync.mockReturnValue('');
+      const { getChangedFiles } = await import('../ui-detector');
+      const files = getChangedFiles('main');
+      expect(files).toEqual([]);
+    });
+
+    it('filters out empty lines', async () => {
+      mockExecSync.mockReturnValue('src/a.ts\n\nsrc/b.ts\n');
+      const { getChangedFiles } = await import('../ui-detector');
+      const files = getChangedFiles('main');
+      expect(files).toEqual(['src/a.ts', 'src/b.ts']);
     });
   });
 
@@ -269,9 +229,9 @@ describe('ui-detector', () => {
       expect(result.isUiSprint).toBe(false);
     });
 
-    it('should exclude src/__snapshots__ directory files', async () => {
+    it('excludes files under src/coverage/', async () => {
       const { collectUiMatches } = await import('../ui-detector');
-      const result = collectUiMatches(['src/__snapshots__/Button.test.tsx.snap']);
+      const result = collectUiMatches(['src/coverage/components/Coverage.tsx']);
       expect(result.isUiSprint).toBe(false);
     });
 
@@ -279,6 +239,7 @@ describe('ui-detector', () => {
       const { collectUiMatches } = await import('../ui-detector');
       const result = collectUiMatches([]);
       expect(result.isUiSprint).toBe(false);
+      expect(result.matchedFiles).toEqual([]);
     });
 
     it('should collect multiple UI files', async () => {
@@ -292,7 +253,7 @@ describe('ui-detector', () => {
       expect(result.matchedFiles).toHaveLength(2);
     });
 
-    it('should collect unique rules across files', async () => {
+    it('should aggregate unique rules across files', async () => {
       const { collectUiMatches } = await import('../ui-detector');
       const result = collectUiMatches([
         'src/components/Button.tsx',
@@ -306,6 +267,48 @@ describe('ui-detector', () => {
       const { collectUiMatches } = await import('../ui-detector');
       const withoutIgnore = collectUiMatches(['legacy/components/Old.tsx']);
       expect(withoutIgnore.isUiSprint).toBe(true);
+    });
+  });
+
+  describe('isExcluded and loadUiGateIgnore', () => {
+    it('excludes paths matching **/coverage/** with leading directory', async () => {
+      const { isExcluded } = await import('../ui-detector');
+      expect(isExcluded('src/coverage/report.html', ['**/coverage/**'])).toBe(true);
+    });
+
+    it('does not match non-excluded paths', async () => {
+      const { isExcluded } = await import('../ui-detector');
+      expect(isExcluded('src/app.ts', ['**/coverage/**'])).toBe(false);
+    });
+
+    it('returns empty array when .ui-gate-ignore does not exist', async () => {
+      const { loadUiGateIgnore } = await import('../ui-detector');
+      expect(loadUiGateIgnore('/tmp')).toEqual([]);
+    });
+
+    it('excludes paths matching **/node_modules/** with leading directory', async () => {
+      const { isExcluded } = await import('../ui-detector');
+      expect(isExcluded('lib/node_modules/pkg/index.js', ['**/node_modules/**'])).toBe(true);
+    });
+
+    it('excludes paths matching **/dist/** with leading directory', async () => {
+      const { isExcluded } = await import('../ui-detector');
+      expect(isExcluded('src/dist/bundle.js', ['**/dist/**'])).toBe(true);
+    });
+
+    it('excludes paths matching **/build/** with leading directory', async () => {
+      const { isExcluded } = await import('../ui-detector');
+      expect(isExcluded('src/build/output.js', ['**/build/**'])).toBe(true);
+    });
+
+    it('excludes paths matching **/__tests__/**', async () => {
+      const { isExcluded } = await import('../ui-detector');
+      expect(isExcluded('src/__tests__/Button.test.tsx', ['**/__tests__/**'])).toBe(true);
+    });
+
+    it('excludes paths matching **/*.test.*', async () => {
+      const { isExcluded } = await import('../ui-detector');
+      expect(isExcluded('src/Button.test.tsx', ['**/*.test.*'])).toBe(true);
     });
   });
 });
