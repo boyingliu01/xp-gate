@@ -505,17 +505,22 @@ if [ "$PROJECT_LANG" = "documentation-only" ]; then
     # Verify tsc is real TypeScript compiler (npx may fetch deprecated tsc@2.0.4 placeholder)
     TSC_OUTPUT=$(npx tsc --version 2>&1)
     if echo "$TSC_OUTPUT" | grep -q "Version"; then
-      # Run TypeScript type checking
-      echo "Running TypeScript static analysis ($TSC_OUTPUT)..."
-      npx tsc --noEmit --skipLibCheck 2>&1 | head -30
-      TSC_EXIT=$?
-      if [ "$TSC_EXIT" -ne 0 ]; then
-        echo ""
-        echo "❌ BLOCKED - TYPE ERRORS detected"
-        echo "Fix the type errors above before committing."
-        exit 1
+      # Only run tsc if tsconfig.json exists (without it tsc prints help and exits non-zero)
+      if [ -f "tsconfig.json" ]; then
+        # Run TypeScript type checking
+        echo "Running TypeScript static analysis ($TSC_OUTPUT)..."
+        npx tsc --noEmit --skipLibCheck 2>&1 | head -30
+        TSC_EXIT=$?
+        if [ "$TSC_EXIT" -ne 0 ]; then
+          echo ""
+          echo "❌ BLOCKED - TYPE ERRORS detected"
+          echo "Fix the type errors above before committing."
+          exit 1
+        fi
+        echo "✅ PASSED - TypeScript static analysis."
+      else
+        echo "ℹ️  SKIP - tsconfig.json not found (no TypeScript project config)"
       fi
-      echo "✅ PASSED - TypeScript static analysis."
     else
       echo "ℹ️  SKIP - tsc not properly installed ($TSC_OUTPUT)"
       echo "Install typescript (npm install typescript --save-dev) for type checking."
