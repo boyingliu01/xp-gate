@@ -123,59 +123,72 @@ export async function saveBaseline(baselinePath: string, baseline: Record<string
   await fs.writeFile(baselinePath, JSON.stringify(baseline, null, 2));
 }
 
+function evaluateNewFile(currentWarnings: number): Pick<DeltaResult, 'enforcement' | 'reason'> {
+  if (currentWarnings > 0) {
+    return {
+      enforcement: 'BLOCK',
+      reason: `New files must have zero warnings (currently: ${currentWarnings}). Boy Scout Rule: Leave the code cleaner than you found it.`,
+    };
+  }
+  return { enforcement: 'PASS', reason: 'New file with zero warnings' };
+}
+
+function describeNonIncreasedDelta(delta: number, currentWarnings: number): string {
+  if (delta < 0) return `Warnings decreased by ${Math.abs(delta)}`;
+  if (currentWarnings === 0) return 'All warnings cleared';
+  return 'No new warnings introduced';
+}
+
+function evaluateModifiedFile(
+  baselineEntry: BaselineEntry | null,
+  currentWarnings: number,
+  baselineWarnings: number,
+): Pick<DeltaResult, 'enforcement' | 'reason'> {
+  if (!baselineEntry) {
+    return { enforcement: 'PASS', reason: 'File added to baseline with current warning count' };
+  }
+
+  if (currentWarnings > baselineWarnings) {
+    return {
+      enforcement: 'BLOCK',
+      reason: `Modified files cannot increase warnings (${currentWarnings} > ${baselineWarnings}). Boy Scout Rule: Leave the code cleaner than you found it.`,
+    };
+  }
+
+  if (baselineWarnings <= 5 && currentWarnings > 0) {
+    return {
+      enforcement: 'BLOCK',
+      reason: `Files with <=5 warnings must clear to zero (currently: ${currentWarnings}/${baselineWarnings}). Boy Scout Rule: Leave the code cleaner than you found it.`,
+    };
+  }
+
+  return {
+    enforcement: 'PASS',
+    reason: describeNonIncreasedDelta(currentWarnings - baselineWarnings, currentWarnings),
+  };
+}
+
 export function calculateDelta(
   baselineEntry: BaselineEntry | null,
   currentWarnings: number,
   status: 'NEW' | 'MODIFIED'
 ): DeltaResult {
-  const deltaResult: DeltaResult = {
+  const baselineWarnings = baselineEntry ? baselineEntry.totalWarnings : 0;
+  const delta = status === 'NEW' ? currentWarnings : currentWarnings - baselineWarnings;
+
+  const evaluation = status === 'NEW'
+    ? evaluateNewFile(currentWarnings)
+    : evaluateModifiedFile(baselineEntry, currentWarnings, baselineWarnings);
+
+  return {
     file: '',
     status,
-    baselineWarnings: baselineEntry ? baselineEntry.totalWarnings : 0,
+    baselineWarnings,
     currentWarnings,
-    delta: 0,
-    enforcement: 'PASS',
-    reason: ''
+    delta,
+    enforcement: evaluation.enforcement,
+    reason: evaluation.reason,
   };
-
-  if (status === 'NEW') {
-    deltaResult.delta = currentWarnings;
-    if (currentWarnings > 0) {
-      deltaResult.enforcement = 'BLOCK';
-      deltaResult.reason = `New files must have zero warnings (currently: ${currentWarnings}). Boy Scout Rule: Leave the code cleaner than you found it.`;
-    } else {
-      deltaResult.enforcement = 'PASS';
-      deltaResult.reason = 'New file with zero warnings';
-    }
-  } else {
-    // For modified files with no baseline (new to baseline due to auto-init), treat as special case
-    if (!baselineEntry) {
-      // Auto-initialized file, allow current warnings as the new baseline, just verify this doesn't increase warnings
-      deltaResult.enforcement = 'PASS';
-      deltaResult.reason = 'File added to baseline with current warning count';
-    } else {
-      deltaResult.delta = currentWarnings - deltaResult.baselineWarnings;
-      
-      if (currentWarnings > deltaResult.baselineWarnings) {
-        deltaResult.enforcement = 'BLOCK';
-        deltaResult.reason = `Modified files cannot increase warnings (${currentWarnings} > ${deltaResult.baselineWarnings}). Boy Scout Rule: Leave the code cleaner than you found it.`;
-      } 
-      else if (deltaResult.baselineWarnings <= 5 && currentWarnings > 0) {
-        deltaResult.enforcement = 'BLOCK';
-        deltaResult.reason = `Files with <=5 warnings must clear to zero (currently: ${currentWarnings}/${deltaResult.baselineWarnings}). Boy Scout Rule: Leave the code cleaner than you found it.`;
-      }
-      else {
-        deltaResult.enforcement = 'PASS';
-        deltaResult.reason = deltaResult.delta < 0 
-          ? `Warnings decreased by ${Math.abs(deltaResult.delta)}` 
-          : currentWarnings === 0
-          ? 'All warnings cleared'
-          : 'No new warnings introduced';
-      }
-    }
-  }
-
-  return deltaResult;
 }
 
 export function enforceBoyScoutRule(deltas: DeltaResult[]): EnforcementResult {
@@ -243,31 +256,25 @@ async function autoInitBaseline(
   return baseline;
 }
 
-async function main(): Promise<number> {
-  const args = process.argv.slice(2);
-  
-  const parsed = parseArgs(args);
-  
-  if (parsed.command === 'init-baseline') {
-    try {
-      await initBaselineCommand((parsed.files ?? []) as string[]);
-      console.log('Baseline initialized successfully');
-      return 0;
-    } catch (error: unknown) {
-      console.error('Error initializing baseline:', error);
-      return 1;
-    }
+async function runInitBaselineCommand(parsed: Record<string, unknown>): Promise<number> {
+  try {
+    await initBaselineCommand((parsed.files ?? []) as string[]);
+    console.log('Baseline initialized successfully');
+    return 0;
+  } catch (error: unknown) {
+    console.error('Error initializing baseline:', error);
+    return 1;
   }
-  
+}
+
+async function runEnforcementCommand(parsed: Record<string, unknown>): Promise<number> {
   try {
     const enforcementResult = await runEnforcement(
       (parsed.newFiles ?? []) as string[],
       (parsed.modifiedFiles ?? []) as string[],
       (parsed.baselinePath as string) || '.warnings-baseline.json'
     );
-    
     console.log(JSON.stringify(enforcementResult, null, 2));
-    
     return enforcementResult.overallStatus === 'PASS' ? 0 : 1;
   } catch (error: unknown) {
     console.error('Error during enforcement:', error);
@@ -275,36 +282,45 @@ async function main(): Promise<number> {
   }
 }
 
+async function main(): Promise<number> {
+  const parsed = parseArgs(process.argv.slice(2));
+  return parsed.command === 'init-baseline'
+    ? runInitBaselineCommand(parsed)
+    : runEnforcementCommand(parsed);
+}
+
+function splitCsvArg(raw: string | undefined): string[] {
+  return raw?.split(',').map((s: string) => s.trim()).filter(Boolean) || [];
+}
+
+const ARG_HANDLERS: Record<string, (parsed: Record<string, unknown>, next: string | undefined) => boolean> = {
+  '--new-files': (parsed, next) => { parsed.newFiles = splitCsvArg(next); return true; },
+  '--modified-files': (parsed, next) => { parsed.modifiedFiles = splitCsvArg(next); return true; },
+  '--baseline': (parsed, next) => { parsed.baselinePath = next; return true; },
+  '--init-baseline': (parsed, next) => {
+    parsed.command = 'init-baseline';
+    parsed.files = splitCsvArg(next);
+    return true;
+  },
+};
+
 function parseArgs(args: string[]): Record<string, unknown> {
-const parsed: Record<string, unknown> = {
+  const parsed: Record<string, unknown> = {
     command: null,
     newFiles: [],
     modifiedFiles: [],
-    baselinePath: null
+    baselinePath: null,
   };
 
   for (let i = 0; i < args.length; i++) {
     const arg = args[i];
-    
-    if (arg === '--new-files') {
-      parsed.newFiles = args[i + 1]?.split(',').map((s: string) => s.trim()).filter(Boolean) || [];
-      i++;
-    } else if (arg === '--modified-files') {
-      parsed.modifiedFiles = args[i + 1]?.split(',').map((s: string) => s.trim()).filter(Boolean) || [];
-      i++;
-    } else if (arg === '--baseline') {
-      parsed.baselinePath = args[i + 1];
-      i++;
-    } else if (arg === '--init-baseline') {
-      parsed.command = 'init-baseline';
-      parsed.files = args[i + 1]?.split(',').map((s: string) => s.trim()).filter(Boolean) || [];
-      i++;
-    } else if (arg === '--help' || arg === '-h') {
+    if (arg === '--help' || arg === '-h' || arg === 'help') {
       showHelp();
       process.exit(0);
-    } else if (arg === 'help') {
-      showHelp();
-      process.exit(0);
+    }
+    const handler = ARG_HANDLERS[arg];
+    if (handler && handler(parsed, args[i + 1])) {
+      i++;
     }
   }
 

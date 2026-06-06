@@ -2,14 +2,6 @@ export type MockStrategy = 'real' | 'mock' | 'partial';
 
 export type DependencyScope = 'internal' | 'external' | 'pending';
 
-export interface DependencyInfo {
-  importPath: string;
-  scope: DependencyScope;
-  isImplemented: boolean;
-  reason: string;
-  pendingTicket?: string;
-}
-
 export interface MockDecision {
   strategy: MockStrategy;
   reason: string;

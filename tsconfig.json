@@ -14,5 +14,5 @@
     "types": ["node"]
   },
   "include": ["src/**/*"],
-  "exclude": ["node_modules", "dist", "src/_wip", "src/**/__tests__/**", "src/**/*.test.ts", "src/**/*.spec.ts"]
+  "exclude": ["node_modules", "dist", "src/_wip", "src/**/__tests__/**", "src/**/*.test.ts", "src/**/*.spec.ts", "src/npm-package/plugins/**", "src/npm-package/skills/**"]
 }

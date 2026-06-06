@@ -7,11 +7,11 @@ import {
   GateMStatus,
   MutationBaseline,
   MutationScore,
-  StrykerReport,
   FileThreshold,
   ScoreEvaluation,
   TestIntentCheckResult
 } from './types';
+import { StrykerReport } from './stryker-types';
 import { detectAITestCharacteristics } from './detect-ai-test';
 
 const DEFAULT_THRESHOLD = 60;

@@ -1,21 +1,7 @@
 import { analyze, getAdapterForFile } from './analyzer';
 import { formatConsole, formatJSON, formatSARIF } from './reporter';
 import { loadConfig } from './config';
-import { longFunctionRule } from './rules/clean-code/long-function';
-import { largeFileRule } from './rules/clean-code/large-file';
-import { magicNumbersRule } from './rules/clean-code/magic-numbers';
-import { godClassRule } from './rules/clean-code/god-class';
-import { deepNestingRule } from './rules/clean-code/deep-nesting';
-import { tooManyParamsRule } from './rules/clean-code/too-many-params';
-import { missingErrorHandlingRule } from './rules/clean-code/missing-error-handling';
-import { unusedImportsRule } from './rules/clean-code/unused-imports';
-import { codeDuplicationRule } from './rules/clean-code/code-duplication';
-import { manyExportsRule } from './rules/clean-code/many-exports';
-import { srpRule } from './rules/solid/srp';
-import { ocpRule } from './rules/solid/ocp';
-import { lspRule } from './rules/solid/lsp';
-import { ispRule } from './rules/solid/isp';
-import { dipRule } from './rules/solid/dip';
+import { getAllPrincipleRules } from './rules';
 
 interface CLIOptions {
   files: string[];
@@ -59,23 +45,7 @@ export function parseArgs(args: string[]): CLIOptions {
 }
 
 function getAllRules() {
-  return [
-    longFunctionRule,
-    largeFileRule,
-    magicNumbersRule,
-    godClassRule,
-    deepNestingRule,
-    tooManyParamsRule,
-    missingErrorHandlingRule,
-    unusedImportsRule,
-    codeDuplicationRule,
-    manyExportsRule,
-    srpRule,
-    ocpRule,
-    lspRule,
-    ispRule,
-    dipRule
-  ];
+  return getAllPrincipleRules();
 }
 
 export { getAllRules };
