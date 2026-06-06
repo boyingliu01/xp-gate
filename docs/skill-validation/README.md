@@ -10,9 +10,6 @@ docs/skill-validation/
 ├── README.md                           # 本文件 — 验证文档索引
 ├── validation-summary.md               # 总验证报告（含 3 skill 汇总）
 ├── validation-methodology.md           # 验证方法论（L1-L4 框架 + 20 业界方案）
-├── promptpressure/
-│   ├── drift-report-final.md           # 最终漂移检测报告（改进后）
-│   └── cross-model-results.json        # 跨模型对比原始数据
 └── eval-cases/
     ├── delphi-review/evals.json        # delphi-review 测试用例
     ├── sprint-flow/evals.json          # sprint-flow 测试用例
@@ -40,5 +37,5 @@ docs/skill-validation/
 
 调研了 20 个业界验证框架，详见 `validation-methodology.md`。推荐三层验证体系：
 1. **首次验证**: Anthropic skill-creator
-2. **回归检测**: promptfoo (CI/CD 集成)
-3. **漂移检测**: PromptPressure (模型更新时)
+2. **回归检测**: external skill-cert project (skill 创建/修改时)
+3. **漂移检测**: external skill-cert project (模型更新时)

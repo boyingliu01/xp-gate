@@ -28,7 +28,7 @@
 ### GITHOOKS-GATE (Phase 1→2 闸门)
 
 - 执行时机: Phase 1 完全通过、准备进入 Phase 2 BUILD 前
-- `githooks/verify.sh` 全部存在 → 直接进入 BUILD
+- `githooks/verify.sh` 全部存在 → 进入 BUILD 入口（仍必须先执行 DELPHI-GATE）
 - 缺失 → `githooks/install.sh` 安装（hooks + adapter 基础设施）
 - **核心原则**: 没有质量门禁的代码不可进入 BUILD。**失败 → 不可编码。**
 

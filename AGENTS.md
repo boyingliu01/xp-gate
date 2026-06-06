@@ -49,7 +49,7 @@ XP-Gate — 6质量门禁（合并自原版9个）+ AI多专家评审的自动�
 │   ├── sync-version.sh  # VERSION → 4 package.json files
 │   └── test-plugins.sh  # 28 plugin integration tests
 ├── dashboard/          # Quality web dashboard (serve.js, dashboard.js)
-├── .github/workflows/  # 8 CI pipelines: quality-gates(953 lines), npm-publish, cross-platform, sonarqube, security, llm-security, mutation-test, promptfoo-eval
+├── .github/workflows/  # 7 CI pipelines: quality-gates, npm-publish, cross-platform-ci, sonarqube, security-audit, mutation-test, skill-cert-eval
 ├── specification.yaml  # Req (auto-generated from APPROVED design docs)
 ├── architecture.yaml   # Arch rules (ARCH-001 to ARCH-014)
 ├── VERSION             # Single source of truth (MAJOR.MINOR.PATCH.MICRO format)
@@ -79,7 +79,7 @@ XP-Gate — 6质量门禁（合并自原版9个）+ AI多专家评审的自动�
 | Architecture | ./src/architecture/ | Layer boundary validation (ARCH-001 to ARCH-014) |
 | Version Sync | ./scripts/sync-version.sh | VERSION → root/npm-package/claude-plugin/opencode package.json |
 | Quality Dashboard | ./dashboard/ | `npm run dashboard` → localhost:3333 |
-| CI Workflows | .github/workflows/ | 8 pipelines, quality-gates.yml is 953 lines |
+| CI Workflows | .github/workflows/ | 7 pipelines, quality-gates.yml is 953 lines |
 
 ## CODE MAP
 | Symbol | Type | Location | Refs | Role |
@@ -107,7 +107,7 @@ XP-Gate — 6质量门禁（合并自原版9个）+ AI多专家评审的自动�
 - VERSION file: single source of truth (MAJOR.MINOR.PATCH.MICRO), sync-version.sh propagates to 4 package.json files
 - Delphi review: ≥91% consensus, 3 experts from ≥2 different providers, domestic models only
 - ralph-loop: Phase 2 BUILD default mode, REQ-level iteration, saves 40-67% tokens vs parallel
-- promptfoo/ and promptpressure/ directories **removed** — test infra moved to .github/workflows/
+- Skill validation/security eval infrastructure lives in external skill-cert project; xp-gate only distributes/invokes skills
 
 ## ANTI-PATTERNS (THIS PROJECT)
 - Do NOT bypass quality gates via `--no-verify`
@@ -178,7 +178,7 @@ xp-gate migrate             # Clean up v0.4.x残留 (GitHub Packages → npm)
 
 ## NOTES
 - skill-cert/ is an external Python subproject (separate install, own pyproject.toml + venv)
-- promptfoo/ and promptpressure/ directories no longer exist — CI workflows replaced them
+- Skill validation/security eval directories no longer exist in xp-gate — use external skill-cert project for creation/update-time skill evaluation
 - .worktrees/ contains sprint and windows-compat worktrees
 - coverage/ directory contains vitest HTML reports (not committed)
 - dashboard/ contains static web dashboard files

@@ -15,7 +15,6 @@
     "mutation:baseline:init": "npx tsx src/mutation/init-baseline.ts",
     "mutation:baseline:download": "npx tsx src/mutation/update-baseline.ts --download",
     "mutation:incremental": "npx tsx src/mutation/gate-m.ts",
-    "security:llm": "npx promptfoo eval --config promptfoo/promptsecurity.yaml",
     "build": "tsc",
     "build:claude-plugin": "bash scripts/build-plugin.sh --platform claude-code",
     "build:opencode-plugin": "bash scripts/build-plugin.sh --platform opencode",

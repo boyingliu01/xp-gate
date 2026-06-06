@@ -23,7 +23,7 @@
 | Skill | 来源 | 触发条件 | 条件分支 |
 |-------|------|---------|---------|
 | `autoplan` | gstack | 进入 Phase 1 自动调用 | 输出 AUTO_APPROVED 或 NEEDS_REVIEW |
-| `delphi-review` | xp-gate | autoplan NEEDS_REVIEW OR taste_decisions > 0 | 跳过如果 AUTO_APPROVED + 无 taste_decisions |
+| `delphi-review` | xp-gate | Phase 1 强制调用；AUTO_APPROVED + 无 taste_decisions 使用 lightweight delphi-review | 必须产生 `.sprint-state/delphi-reviewed.json` 且 verdict=APPROVED |
 | `to-issues` | xp-gate | delphi-review APPROVED 后 | 拆解为垂直切片 → slices-manifest.json |
 
 ### Phase 2: BUILD

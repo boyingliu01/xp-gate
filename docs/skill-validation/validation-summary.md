@@ -87,8 +87,8 @@ L4: 执行稳定性 → 跨模型/跨次运行的方差分析
 | 机制 | 工具 | 频率 |
 |------|------|------|
 | 首次验证 | Anthropic skill-creator | 新 skill 创建时 |
-| 回归检测 | promptfoo (CI/CD) | 每周 + skill 变更时 |
-| 漂移检测 | PromptPressure | 模型更新时 |
+| 回归检测 | external skill-cert project | skill 创建/修改时 |
+| 漂移检测 | external skill-cert project | 模型更新时 |
 | 边界测试 | evals/evals.json | 随 skill 一起维护 |
 
 ---
@@ -103,5 +103,5 @@ L4: 执行稳定性 → 跨模型/跨次运行的方差分析
 | sprint-flow 验证报告 | `.sprint-state/.../validation-report-sprint-flow.md` |
 | test-spec 验证报告 | `.sprint-state/.../validation-report-test-spec-alignment.md` |
 | 稳定性报告 | `.sprint-state/.../stability-report-delphi-review.md` |
-| 漂移检测报告 | `promptpressure/results/*/drift-report.json` |
+| 漂移检测报告 | external skill-cert project artifact |
 | P1 完成报告 | `.sprint-state/.../p1-completion-report.md` |
