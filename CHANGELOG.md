@@ -2,6 +2,22 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.7.1] - 2026-06-06
+
+### Fixed
+- **Issue #147 — Gate 1 lint errors** — 修复 Gate 1 lint 错误并拆分 boy-scout 测试，使其通过 large-file 规则（PR #147）
+- **Issue #139 — stale promptfoo refs** — 清理 promptfoo 历史残留引用、同步 npm-package skills 副本、为轻量级 Delphi route 强制启用 gate（PR #139）
+- **vitest coverage 排除 .worktrees** — `vitest.config.ts` 在 coverage.exclude 中补齐 `.worktrees/**`（test.exclude 已有，coverage 缺漏），避免 worktree 残留 HTML 报告 JS 文件被纳入 coverage 总数（之前导致 Gate 5 阈值误判）
+
+### Changed
+- **Version consolidation 0.7.1** — 合并 0.6.2（main 上累积未发布的 bugfix #139/#147）+ 0.7.0（Qoder 集成迭代分支引入的 MINOR bump），统一对齐到 0.7.1 作为下一个发布版本
+- **VERSION 同步覆盖扩展** — 同步更新 `src/npm-package/plugins/claude-code/.claude-plugin/plugin.json` 内嵌副本（sync-version.sh 当前未覆盖此路径，已手工修正）
+- **AGENTS.md 版本注释** — `src/npm-package/AGENTS.md` 的 stale 版本注释（0.5.1 → 0.7.1）
+
+### Notes
+- Issue #144（分布式事务：active sprint instance lock + rebase-before-commit guard）仍为 OPEN，本版本未实现
+- `npm-publish` workflow 仅在 `VERSION` 文件变更时触发——这是 #139/#147 此前未触发发布的根因（两个 bugfix 均未 bump 版本）
+
 ## [0.5.1] - 2026-05-30
 
 ### Added

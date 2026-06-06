@@ -11,6 +11,7 @@ export default defineConfig({
       exclude: [
         'src/_wip/**',
         'node_modules/**',
+        '.worktrees/**',
         'src/mutation/**',
         'dashboard/**',
         'src/npm-package/bin/**',

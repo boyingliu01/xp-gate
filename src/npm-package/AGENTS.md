@@ -72,4 +72,4 @@ xp-gate uninstall-skill <name> # Remove skill (--force required)
 - Published as `xp-gate` on public npm registry (moved from GitHub Packages in v0.5.1)
 - Adapters duplicated from githooks/adapters/ — known tech debt, maintenance risk
 - sync-package-content.js runs on `npm version` and `npm pack` to bundle skills/plugins
-- Package version: 0.5.1 (npm semver, 3-digit)
+- Package version: 0.7.1 (npm semver, 3-digit; source of truth = repo VERSION file)
