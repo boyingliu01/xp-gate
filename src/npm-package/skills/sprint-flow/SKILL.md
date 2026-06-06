@@ -178,7 +178,7 @@ Phase 6: SHIP → finishing-a-development-branch (4 选项) → ship (PR 路径)
             → PR 创建完成
 Phase 7: ⚠️ LAND → land-and-deploy → merge PR + wait CI + canary health check
             → deploy verification + auto-rollback on failure
-Phase 8: CLEANUP → git worktree remove + sprint-state.json update → status: merged
+Phase 8: CLEANUP → git worktree remove + branch delete + sprint-state.json update → status: merged
             → Sprint Summary → IF emergent issues → Sprint 2
 ```
 
@@ -512,6 +512,9 @@ Phase 2 第一步必须执行 DELPHI-GATE 检查。没有 delphi-review APPROVED
 **执行时机**: Phase 7 LAND 成功后（或 Phase 6 Option 1 本地 Merge 后）
 
 **动作**:
+0. **保存分支信息**（必须在 worktree remove 之前执行）:
+   - `sprint_branch=$(git branch --show-current)`
+   - 如果 sprint_branch 为空或与 `isolation.branch` 不匹配: 使用 `isolation.branch`
 1. **检测 worktree 是否存在**: `[ -d <worktree_path> ]`
 2. **安全清理**: 
    - **⚠️ 禁止使用通配符或递归 shell 删除命令** — 必须先列出 `isolation.worktree_path` 并确认只清理本 sprint worktree
@@ -519,14 +522,29 @@ Phase 2 第一步必须执行 DELPHI-GATE 检查。没有 delphi-review APPROVED
    - 如果仍失败：输出 `[WARN] Worktree cleanup failed; list the target path and ask the user to clean it manually`
    - ** NEVER delete arbitrary directories** — 只删除本 sprint 创建的 `isolation.worktree_path`
 3. **残留检测**: `[ -d <worktree_path> ]` → 如果仍有残留，输出警告 `[WARN] 检测到残留目录，请手动检查：<worktree_path>`
-4. **更新 `.sprint-state/sprint-state.json`**:
+4. **删除本地和远程分支**（⚠️ 必须在步骤 2 worktree remove 成功后执行）:
+   - 切回主分支: `cd <repo_root> && git checkout main && git pull origin main`
+   - 删除本地分支: `git branch -D <sprint_branch>`
+     - 使用 `-D` 因为 squash merge 后 git 不认为已合并
+     - 如果分支不存在（已被其他流程删除）: 静默跳过
+   - 删除远程分支: `git push origin --delete <sprint_branch>`
+   - 如果远程分支删除失败: 输出 `[WARN] Remote branch cleanup failed, please manually run: git push origin --delete <sprint_branch>`
+5. **关闭遗留 OPEN PR**:
+   - `gh pr list --head <sprint_branch> --state open`
+   - 如果存在 OPEN PR: 关闭并评论说明该 sprint 已通过其他 PR 完成
+6. **更新 `.sprint-state/sprint-state.json`**:
    - `phase: 8`
    - `status: "merged"` 或 `"completed"`
-5. **输出 Cleanup Report + Sprint Summary**
+7. **输出 Cleanup Report + Sprint Summary**
 
-**条件跳过**: `--no-isolate` 路径（无 worktree 可清理）
+**执行顺序依赖**:
+```
+步骤 0 (保存分支名) → 步骤 2 (worktree remove 解除分支文件占用) → 步骤 4 (branch -D 删分支引用 → push --delete 删远程)
+```
 
-**输出**: `[CLEANUP] Worktree removed:` + 残留检测（✅ clean / ⚠️ residual）
+**条件跳过**: `--no-isolate` 路径（无 worktree/分支可清理）
+
+**输出**: `[CLEANUP] Worktree removed + Branch deleted:` + 残留检测（✅ clean / ⚠️ residual）
 
 **IF emergent issues → Sprint 2**
 
@@ -855,7 +873,7 @@ Sprint state is persisted as JSON in `.sprint-state/sprint-state.json`:
 | Phase 5 (FEEDBACK) | `learn` + `retro` | (同) | (同) | (同) |
 | Phase 6 (SHIP) | `finishing-a-development-branch` + `ship` | (同) | + platform deploy (可选) | (同) |
 | Phase 7 (LAND) | `land-and-deploy` + canary | (同) | (同) | (同) |
-| Phase 8 (CLEANUP) | worktree remove + state update | (同) | (同) | (同) |
+| Phase 8 (CLEANUP) | worktree remove + branch delete + state update | (同) | (同) | (同) |
 | Browse | `localhost:3000` | 部署 URL + 表单/交互 | Flutter Web / RN Web 测试 | (专用负载测试) |
 
 **Mobile 专属工具链**:
@@ -1124,7 +1142,7 @@ When ending or pausing, output:
 | 验证失败仍 commit | 验证不通过的代码不 commit |
 | 跳过 Phase 5 FEEDBACK 直接 SHIP | Phase 5 是 HARD-GATE，不可跳过 |
 | --force 在生产分支上运行不确认 | --force 必须等待用户显式确认风险 |
-| Phase 6 SHIP 后不清理 worktree | Phase 8 CLEANUP 必须执行 git worktree remove |
+| Phase 6 SHIP 后不清理 worktree/分支 | Phase 8 CLEANUP 必须执行 worktree remove + branch delete |
 
 ---
 
@@ -1182,7 +1200,7 @@ Sprint-flow orchestrator MUST output phase transition status as valid JSON:
 | 验证失败仍 commit | 验证不通过的代码不 commit |
 | 跳过 Phase 5 FEEDBACK 直接 SHIP | Phase 5 是 HARD-GATE，不可跳过 |
 | --force 在生产分支上运行不确认 | --force 必须等待用户显式确认风险 |
-| Phase 6 SHIP 后不清理 worktree | Phase 8 CLEANUP 必须执行 git worktree remove |
+| Phase 6 SHIP 后不清理 worktree/分支 | Phase 8 CLEANUP 必须执行 worktree remove + branch delete |
 
 ---
 
