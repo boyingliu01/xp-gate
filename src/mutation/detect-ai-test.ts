@@ -51,17 +51,23 @@ function countTestLines(content: string): number {
   }).length;
 }
 
+const LAYER_PATTERNS: Array<[TestLayer, string[]]> = [
+  ['e2e', ['.e2e.', '/e2e/', 'e2e/']],
+  ['integration', ['.integration.', '/integration/', 'integration/']],
+  ['unit', ['/__tests__/', '.test.', '.spec.']],
+];
+
+function matchesPattern(normalized: string, pattern: string): boolean {
+  if (!pattern.startsWith('/') && pattern.endsWith('/')) {
+    return normalized.startsWith(pattern);
+  }
+  return normalized.includes(pattern);
+}
+
 export function detectTestLayer(testFilePath: string): TestLayer {
-  // Normalize separators for cross-platform matching (Windows uses \)
   const normalized = testFilePath.replace(/\\/g, '/');
-  if (normalized.includes('.e2e.') || normalized.includes('/e2e/') || normalized.startsWith('e2e/')) {
-    return 'e2e';
-  }
-  if (normalized.includes('.integration.') || normalized.includes('/integration/') || normalized.startsWith('integration/')) {
-    return 'integration';
-  }
-  if (normalized.includes('/__tests__/') || normalized.includes('.test.') || normalized.includes('.spec.')) {
-    return 'unit';
+  for (const [layer, patterns] of LAYER_PATTERNS) {
+    if (patterns.some(p => matchesPattern(normalized, p))) return layer;
   }
   return 'unknown';
 }

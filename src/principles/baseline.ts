@@ -14,6 +14,51 @@ interface BaselineStorageConfig {
   batchSize?: number;
 }
 
+type ToolValidator = (entry: BaselineEntry, file: string) => void;
+
+function validateNumber(
+  entry: BaselineEntry,
+  tool: string,
+  file: string,
+  props: string[],
+): void {
+  const obj = entry[tool as keyof BaselineEntry];
+  if (!obj || typeof obj !== 'object') return;
+  for (const prop of props) {
+    if (typeof (obj as Record<string, unknown>)[prop] !== 'number') {
+      throw new Error(`Invalid ${tool} properties for file ${file}`);
+    }
+  }
+}
+
+const ENTRY_VALIDATORS: ToolValidator[] = [
+  e => validateNumber(e, 'eslint', '', ['warnings', 'errors']),
+  e => validateNumber(e, 'principles', '', ['warnings', 'errors']),
+  e => validateNumber(e, 'ccn', '', ['warnings', 'max']),
+];
+
+function validateEntry(file: string, entry: BaselineEntry): void {
+  if (typeof entry.totalWarnings !== 'number' || entry.totalWarnings < 0) {
+    throw new Error(`Invalid totalWarnings value for file ${file}: ${entry.totalWarnings}`);
+  }
+  if (typeof entry.lastAnalyzed !== 'string') {
+    throw new Error(`Missing or invalid lastAnalyzed timestamp for file ${file}`);
+  }
+  for (const validator of ENTRY_VALIDATORS) {
+    validator(entry, file);
+  }
+}
+
+function filterBaselineWarnings(baseline: Record<string, BaselineEntry>, minWarningCount: number = 1): Record<string, BaselineEntry> {
+  const filtered: Record<string, BaselineEntry> = {};
+  for (const [file, entry] of Object.entries(baseline)) {
+    if (entry.totalWarnings >= minWarningCount) {
+      filtered[file] = entry;
+    }
+  }
+  return filtered;
+}
+
 class BaselineStorage {
   private config: BaselineStorageConfig = {
     maxSize: 10000,
@@ -45,48 +90,10 @@ class BaselineStorage {
     if (Object.keys(baseline).length > this.config.maxSize!) {
       throw new Error(`Baseline exceeds maximum size of ${this.config.maxSize} files`);
     }
-
     for (const [file, entry] of Object.entries(baseline)) {
-      if (typeof entry.totalWarnings !== 'number' || entry.totalWarnings < 0) {
-        throw new Error(`Invalid totalWarnings value for file ${file}: ${entry.totalWarnings}`);
-      }
-
-      if (typeof entry.lastAnalyzed !== 'string') {
-        throw new Error(`Missing or invalid lastAnalyzed timestamp for file ${file}`);
-      }
-
-      if (entry.eslint) {
-        if (typeof entry.eslint.warnings !== 'number' || typeof entry.eslint.errors !== 'number') {
-          throw new Error(`Invalid eslint properties for file ${file}`);
-        }
-      }
-
-      if (entry.principles) {
-        if (typeof entry.principles.warnings !== 'number' || typeof entry.principles.errors !== 'number') {
-          throw new Error(`Invalid principles properties for file ${file}`);
-        }
-      }
-
-      if (entry.ccn) {
-        if (typeof entry.ccn.warnings !== 'number' || typeof entry.ccn.max !== 'number') {
-          throw new Error(`Invalid ccn properties for file ${file}`);
-        }
-      }
+      validateEntry(file, entry);
     }
-
     return true;
-  }
-
-  filterToIncludeOnlyFilesWithWarnings(baseline: Record<string, BaselineEntry>, minWarningCount: number = 1): Record<string, BaselineEntry> {
-    const filtered: Record<string, BaselineEntry> = {};
-    
-    for (const [file, entry] of Object.entries(baseline)) {
-      if (entry.totalWarnings >= minWarningCount) {
-        filtered[file] = entry;
-      }
-    }
-    
-    return filtered;
   }
 
   async createFromFiles(warningData: Array<{ file: string; counts: Partial<BaselineEntry> }>): Promise<Record<string, BaselineEntry>> {
@@ -224,9 +231,10 @@ class BaselineStorage {
   }
 }
 
-export { 
-  BaselineEntry, 
+export {
+  BaselineEntry,
   BaselineStorage,
+  filterBaselineWarnings,
   type BaselineStorageConfig
 };
 

@@ -175,6 +175,37 @@ export async function loadExternalDependencies(projectRoot: string): Promise<str
 }
 
 /**
+ * Check if an import path matches any module in a list.
+ * Matches: exact name, subpath (ends with /module), or prefix (starts with module).
+ */
+function matchesModule(importPath: string, modules: string[]): boolean {
+  return modules.some(
+    (mod) => importPath === mod || importPath.endsWith('/' + mod) || importPath.startsWith(mod),
+  );
+}
+
+/**
+ * Check filesystem existence with optional cache.
+ * Returns [exists, resolvedPath].
+ */
+function checkExists(
+  importPath: string,
+  projectRoot: string,
+  existCache?: Map<string, boolean>,
+): [boolean, string] {
+  const resolved = resolveToRealPath(importPath, projectRoot);
+  const exists = existCache?.get(resolved) ?? existsSync(resolved);
+  if (existCache) existCache.set(resolved, exists);
+  return [exists, resolved];
+}
+
+function isExternalPackage(importPath: string, packages: string[]): boolean {
+  return packages.some(
+    (pkg) => importPath === pkg || importPath.startsWith(pkg + '/'),
+  );
+}
+
+/**
  * Classify a single dependency as internal, external, or pending.
  *
  * - **internal**: The import resolves to a file within the project boundary,
@@ -192,54 +223,36 @@ export function classifyDependency(
   importPath: string,
   scope: ProjectScope,
   options: ScanOptions,
-  existCache?: Map<string, boolean>,
+  existCache: Map<string, boolean> = new Map(),
 ): DependencyScope {
-  // Check if it's an implemented module
-  for (const mod of scope.implementedModules) {
-    if (importPath === mod || importPath.endsWith('/' + mod) || importPath.startsWith(mod)) {
-      return 'internal';
-    }
-  }
+  if (matchesModule(importPath, scope.implementedModules)) return 'internal';
+  if (matchesModule(importPath, scope.unimplementedModules)) return 'pending';
+  if (isExternalPackage(importPath, scope.externalPackages)) return 'external';
 
-  // Check if it's an unimplemented module
-  for (const mod of scope.unimplementedModules) {
-    if (importPath === mod || importPath.endsWith('/' + mod) || importPath.startsWith(mod)) {
+  for (const pattern of options.boundary) {
+    if (simpleGlobMatch(pattern, importPath)) {
+      const [exists] = checkExists(importPath, options.projectRoot, existCache);
+      if (exists) return 'internal';
       return 'pending';
     }
   }
 
-  // Check if it's an external package
-  for (const pkg of scope.externalPackages) {
-    if (importPath === pkg || importPath.startsWith(pkg + '/')) {
-      return 'external';
-    }
-  }
+  if (isExternalImport(importPath, options)) return 'external';
 
-  // Check boundary patterns
-  for (const pattern of options.boundary) {
-    if (simpleGlobMatch(pattern, importPath)) {
-      // Within boundary — resolve to check if it exists
-      const resolved = resolveToRealPath(importPath, options.projectRoot);
-      const exists = existCache?.get(resolved) ?? existsSync(resolved);
-      if (existCache) {
-        existCache.set(resolved, exists);
-      }
-      return exists ? 'internal' : 'pending';
-    }
-  }
+  const [exists] = checkExists(importPath, options.projectRoot, existCache);
+  if (exists) return 'internal';
+  return 'pending';
+}
 
-  // External check via isExternalImport
-  if (isExternalImport(importPath, options)) {
-    return 'external';
-  }
-
-  // Fall back to checking filesystem
-  const resolved = resolveToRealPath(importPath, options.projectRoot);
-  const exists = existCache?.get(resolved) ?? existsSync(resolved);
-  if (existCache) {
-    existCache.set(resolved, exists);
-  }
-  return exists ? 'internal' : 'pending';
+function isAlreadyClassified(
+  importPath: string,
+  implemented: string[],
+  unimplemented: string[],
+  external: string[],
+): boolean {
+  return implemented.includes(importPath)
+    || unimplemented.includes(importPath)
+    || external.includes(importPath);
 }
 
 /**
@@ -254,65 +267,35 @@ export function classifyDependency(
  */
 export async function scanProjectScope(options: ScanOptions): Promise<ProjectScope> {
   const { projectRoot, imports, boundary } = options;
-
-  // Load external dependencies from package.json
-  const externalPackages = await loadExternalDependencies(projectRoot);
-
-  const projectBoundary = [...boundary];
   const existCache = new Map<string, boolean>();
 
-  const implementedModules: string[] = [];
-  const unimplementedModules: string[] = [];
-  const resolvedExternalPackages: string[] = [];
+  const implemented: string[] = [];
+  const unimplemented: string[] = [];
+  const external: string[] = [];
 
   for (const importPath of imports) {
-    // Skip duplicate entries
-    if (implementedModules.includes(importPath) ||
-        unimplementedModules.includes(importPath) ||
-        resolvedExternalPackages.includes(importPath)) {
+    if (isAlreadyClassified(importPath, implemented, unimplemented, external)) continue;
+
+    if (isExternalImport(importPath, options)) {
+      external.push(importPath);
       continue;
     }
 
     const resolved = resolveToRealPath(importPath, projectRoot);
-
-    // Check external first
-    if (isExternalImport(importPath, options)) {
-      // Check if it's in the external packages list
-      const isKnownPackage = externalPackages.some(
-        pkg => importPath === pkg || importPath.startsWith(pkg + '/'),
-      );
-      if (isKnownPackage) {
-        resolvedExternalPackages.push(importPath);
-        continue;
-      }
-
-      // Could be a builtin or unknown external
-      const bareName = importPath.startsWith('node:') ? importPath.slice(5) : importPath;
-      if (NODE_BUILTINS.has(bareName)) {
-        resolvedExternalPackages.push(importPath);
-      } else {
-        // Unknown bare import — classify as pending (external but not in package.json)
-        // Actually, bare imports not in package.json are still external
-        resolvedExternalPackages.push(importPath);
-      }
-      continue;
-    }
-
-    // Relative / @/ alias — check filesystem
     const exists = existCache.get(resolved) ?? existsSync(resolved);
     existCache.set(resolved, exists);
 
     if (exists) {
-      implementedModules.push(importPath);
+      implemented.push(importPath);
     } else {
-      unimplementedModules.push(importPath);
+      unimplemented.push(importPath);
     }
   }
 
   return {
-    implementedModules: [...new Set(implementedModules)],
-    unimplementedModules: [...new Set(unimplementedModules)],
-    externalPackages: [...new Set(resolvedExternalPackages)],
-    projectBoundary,
+    implementedModules: [...new Set(implemented)],
+    unimplementedModules: [...new Set(unimplemented)],
+    externalPackages: [...new Set(external)],
+    projectBoundary: [...boundary],
   };
 }
