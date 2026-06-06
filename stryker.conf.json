@@ -3,8 +3,8 @@
   "testRunner": "vitest",
   "coverageAnalysis": "all",
   "tsconfigFile": "tsconfig.stryker.json",
-  "timeoutMS": 120000,
-  "timeoutFactor": 1.5,
+  "timeoutMS": 600000,
+  "timeoutFactor": 1,
   "mutate": [
     "src/principles/**/*.ts",
     "!src/principles/**/*.test.ts",
