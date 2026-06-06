@@ -620,10 +620,11 @@ Phase 2 第一步必须执行 DELPHI-GATE 检查。没有 delphi-review APPROVED
 
 3. **等待用户确认 checkpoint**（如适用）
 
-4. **展示进度看板**：读取 `sprint-state.json`，使用 `@templates/sprint-progress-template.md` 渲染进度看板
+4. **展示进度看板**：执行 `node scripts/render-sprint-progress.cjs` 渲染进度看板
+   - 脚本自动读取 `.sprint-state/sprint-state.json` 并输出 ASCII 进度看板
    - 渲染规则：已完成阶段显示 ✅ + 耗时，当前阶段 🔄，待做 ⬜，跳过 ⏭️，失败 ❌
    - 进度条：`[████▓░░░░░░] {pct}%`（已完成数/总阶段数 11）
-   - 下一步行动：根据当前阶段 + 状态，从模板的"下一步行动表"中查找对应提示
+   - 下一步行动：根据当前阶段 + 状态，自动查找对应提示
    - 输出物路径：列出 `outputs` 中已有的文件路径
    - 时机：每个 Phase 完成后的 transition 阶段自动展示，用户无需请求
    - 向后兼容：旧版 `sprint-state.json` 缺少 `phase_history` 时，从 `phase` 字段推断状态
@@ -792,17 +793,16 @@ Sprint state is persisted as JSON in `.sprint-state/sprint-state.json`:
 
 ```bash
 /sprint-flow --status
-# → 读取 .sprint-state/sprint-state.json
-# → 渲染进度看板（使用 @templates/sprint-progress-template.md）
+# → 执行 node scripts/render-sprint-progress.cjs
+# → 读取 .sprint-state/sprint-state.json 并渲染 ASCII 进度看板
 # → 不执行任何 Phase，仅展示当前状态
 # 适用场景：碎片时间恢复时快速查看进度、中断后确认当前阶段和下一步操作
 ```
 
 **行为规则**：
-- 读取 `.sprint-state/sprint-state.json` 获取 `id`, `task_description`, `phase`, `status`, `phase_history`, `outputs`, `isolation`
-- 扫描 `.sprint-state/phase-outputs/phase-*-summary.md` 获取各阶段 `status` 和 `phase_name`
-- 如果 `sprint-state.json` 不存在 → 输出 `[INFO] 未找到活跃的 Sprint。请先运行 /sprint-flow "[需求描述]" 启动新 Sprint。`
-- 如果 `status == "completed"` → 展示完整看板 + `[INFO] Sprint 已完成。` + Sprint Summary 路径
+- 执行 `node scripts/render-sprint-progress.cjs`（脚本自动处理所有渲染逻辑）
+- 如果 `sprint-state.json` 不存在 → 脚本输出 `[INFO] 未找到活跃的 Sprint。请先运行 /sprint-flow "[需求描述]" 启动新 Sprint。`
+- 如果 `status == "completed"` → 脚本输出完整看板 + `[INFO] Sprint 已完成。`
 - `--status` 可与其他参数组合：`--status --resume-from build` → 先展示状态，再提示 "将从 Phase 2 BUILD 继续"
 - 向后兼容：旧版 `sprint-state.json` 缺少 `phase_history`/`task_description` 时，按模板"向后兼容"规则渲染
 
