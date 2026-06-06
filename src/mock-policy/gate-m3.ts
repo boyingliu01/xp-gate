@@ -43,22 +43,24 @@ function detectMockUsage(testContent: string, importPath: string): MockStrategy 
   return mockPatterns.some(p => p.test(testContent)) ? 'mock' : 'real';
 }
 
-function buildStrategyViolation(
-  testFile: string,
-  importPath: string,
-  actualStrategy: MockStrategy,
-  expectedStrategy: MockStrategy,
-  reason: string,
-  severity: 'warning' | 'error',
-): MockPolicyViolation {
+interface StrategyViolationInput {
+  testFile: string;
+  importPath: string;
+  actualStrategy: MockStrategy;
+  expectedStrategy: MockStrategy;
+  reason: string;
+  severity: 'warning' | 'error';
+}
+
+function buildStrategyViolation(input: StrategyViolationInput): MockPolicyViolation {
   return {
-    file: testFile,
+    file: input.testFile,
     line: 0,
-    dependency: importPath,
-    actualStrategy,
-    expectedStrategy,
-    reason,
-    severity,
+    dependency: input.importPath,
+    actualStrategy: input.actualStrategy,
+    expectedStrategy: input.expectedStrategy,
+    reason: input.reason,
+    severity: input.severity,
   };
 }
 
@@ -67,37 +69,40 @@ function buildPendingRemovalViolation(
   importPath: string,
   severity: 'warning' | 'error',
 ): MockPolicyViolation {
-  return buildStrategyViolation(
+  return buildStrategyViolation({
     testFile,
     importPath,
-    'mock',
-    'mock',
-    `Pending dependency "${importPath}" requires @mock-justified annotation with removal plan`,
+    actualStrategy: 'mock',
+    expectedStrategy: 'mock',
+    reason: `Pending dependency "${importPath}" requires @mock-justified annotation with removal plan`,
     severity,
-  );
+  });
 }
 
-function validateImport(
-  testFile: string,
-  content: string,
-  importPath: string,
-  engine: MockDecisionEngine,
-  layer: ReturnType<typeof detectTestLayer>,
-  severity: 'warning' | 'error',
-): MockPolicyViolation[] {
+interface ValidateImportInput {
+  testFile: string;
+  content: string;
+  importPath: string;
+  engine: MockDecisionEngine;
+  layer: ReturnType<typeof detectTestLayer>;
+  severity: 'warning' | 'error';
+}
+
+function validateImport(input: ValidateImportInput): MockPolicyViolation[] {
+  const { testFile, content, importPath, engine, layer, severity } = input;
   const decision = engine.decide(importPath, layer);
   const actualStrategy = detectMockUsage(content, importPath);
   const violations: MockPolicyViolation[] = [];
 
   if (decision.strategy !== actualStrategy) {
-    violations.push(buildStrategyViolation(
+    violations.push(buildStrategyViolation({
       testFile,
       importPath,
       actualStrategy,
-      decision.strategy,
-      decision.reason,
+      expectedStrategy: decision.strategy,
+      reason: decision.reason,
       severity,
-    ));
+    }));
   }
 
   if (decision.pendingRemoval && actualStrategy === 'mock' && !content.includes('@mock-justified')) {
@@ -118,14 +123,14 @@ async function validateFile(
   const layer = detectTestLayer(testFile);
   const imports = collectImports(content);
 
-  return imports.flatMap(importPath => validateImport(
+  return imports.flatMap(importPath => validateImport({
     testFile,
     content,
     importPath,
     engine,
     layer,
     severity,
-  ));
+  }));
 }
 
 export async function runGateM3(

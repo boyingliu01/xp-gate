@@ -1,9 +1,3 @@
-export type TriggerType =
-  | 'perf-regression'
-  | 'user-report'
-  | 'ablation-result'
-  | 'new-feature';
-
 export type ComponentName =
   | 'system-prompt'
   | 'tools'
