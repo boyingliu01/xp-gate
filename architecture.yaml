@@ -200,11 +200,14 @@ integration:
        skipMarker: ".skip-architecture-cpp"
 
 # LLM Security Audit configuration
+# DEPRECATED (2026-06-05): LLM/AI security evaluation migrated to external
+# skill-cert project. The `enabled: false` flag below preserves the historical
+# threat-model coverage table but disables in-repo enforcement. See issue #140.
 security:
   llm_audit:
-    description: "OWASP LLM Top 10 security audit for AI review pipeline"
+    description: "OWASP LLM Top 10 security audit for AI review pipeline (migrated to external skill-cert)"
     provider: "anthropic:messages:claude-sonnet-4-20250514"
-    enabled: true
+    enabled: false
     max_tokens: 4096
     failure_threshold: 3  # CI fails only when 3+ tests have assertion failures (flaky-test tolerance)
     covered_categories:

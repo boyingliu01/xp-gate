@@ -69,13 +69,13 @@ autoplan_result:
 │                                                                    │
 │ IF autoplan_result.verdict == "AUTO_APPROVED"                      │
 │    AND autoplan_result.taste_decisions == []                       │
-│  → 跳过 delphi-review，直接进入 Step 3                            │
-│  → 场景: autoplan 所有决策自动通过，无关键分歧                     │
+│  → 调用 lightweight delphi-review（2 专家、1 轮、2/2 APPROVED）     │
+│  → 场景: autoplan 所有决策自动通过，无关键分歧，但仍需共识门禁     │
 │                                                                    │
 │ IF autoplan_result.verdict == "NEEDS_REVIEW"                       │
 │    OR autoplan_result.taste_decisions.length > 0                   │
 │  → ⚠️ 暂停等待用户确认 taste_decisions                             │
-│  → 用户确认后，调用 delphi-review                                  │
+│  → 用户确认后，调用标准 delphi-review                              │
 │  → 场景: 存在关键决策分歧或 autoplan 未完全自动通过                │
 │                                                                    │
 └───────────────────────────────────────────────────────────────────┘
@@ -105,7 +105,7 @@ Decision 2: [决策描述]
 
 ---
 
-### Step 2b: 调用 delphi-review（如需要）
+### Step 2b: 调用 delphi-review（强制）
 
 ```bash
 skill(name="delphi-review", user_message="[设计文档 + taste_decisions 确认结果]")

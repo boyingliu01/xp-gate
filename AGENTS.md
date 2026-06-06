@@ -79,7 +79,7 @@ XP-Gate — 6质量门禁（合并自原版9个）+ AI多专家评审的自动�
 | Architecture | ./src/architecture/ | Layer boundary validation (ARCH-001 to ARCH-014) |
 | Version Sync | ./scripts/sync-version.sh | VERSION → root/npm-package/claude-plugin/opencode package.json |
 | Quality Dashboard | ./dashboard/ | `npm run dashboard` → localhost:3333 |
-| CI Workflows | .github/workflows/ | 8 pipelines, quality-gates.yml is 953 lines |
+| CI Workflows | .github/workflows/ | 6 pipelines, quality-gates.yml is 953 lines |
 
 ## CODE MAP
 | Symbol | Type | Location | Refs | Role |
