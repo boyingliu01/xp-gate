@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import fs from 'fs/promises';
-import { BaselineStorage, BaselineEntry } from '../baseline';
+import { BaselineStorage, BaselineEntry, filterBaselineWarnings } from '../baseline';
 
 describe('Baseline Storage', () => {
   const mockBaselinePath = '.warnings-baseline.json';
@@ -126,7 +126,7 @@ describe('Baseline Storage', () => {
       }
     };
 
-    const filtered = baselineStorage.filterToIncludeOnlyFilesWithWarnings(baseline, 1);
+    const filtered = filterBaselineWarnings(baseline, 1);
     expect(Object.keys(filtered)).toHaveLength(1);
     expect(filtered['src/warning1.ts']).toBeDefined();
     expect(filtered['src/clean1.ts']).toBeUndefined();
