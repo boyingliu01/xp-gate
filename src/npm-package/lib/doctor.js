@@ -87,114 +87,120 @@ function checkEnv(checks) {
 }
 
 /**
+ * Validate config file exists, is parseable, and has a known mode.
+ * Returns { config: object|null, checks: Array, issues: number }
+ * When config is unrecoverable, returns null to stop further checks.
+ */
+function checkConfig() {
+  const config = getConfig();
+  if (config === null) {
+    return { config: null, checks: [{ name: 'Config file', status: 'FAIL', detail: 'Not found' }], issues: 1 };
+  }
+  if (config === 'corrupt') {
+    return { config: null, checks: [{ name: 'Config file', status: 'FAIL', detail: 'Corrupt JSON' }], issues: 1 };
+  }
+  if (config.mode !== 'local' && config.mode !== 'global') {
+    return { config: null, checks: [
+      { name: 'Config file', status: 'PASS', detail: CONFIG_FILE },
+      { name: 'Install mode', status: 'FAIL', detail: `Unknown: ${config.mode}` }
+    ], issues: 1 };
+  }
+  return { config, checks: [
+    { name: 'Config file', status: 'PASS', detail: CONFIG_FILE },
+    { name: 'Install mode', status: 'PASS', detail: config.mode }
+  ], issues: 0 };
+}
+
+function checkLocalHooks(checks) {
+  let issues = 0;
+  const gitDir = getGitDir();
+  if (!gitDir) {
+    checks.push({ name: 'Git repository', status: 'FAIL', detail: 'Not in a git repo' });
+    return 1;
+  }
+  const hooksDir = path.join(gitDir, 'hooks');
+  issues += checkSingleHook(hooksDir, 'pre-commit', SIGNATURES['pre-commit'], 'Hooks', checks);
+  issues += checkSingleHook(hooksDir, 'pre-push', SIGNATURES['pre-push'], 'Hooks', checks);
+  return issues;
+}
+
+function checkGlobalHooks(checks) {
+  let issues = 0;
+  issues += checkSingleHook(GLOBAL_HOOKS_DIR, 'pre-commit', SIGNATURES['pre-commit'], 'Global hooks', checks);
+  issues += checkSingleHook(GLOBAL_HOOKS_DIR, 'pre-push', SIGNATURES['pre-push'], 'Global hooks', checks);
+
+  const hooksPath = getCurrentHooksPath();
+  if (hooksPath === null || hooksPath === '') {
+    checks.push({ name: 'Git core.hooksPath', status: 'FAIL', detail: 'Not set' });
+    issues++;
+  } else if (hooksPath !== GLOBAL_HOOKS_DIR) {
+    checks.push({ name: 'Git core.hooksPath', status: 'FAIL', detail: `Expected ${GLOBAL_HOOKS_DIR}, got ${hooksPath}` });
+    issues++;
+  } else {
+    checks.push({ name: 'Git core.hooksPath', status: 'PASS', detail: GLOBAL_HOOKS_DIR });
+  }
+  return issues;
+}
+
+/**
+ * Check a single hook file exists and is an xp-gate file.
+ */
+function checkSingleHook(hooksDir, name, signature, label, checks) {
+  const hookPath = path.join(hooksDir, name);
+  if (!fs.existsSync(hookPath) || !isXpGateFile(hookPath, signature)) {
+    checks.push({ name: `${label}: ${name}`, status: 'FAIL', detail: 'Missing or not xp-gate' });
+    return 1;
+  }
+  checks.push({ name: `${label}: ${name}`, status: 'PASS', detail: hookPath });
+  return 0;
+}
+
+function checkAdapters(checks, mode, gitDir) {
+  const adaptersDir = mode === 'local'
+    ? path.join(path.dirname(gitDir || ''), 'githooks', 'adapters')
+    : GLOBAL_ADAPTERS_DIR;
+
+  if (!adaptersDir || !fs.existsSync(adaptersDir)) {
+    checks.push({ name: 'Adapters directory', status: 'FAIL', detail: 'Missing' });
+    return 1;
+  }
+  const adapterFiles = fs.readdirSync(adaptersDir).filter(f => f.endsWith('.sh'));
+  if (adapterFiles.length === 0) {
+    checks.push({ name: 'Adapters directory', status: 'FAIL', detail: 'Empty directory' });
+    return 1;
+  }
+  checks.push({ name: 'Adapters directory', status: 'PASS', detail: `${adapterFiles.length} adapter(s)` });
+  return 0;
+}
+
+/**
  * Build check report for the doctor.
  * Returns { checks: Array<{name, status, detail}>, issues: number }
  */
 function diagnose() {
   const checks = [];
   let issues = 0;
-  const config = getConfig();
 
   // --- Check 1: Config file ---
-  if (config === null) {
-    checks.push({ name: 'Config file', status: 'FAIL', detail: 'Not found' });
-    issues++;
-    return { checks, issues }; // Cannot proceed without config
+  const configResult = checkConfig();
+  if (configResult.config === null) {
+    return { checks: configResult.checks, issues: configResult.issues };
   }
-
-  if (config === 'corrupt') {
-    checks.push({ name: 'Config file', status: 'FAIL', detail: 'Corrupt JSON' });
-    issues++;
-    return { checks, issues }; // Cannot proceed with corrupt config
-  }
-
-  checks.push({ name: 'Config file', status: 'PASS', detail: CONFIG_FILE });
-
-  // Check mode
-  if (config.mode !== 'local' && config.mode !== 'global') {
-    checks.push({ name: 'Install mode', status: 'FAIL', detail: `Unknown: ${config.mode}` });
-    issues++;
-    return { checks, issues };
-  }
-
-  checks.push({ name: 'Install mode', status: 'PASS', detail: config.mode });
+  const { config } = configResult;
+  checks.push(...configResult.checks);
+  issues += configResult.issues;
 
   // --- Check 2: Hooks files ---
   if (config.mode === 'local') {
-    const gitDir = getGitDir();
-    if (!gitDir) {
-      checks.push({ name: 'Git repository', status: 'FAIL', detail: 'Not in a git repo' });
-      issues++;
-    } else {
-      const hooksDir = path.join(gitDir, 'hooks');
-      const preCommit = path.join(hooksDir, 'pre-commit');
-      const prePush = path.join(hooksDir, 'pre-push');
-
-      if (!fs.existsSync(preCommit) || !isXpGateFile(preCommit, SIGNATURES['pre-commit'])) {
-        checks.push({ name: 'Hooks: pre-commit', status: 'FAIL', detail: 'Missing or not xp-gate' });
-        issues++;
-      } else {
-        checks.push({ name: 'Hooks: pre-commit', status: 'PASS', detail: preCommit });
-      }
-
-      if (!fs.existsSync(prePush) || !isXpGateFile(prePush, SIGNATURES['pre-push'])) {
-        checks.push({ name: 'Hooks: pre-push', status: 'FAIL', detail: 'Missing or not xp-gate' });
-        issues++;
-      } else {
-        checks.push({ name: 'Hooks: pre-push', status: 'PASS', detail: prePush });
-      }
-    }
-  } else if (config.mode === 'global') {
-    // Check global hooks directory
-    const preCommit = path.join(GLOBAL_HOOKS_DIR, 'pre-commit');
-    const prePush = path.join(GLOBAL_HOOKS_DIR, 'pre-push');
-
-    if (!fs.existsSync(preCommit) || !isXpGateFile(preCommit, SIGNATURES['pre-commit'])) {
-      checks.push({ name: 'Global hooks: pre-commit', status: 'FAIL', detail: 'Missing or not xp-gate' });
-      issues++;
-    } else {
-      checks.push({ name: 'Global hooks: pre-commit', status: 'PASS', detail: preCommit });
-    }
-
-    if (!fs.existsSync(prePush) || !isXpGateFile(prePush, SIGNATURES['pre-push'])) {
-      checks.push({ name: 'Global hooks: pre-push', status: 'FAIL', detail: 'Missing or not xp-gate' });
-      issues++;
-    } else {
-      checks.push({ name: 'Global hooks: pre-push', status: 'PASS', detail: prePush });
-    }
-
-    // --- Check 4: core.hooksPath (global mode only) ---
-    const hooksPath = getCurrentHooksPath();
-    if (hooksPath === null || hooksPath === '') {
-      checks.push({ name: 'Git core.hooksPath', status: 'FAIL', detail: 'Not set' });
-      issues++;
-    } else if (hooksPath !== GLOBAL_HOOKS_DIR) {
-      checks.push({ name: 'Git core.hooksPath', status: 'FAIL', detail: `Expected ${GLOBAL_HOOKS_DIR}, got ${hooksPath}` });
-      issues++;
-    } else {
-      checks.push({ name: 'Git core.hooksPath', status: 'PASS', detail: GLOBAL_HOOKS_DIR });
-    }
+    issues += checkLocalHooks(checks);
+  } else {
+    issues += checkGlobalHooks(checks);
   }
 
   // --- Check 3: Adapters directory ---
-  const adaptersDir = config.mode === 'local'
-    ? path.join(path.dirname(getGitDir() || ''), 'githooks', 'adapters')
-    : GLOBAL_ADAPTERS_DIR;
+  issues += checkAdapters(checks, config.mode, getGitDir());
 
-  if (!adaptersDir || !fs.existsSync(adaptersDir)) {
-    checks.push({ name: 'Adapters directory', status: 'FAIL', detail: 'Missing' });
-    issues++;
-  } else {
-    const adapterFiles = fs.readdirSync(adaptersDir).filter(f => f.endsWith('.sh'));
-    if (adapterFiles.length === 0) {
-      checks.push({ name: 'Adapters directory', status: 'FAIL', detail: 'Empty directory' });
-      issues++;
-    } else {
-      checks.push({ name: 'Adapters directory', status: 'PASS', detail: `${adapterFiles.length} adapter(s)` });
-    }
-  }
-
-  // --- Check 5: Environment dependencies ---
+  // --- Check 4: Environment dependencies ---
   checkEnv(checks);
 
   return { checks, issues };
@@ -215,6 +221,19 @@ function printReport(checks) {
 }
 
 /**
+ * Copy a hook file from package source to target, creating parent dir if needed.
+ */
+function restoreHook(srcFile, destFile, label) {
+  if (!fs.existsSync(srcFile)) return false;
+  const destDir = path.dirname(destFile);
+  fs.mkdirSync(destDir, { recursive: true });
+  fs.copyFileSync(srcFile, destFile);
+  fs.chmodSync(destFile, 0o755);
+  console.log(`  ✓ Restored ${label}`);
+  return true;
+}
+
+/**
  * Attempt to fix known issues.
  * Only operates when mode === 'active' (local or global).
  */
@@ -231,58 +250,17 @@ function fixIssues(checks, config) {
     const gitDir = getGitDir();
     if (gitDir) {
       const hooksDir = path.join(gitDir, 'hooks');
-      const preCommit = path.join(hooksDir, 'pre-commit');
-      const prePush = path.join(hooksDir, 'pre-push');
-
-      if (!fs.existsSync(preCommit) || !isXpGateFile(preCommit, SIGNATURES['pre-commit'])) {
-        const src = path.join(srcDir, 'hooks', 'pre-commit');
-        if (fs.existsSync(src)) {
-          fs.mkdirSync(hooksDir, { recursive: true });
-          fs.copyFileSync(src, preCommit);
-          fs.chmodSync(preCommit, 0o755);
-          console.log('  ✓ Restored pre-commit hook');
-          fixed = true;
-        }
-      }
-
-      if (!fs.existsSync(prePush) || !isXpGateFile(prePush, SIGNATURES['pre-push'])) {
-        const src = path.join(srcDir, 'hooks', 'pre-push');
-        if (fs.existsSync(src)) {
-          fs.mkdirSync(hooksDir, { recursive: true });
-          fs.copyFileSync(src, prePush);
-          fs.chmodSync(prePush, 0o755);
-          console.log('  ✓ Restored pre-push hook');
-          fixed = true;
-        }
-      }
+      fixed = restoreHook(path.join(srcDir, 'hooks', 'pre-commit'), path.join(hooksDir, 'pre-commit'), 'pre-commit hook') || fixed;
+      fixed = restoreHook(path.join(srcDir, 'hooks', 'pre-push'), path.join(hooksDir, 'pre-push'), 'pre-push hook') || fixed;
     }
-  } else if (config.mode === 'global') {
-    const preCommit = path.join(GLOBAL_HOOKS_DIR, 'pre-commit');
-    const prePush = path.join(GLOBAL_HOOKS_DIR, 'pre-push');
+  } else {
+    const hooksDir = GLOBAL_HOOKS_DIR;
+    fixed = restoreHook(path.join(srcDir, 'hooks', 'pre-commit'), path.join(hooksDir, 'pre-commit'), 'global pre-commit hook') || fixed;
+    fixed = restoreHook(path.join(srcDir, 'hooks', 'pre-push'), path.join(hooksDir, 'pre-push'), 'global pre-push hook') || fixed;
+  }
 
-    if (!fs.existsSync(preCommit) || !isXpGateFile(preCommit, SIGNATURES['pre-commit'])) {
-      const src = path.join(srcDir, 'hooks', 'pre-commit');
-      if (fs.existsSync(src)) {
-        fs.mkdirSync(GLOBAL_HOOKS_DIR, { recursive: true });
-        fs.copyFileSync(src, preCommit);
-        fs.chmodSync(preCommit, 0o755);
-        console.log('  ✓ Restored global pre-commit hook');
-        fixed = true;
-      }
-    }
-
-    if (!fs.existsSync(prePush) || !isXpGateFile(prePush, SIGNATURES['pre-push'])) {
-      const src = path.join(srcDir, 'hooks', 'pre-push');
-      if (fs.existsSync(src)) {
-        fs.mkdirSync(GLOBAL_HOOKS_DIR, { recursive: true });
-        fs.copyFileSync(src, prePush);
-        fs.chmodSync(prePush, 0o755);
-        console.log('  ✓ Restored global pre-push hook');
-        fixed = true;
-      }
-    }
-
-    // Fix core.hooksPath
+  // Fix core.hooksPath (global mode only)
+  if (config.mode === 'global') {
     const hooksPath = getCurrentHooksPath();
     if (hooksPath !== GLOBAL_HOOKS_DIR) {
       try {
@@ -324,6 +302,14 @@ function fixIssues(checks, config) {
  * @param {string[]} args CLI arguments
  * @returns {number} exit code (0 = all clear, 1 = issues found)
  */
+function isActiveMode(config) {
+  return config && config !== 'corrupt' && (config.mode === 'local' || config.mode === 'global');
+}
+
+function isUninstalledMode(config) {
+  return config && config !== 'corrupt' && config.mode === 'uninstalled';
+}
+
 async function doctor(args) {
   const fixMode = args.includes('--fix');
 
@@ -333,14 +319,14 @@ async function doctor(args) {
   const config = getConfig();
 
   // §4.8: mode === "uninstalled" → print "xp-gate is not installed"
-  if (config && config !== 'corrupt' && config.mode === 'uninstalled') {
+  if (isUninstalledMode(config)) {
     console.log('xp-gate is not installed.');
     console.log('Run xp-gate init to install.');
     return 0;
   }
 
   // §4.13: --fix only when mode === "active"
-  if (fixMode && config && config !== 'corrupt' && (config.mode === 'local' || config.mode === 'global')) {
+  if (fixMode && isActiveMode(config)) {
     fixIssues(null, config);
   }
 
@@ -355,8 +341,8 @@ async function doctor(args) {
 
   console.log(`\n✗ ${issues} issue(s) found`);
 
-  if (fixMode && config && config !== 'corrupt' && (config.mode === 'local' || config.mode === 'global')) {
-    // Re-run diagnosis after fix to report updated status
+  // Re-run diagnosis after fix to report updated status
+  if (fixMode && isActiveMode(config)) {
     console.log('\nRe-running diagnosis after fix...');
     const { checks: postChecks } = diagnose();
     printReport(postChecks);

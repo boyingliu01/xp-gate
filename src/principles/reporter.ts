@@ -91,16 +91,49 @@ function getRuleLevel(ruleId: string): string {
   return 'note';
 }
 
+function formatEmptyResult(result: AnalysisResult, lines: string[]): string {
+  lines.push('✓ No violations found');
+  lines.push('');
+  lines.push(`Files checked: ${result.summary.filesChecked}`);
+  lines.push(`Rules run: ${result.summary.rulesRun}`);
+  lines.push(`Execution time: ${result.executionTimeMs}ms`);
+  return lines.join('\n');
+}
+
+function formatViolationLines(violation: Violation): string[] {
+  const severityIcon = violation.severity === 'error' ? '✗' : 
+                       violation.severity === 'warning' ? '⚠' : 'ℹ';
+  const severityLabel = violation.severity.toUpperCase();
+  return [
+    `  ${severityIcon} [${severityLabel}] ${violation.ruleId}`,
+    `     line ${violation.line}${violation.column ? `, col ${violation.column}` : ''}: ${violation.message}`
+  ];
+}
+
+function formatFileViolations(lines: string[], filesMap: Record<string, Violation[]>): void {
+  for (const [file, violations] of Object.entries(filesMap)) {
+    lines.push(`\n📁 ${file}`);
+    lines.push('─'.repeat(40));
+    for (const v of violations) {
+      lines.push(...formatViolationLines(v));
+    }
+  }
+}
+
+function formatErrors(lines: string[], result: AnalysisResult): void {
+  if (result.errors.length === 0) return;
+  lines.push('');
+  lines.push('⚠ Analysis errors:');
+  for (const err of result.errors) {
+    lines.push(`  - ${err}`);
+  }
+}
+
 export function formatConsole(result: AnalysisResult): string {
   const lines: string[] = [];
   
   if (result.violations.length === 0) {
-    lines.push('✓ No violations found');
-    lines.push('');
-    lines.push(`Files checked: ${result.summary.filesChecked}`);
-    lines.push(`Rules run: ${result.summary.rulesRun}`);
-    lines.push(`Execution time: ${result.executionTimeMs}ms`);
-    return lines.join('\n');
+    return formatEmptyResult(result, lines);
   }
   
   const filesMap: Record<string, Violation[]> = {};
@@ -111,32 +144,14 @@ export function formatConsole(result: AnalysisResult): string {
     filesMap[v.file].push(v);
   }
   
-  for (const [file, violations] of Object.entries(filesMap)) {
-    lines.push(`\n📁 ${file}`);
-    lines.push('─'.repeat(40));
-    
-    for (const v of violations) {
-      const severityIcon = v.severity === 'error' ? '✗' : 
-                           v.severity === 'warning' ? '⚠' : 'ℹ';
-      const severityLabel = v.severity.toUpperCase();
-      
-      lines.push(`  ${severityIcon} [${severityLabel}] ${v.ruleId}`);
-      lines.push(`     line ${v.line}${v.column ? `, col ${v.column}` : ''}: ${v.message}`);
-    }
-  }
+  formatFileViolations(lines, filesMap);
   
   lines.push('');
   lines.push('─'.repeat(40));
   lines.push(formatSummary(result));
   lines.push(`Execution time: ${result.executionTimeMs}ms`);
   
-  if (result.errors.length > 0) {
-    lines.push('');
-    lines.push('⚠ Analysis errors:');
-    for (const err of result.errors) {
-      lines.push(`  - ${err}`);
-    }
-  }
+  formatErrors(lines, result);
   
   return lines.join('\n');
 }
