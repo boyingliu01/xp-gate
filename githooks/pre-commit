@@ -40,7 +40,7 @@ _quality_report_on_exit() {
     return
   fi
   _QUALITY_REPORT_DONE=1
-  generate_quality_report 2>/dev/null || true
+  command -v generate_quality_report >/dev/null 2>&1 && generate_quality_report 2>/dev/null || true
   exit $_saved_exit
 }
 trap '_quality_report_on_exit' EXIT
