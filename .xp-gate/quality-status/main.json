@@ -1,8 +1,8 @@
 {
   "reportVersion": "1.1",
-  "generatedAt": "2026-06-07T07:54:05Z",
+  "generatedAt": "2026-06-07T10:09:59Z",
   "branch": "main",
-  "commit": "315aff324fe6a8fddefbbc2144ee23cea66e295c",
+  "commit": "1945bf63b5034aabd7ebf672a2cff026f9f27e5a",
   "language": "typescript",
   "overall": {
     "gatesPassed": 9,
@@ -37,13 +37,13 @@
       "name": "Tests + Coverage",
       "status": "PASS",
       "thresholds": { "lines": 80, "functions": 80, "branches": 70, "statements": 80 },
-      "actual": { "coverage": "95" },
+      "actual": { "coverage": "94" },
       "failedTests": []
     },
     "gate6_arch_boyscout": {
       "name": "Architecture + Boy Scout Rule",
       "status": "PASS",
-      "boyScoutPassed": 11,
+      "boyScoutPassed": 5,
       "boyScoutBlocked": 0
     },
     "gate7_iac_security": {

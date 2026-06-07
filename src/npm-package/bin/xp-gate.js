@@ -7,6 +7,7 @@ const { uninstall } = require('../lib/uninstall.js');
 const { doctor } = require('../lib/doctor.js');
 const { checkDeps } = require('../lib/detect-deps.js');
 const { migrate } = require('../lib/migrate.js');
+const { handleBaseline } = require('../lib/baseline.js');
 
 function handleUIReview() {
   const { execSync } = require('child_process');
@@ -91,6 +92,11 @@ const COMMANDS = {
     description: 'Gate audit logging (record, --tail, --stats)',
     run: subargs => handleAudit(subargs),
     usage: 'xp-gate audit [--tail [N]|--stats|record --gate-id X --gate-name Y ...]'
+  },
+  'baseline': {
+    description: 'Manage lint baselines (create, show, reset, diff)',
+    run: subargs => handleBaseline(subargs).then(code => process.exit(code)),
+    usage: 'xp-gate baseline <create|show|reset|diff>'
   }
 };
 

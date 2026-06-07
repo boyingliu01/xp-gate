@@ -547,18 +547,51 @@ if [ "$PROJECT_LANG" = "documentation-only" ]; then
       # Filter to only TS/JS files - ESLint config ignores non-matching files
       ESLINT_FILES=$(echo "$CHANGED_FILES" | grep -E '\.(ts|tsx|js|jsx)$' || true)
       if [ -n "$ESLINT_FILES" ]; then
-        npx eslint $ESLINT_FILES --max-warnings 0 --no-warn-ignored 2>&1 | head -30
+        ESLINT_OUTPUT=$(npx eslint $ESLINT_FILES -f json --no-warn-ignored 2>&1)
         ESLINT_EXIT=$?
+        if [ "$ESLINT_EXIT" -ne 0 ]; then
+          if [ -f ".xp-gate/lint-baseline.json" ] && command -v node &> /dev/null; then
+            # Compare against lint baseline
+            BASELINE_WARNINGS=$(echo "$ESLINT_FILES" | tr ' ' '\n' | node -e "
+              const fs=require('fs');const b=JSON.parse(fs.readFileSync('.xp-gate/lint-baseline.json','utf8'));
+              const stdin=require('fs').readFileSync('/dev/stdin','utf8').trim();
+              const files=stdin?stdin.split('\n'):[];
+              let total=0;for(const f of files){if(b[f])total+=b[f].totalWarnings||0}
+              console.log(total);
+            ")
+            CURRENT_WARNINGS=$(echo "$ESLINT_OUTPUT" | node -e "
+              const d=JSON.parse(require('fs').readFileSync('/dev/stdin','utf8'));
+              console.log(d.reduce((s,f)=>s+(f.warningCount||0)+(f.errorCount||0),0));
+            ")
+            if [ "$CURRENT_WARNINGS" -gt "$BASELINE_WARNINGS" ]; then
+              NEW_WARNINGS=$((CURRENT_WARNINGS - BASELINE_WARNINGS))
+              echo "$ESLINT_OUTPUT" | head -30
+              echo ""
+              echo "❌ BLOCKED - ${NEW_WARNINGS} NEW lint error(s) (baseline: ${BASELINE_WARNINGS}, current: ${CURRENT_WARNINGS})"
+              echo "Run 'xp-gate baseline reset' after fixing to update the baseline."
+              exit 1
+            else
+              REDUCED=$((BASELINE_WARNINGS - CURRENT_WARNINGS))
+              if [ "$REDUCED" -gt 0 ]; then
+                echo "✅ PASSED - Lint debt reduced by ${REDUCED} (${BASELINE_WARNINGS} → ${CURRENT_WARNINGS})"
+              else
+                echo "✅ PASSED - No new lint errors (baseline: ${BASELINE_WARNINGS})"
+              fi
+            fi
+          else
+            echo "$ESLINT_OUTPUT" | head -30
+            echo ""
+            echo "❌ BLOCKED - LINT ERRORS detected"
+            echo "Fix the lint errors above before committing."
+            echo "Tip: Run 'xp-gate baseline create' to establish a lint baseline."
+            exit 1
+          fi
+        else
+          echo "✅ PASSED - ESLint linting."
+        fi
       else
-        ESLINT_EXIT=0
+        echo "✅ PASSED - No staged TS/JS files to lint."
       fi
-      if [ "$ESLINT_EXIT" -ne 0 ]; then
-        echo ""
-        echo "❌ BLOCKED - LINT ERRORS detected"
-        echo "Fix the lint errors above before committing."
-        exit 1
-      fi
-      echo "✅ PASSED - ESLint linting."
     else
       echo "ℹ️  No ESLint configuration found - Skipping"
     fi
@@ -572,16 +605,60 @@ elif [ "$PROJECT_LANG" = "python" ]; then
   else
     # Run Ruff (includes syntax check, linting)
     echo "Running Ruff linting (syntax + lint)..."
-    ruff check "$CHANGED_FILES" 2>&1 | head -30
+    RUFF_OUTPUT=$(ruff check "$CHANGED_FILES" --output-format json 2>&1)
     RUFF_EXIT=$?
     if [ "$RUFF_EXIT" -ne 0 ]; then
-      echo ""
-      echo "❌ BLOCKED - RUFF ERRORS detected"
-      echo "Fix the lint errors above before committing."
-      echo "Tip: Run 'ruff check --fix' to auto-fix some issues."
-      exit 1
+      if [ -f ".xp-gate/lint-baseline.json" ] && command -v node &> /dev/null; then
+        # Get baseline warnings for changed Python files
+        PY_FILES=$(echo "$CHANGED_FILES" | grep '\.py$' || true)
+        if [ -n "$PY_FILES" ]; then
+          BASELINE_WARNINGS=$(echo "$PY_FILES" | node -e "
+            const fs=require('fs');const b=JSON.parse(fs.readFileSync('.xp-gate/lint-baseline.json','utf8'));
+            const stdin=require('fs').readFileSync('/dev/stdin','utf8').trim();
+            const files=stdin?stdin.split('\n'):[];
+            let total=0;for(const f of files){if(b[f])total+=b[f].totalWarnings||0}
+            console.log(total);
+          ")
+          CURRENT_WARNINGS=$(echo "$RUFF_OUTPUT" | node -e "
+            const d=JSON.parse(require('fs').readFileSync('/dev/stdin','utf8'));
+            console.log(d.reduce((s,f)=>s+(f.messages?f.messages.length:0),0));
+          ")
+          if [ "$CURRENT_WARNINGS" -gt "$BASELINE_WARNINGS" ]; then
+            NEW_WARNINGS=$((CURRENT_WARNINGS - BASELINE_WARNINGS))
+            echo "$RUFF_OUTPUT" | node -e "
+              const d=JSON.parse(require('fs').readFileSync('/dev/stdin','utf8'));
+              for(const f of d){for(const m of f.messages||[]){console.log(m.kind+': '+m.message)}}
+            " | head -30
+            echo ""
+            echo "❌ BLOCKED - ${NEW_WARNINGS} NEW lint error(s) (baseline: ${BASELINE_WARNINGS}, current: ${CURRENT_WARNINGS})"
+            echo "Run 'xp-gate baseline reset' after fixing to update the baseline."
+            exit 1
+          else
+            REDUCED=$((BASELINE_WARNINGS - CURRENT_WARNINGS))
+            if [ "$REDUCED" -gt 0 ]; then
+              echo "✅ PASSED - Lint debt reduced by ${REDUCED} (${BASELINE_WARNINGS} → ${CURRENT_WARNINGS})"
+            else
+              echo "✅ PASSED - No new lint errors (baseline: ${BASELINE_WARNINGS})"
+            fi
+          fi
+        else
+          echo "✅ PASSED - Ruff linting (no Python files to check)."
+        fi
+      else
+        echo "$RUFF_OUTPUT" | node -e "
+          const d=JSON.parse(require('fs').readFileSync('/dev/stdin','utf8'));
+          for(const f of d){for(const m of f.messages||[]){console.log(m.kind+': '+m.message)}}
+        " | head -30
+        echo ""
+        echo "❌ BLOCKED - RUFF ERRORS detected"
+        echo "Fix the lint errors above before committing."
+        echo "Tip: Run 'ruff check --fix' to auto-fix some issues."
+        echo "Tip: Run 'xp-gate baseline create' to establish a lint baseline."
+        exit 1
+      fi
+    else
+      echo "✅ PASSED - Ruff linting."
     fi
-    echo "✅ PASSED - Ruff linting."
     
     # Optional: Type checking with mypy
     if command -v mypy &> /dev/null; then
@@ -627,15 +704,53 @@ elif [ "$PROJECT_LANG" = "shell" ] || echo "$CHANGED_FILES" | grep -qE '\.sh$'; 
     echo "✅ PASSED - No staged shell scripts to check."
   elif command -v shellcheck &> /dev/null; then
     echo "Running shellcheck on staged shell scripts..."
-    shellcheck $SHELL_FILES 2>&1 | head -30
+    SHELLCHECK_OUTPUT=$(shellcheck -f json $SHELL_FILES 2>&1)
     SHELLCHECK_EXIT=$?
     if [ "$SHELLCHECK_EXIT" -ne 0 ]; then
-      echo ""
-      echo "❌ BLOCKED - SHELLCHECK ERRORS detected"
-      echo "Fix the shell script errors above."
-      exit 1
+      if [ -f ".xp-gate/lint-baseline.json" ] && command -v node &> /dev/null; then
+        BASELINE_WARNINGS=$(echo "$SHELL_FILES" | node -e "
+          const fs=require('fs');const b=JSON.parse(fs.readFileSync('.xp-gate/lint-baseline.json','utf8'));
+          const stdin=require('fs').readFileSync('/dev/stdin','utf8').trim();
+          const files=stdin?stdin.split('\n'):[];
+          let total=0;for(const f of files){if(b[f])total+=b[f].totalWarnings||0}
+          console.log(total);
+        ")
+        CURRENT_WARNINGS=$(echo "$SHELLCHECK_OUTPUT" | node -e "
+          const d=JSON.parse(require('fs').readFileSync('/dev/stdin','utf8'));
+          console.log(d.length);
+        ")
+        if [ "$CURRENT_WARNINGS" -gt "$BASELINE_WARNINGS" ]; then
+          NEW_WARNINGS=$((CURRENT_WARNINGS - BASELINE_WARNINGS))
+          echo "$SHELLCHECK_OUTPUT" | node -e "
+            const d=JSON.parse(require('fs').readFileSync('/dev/stdin','utf8'));
+            for(const i of d){console.log(i.file+':'+i.line+': '+i.level+': '+i.message)}
+          " | head -30
+          echo ""
+          echo "❌ BLOCKED - ${NEW_WARNINGS} NEW shellcheck issue(s) (baseline: ${BASELINE_WARNINGS}, current: ${CURRENT_WARNINGS})"
+          echo "Run 'xp-gate baseline reset' after fixing to update the baseline."
+          exit 1
+        else
+          REDUCED=$((BASELINE_WARNINGS - CURRENT_WARNINGS))
+          if [ "$REDUCED" -gt 0 ]; then
+            echo "✅ PASSED - Shellcheck debt reduced by ${REDUCED} (${BASELINE_WARNINGS} → ${CURRENT_WARNINGS})"
+          else
+            echo "✅ PASSED - No new shellcheck issues (baseline: ${BASELINE_WARNINGS})"
+          fi
+        fi
+      else
+        echo "$SHELLCHECK_OUTPUT" | node -e "
+          const d=JSON.parse(require('fs').readFileSync('/dev/stdin','utf8'));
+          for(const i of d){console.log(i.file+':'+i.line+': '+i.level+': '+i.message)}
+        " | head -30
+        echo ""
+        echo "❌ BLOCKED - SHELLCHECK ERRORS detected"
+        echo "Fix the shell script errors above."
+        echo "Tip: Run 'xp-gate baseline create' to establish a lint baseline."
+        exit 1
+      fi
+    else
+      echo "✅ PASSED - Shellcheck completed."
     fi
-    echo "✅ PASSED - Shellcheck completed."
   else
     echo "ℹ️  shellcheck not available - Attempting basic syntax check"
     # Basic check for staged shell script files
