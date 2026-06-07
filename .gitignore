@@ -57,6 +57,7 @@ htmlcov/
 # XP-Gate quality status (per-branch, local-only — not shared across devs)
 .xp-gate/quality-status/
 .xp-gate/reports/
+.xp-gate/lint-baseline.json
 .xpgate-review/
 
 # Per-commit/branch report artifacts (local-only transient output)

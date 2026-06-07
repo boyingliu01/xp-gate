@@ -86,7 +86,7 @@ function printUsage() {
   console.log('  2) Local   — install hooks into current project only\n');
   console.log('Usage:');
   console.log('  xp-gate init --global     # all projects');
-  console.log('  xp-gate init              # current project');
+  console.log('  xp-gate init --baseline   # current project + create lint baseline');
   console.log('  xp-gate setup-global      # all projects (alias)\n');
 }
 
@@ -265,7 +265,18 @@ async function init(args) {
 
   if (!installMode) { printUsage(); return 0; }
   if (installMode === 'global') return setupGlobal(args);
-  return installLocal(args);
+  const code = await installLocal(args);
+  if (code === 0 && args.includes('--baseline')) {
+    try {
+      const { createBaseline } = require('./baseline.js');
+      console.log('\nCreating lint baseline...');
+      const baseline = await createBaseline();
+      console.log(`✅ Lint baseline created — ${Object.keys(baseline).length} files tracked.`);
+    } catch (e) {
+      console.log(`ℹ️  Lint baseline creation skipped: ${e.message}`);
+    }
+  }
+  return code;
 }
 
 async function installLocal(args) {

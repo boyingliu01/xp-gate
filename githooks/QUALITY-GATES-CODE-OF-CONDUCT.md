@@ -115,6 +115,68 @@ git push      # pre-push 验证通过后才允许
 
 ---
 
+## 设计约束：staged-only 扫描
+
+**pre-commit hook 默认只扫描 staged 文件（`$CHANGED_FILES`），不扫描全量代码库。**
+
+这是有意为之的设计决策，原因：
+
+| 原因 | 说明 |
+|------|------|
+| 性能 | 全量扫描大型代码库会导致每次提交等待 30s+，破坏开发流 |
+| 童子军规则 | Boy Scout Rule 保证"修改不恶化"，存量债务不阻断新提交 |
+| 增量改进 | Hook 聚焦 staged 变更，全量质量由 CI/CD 管道覆盖 |
+
+**这意味着**：
+
+- 预存在的代码债务不会在本地提交时被阻断（仅新代码和修改的代码受检）
+- 全量质量扫描由 `.github/workflows/quality-gates.yml` 的 CI 作业和定期 `quality-audit` 任务覆盖
+- 如果需要对某些文件触发全量检查，对该文件做任意修改后提交即可（修改会触发该文件的全量扫描）
+
+> **不是漏洞，是设计约束。** Hook 聚焦增量质量，全量质量靠 CI 和定期审计。
+
+## Lint Baseline（lint 基线）
+
+lint 基线是 staged-only 扫描的配套机制。它允许项目记录当前 lint 错误的总量，并在每次提交时只检查**新增**的 lint 错误。
+
+### 工作机制
+
+1. **初始化基线**：`xp-gate baseline create` 全量扫描代码库，记录每个文件的 lint 错误数
+2. **增量检查**：每次 `git commit` 时，pre-commit hook 对比当前 lint 错误数和基线中的记录
+3. **决策规则**：
+   - 当前错误 ≤ 基线 → ✅ PASS（甚至显示减少量）
+   - 当前错误 > 基线 → ❌ BLOCK（显示新增的错误数）
+
+### 什么时候用
+
+| 项目状态 | 建议 |
+|---------|------|
+| 新项目（无 lint 错误） | 不需要基线，`--max-warnings 0` 够用 |
+| 有存量 lint 错误的项目 | 创建基线后，每次提交只检查新增错误 |
+| CI 永远是红色 | 创建基线 → 逐步修复 → `xp-gate baseline reset` 更新基线 |
+
+### CLI 命令
+
+```bash
+xp-gate baseline create   # 创建基线（全量扫描）
+xp-gate baseline show     # 查看当前基线
+xp-gate baseline reset    # 重置基线（修复完错误后更新）
+xp-gate baseline diff     # 对比当前状态和基线差异
+```
+
+### 相关配置
+
+基线存储在 `.xp-gate/lint-baseline.json`（已 gitignore），每个项目/分支独立。
+
+### 和 Boy Scout Rule 的关系
+
+| 机制 | 覆盖范围 | 检查时机 | 目标 |
+|------|---------|---------|------|
+| Boy Scout Rule | Principles 警告（Clean Code/SOLID） | 每次 commit | 修改不恶化，≤5 清零 |
+| Lint Baseline | Lint 工具错误（ESLint/ruff/shellcheck） | 每次 commit | 不引入新错误，逐步减少债务 |
+
+两者共同保证：**存量债务不阻断工作，增量必须逐步改善。**
+
 ## 自动跳过逻辑
 
 pre-push hook 已内置自动检测：

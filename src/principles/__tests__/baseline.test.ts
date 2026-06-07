@@ -9,6 +9,88 @@ import path from 'path';
 import os from 'os';
 import { BaselineStorage } from '../baseline';
 
+describe('BaselineEntry - lint tool fields (ruff, golangci, shellcheck)', () => {
+  it('accepts ruff field in BaselineEntry', () => {
+    const storage = new BaselineStorage();
+    const entry: Record<string, unknown> = {
+      'src/app.py': {
+        ruff: { warnings: 5, errors: 2 },
+        totalWarnings: 5,
+        lastAnalyzed: new Date().toISOString(),
+      },
+    };
+    expect(() => storage.validate(entry as Record<string, import('../baseline').BaselineEntry>)).not.toThrow();
+  });
+
+  it('accepts golangci field in BaselineEntry', () => {
+    const storage = new BaselineStorage();
+    const entry: Record<string, unknown> = {
+      'src/main.go': {
+        golangci: { warnings: 3, errors: 1 },
+        totalWarnings: 3,
+        lastAnalyzed: new Date().toISOString(),
+      },
+    };
+    expect(() => storage.validate(entry as Record<string, import('../baseline').BaselineEntry>)).not.toThrow();
+  });
+
+  it('accepts shellcheck field in BaselineEntry', () => {
+    const storage = new BaselineStorage();
+    const entry: Record<string, unknown> = {
+      'deploy.sh': {
+        shellcheck: { warnings: 2, errors: 0 },
+        totalWarnings: 2,
+        lastAnalyzed: new Date().toISOString(),
+      },
+    };
+    expect(() => storage.validate(entry as Record<string, import('../baseline').BaselineEntry>)).not.toThrow();
+  });
+
+  it('rejects ruff entry with non-numeric warnings', () => {
+    const storage = new BaselineStorage();
+    const entry = {
+      'src/app.py': {
+        ruff: { warnings: 'high', errors: 2 },
+        totalWarnings: 5,
+        lastAnalyzed: new Date().toISOString(),
+      },
+    };
+    expect(() => storage.validate(entry as Record<string, import('../baseline').BaselineEntry>)).toThrow(/Invalid ruff properties/);
+  });
+
+  it('combines all lint tools in getSummaryStatistics', () => {
+    const storage = new BaselineStorage();
+    const baseline: Record<string, unknown> = {
+      'src/app.py': {
+        ruff: { warnings: 5, errors: 2 },
+        totalWarnings: 5,
+        lastAnalyzed: new Date().toISOString(),
+      },
+      'src/main.go': {
+        golangci: { warnings: 3, errors: 1 },
+        totalWarnings: 3,
+        lastAnalyzed: new Date().toISOString(),
+      },
+      'deploy.sh': {
+        shellcheck: { warnings: 2, errors: 0 },
+        totalWarnings: 2,
+        lastAnalyzed: new Date().toISOString(),
+      },
+    };
+
+    const stats = storage.getSummaryStatistics(baseline as Record<string, import('../baseline').BaselineEntry>);
+
+    expect(stats.totalFiles).toBe(3);
+    expect(stats.totalWarnings).toBe(10);
+    expect(stats.ruff?.totalWarnings).toBe(5);
+    expect(stats.ruff?.totalErrors).toBe(2);
+    expect(stats.golangci?.totalWarnings).toBe(3);
+    expect(stats.golangci?.totalErrors).toBe(1);
+    expect(stats.shellcheck?.totalWarnings).toBe(2);
+    expect(stats.shellcheck?.totalErrors).toBe(0);
+  });
+});
+
 describe('BaselineStorage - extended coverage', () => {
   let tmpDir: string;
   let baselinePath: string;
