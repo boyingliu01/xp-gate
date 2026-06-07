@@ -619,7 +619,7 @@ Phase 2 第一步必须执行 DELPHI-GATE 检查。没有 delphi-review APPROVED
 不包含前一 Phase 的完整对话、中间文件、失败尝试。
 
 **特殊场景**：
-- `--resume-from <phase>`：跳过前置 Phase，直接从指定 Phase 启动。此时要求该 Phase 的前置摘要文件已存在。例如 `--resume-from build` 要求 `phase-1-summary.md` 和 `specification.yaml` 已存在。orchestrator 仍执行 Phase Transition Gate 验证。
+- `--resume-from <phase>`：跳过前置 Phase，直接从指定 Phase 启动。**MUST 先执行 RESUME GATE（Issue #148）** 校验 sprint 状态、git 可达性和文件时效性，再执行 Phase Transition Gate 校验摘要文件格式。例如 `--resume-from build` 要求 `phase-1-summary.md` 和 `specification.yaml` 已存在且非 stale。
 - `--no-isolate`：跳过 Phase -1 ISOLATE，直接在当前分支执行。Phase 0 无 `phase--1-summary` 可用，上下文继承来源为用户原始需求 + 当前 git 状态。所有后续 Phase 的 worktree enforcement 不适用（无 worktree），但仍需保持代码隔离。
 - `next_phase_context` 中的 `{path}` 等变量占位符在实际写入时被替换为具体值。示例中的 `{path}` 应替换为实际 worktree 路径（如 `.worktrees/sprint/sprint-2026-06-01-01`）。
 
@@ -697,6 +697,89 @@ CHARS=$(wc -c < "$SUMMARY" | tr -d ' ')
 
 **由 orchestrator 强制执行**，不依赖 subagent 自觉遵守。
 验证失败 → BLOCK，不可 dispatch 下一 Phase。
+
+### RESUME GATE / --resume-from 断点校验（Issue #148）
+
+当使用 `--resume-from <phase>` 时，在执行 Phase Transition Gate 之前，
+orchestrator MUST 先执行以下断点校验。任何一项失败 → BLOCK，拒绝恢复。
+
+```bash
+SPRINT_STATE=".sprint-state/sprint-state.json"
+[ -f "$SPRINT_STATE" ] || { echo "[BLOCK] sprint-state.json 不存在，无法恢复"; exit 1; }
+
+# 1. Sprint ID 一致性：确认 resume 的目标 sprint 与 sprint-state.json 匹配
+SPRINT_ID=$(grep -o '"id": "[^"]*"' "$SPRINT_STATE" | head -1 | cut -d'"' -f4)
+CURRENT_SPRINT_ID=$(echo "$TASK_DESCRIPTION" | md5sum | head -8 2>/dev/null || echo "unknown")
+# 实际 sprint id 由 Phase -1 生成，此处仅验证文件存在且包含 id 字段
+[ -n "$SPRINT_ID" ] || { echo "[BLOCK] sprint-state.json 缺少 id 字段"; exit 1; }
+
+# 2. 阶段顺序校验：--resume-from 的 phase 必须是最后已完成 phase 的后继
+LAST_COMPLETED_PHASE=$(grep -o '"phase": [0-9]' "$SPRINT_STATE" | tail -1 | awk '{print $2}')
+RESUME_PHASE=$((RESUME_PHASE))  # orchestrator 将 --resume-from 参数值转为整数
+[ "$RESUME_PHASE" -gt "$LAST_COMPLETED_PHASE" ] || { 
+  echo "[BLOCK] --resume-from phase ($RESUME_PHASE) 必须在最后已完成 phase ($LAST_COMPLETED_PHASE) 之后"
+  exit 1
+}
+
+# 3. Git 状态校验：isolation branch 仍然可达
+ISOLATION_BRANCH=$(grep -o '"branch": "[^"]*"' "$SPRINT_STATE" | head -1 | cut -d'"' -f4)
+ISOLATION_COMMIT=$(grep -o '"created_from_commit": "[^"]*"' "$SPRINT_STATE" | head -1 | cut -d'"' -f4)
+if [ -n "$ISOLATION_BRANCH" ]; then
+  git rev-parse --verify "$ISOLATION_BRANCH" >/dev/null 2>&1 || {
+    echo "[BLOCK] isolation branch '$ISOLATION_BRANCH' 已不存在（可能被删除或 force push 覆盖）"
+    exit 1
+  }
+fi
+if [ -n "$ISOLATION_COMMIT" ]; then
+  git cat-file -e "${ISOLATION_COMMIT}^{commit}" 2>/dev/null || {
+    echo "[WARN] isolation commit $ISOLATION_COMMIT 不可达（可能被 GC 或 rebase 清理），恢复后可能状态不一致"
+    # WARN 而非 BLOCK — 可继续但有风险
+  }
+fi
+
+# 4. 文件时效性校验：前置摘要文件的 mtime 不晚于其生成 phase 的完成时间
+RESUME_PREREQ_PHASE=$((RESUME_PHASE - 1))
+PREREQ_FILE=".sprint-state/phase-outputs/phase-${RESUME_PREREQ_PHASE}-summary.md"
+[ -f "$PREREQ_FILE" ] || { echo "[BLOCK] 前置摘要文件 ${PREREQ_FILE} 不存在"; exit 1; }
+
+# 提取前置 phase 的完成时间
+PREREQ_COMPLETED_AT=$(grep -A3 "\"phase\": $RESUME_PREREQ_PHASE" "$SPRINT_STATE" 2>/dev/null | grep "completed_at" | head -1 | cut -d'"' -f4)
+if [ -n "$PREREQ_COMPLETED_AT" ] && [ "$PREREQ_COMPLETED_AT" != "null" ]; then
+  FILE_MTIME=$(stat -c %Y "$PREREQ_FILE" 2>/dev/null || stat -f %m "$PREREQ_FILE" 2>/dev/null)
+  COMPLETED_EPOCH=$(date -d "$PREREQ_COMPLETED_AT" +%s 2>/dev/null || echo "")
+  if [ -n "$FILE_MTIME" ] && [ -n "$COMPLETED_EPOCH" ]; then
+    # 容忍 60 秒时钟偏差
+    [ "$FILE_MTIME" -le $((COMPLETED_EPOCH + 60)) ] || {
+      echo "[WARN] 前置摘要文件 ${PREREQ_FILE} 在 phase $RESUME_PREREQ_PHASE 完成后被修改（mtime: $(date -d @$FILE_MTIME '+%Y-%m-%d %H:%M:%S'), completed_at: $PREREQ_COMPLETED_AT）"
+      echo "[ACTION] 继续恢复前请确认修改是预期的。输入 'confirm' 继续，其他取消："
+      read USER_CONFIRM
+      [ "$USER_CONFIRM" = "confirm" ] || { echo "[BLOCK] 用户取消恢复"; exit 1; }
+    }
+  fi
+fi
+
+# 5. specification.yaml 时效性校验（仅 --resume-from build）
+SPEC_FILE="specification.yaml"
+if [ "$RESUME_PHASE" -ge 2 ] && [ -f "$SPEC_FILE" ]; then
+  SPEC_MTIME=$(stat -c %Y "$SPEC_FILE" 2>/dev/null || stat -f %m "$SPEC_FILE" 2>/dev/null)
+  PLAN_COMPLETED_AT=$(grep -A3 '"phase": 1' "$SPRINT_STATE" 2>/dev/null | grep "completed_at" | head -1 | cut -d'"' -f4)
+  if [ -n "$SPEC_MTIME" ] && [ -n "$PLAN_COMPLETED_AT" ] && [ "$PLAN_COMPLETED_AT" != "null" ]; then
+    PLAN_EPOCH=$(date -d "$PLAN_COMPLETED_AT" +%s 2>/dev/null || echo "")
+    if [ -n "$PLAN_EPOCH" ] && [ "$SPEC_MTIME" -gt $((PLAN_EPOCH + 60)) ]; then
+      echo "[WARN] specification.yaml 在 Plan phase 完成后被修改"
+      echo "[ACTION] 继续恢复前请确认 specification.yaml 的修改是预期的。输入 'confirm' 继续："
+      read USER_CONFIRM
+      [ "$USER_CONFIRM" = "confirm" ] || { echo "[BLOCK] 用户取消恢复"; exit 1; }
+    fi
+  fi
+fi
+
+echo "✅ RESUME GATE PASSED — 断点校验通过"
+# 继续执行 Phase Transition Gate
+```
+
+验证失败 → BLOCK，不可执行 `--resume-from`。
+orchestrator 必须展示失败原因并建议用户启动新 Sprint 或手动修复后重试。
 
 ### WORKTREE ENFORCEMENT（Issue #84）
 
@@ -796,11 +879,19 @@ Sprint state is persisted as JSON in `.sprint-state/sprint-state.json`:
 
 ### --resume-from（从某阶段继续）
 
+**前置校验**：MUST 执行 RESUME GATE（见上节）后才可 dispatch 下一 Phase。
+
 ```bash
 /sprint-flow "继续 Sprint" --resume-from build --spec specification.yaml
-# → 从 Build 恢复，但必须已有 specification.yaml + .sprint-state/delphi-reviewed.json (verdict: APPROVED)
+# → 1. 执行 RESUME GATE（校验 sprint-state + git 状态 + 文件时效性）
+# → 2. 执行 Phase Transition Gate（校验摘要文件格式）
+# → 3. 从 Build 恢复，但必须已有 specification.yaml + .sprint-state/delphi-reviewed.json (verdict: APPROVED)
 # 适用场景：中断恢复，使用已通过 delphi-review 的 specification.yaml
 ```
+
+**已知限制**：
+- `--resume-from` 校验为**尽力而为**：git commit 可被 GC 回收、文件 mtime 可被 `git checkout` 修改
+- 校验失败时 orchestrator 应输出完整诊断日志，建议用户启动新 Sprint 而非手动修补
 
 ### --phase（只执行单个阶段）
 
@@ -954,7 +1045,9 @@ Sprint 结束时 (Phase 6 完成):
 
 # 第二次：三天后继续
 /sprint-flow "继续开发" --resume-from build --spec docs/specification.yaml
-# → 从 Build 入口恢复，但必须已有 specification.yaml + .sprint-state/delphi-reviewed.json (verdict: APPROVED)
+# → 1. RESUME GATE：校验 sprint-state + git + 文件时效性（三天前生成的文件可能 stale）
+# → 2. Phase Transition Gate：校验摘要文件格式
+# → 3. 从 Build 入口恢复，但必须已有 specification.yaml + .sprint-state/delphi-reviewed.json (verdict: APPROVED)
 ```
 
 ### 示例 3：语言特定

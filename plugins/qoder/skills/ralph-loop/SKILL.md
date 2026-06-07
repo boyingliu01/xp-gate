@@ -323,6 +323,16 @@ Phase 0, 1, 3-6 行为完全不变。
    - 注入：当前 REQ + AC + permanent learnings + contextual learnings (最近 3 条)
    - 注入：AGENTS.md + git log --oneline -5 + 测试基础设施摘要
 
+3. **Pre-REQ snapshot（Issue #137）**
+   - 在 dispatch subagent 前记录当前 git HEAD，用于 TDD 合规的基线对比
+   ```bash
+   # 保存当前 HEAD 作为 TDD 验证基线
+   PRE_REQ_HASH=$(git rev-parse HEAD)
+   echo "[TDD-BASELINE] Pre-REQ snapshot: $PRE_REQ_HASH"
+   # 记录到临时文件（subagent 只读基线，避免污染）
+   echo "$PRE_REQ_HASH" > .sprint-state/last-req-baseline.txt
+   ```
+
 3. **Dispatch build subagent**
    - 使用 `task(category="unspecified-high", load_skills=["test-driven-development"], timeout=300)`
    - 强制 TDD 流程：RED → GREEN → REFACTOR
@@ -330,7 +340,34 @@ Phase 0, 1, 3-6 行为完全不变。
 
 4. **Run full regression tests**
    - L1: typecheck + lint on changed files
-   - L1b: 检查测试先行比率 (新增测试行数 / 总新增行数 ≥ 40%)
+   - **L1b: 客观测试先行验证（Issue #137）** — 使用 git diff 验证新增测试行数占总新增行数比例
+     ```bash
+     # 从基线读取 pre-REQ HEAD，支持跨多个 commit 的 REQ
+     PRE_BASELINE=$(cat .sprint-state/last-req-baseline.txt 2>/dev/null || echo "HEAD~1")
+     GIT_DIFF=$(git diff "$PRE_BASELINE"..HEAD --stat --diff-filter=AM 2>/dev/null)
+     # 提取新增测试行数（*.test.*, *.spec.*, __tests__/* 等）
+     TEST_LINES=$(echo "$GIT_DIFF" | grep -E '\.(test|spec)\.[a-z]+|__tests__/' | grep -oP '\d+(?= insertion)' | paste -sd+ | bc || echo 0)
+     # 提取总新增行数
+     TOTAL_LINES=$(echo "$GIT_DIFF" | grep -oP '\d+(?= insertion)' | paste -sd+ | bc || echo 0)
+     # 计算比率
+     if [ "$TOTAL_LINES" -gt 0 ]; then
+       RATIO=$((TEST_LINES * 100 / TOTAL_LINES))
+       echo "[TDD-CHECK] Test lines: $TEST_LINES / Total lines: $TOTAL_LINES = ${RATIO}%"
+       [ "$RATIO" -ge 40 ] || {
+         echo "[TDD-FAIL] Test-first ratio ${RATIO}% < 40% threshold"
+         echo "[TDD-FAIL] Expected ≥ 40% test lines. Retry with tests written first."
+         exit 1
+       }
+     else
+       echo "[TDD-CHECK] No new lines in diff (possibly no changes or first commit)"
+     fi
+     ```
+   - **L1b-alt: 测试文件存在验证** — 当 diff 为空或无新增行时，降级检查测试文件是否出现在 changeset 中
+     ```bash
+     HAS_TEST_FILES=$(echo "$GIT_DIFF" | grep -c -E '\.(test|spec)\.[a-z]+|__tests__/' || echo 0)
+     [ "$HAS_TEST_FILES" -gt 0 ] || { echo "[TDD-FAIL] No test files found in changeset"; exit 1; }
+     echo "[TDD-CHECK] Test files present in changeset: $HAS_TEST_FILES file(s)"
+     ```
    - **L2: 全量测试运行**（不只是 @test 当前 REQ 的测试）
    - L3: 检查整体覆盖率 ≥ 80%
 
@@ -438,9 +475,10 @@ REQ-001 开始 → 检查 test-utils.ts → 不存在
 - [ ] Test infrastructure confirmed ready
 
 **TDD Compliance**:
-- [ ] Tests written BEFORE implementation
-- [ ] Test/implementation ratio ≥ 40%
+- [ ] Tests written BEFORE implementation (verified via `git diff HEAD~1 --stat --diff-filter=AM`)
+- [ ] Test/implementation ratio ≥ 40% (L1b check: test_lines / total_lines ≥ 40%)
 - [ ] Mock usage justified (if >30% mock density)
+- [ ] Test files present in changeset (L1b-alt fallback)
 
 **Verification Layers**:
 - [ ] L1: typecheck + lint pass
