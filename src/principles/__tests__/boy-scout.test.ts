@@ -30,6 +30,7 @@ import {
   analyzeWarningsForFiles,
   autoInitBaseline,
   initBaselineCommand,
+  runEnforcement,
 } from '../boy-scout';
 import { analyze } from '../analyzer';
 import { getAllRules } from '../index';
@@ -74,60 +75,22 @@ describe('Boy Scout Rule Enforcement', () => {
    * @covers AC-QG-002-01
    */
   describe('file classification', () => {
-    it('identifies new files from git diff', () => {
-      const gitDiff = [
-        'A    src/new-file.ts',
-        'M    src/existing-file.ts',
-        'D    src/deleted-file.ts'
-      ];
-      
-      const classified = classifyFiles(gitDiff);
+    const baseGitDiff = ['A    src/new-file.ts', 'M    src/existing-file.ts', 'D    src/deleted-file.ts'];
+
+    it('classifies new, modified, deleted files from git diff', () => {
+      const classified = classifyFiles(baseGitDiff);
       expect(classified.new).toEqual(['src/new-file.ts']);
-    });
-    
-    it('identifies modified files from git diff', () => {
-      const gitDiff = [
-        'A    src/new-file.ts',
-        'M    src/existing-file.ts',
-        'D    src/deleted-file.ts'
-      ];
-      
-      const classified = classifyFiles(gitDiff);
       expect(classified.modified).toEqual(['src/existing-file.ts']);
-    });
-    
-    it('ignores deleted files', () => {
-      const gitDiff = [
-        'A    src/new-file.ts',
-        'M    src/existing-file.ts',
-        'D    src/deleted-file.ts'
-      ];
-      
-      const classified = classifyFiles(gitDiff);
       expect(classified.deleted).toEqual(['src/deleted-file.ts']);
     });
     
     it('handles renamed files correctly', () => {
-      const gitDiff = [
-        'A    src/new-file.ts',
-        'R095 old-file.ts src/new-renamed-file.ts',
-        'M    src/existing-file.ts'
-      ];
-      
-      const classified = classifyFiles(gitDiff);
-      expect(classified.renamed).toEqual([
-        { oldPath: 'old-file.ts', newPath: 'src/new-renamed-file.ts' }
-      ]);
+      const classified = classifyFiles([...baseGitDiff, 'R095 old-file.ts src/new-renamed-file.ts']);
+      expect(classified.renamed).toEqual([{ oldPath: 'old-file.ts', newPath: 'src/new-renamed-file.ts' }]);
     });
     
     it('handles empty diff lines', () => {
-      const gitDiff = [
-        '',
-        'A    src/new-file.ts',
-        ' '
-      ];
-      
-      const classified = classifyFiles(gitDiff);
+      const classified = classifyFiles(['', 'A    src/new-file.ts', ' ']);
       expect(classified.new).toEqual(['src/new-file.ts']);
     });
   });
@@ -278,34 +241,17 @@ describe('Boy Scout Rule Enforcement', () => {
    * @covers AC-QG-002-07, AC-QG-002-08
    */
   describe('threshold enforcement', () => {
-    it('blocks file with baseline=5 and current=1 (must clear to zero)', () => {
-      const baselineEntry = { totalWarnings: 5, lastAnalyzed: new Date().toISOString() } as BaselineEntry;
-      const result = calculateDelta(baselineEntry, 1, 'MODIFIED');
-      expect(result.enforcement).toBe('BLOCK');
+    const entry = (w: number) => ({ totalWarnings: w, lastAnalyzed: new Date().toISOString() }) as BaselineEntry;
+
+    it('blocks ≤5 warnings that dont clear to zero', () => {
+      expect(calculateDelta(entry(5), 1, 'MODIFIED').enforcement).toBe('BLOCK');
+      expect(calculateDelta(entry(3), 3, 'MODIFIED').enforcement).toBe('BLOCK');
     });
-    
-    it('passes file with baseline=6 and current=5 (improvement)', () => {
-      const baselineEntry = { totalWarnings: 6, lastAnalyzed: new Date().toISOString() } as BaselineEntry;
-      const result = calculateDelta(baselineEntry, 5, 'MODIFIED');
-      expect(result.enforcement).toBe('PASS');
-    });
-    
-    it('passes file with baseline=5 and current=0 (cleared to zero)', () => {
-      const baselineEntry = { totalWarnings: 5, lastAnalyzed: new Date().toISOString() } as BaselineEntry;
-      const result = calculateDelta(baselineEntry, 0, 'MODIFIED');
-      expect(result.enforcement).toBe('PASS');
-    });
-    
-    it('blocks file with baseline=3 and current=3 (must clear)', () => {
-      const baselineEntry = { totalWarnings: 3, lastAnalyzed: new Date().toISOString() } as BaselineEntry;
-      const result = calculateDelta(baselineEntry, 3, 'MODIFIED');
-      expect(result.enforcement).toBe('BLOCK');
-    });
-    
-    it('allows file with baseline=8 and current=8 (no improvement needed)', () => {
-      const baselineEntry = { totalWarnings: 8, lastAnalyzed: new Date().toISOString() } as BaselineEntry;
-      const result = calculateDelta(baselineEntry, 8, 'MODIFIED');
-      expect(result.enforcement).toBe('PASS');
+
+    it('passes ≤5 warnings cleared to zero or >5 warnings that decrease', () => {
+      expect(calculateDelta(entry(5), 0, 'MODIFIED').enforcement).toBe('PASS');
+      expect(calculateDelta(entry(6), 5, 'MODIFIED').enforcement).toBe('PASS');
+      expect(calculateDelta(entry(8), 8, 'MODIFIED').enforcement).toBe('PASS');
     });
   });
 
@@ -318,6 +264,70 @@ describe('Boy Scout Rule Enforcement', () => {
       const result = enforceBoyScoutRule([]);
       expect(result.summary.totalFiles).toBe(0);
       expect(result.overallStatus).toBe('PASS');
+    });
+  });
+
+  /**
+   * @test #173 boy-scout coverage - runEnforcement
+   * @covers AC-QG-002-runEnforcement-full
+   */
+  describe('runEnforcement', () => {
+    const warn = (file: string) => ({ file, severity: 'warning' as const, ruleId: 'r1', message: 'm' });
+    const setup = () => {
+      mockAccess.mockRejectedValue(new Error('ENOENT'));
+      mockWriteFile.mockResolvedValue(undefined);
+    };
+
+    it('enforces new files with zero warnings', async () => {
+      setup();
+      mockAnalyze.mockResolvedValue({ violations: [] } as unknown as Awaited<ReturnType<typeof analyze>>);
+      const result = await runEnforcement(['clean.ts'], [], '/tmp/test-baseline.json');
+      expect(result.overallStatus).toBe('PASS');
+      expect(result.summary.totalFiles).toBe(1);
+    });
+
+    it('auto-initializes baseline for modified files and passes', async () => {
+      setup();
+      mockAnalyze.mockResolvedValue({ violations: [warn('mod.ts')] } as unknown as Awaited<ReturnType<typeof analyze>>);
+      const result = await runEnforcement([], ['mod.ts'], '/tmp/test-baseline.json');
+      expect(result.summary.totalFiles).toBe(1);
+      expect(mockWriteFile).toHaveBeenCalled();
+    });
+
+    it('blocks new files with warnings', async () => {
+      setup();
+      mockAnalyze.mockResolvedValue({ violations: [warn('bad.ts')] } as unknown as Awaited<ReturnType<typeof analyze>>);
+      const result = await runEnforcement(['bad.ts'], [], '/tmp/test-baseline.json');
+      expect(result.overallStatus).toBe('BLOCK');
+      expect(result.violations.length).toBe(1);
+    });
+
+    it('handles mixed new and modified files', async () => {
+      setup();
+      mockAnalyze.mockResolvedValue({ violations: [warn('bad.ts')] } as unknown as Awaited<ReturnType<typeof analyze>>);
+      const result = await runEnforcement(['bad.ts', 'clean.ts'], ['existing.ts'], '/tmp/test-baseline.json');
+      expect(result.summary.totalFiles).toBe(3);
+    });
+
+    it('decreased warnings shows reason and same high warnings shows "No new warnings"', async () => {
+      const baseline = { 'mod.ts': { totalWarnings: 3, lastAnalyzed: new Date().toISOString() } };
+      mockAccess.mockResolvedValue(undefined);
+      mockWriteFile.mockResolvedValue(undefined);
+
+      // Decreased case
+      mockAnalyze.mockResolvedValue({ violations: [] } as unknown as Awaited<ReturnType<typeof analyze>>);
+      mockReadFile.mockResolvedValue(JSON.stringify(baseline));
+      const decResult = await runEnforcement([], ['mod.ts'], '/tmp/test-baseline.json');
+      expect(decResult.detailedReport[0].reason).toBe('Warnings decreased by 3');
+
+      // Same high warnings case
+      const highBaseline = { 'mod.ts': { totalWarnings: 10, lastAnalyzed: new Date().toISOString() } };
+      mockAnalyze.mockResolvedValue({
+        violations: Array.from({ length: 10 }, () => warn('mod.ts')),
+      } as unknown as Awaited<ReturnType<typeof analyze>>);
+      mockReadFile.mockResolvedValue(JSON.stringify(highBaseline));
+      const sameResult = await runEnforcement([], ['mod.ts'], '/tmp/test-baseline.json');
+      expect(sameResult.detailedReport[0].reason).toBe('No new warnings introduced');
     });
   });
 
@@ -360,55 +370,36 @@ describe('Boy Scout Rule Enforcement', () => {
       expect(result).toEqual({ 'src/a.ts': 0, 'src/b.ts': 0 });
     });
 
-    it('counts warning violations per file', async () => {
+    it('counts warning/error violations per file and ignores info-level', async () => {
       mockAnalyze.mockResolvedValue({
         violations: [
-{ file: 'src/a.ts', line: 1, severity: 'warning' as const, ruleId: 'r1', message: 'm' },
-{ file: 'src/a.ts', line: 2, severity: 'warning' as const, ruleId: 'r2', message: 'm' },
-{ file: 'src/b.ts', line: 1, severity: 'warning' as const, ruleId: 'r1', message: 'm' },
-{ file: 'src/a.ts', line: 3, severity: 'error' as const, ruleId: 'r3', message: 'm' },
+          { file: 'src/a.ts', line: 1, severity: 'warning' as const, ruleId: 'r1', message: 'm' },
+          { file: 'src/a.ts', line: 2, severity: 'warning' as const, ruleId: 'r2', message: 'm' },
+          { file: 'src/b.ts', line: 1, severity: 'warning' as const, ruleId: 'r1', message: 'm' },
+          { file: 'src/a.ts', line: 3, severity: 'error' as const, ruleId: 'r3', message: 'm' },
+          { file: 'src/c.ts', line: 1, severity: 'info' as const, ruleId: 'r4', message: 'm' },
         ],
       } as unknown as Awaited<ReturnType<typeof analyze>>);
 
-      const result = await analyzeWarningsForFiles('src/a.ts,src/b.ts');
-
+      const result = await analyzeWarningsForFiles('src/a.ts,src/b.ts,src/c.ts');
       expect(result['src/a.ts']).toBe(3);
       expect(result['src/b.ts']).toBe(1);
-    });
-
-    it('ignores info-level violations', async () => {
-      mockAnalyze.mockResolvedValue({
-        violations: [
-          { file: 'src/a.ts', line: 1, severity: 'info' as const, ruleId: 'r1', message: 'm' },
-          { file: 'src/a.ts', line: 2, severity: 'warning' as const, ruleId: 'r2', message: 'm' },
-        ],
-      } as unknown as Awaited<ReturnType<typeof analyze>>);
-
-      const result = await analyzeWarningsForFiles('src/a.ts');
-
-      expect(result['src/a.ts']).toBe(1);
+      expect(result['src/c.ts']).toBe(0);
     });
 
     it('handles files not in the input list', async () => {
       mockAnalyze.mockResolvedValue({
-        violations: [
-          { file: 'src/unknown.ts', line: 1, severity: 'warning' as const, ruleId: 'r1', message: 'm' },
-        ],
+        violations: [{ file: 'src/unknown.ts', line: 1, severity: 'warning' as const, ruleId: 'r1', message: 'm' }],
       } as unknown as Awaited<ReturnType<typeof analyze>>);
 
       const result = await analyzeWarningsForFiles('src/a.ts');
-
       expect(result['src/a.ts']).toBe(0);
       expect(result['src/unknown.ts']).toBe(1);
     });
 
     it('handles whitespace in comma-separated strings', async () => {
-      mockAnalyze.mockResolvedValue({
-        violations: [],
-      } as unknown as Awaited<ReturnType<typeof analyze>>);
-
+      mockAnalyze.mockResolvedValue({ violations: [] } as unknown as Awaited<ReturnType<typeof analyze>>);
       const result = await analyzeWarningsForFiles('  src/a.ts , src/b.ts  ');
-
       expect(result).toHaveProperty('src/a.ts');
       expect(result).toHaveProperty('src/b.ts');
     });
@@ -552,6 +543,104 @@ describe('Boy Scout Rule Enforcement', () => {
       expect(mockWriteFile).toHaveBeenCalledWith('.warnings-baseline.json', expect.any(String));
       const savedJson = JSON.parse(vi.mocked(mockWriteFile).mock.calls[0][1] as string);
       expect(Object.keys(savedJson)).toEqual([]);
+    });
+  });
+
+  /**
+   * @test REQ-QG-002 CLI entrypoint coverage
+   * @intent Cover internal CLI helpers (main, parseArgs, splitCsvArg, ARG_HANDLERS, runInitBaselineCommand, runEnforcementCommand, showHelp) via module re-import with synthesized argv
+   * @covers analyzeWarningsForFiles-CLI-1, analyzeWarningsForFiles-CLI-2, analyzeWarningsForFiles-CLI-3
+   */
+  /**
+   * @test REQ-QG-002 CLI entrypoint coverage
+   * @intent Cover internal CLI helpers (main, parseArgs, splitCsvArg, ARG_HANDLERS, runInitBaselineCommand, runEnforcementCommand, showHelp) via real subprocess execution with NODE_V8_COVERAGE so vitest's v8 reporter merges the child profiles.
+   * @covers boy-scout-cli-help, boy-scout-cli-init-baseline, boy-scout-cli-enforce
+   */
+  describe('CLI entrypoint (main / parseArgs / handlers)', () => {
+    const { spawnSync } = require('child_process') as typeof import('child_process');
+    const path = require('path') as typeof import('path');
+    const fs = require('fs') as typeof import('fs');
+    const os = require('os') as typeof import('os');
+
+    const BOY_SCOUT_PATH = path.resolve(__dirname, '../boy-scout.ts');
+
+    function runCli(args: string[], cwd?: string): { code: number; stdout: string; stderr: string } {
+      const coverageDir = process.env.NODE_V8_COVERAGE ?? path.join(process.cwd(), 'coverage', '.tmp');
+      const result = spawnSync('npx', ['tsx', BOY_SCOUT_PATH, ...args], {
+        cwd: cwd ?? process.cwd(),
+        encoding: 'utf-8',
+        env: { ...process.env, NODE_V8_COVERAGE: coverageDir },
+      });
+      return {
+        code: result.status ?? -1,
+        stdout: result.stdout ?? '',
+        stderr: result.stderr ?? '',
+      };
+    }
+
+    it('shows help when --help is passed', () => {
+      const { code, stdout } = runCli(['--help']);
+      expect(code).toBe(0);
+      expect(stdout).toContain('Usage: boy-scout');
+      expect(stdout).toContain('--init-baseline');
+    });
+
+    it('shows help when -h is passed', () => {
+      const { code, stdout } = runCli(['-h']);
+      expect(code).toBe(0);
+      expect(stdout).toContain('Usage: boy-scout');
+    });
+
+    it('shows help when "help" keyword is passed', () => {
+      const { code, stdout } = runCli(['help']);
+      expect(code).toBe(0);
+      expect(stdout).toContain('Usage: boy-scout');
+    });
+
+    it('runs init-baseline command via --init-baseline flag in a clean tmp project', () => {
+      const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'boy-scout-init-'));
+      try {
+        fs.writeFileSync(path.join(tmp, 'a.ts'), 'export const x = 1;\n');
+        const { code, stdout } = runCli(['--init-baseline', 'a.ts'], tmp);
+        expect(code).toBe(0);
+        expect(stdout).toContain('Baseline initialized successfully');
+        expect(fs.existsSync(path.join(tmp, '.warnings-baseline.json'))).toBe(true);
+      } finally {
+        fs.rmSync(tmp, { recursive: true, force: true });
+      }
+    });
+
+    it('runs enforcement command and prints JSON result with overallStatus', () => {
+      const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'boy-scout-enforce-'));
+      try {
+        fs.writeFileSync(path.join(tmp, 'clean.ts'), 'export const ok = 1;\n');
+        const baselinePath = path.join(tmp, '.warnings-baseline.json');
+        const { code, stdout } = runCli([
+          '--new-files', 'clean.ts',
+          '--baseline', baselinePath,
+        ], tmp);
+        expect([0, 1]).toContain(code);
+        expect(stdout).toContain('overallStatus');
+      } finally {
+        fs.rmSync(tmp, { recursive: true, force: true });
+      }
+    });
+
+    it('handles --modified-files argument and writes baseline auto-init', () => {
+      const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'boy-scout-mod-'));
+      try {
+        fs.writeFileSync(path.join(tmp, 'mod.ts'), 'export const m = 1;\n');
+        const baselinePath = path.join(tmp, '.warnings-baseline.json');
+        fs.writeFileSync(baselinePath, '{}');
+        const { code, stdout } = runCli([
+          '--modified-files', 'mod.ts',
+          '--baseline', baselinePath,
+        ], tmp);
+        expect([0, 1]).toContain(code);
+        expect(stdout).toContain('overallStatus');
+      } finally {
+        fs.rmSync(tmp, { recursive: true, force: true });
+      }
     });
   });
 });

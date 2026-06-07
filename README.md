@@ -7,7 +7,7 @@
 [![Sprint Flow](https://img.shields.io/badge/Sprint%20Flow-Think→Ship-purple)](./skills/sprint-flow)
 [![npm package](https://img.shields.io/badge/npm%20registry-npm%20install%20--g%20%40boyingliu01%2Fxp--gate-blue?logo=npm)](src/npm-package)
 
-> **v0.5.1**: xp-gate 已从 GitHub Packages 迁移到公共 npm registry。新增 `xp-gate uninstall` / `doctor` / `migrate` 命令。旧版用户请阅读下方迁移指南。
+> **v0.8.1**: xp-gate 已从 GitHub Packages 迁移到公共 npm registry。新增 `xp-gate uninstall` / `doctor` / `migrate` 命令。旧版用户请阅读下方迁移指南。
 
 ---
 

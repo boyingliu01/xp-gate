@@ -267,7 +267,7 @@ async function runInitBaselineCommand(parsed: Record<string, unknown>): Promise<
   }
 }
 
-async function runEnforcementCommand(parsed: Record<string, unknown>): Promise<number> {
+export async function runEnforcementCommand(parsed: Record<string, unknown>): Promise<number> {
   try {
     const enforcementResult = await runEnforcement(
       (parsed.newFiles ?? []) as string[],
@@ -282,7 +282,7 @@ async function runEnforcementCommand(parsed: Record<string, unknown>): Promise<n
   }
 }
 
-async function main(): Promise<number> {
+export async function main(): Promise<number> {
   const parsed = parseArgs(process.argv.slice(2));
   return parsed.command === 'init-baseline'
     ? runInitBaselineCommand(parsed)

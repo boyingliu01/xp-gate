@@ -1,7 +1,7 @@
 # SKILLS/SPRINT-FLOW KNOWLEDGE BASE
 
 **Generated:** 2026-05-30
-**Version:** v0.5.1
+**Version:** v0.8.1
 
 ## OVERVIEW
 7-phase development pipeline: THINK→PLAN→BUILD→REVIEW→USER ACCEPT→FEEDBACK→SHIP, with ralph-loop default build mode.

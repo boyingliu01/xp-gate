@@ -31,7 +31,6 @@ docs/
 ├── principlesrc-configuration.md
 ├── ralph-loop-design.md
 ├── rename-guide.md
-├── sonarqube-setup.md
 ├── specification-ahe-observability.yaml
 └── sprint-fix-open-issues-design.md
 ```

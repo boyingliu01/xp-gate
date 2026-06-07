@@ -3,7 +3,7 @@
 **Generated:** 2026-05-30
 **Commit:** 4517f2b
 **Branch:** main
-**Version:** v0.5.1
+**Version:** v0.8.1
 
 ## OVERVIEW
 Delphi Consensus Review — multi-round anonymous expert review (≥91% threshold, 3 experts from ≥2 providers, domestic models only). Supports design + code-walkthrough modes.

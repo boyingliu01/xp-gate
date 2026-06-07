@@ -23,6 +23,7 @@
     "test:plugins": "bash scripts/test-plugins.sh",
     "lint": "eslint src --ext .ts",
     "principles": "npx tsx src/principles/index.ts",
+    "archlint": "npx @archlinter/cli scan . --config architecture.yaml",
     "dashboard": "node dashboard/serve.js"
   },
   "dependencies": {
@@ -39,6 +40,7 @@
     "@typescript-eslint/eslint-plugin": "^8.59.2",
     "@typescript-eslint/parser": "^8.59.2",
     "@vitest/coverage-v8": "^1.6.1",
+    "@archlinter/cli": "^0.16.0",
     "jscpd": "^4.0.9",
     "typescript": "^5.9.3",
     "vitest": "^1.6.1"

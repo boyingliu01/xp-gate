@@ -3,7 +3,7 @@
 **Generated:** 2026-05-30
 **Commit:** 4517f2b
 **Branch:** main
-**Version:** v0.5.1
+**Version:** v0.8.1
 
 ## OVERVIEW
 Git quality gates: pre-commit (6 Gates via 13 language adapters) and pre-push (Gate M mutation + Delphi code-walkthrough). Zero-tolerance policy per QUALITY-GATES-CODE-OF-CONDUCT.md.
@@ -44,7 +44,7 @@ githooks/
 - **6-gate** pre-commit: Code Quality(1+2+5), Dup Code(2), Complexity(3), Principles(4), Tests(3+4), Architecture(6)
 - Tool unavailable → SKIP for that language, NOT block
 - Zero-tolerance: hooks block if tools unavailable for detected language
-- CCN thresholds: >5 warn, >10 block
+- CCN threshold: >5 block
 - Pre-push: max 20 files or 500 LOC per push
 - Pre-push skipped for main/master pushes (code-walkthrough only)
 - Boy Scout Rule: new files zero-tolerance; modified files cannot increase warnings; ≤5 baseline warnings must clear to zero
