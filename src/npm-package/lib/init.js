@@ -303,6 +303,7 @@ async function installLocal(args) {
   updateConfig({ lastInit: new Date().toISOString(), mode: 'local', manifest });
 
   injectKarpathyPrinciples(projectRoot);
+  configureOpenCodePlugin(srcDir, projectRoot);
 
   console.log('\nInstallation complete!');
   console.log('Run git commit to trigger quality gates');
@@ -346,6 +347,49 @@ async function setupGlobal(args) {
   console.log('All git repositories will now use xp-gate quality gates.');
   console.log('Per-project adapters can still override by creating <repo>/githooks/');
   return 0;
+}
+
+function configureOpenCodePlugin(srcDir, projectRoot) {
+  const opencodeJsonPath = path.join(projectRoot, 'opencode.json');
+  const pluginSrcPath = path.join(srcDir, 'plugins', 'opencode');
+
+  if (!fs.existsSync(pluginSrcPath)) {
+    console.log('  OpenCode plugin: SKIP (not bundled)');
+    return;
+  }
+
+  let config = {};
+  if (fs.existsSync(opencodeJsonPath)) {
+    try {
+      const raw = fs.readFileSync(opencodeJsonPath, 'utf8');
+      config = JSON.parse(raw);
+    } catch (e) {
+      console.warn(`  Warning: could not parse opencode.json: ${e.message}`);
+      return;
+    }
+  }
+
+  if (!Array.isArray(config.plugin)) {
+    config.plugin = [];
+  }
+
+  const normalizedSrc = path.resolve(pluginSrcPath);
+  const alreadyConfigured = config.plugin.some(p => path.resolve(projectRoot, p) === normalizedSrc);
+
+  if (alreadyConfigured) {
+    console.log('  OpenCode plugin: already configured in opencode.json');
+    return;
+  }
+
+  const relativePluginPath = path.relative(projectRoot, normalizedSrc).replace(/\\/g, '/');
+  config.plugin.push(relativePluginPath);
+
+  try {
+    fs.writeFileSync(opencodeJsonPath, JSON.stringify(config, null, 2) + '\n');
+    console.log(`  OpenCode plugin: added to opencode.json (${relativePluginPath})`);
+  } catch (e) {
+    console.warn(`  Warning: could not write opencode.json: ${e.message}`);
+  }
 }
 
 function injectKarpathyPrinciples(projectRoot) {
