@@ -577,6 +577,42 @@ describe('uninstall', () => {
     expect(logSpy).toHaveBeenCalledWith(expect.stringContaining('adapter-common.sh'));
   });
 
+  // === Execution loop: mixed item types plan ===
+
+  it('executes mixed-type plan (file + dir + gitconfig items) correctly', async () => {
+    setupGlobalInstall();
+    const expectedHooksPath = globalHooksDir();
+    mockExecGlobalHooksPath(expectedHooksPath);
+    const { uninstall } = require('../uninstall');
+
+    const result = await uninstall([]);
+
+    expect(result).toBe(0);
+
+    // Gitconfig type unset core.hooksPath
+    expect(execSpy).toHaveBeenCalledWith(
+      expect.stringContaining('git config --global --unset core.hooksPath'),
+      expect.any(Object)
+    );
+    // Dir items removed: global hooks, adapters, template
+    expect(fs.existsSync(globalHooksDir())).toBe(false);
+    expect(fs.existsSync(globalAdaptersDir())).toBe(false);
+    expect(fs.existsSync(templateDir())).toBe(false);
+  });
+
+  it('skips non-existent file items in execution loop gracefully', async () => {
+    setupLocalInstall();
+    // Delete one file before uninstall
+    fs.unlinkSync(path.join(projectHooksDir(), 'pre-commit'));
+    mockExecSuccess();
+    const { uninstall } = require('../uninstall');
+
+    const result = await uninstall([]);
+    expect(result).toBe(0);
+    // Should not crash — remaining items still processed
+    expect(fs.existsSync(path.join(projectHooksDir(), 'pre-push'))).toBe(false);
+  });
+
   it('saves rollback snapshot before destructive operations', async () => {
     setupLocalInstall();
     mockExecSuccess();

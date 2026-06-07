@@ -263,6 +263,17 @@ describe('update-skill', () => {
     expect(errorSpy).toHaveBeenCalledWith('Error: foo is not installed');
   });
 
+  // === Mode handler isolation: check/all/single operate independently ===
+
+  it('check and all modes handle empty config without crashing (edge cases)', async () => {
+    // No config file at all — getConfig returns {}
+    const { updateSkill } = require('../update-skill');
+    expect(await updateSkill(null, { check: true })).toBe(0);
+    expect(await updateSkill(null, { all: true })).toBe(0);
+    expect(await updateSkill('anything')).toBe(1);
+    expect(errorSpy).toHaveBeenCalledWith('Error: anything is not installed');
+  });
+
   it('getConfig parses valid config (single-name path succeeds)', async () => {
     writeConfig({ foo: { version: '1.0.0' } });
     const { updateSkill } = require('../update-skill');

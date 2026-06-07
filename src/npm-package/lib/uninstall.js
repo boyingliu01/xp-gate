@@ -261,6 +261,68 @@ function buildPlan(mode) {
 }
 
 /**
+ * Remove a single file item with ownership verification.
+ * @returns {boolean} true on success, false on skip (not xp-gate owned)
+ */
+function removeFile(item, config) {
+  const manifestEntry = config.manifest && config.manifest.files
+    ? config.manifest.files[item.manifestKey]
+    : null;
+
+  if (!verifyFileOwnership(item.path, manifestEntry, item.signature)) {
+    if (fs.existsSync(item.path)) {
+      console.warn(`  Warning: ${item.label} does not contain xp-gate signature — skipping`);
+    }
+    return false;
+  }
+
+  fs.unlinkSync(item.path);
+  console.log(`  Removed ${item.label}`);
+  return true;
+}
+
+/**
+ * Remove a directory item.
+ * @returns {boolean} true if dir existed and was removed, false otherwise
+ */
+function removeDir(item) {
+  if (!fs.existsSync(item.path)) return false;
+  fs.rmSync(item.path, { recursive: true, force: true });
+  console.log(`  Removed ${item.label}`);
+  return true;
+}
+
+/**
+ * Unset core.hooksPath if it matches the expected xp-gate path.
+ * @returns {boolean} true if unset was performed or already unset, false on mismatch
+ */
+function unsetGitConfigIfMatch(item) {
+  const currentPath = getCurrentHooksPath();
+  if (currentPath === null || currentPath === '') {
+    console.log(`  ${item.label} — not set`);
+    return true;
+  }
+  if (currentPath === item.expectedPath) {
+    unsetHooksPath();
+    console.log(`  Unset ${item.label}`);
+    return true;
+  }
+  console.warn(`  Warning: core.hooksPath (${currentPath}) does not match xp-gate path — skipping unset`);
+  return false;
+}
+
+/**
+ * Execute a single plan item (file/dir/gitconfig).
+ * @returns {boolean} true on success, false on skip/failure
+ */
+function executePlanItem(item, config) {
+  if (item.type === 'file') return removeFile(item, config);
+  if (item.type === 'dir') return removeDir(item);
+  if (item.type === 'gitconfig' && item.action === 'unset-hooks-path') return unsetGitConfigIfMatch(item);
+  return false;
+}
+
+/**
  * @param {string[]} args CLI arguments
  * @returns {number} exit code (0 = success, 1 = error)
  */
@@ -337,37 +399,7 @@ async function uninstall(args) {
 
   for (const item of plan) {
     try {
-      if (item.type === 'file') {
-        const manifestEntry = config.manifest && config.manifest.files
-          ? config.manifest.files[item.manifestKey]
-          : null;
-
-        if (!verifyFileOwnership(item.path, manifestEntry, item.signature)) {
-          if (fs.existsSync(item.path)) {
-            console.warn(`  Warning: ${item.label} does not contain xp-gate signature — skipping`);
-          }
-          continue;
-        }
-
-        fs.unlinkSync(item.path);
-        console.log(`  Removed ${item.label}`);
-      } else if (item.type === 'dir') {
-        if (fs.existsSync(item.path)) {
-          fs.rmSync(item.path, { recursive: true, force: true });
-          console.log(`  Removed ${item.label}`);
-        }
-      } else if (item.type === 'gitconfig' && item.action === 'unset-hooks-path') {
-        const currentPath = getCurrentHooksPath();
-        if (currentPath === null || currentPath === '') {
-          // Already unset
-          console.log(`  ${item.label} — not set`);
-        } else if (currentPath === item.expectedPath) {
-          unsetHooksPath();
-          console.log(`  Unset ${item.label}`);
-        } else {
-          console.warn(`  Warning: core.hooksPath (${currentPath}) does not match xp-gate path — skipping unset`);
-        }
-      }
+      hadErrors = !executePlanItem(item, config) || hadErrors;
     } catch (e) {
       console.warn(`  Warning: Could not remove ${item.label}: ${e.message}`);
       hadErrors = true;

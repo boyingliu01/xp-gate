@@ -111,15 +111,8 @@ function computeSummary(
   };
 }
 
-function runRuleOnFile(
-  file: string,
-  rule: Rule,
-  adapter: Adapter,
-  violations: Violation[],
-  fileResult: FileResult,
-  ruleResult: RuleResult,
-  errors: string[],
-): void {
+function runRuleOnFile(ctx: RunRuleContext): void {
+  const { file, rule, adapter, violations, fileResult, ruleResult, errors } = ctx;
   ruleResult.filesChecked++;
   try {
     const ruleViolations = rule.check(file, adapter);
@@ -133,6 +126,16 @@ function runRuleOnFile(
     const msg = err instanceof Error ? err.message : String(err);
     errors.push(`Rule ${rule.id} failed on ${file}: ${msg}`);
   }
+}
+
+interface RunRuleContext {
+  file: string;
+  rule: Rule;
+  adapter: Adapter;
+  violations: Violation[];
+  fileResult: FileResult;
+  ruleResult: RuleResult;
+  errors: string[];
 }
 
 export async function analyze(
@@ -162,7 +165,15 @@ export async function analyze(
     fileResults[file] = fileResult;
 
     for (const rule of rulesToRun) {
-      runRuleOnFile(file, rule, adapter, violations, fileResult, ruleResults[rule.id], errors);
+      runRuleOnFile({
+        file,
+        rule,
+        adapter,
+        violations,
+        fileResult,
+        ruleResult: ruleResults[rule.id],
+        errors,
+      });
     }
   }
 

@@ -227,6 +227,86 @@ it('should skip files that do not match adapter language', async () => {
     });
   });
 
+  describe('runRuleOnFile (via analyze) — verifies context-object parameter bundling', () => {
+    it('should correctly aggregate violations per file and per rule', async () => {
+      const files = ['a.ts', 'b.ts'];
+      const ruleA = {
+        id: 'test.rule-a',
+        name: 'Rule A',
+        threshold: 10,
+        severity: 'warning' as Severity,
+        check: vi.fn().mockImplementation((file: string) => {
+          if (file === 'a.ts') {
+            return [{ file: 'a.ts', line: 1, ruleId: 'test.rule-a', message: 'violation in a', severity: 'warning' as Severity }];
+          }
+          return [];
+        })
+      } as Rule;
+      const ruleB = {
+        id: 'test.rule-b',
+        name: 'Rule B',
+        threshold: 10,
+        severity: 'error' as Severity,
+        check: vi.fn().mockReturnValue([
+          { file: 'a.ts', line: 2, ruleId: 'test.rule-b', message: 'error in a', severity: 'error' as Severity },
+          { file: 'b.ts', line: 1, ruleId: 'test.rule-b', message: 'error in b', severity: 'error' as Severity },
+        ])
+      } as Rule;
+
+      const result = await analyze(files, [ruleA, ruleB], mockAdapter);
+
+      // fileResults — each file has the correct violations
+      // ruleA: 1 violation for a.ts via file-match, 0 for b.ts; ruleB: mockReturnValue returns both for any file
+      expect(result.fileResults['a.ts'].violations).toHaveLength(3);
+      expect(result.fileResults['a.ts'].ruleIds).toEqual(['test.rule-a', 'test.rule-b']);
+      // ruleB returns both violations on every call (mockReturnValue — no per-file filter)
+      expect(result.fileResults['b.ts'].violations).toHaveLength(2);
+      expect(result.fileResults['b.ts'].ruleIds).toEqual(['test.rule-b']);
+
+      // ruleResults — each rule tracked correctly
+      expect(result.ruleResults['test.rule-a'].violationCount).toBe(1);
+      expect(result.ruleResults['test.rule-a'].filesChecked).toBe(2);
+      // ruleB's violationCount accumulates across all files (2 per file × 2 files = 4)
+      expect(result.ruleResults['test.rule-b'].violationCount).toBe(4);
+      expect(result.ruleResults['test.rule-b'].filesChecked).toBe(2);
+
+      // total violations = 1 (ruleA) + 4 (ruleB) = 5
+      expect(result.summary.totalViolations).toBe(5);
+    });
+
+    it('should collect per-rule errors from runRuleOnFile into top-level errors array', async () => {
+      const files = ['a.ts', 'b.ts'];
+      const goodRule = {
+        id: 'test.good',
+        name: 'Good Rule',
+        threshold: 10,
+        severity: 'info' as Severity,
+        check: vi.fn().mockReturnValue([])
+      } as Rule;
+      const badRule = {
+        id: 'test.bad',
+        name: 'Bad Rule',
+        threshold: 10,
+        severity: 'error' as Severity,
+        check: vi.fn().mockImplementation((file: string) => {
+          if (file === 'b.ts') throw new Error('crash on b');
+          return [];
+        })
+      } as Rule;
+
+      const result = await analyze(files, [goodRule, badRule], mockAdapter);
+
+      // goodRule ran on both files
+      expect(goodRule.check).toHaveBeenCalledTimes(2);
+      // badRule crashed on b.ts — error captured, a.ts succeeded
+      expect(result.errors).toContain('Rule test.bad failed on b.ts: crash on b');
+      // goodRule results still intact
+      expect(result.ruleResults['test.good'].filesChecked).toBe(2);
+      // filesChecked counts attempted files (incremented before try/catch)
+      expect(result.ruleResults['test.bad'].filesChecked).toBe(2);
+    });
+  });
+
   describe('AnalysisResult structure', () => {
     it('should include file-by-file breakdown', async () => {
       const files = ['test.ts'];

@@ -59,4 +59,26 @@ describe('DartAdapter', () => {
     const lineCount = adapter.countLines();
     expect(lineCount).toBe(2);
   });
+
+  it('should fall back to super.detectLanguage for non-dart extensions', () => {
+    (readFileSync as vi.Mock).mockReturnValue('content');
+    const adapter = new DartAdapter('test.py');
+    expect(adapter.detectLanguage()).toBe('python');
+  });
+
+  it('should handle async functions in Dart', () => {
+    (readFileSync as vi.Mock).mockReturnValue('Future<void> fetchData() async {}\nasync void fireAndForget() {}');
+    const adapter = new DartAdapter('test.dart');
+    const functions = adapter.extractFunctions();
+    const asyncFns = functions.filter(fn => (fn as {type: string}).type === 'async_function');
+    expect(asyncFns.length).toBeGreaterThan(0);
+  });
+
+  it('should handle abstract class declarations in Dart', () => {
+    (readFileSync as vi.Mock).mockReturnValue('abstract class Repository {\n  void save();\n}\n');
+    const adapter = new DartAdapter('test.dart');
+    const classes = adapter.extractClasses();
+    const abstractClasses = classes.filter(cls => (cls as {type: string}).type === 'abstract_class');
+    expect(abstractClasses.length).toBeGreaterThan(0);
+  });
 });

@@ -59,4 +59,10 @@ describe('SwiftAdapter', () => {
     const lineCount = adapter.countLines();
     expect(lineCount).toBe(2);
   });
+
+  it('should fall back to super.detectLanguage for non-swift extensions', () => {
+    (readFileSync as vi.Mock).mockReturnValue('content');
+    const adapter = new SwiftAdapter('test.py');
+    expect(adapter.detectLanguage()).toBe('python');
+  });
 });

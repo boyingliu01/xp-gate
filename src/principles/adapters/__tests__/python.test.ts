@@ -66,4 +66,19 @@ describe('PythonAdapter', () => {
     const functions = adapter.extractFunctions();
     expect(Array.isArray(functions)).toBe(true);
   });
+
+  it('should fall back to super.detectLanguage for non-py extensions', () => {
+    (readFileSync as vi.Mock).mockReturnValue('content');
+    const adapter = new PythonAdapter('test.ts');
+    expect(adapter.detectLanguage()).toBe('typescript');
+  });
+
+  it('should extract code block with indented body', () => {
+    (readFileSync as vi.Mock).mockReturnValue('def outer():\n    inner()\n    return 0');
+    const adapter = new PythonAdapter('test.py');
+    const functions = adapter.extractFunctions();
+    expect(Array.isArray(functions)).toBe(true);
+    expect(functions.length).toBe(1);
+    expect((functions[0] as {name: string}).name).toBe('outer');
+  });
 });
