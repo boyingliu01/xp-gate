@@ -247,6 +247,7 @@ ISOLATE → AUTO-ESTIMATE → THINK → PLAN → [GITHOOKS-GATE] → BUILD → R
 | 步骤 | 动作 | 说明 |
 |------|------|------|
 | 0 | **检测当前环境** | 运行 `git rev-parse --git-dir` 和 `git rev-parse --git-common-dir`。如果 `GIT_DIR != GIT_COMMON`：已在 worktree 中 → 输出 "Already in isolated worktree" → 进入 Phase 0 |
+| 0.5 | **Sprint Lock 检测（Issue #144）** | 检查 `.sprint-state/sprint.lock` 是否存在: `[ -f .sprint-state/sprint.lock ]`。如果存在: 读取锁内容，检查是否 stale（超过 24 小时或 worktree 目录不存在）→ stale → 输出 `[WARN] 发现过期 sprint lock，将覆盖` → 更新锁。非 stale → 输出 `[BLOCK] 已有活跃 sprint (ID: {sprint_id}, started: {started_at})。请先完成当前 sprint 或手动删除 .sprint-state/sprint.lock` → 退出。锁不存在 → 创建锁: `echo '{"sprint_id":"sprint-YYYY-MM-DD-NN","started_at":"<ISO8601>"}' > .sprint-state/sprint.lock` |
 | 1 | **检查保护分支** | 获取当前分支名 `git branch --show-current`。保护分支列表: `main, master, develop, trunk, mainline`。保护分支 → 强制创建 worktree。非保护分支 → 依然创建 worktree（推荐，不阻断） |
 | 2 | **创建 worktree** | 创建目录: `mkdir -p .worktrees/sprint`。检测已有 NN 编号: `ls .worktrees/sprint/ 2>/dev/null | grep -oE '[0-9]{2}$' | sort -n | tail -1`（取最后两位数字，数值排序，取最大），NN = 结果 + 1（无结果则从 01 开始）。运行 `git worktree add .worktrees/sprint/sprint-YYYY-MM-DD-NN -b sprint/YYYY-MM-DD-NN`。**注意**: `cd` 在 AI agent 单次工具调用中不保持状态，步骤 3-6 必须通过 `workdir` 参数或 `&&` 链式命令在新 worktree 目录下执行 |
 | 3 | **项目 setup** | 在 worktree 目录下: 检测项目类型: `package.json` → `npm install`, `go.mod` → `go mod download`, `pyproject.toml` → `pip/poetry install` |
@@ -485,6 +486,25 @@ Phase 2 第一步必须执行 DELPHI-GATE 检查。没有 delphi-review APPROVED
   - 更新 `CHANGELOG.md` 添加本次变更记录（含变更类型说明：skill-only / code / mixed）
   - 验证：`git diff VERSION` 确认版本号已变更，未变更 → 阻断
   - **此规则与变更类型无关** — 纯 skill 变更（仅 .md 文件）也必须 bump PATCH，确保每次 sprint 都触发 npm 发布
+- **📋 VERSION CHANGESET（Issue #142）**: 每次 VERSION bump 必须创建原子化的 changeset 记录，确保版本变更可追溯、可审计
+  - 在 `.sprint-state/changesets/` 目录下创建 JSON 文件，文件名格式: `changeset-{YYYYMMDDHHMMSS}.json`
+  - changeset 字段:
+    ```json
+    {
+      "id": "cs_xxxxxxxx",
+      "created_at": "2026-06-07T12:00:00Z",
+      "sprint_id": "sprint-2026-06-07-01",
+      "old_version": "0.8.1.2",
+      "new_version": "0.8.2.0",
+      "change_type": "patch|minor|major",
+      "description": "brief description of changes in this bump",
+      "files_changed": ["VERSION", "CHANGELOG.md", "package.json", "src/npm-package/package.json", "plugins/claude-code/.claude-plugin/plugin.json", "plugins/opencode/package.json"],
+      "semver_note": "npm semver 3-digit: 0.8.2"
+    }
+    ```
+  - changeset 创建时机：VERSION 更新后、`sync-version.sh` 执行后、commit 前
+  - changeset 随 commit 一起提交，形成版本变更的完整审计链
+  - **用途**: 回滚时通过 changeset 精确还原版本号、CI/CD 自动确定发布范围、审核时追踪每次 bump 的原因
 - **`finishing-a-development-branch`** (superpowers) — 结构化完成流：4 选项（merge / PR / discard / keep）
 - `ship` (gstack) — 创建 PR（PR 路径时使用）
 - Phase 6 输出：PR URL（用于 Phase 7 输入）
@@ -535,7 +555,10 @@ Phase 2 第一步必须执行 DELPHI-GATE 检查。没有 delphi-review APPROVED
 6. **更新 `.sprint-state/sprint-state.json`**:
    - `phase: 8`
    - `status: "merged"` 或 `"completed"`
-7. **输出 Cleanup Report + Sprint Summary**
+7. **释放 Sprint Lock（Issue #144）**:
+   - `rm -f .sprint-state/sprint.lock`
+   - 验证锁已删除: `[ ! -f .sprint-state/sprint.lock ] || echo "[WARN] sprint lock 未能删除，请手动清理"`
+8. **输出 Cleanup Report + Sprint Summary**
 
 **执行顺序依赖**:
 ```
@@ -681,6 +704,9 @@ next_phase_context: "Worktree created at {path}. All subsequent edits MUST use t
 Orchestrator dispatch 下一 Phase 前必须执行验证：
 
 ```bash
+# === Phase Transition Gate ===
+
+# 1. Phase summary file validation
 SUMMARY=".sprint-state/phase-outputs/phase-${N}-summary.md"
 [ -f "$SUMMARY" ] || { echo "[BLOCK] phase-${N}-summary 不存在"; exit 1; }
 FRONTMARKERS=$(grep -c "^---" "$SUMMARY" 2>/dev/null || echo 0)
@@ -693,6 +719,30 @@ grep -q "^outputs:" "$SUMMARY" || { echo "[BLOCK] 缺少 outputs 字段"; exit 1
 grep -q "^next_phase_context:" "$SUMMARY" || { echo "[BLOCK] 缺少 next_phase_context"; exit 1; }
 CHARS=$(wc -c < "$SUMMARY" | tr -d ' ')
 [ "$CHARS" -le 40000 ] || { echo "[BLOCK] 摘要超出大小限制 (${CHARS}/40000 chars)"; exit 1; }
+
+# 2. sprint-state.json enforcement check (Issue #146)
+SPRINT_STATE=".sprint-state/sprint-state.json"
+[ -f "$SPRINT_STATE" ] || { echo "[BLOCK] sprint-state.json 不存在"; exit 1; }
+
+# Verify phase_history includes current phase with completed_at
+PHASE_HISTORY_CHECK=$(grep -c "\"phase\": $N" "$SPRINT_STATE" 2>/dev/null || echo 0)
+[ "$PHASE_HISTORY_CHECK" -gt 0 ] || {
+  echo "[BLOCK] sprint-state.json phase_history 缺少 phase $N 的记录"
+  echo "[ACTION] 在 dispatch 下一 Phase 前更新 sprint-state.json:"
+  echo "  - phase: $N"
+  echo "  - phase_history: 追加 {phase:N, status:completed, completed_at:<ISO8601>}"
+  echo "  - outputs: 追加当前 phase 的输出文件"
+  exit 1
+}
+
+# Verify completed_at is set (not null)
+COMPLETED_AT_VALUE=$(grep -A3 "\"phase\": $N" "$SPRINT_STATE" 2>/dev/null | grep "completed_at" | head -1 | grep -o '"[^"]*"$' | tr -d '"')
+[ "$COMPLETED_AT_VALUE" != "null" ] && [ -n "$COMPLETED_AT_VALUE" ] || {
+  echo "[BLOCK] sprint-state.json phase $N 的 completed_at 未设置 (null)"
+  echo "[ACTION] 设置 completed_at 为当前时间 (ISO 8601):"
+  echo "  date -u +%Y-%m-%dT%H:%M:%SZ"
+  exit 1
+}
 ```
 
 **由 orchestrator 强制执行**，不依赖 subagent 自觉遵守。
