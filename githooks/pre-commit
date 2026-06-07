@@ -152,6 +152,11 @@ has_version_change=false
 has_changelog_change=false
 
 if [ "$is_protected" = "true" ]; then
+  # Env var bypass: SKIP_VERSION_CHECK=1 skips Gate 0 entirely
+  # Useful for: SKIP_VERSION_CHECK=1 git commit -m "chore: ..."
+  if [ "${SKIP_VERSION_CHECK:-}" = "1" ]; then
+    echo "✅ PASSED - Gate 0: Version Consistency Check (SKIP_VERSION_CHECK=1 env var)"
+  else
   # Check if staged changes include VERSION or CHANGELOG.md
   STAGED_FILES=$(git diff --cached --name-only --diff-filter=ACM)
   for file in $STAGED_FILES; do
@@ -244,6 +249,7 @@ Staged files: $(echo "$STAGED_FILES" | tr '\n' ', ' | sed 's/,$//')
       fi
     fi
   fi
+  fi  # closes SKIP_VERSION_CHECK if/else
 else
   echo "✅ PASSED - Gate 0: Version Consistency Check (non-protected branch: $CURRENT_BRANCH)"
 fi

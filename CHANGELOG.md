@@ -6,6 +6,8 @@ All notable changes to this project will be documented in this file.
 
 ### Added
 - **`npm-publish.yml` 自动同步 GitHub Releases** — 在 npm publish 步骤之后追加 git tag + GitHub Release 自动创建（基于 CHANGELOG.md 提取对应版本的 release notes），并把 `permissions.contents` 提升至 `write`、`fetch-depth: 0`。tag/release 创建均为幂等（已存在则更新或跳过）。修复 GitHub Releases 长期停留在 v0.3.1.0 的问题。
+- **#135 — OpenCode plugin auto-configure in xp-gate init** — `xp-gate init` now detects opencode.json in the project root and automatically injects the bundled plugin path. No more manual editing of opencode.json after npm install.
+- **Gate 0: SKIP_VERSION_CHECK env var bypass** — add `SKIP_VERSION_CHECK=1` env var as a reliable bypass for `git commit -m` (which can't use the `[skip-version-check]` commit message prefix since COMMIT_EDITMSG isn't populated before the pre-commit hook runs). Usage: `SKIP_VERSION_CHECK=1 git commit -m "message"`
 
 ## [0.8.1] - Unreleased
 
