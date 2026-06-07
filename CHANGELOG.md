@@ -2,14 +2,21 @@
 
 All notable changes to this project will be documented in this file.
 
-## [Unreleased]
+## [0.8.2] - Unreleased
 
 ### Added
-- **`npm-publish.yml` 自动同步 GitHub Releases** — 在 npm publish 步骤之后追加 git tag + GitHub Release 自动创建（基于 CHANGELOG.md 提取对应版本的 release notes），并把 `permissions.contents` 提升至 `write`、`fetch-depth: 0`。tag/release 创建均为幂等（已存在则更新或跳过）。修复 GitHub Releases 长期停留在 v0.3.1.0 的问题。
 - **#135 — OpenCode plugin auto-configure in xp-gate init** — `xp-gate init` now detects opencode.json in the project root and automatically injects the bundled plugin path. No more manual editing of opencode.json after npm install.
 - **Gate 0: SKIP_VERSION_CHECK env var bypass** — add `SKIP_VERSION_CHECK=1` env var as a reliable bypass for `git commit -m` (which can't use the `[skip-version-check]` commit message prefix since COMMIT_EDITMSG isn't populated before the pre-commit hook runs). Usage: `SKIP_VERSION_CHECK=1 git commit -m "message"`
+- **#148 — Resume Gate stale detection** — Add RESUME GATE to sprint-flow with 5 validations: sprint ID consistency, phase ordering, git isolation branch reachability, file mtime staleness vs phase completion time, specification.yaml staleness for `--resume-from build`
+- **#137 — Ralph-loop objective TDD enforcement** — Add pre-REQ git HEAD snapshot baseline, L1b git-diff based test-first ratio check (test_lines ≥ 40%), L1b-alt test file presence check
+- **#142 — VERSION serialization changeset model** — Add `.sprint-state/changesets/` directory for atomic version tracking. changeset JSON includes id, sprint_id, old/new version, change_type, files_changed. Created on every VERSION bump in Phase 6 before commit.
+- **#144 — Sprint lock prevent concurrent sprints** — Add `.sprint-state/sprint.lock` lockfile mechanism. Phase -1 checks for existing lock, detects stale (24h+ or orphan worktree). Non-stale active lock BLOCKs new sprint. Phase 8 releases lock on cleanup.
+- **#146 — sprint-state.json enforcement** — Phase Transition Gate now verifies `phase_history` includes current phase with `completed_at` set. BLOCK if entry missing or completed_at is null, with clear remediation instructions.
 
-## [0.8.1] - Unreleased
+### Changed
+- `release: v0.8.1.1` — adapter deduplication + Gate 0 bypass fix (committed directly as 8cb552c, no CHANGELOG entry at time of micro bump)
+
+## [0.8.1] - 2026-06-07
 
 ### Fixed
 - **#170 — pre-push hook fatal: bad object on remote branch deletion** — detect `local_sha=000...000` for branch deletion events and skip validation
