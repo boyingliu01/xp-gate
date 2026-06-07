@@ -2,7 +2,7 @@
 
 **Generated:** 2026-05-30
 **Commit:** 4517f2b
-**Version:** v0.5.1
+**Version:** v0.8.1
 
 ## OVERVIEW
 Clean Code & SOLID principles checker with 14 rules and 9 language adapters. Gate 4 of pre-commit hook. Includes Boy Scout Rule enforcement and baseline storage.

@@ -3,7 +3,7 @@
 **Generated:** 2026-05-30
 **Commit:** 4517f2b
 **Branch:** main
-**Version:** v0.5.1
+**Version:** v0.8.1
 
 ## OVERVIEW
 XP-Gate — 6质量门禁（合并自原版9个）+ AI多专家评审的自动化开发工作流 + npm 零安装分发 + 跨平台插件系统（Claude Code + OpenCode）。Implements Sprint Flow (7-phase pipeline), Delphi review (design + code-walkthrough), test-specification alignment, Boy Scout Rule enforcement, multi-language principles checker (14 rules × 13 language adapters), Gate M mutation testing, and cross-platform plugin distribution.
@@ -12,7 +12,7 @@ XP-Gate — 6质量门禁（合并自原版9个）+ AI多专家评审的自动�
 ```
 ./
 ├── src/
-│   ├── npm-package/    # npm distribution (v0.5.1, 8 CLI commands)
+│   ├── npm-package/    # npm distribution (v0.8.1, 8 CLI commands)
 │   │   ├── bin/xp-gate.js   # CLI entry: init/uninstall/doctor/migrate/install-skill
 │   │   ├── adapters/        # 13 language adapters (duplicated from githooks/)
 │   │   ├── hooks/           # Hook infrastructure scripts
@@ -49,7 +49,7 @@ XP-Gate — 6质量门禁（合并自原版9个）+ AI多专家评审的自动�
 │   ├── sync-version.sh  # VERSION → 4 package.json files
 │   └── test-plugins.sh  # 28 plugin integration tests
 ├── dashboard/          # Quality web dashboard (serve.js, dashboard.js)
-├── .github/workflows/  # 6 CI pipelines: quality-gates, npm-publish, cross-platform-ci, sonarqube, security-audit, mutation-test
+├── .github/workflows/  # 5 CI pipelines: quality-gates, npm-publish, cross-platform-ci, security-audit, mutation-test
 ├── specification.yaml  # Req (auto-generated from APPROVED design docs)
 ├── architecture.yaml   # Arch rules (ARCH-001 to ARCH-014)
 ├── VERSION             # Single source of truth (MAJOR.MINOR.PATCH.MICRO format)
@@ -59,7 +59,7 @@ XP-Gate — 6质量门禁（合并自原版9个）+ AI多专家评审的自动�
 ## WHERE TO LOOK
 | Task | Location | Notes |
 |------|----------|-------|
-| npm Package | ./src/npm-package/ | Zero-install distribution: hooks + adapters + CLI, v0.5.1 |
+| npm Package | ./src/npm-package/ | Zero-install distribution: hooks + adapters + CLI, v0.8.1 |
 | CLI Entry | src/npm-package/bin/xp-gate.js | 8 commands: init, setup-global, install-skill, update-skill, uninstall-skill, uninstall, migrate, doctor |
 | CLI lib | src/npm-package/lib/ | init.js, install-skill.js, doctor.js, migrate.js, uninstall.js, rollback.js, ui-detector.ts |
 | Claude Code Plugin | ./plugins/claude-code/ | JSON manifest + bash hooks + bin wrapper (7 skills, graceful degradation) |
@@ -79,7 +79,7 @@ XP-Gate — 6质量门禁（合并自原版9个）+ AI多专家评审的自动�
 | Architecture | ./src/architecture/ | Layer boundary validation (ARCH-001 to ARCH-014) |
 | Version Sync | ./scripts/sync-version.sh | VERSION → root/npm-package/claude-plugin/opencode package.json |
 | Quality Dashboard | ./dashboard/ | `npm run dashboard` → localhost:3333 |
-| CI Workflows | .github/workflows/ | 7 pipelines, quality-gates.yml is 953 lines |
+| CI Workflows | .github/workflows/ | 5 pipelines, quality-gates.yml is 953 lines |
 
 ## CODE MAP
 | Symbol | Type | Location | Refs | Role |

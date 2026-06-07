@@ -2,7 +2,7 @@
 
 **Generated:** 2026-05-30
 **Commit:** 4517f2b
-**Version:** v0.5.1
+**Version:** v0.8.1
 
 ## OVERVIEW
 npm distribution package — zero-install CLI for xp-gate with 8 commands, hooks, adapters, and bundled skills/plugins.
@@ -69,7 +69,7 @@ xp-gate uninstall-skill <name> # Remove skill (--force required)
 ```
 
 ## NOTES
-- Published as `xp-gate` on public npm registry (moved from GitHub Packages in v0.5.1)
+- Published as `xp-gate` on public npm registry (moved from GitHub Packages in v0.8.1)
 - Adapters duplicated from githooks/adapters/ — known tech debt, maintenance risk
 - sync-package-content.js runs on `npm version` and `npm pack` to bundle skills/plugins
 - Package version: 0.7.1 (npm semver, 3-digit; source of truth = repo VERSION file)

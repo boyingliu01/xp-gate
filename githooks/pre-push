@@ -69,7 +69,11 @@ trap '_pre_push_report_on_exit' EXIT
 PUSHED_FILES=""
 TS_FILES=""
 while read local_ref local_sha remote_ref remote_sha; do
-  if [ "$remote_sha" = "0000000000000000000000000000000000000000" ]; then
+  if [ "$local_sha" = "0000000000000000000000000000000000000000" ]; then
+    # Branch deletion - skip validation entirely
+    echo "   ℹ️  Branch deletion detected ($local_ref). Skipping validation."
+    continue
+  elif [ "$remote_sha" = "0000000000000000000000000000000000000000" ]; then
     # New branch - compare against empty tree
     PUSHED_FILES=$(git diff-tree -r --name-only HEAD)
     TS_FILES=$(git diff-tree -r --name-only HEAD | grep '\.ts$' || true)
@@ -163,9 +167,9 @@ else
       if [[ ! -f "src/mutation/gate-m.ts" ]]; then
         echo "⚠️ Gate M script (src/mutation/gate-m.ts) not found. SKIP — Gate M."
       else
-        # Run mutation gate with 120s timeout
+        # Run mutation gate with timeout matching stryker.conf.json (timeoutMS: 600000 = 10min)
         MUTATION_OUTPUT=$(mktemp)
-        timeout 120s npx tsx src/mutation/gate-m.ts --changed-files "$CHANGED_SOURCE_FILES" > "$MUTATION_OUTPUT" 2>&1
+        timeout 600s npx tsx src/mutation/gate-m.ts --changed-files "$CHANGED_SOURCE_FILES" > "$MUTATION_OUTPUT" 2>&1
         MUTATION_EXIT=$?
 
         case $MUTATION_EXIT in

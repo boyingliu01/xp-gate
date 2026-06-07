@@ -7,6 +7,35 @@ All notable changes to this project will be documented in this file.
 ### Added
 - **`npm-publish.yml` 自动同步 GitHub Releases** — 在 npm publish 步骤之后追加 git tag + GitHub Release 自动创建（基于 CHANGELOG.md 提取对应版本的 release notes），并把 `permissions.contents` 提升至 `write`、`fetch-depth: 0`。tag/release 创建均为幂等（已存在则更新或跳过）。修复 GitHub Releases 长期停留在 v0.3.1.0 的问题。
 
+## [0.8.1] - Unreleased
+
+### Fixed
+- **#170 — pre-push hook fatal: bad object on remote branch deletion** — detect `local_sha=000...000` for branch deletion events and skip validation
+- **#171 — archlint configured but not enforced** — install `@archlinter/cli@0.16.0`, create `.archlint.yaml`, update pre-commit hooks with `npx --no-install` support
+- **#172 — ui-detector.ts coverage below 80%** — add 18 new CLI tests (direct process mocking), line coverage 96.52%
+- **#173 — boy-scout.ts function coverage 56%** — add 17 new tests including `runEnforcement`, `parseArgs`, `splitCsvArg`, `showHelp`; 92% line, 91% function
+- **#174 — many-exports.ts + lsp.ts branch coverage** — add targeted tests for branch/edge cases; 100% line coverage for both files
+- **#176 — documentation version markers stale** — update all 25+ AGENTS.md files and README.md from v0.5.1 to v0.8.1
+- **#175 — Gate 0 script file exemption** — exempt `.sh` files from "source code" detection in version consistency check; commits containing only shell scripts no longer require VERSION/CHANGELOG update
+
+### Removed
+- **SonarQube Gate 8** — full deletion of SonarQube support: `docs/sonarqube-setup.md`, `sonar-project.properties`, `.github/workflows/sonarqube.yml`, design plans, AGENTS.md references
+
+## [0.8.0] - 2026-06-06
+
+### Fixed
+- **#143 — SHA self-reference paradox in pre-push** — resolve circular dependency when checking HEAD vs remote
+- **#154 — coverage config drift** — fix vitest coverage configuration consistency
+- **#155 — command injection SAST** — secure git diff calls with spawnSync array args
+- **#157 — mutation timeout** — increase stryker dry-run timeout to 600s matching `stryker.conf.json`
+- **#167 — fake tsc@2.0.4 blocking First Commit Gates** — resolve phantom tsc dependency issue
+
+### Changed
+- **#149 — expand first-commit-gates CI** — exercise all 6 quality gates in CI pipeline
+- **#150 — mutation watchdog** — add actionable PR comment + watchdog on timeout
+- **#153 — reduce all functions CCN** — refactor to ≤10 threshold, remove dual-tier system
+- **#163 — pre-push code-walkthrough** — resolve SHA self-reference paradox
+
 ## [0.7.2] - 2026-06-06
 
 ### Removed

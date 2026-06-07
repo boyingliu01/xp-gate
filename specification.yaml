@@ -391,7 +391,6 @@ specification:
       description: Use CheckStyle + PMD v7 + SpotBugs for Java (company standard)
       rationale: Company already uses these tools. PMD v7 brings 2-3x performance improvement. SpotBugs operates at bytecode level for bug detection.
       alternatives_considered:
-        - "SonarQube only - requires server setup"
         - "NullAway mandatory - may block initially, use as recommended"
     
     - id: DD-QG-004

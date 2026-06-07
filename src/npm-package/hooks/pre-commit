@@ -576,7 +576,6 @@ elif [ "$PROJECT_LANG" = "powershell" ]; then
   
 else
   CCN_THRESHOLD=5
-  CCN_ERROR_THRESHOLD=10  # Changed from 15 to 10 as per standard practice
   
   # Check lizard availability
   LIZARD_CMD=""
@@ -603,22 +602,12 @@ else
       CC_WARNINGS=$(echo "$CC_OUTPUT" | grep "^Warning cnt" | awk '{print $NF}' | tr -d '[:space:]' | sed 's/[^0-9]//g' || true)
       CC_WARNINGS=${CC_WARNINGS:-0}
       
-      # Count functions with CCN > CCN_ERROR_THRESHOLD (these block)
-      CC_ERRORS=$(echo "$CC_OUTPUT" | awk 'NF>=6 && $2 ~ /^[0-9]+$/ && $NF ~ /@/ && $2+0 > '"$CCN_ERROR_THRESHOLD"'' | sort -u -k5,5 | wc -l)
-      
-      if [ "$CC_ERRORS" -gt 0 ]; then
-        echo "$CC_OUTPUT"
-        echo ""
-        echo "❌ BLOCKED - Functions with CCN > $CCN_ERROR_THRESHOLD found."
-        echo "Refactor high-complexity functions to keep below $CCN_ERROR_THRESHOLD complexity."
-        exit
-      fi
-      
       if [ "$CC_WARNINGS" -gt 0 ]; then
         echo "$CC_OUTPUT"
         echo ""
-        echo "⚠️  Found $CC_WARNINGS functions with CCN > $CCN_THRESHOLD (acceptable warning level)"
-        echo "✅ PASSED - Within error threshold (warnings allowed)."
+        echo "❌ BLOCKED - $CC_WARNINGS functions with CCN > $CCN_THRESHOLD found."
+        echo "Refactor high-complexity functions to keep below $CCN_THRESHOLD complexity."
+        exit 1
       else
         echo "✅ PASSED - All functions within complexity threshold ($CCN_THRESHOLD)."
       fi
@@ -1104,19 +1093,33 @@ elif [ "$PROJECT_LANG" = "powershell" ]; then
 
 else
   # Check if architecture config exists
-  if [ -f "architecture.yaml" ] || [ -f ".architecturerc" ]; then
+  if [ -f "architecture.yaml" ] || [ -f ".architecturerc" ] || [ -f ".archlint.yaml" ]; then
     # Different architecture tools per language
     case "$PROJECT_LANG" in
       "typescript")
-        if ! require_tool "archlint" "Gate 6" "npm install -g @archlinter/cli"; then
-          echo "     ❌ BLOCKED - archlint not installed"
-          echo "     Install with: npm install -g @archlinter/cli"
-          exit
+        # Try local npx install first (devDependencies), fall back to global
+        if npx --no-install @archlinter/cli --version >/dev/null 2>&1; then
+          ARCHLINT_CMD="npx --no-install @archlinter/cli"
+        elif command -v archlint >/dev/null 2>&1; then
+          ARCHLINT_CMD="archlint"
+        elif npx @archlinter/cli --version >/dev/null 2>&1; then
+          ARCHLINT_CMD="npx @archlinter/cli"
         else
-          echo "     Running archlint for TypeScript..."
-          archlint scan . -f table --quiet 2>&1 | tail -30 || echo "⚠️  Architectural smells detected (pre-existing, continuing)"
-          echo "     ✅ TypeScript architecture validation completed."
+          echo "     ❌ BLOCKED - archlint not installed"
+          echo "     Install with: npm install --save-dev @archlinter/cli"
+          exit 1
         fi
+        echo "     Running archlint for TypeScript..."
+        ARCHLINT_OUTPUT=$($ARCHLINT_CMD scan . -f table --quiet 2>&1)
+        ARCHLINT_EXIT=$?
+        echo "$ARCHLINT_OUTPUT" | tail -30
+        if [ "$ARCHLINT_EXIT" -ne 0 ]; then
+          echo ""
+          echo "❌ BLOCKED - Architecture violations detected"
+          echo "Fix the architecture violations above before committing."
+          exit 1
+        fi
+        echo "     ✅ TypeScript architecture validation completed."
         ;;
       "python")
         if [ -f ".import-linter.yml" ] || [ -f "import_linter_config.yml" ]; then
@@ -1584,7 +1587,7 @@ generate_quality_report() {
       "name": "Cyclomatic Complexity",
       "status": "${GATE_3_STATUS:-PASS}",
       "threshold": "${CCN_THRESHOLD:-5}",
-      "errorThreshold": "${CCN_ERROR_THRESHOLD:-10}",
+      "blockThreshold": "${CCN_THRESHOLD:-5}",
       "warnings": ${CC_WARNINGS:-0}
     },
     "gate4_principles": {

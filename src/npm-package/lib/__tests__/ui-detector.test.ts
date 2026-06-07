@@ -357,4 +357,98 @@ describe('ui-detector', () => {
       expect(isExcluded('src/Button.test.tsx', ['**/*.test.*'])).toBe(true);
     });
   });
+
+  /**
+   * @test #172 ui-detector CLI coverage
+   * @intent Cover CLI entry points (runCli, runPushMode, processOutput, runCheckBranch, runDefault)
+   *   via real subprocess execution with NODE_V8_COVERAGE to merge coverage profiles.
+   * @covers ui-detector-cli-push-mode, ui-detector-cli-check-branch, ui-detector-cli-default-mode
+   */
+  describe('CLI integration (subprocess)', () => {
+    const { spawnSync: realSpawnSync } = require('child_process') as typeof import('child_process');
+    const path = require('path') as typeof import('path');
+    const fs = require('fs') as typeof import('fs');
+    const os = require('os') as typeof import('os');
+
+    const UI_DETECTOR_PATH = path.resolve(__dirname, '../ui-detector.ts');
+
+    function runCli(args: string[], stdin?: string, cwd?: string): { code: number; stdout: string; stderr: string } {
+      const coverageDir = process.env.NODE_V8_COVERAGE ?? path.join(process.cwd(), 'coverage', '.tmp');
+      const result = realSpawnSync('npx', ['tsx', UI_DETECTOR_PATH, ...args], {
+        cwd: cwd ?? process.cwd(),
+        encoding: 'utf-8',
+        input: stdin,
+        env: { ...process.env, NODE_V8_COVERAGE: coverageDir },
+      });
+      return {
+        code: result.status ?? -1,
+        stdout: result.stdout ?? '',
+        stderr: result.stderr ?? '',
+      };
+    }
+
+    it('runs default mode with --check-branch flag (HEAD-based detection)', () => {
+      const { code, stdout } = runCli(['--check-branch']);
+      expect(code).toBeGreaterThanOrEqual(0);
+      expect(code).toBeLessThanOrEqual(1);
+      const parsed = JSON.parse(stdout);
+      expect(parsed).toHaveProperty('isUiSprint');
+      expect(parsed).toHaveProperty('matchedFiles');
+      expect(parsed).toHaveProperty('matchedRules');
+    });
+
+    it('runs push-mode via stdin', () => {
+      const { code, stdout } = runCli(['--push-mode'], 'views/index.html');
+      expect([0, 1]).toContain(code);
+      const parsed = JSON.parse(stdout);
+      expect(parsed.isUiSprint).toBe(true);
+      expect(parsed.matchedFiles).toContain('views/index.html');
+    });
+
+    it('runs push-mode with stdin input', () => {
+      const { code, stdout } = runCli(['--push-mode'], 'views/login.njk\nsrc/auth.ts\n');
+      expect([0, 1]).toContain(code);
+      const parsed = JSON.parse(stdout);
+      expect(parsed.isUiSprint).toBe(true);
+      expect(parsed.matchedFiles).toContain('views/login.njk');
+    });
+
+    it('runs push-mode with non-UI files (exit 1)', () => {
+      const { code, stdout } = runCli(['--push-mode'], 'src/auth.ts\nsrc/db.ts\n');
+      expect(code).toBe(1);
+      const parsed = JSON.parse(stdout);
+      expect(parsed.isUiSprint).toBe(false);
+      expect(parsed.matchedFiles).toEqual([]);
+    });
+
+    it('respects .ui-gate-ignore in push-mode', () => {
+      const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'ui-detector-ignore-'));
+      try {
+        fs.writeFileSync(path.join(tmp, '.ui-gate-ignore'), 'legacy/**\n');
+        const { code, stdout } = runCli(['--push-mode'], 'legacy/views/index.html', tmp);
+        expect(code).toBe(1);
+        const parsed = JSON.parse(stdout);
+        expect(parsed.isUiSprint).toBe(false);
+      } finally {
+        fs.rmSync(tmp, { recursive: true, force: true });
+      }
+    });
+
+    it('processes renamed files in push-mode', () => {
+      const { code, stdout } = runCli(['--push-mode'], 'src/a.tsx \u2192 src/components/B.tsx');
+      expect([0, 1]).toContain(code);
+      const parsed = JSON.parse(stdout);
+      expect(parsed.matchedFiles).toContain('src/components/B.tsx');
+    });
+
+    it('runs default mode (detectUiSprint in current repo)', () => {
+      const { code, stdout } = runCli([]);
+      expect([0, 1]).toContain(code);
+      const parsed = JSON.parse(stdout);
+      expect(parsed).toHaveProperty('isUiSprint');
+      expect(parsed).toHaveProperty('matchedFiles');
+      expect(parsed).toHaveProperty('matchedRules');
+    });
+  });
 });
+

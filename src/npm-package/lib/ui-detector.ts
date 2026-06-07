@@ -210,21 +210,21 @@ function processOutput(input: string, repoRoot: string): void {
     .map(parseRenamedFile)
     .filter((f) => f.length > 0);
   const result = collectUiMatches(files, repoRoot);
-   
+    
   console.log(JSON.stringify(result, null, 2));
   process.exit(result.isUiSprint ? 0 : 1);
 }
 
 function runCheckBranch(_repoRoot: string): void {
   const result = detectUiSprint('HEAD');
-   
+    
   console.log(JSON.stringify(result, null, 2));
   process.exit(result.isUiSprint ? 0 : 1);
 }
 
 function runDefault(_repoRoot: string): void {
   const result = detectUiSprint();
-   
+    
   console.log(JSON.stringify(result, null, 2));
   process.exit(result.isUiSprint ? 0 : 1);
 }
