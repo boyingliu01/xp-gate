@@ -238,4 +238,3 @@ export {
   type BaselineStorageConfig
 };
 
-export type { BaselineEntry as BaselineEntryInterface };

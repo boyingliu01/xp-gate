@@ -8,55 +8,88 @@ const { doctor } = require('../lib/doctor.js');
 const { checkDeps } = require('../lib/detect-deps.js');
 const { migrate } = require('../lib/migrate.js');
 
+function handleUIReview() {
+  const { execSync } = require('child_process');
+  const uiReviewPath = path.join(__dirname, '..', 'lib', 'ui-review.ts');
+  try {
+    execSync(`npx -y tsx "${uiReviewPath}"`, { stdio: 'inherit' });
+    process.exit(0);
+  } catch (err) {
+    process.exit(1);
+  }
+}
+
 const COMMANDS = {
   'init': {
     description: 'Initialize xp-gate (use --global for all projects)',
-    fn: init,
+    run: subargs => init(subargs).then(code => process.exit(code)),
     usage: 'xp-gate init [--global]'
   },
   'setup-global': {
     description: 'Set up xp-gate globally for all git projects',
-    fn: init,
+    run: () => init(['--global']).then(code => process.exit(code)),
     usage: 'xp-gate setup-global'
   },
   'install-skill': {
     description: 'Install a xp-gate skill from GitHub',
-    fn: installSkill,
+    run: subargs => {
+      const name = subargs[0];
+      if (!name) {
+        console.error('Error: Skill name required');
+        console.error('Usage: xp-gate install-skill <name>[@<version>]');
+        process.exit(1);
+      }
+      const options = parseOptions(subargs.slice(1));
+      installSkill(name, options).then(code => process.exit(code));
+    },
     usage: 'xp-gate install-skill <name>[@<version>] [--offline] [--verbose] [--force]'
   },
   'update-skill': {
     description: 'Update installed skill(s)',
-    fn: updateSkill,
+    run: subargs => {
+      const name = subargs[0];
+      const options = parseOptions(subargs.slice(1));
+      updateSkill(name, options).then(code => process.exit(code));
+    },
     usage: 'xp-gate update-skill [<name>] [--all] [--check]'
   },
   'uninstall-skill': {
     description: 'Uninstall a xp-gate skill',
-    fn: uninstallSkill,
+    run: subargs => {
+      const name = subargs[0];
+      if (!name) {
+        console.error('Error: Skill name required');
+        console.error('Usage: xp-gate uninstall-skill <name>');
+        process.exit(1);
+      }
+      const options = parseOptions(subargs.slice(1));
+      uninstallSkill(name, options).then(code => process.exit(code));
+    },
     usage: 'xp-gate uninstall-skill <name> [--force]'
   },
   'uninstall': {
     description: 'Uninstall xp-gate (reverse of init)',
-    fn: uninstall,
+    run: subargs => uninstall(subargs).then(code => process.exit(code)),
     usage: 'xp-gate uninstall [--dry-run] [--force] [--local|--global]'
   },
   'migrate': {
     description: 'Migrate from v0.4.x (GitHub Packages) to v0.5.x (public npm)',
-    fn: migrate,
+    run: subargs => migrate(subargs).then(code => process.exit(code)),
     usage: 'xp-gate migrate [--dry-run]'
   },
   'doctor': {
     description: 'Diagnose xp-gate installation health',
-    fn: doctor,
+    run: subargs => doctor(subargs).then(code => process.exit(code)),
     usage: 'xp-gate doctor [--fix]'
   },
   'ui-review': {
     description: 'Run UI review for non-sprint developers (generates .ui-gate-result.json)',
-    fn: null,
+    run: () => handleUIReview(),
     usage: 'xp-gate ui-review'
   },
   'audit': {
     description: 'Gate audit logging (record, --tail, --stats)',
-    fn: null,
+    run: subargs => handleAudit(subargs),
     usage: 'xp-gate audit [--tail [N]|--stats|record --gate-id X --gate-name Y ...]'
   }
 };
@@ -92,151 +125,94 @@ function main() {
   
   const command = args[0];
   const subargs = args.slice(1);
+  const cmd = COMMANDS[command];
   
-  if (command === 'init' || command === 'setup-global') {
-    const initArgs = command === 'setup-global' ? ['--global'] : subargs;
-    init(initArgs).then(code => process.exit(code));
+  if (!cmd) {
+    console.error(`Unknown command: ${command}`);
+    printHelp();
+    process.exit(1);
     return;
   }
   
-  if (command === 'install-skill') {
-    const name = subargs[0];
-    if (!name) {
-      console.error('Error: Skill name required');
-      console.error('Usage: xp-gate install-skill <name>[@<version>]');
-      process.exit(1);
+  cmd.run(subargs);
+}
+
+function handleAuditTail(args, auditPath) {
+  const tailIdx = args.indexOf('--tail');
+  const count = parseInt(args[tailIdx + 1] || '20', 10);
+  try {
+    const { readTailEntries } = require(auditPath);
+    const entries = readTailEntries(count);
+    if (entries.length === 0) {
+      console.log('No audit entries found.');
       return;
     }
-    const options = parseOptions(subargs.slice(1));
-    installSkill(name, options).then(code => process.exit(code));
-    return;
+    printAuditTable(entries);
+  } catch (err) {
+    console.error('Error reading audit entries:', err.message);
+    process.exit(1);
   }
-  
-  if (command === 'update-skill') {
-    const name = subargs[0];
-    const options = parseOptions(subargs.slice(1));
-    updateSkill(name, options).then(code => process.exit(code));
-    return;
-  }
-  
-  if (command === 'uninstall-skill') {
-    const name = subargs[0];
-    if (!name) {
-      console.error('Error: Skill name required');
-      console.error('Usage: xp-gate uninstall-skill <name>');
-      process.exit(1);
+}
+
+function handleAuditStats(auditPath) {
+  try {
+    const { computeStats } = require(auditPath);
+    const stats = computeStats();
+    if (stats.length === 0) {
+      console.log('No audit data found.');
       return;
     }
-    const options = parseOptions(subargs.slice(1));
-    uninstallSkill(name, options).then(code => process.exit(code));
-    return;
+    printStatsTable(stats);
+  } catch (err) {
+    console.error('Error computing stats:', err.message);
+    process.exit(1);
   }
-  
-  if (command === 'uninstall') {
-    uninstall(subargs).then(code => process.exit(code));
-    return;
-  }
+}
 
-  if (command === 'migrate') {
-    migrate(subargs).then(code => process.exit(code));
-    return;
-  }
-  
-  if (command === 'doctor') {
-    doctor(subargs).then(code => process.exit(code));
-    return;
-  }
-
-  if (command === 'ui-review') {
-    const { execSync } = require('child_process');
-    const path = require('path');
-    const uiReviewPath = path.join(__dirname, '..', 'lib', 'ui-review.ts');
-    try {
-      execSync(`npx -y tsx "${uiReviewPath}"`, { stdio: 'inherit' });
-      process.exit(0);
-    } catch (err) {
-      process.exit(1);
+function handleAuditRecord(args, auditPath) {
+  try {
+    const { appendAuditEntry } = require(auditPath);
+    const rest = args.slice(1);
+    const opts = {};
+    for (let i = 0; i < rest.length; i++) {
+      if (rest[i].startsWith('--') && i + 1 < rest.length) {
+        opts[rest[i].slice(2)] = rest[i + 1];
+        i++;
+      }
     }
+    const entry = {
+      timestamp: new Date().toISOString(),
+      gate_id: opts['gate-id'] || 'unknown',
+      gate_name: opts['gate-name'] || 'unknown',
+      passed: opts['passed'] === 'true',
+      issues_found: parseInt(opts['issues-found'] || '0', 10),
+      duration_ms: parseInt(opts['duration-ms'] || '0', 10),
+      trigger: opts['trigger'] || 'manual',
+      repo_path: process.cwd(),
+      commit_hash: opts['commit-hash'] || 'HEAD',
+    };
+    appendAuditEntry(entry);
+  } catch (err) {
+    console.error('Error recording audit entry:', err.message);
+    process.exit(1);
   }
-
-  if (command === 'audit') {
-    handleAudit(subargs);
-    return;
-  }
-  
-  console.error(`Unknown command: ${command}`);
-  printHelp();
-  process.exit(1);
 }
 
 function handleAudit(args) {
-  const path = require('path');
   const auditPath = path.join(__dirname, '..', 'lib', 'gate-audit.ts');
 
-  // --tail [N]
-  const tailIdx = args.indexOf('--tail');
-  if (tailIdx !== -1) {
-    const count = parseInt(args[tailIdx + 1] || '20', 10);
-    try {
-      const { readTailEntries } = require(auditPath);
-      const entries = readTailEntries(count);
-      if (entries.length === 0) {
-        console.log('No audit entries found.');
-        return;
-      }
-      printAuditTable(entries);
-    } catch (err) {
-      console.error('Error reading audit entries:', err.message);
-      process.exit(1);
-    }
+  if (args.includes('--tail')) {
+    handleAuditTail(args, auditPath);
     return;
   }
 
-  // --stats
   if (args.includes('--stats')) {
-    try {
-      const { computeStats } = require(auditPath);
-      const stats = computeStats();
-      if (stats.length === 0) {
-        console.log('No audit data found.');
-        return;
-      }
-      printStatsTable(stats);
-    } catch (err) {
-      console.error('Error computing stats:', err.message);
-      process.exit(1);
-    }
+    handleAuditStats(auditPath);
     return;
   }
 
-  // record --gate-id X --gate-name Y --passed true/false ...
   if (args[0] === 'record') {
-    try {
-      const { appendAuditEntry } = require(auditPath);
-      const rest = args.slice(1);
-      const opts = {};
-      for (let i = 0; i < rest.length; i++) {
-        if (rest[i].startsWith('--') && i + 1 < rest.length) {
-          opts[rest[i].slice(2)] = rest[i + 1];
-          i++;
-        }
-      }
-      const entry = {
-        timestamp: new Date().toISOString(),
-        gate_id: opts['gate-id'] || 'unknown',
-        gate_name: opts['gate-name'] || 'unknown',
-        passed: opts['passed'] === 'true',
-        issues_found: parseInt(opts['issues-found'] || '0', 10),
-        duration_ms: parseInt(opts['duration-ms'] || '0', 10),
-        trigger: opts['trigger'] || 'manual',
-        repo_path: process.cwd(),
-        commit_hash: opts['commit-hash'] || 'HEAD',
-      };
-      appendAuditEntry(entry);
-    } catch (err) {
-      console.error('Error recording audit entry:', err.message);
-      process.exit(1);
-    }
+    handleAuditRecord(args, auditPath);
     return;
   }
 

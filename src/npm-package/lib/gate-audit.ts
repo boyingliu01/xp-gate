@@ -117,12 +117,9 @@ export function readTailEntries(
 }
 
 /**
- * Compute per-gate aggregate statistics.
+ * Read and parse all valid audit entries from the log file.
  */
-export function computeStats(
-  repoRoot: string = process.cwd(),
-): { gate_id: string; pass_pct: string; avg_ms: number; avg_issues: number }[] {
-  const logPath = join(repoRoot, AUDIT_DIR, AUDIT_FILE);
+function parseAuditEntries(logPath: string): GateAuditEntry[] {
   if (!existsSync(logPath)) {
     return [];
   }
@@ -132,7 +129,6 @@ export function computeStats(
     return [];
   }
 
-  // Parse all valid entries
   const entries: GateAuditEntry[] = [];
   for (const line of content.split('\n')) {
     if (line.trim()) {
@@ -143,8 +139,13 @@ export function computeStats(
       }
     }
   }
+  return entries;
+}
 
-  // Aggregate by gate_id
+/**
+ * Aggregate audit entries by gate_id, computing sums for passed/ms/issues.
+ */
+function aggregateByGate(entries: GateAuditEntry[]): Map<string, { total: number; passed: number; ms: number; issues: number }> {
   const buckets = new Map<string, { total: number; passed: number; ms: number; issues: number }>();
 
   for (const e of entries) {
@@ -155,6 +156,23 @@ export function computeStats(
     b.issues += e.issues_found;
     buckets.set(e.gate_id, b);
   }
+
+  return buckets;
+}
+
+/**
+ * Compute per-gate aggregate statistics.
+ */
+export function computeStats(
+  repoRoot: string = process.cwd(),
+): { gate_id: string; pass_pct: string; avg_ms: number; avg_issues: number }[] {
+  const logPath = join(repoRoot, AUDIT_DIR, AUDIT_FILE);
+  const entries = parseAuditEntries(logPath);
+  if (entries.length === 0) {
+    return [];
+  }
+
+  const buckets = aggregateByGate(entries);
 
   const results: { gate_id: string; pass_pct: string; avg_ms: number; avg_issues: number }[] = [];
 
@@ -167,7 +185,6 @@ export function computeStats(
     });
   }
 
-  // Sort by gate_id for stable output
   results.sort((a, b) => a.gate_id.localeCompare(b.gate_id));
   return results;
 }
