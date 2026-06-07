@@ -99,4 +99,18 @@ describe('TypeScriptAdapter', () => {
       new TypeScriptAdapter('nonexistent-file.ts');
     }).toThrow('Could not read file:');
   });
+
+  it('should fall back to super.detectLanguage for non-ts/non-tsx extensions', () => {
+    (readFileSync as vi.Mock).mockReturnValue('content');
+    const adapter = new TypeScriptAdapter('test.py');
+    expect(adapter.detectLanguage()).toBe('python');
+  });
+
+  it('should extract re-export declarations', () => {
+    (readFileSync as vi.Mock).mockReturnValue('export { Foo };\nexport { Bar };\nexport function baz() {}');
+    const adapter = new TypeScriptAdapter('test.ts');
+    const exports = adapter.extractExports();
+    const reExports = exports.filter(ex => (ex as {type: string}).type === 're-export');
+    expect(reExports.length).toBe(2);
+  });
 });

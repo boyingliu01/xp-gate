@@ -23,39 +23,26 @@ export interface ScanOptions {
  * @param pattern - Glob pattern to convert
  * @returns RegExp equivalent of the glob pattern
  */
+type GlobCharResult = { regex: string; advance: number };
+
+function globCharToRegex(ch: string, nextCh: string): GlobCharResult {
+  if (ch === '*' && nextCh === '*') return { regex: '.*', advance: 2 };
+  if (ch === '*') return { regex: '[^/]*', advance: 1 };
+  if (ch === '.') return { regex: '\\.', advance: 1 };
+  if (ch === '?') return { regex: '[^/]', advance: 1 };
+  if (ch === '/') return { regex: '/', advance: 1 };
+  const special = '.+^${}()|[]\\';
+  if (special.includes(ch)) return { regex: '\\' + ch, advance: 1 };
+  return { regex: ch, advance: 1 };
+}
+
 export function simpleGlobMatch(pattern: string, inputPath: string): boolean {
-  // Escape regex special characters except for * and **
   let regexStr = '';
   let i = 0;
   while (i < pattern.length) {
-    const ch = pattern[i];
-    if (ch === '*' && pattern[i + 1] === '*') {
-      // ** matches everything including path separators
-      regexStr += '.*';
-      i += 2;
-    } else if (ch === '*') {
-      // Single * matches any chars except path separator
-      regexStr += '[^/]*';
-      i += 1;
-    } else if (ch === '.') {
-      regexStr += '\\.';
-      i += 1;
-    } else if (ch === '?') {
-      regexStr += '[^/]';
-      i += 1;
-    } else if (ch === '/') {
-      regexStr += '/';
-      i += 1;
-    } else {
-      // Escape other special regex chars
-      const special = '.+^${}()|[]\\';
-      if (special.includes(ch)) {
-        regexStr += '\\' + ch;
-      } else {
-        regexStr += ch;
-      }
-      i += 1;
-    }
+    const result = globCharToRegex(pattern[i], pattern[i + 1] || '');
+    regexStr += result.regex;
+    i += result.advance;
   }
 
   try {

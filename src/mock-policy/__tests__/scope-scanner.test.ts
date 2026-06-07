@@ -71,8 +71,20 @@ describe('simpleGlobMatch', () => {
   });
 
   it('returns false for invalid regex patterns gracefully', () => {
-    // A pattern that would cause regex construction to fail
     expect(simpleGlobMatch('src/[invalid', 'src/foo')).toBe(false);
+  });
+
+  it('handles mixed character types in sequence', () => {
+    expect(simpleGlobMatch('src/**/test.?.*', 'src/a/b/test.c.ts')).toBe(true);
+    expect(simpleGlobMatch('src/**/test.?.*', 'src/sub/test.c.ts')).toBe(true);
+  });
+
+  it('handles regex special chars (+^${}()|[]) in patterns', () => {
+    expect(simpleGlobMatch('src/file+test', 'src/file+test')).toBe(true);
+    expect(simpleGlobMatch('src/file^test', 'src/file^test')).toBe(true);
+    expect(simpleGlobMatch('src/file(test)', 'src/file(test)')).toBe(true);
+    expect(simpleGlobMatch('src/file{test}', 'src/file{test}')).toBe(true);
+    expect(simpleGlobMatch('src/file|test', 'src/file|test')).toBe(true);
   });
 });
 

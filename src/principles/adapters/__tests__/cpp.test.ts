@@ -278,4 +278,13 @@ describe('CppAdapter - extractCodeBlock edge cases', () => {
     expect(Array.isArray(functions)).toBe(true);
     expect(functions.some(fn => (fn as { name: string }).name === 'outer')).toBe(true);
   });
+
+  it('should extract functions with scope prefix (e.g. MyClass::method)', () => {
+    const src = 'void MyClass::method() { return; }';
+    (readFileSync as vi.Mock).mockReturnValue(src);
+    const adapter = new CppAdapter('test.cpp');
+    const functions = adapter.extractFunctions();
+    expect(Array.isArray(functions)).toBe(true);
+    expect(functions.some(fn => (fn as { name: string }).name === 'MyClass::method')).toBe(true);
+  });
 });

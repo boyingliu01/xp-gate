@@ -59,4 +59,18 @@ describe('KotlinAdapter', () => {
     const lineCount = adapter.countLines();
     expect(lineCount).toBe(2);
   });
+
+  it('should fall back to super.detectLanguage for non-kotlin extensions', () => {
+    (readFileSync as vi.Mock).mockReturnValue('content');
+    const adapter = new KotlinAdapter('test.ts');
+    expect(adapter.detectLanguage()).toBe('typescript');
+  });
+
+  it('should handle suspend functions in Kotlin', () => {
+    (readFileSync as vi.Mock).mockReturnValue('suspend fun fetchData(): String { return "data" }');
+    const adapter = new KotlinAdapter('test.kt');
+    const functions = adapter.extractFunctions();
+    const suspendFns = functions.filter(fn => (fn as {type: string}).type === 'suspend_function');
+    expect(suspendFns.length).toBeGreaterThan(0);
+  });
 });

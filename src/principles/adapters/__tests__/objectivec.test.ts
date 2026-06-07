@@ -444,4 +444,10 @@ static inline int fastAdd(int a, int b) {
     const functions = adapter.extractFunctions();
     expect(functions.every(fn => typeof (fn as {code: string}).code === 'string')).toBe(true);
   });
+
+  it('should fall back to super.detectLanguage for non-m/non-mm extensions', () => {
+    (readFileSync as vi.Mock).mockReturnValue('content');
+    const adapter = new ObjectiveCAdapter('test.ts');
+    expect(adapter.detectLanguage()).toBe('typescript');
+  });
 });

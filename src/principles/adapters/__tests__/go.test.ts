@@ -59,4 +59,10 @@ describe('GoAdapter', () => {
     const lineCount = adapter.countLines();
     expect(lineCount).toBe(2);
   });
+
+  it('should fall back to super.detectLanguage for non-go extensions', () => {
+    (readFileSync as vi.Mock).mockReturnValue('content');
+    const adapter = new GoAdapter('test.ts');
+    expect(adapter.detectLanguage()).toBe('typescript');
+  });
 });

@@ -193,6 +193,26 @@ describe('migrate', () => {
 
   // === Print summary ===
 
+  // === Phase isolation: removing npmrc should not affect cache check ===
+
+  it('phases are isolated: npmrc cleanup and cache check operate independently', async () => {
+    // Only npmrc has github packages lines, no cache dir
+    fs.writeFileSync(npmrcPath(), [
+      '//npm.pkg.github.com/:_authToken=ghp_abc123',
+      'registry=https://registry.npmjs.org/'
+    ].join('\n') + '\n');
+
+    const { migrate } = require('../migrate');
+    const result = await migrate([]);
+
+    expect(result).toBe(0);
+    // npmrc should be cleaned
+    const content = fs.readFileSync(npmrcPath(), 'utf8');
+    expect(content).not.toContain('npm.pkg.github.com');
+    // Should report no old cache (dir doesn't exist)
+    expect(logSpy).toHaveBeenCalledWith(expect.stringContaining('No old cache'));
+  });
+
   it('prints full summary of actions taken', async () => {
     fs.writeFileSync(npmrcPath(), [
       '//npm.pkg.github.com/:_authToken=ghp_abc123',
