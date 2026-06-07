@@ -1,0 +1,17 @@
+---
+id: WC-STYLE-016
+name: 确保SQL拼装时查询条件有效性
+severity: error  # error=阻断, warning=警告
+source: J000112
+tool: auto  # auto-manual-auto: detected by tool / manual check / AST-grep
+category: wc-style
+description: |
+  确保SQL拼装时查询条件有效性
+
+  对应浩鲸规范 J000112。
+
+check:
+  type: ast-grep  # ast-grep / pmd-custom / spotbugs / checkstyle / manual
+  pattern: TODO
+
+notes: "SQL injection prevention"

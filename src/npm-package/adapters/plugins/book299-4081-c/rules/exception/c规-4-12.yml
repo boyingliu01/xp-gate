@@ -1,0 +1,14 @@
+---
+id: C规-4-12
+name: 异常捕获器中的参数类型应当为常引用型或指针型
+severity: error
+tool: auto
+category: wc-exception
+description: |
+  异常捕获器中的参数类型应当为常引用型或指针型
+
+  Auto-extracted from book299-4081-C++编程规范.txt.
+
+check:
+  type: ast-grep
+  pattern: TODO

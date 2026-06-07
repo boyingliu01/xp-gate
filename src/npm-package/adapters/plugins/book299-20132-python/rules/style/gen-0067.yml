@@ -1,0 +1,14 @@
+---
+id: GEN-0067
+name: 避免在循环中用+和+=操作符来累加字符串。主要原因：
+severity: error
+tool: auto
+category: wc-style
+description: |
+  避免在循环中用+和+=操作符来累加字符串。主要原因：
+
+  Auto-extracted from book299-20132-Python语言编码规范.txt.
+
+check:
+  type: ast-grep
+  pattern: TODO

@@ -1,0 +1,14 @@
+---
+id: C规-4-11
+name: 异常捕获器的书写顺序应当由特殊到一般
+severity: error
+tool: auto
+category: wc-exception
+description: |
+  异常捕获器的书写顺序应当由特殊到一般
+
+  Auto-extracted from book299-4081-C++编程规范.txt.
+
+check:
+  type: ast-grep
+  pattern: TODO

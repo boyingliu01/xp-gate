@@ -1,0 +1,14 @@
+---
+id: C建-4-2
+name: 使用智能指针来进行指针对象的自动释放管理
+severity: info
+tool: auto
+category: wc-resource
+description: |
+  使用智能指针来进行指针对象的自动释放管理
+
+  Auto-extracted from book299-4081-C++编程规范.txt.
+
+check:
+  type: ast-grep
+  pattern: TODO

@@ -1,0 +1,14 @@
+---
+id: GEN-0068
+name: 在同一个文件中，保持使用字符串引号的一致性。使用单引号'或者双引号"之一用以引用字符串，并在同一文件中沿用。
+severity: warning
+tool: auto
+category: wc-style
+description: |
+  在同一个文件中，保持使用字符串引号的一致性。使用单引号'或者双引号"之一用以引用字符串，并在同一文件中沿用。
+
+  Auto-extracted from book299-20132-Python语言编码规范.txt.
+
+check:
+  type: ast-grep
+  pattern: TODO

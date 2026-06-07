@@ -1,0 +1,14 @@
+---
+id: GEN-0001
+name: 对于包含重要信息（如app-signature 数字签名信息等）的前端js文件需要进行混淆加固（规范来源： 安全治理单11109465）            
+severity: error
+tool: auto
+category: wc-security
+description: |
+  对于包含重要信息（如app-signature 数字签名信息等）的前端js文件需要进行混淆加固（规范来源： 安全治理单11109465）            
+
+  Auto-extracted from book299-4083-JavaScript(ES5)语言编码规范.txt.
+
+check:
+  type: ast-grep
+  pattern: TODO

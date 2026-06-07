@@ -1,0 +1,14 @@
+---
+id: C规-2-18
+name: 源文件命名采用驼峰式
+severity: error
+tool: auto
+category: wc-style
+description: |
+  源文件命名采用驼峰式
+
+  Auto-extracted from book299-4081-C++编程规范.txt.
+
+check:
+  type: ast-grep
+  pattern: TODO

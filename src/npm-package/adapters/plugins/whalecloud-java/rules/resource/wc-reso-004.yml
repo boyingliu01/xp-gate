@@ -1,0 +1,17 @@
+---
+id: WC-RESO-004
+name: 避免将过大文件一次性加载到内存
+severity: error  # error=阻断, warning=警告
+source: J000111
+tool: auto  # auto-manual-auto: detected by tool / manual check / AST-grep
+category: wc-resource
+description: |
+  避免将过大文件一次性加载到内存
+
+  对应浩鲸规范 J000111。
+
+check:
+  type: ast-grep  # ast-grep / pmd-custom / spotbugs / checkstyle / manual
+  pattern: TODO
+
+notes: "Memory management"

@@ -1,0 +1,14 @@
+---
+id: C规-3-11
+name: 零值比较规范
+severity: error
+tool: auto
+category: wc-style
+description: |
+  零值比较规范
+
+  Auto-extracted from book299-4081-C++编程规范.txt.
+
+check:
+  type: ast-grep
+  pattern: TODO

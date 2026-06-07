@@ -1,0 +1,17 @@
+---
+id: WC-STYLE-003
+name: 避免一个语句中给多个变量赋值
+severity: error  # error=阻断, warning=警告
+source: J000066
+tool: auto  # auto-manual-auto: detected by tool / manual check / AST-grep
+category: wc-style
+description: |
+  避免一个语句中给多个变量赋值
+
+  对应浩鲸规范 J000066。
+
+check:
+  type: ast-grep  # ast-grep / pmd-custom / spotbugs / checkstyle / manual
+  pattern: TODO
+
+notes: "Multiple assignment readability"

@@ -1,0 +1,17 @@
+---
+id: WC-EXCEPT-007
+name: 抛异常与捕获异常必须完全匹配
+severity: error  # error=阻断, warning=警告
+source: J000046
+tool: auto  # auto-manual-auto: detected by tool / manual check / AST-grep
+category: wc-exception
+description: |
+  抛异常与捕获异常必须完全匹配
+
+  对应浩鲸规范 J000046。
+
+check:
+  type: ast-grep  # ast-grep / pmd-custom / spotbugs / checkstyle / manual
+  pattern: TODO
+
+notes: "Exception type matching"

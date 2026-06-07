@@ -1,0 +1,14 @@
+---
+id: GEN-0051
+name: 不许使用复杂的运算表达式，必要时添加括号而不依赖于优先级。
+severity: error
+tool: auto
+category: wc-style
+description: |
+  不许使用复杂的运算表达式，必要时添加括号而不依赖于优先级。
+
+  Auto-extracted from book299-20132-Python语言编码规范.txt.
+
+check:
+  type: ast-grep
+  pattern: TODO

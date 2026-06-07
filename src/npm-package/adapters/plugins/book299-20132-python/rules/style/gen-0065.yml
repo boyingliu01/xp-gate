@@ -1,0 +1,14 @@
+---
+id: GEN-0065
+name: 隐式相对 import 是禁止使用的。
+severity: error
+tool: auto
+category: wc-style
+description: |
+  隐式相对 import 是禁止使用的。
+
+  Auto-extracted from book299-20132-Python语言编码规范.txt.
+
+check:
+  type: ast-grep
+  pattern: TODO

@@ -1,0 +1,14 @@
+---
+id: C规-3-13
+name: 构造函数中禁止调用本类的虚函数
+severity: error
+tool: auto
+category: wc-style
+description: |
+  构造函数中禁止调用本类的虚函数
+
+  Auto-extracted from book299-4081-C++编程规范.txt.
+
+check:
+  type: ast-grep
+  pattern: TODO

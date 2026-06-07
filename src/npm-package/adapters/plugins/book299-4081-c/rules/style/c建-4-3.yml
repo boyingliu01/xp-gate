@@ -1,0 +1,14 @@
+---
+id: C建-4-3
+name: C++中空指针建议使用nullptr
+severity: info
+tool: auto
+category: wc-style
+description: |
+  C++中空指针建议使用nullptr
+
+  Auto-extracted from book299-4081-C++编程规范.txt.
+
+check:
+  type: ast-grep
+  pattern: TODO

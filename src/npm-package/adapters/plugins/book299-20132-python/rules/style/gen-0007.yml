@@ -1,0 +1,14 @@
+---
+id: GEN-0007
+name: 模块命名应短小，并且全为小写，如果需要多单词增加可读性，使用下划线进行拼接。
+severity: warning
+tool: auto
+category: wc-style
+description: |
+  模块命名应短小，并且全为小写，如果需要多单词增加可读性，使用下划线进行拼接。
+
+  Auto-extracted from book299-20132-Python语言编码规范.txt.
+
+check:
+  type: ast-grep
+  pattern: TODO

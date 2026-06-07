@@ -1,0 +1,17 @@
+---
+id: WC-CONCUR-003
+name: 多资源加锁需保持一致的加锁顺序
+severity: error  # error=阻断, warning=警告
+source: J000019
+tool: auto  # auto-manual-auto: detected by tool / manual check / AST-grep
+category: wc-concurrency
+description: |
+  多资源加锁需保持一致的加锁顺序
+
+  对应浩鲸规范 J000019。
+
+check:
+  type: ast-grep  # ast-grep / pmd-custom / spotbugs / checkstyle / manual
+  pattern: TODO
+
+notes: "Deadlock prevention"

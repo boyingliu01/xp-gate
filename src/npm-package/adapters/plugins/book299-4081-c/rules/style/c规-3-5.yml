@@ -1,0 +1,14 @@
+---
+id: C规-3-5
+name: 类对象的传递尽量使用地址或者引用方式。
+severity: error
+tool: auto
+category: wc-style
+description: |
+  类对象的传递尽量使用地址或者引用方式。
+
+  Auto-extracted from book299-4081-C++编程规范.txt.
+
+check:
+  type: ast-grep
+  pattern: TODO

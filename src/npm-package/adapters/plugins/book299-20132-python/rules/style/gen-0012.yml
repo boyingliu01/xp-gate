@@ -1,0 +1,14 @@
+---
+id: GEN-0012
+name: 只有当已有代码风格已经是混合大小写时，为了保留向后兼容性才使用混合大小写。
+severity: warning
+tool: auto
+category: wc-style
+description: |
+  只有当已有代码风格已经是混合大小写时，为了保留向后兼容性才使用混合大小写。
+
+  Auto-extracted from book299-20132-Python语言编码规范.txt.
+
+check:
+  type: ast-grep
+  pattern: TODO

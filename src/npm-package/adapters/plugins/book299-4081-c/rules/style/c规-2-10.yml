@@ -1,0 +1,14 @@
+---
+id: C规-2-10
+name: 代码注释广覆盖
+severity: error
+tool: auto
+category: wc-style
+description: |
+  代码注释广覆盖
+
+  Auto-extracted from book299-4081-C++编程规范.txt.
+
+check:
+  type: ast-grep
+  pattern: TODO

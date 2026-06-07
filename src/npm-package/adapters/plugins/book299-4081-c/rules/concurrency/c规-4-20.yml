@@ -1,0 +1,14 @@
+---
+id: C规-4-20
+name: 多线程访问共享资源时需要加锁保护
+severity: error
+tool: auto
+category: wc-concurrency
+description: |
+  多线程访问共享资源时需要加锁保护
+
+  Auto-extracted from book299-4081-C++编程规范.txt.
+
+check:
+  type: ast-grep
+  pattern: TODO

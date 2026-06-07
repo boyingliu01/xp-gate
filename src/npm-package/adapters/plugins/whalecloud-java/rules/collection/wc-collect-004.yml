@@ -1,0 +1,17 @@
+---
+id: WC-COLLECT-004
+name: subList场景中原集合元素增加或删除需高度注意
+severity: error  # error=阻断, warning=警告
+source: J000004
+tool: auto  # auto-manual-auto: detected by tool / manual check / AST-grep
+category: wc-collection
+description: |
+  subList场景中原集合元素增加或删除需高度注意
+
+  对应浩鲸规范 J000004。
+
+check:
+  type: ast-grep  # ast-grep / pmd-custom / spotbugs / checkstyle / manual
+  pattern: TODO
+
+notes: "ConcurrentModificationException risk"

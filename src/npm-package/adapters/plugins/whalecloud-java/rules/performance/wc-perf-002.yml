@@ -1,0 +1,17 @@
+---
+id: WC-PERF-002
+name: 利用缓冲流类提高I/O操作效率
+severity: error  # error=阻断, warning=警告
+source: J000127
+tool: auto  # auto-manual-auto: detected by tool / manual check / AST-grep
+category: wc-performance
+description: |
+  利用缓冲流类提高I/O操作效率
+
+  对应浩鲸规范 J000127。
+
+check:
+  type: ast-grep  # ast-grep / pmd-custom / spotbugs / checkstyle / manual
+  pattern: TODO
+
+notes: "BufferedInputStream/Reader"

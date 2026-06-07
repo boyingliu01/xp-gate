@@ -1,0 +1,14 @@
+---
+id: C建-2-4
+name: 新产品研发优先使用Cmake编译配置工具
+severity: info
+tool: auto
+category: wc-style
+description: |
+  新产品研发优先使用Cmake编译配置工具
+
+  Auto-extracted from book299-4081-C++编程规范.txt.
+
+check:
+  type: ast-grep
+  pattern: TODO

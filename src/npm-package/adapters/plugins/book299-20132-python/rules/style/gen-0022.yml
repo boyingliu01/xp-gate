@@ -1,0 +1,14 @@
+---
+id: GEN-0022
+name: 全部使用大写并且下划线将单词分开。
+severity: warning
+tool: auto
+category: wc-style
+description: |
+  全部使用大写并且下划线将单词分开。
+
+  Auto-extracted from book299-20132-Python语言编码规范.txt.
+
+check:
+  type: ast-grep
+  pattern: TODO

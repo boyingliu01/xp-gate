@@ -1,0 +1,14 @@
+---
+id: GEN-0072
+name: 以下情况避免无关的空格：
+severity: warning
+tool: auto
+category: wc-style
+description: |
+  以下情况避免无关的空格：
+
+  Auto-extracted from book299-20132-Python语言编码规范.txt.
+
+check:
+  type: ast-grep
+  pattern: TODO

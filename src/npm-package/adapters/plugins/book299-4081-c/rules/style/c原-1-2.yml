@@ -1,0 +1,14 @@
+---
+id: C原-1-2
+name: 正确优先，效率次之
+severity: warning
+tool: auto
+category: wc-style
+description: |
+  正确优先，效率次之
+
+  Auto-extracted from book299-4081-C++编程规范.txt.
+
+check:
+  type: ast-grep
+  pattern: TODO

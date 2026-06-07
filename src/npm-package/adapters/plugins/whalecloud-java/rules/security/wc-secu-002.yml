@@ -1,0 +1,17 @@
+---
+id: WC-SECU-002
+name: 不使用MD2/MD4/MD5加密敏感数据
+severity: error  # error=阻断, warning=警告
+source: J000075
+tool: auto  # auto-manual-auto: detected by tool / manual check / AST-grep
+category: wc-security
+description: |
+  不使用MD2/MD4/MD5加密敏感数据
+
+  对应浩鲸规范 J000075。
+
+check:
+  type: ast-grep  # ast-grep / pmd-custom / spotbugs / checkstyle / manual
+  pattern: TODO
+
+notes: "SHA256 recommendation"

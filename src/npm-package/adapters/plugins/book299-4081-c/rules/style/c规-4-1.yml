@@ -1,0 +1,14 @@
+---
+id: C规-4-1
+name: 非内置类型的全局变量应使用指针方式
+severity: error
+tool: auto
+category: wc-style
+description: |
+  非内置类型的全局变量应使用指针方式
+
+  Auto-extracted from book299-4081-C++编程规范.txt.
+
+check:
+  type: ast-grep
+  pattern: TODO

@@ -1,0 +1,14 @@
+---
+id: C建-3-5
+name: 优先使用初始化列表方式编写构造函数
+severity: info
+tool: auto
+category: wc-style
+description: |
+  优先使用初始化列表方式编写构造函数
+
+  Auto-extracted from book299-4081-C++编程规范.txt.
+
+check:
+  type: ast-grep
+  pattern: TODO

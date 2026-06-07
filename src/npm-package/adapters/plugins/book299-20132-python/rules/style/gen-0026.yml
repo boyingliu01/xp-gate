@@ -1,0 +1,14 @@
+---
+id: GEN-0026
+name: 注释信息不仅要包括代码的功能，还应给出原因，不要为注释而注释。
+severity: error
+tool: auto
+category: wc-style
+description: |
+  注释信息不仅要包括代码的功能，还应给出原因，不要为注释而注释。
+
+  Auto-extracted from book299-20132-Python语言编码规范.txt.
+
+check:
+  type: ast-grep
+  pattern: TODO

@@ -1,0 +1,14 @@
+---
+id: C规-2-7
+name: 头文件必须使用预处理块来避免重复包含
+severity: error
+tool: auto
+category: wc-style
+description: |
+  头文件必须使用预处理块来避免重复包含
+
+  Auto-extracted from book299-4081-C++编程规范.txt.
+
+check:
+  type: ast-grep
+  pattern: TODO

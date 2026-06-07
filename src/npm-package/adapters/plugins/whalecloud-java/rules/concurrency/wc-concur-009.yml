@@ -1,0 +1,17 @@
+---
+id: WC-CONCUR-009
+name: 多线程用线程安全集合
+severity: error  # error=阻断, warning=警告
+source: J000114
+tool: auto  # auto-manual-auto: detected by tool / manual check / AST-grep
+category: wc-concurrency
+description: |
+  多线程用线程安全集合
+
+  对应浩鲸规范 J000114。
+
+check:
+  type: ast-grep  # ast-grep / pmd-custom / spotbugs / checkstyle / manual
+  pattern: TODO
+
+notes: "ConcurrentHashMap/CopyOnWriteArrayList"

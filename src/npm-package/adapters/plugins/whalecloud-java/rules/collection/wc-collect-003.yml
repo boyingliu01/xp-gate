@@ -1,0 +1,17 @@
+---
+id: WC-COLLECT-003
+name: 不可对Collections返回的不可变列表进行添加或删除
+severity: error  # error=阻断, warning=警告
+source: J000003
+tool: auto  # auto-manual-auto: detected by tool / manual check / AST-grep
+category: wc-collection
+description: |
+  不可对Collections返回的不可变列表进行添加或删除
+
+  对应浩鲸规范 J000003。
+
+check:
+  type: ast-grep  # ast-grep / pmd-custom / spotbugs / checkstyle / manual
+  pattern: TODO
+
+notes: "UnsupportedOperationException risk"

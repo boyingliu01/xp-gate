@@ -1,0 +1,17 @@
+---
+id: WC-CONCUR-004
+name: 并发修改同一记录需加锁
+severity: error  # error=阻断, warning=警告
+source: J000020
+tool: auto  # auto-manual-auto: detected by tool / manual check / AST-grep
+category: wc-concurrency
+description: |
+  并发修改同一记录需加锁
+
+  对应浩鲸规范 J000020。
+
+check:
+  type: ast-grep  # ast-grep / pmd-custom / spotbugs / checkstyle / manual
+  pattern: TODO
+
+notes: "Lost update prevention"

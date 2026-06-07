@@ -1,0 +1,14 @@
+---
+id: C建-5-7
+name: 文件操作时一次读取的buffer大小为2048\~8192字节效率较高
+severity: info
+tool: auto
+category: wc-performance
+description: |
+  文件操作时一次读取的buffer大小为2048\~8192字节效率较高
+
+  Auto-extracted from book299-4081-C++编程规范.txt.
+
+check:
+  type: ast-grep
+  pattern: TODO

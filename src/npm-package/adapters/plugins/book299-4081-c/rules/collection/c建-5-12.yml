@@ -1,0 +1,14 @@
+---
+id: C建-5-12
+name: 去掉不必要的memset或者数组初始化操作
+severity: info
+tool: auto
+category: wc-collection
+description: |
+  去掉不必要的memset或者数组初始化操作
+
+  Auto-extracted from book299-4081-C++编程规范.txt.
+
+check:
+  type: ast-grep
+  pattern: TODO

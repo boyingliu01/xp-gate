@@ -1,0 +1,17 @@
+---
+id: WC-CONCUR-006
+name: Lock类加锁需确保锁范围内代码受保护
+severity: error  # error=阻断, warning=警告
+source: J000022
+tool: auto  # auto-manual-auto: detected by tool / manual check / AST-grep
+category: wc-concurrency
+description: |
+  Lock类加锁需确保锁范围内代码受保护
+
+  对应浩鲸规范 J000022。
+
+check:
+  type: ast-grep  # ast-grep / pmd-custom / spotbugs / checkstyle / manual
+  pattern: TODO
+
+notes: "try-finally pattern required"

@@ -1,0 +1,14 @@
+---
+id: C建-5-13
+name: 尽可能用TSChr类代替原生的C字符串解决性能问题
+severity: info
+tool: auto
+category: wc-performance
+description: |
+  尽可能用TSChr类代替原生的C字符串解决性能问题
+
+  Auto-extracted from book299-4081-C++编程规范.txt.
+
+check:
+  type: ast-grep
+  pattern: TODO

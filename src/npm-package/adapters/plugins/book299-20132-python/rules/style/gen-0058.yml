@@ -1,0 +1,14 @@
+---
+id: GEN-0058
+name: 不要用空格来垂直对齐多行间的标记，因为这会成为维护的负担(适用于:，#，=等)。
+severity: error
+tool: auto
+category: wc-style
+description: |
+  不要用空格来垂直对齐多行间的标记，因为这会成为维护的负担(适用于:，#，=等)。
+
+  Auto-extracted from book299-20132-Python语言编码规范.txt.
+
+check:
+  type: ast-grep
+  pattern: TODO

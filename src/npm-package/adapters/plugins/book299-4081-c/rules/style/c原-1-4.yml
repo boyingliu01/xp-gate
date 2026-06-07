@@ -1,0 +1,14 @@
+---
+id: C原-1-4
+name: 持续改进，避免错误复现
+severity: warning
+tool: auto
+category: wc-style
+description: |
+  持续改进，避免错误复现
+
+  Auto-extracted from book299-4081-C++编程规范.txt.
+
+check:
+  type: ast-grep
+  pattern: TODO

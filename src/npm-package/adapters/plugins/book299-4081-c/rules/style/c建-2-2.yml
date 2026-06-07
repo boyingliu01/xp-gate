@@ -1,0 +1,14 @@
+---
+id: C建-2-2
+name: 每行代码和注释尽量不要超过80列
+severity: info
+tool: auto
+category: wc-style
+description: |
+  每行代码和注释尽量不要超过80列
+
+  Auto-extracted from book299-4081-C++编程规范.txt.
+
+check:
+  type: ast-grep
+  pattern: TODO

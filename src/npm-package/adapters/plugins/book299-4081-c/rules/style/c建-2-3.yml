@@ -1,0 +1,14 @@
+---
+id: C建-2-3
+name: Protobuf 应通过协议文件.proto自动生成源码
+severity: info
+tool: auto
+category: wc-style
+description: |
+  Protobuf 应通过协议文件.proto自动生成源码
+
+  Auto-extracted from book299-4081-C++编程规范.txt.
+
+check:
+  type: ast-grep
+  pattern: TODO

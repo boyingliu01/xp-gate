@@ -1,0 +1,17 @@
+---
+id: WC-EXCEPT-010
+name: 对外API必须使用错误码
+severity: warning  # error=阻断, warning=警告
+source: J000049
+tool: auto  # auto-manual-auto: detected by tool / manual check / AST-grep
+category: wc-exception
+description: |
+  对外API必须使用错误码
+
+  对应浩鲸规范 J000049。
+
+check:
+  type: ast-grep  # ast-grep / pmd-custom / spotbugs / checkstyle / manual
+  pattern: TODO
+
+notes: "Error code standardization"

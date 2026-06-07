@@ -1,0 +1,17 @@
+---
+id: WC-COLLECT-011
+name: 集合初始化时指定初始值大小
+severity: warning  # error=阻断, warning=警告
+source: J0000117
+tool: auto  # auto-manual-auto: detected by tool / manual check / AST-grep
+category: wc-collection
+description: |
+  集合初始化时指定初始值大小
+
+  对应浩鲸规范 J0000117。
+
+check:
+  type: ast-grep  # ast-grep / pmd-custom / spotbugs / checkstyle / manual
+  pattern: TODO
+
+notes: "Avoid resize overhead"

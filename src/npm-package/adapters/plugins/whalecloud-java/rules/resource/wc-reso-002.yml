@@ -1,0 +1,17 @@
+---
+id: WC-RESO-002
+name: 避免使用System.gc强制内存回收
+severity: error  # error=阻断, warning=警告
+source: J000108
+tool: auto  # auto-manual-auto: detected by tool / manual check / AST-grep
+category: wc-resource
+description: |
+  避免使用System.gc强制内存回收
+
+  对应浩鲸规范 J000108。
+
+check:
+  type: ast-grep  # ast-grep / pmd-custom / spotbugs / checkstyle / manual
+  pattern: TODO
+
+notes: "PMD:DoNotCallSystemExit"

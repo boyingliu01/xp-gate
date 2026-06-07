@@ -1,0 +1,14 @@
+---
+id: C规-4-6
+name: 非QMDB等例外模块外的代码中禁止抛出异常
+severity: error
+tool: auto
+category: wc-exception
+description: |
+  非QMDB等例外模块外的代码中禁止抛出异常
+
+  Auto-extracted from book299-4081-C++编程规范.txt.
+
+check:
+  type: ast-grep
+  pattern: TODO

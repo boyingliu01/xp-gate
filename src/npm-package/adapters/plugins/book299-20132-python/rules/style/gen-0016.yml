@@ -1,0 +1,14 @@
+---
+id: GEN-0016
+name: 类型变量名称通常应使用简短的驼峰命名，建议将后缀_co 或_contra 添加到用于声明相应的协变和逆变的行为。
+severity: warning
+tool: auto
+category: wc-style
+description: |
+  类型变量名称通常应使用简短的驼峰命名，建议将后缀_co 或_contra 添加到用于声明相应的协变和逆变的行为。
+
+  Auto-extracted from book299-20132-Python语言编码规范.txt.
+
+check:
+  type: ast-grep
+  pattern: TODO

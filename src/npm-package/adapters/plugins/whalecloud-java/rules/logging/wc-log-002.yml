@@ -1,0 +1,17 @@
+---
+id: WC-LOG-002
+name: trace/debug/info日志输出前需判断级别
+severity: error  # error=阻断, warning=警告
+source: J000054
+tool: auto  # auto-manual-auto: detected by tool / manual check / AST-grep
+category: wc-logging
+description: |
+  trace/debug/info日志输出前需判断级别
+
+  对应浩鲸规范 J000054。
+
+check:
+  type: ast-grep  # ast-grep / pmd-custom / spotbugs / checkstyle / manual
+  pattern: TODO
+
+notes: "isDebugEnabled() guard"

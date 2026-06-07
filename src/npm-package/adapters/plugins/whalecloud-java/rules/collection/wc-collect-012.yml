@@ -1,0 +1,17 @@
+---
+id: WC-COLLECT-012
+name: 使用entrySet遍历Map而非keySet
+severity: warning  # error=阻断, warning=警告
+source: J0000118
+tool: auto  # auto-manual-auto: detected by tool / manual check / AST-grep
+category: wc-collection
+description: |
+  使用entrySet遍历Map而非keySet
+
+  对应浩鲸规范 J0000118。
+
+check:
+  type: ast-grep  # ast-grep / pmd-custom / spotbugs / checkstyle / manual
+  pattern: TODO
+
+notes: "PMD:KeySetOverEntrySet"

@@ -17,6 +17,8 @@ All notable changes to this project will be documented in this file.
 - **#174 — many-exports.ts + lsp.ts branch coverage** — add targeted tests for branch/edge cases; 100% line coverage for both files
 - **#176 — documentation version markers stale** — update all 25+ AGENTS.md files and README.md from v0.5.1 to v0.8.1
 - **#175 — Gate 0 script file exemption** — exempt `.sh` files from "source code" detection in version consistency check; commits containing only shell scripts no longer require VERSION/CHANGELOG update
+- **#177 — adapter deduplication** — add `syncAdapters()` to sync-package-content.js so `githooks/adapters/` is the single source of truth; `npm-package/adapters/` is now a build artifact. Fixes java.sh divergence (whalecloud grep typo)
+- **Gate 0 bypass fix** — `[skip-version-check]` now reads from COMMIT_EDITMSG and allows build-tooling files (adapters/, scripts/, hooks/) while still blocking production source code
 
 ### Removed
 - **SonarQube Gate 8** — full deletion of SonarQube support: `docs/sonarqube-setup.md`, `sonar-project.properties`, `.github/workflows/sonarqube.yml`, design plans, AGENTS.md references

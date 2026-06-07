@@ -1,0 +1,14 @@
+---
+id: GEN-0033
+name: 可以根据[PEP-484]对Python3代码进行类型注释,并且在build时用类型检查工具例如[pytype]进行类型检查。
+severity: warning
+tool: auto
+category: wc-style
+description: |
+  可以根据[PEP-484]对Python3代码进行类型注释,并且在build时用类型检查工具例如[pytype]进行类型检查。
+
+  Auto-extracted from book299-20132-Python语言编码规范.txt.
+
+check:
+  type: ast-grep
+  pattern: TODO

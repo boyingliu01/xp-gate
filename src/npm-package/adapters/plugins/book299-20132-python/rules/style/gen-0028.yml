@@ -1,0 +1,14 @@
+---
+id: GEN-0028
+name: 避免使用行尾注释。
+severity: error
+tool: auto
+category: wc-style
+description: |
+  避免使用行尾注释。
+
+  Auto-extracted from book299-20132-Python语言编码规范.txt.
+
+check:
+  type: ast-grep
+  pattern: TODO

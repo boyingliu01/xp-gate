@@ -1,0 +1,17 @@
+---
+id: WC-RESO-006
+name: 谨慎使用Object.clone进行对象拷贝
+severity: error  # error=阻断, warning=警告
+source: J000094
+tool: auto  # auto-manual-auto: detected by tool / manual check / AST-grep
+category: wc-resource
+description: |
+  谨慎使用Object.clone进行对象拷贝
+
+  对应浩鲸规范 J000094。
+
+check:
+  type: ast-grep  # ast-grep / pmd-custom / spotbugs / checkstyle / manual
+  pattern: TODO
+
+notes: "Clone vs copy constructor"

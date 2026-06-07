@@ -175,28 +175,37 @@ if [ "$is_protected" = "true" ]; then
       esac
     done
 
+    # Check for build-tooling-only changes (adapters, scripts, hooks)
+    has_real_source=false
+    for file in $STAGED_FILES; do
+      case "$file" in
+        src/npm-package/adapters/*|src/npm-package/scripts/*|src/npm-package/hooks/*|scripts/*|githooks/adapters/*)
+          continue ;;
+        *.ts|*.js|*.tsx|*.jsx|*.py|*.go|*.java|*.rs|*.c|*.cpp|*.h|*.css|*.scss)
+          has_real_source=true
+          ;;
+      esac
+    done
+
     # Doc-only changes: no source code files
     if [ "$has_source" = "false" ]; then
       echo "✅ PASSED - Gate 0: Version Consistency Check (doc-only changes)"
     else
-      # Check for bypass: commit message prefix + no source files
-      COMMIT_MSG=$(git log -1 --format='%s' 2>/dev/null || echo "")
+      # Check for bypass: commit message prefix (read from COMMIT_EDITMSG during pre-commit hook)
+      COMMIT_MSG=$(cat "$(git rev-parse --git-dir)/COMMIT_EDITMSG" 2>/dev/null | head -1 || echo "")
       if echo "$COMMIT_MSG" | grep -qE '^\[skip-version-check\]'; then
-        # Check if commit message starts with allowed prefix
         if echo "$COMMIT_MSG" | grep -qE '^\[skip-version-check\].*(chore:|docs:|release:)'; then
-          # Verify no source files in staged changes (already checked above)
-          if [ "$has_source" = "false" ]; then
-            echo "✅ PASSED - Gate 0: Version Consistency Check (bypass: chore/docs/release with no source)"
+          if [ "$has_real_source" = "false" ]; then
+            echo "✅ PASSED - Gate 0: Version Consistency Check (bypass: chore/docs/release)"
           else
             echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
   VERSION CONSISTENCY CHECK (Gate 0)
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 Branch: $CURRENT_BRANCH
-ERROR: [skip-version-check] bypass used but source code files detected.
+ERROR: [skip-version-check] bypass used but production source files detected.
 
-Bypass requires:
-  1. Commit message starts with [skip-version-check] + chore:/docs:/release:
-  2. NO source code files in staged changes
+Bypass only allows build-tooling changes (adapters/, scripts/, hooks/).
+Production source files require VERSION/CHANGELOG update.
 
 Files: $(echo "$STAGED_FILES" | tr '\n' ', ' | sed 's/,$//')
 "

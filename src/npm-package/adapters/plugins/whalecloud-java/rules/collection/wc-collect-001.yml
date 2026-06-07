@@ -1,0 +1,17 @@
+---
+id: WC-COLLECT-001
+name: ArrayList subList结果不可强转成ArrayList
+severity: error  # error=阻断, warning=警告
+source: J000001
+tool: auto  # auto-manual-auto: detected by tool / manual check / AST-grep
+category: wc-collection
+description: |
+  ArrayList subList结果不可强转成ArrayList
+
+  对应浩鲸规范 J000001。
+
+check:
+  type: ast-grep  # ast-grep / pmd-custom / spotbugs / checkstyle / manual
+  pattern: TODO
+
+notes: "pmd:ArrayListSubList already covers this; verify severity matches"

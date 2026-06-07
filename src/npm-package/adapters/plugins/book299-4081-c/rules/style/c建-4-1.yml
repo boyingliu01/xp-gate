@@ -1,0 +1,14 @@
+---
+id: C建-4-1
+name: 合理使用assert或等价物来检查非法情况
+severity: info
+tool: auto
+category: wc-style
+description: |
+  合理使用assert或等价物来检查非法情况
+
+  Auto-extracted from book299-4081-C++编程规范.txt.
+
+check:
+  type: ast-grep
+  pattern: TODO

@@ -1,0 +1,14 @@
+---
+id: GEN-0015
+name: 变量命都是小写，多单词使用下划线连接。
+severity: error
+tool: auto
+category: wc-style
+description: |
+  变量命都是小写，多单词使用下划线连接。
+
+  Auto-extracted from book299-20132-Python语言编码规范.txt.
+
+check:
+  type: ast-grep
+  pattern: TODO

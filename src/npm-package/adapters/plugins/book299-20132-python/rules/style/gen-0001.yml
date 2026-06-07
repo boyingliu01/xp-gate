@@ -1,0 +1,14 @@
+---
+id: GEN-0001
+name: 名字应该能够标识事物的特性，并且与业务挂钩。
+severity: warning
+tool: auto
+category: wc-style
+description: |
+  名字应该能够标识事物的特性，并且与业务挂钩。
+
+  Auto-extracted from book299-20132-Python语言编码规范.txt.
+
+check:
+  type: ast-grep
+  pattern: TODO

@@ -1,0 +1,14 @@
+---
+id: GEN-0017
+name: 类型变量的定义统一放在 import 之后。
+severity: error
+tool: auto
+category: wc-style
+description: |
+  类型变量的定义统一放在 import 之后。
+
+  Auto-extracted from book299-20132-Python语言编码规范.txt.
+
+check:
+  type: ast-grep
+  pattern: TODO

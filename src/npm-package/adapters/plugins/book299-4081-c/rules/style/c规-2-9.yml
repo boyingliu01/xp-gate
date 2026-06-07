@@ -1,0 +1,14 @@
+---
+id: C规-2-9
+name: 保证代码和注释的一致性
+severity: error
+tool: auto
+category: wc-style
+description: |
+  保证代码和注释的一致性
+
+  Auto-extracted from book299-4081-C++编程规范.txt.
+
+check:
+  type: ast-grep
+  pattern: TODO

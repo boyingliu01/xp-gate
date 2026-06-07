@@ -1,0 +1,14 @@
+---
+id: GEN-0008
+name: 类命名采用驼峰命名约定，大写字母开头，各个单词首字母大写。
+severity: error
+tool: auto
+category: wc-style
+description: |
+  类命名采用驼峰命名约定，大写字母开头，各个单词首字母大写。
+
+  Auto-extracted from book299-20132-Python语言编码规范.txt.
+
+check:
+  type: ast-grep
+  pattern: TODO

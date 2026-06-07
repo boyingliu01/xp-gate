@@ -1,0 +1,14 @@
+---
+id: C规-3-7
+name: 对所调用的函数的返回值要处理完备
+severity: error
+tool: auto
+category: wc-style
+description: |
+  对所调用的函数的返回值要处理完备
+
+  Auto-extracted from book299-4081-C++编程规范.txt.
+
+check:
+  type: ast-grep
+  pattern: TODO

@@ -1,0 +1,17 @@
+---
+id: WC-EXCEPT-001
+name: 可通过预检查规避的RuntimeException
+severity: error  # error=阻断, warning=警告
+source: J000039
+tool: auto  # auto-manual-auto: detected by tool / manual check / AST-grep
+category: wc-exception
+description: |
+  可通过预检查规避的RuntimeException
+
+  对应浩鲸规范 J000039。
+
+check:
+  type: ast-grep  # ast-grep / pmd-custom / spotbugs / checkstyle / manual
+  pattern: TODO
+
+notes: "Null check before method call"

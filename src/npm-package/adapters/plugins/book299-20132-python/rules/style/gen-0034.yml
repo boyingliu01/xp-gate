@@ -1,0 +1,14 @@
+---
+id: GEN-0034
+name: 存在错误隐患的代码用# FIXME:声明。
+severity: info
+tool: auto
+category: wc-style
+description: |
+  存在错误隐患的代码用# FIXME:声明。
+
+  Auto-extracted from book299-20132-Python语言编码规范.txt.
+
+check:
+  type: ast-grep
+  pattern: TODO

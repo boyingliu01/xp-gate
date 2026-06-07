@@ -1,0 +1,14 @@
+---
+id: GEN-0037
+name: 类应该在其定义下有一个用于描述该类的文档字符串。
+severity: error
+tool: auto
+category: wc-style
+description: |
+  类应该在其定义下有一个用于描述该类的文档字符串。
+
+  Auto-extracted from book299-20132-Python语言编码规范.txt.
+
+check:
+  type: ast-grep
+  pattern: TODO

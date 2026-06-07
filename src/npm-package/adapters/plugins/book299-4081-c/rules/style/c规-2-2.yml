@@ -1,0 +1,14 @@
+---
+id: C规-2-2
+name: 类访问修饰符与分界符对齐，辖属内容要缩进
+severity: error
+tool: auto
+category: wc-style
+description: |
+  类访问修饰符与分界符对齐，辖属内容要缩进
+
+  Auto-extracted from book299-4081-C++编程规范.txt.
+
+check:
+  type: ast-grep
+  pattern: TODO

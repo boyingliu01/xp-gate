@@ -1,0 +1,14 @@
+---
+id: GEN-0049
+name: 行内注释是和代码语名写在一行内的注释。行内注释应该至少和代码语句之间有两个空格间隔，并且以#和一个空格开始。
+severity: info
+tool: auto
+category: wc-style
+description: |
+  行内注释是和代码语名写在一行内的注释。行内注释应该至少和代码语句之间有两个空格间隔，并且以#和一个空格开始。
+
+  Auto-extracted from book299-20132-Python语言编码规范.txt.
+
+check:
+  type: ast-grep
+  pattern: TODO

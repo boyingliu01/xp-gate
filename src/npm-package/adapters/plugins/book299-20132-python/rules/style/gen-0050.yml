@@ -1,0 +1,14 @@
+---
+id: GEN-0050
+name: 代码未写，文档先行。注释必须按照统一的范式编写。
+severity: error
+tool: auto
+category: wc-style
+description: |
+  代码未写，文档先行。注释必须按照统一的范式编写。
+
+  Auto-extracted from book299-20132-Python语言编码规范.txt.
+
+check:
+  type: ast-grep
+  pattern: TODO

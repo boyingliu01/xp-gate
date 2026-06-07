@@ -1,0 +1,17 @@
+---
+id: WC-STYLE-018
+name: 避免变量在使用前被另一个赋值覆盖
+severity: error  # error=阻断, warning=警告
+source: J000105
+tool: auto  # auto-manual-auto: detected by tool / manual check / AST-grep
+category: wc-style
+description: |
+  避免变量在使用前被另一个赋值覆盖
+
+  对应浩鲸规范 J000105。
+
+check:
+  type: ast-grep  # ast-grep / pmd-custom / spotbugs / checkstyle / manual
+  pattern: TODO
+
+notes: "Variable shadowing/overwrite"

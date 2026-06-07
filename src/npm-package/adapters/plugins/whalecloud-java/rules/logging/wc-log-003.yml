@@ -1,0 +1,17 @@
+---
+id: WC-LOG-003
+name: 避免重复打印日志
+severity: error  # error=阻断, warning=警告
+source: J000055
+tool: auto  # auto-manual-auto: detected by tool / manual check / AST-grep
+category: wc-logging
+description: |
+  避免重复打印日志
+
+  对应浩鲸规范 J000055。
+
+check:
+  type: ast-grep  # ast-grep / pmd-custom / spotbugs / checkstyle / manual
+  pattern: TODO
+
+notes: "Log duplication prevention"

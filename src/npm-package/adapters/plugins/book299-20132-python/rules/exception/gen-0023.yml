@@ -1,0 +1,14 @@
+---
+id: GEN-0023
+name: 由于异常实际上也是类，因此类命名的约定也适用与异常。不同的是，如果异常实际上是抛出错误的话，异常名后应该加上“Error”的后缀。
+severity: warning
+tool: auto
+category: wc-exception
+description: |
+  由于异常实际上也是类，因此类命名的约定也适用与异常。不同的是，如果异常实际上是抛出错误的话，异常名后应该加上“Error”的后缀。
+
+  Auto-extracted from book299-20132-Python语言编码规范.txt.
+
+check:
+  type: ast-grep
+  pattern: TODO

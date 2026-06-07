@@ -1,0 +1,14 @@
+---
+id: C规-2-4
+name: 头文件中禁止使用using namespace
+severity: error
+tool: auto
+category: wc-style
+description: |
+  头文件中禁止使用using namespace
+
+  Auto-extracted from book299-4081-C++编程规范.txt.
+
+check:
+  type: ast-grep
+  pattern: TODO

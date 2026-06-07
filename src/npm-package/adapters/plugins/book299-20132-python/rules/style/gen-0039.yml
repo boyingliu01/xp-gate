@@ -1,0 +1,14 @@
+---
+id: GEN-0039
+name: 一个函数必须要有文档字符串，除非它满足以下条件之一。
+severity: error
+tool: auto
+category: wc-style
+description: |
+  一个函数必须要有文档字符串，除非它满足以下条件之一。
+
+  Auto-extracted from book299-20132-Python语言编码规范.txt.
+
+check:
+  type: ast-grep
+  pattern: TODO

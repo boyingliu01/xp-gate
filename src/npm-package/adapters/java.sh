@@ -9,7 +9,7 @@ _is_whalecloud_enabled() {
   # Check if whalecloud-java plugin is enabled
   [ -d "$WHALECLOUD_PLUGIN_DIR" ] && \
     ([ -f "config/pmd/whalecloud-ruleset.xml" ] || \
-     grep -q 'xp-gate-whalecloud-java\|xp-gateWhalecloudCheck' pom.xml build.gradle build.gradle.kts 2>/dev/null)
+     grep -q 'xp-gate-whalecloud-java\|xpGateWhalecloudCheck' pom.xml build.gradle build.gradle.kts 2>/dev/null)
 }
 
 _detect_java_build() {

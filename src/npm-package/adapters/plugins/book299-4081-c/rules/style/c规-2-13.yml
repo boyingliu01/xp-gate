@@ -1,0 +1,14 @@
+---
+id: C规-2-13
+name: 变量名前缀可快速识别变量类型和作用域
+severity: error
+tool: auto
+category: wc-style
+description: |
+  变量名前缀可快速识别变量类型和作用域
+
+  Auto-extracted from book299-4081-C++编程规范.txt.
+
+check:
+  type: ast-grep
+  pattern: TODO

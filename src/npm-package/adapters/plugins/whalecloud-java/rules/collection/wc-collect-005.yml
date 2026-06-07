@@ -1,0 +1,17 @@
+---
+id: WC-COLLECT-005
+name: 集合转数组必须使用toArray(T[] array)
+severity: error  # error=阻断, warning=警告
+source: J000005
+tool: auto  # auto-manual-auto: detected by tool / manual check / AST-grep
+category: wc-collection
+description: |
+  集合转数组必须使用toArray(T[] array)
+
+  对应浩鲸规范 J000005。
+
+check:
+  type: ast-grep  # ast-grep / pmd-custom / spotbugs / checkstyle / manual
+  pattern: TODO
+
+notes: "toArray() without args loses type safety"

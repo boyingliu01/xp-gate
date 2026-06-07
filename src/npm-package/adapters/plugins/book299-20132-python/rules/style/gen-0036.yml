@@ -1,0 +1,14 @@
+---
+id: GEN-0036
+name: 应该包含如下：
+severity: info
+tool: auto
+category: wc-style
+description: |
+  应该包含如下：
+
+  Auto-extracted from book299-20132-Python语言编码规范.txt.
+
+check:
+  type: ast-grep
+  pattern: TODO

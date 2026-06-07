@@ -1,0 +1,17 @@
+---
+id: WC-SECU-005
+name: 禁止内外层循环使用相同遍历变量
+severity: error  # error=阻断, warning=警告
+source: J000104
+tool: auto  # auto-manual-auto: detected by tool / manual check / AST-grep
+category: wc-security
+description: |
+  禁止内外层循环使用相同遍历变量
+
+  对应浩鲸规范 J000104。
+
+check:
+  type: ast-grep  # ast-grep / pmd-custom / spotbugs / checkstyle / manual
+  pattern: TODO
+
+notes: "Shadow variable risk"

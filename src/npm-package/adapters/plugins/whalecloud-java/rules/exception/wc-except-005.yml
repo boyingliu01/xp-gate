@@ -1,0 +1,17 @@
+---
+id: WC-EXCEPT-005
+name: finally块必须关闭资源
+severity: error  # error=阻断, warning=警告
+source: J000043
+tool: auto  # auto-manual-auto: detected by tool / manual check / AST-grep
+category: wc-exception
+description: |
+  finally块必须关闭资源
+
+  对应浩鲸规范 J000043。
+
+check:
+  type: ast-grep  # ast-grep / pmd-custom / spotbugs / checkstyle / manual
+  pattern: TODO
+
+notes: "Resource cleanup in finally"

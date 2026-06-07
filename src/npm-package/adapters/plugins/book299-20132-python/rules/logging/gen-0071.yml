@@ -1,0 +1,14 @@
+---
+id: GEN-0071
+name: 推荐使用logging而非print打印日志，logging的优点是：
+severity: warning
+tool: auto
+category: wc-logging
+description: |
+  推荐使用logging而非print打印日志，logging的优点是：
+
+  Auto-extracted from book299-20132-Python语言编码规范.txt.
+
+check:
+  type: ast-grep
+  pattern: TODO

@@ -1,0 +1,14 @@
+---
+id: C规-3-12
+name: C++程序中只使用const常量，并避免使用"魔数"
+severity: error
+tool: auto
+category: wc-style
+description: |
+  C++程序中只使用const常量，并避免使用"魔数"
+
+  Auto-extracted from book299-4081-C++编程规范.txt.
+
+check:
+  type: ast-grep
+  pattern: TODO

@@ -1,0 +1,14 @@
+---
+id: C建-5-8
+name: 对大文件操作时使用mmap
+severity: info
+tool: auto
+category: wc-collection
+description: |
+  对大文件操作时使用mmap
+
+  Auto-extracted from book299-4081-C++编程规范.txt.
+
+check:
+  type: ast-grep
+  pattern: TODO

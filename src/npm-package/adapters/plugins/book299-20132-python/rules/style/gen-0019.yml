@@ -1,0 +1,14 @@
+---
+id: GEN-0019
+name: 全局变量：适用于函数的命名规范。
+severity: warning
+tool: auto
+category: wc-style
+description: |
+  全局变量：适用于函数的命名规范。
+
+  Auto-extracted from book299-20132-Python语言编码规范.txt.
+
+check:
+  type: ast-grep
+  pattern: TODO

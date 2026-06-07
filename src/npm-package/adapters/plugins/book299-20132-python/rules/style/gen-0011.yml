@@ -1,0 +1,14 @@
+---
+id: GEN-0011
+name: 函数命名都是小写，必要时使用下划线连接各单词提高可读性。
+severity: warning
+tool: auto
+category: wc-style
+description: |
+  函数命名都是小写，必要时使用下划线连接各单词提高可读性。
+
+  Auto-extracted from book299-20132-Python语言编码规范.txt.
+
+check:
+  type: ast-grep
+  pattern: TODO

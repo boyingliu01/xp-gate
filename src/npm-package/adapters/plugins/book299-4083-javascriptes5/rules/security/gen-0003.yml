@@ -1,0 +1,14 @@
+---
+id: GEN-0003
+name: 禁止在前端 js、css、html 文件中包含物理路径信息、数据库连接信息、SQL语句信息、appKey/accessSecret、对象存储 key/secre
+severity: error
+tool: auto
+category: wc-security
+description: |
+  禁止在前端 js、css、html 文件中包含物理路径信息、数据库连接信息、SQL语句信息、appKey/accessSecret、对象存储 key/secre
+
+  Auto-extracted from book299-4083-JavaScript(ES5)语言编码规范.txt.
+
+check:
+  type: ast-grep
+  pattern: TODO

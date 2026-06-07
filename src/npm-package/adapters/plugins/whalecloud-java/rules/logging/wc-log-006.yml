@@ -1,0 +1,17 @@
+---
+id: WC-LOG-006
+name: 国际化团队使用全英文日志
+severity: error  # error=阻断, warning=警告
+source: J000057
+tool: auto  # auto-manual-auto: detected by tool / manual check / AST-grep
+category: wc-logging
+description: |
+  国际化团队使用全英文日志
+
+  对应浩鲸规范 J000057。
+
+check:
+  type: ast-grep  # ast-grep / pmd-custom / spotbugs / checkstyle / manual
+  pattern: TODO
+
+notes: "English-only logs"

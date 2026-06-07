@@ -1,0 +1,17 @@
+---
+id: WC-STYLE-012
+name: 避免用对象访问类的静态变量和方法
+severity: error  # error=阻断, warning=警告
+source: J000125
+tool: auto  # auto-manual-auto: detected by tool / manual check / AST-grep
+category: wc-style
+description: |
+  避免用对象访问类的静态变量和方法
+
+  对应浩鲸规范 J000125。
+
+check:
+  type: ast-grep  # ast-grep / pmd-custom / spotbugs / checkstyle / manual
+  pattern: TODO
+
+notes: "Static access via instance"

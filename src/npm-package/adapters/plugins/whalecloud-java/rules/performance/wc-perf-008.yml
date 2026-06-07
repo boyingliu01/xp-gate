@@ -1,0 +1,17 @@
+---
+id: WC-PERF-008
+name: 数据结构初始化指定大小
+severity: warning  # error=阻断, warning=警告
+source: J000113
+tool: auto  # auto-manual-auto: detected by tool / manual check / AST-grep
+category: wc-performance
+description: |
+  数据结构初始化指定大小
+
+  对应浩鲸规范 J000113。
+
+check:
+  type: ast-grep  # ast-grep / pmd-custom / spotbugs / checkstyle / manual
+  pattern: TODO
+
+notes: "Collection capacity hints"

@@ -1,0 +1,14 @@
+---
+id: C规-3-9
+name: 派生类赋值函数中需要对基类的成员变量赋值
+severity: error
+tool: auto
+category: wc-style
+description: |
+  派生类赋值函数中需要对基类的成员变量赋值
+
+  Auto-extracted from book299-4081-C++编程规范.txt.
+
+check:
+  type: ast-grep
+  pattern: TODO
