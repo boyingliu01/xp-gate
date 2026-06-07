@@ -77,4 +77,28 @@ if [ -f "$OPENCODE_PLUGIN" ]; then
   echo "[sync-version] plugins/opencode/package.json -> $NPM_VERSION"
 fi
 
+# --- npm-package mirror copies (for Mirror Parity CI check) ---
+NPM_CLAUDE_PLUGIN="$ROOT_DIR/src/npm-package/plugins/claude-code/.claude-plugin/plugin.json"
+NPM_OPENCODE_PLUGIN="$ROOT_DIR/src/npm-package/plugins/opencode/package.json"
+
+if [ -f "$NPM_CLAUDE_PLUGIN" ]; then
+  node -e "
+    const fs = require('fs');
+    const pkg = JSON.parse(fs.readFileSync('$NPM_CLAUDE_PLUGIN', 'utf8'));
+    pkg.version = '$NPM_VERSION';
+    fs.writeFileSync('$NPM_CLAUDE_PLUGIN', JSON.stringify(pkg, null, 2) + '\n');
+  "
+  echo "[sync-version] src/npm-package/plugins/claude-code/.claude-plugin/plugin.json -> $NPM_VERSION"
+fi
+
+if [ -f "$NPM_OPENCODE_PLUGIN" ]; then
+  node -e "
+    const fs = require('fs');
+    const pkg = JSON.parse(fs.readFileSync('$NPM_OPENCODE_PLUGIN', 'utf8'));
+    pkg.version = '$NPM_VERSION';
+    fs.writeFileSync('$NPM_OPENCODE_PLUGIN', JSON.stringify(pkg, null, 2) + '\n');
+  "
+  echo "[sync-version] src/npm-package/plugins/opencode/package.json -> $NPM_VERSION"
+fi
+
 echo "[sync-version] OK — all package.json version fields synced from VERSION ($FULL_VERSION)"
