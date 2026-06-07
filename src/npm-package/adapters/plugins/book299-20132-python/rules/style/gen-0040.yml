@@ -1,0 +1,14 @@
+---
+id: GEN-0040
+name: 文档字符串应该包含函数做什么，以及输入和输出的详细描述。通常不应该描述"怎么做"，除非是一些复杂的算法。当开发人员调用该函数时， 文档字符串应该提供足够的信息，
+severity: error
+tool: auto
+category: wc-style
+description: |
+  文档字符串应该包含函数做什么，以及输入和输出的详细描述。通常不应该描述"怎么做"，除非是一些复杂的算法。当开发人员调用该函数时， 文档字符串应该提供足够的信息，
+
+  Auto-extracted from book299-20132-Python语言编码规范.txt.
+
+check:
+  type: ast-grep
+  pattern: TODO

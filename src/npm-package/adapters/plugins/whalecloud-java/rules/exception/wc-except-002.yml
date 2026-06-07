@@ -1,0 +1,17 @@
+---
+id: WC-EXCEPT-002
+name: 异常不能用做流程控制
+severity: error  # error=阻断, warning=警告
+source: J000040
+tool: auto  # auto-manual-auto: detected by tool / manual check / AST-grep
+category: wc-exception
+description: |
+  异常不能用做流程控制
+
+  对应浩鲸规范 J000040。
+
+check:
+  type: ast-grep  # ast-grep / pmd-custom / spotbugs / checkstyle / manual
+  pattern: TODO
+
+notes: "Exceptions for control flow anti-pattern"

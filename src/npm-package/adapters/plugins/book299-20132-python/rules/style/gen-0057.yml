@@ -1,0 +1,14 @@
+---
+id: GEN-0057
+name: 在函数内使用空行（尽量少）使代码逻辑更清晰。
+severity: warning
+tool: auto
+category: wc-style
+description: |
+  在函数内使用空行（尽量少）使代码逻辑更清晰。
+
+  Auto-extracted from book299-20132-Python语言编码规范.txt.
+
+check:
+  type: ast-grep
+  pattern: TODO

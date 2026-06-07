@@ -1,0 +1,17 @@
+---
+id: WC-STYLE-015
+name: 在类型转换前进行数据类型检测
+severity: error  # error=阻断, warning=警告
+source: J000101
+tool: auto  # auto-manual-auto: detected by tool / manual check / AST-grep
+category: wc-style
+description: |
+  在类型转换前进行数据类型检测
+
+  对应浩鲸规范 J000101。
+
+check:
+  type: ast-grep  # ast-grep / pmd-custom / spotbugs / checkstyle / manual
+  pattern: TODO
+
+notes: "ClassCastException prevention"

@@ -1,0 +1,17 @@
+---
+id: WC-COLLECT-007
+name: 无泛型集合赋值给泛型限制集合时需警惕
+severity: error  # error=阻断, warning=警告
+source: J000008
+tool: auto  # auto-manual-auto: detected by tool / manual check / AST-grep
+category: wc-collection
+description: |
+  无泛型集合赋值给泛型限制集合时需警惕
+
+  对应浩鲸规范 J000008。
+
+check:
+  type: ast-grep  # ast-grep / pmd-custom / spotbugs / checkstyle / manual
+  pattern: TODO
+
+notes: "Raw type assignment风险"

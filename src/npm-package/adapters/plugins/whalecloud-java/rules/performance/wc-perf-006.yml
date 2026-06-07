@@ -1,0 +1,17 @@
+---
+id: WC-PERF-006
+name: 尽早释放无用对象引用
+severity: warning  # error=阻断, warning=警告
+source: J000107
+tool: auto  # auto-manual-auto: detected by tool / manual check / AST-grep
+category: wc-performance
+description: |
+  尽早释放无用对象引用
+
+  对应浩鲸规范 J000107。
+
+check:
+  type: ast-grep  # ast-grep / pmd-custom / spotbugs / checkstyle / manual
+  pattern: TODO
+
+notes: "Reference clearing"

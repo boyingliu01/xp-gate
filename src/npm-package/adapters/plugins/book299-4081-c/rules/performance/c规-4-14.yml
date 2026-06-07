@@ -1,0 +1,14 @@
+---
+id: C规-4-14
+name: 对数组通过下标访问操作时必须进行内存越界检查
+severity: error
+tool: auto
+category: wc-performance
+description: |
+  对数组通过下标访问操作时必须进行内存越界检查
+
+  Auto-extracted from book299-4081-C++编程规范.txt.
+
+check:
+  type: ast-grep
+  pattern: TODO

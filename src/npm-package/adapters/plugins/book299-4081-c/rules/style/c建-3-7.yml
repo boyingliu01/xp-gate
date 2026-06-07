@@ -1,0 +1,14 @@
+---
+id: C建-3-7
+name: 数据类型的类要求提供清理函数
+severity: info
+tool: auto
+category: wc-style
+description: |
+  数据类型的类要求提供清理函数
+
+  Auto-extracted from book299-4081-C++编程规范.txt.
+
+check:
+  type: ast-grep
+  pattern: TODO

@@ -1,0 +1,14 @@
+---
+id: GEN-0029
+name: 生成开发文档的需要用中文编写。
+severity: warning
+tool: auto
+category: wc-style
+description: |
+  生成开发文档的需要用中文编写。
+
+  Auto-extracted from book299-20132-Python语言编码规范.txt.
+
+check:
+  type: ast-grep
+  pattern: TODO

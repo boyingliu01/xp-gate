@@ -1,0 +1,14 @@
+---
+id: C原-1-3
+name: 复用为本，拒绝重复
+severity: warning
+tool: auto
+category: wc-style
+description: |
+  复用为本，拒绝重复
+
+  Auto-extracted from book299-4081-C++编程规范.txt.
+
+check:
+  type: ast-grep
+  pattern: TODO

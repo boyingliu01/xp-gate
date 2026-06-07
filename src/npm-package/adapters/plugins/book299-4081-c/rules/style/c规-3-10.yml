@@ -1,0 +1,14 @@
+---
+id: C规-3-10
+name: 文件句柄打开使用完后要及时关闭
+severity: error
+tool: auto
+category: wc-style
+description: |
+  文件句柄打开使用完后要及时关闭
+
+  Auto-extracted from book299-4081-C++编程规范.txt.
+
+check:
+  type: ast-grep
+  pattern: TODO

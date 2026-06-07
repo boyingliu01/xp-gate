@@ -1,0 +1,17 @@
+---
+id: WC-EXCEPT-011
+name: JDK9+ try-with-resources优化
+severity: warning  # error=阻断, warning=警告
+source: J000045
+tool: auto  # auto-manual-auto: detected by tool / manual check / AST-grep
+category: wc-exception
+description: |
+  JDK9+ try-with-resources优化
+
+  对应浩鲸规范 J000045。
+
+check:
+  type: ast-grep  # ast-grep / pmd-custom / spotbugs / checkstyle / manual
+  pattern: TODO
+
+notes: "Resource management improvement"

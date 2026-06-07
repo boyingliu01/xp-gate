@@ -1,0 +1,14 @@
+---
+id: GEN-0020
+name: 用单下划线(_)开头表示模块变量是 protected 的。
+severity: error
+tool: auto
+category: wc-style
+description: |
+  用单下划线(_)开头表示模块变量是 protected 的。
+
+  Auto-extracted from book299-20132-Python语言编码规范.txt.
+
+check:
+  type: ast-grep
+  pattern: TODO

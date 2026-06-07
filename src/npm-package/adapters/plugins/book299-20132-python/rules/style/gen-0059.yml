@@ -1,0 +1,14 @@
+---
+id: GEN-0059
+name: 续行应该与包裹元素对齐，要么使用圆括号，方括号，花括号内的隐式行连接来垂直对齐，要么使用挂行缩进对齐。
+severity: warning
+tool: auto
+category: wc-style
+description: |
+  续行应该与包裹元素对齐，要么使用圆括号，方括号，花括号内的隐式行连接来垂直对齐，要么使用挂行缩进对齐。
+
+  Auto-extracted from book299-20132-Python语言编码规范.txt.
+
+check:
+  type: ast-grep
+  pattern: TODO

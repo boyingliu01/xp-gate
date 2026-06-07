@@ -1,0 +1,17 @@
+---
+id: WC-LOG-007
+name: 使用warn记录用户输入参数错误
+severity: warning  # error=阻断, warning=警告
+source: J000059
+tool: auto  # auto-manual-auto: detected by tool / manual check / AST-grep
+category: wc-logging
+description: |
+  使用warn记录用户输入参数错误
+
+  对应浩鲸规范 J000059。
+
+check:
+  type: ast-grep  # ast-grep / pmd-custom / spotbugs / checkstyle / manual
+  pattern: TODO
+
+notes: "Warning level for input errors"

@@ -1,0 +1,17 @@
+---
+id: WC-STYLE-005
+name: 调用String.substring时先进行长度判断
+severity: error  # error=阻断, warning=警告
+source: J000073
+tool: auto  # auto-manual-auto: detected by tool / manual check / AST-grep
+category: wc-style
+description: |
+  调用String.substring时先进行长度判断
+
+  对应浩鲸规范 J000073。
+
+check:
+  type: ast-grep  # ast-grep / pmd-custom / spotbugs / checkstyle / manual
+  pattern: TODO
+
+notes: "IndexOutOfBoundsException prevention"

@@ -1,0 +1,14 @@
+---
+id: GEN-0018
+name: 类变量统一放在类注释的之后，所有类函数的之前。
+severity: error
+tool: auto
+category: wc-style
+description: |
+  类变量统一放在类注释的之后，所有类函数的之前。
+
+  Auto-extracted from book299-20132-Python语言编码规范.txt.
+
+check:
+  type: ast-grep
+  pattern: TODO

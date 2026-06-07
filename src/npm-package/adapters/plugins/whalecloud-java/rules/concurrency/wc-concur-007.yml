@@ -1,0 +1,17 @@
+---
+id: WC-CONCUR-007
+name: HashMap resize高并发可能死循环
+severity: error  # error=阻断, warning=警告
+source: J000023
+tool: auto  # auto-manual-auto: detected by tool / manual check / AST-grep
+category: wc-concurrency
+description: |
+  HashMap resize高并发可能死循环
+
+  对应浩鲸规范 J000023。
+
+check:
+  type: ast-grep  # ast-grep / pmd-custom / spotbugs / checkstyle / manual
+  pattern: TODO
+
+notes: "Use ConcurrentHashMap in JDK7-"

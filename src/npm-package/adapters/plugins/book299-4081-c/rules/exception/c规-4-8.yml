@@ -1,0 +1,14 @@
+---
+id: C规-4-8
+name: 禁止构造函数中抛出异常
+severity: error
+tool: auto
+category: wc-exception
+description: |
+  禁止构造函数中抛出异常
+
+  Auto-extracted from book299-4081-C++编程规范.txt.
+
+check:
+  type: ast-grep
+  pattern: TODO

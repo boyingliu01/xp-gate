@@ -1,0 +1,14 @@
+---
+id: GEN-0055
+name: 使用 2 个空行来分隔最外层的函数(function)和类(class)定义。
+severity: error
+tool: auto
+category: wc-style
+description: |
+  使用 2 个空行来分隔最外层的函数(function)和类(class)定义。
+
+  Auto-extracted from book299-20132-Python语言编码规范.txt.
+
+check:
+  type: ast-grep
+  pattern: TODO

@@ -1,0 +1,14 @@
+---
+id: GEN-0046
+name: 块注释的每一行都应该以#和一个空格开头（除非该文本是在注释内缩进对齐的）。
+severity: error
+tool: auto
+category: wc-style
+description: |
+  块注释的每一行都应该以#和一个空格开头（除非该文本是在注释内缩进对齐的）。
+
+  Auto-extracted from book299-20132-Python语言编码规范.txt.
+
+check:
+  type: ast-grep
+  pattern: TODO

@@ -1,0 +1,14 @@
+---
+id: C建-3-8
+name: 派生类重写基类的虚函数时使用override关键字
+severity: info
+tool: auto
+category: wc-style
+description: |
+  派生类重写基类的虚函数时使用override关键字
+
+  Auto-extracted from book299-4081-C++编程规范.txt.
+
+check:
+  type: ast-grep
+  pattern: TODO

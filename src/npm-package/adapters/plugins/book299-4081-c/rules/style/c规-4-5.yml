@@ -1,0 +1,14 @@
+---
+id: C规-4-5
+name: 指针不要进行复杂的逻辑或算术运算
+severity: error
+tool: auto
+category: wc-style
+description: |
+  指针不要进行复杂的逻辑或算术运算
+
+  Auto-extracted from book299-4081-C++编程规范.txt.
+
+check:
+  type: ast-grep
+  pattern: TODO

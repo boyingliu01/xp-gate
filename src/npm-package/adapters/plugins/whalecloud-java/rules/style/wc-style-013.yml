@@ -1,0 +1,17 @@
+---
+id: WC-STYLE-013
+name: 避免定义未使用的局部变量/参数/私有方法
+severity: error  # error=阻断, warning=警告
+source: J000097
+tool: auto  # auto-manual-auto: detected by tool / manual check / AST-grep
+category: wc-style
+description: |
+  避免定义未使用的局部变量/参数/私有方法
+
+  对应浩鲸规范 J000097。
+
+check:
+  type: ast-grep  # ast-grep / pmd-custom / spotbugs / checkstyle / manual
+  pattern: TODO
+
+notes: "Dead code detection"

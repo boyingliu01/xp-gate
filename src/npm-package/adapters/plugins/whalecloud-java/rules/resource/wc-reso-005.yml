@@ -1,0 +1,17 @@
+---
+id: WC-RESO-005
+name: JDBC结果集大小应当加以限制
+severity: error  # error=阻断, warning=警告
+source: J000110
+tool: auto  # auto-manual-auto: detected by tool / manual check / AST-grep
+category: wc-resource
+description: |
+  JDBC结果集大小应当加以限制
+
+  对应浩鲸规范 J000110。
+
+check:
+  type: ast-grep  # ast-grep / pmd-custom / spotbugs / checkstyle / manual
+  pattern: TODO
+
+notes: "ResultSet fetch size"

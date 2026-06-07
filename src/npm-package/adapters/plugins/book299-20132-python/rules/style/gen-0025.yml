@@ -1,0 +1,14 @@
+---
+id: GEN-0025
+name: 避免使用装饰性内容，保持注释的简洁。
+severity: error
+tool: auto
+category: wc-style
+description: |
+  避免使用装饰性内容，保持注释的简洁。
+
+  Auto-extracted from book299-20132-Python语言编码规范.txt.
+
+check:
+  type: ast-grep
+  pattern: TODO

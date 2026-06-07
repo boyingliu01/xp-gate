@@ -1,0 +1,14 @@
+---
+id: GEN-0069
+name: 优先使用f-string,%,或者str.format格式化字符串而非做字符串拼接，代码可读性更好。
+severity: warning
+tool: auto
+category: wc-style
+description: |
+  优先使用f-string,%,或者str.format格式化字符串而非做字符串拼接，代码可读性更好。
+
+  Auto-extracted from book299-20132-Python语言编码规范.txt.
+
+check:
+  type: ast-grep
+  pattern: TODO

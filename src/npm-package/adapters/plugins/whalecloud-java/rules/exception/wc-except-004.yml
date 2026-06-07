@@ -1,0 +1,17 @@
+---
+id: WC-EXCEPT-004
+name: 捕获异常需处理不可抛弃
+severity: error  # error=阻断, warning=警告
+source: J000042
+tool: auto  # auto-manual-auto: detected by tool / manual check / AST-grep
+category: wc-exception
+description: |
+  捕获异常需处理不可抛弃
+
+  对应浩鲸规范 J000042。
+
+check:
+  type: ast-grep  # ast-grep / pmd-custom / spotbugs / checkstyle / manual
+  pattern: TODO
+
+notes: "Empty catch block prohibition"

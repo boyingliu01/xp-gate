@@ -111,12 +111,39 @@ function syncPlugins() {
   return copied;
 }
 
+function syncAdapters() {
+  const srcRoot = path.join(REPO_ROOT, 'githooks', 'adapters');
+  const destRoot = path.join(PKG_ROOT, 'adapters');
+  if (!fs.existsSync(srcRoot)) {
+    console.error(`[sync] SKIP adapters (missing): ${srcRoot}`);
+    return 0;
+  }
+  rmrf(destRoot);
+  fs.mkdirSync(destRoot, { recursive: true });
+  const entries = fs.readdirSync(srcRoot, { withFileTypes: true });
+  let copied = 0;
+  for (const entry of entries) {
+    const srcPath = path.join(srcRoot, entry.name);
+    const destPath = path.join(destRoot, entry.name);
+    if (entry.isDirectory()) {
+      copyDir(srcPath, destPath);
+      copied += 1;
+    } else if (entry.isFile() && entry.name.endsWith('.sh')) {
+      fs.copyFileSync(srcPath, destPath);
+      copied += 1;
+    }
+  }
+  console.error(`[sync] adapters/ (${copied} entries)`);
+  return copied;
+}
+
 function main() {
   console.error(`[sync] repo root: ${REPO_ROOT}`);
   console.error(`[sync] package root: ${PKG_ROOT}`);
   const skills = syncSkills();
   const plugins = syncPlugins();
-  console.error(`[sync] done: ${skills} skill(s), ${plugins} plugin(s)`);
+  const adapters = syncAdapters();
+  console.error(`[sync] done: ${skills} skill(s), ${plugins} plugin(s), ${adapters} adapter entries`);
   if (skills !== CORE_SKILLS.length) {
     console.error(`[sync] ERROR: expected ${CORE_SKILLS.length} skills, copied ${skills}`);
     process.exit(1);

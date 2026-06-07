@@ -1,0 +1,17 @@
+---
+id: WC-PERF-005
+name: 避免使用已过时的技术或组件
+severity: warning  # error=阻断, warning=警告
+source: J001061
+tool: auto  # auto-manual-auto: detected by tool / manual check / AST-grep
+category: wc-performance
+description: |
+  避免使用已过时的技术或组件
+
+  对应浩鲸规范 J001061。
+
+check:
+  type: ast-grep  # ast-grep / pmd-custom / spotbugs / checkstyle / manual
+  pattern: TODO
+
+notes: "Deprecated technology usage"

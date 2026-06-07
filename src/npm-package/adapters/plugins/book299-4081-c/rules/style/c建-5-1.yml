@@ -1,0 +1,14 @@
+---
+id: C建-5-1
+name: 尽量避免使用跨动态库的全局变量访问
+severity: info
+tool: auto
+category: wc-style
+description: |
+  尽量避免使用跨动态库的全局变量访问
+
+  Auto-extracted from book299-4081-C++编程规范.txt.
+
+check:
+  type: ast-grep
+  pattern: TODO

@@ -1,0 +1,17 @@
+---
+id: WC-COLLECT-009
+name: Map类集合K/V能存储null值的情况
+severity: error  # error=阻断, warning=警告
+source: J000011
+tool: auto  # auto-manual-auto: detected by tool / manual check / AST-grep
+category: wc-collection
+description: |
+  Map类集合K/V能存储null值的情况
+
+  对应浩鲸规范 J000011。
+
+check:
+  type: ast-grep  # ast-grep / pmd-custom / spotbugs / checkstyle / manual
+  pattern: TODO
+
+notes: "HashMap vs ConcurrentHashMap null handling"
