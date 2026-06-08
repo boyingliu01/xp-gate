@@ -105,7 +105,7 @@ jobs:
 
       - name: Bundle skills (prepack)
         working-directory: plugins/opencode
-        run: node scripts/prepack.js
+        run: node scripts/prepack.cjs
 
       - name: Verify tarball size
         working-directory: plugins/opencode
