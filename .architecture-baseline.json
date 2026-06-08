@@ -1,0 +1,746 @@
+{
+  "schemaVersion": 1,
+  "archlintVersion": "0.16.0",
+  "generatedAt": "2026-06-08T15:16:24.816949902+00:00",
+  "commit": "acb8119",
+  "smells": [
+    {
+      "id": "clone:62e60abd033748b75351bde7fe72d972b2cd22698e13e9427ee5af507adab3b6",
+      "smellType": "CodeClone",
+      "severity": "High",
+      "files": [
+        "src/npm-package/plugins/opencode/scripts/prepack.cjs",
+        "plugins/opencode/scripts/prepack.cjs"
+      ],
+      "metrics": {
+        "cloneInstances": 2,
+        "cloneHash": "62e60abd033748b75351bde7fe72d972b2cd22698e13e9427ee5af507adab3b6",
+        "tokenCount": 272
+      },
+      "details": {
+        "type": "codeClone",
+        "clone_hash": "62e60abd033748b75351bde7fe72d972b2cd22698e13e9427ee5af507adab3b6",
+        "token_count": 272
+      },
+      "locations": [
+        {
+          "file": "plugins/opencode/scripts/prepack.cjs",
+          "line": 2,
+          "column": 1,
+          "range": {
+            "start_line": 2,
+            "start_column": 1,
+            "end_line": 85,
+            "end_column": 5
+          },
+          "description": "Duplicated code (272 tokens, lines 2-85). Also found in: src/npm-package/plugins/opencode/scripts/prepack.cjs:2-85"
+        },
+        {
+          "file": "src/npm-package/plugins/opencode/scripts/prepack.cjs",
+          "line": 2,
+          "column": 1,
+          "range": {
+            "start_line": 2,
+            "start_column": 1,
+            "end_line": 85,
+            "end_column": 5
+          },
+          "description": "Duplicated code (272 tokens, lines 2-85). Also found in: plugins/opencode/scripts/prepack.cjs:2-85"
+        }
+      ]
+    },
+    {
+      "id": "clone:af002b89d7c4a9d182137416294b4903f8432633d299acc643694c3fa0eaf600",
+      "smellType": "CodeClone",
+      "severity": "High",
+      "files": [
+        "plugins/opencode/scripts/prepack.cjs",
+        "src/npm-package/plugins/opencode/scripts/prepack.cjs",
+        "src/npm-package/scripts/sync-package-content.js"
+      ],
+      "metrics": {
+        "cloneHash": "af002b89d7c4a9d182137416294b4903f8432633d299acc643694c3fa0eaf600",
+        "cloneInstances": 3,
+        "tokenCount": 137
+      },
+      "details": {
+        "type": "codeClone",
+        "clone_hash": "af002b89d7c4a9d182137416294b4903f8432633d299acc643694c3fa0eaf600",
+        "token_count": 137
+      },
+      "locations": [
+        {
+          "file": "plugins/opencode/scripts/prepack.cjs",
+          "line": 28,
+          "column": 1,
+          "range": {
+            "start_line": 28,
+            "start_column": 1,
+            "end_line": 83,
+            "end_column": 2
+          },
+          "description": "Duplicated code (137 tokens, lines 28-83). Also found in: src/npm-package/plugins/opencode/scripts/prepack.cjs:28-83, src/npm-package/scripts/sync-package-content.js:35-79"
+        },
+        {
+          "file": "src/npm-package/plugins/opencode/scripts/prepack.cjs",
+          "line": 28,
+          "column": 1,
+          "range": {
+            "start_line": 28,
+            "start_column": 1,
+            "end_line": 83,
+            "end_column": 2
+          },
+          "description": "Duplicated code (137 tokens, lines 28-83). Also found in: plugins/opencode/scripts/prepack.cjs:28-83, src/npm-package/scripts/sync-package-content.js:35-79"
+        },
+        {
+          "file": "src/npm-package/scripts/sync-package-content.js",
+          "line": 35,
+          "column": 1,
+          "range": {
+            "start_line": 35,
+            "start_column": 1,
+            "end_line": 79,
+            "end_column": 2
+          },
+          "description": "Duplicated code (137 tokens, lines 35-79). Also found in: plugins/opencode/scripts/prepack.cjs:28-83, src/npm-package/plugins/opencode/scripts/prepack.cjs:28-83"
+        }
+      ]
+    },
+    {
+      "id": "nest:src/npm-package/lib/baseline.js:createBaseline:72",
+      "smellType": "DeepNesting",
+      "severity": "Medium",
+      "files": [
+        "src/npm-package/lib/baseline.js"
+      ],
+      "metrics": {
+        "depth": 5
+      },
+      "details": {
+        "type": "deepNesting",
+        "name": "createBaseline",
+        "depth": 5,
+        "line": 72
+      },
+      "locations": [
+        {
+          "file": "src/npm-package/lib/baseline.js",
+          "line": 72,
+          "column": 16,
+          "range": {
+            "start_line": 72,
+            "start_column": 16,
+            "end_line": 72,
+            "end_column": 30
+          },
+          "description": "Function 'createBaseline' is too deeply nested"
+        }
+      ]
+    },
+    {
+      "id": "ccycl:src/npm-package/lib/uninstall.js:uninstall:329",
+      "smellType": "HighCyclomaticComplexity",
+      "severity": "Medium",
+      "files": [
+        "src/npm-package/lib/uninstall.js"
+      ],
+      "metrics": {
+        "cyclomaticComplexity": 16
+      },
+      "details": {
+        "type": "highCyclomaticComplexity",
+        "name": "uninstall",
+        "line": 329,
+        "complexity": 16
+      },
+      "locations": [
+        {
+          "file": "src/npm-package/lib/uninstall.js",
+          "line": 329,
+          "column": 16,
+          "range": {
+            "start_line": 329,
+            "start_column": 16,
+            "end_line": 329,
+            "end_column": 25
+          },
+          "description": "Function 'uninstall' (cyclomatic complexity: 16)"
+        }
+      ]
+    },
+    {
+      "id": "ccycl:src/npm-package/lib/install-skill.js:installSkill:20",
+      "smellType": "HighCyclomaticComplexity",
+      "severity": "Medium",
+      "files": [
+        "src/npm-package/lib/install-skill.js"
+      ],
+      "metrics": {
+        "cyclomaticComplexity": 16
+      },
+      "details": {
+        "type": "highCyclomaticComplexity",
+        "name": "installSkill",
+        "line": 20,
+        "complexity": 16
+      },
+      "locations": [
+        {
+          "file": "src/npm-package/lib/install-skill.js",
+          "line": 20,
+          "column": 16,
+          "range": {
+            "start_line": 20,
+            "start_column": 16,
+            "end_line": 20,
+            "end_column": 28
+          },
+          "description": "Function 'installSkill' (cyclomatic complexity: 16)"
+        }
+      ]
+    },
+    {
+      "id": "ccycl:src/npm-package/lib/doctor.js:fixIssues:240",
+      "smellType": "HighCyclomaticComplexity",
+      "severity": "Medium",
+      "files": [
+        "src/npm-package/lib/doctor.js"
+      ],
+      "metrics": {
+        "cyclomaticComplexity": 18
+      },
+      "details": {
+        "type": "highCyclomaticComplexity",
+        "name": "fixIssues",
+        "line": 240,
+        "complexity": 18
+      },
+      "locations": [
+        {
+          "file": "src/npm-package/lib/doctor.js",
+          "line": 240,
+          "column": 10,
+          "range": {
+            "start_line": 240,
+            "start_column": 10,
+            "end_line": 240,
+            "end_column": 19
+          },
+          "description": "Function 'fixIssues' (cyclomatic complexity: 18)"
+        }
+      ]
+    },
+    {
+      "id": "ccycl:src/principles/adapters/cpp.ts:CppAdapter.extractCodeBlock:52",
+      "smellType": "HighCyclomaticComplexity",
+      "severity": "Medium",
+      "files": [
+        "src/principles/adapters/cpp.ts"
+      ],
+      "metrics": {
+        "cyclomaticComplexity": 27
+      },
+      "details": {
+        "type": "highCyclomaticComplexity",
+        "name": "CppAdapter.extractCodeBlock",
+        "line": 52,
+        "complexity": 27
+      },
+      "locations": [
+        {
+          "file": "src/principles/adapters/cpp.ts",
+          "line": 52,
+          "column": 12,
+          "range": {
+            "start_line": 52,
+            "start_column": 12,
+            "end_line": 52,
+            "end_column": 28
+          },
+          "description": "Function 'CppAdapter.extractCodeBlock' (cyclomatic complexity: 27)"
+        }
+      ]
+    },
+    {
+      "id": "ccycl:src/principles/baseline.ts:aggregateTool:51",
+      "smellType": "HighCyclomaticComplexity",
+      "severity": "Medium",
+      "files": [
+        "src/principles/baseline.ts"
+      ],
+      "metrics": {
+        "cyclomaticComplexity": 16
+      },
+      "details": {
+        "type": "highCyclomaticComplexity",
+        "name": "aggregateTool",
+        "line": 51,
+        "complexity": 16
+      },
+      "locations": [
+        {
+          "file": "src/principles/baseline.ts",
+          "line": 51,
+          "column": 10,
+          "range": {
+            "start_line": 51,
+            "start_column": 10,
+            "end_line": 51,
+            "end_column": 23
+          },
+          "description": "Function 'aggregateTool' (cyclomatic complexity: 16)"
+        }
+      ]
+    },
+    {
+      "id": "ccycl:src/npm-package/lib/baseline.js:createBaseline:72",
+      "smellType": "HighCyclomaticComplexity",
+      "severity": "Medium",
+      "files": [
+        "src/npm-package/lib/baseline.js"
+      ],
+      "metrics": {
+        "cyclomaticComplexity": 46
+      },
+      "details": {
+        "type": "highCyclomaticComplexity",
+        "name": "createBaseline",
+        "line": 72,
+        "complexity": 46
+      },
+      "locations": [
+        {
+          "file": "src/npm-package/lib/baseline.js",
+          "line": 72,
+          "column": 16,
+          "range": {
+            "start_line": 72,
+            "start_column": 16,
+            "end_line": 72,
+            "end_column": 30
+          },
+          "description": "Function 'createBaseline' (cyclomatic complexity: 46)"
+        }
+      ]
+    },
+    {
+      "id": "ccycl:src/npm-package/lib/baseline.js:diffBaseline:277",
+      "smellType": "HighCyclomaticComplexity",
+      "severity": "Medium",
+      "files": [
+        "src/npm-package/lib/baseline.js"
+      ],
+      "metrics": {
+        "cyclomaticComplexity": 21
+      },
+      "details": {
+        "type": "highCyclomaticComplexity",
+        "name": "diffBaseline",
+        "line": 277,
+        "complexity": 21
+      },
+      "locations": [
+        {
+          "file": "src/npm-package/lib/baseline.js",
+          "line": 277,
+          "column": 16,
+          "range": {
+            "start_line": 277,
+            "start_column": 16,
+            "end_line": 277,
+            "end_column": 28
+          },
+          "description": "Function 'diffBaseline' (cyclomatic complexity: 21)"
+        }
+      ]
+    },
+    {
+      "id": "deadcode:8cf3a492",
+      "smellType": "DeadCode",
+      "severity": "Medium",
+      "files": [
+        "dashboard/dashboard.js"
+      ],
+      "metrics": {},
+      "details": {
+        "type": "deadCode"
+      }
+    },
+    {
+      "id": "deadcode:2caab309",
+      "smellType": "DeadCode",
+      "severity": "Medium",
+      "files": [
+        "src/npm-package/bin/xp-gate.js"
+      ],
+      "metrics": {},
+      "details": {
+        "type": "deadCode"
+      }
+    },
+    {
+      "id": "deadcode:ed44cb8a",
+      "smellType": "DeadCode",
+      "severity": "Medium",
+      "files": [
+        "plugins/opencode/scripts/prepack.cjs"
+      ],
+      "metrics": {},
+      "details": {
+        "type": "deadCode"
+      }
+    },
+    {
+      "id": "dead:src/mock-policy/mock-decision-engine.ts:MockDecisionEngine.decide:111",
+      "smellType": "DeadSymbol",
+      "severity": "Medium",
+      "files": [
+        "src/mock-policy/mock-decision-engine.ts"
+      ],
+      "metrics": {},
+      "details": {
+        "type": "deadSymbol",
+        "name": "MockDecisionEngine.decide",
+        "kind": "Class Method"
+      },
+      "locations": [
+        {
+          "file": "src/mock-policy/mock-decision-engine.ts",
+          "line": 111,
+          "column": 3,
+          "range": {
+            "start_line": 111,
+            "start_column": 3,
+            "end_line": 111,
+            "end_column": 9
+          },
+          "description": "Class Method 'MockDecisionEngine.decide' definition"
+        }
+      ]
+    },
+    {
+      "id": "ccog:src/npm-package/lib/uninstall.js:uninstall:329",
+      "smellType": "HighCognitiveComplexity",
+      "severity": "Medium",
+      "files": [
+        "src/npm-package/lib/uninstall.js"
+      ],
+      "metrics": {
+        "cognitiveComplexity": 16
+      },
+      "details": {
+        "type": "highCognitiveComplexity",
+        "name": "uninstall",
+        "line": 329,
+        "complexity": 16
+      },
+      "locations": [
+        {
+          "file": "src/npm-package/lib/uninstall.js",
+          "line": 329,
+          "column": 16,
+          "range": {
+            "start_line": 329,
+            "start_column": 16,
+            "end_line": 329,
+            "end_column": 25
+          },
+          "description": "Function 'uninstall' (cognitive complexity: 16)"
+        }
+      ]
+    },
+    {
+      "id": "ccog:src/principles/lint-baseline.ts:diffBaselines:232",
+      "smellType": "HighCognitiveComplexity",
+      "severity": "Medium",
+      "files": [
+        "src/principles/lint-baseline.ts"
+      ],
+      "metrics": {
+        "cognitiveComplexity": 16
+      },
+      "details": {
+        "type": "highCognitiveComplexity",
+        "name": "diffBaselines",
+        "line": 232,
+        "complexity": 16
+      },
+      "locations": [
+        {
+          "file": "src/principles/lint-baseline.ts",
+          "line": 232,
+          "column": 17,
+          "range": {
+            "start_line": 232,
+            "start_column": 17,
+            "end_line": 232,
+            "end_column": 30
+          },
+          "description": "Function 'diffBaselines' (cognitive complexity: 16)"
+        }
+      ]
+    },
+    {
+      "id": "ccog:src/npm-package/lib/install-skill.js:installSkill:20",
+      "smellType": "HighCognitiveComplexity",
+      "severity": "Medium",
+      "files": [
+        "src/npm-package/lib/install-skill.js"
+      ],
+      "metrics": {
+        "cognitiveComplexity": 21
+      },
+      "details": {
+        "type": "highCognitiveComplexity",
+        "name": "installSkill",
+        "line": 20,
+        "complexity": 21
+      },
+      "locations": [
+        {
+          "file": "src/npm-package/lib/install-skill.js",
+          "line": 20,
+          "column": 16,
+          "range": {
+            "start_line": 20,
+            "start_column": 16,
+            "end_line": 20,
+            "end_column": 28
+          },
+          "description": "Function 'installSkill' (cognitive complexity: 21)"
+        }
+      ]
+    },
+    {
+      "id": "ccog:src/npm-package/lib/doctor.js:fixIssues:240",
+      "smellType": "HighCognitiveComplexity",
+      "severity": "Medium",
+      "files": [
+        "src/npm-package/lib/doctor.js"
+      ],
+      "metrics": {
+        "cognitiveComplexity": 25
+      },
+      "details": {
+        "type": "highCognitiveComplexity",
+        "name": "fixIssues",
+        "line": 240,
+        "complexity": 25
+      },
+      "locations": [
+        {
+          "file": "src/npm-package/lib/doctor.js",
+          "line": 240,
+          "column": 10,
+          "range": {
+            "start_line": 240,
+            "start_column": 10,
+            "end_line": 240,
+            "end_column": 19
+          },
+          "description": "Function 'fixIssues' (cognitive complexity: 25)"
+        }
+      ]
+    },
+    {
+      "id": "ccog:src/principles/adapters/cpp.ts:CppAdapter.extractCodeBlock:52",
+      "smellType": "HighCognitiveComplexity",
+      "severity": "Medium",
+      "files": [
+        "src/principles/adapters/cpp.ts"
+      ],
+      "metrics": {
+        "cognitiveComplexity": 51
+      },
+      "details": {
+        "type": "highCognitiveComplexity",
+        "name": "CppAdapter.extractCodeBlock",
+        "line": 52,
+        "complexity": 51
+      },
+      "locations": [
+        {
+          "file": "src/principles/adapters/cpp.ts",
+          "line": 52,
+          "column": 12,
+          "range": {
+            "start_line": 52,
+            "start_column": 12,
+            "end_line": 52,
+            "end_column": 28
+          },
+          "description": "Function 'CppAdapter.extractCodeBlock' (cognitive complexity: 51)"
+        }
+      ]
+    },
+    {
+      "id": "ccog:src/principles/baseline.ts:aggregateTool:51",
+      "smellType": "HighCognitiveComplexity",
+      "severity": "Medium",
+      "files": [
+        "src/principles/baseline.ts"
+      ],
+      "metrics": {
+        "cognitiveComplexity": 16
+      },
+      "details": {
+        "type": "highCognitiveComplexity",
+        "name": "aggregateTool",
+        "line": 51,
+        "complexity": 16
+      },
+      "locations": [
+        {
+          "file": "src/principles/baseline.ts",
+          "line": 51,
+          "column": 10,
+          "range": {
+            "start_line": 51,
+            "start_column": 10,
+            "end_line": 51,
+            "end_column": 23
+          },
+          "description": "Function 'aggregateTool' (cognitive complexity: 16)"
+        }
+      ]
+    },
+    {
+      "id": "ccog:src/principles/baseline.ts:BaselineStorage.createFromFiles:149",
+      "smellType": "HighCognitiveComplexity",
+      "severity": "Medium",
+      "files": [
+        "src/principles/baseline.ts"
+      ],
+      "metrics": {
+        "cognitiveComplexity": 21
+      },
+      "details": {
+        "type": "highCognitiveComplexity",
+        "name": "BaselineStorage.createFromFiles",
+        "line": 149,
+        "complexity": 21
+      },
+      "locations": [
+        {
+          "file": "src/principles/baseline.ts",
+          "line": 149,
+          "column": 9,
+          "range": {
+            "start_line": 149,
+            "start_column": 9,
+            "end_line": 149,
+            "end_column": 24
+          },
+          "description": "Function 'BaselineStorage.createFromFiles' (cognitive complexity: 21)"
+        }
+      ]
+    },
+    {
+      "id": "ccog:src/npm-package/lib/baseline.js:createBaseline:72",
+      "smellType": "HighCognitiveComplexity",
+      "severity": "Medium",
+      "files": [
+        "src/npm-package/lib/baseline.js"
+      ],
+      "metrics": {
+        "cognitiveComplexity": 103
+      },
+      "details": {
+        "type": "highCognitiveComplexity",
+        "name": "createBaseline",
+        "line": 72,
+        "complexity": 103
+      },
+      "locations": [
+        {
+          "file": "src/npm-package/lib/baseline.js",
+          "line": 72,
+          "column": 16,
+          "range": {
+            "start_line": 72,
+            "start_column": 16,
+            "end_line": 72,
+            "end_column": 30
+          },
+          "description": "Function 'createBaseline' (cognitive complexity: 103)"
+        }
+      ]
+    },
+    {
+      "id": "ccog:src/npm-package/lib/baseline.js:showBaseline:226",
+      "smellType": "HighCognitiveComplexity",
+      "severity": "Medium",
+      "files": [
+        "src/npm-package/lib/baseline.js"
+      ],
+      "metrics": {
+        "cognitiveComplexity": 16
+      },
+      "details": {
+        "type": "highCognitiveComplexity",
+        "name": "showBaseline",
+        "line": 226,
+        "complexity": 16
+      },
+      "locations": [
+        {
+          "file": "src/npm-package/lib/baseline.js",
+          "line": 226,
+          "column": 10,
+          "range": {
+            "start_line": 226,
+            "start_column": 10,
+            "end_line": 226,
+            "end_column": 22
+          },
+          "description": "Function 'showBaseline' (cognitive complexity: 16)"
+        }
+      ]
+    },
+    {
+      "id": "ccog:src/npm-package/lib/baseline.js:diffBaseline:277",
+      "smellType": "HighCognitiveComplexity",
+      "severity": "Medium",
+      "files": [
+        "src/npm-package/lib/baseline.js"
+      ],
+      "metrics": {
+        "cognitiveComplexity": 22
+      },
+      "details": {
+        "type": "highCognitiveComplexity",
+        "name": "diffBaseline",
+        "line": 277,
+        "complexity": 22
+      },
+      "locations": [
+        {
+          "file": "src/npm-package/lib/baseline.js",
+          "line": 277,
+          "column": 16,
+          "range": {
+            "start_line": 277,
+            "start_column": 16,
+            "end_line": 277,
+            "end_column": 28
+          },
+          "description": "Function 'diffBaseline' (cognitive complexity: 22)"
+        }
+      ]
+    }
+  ],
+  "summary": {
+    "totalSmells": 24,
+    "filesAnalyzed": 142,
+    "cycles": 0,
+    "godModules": 0,
+    "deadCode": 3,
+    "deadSymbols": 1,
+    "layerViolations": 0,
+    "highCyclomaticComplexity": 7,
+    "highCognitiveComplexity": 10,
+    "hubModules": 0
+  },
+  "grade": "ArchitectureGrade { score: 7.598592, level: Fair, density: 3.8028169 }"
+}

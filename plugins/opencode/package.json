@@ -1,12 +1,26 @@
 {
   "name": "@xp-gate/opencode-plugin",
-  "version": "0.8.2",
-  "private": true,
+  "version": "0.8.3",
   "type": "module",
   "main": "index.ts",
   "description": "XP-Gate quality gates + AI workflow skills for OpenCode",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/boyingliu01/xp-gate",
+    "directory": "plugins/opencode"
+  },
+  "publishConfig": {
+    "registry": "https://registry.npmjs.org",
+    "access": "public"
+  },
+  "files": [
+    "index.ts",
+    "skills/",
+    "tsconfig.json",
+    "README.md"
+  ],
   "scripts": {
-    "build": "bun build index.ts --outdir dist --target bun",
+    "prepack": "node scripts/prepack.cjs",
     "check": "tsc --noEmit"
   },
   "dependencies": {
@@ -14,5 +28,15 @@
   },
   "devDependencies": {
     "typescript": "^5.4.0"
-  }
+  },
+  "keywords": [
+    "opencode",
+    "plugin",
+    "xp-gate",
+    "quality-gates",
+    "code-review",
+    "sprint-flow"
+  ],
+  "author": "boyingliu01",
+  "license": "MIT"
 }

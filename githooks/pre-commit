@@ -1478,16 +1478,32 @@ else
           exit 1
         fi
          echo "     Running archlint for TypeScript..."
-         ARCHLINT_OUTPUT=$($ARCHLINT_CMD scan . -f table --quiet 2>&1)
+          # Use diff mode with baseline for ratchet (block only new violations)
+          # Fall back to raw scan if no baseline exists (new project, zero-tolerance)
+          if [ -f ".architecture-baseline.json" ]; then
+            ARCHLINT_OUTPUT=$($ARCHLINT_CMD diff .architecture-baseline.json --fail-on high 2>&1)
+          else
+            ARCHLINT_OUTPUT=$($ARCHLINT_CMD scan . -f table --quiet 2>&1)
+          fi
          ARCHLINT_EXIT=$?
          echo "$ARCHLINT_OUTPUT" | tail -30
          if [ "$ARCHLINT_EXIT" -ne 0 ]; then
            echo ""
            echo "❌ BLOCKED - Architecture violations detected"
-           echo "Fix the architecture violations above before committing."
+           if [ -f ".architecture-baseline.json" ]; then
+             echo "New architecture violations found (baseline ratchet mode)."
+             echo "Fix the new violations above, or update the baseline with: npx @archlinter/cli snapshot -o .architecture-baseline.json"
+           else
+             echo "Fix the architecture violations above before committing."
+             echo "Or generate a baseline for gradual adoption: npx @archlinter/cli snapshot -o .architecture-baseline.json"
+           fi
            exit 1
          fi
-         echo "     ✅ TypeScript architecture validation completed."
+         if [ -f ".architecture-baseline.json" ]; then
+           echo "     ✅ TypeScript architecture validation completed (baseline ratchet mode)."
+         else
+           echo "     ✅ TypeScript architecture validation completed (zero-tolerance mode). no baseline found."
+         fi
          ;;
       "python")
         if [ -f ".import-linter.yml" ] || [ -f "import_linter_config.yml" ]; then

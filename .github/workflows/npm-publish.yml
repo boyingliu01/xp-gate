@@ -11,7 +11,9 @@ permissions:
   id-token: write
 
 jobs:
-  publish:
+  # ─── @boyingliu01/xp-gate (CLI) ───────────────────────────────────────
+
+  publish-cli:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -39,14 +41,14 @@ jobs:
           echo "tag=$TAG" >> $GITHUB_OUTPUT
           echo "Publishing @boyingliu01/xp-gate@$NPM_VERSION (from VERSION $FULL_VERSION), tag $TAG"
 
-      - name: Check existing version
+      - name: Check existing CLI version
         run: |
           NPM_VERSION="${{ steps.version.outputs.npm_version }}"
           if npm view @boyingliu01/xp-gate@$NPM_VERSION version 2>/dev/null; then
             echo "ERROR: Version $NPM_VERSION already exists on npm"
             exit 1
           fi
-          echo "Version $NPM_VERSION is available on npm"
+          echo "Version $NPM_VERSION is available on npm for @boyingliu01/xp-gate"
 
       - name: Sync package content
         working-directory: src/npm-package
@@ -69,7 +71,77 @@ jobs:
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
 
-      # --- Post-publish: keep GitHub Releases in sync with npm ---
+  # ─── @xp-gate/opencode-plugin ────────────────────────────────────────
+
+  publish-opencode-plugin:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          registry-url: 'https://registry.npmjs.org'
+
+      - name: Compute versions
+        id: version
+        run: |
+          FULL_VERSION=$(cat VERSION | tr -d '[:space:]')
+          NPM_VERSION=$(echo "$FULL_VERSION" | awk -F. '{print $1"."$2"."$3}')
+          TAG="v${NPM_VERSION}"
+          echo "npm_version=$NPM_VERSION" >> $GITHUB_OUTPUT
+          echo "tag=$TAG" >> $GITHUB_OUTPUT
+
+      - name: Check existing plugin version
+        run: |
+          NPM_VERSION="${{ steps.version.outputs.npm_version }}"
+          if npm view @xp-gate/opencode-plugin@$NPM_VERSION version 2>/dev/null; then
+            echo "ERROR: Version $NPM_VERSION already exists on npm"
+            exit 1
+          fi
+          echo "Version $NPM_VERSION is available on npm for @xp-gate/opencode-plugin"
+
+      - name: Bundle skills (prepack)
+        working-directory: plugins/opencode
+        run: node scripts/prepack.js
+
+      - name: Verify tarball size
+        working-directory: plugins/opencode
+        run: |
+          SIZE=$(npm pack --dry-run --json 2>/dev/null | jq '.[0].size')
+          echo "Tarball size: $SIZE bytes"
+          if [ "$SIZE" -ge 2097152 ]; then
+            echo "FAIL: tarball >= 2MB (limit is 2097152 bytes)"
+            exit 1
+          fi
+          echo "PASS: tarball under 2MB"
+
+      - name: npm publish with provenance
+        working-directory: plugins/opencode
+        run: npm publish --provenance --access public
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+
+  # ─── Post-publish: GitHub Releases (shared) ──────────────────────────
+
+  create-release:
+    needs: [publish-cli, publish-opencode-plugin]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Compute versions
+        id: version
+        run: |
+          FULL_VERSION=$(cat VERSION | tr -d '[:space:]')
+          NPM_VERSION=$(echo "$FULL_VERSION" | awk -F. '{print $1"."$2"."$3}')
+          TAG="v${NPM_VERSION}"
+          echo "npm_version=$NPM_VERSION" >> $GITHUB_OUTPUT
+          echo "tag=$TAG" >> $GITHUB_OUTPUT
 
       - name: Extract release notes from CHANGELOG
         id: notes
@@ -77,7 +149,6 @@ jobs:
           NPM_VERSION="${{ steps.version.outputs.npm_version }}"
           NOTES_FILE="$(mktemp)"
           if [ -f CHANGELOG.md ]; then
-            # Pull the section between "## [<version>]" and the next "## [" heading
             awk -v ver="$NPM_VERSION" '
               $0 ~ "^## \\[" ver "\\]" { flag=1; next }
               flag && /^## \[/ { flag=0 }
@@ -85,7 +156,7 @@ jobs:
             ' CHANGELOG.md > "$NOTES_FILE"
           fi
           if [ ! -s "$NOTES_FILE" ]; then
-            echo "Release ${{ steps.version.outputs.tag }} of @boyingliu01/xp-gate" > "$NOTES_FILE"
+            echo "Release ${{ steps.version.outputs.tag }}" > "$NOTES_FILE"
             echo "" >> "$NOTES_FILE"
             echo "Auto-generated from VERSION bump. See CHANGELOG.md for details." >> "$NOTES_FILE"
           fi
@@ -102,26 +173,24 @@ jobs:
           NPM_VERSION="${{ steps.version.outputs.npm_version }}"
           NOTES_FILE="${{ steps.notes.outputs.notes_file }}"
 
-          # Skip cleanly if tag already exists (idempotent — manual tag, re-run, etc.)
           if git ls-remote --tags --exit-code origin "refs/tags/$TAG" >/dev/null 2>&1; then
             echo "Tag $TAG already exists on origin — skipping tag creation."
           else
             git config user.name  "github-actions[bot]"
             git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-            git tag -a "$TAG" -m "Release $TAG (@boyingliu01/xp-gate@$NPM_VERSION)"
+            git tag -a "$TAG" -m "Release $TAG (@boyingliu01/xp-gate@$NPM_VERSION + @xp-gate/opencode-plugin@$NPM_VERSION)"
             git push origin "$TAG"
           fi
 
-          # Create the release if missing; otherwise refresh notes
           if gh release view "$TAG" >/dev/null 2>&1; then
             echo "GitHub Release $TAG already exists — updating notes."
             gh release edit "$TAG" \
-              --title "$TAG — @boyingliu01/xp-gate@$NPM_VERSION" \
+              --title "$TAG — xp-gate@$NPM_VERSION + opencode-plugin@$NPM_VERSION" \
               --notes-file "$NOTES_FILE" \
               --latest
           else
             gh release create "$TAG" \
-              --title "$TAG — @boyingliu01/xp-gate@$NPM_VERSION" \
+              --title "$TAG — xp-gate@$NPM_VERSION + opencode-plugin@$NPM_VERSION" \
               --notes-file "$NOTES_FILE" \
               --latest
           fi
