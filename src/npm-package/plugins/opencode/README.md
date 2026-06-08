@@ -14,7 +14,7 @@ In your `opencode.json`:
 
 ```json
 {
-  "plugin": ["@xp-gate/opencode-plugin"]
+  "plugin": ["@boyingliu01/opencode-plugin"]
 }
 ```
 

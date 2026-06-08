@@ -2,7 +2,7 @@
 'use strict';
 
 /**
- * prepack.js — Bundle skills into @xp-gate/opencode-plugin before npm publish.
+ * prepack.js — Bundle skills into @boyingliu01/opencode-plugin before npm publish.
  *
  * Skills live in repo-root `skills/` and are gitignored in `plugins/opencode/skills/`.
  * This script copies them into the plugin package so the published tarball is self-contained.
@@ -79,7 +79,7 @@ function main() {
     process.exit(1);
   }
 
-  console.error(`[prepack] done: ${copied} skills bundled for @xp-gate/opencode-plugin`);
+  console.error(`[prepack] done: ${copied} skills bundled for @boyingliu01/opencode-plugin`);
 }
 
 main();

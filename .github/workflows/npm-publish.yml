@@ -71,7 +71,7 @@ jobs:
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
 
-  # ─── @xp-gate/opencode-plugin ────────────────────────────────────────
+  # ─── @boyingliu01/opencode-plugin ────────────────────────────────────────
 
   publish-opencode-plugin:
     runs-on: ubuntu-latest
@@ -97,11 +97,11 @@ jobs:
       - name: Check existing plugin version
         run: |
           NPM_VERSION="${{ steps.version.outputs.npm_version }}"
-          if npm view @xp-gate/opencode-plugin@$NPM_VERSION version 2>/dev/null; then
+          if npm view @boyingliu01/opencode-plugin@$NPM_VERSION version 2>/dev/null; then
             echo "ERROR: Version $NPM_VERSION already exists on npm"
             exit 1
           fi
-          echo "Version $NPM_VERSION is available on npm for @xp-gate/opencode-plugin"
+          echo "Version $NPM_VERSION is available on npm for @boyingliu01/opencode-plugin"
 
       - name: Bundle skills (prepack)
         working-directory: plugins/opencode
@@ -178,7 +178,7 @@ jobs:
           else
             git config user.name  "github-actions[bot]"
             git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-            git tag -a "$TAG" -m "Release $TAG (@boyingliu01/xp-gate@$NPM_VERSION + @xp-gate/opencode-plugin@$NPM_VERSION)"
+            git tag -a "$TAG" -m "Release $TAG (@boyingliu01/xp-gate@$NPM_VERSION + @boyingliu01/opencode-plugin@$NPM_VERSION)"
             git push origin "$TAG"
           fi
 

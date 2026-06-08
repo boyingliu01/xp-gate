@@ -1,5 +1,5 @@
 {
-  "name": "@xp-gate/opencode-plugin",
+  "name": "@boyingliu01/opencode-plugin",
   "version": "0.8.4",
   "type": "module",
   "main": "index.ts",
