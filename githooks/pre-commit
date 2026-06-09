@@ -816,7 +816,7 @@ elif [ "$PROJECT_LANG" = "typescript" ]; then
   fi
   
   echo "Running jscpd for duplicate code detection..."
-  jscpd --config jscpd.conf.json "$CHANGED_FILES" 2>&1 | head -30
+  jscpd --config jscpd.conf.json $(echo "$CHANGED_FILES" | tr '\n' ' ') 2>&1 | head -30
   JSCPD_EXIT=$?
   if [ "$JSCPD_EXIT" -ne 0 ]; then
     echo "ℹ️  jscpd found duplicated code (warning, not blocking by default)"
@@ -1137,7 +1137,7 @@ else
   # Gate 5b: Mock Density ADVISORY Scan (pure bash — no npx tsx overhead)
   # 30% = ADVISORY, 50% = suggests @mock-justified. Does NOT block commit.
   # ========================================================================
-  CHANGED_TEST_FILES=$(git diff --cached --name-only | grep -E '\.(test|spec)\.(ts|tsx|js|jsx|py|go)$' || true)
+  CHANGED_TEST_FILES=$(git diff --cached --name-only --diff-filter=ACM | grep -E '\.(test|spec)\.(ts|tsx|js|jsx|py|go)$' || true)
 
   if [ -n "$CHANGED_TEST_FILES" ]; then
     echo "Checking mock density in test files..."
