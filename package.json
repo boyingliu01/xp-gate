@@ -1,6 +1,6 @@
 {
   "name": "xp-gate",
-  "version": "0.8.5.0",
+  "version": "0.8.6.0",
   "description": "XP-Gate - Quality Gate & AI Review for Every Commit",
   "type": "module",
   "engines": {
@@ -33,6 +33,7 @@
     "zod": "^4.4.3"
   },
   "devDependencies": {
+    "@archlinter/cli": "^0.16.0",
     "@stryker-mutator/core": "^8.7.1",
     "@stryker-mutator/typescript-checker": "^8.7.1",
     "@stryker-mutator/vitest-runner": "^8.7.1",
@@ -40,7 +41,6 @@
     "@typescript-eslint/eslint-plugin": "^8.59.2",
     "@typescript-eslint/parser": "^8.59.2",
     "@vitest/coverage-v8": "^1.6.1",
-    "@archlinter/cli": "^0.16.0",
     "jscpd": "^4.0.9",
     "typescript": "^5.9.3",
     "vitest": "^1.6.1"

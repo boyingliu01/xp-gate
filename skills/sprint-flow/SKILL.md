@@ -1,5 +1,6 @@
 ---
 name: sprint-flow
+version: 1.0.0
 description: >
   One-Shot Sprint 自动流水线。单一入口，自动串联 Think → Plan → Build → 
   Review → Ship 流程。整合 brainstorming + autoplan + delphi-review + TDD +
@@ -30,6 +31,24 @@ description: >
   --status: 查看当前 Sprint 进度看板（不执行任何阶段，仅读取 sprint-state.json 并渲染进度）
   Use when asked to "开发新功能", "实现 X", "start sprint", "一键开发", or "/sprint-flow" for end-to-end feature development.
 maturity: beta
+triggers:
+  - "/sprint-flow"
+  - "start sprint"
+  - "开发新功能"
+  - "实现 X"
+  - "一键开发"
+workflow_steps:
+  - "Phase -1: ISOLATE"
+  - "Phase -0.5: AUTO-ESTIMATE"
+  - "Phase 0: THINK"
+  - "Phase 1: PLAN"
+  - "Phase 2: BUILD"
+  - "Phase 3: REVIEW"
+  - "Phase 4: USER ACCEPTANCE"
+  - "Phase 5: FEEDBACK"
+  - "Phase 6: SHIP"
+  - "Phase 7: LAND"
+  - "Phase 8: CLEANUP"
 ---
 
 ## Triggers
