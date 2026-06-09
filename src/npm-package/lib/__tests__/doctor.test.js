@@ -446,4 +446,147 @@ describe('doctor', () => {
       expect.stringContaining('Not found')
     );
   });
+
+  // === Issue #186: Version mismatch detection ===
+
+  it('detects version mismatch when config version differs from package version', async () => {
+    setupLocalInstall();
+    // Write config with old version
+    const cfg = JSON.parse(fs.readFileSync(configFile(), 'utf8'));
+    cfg.version = '0.3.1.1';
+    fs.writeFileSync(configFile(), JSON.stringify(cfg, null, 2));
+    mockExecSuccess();
+    const { doctor } = require('../doctor');
+
+    const result = await doctor([]);
+
+    expect(result).toBe(1);
+    expect(logSpy).toHaveBeenCalledWith(
+      expect.stringContaining('Version mismatch')
+    );
+    expect(logSpy).toHaveBeenCalledWith(
+      expect.stringContaining('0.3.1.1')
+    );
+  });
+
+  it('passes version check when config version matches package version', async () => {
+    setupLocalInstall();
+    // Write config with matching version
+    const pkg = JSON.parse(fs.readFileSync(
+      path.join(path.dirname(path.dirname(require.resolve('../doctor'))), 'package.json'), 'utf8'
+    ));
+    const cfg = JSON.parse(fs.readFileSync(configFile(), 'utf8'));
+    cfg.version = pkg.version;
+    fs.writeFileSync(configFile(), JSON.stringify(cfg, null, 2));
+    mockExecSuccess();
+    const { doctor } = require('../doctor');
+
+    const result = await doctor([]);
+
+    expect(result).toBe(0);
+    expect(logSpy).toHaveBeenCalledWith(
+      expect.stringContaining('All checks passed')
+    );
+  });
+
+  it('passes version check when config has no version field (legacy)', async () => {
+    setupLocalInstall();
+    // Config without version field — legacy install, should not fail
+    mockExecSuccess();
+    const { doctor } = require('../doctor');
+
+    const result = await doctor([]);
+
+    expect(result).toBe(0);
+    expect(logSpy).toHaveBeenCalledWith(
+      expect.stringContaining('All checks passed')
+    );
+  });
+
+  // === Issue #188: templateDir validation ===
+
+  it('detects templateDir pointing to wrong platform directory', async () => {
+    setupLocalInstall();
+    // Write config with stale opencode templateDir when qoder is active
+    const cfg = JSON.parse(fs.readFileSync(configFile(), 'utf8'));
+    cfg.templateDir = path.join(tmpHome, '.config', 'opencode', 'git-hooks-template');
+    fs.writeFileSync(configFile(), JSON.stringify(cfg, null, 2));
+
+    // Create qoder marker to simulate qoder environment
+    fs.mkdirSync(path.join(tmpHome, '.qoder', 'skills'), { recursive: true });
+
+    // Need fresh module because shared-paths caches detectPlatform at module load
+    delete require.cache[require.resolve('../shared-paths')];
+    delete require.cache[require.resolve('../doctor')];
+    const { doctor: doc2 } = require('../doctor');
+    mockExecSuccess();
+
+    const result = await doc2([]);
+
+    expect(result).toBe(1);
+    expect(logSpy).toHaveBeenCalledWith(
+      expect.stringContaining('templateDir')
+    );
+    expect(logSpy).toHaveBeenCalledWith(
+      expect.stringContaining('opencode')
+    );
+  });
+
+  it('passes templateDir check when templateDir matches current platform', async () => {
+    setupLocalInstall();
+    // Write config with correct qoder templateDir
+    const cfg = JSON.parse(fs.readFileSync(configFile(), 'utf8'));
+    cfg.templateDir = path.join(tmpHome, '.qoder', 'git-hooks-template');
+    fs.writeFileSync(configFile(), JSON.stringify(cfg, null, 2));
+
+    // Create qoder marker
+    fs.mkdirSync(path.join(tmpHome, '.qoder', 'skills'), { recursive: true });
+
+    delete require.cache[require.resolve('../shared-paths')];
+    delete require.cache[require.resolve('../doctor')];
+    const { doctor: doc2 } = require('../doctor');
+    mockExecSuccess();
+
+    const result = await doc2([]);
+
+    expect(result).toBe(0);
+    expect(logSpy).toHaveBeenCalledWith(
+      expect.stringContaining('All checks passed')
+    );
+  });
+
+  it('passes templateDir check when config has no templateDir field (legacy)', async () => {
+    setupLocalInstall();
+    // Config without templateDir — legacy install, should not fail
+    mockExecSuccess();
+    const { doctor } = require('../doctor');
+
+    const result = await doctor([]);
+
+    expect(result).toBe(0);
+    expect(logSpy).toHaveBeenCalledWith(
+      expect.stringContaining('All checks passed')
+    );
+  });
+
+  // === Issue #186: --fix syncs global hooks from package source ===
+
+  it('--fix syncs global hooks when they are outdated', async () => {
+    setupGlobalInstall();
+    // Write an outdated pre-commit hook (different content)
+    const oldContent = '#!/bin/bash\n# OpenCode Quality Gates - Pre-Commit Hook - OLD VERSION\n';
+    fs.writeFileSync(path.join(globalHooksDir(), 'pre-commit'), oldContent);
+    mockExecSuccess();
+    const { doctor } = require('../doctor');
+
+    const result = await doctor(['--fix']);
+
+    expect(result).toBe(0);
+    // Should have restored from package source
+    const restoredContent = fs.readFileSync(path.join(globalHooksDir(), 'pre-commit'), 'utf8');
+    expect(restoredContent).not.toBe(oldContent);
+    expect(logSpy).toHaveBeenCalledWith(
+      expect.stringContaining('Restored')
+    );
+  });
 });

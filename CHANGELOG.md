@@ -2,6 +2,13 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.8.8] - 2026-06-09
+
+### Fixed
+- **#186 — P1: Global version mismatch detection** — `xp-gate doctor` now detects when installed config version differs from package version. `xp-gate doctor --fix` auto-syncs config version and updates global hooks from package source.
+- **#187 — P2: Windows/Qoder bash hooks pip3 compatibility** — Replaced `pip3` with `pip` in pre-commit lizard install message and TOOL-INSTALLATION-GUIDE.md for cross-platform compatibility.
+- **#188 — P2: templateDir pointing to OpenCode residue path** — `shared-paths.js` now dynamically resolves `TEMPLATE_DIR` based on detected AI agent platform (opencode/claude-code/qoder). `xp-gate doctor` validates templateDir against current platform; `--fix` auto-corrects it.
+
 ## [0.8.2] - Unreleased
 
 ### Added

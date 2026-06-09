@@ -7,10 +7,25 @@ const {
   CONFIG_FILE,
   GLOBAL_HOOKS_DIR,
   GLOBAL_ADAPTERS_DIR,
+  detectPlatform,
+  getTemplateDir,
 } = require('./shared-paths.js');
 
 // npm package source dir (template hooks/adapters)
 const PKG_DIR = path.dirname(__dirname);
+
+/**
+ * Read the package version from the installed package.json.
+ * @returns {string|null}
+ */
+function getPackageVersion() {
+  try {
+    const pkg = JSON.parse(fs.readFileSync(path.join(PKG_DIR, 'package.json'), 'utf8'));
+    return pkg.version || null;
+  } catch {
+    return null;
+  }
+}
 
 /**
  * Signature strings used to verify file ownership.
@@ -38,6 +53,10 @@ function getConfig() {
   } catch {
     return 'corrupt';
   }
+}
+
+function saveConfig(config) {
+  fs.writeFileSync(CONFIG_FILE, JSON.stringify(config, null, 2));
 }
 
 function getGitDir() {
@@ -190,17 +209,43 @@ function diagnose() {
   checks.push(...configResult.checks);
   issues += configResult.issues;
 
-  // --- Check 2: Hooks files ---
+  // --- Check 2: Version mismatch ---
+  const pkgVersion = getPackageVersion();
+  const configVersion = config.version;
+  if (configVersion && pkgVersion && configVersion !== pkgVersion) {
+    checks.push({
+      name: 'Version mismatch',
+      status: 'FAIL',
+      detail: `config: ${configVersion}, package: ${pkgVersion} — run 'xp-gate doctor --fix' to sync`
+    });
+    issues++;
+  }
+
+  // --- Check 3: templateDir validation ---
+  const configTemplateDir = config.templateDir;
+  if (configTemplateDir) {
+    const expectedTemplateDir = getTemplateDir();
+    if (configTemplateDir !== expectedTemplateDir) {
+      checks.push({
+        name: 'templateDir',
+        status: 'FAIL',
+        detail: `points to ${configTemplateDir}, expected ${expectedTemplateDir} for current platform`
+      });
+      issues++;
+    }
+  }
+
+  // --- Check 4: Hooks files ---
   if (config.mode === 'local') {
     issues += checkLocalHooks(checks);
   } else {
     issues += checkGlobalHooks(checks);
   }
 
-  // --- Check 3: Adapters directory ---
+  // --- Check 5: Adapters directory ---
   issues += checkAdapters(checks, config.mode, getGitDir());
 
-  // --- Check 4: Environment dependencies ---
+  // --- Check 6: Environment dependencies ---
   checkEnv(checks);
 
   return { checks, issues };
@@ -244,6 +289,24 @@ function fixIssues(checks, config) {
 
   const srcDir = PKG_DIR;
   let fixed = false;
+
+  // Fix version mismatch — update config version to match package
+  const pkgVersion = getPackageVersion();
+  if (pkgVersion && config.version !== pkgVersion) {
+    config.version = pkgVersion;
+    saveConfig(config);
+    console.log(`  ✓ Updated config version to ${pkgVersion}`);
+    fixed = true;
+  }
+
+  // Fix templateDir mismatch
+  const expectedTemplateDir = getTemplateDir();
+  if (config.templateDir && config.templateDir !== expectedTemplateDir) {
+    config.templateDir = expectedTemplateDir;
+    saveConfig(config);
+    console.log(`  ✓ Updated templateDir to ${expectedTemplateDir}`);
+    fixed = true;
+  }
 
   // Fix missing hooks
   if (config.mode === 'local') {

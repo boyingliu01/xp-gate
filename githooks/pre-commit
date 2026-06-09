@@ -934,7 +934,7 @@ else
     fi
   else
     echo "⚠️  WARN - lizard not installed, complexity check not performed"
-    echo "   Install with: pip3 install --user lizard"
+    echo "   Install with: pip install --user lizard"
     echo "   Gate 3: Complexity check (WARN, tool not available)"
     GATE_3_STATUS="WARN"
   fi

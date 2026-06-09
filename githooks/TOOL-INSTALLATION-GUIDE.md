@@ -62,7 +62,7 @@
 
 | 工具 | 用途 | 语言覆盖 | 安装命令 |
 |------|------|----------|----------|
-| **lizard** | 函数级复杂度 | TS/Python/Go/Java/Swift | `pip3 install --user lizard` |
+| **lizard** | 函数级复杂度 | TS/Python/Go/Java/Swift | `pip install --user lizard` |
 | **dart_code_linter** | Dart 复杂度 | Dart/Flutter | `dart pub add --dev dart_code_linter` |
 | **detekt** | Kotlin 复杂度 | Kotlin | Gradle plugin 或 CLI |
 
@@ -174,7 +174,7 @@ npm install -g @ast-grep/cli
 
 ### Cyclomatic Complexity (lizard)
 ```bash
-pip3 install --user lizard
+pip install --user lizard
 ~/.local/bin/lizard --version
 ```
 
