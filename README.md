@@ -152,7 +152,7 @@ XP-Gate 现在同时支持 Claude Code 和 OpenCode 插件分发，提供 IDE �
 ```
 
 提供：
-- 7 个 AI 技能 (sprint-flow, delphi-review, test-specification-alignment, ralph-loop, test-driven-development, improve-codebase-architecture, to-issues)
+- 6 个 AI 技能 (sprint-flow, delphi-review, test-specification-alignment, ralph-loop, improve-codebase-architecture, to-issues)
 - PostToolUse hook：每次 Edit/Write 自动运行 principles 检查
 - 优雅降级：xp-gate CLI 未安装时记录提示，不阻塞会话
 

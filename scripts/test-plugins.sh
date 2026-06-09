@@ -75,7 +75,7 @@ fi
 # Test 6: All expected skills present in built plugins
 echo ""
 echo "Test 6: Skill packaging"
-EXPECTED_SKILLS=(sprint-flow delphi-review test-specification-alignment ralph-loop test-driven-development improve-codebase-architecture to-issues)
+EXPECTED_SKILLS=(sprint-flow delphi-review test-specification-alignment ralph-loop improve-codebase-architecture to-issues)
 for skill in "${EXPECTED_SKILLS[@]}"; do
   if [ -f "$REPO_ROOT/plugins/claude-code/skills/$skill/SKILL.md" ]; then
     pass "claude-code/skills/$skill/SKILL.md"
