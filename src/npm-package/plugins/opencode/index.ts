@@ -8,11 +8,10 @@
  *
  * Graceful degradation: if xp-gate CLI not installed, tools return install instructions.
  */
-import type { Plugin, PluginModule } from "@opencode-ai/plugin"
 import { tool } from "@opencode-ai/plugin"
 import { z } from "zod"
 
-export const XpGatePlugin: Plugin = async (input) => {
+export const XpGatePlugin = async (input) => {
   const { directory, $ } = input
 
   return {
@@ -32,7 +31,7 @@ export const XpGatePlugin: Plugin = async (input) => {
             const result = await $`bash -c ${`cd "${cwd}" && command -v xp-gate >/dev/null 2>&1 && xp-gate check "${target}"${gates}`}`
             const text = await result.text()
             return text || "[XP-Gate] Check complete."
-          } catch (err: unknown) {
+          } catch (err) {
             return `[XP-Gate] xp-gate CLI not found.\nInstall: npm install -g @boyingliu01/xp-gate\n${err instanceof Error ? err.message : ""}`
           }
         },
@@ -46,13 +45,15 @@ export const XpGatePlugin: Plugin = async (input) => {
         async execute(args, ctx) {
           const cwd = ctx.directory || directory
           const target = args.path.startsWith("/") ? args.path : `${cwd}/${args.path}`
-          const cmd = `cd "${cwd}" && npx -y tsx src/principles/index.ts --files "${target}" --format console`
+
+          // Try xp-gate CLI first (preferred), fall back to npx tsx
+          const cmd = `cd "${cwd}" && command -v xp-gate >/dev/null 2>&1 && xp-gate principles "${target}" || npx -y tsx ${directory}/src/principles/index.ts --files "${target}" --format console`
           try {
             const result = await $`bash -c ${cmd}`
             const text = await result.text()
             return text || "[XP-Gate] Principles check complete."
-          } catch (err: unknown) {
-            return `[XP-Gate] Principles checker failed.\nEnsure src/principles/index.ts exists.\n${err instanceof Error ? err.message : ""}`
+          } catch (err) {
+            return `[XP-Gate] Principles checker failed.\nInstall xp-gate CLI: npm install -g @boyingliu01/xp-gate\n${err instanceof Error ? err.message : ""}`
           }
         },
       }),
@@ -68,7 +69,7 @@ export const XpGatePlugin: Plugin = async (input) => {
             const result = await $`bash -c ${`cd "${cwd}" && npx archlint check --config ${args.config}`}`
             const text = await result.text()
             return text || "[XP-Gate] Architecture check complete."
-          } catch (err: unknown) {
+          } catch (err) {
             return `[XP-Gate] Architecture validation requires archlint + ${args.config}.\n${err instanceof Error ? err.message : ""}`
           }
         },
@@ -77,7 +78,7 @@ export const XpGatePlugin: Plugin = async (input) => {
   }
 }
 
-const pluginModule: PluginModule = {
+const pluginModule = {
   id: "xp-gate",
   server: XpGatePlugin,
 }

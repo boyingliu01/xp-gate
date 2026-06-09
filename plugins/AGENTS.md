@@ -71,7 +71,7 @@ bash scripts/test-plugins.sh             # 28 integration tests
 
 ## NOTES
 - v0.4.0+: Plugin system introduced
-- Claude plugin: 7 skills (sprint-flow, delphi-review, test-specification-alignment, ralph-loop, test-driven-development, improve-codebase-architecture, to-issues)
+- Claude plugin: 6 skills (sprint-flow, delphi-review, test-specification-alignment, ralph-loop, improve-codebase-architecture, to-issues)
 - OpenCode plugin: 3 tools (gate-check, gate-principles, gate-arch)
 - build-plugin.sh validates 7 expected skills in output
 - test-plugins.sh: 28 tests — JSON validity, versions, builds, packaging, graceful degradation

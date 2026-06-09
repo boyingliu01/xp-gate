@@ -69,7 +69,6 @@ EXPECTED_SKILLS=(
   "delphi-review"
   "test-specification-alignment"
   "ralph-loop"
-  "test-driven-development"
   "improve-codebase-architecture"
   "to-issues"
 )

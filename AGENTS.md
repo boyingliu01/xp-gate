@@ -39,7 +39,6 @@ XP-Gate — 6质量门禁（合并自原版9个）+ AI多专家评审的自动�
 │   ├── delphi-review/  # Multi-expert consensus (design + code-walkthrough modes)
 │   ├── test-specification-alignment/  # 2-phase test-spec verification
 │   ├── ralph-loop/     # REQ-level iterative build (Phase 2 default, saves 40-67% tokens)
-│   ├── test-driven-development/  # TDD enforcement
 │   ├── improve-codebase-architecture/  # Architecture health checks
 │   ├── to-issues/      # Vertical slice issue splitting
 │   └── admin-template-guidelines/
