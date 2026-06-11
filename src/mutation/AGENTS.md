@@ -1,19 +1,22 @@
 # SRC/MUTATION KNOWLEDGE BASE
 
-**Generated:** 2026-05-30
-**Commit:** 4517f2b
+**Generated:** 2026-06-09
+**Commit:** f60b2e9
+**Branch:** main
+**Version:** 0.8.8.0
 
 ## OVERVIEW
-Gate M incremental mutation testing + AI-generated test detection — pre-push quality gate.
+**Gate M** (incremental mutation testing) + **Gate M2** helpers (test-layer detection used by `src/mock-policy/`). Pre-push quality gate. TypeScript-only; uses Stryker.
 
 ## STRUCTURE
 ```
 src/mutation/
-├── gate-m.ts           # Incremental mutation testing gate
-├── detect-ai-test.ts   # AI-generated test detection
-├── init-baseline.ts    # Baseline initialization
-├── update-baseline.ts  # Baseline updates after push
-├── types.ts            # Type definitions
+├── gate-m.ts            # Incremental mutation testing gate — driven by changed-files list
+├── detect-ai-test.ts    # AI-test heuristics + detectTestLayer() (reused by Gate M3)
+├── init-baseline.ts     # First-time full baseline initialization
+├── update-baseline.ts   # Baseline update after successful push
+├── stryker-types.ts     # Typed wrapper around Stryker JSON output
+├── types.ts             # Local type definitions
 └── __tests__/
     ├── gate-m.test.ts
     └── detect-ai-test.test.ts
@@ -22,37 +25,49 @@ src/mutation/
 ## WHERE TO LOOK
 | Task | Location | Notes |
 |------|----------|-------|
-| Mutation gate | gate-m.ts | Incremental mutation on changed files |
-| AI test detection | detect-ai-test.ts | Detects AI-generated test patterns |
-| Baseline init | init-baseline.ts | Full scan baseline (first-time setup) |
-| Baseline update | update-baseline.ts | Updates after successful push |
+| Mutation gate runner | gate-m.ts | `npx tsx src/mutation/gate-m.ts --changed-files "..."` |
+| AI-test heuristics | detect-ai-test.ts | Used by both Gate M2 and Gate M3 |
+| Test layer detection | detect-ai-test.ts `detectTestLayer` | unit / integration / e2e / unknown |
+| Baseline init | init-baseline.ts | First-time full scan |
+| Baseline update | update-baseline.ts | Refresh after a clean push |
 
 ## CONVENTIONS
-- Mutation targets: src/principles/**/*.ts only
-- Thresholds: high=80%, low=60%, break=40% (stryker.conf.json)
-- Critical paths: configurable via .mutation-critical-paths (80% threshold)
-- Baseline stored in .mutation-baseline.json
+- **Mutation targets**: `src/principles/**/*.ts` by default.
+- **Thresholds** (from `stryker.conf.json`): high=80%, low=60%, break=40%.
+- **Critical paths** configurable via `.mutation-critical-paths` (forces 80% on listed paths).
+- **Baseline** stored in `.mutation-baseline.json`.
+- **Pre-push slim config**: `stryker.prepush.conf.json` (faster; only mutates changed files).
+- **Coverage exclude**: `src/mutation/**` is excluded from vitest coverage to avoid mutating the mutator.
 
-## ANTI-PATTERNS (THIS PROJECT)
-- Do NOT run mutation on main branch without worktree isolation
-- Do NOT skip baseline initialization before first incremental run
-- Do NOT lower thresholds below 40% (stryker break threshold)
+## ANTI-PATTERNS
+- Do NOT run mutation directly on `main` without worktree isolation.
+- Do NOT skip baseline initialization before the first incremental run.
+- Do NOT lower thresholds below 40% (the Stryker break threshold).
+- Do NOT couple `detect-ai-test.ts` to Gate M3 internals — it must remain a generic helper consumable by both Gate M2 and Gate M3.
 
 ## UNIQUE STYLES
-- Incremental mutation: only mutates changed files (not full suite)
-- AI test detection: Gate M2 mock density check (50% BLOCK, 30% ADVISORY)
-- Pre-push trigger: runs automatically on git push
-- Main/master pushes: mutation runs but code-walkthrough skipped
+- **Incremental by default** — only mutates changed files in pre-push mode.
+- **Gate M2 is implemented inline in `githooks/pre-push`** (regex-counted mock keywords) — only the test-layer detection helper lives here.
+- **Main/master push**: Gate M still runs; only the Delphi code-walkthrough validator is skipped.
 
 ## COMMANDS
 ```bash
-npm run test:mutation                # stryker run (full)
-npm run mutation:baseline:init       # Initialize local baseline
+# Full suite (CI / local manual)
+npm run test:mutation
+
+# Initialize baseline (one-time)
+npm run mutation:baseline:init
+
+# Incremental run on specific files
 npm run mutation:incremental -- --changed-files "src/foo.ts,src/bar.ts"
+
+# Direct Gate M invocation (what pre-push calls)
+npx tsx src/mutation/gate-m.ts --changed-files "src/foo.ts"
 ```
 
 ## NOTES
-- Pre-push hook triggers Gate M + Gate M2
-- Mutation testing CI: .github/workflows/mutation-test.yml (45min timeout)
-- Stryker config: stryker.conf.json (principles), stryker.prepush.conf.json (pre-push)
-- Coverage exclude: src/mutation/** excluded from vitest coverage
+- Invoked by `githooks/pre-push` as Gate M.
+- CI workflow: `.github/workflows/mutation-test.yml` (45-min timeout).
+- Mock policy (`src/mock-policy/gate-m3.ts`) imports `detectTestLayer` from this module — keep that export stable.
+- Configs: `stryker.conf.json` (full), `stryker.prepush.conf.json` (slim).
+
