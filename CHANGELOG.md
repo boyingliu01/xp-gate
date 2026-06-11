@@ -9,7 +9,9 @@ All notable changes to this project will be documented in this file.
 - **#187 — P2: Windows/Qoder bash hooks pip3 compatibility** — Replaced `pip3` with `pip` in pre-commit lizard install message and TOOL-INSTALLATION-GUIDE.md for cross-platform compatibility.
 - **#188 — P2: templateDir pointing to OpenCode residue path** — `shared-paths.js` now dynamically resolves `TEMPLATE_DIR` based on detected AI agent platform (opencode/claude-code/qoder). `xp-gate doctor` validates templateDir against current platform; `--fix` auto-corrects it.
 
-## [0.8.2] - Unreleased
+## [0.8.2] - 2026-06-08
+
+> **Note**: This entry was marked "Unreleased" in error during 0.8.x rapid iteration. The features below shipped as part of the 0.8.2 → 0.8.8 release wave on 2026-06-08/09. See issue #205 for the fix.
 
 ### Added
 - **#135 — OpenCode plugin auto-configure in xp-gate init** — `xp-gate init` now detects opencode.json in the project root and automatically injects the bundled plugin path. No more manual editing of opencode.json after npm install.

@@ -28,19 +28,24 @@ components:
     install_command: "npm install -g xp-gate"
     subcommands:
       - "xp-gate init"
-      - "xp-gate uninstall"
-      - "xp-gate doctor"
+      - "xp-gate setup-global"
+      - "xp-gate uninstall [--dry-run --force --local --global]"
+      - "xp-gate doctor [--fix]"
       - "xp-gate migrate"
+      - "xp-gate baseline <create|show|reset|diff>"
       - "xp-gate install-skill <name>"
       - "xp-gate update-skill <name>"
       - "xp-gate uninstall-skill <name> --force"
+      - "xp-gate audit [--tail | --stats | record]"
+      - "xp-gate ui-review"
+      - "xp-gate --version"
     requires:
       - node (>=18)
       - npm
     optional: false
 
   - id: pre-commit
-    name: "Pre-Commit Hook (6 Gates)"
+    name: "Pre-Commit Hook (Gate 0-9, 10 道门禁)"
     description: "Static analysis, lint, test, coverage, shell check, principles (Clean Code + SOLID), cyclomatic complexity, Boy Scout Rule, architecture quality"
     type: git-hook
     install_command: "bash <(curl -fsSL https://raw.githubusercontent.com/boyingliu01/xp-gate/repo-main/scripts/install-pre-commit.sh) (LEGACY - GHP version only, use npm install -g xp-gate instead)"

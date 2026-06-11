@@ -34,8 +34,8 @@ XP-Gate 将确定性质量门禁（纯代码）与 AI 智能评审（多专家�
 │   │  sprint-flow/   │  │  delphi-review/ │  │test-spec-align/ │            │
 │   │   SKILL.md      │  │   SKILL.md      │  │   SKILL.md      │            │
 │   │                 │  │                 │  │                 │            │
-│   │ 7 Phase Flow    │  │ 2 Expert Modes  │  │ 2 Phase Check   │            │
-│   │ Output Contract │  │ Consensus >=95% │  │ Freeze/Unfreeze │            │
+│   │ 11 Phase Flow   │  │ 2 Expert Modes  │  │ 2 Phase Check   │            │
+│   │ Output Contract │  │ Consensus >=91% │  │ Freeze/Unfreeze │            │
 │   └─────────────────┘  └─────────────────┘  └─────────────────┘            │
 │                                                                              │
 │   Skill = Markdown + Output Contract (机器可解析的 JSON Schema)              │
@@ -82,7 +82,7 @@ XP-Gate 将确定性质量门禁（纯代码）与 AI 智能评审（多专家�
 │                       Layer 1: Git Hooks (Deterministic)                     │
 │                                                                              │
 │   ┌─────────────────────────────────────────────────────────────────────┐   │
-│   │                        pre-commit (6 Gates)                          │   │
+│   │                    pre-commit (Gate 0-9, 10 道门禁)                    │   │
 │   ├─────────────────────────────────────────────────────────────────────┤   │
 │   │ Gate 1 │ Gate 2 │ Gate 3 │ Gate 4 │ Gate 5 │ Gate 6                 │   │
 │   │ Code   │ Dup    │ CCN    │Principles│ Tests │Arch +                │   │
@@ -112,7 +112,7 @@ XP-Gate 将确定性质量门禁（纯代码）与 AI 智能评审（多专家�
 
 pre-commit 在每次 `git commit` 时自动运行 6 道质量门禁，任何一道失败都会阻止提交。
 
-**6 道门禁**
+**10 道门禁 (Gate 0-9)**
 
 | Gate | 名称 | 检查内容 | 标准 |
 |------|------|----------|------|
@@ -125,7 +125,7 @@ pre-commit 在每次 `git commit` 时自动运行 6 道质量门禁，任何一�
 
 **关键文件**
 
-- `githooks/pre-commit` — 6 道门禁主脚本 (1099 行)
+- `githooks/pre-commit` — 10 道门禁主脚本 (Gate 0-9, ~2084 行)
 - `githooks/adapter-common.sh` — 语言检测与路由 (130 行)
 
 #### 3.1.2 语言适配器模式
@@ -347,7 +347,7 @@ triggers:
 **sprint-flow/SKILL.md** — Sprint 流程编排器
 
 ```yaml
-7 Phases:
+11 Phases:
   Phase 0: THINK      → brainstorming → Pain Document + Design Document
   Phase 1: PLAN       → autoplan + delphi-review → specification.yaml
   Phase 2: BUILD      → TDD + freeze + blind-review → MVP v1
@@ -370,7 +370,7 @@ Modes:
     - 输出: .code-walkthrough-result.json
 
 Experts: 2-3 位来自不同提供商的模型
-Consensus: >=95% 一致性
+Consensus: >=91% 一致性
 Rounds: 多轮直到 APPROVED 或达到 max_rounds
 ```
 
@@ -397,7 +397,7 @@ Phase 2 (禁止修改):
 
 Sprint Flow 是整个系统的顶层编排器，串联所有组件完成从需求到部署的完整流程。
 
-#### 3.5.1 7 阶段流程
+#### 3.5.1 11 阶段流程 (Phase -1 ~ Phase 8)
 
 ```
 用户输入: /sprint-flow "开发用户登录功能"
@@ -610,7 +610,7 @@ git push
     { "id": "A", "name": "架构专家", "model": "deepseek-v4-pro" },
     { "id": "B", "name": "技术专家", "model": "kimi-k2.6" }
   ],
-  "consensus_threshold": 0.95,
+  "consensus_threshold": 0.91,
   "max_rounds": 5
 }
 ```
@@ -712,12 +712,14 @@ root/
 
 ## 7. 设计决策
 
-### 7.1 为什么 6 道门禁 (从 9 道简化)
+### 7.1 门禁数量演进 (9 → 6 → 10)
 
-原始设计有 9 道门禁，经过重构合并为 6 道：
+原始设计有 9 道门禁；中期重构合并为 6 道；v0.8.x 安全审计阶段又新增 3 道安全门禁 + Gate 0 版本一致性预检，得到当前的 10 道 (Gate 0-9)。
 
-| 原门禁 | 新门禁 | 合并理由 |
-|--------|--------|----------|
+**阶段一：原始 9 道（拆分过细）**
+
+| 原门禁 | 中期合并门禁 | 合并理由 |
+|--------|--------------|----------|
 | Gate 1 (Static) + Gate 2 (Lint) + Gate 5 (Shell) | Gate 1 (Code Quality) | 都是静态代码分析，按语言统一处理 |
 | Gate 3 (Tests) + Gate 4 (Coverage) | Gate 5 (Tests + Coverage) | 测试和覆盖率紧密相关，适配器统一提供 |
 | Gate 8 (Boy Scout) + Gate 9 (Architecture) | Gate 6 (Architecture + Boy Scout) | 都属于代码长期健康度检查 |
@@ -725,10 +727,22 @@ root/
 | Gate 7 (Complexity) | Gate 3 (Complexity) | 独立保留，圈复杂度是核心指标 |
 | — | Gate 2 (Duplicate Code) | 新增门禁，代码重复检测 |
 
-**简化收益**:
-- 减少用户认知负担
-- 适配器可以更完整地封装语言工具链
-- 保持检查完整性不降低
+**阶段二：v0.8.x 新增的预检 + 安全门禁**
+
+| 新增门禁 | 来源 | 引入理由 |
+|----------|------|----------|
+| Gate 0 (Version Consistency) | `src/architecture/version-parser.ts` + VERSION | 防止 VERSION 与 package.json 漂移导致发布异常 |
+| Gate 7 (IaC Security) | checkov/hadolint/kube-score/tflint | 基础设施配置（K8s/Terraform/Docker）安全合规 |
+| Gate 8 (Secret Scanning) | gitleaks (`.gitleaks.toml`) | 防止密钥/凭证泄漏 |
+| Gate 9 (Semgrep SAST) | semgrep ruleset | 应用层 SAST 安全扫描 |
+
+**当前总数**: Gate 0-9 = 10 道（脚本数字编号）；用户文档仍可以 "代码质量(1+2+5) / 复杂度(3) / 原则(4) / 架构(6) / 安全(7+8+9)" 5 个概念簇 + Gate 0 预检的旧 "6 道" 视角阅读。
+
+**关键收益**:
+- 适配器统一封装语言工具链，跨语言一致行为
+- 安全审计随 v0.8.x 一并补齐（密钥/SAST/IaC）
+- Gate 0 防止版本漂移这种"易发现但慢中毒"的问题
+- 工具缺失 = SKIP（不阻断），避免一刀切
 
 ### 7.2 为什么使用 Delphi 方法
 
@@ -738,7 +752,7 @@ Delphi 方法 (兰德公司开发) 相比单一 AI 评审有显著优势：
 |------|---------|---------------|
 | 偏见避免 | 容易受训练数据偏见影响 | 匿名评审避免锚定效应 |
 | 覆盖度 | 单点视角 | 多维度交叉验证 |
-| 一致性 | 波动较大 | >=95% 统计共识 |
+| 一致性 | 波动较大 | >=91% 统计共识 |
 | 置信度 | 主观判断 | 量化的 confidence 评分 |
 
 **关键设计**:

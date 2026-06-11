@@ -101,4 +101,33 @@ if [ -f "$NPM_OPENCODE_PLUGIN" ]; then
   echo "[sync-version] src/npm-package/plugins/opencode/package.json -> $NPM_VERSION"
 fi
 
+# Header-only refresh for AGENTS.md mirrors (issue #206).
+# Walks every AGENTS.md and updates the 3 metadata header lines from VERSION + git HEAD + today's date.
+# Body content is untouched — re-run /init-deep when body content goes stale.
+TODAY="$(date +%Y-%m-%d)"
+HEAD_SHA="$(git -C "$ROOT_DIR" rev-parse --short HEAD 2>/dev/null || echo unknown)"
+BRANCH="$(git -C "$ROOT_DIR" rev-parse --abbrev-ref HEAD 2>/dev/null || echo unknown)"
+
+AGENTS_COUNT=0
+while IFS= read -r -d '' agents_file; do
+  node -e "
+    const fs = require('fs');
+    const p = '$agents_file';
+    let c = fs.readFileSync(p, 'utf8');
+    let changed = false;
+    const repl = [
+      [/^\*\*Generated:\*\*.*$/m, '**Generated:** $TODAY'],
+      [/^\*\*Commit:\*\*.*$/m,    '**Commit:** $HEAD_SHA'],
+      [/^\*\*Branch:\*\*.*$/m,    '**Branch:** $BRANCH'],
+      [/^\*\*Version:\*\*.*$/m,   '**Version:** $FULL_VERSION'],
+    ];
+    for (const [re, rep] of repl) {
+      if (re.test(c)) { c = c.replace(re, rep); changed = true; }
+    }
+    if (changed) { fs.writeFileSync(p, c); process.exit(0); }
+    process.exit(2);
+  " && AGENTS_COUNT=$((AGENTS_COUNT + 1)) || true
+done < <(find "$ROOT_DIR" -name 'AGENTS.md' -not -path '*/node_modules/*' -not -path '*/.git/*' -print0)
+echo "[sync-version] AGENTS.md headers refreshed: $AGENTS_COUNT files (date=$TODAY commit=$HEAD_SHA branch=$BRANCH version=$FULL_VERSION)"
+
 echo "[sync-version] OK — all package.json version fields synced from VERSION ($FULL_VERSION)"
