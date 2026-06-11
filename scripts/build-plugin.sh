@@ -63,13 +63,16 @@ fi
 # Copy all skills
 bash "$SCRIPT_DIR/copy-skills.sh" --source "$SKILLS_SOURCE" --dest "$PLUGIN_DIR/skills"
 
-# Verify expected skills (matching skills/ directory)
+# Must stay in sync with skills/ directory (all 8 canonical skills).
+# When adding a new skill, append it here AND under skills/.
 EXPECTED_SKILLS=(
-  "sprint-flow"
+  "admin-template-guidelines"
   "delphi-review"
-  "test-specification-alignment"
-  "ralph-loop"
   "improve-codebase-architecture"
+  "ralph-loop"
+  "sprint-flow"
+  "test-driven-development"
+  "test-specification-alignment"
   "to-issues"
 )
 

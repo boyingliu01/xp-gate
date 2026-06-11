@@ -1,12 +1,12 @@
 # XP-Gate Capability Matrix
 
-**XP-Gate** 是一套 AI 驱动的开发工作流工具集，提供 6 道质量门禁和多专家评审机制，确保代码提交前的自动化验证和设计决策的共识达成。
+**XP-Gate** 是一套 AI 驱动的开发工作流工具集，提供 10 道质量门禁 (Gate 0–9) + 3 道 pre-push 变异/Mock 门禁 (Gate M/M2/M3) + Delphi 多专家评审机制，确保代码提交前的自动化验证和设计决策的共识达成。
 
 ---
 
 ## 1. Overview
 
-XP-Gate 整合质量门禁、AI 多专家评审和 Sprint 流程编排三大核心模块。质量门禁在每次 `git commit` 时自动运行 6 项检查，任何失败都会阻止提交。Delphi Review 采用多轮匿名评审机制，直到所有专家达成共识（≥95%）。Sprint Flow 提供一键式完整开发流程编排，从需求探索到发布部署全程自动化。
+XP-Gate 整合质量门禁、AI 多专家评审和 Sprint 流程编排三大核心模块。质量门禁在每次 `git commit` 时自动运行 10 项检查 (Gate 0-9，按脚本数字编号；旧文档以 "6 道门禁" 作概念分组)，每次 `git push` 自动运行 Gate M / M2 / M3 + Delphi 代码走查校验。任何失败都会阻止提交或推送。Delphi Review 采用多轮匿名评审机制，直到所有专家达成共识（≥91%）。Sprint Flow 提供一键式 11 阶段 (Phase -1 ~ Phase 8) 完整开发流程编排，从需求探索到发布部署全程自动化。
 
 ---
 
@@ -24,7 +24,7 @@ XP-Gate 整合质量门禁、AI 多专家评审和 Sprint 流程编排三大核�
 | | 代码覆盖率 | ✅ 完全支持 | Gate 5: ≥80% 阈值强制检查 |
 | | 架构验证 | ✅ 完全支持 | Gate 6: archlint/import-linter/arch-go 层边界检查 |
 | | 童子军规则 | ✅ 完全支持 | Gate 6: 差异化警告管理，新文件零容忍 |
-| **AI 评审** | Delphi 设计评审 | ✅ 完全支持 | 多轮匿名评审，共识阈值 ≥95% |
+| **AI 评审** | Delphi 设计评审 | ✅ 完全支持 | 多轮匿名评审，共识阈值 ≥91% |
 | | Code Walkthrough | ✅ 完全支持 | git push 前代码走查验证 |
 | | 测试规范对齐 | ✅ 完全支持 | 两阶段验证，Phase 2 freeze 保护 |
 | **Sprint Flow** | Phase 0 Think | ✅ 完全支持 | brainstorming 需求探索 |
@@ -82,20 +82,26 @@ XP-Gate 支持 12 种编程语言的质量门禁和静态分析：
 
 ## 4. Sprint Flow Capabilities Map
 
-Sprint Flow 提供 7 个阶段的完整开发流程编排：
+Sprint Flow 提供 11 个阶段 (Phase -1, -0.5, 0..8) 的完整开发流程编排：
 
 ```
-Phase 0: THINK ───────┐
+Phase -1: ISOLATE ────┐
+  └─ worktree 隔离    │
+                      │
+Phase -0.5: AUTO-EST ─┤
+  └─ 规模评估         │
+                      │
+Phase 0: THINK ───────┤
   ├─ brainstorming    │
-  └─ 设计文档         │
+  └─ CONTEXT.md + ADR │
                       │
 Phase 1: PLAN ────────┤
   ├─ autoplan         │
-  ├─ delphi-review    │
+  ├─ delphi-review    │ ← HARD-GATE (≥91% 共识才能进入 Phase 2)
   └─ specification    │
                       │
 Phase 2: BUILD ───────┤
-  ├─ dispatching      │
+  ├─ ralph-loop (默认)│
   ├─ TDD (RED/GREEN)  │
   ├─ freeze/unfreeze  │
   └─ verification     │
@@ -110,15 +116,20 @@ Phase 4: ACCEPT ──────┤ ⚠️ 必须人工
   └─ Emergent Issues  │
                       │
 Phase 5: FEEDBACK ────┤
-  ├─ learn            │
+  ├─ learn (Sprint 级)│
   ├─ retro            │
   └─ debugging        │
                       │
-Phase 6: SHIP ────────┘
-  ├─ finishing-branch
-  ├─ ship
-  ├─ land-and-deploy
-  └─ canary
+Phase 6: SHIP ────────┤
+  ├─ finishing-branch │
+  └─ ship (PR 创建)   │
+                      │
+Phase 7: LAND ────────┤
+  ├─ land-and-deploy  │
+  └─ canary           │
+                      │
+Phase 8: CLEANUP ─────┘
+  └─ Sprint 分支清理
 ```
 
 **暂停点设计**:
@@ -215,7 +226,7 @@ XP-Gate 集成的 AI Skills 体系：
 **强制要求**:
 - 至少 2 家不同厂商模型
 - 禁止使用 Anthropic/OpenAI/Google 国外模型
-- 共识阈值 ≥95%
+- 共识阈值 ≥91%
 
 ---
 
@@ -250,7 +261,7 @@ XP-Gate 集成的 AI Skills 体系：
 | **覆盖率阈值** | 提交前强制 ≥80% | 合并前检查 |
 | **架构验证** | 层边界检查（archlint） | 通常无 |
 | **测试冻结** | Phase 2 freeze 机制 | 通常无 |
-| **Sprint 编排** | 7 阶段完整流程 | 通常无 |
+| **Sprint 编排** | 11 阶段完整流程 (Phase -1 ~ Phase 8) | 通常无 |
 | **并行执行** | dispatching-parallel-agents | 通常无 |
 | **安全审计** | CSO 15 阶段深度扫描 | 基础安全扫描 |
 | **成本** | 本地运行，AI 调用按需 | CI 服务器持续运行 |
@@ -261,7 +272,7 @@ XP-Gate 集成的 AI Skills 体系：
 XP-Gate 专注于**提交前质量门禁**和**AI 辅助评审**，可与标准 CI/CD **互补使用**:
 
 ```
-本地开发 ──→ git commit ──→ XP-Gate 6 Gates ──→ ✅ 通过
+本地开发 ──→ git commit ──→ XP-Gate Gate 0-9 ──→ ✅ 通过
                                             └──→ ❌ 阻断修复
                                                   │
                                                   ▼
