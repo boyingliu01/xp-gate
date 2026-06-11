@@ -2,6 +2,19 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.8.9] - 2026-06-11
+
+### Fixed
+- **#208 — OpenCode plugin's 3 tools were broken after clone** — `gate-check`, `gate-principles`, `gate-arch` shelled out to `xp-gate` subcommands that were never registered (`xp-gate check`, `xp-gate principles`, `xp-gate arch`) and to the wrong archlint package name (`npx archlint check` instead of `npx @archlinter/cli scan`). `gate-check` and `gate-arch` had no fallback path either, so they silently no-opped or crashed.
+
+### Added
+- **3 new CLI subcommands** — `xp-gate check <path>`, `xp-gate principles <path>`, `xp-gate arch [--config ...]`. Total registered subcommands grew from ≥11 to ≥15. Each one is the canonical implementation for the OpenCode plugin tool of the same name; both call paths produce identical output.
+- **OpenCode plugin npx-tsx fallback for all 3 tools** — every tool now uses a chained shell-out (`command -v xp-gate && xp-gate <cmd> || npx -y tsx <source>`) so the tools work both with a globally installed `xp-gate` CLI and from a fresh clone of the repo. Matches the existing graceful-degradation pattern from the Claude Code plugin's `xp-gate-check`.
+- **Plugin↔CLI contract documentation** — `plugins/opencode/README.md` now explicitly documents that `gate-check`/`gate-principles`/`gate-arch` are dual-surface (OpenCode tool + CLI subcommand) and that both paths produce identical output.
+
+### Follow-up
+- **#209 filed** — investigate why the OpenCode plugin originally shelled out to never-registered subcommands. Suggests CI check to diff plugin shell-outs against `bin/xp-gate.js` `COMMANDS` map to prevent future drift. Backlog (p3-low).
+
 ## [0.8.8] - 2026-06-09
 
 ### Fixed

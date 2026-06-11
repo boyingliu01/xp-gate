@@ -1,9 +1,9 @@
 # PROJECT KNOWLEDGE BASE
 
 **Generated:** 2026-06-11
-**Commit:** 5fa32fd
+**Commit:** c18f82b
 **Branch:** main
-**Version:** 0.8.8.0
+**Version:** 0.8.9.0
 
 ## OVERVIEW
 XP-Gate — deterministic git quality gates + AI-driven multi-expert review (Delphi) + Sprint Flow pipeline + npm zero-install distribution + cross-platform plugin system (Claude Code / OpenCode / Qoder). Pre-commit runs **10 numbered gates (Gate 0–9)** at the script level, conceptually grouped as **6 categories** in user-facing docs (README, CAPABILITIES.md). Pre-push runs **3 mutation/mock gates (M, M2, M3) + Delphi code-walkthrough**. Implements 14 Clean Code/SOLID rules across 9 language adapters (TypeScript engine), 13 shell adapters (gate routing), Boy Scout Rule baseline enforcement, test-specification alignment, mock policy enforcement, and incremental mutation testing.
@@ -162,7 +162,7 @@ Subcommands registered in 0.8.8.0 (verified against bin source):
 | `xp-gate ui-review` | Visual review for UI-bearing changes (delegates to ui-review.ts) |
 | `xp-gate --version` | Print version (from VERSION file) |
 
-> Older docs say "8 commands". Source registers ≥11. Tracked as drift, not a bug.
+> Older docs said "8 commands"; 0.8.8 grew to ≥11; 0.8.9 added `check`/`principles`/`arch` for parity with the OpenCode plugin (fixes #208), bringing the total to ≥15.
 
 ## CONVENTIONS
 - **VERSION as single source of truth.** `scripts/sync-version.sh` propagates the 4-digit `MAJOR.MINOR.PATCH.MICRO` from `VERSION` into the 4 `package.json` files (root, src/npm-package, plugins/opencode, plugins/claude-code) as a 3-digit npm-compatible semver. Never edit `package.json` versions by hand.
@@ -196,7 +196,7 @@ Subcommands registered in 0.8.8.0 (verified against bin source):
 | 2 | Pre-push gate count: docs say "Gate M + Delphi", reality = Gate M + M2 + M3 + Delphi | `githooks/pre-push` | README.md | Add Gate M2/M3 rows to README pre-push table. |
 | 3 | Delphi consensus threshold: docs say 95%, SKILL.md uses 91% | `skills/delphi-review/SKILL.md` lines 12/30/94/251/255/343 | README.md, CAPABILITIES.md | Pick 91% (SKILL.md is canonical); update README + CAPABILITIES. |
 | 4 | Sprint Flow phase count: docs say 7-phase, reality = 11 phases (-1, -0.5, 0..8) | `skills/sprint-flow/SKILL.md` | README.md "Sprint Flow 全流程" section | Re-draw the ASCII pipeline; update labels. |
-| 5 | CLI command count: docs say 8, source registers ≥11 | `src/npm-package/bin/xp-gate.js` | Root README CLI table, MANIFEST.md | Regenerate MANIFEST.md + README command table. |
+| 5 | CLI command count: docs say 8, source registers ≥15 (added check/principles/arch in 0.8.9 for #208) | `src/npm-package/bin/xp-gate.js` | Root README CLI table, MANIFEST.md | ✅ Both refreshed in 0.8.9 fix-pack. |
 | 6 | plugins/qoder/ missing manifest file | repo state | Plugin docs claim qoder is supported | Add `plugin.json` (or `qoder.json`) so the plugin can be installed. |
 | 7 | claude-code/ + opencode/ ship only `sprint-flow` skill; docs say 6-7 skills | `plugins/{claude-code,opencode}/skills/` | README "方式 -1" section | Fix `scripts/build-plugin.sh` and `scripts/copy-skills.sh` so all 8 skills are copied for claude-code/opencode (currently only qoder/ has the full set). |
 | 8 | README lists `adapter-c.sh` but no `c.sh` exists in `githooks/adapters/` | repo state | README "语言支持" table | Either drop the C row from README, or add a real `c.sh` adapter. |

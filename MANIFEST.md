@@ -38,6 +38,9 @@ components:
       - "xp-gate uninstall-skill <name> --force"
       - "xp-gate audit [--tail | --stats | record]"
       - "xp-gate ui-review"
+      - "xp-gate check <path> [--gates principles,arch]"      # added in 0.8.9, fixes #208
+      - "xp-gate principles <path> [--format console|json|sarif]"  # added in 0.8.9, fixes #208
+      - "xp-gate arch [--config <path>]"                       # added in 0.8.9, fixes #208
       - "xp-gate --version"
     requires:
       - node (>=18)

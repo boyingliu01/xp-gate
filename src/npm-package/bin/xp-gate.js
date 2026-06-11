@@ -8,6 +8,9 @@ const { doctor } = require('../lib/doctor.js');
 const { checkDeps } = require('../lib/detect-deps.js');
 const { migrate } = require('../lib/migrate.js');
 const { handleBaseline } = require('../lib/baseline.js');
+const { check } = require('../lib/check.js');
+const { principles } = require('../lib/principles.js');
+const { arch } = require('../lib/arch.js');
 
 function handleUIReview() {
   const { execSync } = require('child_process');
@@ -97,6 +100,21 @@ const COMMANDS = {
     description: 'Manage lint baselines (create, show, reset, diff)',
     run: subargs => handleBaseline(subargs).then(code => process.exit(code)),
     usage: 'xp-gate baseline <create|show|reset|diff>'
+  },
+  'check': {
+    description: 'Run user-invokable quality gates (Gate 4 Principles + Gate 6 Architecture) on a path',
+    run: subargs => check(subargs).then(code => process.exit(code)),
+    usage: 'xp-gate check <file_or_directory> [--gates principles,arch]'
+  },
+  'principles': {
+    description: 'Run Clean Code + SOLID principles checker (Gate 4 standalone)',
+    run: subargs => principles(subargs).then(code => process.exit(code)),
+    usage: 'xp-gate principles <file_or_directory> [--format console|json|sarif]'
+  },
+  'arch': {
+    description: 'Run architecture validation (Gate 6 standalone, uses architecture.yaml)',
+    run: subargs => arch(subargs).then(code => process.exit(code)),
+    usage: 'xp-gate arch [--config <path>]'
   }
 };
 
