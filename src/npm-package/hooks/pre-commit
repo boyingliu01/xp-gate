@@ -26,13 +26,14 @@ fi
 source "$ADAPTER_DIR/adapter-common.sh" 2>/dev/null || {
   echo "Error: Cannot source adapter-common.sh from $ADAPTER_DIR"
   echo "Run: xp-gate init (per-project) or xp-gate setup-global (all projects)"
-  exit
+  exit 1
 }
 
 # Trap: ensure quality report generated on ANY exit (pass or fail).
 # Using a guard prevents recursion when 'exit' is called from inside the trap.
+# IMPORTANT: Captures exit status FIRST so generate_quality_report cannot override it.
 _QUALITY_REPORT_DONE=0
-  _quality_report_on_exit() {
+_quality_report_on_exit() {
   local _saved_exit=$?
   if [ "$_QUALITY_REPORT_DONE" = "1" ]; then
     exit $_saved_exit
@@ -48,6 +49,9 @@ PROJECT_ROOT="$(git rev-parse --show-toplevel 2>/dev/null || echo "$(cd "$SCRIPT
 if [[ -d "$PROJECT_ROOT/node_modules/.bin" ]]; then
   export PATH="$PROJECT_ROOT/node_modules/.bin:$PATH"
 fi
+
+# Ensure pipe failures propagate exit codes through | head/tail/grep
+set -o pipefail
 
 # ============================================================================
 # Helper Functions
@@ -123,6 +127,166 @@ echo "━━━━━━━━━━━━━━━━━━━━━━━━�
 echo "Refactored Structure: 6 Type-Based Gates"
 echo ""
 
+# ============================================================================
+# Gate 0: Version Consistency Check (Protected Branches)
+# ============================================================================
+
+CURRENT_BRANCH=$(git rev-parse --abbrev-ref HEAD)
+PROTECTED_BRANCHES="main master develop trunk mainline"
+ROOT_DIR=$(git rev-parse --show-toplevel 2>/dev/null || echo ".")
+
+# Optional: project-level .protected-branches config file
+if [ -f "$ROOT_DIR/.protected-branches" ]; then
+  PROTECTED_BRANCHES="$PROTECTED_BRANCHES $(cat "$ROOT_DIR/.protected-branches" | tr '\n' ' ')"
+fi
+
+is_protected=false
+for branch in $PROTECTED_BRANCHES; do
+  if [ "$CURRENT_BRANCH" = "$branch" ]; then
+    is_protected=true
+    break
+  fi
+done
+
+has_version_change=false
+has_changelog_change=false
+
+if [ "$is_protected" = "true" ]; then
+  # Env var bypass: SKIP_VERSION_CHECK=1 skips Gate 0 entirely
+  # Useful for: SKIP_VERSION_CHECK=1 git commit -m "chore: ..."
+  if [ "${SKIP_VERSION_CHECK:-}" = "1" ]; then
+    echo "✅ PASSED - Gate 0: Version Consistency Check (SKIP_VERSION_CHECK=1 env var)"
+  else
+  # Check if staged changes include VERSION or CHANGELOG.md
+  STAGED_FILES=$(git diff --cached --name-only --diff-filter=ACM)
+  for file in $STAGED_FILES; do
+    case "$file" in
+      VERSION) has_version_change=true ;;
+      CHANGELOG.md) has_changelog_change=true ;;
+    esac
+  done
+
+  # If either VERSION or CHANGELOG.md is staged, pass
+  if [ "$has_version_change" = "true" ] || [ "$has_changelog_change" = "true" ]; then
+    # Auto-run sync-version.sh when VERSION is staged (issue #206 follow-up).
+    # Propagates VERSION → 4 package.json + refreshes 32 AGENTS.md headers,
+    # then stages only files sync-version.sh is known to touch (NOT runtime
+    # journals or unrelated edits) so the commit captures it atomically.
+    if [ "$has_version_change" = "true" ] && [ -f "$ROOT_DIR/scripts/sync-version.sh" ]; then
+      echo "🔄 Gate 0: VERSION staged — running sync-version.sh to fan out to package.json + AGENTS.md headers..."
+      if bash "$ROOT_DIR/scripts/sync-version.sh" > /tmp/xp-gate-sync-version.log 2>&1; then
+        SYNC_STAGED=0
+        # Stage the 4 known package.json targets if modified
+        for pkg in package.json src/npm-package/package.json \
+                   plugins/claude-code/.claude-plugin/plugin.json \
+                   plugins/opencode/package.json \
+                   src/npm-package/plugins/claude-code/.claude-plugin/plugin.json \
+                   src/npm-package/plugins/opencode/package.json; do
+          if [ -f "$ROOT_DIR/$pkg" ] && ! git diff --quiet -- "$ROOT_DIR/$pkg" 2>/dev/null; then
+            git add "$ROOT_DIR/$pkg"
+            SYNC_STAGED=$((SYNC_STAGED + 1))
+          fi
+        done
+        # Stage AGENTS.md files with header-only modifications (header refresh is the only thing sync-version touches in AGENTS.md)
+        while IFS= read -r -d '' agents_file; do
+          if ! git diff --quiet -- "$agents_file" 2>/dev/null; then
+            git add "$agents_file"
+            SYNC_STAGED=$((SYNC_STAGED + 1))
+          fi
+        done < <(find "$ROOT_DIR" -name 'AGENTS.md' -not -path '*/node_modules/*' -not -path '*/.git/*' -print0)
+        echo "   auto-staged $SYNC_STAGED file(s) from sync-version.sh (package.json × ≤6 + AGENTS.md headers)"
+      else
+        echo "⚠️  sync-version.sh failed; see /tmp/xp-gate-sync-version.log — continuing without auto-sync"
+      fi
+    fi
+    echo "✅ PASSED - Gate 0: Version Consistency Check (VERSION/CHANGELOG staged)"
+  else
+    # Check for doc-only changes (no source code files)
+    has_source=false
+    for file in $STAGED_FILES; do
+      case "$file" in
+        *.ts|*.js|*.tsx|*.jsx|*.py|*.go|*.java|*.rs|*.c|*.cpp|*.h|*.css|*.scss)
+          has_source=true
+          ;;
+      esac
+    done
+
+    # Check for build-tooling-only changes (adapters, scripts, hooks)
+    has_real_source=false
+    for file in $STAGED_FILES; do
+      case "$file" in
+        src/npm-package/adapters/*|src/npm-package/scripts/*|src/npm-package/hooks/*|scripts/*|githooks/adapters/*)
+          continue ;;
+        *.ts|*.js|*.tsx|*.jsx|*.py|*.go|*.java|*.rs|*.c|*.cpp|*.h|*.css|*.scss)
+          has_real_source=true
+          ;;
+      esac
+    done
+
+    # Doc-only changes: no source code files
+    if [ "$has_source" = "false" ]; then
+      echo "✅ PASSED - Gate 0: Version Consistency Check (doc-only changes)"
+    else
+      # Check for bypass: commit message prefix (read from COMMIT_EDITMSG during pre-commit hook)
+      COMMIT_MSG=$(cat "$(git rev-parse --git-dir)/COMMIT_EDITMSG" 2>/dev/null | head -1 || echo "")
+      if echo "$COMMIT_MSG" | grep -qE '^\[skip-version-check\]'; then
+        if echo "$COMMIT_MSG" | grep -qE '^\[skip-version-check\].*(chore:|docs:|release:)'; then
+          if [ "$has_real_source" = "false" ]; then
+            echo "✅ PASSED - Gate 0: Version Consistency Check (bypass: chore/docs/release)"
+          else
+            echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  VERSION CONSISTENCY CHECK (Gate 0)
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+Branch: $CURRENT_BRANCH
+ERROR: [skip-version-check] bypass used but production source files detected.
+
+Bypass only allows build-tooling changes (adapters/, scripts/, hooks/).
+Production source files require VERSION/CHANGELOG update.
+
+Files: $(echo "$STAGED_FILES" | tr '\n' ', ' | sed 's/,$//')
+"
+            exit 1
+          fi
+        else
+          echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  VERSION CONSISTENCY CHECK (Gate 0)
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+Branch: $CURRENT_BRANCH
+ERROR: [skip-version-check] bypass prefix invalid.
+
+Allowed prefixes: chore:, docs:, release:
+Example: [skip-version-check] chore: update dependencies
+"
+          exit 1
+        fi
+      else
+        echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  VERSION CONSISTENCY CHECK (Gate 0)
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+Branch: $CURRENT_BRANCH
+ERROR: Committing to a protected branch without VERSION/CHANGELOG update.
+
+This bypasses the ship workflow and causes version drift.
+Before committing:
+  1. Update VERSION file with new version
+  2. Add entry to CHANGELOG.md
+  3. Run: bash scripts/sync-version.sh
+
+Or use --no-verify (discouraged) or include [skip-version-check] in commit message.
+
+Staged files: $(echo "$STAGED_FILES" | tr '\n' ', ' | sed 's/,$//')
+"
+        exit 1
+      fi
+    fi
+  fi
+  fi  # closes SKIP_VERSION_CHECK if/else
+else
+  echo "✅ PASSED - Gate 0: Version Consistency Check (non-protected branch: $CURRENT_BRANCH)"
+fi
+
+echo ""
+
 # Get list of changed files
 CHANGED_FILES=$(git diff --cached --name-only --diff-filter=ACM)
 
@@ -157,8 +321,8 @@ elif [ -f "pubspec.yaml" ]; then
 elif [ -n "$(find . -name '*.ps1' -not -path './.git/*' -maxdepth 2 | head -1)" ]; then
   PROJECT_LANG="powershell"
 elif [ -f "CMakeLists.txt" ] || [ -f "Makefile" ]; then
-  CPP_FILES=$(find . -maxdepth 2 -name "*.cpp" -o -name "*.cxx" -o -name "*.cc" -not -path "./.git/*" 2>/dev/null | head -1)
-  OBJC_FILES=$(find . -maxdepth 2 -name "*.m" -o -name "*.mm" -not -path "./.git/*" 2>/dev/null | head -1)
+  CPP_FILES=$(find . -maxdepth 2 \( -name "*.cpp" -o -name "*.cxx" -o -name "*.cc" \) -not -path "./.git/*" 2>/dev/null | head -1)
+  OBJC_FILES=$(find . -maxdepth 2 \( -name "*.m" -o -name "*.mm" \) -not -path "./.git/*" 2>/dev/null | head -1)
   if [ -n "$CPP_FILES" ]; then
     PROJECT_LANG="cpp"
   elif [ -n "$OBJC_FILES" ]; then
@@ -166,7 +330,7 @@ elif [ -f "CMakeLists.txt" ] || [ -f "Makefile" ]; then
   fi
 elif [ -f "*.xcodeproj" ] || [ -d "*.xcworkspace" ]; then
   # Xcode project - Objective-C or Swift
-  OBJC_FILES=$(find . -maxdepth 2 -name "*.m" -o -name "*.mm" -not -path "./.git/*" 2>/dev/null | head -1)
+  OBJC_FILES=$(find . -maxdepth 2 \( -name "*.m" -o -name "*.mm" \) -not -path "./.git/*" 2>/dev/null | head -1)
   if [ -n "$OBJC_FILES" ]; then
     PROJECT_LANG="objectivec"
   fi
@@ -310,6 +474,52 @@ if [ -z "$PROJECT_LANG" ]; then
   fi
 fi
 
+# ============================================================================
+# Audit helper — records gate execution to .xp-gate/audit.jsonl
+# NEVER blocks commit on failure (try/catch around npx tsx).
+# Usage: record_gate_audit <gate_id> <gate_name> <passed> <issues_found> <start_ms>
+# ============================================================================
+AUDIT_SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+PROJECT_ROOT_FOR_AUDIT="$(git rev-parse --show-toplevel 2>/dev/null || echo "$AUDIT_SCRIPT_DIR/../..")"
+
+record_gate_audit() {
+  local gate_id="$1"
+  local gate_name="$2"
+  local passed="$3"
+  local issues_found="$4"
+  local start_ms="$5"
+  local end_ms
+  end_ms=$(date +%s%3N 2>/dev/null || python3 -c "import time;print(int(time.time()*1000))" 2>/dev/null || echo "0")
+  local duration_ms=$((end_ms - start_ms))
+  if [ "$duration_ms" -lt 0 ] 2>/dev/null; then
+    duration_ms=0
+  fi
+
+  # Determine gate result: PASS or FAIL based on status variable
+  local gate_result="true"
+  if [ "$passed" != "PASS" ] && [ "$passed" != "SKIP" ]; then
+    gate_result="false"
+  fi
+
+  # Fire-and-forget: audit must never block the commit
+  {
+    npx tsx "${PROJECT_ROOT_FOR_AUDIT}/src/npm-package/lib/gate-audit.ts" record \
+      --gate-id "$gate_id" \
+      --gate-name "$gate_name" \
+      --passed "$gate_result" \
+      --issues-found "$issues_found" \
+      --duration-ms "$duration_ms" \
+      --trigger commit \
+      2>/dev/null
+  } &
+  disown 2>/dev/null || true
+}
+
+# Get milliseconds timestamp (used by gates for duration measurement)
+gate_start_ms() {
+  date +%s%3N 2>/dev/null || python3 -c "import time;print(int(time.time()*1000))" 2>/dev/null || echo "0"
+}
+
 # Switch to subdirectory if detected (for mixed/hybrid projects)
 # All subsequent gates will run in the subdirectory context
 ORIGINAL_DIR=""
@@ -324,43 +534,95 @@ fi
 # GATE 1: Code Quality (Static Analysis + Linting + Shell Check combined)
 # Combination of: Old Gates 1 (Static), Gate 2 (Linting), Gate 5 (Shell Check)
 # ============================================================================
-2>&1 echo ""
-2>&1 echo "→ Gate 1: Code Quality (static analysis + linting)..."
+ 2>&1 echo ""
+ 2>&1 echo "→ Gate 1: Code Quality (static analysis + linting)..."
+GATE_1_START=$(gate_start_ms)
 
 if [ "$PROJECT_LANG" = "documentation-only" ]; then
   # Documentation-only project - skip static analysis
   echo "✅ PASSED - Skipped (no source code to analyze)."
    
-elif [ "$PROJECT_LANG" = "typescript" ]; then
-  # TypeScript: static analysis (tsc) + linting (eslint) 
+  elif [ "$PROJECT_LANG" = "typescript" ]; then
+  # TypeScript: static analysis (tsc) + linting (eslint)
   if ! command -v npx &> /dev/null; then
     echo "ℹ️  SKIP - npx not available (non-blocking for TypeScript)"
     echo "✅ PASSED - Code Quality Gate (SKIP)"
-  else  
-    # Run TypeScript type checking
-    echo "Running TypeScript static analysis (tsc)..."
-    npx tsc --noEmit --skipLibCheck 2>&1 | head -30
-    TSC_EXIT=$?
-    if [ "$TSC_EXIT" -ne 0 ]; then
-      echo ""
-      echo "❌ BLOCKED - TYPE ERRORS detected"
-      echo "Fix the type errors above before committing."
-      exit
+  else
+    # Verify tsc is real TypeScript compiler (npx may fetch deprecated tsc@2.0.4 placeholder)
+    TSC_OUTPUT=$(npx tsc --version 2>&1)
+    if echo "$TSC_OUTPUT" | grep -q "Version"; then
+      # Only run tsc if tsconfig.json exists (without it tsc prints help and exits non-zero)
+      if [ -f "tsconfig.json" ]; then
+        # Run TypeScript type checking
+        echo "Running TypeScript static analysis ($TSC_OUTPUT)..."
+        npx tsc --noEmit --skipLibCheck 2>&1 | head -30
+        TSC_EXIT=$?
+        if [ "$TSC_EXIT" -ne 0 ]; then
+          echo ""
+          echo "❌ BLOCKED - TYPE ERRORS detected"
+          echo "Fix the type errors above before committing."
+          exit 1
+        fi
+        echo "✅ PASSED - TypeScript static analysis."
+      else
+        echo "ℹ️  SKIP - tsconfig.json not found (no TypeScript project config)"
+      fi
+    else
+      echo "ℹ️  SKIP - tsc not properly installed ($TSC_OUTPUT)"
+      echo "Install typescript (npm install typescript --save-dev) for type checking."
     fi
-    echo "✅ PASSED - TypeScript static analysis."
     
     # Run ESLint linting if config exists
     if [ -f ".eslintrc.json" ] || [ -f ".eslintrc.js" ] || [ -f ".eslintrc.cjs" ] || [ -f "eslint.config.js" ]; then
       echo "Running ESLint linting..."
-      npx eslint "$CHANGED_FILES" --ext .js,.jsx,.ts,.tsx --max-warnings 0 2>&1 | head -30
-      ESLINT_EXIT=$?
-      if [ "$ESLINT_EXIT" -ne 0 ]; then
-        echo ""
-        echo "❌ BLOCKED - LINT ERRORS detected"
-        echo "Fix the lint errors above before committing."
-        exit
+      # Filter to only TS/JS files - ESLint config ignores non-matching files
+      ESLINT_FILES=$(echo "$CHANGED_FILES" | grep -E '\.(ts|tsx|js|jsx)$' || true)
+      if [ -n "$ESLINT_FILES" ]; then
+        ESLINT_OUTPUT=$(npx eslint $ESLINT_FILES -f json --no-warn-ignored 2>&1)
+        ESLINT_EXIT=$?
+        if [ "$ESLINT_EXIT" -ne 0 ]; then
+          if [ -f ".xp-gate/lint-baseline.json" ] && command -v node &> /dev/null; then
+            # Compare against lint baseline
+            BASELINE_WARNINGS=$(echo "$ESLINT_FILES" | tr ' ' '\n' | node -e "
+              const fs=require('fs');const b=JSON.parse(fs.readFileSync('.xp-gate/lint-baseline.json','utf8'));
+              const stdin=require('fs').readFileSync('/dev/stdin','utf8').trim();
+              const files=stdin?stdin.split('\n'):[];
+              let total=0;for(const f of files){if(b[f])total+=b[f].totalWarnings||0}
+              console.log(total);
+            ")
+            CURRENT_WARNINGS=$(echo "$ESLINT_OUTPUT" | node -e "
+              const d=JSON.parse(require('fs').readFileSync('/dev/stdin','utf8'));
+              console.log(d.reduce((s,f)=>s+(f.warningCount||0)+(f.errorCount||0),0));
+            ")
+            if [ "$CURRENT_WARNINGS" -gt "$BASELINE_WARNINGS" ]; then
+              NEW_WARNINGS=$((CURRENT_WARNINGS - BASELINE_WARNINGS))
+              echo "$ESLINT_OUTPUT" | head -30
+              echo ""
+              echo "❌ BLOCKED - ${NEW_WARNINGS} NEW lint error(s) (baseline: ${BASELINE_WARNINGS}, current: ${CURRENT_WARNINGS})"
+              echo "Run 'xp-gate baseline reset' after fixing to update the baseline."
+              exit 1
+            else
+              REDUCED=$((BASELINE_WARNINGS - CURRENT_WARNINGS))
+              if [ "$REDUCED" -gt 0 ]; then
+                echo "✅ PASSED - Lint debt reduced by ${REDUCED} (${BASELINE_WARNINGS} → ${CURRENT_WARNINGS})"
+              else
+                echo "✅ PASSED - No new lint errors (baseline: ${BASELINE_WARNINGS})"
+              fi
+            fi
+          else
+            echo "$ESLINT_OUTPUT" | head -30
+            echo ""
+            echo "❌ BLOCKED - LINT ERRORS detected"
+            echo "Fix the lint errors above before committing."
+            echo "Tip: Run 'xp-gate baseline create' to establish a lint baseline."
+            exit 1
+          fi
+        else
+          echo "✅ PASSED - ESLint linting."
+        fi
+      else
+        echo "✅ PASSED - No staged TS/JS files to lint."
       fi
-      echo "✅ PASSED - ESLint linting."
     else
       echo "ℹ️  No ESLint configuration found - Skipping"
     fi
@@ -374,16 +636,60 @@ elif [ "$PROJECT_LANG" = "python" ]; then
   else
     # Run Ruff (includes syntax check, linting)
     echo "Running Ruff linting (syntax + lint)..."
-    ruff check "$CHANGED_FILES" 2>&1 | head -30
+    RUFF_OUTPUT=$(ruff check "$CHANGED_FILES" --output-format json 2>&1)
     RUFF_EXIT=$?
     if [ "$RUFF_EXIT" -ne 0 ]; then
-      echo ""
-      echo "❌ BLOCKED - RUFF ERRORS detected"
-      echo "Fix the lint errors above before committing."
-      echo "Tip: Run 'ruff check --fix' to auto-fix some issues."
-      exit
+      if [ -f ".xp-gate/lint-baseline.json" ] && command -v node &> /dev/null; then
+        # Get baseline warnings for changed Python files
+        PY_FILES=$(echo "$CHANGED_FILES" | grep '\.py$' || true)
+        if [ -n "$PY_FILES" ]; then
+          BASELINE_WARNINGS=$(echo "$PY_FILES" | node -e "
+            const fs=require('fs');const b=JSON.parse(fs.readFileSync('.xp-gate/lint-baseline.json','utf8'));
+            const stdin=require('fs').readFileSync('/dev/stdin','utf8').trim();
+            const files=stdin?stdin.split('\n'):[];
+            let total=0;for(const f of files){if(b[f])total+=b[f].totalWarnings||0}
+            console.log(total);
+          ")
+          CURRENT_WARNINGS=$(echo "$RUFF_OUTPUT" | node -e "
+            const d=JSON.parse(require('fs').readFileSync('/dev/stdin','utf8'));
+            console.log(d.reduce((s,f)=>s+(f.messages?f.messages.length:0),0));
+          ")
+          if [ "$CURRENT_WARNINGS" -gt "$BASELINE_WARNINGS" ]; then
+            NEW_WARNINGS=$((CURRENT_WARNINGS - BASELINE_WARNINGS))
+            echo "$RUFF_OUTPUT" | node -e "
+              const d=JSON.parse(require('fs').readFileSync('/dev/stdin','utf8'));
+              for(const f of d){for(const m of f.messages||[]){console.log(m.kind+': '+m.message)}}
+            " | head -30
+            echo ""
+            echo "❌ BLOCKED - ${NEW_WARNINGS} NEW lint error(s) (baseline: ${BASELINE_WARNINGS}, current: ${CURRENT_WARNINGS})"
+            echo "Run 'xp-gate baseline reset' after fixing to update the baseline."
+            exit 1
+          else
+            REDUCED=$((BASELINE_WARNINGS - CURRENT_WARNINGS))
+            if [ "$REDUCED" -gt 0 ]; then
+              echo "✅ PASSED - Lint debt reduced by ${REDUCED} (${BASELINE_WARNINGS} → ${CURRENT_WARNINGS})"
+            else
+              echo "✅ PASSED - No new lint errors (baseline: ${BASELINE_WARNINGS})"
+            fi
+          fi
+        else
+          echo "✅ PASSED - Ruff linting (no Python files to check)."
+        fi
+      else
+        echo "$RUFF_OUTPUT" | node -e "
+          const d=JSON.parse(require('fs').readFileSync('/dev/stdin','utf8'));
+          for(const f of d){for(const m of f.messages||[]){console.log(m.kind+': '+m.message)}}
+        " | head -30
+        echo ""
+        echo "❌ BLOCKED - RUFF ERRORS detected"
+        echo "Fix the lint errors above before committing."
+        echo "Tip: Run 'ruff check --fix' to auto-fix some issues."
+        echo "Tip: Run 'xp-gate baseline create' to establish a lint baseline."
+        exit 1
+      fi
+    else
+      echo "✅ PASSED - Ruff linting."
     fi
-    echo "✅ PASSED - Ruff linting."
     
     # Optional: Type checking with mypy
     if command -v mypy &> /dev/null; then
@@ -394,7 +700,7 @@ elif [ "$PROJECT_LANG" = "python" ]; then
         echo ""
         echo "❌ BLOCKED - MYPI TYPE ERRORS detected"
         echo "Fix the type errors above before committing."
-        exit
+        exit 1
       fi
       echo "✅ PASSED - mypy type checking."
     else
@@ -415,42 +721,80 @@ elif [ "$PROJECT_LANG" = "go" ]; then
       echo ""
       echo "❌ BLOCKED - GOLANGCI-LINT ERRORS detected"
       echo "Fix the lint errors above before committing."
-      exit
+      exit 1
     fi
     echo "✅ PASSED - golangci-lint."
   fi
 
-elif [ "$PROJECT_LANG" = "shell" ] || echo "$CHANGED_FILES" | grep -qE '\.sh$' || find . -name "*.sh" -type f | head -n 1; then
-  # Shell: For shell files, use shellcheck directly
-  if command -v shellcheck &> /dev/null; then
-    echo "Running shellcheck on shell scripts..."
-    shellcheck $(echo "$CHANGED_FILES" | grep '\.sh$' || echo "."/*.sh ./**/**/*.sh 2>/dev/null) 2>&1 | head -30
+elif [ "$PROJECT_LANG" = "shell" ] || echo "$CHANGED_FILES" | grep -qE '\.sh$'; then
+  # Shell: check staged shell files only. Installed hook adapters are infrastructure,
+  # not project changes, and should not be linted on unrelated commits.
+  SHELL_FILES=$(echo "$CHANGED_FILES" | grep '\.sh$' || true)
+
+  if [ -z "$SHELL_FILES" ]; then
+    echo "✅ PASSED - No staged shell scripts to check."
+  elif command -v shellcheck &> /dev/null; then
+    echo "Running shellcheck on staged shell scripts..."
+    SHELLCHECK_OUTPUT=$(shellcheck -f json $SHELL_FILES 2>&1)
     SHELLCHECK_EXIT=$?
     if [ "$SHELLCHECK_EXIT" -ne 0 ]; then
-      echo ""
-      echo "❌ BLOCKED - SHELLCHECK ERRORS detected"
-      echo "Fix the shell script errors above."
-      exit
-    fi
-    echo "✅ PASSED - Shellcheck completed."
-  else
-    echo "ℹ️  shellcheck not available - Attempting basic syntax check"
-    # Basic check for shell script files
-    SHELL_FILES=$(echo "$CHANGED_FILES" | grep '\.sh$' || find . -name "*.sh" -type f 2>/dev/null | head -10)
-    if [ -n "$SHELL_FILES" ]; then
-      for sh_file in $SHELL_FILES; do
-        if [ -f "$sh_file" ]; then
-          bash -n "$sh_file"
-          if [ $? -ne 0 ]; then
-            echo "❌ BLOCKED - SYNTAX ERROR in $sh_file"
-            exit
+      if [ -f ".xp-gate/lint-baseline.json" ] && command -v node &> /dev/null; then
+        BASELINE_WARNINGS=$(echo "$SHELL_FILES" | node -e "
+          const fs=require('fs');const b=JSON.parse(fs.readFileSync('.xp-gate/lint-baseline.json','utf8'));
+          const stdin=require('fs').readFileSync('/dev/stdin','utf8').trim();
+          const files=stdin?stdin.split('\n'):[];
+          let total=0;for(const f of files){if(b[f])total+=b[f].totalWarnings||0}
+          console.log(total);
+        ")
+        CURRENT_WARNINGS=$(echo "$SHELLCHECK_OUTPUT" | node -e "
+          const d=JSON.parse(require('fs').readFileSync('/dev/stdin','utf8'));
+          console.log(d.length);
+        ")
+        if [ "$CURRENT_WARNINGS" -gt "$BASELINE_WARNINGS" ]; then
+          NEW_WARNINGS=$((CURRENT_WARNINGS - BASELINE_WARNINGS))
+          echo "$SHELLCHECK_OUTPUT" | node -e "
+            const d=JSON.parse(require('fs').readFileSync('/dev/stdin','utf8'));
+            for(const i of d){console.log(i.file+':'+i.line+': '+i.level+': '+i.message)}
+          " | head -30
+          echo ""
+          echo "❌ BLOCKED - ${NEW_WARNINGS} NEW shellcheck issue(s) (baseline: ${BASELINE_WARNINGS}, current: ${CURRENT_WARNINGS})"
+          echo "Run 'xp-gate baseline reset' after fixing to update the baseline."
+          exit 1
+        else
+          REDUCED=$((BASELINE_WARNINGS - CURRENT_WARNINGS))
+          if [ "$REDUCED" -gt 0 ]; then
+            echo "✅ PASSED - Shellcheck debt reduced by ${REDUCED} (${BASELINE_WARNINGS} → ${CURRENT_WARNINGS})"
+          else
+            echo "✅ PASSED - No new shellcheck issues (baseline: ${BASELINE_WARNINGS})"
           fi
         fi
-      done
-      echo "✅ PASSED - Basic shell script syntax check."
+      else
+        echo "$SHELLCHECK_OUTPUT" | node -e "
+          const d=JSON.parse(require('fs').readFileSync('/dev/stdin','utf8'));
+          for(const i of d){console.log(i.file+':'+i.line+': '+i.level+': '+i.message)}
+        " | head -30
+        echo ""
+        echo "❌ BLOCKED - SHELLCHECK ERRORS detected"
+        echo "Fix the shell script errors above."
+        echo "Tip: Run 'xp-gate baseline create' to establish a lint baseline."
+        exit 1
+      fi
     else
-      echo "✅ PASSED - No shell scripts to check."
+      echo "✅ PASSED - Shellcheck completed."
     fi
+  else
+    echo "ℹ️  shellcheck not available - Attempting basic syntax check"
+    # Basic check for staged shell script files
+    for sh_file in $SHELL_FILES; do
+      if [ -f "$sh_file" ]; then
+        bash -n "$sh_file"
+        if [ $? -ne 0 ]; then
+          echo "❌ BLOCKED - SYNTAX ERROR in $sh_file"
+          exit 1
+        fi
+      fi
+    done
+    echo "✅ PASSED - Basic shell script syntax check."
   fi
 
 else
@@ -484,24 +828,26 @@ else
 fi
 GATE_1_STATUS="PASS"
 GATE_1_TOOL="${PROJECT_LANG}"
+record_gate_audit "gate-1" "code-quality" "$GATE_1_STATUS" "0" "$GATE_1_START"
 
 # ============================================================================
 # GATE 2: Duplicate Code Detection (NEW gate)
 # Uses jscpd, or similar tools, specific to language
 # ============================================================================
-2>&1 echo ""
-2>&1 echo "→ Gate 2: Duplicate code detection..."
+ 2>&1 echo ""
+ 2>&1 echo "→ Gate 2: Duplicate code detection..."
+GATE_2_START=$(gate_start_ms)
 
 if [ "$PROJECT_LANG" = "documentation-only" ]; then
   echo "✅ PASSED - Skipped (no source code to analyze)."
   
 elif [ "$PROJECT_LANG" = "typescript" ]; then
   if ! require_tool "jscpd" "Gate 2" "npm install -D jscpd"; then
-    exit
+    exit 1
   fi
   
   echo "Running jscpd for duplicate code detection..."
-  jscpd --config jscpd.conf.json "$CHANGED_FILES" 2>&1 | head -30
+  jscpd --config jscpd.conf.json $(echo "$CHANGED_FILES" | tr '\n' ' ') 2>&1 | head -30
   JSCPD_EXIT=$?
   if [ "$JSCPD_EXIT" -ne 0 ]; then
     echo "ℹ️  jscpd found duplicated code (warning, not blocking by default)"
@@ -523,12 +869,12 @@ elif [ "$PROJECT_LANG" = "python" ]; then
     ruff check --select=DUP $(echo "$CHANGED_FILES" | grep "\.py$") 2>&1 | head -30
     echo "✅ PASSED - ruff duplicate code check completed."
   else
-    exit
+    exit 1
   fi
 
 elif [ "$PROJECT_LANG" = "go" ]; then
   if ! require_tool "jscpd" "Gate 2" "npm install -D jscpd"; then
-    exit
+    exit 1
   fi
   
   echo "Running jscpd for Go duplicate code detection..."
@@ -550,7 +896,7 @@ else
   SOURCE_FILES=$(echo "$CHANGED_FILES" | grep -E '\.(ts|tsx|js|jsx|py|go|java|scala|kt|cpp|c|h|rs|php|dart|swift)$')
   if [ -n "$SOURCE_FILES" ]; then
     if ! require_tool "jscpd" "Gate 2" "npm install -D jscpd"; then
-      exit
+      exit 1
     fi
     echo "Running jscpd for duplicate code detection..."
     jscpd $SOURCE_FILES 2>&1 | head -15
@@ -560,13 +906,15 @@ else
   fi
 fi
 GATE_2_STATUS="PASS"
+record_gate_audit "gate-2" "duplicate-code" "$GATE_2_STATUS" "0" "$GATE_2_START"
 
 # ============================================================================
 # GATE 3: Cyclomatic Complexity Check (Old Gate 7)
 # Uses lizard - keeps existing logic for consistency
 # ============================================================================
-2>&1 echo ""
-2>&1 echo "→ Gate 3: Cyclomatic complexity..."
+ 2>&1 echo ""
+ 2>&1 echo "→ Gate 3: Cyclomatic complexity..."
+GATE_3_START=$(gate_start_ms)
 
 if [ "$PROJECT_LANG" = "documentation-only" ]; then
   echo "✅ PASSED - Skipped (documentation project)."
@@ -616,19 +964,22 @@ else
       echo "✅ PASSED - No source files to check for complexity."
     fi
   else
-    echo "ℹ️  lizard not installed - Skipping complexity check (non-blocking)"
-    echo "ℹ️  Install with: pip3 install --user lizard"
-    echo "✅ PASSED - Complexity check (SKIP, tool not available)"
+    echo "⚠️  WARN - lizard not installed, complexity check not performed"
+    echo "   Install with: pip install --user lizard"
+    echo "   Gate 3: Complexity check (WARN, tool not available)"
+    GATE_3_STATUS="WARN"
   fi
 fi
 GATE_3_STATUS="PASS"
+record_gate_audit "gate-3" "complexity" "$GATE_3_STATUS" "${CC_WARNINGS:-0}" "$GATE_3_START"
 
 # ============================================================================
 # GATE 4: Principles Checker (Old Gate 6 - Clean Code + SOLID)
 # Reuses existing principles checker logic
 # ============================================================================
-2>&1 echo ""
-2>&1 echo "→ Gate 4: Principles checker (Clean Code + SOLID)..."
+ 2>&1 echo ""
+ 2>&1 echo "→ Gate 4: Principles checker (Clean Code + SOLID)..."
+GATE_4_START=$(gate_start_ms)
 
 if [ "$PROJECT_LANG" = "documentation-only" ]; then
   echo "✅ PASSED - Skipped (documentation project)."
@@ -659,7 +1010,7 @@ else
             echo "  - SOLID principle violations"
             echo "  - architectural violations"
             npx tsx src/principles/index.ts --files $PRINCIPLES_FILES --format console
-            exit
+            exit 1
           fi
           
           echo "✅ PASSED - Principles checker (no errors found)."
@@ -683,13 +1034,15 @@ else
   fi
 fi
 GATE_4_STATUS="PASS"
+record_gate_audit "gate-4" "principles" "$GATE_4_STATUS" "${WARNING_COUNT:-0}" "$GATE_4_START"
 
 # ============================================================================
 # GATE 5: Tests & Coverage Combined (Combines Old Gates 3 - Tests and 4 - Coverage)
 # Uses adapter system to run tests + coverage for language
 # ============================================================================
-2>&1 echo ""
-2>&1 echo "→ Gate 5: Tests & coverage..."
+ 2>&1 echo ""
+ 2>&1 echo "→ Gate 5: Tests & coverage..."
+GATE_5_START=$(gate_start_ms)
 
 if [ "$PROJECT_LANG" = "documentation-only" ]; then
   echo "✅ PASSED - Skipped (documentation project)."
@@ -815,7 +1168,7 @@ else
   # Gate 5b: Mock Density ADVISORY Scan (pure bash — no npx tsx overhead)
   # 30% = ADVISORY, 50% = suggests @mock-justified. Does NOT block commit.
   # ========================================================================
-  CHANGED_TEST_FILES=$(git diff --cached --name-only | grep -E '\.(test|spec)\.(ts|tsx|js|jsx|py|go)$' || true)
+  CHANGED_TEST_FILES=$(git diff --cached --name-only --diff-filter=ACM | grep -E '\.(test|spec)\.(ts|tsx|js|jsx|py|go)$' || true)
 
   if [ -n "$CHANGED_TEST_FILES" ]; then
     echo "Checking mock density in test files..."
@@ -827,7 +1180,8 @@ else
                   'mockResolvedValue' 'mockRejectedValue' 'mockReturnValue' 'mockImplementation' \
                   'createMock' 'mockReset' 'mockClear' 'mockRestore' 'MagicMock' 'unittest\.mock' \
                   '\.patch(' 'gomock' 'mockgen' '.EXPECT()'; do
-          c=$(grep -o -c "$kw" "$test_file" 2>/dev/null || echo "0")
+          c=$(grep -c "$kw" "$test_file" 2>/dev/null)
+          c=${c:-0}
           MOCK_COUNT=$((MOCK_COUNT + c))
         done
 
@@ -873,7 +1227,7 @@ else
       if [ "$TESTS_EXIT_CODE" -ne 0 ]; then
         echo ""
         echo "❌ BLOCKED - Tests FAILED"
-        exit
+        exit 1
       else
         echo "✅ PASSED - Unit tests passed."
       fi
@@ -1073,14 +1427,58 @@ else
     echo "ℹ️  Coverage enforcement not applicable for ${PROJECT_LANG}"
   fi
   echo "✅ PASSED - Coverage check completed."
+
+  # ============================================================================
+  # Stage 3: Per-file coverage check for NEW files (Issue #103)
+  # New files must have ≥80% coverage individually.
+  # ============================================================================
+  if [ "$PROJECT_LANG" = "typescript" ] && [ -f "coverage/coverage-summary.json" ]; then
+    NEW_SOURCE_FILES=$(git diff --cached --name-only --diff-filter=A | grep -E '\.(ts|tsx)$' | grep -v '__tests__' | grep -v '\.test\.' | grep -v '\.spec\.' | grep -v '__snapshots__' | grep -v '\.d\.ts$' || true)
+    if [ -n "$NEW_SOURCE_FILES" ]; then
+      echo ""
+      echo "   └─ Per-file coverage check for new files:"
+      for new_file in $NEW_SOURCE_FILES; do
+        # Normalize path for coverage-summary.json lookup
+        NORMALIZED_PATH=$(echo "$new_file" | sed 's|^\./||')
+        FILE_COV=$(node -e "
+          try {
+            const fs = require('fs');
+            const data = JSON.parse(fs.readFileSync('coverage/coverage-summary.json', 'utf8'));
+            const entry = data['$NORMALIZED_PATH'];
+            if (entry && entry.lines) {
+              console.log(Math.round(entry.lines.pct));
+            } else {
+              console.log('no_data');
+            }
+          } catch(e) { console.log('parse_error'); }
+        " 2>/dev/null)
+        if [ "$FILE_COV" = "no_data" ] || [ "$FILE_COV" = "parse_error" ]; then
+          echo "     ⚠️  $new_file — no coverage data (file may be excluded or not exercised)"
+        elif [ "$FILE_COV" -lt 80 ]; then
+          echo "     ❌ $new_file — ${FILE_COV}% coverage (below 80% threshold)"
+          NEW_FILE_COV_FAIL=true
+        else
+          echo "     ✅ $new_file — ${FILE_COV}% coverage"
+        fi
+      done
+      if [ "${NEW_FILE_COV_FAIL:-false}" = "true" ]; then
+        echo ""
+        echo "❌ BLOCKED - New file(s) below 80% coverage threshold"
+        echo "Add tests to cover the new files before committing."
+        exit 1
+      fi
+    fi
+  fi
 fi
 GATE_5_STATUS="PASS"
+record_gate_audit "gate-5" "tests-coverage" "$GATE_5_STATUS" "0" "$GATE_5_START"
 
 # ============================================================================
 # GATE 6: Architecture & Tech Debt (Combines Old Gate 8 - Boy Scout and Gate 9 - Architecture)
 # ============================================================================
-2>&1 echo ""
-2>&1 echo "→ Gate 6: Architecture & tech debt..."
+ 2>&1 echo ""
+ 2>&1 echo "→ Gate 6: Architecture & tech debt..."
+GATE_6_START=$(gate_start_ms)
 
 # First Part: Architecture Validation (previously Gate 9)
 2>&1 echo "   └─ Architecture validation:"
@@ -1110,18 +1508,34 @@ else
           echo "     Install with: npm install --save-dev @archlinter/cli"
           exit 1
         fi
-        echo "     Running archlint for TypeScript..."
-        ARCHLINT_OUTPUT=$($ARCHLINT_CMD scan . -f table --quiet 2>&1)
-        ARCHLINT_EXIT=$?
-        echo "$ARCHLINT_OUTPUT" | tail -30
-        if [ "$ARCHLINT_EXIT" -ne 0 ]; then
-          echo ""
-          echo "❌ BLOCKED - Architecture violations detected"
-          echo "Fix the architecture violations above before committing."
-          exit 1
-        fi
-        echo "     ✅ TypeScript architecture validation completed."
-        ;;
+         echo "     Running archlint for TypeScript..."
+          # Use diff mode with baseline for ratchet (block only new violations)
+          # Fall back to raw scan if no baseline exists (new project, zero-tolerance)
+          if [ -f ".architecture-baseline.json" ]; then
+            ARCHLINT_OUTPUT=$($ARCHLINT_CMD diff .architecture-baseline.json --fail-on high 2>&1)
+          else
+            ARCHLINT_OUTPUT=$($ARCHLINT_CMD scan . -f table --quiet 2>&1)
+          fi
+         ARCHLINT_EXIT=$?
+         echo "$ARCHLINT_OUTPUT" | tail -30
+         if [ "$ARCHLINT_EXIT" -ne 0 ]; then
+           echo ""
+           echo "❌ BLOCKED - Architecture violations detected"
+           if [ -f ".architecture-baseline.json" ]; then
+             echo "New architecture violations found (baseline ratchet mode)."
+             echo "Fix the new violations above, or update the baseline with: npx @archlinter/cli snapshot -o .architecture-baseline.json"
+           else
+             echo "Fix the architecture violations above before committing."
+             echo "Or generate a baseline for gradual adoption: npx @archlinter/cli snapshot -o .architecture-baseline.json"
+           fi
+           exit 1
+         fi
+         if [ -f ".architecture-baseline.json" ]; then
+           echo "     ✅ TypeScript architecture validation completed (baseline ratchet mode)."
+         else
+           echo "     ✅ TypeScript architecture validation completed (zero-tolerance mode). no baseline found."
+         fi
+         ;;
       "python")
         if [ -f ".import-linter.yml" ] || [ -f "import_linter_config.yml" ]; then
           if require_tool "lint-imports" "Gate 6" "pip install import-linter"; then
@@ -1131,7 +1545,7 @@ else
           else
             echo "     ❌ BLOCKED - import-linter not installed"
             echo "     Install with: pip install import-linter"
-            exit
+            exit 1
           fi
         else
           echo "     ℹ️  No .import-linter.yml found - skipping Python architecture"
@@ -1147,7 +1561,7 @@ else
           else
             echo "     ❌ BLOCKED - arch-go not installed"
             echo "     Install with: go install github.com/arch-go/arch-go@latest"
-            exit
+            exit 1
           fi
         else
           echo "     ℹ️  No arch-go.yaml found - skipping Go architecture"
@@ -1183,10 +1597,11 @@ else
     else
       echo ""
       echo "❌ ARCHITECTURE CONFIG MISSING - COMMIT BLOCKED"
-      echo "   Required configuration file 'architecture.yaml' is NOT found."
+      echo "   Required configuration file (.archlint.yaml / architecture.yaml) is NOT found."
       echo "   Architecture Quality Gate requires explicit architecture constraints."
       echo ""
-      echo "   Create architecture.yaml with:"
+      echo "   Create .archlint.yaml with: npx archlint init --no-interactive"
+      echo "   Or architecture.yaml for custom Clean Architecture layer definitions:"
       echo "     layers:"
       echo "       - name: api"
       echo "         paths: [\"src/api/**\"]"
@@ -1199,7 +1614,7 @@ else
       echo ""
       echo "   After creating architecture.yaml, retry the commit."
       echo "   (To skip with warning, create .architecture-skip file)"
-      exit
+      exit 1
     fi
   fi
 fi
@@ -1243,7 +1658,7 @@ else
           echo "  - NEW files: must have zero warnings"
           echo "  - MODIFIED files: cannot increase warnings from baseline"
           echo "  - Files with ≤5 warnings: must clear to zero"
-          exit
+          exit 1
         fi
         
         # Check output for violations
@@ -1253,7 +1668,7 @@ else
           echo "$BOY_SCOUT_OUTPUT"
           echo ""
           echo "❌ BLOCKED - Boy Scout Rule violations detected ($VIOLATION_COUNT)"
-          exit
+          exit 1
         fi
         
         echo "     ✅ PASSED - Boy Scout Rule compliance."
@@ -1269,6 +1684,7 @@ else
   fi
 fi
 GATE_6_STATUS="PASS"
+record_gate_audit "gate-6" "architecture-boy-scout" "$GATE_6_STATUS" "${BS_BLOCKED:-0}" "$GATE_6_START"
 
 # ============================================================================
 
@@ -1277,8 +1693,9 @@ GATE_6_STATUS="PASS"
 # Detects security issues in Infrastructure as Code files
 # Tools: checkov (recommended), hadolint, kube-score, tflint
 # ============================================================================
-2>&1 echo ""
-2>&1 echo "→ Gate 7: IaC Security Scanning (Terraform, Kubernetes, Docker)..."
+ 2>&1 echo ""
+ 2>&1 echo "→ Gate 7: IaC Security Scanning (Terraform, Kubernetes, Docker)..."
+GATE_7_START=$(gate_start_ms)
 
 # Check if any IaC files are changed
 IAC_FILES=$(git diff --cached --name-only --diff-filter=ACM 2>/dev/null | grep -E "\.(tf|yaml|yml)$|Dockerfile" || true)
@@ -1306,7 +1723,7 @@ else
       echo "Fix the security issues above before committing."
       echo "Tip: Install checkov for comprehensive IaC scanning: pip install checkov"
       GATE_7_STATUS="FAIL"
-      exit
+      exit 1
     fi
   else
     echo "ℹ️  SKIP - IaC adapter not found"
@@ -1314,6 +1731,7 @@ else
     GATE_7_STATUS="SKIP"
   fi
 fi
+record_gate_audit "gate-7" "iac-security" "$GATE_7_STATUS" "0" "$GATE_7_START"
 
 
 # GATE 8: Secret Scanning (gitleaks)
@@ -1321,8 +1739,9 @@ fi
 # Tool: gitleaks -- https://github.com/gitleaks/gitleaks
 # ============================================================================
 
-2>&1 echo ""
-2>&1 echo "→ Gate 8: Secret scanning (gitleaks)..."
+ 2>&1 echo ""
+ 2>&1 echo "→ Gate 8: Secret scanning (gitleaks)..."
+GATE_8_START=$(gate_start_ms)
 
 # Gitleaks availability check
 GITLEAKS_CMD=""
@@ -1357,7 +1776,7 @@ if [ -n "$GITLEAKS_CMD" ]; then
     echo "  3. Use git secret or vault for sensitive data"
     echo ""
     echo "See: https://github.com/gitleaks/gitleaks"
-    exit
+    exit 1
   else
     echo "     ⚠️  gitleaks exited with code $GITLEAKS_EXIT - skipping gate"
     echo "     ✅ Secret Scanning (SKIP, gitleaks error)"
@@ -1369,6 +1788,7 @@ else
   echo "     ✅ Secret Scanning (SKIP, gitleaks not installed)"
   GATE_8_STATUS="SKIP"
 fi
+record_gate_audit "gate-8" "secret-scanning" "$GATE_8_STATUS" "0" "$GATE_8_START"
 
 # Switch back to original directory if we were in a subdirectory
 if [ -n "$ORIGINAL_DIR" ]; then
@@ -1381,8 +1801,9 @@ fi
 # Tool: semgrep -- https://semgrep.dev
 # ============================================================================
 
-2>&1 echo ""
-2>&1 echo "→ Gate 9: Semgrep SAST Security Scan..."
+ 2>&1 echo ""
+ 2>&1 echo "→ Gate 9: Semgrep SAST Security Scan..."
+GATE_9_START=$(gate_start_ms)
 
 GATE_9_STATUS="PASS"
 
@@ -1395,11 +1816,11 @@ elif [ -f "$HOME/.local/bin/semgrep" ]; then
 fi
 
 if [ -z "$SEMGREP_CMD" ]; then
-  echo "     ℹ️  semgrep not installed — SAST scanning unavailable"
+  echo "     ⚠️  WARN - semgrep not installed — SAST scanning unavailable"
   echo "     Install: brew install semgrep | pip install semgrep"
   echo "     Pre-cache rules: semgrep --config=p/security-audit"
-  echo "     ✅ Semgrep SAST (SKIP, semgrep not installed)"
-  GATE_9_STATUS="SKIP"
+  echo "     Gate 9: SAST Security (WARN, semgrep not installed)"
+  GATE_9_STATUS="WARN"
 else
   # Get staged files filtered to Semgrep-supported languages
   SEMGREP_FILES=$(git diff --cached --name-only --diff-filter=ACM 2>/dev/null | grep -E '\.(ts|tsx|js|jsx|py|go|java|c|cpp|cs|rb|php|scala|swift)$' || true)
@@ -1485,7 +1906,7 @@ except:
         echo "$FINDING_DETAILS"
         echo "  Run 'semgrep scan --config=p/security-audit' to review all findings."
         GATE_9_STATUS="FAIL"
-        exit
+        exit 1
       else
         echo ""
         echo "     ✅ PASSED - No critical/high vulnerabilities"
@@ -1503,9 +1924,7 @@ except:
     fi
   fi
 fi
-
-# ============================================================================
-# QUALITY REPORT GENERATION
+record_gate_audit "gate-9" "sast-security" "$GATE_9_STATUS" "0" "$GATE_9_START"
 # ============================================================================
 
 generate_quality_report() {
@@ -1522,7 +1941,7 @@ generate_quality_report() {
 
   for gate in 1 2 3 4 5 6 7 8 9; do
     local status_var="GATE_${gate}_STATUS"
-    if [ "${!status_var}" = "PASS" ] || [ "${!status_var}" = "SKIP" ]; then
+    if [ "${!status_var}" = "PASS" ]; then
       PASSED_COUNT=$((PASSED_COUNT + 1))
     fi
   done
@@ -1628,6 +2047,31 @@ generate_quality_report() {
 }
 ENDJSON
 
+  # ── Persistent per-run report (Issue #101) ────────────────────────────────────────
+  local REPORTS_DIR=".xp-gate/reports/pre-commit"
+  local REPORT_TS
+  REPORT_TS=$(date -u +"%Y-%m-%d-%H%M%S")
+  local PERSISTED_REPORT_FILE="${REPORTS_DIR}/${REPORT_TS}.json"
+  mkdir -p "$REPORTS_DIR"
+  python3 - <<PY 2>/dev/null || cp "$REPORT_FILE" "$PERSISTED_REPORT_FILE"
+import json
+from pathlib import Path
+branch_report = json.loads(Path('$REPORT_FILE').read_text())
+changed_files = '''${CHANGED_FILES:-}'''.splitlines()
+report = {
+  'timestamp': '$TIMESTAMP',
+  'trigger': 'pre-commit',
+  'branch': '$BRANCH',
+  'commit': '$COMMIT_HASH',
+  'changed_files': [f for f in changed_files if f],
+  'overall': branch_report.get('overall', {}),
+  'gates': branch_report.get('gates', {}),
+  'warnings': [],
+  'errors': [],
+}
+Path('$PERSISTED_REPORT_FILE').write_text(json.dumps(report, indent=2) + '\n')
+PY
+
   # ── History append (unchanged — append-only for trend) ────────────────────────────
   local GATES_JSON="{"
   GATES_JSON="${GATES_JSON}\"gate1\":{\"status\":\"${GATE_1_STATUS:-PASS}\",\"name\":\"Code Quality\"},"
@@ -1661,6 +2105,7 @@ ENDJSON
   echo ""
   echo "  Overall Score: $SCORE/10 | $PASSED_COUNT/$TOTAL_GATES gates passed"
   echo "  Branch status: $REPORT_FILE"
+  echo "  Run report: $PERSISTED_REPORT_FILE"
   echo "  History saved: $HISTORY_FILE"
   echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
   echo ""
@@ -1668,4 +2113,4 @@ ENDJSON
 
 generate_quality_report
 
-exit
+exit 0
