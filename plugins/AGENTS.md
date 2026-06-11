@@ -1,9 +1,9 @@
 # PLUGINS KNOWLEDGE BASE
 
 **Generated:** 2026-06-11
-**Commit:** 5fa32fd
+**Commit:** c18f82b
 **Branch:** main
-**Version:** 0.8.8.0
+**Version:** 0.8.9.0
 
 ## OVERVIEW
 Cross-platform plugin system for Claude Code, OpenCode, and Qoder. Shared skills + platform-specific hooks/tooling. **The three platforms currently ship inconsistent skill sets — see "Known Issues" below.**
@@ -86,11 +86,12 @@ bash scripts/test-plugins.sh
 
 ## KNOWN ISSUES (filed as GitHub issues during 2026-06-09 audit)
 
-| # | Issue | Severity |
-|---|-------|----------|
-| 1 | `plugins/qoder/` is missing a manifest file (`plugin.json` / `qoder.json`) — the plugin can't be registered with Qoder host as-is | High |
-| 2 | `plugins/claude-code/skills/` and `plugins/opencode/skills/` bundle only `sprint-flow`; docs say "6 skills" / "7 skills". `scripts/build-plugin.sh` or `scripts/copy-skills.sh` isn't copying the full set for these two platforms | High |
-| 3 | None of the three platforms ships the new `test-driven-development` skill (added in 0.8.x) | Medium |
+| # | Issue | Severity | Status |
+|---|-------|----------|--------|
+| 1 | `plugins/qoder/` is missing a manifest file (`plugin.json` / `qoder.json`) — the plugin can't be registered with Qoder host as-is | High | ✅ Fixed in commit `1d2cff8` (#202) |
+| 2 | `plugins/claude-code/skills/` and `plugins/opencode/skills/` bundle only `sprint-flow`; docs say "6 skills" / "7 skills". `scripts/build-plugin.sh` or `scripts/copy-skills.sh` isn't copying the full set for these two platforms | High | ✅ Fixed in commit `1d2cff8` (#203) |
+| 3 | None of the three platforms ships the new `test-driven-development` skill (added in 0.8.x) | Medium | ✅ Fixed in commit `1d2cff8` (#203) |
+| 4 | OpenCode plugin's `gate-check` and `gate-arch` tools shell out to `xp-gate check` and `npx archlint check` — neither subcommand/package exists as advertised. Tools silently no-op or crash | High | ✅ Fixed in 0.8.9 (#208): new `xp-gate check/principles/arch` subcommands + plugin shell-out + npx-tsx fallback |
 
 See root `AGENTS.md` → "Known Drift" #6, #7 for full context.
 

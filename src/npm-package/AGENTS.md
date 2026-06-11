@@ -1,12 +1,12 @@
 # SRC/NPM-PACKAGE KNOWLEDGE BASE
 
 **Generated:** 2026-06-11
-**Commit:** 5fa32fd
+**Commit:** c18f82b
 **Branch:** main
-**Version:** 0.8.8.0
+**Version:** 0.8.9.0
 
 ## OVERVIEW
-npm distribution package — zero-install CLI for xp-gate. Published as `@boyingliu01/xp-gate` on the public npm registry. Bundles hooks + 13 language adapters + 8 skills + 3 platform plugins at `prepack` time. Registers **≥11 CLI subcommands** (older docs said 8; tracked as drift).
+npm distribution package — zero-install CLI for xp-gate. Published as `@boyingliu01/xp-gate` on the public npm registry. Bundles hooks + 13 language adapters + 8 skills + 3 platform plugins at `prepack` time. Registers **≥15 CLI subcommands** (was ≥11 before 0.8.9; `check`/`principles`/`arch` added for OpenCode-plugin parity, fixes #208).
 
 ## STRUCTURE
 ```
@@ -44,7 +44,7 @@ src/npm-package/
 ## WHERE TO LOOK
 | Task | Location | Notes |
 |------|----------|-------|
-| CLI entry | bin/xp-gate.js | Dispatches ≥11 subcommands |
+| CLI entry | bin/xp-gate.js | Dispatches ≥15 subcommands |
 | init (per-project install) | lib/init.js | Copies hooks + adapters into the consumer repo |
 | setup-global | lib/init.js (mode flag) | Installs adapters under `~/.config/xp-gate/` |
 | uninstall | lib/uninstall.js | Reverse of init; `--dry-run --force --local --global` |

@@ -268,7 +268,12 @@ bash scripts/install-all.sh
 | `xp-gate uninstall-skill <name> --force` | 卸载 Skill |
 | `xp-gate audit [--tail \| --stats \| record]` | 查看/记录 gate 审计日志 |
 | `xp-gate ui-review` | UI/视觉改动 review（委托给 ui-review.ts） |
+| `xp-gate check <path> [--gates principles,arch]` | 在指定路径上运行用户可调用的质量门禁 (Gate 4 + Gate 6)。**v0.8.9+**：同名 OpenCode 工具 `gate-check` 即调用此命令。修复 #208。 |
+| `xp-gate principles <path> [--format console\|json\|sarif]` | 单独运行 Clean Code + SOLID 检查器 (Gate 4)。OpenCode 工具 `gate-principles` 即调用此命令。修复 #208。 |
+| `xp-gate arch [--config <path>]` | 单独运行架构合规检查 (Gate 6, 读取 architecture.yaml)。OpenCode 工具 `gate-arch` 即调用此命令。修复 #208。 |
 | `xp-gate --version` | 查看版本 |
+
+> **关于 `gate-check` / `gate-principles` / `gate-arch`**：这三个名字既是 OpenCode plugin 工具（在 OpenCode 会话内自动可用），也是 `xp-gate` CLI 的子命令（任意 shell 都可调用）。OpenCode plugin 内部会优先 shell out 到 `xp-gate` CLI；未安装时回退到直接调用源码 (`npx -y tsx src/principles/index.ts` / `npx -y @archlinter/cli`)。两个调用路径输出一致。
 
 ---
 
