@@ -192,14 +192,14 @@ Subcommands registered in 0.8.8.0 (verified against bin source):
 
 | # | What | Source of truth | Stale doc | Plan |
 |---|------|-----------------|-----------|------|
-| 1 | Gate count: docs say 6, script runs 10 (Gate 0–9) | `githooks/pre-commit` | README.md, CAPABILITIES.md | Re-write README "Quality Gates" section to enumerate Gate 0–9 + the conceptual grouping. |
-| 2 | Pre-push gate count: docs say "Gate M + Delphi", reality = Gate M + M2 + M3 + Delphi | `githooks/pre-push` | README.md | Add Gate M2/M3 rows to README pre-push table. |
+| 1 | Gate count: docs say 6, script runs 10 (Gate 0–9) | `githooks/pre-commit` | README.md, CAPABILITIES.md | ✅ Fixed: README enumerates Gate 0-9 with conceptual grouping note. |
+| 2 | Pre-push gate count: docs say "Gate M + Delphi", reality = Gate M + M2 + M3 + Delphi | `githooks/pre-push` | README.md | ✅ Fixed: README pre-push table includes Gate M2/M3 rows. |
 | 3 | Delphi consensus threshold: docs say 95%, SKILL.md uses 91% | — | — | ✅ Fixed: unified to ≥90% across all docs and skills. |
-| 4 | Sprint Flow phase count: docs say 7-phase, reality = 11 phases (-1, -0.5, 0..8) | `skills/sprint-flow/SKILL.md` | README.md "Sprint Flow 全流程" section | Re-draw the ASCII pipeline; update labels. |
+| 4 | Sprint Flow phase count: docs say 7-phase, reality = 11 phases (-1, -0.5, 0..8) | `skills/sprint-flow/SKILL.md` | README.md "Sprint Flow 全流程" section | ✅ Fixed: README ASCII pipeline shows all 11 phases with correct labels. |
 | 5 | CLI command count: docs say 8, source registers ≥15 (added check/principles/arch in 0.8.9 for #208) | `src/npm-package/bin/xp-gate.js` | Root README CLI table, MANIFEST.md | ✅ Both refreshed in 0.8.9 fix-pack. |
-| 6 | plugins/qoder/ missing manifest file | repo state | Plugin docs claim qoder is supported | Add `plugin.json` (or `qoder.json`) so the plugin can be installed. |
+| 6 | plugins/qoder/ missing manifest file | repo state | Plugin docs claim qoder is supported | ✅ Fixed: `plugins/qoder/plugin.json` exists with valid manifest. |
 | 7 | claude-code/ + opencode/ ship only `sprint-flow` skill; docs say 6-7 skills | `src/npm-package/scripts/sync-package-content.js` CORE_SKILLS (8 entries) | README "方式 -1" section | ✅ Fixed: `build-plugin.sh` + `copy-skills.sh` + `sync-package-content.js` all ship all 8 skills for claude-code/opencode/qoder. |
-| 8 | README lists `adapter-c.sh` but no `c.sh` exists in `githooks/adapters/` | repo state | README "语言支持" table | Either drop the C row from README, or add a real `c.sh` adapter. |
-| 9 | CHANGELOG: v0.8.2 marked "Unreleased" while v0.8.8 is already shipped | `CHANGELOG.md` | CHANGELOG order | Re-order entries so released versions come before any "Unreleased" header. |
+| 8 | README lists `adapter-c.sh` but no `c.sh` exists in `githooks/adapters/` | repo state | README "语言支持" table | ✅ Fixed: README removed C row, no `adapter-c.sh` reference. |
+| 9 | CHANGELOG: v0.8.2 marked "Unreleased" while v0.8.8 is already shipped | `CHANGELOG.md` | CHANGELOG order | ✅ Fixed: v0.8.2 now has date ("2026-06-08") with explanation note about prior "Unreleased" error. |
 | 10 | Root AGENTS.md (this file before regen) said v0.8.1 / 2026-05-30 / commit 4517f2b | This file before this commit | This file | Fixed in this commit. Confirms the staleness pattern across all AGENTS.md mirrors — re-run `/init-deep` whenever VERSION bumps a minor digit. |
 
