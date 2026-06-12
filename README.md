@@ -7,7 +7,7 @@
 [![Sprint Flow](https://img.shields.io/badge/Sprint%20Flow-11%20Phases-purple)](./skills/sprint-flow)
 [![npm package](https://img.shields.io/badge/npm%20registry-npm%20install%20--g%20%40boyingliu01%2Fxp--gate-blue?logo=npm)](src/npm-package)
 
-> **v0.8.1**: xp-gate 已从 GitHub Packages 迁移到公共 npm registry。新增 `xp-gate uninstall` / `doctor` / `migrate` 命令。旧版用户请阅读下方迁移指南。
+> **v0.8.1**: xp-gate 已从 GitHub Packages 迁移到公共 npm registry。新增 `xp-gate uninstall` / `doctor` / `migrate` / `check` / `principles` / `arch` 命令。
 
 ---
 
@@ -23,58 +23,6 @@
 8. [配置说明](#配置说明)
 9. [贡献指南](#贡献指南)
 10. [许可证](#许可证)
-
----
-
-## 迁移指南 (v0.4.x → v0.5.x)
-
-旧版 0.4.x 用户（通过 GitHub Packages 安装）请按以下步骤迁移到公共 npm registry：
-
-### Step 1: 卸载旧版本
-
-```bash
-# 卸载 GitHub Packages 版本
-npm uninstall -g @boyingliu01/xp-gate
-npm uninstall -g xp-gate
-```
-
-### Step 2: 清理旧 PAT Token
-
-旧版需要在 `~/.npmrc` 中配置 GitHub PAT token，新版已不需要。请清理旧配置：
-
-**GNU sed (Linux):**
-```bash
-sed -i '/npm\.pkg\.github\.com/d' ~/.npmrc
-```
-
-**BSD sed (macOS):**
-```bash
-sed -i '' '/npm\.pkg\.github\.com/d' ~/.npmrc
-```
-
-**PowerShell (Windows):**
-```powershell
-(Get-Content $env:USERPROFILE\.npmrc) | Where-Object { $_ -notmatch 'npm\.pkg\.github\.com' } | Set-Content $env:USERPROFILE\.npmrc
-```
-
-**Node.js (跨平台推荐):**
-```bash
-node -e "const fs=require('fs'),p=require('path').join(require('os').homedir(),'.npmrc');if(fs.existsSync(p)){fs.writeFileSync(p,fs.readFileSync(p,'utf8').split('\n').filter(l=>!l.includes('npm.pkg.github.com')).join('\n'))}"
-```
-
-### Step 3: 安装新版
-
-```bash
-# 直接从公共 npm 安装 scoped 包，无需 PAT！
-npm install -g @boyingliu01/xp-gate
-```
-
-### Step 4: 初始化项目
-
-```bash
-cd your-project
-xp-gate init
-```
 
 ---
 
