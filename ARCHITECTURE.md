@@ -35,7 +35,7 @@ XP-Gate 将确定性质量门禁（纯代码）与 AI 智能评审（多专家�
 │   │   SKILL.md      │  │   SKILL.md      │  │   SKILL.md      │            │
 │   │                 │  │                 │  │                 │            │
 │   │ 11 Phase Flow   │  │ 2 Expert Modes  │  │ 2 Phase Check   │            │
-│   │ Output Contract │  │ Consensus >=91% │  │ Freeze/Unfreeze │            │
+│   │ Output Contract │  │ Consensus >=90% │  │ Freeze/Unfreeze │            │
 │   └─────────────────┘  └─────────────────┘  └─────────────────┘            │
 │                                                                              │
 │   Skill = Markdown + Output Contract (机器可解析的 JSON Schema)              │
@@ -370,7 +370,7 @@ Modes:
     - 输出: .code-walkthrough-result.json
 
 Experts: 2-3 位来自不同提供商的模型
-Consensus: >=91% 一致性
+Consensus: >=90% 一致性
 Rounds: 多轮直到 APPROVED 或达到 max_rounds
 ```
 
@@ -610,7 +610,7 @@ git push
     { "id": "A", "name": "架构专家", "model": "deepseek-v4-pro" },
     { "id": "B", "name": "技术专家", "model": "kimi-k2.6" }
   ],
-  "consensus_threshold": 0.91,
+  "consensus_threshold": 0.90,
   "max_rounds": 5
 }
 ```
@@ -752,7 +752,7 @@ Delphi 方法 (兰德公司开发) 相比单一 AI 评审有显著优势：
 |------|---------|---------------|
 | 偏见避免 | 容易受训练数据偏见影响 | 匿名评审避免锚定效应 |
 | 覆盖度 | 单点视角 | 多维度交叉验证 |
-| 一致性 | 波动较大 | >=91% 统计共识 |
+| 一致性 | 波动较大 | >=90% 统计共识 |
 | 置信度 | 主观判断 | 量化的 confidence 评分 |
 
 **关键设计**:

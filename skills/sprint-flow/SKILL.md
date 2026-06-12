@@ -247,7 +247,7 @@ ISOLATE → AUTO-ESTIMATE → THINK → PLAN → [GITHOOKS-GATE] → BUILD → R
 ```
 
 **Hard Gates**:
-- **Phase 0→1**: Design must be APPROVED by delphi-review (≥91% consensus)
+- **Phase 0→1**: Design must be APPROVED by delphi-review (≥90% consensus)
 - **Phase 1→2**: GITHOOKS-GATE (hooks must be installed) + DELPHI-GATE (spec must be APPROVED)
 - **Phase 4→5**: User acceptance must be completed (mandatory manual step)
 - **Phase 5→6**: feedback-log.md must exist (HARD-GATE)

@@ -6,7 +6,7 @@
 **Version:** 0.8.9.0
 
 ## OVERVIEW
-**11-phase** development pipeline: ISOLATE → AUTO-ESTIMATE → THINK → PLAN → BUILD → REVIEW → USER ACCEPTANCE → FEEDBACK → SHIP → LAND → CLEANUP. Phase 2 default build mode is **ralph-loop** (REQ-level iteration, 40-67% token savings vs parallel). HARD-GATE in Phase 1: design must pass Delphi review (≥91% consensus) before any coding.
+**11-phase** development pipeline: ISOLATE → AUTO-ESTIMATE → THINK → PLAN → BUILD → REVIEW → USER ACCEPTANCE → FEEDBACK → SHIP → LAND → CLEANUP. Phase 2 default build mode is **ralph-loop** (REQ-level iteration, 40-67% token savings vs parallel). HARD-GATE in Phase 1: design must pass Delphi review (≥90% consensus) before any coding.
 
 > **Doc drift**: README/CAPABILITIES still describe a "7-phase" pipeline. The canonical 11-phase model lives in `SKILL.md` and is what actually executes. See root `AGENTS.md` → "Known Drift" #4.
 
@@ -58,7 +58,7 @@ skills/sprint-flow/
 | -1 | ISOLATE | Isolate working tree / worktree creation | — |
 | -0.5 | AUTO-ESTIMATE | Sizing pass; emits estimate template | — |
 | 0 | THINK | brainstorming → CONTEXT.md + ADR | — |
-| 1 | PLAN | autoplan → delphi-review → specification.yaml | **HARD-GATE**: design must reach ≥91% Delphi consensus |
+| 1 | PLAN | autoplan → delphi-review → specification.yaml | **HARD-GATE**: design must reach ≥90% Delphi consensus |
 | 2 | BUILD | ralph-loop (REQ-level, default) + TDD + test-spec-alignment | — |
 | 3 | REVIEW | code-walkthrough + QA + benchmark | — |
 | 4 | USER ACCEPTANCE | Manual verification | — |
@@ -69,7 +69,7 @@ skills/sprint-flow/
 
 ## CONVENTIONS
 - **ralph-loop is Phase 2 default**. Each REQ runs in a clean context (no linear accumulation), saving 40-67% tokens vs parallel mode.
-- **delphi-review HARD-GATE in Phase 1**: design must reach ≥91% consensus across ≥2 model providers, domestic models only. Unapproved → BLOCK coding.
+- **delphi-review HARD-GATE in Phase 1**: design must reach ≥90% consensus across ≥2 model providers, domestic models only. Unapproved → BLOCK coding.
 - **`learn` is called twice**: once per REQ in Phase 2 (ralph-loop internal, `progress.log` permanent/contextual classification) and once in Phase 5 (Sprint-level retro).
 - **Phase isolation**: each phase has explicit entry/exit criteria documented in its `references/phase-*.md` file.
 - **Emergent Requirements** discovered in Phase 4 (USER ACCEPTANCE) are explicitly captured via `templates/emergent-issues-template.md` — never silently merged.
@@ -81,7 +81,7 @@ skills/sprint-flow/
 - Do NOT enter Phase 1 (PLAN) without completing Phase 0 (THINK).
 - Do NOT implement before design is APPROVED — Phase 1 must reach Delphi consensus first.
 - Do NOT merge an Emergent Requirement into the original Sprint silently — capture it via the template.
-- Do NOT terminate Delphi review before ≥91% consensus or 5 rounds, whichever first.
+- Do NOT terminate Delphi review before ≥90% consensus or 5 rounds, whichever first.
 
 ## UNIQUE STYLES
 - **11 phases** including negative-numbered pre-phases (-1, -0.5) — intentional, captures the work that happens before "real" coding starts.

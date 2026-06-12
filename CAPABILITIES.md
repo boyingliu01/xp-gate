@@ -6,7 +6,7 @@
 
 ## 1. Overview
 
-XP-Gate 整合质量门禁、AI 多专家评审和 Sprint 流程编排三大核心模块。质量门禁在每次 `git commit` 时自动运行 10 项检查 (Gate 0-9，按脚本数字编号；旧文档以 "6 道门禁" 作概念分组)，每次 `git push` 自动运行 Gate M / M2 / M3 + Delphi 代码走查校验。任何失败都会阻止提交或推送。Delphi Review 采用多轮匿名评审机制，直到所有专家达成共识（≥91%）。Sprint Flow 提供一键式 11 阶段 (Phase -1 ~ Phase 8) 完整开发流程编排，从需求探索到发布部署全程自动化。
+XP-Gate 整合质量门禁、AI 多专家评审和 Sprint 流程编排三大核心模块。质量门禁在每次 `git commit` 时自动运行 10 项检查 (Gate 0-9，按脚本数字编号；旧文档以 "6 道门禁" 作概念分组)，每次 `git push` 自动运行 Gate M / M2 / M3 + Delphi 代码走查校验。任何失败都会阻止提交或推送。Delphi Review 采用多轮匿名评审机制，直到所有专家达成共识（≥90%）。Sprint Flow 提供一键式 11 阶段 (Phase -1 ~ Phase 8) 完整开发流程编排，从需求探索到发布部署全程自动化。
 
 ---
 
@@ -24,7 +24,7 @@ XP-Gate 整合质量门禁、AI 多专家评审和 Sprint 流程编排三大核�
 | | 代码覆盖率 | ✅ 完全支持 | Gate 5: ≥80% 阈值强制检查 |
 | | 架构验证 | ✅ 完全支持 | Gate 6: archlint/import-linter/arch-go 层边界检查 |
 | | 童子军规则 | ✅ 完全支持 | Gate 6: 差异化警告管理，新文件零容忍 |
-| **AI 评审** | Delphi 设计评审 | ✅ 完全支持 | 多轮匿名评审，共识阈值 ≥91% |
+| **AI 评审** | Delphi 设计评审 | ✅ 完全支持 | 多轮匿名评审，共识阈值 ≥90% |
 | | Code Walkthrough | ✅ 完全支持 | git push 前代码走查验证 |
 | | 测试规范对齐 | ✅ 完全支持 | 两阶段验证，Phase 2 freeze 保护 |
 | **Sprint Flow** | Phase 0 Think | ✅ 完全支持 | brainstorming 需求探索 |
@@ -97,7 +97,7 @@ Phase 0: THINK ───────┤
                       │
 Phase 1: PLAN ────────┤
   ├─ autoplan         │
-  ├─ delphi-review    │ ← HARD-GATE (≥91% 共识才能进入 Phase 2)
+  ├─ delphi-review    │ ← HARD-GATE (≥90% 共识才能进入 Phase 2)
   └─ specification    │
                       │
 Phase 2: BUILD ───────┤
@@ -226,7 +226,7 @@ XP-Gate 集成的 AI Skills 体系：
 **强制要求**:
 - 至少 2 家不同厂商模型
 - 禁止使用 Anthropic/OpenAI/Google 国外模型
-- 共识阈值 ≥91%
+- 共识阈值 ≥90%
 
 ---
 

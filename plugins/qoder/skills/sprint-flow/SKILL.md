@@ -1,5 +1,6 @@
 ---
 name: sprint-flow
+version: 1.0.0
 description: >
   One-Shot Sprint 自动流水线。单一入口，自动串联 Think → Plan → Build → 
   Review → Ship 流程。整合 brainstorming + autoplan + delphi-review + TDD +
@@ -12,6 +13,7 @@ description: >
   - "start sprint"
   - "一键开发"
   - "/sprint-flow"
+  触发后第一行输出: `Sprint Flow: ISOLATE → AUTO-ESTIMATE → THINK → PLAN → BUILD → REVIEW → USER ACCEPTANCE → FEEDBACK → SHIP → LAND → CLEANUP`
   用法: /sprint-flow "[需求描述]"
   示例: /sprint-flow "开发访谈机器人，支持多轮对话"
   可选参数:
@@ -29,6 +31,24 @@ description: >
   --status: 查看当前 Sprint 进度看板（不执行任何阶段，仅读取 sprint-state.json 并渲染进度）
   Use when asked to "开发新功能", "实现 X", "start sprint", "一键开发", or "/sprint-flow" for end-to-end feature development.
 maturity: beta
+triggers:
+  - "/sprint-flow"
+  - "start sprint"
+  - "开发新功能"
+  - "实现 X"
+  - "一键开发"
+workflow_steps:
+  - "Phase -1: ISOLATE"
+  - "Phase -0.5: AUTO-ESTIMATE"
+  - "Phase 0: THINK"
+  - "Phase 1: PLAN"
+  - "Phase 2: BUILD"
+  - "Phase 3: REVIEW"
+  - "Phase 4: USER ACCEPTANCE"
+  - "Phase 5: FEEDBACK"
+  - "Phase 6: SHIP"
+  - "Phase 7: LAND"
+  - "Phase 8: CLEANUP"
 ---
 
 ## Triggers
@@ -227,7 +247,7 @@ ISOLATE → AUTO-ESTIMATE → THINK → PLAN → [GITHOOKS-GATE] → BUILD → R
 ```
 
 **Hard Gates**:
-- **Phase 0→1**: Design must be APPROVED by delphi-review (≥91% consensus)
+- **Phase 0→1**: Design must be APPROVED by delphi-review (≥90% consensus)
 - **Phase 1→2**: GITHOOKS-GATE (hooks must be installed) + DELPHI-GATE (spec must be APPROVED)
 - **Phase 4→5**: User acceptance must be completed (mandatory manual step)
 - **Phase 5→6**: feedback-log.md must exist (HARD-GATE)
@@ -235,6 +255,36 @@ ISOLATE → AUTO-ESTIMATE → THINK → PLAN → [GITHOOKS-GATE] → BUILD → R
 ---
 
 ## 各 Phase 调用的 Skills
+
+### ⚠️ 强制输出格式规范（Mandatory Output Format）
+
+**执行每个 Phase 时，必须以以下固定格式输出阶段标题**，不可省略、不可合并、不可替换：
+
+```markdown
+## Phase -1: ISOLATE (隔离)
+## Phase -0.5: AUTO-ESTIMATE (规模评估)
+## Phase 0: THINK (思考)
+## Phase 1: PLAN (规划)
+## Phase 2: BUILD (构建)
+## Phase 3: REVIEW (评审)
+## Phase 4: USER ACCEPTANCE (用户验收)
+## Phase 5: FEEDBACK (反馈)
+## Phase 6: SHIP (发布)
+## Phase 7: LAND (部署)
+## Phase 8: CLEANUP (清理)
+```
+
+**规则**：
+1. 每个 Phase **开始执行时必须首先输出**对应的 `## Phase X: NAME` 标题行（作为该 Phase 输出的第一行）
+2. **禁止省略** "Phase" 关键词（如不能只写 "ISOLATE" 或 "## -1"）
+3. **禁止合并**多个 Phase 的输出（每个 Phase 必须有独立标题）
+4. **格式必须精确匹配**：`## Phase ` + 数字 + `: ` + 大写英文名 + ` (中文名)`
+5. 跳过某个 Phase（如 `--resume-from build` 跳过了 -1, -0.5, 0, 1）时，不输出被跳过 Phase 的标题
+6. 触发 `/sprint-flow` 后，**第一行输出应包含工作流阶段概览**：
+
+```
+Sprint Flow: ISOLATE → AUTO-ESTIMATE → THINK → PLAN → BUILD → REVIEW → USER ACCEPTANCE → FEEDBACK → SHIP → LAND → CLEANUP
+```
 
 ### Phase -1: ISOLATE（git worktree 隔离）
 

@@ -98,7 +98,7 @@ AUTO-ESTIMATE 输出 → Force Levels 执行 → 自动升级机制（如触发�
 
 | 场景 | DELPHI-GATE | Force Levels |
 |------|------------|-------------|
-| Phase 1 设计评审 | 3 专家、≥95% 共识、生成 specification.yaml | 不适用（设计阶段） |
+| Phase 1 设计评审 | 3 专家、≥90% 共识、生成 specification.yaml | 不适用（设计阶段） |
 | Phase 2 BUILD 入口 | **必须检查** `.sprint-state/delphi-reviewed.json` 中 `verdict=APPROVED` | 轻量/标准/复杂：通过对应强度的 delphi-review 生成该门禁文件 |
 | 轻量级评审 | 生成 `delphi-reviewed.json`（2 专家、1 轮、2/2 批准） | 2 专家、1 轮、写入门禁文件 |
 | 标准级评审 | 生成 `delphi-reviewed.json`（2 专家、最多 2 轮、2/2 批准） | 2 专家、最多 2 轮、写入门禁文件 |

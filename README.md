@@ -3,7 +3,7 @@
 > **AI 驱动开发工作流工具：10 道质量门禁 (Gate 0–9) + Delphi 多专家评审 + Sprint Flow 全流程编排**
 
 [![Git Hooks](https://img.shields.io/badge/Git%20Hooks-Gate%200--9-green)](./githooks)
-[![AI Review](https://img.shields.io/badge/AI%20Review-Delphi%20≥91%25-blue)](./skills/delphi-review)
+[![AI Review](https://img.shields.io/badge/AI%20Review-Delphi%20≥90%25-blue)](./skills/delphi-review)
 [![Sprint Flow](https://img.shields.io/badge/Sprint%20Flow-11%20Phases-purple)](./skills/sprint-flow)
 [![npm package](https://img.shields.io/badge/npm%20registry-npm%20install%20--g%20%40boyingliu01%2Fxp--gate-blue?logo=npm)](src/npm-package)
 
@@ -51,7 +51,7 @@ XP-Gate 通过 **确定性门禁 + AI 多专家共识 + 全流程编排** 解决
 │   (确定性)      │   (共识驱动)    │   (流程编排)        │
 ├─────────────────┼─────────────────┼─────────────────────┤
 │ • 10 道门禁 0-9 │ • Delphi 方法   │ • 11 阶段流水线     │
-│ • 13 语言适配   │ • ≥91% 共识     │ • 硬门槛控制        │
+│ • 13 语言适配   │ • ≥90% 共识     │ • 硬门槛控制        │
 │ • 零容忍策略    │ • 国产模型      │ • 自动并行执行      │
 └─────────────────┴─────────────────┴─────────────────────┘
 ```
@@ -65,7 +65,7 @@ Git 提交时自动触发，**纯代码逻辑，无 AI 参与**，确保快速�
 多轮匿名专家评审，基于 RAND 公司 Delphi 方法论：
 - 匿名性：第一轮专家互不知晓
 - 迭代性：多轮直到共识
-- 统计共识：≥91% 一致才算通过
+- 统计共识：≥90% 一致才算通过
 
 ### 3. Sprint Flow
 
@@ -214,10 +214,10 @@ isolation     pass          + CONTEXT    + delphi    (default)   + QA / web     
               + estimate    + ADR        review +    TDD +       benchmark     (78% bugs      debug      + ship       canary     cleanup
                                          spec.yaml   test-align                 invisible)
                                               │
-                                           HARD-GATE ← 设计未达 ≥91% Delphi 共识 → 禁止编码
+                                           HARD-GATE ← 设计未达 ≥90% Delphi 共识 → 禁止编码
 ```
 
-> **完整 11 阶段** (Phase -1, -0.5, 0..8)。`Phase 2 BUILD` 默认使用 `ralph-loop` (REQ 级迭代，干净上下文，节约 40-67% token)。`Phase 1 PLAN` 与 `Phase 2 BUILD` 之间存在 HARD-GATE — 设计必须通过 Delphi 评审 (≥91% 共识，≥2 家不同模型厂家) 才能开始实施。
+> **完整 11 阶段** (Phase -1, -0.5, 0..8)。`Phase 2 BUILD` 默认使用 `ralph-loop` (REQ 级迭代，干净上下文，节约 40-67% token)。`Phase 1 PLAN` 与 `Phase 2 BUILD` 之间存在 HARD-GATE — 设计必须通过 Delphi 评审 (≥90% 共识，≥2 家不同模型厂家) 才能开始实施。
 
 ### 各阶段说明
 
@@ -226,7 +226,7 @@ isolation     pass          + CONTEXT    + delphi    (default)   + QA / web     
 | -1 | ISOLATE | worktree 隔离 | 隔离工作树 |
 | -0.5 | AUTO-ESTIMATE | 规模评估 | estimate 模板 |
 | 0 | THINK | brainstorming | CONTEXT.md + ADR |
-| 1 | PLAN | autoplan → delphi-review (HARD-GATE ≥91% 共识) | specification.yaml |
+| 1 | PLAN | autoplan → delphi-review (HARD-GATE ≥90% 共识) | specification.yaml |
 | 2 | BUILD | ralph-loop (默认) + TDD + test-spec-alignment | 功能代码 |
 | 3 | REVIEW | code-walkthrough + QA + benchmark | 评审报告 |
 | 4 | USER ACCEPT | 人工验收 | 验收确认 |
@@ -408,7 +408,7 @@ XP-Gate 不只是一个工具——它是一套 AI 辅助开发的纪律体系�
 
 Sprint Flow 会自动走完：
 - Phase 0: brainstorming 探索需求，生成设计文档
-- Phase 1: autoplan + delphi-review 多专家评审设计（≥91% 共识才放行）
+- Phase 1: autoplan + delphi-review 多专家评审设计（≥90% 共识才放行）
 - Phase 2: ralph-loop **逐 REQ 迭代构建**（每个 REQ 干净上下文，节省 40-67% token）
 - Phase 3-6: 代码走查、用户验收、复盘、发布
 
@@ -523,7 +523,7 @@ rules:
       "model": "kimi-k2.6"
     }
   ],
-  "consensus_threshold": 0.91,
+  "consensus_threshold": 0.90,
   "max_rounds": 5,
   "timeout": 3600
 }
