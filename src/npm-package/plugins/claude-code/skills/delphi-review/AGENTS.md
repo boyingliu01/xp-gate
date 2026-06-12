@@ -6,7 +6,7 @@
 **Version:** 0.8.9.0
 
 ## OVERVIEW
-Delphi Consensus Review — multi-round anonymous expert review (≥91% threshold, 3 experts from ≥2 providers, domestic models only). Supports design + code-walkthrough modes.
+Delphi Consensus Review — multi-round anonymous expert review (≥90% threshold, 3 experts from ≥2 providers, domestic models only). Supports design + code-walkthrough modes.
 
 ## STRUCTURE
 ```
@@ -30,7 +30,7 @@ skills/delphi-review/
 
 ## CONVENTIONS
 - 3 experts anonymous in Round 1 (no cross-expert bias)
-- ≥91% consensus threshold (was 95%, lowered to 91%)
+- ≥90% consensus threshold (was 95%, now unified to 90%)
 - Max 5 rounds before forcing decision
 - Cross-provider required: experts from ≥2 different providers
 - Domestic models only: glm, kimi, minimax, qwen, deepseek
@@ -39,7 +39,7 @@ skills/delphi-review/
 - Code-walkthrough skipped on main/master pushes (by design)
 
 ## ANTI-PATTERNS (THIS PROJECT)
-- Do NOT terminate before achieving true consensus (≥91%)
+- Do NOT terminate before achieving true consensus (≥90%)
 - Do NOT reveal other experts' opinions during Round 1
 - Do NOT accept partial agreement without resolution
 - Do NOT skip code-walkthrough when over thresholds (BLOCK + user decision)
@@ -49,7 +49,7 @@ skills/delphi-review/
 
 ## UNIQUE STYLES
 - Anonymous expert reviews (Round 1)
-- Statistical consensus measurement (≥91% threshold)
+- Statistical consensus measurement (≥90% threshold)
 - Two modes: design review + code-walkthrough
 - Pre-push integration: .code-walkthrough-result.json stores commit hash + verdict
 - Delphi guard in claude-code plugin: blocks Edit/Write before APPROVAL

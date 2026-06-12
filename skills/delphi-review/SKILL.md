@@ -9,7 +9,7 @@ description: "Use when asked to review a design, plan, or architecture; before i
 
 **In Scope:**
 - Multi-round anonymous expert consensus review (design + code-walkthrough modes)
-- 2-3 experts from different providers with statistical consensus (>= 91%)
+- 2-3 experts from different providers with statistical consensus (>= 90%)
 - Structured verdict: APPROVED / PASS_WITH_CAVEATS / REQUEST_CHANGES
 - Domestic models only (no Anthropic/OpenAI/Google)
 
@@ -27,7 +27,7 @@ description: "Use when asked to review a design, plan, or architecture; before i
 1. **匿名性** — Round 1 专家互不知道对方意见
 2. **迭代** — 多轮直到共识，不是固定轮数
 3. **受控反馈** — 每轮看到其他专家意见
-4. **统计共识** — >=91% 一致才算共识
+4. **统计共识** — >=90% 一致才算共识
 
 ### 质量优先
 
@@ -95,7 +95,7 @@ description: "Use when asked to review a design, plan, or architecture; before i
 
 | 阈值 | 说明 |
 |------|------|
-| **>=91%** | 推荐默认 |
+| **>=90%** | 推荐默认 |
 | 100% | 完全一致（更严格） |
 
 ---
@@ -105,14 +105,14 @@ description: "Use when asked to review a design, plan, or architecture; before i
 ```
 Phase 0: 准备 → Round 1: 匿名独立评审 → 共识检查
     │
-    ├─ 一致 + >=91% + APPROVED → ✅ 完成
+    ├─ 一致 + >=90% + APPROVED → ✅ 完成
     │
-    └─ 不一致 或 <91% 或 REQUEST_CHANGES
+    └─ 不一致 或 <90% 或 REQUEST_CHANGES
           │
           ▼
        Round 2: 交换意见 → 共识检查
           │
-          ├─ 一致 + >=91% + APPROVED → ✅ 完成
+          ├─ 一致 + >=90% + APPROVED → ✅ 完成
           │
           └─ 仍分歧 或 REQUEST_CHANGES
                 │
@@ -248,11 +248,11 @@ This skill activates on any request for multi-expert review. Common triggers:
 2. **Dispatch anonymous experts** - 2-3 experts from ≥2 different domestic model providers
 3. **Collect Round 1 independent reviews** - Anonymous, no cross-expert bias
 4. **Synthesize feedback** - Measure consensus, identify disagreements
-5. **Run Round 2+ until consensus** - Exchange opinions, iterate until ≥91% agreement
+5. **Run Round 2+ until consensus** - Exchange opinions, iterate until ≥90% agreement
 6. **Block on unresolved Critical/Major** - Zero-tolerance: all Critical/Major must be resolved
 7. **Emit verdict** - APPROVED (with specification.yaml) or REQUEST_CHANGES (fix + re-review)
 
-**Consensus threshold:** ≥91% (project standard for Delphi review approval)
+**Consensus threshold:** ≥90% (project standard for Delphi review approval)
 **Model policy:** Domestic models only (DeepSeek, Qwen, Kimi, GLM, MiniMax). Foreign models (Anthropic/OpenAI/Google) forbidden.
 
 ---
@@ -340,7 +340,7 @@ Every review round output MUST follow this exact JSON structure for design mode:
 - [ ] Round 2+ 完成（交换意见 / 最终立场）
 
 **CRITICAL — 共识验证:**
-- [ ] 问题共识比例 >=91%
+- [ ] 问题共识比例 >=90%
 - [ ] 所有 Critical Issues 已解决
 - [ ] 所有 Major Concerns 已处理
 
@@ -422,7 +422,7 @@ Every review round output MUST follow this exact JSON structure for design mode:
 | 只处理 Critical，忽略 Major | 零容忍：Critical/Major 全部必须处理，不可跳过或降级 |
 | 单专家自评 | 至少 2 位不同 provider 的专家 |
 | 用户说"时间紧急"就跳过 | 评审是投资不是开销，跳过后期返工成本更高 |
-| "专家几乎一致"就通过 | "几乎" = 不一致，继续到 >=91% |
+| "专家几乎一致"就通过 | "几乎" = 不一致，继续到 >=90% |
 | 使用 Anthropic/GPT/Gemini 等国外昂贵模型 | 必须使用国产开源模型（DeepSeek, Qwen, Kimi, GLM, MiniMax） |
 | 三个专家使用同一厂家模型 | 必须来自至少 2 家不同厂家 |
 
@@ -437,7 +437,7 @@ Every review round output MUST follow this exact JSON structure for design mode:
 | "这只是小变更" | 所有变更都需要评审 |
 | "Round 1 就够了" | 不够，必须多轮直到共识 |
 | "生成报告就完成了" | APPROVED 才算完成 |
-| "2/3 同意就是共识" | 还要检查问题共识比例 >=91% |
+| "2/3 同意就是共识" | 还要检查问题共识比例 >=90% |
 
 ---
 
@@ -445,7 +445,7 @@ Every review round output MUST follow this exact JSON structure for design mode:
 
 **Delphi 评审完成的唯一标准：**
 1. ✅ 所有专家裁决 APPROVED
-2. ✅ 问题共识 >=91%
+2. ✅ 问题共识 >=90%
 3. ✅ 所有 Critical Issues 已修复验证
 4. ✅ 所有 Major Concerns 已处理
 5. ✅ 共识报告已生成

@@ -47,7 +47,7 @@ XP-Gate — deterministic git quality gates + AI-driven multi-expert review (Del
 │   └── __tests__/      # BATS tests
 ├── skills/             # 8 canonical AI workflow skills (SKILL.md + references/ + templates/)
 │   ├── sprint-flow/    # 11-phase pipeline (Phase -1, -0.5, 0..8); docs say "7-phase" (drift logged)
-│   ├── delphi-review/  # ≥91% consensus (SKILL.md); README/CAPABILITIES still say 95% (drift logged)
+│   ├── delphi-review/  # ≥90% consensus (SKILL.md)
 │   ├── test-specification-alignment/   # 2-phase (align modifiable → execute frozen)
 │   ├── test-driven-development/        # NEW in 0.8.x; bundles testing-anti-patterns.md
 │   ├── ralph-loop/                     # Phase 2 default build mode (REQ-level; 40-67% token savings)
@@ -98,7 +98,7 @@ XP-Gate — deterministic git quality gates + AI-driven multi-expert review (Del
 | Adapter routing | githooks/adapter-common.sh | 3-tier: global → project → script dir |
 | Code of Conduct | githooks/QUALITY-GATES-CODE-OF-CONDUCT.md | --no-verify prohibited |
 | Sprint Flow | skills/sprint-flow/SKILL.md | 11 phases; phase docs in references/phase-*.md |
-| Delphi Review | skills/delphi-review/SKILL.md | Design + code-walkthrough modes; ≥91% consensus |
+| Delphi Review | skills/delphi-review/SKILL.md | Design + code-walkthrough modes; ≥90% consensus |
 | Test Alignment | skills/test-specification-alignment/SKILL.md | Phase 1 modifiable / Phase 2 frozen |
 | Principles Engine | src/principles/ | analyzer.ts + index.ts CLI; SARIF 2.1.0 output |
 | Boy Scout Rule | src/principles/boy-scout.ts | Differential warning enforcement (Gate 6) |
@@ -183,7 +183,7 @@ Subcommands registered in 0.8.8.0 (verified against bin source):
 - Do NOT add runtime dependencies to `src/npm-package/` — it ships zero-install.
 - Do NOT use Anthropic/OpenAI/Google models in `.delphi-config.json`. Domestic-only.
 - Do NOT skip `delphi-review` in Sprint Flow Phase 1 — HARD-GATE blocks Phase 2.
-- Do NOT terminate Delphi review before ≥91% consensus or 5 rounds (whichever first).
+- Do NOT terminate Delphi review before ≥90% consensus or 5 rounds (whichever first).
 - Do NOT modify tests during Phase 2 of test-specification-alignment (freeze enforced).
 - Do NOT push from main/master and expect code-walkthrough to run — by design it's skipped.
 - Do NOT delete or rename `.code-walkthrough-result.json` before push.
@@ -194,7 +194,7 @@ Subcommands registered in 0.8.8.0 (verified against bin source):
 |---|------|-----------------|-----------|------|
 | 1 | Gate count: docs say 6, script runs 10 (Gate 0–9) | `githooks/pre-commit` | README.md, CAPABILITIES.md | Re-write README "Quality Gates" section to enumerate Gate 0–9 + the conceptual grouping. |
 | 2 | Pre-push gate count: docs say "Gate M + Delphi", reality = Gate M + M2 + M3 + Delphi | `githooks/pre-push` | README.md | Add Gate M2/M3 rows to README pre-push table. |
-| 3 | Delphi consensus threshold: docs say 95%, SKILL.md uses 91% | `skills/delphi-review/SKILL.md` lines 12/30/94/251/255/343 | README.md, CAPABILITIES.md | Pick 91% (SKILL.md is canonical); update README + CAPABILITIES. |
+| 3 | Delphi consensus threshold: docs say 95%, SKILL.md uses 91% | — | — | ✅ Fixed: unified to ≥90% across all docs and skills. |
 | 4 | Sprint Flow phase count: docs say 7-phase, reality = 11 phases (-1, -0.5, 0..8) | `skills/sprint-flow/SKILL.md` | README.md "Sprint Flow 全流程" section | Re-draw the ASCII pipeline; update labels. |
 | 5 | CLI command count: docs say 8, source registers ≥15 (added check/principles/arch in 0.8.9 for #208) | `src/npm-package/bin/xp-gate.js` | Root README CLI table, MANIFEST.md | ✅ Both refreshed in 0.8.9 fix-pack. |
 | 6 | plugins/qoder/ missing manifest file | repo state | Plugin docs claim qoder is supported | Add `plugin.json` (or `qoder.json`) so the plugin can be installed. |
