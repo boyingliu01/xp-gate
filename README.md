@@ -128,66 +128,20 @@ THINK → PLAN → BUILD → REVIEW → USER ACCEPT → FEEDBACK → SHIP
 
 ---
 
-## 环境要求
-
-| 依赖 | 最低版本 | 说明 |
-|------|---------|------|
-| Node.js | ≥18.x | npm 包运行时 |
-| Git | ≥2.38 | 版本控制 |
-| **Git Bash** | 任意 | **Windows 用户必须安装** — 所有 shell 脚本和 git hooks 依赖 bash |
-| **Git for Windows** | 任意 | [下载](https://git-scm.com/download/win) — 安装时勾选 "Git Bash Here"，会自动把 `bash.exe` 加入 PATH |
-
-> Linux/macOS 用户已自带 bash，无需额外安装。
-
 ## 快速开始
 
-### 方式 -1：作为 IDE 插件安装 (v0.4.0+)
+XP-Gate 由 **两个互补的发行渠道** 组成，建议同时安装：
 
-XP-Gate 现在同时支持 Claude Code 和 OpenCode 插件分发，提供 IDE 内即时质量检查 + AI 工作流技能。
+### 第一步：安装 npm 包（必需 — Git Hooks + 全流程基础设施）
 
-**Claude Code 插件**：
-```bash
-# 从 GitHub 安装
-/plugin install boyingliu01/xp-gate
-```
+**前置条件**：Node.js ≥18.x（`npm` 包运行时）、Git ≥2.38。
 
-提供：
-- 6 个 AI 技能 (sprint-flow, delphi-review, test-specification-alignment, ralph-loop, improve-codebase-architecture, to-issues)
-- PostToolUse hook：每次 Edit/Write 自动运行 principles 检查
-- 优雅降级：xp-gate CLI 未安装时记录提示，不阻塞会话
-
-**OpenCode 插件**：
-```json
-// opencode.json
-{
-  "plugin": ["./plugins/opencode"]
-}
-```
-
-提供：
-- 7 个 AI 技能（同 Claude）
-- 3 个工具：`gate-check`、`gate-principles`、`gate-arch`
-- 与 Claude 插件共享同一份 SKILL.md 文件
-
-> **注意**：插件不提供 git hooks（平台限制）。完整 git 质量门禁仍需通过 npm 包安装（方式零）。两种方式可同时启用：插件提供 IDE 集成，npm 包提供 git enforcement。
-
-### 方式零：全局安装 xp-gate CLI
-
-#### 前置条件
-
-- **Linux/macOS**: 已安装 [Git](https://git-scm.com) + **bash**（系统自带）
-- **Windows**: 已安装 Git + 必须安装 Git Bash（安装时勾选 "Git Bash Here"）
-
-#### 安装 xp-gate CLI
+> Linux/macOS 用户已自带 bash，无需额外安装。Windows 用户必须安装 [Git Bash](https://git-scm.com/download/win)。
 
 ```bash
-# 全局安装（无需 PAT，公共 npm registry）
+# 全局安装（公共 npm registry，无需 PAT）
 npm install -g @boyingliu01/xp-gate
-```
 
-#### 初始化项目
-
-```bash
 # 进入你的项目目录
 cd your-project
 
@@ -199,59 +153,36 @@ xp-gate install-skill sprint-flow
 xp-gate install-skill delphi-review
 ```
 
-### 方式一：独立安装（仅门禁）
+npm 包提供：
+- **Git Hooks**（pre-commit Gate 0–9 + pre-push Gate M/M2/M3）— 每次提交/推送自动执行 14 道质量门禁
+- **CLI 管理命令**（doctor, baseline, audit, uninstall 等 15+ 子命令）
+- **Skill 下载器**（`xp-gate install-skill` 从 GitHub 按版本下载 SKILL.md）
 
-```bash
-# 克隆仓库
-git clone https://github.com/boyingliu01/xp-gate.git
-cd xp-gate
+npm 包 **不提供** IDE 内的即时 gate 调用和 skill 自动发现。
 
-# 安装 Git Hooks（必须）— 安装 hooks + adapter 基础设施
-bash githooks/install.sh
+### 第二步：安装 IDE 插件（推荐 — AI 对话内质量工具 + 技能自动加载）
 
-# 验证安装
-bash githooks/verify.sh
+XP-Gate 同时支持 **Claude Code** 和 **OpenCode** 插件分发：
 
-# 可选：安装 npm 依赖（用于 TypeScript 项目）
-npm install
+**OpenCode 插件**：
+```json
+// opencode.json
+{ "plugin": ["@boyingliu01/opencode-plugin"] }
 ```
 
-### 方式二：完整安装（含 AI 技能）
-
+**Claude Code 插件**：
 ```bash
-# 1. 安装基础依赖
-npm install
-
-# 2. 配置 Delphi 评审（需要配置模型）
-cp skills/delphi-review/.delphi-config.json.example .delphi-config.json
-# 编辑 .delphi-config.json，配置你的模型
-
-# 3. 验证安装
-npx tsx src/principles/index.ts --help
+/plugin install boyingliu01/xp-gate
 ```
 
-### 推荐：统一安装脚本
+IDE 插件提供：
+- **AI 对话内的质量工具**（`gate-check`、`gate-principles`、`gate-arch`，与 `xp-gate check/principles/arch` CLI 子命令输出一致）
+- **AI 工作流技能自动加载**（sprint-flow、delphi-review、ralph-loop 等 7 个 skill，OpenCode 自动发现，无需 `install-skill`）
+- **IDE 级 enforcement**（Claude Code PostToolUse hook：每次 Edit/Write 自动运行 principles 检查）
 
-```bash
-# 一键安装 Git Hooks + adapter 基础设施
-bash githooks/install.sh
+IDE 插件 **不提供** Git Hooks（AI 平台限制，无法在 commit/push 时机自动执行）。
 
-# 验证安装完整性
-bash githooks/verify.sh
-```
-
-### 组件化安装脚本（按需）
-
-```bash
-# 仅安装 Git Hooks
-bash scripts/install-hooks.sh
-
-# 仅安装 AI 技能
-bash scripts/install-skills.sh
-
-# 安装全部
-bash scripts/install-all.sh
-```
+> **两步的关系**：npm 包负责 git enforcement（提交门禁），IDE 插件负责 IDE 集成（对话内工具 + 自动 skill）。两者互补，**缺一不可**。只装 npm 包 ≠ skill 自动加载；只装插件 ≠ 提交门禁生效。
 
 ### xp-gate CLI 命令速查
 
@@ -273,7 +204,27 @@ bash scripts/install-all.sh
 | `xp-gate arch [--config <path>]` | 单独运行架构合规检查 (Gate 6, 读取 architecture.yaml)。OpenCode 工具 `gate-arch` 即调用此命令。修复 #208。 |
 | `xp-gate --version` | 查看版本 |
 
-> **关于 `gate-check` / `gate-principles` / `gate-arch`**：这三个名字既是 OpenCode plugin 工具（在 OpenCode 会话内自动可用），也是 `xp-gate` CLI 的子命令（任意 shell 都可调用）。OpenCode plugin 内部会优先 shell out 到 `xp-gate` CLI；未安装时回退到直接调用源码 (`npx -y tsx src/principles/index.ts` / `npx -y @archlinter/cli`)。两个调用路径输出一致。
+---
+
+### 遗留安装路径（仓库直接克隆）
+
+> 以下路径适用于 xp-gate 开发者或无法使用 npm 的环境。普通用户请使用上方的 npm 安装。
+
+```bash
+# 克隆仓库
+git clone https://github.com/boyingliu01/xp-gate.git && cd xp-gate
+
+# 一键安装 Git Hooks + adapter 基础设施
+bash githooks/install.sh
+
+# 验证安装完整性
+bash githooks/verify.sh
+
+# 组件化安装（按需）
+bash scripts/install-hooks.sh   # 仅 hooks
+bash scripts/install-skills.sh  # 仅 skills
+bash scripts/install-all.sh     # 全部
+```
 
 ---
 
