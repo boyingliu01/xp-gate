@@ -125,7 +125,7 @@ XP-Gate 同时支持 **Claude Code** 和 **OpenCode** 插件分发：
 
 IDE 插件提供：
 - **AI 对话内的质量工具**（`gate-check`、`gate-principles`、`gate-arch`，与 `xp-gate check/principles/arch` CLI 子命令输出一致）
-- **AI 工作流技能自动加载**（sprint-flow、delphi-review、ralph-loop 等 7 个 skill，OpenCode 自动发现，无需 `install-skill`）
+- **AI 工作流技能自动加载**（sprint-flow、delphi-review、ralph-loop 等 8 个 skill，OpenCode 自动发现，无需 `install-skill`）
 - **IDE 级 enforcement**（Claude Code PostToolUse hook：每次 Edit/Write 自动运行 principles 检查）
 
 IDE 插件 **不提供** Git Hooks（AI 平台限制，无法在 commit/push 时机自动执行）。
