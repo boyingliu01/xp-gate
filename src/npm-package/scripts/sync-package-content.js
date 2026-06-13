@@ -137,13 +137,27 @@ function syncAdapters() {
   return copied;
 }
 
+function syncModules(moduleName) {
+  const src = path.join(REPO_ROOT, 'src', moduleName);
+  const dest = path.join(PKG_ROOT, moduleName);
+  if (!copyDir(src, dest)) {
+    console.error(`[sync] ERROR: missing module ${moduleName}`);
+    process.exit(1);
+  }
+  console.error(`[sync] ${moduleName}/`);
+  return 1;
+}
+
 function main() {
   console.error(`[sync] repo root: ${REPO_ROOT}`);
   console.error(`[sync] package root: ${PKG_ROOT}`);
   const skills = syncSkills();
   const plugins = syncPlugins();
   const adapters = syncAdapters();
-  console.error(`[sync] done: ${skills} skill(s), ${plugins} plugin(s), ${adapters} adapter entries`);
+  const principles = syncModules('principles');
+  const mutation = syncModules('mutation');
+  const mockPolicy = syncModules('mock-policy');
+  console.error(`[sync] done: ${skills} skill(s), ${plugins} plugin(s), ${adapters} adapter entries, ${principles + mutation + mockPolicy} module(s)`);
   if (skills !== CORE_SKILLS.length) {
     console.error(`[sync] ERROR: expected ${CORE_SKILLS.length} skills, copied ${skills}`);
     process.exit(1);

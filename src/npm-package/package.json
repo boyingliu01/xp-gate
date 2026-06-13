@@ -12,7 +12,10 @@
     "lib/",
     "skills/",
     "plugins/",
-    "adapter-common.sh"
+    "adapter-common.sh",
+    "principles/",
+    "mutation/",
+    "mock-policy/"
   ],
   "repository": {
     "type": "git",

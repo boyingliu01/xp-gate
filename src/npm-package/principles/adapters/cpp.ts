@@ -1,0 +1,115 @@
+import { BaseAdapter } from './base';
+import { Adapter } from '../types';
+
+export class CppAdapter extends BaseAdapter implements Adapter {
+  detectLanguage(): string {
+    const ext = this.filePath.toLowerCase();
+    if (ext.endsWith('.cpp') || ext.endsWith('.cxx') || ext.endsWith('.cc') ||
+        ext.endsWith('.c') || ext.endsWith('.hpp') || ext.endsWith('.h')) {
+      return 'cpp';
+    }
+    return super.detectLanguage();
+  }
+
+  parseAST(): unknown {
+    return this.createParseResult('cpp');
+  }
+
+  extractFunctions(): unknown[] {
+    const functionMatches = [];
+    const fnRegex = /(\w+[\s*]+)+([\w:]+[:]+)?([~]?\w+)\s*\([^)]*\)\s*(const\s*)?\s*(override\s*)?\s*(final\s*)?\s*(noexcept\s*)?\s*(->\s*[\w<>:&*\s]+)?\s*[{;]/g;
+    let match;
+
+    while ((match = fnRegex.exec(this.fileContent)) !== null) {
+      const funcName = match[3] || 'unknown';
+      const fullName = match[2] ? match[2] + funcName : funcName;
+
+      functionMatches.push(this.createCodeMatch(fullName.replace(/::$/, ''), 'function', match.index));
+    }
+
+    const constructorRegex = /([\w:]+)\s*\([^)]*\)\s*:\s*[\w_]+\s*\([^)]*\)/g;
+    while ((match = constructorRegex.exec(this.fileContent)) !== null) {
+      const constructorName = match[1];
+
+      functionMatches.push(this.createCodeMatch(constructorName, 'constructor', match.index));
+    }
+
+    return functionMatches;
+  }
+
+  extractClasses(): unknown[] {
+    const classMatches = [];
+    const classRegex = /\b(class|struct)\s+(\w+)\s*(:\s*(public|protected|private)\s+[\w:]+)?\s*\{/g;
+    let match;
+
+    while ((match = classRegex.exec(this.fileContent)) !== null) {
+      classMatches.push(this.createCodeMatch(match[2], match[1], match.index));
+    }
+
+    return classMatches;
+  }
+
+  override extractCodeBlock(startPos: number, maxFallback: number = 200): string {
+    const state = { inBlock: false, braceCount: 0 };
+    let endPos = startPos;
+    let inString = false;
+    let stringChar = '';
+    let inComment = false;
+
+    for (let i = startPos; i < this.fileContent.length; i++) {
+      const char = this.fileContent[i];
+      const nextChar = this.fileContent[i + 1] || '';
+
+      if (!inString && !inComment) {
+        if (char === '/' && nextChar === '/') {
+          while (i < this.fileContent.length && this.fileContent[i] !== '\n') {
+            i++;
+          }
+          continue;
+        }
+        if (char === '/' && nextChar === '*') {
+          inComment = true;
+          i++;
+          continue;
+        }
+      } else if (inComment) {
+        if (char === '*' && nextChar === '/') {
+          inComment = false;
+          i++;
+        }
+        continue;
+      }
+
+      if (!inComment) {
+        if (!inString && (char === '"' || char === "'")) {
+          inString = true;
+          stringChar = char;
+        } else if (inString && char === stringChar) {
+          let backslashCount = 0;
+          let j = i - 1;
+          while (j >= 0 && this.fileContent[j] === '\\') {
+            backslashCount++;
+            j--;
+          }
+          if (backslashCount % 2 === 0) {
+            inString = false;
+          }
+        }
+      }
+
+      if (!inString && !inComment) {
+        const result = this.advanceBraceTracker(char, i, state);
+        if (result.closed) {
+          endPos = result.endPos;
+          break;
+        }
+      }
+    }
+
+    if (endPos > startPos) {
+      return this.fileContent.substring(startPos, endPos);
+    }
+
+    return this.fallbackCodeBlock(startPos, maxFallback);
+  }
+}

@@ -37,6 +37,18 @@ function copyAdapters(srcDir, destDir) {
   }
 }
 
+function copyRecursive(src, dest) {
+  const stat = fs.statSync(src);
+  if (stat.isDirectory()) {
+    fs.mkdirSync(dest, { recursive: true });
+    fs.readdirSync(src).forEach(entry => {
+      copyRecursive(path.join(src, entry), path.join(dest, entry));
+    });
+  } else {
+    fs.copyFileSync(src, dest);
+  }
+}
+
 function logDeps(depCheck) {
   if (!depCheck.ok) {
     console.warn('Warning: Missing dependencies');
@@ -304,6 +316,18 @@ async function installLocal(args) {
   copyAdapters(srcDir, path.join(projectRoot, 'githooks'));
   console.log(`  adapter-common.sh + adapters -> ${projectRoot}/githooks/`);
 
+  // Install principles/, mutation/, mock-policy/ to .xp-gate/modules/
+  const modulesDir = path.join(projectRoot, '.xp-gate', 'modules');
+  ['principles', 'mutation', 'mock-policy'].forEach(module => {
+    const moduleSrc = path.join(srcDir, module);
+    const moduleDest = path.join(modulesDir, module);
+    if (fs.existsSync(moduleSrc)) {
+      fs.mkdirSync(path.dirname(moduleDest), { recursive: true });
+      copyRecursive(moduleSrc, moduleDest);
+      console.log(`  ${module}/ -> .xp-gate/modules/${module}/`);
+    }
+  });
+
   fs.mkdirSync(TEMPLATE_DIR, { recursive: true });
   copyHooks(srcDir, TEMPLATE_DIR);
   fs.mkdirSync(path.join(TEMPLATE_DIR, 'adapters'), { recursive: true });
@@ -340,6 +364,18 @@ async function setupGlobal(args) {
 
   copyAdapters(srcDir, GLOBAL_ADAPTERS_DIR);
   console.log(`  adapter-common.sh + adapters -> ${GLOBAL_ADAPTERS_DIR}`);
+
+  // Install principles/, mutation/, mock-policy/ to global modules dir
+  const globalModulesDir = path.join(CONFIG_DIR, 'modules');
+  ['principles', 'mutation', 'mock-policy'].forEach(module => {
+    const moduleSrc = path.join(srcDir, module);
+    const moduleDest = path.join(globalModulesDir, module);
+    if (fs.existsSync(moduleSrc)) {
+      fs.mkdirSync(path.dirname(moduleDest), { recursive: true });
+      copyRecursive(moduleSrc, moduleDest);
+      console.log(`  ${module}/ -> ${globalModulesDir}/${module}/`);
+    }
+  });
 
   const { execSync } = require('child_process');
   try {
