@@ -989,13 +989,20 @@ else
   PRINCIPLES_FILES=$(echo "$CHANGED_FILES" | grep -E '\.(ts|tsx|js|jsx|py|go|java|kt|dart|swift|cpp|c|hpp|h|m|mm)$' || true)
   
   if [ -n "$PRINCIPLES_FILES" ]; then
-    # Check if principles checker exists in project
-    if [ -f "src/principles/index.ts" ]; then
+    # Check for principles checker in installed modules first, then project src/
+    PRINCIPLES_DIR=""
+    if [ -d ".xp-gate/modules/principles" ]; then
+      PRINCIPLES_DIR=".xp-gate/modules/principles"
+    elif [ -f "src/principles/index.ts" ]; then
+      PRINCIPLES_DIR="src/principles"
+    fi
+    
+    if [ -n "$PRINCIPLES_DIR" ]; then
       echo "Checking Clean Code + SOLID principles..."
       
       if command -v npx > /dev/null 2>&1; then
         # Run principles checker and store results
-        if npx tsx src/principles/index.ts --files $PRINCIPLES_FILES --format json > /tmp/principles-output.json 2>/dev/null; then
+        if npx tsx $PRINCIPLES_DIR/index.ts --files $PRINCIPLES_FILES --format json > /tmp/principles-output.json 2>/dev/null; then
           # Check severity levels
           ERROR_COUNT=$(grep -c '"severity":"error"' /tmp/principles-output.json 2>/dev/null || true)
           ERROR_COUNT=${ERROR_COUNT:-0}
@@ -1626,8 +1633,15 @@ if [ "$PROJECT_LANG" = "documentation-only" ]; then
   echo "     ✅ Skipped (documentation project)."
   
 else
-  # Check if principles directory exists for Boy Scout
-  if [ -f "src/principles/boy-scout.ts" ]; then
+  # Check for Boy Scout script in installed modules first, then project src/
+  BOY_SCOUT_SCRIPT=""
+  if [ -f ".xp-gate/modules/principles/boy-scout.ts" ]; then
+    BOY_SCOUT_SCRIPT=".xp-gate/modules/principles/boy-scout.ts"
+  elif [ -f "src/principles/boy-scout.ts" ]; then
+    BOY_SCOUT_SCRIPT="src/principles/boy-scout.ts"
+  fi
+  
+  if [ -n "$BOY_SCOUT_SCRIPT" ]; then
     echo "     Checking Boy Scout Rule compliance..."
     
     # Separate new files and modified files
@@ -1643,7 +1657,7 @@ else
         if [ -z "$(echo "$NEW_FILES" | tr -d ' ')" ] && [ -z "$(echo "$MODIFIED_FILES" | tr -d ' ')" ]; then
           echo "     ✅ No new or modified source files for Boy Scout check."
         else
-          BOY_SCOUT_OUTPUT=$(npx tsx src/principles/boy-scout.ts \
+          BOY_SCOUT_OUTPUT=$(npx tsx $BOY_SCOUT_SCRIPT \
             --new-files "$(echo "$NEW_FILES" | tr ' ' ',')" \
             --modified-files "$(echo "$MODIFIED_FILES" | tr ' ' ',')" \
             --baseline ".warnings-baseline.json" 2>&1)

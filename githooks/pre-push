@@ -163,13 +163,20 @@ else
       echo "🧬 Running mutation tests on changed files..."
       echo "$CHANGED_SOURCE_FILES"
 
-      # Check if mutation gate script exists
-      if [[ ! -f "src/mutation/gate-m.ts" ]]; then
-        echo "⚠️ Gate M script (src/mutation/gate-m.ts) not found. SKIP — Gate M."
+      # Check for mutation gate script in installed modules first, then project src/
+      MUTATION_SCRIPT=""
+      if [ -f ".xp-gate/modules/mutation/gate-m.ts" ]; then
+        MUTATION_SCRIPT=".xp-gate/modules/mutation/gate-m.ts"
+      elif [ -f "src/mutation/gate-m.ts" ]; then
+        MUTATION_SCRIPT="src/mutation/gate-m.ts"
+      fi
+
+      if [[ -z "$MUTATION_SCRIPT" ]]; then
+        echo "⚠️ Gate M script not found. SKIP — Gate M."
       else
         # Run mutation gate with timeout matching stryker.conf.json (timeoutMS: 600000 = 10min)
         MUTATION_OUTPUT=$(mktemp)
-        timeout 600s npx tsx src/mutation/gate-m.ts --changed-files "$CHANGED_SOURCE_FILES" > "$MUTATION_OUTPUT" 2>&1
+        timeout 600s npx tsx $MUTATION_SCRIPT --changed-files "$CHANGED_SOURCE_FILES" > "$MUTATION_OUTPUT" 2>&1
         MUTATION_EXIT=$?
 
         case $MUTATION_EXIT in
@@ -312,7 +319,15 @@ run_gate_m3() {
     return 0
   fi
 
-  if [[ ! -f "./src/mock-policy/gate-m3.ts" ]]; then
+  # Check for mock-policy module in installed modules first, then project src/
+  local GATE_M3_SCRIPT=""
+  if [ -f ".xp-gate/modules/mock-policy/gate-m3.ts" ]; then
+    GATE_M3_SCRIPT=".xp-gate/modules/mock-policy/gate-m3.ts"
+  elif [ -f "./src/mock-policy/gate-m3.ts" ]; then
+    GATE_M3_SCRIPT="./src/mock-policy/gate-m3.ts"
+  fi
+
+  if [[ -z "$GATE_M3_SCRIPT" ]]; then
     echo "   SKIP — module not found"
     return 0
   fi
@@ -338,7 +353,7 @@ run_gate_m3() {
     [[ -n "$f" ]] && args+=("$f")
   done <<< "$test_files"
 
-  if npx tsx "./src/mock-policy/gate-m3.ts" "${args[@]}"; then
+  if npx tsx "$GATE_M3_SCRIPT" "${args[@]}"; then
     echo "✅ Gate M3: PASS"
     return 0
   else

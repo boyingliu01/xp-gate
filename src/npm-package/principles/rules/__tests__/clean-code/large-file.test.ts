@@ -1,0 +1,73 @@
+import { describe, it, expect } from 'vitest';
+import { largeFileRule } from '../../clean-code/large-file';
+
+// Mock adapter for testing
+const mockAdapter = {
+  detectLanguage: () => 'typescript',
+  parseAST: () => undefined,
+  extractFunctions: () => [],
+  extractClasses: () => [],
+  countLines: (_fileName: string) => 10 // Default to small file
+};
+
+describe('largeFileRule', () => {
+  it('should return an empty array when file has fewer than 500 lines', () => {
+    const shortFileAdapter = {
+      ...mockAdapter,
+      countLines: () => 499
+    } as never;
+
+    const violations = largeFileRule.check('test-short.ts', shortFileAdapter);
+    expect(violations).toHaveLength(0);
+  });
+
+  it('should detect files exceeding 650 lines', () => {
+    const largeFileAdapter: never = {
+      ...mockAdapter,
+      countLines: () => 651
+    };
+
+    const violations = largeFileRule.check('test-large.ts', largeFileAdapter);
+    expect(violations).toHaveLength(1);
+    expect(violations[0]).toEqual({
+      file: 'test-large.ts',
+      line: 1,
+      ruleId: 'clean-code.large-file',
+      message: 'File is too large: 651 lines (maximum: 650)',
+      severity: 'warning'
+    });
+  });
+
+  it('should handle exactly threshold lines as not violating', () => {
+    const thresholdFileAdapter: never = {
+      ...mockAdapter,
+      countLines: () => 650
+    };
+
+    const violations = largeFileRule.check('test-threshold.ts', thresholdFileAdapter);
+    expect(violations).toHaveLength(0);
+  });
+
+  it('should use the correct rule identifier', () => {
+    expect(largeFileRule.id).toEqual('clean-code.large-file');
+  });
+
+  it('should have the correct severity', () => {
+    expect(largeFileRule.severity).toEqual('warning');
+  });
+
+  it('should use the correct threshold', () => {
+    expect(largeFileRule.threshold).toEqual(650);
+  });
+
+  it('should return empty violations when adapter throws error', () => {
+    const mockAdapterThatThrows: never = {
+      ...mockAdapter,
+      countLines: () => { throw new Error('Adapter failed'); }
+    };
+    
+    const violations = largeFileRule.check('test.ts', mockAdapterThatThrows);
+    
+    expect(violations).toHaveLength(0);
+  });
+});

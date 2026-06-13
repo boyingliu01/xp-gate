@@ -1,0 +1,74 @@
+import { describe, it, expect } from 'vitest';
+import { deepNestingRule } from '../../clean-code/deep-nesting';
+
+const mockAdapter = {
+  detectLanguage: () => 'typescript',
+  parseAST: () => undefined,
+  extractFunctions: () => [],
+  extractClasses: () => [],
+  countLines: () => 0
+};
+
+describe('deep-nesting.ts - Deep Nesting Rule', () => {
+  it('should detect function with nesting deeper than 4 levels', () => {
+    const mockAdapterWithDeepNesting = {
+      ...mockAdapter,
+      extractFunctions: () => [{
+        name: 'deeplyNested',
+        startLine: 1,
+        code: `
+function deeplyNested() {
+  if (a) {
+    if (b) {
+      if (c) {
+        if (d) {
+          if (e) {
+            return true;
+          }
+        }
+      }
+    }
+  }
+}
+`,
+        nestingDepth: 5
+      }]
+    };
+    
+    const violations = deepNestingRule.check('test.ts', mockAdapterWithDeepNesting as never);
+    
+    expect(violations.length).toBe(1);
+    expect(violations[0].ruleId).toBe('clean-code.deep-nesting');
+  });
+
+  it('should pass for function with acceptable nesting', () => {
+    const mockAdapterWithNormalNesting = {
+      ...mockAdapter,
+      extractFunctions: () => [{
+        name: 'normalNesting',
+        startLine: 1,
+        nestingDepth: 3
+      }]
+    };
+    
+    const violations = deepNestingRule.check('test.ts', mockAdapterWithNormalNesting as never);
+    
+    expect(violations.length).toBe(0);
+  });
+
+  it('should use threshold from config', () => {
+    expect(deepNestingRule.threshold).toBe(4);
+    expect(deepNestingRule.severity).toBe('warning');
+  });
+
+  it('should return empty violations when adapter throws error', () => {
+    const mockAdapterThatThrows = {
+      ...mockAdapter,
+      extractFunctions: () => { throw new Error('Adapter failed'); }
+    };
+    
+    const violations = deepNestingRule.check('test.ts', mockAdapterThatThrows as never);
+    
+    expect(violations.length).toBe(0);
+  });
+});
