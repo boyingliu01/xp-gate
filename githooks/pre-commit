@@ -11,19 +11,19 @@
 # 1. Global: ~/.config/xp-gate/adapters (for core.hooksPath global setup)
 # 2. Project-local: <repo>/githooks/ (for per-project init)
 # 3. Script dir: hooks directory containing this script (fallback)
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ADAPTER_DIR=""
 GLOBAL_ADAPTER_DIR="$HOME/.config/xp-gate/adapters"
 PROJECT_GITHOOKS="$(git rev-parse --show-toplevel 2>/dev/null)/githooks"
+GATES_DIR="$SCRIPT_DIR/gates"
 
 if [ -f "$GLOBAL_ADAPTER_DIR/adapter-common.sh" ]; then
   ADAPTER_DIR="$GLOBAL_ADAPTER_DIR"
 elif [ -f "$PROJECT_GITHOOKS/adapter-common.sh" ]; then
   ADAPTER_DIR="$PROJECT_GITHOOKS"
 else
-  SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
   ADAPTER_DIR="$SCRIPT_DIR"
 fi
-GATES_DIR="$SCRIPT_DIR/gates"
 source "$ADAPTER_DIR/adapter-common.sh" 2>/dev/null || {
   echo "Error: Cannot source adapter-common.sh from $ADAPTER_DIR"
   echo "Run: xp-gate init (per-project) or xp-gate setup-global (all projects)"
