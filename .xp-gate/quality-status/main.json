@@ -1,14 +1,14 @@
 {
   "reportVersion": "1.1",
-  "generatedAt": "2026-06-12T05:50:48Z",
+  "generatedAt": "2026-06-14T04:02:47Z",
   "branch": "main",
-  "commit": "cce09d20800b6b19a5f06c8131df8d7f37523651",
+  "commit": "68815ab0686d3ac80b9d20318192b857d4f6f6c9",
   "language": "typescript",
   "overall": {
-    "gatesPassed": 9,
+    "gatesPassed": 4,
     "gatesTotal": 9,
-    "score": 10.0,
-    "verdict": "PASS"
+    "score": 4.0,
+    "verdict": "PARTIAL"
   },
   "gates": {
     "gate1_static_analysis": {
