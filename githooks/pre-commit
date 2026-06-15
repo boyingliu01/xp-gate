@@ -30,6 +30,17 @@ source "$ADAPTER_DIR/adapter-common.sh" 2>/dev/null || {
   exit 1
 }
 
+# Gate scripts directory — falls back to project githooks if ADAPTER_DIR doesn't have them
+if [ -f "$ADAPTER_DIR/gate-3.sh" ]; then
+  GATE_DIR="$ADAPTER_DIR"
+elif [ -f "$PROJECT_GITHOOKS/gate-3.sh" ]; then
+  GATE_DIR="$PROJECT_GITHOOKS"
+elif [ -f "$SCRIPT_DIR/gate-3.sh" ]; then
+  GATE_DIR="$SCRIPT_DIR"
+else
+  GATE_DIR="$ADAPTER_DIR"
+fi
+
 # Trap: ensure quality report generated on ANY exit (pass or fail).
 # Using a guard prevents recursion when 'exit' is called from inside the trap.
 # IMPORTANT: Captures exit status FIRST so generate_quality_report cannot override it.
@@ -156,7 +167,7 @@ if [ "$is_protected" = "true" ]; then
   # Env var bypass: SKIP_VERSION_CHECK=1 skips Gate 0 entirely
   # Useful for: SKIP_VERSION_CHECK=1 git commit -m "chore: ..."
   if [ "${SKIP_VERSION_CHECK:-}" = "1" ]; then
-    echo "✅ PASSED - Gate 0: Version Consistency Check (SKIP_VERSION_CHECK=1 env var)"
+    echo "⏭️  SKIPPED - Gate 0: Version consistency (SKIP_VERSION_CHECK=1 env var)"
   else
   # Check if staged changes include VERSION or CHANGELOG.md
   STAGED_FILES=$(git diff --cached --name-only --diff-filter=ACM)
@@ -541,13 +552,13 @@ GATE_1_START=$(gate_start_ms)
 
 if [ "$PROJECT_LANG" = "documentation-only" ]; then
   # Documentation-only project - skip static analysis
-  echo "✅ PASSED - Skipped (no source code to analyze)."
-   
+  echo "⏭️  SKIPPED - Code quality (documentation project)."
+  
   elif [ "$PROJECT_LANG" = "typescript" ]; then
   # TypeScript: static analysis (tsc) + linting (eslint)
   if ! command -v npx &> /dev/null; then
-    echo "ℹ️  SKIP - npx not available (non-blocking for TypeScript)"
-    echo "✅ PASSED - Code Quality Gate (SKIP)"
+    echo "ℹ️  npx not available — skipping TypeScript checks"
+    echo "⏭️  SKIPPED - Code quality (npx not available)"
   else
     # Verify tsc is real TypeScript compiler (npx may fetch deprecated tsc@2.0.4 placeholder)
     TSC_OUTPUT=$(npx tsc --version 2>&1)
@@ -632,8 +643,8 @@ if [ "$PROJECT_LANG" = "documentation-only" ]; then
 elif [ "$PROJECT_LANG" = "python" ]; then
   # Python: Ruff (includes syntax + linting) + mypy (optional typing)
   if ! command -v ruff &> /dev/null; then
-    echo "ℹ️  SKIP - ruff not available (non-blocking for Python)"
-    echo "✅ PASSED - Code Quality Gate (SKIP)"
+    echo "ℹ️  ruff not available — skipping Python linting"
+    echo "⏭️  SKIPPED - Code quality (ruff not available, run: pip install ruff)"
   else
     # Run Ruff (includes syntax check, linting)
     echo "Running Ruff linting (syntax + lint)..."
@@ -712,8 +723,8 @@ elif [ "$PROJECT_LANG" = "python" ]; then
 elif [ "$PROJECT_LANG" = "go" ]; then
   # Go: go vet + golangci-lint
   if ! command -v golangci-lint &> /dev/null; then
-    echo "ℹ️  SKIP - golangci-lint not available (non-blocking for Go)"
-    echo "✅ PASSED - Code Quality Gate (SKIP)"
+    echo "ℹ️  golangci-lint not available — skipping Go linting"
+    echo "⏭️  SKIPPED - Code quality (golangci-lint not available)"
   else
     echo "Running golangci-lint (comprehensive static analysis)..."
     golangci-lint run 2>&1 | head -30
@@ -818,13 +829,13 @@ else
     if [ "$ANALYSIS_EXIT" -eq 0 ] && [ "$LINT_EXIT" -eq 0 ]; then
       echo "✅ PASSED - Language-specific code quality checks."
     else
-      # If tools are not available or failed, skip non-blockingly
-      echo "✅ PASSED - Code Quality Gate (SKIP for unavailable tools)"
+      # Tools unavailable or failed — skip non-blockingly
+      echo "⏭️  SKIPPED - Code quality (tools unavailable or failed)"
     fi
   else
     # If no adapter exists for this language, skip
-    echo "ℹ️  No specific adapter for $PROJECT_LANG - using generic checks if any"
-    echo "✅ PASSED - Code Quality Gate (no specific checks available)."
+    echo "ℹ️  No specific adapter for $PROJECT_LANG — using generic checks if any"
+    echo "⏭️  SKIPPED - Code quality (no specific checks for $PROJECT_LANG)"
   fi
 fi
 GATE_1_STATUS="PASS"
@@ -840,8 +851,8 @@ record_gate_audit "gate-1" "code-quality" "$GATE_1_STATUS" "0" "$GATE_1_START"
 GATE_2_START=$(gate_start_ms)
 
 if [ "$PROJECT_LANG" = "documentation-only" ]; then
-  echo "✅ PASSED - Skipped (no source code to analyze)."
-  
+echo "⏭️  SKIPPED - Duplicate code (documentation project)."
+
 elif [ "$PROJECT_LANG" = "typescript" ]; then
   if ! require_tool "jscpd" "Gate 2" "npm install -D jscpd"; then
     exit 1
@@ -887,11 +898,11 @@ elif [ "$PROJECT_LANG" = "go" ]; then
 
 elif [ "$PROJECT_LANG" = "powershell" ]; then
   echo "ℹ️  No PowerShell-native duplicate detector (jscpd does not support .ps1)"
-  echo "✅ PASSED - Skipped (no standardized tool for PowerShell duplicate detection)"
+  echo "⏭️  SKIPPED - Duplicate code (no tool for PowerShell)"
 
 elif [ "$PROJECT_LANG" = "shell" ]; then
   echo "ℹ️  Duplicate detection not typically used for shell scripts"
-  echo "✅ PASSED - Skipped (shell scripts, no standardized dup tool)"
+  echo "⏭️  SKIPPED - Duplicate code (no tool for shell scripts)"
 
 else
   SOURCE_FILES=$(echo "$CHANGED_FILES" | grep -E '\.(ts|tsx|js|jsx|py|go|java|scala|kt|cpp|c|h|rs|php|dart|swift)$')
@@ -910,24 +921,16 @@ GATE_2_STATUS="PASS"
 record_gate_audit "gate-2" "duplicate-code" "$GATE_2_STATUS" "0" "$GATE_2_START"
 
 # ============================================================================
-# GATE 3: Cyclomatic Complexity Check (Old Gate 7)
-# Uses lizard - keeps existing logic for consistency
+# GATE 3: Cyclomatic Complexity Check
+# Extracted to gate-3.sh for maintainability
 # ============================================================================
- 2>&1 echo ""
- 2>&1 echo "→ Gate 3: Cyclomatic complexity..."
-GATE_3_START=$(gate_start_ms)
-source "$GATES_DIR/gate-3-complexity.sh"
-record_gate_audit "gate-3" "complexity" "$GATE_3_STATUS" "${CC_WARNINGS:-0}" "$GATE_3_START"
+source "$GATE_DIR/gate-3.sh"
 
 # ============================================================================
-# GATE 4: Principles Checker (Old Gate 6 - Clean Code + SOLID)
-# Reuses existing principles checker logic
+# GATE 4: Principles Checker (Clean Code + SOLID)
+# Extracted to gate-4.sh for maintainability
 # ============================================================================
- 2>&1 echo ""
- 2>&1 echo "→ Gate 4: Principles checker (Clean Code + SOLID)..."
-GATE_4_START=$(gate_start_ms)
-source "$GATES_DIR/gate-4-principles.sh"
-record_gate_audit "gate-4" "principles" "$GATE_4_STATUS" "${WARNING_COUNT:-0}" "$GATE_4_START"
+source "$GATE_DIR/gate-4.sh"
 
 # ============================================================================
 # GATE 5: Tests & Coverage Combined (Combines Old Gates 3 - Tests and 4 - Coverage)
@@ -1381,7 +1384,7 @@ if [ "$PROJECT_LANG" = "documentation-only" ]; then
 
 elif [ "$PROJECT_LANG" = "powershell" ]; then
   echo "     ℹ️  No PowerShell architecture tooling available"
-  echo "     ✅ Architecture validation (SKIP, no tool for PowerShell)"
+     echo "     ⏭️  SKIPPED - Architecture validation (no tool for PowerShell)"
 
 else
   # Check if architecture config exists
@@ -1442,7 +1445,7 @@ else
           fi
         else
           echo "     ℹ️  No .import-linter.yml found - skipping Python architecture"
-          echo "     ✅ Python architecture validation (SKIP, no config)"
+          echo "     ⏭️  SKIPPED - Python architecture validation (no config)"
         fi
         ;;
       "go")
@@ -1458,7 +1461,7 @@ else
           fi
         else
           echo "     ℹ️  No arch-go.yaml found - skipping Go architecture"
-          echo "     ✅ Go architecture validation (SKIP, no config)"
+          echo "     ⏭️  SKIPPED - Go architecture validation (no config)"
         fi
         ;;
       "java")
@@ -1474,19 +1477,19 @@ else
           echo "     ✅ Java architecture validation completed."
         else
           echo "     ℹ️  No architecture test files found - skipping"
-          echo "     ✅ Architecture validation (SKIP, no tests)"
+          echo "     ⏭️  SKIPPED - Architecture validation (no tests)"
         fi
         ;;
       *)
         echo "     ℹ️  Architecture validation not configured for $PROJECT_LANG"
-        echo "     ✅ Architecture validation (SKIP, not configured)"
+        echo "     ⏭️  SKIPPED - Architecture validation (not configured for $PROJECT_LANG)"
         ;;
     esac
   else
     # Architecture config is REQUIRED — BLOCK if missing
     if [ -f ".architecture-skip" ]; then
       echo "     ⚠️  Architecture config missing but .architecture-skip present — allowed to skip"
-      echo "     ✅ Architecture validation (SKIP, .architecture-skip exemption)"
+      echo "     ⏭️  SKIPPED - Architecture validation (.architecture-skip exemption)"
     else
       echo ""
       echo "❌ ARCHITECTURE CONFIG MISSING - COMMIT BLOCKED"
@@ -1575,12 +1578,12 @@ else
         fi
       else
         echo "     ℹ️  npx not available - skipping Boy Scout Rule"
-        echo "     ✅ Boy Scout Rule (SKIP, Node.js not available)"
+        echo "     ⏭️  SKIPPED - Boy Scout Rule (Node.js/npx not available)"
       fi
     fi
   else
     echo "     ℹ️  Boy scout rule not available in project - skipping"
-    echo "     ✅ Boy Scout Rule (SKIP, not available in project)"
+    echo "     ⏭️  SKIPPED - Boy Scout Rule (not available in project)"
   fi
 fi
 GATE_6_STATUS="PASS"
@@ -1590,26 +1593,15 @@ record_gate_audit "gate-6" "architecture-boy-scout" "$GATE_6_STATUS" "${BS_BLOCK
 
 # ============================================================================
 # GATE 7: IaC Security Scanning (Terraform, Kubernetes, Docker)
-# Detects security issues in Infrastructure as Code files
-# Tools: checkov (recommended), hadolint, kube-score, tflint
+# Extracted to gate-7.sh for maintainability
 # ============================================================================
- 2>&1 echo ""
- 2>&1 echo "→ Gate 7: IaC Security Scanning (Terraform, Kubernetes, Docker)..."
-GATE_7_START=$(gate_start_ms)
-source "$GATES_DIR/gate-7-iac-security.sh"
-record_gate_audit "gate-7" "iac-security" "$GATE_7_STATUS" "0" "$GATE_7_START"
+source "$GATE_DIR/gate-7.sh"
 
 
 # GATE 8: Secret Scanning (gitleaks)
-# Detects secrets (API keys, passwords, tokens) in staged files
-# Tool: gitleaks -- https://github.com/gitleaks/gitleaks
+# Extracted to gate-8.sh for maintainability
 # ============================================================================
-
- 2>&1 echo ""
- 2>&1 echo "→ Gate 8: Secret scanning (gitleaks)..."
-GATE_8_START=$(gate_start_ms)
-source "$GATES_DIR/gate-8-secret-scanning.sh"
-record_gate_audit "gate-8" "secret-scanning" "$GATE_8_STATUS" "0" "$GATE_8_START"
+source "$GATE_DIR/gate-8.sh"
 
 # Switch back to original directory if we were in a subdirectory
 if [ -n "$ORIGINAL_DIR" ]; then
@@ -1618,15 +1610,9 @@ fi
 
 # ============================================================================
 # GATE 9: Semgrep SAST Security Scan
-# Detects security vulnerabilities (SQL injection, XSS, etc.) in staged files
-# Tool: semgrep -- https://semgrep.dev
+# Extracted to gate-9.sh for maintainability
 # ============================================================================
-
- 2>&1 echo ""
- 2>&1 echo "→ Gate 9: Semgrep SAST Security Scan..."
-GATE_9_START=$(gate_start_ms)
-source "$GATES_DIR/gate-9-sast-security.sh"
-record_gate_audit "gate-9" "sast-security" "$GATE_9_STATUS" "0" "$GATE_9_START"
+source "$GATE_DIR/gate-9.sh"
 # ============================================================================
 
 generate_quality_report() {
