@@ -155,7 +155,7 @@ if [ "$is_protected" = "true" ]; then
   # Env var bypass: SKIP_VERSION_CHECK=1 skips Gate 0 entirely
   # Useful for: SKIP_VERSION_CHECK=1 git commit -m "chore: ..."
   if [ "${SKIP_VERSION_CHECK:-}" = "1" ]; then
-    echo "✅ PASSED - Gate 0: Version Consistency Check (SKIP_VERSION_CHECK=1 env var)"
+    echo "⏭️  SKIPPED - Gate 0: Version consistency (SKIP_VERSION_CHECK=1 env var)"
   else
   # Check if staged changes include VERSION or CHANGELOG.md
   STAGED_FILES=$(git diff --cached --name-only --diff-filter=ACM)
@@ -540,13 +540,13 @@ GATE_1_START=$(gate_start_ms)
 
 if [ "$PROJECT_LANG" = "documentation-only" ]; then
   # Documentation-only project - skip static analysis
-  echo "✅ PASSED - Skipped (no source code to analyze)."
-   
+  echo "⏭️  SKIPPED - Code quality (documentation project)."
+  
   elif [ "$PROJECT_LANG" = "typescript" ]; then
   # TypeScript: static analysis (tsc) + linting (eslint)
   if ! command -v npx &> /dev/null; then
-    echo "ℹ️  SKIP - npx not available (non-blocking for TypeScript)"
-    echo "✅ PASSED - Code Quality Gate (SKIP)"
+    echo "ℹ️  npx not available — skipping TypeScript checks"
+    echo "⏭️  SKIPPED - Code quality (npx not available)"
   else
     # Verify tsc is real TypeScript compiler (npx may fetch deprecated tsc@2.0.4 placeholder)
     TSC_OUTPUT=$(npx tsc --version 2>&1)
@@ -631,8 +631,8 @@ if [ "$PROJECT_LANG" = "documentation-only" ]; then
 elif [ "$PROJECT_LANG" = "python" ]; then
   # Python: Ruff (includes syntax + linting) + mypy (optional typing)
   if ! command -v ruff &> /dev/null; then
-    echo "ℹ️  SKIP - ruff not available (non-blocking for Python)"
-    echo "✅ PASSED - Code Quality Gate (SKIP)"
+    echo "ℹ️  ruff not available — skipping Python linting"
+    echo "⏭️  SKIPPED - Code quality (ruff not available, run: pip install ruff)"
   else
     # Run Ruff (includes syntax check, linting)
     echo "Running Ruff linting (syntax + lint)..."
@@ -711,8 +711,8 @@ elif [ "$PROJECT_LANG" = "python" ]; then
 elif [ "$PROJECT_LANG" = "go" ]; then
   # Go: go vet + golangci-lint
   if ! command -v golangci-lint &> /dev/null; then
-    echo "ℹ️  SKIP - golangci-lint not available (non-blocking for Go)"
-    echo "✅ PASSED - Code Quality Gate (SKIP)"
+    echo "ℹ️  golangci-lint not available — skipping Go linting"
+    echo "⏭️  SKIPPED - Code quality (golangci-lint not available)"
   else
     echo "Running golangci-lint (comprehensive static analysis)..."
     golangci-lint run 2>&1 | head -30
@@ -817,13 +817,13 @@ else
     if [ "$ANALYSIS_EXIT" -eq 0 ] && [ "$LINT_EXIT" -eq 0 ]; then
       echo "✅ PASSED - Language-specific code quality checks."
     else
-      # If tools are not available or failed, skip non-blockingly
-      echo "✅ PASSED - Code Quality Gate (SKIP for unavailable tools)"
+      # Tools unavailable or failed — skip non-blockingly
+      echo "⏭️  SKIPPED - Code quality (tools unavailable or failed)"
     fi
   else
     # If no adapter exists for this language, skip
-    echo "ℹ️  No specific adapter for $PROJECT_LANG - using generic checks if any"
-    echo "✅ PASSED - Code Quality Gate (no specific checks available)."
+    echo "ℹ️  No specific adapter for $PROJECT_LANG — using generic checks if any"
+    echo "⏭️  SKIPPED - Code quality (no specific checks for $PROJECT_LANG)"
   fi
 fi
 GATE_1_STATUS="PASS"
@@ -839,8 +839,8 @@ record_gate_audit "gate-1" "code-quality" "$GATE_1_STATUS" "0" "$GATE_1_START"
 GATE_2_START=$(gate_start_ms)
 
 if [ "$PROJECT_LANG" = "documentation-only" ]; then
-  echo "✅ PASSED - Skipped (no source code to analyze)."
-  
+echo "⏭️  SKIPPED - Duplicate code (documentation project)."
+
 elif [ "$PROJECT_LANG" = "typescript" ]; then
   if ! require_tool "jscpd" "Gate 2" "npm install -D jscpd"; then
     exit 1
@@ -886,11 +886,11 @@ elif [ "$PROJECT_LANG" = "go" ]; then
 
 elif [ "$PROJECT_LANG" = "powershell" ]; then
   echo "ℹ️  No PowerShell-native duplicate detector (jscpd does not support .ps1)"
-  echo "✅ PASSED - Skipped (no standardized tool for PowerShell duplicate detection)"
+  echo "⏭️  SKIPPED - Duplicate code (no tool for PowerShell)"
 
 elif [ "$PROJECT_LANG" = "shell" ]; then
   echo "ℹ️  Duplicate detection not typically used for shell scripts"
-  echo "✅ PASSED - Skipped (shell scripts, no standardized dup tool)"
+  echo "⏭️  SKIPPED - Duplicate code (no tool for shell scripts)"
 
 else
   SOURCE_FILES=$(echo "$CHANGED_FILES" | grep -E '\.(ts|tsx|js|jsx|py|go|java|scala|kt|cpp|c|h|rs|php|dart|swift)$')
@@ -909,139 +909,16 @@ GATE_2_STATUS="PASS"
 record_gate_audit "gate-2" "duplicate-code" "$GATE_2_STATUS" "0" "$GATE_2_START"
 
 # ============================================================================
-# GATE 3: Cyclomatic Complexity Check (Old Gate 7)
-# Uses lizard - keeps existing logic for consistency
+# GATE 3: Cyclomatic Complexity Check
+# Extracted to gate-3.sh for maintainability
 # ============================================================================
- 2>&1 echo ""
- 2>&1 echo "→ Gate 3: Cyclomatic complexity..."
-GATE_3_START=$(gate_start_ms)
-
-if [ "$PROJECT_LANG" = "documentation-only" ]; then
-  echo "✅ PASSED - Skipped (documentation project)."
-
-elif [ "$PROJECT_LANG" = "powershell" ]; then
-  echo "ℹ️  No PowerShell principles checker available"
-  echo "✅ PASSED - Skipped (no PowerShell Clean Code / SOLID tool)"
-  
-else
-  CCN_THRESHOLD=5
-  
-  # Check lizard availability
-  LIZARD_CMD=""
-  if command -v lizard > /dev/null 2>&1; then
-    LIZARD_CMD=lizard
-  elif [ -f ~/.local/bin/lizard ]; then
-    LIZARD_CMD=~/.local/bin/lizard
-  fi
-  
-  if [ -n "$LIZARD_CMD" ]; then
-    LIZARD_PATH=$(eval echo "$LIZARD_CMD")
-    
-    # Get changed source files for complexity check
-    CC_FILES=$(echo "$CHANGED_FILES" | grep -E '\.(ts|tsx|js|jsx|py|go|java|swift|cpp|c|hpp|h|m|mm|kt)$' || true)
-    
-    if [ -n "$CC_FILES" ]; then
-      echo "Checking complexity for source files..."
-      
-      # Run lizard with CCN threshold
-      CC_OUTPUT=$($LIZARD_PATH -C $CCN_THRESHOLD $CC_FILES 2>&1 || true)
-      
-      # Parse warning count from the summary table: "Warning cnt   8"
-      # Use anchored grep to avoid matching lizard table headers (e.g. "Rt" column)
-      CC_WARNINGS=$(echo "$CC_OUTPUT" | grep "^Warning cnt" | awk '{print $NF}' | tr -d '[:space:]' | sed 's/[^0-9]//g' || true)
-      CC_WARNINGS=${CC_WARNINGS:-0}
-      
-      if [ "$CC_WARNINGS" -gt 0 ]; then
-        echo "$CC_OUTPUT"
-        echo ""
-        echo "❌ BLOCKED - $CC_WARNINGS functions with CCN > $CCN_THRESHOLD found."
-        echo "Refactor high-complexity functions to keep below $CCN_THRESHOLD complexity."
-        exit 1
-      else
-        echo "✅ PASSED - All functions within complexity threshold ($CCN_THRESHOLD)."
-      fi
-    else
-      echo "✅ PASSED - No source files to check for complexity."
-    fi
-  else
-    echo "⚠️  WARN - lizard not installed, complexity check not performed"
-    echo "   Install with: pip install --user lizard"
-    echo "   Gate 3: Complexity check (WARN, tool not available)"
-    GATE_3_STATUS="WARN"
-  fi
-fi
-GATE_3_STATUS="PASS"
-record_gate_audit "gate-3" "complexity" "$GATE_3_STATUS" "${CC_WARNINGS:-0}" "$GATE_3_START"
+source "$ADAPTER_DIR/gate-3.sh"
 
 # ============================================================================
-# GATE 4: Principles Checker (Old Gate 6 - Clean Code + SOLID)
-# Reuses existing principles checker logic
+# GATE 4: Principles Checker (Clean Code + SOLID)
+# Extracted to gate-4.sh for maintainability
 # ============================================================================
- 2>&1 echo ""
- 2>&1 echo "→ Gate 4: Principles checker (Clean Code + SOLID)..."
-GATE_4_START=$(gate_start_ms)
-
-if [ "$PROJECT_LANG" = "documentation-only" ]; then
-  echo "✅ PASSED - Skipped (documentation project)."
-  
-else
-  # Get source files to check against principles
-  PRINCIPLES_FILES=$(echo "$CHANGED_FILES" | grep -E '\.(ts|tsx|js|jsx|py|go|java|kt|dart|swift|cpp|c|hpp|h|m|mm)$' || true)
-  
-  if [ -n "$PRINCIPLES_FILES" ]; then
-    # Check for principles checker in installed modules first, then project src/
-    PRINCIPLES_DIR=""
-    if [ -d ".xp-gate/modules/principles" ]; then
-      PRINCIPLES_DIR=".xp-gate/modules/principles"
-    elif [ -f "src/principles/index.ts" ]; then
-      PRINCIPLES_DIR="src/principles"
-    fi
-    
-    if [ -n "$PRINCIPLES_DIR" ]; then
-      echo "Checking Clean Code + SOLID principles..."
-      
-      if command -v npx > /dev/null 2>&1; then
-        # Run principles checker and store results
-        if npx tsx $PRINCIPLES_DIR/index.ts --files $PRINCIPLES_FILES --format json > /tmp/principles-output.json 2>/dev/null; then
-          # Check severity levels
-          ERROR_COUNT=$(grep -c '"severity":"error"' /tmp/principles-output.json 2>/dev/null || true)
-          ERROR_COUNT=${ERROR_COUNT:-0}
-          WARNING_COUNT=$(grep -c '"severity":"warning"' /tmp/principles-output.json 2>/dev/null || true)
-          WARNING_COUNT=${WARNING_COUNT:-0}
-          
-          if [ "$ERROR_COUNT" -gt 0 ]; then
-            echo ""
-            echo "❌ BLOCKED - $ERROR_COUNT principle ERROR(S) found"
-            echo "Critical violations must be fixed before commit:"
-            echo "  - error-handling violations"
-            echo "  - SOLID principle violations"
-            echo "  - architectural violations"
-            npx tsx src/principles/index.ts --files $PRINCIPLES_FILES --format console
-            exit 1
-          fi
-          
-          echo "✅ PASSED - Principles checker (no errors found)."
-          if [ "$WARNING_COUNT" -gt 0 ]; then
-            echo "ℹ️  $WARNING_COUNT warnings found (will be handled by Boy Scout Rule)."
-          fi
-        else
-          echo "⚠️  Warning: Principles checker execution failed"
-          echo "✅ PASSED - Principles check (SKIP, execution issue)"
-        fi
-      else
-        echo "ℹ️  npx not available - skipping principles check"
-        echo "✅ PASSED - Principles check (SKIP, no Node.js)"
-      fi
-    else
-      echo "ℹ️  Principles checker not found in project - skipping"
-      echo "✅ PASSED - Principles check (SKIP, not available in project)"
-    fi
-  else
-    echo "✅ PASSED - No source files changed (principles check skipped)."
-  fi
-fi
-GATE_4_STATUS="PASS"
-record_gate_audit "gate-4" "principles" "$GATE_4_STATUS" "${WARNING_COUNT:-0}" "$GATE_4_START"
+source "$ADAPTER_DIR/gate-4.sh"
 
 # ============================================================================
 # GATE 5: Tests & Coverage Combined (Combines Old Gates 3 - Tests and 4 - Coverage)
@@ -1704,105 +1581,15 @@ record_gate_audit "gate-6" "architecture-boy-scout" "$GATE_6_STATUS" "${BS_BLOCK
 
 # ============================================================================
 # GATE 7: IaC Security Scanning (Terraform, Kubernetes, Docker)
-# Detects security issues in Infrastructure as Code files
-# Tools: checkov (recommended), hadolint, kube-score, tflint
+# Extracted to gate-7.sh for maintainability
 # ============================================================================
- 2>&1 echo ""
- 2>&1 echo "→ Gate 7: IaC Security Scanning (Terraform, Kubernetes, Docker)..."
-GATE_7_START=$(gate_start_ms)
-
-# Check if any IaC files are changed
-IAC_FILES=$(git diff --cached --name-only --diff-filter=ACM 2>/dev/null | grep -E "\.(tf|yaml|yml)$|Dockerfile" || true)
-if [ -z "$IAC_FILES" ]; then
-  echo "✅ PASSED - No IaC files detected in changes."
-  GATE_7_STATUS="PASS"
-else
-  # Run IaC adapter
-  if [ -f "githooks/adapters/iac.sh" ]; then
-    # shellcheck source=githooks/adapters/iac.sh
-    source "githooks/adapters/iac.sh"
-    
-    # Run static analysis for IaC files
-    IAC_OUTPUT=$(run_static_analysis "$IAC_FILES" 2>&1)
-    IAC_EXIT=$?
-    
-    echo "$IAC_OUTPUT"
-    
-    if [ $IAC_EXIT -eq 0 ]; then
-      echo "✅ PASSED - IaC security scan."
-      GATE_7_STATUS="PASS"
-    else
-      echo ""
-      echo "❌ BLOCKED - IaC security issues detected"
-      echo "Fix the security issues above before committing."
-      echo "Tip: Install checkov for comprehensive IaC scanning: pip install checkov"
-      GATE_7_STATUS="FAIL"
-      exit 1
-    fi
-  else
-    echo "ℹ️  SKIP - IaC adapter not found"
-    echo "✅ PASSED - IaC Security (SKIP)"
-    GATE_7_STATUS="SKIP"
-  fi
-fi
-record_gate_audit "gate-7" "iac-security" "$GATE_7_STATUS" "0" "$GATE_7_START"
+source "$ADAPTER_DIR/gate-7.sh"
 
 
 # GATE 8: Secret Scanning (gitleaks)
-# Detects secrets (API keys, passwords, tokens) in staged files
-# Tool: gitleaks -- https://github.com/gitleaks/gitleaks
+# Extracted to gate-8.sh for maintainability
 # ============================================================================
-
- 2>&1 echo ""
- 2>&1 echo "→ Gate 8: Secret scanning (gitleaks)..."
-GATE_8_START=$(gate_start_ms)
-
-# Gitleaks availability check
-GITLEAKS_CMD=""
-if command -v gitleaks >/dev/null 2>&1; then
-  GITLEAKS_CMD="gitleaks"
-elif [ -f "$HOME/.local/bin/gitleaks" ]; then
-  GIBLEAKS_CMD="$HOME/.local/bin/gitleaks"
-fi
-
-if [ -n "$GITLEAKS_CMD" ]; then
-  GITLEAKS_CONFIG=""
-  if [ -f ".gitleaks.toml" ]; then
-    GITLEAKS_CONFIG="--config=.gitleaks.toml"
-  fi
-
-  # Run gitleaks on staged changes only (pre-commit mode for speed)
-  GITLEAKS_OUTPUT=$($GITLEAKS_CMD git --pre-commit --redact --no-banner $GITLEAKS_CONFIG --report-format=json --report-path=/tmp/gitleaks-report.json 2>&1)
-  GITLEAKS_EXIT=$?
-
-  if [ "$GITLEAKS_EXIT" -eq 0 ]; then
-    echo "     ✅ PASSED - No secrets detected."
-    GATE_8_STATUS="PASS"
-  elif [ "$GITLEAKS_EXIT" -eq 1 ]; then
-    # Secrets found — output details
-    echo "$GITLEAKS_OUTPUT"
-    echo ""
-    echo "❌ BLOCKED - Secrets detected in staged files."
-    echo ""
-    echo "Remediation options:"
-    echo "  1. Remove the secret and use environment variables instead"
-    echo "  2. Add a false positive to .gitleaks.toml allowlist"
-    echo "  3. Use git secret or vault for sensitive data"
-    echo ""
-    echo "See: https://github.com/gitleaks/gitleaks"
-    exit 1
-  else
-    echo "     ⚠️  gitleaks exited with code $GITLEAKS_EXIT - skipping gate"
-    echo "     ✅ Secret Scanning (SKIP, gitleaks error)"
-    GATE_8_STATUS="SKIP"
-  fi
-else
-  echo "     ℹ️  gitleaks not installed — secret scanning unavailable"
-  echo "     Install: brew install gitleaks (macOS) | scripts/install-gitleaks.sh (Linux)"
-  echo "     ✅ Secret Scanning (SKIP, gitleaks not installed)"
-  GATE_8_STATUS="SKIP"
-fi
-record_gate_audit "gate-8" "secret-scanning" "$GATE_8_STATUS" "0" "$GATE_8_START"
+source "$ADAPTER_DIR/gate-8.sh"
 
 # Switch back to original directory if we were in a subdirectory
 if [ -n "$ORIGINAL_DIR" ]; then
@@ -1811,134 +1598,9 @@ fi
 
 # ============================================================================
 # GATE 9: Semgrep SAST Security Scan
-# Detects security vulnerabilities (SQL injection, XSS, etc.) in staged files
-# Tool: semgrep -- https://semgrep.dev
+# Extracted to gate-9.sh for maintainability
 # ============================================================================
-
- 2>&1 echo ""
- 2>&1 echo "→ Gate 9: Semgrep SAST Security Scan..."
-GATE_9_START=$(gate_start_ms)
-
-GATE_9_STATUS="PASS"
-
-# Semgrep availability check
-SEMGREP_CMD=""
-if command -v semgrep >/dev/null 2>&1; then
-  SEMGREP_CMD="semgrep"
-elif [ -f "$HOME/.local/bin/semgrep" ]; then
-  SEMGREP_CMD="$HOME/.local/bin/semgrep"
-fi
-
-if [ -z "$SEMGREP_CMD" ]; then
-  echo "     ⚠️  WARN - semgrep not installed — SAST scanning unavailable"
-  echo "     Install: brew install semgrep | pip install semgrep"
-  echo "     Pre-cache rules: semgrep --config=p/security-audit"
-  echo "     Gate 9: SAST Security (WARN, semgrep not installed)"
-  GATE_9_STATUS="WARN"
-else
-  # Get staged files filtered to Semgrep-supported languages
-  SEMGREP_FILES=$(git diff --cached --name-only --diff-filter=ACM 2>/dev/null | grep -E '\.(ts|tsx|js|jsx|py|go|java|c|cpp|cs|rb|php|scala|swift)$' || true)
-
-  if [ -z "$SEMGREP_FILES" ]; then
-    echo "     ✅ PASSED - No supported language files in staged changes."
-    GATE_9_STATUS="PASS"
-  else
-    # Run semgrep with JSON output
-    # --config=p/security-audit: explicit security ruleset
-    # --json: machine-readable output
-    # --disable-version-check: skip network call
-    SEMGREP_OUTPUT=$($SEMGREP_CMD scan --config=p/security-audit --json --disable-version-check $SEMGREP_FILES 2>&1)
-    SEMGREP_EXIT=$?
-
-    if [ "$SEMGREP_EXIT" -eq 0 ]; then
-      echo "     ✅ PASSED - No security vulnerabilities found."
-      GATE_9_STATUS="PASS"
-    elif [ "$SEMGREP_EXIT" -eq 1 ]; then
-      # Findings detected - parse JSON to categorize
-      CRITICAL_HIGH=$(echo "$SEMGREP_OUTPUT" | python3 -c "
-import sys, json
-try:
-    data = json.load(sys.stdin)
-    results = data.get('results', [])
-    count = 0
-    for r in results:
-        extra = r.get('extra', {})
-        severity = extra.get('severity', '').upper()
-        if severity in ('CRITICAL', 'HIGH'):
-            count += 1
-    print(count)
-except:
-    print('0')
-" 2>/dev/null || echo "0")
-
-      MEDIUM_LOW=$(echo "$SEMGREP_OUTPUT" | python3 -c "
-import sys, json
-try:
-    data = json.load(sys.stdin)
-    results = data.get('results', [])
-    count = 0
-    for r in results:
-        extra = r.get('extra', {})
-        severity = extra.get('severity', '').upper()
-        if severity in ('MEDIUM', 'LOW'):
-            count += 1
-    print(count)
-except:
-    print('0')
-" 2>/dev/null || echo "0")
-
-      # Extract top finding details
-      FINDING_DETAILS=$(echo "$SEMGREP_OUTPUT" | python3 -c "
-import sys, json
-try:
-    data = json.load(sys.stdin)
-    results = data.get('results', [])
-    for r in results[:5]:  # Show top 5
-        extra = r.get('extra', {})
-        severity = extra.get('severity', 'UNKNOWN').upper()
-        rule_id = r.get('check_id', 'unknown')
-        path = r.get('path', 'unknown')
-        start_line = r.get('start', {}).get('line', '?')
-        message = extra.get('message', '')[:80]
-        print(f'  [{severity}] {rule_id}')
-        print(f'  {path}:{start_line} → {message}')
-        print()
-except:
-    print('  (Failed to parse semgrep output)')
-" 2>/dev/null || echo "  (Failed to parse semgrep output)")
-
-      if [ "$CRITICAL_HIGH" -gt 0 ]; then
-        echo ""
-        echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-        echo "   GATE 9: Semgrep Security Gate"
-        echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-        echo "  CRITICAL/HIGH: ${CRITICAL_HIGH}  ❌ BLOCKED"
-        echo "  MEDIUM/LOW:    ${MEDIUM_LOW}  ⚠️  warning"
-        echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-        echo "  ❌ BLOCKED — Critical/High vulnerability found"
-        echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-        echo "$FINDING_DETAILS"
-        echo "  Run 'semgrep scan --config=p/security-audit' to review all findings."
-        GATE_9_STATUS="FAIL"
-        exit 1
-      else
-        echo ""
-        echo "     ✅ PASSED - No critical/high vulnerabilities"
-        if [ "$MEDIUM_LOW" -gt 0 ]; then
-          echo "     ⚠️  ${MEDIUM_LOW} medium/low findings (warnings only)"
-          echo "$FINDING_DETAILS"
-        fi
-        GATE_9_STATUS="PASS"
-      fi
-    else
-      # semgrep runtime error (timeout, config error, etc.)
-      echo "     ⚠️  semgrep exited with code ${SEMGREP_EXIT} — skipping gate"
-      echo "     ✅ Semgrep SAST (SKIP, semgrep error)"
-      GATE_9_STATUS="SKIP"
-    fi
-  fi
-fi
-record_gate_audit "gate-9" "sast-security" "$GATE_9_STATUS" "0" "$GATE_9_START"
+source "$ADAPTER_DIR/gate-9.sh"
 # ============================================================================
 
 generate_quality_report() {
