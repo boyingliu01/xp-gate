@@ -74,9 +74,26 @@ while read local_ref local_sha remote_ref remote_sha; do
     echo "   ℹ️  Branch deletion detected ($local_ref). Skipping validation."
     continue
   elif [ "$remote_sha" = "0000000000000000000000000000000000000000" ]; then
-    # New branch - compare against empty tree
-    PUSHED_FILES=$(git diff-tree -r --name-only HEAD)
-    TS_FILES=$(git diff-tree -r --name-only HEAD | grep '\.ts$' || true)
+    # New branch - compare cumulative diff vs base branch
+    # Use git merge-base HEAD main/master to find the branch point,
+    # then diff the full branch range. Falls back to HEAD-only diff if no base found.
+    BASE_BRANCH="origin/main"
+    if ! git rev-parse --verify "$BASE_BRANCH" >/dev/null 2>&1; then
+      BASE_BRANCH="origin/master"
+    fi
+    if git rev-parse --verify "$BASE_BRANCH" >/dev/null 2>&1; then
+      MERGE_BASE=$(git merge-base HEAD "$BASE_BRANCH" 2>/dev/null)
+      if [ -n "$MERGE_BASE" ] && [ "$MERGE_BASE" != "$(git rev-parse HEAD)" ]; then
+        PUSHED_FILES=$(git diff --name-only "$MERGE_BASE"...HEAD 2>/dev/null)
+        TS_FILES=$(git diff --name-only "$MERGE_BASE"...HEAD 2>/dev/null | grep '\.ts$' || true)
+      else
+        PUSHED_FILES=$(git diff-tree -r --name-only HEAD)
+        TS_FILES=$(git diff-tree -r --name-only HEAD | grep '\.ts$' || true)
+      fi
+    else
+      PUSHED_FILES=$(git diff-tree -r --name-only HEAD)
+      TS_FILES=$(git diff-tree -r --name-only HEAD | grep '\.ts$' || true)
+    fi
   else
     # Existing branch - compare against what we're pushing from
     PUSHED_FILES=$(git diff-tree -r --name-only "$remote_sha" "$local_sha")

@@ -29,6 +29,17 @@ source "$ADAPTER_DIR/adapter-common.sh" 2>/dev/null || {
   exit 1
 }
 
+# Gate scripts directory — falls back to project githooks if ADAPTER_DIR doesn't have them
+if [ -f "$ADAPTER_DIR/gate-3.sh" ]; then
+  GATE_DIR="$ADAPTER_DIR"
+elif [ -f "$PROJECT_GITHOOKS/gate-3.sh" ]; then
+  GATE_DIR="$PROJECT_GITHOOKS"
+elif [ -f "$SCRIPT_DIR/gate-3.sh" ]; then
+  GATE_DIR="$SCRIPT_DIR"
+else
+  GATE_DIR="$ADAPTER_DIR"
+fi
+
 # Trap: ensure quality report generated on ANY exit (pass or fail).
 # Using a guard prevents recursion when 'exit' is called from inside the trap.
 # IMPORTANT: Captures exit status FIRST so generate_quality_report cannot override it.
@@ -912,13 +923,13 @@ record_gate_audit "gate-2" "duplicate-code" "$GATE_2_STATUS" "0" "$GATE_2_START"
 # GATE 3: Cyclomatic Complexity Check
 # Extracted to gate-3.sh for maintainability
 # ============================================================================
-source "$ADAPTER_DIR/gate-3.sh"
+source "$GATE_DIR/gate-3.sh"
 
 # ============================================================================
 # GATE 4: Principles Checker (Clean Code + SOLID)
 # Extracted to gate-4.sh for maintainability
 # ============================================================================
-source "$ADAPTER_DIR/gate-4.sh"
+source "$GATE_DIR/gate-4.sh"
 
 # ============================================================================
 # GATE 5: Tests & Coverage Combined (Combines Old Gates 3 - Tests and 4 - Coverage)
@@ -1583,13 +1594,13 @@ record_gate_audit "gate-6" "architecture-boy-scout" "$GATE_6_STATUS" "${BS_BLOCK
 # GATE 7: IaC Security Scanning (Terraform, Kubernetes, Docker)
 # Extracted to gate-7.sh for maintainability
 # ============================================================================
-source "$ADAPTER_DIR/gate-7.sh"
+source "$GATE_DIR/gate-7.sh"
 
 
 # GATE 8: Secret Scanning (gitleaks)
 # Extracted to gate-8.sh for maintainability
 # ============================================================================
-source "$ADAPTER_DIR/gate-8.sh"
+source "$GATE_DIR/gate-8.sh"
 
 # Switch back to original directory if we were in a subdirectory
 if [ -n "$ORIGINAL_DIR" ]; then
@@ -1600,7 +1611,7 @@ fi
 # GATE 9: Semgrep SAST Security Scan
 # Extracted to gate-9.sh for maintainability
 # ============================================================================
-source "$ADAPTER_DIR/gate-9.sh"
+source "$GATE_DIR/gate-9.sh"
 # ============================================================================
 
 generate_quality_report() {
