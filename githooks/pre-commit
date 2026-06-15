@@ -1383,7 +1383,7 @@ if [ "$PROJECT_LANG" = "documentation-only" ]; then
 
 elif [ "$PROJECT_LANG" = "powershell" ]; then
   echo "     ℹ️  No PowerShell architecture tooling available"
-  echo "     ✅ Architecture validation (SKIP, no tool for PowerShell)"
+     echo "     ⏭️  SKIPPED - Architecture validation (no tool for PowerShell)"
 
 else
   # Check if architecture config exists
@@ -1444,7 +1444,7 @@ else
           fi
         else
           echo "     ℹ️  No .import-linter.yml found - skipping Python architecture"
-          echo "     ✅ Python architecture validation (SKIP, no config)"
+          echo "     ⏭️  SKIPPED - Python architecture validation (no config)"
         fi
         ;;
       "go")
@@ -1460,7 +1460,7 @@ else
           fi
         else
           echo "     ℹ️  No arch-go.yaml found - skipping Go architecture"
-          echo "     ✅ Go architecture validation (SKIP, no config)"
+          echo "     ⏭️  SKIPPED - Go architecture validation (no config)"
         fi
         ;;
       "java")
@@ -1476,19 +1476,19 @@ else
           echo "     ✅ Java architecture validation completed."
         else
           echo "     ℹ️  No architecture test files found - skipping"
-          echo "     ✅ Architecture validation (SKIP, no tests)"
+          echo "     ⏭️  SKIPPED - Architecture validation (no tests)"
         fi
         ;;
       *)
         echo "     ℹ️  Architecture validation not configured for $PROJECT_LANG"
-        echo "     ✅ Architecture validation (SKIP, not configured)"
+        echo "     ⏭️  SKIPPED - Architecture validation (not configured for $PROJECT_LANG)"
         ;;
     esac
   else
     # Architecture config is REQUIRED — BLOCK if missing
     if [ -f ".architecture-skip" ]; then
       echo "     ⚠️  Architecture config missing but .architecture-skip present — allowed to skip"
-      echo "     ✅ Architecture validation (SKIP, .architecture-skip exemption)"
+      echo "     ⏭️  SKIPPED - Architecture validation (.architecture-skip exemption)"
     else
       echo ""
       echo "❌ ARCHITECTURE CONFIG MISSING - COMMIT BLOCKED"
@@ -1577,12 +1577,12 @@ else
         fi
       else
         echo "     ℹ️  npx not available - skipping Boy Scout Rule"
-        echo "     ✅ Boy Scout Rule (SKIP, Node.js not available)"
+        echo "     ⏭️  SKIPPED - Boy Scout Rule (Node.js/npx not available)"
       fi
     fi
   else
     echo "     ℹ️  Boy scout rule not available in project - skipping"
-    echo "     ✅ Boy Scout Rule (SKIP, not available in project)"
+    echo "     ⏭️  SKIPPED - Boy Scout Rule (not available in project)"
   fi
 fi
 GATE_6_STATUS="PASS"

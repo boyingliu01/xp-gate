@@ -254,7 +254,7 @@ if [ -n "$PY_TEST_FILES" ]; then
 fi
 
 if [ -z "$ALL_PUSHED_TEST_FILES" ]; then
-  echo "✅ No test files in push. SKIP — Mock density check."
+  echo "⏭️  SKIPPED - Mock density check (no test files in push)"
 else
   MOCK_BLOCKED=false
 
