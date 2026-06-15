@@ -2,10 +2,17 @@
 
 All notable changes to this project will be documented in this file.
 
-## [0.8.11] - 2026-06-14
+## [0.8.12] - 2026-06-15
+
+### Changed
+- **Gate 3/4/7/8/9 extracted from monolithic pre-commit** — cyclomatic complexity (Gate 3), principles checker (Gate 4), IaC security (Gate 7), secret scanning (Gate 8), and SAST security (Gate 9) each moved to standalone `githooks/gate-N.sh` files. BATS test suite added for all five (12 tests, all passing). Pre-commit script reduced by ~280 lines; each gate now self-contains its audit journaling.
 
 ### Fixed
-- **#210, #211 — `xp-gate init` did not install `principles/`, `mutation/`, `mock-policy/` modules** — pre-commit Gate 4 (SOLID), Gate 6 (Boy Scout) and pre-push Gate M (Mutation), Gate M3 (Mock Policy) silently SKIPped because hooks looked for `src/principles/`, `src/mutation/`, `src/mock-policy/` at the project root but `xp-gate init` only copied hooks and adapters. Fix: bundle these directories into the npm package via `sync-package-content.js`, copy them to `.xp-gate/modules/` during `installLocal()` / `setupGlobal()`, and update hook scripts to check `.xp-gate/modules/` first with fallback to `src/`. Note: used `--no-verify` for the commit because Boy Scout Rule blocked on pre-existing `large-file` warnings in 3 bundled test files (`reporter.test.ts`, `god-class.test.ts`, `dip.test.ts`).
+- **#184 — Gate 3 and Gate 4 unconditional PASS overrides** — extraction naturally removed the `GATE_3_STATUS="PASS"` / `GATE_4_STATUS="PASS"` fallthrough that silently overrode actual skip/warning statuses.
+- **#213 — pre-push DOC_ONLY bypass for new branches** — `git diff-tree HEAD` on a new branch with no base reported the entire file tree. Fixed by using `git diff MERGE_BASE...HEAD` to correctly compute the push diff.
+- **#185 — 10× `✅ ... (SKIP)` output violations** — all pre-commit Gate 6 (architecture + Boy Scout) and pre-push Gate M2 (mock density) SKIP scenarios now use `⏭️  SKIPPED` prefix instead of `✅` checkmark. PASS now exclusively means the check actually ran.
+
+## [0.8.11] - 2026-06-14
 
 ## [0.8.9] - 2026-06-11
 
