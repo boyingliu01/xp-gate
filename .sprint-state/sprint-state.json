@@ -1,8 +1,25 @@
 {
-  "id": null,
-  "status": "idle",
-  "phase": null,
-  "phase_history": [],
+  "id": "sprint-2026-06-14-01",
+  "task_description": "Sprint A: Fix Gate Integrity + Gate Init bugs (#184, #185, #210, #211)",
+  "phase": -1,
+  "status": "running",
+  "started_at": "2026-06-14T08:30:00Z",
+  "isolation": {
+    "worktree_path": ".worktrees/sprint/sprint-2026-06-14-01",
+    "branch": "sprint/2026-06-14-01",
+    "created_from": "main",
+    "created_from_commit": "d967c4cd428793de1fbddc4d0e855c8f29310809"
+  },
+  "phase_history": [
+    {
+      "phase": -1,
+      "phase_name": "ISOLATE",
+      "status": "completed",
+      "started_at": "2026-06-14T08:30:00Z",
+      "completed_at": "2026-06-14T08:32:00Z",
+      "duration_seconds": 120
+    }
+  ],
   "outputs": {},
   "metrics": {}
 }
