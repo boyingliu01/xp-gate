@@ -2,12 +2,12 @@
 
 All notable changes to this project will be documented in this file.
 
-## [0.8.14] - 2026-06-16
+## [0.8.15] - 2026-06-16
 
 ### Changed
-- Version bump to 0.8.14 (0.8.13 already published, re-publishing with updated content).
+- Version bump to 0.8.15.
 
-## [0.8.13] - 2026-06-16
+## [0.8.14] - 2026-06-16
 
 ### Fixed
 - **Doctor test timeout** — `seedVersionCache()` now writes to `os.homedir()/.xp-gate/` instead of `tmpHome/.xp-gate/` to match `check-version.js` which uses `os.homedir()` (not `process.env.HOME`) to compute `XP_GATE_DIR` at module load time.
