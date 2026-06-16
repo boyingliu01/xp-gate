@@ -261,7 +261,7 @@ function printReport(checks) {
   console.log('-----------------');
 
   for (const check of checks) {
-    const statusSymbol = check.status === 'PASS' ? ' ✓' : ' ✗';
+    const statusSymbol = check.status === 'PASS' ? ' ✓' : check.status === 'WARN' ? ' ⚠' : ' ✗';
     console.log(`  ${statusSymbol} ${check.name}: ${check.detail}`);
   }
 }
@@ -406,6 +406,30 @@ async function doctor(args) {
       console.log(`\n  ℹ ${msg}`);
     }
   } catch { /* non-blocking — don't fail doctor on network issue */ }
+
+  // --- Check 8: OpenCode plugin version check ---
+  const pluginPath = path.join(HOME_DIR, '.config', 'opencode', 'node_modules', '@boyingliu01', 'opencode-plugin', 'package.json');
+  if (fs.existsSync(pluginPath)) {
+    try {
+      const pluginPkg = JSON.parse(fs.readFileSync(pluginPath, 'utf8'));
+      const pluginVersion = pluginPkg.version;
+      if (pluginVersion) {
+        checks.push({ name: 'OpenCode plugin version', status: 'PASS', detail: pluginVersion });
+        // Check if plugin is outdated vs xp-gate CLI (they should match)
+        const pkgVersion = getPackageVersion();
+        if (pkgVersion && pluginVersion !== pkgVersion) {
+          checks.push({
+            name: 'OpenCode plugin version mismatch',
+            status: 'WARN',
+            detail: `plugin: ${pluginVersion}, xp-gate CLI: ${pkgVersion} — run 'cd ~/.config/opencode && npm update @boyingliu01/opencode-plugin'`
+          });
+          issues++;
+        }
+      }
+    } catch { /* skip */ }
+  } else {
+    checks.push({ name: 'OpenCode plugin', status: 'SKIP', detail: 'Not installed in OpenCode config' });
+  }
 
   if (issues === 0) {
     console.log('\n✓ All checks passed');
