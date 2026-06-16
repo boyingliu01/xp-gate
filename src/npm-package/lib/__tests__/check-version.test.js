@@ -74,8 +74,9 @@ describe('check-version.js — REQ-001-01', () => {
   // ──────────────────────────────────────────
   describe('getLocalVersion() — AC-001-01', () => {
     it('returns version from package.json', () => {
+      const pkg = JSON.parse(fs.readFileSync(path.join(__dirname, '../../package.json'), 'utf8'));
       mod = require('../check-version');
-      expect(mod.getLocalVersion()).toBe('0.8.17');
+      expect(mod.getLocalVersion()).toBe(pkg.version);
     });
 
     it('returns null when read fails', () => {
