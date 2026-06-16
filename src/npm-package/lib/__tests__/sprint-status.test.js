@@ -172,9 +172,17 @@ describe('sprint-status: formatSprintTable', () => {
   // AC-SPRINTSTATUS-001-09: Stale state detection
   test('detects stale state (>1h old)', () => {
     const staleState = JSON.parse(JSON.stringify(ACTIVE_STATE));
-    staleState.started_at = new Date(Date.now() - 2 * 60 * 60 * 1000).toISOString(); // 2h ago
+    const twoHoursAgo = new Date(Date.now() - 2 * 60 * 60 * 1000).toISOString();
+    staleState.started_at = twoHoursAgo;
+    // Also backdate all phase_history timestamps so isStale() triggers
+    if (Array.isArray(staleState.phase_history)) {
+      for (const ph of staleState.phase_history) {
+        if (ph.started_at) ph.started_at = twoHoursAgo;
+        if (ph.completed_at) ph.completed_at = twoHoursAgo;
+      }
+    }
     const output = sprintStatus.formatSprintTable(staleState);
-    expect(output).toContain('stale');
+    expect(output).toContain('State may be stale');
   });
 
   // REQ-level progress in BUILD phase
