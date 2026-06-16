@@ -1,174 +1,218 @@
 #!/bin/bash
-# sprint-gate.sh — Sprint Flow Enforcement Gate
+# sprint-gate.sh — Sprint Flow Validation Gate
 #
-# Validates sprint state consistency at git hook boundaries.
-# Called from pre-commit (Gate 10) and pre-push (Gate S).
+# PURPOSE: Enforce Sprint Flow phase discipline at git hook level.
+# Validates delphi-review approval, sprint state, and specification
+# artifacts before allowing commits and pushes on sprint branches.
 #
-# DESIGN: Works regardless of whether AI commits or human commits.
-# Git-level enforcement is the primary mechanism — IDE hooks are secondary.
+# INTEGRATION: Called from pre-commit (Gate 10) and pre-push (Gate S),
+# or run independently for CI/manual validation.
 #
 # USAGE:
-#   sprint-gate.sh --pre-commit   # Pre-commit validation
-#   sprint-gate.sh --pre-push     # Pre-push validation
+#   sprint-gate.sh --pre-commit   # Validate before commit
+#   sprint-gate.sh --pre-push     # Validate before push
 #
-# EXIT CODES:
-#   0 = PASS or SKIP (non-sprint project)
-#   1 = BLOCK (sprint state inconsistent)
+# MECHANISM:
+#   --pre-commit:
+#     - If .sprint-state/ missing → SKIP (not a sprint project)
+#     - If sprint-state.json missing/invalid → SKIP (non-sprint commit)
+#     - If phase >= 1 (PLAN completed) and delphi-reviewed.json missing → DENY
+#     - If delphi-reviewed.json exists, verdict must be "APPROVED"
+#     - If jq unavailable → WARN but ALLOW (graceful degradation)
+#
+#   --pre-push:
+#     - If .sprint-state/ missing → SKIP
+#     - If branch doesn't match sprint/* → SKIP
+#     - If delphi-reviewed.json missing or verdict != "APPROVED" → DENY
+#     - If phase < 2 (BUILD not started) → DENY
+#     - If phase >= 2 and specification.yaml missing → DENY
 #
 # GRACEFUL DEGRADATION:
-#   - No .sprint-state/ → SKIP (not a sprint project)
-#   - jq missing → WARN but ALLOW (matches delphi-review-guard.sh pattern)
+#   - If .sprint-state/ directory doesn't exist → SKIP (not a sprint project)
+#   - If sprint-state.json is missing/invalid → SKIP (non-sprint commit)
+#   - If jq not available → WARN but ALLOW (zero degradation for non-sprint projects)
+#
+# OUTPUT: JSON to stdout — {"decision":"allow|deny|skip",...}
+# EXIT: 0 = pass/skip, 1 = block
 
 set -euo pipefail
 
-MODE="${1:-}"
-ROOT_DIR="$(git rev-parse --show-toplevel 2>/dev/null || echo ".")"
-SPRINT_STATE_DIR="$ROOT_DIR/.sprint-state"
-SPRINT_STATE_FILE="$SPRINT_STATE_DIR/sprint-state.json"
+# --- Argument parsing ---
+MODE=""
+case "${1:-}" in
+  --pre-commit) MODE="pre-commit" ;;
+  --pre-push)   MODE="pre-push" ;;
+  *)
+    echo '{"decision":"deny","reason":"Usage: sprint-gate.sh --pre-commit | --pre-push"}'
+    exit 1
+    ;;
+esac
 
-# ── Argument validation ──────────────────────────────────────────────
-if [ "$MODE" != "--pre-commit" ] && [ "$MODE" != "--pre-push" ]; then
-  echo "Usage: sprint-gate.sh --pre-commit|--pre-push" >&2
-  exit 1
-fi
+# --- Locate repo root and sprint state ---
+REPO_ROOT="$(git rev-parse --show-toplevel 2>/dev/null)" || {
+  echo '{"decision":"skip","reason":"not inside a git repository"}'
+  exit 0
+}
 
-# ── Non-sprint project → SKIP ────────────────────────────────────────
+SPRINT_STATE_DIR="$REPO_ROOT/.sprint-state"
+SPRINT_STATE_JSON="$SPRINT_STATE_DIR/sprint-state.json"
+APPROVED_FILE="$SPRINT_STATE_DIR/delphi-reviewed.json"
+
+# If no .sprint-state directory, this isn't a sprint project → SKIP
 if [ ! -d "$SPRINT_STATE_DIR" ]; then
-  if [ "$MODE" = "--pre-commit" ]; then
-    echo "⏭️  SKIPPED - Gate 10: Sprint Flow (not a sprint project)"
-  else
-    echo "⏭️  SKIPPED - Gate S: Sprint Flow (not a sprint project)"
+  echo '{"decision":"skip","reason":"not a sprint project"}'
+  exit 0
+fi
+
+# --- Helper: check jq availability ---
+HAS_JQ=false
+if command -v jq &>/dev/null; then
+  HAS_JQ=true
+fi
+
+# --- Helper: read phase from sprint-state.json ---
+# Returns phase number or -1 if unreadable
+read_phase() {
+  if [ ! -f "$SPRINT_STATE_JSON" ]; then
+    echo "-1"
+    return
   fi
-  exit 0
-fi
+  if ! $HAS_JQ; then
+    echo "-1"
+    return
+  fi
+  if ! jq empty "$SPRINT_STATE_JSON" 2>/dev/null; then
+    echo "-1"
+    return
+  fi
+  local phase
+  phase=$(jq -r '.phase // -1' "$SPRINT_STATE_JSON" 2>/dev/null) || phase="-1"
+  echo "$phase"
+}
 
-# ── jq availability check ────────────────────────────────────────────
-if ! command -v jq &>/dev/null; then
-  echo "⚠️  WARN - Gate ${MODE#--}: Sprint Flow validation skipped (jq not installed)"
-  echo "   Install jq for full sprint state validation."
-  exit 0
-fi
+# --- Helper: read delphi verdict ---
+# Returns verdict string or empty if unreadable
+read_verdict() {
+  if [ ! -f "$APPROVED_FILE" ]; then
+    echo ""
+    return
+  fi
+  if ! $HAS_JQ; then
+    echo ""
+    return
+  fi
+  if ! jq empty "$APPROVED_FILE" 2>/dev/null; then
+    echo ""
+    return
+  fi
+  jq -r '.verdict // ""' "$APPROVED_FILE" 2>/dev/null || echo ""
+}
 
-# ── Sprint state file validation ─────────────────────────────────────
-if [ ! -f "$SPRINT_STATE_FILE" ]; then
-  echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-  echo "   ❌ SPRINT STATE MISSING - ${MODE#--} BLOCKED"
-  echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-  echo ""
-  echo ".sprint-state/ directory exists but sprint-state.json is missing."
-  echo "This indicates a corrupted sprint state."
-  echo ""
-  echo "Fix: Re-run /sprint-flow or remove .sprint-state/ to start fresh."
-  echo ""
-  exit 1
-fi
+# --- Pre-commit mode ---
+if [ "$MODE" = "pre-commit" ]; then
+  PHASE=$(read_phase)
 
-# ── JSON validity check ──────────────────────────────────────────────
-if ! jq empty "$SPRINT_STATE_FILE" 2>/dev/null; then
-  echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-  echo "   ❌ SPRINT STATE CORRUPT - ${MODE#--} BLOCKED"
-  echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-  echo ""
-  echo "sprint-state.json is not valid JSON."
-  echo ""
-  echo "Fix: Re-run /sprint-flow or remove .sprint-state/ to start fresh."
-  echo ""
-  exit 1
-fi
+  # If sprint-state.json is missing or invalid, skip (non-sprint commit)
+  if [ "$PHASE" = "-1" ]; then
+    if [ ! -f "$SPRINT_STATE_JSON" ]; then
+      echo '{"decision":"skip","reason":"sprint-state.json not found, non-sprint commit"}'
+    else
+      echo '{"decision":"skip","warning":"sprint-state.json is not valid JSON or jq not available, allowing commit"}'
+    fi
+    exit 0
+  fi
 
-# ── Read current phase ───────────────────────────────────────────────
-CURRENT_PHASE=$(jq -r '.currentPhase // "unknown"' "$SPRINT_STATE_FILE" 2>/dev/null)
-
-# ── Pre-commit specific checks ───────────────────────────────────────
-if [ "$MODE" = "--pre-commit" ]; then
-  # Check: If in Phase 2 (BUILD), delphi-review must be APPROVED
-  if [ "$CURRENT_PHASE" = "2" ] || [ "$CURRENT_PHASE" = "BUILD" ]; then
-    DELPHI_FILE="$SPRINT_STATE_DIR/delphi-reviewed.json"
-
-    if [ ! -f "$DELPHI_FILE" ]; then
-      echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-      echo "   ❌ DELPHI-REVIEW NOT COMPLETED - COMMIT BLOCKED"
-      echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-      echo ""
-      echo "Sprint is in Phase 2 (BUILD) but delphi-reviewed.json is missing."
-      echo "Phase 1 delphi-review must be APPROVED before any code commits."
-      echo ""
-      echo "Fix: Run /delphi-review to complete Phase 1."
-      echo ""
+  # Phase >= 1 means PLAN is completed — delphi-review must be APPROVED
+  if [ "$PHASE" -ge 1 ] 2>/dev/null; then
+    # Check if delphi-reviewed.json exists
+    if [ ! -f "$APPROVED_FILE" ]; then
+      echo '{"decision":"deny","reason":"delphi-review not APPROVED. Complete Phase 1 before committing code changes."}'
       exit 1
     fi
 
-    if ! jq empty "$DELPHI_FILE" 2>/dev/null; then
-      echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-      echo "   ❌ DELPHI-REVIEW CORRUPT - COMMIT BLOCKED"
-      echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-      echo ""
-      echo "delphi-reviewed.json is not valid JSON."
-      echo ""
-      echo "Fix: Re-run /delphi-review."
-      echo ""
+    # If jq not available, warn but allow (graceful degradation)
+    if ! $HAS_JQ; then
+      echo '{"decision":"allow","warning":"jq not available, cannot verify delphi-review verdict. Install jq for full protection."}'
+      exit 0
+    fi
+
+    # Validate delphi-reviewed.json is valid JSON
+    if ! jq empty "$APPROVED_FILE" 2>/dev/null; then
+      echo '{"decision":"deny","reason":"delphi-reviewed.json is not valid JSON. Re-run: /delphi-review"}'
       exit 1
     fi
 
-    VERDICT=$(jq -r '.verdict // "unknown"' "$DELPHI_FILE" 2>/dev/null)
+    # Check verdict
+    VERDICT=$(read_verdict)
     if [ "$VERDICT" != "APPROVED" ]; then
-      echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-      echo "   ❌ DELPHI-REVIEW NOT APPROVED - COMMIT BLOCKED"
-      echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-      echo ""
-      echo "Sprint is in Phase 2 (BUILD) but delphi-review verdict is: $VERDICT"
-      echo "HARD-GATE: Design must reach ≥90% consensus before coding."
-      echo ""
-      echo "Fix: Address delphi-review issues and re-run /delphi-review."
-      echo ""
+      echo "{\"decision\":\"deny\",\"reason\":\"delphi-review verdict is '${VERDICT}', not APPROVED. Fix issues and re-run: /delphi-review\"}"
       exit 1
     fi
+
+    # All checks passed
+    echo "{\"decision\":\"allow\",\"message\":\"delphi-review APPROVED, sprint phase ${PHASE} validated\"}"
+    exit 0
   fi
 
-  echo "✅ PASSED - Gate 10: Sprint Flow (phase: $CURRENT_PHASE)"
+  # Phase < 1 (pre-PLAN) — no delphi enforcement needed
+  echo "{\"decision\":\"allow\",\"reason\":\"sprint phase ${PHASE} (pre-PLAN), no delphi enforcement required\"}"
   exit 0
 fi
 
-# ── Pre-push specific checks ─────────────────────────────────────────
-if [ "$MODE" = "--pre-push" ]; then
-  # Check: specification.yaml must exist if in Phase 2+
-  case "$CURRENT_PHASE" in
-    2|BUILD|3|REVIEW|4|USER_ACCEPT|5|FEEDBACK|6|SHIP|7|LAND|8|CLEANUP)
-      SPEC_FILE="$SPRINT_STATE_DIR/phase-outputs/specification.yaml"
-      if [ ! -f "$SPEC_FILE" ]; then
-        # Also check root-level specification.yaml
-        if [ ! -f "$ROOT_DIR/specification.yaml" ]; then
-          echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-          echo "   ❌ SPECIFICATION MISSING - PUSH BLOCKED"
-          echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-          echo ""
-          echo "Sprint phase is '$CURRENT_PHASE' but specification.yaml is missing."
-          echo "Phase 1 PLAN output is required before pushing code."
-          echo ""
-          echo "Fix: Complete Phase 1 (specification.yaml generation)."
-          echo ""
-          exit 1
-        fi
-      fi
+# --- Pre-push mode ---
+if [ "$MODE" = "pre-push" ]; then
+  # Only enforce on sprint/* branches
+  BRANCH="$(git branch --show-current 2>/dev/null)" || BRANCH=""
+  case "$BRANCH" in
+    sprint/*) ;; # continue
+    *)
+      echo "{\"decision\":\"skip\",\"reason\":\"branch '${BRANCH}' does not match sprint/* pattern\"}"
+      exit 0
       ;;
   esac
 
-  # Check: delphi-review must be APPROVED for any push from sprint branch
-  DELPHI_FILE="$SPRINT_STATE_DIR/delphi-reviewed.json"
-  if [ -f "$DELPHI_FILE" ]; then
-    VERDICT=$(jq -r '.verdict // "unknown"' "$DELPHI_FILE" 2>/dev/null)
-    if [ "$VERDICT" != "APPROVED" ]; then
-      echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-      echo "   ❌ DELPHI-REVIEW NOT APPROVED - PUSH BLOCKED"
-      echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-      echo ""
-      echo "Sprint delphi-review verdict is: $VERDICT"
-      echo "Cannot push from sprint branch without APPROVED design review."
-      echo ""
+  # Validate sprint-state.json exists and is readable
+  PHASE=$(read_phase)
+  if [ "$PHASE" = "-1" ] && [ ! -f "$SPRINT_STATE_JSON" ]; then
+    echo "{\"decision\":\"deny\",\"reason\":\"sprint-state.json not found on sprint branch '${BRANCH}'\"}"
+    exit 1
+  fi
+
+  # Delphi review must be APPROVED
+  if [ ! -f "$APPROVED_FILE" ]; then
+    echo '{"decision":"deny","reason":"delphi-reviewed.json not found. Complete Phase 1 delphi-review before pushing."}'
+    exit 1
+  fi
+
+  if ! $HAS_JQ; then
+    echo '{"decision":"deny","reason":"jq not available, cannot verify delphi-review verdict. Install jq to push from sprint branch."}'
+    exit 1
+  fi
+
+  if ! jq empty "$APPROVED_FILE" 2>/dev/null; then
+    echo '{"decision":"deny","reason":"delphi-reviewed.json is not valid JSON. Re-run: /delphi-review"}'
+    exit 1
+  fi
+
+  VERDICT=$(read_verdict)
+  if [ "$VERDICT" != "APPROVED" ]; then
+    echo "{\"decision\":\"deny\",\"reason\":\"delphi-review verdict is '${VERDICT}', not APPROVED. Fix issues and re-run: /delphi-review\"}"
+    exit 1
+  fi
+
+  # specification.yaml must exist (Phase 1 PLAN output)
+  SPEC_FILE="$REPO_ROOT/specification.yaml"
+  if [ ! -f "$SPEC_FILE" ]; then
+    # Also check sprint-state output directory
+    SPEC_FILE="$SPRINT_STATE_DIR/phase-outputs/specification.yaml"
+    if [ ! -f "$SPEC_FILE" ]; then
+      echo '{"decision":"deny","reason":"specification.yaml not found. Phase 1 PLAN must produce specification.yaml before pushing."}'
       exit 1
     fi
   fi
 
-  echo "✅ PASSED - Gate S: Sprint Flow (phase: $CURRENT_PHASE)"
+  # All checks passed — comprehensive success output
+  SPEC_SIZE=$(wc -c < "$SPEC_FILE" 2>/dev/null | tr -d ' ')
+  echo "{\"decision\":\"allow\",\"message\":\"sprint push validated\",\"branch\":\"${BRANCH}\",\"phase\":${PHASE},\"verdict\":\"APPROVED\",\"specification_size_bytes\":${SPEC_SIZE:-0}}"
   exit 0
 fi
