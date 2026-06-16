@@ -138,6 +138,33 @@ echo "Lines: +$LINES_ADDED -$LINES_DELETED"
 echo ""
 
 # ============================================================================
+# GATE S: SPRINT FLOW ENFORCEMENT
+# Validates sprint state consistency before push
+# Uses sprint-gate.sh for standalone validation logic
+# ============================================================================
+GATE_S_STATUS="PASS"
+PROJECT_ROOT="$(git rev-parse --show-toplevel 2>/dev/null || echo ".")"
+SPRINT_GATE_SCRIPT=""
+
+if [ -f "$PROJECT_ROOT/githooks/sprint-gate.sh" ]; then
+  SPRINT_GATE_SCRIPT="$PROJECT_ROOT/githooks/sprint-gate.sh"
+elif [ -f "$(dirname "$0")/sprint-gate.sh" ]; then
+  SPRINT_GATE_SCRIPT="$(dirname "$0")/sprint-gate.sh"
+fi
+
+if [ -n "$SPRINT_GATE_SCRIPT" ]; then
+  if ! bash "$SPRINT_GATE_SCRIPT" --pre-push; then
+    GATE_S_STATUS="BLOCK"
+    echo "❌ BLOCKED - Gate S: Sprint Flow Enforcement"
+    exit 1
+  fi
+else
+  echo "⏭️  SKIPPED - Gate S: Sprint Flow (sprint-gate.sh not found)"
+  GATE_S_STATUS="SKIP"
+fi
+echo ""
+
+# ============================================================================
 # GATE M: MUTATION TESTING
 # ============================================================================
 echo ""

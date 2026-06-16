@@ -1615,19 +1615,52 @@ fi
 source "$GATE_DIR/gate-9.sh"
 # ============================================================================
 
+# ============================================================================
+# GATE 10: Sprint Flow Enforcement
+# Validates sprint state consistency (delphi-review APPROVED before BUILD)
+# Uses sprint-gate.sh for standalone validation logic
+# ============================================================================
+GATE_10_START=$(date +%s)
+GATE_10_STATUS="PASS"
+
+SPRINT_GATE_SCRIPT=""
+if [ -f "$GATE_DIR/sprint-gate.sh" ]; then
+  SPRINT_GATE_SCRIPT="$GATE_DIR/sprint-gate.sh"
+elif [ -f "$(git rev-parse --show-toplevel 2>/dev/null)/githooks/sprint-gate.sh" ]; then
+  SPRINT_GATE_SCRIPT="$(git rev-parse --show-toplevel)/githooks/sprint-gate.sh"
+fi
+
+if [ -n "$SPRINT_GATE_SCRIPT" ]; then
+  if ! bash "$SPRINT_GATE_SCRIPT" --pre-commit; then
+    GATE_10_STATUS="BLOCK"
+    echo "❌ BLOCKED - Gate 10: Sprint Flow Enforcement"
+    # Sprint gate failure is a hard block — exit immediately
+    exit 1
+  fi
+else
+  echo "⏭️  SKIPPED - Gate 10: Sprint Flow (sprint-gate.sh not found)"
+  GATE_10_STATUS="SKIP"
+fi
+
+GATE_10_END=$(date +%s)
+GATE_10_DURATION=$((GATE_10_END - GATE_10_START))
+echo "✅ Gate 10 completed in ${GATE_10_DURATION}s"
+echo ""
+# ============================================================================
+
 generate_quality_report() {
   local HISTORY_FILE=".quality-history.jsonl"
   local COMMIT_HASH
   local TIMESTAMP
   local BRANCH
   local PASSED_COUNT=0
-  local TOTAL_GATES=9
+  local TOTAL_GATES=10
 
   COMMIT_HASH=$(git rev-parse HEAD 2>/dev/null || echo "unknown")
   BRANCH=$(git rev-parse --abbrev-ref HEAD 2>/dev/null || echo "unknown")
   TIMESTAMP=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
 
-  for gate in 1 2 3 4 5 6 7 8 9; do
+  for gate in 1 2 3 4 5 6 7 8 9 10; do
     local status_var="GATE_${gate}_STATUS"
     if [ "${!status_var}" = "PASS" ]; then
       PASSED_COUNT=$((PASSED_COUNT + 1))
@@ -1730,6 +1763,11 @@ generate_quality_report() {
       "name": "SAST Security Scan",
       "status": "${GATE_9_STATUS:-PASS}",
       "tool": "semgrep"
+    },
+    "gate10_sprint_flow": {
+      "name": "Sprint Flow Enforcement",
+      "status": "${GATE_10_STATUS:-PASS}",
+      "tool": "sprint-gate.sh"
     }
   }
 }
@@ -1770,7 +1808,8 @@ PY
   GATES_JSON="${GATES_JSON}\"gate6\":{\"status\":\"${GATE_6_STATUS:-PASS}\",\"name\":\"Architecture+BoyScout\",\"bsBlocked\":${BS_BLOCKED}},"
   GATES_JSON="${GATES_JSON}\"gate7\":{\"status\":\"${GATE_7_STATUS:-PASS}\",\"name\":\"IaC Security\"},"
   GATES_JSON="${GATES_JSON}\"gate8\":{\"status\":\"${GATE_8_STATUS:-PASS}\",\"name\":\"Secret Scanning\"},"
-  GATES_JSON="${GATES_JSON}\"gate9\":{\"status\":\"${GATE_9_STATUS:-PASS}\",\"name\":\"SAST Security\"}}"
+  GATES_JSON="${GATES_JSON}\"gate9\":{\"status\":\"${GATE_9_STATUS:-PASS}\",\"name\":\"SAST Security\"},"
+  GATES_JSON="${GATES_JSON}\"gate10\":{\"status\":\"${GATE_10_STATUS:-PASS}\",\"name\":\"Sprint Flow\"}}"
   GATES_JSON="${GATES_JSON}}"
 
   echo "{\"timestamp\":\"$TIMESTAMP\",\"commit\":\"$COMMIT_HASH\",\"branch\":\"$BRANCH\",\"score\":$SCORE,\"passed\":$PASSED_COUNT,\"total\":$TOTAL_GATES,\"gates\":$GATES_JSON,\"coverage\":\"$COV_PCT\",\"complexityWarnings\":${CC_WARNINGS:-0},\"principleWarnings\":${WARNING_COUNT:-0},\"boyScoutBlocked\":${BS_BLOCKED}}" >> "$HISTORY_FILE"
@@ -1790,6 +1829,7 @@ PY
   printf "  %-45s %s\n" "Gate 7: IaC Security" "${GATE_7_STATUS:-PASS}"
   printf "  %-45s %s\n" "Gate 8: Secret Scanning" "${GATE_8_STATUS:-PASS}"
   printf "  %-45s %s\n" "Gate 9: SAST Security" "${GATE_9_STATUS:-PASS}"
+  printf "  %-45s %s\n" "Gate 10: Sprint Flow" "${GATE_10_STATUS:-PASS}"
   echo ""
   echo "  Overall Score: $SCORE/10 | $PASSED_COUNT/$TOTAL_GATES gates passed"
   echo "  Branch status: $REPORT_FILE"

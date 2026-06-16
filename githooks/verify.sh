@@ -39,6 +39,14 @@ for lang in typescript python go shell flutter dart; do
   check "$PROJECT_ROOT/githooks/adapters/$lang.sh" "adapters/$lang.sh"
 done
 
+# Sprint Flow enforcement (Gate 10 + Gate S)
+check "$PROJECT_ROOT/githooks/sprint-gate.sh" "githooks/sprint-gate.sh"
+
+# Qoder plugin hooks (issue #181/#182/#183)
+check "$PROJECT_ROOT/plugins/qoder/hooks/hooks.json" "plugins/qoder/hooks/hooks.json"
+check "$PROJECT_ROOT/plugins/qoder/bin/sprint-flow-guard.sh" "plugins/qoder/bin/sprint-flow-guard.sh"
+check "$PROJECT_ROOT/plugins/qoder/bin/xp-gate-check" "plugins/qoder/bin/xp-gate-check"
+
 echo ""
 if [[ $MISSING -eq 0 ]]; then
   echo "✅ All quality gates components present ($OK/$OK)."

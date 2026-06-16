@@ -214,17 +214,17 @@ describe('check-version.js — REQ-001-01', () => {
 
     it('returns safe defaults (outdated:false) without network', async () => {
       // Mock https to return the SAME version as local → outdated=false, no network dependency
-      const result = await withMockedHttps('0.8.17', async (m) => m.checkUpgrade('@nonexistent/pkg-test-only'));
+      const result = await withMockedHttps('0.8.18', async (m) => m.checkUpgrade('@nonexistent/pkg-test-only'));
       expect(result.outdated).toBe(false);
-      expect(result.local).toBe('0.8.17');
-      expect(result.remote).toBe('0.8.17');
+      expect(result.local).toBe('0.8.18');
+      expect(result.remote).toBe('0.8.18');
       expect(result.lagDays).toBe(0);
     });
 
     it('returns outdated=true when remote > local', async () => {
       const result = await withMockedHttps('99.99.99', async (m) => m.checkUpgrade('@nonexistent/pkg-test-only'));
       expect(result.outdated).toBe(true);
-      expect(result.local).toBe('0.8.17');
+      expect(result.local).toBe('0.8.18');
       expect(result.remote).toBe('99.99.99');
     });
   });
