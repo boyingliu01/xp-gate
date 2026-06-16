@@ -2,6 +2,21 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.8.13] - 2026-06-16
+
+### Fixed
+- **Doctor test timeout** — `seedVersionCache()` now writes to `os.homedir()/.xp-gate/` instead of `tmpHome/.xp-gate/` to match `check-version.js` which uses `os.homedir()` (not `process.env.HOME`) to compute `XP_GATE_DIR` at module load time.
+- **AC-004-03 corrupt cache test ENOENT** — same root cause; corrupt cache write now targets correct path.
+
+### Added
+- **`check-version.js`** — per-version npm registry cache with skip logic; avoids network calls when cached version matches local version.
+- **`upgrade.js`** — auto-update infrastructure for skill/plugin updates.
+- **`post-merge` hook** — automatic update checks after git merge/pull.
+- **`xp-gate-version-check.sh`** — Claude Code plugin version check hook.
+
+### Changed
+- All 870 npm-package tests pass (62 test files), all 10 pre-commit gates pass 10.0/10.
+
 ## [0.8.12] - 2026-06-15
 
 ### Changed
