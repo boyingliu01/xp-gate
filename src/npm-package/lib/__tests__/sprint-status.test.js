@@ -3,7 +3,6 @@
  * @intent Validate xp-gate sprint-status command reads sprint-state.json and renders table
  * @covers AC-SPRINTSTATUS-001-01 through AC-SPRINTSTATUS-001-09
  */
-const { describe, test, expect, beforeAll, afterAll } = require('@jest/globals');
 const path = require('path');
 const fs = require('fs');
 const os = require('os');
