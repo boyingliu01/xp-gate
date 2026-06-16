@@ -123,34 +123,24 @@ describe('check-version.js — REQ-001-01', () => {
   });
 
   // ──────────────────────────────────────────
-  // AC-001-08: calcLagDays() (internal — tested via checkUpgrade)
+  // AC-001-08: calcLagDays() — directly tested, no network/cache dependency
   // ──────────────────────────────────────────
-  describe('calcLagDays() behavior via checkUpgrade — AC-001-08', () => {
-    it('checkUpgrade returns lagDays=0 when no remote version', async () => {
-      mod = require('../check-version');
-      const r = await mod.checkUpgrade('@nonexistent/pkg-test-only');
-      expect(r.lagDays).toBe(0);
+  describe('calcLagDays() — AC-001-08', () => {
+    beforeEach(() => { mod = require('../check-version'); });
+
+    it('returns 0 when no publishedAt', () => {
+      expect(mod.calcLagDays('')).toBe(0);
+      expect(mod.calcLagDays(null)).toBe(0);
+      expect(mod.calcLagDays(undefined)).toBe(0);
     });
 
-    it('checkUpgrade uses calcLagDays with publishedAt when available', async () => {
-      const https = require('https');
-      const origGet = https.get;
-      const body = JSON.stringify({ latest: '99.99.99' });
-      https.get = (_url, _opts, cb) => {
-        const callback = typeof _opts === 'function' ? _opts : cb;
-        if (!callback) return { on: () => this, destroy: () => {} };
-        const mockRes = {
-          statusCode: 200,
-          on: (evt, handler) => { if (evt === 'end') handler(); return mockRes; },
-        };
-        callback(mockRes);
-        return { on: () => this, destroy: () => {} };
-      };
-      vi.resetModules();
-      mod = require('../check-version');
-      const r = await mod.checkUpgrade('@nonexistent/pkg-test-only');
-      expect(r.lagDays).toBe(0);
-      https.get = origGet;
+    it('returns 0 when publishedAt is unparseable', () => {
+      expect(mod.calcLagDays('not-a-date')).toBe(0);
+    });
+
+    it('returns >= 0 for a past date', () => {
+      const lag = mod.calcLagDays('2026-06-15T00:00:00.000Z');
+      expect(lag).toBeGreaterThanOrEqual(0);
     });
   });
 
