@@ -2,6 +2,19 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.8.18] - 2026-06-16
+
+### Added
+
+- **#181 — Qoder 平台 PreToolUse hook guard** — 新增 `plugins/qoder/hooks/hooks.json` + `bin/sprint-flow-guard.sh` + `bin/xp-gate-check`，与 Claude Code 插件结构对齐。PreToolUse 拦截 Edit/Write/ApplyEdit，读取 `.sprint-state/delphi-reviewed.json`，verdict != APPROVED 时 deny。PostToolUse 运行 principles check（graceful degradation）。Stop hook 输出提示信息。
+- **#182 — Git-level Sprint Flow enforcement** — 新增 `githooks/sprint-gate.sh` 独立验证脚本。Pre-commit Gate 10：Phase 2 (BUILD) 时强制要求 delphi-review APPROVED。Pre-push Gate S：Phase 2+ 时强制要求 specification.yaml 存在 + delphi-review APPROVED。非 sprint 项目自动 SKIP（无 `.sprint-state/` 目录）。jq 缺失时 WARN 但 ALLOW（graceful degradation）。17 个 BATS 测试全部通过。
+- **#183 — Qoder 插件 manifest + hooks 集成** — `plugins/qoder/plugin.json` 新增 `"hooks": "./hooks/hooks.json"` 字段，版本同步到 0.8.18。`githooks/verify.sh` 新增 4 项检查：sprint-gate.sh + Qoder hooks/hooks.json + sprint-flow-guard.sh + xp-gate-check。
+
+### Changed
+
+- **Pre-commit 从 9 gates 扩展到 10 gates** — Gate 10 (Sprint Flow Enforcement) 插入在 Gate 9 之后。Quality report 更新：TOTAL_GATES=10，新增 gate10_sprint_flow 字段，console 输出新增 Gate 10 行。
+- **Pre-push 新增 Gate S** — Gate S (Sprint Flow) 插入在 Gate M 之前。验证 sprint state 一致性，确保 push 前 design review 已完成。
+
 ## [0.8.17] - 2026-06-16
 
 ### Added
