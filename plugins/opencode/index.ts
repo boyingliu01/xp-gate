@@ -184,7 +184,7 @@ export const XpGatePlugin = async (input: OpenCodePluginInput) => {
     "chat.message": async (_input: { message: string }) => {
       if (!checked) {
         checked = true
-        checkPluginUpdate(directory).catch(() => {})
+        checkPluginUpdate(directory).catch((_err) => { /* silent: non-critical background check */ })
       }
       return { action: "continue" }
     },
