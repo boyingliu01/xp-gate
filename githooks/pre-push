@@ -186,6 +186,8 @@ else
         MUTATION_SCRIPT=".xp-gate/modules/mutation/gate-m.ts"
       elif [ -f "src/mutation/gate-m.ts" ]; then
         MUTATION_SCRIPT="src/mutation/gate-m.ts"
+      elif [ -f "$HOME/.config/xp-gate/modules/mutation/gate-m.ts" ]; then
+        MUTATION_SCRIPT="$HOME/.config/xp-gate/modules/mutation/gate-m.ts"
       fi
 
       if [[ -z "$MUTATION_SCRIPT" ]]; then
