@@ -104,13 +104,14 @@ describe('check-version.js — REQ-001-01', () => {
     beforeEach(() => { mod = require('../check-version'); });
 
     it('a < b → negative', () => {
-      expect(mod.compareVersions('0.8.17', '0.8.13')).toBeLessThan(0);
+      expect(mod.compareVersions('0.8.15', '0.8.17')).toBeLessThan(0);
     });
     it('a > b → positive', () => {
-      expect(mod.compareVersions('0.8.13', '0.8.17')).toBeGreaterThan(0);
+      expect(mod.compareVersions('0.8.17', '0.8.15')).toBeGreaterThan(0);
     });
     it('equal → 0', () => {
       expect(mod.compareVersions('0.8.17', '0.8.17')).toBe(0);
+
     });
     it('handles different segment counts', () => {
       expect(mod.compareVersions('1.0', '1.0.1')).toBeLessThan(0);
