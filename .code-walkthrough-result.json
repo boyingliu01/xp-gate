@@ -8,7 +8,7 @@
       "id": "A",
       "role": "architecture",
       "findings": [
-        "no architectural concerns — both features are self-contained additions"
+        "no architectural concerns \u2014 both features are self-contained additions"
       ],
       "verdict": "APPROVED"
     },
@@ -18,7 +18,7 @@
       "findings": [
         "sprint-status.js: clean CLI entry, proper path traversal protection, fs.watch/fs.watchFile fallback",
         "opencode plugin: chat.message hook is nonblocking, inline semver avoids external dep, 24h cache prevents excessive fetches",
-        "ESLint fix: replaced empty catch with noop comment — resolves no-empty-function warning"
+        "ESLint fix: replaced empty catch with noop comment \u2014 resolves no-empty-function warning"
       ],
       "verdict": "APPROVED"
     },
@@ -31,7 +31,7 @@
       "verdict": "APPROVED"
     }
   ],
-  "commit": "edb40f1c3b05f9d846e56a64690bd169e5aa6529",
+  "commit": "acfb10c450fa4122217ae7b406349ff297e37b9c",
   "branch": "sprint/2026-06-16-opencode-autoupdate-sprintstatus",
   "report_ts": "2026-06-16T14:03:00Z"
 }
