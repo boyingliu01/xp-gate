@@ -1,25 +1,73 @@
 {
-  "id": "sprint-2026-06-14-01",
-  "task_description": "Sprint A: Fix Gate Integrity + Gate Init bugs (#184, #185, #210, #211)",
-  "phase": -1,
-  "status": "running",
-  "started_at": "2026-06-14T08:30:00Z",
+  "id": "sprint-2026-06-15-01",
+  "task_description": "处理剩余的 open issues，实现 xp-gate 自动更新机制：服务端组件自动发布 + 客户端自动检测升级",
+  "phase": 2,
+  "status": "building",
+  "started_at": "2026-06-15T07:30:00Z",
   "isolation": {
-    "worktree_path": ".worktrees/sprint/sprint-2026-06-14-01",
-    "branch": "sprint/2026-06-14-01",
+    "worktree_path": ".worktrees/sprint/sprint-2026-06-15-01",
+    "branch": "sprint/2026-06-15-01",
     "created_from": "main",
-    "created_from_commit": "d967c4cd428793de1fbddc4d0e855c8f29310809"
+    "created_from_commit": "c0e2ab9"
+  },
+  "auto_estimate": {
+    "change_type": "新增功能 + 修改已存在代码",
+    "metrics": {
+      "ref_count": 15,
+      "cross_module_count": 4,
+      "modules": ["src/npm-package", "plugins/opencode", "githooks", ".github/workflows"],
+      "circular_dep": false,
+      "public_api_count": 2,
+      "test_file_count": 0
+    },
+    "estimated_level": "复杂",
+    "recommended_flow": "完整 Sprint Flow (Phase 0-8)",
+    "risk_warnings": ["涉及 npm 发布流程改动，需谨慎测试", "客户端自动更新机制需要 OpenCode 的 plugin 钩子支持"],
+    "user_decision": "accepted"
   },
   "phase_history": [
     {
       "phase": -1,
       "phase_name": "ISOLATE",
       "status": "completed",
-      "started_at": "2026-06-14T08:30:00Z",
-      "completed_at": "2026-06-14T08:32:00Z",
-      "duration_seconds": 120
+      "started_at": "2026-06-15T07:30:00Z",
+      "completed_at": "2026-06-15T07:35:00Z",
+      "duration_seconds": 300
+    },
+    {
+      "phase": -0.5,
+      "phase_name": "AUTO-ESTIMATE",
+      "status": "completed",
+      "started_at": "2026-06-15T07:35:00Z",
+      "completed_at": "2026-06-15T07:38:00Z",
+      "duration_seconds": 180
+    },
+    {
+      "phase": 0,
+      "phase_name": "THINK",
+      "status": "completed",
+      "started_at": "2026-06-15T07:38:00Z",
+      "completed_at": "2026-06-15T12:00:00Z",
+      "duration_seconds": 15720
+    },
+    {
+      "phase": 1,
+      "phase_name": "PLAN",
+      "status": "completed",
+      "started_at": "2026-06-15T12:00:00Z",
+      "completed_at": "2026-06-15T13:35:00Z",
+      "duration_seconds": 5700
     }
   ],
-  "outputs": {},
-  "metrics": {}
+  "outputs": {
+    "specification": ".sprint-state/phase-outputs/specification.yaml",
+    "delphi_verdict": ".sprint-state/delphi-reviewed.json"
+  },
+  "metrics": {
+    "delphi_rounds": 4,
+    "delphi_consensus_pct": 100,
+    "requirements_count": 8,
+    "acceptance_criteria_count": 39,
+    "fault_modes_count": 10
+  }
 }

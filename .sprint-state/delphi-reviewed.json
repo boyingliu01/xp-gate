@@ -1,7 +1,49 @@
 {
-  "mode": null,
-  "verdict": null,
-  "timestamp": null,
-  "experts": [],
-  "rounds": 0
+  "mode": "design",
+  "verdict": "APPROVED",
+  "timestamp": "2026-06-15T16:00:00+08:00",
+  "rounds": 4,
+  "consensus_pct": 100,
+  "round_history": [
+    {
+      "round": 1,
+      "verdict": "REQUEST_CHANGES",
+      "consensus_pct": 0,
+      "experts": [
+        { "id": "A", "role": "architecture", "verdict": "REQUEST_CHANGES", "confidence": 6, "issues": 10 },
+        { "id": "B", "role": "implementation", "verdict": "REQUEST_CHANGES", "confidence": 6, "issues": 10 },
+        { "id": "C", "role": "feasibility", "verdict": "REQUEST_CHANGES", "confidence": 6, "issues": 10 }
+      ]
+    },
+    {
+      "round": 2,
+      "verdict": "PARTIAL",
+      "consensus_pct": 33,
+      "experts": [
+        { "id": "A", "role": "architecture", "verdict": "APPROVED", "confidence": 8 },
+        { "id": "B", "role": "implementation", "verdict": "REQUEST_CHANGES", "confidence": 7, "issues": ["post-merge bash syntax", "lagDays hardcoded"] },
+        { "id": "C", "role": "feasibility", "verdict": "REQUEST_CHANGES", "confidence": 7, "issues": ["upgrade.js pkgName hardcoded", "lagDays hardcoded"] }
+      ]
+    },
+    {
+      "round": 3,
+      "verdict": "REQUEST_CHANGES",
+      "consensus_pct": 0,
+      "experts": [
+        { "id": "A", "role": "architecture", "verdict": "REQUEST_CHANGES", "confidence": 9, "issues": ["getPackageName not exported"] },
+        { "id": "B", "role": "implementation", "verdict": "REQUEST_CHANGES", "confidence": 8, "issues": ["getVersionTime defined but never called"] },
+        { "id": "C", "role": "feasibility", "verdict": "REQUEST_CHANGES", "confidence": 9, "issues": ["getPackageName not exported"] }
+      ]
+    },
+    {
+      "round": 4,
+      "verdict": "APPROVED",
+      "consensus_pct": 100,
+      "experts": [
+        { "id": "A", "role": "architecture", "verdict": "APPROVED", "confidence": 9 },
+        { "id": "B", "role": "implementation", "verdict": "APPROVED", "confidence": 9 },
+        { "id": "C", "role": "feasibility", "verdict": "APPROVED", "confidence": 9 }
+      ]
+    }
+  ]
 }
