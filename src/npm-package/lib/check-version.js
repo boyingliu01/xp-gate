@@ -285,4 +285,5 @@ module.exports = {
   formatUpgradeMsg,
   compareVersions,
   clearCache,
+  calcLagDays,
 };

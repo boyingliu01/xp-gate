@@ -2,6 +2,13 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.8.17] - 2026-06-16
+
+### Added
+
+- **#212 — OpenCode plugin auto-update** — `chat.message` hook triggers version check on first user message; inline semver compare (no external deps); npm registry dist-tags fetch (5s timeout, fail silent); 24h cache to `~/.xp-gate/opencode-plugin-version-check.json`; debounced one check per session.
+- **#214 — `xp-gate sprint-status` CLI** — New command: `xp-gate sprint-status [--json] [--watch] [--dir <path>]`; table render with 11 phases, status icons, durations; REQ-level progress in BUILD phase; `--json` mode; `--watch` mode with fs.watch/fs.watchFile fallback + SIGINT cleanup; path traversal protection on `--dir`. 13 vitest tests passing.
+
 ## [0.8.16] - 2026-06-16
 
 ### Fixed

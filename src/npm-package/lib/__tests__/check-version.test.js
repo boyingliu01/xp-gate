@@ -74,8 +74,9 @@ describe('check-version.js — REQ-001-01', () => {
   // ──────────────────────────────────────────
   describe('getLocalVersion() — AC-001-01', () => {
     it('returns version from package.json', () => {
+      const pkg = JSON.parse(fs.readFileSync(path.join(__dirname, '../../package.json'), 'utf8'));
       mod = require('../check-version');
-      expect(mod.getLocalVersion()).toBe('0.8.12');
+      expect(mod.getLocalVersion()).toBe(pkg.version);
     });
 
     it('returns null when read fails', () => {
@@ -104,13 +105,14 @@ describe('check-version.js — REQ-001-01', () => {
     beforeEach(() => { mod = require('../check-version'); });
 
     it('a < b → negative', () => {
-      expect(mod.compareVersions('0.8.12', '0.8.13')).toBeLessThan(0);
+      expect(mod.compareVersions('0.8.15', '0.8.17')).toBeLessThan(0);
     });
     it('a > b → positive', () => {
-      expect(mod.compareVersions('0.8.13', '0.8.12')).toBeGreaterThan(0);
+      expect(mod.compareVersions('0.8.17', '0.8.15')).toBeGreaterThan(0);
     });
     it('equal → 0', () => {
-      expect(mod.compareVersions('0.8.12', '0.8.12')).toBe(0);
+      expect(mod.compareVersions('0.8.17', '0.8.17')).toBe(0);
+
     });
     it('handles different segment counts', () => {
       expect(mod.compareVersions('1.0', '1.0.1')).toBeLessThan(0);
@@ -121,34 +123,24 @@ describe('check-version.js — REQ-001-01', () => {
   });
 
   // ──────────────────────────────────────────
-  // AC-001-08: calcLagDays() (internal — tested via checkUpgrade)
+  // AC-001-08: calcLagDays() — directly tested, no network/cache dependency
   // ──────────────────────────────────────────
-  describe('calcLagDays() behavior via checkUpgrade — AC-001-08', () => {
-    it('checkUpgrade returns lagDays=0 when no remote version', async () => {
-      mod = require('../check-version');
-      const r = await mod.checkUpgrade('@nonexistent/pkg-test-only');
-      expect(r.lagDays).toBe(0);
+  describe('calcLagDays() — AC-001-08', () => {
+    beforeEach(() => { mod = require('../check-version'); });
+
+    it('returns 0 when no publishedAt', () => {
+      expect(mod.calcLagDays('')).toBe(0);
+      expect(mod.calcLagDays(null)).toBe(0);
+      expect(mod.calcLagDays(undefined)).toBe(0);
     });
 
-    it('checkUpgrade uses calcLagDays with publishedAt when available', async () => {
-      const https = require('https');
-      const origGet = https.get;
-      const body = JSON.stringify({ latest: '99.99.99' });
-      https.get = (_url, _opts, cb) => {
-        const callback = typeof _opts === 'function' ? _opts : cb;
-        if (!callback) return { on: () => this, destroy: () => {} };
-        const mockRes = {
-          statusCode: 200,
-          on: (evt, handler) => { if (evt === 'end') handler(); return mockRes; },
-        };
-        callback(mockRes);
-        return { on: () => this, destroy: () => {} };
-      };
-      vi.resetModules();
-      mod = require('../check-version');
-      const r = await mod.checkUpgrade('@nonexistent/pkg-test-only');
-      expect(r.lagDays).toBe(0);
-      https.get = origGet;
+    it('returns 0 when publishedAt is unparseable', () => {
+      expect(mod.calcLagDays('not-a-date')).toBe(0);
+    });
+
+    it('returns >= 0 for a past date', () => {
+      const lag = mod.calcLagDays('2026-06-15T00:00:00.000Z');
+      expect(lag).toBeGreaterThanOrEqual(0);
     });
   });
 
@@ -222,17 +214,17 @@ describe('check-version.js — REQ-001-01', () => {
 
     it('returns safe defaults (outdated:false) without network', async () => {
       // Mock https to return the SAME version as local → outdated=false, no network dependency
-      const result = await withMockedHttps('0.8.12', async (m) => m.checkUpgrade('@nonexistent/pkg-test-only'));
+      const result = await withMockedHttps('0.8.17', async (m) => m.checkUpgrade('@nonexistent/pkg-test-only'));
       expect(result.outdated).toBe(false);
-      expect(result.local).toBe('0.8.12');
-      expect(result.remote).toBe('0.8.12');
+      expect(result.local).toBe('0.8.17');
+      expect(result.remote).toBe('0.8.17');
       expect(result.lagDays).toBe(0);
     });
 
     it('returns outdated=true when remote > local', async () => {
       const result = await withMockedHttps('99.99.99', async (m) => m.checkUpgrade('@nonexistent/pkg-test-only'));
       expect(result.outdated).toBe(true);
-      expect(result.local).toBe('0.8.12');
+      expect(result.local).toBe('0.8.17');
       expect(result.remote).toBe('99.99.99');
     });
   });
@@ -254,7 +246,7 @@ describe('check-version.js — REQ-001-01', () => {
   // ──────────────────────────────────────────
   describe('formatUpgradeMsg() — up to date', () => {
     beforeEach(() => { mod = require('../check-version'); });
-    const r = { outdated: false, local: '0.8.12', remote: '0.8.12', lagDays: 0 };
+    const r = { outdated: false, local: '0.8.17', remote: '0.8.17', lagDays: 0 };
 
     it('cli shows checkmark', () => {
       expect(mod.formatUpgradeMsg(r, 'cli')).toContain('up to date');
@@ -272,7 +264,7 @@ describe('check-version.js — REQ-001-01', () => {
   // ──────────────────────────────────────────
   describe('formatUpgradeMsg() — outdated (AC-003-01/02/03)', () => {
     beforeEach(() => { mod = require('../check-version'); });
-    const r = { outdated: true, local: '0.8.12', remote: '0.8.13', lagDays: 10 };
+    const r = { outdated: true, local: '0.8.17', remote: '0.8.13', lagDays: 10 };
 
     it('cli: full release link + upgrade cmd (AC-003-01)', () => {
       const msg = mod.formatUpgradeMsg(r, 'cli');
