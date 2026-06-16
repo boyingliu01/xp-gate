@@ -1,9 +1,9 @@
 # SKILLS/TEST-SPECIFICATION-ALIGNMENT KNOWLEDGE BASE
 
 **Generated:** 2026-06-16
-**Commit:** b1d8786
+**Commit:** 027813b
 **Branch:** main
-**Version:** 0.8.13.0
+**Version:** 0.8.14.0
 
 ## OVERVIEW
 Test-Specification Alignment Engine — two-stage validation ensuring tests accurately reflect requirements and design specs.
