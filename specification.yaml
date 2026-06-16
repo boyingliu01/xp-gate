@@ -822,3 +822,472 @@ specification:
           ARCH-012: { enabled: false }
           ARCH-013: { enabled: false }
           ARCH-014: { enabled: false }
+
+---
+specification:
+  id: SPEC-AUTO-UPDATE-001
+  name: XP-Gate Auto-Update Mechanism
+  version: "1.0.0"
+  source_document: docs/plans/2026-06-15-xp-gate-auto-update-design.md
+  delphi_status: APPROVED
+  sprint: sprint/2026-06-15-01
+  version_bump: 0.8.12.0 → 0.8.13.0
+
+  requirements:
+    # ============================================================
+    # REQ-AUTO-001: Shared Version Check Module
+    # Issues: #212, #215, #216
+    # ============================================================
+    - id: REQ-AUTO-001
+      description: Create check-version.js shared module for version comparison
+      priority: MUST
+      context: |
+        Zero-runtime-dependency module (Node built-in: https + fs + path).
+        Single source of truth for all version checking logic across CLI, doctor, and plugins.
+        
+        API:
+        - getLocalVersion() → "0.8.12" | null
+        - getRemoteVersion(pkgName) → { latest, publishedAt } | null
+        - checkUpgrade(pkgName) → { outdated, local, remote, lagDays }
+        - formatUpgradeMsg(result, context) → string (context: 'cli' | 'doctor' | 'plugin')
+        
+        Key behaviors:
+        - https.get to https://registry.npmjs.org/-/package/@boyingliu01/xp-gate/dist-tags
+        - 5 second timeout, failure → null (non-blocking)
+        - In-memory cache for 5 minutes
+        - HTTP status code check: non-200 → null
+        - dist-tags 'latest' key existence check: missing → null
+
+      acceptance_criteria:
+        - id: AC-AUTO-001-01
+          given: npm package is installed globally
+          when: getLocalVersion() is called
+          then: Returns the version string from package.json (e.g. "0.8.12")
+
+        - id: AC-AUTO-001-02
+          given: npm package is NOT installed
+          when: getLocalVersion() is called
+          then: Returns null
+
+        - id: AC-AUTO-001-03
+          given: npm registry is reachable
+          when: getRemoteVersion() is called
+          then: Returns object with latest version string and publishedAt timestamp
+
+        - id: AC-AUTO-001-04
+          given: npm registry returns non-200 status code
+          when: getRemoteVersion() is called
+          then: Returns null (non-blocking)
+
+        - id: AC-AUTO-001-05
+          given: npm registry dist-tags lacks 'latest' key
+          when: getRemoteVersion() is called
+          then: Returns null (non-blocking)
+
+        - id: AC-AUTO-001-06
+          given: npm registry times out after 5 seconds
+          when: getRemoteVersion() is called
+          then: Returns null (non-blocking)
+
+        - id: AC-AUTO-001-07
+          given: Local version is 0.8.12 and remote is 0.8.13
+          when: checkUpgrade() is called
+          then: Returns { outdated: true, local: "0.8.12", remote: "0.8.13", lagDays: <number> }
+
+        - id: AC-AUTO-001-08
+          given: Local version equals remote version
+          when: checkUpgrade() is called
+          then: Returns { outdated: false, local, remote, lagDays: 0 }
+
+        - id: AC-AUTO-001-09
+          given: formatUpgradeMsg() with outdated=true and context='cli'
+          when: Called
+          then: Returns CLI-friendly message with GitHub release link
+
+        - id: AC-AUTO-001-10
+          given: formatUpgradeMsg() with outdated=false and context='cli'
+          when: Called
+          then: Returns "up to date" message
+
+        - id: AC-AUTO-001-11
+          given: getRemoteVersion() succeeds, then called again within 5 minutes
+          when: Second call
+          then: Returns cached result (no new network request)
+
+        - id: AC-AUTO-001-12
+          given: --apply succeeds (upgrade completed)
+          when: Next cache access
+          then: Cache is cleared, fresh network request made
+
+      edge_cases:
+        - npm registry network timeout
+        - npm registry returns non-JSON response
+        - Remote version string is invalid semver (e.g. "latest")
+        - Local package.json is malformed
+
+      test_coverage_requirements:
+        unit: true
+        integration: true
+        threshold: 80
+
+    # ============================================================
+    # REQ-AUTO-002: CLI upgrade command
+    # Issue: #215
+    # ============================================================
+    - id: REQ-AUTO-002
+      description: Create xp-gate upgrade CLI command
+      priority: MUST
+      context: |
+        Commands:
+        - xp-gate upgrade: check + human-readable output
+        - xp-gate upgrade --preview: JSON output for plugin consumption
+        - xp-gate upgrade --apply: check + auto-upgrade via npm install -g
+        
+        Output formats:
+        - upgrade (up-to-date): "✓ xp-gate v0.8.12 is up to date"
+        - upgrade (outdated): "A newer version v0.8.13 is available (<releaseUrl>) — run: xp-gate upgrade --apply"
+        - upgrade --preview: {"local":"0.8.12","remote":"0.8.13","outdated":true,"lagDays":3,"releaseUrl":"...","publishedAt":"..."}
+        - upgrade --apply (permission denied): "Permission denied. Try: sudo npm install -g @boyingliu01/xp-gate"
+
+      acceptance_criteria:
+        - id: AC-AUTO-002-01
+          given: xp-gate upgrade is run and already up to date
+          when: Command executes
+          then: Exits with 0, outputs current version message
+
+        - id: AC-AUTO-002-02
+          given: xp-gate upgrade is run and a newer version exists
+          when: Command executes
+          then: Exits with 0, outputs upgrade message with GitHub release link
+
+        - id: AC-AUTO-002-03
+          given: xp-gate upgrade --preview is run
+          when: Command executes
+          then: Exits with 0, outputs single-line JSON with releaseUrl and publishedAt
+
+        - id: AC-AUTO-002-04
+          given: xp-gate upgrade --apply is run and newer version exists
+          when: Command executes
+          then: Executes npm install -g @boyingliu01/xp-gate
+
+        - id: AC-AUTO-002-05
+          given: xp-gate upgrade --apply encounters EACCES error
+          when: npm install fails with permission denied
+          then: Shows friendly error with sudo hint
+
+        - id: AC-AUTO-002-06
+          given: xp-gate upgrade command is registered
+          when: xp-gate --help is run
+          then: upgrade appears in command list
+
+        - id: AC-AUTO-002-07
+          given: xp-gate upgrade is run and registry is unreachable
+          when: Network fails
+          then: Shows "Unable to check for updates (network issue)"
+
+      edge_cases:
+        - npm command not found on PATH
+        - sudo required for global install
+        - Registry returns 404 or 500
+
+      test_coverage_requirements:
+        unit: true
+        integration: true
+        threshold: 80
+
+    # ============================================================
+    # REQ-AUTO-003: Doctor version check integration
+    # Issue: #216
+    # ============================================================
+    - id: REQ-AUTO-003
+      description: Integrate version check into doctor.js output
+      priority: SHOULD
+      context: |
+        Append to doctor.js output:
+        [Version Check]
+          Local:  v0.8.12
+          Remote: v0.8.13 ← NEW (see: <releaseUrl>)
+          Run: xp-gate upgrade --apply
+        
+        Auto-detect for first-time users: doctor runs checkUpgrade()
+        on every invocation, displays upgrade hint when outdated=true.
+
+      acceptance_criteria:
+        - id: AC-AUTO-003-01
+          given: xp-gate doctor is run and version is current
+          when: Command executes
+          then: Output includes version check section showing both versions are same
+
+        - id: AC-AUTO-003-02
+          given: xp-gate doctor is run and newer version exists
+          when: Command executes
+          then: Output includes version check with upgrade hint and release URL
+
+      test_coverage_requirements:
+        unit: true
+        integration: true
+        threshold: 80
+
+    # ============================================================
+    # REQ-AUTO-004: OpenCode Plugin auto-update checker
+    # Issue: #212
+    # ============================================================
+    - id: REQ-AUTO-004
+      description: Add auto-update version check to OpenCode plugin
+      priority: SHOULD
+      context: |
+        Strategy: lazy check on first tool invocation.
+        Decorates each tool handler with version check via execSync('xp-gate upgrade --preview').
+        
+        Notification rules:
+        - <1 day lag: silent
+        - 1-7 days: tool response appends "Upgrade: v{remote} available — run: xp-gate upgrade --apply"
+        - >7 days: strong warning with both local and remote versions
+        - Registry unreachable: silent fallback
+        
+        execSync error handling:
+        - ENOENT (CLI not installed): "xp-gate CLI not found — install with: npm install -g @boyingliu01/xp-gate"
+        - Other errors: silent (return null)
+
+      acceptance_criteria:
+        - id: AC-AUTO-004-01
+          given: OpenCode plugin loads and xp-gate CLI is installed
+          when: First tool is invoked
+          then: execSync('xp-gate upgrade --preview') is called
+
+        - id: AC-AUTO-004-02
+          given: Version check succeeds and lag is 1-7 days
+          when: Tool handler returns response
+          then: Response appends upgrade notification message
+
+        - id: AC-AUTO-004-03
+          given: Version check succeeds and lag is >7 days
+          when: Tool handler returns response
+          then: Response appends strong upgrade warning
+
+        - id: AC-AUTO-004-04
+          given: Version check succeeds and lag is <1 day
+          when: Tool handler returns response
+          then: No notification appended
+
+        - id: AC-AUTO-004-05
+          given: execSync fails with ENOENT (CLI not installed)
+          when: Tool handler runs
+          then: Shows CLI install hint, does not crash
+
+        - id: AC-AUTO-004-06
+          given: execSync fails with other error
+          when: Tool handler runs
+          then: Silent fallback (return null, no notification)
+
+        - id: AC-AUTO-004-07
+          given: Version check result is cached (within 5 min)
+          when: Same session second tool invocation
+          then: No new execSync call
+
+      edge_cases:
+        - xp-gate CLI not installed on user system
+        - execSync timeout
+        - --preview JSON malformed
+
+      test_coverage_requirements:
+        unit: true
+        integration: true
+        threshold: 80
+
+    # ============================================================
+    # REQ-AUTO-005: Claude Code Plugin auto-update checker
+    # Issue: #212
+    # ============================================================
+    - id: REQ-AUTO-005
+      description: Add auto-update version check to Claude Code plugin via PostToolUse hook
+      priority: SHOULD
+      context: |
+        New file: plugins/claude-code/bin/xp-gate-version-check.sh
+        Modified: plugins/claude-code/hooks/hooks.json — add PostToolUse entry with matcher ".*"
+        
+        Hook script:
+        - Calls xp-gate upgrade --preview
+        - Checks cached version via temp file /tmp/.xp-gate-version-checked
+        - Temp file format: <remote_version>\n<timestamp_ms>
+        - Cache TTL: 5 minutes (expired cache treated as non-existent)
+        - If outdated: outputs console.warn message
+
+      acceptance_criteria:
+        - id: AC-AUTO-005-01
+          given: Claude Code plugin is loaded and xp-gate CLI is installed
+          when: Any PostToolUse hook fires
+          then: bash script calls xp-gate upgrade --preview
+
+        - id: AC-AUTO-005-02
+          given: Version check finds outdated version >1 day
+          when: Script runs
+          then: console.warn output with upgrade notification
+
+        - id: AC-AUTO-005-03
+          given: Version check succeeds and lag is <1 day
+          when: Script runs
+          then: No warning output
+
+        - id: AC-AUTO-005-04
+          given: Same version checked within 5 minutes
+          when: Script runs again
+          then: Skips execSync call (uses temp file cache)
+
+        - id: AC-AUTO-005-05
+          given: CL execSync fails (CLI not installed or network error)
+          when: Script runs
+          then: Silent fallback, does not crash hooks
+
+      edge_cases:
+        - Temp file write permission denied
+        - Temp file content corrupted
+        - Multiple concurrent Claude Code sessions
+
+      test_coverage_requirements:
+        unit: true
+        integration: true
+        threshold: 80
+
+    # ============================================================
+    # REQ-AUTO-006: Post-merge hook for auto sync-version
+    # Issue: #207
+    # ============================================================
+    - id: REQ-AUTO-006
+      description: Create post-merge git hook to auto-run sync-version.sh on VERSION change
+      priority: MUST
+      context: |
+        New file: githooks/post-merge
+        Modified: githooks/install.sh (add post-merge to HOOKS_LIST)
+        npm copy: src/npm-package/hooks/post-merge (copied from githooks/)
+        
+        Behavior:
+        1. Check if xp-gate project: scripts/sync-version.sh exist check
+        2. Use ORIG_HEAD (not HEAD) to detect VERSION file change during merge
+           Command: git diff-tree --name-only -r ORIG_HEAD HEAD | grep -q '^VERSION$'
+        3. If VERSION changed → execute scripts/sync-version.sh
+        4. Output user message with specific updated file paths
+
+      acceptance_criteria:
+        - id: AC-AUTO-006-01
+          given: Merge changes VERSION file
+          when: Post-merge hook runs
+          then: Detects VERSION change via ORIG_HEAD comparison
+
+        - id: AC-AUTO-006-02
+          given: VERSION file was changed during merge
+          when: Post-merge hook detects change
+          then: Executes scripts/sync-version.sh
+
+        - id: AC-AUTO-006-03
+          given: VERSION file was NOT changed during merge
+          when: Post-merge hook runs
+          then: Does NOT execute sync-version.sh (zero overhead)
+
+        - id: AC-AUTO-006-04
+          given: Merge is not in xp-gate project (no sync-version.sh)
+          when: Post-merge hook runs
+          then: Exits silently (no output)
+
+        - id: AC-AUTO-006-05
+          given: sync-version.sh executes successfully
+          when: Post-merge hook completes
+          then: Outputs list of specific updated files
+
+        - id: AC-AUTO-006-06
+          given: install.sh --force is run
+          when: Installation completes
+          then: post-merge hook is installed in .git/hooks/
+
+      edge_cases:
+        - ORIG_HEAD does not exist (first commit or shallow clone)
+        - sync-version.sh fails
+        - Multiple VERSION changes in same merge
+
+      test_coverage_requirements:
+        unit: false
+        integration: true
+        threshold: 80
+
+  # ============================================================
+  # Design Decisions
+  # ============================================================
+  design_decisions:
+    - id: DD-AUTO-001
+      description: CLI as single entry point for version checking
+      rationale: |
+        check-version.js exists only in lib/. Plugins and hooks access version info
+        exclusively via execSync('xp-gate upgrade --preview'). Avoids duplicating
+        network/parse logic across 3 codebases (CLI, OpenCode plugin, CC hooks).
+      alternatives_considered:
+        - "Direct npm registry call from each plugin — duplicated error handling"
+        - "Shared JS module installed as npm dependency — adds dep graph"
+
+    - id: DD-AUTO-002
+      description: Lazy/delayed version check (first tool invocation, not plugin init)
+      rationale: |
+        OpenCode plugin has no init/bootstrap lifecycle hook (SDK limitation).
+        Claude Code PostToolUse matcher ".*" fires on every call but bash script
+        has 5min temp file cache to prevent redundant network calls.
+      alternatives_considered:
+        - "Eager check on plugin load — not possible for OpenCode plugin"
+
+    - id: DD-AUTO-003
+      description: Post-merge hook uses ORIG_HEAD instead of HEAD
+      rationale: |
+        During a merge, HEAD points to the merge commit, not the incoming branch.
+        ORIG_HEAD preserves the pre-merge commit, allowing correct diff detection
+        of whether VERSION changed during the merge.
+      alternatives_considered:
+        - "HEAD~1 — incorrect for merge commits"
+
+    - id: DD-AUTO-004
+      description: CI already handles npm publish (no changes needed)
+      rationale: |
+        .github/workflows/npm-publish.yml automatically publishes when VERSION
+        is pushed to main. No server-side changes required for this sprint.
+
+    - id: DD-AUTO-005
+      description: Plugin badge uses gentle lowercase tone, not all-caps
+      rationale: |
+        All-caps looks like an error. Lowercase "Upgrade: v{remote} available"
+        conveys helpfulness without alarmism. >7 day lag adds "recommended" for
+        appropriate urgency.
+
+    - id: DD-AUTO-006
+      description: Doctor version check runs on every invocation
+      rationale: |
+        First-time users benefit from immediate upgrade detection.
+        5-minute cache prevents redundant network calls on repeated doctor runs.
+
+  # ============================================================
+  # Configuration
+  # ============================================================
+  configuration:
+    check_version:
+      npm_package_name: "@boyingliu01/xp-gate"
+      registry_url: "https://registry.npmjs.org/-/package/@boyingliu01/xp-gate/dist-tags"
+      network_timeout_ms: 5000
+      cache_ttl_ms: 300000  # 5 minutes
+
+    notification:
+      plugin_lag_silent_ms: 86400000  # 1 day
+      plugin_lag_soft_warning_ms: 604800000  # 7 days
+      plugin_strong_warning: ">7 days"
+
+    post_merge:
+      src_file: "githooks/post-merge"
+      npm_target: "src/npm-package/hooks/post-merge"
+      detect_command: "git diff-tree --name-only -r ORIG_HEAD HEAD | grep -q '^VERSION$'"
+
+    file_changes:
+      - src/npm-package/lib/check-version.js (new)
+      - src/npm-package/lib/upgrade.js (new)
+      - src/npm-package/bin/xp-gate.js (modified)
+      - src/npm-package/lib/doctor.js (modified)
+      - plugins/opencode/index.ts (modified)
+      - plugins/claude-code/hooks/hooks.json (modified)
+      - plugins/claude-code/bin/xp-gate-version-check.sh (new)
+      - githooks/post-merge (new)
+      - githooks/install.sh (modified)
+      - src/npm-package/hooks/post-merge (copy of githooks/post-merge)

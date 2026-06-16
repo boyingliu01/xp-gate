@@ -10,6 +10,7 @@ const {
   detectPlatform,
   getTemplateDir,
 } = require('./shared-paths.js');
+const { checkUpgrade, formatUpgradeMsg } = require('./check-version.js');
 
 // npm package source dir (template hooks/adapters)
 const PKG_DIR = path.dirname(__dirname);
@@ -396,6 +397,15 @@ async function doctor(args) {
   const { checks, issues } = diagnose();
 
   printReport(checks);
+
+  // --- Check 7: Version upgrade check ---
+  try {
+    const upgradeResult = await checkUpgrade();
+    const msg = formatUpgradeMsg(upgradeResult, 'doctor');
+    if (msg) {
+      console.log(`\n  ℹ ${msg}`);
+    }
+  } catch { /* non-blocking — don't fail doctor on network issue */ }
 
   if (issues === 0) {
     console.log('\n✓ All checks passed');
