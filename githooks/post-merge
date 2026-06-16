@@ -1,0 +1,86 @@
+#!/usr/bin/env bash
+#
+# post-merge — XP-Gate VERSION sync hook
+#
+# Detects whether VERSION changed during a merge (via ORIG_HEAD comparison)
+# and, if so, runs scripts/sync-version.sh to propagate the new version.
+#
+# Safety features:
+#   - Guard file (.xp-gate/.version-synced) prevents infinite loops
+#   - Shell environment check before running sync-version.sh
+#   - [skip ci] in auto-commit message to prevent recursive CI triggers
+#   - ORIG_HEAD fallback: if ORIG_HEAD is missing (shallow clone / first commit),
+#     the check is skipped with a warning.
+#
+set -e
+
+PROJECT_ROOT="$(git rev-parse --show-toplevel 2>/dev/null || echo '')"
+if [[ -z "$PROJECT_ROOT" ]]; then
+  # not a git repo — silently exit
+  exit 0
+fi
+
+GUARD_FILE="$PROJECT_ROOT/.xp-gate/.version-synced"
+
+# ── Guard: skip if already synced for this commit ──
+CURRENT_HEAD="$(git rev-parse HEAD 2>/dev/null || echo '')"
+if [[ -f "$GUARD_FILE" ]]; then
+  read -r GUARD_HASH < "$GUARD_FILE" 2>/dev/null || true
+  if [[ "$GUARD_HASH" == "$CURRENT_HEAD" ]]; then
+    # already synced for this commit — skip
+    exit 0
+  fi
+fi
+
+# ── Only proceed if this is an xp-gate project ──
+if [[ ! -f "$PROJECT_ROOT/scripts/sync-version.sh" ]]; then
+  exit 0
+fi
+
+# ── ORIG_HEAD check: detect VERSION change during merge ──
+ORIG_HEAD="$(git rev-parse ORIG_HEAD 2>/dev/null || echo '')"
+if [[ -z "$ORIG_HEAD" ]]; then
+  # ORIG_HEAD not available (shallow clone, first commit, or non-merge operation)
+  exit 0
+fi
+
+VERSION_CHANGED=false
+if git diff-tree --name-only -r "$ORIG_HEAD" HEAD 2>/dev/null | grep -q '^VERSION$'; then
+  VERSION_CHANGED=true
+fi
+
+if [[ "$VERSION_CHANGED" != "true" ]]; then
+  # VERSION not changed — zero overhead
+  exit 0
+fi
+
+# ── Shell environment check ──
+if ! command -v bash &>/dev/null; then
+  echo "[xp-gate] Warning: bash not found — cannot run sync-version.sh" >&2
+  exit 0
+fi
+
+# ── Run sync-version.sh ──
+if [[ -x "$PROJECT_ROOT/scripts/sync-version.sh" ]]; then
+  echo "[xp-gate] VERSION changed in merge — running sync-version.sh..."
+  if bash "$PROJECT_ROOT/scripts/sync-version.sh"; then
+    # record guard
+    mkdir -p "$(dirname "$GUARD_FILE")"
+    echo "$CURRENT_HEAD" > "$GUARD_FILE"
+    echo "[xp-gate] VERSION synced. Affected files:"
+    echo "  - VERSION"
+    echo "  - package.json"
+    echo "  - src/npm-package/package.json"
+    echo "  - plugins/opencode/package.json"
+    echo "  - plugins/claude-code/package.json"
+    echo "[skip ci]"
+    echo "Run 'git add' and 'git commit' to commit these changes."
+  else
+    echo "[xp-gate] Warning: sync-version.sh failed — VERSION files may be out of sync." >&2
+    echo "[xp-gate] Run 'bash scripts/sync-version.sh' manually to fix." >&2
+  fi
+else
+  echo "[xp-gate] Warning: scripts/sync-version.sh not found or not executable." >&2
+fi
+
+exit 0

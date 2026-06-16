@@ -11,6 +11,7 @@ const { handleBaseline } = require('../lib/baseline.js');
 const { check } = require('../lib/check.js');
 const { principles } = require('../lib/principles.js');
 const { arch } = require('../lib/arch.js');
+const { upgrade } = require('../lib/upgrade.js');
 
 function handleUIReview() {
   const { execSync } = require('child_process');
@@ -115,6 +116,11 @@ const COMMANDS = {
     description: 'Run architecture validation (Gate 6 standalone, uses architecture.yaml)',
     run: subargs => arch(subargs).then(code => process.exit(code)),
     usage: 'xp-gate arch [--config <path>]'
+  },
+  'upgrade': {
+    description: 'Check for xp-gate updates (--preview for JSON, --apply to upgrade)',
+    run: subargs => upgrade(subargs).then(code => process.exit(code)),
+    usage: 'xp-gate upgrade [--preview] [--apply]'
   }
 };
 

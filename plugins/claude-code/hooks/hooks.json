@@ -20,6 +20,15 @@
             "command": "\"$CLAUDE_PLUGIN_ROOT\"/bin/xp-gate-check \"${TOOL_INPUT_FILE}\""
           }
         ]
+      },
+      {
+        "matcher": ".*",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "\"$CLAUDE_PLUGIN_ROOT\"/bin/xp-gate-version-check.sh"
+          }
+        ]
       }
     ],
     "Stop": [

@@ -16,7 +16,7 @@ TARGET_HOOKS="$GIT_DIR/hooks"
 mkdir -p "$TARGET_HOOKS"
 TARGET_GITHOOKS="$PROJECT_ROOT/githooks"
 
-HOOKS_LIST="pre-commit pre-push"
+HOOKS_LIST="pre-commit pre-push post-merge"
 
 echo "Installing OpenCode quality gates..."
 echo ""
@@ -41,7 +41,7 @@ if [[ -d "$TARGET_GITHOOKS" ]]; then
     echo "  + adapters/*.sh (merged into $TARGET_GITHOOKS/adapters/)"
     echo ""
     echo "Git hooks and adapter infrastructure installed to current project."
-    echo "  Hooks:    $TARGET_HOOKS/{pre-commit,pre-push}"
+echo "  Hooks:    $TARGET_HOOKS/{pre-commit,pre-push,post-merge}"
     echo "  Adapters: $TARGET_GITHOOKS/adapter-common.sh + adapters/"
     echo ""
     echo "On next commit, quality gates will run automatically."

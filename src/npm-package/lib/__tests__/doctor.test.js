@@ -13,8 +13,6 @@ describe('doctor', () => {
   let tmpProject;
   let originalHome;
   let logSpy;
-  let warnSpy;
-  let errorSpy;
   let execSpy;
 
   beforeEach(() => {
@@ -29,8 +27,8 @@ describe('doctor', () => {
     delete require.cache[require.resolve('../detect-deps.js')];
     delete require.cache[require.resolve('../shared-paths')];
     logSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
-    warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
-    errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+    vi.spyOn(console, 'warn').mockImplementation(() => {});
+    vi.spyOn(console, 'error').mockImplementation(() => {});
   });
 
   afterEach(() => {
@@ -54,10 +52,6 @@ describe('doctor', () => {
 
   function globalAdaptersDir() {
     return path.join(tmpHome, '.config', 'xp-gate', 'adapters');
-  }
-
-  function projectGitDir() {
-    return path.join(tmpProject, '.git');
   }
 
   function projectHooksDir() {
@@ -168,6 +162,17 @@ describe('doctor', () => {
     });
   }
 
+  // doctor() calls checkUpgrade() which hits npm registry; seed cache to skip.
+  // check-version.js uses os.homedir() (not process.env.HOME) for XP_GATE_DIR.
+  function seedVersionCache() {
+    const cacheDir = path.join(os.homedir(), '.xp-gate');
+    fs.mkdirSync(cacheDir, { recursive: true });
+    fs.writeFileSync(
+      path.join(cacheDir, 'version-cache.json'),
+      JSON.stringify({ ts: Date.now(), version: '0.8.12', publishedAt: '' })
+    );
+  }
+
   function mockExecFail() {
     execSpy = vi.spyOn(childProcess, 'execSync').mockImplementation(() => {
       throw new Error('Command failed');
@@ -178,36 +183,22 @@ describe('doctor', () => {
 
   it('AC-05: doctor reports all checks passed for healthy local install', async () => {
     setupLocalInstall();
+    seedVersionCache();
     mockExecSuccess();
     const { doctor } = require('../doctor');
 
     const result = await doctor([]);
 
     expect(result).toBe(0);
-
-    // Should report Config file check
-    expect(logSpy).toHaveBeenCalledWith(
-      expect.stringContaining('Config file')
-    );
-
-    // Should report hooks check
-    expect(logSpy).toHaveBeenCalledWith(
-      expect.stringContaining('Hooks')
-    );
-
-    // Should report Adapters directory check
-    expect(logSpy).toHaveBeenCalledWith(
-      expect.stringContaining('Adapters directory')
-    );
-
-    // Should report all checks passed
-    expect(logSpy).toHaveBeenCalledWith(
-      expect.stringContaining('All checks passed')
-    );
+    expect(logSpy).toHaveBeenCalledWith(expect.stringContaining('Config file'));
+    expect(logSpy).toHaveBeenCalledWith(expect.stringContaining('Hooks'));
+    expect(logSpy).toHaveBeenCalledWith(expect.stringContaining('Adapters directory'));
+    expect(logSpy).toHaveBeenCalledWith(expect.stringContaining('All checks passed'));
   });
 
   it('AC-05: doctor reports all checks passed for healthy global install', async () => {
     setupGlobalInstall();
+    seedVersionCache();
     mockExecSuccess();
     const { doctor } = require('../doctor');
 
@@ -223,6 +214,7 @@ describe('doctor', () => {
 
   it('AC-08: doctor detects missing hooks in partial install', async () => {
     setupLocalInstall();
+    seedVersionCache();
     // Remove hooks to simulate partial state
     fs.unlinkSync(path.join(projectHooksDir(), 'pre-commit'));
     fs.unlinkSync(path.join(projectHooksDir(), 'pre-push'));
@@ -268,6 +260,7 @@ describe('doctor', () => {
 
   it('AC-08: doctor detects missing adapters', async () => {
     setupLocalInstall();
+    seedVersionCache();
     // Remove adapters dir
     fs.rmSync(projectAdaptersDir(), { recursive: true, force: true });
     mockExecSuccess();
@@ -286,6 +279,7 @@ describe('doctor', () => {
 
   it('AC-08: doctor detects wrong core.hooksPath in global mode', async () => {
     setupGlobalInstall();
+    seedVersionCache();
     // Mock hooksPath pointing somewhere else
     execSpy = vi.spyOn(childProcess, 'execSync').mockImplementation((cmd) => {
       if (cmd.includes('git config --global core.hooksPath')) {
@@ -309,13 +303,9 @@ describe('doctor', () => {
       return '';
     });
     const { doctor } = require('../doctor');
-
     const result = await doctor([]);
-
     expect(result).toBe(1);
-    expect(logSpy).toHaveBeenCalledWith(
-      expect.stringContaining('Expected ')
-    );
+    expect(logSpy).toHaveBeenCalledWith(expect.stringContaining('Expected '));
   });
 
   // === AC-10: --fix only when mode === "active" ===
@@ -328,49 +318,41 @@ describe('doctor', () => {
     );
 
     const { doctor } = require('../doctor');
-
     const result = await doctor(['--fix']);
-
     expect(result).toBe(0);
-    // Should NOT attempt fix operations
-    expect(logSpy).toHaveBeenCalledWith(
-      expect.stringContaining('xp-gate is not installed')
-    );
+    expect(logSpy).toHaveBeenCalledWith(expect.stringContaining('xp-gate is not installed'));
   });
 
   it('AC-10: doctor --fix reinstall hooks when mode is active and hooks missing', async () => {
     setupLocalInstall();
+    seedVersionCache();
     // Remove hooks to create a fixable issue
     fs.unlinkSync(path.join(projectHooksDir(), 'pre-commit'));
     fs.unlinkSync(path.join(projectHooksDir(), 'pre-push'));
     mockExecSuccess();
     const { doctor } = require('../doctor');
-
     const result = await doctor(['--fix']);
-
     expect(result).toBe(0);
-    // Should have reinstalled hooks
     expect(fs.existsSync(path.join(projectHooksDir(), 'pre-commit'))).toBe(true);
     expect(fs.existsSync(path.join(projectHooksDir(), 'pre-push'))).toBe(true);
   });
 
   it('AC-10: doctor --fix reinstall adapters when mode is active and adapters missing', async () => {
     setupLocalInstall();
+    seedVersionCache();
     // Remove adapters
     fs.rmSync(projectAdaptersDir(), { recursive: true, force: true });
     mockExecSuccess();
     const { doctor } = require('../doctor');
-
     const result = await doctor(['--fix']);
-
     expect(result).toBe(0);
-    // Should have reinstalled adapters
     expect(fs.existsSync(projectAdaptersDir())).toBe(true);
     expect(fs.existsSync(path.join(projectAdaptersDir(), 'typescript.sh'))).toBe(true);
   });
 
   it('AC-10: doctor --fix corrects core.hooksPath in global mode', async () => {
     setupGlobalInstall();
+    seedVersionCache();
     // Mock hooksPath pointing somewhere else
     execSpy = vi.spyOn(childProcess, 'execSync').mockImplementation((cmd) => {
       if (cmd.includes('git config --global core.hooksPath')) {
@@ -436,6 +418,7 @@ describe('doctor', () => {
 
   it('detects missing environment dependencies', async () => {
     setupLocalInstall();
+    seedVersionCache();
     mockExecFail();
     const { doctor } = require('../doctor');
 
@@ -451,6 +434,7 @@ describe('doctor', () => {
 
   it('detects version mismatch when config version differs from package version', async () => {
     setupLocalInstall();
+    seedVersionCache();
     // Write config with old version
     const cfg = JSON.parse(fs.readFileSync(configFile(), 'utf8'));
     cfg.version = '0.3.1.1';
@@ -471,6 +455,7 @@ describe('doctor', () => {
 
   it('passes version check when config version matches package version', async () => {
     setupLocalInstall();
+    seedVersionCache();
     // Write config with matching version
     const pkg = JSON.parse(fs.readFileSync(
       path.join(path.dirname(path.dirname(require.resolve('../doctor'))), 'package.json'), 'utf8'
@@ -491,6 +476,7 @@ describe('doctor', () => {
 
   it('passes version check when config has no version field (legacy)', async () => {
     setupLocalInstall();
+    seedVersionCache();
     // Config without version field — legacy install, should not fail
     mockExecSuccess();
     const { doctor } = require('../doctor');
@@ -507,6 +493,7 @@ describe('doctor', () => {
 
   it('detects templateDir pointing to wrong platform directory', async () => {
     setupLocalInstall();
+    seedVersionCache();
     // Write config with stale opencode templateDir when qoder is active
     const cfg = JSON.parse(fs.readFileSync(configFile(), 'utf8'));
     cfg.templateDir = path.join(tmpHome, '.config', 'opencode', 'git-hooks-template');
@@ -534,18 +521,20 @@ describe('doctor', () => {
 
   it('passes templateDir check when templateDir matches current platform', async () => {
     setupLocalInstall();
+    seedVersionCache();
     // Write config with correct qoder templateDir
     const cfg = JSON.parse(fs.readFileSync(configFile(), 'utf8'));
     cfg.templateDir = path.join(tmpHome, '.qoder', 'git-hooks-template');
     fs.writeFileSync(configFile(), JSON.stringify(cfg, null, 2));
 
-    // Create qoder marker
+    // Create qoder marker — must exist BEFORE loading shared-paths
     fs.mkdirSync(path.join(tmpHome, '.qoder', 'skills'), { recursive: true });
 
+    // Fresh require so shared-paths detectPlatform() sees .qoder/skills
     delete require.cache[require.resolve('../shared-paths')];
     delete require.cache[require.resolve('../doctor')];
-    const { doctor: doc2 } = require('../doctor');
     mockExecSuccess();
+    const { doctor: doc2 } = require('../doctor');
 
     const result = await doc2([]);
 
@@ -557,6 +546,7 @@ describe('doctor', () => {
 
   it('passes templateDir check when config has no templateDir field (legacy)', async () => {
     setupLocalInstall();
+    seedVersionCache();
     // Config without templateDir — legacy install, should not fail
     mockExecSuccess();
     const { doctor } = require('../doctor');
@@ -569,10 +559,73 @@ describe('doctor', () => {
     );
   });
 
+  // === REQ-001-04: doctor 集成版本升级检查 (AC-004-01/02) ===
+
+  it('AC-004-01: doctor shows upgrade prompt at end when outdated', async () => {
+    setupLocalInstall();
+    mockExecSuccess();
+    // Remove version cache so checkUpgrade hits the real npm registry
+    const cachePath = path.join(tmpHome, '.xp-gate', 'version-cache.json');
+    if (fs.existsSync(cachePath)) fs.unlinkSync(cachePath);
+
+    delete require.cache[require.resolve('../doctor')];
+    delete require.cache[require.resolve('../check-version.js')];
+    const { doctor } = require('../doctor');
+
+    const result = await doctor([]);
+
+    expect(result).toBe(0);
+    // Doctor should output upgrade message when outdated
+    const output = logSpy.mock.calls.map(c => c[0] || '').join('\n');
+    expect(output).toMatch(/newer version|upgrade|v\d+\.\d+\.\d+/);
+  }, 30000);
+
+  it('AC-004-02: doctor does NOT show upgrade prompt when up to date', async () => {
+    setupLocalInstall();
+    mockExecSuccess();
+    // Write a cache with a future version so checkUpgrade says "not outdated"
+    const cachePath = path.join(tmpHome, '.xp-gate', 'version-cache.json');
+    fs.mkdirSync(path.dirname(cachePath), { recursive: true });
+    fs.writeFileSync(cachePath, JSON.stringify({
+      ts: Date.now(),
+      version: '999.999.999',
+      publishedAt: ''
+    }));
+
+    delete require.cache[require.resolve('../doctor')];
+    delete require.cache[require.resolve('../check-version.js')];
+    const { doctor } = require('../doctor');
+
+    const result = await doctor([]);
+
+    expect(result).toBe(0);
+    const output = logSpy.mock.calls.map(c => c[0] || '').join('\n');
+    // Should NOT contain upgrade-related messages
+    expect(output).not.toMatch(/newer version|upgrade/i);
+  });
+
+  it('AC-004-03: doctor does NOT fail when version check throws', async () => {
+    setupLocalInstall();
+    seedVersionCache();
+    mockExecSuccess();
+    // Write corrupt cache to trigger checkUpgrade error path
+    const cachePath = path.join(os.homedir(), '.xp-gate', 'version-cache.json');
+    fs.writeFileSync(cachePath, 'not json');
+
+    delete require.cache[require.resolve('../doctor')];
+    delete require.cache[require.resolve('../check-version.js')];
+    const { doctor } = require('../doctor');
+
+    // Doctor should NOT throw — version check is non-blocking
+    const result = await doctor([]);
+    expect(result).toBe(0);
+  });
+
   // === Issue #186: --fix syncs global hooks from package source ===
 
   it('--fix syncs global hooks when they are outdated', async () => {
     setupGlobalInstall();
+    seedVersionCache();
     // Write an outdated pre-commit hook (different content)
     const oldContent = '#!/bin/bash\n# OpenCode Quality Gates - Pre-Commit Hook - OLD VERSION\n';
     fs.writeFileSync(path.join(globalHooksDir(), 'pre-commit'), oldContent);
