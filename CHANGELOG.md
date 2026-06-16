@@ -2,6 +2,23 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.8.17] - 2026-06-16
+
+### Added
+
+- **#212 — OpenCode plugin auto-update** — `chat.message` hook triggers version check on first user message; inline semver compare (no external deps); npm registry dist-tags fetch (5s timeout, fail silent); 24h cache to `~/.xp-gate/opencode-plugin-version-check.json`; debounced one check per session.
+- **#214 — `xp-gate sprint-status` CLI** — New command: `xp-gate sprint-status [--json] [--watch] [--dir <path>]`; table render with 11 phases, status icons, durations; REQ-level progress in BUILD phase; `--json` mode; `--watch` mode with fs.watch/fs.watchFile fallback + SIGINT cleanup; path traversal protection on `--dir`. 13 vitest tests passing.
+
+## [0.8.16] - 2026-06-16
+
+### Fixed
+
+- **#217 — Sprint Flow Phase 0 subagent 卡死** — Phase Dispatch Matrix 中 Phase 0 THINK 的 `category` 从 `deep` 改为 `unspecified-high`，`load_skills` 从 `["brainstorming"]` 改为 `[]`。根本原因：`brainstorming` 为交互式 skill，注入独立 subagent session 后无用户可交互而卡死；`deep` 类别不适合结构化文档生成。
+- **#210 — Gate 4 SOLID 检查在目标项目中永远被跳过** — `githooks/gate-4.sh` 和 `githooks/gates/gate-4-principles.sh` 新增第三级 fallback：检查 `$HOME/.config/xp-gate/modules/principles`（全局安装路径），确保 `xp-gate init` 未复制 `src/principles/` 到目标项目时 Gate 4 仍可执行。同时修复了 FAIL 分支中硬编码的 `src/principles/index.ts` 路径，改用 `$PRINCIPLES_DIR` 变量。
+- **#211 — Gate M 变异测试在目标项目中永远被跳过** — `githooks/pre-push` 新增第三级 fallback：检查 `$HOME/.config/xp-gate/modules/mutation/gate-m.ts`，确保全局安装路径下仍可执行变异测试。
+- **#188 — templateDir 指向 OpenCode 残留路径** — 已有 `xp-gate doctor --fix` 自动检测和修复机制（`shared-paths.js` 的 `getTemplateDir()` + `detectPlatform()`），该 issue 涉及的代码逻辑已完整实现，确认有效。
+- **#216 — 本地 opencode-plugin 版本滞后无通知** — `xp-gate doctor` 新增 OpenCode 插件版本检测（Check 8）：读取 `~/.config/opencode/node_modules/@boyingliu01/opencode-plugin/package.json` 版本，与 xp-gate CLI 版本比对，不一致时输出 WARN 提示及手动升级命令。
+
 ## [0.8.15] - 2026-06-16
 
 ### Changed

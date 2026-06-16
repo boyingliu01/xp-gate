@@ -1,9 +1,9 @@
 # PROJECT KNOWLEDGE BASE
 
 **Generated:** 2026-06-16
-**Commit:** 256eef6
+**Commit:** d3a0242
 **Branch:** main
-**Version:** 0.8.15.0
+**Version:** 0.8.17.0
 
 ## OVERVIEW
 XP-Gate — deterministic git quality gates + AI-driven multi-expert review (Delphi) + Sprint Flow pipeline + npm zero-install distribution + cross-platform plugin system (Claude Code / OpenCode / Qoder). Pre-commit runs **10 numbered gates (Gate 0–9)** at the script level, conceptually grouped as **6 categories** in user-facing docs (README, CAPABILITIES.md). Pre-push runs **3 mutation/mock gates (M, M2, M3) + Delphi code-walkthrough**. Implements 14 Clean Code/SOLID rules across 9 language adapters (TypeScript engine), 13 shell adapters (gate routing), Boy Scout Rule baseline enforcement, test-specification alignment, mock policy enforcement, and incremental mutation testing.
@@ -160,9 +160,10 @@ Subcommands registered in 0.8.8.0 (verified against bin source):
 | `xp-gate uninstall-skill <name> --force` | Remove an installed skill |
 | `xp-gate audit [--tail \| --stats \| record]` | Inspect / record gate audit log |
 | `xp-gate ui-review` | Visual review for UI-bearing changes (delegates to ui-review.ts) |
+| `xp-gate sprint-status [--json] [--watch] [--dir <path>]` | Show Sprint Flow progress (reads `.sprint-state/sprint-state.json`) |
 | `xp-gate --version` | Print version (from VERSION file) |
 
-> Older docs said "8 commands"; 0.8.8 grew to ≥11; 0.8.9 added `check`/`principles`/`arch` for parity with the OpenCode plugin (fixes #208), bringing the total to ≥15.
+> Older docs said "8 commands"; 0.8.8 grew to ≥11; 0.8.9 added `check`/`principles`/`arch` for parity with the OpenCode plugin (fixes #208). v0.8.16 added `sprint-status`, bringing the total to ≥16.
 
 ## CONVENTIONS
 - **VERSION as single source of truth.** `scripts/sync-version.sh` propagates the 4-digit `MAJOR.MINOR.PATCH.MICRO` from `VERSION` into the 4 `package.json` files (root, src/npm-package, plugins/opencode, plugins/claude-code) as a 3-digit npm-compatible semver. Never edit `package.json` versions by hand.

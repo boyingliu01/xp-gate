@@ -147,6 +147,7 @@ IDE 插件 **不提供** Git Hooks（AI 平台限制，无法在 commit/push 时
 | `xp-gate uninstall-skill <name> --force` | 卸载 Skill |
 | `xp-gate audit [--tail \| --stats \| record]` | 查看/记录 gate 审计日志 |
 | `xp-gate ui-review` | UI/视觉改动 review（委托给 ui-review.ts） |
+| `xp-gate sprint-status [--json] [--watch] [--dir <path>]` | 查看 Sprint Flow 进度（读取 `.sprint-state/sprint-state.json`） |
 | `xp-gate check <path> [--gates principles,arch]` | 在指定路径上运行用户可调用的质量门禁 (Gate 4 + Gate 6)。**v0.8.9+**：同名 OpenCode 工具 `gate-check` 即调用此命令。修复 #208。 |
 | `xp-gate principles <path> [--format console\|json\|sarif]` | 单独运行 Clean Code + SOLID 检查器 (Gate 4)。OpenCode 工具 `gate-principles` 即调用此命令。修复 #208。 |
 | `xp-gate arch [--config <path>]` | 单独运行架构合规检查 (Gate 6, 读取 architecture.yaml)。OpenCode 工具 `gate-arch` 即调用此命令。修复 #208。 |

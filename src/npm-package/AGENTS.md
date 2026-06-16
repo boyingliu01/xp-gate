@@ -1,9 +1,9 @@
 # SRC/NPM-PACKAGE KNOWLEDGE BASE
 
 **Generated:** 2026-06-16
-**Commit:** 256eef6
+**Commit:** d3a0242
 **Branch:** main
-**Version:** 0.8.15.0
+**Version:** 0.8.17.0
 
 ## OVERVIEW
 npm distribution package — zero-install CLI for xp-gate. Published as `@boyingliu01/xp-gate` on the public npm registry. Bundles hooks + 13 language adapters + 8 skills + 3 platform plugins at `prepack` time. Registers **≥15 CLI subcommands** (was ≥11 before 0.8.9; `check`/`principles`/`arch` added for OpenCode-plugin parity, fixes #208).
@@ -74,6 +74,7 @@ src/npm-package/
 | `xp-gate uninstall-skill <name> --force` | Remove an installed skill |
 | `xp-gate audit [--tail \| --stats \| record]` | Inspect / record gate audit log |
 | `xp-gate ui-review` | Visual review for UI-bearing changes |
+| `xp-gate sprint-status [--json] [--watch] [--dir <path>]` | Show Sprint Flow progress (reads `.sprint-state/sprint-state.json`) |
 | `xp-gate --version` | Print version (sourced from VERSION file) |
 
 ## CONVENTIONS

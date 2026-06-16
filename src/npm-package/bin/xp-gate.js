@@ -121,6 +121,14 @@ const COMMANDS = {
     description: 'Check for xp-gate updates (--preview for JSON, --apply to upgrade)',
     run: subargs => upgrade(subargs).then(code => process.exit(code)),
     usage: 'xp-gate upgrade [--preview] [--apply]'
+  },
+  'sprint-status': {
+    description: 'Show Sprint Flow progress (reads .sprint-state/sprint-state.json)',
+    run: subargs => {
+      const { handleSprintStatus } = require('../lib/sprint-status.js');
+      handleSprintStatus(subargs).then(code => process.exit(code));
+    },
+    usage: 'xp-gate sprint-status [--json] [--watch] [--dir <path>]'
   }
 };
 

@@ -406,7 +406,7 @@ Sprint Flow: ISOLATE → AUTO-ESTIMATE → THINK → PLAN → BUILD → REVIEW �
 - Phase 2 BUILD 仍然执行完整 TDD + 盲评 + 验证
 
 ### Phase 0: THINK（需求探索与设计）
-- **Subagent dispatch**: orchestrator 通过 `task(category="deep", load_skills=["brainstorming"])` 启动独立 session
+- **Subagent dispatch**: orchestrator 通过 `task(category="unspecified-high", load_skills=[])` 启动独立 session
 - 输入: Phase -1 summary（worktree 路径）+ 用户原始需求
 - 输出: 结构化设计文档 → 直接作为 Phase 1 PLAN 的输入
 - **HARD-GATE**: 设计未批准 → 不可进入实现
@@ -655,7 +655,7 @@ Phase 2 第一步必须执行 DELPHI-GATE 检查。没有 delphi-review APPROVED
 |-------|------|:---------:|----------|-------------|--------|
 | -1 | ISOLATE | ❌ | Bash（直接执行） | 无 | orchestrator |
 | -0.5 | AUTO-ESTIMATE | ❌ | Bash（直接执行） | 无 | orchestrator |
-| 0 | THINK | ✅ | `deep` | `["brainstorming"]` | subagent |
+| 0 | THINK | ✅ | `unspecified-high` | `[]` | subagent |
 | 1 | PLAN | ✅ | `deep` | `["autoplan", "delphi-review", "to-issues"]` | subagent |
 | 2 | BUILD | ✅(已有) | ralph-loop | `["test-driven-development"]` | subagent |
 | 3 | REVIEW | ✅ | `deep` | `["delphi-review", "test-specification-alignment"]` | subagent |

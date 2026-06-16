@@ -24,6 +24,8 @@ else
       PRINCIPLES_DIR=".xp-gate/modules/principles"
     elif [ -f "src/principles/index.ts" ]; then
       PRINCIPLES_DIR="src/principles"
+    elif [ -d "$HOME/.config/xp-gate/modules/principles" ]; then
+      PRINCIPLES_DIR="$HOME/.config/xp-gate/modules/principles"
     fi
     
     if [ -n "$PRINCIPLES_DIR" ]; then
@@ -45,7 +47,7 @@ else
             echo "  - error-handling violations"
             echo "  - SOLID principle violations"
             echo "  - architectural violations"
-            npx tsx src/principles/index.ts --files $PRINCIPLES_FILES --format console
+            npx tsx $PRINCIPLES_DIR/index.ts --files $PRINCIPLES_FILES --format console
             GATE_4_STATUS="FAIL"
             exit 1
           fi
