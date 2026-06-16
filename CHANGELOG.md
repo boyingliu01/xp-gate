@@ -2,6 +2,11 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.8.14] - 2026-06-16
+
+### Changed
+- Version bump to 0.8.14 (0.8.13 already published, re-publishing with updated content).
+
 ## [0.8.13] - 2026-06-16
 
 ### Fixed

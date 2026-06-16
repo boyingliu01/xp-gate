@@ -18,9 +18,10 @@ async function runCmd(cmd: string, cwd: string): Promise<string> {
   try {
     const { stdout } = await execAsync(cmd, { cwd, timeout: 30000 })
     return stdout || "[XP-Gate] Command completed (no output)."
-  } catch (err: any) {
-    if (err.stderr) return err.stderr
-    if (err.message) return `[XP-Gate] Error: ${err.message}`
+  } catch (err: unknown) {
+    const error = err as { stderr?: string; message?: string }
+    if (error.stderr) return error.stderr
+    if (error.message) return `[XP-Gate] Error: ${error.message}`
     return "[XP-Gate] Command failed."
   }
 }
@@ -57,7 +58,7 @@ async function getUpgradeSuggestion(cwd: string): Promise<string> {
 }
 
 export const XpGatePlugin = async (input: OpenCodePluginInput) => {
-  const { directory, $ } = input
+  const { directory } = input
 
   return {
     tool: {
