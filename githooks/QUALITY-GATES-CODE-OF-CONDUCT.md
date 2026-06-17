@@ -82,8 +82,10 @@ git push      # pre-push 验证通过后才允许
 | Gate 3: 圈复杂度 | lizard | 降低复杂度 | ❌ 不允许 |
 | Gate 4: Principles | principles checker | 修复代码异味 | ❌ 不允许 |
 | Gate 5: 测试 + 覆盖率 | vitest/pytest/go test 等 | 增加测试覆盖 | ❌ 不允许 |
+| Gate 5a-BLOCK: 新增文件测试强制 | pre-commit (Gate 5 子检查) | 新增 .ts/.tsx 文件添加对应测试，或添加 `@no-test-required` 注解 | ❌ 不允许（新增文件 BLOCK，修改文件 WARNING） |
 | Gate 6: 架构 + 童子军 | archlint + boy-scout.ts | 修复架构/减少警告 | ❌ 不允许 |
 | Gate 7: 密钥扫描 | gitleaks/trufflehog | 移除密钥或使用环境变量 | ❌ 不允许 |
+| Pre-push Gate M2: Mock 密度 | inline in pre-push | 降低 mock 密度至 ≤30% (Phase 1 WARNING) 或添加 `@mock-justified` | ❌ 不允许（Phase 1 WARNING，Phase 2 将启用 BLOCK） |
 | Pre-push: Code Walkthrough | delphi-review | 修复专家提出的问题 | ❌ 不允许 |
 
 ---

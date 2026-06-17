@@ -264,7 +264,7 @@ isolation     pass          + CONTEXT    + delphi    (default)   + QA / web     
 | Gate 2 | 重复代码 (jscpd) | ≤5% 相似度 | 阻断提交 |
 | Gate 3 | 圈复杂度 (lizard) | ≤5 警告，≤10 阻断 | 警告/阻断 |
 | Gate 4 | Principles (14 条 Clean Code + SOLID) | 零错误 | 阻断提交 |
-| Gate 5 | 单元测试 + 覆盖率 | 全部通过 + ≥80% | 阻断提交 |
+| Gate 5 | 单元测试 + 覆盖率 | 全部通过 + ≥80% | 阻断提交。Gate 5a-BLOCK: 新增 .ts/.tsx 文件无测试则阻断 |
 | Gate 6 | 架构合规 + 童子军规则 | 无新增警告 | 阻断提交 |
 | Gate 7 | IaC 安全扫描 (checkov/hadolint/kube-score/tflint) | 无 High 级别风险 | 阻断提交 |
 | Gate 8 | 密钥扫描 (gitleaks) | 零泄漏 | 阻断提交 |
@@ -277,7 +277,7 @@ isolation     pass          + CONTEXT    + delphi    (default)   + QA / web     
 | 门禁 | 检查内容 | 阈值 | 失败行为 |
 |------|---------|------|---------|
 | Gate M | 增量变异测试 (Stryker, TS only) | 默认 60%，关键路径 80% | 阻断推送 |
-| Gate M2 | Mock 密度内联扫描 | mock 关键字密度 ≤50% 或带 `@mock-justified` | 阻断推送 |
+| Gate M2 | Mock 密度内联扫描 | mock 关键字密度 ≤30% (Phase 1 WARNING) 或带 `@mock-justified` | 阻断推送 |
 | Gate M3 | Mock 分层策略 (per-file validator) | 每层 mock 策略合规 | 阻断推送 |
 | Delphi 代码走查 | `.code-walkthrough-result.json` 校验 | 必须存在且未过期 (vs HEAD commit) | 阻断推送 |
 
