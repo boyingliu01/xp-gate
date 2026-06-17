@@ -3,12 +3,21 @@ const path = require('path');
 const https = require('https');
 const http = require('http');
 const { execSync } = require('child_process');
-const { checkDeps, detectPlatform } = require('./detect-deps.js');
+const { checkDeps } = require('./detect-deps.js');
 const { downloadFromGitHub } = require('./download-skill.js');
 const { rollback } = require('./rollback.js');
-const { HOME_DIR, CONFIG_DIR } = require('./shared-paths.js');
+const { HOME_DIR, CONFIG_DIR, detectPlatform } = require('./shared-paths.js');
 
-const SKILLS_DIR = path.join(HOME_DIR, '.config', 'opencode', 'skills');
+function getSkillsDir() {
+  const platform = detectPlatform();
+  if (platform === 'qoder') {
+    return path.join(HOME_DIR, '.qoder', 'skills');
+  }
+  if (platform === 'claude-code') {
+    return path.join(HOME_DIR, '.claude', 'skills');
+  }
+  return path.join(HOME_DIR, '.config', 'opencode', 'skills');
+}
 
 const SKILLS_REGISTRY = {
   'sprint-flow': { repo: 'boyingliu01/xp-gate', path: 'skills/sprint-flow' },
@@ -43,7 +52,7 @@ async function installSkill(name, options = {}) {
     return 1;
   }
   
-  const targetDir = path.join(SKILLS_DIR, name);
+  const targetDir = path.join(getSkillsDir(), name);
   if (fs.existsSync(targetDir) && !force) {
     console.error(`Error: ${name} is already installed`);
     console.error('Use --force to overwrite');

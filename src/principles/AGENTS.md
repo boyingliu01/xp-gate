@@ -1,9 +1,9 @@
 # PRINCIPLES CHECKER MODULE
 
 **Generated:** 2026-06-17
-**Commit:** 5a241f0
-**Branch:** main
-**Version:** 0.8.19.0
+**Commit:** 673e8cb
+**Branch:** fix/qoder-compat-227-228-229
+**Version:** 0.8.20.0
 
 ## OVERVIEW
 Clean Code & SOLID principles checker — **Gate 4** of pre-commit. 14 rules × 9 language adapters, SARIF 2.1.0 output. Houses the **Boy Scout Rule** enforcement engine (Gate 6) and warning-baseline storage.
