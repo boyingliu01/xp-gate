@@ -945,15 +945,52 @@ if [ "$PROJECT_LANG" = "documentation-only" ]; then
 
 else
   # ========================================================================
-  # Gate 5a: Test-Source File Pairing Check (WARNING only)
+  # Gate 5a: Test-Source File Pairing Check
+  # New .ts/.tsx files: BLOCK (no corresponding test → commit rejected)
+  # Modified files (any lang): WARNING (backward compatible)
+  # New non-TS files: WARNING (unchanged)
+  # Escape valve: SKIP_GATE_5A_BLOCK=1 (non-main/master only, audit logged)
+  # Grace period: .tdd-adoption.yaml gracePeriod: N (first N commits = WARNING only)
   # Checks coexistence, not temporal order. True "test-first" enforced by
   # Agent skills (Layer 1 + Layer 4).
   # ========================================================================
-  NEW_SOURCE_FILES=$(git diff --cached --name-only --diff-filter=A | grep -E '\.(ts|tsx|py|go|java|kt|kts|cpp|cc|cxx|c|swift|dart|rb|rs)$' | grep -v '__tests__' | grep -v '\.test\.' | grep -v '\.spec\.' | grep -v '__snapshots__' || true)
 
-  if [ -n "$NEW_SOURCE_FILES" ]; then
-    PAIRING_WARNINGS=0
-    for src_file in $NEW_SOURCE_FILES; do
+  # --- Pre-checks: grace period + escape valve ---
+  TDD_GRACE=0
+  if [ -f ".tdd-adoption.yaml" ]; then
+    TDD_ENABLED=$(grep -E '^\s*enabled:' .tdd-adoption.yaml | awk '{print $2}' || echo "true")
+    if [ "$TDD_ENABLED" != "false" ]; then
+      TDD_GRACE=$(grep -E '^\s*gracePeriod:' .tdd-adoption.yaml | awk '{print $2}' || echo "0")
+    fi
+  fi
+
+  TDD_BLOCK_DOWNGRADE=false
+  if [ "$TDD_GRACE" -gt 0 ] 2>/dev/null; then
+    TDD_BLOCK_DOWNGRADE=true
+  fi
+
+  SKIP_5A_BLOCK=false
+  if [ "${SKIP_GATE_5A_BLOCK:-0}" = "1" ]; then
+    CURRENT_BRANCH=$(git rev-parse --abbrev-ref HEAD)
+    if [ "$CURRENT_BRANCH" != "main" ] && [ "$CURRENT_BRANCH" != "master" ]; then
+      REASON="${SKIP_GATE_5A_BLOCK_REASON:-not specified}"
+      mkdir -p .xp-gate/reports
+      echo "{\"timestamp\":\"$(date -u +%Y-%m-%dT%H:%M:%SZ)\",\"branch\":\"$CURRENT_BRANCH\",\"user\":\"$(git config user.name)\",\"reason\":\"$REASON\",\"gate\":\"5a-block\"}" >> .xp-gate/reports/escape-valve-log.json
+      echo "⚠️  ESCAPE VALVE: SKIP_GATE_5A_BLOCK=1 on branch $CURRENT_BRANCH (reason: $REASON)"
+      echo "   ⚠️  Post-mortem issue required within 24h"
+      SKIP_5A_BLOCK=true
+    else
+      echo "❌ ESCAPE VALVE BLOCKED: SKIP_GATE_5A_BLOCK not allowed on main/master branch"
+      exit 1
+    fi
+  fi
+
+  # --- BLOCK path: New .ts/.tsx files without corresponding tests ---
+  NEW_TS_FILES=$(git diff --cached --name-only --diff-filter=A | grep -E '\.(ts|tsx)$' | grep -v '__tests__' | grep -v '\.test\.' | grep -v '\.spec\.' | grep -v '__snapshots__' || true)
+
+  if [ -n "$NEW_TS_FILES" ]; then
+    BLOCKED_TS_FILES=0
+    for src_file in $NEW_TS_FILES; do
       base="${src_file%.*}"
       ext="${src_file##*.}"
       filename="${base##*/}"
@@ -966,8 +1003,82 @@ else
       case "$ext" in
         d.ts|pyi) continue ;;
       esac
-      # Skip files with // @no-test annotation
-      if grep -q '@no-test' "$src_file" 2>/dev/null; then
+      # Skip files with @no-test-required or legacy @no-test annotation
+      if grep -qE '@no-test-required\s*:\s*.{10,}' "$src_file" 2>/dev/null || \
+         grep -q '@no-test' "$src_file" 2>/dev/null; then
+        continue
+      fi
+
+      # Check common test file patterns for TypeScript
+      TEST_FOUND=false
+      patterns=(
+        "${base}.test.${ext}"
+        "${base}.spec.${ext}"
+        "${dir}/__tests__/${filename}.test.${ext}"
+        "${dir}/__tests__/${filename}.spec.${ext}"
+        "tests/${filename}.test.${ext}"
+        "tests/${filename}.spec.${ext}"
+      )
+
+      for pattern in "${patterns[@]}"; do
+        if [[ "$pattern" == *'*'* ]]; then
+          found=$(find . -path "*/${pattern}" -type f 2>/dev/null | head -1)
+          if [ -n "$found" ]; then TEST_FOUND=true; break; fi
+        elif [ -f "$pattern" ]; then
+          TEST_FOUND=true
+          break
+        fi
+      done
+
+      if [ "$TEST_FOUND" = false ]; then
+        if [ "$SKIP_5A_BLOCK" = true ] || [ "$TDD_BLOCK_DOWNGRADE" = true ]; then
+          echo "⚠️  TEST PAIRING WARNING (downgraded): New TypeScript file without test: $src_file"
+          echo "   Expected: ${patterns[0]}, ${patterns[1]:-...}"
+          echo "   Or: Add '// @no-test-required: <reason>' if this file doesn't need tests"
+        else
+          echo "❌ BLOCKED: $src_file — New TypeScript source file without corresponding test"
+          echo "   Expected: ${patterns[0]}, ${patterns[1]:-...}"
+          echo "   Add '// @no-test-required: <reason>' if this file doesn't need tests"
+          BLOCKED_TS_FILES=$((BLOCKED_TS_FILES + 1))
+        fi
+      fi
+    done
+
+    if [ "$BLOCKED_TS_FILES" -gt 0 ]; then
+      echo ""
+      echo "❌ $BLOCKED_TS_FILES new TypeScript file(s) without corresponding tests — commit BLOCKED"
+      echo "   Add test files or '// @no-test-required: <reason>' annotation."
+      echo "   Escape valve: SKIP_GATE_5A_BLOCK=1 (non-main/master only)"
+      exit 1
+    fi
+  fi
+
+  # --- WARNING path: Modified files (any lang) + New non-TS files ---
+  WARNING_SOURCE_FILES=$(
+    {
+      git diff --cached --name-only --diff-filter=M | grep -E '\.(ts|tsx|py|go|java|kt|kts|cpp|cc|cxx|c|swift|dart|rb|rs)$' | grep -v '__tests__' | grep -v '\.test\.' | grep -v '\.spec\.' | grep -v '__snapshots__'
+      git diff --cached --name-only --diff-filter=A | grep -E '\.(py|go|java|kt|kts|cpp|cc|cxx|c|swift|dart|rb|rs)$' | grep -v '__tests__' | grep -v '\.test\.' | grep -v '\.spec\.' | grep -v '__snapshots__'
+    } | sort -u || true
+  )
+
+  if [ -n "$WARNING_SOURCE_FILES" ]; then
+    PAIRING_WARNINGS=0
+    for src_file in $WARNING_SOURCE_FILES; do
+      base="${src_file%.*}"
+      ext="${src_file##*.}"
+      filename="${base##*/}"
+      dir="$(dirname "$src_file")"
+
+      # Skip excluded files: index/barrel, types, interfaces, constants, declarations
+      case "$filename" in
+        index|types|interfaces|constants|__init__) continue ;;
+      esac
+      case "$ext" in
+        d.ts|pyi) continue ;;
+      esac
+      # Skip files with @no-test-required or legacy @no-test annotation
+      if grep -qE '@no-test-required\s*:\s*.{10,}' "$src_file" 2>/dev/null || \
+         grep -q '@no-test' "$src_file" 2>/dev/null; then
         continue
       fi
 
@@ -1045,18 +1156,18 @@ else
       done
 
       if [ "$TEST_FOUND" = false ]; then
-        echo "⚠️  TEST PAIRING WARNING: New source file without corresponding test: $src_file"
+        echo "⚠️  TEST PAIRING WARNING: Source file without corresponding test: $src_file"
         echo "   Expected patterns for .${ext}: ${patterns[0]}, ${patterns[1]:-...}"
-        echo "   Or: Add '// @no-test' annotation if this file doesn't need tests"
+        echo "   Or: Add '// @no-test-required: <reason>' annotation if this file doesn't need tests"
         PAIRING_WARNINGS=$((PAIRING_WARNINGS + 1))
       fi
     done
 
     if [ "$PAIRING_WARNINGS" -gt 0 ]; then
       echo ""
-      echo "⚠️  $PAIRING_WARNINGS new source file(s) without corresponding tests"
+      echo "⚠️  $PAIRING_WARNINGS source file(s) without corresponding tests"
       echo "   This is a WARNING — commit proceeds. TDD order enforced by Agent skills."
-      echo "   To suppress for specific files, add '// @no-test' at the top."
+      echo "   To suppress for specific files, add '// @no-test-required: <reason>' at the top."
     fi
   fi
 
