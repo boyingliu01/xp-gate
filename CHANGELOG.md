@@ -2,6 +2,23 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.8.21] - 2026-06-17
+
+### Refactored
+
+- **Sprint Flow SKILL.md 大幅精简 (-64%)** — `skills/sprint-flow/SKILL.md` 从 76KB/1,444 行减至 27.8KB/491 行。所有 Phase 详细指令提取到 `references/phase-*.md`（13 文件，120KB）。编排规则提取到 `references/orchestration-rules.md`（17KB）。移除重复内容：Anti-Patterns、Output Format、Security Notes、Scope。使用示例 11→3。Phase 2/6/7/8 引用文件精简为 `@see SKILL.md` 指针。完整验证：13 个参考文件 + 6 个模板全部就位。
+
+### Fixed
+
+- **#232 — npm-publish CI 在 squash-merge 后未触发** — `.github/workflows/npm-publish.yml` 移除 `paths: [VERSION]` 过滤器。根因：GH Actions `paths` 过滤在 squash-merge commit 上不可靠（PR #231/#233 均受影响）。已存在的"Check existing CLI version"步骤提供等效的防重复保护。
+
+### Changed
+
+- 镜像同步：精简后的 sprint-flow skill 同步到 claude-code / opencode / qoder 插件目录及 npm 包内
+- `@boyingliu01/xp-gate@0.8.21` 和 `@boyingliu01/opencode-plugin@0.8.21` 手动发布到 npm
+- Git tag `v0.8.21` 创建并推送，GitHub Release 已创建
+- `latest` dist-tag 修正为 0.8.21（CI 自动发布的 0.8.20 曾覆盖了 latest tag）
+
 ## [0.8.20] - 2026-06-17
 
 ### Fixed

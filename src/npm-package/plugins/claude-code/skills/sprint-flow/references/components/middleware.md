@@ -27,7 +27,7 @@ Phase 6: SHIP → finishing-a-development-branch → canary → Sprint Summary
 |-------|-----------|---------|---------|-------------|
 | Phase 0 | **HARD-GATE** | 设计未 APPROVED | 修改设计文档 | 设计 APPROVED 后继续 |
 | Phase 1 | taste_decisions | autoplan 发现未决议事项 | 用户确认每个决策 | 确认后自动继续 |
-| Phase 1 | delphi-review | 未 APPROVED（REQUEST_CHANGES） | 修复并重新评审 | APPROVED 后自动继续 |
+| Phase 1 | delphi-review | 最终 REQUEST_CHANGES（subagent 自动修复仍失败） | 修复并重新 dispatch | APPROVED 后自动继续 |
 | **Phase 2** | **DELPHI-GATE** | delphi-reviewed.json 不存在或 verdict != APPROVED | 返回 Phase 1 完成 delphi-review | APPROVED 后继续 |
 | Phase 2 | 验证失败 | 超过 max 3 次失败 | 用户决定修复或放弃 | 验证通过后自动继续 |
 | Phase 2 | 成本超阈值 | token 成本 > 阈值 | 用户决定继续或暂停 | 用户确认后自动继续 |
@@ -36,7 +36,10 @@ Phase 6: SHIP → finishing-a-development-branch → canary → Sprint Summary
 | **Phase 5** | **FEEDBACK 硬门禁** | Phase 4 完成后进入 | 执行 learn + retro → 生成 feedback-log.md | feedback-log.md 存在后继续 |
 | **Phase 6** | **Phase 5 门禁验证** | Phase 5 未完成 | 验证 feedback-log.md → 不存在 → 返回 Phase 5 | feedback-log.md 存在后继续 |
 | Phase 6 | finishing-a-branch | 分支收尾 | 用户 4 选 1 | 确认后自动继续 |
-| Phase 6 | ship PR | PR 路径需要合并 | 用户确认合并 | 合并后自动继续 |
+
+> **#218 变更**: Delphi review Round 1→2→3 的自动调度在 subagent 内部完成，不暂停。`delphi-review` 暂停点仅当 subagent 自动修复仍失败时才触发。
+> **#225 变更**: `taste_decisions` 暂停点由 orchestrator 直接执行 autoplan，不 dispatch 到 subagent。
+> **PR 确认冗余移除**: ship PR 创建后不再暂停确认 — 用户已通过 finishing-a-development-branch 选择了 PR 路径。
 
 ## 状态转换规则
 

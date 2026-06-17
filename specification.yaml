@@ -1,1293 +1,274 @@
-specification:
-  id: SPEC-QG-001
-  name: Quality Gate Enhancement + Gate 9 Architecture Quality
-  version: "2.0.0"
-  source_document: docs/quality-gate-enhancement-design-v1.0.md
-  delphi_status: APPROVED
-  gate_9_source: .sisyphus/plans/gate-9-architecture-quality.md
-  gate_9_delphi_status: APPROVED
-  
-  requirements:
-    # ============================================================
-    # Requirement 1: Language Coverage Extension
-    # ============================================================
-    - id: REQ-QG-001
-      description: Extend quality gate system to support all 6 primary languages used by the company
-      priority: MUST
-      context: |
-        Company uses multiple languages as primary development stack:
-        - Java (backend services)
-        - JavaScript/TypeScript (frontend)
-        - C++ (embedded/performance)
-        - Python (data/AI)
-        - Objective-C (iOS legacy)
-        - Kotlin (Android)
-      
-      acceptance_criteria:
-        # Pre-commit Hook Integration
-        - id: AC-QG-001-01
-          given: A Java project with pom.xml or build.gradle exists
-          when: User attempts to commit changes
-          then: Pre-commit hook runs CheckStyle + PMD v7 + SpotBugs analysis and blocks on failures
-        
-        - id: AC-QG-001-02
-          given: A Kotlin project with .kt files exists
-          when: User attempts to commit changes
-          then: Pre-commit hook runs detekt (PRIMARY) + ktlint (SUPPLEMENTAL) analysis
-        
-        - id: AC-QG-001-03
-          given: A C++ project with CMakeLists.txt or Makefile exists
-          when: User attempts to commit changes
-          then: Pre-commit hook runs clang-tidy (PRIMARY) + cppcheck (SUPPLEMENTAL) analysis
-        
-        - id: AC-QG-001-04
-          given: An Objective-C project with .m or .mm files exists
-          when: User attempts to commit changes
-          then: Pre-commit hook runs scan-build (PRIMARY) + oclint (SUPPLEMENTAL) analysis
-        
-        # Principles Checker Adapters
-        - id: AC-QG-001-05
-          given: A C++ source file (.cpp, .cxx, .cc, .c, .hpp, .h) is provided
-          when: Principles checker runs analysis
-          then: CppAdapter correctly extracts functions and classes using regex patterns
-        
-        - id: AC-QG-001-06
-          given: An Objective-C source file (.m, .mm) is provided
-          when: Principles checker runs analysis
-          then: ObjectiveCAdapter correctly extracts @implementation and method declarations
-        
-        # CCN Support
-        - id: AC-QG-001-07
-          given: Changed files include C++ (.cpp, .c) or Objective-C (.m, .mm) files
-          when: Gate 7 Cyclomatic Complexity check runs
-          then: lizard correctly analyzes complexity for all supported languages
-        
-        # Language Detection
-        - id: AC-QG-001-08
-          given: Project root contains .m or .mm files or .xcodeproj directory
-          when: Pre-commit hook determines project language
-          then: PROJECT_LANG is correctly set to "objectivec"
-        
-        - id: AC-QG-001-09
-          given: Project root contains pom.xml with .kt files
-          when: Pre-commit hook determines project language
-          then: PROJECT_LANG is correctly set to "kotlin"
-      
-      edge_cases:
-        - Mixed language projects (e.g., Java + Kotlin in same repo)
-        - Header files (.h) that could be C or C++
-        - Objective-C++ files (.mm) with C++ and ObjC mixed
-        
-      security_considerations:
-        - clang-tidy must not expose compile_commands.json contents
-        - scan-build output must be sanitized before display
-      
-      test_coverage_requirements:
-        unit: true
-        integration: true
-        threshold: 80
-      
-      gap_analysis:
-        java: "MEDIUM - adapter exists, needs pre-commit"
-        javascript: "LOW - via TypeScript adapter"
-        typescript: "NONE - fully supported"
-        cpp: "HIGH - no support before this enhancement"
-        python: "NONE - fully supported"
-        objectivec: "HIGH - no support before this enhancement"
-        kotlin: "MEDIUM - needs pre-commit integration"
-
-    # ============================================================
-    # Requirement 2: Boy Scout Rule Implementation
-    # ============================================================
-    - id: REQ-QG-002
-      description: Implement differential warning enforcement for historical projects (Boy Scout Rule)
-      priority: MUST
-      context: |
-        Boy Scout Rule: "Always leave the campground cleaner than you found it."
-        
-        Current gap:
-        - No file classification mechanism (new vs modified vs unchanged)
-        - No baseline storage (warning history per file)
-        - No warning delta tracking
-        - All-or-nothing enforcement (no differential)
-      
-      acceptance_criteria:
-        # File Classification
-        - id: AC-QG-002-01
-          given: Git staged changes include added (A) and modified (M) files
-          when: Boy Scout module runs file classification
-          then: classifyFiles correctly separates newFiles and modifiedFiles arrays
-        
-        # Baseline Storage
-        - id: AC-QG-002-02
-          given: A baseline file .warnings-baseline.json exists with previous warning counts
-          when: Boy Scout module loads baseline
-          then: loadBaseline returns Record<string, BaselineEntry> with correct data
-        
-        - id: AC-QG-002-03
-          given: Analysis results need to be stored
-          when: saveBaseline is called
-          then: .warnings-baseline.json is updated with new warning counts
-        
-        # New File Enforcement
-        - id: AC-QG-002-04
-          given: A new file (status=NEW) has currentWarnings > 0
-          when: calculateDelta processes the file
-          then: enforcement is BLOCK with reason "New files must have zero warnings"
-        
-        - id: AC-QG-002-05
-          given: A new file (status=NEW) has currentWarnings = 0
-          when: calculateDelta processes the file
-          then: enforcement is PASS with reason "New file with zero warnings"
-        
-        # Modified File Enforcement
-        - id: AC-QG-002-06
-          given: A modified file has currentWarnings > baselineWarnings (delta > 0)
-          when: calculateDelta processes the file
-          then: enforcement is BLOCK with reason about added warnings
-        
-        - id: AC-QG-002-07
-          given: A modified file has baselineWarnings <= 5 AND currentWarnings > 0
-          when: calculateDelta processes the file
-          then: enforcement is BLOCK with reason about clearing to zero
-        
-        - id: AC-QG-002-08
-          given: A modified file has currentWarnings < baselineWarnings (delta < 0)
-          when: calculateDelta processes the file
-          then: enforcement is PASS with reason about improvement
-        
-        # Baseline Initialization
-        - id: AC-QG-002-09
-          given: A historical project needs baseline initialization
-          when: initBaseline is called with file list
-          then: .warnings-baseline.json is created with current warning counts
-        
-        # Gate 8 Integration
-        - id: AC-QG-002-10
-          given: Pre-commit hook detects .warnings-baseline.json exists
-          when: Gate 8 Boy Scout Rule runs
-          then: boy-scout.ts CLI is invoked with correct parameters
-        
-        - id: AC-QG-002-11
-          given: Any file violates Boy Scout Rule
-          when: Gate 8 enforcement completes
-          then: Commit is blocked with detailed violation report
-        
-      edge_cases:
-        - Empty file list (no changes)
-        - Baseline file corrupted or invalid JSON
-        - Very large baseline file (>1000 entries)
-        - Concurrent baseline modifications
-        
-      security_considerations:
-        - Baseline file must not expose sensitive code information
-        - CLI arguments must be validated before processing
-      
-      test_coverage_requirements:
-        unit: true
-        integration: true
-        threshold: 80
-      
-      enforcement_rules:
-        new_files: "zero_tolerance"
-        modified_files: "decrease_or_maintain"
-        threshold_to_clear: 5
-        update_baseline_on_pass: true
-
-    # ============================================================
-    # Requirement 3: Gate 9 Architecture Quality Validation
-    # ============================================================
-    - id: REQ-ARCH-001
-      description: TypeScript projects must have architecture validation using archlint (@archlinter/cli) with version >= 2.0.0
-      priority: MUST
-      context: |
-        Gate 9 fills architecture-level quality check gap:
-        - Layer boundary violations (Domain importing Infrastructure)
-        - Dependency direction (Clean Architecture: outer → inner only)
-        - Circular dependencies across layers
-        
-        Tool: archlint (@archlinter/cli), NOT architecture-linter
-        - Package: @archlinter/cli
-        - CLI command: archlint
-        - Rust implementation: ~100ms performance
-      
-      acceptance_criteria:
-        - id: AC-ARCH-001-01
-          given: TypeScript project with tsconfig.json exists
-          when: Gate 9 runs in pre-commit
-          then: archlint command is checked for availability (exit 1 if missing)
-        
-        - id: AC-ARCH-001-02
-          given: archlint is installed
-          when: Version check runs
-          then: Version must be >= 2.0.0 (exit 1 if incompatible)
-        
-        - id: AC-ARCH-001-03
-          given: archlint version compatible
-          when: Architecture validation runs
-          then: archlint analyze --output sarif executes successfully
-        
-        - id: AC-ARCH-001-04
-          given: Baseline file exists (.architecture-baseline.json)
-          when: Architecture validation runs
-          then: Uses --baseline mode to check for new violations only
-      
-      architecture_rules:
-        - ARCH-001: Domain isolation (ERROR)
-        - ARCH-002: Application layer boundary (ERROR)
-        - ARCH-003: Presentation layer boundary (ERROR)
-        - ARCH-004: Infrastructure layer boundary (ERROR)
-        - ARCH-005: Cross-layer cycles (ERROR)
-    
-    - id: REQ-ARCH-002
-      description: Python projects must have architecture validation using Deply with version >= 0.8.0
-      priority: SHOULD
-      
-      acceptance_criteria:
-        - id: AC-ARCH-002-01
-          given: Python project with pyproject.toml and .import-linter.yml exists
-          when: Gate 9 runs in pre-commit
-          then: lint-imports command is checked for availability (exit 1 if missing)
-        
-        - id: AC-ARCH-002-02
-          given: import-linter is installed
-          when: Version check runs
-          then: Version must be >= 2.0.0 (exit 1 if incompatible)
-        
-        - id: AC-ARCH-002-03
-          given: import-linter version compatible
-          when: Architecture validation runs
-          then: lint-imports executes successfully
-    
-    - id: REQ-ARCH-003
-      description: Go projects must have architecture validation using arch-go >= 1.7.0
-      priority: SHOULD
-      
-      acceptance_criteria:
-        - id: AC-ARCH-003-01
-          given: Go project with go.mod and arch-go.yml exists
-          when: Gate 9 runs in pre-commit
-          then: arch-go check executes successfully
-        
-        - id: AC-ARCH-003-02
-          given: arch-go is installed
-          when: Version check runs
-          then: arch-go version must be >= 1.7.0
-    
-    - id: REQ-ARCH-004
-      description: Java projects must have architecture validation using ArchUnit via Maven
-      priority: SHOULD
-      
-      acceptance_criteria:
-        - id: AC-ARCH-004-01
-          given: Java project with pom.xml and src/test/java/architecture exists
-          when: Gate 9 runs in pre-commit
-          then: mvn test -Dtest=*ArchitectureTest executes successfully
-        
-        - id: AC-ARCH-004-02
-          given: Maven check runs
-          when: mvn command is detected
-          then: mvn must be available (exit 1 if missing)
-    
-    - id: REQ-ARCH-005
-      description: C++ projects must be detected and blocked until Phase 5 implementation or explicit skip marker
-      priority: MUST
-      
-      acceptance_criteria:
-        - id: AC-ARCH-005-01
-          given: C++ project with .cpp/.hpp files exists
-          when: Gate 9 runs in pre-commit
-          then: has_cpp_files() detects C++ files correctly
-        
-        - id: AC-ARCH-005-02
-          given: C++ files detected AND no .skip-architecture-cpp marker
-          when: Gate 9 runs
-          then: BLOCKED with exit 1 and clear error message
-        
-        - id: AC-ARCH-005-03
-          given: C++ files detected AND .skip-architecture-cpp marker exists
-          when: Gate 9 runs
-          then: Warning message shown, gate passes (exit 0)
-        
-        - id: AC-ARCH-005-04
-          given: .skip-architecture-cpp file exists
-          when: User reviews the project
-          then: File should be committed to repo (dot prefix indicates config)
-    
-    - id: REQ-ARCH-006
-      description: Gate 9 must support architecture.yaml configuration with layer definitions
-      priority: MUST
-      
-      acceptance_criteria:
-        - id: AC-ARCH-006-01
-          given: architecture.yaml exists in project root
-          when: Gate 9 runs
-          then: Configuration is loaded and used for validation
-        
-        - id: AC-ARCH-006-02
-          given: No architecture.yaml exists
-          when: Gate 9 runs
-          then: Gate skips with warning message (exit 0)
-    
-    - id: REQ-ARCH-007
-      description: Gate 9 must output SARIF 2.1.0 format for IDE/GitHub Actions integration
-      priority: MUST
-      
-      acceptance_criteria:
-        - id: AC-ARCH-007-01
-          given: Architecture violations found
-          when: archlint runs with --output sarif
-          then: SARIF JSON file is generated
-        
-        - id: AC-ARCH-007-02
-          given: SARIF output file exists
-          when: File is parsed
-          then: SARIF follows 2.1.0 schema
-    
-    - id: REQ-ARCH-008
-      description: Gate 9 must support baseline/ratchet mode for gradual adoption
-      priority: SHOULD
-      
-      acceptance_criteria:
-        - id: AC-ARCH-008-01
-          given: .architecture-baseline.json exists
-          when: Gate 9 runs
-          then: Only new violations are reported
-        
-        - id: AC-ARCH-008-02
-          given: Baseline mode enabled in config
-          when: New violation appears
-          then: Gate BLOCKS with exit 1
-    
-    - id: REQ-ARCH-009
-      description: Gate 9 must skip documentation-only projects without source code
-      priority: MUST
-      
-      acceptance_criteria:
-        - id: AC-ARCH-009-01
-          given: Documentation-only project detected
-          when: Gate 9 runs
-          then: Gate skips with warning (exit 0)
-
-  # ============================================================
-  # Design Decisions (from Delphi Review)
-  # ============================================================
-  design_decisions:
-    - id: DD-QG-001
-      description: Use clang-tidy as PRIMARY C++ checker, cppcheck as SUPPLEMENTAL
-      rationale: clang-tidy supports modern C++ (11/14/17/20/23), 200+ checks, auto-fixes. cppcheck is lightweight for fast preliminary scan.
-      alternatives_considered:
-        - "cppcheck only - lacks modern C++ support"
-        - "clang AST integration - requires libclang setup"
-    
-    - id: DD-QG-002
-      description: Use scan-build (Clang Static Analyzer) as PRIMARY ObjC checker
-      rationale: Apple standard, built into Xcode, path-sensitive analysis for iOS/macOS specific issues
-      alternatives_considered:
-        - "oclint only - metrics focused, limited detection"
-        - "External commercial tools - cost prohibitive"
-    
-    - id: DD-QG-003
-      description: Use CheckStyle + PMD v7 + SpotBugs for Java (company standard)
-      rationale: Company already uses these tools. PMD v7 brings 2-3x performance improvement. SpotBugs operates at bytecode level for bug detection.
-      alternatives_considered:
-        - "NullAway mandatory - may block initially, use as recommended"
-    
-    - id: DD-QG-004
-      description: Use regex-based extraction for C++/ObjC AST (Phase 1)
-      rationale: ast-grep does NOT support C++/Objective-C. Regex fallback allows basic rule checking (long-function, large-file, god-class). Phase 2 can integrate libclang for full AST.
-      alternatives_considered:
-        - "Wait for libclang - blocks Phase 1 delivery"
-        - "Skip C++/ObjC principles - incomplete coverage"
-    
-    - id: DD-QG-005
-      description: TypeScript/Bash bridge for Boy Scout CLI
-      rationale: TypeScript handles delta calculation logic cleanly. Bash handles git integration and file classification. npx tsx provides clean CLI interface.
-      alternatives_considered:
-        - "Pure Bash - complex JSON parsing"
-        - "Python module - adds dependency"
-    
-    - id: DD-QG-006
-      description: Zero-tolerance for PRIMARY tools, warn-only for SUPPLEMENTAL
-      rationale: Blocks on missing clang-tidy/scan-build/detekt. Warns on missing cppcheck/oclint/ktlint. Follows existing zero-tolerance principle.
-      alternatives_considered:
-        - "Relaxed mode - weak enforcement"
-        - "Skip missing tools silently - no user notification"
-    
-    - id: DD-ARCH-001
-      description: Use archlint (@archlinter/cli) as primary TypeScript architecture validation tool
-      rationale: |
-        - Built-in SARIF output for IDE/GitHub Actions integration
-        - CLI-first design perfect for pre-commit hooks
-        - Baseline/diff mode for gradual adoption
-        - Rust implementation provides fast performance (~100ms)
-        - Configurable layer rules
-      alternatives_considered:
-        - ArchUnitTS: Test-based, requires Jest/Vitest setup, no SARIF
-        - dependency-cruiser: Strong cycle detection but SARIF requires custom plugin
-        - architecture-linter (wrong package): Different tool, npm package exists but low usage
-    
-    - id: DD-ARCH-002
-      description: Create separate Gate 9 instead of extending Gate 6 Principles
-      rationale: |
-        - Clear separation: Gate 6 checks code quality, Gate 9 checks architecture quality
-        - Principles are code-level rules (long functions, god classes)
-        - Architecture is module-level rules (layer boundaries, dependency direction)
-      alternatives_considered:
-        - Extend Gate 6: Would mix code-level and module-level checks
-    
-    - id: DD-ARCH-003
-      description: Set baseline.enabled = false by default for new projects
-      rationale: |
-        - New projects should start with zero violations mindset
-        - Baseline mode is ONLY for historical projects
-      alternatives_considered:
-        - Baseline enabled by default: Creates technical debt mindset
-    
-    - id: DD-ARCH-004
-      description: C++ projects use hard fail with explicit skip marker (.skip-architecture-cpp)
-      rationale: |
-        - Zero tolerance principle: unsupported languages must be explicitly acknowledged
-        - Dot prefix indicates config file (should be committed to repo)
-      alternatives_considered:
-        - Soft warning: Would violate zero tolerance principle
-    
-    - id: DD-ARCH-005
-      description: Add version checks for all language tools (TypeScript, Python, Go)
-      rationale: |
-        - CLI interfaces differ across versions
-        - Ensures compatibility before execution
-    
-    - id: DD-ARCH-006
-      description: Use robust version parsing with grep -oE and cut -d.
-      rationale: |
-        - Handles various version formats (v2.0.0, 2.0.0, archlint 2.0.0)
-        - More reliable than simple regex matching
-
-  # ============================================================
-  # API Contracts
-  # ============================================================
-  api_contracts:
-    - interface: boy-scout.ts CLI
-      commands:
-        - command: "npx tsx src/principles/boy-scout.ts --new-files <files> --modified-files <files> --baseline <path>"
-          input:
-            new_files: "comma-separated file paths"
-            modified_files: "comma-separated file paths"
-            baseline: ".warnings-baseline.json path"
-          output:
-            format: "JSON"
-            fields:
-              - "overallStatus: PASS | BLOCK"
-              - "violations: DeltaResult[]"
-              - "summary: { totalFiles, passedFiles, blockedFiles }"
-            exit_code:
-              pass: 0
-              block: 1
-        
-        - command: "npx tsx src/principles/boy-scout.ts --init-baseline [files]"
-          input:
-            files: "optional comma-separated file paths (defaults to all source files)"
-          output:
-            file: ".warnings-baseline.json created"
-            console: "Files scanned, files with warnings, total warnings"
-
-    - interface: DeltaResult
-      type: "object"
-      fields:
-        - name: "file"
-          type: "string"
-          description: "File path"
-        - name: "status"
-          type: "'NEW' | 'MODIFIED' | 'UNCHANGED'"
-          description: "File change status"
-        - name: "baselineWarnings"
-          type: "number"
-          description: "Warning count from baseline"
-        - name: "currentWarnings"
-          type: "number"
-          description: "Current warning count"
-        - name: "delta"
-          type: "number"
-          description: "currentWarnings - baselineWarnings"
-        - name: "enforcement"
-          type: "'PASS' | 'BLOCK'"
-          description: "Enforcement decision"
-        - name: "reason"
-          type: "string"
-          description: "Explanation of enforcement decision"
-
-  # ============================================================
-  # Tool Matrix
-  # ============================================================
-  tool_matrix:
-    java:
-      primary: ["CheckStyle", "PMD v7", "SpotBugs"]
-      supplemental: ["NullAway"]
-      notes: "Company existing tools, PMD v7 upgrade required for 2-3x speed"
-    
-    kotlin:
-      primary: ["detekt"]
-      supplemental: ["ktlint"]
-      notes: "detekt for 200+ rules, ktlint for formatting only"
-    
-    cpp:
-      primary: ["clang-tidy"]
-      supplemental: ["cppcheck"]
-      notes: "clang-tidy for modern C++, cppcheck for fast preliminary scan"
-    
-    objectivec:
-      primary: ["scan-build (Clang Static Analyzer)"]
-      supplemental: ["oclint"]
-      notes: "scan-build built into Xcode, oclint for metrics only"
-    
-    python:
-      primary: ["Ruff"]
-      supplemental: ["mypy"]
-      notes: "Ruff 100x faster than flake8, already optimal"
-    
-    go:
-      primary: ["golangci-lint"]
-      supplemental: []
-      notes: "60+ linters combined, already optimal"
-    
-    typescript:
-      primary: ["ESLint"]
-      supplemental: ["tsc --noEmit"]
-      notes: "Standard, already supported"
-
-  # ============================================================
-  # Quality Gate Structure
-  # ============================================================
-  gates:
-    - gate: 1
-      name: "Static Analysis"
-      description: "Language-specific static analysis tools"
-      mandatory: true
-    
-    - gate: 2
-      name: "Additional Linting"
-      description: "Optional additional lint via pre-commit config"
-      mandatory: false
-    
-    - gate: 3
-      name: "Unit Tests"
-      description: "Run unit tests via language-specific test runner"
-      mandatory: true
-    
-    - gate: 4
-      name: "Coverage"
-      description: "Check test coverage >= 80%"
-      mandatory: true
-    
-    - gate: 5
-      name: "Shell Check"
-      description: "Shell script quality via shellcheck"
-      mandatory: true
-    
-    - gate: 6
-      name: "Principles Checker"
-      description: "Clean Code & SOLID principles validation"
-      mandatory: true
-    
-    - gate: 7
-      name: "Cyclomatic Complexity"
-      description: "CCN threshold check (warning: 5, block: 10)"
-      mandatory: true
-    
-    - gate: 8
-      name: "Boy Scout Rule"
-      description: "Differential warning enforcement"
-      mandatory: true
-      condition: "Only when .warnings-baseline.json exists"
-    
-    - gate: 9
-      name: "Architecture Quality"
-      description: "Clean Architecture layer validation with archlint"
-      mandatory: true
-      condition: "Only when architecture.yaml exists"
-      tools:
-        typescript: "archlint (@archlinter/cli)"
-        python: "Deply"
-        go: "go test -run Architecture"
-        java: "ArchUnit (mvn test)"
-        cpp: "Phase 5 future work (hard fail + skip marker)"
-      rules:
-        - ARCH-001: Domain isolation (ERROR)
-        - ARCH-002: Application boundary (ERROR)
-        - ARCH-003: Presentation boundary (ERROR)
-        - ARCH-004: Infrastructure boundary (ERROR)
-        - ARCH-005: Cross-layer cycles (ERROR)
-
-  # ============================================================
-  # REQ-QG-003: Gate Activation Verification (ref: docs/incidents/test-spec-blind-spot-analysis.md)
-  # ============================================================
-  - id: REQ-QG-003
-    title: Gate Activation Verification
-    description: |
-      Ensure all mandatory quality gates are ACTIVE (not SKIP) when their required
-      tools and configurations are present. This prevents the "coded but not activated"
-      class of defects where gate code exists but outputs SKIP because dependencies
-      (config files, tools, adapters) were never installed.
-    priority: Critical
-    status: implemented
-    source_document: docs/incidents/test-spec-blind-spot-analysis.md
-
-    acceptance_criteria:
-      - id: AC-GATE-ACTIVATION-01
-        given: The project has all required gate tools installed and configured
-        when: git commit is executed
-        then: >
-          Gate 1 (ESLint) outputs "✅ PASSED - ESLint linting" (not "No ESLint configuration found - Skipping")
-      - id: AC-GATE-ACTIVATION-02
-        given: lizard is installed and available in PATH or ~/.local/bin/lizard
-        when: git commit is executed with source file changes
-        then: >
-          Gate 3 (Cyclomatic Complexity) outputs "✅ PASSED" with complexity data (not "SKIP, tool not available")
-      - id: AC-GATE-ACTIVATION-03
-        given: vitest with @vitest/coverage-v8 is installed and test:coverage script exists
-        when: git commit is executed
-        then: >
-          Gate 5 (Coverage) produces a non-zero coverage percentage (not silent PASS with 0% or N/A%)
-      - id: AC-GATE-ACTIVATION-04
-        given: Any mandatory gate outputs "SKIP" for a tool that IS installed and configured
-        when: Pre-commit hook completes
-        then: The hook must emit a warning message indicating the gate was skipped despite tool availability
-      - id: AC-GATE-ACTIVATION-05
-        given: A pre-commit hook run completes
-        when: The quality report is generated
-        then: >
-          No mandatory gate shows status "SKIP" unless the corresponding tool is genuinely unavailable
-          (per QUALITY-GATES-CODE-OF-CONDUCT.md: zero-tolerance, tool unavailable = BLOCK)
-
-    dependents:
-      - REQ-QG-001 (Quality Gate Extension)
-      - REQ-QG-002 (Boy Scout Rule)
-
-    test_coverage_requirements:
-      unit: true
-      integration: true
-      e2e: true
-      threshold: 80
-
-  # ============================================================
-  # Requirement 4: Gate M — Mutation Testing Quality Gate (Pre-Push)
-  # Source: docs/plans/2026-05-16-gate8-mutation-testing-precommit.md
-  # Delphi Status: APPROVED (Round 2)
-  # ============================================================
-  - id: REQ-MUT-001
-    title: Gate M Mutation Testing Quality Gate
-    description: |
-      Implement a pre-push quality gate that uses Stryker mutation testing to validate
-      test effectiveness beyond code coverage. The gate runs incrementally on changed files
-      with a 120s timeout, compares against local baseline, and blocks push if mutation
-      score falls below configurable thresholds.
-    priority: MUST
-    status: planned
-    source_document: docs/plans/2026-05-16-gate8-mutation-testing-precommit.md
-
-    acceptance_criteria:
-      - id: AC-MUT-001-01
-        given: A new source file with mutation score 65%
-        when: Pre-push Gate M runs
-        then: Push is allowed (score >= default threshold 60%)
-
-      - id: AC-MUT-001-02
-        given: A new source file with mutation score 55%
-        when: Pre-push Gate M runs
-        then: Push is BLOCKED (score < default threshold 60%)
-
-      - id: AC-MUT-001-03
-        given: A critical-path source file with mutation score 75%
-        when: Pre-push Gate M runs
-        then: Push is BLOCKED (score < critical threshold 80%)
-
-      - id: AC-MUT-001-04
-        given: A modified source file with baseline score 60% and new score 58%
-        when: Pre-push Gate M runs
-        then: Push is BLOCKED (score below baseline, regression not allowed)
-
-      - id: AC-MUT-001-05
-        given: A modified source file with baseline score 60% and new score 62%
-        when: Pre-push Gate M runs
-        then: Push is allowed (score improved above baseline)
-
-      - id: AC-MUT-001-06
-        given: A large commit with >10 changed files causing Stryker to exceed 120s timeout
-        when: Pre-push Gate M runs
-        then: Warning is emitted, push is allowed (timeout does not block)
-
-      - id: AC-MUT-001-07
-        given: A test file missing @intent JSDoc annotation
-        when: Pre-push Gate M runs test intent check
-        then: Warning is emitted, push is not blocked
-
-      - id: AC-MUT-001-08
-        given: No source files are in the current push
-        when: Pre-push Gate M runs
-        then: Gate M is SKIPPED with pass status
-
-      - id: AC-MUT-001-09
-        given: First-time setup with no local baseline
-        when: Developer runs npm run mutation:baseline:init
-        then: .mutation-baseline.json is generated locally (gitignored)
-
-      - id: AC-MUT-001-10
-        given: A test file with explicit @mutation-threshold: 75 and source score 70%
-        when: Pre-push Gate M runs
-        then: Push is BLOCKED (score < declared threshold 75%)
-
-    edge_cases:
-      - Stryker process killed by timeout (exit code 124) with incomplete report
-      - Baseline file corrupted or malformed JSON
-      - Source file exists but corresponding test file does not
-      - Mixed human-written and AI-generated tests in same file (threshold ambiguity)
-      - Stryker config missing or invalid (dry-run validation fails)
-      - CI baseline download fails (network issue, fallback to local or threshold-only)
-
-    security_considerations:
-      - Stryker report output must not contain source code snippets in CI artifacts
-      - Baseline file must not expose sensitive file paths or internal structure
-      - timeout command must not leak partial Stryker state on interruption
-
-    test_coverage_requirements:
-      unit: true
-      integration: true
-      threshold: 80
-
-  # ============================================================
-  # Success Metrics
-  # ============================================================
-  success_metrics:
-    language_extension:
-      languages_supported: 6
-      pre_commit_coverage: "100% for primary languages"
-      principles_coverage: "100% for primary languages"
-      ccn_coverage: "100% for primary languages"
-    
-    boy_scout_rule:
-      new_files_blocked: "100% when warnings > 0"
-      modified_files_blocked: "100% when delta > 0"
-      legacy_files_cleared: "tracking enabled"
-      baseline_storage_overhead: "<50KB for medium projects"
-
-  # ============================================================
-  # Configuration
-  # ============================================================
-  configuration:
-    principlesrc:
-      boyScoutRule:
-        enabled: true
-        baselineFile: ".warnings-baseline.json"
-        thresholdToClear: 5
-        newFilePolicy: "zero-tolerance"
-        modifiedFilePolicy: "decrease-or-maintain"
-        updateBaselineOnPass: true
-      
-      thresholds:
-        long_function: 50
-        god_class: 15
-        deep_nesting: 4
-        ccn_warning: 5
-        ccn_block: 10
-      
-      coverage:
-        branches: 80
-        functions: 80
-        lines: 80
-        statements: 80
-      
-      architecture:
-        baselineFile: ".architecture-baseline.json"
-        baselineEnabled: false
-        configFile: "architecture.yaml"
-        outputFormat: "sarif"
-        layers:
-          domain: "src/domain/**"
-          application: "src/application/**"
-          infrastructure: "src/infrastructure/**"
-          presentation: "src/presentation/**"
-        rules:
-          ARCH-001: { enabled: true, severity: error }
-          ARCH-002: { enabled: true, severity: error }
-          ARCH-003: { enabled: true, severity: error }
-          ARCH-004: { enabled: true, severity: error }
-          ARCH-005: { enabled: true, severity: error }
-          ARCH-006: { enabled: false }
-          ARCH-007: { enabled: false }
-          ARCH-008: { enabled: false }
-          ARCH-009: { enabled: false }
-          ARCH-010: { enabled: false }
-          ARCH-011: { enabled: false }
-          ARCH-012: { enabled: false }
-          ARCH-013: { enabled: false }
-          ARCH-014: { enabled: false }
-
 ---
 specification:
-  id: SPEC-AUTO-UPDATE-001
-  name: XP-Gate Auto-Update Mechanism
+  id: SPEC-SLIM-001
+  name: Sprint-Flow Skill Slimming
   version: "1.0.0"
-  source_document: docs/plans/2026-06-15-xp-gate-auto-update-design.md
+  source_document: docs/plans/2026-06-17-sprint-flow-skill-slimming-design.md
   delphi_status: APPROVED
-  sprint: sprint/2026-06-15-01
-  version_bump: 0.8.12.0 → 0.8.13.0
+  delphi_rounds: 4
+  delphi_consensus: "3/3"
 
   requirements:
     # ============================================================
-    # REQ-AUTO-001: Shared Version Check Module
-    # Issues: #212, #215, #216
+    # REQ-SLIM-001: Phase 0 — Pre-fix document integrity
     # ============================================================
-    - id: REQ-AUTO-001
-      description: Create check-version.js shared module for version comparison
+    - id: REQ-SLIM-001
+      description: Fix document integrity issues before slimming — create missing references/ files and fix broken indexes
       priority: MUST
       context: |
-        Zero-runtime-dependency module (Node built-in: https + fs + path).
-        Single source of truth for all version checking logic across CLI, doctor, and plugins.
-        
-        API:
-        - getLocalVersion() → "0.8.12" | null
-        - getRemoteVersion(pkgName) → { latest, publishedAt } | null
-        - checkUpgrade(pkgName) → { outdated, local, remote, lagDays }
-        - formatUpgradeMsg(result, context) → string (context: 'cli' | 'doctor' | 'plugin')
-        
-        Key behaviors:
-        - https.get to https://registry.npmjs.org/-/package/@boyingliu01/xp-gate/dist-tags
-        - 5 second timeout, failure → null (non-blocking)
-        - In-memory cache for 5 minutes
-        - HTTP status code check: non-200 → null
-        - dist-tags 'latest' key existence check: missing → null
+        SKILL.md line 1306 references @references/phase-minus-1-isolate.md which does NOT exist on disk.
+        SKILL.md References section (lines 1305-1313) is missing entries:
+          - phase-7-land.md
+          - phase-8-cleanup.md
+          - phase-minus-0-5-auto-estimate.md
+          - phase-minus-1-isolate.md (referenced but file doesn't exist)
+        AGENTS.md STRUCTURE tree (lines 21-34) is missing entries:
+          - phase-7-land.md
+          - phase-8-cleanup.md
 
       acceptance_criteria:
-        - id: AC-AUTO-001-01
-          given: npm package is installed globally
-          when: getLocalVersion() is called
-          then: Returns the version string from package.json (e.g. "0.8.12")
+        - id: AC-SLIM-001-01
+          given: references/phase-minus-1-isolate.md does not exist
+          when: Phase 0 completes
+          then: references/phase-minus-1-isolate.md is created containing Phase -1 instructions
 
-        - id: AC-AUTO-001-02
-          given: npm package is NOT installed
-          when: getLocalVersion() is called
-          then: Returns null
+        - id: AC-SLIM-001-02
+          given: SKILL.md References section is missing entries
+          when: Phase 0 completes
+          then: References section includes phase-minus-1-isolate, phase-7-land, phase-8-cleanup, phase-minus-0-5-auto-estimate
 
-        - id: AC-AUTO-001-03
-          given: npm registry is reachable
-          when: getRemoteVersion() is called
-          then: Returns object with latest version string and publishedAt timestamp
-
-        - id: AC-AUTO-001-04
-          given: npm registry returns non-200 status code
-          when: getRemoteVersion() is called
-          then: Returns null (non-blocking)
-
-        - id: AC-AUTO-001-05
-          given: npm registry dist-tags lacks 'latest' key
-          when: getRemoteVersion() is called
-          then: Returns null (non-blocking)
-
-        - id: AC-AUTO-001-06
-          given: npm registry times out after 5 seconds
-          when: getRemoteVersion() is called
-          then: Returns null (non-blocking)
-
-        - id: AC-AUTO-001-07
-          given: Local version is 0.8.12 and remote is 0.8.13
-          when: checkUpgrade() is called
-          then: Returns { outdated: true, local: "0.8.12", remote: "0.8.13", lagDays: <number> }
-
-        - id: AC-AUTO-001-08
-          given: Local version equals remote version
-          when: checkUpgrade() is called
-          then: Returns { outdated: false, local, remote, lagDays: 0 }
-
-        - id: AC-AUTO-001-09
-          given: formatUpgradeMsg() with outdated=true and context='cli'
-          when: Called
-          then: Returns CLI-friendly message with GitHub release link
-
-        - id: AC-AUTO-001-10
-          given: formatUpgradeMsg() with outdated=false and context='cli'
-          when: Called
-          then: Returns "up to date" message
-
-        - id: AC-AUTO-001-11
-          given: getRemoteVersion() succeeds, then called again within 5 minutes
-          when: Second call
-          then: Returns cached result (no new network request)
-
-        - id: AC-AUTO-001-12
-          given: --apply succeeds (upgrade completed)
-          when: Next cache access
-          then: Cache is cleared, fresh network request made
-
-      edge_cases:
-        - npm registry network timeout
-        - npm registry returns non-JSON response
-        - Remote version string is invalid semver (e.g. "latest")
-        - Local package.json is malformed
-
-      test_coverage_requirements:
-        unit: true
-        integration: true
-        threshold: 80
+        - id: AC-SLIM-001-03
+          given: AGENTS.md STRUCTURE tree is missing entries
+          when: Phase 0 completes
+          then: STRUCTURE tree includes phase-7-land.md, phase-8-cleanup.md
 
     # ============================================================
-    # REQ-AUTO-002: CLI upgrade command
-    # Issue: #215
+    # REQ-SLIM-002: Phase 1 — Deduplication
     # ============================================================
-    - id: REQ-AUTO-002
-      description: Create xp-gate upgrade CLI command
+    - id: REQ-SLIM-002
+      description: Remove duplicate content from SKILL.md — 3x Anti-Patterns, 2x Security Notes, 2x Output Format, YAML/body overlap, 11 examples
       priority: MUST
       context: |
-        Commands:
-        - xp-gate upgrade: check + human-readable output
-        - xp-gate upgrade --preview: JSON output for plugin consumption
-        - xp-gate upgrade --apply: check + auto-upgrade via npm install -g
-        
-        Output formats:
-        - upgrade (up-to-date): "✓ xp-gate v0.8.12 is up to date"
-        - upgrade (outdated): "A newer version v0.8.13 is available (<releaseUrl>) — run: xp-gate upgrade --apply"
-        - upgrade --preview: {"local":"0.8.12","remote":"0.8.13","outdated":true,"lagDays":3,"releaseUrl":"...","publishedAt":"..."}
-        - upgrade --apply (permission denied): "Permission denied. Try: sudo npm install -g @boyingliu01/xp-gate"
+        Measured duplicates:
+        - 3x Anti-Patterns at lines 1222, 1327, 1385 — keep 1 (line 1222, most comprehensive)
+        - 2x Security Notes at lines 144, 1291 — keep 1 (line 144, shorter)
+        - 2x Output Format at lines 1342, 1400 — keep 1 (line 1342, with phase_history)
+        - YAML frontmatter (lines 1-52) overlaps body Triggers/Scope/Examples/Params
+        - 11 usage examples → slim to 3
 
       acceptance_criteria:
-        - id: AC-AUTO-002-01
-          given: xp-gate upgrade is run and already up to date
-          when: Command executes
-          then: Exits with 0, outputs current version message
-
-        - id: AC-AUTO-002-02
-          given: xp-gate upgrade is run and a newer version exists
-          when: Command executes
-          then: Exits with 0, outputs upgrade message with GitHub release link
-
-        - id: AC-AUTO-002-03
-          given: xp-gate upgrade --preview is run
-          when: Command executes
-          then: Exits with 0, outputs single-line JSON with releaseUrl and publishedAt
-
-        - id: AC-AUTO-002-04
-          given: xp-gate upgrade --apply is run and newer version exists
-          when: Command executes
-          then: Executes npm install -g @boyingliu01/xp-gate
-
-        - id: AC-AUTO-002-05
-          given: xp-gate upgrade --apply encounters EACCES error
-          when: npm install fails with permission denied
-          then: Shows friendly error with sudo hint
-
-        - id: AC-AUTO-002-06
-          given: xp-gate upgrade command is registered
-          when: xp-gate --help is run
-          then: upgrade appears in command list
-
-        - id: AC-AUTO-002-07
-          given: xp-gate upgrade is run and registry is unreachable
-          when: Network fails
-          then: Shows "Unable to check for updates (network issue)"
-
-      edge_cases:
-        - npm command not found on PATH
-        - sudo required for global install
-        - Registry returns 404 or 500
-
-      test_coverage_requirements:
-        unit: true
-        integration: true
-        threshold: 80
+        - id: AC-SLIM-002-01
+          given: 3 Anti-Patterns sections exist
+          when: Phase 1 completes
+          then: Exactly 1 Anti-Patterns section remains
+        - id: AC-SLIM-002-02
+          given: 2 Security Notes sections exist
+          when: Phase 1 completes
+          then: Exactly 1 Security Notes section remains
+        - id: AC-SLIM-002-03
+          given: 2 Output Format sections exist
+          when: Phase 1 completes
+          then: Exactly 1 Output Format section remains
+        - id: AC-SLIM-002-04
+          given: Body Triggers/Scope/Examples duplicate YAML frontmatter
+          when: Phase 1 completes
+          then: Body sections removed; canonical info in frontmatter only
+        - id: AC-SLIM-002-05
+          given: 11 usage examples exist
+          when: Phase 1 completes
+          then: Exactly 3 examples remain (full-sprint, --stop-at, --resume-from)
 
     # ============================================================
-    # REQ-AUTO-003: Doctor version check integration
-    # Issue: #216
+    # REQ-SLIM-003: Phase 2 — Phase instructions → references/
     # ============================================================
-    - id: REQ-AUTO-003
-      description: Integrate version check into doctor.js output
-      priority: SHOULD
-      context: |
-        Append to doctor.js output:
-        [Version Check]
-          Local:  v0.8.12
-          Remote: v0.8.13 ← NEW (see: <releaseUrl>)
-          Run: xp-gate upgrade --apply
-        
-        Auto-detect for first-time users: doctor runs checkUpgrade()
-        on every invocation, displays upgrade hint when outdated=true.
-
-      acceptance_criteria:
-        - id: AC-AUTO-003-01
-          given: xp-gate doctor is run and version is current
-          when: Command executes
-          then: Output includes version check section showing both versions are same
-
-        - id: AC-AUTO-003-02
-          given: xp-gate doctor is run and newer version exists
-          when: Command executes
-          then: Output includes version check with upgrade hint and release URL
-
-      test_coverage_requirements:
-        unit: true
-        integration: true
-        threshold: 80
-
-    # ============================================================
-    # REQ-AUTO-004: OpenCode Plugin auto-update checker
-    # Issue: #212
-    # ============================================================
-    - id: REQ-AUTO-004
-      description: Add auto-update version check to OpenCode plugin
-      priority: SHOULD
-      context: |
-        Strategy: lazy check on first tool invocation.
-        Decorates each tool handler with version check via execSync('xp-gate upgrade --preview').
-        
-        Notification rules:
-        - <1 day lag: silent
-        - 1-7 days: tool response appends "Upgrade: v{remote} available — run: xp-gate upgrade --apply"
-        - >7 days: strong warning with both local and remote versions
-        - Registry unreachable: silent fallback
-        
-        execSync error handling:
-        - ENOENT (CLI not installed): "xp-gate CLI not found — install with: npm install -g @boyingliu01/xp-gate"
-        - Other errors: silent (return null)
-
-      acceptance_criteria:
-        - id: AC-AUTO-004-01
-          given: OpenCode plugin loads and xp-gate CLI is installed
-          when: First tool is invoked
-          then: execSync('xp-gate upgrade --preview') is called
-
-        - id: AC-AUTO-004-02
-          given: Version check succeeds and lag is 1-7 days
-          when: Tool handler returns response
-          then: Response appends upgrade notification message
-
-        - id: AC-AUTO-004-03
-          given: Version check succeeds and lag is >7 days
-          when: Tool handler returns response
-          then: Response appends strong upgrade warning
-
-        - id: AC-AUTO-004-04
-          given: Version check succeeds and lag is <1 day
-          when: Tool handler returns response
-          then: No notification appended
-
-        - id: AC-AUTO-004-05
-          given: execSync fails with ENOENT (CLI not installed)
-          when: Tool handler runs
-          then: Shows CLI install hint, does not crash
-
-        - id: AC-AUTO-004-06
-          given: execSync fails with other error
-          when: Tool handler runs
-          then: Silent fallback (return null, no notification)
-
-        - id: AC-AUTO-004-07
-          given: Version check result is cached (within 5 min)
-          when: Same session second tool invocation
-          then: No new execSync call
-
-      edge_cases:
-        - xp-gate CLI not installed on user system
-        - execSync timeout
-        - --preview JSON malformed
-
-      test_coverage_requirements:
-        unit: true
-        integration: true
-        threshold: 80
-
-    # ============================================================
-    # REQ-AUTO-005: Claude Code Plugin auto-update checker
-    # Issue: #212
-    # ============================================================
-    - id: REQ-AUTO-005
-      description: Add auto-update version check to Claude Code plugin via PostToolUse hook
-      priority: SHOULD
-      context: |
-        New file: plugins/claude-code/bin/xp-gate-version-check.sh
-        Modified: plugins/claude-code/hooks/hooks.json — add PostToolUse entry with matcher ".*"
-        
-        Hook script:
-        - Calls xp-gate upgrade --preview
-        - Checks cached version via temp file /tmp/.xp-gate-version-checked
-        - Temp file format: <remote_version>\n<timestamp_ms>
-        - Cache TTL: 5 minutes (expired cache treated as non-existent)
-        - If outdated: outputs console.warn message
-
-      acceptance_criteria:
-        - id: AC-AUTO-005-01
-          given: Claude Code plugin is loaded and xp-gate CLI is installed
-          when: Any PostToolUse hook fires
-          then: bash script calls xp-gate upgrade --preview
-
-        - id: AC-AUTO-005-02
-          given: Version check finds outdated version >1 day
-          when: Script runs
-          then: console.warn output with upgrade notification
-
-        - id: AC-AUTO-005-03
-          given: Version check succeeds and lag is <1 day
-          when: Script runs
-          then: No warning output
-
-        - id: AC-AUTO-005-04
-          given: Same version checked within 5 minutes
-          when: Script runs again
-          then: Skips execSync call (uses temp file cache)
-
-        - id: AC-AUTO-005-05
-          given: CL execSync fails (CLI not installed or network error)
-          when: Script runs
-          then: Silent fallback, does not crash hooks
-
-      edge_cases:
-        - Temp file write permission denied
-        - Temp file content corrupted
-        - Multiple concurrent Claude Code sessions
-
-      test_coverage_requirements:
-        unit: true
-        integration: true
-        threshold: 80
-
-    # ============================================================
-    # REQ-AUTO-006: Post-merge hook for auto sync-version
-    # Issue: #207
-    # ============================================================
-    - id: REQ-AUTO-006
-      description: Create post-merge git hook to auto-run sync-version.sh on VERSION change
+    - id: REQ-SLIM-003
+      description: Move Phase execution instructions from SKILL.md to references/ files, leaving 3-5 line summaries
       priority: MUST
       context: |
-        New file: githooks/post-merge
-        Modified: githooks/install.sh (add post-merge to HOOKS_LIST)
-        npm copy: src/npm-package/hooks/post-merge (copied from githooks/)
-        
-        Behavior:
-        1. Check if xp-gate project: scripts/sync-version.sh exist check
-        2. Use ORIG_HEAD (not HEAD) to detect VERSION file change during merge
-           Command: git diff-tree --name-only -r ORIG_HEAD HEAD | grep -q '^VERSION$'
-        3. If VERSION changed → execute scripts/sync-version.sh
-        4. Output user message with specific updated file paths
+        Currently Phase -1 through Phase 8 instructions total ~22KB.
+        Each phase reduced to 3-5 line summary with @see references/phase-N.md.
+        New files: references/orchestration-rules.md, references/phase-summary-format.md.
 
       acceptance_criteria:
-        - id: AC-AUTO-006-01
-          given: Merge changes VERSION file
-          when: Post-merge hook runs
-          then: Detects VERSION change via ORIG_HEAD comparison
+        - id: AC-SLIM-003-01
+          given: Phase -1 instructions in SKILL.md lines 289-344
+          when: Phase 2 completes
+          then: Phase -1 is 3-5 line summary with @see references/phase-minus-1-isolate.md
+        - id: AC-SLIM-003-02
+          given: Each Phase section has @references/ annotations
+          when: Phase 2 completes
+          then: All @references/ target files exist on disk
+        - id: AC-SLIM-003-03
+          given: references/orchestration-rules.md does not exist
+          when: Phase 2 completes
+          then: references/orchestration-rules.md exists with Agent Dispatch + Transition Gate
+        - id: AC-SLIM-003-04
+          given: references/phase-summary-format.md does not exist
+          when: Phase 2 completes
+          then: references/phase-summary-format.md exists with Phase Summary schema
 
-        - id: AC-AUTO-006-02
-          given: VERSION file was changed during merge
-          when: Post-merge hook detects change
-          then: Executes scripts/sync-version.sh
+    # ============================================================
+    # REQ-SLIM-004: Phase 3 — Inline bash → logic descriptions
+    # ============================================================
+    - id: REQ-SLIM-004
+      description: Replace all >3 line bash code blocks with 4-field logic descriptions
+      priority: MUST
+      context: |
+        ~12KB of inline bash scripts replaced with WHAT/HOW/CHECKS/ERRORS blocks (~3KB).
+        Full command sequences move to references/orchestration-rules.md.
 
-        - id: AC-AUTO-006-03
-          given: VERSION file was NOT changed during merge
-          when: Post-merge hook runs
-          then: Does NOT execute sync-version.sh (zero overhead)
+      acceptance_criteria:
+        - id: AC-SLIM-004-01
+          given: SKILL.md has ~12KB of inline bash scripts
+          when: Phase 3 completes
+          then: All >3 line bash blocks replaced with 4-field logic descriptions
+        - id: AC-SLIM-004-02
+          given: Bash scripts removed from SKILL.md
+          when: Phase 3 completes
+          then: Full command sequences exist in references/orchestration-rules.md
+        - id: AC-SLIM-004-03
+          given: A 4-field logic description exists
+          when: Phase 3 completes
+          then: Each replacement follows WHAT/HOW/CHECKS/ERRORS format
 
-        - id: AC-AUTO-006-04
-          given: Merge is not in xp-gate project (no sync-version.sh)
-          when: Post-merge hook runs
-          then: Exits silently (no output)
+    # ============================================================
+    # REQ-SLIM-005: Phase 4 — Validation and CI
+    # ============================================================
+    - id: REQ-SLIM-005
+      description: Create validation scripts and verify slimming results
+      priority: MUST
+      context: |
+        Create scripts/check-skill-size.sh for automated validation.
+        Manual verification of each Phase summary vs references/ content.
+        Integration tests for core scenarios.
 
-        - id: AC-AUTO-006-05
-          given: sync-version.sh executes successfully
-          when: Post-merge hook completes
-          then: Outputs list of specific updated files
+      acceptance_criteria:
+        - id: AC-SLIM-005-01
+          given: scripts/check-skill-size.sh is created
+          when: Phase 4 completes
+          then: Script checks SKILL.md size (>30KB WARN, >35KB ERROR)
+        - id: AC-SLIM-005-02
+          given: SKILL.md has @references/ annotations
+          when: Script runs
+          then: All @references/ target files exist on disk
+        - id: AC-SLIM-005-03
+          given: 7 AGENTS.md mirrors exist
+          when: Script runs
+          then: All mirrors are byte-identical
 
-        - id: AC-AUTO-006-06
-          given: install.sh --force is run
-          when: Installation completes
-          then: post-merge hook is installed in .git/hooks/
+    # ============================================================
+    # REQ-SLIM-006: On-demand loading protocol
+    # ============================================================
+    - id: REQ-SLIM-006
+      description: Implement on-demand loading protocol so Agent reads references/ files sequentially during phases
+      priority: MUST
+      context: |
+        Protocol from design §3.3:
+        1. SKILL.md loaded by runtime
+        2. Agent reads Phase N summary (3-5 lines)
+        3. Agent detects @see references/phase-N.md annotation
+        4. Agent reads references/phase-N.md for detailed instructions
+        5. Agent executes Phase
+        6. Next Phase → repeat 2-5
 
-      edge_cases:
-        - ORIG_HEAD does not exist (first commit or shallow clone)
-        - sync-version.sh fails
-        - Multiple VERSION changes in same merge
-
-      test_coverage_requirements:
-        unit: false
-        integration: true
-        threshold: 80
+      acceptance_criteria:
+        - id: AC-SLIM-006-01
+          given: SKILL.md loaded
+          when: Agent reads a Phase summary
+          then: Summary ends with @see references/phase-N.md annotation
+        - id: AC-SLIM-006-02
+          given: references/phase-N.md does not exist
+          when: Agent attempts on-demand load
+          then: Falls back to SKILL.md summary + generic defaults
 
   # ============================================================
   # Design Decisions
   # ============================================================
   design_decisions:
-    - id: DD-AUTO-001
-      description: CLI as single entry point for version checking
-      rationale: |
-        check-version.js exists only in lib/. Plugins and hooks access version info
-        exclusively via execSync('xp-gate upgrade --preview'). Avoids duplicating
-        network/parse logic across 3 codebases (CLI, OpenCode plugin, CC hooks).
+    - id: DD-SLIM-001
+      description: Keep YAML frontmatter as canonical, remove body Triggers/Scope/Params/Examples
+      rationale: Frontmatter already contains triggers, parameters, examples, scope. Body duplicates ~5KB.
       alternatives_considered:
-        - "Direct npm registry call from each plugin — duplicated error handling"
-        - "Shared JS module installed as npm dependency — adds dep graph"
+        - "Keep both — redundant info inflating token count"
+        - "Remove frontmatter — breaks skill loader"
 
-    - id: DD-AUTO-002
-      description: Lazy/delayed version check (first tool invocation, not plugin init)
-      rationale: |
-        OpenCode plugin has no init/bootstrap lifecycle hook (SDK limitation).
-        Claude Code PostToolUse matcher ".*" fires on every call but bash script
-        has 5min temp file cache to prevent redundant network calls.
+    - id: DD-SLIM-002
+      description: Keep 3 usage examples (full-sprint, --stop-at, --resume-from)
+      rationale: 11 examples add ~2.5KB to every load. 3 covers 90% of use cases.
       alternatives_considered:
-        - "Eager check on plugin load — not possible for OpenCode plugin"
+        - "Keep all 11 — useful but costly"
+        - "Keep 5 — marginal benefit over 3"
 
-    - id: DD-AUTO-003
-      description: Post-merge hook uses ORIG_HEAD instead of HEAD
-      rationale: |
-        During a merge, HEAD points to the merge commit, not the incoming branch.
-        ORIG_HEAD preserves the pre-merge commit, allowing correct diff detection
-        of whether VERSION changed during the merge.
+    - id: DD-SLIM-003
+      description: Keep most comprehensive Anti-Patterns table (line 1222, 10 rows)
+      rationale: Line 1222 version has 10 rows vs 8 in others, covers more anti-patterns.
       alternatives_considered:
-        - "HEAD~1 — incorrect for merge commits"
+        - "Merge all 3 versions — creates 3rd version with 12 rows"
 
-    - id: DD-AUTO-004
-      description: CI already handles npm publish (no changes needed)
-      rationale: |
-        .github/workflows/npm-publish.yml automatically publishes when VERSION
-        is pushed to main. No server-side changes required for this sprint.
+    - id: DD-SLIM-004
+      description: Phase migration done in one batch per §4
+      rationale: Batch avoids mixed inline/reference inconsistency. Per-phase batches (Option B in design) prolong instability.
 
-    - id: DD-AUTO-005
-      description: Plugin badge uses gentle lowercase tone, not all-caps
-      rationale: |
-        All-caps looks like an error. Lowercase "Upgrade: v{remote} available"
-        conveys helpfulness without alarmism. >7 day lag adds "recommended" for
-        appropriate urgency.
+    - id: DD-SLIM-005
+      description: "\"@references/\" paths relative to SKILL_DIR, not absolute"
+      rationale: SKILL_DIR varies by deployment (OpenCode, Claude Code, npm). Relative paths work everywhere.
 
-    - id: DD-AUTO-006
-      description: Doctor version check runs on every invocation
-      rationale: |
-        First-time users benefit from immediate upgrade detection.
-        5-minute cache prevents redundant network calls on repeated doctor runs.
+  # ============================================================
+  # Success Metrics
+  # ============================================================
+  success_metrics:
+    skill_md_size:
+      current_bytes: 76108
+      target_bytes: 28000
+      reduction_pct: 63
+    initial_load_tokens:
+      current: ~47428
+      target: ~38000
+      reduction_pct: 62
+    duplication:
+      current_kb: 12
+      target_kb: 0
+    inline_bash:
+      current_kb: 12
+      target_kb: 3
+    references_files:
+      current: 16
+      target: 19
+    verification_script:
+      exists: false
+      target: true
+
+  # ============================================================
+  # File Changes (by phase)
+  # ============================================================
+  file_changes:
+    - phase: "0"
+      changes:
+        - "references/phase-minus-1-isolate.md (new)"
+        - "SKILL.md (modified — fix References index)"
+        - "AGENTS.md (modified — fix STRUCTURE tree)"
+    - phase: "1"
+      changes:
+        - "SKILL.md (modified — deduplicate Anti-Patterns/Security/Output/body/examples)"
+    - phase: "2"
+      changes:
+        - "SKILL.md (modified — Phase instructions slimmed to summaries)"
+        - "references/orchestration-rules.md (new)"
+        - "references/phase-summary-format.md (new)"
+    - phase: "3"
+      changes:
+        - "SKILL.md (modified — bash → logic descriptions)"
+        - "references/orchestration-rules.md (modified — add bash commands)"
+    - phase: "4"
+      changes:
+        - "scripts/check-skill-size.sh (new)"
 
   # ============================================================
   # Configuration
   # ============================================================
   configuration:
-    check_version:
-      npm_package_name: "@boyingliu01/xp-gate"
-      registry_url: "https://registry.npmjs.org/-/package/@boyingliu01/xp-gate/dist-tags"
-      network_timeout_ms: 5000
-      cache_ttl_ms: 300000  # 5 minutes
-
-    notification:
-      plugin_lag_silent_ms: 86400000  # 1 day
-      plugin_lag_soft_warning_ms: 604800000  # 7 days
-      plugin_strong_warning: ">7 days"
-
-    post_merge:
-      src_file: "githooks/post-merge"
-      npm_target: "src/npm-package/hooks/post-merge"
-      detect_command: "git diff-tree --name-only -r ORIG_HEAD HEAD | grep -q '^VERSION$'"
-
-    file_changes:
-      - src/npm-package/lib/check-version.js (new)
-      - src/npm-package/lib/upgrade.js (new)
-      - src/npm-package/bin/xp-gate.js (modified)
-      - src/npm-package/lib/doctor.js (modified)
-      - plugins/opencode/index.ts (modified)
-      - plugins/claude-code/hooks/hooks.json (modified)
-      - plugins/claude-code/bin/xp-gate-version-check.sh (new)
-      - githooks/post-merge (new)
-      - githooks/install.sh (modified)
-      - src/npm-package/hooks/post-merge (copy of githooks/post-merge)
+    skill_dir: ~/.config/opencode/skills/sprint-flow/
+    copy_script: scripts/copy-skills.sh
+    check_script: scripts/check-skill-size.sh
+    size_warn_kb: 30
+    size_error_kb: 35
