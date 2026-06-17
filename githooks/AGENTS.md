@@ -68,7 +68,7 @@ githooks/
 | Gate | Name | Source | Block on |
 |------|------|--------|----------|
 | M | Incremental Mutation | `../src/mutation/gate-m.ts` (Stryker, `stryker.prepush.conf.json`) | Mutation score < threshold (TS only) |
-| M2 | Mock Density Check | inline in `pre-push` (keyword scan: vi.mock, jest.mock, mockResolvedValue, MagicMock, `.patch(`, gomock, EXPECT, ...) | >50% mock density without `// @mock-justified: <reason>` (≥10 chars) |
+| M2 | Mock Density Check | inline in `pre-push` (keyword scan: vi.mock, jest.mock, mockResolvedValue, MagicMock, `.patch(`, gomock, EXPECT, ...) | >30% mock density without `// @mock-justified: <reason>` (≥10 chars). Phase 1: WARNING only. Configurable via `.mockpolicyrc`. |
 | M3 | Mock Layering Policy | `../src/mock-policy/gate-m3.ts` | Per-layer mock policy violation when `severity=error` |
 | Delphi | Code-walkthrough validator | reads `.code-walkthrough-result.json` | File missing, OR commit hash stale vs HEAD |
 
