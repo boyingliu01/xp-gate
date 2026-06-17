@@ -986,7 +986,7 @@ else
   fi
 
   # --- BLOCK path: New .ts/.tsx files without corresponding tests ---
-  NEW_TS_FILES=$(git diff --cached --name-only --diff-filter=A | grep -E '\.(ts|tsx)$' | grep -v '__tests__' | grep -v '\.test\.' | grep -v '\.spec\.' | grep -v '__snapshots__' || true)
+  NEW_TS_FILES=$(git diff --cached --name-only --diff-filter=A | grep -E '\.(ts|tsx)$' | grep -v '\.d\.ts$' | grep -v '__tests__' | grep -v '\.test\.' | grep -v '\.spec\.' | grep -v '__snapshots__' || true)
 
   if [ -n "$NEW_TS_FILES" ]; then
     BLOCKED_TS_FILES=0
@@ -1003,9 +1003,14 @@ else
       case "$ext" in
         d.ts|pyi) continue ;;
       esac
-      # Skip files with @no-test-required or legacy @no-test annotation
-      if grep -qE '@no-test-required\s*:\s*.{10,}' "$src_file" 2>/dev/null || \
-         grep -q '@no-test' "$src_file" 2>/dev/null; then
+      # Skip files with @no-test-required (reason >= 10 chars) or legacy @no-test annotation
+      # Order matters: @no-test-required must be checked first — @no-test is a substring match
+      if grep -q '@no-test-required' "$src_file" 2>/dev/null; then
+        if grep -qE '@no-test-required\s*:\s*.{10,}' "$src_file" 2>/dev/null; then
+          continue
+        fi
+        # @no-test-required with short reason (< 10 chars) — fall through to BLOCK
+      elif grep -q '@no-test' "$src_file" 2>/dev/null; then
         continue
       fi
 
@@ -1076,9 +1081,14 @@ else
       case "$ext" in
         d.ts|pyi) continue ;;
       esac
-      # Skip files with @no-test-required or legacy @no-test annotation
-      if grep -qE '@no-test-required\s*:\s*.{10,}' "$src_file" 2>/dev/null || \
-         grep -q '@no-test' "$src_file" 2>/dev/null; then
+      # Skip files with @no-test-required (reason >= 10 chars) or legacy @no-test annotation
+      # Order matters: @no-test-required must be checked first — @no-test is a substring match
+      if grep -q '@no-test-required' "$src_file" 2>/dev/null; then
+        if grep -qE '@no-test-required\s*:\s*.{10,}' "$src_file" 2>/dev/null; then
+          continue
+        fi
+        # @no-test-required with short reason (< 10 chars) — fall through to BLOCK
+      elif grep -q '@no-test' "$src_file" 2>/dev/null; then
         continue
       fi
 
