@@ -263,7 +263,9 @@ else
 fi
 
 # ============================================================================
-# GATE M2: MOCK DENSITY CHECK (BLOCK at 50%, ADVISORY at 30%)
+# GATE M2: MOCK DENSITY CHECK (BLOCK at 30%, configurable via .mockpolicyrc)
+# Phase 1: WARNING mode (collect false positive data before enabling BLOCK)
+# Per-layer thresholds: .mockpolicyrc layers.*.maxMockDensity
 # ============================================================================
 echo ""
 echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
@@ -286,6 +288,16 @@ if [ -z "$ALL_PUSHED_TEST_FILES" ]; then
   echo "⏭️  SKIPPED - Mock density check (no test files in push)"
 else
   MOCK_BLOCKED=false
+
+  # Read .mockpolicyrc configuration
+  MOCK_THRESHOLD=30  # Default threshold
+  if [ -f ".mockpolicyrc" ]; then
+    # Read global mock-threshold if present
+    CUSTOM_THRESHOLD=$(grep -oE '"mock-threshold"\s*:\s*[0-9]+' .mockpolicyrc | grep -oE '[0-9]+$' || true)
+    if [ -n "$CUSTOM_THRESHOLD" ]; then
+      MOCK_THRESHOLD=$CUSTOM_THRESHOLD
+    fi
+  fi
 
   for test_file in $ALL_PUSHED_TEST_FILES; do
     if [ -f "$test_file" ]; then
@@ -316,33 +328,34 @@ else
         MOCK_DENSITY="0"
       fi
 
-      THRESHOLD_50=$(awk "BEGIN {print ($MOCK_DENSITY > 50) ? 1 : 0}")
-      THRESHOLD_30=$(awk "BEGIN {print ($MOCK_DENSITY > 30) ? 1 : 0}")
+      THRESHOLD_BLOCK=$(awk "BEGIN {print ($MOCK_DENSITY > $MOCK_THRESHOLD) ? 1 : 0}")
 
       # Check for @mock-justified annotation with reason text (min 10 chars)
       HAS_JUSTIFIED=$(grep -qE '@mock-justified\s*:\s*.{10,}' "$test_file" 2>/dev/null && echo "true" || echo "false")
 
-      if [ "$THRESHOLD_50" = "1" ]; then
+      if [ "$THRESHOLD_BLOCK" = "1" ]; then
         if [ "$HAS_JUSTIFIED" = "false" ]; then
-          echo "❌ BLOCKED: $test_file — Mock density ${MOCK_DENSITY}% exceeds 50% threshold"
+          # Phase 1: WARNING mode (will become BLOCK in Phase 2)
+          echo "⚠️  WARNING: $test_file — Mock density ${MOCK_DENSITY}% exceeds ${MOCK_THRESHOLD}% threshold"
           echo "   Must: Reduce mocks OR add '// @mock-justified: <reason>' (min 10 char explanation)"
-          MOCK_BLOCKED=true
+          echo "   (Phase 1: WARNING mode — will become BLOCK after baseline analysis)"
+          # Note: Do NOT set MOCK_BLOCKED=true in Phase 1
         else
-          echo "⚠️  WARNING: $test_file — Mock density ${MOCK_DENSITY}% (justified by annotation)"
+          echo "✅ $test_file — Mock density ${MOCK_DENSITY}% (justified by annotation)"
         fi
-      elif [ "$THRESHOLD_30" = "1" ]; then
-        echo "ℹ️  ADVISORY: $test_file — Mock density ${MOCK_DENSITY}% (consider integration tests)"
       else
-        echo "✅ $test_file — Mock density ${MOCK_DENSITY}% (acceptable)"
+        echo "✅ $test_file — Mock density ${MOCK_DENSITY}% (within ${MOCK_THRESHOLD}% threshold)"
       fi
     fi
   done
 
-  if [ "$MOCK_BLOCKED" = true ]; then
-    echo ""
-    echo "❌ PUSH BLOCKED — Mock density too high without justification"
-    exit 1
-  fi
+  # Phase 1: WARNING mode only — no blocking
+  # Phase 2 (after baseline analysis): enable BLOCK based on false positive rate
+  # if [ "$MOCK_BLOCKED" = true ]; then
+  #   echo ""
+  #   echo "❌ PUSH BLOCKED — Mock density too high without justification"
+  #   exit 1
+  # fi
 fi
 
 # ============================================================================

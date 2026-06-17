@@ -2,6 +2,13 @@
 
 All notable changes to this project will be documented in this file.
 
+## [Unreleased]
+
+### Breaking Changes
+
+- **Gate 5a-BLOCK**: New `.ts/.tsx` files without corresponding tests now BLOCK commits (previously WARNING only). Modified files remain WARNING. Escape valve: `SKIP_GATE_5A_BLOCK=1` (non-main/master branches only).
+- **Gate M2**: Mock density threshold lowered from 50% to 30%. Phase 1: WARNING mode (no blocking). Phase 2: will enable BLOCK after baseline analysis. Configurable via `.mockpolicyrc`.
+
 ## [0.8.21] - 2026-06-17
 
 ### Refactored
