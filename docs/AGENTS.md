@@ -1,9 +1,9 @@
 # DOCUMENTATION KNOWLEDGE BASE
 
 **Generated:** 2026-06-17
-**Commit:** 5a241f0
-**Branch:** main
-**Version:** 0.8.19.0
+**Commit:** 673e8cb
+**Branch:** fix/qoder-compat-227-228-229
+**Version:** 0.8.20.0
 
 ## OVERVIEW
 Reference guides, design history, postmortems, and weekly retros. **30+ chronologically-archived design plans** under `plans/`. Plan docs follow `YYYY-MM-DD-topic.md` and each typically corresponds to a Delphi consensus report or implementation plan.

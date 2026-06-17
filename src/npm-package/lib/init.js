@@ -335,7 +335,7 @@ async function installLocal(args) {
   ensureConfigDir();
 
   const manifest = generateManifest(srcDir, projectRoot);
-  updateConfig({ lastInit: new Date().toISOString(), mode: 'local', manifest });
+  updateConfig({ lastInit: new Date().toISOString(), mode: 'local', templateDir: TEMPLATE_DIR, manifest });
 
   injectKarpathyPrinciples(projectRoot);
   configureOpenCodePlugin(srcDir, projectRoot);
@@ -388,7 +388,7 @@ async function setupGlobal(args) {
   ensureConfigDir();
 
   const manifest = generateGlobalManifest(srcDir);
-  updateConfig({ lastInit: new Date().toISOString(), mode: 'global', manifest });
+  updateConfig({ lastInit: new Date().toISOString(), mode: 'global', templateDir: TEMPLATE_DIR, manifest });
 
   console.log('\nGlobal setup complete!');
   console.log('All git repositories will now use xp-gate quality gates.');

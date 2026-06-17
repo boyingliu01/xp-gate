@@ -10,8 +10,13 @@ const path = require('path');
 //   - ../../src/principles/index.ts (installed under node_modules/@boyingliu01/xp-gate)
 function findPrinciplesEntry() {
   const candidates = [
+    // npm package bundled layout: lib/principles.js → principles/index.ts
+    path.resolve(__dirname, '..', 'principles', 'index.ts'),
+    // Development layout: lib/principles.js → src/principles/index.ts
     path.resolve(__dirname, '..', '..', '..', 'src', 'principles', 'index.ts'),
+    // npm package installed under node_modules/@boyingliu01/xp-gate
     path.resolve(__dirname, '..', '..', 'src', 'principles', 'index.ts'),
+    // Running from repo root
     path.resolve(process.cwd(), 'src', 'principles', 'index.ts'),
   ];
   for (const c of candidates) {
