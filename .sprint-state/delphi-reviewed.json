@@ -46,5 +46,20 @@
     "Mock 密度公式：mock关键字匹配行数 / 测试文件总行数",
     "@mock-justified 注解理由长度：保持 10 字符（现有行为）"
   ],
-  "specification_path": ".sprint-state/phase-outputs/specification.yaml"
+  "specification_path": ".sprint-state/phase-outputs/specification.yaml",
+  "code_walkthrough": {
+    "mode": "code-walkthrough",
+    "commit": "1979b6aeb7b57d32931c24d58472a7021a312584",
+    "timestamp": "2026-06-18T00:00:00Z",
+    "verdict": "APPROVED_WITH_CAVEATS",
+    "consensus_ratio": 1.0,
+    "experts": 2,
+    "rounds": 2,
+    "caveats": [
+      "README Gate M2 threshold drift (50% shown, 30% actual)",
+      "Escape valve audit log unescaped JSON",
+      "Gate 5b grep inconsistency with pre-push"
+    ],
+    "review_report": ".sprint-state/phase-outputs/review-report.md"
+  }
 }
