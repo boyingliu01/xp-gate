@@ -66,31 +66,23 @@ finishing-a-development-branch 执行 4 选项决策：
 
 **决策逻辑**:
 ```
-IF 测试全部通过 + 用户确信 → merge → land-and-deploy
-IF 测试全部通过 + 需要 review → PR → ship → 等待 review → land-and-deploy
+IF 测试全部通过 + 用户确信 → merge → land-and-deploy (Step 4)
+IF 测试全部通过 + 需要 review → PR → ship (Step 3a) → land-and-deploy (Step 4)
 IF 实验失败 → discard → 清理 worktree → 结束 Sprint
 IF 半成品 → keep → 保留分支 → 结束 Sprint
 ```
 
+> **#218**: `finishing-a-development-branch` 的 4 选项决策已包含用户确认（Step 2），不再需要独立的 Step 3 重复确认。用户选择后直接路由到对应步骤。
+
 **worktree 清理**: finishing-a-development-branch 自动清理不再需要的 worktree。
 
-### Step 3: 用户确认合并/发布
-
-提示用户：
-```
-⚠️ 分支完成决策:
-
-- [merge] → 直接合并 + 部署
-- [PR] → PR 已创建: [URL]，请确认合并
-- [discard] → 清理分支，结束 Sprint
-- [keep] → 保留分支，待后续处理
-
-请确认选项：
-```
-
-**discard/keep**: 进入 Step 5（清理 + 生成 Summary）
-
-**merge/PR 确认**: 进入 Step 4
+**分支完成选项路由**:
+| 用户选择 | 路由 |
+|---------|------|
+| **merge** | → Step 4 (land-and-deploy) |
+| **PR** | → Step 3a (ship) → PR URL → Step 4 (land-and-deploy) |
+| **discard** | → Step 5 (cleanup + summary) |
+| **keep** | → Step 5 (cleanup + summary) |
 
 ### Step 3a: 调用 ship skill（PR 路径）
 
@@ -108,7 +100,7 @@ ship 执行：
 
 **输出**: PR URL
 
-⚠️ **暂停点**: PR 创建后等待用户确认合并
+> **注意**: PR 创建后不暂停等待用户确认合并。用户已通过 finishing-a-development-branch 选择了 PR 路径（Step 2），ship 自动完成后直接进入 Step 4 land-and-deploy 继续执行。如果用户需要暂停审查 PR，应在 Sprint 开始时指定 `--stop-at ship`。
 
 ### Step 4: 调用 land-and-deploy（用户确认后）
 
@@ -166,8 +158,9 @@ skill(name="canary", user_message="--url [production URL]")
 | 暂停点 | 触发条件 | 用户操作 |
 |--------|---------|---------|
 | finishing-a-development-branch | 4 选项决策 | 用户选择 merge/PR/discard/keep |
-| ship PR 创建（PR 路径） | PR 已创建 | 用户确认合并 |
 | land-and-deploy 失败 | CI 或部署失败 | 用户处理问题 |
+
+> **#218**: PR 创建后不再暂停等待确认 — 用户已通过 finishing-a-development-branch 选择了 PR 路径，ship 自动完成后直接进入 land-and-deploy。如果用户需要暂停审查 PR，应在 Sprint 开始时指定 `--stop-at ship`。
 
 ---
 

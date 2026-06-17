@@ -2,6 +2,18 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.8.19] - 2026-06-17
+
+### Fixed
+
+- **#218 — Delphi review Round 1→Round 2→Round 3 缺乏自动化调度机制** — `skills/delphi-review/SKILL.md` 新增 Orchestrator Dispatch Rules 章节（~76 行），定义自动多轮循环伪代码、终止结果输出格式、与 orchestrator 的交互约定。`skills/sprint-flow/references/phase-1-plan.md` 重写 Step 2b→Step 2c，delphi-review 在 subagent 内部自动多轮，只有最终 REQUEST_CHANGES（自动修复仍失败）才暂停。`skills/sprint-flow/references/phase-3-review.md` code-walkthrough subagent 自动多轮 + 自动修复尝试。全流程暂停点审计移除 Phase 6 冗余 PR 确认。
+- **#225 — autoplan 被错误 dispatch 到 subagent 导致交互中断** — Phase Subagent Dispatch Matrix 拆分行：autoplan（`❌ orchestrator 直接执行`），delphi-review + to-issues（`✅ subagent`）。Phase 1 描述和完整流程箭头图更新。
+
+### Changed
+
+- **全流程暂停点审计** — 审计 Phase -0.5 到 Phase 8 所有暂停点，发现并移除 Phase 6 冗余双重确认（`finishing-a-development-branch` Step 2 已让用户 4 选 1，Step 3 重复确认）。暂停点从 3 个降至 2 个（仅保留 `finishing-a-development-branch` 和 `land-and-deploy 失败`）。
+- **Middleware 暂停点矩阵更新** — `skills/sprint-flow/references/components/middleware.md` 移除 `ship PR` 暂停行，添加 #218/#225 变更说明。Delphi review 暂停点从"每轮暂停"改为"自动修复仍失败才暂停"。
+
 ## [0.8.18] - 2026-06-16
 
 ### Added

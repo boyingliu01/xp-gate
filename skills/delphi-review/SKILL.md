@@ -190,12 +190,88 @@ Phase 0: 准备 → Round 1: 匿名独立评审 → 共识检查
 
 ---
 
+## Orchestrator Dispatch Rules（#218 自动多轮调度）
+
+### 背景
+
+Delphi review 在 sprint-flow 中通过 subagent 调用时，Round 1→Round 2→Round 3 的调度**必须在 subagent 内部自动完成**，不能每轮暂停等待 orchestrator 或用户干预。只有在以下情况才需要 orchestrator 暂停：
+
+### 自动调度规则
+
+| 场景 | 自动处理 | 需暂停 |
+|------|---------|--------|
+| Round 1 完成，需 Round 2 | ✅ subagent 自动继续 | ❌ |
+| Round 2 完成，需 Round 3 | ✅ subagent 自动继续 | ❌ |
+| Round 3+ 完成，仍需更多轮 | ✅ subagent 自动继续，直到 max_rounds | ❌ |
+| 最终 APPROVED (>=90%) | ✅ subagent 输出结果后退出 | ❌ |
+| 最终 REQUEST_CHANGES（可自动修复） | ✅ subagent 尝试修复措辞、AC 缺失等常见问题后自动重评审 | ❌ |
+| 最终 REQUEST_CHANGES（无法自动修复） | ✅ subagent 输出详细失败报告 | **✅ orchestrator 暂停等用户** |
+| 超过 max_rounds (5) 仍无共识 | ✅ subagent 输出"未达成共识报告" | **✅ orchestrator 暂停等用户决策** |
+
+### Subagent 内部 Round 循环
+
+当 delphi-review 以 subagent 启动时（非交互式），应执行以下自动循环：
+
+```python
+round = 1
+while round <= max_review_rounds:
+    # 执行当前 round（所有专家匿名/半匿名评审）
+    results = execute_round(round)
+    
+    # 检查共识
+    consensus = check_consensus(results)
+    
+    if consensus.verdict == "APPROVED" and consensus.ratio >= 0.9:
+        emit_verdict("APPROVED", consensus)
+        break
+    
+    if round == max_review_rounds:
+        # 已达最大轮数仍无共识
+        emit_verdict("NO_CONSENSUS", consensus)
+        break
+    
+    round += 1
+
+if verdict == "REQUEST_CHANGES":
+    # 尝试自动修复常见问题
+    auto_fix_result = attempt_auto_fix(issues)
+    if auto_fix_result.success:
+        # 自动修复后，从 Round 2 起步重新评审
+        round = 2
+        continue  # 重新进入循环
+    else:
+        # 无法自动修复，交给 orchestrator
+        emit_verdict("REQUEST_CHANGES", auto_fix_result.failed_issues)
+```
+
+### 终止结果输出
+
+当 subagent 因终态退出时，必须输出清晰的裁决：
+
+- **APPROVED**: 共识报告 + specification.yaml
+- **REQUEST_CHANGES（可自动修复）**: 自动修复后再次评审
+- **REQUEST_CHANGES（不可自动修复）**: 失败报告 + 建议修复方向
+- **NO_CONSENSUS**: 分歧详情报告
+
+### 与 orchestrator 的交互约定
+
+| 状态 | Subagent 输出 | Orchestrator 动作 |
+|------|--------------|------------------|
+| APPROVED | `{verdict:"APPROVED", consensus_ratio: N, ...}` | 自动进入下一 Phase |
+| REQUEST_CHANGES (auto-fixed) | `{verdict:"APPROVED", auto_fixed: ["..."]}` | 自动进入下一 Phase |
+| REQUEST_CHANGES (unfixable) | `{verdict:"REQUEST_CHANGES", failed_issues: [...]}` | ⚠️ 暂停等用户修复后，通过 task_id 重新 dispatch |
+| NO_CONSENSUS | `{verdict:"NO_CONSENSUS", disagreements: [...]}` | ⚠️ 暂停等用户决策（可继续/中止/强制通过） |
+
+---
+
 ## 修复与重新评审
 
 如果最终裁决是 REQUEST_CHANGES 或 REJECTED：
 1. 修复所有 Critical Issues + 处理所有 Major Concerns
 2. 重新评审（从 Round 2 起步，不是 Round 1）
 3. 迭代直到 APPROVED
+
+**Automatic re-review（#218）**: 当 delphi-review 以 subagent 运行时，对于常见的自动可控问题（措辞模糊、AC 缺失、格式问题等），subagent 应自行修复后自动重评审，无需等待用户。
 
 修复报告格式：
 ```markdown

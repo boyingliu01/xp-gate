@@ -34,22 +34,37 @@ Web 前端项目额外增加：系统化 QA、视觉审计、性能基线。
 
 ### Step 1: 调用 delphi-review --mode code-walkthrough
 
-```
-skill(name="delphi-review", user_message="--mode code-walkthrough")
+delphi code-walkthrough 在 subagent 中自动执行多轮调度（#218 自动多轮，无需人工中断）：
+
+```bash
+task(
+  category="deep",
+  load_skills=["delphi-review"],
+  run_in_background=false,
+  prompt="--mode code-walkthrough (设计文档 + MVP 代码)"
+)
 ```
 
-delphi code-walkthrough 执行：
+delphi code-walkthrough 内部自动执行：
 - 2-3 位国内模型专家匿名独立评审（DeepSeek-v4-pro + Kimi-K2.6 + Qwen3.6-Plus）
 - Round 1: 匿名独立评审（防止 anchoring bias）
-- Round 2: 交换意见，响应关切
-- Round 3: 最终立场（如需）
-- ≥90% 共识 + APPROVED 才通过
+- Round 2: 自动交换意见，响应关切
+- Round 3: 自动最终立场（如需）
+- **≥90% 共识 + APPROVED 才通过**
 
-**如果 REQUEST_CHANGES**:
-- ⚠️ 暂停等待用户修复 Critical Issues + 处理 Major Concerns
-- 修复后回到 Round 2 重新评审
+**自动 Round 调度（#218）**:
+- 每轮结束后自动检查共识，自动展开下一轮
+- subagent 内部循环，无需每轮暂停等待 orchestrator
+- 只有最终裁决需要 orchestrator 处理
 
-**如果 APPROVED**:
+**如果最终 REQUEST_CHANGES（subagent 尝试自动修复）**:
+- subagent 尝试自动修复常见问题（措辞不清晰、缺少用例覆盖等）
+- 修复成功后自动回到 Round 2 重新评审
+- 如果仍然 REQUEST_CHANGES → subagent 输出详细失败报告
+- ⚠️ Orchestrator 暂停等待用户修复 Critical Issues + 处理 Major Concerns
+- 用户修复后通过 task_id 延续 subagent 重新评审
+
+**如果最终 APPROVED**:
 - 写入 `.code-walkthrough-result.json`（1 小时有效期）
 - 进入 Step 2
 
@@ -194,12 +209,14 @@ browse 执行：
 
 | 暂停点 | 触发条件 | 用户操作 |
 |--------|---------|---------|
-| delphi code-walkthrough REQUEST_CHANGES | Critical Issues 未修复 | 用户修复 → 重新评审 → APPROVED → 继续 |
+| delphi code-walkthrough REQUEST_CHANGES（不可自动修复）| subagent 尝试自动修复后仍 REQUEST_CHANGES | 用户修复 → 重新 dispatch subagent → APPROVED → 继续 |
 | test-alignment 失败 | 自动回退 Phase 2（不暂停） | 自动迭代 |
 | qa 发现问题 (web) | 自动回退修复（不暂停） | 自动迭代 |
 | design-review 发现问题 (web) | 自动回退修复（不暂停） | 自动迭代 |
 | api-test 失败 (backend) | 自动回退 Phase 2（不暂停） | 自动迭代 |
 | browse 发现问题 | 自动回退 Phase 2（不暂停） | 自动迭代 |
+
+> **#218 规则**: Delphi code-walkthrough 的 Round 1→2→3 自动调度在 subagent 内部完成，不暂停。只有 subagent 尝试自动修复后仍 REQUEST_CHANGES 时才需要用户介入。
 
 ---
 
