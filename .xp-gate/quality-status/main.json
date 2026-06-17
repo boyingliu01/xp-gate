@@ -1,13 +1,13 @@
 {
   "reportVersion": "1.1",
-  "generatedAt": "2026-06-14T04:02:47Z",
+  "generatedAt": "2026-06-17T01:22:20Z",
   "branch": "main",
-  "commit": "68815ab0686d3ac80b9d20318192b857d4f6f6c9",
+  "commit": "d1b11ce67dbf367d7a214229e39b414007955787",
   "language": "typescript",
   "overall": {
-    "gatesPassed": 4,
-    "gatesTotal": 9,
-    "score": 4.0,
+    "gatesPassed": 7,
+    "gatesTotal": 10,
+    "score": 7.0,
     "verdict": "PARTIAL"
   },
   "gates": {
@@ -23,27 +23,27 @@
     },
     "gate3_complexity": {
       "name": "Cyclomatic Complexity",
-      "status": "PASS",
+      "status": "SKIP",
       "threshold": "5",
       "blockThreshold": "5",
       "warnings": 0
     },
     "gate4_principles": {
       "name": "Clean Code + SOLID",
-      "status": "PASS",
+      "status": "SKIP",
       "warnings": 0
     },
     "gate5_tests": {
       "name": "Tests + Coverage",
       "status": "PASS",
       "thresholds": { "lines": 80, "functions": 80, "branches": 70, "statements": 80 },
-      "actual": { "coverage": "94" },
+      "actual": { "coverage": "N/A" },
       "failedTests": []
     },
     "gate6_arch_boyscout": {
       "name": "Architecture + Boy Scout Rule",
       "status": "PASS",
-      "boyScoutPassed": 1,
+      "boyScoutPassed": 36,
       "boyScoutBlocked": 0
     },
     "gate7_iac_security": {
@@ -58,8 +58,13 @@
     },
     "gate9_sast": {
       "name": "SAST Security Scan",
-      "status": "PASS",
+      "status": "SKIP",
       "tool": "semgrep"
+    },
+    "gate10_sprint_flow": {
+      "name": "Sprint Flow Enforcement",
+      "status": "PASS",
+      "tool": "sprint-gate.sh"
     }
   }
 }
