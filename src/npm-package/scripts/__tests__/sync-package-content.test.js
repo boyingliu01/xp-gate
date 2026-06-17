@@ -9,7 +9,6 @@ const fs = require('fs');
 const path = require('path');
 const os = require('os');
 
-// Import the function under test
 const { checkDocsDrift } = require('../sync-package-content');
 
 function createTempDir() {
@@ -90,12 +89,12 @@ describe('checkDocsDrift', () => {
   });
 
   test('exits with error when pre-commit gate count in script exceeds docs', () => {
-    // Script with 3 gates
+    // Script with 3 gates (use "Gate" not "GATE" to match actual regex)
     const scriptContent = [
       '#!/bin/bash',
-      '# GATE 1: Code Quality',
-      '# GATE 2: Duplicate Code',
-      '# GATE 3: Complexity',
+      '# Gate 1: Code Quality',
+      '# Gate 2: Duplicate Code',
+      '# Gate 3: Complexity',
     ].join('\n');
     writeScript(preCommitPath, scriptContent);
     writeScript(prePushPath, '#!/bin/bash');
@@ -119,16 +118,8 @@ describe('checkDocsDrift', () => {
     ].join('\n');
     writeDoc(agentsPath, agentsContent);
 
-    const mockExit = jest.spyOn(process, 'exit').mockImplementation((code) => {
-      throw new Error(`process.exit(${code})`);
-    });
-
-    expect(() => {
-      checkDocsDrift(preCommitPath, prePushPath, readmePath, agentsPath);
-    }).toThrow('process.exit(1)');
-
-    expect(mockExit).toHaveBeenCalledWith(1);
-    mockExit.mockRestore();
+    const result = checkDocsDrift(preCommitPath, prePushPath, readmePath, agentsPath);
+    expect(result).toBe(false);
   });
 
   test('exits with error when pre-push gate count mismatches', () => {
@@ -167,16 +158,8 @@ describe('checkDocsDrift', () => {
     ].join('\n');
     writeDoc(agentsPath, agentsContent);
 
-    const mockExit = jest.spyOn(process, 'exit').mockImplementation((code) => {
-      throw new Error(`process.exit(${code})`);
-    });
-
-    expect(() => {
-      checkDocsDrift(preCommitPath, prePushPath, readmePath, agentsPath);
-    }).toThrow('process.exit(1)');
-
-    expect(mockExit).toHaveBeenCalledWith(1);
-    mockExit.mockRestore();
+    const result = checkDocsDrift(preCommitPath, prePushPath, readmePath, agentsPath);
+    expect(result).toBe(false);
   });
 
   test('skips missing doc files with warning instead of crashing', () => {
