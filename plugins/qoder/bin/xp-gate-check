@@ -35,9 +35,13 @@ if command -v xp-gate >/dev/null 2>&1; then
   # xp-gate globally installed — run principles check on the file
   npx -y tsx "${REPO_ROOT}/src/principles/index.ts" --files "$FILE_PATH" --format console 2>&1 || true
 elif [ -f "${REPO_ROOT}/src/principles/index.ts" ]; then
-  # Fallback: run principles checker directly from repo source
+  # Fallback: run principles checker directly from repo source (dev checkout)
   echo "[XP-Gate] Running principles check (xp-gate CLI not installed)" >&2
   npx -y tsx "${REPO_ROOT}/src/principles/index.ts" --files "$FILE_PATH" --format console 2>&1 || true
+elif [ -f "${REPO_ROOT}/principles/index.ts" ]; then
+  # Fallback: npm-package bundled layout (principles/index.ts without src/ prefix)
+  echo "[XP-Gate] Running principles check (npm bundled)" >&2
+  npx -y tsx "${REPO_ROOT}/principles/index.ts" --files "$FILE_PATH" --format console 2>&1 || true
 else
   # Graceful degradation: log once per session
   echo "[XP-Gate] Quality check skipped: xp-gate not installed. Run 'npm install -g @boyingliu01/xp-gate'" >&2

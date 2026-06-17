@@ -1,5 +1,5 @@
 {
-  "version": "0.8.17",
+  "version": "0.8.20",
   "mode": "code-walkthrough",
   "verdict": "APPROVED",
   "consensus": 1.0,
@@ -8,7 +8,7 @@
       "id": "A",
       "role": "architecture",
       "findings": [
-        "no architectural concerns \u2014 both features are self-contained additions"
+        "3 independent file-level changes, no cross-module coupling, no architecture impact"
       ],
       "verdict": "APPROVED"
     },
@@ -16,9 +16,10 @@
       "id": "B",
       "role": "implementation",
       "findings": [
-        "sprint-status.js: clean CLI entry, proper path traversal protection, fs.watch/fs.watchFile fallback",
-        "opencode plugin: chat.message hook is nonblocking, inline semver avoids external dep, 24h cache prevents excessive fetches",
-        "ESLint fix: replaced empty catch with noop comment \u2014 resolves no-empty-function warning"
+        "principles.js: path candidate order respects most-constrained layout first",
+        "install-skill.js: getSkillsDir() uses shared-paths detectPlatform, removes duplicate import",
+        "init.js: templateDir added to both setupLocal and setupGlobal updateConfig calls",
+        "xp-gate-check: added npm bundled path fallback"
       ],
       "verdict": "APPROVED"
     },
@@ -26,12 +27,13 @@
       "id": "C",
       "role": "feasibility",
       "findings": [
-        "13 tests pass, TS compiles clean, gates 0-9 pass, mirror parity synced"
+        "all changes are backwards-compatible, no breaking API changes",
+        "npm canary verification recommended after publish"
       ],
       "verdict": "APPROVED"
     }
   ],
-  "commit": "5b4e150c5f430076381ce45368dc890ea4f10148",
-  "branch": "sprint/2026-06-16-opencode-autoupdate-sprintstatus",
-  "report_ts": "2026-06-16T14:03:00Z"
+  "commit": "351577caaf13376770170523251d432f5eb6e49e",
+  "branch": "fix/qoder-compat-227-228-229",
+  "report_ts": "2026-06-17T08:25:00Z"
 }

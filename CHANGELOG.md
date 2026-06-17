@@ -2,6 +2,18 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.8.20] - 2026-06-17
+
+### Fixed
+
+- **#227 (P0) — xp-gate principles 在 npm global install 下找不到 principles/index.ts** — `src/npm-package/lib/principles.js` `findPrinciplesEntry()` 首位添加 `../principles/index.ts` 候选路径（npm bundled 布局）。`plugins/qoder/bin/xp-gate-check` 添加 `principles/index.ts` fallback 路径。
+- **#228 (P1) — xp-gate install-skill 在 Qoder 下安装到 ~/.config/opencode/skills/** — 静态 `SKILLS_DIR` 改为动态 `getSkillsDir()`，按 `detectPlatform()` 返回 qoder/claude-code/opencode 对应 skills 目录。
+- **#229 (P2) — xp-gate init 未写入 templateDir** — `installLocal()` 和 `setupGlobal()` 的 `updateConfig()` 加入 `templateDir: TEMPLATE_DIR`，确保写入正确的 platform 对应路径。
+
+### Changed
+
+- `src/npm-package/lib/install-skill.js`: 移除重复的 `detectPlatform` 导入（`detect-deps.js`），统一使用 `shared-paths.js` 版本。
+
 ## [0.8.19] - 2026-06-17
 
 ### Fixed
