@@ -181,8 +181,7 @@ Phase -0.5: AUTO-ESTIMATE → 自动评估需求规模 → ⚠️ 展示评估�
             → 标准：正常流程 Phase 0-4
             → 复杂：完整流程 Phase 0-8 + 风险警告
 Phase 0: THINK → brainstorming → ⚠️ HARD-GATE: 设计未批准 → 不可进入实现 → Design Document (AI编辑行为约束: 原则3 Surgical Changes, 验证循环要求: 原则4 Goal-Driven Execution - 见 AGENTS.md "## AI CODING DISCIPLINE (Karpathy Principles)")
-Phase 1: PLAN → autoplan → ⚠️ (如有taste_decisions，暂停等用户确认)
-           → delphi-review → ⚠️ (等待 APPROVED)
+Phase 1: PLAN → autoplan (orchestrator直执行，taste_decisions交互确认) → delphi-review (subagent自动多轮至APPROVED)
            → 自动生成 specification.yaml（无需独立 skill）
 Phase 2: BUILD → ⚠️ GITHOOKS-GATE: 检查并安装 Git Hooks（缺失→阻断）
            → dispatching-parallel-agents (并行检测) + executing-plans (隔离执行)
@@ -232,7 +231,7 @@ Phase 8: CLEANUP → git worktree remove + branch delete + sprint-state.json upd
 | 1 | **-1** | **ISOLATE** | Detect protected branch → Create git worktree → Setup project → Validate .gitignore → Record sprint state | Worktree path |
 | 2 | **-0.5** | **AUTO-ESTIMATE** | Analyze code structure → Count references → Assess cross-module impact → Classify (lightweight/standard/complex) | Impact assessment + flow recommendation |
 | 3 | **0** | **THINK** | brainstorming → Generate design doc + CONTEXT.md + ADR | Design document |
-| 4 | **1** | **PLAN** | autoplan → delphi-review (mandatory; lightweight allowed) → Generate specification.yaml + slices-manifest.json | specification.yaml |
+| 4 | **1** | **PLAN** | **Orchestrator: autoplan → Subagent: delphi-review (auto multi-round) → to-issues → Generate specification.yaml + slices-manifest.json** | specification.yaml |
 | 5 | **2** | **BUILD** | GITHOOKS-GATE → ralph-loop (default) or parallel → TDD → freeze → blind review → verification | MVP code |
 | 6 | **3** | **REVIEW** | delphi-review --mode code-walkthrough → test-specification-alignment → browse QA → benchmark (optional) | Review report |
 | 7 | **4** | **USER ACCEPT** | **Manual verification** → Capture emergent issues | Emergent issues list |
@@ -412,7 +411,11 @@ Sprint Flow: ISOLATE → AUTO-ESTIMATE → THINK → PLAN → BUILD → REVIEW �
 - **HARD-GATE**: 设计未批准 → 不可进入实现
 
 ### Phase 1: PLAN（共识评审）
-- **Subagent dispatch**: orchestrator 通过 `task(category="deep", load_skills=["autoplan", "delphi-review", "to-issues"])` 启动独立 session
+- **注意**: `autoplan` 是交互式 skill（可能在 taste_decisions 节点暂停等待用户输入），**必须由 orchestrator 直接执行**，不可 dispatch 到 subagent（Issue #225）。
+- **子流程**:
+  1. **Orchestrator** 直接调用 `task(category="deep", load_skills=["autoplan"], ...)` 执行 autoplan（可交互式等待用户确认 taste_decisions）
+  2. Autoplan 完成后，将结果（设计文档 + taste_decisions 确认）传给 subagent
+  3. **Subagent** 执行 delphi-review + to-issues: `task(category="deep", load_skills=["delphi-review", "to-issues"], prompt="autoplan 结果: ...")`
 - 输入: phase-0-summary.md + 设计文档
 - 输出: `specification.yaml`（含 user_stories[]）+ `slices-manifest.json`
 
@@ -656,7 +659,8 @@ Phase 2 第一步必须执行 DELPHI-GATE 检查。没有 delphi-review APPROVED
 | -1 | ISOLATE | ❌ | Bash（直接执行） | 无 | orchestrator |
 | -0.5 | AUTO-ESTIMATE | ❌ | Bash（直接执行） | 无 | orchestrator |
 | 0 | THINK | ✅ | `unspecified-high` | `[]` | subagent |
-| 1 | PLAN | ✅ | `deep` | `["autoplan", "delphi-review", "to-issues"]` | subagent |
+| 1 | PLAN (**autoplan**) | **❌** | **orchestrator 直接执行** | `["autoplan"]` | **orchestrator** |
+| 1 | PLAN (**delphi-review + to-issues**) | ✅ | `deep` | `["delphi-review", "to-issues"]` | **subagent（仅处理评审+切片）** |
 | 2 | BUILD | ✅(已有) | ralph-loop | `["test-driven-development"]` | subagent |
 | 3 | REVIEW | ✅ | `deep` | `["delphi-review", "test-specification-alignment"]` | subagent |
 | 4 | USER ACCEPT | ❌ | **强制人工** | 无 | 用户 |
@@ -664,6 +668,8 @@ Phase 2 第一步必须执行 DELPHI-GATE 检查。没有 delphi-review APPROVED
 | 6 | SHIP | ✅ | `quick` | `["finishing-a-development-branch", "ship"]` | subagent |
 | 7 | LAND | ✅ | `deep` | `["land-and-deploy"]` | subagent |
 | 8 | CLEANUP | ❌ | Bash（直接执行） | 无 | orchestrator |
+
+> **#225 关键规则**: `autoplan` 是交互式 skill（可能在 taste_decisions 节点暂停等待用户输入），因此**必须由 orchestrator 直接执行**，不可 dispatch 到 subagent。只有 delphi-review 和 to-issues 这种非交互式步骤可以 dispatch 到 subagent。
 
 **上下文隔离原则**：
 - 每个 Subagent 在**独立 session** 中启动，不继承 orchestrator 的对话历史
