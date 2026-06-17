@@ -1,39 +1,15 @@
 {
-  "version": "0.8.20",
+  "version": "0.8.21",
   "mode": "code-walkthrough",
   "verdict": "APPROVED",
   "consensus": 1.0,
+  "commit": "75c7c7f204317e340ce3a563e7bb36fef3acb26f",
+  "branch": "sprint/2026-06-17-01",
+  "expires": "2026-06-18T00:34:00Z",
   "experts": [
-    {
-      "id": "A",
-      "role": "architecture",
-      "findings": [
-        "3 independent file-level changes, no cross-module coupling, no architecture impact"
-      ],
-      "verdict": "APPROVED"
-    },
-    {
-      "id": "B",
-      "role": "implementation",
-      "findings": [
-        "principles.js: path candidate order respects most-constrained layout first",
-        "install-skill.js: getSkillsDir() uses shared-paths detectPlatform, removes duplicate import",
-        "init.js: templateDir added to both setupLocal and setupGlobal updateConfig calls",
-        "xp-gate-check: added npm bundled path fallback"
-      ],
-      "verdict": "APPROVED"
-    },
-    {
-      "id": "C",
-      "role": "feasibility",
-      "findings": [
-        "all changes are backwards-compatible, no breaking API changes",
-        "npm canary verification recommended after publish"
-      ],
-      "verdict": "APPROVED"
-    }
+    {"id": "A", "role": "architecture", "verdict": "APPROVED"},
+    {"id": "B", "role": "feasibility", "verdict": "APPROVED"}
   ],
-  "commit": "351577caaf13376770170523251d432f5eb6e49e",
-  "branch": "fix/qoder-compat-227-228-229",
-  "report_ts": "2026-06-17T08:25:00Z"
+  "confidence": 9,
+  "sprint_id": "sprint-2026-06-17-01"
 }

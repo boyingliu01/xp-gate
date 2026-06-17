@@ -479,6 +479,7 @@ REQ-001 开始 → 检查 test-utils.ts → 不存在
 - [ ] Test/implementation ratio ≥ 40% (L1b check: test_lines / total_lines ≥ 40%)
 - [ ] Mock usage justified (if >30% mock density)
 - [ ] Test files present in changeset (L1b-alt fallback)
+- [ ] **TDD 合规检查**: 验证 test-first 原则（新增源文件必须有对应测试文件，或添加 `@no-test-required` 注解）
 
 **Verification Layers**:
 - [ ] L1: typecheck + lint pass
@@ -493,7 +494,7 @@ REQ-001 开始 → 检查 test-utils.ts → 不存在
 
 **State Updated**:
 - [ ] AGENTS.md updated (orchestrator)
-- [ ] progress.log atomically written
+- [ ] progress.log atomically written (includes `test_first_compliant: true/false` — whether the REQ passed test-first validation)
 - [ ] Git commit created (if PASS)
 
 **Next Step**: [REQ-YYY title / COMPLETE / BLOCKED]

@@ -122,7 +122,7 @@ XP-Gate — deterministic git quality gates + AI-driven multi-expert review (Del
 | 2 | Duplicate Code | jscpd (`jscpd.conf.json`) | >5% similarity |
 | 3 | Cyclomatic Complexity | lizard (CCN) | >5 warn, >10 block |
 | 4 | Principles | `src/principles/index.ts` (14 rules × 9 langs) | Any error/warning per .principlesrc |
-| 5 | Tests + Coverage | Adapter `test` + coverage | Test fail, coverage <80% |
+| 5 | Tests + Coverage | Adapter `test` + coverage | Test fail, coverage <80%. Gate 5a: new .ts/.tsx files BLOCK if no test |
 | 6 | Architecture + Boy Scout | `.archlint.yaml` + `boy-scout.ts` | New warnings on modified files |
 | 7 | IaC Security | checkov / hadolint / kube-score / tflint | High-severity finding |
 | 8 | Secret Scanning | gitleaks (`.gitleaks.toml`) | Any leaked secret |
@@ -137,7 +137,7 @@ XP-Gate — deterministic git quality gates + AI-driven multi-expert review (Del
 | Gate | Name | Source | Block on |
 |------|------|--------|----------|
 | M | Incremental Mutation | `src/mutation/gate-m.ts` (Stryker, prepush config) | Mutation score < threshold (TS only) |
-| M2 | Mock Density Check | inline in pre-push | >50% mock density without `@mock-justified` |
+| M2 | Mock Density Check | inline in pre-push | >30% mock density (Phase 1 WARNING) without `@mock-justified` |
 | M3 | Mock Layering Policy | `src/mock-policy/gate-m3.ts` | Per-layer mock policy violation (severity=error) |
 | Delphi | Code-walkthrough validator | `.code-walkthrough-result.json` | Missing or stale walkthrough vs HEAD commit |
 
