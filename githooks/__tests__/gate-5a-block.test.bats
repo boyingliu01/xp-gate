@@ -27,9 +27,20 @@ setup() {
   # Create temp git repo for testing
   export TEST_DIR="$(mktemp -d)"
   cd "$TEST_DIR"
-  git init -q
+  git init -q -b test-branch
   git config user.email "test@test.com"
   git config user.name "Test"
+  git config core.hooksPath .git/hooks
+
+  # Create mock jscpd so Gate 2 doesn't block on missing tool
+  mkdir -p "$TEST_DIR/bin"
+  cat > "$TEST_DIR/bin/jscpd" << 'MOCK'
+#!/bin/bash
+echo '{"duplicates":[]}'
+exit 0
+MOCK
+  chmod +x "$TEST_DIR/bin/jscpd"
+  export PATH="$TEST_DIR/bin:$PATH"
 
   # Copy pre-commit hook + required infrastructure
   mkdir -p .git/hooks
@@ -38,8 +49,13 @@ setup() {
   # adapter-common.sh is sourced by pre-commit at startup
   cp "$SOURCE_GITHOOKS/adapter-common.sh" .git/hooks/adapter-common.sh 2>/dev/null || true
 
-  # Create initial commit so HEAD exists
+  # Create initial commit so HEAD exists (include a .ts file so hook detects TypeScript project)
   echo "init" > README.md
+  mkdir -p src
+  echo '// @no-test-required: test infrastructure placeholder
+export const placeholder = true;' > src/placeholder.ts
+  # Minimal archlint config so Gate 6 doesn't block on missing config
+  echo "ignore: []" > .archlint.yaml
   git add . && git commit -q -m "init"
 }
 
@@ -142,13 +158,63 @@ teardown() {
 # ── AC-TDD-001-09: Escape valve on main → BLOCK ──────────────────────
 
 @test "SKIP_GATE_5A_BLOCK=1 on main branch is BLOCKED" {
-  mkdir -p src
-  echo "export const x = 1;" > src/foo.ts
-  git add src/foo.ts
+  # Self-contained test: create a fresh repo on "main" to avoid dirty-tree
+  # branch-switch issues from hook-generated artifacts in setup().
+  local FRESH
+  FRESH=$(mktemp -d)
+  git init -q -b main "$FRESH"
+  git -C "$FRESH" config user.email "test@test.com"
+  git -C "$FRESH" config user.name "Test"
+
+  # Copy hook + adapter infrastructure
+  mkdir -p "$FRESH/.git/hooks"
+  cp "$SOURCE_GITHOOKS/pre-commit" "$FRESH/.git/hooks/pre-commit"
+  chmod +x "$FRESH/.git/hooks/pre-commit"
+  cp "$SOURCE_GITHOOKS/adapter-common.sh" "$FRESH/.git/hooks/adapter-common.sh" 2>/dev/null || true
+  # Use absolute path — relative ".git/hooks" resolves relative to .git/ dir, not working tree
+  git -C "$FRESH" config core.hooksPath "$FRESH/.git/hooks"
+
+  # Mock jscpd + lizard so Gate 2/3 don't block
+  mkdir -p "$FRESH/bin"
+  cat > "$FRESH/bin/jscpd" << 'MOCK'
+#!/bin/bash
+echo '{"duplicates":[]}'
+exit 0
+MOCK
+  cat > "$FRESH/bin/lizard" << 'MOCK'
+#!/bin/bash
+echo "0"
+exit 0
+MOCK
+  chmod +x "$FRESH/bin/jscpd" "$FRESH/bin/lizard"
+
+  # Initial commit with package.json (so PROJECT_LANG=typescript → Gate 5a activates)
+  echo '{}' > "$FRESH/package.json"
+  echo "0.0.1" > "$FRESH/VERSION"
+  echo "# Changelog" > "$FRESH/CHANGELOG.md"
+  echo "init" > "$FRESH/README.md"
+  mkdir -p "$FRESH/src"
+  echo '// @no-test-required: test infrastructure placeholder
+export const placeholder = true;' > "$FRESH/src/placeholder.ts"
+  echo "ignore: []" > "$FRESH/.archlint.yaml"
+  git -C "$FRESH" add .
+  git -C "$FRESH" commit --no-verify -q -m "init"
+
+  # Clean up hook artifacts from initial commit so tree is clean
+  rm -f "$FRESH/.quality-history.jsonl"
+  rm -rf "$FRESH/.xp-gate"
+
+  # Now test: new .ts file + SKIP_GATE_5A_BLOCK=1 on main → BLOCKED
+  echo "export const x = 1;" > "$FRESH/src/foo.ts"
+  git -C "$FRESH" add src/foo.ts
   export SKIP_GATE_5A_BLOCK=1
-  run git commit -m "add foo"
+  export SKIP_VERSION_CHECK=1
+  export PATH="$FRESH/bin:$PATH"
+  run git -C "$FRESH" commit -m "add foo"
   [ "$status" -ne 0 ]
   [[ "$output" == *"ESCAPE VALVE BLOCKED"* ]]
+
+  rm -rf "$FRESH"
 }
 
 # ── AC-TDD-001-10: Grace period → WARNING (not blocked) ──────────────
@@ -189,11 +255,60 @@ teardown() {
 # ── AC-TDD-001-13: .d.ts file → PASS (exempt) ────────────────────────
 
 @test ".d.ts declaration file PASSES without test" {
-  mkdir -p src
-  echo "declare module 'foo' {}" > src/foo.d.ts
-  git add src/foo.d.ts
-  run git commit -m "add declaration"
+  # Self-contained test: needs package.json so PROJECT_LANG=typescript
+  # (otherwise Gate 5a is skipped entirely as "documentation-only")
+  # Use non-protected branch to avoid Gate 0 blocking on VERSION/CHANGELOG
+  local FRESH
+  FRESH=$(mktemp -d)
+  git init -q -b test-branch "$FRESH"
+  git -C "$FRESH" config user.email "test@test.com"
+  git -C "$FRESH" config user.name "Test"
+
+  mkdir -p "$FRESH/.git/hooks"
+  cp "$SOURCE_GITHOOKS/pre-commit" "$FRESH/.git/hooks/pre-commit"
+  chmod +x "$FRESH/.git/hooks/pre-commit"
+  cp "$SOURCE_GITHOOKS/adapter-common.sh" "$FRESH/.git/hooks/adapter-common.sh" 2>/dev/null || true
+  # Use absolute path — relative ".git/hooks" resolves relative to .git/ dir, not working tree
+  git -C "$FRESH" config core.hooksPath "$FRESH/.git/hooks"
+
+  # Mock jscpd + lizard so Gate 2/3 don't block
+  mkdir -p "$FRESH/bin"
+  cat > "$FRESH/bin/jscpd" << 'MOCK'
+#!/bin/bash
+echo '{"duplicates":[]}'
+exit 0
+MOCK
+  cat > "$FRESH/bin/lizard" << 'MOCK'
+#!/bin/bash
+echo "0"
+exit 0
+MOCK
+  chmod +x "$FRESH/bin/jscpd" "$FRESH/bin/lizard"
+
+  # Initial commit with package.json (so PROJECT_LANG=typescript → Gate 5a activates)
+  echo '{}' > "$FRESH/package.json"
+  echo "0.0.1" > "$FRESH/VERSION"
+  echo "# Changelog" > "$FRESH/CHANGELOG.md"
+  echo "init" > "$FRESH/README.md"
+  mkdir -p "$FRESH/src"
+  echo '// @no-test-required: test infrastructure placeholder
+export const placeholder = true;' > "$FRESH/src/placeholder.ts"
+  echo "ignore: []" > "$FRESH/.archlint.yaml"
+  git -C "$FRESH" add .
+  git -C "$FRESH" commit --no-verify -q -m "init"
+
+  # Clean up hook artifacts from initial commit
+  rm -f "$FRESH/.quality-history.jsonl"
+  rm -rf "$FRESH/.xp-gate"
+
+  # Now test: .d.ts file is exempt from Gate 5a → commit should succeed
+  echo "declare module 'foo' {}" > "$FRESH/src/foo.d.ts"
+  git -C "$FRESH" add src/foo.d.ts
+  export PATH="$FRESH/bin:$PATH"
+  run git -C "$FRESH" commit -m "add declaration"
   [ "$status" -eq 0 ]
+
+  rm -rf "$FRESH"
 }
 
 # ── AC-TDD-001-14: Multiple new TS files, one missing test → BLOCK ───

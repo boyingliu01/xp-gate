@@ -22,9 +22,20 @@ SOURCE_GITHOOKS="${XP_GATE_GITHOOKS:-$(cd "$BATS_TEST_DIRNAME/.." && pwd)}"
 setup() {
   export TEST_DIR="$(mktemp -d)"
   cd "$TEST_DIR"
-  git init -q
+  git init -q -b test-branch
   git config user.email "test@test.com"
   git config user.name "Test"
+  git config core.hooksPath .git/hooks
+
+  # Create mock jscpd so Gate 2 doesn't block on missing tool
+  mkdir -p "$TEST_DIR/bin"
+  cat > "$TEST_DIR/bin/jscpd" << 'MOCK'
+#!/bin/bash
+echo '{"duplicates":[]}'
+exit 0
+MOCK
+  chmod +x "$TEST_DIR/bin/jscpd"
+  export PATH="$TEST_DIR/bin:$PATH"
 
   # Copy pre-push hook
   mkdir -p .git/hooks
@@ -36,6 +47,20 @@ setup() {
   # Create initial commit (no test files — clean baseline for diff-tree)
   echo "init" > README.md
   git add . && git commit -q -m "init"
+
+  # Create walkthrough result file so Delphi validator doesn't block
+  # This is required by the pre-push hook's code-walkthrough section (lines 516-537)
+  local current_sha
+  current_sha="$(git rev-parse HEAD)"
+  cat > .code-walkthrough-result.json << EOF
+{
+  "commit": "$current_sha",
+  "verdict": "APPROVED",
+  "expires": "$(date -u -d '+1 hour' +%Y-%m-%dT%H:%M:%SZ)",
+  "branch": "test-branch",
+  "confidence": 9
+}
+EOF
 }
 
 teardown() {
@@ -65,10 +90,22 @@ create_test_file_with_density() {
 
 # Helper: run pre-push with simulated ref info (new-branch scenario)
 # Pipes stdin so the hook's `while read` loop gets valid ref data.
+# Creates a fresh .code-walkthrough-result.json matching current HEAD
+# so the Delphi validator doesn't block (required by lines 516-537 of pre-push).
 run_pre_push() {
   local local_sha
   local_sha="$(git rev-parse HEAD)"
   local zeros="0000000000000000000000000000000000000000"
+  # Write walkthrough result with current HEAD so Delphi validator passes
+  cat > .code-walkthrough-result.json << EOF
+{
+  "commit": "$local_sha",
+  "verdict": "APPROVED",
+  "expires": "$(date -u -d '+1 hour' +%Y-%m-%dT%H:%M:%SZ)",
+  "branch": "test-branch",
+  "confidence": 9
+}
+EOF
   run bash -c "echo 'refs/heads/main $local_sha refs/heads/main $zeros' | .git/hooks/pre-push origin https://example.com"
 }
 
