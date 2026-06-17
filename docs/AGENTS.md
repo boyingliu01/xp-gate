@@ -1,8 +1,8 @@
 # DOCUMENTATION KNOWLEDGE BASE
 
 **Generated:** 2026-06-17
-**Commit:** 673e8cb
-**Branch:** fix/qoder-compat-227-228-229
+**Commit:** a697146
+**Branch:** main
 **Version:** 0.8.20.0
 
 ## OVERVIEW
