@@ -989,7 +989,7 @@ else
   fi
 
   # --- BLOCK path: New .ts/.tsx files without corresponding tests ---
-  NEW_TS_FILES=$(git diff --cached --name-only --diff-filter=A | grep -E '\.(ts|tsx)$' | grep -v '\.d\.ts$' | grep -v '__tests__' | grep -v '\.test\.' | grep -v '\.spec\.' | grep -v '__snapshots__' | grep -v 'node_modules/' | grep -v '\.next/' | grep -v '\.nuxt/' | grep -v 'dist/' | grep -v 'build/' | grep -v '.turbo/' | grep -v '.cache/' || true)
+  NEW_TS_FILES=$(git diff --cached --name-only --diff-filter=A | grep -E '\.(ts|tsx)$' | grep -v '\.d\.ts$' | grep -v '__tests__' | grep -v '\.test\.' | grep -v '\.spec\.' | grep -v '__snapshots__' | grep -v 'node_modules/' | grep -v '\.next/' | grep -v '\.nuxt/' | grep -v 'dist/' | grep -v 'build/' | grep -v '.turbo/' | grep -v '.cache/' | grep -Ev '(^|/)vitest\.config\.' | grep -Ev '(^|/)vite\.config\.' | grep -Ev '(^|/)jest\.config\.' | grep -Ev '(^|/)tsconfig\.' | grep -Ev '(^|/)eslint\.' | grep -Ev '(^|/)prettier\.' | grep -Ev '(^|/)tailwind\.' || true)
 
   if [ -n "$NEW_TS_FILES" ]; then
     BLOCKED_TS_FILES=0
