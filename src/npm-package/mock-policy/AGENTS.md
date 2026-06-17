@@ -1,9 +1,9 @@
 # SRC/MOCK-POLICY KNOWLEDGE BASE
 
-**Generated:** 2026-06-16
-**Commit:** cf4275e
-**Branch:** sprint/2026-06-16-02
-**Version:** 0.8.17.0
+**Generated:** 2026-06-17
+**Commit:** d1b11ce
+**Branch:** main
+**Version:** 0.8.18.0
 
 ## OVERVIEW
 Mock layering policy enforcement — Gate M3 of pre-push hook. Ensures integration tests use real implementations for internal dependencies, mock external dependencies, and annotate pending mocks with removal plans. Combines project scope scanning, mock decision engine, and per-file validation into a single pipeline.
