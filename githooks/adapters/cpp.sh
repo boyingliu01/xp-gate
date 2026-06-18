@@ -13,12 +13,12 @@ _detect_cpp_build() {
 run_static_analysis() {
   if command -v clang-tidy &>/dev/null; then
     local files
-    files=$(find . -name "*.cpp" -o -name "*.cc" -o -name "*.c" -o -name "*.h" 2>/dev/null | head -20)
+    files=$(find . -name "*.cpp" -o -name "*.cc" -o -name "*.c" -o -name "*.h" 2>/dev/null | sed -n '1,20p; 20q')
     if [ -n "$files" ]; then
-      echo "$files" | xargs clang-tidy 2>&1 | head -20
+      echo "$files" | xargs clang-tidy 2>&1 | sed -n '1,20p; 20q'
     fi
   elif command -v cppcheck &>/dev/null; then
-    cppcheck --enable=all --inline-suppr . 2>&1 | head -20
+    cppcheck --enable=all --inline-suppr . 2>&1 | sed -n '1,20p; 20q'
   else
     echo "No C++ analysis tools (clang-tidy/cppcheck)"
     return 1

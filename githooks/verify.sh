@@ -4,7 +4,7 @@ OK=0
 MISSING=0
 
 check() {
-  if [[ -f "$1" ]]; then
+  if [ -f "$1" ]; then
     echo "  ✅ $2"
     OK=$((OK + 1))
   else
@@ -27,7 +27,7 @@ echo ""
 check "$GIT_DIR/hooks/pre-commit" ".git/hooks/pre-commit"
 check "$GIT_DIR/hooks/pre-push" ".git/hooks/pre-push"
 check "$PROJECT_ROOT/githooks/adapter-common.sh" "githooks/adapter-common.sh"
-if [[ -d "$PROJECT_ROOT/githooks/adapters" ]]; then
+if [ -d "$PROJECT_ROOT/githooks/adapters" ]; then
   echo "  ✅ githooks/adapters/ directory"
   OK=$((OK + 1))
 else
@@ -48,7 +48,7 @@ check "$PROJECT_ROOT/plugins/qoder/bin/sprint-flow-guard.sh" "plugins/qoder/bin/
 check "$PROJECT_ROOT/plugins/qoder/bin/xp-gate-check" "plugins/qoder/bin/xp-gate-check"
 
 echo ""
-if [[ $MISSING -eq 0 ]]; then
+if [ "$MISSING" -eq 0 ]; then
   echo "✅ All quality gates components present ($OK/$OK)."
   exit 0
 else

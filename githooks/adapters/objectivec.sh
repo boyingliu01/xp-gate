@@ -2,10 +2,10 @@
 
 run_static_analysis() {
   if command -v oclint &>/dev/null; then
-    oclint-json-compilation-database 2>&1 | head -30
+    oclint-json-compilation-database 2>&1 | sed -n '1,30p; 30q'
     return $?
   elif command -v clang-tidy &>/dev/null; then
-    find . -name "*.m" -o -name "*.mm" -o -name "*.h" | head -20 | xargs clang-tidy 2>&1 | head -30
+    find . -name "*.m" -o -name "*.mm" -o -name "*.h" | sed -n '1,20p; 20q' | xargs clang-tidy 2>&1 | sed -n '1,30p; 30q'
     return $?
   else
     echo "No Objective-C analysis tools available (oclint/clang-tidy)"
