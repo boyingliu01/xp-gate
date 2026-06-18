@@ -4,6 +4,18 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+## [0.9.1] - 2026-06-18
+
+### Refactored
+
+- **Skill Slimming Sprint**: 4 skills trimmed to ≤12KB each (total 90KB→27KB, -70%)
+  - `admin-template-guidelines`: 28KB → 4.4KB (6 rules → `references/rule-{1..6}.md`)
+  - `test-specification-alignment`: 23KB → 7.4KB (CN/EN dedup, `references/`)
+  - `delphi-review`: 18KB → 7.8KB (templates → `references/`)
+  - `ralph-loop`: 21KB → 7.3KB (merge `components/` → `references/components.md`)
+- Mirrors synced across all 4 plugin platforms (claude-code/opencode/qoder)
+- Fixes #236 (skill token slimming), #237 (subagent dispatch model error — root cause: sdxl-v1 model not available for deep tasks, mitigated by g-deepseek-v4-flash)
+
 ## [0.9.0] - 2026-06-18
 
 ### Breaking Changes
