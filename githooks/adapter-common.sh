@@ -35,7 +35,7 @@ detect_project_lang() {
   elif [[ -f "go.mod" ]]; then
     echo "go"
   elif [[ -f "build.gradle" ]] || [[ -f "build.gradle.kts" ]]; then
-    if [[ -n "$(find . -name "*.kt" -type f | head -n 1)" ]]; then
+    if [[ -n "$(find . -name "*.kt" -type f | sed -n '1p; 1q')" ]]; then
       echo "kotlin"
     else
       echo "java"
@@ -48,44 +48,44 @@ detect_project_lang() {
     else
       echo "dart"
     fi
-  elif [[ -n "$(find . -name "*.ps1" -type f | head -n 1)" ]]; then
+  elif [[ -n "$(find . -name "*.ps1" -type f | sed -n '1p; 1q')" ]]; then
     echo "powershell"
   elif [[ -f "Package.swift" ]]; then
     echo "swift"
-  elif [[ -f "CMakeLists.txt" ]] || [[ -n "$(find . -name "*.cpp" -o -name "*.cc" -type f | head -n 1)" ]]; then
+  elif [[ -f "CMakeLists.txt" ]] || [[ -n "$(find . -name "*.cpp" -o -name "*.cc" -type f | sed -n '1p; 1q')" ]]; then
     echo "cpp"
-  elif [[ -n "$(find . -name "*.m" -o -name "*.mm" -type f | head -n 1)" ]]; then
+  elif [[ -n "$(find . -name "*.m" -o -name "*.mm" -type f | sed -n '1p; 1q')" ]]; then
     echo "objectivec"
-  elif [[ -n "$(find . -name "*.sh" -type f | head -n 1)" ]] || [[ -n "$(find . -name "Dockerfile" -o -name "*.dockerfile" -type f | head -n 1)" ]]; then
+  elif [[ -n "$(find . -name "*.sh" -type f | sed -n '1p; 1q')" ]] || [[ -n "$(find . -name "Dockerfile" -o -name "*.dockerfile" -type f | sed -n '1p; 1q')" ]]; then
     echo "shell"
-  elif [[ -n "$(find . -name "*.ps1" -type f -not -path "./.git/*" | head -n 1)" ]]; then
+  elif [[ -n "$(find . -name "*.ps1" -type f -not -path "./.git/*" | sed -n '1p; 1q')" ]]; then
     echo "powershell"
   else
-    if [[ -n "$(find . -name "*.ts" -o -name "*.tsx" -type f | head -n 1)" ]]; then
+    if [[ -n "$(find . -name "*.ts" -o -name "*.tsx" -type f | sed -n '1p; 1q')" ]]; then
       echo "typescript"
-    elif [[ -n "$(find . -name "*.py" -type f | head -n 1)" ]]; then
+    elif [[ -n "$(find . -name "*.py" -type f | sed -n '1p; 1q')" ]]; then
       echo "python"
-    elif [[ -n "$(find . -name "*.go" -type f | head -n 1)" ]]; then
+    elif [[ -n "$(find . -name "*.go" -type f | sed -n '1p; 1q')" ]]; then
       echo "go"
-    elif [[ -n "$(find . -name "*.kt" -type f | head -n 1)" ]]; then
+    elif [[ -n "$(find . -name "*.kt" -type f | sed -n '1p; 1q')" ]]; then
       echo "kotlin"
-    elif [[ -n "$(find . -name "*.java" -type f | head -n 1)" ]]; then
+    elif [[ -n "$(find . -name "*.java" -type f | sed -n '1p; 1q')" ]]; then
       echo "java"
-    elif [[ -n "$(find . -name "*.dart" -type f | head -n 1)" ]]; then
+    elif [[ -n "$(find . -name "*.dart" -type f | sed -n '1p; 1q')" ]]; then
       if grep -q "flutter:" "pubspec.yaml" 2>/dev/null || [[ -f ".flutter" ]]; then
         echo "flutter"
       else
         echo "dart"
       fi
-    elif [[ -n "$(find . -name "*.swift" -type f | head -n 1)" ]]; then
+    elif [[ -n "$(find . -name "*.swift" -type f | sed -n '1p; 1q')" ]]; then
       echo "swift"
-    elif [[ -n "$(find . -name "*.cpp" -o -name "*.cc" -o -name "*.c" -o -name "*.h" -type f | head -n 1)" ]]; then
+    elif [[ -n "$(find . -name "*.cpp" -o -name "*.cc" -o -name "*.c" -o -name "*.h" -type f | sed -n '1p; 1q')" ]]; then
       echo "cpp"
-    elif [[ -n "$(find . -name "*.m" -o -name "*.mm" -type f | head -n 1)" ]]; then
+    elif [[ -n "$(find . -name "*.m" -o -name "*.mm" -type f | sed -n '1p; 1q')" ]]; then
       echo "objectivec"
-    elif [[ -n "$(find . -name "*.sh" -type f | head -n 1)" ]]; then
+    elif [[ -n "$(find . -name "*.sh" -type f | sed -n '1p; 1q')" ]]; then
       echo "shell"
-    elif [[ -n "$(find . -name "*.ps1" -type f -not -path "./.git/*" | head -n 1)" ]]; then
+    elif [[ -n "$(find . -name "*.ps1" -type f -not -path "./.git/*" | sed -n '1p; 1q')" ]]; then
       echo "powershell"
     else
       echo "unknown"
@@ -167,20 +167,20 @@ detect_iac_project() {
   local has_iac=false
   
   # Check for Terraform files
-  if [[ -n "$(find . -maxdepth 2 -name "*.tf" -not -path "./.git/*" 2>/dev/null | head -1)" ]]; then
+  if [[ -n "$(find . -maxdepth 2 -name "*.tf" -not -path "./.git/*" 2>/dev/null | sed -n '1p; 1q')" ]]; then
     has_iac=true
   fi
   
   # Check for Kubernetes manifests (YAML with apiVersion/kind)
-  if [[ -n "$(find . -maxdepth 2 \( -name "*.yaml" -o -name "*.yml" \) -not -path "./.git/*" 2>/dev/null | head -1)" ]]; then
-    local yaml_file=$(find . -maxdepth 2 \( -name "*.yaml" -o -name "*.yml" \) -not -path "./.git/*" 2>/dev/null | head -1)
+  if [[ -n "$(find . -maxdepth 2 \( -name "*.yaml" -o -name "*.yml" \) -not -path "./.git/*" 2>/dev/null | sed -n '1p; 1q')" ]]; then
+    local yaml_file=$(find . -maxdepth 2 \( -name "*.yaml" -o -name "*.yml" \) -not -path "./.git/*" 2>/dev/null | sed -n '1p; 1q')
     if grep -qE "^(apiVersion|kind):" "$yaml_file" 2>/dev/null; then
       has_iac=true
     fi
   fi
   
   # Check for Dockerfiles
-  if [[ -n "$(find . -maxdepth 2 -name "Dockerfile" -o -name "*.dockerfile" -not -path "./.git/*" 2>/dev/null | head -1)" ]]; then
+  if [[ -n "$(find . -maxdepth 2 -name "Dockerfile" -o -name "*.dockerfile" -not -path "./.git/*" 2>/dev/null | sed -n '1p; 1q')" ]]; then
     has_iac=true
   fi
   

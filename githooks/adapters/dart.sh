@@ -2,7 +2,7 @@
 
 run_static_analysis() {
   if command -v dart &>/dev/null; then
-    dart analyze 2>&1 | head -30
+    dart analyze 2>&1 | sed -n '1,30p; 30q'
     return $?
   else
     echo "Dart SDK not available"
@@ -12,7 +12,7 @@ run_static_analysis() {
 
 run_lint() {
   if command -v dart &>/dev/null; then
-    dart format --output=none --set-exit-if-changed . 2>&1 | head -30
+    dart format --output=none --set-exit-if-changed . 2>&1 | sed -n '1,30p; 30q'
     return $?
   else
     echo "Dart SDK not available"

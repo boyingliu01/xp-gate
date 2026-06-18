@@ -72,7 +72,7 @@ run_tests() {
     test_paths="test/"
   fi
 
-  if [ -n "$test_paths" ] && find "$test_paths" -name "*.Tests.ps1" -type f 2>/dev/null | head -1 | grep -q "."; then
+  if [ -n "$test_paths" ] && find "$test_paths" -name "*.Tests.ps1" -type f 2>/dev/null | sed -n '1p; 1q' | grep -q "."; then
     echo "Running Pester tests..."
     "$PWSH" -NoProfile -Command "
       \$results = Invoke-Pester -Path '$test_paths' -PassThru
@@ -84,7 +84,7 @@ run_tests() {
       exit 0
     "
     return $?
-  elif find . -maxdepth 2 -name "*.Tests.ps1" -type f 2>/dev/null | head -1 | grep -q "."; then
+  elif find . -maxdepth 2 -name "*.Tests.ps1" -type f 2>/dev/null | sed -n '1p; 1q' | grep -q "."; then
     echo "Running Pester tests in current directory..."
     "$PWSH" -NoProfile -Command "
       \$results = Invoke-Pester -CI -PassThru
@@ -117,7 +117,7 @@ run_coverage() {
     test_paths="test/"
   fi
 
-  if [ -n "$test_paths" ] || find . -maxdepth 2 -name "*.Tests.ps1" -type f 2>/dev/null | head -1 | grep -q "."; then
+  if [ -n "$test_paths" ] || find . -maxdepth 2 -name "*.Tests.ps1" -type f 2>/dev/null | sed -n '1p; 1q' | grep -q "."; then
     echo "Running Pester with code coverage..."
     local path_arg="${test_paths:-.}"
     "$PWSH" -NoProfile -Command "
