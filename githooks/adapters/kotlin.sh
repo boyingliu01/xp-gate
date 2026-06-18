@@ -15,13 +15,13 @@ run_static_analysis() {
   build_system=$(_detect_kotlin_build)
 
   if [ "$build_system" = "maven" ]; then
-    mvn compile -q 2>&1 | grep -i "error\|fail" | head -5
+    mvn compile -q 2>&1 | grep -i "error\|fail" | sed -n '1,5p; 5q'
     if [ ${PIPESTATUS[0]} -ne 0 ]; then
       echo "❌ Maven compilation failed"
       return 1
     fi
   elif [ "$build_system" = "gradle" ]; then
-    gradle compileKotlin --quiet 2>&1 | grep -i "error\|fail" | head -5
+    gradle compileKotlin --quiet 2>&1 | grep -i "error\|fail" | sed -n '1,5p; 5q'
     if [ ${PIPESTATUS[0]} -ne 0 ]; then
       echo "❌ Gradle compilation failed"
       return 1
@@ -29,10 +29,10 @@ run_static_analysis() {
   fi
 
   if command -v ktlint &>/dev/null; then
-    ktlint "**/*.kt" 2>&1 | head -20
+    ktlint "**/*.kt" 2>&1 | sed -n '1,20p; 20q'
     return $?
   elif command -v detekt &>/dev/null; then
-    detekt --input . 2>&1 | head -20
+    detekt --input . 2>&1 | sed -n '1,20p; 20q'
     return $?
   else
     echo "No Kotlin lint tools (ktlint/detekt)"

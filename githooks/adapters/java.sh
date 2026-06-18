@@ -27,13 +27,13 @@ run_static_analysis() {
   build_system=$(_detect_java_build)
 
   if [ "$build_system" = "maven" ]; then
-    mvn compile -q 2>&1 | grep -i "error\|fail" | head -5
+    mvn compile -q 2>&1 | grep -i "error\|fail" | sed -n '1,5p; 5q'
     if [ "${PIPESTATUS[0]}" -ne 0 ]; then
       echo "❌ Maven compilation failed"
       return 1
     fi
   elif [ "$build_system" = "gradle" ]; then
-    gradle compileJava --quiet 2>&1 | grep -i "error\|fail" | head -5
+    gradle compileJava --quiet 2>&1 | grep -i "error\|fail" | sed -n '1,5p; 5q'
     if [ "${PIPESTATUS[0]}" -ne 0 ]; then
       echo "❌ Gradle compilation failed"
       return 1
@@ -42,12 +42,12 @@ run_static_analysis() {
 
   # CheckStyle with Google style (legacy fallback)
   if command -v checkstyle &>/dev/null; then
-    checkstyle -c /google_checks.xml . 2>&1 | head -20
+    checkstyle -c /google_checks.xml . 2>&1 | sed -n '1,20p; 20q'
   fi
 
   # PMD error detection (legacy fallback)
   if command -v pmd &>/dev/null; then
-    pmd check -d . -R category/java/errorprone.xml 2>&1 | head -20
+    pmd check -d . -R category/java/errorprone.xml 2>&1 | sed -n '1,20p; 20q'
   fi
 
   # p3c-pmd check (Alibaba coding guidelines) — primary Java quality gate

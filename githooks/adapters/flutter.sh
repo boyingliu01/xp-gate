@@ -2,7 +2,7 @@
 
 run_static_analysis() {
   if command -v flutter &>/dev/null; then
-    flutter analyze 2>&1 | head -30
+    flutter analyze 2>&1 | sed -n '1,30p; 30q'
     return $?
   else
     echo "Flutter SDK not available"
@@ -12,7 +12,7 @@ run_static_analysis() {
 
 run_lint() {
   if command -v flutter &>/dev/null; then
-    flutter format --output=none --set-exit-if-changed . 2>&1 | head -30
+    flutter format --output=none --set-exit-if-changed . 2>&1 | sed -n '1,30p; 30q'
     return $?
   else
     echo "Flutter SDK not available"
