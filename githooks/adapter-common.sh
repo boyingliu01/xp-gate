@@ -2,6 +2,31 @@
 
 # Common adapter functions for language detection and routing
 
+# OS detection: returns linux/macos/windows/unknown
+# Uses uname -s (POSIX) as primary, ${OSTYPE-} as fallback
+detect_os_env() {
+    local os
+    os=$(uname -s 2>/dev/null || echo "unknown")
+    case "$os" in
+        Linux*)     echo "linux";;
+        Darwin*)    echo "macos";;
+        MINGW*|MSYS*|CYGWIN*) echo "windows";;
+        *)
+            # Fallback: OSTYPE (bash built-in, not always available)
+            if [ -n "${OSTYPE-}" ]; then
+                case "${OSTYPE-}" in
+                    linux*)     echo "linux";;
+                    darwin*)    echo "macos";;
+                    msys*|cygwin*) echo "windows";;
+                    *)          echo "unknown";;
+                esac
+            else
+                echo "unknown"
+            fi
+            ;;
+    esac
+}
+
 detect_project_lang() {
   if [[ -f "tsconfig.json" ]]; then
     echo "typescript"
