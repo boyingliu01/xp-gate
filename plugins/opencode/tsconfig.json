@@ -10,6 +10,6 @@
     "declaration": false,
     "noEmit": true
   },
-  "include": ["index.ts"],
+  "include": ["index.ts", "tui-plugin.ts"],
   "exclude": ["node_modules", "dist", "skills"]
 }

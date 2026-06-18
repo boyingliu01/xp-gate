@@ -1,9 +1,9 @@
 {
   "name": "@boyingliu01/opencode-plugin",
-  "version": "0.9.2",
+  "version": "0.9.3",
   "type": "module",
   "main": "index.ts",
-  "description": "XP-Gate quality gates + AI workflow skills for OpenCode",
+  "description": "XP-Gate quality gates + AI workflow skills + Sprint Flow TUI sidebar for OpenCode",
   "repository": {
     "type": "git",
     "url": "https://github.com/boyingliu01/xp-gate",
@@ -13,8 +13,19 @@
     "registry": "https://registry.npmjs.org",
     "access": "public"
   },
+  "exports": {
+    ".": {
+      "import": "./index.ts",
+      "types": "./index.ts"
+    },
+    "./tui": {
+      "import": "./tui-plugin.ts",
+      "types": "./tui-plugin.ts"
+    }
+  },
   "files": [
     "index.ts",
+    "tui-plugin.ts",
     "skills/",
     "tsconfig.json",
     "README.md"

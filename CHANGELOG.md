@@ -4,6 +4,15 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+## [0.9.3] - 2026-06-18
+
+### Added
+
+- **OpenCode TUI sidebar slot plugin**: `plugins/opencode/tui-plugin.ts` renders Sprint Flow progress in the OpenCode sidebar. Registers via `"./tui"` subpath export. Shows phase status, REQ-level progress, metrics, and staleness detection. 30 unit tests covering all pure functions.
+  - `readSprintState()`: reads `.sprint-state/sprint-state.json`
+  - `renderSprintSidebar()`: renders phase lines with ✓/→/·/○ status symbols
+  - `isStale()`: detects >1h inactivity
+
 ## [0.9.2] - 2026-06-18
 
 ### Fixed
