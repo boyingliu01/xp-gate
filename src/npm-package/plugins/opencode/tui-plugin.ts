@@ -15,7 +15,7 @@
 import { existsSync, readFileSync } from "node:fs"
 import { join } from "node:path"
 import type { TuiPlugin, TuiSlotPlugin, TuiSlotProps } from "@opencode-ai/plugin/tui"
-import { PHASE_NAMES, PHASE_ORDER, isStale } from "../../../lib/shared-phase-constants.js"
+import { PHASE_NAMES, PHASE_ORDER, isStale } from "../../src/npm-package/lib/shared-phase-constants.js"
 
 // ── Sprint state schema ──
 

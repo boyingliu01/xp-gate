@@ -1,8 +1,8 @@
 {
   "reportVersion": "1.1",
-  "generatedAt": "2026-06-18T08:30:57Z",
+  "generatedAt": "2026-06-18T16:24:54Z",
   "branch": "main",
-  "commit": "b67fc85fb57204c9f14f6af5811d9bf1018a3cbc",
+  "commit": "47514853a8571eb8a8dac153d5244716b4a174cf",
   "language": "typescript",
   "overall": {
     "gatesPassed": 10,
@@ -43,7 +43,7 @@
     "gate6_arch_boyscout": {
       "name": "Architecture + Boy Scout Rule",
       "status": "PASS",
-      "boyScoutPassed": 48,
+      "boyScoutPassed": 68,
       "boyScoutBlocked": 0
     },
     "gate7_iac_security": {
