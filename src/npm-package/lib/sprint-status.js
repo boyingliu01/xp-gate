@@ -9,22 +9,7 @@
 
 const fs = require('fs');
 const path = require('path');
-
-const PHASE_NAMES = {
-  '-1': 'ISOLATE',
-  '-0.5': 'AUTO-ESTIMATE',
-  '0': 'THINK',
-  '1': 'PLAN',
-  '2': 'BUILD',
-  '3': 'REVIEW',
-  '4': 'USER ACCEPT',
-  '5': 'FEEDBACK',
-  '6': 'SHIP',
-  '7': 'LAND',
-  '8': 'CLEANUP',
-};
-
-const PHASE_ORDER = ['-1', '-0.5', '0', '1', '2', '3', '4', '5', '6', '7', '8'];
+const { PHASE_NAMES, PHASE_ORDER, getLatestTimestamp, isStale } = require('./shared-phase-constants');
 
 /**
  * Read and parse sprint-state.json from a project directory.
@@ -70,29 +55,78 @@ function formatDuration(seconds) {
 }
 
 /**
- * Check if the state is stale (>1h since last activity).
+ * Format the sprint header lines (task description, ID, branch).
  * @param {object} state - Sprint state object
- * @returns {boolean}
+ * @param {string} branch - Branch name
+ * @returns {string[]} Header lines
  */
-function isStale(state) {
-  if (!state || !state.started_at) return false;
-  const started = new Date(state.started_at).getTime();
-  if (isNaN(started)) return false;
-  // Check latest phase_history timestamp (started_at or completed_at)
-  let latest = started;
-  if (Array.isArray(state.phase_history) && state.phase_history.length > 0) {
+function buildHeader(state, branch) {
+  return [
+    `Sprint: ${state.task_description}`,
+    `ID: ${state.id || 'unknown'}  |  Branch: ${branch}`,
+  ];
+}
+
+/**
+ * Format the metrics line (tests, coverage).
+ * @param {object} metrics - Sprint metrics object
+ * @returns {string|null} Metrics line or null if no metrics
+ */
+function buildMetricsLine(metrics) {
+  const parts = [];
+  if (metrics.tests_passed != null) {
+    parts.push(`Tests: ${metrics.tests_passed} passed${metrics.tests_failed ? `, ${metrics.tests_failed} failed` : ''}`);
+  }
+  if (metrics.coverage_pct != null) {
+    parts.push(`Coverage: ${metrics.coverage_pct}%`);
+  }
+  return parts.length > 0 ? `Metrics: ${parts.join('  |  ')}` : null;
+}
+
+/**
+ * Build a phase lookup map from phase_history array.
+ * @param {object} state - Sprint state object
+ * @returns {object} Map of phase key → phase history entry
+ */
+function buildPhaseLookup(state) {
+  const map = {};
+  if (Array.isArray(state.phase_history)) {
     for (const ph of state.phase_history) {
-      if (ph.completed_at) {
-        const t = new Date(ph.completed_at).getTime();
-        if (!isNaN(t) && t > latest) latest = t;
-      }
-      if (ph.started_at) {
-        const t = new Date(ph.started_at).getTime();
-        if (!isNaN(t) && t > latest) latest = t;
-      }
+      map[String(ph.phase)] = ph;
     }
   }
-  return Date.now() - latest > 3600000; // 1h
+  return map;
+}
+
+/**
+ * Format a single phase row line.
+ * @param {string} key - Phase key (e.g. '0', '1')
+ * @param {object|undefined} history - Phase history entry
+ * @param {number} maxNameLen - Max phase name length for padding
+ * @returns {string} Formatted phase line
+ */
+function formatPhaseLine(key, history, maxNameLen) {
+  const name = history?.phase_name || PHASE_NAMES[key] || key;
+  const status = history?.status || 'pending';
+  const icon = statusIcon(status);
+  const dur = formatDuration(history?.duration_seconds);
+  const statusLabel = status === 'completed' ? 'Completed' :
+    status === 'in_progress' ? 'In Progress' : 'Pending';
+  return `  Phase ${key.padStart(4)}  ${name.padEnd(maxNameLen + 1)} ${icon} ${dur.padEnd(5)} ${statusLabel}`;
+}
+
+/**
+ * Format REQ-level progress sub-lines for a phase (typically BUILD).
+ * @param {object|undefined} history - Phase history entry with optional reqs
+ * @returns {string[]} Array of REQ progress lines (may be empty)
+ */
+function formatReqLines(history) {
+  if (!history?.reqs) return [];
+  const lines = [];
+  for (const [reqId, req] of Object.entries(history.reqs)) {
+    lines.push(`    ${statusIcon(req.status)} ${reqId}  ${req.name}`);
+  }
+  return lines;
 }
 
 /**
@@ -105,77 +139,35 @@ function formatSprintTable(state) {
     return 'No active sprint in this directory';
   }
 
-  const lines = [];
   const branch = state.isolation?.branch || 'unknown';
   const metrics = state.metrics || {};
+  const lines = buildHeader(state, branch);
 
-  // Header
-  lines.push(`Sprint: ${state.task_description}`);
-  lines.push(`ID: ${state.id || 'unknown'}  |  Branch: ${branch}`);
+  const metricsLine = buildMetricsLine(metrics);
+  if (metricsLine) lines.push(metricsLine);
 
-  // Metrics line (if available)
-  const metricParts = [];
-  if (metrics.tests_passed != null) {
-    metricParts.push(`Tests: ${metrics.tests_passed} passed${metrics.tests_failed ? `, ${metrics.tests_failed} failed` : ''}`);
-  }
-  if (metrics.coverage_pct != null) {
-    metricParts.push(`Coverage: ${metrics.coverage_pct}%`);
-  }
-  if (metricParts.length > 0) {
-    lines.push(`Metrics: ${metricParts.join('  |  ')}`);
-  }
-
-  // Stale warning
   if (isStale(state)) {
     lines.push('⚠️  State may be stale (last updated >1h ago)');
   }
-
   lines.push('');
 
-  // Build phase lookup from phase_history
-  const historyByPhase = {};
-  if (Array.isArray(state.phase_history)) {
-    for (const ph of state.phase_history) {
-      historyByPhase[String(ph.phase)] = ph;
-    }
-  }
+  const historyByPhase = buildPhaseLookup(state);
 
-  // Calculate column widths dynamically
   let maxNameLen = 'Phase'.length;
   for (const key of PHASE_ORDER) {
-    const history = historyByPhase[key];
-    const name = history?.phase_name || PHASE_NAMES[key] || key;
+    const name = historyByPhase[key]?.phase_name || PHASE_NAMES[key] || key;
     if (name.length > maxNameLen) maxNameLen = name.length;
   }
 
-  // Separator line
   const sep = '─'.repeat(maxNameLen + 40);
-
   lines.push(sep);
 
   for (const key of PHASE_ORDER) {
-    const history = historyByPhase[key];
-    const name = history?.phase_name || PHASE_NAMES[key] || key;
-    const status = history?.status || 'pending';
-    const icon = statusIcon(status);
-    const dur = formatDuration(history?.duration_seconds);
-    const statusLabel = status === 'completed' ? 'Completed' :
-      status === 'in_progress' ? 'In Progress' : 'Pending';
-
-    const line = `  Phase ${key.padStart(4)}  ${name.padEnd(maxNameLen + 1)} ${icon} ${dur.padEnd(5)} ${statusLabel}`;
-    lines.push(line);
-
-    // REQ-level progress for BUILD phase
-    if (history?.reqs) {
-      for (const [reqId, req] of Object.entries(history.reqs)) {
-        const reqIcon = statusIcon(req.status);
-        lines.push(`    ${reqIcon} ${reqId}  ${req.name}`);
-      }
-    }
+    lines.push(formatPhaseLine(key, historyByPhase[key], maxNameLen));
+    lines.push(...formatReqLines(historyByPhase[key]));
   }
 
   lines.push(sep);
-
   return lines.join('\n');
 }
 

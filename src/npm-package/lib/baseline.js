@@ -221,6 +221,29 @@ async function createBaseline() {
 }
 
 /**
+ * Count baseline entries grouped by tool type.
+ * @param {object} data - Parsed baseline object (filePath → entry)
+ * @returns {{ totalFiles: number, totalWarnings: number, eslintCount: number, ruffCount: number, golangciCount: number, shellcheckCount: number }}
+ */
+function countBaselineByTool(data) {
+  const files = Object.keys(data);
+  const totalWarnings = files.reduce((s, f) => s + data[f].totalWarnings, 0);
+  let eslintCount = 0;
+  let ruffCount = 0;
+  let golangciCount = 0;
+  let shellcheckCount = 0;
+
+  for (const entry of Object.values(data)) {
+    if (entry.eslint) eslintCount++;
+    if (entry.ruff) ruffCount++;
+    if (entry.golangci) golangciCount++;
+    if (entry.shellcheck) shellcheckCount++;
+  }
+
+  return { totalFiles: files.length, totalWarnings, eslintCount, ruffCount, golangciCount, shellcheckCount };
+}
+
+/**
  * Show current baseline.
  */
 function showBaseline() {
@@ -237,27 +260,16 @@ function showBaseline() {
     return 0;
   }
 
-  const totalWarnings = files.reduce((s, f) => s + data[f].totalWarnings, 0);
-  let eslintCount = 0;
-  let ruffCount = 0;
-  let golangciCount = 0;
-  let shellcheckCount = 0;
-
-  for (const entry of Object.values(data)) {
-    if (entry.eslint) eslintCount++;
-    if (entry.ruff) ruffCount++;
-    if (entry.golangci) golangciCount++;
-    if (entry.shellcheck) shellcheckCount++;
-  }
+  const counts = countBaselineByTool(data);
 
   console.log('Lint Baseline:');
   console.log(`  Created: ${data[files[0]]?.lastAnalyzed?.slice(0, 10) || 'N/A'}`);
-  console.log(`  Files tracked: ${files.length}`);
-  console.log(`  Total warnings: ${totalWarnings}`);
-  if (eslintCount > 0) console.log(`  ESLint: ${eslintCount} files`);
-  if (ruffCount > 0) console.log(`  Ruff: ${ruffCount} files`);
-  if (golangciCount > 0) console.log(`  golangci-lint: ${golangciCount} files`);
-  if (shellcheckCount > 0) console.log(`  ShellCheck: ${shellcheckCount} files`);
+  console.log(`  Files tracked: ${counts.totalFiles}`);
+  console.log(`  Total warnings: ${counts.totalWarnings}`);
+  if (counts.eslintCount > 0) console.log(`  ESLint: ${counts.eslintCount} files`);
+  if (counts.ruffCount > 0) console.log(`  Ruff: ${counts.ruffCount} files`);
+  if (counts.golangciCount > 0) console.log(`  golangci-lint: ${counts.golangciCount} files`);
+  if (counts.shellcheckCount > 0) console.log(`  ShellCheck: ${counts.shellcheckCount} files`);
 
   return 0;
 }
@@ -272,21 +284,13 @@ async function resetBaseline() {
 }
 
 /**
- * Diff current lint state against stored baseline.
+ * Compare two baselines and produce diff data.
+ * @param {object} oldBaseline
+ * @param {object} currentBaseline
+ * @returns {{ totalWarningsDelta: number, increased: string[], decreased: string[], added: string[], removed: string[] }}
  */
-async function diffBaseline() {
-  if (!fs.existsSync(getBaselineFile())) {
-    console.log('No baseline found. Run `xp-gate baseline create` first.');
-    return 1;
-  }
-
-  const oldBaseline = JSON.parse(fs.readFileSync(getBaselineFile(), 'utf8'));
-  const currentBaseline = await createBaseline();
-
-  const allFiles = new Set([
-    ...Object.keys(oldBaseline),
-    ...Object.keys(currentBaseline),
-  ]);
+function compareBaselines(oldBaseline, currentBaseline) {
+  const allFiles = new Set([...Object.keys(oldBaseline), ...Object.keys(currentBaseline)]);
 
   let totalWarningsDelta = 0;
   const increased = [];
@@ -312,31 +316,54 @@ async function diffBaseline() {
     }
   }
 
+  return { totalWarningsDelta, increased, decreased, added, removed };
+}
+
+/**
+ * Print a diff result report to console.
+ */
+function printDiffReport(result) {
   console.log('Lint Baseline Diff:');
-  console.log(`  Total warnings delta: ${totalWarningsDelta >= 0 ? '+' : ''}${totalWarningsDelta}`);
+  console.log(`  Total warnings delta: ${result.totalWarningsDelta >= 0 ? '+' : ''}${result.totalWarningsDelta}`);
 
-  if (added.length > 0) {
-    console.log(`\nFiles added (${added.length}):`);
-    added.forEach(l => console.log(l));
+  if (result.added.length > 0) {
+    console.log(`\nFiles added (${result.added.length}):`);
+    result.added.forEach(l => console.log(l));
   }
-  if (removed.length > 0) {
-    console.log(`\nFiles removed (${removed.length}):`);
-    removed.forEach(l => console.log(l));
+  if (result.removed.length > 0) {
+    console.log(`\nFiles removed (${result.removed.length}):`);
+    result.removed.forEach(l => console.log(l));
   }
-  if (increased.length > 0) {
-    console.log(`\nWarnings increased (${increased.length}):`);
-    increased.forEach(l => console.log(l));
+  if (result.increased.length > 0) {
+    console.log(`\nWarnings increased (${result.increased.length}):`);
+    result.increased.forEach(l => console.log(l));
   }
-  if (decreased.length > 0) {
-    console.log(`\nWarnings decreased (${decreased.length}):`);
-    decreased.forEach(l => console.log(l));
+  if (result.decreased.length > 0) {
+    console.log(`\nWarnings decreased (${result.decreased.length}):`);
+    result.decreased.forEach(l => console.log(l));
   }
 
-  if (added.length === 0 && removed.length === 0 && increased.length === 0 && decreased.length === 0) {
+  if (result.added.length === 0 && result.removed.length === 0 && result.increased.length === 0 && result.decreased.length === 0) {
     console.log('  No change from baseline.');
   }
+}
 
-  return totalWarningsDelta > 0 ? 1 : 0;
+/**
+ * Diff current lint state against stored baseline.
+ */
+async function diffBaseline() {
+  if (!fs.existsSync(getBaselineFile())) {
+    console.log('No baseline found. Run `xp-gate baseline create` first.');
+    return 1;
+  }
+
+  const oldBaseline = JSON.parse(fs.readFileSync(getBaselineFile(), 'utf8'));
+  const currentBaseline = await createBaseline();
+
+  const result = compareBaselines(oldBaseline, currentBaseline);
+  printDiffReport(result);
+
+  return result.totalWarningsDelta > 0 ? 1 : 0;
 }
 
 /**
@@ -389,4 +416,4 @@ Examples:
   }
 }
 
-module.exports = { handleBaseline, createBaseline, showBaseline, resetBaseline, diffBaseline };
+module.exports = { handleBaseline, createBaseline, showBaseline, resetBaseline, diffBaseline, countBaselineByTool, compareBaselines };

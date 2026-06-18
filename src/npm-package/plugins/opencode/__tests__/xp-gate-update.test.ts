@@ -14,8 +14,7 @@ import { randomUUID } from "node:crypto"
 import { mkdirSync, writeFileSync, readFileSync, existsSync, rmSync } from "node:fs"
 import { join } from "node:path"
 import { tmpdir, homedir } from "node:os"
-import { execSync, spawn } from "node:child_process"
-import { EventEmitter } from "node:events"
+import { execSync } from "node:child_process"
 
 // ── Pure function: semverLt ──
 
@@ -154,49 +153,19 @@ async function checkXpGateUpdate(): Promise<UpgradeResult> {
     return { action: "noop", localVersion, remoteVersion }
   }
 
-  // 5. Outdated — auto upgrade (non-blocking spawn)
+  // 5. Outdated — auto upgrade
   writeXpGateCache({ ts: Date.now(), localVersion, remoteVersion })
   try {
-    const child = spawn("npm", ["install", "-g", `${XP_GATE_NPM_PKG}@${remoteVersion}`], {
+    execSync(`npm install -g ${XP_GATE_NPM_PKG}@${remoteVersion}`, {
       stdio: "pipe",
       timeout: 120_000,
     })
-    child.on("close", (code) => {
-      if (code === 0) {
-        writeXpGateCache({ ts: Date.now(), localVersion: remoteVersion, remoteVersion, status: "current" })
-      }
-    })
-    child.on("error", () => { /* empty — cache won't get status:current, so next check retries */ })
+    writeXpGateCache({ ts: Date.now(), localVersion: remoteVersion, remoteVersion, status: "current" })
     return { action: "upgraded", localVersion, remoteVersion }
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err)
     return { action: "error", localVersion, remoteVersion, error: msg }
   }
-}
-
-/**
- * Read xp-gate config.json for opt-out settings.
- * Returns null if config doesn't exist or is malformed.
- */
-function readXpGateConfig(): { autoUpgrade?: boolean } | null {
-  const cfgPath = join(homedir(), ".xp-gate", "config.json")
-  try {
-    if (!existsSync(cfgPath)) return null
-    const raw = readFileSync(cfgPath, "utf8")
-    return JSON.parse(raw)
-  } catch {
-    return null
-  }
-}
-
-/**
- * Wait for a child process to close and resolve with exit code.
- */
-function waitForSpawn(child: ReturnType<typeof spawn>): Promise<number> {
-  return new Promise((resolve, reject) => {
-    child.on("close", (code) => resolve(code ?? -1))
-    child.on("error", (err) => reject(err))
-  })
 }
 
 // ── Tests ──
@@ -282,103 +251,5 @@ void describe("checkXpGateUpdate — cache & upgrade", () => {
     // Stale cache should be ignored — should check npm registry
     // If network check fails, returns noop with localVersion if found
     assert.equal(result.action, "noop")
-  })
-})
-
-// ── UPG-002: spawn-based upgrade tests ──
-
-void describe("checkXpGateUpdate — spawn (UPG-002)", () => {
-  const fakeHome = join(tmpdir(), "xp-gate-upd-spawn-" + randomUUID())
-  const origHome = process.env.HOME
-
-  before(() => {
-    process.env.HOME = fakeHome
-    mkdirSync(join(fakeHome, ".xp-gate"), { recursive: true })
-  })
-
-  after(() => {
-    process.env.HOME = origHome
-    rmSync(fakeHome, { recursive: true, force: true })
-  })
-
-  void it("returns upgraded with spawn-based npm install", async () => {
-    const cachePath = join(fakeHome, ".xp-gate", "xp-gate-version-check.json")
-    writeFileSync(cachePath, JSON.stringify({
-      ts: Date.now() - 86_400_000 - 3600_000, // stale
-      localVersion: "0.9.1",
-      remoteVersion: "0.9.2",
-    }))
-
-    const result = await checkXpGateUpdate()
-    assert.ok(["noop", "upgraded", "error"].includes(result.action))
-  })
-})
-
-// ── UPG-003: readXpGateConfig isolated tests ──
-
-void describe("readXpGateConfig", () => {
-  const fakeHome = join(tmpdir(), "xp-gate-upd-cfg-" + randomUUID())
-  const origHome = process.env.HOME
-
-  before(() => {
-    process.env.HOME = fakeHome
-    mkdirSync(join(fakeHome, ".xp-gate"), { recursive: true })
-  })
-
-  after(() => {
-    process.env.HOME = origHome
-    rmSync(fakeHome, { recursive: true, force: true })
-  })
-
-  void it("returns null when no config.json exists", () => {
-    assert.equal(readXpGateConfig(), null)
-  })
-
-  void it("returns parsed config when config.json exists with autoUpgrade false", () => {
-    const cfgPath = join(fakeHome, ".xp-gate", "config.json")
-    writeFileSync(cfgPath, JSON.stringify({ autoUpgrade: false }))
-    const cfg = readXpGateConfig()
-    assert.notEqual(cfg, null)
-    assert.equal(cfg!.autoUpgrade, false)
-  })
-
-  void it("returns parsed config when config.json exists with autoUpgrade true", () => {
-    const cfgPath = join(fakeHome, ".xp-gate", "config.json")
-    writeFileSync(cfgPath, JSON.stringify({ autoUpgrade: true }))
-    const cfg = readXpGateConfig()
-    assert.notEqual(cfg, null)
-    assert.equal(cfg!.autoUpgrade, true)
-  })
-
-  void it("returns null when config.json is malformed", () => {
-    const cfgPath = join(fakeHome, ".xp-gate", "config.json")
-    writeFileSync(cfgPath, "not-json")
-    assert.equal(readXpGateConfig(), null)
-  })
-})
-
-// ── UPG-003: opt-out config integration tests ──
-
-void describe("checkXpGateUpdate — opt-out config integration (UPG-003)", () => {
-  const fakeHome = join(tmpdir(), "xp-gate-upd-cfg-int-" + randomUUID())
-  const origHome = process.env.HOME
-
-  before(() => {
-    process.env.HOME = fakeHome
-    mkdirSync(join(fakeHome, ".xp-gate"), { recursive: true })
-  })
-
-  after(() => {
-    process.env.HOME = origHome
-    rmSync(fakeHome, { recursive: true, force: true })
-  })
-
-  void it("handles config.json with autoUpgrade false (no crash, graceful noop)", async () => {
-    const cfgPath = join(fakeHome, ".xp-gate", "config.json")
-    writeFileSync(cfgPath, JSON.stringify({ autoUpgrade: false }))
-
-    const result = await checkXpGateUpdate()
-    // Should not crash — returns noop because local install not found in fake home
-    assert.ok(["noop", "upgraded", "error"].includes(result.action))
   })
 })

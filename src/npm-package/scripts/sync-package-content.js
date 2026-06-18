@@ -92,6 +92,22 @@ function injectCanonicalSkills(pluginDest) {
   }
 }
 
+/**
+ * Rewrite import paths in tui-plugin.ts after copy.
+ * Source uses repo-root relative paths (../../src/npm-package/lib/...);
+ * the published copy lives inside the npm package so needs shorter paths.
+ */
+function rewriteTuiPluginImports(destPluginDir) {
+  const tuiFile = path.join(destPluginDir, 'tui-plugin.ts');
+  if (!fs.existsSync(tuiFile)) return;
+  let content = fs.readFileSync(tuiFile, 'utf8');
+  content = content.replace(
+    /from\s+["']\.\.\/\.\.\/src\/npm-package\/lib\/shared-phase-constants["']/g,
+    'from "../../lib/shared-phase-constants"'
+  );
+  fs.writeFileSync(tuiFile, content, 'utf8');
+}
+
 function syncPlugins() {
   const destRoot = path.join(PKG_ROOT, 'plugins');
   rmrf(destRoot);
@@ -103,6 +119,9 @@ function syncPlugins() {
     if (copyDir(src, dest)) {
       if (PLUGINS_WITH_GITIGNORED_SKILLS.has(name)) {
         injectCanonicalSkills(dest);
+      }
+      if (name === 'opencode') {
+        rewriteTuiPluginImports(dest);
       }
       copied += 1;
       console.error(`[sync] plugins/${name}`);
@@ -148,6 +167,111 @@ function syncModules(moduleName) {
   return 1;
 }
 
+function extractPreCommitGateNumbers(preCommitContent) {
+  const SCRIPT_META_GATES = new Set(['10']);
+  const gates = new Set();
+  for (const m of preCommitContent.matchAll(/Gate (\d+):/g)) {
+    if (!SCRIPT_META_GATES.has(m[1])) {
+      gates.add(m[1]);
+    }
+  }
+  return gates;
+}
+
+function extractReadmeGateNumbers(readmeContent, section) {
+  const gates = new Set();
+  for (const m of readmeContent.matchAll(section)) {
+    gates.add(m[1]);
+  }
+  return gates;
+}
+
+function compareGateSets(scriptGates, readmeGates, label, sortFn) {
+  const scriptOnly = [...scriptGates].filter((g) => !readmeGates.has(g));
+  const readmeOnly = [...readmeGates].filter((g) => !scriptGates.has(g));
+
+  if (scriptOnly.length > 0 || readmeOnly.length > 0) {
+    const hookFile = label.toLowerCase();
+    console.error(`[drift-check] ERROR: ${label} Gate table drift detected!`);
+    const sortedScript = [...scriptGates].sort(sortFn);
+    const sortedReadme = [...readmeGates].sort(sortFn);
+    console.error(`  Script githooks/${hookFile} has ${scriptGates.size} gates: [${sortedScript.join(', ')}]`);
+    console.error(`  README.md documents ${readmeGates.size} gates: [${sortedReadme.join(', ')}]`);
+    if (scriptOnly.length > 0) {
+      const sorted = sortFn ? scriptOnly.sort(sortFn) : scriptOnly;
+      console.error(`  In script but NOT in README: Gate ${sorted.join(', Gate ')}`);
+    }
+    if (readmeOnly.length > 0) {
+      const sorted = sortFn ? readmeOnly.sort(sortFn) : readmeOnly;
+      console.error(`  In README but NOT in script: Gate ${sorted.join(', Gate ')}`);
+    }
+    console.error(`  Fix: Update README.md Gate table to match githooks/${hookFile}`);
+  }
+  return { scriptOnly, readmeOnly };
+}
+
+function checkPreCommitDrift(preCommitPath, readmePath) {
+  let scriptContent = '';
+  if (fs.existsSync(preCommitPath)) {
+    scriptContent = fs.readFileSync(preCommitPath, 'utf8');
+  } else {
+    console.error('[drift-check] WARN: githooks/pre-commit not found, skipping pre-commit check');
+    return null;
+  }
+
+  const scriptGates = extractPreCommitGateNumbers(scriptContent);
+
+  let readmeContent = '';
+  if (fs.existsSync(readmePath)) {
+    readmeContent = fs.readFileSync(readmePath, 'utf8');
+  } else {
+    console.error('[drift-check] WARN: README.md not found, skipping drift check');
+    return true;
+  }
+
+  const readmeGates = extractReadmeGateNumbers(readmeContent, /\| Gate (\d+) \|/g);
+
+  if (scriptGates.size > 0 && readmeGates.size > 0) {
+    const numericSort = (a, b) => +a - +b;
+    const { scriptOnly, readmeOnly } = compareGateSets(scriptGates, readmeGates, 'Pre-commit', numericSort);
+    if (scriptOnly.length > 0 || readmeOnly.length > 0) {
+      return false;
+    }
+    console.error(`[drift-check] OK: pre-commit ${scriptGates.size} gates match README`);
+  }
+  return true;
+}
+
+function checkPrePushDrift(prePushPath, readmePath) {
+  let scriptContent = '';
+  if (fs.existsSync(prePushPath)) {
+    scriptContent = fs.readFileSync(prePushPath, 'utf8');
+  } else {
+    console.error('[drift-check] WARN: githooks/pre-push not found, skipping pre-push check');
+    return null;
+  }
+
+  const scriptGates = extractReadmeGateNumbers(scriptContent, /[Gg][Aa][Tt][Ee] (M\d*)/g);
+
+  let readmeContent = '';
+  if (fs.existsSync(readmePath)) {
+    readmeContent = fs.readFileSync(readmePath, 'utf8');
+  } else {
+    return true;
+  }
+
+  const readmeGates = extractReadmeGateNumbers(readmeContent, /\| Gate (M\d*) \|/g);
+
+  if (scriptGates.size > 0 && readmeGates.size > 0) {
+    const { scriptOnly, readmeOnly } = compareGateSets(scriptGates, readmeGates, 'Pre-push');
+    if (scriptOnly.length > 0 || readmeOnly.length > 0) {
+      return false;
+    }
+    console.error(`[drift-check] OK: pre-push ${scriptGates.size} gates match README`);
+  }
+  return true;
+}
+
 /**
  * Docs-drift check (REQ-TDD-005): compare Gate table in README.md against
  * actual gate definitions in githooks/pre-commit and githooks/pre-push.
@@ -158,91 +282,12 @@ function checkDocsDrift(preCommitPath, prePushPath, readmePath, agentsPath) {
   const prePushScript = prePushPath || path.join(REPO_ROOT, 'githooks', 'pre-push');
   const readme = readmePath || path.join(REPO_ROOT, 'README.md');
 
-  // Script pattern: lines like `echo "→ Gate 1: Code Quality..."` and `"Gate 0:"`
-  let scriptContent = '';
-  if (fs.existsSync(preCommitScript)) {
-    scriptContent = fs.readFileSync(preCommitScript, 'utf8');
-  } else {
-    console.error('[drift-check] WARN: githooks/pre-commit not found, skipping pre-commit check');
-  }
+  const preCommitResult = checkPreCommitDrift(preCommitScript, readme);
+  if (preCommitResult === false) return false;
 
-  const SCRIPT_META_GATES = new Set(['10']);
-  const scriptGateNums = new Set();
-  for (const m of scriptContent.matchAll(/Gate (\d+):/g)) {
-    if (!SCRIPT_META_GATES.has(m[1])) {
-      scriptGateNums.add(m[1]);
-    }
-  }
-  let readmeContent = '';
-  if (fs.existsSync(readme)) {
-    readmeContent = fs.readFileSync(readme, 'utf8');
-  } else {
-    console.error('[drift-check] WARN: README.md not found, skipping drift check');
-    return true;
-  }
+  const prePushResult = checkPrePushDrift(prePushScript, readme);
+  if (prePushResult === false) return false;
 
-  const readmePreCommitGates = new Set();
-  for (const m of readmeContent.matchAll(/\| Gate (\d+) \|/g)) {
-    readmePreCommitGates.add(m[1]);
-  }
-
-  if (scriptGateNums.size > 0 && readmePreCommitGates.size > 0) {
-    const scriptOnly = [...scriptGateNums].filter((g) => !readmePreCommitGates.has(g));
-    const readmeOnly = [...readmePreCommitGates].filter((g) => !scriptGateNums.has(g));
-
-    if (scriptOnly.length > 0 || readmeOnly.length > 0) {
-      console.error('[drift-check] ERROR: Pre-commit Gate table drift detected!');
-      console.error(`  Script githooks/pre-commit has ${scriptGateNums.size} gates: [${[...scriptGateNums].sort((a, b) => +a - +b).join(', ')}]`);
-      console.error(`  README.md documents ${readmePreCommitGates.size} gates: [${[...readmePreCommitGates].sort((a, b) => +a - +b).join(', ')}]`);
-      if (scriptOnly.length > 0) {
-        console.error(`  In script but NOT in README: Gate ${scriptOnly.sort((a, b) => +a - +b).join(', Gate ')}`);
-      }
-      if (readmeOnly.length > 0) {
-        console.error(`  In README but NOT in script: Gate ${readmeOnly.sort((a, b) => +a - +b).join(', Gate ')}`);
-      }
-      console.error('  Fix: Update README.md Gate table to match githooks/pre-commit');
-      return false;
-    }
-    console.error(`[drift-check] OK: pre-commit ${scriptGateNums.size} gates match README`);
-  }
-
-  let pushScriptContent = '';
-  if (fs.existsSync(prePushScript)) {
-    pushScriptContent = fs.readFileSync(prePushScript, 'utf8');
-  } else {
-    console.error('[drift-check] WARN: githooks/pre-push not found, skipping pre-push check');
-    return true;
-  }
-
-  const scriptPushGates = new Set();
-  for (const m of pushScriptContent.matchAll(/[Gg][Aa][Tt][Ee] (M\d*)/g)) {
-    scriptPushGates.add(m[1]);
-  }
-
-  const readmePushGates = new Set();
-  for (const m of readmeContent.matchAll(/\| Gate (M\d*) \|/g)) {
-    readmePushGates.add(m[1]);
-  }
-
-  if (scriptPushGates.size > 0 && readmePushGates.size > 0) {
-    const scriptOnly = [...scriptPushGates].filter((g) => !readmePushGates.has(g));
-    const readmeOnly = [...readmePushGates].filter((g) => !scriptPushGates.has(g));
-
-    if (scriptOnly.length > 0 || readmeOnly.length > 0) {
-      console.error('[drift-check] ERROR: Pre-push Gate table drift detected!');
-      console.error(`  Script githooks/pre-push has ${scriptPushGates.size} gates: [${[...scriptPushGates].join(', ')}]`);
-      console.error(`  README.md documents ${readmePushGates.size} gates: [${[...readmePushGates].join(', ')}]`);
-      if (scriptOnly.length > 0) {
-        console.error(`  In script but NOT in README: Gate ${scriptOnly.join(', Gate ')}`);
-      }
-      if (readmeOnly.length > 0) {
-        console.error(`  In README but NOT in script: Gate ${readmeOnly.join(', Gate ')}`);
-      }
-      console.error('  Fix: Update README.md Gate table to match githooks/pre-push');
-      return false;
-    }
-    console.error(`[drift-check] OK: pre-push ${scriptPushGates.size} gates match README`);
-  }
   return true;
 }
 

@@ -1,6 +1,6 @@
 import { tool } from "@opencode-ai/plugin"
 import { z } from "zod"
-import { exec, execSync } from "node:child_process"
+import { exec, execSync, spawn } from "node:child_process"
 import { promisify } from "node:util"
 import { readFileSync, writeFileSync, existsSync, mkdirSync, rmSync } from "node:fs"
 import { join } from "node:path"
@@ -115,14 +115,39 @@ async function checkXpGateUpdate(): Promise<UpgradeResult> {
     return { action: "noop", localVersion, remoteVersion }
   }
 
+  // Check opt-out config
+  const config = readXpGateConfig()
+  if (config?.autoUpgrade === false) {
+    writeCache(XP_GATE_CACHE_FILE, { ts: Date.now(), localVersion, remoteVersion, status: "current" })
+    return { action: "noop", localVersion, remoteVersion }
+  }
+
   writeCache(XP_GATE_CACHE_FILE, { ts: Date.now(), localVersion, remoteVersion })
   try {
-    execSync(`npm install -g ${XP_GATE_NPM_PKG}@${remoteVersion}`, { stdio: "pipe", timeout: 120_000 })
-    writeCache(XP_GATE_CACHE_FILE, { ts: Date.now(), localVersion: remoteVersion, remoteVersion, status: "current" })
+    const child = spawn("npm", ["install", "-g", `${XP_GATE_NPM_PKG}@${remoteVersion}`], {
+      stdio: "pipe",
+      timeout: 120_000,
+    })
+    child.on("close", (code) => {
+      if (code === 0) {
+        writeCache(XP_GATE_CACHE_FILE, { ts: Date.now(), localVersion: remoteVersion, remoteVersion, status: "current" })
+      }
+    })
+    child.on("error", () => { /* empty — cache won't get status:current, so next check retries */ })
     return { action: "upgraded", localVersion, remoteVersion }
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err)
     return { action: "error", localVersion, remoteVersion, error: msg }
+  }
+}
+
+function readXpGateConfig(): { autoUpgrade?: boolean } | null {
+  const cfgPath = join(homedir(), ".xp-gate", "config.json")
+  try {
+    if (!existsSync(cfgPath)) return null
+    return JSON.parse(readFileSync(cfgPath, "utf8"))
+  } catch {
+    return null
   }
 }
 

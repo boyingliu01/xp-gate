@@ -1,14 +1,14 @@
 {
   "reportVersion": "1.1",
-  "generatedAt": "2026-06-18T07:54:48Z",
+  "generatedAt": "2026-06-18T08:30:57Z",
   "branch": "main",
-  "commit": "a98bc7372cce84decc312ed428fc3e4cc7c925ae",
+  "commit": "b67fc85fb57204c9f14f6af5811d9bf1018a3cbc",
   "language": "typescript",
   "overall": {
-    "gatesPassed": 7,
+    "gatesPassed": 10,
     "gatesTotal": 10,
-    "score": 7.0,
-    "verdict": "PARTIAL"
+    "score": 10.0,
+    "verdict": "PASS"
   },
   "gates": {
     "gate1_static_analysis": {
@@ -23,14 +23,14 @@
     },
     "gate3_complexity": {
       "name": "Cyclomatic Complexity",
-      "status": "SKIP",
+      "status": "PASS",
       "threshold": "5",
       "blockThreshold": "5",
       "warnings": 0
     },
     "gate4_principles": {
       "name": "Clean Code + SOLID",
-      "status": "SKIP",
+      "status": "PASS",
       "warnings": 0
     },
     "gate5_tests": {
@@ -43,7 +43,7 @@
     "gate6_arch_boyscout": {
       "name": "Architecture + Boy Scout Rule",
       "status": "PASS",
-      "boyScoutPassed": 1,
+      "boyScoutPassed": 48,
       "boyScoutBlocked": 0
     },
     "gate7_iac_security": {
@@ -58,7 +58,7 @@
     },
     "gate9_sast": {
       "name": "SAST Security Scan",
-      "status": "SKIP",
+      "status": "PASS",
       "tool": "semgrep"
     },
     "gate10_sprint_flow": {
