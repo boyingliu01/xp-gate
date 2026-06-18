@@ -1,14 +1,16 @@
 # PROJECT KNOWLEDGE BASE
 
 **Generated:** 2026-06-18
-**Commit:** 5ee2fa4
+**Commit:** 1d85a52
 **Branch:** main
-**Version:** 0.9.0.0
+**Version:** 0.9.2.0
 
 ## OVERVIEW
 XP-Gate — deterministic git quality gates + AI-driven multi-expert review (Delphi) + Sprint Flow pipeline + npm zero-install distribution + cross-platform plugin system (Claude Code / OpenCode / Qoder). Pre-commit runs **10 numbered gates (Gate 0–9)** at the script level, conceptually grouped as **6 categories** in user-facing docs (README, CAPABILITIES.md). Pre-push runs **3 mutation/mock gates (M, M2, M3) + Delphi code-walkthrough**. Implements 14 Clean Code/SOLID rules across 9 language adapters (TypeScript engine), 13 shell adapters (gate routing), Boy Scout Rule baseline enforcement, test-specification alignment, mock policy enforcement, and incremental mutation testing.
 
 > **Doc-vs-script drift, intentional:** README/CAPABILITIES.md describe "6 Gates" as a conceptual grouping; the actual `githooks/pre-commit` script runs Gate 0–9. Tracked as a doc-alignment issue, not a bug.
+>
+> **v0.9.2**: Windows Git Bash compatibility — `detect_os_env()`, `head→sed` migration (46 changes), `[[ ]]→[ ]` POSIX conditionals (47 changes), winget install hints, Windows CI job. All 37 githooks `.sh` files are now `head`-free.
 
 ## STRUCTURE
 ```
@@ -31,9 +33,9 @@ XP-Gate — deterministic git quality gates + AI-driven multi-expert review (Del
 │   ├── mutation/       # Gate M (incremental mutation) + Gate M2 helpers (detect-ai-test) + baselines
 │   └── rules/          # Shared rule index
 ├── plugins/            # Cross-platform plugin sources (v0.4.0+; rebuilt into src/npm-package/plugins/)
-│   ├── claude-code/    # JSON manifest + bash hooks + bin wrapper; ships ONLY sprint-flow skill currently
-│   ├── opencode/       # TS module with 3 tools (gate-check, gate-principles, gate-arch); ships ONLY sprint-flow
-│   ├── qoder/          # 7 skills, NO manifest file (see issue #qoder-manifest)
+│   ├── claude-code/    # JSON manifest + bash hooks + bin wrapper; ships all 8 skills
+│   ├── opencode/       # TS module with 3 tools (gate-check, gate-principles, gate-arch); ships all 8 skills
+│   ├── qoder/          # 7 skills (expects npx xp-gate call for gate tooling; plugin.json exists)
 │   └── shared/         # Cross-platform docs (when present)
 ├── githooks/           # Source-of-truth hook scripts (also bundled into npm package)
 │   ├── pre-commit      # ~2084 lines: Gate 0 (Version Consistency) + Gates 1–9
@@ -65,7 +67,7 @@ XP-Gate — deterministic git quality gates + AI-driven multi-expert review (Del
 ├── MANIFEST.md         # Machine-readable component manifest
 ├── architecture.yaml   # ARCH-001..014 rule definitions
 ├── specification.yaml  # Requirements (auto-generated from APPROVED design docs)
-├── VERSION             # Single source of truth: 0.8.8.0 (MAJOR.MINOR.PATCH.MICRO)
+├── VERSION             # Single source of truth: 0.9.2.0 (MAJOR.MINOR.PATCH.MICRO)
 ├── .architecture-baseline.json  # ARCH baseline snapshot (~20 KB)
 ├── .archlint.yaml      # Architecture lint config
 ├── .mockpolicyrc       # Gate M3 mock policy config
@@ -88,7 +90,7 @@ XP-Gate — deterministic git quality gates + AI-driven multi-expert review (Del
 | CLI implementations | src/npm-package/lib/ | init, install/update/uninstall-skill, doctor, migrate, uninstall, baseline, audit-log, gate-audit, rollback, ui-detector, ui-review, download-skill, shared-* |
 | Claude Code plugin | plugins/claude-code/ | Manifest: .claude-plugin/plugin.json; hooks: hooks/hooks.json |
 | OpenCode plugin | plugins/opencode/ | index.ts exposes gate-check, gate-principles, gate-arch |
-| Qoder plugin | plugins/qoder/ | 7 skills bundled, manifest MISSING (see Known Drift) |
+| Qoder plugin | plugins/qoder/ | 7 skills (expects npx xp-gate for gate tooling) |
 | Plugin builder | scripts/build-plugin.sh | --platform claude-code\|opencode\|qoder |
 | Skill copy | scripts/copy-skills.sh | Preserves references/ and templates/ |
 | Plugin tests | scripts/test-plugins.sh | 28 integration tests |
@@ -166,7 +168,7 @@ Subcommands registered in 0.8.8.0 (verified against bin source):
 > Older docs said "8 commands"; 0.8.8 grew to ≥11; 0.8.9 added `check`/`principles`/`arch` for parity with the OpenCode plugin (fixes #208). v0.8.16 added `sprint-status`, bringing the total to ≥16.
 
 ## CONVENTIONS
-- **VERSION as single source of truth.** `scripts/sync-version.sh` propagates the 4-digit `MAJOR.MINOR.PATCH.MICRO` from `VERSION` into the 4 `package.json` files (root, src/npm-package, plugins/opencode, plugins/claude-code) as a 3-digit npm-compatible semver. Never edit `package.json` versions by hand.
+- **VERSION as single source of truth.** `scripts/sync-version.sh` propagates `MAJOR.MINOR.PATCH.MICRO` from `VERSION` into npm package.json files (3-digit) and plugin manifests. Root `package.json` uses 3-digit version. Never edit `package.json` versions by hand.
 - **No `--no-verify` ever.** `githooks/QUALITY-GATES-CODE-OF-CONDUCT.md` makes hook bypass a process violation.
 - **Tool missing → SKIP, not BLOCK.** When a language tool isn't installed, the adapter degrades the gate to SKIP instead of blocking the commit. Hard-block only fires when the tool exists and the check fails.
 - **Boy Scout Rule (Gate 6).** New files: zero warnings. Modified files: warning count cannot increase vs `.warnings-baseline.json`. Untouched files: unchecked.
@@ -189,18 +191,7 @@ Subcommands registered in 0.8.8.0 (verified against bin source):
 - Do NOT push from main/master and expect code-walkthrough to run — by design it's skipped.
 - Do NOT delete or rename `.code-walkthrough-result.json` before push.
 
-## KNOWN DRIFT (file as issues; tracked, not bugs in code)
+## KNOWN DRIFT HISTORY
 
-| # | What | Source of truth | Stale doc | Plan |
-|---|------|-----------------|-----------|------|
-| 1 | Gate count: docs say 6, script runs 10 (Gate 0–9) | `githooks/pre-commit` | README.md, CAPABILITIES.md | ✅ Fixed: README enumerates Gate 0-9 with conceptual grouping note. |
-| 2 | Pre-push gate count: docs say "Gate M + Delphi", reality = Gate M + M2 + M3 + Delphi | `githooks/pre-push` | README.md | ✅ Fixed: README pre-push table includes Gate M2/M3 rows. |
-| 3 | Delphi consensus threshold: docs say 95%, SKILL.md uses 91% | — | — | ✅ Fixed: unified to ≥90% across all docs and skills. |
-| 4 | Sprint Flow phase count: docs say 7-phase, reality = 11 phases (-1, -0.5, 0..8) | `skills/sprint-flow/SKILL.md` | README.md "Sprint Flow 全流程" section | ✅ Fixed: README ASCII pipeline shows all 11 phases with correct labels. |
-| 5 | CLI command count: docs say 8, source registers ≥15 (added check/principles/arch in 0.8.9 for #208) | `src/npm-package/bin/xp-gate.js` | Root README CLI table, MANIFEST.md | ✅ Both refreshed in 0.8.9 fix-pack. |
-| 6 | plugins/qoder/ missing manifest file | repo state | Plugin docs claim qoder is supported | ✅ Fixed: `plugins/qoder/plugin.json` exists with valid manifest. |
-| 7 | claude-code/ + opencode/ ship only `sprint-flow` skill; docs say 6-7 skills | `src/npm-package/scripts/sync-package-content.js` CORE_SKILLS (8 entries) | README "方式 -1" section | ✅ Fixed: `build-plugin.sh` + `copy-skills.sh` + `sync-package-content.js` all ship all 8 skills for claude-code/opencode/qoder. README says 8 skills. |
-| 8 | README lists `adapter-c.sh` but no `c.sh` exists in `githooks/adapters/` | repo state | README "语言支持" table | ✅ Fixed: README removed C row, no `adapter-c.sh` reference. |
-| 9 | CHANGELOG: v0.8.2 marked "Unreleased" while v0.8.8 is already shipped | `CHANGELOG.md` | CHANGELOG order | ✅ Fixed: v0.8.2 now has date ("2026-06-08") with explanation note about prior "Unreleased" error. |
-| 10 | Root AGENTS.md (this file before regen) said v0.8.1 / 2026-05-30 / commit 4517f2b | This file before this commit | This file | Fixed in this commit. Confirms the staleness pattern across all AGENTS.md mirrors — re-run `/init-deep` whenever VERSION bumps a minor digit. |
+All 10 documented drift items (Gate count, pre-push gates, Delphi threshold, Sprint Flow phases, CLI count, qoder manifest, skill bundling, C adapter, CHANGELOG date, AGENTS.md staleness) were resolved in v0.8.9–v0.9.2. Run `/init-deep` whenever VERSION bumps a minor digit to prevent AGENTS.md mirror staleness.
 

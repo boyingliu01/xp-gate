@@ -1,12 +1,12 @@
 # PLUGINS KNOWLEDGE BASE
 
 **Generated:** 2026-06-18
-**Commit:** 5ee2fa4
+**Commit:** 1d85a52
 **Branch:** main
-**Version:** 0.9.0.0
+**Version:** 0.9.2.0
 
 ## OVERVIEW
-Cross-platform plugin system for Claude Code, OpenCode, and Qoder. Shared skills + platform-specific hooks/tooling. **The three platforms currently ship inconsistent skill sets — see "Known Issues" below.**
+Cross-platform plugin system for Claude Code, OpenCode, and Qoder. Shared skills + platform-specific hooks/tooling. **All three platforms ship 8 skills each as of v0.9.1+.**
 
 ## STRUCTURE
 ```
@@ -84,20 +84,13 @@ bash scripts/test-plugins.sh
 # opencode.json:  { "plugin": ["./plugins/opencode"] }
 ```
 
-## KNOWN ISSUES (filed as GitHub issues during 2026-06-09 audit)
+## KNOWN ISSUES (all resolved as of v0.9.2)
 
-| # | Issue | Severity | Status |
-|---|-------|----------|--------|
-| 1 | `plugins/qoder/` is missing a manifest file (`plugin.json` / `qoder.json`) — the plugin can't be registered with Qoder host as-is | High | ✅ Fixed in commit `1d2cff8` (#202) |
-| 2 | `plugins/claude-code/skills/` and `plugins/opencode/skills/` bundle only `sprint-flow`; docs say "6 skills" / "7 skills". `scripts/build-plugin.sh` or `scripts/copy-skills.sh` isn't copying the full set for these two platforms | High | ✅ Fixed in commit `1d2cff8` (#203) |
-| 3 | None of the three platforms ships the new `test-driven-development` skill (added in 0.8.x) | Medium | ✅ Fixed in commit `1d2cff8` (#203) |
-| 4 | OpenCode plugin's `gate-check` and `gate-arch` tools shell out to `xp-gate check` and `npx archlint check` — neither subcommand/package exists as advertised. Tools silently no-op or crash | High | ✅ Fixed in 0.8.9 (#208): new `xp-gate check/principles/arch` subcommands + plugin shell-out + npx-tsx fallback |
-
-See root `AGENTS.md` → "Known Drift" #6, #7 for full context.
+All 4 documented plugin issues (qoder manifest missing, claude-code/opencode incomplete skill bundles, missing tdd skill, OpenCode tool shell-out) were fixed in commits `1d2cff8` (#202/#203) and 0.8.9 (#208). See root `AGENTS.md` → "Known Drift History".
 
 ## NOTES
 - v0.4.0+: plugin system introduced.
 - v0.8.x: plugin version bumped to 0.8.8 (synced from repo `VERSION`).
-- OpenCode plugin exposes 3 tools: `gate-check`, `gate-principles`, `gate-arch`.
+- OpenCode plugin exposes 3 tools: `gate-check`, `gate-principles`, `gate-arch`, each shelling out to `xp-gate check/principles/arch` subcommands (fixes #208).
 - `test-plugins.sh` validates JSON manifests, version pinning, build outputs, and graceful-degradation behavior.
 

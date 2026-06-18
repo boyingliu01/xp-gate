@@ -1,9 +1,9 @@
 # GITHOOKS KNOWLEDGE BASE
 
 **Generated:** 2026-06-18
-**Commit:** 5ee2fa4
+**Commit:** 1d85a52
 **Branch:** main
-**Version:** 0.9.0.0
+**Version:** 0.9.2.0
 
 ## OVERVIEW
 Git quality gates: pre-commit runs **10 numbered gates** (Gate 0–9, conceptually grouped as "6 categories" in user-facing docs) via 13 language adapters; pre-push runs **Gate M + Gate M2 + Gate M3 + Delphi code-walkthrough validator**. Zero-tolerance policy per `QUALITY-GATES-CODE-OF-CONDUCT.md` — `--no-verify` strictly prohibited.
@@ -18,7 +18,7 @@ githooks/
 │   ├── typescript.sh, python.sh, go.sh, java.sh, kotlin.sh
 │   ├── cpp.sh, swift.sh, objectivec.sh, shell.sh, powershell.sh
 │   ├── dart.sh, flutter.sh, iac.sh
-│   │                             # NOTE: no standalone c.sh — README claims one (see Known Drift #8)
+│   │                             # NOTE: no standalone c.sh (cpp.sh handles both C and C++)
 │   └── plugins/                  # 5 third-party extensions
 │       ├── p3c-java/             # Alibaba P3C Java guidelines
 │       ├── whalecloud-java/      # Whalecloud Java rules
