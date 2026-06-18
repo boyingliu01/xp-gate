@@ -4,10 +4,23 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+## [0.9.0] - 2026-06-18
+
 ### Breaking Changes
 
 - **Gate 5a-BLOCK**: New `.ts/.tsx` files without corresponding tests now BLOCK commits (previously WARNING only). Modified files remain WARNING. Escape valve: `SKIP_GATE_5A_BLOCK=1` (non-main/master branches only).
 - **Gate M2**: Mock density threshold lowered from 50% to 30%. Phase 1: WARNING mode (no blocking). Phase 2: will enable BLOCK after baseline analysis. Configurable via `.mockpolicyrc`.
+
+### Added
+
+- **REQ-TDD-004**: 24 BATS tests for Gate 5a-BLOCK (14 scenarios) and Gate M2 threshold (10 scenarios)
+- **REQ-TDD-005**: `checkDocsDrift()` unit tests (5 tests) with testable refactor — function now accepts path params and returns boolean instead of `process.exit(1)`
+- **Gate 5a config exclusions**: `node_modules/`, `.next/`, `.nuxt/`, `dist/`, `build/`, `.turbo/`, `.cache/`, and config files (`vitest.config.*`, `vite.config.*`, `tsconfig.*`, etc.)
+
+### Changed
+
+- **REQ-TDD-003**: Skill references synced across npm mirrors (ralph-loop, sprint-flow, phase-2-build)
+- **Gate 5a**: New `.ts/.tsx` files without tests now BLOCK (previously WARNING)
 
 ## [0.8.21] - 2026-06-17
 
