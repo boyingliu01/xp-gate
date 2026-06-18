@@ -161,6 +161,77 @@ jobs:
           echo "PASS: tarball < 2MB ($SIZE bytes)"
         shell: bash
 
+  # AC-WIN-005: Windows Git Bash hook syntax check (+ detect_os_env validation)
+  windows-gitbash-hooks:
+    name: Windows Git Bash Hooks
+    runs-on: windows-latest
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: bash -n syntax check on all .sh files
+        run: |
+          failed=0
+          while IFS= read -r -d '' f; do
+            echo "Checking: $f"
+            bash -n "$f" || { echo "FAIL: $f"; failed=1; }
+          done < <(find githooks -name '*.sh' -print0)
+          echo "---"
+          if [ "$failed" -eq 1 ]; then
+            echo "FAIL: one or more shell files have syntax errors"
+            exit 1
+          fi
+          echo "PASS: all .sh files pass bash -n"
+
+      - name: bash -n on pre-commit and pre-push
+        run: |
+          bash -n githooks/pre-commit && echo "PASS: pre-commit"
+          bash -n githooks/pre-push && echo "PASS: pre-push"
+
+      - name: Inline detect_os_env() test (expect windows)
+        run: |
+          result=$(bash -c '
+            source githooks/adapter-common.sh
+            detect_os_env
+          ')
+          echo "detect_os_env() returned: $result"
+          if [ "$result" != "windows" ]; then
+            echo "FAIL: expected 'windows', got '$result'"
+            exit 1
+          fi
+          echo "PASS: detect_os_env() returns '$result' on windows-latest"
+
+      - name: OSTYPE-unset negative test
+        run: |
+          result=$(bash -c '
+            unset OSTYPE
+            source githooks/adapter-common.sh
+            detect_os_env
+          ')
+          echo "detect_os_env() with unset OSTYPE returned: $result"
+          case "$result" in
+            windows) echo "PASS: still detects windows via uname" ;;
+            linux|macos) echo "INFO: on non-windows runner, expected: $result" ;;
+            *) echo "FAIL: unexpected result '$result'"; exit 1 ;;
+          esac
+
+      - name: OSTYPE=cygwin negative test
+        run: |
+          result=$(bash -c '
+            export OSTYPE=cygwin
+            source githooks/adapter-common.sh
+            detect_os_env
+          ')
+          echo "detect_os_env() with OSTYPE=cygwin returned: $result"
+          if [ "$result" != "windows" ]; then
+            echo "FAIL: expected 'windows' for OSTYPE=cygwin, got '$result'"
+            exit 1
+          fi
+          echo "PASS: detect_os_env() correctly handles OSTYPE=cygwin"
+
   # Mirror Parity Guard: src/npm-package/skills/ and src/npm-package/plugins/ must equal canonical sources
   # Prevents silent divergence between source-of-truth and npm-distributed copies (C-CRIT-2)
   mirror-parity:

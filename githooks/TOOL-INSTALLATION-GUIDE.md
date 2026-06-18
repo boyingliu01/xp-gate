@@ -484,4 +484,78 @@ Install-Module Pester -Scope CurrentUser -Force
 - Dart 项目优先使用 `dart analyze`（不依赖 Flutter 框架，启动更快）
 - Flutter 项目使用 `flutter analyze`（包含 Flutter 特定规则）
 
+---
+
+## Windows (Git Bash) 环境指南
+
+### 前置条件
+
+| 条件 | 说明 |
+|------|------|
+| **Git Bash** | 必须安装 [Git for Windows](https://git-scm.com/download/win)，选择"Git Bash"组件 |
+| **Node.js** | 下载 [Node.js ≥18.x](https://nodejs.org/) Windows 安装包，或 `winget install OpenJS.NodeJS.LTS` |
+| **Python** | 从 [python.org](https://www.python.org/downloads/) 下载，或 `winget install Python.Python.3.12` |
+
+> **重要**：Git Bash 使用 `MINGW64/MSYS` 环境，与 Linux/macOS 的 bash 行为不完全一致。XP-Gate 已做以下适配：
+> - `detect_os_env()` 识别 `MINGW*|MSYS*|CYGWIN*` 返回 `windows`
+> - 所有脚本使用 `[ ]` 而非 `[[ ]]` 条件（POSIX 兼容）
+> - 使用 `sed -n '1,Np; Nq'` 替代 `head` 命令
+
+### Windows 工具安装表
+
+| 工具 | 用途 | 安装命令 |
+|------|------|----------|
+| **gitleaks** | Gate 8 密钥扫描 | `winget install gitleaks` 或从 [GitHub Releases](https://github.com/gitleaks/gitleaks/releases) 下载 |
+| **semgrep** | Gate 9 SAST 安全扫描 | `pip install semgrep` (需要 Python) |
+| **shellcheck** | Shell 静态分析 | `winget install koalaman.shellcheck` 或 `choco install shellcheck` |
+| **lizard** | Gate 3 复杂度 | `pip install --user lizard` |
+| **checkov** | Gate 7 IaC 安全 | `pip install checkov` |
+| **jscpd** | Gate 2 重复代码 | `npm install -g jscpd` |
+| **@archlinter/cli** | Gate 6 架构检查 | `npm install -g @archlinter/cli` |
+
+### 快速安装（Windows 一键脚本）
+
+将以下内容保存为 `install-xp-gate-tools.ps1`，以 PowerShell **管理员模式**运行：
+
+```powershell
+# Node.js
+winget install OpenJS.NodeJS.LTS
+
+# Python
+winget install Python.Python.3.12
+
+# Shell
+winget install Git.Git
+winget install koalaman.shellcheck
+
+# npm 全局工具
+npm install -g jscpd @archlinter/cli
+
+# pip 工具
+pip install lizard checkov semgrep
+```
+
+### 已知限制
+
+| Gate | Windows 状态 | 原因 |
+|------|-------------|------|
+| Gate 0-9 | ✅ 全部通过 | 所有 shell 命令已 POSIX 兼容 |
+| Gate M (Mutation) | ⚠️ 需 WSL | Stryker 需要 Node.js 原生环境，Git Bash 下建议用 WSL |
+| Gate 6 架构 | ✅ 已支持 | archlint 通过 npm 全局安装，Git Bash 可用 |
+
+### 验证
+
+```bash
+# 检查 OS 检测
+bash -c 'source githooks/adapter-common.sh && detect_os_env'
+# 预期输出: windows
+
+# 验证所有脚本语法
+bash -n githooks/adapter-common.sh && echo "✅ adapter-common.sh"
+bash -n githooks/pre-commit && echo "✅ pre-commit"
+bash -n githooks/pre-push && echo "✅ pre-push"
+```
+
+---
+
 **环境准备好后，AI 才能自动执行质量门禁。**
