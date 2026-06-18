@@ -285,6 +285,7 @@ void describe("checkXpGateUpdate — cache & upgrade", () => {
   })
 })
 
+
 // ── UPG-002: spawn-based upgrade tests ──
 
 void describe("checkXpGateUpdate — spawn (UPG-002)", () => {
