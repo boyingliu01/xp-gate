@@ -23,17 +23,17 @@ echo ""
 
 for hook in $HOOKS_LIST; do
   src="$HOOKS_DIR/$hook"
-  if [[ -f "$src" ]]; then
+  if [ -f "$src" ]; then
     cp "$src" "$TARGET_HOOKS/$hook"
     chmod +x "$TARGET_HOOKS/$hook"
     echo "  + $hook ($HOOKS_DIR/$hook) -> .git/hooks/"
   fi
 done
 
-if [[ -d "$TARGET_GITHOOKS" ]]; then
-  if [[ "$1" != "--force" ]]; then
+if [ -d "$TARGET_GITHOOKS" ]; then
+  if [ "$1" != "--force" ]; then
     mkdir -p "$TARGET_GITHOOKS/adapters"
-    if [[ -f "$HOOKS_DIR/adapter-common.sh" ]]; then
+    if [ -f "$HOOKS_DIR/adapter-common.sh" ]; then
       cp "$HOOKS_DIR/adapter-common.sh" "$TARGET_GITHOOKS/adapter-common.sh"
       echo "  + adapter-common.sh -> $TARGET_GITHOOKS/"
     fi
