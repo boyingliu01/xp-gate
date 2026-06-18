@@ -12,6 +12,8 @@
  * standalone test verification.
  */
 
+const { EventEmitter } = require('events');
+
 describe('upgrade.js --apply execSync path', () => {
   function evictCache() {
     const resolved = require.resolve('../upgrade');
@@ -24,7 +26,19 @@ describe('upgrade.js --apply execSync path', () => {
     delete require.cache[cvResolved];
   }
 
-  function withMockedEnv(latestVersion, execSyncImpl, fn) {
+  function spawnEE(closeCode) {
+    const ee = new EventEmitter();
+    process.nextTick(() => ee.emit('close', closeCode));
+    return ee;
+  }
+
+  function spawnErr(err) {
+    const ee = new EventEmitter();
+    process.nextTick(() => ee.emit('error', err));
+    return ee;
+  }
+
+  function withMockedEnv(latestVersion, spawnImpl, fn) {
     const fs = require('fs');
     const os = require('os');
     const cpPath = require('path').join(os.homedir(), '.xp-gate', 'version-cache.json');
@@ -34,8 +48,8 @@ describe('upgrade.js --apply execSync path', () => {
     evictCache();
     const cp = require('child_process');
     const https = require('https');
-    const saved = { execSync: cp.execSync, httpsGet: https.get };
-    cp.execSync = execSyncImpl;
+    const saved = { spawn: cp.spawn, httpsGet: https.get };
+    cp.spawn = spawnImpl;
     const body = JSON.stringify({ latest: latestVersion });
     https.get = (_url, _opts, cb) => {
       const callback = typeof _opts === 'function' ? _opts : cb;
@@ -55,61 +69,56 @@ describe('upgrade.js --apply execSync path', () => {
       const m = require('../upgrade');
       return fn(m);
     } finally {
-      cp.execSync = saved.execSync;
+      cp.spawn = saved.spawn;
       https.get = saved.httpsGet;
     }
   }
 
-  it('returns 0 when execSync succeeds', async () => {
-    const code = await withMockedEnv('99.99.99', vi.fn().mockReturnValue(Buffer.from('')), async (m) => {
+  it('returns 0 when spawn succeeds', async () => {
+    const code = await withMockedEnv('99.99.99', vi.fn(() => spawnEE(0)), async (m) => {
       return m.upgrade(['--apply']);
     });
     expect(code).toBe(0);
   }, 10000);
 
-  it('returns 1 when execSync throws EACCES', async () => {
-    const err = new Error('EACCES');
-    err.stderr = Buffer.from('EACCES: permission denied');
-    const code = await withMockedEnv('99.99.99', vi.fn(() => { throw err; }), async (m) => {
+  it('returns 1 when spawn errors with EACCES', async () => {
+    const err = new Error('EACCES: permission denied');
+    const code = await withMockedEnv('99.99.99', vi.fn(() => spawnErr(err)), async (m) => {
       return m.upgrade(['--apply']);
     });
     expect(code).toBe(1);
   }, 10000);
 
-  it('returns 1 when execSync throws ETIMEDOUT', async () => {
+  it('returns 1 when spawn errors with ETIMEDOUT', async () => {
     const err = new Error('ETIMEDOUT');
-    err.code = 'ETIMEDOUT';
-    err.stderr = Buffer.from('');
-    const code = await withMockedEnv('99.99.99', vi.fn(() => { throw err; }), async (m) => {
+    const code = await withMockedEnv('99.99.99', vi.fn(() => spawnErr(err)), async (m) => {
       return m.upgrade(['--apply']);
     });
     expect(code).toBe(1);
   }, 10000);
 
-  it('returns 1 when execSync throws generic error', async () => {
-    const err = new Error('generic failure');
-    err.stderr = Buffer.from('');
-    const code = await withMockedEnv('99.99.99', vi.fn(() => { throw err; }), async (m) => {
+  it('returns 1 when spawn exits with non-zero code', async () => {
+    const code = await withMockedEnv('99.99.99', vi.fn(() => spawnEE(1)), async (m) => {
       return m.upgrade(['--apply']);
     });
     expect(code).toBe(1);
   }, 10000);
 
-  it('calls execSync with correct pkgName and version', async () => {
-    const mockFn = vi.fn().mockReturnValue(Buffer.from(''));
-    await withMockedEnv('99.99.99', mockFn, async (m) => {
+  it('calls spawn with correct args', async () => {
+    const mockSpawn = vi.fn(() => spawnEE(0));
+    await withMockedEnv('99.99.99', mockSpawn, async (m) => {
       await m.upgrade(['--apply']);
-      expect(mockFn).toHaveBeenCalledWith(
-        expect.stringMatching(/npm install -g .+@99\.99\.99/),
+      expect(mockSpawn).toHaveBeenCalledWith(
+        'npm',
+        ['install', '-g', expect.stringMatching(/@99\.99\.99/)],
         expect.objectContaining({ stdio: 'inherit', timeout: 120000 }),
       );
     });
   }, 10000);
 
   // ── default mode (no --apply/--preview) outdated path ──
-  // Covers upgrade.js L110-112: formatUpgradeMsg + console.log
   it('default mode: shows upgrade msg when outdated', async () => {
-    await withMockedEnv('99.99.99', vi.fn().mockReturnValue(Buffer.from('')), async (m) => {
+    await withMockedEnv('99.99.99', vi.fn(() => spawnEE(0)), async (m) => {
       const out = [];
       const origLog = console.log;
       console.log = (...a) => { out.push(a.join(' ')); };
@@ -125,7 +134,7 @@ describe('upgrade.js --apply execSync path', () => {
   }, 10000);
 
   // ── withMockedEnv variant: also mocks getLocalVersion() to return null ──
-  function withMockedEnvNoLocal(latestVersion, execSyncImpl, fn) {
+  function withMockedEnvNoLocal(latestVersion, spawnImpl, fn) {
     const fs = require('fs');
     const os = require('os');
     const cpPath = require('path').join(os.homedir(), '.xp-gate', 'version-cache.json');
@@ -135,8 +144,8 @@ describe('upgrade.js --apply execSync path', () => {
     evictCache();
     const cp = require('child_process');
     const https = require('https');
-    const saved = { execSync: cp.execSync, httpsGet: https.get, fsReadFileSync: fs.readFileSync };
-    cp.execSync = execSyncImpl;
+    const saved = { spawn: cp.spawn, httpsGet: https.get, fsReadFileSync: fs.readFileSync };
+    cp.spawn = spawnImpl;
     // Make getLocalVersion() return null by making fs.readFileSync throw for package.json
     fs.readFileSync = (filePath, encoding) => {
       if (typeof filePath === 'string' && filePath.includes('package.json')) {
@@ -165,7 +174,7 @@ describe('upgrade.js --apply execSync path', () => {
       const m = require('../upgrade');
       return fn(m);
     } finally {
-      cp.execSync = saved.execSync;
+      cp.spawn = saved.spawn;
       https.get = saved.httpsGet;
       fs.readFileSync = saved.fsReadFileSync;
     }
@@ -178,7 +187,7 @@ describe('upgrade.js --apply execSync path', () => {
     const origLog = console.log;
     console.log = (...a) => { out.push(a.join(' ')); };
     try {
-      const code = await withMockedEnvNoLocal('0.8.12', vi.fn().mockReturnValue(Buffer.from('')), async (m) => m.upgrade(['--apply']));
+      const code = await withMockedEnvNoLocal('0.8.12', vi.fn(() => spawnEE(0)), async (m) => m.upgrade(['--apply']));
       expect(code).toBe(0);
       expect(out.join(' ')).toBe('xp-gate is up to date.');
     } finally {
@@ -192,7 +201,7 @@ describe('upgrade.js --apply execSync path', () => {
     const origLog = console.log;
     console.log = (...a) => { out.push(a.join(' ')); };
     try {
-      const code = await withMockedEnvNoLocal('0.8.12', vi.fn().mockReturnValue(Buffer.from('')), async (m) => m.upgrade([]));
+      const code = await withMockedEnvNoLocal('0.8.12', vi.fn(() => spawnEE(0)), async (m) => m.upgrade([]));
       expect(code).toBe(0);
       expect(out.join(' ')).toBe('xp-gate is up to date.');
     } finally {
@@ -206,7 +215,7 @@ describe('upgrade.js --apply execSync path', () => {
     const origLog = console.log;
     console.log = (...a) => { out.push(a.join(' ')); };
     try {
-      const code = await withMockedEnv('99.99.99', vi.fn().mockReturnValue(Buffer.from('')), async (m) => m.upgrade([]));
+      const code = await withMockedEnv('99.99.99', vi.fn(() => spawnEE(0)), async (m) => m.upgrade([]));
       expect(code).toBe(0);
       expect(out.length + (out.join(' ').length > 0 ? 1 : 0)).toBeGreaterThan(0);
     } finally {
@@ -220,7 +229,7 @@ describe('upgrade.js --apply execSync path', () => {
     const origLog = console.log;
     console.log = (...a) => { out.push(a.join(' ')); };
     try {
-      const code = await withMockedEnv('1.0.0', vi.fn().mockReturnValue(Buffer.from('')), async (m) => m.upgrade(['--preview']));
+      const code = await withMockedEnv('1.0.0', vi.fn(() => spawnEE(0)), async (m) => m.upgrade(['--preview']));
       expect(code).toBe(0);
       expect(out.length).toBe(1);
       const parsed = JSON.parse(out[0]);

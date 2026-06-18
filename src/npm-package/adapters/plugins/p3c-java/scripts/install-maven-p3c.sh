@@ -46,10 +46,10 @@ if grep -q '<profiles>' pom.xml; then
 
   # Use sed to insert before </profiles>
   # Find the line number of </profiles>
-  PROFILES_END_LINE=$(grep -n '</profiles>' pom.xml | head -1 | cut -d: -f1)
+  PROFILES_END_LINE=$(grep -n '</profiles>' pom.xml | sed -n '1p; 1q' | cut -d: -f1)
 
   if [ -n "$PROFILES_END_LINE" ]; then
-    head -n $((PROFILES_END_LINE - 1)) pom.xml > pom.xml.tmp
+    sed -n "1,$((PROFILES_END_LINE - 1))p; $((PROFILES_END_LINE - 1))q" pom.xml > pom.xml.tmp
     {
       echo ""
       echo "    <!-- XP-Gate: Alibaba p3c-pmd quality gate profile -->"
@@ -66,7 +66,7 @@ else
   PROJECT_END_LINE=$(grep -n '</project>' pom.xml | tail -1 | cut -d: -f1)
 
   if [ -n "$PROJECT_END_LINE" ]; then
-    head -n $((PROJECT_END_LINE - 1)) pom.xml > pom.xml.tmp
+    sed -n "1,$((PROJECT_END_LINE - 1))p; $((PROJECT_END_LINE - 1))q" pom.xml > pom.xml.tmp
     {
       echo ""
       echo "  <!-- XP-Gate: Alibaba p3c-pmd quality gate profile -->"

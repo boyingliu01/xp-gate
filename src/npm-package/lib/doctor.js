@@ -211,30 +211,10 @@ function diagnose() {
   issues += configResult.issues;
 
   // --- Check 2: Version mismatch ---
-  const pkgVersion = getPackageVersion();
-  const configVersion = config.version;
-  if (configVersion && pkgVersion && configVersion !== pkgVersion) {
-    checks.push({
-      name: 'Version mismatch',
-      status: 'FAIL',
-      detail: `config: ${configVersion}, package: ${pkgVersion} — run 'xp-gate doctor --fix' to sync`
-    });
-    issues++;
-  }
+  issues += diagnoseVersion(config, getPackageVersion(), checks);
 
   // --- Check 3: templateDir validation ---
-  const configTemplateDir = config.templateDir;
-  if (configTemplateDir) {
-    const expectedTemplateDir = getTemplateDir();
-    if (configTemplateDir !== expectedTemplateDir) {
-      checks.push({
-        name: 'templateDir',
-        status: 'FAIL',
-        detail: `points to ${configTemplateDir}, expected ${expectedTemplateDir} for current platform`
-      });
-      issues++;
-    }
-  }
+  issues += diagnoseTemplateDir(config, checks);
 
   // --- Check 4: Hooks files ---
   if (config.mode === 'local') {
@@ -250,6 +230,43 @@ function diagnose() {
   checkEnv(checks);
 
   return { checks, issues };
+}
+
+/**
+ * Check 2: Version mismatch between config and package.
+ * @returns {number} issue count (0 or 1)
+ */
+function diagnoseVersion(config, pkgVersion, checks) {
+  const configVersion = config.version;
+  if (configVersion && pkgVersion && configVersion !== pkgVersion) {
+    checks.push({
+      name: 'Version mismatch',
+      status: 'FAIL',
+      detail: `config: ${configVersion}, package: ${pkgVersion} — run 'xp-gate doctor --fix' to sync`
+    });
+    return 1;
+  }
+  return 0;
+}
+
+/**
+ * Check 3: templateDir validation against platform expectation.
+ * @returns {number} issue count (0 or 1)
+ */
+function diagnoseTemplateDir(config, checks) {
+  const configTemplateDir = config.templateDir;
+  if (configTemplateDir) {
+    const expectedTemplateDir = getTemplateDir();
+    if (configTemplateDir !== expectedTemplateDir) {
+      checks.push({
+        name: 'templateDir',
+        status: 'FAIL',
+        detail: `points to ${configTemplateDir}, expected ${expectedTemplateDir} for current platform`
+      });
+      return 1;
+    }
+  }
+  return 0;
 }
 
 /**
@@ -280,6 +297,96 @@ function restoreHook(srcFile, destFile, label) {
 }
 
 /**
+ * Fix version mismatch — update config.version to match package version.
+ * @param {object} config
+ * @param {string|null} pkgVersion
+ * @returns {boolean} Whether a fix was applied
+ */
+function fixVersionMismatch(config, pkgVersion) {
+  if (pkgVersion && config.version !== pkgVersion) {
+    config.version = pkgVersion;
+    saveConfig(config);
+    console.log(`  ✓ Updated config version to ${pkgVersion}`);
+    return true;
+  }
+  return false;
+}
+
+/**
+ * Fix templateDir mismatch — update config.templateDir to match expected.
+ * @param {object} config
+ * @param {string} expectedTemplateDir
+ * @returns {boolean} Whether a fix was applied
+ */
+function fixTemplateDirMismatch(config, expectedTemplateDir) {
+  if (config.templateDir && config.templateDir !== expectedTemplateDir) {
+    config.templateDir = expectedTemplateDir;
+    saveConfig(config);
+    console.log(`  ✓ Updated templateDir to ${expectedTemplateDir}`);
+    return true;
+  }
+  return false;
+}
+
+/**
+ * Restore missing hooks from package source.
+ * @param {'local'|'global'} mode
+ * @param {string} srcDir - Package source directory
+ * @param {string} hooksDir - Target hooks directory
+ * @returns {boolean} Whether any hooks were restored
+ */
+function fixMissingHooks(mode, srcDir, hooksDir) {
+  let fixed = false;
+  const label = mode === 'local' ? '' : 'global ';
+  const preCommitLabel = `${label}pre-commit hook`;
+  const prePushLabel = `${label}pre-push hook`;
+  fixed = restoreHook(path.join(srcDir, 'hooks', 'pre-commit'), path.join(hooksDir, 'pre-commit'), preCommitLabel) || fixed;
+  fixed = restoreHook(path.join(srcDir, 'hooks', 'pre-push'), path.join(hooksDir, 'pre-push'), prePushLabel) || fixed;
+  return fixed;
+}
+
+/**
+ * Fix core.hooksPath for global mode.
+ * @param {string} globalHooksDir
+ * @returns {boolean} Whether the fix was applied
+ */
+function fixCoreHooksPath(globalHooksDir) {
+  try {
+    execSync(`git config --global core.hooksPath "${globalHooksDir}"`, {
+      stdio: ['pipe', 'pipe', 'pipe']
+    });
+    console.log(`  ✓ Set core.hooksPath to ${globalHooksDir}`);
+    return true;
+  } catch (e) {
+    console.log(`  ✗ Could not set core.hooksPath: ${e.message}`);
+    return false;
+  }
+}
+
+/**
+ * Restore missing adapters from package source.
+ * @param {'local'|'global'} mode
+ * @param {string} srcDir - Package source directory
+ * @param {string} adaptersDir - Target adapters directory
+ * @returns {boolean} Whether adapters were restored
+ */
+function fixMissingAdapters(mode, srcDir, adaptersDir) {
+  if (adaptersDir && (!fs.existsSync(adaptersDir) || fs.readdirSync(adaptersDir).filter(f => f.endsWith('.sh')).length === 0)) {
+    const pkgAdaptersDir = path.join(srcDir, 'adapters');
+    if (fs.existsSync(pkgAdaptersDir)) {
+      fs.mkdirSync(adaptersDir, { recursive: true });
+      const adapterFiles = fs.readdirSync(pkgAdaptersDir).filter(f => f.endsWith('.sh'));
+      for (const f of adapterFiles) {
+        fs.copyFileSync(path.join(pkgAdaptersDir, f), path.join(adaptersDir, f));
+      }
+      console.log(`  ✓ Restored ${adapterFiles.length} adapter(s)`);
+      return true;
+    }
+  }
+  return false;
+}
+
+/**
  * Attempt to fix known issues.
  * Only operates when mode === 'active' (local or global).
  */
@@ -291,71 +398,30 @@ function fixIssues(checks, config) {
   const srcDir = PKG_DIR;
   let fixed = false;
 
-  // Fix version mismatch — update config version to match package
-  const pkgVersion = getPackageVersion();
-  if (pkgVersion && config.version !== pkgVersion) {
-    config.version = pkgVersion;
-    saveConfig(config);
-    console.log(`  ✓ Updated config version to ${pkgVersion}`);
-    fixed = true;
-  }
+  fixed = fixVersionMismatch(config, getPackageVersion()) || fixed;
+  fixed = fixTemplateDirMismatch(config, getTemplateDir()) || fixed;
 
-  // Fix templateDir mismatch
-  const expectedTemplateDir = getTemplateDir();
-  if (config.templateDir && config.templateDir !== expectedTemplateDir) {
-    config.templateDir = expectedTemplateDir;
-    saveConfig(config);
-    console.log(`  ✓ Updated templateDir to ${expectedTemplateDir}`);
-    fixed = true;
-  }
-
-  // Fix missing hooks
   if (config.mode === 'local') {
     const gitDir = getGitDir();
     if (gitDir) {
       const hooksDir = path.join(gitDir, 'hooks');
-      fixed = restoreHook(path.join(srcDir, 'hooks', 'pre-commit'), path.join(hooksDir, 'pre-commit'), 'pre-commit hook') || fixed;
-      fixed = restoreHook(path.join(srcDir, 'hooks', 'pre-push'), path.join(hooksDir, 'pre-push'), 'pre-push hook') || fixed;
+      fixed = fixMissingHooks('local', srcDir, hooksDir) || fixed;
     }
   } else {
-    const hooksDir = GLOBAL_HOOKS_DIR;
-    fixed = restoreHook(path.join(srcDir, 'hooks', 'pre-commit'), path.join(hooksDir, 'pre-commit'), 'global pre-commit hook') || fixed;
-    fixed = restoreHook(path.join(srcDir, 'hooks', 'pre-push'), path.join(hooksDir, 'pre-push'), 'global pre-push hook') || fixed;
+    fixed = fixMissingHooks('global', srcDir, GLOBAL_HOOKS_DIR) || fixed;
   }
 
-  // Fix core.hooksPath (global mode only)
   if (config.mode === 'global') {
     const hooksPath = getCurrentHooksPath();
     if (hooksPath !== GLOBAL_HOOKS_DIR) {
-      try {
-        execSync(`git config --global core.hooksPath "${GLOBAL_HOOKS_DIR}"`, {
-          stdio: ['pipe', 'pipe', 'pipe']
-        });
-        console.log(`  ✓ Set core.hooksPath to ${GLOBAL_HOOKS_DIR}`);
-        fixed = true;
-      } catch (e) {
-        console.log(`  ✗ Could not set core.hooksPath: ${e.message}`);
-      }
+      fixed = fixCoreHooksPath(GLOBAL_HOOKS_DIR) || fixed;
     }
   }
 
-  // Fix missing adapters
   const adaptersDir = config.mode === 'local'
     ? path.join(path.dirname(getGitDir() || ''), 'githooks', 'adapters')
     : GLOBAL_ADAPTERS_DIR;
-
-  if (adaptersDir && (!fs.existsSync(adaptersDir) || fs.readdirSync(adaptersDir).filter(f => f.endsWith('.sh')).length === 0)) {
-    const pkgAdaptersDir = path.join(srcDir, 'adapters');
-    if (fs.existsSync(pkgAdaptersDir)) {
-      fs.mkdirSync(adaptersDir, { recursive: true });
-      const adapterFiles = fs.readdirSync(pkgAdaptersDir).filter(f => f.endsWith('.sh'));
-      for (const f of adapterFiles) {
-        fs.copyFileSync(path.join(pkgAdaptersDir, f), path.join(adaptersDir, f));
-      }
-      console.log(`  ✓ Restored ${adapterFiles.length} adapter(s)`);
-      fixed = true;
-    }
-  }
+  fixed = fixMissingAdapters(config.mode, srcDir, adaptersDir) || fixed;
 
   if (!fixed) {
     console.log('  No fixable issues found.');
@@ -372,6 +438,49 @@ function isActiveMode(config) {
 
 function isUninstalledMode(config) {
   return config && config !== 'corrupt' && config.mode === 'uninstalled';
+}
+
+/**
+ * Check 7: Version upgrade check (non-blocking).
+ */
+async function diagnoseUpgrade() {
+  try {
+    const upgradeResult = await checkUpgrade();
+    const msg = formatUpgradeMsg(upgradeResult, 'doctor');
+    if (msg) {
+      console.log(`\n  ℹ ${msg}`);
+    }
+  } catch { /* non-blocking — don't fail doctor on network issue */ }
+}
+
+/**
+ * Check 8: OpenCode plugin version check.
+ * @returns {number} issue count
+ */
+function diagnoseOpenCodePlugin(checks) {
+  const pluginPath = path.join(HOME_DIR, '.config', 'opencode', 'node_modules', '@boyingliu01', 'opencode-plugin', 'package.json');
+  if (fs.existsSync(pluginPath)) {
+    try {
+      const pluginPkg = JSON.parse(fs.readFileSync(pluginPath, 'utf8'));
+      const pluginVersion = pluginPkg.version;
+      if (pluginVersion) {
+        checks.push({ name: 'OpenCode plugin version', status: 'PASS', detail: pluginVersion });
+        // Check if plugin is outdated vs xp-gate CLI (they should match)
+        const pkgVersion = getPackageVersion();
+        if (pkgVersion && pluginVersion !== pkgVersion) {
+          checks.push({
+            name: 'OpenCode plugin version mismatch',
+            status: 'WARN',
+            detail: `plugin: ${pluginVersion}, xp-gate CLI: ${pkgVersion} — run 'cd ~/.config/opencode && npm update @boyingliu01/opencode-plugin'`
+          });
+          return 1;
+        }
+      }
+    } catch { /* skip */ }
+  } else {
+    checks.push({ name: 'OpenCode plugin', status: 'SKIP', detail: 'Not installed in OpenCode config' });
+  }
+  return 0;
 }
 
 async function doctor(args) {
@@ -394,42 +503,13 @@ async function doctor(args) {
     fixIssues(null, config);
   }
 
-  const { checks, issues } = diagnose();
+  const { checks, issues: diagnosedIssues } = diagnose();
+  let issues = diagnosedIssues;
 
   printReport(checks);
 
-  // --- Check 7: Version upgrade check ---
-  try {
-    const upgradeResult = await checkUpgrade();
-    const msg = formatUpgradeMsg(upgradeResult, 'doctor');
-    if (msg) {
-      console.log(`\n  ℹ ${msg}`);
-    }
-  } catch { /* non-blocking — don't fail doctor on network issue */ }
-
-  // --- Check 8: OpenCode plugin version check ---
-  const pluginPath = path.join(HOME_DIR, '.config', 'opencode', 'node_modules', '@boyingliu01', 'opencode-plugin', 'package.json');
-  if (fs.existsSync(pluginPath)) {
-    try {
-      const pluginPkg = JSON.parse(fs.readFileSync(pluginPath, 'utf8'));
-      const pluginVersion = pluginPkg.version;
-      if (pluginVersion) {
-        checks.push({ name: 'OpenCode plugin version', status: 'PASS', detail: pluginVersion });
-        // Check if plugin is outdated vs xp-gate CLI (they should match)
-        const pkgVersion = getPackageVersion();
-        if (pkgVersion && pluginVersion !== pkgVersion) {
-          checks.push({
-            name: 'OpenCode plugin version mismatch',
-            status: 'WARN',
-            detail: `plugin: ${pluginVersion}, xp-gate CLI: ${pkgVersion} — run 'cd ~/.config/opencode && npm update @boyingliu01/opencode-plugin'`
-          });
-          issues++;
-        }
-      }
-    } catch { /* skip */ }
-  } else {
-    checks.push({ name: 'OpenCode plugin', status: 'SKIP', detail: 'Not installed in OpenCode config' });
-  }
+  await diagnoseUpgrade();
+  issues += diagnoseOpenCodePlugin(checks);
 
   if (issues === 0) {
     console.log('\n✓ All checks passed');
@@ -448,4 +528,11 @@ async function doctor(args) {
   return issues > 0 ? 1 : 0;
 }
 
-module.exports = { doctor, isXpGateFile, SIGNATURES };
+module.exports = {
+  doctor, isXpGateFile, SIGNATURES,
+  fixVersionMismatch,
+  fixTemplateDirMismatch,
+  fixMissingHooks,
+  fixCoreHooksPath,
+  fixMissingAdapters,
+};

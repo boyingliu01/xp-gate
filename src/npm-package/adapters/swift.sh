@@ -2,7 +2,7 @@
 
 run_static_analysis() {
   if command -v swiftlint &>/dev/null; then
-    swiftlint lint 2>&1 | head -30
+    swiftlint lint 2>&1 | sed -n '1,30p; 30q'
     return $?
   else
     echo "SwiftLint not available"
@@ -12,7 +12,7 @@ run_static_analysis() {
 
 run_lint() {
   if command -v swiftlint &>/dev/null; then
-    swiftlint lint --strict 2>&1 | head -30
+    swiftlint lint --strict 2>&1 | sed -n '1,30p; 30q'
     return $?
   else
     echo "SwiftLint not available"

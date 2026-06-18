@@ -15,6 +15,7 @@
 import { existsSync, readFileSync } from "node:fs"
 import { join } from "node:path"
 import type { TuiPlugin, TuiSlotPlugin, TuiSlotProps } from "@opencode-ai/plugin/tui"
+import { PHASE_NAMES, PHASE_ORDER, getLatestTimestamp, isStale } from "../../src/npm-package/lib/shared-phase-constants.js"
 
 // ── Sprint state schema ──
 
@@ -44,24 +45,6 @@ interface SprintState {
   phase_history?: SprintPhaseHistory[]
 }
 
-// ── Constants ──
-
-const PHASE_NAMES: Record<string, string> = {
-  "-1": "ISOLATE",
-  "-0.5": "AUTO-ESTIMATE",
-  "0": "THINK",
-  "1": "PLAN",
-  "2": "BUILD",
-  "3": "REVIEW",
-  "4": "USER ACCEPT",
-  "5": "FEEDBACK",
-  "6": "SHIP",
-  "7": "LAND",
-  "8": "CLEANUP",
-}
-
-const PHASE_ORDER = ["-1", "-0.5", "0", "1", "2", "3", "4", "5", "6", "7", "8"]
-
 // ── Helpers ──
 
 function readSprintState(dir: string): SprintState | null {
@@ -72,26 +55,6 @@ function readSprintState(dir: string): SprintState | null {
   } catch {
     return null
   }
-}
-
-function isStale(state: SprintState): boolean {
-  if (!state || !state.started_at) return false
-  const started = new Date(state.started_at).getTime()
-  if (isNaN(started)) return false
-  let latest = started
-  if (Array.isArray(state.phase_history)) {
-    for (const ph of state.phase_history) {
-      if (ph.completed_at) {
-        const t = new Date(ph.completed_at).getTime()
-        if (!isNaN(t) && t > latest) latest = t
-      }
-      if (ph.started_at) {
-        const t = new Date(ph.started_at).getTime()
-        if (!isNaN(t) && t > latest) latest = t
-      }
-    }
-  }
-  return Date.now() - latest > 3_600_000
 }
 
 function statusSymbol(status: string | undefined, key: string, currentPhase: string | number | undefined): string {
@@ -109,57 +72,63 @@ function renderPhaseLine(key: string, history: SprintPhaseHistory | undefined, c
     .replace(/\s+$/, "")
 }
 
+function buildPhaseLookup(state: SprintState): Record<string, SprintPhaseHistory> {
+  const lookup: Record<string, SprintPhaseHistory> = {}
+  if (Array.isArray(state.phase_history)) {
+    for (const ph of state.phase_history) {
+      lookup[String(ph.phase)] = ph
+    }
+  }
+  return lookup
+}
+
+function buildMetricsLine(metrics: SprintState["metrics"]): string | null {
+  const parts: string[] = []
+  if (metrics?.tests_passed != null) parts.push(`tests:${metrics.tests_passed}`)
+  if (metrics?.coverage_pct != null) parts.push(`cov:${metrics.coverage_pct}%`)
+  return parts.length > 0 ? parts.join(" ") : null
+}
+
+function buildStaleWarning(state: SprintState): string | null {
+  if (!state || !state.started_at) return null
+  return isStale(state) ? "⚠ idle >1h" : null
+}
+
+function renderBuildReqs(history: SprintPhaseHistory): string[] {
+  if (!history.reqs) return []
+  return Object.entries(history.reqs)
+    .filter(([, r]) => r.name)
+    .map(([id, r]) => `  ${statusSymbol(r.status, id, undefined)} ${r.name}`)
+}
+
+function renderPhaseLines(
+  historyByPhase: Record<string, SprintPhaseHistory>,
+  currentPhase: string | number | undefined,
+): string[] {
+  const lines: string[] = []
+  for (const key of PHASE_ORDER) {
+    const history = historyByPhase[key]
+    if (!history && String(currentPhase) !== key) continue
+    lines.push(renderPhaseLine(key, history, currentPhase))
+    if (key === "2" && history?.reqs) {
+      lines.push(...renderBuildReqs(history))
+    }
+  }
+  return lines
+}
+
 function renderSprintSidebar(state: SprintState): string {
   if (!state || !state.task_description) return ""
 
-  const lines: string[] = []
-  const metrics = state.metrics || {}
-  const currentPhase = state.phase
+  const lines: string[] = [`SPRINT: ${state.task_description}`]
+  const metricsLine = buildMetricsLine(state.metrics)
+  if (metricsLine) lines.push(metricsLine)
 
-  // Build lookup
-  const historyByPhase: Record<string, SprintPhaseHistory> = {}
-  if (Array.isArray(state.phase_history)) {
-    for (const ph of state.phase_history) {
-      historyByPhase[String(ph.phase)] = ph
-    }
-  }
+  const staleWarning = buildStaleWarning(state)
+  if (staleWarning) lines.push(staleWarning)
 
-  // Title
-  lines.push(`SPRINT: ${state.task_description}`)
-
-  // Metrics
-  const metricParts: string[] = []
-  if (metrics.tests_passed != null) {
-    metricParts.push(`tests:${metrics.tests_passed}`)
-  }
-  if (metrics.coverage_pct != null) {
-    metricParts.push(`cov:${metrics.coverage_pct}%`)
-  }
-  if (metricParts.length > 0) {
-    lines.push(metricParts.join(" "))
-  }
-
-  // Stale warning
-  if (isStale(state)) {
-    lines.push("⚠ idle >1h")
-  }
-
-  // Phase progress
-  for (const key of PHASE_ORDER) {
-    const history = historyByPhase[key]
-    // Only show phases with activity or current
-    if (!history && String(currentPhase) !== key) continue
-    const line = renderPhaseLine(key, history, currentPhase)
-    lines.push(line)
-
-    // REQ-level progress for BUILD phase
-    if (key === "2" && history?.reqs) {
-      const reqNames = Object.entries(history.reqs)
-        .filter(([, r]) => r.name)
-        .map(([id, r]) => `  ${statusSymbol(r.status, id, undefined)} ${r.name}`)
-      if (reqNames.length > 0) lines.push(...reqNames)
-    }
-  }
+  const historyByPhase = buildPhaseLookup(state)
+  lines.push(...renderPhaseLines(historyByPhase, state.phase))
 
   return lines.join("\n")
 }

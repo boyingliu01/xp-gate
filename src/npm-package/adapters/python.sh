@@ -63,7 +63,7 @@ run_tests() {
   fi
 
   # Check for errors in summary line (e.g. "3 errors")
-  ERROR_COUNT=$(echo "$PYTEST_OUTPUT" | grep -oP '\d+ error' | grep -oP '\d+' | head -1)
+  ERROR_COUNT=$(echo "$PYTEST_OUTPUT" | grep -oP '\d+ error' | grep -oP '\d+' | sed -n '1p; 1q')
   if [ -n "$ERROR_COUNT" ] && [ "$ERROR_COUNT" -gt 0 ]; then
     echo "❌ $ERROR_COUNT test collection/execution errors detected"
     return 1
@@ -94,7 +94,7 @@ run_coverage() {
   fi
 
   # Check for errors in summary line (e.g. "3 errors")
-  ERROR_COUNT=$(echo "$PYTEST_OUTPUT" | grep -oP '\d+ error' | grep -oP '\d+' | head -1)
+  ERROR_COUNT=$(echo "$PYTEST_OUTPUT" | grep -oP '\d+ error' | grep -oP '\d+' | sed -n '1p; 1q')
   if [ -n "$ERROR_COUNT" ] && [ "$ERROR_COUNT" -gt 0 ]; then
     echo "❌ $ERROR_COUNT test collection/execution errors detected"
     return 1

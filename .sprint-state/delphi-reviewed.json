@@ -1,65 +1,20 @@
 {
   "mode": "design",
-  "sprint_id": "sprint-2026-06-17-01",
-  "design_doc": "docs/plans/2026-06-17-tdd-enforcement-design.md",
-  "timestamp": "2026-06-17T14:05:00Z",
+  "timestamp": "2026-06-18T17:00Z",
   "verdict": "APPROVED",
   "consensus_ratio": 1.0,
-  "rounds": 2,
-  "experts": [
-    {"id": "A", "role": "architecture", "model": "deepseek-v4-pro", "verdict": "APPROVED", "confidence": 9},
-    {"id": "B", "role": "implementation", "model": "kimi-k2.6", "verdict": "APPROVED", "confidence": 9},
-    {"id": "C", "role": "feasibility", "model": "qwen3.6-plus", "verdict": "APPROVED", "confidence": 9}
-  ],
-  "round_history": [
-    {
-      "round": 1,
-      "consensus_pct": 0,
-      "verdict": "REQUEST_CHANGES",
-      "critical_issues_resolved": false,
-      "summary": "3位专家全部REQUEST_CHANGES。共同问题：Gate 11与5a关系未定义、Gate M4与M2重复、注解不一致、Layer 3模糊、文档更新缺失"
-    },
-    {
-      "round": 2,
-      "consensus_pct": 100,
-      "verdict": "APPROVED",
-      "critical_issues_resolved": true,
-      "summary": "修复答复被接受：Gate 5a升级（非新建Gate 11）、Gate M2阈值调整（非新建Gate M4）、注解统一为@no-test-required、Layer 3具体化、文档更新清单补充、BATS测试新增、逃生阀设计"
-    },
-    {
-      "round": "2_v2",
-      "consensus_pct": 100,
-      "verdict": "APPROVED",
-      "critical_issues_resolved": true,
-      "summary": "设计文档v3实际修改后重新评审。3专家全部APPROVED(9/10)。Round 1 v2的所有Critical和Major问题均已解决。Minor concerns：逃生阀决策流程图、@no-test deprecated移除标注、grace period计数存储、mock density边界、BATS fixture设计"
-    }
-  ],
-  "decisions_confirmed": [
-    "Gate 5a 升级：WARNING → BLOCK（仅对新增文件），不新建 Gate 11",
-    "Gate M2 阈值调整：50% → 30%，不新建 Gate M4",
-    "注解统一为 @no-test-required，同时支持 @no-test 作为 deprecated alias",
-    "Layer 3 具体化：修改 ralph-loop SKILL.md 和 phase-2-build.md",
-    "文档更新：AGENTS.md、README.md、QUALITY-GATES-CODE-OF-CONDUCT.md",
-    "BATS 测试：新增 gate-5a-block.test.bats 和 gate-m2-threshold.test.bats",
-    "逃生阀：SKIP_GATE_5A_BLOCK=1 环境变量",
-    "存量迁移：补充影响评估（需实际统计当前仓库无测试文件数量）",
-    "Mock 密度公式：mock关键字匹配行数 / 测试文件总行数",
-    "@mock-justified 注解理由长度：保持 10 字符（现有行为）"
-  ],
-  "specification_path": ".sprint-state/phase-outputs/specification.yaml",
-  "code_walkthrough": {
-    "mode": "code-walkthrough",
-    "commit": "1979b6aeb7b57d32931c24d58472a7021a312584",
-    "timestamp": "2026-06-18T00:00:00Z",
-    "verdict": "APPROVED_WITH_CAVEATS",
-    "consensus_ratio": 1.0,
-    "experts": 2,
-    "rounds": 2,
-    "caveats": [
-      "README Gate M2 threshold drift (50% shown, 30% actual)",
-      "Escape valve audit log unescaped JSON",
-      "Gate 5b grep inconsistency with pre-push"
-    ],
-    "review_report": ".sprint-state/phase-outputs/review-report.md"
+  "consensus_detail": {
+    "expert_A_architecture": "APPROVED (9/10)",
+    "expert_B_technical": "APPROVED (9/10)",
+    "expert_C_feasibility": "APPROVED (9/10)",
+    "rounds_to_consensus": 4
+  },
+  "specification_path": ".sprint-state/specification.yaml",
+  "specification_version": 4,
+  "history": {
+    "v1": "Round 1 → REQUEST_CHANGES (3/3): phantom work, stale data",
+    "v2": "Round 2 → REQUEST_CHANGES (3/3): codebase state drift",
+    "v3": "Round 3 → REQUEST_CHANGES (2/3): UPG-001 phantom work",
+    "v4": "Round 2 re-review → APPROVED (3/3)"
   }
 }
