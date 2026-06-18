@@ -144,7 +144,7 @@ echo ""
 # ============================================================================
 
 CURRENT_BRANCH=$(git rev-parse --abbrev-ref HEAD)
-PROTECTED_BRANCHES="main master develop trunk mainline"
+PROTECTED_BRANCHES="master develop trunk mainline"
 ROOT_DIR=$(git rev-parse --show-toplevel 2>/dev/null || echo ".")
 
 # Optional: project-level .protected-branches config file
