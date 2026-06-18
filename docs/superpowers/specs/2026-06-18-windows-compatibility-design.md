@@ -25,6 +25,7 @@ XP-Gate's git hooks are bash scripts with extensive Unix-only patterns (52 `head
 - Adding Windows VMs for manual testing (CI runner covers this)
 - OTel GenAI observability (#124)
 - Multi-language mutation testing (#160)
+- **TypeScript-based gates (Gate M, Gate M3, UI detector)**: These run via `npx tsx` within the Node.js runtime, which is already cross-platform by design. `npx` resolves relative paths (`src/mutation/gate-m.ts`) against `cwd` — same in Git Bash and Unix. No changes needed. Pre-push invocations of `npx tsx` are platform-agnostic.
 
 ## Design
 
@@ -44,6 +45,9 @@ detect_os_env() {
         MINGW*|MSYS*|CYGWIN*) echo "windows";;
         *)
             # 降级：检测$OSTYPE（bash特有，某些非POSIX环境备用）
+            # 使用set +u包裹，因为$OSTYPE在set -u（nounset）下即使使用${var-}
+            # 语法也仍然在某些bash版本中触发警告
+            # shellcheck disable=SC2154  # OSTYPE是bash内置变量，显式shopt声明
             if [ -n "${OSTYPE-}" ]; then
                 case "${OSTYPE-}" in
                     linux*)     echo "linux";;
@@ -59,7 +63,7 @@ detect_os_env() {
 }
 ```
 
-The function checks `uname -s` for MSYS/MINGW/CYGWIN signatures which are standard Git Bash environment markers. Uses `${OSTYPE-}` (default-value syntax) as a fallback when `uname` is unavailable — the `-` suffix avoids `set -u` failures without needing an explicit `set +u`.
+The function checks `uname -s` for MSYS/MINGW/CYGWIN signatures which are standard Git Bash environment markers. Uses `${OSTYPE-}` (default-value syntax) as a fallback when `uname` is unavailable. Note: in `set -u` (nounset) mode, `${var-}` still triggers a reference error in some bash versions; the surrounding `case "$os"` fallback only reaches the OSTYPE branch when `uname -s` also fails, which is extremely rare in practice. If this proves problematic during CI, wrap the OSTYPE block in `set +u; ...; set -u`.
 
 ### 2. `head` → `sed` Migration
 
@@ -67,22 +71,26 @@ Replace all 52 `head` invocations with POSIX `sed` equivalents:
 
 | Pattern | Replacement |
 |---------|-------------|
-| `head -1` | `sed -n '1p'` |
-| `head -n 1` | `sed -n '1p'` |
-| `head -20` / `head -30` / `head -5` | `sed -n '1,20p'` etc. |
-| `grep ... \| head -n 1` | `grep ... \| sed -n '1p'` |
-| `grep ... \| head -n X` (X>1) | `grep ... \| sed -n '1,Xp'` |
-| `head -N` (如plugin中的`head -20`) | `sed -n '1,Np'` |
+| `head -1` | `sed -n '1p; 1q'` |
+| `head -n 1` | `sed -n '1p; 1q'` |
+| `head -20` / `head -30` / `head -5` | `sed -n '1,20p; 20q'` etc. |
+| `grep ... \| head -n 1` | `grep ... \| sed -n '1p; 1q'` |
+| `grep ... \| head -n X` (X>1) | `grep ... \| sed -n '1,Xp; Xq'` |
+| `head -N` (如plugin中的`head -20`) | `sed -n '1,Np; Nq'` |
 
-> ⚠️ **Critical: `grep -m X` 不可用**。`grep ... | head -n 1` 中即使grep无匹配，head仍返回0；改为`grep -m 1`后无匹配返回1，改变管道退出码。在`set -e`环境下会导致脚本提前退出。**统一使用`sed -n '1,Np'`替代所有`head -N`**。
+> ⚠️ **Critical: `grep -m X` 不可用**。`grep ... | head -n 1` 中即使grep无匹配，head仍返回0；改为`grep -m 1`后无匹配返回1，改变管道退出码。在`set -e`环境下会导致脚本提前退出。**统一使用`sed -n '1,Np; Nq'`替代所有`head -N`**。
 
-> 📝 `sed -n '1,Np'` 在输入行数 < N时输出全部行（与`head -N`行为一致），无需额外处理。
+> ⚠️ **性能: `sed -n '1,Np'` 不加 `q` 会读完全文件**。`sed -n '1,5p' bigfile` 会遍历整个文件，在第5行后继续读到EOF。必须添加退出命令：`sed -n '1,5p; 5q'`，第5行输出后立即退出，行为和 `head -5` 一致。对于取首行，`sed -n '1p; 1q'` 等价于 `head -1`。
 
-**Exception**: Plugin scripts in `githooks/adapters/plugins/` (p3c-java, whalecloud-java) use `head` for file-level operations (splitting XML, `head -20`). These are third-party extensions — convert them using `sed -n '1,20p'` with the same logic. Syntax-check via `bash -n` on CI only (stretch goal).
+> 📝 `sed -n '1,Np; Nq'` 在输入行数 < N时：`q` 命令会在EOF时被触发（sed认为"行号 > N"为假，不会触发 q，读到文件结尾后自然退出），输出全部行，与`head -N`行为一致。
+
+**Exception (stretch goal)**: Plugin scripts in `githooks/adapters/plugins/` (p3c-java, whalecloud-java, book299-*) use `head` for file-level operations (splitting XML, `head -20`). These are third-party extensions — convert them using `sed -n '1,20p'` with the same logic if time permits. **Stretch goal trigger**: all 5 core Opt steps complete AND CI passes AND >50% of plugin scripts also pass `bash -n` syntax check. If not met, plugins retain existing `head` calls and are marked as known Windows-incompatible extensions.
 
 ### 3. `[[ ]]` → `[ ]` Conversion
 
 Convert 47 occurrences across 4 files. These are the most consequential changes because they affect core routing logic.
+
+> ⚠️ **高风险区域**: `adapter-common.sh` 独占 37/47 处 `[[ ]]`，修改密度极高。建议逐批转换（每批不超过10-15处），每批完成后立即 `bash -n` 验证。详见 Implementation Order Opt 1 的子步骤说明。
 
 **Rules**:
 - `[[ -f "x" ]]` → `[ -f "x" ]`
@@ -118,6 +126,14 @@ The single `chmod +x` in `install.sh` line 28 is a best-effort operation — on 
 
 ### 6. Tool Install Messages
 
+4 `brew` references across 4 files:
+- `githooks/gate-8.sh` (inline `brew` mention)
+- `githooks/gate-9.sh` (inline `brew` mention)
+- `githooks/gates/gate-8-secret-scanning.sh` (inline `brew` mention)
+- `githooks/gates/gate-9-sast-security.sh` (inline `brew` mention)
+
+All 4 files follow the same pattern — add `winget` alternative for Windows:
+
 ```
 # Before
 echo "     Install: brew install gitleaks (macOS) | scripts/install-gitleaks.sh (Linux)"
@@ -128,7 +144,7 @@ echo "     Install: brew install gitleaks (macOS) | winget install gitleaks (Win
 echo "     Install: brew install semgrep (macOS) | pip install semgrep (Linux/Windows)"
 ```
 
-### 5. Cross-platform CI
+### 7. Cross-platform CI
 
 Add a `windows-gitbash-hooks` job to `cross-platform-ci.yml`:
 
@@ -156,9 +172,9 @@ Add a `windows-gitbash-hooks` job to `cross-platform-ci.yml`:
           done
 ```
 
-### 6. Documentation Updates
+### 8. Documentation Updates
 
-**TOOL-INSTALLATION-GUIDE.md**: Add a Windows section at the top:
+**`githooks/TOOL-INSTALLATION-GUIDE.md`** (注意：文件在 `githooks/` 下，非仓库根目录): Add a Windows section at the top:
 
 ```markdown
 ## Windows Environment Requirements
@@ -282,22 +298,39 @@ Level 3: CI execution (平台差异化)
           OS=$(detect_os_env)
           echo "Detected OS: $OS"
           if [ "$OS" != "windows" ]; then
-            echo "FAIL: Expected 'windows' on Windows runner"
+            echo "FAIL: Expected 'windows' on Windows runner (got: $OS)"
             exit 1
           fi
           echo "PASS: OS detection works on Windows"
+          # Negative test: unset OSTYPE to verify fallback still works
+          SAVED_OSTYPE="${OSTYPE-}"
+          unset OSTYPE 2>/dev/null || true
+          OS2=$(detect_os_env)
+          if [ "$OS2" != "windows" ]; then
+            echo "NOTE: OSTYPE-unset test returned '$OS2' (not windows) — this is acceptable"
+            echo "because uname -s is the primary detection path"
+          fi
+          [ -n "$SAVED_OSTYPE" ] && export OSTYPE="$SAVED_OSTYPE"
 ```
 
 ## Implementation Order
 
-The work should proceed in this order to minimize merge conflicts:
+The work should proceed in this order to minimize merge conflicts. Each step should be a separate commit to respect pre-push 500 LOC hard limit.
 
-1. **Opt 1**: `adapter-common.sh` — OS detection + `head` → `sed` + `[[ ]]` → `[ ]`
-   - Largest file, most changes, foundational
-2. **Opt 2**: `install.sh`, `verify.sh`, `shell.sh` — `[[ ]]` → `[ ]` + `chmod` guard
-3. **Opt 3**: Gate 8/9 scripts — `brew` replacement + tool install messages
-4. **Opt 4**: `cross-platform-ci.yml` — Windows Git Bash job (含语法检查 + OS检测验证)
-5. **Opt 5**: `TOOL-INSTALLATION-GUIDE.md` — Windows section
+1. **Opt 1a**: `adapter-common.sh` — OS detection layer only (add `detect_os_env()`)
+   - Small, focused commit (~10 lines)
+2. **Opt 1b**: `adapter-common.sh` — `head` → `sed` (21 occurrences)
+   - Search-and-replace only, low risk
+3. **Opt 1c**: `adapter-common.sh` — `[[ ]]` → `[ ]` (37 occurrences)
+   - Highest risk step. Process in 3-4 batches: each batch 10-15 conversions, `bash -n` after each batch
+4. **Opt 2**: `install.sh`, `verify.sh`, `shell.sh` — `[[ ]]` → `[ ]` + `head` → `sed`
+   - 3 files, 10 `[[ ]]` + remaining `head` occurrences; combined into one commit
+5. **Opt 2b**: All remaining `githooks/adapters/*.sh` files — `head` → `sed` only
+   - 8 adapter files, no `[[ ]]` changes (adapters remain bash)
+6. **Opt 3**: Gate 8/9 scripts (4 files) — `brew` replacement + tool install messages
+   - `githooks/gate-8.sh`, `githooks/gate-9.sh`, `githooks/gates/gate-8-secret-scanning.sh`, `githooks/gates/gate-9-sast-security.sh`
+7. **Opt 4**: `cross-platform-ci.yml` — Windows Git Bash job (含语法检查 + OS检测验证)
+8. **Opt 5**: `githooks/TOOL-INSTALLATION-GUIDE.md` — Windows section
 
 ## Rollback Plan
 
@@ -320,8 +353,12 @@ If the Windows compatibility changes break existing hook behavior:
 1. **`[[ ]]` → `[ ]` typo risk**: 47 conversions × high density in adapter-common.sh
    - Mitigation: `bash -n` catches syntax errors; CI validates on both Linux + Windows
 2. **`sed` behavior**: GNU sed vs BSD sed differences
-   - Mitigation: `sed -n '1p'` pattern is POSIX-standard, works everywhere
-3. **Plugin scripts**: Third-party extensions (p3c-java, whalecloud-java) use `head` for XML editing — lower confidence
-   - Mitigation: Treat as stretch goal, test syntax only
-4. **BATS on Windows**: BATS是bash测试框架，在Git Bash下可以运行，但需确认shebang和环境变量
-   - Mitigation: CI中用`bats`命令（Windows Git Bash安装后有bat兼容），或用`bash bats/test.bats`显式调用
+    - Mitigation: `sed -n '1,Np; Nq'` pattern is POSIX-standard, works everywhere
+3. **`grep -q 2>/dev/null` 在 MSYS2 中的 `/dev/null` 映射**: Git Bash/MSYS2 将 `/dev/null` 映射为 `NUL` 设备，`grep -q` 的 `2>/dev/null` 重定向在绝大多数情况下正常工作。极少数情况（如 MSYS2 模拟层版本差异）可能导致 `grep -q` 行为异常。
+    - Mitigation: `bash -n` 语法检查 + CI Level 1 验证通过即可；如果 MSYS2 有兼容问题，替换为 `grep -q ... 2>/dev/null || true` 模式
+4. **Plugin scripts**: Third-party extensions (p3c-java, whalecloud-java) use `head` for XML editing — lower confidence
+    - Mitigation: Treat as stretch goal, test syntax only. Windows CI 中仅验证 `bash -n` 语法正确性，不保证运行时兼容性。
+5. **BATS on Windows**: BATS是bash测试框架，在Git Bash下**理论上**可以运行。但此项目不验证，Windows CI 中也不安装或运行 BATS。
+    - Mitigation: 不在 Windows CI 中运行 BATS。如有团队在 Windows 上需要 BATS，通过 `bash bats/test.bats` 显式调用（而非直接 `bats` 命令）。
+6. **`[ -n "$(cmd)" ]` 中 cmd 退出码传播**: `find ... | sed ...` 管道在 `[ -n "$(...)" ]` 内执行时，管道的退出码被 `[ ]` 消耗。在 `set -e` 环境中，管道第一个命令失败不会传播到外层（因为 `[ ]` 的退出码覆盖了管道退出码）。这不是回归（现有 `[[ -n "$(cmd)" ]]` 也有同样行为），但仍需了解。
+    - Mitigation: Level 2 BATS 中增加 `detect_project_lang()` 冒烟测试，覆盖文件存在/不存在/带空格文件名 3 种场景
