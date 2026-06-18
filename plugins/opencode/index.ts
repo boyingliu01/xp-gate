@@ -1,8 +1,8 @@
 import { tool } from "@opencode-ai/plugin"
 import { z } from "zod"
-import { exec } from "child_process"
-import { promisify } from "util"
-import { readFileSync, writeFileSync, existsSync, mkdirSync } from "node:fs"
+import { exec, execSync } from "node:child_process"
+import { promisify } from "node:util"
+import { readFileSync, writeFileSync, existsSync, mkdirSync, rmSync } from "node:fs"
 import { join } from "node:path"
 import { homedir } from "node:os"
 
@@ -11,6 +11,158 @@ const execAsync = promisify(exec)
 interface OpenCodePluginInput {
   directory: string
   $: (strings: TemplateStringsArray, ...values: unknown[]) => Promise<{ text(): Promise<string> }>
+}
+
+// ── Constants ──
+
+const CACHE_TTL_MS = 86_400_000 // 24h
+const FETCH_TIMEOUT_MS = 5_000
+
+const XP_GATE_NPM_PKG = "@boyingliu01/xp-gate"
+const XP_GATE_CACHE_FILE = join(homedir(), ".xp-gate", "xp-gate-version-check.json")
+const XP_GATE_REGISTRY_URL = `https://registry.npmjs.org/-/package/${encodeURIComponent(XP_GATE_NPM_PKG)}/dist-tags`
+
+const OPENCODE_PLUGIN_REGISTRY = "https://registry.npmjs.org/-/package/@boyingliu01%2Fopencode-plugin/dist-tags"
+const OPENCODE_CACHE_FILE = join(homedir(), ".xp-gate", "opencode-plugin-version-check.json")
+
+let checked = false
+
+// ── Utilities ──
+
+function semverLt(a: string, b: string): boolean {
+  const pa = a.replace(/^v/, "").split(".").map(Number)
+  const pb = b.replace(/^v/, "").split(".").map(Number)
+  for (let i = 0; i < Math.max(pa.length, pb.length); i++) {
+    const na = pa[i] ?? 0
+    const nb = pb[i] ?? 0
+    if (na !== nb) return na < nb
+  }
+  return false
+}
+
+async function fetchNpmLatestVersion(url: string): Promise<string | null> {
+  const controller = new AbortController()
+  const timer = setTimeout(() => controller.abort(), FETCH_TIMEOUT_MS)
+  try {
+    const response = await fetch(url, { signal: controller.signal })
+    if (!response.ok) return null
+    const data: Record<string, unknown> = await response.json()
+    return typeof data.latest === "string" ? data.latest : null
+  } catch {
+    return null
+  } finally {
+    clearTimeout(timer)
+  }
+}
+
+function readCache(file: string): { ts: number; remoteVersion: string; status?: string } | null {
+  try {
+    if (!existsSync(file)) return null
+    const raw = readFileSync(file, "utf8")
+    const data = JSON.parse(raw)
+    if (Date.now() - data.ts < CACHE_TTL_MS && data.remoteVersion) return data
+    return null
+  } catch {
+    return null
+  }
+}
+
+function writeCache(file: string, data: object): void {
+  try {
+    mkdirSync(join(homedir(), ".xp-gate"), { recursive: true })
+    writeFileSync(file + ".tmp", JSON.stringify(data), "utf8")
+    try { rmSync(file) } catch {}
+    writeFileSync(file, readFileSync(file + ".tmp", "utf8"), "utf8")
+    try { rmSync(file + ".tmp") } catch {}
+  } catch {
+    // silent
+  }
+}
+
+// ── XP-Gate npm package auto-update ──
+
+type UpgradeResult = {
+  action: "noop" | "upgraded" | "error"
+  localVersion: string | null
+  remoteVersion: string | null
+  error?: string
+}
+
+function getLocalXpGateVersion(): string | null {
+  try {
+    const globalRoot = execSync("npm root -g", { encoding: "utf8" }).trim()
+    const pkg = JSON.parse(readFileSync(join(globalRoot, XP_GATE_NPM_PKG, "package.json"), "utf8"))
+    return pkg.version || null
+  } catch {
+    return null
+  }
+}
+
+async function checkXpGateUpdate(): Promise<UpgradeResult> {
+  const cached = readCache(XP_GATE_CACHE_FILE)
+  if (cached?.status === "current" && cached.remoteVersion) {
+    return { action: "noop", localVersion: cached.remoteVersion, remoteVersion: cached.remoteVersion }
+  }
+
+  const localVersion = getLocalXpGateVersion()
+  if (!localVersion) return { action: "noop", localVersion: null, remoteVersion: null }
+
+  const remoteVersion = await fetchNpmLatestVersion(XP_GATE_REGISTRY_URL)
+  if (!remoteVersion) return { action: "noop", localVersion, remoteVersion: null }
+
+  if (!semverLt(localVersion, remoteVersion)) {
+    writeCache(XP_GATE_CACHE_FILE, { ts: Date.now(), localVersion, remoteVersion, status: "current" })
+    return { action: "noop", localVersion, remoteVersion }
+  }
+
+  writeCache(XP_GATE_CACHE_FILE, { ts: Date.now(), localVersion, remoteVersion })
+  try {
+    execSync(`npm install -g ${XP_GATE_NPM_PKG}@${remoteVersion}`, { stdio: "pipe", timeout: 120_000 })
+    writeCache(XP_GATE_CACHE_FILE, { ts: Date.now(), localVersion: remoteVersion, remoteVersion, status: "current" })
+    return { action: "upgraded", localVersion, remoteVersion }
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err)
+    return { action: "error", localVersion, remoteVersion, error: msg }
+  }
+}
+
+// ── OpenCode plugin version check (notification only) ──
+
+async function checkPluginUpdate(pluginDir: string): Promise<void> {
+  const cached = readCache(OPENCODE_CACHE_FILE)
+  if (cached?.status === "current" && cached.remoteVersion) return
+
+  let localVersion = ""
+  try {
+    const pkg = JSON.parse(readFileSync(join(pluginDir, "package.json"), "utf8"))
+    localVersion = pkg.version || ""
+  } catch {
+    return
+  }
+
+  const remoteVersion = await fetchNpmLatestVersion(OPENCODE_PLUGIN_REGISTRY)
+  if (!remoteVersion) return
+
+  if (remoteVersion && localVersion && semverLt(localVersion, remoteVersion)) {
+    writeCache(OPENCODE_CACHE_FILE, { ts: Date.now(), localVersion, remoteVersion })
+  } else if (remoteVersion && localVersion) {
+    writeCache(OPENCODE_CACHE_FILE, { ts: Date.now(), localVersion, remoteVersion, status: "current" })
+  }
+}
+
+// ── Combined background check (runs once on first chat.message) ──
+
+async function runBackgroundUpdates(pluginDir: string): Promise<string | null> {
+  const result = await checkXpGateUpdate()
+  await checkPluginUpdate(pluginDir)
+
+  if (result.action === "upgraded") {
+    return `[XP-Gate] Auto-upgraded from v${result.localVersion} to v${result.remoteVersion}`
+  }
+  if (result.action === "error") {
+    return `[XP-Gate] Upgrade check: v${result.remoteVersion} available (auto-upgrade failed: ${result.error})`
+  }
+  return null
 }
 
 async function runCmd(cmd: string, cwd: string): Promise<string> {
@@ -47,77 +199,6 @@ async function getUpgradeSuggestion(cwd: string): Promise<string> {
   } catch {
     return ""
   }
-}
-
-// ── Auto-update check for opencode-plugin ──
-
-const CACHE_TTL_MS = 86_400_000
-const NPM_REGISTRY_URL = "https://registry.npmjs.org/-/package/@boyingliu01%2Fopencode-plugin/dist-tags"
-const FETCH_TIMEOUT_MS = 5_000
-const CACHE_FILE = join(homedir(), ".xp-gate", "opencode-plugin-version-check.json")
-
-let checked = false
-let checkInFlight: Promise<void> | null = null
-
-function semverLt(a: string, b: string): boolean {
-  const pa = a.replace(/^v/, "").split(".").map(Number)
-  const pb = b.replace(/^v/, "").split(".").map(Number)
-  for (let i = 0; i < Math.max(pa.length, pb.length); i++) {
-    const na = pa[i] ?? 0
-    const nb = pb[i] ?? 0
-    if (na !== nb) return na < nb
-  }
-  return false
-}
-
-async function checkPluginUpdate(pluginDir: string): Promise<void> {
-  if (checkInFlight) return
-
-  checkInFlight = (async () => {
-    try {
-      mkdirSync(join(homedir(), ".xp-gate"), { recursive: true })
-
-      if (existsSync(CACHE_FILE)) {
-        const cached = JSON.parse(readFileSync(CACHE_FILE, "utf8"))
-        if (Date.now() - cached.ts < CACHE_TTL_MS) return
-      }
-
-      let localVersion = ""
-      try {
-        const pkg = JSON.parse(readFileSync(join(pluginDir, "package.json"), "utf8"))
-        localVersion = pkg.version || ""
-      } catch {
-        return
-      }
-
-      const controller = new AbortController()
-      const timer = setTimeout(() => controller.abort(), FETCH_TIMEOUT_MS)
-      try {
-        const response = await fetch(NPM_REGISTRY_URL, { signal: controller.signal })
-        if (!response.ok) return
-        const data: Record<string, unknown> = await response.json()
-        const remoteVersion = String(data.latest || "")
-
-        if (remoteVersion && localVersion && semverLt(localVersion, remoteVersion)) {
-          writeFileSync(CACHE_FILE, JSON.stringify({ ts: Date.now(), localVersion, remoteVersion }))
-          process.stderr.write(
-            `[XP-Gate] New opencode-plugin version v${remoteVersion} available (you have v${localVersion})\n` +
-            `[XP-Gate] Update with: cd ~/.config/opencode && npm update @boyingliu01/opencode-plugin\n`
-          )
-        } else if (remoteVersion && localVersion) {
-          // Cache "up to date" to avoid re-fetching every session
-          writeFileSync(CACHE_FILE, JSON.stringify({ ts: Date.now(), localVersion, remoteVersion, status: "current" }))
-        }
-      } finally {
-        clearTimeout(timer)
-      }
-    } catch {
-      // All errors silently ignored
-    }
-  })()
-
-  await checkInFlight
-  checkInFlight = null
 }
 
 // ── Plugin definition ──
@@ -184,7 +265,9 @@ export const XpGatePlugin = async (input: OpenCodePluginInput) => {
     "chat.message": async (_input: { message: string }) => {
       if (!checked) {
         checked = true
-        checkPluginUpdate(directory).catch((_err) => { /* silent: non-critical background check */ })
+        runBackgroundUpdates(directory).then((msg) => {
+          if (msg) process.stderr.write(`${msg}\n`)
+        })
       }
       return { action: "continue" }
     },
