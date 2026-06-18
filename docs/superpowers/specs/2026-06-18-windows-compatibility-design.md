@@ -35,16 +35,31 @@ File: `githooks/adapter-common.sh`
 Add a new function at the top:
 ```bash
 detect_os_env() {
-  case "$(uname -s 2>/dev/null || echo unknown)" in
-    MINGW*|MSYS*|CYGWIN*) echo "windows" ;;
-    Darwin*) echo "macos" ;;
-    Linux*) echo "linux" ;;
-    *) echo "unknown" ;;
-  esac
+    local os
+    # 优先使用uname -s（POSIX标准，所有平台可用）
+    os=$(uname -s 2>/dev/null || echo "unknown")
+    case "$os" in
+        Linux*)     echo "linux";;
+        Darwin*)    echo "macos";;
+        MINGW*|MSYS*|CYGWIN*) echo "windows";;
+        *)
+            # 降级：检测$OSTYPE（bash特有，某些非POSIX环境备用）
+            if [ -n "${OSTYPE-}" ]; then
+                case "${OSTYPE-}" in
+                    linux*)     echo "linux";;
+                    darwin*)    echo "macos";;
+                    msys*|cygwin*) echo "windows";;
+                    *)          echo "unknown";;
+                esac
+            else
+                echo "unknown"
+            fi
+            ;;
+    esac
 }
 ```
 
-The function checks `uname -s` for MSYS/MINGW/CYGWIN signatures which are standard Git Bash environment markers. This is a POSIX-compatible check.
+The function checks `uname -s` for MSYS/MINGW/CYGWIN signatures which are standard Git Bash environment markers. Uses `${OSTYPE-}` (default-value syntax) as a fallback when `uname` is unavailable — the `-` suffix avoids `set -u` failures without needing an explicit `set +u`.
 
 ### 2. `head` → `sed` Migration
 
@@ -55,9 +70,15 @@ Replace all 52 `head` invocations with POSIX `sed` equivalents:
 | `head -1` | `sed -n '1p'` |
 | `head -n 1` | `sed -n '1p'` |
 | `head -20` / `head -30` / `head -5` | `sed -n '1,20p'` etc. |
-| `grep ... \| head -n X` | `grep -m X ...` (works with GNU grep, sed fallback) |
+| `grep ... \| head -n 1` | `grep ... \| sed -n '1p'` |
+| `grep ... \| head -n X` (X>1) | `grep ... \| sed -n '1,Xp'` |
+| `head -N` (如plugin中的`head -20`) | `sed -n '1,Np'` |
 
-**Exception**: Plugin scripts in `githooks/adapters/plugins/` (p3c-java, whalecloud-java) use `head` for file-level operations (splitting XML). These are third-party extensions — convert them but keep the same logic.
+> ⚠️ **Critical: `grep -m X` 不可用**。`grep ... | head -n 1` 中即使grep无匹配，head仍返回0；改为`grep -m 1`后无匹配返回1，改变管道退出码。在`set -e`环境下会导致脚本提前退出。**统一使用`sed -n '1,Np'`替代所有`head -N`**。
+
+> 📝 `sed -n '1,Np'` 在输入行数 < N时输出全部行（与`head -N`行为一致），无需额外处理。
+
+**Exception**: Plugin scripts in `githooks/adapters/plugins/` (p3c-java, whalecloud-java) use `head` for file-level operations (splitting XML, `head -20`). These are third-party extensions — convert them using `sed -n '1,20p'` with the same logic. Syntax-check via `bash -n` on CI only (stretch goal).
 
 ### 3. `[[ ]]` → `[ ]` Conversion
 
@@ -73,14 +94,29 @@ Convert 47 occurrences across 4 files. These are the most consequential changes 
 - `[[ "a" == "b" ]]` → `[ "a" = "b" ]`
 - `[[ "a" != "b" ]]` → `[ "a" != "b" ]`
 
+> ⚠️ **MANDATORY: ALL variable expansions inside `[ ]` MUST be double-quoted**: `[ -n "$var" ]`, NOT `[ -n $var ]`. Unquoted empty variables either cause syntax error (`[  = "" ]`) or are misinterpreted (`[ -n ]` is always true because `-n` is 2 chars). This is the #1 bug source in `[[ ]]` → `[ ]` conversion.
+
 **Key risks**:
 - `[[ ]]` prevents word splitting; `[ ]` does not — all variable expansions must be quoted
 - `[[ ]]` supports regex matching (`=~`); `[ ]` does not — use `case` or `grep -q` instead
 - Empty variable in `[ ]` causes syntax error — double-quote ALL variable references
 
-### 4. Tool Install Messages
+### 4. `command -v` Strategy
 
-Replace 4 `brew` references with cross-platform alternatives:
+**Decision: Keep unchanged.** `command -v` is POSIX-standard (IEEE Std 1003.1) and available in Git Bash, MSYS2, and all Unix shells. It works correctly for tool detection on all supported platforms. The 55 existing usages require no migration.
+
+Note: `command -v` is NOT available in Windows PowerShell/cmd.exe — but hooks always run under Git Bash, where it works.
+
+### 5. `chmod +x` on Windows
+
+**Decision: Document, no change needed.** In Git Bash (MSYS2/MinGW), `chmod +x` is effectively a no-op — Windows NTFS ACLs don't map to Unix permission bits. Hook executability is guaranteed by:
+- npm package distribution: files are marked executable at pack time
+- `core.filemode` in git config: on Windows, typically `false`; hooks run via `bash <script>` regardless of exec bit
+- `xp-gate init` copies files via `fs.copyFileSync()` which preserves source permissions
+
+The single `chmod +x` in `install.sh` line 28 is a best-effort operation — on Windows it's harmless (no error), on Unix it's necessary. Keep it.
+
+### 6. Tool Install Messages
 
 ```
 # Before
@@ -143,37 +179,37 @@ POSIX-compatible shell syntax and run under Git Bash's MSYS2 environment.
 
 ## Testing Strategy (Cross-Platform: Single Test Suite)
 
-### Principle: One Test Suite, Dual Platform
+### Principle: One Test Suite, Platform-Specific Execution
 
-所有测试**只写一套**，但测试代码本身必须跨平台兼容（和hooks代码同一标准）。不在两个平台上维护两套独立的测试。
+所有测试代码**只写一套**，但执行范围因平台而异。BATS 测试仅在 Linux 上运行（Windows Git Bash 下 BATS 的 shebang 解析和环境变量行为未经实际验证，存在兼容性风险）。Level 1 语法检查和内置的 OS 检测测试在所有平台运行。
 
 原因：
 - hooks在Windows上通过Git Bash的MSYS2环境运行，解释器**本质上还是同一个bash**
 - 真正需要两套的是CI runner（`ubuntu-latest` + `windows-latest`），不是测试代码
-- 维护两套测试的成本 > 收益，且容易漂移
+- BATS在Windows Git Bash下的可用性未验证 — 不冒这个风险，Windows只做语法检查
 
 ### 测试代码兼容性要求
 
-测试脚本（BATS）也遵循与hooks相同的POSIX兼容标准：
+BATS 测试脚本（仅 Linux 运行）也遵循 POSIX 兼容标准，确保与 hooks 代码风格一致：
 
 | 禁止 | 替代 |
 |------|------|
 | `[[ ]]` | `[ ]` 并双引号所有变量 |
 | `head` | `sed -n '1p'` 或 `grep -m` |
-| `source` (除非必要) | `.` 命令（POSIX兼容） |
+| `source` (除非必要) | `.` 命令（POSIX兼容，Git Bash也支持） |
 | 硬编码Unix路径 | `$PWD`、`$(dirname "$0")` |
-| `command -v` | 同，Git Bash支持 |
+| `command -v` | POSIX标准，Git Bash支持，保持不变 |
 
 ### 测试层级
 
 ```
-Level 1: Syntax validation (最轻量，必过)
+Level 1: Syntax validation (最轻量，双平台)
   ├─ bash -n githooks/adapter-common.sh
   ├─ bash -n githooks/pre-commit
   ├─ bash -n githooks/pre-push
   └─ bash -n for every gate-*.sh, adapters/*.sh
 
-Level 2: BATS unit tests (githooks/__tests__/)
+Level 2: BATS unit tests (仅 Linux)
   ├─ 现有BATS测试保持不变（gate-parsing, gate-activation等）
   ├─ 新增: detect_os_env() 单元测试
   │   ├─ "linux" ← 模拟 $(uname -s) = "Linux"
@@ -181,9 +217,9 @@ Level 2: BATS unit tests (githooks/__tests__/)
   │   └─ "macos" ← 模拟 $(uname -s) = "Darwin"
   └─ 新增: 验证所有gate脚本的bash -n解析（自动扫描）
 
-Level 3: CI execution (两平台)
-  ├─ ubuntu-latest: 完整测试 + BATS + gate集成测试
-  └─ windows-latest (shell: bash): bash -n语法检查 + script源测试
+Level 3: CI execution (平台差异化)
+  ├─ ubuntu-latest: Level 1 + Level 2 (完整BATS)
+  └─ windows-latest (shell: bash): Level 1 only (bash -n + 内联OS检测)
 ```
 
 ### CI配置
@@ -221,13 +257,26 @@ Level 3: CI execution (两平台)
       - name: Test OS detection
         shell: bash
         run: |
-          # Simulate detect_os_env() inline test
+          # Simulate detect_os_env() inline test (full logic, incl. OSTYPE fallback)
           detect_os_env() {
-            case "$(uname -s 2>/dev/null || echo unknown)" in
-              MINGW*|MSYS*|CYGWIN*) echo "windows" ;;
-              Darwin*) echo "macos" ;;
-              Linux*) echo "linux" ;;
-              *) echo "unknown" ;;
+            local os
+            os=$(uname -s 2>/dev/null || echo "unknown")
+            case "$os" in
+                Linux*)     echo "linux";;
+                Darwin*)    echo "macos";;
+                MINGW*|MSYS*|CYGWIN*) echo "windows";;
+                *)
+                    if [ -n "${OSTYPE-}" ]; then
+                        case "${OSTYPE-}" in
+                            linux*)     echo "linux";;
+                            darwin*)    echo "macos";;
+                            msys*|cygwin*) echo "windows";;
+                            *)          echo "unknown";;
+                        esac
+                    else
+                        echo "unknown"
+                    fi
+                    ;;
             esac
           }
           OS=$(detect_os_env)
@@ -249,6 +298,22 @@ The work should proceed in this order to minimize merge conflicts:
 3. **Opt 3**: Gate 8/9 scripts — `brew` replacement + tool install messages
 4. **Opt 4**: `cross-platform-ci.yml` — Windows Git Bash job (含语法检查 + OS检测验证)
 5. **Opt 5**: `TOOL-INSTALLATION-GUIDE.md` — Windows section
+
+## Rollback Plan
+
+If the Windows compatibility changes break existing hook behavior:
+
+| Trigger | Detection | Rollback Action |
+|---------|-----------|-----------------|
+| `bash -n` fails on any modified `.sh` file | Pre-commit Gate 6 / CI Level 1 | `git checkout -- githooks/adapter-common.sh` — 恢复整个文件 |
+| `detect_os_env()` returns wrong OS on Linux | E2E test failure or gate misrouting | `git checkout -- githooks/adapter-common.sh` — 恢复OS检测部分 |
+| `[ ]` quoting bug causes false positive/negative | Gate 1 fails on unrelated file, or shellcheck errors | 定位到具体行，`git checkout -- <file>` 恢复该文件 |
+| 任何CI新错误 | CI pipeline failure | `git revert <commit>` 回退到上一个commit |
+
+**不回退**的情况：
+- Windows CI runner 上 tools 未安装导致 gate SKIP（这是预期行为，不是回归）
+- BATS 测试在 Linux 上暴露了 Windows 特有路径问题（标记 known issue）
+- `sed -n '1p'` 行为差异（POSIX标准，回退可能性极低）
 
 ## Risks
 
