@@ -28,64 +28,64 @@ detect_os_env() {
 }
 
 detect_project_lang() {
-  if [[ -f "tsconfig.json" ]]; then
+  if [ -f "tsconfig.json" ]; then
     echo "typescript"
-  elif [[ -f "pyproject.toml" ]] || [[ -f "requirements.txt" ]] || [[ -f "setup.py" ]]; then
+  elif [ -f "pyproject.toml" ] || [ -f "requirements.txt" ] || [ -f "setup.py" ]; then
     echo "python"
-  elif [[ -f "go.mod" ]]; then
+  elif [ -f "go.mod" ]; then
     echo "go"
-  elif [[ -f "build.gradle" ]] || [[ -f "build.gradle.kts" ]]; then
-    if [[ -n "$(find . -name "*.kt" -type f | sed -n '1p; 1q')" ]]; then
+  elif [ -f "build.gradle" ] || [ -f "build.gradle.kts" ]; then
+    if [ -n "$(find . -name "*.kt" -type f | sed -n '1p; 1q')" ]; then
       echo "kotlin"
     else
       echo "java"
     fi
-  elif [[ -f "pom.xml" ]]; then
+  elif [ -f "pom.xml" ]; then
     echo "java"
-  elif [[ -f "pubspec.yaml" ]]; then
-    if grep -q "flutter:" "pubspec.yaml" 2>/dev/null || [[ -f ".metadata" ]]; then
+  elif [ -f "pubspec.yaml" ]; then
+    if grep -q "flutter:" "pubspec.yaml" 2>/dev/null || [ -f ".metadata" ]; then
       echo "flutter"
     else
       echo "dart"
     fi
-  elif [[ -n "$(find . -name "*.ps1" -type f | sed -n '1p; 1q')" ]]; then
+  elif [ -n "$(find . -name "*.ps1" -type f | sed -n '1p; 1q')" ]; then
     echo "powershell"
-  elif [[ -f "Package.swift" ]]; then
+  elif [ -f "Package.swift" ]; then
     echo "swift"
-  elif [[ -f "CMakeLists.txt" ]] || [[ -n "$(find . -name "*.cpp" -o -name "*.cc" -type f | sed -n '1p; 1q')" ]]; then
+  elif [ -f "CMakeLists.txt" ] || [ -n "$(find . -name "*.cpp" -o -name "*.cc" -type f | sed -n '1p; 1q')" ]; then
     echo "cpp"
-  elif [[ -n "$(find . -name "*.m" -o -name "*.mm" -type f | sed -n '1p; 1q')" ]]; then
+  elif [ -n "$(find . -name "*.m" -o -name "*.mm" -type f | sed -n '1p; 1q')" ]; then
     echo "objectivec"
-  elif [[ -n "$(find . -name "*.sh" -type f | sed -n '1p; 1q')" ]] || [[ -n "$(find . -name "Dockerfile" -o -name "*.dockerfile" -type f | sed -n '1p; 1q')" ]]; then
+  elif [ -n "$(find . -name "*.sh" -type f | sed -n '1p; 1q')" ]; then
     echo "shell"
-  elif [[ -n "$(find . -name "*.ps1" -type f -not -path "./.git/*" | sed -n '1p; 1q')" ]]; then
+  elif [ -n "$(find . -name "*.ps1" -type f -not -path "./.git/*" | sed -n '1p; 1q')" ]; then
     echo "powershell"
   else
-    if [[ -n "$(find . -name "*.ts" -o -name "*.tsx" -type f | sed -n '1p; 1q')" ]]; then
+    if [ -n "$(find . -name "*.ts" -o -name "*.tsx" -type f | sed -n '1p; 1q')" ]; then
       echo "typescript"
-    elif [[ -n "$(find . -name "*.py" -type f | sed -n '1p; 1q')" ]]; then
+    elif [ -n "$(find . -name "*.py" -type f | sed -n '1p; 1q')" ]; then
       echo "python"
-    elif [[ -n "$(find . -name "*.go" -type f | sed -n '1p; 1q')" ]]; then
+    elif [ -n "$(find . -name "*.go" -type f | sed -n '1p; 1q')" ]; then
       echo "go"
-    elif [[ -n "$(find . -name "*.kt" -type f | sed -n '1p; 1q')" ]]; then
+    elif [ -n "$(find . -name "*.kt" -type f | sed -n '1p; 1q')" ]; then
       echo "kotlin"
-    elif [[ -n "$(find . -name "*.java" -type f | sed -n '1p; 1q')" ]]; then
+    elif [ -n "$(find . -name "*.java" -type f | sed -n '1p; 1q')" ]; then
       echo "java"
-    elif [[ -n "$(find . -name "*.dart" -type f | sed -n '1p; 1q')" ]]; then
-      if grep -q "flutter:" "pubspec.yaml" 2>/dev/null || [[ -f ".flutter" ]]; then
+    elif [ -n "$(find . -name "*.dart" -type f | sed -n '1p; 1q')" ]; then
+      if grep -q "flutter:" "pubspec.yaml" 2>/dev/null || [ -f ".flutter" ]; then
         echo "flutter"
       else
         echo "dart"
       fi
-    elif [[ -n "$(find . -name "*.swift" -type f | sed -n '1p; 1q')" ]]; then
+    elif [ -n "$(find . -name "*.swift" -type f | sed -n '1p; 1q')" ]; then
       echo "swift"
-    elif [[ -n "$(find . -name "*.cpp" -o -name "*.cc" -o -name "*.c" -o -name "*.h" -type f | sed -n '1p; 1q')" ]]; then
+    elif [ -n "$(find . -name "*.cpp" -o -name "*.cc" -o -name "*.c" -o -name "*.h" -type f | sed -n '1p; 1q')" ]; then
       echo "cpp"
-    elif [[ -n "$(find . -name "*.m" -o -name "*.mm" -type f | sed -n '1p; 1q')" ]]; then
+    elif [ -n "$(find . -name "*.m" -o -name "*.mm" -type f | sed -n '1p; 1q')" ]; then
       echo "objectivec"
-    elif [[ -n "$(find . -name "*.sh" -type f | sed -n '1p; 1q')" ]]; then
+    elif [ -n "$(find . -name "*.sh" -type f | sed -n '1p; 1q')" ]; then
       echo "shell"
-    elif [[ -n "$(find . -name "*.ps1" -type f -not -path "./.git/*" | sed -n '1p; 1q')" ]]; then
+    elif [ -n "$(find . -name "*.ps1" -type f -not -path "./.git/*" | sed -n '1p; 1q')" ]; then
       echo "powershell"
     else
       echo "unknown"
@@ -99,7 +99,7 @@ route_to_adapter() {
   lang=$(detect_project_lang)
   
   # Source the appropriate adapter
-  if [[ -f "githooks/adapters/${lang}.sh" ]]; then
+  if [ -f "githooks/adapters/${lang}.sh" ]; then
     # shellcheck source=githooks/adapters/"${lang}".sh
     source "githooks/adapters/${lang}.sh"
     
@@ -111,7 +111,7 @@ route_to_adapter() {
       "coverage") run_coverage ;;
       *) return 1 ;;
     esac
-  elif [[ -f "./githooks/adapters/${lang}.sh" ]]; then
+  elif [ -f "./githooks/adapters/${lang}.sh" ]; then
     # Alternative: source with ./ prefix
     # shellcheck source=./githooks/adapters/"${lang}".sh
     source "./githooks/adapters/${lang}.sh"
@@ -155,7 +155,7 @@ require_tool() {
   fi
   
   echo "❌ BLOCKED - Required tool '$tool_name' not available for $gate_name"
-  if [[ -n "$install_hint" ]]; then
+  if [ -n "$install_hint" ]; then
     echo "   Install: $install_hint"
   fi
   echo "   Per QUALITY-GATES-CODE-OF-CONDUCT.md: tool unavailable = BLOCK, not SKIP"
@@ -167,12 +167,12 @@ detect_iac_project() {
   local has_iac=false
   
   # Check for Terraform files
-  if [[ -n "$(find . -maxdepth 2 -name "*.tf" -not -path "./.git/*" 2>/dev/null | sed -n '1p; 1q')" ]]; then
+  if [ -n "$(find . -maxdepth 2 -name "*.tf" -not -path "./.git/*" 2>/dev/null | sed -n '1p; 1q')" ]; then
     has_iac=true
   fi
   
   # Check for Kubernetes manifests (YAML with apiVersion/kind)
-  if [[ -n "$(find . -maxdepth 2 \( -name "*.yaml" -o -name "*.yml" \) -not -path "./.git/*" 2>/dev/null | sed -n '1p; 1q')" ]]; then
+  if [ -n "$(find . -maxdepth 2 \( -name "*.yaml" -o -name "*.yml" \) -not -path "./.git/*" 2>/dev/null | sed -n '1p; 1q')" ]; then
     local yaml_file=$(find . -maxdepth 2 \( -name "*.yaml" -o -name "*.yml" \) -not -path "./.git/*" 2>/dev/null | sed -n '1p; 1q')
     if grep -qE "^(apiVersion|kind):" "$yaml_file" 2>/dev/null; then
       has_iac=true
@@ -180,7 +180,7 @@ detect_iac_project() {
   fi
   
   # Check for Dockerfiles
-  if [[ -n "$(find . -maxdepth 2 -name "Dockerfile" -o -name "*.dockerfile" -not -path "./.git/*" 2>/dev/null | sed -n '1p; 1q')" ]]; then
+  if [ -n "$(find . -maxdepth 2 -name "Dockerfile" -o -name "*.dockerfile" -not -path "./.git/*" 2>/dev/null | sed -n '1p; 1q')" ]; then
     has_iac=true
   fi
   
@@ -193,9 +193,9 @@ detect_iac_project() {
 
 # Stryker 9.x config files (new format, takes priority)
 detect_mutation_testable() {
-  if [[ -f "stryker.config.mjs" ]] || [[ -f "stryker.config.js" ]] || \
-     [[ -f "stryker.config.cjs" ]] || [[ -f "stryker.config.json" ]]; then
-    if [[ -f "package.json" ]] && grep -qE '"@stryker-mutator[^"]*"' package.json 2>/dev/null; then
+  if [ -f "stryker.config.mjs" ] || [ -f "stryker.config.js" ] || \
+     [ -f "stryker.config.cjs" ] || [ -f "stryker.config.json" ]; then
+    if [ -f "package.json" ] && grep -qE '"@stryker-mutator[^"]*"' package.json 2>/dev/null; then
       return 0
     fi
     if command -v npx >/dev/null 2>&1 && npx --no-install stryker --version >/dev/null 2>&1; then
@@ -204,8 +204,8 @@ detect_mutation_testable() {
   fi
 
   # Legacy Stryker config files (backwards compatibility)
-  if [[ -f "stryker.conf.json" ]] || [[ -f "stryker.prepush.conf.json" ]]; then
-    if [[ -f "package.json" ]] && grep -qE '"@stryker-mutator[^"]*"' package.json 2>/dev/null; then
+  if [ -f "stryker.conf.json" ] || [ -f "stryker.prepush.conf.json" ]; then
+    if [ -f "package.json" ] && grep -qE '"@stryker-mutator[^"]*"' package.json 2>/dev/null; then
       return 0
     fi
     if command -v npx >/dev/null 2>&1 && npx --no-install stryker --version >/dev/null 2>&1; then
