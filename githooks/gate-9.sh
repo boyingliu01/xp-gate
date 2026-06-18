@@ -20,7 +20,7 @@ fi
 
 if [ -z "$SEMGREP_CMD" ]; then
   echo "     ⚠️  WARN - semgrep not installed — SAST scanning unavailable"
-  echo "     Install: brew install semgrep | pip install semgrep"
+  echo "     Install: brew install semgrep (macOS) | pip install semgrep (Linux) | pip install semgrep (Windows)"
   echo "     Pre-cache rules: semgrep --config=p/security-audit"
   echo "     Gate 9: SAST Security (WARN, semgrep not installed)"
   GATE_9_STATUS="WARN"
