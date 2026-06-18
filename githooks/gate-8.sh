@@ -49,7 +49,7 @@ if [ -n "$GITLEAKS_CMD" ]; then
   fi
 else
   echo "     ℹ️  gitleaks not installed — secret scanning unavailable"
-  echo "     Install: brew install gitleaks (macOS) | scripts/install-gitleaks.sh (Linux)"
+  echo "     Install: brew install gitleaks (macOS) | winget install gitleaks (Windows) | scripts/install-gitleaks.sh (Linux)"
   echo "     ⏭️  SKIPPED - Secret scanning (gitleaks not installed)"
   GATE_8_STATUS="SKIP"
 fi
