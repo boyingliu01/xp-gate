@@ -26,13 +26,13 @@ run_lint() {
 
 run_tests() {
   # Look for and run shell test files
-  if [[ -d "tests" ]] && [[ -n "$(find tests -name "*.sh" -type f | head -n 1)" ]]; then
+  if [ -d "tests" ] && [ -n "$(find tests -name "*.sh" -type f | sed -n '1p; 1q')" ]; then
     echo "Running Shell tests..."
     for test_file in tests/*.sh; do
-      if [[ -x "$test_file" ]]; then
+      if [ -x "$test_file" ]; then
         "$test_file"
         local exit_code=$?
-        if [[ $exit_code -ne 0 ]]; then
+        if [ "$exit_code" -ne 0 ]; then
           return $exit_code
         fi
       fi
