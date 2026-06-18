@@ -4,6 +4,20 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+## [0.9.2] - 2026-06-18
+
+### Fixed
+
+- **Windows bash hooks compatibility (#187, #168)**:
+  - `detect_os_env()`: Cross-platform OS detection using `uname -s` + `${OSTYPE-}` fallback
+  - `head→sed`: 46 replacements across 15 hook/adapter files — `sed -n '1,Np; Nq'` with early exit
+  - `[[ ]]→[ ]`: 47 POSIX-compatible conditional expressions in adapter-common.sh + install/verify scripts
+  - `brew→winget/pip`: Windows tool install hints in Gate 8 and Gate 9 files
+  - **Plugin stretch goal**: Replaced 6 `head` usages in p3c-java + whalecloud-java plugin scripts
+  - **CI**: New `windows-gitbash-hooks` job in cross-platform CI workflow
+  - **Docs**: Windows setup section in `TOOL-INSTALLATION-GUIDE.md`
+  - All 37 githooks `.sh` files now `head`-free, 33/33 acceptance criteria passed
+
 ## [0.9.1] - 2026-06-18
 
 ### Refactored

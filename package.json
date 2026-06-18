@@ -1,6 +1,6 @@
 {
   "name": "xp-gate",
-  "version": "0.9.1",
+  "version": "0.9.2",
   "description": "XP-Gate - Quality Gate & AI Review for Every Commit",
   "type": "module",
   "engines": {
