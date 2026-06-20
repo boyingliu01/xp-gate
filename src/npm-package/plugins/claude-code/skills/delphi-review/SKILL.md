@@ -1,6 +1,7 @@
 ---
 name: delphi-review
 description: "Use when asked to review a design, plan, or architecture; before implementation starts; or when multi-expert consensus is needed. Triggers: 'review this design', '评审这个需求', 'design review', '多专家评审', 'consensus review', 'code walkthrough', 'push review', 'architecture review', 'PR review', or any request for multi-expert evaluation of requirements, design docs, or PRs."
+auto_continue: true
 ---
 
 # Delphi Consensus Review
@@ -108,6 +109,39 @@ Phase 0: 准备 → Round 1: 匿名独立评审 → 共识检查
 **Orchestrator 自动调度规则**（#218 subagent 内部自动多轮循环）→ 详见 `references/orchestrator-dispatch.md`
 
 **Automatic re-review**: 对于常见可控问题（措辞模糊、AC 缺失、格式问题），subagent 应自行修复后自动重评审，无需等待用户。
+
+### ⭐ 自动延续规则（MANDATORY — 防止流程卡住）
+
+当 Delphi Review 启动多轮评审（Round 2+）时，**orchestrator 必须自动延续流程，不得等待用户输入**。
+
+**触发条件**：
+- Round N 完成，但未达到终止条件（100% approved + ≥90% consensus + 所有 Critical/Major 已处理）
+- 存在待处理的背景任务（subagent  dispatched tasks）
+
+**自动延续动作**：
+1. **收集背景任务结果**：等待 `<system-reminder>` 通知后，立即调用 `background_output(task_id="bg_...")` 获取所有 subagent 输出
+2. **合成 Round N 总结**：汇总专家意见、共识度、待处理问题
+3. **自动启动 Round N+1**：立即 dispatch 新一轮 subagent 任务，携带上一轮总结作为上下文
+4. **循环直至终止**：重复步骤 1-3，直到达到终止条件
+
+**终止条件**（满足全部）：
+- ✅ 所有专家状态 = APPROVED
+- ✅ 共识度 ≥ 90%
+- ✅ 所有 Critical 级别问题已解决
+- ✅ 所有 Major 级别问题已处理（或已记录为已知问题）
+
+**例外情况**（直接输出，不进入下一轮）：
+- Round 1 即达到 100% approved + 100% consensus → 直接输出最终报告
+- 已达最大轮数（5 轮）→ 输出"未达成共识"报告，标记为 PROCESS_BLOCK
+
+**禁止行为**：
+- ❌ 询问用户"要继续吗？"
+- ❌ 等待用户手动触发 Round N+1
+- ❌ 在未达到终止条件时停止流程
+
+**错误处理**：
+- 背景任务超时（>10min）→ 标记为 TIMEOUT，输出部分结果并终止
+- 背景任务失败（subagent 错误）→ 重试 1 次，仍失败则输出错误报告并终止
 
 ---
 

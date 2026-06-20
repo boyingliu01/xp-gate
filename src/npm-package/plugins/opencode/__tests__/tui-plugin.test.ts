@@ -73,7 +73,7 @@ function renderPhaseLine(key: string, history: { status?: string; phase_name?: s
 
 // ── Test fixtures ──
 
-function makeSprintState(overrides: Record<string, unknown> = {}): Record<string, unknown> {
+function makeSprintState(overrides: Record<string, unknown> = {}) {
   const base = {
     id: "sprint-001",
     phase: "2",
@@ -88,7 +88,7 @@ function makeSprintState(overrides: Record<string, unknown> = {}): Record<string
       { phase: "2", status: "in_progress" as const, reqs: { "REQ-001": { name: "JWT auth", status: "completed" as const }, "REQ-002": { name: "OAuth2 flow", status: "in_progress" as const } } },
     ],
   }
-  return { ...base, ...overrides }
+  return { ...base, ...overrides } as Record<string, unknown>
 }
 
 // ── isStale ──
