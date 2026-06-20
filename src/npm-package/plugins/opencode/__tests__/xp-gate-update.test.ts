@@ -15,7 +15,6 @@ import { mkdirSync, writeFileSync, readFileSync, existsSync, rmSync } from "node
 import { join } from "node:path"
 import { tmpdir, homedir } from "node:os"
 import { execSync, spawn } from "node:child_process"
-import { EventEmitter } from "node:events"
 
 // ── Pure function: semverLt ──
 
@@ -187,16 +186,6 @@ function readXpGateConfig(): { autoUpgrade?: boolean } | null {
   } catch {
     return null
   }
-}
-
-/**
- * Wait for a child process to close and resolve with exit code.
- */
-function waitForSpawn(child: ReturnType<typeof spawn>): Promise<number> {
-  return new Promise((resolve, reject) => {
-    child.on("close", (code) => resolve(code ?? -1))
-    child.on("error", (err) => reject(err))
-  })
 }
 
 // ── Tests ──
