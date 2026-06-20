@@ -101,6 +101,12 @@ function renderBuildReqs(history: SprintPhaseHistory): string[] {
     .map(([id, r]) => `  ${statusSymbol(r.status, id, undefined)} ${r.name}`)
 }
 
+function appendBuildReqs(lines: string[], key: string, history: SprintPhaseHistory | undefined): void {
+  if (key === "2" && history?.reqs) {
+    lines.push(...renderBuildReqs(history))
+  }
+}
+
 function renderPhaseLines(
   historyByPhase: Record<string, SprintPhaseHistory>,
   currentPhase: string | number | undefined,
@@ -110,9 +116,7 @@ function renderPhaseLines(
     const history = historyByPhase[key]
     if (!history && String(currentPhase) !== key) continue
     lines.push(renderPhaseLine(key, history, currentPhase))
-    if (key === "2" && history?.reqs) {
-      lines.push(...renderBuildReqs(history))
-    }
+    appendBuildReqs(lines, key, history)
   }
   return lines
 }

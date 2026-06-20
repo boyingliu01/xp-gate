@@ -386,6 +386,42 @@ function fixMissingAdapters(mode, srcDir, adaptersDir) {
   return false;
 }
 
+function fixConfigMismatches(config) {
+  let fixed = false;
+  fixed = fixVersionMismatch(config, getPackageVersion()) || fixed;
+  fixed = fixTemplateDirMismatch(config, getTemplateDir()) || fixed;
+  return fixed;
+}
+
+function fixHooksByMode(config, srcDir) {
+  let fixed = false;
+  if (config.mode === 'local') {
+    const gitDir = getGitDir();
+    if (gitDir) {
+      const hooksDir = path.join(gitDir, 'hooks');
+      fixed = fixMissingHooks('local', srcDir, hooksDir) || fixed;
+    }
+  } else {
+    fixed = fixMissingHooks('global', srcDir, GLOBAL_HOOKS_DIR) || fixed;
+  }
+  return fixed;
+}
+
+function fixGlobalHooksPath(config) {
+  if (config.mode !== 'global') return false;
+  const hooksPath = getCurrentHooksPath();
+  if (hooksPath !== GLOBAL_HOOKS_DIR) {
+    return fixCoreHooksPath(GLOBAL_HOOKS_DIR);
+  }
+  return false;
+}
+
+function getAdaptersDirByMode(config) {
+  return config.mode === 'local'
+    ? path.join(path.dirname(getGitDir() || ''), 'githooks', 'adapters')
+    : GLOBAL_ADAPTERS_DIR;
+}
+
 /**
  * Attempt to fix known issues.
  * Only operates when mode === 'active' (local or global).
@@ -398,30 +434,10 @@ function fixIssues(checks, config) {
   const srcDir = PKG_DIR;
   let fixed = false;
 
-  fixed = fixVersionMismatch(config, getPackageVersion()) || fixed;
-  fixed = fixTemplateDirMismatch(config, getTemplateDir()) || fixed;
-
-  if (config.mode === 'local') {
-    const gitDir = getGitDir();
-    if (gitDir) {
-      const hooksDir = path.join(gitDir, 'hooks');
-      fixed = fixMissingHooks('local', srcDir, hooksDir) || fixed;
-    }
-  } else {
-    fixed = fixMissingHooks('global', srcDir, GLOBAL_HOOKS_DIR) || fixed;
-  }
-
-  if (config.mode === 'global') {
-    const hooksPath = getCurrentHooksPath();
-    if (hooksPath !== GLOBAL_HOOKS_DIR) {
-      fixed = fixCoreHooksPath(GLOBAL_HOOKS_DIR) || fixed;
-    }
-  }
-
-  const adaptersDir = config.mode === 'local'
-    ? path.join(path.dirname(getGitDir() || ''), 'githooks', 'adapters')
-    : GLOBAL_ADAPTERS_DIR;
-  fixed = fixMissingAdapters(config.mode, srcDir, adaptersDir) || fixed;
+  fixed = fixConfigMismatches(config) || fixed;
+  fixed = fixHooksByMode(config, srcDir) || fixed;
+  fixed = fixGlobalHooksPath(config) || fixed;
+  fixed = fixMissingAdapters(config.mode, srcDir, getAdaptersDirByMode(config)) || fixed;
 
   if (!fixed) {
     console.log('  No fixable issues found.');
