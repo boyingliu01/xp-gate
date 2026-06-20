@@ -408,6 +408,58 @@ Sprint Flow: ISOLATE → AUTO-ESTIMATE → THINK → PLAN → BUILD → REVIEW �
 
 ---
 
+### ⭐ Phase State Persistence（阶段状态持久化 — MANDATORY）
+
+**编排器必须在每个 Phase 完成后更新 `.sprint-state/sprint-state.json`**：
+
+1. **Phase 完成后立即更新**（每个 Phase 结束前）：
+   - `phase`: 更新为当前 Phase 编号（如 `0`, `1`, `2`...）
+   - `status`: 更新为 `"completed"`（已完成 Phase）
+   - `phase_history`: 追加新条目
+
+2. **`phase_history` 数组条目 schema**：
+   ```json
+   {
+     "phase": 0,
+     "phase_name": "THINK",
+     "status": "completed",
+     "timestamp": "2026-06-20T10:30:00Z"
+   }
+   ```
+
+3. **检查点**：
+   - `--status` 参数读取 `sprint-state.json` 并渲染进度看板
+   - TUI panel 显示当前 Phase 和历史
+   - `--resume-from` 校验 `phase_history` 中的最后完成 Phase
+
+4. **完整 sprint-state.json 示例**：
+   ```json
+   {
+     "id": "sprint-2026-06-20-01",
+     "phase": 2,
+     "status": "in_progress",
+     "phase_history": [
+       {"phase": -1, "phase_name": "ISOLATE", "status": "completed", "timestamp": "2026-06-20T10:00:00Z"},
+       {"phase": -0.5, "phase_name": "AUTO-ESTIMATE", "status": "completed", "timestamp": "2026-06-20T10:05:00Z"},
+       {"phase": 0, "phase_name": "THINK", "status": "completed", "timestamp": "2026-06-20T10:15:00Z"},
+       {"phase": 1, "phase_name": "PLAN", "status": "completed", "timestamp": "2026-06-20T10:30:00Z"}
+     ],
+     "isolation": {
+       "worktree_path": "/home/boyingliu01/projects/xp-gate/.worktrees/sprint/sprint-2026-06-20-01",
+       "branch": "sprint/2026-06-20-01"
+     },
+     "outputs": {
+       "pain_document": "phase-outputs/phase-0-summary.md",
+       "specification": "phase-outputs/specification.yaml"
+     },
+     "metrics": {
+       "coverage_pct": 85.5
+     }
+   }
+   ```
+
+---
+
 ## 使用示例
 
 | 场景 | 命令 | 说明 |
@@ -447,7 +499,7 @@ See [Output Contract](#output-contract) below for the canonical machine-readable
 
 **Phase Summary** (每个 Phase 必须输出 YAML frontmatter): `phase/N`, `phase_name`, `status`, `outputs[]`, `decisions[]`, `next_phase_context` + markdown body (≤50 lines)
 
-**Sprint State JSON**: `{id, phase, status, isolation {worktree_path, branch}, outputs, metrics}` — 存储于 `.sprint-state/sprint-state.json`
+**Sprint State JSON**: `{id, phase, status, phase_history[], isolation {worktree_path, branch}, outputs, metrics}` — 存储于 `.sprint-state/sprint-state.json`
 
 **Final User-Facing Output**: Phase/status, file paths, validation results, next user decision, PR URL or cleanup report
 

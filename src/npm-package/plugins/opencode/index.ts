@@ -150,7 +150,6 @@ function readXpGateConfig(): { autoUpgrade?: boolean } | null {
     return null
   }
 }
-
 // ── OpenCode plugin version check (notification only) ──
 
 async function checkPluginUpdate(pluginDir: string): Promise<void> {
