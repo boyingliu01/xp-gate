@@ -4,6 +4,24 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+## [0.10.3] - 2026-06-22
+
+### Added
+
+- **Gate 10: Build Integrity Check (pre-push)** — catches broken package references that all previous gates missed. Three checks run in parallel:
+  - `tsc --noEmit` — type-check the project (incremental with `.tsbuildinfo` caching)
+  - `npm pack --dry-run` — verify package manifest includes expected files
+  - Import resolver — detect relative imports that escape the package boundary or target nonexistent files (the original bug: `tui-plugin.ts` importing `../../src/...` which didn't exist in the published npm package)
+  - New module: `src/build-integrity/gate-10.ts` with `runTscCheck`, `runPackCheck`, `runImportCheck`, `runGate10`, and `main` CLI
+  - Integrated into `githooks/pre-push` (runs after Gate S, before Gate M)
+  - 63 unit tests (40 import-resolver, 10 tsc/pack, 13 orchestrator) — all passing
+- **#246: ESLint config warning** — pre-commit now warns when eslint is in devDependencies but no `.eslintrc*` / `eslint.config.*` is found (non-blocking, informational)
+
+### Changed
+
+- **Pre-push report** now tracks individual gate statuses (Gate 10, M, M-Python, M2, M3, UI, Delphi) instead of a single verdict
+- **npm package sync** now includes `build-integrity/` module; `src/npm-package/package.json` files array updated
+
 ## [0.10.2] - 2026-06-22
 
 ### Changed

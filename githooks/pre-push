@@ -44,7 +44,13 @@ report = {
     'verdict': '$verdict',
   },
   'gates': [
-    {'id': 'M', 'name': 'Mutation + Code Walkthrough + UI Gates', 'status': '$verdict', 'details': {'remote': '$REMOTE', 'url': '$URL'}}
+    {'id': '10', 'name': 'Build Integrity', 'status': '${GATE_10_STATUS:-SKIP}', 'details': {}},
+    {'id': 'M', 'name': 'Mutation Testing', 'status': '${GATE_M_STATUS:-SKIP}', 'details': {}},
+    {'id': 'M-Python', 'name': 'Mutation Testing (Python)', 'status': '${GATE_M_PYTHON_STATUS:-SKIP}', 'details': {}},
+    {'id': 'M2', 'name': 'Mock Density', 'status': '${GATE_M2_STATUS:-SKIP}', 'details': {}},
+    {'id': 'M3', 'name': 'Mock Layering', 'status': '${GATE_M3_STATUS:-SKIP}', 'details': {}},
+    {'id': 'UI', 'name': 'UI Sprint Gates', 'status': '${GATE_UI_STATUS:-SKIP}', 'details': {}},
+    {'id': 'Delphi', 'name': 'Code Walkthrough', 'status': '${GATE_DELPHI_STATUS:-SKIP}', 'details': {'remote': '$REMOTE', 'url': '$URL'}}
   ],
   'warnings': [],
   'errors': [] if '$verdict' == 'PASS' else ['pre-push hook exited with code $exit_code'],
@@ -161,6 +167,67 @@ if [ -n "$SPRINT_GATE_SCRIPT" ]; then
 else
   echo "⏭️  SKIPPED - Gate S: Sprint Flow (sprint-gate.sh not found)"
   GATE_S_STATUS="SKIP"
+fi
+echo ""
+
+# ============================================================================
+# GATE 10: BUILD INTEGRITY CHECK (TypeScript)
+# ============================================================================
+GATE_10_STATUS="SKIP"
+
+if [[ -f "package.json" ]] && [[ -f "tsconfig.json" ]] && [[ -n "$TS_FILES" ]]; then
+  echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+  echo "   GATE 10: BUILD INTEGRITY CHECK"
+  echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+
+  GATE_10_SCRIPT=""
+  if [[ -f "$PROJECT_ROOT/src/build-integrity/gate-10.ts" ]]; then
+    GATE_10_SCRIPT="$PROJECT_ROOT/src/build-integrity/gate-10.ts"
+  elif [[ -f ".xp-gate/modules/build-integrity/gate-10.ts" ]]; then
+    GATE_10_SCRIPT=".xp-gate/modules/build-integrity/gate-10.ts"
+  elif [[ -f "$HOME/.config/xp-gate/modules/build-integrity/gate-10.ts" ]]; then
+    GATE_10_SCRIPT="$HOME/.config/xp-gate/modules/build-integrity/gate-10.ts"
+  fi
+
+  if [[ -n "$GATE_10_SCRIPT" ]]; then
+    # Build comma-separated list of absolute file paths for changed TS files
+    GATE_10_FILE_LIST=""
+    while IFS= read -r f; do
+      if [ -z "$GATE_10_FILE_LIST" ]; then
+        GATE_10_FILE_LIST="$f"
+      else
+        GATE_10_FILE_LIST="$GATE_10_FILE_LIST,$f"
+      fi
+    done <<< "$TS_FILES"
+
+    GATE_10_OUTPUT=$(mktemp)
+    if timeout 120s npx tsx "$GATE_10_SCRIPT" --changed-files "$GATE_10_FILE_LIST" --project-root "$PROJECT_ROOT" > "$GATE_10_OUTPUT" 2>&1; then
+      cat "$GATE_10_OUTPUT"
+      GATE_10_STATUS="PASS"
+      echo "✅ Gate 10: PASS"
+    else
+      GATE_10_EXIT=$?
+      cat "$GATE_10_OUTPUT"
+      if [[ $GATE_10_EXIT -eq 124 ]]; then
+        echo "⏱️ Gate 10: TIMEOUT (120s). Allowing push with warning."
+        GATE_10_STATUS="TIMEOUT"
+      else
+        echo ""
+        echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+        echo "   ❌ GATE 10 FAILED — PUSH BLOCKED"
+        echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+        echo "Build integrity check failed. Fix type errors, broken imports,"
+        echo "or package manifest issues before pushing."
+        rm -f "$GATE_10_OUTPUT"
+        exit 1
+      fi
+    fi
+    rm -f "$GATE_10_OUTPUT"
+  else
+    echo "⚠️ Gate 10 script not found. SKIP — Gate 10."
+  fi
+else
+  echo "📚 Not a TypeScript project or no TS files changed. SKIP — Gate 10."
 fi
 echo ""
 

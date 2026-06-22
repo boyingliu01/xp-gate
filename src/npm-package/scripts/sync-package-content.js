@@ -300,10 +300,11 @@ function main() {
   const skills = syncSkills();
   const plugins = syncPlugins();
   const adapters = syncAdapters();
-  const principles = syncModules('principles');
-  const mutation = syncModules('mutation');
-  const mockPolicy = syncModules('mock-policy');
-  console.error(`[sync] done: ${skills} skill(s), ${plugins} plugin(s), ${adapters} adapter entries, ${principles + mutation + mockPolicy} module(s)`);
+const principles = syncModules('principles');
+const mutation = syncModules('mutation');
+const mockPolicy = syncModules('mock-policy');
+const buildIntegrity = syncModules('build-integrity');
+console.error(`[sync] done: ${skills} skill(s), ${plugins} plugin(s), ${adapters} adapter entries, ${principles + mutation + mockPolicy + buildIntegrity} module(s)`);
   if (skills !== CORE_SKILLS.length) {
     console.error(`[sync] ERROR: expected ${CORE_SKILLS.length} skills, copied ${skills}`);
     process.exit(1);

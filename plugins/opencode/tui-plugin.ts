@@ -38,25 +38,6 @@ function parseTime(value: unknown): number {
   return new Date(value as string).getTime();
 }
 
-function maxValid(current: number, candidate: unknown): number {
-  if (!candidate) return current;
-  const t = parseTime(candidate);
-  return !isNaN(t) && t > current ? t : current;
-}
-
-function getLatestTimestamp(state: Record<string, unknown> | null): number {
-  if (!state || !state.started_at) return 0;
-  const started = parseTime(state.started_at);
-  if (isNaN(started)) return 0;
-  let latest = started;
-  if (Array.isArray(state.phase_history)) {
-    for (const ph of state.phase_history) {
-      latest = maxValid(maxValid(latest, (ph as Record<string, unknown>).completed_at), (ph as Record<string, unknown>).started_at);
-    }
-  }
-  return latest;
-}
-
 function isStale(state: SprintState | null): boolean {
   if (!state || !state.started_at) return false;
   const latest = sprintTimestamp(state);
