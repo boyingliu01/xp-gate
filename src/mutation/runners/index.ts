@@ -1,3 +1,4 @@
+// @no-test-required: Re-exports and registry — tested via gate-m integration + pre-push Gate M
 export type {
   MutationFileReport,
   MutationRunResult,

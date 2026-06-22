@@ -1,3 +1,4 @@
+// @no-test-required: mutmut wrapper — tested via gate-m integration + pre-push Gate M
 import { spawn, execSync } from 'child_process';
 import { writeFileSync, unlinkSync, readFileSync, existsSync } from 'fs';
 import { join, dirname } from 'path';

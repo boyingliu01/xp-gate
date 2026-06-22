@@ -1,3 +1,4 @@
+// @no-test-required: LangAdapter types/interface — tested via gate-m integration
 /**
  * Language-agnostic mutation runner interface.
  *

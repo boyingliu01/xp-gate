@@ -1,3 +1,4 @@
+// @no-test-required: Stryker wrapper — tested via gate-m integration + pre-push Gate M
 import { spawn } from 'child_process';
 import { readFileSync } from 'fs';
 import { join } from 'path';

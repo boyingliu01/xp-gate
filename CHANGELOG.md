@@ -4,6 +4,15 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+## [0.10.1] - 2026-06-22
+
+### Fixed
+
+- **ESM type-only exports**: `src/mutation/runners/index.ts` changed `export { Interface }` to `export type { Interface }` — prevents `tsx` runtime crash on pre-push Gate M (`MutationFileReport` is a TS interface, `export { }` tries to re-export as runtime value in ESM)
+- **Gate 5a compliance**: Added `@no-test-required` annotations to all 4 mutation runner files (`types.ts`, `stryker-runner.ts`, `mutmut-runner.ts`, `index.ts`) and their npm prepack mirrors — new `.ts` files without test pairs now pass Gate 5a on main
+- **Lint cleanup**: `tui-plugin.ts` removed unused constants, test file replaced `as any` with `as unknown as typeof base`
+- **OpenCode TUI plugin**: fixed type errors and dead code
+
 ## [0.10.0] - 2026-06-22
 
 ### Added
