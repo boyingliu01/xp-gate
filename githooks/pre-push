@@ -263,6 +263,66 @@ else
 fi
 
 # ============================================================================
+# GATE M (Python): Incremental Mutation Testing via mutmut
+# Runs after TypeScript Gate M; uses the same gate-m.ts orchestrator with
+# MutmutRunner for Python files.
+# ============================================================================
+echo ""
+echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+echo "   GATE M (Python): MUTATION TESTING"
+echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+
+# Collect changed Python source files (exclude tests, venv, cached)
+PY_FILES=$(echo "$PUSHED_FILES" | grep -E '\.py$' | grep -v '__pycache__' | grep -v '\.test\.py' | grep -v '/test_' | grep -v '/tests/' || true)
+PY_SOURCE_FILES=$(echo "$PY_FILES" | grep -v '/venv/' | grep -v '/\.venv/' || true)
+
+if [ -z "$PY_SOURCE_FILES" ]; then
+  echo "📚 No changed Python source files. SKIP — Gate M (Python)."
+else
+  PYTHON_FILE_LIST=$(echo "$PY_SOURCE_FILES" | tr '\n' ',' | sed 's/,$//')
+  echo "🐍 Changed Python files: $PYTHON_FILE_LIST"
+
+  if detect_python_mutation_testable 2>/dev/null; then
+    if [ -f "src/mutation/gate-m.ts" ]; then
+      MUTATION_OUTPUT=$(mktemp)
+      timeout 120s npx tsx src/mutation/gate-m.ts --changed-files "$PYTHON_FILE_LIST" > "$MUTATION_OUTPUT" 2>&1
+      MUTATION_EXIT=$?
+
+      case $MUTATION_EXIT in
+        0)
+          echo "✅ Gate M (Python): PASS"
+          ;;
+        1)
+          echo ""
+          echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+          echo "   ❌ GATE M (Python) FAILED - PUSH BLOCKED"
+          echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+          echo ""
+          cat "$MUTATION_OUTPUT"
+          echo ""
+          rm -f "$MUTATION_OUTPUT"
+          exit 1
+          ;;
+        124)
+          cat "$MUTATION_OUTPUT"
+          echo "⏱ Gate M (Python): TIMEOUT (120s). Allowing push with warning."
+          ;;
+        *)
+          cat "$MUTATION_OUTPUT"
+          echo "⚠ Gate M (Python): Unexpected exit code $MUTATION_EXIT. Allowing push with warning."
+          ;;
+      esac
+
+      rm -f "$MUTATION_OUTPUT"
+    else
+      echo "⚠ Gate M script not found. SKIP — Gate M (Python)."
+    fi
+  else
+    echo "⚠ mutmut not installed. SKIP — Gate M (Python)."
+  fi
+fi
+
+# ============================================================================
 # GATE M2: MOCK DENSITY CHECK (BLOCK at 30%, configurable via .mockpolicyrc)
 # Phase 1: WARNING mode (collect false positive data before enabling BLOCK)
 # Per-layer thresholds: .mockpolicyrc layers.*.maxMockDensity

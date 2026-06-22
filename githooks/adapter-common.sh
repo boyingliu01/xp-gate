@@ -215,3 +215,20 @@ detect_mutation_testable() {
 
   return 1
 }
+# Detect if a Python project has mutmut installed and configured
+detect_python_mutation_testable() {
+  # Check for mutmut installation
+  if command -v mutmut >/dev/null 2>&1; then
+    return 0
+  fi
+  # Check for pip-installed mutmut in current venv
+  if command -v pip >/dev/null 2>&1 || command -v pip3 >/dev/null 2>&1; then
+    if pip show mutmut >/dev/null 2>&1; then
+      return 0
+    fi
+    if pip3 show mutmut >/dev/null 2>&1; then
+      return 0
+    fi
+  fi
+  return 1
+}

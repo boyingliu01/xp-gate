@@ -307,3 +307,140 @@ git push ──→ CI/CD Pipeline ──→ Build/Test/Deploy
 ---
 
 *Generated: 2026-05-05 | Version: 1.0.0*
+
+---
+
+## Python Mutation Testing (Gate M - Python)
+
+**新增于 v0.9.6** — 为 Python 项目提供增量变异测试支持。
+
+### 功能特性
+
+| 特性 | 说明 |
+|------|------|
+| **工具** | mutmut (pytest-native, CLI 友好，增量支持) |
+| **阈值** | 默认 60%，关键路径 80% |
+| **超时** | 120 秒（超时允许推送但警告） |
+| **文件过滤** | 自动排除 `test_*.py`、`/tests/`、`__pycache__` |
+| **基线管理** | 扩展 `.mutation-baseline.json` 支持 Python 分数 |
+| **配置检测** | 支持 `.mutmut.conf` 和 `mutmut_config.py` |
+| **集成位置** | Pre-push 钩子，位于 TypeScript Gate M 之后 |
+
+### 使用方法
+
+```bash
+# 1. 安装 mutmut（每个 Python 项目一次）
+pip install mutmut
+
+# 2. 初始化 mutmut 配置
+mutmut init
+
+# 3. 配置 .mutmut.conf 或 mutmut_config.py
+# 示例：command = "pytest tests/"
+
+# 4. 推送代码 - Gate M (Python) 自动运行
+git push
+
+# 5. 如果超时，手动运行完整报告
+python -m mutmut run
+```
+
+### 配置示例
+
+**.mutmut.conf**
+```ini
+[mutmut]
+command = pytest tests/
+```
+
+**mutmut_config.py**
+```python
+import mutmut
+
+def get_config():
+    return {
+        'command': 'pytest tests/',
+        'source_dirs': ['src/'],
+        'test_dirs': ['tests/']
+    }
+```
+
+**.mutation-critical-paths**
+```
+src/core/**
+src/auth/**
+```
+
+### 文件过滤规则
+
+| 模式 | 排除 |
+|------|------|
+| `test_*.py` | 测试文件 |
+| `/tests/` | 测试目录 |
+| `__pycache__/` | Python 缓存目录 |
+| `*.pyc` | 编译文件 |
+
+### 阈值策略
+
+| 路径类型 | 阈值 | 说明 |
+|---------|------|------|
+| 普通路径 | 60% | 默认阈值 |
+| 关键路径 | 80% | `.mutation-critical-paths` 中定义 |
+| 基线回归 | 禁止 | 不允许低于基线分数 |
+
+### 超时行为
+
+| 情况 | 行为 | 建议 |
+|------|------|------|
+| 120 秒内完成 | 正常评估 | - |
+| 超时 (124) | 允许推送但警告 | 手动运行 `python -m mutmut run` |
+| 其他错误 | 允许推送但警告 | 检查 mutmut 配置 |
+
+### 基线格式
+
+**.mutation-baseline.json** (扩展后)
+```json
+{
+  "version": "0.9.6",
+  "generatedAt": "2026-06-21T00:00:00.000Z",
+  "source": "local",
+  "languages": {
+    "typescript": {
+      "scores": {
+        "src/foo.ts": { "score": 85, "mutants": 20, "killed": 17, "survived": 3 }
+      }
+    },
+    "python": {
+      "scores": {
+        "src/foo.py": { "score": 75, "mutants": 15, "killed": 11, "survived": 4 }
+      }
+    }
+  }
+}
+```
+
+### 集成到 Pre-push
+
+```bash
+# Pre-push 执行顺序
+1. Gate S (Sprint Flow)
+2. Gate M (TypeScript Mutation)
+3. Gate M (Python Mutation) ← 新增
+4. Gate M2 (Mock Density)
+5. Gate M3 (Mock Layering)
+6. Delphi Code Walkthrough
+```
+
+### 已知限制
+
+1. **仅支持 pytest** — mutmut 依赖 pytest 运行测试
+2. **首次运行慢** — 全量变异测试需 2-10 分钟
+3. **增量依赖配置** — 需要正确配置 `.mutmut.conf`
+4. **Windows 兼容性** — 需通过 Git Bash 运行
+
+### 参考文档
+
+- [设计文档](docs/plans/2026-06-21-python-mutation-testing-integration.md)
+- [mutmut 官方文档](https://mutmut.readthedocs.io/)
+- [Gate M TypeScript 实现](src/mutation/gate-m.ts)
+- [Python Gate M 实现](src/mutation/gate-m-python.ts)

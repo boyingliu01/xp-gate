@@ -15,7 +15,67 @@
 import { existsSync, readFileSync } from "node:fs"
 import { join } from "node:path"
 import type { TuiPlugin, TuiSlotPlugin, TuiSlotProps } from "@opencode-ai/plugin/tui"
-import { PHASE_NAMES, PHASE_ORDER, getLatestTimestamp, isStale } from "../../src/npm-package/lib/shared-phase-constants.js"
+// ── Phase constants (inlined from ../../src/npm-package/lib/shared-phase-constants.js)
+//   This file is inlined because the installed npm package does not bundle src/ at publish time. ──
+
+const PHASE_NAMES: Record<string, string> = {
+  '-1': 'ISOLATE',
+  '-0.5': 'AUTO-ESTIMATE',
+  '0': 'THINK',
+  '1': 'PLAN',
+  '2': 'BUILD',
+  '3': 'REVIEW',
+  '4': 'USER ACCEPT',
+  '5': 'FEEDBACK',
+  '6': 'SHIP',
+  '7': 'LAND',
+  '8': 'CLEANUP',
+};
+
+const PHASE_ORDER = ['-1', '-0.5', '0', '1', '2', '3', '4', '5', '6', '7', '8'];
+
+function parseTime(value: unknown): number {
+  return new Date(value as string).getTime();
+}
+
+function maxValid(current: number, candidate: unknown): number {
+  if (!candidate) return current;
+  const t = parseTime(candidate);
+  return !isNaN(t) && t > current ? t : current;
+}
+
+function getLatestTimestamp(state: Record<string, unknown> | null): number {
+  if (!state || !state.started_at) return 0;
+  const started = parseTime(state.started_at);
+  if (isNaN(started)) return 0;
+  let latest = started;
+  if (Array.isArray(state.phase_history)) {
+    for (const ph of state.phase_history) {
+      latest = maxValid(maxValid(latest, (ph as Record<string, unknown>).completed_at), (ph as Record<string, unknown>).started_at);
+    }
+  }
+  return latest;
+}
+
+function isStale(state: SprintState | null): boolean {
+  if (!state || !state.started_at) return false;
+  const latest = sprintTimestamp(state);
+  return latest > 0 && Date.now() - latest > 3600000;
+}
+
+function sprintTimestamp(state: SprintState | null): number {
+  if (!state || !state.started_at) return 0;
+  const started = parseTime(state.started_at);
+  if (isNaN(started)) return 0;
+  let latest = started;
+  if (Array.isArray(state.phase_history)) {
+    for (const ph of state.phase_history) {
+      latest = ph.completed_at ? Math.max(latest, parseTime(ph.completed_at)) : latest;
+      latest = ph.started_at ? Math.max(latest, parseTime(ph.started_at)) : latest;
+    }
+  }
+  return latest;
+}
 
 // ── Sprint state schema ──
 
@@ -147,8 +207,7 @@ const tuiPlugin: TuiSlotPlugin = {
       if (!state) return null
       const text = renderSprintSidebar(state)
       if (!text) return null
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      return text as any
+      return text
     },
   },
 }

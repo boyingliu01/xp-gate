@@ -102,3 +102,63 @@ run_coverage() {
 
   return $PYTEST_EXIT
 }
+# ── Gate M: Python mutation testing (mutmut) ──
+
+run_mutation() {
+  local files_arg="$1"
+  local timeout_ms="${2:-120000}"
+  local timeout_s=$((timeout_ms / 1000))
+
+  if ! detect_python_mutation_testable; then
+    echo "⚠ mutmut not installed. SKIP — Gate M (Python)."
+    return 0
+  fi
+
+  # Parse comma-separated file list into mutmut --paths-to-mulate args
+  local file_list=""
+  IFS=',' read -ra FILE_ARRAY <<< "$files_arg"
+  for f in "${FILE_ARRAY[@]}"; do
+    f=$(echo "$f" | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')
+    [ -f "$f" ] && file_list="$file_list $f"
+  done
+
+  if [ -z "$file_list" ]; then
+    echo "📚 No valid Python source files for mutation. SKIP — Gate M (Python)."
+    return 0
+  fi
+
+  echo "🐍 Running Python mutation testing (mutmut) on: $file_list"
+
+  # Gate M orchestrator (TypeScript) handles mutmut via MutmutRunner in src/mutation/runners/
+  # The shell adapter delegates to the TS runner for consistency with TS Gate M.
+  if [ -f "src/mutation/gate-m.ts" ]; then
+    timeout "${timeout_s}s" npx tsx src/mutation/gate-m.ts \
+      --changed-files "$files_arg" 2>&1
+    return $?
+  fi
+
+  # Fallback: direct mutmut CLI if TS gate module not available
+  local MUTATION_OUTPUT
+  MUTATION_OUTPUT=$(mktemp)
+
+  timeout "${timeout_s}s" mutmut run --paths-to-mutate $file_list > "$MUTATION_OUTPUT" 2>&1
+  local EXIT_CODE=$?
+
+  cat "$MUTATION_OUTPUT"
+  rm -f "$MUTATION_OUTPUT"
+
+  case $EXIT_CODE in
+    0)
+      echo "✅ Gate M (Python): PASS"
+      return 0
+      ;;
+    124)
+      echo "⏱ Gate M (Python): TIMEOUT (${timeout_s}s). Allowing push with warning."
+      return 0
+      ;;
+    *)
+      echo "❌ Gate M (Python): mutation score below threshold"
+      return 1
+      ;;
+  esac
+}
