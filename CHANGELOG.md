@@ -4,6 +4,21 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+## [0.10.0] - 2026-06-22
+
+### Added
+
+- **Python mutation testing (Gate M)**: LangAdapter architecture with `MutationRunner` interface, `StrykerRunner` (TypeScript) and `MutmutRunner` (Python). `gate-m.ts` routes by file extension and runs each language's native mutation tool.
+  - MutmutRunner: mutmut v3.x compatible — backup/restore `pyproject.toml`, emoji progress parsing, preserves existing user config (`paths_to_exclude`, `timeout`, etc.)
+  - Shell integration: `detect_python_mutation_testable()`, `run_mutation()` in python.sh, pre-push Python Gate M section
+  - Runner registry pattern extensible for future languages (Go, Java, etc.)
+
+### Fixed
+
+- **OpenCode TUI plugin**: removed `as any`, inlined constants to avoid bundling `src/`, synced to 3 locations
+- **gate-m.ts**: removed dead `errorFiles` variable, added `groupByRunner()` routing for multi-language mutation
+- **Delphi review**: experts read from worktree (not stale main repo files) to prevent hallucination
+
 ## [0.9.3] - 2026-06-18
 
 ### Added
@@ -563,3 +578,30 @@ TypeScript, Python, Go, Shell, Java, Kotlin, C++, Swift, Objective-C, Dart, Flut
 
 ### Known Issues
 - AI agent shortcut-taking behavior (addressed in v0.0.2)
+
+## [Unreleased] - v0.9.6.0
+
+### Added
+- **Python Mutation Testing (Gate M)**: 首次为 Python 项目提供增量变异测试支持
+  - 工具：mutmut (pytest-native, CLI 友好，增量支持)
+  - 阈值：默认 60%，关键路径 80%
+  - 超时：120s（超时允许推送但警告）
+  - 文件过滤：自动排除 `test_*.py`、`/tests/`、`__pycache__`
+  - 配置：支持 `.mutmut.conf` 和 `mutmut_config.py`
+  - 基线：扩展 `.mutation-baseline.json` 支持 Python 分数
+  - 集成：Pre-push 钩子，位于 TypeScript Gate M 之后
+  - 参考：`docs/plans/2026-06-21-python-mutation-testing-integration.md`
+
+### Changed
+- `README.md`: 更新 Pre-push 门禁表格，添加 Python Gate M
+- `githooks/pre-push`: 添加 Python 变异测试集成
+- `githooks/adapters/python.sh`: 新增 `run_mutation()` 函数
+- `githooks/adapter-common.sh`: 新增 `detect_mutation_testable()` Python 支持
+- `src/mutation/gate-m-python.ts`: 新增 TypeScript 运行器
+- `src/mutation/types.ts`: 扩展类型定义支持多语言基线
+- `.gitignore`: 添加 `.mutation-baseline.json`
+
+### Technical Debt
+- 待创建 Python 突变测试用例 (`src/mutation/__tests__/gate-m-python.test.ts`)
+- 待更新 CAPABILITIES.md 添加 Python 突变测试能力说明
+- 待创建 mutmut 配置模板 (`templates/.mutmut.conf.example`)

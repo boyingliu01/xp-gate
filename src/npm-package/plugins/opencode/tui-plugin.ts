@@ -147,8 +147,7 @@ const tuiPlugin: TuiSlotPlugin = {
       if (!state) return null
       const text = renderSprintSidebar(state)
       if (!text) return null
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      return text as any
+      return text
     },
   },
 }

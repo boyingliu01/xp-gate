@@ -532,11 +532,11 @@ rules:
 
 ### .mutation-critical-paths（关键路径配置）
 
-```json
-{
-  "criticalPaths": ["src/core/", "src/handlers/"],
-  "threshold": 80
-}
+```text
+# 每行一个路径模式（支持 glob）
+# 以 # 开头的行为注释
+src/core/
+src/handlers/
 ```
 
 ### 变异测试命令
