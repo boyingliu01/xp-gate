@@ -1,6 +1,5 @@
 import fs from 'fs/promises';
 import path from 'path';
-import { spawn } from 'child_process';
 import {
   GateMOptions,
   GateMResult,
@@ -8,16 +7,22 @@ import {
   MutationBaseline,
   MutationScore,
   FileThreshold,
-  ScoreEvaluation,
-  TestIntentCheckResult
+  ScoreEvaluation
 } from './types';
-import { StrykerReport } from './stryker-types';
 import { detectAITestCharacteristics } from './detect-ai-test';
+import {
+  resolveRunner,
+  registerAllRunners,
+  RunMutationOptions,
+  MutationRunOutcome,
+} from './runners';
+
+// ── Pre-run auto-registration of all language runners ──
+
+registerAllRunners();
 
 const DEFAULT_THRESHOLD = 60;
 const CRITICAL_PATH_THRESHOLD = 80;
-const STRYKER_REPORT_PATH = '.stryker-report.json';
-const STRYKER_CONFIG = 'stryker.prepush.conf.json';
 
 type ArgHandler = (options: GateMOptions, args: string[], i: number) => void;
 
@@ -25,7 +30,7 @@ const ARG_HANDLERS: Record<string, ArgHandler> = {
   '--changed-files': parseChangedFiles,
   '--baseline': parseBaseline,
   '--critical-paths': parseCriticalPaths,
-  '--timeout': parseTimeout
+  '--timeout': parseTimeout,
 };
 
 function parseArgs(args: string[]): GateMOptions {
@@ -33,7 +38,7 @@ function parseArgs(args: string[]): GateMOptions {
     changedFiles: [],
     baselinePath: '.mutation-baseline.json',
     criticalPathsPath: '.mutation-critical-paths',
-    timeoutMs: 120000
+    timeoutMs: 120000,
   };
 
   for (let i = 0; i < args.length; i++) {
@@ -68,13 +73,21 @@ function parseTimeout(options: GateMOptions, args: string[], i: number): void {
   if (next) options.timeoutMs = parseInt(next, 10);
 }
 
+// ── File filtering: excludes tests, declarations, adapters ──
+// Delegate per-language filtering to a helper.
+
 function filterSourceFiles(files: string[]): string[] {
   return files.filter(file => {
-    if (!file.endsWith('.ts')) return false;
-    if (file.endsWith('.test.ts')) return false;
+    const ext = path.extname(file);
+    // Skip test files
+    if (file.includes('.test.') || file.includes('_test.')) return false;
+    // Skip declaration files
     if (file.endsWith('.d.ts')) return false;
+    // Skip adapter files
     if (file.includes('/adapters/')) return false;
-    return true;
+    // Skip files with no registered runner
+    const runner = resolveRunner(ext);
+    return runner !== undefined;
   });
 }
 
@@ -87,33 +100,51 @@ async function fileExists(filePath: string): Promise<boolean> {
   }
 }
 
-async function findTestFile(sourceFile: string): Promise<string | null> {
-  const testFile1 = sourceFile.replace(/\.ts$/, '.test.ts');
-  if (await fileExists(testFile1)) return testFile1;
-
+async function findTestFileForSource(sourceFile: string): Promise<string | null> {
+  const ext = path.extname(sourceFile);
+  const baseName = path.basename(sourceFile, ext);
   const dir = path.dirname(sourceFile);
-  const basename = path.basename(sourceFile, '.ts');
-  const testFile2 = path.join(dir, '__tests__', `${basename}.test.ts`);
-  if (await fileExists(testFile2)) return testFile2;
+
+  if (ext === '.ts' || ext === '.tsx') {
+    // TypeScript: foo.ts → foo.test.ts
+    const testFile1 = sourceFile.replace(/\.tsx?$/, '.test.ts');
+    if (await fileExists(testFile1)) return testFile1;
+
+    const testFile2 = path.join(dir, '__tests__', `${baseName}.test.ts`);
+    if (await fileExists(testFile2)) return testFile2;
+  }
+
+  if (ext === '.py') {
+    // Python: foo.py → foo_test.py or tests/test_foo.py
+    const testFile1 = sourceFile.replace(/\.py$/, '_test.py');
+    if (await fileExists(testFile1)) return testFile1;
+
+    const testFile2 = path.join('tests', `test_${baseName}.py`);
+    if (await fileExists(testFile2)) return testFile2;
+
+    const testFile3 = path.join(dir, '__tests__', `test_${baseName}.py`);
+    if (await fileExists(testFile3)) return testFile3;
+  }
 
   return null;
 }
 
-async function checkTestIntents(
-  sourceFiles: string[]
-): Promise<TestIntentCheckResult[]> {
+interface TestIntentCheckResult {
+  sourceFile: string;
+  testFile: string | null;
+  missingAnnotations: string[];
+}
+
+async function checkTestIntents(sourceFiles: string[]): Promise<TestIntentCheckResult[]> {
   const results: TestIntentCheckResult[] = [];
 
   for (const sourceFile of sourceFiles) {
-    const testFile = await findTestFile(sourceFile);
+    const testFile = await findTestFileForSource(sourceFile);
     if (!testFile) {
       results.push({
         sourceFile,
         testFile: null,
-        hasTestAnnotation: false,
-        hasIntentAnnotation: false,
-        hasCoversAnnotation: false,
-        missingAnnotations: ['@test', '@intent', '@covers']
+        missingAnnotations: ['@test', '@intent', '@covers'],
       });
       continue;
     }
@@ -127,10 +158,7 @@ async function checkTestIntents(
     results.push({
       sourceFile,
       testFile,
-      hasTestAnnotation: detection.annotations.hasTest,
-      hasIntentAnnotation: detection.annotations.hasIntent,
-      hasCoversAnnotation: detection.annotations.hasCovers,
-      missingAnnotations
+      missingAnnotations,
     });
   }
 
@@ -204,7 +232,7 @@ async function determineThresholds(
   const thresholds: FileThreshold[] = [];
 
   for (const file of sourceFiles) {
-    const testFile = await findTestFile(file);
+    const testFile = await findTestFileForSource(file);
     let explicitThreshold: number | undefined;
     if (testFile) {
       const detection = await detectAITestCharacteristics(testFile);
@@ -222,116 +250,33 @@ async function determineThresholds(
       file,
       threshold,
       isCriticalPath: isCritical,
-      explicitThreshold
+      explicitThreshold,
     });
   }
 
   return thresholds;
 }
 
-function runStryker(
-  files: string[],
-  timeoutMs: number
-): Promise<{ report: StrykerReport | null; timedOut: boolean; error?: string }> {
-  return new Promise((resolve) => {
-    const args = [
-      'stryker',
-      'run',
-      '--config',
-      STRYKER_CONFIG,
-      ...files.flatMap(f => ['--mutate', f])
-    ];
+// ── Per-file extension grouping → route to correct runner ──
 
-    const child = spawn('npx', args, {
-      stdio: 'pipe',
-      shell: false
-    });
+function groupByRunner(files: string[]): Map<string, string[]> {
+  const groups = new Map<string, string[]>();
 
-    let stdout = '';
-    let stderr = '';
+  for (const file of files) {
+    const ext = path.extname(file);
+    const runner = resolveRunner(ext);
+    if (!runner) continue;
 
-    child.stdout?.on('data', (data: Buffer) => {
-      stdout += data.toString();
-    });
-
-    child.stderr?.on('data', (data: Buffer) => {
-      stderr += data.toString();
-    });
-
-    const timeoutId = setTimeout(() => {
-      child.kill('SIGTERM');
-      setTimeout(() => {
-        if (!child.killed) {
-          child.kill('SIGKILL');
-        }
-      }, 5000);
-    }, timeoutMs);
-
-    child.on('close', async (code) => {
-      clearTimeout(timeoutId);
-
-      if (code === null) {
-        resolve({ report: null, timedOut: true });
-        return;
-      }
-
-      const report = await parseStrykerReport(STRYKER_REPORT_PATH);
-      resolve({ report, timedOut: false, error: code !== 0 ? stderr || stdout : undefined });
-    });
-
-    child.on('error', (err) => {
-      clearTimeout(timeoutId);
-      resolve({ report: null, timedOut: false, error: err.message });
-    });
-  });
-}
-
-async function parseStrykerReport(reportPath: string): Promise<StrykerReport | null> {
-  try {
-    const content = await fs.readFile(reportPath, 'utf-8');
-    const parsed = JSON.parse(content);
-    return parseReportObject(parsed);
-  } catch {
-    return null;
-  }
-}
-
-function parseReportObject(parsed: Record<string, unknown>): StrykerReport {
-  const report: StrykerReport = {
-    mutationScore: asNumber(parsed.mutationScore),
-    nrOfMutants: asNumber(parsed.nrOfMutants),
-    nrOfKilledMutants: asNumber(parsed.nrOfKilledMutants),
-    nrOfSurvivedMutants: asNumber(parsed.nrOfSurvivedMutants),
-  };
-
-  if (parsed.files && typeof parsed.files === 'object') {
-    report.files = parseFilesObject(parsed.files as Record<string, Record<string, unknown>>);
+    const key = runner.name;
+    if (!groups.has(key)) groups.set(key, []);
+    groups.get(key)!.push(file);
   }
 
-  return report;
-}
-
-function asNumber(value: unknown, fallback = 0): number {
-  return typeof value === 'number' ? value : fallback;
-}
-
-function parseFilesObject(
-  filesObj: Record<string, Record<string, unknown>>
-): Record<string, { mutationScore: number; nrOfMutants: number; nrOfKilledMutants: number; nrOfSurvivedMutants: number }> {
-  const files: Record<string, { mutationScore: number; nrOfMutants: number; nrOfKilledMutants: number; nrOfSurvivedMutants: number }> = {};
-  for (const [file, data] of Object.entries(filesObj)) {
-    files[file] = {
-      mutationScore: asNumber(data.mutationScore),
-      nrOfMutants: asNumber(data.nrOfMutants),
-      nrOfKilledMutants: asNumber(data.nrOfKilledMutants),
-      nrOfSurvivedMutants: asNumber(data.nrOfSurvivedMutants),
-    };
-  }
-  return files;
+  return groups;
 }
 
 function evaluateScores(
-  report: StrykerReport,
+  fileScores: Record<string, number>,
   thresholds: FileThreshold[],
   baseline: MutationBaseline | null
 ): { evaluations: ScoreEvaluation[]; blocked: boolean; messages: string[] } {
@@ -340,47 +285,39 @@ function evaluateScores(
   let blocked = false;
 
   for (const ft of thresholds) {
-    const result = evaluateFileThreshold(ft, report, baseline);
-    evaluations.push(result.evaluation);
-    if (!result.evaluation.passed) blocked = true;
-    messages.push(result.message);
+    const score = fileScores[ft.file] ?? 0;
+    const baselineScore = baseline?.scores[ft.file]?.score;
+
+    let effectiveThreshold = ft.threshold;
+    if (baselineScore !== undefined && score < baselineScore) {
+      effectiveThreshold = Math.max(effectiveThreshold, baselineScore);
+    }
+
+    const passed = score >= effectiveThreshold;
+    const isRegression = baselineScore !== undefined && score < baselineScore;
+
+    const evaluation: ScoreEvaluation = {
+      file: ft.file,
+      score,
+      threshold: effectiveThreshold,
+      baselineScore,
+      passed,
+      isRegression,
+    };
+    evaluations.push(evaluation);
+
+    if (!passed) blocked = true;
+    messages.push(buildScoreMessage({
+      file: ft.file,
+      score,
+      effectiveThreshold,
+      baselineScore,
+      passed,
+      isRegression,
+    }));
   }
 
   return { evaluations, blocked, messages };
-}
-
-function evaluateFileThreshold(
-  ft: FileThreshold,
-  report: StrykerReport,
-  baseline: MutationBaseline | null
-): { evaluation: ScoreEvaluation; message: string } {
-  const fileReport = report.files
-    ? Object.entries(report.files).find(([key]) => key === ft.file)?.[1]
-    : undefined;
-
-  const score = fileReport?.mutationScore ?? report.mutationScore;
-  const baselineScore = baseline?.scores[ft.file]?.score;
-
-  let effectiveThreshold = ft.threshold;
-  if (baselineScore !== undefined && score < baselineScore) {
-    effectiveThreshold = Math.max(effectiveThreshold, baselineScore);
-  }
-
-  const passed = score >= effectiveThreshold;
-  const isRegression = baselineScore !== undefined && score < baselineScore;
-
-  const evaluation: ScoreEvaluation = {
-    file: ft.file,
-    score,
-    threshold: effectiveThreshold,
-    baselineScore,
-    passed,
-    isRegression
-  };
-
-  const message = buildScoreMessage({ file: ft.file, score, effectiveThreshold, baselineScore, passed, isRegression });
-
-  return { evaluation, message };
 }
 
 interface ScoreMessageParams {
@@ -416,9 +353,66 @@ function buildResult(
     filesChecked,
     scores,
     warnings,
-    errors
+    errors,
   };
 }
+
+async function runAllRunners(
+  groups: Map<string, string[]>,
+  timeoutMs: number,
+  cwd: string
+): Promise<Record<string, number | null>> {
+  const fileScores: Record<string, number | null> = {};
+
+  for (const [, files] of Array.from(groups.entries())) {
+    const runner = resolveRunner(path.extname(files[0]));
+    if (!runner) continue;
+
+    if (!await runner.isAvailable()) {
+      for (const f of files) fileScores[f] = null;
+      continue;
+    }
+
+    const options: RunMutationOptions = {
+      files,
+      timeoutMs,
+      cwd,
+    };
+
+    const outcome: MutationRunOutcome = await runner.run(options);
+
+    if (outcome.timedOut) {
+      for (const f of files) fileScores[f] = null;
+      continue;
+    }
+
+    if (outcome.error) {
+      for (const f of files) fileScores[f] = null;
+      continue;
+    }
+
+    if (!outcome.report) {
+      for (const f of files) fileScores[f] = null;
+      continue;
+    }
+
+    // If per-file scores exist, use them
+    if (outcome.report.files) {
+      for (const [fileKey, fileReport] of Object.entries(outcome.report.files)) {
+        fileScores[fileKey] = fileReport.mutationScore;
+      }
+    } else {
+      // Top-level score applies to all files
+      for (const f of files) {
+        fileScores[f] = outcome.report.mutationScore;
+      }
+    }
+  }
+
+  return fileScores;
+}
+
+// ── Main gateway ──
 
 export async function runGateM(options: GateMOptions): Promise<GateMResult> {
   const warnings: string[] = [];
@@ -430,49 +424,15 @@ export async function runGateM(options: GateMOptions): Promise<GateMResult> {
     return buildResult('skip', 0, {}, warnings, errors);
   }
 
-  collectTestIntentWarnings(sourceFiles, warnings);
+  // Test intent check (async, fire-and-forget warning)
+  await collectTestIntentWarnings(sourceFiles, warnings);
 
-  const thresholds = await determineThresholdsWithLogging(options, sourceFiles);
-  const baseline = await loadBaselineWithLogging(options.baselinePath);
+  const thresholds = await determineThresholds(sourceFiles, await loadCriticalPaths(options.criticalPathsPath));
+  const baseline = await loadBaseline(options.baselinePath);
 
-  const strykerResult = await runStryker(sourceFiles, options.timeoutMs);
-  const timeoutResult = handleTimeout(strykerResult, options, sourceFiles, warnings, errors);
-  if (timeoutResult) return timeoutResult;
-
-  const errorResult = handleStrykerError(strykerResult, sourceFiles, warnings, errors);
-  if (errorResult) return errorResult;
-
-  const reportResult = handleMissingReport(strykerResult, sourceFiles, warnings, errors);
-  if (reportResult) return reportResult;
-
-  const evalResult = evaluateAndReport(strykerResult.report, thresholds, baseline);
-
-  if (evalResult.blocked) {
-    return buildResult('block', sourceFiles.length, evalResult.scores, warnings, errors);
+  if (baseline) {
+    console.log(`  Loaded baseline from ${options.baselinePath} (${Object.keys(baseline.scores).length} files)`);
   }
-
-  return buildResult('pass', sourceFiles.length, evalResult.scores, warnings, errors);
-}
-
-function collectTestIntentWarnings(sourceFiles: string[], warnings: string[]): void {
-  checkTestIntents(sourceFiles).then((results) => {
-    for (const result of results) {
-      if (result.missingAnnotations.length > 0) {
-        const testFileInfo = result.testFile ? ` (${result.testFile})` : ' (no test file found)';
-        warnings.push(
-          `Warning: ${result.sourceFile}${testFileInfo} missing annotations: ${result.missingAnnotations.join(', ')}`
-        );
-      }
-    }
-  });
-}
-
-async function determineThresholdsWithLogging(
-  options: GateMOptions,
-  sourceFiles: string[]
-): Promise<FileThreshold[]> {
-  const criticalPaths = await loadCriticalPaths(options.criticalPathsPath);
-  const thresholds = await determineThresholds(sourceFiles, criticalPaths);
 
   for (const ft of thresholds) {
     const level = ft.isCriticalPath ? 'critical path' : 'default';
@@ -484,84 +444,60 @@ async function determineThresholdsWithLogging(
     console.log(`  ${ft.file}: threshold=${ft.threshold}% (${level}, ${thresholdSource})`);
   }
 
-  return thresholds;
-}
+  // Route to runners by file extension
+  const groups = groupByRunner(sourceFiles);
+  const cwd = process.cwd();
+  const fileScoresNullable = await runAllRunners(groups, options.timeoutMs, cwd);
 
-async function loadBaselineWithLogging(baselinePath: string): Promise<MutationBaseline | null> {
-  const baseline = await loadBaseline(baselinePath);
-  if (baseline) {
-    console.log(`  Loaded baseline from ${baselinePath} (${Object.keys(baseline.scores).length} files)`);
-  }
-  return baseline;
-}
+  // Build final scores map
+  const fileScores: Record<string, number> = {};
+  const timeoutFiles: string[] = [];
 
-function handleTimeout(
-  strykerResult: { report: StrykerReport | null; timedOut: boolean; error?: string },
-  options: GateMOptions,
-  sourceFiles: string[],
-  warnings: string[],
-  errors: string[]
-): GateMResult | null {
-  if (!strykerResult.timedOut) return null;
-
-  warnings.push(
-    `Mutation testing timed out (>${options.timeoutMs}ms). Push allowed. Run 'npm run test:mutation' locally for full report.`
-  );
-  return buildResult('timeout', sourceFiles.length, {}, warnings, errors);
-}
-
-function handleStrykerError(
-  strykerResult: { report: StrykerReport | null; timedOut: boolean; error?: string },
-  sourceFiles: string[],
-  warnings: string[],
-  errors: string[]
-): GateMResult | null {
-  if (!strykerResult.error || strykerResult.report) return null;
-
-  errors.push(`Stryker failed: ${strykerResult.error}`);
-  return buildResult('block', sourceFiles.length, {}, warnings, errors);
-}
-
-function handleMissingReport(
-  strykerResult: { report: StrykerReport | null; timedOut: boolean; error?: string },
-  sourceFiles: string[],
-  warnings: string[],
-  errors: string[]
-): GateMResult | null {
-  if (strykerResult.report) return null;
-
-  errors.push('Stryker report not found or invalid.');
-  return buildResult('block', sourceFiles.length, {}, warnings, errors);
-}
-
-function evaluateAndReport(
-  report: StrykerReport | null,
-  thresholds: FileThreshold[],
-  baseline: MutationBaseline | null
-): { scores: Record<string, MutationScore>; blocked: boolean; messages: string[] } {
-  if (!report) {
-    return { scores: {}, blocked: true, messages: ['Stryker report unavailable'] };
-  }
-  const scores: Record<string, MutationScore> = {};
-
-  if (report.files) {
-    for (const [file, data] of Object.entries(report.files)) {
-      scores[file] = {
-        score: data.mutationScore,
-        mutants: data.nrOfMutants,
-        killed: data.nrOfKilledMutants,
-        survived: data.nrOfSurvivedMutants
-      };
+  for (const [file, maybeScore] of Object.entries(fileScoresNullable)) {
+    if (maybeScore === null) {
+      timeoutFiles.push(file);
+    } else {
+      fileScores[file] = maybeScore;
     }
   }
 
-  const evalResult = evaluateScores(report, thresholds, baseline);
+  if (timeoutFiles.length > 0) {
+    warnings.push(`Mutation testing timed out for: ${timeoutFiles.join(', ')}. Run locally for full report.`);
+  }
+
+  const evalResult = evaluateScores(fileScores, thresholds, baseline);
 
   for (const msg of evalResult.messages) {
     console.log(`  ${msg}`);
   }
 
-  return { scores, blocked: evalResult.blocked, messages: evalResult.messages.filter(Boolean) };
+  const mutationScores: Record<string, MutationScore> = {};
+  for (const [file, score] of Object.entries(fileScores)) {
+    mutationScores[file] = {
+      score,
+      mutants: 0, // Detailed stats only available from per-file reports
+      killed: 0,
+      survived: 0,
+    };
+  }
+
+  if (evalResult.blocked) {
+    return buildResult('block', sourceFiles.length, mutationScores, warnings, errors);
+  }
+
+  return buildResult('pass', sourceFiles.length, mutationScores, warnings, errors);
+}
+
+async function collectTestIntentWarnings(sourceFiles: string[], warnings: string[]): Promise<void> {
+  const results = await checkTestIntents(sourceFiles);
+  for (const result of results) {
+    if (result.missingAnnotations.length > 0) {
+      const testFileInfo = result.testFile ? ` (${result.testFile})` : ' (no test file found)';
+      warnings.push(
+        `Warning: ${result.sourceFile}${testFileInfo} missing annotations: ${result.missingAnnotations.join(', ')}`
+      );
+    }
+  }
 }
 
 export async function main(args: string[]): Promise<number> {
@@ -572,7 +508,7 @@ export async function main(args: string[]): Promise<number> {
     return 1;
   }
 
-  console.log(`Gate M: Mutation Testing`);
+  console.log(`Gate M: Mutation Testing (LangAdapter)`);
   console.log(`  Changed files: ${options.changedFiles.length}`);
   console.log(`  Baseline: ${options.baselinePath}`);
   console.log(`  Critical paths: ${options.criticalPathsPath}`);
@@ -603,9 +539,9 @@ export async function main(args: string[]): Promise<number> {
   return result.exitCode;
 }
 
-const args = process.argv.slice(2);
+const cliArgs = process.argv.slice(2);
 if (typeof require !== 'undefined' && require.main === module) {
-  main(args)
+  main(cliArgs)
     .then(exitCode => {
       if (exitCode !== 0) {
         process.exit(exitCode);
@@ -616,4 +552,3 @@ if (typeof require !== 'undefined' && require.main === module) {
       process.exit(1);
     });
 }
-// trigger Gate M

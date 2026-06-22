@@ -88,7 +88,7 @@ function makeSprintState(overrides: Record<string, unknown> = {}) {
       { phase: "2", status: "in_progress" as const, reqs: { "REQ-001": { name: "JWT auth", status: "completed" as const }, "REQ-002": { name: "OAuth2 flow", status: "in_progress" as const } } },
     ],
   }
-  return { ...base, ...overrides } as Record<string, unknown>
+  return { ...base, ...overrides } as unknown as typeof base
 }
 
 // ── isStale ──
