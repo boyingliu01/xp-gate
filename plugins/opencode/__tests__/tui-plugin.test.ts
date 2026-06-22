@@ -12,7 +12,7 @@
 import { describe, it, before, after } from "node:test"
 import assert from "node:assert/strict"
 import { randomUUID } from "node:crypto"
-import { mkdirSync, writeFileSync, existsSync, rmSync } from "node:fs"
+import { mkdirSync, writeFileSync, rmSync } from "node:fs"
 import { join } from "node:path"
 import { tmpdir } from "node:os"
 
@@ -88,7 +88,7 @@ function makeSprintState(overrides: Record<string, unknown> = {}) {
       { phase: "2", status: "in_progress" as const, reqs: { "REQ-001": { name: "JWT auth", status: "completed" as const }, "REQ-002": { name: "OAuth2 flow", status: "in_progress" as const } } },
     ],
   }
-  return { ...base, ...overrides } as any
+  return { ...base, ...overrides } as unknown as Parameters<typeof renderSprintSidebar>[0]
 }
 
 // ── isStale ──

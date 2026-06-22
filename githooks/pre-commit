@@ -637,6 +637,14 @@ if [ "$PROJECT_LANG" = "documentation-only" ]; then
       fi
     else
       echo "ℹ️  No ESLint configuration found - Skipping"
+      if [ -f "package.json" ] && command -v node &> /dev/null; then
+        HAS_ESLINT=$(node -e "try{const p=JSON.parse(require('fs').readFileSync('package.json','utf8'));const d=p.devDependencies||{};const deps=p.dependencies||{};console.log((d.eslint||deps.eslint)?'yes':'no')}catch{console.log('no')}") && true
+        if [ "$HAS_ESLINT" = "yes" ]; then
+          echo "⚠️  WARNING: eslint is installed in package.json but no eslint config found"
+          echo "   Either create .eslintrc.* / eslint.config.* or remove eslint from dependencies"
+          echo "   See: https://eslint.org/docs/latest/use/configure/configuration-files"
+        fi
+      fi
     fi
   fi
 
