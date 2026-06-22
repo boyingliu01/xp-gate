@@ -4,6 +4,12 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+## [0.10.2] - 2026-06-22
+
+### Changed
+
+- **VERSION bump to 0.10.2.0** (npm 0.10.0 and 0.10.1 were pre-published before sprint fixes landed; this release carries all v0.10.1 fixes to a publishable version)
+
 ## [0.10.1] - 2026-06-22
 
 ### Fixed
