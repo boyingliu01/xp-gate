@@ -31,25 +31,30 @@
 | -1 | ISOLATE | ❌ | Bash（直接执行） | 无 | orchestrator |
 | -0.5 | AUTO-ESTIMATE | ❌ | Bash（直接执行） | 无 | orchestrator |
 | 0 | THINK | ❌ | orchestrator（直接执行） | `["brainstorming"]` | orchestrator |
-| 1 | PLAN | ⚠️ | orchestrator 执行 autoplan（交互）→ subagent 执行 delphi-review + to-issues | 见下方说明 | orchestrator + subagent |
-| 2 | BUILD | ✅(已有) | ralph-loop | `["test-driven-development"]` | subagent |
+| 1 | PLAN | ⚠️ | orchestrator 执行 autoplan + to-issues（交互）→ subagent 执行 delphi-review | 见下方说明 | orchestrator + subagent |
+| 2 | BUILD | ✅ | ralph-loop | `["test-driven-development"]` | subagent |
 | 3 | REVIEW | ✅ | `deep` | `["delphi-review", "test-specification-alignment"]` | subagent |
 | 4 | USER ACCEPT | ❌ | **强制人工** | 无 | 用户 |
 | 5 | FEEDBACK | ✅ | `quick` | `["learn", "retro", "systematic-debugging"]` | subagent |
-| 6 | SHIP | ✅ | `quick` | `["finishing-a-development-branch", "ship"]` | subagent |
-| 7 | LAND | ✅ | `deep` | `["land-and-deploy"]` | subagent |
+| 6 | SHIP | ❌ | orchestrator（直接执行） | `["finishing-a-development-branch", "ship"]` | orchestrator |
+| 7 | LAND | ❌ | orchestrator（直接执行） | `["land-and-deploy"]` | orchestrator |
 | 8 | CLEANUP | ❌ | Bash（直接执行） | 无 | orchestrator |
 
-**⚠️ Phase 0 和 Phase 1 必须由 orchestrator 直接执行（不可 dispatch 到 subagent）**：
+**⚠️ 交互式 skill 必须由 orchestrator 直接执行（不可 dispatch 到 subagent）**：
 
-| Phase | 为什么不能在 subagent 中执行 |
-|-------|---------------------------|
-| 0 (brainstorming) | `brainstorming` 是**交互式 skill**——需要与用户对话确认需求、提出澄清问题。Subagent 是 fire-and-forget 模式，无法暂停等待用户输入，会导致卡死或跳过关键确认（Issue #217, #225） |
-| 1 (autoplan) | `autoplan` 在 taste_decisions 节点会**暂停等待用户确认**（交互式决策）。必须由 orchestrator 直接执行以保持交互能力（Issue #225）。autoplan 完成后，可将结果传给 subagent 执行 `delphi-review` + `to-issues` |
+| Phase | Skill | 为什么不能在 subagent 中执行 |
+|-------|-------|---------------------------|
+| 0 | `brainstorming` | 需要与用户对话确认需求、提出澄清问题。Subagent 是 fire-and-forget 模式，无法暂停等待用户输入（Issue #217） |
+| 1 | `autoplan` | taste_decisions 节点暂停等待用户确认。必须由 orchestrator 直接执行（Issue #225） |
+| 1 | `to-issues` | Step 6 "向用户确认" — 展示拆分结果，等待用户批准后才生成 slices-manifest.json |
+| 6 | `finishing-a-development-branch` | 4 选项菜单 (merge/PR/keep/discard) 需要用户选择；Option 4 (discard) 要求 typed confirmation |
+| 6 | `ship` | PR 创建前需要用户确认；包含 AskUserQuestion STOP 点 |
+| 7 | `land-and-deploy` | Merge 确认、rollback 决策 — 均为用户交互点 |
 
 **Phase 1 执行模式（两阶段）**：
 1. **Orchestrator 直接执行 autoplan**：`skill(name="autoplan")` → 等待用户确认 taste_decisions
-2. **Subagent 执行 delphi-review + to-issues**：`task(category="deep", load_skills=["delphi-review", "to-issues"])` — 这两个是非交互式，可在 subagent 中自动运行至 APPROVED
+2. **Orchestrator 直接执行 to-issues**：`skill(name="to-issues")` → 等待用户确认 Issue 拆分
+3. **Subagent 执行 delphi-review**：`task(category="deep", load_skills=["delphi-review"])` — 非交互式，可自动运行至 APPROVED
 
 **上下文隔离原则**：
 - 每个 Subagent 在**独立 session** 中启动，不继承 orchestrator 的对话历史
