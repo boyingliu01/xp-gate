@@ -4,6 +4,8 @@
 
 多专家代码走查、测试对齐、浏览器测试。确保 MVP 符合 specification。
 
+**执行者**: orchestrator 直接执行全部步骤（非 subagent dispatch）— Issue #249。
+
 Web 前端项目额外增加：系统化 QA、视觉审计、性能基线。
 
 ---
@@ -46,7 +48,7 @@ delphi code-walkthrough 执行：
 - ≥90% 共识 + APPROVED 才通过
 
 **如果 REQUEST_CHANGES**:
-- ⚠️ 暂停等待用户修复 Critical Issues + 处理 Major Concerns
+- ⚠️ 暂停等待用户处理 Critical Issues + Major Concerns（orchestrator 直接执行，可交互）
 - 修复后回到 Round 2 重新评审
 
 **如果 APPROVED**:
