@@ -30,6 +30,38 @@ source "$ADAPTER_DIR/adapter-common.sh" 2>/dev/null || {
   exit 1
 }
 
+# Resolve adapter file path — handles both layouts:
+#   Global:      ~/.config/xp-gate/adapters/typescript.sh      (flat)
+#   Project:     <repo>/githooks/adapters/typescript.sh          (nested)
+#   Script dir:  <hook-dir>/adapters/typescript.sh               (nested)
+# ADAPTER_DIR points to the base directory that contains either
+# adapter-common.sh directly (global) or adapter-common.sh in a flat layout.
+# Gate scripts live alongside adapter-common.sh.
+resolve_adapter_path() {
+  local lang="$1"
+  # Try flat layout first (global: typescript.sh next to adapter-common.sh)
+  if [ -f "$ADAPTER_DIR/${lang}.sh" ]; then
+    echo "$ADAPTER_DIR/${lang}.sh"
+    return 0
+  fi
+  # Try nested layout (project: adapters/typescript.sh)
+  if [ -f "$ADAPTER_DIR/adapters/${lang}.sh" ]; then
+    echo "$ADAPTER_DIR/adapters/${lang}.sh"
+    return 0
+  fi
+  # Try project githooks as fallback
+  if [ -f "$PROJECT_GITHOOKS/adapters/${lang}.sh" ]; then
+    echo "$PROJECT_GITHOOKS/adapters/${lang}.sh"
+    return 0
+  fi
+  # Try script dir as last resort
+  if [ -f "$SCRIPT_DIR/adapters/${lang}.sh" ]; then
+    echo "$SCRIPT_DIR/adapters/${lang}.sh"
+    return 0
+  fi
+  return 1
+}
+
 # Gate scripts directory — falls back to project githooks if ADAPTER_DIR doesn't have them
 if [ -f "$ADAPTER_DIR/gate-3.sh" ]; then
   GATE_DIR="$ADAPTER_DIR"
@@ -819,7 +851,8 @@ elif [ "$PROJECT_LANG" = "shell" ] || echo "$CHANGED_FILES" | grep -qE '\.sh$'; 
 
 else
   # Route to appropriate adapter for other languages
-  if source "$ADAPTER_DIR/adapters/${PROJECT_LANG}.sh" 2>/dev/null; then
+  ADAPTER_FILE=$(resolve_adapter_path "$PROJECT_LANG")
+  if [ -n "$ADAPTER_FILE" ] && source "$ADAPTER_FILE" 2>/dev/null; then
     echo "Running static analysis for $PROJECT_LANG..."
     run_static_analysis | head -30 2>/dev/null
     ANALYSIS_EXIT=$?
@@ -1251,8 +1284,9 @@ else
   echo "Running tests..."
   
   # Route to appropriate test runner via adapter
-  if [ "${PROJECT_LANG}" != "unknown" ] && [ -f "$ADAPTER_DIR/adapters/${PROJECT_LANG}.sh" ]; then
-    if source "$ADAPTER_DIR/adapters/${PROJECT_LANG}.sh" 2>/dev/null; then
+  ADAPTER_FILE=$(resolve_adapter_path "$PROJECT_LANG")
+  if [ "${PROJECT_LANG}" != "unknown" ] && [ -n "$ADAPTER_FILE" ]; then
+    if source "$ADAPTER_FILE" 2>/dev/null; then
       TESTS_OUTPUT=$(run_tests 2>&1)
       TESTS_EXIT_CODE=$?
       echo "$TESTS_OUTPUT" | head -50
@@ -1264,17 +1298,17 @@ else
         echo "✅ PASSED - Unit tests passed."
       fi
     else
-      echo "✅ PASSED - No adapter for tests, assuming none to run."
+      echo "✅ PASSED - Could not source ${PROJECT_LANG} adapter for tests, assuming none to run."
     fi
   else
-    echo "✅ PASSED - No specific adapter, no tests to run."
+    echo "✅ PASSED - No ${PROJECT_LANG} adapter found for tests, assuming none to run."
   fi
   
   # Next, run coverage check
   echo "Running coverage check..."
 
-  if [ "${PROJECT_LANG}" != "unknown" ] && [ -f "$ADAPTER_DIR/adapters/${PROJECT_LANG}.sh" ]; then
-    if source "$ADAPTER_DIR/adapters/${PROJECT_LANG}.sh" 2>/dev/null; then
+  if [ "${PROJECT_LANG}" != "unknown" ] && [ -n "$ADAPTER_FILE" ]; then
+    if source "$ADAPTER_FILE" 2>/dev/null; then
       case "$PROJECT_LANG" in
         "typescript")
           if [ -f "package.json" ] && grep -q '"test:coverage"' package.json 2>/dev/null; then
@@ -1331,12 +1365,12 @@ else
       esac
     else
       # Adapter source failed — warn and let Stage 2 attempt file-based enforcement
-      echo "⚠️  Could not source ${PROJECT_LANG} adapter, will check coverage files directly..."
+      echo "⚠️  Could not source ${PROJECT_LANG} adapter from ${ADAPTER_FILE}, will check coverage files directly..."
       COV_EXIT=0
     fi
   else
     # No adapter available — warn and let Stage 2 attempt file-based enforcement
-    echo "⚠️  No adapter for ${PROJECT_LANG}, will check coverage files directly..."
+    echo "⚠️  No adapter found for ${PROJECT_LANG} (searched: ${ADAPTER_DIR}/, ${ADAPTER_DIR}/adapters/, ${PROJECT_GITHOOKS}/adapters/, ${SCRIPT_DIR}/adapters/) — will check coverage files directly..."
     COV_EXIT=0
   fi
 

@@ -98,23 +98,22 @@ route_to_adapter() {
   local lang
   lang=$(detect_project_lang)
   
-  # Source the appropriate adapter
-  if [ -f "githooks/adapters/${lang}.sh" ]; then
-    # shellcheck source=githooks/adapters/"${lang}".sh
-    source "githooks/adapters/${lang}.sh"
-    
-    # Execute the requested action
-    case "$action" in
-      "static_analysis") run_static_analysis ;;
-      "lint") run_lint ;;
-      "tests") run_tests ;;
-      "coverage") run_coverage ;;
-      *) return 1 ;;
-    esac
+  local adapter_file=""
+
+  # 3-tier resolution matching pre-commit ADAPTER_DIR logic
+  # Tier 1: Global flat layout (~/.config/xp-gate/adapters/lang.sh)
+  if [ -f "$HOME/.config/xp-gate/adapters/${lang}.sh" ]; then
+    adapter_file="$HOME/.config/xp-gate/adapters/${lang}.sh"
+  # Tier 2: Project nested layout (githooks/adapters/lang.sh)
+  elif [ -f "githooks/adapters/${lang}.sh" ]; then
+    adapter_file="githooks/adapters/${lang}.sh"
   elif [ -f "./githooks/adapters/${lang}.sh" ]; then
-    # Alternative: source with ./ prefix
-    # shellcheck source=./githooks/adapters/"${lang}".sh
-    source "./githooks/adapters/${lang}.sh"
+    adapter_file="./githooks/adapters/${lang}.sh"
+  fi
+
+  if [ -n "$adapter_file" ]; then
+    # shellcheck source=./githooks/adapters/lang.sh
+    source "$adapter_file"
     
     # Execute the requested action
     case "$action" in
@@ -125,7 +124,7 @@ route_to_adapter() {
       *) return 1 ;;
     esac
   else
-    echo "No adapter found for language: $lang"
+    echo "No adapter found for language: $lang (searched: ~/.config/xp-gate/adapters/, githooks/adapters/)"
     return 1
   fi
 }
