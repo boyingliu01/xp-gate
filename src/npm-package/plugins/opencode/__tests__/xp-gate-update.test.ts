@@ -160,20 +160,22 @@ async function checkXpGateUpdate(): Promise<UpgradeResult> {
     return { action: "noop", localVersion, remoteVersion }
   }
 
-  // 5. Outdated — auto upgrade (non-blocking spawn)
+  // 5. Outdated — auto upgrade (awaited spawn)
   writeXpGateCache({ ts: Date.now(), localVersion, remoteVersion })
   try {
-    const child = spawn("npm", ["install", "-g", `${XP_GATE_NPM_PKG}@${remoteVersion}`], {
-      stdio: "pipe",
-      timeout: 120_000,
+    const exitCode = await new Promise<number | null>((resolve, reject) => {
+      const child = spawn("npm", ["install", "-g", `${XP_GATE_NPM_PKG}@${remoteVersion}`], {
+        stdio: "pipe",
+        timeout: 120_000,
+      })
+      child.on("close", (code) => resolve(code))
+      child.on("error", (err) => reject(err))
     })
-    child.on("close", (code) => {
-      if (code === 0) {
-        writeXpGateCache({ ts: Date.now(), localVersion: remoteVersion, remoteVersion, status: "current" })
-      }
-    })
-    child.on("error", () => { /* empty — cache won't get status:current, so next check retries */ })
-    return { action: "upgraded", localVersion, remoteVersion }
+    if (exitCode === 0) {
+      writeXpGateCache({ ts: Date.now(), localVersion: remoteVersion, remoteVersion, status: "current" })
+      return { action: "upgraded", localVersion, remoteVersion }
+    }
+    return { action: "error", localVersion, remoteVersion, error: `npm install exited with code ${exitCode}` }
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err)
     return { action: "error", localVersion, remoteVersion, error: msg }
@@ -449,18 +451,15 @@ void describe("checkXpGateUpdate — spawn completes and writes cache (UPG-004)"
     const result = await checkXpGateUpdate()
     getLocalVersionOverride = null
 
-    // The function returns immediately (fire-and-forget spawn)
+    // After fix: spawn is awaited, so cache is already written when function returns
     assert.equal(result.action, "upgraded")
 
-    // Wait for the spawn to complete and write cache
-    await new Promise(resolve => setTimeout(resolve, 15000))
-
-    // After spawn completes, cache should have status:current
+    // Cache should have status:current immediately (no delay needed)
     const finalCache = readXpGateCache()
     if (finalCache) {
       assert.equal(finalCache.status, "current",
-        "FIRE-AND-FORGET BUG: spawn didn't write status:current — the chat.message hook " +
-        "discards the spawn promise before it completes. Fix: await the spawn in checkXpGateUpdate.")
+        "UPG-004 FAIL: spawn did not write status:current. The upgrade promise " +
+        "must be awaited so the cache reflects the completed install.")
     }
   })
 })
@@ -509,12 +508,11 @@ void describe("runBackgroundUpdates — await verification (UPG-005)", () => {
 
     assert.equal(result.action, "upgraded")
 
-    // Fire-and-forget bug: spawn is not awaited, so elapsed < 500ms
-    // With proper await: elapsed > 1000ms (npm install takes time)
+    // After fix: spawn is properly awaited, so elapsed >= 1000ms
     console.log(`UPG-005: checkXpGateUpdate() returned in ${elapsed}ms`)
     assert.ok(elapsed > 1000,
       `UPG-005 FAIL: resolve took only ${elapsed}ms — spawn is NOT awaited. ` +
-      "chat.message hook returns before npm install completes, so the " +
-      "upgrade promise is lost and cache never gets status:current.")
+      "The chat.message hook must await the upgrade promise so " +
+      "npm install completes and cache gets status:current.")
   })
 })
