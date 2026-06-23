@@ -4,6 +4,22 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+## [0.10.4] - 2026-06-23
+
+### Added
+
+- **#160: Go mutation testing (Gate M)** — `GoMutantRunner` spawns `gomutants` (v0.4.0) to run mutation testing on Go source files
+  - Auto-routed via `runnerRegistry` when `.go` files change on pre-push
+  - Parses `test_efficacy` score + per-file `mutations[]` array with status counting
+  - Go test file discovery (`foo.go → foo_test.go`) integrated into `findTestFileForSource`
+  - 11 unit tests for `GoMutantRunner` (isAvailable, spawn args, timeout, JSON parsing)
+  - CI workflow `mutation-test-go.yml` for E2E Go mutation regression testing
+  - New workflow job: setup Go 1.26 → install gomutants → create fixture → gate-m E2E
+
+### Changed
+
+- Architecture baseline updated to account for pre-existing smells in `gate-m.ts`
+
 ## [0.10.3] - 2026-06-22
 
 ### Added
