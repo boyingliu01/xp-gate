@@ -228,6 +228,12 @@ git diff --stat HEAD 2>/dev/null  # 如果有局部修改
 
 ---
 
+## 编排注意事项
+
+Phase -0.5 经常使用并行 background explore agents 评估代码影响范围。Agent dispatch 后必须遵循 **Background Task Resume Protocol**（参见 `orchestration-rules.md`），在所有 background task 返回后自动恢复继续，不得等待人工消息（Issue #248）。
+
+---
+
 ## 与学习循环的集成
 
 ### 数据收集
