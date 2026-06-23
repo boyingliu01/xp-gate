@@ -180,11 +180,11 @@ describe('check-version.js — REQ-001-01', () => {
     }
 
     function withMockedHttps(latestVersion, fn) {
-      const fs = require('fs');
-      const os = require('os');
-      const cpPath = require('path').join(os.homedir(), '.xp-gate', 'version-cache.json');
-      if (fs.existsSync(cpPath)) {
-        try { fs.unlinkSync(cpPath); } catch { }
+      const fsm = require('fs');
+      const osm = require('os');
+      const cpPath = require('path').join(osm.homedir(), '.xp-gate', 'version-cache.json');
+      if (fsm.existsSync(cpPath)) {
+        try { fsm.unlinkSync(cpPath); } catch { }
       }
       evictCache();
       const https = require('https');
@@ -204,11 +204,25 @@ describe('check-version.js — REQ-001-01', () => {
         callback(mockRes);
         return { on: () => undefined, destroy: () => undefined };
       };
+      // Mock getLocalVersion to return a fixed version so tests don't
+      // depend on the real package.json version (which drifts over time).
+      const savedReadFileSync = fsm.readFileSync;
+      const pkgJsonDir = require('path').join(
+        require('path').dirname(require.resolve('../check-version')),
+        '..'
+      );
+      fsm.readFileSync = (...args) => {
+        if (String(args[0]).endsWith('package.json') && String(args[0]) === require('path').join(pkgJsonDir, 'package.json')) {
+          return JSON.stringify({ name: '@boyingliu01/xp-gate', version: '0.8.21' });
+        }
+        return savedReadFileSync.apply(fsm, args);
+      };
       try {
         const m = require('../check-version');
         return fn(m);
       } finally {
         https.get = saved;
+        fsm.readFileSync = savedReadFileSync;
       }
     }
 
