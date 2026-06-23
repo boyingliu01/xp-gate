@@ -192,7 +192,7 @@ describe('install-skill', () => {
     const result = await installSkill('sprint-flow');
 
     expect(result).toBe(1);
-    expect(console.error).toHaveBeenCalledWith('Error: sprint-flow is already installed');
+    expect(console.error).toHaveBeenCalledWith('Error: sprint-flow is already installed\nUse --force to overwrite');
   });
 
   it('backs up and replaces when target exists and force=true', async () => {
