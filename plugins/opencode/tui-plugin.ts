@@ -17,6 +17,7 @@
 
 import { existsSync, readFileSync, readdirSync } from "node:fs"
 import { join, dirname, resolve, parse } from "node:path"
+import { homedir } from "node:os"
 import type { TuiPlugin, TuiSlotPlugin, TuiSlotProps } from "@opencode-ai/plugin/tui"
 
 // ── Phase constants (inlined from ../../src/npm-package/lib/shared-phase-constants.js) ──
@@ -174,7 +175,7 @@ function discoverActiveSprints(dir: string): DiscoveredSprint[] {
 
 // ── Cache (module-level, 5s TTL) ──
 
-let _cache: { data: DiscoveredSprint[]; ts: number; dir: string } | null = null;
+let _cache: { data: DiscoveredSprint[]; upgradeNotice: string | null; ts: number; dir: string } | null = null;
 const CACHE_TTL_MS = 5_000;
 
 // ── Helpers ──
@@ -328,6 +329,45 @@ function renderMultiSprintSidebar(sprints: DiscoveredSprint[]): string | null {
   return blocks.join("\n---\n");
 }
 
+function renderContent(sprints: DiscoveredSprint[], upgradeNotice: string | null): string | null {
+  const sprintContent = renderMultiSprintSidebar(sprints)
+  if (upgradeNotice && sprintContent) return `${upgradeNotice}\n---\n${sprintContent}`
+  if (upgradeNotice) return upgradeNotice
+  return sprintContent
+}
+
+// ── Upgrade notice ──
+
+const UPGRADE_NOTICE_FILE = join(homedir(), ".xp-gate", "upgrade-notice.json")
+const UPGRADE_NOTICE_TTL_MS = 86_400_000 // 24h
+
+type UpgradeNotice = {
+  kind: string
+  localVersion: string | null
+  remoteVersion: string | null
+  message: string
+  ts: number
+}
+
+function readUpgradeNotice(): UpgradeNotice | null {
+  try {
+    if (!existsSync(UPGRADE_NOTICE_FILE)) return null
+    const raw = readFileSync(UPGRADE_NOTICE_FILE, "utf8")
+    const data = JSON.parse(raw) as UpgradeNotice
+    if (Date.now() - data.ts < UPGRADE_NOTICE_TTL_MS && data.message) return data
+    return null
+  } catch {
+    return null
+  }
+}
+
+function renderUpgradeNotice(): string | null {
+  const notice = readUpgradeNotice()
+  if (!notice) return null
+  const icon = notice.kind === "upgraded" ? "✓" : notice.kind === "outdated" ? "↑" : "⚠"
+  return `${icon} ${notice.message}`
+}
+
 // ── TUI Slot Plugin ──
 
 const tuiPlugin: TuiSlotPlugin = {
@@ -338,12 +378,13 @@ const tuiPlugin: TuiSlotPlugin = {
 
       // Use cache if still valid for current directory
       if (_cache && _cache.dir === dir && now - _cache.ts < CACHE_TTL_MS) {
-        return renderMultiSprintSidebar(_cache.data);
+        return renderContent(_cache.data, _cache.upgradeNotice);
       }
 
       const sprints = discoverActiveSprints(dir);
-      _cache = { data: sprints, ts: now, dir };
-      return renderMultiSprintSidebar(sprints);
+      const upgradeNotice = renderUpgradeNotice()
+      _cache = { data: sprints, ts: now, dir, upgradeNotice };
+      return renderContent(sprints, upgradeNotice);
     },
   },
 }

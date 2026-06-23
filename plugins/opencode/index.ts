@@ -55,7 +55,7 @@ async function fetchNpmLatestVersion(url: string): Promise<string | null> {
   }
 }
 
-function readCache(file: string): { ts: number; remoteVersion: string; status?: string } | null {
+function readCache(file: string): { ts: number; remoteVersion: string; localVersion?: string; status?: string } | null {
   try {
     if (!existsSync(file)) return null
     const raw = readFileSync(file, "utf8")
@@ -100,11 +100,16 @@ function getLocalXpGateVersion(): string | null {
 
 async function checkXpGateUpdate(): Promise<UpgradeResult> {
   const cached = readCache(XP_GATE_CACHE_FILE)
-  if (cached?.status === "current" && cached.remoteVersion) {
-    return { action: "noop", localVersion: cached.remoteVersion, remoteVersion: cached.remoteVersion }
+  const localVersion = getLocalXpGateVersion()
+
+  // If cache exists and local version hasn't changed AND status is "current",
+  // the cache is still valid — skip network check
+  if (cached?.status === "current" && cached.remoteVersion && localVersion && cached.localVersion === localVersion) {
+    return { action: "noop", localVersion, remoteVersion: cached.remoteVersion }
   }
 
-  const localVersion = getLocalXpGateVersion()
+  // If we have a valid cache but local version changed (e.g., manual upgrade)
+  // or cache has no "current" status, we need to re-check remote
   if (!localVersion) return { action: "noop", localVersion: null, remoteVersion: null }
 
   const remoteVersion = await fetchNpmLatestVersion(XP_GATE_REGISTRY_URL)
@@ -124,17 +129,19 @@ async function checkXpGateUpdate(): Promise<UpgradeResult> {
 
   writeCache(XP_GATE_CACHE_FILE, { ts: Date.now(), localVersion, remoteVersion })
   try {
-    const child = spawn("npm", ["install", "-g", `${XP_GATE_NPM_PKG}@${remoteVersion}`], {
-      stdio: "pipe",
-      timeout: 120_000,
+    const exitCode = await new Promise<number | null>((resolve, reject) => {
+      const child = spawn("npm", ["install", "-g", `${XP_GATE_NPM_PKG}@${remoteVersion}`], {
+        stdio: "pipe",
+        timeout: 120_000,
+      })
+      child.on("close", (code) => resolve(code))
+      child.on("error", (err) => reject(err))
     })
-    child.on("close", (code) => {
-      if (code === 0) {
-        writeCache(XP_GATE_CACHE_FILE, { ts: Date.now(), localVersion: remoteVersion, remoteVersion, status: "current" })
-      }
-    })
-    child.on("error", () => { /* empty — cache won't get status:current, so next check retries */ })
-    return { action: "upgraded", localVersion, remoteVersion }
+    if (exitCode === 0) {
+      writeCache(XP_GATE_CACHE_FILE, { ts: Date.now(), localVersion: remoteVersion, remoteVersion, status: "current" })
+      return { action: "upgraded", localVersion, remoteVersion }
+    }
+    return { action: "error", localVersion, remoteVersion, error: `npm install exited with code ${exitCode}` }
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err)
     return { action: "error", localVersion, remoteVersion, error: msg }
@@ -174,6 +181,22 @@ async function checkPluginUpdate(pluginDir: string): Promise<void> {
   }
 }
 
+// ── TUI upgrade notice ──
+
+const UPGRADE_NOTICE_FILE = join(homedir(), ".xp-gate", "upgrade-notice.json")
+
+type UpgradeNotice = {
+  kind: "upgraded" | "outdated" | "error"
+  localVersion: string | null
+  remoteVersion: string | null
+  message: string
+  ts: number
+}
+
+function writeUpgradeNotice(notice: UpgradeNotice): void {
+  writeCache(UPGRADE_NOTICE_FILE, notice)
+}
+
 // ── Combined background check (runs once on first chat.message) ──
 
 async function runBackgroundUpdates(pluginDir: string): Promise<string | null> {
@@ -181,10 +204,19 @@ async function runBackgroundUpdates(pluginDir: string): Promise<string | null> {
   await checkPluginUpdate(pluginDir)
 
   if (result.action === "upgraded") {
-    return `[XP-Gate] Auto-upgraded from v${result.localVersion} to v${result.remoteVersion}`
+    const msg = `[XP-Gate] Auto-upgraded from v${result.localVersion} to v${result.remoteVersion}`
+    writeUpgradeNotice({ kind: "upgraded", localVersion: result.localVersion, remoteVersion: result.remoteVersion, message: msg, ts: Date.now() })
+    return msg
   }
   if (result.action === "error") {
-    return `[XP-Gate] Upgrade check: v${result.remoteVersion} available (auto-upgrade failed: ${result.error})`
+    const msg = `[XP-Gate] Upgrade check: v${result.remoteVersion} available (auto-upgrade failed: ${result.error})`
+    writeUpgradeNotice({ kind: "error", localVersion: result.localVersion, remoteVersion: result.remoteVersion, message: msg, ts: Date.now() })
+    return msg
+  }
+  if (result.remoteVersion && result.localVersion && semverLt(result.localVersion, result.remoteVersion)) {
+    const msg = `[XP-Gate] New version v${result.remoteVersion} available (you have v${result.localVersion})`
+    writeUpgradeNotice({ kind: "outdated", localVersion: result.localVersion, remoteVersion: result.remoteVersion, message: msg, ts: Date.now() })
+    return msg
   }
   return null
 }
@@ -289,11 +321,9 @@ export const XpGatePlugin = async (input: OpenCodePluginInput) => {
     "chat.message": async (_input: { message: string }) => {
       if (!checked) {
         checked = true
-        runBackgroundUpdates(directory).then((msg) => {
-          if (msg) process.stderr.write(`${msg}\n`)
-        })
+        const msg = await runBackgroundUpdates(directory).catch(() => null)
+        if (msg) process.stderr.write(`${msg}\n`)
       }
-      return { action: "continue" }
     },
   }
 }
