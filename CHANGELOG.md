@@ -2,7 +2,23 @@
 
 All notable changes to this project will be documented in this file.
 
-## [Unreleased]
+## [0.10.7] - 2026-06-23
+
+### Fixed
+
+- **sprint-flow orchestrator stall (#248)** — Phase 0 and Phase 1 were incorrectly dispatched to subagents, causing interactive skills (brainstorming, autoplan, to-issues) to hang. Restored orchestrator-direct execution for all interactive phases, restored the Background Task Resume Protocol lost during the SKILL.md slim refactor (commit `c0c52f4`), and expanded audit to all 13 sprint-flow skills.
+  - **Phase 0 THINK**: brainstorming now runs in orchestrator (interactive — requires user decisions)
+  - **Phase 1 PLAN**: autoplan + to-issues run in orchestrator (interactive); delphi-review dispatched to subagent (non-interactive)
+  - **Phase 6 SHIP**: finishing-a-development-branch + ship run in orchestrator (interactive — merge/PR decisions)
+  - **Phase 7 LAND**: land-and-deploy runs in orchestrator (interactive — deploy verification)
+  - Phase 2 BUILD (ralph-loop), Phase 3 REVIEW (delphi-review + test-alignment), Phase 5 FEEDBACK (learn/retro/debug) remain subagent-dispatched (all non-interactive)
+  - Added Background Task Resume Protocol to orchestration-rules.md and auto-estimate phase doc
+
+## [0.10.6] - 2026-06-23
+
+### Fixed
+
+- **TUI plugin exports field** — npm package `src/npm-package/package.json` had no TUI exports field, causing sidebar to break. Added proper exports entry.
 
 ## [0.10.5] - 2026-06-23
 
