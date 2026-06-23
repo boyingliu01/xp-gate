@@ -105,7 +105,7 @@ Decision 2: [决策描述]
 
 ---
 
-### Step 2b: 调用 delphi-review（强制）
+### Step 2b: 调用 delphi-review（强制，orchestrator 直接执行）
 
 ```bash
 skill(name="delphi-review", user_message="[设计文档 + taste_decisions 确认结果]")
@@ -117,7 +117,7 @@ delphi-review 执行：
 - 输出: APPROVED / REQUEST_CHANGES
 
 **如果 REQUEST_CHANGES**:
-- ⚠️ 暂停等待用户修复
+- ⚠️ 暂停等待用户处理（orchestrator 直接执行，可交互确认）
 - 修复后重新评审（从 Round 2 起步）
 - 直到 APPROVED
 

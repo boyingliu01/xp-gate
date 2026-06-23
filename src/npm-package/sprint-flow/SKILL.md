@@ -231,13 +231,17 @@ Sprint Flow: ISOLATE → AUTO-ESTIMATE → THINK → PLAN → BUILD → REVIEW �
 4. **所有路由必须产生** `delphi-reviewed.json` (verdict: APPROVED) 才能进入 Phase 2 BUILD
 
 ### Phase 0: THINK（需求探索与设计）
-- **Subagent dispatch**: orchestrator 通过 `task(category="deep", load_skills=["brainstorming"])` 启动独立 session
+- **Orchestrator 直接执行**: brainstorming 是交互式 skill，**必须由 orchestrator 直接调用** `skill(name="brainstorming")`，不可 dispatch 到 subagent（Issue #217, #225, #248）
 - 输入: Phase -1 summary（worktree 路径）+ 用户原始需求
 - 输出: 结构化设计文档 → 直接作为 Phase 1 PLAN 的输入
 - **HARD-GATE**: 设计未批准 → 不可进入实现
 
 ### Phase 1: PLAN（共识评审）
-- **Subagent dispatch**: orchestrator 通过 `task(category="deep", load_skills=["autoplan", "delphi-review", "to-issues"])` 启动独立 session
+- **注意**: `autoplan`、`delphi-review` 和 `to-issues` 均为交互式 skill，**必须由 orchestrator 直接执行**（Issue #225, #248, #249）
+- **执行模式（三阶段，全部 orchestrator 直接执行）**:
+  1. **Orchestrator 直接执行 autoplan**: `skill(name="autoplan")` → 用户确认 taste_decisions
+  2. **Orchestrator 直接执行 delphi-review**: `skill(name="delphi-review")` — 等待 APPROVED（非 APPROVED 时需等待用户确认/处理）
+  3. **Orchestrator 直接执行 to-issues**: `skill(name="to-issues")` → 用户确认 Issue 拆分方案
 - 输入: phase-0-summary.md + 设计文档
 - 输出: `specification.yaml`（含 user_stories[]）+ `slices-manifest.json`
 
@@ -272,13 +276,10 @@ Sprint Flow: ISOLATE → AUTO-ESTIMATE → THINK → PLAN → BUILD → REVIEW �
 5. **Mock Minimization**: integration-first, mock 仅限 external services, 密度 > 30% 需 `@mock-justified`
 
 ### Phase 3: REVIEW + TEST（验证）
-- **Subagent dispatch**: orchestrator 通过 `task(category="deep", load_skills=["delphi-review", "test-specification-alignment"])` 启动独立 session
+- **Orchestrator 直接执行**: delphi-review code-walkthrough 需要用户确认 verdict（Issue #249），**必须由 orchestrator 直接调用** `skill(name="delphi-review")`
+- **Orchestrator 按序执行**: `delphi-review --mode code-walkthrough` → 等待 APPROVED → `test-specification-alignment` → `browse` (gstack) → 可选 `qa`/`design-review`/`benchmark` (gstack)
 - 输入: phase-2-summary.md + MVP 代码
 - 输出: 评审报告 + 测试对齐结果
-- `delphi-review --mode code-walkthrough` — 多专家匿名代码走查
-- `test-specification-alignment` — 测试与 Spec 对齐验证
-- `browse` (gstack) — 浏览器自动化测试
-- `k6` / `locust` / `gatling` — 负载/压力测试（可选，后端项目）
 
 ### 负载/压力测试（可选）
 - **适用项目**：主要用于后端服务的压力测试 (k6/Locust/Gatling)，Web 前端已有 `benchmark` 技能覆盖 Core Web Vitals、加载时间和资源大小等性能指标
@@ -304,7 +305,7 @@ Sprint Flow: ISOLATE → AUTO-ESTIMATE → THINK → PLAN → BUILD → REVIEW �
 **详细指令**: 参见 `references/phase-6-ship.md` — GITHOOKS-GATE / VERSION-GATE / VERSION CHANGESET (Issue #142) / changeset schema。
 
 **快速参考**:
-- **Dispatch**: `task(category="quick", load_skills=["finishing-a-development-branch", "ship"])`
+- **Orchestrator 直接执行**: `finishing-a-development-branch` 和 `ship` 均为交互式 skill（4 选项菜单 + PR 确认），**必须由 orchestrator 直接调用** `skill(name="finishing-a-development-branch")` 和 `skill(name="ship")`
 - 输入: phase-5-summary.md + feedback-log.md → 输出: PR URL
 - **HARD-GATE**: Phase 5 未完成 → BLOCK。验证 `feedback-log.md` 存在。
 - **GITHOOKS-GATE**: 验证 hooks 完整性，缺失则 `githooks/install.sh`
@@ -315,7 +316,7 @@ Sprint Flow: ISOLATE → AUTO-ESTIMATE → THINK → PLAN → BUILD → REVIEW �
 **详细指令**: 参见 `references/phase-7-land.md` — 完整流程、SLA 指标、回滚策略。
 
 **快速参考**:
-- **Dispatch**: `task(category="deep", load_skills=["land-and-deploy"])`
+- **Orchestrator 直接执行**: `land-and-deploy` 包含 merge 确认和 rollback 决策，**必须由 orchestrator 直接调用** `skill(name="land-and-deploy")`
 - 输入: phase-6-summary.md + PR URL → 输出: 部署状态 + Canary 报告
 - 流程: Merge PR → 等待 CI (10min) → 等待 Deploy (10min) → Canary Health Check (5min)
 - **回滚**: `git revert` 最后一次 merge commit
@@ -408,6 +409,58 @@ Sprint Flow: ISOLATE → AUTO-ESTIMATE → THINK → PLAN → BUILD → REVIEW �
 
 ---
 
+### ⭐ Phase State Persistence（阶段状态持久化 — MANDATORY）
+
+**编排器必须在每个 Phase 完成后更新 `.sprint-state/sprint-state.json`**：
+
+1. **Phase 完成后立即更新**（每个 Phase 结束前）：
+   - `phase`: 更新为当前 Phase 编号（如 `0`, `1`, `2`...）
+   - `status`: 更新为 `"completed"`（已完成 Phase）
+   - `phase_history`: 追加新条目
+
+2. **`phase_history` 数组条目 schema**：
+   ```json
+   {
+     "phase": 0,
+     "phase_name": "THINK",
+     "status": "completed",
+     "timestamp": "2026-06-20T10:30:00Z"
+   }
+   ```
+
+3. **检查点**：
+   - `--status` 参数读取 `sprint-state.json` 并渲染进度看板
+   - TUI panel 显示当前 Phase 和历史
+   - `--resume-from` 校验 `phase_history` 中的最后完成 Phase
+
+4. **完整 sprint-state.json 示例**：
+   ```json
+   {
+     "id": "sprint-2026-06-20-01",
+     "phase": 2,
+     "status": "in_progress",
+     "phase_history": [
+       {"phase": -1, "phase_name": "ISOLATE", "status": "completed", "timestamp": "2026-06-20T10:00:00Z"},
+       {"phase": -0.5, "phase_name": "AUTO-ESTIMATE", "status": "completed", "timestamp": "2026-06-20T10:05:00Z"},
+       {"phase": 0, "phase_name": "THINK", "status": "completed", "timestamp": "2026-06-20T10:15:00Z"},
+       {"phase": 1, "phase_name": "PLAN", "status": "completed", "timestamp": "2026-06-20T10:30:00Z"}
+     ],
+     "isolation": {
+       "worktree_path": "/home/boyingliu01/projects/xp-gate/.worktrees/sprint/sprint-2026-06-20-01",
+       "branch": "sprint/2026-06-20-01"
+     },
+     "outputs": {
+       "pain_document": "phase-outputs/phase-0-summary.md",
+       "specification": "phase-outputs/specification.yaml"
+     },
+     "metrics": {
+       "coverage_pct": 85.5
+     }
+   }
+   ```
+
+---
+
 ## 使用示例
 
 | 场景 | 命令 | 说明 |
@@ -447,7 +500,7 @@ See [Output Contract](#output-contract) below for the canonical machine-readable
 
 **Phase Summary** (每个 Phase 必须输出 YAML frontmatter): `phase/N`, `phase_name`, `status`, `outputs[]`, `decisions[]`, `next_phase_context` + markdown body (≤50 lines)
 
-**Sprint State JSON**: `{id, phase, status, isolation {worktree_path, branch}, outputs, metrics}` — 存储于 `.sprint-state/sprint-state.json`
+**Sprint State JSON**: `{id, phase, status, phase_history[], isolation {worktree_path, branch}, outputs, metrics}` — 存储于 `.sprint-state/sprint-state.json`
 
 **Final User-Facing Output**: Phase/status, file paths, validation results, next user decision, PR URL or cleanup report
 

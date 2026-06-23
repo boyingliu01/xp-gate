@@ -237,11 +237,11 @@ Sprint Flow: ISOLATE → AUTO-ESTIMATE → THINK → PLAN → BUILD → REVIEW �
 - **HARD-GATE**: 设计未批准 → 不可进入实现
 
 ### Phase 1: PLAN（共识评审）
-- **注意**: `autoplan` 和 `to-issues` 是交互式 skill，**必须由 orchestrator 直接执行**（Issue #225, #248）
-- **执行模式（三阶段）**:
+- **注意**: `autoplan`、`delphi-review` 和 `to-issues` 均为交互式 skill，**必须由 orchestrator 直接执行**（Issue #225, #248, #249）
+- **执行模式（三阶段，全部 orchestrator 直接执行）**:
   1. **Orchestrator 直接执行 autoplan**: `skill(name="autoplan")` → 用户确认 taste_decisions
-  2. **Orchestrator 直接执行 to-issues**: `skill(name="to-issues")` → 用户确认 Issue 拆分方案
-  3. **Subagent 执行 delphi-review**: `task(category="deep", load_skills=["delphi-review"])` — 非交互式，可自动运行至 APPROVED
+  2. **Orchestrator 直接执行 delphi-review**: `skill(name="delphi-review")` — 等待 APPROVED（非 APPROVED 时需等待用户确认/处理）
+  3. **Orchestrator 直接执行 to-issues**: `skill(name="to-issues")` → 用户确认 Issue 拆分方案
 - 输入: phase-0-summary.md + 设计文档
 - 输出: `specification.yaml`（含 user_stories[]）+ `slices-manifest.json`
 
@@ -276,13 +276,10 @@ Sprint Flow: ISOLATE → AUTO-ESTIMATE → THINK → PLAN → BUILD → REVIEW �
 5. **Mock Minimization**: integration-first, mock 仅限 external services, 密度 > 30% 需 `@mock-justified`
 
 ### Phase 3: REVIEW + TEST（验证）
-- **Subagent dispatch**: orchestrator 通过 `task(category="deep", load_skills=["delphi-review", "test-specification-alignment"])` 启动独立 session
+- **Orchestrator 直接执行**: delphi-review code-walkthrough 需要用户确认 verdict（Issue #249），**必须由 orchestrator 直接调用** `skill(name="delphi-review")`
+- **Orchestrator 按序执行**: `delphi-review --mode code-walkthrough` → 等待 APPROVED → `test-specification-alignment` → `browse` (gstack) → 可选 `qa`/`design-review`/`benchmark` (gstack)
 - 输入: phase-2-summary.md + MVP 代码
 - 输出: 评审报告 + 测试对齐结果
-- `delphi-review --mode code-walkthrough` — 多专家匿名代码走查
-- `test-specification-alignment` — 测试与 Spec 对齐验证
-- `browse` (gstack) — 浏览器自动化测试
-- `k6` / `locust` / `gatling` — 负载/压力测试（可选，后端项目）
 
 ### 负载/压力测试（可选）
 - **适用项目**：主要用于后端服务的压力测试 (k6/Locust/Gatling)，Web 前端已有 `benchmark` 技能覆盖 Core Web Vitals、加载时间和资源大小等性能指标

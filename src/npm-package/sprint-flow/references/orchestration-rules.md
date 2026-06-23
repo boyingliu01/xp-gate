@@ -30,15 +30,33 @@
 |-------|------|:---------:|----------|-------------|--------|
 | -1 | ISOLATE | ❌ | Bash（直接执行） | 无 | orchestrator |
 | -0.5 | AUTO-ESTIMATE | ❌ | Bash（直接执行） | 无 | orchestrator |
-| 0 | THINK | ✅ | `deep` | `["brainstorming"]` | subagent |
-| 1 | PLAN | ✅ | `deep` | `["autoplan", "delphi-review", "to-issues"]` | subagent |
-| 2 | BUILD | ✅(已有) | ralph-loop | `["test-driven-development"]` | subagent |
-| 3 | REVIEW | ✅ | `deep` | `["delphi-review", "test-specification-alignment"]` | subagent |
+| 0 | THINK | ❌ | orchestrator（直接执行） | `["brainstorming"]` | orchestrator |
+| 1 | PLAN | ❌ | orchestrator（直接执行） | `["autoplan", "delphi-review", "to-issues"]` | orchestrator |
+| 2 | BUILD | ✅ | ralph-loop | `["test-driven-development"]` | subagent |
+| 3 | REVIEW | ❌ | orchestrator（直接执行） | `["delphi-review", "test-specification-alignment"]` | orchestrator |
 | 4 | USER ACCEPT | ❌ | **强制人工** | 无 | 用户 |
 | 5 | FEEDBACK | ✅ | `quick` | `["learn", "retro", "systematic-debugging"]` | subagent |
-| 6 | SHIP | ✅ | `quick` | `["finishing-a-development-branch", "ship"]` | subagent |
-| 7 | LAND | ✅ | `deep` | `["land-and-deploy"]` | subagent |
+| 6 | SHIP | ❌ | orchestrator（直接执行） | `["finishing-a-development-branch", "ship"]` | orchestrator |
+| 7 | LAND | ❌ | orchestrator（直接执行） | `["land-and-deploy"]` | orchestrator |
 | 8 | CLEANUP | ❌ | Bash（直接执行） | 无 | orchestrator |
+
+**⚠️ 交互式 skill 必须由 orchestrator 直接执行（不可 dispatch 到 subagent）**：
+
+| Phase | Skill | 为什么不能在 subagent 中执行 |
+|-------|-------|---------------------------|
+| 0 | `brainstorming` | 需要与用户对话确认需求、提出澄清问题。Subagent 是 fire-and-forget 模式，无法暂停等待用户输入（Issue #217） |
+| 1 | `autoplan` | taste_decisions 节点暂停等待用户确认。必须由 orchestrator 直接执行（Issue #225） |
+| 1 | `delphi-review` | design 模式需等待 verdict APPROVED；非 APPROVED 时需用户确认是否接受分歧方案（Issue #249） |
+| 1 | `to-issues` | Step 6 "向用户确认" — 展示拆分结果，等待用户批准后才生成 slices-manifest.json |
+| 3 | `delphi-review --mode code-walkthrough` | Code walkthrough 非 APPROVED 时需暂停等待用户处理 Critical Issues（Issue #249） |
+| 6 | `finishing-a-development-branch` | 4 选项菜单 (merge/PR/keep/discard) 需要用户选择；Option 4 (discard) 要求 typed confirmation |
+| 6 | `ship` | PR 创建前需要用户确认；包含 AskUserQuestion STOP 点 |
+| 7 | `land-and-deploy` | Merge 确认、rollback 决策 — 均为用户交互点 |
+
+**Phase 1 执行模式（全部 orchestrator 直接执行）**：
+1. **Orchestrator 直接执行 autoplan**：`skill(name="autoplan")` → 等待用户确认 taste_decisions
+2. **Orchestrator 直接执行 delphi-review**：`skill(name="delphi-review")` → 等待 APPROVED（非 APPROVED 时暂停等待用户确认）
+3. **Orchestrator 直接执行 to-issues**：`skill(name="to-issues")` → 等待用户确认 Issue 拆分
 
 **上下文隔离原则**：
 - 每个 Subagent 在**独立 session** 中启动，不继承 orchestrator 的对话历史
@@ -55,7 +73,7 @@
 | Phase 0 | phase--1-summary（仅路径） | 隔离环境信息（worktree 路径） |
 | Phase 1 | phase-0-summary.md + design-doc | 设计决策 + 结构化规格 |
 | Phase 2 | phase-1-summary.md + specification.yaml | 评审结论 + REQ 列表 |
-| Phase 3 | phase-2-summary.md + MVP 代码 | 构建结果 |
+| Phase 3 | phase-2-summary.md + MVP 代码 | 构建结果（orchestrator 直接执行，无 subagent 上下文继承） |
 | Phase 4 | — | **人工验收**。Phase 4 不产生 subagent summary，但用户验收结果记录在 `.sprint-state/phase-outputs/emergent-issues.md`（如有 emergent issues）。Phase 5 加载此文件。 |
 | Phase 5 | phase-4-summary.md + emergent-issues.md | 验收结论 |
 | Phase 6 | phase-5-summary.md + feedback-log.md | 复盘结论 |
@@ -97,6 +115,20 @@
    - 输出物路径：列出 `outputs` 中已有的文件路径
    - 时机：每个 Phase 完成后的 transition 阶段自动展示，用户无需请求
    - 向后兼容：旧版 `sprint-state.json` 缺少 `phase_history` 时，从 `phase` 字段推断状态
+
+### Background Task Resume Protocol (MANDATORY — Issue #248)
+
+After dispatching background agents with `run_in_background=true` (e.g., Phase -0.5 AUTO-ESTIMATE explore agents, Phase 1 delphi-review subagent):
+
+1. **END YOUR RESPONSE** — do NOT poll `background_output()` before receiving `<system-reminder>`
+2. **On `<system-reminder>` notification**: collect ALL completed results via `background_output(task_id="bg_...")`
+3. **When ALL tasks complete**: immediately resume by:
+   a. Synthesizing results into the current phase assessment
+   b. Executing the phase transition gate
+   c. Continuing to the next phase **WITHOUT waiting for human input**
+4. **If any task failed**: collect partial results, log the failure, continue with available data (do NOT block the pipeline)
+
+**The orchestrator MUST treat task completion notifications as an implicit "continue" signal.** This protocol prevents the "human-in-loop stall" where all background tasks complete but the orchestrator waits indefinitely for a human message (Issue #235, #248).
 
 ### Phase Summary 格式（YAML Frontmatter Schema）
 
