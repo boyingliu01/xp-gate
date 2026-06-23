@@ -231,13 +231,17 @@ Sprint Flow: ISOLATE → AUTO-ESTIMATE → THINK → PLAN → BUILD → REVIEW �
 4. **所有路由必须产生** `delphi-reviewed.json` (verdict: APPROVED) 才能进入 Phase 2 BUILD
 
 ### Phase 0: THINK（需求探索与设计）
-- **Subagent dispatch**: orchestrator 通过 `task(category="deep", load_skills=["brainstorming"])` 启动独立 session
+- **Orchestrator 直接执行**: brainstorming 是交互式 skill，**必须由 orchestrator 直接调用** `skill(name="brainstorming")`，不可 dispatch 到 subagent（Issue #217, #225, #248）
 - 输入: Phase -1 summary（worktree 路径）+ 用户原始需求
 - 输出: 结构化设计文档 → 直接作为 Phase 1 PLAN 的输入
 - **HARD-GATE**: 设计未批准 → 不可进入实现
 
 ### Phase 1: PLAN（共识评审）
-- **Subagent dispatch**: orchestrator 通过 `task(category="deep", load_skills=["autoplan", "delphi-review", "to-issues"])` 启动独立 session
+- **注意**: `autoplan` 和 `to-issues` 是交互式 skill，**必须由 orchestrator 直接执行**（Issue #225, #248）
+- **执行模式（三阶段）**:
+  1. **Orchestrator 直接执行 autoplan**: `skill(name="autoplan")` → 用户确认 taste_decisions
+  2. **Orchestrator 直接执行 to-issues**: `skill(name="to-issues")` → 用户确认 Issue 拆分方案
+  3. **Subagent 执行 delphi-review**: `task(category="deep", load_skills=["delphi-review"])` — 非交互式，可自动运行至 APPROVED
 - 输入: phase-0-summary.md + 设计文档
 - 输出: `specification.yaml`（含 user_stories[]）+ `slices-manifest.json`
 
@@ -304,7 +308,7 @@ Sprint Flow: ISOLATE → AUTO-ESTIMATE → THINK → PLAN → BUILD → REVIEW �
 **详细指令**: 参见 `references/phase-6-ship.md` — GITHOOKS-GATE / VERSION-GATE / VERSION CHANGESET (Issue #142) / changeset schema。
 
 **快速参考**:
-- **Dispatch**: `task(category="quick", load_skills=["finishing-a-development-branch", "ship"])`
+- **Orchestrator 直接执行**: `finishing-a-development-branch` 和 `ship` 均为交互式 skill（4 选项菜单 + PR 确认），**必须由 orchestrator 直接调用** `skill(name="finishing-a-development-branch")` 和 `skill(name="ship")`
 - 输入: phase-5-summary.md + feedback-log.md → 输出: PR URL
 - **HARD-GATE**: Phase 5 未完成 → BLOCK。验证 `feedback-log.md` 存在。
 - **GITHOOKS-GATE**: 验证 hooks 完整性，缺失则 `githooks/install.sh`
@@ -315,7 +319,7 @@ Sprint Flow: ISOLATE → AUTO-ESTIMATE → THINK → PLAN → BUILD → REVIEW �
 **详细指令**: 参见 `references/phase-7-land.md` — 完整流程、SLA 指标、回滚策略。
 
 **快速参考**:
-- **Dispatch**: `task(category="deep", load_skills=["land-and-deploy"])`
+- **Orchestrator 直接执行**: `land-and-deploy` 包含 merge 确认和 rollback 决策，**必须由 orchestrator 直接调用** `skill(name="land-and-deploy")`
 - 输入: phase-6-summary.md + PR URL → 输出: 部署状态 + Canary 报告
 - 流程: Merge PR → 等待 CI (10min) → 等待 Deploy (10min) → Canary Health Check (5min)
 - **回滚**: `git revert` 最后一次 merge commit
