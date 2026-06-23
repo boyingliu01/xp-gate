@@ -10,6 +10,7 @@
 const fs = require('fs');
 const path = require('path');
 const { PHASE_NAMES, PHASE_ORDER, getLatestTimestamp, isStale } = require('./shared-phase-constants');
+const { discoverActiveSprints } = require('./sprint-discovery');
 
 /**
  * Read and parse sprint-state.json from a project directory.
@@ -188,6 +189,7 @@ function jsonMode(state) {
 async function handleSprintStatus(args = []) {
   const jsonFlag = args.includes('--json');
   const watchFlag = args.includes('--watch');
+  const allFlag = args.includes('--all');
   const dirIdx = args.indexOf('--dir');
   let searchDir = process.cwd();
 
@@ -198,6 +200,10 @@ async function handleSprintStatus(args = []) {
       console.error('Error: --dir path must be under current working directory');
       return 1;
     }
+  }
+
+  if (allFlag) {
+    return handleAllSprints(searchDir, jsonFlag, watchFlag);
   }
 
   const state = readSprintState(searchDir);
@@ -218,6 +224,49 @@ async function handleSprintStatus(args = []) {
   }
 
   console.log(formatSprintTable(state));
+  return 0;
+}
+
+/**
+ * Handle --all mode: discover all active sprints across worktrees.
+ * @param {string} searchDir - Starting directory
+ * @param {boolean} jsonFlag - JSON output mode
+ * @param {boolean} watchFlag - Watch mode (not supported in --all)
+ * @returns {Promise<number>} Exit code
+ */
+async function handleAllSprints(searchDir, jsonFlag, watchFlag) {
+  if (watchFlag) {
+    console.error('Error: --watch is not supported with --all');
+    return 1;
+  }
+
+  const sprints = discoverActiveSprints(searchDir);
+
+  if (sprints.length === 0) {
+    console.log('No active sprints found');
+    return 0;
+  }
+
+  if (jsonFlag) {
+    console.log(jsonMode(sprints.map(s => ({
+      ...s.state,
+      source_path: s.sourcePath,
+      worktree_exists: s.worktreeExists,
+    }))));
+    return 0;
+  }
+
+  for (let i = 0; i < sprints.length; i++) {
+    const { state, worktreeExists } = sprints[i];
+    console.log(formatSprintTable(state));
+    if (worktreeExists) {
+      console.log(`  Worktree: ${state.isolation?.worktree_path || 'unknown'}`);
+    }
+    if (i < sprints.length - 1) {
+      console.log('\n' + '='.repeat(60) + '\n');
+    }
+  }
+
   return 0;
 }
 

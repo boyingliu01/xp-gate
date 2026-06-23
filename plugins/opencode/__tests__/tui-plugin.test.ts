@@ -21,6 +21,45 @@ import { tmpdir } from "node:os"
 // test runner provides a separate copy of the pure functions
 import { readSprintState, renderSprintSidebar } from "../tui-plugin.ts"
 
+// Inline single-sprint rendering logic for multi-sprint comparison
+// (The module-level renderMultiSprintSidebar is not directly importable
+//  since it uses module-level state. We test the composition here.)
+function buildMultiSprintBlock(state: Record<string, unknown>, index: number): string {
+  const lines: string[] = []
+  const id = (state as any).id || `sprint-${index}`
+  const desc = (state as any).task_description || id
+  lines.push(`SPRINT: ${desc}`)
+  if ((state as any).isolation?.branch) {
+    lines.push(`  ${(state as any).isolation.branch}`)
+  }
+  const historyByPhase: Record<string, { status?: string; phase_name?: string }> = {}
+  if (Array.isArray((state as any).phase_history)) {
+    for (const ph of (state as any).phase_history) {
+      historyByPhase[String(ph.phase)] = ph
+    }
+  }
+  for (const key of ['-1', '-0.5', '0', '1', '2', '3', '4', '5', '6', '7', '8']) {
+    const history = historyByPhase[key]
+    if (!history && String((state as any).phase) !== key) continue
+    const name = history?.phase_name || ({
+      '-1': 'ISOLATE', '-0.5': 'AUTO-ESTIMATE', '0': 'THINK', '1': 'PLAN', '2': 'BUILD',
+      '3': 'REVIEW', '4': 'USER ACCEPT', '5': 'FEEDBACK', '6': 'SHIP', '7': 'LAND', '8': 'CLEANUP',
+    })[key] || key
+    const sym = history?.status === 'completed' ? '✓' :
+      history?.status === 'in_progress' ? '→' :
+        (String((state as any).phase) === key ? '·' : '○')
+    lines.push(`${sym} ${name.padEnd(14)} ${history?.status === 'completed' ? 'done' : history?.status === 'in_progress' ? 'active' : ''}`.replace(/\s+$/, ''))
+  }
+  return lines.join('\n')
+}
+
+function buildMultiSprintOutput(sprints: Record<string, unknown>[]): string | null {
+  if (sprints.length === 0) return null
+  const blocks = sprints.slice(0, 3).map((s, i) => buildMultiSprintBlock(s, i))
+  if (sprints.length > 3) blocks.push(`… +${sprints.length - 3} more`)
+  return blocks.join('\n---\n')
+}
+
 // Duplicate helpers here to test in isolation
 function isStale(state: { started_at?: string; phase_history?: Array<{ started_at?: string; completed_at?: string }> }): boolean {
   if (!state || !state.started_at) return false
@@ -73,7 +112,8 @@ function renderPhaseLine(key: string, history: { status?: string; phase_name?: s
 
 // ── Test fixtures ──
 
-function makeSprintState(overrides: Record<string, unknown> = {}) {
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+function makeSprintState(overrides: Record<string, unknown> = {}): any {
   const base = {
     id: "sprint-001",
     phase: "2",
@@ -88,7 +128,7 @@ function makeSprintState(overrides: Record<string, unknown> = {}) {
       { phase: "2", status: "in_progress" as const, reqs: { "REQ-001": { name: "JWT auth", status: "completed" as const }, "REQ-002": { name: "OAuth2 flow", status: "in_progress" as const } } },
     ],
   }
-  return { ...base, ...overrides } as unknown as Parameters<typeof renderSprintSidebar>[0]
+  return { ...base, ...overrides }
 }
 
 // ── isStale ──
@@ -243,20 +283,20 @@ void describe("renderSprintSidebar", () => {
   })
 
   void it("includes sprint title on first line", () => {
-    const output = renderSprintSidebar(makeSprintState())
+    const output = renderSprintSidebar(makeSprintState() as unknown as Parameters<typeof renderSprintSidebar>[0])
     const lines = output.split("\n")
     assert.ok(lines[0].includes("SPRINT:"))
     assert.ok(lines[0].includes("OAuth2"))
   })
 
   void it("includes metrics when available", () => {
-    const output = renderSprintSidebar(makeSprintState())
+    const output = renderSprintSidebar(makeSprintState() as unknown as Parameters<typeof renderSprintSidebar>[0])
     assert.ok(output.includes("tests:42"))
     assert.ok(output.includes("cov:87%"))
   })
 
   void it("omits metrics section when none present", () => {
-    const output = renderSprintSidebar(makeSprintState({ metrics: {} }))
+    const output = renderSprintSidebar(makeSprintState({ metrics: {} }) as any)
     assert.ok(!output.includes("tests:"))
     assert.ok(!output.includes("cov:"))
   })
@@ -279,7 +319,7 @@ void describe("renderSprintSidebar", () => {
   })
 
   void it("shows phases with activity or current", () => {
-    const output = renderSprintSidebar(makeSprintState())
+    const output = renderSprintSidebar(makeSprintState() as unknown as Parameters<typeof renderSprintSidebar>[0])
     // Should show ISOLATE (completed in history), THINK, PLAN, BUILD (current)
     assert.ok(output.includes("ISOLATE"))
     assert.ok(output.includes("THINK"))
@@ -291,16 +331,93 @@ void describe("renderSprintSidebar", () => {
   })
 
   void it("shows REQ-level progress for BUILD phase", () => {
-    const output = renderSprintSidebar(makeSprintState())
+    const output = renderSprintSidebar(makeSprintState() as unknown as Parameters<typeof renderSprintSidebar>[0])
     assert.ok(output.includes("JWT"))
     assert.ok(output.includes("OAuth2"))
   })
 
   void it("renders correct status symbols per phase", () => {
-    const output = renderSprintSidebar(makeSprintState())
-    // ISOLATE completed → ✓
+    const output = renderSprintSidebar(makeSprintState() as unknown as Parameters<typeof renderSprintSidebar>[0])
     const lines = output.split("\n")
     const isolateLine = lines.find((l: string) => l.includes("ISOLATE"))
     assert.ok(isolateLine && isolateLine.startsWith("✓"), `Expected ISOLATE line to start with ✓, got: ${isolateLine}`)
+  })
+})
+
+// ── Multi-Sprint Rendering ──
+
+void describe("multi-sprint rendering", () => {
+  void it("returns null for empty sprints array", () => {
+    assert.equal(buildMultiSprintOutput([]), null)
+  })
+
+  void it("renders single sprint without separator", () => {
+    const output = buildMultiSprintOutput([makeSprintState()])
+    assert.ok(output !== null)
+    assert.ok(!output!.includes("---"), "Single sprint should not have separator")
+    assert.ok(output!.includes("SPRINT:"))
+  })
+
+  void it("renders two sprints separated by ---", () => {
+    const sprint2 = makeSprintState({
+      id: "sprint-002",
+      task_description: "Second sprint",
+      started_at: new Date(Date.now() - 7_200_000).toISOString(),
+      phase: "1",
+    })
+    const output = buildMultiSprintOutput([makeSprintState(), sprint2])
+    assert.ok(output !== null)
+    assert.ok(output!.includes("---"), "Two sprints should be separated by ---")
+    assert.ok(output!.includes("OAuth2"))
+    assert.ok(output!.includes("Second sprint"))
+  })
+
+  void it("shows only first 3 sprints with overflow message for 4+", () => {
+    const sprints = [1, 2, 3, 4, 5].map(i =>
+      makeSprintState({
+        id: `sprint-00${i}`,
+        task_description: `Sprint ${i}`,
+      })
+    )
+    const output = buildMultiSprintOutput(sprints)
+    assert.ok(output !== null)
+    assert.ok(output!.includes("+2 more"), "Should show overflow for 5 sprints")
+    assert.ok(!output!.includes("Sprint 4"), "4th sprint should be collapsed")
+    assert.ok(!output!.includes("Sprint 5"), "5th sprint should be collapsed")
+  })
+
+  void it("renders 3 sprints without overflow", () => {
+    const sprints = [1, 2, 3].map(i =>
+      makeSprintState({
+        id: `sprint-00${i}`,
+        task_description: `Sprint ${i}`,
+      })
+    )
+    const output = buildMultiSprintOutput(sprints)
+    assert.ok(output !== null)
+    assert.ok(!output!.includes("more"), "3 sprints should not show overflow")
+  })
+
+  void it("uses sprint ID as fallback when task_description missing", () => {
+    const sprint = makeSprintState({ task_description: undefined, id: "sprint-2026-06-23-01" })
+    const output = buildMultiSprintBlock(sprint, 0)
+    assert.ok(output.includes("sprint-2026-06-23-01"), "Should use sprint ID as fallback")
+  })
+
+  void it("shows branch info when isolation.branch present", () => {
+    const sprint = makeSprintState({
+      isolation: { branch: "sprint/my-feature" },
+    })
+    const output = buildMultiSprintBlock(sprint, 0)
+    assert.ok(output.includes("sprint/my-feature"))
+  })
+
+  void it("does not crash on sprint with no started_at or phase_history", () => {
+    const sprint = {
+      id: "sprint-minimal",
+      task_description: "Minimal sprint",
+    }
+    const output = buildMultiSprintBlock(sprint, 0)
+    assert.ok(output.includes("Minimal sprint"))
   })
 })
