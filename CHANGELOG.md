@@ -4,6 +4,15 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+## [0.10.5] - 2026-06-23
+
+### Fixed
+
+- **npm-package mirror sync** — `GoMutantRunner` and all Go mutation testing files (`go-mutant-runner.ts`, `runners/index.ts`, `gate-m.ts` test discovery, `go-mutant-runner.test.ts`) were committed to `src/mutation/` in v0.10.4.0 but not mirrored to `src/npm-package/mutation/`
+  - This means npm users did not actually receive Go mutation support in v0.10.4
+  - All 4 files now correctly mirrored so `@boyingliu01/xp-gate@0.10.5` distributes Go mutation testing properly
+- Architecture baseline updated to account for pre-existing mirror duplication smells (CodeClone between `src/mutation/` and `src/npm-package/mutation/`)
+
 ## [0.10.4] - 2026-06-23
 
 ### Added
