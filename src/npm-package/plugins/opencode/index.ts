@@ -129,17 +129,19 @@ async function checkXpGateUpdate(): Promise<UpgradeResult> {
 
   writeCache(XP_GATE_CACHE_FILE, { ts: Date.now(), localVersion, remoteVersion })
   try {
-    const child = spawn("npm", ["install", "-g", `${XP_GATE_NPM_PKG}@${remoteVersion}`], {
-      stdio: "pipe",
-      timeout: 120_000,
+    const exitCode = await new Promise<number | null>((resolve, reject) => {
+      const child = spawn("npm", ["install", "-g", `${XP_GATE_NPM_PKG}@${remoteVersion}`], {
+        stdio: "pipe",
+        timeout: 120_000,
+      })
+      child.on("close", (code) => resolve(code))
+      child.on("error", (err) => reject(err))
     })
-    child.on("close", (code) => {
-      if (code === 0) {
-        writeCache(XP_GATE_CACHE_FILE, { ts: Date.now(), localVersion: remoteVersion, remoteVersion, status: "current" })
-      }
-    })
-    child.on("error", () => { /* empty — cache won't get status:current, so next check retries */ })
-    return { action: "upgraded", localVersion, remoteVersion }
+    if (exitCode === 0) {
+      writeCache(XP_GATE_CACHE_FILE, { ts: Date.now(), localVersion: remoteVersion, remoteVersion, status: "current" })
+      return { action: "upgraded", localVersion, remoteVersion }
+    }
+    return { action: "error", localVersion, remoteVersion, error: `npm install exited with code ${exitCode}` }
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err)
     return { action: "error", localVersion, remoteVersion, error: msg }
@@ -319,11 +321,9 @@ export const XpGatePlugin = async (input: OpenCodePluginInput) => {
     "chat.message": async (_input: { message: string }) => {
       if (!checked) {
         checked = true
-        runBackgroundUpdates(directory).then((msg) => {
-          if (msg) process.stderr.write(`${msg}\n`)
-        })
+        const msg = await runBackgroundUpdates(directory).catch(() => null)
+        if (msg) process.stderr.write(`${msg}\n`)
       }
-      return { action: "continue" }
     },
   }
 }
