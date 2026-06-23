@@ -17,6 +17,7 @@ ROOT_PKG="$ROOT_DIR/package.json"
 NPM_PKG="$ROOT_DIR/src/npm-package/package.json"
 CLAUDE_PLUGIN="$ROOT_DIR/plugins/claude-code/.claude-plugin/plugin.json"
 OPENCODE_PLUGIN="$ROOT_DIR/plugins/opencode/package.json"
+QODE_PLUGIN="$ROOT_DIR/plugins/qoder/plugin.json"
 
 if [ ! -f "$VERSION_FILE" ]; then
   echo "[sync-version] ERROR: VERSION file not found at $VERSION_FILE"
@@ -75,6 +76,17 @@ if [ -f "$OPENCODE_PLUGIN" ]; then
     fs.writeFileSync('$OPENCODE_PLUGIN', JSON.stringify(pkg, null, 2) + '\n');
   "
   echo "[sync-version] plugins/opencode/package.json -> $NPM_VERSION"
+fi
+
+# --- Qoder plugin manifest ---
+if [ -f "$QODE_PLUGIN" ]; then
+  node -e "
+    const fs = require('fs');
+    const pkg = JSON.parse(fs.readFileSync('$QODE_PLUGIN', 'utf8'));
+    pkg.version = '$NPM_VERSION';
+    fs.writeFileSync('$QODE_PLUGIN', JSON.stringify(pkg, null, 2) + '\n');
+  "
+  echo "[sync-version] plugins/qoder/plugin.json -> $NPM_VERSION"
 fi
 
 # --- npm-package mirror copies (for Mirror Parity CI check) ---

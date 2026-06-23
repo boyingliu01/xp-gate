@@ -2,6 +2,13 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.10.8] - 2026-06-23
+
+### Fixed
+
+- **qoder plugin version sync** — `plugins/qoder/plugin.json` was not included in `scripts/sync-version.sh`, causing it to remain at 0.8.17 while all other components advanced to 0.10.x. Now synced as part of the standard version bump process.
+- **npm-package qoder mirror** — `src/npm-package/plugins/qoder/plugin.json` also fixed (was 0.8.17 → 0.10.7, now 0.10.8).
+
 ## [0.10.7] - 2026-06-23
 
 ### Fixed
