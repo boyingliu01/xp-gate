@@ -231,13 +231,16 @@ Sprint Flow: ISOLATE → AUTO-ESTIMATE → THINK → PLAN → BUILD → REVIEW �
 4. **所有路由必须产生** `delphi-reviewed.json` (verdict: APPROVED) 才能进入 Phase 2 BUILD
 
 ### Phase 0: THINK（需求探索与设计）
-- **Subagent dispatch**: orchestrator 通过 `task(category="deep", load_skills=["brainstorming"])` 启动独立 session
+- **Orchestrator 直接执行**: brainstorming 是交互式 skill，**必须由 orchestrator 直接调用** `skill(name="brainstorming")`，不可 dispatch 到 subagent（Issue #217, #225, #248）
 - 输入: Phase -1 summary（worktree 路径）+ 用户原始需求
 - 输出: 结构化设计文档 → 直接作为 Phase 1 PLAN 的输入
 - **HARD-GATE**: 设计未批准 → 不可进入实现
 
 ### Phase 1: PLAN（共识评审）
-- **Subagent dispatch**: orchestrator 通过 `task(category="deep", load_skills=["autoplan", "delphi-review", "to-issues"])` 启动独立 session
+- **注意**: `autoplan` 是交互式 skill（taste_decisions 节点暂停等待用户输入），**必须由 orchestrator 直接执行**（Issue #225, #248）
+- **执行模式（两阶段）**:
+  1. **Orchestrator 直接执行 autoplan**: `skill(name="autoplan")` → 用户确认 taste_decisions
+  2. **Subagent 执行 delphi-review + to-issues**: `task(category="deep", load_skills=["delphi-review", "to-issues"])` — 非交互式，可在 subagent 中自动运行至 APPROVED
 - 输入: phase-0-summary.md + 设计文档
 - 输出: `specification.yaml`（含 user_stories[]）+ `slices-manifest.json`
 

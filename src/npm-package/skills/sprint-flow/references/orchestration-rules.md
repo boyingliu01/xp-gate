@@ -30,8 +30,8 @@
 |-------|------|:---------:|----------|-------------|--------|
 | -1 | ISOLATE | ❌ | Bash（直接执行） | 无 | orchestrator |
 | -0.5 | AUTO-ESTIMATE | ❌ | Bash（直接执行） | 无 | orchestrator |
-| 0 | THINK | ✅ | `deep` | `["brainstorming"]` | subagent |
-| 1 | PLAN | ✅ | `deep` | `["autoplan", "delphi-review", "to-issues"]` | subagent |
+| 0 | THINK | ❌ | orchestrator（直接执行） | `["brainstorming"]` | orchestrator |
+| 1 | PLAN | ⚠️ | orchestrator 执行 autoplan（交互）→ subagent 执行 delphi-review + to-issues | 见下方说明 | orchestrator + subagent |
 | 2 | BUILD | ✅(已有) | ralph-loop | `["test-driven-development"]` | subagent |
 | 3 | REVIEW | ✅ | `deep` | `["delphi-review", "test-specification-alignment"]` | subagent |
 | 4 | USER ACCEPT | ❌ | **强制人工** | 无 | 用户 |
@@ -39,6 +39,17 @@
 | 6 | SHIP | ✅ | `quick` | `["finishing-a-development-branch", "ship"]` | subagent |
 | 7 | LAND | ✅ | `deep` | `["land-and-deploy"]` | subagent |
 | 8 | CLEANUP | ❌ | Bash（直接执行） | 无 | orchestrator |
+
+**⚠️ Phase 0 和 Phase 1 必须由 orchestrator 直接执行（不可 dispatch 到 subagent）**：
+
+| Phase | 为什么不能在 subagent 中执行 |
+|-------|---------------------------|
+| 0 (brainstorming) | `brainstorming` 是**交互式 skill**——需要与用户对话确认需求、提出澄清问题。Subagent 是 fire-and-forget 模式，无法暂停等待用户输入，会导致卡死或跳过关键确认（Issue #217, #225） |
+| 1 (autoplan) | `autoplan` 在 taste_decisions 节点会**暂停等待用户确认**（交互式决策）。必须由 orchestrator 直接执行以保持交互能力（Issue #225）。autoplan 完成后，可将结果传给 subagent 执行 `delphi-review` + `to-issues` |
+
+**Phase 1 执行模式（两阶段）**：
+1. **Orchestrator 直接执行 autoplan**：`skill(name="autoplan")` → 等待用户确认 taste_decisions
+2. **Subagent 执行 delphi-review + to-issues**：`task(category="deep", load_skills=["delphi-review", "to-issues"])` — 这两个是非交互式，可在 subagent 中自动运行至 APPROVED
 
 **上下文隔离原则**：
 - 每个 Subagent 在**独立 session** 中启动，不继承 orchestrator 的对话历史
@@ -97,6 +108,20 @@
    - 输出物路径：列出 `outputs` 中已有的文件路径
    - 时机：每个 Phase 完成后的 transition 阶段自动展示，用户无需请求
    - 向后兼容：旧版 `sprint-state.json` 缺少 `phase_history` 时，从 `phase` 字段推断状态
+
+### Background Task Resume Protocol (MANDATORY — Issue #248)
+
+After dispatching background agents with `run_in_background=true` (e.g., Phase -0.5 AUTO-ESTIMATE explore agents, Phase 1 delphi-review subagent):
+
+1. **END YOUR RESPONSE** — do NOT poll `background_output()` before receiving `<system-reminder>`
+2. **On `<system-reminder>` notification**: collect ALL completed results via `background_output(task_id="bg_...")`
+3. **When ALL tasks complete**: immediately resume by:
+   a. Synthesizing results into the current phase assessment
+   b. Executing the phase transition gate
+   c. Continuing to the next phase **WITHOUT waiting for human input**
+4. **If any task failed**: collect partial results, log the failure, continue with available data (do NOT block the pipeline)
+
+**The orchestrator MUST treat task completion notifications as an implicit "continue" signal.** This protocol prevents the "human-in-loop stall" where all background tasks complete but the orchestrator waits indefinitely for a human message (Issue #235, #248).
 
 ### Phase Summary 格式（YAML Frontmatter Schema）
 
