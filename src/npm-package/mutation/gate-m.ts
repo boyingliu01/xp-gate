@@ -126,6 +126,12 @@ async function findTestFileForSource(sourceFile: string): Promise<string | null>
     if (await fileExists(testFile3)) return testFile3;
   }
 
+  if (ext === '.go') {
+    // Go: foo.go → foo_test.go (same directory, idiomatic convention)
+    const testFile1 = sourceFile.replace(/\.go$/, '_test.go');
+    if (await fileExists(testFile1)) return testFile1;
+  }
+
   return null;
 }
 
