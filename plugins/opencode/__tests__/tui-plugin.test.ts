@@ -26,28 +26,28 @@ import { readSprintState, renderSprintSidebar } from "../tui-plugin.ts"
 //  since it uses module-level state. We test the composition here.)
 function buildMultiSprintBlock(state: Record<string, unknown>, index: number): string {
   const lines: string[] = []
-  const id = (state as any).id || `sprint-${index}`
-  const desc = (state as any).task_description || id
+  const id = (state as Record<string, unknown>).id || `sprint-${index}`
+  const desc = (state as Record<string, unknown>).task_description || id
   lines.push(`SPRINT: ${desc}`)
-  if ((state as any).isolation?.branch) {
-    lines.push(`  ${(state as any).isolation.branch}`)
+  if ((state as Record<string, unknown>).isolation?.branch) {
+    lines.push(`  ${(state as Record<string, unknown>).isolation.branch}`)
   }
   const historyByPhase: Record<string, { status?: string; phase_name?: string }> = {}
-  if (Array.isArray((state as any).phase_history)) {
-    for (const ph of (state as any).phase_history) {
+  if (Array.isArray((state as Record<string, unknown>).phase_history)) {
+    for (const ph of (state as Record<string, unknown>).phase_history) {
       historyByPhase[String(ph.phase)] = ph
     }
   }
   for (const key of ['-1', '-0.5', '0', '1', '2', '3', '4', '5', '6', '7', '8']) {
     const history = historyByPhase[key]
-    if (!history && String((state as any).phase) !== key) continue
+    if (!history && String((state as Record<string, unknown>).phase) !== key) continue
     const name = history?.phase_name || ({
       '-1': 'ISOLATE', '-0.5': 'AUTO-ESTIMATE', '0': 'THINK', '1': 'PLAN', '2': 'BUILD',
       '3': 'REVIEW', '4': 'USER ACCEPT', '5': 'FEEDBACK', '6': 'SHIP', '7': 'LAND', '8': 'CLEANUP',
     })[key] || key
     const sym = history?.status === 'completed' ? '✓' :
       history?.status === 'in_progress' ? '→' :
-        (String((state as any).phase) === key ? '·' : '○')
+        (String((state as Record<string, unknown>).phase) === key ? '·' : '○')
     lines.push(`${sym} ${name.padEnd(14)} ${history?.status === 'completed' ? 'done' : history?.status === 'in_progress' ? 'active' : ''}`.replace(/\s+$/, ''))
   }
   return lines.join('\n')
@@ -296,7 +296,7 @@ void describe("renderSprintSidebar", () => {
   })
 
   void it("omits metrics section when none present", () => {
-    const output = renderSprintSidebar(makeSprintState({ metrics: {} }) as any)
+    const output = renderSprintSidebar(makeSprintState({ metrics: {} }) as unknown as Parameters<typeof renderSprintSidebar>[0])
     assert.ok(!output.includes("tests:"))
     assert.ok(!output.includes("cov:"))
   })

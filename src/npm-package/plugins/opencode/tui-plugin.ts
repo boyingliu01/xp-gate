@@ -2,7 +2,7 @@
  * XP-Gate OpenCode TUI Slot Plugin
  *
  * Registers sidebar_content slot to display Sprint Flow progress
- * from .sprint-state/sprint-state.json.
+ * from active sprint states discovered in .worktrees/sprint/ subdirectories.
  *
  * This is a separate plugin file because SDK 1.x PluginModule does not
  * support server + tui in the same module. Users register this file
@@ -10,13 +10,17 @@
  *   { "plugin": ["@boyingliu01/opencode-plugin/tui"] }
  *
  * The npm package exports "./tui" from package.json for this resolution.
+ *
+ * Discovery logic is inlined here (mirrors src/npm-package/lib/sprint-discovery.js)
+ * because the plugin ships separately from the CLI package at runtime.
  */
 
-import { existsSync, readFileSync } from "node:fs"
-import { join } from "node:path"
+import { existsSync, readFileSync, readdirSync } from "node:fs"
+import { join, dirname, resolve, parse } from "node:path"
+import { homedir } from "node:os"
 import type { TuiPlugin, TuiSlotPlugin, TuiSlotProps } from "@opencode-ai/plugin/tui"
-// ── Phase constants (inlined from ../../src/npm-package/lib/shared-phase-constants.js)
-//   This file is inlined because the installed npm package does not bundle src/ at publish time. ──
+
+// ── Phase constants (inlined from ../../src/npm-package/lib/shared-phase-constants.js) ──
 
 const PHASE_NAMES: Record<string, string> = {
   '-1': 'ISOLATE',
@@ -33,30 +37,6 @@ const PHASE_NAMES: Record<string, string> = {
 };
 
 const PHASE_ORDER = ['-1', '-0.5', '0', '1', '2', '3', '4', '5', '6', '7', '8'];
-
-function parseTime(value: unknown): number {
-  return new Date(value as string).getTime();
-}
-
-function isStale(state: SprintState | null): boolean {
-  if (!state || !state.started_at) return false;
-  const latest = sprintTimestamp(state);
-  return latest > 0 && Date.now() - latest > 3600000;
-}
-
-function sprintTimestamp(state: SprintState | null): number {
-  if (!state || !state.started_at) return 0;
-  const started = parseTime(state.started_at);
-  if (isNaN(started)) return 0;
-  let latest = started;
-  if (Array.isArray(state.phase_history)) {
-    for (const ph of state.phase_history) {
-      latest = ph.completed_at ? Math.max(latest, parseTime(ph.completed_at)) : latest;
-      latest = ph.started_at ? Math.max(latest, parseTime(ph.started_at)) : latest;
-    }
-  }
-  return latest;
-}
 
 // ── Sprint state schema ──
 
@@ -86,16 +66,142 @@ interface SprintState {
   phase_history?: SprintPhaseHistory[]
 }
 
-// ── Helpers ──
+interface DiscoveredSprint {
+  state: SprintState
+  sourcePath: string
+  worktreeExists: boolean
+}
+
+// ── Discovery: inlined from src/npm-package/lib/sprint-discovery.js ──
+
+const MAX_DISCOVERY_RESULTS = 5;
+
+function findGitRoot(startDir: string): string | null {
+  let current = resolve(startDir);
+  const root = parse(current).root;
+  const seen = new Set<string>();
+
+  while (current !== root) {
+    if (seen.has(current)) break;
+    seen.add(current);
+    if (existsSync(join(current, '.git'))) return current;
+    const parent = dirname(current);
+    if (parent === current) break;
+    current = parent;
+  }
+  if (existsSync(join(root, '.git'))) return root;
+  return null;
+}
 
 function readSprintState(dir: string): SprintState | null {
   try {
-    const stateFile = join(dir, ".sprint-state", "sprint-state.json")
-    if (!existsSync(stateFile)) return null
-    return JSON.parse(readFileSync(stateFile, "utf8"))
+    const stateFile = join(dir, '.sprint-state', 'sprint-state.json');
+    if (!existsSync(stateFile)) return null;
+    return JSON.parse(readFileSync(stateFile, 'utf8')) as SprintState;
   } catch {
-    return null
+    return null;
   }
+}
+
+function checkWorktreeExists(worktreePath: string | undefined): boolean {
+  if (!worktreePath) return false;
+  try { return existsSync(worktreePath); } catch { return false; }
+}
+
+function discoverActiveSprints(dir: string): DiscoveredSprint[] {
+  const gitRoot = findGitRoot(dir);
+  const results: DiscoveredSprint[] = [];
+
+  if (gitRoot) {
+    const worktreeBase = join(gitRoot, '.worktrees', 'sprint');
+    let entries: { name: string; isDirectory: () => boolean }[] = [];
+    try {
+      if (existsSync(worktreeBase)) {
+        entries = readdirSync(worktreeBase, { withFileTypes: true });
+      }
+    } catch { /* EACCES */ }
+
+    for (const entry of entries) {
+      if (!entry.isDirectory()) continue;
+      const sprintDir = join(worktreeBase, entry.name);
+      const state = readSprintState(sprintDir);
+      if (!state?.id) continue;
+      const worktreeExists = checkWorktreeExists(sprintDir);
+      if (isStaleSprint(state) && !worktreeExists) continue;
+
+      results.push({ state, sourcePath: join(sprintDir, '.sprint-state', 'sprint-state.json'), worktreeExists });
+    }
+  }
+
+  // Fallback: cwd's own .sprint-state/
+  const localState = readSprintState(dir);
+  if (localState?.id) {
+    const localWorktreePath = localState.isolation?.worktree_path;
+    const hasExplicitWorktree = !!localWorktreePath;
+    const localWorktreeExists = hasExplicitWorktree ? checkWorktreeExists(localWorktreePath) : false;
+    if (!hasExplicitWorktree || localWorktreeExists) {
+      results.push({
+        state: localState,
+        sourcePath: join(dir, '.sprint-state', 'sprint-state.json'),
+        worktreeExists: localWorktreeExists,
+      });
+    }
+  }
+
+  // Dedup by state.id
+  const deduped = new Map<string, DiscoveredSprint>();
+  for (const entry of results) {
+    const id = entry.state.id!;
+    const existing = deduped.get(id);
+    if (!existing) { deduped.set(id, entry); continue; }
+    if (entry.worktreeExists && !existing.worktreeExists) { deduped.set(id, entry); continue; }
+    if (!entry.worktreeExists && existing.worktreeExists) continue;
+    const entryTs = entry.state.started_at ? new Date(entry.state.started_at).getTime() : 0;
+    const existingTs = existing.state.started_at ? new Date(existing.state.started_at).getTime() : 0;
+    if (entryTs > existingTs || (entryTs === existingTs && entry.sourcePath < existing.sourcePath)) {
+      deduped.set(id, entry);
+    }
+  }
+
+  return Array.from(deduped.values())
+    .sort((a, b) => {
+      const aTs = a.state.started_at ? new Date(a.state.started_at).getTime() : 0;
+      const bTs = b.state.started_at ? new Date(b.state.started_at).getTime() : 0;
+      if (bTs !== aTs) return bTs - aTs;
+      return String(b.state.id).localeCompare(String(a.state.id));
+    })
+    .slice(0, MAX_DISCOVERY_RESULTS);
+}
+
+// ── Cache (module-level, 5s TTL) ──
+
+let _cache: { data: DiscoveredSprint[]; upgradeNotice: string | null; ts: number; dir: string } | null = null;
+const CACHE_TTL_MS = 5_000;
+
+// ── Helpers ──
+
+function parseTime(value: unknown): number {
+  return new Date(value as string).getTime();
+}
+
+function sprintTimestamp(state: SprintState): number {
+  if (!state.started_at) return 0;
+  const started = parseTime(state.started_at);
+  if (isNaN(started)) return 0;
+  let latest = started;
+  if (Array.isArray(state.phase_history)) {
+    for (const ph of state.phase_history) {
+      latest = ph.completed_at ? Math.max(latest, parseTime(ph.completed_at)) : latest;
+      latest = ph.started_at ? Math.max(latest, parseTime(ph.started_at)) : latest;
+    }
+  }
+  return latest;
+}
+
+function isStaleSprint(state: SprintState | null): boolean {
+  if (!state?.started_at) return false;
+  const latest = sprintTimestamp(state);
+  return latest > 0 && Date.now() - latest > 3_600_000;
 }
 
 function statusSymbol(status: string | undefined, key: string, currentPhase: string | number | undefined): string {
@@ -131,8 +237,8 @@ function buildMetricsLine(metrics: SprintState["metrics"]): string | null {
 }
 
 function buildStaleWarning(state: SprintState): string | null {
-  if (!state || !state.started_at) return null
-  return isStale(state) ? "⚠ idle >1h" : null
+  if (!state?.started_at) return null
+  return isStaleSprint(state) ? "⚠ idle >1h" : null
 }
 
 function renderBuildReqs(history: SprintPhaseHistory): string[] {
@@ -178,17 +284,107 @@ function renderSprintSidebar(state: SprintState): string {
   return lines.join("\n")
 }
 
+function renderSprintTitle(state: SprintState): string {
+  if (state.task_description) return state.task_description;
+  if (state.id) {
+    // Fallback: extract date from sprint ID like "sprint-2026-06-23-01"
+    const match = state.id.match(/sprint-(\d{4}-\d{2}-\d{2})-(\d+)/);
+    if (match) return `Sprint ${match[1]} #${match[2]}`;
+    return state.id;
+  }
+  return 'Unknown Sprint';
+}
+
+function renderMultiSprintSidebar(sprints: DiscoveredSprint[]): string | null {
+  if (sprints.length === 0) return null;
+
+  const blocks: string[] = [];
+  const displayCount = Math.min(sprints.length, 3);
+
+  for (let i = 0; i < displayCount; i++) {
+    const { state } = sprints[i];
+    const title = renderSprintTitle(state);
+    const block: string[] = [`SPRINT: ${title}`];
+
+    if (state.isolation?.branch) {
+      block.push(`  ${state.isolation.branch}`);
+    }
+
+    const metricsLine = buildMetricsLine(state.metrics);
+    if (metricsLine) block.push(`  ${metricsLine}`);
+
+    const staleWarning = buildStaleWarning(state);
+    if (staleWarning) block.push(`  ${staleWarning}`);
+
+    const historyByPhase = buildPhaseLookup(state);
+    block.push(...renderPhaseLines(historyByPhase, state.phase));
+
+    blocks.push(block.join("\n"));
+  }
+
+  if (sprints.length > 3) {
+    blocks.push(`… +${sprints.length - 3} more`);
+  }
+
+  return blocks.join("\n---\n");
+}
+
+function renderContent(sprints: DiscoveredSprint[], upgradeNotice: string | null): string | null {
+  const sprintContent = renderMultiSprintSidebar(sprints)
+  if (upgradeNotice && sprintContent) return `${upgradeNotice}\n---\n${sprintContent}`
+  if (upgradeNotice) return upgradeNotice
+  return sprintContent
+}
+
+// ── Upgrade notice ──
+
+const UPGRADE_NOTICE_FILE = join(homedir(), ".xp-gate", "upgrade-notice.json")
+const UPGRADE_NOTICE_TTL_MS = 86_400_000 // 24h
+
+type UpgradeNotice = {
+  kind: string
+  localVersion: string | null
+  remoteVersion: string | null
+  message: string
+  ts: number
+}
+
+function readUpgradeNotice(): UpgradeNotice | null {
+  try {
+    if (!existsSync(UPGRADE_NOTICE_FILE)) return null
+    const raw = readFileSync(UPGRADE_NOTICE_FILE, "utf8")
+    const data = JSON.parse(raw) as UpgradeNotice
+    if (Date.now() - data.ts < UPGRADE_NOTICE_TTL_MS && data.message) return data
+    return null
+  } catch {
+    return null
+  }
+}
+
+function renderUpgradeNotice(): string | null {
+  const notice = readUpgradeNotice()
+  if (!notice) return null
+  const icon = notice.kind === "upgraded" ? "✓" : notice.kind === "outdated" ? "↑" : "⚠"
+  return `${icon} ${notice.message}`
+}
+
 // ── TUI Slot Plugin ──
 
 const tuiPlugin: TuiSlotPlugin = {
   slots: {
     sidebar_content: (_props: TuiSlotProps) => {
-      const dir = process.env.XP_GATE_PROJECT_DIR || process.cwd()
-      const state = readSprintState(dir)
-      if (!state) return null
-      const text = renderSprintSidebar(state)
-      if (!text) return null
-      return text
+      const dir = process.env.XP_GATE_PROJECT_DIR || process.cwd();
+      const now = Date.now();
+
+      // Use cache if still valid for current directory
+      if (_cache && _cache.dir === dir && now - _cache.ts < CACHE_TTL_MS) {
+        return renderContent(_cache.data, _cache.upgradeNotice);
+      }
+
+      const sprints = discoverActiveSprints(dir);
+      const upgradeNotice = renderUpgradeNotice()
+      _cache = { data: sprints, ts: now, dir, upgradeNotice };
+      return renderContent(sprints, upgradeNotice);
     },
   },
 }
