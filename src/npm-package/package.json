@@ -18,6 +18,9 @@
     "mock-policy/",
     "build-integrity/"
   ],
+  "exports": {
+    "./tui": "./plugins/opencode/tui-plugin.ts"
+  },
   "repository": {
     "type": "git",
     "url": "https://github.com/boyingliu01/xp-gate"
