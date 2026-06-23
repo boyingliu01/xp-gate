@@ -49,6 +49,138 @@ setup() {
 }
 
 # ============================================================================
+# resolve_adapter_path: flat (global) vs nested (project) layout
+# ============================================================================
+
+@test "resolve_adapter_path finds adapter in flat global layout" {
+  FAKE_GLOBAL=$(mktemp -d)
+  touch "$FAKE_GLOBAL/adapter-common.sh"
+  touch "$FAKE_GLOBAL/typescript.sh"
+  touch "$FAKE_GLOBAL/python.sh"
+
+  # Simulate global install resolution from pre-commit
+  ADAPTER_DIR="$FAKE_GLOBAL"
+  GLOBAL_ADAPTER_DIR="$FAKE_GLOBAL"
+  PROJECT_GITHOOKS="/nonexistent/githooks"
+  SCRIPT_DIR="/nonexistent/scripts"
+
+  resolve_adapter_path() {
+    local lang="$1"
+    if [ -f "$ADAPTER_DIR/${lang}.sh" ]; then
+      echo "$ADAPTER_DIR/${lang}.sh"
+      return 0
+    fi
+    if [ -f "$ADAPTER_DIR/adapters/${lang}.sh" ]; then
+      echo "$ADAPTER_DIR/adapters/${lang}.sh"
+      return 0
+    fi
+    if [ -f "$PROJECT_GITHOOKS/adapters/${lang}.sh" ]; then
+      echo "$PROJECT_GITHOOKS/adapters/${lang}.sh"
+      return 0
+    fi
+    if [ -f "$SCRIPT_DIR/adapters/${lang}.sh" ]; then
+      echo "$SCRIPT_DIR/adapters/${lang}.sh"
+      return 0
+    fi
+    return 1
+  }
+
+  result=$(resolve_adapter_path "typescript")
+  [ "$result" = "$FAKE_GLOBAL/typescript.sh" ]
+}
+
+@test "resolve_adapter_path finds adapter in nested project layout" {
+  FAKE_PROJECT=$(mktemp -d)
+  mkdir -p "$FAKE_PROJECT/adapters"
+  touch "$FAKE_PROJECT/adapter-common.sh"
+  touch "$FAKE_PROJECT/adapters/typescript.sh"
+
+  # Simulate project-local resolution (no global adapter-common.sh)
+  ADAPTER_DIR="$FAKE_PROJECT"
+  GLOBAL_ADAPTER_DIR="/nonexistent/global"
+  PROJECT_GITHOOKS="$FAKE_PROJECT"
+  SCRIPT_DIR="/nonexistent/scripts"
+
+  resolve_adapter_path() {
+    local lang="$1"
+    if [ -f "$ADAPTER_DIR/${lang}.sh" ]; then
+      echo "$ADAPTER_DIR/${lang}.sh"
+      return 0
+    fi
+    if [ -f "$ADAPTER_DIR/adapters/${lang}.sh" ]; then
+      echo "$ADAPTER_DIR/adapters/${lang}.sh"
+      return 0
+    fi
+    return 1
+  }
+
+  result=$(resolve_adapter_path "typescript")
+  [ "$result" = "$FAKE_PROJECT/adapters/typescript.sh" ]
+}
+
+@test "resolve_adapter_path returns non-zero for unknown language" {
+  FAKE_GLOBAL=$(mktemp -d)
+  touch "$FAKE_GLOBAL/adapter-common.sh"
+  ADAPTER_DIR="$FAKE_GLOBAL"
+  GLOBAL_ADAPTER_DIR="$FAKE_GLOBAL"
+  PROJECT_GITHOOKS="/nonexistent/githooks"
+  SCRIPT_DIR="/nonexistent/scripts"
+
+  resolve_adapter_path() {
+    local lang="$1"
+    if [ -f "$ADAPTER_DIR/${lang}.sh" ]; then
+      echo "$ADAPTER_DIR/${lang}.sh"
+      return 0
+    fi
+    if [ -f "$ADAPTER_DIR/adapters/${lang}.sh" ]; then
+      echo "$ADAPTER_DIR/adapters/${lang}.sh"
+      return 0
+    fi
+    return 1
+  }
+
+  run resolve_adapter_path "haskell"
+  [ "$status" -ne 0 ]
+}
+
+@test "resolve_adapter_path falls back to project-githooks when ADAPTER_DIR flat and nested both miss" {
+  FAKE_PROJECT=$(mktemp -d)
+  FAKE_GLOBAL=$(mktemp -d)
+  mkdir -p "$FAKE_PROJECT/adapters"
+  touch "$FAKE_GLOBAL/adapter-common.sh"       # triggers global ADAPTER_DIR
+  touch "$FAKE_PROJECT/adapters/rust.sh"       # only in project, not global
+
+  ADAPTER_DIR="$FAKE_GLOBAL"
+  GLOBAL_ADAPTER_DIR="$FAKE_GLOBAL"
+  PROJECT_GITHOOKS="$FAKE_PROJECT"
+  SCRIPT_DIR="/nonexistent/scripts"
+
+  resolve_adapter_path() {
+    local lang="$1"
+    if [ -f "$ADAPTER_DIR/${lang}.sh" ]; then
+      echo "$ADAPTER_DIR/${lang}.sh"
+      return 0
+    fi
+    if [ -f "$ADAPTER_DIR/adapters/${lang}.sh" ]; then
+      echo "$ADAPTER_DIR/adapters/${lang}.sh"
+      return 0
+    fi
+    if [ -f "$PROJECT_GITHOOKS/adapters/${lang}.sh" ]; then
+      echo "$PROJECT_GITHOOKS/adapters/${lang}.sh"
+      return 0
+    fi
+    if [ -f "$SCRIPT_DIR/adapters/${lang}.sh" ]; then
+      echo "$SCRIPT_DIR/adapters/${lang}.sh"
+      return 0
+    fi
+    return 1
+  }
+
+  result=$(resolve_adapter_path "rust")
+  [ "$result" = "$FAKE_PROJECT/adapters/rust.sh" ]
+}
+
+# ============================================================================
 # Issue #14: Test the actual pre-commit behavior for missing tools
 # These tests verify that the hook BLOCKS when tools are missing, not SKIPs
 # ============================================================================
