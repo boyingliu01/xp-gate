@@ -102,6 +102,15 @@ describe('doctor', () => {
     );
   }
 
+  function tuiJsonPath() {
+    return path.join(tmpHome, '.config', 'opencode', 'tui.json');
+  }
+
+  function ensureTuiRegistered() {
+    fs.mkdirSync(path.dirname(tuiJsonPath()), { recursive: true });
+    fs.writeFileSync(tuiJsonPath(), JSON.stringify({ plugin: ['@boyingliu01/opencode-plugin/tui'] }, null, 2));
+  }
+
   function setupLocalInstall() {
     createXpGatePreCommit(projectHooksDir());
     createXpGatePrePush(projectHooksDir());
@@ -183,6 +192,7 @@ describe('doctor', () => {
 
   it('AC-05: doctor reports all checks passed for healthy local install', async () => {
     setupLocalInstall();
+    ensureTuiRegistered();
     seedVersionCache();
     mockExecSuccess();
     const { doctor } = require('../doctor');
@@ -198,6 +208,7 @@ describe('doctor', () => {
 
   it('AC-05: doctor reports all checks passed for healthy global install', async () => {
     setupGlobalInstall();
+    ensureTuiRegistered();
     seedVersionCache();
     mockExecSuccess();
     const { doctor } = require('../doctor');
@@ -352,6 +363,7 @@ describe('doctor', () => {
 
   it('AC-10: doctor --fix corrects core.hooksPath in global mode', async () => {
     setupGlobalInstall();
+    ensureTuiRegistered();
     seedVersionCache();
     // Mock hooksPath pointing somewhere else
     execSpy = vi.spyOn(childProcess, 'execSync').mockImplementation((cmd) => {
@@ -455,6 +467,7 @@ describe('doctor', () => {
 
   it('passes version check when config version matches package version', async () => {
     setupLocalInstall();
+    ensureTuiRegistered();
     seedVersionCache();
     // Write config with matching version
     const pkg = JSON.parse(fs.readFileSync(
@@ -476,6 +489,7 @@ describe('doctor', () => {
 
   it('passes version check when config has no version field (legacy)', async () => {
     setupLocalInstall();
+    ensureTuiRegistered();
     seedVersionCache();
     // Config without version field — legacy install, should not fail
     mockExecSuccess();
@@ -521,6 +535,7 @@ describe('doctor', () => {
 
   it('passes templateDir check when templateDir matches current platform', async () => {
     setupLocalInstall();
+    ensureTuiRegistered();
     seedVersionCache();
     // Write config with correct qoder templateDir
     const cfg = JSON.parse(fs.readFileSync(configFile(), 'utf8'));
@@ -546,6 +561,7 @@ describe('doctor', () => {
 
   it('passes templateDir check when config has no templateDir field (legacy)', async () => {
     setupLocalInstall();
+    ensureTuiRegistered();
     seedVersionCache();
     // Config without templateDir — legacy install, should not fail
     mockExecSuccess();
@@ -563,6 +579,7 @@ describe('doctor', () => {
 
   it('AC-004-01: doctor shows upgrade prompt at end when outdated', async () => {
     setupLocalInstall();
+    ensureTuiRegistered();
     mockExecSuccess();
     // Remove version cache so checkUpgrade hits the real npm registry
     const cachePath = path.join(tmpHome, '.xp-gate', 'version-cache.json');
@@ -582,6 +599,7 @@ describe('doctor', () => {
 
   it('AC-004-02: doctor does NOT show upgrade prompt when up to date', async () => {
     setupLocalInstall();
+    ensureTuiRegistered();
     mockExecSuccess();
     // Write a cache with a future version so checkUpgrade says "not outdated"
     const cachePath = path.join(tmpHome, '.xp-gate', 'version-cache.json');
@@ -606,6 +624,7 @@ describe('doctor', () => {
 
   it('AC-004-03: doctor does NOT fail when version check throws', async () => {
     setupLocalInstall();
+    ensureTuiRegistered();
     seedVersionCache();
     mockExecSuccess();
     // Write corrupt cache to trigger checkUpgrade error path
@@ -641,5 +660,141 @@ describe('doctor', () => {
     expect(logSpy).toHaveBeenCalledWith(
       expect.stringContaining('Restored')
     );
+  });
+
+  // === Check 9: TUI auto-registration (tui.json) ===
+
+  it('Check 9: PASS when tui.json has @boyingliu01/opencode-plugin/tui registered', async () => {
+    setupLocalInstall();
+    seedVersionCache();
+    mockExecSuccess();
+    // Create tui.json with the plugin registered
+    fs.mkdirSync(path.dirname(tuiJsonPath()), { recursive: true });
+    fs.writeFileSync(tuiJsonPath(), JSON.stringify({ plugin: ['@boyingliu01/opencode-plugin/tui'] }, null, 2));
+    const { doctor } = require('../doctor');
+
+    const result = await doctor([]);
+
+    expect(result).toBe(0);
+    expect(logSpy).toHaveBeenCalledWith(
+      expect.stringContaining('@boyingliu01/opencode-plugin/tui registered')
+    );
+  });
+
+  it('Check 9: FAIL when tui.json is missing', async () => {
+    setupLocalInstall();
+    seedVersionCache();
+    mockExecSuccess();
+    // Ensure no tui.json
+    if (fs.existsSync(tuiJsonPath())) fs.unlinkSync(tuiJsonPath());
+    const { doctor } = require('../doctor');
+
+    const result = await doctor([]);
+
+    expect(result).toBe(1);
+    expect(logSpy).toHaveBeenCalledWith(
+      expect.stringContaining('TUI registration: Not registered')
+    );
+  });
+
+  it('Check 9: FAIL when tui.json exists without @boyingliu01/opencode-plugin/tui entry', async () => {
+    setupLocalInstall();
+    seedVersionCache();
+    mockExecSuccess();
+    fs.mkdirSync(path.dirname(tuiJsonPath()), { recursive: true });
+    fs.writeFileSync(tuiJsonPath(), JSON.stringify({ plugin: ['some-other-plugin'] }, null, 2));
+    const { doctor } = require('../doctor');
+
+    const result = await doctor([]);
+
+    expect(result).toBe(1);
+    expect(logSpy).toHaveBeenCalledWith(
+      expect.stringContaining('TUI registration: Not registered')
+    );
+  });
+
+  it('Check 9: WARN when tui.json exists but has no plugin array', async () => {
+    setupLocalInstall();
+    seedVersionCache();
+    mockExecSuccess();
+    fs.mkdirSync(path.dirname(tuiJsonPath()), { recursive: true });
+    fs.writeFileSync(tuiJsonPath(), JSON.stringify({ someKey: 'value' }, null, 2));
+    const { doctor } = require('../doctor');
+
+    const result = await doctor([]);
+
+    expect(result).toBe(1);
+    expect(logSpy).toHaveBeenCalledWith(
+      expect.stringContaining('TUI registration: Not registered')
+    );
+  });
+
+  it('Check 9: FAIL with backup when tui.json is corrupt JSON', async () => {
+    setupLocalInstall();
+    seedVersionCache();
+    mockExecSuccess();
+    fs.mkdirSync(path.dirname(tuiJsonPath()), { recursive: true });
+    fs.writeFileSync(tuiJsonPath(), 'this is not { valid json');
+    const { doctor } = require('../doctor');
+
+    const result = await doctor([]);
+
+    expect(result).toBe(1);
+    expect(logSpy).toHaveBeenCalledWith(
+      expect.stringContaining('TUI registration: Corrupt')
+    );
+  });
+
+  // === --fix TUI registration ===
+
+  it('--fix: diagnoses TUI not registered then re-diagnoses after fix', async () => {
+    setupLocalInstall();
+    seedVersionCache();
+    mockExecSuccess();
+    // No tui.json
+    if (fs.existsSync(path.join(tmpHome, '.config', 'opencode'))) {
+      fs.rmSync(path.join(tmpHome, '.config', 'opencode'), { recursive: true, force: true });
+    }
+    const { doctor } = require('../doctor');
+
+    const result = await doctor(['--fix']);
+
+    expect(result).toBe(0);
+    // After fix, tui.json should exist with the plugin registered
+    expect(fs.existsSync(tuiJsonPath())).toBe(true);
+    const tui = JSON.parse(fs.readFileSync(tuiJsonPath(), 'utf8'));
+    expect(tui.plugin).toContain('@boyingliu01/opencode-plugin/tui');
+  });
+
+  it('--fix: append to existing tui.json plugin array', async () => {
+    setupLocalInstall();
+    seedVersionCache();
+    mockExecSuccess();
+    fs.mkdirSync(path.dirname(tuiJsonPath()), { recursive: true });
+    fs.writeFileSync(tuiJsonPath(), JSON.stringify({ plugin: ['some-other-plugin'] }, null, 2));
+    const { doctor } = require('../doctor');
+
+    const result = await doctor(['--fix']);
+
+    expect(result).toBe(0);
+    const tui = JSON.parse(fs.readFileSync(tuiJsonPath(), 'utf8'));
+    expect(tui.plugin).toContain('some-other-plugin');
+    expect(tui.plugin).toContain('@boyingliu01/opencode-plugin/tui');
+  });
+
+  it('--fix: idempotent — does not duplicate entry when already registered', async () => {
+    setupLocalInstall();
+    seedVersionCache();
+    mockExecSuccess();
+    fs.mkdirSync(path.dirname(tuiJsonPath()), { recursive: true });
+    fs.writeFileSync(tuiJsonPath(), JSON.stringify({ plugin: ['@boyingliu01/opencode-plugin/tui'] }, null, 2));
+    const { doctor } = require('../doctor');
+
+    const result = await doctor(['--fix']);
+
+    expect(result).toBe(0);
+    const tui = JSON.parse(fs.readFileSync(tuiJsonPath(), 'utf8'));
+    // Should still have exactly one entry
+    expect(tui.plugin.filter(p => p === '@boyingliu01/opencode-plugin/tui').length).toBe(1);
   });
 });

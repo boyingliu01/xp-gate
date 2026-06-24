@@ -117,6 +117,10 @@ XP-Gate 同时支持 **Claude Code** 和 **OpenCode** 插件分发：
 // opencode.json
 { "plugin": ["@boyingliu01/opencode-plugin"] }
 ```
+> 单次注册即可获得三大功能：AI 对话内的质量工具 + 右侧面板 Sprint Flow 进度 + 自动升级通知。
+>
+> `xp-gate init` 会自动创建 TUI 面板注册（`~/.config/opencode/tui.json`），无需手动配置。
+> 如果面板未显示，运行 `xp-gate doctor --fix` 即可自动修复。
 
 **Claude Code 插件**：
 ```bash

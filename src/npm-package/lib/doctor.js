@@ -229,6 +229,9 @@ function diagnose() {
   // --- Check 6: Environment dependencies ---
   checkEnv(checks);
 
+  // --- Check 7: TUI auto-registration ---
+  issues += diagnoseTuiRegistration(checks);
+
   return { checks, issues };
 }
 
@@ -438,6 +441,7 @@ function fixIssues(checks, config) {
   fixed = fixHooksByMode(config, srcDir) || fixed;
   fixed = fixGlobalHooksPath(config) || fixed;
   fixed = fixMissingAdapters(config.mode, srcDir, getAdaptersDirByMode(config)) || fixed;
+  fixed = fixTuiRegistration() || fixed;
 
   if (!fixed) {
     console.log('  No fixable issues found.');
@@ -499,6 +503,124 @@ function diagnoseOpenCodePlugin(checks) {
   return 0;
 }
 
+/**
+ * TUI registration path and expected plugin entry.
+ */
+const TUI_JSON_PATH = path.join(HOME_DIR, '.config', 'opencode', 'tui.json');
+const TUI_PLUGIN_ENTRY = '@boyingliu01/opencode-plugin/tui';
+
+/**
+ * Read and parse tui.json, returning { data, error }.
+ * data = parsed object on success, null on file missing, undefined on corrupt.
+ */
+function readTuiJson() {
+  if (!fs.existsSync(TUI_JSON_PATH)) return { data: null, error: null };
+  try {
+    const raw = fs.readFileSync(TUI_JSON_PATH, 'utf8');
+    const data = JSON.parse(raw);
+    return { data, error: null };
+  } catch (e) {
+    return { data: undefined, error: `Corrupt JSON: ${e.message}` };
+  }
+}
+
+/**
+ * Check 9: TUI auto-registration in ~/.config/opencode/tui.json.
+ * @returns {number} issue count
+ */
+function diagnoseTuiRegistration(checks) {
+  const { data, error } = readTuiJson();
+
+  if (error) {
+    checks.push({ name: 'TUI registration', status: 'FAIL', detail: error });
+    return 1;
+  }
+
+  if (data === null) {
+    checks.push({ name: 'TUI registration', status: 'FAIL', detail: 'Not registered' });
+    return 1;
+  }
+
+  const plugins = Array.isArray(data.plugin) ? data.plugin : [];
+  if (plugins.includes(TUI_PLUGIN_ENTRY)) {
+    checks.push({ name: 'TUI registration', status: 'PASS', detail: `${TUI_PLUGIN_ENTRY} registered` });
+    return 0;
+  }
+
+  checks.push({ name: 'TUI registration', status: 'FAIL', detail: 'Not registered' });
+  return 1;
+}
+
+/**
+ * Fix TUI registration: ensure @boyingliu01/opencode-plugin/tui is in tui.json.
+ * Uses atomic write (tmp + renameSync) for JSON safety.
+ * On corrupt JSON: backup to .corrupt-{timestamp}.bak then rebuild.
+ * Idempotent: skips if already registered.
+ * @returns {boolean} Whether a fix was applied
+ */
+function fixTuiRegistration() {
+  const { data, error } = readTuiJson();
+
+  // Corrupt JSON: backup old file, rebuild from scratch
+  if (error && data === undefined) {
+    const ts = Date.now();
+    const backupPath = `${TUI_JSON_PATH}.corrupt-${ts}.bak`;
+    try {
+      fs.copyFileSync(TUI_JSON_PATH, backupPath);
+      console.log(`  ⚠ TUI config corrupted — backed up to ${backupPath}`);
+    } catch { /* non-critical */ }
+    // Rebuild fresh
+    const dir = path.dirname(TUI_JSON_PATH);
+    fs.mkdirSync(dir, { recursive: true });
+    const newConfig = { plugin: [TUI_PLUGIN_ENTRY] };
+    const tmpPath = `${TUI_JSON_PATH}.tmp`;
+    fs.writeFileSync(tmpPath, JSON.stringify(newConfig, null, 2));
+    fs.renameSync(tmpPath, TUI_JSON_PATH);
+    console.log(`  ✓ Registered ${TUI_PLUGIN_ENTRY} in TUI (rebuilt after corrupt backup)`);
+    return true;
+  }
+
+  // File doesn't exist: create it
+  if (data === null) {
+    const dir = path.dirname(TUI_JSON_PATH);
+    fs.mkdirSync(dir, { recursive: true });
+    const newConfig = { plugin: [TUI_PLUGIN_ENTRY] };
+    const tmpPath = `${TUI_JSON_PATH}.tmp`;
+    fs.writeFileSync(tmpPath, JSON.stringify(newConfig, null, 2));
+    fs.renameSync(tmpPath, TUI_JSON_PATH);
+    console.log(`  ✓ Created TUI config with ${TUI_PLUGIN_ENTRY}`);
+    return true;
+  }
+
+  // File exists, check if plugin already registered (idempotent)
+  const plugins = Array.isArray(data.plugin) ? data.plugin : [];
+  if (plugins.includes(TUI_PLUGIN_ENTRY)) return false;
+
+  // Append plugin entry
+  data.plugin = plugins.concat([TUI_PLUGIN_ENTRY]);
+  const tmpPath = `${TUI_JSON_PATH}.tmp`;
+  fs.writeFileSync(tmpPath, JSON.stringify(data, null, 2));
+  fs.renameSync(tmpPath, TUI_JSON_PATH);
+  console.log(`  ✓ Added ${TUI_PLUGIN_ENTRY} to TUI config`);
+  return true;
+}
+
+/**
+ * Wrapper for init.js: ensure TUI is registered without console output.
+ * Returns true if the plugin is already registered or was just added.
+ */
+function ensureTuiRegistration() {
+  const { data } = readTuiJson();
+  if (data === null || data === undefined) {
+    fixTuiRegistration();
+    return;
+  }
+  const plugins = Array.isArray(data.plugin) ? data.plugin : [];
+  if (!plugins.includes(TUI_PLUGIN_ENTRY)) {
+    fixTuiRegistration();
+  }
+}
+
 async function doctor(args) {
   const fixMode = args.includes('--fix');
 
@@ -551,4 +673,8 @@ module.exports = {
   fixMissingHooks,
   fixCoreHooksPath,
   fixMissingAdapters,
+  diagnoseTuiRegistration,
+  fixTuiRegistration,
+  ensureTuiRegistration,
+  readTuiJson,
 };

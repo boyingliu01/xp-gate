@@ -340,6 +340,12 @@ async function installLocal(args) {
   injectKarpathyPrinciples(projectRoot);
   configureOpenCodePlugin(srcDir, projectRoot);
 
+  // Auto-register TUI plugin globally (idempotent)
+  try {
+    const { ensureTuiRegistration } = require('../lib/doctor.js');
+    ensureTuiRegistration();
+  } catch { /* non-critical: TUI registration is best-effort */ }
+
   console.log('\nInstallation complete!');
   console.log('Run git commit to trigger quality gates');
   return 0;
@@ -389,6 +395,12 @@ async function setupGlobal(args) {
 
   const manifest = generateGlobalManifest(srcDir);
   updateConfig({ lastInit: new Date().toISOString(), mode: 'global', templateDir: TEMPLATE_DIR, manifest });
+
+  // Auto-register TUI plugin globally (idempotent)
+  try {
+    const { ensureTuiRegistration } = require('../lib/doctor.js');
+    ensureTuiRegistration();
+  } catch { /* non-critical: TUI registration is best-effort */ }
 
   console.log('\nGlobal setup complete!');
   console.log('All git repositories will now use xp-gate quality gates.');
