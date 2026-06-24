@@ -1,9 +1,9 @@
 # DOCUMENTATION KNOWLEDGE BASE
 
-**Generated:** 2026-06-23
-**Commit:** bac916f
+**Generated:** 2026-06-24
+**Commit:** f8338d6
 **Branch:** main
-**Version:** 0.10.11.0
+**Version:** 0.10.12.0
 
 ## OVERVIEW
 Reference guides, design history, postmortems, and weekly retros. **30+ chronologically-archived design plans** under `plans/`. Plan docs follow `YYYY-MM-DD-topic.md` and each typically corresponds to a Delphi consensus report or implementation plan.
