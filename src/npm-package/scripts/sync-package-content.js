@@ -93,19 +93,69 @@ function injectCanonicalSkills(pluginDest) {
 }
 
 /**
+ * Validate tui-plugin.ts structural integrity before publish.
+ * Rejects packages that ship broken plugin files (e.g. stale cache with
+ * old import paths that cannot resolve in the installed location).
+ */
+function validateTuiPlugin(srcPluginDir) {
+  const tuiFile = path.join(srcPluginDir, 'tui-plugin.ts');
+  if (!fs.existsSync(tuiFile)) {
+    console.error('[validate-tui] ERROR: tui-plugin.ts not found at', tuiFile);
+    process.exit(1);
+  }
+
+  const content = fs.readFileSync(tuiFile, 'utf8');
+
+  // Check 1: Must contain worktree-aware discovery (new version signature).
+  // Old versions (≤0.9.5) read .sprint-state/ from cwd only; new versions
+  // scan .worktrees/sprint/ subdirectories for multi-worktree discovery.
+  if (!content.includes('discoverActiveSprints') || !content.includes('.worktrees')) {
+    console.error(
+      '[validate-tui] ERROR: tui-plugin.ts is missing discoverActiveSprints or .worktrees reference.\n' +
+      '  This means the file is an old version (<v0.10.0) that cannot discover sprint states.\n' +
+      '  Fix: update plugins/opencode/tui-plugin.ts to the latest version with worktree scanning.'
+    );
+    process.exit(1);
+  }
+
+  // Check 2: Must NOT contain broken repo-relative import paths.
+  // The published package lives under node_modules/; paths like
+  // ../../src/npm-package/lib/... will never resolve at install time.
+  const brokenImport = content.match(/from\s+["'][^"']*\.\.\/\.\.\/src[^"']*["']/g);
+  if (brokenImport) {
+    console.error(
+      '[validate-tui] ERROR: tui-plugin.ts contains broken import path(s):'
+    );
+    brokenImport.forEach((m) => console.error('  ' + m));
+    console.error(
+      '  These paths cannot resolve when the package is installed under node_modules/.\n' +
+      '  Fix: inline the referenced constants directly in tui-plugin.ts.'
+    );
+    process.exit(1);
+  }
+
+  console.error('[validate-tui] OK: tui-plugin.ts passes structural checks');
+}
+
+/**
  * Rewrite import paths in tui-plugin.ts after copy.
  * Source uses repo-root relative paths (../../src/npm-package/lib/...);
  * the published copy lives inside the npm package so needs shorter paths.
+ *
+ * @deprecated v0.10.13+: tui-plugin.ts no longer imports from shared-phase-constants.
+ *   Kept as a no-op safety net in case old import paths reappear.
  */
 function rewriteTuiPluginImports(destPluginDir) {
   const tuiFile = path.join(destPluginDir, 'tui-plugin.ts');
   if (!fs.existsSync(tuiFile)) return;
   let content = fs.readFileSync(tuiFile, 'utf8');
-  content = content.replace(
-    /from\s+["']\.\.\/\.\.\/src\/npm-package\/lib\/shared-phase-constants["']/g,
-    'from "../../lib/shared-phase-constants"'
-  );
-  fs.writeFileSync(tuiFile, content, 'utf8');
+  if (content.includes('../../src/npm-package/lib/shared-phase-constants')) {
+    console.error(
+      '[sync] WARN: tui-plugin.ts still references shared-phase-constants via broken path.\n' +
+      '  Consider inlining the constants so the package can resolve at install time.'
+    );
+  }
+  // No rewrite needed for v0.10.13+; the import was removed.
 }
 
 function syncPlugins() {
@@ -313,6 +363,10 @@ console.error(`[sync] done: ${skills} skill(s), ${plugins} plugin(s), ${adapters
     console.error(`[sync] ERROR: expected ${PLUGINS.length} plugins, copied ${plugins}`);
     process.exit(1);
   }
+
+  // Validate tui-plugin.ts structural integrity before publish
+  const opencodePluginDir = path.join(PKG_ROOT, 'plugins', 'opencode');
+  validateTuiPlugin(opencodePluginDir);
 }
 
 if (require.main !== module) {
