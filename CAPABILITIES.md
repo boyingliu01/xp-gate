@@ -444,3 +444,19 @@ src/auth/**
 - [mutmut 官方文档](https://mutmut.readthedocs.io/)
 - [Gate M TypeScript 实现](src/mutation/gate-m.ts)
 - [Python Gate M 实现](src/mutation/gate-m-python.ts)
+
+## 11. OpenCode 插件诊断能力
+
+`xp-gate doctor` 提供 9 项安装健康检查（Check 0-9），其中 Check 8 检查插件版本一致性，Check 9（新增于 v0.10.13）检查 TUI 面板注册状态。
+
+### Check 9: TUI 面板注册
+
+OpenCode 右侧面板在 Sprint Flow 运行时显示迭代阶段的进度条、当前 REQ 完成数和跳过的阶段。面板由 TUI 插件提供（`@boyingliu01/opencode-plugin/tui`），需要注册到 `~/.config/opencode/tui.json`。
+
+- **自动注册**：`xp-gate init` 自动创建 `tui.json` 并注册
+- **故障修复**：`xp-gate doctor --fix` 自动检测并修复缺失/损坏的 TUI 注册
+- **损坏 JSON 保护**：后退到 `.corrupt-{timestamp}.bak` 备份，原子写入（`tmp + renameSync`）
+
+### 升级通知
+
+`@boyingliu01/opencode-plugin` 在用户发送第一条消息时自动检查版本更新。如果发现新版本，自动执行 `npm install -g`，并在 TUI 面板顶部展示升级通知横幅。
