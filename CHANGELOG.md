@@ -2,6 +2,22 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.10.13] - 2026-06-24
+
+### Fixed
+
+- **Auto-upgrade notification visibility (#212, #216)** — Upgrade results were written only to `stderr`, invisible to OpenCode users. Upgrade notice is now displayed as a banner in the TUI sidebar panel, with `stderr` retained as a fallback for npm-only users without TUI registration.
+
+- **Sprint Flow TUI panel auto-registration (#214, #240)** — The TUI sidebar panel required separate registration in `~/.config/opencode/tui.json`, but documentation never mentioned this. Now `xp-gate init` auto-creates the TUI config, and `xp-gate doctor --fix` (new Check 9) repairs missing/corrupt registrations.
+
+- **Early-phase placeholder rendering (#247)** — When Sprint Flow is starting but no sprint data exists yet, the panel now shows "初始化中..." (`.sprint-state/` detected) or "准备中..." (`.worktrees/` detected) instead of a blank panel.
+
+- **Corrupt JSON resilience** — `doctor --fix` now backs up corrupt `tui.json` as `.corrupt-{timestamp}.bak` and rebuilds from scratch. Atomic writes via `renameSync` prevent partial-file reads.
+
+### Added
+
+- **doctor Check 9: TUI registration** — Detects missing/corrupt `~/.config/opencode/tui.json` and auto-repairs via `--fix`.
+
 ## [0.10.8] - 2026-06-23
 
 ### Fixed
