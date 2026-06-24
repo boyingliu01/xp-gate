@@ -13,7 +13,6 @@ import { describe, it, before, after } from "node:test"
 import assert from "node:assert/strict"
 import { randomUUID } from "node:crypto"
 import { mkdirSync, writeFileSync, rmSync } from "node:fs"
-import { join } from "node:path"
 import { tmpdir } from "node:os"
 
 // Import the functions under test
@@ -419,5 +418,126 @@ void describe("multi-sprint rendering", () => {
     }
     const output = buildMultiSprintBlock(sprint, 0)
     assert.ok(output.includes("Minimal sprint"))
+  })
+})
+
+// ── Early-phase placeholder rendering ──
+
+/**
+ * Renders panel content with early-phase placeholder fallback.
+ * Mirrors the planned renderContent(dir, sprints, upgradeNotice) from tui-plugin.ts.
+ * Expected to be the actual implementation after TDD cycle.
+ */
+import { existsSync } from "node:fs"
+import { dirname, resolve, parse, join } from "node:path"
+
+function findGitRoot(startDir: string): string | null {
+  let current = resolve(startDir);
+  const root = parse(current).root;
+  const seen = new Set<string>();
+  while (current !== root) {
+    if (seen.has(current)) break;
+    seen.add(current);
+    if (existsSync(join(current, '.git'))) return current;
+    const parent = dirname(current);
+    if (parent === current) break;
+    current = parent;
+  }
+  if (existsSync(join(root, '.git'))) return root;
+  return null;
+}
+
+function renderContentWithPlaceholder(
+  dir: string,
+  sprints: { state: Record<string, unknown>; sourcePath: string; worktreeExists: boolean }[],
+  upgradeNotice: string | null,
+): string | null {
+  if (sprints.length > 0) {
+    return upgradeNotice || null
+  }
+
+  const hasStateDir = existsSync(join(dir, ".sprint-state"))
+  const gitRoot = findGitRoot(dir)
+  const hasWorktreesRoot = gitRoot ? existsSync(join(gitRoot, ".worktrees")) : false
+
+  if (hasStateDir) {
+    const placeholder = "SPRINT FLOW\n  → 初始化中..."
+    return [upgradeNotice, placeholder].filter(Boolean).join("\n---\n")
+  }
+
+  if (hasWorktreesRoot) {
+    const placeholder = "SPRINT FLOW\n  · 准备中..."
+    return [upgradeNotice, placeholder].filter(Boolean).join("\n---\n")
+  }
+
+  return upgradeNotice || null
+}
+
+void describe("early-phase placeholder rendering", () => {
+  const tmpDir = join(tmpdir(), "xp-gate-tui-placeholder-" + randomUUID())
+
+  before(() => {
+    mkdirSync(tmpDir, { recursive: true })
+  })
+
+  after(() => {
+    rmSync(tmpDir, { recursive: true, force: true })
+  })
+
+  void it("returns null when no sprints and no .sprint-state/ directory and no .worktrees/", () => {
+    const result = renderContentWithPlaceholder(tmpDir, [], null)
+    assert.equal(result, null, "Should return null when nothing exists")
+  })
+
+  void it("returns '初始化中...' placeholder when .sprint-state/ directory exists but no sprint data", () => {
+    mkdirSync(join(tmpDir, ".sprint-state"), { recursive: true })
+    const result = renderContentWithPlaceholder(tmpDir, [], null)
+    assert.ok(result !== null, "Should return a placeholder string")
+    assert.ok(result!.includes("SPRINT FLOW"), "Should include SPRINT FLOW header")
+    assert.ok(result!.includes("初始化中"), "Should include 初始化中...")
+  })
+
+  void it("returns '准备中...' placeholder when .worktrees/ directory exists but no sprint data", () => {
+    // Must create .git/ dir for findGitRoot() to succeed
+    // Note: test 2 (above) may have created .sprint-state/ — clean it first
+    rmSync(join(tmpDir, ".sprint-state"), { recursive: true, force: true })
+    mkdirSync(join(tmpDir, ".git"), { recursive: true })
+    mkdirSync(join(tmpDir, ".worktrees"), { recursive: true })
+
+    const result = renderContentWithPlaceholder(tmpDir, [], null)
+    assert.ok(result !== null, "Should return a placeholder string")
+    assert.ok(result!.includes("SPRINT FLOW"), "Should include SPRINT FLOW header")
+    assert.ok(result!.includes("准备中"), "Should include 准备中...")
+  })
+
+  void it("prefers .sprint-state/ placeholder over .worktrees/ when both exist", () => {
+    mkdirSync(join(tmpDir, ".sprint-state"), { recursive: true })
+    const result = renderContentWithPlaceholder(tmpDir, [], null)
+    assert.ok(result!.includes("初始化中"), "Should prefer 初始化中 when .sprint-state/ exists")
+    assert.ok(!result!.includes("准备中"), "Should NOT show 准备中 when .sprint-state/ exists")
+  })
+
+  void it("includes upgrade notice banner above placeholder when both present", () => {
+    const notice = "✓ Auto-upgraded from v0.10.12 to v0.10.13"
+    const result = renderContentWithPlaceholder(tmpDir, [], notice)
+    assert.ok(result !== null)
+    assert.ok(result!.includes("Auto-upgraded"), "Should include upgrade notice")
+    assert.ok(result!.includes("SPRINT FLOW"), "Should include placeholder below notice")
+    // Upgrade notice should appear before SPRINT FLOW
+    const noticePos = result!.indexOf("Auto-upgraded")
+    const sprintPos = result!.indexOf("SPRINT FLOW")
+    assert.ok(noticePos < sprintPos, "Upgrade notice should come before SPRINT FLOW")
+  })
+
+  void it("shows upgrade notice only when no sprints and no placeholder dirs", () => {
+    // Reset — remove .sprint-state/ and .worktrees/
+    rmSync(join(tmpDir, ".sprint-state"), { recursive: true, force: true })
+    rmSync(join(tmpDir, ".worktrees"), { recursive: true, force: true })
+
+    const notice = "↑ New version v1.0.0 available"
+    const result = renderContentWithPlaceholder(tmpDir, [], notice)
+    assert.ok(result !== null, "Should return upgrade notice even without sprint dirs")
+    assert.ok(result!.includes("New version"), "Should include upgrade notice text")
+    assert.ok(!result!.includes("SPRINT FLOW"), "Should NOT show placeholder when nothing exists")
   })
 })

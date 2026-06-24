@@ -322,6 +322,8 @@ export const XpGatePlugin = async (input: OpenCodePluginInput) => {
       if (!checked) {
         checked = true
         const msg = await runBackgroundUpdates(directory).catch(() => null)
+        // Primary notification: upgrade-notice.json → TUI sidebar banner
+        // Fallback: stderr for users without TUI panel registered
         if (msg) process.stderr.write(`${msg}\n`)
       }
     },

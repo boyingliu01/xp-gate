@@ -1,9 +1,9 @@
 # SKILLS/SPRINT-FLOW KNOWLEDGE BASE
 
-**Generated:** 2026-06-23
-**Commit:** bac916f
+**Generated:** 2026-06-24
+**Commit:** 2eccd90
 **Branch:** main
-**Version:** 0.10.11.0
+**Version:** 0.10.12.0
 
 ## OVERVIEW
 **11-phase** development pipeline: ISOLATE → AUTO-ESTIMATE → THINK → PLAN → BUILD → REVIEW → USER ACCEPTANCE → FEEDBACK → SHIP → LAND → CLEANUP. Phase 2 default build mode is **ralph-loop** (REQ-level iteration, 40-67% token savings vs parallel). HARD-GATE in Phase 1: design must pass Delphi review (≥90% consensus) before any coding.

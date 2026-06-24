@@ -1,9 +1,9 @@
 # SRC/NPM-PACKAGE KNOWLEDGE BASE
 
-**Generated:** 2026-06-23
-**Commit:** bac916f
+**Generated:** 2026-06-24
+**Commit:** 2eccd90
 **Branch:** main
-**Version:** 0.10.11.0
+**Version:** 0.10.12.0
 
 ## OVERVIEW
 npm distribution package — zero-install CLI for xp-gate. Published as `@boyingliu01/xp-gate` on the public npm registry. Bundles hooks + 13 language adapters + 8 skills + 3 platform plugins at `prepack` time. Registers **≥15 CLI subcommands** (was ≥11 before 0.8.9; `check`/`principles`/`arch` added for OpenCode-plugin parity, fixes #208).
@@ -66,7 +66,7 @@ src/npm-package/
 | `xp-gate init` | Install hooks + adapter infrastructure into current project |
 | `xp-gate setup-global` | Install adapters globally under `~/.config/xp-gate/` |
 | `xp-gate uninstall` | Reverse of `init`; supports `--dry-run --force --local --global` |
-| `xp-gate doctor [--fix]` | Diagnose hook/adapter/env health |
+| `xp-gate doctor [--fix]` | Diagnose hook/adapter/env health; **Check 9: OpenCode TUI panel registration** |
 | `xp-gate migrate` | Clean v0.4.x GitHub-Packages residue from `~/.npmrc` |
 | `xp-gate baseline <create\|show\|reset\|diff>` | Manage lint baseline (Boy Scout track) |
 | `xp-gate install-skill <name>` | Download + install a skill from GitHub |

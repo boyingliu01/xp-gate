@@ -329,11 +329,29 @@ function renderMultiSprintSidebar(sprints: DiscoveredSprint[]): string | null {
   return blocks.join("\n---\n");
 }
 
-function renderContent(sprints: DiscoveredSprint[], upgradeNotice: string | null): string | null {
+function renderContent(sprints: DiscoveredSprint[], upgradeNotice: string | null, dir: string): string | null {
   const sprintContent = renderMultiSprintSidebar(sprints)
-  if (upgradeNotice && sprintContent) return `${upgradeNotice}\n---\n${sprintContent}`
-  if (upgradeNotice) return upgradeNotice
-  return sprintContent
+
+  if (sprintContent) {
+    return [upgradeNotice, sprintContent].filter(Boolean).join("\n---\n")
+  }
+
+  // Early-phase placeholders: when no sprint data yet, check for directory hints
+  const hasStateDir = existsSync(join(dir, ".sprint-state"))
+  const gitRoot = findGitRoot(dir)
+  const hasWorktreesRoot = gitRoot ? existsSync(join(gitRoot, ".worktrees")) : false
+
+  if (hasStateDir) {
+    const placeholder = "SPRINT FLOW\n  → 初始化中..."
+    return [upgradeNotice, placeholder].filter(Boolean).join("\n---\n")
+  }
+
+  if (hasWorktreesRoot) {
+    const placeholder = "SPRINT FLOW\n  · 准备中..."
+    return [upgradeNotice, placeholder].filter(Boolean).join("\n---\n")
+  }
+
+  return upgradeNotice || null
 }
 
 // ── Upgrade notice ──
@@ -376,15 +394,14 @@ const tuiPlugin: TuiSlotPlugin = {
       const dir = process.env.XP_GATE_PROJECT_DIR || process.cwd();
       const now = Date.now();
 
-      // Use cache if still valid for current directory
       if (_cache && _cache.dir === dir && now - _cache.ts < CACHE_TTL_MS) {
-        return renderContent(_cache.data, _cache.upgradeNotice);
+        return renderContent(_cache.data, _cache.upgradeNotice, dir);
       }
 
       const sprints = discoverActiveSprints(dir);
       const upgradeNotice = renderUpgradeNotice()
       _cache = { data: sprints, ts: now, dir, upgradeNotice };
-      return renderContent(sprints, upgradeNotice);
+      return renderContent(sprints, upgradeNotice, dir);
     },
   },
 }
