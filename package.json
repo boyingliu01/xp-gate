@@ -1,6 +1,6 @@
 {
   "name": "xp-gate",
-  "version": "0.10.13.0",
+  "version": "0.10.14.0",
   "description": "XP-Gate - Quality Gate & AI Review for Every Commit",
   "type": "module",
   "engines": {
@@ -28,6 +28,7 @@
   },
   "dependencies": {
     "@ast-grep/cli": "^0.36.2",
+    "@boyingliu01/opencode-plugin": "^0.10.13",
     "@types/js-yaml": "^4.0.9",
     "js-yaml": "^4.2.0",
     "zod": "^4.4.3"
