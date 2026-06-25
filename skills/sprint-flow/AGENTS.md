@@ -1,12 +1,12 @@
 # SKILLS/SPRINT-FLOW KNOWLEDGE BASE
 
 **Generated:** 2026-06-25
-**Commit:** ecb955b
-**Branch:** main
+**Commit:** 10a9bd1
+**Branch:** sprint/2026-06-25-04
 **Version:** 0.10.15.0
 
 ## OVERVIEW
-**11-phase** development pipeline: ISOLATE → AUTO-ESTIMATE → THINK → PLAN → BUILD → REVIEW → USER ACCEPTANCE → FEEDBACK → SHIP → LAND → CLEANUP. Phase 2 default build mode is **ralph-loop** (REQ-level iteration, 40-67% token savings vs parallel). HARD-GATE in Phase 1: design must pass Delphi review (≥90% consensus) before any coding.
+**11-phase** development pipeline: ISOLATE → AUTO-ESTIMATE → THINK → PLAN → BUILD → REVIEW → SHIP → LAND → USER ACCEPTANCE → FEEDBACK → CLEANUP. Phase 2 default build mode is **ralph-loop** (REQ-level iteration, 40-67% token savings vs parallel). HARD-GATE in Phase 1: design must pass Delphi review (≥90% consensus) before any coding.
 
 > **Doc drift**: README/CAPABILITIES still describe a "7-phase" pipeline. The canonical 11-phase model lives in `SKILL.md` and is what actually executes. See root `AGENTS.md` → "Known Drift" #4.
 
@@ -61,10 +61,10 @@ skills/sprint-flow/
 | 1 | PLAN | autoplan → delphi-review → specification.yaml | **HARD-GATE**: design must reach ≥90% Delphi consensus |
 | 2 | BUILD | ralph-loop (REQ-level, default) + TDD + test-spec-alignment | — |
 | 3 | REVIEW | code-walkthrough + QA + benchmark | — |
-| 4 | USER ACCEPTANCE | Manual verification | — |
-| 5 | FEEDBACK | retro + debugging + `learn` (Sprint-level) | — |
-| 6 | SHIP | finishing-a-development-branch → PR | — |
-| 7 | LAND | land + deploy + canary | — |
+| 4 | SHIP | finishing-a-development-branch → PR | — |
+| 5 | LAND | land + deploy staging + canary | — |
+| 6 | USER ACCEPTANCE | Manual verification on staging | — |
+| 7 | FEEDBACK | retro + debugging + `learn` (Sprint-level) | — |
 | 8 | CLEANUP | Sprint branch cleanup (per `docs/plans/2026-06-06-sprint-branch-cleanup-design.md`) | — |
 
 ## CONVENTIONS
@@ -72,7 +72,7 @@ skills/sprint-flow/
 - **delphi-review HARD-GATE in Phase 1**: design must reach ≥90% consensus across ≥2 model providers, domestic models only. Unapproved → BLOCK coding.
 - **`learn` is called twice**: once per REQ in Phase 2 (ralph-loop internal, `progress.log` permanent/contextual classification) and once in Phase 5 (Sprint-level retro).
 - **Phase isolation**: each phase has explicit entry/exit criteria documented in its `references/phase-*.md` file.
-- **Emergent Requirements** discovered in Phase 4 (USER ACCEPTANCE) are explicitly captured via `templates/emergent-issues-template.md` — never silently merged.
+- **Emergent Requirements** discovered in Phase 6 (USER ACCEPTANCE) are explicitly captured via `templates/emergent-issues-template.md` — never silently merged.
 - **Auto-detection**: Phase 0 uses `src/npm-package/lib/ui-detector.ts` to pick the right tech-stack templates.
 
 ## ANTI-PATTERNS (THIS PROJECT)
