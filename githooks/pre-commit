@@ -678,6 +678,20 @@ if [ "$PROJECT_LANG" = "documentation-only" ]; then
         fi
       fi
     fi
+
+    # ── Biome config detection ──
+    if ! [ -f "biome.json" ] && ! [ -f "biome.jsonc" ]; then
+      if [ -f "package.json" ] && command -v node &> /dev/null; then
+        HAS_BIOME=$(node -e "try{const p=JSON.parse(require('fs').readFileSync('package.json','utf8'));const d=p.devDependencies||{};const deps=p.dependencies||{};console.log((d['@biomejs/biome']||deps['@biomejs/biome'])?'yes':'no')}catch{console.log('no')}") && true
+        if [ "$HAS_BIOME" = "yes" ]; then
+          echo ""
+          echo "⚠️  WARNING: @biomejs/biome is installed in package.json but no biome.json found"
+          echo "   Create a biome.json configuration file to enable Biome linting."
+          echo "   NOTE: useLiteralKeys conflicts with TypeScript TS4111 — see docs/biome-configuration.md"
+          echo "   For quick setup: add '\"linter\":{\"rules\":{\"complexity\":{\"useLiteralKeys\":\"off\"}}}' to biome.json"
+        fi
+      fi
+    fi
   fi
 
 elif [ "$PROJECT_LANG" = "python" ]; then
