@@ -19,8 +19,8 @@
       "types": "./index.ts"
     },
     "./tui": {
-      "import": "./tui-plugin.ts",
-      "types": "./tui-plugin.ts"
+      "import": "./tui-plugin.tsx",
+      "types": "./tui-plugin.tsx"
     }
   },
   "files": [
