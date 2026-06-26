@@ -15,6 +15,60 @@ echo "━━━━━━━━━━━━━━━━━━━━━━━━�
 CURRENT_BRANCH=$(git rev-parse --abbrev-ref HEAD)
 REMOTE="$1"
 URL="$2"
+_PRE_PUSH_REPORT_DONE=0
+
+write_pre_push_report() {
+  local exit_code="$1"
+  local timestamp report_ts reports_dir report_file commit_hash verdict
+  timestamp=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
+  report_ts=$(date -u +"%Y-%m-%d-%H%M%S")
+  reports_dir=".xp-gate/reports/pre-push"
+  report_file="${reports_dir}/${report_ts}.json"
+  commit_hash=$(git rev-parse HEAD 2>/dev/null || echo "unknown")
+  verdict=$([ "$exit_code" -eq 0 ] && echo "PASS" || echo "BLOCKED")
+  mkdir -p "$reports_dir"
+  python3 - <<PY 2>/dev/null || true
+import json
+from pathlib import Path
+pushed_files = '''${PUSHED_FILES:-}'''.splitlines()
+report = {
+  'timestamp': '$timestamp',
+  'trigger': 'pre-push',
+  'branch': '$CURRENT_BRANCH',
+  'commit': '$commit_hash',
+  'changed_files': [f for f in pushed_files if f],
+  'overall': {
+    'score': '10.0/10' if '$verdict' == 'PASS' else '0.0/10',
+    'gates_passed': 1 if '$verdict' == 'PASS' else 0,
+    'gates_total': 1,
+    'verdict': '$verdict',
+  },
+  'gates': [
+    {'id': '10', 'name': 'Build Integrity', 'status': '${GATE_10_STATUS:-SKIP}', 'details': {}},
+    {'id': 'M', 'name': 'Mutation Testing', 'status': '${GATE_M_STATUS:-SKIP}', 'details': {}},
+    {'id': 'M-Python', 'name': 'Mutation Testing (Python)', 'status': '${GATE_M_PYTHON_STATUS:-SKIP}', 'details': {}},
+    {'id': 'M2', 'name': 'Mock Density', 'status': '${GATE_M2_STATUS:-SKIP}', 'details': {}},
+    {'id': 'M3', 'name': 'Mock Layering', 'status': '${GATE_M3_STATUS:-SKIP}', 'details': {}},
+    {'id': 'UI', 'name': 'UI Sprint Gates', 'status': '${GATE_UI_STATUS:-SKIP}', 'details': {}},
+    {'id': 'Delphi', 'name': 'Code Walkthrough', 'status': '${GATE_DELPHI_STATUS:-SKIP}', 'details': {'remote': '$REMOTE', 'url': '$URL'}}
+  ],
+  'warnings': [],
+  'errors': [] if '$verdict' == 'PASS' else ['pre-push hook exited with code $exit_code'],
+}
+Path('$report_file').write_text(json.dumps(report, indent=2) + '\n')
+PY
+}
+
+_pre_push_report_on_exit() {
+  local saved_exit=$?
+  if [ "$_PRE_PUSH_REPORT_DONE" = "1" ]; then
+    exit "$saved_exit"
+  fi
+  _PRE_PUSH_REPORT_DONE=1
+  write_pre_push_report "$saved_exit"
+  exit "$saved_exit"
+}
+trap '_pre_push_report_on_exit' EXIT
 
 # Get files being pushed in this push operation
 # pre-push receives stdin with ref information
@@ -26,9 +80,26 @@ while read local_ref local_sha remote_ref remote_sha; do
     echo "   ℹ️  Branch deletion detected ($local_ref). Skipping validation."
     continue
   elif [ "$remote_sha" = "0000000000000000000000000000000000000000" ]; then
-    # New branch - compare against empty tree
-    PUSHED_FILES=$(git diff-tree -r --name-only HEAD)
-    TS_FILES=$(git diff-tree -r --name-only HEAD | grep '\.ts$' || true)
+    # New branch - compare cumulative diff vs base branch
+    # Use git merge-base HEAD main/master to find the branch point,
+    # then diff the full branch range. Falls back to HEAD-only diff if no base found.
+    BASE_BRANCH="origin/main"
+    if ! git rev-parse --verify "$BASE_BRANCH" >/dev/null 2>&1; then
+      BASE_BRANCH="origin/master"
+    fi
+    if git rev-parse --verify "$BASE_BRANCH" >/dev/null 2>&1; then
+      MERGE_BASE=$(git merge-base HEAD "$BASE_BRANCH" 2>/dev/null)
+      if [ -n "$MERGE_BASE" ] && [ "$MERGE_BASE" != "$(git rev-parse HEAD)" ]; then
+        PUSHED_FILES=$(git diff --name-only "$MERGE_BASE"...HEAD 2>/dev/null)
+        TS_FILES=$(git diff --name-only "$MERGE_BASE"...HEAD 2>/dev/null | grep '\.ts$' || true)
+      else
+        PUSHED_FILES=$(git diff-tree -r --name-only HEAD)
+        TS_FILES=$(git diff-tree -r --name-only HEAD | grep '\.ts$' || true)
+      fi
+    else
+      PUSHED_FILES=$(git diff-tree -r --name-only HEAD)
+      TS_FILES=$(git diff-tree -r --name-only HEAD | grep '\.ts$' || true)
+    fi
   else
     # Existing branch - compare against what we're pushing from
     PUSHED_FILES=$(git diff-tree -r --name-only "$remote_sha" "$local_sha")
@@ -70,6 +141,94 @@ echo ""
 echo "Branch: $CURRENT_BRANCH"
 echo "Files changed: $FILES_CHANGED"
 echo "Lines: +$LINES_ADDED -$LINES_DELETED"
+echo ""
+
+# ============================================================================
+# GATE S: SPRINT FLOW ENFORCEMENT
+# Validates sprint state consistency before push
+# Uses sprint-gate.sh for standalone validation logic
+# ============================================================================
+GATE_S_STATUS="PASS"
+PROJECT_ROOT="$(git rev-parse --show-toplevel 2>/dev/null || echo ".")"
+SPRINT_GATE_SCRIPT=""
+
+if [ -f "$PROJECT_ROOT/githooks/sprint-gate.sh" ]; then
+  SPRINT_GATE_SCRIPT="$PROJECT_ROOT/githooks/sprint-gate.sh"
+elif [ -f "$(dirname "$0")/sprint-gate.sh" ]; then
+  SPRINT_GATE_SCRIPT="$(dirname "$0")/sprint-gate.sh"
+fi
+
+if [ -n "$SPRINT_GATE_SCRIPT" ]; then
+  if ! bash "$SPRINT_GATE_SCRIPT" --pre-push; then
+    GATE_S_STATUS="BLOCK"
+    echo "❌ BLOCKED - Gate S: Sprint Flow Enforcement"
+    exit 1
+  fi
+else
+  echo "⏭️  SKIPPED - Gate S: Sprint Flow (sprint-gate.sh not found)"
+  GATE_S_STATUS="SKIP"
+fi
+echo ""
+
+# ============================================================================
+# GATE 10: BUILD INTEGRITY CHECK (TypeScript)
+# ============================================================================
+GATE_10_STATUS="SKIP"
+
+if [[ -f "package.json" ]] && [[ -f "tsconfig.json" ]] && [[ -n "$TS_FILES" ]]; then
+  echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+  echo "   GATE 10: BUILD INTEGRITY CHECK"
+  echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+
+  GATE_10_SCRIPT=""
+  if [[ -f "$PROJECT_ROOT/src/build-integrity/gate-10.ts" ]]; then
+    GATE_10_SCRIPT="$PROJECT_ROOT/src/build-integrity/gate-10.ts"
+  elif [[ -f ".xp-gate/modules/build-integrity/gate-10.ts" ]]; then
+    GATE_10_SCRIPT=".xp-gate/modules/build-integrity/gate-10.ts"
+  elif [[ -f "$HOME/.config/xp-gate/modules/build-integrity/gate-10.ts" ]]; then
+    GATE_10_SCRIPT="$HOME/.config/xp-gate/modules/build-integrity/gate-10.ts"
+  fi
+
+  if [[ -n "$GATE_10_SCRIPT" ]]; then
+    # Build comma-separated list of absolute file paths for changed TS files
+    GATE_10_FILE_LIST=""
+    while IFS= read -r f; do
+      if [ -z "$GATE_10_FILE_LIST" ]; then
+        GATE_10_FILE_LIST="$f"
+      else
+        GATE_10_FILE_LIST="$GATE_10_FILE_LIST,$f"
+      fi
+    done <<< "$TS_FILES"
+
+    GATE_10_OUTPUT=$(mktemp)
+    if timeout 120s npx tsx "$GATE_10_SCRIPT" --changed-files "$GATE_10_FILE_LIST" --project-root "$PROJECT_ROOT" > "$GATE_10_OUTPUT" 2>&1; then
+      cat "$GATE_10_OUTPUT"
+      GATE_10_STATUS="PASS"
+      echo "✅ Gate 10: PASS"
+    else
+      GATE_10_EXIT=$?
+      cat "$GATE_10_OUTPUT"
+      if [[ $GATE_10_EXIT -eq 124 ]]; then
+        echo "⏱️ Gate 10: TIMEOUT (120s). Allowing push with warning."
+        GATE_10_STATUS="TIMEOUT"
+      else
+        echo ""
+        echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+        echo "   ❌ GATE 10 FAILED — PUSH BLOCKED"
+        echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+        echo "Build integrity check failed. Fix type errors, broken imports,"
+        echo "or package manifest issues before pushing."
+        rm -f "$GATE_10_OUTPUT"
+        exit 1
+      fi
+    fi
+    rm -f "$GATE_10_OUTPUT"
+  else
+    echo "⚠️ Gate 10 script not found. SKIP — Gate 10."
+  fi
+else
+  echo "📚 Not a TypeScript project or no TS files changed. SKIP — Gate 10."
+fi
 echo ""
 
 # ============================================================================
@@ -115,13 +274,22 @@ else
       echo "🧬 Running mutation tests on changed files..."
       echo "$CHANGED_SOURCE_FILES"
 
-      # Check if mutation gate script exists
-      if [[ ! -f "src/mutation/gate-m.ts" ]]; then
-        echo "⚠️ Gate M script (src/mutation/gate-m.ts) not found. SKIP — Gate M."
+      # Check for mutation gate script in installed modules first, then project src/
+      MUTATION_SCRIPT=""
+      if [ -f ".xp-gate/modules/mutation/gate-m.ts" ]; then
+        MUTATION_SCRIPT=".xp-gate/modules/mutation/gate-m.ts"
+      elif [ -f "src/mutation/gate-m.ts" ]; then
+        MUTATION_SCRIPT="src/mutation/gate-m.ts"
+      elif [ -f "$HOME/.config/xp-gate/modules/mutation/gate-m.ts" ]; then
+        MUTATION_SCRIPT="$HOME/.config/xp-gate/modules/mutation/gate-m.ts"
+      fi
+
+      if [[ -z "$MUTATION_SCRIPT" ]]; then
+        echo "⚠️ Gate M script not found. SKIP — Gate M."
       else
         # Run mutation gate with timeout matching stryker.conf.json (timeoutMS: 600000 = 10min)
         MUTATION_OUTPUT=$(mktemp)
-        timeout 600s npx tsx src/mutation/gate-m.ts --changed-files "$CHANGED_SOURCE_FILES" > "$MUTATION_OUTPUT" 2>&1
+        timeout 600s npx tsx $MUTATION_SCRIPT --changed-files "$CHANGED_SOURCE_FILES" > "$MUTATION_OUTPUT" 2>&1
         MUTATION_EXIT=$?
 
         case $MUTATION_EXIT in
@@ -162,7 +330,69 @@ else
 fi
 
 # ============================================================================
-# GATE M2: MOCK DENSITY CHECK (BLOCK at 50%, ADVISORY at 30%)
+# GATE M (Python): Incremental Mutation Testing via mutmut
+# Runs after TypeScript Gate M; uses the same gate-m.ts orchestrator with
+# MutmutRunner for Python files.
+# ============================================================================
+echo ""
+echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+echo "   GATE M (Python): MUTATION TESTING"
+echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+
+# Collect changed Python source files (exclude tests, venv, cached)
+PY_FILES=$(echo "$PUSHED_FILES" | grep -E '\.py$' | grep -v '__pycache__' | grep -v '\.test\.py' | grep -v '/test_' | grep -v '/tests/' || true)
+PY_SOURCE_FILES=$(echo "$PY_FILES" | grep -v '/venv/' | grep -v '/\.venv/' || true)
+
+if [ -z "$PY_SOURCE_FILES" ]; then
+  echo "📚 No changed Python source files. SKIP — Gate M (Python)."
+else
+  PYTHON_FILE_LIST=$(echo "$PY_SOURCE_FILES" | tr '\n' ',' | sed 's/,$//')
+  echo "🐍 Changed Python files: $PYTHON_FILE_LIST"
+
+  if detect_python_mutation_testable 2>/dev/null; then
+    if [ -f "src/mutation/gate-m.ts" ]; then
+      MUTATION_OUTPUT=$(mktemp)
+      timeout 120s npx tsx src/mutation/gate-m.ts --changed-files "$PYTHON_FILE_LIST" > "$MUTATION_OUTPUT" 2>&1
+      MUTATION_EXIT=$?
+
+      case $MUTATION_EXIT in
+        0)
+          echo "✅ Gate M (Python): PASS"
+          ;;
+        1)
+          echo ""
+          echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+          echo "   ❌ GATE M (Python) FAILED - PUSH BLOCKED"
+          echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+          echo ""
+          cat "$MUTATION_OUTPUT"
+          echo ""
+          rm -f "$MUTATION_OUTPUT"
+          exit 1
+          ;;
+        124)
+          cat "$MUTATION_OUTPUT"
+          echo "⏱ Gate M (Python): TIMEOUT (120s). Allowing push with warning."
+          ;;
+        *)
+          cat "$MUTATION_OUTPUT"
+          echo "⚠ Gate M (Python): Unexpected exit code $MUTATION_EXIT. Allowing push with warning."
+          ;;
+      esac
+
+      rm -f "$MUTATION_OUTPUT"
+    else
+      echo "⚠ Gate M script not found. SKIP — Gate M (Python)."
+    fi
+  else
+    echo "⚠ mutmut not installed. SKIP — Gate M (Python)."
+  fi
+fi
+
+# ============================================================================
+# GATE M2: MOCK DENSITY CHECK (BLOCK at 30%, configurable via .mockpolicyrc)
+# Phase 1: WARNING mode (collect false positive data before enabling BLOCK)
+# Per-layer thresholds: .mockpolicyrc layers.*.maxMockDensity
 # ============================================================================
 echo ""
 echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
@@ -182,9 +412,19 @@ if [ -n "$PY_TEST_FILES" ]; then
 fi
 
 if [ -z "$ALL_PUSHED_TEST_FILES" ]; then
-  echo "✅ No test files in push. SKIP — Mock density check."
+  echo "⏭️  SKIPPED - Mock density check (no test files in push)"
 else
   MOCK_BLOCKED=false
+
+  # Read .mockpolicyrc configuration
+  MOCK_THRESHOLD=30  # Default threshold
+  if [ -f ".mockpolicyrc" ]; then
+    # Read global mock-threshold if present
+    CUSTOM_THRESHOLD=$(grep -oE '"mock-threshold"\s*:\s*[0-9]+' .mockpolicyrc | grep -oE '[0-9]+$' || true)
+    if [ -n "$CUSTOM_THRESHOLD" ]; then
+      MOCK_THRESHOLD=$CUSTOM_THRESHOLD
+    fi
+  fi
 
   for test_file in $ALL_PUSHED_TEST_FILES; do
     if [ -f "$test_file" ]; then
@@ -196,9 +436,8 @@ else
       for kw in 'jest\.mock' 'vi\.mock' 'jest\.spyOn' 'vi\.spyOn' 'jest\.fn' 'vi\.fn' \
                 'mockResolvedValue' 'mockRejectedValue' 'mockReturnValue' 'mockImplementation' \
                 'createMock' 'mockReset' 'mockClear' 'mockRestore' 'MagicMock' 'unittest\.mock' \
-                '\.patch(' 'gomock' 'mockgen' '\.EXPECT()'; do
-        c=$(grep -o "$kw" "$test_file" 2>/dev/null | wc -l || echo "0")
-        # Guard against empty/non-numeric values that break bash arithmetic
+                '\.patch(' 'gomock' 'mockgen' '.EXPECT()'; do
+        c=$(grep -o "$kw" "$test_file" 2>/dev/null | wc -l || true)
         c=${c//[^0-9]/}
         c=${c:-0}
         MOCK_COUNT=$((MOCK_COUNT + c))
@@ -216,32 +455,185 @@ else
         MOCK_DENSITY="0"
       fi
 
-      THRESHOLD_50=$(awk "BEGIN {print ($MOCK_DENSITY > 50) ? 1 : 0}")
-      THRESHOLD_30=$(awk "BEGIN {print ($MOCK_DENSITY > 30) ? 1 : 0}")
+      THRESHOLD_BLOCK=$(awk "BEGIN {print ($MOCK_DENSITY > $MOCK_THRESHOLD) ? 1 : 0}")
 
       # Check for @mock-justified annotation with reason text (min 10 chars)
       HAS_JUSTIFIED=$(grep -qE '@mock-justified\s*:\s*.{10,}' "$test_file" 2>/dev/null && echo "true" || echo "false")
 
-      if [ "$THRESHOLD_50" = "1" ]; then
+      if [ "$THRESHOLD_BLOCK" = "1" ]; then
         if [ "$HAS_JUSTIFIED" = "false" ]; then
-          echo "❌ BLOCKED: $test_file — Mock density ${MOCK_DENSITY}% exceeds 50% threshold"
+          # Phase 1: WARNING mode (will become BLOCK in Phase 2)
+          echo "⚠️  WARNING: $test_file — Mock density ${MOCK_DENSITY}% exceeds ${MOCK_THRESHOLD}% threshold"
           echo "   Must: Reduce mocks OR add '// @mock-justified: <reason>' (min 10 char explanation)"
-          MOCK_BLOCKED=true
+          echo "   (Phase 1: WARNING mode — will become BLOCK after baseline analysis)"
+          # Note: Do NOT set MOCK_BLOCKED=true in Phase 1
         else
-          echo "⚠️  WARNING: $test_file — Mock density ${MOCK_DENSITY}% (justified by annotation)"
+          echo "✅ $test_file — Mock density ${MOCK_DENSITY}% (justified by annotation)"
         fi
-      elif [ "$THRESHOLD_30" = "1" ]; then
-        echo "ℹ️  ADVISORY: $test_file — Mock density ${MOCK_DENSITY}% (consider integration tests)"
       else
-        echo "✅ $test_file — Mock density ${MOCK_DENSITY}% (acceptable)"
+        echo "✅ $test_file — Mock density ${MOCK_DENSITY}% (within ${MOCK_THRESHOLD}% threshold)"
       fi
     fi
   done
 
-  if [ "$MOCK_BLOCKED" = true ]; then
-    echo ""
-    echo "❌ PUSH BLOCKED — Mock density too high without justification"
-    exit 1
+  # Phase 1: WARNING mode only — no blocking
+  # Phase 2 (after baseline analysis): enable BLOCK based on false positive rate
+  # if [ "$MOCK_BLOCKED" = true ]; then
+  #   echo ""
+  #   echo "❌ PUSH BLOCKED — Mock density too high without justification"
+  #   exit 1
+  # fi
+fi
+
+# ============================================================================
+# Gate M3: Mock Layering Strategy
+# Validates mock policies based on test layer and dependency scope
+# Runs only in non-main branches, TypeScript projects with the module available
+# ============================================================================
+run_gate_m3() {
+  local changed_files="$1"
+  local project_root="$2"
+
+  echo ""
+  echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+  echo "   GATE M3: MOCK LAYERING STRATEGY"
+  echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+
+  # Skip on main/master
+  if [[ "$CURRENT_BRANCH" == "main" || "$CURRENT_BRANCH" == "master" ]]; then
+    echo "   SKIP — pushing to main/master"
+    return 0
+  fi
+
+  # Check for mock-policy module in installed modules first, then project src/
+  local GATE_M3_SCRIPT=""
+  if [ -f ".xp-gate/modules/mock-policy/gate-m3.ts" ]; then
+    GATE_M3_SCRIPT=".xp-gate/modules/mock-policy/gate-m3.ts"
+  elif [ -f "./src/mock-policy/gate-m3.ts" ]; then
+    GATE_M3_SCRIPT="./src/mock-policy/gate-m3.ts"
+  fi
+
+  if [[ -z "$GATE_M3_SCRIPT" ]]; then
+    echo "   SKIP — module not found"
+    return 0
+  fi
+
+  if [[ ! -f "package.json" ]] || [[ ! -f "tsconfig.json" ]]; then
+    echo "   SKIP — TypeScript only"
+    return 0
+  fi
+
+  # Filter to test files only
+  local test_files=$(echo "$changed_files" | grep -E '\.(test|spec)\.ts$' || true)
+
+  if [[ -z "$test_files" ]]; then
+    echo "   SKIP — no test files changed"
+    return 0
+  fi
+
+  echo "   Changed test files: $(echo "$test_files" | wc -l)"
+
+  # Convert to array safely (handles spaces in filenames)
+  local args=()
+  while IFS= read -r f; do
+    [[ -n "$f" ]] && args+=("$f")
+  done <<< "$test_files"
+
+  if npx tsx "$GATE_M3_SCRIPT" "${args[@]}"; then
+    echo "✅ Gate M3: PASS"
+    return 0
+  else
+    local exit_code=$?
+    if [[ "$exit_code" -eq 1 ]]; then
+      echo ""
+      echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+      echo "   ❌ GATE M3 FAILED - PUSH BLOCKED"
+      echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+      echo ""
+      echo "Mock layering violations found. Review and fix or adjust"
+      echo ".mockpolicyrc severity to 'warning' for advisory mode."
+      echo ""
+      return 1
+    fi
+    echo "⚠️ Gate M3: Unexpected error — allowing push with warning"
+    return 0
+  fi
+}
+
+run_gate_m3 "$TS_FILES" "$PROJECT_ROOT"
+
+# ============================================================================
+# GATE UI: UI SPRINT DETECTION & RESULT VALIDATION
+# ============================================================================
+echo ""
+echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+echo "   GATE UI: UI SPRINT QUALITY GATES"
+echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+
+# Skip on main/master (pre-reviewed via PR)
+if [[ "$CURRENT_BRANCH" == "main" || "$CURRENT_BRANCH" == "master" ]]; then
+  echo "⚠️ Pushing to main/master — UI Gate skipped (pre-reviewed via PR)"
+else
+  # Check bypass
+  if [[ "$XP_GATE_SKIP_UI_GATES" == "1" ]]; then
+    if [[ -z "$XP_GATE_BYPASS_REASON" || ${#XP_GATE_BYPASS_REASON// /} -lt 10 ]]; then
+      echo "❌ XP_GATE_BYPASS_REASON required (min 10 non-whitespace chars)"
+      exit 1
+    fi
+    echo "⚠️  UI Gate BYPASSED — reason: $XP_GATE_BYPASS_REASON"
+    AUDIT_ENTRY="{\"timestamp\":\"$(date -u +%Y-%m-%dT%H:%M:%SZ)\",\"branch\":\"$CURRENT_BRANCH\",\"commit\":\"$(git rev-parse HEAD)\",\"user\":\"$(git config user.name || echo 'unknown')\",\"reason\":\"$XP_GATE_BYPASS_REASON\",\"bypass_type\":\"ui-gates\"}"
+    echo "$AUDIT_ENTRY" >> .audit-log.jsonl
+  else
+    # Detect UI changes in pushed files
+    UI_DETECTION=$(echo "$PUSHED_FILES" | npx -y tsx src/npm-package/lib/ui-detector.ts --push-mode --from-stdin 2>/dev/null) || true
+    
+    IS_UI_SPRINT=$(echo "$UI_DETECTION" | jq -r '.isUiSprint' 2>/dev/null || echo "false")
+    
+    if [[ "$IS_UI_SPRINT" == "true" ]]; then
+      UI_RESULT_FILE=".ui-gate-result.json"
+      MISSING_RESULTS=()
+      
+      if [[ ! -f "$UI_RESULT_FILE" ]]; then
+        MISSING_RESULTS+=("$UI_RESULT_FILE")
+      fi
+      
+      if [[ ${#MISSING_RESULTS[@]} -gt 0 ]]; then
+        echo ""
+        echo "❌ UI sprint detected — missing result file(s):"
+        for f in "${MISSING_RESULTS[@]}"; do echo "  - $f"; done
+        echo ""
+        echo "Before pushing, run: /design-review + /qa-only in your Agent session"
+        echo "Or for non-sprint flows: xp-gate ui-review"
+        echo ""
+        echo "Sprint Flow: Phase 3 automatically triggers these when UI changes detected."
+        exit 1
+      fi
+      
+      # Validate result file
+      RESULT_COMMIT=$(jq -r '.commit' "$UI_RESULT_FILE" 2>/dev/null)
+      RESULT_VERDICT=$(jq -r '.verdict' "$UI_RESULT_FILE" 2>/dev/null)
+      RESULT_EXPIRES=$(jq -r '.expires' "$UI_RESULT_FILE" 2>/dev/null)
+      
+      if [[ "$RESULT_COMMIT" != "$(git rev-parse HEAD)" ]]; then
+        echo "❌ .ui-gate-result.json outdated — expected commit $(git rev-parse HEAD), got $RESULT_COMMIT"
+        exit 1
+      fi
+      
+      if [[ "$RESULT_VERDICT" != "APPROVED" ]]; then
+        echo "❌ .ui-gate-result.json verdict: $RESULT_VERDICT (must be APPROVED)"
+        exit 1
+      fi
+      
+      CURRENT_TIME=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+      if [[ "$CURRENT_TIME" > "$RESULT_EXPIRES" ]]; then
+        echo "❌ .ui-gate-result.json expired ($RESULT_EXPIRES)"
+        exit 1
+      fi
+      
+      echo "✅ Gate UI: PASS — UI changes reviewed and approved"
+    else
+      echo "ℹ️  No UI changes detected — skipping UI Gate"
+    fi
   fi
 fi
 
@@ -292,7 +684,16 @@ if ! command -v jq &> /dev/null; then
 fi
 
 # Validate result file content
+# SHA self-reference paradox fix: if the result file was committed as part of
+# HEAD, its content references HEAD^ (the commit being reviewed), not HEAD.
 CURRENT_COMMIT=$(git rev-parse HEAD)
+if git diff-tree --no-commit-id --name-only -r HEAD 2>/dev/null | grep -qx "$RESULT_FILE"; then
+  # Result file is part of the latest commit — compare against the reviewed commit
+  EXPECTED_COMMIT=$(git rev-parse HEAD^ 2>/dev/null || echo "unknown")
+else
+  # Result file is working-tree only — compare against current HEAD
+  EXPECTED_COMMIT="$CURRENT_COMMIT"
+fi
 
 # Check JSON validity
 if ! jq empty "$RESULT_FILE" 2>/dev/null; then
@@ -325,15 +726,15 @@ if [ "$RESULT_BRANCH" != "$CURRENT_BRANCH" ]; then
 fi
 
 # Commit match check
-if [ "$RESULT_COMMIT" != "$CURRENT_COMMIT" ]; then
+if [ "$RESULT_COMMIT" != "$EXPECTED_COMMIT" ]; then
   echo ""
   echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
   echo "   ❌ RESULT FILE OUTDATED - PUSH BLOCKED"
   echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
   echo ""
   echo "Result file is for a different commit:"
-  echo "  Expected: $CURRENT_COMMIT"
-  echo "  Found: $RESULT_COMMIT"
+    echo "  Expected: $EXPECTED_COMMIT"
+    echo "  Found: $RESULT_COMMIT"
   echo ""
   echo "Re-run: /delphi-review --mode code-walkthrough"
   echo ""
