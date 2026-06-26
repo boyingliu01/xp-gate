@@ -2,6 +2,18 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.11.0.0] - 2026-06-26
+
+### Added
+- **Gate 9: Build Integrity** — New pre-commit gate that verifies TypeScript compilation (`tsc --noEmit`), package manifest integrity (`npm pack --dry-run`), and import path legality. Blocks commits with broken builds.
+
+### Changed
+- **Breaking**: Pre-commit gate renumbering: Gate 9 (SAST) → Gate 10; Gate 10 (Sprint Flow) → Gate 11. TOTAL_GATES=11, reportVersion "2.0". Re-run `xp-gate init` to update hooks.
+- **Breaking**: Pre-push gates renamed to M-prefix scheme: M2→MD (Mock Density), M3→ML (Mock Layering), Delphi→MW (Code Walkthrough), Gate S→MS (Sprint Flow).
+- Pre-push Gate 10 (Build Integrity) retained as defense-in-depth check.
+
+## [0.10.17.0] - 2026-06-26
+
 ## [0.10.13] - 2026-06-24
 
 ### Fixed

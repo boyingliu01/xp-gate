@@ -47,10 +47,10 @@ report = {
     {'id': '10', 'name': 'Build Integrity', 'status': '${GATE_10_STATUS:-SKIP}', 'details': {}},
     {'id': 'M', 'name': 'Mutation Testing', 'status': '${GATE_M_STATUS:-SKIP}', 'details': {}},
     {'id': 'M-Python', 'name': 'Mutation Testing (Python)', 'status': '${GATE_M_PYTHON_STATUS:-SKIP}', 'details': {}},
-    {'id': 'M2', 'name': 'Mock Density', 'status': '${GATE_M2_STATUS:-SKIP}', 'details': {}},
-    {'id': 'M3', 'name': 'Mock Layering', 'status': '${GATE_M3_STATUS:-SKIP}', 'details': {}},
+    {'id': 'MD', 'name': 'Mock Density', 'status': '${GATE_M2_STATUS:-SKIP}', 'details': {}},
+    {'id': 'ML', 'name': 'Mock Layering', 'status': '${GATE_M3_STATUS:-SKIP}', 'details': {}},
     {'id': 'UI', 'name': 'UI Sprint Gates', 'status': '${GATE_UI_STATUS:-SKIP}', 'details': {}},
-    {'id': 'Delphi', 'name': 'Code Walkthrough', 'status': '${GATE_DELPHI_STATUS:-SKIP}', 'details': {'remote': '$REMOTE', 'url': '$URL'}}
+    {'id': 'MW', 'name': 'Code Walkthrough', 'status': '${GATE_DELPHI_STATUS:-SKIP}', 'details': {'remote': '$REMOTE', 'url': '$URL'}}
   ],
   'warnings': [],
   'errors': [] if '$verdict' == 'PASS' else ['pre-push hook exited with code $exit_code'],
@@ -161,11 +161,11 @@ fi
 if [ -n "$SPRINT_GATE_SCRIPT" ]; then
   if ! bash "$SPRINT_GATE_SCRIPT" --pre-push; then
     GATE_S_STATUS="BLOCK"
-    echo "❌ BLOCKED - Gate S: Sprint Flow Enforcement"
+    echo "❌ BLOCKED - Gate MS: Sprint Flow Enforcement"
     exit 1
   fi
 else
-  echo "⏭️  SKIPPED - Gate S: Sprint Flow (sprint-gate.sh not found)"
+  echo "⏭️  SKIPPED - Gate MS: Sprint Flow (sprint-gate.sh not found)"
   GATE_S_STATUS="SKIP"
 fi
 echo ""
@@ -390,13 +390,13 @@ else
 fi
 
 # ============================================================================
-# GATE M2: MOCK DENSITY CHECK (BLOCK at 30%, configurable via .mockpolicyrc)
+# GATE MD: MOCK DENSITY CHECK (BLOCK at 30%, configurable via .mockpolicyrc)
 # Phase 1: WARNING mode (collect false positive data before enabling BLOCK)
 # Per-layer thresholds: .mockpolicyrc layers.*.maxMockDensity
 # ============================================================================
 echo ""
 echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-echo "   GATE M2: MOCK DENSITY CHECK"
+echo "   GATE MD: MOCK DENSITY CHECK"
 echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
 
 # Collect TS and Python test files from pushed files
@@ -486,7 +486,7 @@ else
 fi
 
 # ============================================================================
-# Gate M3: Mock Layering Strategy
+# Gate ML: Mock Layering Strategy
 # Validates mock policies based on test layer and dependency scope
 # Runs only in non-main branches, TypeScript projects with the module available
 # ============================================================================
@@ -496,7 +496,7 @@ run_gate_m3() {
 
   echo ""
   echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-  echo "   GATE M3: MOCK LAYERING STRATEGY"
+  echo "   GATE ML: MOCK LAYERING STRATEGY"
   echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
 
   # Skip on main/master
@@ -540,14 +540,14 @@ run_gate_m3() {
   done <<< "$test_files"
 
   if npx tsx "$GATE_M3_SCRIPT" "${args[@]}"; then
-    echo "✅ Gate M3: PASS"
+    echo "✅ Gate ML: PASS"
     return 0
   else
     local exit_code=$?
     if [[ "$exit_code" -eq 1 ]]; then
       echo ""
       echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-      echo "   ❌ GATE M3 FAILED - PUSH BLOCKED"
+      echo "   ❌ GATE ML FAILED - PUSH BLOCKED"
       echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
       echo ""
       echo "Mock layering violations found. Review and fix or adjust"
@@ -555,7 +555,7 @@ run_gate_m3() {
       echo ""
       return 1
     fi
-    echo "⚠️ Gate M3: Unexpected error — allowing push with warning"
+    echo "⚠️ Gate ML: Unexpected error — allowing push with warning"
     return 0
   fi
 }
@@ -638,19 +638,19 @@ else
 fi
 
 # ============================================================================
-# VALIDATE CODE WALKTHROUGH RESULT FILE
+# GATE MW: VALIDATE CODE WALKTHROUGH RESULT FILE
 # ============================================================================
 RESULT_FILE=".code-walkthrough-result.json"
 
-# Skip Delphi walkthrough for main/master (Gate M already ran above)
+# Skip MW walkthrough for main/master (Gate M already ran above)
 if [[ "$CURRENT_BRANCH" == "main" || "$CURRENT_BRANCH" == "master" ]]; then
-  echo "⚠️ Pushing to main/master - Delphi walkthrough skipped"
+  echo "⚠️ Pushing to main/master - MW walkthrough skipped"
 else
 
 if [ ! -f "$RESULT_FILE" ]; then
   echo ""
   echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-  echo "   ❌ CODE WALKTHROUGH REQUIRED - PUSH BLOCKED"
+  echo "   ❌ GATE MW: CODE WALKTHROUGH REQUIRED - PUSH BLOCKED"
   echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
   echo ""
   echo "No code walkthrough result found."
@@ -745,7 +745,7 @@ fi
 if [ "$RESULT_VERDICT" != "APPROVED" ]; then
   echo ""
   echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-  echo "   ❌ CODE WALKTHROUGH NOT APPROVED - PUSH BLOCKED"
+  echo "   ❌ GATE MW: CODE WALKTHROUGH NOT APPROVED - PUSH BLOCKED"
   echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
   echo ""
   echo "Verdict: $RESULT_VERDICT"
@@ -785,7 +785,7 @@ fi
 # ============================================================================
 echo ""
 echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-echo "   ✅ CODE WALKTHROUGH VERIFIED"
+  echo "   ✅ GATE MW: CODE WALKTHROUGH VERIFIED"
 echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
 echo ""
 echo "Branch: $CURRENT_BRANCH"
