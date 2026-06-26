@@ -12,6 +12,30 @@ import type {
   ImportCheckResult,
   ImportViolation,
 } from './types';
+/**
+ * ═══════════════════════════════════════════════════════════════════════════════
+ * NAMING NOTE: This file is named "gate-10.ts" for historical reasons.
+ *
+ * It implements **pre-commit Gate 9 (Build Integrity)** which verifies:
+ *   1. TypeScript compilation (tsc --noEmit)
+ *   2. Package manifest integrity (npm pack --dry-run)
+ *   3. Import path legality (no path-traversal outside package)
+ *
+ * History: Originally deployed as Gate 10 in pre-push (build integrity on push).
+ * When migrated to pre-commit as Gate 9, the filename was intentionally kept
+ * to avoid breaking all import references, CI configs, and baselines that
+ * reference "gate-10.ts". It also remains referenced from pre-push as a
+ * defense-in-depth check.
+ *
+ * DO NOT RENAME this file to gate-9.ts without updating ALL references in:
+ *   - githooks/pre-commit (Gate 9 section)
+ *   - githooks/pre-push (Gate 10 defense-in-depth section)
+ *   - src/npm-package/hooks/pre-commit
+ *   - src/npm-package/hooks/pre-push
+ *   - .architecture-baseline.json
+ *   - Any CI workflow referencing this file
+ * ═══════════════════════════════════════════════════════════════════════════════
+ */
 
 const execFileAsync = promisify(execFile);
 

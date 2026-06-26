@@ -272,18 +272,21 @@ isolation     pass          + CONTEXT    + delphi    (default)   + QA / web     
 | Gate 6 | 架构合规 + 童子军规则 | 无新增警告 | 阻断提交 |
 | Gate 7 | IaC 安全扫描 (checkov/hadolint/kube-score/tflint) | 无 High 级别风险 | 阻断提交 |
 | Gate 8 | 密钥扫描 (gitleaks) | 零泄漏 | 阻断提交 |
-| Gate 9 | Semgrep SAST 安全扫描 | 无 High 级别风险 | 阻断提交 |
+| **Gate 9** | **构建完整性 (tsc + npm pack + import check)** | **编译通过、打包成功、import 合法** | **阻断提交** |
+| Gate 10 | Semgrep SAST 安全扫描 | 无 High 级别风险 | 阻断提交 |
+| Gate 11 | Sprint Flow 执行 | specification.yaml 合规 | 阻断提交 |
 
-> **概念分组（旧 "6 道门禁" 视角）**：Gates 1+2+5 = 代码质量集群，Gate 3 = 复杂度，Gate 4 = 原则，Gate 6 = 架构，Gates 7+8+9 = 安全（0.8.x 新增），Gate 0 = 预检。两种视角同时存在，README 现在以脚本真相 (Gate 0-9) 为准。
+> **概念分组（旧 "6 道门禁" 视角）**：Gates 1+2+5 = 代码质量集群，Gate 3 = 复杂度，Gate 4 = 原则，Gate 6 = 架构，Gates 7+8+9 = 安全 + 构建完整性（v0.11.0），Gate 0 = 预检。
 
-### Pre-push（Gate M / M2 / M3 + Delphi 代码走查）
+### Pre-push（M / MD / ML / MW / MS）
 
 | 门禁 | 检查内容 | 阈值 | 失败行为 |
 |------|---------|------|---------|
 | Gate M | 增量变异测试 (Stryker, TS only) | 默认 60%，关键路径 80% | 阻断推送 |
-| Gate M2 | Mock 密度内联扫描 | mock 关键字密度 ≤30% (Phase 1 WARNING) 或带 `@mock-justified` | 阻断推送 |
-| Gate M3 | Mock 分层策略 (per-file validator) | 每层 mock 策略合规 | 阻断推送 |
-| Delphi 代码走查 | `.code-walkthrough-result.json` 校验 | 必须存在且未过期 (vs HEAD commit) | 阻断推送 |
+| Gate MD | Mock 密度内联扫描 | mock 关键字密度 ≤30% (Phase 1 WARNING) 或带 `@mock-justified` | 阻断推送 |
+| Gate ML | Mock 分层策略 (per-file validator) | 每层 mock 策略合规 | 阻断推送 |
+| Gate MW | 代码走查 (`.code-walkthrough-result.json` 校验) | 必须存在且未过期 (vs HEAD commit) | 阻断推送 |
+| Gate MS | Sprint Flow 执行 | specification.yaml 合规 | 阻断推送 |
 
 > **Pre-push 硬上限**：单次推送 ≤20 个文件 或 ≤500 LOC。`main`/`master` 上的推送会跳过 Delphi 代码走查校验（设计如此）。所有 pre-push 运行写入 `.xp-gate/reports/pre-push/*.json`。
 
