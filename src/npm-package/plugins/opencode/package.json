@@ -1,6 +1,6 @@
 {
   "name": "@boyingliu01/opencode-plugin",
-  "version": "0.10.16",
+  "version": "0.10.17",
   "type": "module",
   "main": "index.ts",
   "description": "XP-Gate quality gates + AI workflow skills + Sprint Flow TUI sidebar for OpenCode",
@@ -19,8 +19,8 @@
       "types": "./index.ts"
     },
     "./tui": {
-      "import": "./tui-plugin.ts",
-      "types": "./tui-plugin.ts"
+      "import": "./tui-plugin.tsx",
+      "types": "./tui-plugin.tsx"
     }
   },
   "files": [
