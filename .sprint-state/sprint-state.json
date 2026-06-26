@@ -1,13 +1,14 @@
 {
   "id": "sprint-2026-06-26-05",
-  "phase": 1,
-  "status": "running",
+  "phase": 2,
+  "status": "completed",
   "task_description": "Gate 10: 构建/编译产物完整性检查",
   "phase_history": [
     {"phase": -1, "phase_name": "ISOLATE", "status": "completed", "timestamp": "2026-06-26T03:45:50Z"},
     {"phase": -0.5, "phase_name": "AUTO-ESTIMATE", "status": "completed", "timestamp": "2026-06-26T03:47:00Z"},
     {"phase": 0, "phase_name": "THINK", "status": "completed", "timestamp": "2026-06-26T03:50:00Z"},
-    {"phase": 1, "phase_name": "PLAN", "status": "completed", "timestamp": "2026-06-26T04:05:00Z"}
+    {"phase": 1, "phase_name": "PLAN", "status": "completed", "timestamp": "2026-06-26T04:05:00Z"},
+    {"phase": 2, "phase_name": "BUILD", "status": "completed", "timestamp": "2026-06-26T04:20:00Z"}
   ],
   "isolation": {
     "worktree_path": ".worktrees/sprint/sprint-2026-06-26-05",
@@ -17,7 +18,8 @@
   },
   "outputs": {
     "pain_document": "phase-outputs/phase-0-summary.md",
-    "delphi_reviewed": ".sprint-state/delphi-reviewed.json"
+    "delphi_reviewed": ".sprint-state/delphi-reviewed.json",
+    "commits": ["3ae0916", "7c735c0", "5f7953e"]
   },
   "metrics": {
     "baseline_tests": 1689,
