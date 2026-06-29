@@ -1,35 +1,26 @@
 {
-  "id": "sprint-2026-06-26-05",
+  "id": "sprint-2026-06-29-01",
   "phase": 5,
   "status": "completed",
-  "task_description": "Gate 10: 构建/编译产物完整性检查",
   "phase_history": [
-    {"phase": -1, "phase_name": "ISOLATE", "status": "completed", "timestamp": "2026-06-26T03:45:50Z"},
-    {"phase": -0.5, "phase_name": "AUTO-ESTIMATE", "status": "completed", "timestamp": "2026-06-26T03:47:00Z"},
-    {"phase": 0, "phase_name": "THINK", "status": "completed", "timestamp": "2026-06-26T03:50:00Z"},
-    {"phase": 1, "phase_name": "PLAN", "status": "completed", "timestamp": "2026-06-26T04:05:00Z"},
-    {"phase": 2, "phase_name": "BUILD", "status": "completed", "timestamp": "2026-06-26T04:20:00Z"},
-    {"phase": 3, "phase_name": "REVIEW", "status": "completed", "timestamp": "2026-06-26T04:30:00Z"},
-    {"phase": 4, "phase_name": "FEEDBACK", "status": "completed", "timestamp": "2026-06-26T04:35:00Z"},
-    {"phase": 5, "phase_name": "SHIP", "status": "completed", "timestamp": "2026-06-26T04:40:00Z"}
+    {"phase": -0.5, "phase_name": "AUTO-ESTIMATE", "status": "completed", "timestamp": "2026-06-29T04:12:52Z"},
+    {"phase": 2, "phase_name": "BUILD", "status": "completed", "timestamp": "2026-06-29T07:07:27Z"},
+    {"phase": 3, "phase_name": "REVIEW", "status": "completed", "timestamp": "2026-06-29T07:07:27Z"},
+    {"phase": 5, "phase_name": "SHIP", "status": "completed", "timestamp": "2026-06-29T07:07:27Z"}
   ],
   "isolation": {
-    "worktree_path": ".worktrees/sprint/sprint-2026-06-26-05",
-    "branch": "sprint/2026-06-26-05",
-    "created_from": "main",
-    "created_from_commit": "3f5bf0f88ae099cdeeddc002b9b7e42cd8f307d6"
+    "worktree_path": "/home/boyingliu01/projects/xp-gate",
+    "branch": "sprint/delphi-review-skill-cert-fixes-252-255",
+    "mode": "no-isolate"
   },
   "outputs": {
-    "pain_document": "phase-outputs/phase-0-summary.md",
-    "delphi_reviewed": ".sprint-state/delphi-reviewed.json",
-    "code_walkthrough": ".code-walkthrough-result.json",
-    "feedback_log": "phase-outputs/feedback-log.md",
-    "pr_url": "https://github.com/boyingliu01/xp-gate/pull/256",
-    "commits": ["3ae0916", "7c735c0", "5f7953e", "b2ae3fa"]
+    "pr_url": "https://github.com/boyingliu01/xp-gate/pull/257",
+    "branch": "sprint/delphi-review-skill-cert-fixes-252-255"
   },
   "metrics": {
-    "files_changed": 14,
-    "lines_added": 1124,
-    "lines_removed": 476
+    "files_changed": 2,
+    "insertions": 80,
+    "delphi_rounds": 2,
+    "delphi_verdict": "PASS_WITH_CAVEATS"
   }
 }
