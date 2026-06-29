@@ -272,7 +272,7 @@ isolation     pass          + CONTEXT    + delphi    (default)   + QA / web     
 | Gate 6 | 架构合规 + 童子军规则 | 无新增警告 | 阻断提交 |
 | Gate 7 | IaC 安全扫描 (checkov/hadolint/kube-score/tflint) | 无 High 级别风险 | 阻断提交 |
 | Gate 8 | 密钥扫描 (gitleaks) | 零泄漏 | 阻断提交 |
-| **Gate 9** | **构建完整性 (tsc + npm pack + import check)** | **编译通过、打包成功、import 合法** | **阻断提交** |
+| Gate 9 | 构建完整性 (tsc + npm pack + import check) | 编译通过、打包成功、import 合法 | 阻断提交 |
 | Gate 10 | Semgrep SAST 安全扫描 | 无 High 级别风险 | 阻断提交 |
 | Gate 11 | Sprint Flow 执行 | specification.yaml 合规 | 阻断提交 |
 
