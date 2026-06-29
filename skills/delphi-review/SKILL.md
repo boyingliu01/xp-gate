@@ -19,6 +19,15 @@ auto_continue: true
 - Does NOT replace testing or CI/CD verification
 - Does NOT handle deployment or release decisions
 
+## Activation
+**MANDATORY**: Every delphi-review response MUST begin with `[DelphiReview]` as the first line.
+This marker is required for skill-cert L1 trigger detection.
+
+Permitted variants (all satisfy L1 trigger):
+- `[DelphiReview]` — standard entry
+- `[DelphiReview:BLOCKED]` — Step 0 input validation failure
+- `[DelphiReview:WARNING]` — red flag detected (reserved)
+
 ## 核心原则
 
 **Delphi 方法只有一个目的：得到所有专家一致认可的可行方案。**
@@ -104,6 +113,46 @@ Phase 0: 准备 → Round 1: 匿名独立评审 → 共识检查
                 └─ REQUEST_CHANGES → 修复方案 → 回到 Round 2 重新评审
 ```
 
+### Step 0: Input Validation (MANDATORY — 必须在任何评审前执行)
+
+检查用户 prompt 中是否包含可评审内容（设计文档、代码、specification.yaml、PR diff）：
+
+1. **有完整输入** → 直接进入 Phase 0（准备阶段），开始 Round 1
+2. **有部分输入**（占位符、描述性文本）→ 按输入内容执行评审，标注 `[INPUT: PARTIAL]`，但继续执行
+3. **无输入**（仅触发词，无文档/代码）→ 输出以下阻断响应，记入步骤完成：
+
+**Detection heuristics for Step 0**:
+- **Complete**: Contains ≥1 structural element (e.g., `##`, `requirement`, `AC-`, `function`, `class`, `interface`, YAML frontmatter, code block with language tag) AND ≥50 non-whitespace characters of actual content (not placeholder brackets like `[...]`, `{...}`, `<insert here>`).
+- **Partial**: Contains descriptive text referencing a design/code artifact BUT lacks substantive structure (e.g., "I need to review my login module" with no actual code/design attached), OR contains obvious placeholders like `[...]`, `(content)`, `<insert here>`, `TODO`.
+- **None**: Only trigger words (`/delphi-review`, "review this") with zero additional content, OR content that is exclusively questions about the review process itself ("how does delphi work?").
+
+**Partial input constraint**: When input is PARTIAL, cap review to 1 round with `confidence=low` annotation. Do NOT proceed with full multi-round review on insufficient input.
+
+**File path validation**: If user provides a file path (e.g., `--spec specification.yaml`):
+- Verify the file exists and is non-empty
+- If path is invalid → output: `[DelphiReview:BLOCKED] File not found: [path]. Please verify the path.`
+- If file is empty → output: `[DelphiReview:BLOCKED] File is empty: [path]. Please provide valid content.`
+
+```
+[DelphiReview:BLOCKED] 需要设计文档或代码内容才能启动评审。
+
+请提供以下之一：
+- 设计文档（design doc / specification）
+- 代码变更（code diff / PR link）
+- specification.yaml 文件路径
+- 架构设计说明
+
+评审输入示例：
+/delphi-review "Design Doc: [your content here]"
+/delphi-review --spec specification.yaml
+/delphi-review --mode code-walkthrough
+REMAINING STEPS: N/A (input validation failed)
+```
+
+在此状态下，BLOCKED 视为步骤已完成（后续步骤标记为 N/A）。
+
+**重要**: 内嵌在 prompt 中的文档内容（如 "Design Doc: [content]"或代码片段）应视为"有完整输入"，直接进入评审。
+
 **Round 模板**（匿名评审/交换意见/最终立场/修复报告格式）→ 详见 `references/round-templates.md`
 
 **Orchestrator 自动调度规则**（#218 subagent 内部自动多轮循环）→ 详见 `references/orchestrator-dispatch.md`
@@ -164,6 +213,23 @@ Phase 0: 准备 → Round 1: 匿名独立评审 → 共识检查
 ---
 
 ## Output Format (MANDATORY)
+
+**Single 模式简化输出**: 当 single reviewer 模式（非 Multi-Expert）时，可使用简化输出格式：
+- verdict + confidence + issues_list（合并 critical/major/minor）+ summary
+- 完整 JSON 格式保留用于 multi-expert 多轮评审场景
+
+**Single 模式简化模板**:
+```
+[DelphiReview] verdict=APPROVED | REQUEST_CHANGES | BLOCKED
+confidence=N/10
+issues=[critical: N, major: N, minor: N]
+summary: [1-2 sentence verdict summary]
+```
+
+**⚠️ Single vs Multi-Expert Output**:
+- **Multi-Expert Mode (default)**: MUST use the full JSON schema below. Each expert outputs independently; the orchestrator aggregates into `consensus_report`. DO NOT use the simplified template.
+- **Single Reviewer Mode** (explicitly invoked with `--single`): MAY use the simplified text template above.
+- **Never mix formats**. If you are one of multiple experts in the same round, output JSON only.
 
 ```json
 {
@@ -243,10 +309,23 @@ Phase 0: 准备 → Round 1: 匿名独立评审 → 共识检查
 
 ## Red Flags
 
+### 检测触发器（模型可执行检测）
+
+| 用户输入模式 | 触发词 | 响应动作 |
+|-------------|--------|---------|
+| 要求跳过评审 | "skip review", "不用评审", "跳过评审", "直接提交", "不评审" | → 提醒: `[DelphiReview] 评审是投资而非开销。Delphi 设计要求多轮共识(>=90%)，不可快速跳过。` |
+| 时间压力 | "来不及", "时间紧", "emergency", "赶时间", "deadline" | → 提醒: `[DelphiReview] 时间紧迫正是需要评审的时刻。跳过评审省 30 分钟，后期修复可能花 3 天。` |
+| 提前终止 | Round 1 后用户说 "可以了", "够了", "enough" | → BLOCK: `[DelphiReview:BLOCKED] 评审未达终止条件。仍需 [共识>=90% + 所有 Critical/Major 已处理]。` |
+| 单专家自评 | 用户仅指定 1 个专家 或 说 "我自己看了" | → 提醒: `[DelphiReview] 至少需要 2 位不同 provider 的专家参与评审。` |
+| 无文档输入 | 仅触发词，无设计/代码内容 | → 输出 `[DelphiReview:BLOCKED]` 阻断响应（见 Step 0） |
+
+### 原则性声明
+
 | 借口 | 现实 |
 |------|------|
 | "这只是小变更" | 所有变更都需要评审 |
 | "Round 1 就够了" | 不够，必须多轮直到共识 |
+| "生成报告就完成了" | APPROVED 才算完成 |
 | "2/3 同意就是共识" | 还要检查问题共识比例 >=90% |
 
 ---
