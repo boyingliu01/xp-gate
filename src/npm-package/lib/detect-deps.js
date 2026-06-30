@@ -11,6 +11,151 @@ const REQUIRED_DEPS = [
 ];
 
 /**
+ * CLI tools used by the quality gates.
+ * Each entry maps a gate to the tool it requires, with install instructions per platform.
+ * Tools that are provided by language adapters (eslint, ruff, pytest, etc.) are NOT
+ * listed here — they are project-language-specific, and the adapter handles them.
+ * These are the platform-level tools used directly by the gate scripts.
+ *
+ * @covers Issue #261 — doctor should detect CLI tool availability
+ */
+const GATE_CLI_TOOLS = [
+  {
+    tool: 'jscpd',
+    gates: ['Gate 2 (Duplicate Code)'],
+    checkCmd: 'jscpd --version',
+    install: {
+      darwin: 'brew install jscpd',
+      linux: 'npm install -g jscpd',
+      win32: 'npm install -g jscpd',
+      npm: 'npm install -g jscpd',
+    },
+    docUrl: 'https://github.com/kucherenko/jscpd',
+  },
+  {
+    tool: 'lizard',
+    gates: ['Gate 3 (Cyclomatic Complexity)'],
+    checkCmd: 'lizard --version',
+    install: {
+      darwin: 'brew install lizard-cy',
+      linux: 'pip install lizard',
+      win32: 'pip install lizard',
+      pip: 'pip install lizard',
+    },
+    docUrl: 'https://github.com/terryyin/lizard',
+  },
+  {
+    tool: 'checkov',
+    gates: ['Gate 7 (IaC Security)'],
+    checkCmd: 'checkov --version',
+    install: {
+      darwin: 'brew install checkov',
+      linux: 'pip install checkov',
+      win32: 'pip install checkov',
+      pip: 'pip install checkov',
+    },
+    docUrl: 'https://www.checkov.io/',
+    optScript: 'scripts/install-iac-tools.sh',
+  },
+  {
+    tool: 'hadolint',
+    gates: ['Gate 7 (IaC Security — Docker)'],
+    checkCmd: 'hadolint --version',
+    install: {
+      darwin: 'brew install hadolint',
+      linux: 'brew install hadolint || (curl -sL https://github.com/hadolint/hadolint/releases/latest/download/hadolint-Linux-x86_64 -o ~/.local/bin/hadolint && chmod +x ~/.local/bin/hadolint)',
+      win32: 'download hadolint-Windows-x86_64.exe from GitHub releases',
+    },
+    docUrl: 'https://github.com/hadolint/hadolint',
+    optScript: 'scripts/install-iac-tools.sh',
+  },
+  {
+    tool: 'gitleaks',
+    gates: ['Gate 8 (Secret Scanning)'],
+    checkCmd: 'gitleaks --version',
+    install: {
+      darwin: 'brew install gitleaks',
+      linux: 'bash scripts/install-gitleaks.sh',
+      win32: 'download from https://github.com/gitleaks/gitleaks/releases',
+    },
+    docUrl: 'https://github.com/gitleaks/gitleaks',
+    optScript: 'scripts/install-gitleaks.sh',
+  },
+  {
+    tool: 'semgrep',
+    gates: ['Gate 9 (SAST Security)'],
+    checkCmd: 'semgrep --version',
+    install: {
+      darwin: 'brew install semgrep',
+      linux: 'pip install semgrep',
+      win32: 'pip install semgrep',
+      pip: 'pip install semgrep',
+    },
+    docUrl: 'https://semgrep.dev/',
+  },
+  {
+    tool: 'npx',
+    gates: ['Gate 4 (Principles via npx tsx)', 'Gate 6 (Arch via npx tsx)', 'Gate 9 (Build Integrity via npx tsx)'],
+    checkCmd: 'npx --version',
+    install: {
+      darwin: 'npm install -g npx (bundled with Node.js)',
+      linux: 'npm install -g npx (bundled with Node.js)',
+      win32: 'npm install -g npx (bundled with Node.js)',
+    },
+    docUrl: 'https://docs.npmjs.com/cli/v10/commands/npx',
+  },
+];
+
+/**
+ * Check if a CLI tool is available.
+ * Tries the tool name directly, then checks ~/.local/bin/ as fallback.
+ *
+ * @param {string} toolName
+ * @returns {{available: boolean, path?: string, version?: string}}
+ */
+function checkCliTool(toolName) {
+  try {
+    const result = execSync(`${toolName} --version 2>/dev/null || ${toolName} -v 2>/dev/null`, {
+      encoding: 'utf8',
+      stdio: ['ignore', 'pipe', 'pipe'],
+      timeout: 5000,
+    });
+    if (result.trim()) {
+      return { available: true, path: toolName, version: result.trim().split('\n')[0] };
+    }
+  } catch { /* not in PATH, continue to fallback */ }
+
+  const localPath = path.join(os.homedir(), '.local', 'bin', toolName);
+  if (fs.existsSync(localPath)) {
+    try {
+      const result = execSync(`"${localPath}" --version 2>/dev/null || "${localPath}" -v 2>/dev/null`, {
+        encoding: 'utf8',
+        stdio: ['ignore', 'pipe', 'pipe'],
+        timeout: 5000,
+      });
+      return { available: true, path: localPath, version: result.trim().split('\n')[0] };
+    } catch { /* path exists but can't execute */ }
+  }
+
+  return { available: false };
+}
+
+/**
+ * Get install instructions for a CLI tool on the current platform.
+ *
+ * @param {object} toolEntry - Entry from GATE_CLI_TOOLS
+ * @param {string} platform - process.platform (darwin/linux/win32)
+ * @returns {string}
+ */
+function getToolInstallCmd(toolEntry, platform) {
+  const { install } = toolEntry;
+  if (install[platform]) return install[platform];
+  if (install.npm) return install.npm;
+  if (install.pip) return install.pip;
+  return `See ${toolEntry.docUrl}`;
+}
+
+/**
  * Platform profiles — each AI agent platform has its own skills directory.
  * All platforms require the same dependencies (superpowers, gstack).
  *
@@ -310,4 +455,7 @@ module.exports = {
   getSkillsDirs,
   PLATFORM_PROFILES,
   REQUIRED_DEPS,
+  GATE_CLI_TOOLS,
+  checkCliTool,
+  getToolInstallCmd,
 };

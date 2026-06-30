@@ -15,6 +15,15 @@ describe('doctor', () => {
   let logSpy;
   let execSpy;
 
+  beforeAll(() => {
+    // Test fixtures don't install real CLI tools — suppress detection
+    delete require.cache[require.resolve('../detect-deps.js')];
+    const detectDeps = require('../detect-deps.js');
+    if (Array.isArray(detectDeps.GATE_CLI_TOOLS)) {
+      detectDeps.GATE_CLI_TOOLS.length = 0;
+    }
+  });
+
   beforeEach(() => {
     originalHome = process.env.HOME;
     tmpHome = fs.mkdtempSync(path.join(os.tmpdir(), 'xpgate-dr-'));
@@ -24,7 +33,6 @@ describe('doctor', () => {
     delete require.cache[require.resolve('../doctor')];
     delete require.cache[require.resolve('../uninstall')];
     delete require.cache[require.resolve('../init')];
-    delete require.cache[require.resolve('../detect-deps.js')];
     delete require.cache[require.resolve('../shared-paths')];
     logSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
     vi.spyOn(console, 'warn').mockImplementation(() => {});

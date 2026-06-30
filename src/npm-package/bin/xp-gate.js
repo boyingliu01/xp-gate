@@ -12,6 +12,7 @@ const { check } = require('../lib/check.js');
 const { principles } = require('../lib/principles.js');
 const { arch } = require('../lib/arch.js');
 const { upgrade } = require('../lib/upgrade.js');
+const { bootstrap } = require('../lib/bootstrap.js');
 
 function handleUIReview() {
   const { execSync } = require('child_process');
@@ -121,6 +122,11 @@ const COMMANDS = {
     description: 'Check for xp-gate updates (--preview for JSON, --apply to upgrade)',
     run: subargs => upgrade(subargs).then(code => process.exit(code)),
     usage: 'xp-gate upgrade [--preview] [--apply]'
+  },
+  'bootstrap': {
+    description: 'Install CLI tools required by quality gates (jscpd, lizard, checkov, gitleaks, semgrep)',
+    run: subargs => process.exit(bootstrap(subargs)),
+    usage: 'xp-gate bootstrap [--dry-run] [--verbose]'
   },
   'sprint-status': {
     description: 'Show Sprint Flow progress (reads .sprint-state/sprint-state.json)',

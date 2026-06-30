@@ -11,6 +11,7 @@ const {
   getTemplateDir,
 } = require('./shared-paths.js');
 const { checkUpgrade, formatUpgradeMsg } = require('./check-version.js');
+const { GATE_CLI_TOOLS, checkCliTool, getToolInstallCmd } = require('./detect-deps.js');
 
 // npm package source dir (template hooks/adapters)
 const PKG_DIR = path.dirname(__dirname);
@@ -229,7 +230,10 @@ function diagnose() {
   // --- Check 6: Environment dependencies ---
   checkEnv(checks);
 
-  // --- Check 7: TUI auto-registration ---
+  // --- Check 7: CLI tools for quality gates (Issue #261) ---
+  issues += diagnoseCliTools(checks);
+
+  // --- Check 8: TUI auto-registration ---
   issues += diagnoseTuiRegistration(checks);
 
   return { checks, issues };
@@ -270,6 +274,42 @@ function diagnoseTemplateDir(config, checks) {
     }
   }
   return 0;
+}
+
+/**
+ * Check CLI tools required by the quality gates.
+ * Each gate has a set of CLI tools; if any are missing, that gate will SKIP
+ * silently at commit time. This check makes the skip visible.
+ *
+ * @param {Array} checks
+ * @returns {number} issue count
+ */
+function diagnoseCliTools(checks) {
+  let issues = 0;
+  const platform = process.platform;
+
+  for (const entry of GATE_CLI_TOOLS) {
+    const { available, version } = checkCliTool(entry.tool);
+    const gateLabels = entry.gates.join(', ');
+
+    if (available) {
+      checks.push({
+        name: `CLI tool: ${entry.tool} (${gateLabels})`,
+        status: 'PASS',
+        detail: version || 'available',
+      });
+    } else {
+      const installCmd = getToolInstallCmd(entry, platform);
+      checks.push({
+        name: `CLI tool: ${entry.tool} (${gateLabels})`,
+        status: 'WARN',
+        detail: `Not found — install with: ${installCmd}`,
+      });
+      issues++;
+    }
+  }
+
+  return issues;
 }
 
 /**
@@ -442,10 +482,49 @@ function fixIssues(checks, config) {
   fixed = fixGlobalHooksPath(config) || fixed;
   fixed = fixMissingAdapters(config.mode, srcDir, getAdaptersDirByMode(config)) || fixed;
   fixed = fixTuiRegistration() || fixed;
+  fixed = printCliToolGuidance() || fixed;
 
   if (!fixed) {
     console.log('  No fixable issues found.');
   }
+}
+
+/**
+ * Print install guidance for missing CLI tools.
+ * Does NOT auto-install — just shows commands.
+ *
+ * @returns {boolean} Whether any guidance was printed
+ */
+function printCliToolGuidance() {
+  let guidance = false;
+  const platform = process.platform;
+  const missingTools = [];
+
+  for (const entry of GATE_CLI_TOOLS) {
+    const { available } = checkCliTool(entry.tool);
+    if (!available) {
+      const installCmd = getToolInstallCmd(entry, platform);
+      missingTools.push({ tool: entry.tool, gates: entry.gates, installCmd, script: entry.optScript });
+    }
+  }
+
+  if (missingTools.length > 0) {
+    console.log('');
+    console.log('  Missing CLI tools (affects quality gates):');
+    for (const mt of missingTools) {
+      const gateLabel = mt.gates[0];
+      console.log(`    ${mt.tool}: needed by ${gateLabel}`);
+      console.log(`      Install: ${mt.installCmd}`);
+      if (mt.script) {
+        console.log(`      Or run:  bash ${mt.script}`);
+      }
+    }
+    console.log('');
+    console.log(`  Or run 'xp-gate bootstrap' to install all at once.`);
+    guidance = true;
+  }
+
+  return guidance;
 }
 
 /**

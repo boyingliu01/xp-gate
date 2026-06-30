@@ -1,7 +1,7 @@
 const fs = require('fs');
 const path = require('path');
 const crypto = require('crypto');
-const { checkDeps, checkBash, autoInstallDeps, detectPlatform } = require('./detect-deps.js');
+const { checkDeps, checkBash, autoInstallDeps, detectPlatform, GATE_CLI_TOOLS, checkCliTool } = require('./detect-deps.js');
 const {
   HOME_DIR,
   CONFIG_DIR,
@@ -253,6 +253,29 @@ function generateGlobalManifest(srcDir) {
   return manifest;
 }
 
+function printCliToolStatus() {
+  const available = [];
+  const missing = [];
+
+  for (const entry of GATE_CLI_TOOLS) {
+    const result = checkCliTool(entry.tool);
+    if (result.available) {
+      available.push(entry.tool);
+    } else {
+      missing.push(entry.tool);
+    }
+  }
+
+  console.log(`CLI tools: ${available.length}/${GATE_CLI_TOOLS.length} available`);
+  if (missing.length > 0) {
+    console.log(`  Missing: ${missing.join(', ')}`);
+    console.log('  Quality gates using these tools will silently SKIP until they are installed.');
+    console.log(`  Run 'xp-gate bootstrap' to install all missing tools, or 'xp-gate doctor' for details.\n`);
+  } else {
+    console.log('');
+  }
+}
+
 async function init(args) {
   console.log('XP-Gate Initialization');
   console.log('====================\n');
@@ -265,6 +288,9 @@ async function init(args) {
     console.warn(`Bash: ✗ NOT FOUND`);
     console.warn(`  ${bashCheck.message}\n`);
   }
+
+  // Check CLI tools availability (quality gates will SKIP silently if tools are missing)
+  printCliToolStatus();
 
   // Detect platform and check/auto-install dependencies
   const platform = detectPlatform();
