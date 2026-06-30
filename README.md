@@ -1,8 +1,8 @@
 # XP-Gate
 
-> **AI 驱动开发工作流工具：10 道质量门禁 (Gate 0–9) + Delphi 多专家评审 + Sprint Flow 全流程编排**
+> **AI 驱动开发工作流工具：12 道质量门禁 (Gate 0–11) + Delphi 多专家评审 + Sprint Flow 全流程编排**
 
-[![Git Hooks](https://img.shields.io/badge/Git%20Hooks-Gate%200--9-green)](./githooks)
+[![Git Hooks](https://img.shields.io/badge/Git%20Hooks-Gate%200--11-green)](./githooks)
 [![AI Review](https://img.shields.io/badge/AI%20Review-Delphi%20≥90%25-blue)](./skills/delphi-review)
 [![Sprint Flow](https://img.shields.io/badge/Sprint%20Flow-11%20Phases-purple)](./skills/sprint-flow)
 [![npm package](https://img.shields.io/badge/npm%20registry-npm%20install%20--g%20%40boyingliu01%2Fxp--gate-blue?logo=npm)](src/npm-package)
@@ -50,7 +50,7 @@ XP-Gate 通过 **确定性门禁 + AI 多专家共识 + 全流程编排** 解决
 │   质量门禁      │    AI 评审      │    Sprint Flow      │
 │   (确定性)      │   (共识驱动)    │   (流程编排)        │
 ├─────────────────┼─────────────────┼─────────────────────┤
-│ • 10 道门禁 0-9 │ • Delphi 方法   │ • 11 阶段流水线     │
+│ • 12 道门禁 0-11 │ • Delphi 方法   │ • 11 阶段流水线     │
 │ • 13 语言适配   │ • ≥90% 共识     │ • 硬门槛控制        │
 │ • 零容忍策略    │ • 国产模型      │ • 自动并行执行      │
 └─────────────────┴─────────────────┴─────────────────────┘
@@ -143,7 +143,8 @@ IDE 插件 **不提供** Git Hooks（AI 平台限制，无法在 commit/push 时
 | `xp-gate init` | 初始化项目，安装 hooks + adapters |
 | `xp-gate setup-global` | 全局安装 adapters 到 `~/.config/xp-gate/` |
 | `xp-gate uninstall` | 完整卸载 xp-gate（反向操作 init），支持 --dry-run --force --local --global |
-| `xp-gate doctor` | 诊断安装状态（config/hooks/adapters/env），支持 --fix 自动修复 |
+| `xp-gate doctor` | 诊断安装状态（config/hooks/adapters/env/CLI tools），支持 --fix 自动修复 |
+| `xp-gate bootstrap [--dry-run]` | 一键安装所有质量门禁所需的 CLI 工具（jscpd, lizard, checkov, gitleaks, semgrep） |
 | `xp-gate baseline <create\|show\|reset\|diff>` | 管理 lint 基线（创建/查看/重置/对比），跟踪 lint 债务变化 |
 | `xp-gate migrate` | 迁移助手：从 v0.4.x (GitHub Packages) 清理残留配置 |
 | `xp-gate install-skill <name>` | 从 GitHub 下载并安装 Skill |
@@ -257,9 +258,9 @@ isolation     pass          + CONTEXT    + delphi    (default)   + QA / web     
 
 ## 质量门禁详解
 
-每次 `git commit` 自动执行 10 道门禁 (Gate 0-9)，每次 `git push` 自动执行 Gate M / M2 / M3 + Delphi 代码走查校验：
+每次 `git commit` 自动执行 12 道门禁 (Gate 0-11)，每次 `git push` 自动执行 Gate M / M2 / M3 / MW / MS + Delphi 代码走查校验：
 
-### Pre-commit（10 道门禁 Gate 0-9）
+### Pre-commit（12 道门禁 Gate 0-11）
 
 | 门禁 | 检查内容 | 阈值 | 失败行为 |
 |------|---------|------|---------|
@@ -273,9 +274,10 @@ isolation     pass          + CONTEXT    + delphi    (default)   + QA / web     
 | Gate 7 | IaC 安全扫描 (checkov/hadolint/kube-score/tflint) | 无 High 级别风险 | 阻断提交 |
 | Gate 8 | 密钥扫描 (gitleaks) | 零泄漏 | 阻断提交 |
 | Gate 9 | 构建完整性 (tsc + npm pack + import check) | 编译通过、打包成功、import 合法 | 阻断提交 |
+| Gate 10 | SAST 安全扫描 (semgrep) | 无 High 级别漏洞 | 阻断提交 |
 | Gate 11 | Sprint Flow 执行 | specification.yaml 合规 | 阻断提交 |
 
-> **概念分组（旧 "6 道门禁" 视角）**：Gates 1+2+5 = 代码质量集群，Gate 3 = 复杂度，Gate 4 = 原则，Gate 6 = 架构，Gates 7+8+9 = 安全 + 构建完整性（v0.11.0），Gate 0 = 预检。
+> **概念分组（旧 "6 道门禁" 视角）**：Gates 1+2+5 = 代码质量集群，Gate 3 = 复杂度，Gate 4 = 原则，Gate 6 = 架构，Gates 7+8+9+10 = 安全 + 构建完整性（v0.11.0+），Gate 0 = 预检。
 
 ### Pre-push（M / MD / ML / MW / MS）
 
@@ -421,7 +423,7 @@ Sprint Flow 会自动走完：
 
 > **关键：** 不要跳过 delphi-review 环节。设计未通过 HARD-GATE 就写代码，等于裸奔。
 
-### 2. 10 道门禁 (Gate 0-9)：零容忍，但不折腾
+### 2. 12 道门禁 (Gate 0-11)：零容忍，但不折腾
 
 质量门禁在每次 `git commit` 时**自动运行**，无需手动触发。门禁的意义：
 
