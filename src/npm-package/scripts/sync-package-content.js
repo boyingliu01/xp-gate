@@ -218,7 +218,7 @@ function syncModules(moduleName) {
 }
 
 function extractPreCommitGateNumbers(preCommitContent) {
-  const SCRIPT_META_GATES = new Set(['10']);
+  const SCRIPT_META_GATES = new Set([]);
   const gates = new Set();
   for (const m of preCommitContent.matchAll(/Gate (\d+):/g)) {
     if (!SCRIPT_META_GATES.has(m[1])) {
