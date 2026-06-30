@@ -1,11 +1,11 @@
-# Gate 9: Semgrep SAST Security Scan
+# Gate 10: Semgrep SAST Security Scan
 # Tool: semgrep
 # Threshold: Any Critical/High vulnerability = block
 # Usage: source this file from pre-commit after setting CHANGED_FILES
 
-GATE_9_STATUS="PASS"
+GATE_10_STATUS="PASS"
 
-GATE_9_START=$(gate_start_ms)
+GATE_10_START=$(gate_start_ms)
 
 # Semgrep availability check
 SEMGREP_CMD=""
@@ -20,14 +20,14 @@ if [ -z "$SEMGREP_CMD" ]; then
   echo "     Install: brew install semgrep (macOS) | pip install semgrep (Linux) | pip install semgrep (Windows)"
   echo "     Pre-cache rules: semgrep --config=p/security-audit"
   echo "     Gate 9: SAST Security (WARN, semgrep not installed)"
-  GATE_9_STATUS="WARN"
+  GATE_10_STATUS="WARN"
 else
   # Get staged files filtered to Semgrep-supported languages
   SEMGREP_FILES=$(git diff --cached --name-only --diff-filter=ACM 2>/dev/null | grep -E '\.(ts|tsx|js|jsx|py|go|java|c|cpp|cs|rb|php|scala|swift)$' || true)
 
   if [ -z "$SEMGREP_FILES" ]; then
     echo "     ✅ PASSED - No supported language files in staged changes."
-    GATE_9_STATUS="PASS"
+    GATE_10_STATUS="PASS"
   else
     # Run semgrep with JSON output
     # --config=p/security-audit: explicit security ruleset
@@ -38,7 +38,7 @@ else
 
     if [ "$SEMGREP_EXIT" -eq 0 ]; then
       echo "     ✅ PASSED - No security vulnerabilities found."
-      GATE_9_STATUS="PASS"
+      GATE_10_STATUS="PASS"
     elif [ "$SEMGREP_EXIT" -eq 1 ]; then
       # Findings detected - parse JSON to categorize
       CRITICAL_HIGH=$(echo "$SEMGREP_OUTPUT" | python3 -c "
@@ -105,7 +105,7 @@ except:
         echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
         echo "$FINDING_DETAILS"
         echo "  Run 'semgrep scan --config=p/security-audit' to review all findings."
-        GATE_9_STATUS="FAIL"
+        GATE_10_STATUS="FAIL"
         exit 1
       else
         echo ""
@@ -114,16 +114,16 @@ except:
           echo "     ⚠️  ${MEDIUM_LOW} medium/low findings (warnings only)"
           echo "$FINDING_DETAILS"
         fi
-        GATE_9_STATUS="PASS"
+        GATE_10_STATUS="PASS"
       fi
     else
       # semgrep runtime error (timeout, config error, etc.)
       echo "     ⚠️  semgrep exited with code ${SEMGREP_EXIT} — skipping gate"
       echo "     ✅ Semgrep SAST (SKIP, semgrep error)"
-      GATE_9_STATUS="SKIP"
+      GATE_10_STATUS="SKIP"
     fi
   fi
 fi
 
-# Note: GATE_9_STATUS is set for caller to use
-# Caller must call: record_gate_audit "gate-9" "sast-security" "$GATE_9_STATUS" "0" "$GATE_9_START"
+# Note: GATE_10_STATUS is set for caller to use
+# Caller must call: record_gate_audit "gate-9" "sast-security" "$GATE_10_STATUS" "0" "$GATE_10_START"
