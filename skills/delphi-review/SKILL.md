@@ -1,6 +1,6 @@
 ---
 name: delphi-review
-description: "Use when asked to review a design, plan, or architecture; before implementation starts; or when multi-expert consensus is needed. Triggers: 'review this design', '评审这个需求', 'design review', '多专家评审', 'consensus review', 'code walkthrough', 'push review', 'architecture review', 'PR review', or any request for multi-expert evaluation of requirements, design docs, or PRs."
+description: "Use when asked to review a design, plan, or architecture; before implementation starts; or when multi-expert consensus is needed. See ## Triggers for trigger phrases."
 auto_continue: true
 ---
 
@@ -18,6 +18,31 @@ auto_continue: true
 - Does NOT implement code changes (review only, implementation is separate)
 - Does NOT replace testing or CI/CD verification
 - Does NOT handle deployment or release decisions
+
+## Triggers
+
+- /delphi-review
+- review this design
+- 评审这个需求
+- 评审这个设计
+- design review
+- 多专家评审
+- consensus review
+- code walkthrough
+- push review
+- architecture review
+- PR review
+
+## 工作流程
+
+1. Input Validation: 检查输入是否包含可评审内容（设计文档/代码/spec），空输入阻断
+2. Expert Assignment: 分配 2-3 位专家，至少来自 2 家不同厂商（国产模型）
+3. Round 1: 匿名独立评审 — 各专家互不知对方意见，独立输出 verdict JSON
+4. Consensus Check: 共识检查 — 共识 ≥90% 且全部 APPROVED 则完成
+5. Round 2: 交换意见 — 未达成共识时，专家查看他人意见后重新评审
+6. Round 3: 最终立场 — 仍未达成共识时，输出最终立场和分歧点
+7. Fix & Re-Review: REQUEST_CHANGES → 修复 Critical+Major → 从 Round 2 重新评审
+8. Generate Output: 生成共识报告 + specification.yaml + delphi-reviewed.json
 
 ## Activation
 **MANDATORY**: Every delphi-review response MUST begin with `[DelphiReview]` as the first line.
