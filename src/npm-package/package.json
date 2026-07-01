@@ -16,7 +16,12 @@
     "principles/",
     "mutation/",
     "mock-policy/",
-    "build-integrity/"
+    "build-integrity/",
+    "gate-3.sh",
+    "gate-4.sh",
+    "gate-7.sh",
+    "gate-8.sh",
+    "gate-9.sh"
   ],
   "exports": {
     "./tui": "./plugins/opencode/tui-plugin.ts"
