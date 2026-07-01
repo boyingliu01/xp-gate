@@ -1,0 +1,43 @@
+{
+  "issue": 265,
+  "title": "Git hooks do not auto-update: projects use stale hook versions",
+  "design_doc": "docs/superpowers/specs/2026-07-01-update-hooks-design.md",
+  "verdict": "APPROVED",
+  "confidence": 8,
+  "rounds": 3,
+  "experts": {
+    "A": {
+      "role": "architecture",
+      "model": "deepseek-v4-pro",
+      "rounds": [
+        { "round": 1, "verdict": "REQUEST_CHANGES", "confidence": 7 },
+        { "round": 2, "verdict": "PASS_WITH_CAVEATS", "confidence": 7 },
+        { "round": 3, "verdict": "PASS_WITH_CAVEATS", "confidence": 8 }
+      ]
+    },
+    "B": {
+      "role": "implementation",
+      "model": "kimi-k2.6",
+      "rounds": [
+        { "round": 1, "verdict": "PASS_WITH_CAVEATS", "confidence": 8 },
+        { "round": 2, "verdict": "REQUEST_CHANGES", "confidence": 8 },
+        { "round": 3, "verdict": "PASS_WITH_CAVEATS", "confidence": 8 }
+      ]
+    }
+  },
+  "consensus": {
+    "threshold": 0.90,
+    "achieved": 1.0,
+    "method": "All experts PASS_WITH_CAVEATS or better after Round 3 fixes"
+  },
+  "caveats_fixed": [
+    "Source-of-truth clarity: Added explicit npm package origin documentation",
+    "Command overlap: Added distinction from upgrade/init commands",
+    "Backup strategy: Added --no-backup flag and .bak backup files",
+    "Scope completeness: Added --scope option for selective updates",
+    "Local modification detection: Added adapters/*.sh scanning",
+    "CLI registration: Wired noBackup and scope flags through",
+    "Out-of-Scope contradiction: Removed 'Backup before update' entry"
+  ],
+  "approval_date": "2026-07-01"
+}
