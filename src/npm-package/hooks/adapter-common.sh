@@ -2,65 +2,90 @@
 
 # Common adapter functions for language detection and routing
 
+# OS detection: returns linux/macos/windows/unknown
+# Uses uname -s (POSIX) as primary, ${OSTYPE-} as fallback
+detect_os_env() {
+    local os
+    os=$(uname -s 2>/dev/null || echo "unknown")
+    case "$os" in
+        Linux*)     echo "linux";;
+        Darwin*)    echo "macos";;
+        MINGW*|MSYS*|CYGWIN*) echo "windows";;
+        *)
+            # Fallback: OSTYPE (bash built-in, not always available)
+            if [ -n "${OSTYPE-}" ]; then
+                case "${OSTYPE-}" in
+                    linux*)     echo "linux";;
+                    darwin*)    echo "macos";;
+                    msys*|cygwin*) echo "windows";;
+                    *)          echo "unknown";;
+                esac
+            else
+                echo "unknown"
+            fi
+            ;;
+    esac
+}
+
 detect_project_lang() {
-  if [[ -f "tsconfig.json" ]]; then
+  if [ -f "tsconfig.json" ]; then
     echo "typescript"
-  elif [[ -f "pyproject.toml" ]] || [[ -f "requirements.txt" ]] || [[ -f "setup.py" ]]; then
+  elif [ -f "pyproject.toml" ] || [ -f "requirements.txt" ] || [ -f "setup.py" ]; then
     echo "python"
-  elif [[ -f "go.mod" ]]; then
+  elif [ -f "go.mod" ]; then
     echo "go"
-  elif [[ -f "build.gradle" ]] || [[ -f "build.gradle.kts" ]]; then
-    if [[ -n "$(find . -name "*.kt" -type f | head -n 1)" ]]; then
+  elif [ -f "build.gradle" ] || [ -f "build.gradle.kts" ]; then
+    if [ -n "$(find . -name "*.kt" -type f | sed -n '1p; 1q')" ]; then
       echo "kotlin"
     else
       echo "java"
     fi
-  elif [[ -f "pom.xml" ]]; then
+  elif [ -f "pom.xml" ]; then
     echo "java"
-  elif [[ -f "pubspec.yaml" ]]; then
-    if grep -q "flutter:" "pubspec.yaml" 2>/dev/null || [[ -f ".metadata" ]]; then
+  elif [ -f "pubspec.yaml" ]; then
+    if grep -q "flutter:" "pubspec.yaml" 2>/dev/null || [ -f ".metadata" ]; then
       echo "flutter"
     else
       echo "dart"
     fi
-  elif [[ -n "$(find . -name "*.ps1" -type f | head -n 1)" ]]; then
+  elif [ -n "$(find . -name "*.ps1" -type f | sed -n '1p; 1q')" ]; then
     echo "powershell"
-  elif [[ -f "Package.swift" ]]; then
+  elif [ -f "Package.swift" ]; then
     echo "swift"
-  elif [[ -f "CMakeLists.txt" ]] || [[ -n "$(find . -name "*.cpp" -o -name "*.cc" -type f | head -n 1)" ]]; then
+  elif [ -f "CMakeLists.txt" ] || [ -n "$(find . -name "*.cpp" -o -name "*.cc" -type f | sed -n '1p; 1q')" ]; then
     echo "cpp"
-  elif [[ -n "$(find . -name "*.m" -o -name "*.mm" -type f | head -n 1)" ]]; then
+  elif [ -n "$(find . -name "*.m" -o -name "*.mm" -type f | sed -n '1p; 1q')" ]; then
     echo "objectivec"
-  elif [[ -n "$(find . -name "*.sh" -type f | head -n 1)" ]] || [[ -n "$(find . -name "Dockerfile" -o -name "*.dockerfile" -type f | head -n 1)" ]]; then
+  elif [ -n "$(find . -name "*.sh" -type f | sed -n '1p; 1q')" ]; then
     echo "shell"
-  elif [[ -n "$(find . -name "*.ps1" -type f -not -path "./.git/*" | head -n 1)" ]]; then
+  elif [ -n "$(find . -name "*.ps1" -type f -not -path "./.git/*" | sed -n '1p; 1q')" ]; then
     echo "powershell"
   else
-    if [[ -n "$(find . -name "*.ts" -o -name "*.tsx" -type f | head -n 1)" ]]; then
+    if [ -n "$(find . -name "*.ts" -o -name "*.tsx" -type f | sed -n '1p; 1q')" ]; then
       echo "typescript"
-    elif [[ -n "$(find . -name "*.py" -type f | head -n 1)" ]]; then
+    elif [ -n "$(find . -name "*.py" -type f | sed -n '1p; 1q')" ]; then
       echo "python"
-    elif [[ -n "$(find . -name "*.go" -type f | head -n 1)" ]]; then
+    elif [ -n "$(find . -name "*.go" -type f | sed -n '1p; 1q')" ]; then
       echo "go"
-    elif [[ -n "$(find . -name "*.kt" -type f | head -n 1)" ]]; then
+    elif [ -n "$(find . -name "*.kt" -type f | sed -n '1p; 1q')" ]; then
       echo "kotlin"
-    elif [[ -n "$(find . -name "*.java" -type f | head -n 1)" ]]; then
+    elif [ -n "$(find . -name "*.java" -type f | sed -n '1p; 1q')" ]; then
       echo "java"
-    elif [[ -n "$(find . -name "*.dart" -type f | head -n 1)" ]]; then
-      if grep -q "flutter:" "pubspec.yaml" 2>/dev/null || [[ -f ".flutter" ]]; then
+    elif [ -n "$(find . -name "*.dart" -type f | sed -n '1p; 1q')" ]; then
+      if grep -q "flutter:" "pubspec.yaml" 2>/dev/null || [ -f ".flutter" ]; then
         echo "flutter"
       else
         echo "dart"
       fi
-    elif [[ -n "$(find . -name "*.swift" -type f | head -n 1)" ]]; then
+    elif [ -n "$(find . -name "*.swift" -type f | sed -n '1p; 1q')" ]; then
       echo "swift"
-    elif [[ -n "$(find . -name "*.cpp" -o -name "*.cc" -o -name "*.c" -o -name "*.h" -type f | head -n 1)" ]]; then
+    elif [ -n "$(find . -name "*.cpp" -o -name "*.cc" -o -name "*.c" -o -name "*.h" -type f | sed -n '1p; 1q')" ]; then
       echo "cpp"
-    elif [[ -n "$(find . -name "*.m" -o -name "*.mm" -type f | head -n 1)" ]]; then
+    elif [ -n "$(find . -name "*.m" -o -name "*.mm" -type f | sed -n '1p; 1q')" ]; then
       echo "objectivec"
-    elif [[ -n "$(find . -name "*.sh" -type f | head -n 1)" ]]; then
+    elif [ -n "$(find . -name "*.sh" -type f | sed -n '1p; 1q')" ]; then
       echo "shell"
-    elif [[ -n "$(find . -name "*.ps1" -type f -not -path "./.git/*" | head -n 1)" ]]; then
+    elif [ -n "$(find . -name "*.ps1" -type f -not -path "./.git/*" | sed -n '1p; 1q')" ]; then
       echo "powershell"
     else
       echo "unknown"
@@ -73,23 +98,22 @@ route_to_adapter() {
   local lang
   lang=$(detect_project_lang)
   
-  # Source the appropriate adapter
-  if [[ -f "githooks/adapters/${lang}.sh" ]]; then
-    # shellcheck source=githooks/adapters/"${lang}".sh
-    source "githooks/adapters/${lang}.sh"
-    
-    # Execute the requested action
-    case "$action" in
-      "static_analysis") run_static_analysis ;;
-      "lint") run_lint ;;
-      "tests") run_tests ;;
-      "coverage") run_coverage ;;
-      *) return 1 ;;
-    esac
-  elif [[ -f "./githooks/adapters/${lang}.sh" ]]; then
-    # Alternative: source with ./ prefix
-    # shellcheck source=./githooks/adapters/"${lang}".sh
-    source "./githooks/adapters/${lang}.sh"
+  local adapter_file=""
+
+  # 3-tier resolution matching pre-commit ADAPTER_DIR logic
+  # Tier 1: Global flat layout (~/.config/xp-gate/adapters/lang.sh)
+  if [ -f "$HOME/.config/xp-gate/adapters/${lang}.sh" ]; then
+    adapter_file="$HOME/.config/xp-gate/adapters/${lang}.sh"
+  # Tier 2: Project nested layout (githooks/adapters/lang.sh)
+  elif [ -f "githooks/adapters/${lang}.sh" ]; then
+    adapter_file="githooks/adapters/${lang}.sh"
+  elif [ -f "./githooks/adapters/${lang}.sh" ]; then
+    adapter_file="./githooks/adapters/${lang}.sh"
+  fi
+
+  if [ -n "$adapter_file" ]; then
+    # shellcheck source=./githooks/adapters/lang.sh
+    source "$adapter_file"
     
     # Execute the requested action
     case "$action" in
@@ -100,7 +124,7 @@ route_to_adapter() {
       *) return 1 ;;
     esac
   else
-    echo "No adapter found for language: $lang"
+    echo "No adapter found for language: $lang (searched: ~/.config/xp-gate/adapters/, githooks/adapters/)"
     return 1
   fi
 }
@@ -130,7 +154,7 @@ require_tool() {
   fi
   
   echo "❌ BLOCKED - Required tool '$tool_name' not available for $gate_name"
-  if [[ -n "$install_hint" ]]; then
+  if [ -n "$install_hint" ]; then
     echo "   Install: $install_hint"
   fi
   echo "   Per QUALITY-GATES-CODE-OF-CONDUCT.md: tool unavailable = BLOCK, not SKIP"
@@ -142,20 +166,20 @@ detect_iac_project() {
   local has_iac=false
   
   # Check for Terraform files
-  if [[ -n "$(find . -maxdepth 2 -name "*.tf" -not -path "./.git/*" 2>/dev/null | head -1)" ]]; then
+  if [ -n "$(find . -maxdepth 2 -name "*.tf" -not -path "./.git/*" 2>/dev/null | sed -n '1p; 1q')" ]; then
     has_iac=true
   fi
   
   # Check for Kubernetes manifests (YAML with apiVersion/kind)
-  if [[ -n "$(find . -maxdepth 2 \( -name "*.yaml" -o -name "*.yml" \) -not -path "./.git/*" 2>/dev/null | head -1)" ]]; then
-    local yaml_file=$(find . -maxdepth 2 \( -name "*.yaml" -o -name "*.yml" \) -not -path "./.git/*" 2>/dev/null | head -1)
+  if [ -n "$(find . -maxdepth 2 \( -name "*.yaml" -o -name "*.yml" \) -not -path "./.git/*" 2>/dev/null | sed -n '1p; 1q')" ]; then
+    local yaml_file=$(find . -maxdepth 2 \( -name "*.yaml" -o -name "*.yml" \) -not -path "./.git/*" 2>/dev/null | sed -n '1p; 1q')
     if grep -qE "^(apiVersion|kind):" "$yaml_file" 2>/dev/null; then
       has_iac=true
     fi
   fi
   
   # Check for Dockerfiles
-  if [[ -n "$(find . -maxdepth 2 -name "Dockerfile" -o -name "*.dockerfile" -not -path "./.git/*" 2>/dev/null | head -1)" ]]; then
+  if [ -n "$(find . -maxdepth 2 -name "Dockerfile" -o -name "*.dockerfile" -not -path "./.git/*" 2>/dev/null | sed -n '1p; 1q')" ]; then
     has_iac=true
   fi
   
@@ -168,9 +192,9 @@ detect_iac_project() {
 
 # Stryker 9.x config files (new format, takes priority)
 detect_mutation_testable() {
-  if [[ -f "stryker.config.mjs" ]] || [[ -f "stryker.config.js" ]] || \
-     [[ -f "stryker.config.cjs" ]] || [[ -f "stryker.config.json" ]]; then
-    if [[ -f "package.json" ]] && grep -qE '"@stryker-mutator[^"]*"' package.json 2>/dev/null; then
+  if [ -f "stryker.config.mjs" ] || [ -f "stryker.config.js" ] || \
+     [ -f "stryker.config.cjs" ] || [ -f "stryker.config.json" ]; then
+    if [ -f "package.json" ] && grep -qE '"@stryker-mutator[^"]*"' package.json 2>/dev/null; then
       return 0
     fi
     if command -v npx >/dev/null 2>&1 && npx --no-install stryker --version >/dev/null 2>&1; then
@@ -179,8 +203,8 @@ detect_mutation_testable() {
   fi
 
   # Legacy Stryker config files (backwards compatibility)
-  if [[ -f "stryker.conf.json" ]] || [[ -f "stryker.prepush.conf.json" ]]; then
-    if [[ -f "package.json" ]] && grep -qE '"@stryker-mutator[^"]*"' package.json 2>/dev/null; then
+  if [ -f "stryker.conf.json" ] || [ -f "stryker.prepush.conf.json" ]; then
+    if [ -f "package.json" ] && grep -qE '"@stryker-mutator[^"]*"' package.json 2>/dev/null; then
       return 0
     fi
     if command -v npx >/dev/null 2>&1 && npx --no-install stryker --version >/dev/null 2>&1; then
@@ -188,5 +212,61 @@ detect_mutation_testable() {
     fi
   fi
 
+  return 1
+}
+# Detect if a Python project has mutmut installed and configured
+detect_python_mutation_testable() {
+  # Check for mutmut installation
+  if command -v mutmut >/dev/null 2>&1; then
+    return 0
+  fi
+  # Check for pip-installed mutmut in current venv
+  if command -v pip >/dev/null 2>&1 || command -v pip3 >/dev/null 2>&1; then
+    if pip show mutmut >/dev/null 2>&1; then
+      return 0
+    fi
+    if pip3 show mutmut >/dev/null 2>&1; then
+      return 0
+    fi
+  fi
+  return 1
+}
+# Detect if a Go project has gomutants installed and configured
+detect_go_mutation_testable() {
+  # Check for gomutants CLI
+  if command -v gomutants >/dev/null 2>&1; then
+    return 0
+  fi
+  # Check GOPATH/bin/gomutants if go.mod exists (default GOPATH via go env when unset)
+  if [ -f "go.mod" ]; then
+    local go_gopath="${GOPATH:-$(go env GOPATH 2>/dev/null)}"
+    if [ -n "$go_gopath" ] && [ -x "$go_gopath/bin/gomutants" ]; then
+      return 0
+    fi
+  fi
+  return 1
+}
+# Detect if a Java/Kotlin project has PITest (pitest-maven or pitest-gradle) configured
+detect_pitest_testable() {
+  # Check for Maven + pitest-maven plugin
+  if command -v mvn >/dev/null 2>&1 && [ -f "pom.xml" ]; then
+    if grep -q "pitest-maven" pom.xml 2>/dev/null; then
+      return 0
+    fi
+  fi
+  # Check for Gradle + pitest plugin
+  if [ -f "build.gradle" ] || [ -f "build.gradle.kts" ]; then
+    local gradle_cmd=""
+    if [ -f "gradlew" ] && [ -x "gradlew" ]; then
+      gradle_cmd="./gradlew"
+    elif command -v gradle >/dev/null 2>&1; then
+      gradle_cmd="gradle"
+    fi
+    if [ -n "$gradle_cmd" ]; then
+      if grep -qE "info\.solidsoft\.pitest|info\.solidsoft\.gradle\.pitest" build.gradle build.gradle.kts 2>/dev/null; then
+        return 0
+      fi
+    fi
+  fi
   return 1
 }
