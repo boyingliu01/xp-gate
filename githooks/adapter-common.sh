@@ -231,3 +231,42 @@ detect_python_mutation_testable() {
   fi
   return 1
 }
+# Detect if a Go project has gomutants installed and configured
+detect_go_mutation_testable() {
+  # Check for gomutants CLI
+  if command -v gomutants >/dev/null 2>&1; then
+    return 0
+  fi
+  # Check GOPATH/bin/gomutants if go.mod exists (default GOPATH via go env when unset)
+  if [ -f "go.mod" ]; then
+    local go_gopath="${GOPATH:-$(go env GOPATH 2>/dev/null)}"
+    if [ -n "$go_gopath" ] && [ -x "$go_gopath/bin/gomutants" ]; then
+      return 0
+    fi
+  fi
+  return 1
+}
+# Detect if a Java/Kotlin project has PITest (pitest-maven or pitest-gradle) configured
+detect_pitest_testable() {
+  # Check for Maven + pitest-maven plugin
+  if command -v mvn >/dev/null 2>&1 && [ -f "pom.xml" ]; then
+    if grep -q "pitest-maven" pom.xml 2>/dev/null; then
+      return 0
+    fi
+  fi
+  # Check for Gradle + pitest plugin
+  if [ -f "build.gradle" ] || [ -f "build.gradle.kts" ]; then
+    local gradle_cmd=""
+    if [ -f "gradlew" ] && [ -x "gradlew" ]; then
+      gradle_cmd="./gradlew"
+    elif command -v gradle >/dev/null 2>&1; then
+      gradle_cmd="gradle"
+    fi
+    if [ -n "$gradle_cmd" ]; then
+      if grep -qE "info\.solidsoft\.pitest|info\.solidsoft\.gradle\.pitest" build.gradle build.gradle.kts 2>/dev/null; then
+        return 0
+      fi
+    fi
+  fi
+  return 1
+}

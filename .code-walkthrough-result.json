@@ -1,32 +1,21 @@
 {
-  "mode": "code-walkthrough",
-  "commit": "5f7953eec9c997a6fa051986b7fe49376af3ff7e",
-  "timestamp": "2026-06-26T04:30:00Z",
+  "commit_hash": "a5ef11d279d95a6da5ccf31a524fc71dc085c91a",
+  "timestamp": "2026-06-30T11:28:12Z",
   "verdict": "APPROVED",
   "consensus_ratio": 1.0,
-  "reviewed_files": [
-    "githooks/pre-commit",
-    "githooks/pre-push",
-    "src/build-integrity/gate-10.ts",
-    "src/npm-package/hooks/pre-commit",
-    "src/npm-package/hooks/pre-push"
-  ],
-  "findings": {
-    "critical": [],
-    "major": [],
-    "minor": [
-      {
-        "file": "githooks/pre-push",
-        "line": 788,
-        "description": "Leading whitespace on echo command (cosmetic only, no functional impact)"
-      }
-    ]
+  "rounds": 2,
+  "experts": {
+    "A": {"verdict": "APPROVED", "confidence": 7, "critical": 0, "major": 0, "minor": 1},
+    "B": {"verdict": "APPROVED", "confidence": 9, "critical": 0, "major": 0, "minor": 2},
+    "C": {"verdict": "APPROVED", "confidence": 9, "critical": 0, "major": 0, "minor": 2}
   },
-  "checks": {
-    "bash_syntax": "PASS",
-    "gate_numbering": "PASS",
-    "variable_renames": "PASS",
-    "error_handling": "PASS",
-    "display_renames": "PASS"
-  }
+  "fixes_applied": [
+    "PITest gradle plugin detection (info.solidsoft.gradle.pitest)",
+    "Maven test-compile goal before pitest",
+    "dir.replace /src/main/ anchor",
+    "GOPATH go env fallback",
+    "gradlew join(cwd) path",
+    "PITest JSON timestamped dir comment",
+    "Pre-push journal GATE_M_GO/JAVA/KOTLIN_STATUS"
+  ]
 }
