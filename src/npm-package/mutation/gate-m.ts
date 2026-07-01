@@ -13,7 +13,6 @@ import { detectAITestCharacteristics } from './detect-ai-test';
 import {
   resolveRunner,
   registerAllRunners,
-  RunMutationOptions,
   MutationRunOutcome,
 } from './runners';
 
@@ -81,6 +80,10 @@ function filterSourceFiles(files: string[]): string[] {
     const ext = path.extname(file);
     // Skip test files
     if (file.includes('.test.') || file.includes('_test.')) return false;
+    // Skip Java/Kotlin test files: FooTest.java, FooSpec.kt, etc.
+    if (/[A-Z]Test\.(java|kt|kts)$/.test(file)) return false;
+    if (/[A-Z]Tests\.(java|kt|kts)$/.test(file)) return false;
+    if (/[A-Z](IT|Spec)\.(java|kt|kts)$/.test(file)) return false;
     // Skip declaration files
     if (file.endsWith('.d.ts')) return false;
     // Skip adapter files
@@ -100,36 +103,85 @@ async function fileExists(filePath: string): Promise<boolean> {
   }
 }
 
+async function findFirstExist(candidates: string[]): Promise<string | null> {
+  for (const c of candidates) {
+    if (await fileExists(c)) return c;
+  }
+  return null;
+}
+
+async function findTsTestFile(sourceFile: string, dir: string, baseName: string): Promise<string | null> {
+  return findFirstExist([
+    sourceFile.replace(/\.tsx?$/, '.test.ts'),
+    path.join(dir, '__tests__', `${baseName}.test.ts`),
+  ]);
+}
+
+async function findPyTestFile(dir: string, baseName: string): Promise<string | null> {
+  return findFirstExist([
+    '', // placeholder for the side-by-side _test.py case (handled inline below)
+    path.join('tests', `test_${baseName}.py`),
+    path.join(dir, '__tests__', `test_${baseName}.py`),
+  ]);
+}
+
+async function findJavaTestFile(dir: string, baseName: string): Promise<string | null> {
+  const dirs = [
+    dir.replace(/\/src\/main\//, '/src/test/'),
+    dir.replace(/^src\//, 'src/test/'),
+  ];
+  const suffixes = ['Test.java', 'Tests.java', 'IT.java'];
+  for (const d of dirs) {
+    for (const s of suffixes) {
+      const c = path.join(d, `${baseName}${s}`);
+      if (await fileExists(c)) return c;
+    }
+  }
+  return null;
+}
+
+async function findKotlinTestFile(dir: string, baseName: string): Promise<string | null> {
+  const dirs = [
+    dir.replace(/\/src\/main\//, '/src/test/'),
+    dir.replace(/^src\//, 'src/test/'),
+  ];
+  const suffixes = ['Test.kt', 'Tests.kt', 'Spec.kt'];
+  for (const d of dirs) {
+    for (const s of suffixes) {
+      const c = path.join(d, `${baseName}${s}`);
+      if (await fileExists(c)) return c;
+    }
+  }
+  return null;
+}
+
 async function findTestFileForSource(sourceFile: string): Promise<string | null> {
   const ext = path.extname(sourceFile);
   const baseName = path.basename(sourceFile, ext);
   const dir = path.dirname(sourceFile);
 
   if (ext === '.ts' || ext === '.tsx') {
-    // TypeScript: foo.ts → foo.test.ts
-    const testFile1 = sourceFile.replace(/\.tsx?$/, '.test.ts');
-    if (await fileExists(testFile1)) return testFile1;
-
-    const testFile2 = path.join(dir, '__tests__', `${baseName}.test.ts`);
-    if (await fileExists(testFile2)) return testFile2;
+    return findTsTestFile(sourceFile, dir, baseName);
   }
 
   if (ext === '.py') {
-    // Python: foo.py → foo_test.py or tests/test_foo.py
-    const testFile1 = sourceFile.replace(/\.py$/, '_test.py');
-    if (await fileExists(testFile1)) return testFile1;
-
-    const testFile2 = path.join('tests', `test_${baseName}.py`);
-    if (await fileExists(testFile2)) return testFile2;
-
-    const testFile3 = path.join(dir, '__tests__', `test_${baseName}.py`);
-    if (await fileExists(testFile3)) return testFile3;
+    const pyTest = sourceFile.replace(/\.py$/, '_test.py');
+    if (await fileExists(pyTest)) return pyTest;
+    return findPyTestFile(dir, baseName);
   }
 
   if (ext === '.go') {
-    // Go: foo.go → foo_test.go (same directory, idiomatic convention)
-    const testFile1 = sourceFile.replace(/\.go$/, '_test.go');
-    if (await fileExists(testFile1)) return testFile1;
+    const goTest = sourceFile.replace(/\.go$/, '_test.go');
+    if (await fileExists(goTest)) return goTest;
+    return null;
+  }
+
+  if (ext === '.java') {
+    return findJavaTestFile(dir, baseName);
+  }
+
+  if (ext === '.kt' || ext === '.kts') {
+    return findKotlinTestFile(dir, baseName);
   }
 
   return null;
@@ -375,71 +427,47 @@ async function runAllRunners(
     if (!runner) continue;
 
     if (!await runner.isAvailable()) {
-      for (const f of files) fileScores[f] = null;
+      applyNullScores(files, fileScores);
       continue;
     }
 
-    const options: RunMutationOptions = {
-      files,
-      timeoutMs,
-      cwd,
-    };
-
-    const outcome: MutationRunOutcome = await runner.run(options);
-
-    if (outcome.timedOut) {
-      for (const f of files) fileScores[f] = null;
-      continue;
-    }
-
-    if (outcome.error) {
-      for (const f of files) fileScores[f] = null;
-      continue;
-    }
-
-    if (!outcome.report) {
-      for (const f of files) fileScores[f] = null;
-      continue;
-    }
-
-    // If per-file scores exist, use them
-    if (outcome.report.files) {
-      for (const [fileKey, fileReport] of Object.entries(outcome.report.files)) {
-        fileScores[fileKey] = fileReport.mutationScore;
-      }
-    } else {
-      // Top-level score applies to all files
-      for (const f of files) {
-        fileScores[f] = outcome.report.mutationScore;
-      }
-    }
+    const result = await runner.run({ files, timeoutMs, cwd });
+    applyMutationResult(result, files, fileScores);
   }
 
   return fileScores;
 }
 
+function applyNullScores(files: string[], scores: Record<string, number | null>): void {
+  for (const f of files) scores[f] = null;
+}
+
+function applyMutationResult(
+  outcome: MutationRunOutcome,
+  files: string[],
+  scores: Record<string, number | null>,
+): void {
+  if (outcome.timedOut || outcome.error || !outcome.report) {
+    for (const f of files) scores[f] = null;
+    return;
+  }
+
+  if (outcome.report.files) {
+    for (const [fileKey, fileReport] of Object.entries(outcome.report.files)) {
+      scores[fileKey] = fileReport.mutationScore;
+    }
+    return;
+  }
+
+  for (const f of files) scores[f] = outcome.report.mutationScore;
+}
+
 // ── Main gateway ──
 
-export async function runGateM(options: GateMOptions): Promise<GateMResult> {
-  const warnings: string[] = [];
-  const errors: string[] = [];
-
-  const sourceFiles = filterSourceFiles(options.changedFiles);
-
-  if (sourceFiles.length === 0) {
-    return buildResult('skip', 0, {}, warnings, errors);
-  }
-
-  // Test intent check (async, fire-and-forget warning)
-  await collectTestIntentWarnings(sourceFiles, warnings);
-
-  const thresholds = await determineThresholds(sourceFiles, await loadCriticalPaths(options.criticalPathsPath));
-  const baseline = await loadBaseline(options.baselinePath);
-
+function logThresholdDetails(thresholds: FileThreshold[], baseline: MutationBaseline | null): void {
   if (baseline) {
-    console.log(`  Loaded baseline from ${options.baselinePath} (${Object.keys(baseline.scores).length} files)`);
+    console.log(`  Loaded baseline (${Object.keys(baseline.scores).length} files)`);
   }
-
   for (const ft of thresholds) {
     const level = ft.isCriticalPath ? 'critical path' : 'default';
     const thresholdSource = ft.explicitThreshold !== undefined
@@ -449,49 +477,65 @@ export async function runGateM(options: GateMOptions): Promise<GateMResult> {
         : 'default';
     console.log(`  ${ft.file}: threshold=${ft.threshold}% (${level}, ${thresholdSource})`);
   }
+}
 
-  // Route to runners by file extension
+function buildMutationScores(fileScores: Record<string, number>): Record<string, MutationScore> {
+  const scores: Record<string, MutationScore> = {};
+  for (const [file, score] of Object.entries(fileScores)) {
+    scores[file] = { score, mutants: 0, killed: 0, survived: 0 };
+  }
+  return scores;
+}
+
+export async function runGateM(options: GateMOptions): Promise<GateMResult> {
+  const warnings: string[] = [];
+  const errors: string[] = [];
+
+  const sourceFiles = filterSourceFiles(options.changedFiles);
+  if (sourceFiles.length === 0) {
+    return buildResult('skip', 0, {}, warnings, errors);
+  }
+
+  await collectTestIntentWarnings(sourceFiles, warnings);
+
+  const thresholds = await determineThresholds(sourceFiles, await loadCriticalPaths(options.criticalPathsPath));
+  const baseline = await loadBaseline(options.baselinePath);
+
+  logThresholdDetails(thresholds, baseline);
+
   const groups = groupByRunner(sourceFiles);
-  const cwd = process.cwd();
-  const fileScoresNullable = await runAllRunners(groups, options.timeoutMs, cwd);
+  const fileScoresNullable = await runAllRunners(groups, options.timeoutMs, process.cwd());
 
-  // Build final scores map
+  const { fileScores, timeoutFiles } = partitionScores(fileScoresNullable);
+  if (timeoutFiles.length > 0) {
+    warnings.push(`Mutation testing timed out for: ${timeoutFiles.join(', ')}. Run locally for full report.`);
+  }
+
+  const evalResult = evaluateScores(fileScores, thresholds, baseline);
+  for (const msg of evalResult.messages) console.log(`  ${msg}`);
+
+  if (evalResult.blocked) {
+    return buildResult('block', sourceFiles.length, buildMutationScores(fileScores), warnings, errors);
+  }
+  return buildResult('pass', sourceFiles.length, buildMutationScores(fileScores), warnings, errors);
+}
+
+interface PartitionedScores {
+  fileScores: Record<string, number>;
+  timeoutFiles: string[];
+}
+
+function partitionScores(input: Record<string, number | null>): PartitionedScores {
   const fileScores: Record<string, number> = {};
   const timeoutFiles: string[] = [];
-
-  for (const [file, maybeScore] of Object.entries(fileScoresNullable)) {
+  for (const [file, maybeScore] of Object.entries(input)) {
     if (maybeScore === null) {
       timeoutFiles.push(file);
     } else {
       fileScores[file] = maybeScore;
     }
   }
-
-  if (timeoutFiles.length > 0) {
-    warnings.push(`Mutation testing timed out for: ${timeoutFiles.join(', ')}. Run locally for full report.`);
-  }
-
-  const evalResult = evaluateScores(fileScores, thresholds, baseline);
-
-  for (const msg of evalResult.messages) {
-    console.log(`  ${msg}`);
-  }
-
-  const mutationScores: Record<string, MutationScore> = {};
-  for (const [file, score] of Object.entries(fileScores)) {
-    mutationScores[file] = {
-      score,
-      mutants: 0, // Detailed stats only available from per-file reports
-      killed: 0,
-      survived: 0,
-    };
-  }
-
-  if (evalResult.blocked) {
-    return buildResult('block', sourceFiles.length, mutationScores, warnings, errors);
-  }
-
-  return buildResult('pass', sourceFiles.length, mutationScores, warnings, errors);
+  return { fileScores, timeoutFiles };
 }
 
 async function collectTestIntentWarnings(sourceFiles: string[], warnings: string[]): Promise<void> {

@@ -1,26 +1,76 @@
 {
-  "id": "sprint-2026-06-29-01",
-  "phase": 5,
+  "id": "sprint-2026-06-30-01",
+  "phase": 4,
   "status": "completed",
+  "issue": 160,
+  "issue_title": "Gate M: Mutation testing only supports TypeScript - needs Python, Go, Java adapters",
+  "route": "full-sprint-flow",
+  "delphi": {
+    "verdict": "APPROVED",
+    "consensus_ratio": 0.67,
+    "rounds": 2,
+    "approved_by": [
+      "Expert C (Feasibility)"
+    ]
+  },
+  "estimate": {
+    "classification": "standard",
+    "scope": "python, go, java, kotlin",
+    "deferred": "cpp"
+  },
   "phase_history": [
-    {"phase": -0.5, "phase_name": "AUTO-ESTIMATE", "status": "completed", "timestamp": "2026-06-29T04:12:52Z"},
-    {"phase": 2, "phase_name": "BUILD", "status": "completed", "timestamp": "2026-06-29T07:07:27Z"},
-    {"phase": 3, "phase_name": "REVIEW", "status": "completed", "timestamp": "2026-06-29T07:07:27Z"},
-    {"phase": 5, "phase_name": "SHIP", "status": "completed", "timestamp": "2026-06-29T07:07:27Z"}
+    {
+      "phase": -1,
+      "phase_name": "ISOLATE",
+      "status": "completed",
+      "timestamp": "2026-06-30T06:07:00Z"
+    },
+    {
+      "phase": -0.5,
+      "phase_name": "AUTO-ESTIMATE",
+      "status": "completed",
+      "timestamp": "2026-06-30T06:08:00Z"
+    },
+    {
+      "phase": 0,
+      "phase_name": "THINK",
+      "status": "completed",
+      "timestamp": "2026-06-30T06:45:00Z"
+    },
+    {
+      "phase": 1,
+      "phase_name": "PLAN",
+      "status": "completed",
+      "rounds": 2,
+      "timestamp": "2026-06-30T07:30:00Z"
+    },
+    {
+      "phase": 3,
+      "phase_name": "REVIEW",
+      "status": "completed",
+      "timestamp": "2026-06-30T11:28:12Z",
+      "verdict": "APPROVED",
+      "consensus_ratio": 1.0,
+      "rounds": 2
+    },
+    {
+      "phase": 4,
+      "phase_name": "FEEDBACK",
+      "status": "completed",
+      "timestamp": "2026-06-30T11:45:00Z"
+    }
   ],
   "isolation": {
-    "worktree_path": "/home/boyingliu01/projects/xp-gate",
-    "branch": "sprint/delphi-review-skill-cert-fixes-252-255",
-    "mode": "no-isolate"
+    "worktree_path": "/home/boyingliu01/projects/xp-gate/.worktrees/sprint/sprint-2026-06-30-01",
+    "branch": "sprint/2026-06-30-01"
   },
   "outputs": {
-    "pr_url": "https://github.com/boyingliu01/xp-gate/pull/257",
-    "branch": "sprint/delphi-review-skill-cert-fixes-252-255"
+    "design_doc": "docs/superpowers/specs/2026-06-30-gate-m-multi-lang-mutation-testing-design.md",
+    "specification": ".sprint-state/phase-outputs/specification.yaml",
+    "delphi_reviewed": ".sprint-state/delphi-reviewed.json"
   },
   "metrics": {
-    "files_changed": 2,
-    "insertions": 80,
-    "delphi_rounds": 2,
-    "delphi_verdict": "PASS_WITH_CAVEATS"
+    "baseline_tests": 1689,
+    "baseline_tests_status": "all_passing"
   }
 }
