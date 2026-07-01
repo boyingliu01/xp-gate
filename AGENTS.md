@@ -1,9 +1,9 @@
 # PROJECT KNOWLEDGE BASE
 
 **Generated:** 2026-07-01
-**Commit:** a5ef11d
-**Branch:** sprint/2026-06-30-01
-**Version:** 0.11.4.0
+**Commit:** bd129b3
+**Branch:** main
+**Version:** 0.12.0.0
 
 ## OVERVIEW
 XP-Gate — deterministic git quality gates + AI-driven multi-expert review (Delphi) + Sprint Flow pipeline + npm zero-install distribution + cross-platform plugin system (Claude Code / OpenCode / Qoder). Pre-commit runs **10 numbered gates (Gate 0–9)** at the script level, conceptually grouped as **6 categories** in user-facing docs (README, CAPABILITIES.md). Pre-push runs **3 mutation/mock gates (M, M2, M3) + Delphi code-walkthrough**. Implements 14 Clean Code/SOLID rules across 9 language adapters (TypeScript engine), 13 shell adapters (gate routing), Boy Scout Rule baseline enforcement, test-specification alignment, mock policy enforcement, and incremental mutation testing.
