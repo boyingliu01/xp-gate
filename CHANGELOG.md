@@ -2,6 +2,15 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.11.4.0] - 2026-06-30
+
+### Added
+- **Gate M: Go mutation testing** — Incremental mutation for Go files via `gomutants` (szhekpisov/gomutants). Per-push section in pre-push with `GATE_M_GO_STATUS` journaling. Graceful SKIP when tool not installed.
+- **Gate M: Java mutation testing** — Incremental mutation for Java files via PITest with dual build-tool support (Maven `pom.xml` + Gradle `build.gradle`/`build.gradle.kts`). `PitestRunner` class with `test-compile` step, JSON report parsing, Maven timestamped-dir + Gradle fixed-path report scanning.
+- **Gate M: Kotlin mutation testing** — Java/Kotlin share PITest runner (JVM bytecode level). Auto-detected via `build.gradle(.kts)` + `info.solidsoft.pitest` plugin.
+- **Pre-push adapter detection** — `detect_go_mutation_testable()`, `detect_pitest_testable()` in `adapter-common.sh`. Go uses `GOMUTANTS_AVAILABLE`/`GO_MUTATION_TOOL`; Java/Kotlin use `PITEST_AVAILABLE`.
+- **PitestRunner** — 311 lines, 18 unit tests. Maven (`mvn test-compile org.pitest:pitest-maven:mutationCoverage -DoutputFormats=JSON`) and Gradle (`./gradlew pitest` or `gradle pitest`) support.
+
 ## [0.11.0.0] - 2026-06-26
 
 ### Added
