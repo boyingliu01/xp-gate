@@ -2,6 +2,18 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.12.0.0] - 2026-07-01
+
+### Added
+- **Gate M: Multi-language mutation testing** — LangAdapter system now routes mutation testing to language-specific runners: Stryker (TypeScript), Mutmut (Python), gomutants (Go), PITest (Java/Kotlin).
+- **PitestRunner** — Full PITest integration for Java/Kotlin via Maven (`mvn pitest:mutationCoverage`) and Gradle (`info.solidsoft.pitest` plugin). Supports dual build-tool detection, JSON report parsing (Maven timestamped-dir + Gradle fixed-path), and per-file test matching.
+- **Go mutation testing** — Incremental mutation for Go files via `gomutants` with auto-fallback detection (GOPATH/GOMODCACHE).
+- **Per-language pre-push sections** — Separate Gate M sections for TypeScript, Python, Go, Java, Kotlin in `githooks/pre-push` with graceful SKIP when tools are missing.
+
+### Changed
+- **gate-m.ts refactored** — Extracted `findJavaTestFile`/`findKotlinTestFile` helpers to comply with architecture linter cognitive complexity thresholds. Replaced inline `RunMutationOptions` import with cleaner runner-based abstraction.
+- **Architecture baseline updated** — Regenerated `.architecture-baseline.json` to clear pre-existing smell noise from stale baseline hash.
+
 ## [0.11.4.0] - 2026-06-30
 
 ### Added
