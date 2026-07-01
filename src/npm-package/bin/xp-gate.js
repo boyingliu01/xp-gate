@@ -135,6 +135,14 @@ const COMMANDS = {
       handleSprintStatus(subargs).then(code => process.exit(code));
     },
     usage: 'xp-gate sprint-status [--json] [--watch] [--dir <path>]'
+  },
+  'next-sprint': {
+    description: 'Analyze remaining open issues and plan next iteration',
+    run: subargs => {
+      const { handleNextSprint } = require('../lib/next-sprint.js');
+      handleNextSprint(subargs).then(code => process.exit(code));
+    },
+    usage: 'xp-gate next-sprint [--json] [--plan] [--dir <path>]'
   }
 };
 

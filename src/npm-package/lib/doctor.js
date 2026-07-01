@@ -176,7 +176,20 @@ function checkSingleHook(hooksDir, name, signature, label, checks) {
   return 0;
 }
 
+/**
+ * Expected gate scripts that should be present in the adapters directory.
+ * gate-5.sh and gate-6.sh are inline in pre-commit, so they are NOT expected here.
+ */
+const EXPECTED_GATE_SCRIPTS = [
+  'gate-3.sh',
+  'gate-4.sh',
+  'gate-7.sh',
+  'gate-8.sh',
+  'gate-9.sh',
+];
+
 function checkAdapters(checks, mode, gitDir) {
+  let issues = 0;
   const adaptersDir = mode === 'local'
     ? path.join(path.dirname(gitDir || ''), 'githooks', 'adapters')
     : GLOBAL_ADAPTERS_DIR;
@@ -190,8 +203,22 @@ function checkAdapters(checks, mode, gitDir) {
     checks.push({ name: 'Adapters directory', status: 'FAIL', detail: 'Empty directory' });
     return 1;
   }
-  checks.push({ name: 'Adapters directory', status: 'PASS', detail: `${adapterFiles.length} adapter(s)` });
-  return 0;
+  checks.push({ name: 'Adapters directory', status: 'PASS', detail: `${adapterFiles.length} file(s)` });
+
+  // Check for missing gate scripts (Issue #263 follow-up)
+  const missingGates = EXPECTED_GATE_SCRIPTS.filter(g => !adapterFiles.includes(g));
+  if (missingGates.length > 0) {
+    checks.push({
+      name: 'Gate scripts',
+      status: 'FAIL',
+      detail: `Missing: ${missingGates.join(', ')} — run 'xp-gate doctor --fix' to restore`
+    });
+    issues++;
+  } else {
+    checks.push({ name: 'Gate scripts', status: 'PASS', detail: `${EXPECTED_GATE_SCRIPTS.length} gate script(s)` });
+  }
+
+  return issues;
 }
 
 /**
@@ -429,6 +456,37 @@ function fixMissingAdapters(mode, srcDir, adaptersDir) {
   return false;
 }
 
+/**
+ * Restore missing gate scripts from package root to adapters directory.
+ * Gate scripts (gate-3.sh through gate-9.sh) are stored in the package root,
+ * not in the adapters subdirectory.
+ */
+function fixMissingGateScripts(srcDir, adaptersDir) {
+  if (!adaptersDir || !fs.existsSync(adaptersDir)) return false;
+
+  const existingFiles = fs.readdirSync(adaptersDir);
+  const missingGates = EXPECTED_GATE_SCRIPTS.filter(g => !existingFiles.includes(g));
+
+  if (missingGates.length === 0) return false;
+
+  let restored = 0;
+  for (const gateScript of missingGates) {
+    const srcFile = path.join(srcDir, gateScript);
+    const destFile = path.join(adaptersDir, gateScript);
+    if (fs.existsSync(srcFile)) {
+      fs.copyFileSync(srcFile, destFile);
+      fs.chmodSync(destFile, 0o755);
+      restored++;
+    }
+  }
+
+  if (restored > 0) {
+    console.log(`  ✓ Restored ${restored} gate script(s)`);
+    return true;
+  }
+  return false;
+}
+
 function fixConfigMismatches(config) {
   let fixed = false;
   fixed = fixVersionMismatch(config, getPackageVersion()) || fixed;
@@ -481,6 +539,7 @@ function fixIssues(checks, config) {
   fixed = fixHooksByMode(config, srcDir) || fixed;
   fixed = fixGlobalHooksPath(config) || fixed;
   fixed = fixMissingAdapters(config.mode, srcDir, getAdaptersDirByMode(config)) || fixed;
+  fixed = fixMissingGateScripts(srcDir, getAdaptersDirByMode(config)) || fixed;
   fixed = fixTuiRegistration() || fixed;
   fixed = printCliToolGuidance() || fixed;
 
