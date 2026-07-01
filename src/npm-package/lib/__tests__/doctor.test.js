@@ -108,6 +108,10 @@ describe('doctor', () => {
       path.join(dir, 'adapters', 'python.sh'),
       '#!/usr/bin/env bash\necho "py adapter"\n'
     );
+    const gateScripts = ['gate-3.sh', 'gate-4.sh', 'gate-7.sh', 'gate-8.sh', 'gate-9.sh'];
+    for (const script of gateScripts) {
+      fs.writeFileSync(path.join(dir, 'adapters', script), `#!/bin/bash\n# ${script}\n`);
+    }
   }
 
   function tuiJsonPath() {
@@ -139,7 +143,14 @@ describe('doctor', () => {
     createXpGatePreCommit(globalHooksDir());
     createXpGatePrePush(globalHooksDir());
     createXpGateAdapterCommon(globalAdaptersDir());
-    createXpGateAdapterScripts(globalAdaptersDir());
+    // For global mode, create adapters directly in globalAdaptersDir (not in a subdirectory)
+    fs.mkdirSync(globalAdaptersDir(), { recursive: true });
+    fs.writeFileSync(path.join(globalAdaptersDir(), 'typescript.sh'), '#!/usr/bin/env bash\necho "ts adapter"\n');
+    fs.writeFileSync(path.join(globalAdaptersDir(), 'python.sh'), '#!/usr/bin/env bash\necho "py adapter"\n');
+    const gateScripts = ['gate-3.sh', 'gate-4.sh', 'gate-7.sh', 'gate-8.sh', 'gate-9.sh'];
+    for (const script of gateScripts) {
+      fs.writeFileSync(path.join(globalAdaptersDir(), script), `#!/bin/bash\n# ${script}\n`);
+    }
     createXpGatePreCommit(projectHooksDir());
     createXpGatePrePush(projectHooksDir());
     createXpGateAdapterCommon(projectGithooksDir());
@@ -804,5 +815,93 @@ describe('doctor', () => {
     const tui = JSON.parse(fs.readFileSync(tuiJsonPath(), 'utf8'));
     // Should still have exactly one entry
     expect(tui.plugin.filter(p => p === '@boyingliu01/opencode-plugin/tui').length).toBe(1);
+  });
+
+  // === Issue #263 follow-up: Gate script detection ===
+
+  function createGateScripts(dir) {
+    fs.mkdirSync(dir, { recursive: true });
+    const gateScripts = ['gate-3.sh', 'gate-4.sh', 'gate-7.sh', 'gate-8.sh', 'gate-9.sh'];
+    for (const script of gateScripts) {
+      fs.writeFileSync(path.join(dir, script), `#!/bin/bash\n# ${script}\n`);
+    }
+  }
+
+  it('gate scripts: PASS when all expected gate scripts exist', async () => {
+    setupLocalInstall();
+    ensureTuiRegistered();
+    seedVersionCache();
+    createGateScripts(projectAdaptersDir());
+    mockExecSuccess();
+    const { doctor } = require('../doctor');
+
+    const result = await doctor([]);
+
+    expect(result).toBe(0);
+    expect(logSpy).toHaveBeenCalledWith(
+      expect.stringContaining('Gate scripts')
+    );
+    expect(logSpy).toHaveBeenCalledWith(
+      expect.stringContaining('5 gate script(s)')
+    );
+  });
+
+  it('gate scripts: FAIL when gate scripts are missing', async () => {
+    setupLocalInstall();
+    seedVersionCache();
+    // Clear adapters dir and create with only language adapters, no gate scripts
+    fs.rmSync(projectAdaptersDir(), { recursive: true, force: true });
+    fs.mkdirSync(projectAdaptersDir(), { recursive: true });
+    fs.writeFileSync(path.join(projectAdaptersDir(), 'typescript.sh'), '#!/bin/bash\n');
+    mockExecSuccess();
+    const { doctor } = require('../doctor');
+
+    const result = await doctor([]);
+
+    expect(result).toBe(1);
+    expect(logSpy).toHaveBeenCalledWith(
+      expect.stringContaining('Gate scripts')
+    );
+    expect(logSpy).toHaveBeenCalledWith(
+      expect.stringContaining('Missing')
+    );
+  });
+
+  it('--fix: restores missing gate scripts', async () => {
+    setupLocalInstall();
+    seedVersionCache();
+    // Clear adapters dir and create with only language adapters, no gate scripts
+    fs.rmSync(projectAdaptersDir(), { recursive: true, force: true });
+    fs.mkdirSync(projectAdaptersDir(), { recursive: true });
+    fs.writeFileSync(path.join(projectAdaptersDir(), 'typescript.sh'), '#!/bin/bash\n');
+    mockExecSuccess();
+    const { doctor } = require('../doctor');
+
+    const result = await doctor(['--fix']);
+
+    expect(result).toBe(0);
+    expect(fs.existsSync(path.join(projectAdaptersDir(), 'gate-3.sh'))).toBe(true);
+    expect(fs.existsSync(path.join(projectAdaptersDir(), 'gate-4.sh'))).toBe(true);
+    expect(fs.existsSync(path.join(projectAdaptersDir(), 'gate-7.sh'))).toBe(true);
+    expect(fs.existsSync(path.join(projectAdaptersDir(), 'gate-8.sh'))).toBe(true);
+    expect(fs.existsSync(path.join(projectAdaptersDir(), 'gate-9.sh'))).toBe(true);
+    expect(logSpy).toHaveBeenCalledWith(
+      expect.stringContaining('Restored')
+    );
+  });
+
+  it('--fix: idempotent for gate scripts — does not overwrite existing', async () => {
+    setupLocalInstall();
+    seedVersionCache();
+    createGateScripts(projectAdaptersDir());
+    const originalContent = fs.readFileSync(path.join(projectAdaptersDir(), 'gate-3.sh'), 'utf8');
+    mockExecSuccess();
+    const { doctor } = require('../doctor');
+
+    const result = await doctor(['--fix']);
+
+    expect(result).toBe(0);
+    const currentContent = fs.readFileSync(path.join(projectAdaptersDir(), 'gate-3.sh'), 'utf8');
+    expect(currentContent).toBe(originalContent);
   });
 });
