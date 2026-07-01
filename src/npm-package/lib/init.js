@@ -35,6 +35,13 @@ function copyAdapters(srcDir, destDir) {
       }
     });
   }
+  // Copy gate scripts (gate-3.sh through gate-9.sh) from package root to destDir.
+  // These are sourced by pre-commit via GATE_DIR which resolves to the adapter dir.
+  fs.readdirSync(srcDir).forEach(f => {
+    if (f.startsWith('gate-') && f.endsWith('.sh')) {
+      fs.copyFileSync(path.join(srcDir, f), path.join(destDir, f));
+    }
+  });
 }
 
 function copyRecursive(src, dest) {

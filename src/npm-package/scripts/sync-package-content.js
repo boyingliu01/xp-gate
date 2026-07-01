@@ -203,7 +203,18 @@ function syncAdapters() {
     }
   }
   console.error(`[sync] adapters/ (${copied} entries)`);
-  return copied;
+
+  // Sync gate scripts (gate-*.sh) from githooks/ to package root so they ship
+  // with the npm package and can be installed to the global adapter dir.
+  const githooksDir = path.join(REPO_ROOT, 'githooks');
+  const gateFiles = fs.readdirSync(githooksDir).filter(f => f.startsWith('gate-') && f.endsWith('.sh'));
+  for (const f of gateFiles) {
+    fs.copyFileSync(path.join(githooksDir, f), path.join(PKG_ROOT, f));
+  }
+  if (gateFiles.length > 0) {
+    console.error(`[sync] gate scripts: ${gateFiles.join(', ')}`);
+  }
+  return copied + gateFiles.length;
 }
 
 function syncModules(moduleName) {
