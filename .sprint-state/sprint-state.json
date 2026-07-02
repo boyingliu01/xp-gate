@@ -1,76 +1,31 @@
 {
-  "id": "sprint-2026-06-30-01",
-  "phase": 4,
-  "status": "completed",
-  "issue": 160,
-  "issue_title": "Gate M: Mutation testing only supports TypeScript - needs Python, Go, Java adapters",
-  "route": "full-sprint-flow",
-  "delphi": {
-    "verdict": "APPROVED",
-    "consensus_ratio": 0.67,
-    "rounds": 2,
-    "approved_by": [
-      "Expert C (Feasibility)"
-    ]
-  },
-  "estimate": {
-    "classification": "standard",
-    "scope": "python, go, java, kotlin",
-    "deferred": "cpp"
+  "id": "sprint-2026-07-01-01",
+  "phase": 2,
+  "status": "running",
+  "issue": 265,
+  "issue_title": "Git hooks do not auto-update: projects use stale hook versions",
+  "route": "lightweight",
+  "auto_estimate": {
+    "change_type": "修改已存在代码",
+    "estimated_level": "轻量",
+    "selected_option": "B - 新增 update-hooks 命令"
   },
   "phase_history": [
-    {
-      "phase": -1,
-      "phase_name": "ISOLATE",
-      "status": "completed",
-      "timestamp": "2026-06-30T06:07:00Z"
-    },
-    {
-      "phase": -0.5,
-      "phase_name": "AUTO-ESTIMATE",
-      "status": "completed",
-      "timestamp": "2026-06-30T06:08:00Z"
-    },
-    {
-      "phase": 0,
-      "phase_name": "THINK",
-      "status": "completed",
-      "timestamp": "2026-06-30T06:45:00Z"
-    },
-    {
-      "phase": 1,
-      "phase_name": "PLAN",
-      "status": "completed",
-      "rounds": 2,
-      "timestamp": "2026-06-30T07:30:00Z"
-    },
-    {
-      "phase": 3,
-      "phase_name": "REVIEW",
-      "status": "completed",
-      "timestamp": "2026-06-30T11:28:12Z",
-      "verdict": "APPROVED",
-      "consensus_ratio": 1.0,
-      "rounds": 2
-    },
-    {
-      "phase": 4,
-      "phase_name": "FEEDBACK",
-      "status": "completed",
-      "timestamp": "2026-06-30T11:45:00Z"
-    }
+    {"phase": -1, "phase_name": "ISOLATE", "status": "completed", "timestamp": "2026-07-01T09:00:00Z"},
+    {"phase": -0.5, "phase_name": "AUTO-ESTIMATE", "status": "completed", "timestamp": "2026-07-01T09:10:00Z"},
+    {"phase": 0, "phase_name": "THINK", "status": "completed", "timestamp": "2026-07-01T09:15:00Z"},
+    {"phase": 1, "phase_name": "PLAN", "status": "completed", "timestamp": "2026-07-01T09:30:00Z"},
+    {"phase": 2, "phase_name": "BUILD", "status": "running", "timestamp": "2026-07-01T10:00:00Z"}
   ],
   "isolation": {
-    "worktree_path": "/home/boyingliu01/projects/xp-gate/.worktrees/sprint/sprint-2026-06-30-01",
-    "branch": "sprint/2026-06-30-01"
+    "worktree_path": ".worktrees/sprint/sprint-2026-07-01-01",
+    "branch": "sprint/2026-07-01-01",
+    "created_from": "main",
+    "created_from_commit": "593e816"
   },
   "outputs": {
-    "design_doc": "docs/superpowers/specs/2026-06-30-gate-m-multi-lang-mutation-testing-design.md",
-    "specification": ".sprint-state/phase-outputs/specification.yaml",
-    "delphi_reviewed": ".sprint-state/delphi-reviewed.json"
+    "design_doc": "docs/superpowers/specs/2026-07-01-update-hooks-design.md",
+    "delphi_review": "docs/superpowers/specs/delphi-reviewed.json"
   },
-  "metrics": {
-    "baseline_tests": 1689,
-    "baseline_tests_status": "all_passing"
-  }
+  "metrics": {}
 }
