@@ -88,22 +88,44 @@ Permitted variants (all satisfy L1 trigger):
 | 2 专家（默认） | A(架构) + B(实现) | 代码变更、小型设计 |
 | 3 专家 | A(架构) + B(实现) + C(可行性) | 架构决策、需求文档 |
 
-### 模型选择策略（强制）
+### 模型选择策略（强制 — 从 opencode.json 读取）
 
-**MUST 使用国产开源模型**，**严禁** Anthropic/GPT/Gemini 等国外模型。
+**MUST 从 `opencode.json` 的 agent 配置中读取模型**，**严禁** hardcode 模型名称。
 
-| 厂家 | 可用模型 |
-|------|---------|
-| 深度求索 DeepSeek | `deepseek-v4-pro`, `deepseek-v4-lite` |
-| 月之暗面 Kimi | `kimi-k2.6`, `kimi-k2.5` |
-| 阿里 Qwen | `qwen3.6-plus`, `qwen3.5-plus` |
-| 智谱 GLM | `glm-5.1`, `glm-5.0` |
-| MiniMax | `minimax-m2.7`, `minimax-m2.5` |
+模型选择流程：
+1. 读取 `opencode.json` 中 `agent` 字段下 `delphi-reviewer-architecture`、`delphi-reviewer-technical`、`delphi-reviewer-feasibility` 三个 agent 定义
+2. 提取每个 agent 的 `model` 字段（格式：`provider/model-name`）
+3. 分别作为 Expert A(架构)、Expert B(技术)、Expert C(可行性) 的模型
 
 **关键原则**：
-- ✅ 三个专家必须来自 **至少 2 家不同厂家**
-- ❌ 禁止使用 Anthropic、OpenAI、Google 等国外模型
-- ❌ 禁止三个专家全部使用同一厂家模型
+- ✅ 三个专家必须来自 **至少 2 家不同 provider**（通过 `model` 字段的 `provider/` 前缀判断）
+- ❌ 禁止 hardcode 模型名称（模型列表以 `opencode.json` 为准）
+- ❌ 禁止三个专家全部使用同一 provider 的模型
+
+**`opencode.json` agent 配置示例**（参考 `opencode.json.delphi.example`）：
+```json
+{
+  "agent": {
+    "delphi-reviewer-architecture": {
+      "description": "...",
+      "mode": "subagent",
+      "model": "deepseek/deepseek-chat",
+      "tools": { "read": true, "bash": true, "write": false, "edit": false }
+    },
+    "delphi-reviewer-technical": {
+      "mode": "subagent",
+      "model": "bailian-coding-plan/qwen3.6-plus",
+      "tools": { "read": true, "bash": true, "write": false, "edit": false }
+    },
+    "delphi-reviewer-feasibility": {
+      "mode": "subagent",
+      "model": "deepseek/deepseek-chat",
+      "tools": { "read": true, "bash": true, "write": false, "edit": false }
+    }
+  }
+}
+```
+> 上例中 3 个专家使用了 2 个不同 provider（deepseek + bailian-coding-plan），满足跨 provider 要求。**实际模型名称以你的 `opencode.json` 配置为准，无需在 SKILL.md 维护模型列表。**
 
 ### 共识阈值
 

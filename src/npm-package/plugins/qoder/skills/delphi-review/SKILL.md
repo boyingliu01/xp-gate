@@ -1,6 +1,7 @@
 ---
 name: delphi-review
-description: "Use when asked to review a design, plan, or architecture; before implementation starts; or when multi-expert consensus is needed. Triggers: 'review this design', '评审这个需求', 'design review', '多专家评审', 'consensus review', 'code walkthrough', 'push review', 'architecture review', 'PR review', or any request for multi-expert evaluation of requirements, design docs, or PRs."
+description: "Use when asked to review a design, plan, or architecture; before implementation starts; or when multi-expert consensus is needed. See ## Triggers for trigger phrases."
+auto_continue: true
 ---
 
 # Delphi Consensus Review
@@ -18,26 +19,52 @@ description: "Use when asked to review a design, plan, or architecture; before i
 - Does NOT replace testing or CI/CD verification
 - Does NOT handle deployment or release decisions
 
+## Triggers
+
+- /delphi-review
+- review this design
+- 评审这个需求
+- 评审这个设计
+- design review
+- 多专家评审
+- consensus review
+- code walkthrough
+- push review
+- architecture review
+- PR review
+
+## 工作流程
+
+1. Input Validation: 检查输入是否包含可评审内容（设计文档/代码/spec），空输入阻断
+2. Expert Assignment: 分配 2-3 位专家，至少来自 2 家不同厂商（国产模型）
+3. Round 1: 匿名独立评审 — 各专家互不知对方意见，独立输出 verdict JSON
+4. Consensus Check: 共识检查 — 共识 ≥90% 且全部 APPROVED 则完成
+5. Round 2: 交换意见 — 未达成共识时，专家查看他人意见后重新评审
+6. Round 3: 最终立场 — 仍未达成共识时，输出最终立场和分歧点
+7. Fix & Re-Review: REQUEST_CHANGES → 修复 Critical+Major → 从 Round 2 重新评审
+8. Generate Output: 生成共识报告 + specification.yaml + delphi-reviewed.json
+
+## Activation
+**MANDATORY**: Every delphi-review response MUST begin with `[DelphiReview]` as the first line.
+This marker is required for skill-cert L1 trigger detection.
+
+Permitted variants (all satisfy L1 trigger):
+- `[DelphiReview]` — standard entry
+- `[DelphiReview:BLOCKED]` — Step 0 input validation failure
+- `[DelphiReview:WARNING]` — red flag detected (reserved)
+
 ## 核心原则
 
 **Delphi 方法只有一个目的：得到所有专家一致认可的可行方案。**
 
-### 四大核心特性（RAND 方法论）
-
-1. **匿名性** — Round 1 专家互不知道对方意见
-2. **迭代** — 多轮直到共识，不是固定轮数
-3. **受控反馈** — 每轮看到其他专家意见
-4. **统计共识** — >=90% 一致才算共识
-
-### 质量优先
-
-| 原则 | 说明 |
+| 特性 | 说明 |
 |------|------|
-| Token 是投资 | 相比后期修复成本，评审消耗微不足道 |
-| APPROVED 才是终点 | REQUEST_CHANGES 必须修复并重新评审 |
-| 零容忍 | Critical/Major 问题全部必须处理，不可跳过或降级 |
-
-详见：Anti-Patterns 章节。
+| **匿名性** | Round 1 专家互不知道对方意见 |
+| **迭代** | 多轮直到共识，不是固定轮数 |
+| **受控反馈** | 每轮看到其他专家意见 |
+| **统计共识** | >=90% 一致才算共识 |
+| **Token 是投资** | 相比后期修复成本，评审消耗微不足道 |
+| **零容忍** | Critical/Major 全部必须处理，不可跳过 |
 
 ---
 
@@ -46,50 +73,59 @@ description: "Use when asked to review a design, plan, or architecture; before i
 | 模式 | 触发 | 用途 | 输出 |
 |------|------|------|------|
 | `design`（默认） | `/delphi-review` | 需求/设计/架构/PR 评审 | 共识报告 + specification.yaml |
-| `code-walkthrough` | `/delphi-review --mode code-walkthrough` | git push 前代码走查 | `.code-walkthrough-result.json` |
+| `code-walkthrough` | `--mode code-walkthrough` | git push 前代码走查 | `.code-walkthrough-result.json` |
 
-**Code Walkthrough 模式**的完整规范已移至 `references/code-walkthrough.md`。当用户使用 `--mode code-walkthrough` 时，读取该文件并执行其中定义的全部流程。
+**Code Walkthrough 模式**的完整规范 → 详见 `references/code-walkthrough.md`
 
 ---
 
 ## 参数配置
 
-### 专家数量与角色
+### 专家配置
 
 | 配置 | 专家 | 适用场景 |
 |------|------|---------|
 | 2 专家（默认） | A(架构) + B(实现) | 代码变更、小型设计 |
-| 3 专家 | A(架构) + B(实现) + C(可行性仲裁) | 架构决策、需求文档 |
+| 3 专家 | A(架构) + B(实现) + C(可行性) | 架构决策、需求文档 |
 
-> ⚠️ 至少选择 **两家不同 provider** 的模型，避免同源盲点。模型映射见 `INSTALL.md`。
-> 
-> ### 模型选择策略（强制）
-> 
-> **MUST 使用国产开源模型**，严禁使用国外昂贵模型（Anthropic Claude、OpenAI GPT、Google Gemini 等）。
-> 
-> **允许的模型列表**（从以下国产开源模型厂家中选择）：
-> 
-> | 厂家 | 可选模型 |
-> |------|---------|
-> | 智谱 GLM | `glm-5.1`, `glm-5.0` |
-> | 月之暗面 Kimi | `kimi-k2.6`, `kimi-k2.5` |
-> | MiniMax | `minimax-m2.7`, `minimax-m2.5` |
-> | 阿里 Qwen | `qwen3.6-plus`, `qwen3.5-plus` |
-> | 深度求索 DeepSeek | `deepseek-v4-pro`, `deepseek-v4-lite` |
-> 
-> **专家分配建议**：
-> 
-> | Expert | 推荐模型 | 备选 |
-> |--------|---------|------|
-> | Expert A (架构) | `deepseek-v4-pro` | `qwen3.6-plus`, `glm-5.1` |
-> | Expert B (技术) | `kimi-k2.6` | `deepseek-v4-pro`, `minimax-m2.7` |
-> | Expert C (可行性) | `qwen3.6-plus` | `kimi-k2.6`, `glm-5.1` |
-> 
-> **关键原则**：
-> - ✅ 三个专家必须来自 **至少 2 家不同厂家**（如 DeepSeek + Kimi + Qwen）
-> - ❌ 禁止使用 Anthropic、OpenAI、Google 等国外模型
-> - ❌ 禁止三个专家全部使用同一厂家模型
-> - ⚠️ 成本控制：`deepseek-v4-lite`、`kimi-k2.5`、`qwen3.5-plus` 作为轻量备选
+### 模型选择策略（强制 — 从 opencode.json 读取）
+
+**MUST 从 `opencode.json` 的 agent 配置中读取模型**，**严禁** hardcode 模型名称。
+
+模型选择流程：
+1. 读取 `opencode.json` 中 `agent` 字段下 `delphi-reviewer-architecture`、`delphi-reviewer-technical`、`delphi-reviewer-feasibility` 三个 agent 定义
+2. 提取每个 agent 的 `model` 字段（格式：`provider/model-name`）
+3. 分别作为 Expert A(架构)、Expert B(技术)、Expert C(可行性) 的模型
+
+**关键原则**：
+- ✅ 三个专家必须来自 **至少 2 家不同 provider**（通过 `model` 字段的 `provider/` 前缀判断）
+- ❌ 禁止 hardcode 模型名称（模型列表以 `opencode.json` 为准）
+- ❌ 禁止三个专家全部使用同一 provider 的模型
+
+**`opencode.json` agent 配置示例**（参考 `opencode.json.delphi.example`）：
+```json
+{
+  "agent": {
+    "delphi-reviewer-architecture": {
+      "description": "...",
+      "mode": "subagent",
+      "model": "deepseek/deepseek-chat",
+      "tools": { "read": true, "bash": true, "write": false, "edit": false }
+    },
+    "delphi-reviewer-technical": {
+      "mode": "subagent",
+      "model": "bailian-coding-plan/qwen3.6-plus",
+      "tools": { "read": true, "bash": true, "write": false, "edit": false }
+    },
+    "delphi-reviewer-feasibility": {
+      "mode": "subagent",
+      "model": "deepseek/deepseek-chat",
+      "tools": { "read": true, "bash": true, "write": false, "edit": false }
+    }
+  }
+}
+```
+> 上例中 3 个专家使用了 2 个不同 provider（deepseek + bailian-coding-plan），满足跨 provider 要求。**实际模型名称以你的 `opencode.json` 配置为准，无需在 SKILL.md 维护模型列表。**
 
 ### 共识阈值
 
@@ -100,7 +136,7 @@ description: "Use when asked to review a design, plan, or architecture; before i
 
 ---
 
-## Delphi 评审执行过程
+## 评审执行过程
 
 ```
 Phase 0: 准备 → Round 1: 匿名独立评审 → 共识检查
@@ -124,69 +160,84 @@ Phase 0: 准备 → Round 1: 匿名独立评审 → 共识检查
                 └─ REQUEST_CHANGES → 修复方案 → 回到 Round 2 重新评审
 ```
 
----
+### Step 0: Input Validation (MANDATORY — 必须在任何评审前执行)
 
-## Round 1: 匿名独立评审
+检查用户 prompt 中是否包含可评审内容（设计文档、代码、specification.yaml、PR diff）：
 
-### 为什么必须匿名
+1. **有完整输入** → 直接进入 Phase 0（准备阶段），开始 Round 1
+2. **有部分输入**（占位符、描述性文本）→ 按输入内容执行评审，标注 `[INPUT: PARTIAL]`，但继续执行
+3. **无输入**（仅触发词，无文档/代码）→ 输出以下阻断响应，记入步骤完成：
 
-匿名防止 anchoring bias（锚定偏差）—— 知道其他专家意见后倾向于同意"权威"，不敢提出相反观点。
+**Detection heuristics for Step 0**:
+- **Complete**: Contains ≥1 structural element (e.g., `##`, `requirement`, `AC-`, `function`, `class`, `interface`, YAML frontmatter, code block with language tag) AND ≥50 non-whitespace characters of actual content (not placeholder brackets like `[...]`, `{...}`, `<insert here>`).
+- **Partial**: Contains descriptive text referencing a design/code artifact BUT lacks substantive structure (e.g., "I need to review my login module" with no actual code/design attached), OR contains obvious placeholders like `[...]`, `(content)`, `<insert here>`, `TODO`.
+- **None**: Only trigger words (`/delphi-review`, "review this") with zero additional content, OR content that is exclusively questions about the review process itself ("how does delphi work?").
 
-### 执行方式
+**Partial input constraint**: When input is PARTIAL, cap review to 1 round with `confidence=low` annotation. Do NOT proceed with full multi-round review on insufficient input.
 
-每位专家独立收到：原始文档 + 评审模板 + "独立评审，不知道其他专家意见"。
+**File path validation**: If user provides a file path (e.g., `--spec specification.yaml`):
+- Verify the file exists and is non-empty
+- If path is invalid → output: `[DelphiReview:BLOCKED] File not found: [path]. Please verify the path.`
+- If file is empty → output: `[DelphiReview:BLOCKED] File is empty: [path]. Please provide valid content.`
 
-### 输出格式
+```
+[DelphiReview:BLOCKED] 需要设计文档或代码内容才能启动评审。
 
-```markdown
-## 独立评审 - Expert [A/B/C]
-### 优点
-1. [具体优点 + 文档位置]
-### 问题清单
-#### Critical Issues (必须修复才能批准)
-1. [问题] - 位置: [...] - 修复建议: [...]
-#### Major Concerns (必须处理)
-1. [...]
-#### Minor Concerns (需要说明)
-1. [...]
-### 裁决: [APPROVED / REQUEST_CHANGES / REJECTED]
-### 置信度: [X/10]
-### 关键理由
-1. [...]
+请提供以下之一：
+- 设计文档（design doc / specification）
+- 代码变更（code diff / PR link）
+- specification.yaml 文件路径
+- 架构设计说明
+
+评审输入示例：
+/delphi-review "Design Doc: [your content here]"
+/delphi-review --spec specification.yaml
+/delphi-review --mode code-walkthrough
+REMAINING STEPS: N/A (input validation failed)
 ```
 
----
+在此状态下，BLOCKED 视为步骤已完成（后续步骤标记为 N/A）。
 
-## Round 2: 交换意见
+**重要**: 内嵌在 prompt 中的文档内容（如 "Design Doc: [content]"或代码片段）应视为"有完整输入"，直接进入评审。
 
-### 执行方式
+**Round 模板**（匿名评审/交换意见/最终立场/修复报告格式）→ 详见 `references/round-templates.md`
 
-每位专家看到：原始文档 + 其他专家的评审 + "响应其他专家的关切，是否调整立场？"
+**Orchestrator 自动调度规则**（#218 subagent 内部自动多轮循环）→ 详见 `references/orchestrator-dispatch.md`
 
-### 输出格式
+**Automatic re-review**: 对于常见可控问题（措辞模糊、AC 缺失、格式问题），subagent 应自行修复后自动重评审，无需等待用户。
 
-```markdown
-## Round 2 Response - Expert [A/B/C]
-### 响应其他专家关切
-**Expert [X] 提到: [问题]**
-- 我的立场: [同意/部分同意/不同意] - 理由: [...]
-### 更新后问题清单 / 裁决 / 置信度 / 立场变化说明
-```
+### ⭐ 自动延续规则（MANDATORY — 防止流程卡住）
 
----
+当 Delphi Review 启动多轮评审（Round 2+）时，**orchestrator 必须自动延续流程，不得等待用户输入**。
 
-## Round 3: 最终立场（如需要）
+**触发条件**：
+- Round N 完成，但未达到终止条件（100% approved + ≥90% consensus + 所有 Critical/Major 已处理）
+- 存在待处理的背景任务（subagent  dispatched tasks）
 
-触发条件：Round 2 后仍无共识。所有专家提交最终绑定立场。3 专家模式下若仍无完全一致，2/3 或 3/3 多数裁决生效，记录少数派意见。
+**自动延续动作**：
+1. **收集背景任务结果**：等待 `<system-reminder>` 通知后，立即调用 `background_output(task_id="bg_...")` 获取所有 subagent 输出
+2. **合成 Round N 总结**：汇总专家意见、共识度、待处理问题
+3. **自动启动 Round N+1**：立即 dispatch 新一轮 subagent 任务，携带上一轮总结作为上下文
+4. **循环直至终止**：重复步骤 1-3，直到达到终止条件
 
-### 输出格式
+**终止条件**（满足全部）：
+- ✅ 所有专家状态 = APPROVED
+- ✅ 共识度 ≥ 90%
+- ✅ 所有 Critical 级别问题已解决
+- ✅ 所有 Major 级别问题已处理（或已记录为已知问题）
 
-```markdown
-## Round 3 Final Position - Expert [A/B/C]
-### 最终裁决: [APPROVED / REQUEST_CHANGES / REJECTED]
-### 最终置信度: [X/10]
-### 关键理由 + 与其他专家的差异
-```
+**例外情况**（直接输出，不进入下一轮）：
+- Round 1 即达到 100% approved + 100% consensus → 直接输出最终报告
+- 已达最大轮数（5 轮）→ 输出"未达成共识"报告，标记为 PROCESS_BLOCK
+
+**禁止行为**：
+- ❌ 询问用户"要继续吗？"
+- ❌ 等待用户手动触发 Round N+1
+- ❌ 在未达到终止条件时停止流程
+
+**错误处理**：
+- 背景任务超时（>10min）→ 标记为 TIMEOUT，输出部分结果并终止
+- 背景任务失败（subagent 错误）→ 重试 1 次，仍失败则输出错误报告并终止
 
 ---
 
@@ -196,13 +247,6 @@ Phase 0: 准备 → Round 1: 匿名独立评审 → 共识检查
 1. 修复所有 Critical Issues + 处理所有 Major Concerns
 2. 重新评审（从 Round 2 起步，不是 Round 1）
 3. 迭代直到 APPROVED
-
-修复报告格式：
-```markdown
-## 修复报告
-### Critical Issues 修复 | ### Major Concerns 处理 | ### Minor Concerns 说明
-### 请求重新评审
-```
 
 ---
 
@@ -215,90 +259,24 @@ Phase 0: 准备 → Round 1: 匿名独立评审 → 共识检查
 
 ---
 
-## Triggers
-
-This skill activates on any request for multi-expert review. Common triggers:
-
-**English:**
-- "review this design"
-- "design review"
-- "architecture review"
-- "consensus review"
-- "code walkthrough"
-- "push review"
-- "multi-expert review"
-- "PR review"
-
-**Chinese:**
-- "评审这个需求"
-- "多专家评审"
-- "设计评审"
-- "架构评审"
-- "代码走查"
-
-**Related commands:**
-- `/delphi-review` - Design review mode
-- `/delphi-review --mode code-walkthrough` - Pre-push code walkthrough
-
----
-
-## Workflow Steps
-
-1. **Determine mode** - Design review (default) or code-walkthrough (--mode code-walkthrough)
-2. **Dispatch anonymous experts** - 2-3 experts from ≥2 different domestic model providers
-3. **Collect Round 1 independent reviews** - Anonymous, no cross-expert bias
-4. **Synthesize feedback** - Measure consensus, identify disagreements
-5. **Run Round 2+ until consensus** - Exchange opinions, iterate until ≥90% agreement
-6. **Block on unresolved Critical/Major** - Zero-tolerance: all Critical/Major must be resolved
-7. **Emit verdict** - APPROVED (with specification.yaml) or REQUEST_CHANGES (fix + re-review)
-
-**Consensus threshold:** ≥90% (project standard for Delphi review approval)
-**Model policy:** Domestic models only (DeepSeek, Qwen, Kimi, GLM, MiniMax). Foreign models (Anthropic/OpenAI/Google) forbidden.
-
----
-
-## Scope
-
-**IN Scope:**
-- Design document review (requirements, architecture, PRDs)
-- Pre-implementation planning review
-- Code walkthrough (git push validation, max 20 files/500 LOC)
-- Multi-expert consensus building
-- Specification extraction (design → specification.yaml)
-
-**OUT Scope:**
-- Single-expert review (use `/review` instead)
-- Post-implementation review (use `/requesting-code-review`)
-- Security audit (use `/security-research` or `/cso`)
-- Performance benchmarking (use `/benchmark`)
-
----
-
-## Examples
-
-**Example 1: Design review**
-```bash
-/delphi-review
-```
-→ 3 experts review design doc → consensus report + specification.yaml
-
-**Example 2: Code walkthrough**
-```bash
-/delphi-review --mode code-walkthrough
-```
-→ Pre-push validation → .code-walkthrough-result.json
-
-**Example 3: Chinese trigger**
-```
-User: 评审这个需求文档
-→ Auto-detects delphi-review trigger → dispatches experts
-```
-
----
-
 ## Output Format (MANDATORY)
 
-Every review round output MUST follow this exact JSON structure for design mode:
+**Single 模式简化输出**: 当 single reviewer 模式（非 Multi-Expert）时，可使用简化输出格式：
+- verdict + confidence + issues_list（合并 critical/major/minor）+ summary
+- 完整 JSON 格式保留用于 multi-expert 多轮评审场景
+
+**Single 模式简化模板**:
+```
+[DelphiReview] verdict=APPROVED | REQUEST_CHANGES | BLOCKED
+confidence=N/10
+issues=[critical: N, major: N, minor: N]
+summary: [1-2 sentence verdict summary]
+```
+
+**⚠️ Single vs Multi-Expert Output**:
+- **Multi-Expert Mode (default)**: MUST use the full JSON schema below. Each expert outputs independently; the orchestrator aggregates into `consensus_report`. DO NOT use the simplified template.
+- **Single Reviewer Mode** (explicitly invoked with `--single`): MAY use the simplified text template above.
+- **Never mix formats**. If you are one of multiple experts in the same round, output JSON only.
 
 ```json
 {
@@ -321,96 +299,42 @@ Every review round output MUST follow this exact JSON structure for design mode:
 
 **For code-walkthrough mode**, output follows `.code-walkthrough-result.json` schema (see `references/code-walkthrough.md`).
 
-**Anti-patterns mapping to assertions:**
-- `Round 1 → 生成报告 → "评审完成"` → Output MUST NOT have `verdict: APPROVED` if `critical_issues` exist.
-- `只处理 Critical，忽略 Major` → Output MUST include `major_concerns` array, even if empty.
-- `用户说"时间紧急"就跳过` → Output MUST include `round` field, proving multi-round process.
+**Anti-patterns mapping:**
+- `Round 1 → "评审完成"` → MUST NOT have `verdict: APPROVED` if `critical_issues` exist
+- `只处理 Critical，忽略 Major` → MUST include `major_concerns` array
+- `用户说"时间紧急"就跳过` → MUST include `round` field proving multi-round process
 
 ---
 
 ## Terminal State Checklist
 
-<MANDATORY-CHECKLIST>
-
-### 你只能在以下条件全部满足后声明"Delphi review complete":
-
-**Pre-requisites:**
 - [ ] Phase 0 完成（文档验证 + 专家分配）
-- [ ] Round 1 完成（所有专家匿名独立评审）
-- [ ] Round 2+ 完成（交换意见 / 最终立场）
-
-**CRITICAL — 共识验证:**
+- [ ] Round 1-3 完成（所有专家评审）
 - [ ] 问题共识比例 >=90%
-- [ ] 所有 Critical Issues 已解决
-- [ ] 所有 Major Concerns 已处理
-
-**CRITICAL — 裁决检查:**
+- [ ] 所有 Critical Issues 已解决，Major Concerns 已处理
 - [ ] 最终裁决是 **APPROVED** 或 **APPROVED_WITH_MINOR**
-- [ ] 如果 REQUEST_CHANGES → 已修复 → 已重新评审 → APPROVED
-
-**Final Requirements:**
 - [ ] 共识报告生成并保存
-- [ ] 用户已确认报告
-- [ ] ⭐ **IF APPROVED (design mode): 提示用户生成 specification.yaml，如用户同意则调用 specification-generator**
+- [ ] IF REQUEST_CHANGES → 已修复 → 已重新评审 → APPROVED
+- [ ] ⭐ **IF APPROVED (design mode): 生成 specification.yaml**（自动或用户确认后）
+- [ ] ⭐ **状态文件**: 写入 `.sprint-state/delphi-reviewed.json`（`verdict`, `consensus_ratio`, `timestamp`）
+- [ ] **Code-walkthrough mode**: 写入 `.code-walkthrough-result.json`（commit hash 匹配 HEAD）
 
-**IF 裁决是 REQUEST_CHANGES 或 REJECTED → CANNOT claim complete, MUST 修复并重新评审**
-**IF 任何条件未满足 → CANNOT claim complete, MUST BLOCK 并通知用户**
+**IF REQUEST_CHANGES/REJECTED → CANNOT claim complete**
+**IF 任何条件未满足 → MUST BLOCK**
 
-### ⭐ APPROVED 后必做
+### 状态文件格式
 
-**Design mode**:
-
-1. **Automatic: 生成 specification.yaml** — 从设计文档提取需求到 specification.yaml。这是 test-specification-alignment 的输入，没有它 test-spec 会进入不推荐的 legacy mode。
-
-2. **必须提示用户** — Delphi review APPROVED 后，agent 必须主动输出以下提示：
-
-   ```
-   ⭐ Delphi review APPROVED 完成！
-
-   Next Step: 生成 specification.yaml
-
-   设计文档已稳定，现在可以生成 specification.yaml 用于后续的 test-specification-alignment 验证。
-
-   是否现在生成？
-   - 回答 "yes" 或 "generate spec" → 我将调用 specification-generator 自动生成
-   - 回答 "no" 或 "later" → 稍后手动调用 /specification-generator
-   ```
-
-3. **如果用户同意** → 立即调用 `task(subagent_type="deep", load_skills=["specification-generator"], prompt="基于以下 APPROVED 设计文档生成 specification.yaml: [粘贴设计文档内容]")`
-
-4. **生成完成后** → 将 specification.yaml 包含在提交中，标记为 "auto-generated from Delphi review consensus"
-
-**Code-walkthrough mode**: 写入 `.code-walkthrough-result.json`（commit hash 匹配 HEAD，expires = timestamp + 1小时）。详见 `references/code-walkthrough.md`。
-
-### ⭐ 状态文件输出（MANDATORY — 防止跳过门禁）
-
-**Design mode APPROVED 后** — 必须立即写入 `.sprint-state/delphi-reviewed.json`：
-
+**Design mode APPROVED** → `.sprint-state/delphi-reviewed.json`:
 ```json
-{
-  "mode": "design",
-  "timestamp": "2026-05-30T10:30:00Z",
-  "verdict": "APPROVED",
-  "consensus_ratio": 1.0,
-  "specification_path": ".sprint-state/phase-outputs/specification.yaml"
-}
+{"mode":"design","timestamp":"...","verdict":"APPROVED","consensus_ratio":1.0,"specification_path":".sprint-state/phase-outputs/specification.yaml"}
 ```
 
-**Code-walkthrough mode APPROVED 后** — 必须立即写入 `.sprint-state/delphi-reviewed.json`：
-
+**Code-walkthrough mode APPROVED** → `.sprint-state/delphi-reviewed.json`:
 ```json
-{
-  "mode": "code-walkthrough",
-  "commit": "abc123def...",
-  "timestamp": "2026-05-30T10:30:00Z",
-  "verdict": "APPROVED",
-  "consensus_ratio": 1.0
-}
+{"mode":"code-walkthrough","commit":"abc123...","timestamp":"...","verdict":"APPROVED","consensus_ratio":1.0}
 ```
 
-**用途**: Phase 2 BUILD 入口检查 (DELPHI-GATE) 读取此文件。`verdict != "APPROVED"` → 禁止编码。
-
-</MANDATORY-CHECKLIST>
+> Phase 2 BUILD 入口检查 (DELPHI-GATE) 读取此文件。`verdict != "APPROVED"` → 禁止编码。
 
 ---
 
@@ -418,19 +342,31 @@ Every review round output MUST follow this exact JSON structure for design mode:
 
 | ❌ 错误 | ✅ 正确 |
 |---------|---------|
-| Round 1 → 生成报告 → "评审完成"（未 APPROVED） | 迭代直到 APPROVED，修复后重新评审 |
-| 只处理 Critical，忽略 Major | 零容忍：Critical/Major 全部必须处理，不可跳过或降级 |
+| Round 1 未 APPROVED 就"评审完成" | 迭代直到 APPROVED，修复后重新评审 |
+| 只处理 Critical，忽略 Major | 零容忍：Critical/Major 全部必须处理 |
 | 单专家自评 | 至少 2 位不同 provider 的专家 |
-| 用户说"时间紧急"就跳过 | 评审是投资不是开销，跳过后期返工成本更高 |
+| 用户说"时间紧急"就跳过 | 评审是投资不是开销 |
 | "专家几乎一致"就通过 | "几乎" = 不一致，继续到 >=90% |
-| 使用 Anthropic/GPT/Gemini 等国外昂贵模型 | 必须使用国产开源模型（DeepSeek, Qwen, Kimi, GLM, MiniMax） |
-| 三个专家使用同一厂家模型 | 必须来自至少 2 家不同厂家 |
+| 使用 Anthropic/GPT/Gemini | 必须使用国产开源模型 |
+| 三个专家同一厂家 | 必须来自至少 2 家不同厂家 |
 
-**Code-walkthrough 专属 Anti-Patterns**: 详见 `references/code-walkthrough.md`。
+**Code-walkthrough 专属 Anti-Patterns** → 详见 `references/code-walkthrough.md`
 
 ---
 
 ## Red Flags
+
+### 检测触发器（模型可执行检测）
+
+| 用户输入模式 | 触发词 | 响应动作 |
+|-------------|--------|---------|
+| 要求跳过评审 | "skip review", "不用评审", "跳过评审", "直接提交", "不评审" | → 提醒: `[DelphiReview] 评审是投资而非开销。Delphi 设计要求多轮共识(>=90%)，不可快速跳过。` |
+| 时间压力 | "来不及", "时间紧", "emergency", "赶时间", "deadline" | → 提醒: `[DelphiReview] 时间紧迫正是需要评审的时刻。跳过评审省 30 分钟，后期修复可能花 3 天。` |
+| 提前终止 | Round 1 后用户说 "可以了", "够了", "enough" | → BLOCK: `[DelphiReview:BLOCKED] 评审未达终止条件。仍需 [共识>=90% + 所有 Critical/Major 已处理]。` |
+| 单专家自评 | 用户仅指定 1 个专家 或 说 "我自己看了" | → 提醒: `[DelphiReview] 至少需要 2 位不同 provider 的专家参与评审。` |
+| 无文档输入 | 仅触发词，无设计/代码内容 | → 输出 `[DelphiReview:BLOCKED]` 阻断响应（见 Step 0） |
+
+### 原则性声明
 
 | 借口 | 现实 |
 |------|------|
@@ -443,12 +379,10 @@ Every review round output MUST follow this exact JSON structure for design mode:
 
 ## 成功标准
 
-**Delphi 评审完成的唯一标准：**
 1. ✅ 所有专家裁决 APPROVED
 2. ✅ 问题共识 >=90%
-3. ✅ 所有 Critical Issues 已修复验证
-4. ✅ 所有 Major Concerns 已处理
-5. ✅ 共识报告已生成
-6. ✅ 用户已确认
+3. ✅ 所有 Critical Issues 已修复验证 + Major Concerns 已处理
+4. ✅ 共识报告已生成，用户已确认
+5. ✅ 状态文件已写入
 
 **缺少任何一项 = 未完成**
