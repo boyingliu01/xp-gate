@@ -1,9 +1,9 @@
 # SKILLS/DELPHI-REVIEW KNOWLEDGE BASE
 
 **Generated:** 2026-07-01
-**Commit:** bd129b3
+**Commit:** 58ec6df
 **Branch:** main
-**Version:** 0.12.0.0
+**Version:** 0.12.2.0
 
 ## OVERVIEW
 Delphi Consensus Review — multi-round anonymous expert review (≥90% threshold, 3 experts from ≥2 providers, domestic models only). Supports design + code-walkthrough modes.
@@ -32,9 +32,9 @@ skills/delphi-review/
 - 3 experts anonymous in Round 1 (no cross-expert bias)
 - ≥90% consensus threshold (was 95%, now unified to 90%)
 - Max 5 rounds before forcing decision
-- Cross-provider required: experts from ≥2 different providers
-- Domestic models only: glm, kimi, minimax, qwen, deepseek
-- Foreign models forbidden: Anthropic, OpenAI, Google
+- Cross-provider required: experts from ≥2 different providers (model list read from `opencode.json` agent config, not hardcoded)
+- Model selection: reads `delphi-reviewer-*` agent `model` fields from `opencode.json`
+- No hardcoded model lists — models defined by user's `opencode.json` configuration
 - Code-walkthrough mode: triggered on git push, stores result in .code-walkthrough-result.json
 - Code-walkthrough skipped on main/master pushes (by design)
 
