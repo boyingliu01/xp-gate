@@ -13,6 +13,7 @@ const { principles } = require('../lib/principles.js');
 const { arch } = require('../lib/arch.js');
 const { upgrade } = require('../lib/upgrade.js');
 const { bootstrap } = require('../lib/bootstrap.js');
+const { updateHooks } = require('../lib/update-hooks.js');
 
 function handleUIReview() {
   const { execSync } = require('child_process');
@@ -143,6 +144,27 @@ const COMMANDS = {
       handleNextSprint(subargs).then(code => process.exit(code));
     },
     usage: 'xp-gate next-sprint [--json] [--plan] [--dir <path>]'
+  },
+  'update-hooks': {
+    description: 'Sync latest hooks from xp-gate package to project',
+    run: subargs => {
+      const scopeArg = subargs.find(a => a.startsWith('--scope='));
+      const scopeVal = scopeArg ? scopeArg.split('=')[1] : 'all';
+      const options = {
+        global: subargs.includes('--global'),
+        force: subargs.includes('--force'),
+        dryRun: subargs.includes('--dry-run'),
+        noBackup: subargs.includes('--no-backup'),
+        scope: scopeVal,
+      };
+      try {
+        process.exit(updateHooks(options));
+      } catch (err) {
+        console.error(`Error: ${err.message}`);
+        process.exit(1);
+      }
+    },
+    usage: 'xp-gate update-hooks [--global] [--force] [--dry-run] [--no-backup] [--scope hooks|adapters|all]'
   }
 };
 
