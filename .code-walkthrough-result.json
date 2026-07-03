@@ -1,34 +1,10 @@
 {
-  "commit": "593e816494704d7c18a66e1cbb3c40e3b8196929",
-  "branch": "sprint/2026-07-01-01",
-  "timestamp": "2026-07-01T10:10:00Z",
-  "verdict": "APPROVED",
-  "consensus_ratio": 1.0,
-  "rounds": 3,
-  "experts": {
-    "A": {"verdict": "APPROVED", "confidence": 8, "critical": 0, "major": 0, "minor": 1},
-    "B": {"verdict": "APPROVED", "confidence": 8, "critical": 0, "major": 0, "minor": 1}
-  },
-  "fixes_applied": [
-    "Source-of-truth clarity: Added explicit npm package origin documentation",
-    "Command overlap: Added distinction from upgrade/init commands",
-    "Backup strategy: Added --no-backup flag and .bak backup files",
-    "Scope completeness: Added --scope option for selective updates",
-    "Local modification detection: Added adapters/*.sh scanning",
-    "CLI registration: Wired noBackup and scope flags through",
-    "Out-of-Scope contradiction: Removed 'Backup before update' entry"
-  ],
-  "quality_gates": {
-    "gate_1_code_quality": "PASS",
-    "gate_2_duplicate_code": "PASS",
-    "gate_3_complexity": "PASS",
-    "gate_4_principles": "PASS",
-    "gate_5_tests_coverage": "PASS (84%, 1776/1776 tests)",
-    "gate_6_architecture": "PASS",
-    "gate_7_iac_security": "PASS",
-    "gate_8_secret_scanning": "PASS",
-    "gate_9_build_integrity": "PASS",
-    "gate_10_sast": "PASS",
-    "gate_11_sprint_flow": "PASS"
-  }
+  "status": "approved",
+  "commit_hash": "a0a2a79ab2cc7b31d91533c863c887c5930e0a78",
+  "branch": "fix/gate-5-test-failure-ux",
+  "timestamp": "2026-07-03T09:25:10Z",
+  "decision": "approve",
+  "findings": [],
+  "mode": "code-walkthrough",
+  "walkers": []
 }
