@@ -9,8 +9,42 @@
 
 const fs = require('fs');
 const path = require('path');
-const { PHASE_NAMES, PHASE_ORDER, getLatestTimestamp, isStale } = require('./shared-phase-constants');
 const { discoverActiveSprints } = require('./sprint-discovery');
+
+// Phase constants (inlined; was shared-phase-constants.js, removed in v0.13.0 slimming)
+const PHASE_NAMES = {
+  '-1': 'ISOLATE', '-0.5': 'AUTO-ESTIMATE',
+  '0': 'THINK', '1': 'PLAN', '2': 'BUILD', '3': 'REVIEW',
+  '4': 'USER ACCEPTANCE', '5': 'FEEDBACK', '6': 'SHIP', '7': 'LAND', '8': 'CLEANUP',
+};
+const PHASE_ORDER = ['-1', '-0.5', '0', '1', '2', '3', '4', '5', '6', '7', '8'];
+
+function parseTime(value) {
+  if (!value) return 0;
+  const t = new Date(value).getTime();
+  return isNaN(t) ? 0 : t;
+}
+
+function getLatestTimestamp(state) {
+  if (!state || !state.started_at) return 0;
+  const started = parseTime(state.started_at);
+  if (!started) return 0;
+  const timestamps = [started];
+  if (Array.isArray(state.phase_history)) {
+    for (const ph of state.phase_history) {
+      timestamps.push(parseTime(ph.completed_at));
+      timestamps.push(parseTime(ph.started_at));
+      timestamps.push(parseTime(ph.timestamp));
+    }
+  }
+  return Math.max(...timestamps);
+}
+
+function isStale(state) {
+  if (!state || !state.started_at) return false;
+  const latest = getLatestTimestamp(state);
+  return latest > 0 && Date.now() - latest > 3600000;
+}
 
 /**
  * Read and parse sprint-state.json from a project directory.
