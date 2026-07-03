@@ -1,8 +1,10 @@
 {
   "status": "approved",
-  "commit_hash": "a0a2a79ab2cc7b31d91533c863c887c5930e0a78",
-  "branch": "fix/gate-5-test-failure-ux",
-  "timestamp": "2026-07-03T09:25:10Z",
+  "verdict": "approve",
+  "commit": "9d814c44dd1e0aa66340909fc32ae4ecc49e88f6",
+  "branch": "fix/arch-python-support",
+  "timestamp": "2026-07-03T09:53:33Z",
+  "expires": "2026-07-04T09:53:33Z",
   "decision": "approve",
   "findings": [],
   "mode": "code-walkthrough",
