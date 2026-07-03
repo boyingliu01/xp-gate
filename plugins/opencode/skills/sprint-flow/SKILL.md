@@ -13,7 +13,7 @@ description: >
   - "start sprint"
   - "一键开发"
   - "/sprint-flow"
-  触发后第一行输出: `Sprint Flow: ISOLATE → AUTO-ESTIMATE → THINK → PLAN → BUILD → REVIEW → USER ACCEPTANCE → FEEDBACK → SHIP → LAND → CLEANUP`
+   触发后第一行输出: `Sprint Flow: ISOLATE → AUTO-ESTIMATE → THINK → PLAN → BUILD → REVIEW → SHIP → LAND → USER ACCEPTANCE → FEEDBACK → CLEANUP`
   用法: /sprint-flow "[需求描述]"
   示例: /sprint-flow "开发访谈机器人，支持多轮对话"
   可选参数:
@@ -44,10 +44,10 @@ workflow_steps:
   - "Phase 1: PLAN"
   - "Phase 2: BUILD"
   - "Phase 3: REVIEW"
-  - "Phase 4: USER ACCEPTANCE"
-  - "Phase 5: FEEDBACK"
-  - "Phase 6: SHIP"
-  - "Phase 7: LAND"
+  - "Phase 4: FEEDBACK"
+  - "Phase 5: SHIP"
+  - "Phase 6: LAND"
+  - "Phase 7: USER ACCEPTANCE"
   - "Phase 8: CLEANUP"
 ---
 
@@ -84,8 +84,8 @@ workflow_steps:
 
 - sprint-flow **不执行任何破坏性命令**（no `rm -rf`, `git push --force`, `DROP TABLE` 等）
 - `git worktree remove` 仅删除 sprint 创建的临时 worktree 目录，不影响主仓库
-- Phase 6 SHIP 仅创建 PR（`gh pr create`），不自动 merge（除非用户显式确认）
-- Phase 7 LAND 使用 `gh pr merge --squash`（非 force push），merge 前等待 CI 通过
+- Phase 5 SHIP 仅创建 PR（`gh pr create`），不自动 merge（除非用户显式确认）
+- Phase 6 LAND 使用 `gh pr merge --squash`（非 force push），merge 前等待 CI 通过
 - 文档中 `+ platform deploy` 等描述仅表示可选的部署步骤映射，**不是可执行命令**
 - sprint-flow 不下载、安装或执行任何外部二进制文件
 
@@ -102,7 +102,7 @@ workflow_steps:
 |------|------|
 | **单一入口** | 用户只需调用 `/sprint-flow`，自动串联全流程 |
 | **自动流水线** | 类似 autoplan，自动执行多个阶段 |
-| **关键节点暂停** | APPROVED 确认、Gate 1 通过、Ship 确认、⚠️ Phase 4 必须人工 |
+| **关键节点暂停** | APPROVED 确认、Gate 1 通过、Ship 确认、⚠️ Phase 7 必须人工 |
 | **承认 Emergent** | 用户验收环节必须人工，无法自动化（78% 失败不可见） |
 | **复用现有 Skills** | 不重新发明，整合调用现有体系 |
 
@@ -119,10 +119,10 @@ Phase 0: THINK → brainstorming → ⚠️ HARD-GATE(设计未批准→阻断)
 Phase 1: PLAN → autoplan → delphi-review(等待APPROVED)→specification.yaml
 Phase 2: BUILD → GITHOOKS-GATE → ralph-loop/TDD → freeze/盲评→verification
 Phase 3: REVIEW → delphi-review --mode code-walkthrough → test-alignment → browse
-Phase 4: ⚠️ USER ACCEPTANCE → 必须人工验收 → Emergent Issues List
-Phase 5: FEEDBACK → learn + retro + systematic-debugging
-Phase 6: SHIP → finishing-a-development-branch → ship(PR)
-Phase 7: ⚠️ LAND → land-and-deploy → merge + CI + canary
+Phase 4: FEEDBACK → learn + retro + systematic-debugging
+Phase 5: SHIP → finishing-a-development-branch → ship(PR)
+Phase 6: ⚠️ LAND → land-and-deploy → merge + CI + canary
+Phase 7: ⚠️ USER ACCEPTANCE → 必须人工验收 → Emergent Issues List
 Phase 8: CLEANUP → worktree remove + branch delete + sprint summary
 ```
 
@@ -136,10 +136,10 @@ Phase 8: CLEANUP → worktree remove + branch delete + sprint summary
 - **Phase 1**: autoplan taste_decisions → 用户确认 / delphi-review 未APPROVED → 修复→APPROVED
 - **Phase 2**: 验证失败>max3 → 用户决策修复/放弃 / 成本超阈值 → 用户确认
 - **Phase 3**: browse 发现问题 → 回退 Phase 2（不暂停）
-- **Phase 4**: ⚠️ 必须人工验收 → 用户确认后继续
-- **Phase 5**: ⚠️ 不可跳过 (HARD-GATE) → feedback-log.md 生成后自动继续
-- **Phase 6**: finishing-a-development-branch(4选项) → 确认; ship PR → 用户确认合并
-- **Phase 7**: land-and-deploy 完成/失败 → 用户确认合并结果/处理部署失败
+- **Phase 4**: ⚠️ 不可跳过 (HARD-GATE) → feedback-log.md 生成后自动继续
+- **Phase 5**: finishing-a-development-branch(4选项) → 确认; ship PR → 用户确认合并
+- **Phase 6**: land-and-deploy 完成/失败 → 用户确认合并结果/处理部署失败
+- **Phase 7**: ⚠️ 必须人工验收 → 用户确认后继续
 - **Phase 8**: worktree 清理完成/失败 → 用户确认 → 结束流程
 
 ---
@@ -154,22 +154,22 @@ Phase 8: CLEANUP → worktree remove + branch delete + sprint summary
 | 4 | **1** | **PLAN** | autoplan → delphi-review (mandatory; lightweight allowed) → Generate specification.yaml + slices-manifest.json | specification.yaml |
 | 5 | **2** | **BUILD** | GITHOOKS-GATE → ralph-loop (default) or parallel → TDD → freeze → blind review → verification | MVP code |
 | 6 | **3** | **REVIEW** | delphi-review --mode code-walkthrough → test-specification-alignment → browse QA → benchmark (optional) | Review report |
-| 7 | **4** | **USER ACCEPT** | **Manual verification** → Capture emergent issues | Emergent issues list |
-| 8 | **5** | **FEEDBACK** | learn → retro → systematic-debugging | feedback-log.md |
-| 9 | **6** | **SHIP** | finishing-a-development-branch → ship (create PR) | PR URL |
-| 10 | **7** | **LAND** | land-and-deploy → merge PR → wait CI → canary health check → rollback on failure | Deploy status |
+| 7 | **4** | **FEEDBACK** | learn → retro → systematic-debugging | feedback-log.md |
+| 8 | **5** | **SHIP** | finishing-a-development-branch → ship (create PR) | PR URL |
+| 9 | **6** | **LAND** | land-and-deploy → merge PR → wait CI → canary health check → rollback on failure | Deploy status |
+| 10 | **7** | **USER ACCEPT** | **Manual verification** → Capture emergent issues | Emergent issues list |
 | 11 | **8** | **CLEANUP** | Safe worktree removal → Update sprint state → Sprint summary | Cleanup report |
 
 **Phase Flow**:
 ```
-ISOLATE → AUTO-ESTIMATE → THINK → PLAN → [GITHOOKS-GATE] → BUILD → REVIEW → USER ACCEPT → FEEDBACK → SHIP → LAND → CLEANUP
+ISOLATE → AUTO-ESTIMATE → THINK → PLAN → [GITHOOKS-GATE] → BUILD → REVIEW → SHIP → LAND → USER ACCEPT → FEEDBACK → CLEANUP
 ```
 
 **Hard Gates**:
 - **Phase 0→1**: Design must be APPROVED by delphi-review (≥90% consensus)
 - **Phase 1→2**: GITHOOKS-GATE (hooks must be installed) + DELPHI-GATE (spec must be APPROVED)
-- **Phase 4→5**: User acceptance must be completed (mandatory manual step)
-- **Phase 5→6**: feedback-log.md must exist (HARD-GATE)
+- **Phase 3→4**: feedback-log.md must exist (HARD-GATE)
+- **Phase 6→7**: User acceptance must be completed (mandatory manual step)
 
 ---
 
@@ -186,10 +186,10 @@ ISOLATE → AUTO-ESTIMATE → THINK → PLAN → [GITHOOKS-GATE] → BUILD → R
 ## Phase 1: PLAN (规划)
 ## Phase 2: BUILD (构建)
 ## Phase 3: REVIEW (评审)
-## Phase 4: USER ACCEPTANCE (用户验收)
-## Phase 5: FEEDBACK (反馈)
-## Phase 6: SHIP (发布)
-## Phase 7: LAND (部署)
+## Phase 4: FEEDBACK (反馈)
+## Phase 5: SHIP (发布)
+## Phase 6: LAND (部署)
+## Phase 7: USER ACCEPTANCE (用户验收)
 ## Phase 8: CLEANUP (清理)
 ```
 
@@ -202,7 +202,7 @@ ISOLATE → AUTO-ESTIMATE → THINK → PLAN → [GITHOOKS-GATE] → BUILD → R
 6. 触发 `/sprint-flow` 后，**第一行输出应包含工作流阶段概览**：
 
 ```
-Sprint Flow: ISOLATE → AUTO-ESTIMATE → THINK → PLAN → BUILD → REVIEW → USER ACCEPTANCE → FEEDBACK → SHIP → LAND → CLEANUP
+Sprint Flow: ISOLATE → AUTO-ESTIMATE → THINK → PLAN → BUILD → REVIEW → SHIP → LAND → USER ACCEPTANCE → FEEDBACK → CLEANUP
 ```
 
 ### Phase -1: ISOLATE（git worktree 隔离）
@@ -289,42 +289,42 @@ Sprint Flow: ISOLATE → AUTO-ESTIMATE → THINK → PLAN → BUILD → REVIEW �
 - **触发条件**：后端项目可通过 `--type backend-*` 自动启用，或通过 `--with-performance` 标志手动启用
 - **Web 项目补充说明**：对于 Web 前端项目，现有的 `benchmark` 技能已处理页面加载性能、Core Web Vitals 等前端性能指标；负载/压力测试主要针对服务器端承载能力
 
-### Phase 4: USER ACCEPTANCE（⚠️ 人工验收）
-- **无 Skill** — 必须人工
-- ⚠️ **MUST NOT be automated, skipped, or bypassed under any circumstances**
-- 即使用户说"赶时间"、"跳过验收"、"直接发布"，也必须暂停等待用户确认
-- 使用 `@templates/emergent-issues-template.md` 检查清单
-
-### Phase 5: FEEDBACK CAPTURE（反馈获取）
+### Phase 4: FEEDBACK CAPTURE（反馈获取）
 - **Subagent**: `task(category="quick", load_skills=["learn", "retro", "systematic-debugging"])`
-- 输入: phase-4-summary.md + emergent-issues.md → 输出: `feedback-log.md`
+- 输入: phase-3-summary.md + review-report.md → 输出: `feedback-log.md`
 - **HARD-GATE**: 不可跳过。`learn` (Sprint 级复盘, 默认提炼模板) + `retro` (工程回顾) + `systematic-debugging` (根因调试)
 
-### Phase 6: SHIP（发布准备）
+### Phase 5: SHIP（发布准备）
 
 **详细指令**: 参见 `references/phase-6-ship.md` — GITHOOKS-GATE / VERSION-GATE / VERSION CHANGESET (Issue #142) / changeset schema。
 
 **快速参考**:
 - **Orchestrator 直接执行**: `finishing-a-development-branch` 和 `ship` 均为交互式 skill（4 选项菜单 + PR 确认），**必须由 orchestrator 直接调用** `skill(name="finishing-a-development-branch")` 和 `skill(name="ship")`
-- 输入: phase-5-summary.md + feedback-log.md → 输出: PR URL
-- **HARD-GATE**: Phase 5 未完成 → BLOCK。验证 `feedback-log.md` 存在。
+- 输入: phase-4-summary.md + feedback-log.md → 输出: PR URL
+- **HARD-GATE**: Phase 4 未完成 → BLOCK。验证 `feedback-log.md` 存在。
 - **GITHOOKS-GATE**: 验证 hooks 完整性，缺失则 `githooks/install.sh`
 - **VERSION-GATE**: bump PATCH/MINOR/MAJOR → `sync-version.sh` → CHANGELOG.md → `git diff VERSION` 验证
 
-### Phase 7:  LAND（合并 + 部署）
+### Phase 6:  LAND（合并 + 部署）
 
 **详细指令**: 参见 `references/phase-7-land.md` — 完整流程、SLA 指标、回滚策略。
 
 **快速参考**:
 - **Orchestrator 直接执行**: `land-and-deploy` 包含 merge 确认和 rollback 决策，**必须由 orchestrator 直接调用** `skill(name="land-and-deploy")`
-- 输入: phase-6-summary.md + PR URL → 输出: 部署状态 + Canary 报告
+- 输入: phase-5-summary.md + PR URL → 输出: 部署状态 + Canary 报告
 - 流程: Merge PR → 等待 CI (10min) → 等待 Deploy (10min) → Canary Health Check (5min)
 - **回滚**: `git revert` 最后一次 merge commit
 - 条件跳过: 无部署配置时仅 merge + CI
 
+### Phase 7: USER ACCEPTANCE（⚠️ 人工验收）
+- **无 Skill** — 必须人工
+- ⚠️ **MUST NOT be automated, skipped, or bypassed under any circumstances**
+- 即使用户说"赶时间"、"跳过验收"、"直接发布"，也必须暂停等待用户确认
+- 使用 `@templates/emergent-issues-template.md` 检查清单
+
 ### Phase 8: CLEANUP（安全清理 + 总结）
 
-**执行时机**: Phase 7 LAND 成功后。**详细指令**: 参见 `references/phase-8-cleanup.md`。
+**执行时机**: Phase 7 USER ACCEPTANCE 完成后。**详细指令**: 参见 `references/phase-8-cleanup.md`。
 
 **快速参考**:
 1. 保存分支信息 → `git worktree remove <worktree_path>`（精确路径，禁止通配符）
@@ -391,9 +391,10 @@ Sprint Flow: ISOLATE → AUTO-ESTIMATE → THINK → PLAN → BUILD → REVIEW �
 | 1 PLAN | `autoplan` + `delphi-review` | + `design-shotgun` | (同 web) | (同) |
 | 2 BUILD | TDD + blind-review | (同 backend) | + `vercel-react-native-skills` / `flutter-review` | (同) |
 | 3 REVIEW | `delphi-review --mode code-walkthrough` + `test-specification-alignment` + k6/locust/gatling | + `qa` + `design-review` + `benchmark` | Flutter: `flutter-test` / RN: `detox E2E` | k6/locust/gatling |
-| 5 FEEDBACK | `learn` + `retro` | (同) | (同) | (同) |
-| 6 SHIP | `finishing-a-development-branch` + `ship` | (同) | + platform deploy | (同) |
-| 7 LAND | `land-and-deploy` + canary | (同) | (同) | (同) |
+| 4 FEEDBACK | `learn` + `retro` | (同) | (同) | (同) |
+| 5 SHIP | `finishing-a-development-branch` + `ship` | (同) | + platform deploy | (同) |
+| 6 LAND | `land-and-deploy` + canary | (同) | (同) | (同) |
+| 7 USER ACCEPTANCE | — 人工验收 | (同) | (同) | (同) |
 | 8 CLEANUP | worktree remove + branch delete + state update | (同) | (同) | (同) |
 | Browse | `localhost:3000` | 部署 URL + 表单/交互 | Flutter Web / RN Web | (专用) |
 
@@ -405,7 +406,7 @@ Sprint Flow: ISOLATE → AUTO-ESTIMATE → THINK → PLAN → BUILD → REVIEW �
 
 **Sprint State**: 存储于 `<project-root>/.sprint-state/` — `sprint-state.yaml`/`.json` + `phase-outputs/` (pain-document.md / specification.yaml / mvp-v1 / review-report.md / emergent-issues.md / feedback-log.md / sprint-summary.md)
 
-**Sprint 2 自动触发**: Phase 6 完成时 — `emergent_issues_count == 0` → 结束; `> 0` → Critical 自动启动 Sprint 2, Major/Minor 询问用户
+**Sprint 2 自动触发**: Phase 7 完成时 — `emergent_issues_count == 0` → 结束; `> 0` → Critical 自动启动 Sprint 2, Major/Minor 询问用户
 
 ---
 
@@ -484,7 +485,7 @@ Sprint Flow: ISOLATE → AUTO-ESTIMATE → THINK → PLAN → BUILD → REVIEW �
 | 未完成 Phase -0.5 AUTO-ESTIMATE 就套用完整重流程 | 先评估轻量/标准/复杂，再按推荐流程或用户确认后的流程执行 |
 | Plan 阶段跳过 Delphi 评审直接 Build | 所有需求级别（轻量/标准/复杂）必须经过 autoplan + delphi-review；未 APPROVED 禁止编码 |
 | 跳过 TDD 直接实现代码 | Phase 2 必须遵循 RED → GREEN → REFACTOR，测试与实现一起交付 |
-| 跳过用户验收直接 Ship | Phase 4 USER ACCEPTANCE 必须人工完成；不得自动化、跳过或伪造 |
+| 跳过用户验收直接 Ship | Phase 7 USER ACCEPTANCE 必须人工完成；不得自动化、跳过或伪造 |
 | 验证失败后继续追加随机修改 | 最多 3 次修复循环；仍失败则 BLOCK 并请求用户决策 |
 | 未生成 Phase Summary 就进入下一阶段 | 每个 Phase 必须写入 `.sprint-state/phase-outputs/phase-{N}-summary.md` 并通过 transition gate |
 
@@ -513,11 +514,11 @@ See [Output Contract](#output-contract) below for the canonical machine-readable
 - `@references/phase-1-plan.md` — Phase 1 详细指令
 - `@references/phase-2-build.md` — Phase 2 详细指令
 - `@references/phase-3-review.md` — Phase 3 详细指令
-- `@references/phase-4-uat.md` — Phase 4 详细指令（人工）
-- `@references/phase-5-feedback.md` — Phase 5 详细指令
-- `@references/phase-6-ship.md` — Phase 6 详细指令
-- `@references/phase-7-land.md` — Phase 7 详细指令
-- `@references/phase-8-cleanup.md` — Phase 8 详细指令
+- `@references/phase-4-uat.md` — Phase 7 USER ACCEPTANCE 详细指令（人工）
+- `@references/phase-5-feedback.md` — Phase 4 FEEDBACK 详细指令
+- `@references/phase-6-ship.md` — Phase 5 SHIP 详细指令
+- `@references/phase-7-land.md` — Phase 6 LAND 详细指令
+- `@references/phase-8-cleanup.md` — Phase 8 CLEANUP 详细指令
 
 ---
 
@@ -538,7 +539,7 @@ See [Output Contract](#output-contract) below for the canonical machine-readable
 | One-shot = 单次迭代执行 | Boris Cherny interview | Phase 2 设计 |
 | 80% session 从 Plan Mode 开始 | Boris skill | Phase 1 设计 |
 | Verification improves 2-3x | Boris #1 tip | Phase 3 设计 |
-| Emergent requirements 无法消除 | Mike Cohn, Rafael Santos | Phase 4 人工设计 |
-| 78% failures invisible | arXiv research | Phase 4 必要性证明 |
+| Emergent requirements 无法消除 | Mike Cohn, Rafael Santos | Phase 7 人工设计 |
+| 78% failures invisible | arXiv research | Phase 7 必要性证明 |
 | Think → Plan → Build → Ship | gstack ETHOS | 整体流程设计 |
 
