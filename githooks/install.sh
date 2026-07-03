@@ -17,6 +17,7 @@ mkdir -p "$TARGET_HOOKS"
 TARGET_GITHOOKS="$PROJECT_ROOT/githooks"
 
 HOOKS_LIST="pre-commit pre-push post-merge"
+GATE_SCRIPTS="gate-3.sh gate-4.sh gate-7.sh gate-8.sh gate-9.sh"
 
 echo "Installing OpenCode quality gates..."
 echo ""
@@ -27,6 +28,16 @@ for hook in $HOOKS_LIST; do
     cp "$src" "$TARGET_HOOKS/$hook"
     chmod +x "$TARGET_HOOKS/$hook"
     echo "  + $hook ($HOOKS_DIR/$hook) -> .git/hooks/"
+  fi
+done
+
+# Install gate-*.sh scripts required by pre-commit (referenced via $GATE_DIR)
+for gate in $GATE_SCRIPTS; do
+  src="$HOOKS_DIR/$gate"
+  if [ -f "$src" ]; then
+    cp "$src" "$TARGET_HOOKS/$gate"
+    chmod +x "$TARGET_HOOKS/$gate"
+    echo "  + $gate ($HOOKS_DIR/$gate) -> .git/hooks/"
   fi
 done
 

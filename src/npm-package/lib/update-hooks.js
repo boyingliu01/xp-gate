@@ -198,43 +198,25 @@ function copyGateScripts(srcDir, destDir, dryRun, noBackup) {
   });
 }
 
-/**
- * Main entry point: sync latest hook versions from xp-gate package to project or global directory.
- *
- * @param {Object} options
- * @param {boolean} [options.global=false] - Update global hooks (~/.config/xp-gate/)
- * @param {boolean} [options.force=false] - Skip local modification detection
- * @param {boolean} [options.dryRun=false] - Show what would be updated without writing
- * @param {boolean} [options.noBackup=false] - Skip creating .bak backup files
- * @param {string} [options.scope='all'] - Selectively update: 'hooks', 'adapters', or 'all'
- * @returns {number} Exit code (0 = success, 1 = error/warn)
- */
-function updateHooks(options = {}) {
-  const { global = false, force = false, dryRun = false, noBackup = false, scope = 'all' } = options;
-
-  // Use module.exports.getPackageRoot() so tests can mock via mod.getPackageRoot
-  const srcDir = (module.exports && module.exports.getPackageRoot)
+function resolveSrcDir() {
+  return (module.exports && module.exports.getPackageRoot)
     ? module.exports.getPackageRoot()
     : getPackageRoot();
+}
 
-  // Determine destination directories based on mode
-  let hooksDestDir;
-  let adaptersDestDir;
+function resolveDirs(global) {
+  if (global) return { hooksDestDir: GLOBAL_HOOKS_DIR, adaptersDestDir: GLOBAL_ADAPTERS_DIR };
+  return { hooksDestDir: getProjectHooksDir(), adaptersDestDir: path.join(process.cwd(), 'githooks') };
+}
 
-  if (global) {
-    hooksDestDir = GLOBAL_HOOKS_DIR;
-    adaptersDestDir = GLOBAL_ADAPTERS_DIR;
-  } else {
-    hooksDestDir = getProjectHooksDir();
-    // For local mode, adapters go to project's githooks/ directory
-    adaptersDestDir = path.join(process.cwd(), 'githooks');
-  }
-
-  // Ensure destination directories exist
+function ensureDirsExist(adaptersDestDir, hooksDestDir) {
   fs.mkdirSync(hooksDestDir, { recursive: true });
   fs.mkdirSync(adaptersDestDir, { recursive: true });
   fs.mkdirSync(path.join(adaptersDestDir, 'adapters'), { recursive: true });
+}
 
+function printUpdateHeader(opts) {
+  const { global, srcDir, hooksDestDir, adaptersDestDir, scope, dryRun } = opts;
   console.log(`XP-Gate Update Hooks`);
   console.log(`====================`);
   console.log(`Mode: ${global ? 'Global' : 'Local'}`);
@@ -244,35 +226,53 @@ function updateHooks(options = {}) {
   console.log(`Scope: ${scope}`);
   if (dryRun) console.log(`Dry run: yes (no files will be modified)`);
   console.log('');
+}
 
-  // Detect local modifications and warn (unless force or dryRun)
-  if (!force && !dryRun) {
-    const localMods = detectLocalModifications(srcDir, hooksDestDir, adaptersDestDir);
-    if (localMods.length > 0) {
-      console.warn(`[WARN] Detected ${localMods.length} locally modified file(s):`);
-      localMods.forEach(f => console.warn(`  - ${f}`));
-      console.warn('Use --force to overwrite, or manually backup first.');
-      return 1;
-    }
-  }
+function checkLocalModifications(srcDir, hooksDestDir, adaptersDestDir, force, dryRun) {
+  if (force || dryRun) return 0;
+  const localMods = detectLocalModifications(srcDir, hooksDestDir, adaptersDestDir);
+  if (localMods.length === 0) return 0;
+  console.warn(`[WARN] Detected ${localMods.length} locally modified file(s):`);
+  localMods.forEach(f => console.warn(`  - ${f}`));
+  console.warn('Use --force to overwrite, or manually backup first.');
+  return 1;
+}
 
-  // Copy files based on scope
+function copyByScope(opts) {
+  const { scope, srcDir, hooksDestDir, adaptersDestDir, dryRun, noBackup } = opts;
   if (scope === 'all' || scope === 'hooks') {
-    console.log('Updating hooks...');
+    printInfo('hooks');
     copyHooks(srcDir, hooksDestDir, dryRun, noBackup);
   }
   if (scope === 'all' || scope === 'adapters') {
-    console.log('Updating adapters...');
+    printInfo('adapters');
     copyAdapters(srcDir, adaptersDestDir, dryRun, noBackup);
   }
   if (scope === 'all') {
-    console.log('Updating gate scripts...');
+    printInfo('gate scripts');
     copyGateScripts(srcDir, adaptersDestDir, dryRun, noBackup);
   }
+}
 
-  if (!dryRun) {
-    console.log('\nUpdate complete!');
-  }
+function printInfo(label) { console.log(`Updating ${label}...`); }
+
+/**
+ * Main entry point: sync latest hook versions from xp-gate package to project or global directory.
+ */
+function updateHooks(options = {}) {
+  const { global = false, force = false, dryRun = false, noBackup = false, scope = 'all' } = options;
+  const srcDir = resolveSrcDir();
+  const { hooksDestDir, adaptersDestDir } = resolveDirs(global);
+
+  ensureDirsExist(adaptersDestDir, hooksDestDir);
+  printUpdateHeader({ global, srcDir, hooksDestDir, adaptersDestDir, scope, dryRun });
+
+  const modCheck = checkLocalModifications(srcDir, hooksDestDir, adaptersDestDir, force, dryRun);
+  if (modCheck !== 0) return modCheck;
+
+  copyByScope({ scope, srcDir, hooksDestDir, adaptersDestDir, dryRun, noBackup });
+
+  if (!dryRun) console.log('\nUpdate complete!');
   return 0;
 }
 
