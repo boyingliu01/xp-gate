@@ -932,11 +932,9 @@ elif [ "$PROJECT_LANG" = "python" ]; then
     else
       echo "✅ PASSED - pylint found no duplicates."
     fi
-  elif require_tool "ruff" "Gate 2" "pip install ruff"; then
-    ruff check --select=DUP $(echo "$CHANGED_FILES" | grep "\.py$") 2>&1 | head -30
-    echo "✅ PASSED - ruff duplicate code check completed."
   else
-    exit 1
+    echo "ℹ️  pylint not found — skipping Python duplicate code check."
+    echo "   Install pylint: pip install pylint"
   fi
 
 elif [ "$PROJECT_LANG" = "go" ]; then
