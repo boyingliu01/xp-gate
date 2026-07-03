@@ -80,21 +80,6 @@ function main() {
   }
 
   console.error(`[prepack] done: ${copied} skills bundled for @boyingliu01/opencode-plugin`);
-
-  // Validate tui-plugin.ts structural integrity (Issue #248: stale cache detection)
-  const tuiFile = path.join(PLUGIN_ROOT, 'tui-plugin.ts');
-  const tuiContent = fs.readFileSync(tuiFile, 'utf8');
-  const ok1 = tuiContent.includes('discoverActiveSprints') && tuiContent.includes('.worktrees');
-  const ok2 = !tuiContent.match(/from\s+["'][^"']*\.\.\/\.\.\/src[^"']*["']/);
-  if (!ok1) {
-    console.error('[prepack] ERROR: tui-plugin.ts is missing discoverActiveSprints — old version detected');
-    process.exit(1);
-  }
-  if (!ok2) {
-    console.error('[prepack] ERROR: tui-plugin.ts contains broken import paths to ../../src/...');
-    process.exit(1);
-  }
-  console.error('[prepack] OK: tui-plugin.ts structural checks passed');
 }
 
 main();

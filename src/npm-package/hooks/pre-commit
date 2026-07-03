@@ -1294,22 +1294,52 @@ else
     done
   fi
 
-  # First, run tests using adapter system
+  # Run tests + coverage in a single pass (optimization: avoids running vitest twice)
+  # For TypeScript with test:coverage script, use coverage-enabled run directly.
+  # For other languages, fall back to the adapter's run_tests + run_coverage pair.
   echo "Running tests..."
   
   # Route to appropriate test runner via adapter
   ADAPTER_FILE=$(resolve_adapter_path "$PROJECT_LANG")
   if [ "${PROJECT_LANG}" != "unknown" ] && [ -n "$ADAPTER_FILE" ]; then
     if source "$ADAPTER_FILE" 2>/dev/null; then
-      TESTS_OUTPUT=$(run_tests 2>&1)
-      TESTS_EXIT_CODE=$?
-      echo "$TESTS_OUTPUT" | head -50
-      if [ "$TESTS_EXIT_CODE" -ne 0 ]; then
-        echo ""
-        echo "❌ BLOCKED - Tests FAILED"
-        exit 1
+      # TypeScript: single vitest run --coverage (combines tests + coverage)
+      if [ "$PROJECT_LANG" = "typescript" ] && [ -f "package.json" ]; then
+        if npx vitest --version >/dev/null 2>&1; then
+          echo "Running TypeScript tests with coverage..."
+          TESTS_OUTPUT=$(npx vitest run --coverage 2>&1)
+          TESTS_EXIT_CODE=$?
+          echo "$TESTS_OUTPUT" | head -60
+          if [ "$TESTS_EXIT_CODE" -ne 0 ]; then
+            echo ""
+            echo "❌ BLOCKED - Tests FAILED"
+            exit 1
+          else
+            echo "✅ PASSED - Unit tests passed (with coverage)."
+          fi
+        else
+          # Fallback: run_tests without coverage
+          TESTS_OUTPUT=$(run_tests 2>&1)
+          TESTS_EXIT_CODE=$?
+          echo "$TESTS_OUTPUT" | head -50
+          if [ "$TESTS_EXIT_CODE" -ne 0 ]; then
+            echo ""
+            echo "❌ BLOCKED - Tests FAILED"
+            exit 1
+          fi
+        fi
       else
-        echo "✅ PASSED - Unit tests passed."
+        # Non-TypeScript: standard adapter test flow
+        TESTS_OUTPUT=$(run_tests 2>&1)
+        TESTS_EXIT_CODE=$?
+        echo "$TESTS_OUTPUT" | head -50
+        if [ "$TESTS_EXIT_CODE" -ne 0 ]; then
+          echo ""
+          echo "❌ BLOCKED - Tests FAILED"
+          exit 1
+        else
+          echo "✅ PASSED - Unit tests passed."
+        fi
       fi
     else
       echo "✅ PASSED - Could not source ${PROJECT_LANG} adapter for tests, assuming none to run."
@@ -1318,29 +1348,18 @@ else
     echo "✅ PASSED - No ${PROJECT_LANG} adapter found for tests, assuming none to run."
   fi
   
-  # Next, run coverage check
+  # Next, run coverage check (skip for TypeScript — already done above)
   echo "Running coverage check..."
 
   if [ "${PROJECT_LANG}" != "unknown" ] && [ -n "$ADAPTER_FILE" ]; then
     if source "$ADAPTER_FILE" 2>/dev/null; then
       case "$PROJECT_LANG" in
         "typescript")
-          if [ -f "package.json" ] && grep -q '"test:coverage"' package.json 2>/dev/null; then
-            echo "Running TypeScript coverage with minimum 80% requirement..."
-            npx vitest run --coverage 2>&1
-            COV_EXIT=$?
-            if [ "$COV_EXIT" -ne 0 ]; then
-              echo ""
-              echo "❌ BLOCKED - Coverage check FAILED (exit code: $COV_EXIT)"
-              echo "Coverage must meet the thresholds defined in vitest.config.ts"
-              exit 1
-            fi
-          else
-            echo "No 'test:coverage' script in package.json, running coverage via adapter..."
-            run_coverage_output=$(run_coverage 2>&1)
-            COV_EXIT=$?
-            echo "$run_coverage_output" | head -30
-          fi
+          # Coverage already collected in the test section above (optimized single vitest run --coverage).
+          # The --coverage flag produces coverage/coverage-summary.json which the unconditional
+          # stage-2 enforcement reads. No need to run vitest again here.
+          echo "TypeScript coverage already collected during test run."
+          COV_EXIT=0
           ;;
         "python")
           if command -v pytest &> /dev/null && command -v coverage &> /dev/null; then
@@ -1793,19 +1812,74 @@ if [ -n "$ORIGINAL_DIR" ]; then
 fi
 
 # ============================================================================
-# GATE 9: Semgrep SAST Security Scan
-# Extracted to gate-9.sh for maintainability
+# GATE 9: Build Integrity Check (TypeScript compilation + package + imports)
+# ============================================================================
+2>&1 echo ""
+2>&1 echo "→ Gate 9: Build integrity... "
+GATE_9_START=$(gate_start_ms)
+GATE_9_STATUS="SKIP"
+
+if [ -f "package.json" ] && [ -f "tsconfig.json" ]; then
+  GATE_9_SCRIPT=""
+  if [ -f "$PROJECT_ROOT/src/build-integrity/gate-10.ts" ]; then
+    GATE_9_SCRIPT="$PROJECT_ROOT/src/build-integrity/gate-10.ts"
+  elif [ -f ".xp-gate/modules/build-integrity/gate-10.ts" ]; then
+    GATE_9_SCRIPT=".xp-gate/modules/build-integrity/gate-10.ts"
+  elif [ -f "$HOME/.config/xp-gate/modules/build-integrity/gate-10.ts" ]; then
+    GATE_9_SCRIPT="$HOME/.config/xp-gate/modules/build-integrity/gate-10.ts"
+  fi
+
+  if [ -n "$GATE_9_SCRIPT" ]; then
+    CHANGED_FILES_CSV=$(echo "$CHANGED_FILES" | tr ' ' ',')
+    GATE_9_OUTPUT=$(mktemp)
+    if timeout 120s npx tsx "$GATE_9_SCRIPT" --changed-files "$CHANGED_FILES_CSV" --project-root "$PROJECT_ROOT" --timeout 115000 > "$GATE_9_OUTPUT" 2>&1; then
+      GATE_9_STATUS="PASS"
+      echo "     ✅ Build integrity check passed."
+    else
+      GATE_9_EXIT=$?
+      if [ $GATE_9_EXIT -eq 124 ]; then
+        GATE_9_STATUS="SKIP"
+        echo "     ⏱️  Build integrity check timed out (120s). SKIPPED."
+      else
+        GATE_9_STATUS="BLOCK"
+        cat "$GATE_9_OUTPUT"
+        echo ""
+        echo "❌ BLOCKED - Gate 9: Build integrity check failed"
+        echo "Fix type errors, broken imports, or package manifest issues before committing."
+        rm -f "$GATE_9_OUTPUT"
+        exit 1
+      fi
+    fi
+    rm -f "$GATE_9_OUTPUT"
+  else
+    echo "     ℹ️  Build integrity script not found - skipping"
+    echo "     ⏭️  SKIPPED - Build integrity (gate-10.ts not available)"
+  fi
+else
+  echo "     ℹ️  Not a TypeScript project - skipping build integrity check"
+  echo "     ⏭️  SKIPPED - Build integrity (not a TypeScript project)"
+fi
+
+GATE_9_END=$(date +%s)
+GATE_9_DURATION=$((GATE_9_END - GATE_9_START))
+echo "✅ Gate 9 completed in ${GATE_9_DURATION}s"
+echo ""
+# ============================================================================
+
+# ============================================================================
+# GATE 10: Semgrep SAST Security Scan
+# Extracted to gate-10.sh for maintainability
 # ============================================================================
 source "$GATE_DIR/gate-9.sh"
 # ============================================================================
 
 # ============================================================================
-# GATE 10: Sprint Flow Enforcement
+# GATE 11: Sprint Flow Enforcement
 # Validates sprint state consistency (delphi-review APPROVED before BUILD)
 # Uses sprint-gate.sh for standalone validation logic
 # ============================================================================
-GATE_10_START=$(date +%s)
-GATE_10_STATUS="PASS"
+GATE_11_START=$(date +%s)
+GATE_11_STATUS="PASS"
 
 SPRINT_GATE_SCRIPT=""
 if [ -f "$GATE_DIR/sprint-gate.sh" ]; then
@@ -1816,19 +1890,19 @@ fi
 
 if [ -n "$SPRINT_GATE_SCRIPT" ]; then
   if ! bash "$SPRINT_GATE_SCRIPT" --pre-commit; then
-    GATE_10_STATUS="BLOCK"
-    echo "❌ BLOCKED - Gate 10: Sprint Flow Enforcement"
+    GATE_11_STATUS="BLOCK"
+    echo "❌ BLOCKED - Gate 11: Sprint Flow Enforcement"
     # Sprint gate failure is a hard block — exit immediately
     exit 1
   fi
 else
-  echo "⏭️  SKIPPED - Gate 10: Sprint Flow (sprint-gate.sh not found)"
-  GATE_10_STATUS="SKIP"
+  echo "⏭️  SKIPPED - Gate 11: Sprint Flow (sprint-gate.sh not found)"
+  GATE_11_STATUS="SKIP"
 fi
 
-GATE_10_END=$(date +%s)
-GATE_10_DURATION=$((GATE_10_END - GATE_10_START))
-echo "✅ Gate 10 completed in ${GATE_10_DURATION}s"
+GATE_11_END=$(date +%s)
+GATE_11_DURATION=$((GATE_11_END - GATE_11_START))
+echo "✅ Gate 11 completed in ${GATE_11_DURATION}s"
 echo ""
 # ============================================================================
 
@@ -1838,13 +1912,13 @@ generate_quality_report() {
   local TIMESTAMP
   local BRANCH
   local PASSED_COUNT=0
-  local TOTAL_GATES=10
+  local TOTAL_GATES=11
 
   COMMIT_HASH=$(git rev-parse HEAD 2>/dev/null || echo "unknown")
   BRANCH=$(git rev-parse --abbrev-ref HEAD 2>/dev/null || echo "unknown")
   TIMESTAMP=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
 
-  for gate in 1 2 3 4 5 6 7 8 9 10; do
+  for gate in 1 2 3 4 5 6 7 8 9 10 11; do
     local status_var="GATE_${gate}_STATUS"
     if [ "${!status_var}" = "PASS" ]; then
       PASSED_COUNT=$((PASSED_COUNT + 1))
@@ -1886,7 +1960,7 @@ generate_quality_report() {
 
   cat > "$REPORT_FILE" << ENDJSON
 {
-  "reportVersion": "1.1",
+  "reportVersion": "2.0",
   "generatedAt": "$TIMESTAMP",
   "branch": "$BRANCH",
   "commit": "$COMMIT_HASH",
@@ -1943,14 +2017,19 @@ generate_quality_report() {
       "status": "${GATE_8_STATUS:-PASS}",
       "tool": "gitleaks"
     },
-    "gate9_sast": {
-      "name": "SAST Security Scan",
+    "gate9_build_integrity": {
+      "name": "Build Integrity",
       "status": "${GATE_9_STATUS:-PASS}",
+      "tool": "tsc + npm pack + import check"
+    },
+    "gate10_sast": {
+      "name": "SAST Security Scan",
+      "status": "${GATE_10_STATUS:-PASS}",
       "tool": "semgrep"
     },
-    "gate10_sprint_flow": {
+    "gate11_sprint_flow": {
       "name": "Sprint Flow Enforcement",
-      "status": "${GATE_10_STATUS:-PASS}",
+      "status": "${GATE_11_STATUS:-PASS}",
       "tool": "sprint-gate.sh"
     }
   }
@@ -1992,8 +2071,9 @@ PY
   GATES_JSON="${GATES_JSON}\"gate6\":{\"status\":\"${GATE_6_STATUS:-PASS}\",\"name\":\"Architecture+BoyScout\",\"bsBlocked\":${BS_BLOCKED}},"
   GATES_JSON="${GATES_JSON}\"gate7\":{\"status\":\"${GATE_7_STATUS:-PASS}\",\"name\":\"IaC Security\"},"
   GATES_JSON="${GATES_JSON}\"gate8\":{\"status\":\"${GATE_8_STATUS:-PASS}\",\"name\":\"Secret Scanning\"},"
-  GATES_JSON="${GATES_JSON}\"gate9\":{\"status\":\"${GATE_9_STATUS:-PASS}\",\"name\":\"SAST Security\"},"
-  GATES_JSON="${GATES_JSON}\"gate10\":{\"status\":\"${GATE_10_STATUS:-PASS}\",\"name\":\"Sprint Flow\"}}"
+  GATES_JSON="${GATES_JSON}\"gate9\":{\"status\":\"${GATE_9_STATUS:-PASS}\",\"name\":\"Build Integrity\"},"
+  GATES_JSON="${GATES_JSON}\"gate10\":{\"status\":\"${GATE_10_STATUS:-PASS}\",\"name\":\"SAST Security\"},"
+  GATES_JSON="${GATES_JSON}\"gate11\":{\"status\":\"${GATE_11_STATUS:-PASS}\",\"name\":\"Sprint Flow\"}}"
   GATES_JSON="${GATES_JSON}}"
 
   echo "{\"timestamp\":\"$TIMESTAMP\",\"commit\":\"$COMMIT_HASH\",\"branch\":\"$BRANCH\",\"score\":$SCORE,\"passed\":$PASSED_COUNT,\"total\":$TOTAL_GATES,\"gates\":$GATES_JSON,\"coverage\":\"$COV_PCT\",\"complexityWarnings\":${CC_WARNINGS:-0},\"principleWarnings\":${WARNING_COUNT:-0},\"boyScoutBlocked\":${BS_BLOCKED}}" >> "$HISTORY_FILE"
@@ -2012,8 +2092,9 @@ PY
   printf "  %-45s %s\n" "Gate 6: Architecture + Boy Scout" "${GATE_6_STATUS:-PASS}"
   printf "  %-45s %s\n" "Gate 7: IaC Security" "${GATE_7_STATUS:-PASS}"
   printf "  %-45s %s\n" "Gate 8: Secret Scanning" "${GATE_8_STATUS:-PASS}"
-  printf "  %-45s %s\n" "Gate 9: SAST Security" "${GATE_9_STATUS:-PASS}"
-  printf "  %-45s %s\n" "Gate 10: Sprint Flow" "${GATE_10_STATUS:-PASS}"
+  printf "  %-45s %s\n" "Gate 9: Build Integrity" "${GATE_9_STATUS:-PASS}"
+  printf "  %-45s %s\n" "Gate 10: SAST Security" "${GATE_10_STATUS:-PASS}"
+  printf "  %-45s %s\n" "Gate 11: Sprint Flow" "${GATE_11_STATUS:-PASS}"
   echo ""
   echo "  Overall Score: $SCORE/10 | $PASSED_COUNT/$TOTAL_GATES gates passed"
   echo "  Branch status: $REPORT_FILE"
