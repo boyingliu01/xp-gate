@@ -1294,22 +1294,52 @@ else
     done
   fi
 
-  # First, run tests using adapter system
+  # Run tests + coverage in a single pass (optimization: avoids running vitest twice)
+  # For TypeScript with test:coverage script, use coverage-enabled run directly.
+  # For other languages, fall back to the adapter's run_tests + run_coverage pair.
   echo "Running tests..."
   
   # Route to appropriate test runner via adapter
   ADAPTER_FILE=$(resolve_adapter_path "$PROJECT_LANG")
   if [ "${PROJECT_LANG}" != "unknown" ] && [ -n "$ADAPTER_FILE" ]; then
     if source "$ADAPTER_FILE" 2>/dev/null; then
-      TESTS_OUTPUT=$(run_tests 2>&1)
-      TESTS_EXIT_CODE=$?
-      echo "$TESTS_OUTPUT" | head -50
-      if [ "$TESTS_EXIT_CODE" -ne 0 ]; then
-        echo ""
-        echo "❌ BLOCKED - Tests FAILED"
-        exit 1
+      # TypeScript: single vitest run --coverage (combines tests + coverage)
+      if [ "$PROJECT_LANG" = "typescript" ] && [ -f "package.json" ]; then
+        if npx vitest --version >/dev/null 2>&1; then
+          echo "Running TypeScript tests with coverage..."
+          TESTS_OUTPUT=$(npx vitest run --coverage 2>&1)
+          TESTS_EXIT_CODE=$?
+          echo "$TESTS_OUTPUT" | head -60
+          if [ "$TESTS_EXIT_CODE" -ne 0 ]; then
+            echo ""
+            echo "❌ BLOCKED - Tests FAILED"
+            exit 1
+          else
+            echo "✅ PASSED - Unit tests passed (with coverage)."
+          fi
+        else
+          # Fallback: run_tests without coverage
+          TESTS_OUTPUT=$(run_tests 2>&1)
+          TESTS_EXIT_CODE=$?
+          echo "$TESTS_OUTPUT" | head -50
+          if [ "$TESTS_EXIT_CODE" -ne 0 ]; then
+            echo ""
+            echo "❌ BLOCKED - Tests FAILED"
+            exit 1
+          fi
+        fi
       else
-        echo "✅ PASSED - Unit tests passed."
+        # Non-TypeScript: standard adapter test flow
+        TESTS_OUTPUT=$(run_tests 2>&1)
+        TESTS_EXIT_CODE=$?
+        echo "$TESTS_OUTPUT" | head -50
+        if [ "$TESTS_EXIT_CODE" -ne 0 ]; then
+          echo ""
+          echo "❌ BLOCKED - Tests FAILED"
+          exit 1
+        else
+          echo "✅ PASSED - Unit tests passed."
+        fi
       fi
     else
       echo "✅ PASSED - Could not source ${PROJECT_LANG} adapter for tests, assuming none to run."
@@ -1318,29 +1348,18 @@ else
     echo "✅ PASSED - No ${PROJECT_LANG} adapter found for tests, assuming none to run."
   fi
   
-  # Next, run coverage check
+  # Next, run coverage check (skip for TypeScript — already done above)
   echo "Running coverage check..."
 
   if [ "${PROJECT_LANG}" != "unknown" ] && [ -n "$ADAPTER_FILE" ]; then
     if source "$ADAPTER_FILE" 2>/dev/null; then
       case "$PROJECT_LANG" in
         "typescript")
-          if [ -f "package.json" ] && grep -q '"test:coverage"' package.json 2>/dev/null; then
-            echo "Running TypeScript coverage with minimum 80% requirement..."
-            npx vitest run --coverage 2>&1
-            COV_EXIT=$?
-            if [ "$COV_EXIT" -ne 0 ]; then
-              echo ""
-              echo "❌ BLOCKED - Coverage check FAILED (exit code: $COV_EXIT)"
-              echo "Coverage must meet the thresholds defined in vitest.config.ts"
-              exit 1
-            fi
-          else
-            echo "No 'test:coverage' script in package.json, running coverage via adapter..."
-            run_coverage_output=$(run_coverage 2>&1)
-            COV_EXIT=$?
-            echo "$run_coverage_output" | head -30
-          fi
+          # Coverage already collected in the test section above (optimized single vitest run --coverage).
+          # The --coverage flag produces coverage/coverage-summary.json which the unconditional
+          # stage-2 enforcement reads. No need to run vitest again here.
+          echo "TypeScript coverage already collected during test run."
+          COV_EXIT=0
           ;;
         "python")
           if command -v pytest &> /dev/null && command -v coverage &> /dev/null; then
@@ -1849,7 +1868,7 @@ echo ""
 
 # ============================================================================
 # GATE 10: Semgrep SAST Security Scan
-# Extracted to gate-9.sh for maintainability
+# Extracted to gate-10.sh for maintainability
 # ============================================================================
 source "$GATE_DIR/gate-9.sh"
 # ============================================================================

@@ -4,7 +4,11 @@ const { spawnSync } = require('child_process');
 const fs = require('fs');
 const path = require('path');
 
-// Looks for architecture.yaml in CWD, then walks up to git root.
+function isPythonProject(dir) {
+  const markers = ['setup.py', 'setup.cfg', 'pyproject.toml', 'requirements.txt'];
+  return markers.some((m) => fs.existsSync(path.join(dir, m)));
+}
+
 function findArchConfig(startDir) {
   let dir = path.resolve(startDir);
   const root = path.parse(dir).root;
@@ -15,6 +19,39 @@ function findArchConfig(startDir) {
     dir = path.dirname(dir);
   }
   return null;
+}
+
+function runArchlinter(config) {
+  const result = spawnSync(
+    'npx',
+    ['-y', '@archlinter/cli', 'scan', '.', '--config', config],
+    { stdio: 'inherit', shell: process.platform === 'win32' },
+  );
+  if (result.error && result.error.code === 'ENOENT') {
+    console.error('[xp-gate arch] ERROR: npx not found in PATH. Install Node.js >=18.');
+    return 1;
+  }
+  return result.status === null ? 1 : result.status;
+}
+
+function runArchy(config) {
+  const result = spawnSync('archy', ['check', '.', '--config', config], {
+    stdio: 'inherit',
+    shell: process.platform === 'win32',
+  });
+  if (result.error && result.error.code === 'ENOENT') {
+    console.warn('[xp-gate arch] archy not found on PATH; trying npx fallback.');
+    const npxResult = spawnSync('npx', ['-y', 'archy', 'check', '.', '--config', config], {
+      stdio: 'inherit',
+      shell: process.platform === 'win32',
+    });
+    if (npxResult.error && npxResult.error.code === 'ENOENT') {
+      console.error('[xp-gate arch] ERROR: neither archy nor npx found in PATH.');
+      return 1;
+    }
+    return npxResult.status === null ? 1 : npxResult.status;
+  }
+  return result.status === null ? 1 : result.status;
 }
 
 function arch(args) {
@@ -33,17 +70,12 @@ function arch(args) {
     return Promise.resolve(1);
   }
 
-  const result = spawnSync('npx', ['-y', '@archlinter/cli', 'scan', '.', '--config', config], {
-    stdio: 'inherit',
-    shell: process.platform === 'win32',
-  });
-
-  if (result.error && result.error.code === 'ENOENT') {
-    console.error('[xp-gate arch] ERROR: npx not found in PATH. Install Node.js >=18.');
-    return Promise.resolve(1);
+  if (isPythonProject(process.cwd())) {
+    console.log('[xp-gate arch] Detected Python project — using archy');
+    return Promise.resolve(runArchy(config));
   }
 
-  return Promise.resolve(result.status === null ? 1 : result.status);
+  return Promise.resolve(runArchlinter(config));
 }
 
 module.exports = { arch };

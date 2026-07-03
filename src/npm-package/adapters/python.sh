@@ -47,7 +47,16 @@ run_tests() {
   echo "Running Python tests..."
   PYTEST_OUTPUT=$(pytest --exitfirst --tb=short 2>&1)
   PYTEST_EXIT=$?
-  echo "$PYTEST_OUTPUT" | tail -30
+
+  # Show the short summary tail — this is where FAILED/assert diagnostics live.
+  # With --exitfirst we stop at the first failure, so the last ~10 lines are the
+  # most actionable: they contain the test name, assert expression, and expected
+  # vs actual values.  Full output is saved to /tmp/ for post-mortem inspection.
+  echo "$PYTEST_OUTPUT" | grep -E "(FAILED|PASSED|passed|failed|error|ERROR|assert)" | tail -10
+  echo "$PYTEST_OUTPUT" | tail -5
+
+  # Save full output for post-mortem inspection
+  echo "$PYTEST_OUTPUT" > /tmp/xp-gate-pytest-output-$$.log
 
   # Check for collection errors (ModuleNotFoundError / ImportError)
   if echo "$PYTEST_OUTPUT" | grep -qi "ModuleNotFoundError\|ImportError"; then
@@ -78,7 +87,9 @@ run_coverage() {
   echo "Running Python coverage..."
   PYTEST_OUTPUT=$(pytest --exitfirst --tb=short --cov=. --cov-fail-under=80 2>&1)
   PYTEST_EXIT=$?
-  echo "$PYTEST_OUTPUT" | tail -30
+  echo "$PYTEST_OUTPUT" | grep -E "(FAILED|PASSED|passed|failed|error|ERROR|TOTAL|assert)" | tail -10
+  echo "$PYTEST_OUTPUT" | tail -5
+  echo "$PYTEST_OUTPUT" > /tmp/xp-gate-pytest-cov-output-$$.log
 
   # Check for collection errors (ModuleNotFoundError / ImportError)
   if echo "$PYTEST_OUTPUT" | grep -qi "ModuleNotFoundError\|ImportError"; then

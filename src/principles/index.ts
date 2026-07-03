@@ -72,8 +72,21 @@ export async function main(args: string[]): Promise<number> {
   return result.summary.totalViolations > 0 ? 1 : 0;
 }
 
+// Support both CJS (require.main === module) and ESM (import.meta.url) runtimes.
+// npx tsx loads files via import() making require.main unreliable.
+function isDirectExecution(): boolean {
+  if (typeof require !== 'undefined' && require.main === module) {
+    return true;
+  }
+  if (typeof import.meta !== 'undefined' && import.meta.url && process.argv[1]) {
+    const fileUrl = `file://${process.argv[1]}`;
+    return import.meta.url === fileUrl || import.meta.url.endsWith(`/${process.argv[1]}`);
+  }
+  return false;
+}
+
 const args = process.argv.slice(2);
-if (typeof require !== 'undefined' && require.main === module) {
+if (isDirectExecution()) {
   main(args)
     .then(exitCode => {
       if (exitCode !== 0) {
