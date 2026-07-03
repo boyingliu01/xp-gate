@@ -2,6 +2,17 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.12.4.1] - 2026-07-03
+
+### Fixed
+- **Gate 4**: `principles/index.ts` CLI entry now works under `npx tsx` (ESM `require.main` guard) — was silently producing empty output
+- **Gate 9/10 variable collision**: Semgrep SAST (`gate-9.sh`) used `GATE_9_STATUS` overwriting Build Integrity result; renamed to `GATE_10_STATUS`
+- **npm-package mirror sync**: `src/npm-package/principles/index.ts` now matches source-of-truth; architecture baseline re-snapped
+
+### Changed
+- **Gate 5 vitest optimization**: single `vitest run --coverage` replaces separate test+coverage runs, saving ~40s
+- `githooks/adapters/python.sh`: replace `tail -30` with FAILED-line grep for actionable test failure output
+
 ## [0.12.4.0] - 2026-07-03
 
 ### Refactor
