@@ -2,6 +2,18 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.12.4.0] - 2026-07-03
+
+### Refactor
+- Project slimming: remove dead code, stale docs, abandoned TUI panel
+  - `src/npm-package/skills/`, `src/npm-package/sprint-flow/`, `src/npm-package/build-integrity/`
+  - `src/npm-package/gate-*.sh`, `src/npm-package/lib/next-sprint.js`
+  - `plugins/opencode/tui-plugin.ts/.tsx`, `src/npm-package/lib/shared-phase-constants.*`
+  - 10 stale design docs, `.github/workflows/mutation-test-go.yml`
+- Gate 6 arch fixes: reduce `getLatestTimestamp` complexity, split `updateHooks` into focused functions
+- `gate-m3.ts`: skip non-existent files instead of ENOENT crash
+- Init/gate scripts: sync global hooks to latest, clean project-level hooksPath
+
 ## [0.12.3.0] - 2026-07-03
 
 ### Added
