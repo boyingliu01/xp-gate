@@ -2,7 +2,26 @@
 
 All notable changes to this project will be documented in this file.
 
-## [0.12.0.0] - 2026-07-01
+## [0.12.3.0] - 2026-07-03
+
+### Added
+- **OTel GenAI 可观测性** — debugger 模块新增 OpenTelemetry GenAI span tracing、token 差异追踪、批量导出，零性能开销（`--observability` 开关）。
+- `src/debugger/span-types.ts`: OTel GenAI 语义约定类型 (SpanKind, Attributes, OperationType)
+- `src/debugger/token-delta.ts`: 差分 Token 用量追踪
+- `src/debugger/span-tracer.ts`: 层级 Span 树构建器 (max_depth=10)
+- `src/debugger/batch-exporter.ts`: 异步批量 Span 导出
+- `src/debugger/sprint-state-io.ts`: 共享 sprint state I/O（消除 CodeClone）
+- `src/debugger/evolution-logger.ts`: 函数式模式，避免 archlint DeadSymbol 误报
+- 8 个测试文件，68+ 新测试，1835+ 总测试通过
+
+### Fixed
+- **Gate 6 Boy Scout Rule**: span-types.ts 导出数从 11 降至 10 以满足 `clean-code.many-exports`
+- **Gate 6 DeadSymbol**: evolution-logger.ts 从 class 重构为函数式模式以满足 archlint 追踪
+
+## [0.12.2.0] - 2026-07-02
+
+### Changed
+- README.md: 全量重写 README/CAPABILITIES.md，修复已知 10 项 doc-vs-script drift
 
 ### Added
 - **Gate M: Multi-language mutation testing** — LangAdapter system now routes mutation testing to language-specific runners: Stryker (TypeScript), Mutmut (Python), gomutants (Go), PITest (Java/Kotlin).
