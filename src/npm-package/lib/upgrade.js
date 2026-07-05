@@ -1,6 +1,8 @@
 const { execSync, spawn } = require('child_process');
 const { checkUpgrade, formatUpgradeMsg, clearCache, getLocalVersion, getPackageName } = require('./check-version.js');
 
+const OPENCODE_PLUGIN = '@boyingliu01/opencode-plugin';
+
 /**
  * Handle checkUpgrade() failure.
  * @param {Error} err
@@ -59,6 +61,7 @@ function handlePreviewMode(result) {
 
 /**
  * Handle --apply mode: auto-upgrade via npm install -g.
+ * Also checks for and updates the local OpenCode plugin.
  * @param {{ local: string, remote: string, outdated: boolean }} result
  * @param {string} pkgName
  * @returns {Promise<number>} exit code
@@ -88,6 +91,10 @@ async function handleApplyMode(result, pkgName) {
     });
     clearCache();
     console.log(`\u2713 Upgraded to v${result.remote}`);
+
+    // Also check for and update the local OpenCode plugin if installed.
+    await upgradeOpenCodePlugin();
+
     return 0;
   } catch (err) {
     const msg = err.message || '';
@@ -103,6 +110,63 @@ async function handleApplyMode(result, pkgName) {
     }
     return 1;
   }
+}
+
+async function upgradeOpenCodePlugin() {
+  try {
+    const hasPlugin = await hasOpenCodePlugin();
+    if (!hasPlugin) return;
+
+    const { stdout: versionOut } = await execAsync('npm list -g ' + OPENCODE_PLUGIN + ' --depth=0 --json 2>/dev/null');
+    let currentVersion = '';
+    try {
+      const parsed = JSON.parse(versionOut);
+      const deps = parsed.dependencies || {};
+      currentVersion = deps[OPENCODE_PLUGIN]?.version || '';
+    } catch { /* skip parse error */ }
+    if (currentVersion) {
+      console.log(`  Found OpenCode plugin v${currentVersion} — upgrading to latest...`);
+    }
+
+    const child = spawn('npm', ['install', '-g', OPENCODE_PLUGIN + '@latest'], {
+      stdio: 'pipe',
+      timeout: 120000,
+    });
+    const exitCode = await new Promise((resolve) => {
+      child.on('close', (code) => resolve(code));
+      child.on('error', () => resolve(1));
+    });
+    if (exitCode === 0) {
+      console.log('  Also updated local OpenCode plugin');
+    }
+  } catch {
+    // Non-blocking: plugin upgrade failure should never break the main flow.
+  }
+}
+
+function hasOpenCodePlugin() {
+  return new Promise((resolve) => {
+    const child = spawn('npm', ['list', '-g', OPENCODE_PLUGIN, '--depth=0'], {
+      stdio: 'pipe',
+      timeout: 10000,
+    });
+    child.on('close', (code) => resolve(code === 0));
+    child.on('error', () => resolve(false));
+  });
+}
+
+function execAsync(cmd) {
+  return new Promise((resolve, reject) => {
+    const child = spawn(cmd, { shell: true, stdio: 'pipe', timeout: 10000 });
+    let stdout = '', stderr = '';
+    child.stdout.on('data', (d) => { stdout += d; });
+    child.stderr.on('data', (d) => { stderr += d; });
+    child.on('close', (code) => {
+      if (code === 0) resolve({ stdout, stderr });
+      else reject(new Error(stderr || `exit code ${code}`));
+    });
+    child.on('error', reject);
+  });
 }
 
 /**
