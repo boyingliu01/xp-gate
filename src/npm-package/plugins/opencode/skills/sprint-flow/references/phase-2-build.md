@@ -20,6 +20,65 @@
 
 ---
 
+---
+
+## Uncommitted Changes Gate
+
+**Purpose**: Prevent entering BUILD with uncommitted changes that could mix with sprint work.
+
+**Execution**: Before entering Phase 2 BUILD, the orchestrator MUST check for uncommitted changes in the worktree.
+
+### Gate Logic
+
+```bash
+# Check for uncommitted changes
+UNCOMMITTED=$(git status --porcelain 2>/dev/null | wc -l | tr -d ' ')
+
+if [ "$SKIP_UNCOMMITTED_GATE" = "1" ]; then
+  echo "[UNCOMMITTED-GATE] Skipped (SKIP_UNCOMMITTED_GATE=1)"
+  echo "{\"skipped\":true,\"reason\":\"SKIP_UNCOMMITTED_GATE=1\",\"timestamp\":\"$(date -u +%Y-%m-%dT%H:%M:%SZ)\"}" > .sprint-state/uncommitted-gate-log.json
+elif [ "$UNCOMMITTED" -gt 0 ]; then
+  echo "⚠️ [UNCOMMITTED-GATE] Found ${UNCOMMITTED} uncommitted files in worktree:"
+  git status --short 2>/dev/null | head -20
+  echo ""
+  echo "Uncommitted changes may conflict with sprint work. Recommended actions:"
+  echo "  1. Commit changes: git add -A && git commit -m 'pre-sprint: save work before BUILD'"
+  echo "  2. Stash changes: git stash push -m 'pre-sprint stash'"
+  echo "  3. Skip gate: export SKIP_UNCOMMITTED_GATE=1 (not recommended)"
+  echo ""
+  echo "Logging to .sprint-state/uncommitted-gate-log.json"
+  echo "{\"blocked\":true,\"uncommitted_files\":${UNCOMMITTED},\"timestamp\":\"$(date -u +%Y-%m-%dT%H:%M:%SZ)\"}" > .sprint-state/uncommitted-gate-log.json
+  echo "[BLOCK] Uncommitted changes detected. Please commit, stash, or set SKIP_UNCOMMITTED_GATE=1 to continue."
+  exit 1
+else
+  echo "✅ [UNCOMMITTED-GATE] Worktree clean. Proceeding to BUILD."
+  echo "{\"clean\":true,\"timestamp\":\"$(date -u +%Y-%m-%dT%H:%M:%SZ)\"}" > .sprint-state/uncommitted-gate-log.json
+fi
+```
+
+### Escape Valve
+
+```bash
+# Skip the uncommitted changes gate (use with caution)
+SKIP_UNCOMMITTED_GATE=1
+```
+
+### Log Format (`.sprint-state/uncommitted-gate-log.json`)
+
+```json
+{
+  "clean": true,
+  "blocked": false,
+  "skipped": false,
+  "uncommitted_files": 0,
+  "timestamp": "2026-07-05T10:00:00Z"
+}
+```
+
+**Log location**: `.sprint-state/uncommitted-gate-log.json` — written on every gate execution for audit trail.
+
+---
+
 ## TDD 强制执行
 
 ### Gate 5a-BLOCK: 新增文件测试强制
@@ -41,3 +100,48 @@
 # 非 main/master 分支临时跳过 Gate 5a-BLOCK
 SKIP_GATE_5A_BLOCK=1 git commit -m "message"
 ```
+
+---
+
+## Timing & Stability
+
+This section documents expected execution times and timeout handling for each Phase 2 sub-step to reduce execution timing stddev and prevent pipeline stalls.
+
+### Expected Execution Times
+
+| Step | Description | Expected Time | Timeout | On Timeout |
+|------|-------------|--------------|---------|------------|
+| DELPHI-GATE | Verify delphi-reviewed.json exists | 1-2s | 10s | BLOCK (critical gate) |
+| ralph-loop (per REQ) | TDD + verification per requirement | 5-15 min | 30 min/REQ | Mark REQ as `timeout`, continue next REQ |
+| parallel dispatch | Multi-agent parallel build | 10-30 min | 45 min | Collect partial results, continue |
+| TDD cycle (per unit) | RED → GREEN → REFACTOR | 2-5 min | 10 min | Skip unit, log failure |
+| freeze + blind-review | Code review in isolation | 5-10 min | 20 min | WARNING, continue |
+| verification | Test suite + coverage check | 2-5 min | 15 min | Retry once, then BLOCK |
+| cost monitor | Token cost accounting | <1s | 5s | Skip, log warning |
+| Phase 2 total (lightweight) | ≤3 REQs | 15-30 min | 45 min | — |
+| Phase 2 total (standard) | 4-10 REQs | 30-120 min | 150 min | — |
+| Phase 2 total (complex) | >10 REQs | 60-240 min | 300 min | — |
+
+### Stability Guidelines
+
+1. **Timeout handling**: All Phase 2 sub-steps MUST have explicit timeouts. If a step times out, log the failure to `.sprint-state/phase-outputs/phase-2-errors.json` and continue to the next step (except DELPHI-GATE which is a hard BLOCK).
+
+2. **Retry strategy**: For recoverable failures (verification, TDD cycle):
+   - First failure: log warning, retry once
+   - Second failure: log error, BLOCK and prompt user decision
+   - Do NOT retry more than twice for any single sub-step
+
+3. **Parallel dispatch stability**: When using `--mode parallel`, if any agent fails:
+   - Collect partial results from successful agents
+   - Rerun failed agent(s) individually with `--mode ralph-loop`
+   - Do NOT rerun the entire parallel batch
+
+4. **Cost monitor thresholds**: 
+   - Token cost per REQ > 50,000 → WARNING (review REQ scope)
+   - Token cost per REQ > 100,000 → BLOCK (REQ too large, split into smaller units)
+
+5. **StdDev reduction**: To reduce execution timing variability:
+   - Cache dependency installation results between REQs
+   - Reuse TDD scaffolding across similar REQ types
+   - Pre-compute code structure analysis once at Phase start
+   - Batch lint/format operations at the end, not per REQ
