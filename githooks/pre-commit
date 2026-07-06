@@ -608,6 +608,44 @@ if [ "$PROJECT_LANG" = "documentation-only" ]; then
           exit 1
         fi
         echo "✅ PASSED - TypeScript static analysis."
+        
+        # Also check test files if they exist (Issue #293)
+        # Many projects exclude __tests__/ from tsconfig.json, so test file type
+        # errors silently accumulate.
+        if [ -d "src/__tests__" ] || [ -d "src/tests" ] || [ -d "tests" ] || [ -d "__tests__" ]; then
+          HAS_TESTS_IN_TSC=false
+          if npx tsc --noEmit --skipLibCheck --listFiles 2>/dev/null | grep -qE '__tests__/|\.test\.ts|\.spec\.ts'; then
+            HAS_TESTS_IN_TSC=true
+          fi
+          if [ "$HAS_TESTS_IN_TSC" = false ]; then
+            TSC_TEST_EXIT=0
+            if [ -f "tsconfig.tests.json" ]; then
+              echo "Checking test files with tsconfig.tests.json..."
+              npx tsc --noEmit --project tsconfig.tests.json 2>&1 | head -30
+              TSC_TEST_EXIT=$?
+            else
+              echo "Checking test files for type errors..."
+              TEMP_TSCONFIG=".tsconfig.withtests.json"
+              node -e "
+                const cfg = JSON.parse(require('fs').readFileSync('tsconfig.json','utf8'));
+                delete cfg.exclude;
+                cfg.include = cfg.include || ['src/**/*'];
+                cfg.include.push('src/**/__tests__/**','src/**/*.test.ts','src/**/*.spec.ts');
+                require('fs').writeFileSync('$TEMP_TSCONFIG', JSON.stringify(cfg, null, 2));
+              " 2>/dev/null
+              npx tsc --noEmit --project "$TEMP_TSCONFIG" --skipLibCheck 2>&1 | head -30
+              TSC_TEST_EXIT=$?
+              rm -f "$TEMP_TSCONFIG"
+            fi
+            if [ $TSC_TEST_EXIT -ne 0 ]; then
+              echo ""
+              echo "❌ BLOCKED - TYPE ERRORS in test files"
+              echo "Your project's tsconfig.json excludes test files from type checking."
+              echo "Add a tsconfig.tests.json to customise test file checking."
+              exit 1
+            fi
+          fi
+        fi
       else
         echo "ℹ️  SKIP - tsconfig.json not found (no TypeScript project config)"
       fi
