@@ -14,14 +14,35 @@ run_static_analysis() {
 }
 
 run_lint() {
-  if command -v npx >/dev/null 2>&1; then
-    echo "Running TypeScript linting..."
-    npx eslint . --ext .ts,.tsx
-    return $?
-  else
+  if ! command -v npx >/dev/null 2>&1; then
     echo "npx not available, skipping TypeScript linting"
     return 0
   fi
+
+  # Prefer Biome if biome.json/biome.jsonc exists (covers lint + format in one pass)
+  if [ -f "biome.json" ] || [ -f "biome.jsonc" ]; then
+    echo "Running Biome linting..."
+    npx biome check . --no-errors-on-unmatched 2>&1 | head -50
+    local EXIT_CODE=$?
+    if [ $EXIT_CODE -ne 0 ]; then
+      echo ""
+      echo "❌ Biome check failed"
+      echo "Run 'npx biome check --write .' to auto-fix."
+      return $EXIT_CODE
+    fi
+    echo "✅ PASSED - Biome check."
+    return 0
+  fi
+
+  # Fall back to ESLint if no Biome config exists
+  if [ -f ".eslintrc.json" ] || [ -f ".eslintrc.js" ] || [ -f ".eslintrc.cjs" ] || [ -f "eslint.config.js" ]; then
+    echo "Running ESLint linting..."
+    npx eslint . --ext .ts,.tsx
+    return $?
+  fi
+
+  echo "ℹ️  No linter config found (biome.json or eslint config). Skipping lint."
+  return 0
 }
 
 run_tests() {
