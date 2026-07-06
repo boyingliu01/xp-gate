@@ -679,8 +679,20 @@ if [ "$PROJECT_LANG" = "documentation-only" ]; then
       fi
     fi
 
-    # ── Biome config detection ──
-    if ! [ -f "biome.json" ] && ! [ -f "biome.jsonc" ]; then
+    # ── Biome lint/format check ──
+    if [ -f "biome.json" ] || [ -f "biome.jsonc" ]; then
+      echo "Running Biome lint/format check..."
+      if ! npx biome check --staged . 2>/dev/null; then
+        npx biome check . 2>&1 | head -50
+        echo ""
+        echo "❌ BLOCKED - Biome check failed"
+        echo "Fix the errors above before committing."
+        echo "Tip: Run 'npx biome check --write .' to auto-fix formatting and safe lint issues."
+        echo "     Run 'npx biome check --write --unsafe .' to also fix unsafe lint issues."
+        exit 1
+      fi
+      echo "✅ PASSED - Biome check."
+    else
       if [ -f "package.json" ] && command -v node &> /dev/null; then
         HAS_BIOME=$(node -e "try{const p=JSON.parse(require('fs').readFileSync('package.json','utf8'));const d=p.devDependencies||{};const deps=p.dependencies||{};console.log((d['@biomejs/biome']||deps['@biomejs/biome'])?'yes':'no')}catch{console.log('no')}") && true
         if [ "$HAS_BIOME" = "yes" ]; then
@@ -1221,13 +1233,6 @@ else
         fi
       done
 
-      if [ "$TEST_FOUND" = false ] && [ "$ext" = "py" ]; then
-        module_name="${filename//-/_}"
-        if grep -rq "import $module_name\|from $module_name import" tests/ 2>/dev/null; then
-          TEST_FOUND=true
-        fi
-      fi
-
       if [ "$TEST_FOUND" = false ]; then
         echo "⚠️  TEST PAIRING WARNING: Source file without corresponding test: $src_file"
         echo "   Expected patterns for .${ext}: ${patterns[0]}, ${patterns[1]:-...}"
@@ -1299,28 +1304,117 @@ else
     done
   fi
 
-  # Run tests + coverage in a single pass (optimization: avoids running vitest twice)
-  # For TypeScript with test:coverage script, use coverage-enabled run directly.
-  # For other languages, fall back to the adapter's run_tests + run_coverage pair.
+  # ============================================================================
+  # Smart test selection (Issue #286): only run tests affected by changed files.
+  # Reuses CHANGED_TEST_FILES already computed in Gate 5b (line 1244).
+  # Full run fallback: >20 changed test files, or vitest not found.
+  # ============================================================================
   echo "Running tests..."
   
   # Route to appropriate test runner via adapter
   ADAPTER_FILE=$(resolve_adapter_path "$PROJECT_LANG")
   if [ "${PROJECT_LANG}" != "unknown" ] && [ -n "$ADAPTER_FILE" ]; then
     if source "$ADAPTER_FILE" 2>/dev/null; then
-      # TypeScript: single vitest run --coverage (combines tests + coverage)
+      # TypeScript: vitest with smart test selection
       if [ "$PROJECT_LANG" = "typescript" ] && [ -f "package.json" ]; then
         if npx vitest --version >/dev/null 2>&1; then
-          echo "Running TypeScript tests with coverage..."
-          TESTS_OUTPUT=$(npx vitest run --coverage 2>&1)
-          TESTS_EXIT_CODE=$?
-          echo "$TESTS_OUTPUT" | head -60
-          if [ "$TESTS_EXIT_CODE" -ne 0 ]; then
-            echo ""
-            echo "❌ BLOCKED - Tests FAILED"
-            exit 1
+          # Count changed test files to decide strategy
+          CHANGED_TEST_FILE_COUNT=$(echo "$CHANGED_TEST_FILES" | grep -c '.' || echo "0")
+          
+          # Also get changed source files (non-test) for related-test lookup
+          CHANGED_SRC_FILES=$(git diff --cached --name-only --diff-filter=ACM | grep -E '\.(ts|tsx|js|jsx)$' | grep -v '\.test\.' | grep -v '\.spec\.' | grep -v '__tests__' | grep -v '\.d\.ts$' | grep -v '__snapshots__' || true)
+          CHANGED_SRC_COUNT=$(echo "$CHANGED_SRC_FILES" | grep -c '.' || echo "0")
+          
+          # Decide strategy
+          if [ "$CHANGED_TEST_FILE_COUNT" -gt 20 ] 2>/dev/null; then
+            # Too many test files changed → full run
+            echo "Too many test files changed ($CHANGED_TEST_FILE_COUNT), running full test suite..."
+            TESTS_OUTPUT=$(npx vitest run --coverage 2>&1)
+            TESTS_EXIT_CODE=$?
+            echo "$TESTS_OUTPUT" | head -60
+            if [ "$TESTS_EXIT_CODE" -ne 0 ]; then
+              echo ""
+              echo "❌ BLOCKED - Tests FAILED"
+              exit 1
+            else
+              echo "✅ PASSED - Full test suite passed (with coverage)."
+            fi
+          elif [ "$CHANGED_TEST_FILE_COUNT" -gt 0 ] 2>/dev/null; then
+            # Run only changed test files with coverage
+            SMART_TARGETS=$(echo "$CHANGED_TEST_FILES" | tr '\n' ' ')
+            echo "Running ${CHANGED_TEST_FILE_COUNT} changed test file(s) with coverage..."
+            echo "   Target(s): $(echo "$CHANGED_TEST_FILES" | tr '\n' ' ')"
+            TESTS_OUTPUT=$(npx vitest run --coverage $SMART_TARGETS 2>&1)
+            TESTS_EXIT_CODE=$?
+            echo "$TESTS_OUTPUT" | head -60
+            if [ "$TESTS_EXIT_CODE" -ne 0 ]; then
+              echo ""
+              echo "❌ BLOCKED - Tests FAILED in changed test files"
+              exit 1
+            else
+              echo "✅ PASSED - Changed test files passed (with coverage)."
+            fi
+          elif [ "$CHANGED_SRC_COUNT" -gt 0 ] 2>/dev/null; then
+            # Source files changed but no test files → find related tests or run full
+            echo "Source file(s) changed, finding related tests..."
+            RELATED_TESTS=""
+            for src_file in $CHANGED_SRC_FILES; do
+              base="${src_file%.*}"
+              filename="${base##*/}"
+              dir="$(dirname "$src_file")"
+              ext="${src_file##*.}"
+              # Try common test file patterns
+              for pattern in \
+                "${base}.test.${ext}" \
+                "${base}.spec.${ext}" \
+                "${dir}/__tests__/${filename}.test.${ext}" \
+                "${dir}/__tests__/${filename}.spec.${ext}" \
+                "tests/${filename}.test.${ext}" \
+                "tests/${filename}.spec.${ext}"; do
+                if [ -f "$pattern" ]; then
+                  RELATED_TESTS="${RELATED_TESTS}${pattern} "
+                fi
+              done
+              # Glob fallback for __tests__ dir patterns
+              if [ -d "${dir}/__tests__" ]; then
+                found_glob=$(find "${dir}/__tests__" -maxdepth 1 -name "${filename}.test.*" -o -name "${filename}.spec.*" 2>/dev/null | tr '\n' ' ')
+                if [ -n "$found_glob" ]; then
+                  for f in $found_glob; do
+                    case " $RELATED_TESTS " in *" $f "*) ;; *) RELATED_TESTS="${RELATED_TESTS}${f} " ;; esac
+                  done
+                fi
+              fi
+            done
+            if [ -n "$RELATED_TESTS" ]; then
+              echo "   Found related test(s): $(echo "$RELATED_TESTS" | tr '\n' ' ')"
+              TESTS_OUTPUT=$(npx vitest run --coverage $RELATED_TESTS 2>&1)
+              TESTS_EXIT_CODE=$?
+              echo "$TESTS_OUTPUT" | head -60
+              if [ "$TESTS_EXIT_CODE" -ne 0 ]; then
+                echo ""
+                echo "❌ BLOCKED - Tests FAILED in related test files"
+                exit 1
+              else
+                echo "✅ PASSED - Related test files passed (with coverage)."
+              fi
+            else
+              # No related tests found → full run is safest
+              echo "   No related test files found, running full test suite..."
+              TESTS_OUTPUT=$(npx vitest run --coverage 2>&1)
+              TESTS_EXIT_CODE=$?
+              echo "$TESTS_OUTPUT" | head -60
+              if [ "$TESTS_EXIT_CODE" -ne 0 ]; then
+                echo ""
+                echo "❌ BLOCKED - Tests FAILED"
+                exit 1
+              else
+                echo "✅ PASSED - Full test suite passed (with coverage)."
+              fi
+            fi
           else
-            echo "✅ PASSED - Unit tests passed (with coverage)."
+            # No test files AND no source files changed → skip
+            echo "✅ PASSED - No test or source files changed, skipping test run."
+            TESTS_EXIT_CODE=0
           fi
         else
           # Fallback: run_tests without coverage
@@ -1360,11 +1454,18 @@ else
     if source "$ADAPTER_FILE" 2>/dev/null; then
       case "$PROJECT_LANG" in
         "typescript")
-          # Coverage already collected in the test section above (optimized single vitest run --coverage).
-          # The --coverage flag produces coverage/coverage-summary.json which the unconditional
-          # stage-2 enforcement reads. No need to run vitest again here.
-          echo "TypeScript coverage already collected during test run."
-          COV_EXIT=0
+          # Coverage collected during the test section above.
+          # Smart selection (Issue #286): only runs changed/related tests with --coverage,
+          # producing coverage/coverage-summary.json for the tested subset.
+          # Stage 2 enforcement reads global coverage from the subset run.
+          # If no tests were run (TESTS_EXIT_CODE=0 skip path), warn instead of blocking.
+          if [ -f "coverage/coverage-summary.json" ]; then
+            echo "TypeScript coverage collected during test run."
+            COV_EXIT=0
+          else
+            echo "ℹ️  No coverage data produced — test run was skipped (no TS changes)."
+            COV_EXIT=0
+          fi
           ;;
         "python")
           if command -v pytest &> /dev/null && command -v coverage &> /dev/null; then
