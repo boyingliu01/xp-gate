@@ -3,6 +3,8 @@
     "target": "ES2022",
     "module": "ESNext",
     "moduleResolution": "node",
+    "allowJs": true,
+    "checkJs": false,
     "esModuleInterop": true,
     "strict": true,
     "skipLibCheck": true,
@@ -11,8 +13,8 @@
     "declaration": true,
     "declarationMap": true,
     "sourceMap": true,
-    "types": ["node"]
+    "types": ["node", "vitest/globals"]
   },
   "include": ["src/**/*"],
-  "exclude": ["node_modules", "dist", "src/_wip", "src/**/__tests__/**", "src/**/*.test.ts", "src/**/*.spec.ts", "src/npm-package/plugins/**", "src/npm-package/skills/**"]
+  "exclude": ["node_modules", "dist", "src/_wip", "src/npm-package/plugins/**", "src/npm-package/skills/**"]
 }

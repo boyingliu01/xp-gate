@@ -2,8 +2,9 @@
 #
 # archlint ignore rules
 #
-# Test files: standard archlint defaults — tests routinely duplicate fixtures
-# and shapes by design, not by accident.
+# Test code is first-class: test files are NOT excluded from architecture checks.
+# They participate in all archlint analyses just like production code.
+# Only synthetic fixtures, generated output, and known-dedup mirrors are excluded.
 #
 # Build artifacts and sync mirrors: anything produced by a generator
 # (tsc compilation, npm-package sync, plugin bundling) is a deliberate
@@ -13,18 +14,9 @@
 # skipped. See src/npm-package/scripts/sync-package-content.js for the
 # authoritative source→mirror mapping.
 ignore:
-# Test fixtures (archlint defaults)
-- '**/*.test.ts'
-- '**/*.test.js'
-- '**/*.spec.ts'
-- '**/*.spec.js'
-- '**/__tests__/**'
-- '**/__mocks__/**'
-- '**/test/**'
-- '**/tests/**'
+# Test fixtures (synthetic test data, not test code)
 - '**/__fixtures__/**'
-- '**/*.mock.ts'
-- '**/*.mock.js'
+- '**/__snapshots__/**'
 
 # tsc compilation output (tsconfig.json: outDir=./dist, rootDir=./src)
 - 'dist/**'
@@ -66,3 +58,10 @@ rules:
     - 'githooks/pre-commit'
     - 'githooks/pre-push'
     - 'githooks/adapter-common.sh'
+    # Mirror trees: src/npm-package/*/ are sync copies of src/*
+    - 'src/npm-package/principles/**'
+    - 'src/npm-package/mock-policy/**'
+    - 'src/npm-package/mutation/**'
+    - 'src/npm-package/debugger/**'
+    - 'src/npm-package/architecture/**'
+    - 'src/npm-package/rules/**'

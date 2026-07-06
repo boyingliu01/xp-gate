@@ -1,4 +1,4 @@
-import { describe, it, expect, vi } from 'vitest';
+import { describe, it, expect, vi, type Mock } from 'vitest';;
 import { GoAdapter } from '../go';
 
 vi.mock('fs', () => ({
@@ -10,7 +10,7 @@ import { readFileSync } from 'fs';
 
 describe('GoAdapter', () => {
   it('should implement the Adapter interface', () => {
-    (readFileSync as vi.Mock).mockReturnValue('func testFn() {}\ntype TestClass struct {}');
+    (readFileSync as Mock).mockReturnValue('func testFn() {}\ntype TestClass struct {}');
     const adapter = new GoAdapter('test.go');
     
     expect(adapter).toHaveProperty('detectLanguage');
@@ -21,24 +21,24 @@ describe('GoAdapter', () => {
   });
 
   it('should detect language as go for .go files', () => {
-    (readFileSync as vi.Mock).mockReturnValue('func testFn() {}');
+    (readFileSync as Mock).mockReturnValue('func testFn() {}');
     const adapter = new GoAdapter('test.go');
     const detected = adapter.detectLanguage();
     expect(detected).toBe('go');
   });
 
   it('should parse Go file AST correctly', () => {
-    (readFileSync as vi.Mock).mockReturnValue('func testFn() {}\ntype TestClass struct {}');
+    (readFileSync as Mock).mockReturnValue('func testFn() {}\ntype TestClass struct {}');
     const adapter = new GoAdapter('test.go');
     const ast = adapter.parseAST();
     expect(ast).toHaveProperty('content');
     expect(ast).toHaveProperty('language');
     expect(ast).toHaveProperty('filePath');
-    expect(ast.language).toBe('go');
+    expect((ast as { language: unknown }).language).toBe('go');
   });
 
   it('should extract functions from Go AST', () => {
-    (readFileSync as vi.Mock).mockReturnValue('func testFn() {}\nfunc (t *TestClass) method() {}');
+    (readFileSync as Mock).mockReturnValue('func testFn() {}\nfunc (t *TestClass) method() {}');
     const adapter = new GoAdapter('test.go');
     const functions = adapter.extractFunctions();
     expect(Array.isArray(functions)).toBe(true);
@@ -46,7 +46,7 @@ describe('GoAdapter', () => {
   });
 
   it('should extract structs from Go AST', () => {
-    (readFileSync as vi.Mock).mockReturnValue('func testFn() {}\ntype TestClass struct {}');
+    (readFileSync as Mock).mockReturnValue('func testFn() {}\ntype TestClass struct {}');
     const adapter = new GoAdapter('test.go');
     const classes = adapter.extractClasses();
     expect(Array.isArray(classes)).toBe(true);
@@ -54,14 +54,14 @@ describe('GoAdapter', () => {
   });
 
   it('should count Go file physical lines', () => {
-    (readFileSync as vi.Mock).mockReturnValue('func testFn() {}\nfunc testFn2() {}');
+    (readFileSync as Mock).mockReturnValue('func testFn() {}\nfunc testFn2() {}');
     const adapter = new GoAdapter('test.go');
     const lineCount = adapter.countLines();
     expect(lineCount).toBe(2);
   });
 
   it('should fall back to super.detectLanguage for non-go extensions', () => {
-    (readFileSync as vi.Mock).mockReturnValue('content');
+    (readFileSync as Mock).mockReturnValue('content');
     const adapter = new GoAdapter('test.ts');
     expect(adapter.detectLanguage()).toBe('typescript');
   });

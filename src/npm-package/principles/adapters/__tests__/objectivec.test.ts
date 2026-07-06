@@ -1,4 +1,4 @@
-import { describe, it, expect, vi } from 'vitest';
+import { describe, it, expect, vi, type Mock } from 'vitest';;
 import { ObjectiveCAdapter } from '../objectivec';
 
 vi.mock('fs', () => ({
@@ -20,7 +20,7 @@ describe('ObjectiveCAdapter', () => {
    * @covers AC-QG-001-05
    */
   it('should implement the Adapter interface', () => {
-    (readFileSync as vi.Mock).mockReturnValue('@implementation Test @end');
+    (readFileSync as Mock).mockReturnValue('@implementation Test @end');
     const adapter = new ObjectiveCAdapter('test.m');
     
     expect(adapter).toHaveProperty('detectLanguage');
@@ -34,7 +34,7 @@ describe('ObjectiveCAdapter', () => {
    * @covers AC-QG-001-08
    */
   it('should detect language as objectivec for .m files', () => {
-    (readFileSync as vi.Mock).mockReturnValue('@implementation Test @end');
+    (readFileSync as Mock).mockReturnValue('@implementation Test @end');
     const adapter = new ObjectiveCAdapter('test.m');
     const detected = adapter.detectLanguage();
     expect(detected).toBe('objectivec');
@@ -45,7 +45,7 @@ describe('ObjectiveCAdapter', () => {
    * @covers AC-QG-001-08
    */
   it('should detect language as objectivec for .mm files (Objective-C++)', () => {
-    (readFileSync as vi.Mock).mockReturnValue('@implementation Test @end');
+    (readFileSync as Mock).mockReturnValue('@implementation Test @end');
     const adapter = new ObjectiveCAdapter('test.mm');
     const detected = adapter.detectLanguage();
     expect(detected).toBe('objectivec');
@@ -56,13 +56,13 @@ describe('ObjectiveCAdapter', () => {
    * @covers AC-QG-001-06
    */
   it('should parse Objective-C file AST correctly', () => {
-    (readFileSync as vi.Mock).mockReturnValue('@implementation Test @end');
+    (readFileSync as Mock).mockReturnValue('@implementation Test @end');
     const adapter = new ObjectiveCAdapter('test.m');
     const ast = adapter.parseAST();
     expect(ast).toHaveProperty('content');
     expect(ast).toHaveProperty('language');
     expect(ast).toHaveProperty('filePath');
-    expect(ast.language).toBe('objectivec');
+    expect((ast as { language: unknown }).language).toBe('objectivec');
   });
 
   /**
@@ -70,7 +70,7 @@ describe('ObjectiveCAdapter', () => {
    * @covers AC-QG-001-06
    */
   it('should extract Objective-C instance methods', () => {
-    (readFileSync as vi.Mock).mockReturnValue(`
+    (readFileSync as Mock).mockReturnValue(`
 @implementation Calculator
 - (int)add:(int)a to:(int)b {
   return a + b;
@@ -91,7 +91,7 @@ describe('ObjectiveCAdapter', () => {
    * @covers AC-QG-001-06
    */
   it('should extract Objective-C class methods', () => {
-    (readFileSync as vi.Mock).mockReturnValue(`
+    (readFileSync as Mock).mockReturnValue(`
 @implementation StringUtils
 + (NSString *)trim:(NSString *)str {
   return [str stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceCharacterSet]];
@@ -111,7 +111,7 @@ describe('ObjectiveCAdapter', () => {
    * @covers AC-QG-001-06
    */
   it('should extract C functions from Objective-C file', () => {
-    (readFileSync as vi.Mock).mockReturnValue(`
+    (readFileSync as Mock).mockReturnValue(`
 int helperFunction(int x) {
   return x * 2;
 }
@@ -137,7 +137,7 @@ void logDebug(const char *msg) {
    * @covers AC-QG-001-06
    */
   it('should extract @implementation declarations', () => {
-    (readFileSync as vi.Mock).mockReturnValue(`
+    (readFileSync as Mock).mockReturnValue(`
 @implementation MyClass
 - (void)doSomething {}
 @end
@@ -154,7 +154,7 @@ void logDebug(const char *msg) {
    * @covers AC-QG-001-06
    */
   it('should extract @interface declarations', () => {
-    (readFileSync as vi.Mock).mockReturnValue(`
+    (readFileSync as Mock).mockReturnValue(`
 @interface MyProtocol
 - (void)requiredMethod;
 @end
@@ -171,7 +171,7 @@ void logDebug(const char *msg) {
    * @covers AC-QG-001-06
    */
   it('should handle multiple @implementation blocks', () => {
-    (readFileSync as vi.Mock).mockReturnValue(`
+    (readFileSync as Mock).mockReturnValue(`
 @implementation FirstClass
 - (void)method1 {}
 @end
@@ -191,7 +191,7 @@ void logDebug(const char *msg) {
    * @covers AC-QG-001-06
    */
   it('should handle Objective-C inheritance syntax', () => {
-    (readFileSync as vi.Mock).mockReturnValue(`
+    (readFileSync as Mock).mockReturnValue(`
 @interface ChildClass : ParentClass
 - (void)overrideMethod;
 @end
@@ -207,7 +207,7 @@ void logDebug(const char *msg) {
    * @covers AC-QG-001-06
    */
   it('should handle Objective-C categories', () => {
-    (readFileSync as vi.Mock).mockReturnValue(`
+    (readFileSync as Mock).mockReturnValue(`
 @implementation NSString (Extensions)
 - (NSString *)reversed {
   // implementation
@@ -224,7 +224,7 @@ void logDebug(const char *msg) {
    * @covers AC-QG-001-06
    */
   it('should handle Objective-C properties', () => {
-    (readFileSync as vi.Mock).mockReturnValue(`
+    (readFileSync as Mock).mockReturnValue(`
 @interface Person
 @property (nonatomic, strong) NSString *name;
 @property (nonatomic) NSInteger age;
@@ -249,7 +249,7 @@ void logDebug(const char *msg) {
    * @covers AC-QG-001-06, AC-QG-001-08
    */
   it('should handle Objective-C++ (.mm) files with C++ content', () => {
-    (readFileSync as vi.Mock).mockReturnValue(`
+    (readFileSync as Mock).mockReturnValue(`
 #import <Foundation/Foundation.h>
 #include <vector>
 
@@ -274,7 +274,7 @@ void logDebug(const char *msg) {
    * @covers AC-QG-001-05
    */
   it('should count physical lines correctly', () => {
-    (readFileSync as vi.Mock).mockReturnValue('@implementation Test\n- (void)method {}\n@end');
+    (readFileSync as Mock).mockReturnValue('@implementation Test\n- (void)method {}\n@end');
     const adapter = new ObjectiveCAdapter('test.m');
     const lineCount = adapter.countLines();
     expect(lineCount).toBe(3);
@@ -285,7 +285,7 @@ void logDebug(const char *msg) {
    * @covers AC-QG-001-06
    */
   it('should handle empty file', () => {
-    (readFileSync as vi.Mock).mockReturnValue('');
+    (readFileSync as Mock).mockReturnValue('');
     const adapter = new ObjectiveCAdapter('empty.m');
     const functions = adapter.extractFunctions();
     const classes = adapter.extractClasses();
@@ -298,7 +298,7 @@ void logDebug(const char *msg) {
    * @covers AC-QG-001-06
    */
   it('should handle Objective-C literals and modern syntax', () => {
-    (readFileSync as vi.Mock).mockReturnValue(`
+    (readFileSync as Mock).mockReturnValue(`
 @implementation ModernObjC
 - (NSArray *)getItems {
   return @[ @"one", @"two", @"three" ];
@@ -321,7 +321,7 @@ void logDebug(const char *msg) {
    * @covers AC-QG-001-06
    */
   it('should handle Objective-C blocks', () => {
-    (readFileSync as vi.Mock).mockReturnValue(`
+    (readFileSync as Mock).mockReturnValue(`
 @implementation BlockUser
 - (void)useBlock {
   void (^myBlock)(void) = ^{
@@ -341,7 +341,7 @@ void logDebug(const char *msg) {
    * @covers AC-QG-001-08
    */
   it('should handle preprocessor directives', () => {
-    (readFileSync as vi.Mock).mockReturnValue(`
+    (readFileSync as Mock).mockReturnValue(`
 #import <Foundation/Foundation.h>
 #define MAX_SIZE 100
 
@@ -360,7 +360,7 @@ void logDebug(const char *msg) {
    * @covers AC-QG-001-05
    */
   it('should throw error when file cannot be read', () => {
-    (readFileSync as vi.Mock).mockImplementation(() => {
+    (readFileSync as Mock).mockImplementation(() => {
       throw new Error('Could not read file');
     });
     
@@ -374,7 +374,7 @@ void logDebug(const char *msg) {
    * @covers AC-QG-001-06
    */
   it('should extract method with multiple parameters', () => {
-    (readFileSync as vi.Mock).mockReturnValue(`
+    (readFileSync as Mock).mockReturnValue(`
 @implementation MultiParam
 - (void)drawRect:(CGRect)rect withColor:(UIColor *)color andAlpha:(float)alpha {
   // drawing code
@@ -391,7 +391,7 @@ void logDebug(const char *msg) {
    * @covers AC-QG-001-05, AC-QG-001-06
    */
   it('should handle static inline C functions', () => {
-    (readFileSync as vi.Mock).mockReturnValue(`
+    (readFileSync as Mock).mockReturnValue(`
 static inline int fastAdd(int a, int b) {
   return a + b;
 }
@@ -413,7 +413,7 @@ static inline int fastAdd(int a, int b) {
    * @covers AC-QG-001-05
    */
   it('should extract line number for extracted elements', () => {
-    (readFileSync as vi.Mock).mockReturnValue(`
+    (readFileSync as Mock).mockReturnValue(`
 @implementation LineTest
 - (void)firstMethod {}
 - (void)secondMethod {}
@@ -429,7 +429,7 @@ static inline int fastAdd(int a, int b) {
    * @covers AC-QG-001-05
    */
   it('should extract code block for methods', () => {
-    (readFileSync as vi.Mock).mockReturnValue(`
+    (readFileSync as Mock).mockReturnValue(`
 @implementation CodeBlockTest
 - (int)calculate {
   int result = 0;
@@ -446,7 +446,7 @@ static inline int fastAdd(int a, int b) {
   });
 
   it('should fall back to super.detectLanguage for non-m/non-mm extensions', () => {
-    (readFileSync as vi.Mock).mockReturnValue('content');
+    (readFileSync as Mock).mockReturnValue('content');
     const adapter = new ObjectiveCAdapter('test.ts');
     expect(adapter.detectLanguage()).toBe('typescript');
   });

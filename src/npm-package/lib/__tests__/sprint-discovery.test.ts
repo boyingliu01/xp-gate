@@ -13,7 +13,8 @@ import os from 'os';
 
 // Types mirroring DiscoveredSprint interface
 interface DiscoveredSprint {
-  state: Record<string, unknown>;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  state: any;
   sourcePath: string;
   worktreeExists: boolean;
 }
@@ -285,8 +286,8 @@ describe('sprint-discovery: discoverActiveSprints', () => {
     });
     const results = sprintDiscovery.discoverActiveSprints(TMP_ROOT);
     const duplicates = results.filter(r => r.state.id === 'sprint-2026-06-23-01');
-    expect(duplicates.length).toBe(1, 'Should deduplicate to exactly 1 entry');
-    expect(duplicates[0].worktreeExists).toBe(true, 'Should prefer worktree version');
+    expect(duplicates.length).toBe(1);
+    expect(duplicates[0].worktreeExists).toBe(true);
   });
 
   test('tie-breaker: latest started_at wins when same sprint.id in two worktrees', () => {
@@ -324,7 +325,7 @@ describe('sprint-discovery: discoverActiveSprints', () => {
     // Should not throw, result should be skipped (no valid id)
     const results = sprintDiscovery.discoverActiveSprints(TMP_ROOT);
     const partials = results.filter(r => r.state.task_description === 'Partial fields only');
-    expect(partials.length).toBe(0, 'Sprint without id should be skipped');
+    expect(partials.length).toBe(0);
   });
 
   test('handles EACCES on .sprint-state/ directory gracefully', () => {

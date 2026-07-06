@@ -154,8 +154,9 @@ describe('Baseline Storage', () => {
     expect(stats.totalFiles).toBe(2);
     expect(stats.totalWarnings).toBe(7);
     expect(stats.averageWarningsPerFile).toBe(3.5);
-    expect(stats.eslint?.totalWarnings).toBe(6);
-    expect(stats.eslint?.totalErrors).toBe(1);
+    const richStats = stats as { totalFiles: number; totalWarnings: number; averageWarningsPerFile: number; eslint: { totalWarnings: number; totalErrors: number } };
+    expect(richStats.eslint.totalWarnings).toBe(6);
+    expect(richStats.eslint.totalErrors).toBe(1);
   });
 
   it('creates baseline from files with warning data', async () => {

@@ -384,6 +384,20 @@ async function installLocal(args) {
 
   console.log('\nInstallation complete!');
   console.log('Run git commit to trigger quality gates');
+  console.log('');
+  console.log('━━━ FIRST-CLASS TEST QUALITY ━━━');
+  console.log('XP-Gate treats test code as a first-class citizen:');
+  console.log('  • TypeScript: test files are type-checked, not excluded from tsconfig.json');
+  console.log('  • Static analysis: lint/ESLint/Biome check test files alongside source');
+  console.log('  • Complexity: cyclomatic complexity is measured on test files too');
+  console.log('  • Duplicate code: jscpd scans test files (fixtures/snapshots excluded)');
+  console.log('  • Architecture: archlint validates test code structure');
+  console.log('');
+  console.log('  To include tests in your project:');
+  console.log('  1. Remove __tests__/ from tsconfig.json exclude');
+  console.log('  2. Remove __tests__/ from jscpd.conf.json ignore');
+  console.log('  3. Add tsconfig.json: "types": ["vitest/globals"]');
+  console.log('  4. Run "xp-gate doctor" to verify setup');
   return 0;
 }
 
@@ -441,6 +455,16 @@ async function setupGlobal(args) {
   console.log('\nGlobal setup complete!');
   console.log('All git repositories will now use xp-gate quality gates.');
   console.log('Per-project adapters can still override by creating <repo>/githooks/');
+  console.log('');
+  console.log('━━━ FIRST-CLASS TEST QUALITY ━━━');
+  console.log('XP-Gate treats test code as a first-class citizen:');
+  console.log('  All quality gates apply equally to test files.');
+  console.log('  To include tests in your project:');
+  console.log('  1. Remove __tests__/ from tsconfig.json exclude');
+  console.log('  2. Remove __tests__/ from jscpd.conf.json ignore');
+  console.log('  3. Remove test patterns from .archlint.yaml ignore');
+  console.log('  4. Add "types": ["vitest/globals"] to tsconfig.json');
+  console.log('  5. Run "xp-gate doctor" to verify');
   return 0;
 }
 

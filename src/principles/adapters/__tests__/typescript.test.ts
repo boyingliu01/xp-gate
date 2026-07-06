@@ -1,4 +1,4 @@
-import { describe, it, expect, vi } from 'vitest';
+import { describe, it, expect, vi, type Mock } from 'vitest';;
 import { TypeScriptAdapter } from '../typescript';
 
 vi.mock('fs', () => ({
@@ -11,7 +11,7 @@ import { readFileSync } from 'fs';
 describe('TypeScriptAdapter', () => {
   
   it('should implement the Adapter interface', () => {
-    (readFileSync as vi.Mock).mockReturnValue('export function testFn() {}\nclass TestClass {}');
+    (readFileSync as Mock).mockReturnValue('export function testFn() {}\nclass TestClass {}');
     const adapter = new TypeScriptAdapter('test.ts');
     
     expect(adapter).toHaveProperty('detectLanguage');
@@ -22,31 +22,31 @@ describe('TypeScriptAdapter', () => {
   });
 
   it('should detect language as typescript for .ts files', () => {
-    (readFileSync as vi.Mock).mockReturnValue('export function testFn() {}\nclass TestClass {}');
+    (readFileSync as Mock).mockReturnValue('export function testFn() {}\nclass TestClass {}');
     const adapter = new TypeScriptAdapter('test.ts');
     const detected = adapter.detectLanguage();
     expect(detected).toBe('typescript');
   });
 
   it('should detect language as typescript for .tsx files', () => {
-    (readFileSync as vi.Mock).mockReturnValue('export function testFn() {}\nclass TestClass {}');
+    (readFileSync as Mock).mockReturnValue('export function testFn() {}\nclass TestClass {}');
     const adapter = new TypeScriptAdapter('test.tsx');
     const detected = adapter.detectLanguage();
     expect(detected).toBe('typescript');
   });
 
   it('should parse TypeScript file AST correctly', () => {
-    (readFileSync as vi.Mock).mockReturnValue('export function testFn() {}\nclass TestClass {}');
+    (readFileSync as Mock).mockReturnValue('export function testFn() {}\nclass TestClass {}');
     const adapter = new TypeScriptAdapter('test.ts');
     const ast = adapter.parseAST();
     expect(ast).toHaveProperty('content');
     expect(ast).toHaveProperty('language');
     expect(ast).toHaveProperty('filePath');
-    expect(ast.language).toBe('typescript');
+    expect((ast as { language: unknown }).language).toBe('typescript');
   });
 
   it('should extract functions from TypeScript AST', () => {
-    (readFileSync as vi.Mock).mockReturnValue('export function testFn() {}\nclass TestClass {}');
+    (readFileSync as Mock).mockReturnValue('export function testFn() {}\nclass TestClass {}');
     const adapter = new TypeScriptAdapter('test.ts');
     const functions = adapter.extractFunctions();
     expect(Array.isArray(functions)).toBe(true);
@@ -54,7 +54,7 @@ describe('TypeScriptAdapter', () => {
   });
 
   it('should extract classes from TypeScript AST', () => {
-    (readFileSync as vi.Mock).mockReturnValue('export function testFn() {}\nclass TestClass {}');
+    (readFileSync as Mock).mockReturnValue('export function testFn() {}\nclass TestClass {}');
     const adapter = new TypeScriptAdapter('test.ts');
     const classes = adapter.extractClasses();
     expect(Array.isArray(classes)).toBe(true);
@@ -62,14 +62,14 @@ describe('TypeScriptAdapter', () => {
   });
 
   it('should count TypeScript file physical lines', () => {
-    (readFileSync as vi.Mock).mockReturnValue('export function testFn() {}\nexport function testFn2() {}');
+    (readFileSync as Mock).mockReturnValue('export function testFn() {}\nexport function testFn2() {}');
     const adapter = new TypeScriptAdapter('test.ts');
     const lineCount = adapter.countLines();
     expect(lineCount).toBe(2);
   });
 
   it('should handle TypeScript-specific syntax correctly', () => {
-    (readFileSync as vi.Mock).mockReturnValue(`
+    (readFileSync as Mock).mockReturnValue(`
       export async function asyncFn() {}
       export function* generatorFn() {}
       class MyClass {
@@ -91,7 +91,7 @@ describe('TypeScriptAdapter', () => {
   });
   
   it('should throw error when file cannot be read', () => {
-    (readFileSync as vi.Mock).mockImplementation(() => {
+    (readFileSync as Mock).mockImplementation(() => {
       throw new Error('Could not read file');
     });
     
@@ -101,13 +101,13 @@ describe('TypeScriptAdapter', () => {
   });
 
   it('should fall back to super.detectLanguage for non-ts/non-tsx extensions', () => {
-    (readFileSync as vi.Mock).mockReturnValue('content');
+    (readFileSync as Mock).mockReturnValue('content');
     const adapter = new TypeScriptAdapter('test.py');
     expect(adapter.detectLanguage()).toBe('python');
   });
 
   it('should extract re-export declarations', () => {
-    (readFileSync as vi.Mock).mockReturnValue('export { Foo };\nexport { Bar };\nexport function baz() {}');
+    (readFileSync as Mock).mockReturnValue('export { Foo };\nexport { Bar };\nexport function baz() {}');
     const adapter = new TypeScriptAdapter('test.ts');
     const exports = adapter.extractExports();
     const reExports = exports.filter(ex => (ex as {type: string}).type === 're-export');

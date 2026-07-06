@@ -1,4 +1,4 @@
-import { describe, it, expect, vi } from 'vitest';
+import { describe, it, expect, vi, type Mock } from 'vitest';;
 import { CppAdapter } from '../cpp';
 
 type MockFunction = Record<string, unknown>;
@@ -13,7 +13,7 @@ import { readFileSync } from 'fs';
 describe('CppAdapter', () => {
   
   it('should implement the Adapter interface', () => {
-    (readFileSync as vi.Mock).mockReturnValue('int main() { return 0; }');
+    (readFileSync as Mock).mockReturnValue('int main() { return 0; }');
     const adapter = new CppAdapter('test.cpp');
     
     expect(adapter).toHaveProperty('detectLanguage');
@@ -24,59 +24,59 @@ describe('CppAdapter', () => {
   });
 
   it('should detect language as cpp for .cpp files', () => {
-    (readFileSync as vi.Mock).mockReturnValue('int main() { return 0; }');
+    (readFileSync as Mock).mockReturnValue('int main() { return 0; }');
     const adapter = new CppAdapter('test.cpp');
     const detected = adapter.detectLanguage();
     expect(detected).toBe('cpp');
   });
 
   it('should detect language as cpp for .cxx files', () => {
-    (readFileSync as vi.Mock).mockReturnValue('int main() { return 0; }');
+    (readFileSync as Mock).mockReturnValue('int main() { return 0; }');
     const adapter = new CppAdapter('test.cxx');
     const detected = adapter.detectLanguage();
     expect(detected).toBe('cpp');
   });
 
   it('should detect language as cpp for .cc files', () => {
-    (readFileSync as vi.Mock).mockReturnValue('int main() { return 0; }');
+    (readFileSync as Mock).mockReturnValue('int main() { return 0; }');
     const adapter = new CppAdapter('test.cc');
     const detected = adapter.detectLanguage();
     expect(detected).toBe('cpp');
   });
 
   it('should detect language as cpp for .c files', () => {
-    (readFileSync as vi.Mock).mockReturnValue('int main() { return 0; }');
+    (readFileSync as Mock).mockReturnValue('int main() { return 0; }');
     const adapter = new CppAdapter('test.c');
     const detected = adapter.detectLanguage();
     expect(detected).toBe('cpp');
   });
 
   it('should detect language as cpp for .hpp files', () => {
-    (readFileSync as vi.Mock).mockReturnValue('#pragma once');
+    (readFileSync as Mock).mockReturnValue('#pragma once');
     const adapter = new CppAdapter('test.hpp');
     const detected = adapter.detectLanguage();
     expect(detected).toBe('cpp');
   });
 
   it('should detect language as cpp for .h files', () => {
-    (readFileSync as vi.Mock).mockReturnValue('#pragma once');
+    (readFileSync as Mock).mockReturnValue('#pragma once');
     const adapter = new CppAdapter('test.h');
     const detected = adapter.detectLanguage();
     expect(detected).toBe('cpp');
   });
 
   it('should parse C++ file AST correctly', () => {
-    (readFileSync as vi.Mock).mockReturnValue('int main() { return 0; }');
+    (readFileSync as Mock).mockReturnValue('int main() { return 0; }');
     const adapter = new CppAdapter('test.cpp');
     const ast = adapter.parseAST();
     expect(ast).toHaveProperty('content');
     expect(ast).toHaveProperty('language');
     expect(ast).toHaveProperty('filePath');
-    expect(ast.language).toBe('cpp');
+    expect((ast as { language: unknown }).language).toBe('cpp');
   });
 
   it('should extract functions from C++ code', () => {
-    (readFileSync as vi.Mock).mockReturnValue(`
+    (readFileSync as Mock).mockReturnValue(`
 int add(int a, int b) {
   return a + b;
 }
@@ -92,7 +92,7 @@ int main() {
   });
 
   it('should handle C++ strings with special characters', () => {
-    (readFileSync as vi.Mock).mockReturnValue(`
+    (readFileSync as Mock).mockReturnValue(`
 int main() {
   const char* str = "Hello \\"World\\"";
   char c = '\\'';
@@ -107,7 +107,7 @@ int main() {
   });
   
   it('should throw error when file cannot be read', () => {
-    (readFileSync as vi.Mock).mockImplementation(() => {
+    (readFileSync as Mock).mockImplementation(() => {
       throw new Error('Could not read file');
     });
     
@@ -125,7 +125,7 @@ int main() {
 describe('CppAdapter - extractCodeBlock edge cases', () => {
   it('should skip single-line block comment before the opening brace', () => {
     const src = `int foo() /* inline comment */ { return 1; }`;
-    (readFileSync as vi.Mock).mockReturnValue(src);
+    (readFileSync as Mock).mockReturnValue(src);
     const adapter = new CppAdapter('test.cpp');
     const block = adapter.extractCodeBlock(0);
     expect(block).toContain('{ return 1; }');
@@ -142,7 +142,7 @@ describe('CppAdapter - extractCodeBlock edge cases', () => {
       '  return 42;',
       '}',
     ].join('\n');
-    (readFileSync as vi.Mock).mockReturnValue(src);
+    (readFileSync as Mock).mockReturnValue(src);
     const adapter = new CppAdapter('test.cpp');
     const block = adapter.extractCodeBlock(0);
     expect(block).toContain('return 42;');
@@ -151,7 +151,7 @@ describe('CppAdapter - extractCodeBlock edge cases', () => {
 
   it('should ignore braces inside block comments', () => {
     const src = `int foo() /* fake { brace } here */ { return 7; }`;
-    (readFileSync as vi.Mock).mockReturnValue(src);
+    (readFileSync as Mock).mockReturnValue(src);
     const adapter = new CppAdapter('test.cpp');
     const block = adapter.extractCodeBlock(0);
     expect(block).toContain('return 7;');
@@ -160,7 +160,7 @@ describe('CppAdapter - extractCodeBlock edge cases', () => {
 
   it('should count nested braces correctly via braceCount++ path', () => {
     const src = `void foo() { if (x) { return; } }`;
-    (readFileSync as vi.Mock).mockReturnValue(src);
+    (readFileSync as Mock).mockReturnValue(src);
     const adapter = new CppAdapter('test.cpp');
     const block = adapter.extractCodeBlock(0);
     expect(block).toBe('void foo() { if (x) { return; } }');
@@ -168,7 +168,7 @@ describe('CppAdapter - extractCodeBlock edge cases', () => {
 
   it('should handle deeply nested braces (triple nesting)', () => {
     const src = `int bar() { if (a) { while (b) { c++; } } return 0; }`;
-    (readFileSync as vi.Mock).mockReturnValue(src);
+    (readFileSync as Mock).mockReturnValue(src);
     const adapter = new CppAdapter('test.cpp');
     const block = adapter.extractCodeBlock(0);
     expect(block.trim().endsWith('}')).toBe(true);
@@ -190,7 +190,7 @@ describe('CppAdapter - extractCodeBlock edge cases', () => {
       '  return 0;',
       '}',
     ].join('\n');
-    (readFileSync as vi.Mock).mockReturnValue(src);
+    (readFileSync as Mock).mockReturnValue(src);
     const adapter = new CppAdapter('test.cpp');
     const block = adapter.extractCodeBlock(0);
     expect(block.trim().endsWith('}')).toBe(true);
@@ -205,7 +205,7 @@ describe('CppAdapter - extractCodeBlock edge cases', () => {
       '  return 5;',
       '}',
     ].join('\n');
-    (readFileSync as vi.Mock).mockReturnValue(src);
+    (readFileSync as Mock).mockReturnValue(src);
     const adapter = new CppAdapter('test.cpp');
     const block = adapter.extractCodeBlock(0);
     expect(block).toContain('return 5;');
@@ -223,7 +223,7 @@ describe('CppAdapter - extractCodeBlock edge cases', () => {
       '  int value_;',
       '};',
     ].join('\n');
-    (readFileSync as vi.Mock).mockReturnValue(src);
+    (readFileSync as Mock).mockReturnValue(src);
     const adapter = new CppAdapter('test.cpp');
     const functions = adapter.extractFunctions();
     expect(Array.isArray(functions)).toBe(true);
@@ -240,7 +240,7 @@ describe('CppAdapter - extractCodeBlock edge cases', () => {
       '  int x;',
       '};',
     ].join('\n');
-    (readFileSync as vi.Mock).mockReturnValue(src);
+    (readFileSync as Mock).mockReturnValue(src);
     const adapter = new CppAdapter('test.cpp');
     const classes = adapter.extractClasses();
     expect(Array.isArray(classes)).toBe(true);
@@ -250,13 +250,13 @@ describe('CppAdapter - extractCodeBlock edge cases', () => {
   });
 
   it('should count lines correctly', () => {
-    (readFileSync as vi.Mock).mockReturnValue('line1\nline2\nline3');
+    (readFileSync as Mock).mockReturnValue('line1\nline2\nline3');
     const adapter = new CppAdapter('test.cpp');
     expect(adapter.countLines()).toBe(3);
   });
 
   it('should fall back to super.detectLanguage for non-cpp extensions', () => {
-    (readFileSync as vi.Mock).mockReturnValue('content');
+    (readFileSync as Mock).mockReturnValue('content');
     const adapter = new CppAdapter('test.txt');
     expect(adapter.detectLanguage()).toBe('unknown');
   });
@@ -272,7 +272,7 @@ describe('CppAdapter - extractCodeBlock edge cases', () => {
       '  return -x;',
       '}',
     ].join('\n');
-    (readFileSync as vi.Mock).mockReturnValue(src);
+    (readFileSync as Mock).mockReturnValue(src);
     const adapter = new CppAdapter('test.cpp');
     const functions = adapter.extractFunctions();
     expect(Array.isArray(functions)).toBe(true);
@@ -281,7 +281,7 @@ describe('CppAdapter - extractCodeBlock edge cases', () => {
 
   it('should extract functions with scope prefix (e.g. MyClass::method)', () => {
     const src = 'void MyClass::method() { return; }';
-    (readFileSync as vi.Mock).mockReturnValue(src);
+    (readFileSync as Mock).mockReturnValue(src);
     const adapter = new CppAdapter('test.cpp');
     const functions = adapter.extractFunctions();
     expect(Array.isArray(functions)).toBe(true);

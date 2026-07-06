@@ -1,4 +1,4 @@
-import { describe, it, expect, vi } from 'vitest';
+import { describe, it, expect, vi, type Mock } from 'vitest';;
 import type { Adapter } from '../../types';
 import { BaseAdapter } from '../base';
 
@@ -24,7 +24,7 @@ import { readFileSync } from 'fs';
 describe('BaseAdapter - Default Implementation', () => {
 
   it('should implement the Adapter interface', () => {
-    (readFileSync as vi.Mock).mockReturnValue('mock file content\ntest line 2');
+    (readFileSync as Mock).mockReturnValue('mock file content\ntest line 2');
     const adapter = new MockAdapter('./test.ts');
     const implemented: Adapter = adapter as unknown as Adapter;
     
@@ -37,7 +37,7 @@ describe('BaseAdapter - Default Implementation', () => {
   });
 
   it('should detect language based on file extension', () => {
-    (readFileSync as vi.Mock).mockReturnValue('file content');
+    (readFileSync as Mock).mockReturnValue('file content');
     
     const adapterTs = new MockAdapter('./test.ts');
     expect(adapterTs.detectLanguage()).toBe('typescript');
@@ -56,35 +56,35 @@ describe('BaseAdapter - Default Implementation', () => {
   });
 
   it('should parse file AST correctly', () => {
-    (readFileSync as vi.Mock).mockReturnValue('mock file content\ntest line 2');
+    (readFileSync as Mock).mockReturnValue('mock file content\ntest line 2');
     const adapter = new MockAdapter('./test.ts');
     const ast = adapter.parseAST();
     expect(ast).toEqual({ content: 'mock file content\ntest line 2', astType: 'mock' });
   });
 
   it('should extract functions from AST', () => {
-    (readFileSync as vi.Mock).mockReturnValue('');
+    (readFileSync as Mock).mockReturnValue('');
     const adapter = new MockAdapter('./test.ts');
     const functions = adapter.extractFunctions();
     expect(Array.isArray(functions)).toBe(true);
   });
 
   it('should extract classes from AST', () => {
-    (readFileSync as vi.Mock).mockReturnValue('');
+    (readFileSync as Mock).mockReturnValue('');
     const adapter = new MockAdapter('./test.ts');
     const classes = adapter.extractClasses();
     expect(Array.isArray(classes)).toBe(true);
   });
 
   it('should count physical lines correctly', () => {
-    (readFileSync as vi.Mock).mockReturnValue('line 1\nline 2\nline 3');
+    (readFileSync as Mock).mockReturnValue('line 1\nline 2\nline 3');
     const adapter = new MockAdapter('./test.ts');
     const lineCount = adapter.countLines();
     expect(lineCount).toBe(3);
   });
 
   it('should throw error for unsupported file operations', () => {
-    (readFileSync as vi.Mock).mockImplementation(() => {
+    (readFileSync as Mock).mockImplementation(() => {
       throw new Error('Could not read file');
     });
     
