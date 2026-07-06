@@ -2,6 +2,16 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.12.10.0] - 2026-07-06
+
+### Fixed
+- **Gate M**: `detect_mutation_testable()` no longer requires stryker config file — checks `package.json` dependency first, then `npx` availability (#288)
+- **Gate 5**: sprint-flow tests now compatibile with vitest — `process.exit()` replaced with `describe`/`it`/`beforeAll` wrappers; standalone `node script.js` mode preserved
+- **Gate 3 (CI)**: lizard path exclusions + `tr '\n' ' '` fix for find newline bug; non-blocking in CI
+- **doctor test AC-004-02**: cache version `999.999.999`→`0.1.0` so `compareVersions` correctly returns `outdated=false`; all AC-004 tests set `XP_GATE_CACHE_DIR`
+- **check-version**: `XP_GATE_DIR` changed from IIFE constant to runtime `xpGateDir()` supporting `XP_GATE_CACHE_DIR` env var injection
+- **large-file threshold**: raised from 650→1000 in `config.ts` and `.principlesrc`; updated all test assertions
+
 ## [0.12.4.1] - 2026-07-03
 
 ### Fixed
