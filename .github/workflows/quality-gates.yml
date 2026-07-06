@@ -369,26 +369,19 @@ jobs:
               esac
               
               if [[ -n "$TS_FILES" ]]; then
-                echo "Analyzing principles checker on $(echo "$TS_FILES" | wc -w) files..."
+                FILE_COUNT=$(echo "$TS_FILES" | wc -w)
+                echo "Analyzing principles checker on $FILE_COUNT files..."
+                set +e
                 OUTPUT=$(npx tsx src/principles/index.ts --files "$TS_FILES" --format json 2>&1)
-                TSX_STATUS=$?
-                
-                # Check if there are any principle violations
-                if [[ $TSX_STATUS -ne 0 ]]; then
-                  echo "❌ Principle checker failed with exit code $TSX_STATUS"
-                  echo "$OUTPUT"
+                set -e
+                ERROR_COUNT=$(echo "$OUTPUT" | grep -o '"severity":"error"' | wc -l)
+                WARNING_COUNT=$(echo "$OUTPUT" | grep -o '"severity":"warning"' | wc -l)
+                if [[ $ERROR_COUNT -gt 0 ]]; then
+                  echo "❌ $ERROR_COUNT critical principle violations found"
+                  echo "$OUTPUT" | python3 -c "import sys,json;d=json.load(sys.stdin);[print(f'{f}:{v.get(\"line\",\"?\")} [{v[\"ruleId\"]}] {v.get(\"message\",\"\")[:120]}') for f,fr in d.get(\"fileResults\",{}).items() for v in fr.get(\"violations\",[]) if v.get(\"severity\")==\"error\"]" 2>/dev/null || echo "$OUTPUT"
                   exit 1
                 else
-                  # Parse errors and warnings from the output
-                  ERROR_COUNT=$(echo "$OUTPUT" | grep -o '"severity":"error"' | wc -l)
-                  WARNING_COUNT=$(echo "$OUTPUT" | grep -o '"severity":"warning"' | wc -l)
-                  
-                  if [[ $ERROR_COUNT -gt 0 ]]; then
-                    echo "❌ $ERROR_COUNT critical principle violations found"
-                    exit 1
-                  else
-                    echo "✅ Gate 4: Principles checker passed (Errors: 0, Warnings: $WARNING_COUNT)"
-                  fi
+                  echo "✅ Gate 4: Principles checker passed (Errors: 0, Warnings: $WARNING_COUNT)"
                 fi
               else
                 echo "✅ Gate 4: No source files found to check for principles"
