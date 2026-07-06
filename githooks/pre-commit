@@ -679,8 +679,20 @@ if [ "$PROJECT_LANG" = "documentation-only" ]; then
       fi
     fi
 
-    # ── Biome config detection ──
-    if ! [ -f "biome.json" ] && ! [ -f "biome.jsonc" ]; then
+    # ── Biome lint/format check ──
+    if [ -f "biome.json" ] || [ -f "biome.jsonc" ]; then
+      echo "Running Biome lint/format check..."
+      if ! npx biome check --staged . 2>/dev/null; then
+        npx biome check . 2>&1 | head -50
+        echo ""
+        echo "❌ BLOCKED - Biome check failed"
+        echo "Fix the errors above before committing."
+        echo "Tip: Run 'npx biome check --write .' to auto-fix formatting and safe lint issues."
+        echo "     Run 'npx biome check --write --unsafe .' to also fix unsafe lint issues."
+        exit 1
+      fi
+      echo "✅ PASSED - Biome check."
+    else
       if [ -f "package.json" ] && command -v node &> /dev/null; then
         HAS_BIOME=$(node -e "try{const p=JSON.parse(require('fs').readFileSync('package.json','utf8'));const d=p.devDependencies||{};const deps=p.dependencies||{};console.log((d['@biomejs/biome']||deps['@biomejs/biome'])?'yes':'no')}catch{console.log('no')}") && true
         if [ "$HAS_BIOME" = "yes" ]; then
