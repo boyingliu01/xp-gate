@@ -361,16 +361,15 @@ jobs:
               echo "Running principles checker..."
               TSX_STATUS=0
               
-              # Find source files to check
               case $PROJECT_LANGUAGE in
-                typescript) TS_FILES=$(find . \( -name "*.ts" -o -name "*.tsx" \) -not -path "./node_modules/*" -not -path "./dist/*");;
-                python) TS_FILES=$(find . \( -name "*.py" \) -not -path "./venv/*" -not -path "./.venv/*");;
-                go) TS_FILES=$(find . \( -name "*.go" \) -not -path "./vendor/*");;
-                *) TS_FILES=$(find . \( -name "*.ts" -o -name "*.tsx" -o -name "*.js" -o -name "*.py" -o -name "*.go" \) -not -path "./node_modules/*" -not -path "./dist/*");;
+                typescript) TS_FILES=$(find . \( -name "*.ts" -o -name "*.tsx" \) -not -path "*/node_modules/*" -not -path "*/dist/*" -not -path "./plugins/*" -not -path "./src/npm-package/*" | tr '\n' ' ');;
+                python) TS_FILES=$(find . \( -name "*.py" \) -not -path "*/node_modules/*" -not -path "./venv/*" -not -path "./.venv/*" | tr '\n' ' ');;
+                go) TS_FILES=$(find . \( -name "*.go" \) -not -path "*/node_modules/*" -not -path "./vendor/*" | tr '\n' ' ');;
+                *) TS_FILES=$(find . \( -name "*.ts" -o -name "*.tsx" -o -name "*.js" -o -name "*.py" -o -name "*.go" \) -not -path "*/node_modules/*" -not -path "*/dist/*" | tr '\n' ' ');;
               esac
               
               if [[ -n "$TS_FILES" ]]; then
-                echo "Analyzing with principles checker: $TS_FILES" | head -30
+                echo "Analyzing principles checker on $(echo "$TS_FILES" | wc -w) files..."
                 OUTPUT=$(npx tsx src/principles/index.ts --files "$TS_FILES" --format json 2>&1)
                 TSX_STATUS=$?
                 
