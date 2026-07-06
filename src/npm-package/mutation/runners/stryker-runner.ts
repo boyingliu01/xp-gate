@@ -1,6 +1,6 @@
 // @no-test-required: Stryker wrapper — tested via gate-m integration + pre-push Gate M
 import { spawn } from 'child_process';
-import { readFileSync } from 'fs';
+import { existsSync, readFileSync } from 'fs';
 import { join } from 'path';
 import type {
   MutationRunner,
@@ -36,11 +36,11 @@ export class StrykerRunner implements MutationRunner {
 
   async run(options: RunMutationOptions): Promise<MutationRunOutcome> {
     return new Promise((resolve) => {
+      const configPath = this.resolveConfig(options.cwd);
       const args = [
         'stryker',
         'run',
-        '--config',
-        this.resolveConfig(options.cwd),
+        ...(configPath ? ['--config', configPath] : []),
         ...options.files.flatMap(f => ['--mutate', f]),
       ];
 
@@ -91,8 +91,10 @@ export class StrykerRunner implements MutationRunner {
     });
   }
 
-  private resolveConfig(cwd: string): string {
-    return join(cwd, STRYKER_PREPUSH_CONFIG);
+  private resolveConfig(cwd: string): string | null {
+    const configPath = join(cwd, STRYKER_PREPUSH_CONFIG);
+    if (existsSync(configPath)) return configPath;
+    return null;
   }
 
   private parseReport(cwd: string): MutationRunResult | null {

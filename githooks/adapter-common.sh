@@ -192,26 +192,21 @@ detect_iac_project() {
 
 # Stryker 9.x config files (new format, takes priority)
 detect_mutation_testable() {
-  if [ -f "stryker.config.mjs" ] || [ -f "stryker.config.js" ] || \
+  # Check if @stryker-mutator/core is installed — no config file required.
+  # The StrykerRunner passes --mutate via CLI flags, so stryker can run
+  # without any config file present.
+  if [ -f "package.json" ] && grep -qE '"@stryker-mutator[^"]*"' package.json 2>/dev/null; then
+    return 0
+  fi
+  if command -v npx >/dev/null 2>&1 && npx --no-install stryker --version >/dev/null 2>&1; then
+    return 0
+  fi
+  # Legacy config files (backwards compatibility — deprecated)
+  if [ -f "stryker.conf.json" ] || [ -f "stryker.prepush.conf.json" ] || \
+     [ -f "stryker.config.mjs" ] || [ -f "stryker.config.js" ] || \
      [ -f "stryker.config.cjs" ] || [ -f "stryker.config.json" ]; then
-    if [ -f "package.json" ] && grep -qE '"@stryker-mutator[^"]*"' package.json 2>/dev/null; then
-      return 0
-    fi
-    if command -v npx >/dev/null 2>&1 && npx --no-install stryker --version >/dev/null 2>&1; then
-      return 0
-    fi
+    return 0
   fi
-
-  # Legacy Stryker config files (backwards compatibility)
-  if [ -f "stryker.conf.json" ] || [ -f "stryker.prepush.conf.json" ]; then
-    if [ -f "package.json" ] && grep -qE '"@stryker-mutator[^"]*"' package.json 2>/dev/null; then
-      return 0
-    fi
-    if command -v npx >/dev/null 2>&1 && npx --no-install stryker --version >/dev/null 2>&1; then
-      return 0
-    fi
-  fi
-
   return 1
 }
 # Detect if a Python project has mutmut installed and configured

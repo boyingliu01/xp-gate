@@ -6,12 +6,26 @@ const DEFAULT_PKG_NAME = '@boyingliu01/xp-gate';
 const REGISTRY_URL = (pkg) => `https://registry.npmjs.org/-/package/${encodeURIComponent(pkg)}/dist-tags`;
 const NETWORK_TIMEOUT_MS = 5000;
 const CACHE_TTL_MS = 300000; // 5 minutes
-const XP_GATE_DIR = (() => {
+
+/**
+ * Resolve the xp-gate data directory.
+ *
+ * Priority:
+ *   1. XP_GATE_CACHE_DIR env var (used by tests to inject a temp dir)
+ *   2. os.homedir() + '/.xp-gate' (standard location on all platforms)
+ *
+ * os.homedir() works correctly on Linux ($HOME), macOS ($HOME), and
+ * Windows ($USERPROFILE), so no per-OS branching is needed.
+ */
+function xpGateDir() {
+  if (process.env.XP_GATE_CACHE_DIR) {
+    return process.env.XP_GATE_CACHE_DIR;
+  }
   try {
     const home = require('os').homedir();
     return path.join(home, '.xp-gate');
   } catch { return null; }
-})();
+}
 
 /**
  * Read the package name from the installed package.json, falling back to DEFAULT_PKG_NAME.
@@ -45,8 +59,9 @@ function getLocalVersion() {
  * Cache entry helpers — atomic file write via temp+rename to prevent concurrent read corruption.
  */
 function cachePath() {
-  if (!XP_GATE_DIR) return null;
-  return path.join(XP_GATE_DIR, 'version-cache.json');
+  const dir = xpGateDir();
+  if (!dir) return null;
+  return path.join(dir, 'version-cache.json');
 }
 
 function ensureDir(dir) {

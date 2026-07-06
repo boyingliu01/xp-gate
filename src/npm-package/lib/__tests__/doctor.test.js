@@ -16,6 +16,7 @@ describe('doctor', () => {
   let tmpHome;
   let tmpProject;
   let originalHome;
+  let originalXpGateCacheDir;
   let originalDetectDepsTools;
   let originalExecSync;
   let logSpy;
@@ -44,6 +45,7 @@ describe('doctor', () => {
 
   beforeEach(() => {
     originalHome = process.env.HOME;
+    originalXpGateCacheDir = process.env.XP_GATE_CACHE_DIR;
     originalExecSync = cp.execSync;
     // Unique per-describe + per-test prefixes to avoid parallel collisions.
     tmpHome = fs.mkdtempSync(path.join(os.tmpdir(), `xpgate-dr-${DESCRIBE_ID}-`));
@@ -67,6 +69,7 @@ describe('doctor', () => {
 
   afterEach(() => {
     process.env.HOME = originalHome;
+    process.env.XP_GATE_CACHE_DIR = originalXpGateCacheDir;
     cp.execSync = originalExecSync;
     if (tmpHome && fs.existsSync(tmpHome)) {
       fs.rmSync(tmpHome, { recursive: true, force: true });
@@ -218,9 +221,11 @@ describe('doctor', () => {
   }
 
   // doctor() calls checkUpgrade() which hits npm registry; seed cache to skip.
-  // check-version.js uses os.homedir() (not process.env.HOME) for XP_GATE_DIR.
+  // Set XP_GATE_CACHE_DIR so check-version.js resolves to the temp dir,
+  // avoiding dependency on os.homedir() cross-platform behavior.
   function seedVersionCache() {
-    const cacheDir = path.join(tmpHome, '.xp-gate');
+    process.env.XP_GATE_CACHE_DIR = path.join(tmpHome, '.xp-gate');
+    const cacheDir = process.env.XP_GATE_CACHE_DIR;
     fs.mkdirSync(cacheDir, { recursive: true });
     fs.writeFileSync(
       path.join(cacheDir, 'version-cache.json'),
@@ -619,9 +624,10 @@ describe('doctor', () => {
     setupLocalInstall();
     ensureTuiRegistered();
     mockExecSuccess();
-    // Remove version cache so checkUpgrade hits the real npm registry
-    const cachePath = path.join(tmpHome, '.xp-gate', 'version-cache.json');
-    if (fs.existsSync(cachePath)) fs.unlinkSync(cachePath);
+    // Point cache dir to tmpHome and remove cache so checkUpgrade hits the npm registry
+    process.env.XP_GATE_CACHE_DIR = path.join(tmpHome, '.xp-gate');
+    const cacheFile = path.join(process.env.XP_GATE_CACHE_DIR, 'version-cache.json');
+    if (fs.existsSync(cacheFile)) fs.unlinkSync(cacheFile);
 
     delete require.cache[require.resolve('../doctor')];
     delete require.cache[require.resolve('../check-version.js')];
@@ -639,12 +645,14 @@ describe('doctor', () => {
     setupLocalInstall();
     ensureTuiRegistered();
     mockExecSuccess();
-    // Write a cache with a future version so checkUpgrade says "not outdated"
-    const cachePath = path.join(tmpHome, '.xp-gate', 'version-cache.json');
-    fs.mkdirSync(path.dirname(cachePath), { recursive: true });
-    fs.writeFileSync(cachePath, JSON.stringify({
+    // Point cache dir to tmpHome and write a cache with an old remote version
+    // so compareVersions(local='0.12.9.0', remote='0.1.0') → outdated=false
+    process.env.XP_GATE_CACHE_DIR = path.join(tmpHome, '.xp-gate');
+    const cacheFile = path.join(process.env.XP_GATE_CACHE_DIR, 'version-cache.json');
+    fs.mkdirSync(process.env.XP_GATE_CACHE_DIR, { recursive: true });
+    fs.writeFileSync(cacheFile, JSON.stringify({
       ts: Date.now(),
-      version: '999.999.999',
+      version: '0.1.0',
       publishedAt: ''
     }));
 
