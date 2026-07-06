@@ -1,14 +1,16 @@
 {
-  "commit": "4a004b298f6c3ac52a7705634b7afc7c5b7fcd8c",
-  "branch": "fix/biome-check-in-precommit-gate1",
-  "timestamp": "2026-07-06T19:55:00+08:00",
+  "commit": "0d2e4934aee53390cef155179fa05925002065c1",
+  "branch": "fix/gate-1-tsc-test-files-issue-293",
+  "timestamp": "2026-07-06T20:42:00+08:00",
   "verdict": "APPROVED",
   "changes": [
-    "githooks/pre-commit: invert Biome condition — check runs when biome.json exists (was: only warned when missing)",
-    "githooks/adapters/typescript.sh: run_lint() now prefers Biome, falls back to ESLint",
-    "src/npm-package/ mirrors: synced typescript.sh + hooks/pre-commit + pre-push"
+    "githooks/adapters/typescript.sh run_static_analysis(): after main tsc pass, detect excluded test dirs and run a second pass with test files included",
+    "githooks/pre-commit: same test-file detection logic for inline TypeScript path",
+    "githooks/__tests__/gate-1-tsc-test-files.test.bats: 3 BATS tests for tsc test-file checking",
+    "src/npm-package/ mirrors: synced typescript.sh, pre-commit, adapter-common.sh",
+    "docs/plans/2026-07-06-sprint-flow-compact-redesign.md: RFC design doc"
   ],
-  "gates_passed": ["shell-syntax", "tsc", "principles", "architecture", "boy-scout", "imports", "mutation", "mock-density"],
-  "tests_passed": 1820,
+  "gates_passed": ["shell-syntax", "tsc", "principles", "architecture", "boy-scout", "coverage-84%", "mutation", "mock-density"],
+  "tests_passed": 1869,
   "reviewer": "sisyphus-automated"
 }

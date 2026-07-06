@@ -3,14 +3,70 @@
 # TypeScript adapter for quality gates
 
 run_static_analysis() {
-  if command -v npx >/dev/null 2>&1; then
-    echo "Running TypeScript static analysis..."
-    npx tsc --noEmit
-    return $?
-  else
+  if ! command -v npx >/dev/null 2>&1; then
     echo "npx not available, skipping TypeScript static analysis"
     return 0
   fi
+
+  local HAS_ERRORS=0
+  local TSC_VERSION
+
+  echo "Running TypeScript static analysis..."
+  npx tsc --noEmit
+  TSC_EXIT=$?
+  if [ $TSC_EXIT -ne 0 ]; then
+    HAS_ERRORS=1
+  fi
+
+  # Also check test files if tsconfig.json exists (see Issue #293).
+  # Many projects exclude __tests__/ from tsconfig.json, so test file type
+  # errors silently accumulate. We detect this and run a second tsc pass.
+  local HAS_TESTS=false
+  if [ -d "src/__tests__" ] || [ -d "src/tests" ] || [ -d "tests" ] || [ -d "__tests__" ]; then
+    HAS_TESTS=true
+  fi
+
+  if [ "$HAS_TESTS" = true ] && [ -f "tsconfig.json" ]; then
+    # Check if tsconfig.json already includes test files
+    if npx tsc --noEmit --listFiles 2>/dev/null | grep -qE '__tests__/|\.test\.ts|\.spec\.ts'; then
+      : # Test files already checked — no additional pass needed
+    elif [ -f "tsconfig.tests.json" ]; then
+      echo "Checking test files with tsconfig.tests.json..."
+      npx tsc --noEmit --project tsconfig.tests.json
+      TSC_TEST_EXIT=$?
+      if [ $TSC_TEST_EXIT -ne 0 ]; then
+        HAS_ERRORS=1
+      fi
+    else
+      # Generate a temp tsconfig that includes test files for the additional pass
+      local TSC_TEST_EXIT=0
+      echo "Checking test files for type errors (generating temp tsconfig)..."
+      npx tsc --noEmit 2>/dev/null
+      # Create temp tsconfig extending the original but with test files included
+      local TEMP_TSCONFIG=".tsconfig.withtests.json"
+      if [ ! -f "$TEMP_TSCONFIG" ]; then
+        node -e "
+          const cfg = JSON.parse(require('fs').readFileSync('tsconfig.json','utf8'));
+          delete cfg.exclude;
+          cfg.include = cfg.include || ['src/**/*'];
+          cfg.include.push('src/**/__tests__/**','src/**/*.test.ts','src/**/*.spec.ts');
+          require('fs').writeFileSync('$TEMP_TSCONFIG', JSON.stringify(cfg, null, 2));
+        " 2>/dev/null
+        npx tsc --noEmit --project "$TEMP_TSCONFIG"
+        TSC_TEST_EXIT=$?
+        rm -f "$TEMP_TSCONFIG"
+      fi
+      if [ $TSC_TEST_EXIT -ne 0 ]; then
+        echo ""
+        echo "❌ BLOCKED - TYPE ERRORS in test files"
+        echo "Your project's tsconfig.json excludes test files from type checking."
+        echo "Fix the type errors above or add a tsconfig.tests.json to customise test file checking."
+        HAS_ERRORS=1
+      fi
+    fi
+  fi
+
+  return $HAS_ERRORS
 }
 
 run_lint() {
