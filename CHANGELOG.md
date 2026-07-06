@@ -2,6 +2,15 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.12.11.0] - 2026-07-06
+
+### Fixed
+- **Gate 1**: pre-commit and TypeScript adapter now run tsc on test files — detects type errors in `__tests__/` when tsconfig.json excludes them (#293)
+- **Gate 1 (Biome)**: inverted condition fixed — Biome check now actually runs when `biome.json` exists (was: only warned when missing) (#292)
+
+### Changed
+- **npm-package mirror**: `src/npm-package/hooks/adapter-common.sh` synced to match githooks (missed from PR #288)
+
 ## [0.12.10.0] - 2026-07-06
 
 ### Fixed
