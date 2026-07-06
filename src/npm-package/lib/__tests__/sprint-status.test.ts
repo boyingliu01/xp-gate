@@ -101,10 +101,11 @@ describe('sprint-status: readSprintState', () => {
     writeState(ACTIVE_STATE);
     const state = sprintStatus!.readSprintState(TMP_DIR);
     expect(state).not.toBeNull();
-    expect(state?.task_description).toBe('Test sprint');
-    expect(state?.phase).toBe(2);
-    expect(state?.status).toBe('running');
-    expect(Array.isArray(state?.phase_history)).toBe(true);
+    const stateObj = state as Record<string, unknown>;
+    expect(stateObj.task_description).toBe('Test sprint');
+    expect(stateObj.phase).toBe(2);
+    expect(stateObj.status).toBe('running');
+    expect(Array.isArray(stateObj.phase_history)).toBe(true);
   });
 
   // AC-SPRINTSTATUS-001-02: No active sprint

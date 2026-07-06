@@ -1,4 +1,4 @@
-import { describe, it, expect, vi } from 'vitest';
+import { describe, it, expect, vi, type Mock } from 'vitest';;
 import { KotlinAdapter } from '../kotlin';
 
 vi.mock('fs', () => ({
@@ -10,7 +10,7 @@ import { readFileSync } from 'fs';
 
 describe('KotlinAdapter', () => {
   it('should implement the Adapter interface', () => {
-    (readFileSync as vi.Mock).mockReturnValue('fun testFn() {}\nclass TestClass');
+    (readFileSync as Mock).mockReturnValue('fun testFn() {}\nclass TestClass');
     const adapter = new KotlinAdapter('test.kt');
     
     expect(adapter).toHaveProperty('detectLanguage');
@@ -21,24 +21,24 @@ describe('KotlinAdapter', () => {
   });
 
   it('should detect language as kotlin for .kt files', () => {
-    (readFileSync as vi.Mock).mockReturnValue('fun testFn() {}');
+    (readFileSync as Mock).mockReturnValue('fun testFn() {}');
     const adapter = new KotlinAdapter('test.kt');
     const detected = adapter.detectLanguage();
     expect(detected).toBe('kotlin');
   });
 
   it('should parse Kotlin file AST correctly', () => {
-    (readFileSync as vi.Mock).mockReturnValue('fun testFn() {}\nclass TestClass');
+    (readFileSync as Mock).mockReturnValue('fun testFn() {}\nclass TestClass');
     const adapter = new KotlinAdapter('test.kt');
     const ast = adapter.parseAST();
     expect(ast).toHaveProperty('content');
     expect(ast).toHaveProperty('language');
     expect(ast).toHaveProperty('filePath');
-    expect(ast.language).toBe('kotlin');
+    expect((ast as { language: unknown }).language).toBe('kotlin');
   });
 
   it('should extract functions from Kotlin AST', () => {
-    (readFileSync as vi.Mock).mockReturnValue('fun testFn() {}\nclass TestClass');
+    (readFileSync as Mock).mockReturnValue('fun testFn() {}\nclass TestClass');
     const adapter = new KotlinAdapter('test.kt');
     const functions = adapter.extractFunctions();
     expect(Array.isArray(functions)).toBe(true);
@@ -46,7 +46,7 @@ describe('KotlinAdapter', () => {
   });
 
   it('should extract classes from Kotlin AST', () => {
-    (readFileSync as vi.Mock).mockReturnValue('fun testFn() {}\nclass TestClass');
+    (readFileSync as Mock).mockReturnValue('fun testFn() {}\nclass TestClass');
     const adapter = new KotlinAdapter('test.kt');
     const classes = adapter.extractClasses();
     expect(Array.isArray(classes)).toBe(true);
@@ -54,20 +54,20 @@ describe('KotlinAdapter', () => {
   });
 
   it('should count Kotlin file physical lines', () => {
-    (readFileSync as vi.Mock).mockReturnValue('fun testFn() {}\nfun testFn2() {}');
+    (readFileSync as Mock).mockReturnValue('fun testFn() {}\nfun testFn2() {}');
     const adapter = new KotlinAdapter('test.kt');
     const lineCount = adapter.countLines();
     expect(lineCount).toBe(2);
   });
 
   it('should fall back to super.detectLanguage for non-kotlin extensions', () => {
-    (readFileSync as vi.Mock).mockReturnValue('content');
+    (readFileSync as Mock).mockReturnValue('content');
     const adapter = new KotlinAdapter('test.ts');
     expect(adapter.detectLanguage()).toBe('typescript');
   });
 
   it('should handle suspend functions in Kotlin', () => {
-    (readFileSync as vi.Mock).mockReturnValue('suspend fun fetchData(): String { return "data" }');
+    (readFileSync as Mock).mockReturnValue('suspend fun fetchData(): String { return "data" }');
     const adapter = new KotlinAdapter('test.kt');
     const functions = adapter.extractFunctions();
     const suspendFns = functions.filter(fn => (fn as {type: string}).type === 'suspend_function');

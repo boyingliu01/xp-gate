@@ -1,4 +1,4 @@
-import { describe, it, expect, vi } from 'vitest';
+import { describe, it, expect, vi, type Mock } from 'vitest';;
 import { DartAdapter } from '../dart';
 
 vi.mock('fs', () => ({
@@ -10,7 +10,7 @@ import { readFileSync } from 'fs';
 
 describe('DartAdapter', () => {
   it('should implement the Adapter interface', () => {
-    (readFileSync as vi.Mock).mockReturnValue('void testFn() {}\nclass TestClass {}');
+    (readFileSync as Mock).mockReturnValue('void testFn() {}\nclass TestClass {}');
     const adapter = new DartAdapter('test.dart');
     
     expect(adapter).toHaveProperty('detectLanguage');
@@ -21,24 +21,24 @@ describe('DartAdapter', () => {
   });
 
   it('should detect language as dart for .dart files', () => {
-    (readFileSync as vi.Mock).mockReturnValue('void testFn() {}');
+    (readFileSync as Mock).mockReturnValue('void testFn() {}');
     const adapter = new DartAdapter('test.dart');
     const detected = adapter.detectLanguage();
     expect(detected).toBe('dart');
   });
 
   it('should parse Dart file AST correctly', () => {
-    (readFileSync as vi.Mock).mockReturnValue('void testFn() {}\nclass TestClass {}');
+    (readFileSync as Mock).mockReturnValue('void testFn() {}\nclass TestClass {}');
     const adapter = new DartAdapter('test.dart');
     const ast = adapter.parseAST();
     expect(ast).toHaveProperty('content');
     expect(ast).toHaveProperty('language');
     expect(ast).toHaveProperty('filePath');
-    expect(ast.language).toBe('dart');
+    expect((ast as { language: unknown }).language).toBe('dart');
   });
 
   it('should extract functions from Dart AST', () => {
-    (readFileSync as vi.Mock).mockReturnValue('void testFn() {}\nclass TestClass {}');
+    (readFileSync as Mock).mockReturnValue('void testFn() {}\nclass TestClass {}');
     const adapter = new DartAdapter('test.dart');
     const functions = adapter.extractFunctions();
     expect(Array.isArray(functions)).toBe(true);
@@ -46,7 +46,7 @@ describe('DartAdapter', () => {
   });
 
   it('should extract classes from Dart AST', () => {
-    (readFileSync as vi.Mock).mockReturnValue('void testFn() {}\nclass TestClass {}');
+    (readFileSync as Mock).mockReturnValue('void testFn() {}\nclass TestClass {}');
     const adapter = new DartAdapter('test.dart');
     const classes = adapter.extractClasses();
     expect(Array.isArray(classes)).toBe(true);
@@ -54,20 +54,20 @@ describe('DartAdapter', () => {
   });
 
   it('should count Dart file physical lines', () => {
-    (readFileSync as vi.Mock).mockReturnValue('void testFn() {}\nvoid testFn2() {}');
+    (readFileSync as Mock).mockReturnValue('void testFn() {}\nvoid testFn2() {}');
     const adapter = new DartAdapter('test.dart');
     const lineCount = adapter.countLines();
     expect(lineCount).toBe(2);
   });
 
   it('should fall back to super.detectLanguage for non-dart extensions', () => {
-    (readFileSync as vi.Mock).mockReturnValue('content');
+    (readFileSync as Mock).mockReturnValue('content');
     const adapter = new DartAdapter('test.py');
     expect(adapter.detectLanguage()).toBe('python');
   });
 
   it('should handle async functions in Dart', () => {
-    (readFileSync as vi.Mock).mockReturnValue('Future<void> fetchData() async {}\nasync void fireAndForget() {}');
+    (readFileSync as Mock).mockReturnValue('Future<void> fetchData() async {}\nasync void fireAndForget() {}');
     const adapter = new DartAdapter('test.dart');
     const functions = adapter.extractFunctions();
     const asyncFns = functions.filter(fn => (fn as {type: string}).type === 'async_function');
@@ -75,7 +75,7 @@ describe('DartAdapter', () => {
   });
 
   it('should handle abstract class declarations in Dart', () => {
-    (readFileSync as vi.Mock).mockReturnValue('abstract class Repository {\n  void save();\n}\n');
+    (readFileSync as Mock).mockReturnValue('abstract class Repository {\n  void save();\n}\n');
     const adapter = new DartAdapter('test.dart');
     const classes = adapter.extractClasses();
     const abstractClasses = classes.filter(cls => (cls as {type: string}).type === 'abstract_class');

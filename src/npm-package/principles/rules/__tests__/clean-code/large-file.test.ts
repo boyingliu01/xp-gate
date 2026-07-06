@@ -7,6 +7,7 @@ const mockAdapter = {
   parseAST: () => undefined,
   extractFunctions: () => [],
   extractClasses: () => [],
+  extractExports: () => [],
   countLines: (_fileName: string) => 10 // Default to small file
 };
 
@@ -22,7 +23,7 @@ describe('largeFileRule', () => {
   });
 
   it('should detect files exceeding 1000 lines', () => {
-    const largeFileAdapter: never = {
+    const largeFileAdapter = {
       ...mockAdapter,
       countLines: () => 1001
     };
@@ -39,7 +40,7 @@ describe('largeFileRule', () => {
   });
 
   it('should handle exactly threshold lines as not violating', () => {
-    const thresholdFileAdapter: never = {
+    const thresholdFileAdapter = {
       ...mockAdapter,
       countLines: () => 1000
     };
@@ -61,7 +62,7 @@ describe('largeFileRule', () => {
   });
 
   it('should return empty violations when adapter throws error', () => {
-    const mockAdapterThatThrows: never = {
+    const mockAdapterThatThrows = {
       ...mockAdapter,
       countLines: () => { throw new Error('Adapter failed'); }
     };

@@ -19,7 +19,7 @@ describe('BaselineEntry - lint tool fields (ruff, golangci, shellcheck)', () => 
         lastAnalyzed: new Date().toISOString(),
       },
     };
-    expect(() => storage.validate(entry as Record<string, import('../baseline').BaselineEntry>)).not.toThrow();
+    expect(() => storage.validate(entry as unknown as Record<string, import('../baseline').BaselineEntry>)).not.toThrow();
   });
 
   it('accepts golangci field in BaselineEntry', () => {
@@ -31,7 +31,7 @@ describe('BaselineEntry - lint tool fields (ruff, golangci, shellcheck)', () => 
         lastAnalyzed: new Date().toISOString(),
       },
     };
-    expect(() => storage.validate(entry as Record<string, import('../baseline').BaselineEntry>)).not.toThrow();
+    expect(() => storage.validate(entry as unknown as Record<string, import('../baseline').BaselineEntry>)).not.toThrow();
   });
 
   it('accepts shellcheck field in BaselineEntry', () => {
@@ -43,7 +43,7 @@ describe('BaselineEntry - lint tool fields (ruff, golangci, shellcheck)', () => 
         lastAnalyzed: new Date().toISOString(),
       },
     };
-    expect(() => storage.validate(entry as Record<string, import('../baseline').BaselineEntry>)).not.toThrow();
+    expect(() => storage.validate(entry as unknown as Record<string, import('../baseline').BaselineEntry>)).not.toThrow();
   });
 
   it('rejects ruff entry with non-numeric warnings', () => {
@@ -55,7 +55,7 @@ describe('BaselineEntry - lint tool fields (ruff, golangci, shellcheck)', () => 
         lastAnalyzed: new Date().toISOString(),
       },
     };
-    expect(() => storage.validate(entry as Record<string, import('../baseline').BaselineEntry>)).toThrow(/Invalid ruff properties/);
+    expect(() => storage.validate(entry as unknown as Record<string, import('../baseline').BaselineEntry>)).toThrow(/Invalid ruff properties/);
   });
 
   it('combines all lint tools in getSummaryStatistics', () => {
@@ -82,12 +82,13 @@ describe('BaselineEntry - lint tool fields (ruff, golangci, shellcheck)', () => 
 
     expect(stats.totalFiles).toBe(3);
     expect(stats.totalWarnings).toBe(10);
-    expect(stats.ruff?.totalWarnings).toBe(5);
-    expect(stats.ruff?.totalErrors).toBe(2);
-    expect(stats.golangci?.totalWarnings).toBe(3);
-    expect(stats.golangci?.totalErrors).toBe(1);
-    expect(stats.shellcheck?.totalWarnings).toBe(2);
-    expect(stats.shellcheck?.totalErrors).toBe(0);
+    const richStats = stats as typeof stats & { ruff: { totalWarnings: number; totalErrors: number }; golangci: { totalWarnings: number; totalErrors: number }; shellcheck: { totalWarnings: number; totalErrors: number } };
+    expect(richStats.ruff.totalWarnings).toBe(5);
+    expect(richStats.ruff.totalErrors).toBe(2);
+    expect(richStats.golangci.totalWarnings).toBe(3);
+    expect(richStats.golangci.totalErrors).toBe(1);
+    expect(richStats.shellcheck.totalWarnings).toBe(2);
+    expect(richStats.shellcheck.totalErrors).toBe(0);
   });
 });
 
@@ -121,11 +122,12 @@ describe('BaselineStorage - extended coverage', () => {
         },
       };
 
-      const stats = storage.getSummaryStatistics(baseline);
+      const rawStats = storage.getSummaryStatistics(baseline);
+      const stats = rawStats as { totalFiles: number; totalWarnings: number; averageWarningsPerFile: number; ccn: { totalWarnings: number; totalMax: number } };
 
       expect(stats.totalFiles).toBe(2);
-      expect(stats.ccn?.totalWarnings).toBe(8);
-      expect(stats.ccn?.totalMax).toBe(30);
+      expect(stats.ccn.totalWarnings).toBe(8);
+      expect(stats.ccn.totalMax).toBe(30);
     });
 
     it('returns averageWarningsPerFile of 0 for empty baseline', () => {
@@ -135,7 +137,7 @@ describe('BaselineStorage - extended coverage', () => {
       expect(stats.totalFiles).toBe(0);
       expect(stats.totalWarnings).toBe(0);
       expect(stats.averageWarningsPerFile).toBe(0);
-      expect(stats.ccn).toBeUndefined();
+      expect('ccn' in stats ? (stats as Record<string, unknown>).ccn : undefined).toBeUndefined();
     });
   });
 

@@ -30,7 +30,7 @@ else
   if [ -n "$LIZARD_CMD" ]; then
     LIZARD_PATH=$(eval echo "$LIZARD_CMD")
     
-    # Get changed source files for complexity check
+    # Get changed source files for complexity check (includes test files)
     CC_FILES=$(echo "$CHANGED_FILES" | grep -E '\.(ts|tsx|js|jsx|py|go|java|swift|cpp|c|hpp|h|m|mm|kt)$' || true)
     
     if [ -n "$CC_FILES" ]; then

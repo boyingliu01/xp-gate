@@ -90,6 +90,7 @@ describe('types.ts - Core Interfaces', () => {
         parseAST: () => null,
         extractFunctions: () => [],
         extractClasses: () => [],
+        extractExports: () => [],
         countLines: () => 0,
       };
 
