@@ -13,7 +13,7 @@ description: >
   - "start sprint"
   - "一键开发"
   - "/sprint-flow"
-   触发后第一行输出: `Sprint Flow: ISOLATE → AUTO-ESTIMATE → THINK → PLAN → BUILD → REVIEW → SHIP → LAND → USER ACCEPTANCE → FEEDBACK → CLEANUP`
+   触发后第一行输出: `Sprint Flow: ISOLATE → AUTO-ESTIMATE → THINK → PLAN → BUILD → REVIEW → FEEDBACK → SHIP → LAND → USER ACCEPTANCE → CLEANUP`
   用法: /sprint-flow "[需求描述]"
   示例: /sprint-flow "开发访谈机器人，支持多轮对话"
   可选参数:
@@ -37,6 +37,44 @@ triggers:
   - "开发新功能"
   - "实现 X"
   - "一键开发"
+triggers_negative_examples:
+  - "实现排序算法"          # algorithm implementation, not feature development
+  - "实现一下"              # casual "do it", not a sprint request
+  - "帮我实现这个函数"      # single function, not full feature
+  - "怎么实现登录功能"      # asking HOW, not requesting development
+  - "start spring boot"     # framework name, not sprint
+  - "开发环境配置"          # environment setup, not feature development
+  - "一键部署"              # deploy, not develop
+  - "新功能建议"            # feature suggestion/request, not execution
+  - "implement a sort function"  # algorithm, not full feature
+  - "how to implement auth"      # educational question
+triggers_negative_test_cases:
+  - input: "实现排序算法"
+    expect: "NOT triggered"
+  - input: "实现一下"
+    expect: "NOT triggered"
+  - input: "帮我实现这个函数"
+    expect: "NOT triggered"
+  - input: "怎么实现登录功能"
+    expect: "NOT triggered"
+  - input: "start spring boot"
+    expect: "NOT triggered"
+  - input: "开发环境配置"
+    expect: "NOT triggered"
+  - input: "一键部署"
+    expect: "NOT triggered"
+  - input: "新功能建议"
+    expect: "NOT triggered"
+  - input: "implement a sort function"
+    expect: "NOT triggered"
+  - input: "how to implement auth"
+    expect: "NOT triggered"
+  - input: "开发用户认证模块"
+    expect: "triggered"
+  - input: "/sprint-flow \"开发访谈机器人\""
+    expect: "triggered"
+  - input: "一键开发 REST API"
+    expect: "triggered"
 workflow_steps:
   - "Phase -1: ISOLATE"
   - "Phase -0.5: AUTO-ESTIMATE"
@@ -108,6 +146,35 @@ workflow_steps:
 
 ---
 
+## Unique Value Proposition
+
+Sprint Flow is NOT just a sequential launcher of existing skills. Here's what makes it different from manually running each skill:
+
+### Why Sprint Flow vs Manual Skill Execution
+
+| Dimension | Manual Execution | Sprint Flow |
+|-----------|-----------------|-------------|
+| **Context Continuity** | Each skill starts fresh; lost design decisions between phases | Phase summaries + sprint-state.json maintain full traceability across 11 phases |
+| **Gate Enforcement** | No enforcement — easy to skip Delphi, skip TDD, skip UAT | HARD-GATE: design must be APPROVED (≥90% Delphi consensus) before coding; UAT is mandatory (no bypass) |
+| **Token Efficiency** | Linear context accumulation across phases — ~150K+ tokens | Ralph-loop default: 40-67% token savings via clean REQ-level contexts |
+| **Emergent Requirements** | Discovered late, silently ignored or merged | Phase 7 USER ACCEPTANCE explicitly captures emergent issues via template; triggers Sprint 2 for critical issues |
+| **Quality Ecosystem** | No integration with quality gates | Integrated with xp-gate's full quality ecosystem: Gate 5 (coverage), Gate M2 (mock density), Delphi code-walkthrough |
+| **Progress Tracking** | Ad-hoc, memory-based | `.sprint-state/` persistence with phase history, timing, and metrics — `--status` renders progress dashboard |
+
+### Key Differentiators
+
+1. **40-67% Token Savings via Ralph Loop**: Phase 2 default (`ralph-loop`) processes one REQ at a time with clean context, avoiding the linear context accumulation that costs 150K+ tokens in parallel mode.
+
+2. **HARD-GATE Discipline**: Design must pass Delphi review (≥90% consensus, ≥2 model providers, domestic models only) before Phase 2 BUILD can start. This is enforced both in SKILL.md instructions and via the Claude Code plugin's PreToolUse hook.
+
+3. **Emergent Requirements Acknowledgment**: Based on research showing 78% of failures are invisible to AI (arXiv study), Phase 7 USER ACCEPTANCE is a mandatory manual verification step — cannot be automated, skipped, or bypassed.
+
+4. **XP-Gate Quality Ecosystem Integration**: Sprint Flow is part of the broader xp-gate ecosystem. Phase 2 BUILD integrates with Gate 5 (test coverage ≥80%), Gate M2 (mock density ≤30%), and Gate MW (code-walkthrough validation). Phase 3 REVIEW runs Delphi code-walkthrough that generates `.code-walkthrough-result.json` for pre-push enforcement.
+
+5. **Full Lifecycle Coverage**: From worktree isolation (Phase -1) to cleanup (Phase 8), sprint-flow covers the entire development lifecycle — not just the "write code" part. AUTO-ESTIMATE (Phase -0.5) prevents over-engineering by routing lightweight changes through simplified workflows.
+
+---
+
 ## 完整流程（默认无参数）
 
 调用 `/sprint-flow "[需求描述]"` 后，自动执行以下流程：
@@ -162,7 +229,7 @@ Phase 8: CLEANUP → worktree remove + branch delete + sprint summary
 
 **Phase Flow**:
 ```
-ISOLATE → AUTO-ESTIMATE → THINK → PLAN → [GITHOOKS-GATE] → BUILD → REVIEW → SHIP → LAND → USER ACCEPT → FEEDBACK → CLEANUP
+ISOLATE → AUTO-ESTIMATE → THINK → PLAN → [GITHOOKS-GATE] → BUILD → REVIEW → FEEDBACK → SHIP → LAND → USER ACCEPTANCE → CLEANUP
 ```
 
 **Hard Gates**:
@@ -202,7 +269,7 @@ ISOLATE → AUTO-ESTIMATE → THINK → PLAN → [GITHOOKS-GATE] → BUILD → R
 6. 触发 `/sprint-flow` 后，**第一行输出应包含工作流阶段概览**：
 
 ```
-Sprint Flow: ISOLATE → AUTO-ESTIMATE → THINK → PLAN → BUILD → REVIEW → SHIP → LAND → USER ACCEPTANCE → FEEDBACK → CLEANUP
+Sprint Flow: ISOLATE → AUTO-ESTIMATE → THINK → PLAN → BUILD → REVIEW → FEEDBACK → SHIP → LAND → USER ACCEPTANCE → CLEANUP
 ```
 
 ### Phase -1: ISOLATE（git worktree 隔离）
@@ -508,17 +575,22 @@ See [Output Contract](#output-contract) below for the canonical machine-readable
 ## References
 
 详细指令文件位于 `@references/`:
-- `@references/phase-minus-1-isolate.md` — Phase -1 详细指令
-- `@references/phase-minus-0-5-auto-estimate.md` — Phase -0.5 详细指令
-- `@references/phase-0-think.md` — Phase 0 详细指令
-- `@references/phase-1-plan.md` — Phase 1 详细指令
-- `@references/phase-2-build.md` — Phase 2 详细指令
-- `@references/phase-3-review.md` — Phase 3 详细指令
-- `@references/phase-4-uat.md` — Phase 7 USER ACCEPTANCE 详细指令（人工）
-- `@references/phase-5-feedback.md` — Phase 4 FEEDBACK 详细指令
-- `@references/phase-6-ship.md` — Phase 5 SHIP 详细指令
-- `@references/phase-7-land.md` — Phase 6 LAND 详细指令
-- `@references/phase-8-cleanup.md` — Phase 8 CLEANUP 详细指令
+
+> ⚠️ **Filename numbering note**: Reference filenames use legacy numbering that does NOT match the canonical phase numbers in this document. The table below provides the correct mapping.
+
+| File | Canonical Phase | Phase Name |
+|------|----------------|------------|
+| `@references/phase-minus-1-isolate.md` | Phase -1 | ISOLATE |
+| `@references/phase-minus-0-5-auto-estimate.md` | Phase -0.5 | AUTO-ESTIMATE |
+| `@references/phase-0-think.md` | Phase 0 | THINK |
+| `@references/phase-1-plan.md` | Phase 1 | PLAN |
+| `@references/phase-2-build.md` | Phase 2 | BUILD |
+| `@references/phase-3-review.md` | Phase 3 | REVIEW |
+| `@references/phase-5-feedback.md` | Phase 4 | FEEDBACK (⚠️ filename says phase-5) |
+| `@references/phase-6-ship.md` | Phase 5 | SHIP (⚠️ filename says phase-6) |
+| `@references/phase-7-land.md` | Phase 6 | LAND (⚠️ filename says phase-7) |
+| `@references/phase-4-uat.md` | Phase 7 | USER ACCEPTANCE (⚠️ filename says phase-4) |
+| `@references/phase-8-cleanup.md` | Phase 8 | CLEANUP |
 
 ---
 
@@ -542,4 +614,35 @@ See [Output Contract](#output-contract) below for the canonical machine-readable
 | Emergent requirements 无法消除 | Mike Cohn, Rafael Santos | Phase 7 人工设计 |
 | 78% failures invisible | arXiv research | Phase 7 必要性证明 |
 | Think → Plan → Build → Ship | gstack ETHOS | 整体流程设计 |
+
+---
+
+## Phase Flow Consistency
+
+This section documents the canonical 11-phase order to ensure all future edits keep the phase sequence synchronized across all locations in this document and its reference files.
+
+**Canonical Phase Order** (Phase -1, -0.5, 0..8):
+
+| Phase # | Name | Phase # | Name |
+|---------|------|---------|------|
+| -1 | ISOLATE | 4 | FEEDBACK |
+| -0.5 | AUTO-ESTIMATE | 5 | SHIP |
+| 0 | THINK | 6 | LAND |
+| 1 | PLAN | 7 | USER ACCEPTANCE |
+| 2 | BUILD | 8 | CLEANUP |
+| 3 | REVIEW | | |
+
+**Locations that MUST keep this order synchronized**:
+1. **Frontmatter `workflow_steps`** (lines ~40-51): Phase list
+2. **Frontmatter `description` trigger text** (line ~16): Flow string
+3. **Body "完整流程" section** (lines ~115-127): Phase descriptions in order
+4. **Body "Phase Flow" diagram** (line ~164): ASCII flow diagram
+5. **Body "强制输出格式规范" section** (line ~204): Output format
+6. **Body "Workflow Steps" table** (lines ~149-162): Step/Phase table
+7. **Body "References" section** (lines ~516-521): Reference file list
+8. **`references/orchestration-rules.md` Phase Subagent Dispatch Matrix**: Phase/Name order
+9. **`references/phase-4-uat.md`**: Phase 7 USER ACCEPTANCE (⚠️ file named phase-4, phase number is 7)
+10. **`references/phase-5-feedback.md`**: Phase 4 FEEDBACK (⚠️ file named phase-5, phase number is 4)
+
+**⚠️ Known naming discrepancy**: Reference files use legacy numbering (`phase-4-uat.md` for Phase 7, `phase-5-feedback.md` for Phase 4, `phase-6-ship.md` for Phase 5, `phase-7-land.md` for Phase 6). The canonical phase NUMBER is determined by the `Phase #` column above — reference file names are mapped via the References section, not by their filename digits.
 
