@@ -320,7 +320,8 @@ function testPhaseSubagentMatrixOrder() {
 
 // === Run All Tests ===
 
-function runTests() {
+function runTests(opts = {}) {
+  const { exitOnFail = false } = opts;
   let passed = 0;
   let failed = 0;
   const errors = [];
@@ -366,7 +367,11 @@ function runTests() {
 
   console.log(`\n=== Results: ${passed} passed, ${failed} failed ===\n`);
   errors.forEach(e => console.log(e));
-  process.exit(failed > 0 ? 1 : 0);
+
+  if (exitOnFail && failed > 0) {
+    process.exit(1);
+  }
+  return failed > 0 ? 1 : 0;
 }
 
 // Uncommitted Changes Gate tests (must run after the section is added)
@@ -375,6 +380,7 @@ function testUncommittedGateExists() {
   if (!phase2BuildContent.includes('Uncommitted Changes Gate')) {
     throw new Error('phase-2-build.md must contain "Uncommitted Changes Gate" section');
   }
+  console.log('  ✓ Uncommitted Changes Gate section exists');
 }
 
 function testUncommittedGateEscapeValve() {
@@ -382,6 +388,7 @@ function testUncommittedGateEscapeValve() {
   if (!phase2BuildContent.includes('SKIP_UNCOMMITTED_GATE')) {
     throw new Error('Uncommitted Changes Gate must provide SKIP_UNCOMMITTED_GATE escape valve');
   }
+  console.log('  ✓ Uncommitted gate has SKIP_UNCOMMITTED_GATE escape valve');
 }
 
 function testUncommittedGateLogPath() {
@@ -389,6 +396,49 @@ function testUncommittedGateLogPath() {
   if (!phase2BuildContent.includes('.sprint-state/uncommitted-gate-log.json')) {
     throw new Error('Uncommitted Changes Gate must log to .sprint-state/uncommitted-gate-log.json');
   }
+  console.log('  ✓ Uncommitted gate logs to .sprint-state/uncommitted-gate-log.json');
 }
 
-runTests();
+// When run directly (node script.js), call with exitOnFail for CLI behavior.
+if (require.main === module) {
+  const exitCode = runTests({ exitOnFail: true });
+  process.exit(exitCode);
+}
+
+// Vitest discovery — wrap each test function as a vitest it() block
+describe('sprint-flow SKILL.md', () => {
+  beforeAll(() => { loadSkillMd(); });
+
+  const tests = [
+    { name: 'Positive triggers are present', fn: testPositiveTriggersArePresent },
+    { name: 'Negative triggers have >= 8 entries', fn: testNegativeTriggersArePresent },
+    { name: 'Negative trigger phrases verified', fn: testNegativeTriggerPhrases },
+    { name: 'Positive trigger phrases verified', fn: testPositiveTriggerPhrases },
+    { name: 'Negative test cases exist (>= 11)', fn: testNegativeTestCasesExist },
+    { name: 'workflow_steps order matches canonical', fn: testWorkflowStepsOrder },
+    { name: 'Phase Flow diagram has correct ordering', fn: testPhaseFlowDiagramOrder },
+    { name: 'Phase Flow Consistency section exists', fn: testPhaseFlowConsistencySectionExists },
+    { name: 'Canonical Phase Order table exists', fn: testCanonicalPhaseOrderTableExists },
+    { name: 'All 11 phases in consistency section', fn: testAll11PhasesInPhaseFlowConsistency },
+    { name: 'force-levels.md exists with three levels', fn: testForceLevelsDocumentExists },
+    { name: 'force-levels.md requires Delphi review', fn: testForceLevelsRequiresDelphi },
+    { name: 'Unique Value Proposition exists', fn: testUniqueValuePropositionExists },
+    { name: 'UVP mentions 40-67% token savings', fn: testUvpMentionsTokenSavings },
+    { name: 'UVP mentions HARD-GATE', fn: testUvpMentionsHardGate },
+    { name: 'UVP mentions emergent requirements', fn: testUvpMentionsEmergentRequirements },
+    { name: 'Timing & Stability section exists', fn: testTimingSectionExists },
+    { name: 'Timeout recommendations exist', fn: testTimeoutRecommendationsExist },
+    { name: 'Execution time estimates exist', fn: testExecutionTimeEstimatesExist },
+    { name: 'orchestration-rules.md exists', fn: testOrchestrationRulesExists },
+    { name: 'Orchestration covers all key phases', fn: testPhaseSubagentMatrixOrder },
+    { name: 'Uncommitted Changes Gate section exists', fn: testUncommittedGateExists },
+    { name: 'Uncommitted gate has escape valve', fn: testUncommittedGateEscapeValve },
+    { name: 'Uncommitted gate has log path', fn: testUncommittedGateLogPath },
+  ];
+
+  for (const { name, fn } of tests) {
+    it(name, () => { fn(); });
+  }
+});
+
+module.exports = { runTests };
