@@ -293,7 +293,8 @@ jobs:
           if [[ "$PROJECT_LANGUAGE" == "typescript" && -d "node_modules/.bin" ]] || [[ -f "package.json" ]]; then
             if command -v npx >/dev/null 2>&1; then
               echo "Running jscpd for duplicate code detection..."
-              npx jscpd --reporters consoleFull $(find . \( -name "*.ts" -o -name "*.tsx" -o -name "*.js" -o -name "*.jsx" \) -not -path "./node_modules/*" -not -path "./dist/*" | head -100)
+              JSCPD_FILES=$(find . \( -name "*.ts" -o -name "*.tsx" -o -name "*.js" -o -name "*.jsx" \) -not -path "*/node_modules/*" -not -path "*/dist/*" -not -path "./plugins/*" -not -path "./src/npm-package/*" | tr '\n' ' ')
+              npx jscpd --reporters consoleFull $JSCPD_FILES
               JSCPD_STATUS=$?
               if [[ $JSCPD_STATUS -ne 0 ]]; then
                 echo "ℹ️ jscpd found potential code duplications (warning level, non-blocking by default)"
