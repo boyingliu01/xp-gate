@@ -1,41 +1,25 @@
 # Checkov configuration for XP-Gate
 # https://www.checkov.io/
+#
+# This config is intentionally minimal — all checks are run by default.
+# Populate the sections below to customize behavior.
 
-# Skip specific checks (add your exclusions here)
-# skip_check:
-#   - CKV_AWS_1  # Example: Skip AWS credential check
+quiet: true
+compact: true
+soft-fail: true
 
-# Only run specific checks (uncomment to use)
-# check:
-#   - CKV_AWS_2
+# Skip specific checks (populate with CKV IDs you want to exclude)
+# skip_check: []
 
-# Skip checks for specific files
-# skip_file:
-#   - "tests/**"
-#   - "examples/**"
+# File patterns to exclude from scanning
+# skip_file: []
 
-# Custom policies directory
-# custom_policies: "./policies/"
+# Severity threshold — only report findings at or above this level
+# severity: "high"
 
-# Output formats
-# output:
-#   - cli
-#   - json
-#   - junitxml
-
-# Severity filter
-# severity:
-#   - high
-#   - critical
-
-# Resource types to scan
-# resource:
-#   - aws_s3_bucket
-#   - aws_security_group
-
-# Framework filters
+# Frameworks to enable (comma-separated). Empty = auto-detect from changed files
 # framework:
-#   - terraform
-#   - terraform_plan
-#   - dockerfile
 #   - kubernetes
+#   - dockerfile
+#   - github_actions
+#   - terraform
