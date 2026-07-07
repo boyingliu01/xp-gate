@@ -279,11 +279,73 @@ function printCliToolStatus() {
   console.log(`CLI tools: ${available.length}/${GATE_CLI_TOOLS.length} available`);
   if (missing.length > 0) {
     console.log(`  Missing: ${missing.join(', ')}`);
-    console.log('  Quality gates using these tools will silently SKIP until they are installed.');
-    console.log(`  Run 'xp-gate bootstrap' to install all missing tools, or 'xp-gate doctor' for details.\n`);
+    console.log('  Quality gates using these tools will silently SKIP until they are installed.\n');
   } else {
     console.log('');
   }
+}
+
+/**
+ * Ask the user for confirmation via stdin.
+ * @param {string} question - The yes/no question to display
+ * @returns {Promise<boolean>} true if user answered yes
+ */
+function askYesNo(question) {
+  return new Promise((resolve) => {
+    const rl = require('readline').createInterface({
+      input: process.stdin,
+      output: process.stdout,
+    });
+    rl.question(`${question} (Y/n) `, (answer) => {
+      rl.close();
+      const normalized = answer.trim().toLowerCase();
+      // Empty (just Enter) or y/yes → yes; anything else → no
+      resolve(normalized === '' || normalized === 'y' || normalized === 'yes');
+    });
+  });
+}
+
+/**
+ * Prompt the user to auto-install missing CLI quality-gate tools.
+ * Called after installation completes. Interactive only when TTY is available.
+ * Skips silently when no tools are missing.
+ *
+ * @param {boolean} autoYes - If true, skip prompt and auto-install
+ * @returns {Promise<number>} 0 on success or skipped, 1 on failure
+ */
+async function promptBootstrap(autoYes) {
+  const { bootstrap } = require('./bootstrap.js');
+
+  // Check what's missing without printing a full header
+  const missing = [];
+  for (const entry of GATE_CLI_TOOLS) {
+    const result = checkCliTool(entry.tool);
+    if (!result.available) {
+      missing.push(entry.tool);
+    }
+  }
+
+  if (missing.length === 0) return 0;
+
+  console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
+  console.log('  Quality Gate CLI Tools');
+  console.log('');
+  console.log(`  ${missing.length} tool(s) required by quality gates are not installed:`);
+  for (const tool of missing) {
+    console.log(`    ✗ ${tool}`);
+  }
+  console.log('');
+  console.log('  Without these tools, the corresponding quality gates will');
+  console.log('  silently SKIP during git commits — you may miss issues.');
+  console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
+
+  if (autoYes || (process.stdin.isTTY && await askYesNo('\nInstall missing tools now?'))) {
+    console.log('');
+    return bootstrap([]);
+  }
+
+  console.log('\n  Skipped. Run "xp-gate bootstrap" later to install them.');
+  return 0;
 }
 
 async function init(args) {
@@ -384,7 +446,10 @@ async function installLocal(args) {
 
   console.log('\nInstallation complete!');
   console.log('Run git commit to trigger quality gates');
-  console.log('');
+
+  // Auto-install missing CLI tools (prompt user)
+  const autoYes = args.includes('--yes') || args.includes('--auto-install');
+  await promptBootstrap(autoYes);
   console.log('━━━ FIRST-CLASS TEST QUALITY ━━━');
   console.log('XP-Gate treats test code as a first-class citizen:');
   console.log('  • TypeScript: test files are type-checked, not excluded from tsconfig.json');
@@ -455,6 +520,11 @@ async function setupGlobal(args) {
   console.log('\nGlobal setup complete!');
   console.log('All git repositories will now use xp-gate quality gates.');
   console.log('Per-project adapters can still override by creating <repo>/githooks/');
+
+  // Auto-install missing CLI tools (prompt user)
+  const autoYes = args.includes('--yes') || args.includes('--auto-install');
+  await promptBootstrap(autoYes);
+
   console.log('');
   console.log('━━━ FIRST-CLASS TEST QUALITY ━━━');
   console.log('XP-Gate treats test code as a first-class citizen:');
@@ -556,4 +626,4 @@ function injectKarpathyPrinciples(projectRoot) {
   }
 }
 
-module.exports = { init };
+module.exports = { init, promptBootstrap };
