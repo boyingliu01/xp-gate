@@ -20,8 +20,12 @@ detect_iac_files() {
         tf_files="$tf_files $file"
         ;;
       *.yaml|*.yml)
+        # Check if it's inside .github/workflows/ (GitHub Actions)
+        if echo "$file" | grep -q "\.github/workflows/"; then
+          # Pass directly to checkov as a GitHub Actions file
+          yaml_files="$yaml_files $file"
         # Check if it's a K8s manifest (has apiVersion and kind)
-        if grep -qE "^(apiVersion|kind):" "$file" 2>/dev/null; then
+        elif grep -qE "^(apiVersion|kind):" "$file" 2>/dev/null; then
           yaml_files="$yaml_files $file"
         fi
         ;;
@@ -59,52 +63,75 @@ run_static_analysis() {
   # Try checkov first (recommended - supports multiple platforms)
   if command -v checkov >/dev/null 2>&1; then
     echo "Running checkov IaC security scan..."
-    
+
+    # checkov 3.x always exits 0 even on failures. We capture output to a
+    # temp file and parse it for "FAILED for resource" lines instead.
+    local checkov_log=$(mktemp)
+    local checkov_args="--compact"
+
     # Run checkov on all detected IaC files
     local tf_files=$(echo "$iac_files" | grep "TERRAFORM:" | sed 's/TERRAFORM://')
     local k8s_files=$(echo "$iac_files" | grep "KUBERNETES:" | sed 's/KUBERNETES://')
     local docker_files=$(echo "$iac_files" | grep "DOCKER:" | sed 's/DOCKER://')
-    
+
     if [ -n "$tf_files" ]; then
       echo "Scanning Terraform files..."
       for file in $tf_files; do
         if [ -f "$file" ]; then
-          checkov --file "$file" --compact 2>&1 | tail -20
-          local tf_exit=${PIPESTATUS[0]}
-          if [ $tf_exit -ne 0 ]; then
-            exit_code=$tf_exit
-          fi
+          checkov --file "$file" $checkov_args >> "$checkov_log" 2>&1
         fi
       done
     fi
-    
+
     if [ -n "$k8s_files" ]; then
-      echo "Scanning Kubernetes manifests..."
+      local gh_files=""
+      local k8s_only=""
       for file in $k8s_files; do
-        if [ -f "$file" ]; then
-          checkov --file "$file" --compact 2>&1 | tail -20
-          local k8s_exit=${PIPESTATUS[0]}
-          if [ $k8s_exit -ne 0 ]; then
-            exit_code=$k8s_exit
-          fi
+        if echo "$file" | grep -q "\.github/workflows/"; then
+          gh_files="$gh_files $file"
+        else
+          k8s_only="$k8s_only $file"
         fi
       done
+
+      if [ -n "$k8s_only" ]; then
+        echo "Scanning Kubernetes manifests..."
+        for file in $k8s_only; do
+          if [ -f "$file" ]; then
+            checkov --file "$file" $checkov_args --framework kubernetes >> "$checkov_log" 2>&1
+          fi
+        done
+      fi
+
+      if [ -n "$gh_files" ]; then
+        echo "Scanning GitHub Actions workflows..."
+        for file in $gh_files; do
+          if [ -f "$file" ]; then
+            checkov --file "$file" $checkov_args --framework github_actions >> "$checkov_log" 2>&1
+          fi
+        done
+      fi
     fi
-    
+
     if [ -n "$docker_files" ]; then
       echo "Scanning Dockerfiles..."
       for file in $docker_files; do
         if [ -f "$file" ]; then
-          checkov --file "$file" --compact 2>&1 | tail -20
-          local docker_exit=${PIPESTATUS[0]}
-          if [ $docker_exit -ne 0 ]; then
-            exit_code=$docker_exit
-          fi
+          checkov --file "$file" $checkov_args >> "$checkov_log" 2>&1
         fi
       done
     fi
-    
-    echo "checkov scan completed with exit code: $exit_code"
+
+    # Print captured output then check for failures
+    cat "$checkov_log"
+    local failed_count=$(grep -c "FAILED for resource" "$checkov_log" 2>/dev/null || echo 0)
+    rm -f "$checkov_log"
+
+    if [ "$failed_count" -gt 0 ]; then
+      echo "❌ $failed_count security issue(s) found by checkov. Blocking commit."
+      exit_code=1
+    fi
+    echo "checkov scan completed."
     return $exit_code
   fi
   
