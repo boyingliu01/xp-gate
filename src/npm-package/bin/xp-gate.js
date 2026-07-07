@@ -30,7 +30,7 @@ const COMMANDS = {
   'init': {
     description: 'Initialize xp-gate (use --global for all projects)',
     run: subargs => init(subargs).then(code => process.exit(code)),
-    usage: 'xp-gate init [--global]'
+    usage: 'xp-gate init [--global] [--yes]'
   },
   'setup-global': {
     description: 'Set up xp-gate globally for all git projects',
@@ -125,7 +125,7 @@ const COMMANDS = {
     usage: 'xp-gate upgrade [--preview] [--apply]'
   },
   'bootstrap': {
-    description: 'Install CLI tools required by quality gates (jscpd, lizard, checkov, gitleaks, semgrep)',
+    description: 'Install CLI tools required by quality gates. Also invoked by "xp-gate init --yes"',
     run: subargs => process.exit(bootstrap(subargs)),
     usage: 'xp-gate bootstrap [--dry-run] [--verbose]'
   },
