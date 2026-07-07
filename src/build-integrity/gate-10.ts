@@ -212,61 +212,37 @@ function isRelativeImport(importPath: string): boolean {
  * Checks extensions in order: .ts, .tsx, .js, .jsx, .mjs, .cjs, /index.ts, /index.js
  * Also handles explicit .js extension resolving to .ts (TypeScript convention).
  */
-export function resolveImportPath(importPath: string, fromFile: string): string | null {
-  if (!isRelativeImport(importPath)) {
-    return null;
+function tryAccess(filePath: string): boolean {
+  try {
+    fsNative.accessSync(filePath);
+    return true;
+  } catch {
+    return false;
   }
+}
+
+export function resolveImportPath(importPath: string, fromFile: string): string | null {
+  if (!isRelativeImport(importPath)) return null;
 
   const fromDir = path.dirname(fromFile);
   const resolved = path.resolve(fromDir, importPath);
 
-  const extensions = ['.ts', '.tsx', '.js', '.jsx', '.mjs', '.cjs'];
-  const indexExtensions = ['/index.ts', '/index.js'];
-
   const ext = path.extname(importPath);
   if (ext) {
-    try {
-      fsNative.accessSync(resolved);
-      return resolved;
-    } catch {
-      if (ext === '.js') {
-        const tsPath = resolved.slice(0, -3) + '.ts';
-        try {
-          fsNative.accessSync(tsPath);
-          return tsPath;
-        } catch {
-          // fall through
-        }
-        const tsxPath = resolved.slice(0, -3) + '.tsx';
-        try {
-          fsNative.accessSync(tsxPath);
-          return tsxPath;
-        } catch {
-          // fall through
-        }
-      }
-      return null;
+    if (tryAccess(resolved)) return resolved;
+    if (ext === '.js') {
+      if (tryAccess(resolved.slice(0, -3) + '.ts')) return resolved.slice(0, -3) + '.ts';
+      if (tryAccess(resolved.slice(0, -3) + '.tsx')) return resolved.slice(0, -3) + '.tsx';
     }
+    return null;
   }
 
-  for (const tryExt of extensions) {
-    const candidate = resolved + tryExt;
-    try {
-      fsNative.accessSync(candidate);
-      return candidate;
-    } catch {
-      // continue
-    }
+  for (const tryExt of ['.ts', '.tsx', '.js', '.jsx', '.mjs', '.cjs']) {
+    if (tryAccess(resolved + tryExt)) return resolved + tryExt;
   }
 
-  for (const indexExt of indexExtensions) {
-    const candidate = resolved + indexExt;
-    try {
-      fsNative.accessSync(candidate);
-      return candidate;
-    } catch {
-      // continue
-    }
+  for (const idx of ['/index.ts', '/index.js']) {
+    if (tryAccess(resolved + idx)) return resolved + idx;
   }
 
   return null;
@@ -469,6 +445,32 @@ export async function runPackCheck(
  * - SKIP (exitCode 0, status 'skip') when all checks return 'skip' (or no
  *   applicable checks found).
  */
+function resolveGate10Status(
+  tsc: CheckResult,
+  pack: CheckResult,
+  imp: ImportCheckResult
+): { status: Gate10Status; exitCode: number } {
+  const anyFail = tsc.status === 'fail' || pack.status === 'fail' || imp.status === 'fail';
+  if (anyFail) return { status: 'block', exitCode: 1 };
+
+  const anyPass = tsc.status === 'pass' || pack.status === 'pass' || imp.status === 'pass';
+  if (!anyPass) return { status: 'skip', exitCode: 0 };
+
+  return { status: 'pass', exitCode: 0 };
+}
+
+function collectErrors(
+  tsc: CheckResult,
+  pack: CheckResult,
+  imp: ImportCheckResult
+): string[] {
+  const errors: string[] = [];
+  if (tsc.status === 'fail') errors.push(`tsc: ${tsc.message}`);
+  if (pack.status === 'fail') errors.push(`pack: ${pack.message}`);
+  if (imp.status === 'fail') errors.push(`imports: ${imp.message}`);
+  return errors;
+}
+
 export async function runGate10(options: Gate10Options): Promise<Gate10Result> {
   const { changedFiles, projectRoot, timeoutMs } = options;
 
@@ -478,52 +480,8 @@ export async function runGate10(options: Gate10Options): Promise<Gate10Result> {
     runImportCheck(changedFiles, projectRoot, timeoutMs),
   ]);
 
-  const errors: string[] = [];
-  const warnings: string[] = [];
-
-  if (tscResult.status === 'fail') {
-    errors.push(`tsc: ${tscResult.message}`);
-  }
-  if (packResult.status === 'fail') {
-    errors.push(`pack: ${packResult.message}`);
-  }
-  if (importResult.status === 'fail') {
-    errors.push(`imports: ${importResult.message}`);
-  }
-
-  const anyFail =
-    tscResult.status === 'fail' ||
-    packResult.status === 'fail' ||
-    importResult.status === 'fail';
-
-  const allSkip =
-    tscResult.status === 'skip' &&
-    packResult.status === 'skip' &&
-    importResult.status === 'skip';
-
-  const allSkipOrPass =
-    (tscResult.status === 'skip' || tscResult.status === 'pass') &&
-    (packResult.status === 'skip' || packResult.status === 'pass') &&
-    (importResult.status === 'skip' || importResult.status === 'pass');
-
-  const anyPass =
-    tscResult.status === 'pass' ||
-    packResult.status === 'pass' ||
-    importResult.status === 'pass';
-
-  let status: Gate10Status;
-  let exitCode: number;
-
-  if (anyFail) {
-    status = 'block';
-    exitCode = 1;
-  } else if (allSkip || (allSkipOrPass && !anyPass)) {
-    status = 'skip';
-    exitCode = 0;
-  } else {
-    status = 'pass';
-    exitCode = 0;
-  }
+  const { status, exitCode } = resolveGate10Status(tscResult, packResult, importResult);
+  const errors = collectErrors(tscResult, packResult, importResult);
 
   return {
     exitCode,
@@ -533,50 +491,35 @@ export async function runGate10(options: Gate10Options): Promise<Gate10Result> {
       pack: packResult,
       imports: importResult,
     },
-    warnings,
+    warnings: [],
     errors,
   };
 }
 
-// ─── CLI Entry Point ───────────────────────────────────────────────────────────
+// ─── CLI Argument Parsing ──────────────────────────────────────────────────────
+
+export interface Gate10Args {
+  changedFiles: string[];
+  projectRoot: string;
+  timeoutMs: number;
+  help: boolean;
+}
 
 /**
- * Parses CLI arguments and runs Gate 10.
+ * Parses CLI arguments for Gate 10.
  *
- * Usage:
- *   npx tsx src/build-integrity/gate-10.ts --changed-files "file1.ts,file2.ts"
- *
- * Options:
- *   --changed-files <files>  Comma-separated list of changed file paths
- *   --project-root <path>    Project root (defaults to cwd)
- *   --timeout <ms>           Timeout per check in ms (defaults to 60000)
- *   --help                   Show usage information
- *
- * @returns exit code: 0 = pass/skip, 1 = block
+ * @returns Parsed args object with changedFiles, projectRoot, timeoutMs, and help flag
  */
-export async function main(args: string[]): Promise<number> {
+export function parseGate10Args(args: string[]): Gate10Args {
   let changedFilesStr = '';
   let projectRoot = process.cwd();
   let timeoutMs = 60000;
+  let help = false;
 
   for (let i = 0; i < args.length; i++) {
     const arg = args[i];
     if (arg === '--help' || arg === '-h') {
-      console.log(`Gate 10: Build Integrity Check
-
-Usage:
-  npx tsx src/build-integrity/gate-10.ts --changed-files <files> [options]
-
-Options:
-  --changed-files <files>  Comma-separated list of changed file paths
-  --project-root <path>    Project root (defaults to cwd)
-  --timeout <ms>           Timeout per check in ms (defaults to 60000)
-  --help, -h               Show this help message
-
-Exit codes:
-  0  Pass or skip (all checks passed or were skipped)
-  1  Block (one or more checks failed)`);
-      return 0;
+      help = true;
     } else if (arg === '--changed-files') {
       changedFilesStr = args[++i] || '';
     } else if (arg === '--project-root') {
@@ -590,12 +533,29 @@ Exit codes:
     ? changedFilesStr.split(',').map((f) => f.trim()).filter(Boolean)
     : [];
 
-  const result = await runGate10({
-    changedFiles,
-    projectRoot,
-    timeoutMs,
-  });
+  return { changedFiles, projectRoot, timeoutMs, help };
+}
 
+// ─── CLI Result Formatting ─────────────────────────────────────────────────────
+
+function printHelp(): void {
+  console.log(`Gate 10: Build Integrity Check
+
+Usage:
+  npx tsx src/build-integrity/gate-10.ts --changed-files <files> [options]
+
+Options:
+  --changed-files <files>  Comma-separated list of changed file paths
+  --project-root <path>    Project root (defaults to cwd)
+  --timeout <ms>           Timeout per check in ms (defaults to 60000)
+  --help, -h               Show this help message
+
+Exit codes:
+  0  Pass or skip (all checks passed or were skipped)
+  1  Block (one or more checks failed)`);
+}
+
+function printGate10Result(result: Gate10Result): void {
   console.log('');
   console.log('Gate 10: Build Integrity Check');
   console.log('─'.repeat(50));
@@ -628,6 +588,34 @@ Exit codes:
   }
 
   console.log('');
+}
+
+// ─── CLI Entry Point ───────────────────────────────────────────────────────────
+
+/**
+ * Parses CLI arguments and runs Gate 10.
+ *
+ * Usage:
+ *   npx tsx src/build-integrity/gate-10.ts --changed-files "file1.ts,file2.ts"
+ *
+ * @returns exit code: 0 = pass/skip, 1 = block
+ */
+export async function main(args: string[]): Promise<number> {
+  const parsed = parseGate10Args(args);
+
+  if (parsed.help) {
+    printHelp();
+    return 0;
+  }
+
+  const result = await runGate10({
+    changedFiles: parsed.changedFiles,
+    projectRoot: parsed.projectRoot,
+    timeoutMs: parsed.timeoutMs,
+  });
+
+  printGate10Result(result);
+
   return result.exitCode;
 }
 

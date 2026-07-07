@@ -97,8 +97,11 @@ run_lint() {
     return $?
   fi
 
-  echo "ℹ️  No linter config found (biome.json or eslint config). Skipping lint."
-  return 0
+  echo "❌ BLOCKED - No linter configuration found for TypeScript project."
+  echo "   TypeScript projects require a linter: either Biome (biome.json/biome.jsonc)"
+  echo "   or ESLint (.eslintrc.json/.eslintrc.js/eslint.config.js)."
+  echo "   Create one of these configuration files to enable linting."
+  return 1
 }
 
 run_tests() {
