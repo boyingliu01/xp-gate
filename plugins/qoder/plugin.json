@@ -1,6 +1,6 @@
 {
   "name": "xp-gate",
-  "version": "0.12.12",
+  "version": "0.12.13",
   "displayName": "XP-Gate",
   "description": "Extreme Programming quality gates + AI workflow skills for Qoder. Includes 10 quality gates (Gate 0-9), Sprint Flow (11 phases), and Delphi multi-expert review (>=90% consensus).",
   "author": {
