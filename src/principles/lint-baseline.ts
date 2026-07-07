@@ -290,58 +290,47 @@ export interface LintDeltaResult {
  * Compare current lint state against a baseline entry for a single file.
  * Used by the pre-commit hook to determine if new lint errors were introduced.
  */
+function countErrors(entry: BaselineEntry): number {
+  return (entry.eslint?.errors || 0) +
+    (entry.ruff?.errors || 0) +
+    (entry.golangci?.errors || 0) +
+    (entry.shellcheck?.errors || 0);
+}
+
+function deltaPass(reduction: number, message: string): LintDeltaResult {
+  return { enforcement: 'PASS', newWarnings: 0, newErrors: 0, reduction, message };
+}
+
+function deltaBlock(warnings: number, errors: number, message: string): LintDeltaResult {
+  return { enforcement: 'BLOCK', newWarnings: warnings, newErrors: errors, reduction: 0, message };
+}
+
 export function computeLintDelta(
   baseline: BaselineEntry | null,
   current: BaselineEntry,
 ): LintDeltaResult {
   if (!baseline) {
-    return {
-      enforcement: 'PASS',
-      newWarnings: 0,
-      newErrors: 0,
-      reduction: 0,
-      message: 'New file — baseline created. No comparison needed.',
-    };
+    return deltaPass(0, 'New file — baseline created. No comparison needed.');
   }
 
   const oldW = baseline.totalWarnings;
-  const oldE = (baseline.eslint?.errors || 0) +
-    (baseline.ruff?.errors || 0) +
-    (baseline.golangci?.errors || 0) +
-    (baseline.shellcheck?.errors || 0);
+  const oldE = countErrors(baseline);
   const newW = current.totalWarnings;
-  const newE = (current.eslint?.errors || 0) +
-    (current.ruff?.errors || 0) +
-    (current.golangci?.errors || 0) +
-    (current.shellcheck?.errors || 0);
+  const newE = countErrors(current);
 
   if (newW > oldW) {
-    return {
-      enforcement: 'BLOCK',
-      newWarnings: newW - oldW,
-      newErrors: newE > oldE ? newE - oldE : 0,
-      reduction: 0,
-      message: `Lint debt increased by ${newW - oldW} warnings (${oldW} → ${newW}). Fix new errors before committing.`,
-    };
+    const delta = newW - oldW;
+    return deltaBlock(delta, newE > oldE ? newE - oldE : 0,
+      `Lint debt increased by ${delta} warnings (${oldW} → ${newW}). Fix new errors before committing.`);
   }
 
   if (newW < oldW) {
-    return {
-      enforcement: 'PASS',
-      newWarnings: 0,
-      newErrors: 0,
-      reduction: oldW - newW,
-      message: `Lint debt reduced by ${oldW - newW} warnings (${oldW} → ${newW}). Good job!`,
-    };
+    const delta = oldW - newW;
+    return deltaPass(delta,
+      `Lint debt reduced by ${delta} warnings (${oldW} → ${newW}). Good job!`);
   }
 
-  return {
-    enforcement: 'PASS',
-    newWarnings: 0,
-    newErrors: 0,
-    reduction: 0,
-    message: 'No change in lint debt.',
-  };
+  return deltaPass(0, 'No change in lint debt.');
 }
 
 // ── Formatting ────────────────────────────────────────────
@@ -370,16 +359,22 @@ export function formatBaselineSummary(baseline: Record<string, BaselineEntry>): 
     if (entry.shellcheck) shellcheckFiles++;
   }
 
+  const toolLines = [
+    [eslintFiles, 'ESLint'],
+    [ruffFiles, 'Ruff'],
+    [golangciFiles, 'golangci-lint'],
+    [shellcheckFiles, 'ShellCheck'],
+  ] as const;
+
   const lines: string[] = [
     `Lint Baseline Summary:`,
     `  Files tracked: ${files.length}`,
     `  Total warnings: ${totalWarnings}`,
   ];
 
-  if (eslintFiles > 0) lines.push(`  ESLint: ${eslintFiles} files`);
-  if (ruffFiles > 0) lines.push(`  Ruff: ${ruffFiles} files`);
-  if (golangciFiles > 0) lines.push(`  golangci-lint: ${golangciFiles} files`);
-  if (shellcheckFiles > 0) lines.push(`  ShellCheck: ${shellcheckFiles} files`);
+  for (const [count, name] of toolLines) {
+    if (count > 0) lines.push(`  ${name}: ${count} files`);
+  }
 
   return lines.join('\n');
 }

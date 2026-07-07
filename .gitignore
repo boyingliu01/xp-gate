@@ -114,3 +114,4 @@ src/npm-package/plugins/opencode/node_modules/
 .ui-gate-result.json
 .code-walkthrough-result.json
 architecture-report.sarif.json
+undefined/

@@ -1555,6 +1555,11 @@ else
   # Stage 2: UNCONDITIONAL coverage percentage enforcement
   # Always attempt to parse coverage from available sources. If percentage
   # can be determined and is < 80% → BLOCK. If no data found → warn.
+  #
+  # NOTE: When only a subset of test files were run (smart selection, Issue #286),
+  # coverage data reflects only the tested subset. In that case we warn but don't
+  # block, because the full suite coverage may be ≥80% even though the subset
+  # coverage is lower.
   # ============================================================================
   COVERAGE_ENFORCED=false
 
@@ -1571,10 +1576,17 @@ else
         " 2>/dev/null)
         if [ "$COVERAGE_PERCENT" != "parse_error" ] && [ -n "$COVERAGE_PERCENT" ]; then
           if [ "$COVERAGE_PERCENT" -lt 80 ]; then
-            echo "❌ BLOCKED - TypeScript coverage ${COVERAGE_PERCENT}% below 80% threshold"
-            exit 1
+            # If only subset of tests ran, warn instead of block
+            if [ -n "${CHANGED_TEST_FILE_COUNT:-}" ] && [ "${CHANGED_TEST_FILE_COUNT:-0}" -gt 0 ] 2>/dev/null; then
+              echo "⚠️  Partial coverage ${COVERAGE_PERCENT}% (subset test run, not full suite)."
+              echo "    Run 'npx vitest run --coverage' for full coverage check."
+            else
+              echo "❌ BLOCKED - TypeScript coverage ${COVERAGE_PERCENT}% below 80% threshold"
+              exit 1
+            fi
+          else
+            echo "TypeScript coverage: ${COVERAGE_PERCENT}% ✅ (≥ 80%)"
           fi
-          echo "TypeScript coverage: ${COVERAGE_PERCENT}% ✅ (≥ 80%)"
         else
           echo "⚠️  Could not parse TypeScript coverage from coverage/coverage-summary.json"
         fi

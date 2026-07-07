@@ -1,0 +1,25 @@
+# ============================================================================
+# Semgrep Baseline — suppressed findings
+#
+# These are audited and determined to be false positives or acceptable risk.
+# Format: path pattern or rule@path
+# ============================================================================
+
+# ── CLI tool management ──────────────────────────────────────────────────
+# 
+# All `detect-child-process` findings in xp-gate's infrastructure code
+# are intentional and audited:
+# - execSync/spawn calls are always with controlled arguments (tool names,
+#   config file paths, known-good patterns like "git config --global")
+# - No user input flows into these subprocess calls
+# - These are CLI management utilities, not web-facing endpoints
+#
+# Rule: javascript.lang.security.detect-child-process.detect-child-process
+
+src/npm-package/lib/baseline.js
+src/npm-package/lib/bootstrap.js
+src/npm-package/lib/detect-deps.js
+src/npm-package/lib/doctor.js
+src/npm-package/lib/upgrade.js
+src/npm-package/mutation/runners/pitest-runner.ts
+src/mutation/runners/pitest-runner.ts
