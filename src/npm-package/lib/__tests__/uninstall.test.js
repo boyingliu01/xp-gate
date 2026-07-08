@@ -623,4 +623,57 @@ describe('uninstall', () => {
     // After successful uninstall, backup should be cleaned up
     expect(fs.existsSync(backupDir())).toBe(false);
   });
+
+  it('--purge in global mode removes ~/.xp-gate/ and ~/.config/xp-gate/ config dir', async () => {
+    setupGlobalInstall();
+    const expectedHooksPath = globalHooksDir();
+
+    const xpGateDir = path.join(tmpHome, '.xp-gate');
+    fs.mkdirSync(path.join(xpGateDir, 'reports', 'pre-commit'), { recursive: true });
+    fs.writeFileSync(path.join(xpGateDir, 'reports', 'pre-commit', 'test.json'), '{}');
+
+    mockExecGlobalHooksPath(expectedHooksPath);
+    const { uninstall } = require('../uninstall');
+
+    const result = await uninstall(['--purge']);
+
+    expect(result).toBe(0);
+    expect(fs.existsSync(xpGateDir)).toBe(false);
+    expect(fs.existsSync(path.join(tmpHome, '.config', 'xp-gate'))).toBe(false);
+  });
+
+  it('--purge in local mode removes project and global .xp-gate/ dirs', async () => {
+    setupLocalInstall();
+
+    const projectXpGate = path.join(tmpProject, '.xp-gate');
+    fs.mkdirSync(path.join(projectXpGate, 'quality-status'), { recursive: true });
+    fs.writeFileSync(path.join(projectXpGate, 'quality-status', 'main.json'), '{}');
+
+    const globalXpGate = path.join(tmpHome, '.xp-gate');
+    fs.mkdirSync(path.join(globalXpGate, 'reports', 'pre-commit'), { recursive: true });
+    fs.writeFileSync(path.join(globalXpGate, 'reports', 'pre-commit', 'test.json'), '{}');
+
+    mockExecSuccess();
+    const { uninstall } = require('../uninstall');
+
+    const result = await uninstall(['--purge']);
+
+    expect(result).toBe(0);
+    expect(fs.existsSync(projectXpGate)).toBe(false);
+    expect(fs.existsSync(globalXpGate)).toBe(false);
+    expect(fs.existsSync(path.join(tmpHome, '.config', 'xp-gate'))).toBe(false);
+  });
+
+  it('--purge --dry-run prints purge plan without deleting', async () => {
+    setupGlobalInstall();
+    mockExecGlobalHooksPath(globalHooksDir());
+    const { uninstall } = require('../uninstall');
+
+    const result = await uninstall(['--purge', '--dry-run']);
+
+    expect(result).toBe(0);
+    expect(fs.existsSync(globalHooksDir())).toBe(true);
+    expect(fs.existsSync(globalAdaptersDir())).toBe(true);
+    expect(logSpy).toHaveBeenCalledWith(expect.stringContaining('Purge'));
+  });
 });

@@ -1,5 +1,6 @@
 const fs = require('fs');
 const path = require('path');
+const os = require('os');
 const crypto = require('crypto');
 const {
   HOME_DIR,
@@ -331,7 +332,8 @@ async function uninstall(args) {
     dryRun: args.includes('--dry-run'),
     force: args.includes('--force'),
     forceLocal: args.includes('--local'),
-    forceGlobal: args.includes('--global')
+    forceGlobal: args.includes('--global'),
+    purge: args.includes('--purge'),
   };
 
   // §4.3 Step 1: Read config
@@ -362,7 +364,24 @@ async function uninstall(args) {
   // §4.3 Step 3: Build uninstall plan
   const plan = buildPlan(mode);
 
-  if (plan.length === 0) {
+  // §4.3 Step 3b: Add purge items if --purge
+  const purgeDirs = [];
+  if (options.purge) {
+    const homeDir = process.env.HOME || os.homedir();
+    const configDir = path.join(homeDir, '.config', 'xp-gate');
+    const xpGateDir = path.join(homeDir, '.xp-gate');
+    purgeDirs.push({ label: '~/.xp-gate/', path: xpGateDir });
+    purgeDirs.push({ label: '~/.config/xp-gate/', path: configDir });
+    if (mode === 'local') {
+      const gitDir = getGitDir();
+      if (gitDir) {
+        const projectXpGate = path.join(path.dirname(gitDir), '.xp-gate');
+        purgeDirs.push({ label: '.xp-gate/ (project)', path: projectXpGate });
+      }
+    }
+  }
+
+  if (plan.length === 0 && purgeDirs.length === 0) {
     console.log('Nothing to uninstall');
     // Still update config to uninstalled
     saveConfig({ ...config, mode: 'uninstalled', uninstalled: new Date().toISOString() });
@@ -376,6 +395,12 @@ async function uninstall(args) {
 
   for (const item of plan) {
     console.log(`  • ${item.label}`);
+  }
+  if (options.purge) {
+    console.log('\nPurge mode — additional cleanup:');
+    for (const d of purgeDirs) {
+      console.log(`  • ${d.label}`);
+    }
   }
 
   // §4.3 Step 5: Dry-run → exit
@@ -406,14 +431,36 @@ async function uninstall(args) {
     }
   }
 
+  if (options.purge) {
+    for (const d of purgeDirs) {
+      if (options.dryRun) {
+        console.log(`  • ${d.label}`);
+        continue;
+      }
+      if (!fs.existsSync(d.path)) continue;
+      try {
+        fs.rmSync(d.path, { recursive: true, force: true });
+        console.log(`  Removed ${d.label}`);
+      } catch (e) {
+        console.warn(`  Warning: Could not remove ${d.label}: ${e.message}`);
+        hadErrors = true;
+      }
+    }
+  }
+
   // §4.8 State machine: uninstalling → uninstalled
-  saveConfig({
-    ...getConfig() || config,
-    mode: 'uninstalled',
-    uninstalled: new Date().toISOString(),
-    // Clean up manifest after successful uninstall
-    manifest: undefined
-  });
+  try {
+    saveConfig({
+      ...getConfig() || config,
+      mode: 'uninstalled',
+      uninstalled: new Date().toISOString(),
+      manifest: undefined,
+    });
+  } catch (e) {
+    // purge mode: config dir has been deleted, save is non-critical
+    if (!options.purge) throw e;
+    console.warn(`  Warning: Could not save config: ${e.message}`);
+  }
 
   // §4.12 Step 11: Clean up backup on success
   if (!hadErrors) {
