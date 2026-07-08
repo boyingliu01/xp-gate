@@ -1,6 +1,7 @@
 const fs = require('fs');
 const path = require('path');
 const { execSync } = require('child_process');
+const { copyHooks, copyAdapters } = require('./shared-utils');
 
 async function install(args = [], cwd = process.cwd()) {
   const isGlobal = args.includes('--global');
@@ -25,7 +26,9 @@ function setupGlobal(cwd) {
 
   try {
     execSync(`git config --global core.hooksPath "${globalHooksDir}"`, { stdio: 'pipe' });
-  } catch {}
+  } catch (err) {
+    console.warn(`  Warning: Could not set global core.hooksPath: ${err.message}`);
+  }
 
   console.log('Global installation complete.');
   return 0;
@@ -49,32 +52,6 @@ function setupLocal(projectRoot) {
 
   console.log('Local installation complete.');
   return 0;
-}
-
-function copyHooks(srcDir, destDir) {
-  ['pre-commit', 'pre-push'].forEach(hook => {
-    const src = path.join(srcDir, 'hooks', hook);
-    const dest = path.join(destDir, hook);
-    if (fs.existsSync(src)) {
-      fs.copyFileSync(src, dest);
-      fs.chmodSync(dest, 0o755);
-    }
-  });
-}
-
-function copyAdapters(srcDir, destDir) {
-  const adapterCommon = path.join(srcDir, 'adapter-common.sh');
-  if (fs.existsSync(adapterCommon)) {
-    fs.copyFileSync(adapterCommon, path.join(destDir, 'adapter-common.sh'));
-  }
-  const adaptersDir = path.join(srcDir, 'adapters');
-  if (fs.existsSync(adaptersDir)) {
-    fs.readdirSync(adaptersDir).forEach(f => {
-      if (f.endsWith('.sh')) {
-        fs.copyFileSync(path.join(adaptersDir, f), path.join(destDir, f));
-      }
-    });
-  }
 }
 
 module.exports = { install };

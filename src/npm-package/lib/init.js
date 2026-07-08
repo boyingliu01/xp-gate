@@ -2,6 +2,7 @@ const fs = require('fs');
 const path = require('path');
 const crypto = require('crypto');
 const { checkDeps, checkBash, autoInstallDeps, detectPlatform, GATE_CLI_TOOLS, checkCliTool } = require('./detect-deps.js');
+const { copyHooks, copyAdapters } = require('./shared-utils.js');
 const {
   HOME_DIR,
   CONFIG_DIR,
@@ -10,42 +11,6 @@ const {
   GLOBAL_HOOKS_DIR,
   GLOBAL_ADAPTERS_DIR,
 } = require('./shared-paths.js');
-
-function copyHooks(srcDir, destDir) {
-  ['pre-commit', 'pre-push'].forEach(hook => {
-    const src = path.join(srcDir, 'hooks', hook);
-    const dest = path.join(destDir, hook);
-    if (fs.existsSync(src)) {
-      fs.copyFileSync(src, dest);
-      fs.chmodSync(dest, 0o755);
-    }
-  });
-}
-
-function copyAdapters(srcDir, destDir) {
-  const adapterSrc = path.join(srcDir, 'adapter-common.sh');
-  if (fs.existsSync(adapterSrc)) {
-    fs.copyFileSync(adapterSrc, path.join(destDir, 'adapter-common.sh'));
-  }
-  const adaptersDir = path.join(srcDir, 'adapters');
-  if (fs.existsSync(adaptersDir)) {
-    fs.readdirSync(adaptersDir).forEach(f => {
-      if (f.endsWith('.sh')) {
-        fs.copyFileSync(path.join(adaptersDir, f), path.join(destDir, f));
-      }
-    });
-  }
-  // Copy gate scripts (gate-*.sh) from githooks/ source-of-truth to destDir.
-  // These are sourced by pre-commit via GATE_DIR which resolves to the adapter dir.
-  const githooksDir = path.resolve(srcDir, '..', '..', '..', 'githooks');
-  if (fs.existsSync(githooksDir)) {
-    fs.readdirSync(githooksDir).forEach(f => {
-      if (f.startsWith('gate-') && f.endsWith('.sh')) {
-        fs.copyFileSync(path.join(githooksDir, f), path.join(destDir, f));
-      }
-    });
-  }
-}
 
 function copyRecursive(src, dest) {
   const stat = fs.statSync(src);
