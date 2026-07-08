@@ -107,37 +107,97 @@ const GATE_CLI_TOOLS = [
 ];
 
 /**
- * Check if a CLI tool is available.
- * Tries the tool name directly, then checks ~/.local/bin/ as fallback.
+ * Check if a CLI tool is available in PATH.
+ * Cross-platform: uses `where` on Windows, `which` on Unix as primary detection,
+ * then falls back to direct `--version` invocation with platform-appropriate
+ * stderr redirection.
  *
+ * @covers Issue #299 — Windows false negatives from 2>/dev/null + missing shell
  * @param {string} toolName
  * @returns {{available: boolean, path?: string, version?: string}}
  */
 function checkCliTool(toolName) {
+  const isWindows = process.platform === 'win32';
+  const shell = isWindows ? 'cmd.exe' : '/bin/sh';
+  const nullRedir = isWindows ? '2>nul' : '2>/dev/null';
+  const execOpts = { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], shell, timeout: 15000 };
+
+  // Step 1: Locate tool in PATH using platform-native resolver
+  // `where` (Windows) / `which` (Unix) — more reliable than exec-based detection
   try {
-    const result = execSync(`${toolName} --version 2>/dev/null || ${toolName} -v 2>/dev/null`, {
-      encoding: 'utf8',
-      stdio: ['ignore', 'pipe', 'pipe'],
+    const locator = isWindows ? 'where' : 'which';
+    const locatorResult = execSync(`${locator} ${toolName}`, {
+      ...execOpts,
       timeout: 5000,
     });
+    const resolvedPath = locatorResult.trim().split('\n')[0].trim();
+    if (resolvedPath) {
+      // Step 2: Get version from the located tool
+      const version = getVersion(resolvedPath, execOpts, nullRedir);
+      return { available: true, path: resolvedPath, version };
+    }
+  } catch { /* not in PATH, continue to fallback */ }
+
+  // Step 3: Direct exec fallback (handles edge cases where which/where misses)
+  try {
+    const result = execSync(
+      `${toolName} --version ${nullRedir} || ${toolName} -v ${nullRedir}`,
+      execOpts,
+    );
     if (result.trim()) {
       return { available: true, path: toolName, version: result.trim().split('\n')[0] };
     }
   } catch { /* not in PATH, continue to fallback */ }
 
-  const localPath = path.join(os.homedir(), '.local', 'bin', toolName);
-  if (fs.existsSync(localPath)) {
+  // Step 4: Check well-known local paths
+  const localPaths = getLocalFallbackPaths(toolName, isWindows);
+  for (const localPath of localPaths) {
+    if (!fs.existsSync(localPath)) continue;
     try {
-      const result = execSync(`"${localPath}" --version 2>/dev/null || "${localPath}" -v 2>/dev/null`, {
-        encoding: 'utf8',
-        stdio: ['ignore', 'pipe', 'pipe'],
-        timeout: 5000,
-      });
-      return { available: true, path: localPath, version: result.trim().split('\n')[0] };
+      const version = getVersion(`"${localPath}"`, execOpts, nullRedir);
+      return { available: true, path: localPath, version };
     } catch { /* path exists but can't execute */ }
   }
 
   return { available: false };
+}
+
+function getVersion(execPath, execOpts, nullRedir) {
+  try {
+    const result = execSync(
+      `${execPath} --version ${nullRedir} || ${execPath} -v ${nullRedir}`,
+      execOpts,
+    );
+    return result.trim().split('\n')[0] || undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+function getLocalFallbackPaths(toolName, isWindows) {
+  const home = os.homedir();
+  const paths = [path.join(home, '.local', 'bin', toolName)];
+
+  if (isWindows) {
+    const appData = process.env.APPDATA || path.join(home, 'AppData', 'Roaming');
+    const localAppData = process.env.LOCALAPPDATA || path.join(home, 'AppData', 'Local');
+    paths.push(
+      path.join(appData, 'npm', `${toolName}.cmd`),
+      path.join(home, '.local', 'bin', `${toolName}.exe`),
+    );
+    const pythonBase = path.join(localAppData, 'Programs', 'Python');
+    if (fs.existsSync(pythonBase)) {
+      try {
+        for (const entry of fs.readdirSync(pythonBase)) {
+          if (entry.startsWith('Python')) {
+            paths.push(path.join(pythonBase, entry, 'Scripts', `${toolName}.exe`));
+          }
+        }
+      } catch { /* readdir failed, skip */ }
+    }
+  }
+
+  return paths;
 }
 
 /**

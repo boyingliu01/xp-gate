@@ -2,6 +2,11 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.13.1.0] - 2026-07-08
+
+### Fixed
+- **doctor/bootstrap**: `checkCliTool()` no longer returns false negatives on Windows — uses `where` (Windows) / `which` (Unix) for PATH resolution, explicit `shell` option (`cmd.exe` / `/bin/sh`), platform-appropriate stderr redirection (`2>nul` vs `2>/dev/null`), and 15s timeout for Python tool cold start (#299)
+
 ## [0.13.0.0] - 2026-07-08
 
 ### Changed
