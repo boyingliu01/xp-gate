@@ -9,7 +9,7 @@ const path = require('path');
 
 const SKILL_MD_PATH = path.join(__dirname, '..', 'SKILL.md');
 const REFERENCES_DIR = path.join(__dirname, '..', 'references');
-const PHASE_2_BUILD_PATH = path.join(REFERENCES_DIR, 'phase-2-build.md');
+const PHASE_2_BUILD_PATH = path.join(REFERENCES_DIR, 'phase-3-build.md');
 const ORCHESTRATION_RULES_PATH = path.join(REFERENCES_DIR, 'orchestration-rules.md');
 
 let skillContent = '';
@@ -139,13 +139,12 @@ function testNegativeTestCasesExist() {
 function testWorkflowStepsOrder() {
   const frontmatter = parseFrontmatter(skillContent);
   const steps = frontmatter.workflow_steps || [];
-  if (steps.length !== 11) {
-    throw new Error(`workflow_steps must have exactly 11 entries, got ${steps.length}`);
+  if (steps.length !== 6) {
+    throw new Error(`workflow_steps must have exactly 6 entries, got ${steps.length}`);
   }
 
   const expectedOrder = [
-    'ISOLATE', 'AUTO-ESTIMATE', 'THINK', 'PLAN', 'BUILD',
-    'REVIEW', 'FEEDBACK', 'SHIP', 'LAND', 'USER ACCEPTANCE', 'CLEANUP',
+    'PREP', 'DESIGN', 'BUILD', 'VERIFY', 'SHIP', 'CLOSE',
   ];
 
   for (let i = 0; i < expectedOrder.length; i++) {
@@ -155,29 +154,29 @@ function testWorkflowStepsOrder() {
       );
     }
   }
-  console.log('  ✓ workflow_steps order matches canonical 11-phase sequence');
+  console.log('  ✓ workflow_steps order matches canonical 6-phase sequence');
 }
 
 function testPhaseFlowDiagramOrder() {
-  // The Phase Flow diagram in the body must show: ISOLATE → ... → FEEDBACK → SHIP → LAND → USER ACCEPTANCE → CLEANUP
-  const flowMatch = skillContent.match(/ISOLATE →.*CLEANUP/);
+  // The Phase Flow diagram in the body must show: PREP → ... → SHIP → CLOSE
+  const flowMatch = skillContent.match(/PREP →.*CLOSE/);
   if (!flowMatch) {
     throw new Error('Phase Flow diagram not found in SKILL.md body');
   }
   const flow = flowMatch[0];
 
-  // Verify FEEDBACK comes before SHIP (not after USER ACCEPTANCE)
-  const feedbackPos = flow.indexOf('FEEDBACK');
+  // Verify VERIFY comes before SHIP
+  const verifyPos = flow.indexOf('VERIFY');
   const shipPos = flow.indexOf('SHIP');
-  const userAcceptPos = flow.indexOf('USER ACCEPT');
-  if (feedbackPos === -1 || shipPos === -1 || userAcceptPos === -1) {
+  const closePos = flow.indexOf('CLOSE');
+  if (verifyPos === -1 || shipPos === -1 || closePos === -1) {
     throw new Error('Phase Flow diagram missing required phases');
   }
-  if (feedbackPos > shipPos) {
-    throw new Error('FEEDBACK must come before SHIP in phase flow diagram');
+  if (verifyPos > shipPos) {
+    throw new Error('VERIFY must come before SHIP in phase flow diagram');
   }
-  if (shipPos > userAcceptPos) {
-    throw new Error('SHIP must come before USER ACCEPTANCE in phase flow diagram');
+  if (shipPos > closePos) {
+    throw new Error('SHIP must come before CLOSE in phase flow diagram');
   }
   console.log('  ✓ Phase Flow diagram has correct ordering');
 }
@@ -199,15 +198,14 @@ function testCanonicalPhaseOrderTableExists() {
 function testAll11PhasesInPhaseFlowConsistency() {
   const section = skillContent.split('Phase Flow Consistency')[1];
   const requiredPhases = [
-    'ISOLATE', 'AUTO-ESTIMATE', 'THINK', 'PLAN', 'BUILD',
-    'REVIEW', 'FEEDBACK', 'SHIP', 'LAND', 'USER ACCEPTANCE', 'CLEANUP',
+    'PREP', 'DESIGN', 'BUILD', 'VERIFY', 'SHIP', 'CLOSE',
   ];
   for (const phase of requiredPhases) {
     if (!section.includes(phase)) {
       throw new Error(`Phase Flow Consistency section missing phase: ${phase}`);
     }
   }
-  console.log('  ✓ All 11 phases referenced in Phase Flow Consistency section');
+  console.log('  ✓ All 6 phases referenced in Phase Flow Consistency section');
 }
 
 // === Force Levels Tests ===
@@ -272,9 +270,9 @@ function testUvpMentionsEmergentRequirements() {
 function testTimingSectionExists() {
   const phase2BuildContent = fs.readFileSync(PHASE_2_BUILD_PATH, 'utf-8');
   if (!phase2BuildContent.includes('Timing & Stability')) {
-    throw new Error('phase-2-build.md must contain "Timing & Stability" section');
+    throw new Error('phase-3-build.md must contain "Timing & Stability" section');
   }
-  console.log('  ✓ Timing & Stability section exists in phase-2-build.md');
+  console.log('  ✓ Timing & Stability section exists in phase-3-build.md');
 }
 
 function testTimeoutRecommendationsExist() {
@@ -289,7 +287,7 @@ function testTimeoutRecommendationsExist() {
 function testExecutionTimeEstimatesExist() {
   const phase2BuildContent = fs.readFileSync(PHASE_2_BUILD_PATH, 'utf-8');
   if (!phase2BuildContent.includes('Expected Time')) {
-    throw new Error('phase-2-build.md must include expected execution time estimates');
+    throw new Error('phase-3-build.md must include expected execution time estimates');
   }
   console.log('  ✓ Expected execution time estimates exist');
 }
@@ -305,12 +303,8 @@ function testOrchestrationRulesExists() {
 
 function testPhaseSubagentMatrixOrder() {
   const orchContent = fs.readFileSync(ORCHESTRATION_RULES_PATH, 'utf-8');
-  const expectedOrder = [
-    'ISOLATE', 'AUTO-ESTIMATE', 'THINK', 'PLAN', 'BUILD',
-    'REVIEW', 'USER ACCEPT', 'FEEDBACK', 'SHIP', 'LAND', 'CLEANUP',
-  ];
   // The matrix order reflects file names, but phases should all be present
-  for (const phase of ['ISOLATE', 'THINK', 'PLAN', 'BUILD', 'REVIEW', 'CLEANUP']) {
+  for (const phase of ['PREP', 'DESIGN', 'BUILD', 'VERIFY', 'SHIP', 'CLOSE']) {
     if (!orchContent.includes(phase)) {
       throw new Error(`orchestration-rules.md missing phase: ${phase}`);
     }
@@ -336,7 +330,7 @@ function runTests(opts = {}) {
     { name: 'Phase Flow diagram has correct ordering', fn: testPhaseFlowDiagramOrder },
     { name: 'Phase Flow Consistency section exists', fn: testPhaseFlowConsistencySectionExists },
     { name: 'Canonical Phase Order table exists', fn: testCanonicalPhaseOrderTableExists },
-    { name: 'All 11 phases in consistency section', fn: testAll11PhasesInPhaseFlowConsistency },
+    { name: 'All 6 phases in consistency section', fn: testAll11PhasesInPhaseFlowConsistency },
     { name: 'force-levels.md exists with three levels', fn: testForceLevelsDocumentExists },
     { name: 'force-levels.md requires Delphi review', fn: testForceLevelsRequiresDelphi },
     { name: 'Unique Value Proposition exists', fn: testUniqueValuePropositionExists },
@@ -378,7 +372,7 @@ function runTests(opts = {}) {
 function testUncommittedGateExists() {
   const phase2BuildContent = fs.readFileSync(PHASE_2_BUILD_PATH, 'utf-8');
   if (!phase2BuildContent.includes('Uncommitted Changes Gate')) {
-    throw new Error('phase-2-build.md must contain "Uncommitted Changes Gate" section');
+    throw new Error('phase-3-build.md must contain "Uncommitted Changes Gate" section');
   }
   console.log('  ✓ Uncommitted Changes Gate section exists');
 }
@@ -419,7 +413,7 @@ describe('sprint-flow SKILL.md', () => {
     { name: 'Phase Flow diagram has correct ordering', fn: testPhaseFlowDiagramOrder },
     { name: 'Phase Flow Consistency section exists', fn: testPhaseFlowConsistencySectionExists },
     { name: 'Canonical Phase Order table exists', fn: testCanonicalPhaseOrderTableExists },
-    { name: 'All 11 phases in consistency section', fn: testAll11PhasesInPhaseFlowConsistency },
+    { name: 'All 6 phases in consistency section', fn: testAll11PhasesInPhaseFlowConsistency },
     { name: 'force-levels.md exists with three levels', fn: testForceLevelsDocumentExists },
     { name: 'force-levels.md requires Delphi review', fn: testForceLevelsRequiresDelphi },
     { name: 'Unique Value Proposition exists', fn: testUniqueValuePropositionExists },
