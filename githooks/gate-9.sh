@@ -1,5 +1,5 @@
 # ============================================================================
-# GATE 10: Semgrep SAST Security Scan
+# GATE 9: Semgrep SAST Security Scan
 # Detects security vulnerabilities (SQL injection, XSS, etc.) in staged files
 # Tool: semgrep -- https://semgrep.dev
 # ============================================================================
@@ -99,7 +99,7 @@ except:
       if [ "$CRITICAL_HIGH" -gt 0 ]; then
         echo ""
         echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-        echo "   GATE 10: Semgrep Security Gate"
+        echo "   GATE 9: Semgrep Security Gate"
         echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
         echo "  CRITICAL/HIGH: ${CRITICAL_HIGH}  ❌ BLOCKED"
         echo "  MEDIUM/LOW:    ${MEDIUM_LOW}  ⚠️  warning"
@@ -127,4 +127,4 @@ except:
     fi
   fi
 fi
-record_gate_audit "gate-10" "sast-security" "$GATE_10_STATUS" "0" "$GATE_10_START"
+record_gate_audit "gate-9" "sast-security" "$GATE_9_STATUS" "0" "$GATE_9_START"

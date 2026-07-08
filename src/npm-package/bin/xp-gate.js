@@ -157,6 +157,14 @@ const COMMANDS = {
       }
     },
     usage: 'xp-gate update-hooks [--global] [--force] [--dry-run] [--no-backup] [--scope hooks|adapters|all]'
+  },
+  'install': {
+    description: 'One-step install (init + bootstrap + doctor)',
+    run: subargs => {
+      const { install } = require('../lib/install-cmd');
+      install(subargs).then(code => process.exit(code));
+    },
+    usage: 'xp-gate install [--global]'
   }
 };
 
