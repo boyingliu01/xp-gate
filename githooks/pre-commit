@@ -1454,7 +1454,6 @@ else
             echo "✅ PASSED - No test or source files changed, skipping test run."
             TESTS_EXIT_CODE=0
             TESTS_SKIPPED=true
-            echo "DEBUG: TESTS_SKIPPED set to $TESTS_SKIPPED"
           fi
         else
           # Fallback: run_tests without coverage
@@ -1568,7 +1567,6 @@ else
   case "$PROJECT_LANG" in
     "typescript")
       COVERAGE_ENFORCED=true
-      echo "DEBUG: Stage 2 TESTS_SKIPPED=$TESTS_SKIPPED"
       if [ "${TESTS_SKIPPED:-false}" = "true" ]; then
         echo "✅ PASSED - Coverage check skipped (no test/source files changed)."
       elif [ -f "coverage/coverage-summary.json" ]; then
