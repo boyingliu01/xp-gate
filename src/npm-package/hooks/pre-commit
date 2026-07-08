@@ -1453,6 +1453,7 @@ else
             # No test files AND no source files changed → skip
             echo "✅ PASSED - No test or source files changed, skipping test run."
             TESTS_EXIT_CODE=0
+            TESTS_SKIPPED=true
           fi
         else
           # Fallback: run_tests without coverage
@@ -1566,7 +1567,9 @@ else
   case "$PROJECT_LANG" in
     "typescript")
       COVERAGE_ENFORCED=true
-      if [ -f "coverage/coverage-summary.json" ]; then
+      if [ "${TESTS_SKIPPED:-false}" = "true" ]; then
+        echo "✅ PASSED - Coverage check skipped (no test/source files changed)."
+      elif [ -f "coverage/coverage-summary.json" ]; then
         COVERAGE_PERCENT=$(node -e "
           try {
             const fs = require('fs');
