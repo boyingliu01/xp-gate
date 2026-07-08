@@ -1,16 +1,13 @@
 {
-  "commit": "0d2e4934aee53390cef155179fa05925002065c1",
-  "branch": "fix/gate-1-tsc-test-files-issue-293",
-  "timestamp": "2026-07-06T20:42:00+08:00",
+  "mode": "code-walkthrough",
+  "commit": "7a1f2879f1bf001899dbe80d104f24ebe80eac42",
+  "timestamp": "2026-07-08T18:10:00Z",
   "verdict": "APPROVED",
-  "changes": [
-    "githooks/adapters/typescript.sh run_static_analysis(): after main tsc pass, detect excluded test dirs and run a second pass with test files included",
-    "githooks/pre-commit: same test-file detection logic for inline TypeScript path",
-    "githooks/__tests__/gate-1-tsc-test-files.test.bats: 3 BATS tests for tsc test-file checking",
-    "src/npm-package/ mirrors: synced typescript.sh, pre-commit, adapter-common.sh",
-    "docs/plans/2026-07-06-sprint-flow-compact-redesign.md: RFC design doc"
-  ],
-  "gates_passed": ["shell-syntax", "tsc", "principles", "architecture", "boy-scout", "coverage-84%", "mutation", "mock-density"],
-  "tests_passed": 1869,
-  "reviewer": "sisyphus-automated"
+  "consensus_ratio": 1.0,
+  "rounds": 3,
+  "experts": {
+    "A": { "verdict": "APPROVED", "confidence": 10, "round": 3 },
+    "B": { "verdict": "APPROVED", "confidence": 10, "round": 3 }
+  },
+  "expires": "2026-07-08T19:10:00Z"
 }

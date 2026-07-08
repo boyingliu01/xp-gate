@@ -2,6 +2,26 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.14.0.0] - 2026-07-08
+
+### Added
+- **`xp-gate install`**: one-step install command (init + bootstrap + doctor) (#301)
+- **`xp-gate uninstall --purge`**: full cleanup of ~/.xp-gate/, ~/.config/xp-gate/, git core.hooksPath, and project .xp-gate/ (#301)
+- **GATE_TOOLS classification**: tools cataloged by gate (PLATFORM/IAC/LINT/TEST/MUTATION), cross-referenced via `verify-tool-map.js` (#304, #302)
+- **`detectProjectLang()`**: 12-language detection from project markers (tsconfig.json, go.mod, pyproject.toml, etc.) (#304)
+- **`doctor --format json`**: machine-readable JSON output for script integration (#304)
+- **`bootstrap --lang ts/py/go`**: language-specific tool install support (#304)
+- **`postinstall` hint**: npm install -g prints next-steps guidance (#301)
+
+### Fixed
+- **gate-9.sh**: GATE 10 → GATE 9 in header, echo messages, and audit log variable naming (#303)
+- **doctor**: grouped output by gate category, missing pre-push tools now detected
+- **bootstrap/home resolution**: uses shared-paths.js `HOME_DIR` (incl. USERPROFILE) consistently across all commands
+
+### Changed
+- **init.js / install-cmd.js**: `copyHooks`/`copyAdapters` extracted to `shared-utils.js` (DRY)
+- **Delphi-reviewed**: design doc passes 3-expert consensus (Round 2, 100%); code-walkthrough passes 2-expert consensus (Round 3, 100%)
+
 ## [0.13.1.0] - 2026-07-08
 
 ### Fixed

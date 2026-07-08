@@ -33,4 +33,38 @@ function readXpGateConfig() {
   }
 }
 
-module.exports = { copyDirRecursive, readXpGateConfig };
+function copyHooks(srcDir, destDir) {
+  ['pre-commit', 'pre-push'].forEach(hook => {
+    const src = path.join(srcDir, 'hooks', hook);
+    const dest = path.join(destDir, hook);
+    if (fs.existsSync(src)) {
+      fs.copyFileSync(src, dest);
+      fs.chmodSync(dest, 0o755);
+    }
+  });
+}
+
+function copyAdapters(srcDir, destDir) {
+  const adaptersDir = path.join(srcDir, 'adapters');
+  const adapterCommon = path.join(srcDir, 'adapter-common.sh');
+  if (fs.existsSync(adapterCommon)) {
+    fs.copyFileSync(adapterCommon, path.join(destDir, 'adapter-common.sh'));
+  }
+  if (fs.existsSync(adaptersDir)) {
+    fs.readdirSync(adaptersDir).forEach(f => {
+      if (f.endsWith('.sh')) {
+        fs.copyFileSync(path.join(adaptersDir, f), path.join(destDir, f));
+      }
+    });
+  }
+  const githooksDir = path.resolve(srcDir, '..', '..', '..', 'githooks');
+  if (fs.existsSync(githooksDir)) {
+    fs.readdirSync(githooksDir).forEach(f => {
+      if (f.startsWith('gate-') && f.endsWith('.sh')) {
+        fs.copyFileSync(path.join(githooksDir, f), path.join(destDir, f));
+      }
+    });
+  }
+}
+
+module.exports = { copyDirRecursive, readXpGateConfig, copyHooks, copyAdapters };

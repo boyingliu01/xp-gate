@@ -1,6 +1,5 @@
 const fs = require('fs');
 const path = require('path');
-const os = require('os');
 const crypto = require('crypto');
 const {
   HOME_DIR,
@@ -367,9 +366,8 @@ async function uninstall(args) {
   // §4.3 Step 3b: Add purge items if --purge
   const purgeDirs = [];
   if (options.purge) {
-    const homeDir = process.env.HOME || os.homedir();
-    const configDir = path.join(homeDir, '.config', 'xp-gate');
-    const xpGateDir = path.join(homeDir, '.xp-gate');
+    const configDir = CONFIG_DIR;
+    const xpGateDir = path.join(HOME_DIR, '.xp-gate');
     purgeDirs.push({ label: '~/.xp-gate/', path: xpGateDir });
     purgeDirs.push({ label: '~/.config/xp-gate/', path: configDir });
     if (mode === 'local') {
