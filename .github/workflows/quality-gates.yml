@@ -578,18 +578,21 @@ jobs:
                 for file in $CHANGED_FILES; do
                   file_status=$(git diff --name-status HEAD^ HEAD -- $file 2>/dev/null)
                   if [[ $file_status == A* ]]; then
-                    NEW_FILES="$NEW_FILES $file"
+                    NEW_FILES="${NEW_FILES:+$NEW_FILES,}$file"
                   elif [[ $file_status == M* ]]; then
-                    MODIFIED_FILES="$MODIFIED_FILES $file"
+                    MODIFIED_FILES="${MODIFIED_FILES:+$MODIFIED_FILES,}$file"
                   fi
                 done
                 
                 if [[ -n "$NEW_FILES" ]] || [[ -n "$MODIFIED_FILES" ]]; then
                   echo "Applying Boy Scout Rule to: (N)$NEW_FILES (M)$MODIFIED_FILES"
                   
+                  BOYSCOUT_ARGS=()
+                  [[ -n "$NEW_FILES" ]] && BOYSCOUT_ARGS+=(--new-files "$NEW_FILES")
+                  [[ -n "$MODIFIED_FILES" ]] && BOYSCOUT_ARGS+=(--modified-files "$MODIFIED_FILES")
+                  
                   OUTPUT=$(npx tsx src/principles/boy-scout.ts \
-                    --new-files "$NEW_FILES" \
-                    --modified-files "$MODIFIED_FILES" \
+                    "${BOYSCOUT_ARGS[@]}" \
                     --baseline ".warnings-baseline.json" 2>&1)
                   BOYSCOUT_STATUS=$?
                   
