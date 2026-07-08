@@ -2,7 +2,7 @@
 
 ## 使用说明
 
-此模板用于 Phase 4 (USER ACCEPTANCE) 人工验收。
+此模板用于 Phase 6/6 CLOSE (USER ACCEPTANCE) 人工验收。
 
 ⚠️ 这是 AI 无法预测的 UX/质量问题，只有实际使用才能发现。
 
@@ -14,7 +14,7 @@
 
 ```yaml
 验收日期: YYYY-MM-DD
-验收阶段: Phase 4 - USER ACCEPTANCE
+验收阶段: Phase 6/6 - CLOSE (USER ACCEPTANCE)
 验收人: [姓名]
 MVP 版本: v1.0
 Sprint ID: sprint-YYYY-MM-DD-NN
@@ -56,7 +56,7 @@ Sprint ID: sprint-YYYY-MM-DD-NN
 
 - [ ] UI 元素是否清晰可辨？
 - [ ] 是否存在"看起来像按钮但不可点击"的元素？
-- [ ] 错误消息位置是否合理？（是否远离问题发生处）
+- [ ] 错误消息位置是否合理？
 - [ ] 响应时间是否满意？
 - [ ] 移动端/桌面端是否一致？
 
@@ -104,7 +104,7 @@ Sprint ID: sprint-YYYY-MM-DD-NN
 
 ## 验收结论
 
-- [ ] ✅ 验收通过，进入 Phase 5 (Ship)
+- [ ] ✅ 验收通过，进入 CLEANUP → Sprint 结束
 - [ ] ⚠️ 发现问题需 Sprint 2 迭代
 - [ ] ❌ 重大问题，需重新规划
 
@@ -115,6 +115,6 @@ Sprint ID: sprint-YYYY-MM-DD-NN
 ## Next Step
 
 根据验收结论：
-- ✅ 验收通过 → 进入 Phase 5 (FEEDBACK) 自动执行
-- ⚠️ 发现问题 → 进入 Phase 5，记录反馈，准备 Sprint 2
-- ❌ 重大问题 → Sprint 2 回到 Phase 0 重新规划
+- ✅ 验收通过 → 进入 Phase 6/6 CLOSE (CLEANUP) 自动执行
+- ⚠️ 发现问题 → 记录反馈 → 准备 Sprint 2 → 进入 CLEANUP
+- ❌ 重大问题 → Sprint 2 回到 Phase 2/6 DESIGN 重新规划

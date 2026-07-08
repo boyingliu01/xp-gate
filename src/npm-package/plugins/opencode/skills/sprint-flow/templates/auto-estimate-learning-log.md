@@ -103,7 +103,7 @@
 
 ## 阈值优化触发
 
-当 `total_entries >= 20` 时，在 Phase 8 CLEANUP 阶段提示用户：
+当 `total_entries >= 20` 时，在 Phase 6/6 CLOSE (CLEANUP) 阶段提示用户：
 
 ```
 已积累 20 条 AUTO-ESTIMATE 记录。是否运行阈值优化分析？

@@ -1,6 +1,6 @@
 # Sprint Flow 执行级别定义
 
-**执行时机**: Phase 0 THINK 之前，AUTO-ESTIMATE 完成后。
+**执行时机**: Phase 2/6 DESIGN 之前，PREP AUTO-ESTIMATE 完成后。
 
 **目的**: 根据需求规模匹配适度评审流程，平衡质量保障与效率。
 
@@ -73,7 +73,7 @@
 
 ## 与 AUTO-ESTIMATE 的关系
 
-AUTO-ESTIMATE 提供**初始级别建议**，Force Levels 定义**具体执行规则**：
+AUTO-ESTIMATE 提供**初始级别建议**（Phase 1/6 PREP），Force Levels 定义**具体执行规则**：
 
 ```
 AUTO-ESTIMATE 输出 → Force Levels 执行 → 自动升级机制（如触发）
@@ -94,19 +94,19 @@ AUTO-ESTIMATE 输出 → Force Levels 执行 → 自动升级机制（如触发�
 
 ## 与 DELPHI-GATE 的关系
 
-**DELPHI-GATE** 是 Phase 2 的**强制门禁**，检查 `.sprint-state/delphi-reviewed.json` 的 `verdict=APPROVED`。Force Levels 定义**产生该门禁文件的评审强度**：
+**DELPHI-GATE** 是 Phase 3/6 BUILD 的**强制门禁**，检查 `.sprint-state/delphi-reviewed.json` 的 `verdict=APPROVED`。Force Levels 定义**产生该门禁文件的评审强度**：
 
 | 场景 | DELPHI-GATE | Force Levels |
 |------|------------|-------------|
-| Phase 1 设计评审 | 3 专家、≥90% 共识、生成 specification.yaml | 不适用（设计阶段） |
-| Phase 2 BUILD 入口 | **必须检查** `.sprint-state/delphi-reviewed.json` 中 `verdict=APPROVED` | 轻量/标准/复杂：通过对应强度的 delphi-review 生成该门禁文件 |
+| Phase 2/6 DESIGN 设计评审 | 3 专家、≥90% 共识、生成 specification.yaml | 不适用（设计阶段） |
+| Phase 3/6 BUILD 入口 | **必须检查** `.sprint-state/delphi-reviewed.json` 中 `verdict=APPROVED` | 轻量/标准/复杂：通过对应强度的 delphi-review 生成该门禁文件 |
 | 轻量级评审 | 生成 `delphi-reviewed.json`（2 专家、1 轮、2/2 批准） | 2 专家、1 轮、写入门禁文件 |
 | 标准级评审 | 生成 `delphi-reviewed.json`（2 专家、最多 2 轮、2/2 批准） | 2 专家、最多 2 轮、写入门禁文件 |
 | 复杂级评审 | 生成 `delphi-reviewed.json`（3 专家、最多 3 轮、3/3 批准） | 3 专家、最多 3 轮、写入门禁文件 |
-| Phase 3 代码走查 | 再次检查 `delphi-reviewed.json` 或重新评审 | 复用 Force Levels 规则 |
+| Phase 4/6 VERIFY 代码走查 | 再次检查 `delphi-reviewed.json` 或重新评审 | 复用 Force Levels 规则 |
 
 **关键规则**:
-- **DELPHI-GATE 永不跳过**：Phase 2 BUILD 入口必须检查 `.sprint-state/delphi-reviewed.json` 中 `verdict=APPROVED`
+- **DELPHI-GATE 永不跳过**：Phase 3/6 BUILD 入口必须检查 `.sprint-state/delphi-reviewed.json` 中 `verdict=APPROVED`
 - **Force Levels 定义评审强度**：轻量/标准/复杂决定用 2 专家 1 轮还是 3 专家 3 轮来**产生**门禁文件
 - **轻量级不是跳过评审**：而是简化流程（2 专家、1 轮），但仍需生成门禁文件
 - **LIGHTWEIGHT ≠ ONE-EXPERT**: 1 专家违反 Delphi 核心原则，禁止
@@ -189,15 +189,14 @@ AUTO-ESTIMATE 输出 → Force Levels 执行 → 自动升级机制（如触发�
 
 **仲裁机制**:
 - Round 2 仍有分歧 → 第 3 专家（Qwen3.6-Plus）加入仲裁
-- Round 3 必须达成一致，否则 BLOCK 进入 Phase 2
+- Round 3 必须达成一致，否则 BLOCK 进入 Phase 3/6 BUILD
 
 ---
 
 ## 参见
 
-- [Phase -0.5: AUTO-ESTIMATE](../references/phase-minus-0-5-auto-estimate.md) — 规模评估与流程路由
-- [Phase 0: THINK](../references/phase-0-think.md) — 需求探索与设计
-- [Phase 1: PLAN](../references/phase-1-plan.md) — 计划与 Delphi 设计评审
-- [Phase 2: BUILD](../references/phase-2-build.md) — 编码与 Ralph Loop
-- [Phase 3: REVIEW](../references/phase-3-review.md) — 代码走查与验证
-- [Delphi Review Skill](../../../../skills/delphi-review/SKILL.md) — 多专家共识评审规范
+- [Phase 1/6: PREP](../references/phase-1-prep.md) — worktree 隔离 + 规模评估
+- [Phase 2/6: DESIGN](../references/phase-2-design.md) — 需求探索 + 共识评审
+- [Phase 3/6: BUILD](../references/phase-3-build.md) — TDD + raph-loop 构建
+- [Phase 4/6: VERIFY](../references/phase-4-verify.md) — 代码走查 + 反馈
+- [Delphi Review Skill](../../delphi-review/SKILL.md) — 多专家共识评审规范
