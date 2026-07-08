@@ -2,6 +2,20 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.13.0.0] - 2026-07-08
+
+### Changed
+- **Sprint Flow Compact Redesign**: 11-phase model → 6-phase model (PREP → DESIGN → BUILD → VERIFY → SHIP → CLOSE) (#290)
+  - Reduces cognitive load from 11 phases to 6, addressing user feedback about losing track of current phase
+  - All HARD-GATEs preserved (Delphi consensus internal to DESIGN, UAT mandatory in CLOSE)
+  - `render-sprint-progress.cjs` updated with full backward compatibility for legacy `sprint-state.json` files
+  - CLI params (`--stop-at`, `--resume-from`, `--phase`) accept both old and new phase names
+  - 11 reference files merged into 6; all templates updated; all 7 plugin mirrors synced
+
+### Fixed
+- Closes #272 (Sprint Flow step adherence 65% — workflow too complex)
+- Closes #290 (RFC: Sprint Flow redesign — compact 7-phase flow + visual progress indicator)
+
 ## [0.12.11.0] - 2026-07-06
 
 ### Fixed

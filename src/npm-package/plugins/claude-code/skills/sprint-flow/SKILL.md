@@ -1,6 +1,6 @@
 ---
 name: sprint-flow
-version: 1.0.0
+version: 2.0.0
 description: >
   One-Shot Sprint 自动流水线。单一入口，自动串联 Think → Plan → Build → 
   Review → Ship 流程。整合 brainstorming + autoplan + delphi-review + TDD +
@@ -13,21 +13,21 @@ description: >
   - "start sprint"
   - "一键开发"
   - "/sprint-flow"
-   触发后第一行输出: `Sprint Flow: ISOLATE → AUTO-ESTIMATE → THINK → PLAN → BUILD → REVIEW → FEEDBACK → SHIP → LAND → USER ACCEPTANCE → CLEANUP`
+   触发后第一行输出: `Sprint Flow: PREP → DESIGN → BUILD → VERIFY → SHIP → CLOSE`
   用法: /sprint-flow "[需求描述]"
   示例: /sprint-flow "开发访谈机器人，支持多轮对话"
   可选参数:
   --no-isolate: 跳过自动 worktree 隔离（⚠️ 在保护分支上有污染风险）
   --branch-name <name>: 自定义分支名（默认自动生成 sprint/YYYY-MM-DD-NN）
   --force: 强制在当前分支继续（即使已是保护分支，⚠️ 输出警告）
-  --stop-at <phase>: 执行到指定阶段后停止 (isolate/think/plan/build/review/ship/land/cleanup)
-  --resume-from <phase>: 从指定阶段继续，跳过前面阶段
-  --phase <phase>: 只执行单个阶段 (isolate-only/think-only/plan-only/build-only/review-only/ship-only/land-only/cleanup-only)
+  --stop-at <phase>: 执行到指定阶段后停止 (prep/design/build/verify/ship/close). Legacy names: isolate/think/plan/review/ship/land/cleanup
+  --resume-from <phase>: 从指定阶段继续，跳过前面阶段 (prep/design/build/verify/ship/close)
+  --phase <phase>: 只执行单个阶段 (prep-only/design-only/build-only/verify-only/ship-only/close-only). Legacy: isolate-only/think-only/plan-only/build-only/review-only/ship-only/land-only/cleanup-only
   --lang <language>: 指定项目语言 (springboot/django/golang)
   --type <project_type>: 指定项目类型 (web-nextjs/web-react/web-vue/mobile-flutter/mobile-react-native/backend-django/backend-go/backend-springboot)
   --spec <file>: 使用已有的 specification.yaml 文件
   --with-performance: 启用负载/压力测试（后端项目）
-  --mode <build_mode>: 指定 Phase 2 构建模式。默认 = ralph-loop（逐 REQ 迭代，token 节约）。parallel = 旧有并行模式（一次性 dispatch 所有需求）
+  --mode <build_mode>: 指定 Phase 3 BUILD 构建模式。默认 = ralph-loop（逐 REQ 迭代，token 节约）。parallel = 旧有并行模式（一次性 dispatch 所有需求）
   --status: 查看当前 Sprint 进度看板（不执行任何阶段，仅读取 sprint-state.json 并渲染进度）
   Use when asked to "开发新功能", "实现 X", "start sprint", "一键开发", or "/sprint-flow" for end-to-end feature development.
 maturity: beta
@@ -76,17 +76,12 @@ triggers_negative_test_cases:
   - input: "一键开发 REST API"
     expect: "triggered"
 workflow_steps:
-  - "Phase -1: ISOLATE"
-  - "Phase -0.5: AUTO-ESTIMATE"
-  - "Phase 0: THINK"
-  - "Phase 1: PLAN"
-  - "Phase 2: BUILD"
-  - "Phase 3: REVIEW"
-  - "Phase 4: FEEDBACK"
-  - "Phase 5: SHIP"
-  - "Phase 6: LAND"
-  - "Phase 7: USER ACCEPTANCE"
-  - "Phase 8: CLEANUP"
+  - "Phase 1/6: PREP"
+  - "Phase 2/6: DESIGN"
+  - "Phase 3/6: BUILD"
+  - "Phase 4/6: VERIFY"
+  - "Phase 5/6: SHIP"
+  - "Phase 6/6: CLOSE"
 ---
 
 ## Triggers
@@ -107,14 +102,14 @@ workflow_steps:
 - `--no-isolate`: Skip auto worktree isolation (⚠️ risk of polluting protected branches)
 - `--branch-name <name>`: Custom branch name (default: `sprint/YYYY-MM-DD-NN`)
 - `--force`: Force continue on current branch even if protected (⚠️ requires explicit confirmation)
-- `--stop-at <phase>`: Stop after specified phase (isolate/think/plan/build/review/ship/land/cleanup)
-- `--resume-from <phase>`: Resume from specified phase, skipping earlier phases
-- `--phase <phase>`: Execute only single phase (isolate-only/think-only/plan-only/build-only/review-only/ship-only/land-only/cleanup-only)
+- `--stop-at <phase>`: Stop after specified phase (prep/design/build/verify/ship/close). For backward compat, legacy names (isolate/think/plan/review/ship/land/cleanup) are accepted and mapped.
+- `--resume-from <phase>`: Resume from specified phase, skipping earlier phases (prep/design/build/verify/ship/close)
+- `--phase <phase>`: Execute only single phase (prep-only/design-only/build-only/verify-only/ship-only/close-only). Legacy: isolate-only/think-only/plan-only/build-only/review-only/ship-only/land-only/cleanup-only
 - `--lang <language>`: Specify project language (springboot/django/golang)
 - `--type <project_type>`: Specify project type (web-nextjs/web-react/web-vue/mobile-flutter/mobile-react-native/backend-django/backend-go/backend-springboot)
 - `--spec <file>`: Use existing specification.yaml file
 - `--with-performance`: Enable load/stress testing (backend projects)
-- `--mode <build_mode>`: Phase 2 build mode. Default = ralph-loop (REQ-level iteration, token-efficient). parallel = legacy all-at-once mode
+- `--mode <build_mode>`: Phase 3 BUILD build mode. Default = ralph-loop (REQ-level iteration, token-efficient). parallel = legacy all-at-once mode
 
 # Sprint Flow Skill
 
@@ -123,7 +118,7 @@ workflow_steps:
 - sprint-flow **不执行任何破坏性命令**（no `rm -rf`, `git push --force`, `DROP TABLE` 等）
 - `git worktree remove` 仅删除 sprint 创建的临时 worktree 目录，不影响主仓库
 - Phase 5 SHIP 仅创建 PR（`gh pr create`），不自动 merge（除非用户显式确认）
-- Phase 6 LAND 使用 `gh pr merge --squash`（非 force push），merge 前等待 CI 通过
+- Phase 5 SHIP / LAND 使用 `gh pr merge --squash`（非 force push），merge 前等待 CI 通过
 - 文档中 `+ platform deploy` 等描述仅表示可选的部署步骤映射，**不是可执行命令**
 - sprint-flow 不下载、安装或执行任何外部二进制文件
 
@@ -140,7 +135,7 @@ workflow_steps:
 |------|------|
 | **单一入口** | 用户只需调用 `/sprint-flow`，自动串联全流程 |
 | **自动流水线** | 类似 autoplan，自动执行多个阶段 |
-| **关键节点暂停** | APPROVED 确认、Gate 1 通过、Ship 确认、⚠️ Phase 7 必须人工 |
+| **关键节点暂停** | APPROVED 确认、DELPHI-GATE 通过、Ship 确认、⚠️ Phase 6 CLOSE 必须人工 |
 | **承认 Emergent** | 用户验收环节必须人工，无法自动化（78% 失败不可见） |
 | **复用现有 Skills** | 不重新发明，整合调用现有体系 |
 
@@ -154,24 +149,24 @@ Sprint Flow is NOT just a sequential launcher of existing skills. Here's what ma
 
 | Dimension | Manual Execution | Sprint Flow |
 |-----------|-----------------|-------------|
-| **Context Continuity** | Each skill starts fresh; lost design decisions between phases | Phase summaries + sprint-state.json maintain full traceability across 11 phases |
+| **Context Continuity** | Each skill starts fresh; lost design decisions between phases | Phase summaries + sprint-state.json maintain full traceability across 6 phases |
 | **Gate Enforcement** | No enforcement — easy to skip Delphi, skip TDD, skip UAT | HARD-GATE: design must be APPROVED (≥90% Delphi consensus) before coding; UAT is mandatory (no bypass) |
 | **Token Efficiency** | Linear context accumulation across phases — ~150K+ tokens | Ralph-loop default: 40-67% token savings via clean REQ-level contexts |
-| **Emergent Requirements** | Discovered late, silently ignored or merged | Phase 7 USER ACCEPTANCE explicitly captures emergent issues via template; triggers Sprint 2 for critical issues |
+| **Emergent Requirements** | Discovered late, silently ignored or merged | Phase 6 CLOSE explicitly captures emergent issues via template; triggers Sprint 2 for critical issues |
 | **Quality Ecosystem** | No integration with quality gates | Integrated with xp-gate's full quality ecosystem: Gate 5 (coverage), Gate M2 (mock density), Delphi code-walkthrough |
 | **Progress Tracking** | Ad-hoc, memory-based | `.sprint-state/` persistence with phase history, timing, and metrics — `--status` renders progress dashboard |
 
 ### Key Differentiators
 
-1. **40-67% Token Savings via Ralph Loop**: Phase 2 default (`ralph-loop`) processes one REQ at a time with clean context, avoiding the linear context accumulation that costs 150K+ tokens in parallel mode.
+1. **40-67% Token Savings via Ralph Loop**: Phase 3 BUILD default (`ralph-loop`) processes one REQ at a time with clean context, avoiding the linear context accumulation that costs 150K+ tokens in parallel mode.
 
-2. **HARD-GATE Discipline**: Design must pass Delphi review (≥90% consensus, ≥2 model providers, domestic models only) before Phase 2 BUILD can start. This is enforced both in SKILL.md instructions and via the Claude Code plugin's PreToolUse hook.
+2. **HARD-GATE Discipline**: Design must pass Delphi review (≥90% consensus, ≥2 model providers, domestic models only) before Phase 3 BUILD can start. This is enforced both in SKILL.md instructions and via the Claude Code plugin's PreToolUse hook.
 
-3. **Emergent Requirements Acknowledgment**: Based on research showing 78% of failures are invisible to AI (arXiv study), Phase 7 USER ACCEPTANCE is a mandatory manual verification step — cannot be automated, skipped, or bypassed.
+3. **Emergent Requirements Acknowledgment**: Based on research showing 78% of failures are invisible to AI (arXiv study), Phase 6 CLOSE includes mandatory manual UAT verification — cannot be automated, skipped, or bypassed.
 
-4. **XP-Gate Quality Ecosystem Integration**: Sprint Flow is part of the broader xp-gate ecosystem. Phase 2 BUILD integrates with Gate 5 (test coverage ≥80%), Gate M2 (mock density ≤30%), and Gate MW (code-walkthrough validation). Phase 3 REVIEW runs Delphi code-walkthrough that generates `.code-walkthrough-result.json` for pre-push enforcement.
+4. **XP-Gate Quality Ecosystem Integration**: Sprint Flow is part of the broader xp-gate ecosystem. Phase 3 BUILD integrates with Gate 5 (test coverage ≥80%), Gate M2 (mock density ≤30%), and Gate MW (code-walkthrough validation). Phase 4 VERIFY runs Delphi code-walkthrough that generates `.code-walkthrough-result.json` for pre-push enforcement.
 
-5. **Full Lifecycle Coverage**: From worktree isolation (Phase -1) to cleanup (Phase 8), sprint-flow covers the entire development lifecycle — not just the "write code" part. AUTO-ESTIMATE (Phase -0.5) prevents over-engineering by routing lightweight changes through simplified workflows.
+5. **Full Lifecycle Coverage**: From worktree isolation (PREP) to cleanup (CLOSE), sprint-flow covers the entire development lifecycle — not just the "write code" part. PREP (Phase 1/6) prevents over-engineering by routing lightweight changes through simplified workflows.
 
 ---
 
@@ -180,34 +175,26 @@ Sprint Flow is NOT just a sequential launcher of existing skills. Here's what ma
 调用 `/sprint-flow "[需求描述]"` 后，自动执行以下流程：
 
 ```
-Phase -1: ISOLATE → 保护分支检测→强制worktree
-Phase -0.5: AUTO-ESTIMATE → 展示评估结果→用户确认路由(轻量/标准/复杂)
-Phase 0: THINK → brainstorming → ⚠️ HARD-GATE(设计未批准→阻断)
-Phase 1: PLAN → autoplan → delphi-review(等待APPROVED)→specification.yaml
-Phase 2: BUILD → GITHOOKS-GATE → ralph-loop/TDD → freeze/盲评→verification
-Phase 3: REVIEW → delphi-review --mode code-walkthrough → test-alignment → browse
-Phase 4: FEEDBACK → learn + retro + systematic-debugging
-Phase 5: SHIP → finishing-a-development-branch → ship(PR)
-Phase 6: ⚠️ LAND → land-and-deploy → merge + CI + canary
-Phase 7: ⚠️ USER ACCEPTANCE → 必须人工验收 → Emergent Issues List
-Phase 8: CLEANUP → worktree remove + branch delete + sprint summary
+Phase 1/6: PREP → worktree隔离 + 规模评估 + 流程路由
+Phase 2/6: DESIGN → brainstorming → autoplan → delphi-review → specification.yaml
+Phase 3/6: BUILD → GITHOOKS-GATE → DELPHI-GATE → ralph-loop/TDD → freeze/盲评 → verification
+Phase 4/6: VERIFY → delphi-review --mode code-walkthrough → test-alignment → browse → learn + retro
+Phase 5/6: SHIP → finishing-a-development-branch → ship → land-and-deploy → canary
+Phase 6/6: CLOSE → USER ACCEPTANCE (⚠️ 人工) → emergent issues → cleanup
 ```
+
+**v2.0 Compact Redesign** (Issue #290): Merged from 11 phases to 6. PREP = old ISOLATE + AUTO-ESTIMATE. DESIGN = old THINK + PLAN. BUILD = old BUILD (unchanged). VERIFY = old REVIEW + FEEDBACK. SHIP = old SHIP + LAND. CLOSE = old USER ACCEPTANCE + CLEANUP.
 
 ---
 
 ## 暂停点设计（不是随时停，而是设计明确的暂停点）
 
-- **Phase -1**: 保护分支强制隔离 → 输出警告或自动创建 worktree → 自动恢复
-- **Phase -0.5**: AUTO-ESTIMATE 结果展示 → 用户确认 → 按路由继续
-- **Phase 0**: 设计未 APPROVED (HARD-GATE) → 用户修改 → APPROVED 后继续
-- **Phase 1**: autoplan taste_decisions → 用户确认 / delphi-review 未APPROVED → 修复→APPROVED
-- **Phase 2**: 验证失败>max3 → 用户决策修复/放弃 / 成本超阈值 → 用户确认
-- **Phase 3**: browse 发现问题 → 回退 Phase 2（不暂停）
-- **Phase 4**: ⚠️ 不可跳过 (HARD-GATE) → feedback-log.md 生成后自动继续
-- **Phase 5**: finishing-a-development-branch(4选项) → 确认; ship PR → 用户确认合并
-- **Phase 6**: land-and-deploy 完成/失败 → 用户确认合并结果/处理部署失败
-- **Phase 7**: ⚠️ 必须人工验收 → 用户确认后继续
-- **Phase 8**: worktree 清理完成/失败 → 用户确认 → 结束流程
+- **Phase 1/6 PREP**: 保护分支强制隔离 → 输出警告或自动创建 worktree → 自动恢复；AUTO-ESTIMATE 结果展示 → 用户确认 → 按路由继续
+- **Phase 2/6 DESIGN**: brainstorming 设计未 APPROVED (HARD-GATE) → 用户修改 → APPROVED 后继续；autoplan taste_decisions → 用户确认；delphi-review 未 APPROVED → 修复 → APPROVED → specification.yaml
+- **Phase 3/6 BUILD**: DELPHI-GATE 未通过 → BLOCK；验证失败 > max3 → 用户决策修复/放弃；成本超阈值 → 用户确认
+- **Phase 4/6 VERIFY**: delphi code-walkthrough REQUEST_CHANGES → 用户处理 → 重新评审；browse 发现问题 → 回退 Phase 3（不暂停）
+- **Phase 5/6 SHIP**: finishing-a-development-branch (4选项) → 确认；ship PR → 用户确认合并；land-and-deploy 完成/失败 → 用户确认
+- **Phase 6/6 CLOSE**: USER ACCEPTANCE ⚠️ 必须人工验收 → 用户确认后继续；cleanup 完成/失败 → 用户确认 → 结束流程
 
 ---
 
@@ -215,28 +202,22 @@ Phase 8: CLEANUP → worktree remove + branch delete + sprint summary
 
 | Step | Phase | Name | Key Actions | Output |
 |------|-------|------|-------------|--------|
-| 1 | **-1** | **ISOLATE** | Detect protected branch → Create git worktree → Setup project → Validate .gitignore → Record sprint state | Worktree path |
-| 2 | **-0.5** | **AUTO-ESTIMATE** | Analyze code structure → Count references → Assess cross-module impact → Classify (lightweight/standard/complex) | Impact assessment + flow recommendation |
-| 3 | **0** | **THINK** | brainstorming → Generate design doc + CONTEXT.md + ADR | Design document |
-| 4 | **1** | **PLAN** | autoplan → delphi-review (mandatory; lightweight allowed) → Generate specification.yaml + slices-manifest.json | specification.yaml |
-| 5 | **2** | **BUILD** | GITHOOKS-GATE → ralph-loop (default) or parallel → TDD → freeze → blind review → verification | MVP code |
-| 6 | **3** | **REVIEW** | delphi-review --mode code-walkthrough → test-specification-alignment → browse QA → benchmark (optional) | Review report |
-| 7 | **4** | **FEEDBACK** | learn → retro → systematic-debugging | feedback-log.md |
-| 8 | **5** | **SHIP** | finishing-a-development-branch → ship (create PR) | PR URL |
-| 9 | **6** | **LAND** | land-and-deploy → merge PR → wait CI → canary health check → rollback on failure | Deploy status |
-| 10 | **7** | **USER ACCEPT** | **Manual verification** → Capture emergent issues | Emergent issues list |
-| 11 | **8** | **CLEANUP** | Safe worktree removal → Update sprint state → Sprint summary | Cleanup report |
+| 1 | **1/6** | **PREP** | Detect protected branch → Create git worktree → AUTO-ESTIMATE sizing → Classify (lightweight/standard/complex) | Worktree path + impact assessment |
+| 2 | **2/6** | **DESIGN** | brainstorming → autoplan → delphi-review (HARD-GATE ≥90% consensus) → to-issues → specification.yaml | specification.yaml + slices-manifest.json |
+| 3 | **3/6** | **BUILD** | GITHOOKS-GATE → DELPHI-GATE → ralph-loop (default) or parallel → TDD → freeze → blind review → verification | MVP code |
+| 4 | **4/6** | **VERIFY** | delphi-review --mode code-walkthrough → test-specification-alignment → browse QA → benchmark (optional) → learn + retro | Review report + feedback-log.md |
+| 5 | **5/6** | **SHIP** | finishing-a-development-branch → ship (create PR) → land-and-deploy → merge + CI + canary | PR URL + deploy status |
+| 6 | **6/6** | **CLOSE** | USER ACCEPTANCE (⚠️ mandatory manual) → Capture emergent issues → Cleanup worktree + branch → Sprint summary | Emergent issues list + cleanup report |
 
 **Phase Flow**:
 ```
-ISOLATE → AUTO-ESTIMATE → THINK → PLAN → [GITHOOKS-GATE] → BUILD → REVIEW → FEEDBACK → SHIP → LAND → USER ACCEPTANCE → CLEANUP
+PREP → DESIGN → BUILD → VERIFY → SHIP → CLOSE
 ```
 
 **Hard Gates**:
-- **Phase 0→1**: Design must be APPROVED by delphi-review (≥90% consensus)
-- **Phase 1→2**: GITHOOKS-GATE (hooks must be installed) + DELPHI-GATE (spec must be APPROVED)
-- **Phase 3→4**: feedback-log.md must exist (HARD-GATE)
-- **Phase 6→7**: User acceptance must be completed (mandatory manual step)
+- **Phase 2/6 → 3/6 (DESIGN → BUILD)**: Design must be APPROVED by delphi-review (≥90% consensus) + GITHOOKS-GATE (hooks installed) + DELPHI-GATE (spec APPROVED)
+- **Phase 4/6 → 5/6 (VERIFY → SHIP)**: feedback-log.md must exist (HARD-GATE)
+- **Phase 5/6 → 6/6 (SHIP → CLOSE)**: User acceptance must be completed (mandatory manual step)
 
 ---
 
@@ -247,159 +228,136 @@ ISOLATE → AUTO-ESTIMATE → THINK → PLAN → [GITHOOKS-GATE] → BUILD → R
 **执行每个 Phase 时，必须以以下固定格式输出阶段标题**，不可省略、不可合并、不可替换：
 
 ```markdown
-## Phase -1: ISOLATE (隔离)
-## Phase -0.5: AUTO-ESTIMATE (规模评估)
-## Phase 0: THINK (思考)
-## Phase 1: PLAN (规划)
-## Phase 2: BUILD (构建)
-## Phase 3: REVIEW (评审)
-## Phase 4: FEEDBACK (反馈)
-## Phase 5: SHIP (发布)
-## Phase 6: LAND (部署)
-## Phase 7: USER ACCEPTANCE (用户验收)
-## Phase 8: CLEANUP (清理)
+## Phase 1/6: PREP (准备工作)
+## Phase 2/6: DESIGN (设计)
+## Phase 3/6: BUILD (构建)
+## Phase 4/6: VERIFY (验证)
+## Phase 5/6: SHIP (发布)
+## Phase 6/6: CLOSE (收尾)
 ```
 
 **规则**：
-1. 每个 Phase **开始执行时必须首先输出**对应的 `## Phase X: NAME` 标题行（作为该 Phase 输出的第一行）
-2. **禁止省略** "Phase" 关键词（如不能只写 "ISOLATE" 或 "## -1"）
+1. 每个 Phase **开始执行时必须首先输出**对应的 `## Phase X/6: NAME` 标题行（作为该 Phase 输出的第一行）
+2. **禁止省略** "Phase" 关键词（如不能只写 "PREP" 或 "## 1/6"）
 3. **禁止合并**多个 Phase 的输出（每个 Phase 必须有独立标题）
-4. **格式必须精确匹配**：`## Phase ` + 数字 + `: ` + 大写英文名 + ` (中文名)`
-5. 跳过某个 Phase（如 `--resume-from build` 跳过了 -1, -0.5, 0, 1）时，不输出被跳过 Phase 的标题
+4. **格式必须精确匹配**：`## Phase X/6:` + 大写英文名 + ` (中文名)`
+5. 跳过某个 Phase（如 `--resume-from build` 跳过了 PREP, DESIGN）时，不输出被跳过 Phase 的标题
 6. 触发 `/sprint-flow` 后，**第一行输出应包含工作流阶段概览**：
 
 ```
-Sprint Flow: ISOLATE → AUTO-ESTIMATE → THINK → PLAN → BUILD → REVIEW → FEEDBACK → SHIP → LAND → USER ACCEPTANCE → CLEANUP
+Sprint Flow: PREP → DESIGN → BUILD → VERIFY → SHIP → CLOSE
 ```
 
-### Phase -1: ISOLATE（git worktree 隔离）
+### Phase 1/6: PREP (准备工作 — worktree 隔离 + 规模评估)
 
-**执行时机**: `/sprint-flow` 启动后 → Phase 0 THINK 前。**自动执行**。
+**执行时机**: `/sprint-flow` 启动后 → Phase 2/6 DESIGN 前。**自动执行**。
 
-**详细指令**: 参见 `references/phase-minus-1-isolate.md` — 包含步骤表、参数处理、错误回退、sprint-state 格式。
+**对应旧模型**: Phase -1 ISOLATE + Phase -0.5 AUTO-ESTIMATE
+
+**详细指令**: 参见 `references/phase-1-prep.md` — 包含步骤表、参数处理、错误回退、sprint-state 格式、AUTO-ESTIMATE 指标计算、路由决策。
 
 **快速参考**:
 1. 检测保护分支 (main/master/develop) → 自动创建 worktree `.worktrees/sprint/sprint-YYYY-MM-DD-NN`
 2. Sprint Lock 检测（Issue #144）— stale 锁自动覆盖，非 stale 阻断
 3. 项目 setup (`npm install`/`go mod download`/`pip install`)
 4. `.gitignore` 校验 + Sprint State 记录 + 基线测试
-5. **参数**: `--no-isolate` (跳过)，`--branch-name <name>`，`--force` (绕过保护分支)
+5. 识别需求类型 → 收集指标（引用计数、跨模块依赖、循环依赖）→ **轻量** / **标准** / **复杂**
+6. 输出评估结果 → 用户确认后按路由继续
+7. **参数**: `--no-isolate` (跳过), `--branch-name <name>`, `--force` (绕过保护分支)
 
-### Phase -0.5: AUTO-ESTIMATE（自动化规模评估与流程路由）
+### Phase 2/6: DESIGN (设计 — 需求探索 + 共识评审)
 
-**执行时机**: Phase -1 ISOLATE 完成后 → Phase 0 THINK 前。**自动执行**。
+**对应旧模型**: Phase 0 THINK + Phase 1 PLAN
 
-**详细指令**: 参见 `references/phase-minus-0-5-auto-estimate.md` — 包含步骤、决策表、输出格式、纠偏机制。
+**执行者**: orchestrator 直接执行全部步骤（交互式 skill）。
+
+**详细指令**: 参见 `references/phase-2-design.md` — 完整流程、条件分支、HARD-GATE。
 
 **快速参考**:
-1. 识别需求类型（删除/修改/新增/BugFix）→ 收集指标（引用计数、跨模块依赖、循环依赖）
-2. 综合打分 → **轻量** (≤3 ref, 同模块) / **标准** (4-10 ref, 1-2 modules) / **复杂** (>10 ref 或循环依赖)
-3. 输出评估结果（使用 `templates/auto-estimate-output-template.md`）→ 用户确认后路由至对应 Phase
-4. **所有路由必须产生** `delphi-reviewed.json` (verdict: APPROVED) 才能进入 Phase 2 BUILD
+- **Step 1: brainstorming** — `skill(name="brainstorming")` — 输出设计文档 + CONTEXT.md + ADR。**HARD-GATE**: 设计未批准 → 不可进入实现
+- **Step 2: autoplan** — `skill(name="autoplan")` — CEO/设计/工程自动评审 → 用户确认 taste_decisions
+- **Step 3: delphi-review** — `skill(name="delphi-review")` — 等待 APPROVED（非 APPROVED 暂停等待用户确认）
+- **Step 4: to-issues** — `skill(name="to-issues")` — 垂直切片 Issue 拆分 → slices-manifest.json
+- **Step 5: specification.yaml** — 从 APPROVED 设计文档自动提取
+- **Web 前端额外注入**: `design-shotgun`
+- **条件分支**: IF autoplan AUTO_APPROVED → lightweight delphi-review (2 专家、1 轮); ELSE → 标准 delphi-review (3 专家)
 
-### Phase 0: THINK（需求探索与设计）
-- **Orchestrator 直接执行**: brainstorming 是交互式 skill，**必须由 orchestrator 直接调用** `skill(name="brainstorming")`，不可 dispatch 到 subagent（Issue #217, #225, #248）
-- 输入: Phase -1 summary（worktree 路径）+ 用户原始需求
-- 输出: 结构化设计文档 → 直接作为 Phase 1 PLAN 的输入
-- **HARD-GATE**: 设计未批准 → 不可进入实现
+### Phase 2/6→3/6: GITHOOKS-GATE（质量门禁安装检查）
 
-### Phase 1: PLAN（共识评审）
-- **注意**: `autoplan`、`delphi-review` 和 `to-issues` 均为交互式 skill，**必须由 orchestrator 直接执行**（Issue #225, #248, #249）
-- **执行模式（三阶段，全部 orchestrator 直接执行）**:
-  1. **Orchestrator 直接执行 autoplan**: `skill(name="autoplan")` → 用户确认 taste_decisions
-  2. **Orchestrator 直接执行 delphi-review**: `skill(name="delphi-review")` — 等待 APPROVED（非 APPROVED 时需等待用户确认/处理）
-  3. **Orchestrator 直接执行 to-issues**: `skill(name="to-issues")` → 用户确认 Issue 拆分方案
-- 输入: phase-0-summary.md + 设计文档
-- 输出: `specification.yaml`（含 user_stories[]）+ `slices-manifest.json`
-
-**条件分支逻辑**:
-- IF autoplan AUTO_APPROVED + 无 taste_decisions → 可执行 **lightweight delphi-review**（2 专家、1 轮、2/2 APPROVED，参考 `references/force-levels.md`）
-- IF autoplan NEEDS_REVIEW OR taste_decisions > 0 → 调用标准 delphi-review（3 专家）
-- **delphi-review 必须产生** `.sprint-state/delphi-reviewed.json` 且 `verdict = "APPROVED"` → 生成 specification.yaml（含 user_stories[]） → **调用 /to-issues** 拆解为垂直切片 → slices-manifest.json → Phase 2 按 execution_order 执行
-
-### Phase 1→2: GITHOOKS-GATE（质量门禁安装检查）
-
-**执行时机**: Phase 1 完全通过、准备进入 Phase 2 BUILD 之前.
+**执行时机**: Phase 2/6 DESIGN 完全通过、准备进入 Phase 3/6 BUILD 之前。
 
 **必须执行**: 运行 `githooks/verify.sh` 检查当前项目的 hooks 是否安装。
 
 **检查结果处理**:
-- ✅ 全部存在 → 进入 Phase 2 BUILD 入口（仍必须先执行 DELPHI-GATE）
+- ✅ 全部存在 → 进入 Phase 3/6 BUILD 入口（仍必须先执行 DELPHI-GATE）
 - ❌ 部分/全部缺失 → 运行 `githooks/install.sh` 安装（包括 `.git/hooks/pre-commit`、`.git/hooks/pre-push`、`githooks/adapter-common.sh`、`githooks/adapters/`）
   - 如果 githooks/ 目录不存在于项目根目录（即当前项目不是 xp-gate） → 从 xp-gate 仓库拉取 `githooks/` 目录结构
   - 安装完成后再次 `verify.sh` 确认
 
 **核心原则**: 没有质量门禁的代码不可进入 BUILD 阶段。**GITHOOKS-GATE 失败 → 不可编码。**
 
-### Phase 2: BUILD（ralph-loop 默认 + TDD + 盲评 + 验证）
+### Phase 3/6: BUILD (构建 — ralph-loop 默认 + TDD + 盲评 + 验证)
 
-**详细指令**: 参见 `references/phase-2-build.md`。
+**对应旧模型**: Phase 2 BUILD（功能不变）
+
+**详细指令**: 参见 `references/phase-3-build.md`。
 
 **快速参考**:
 1. **DELPHI-GATE**: 验证 `.sprint-state/delphi-reviewed.json` 存在且 `verdict = "APPROVED"` → 否则 BLOCK
-2. **输入**: `slices-manifest.json`（Phase 1 生成），按 `execution_order` 逐个执行
+2. **输入**: `slices-manifest.json`（Phase 2/6 生成），按 `execution_order` 逐个执行
 3. **模式**: 默认 `ralph-loop`（逐 REQ 迭代，token 节约 40-67%），可选 `--mode parallel`
 4. **Skill 步骤**: hooks-install → dispatching-parallel-agents → TDD (RED/GREEN/REFACTOR) → freeze → blind-review → unfreeze → verification-before-completion → 成本监控
 5. **Mock Minimization**: integration-first, mock 仅限 external services, 密度 > 30% 需 `@mock-justified`
 
-### Phase 3: REVIEW + TEST（验证）
+### Phase 4/6: VERIFY (验证 — 代码走查 + QA + 反馈获取)
+
+**对应旧模型**: Phase 3 REVIEW + Phase 4 FEEDBACK
+
+**详细指令**: 参见 `references/phase-4-verify.md`。
+
+**快速参考**:
 - **Orchestrator 直接执行**: delphi-review code-walkthrough 需要用户确认 verdict（Issue #249），**必须由 orchestrator 直接调用** `skill(name="delphi-review")`
-- **Orchestrator 按序执行**: `delphi-review --mode code-walkthrough` → 等待 APPROVED → `test-specification-alignment` → `browse` (gstack) → 可选 `qa`/`design-review`/`benchmark` (gstack)
-- 输入: phase-2-summary.md + MVP 代码
-- 输出: 评审报告 + 测试对齐结果
+- **执行顺序**: `delphi-review --mode code-walkthrough` → 等待 APPROVED → `test-specification-alignment` → `browse` (gstack) → 可选 `qa`/`design-review`/`benchmark` (gstack)
+- **Feedback 子阶段**: `learn` (Sprint 级复盘) + `retro` (工程回顾) + 可选 `systematic-debugging` (根因调试)
+- **Subagent**: `task(category="quick", load_skills=["learn", "retro", "systematic-debugging"])`
+- 输出: 评审报告 + feedback-log.md
+- **HARD-GATE**: feedback-log.md must exist before Phase 5/6
 
 ### 负载/压力测试（可选）
+
 - **适用项目**：主要用于后端服务的压力测试 (k6/Locust/Gatling)，Web 前端已有 `benchmark` 技能覆盖 Core Web Vitals、加载时间和资源大小等性能指标
-- **Phase 3 技能注入**：可根据项目类型自动选择合适的负载测试工具 (`k6` for Go-based services, `locust` for Python services, `gatling` for JVM-based services)  
-- **集成方式**：可作为 Phase 3 的可选扩展，在 code-walkthrough 之后执行，与基准测试形成完整性能验证链条
+- **Phase 4/6 技能注入**：可根据项目类型自动选择合适的负载测试工具 (`k6` for Go-based services, `locust` for Python services, `gatling` for JVM-based services)
+- **集成方式**：可作为 Phase 4/6 的可选扩展，在 code-walkthrough 之后执行，与基准测试形成完整性能验证链条
 - **配置文件**：通过 `.sprint-load-test.yaml` 进行配置（待实现），包含并发用户数、持续时间、SLA 指标等参数
 - **触发条件**：后端项目可通过 `--type backend-*` 自动启用，或通过 `--with-performance` 标志手动启用
 - **Web 项目补充说明**：对于 Web 前端项目，现有的 `benchmark` 技能已处理页面加载性能、Core Web Vitals 等前端性能指标；负载/压力测试主要针对服务器端承载能力
 
-### Phase 4: FEEDBACK CAPTURE（反馈获取）
-- **Subagent**: `task(category="quick", load_skills=["learn", "retro", "systematic-debugging"])`
-- 输入: phase-3-summary.md + review-report.md → 输出: `feedback-log.md`
-- **HARD-GATE**: 不可跳过。`learn` (Sprint 级复盘, 默认提炼模板) + `retro` (工程回顾) + `systematic-debugging` (根因调试)
+### Phase 5/6: SHIP (发布 — 发布准备 + 合并部署)
 
-### Phase 5: SHIP（发布准备）
+**对应旧模型**: Phase 5 SHIP + Phase 6 LAND
 
-**详细指令**: 参见 `references/phase-6-ship.md` — GITHOOKS-GATE / VERSION-GATE / VERSION CHANGESET (Issue #142) / changeset schema。
+**详细指令**: 参见 `references/phase-5-ship.md` — GITHOOKS-GATE / VERSION-GATE / VERSION CHANGESET (Issue #142) / changeset schema。
 
 **快速参考**:
 - **Orchestrator 直接执行**: `finishing-a-development-branch` 和 `ship` 均为交互式 skill（4 选项菜单 + PR 确认），**必须由 orchestrator 直接调用** `skill(name="finishing-a-development-branch")` 和 `skill(name="ship")`
 - 输入: phase-4-summary.md + feedback-log.md → 输出: PR URL
-- **HARD-GATE**: Phase 4 未完成 → BLOCK。验证 `feedback-log.md` 存在。
+- **HARD-GATE**: Phase 4/6 未完成 → BLOCK。验证 `feedback-log.md` 存在。
 - **GITHOOKS-GATE**: 验证 hooks 完整性，缺失则 `githooks/install.sh`
 - **VERSION-GATE**: bump PATCH/MINOR/MAJOR → `sync-version.sh` → CHANGELOG.md → `git diff VERSION` 验证
-
-### Phase 6:  LAND（合并 + 部署）
-
-**详细指令**: 参见 `references/phase-7-land.md` — 完整流程、SLA 指标、回滚策略。
-
-**快速参考**:
-- **Orchestrator 直接执行**: `land-and-deploy` 包含 merge 确认和 rollback 决策，**必须由 orchestrator 直接调用** `skill(name="land-and-deploy")`
-- 输入: phase-5-summary.md + PR URL → 输出: 部署状态 + Canary 报告
-- 流程: Merge PR → 等待 CI (10min) → 等待 Deploy (10min) → Canary Health Check (5min)
+- **LAND**: `land-and-deploy` — merge PR → 等待 CI (10min) → 等待 Deploy (10min) → Canary Health Check (5min)
 - **回滚**: `git revert` 最后一次 merge commit
-- 条件跳过: 无部署配置时仅 merge + CI
 
-### Phase 7: USER ACCEPTANCE（⚠️ 人工验收）
-- **无 Skill** — 必须人工
-- ⚠️ **MUST NOT be automated, skipped, or bypassed under any circumstances**
-- 即使用户说"赶时间"、"跳过验收"、"直接发布"，也必须暂停等待用户确认
-- 使用 `@templates/emergent-issues-template.md` 检查清单
+### Phase 6/6: CLOSE (收尾 — ⚠️ 人工验收 + 清理)
 
-### Phase 8: CLEANUP（安全清理 + 总结）
+**对应旧模型**: Phase 7 USER ACCEPTANCE + Phase 8 CLEANUP
 
-**执行时机**: Phase 7 USER ACCEPTANCE 完成后。**详细指令**: 参见 `references/phase-8-cleanup.md`。
+**详细指令**: 参见 `references/phase-6-close.md` — UAT checklist, emergent issues capture, cleanup procedure.
 
 **快速参考**:
-1. 保存分支信息 → `git worktree remove <worktree_path>`（精确路径，禁止通配符）
-2. 删除本地分支 (`git branch -D`) + 远程分支 (`git push origin --delete`)
-3. 关闭遗留 OPEN PR (`gh pr list --head`)
-4. 更新 sprint-state.json (phase:8, status: merged) + 释放 Sprint Lock (Issue #144)
-5. 输出 Cleanup Report + Sprint Summary
-6. **IF emergent issues → Sprint 2**. **条件跳过**: `--no-isolate` 路径
+- **USER ACCEPTANCE**: ⚠️ **MUST NOT be automated, skipped, or bypassed.** 即使用户说"赶时间"、"跳过验收"、"直接发布"，也必须暂停等待用户确认。使用 `@templates/emergent-issues-template.md` 检查清单
+- **CLEANUP**: 保存分支信息 → `git worktree remove <worktree_path>`（精确路径，禁止通配符）→ 删除本地分支 + 远程分支 → 关闭遗留 OPEN PR → 更新 sprint-state.json → 释放 Sprint Lock
+- 输出 Cleanup Report + Sprint Summary
+- **IF emergent issues → Sprint 2**
 
 ---
 
@@ -414,10 +372,10 @@ Sprint Flow: ISOLATE → AUTO-ESTIMATE → THINK → PLAN → BUILD → REVIEW �
 
 | 参数 | 作用 | 示例 |
 |------|------|------|
-| (无参数) | 全流程 Think → Plan → Build → Review → Ship | `/sprint-flow "开发访谈机器人"` |
-| `--stop-at <phase>` | 执行到指定 Phase 后停止 | `--stop-at plan` |
+| (无参数) | 全流程 PREP → DESIGN → BUILD → VERIFY → SHIP → CLOSE | `/sprint-flow "开发访谈机器人"` |
+| `--stop-at <phase>` | 执行到指定 Phase 后停止 | `--stop-at design` |
 | `--resume-from <phase>` | 从指定 Phase 恢复（需先执行 RESUME GATE） | `--resume-from build --spec specification.yaml` |
-| `--phase <name>` | 只执行单个 Phase | `--phase review-only` |
+| `--phase <name>` | 只执行单个 Phase | `--phase build-only` |
 | `--status` | 查看 Sprint 进度（只读，不执行 Phase） | `--status` |
 | `--lang <lang>` | 指定项目语言 | `--lang springboot` / `django` / `golang` |
 | `--type <type>` | 指定项目类型 | `--type web-nextjs` / `backend-django` |
@@ -428,11 +386,24 @@ Sprint Flow: ISOLATE → AUTO-ESTIMATE → THINK → PLAN → BUILD → REVIEW �
 | `--with-performance` | 启用负载/压力测试 | `--with-performance` |
 | `--mode <mode>` | 构建模式（ralph-loop / parallel） | `--mode ralph-loop` |
 
+**Backward Compatible Parameter Mapping** (`--stop-at` / `--resume-from` / `--phase`):
+
+| Legacy Value | Maps To |
+|-------------|---------|
+| `isolate`, `isolate-only` | `prep`, `prep-only` |
+| `think`, `think-only` | `design`, `design-only` |
+| `plan`, `plan-only` | `design`, `design-only` |
+| `build`, `build-only` | `build`, `build-only` |
+| `review`, `review-only` | `verify`, `verify-only` |
+| `ship`, `ship-only` | `ship`, `ship-only` |
+| `land`, `land-only` | `ship`, `ship-only` |
+| `cleanup`, `cleanup-only` | `close`, `close-only` |
+
 **`--status` 行为规则**:
 - 执行 `node scripts/render-sprint-progress.cjs`，读取 `.sprint-state/sprint-state.json` 并渲染 ASCII 进度看板
 - 如果 `sprint-state.json` 不存在 → `[INFO] 未找到活跃的 Sprint`
 - 如果 `status == "completed"` → 输出完整看板 + `[INFO] Sprint 已完成。`
-- `--status` 可与其他参数组合：`--status --resume-from build` → 先展示状态，再提示 "将从 Phase 2 BUILD 继续"
+- `--status` 可与其他参数组合：`--status --resume-from build` → 先展示状态，再提示 "将从 Phase 3/6 BUILD 继续"
 
 **`--resume-from` 限制**：校验为**尽力而为**（git commit 可被 GC 回收、文件 mtime 可被 `git checkout` 修改）。校验失败时输出完整诊断日志，建议启动新 Sprint。
 
@@ -454,15 +425,12 @@ Sprint Flow: ISOLATE → AUTO-ESTIMATE → THINK → PLAN → BUILD → REVIEW �
 
 | Phase | Backend (default) | Web Frontend | Mobile | Load Test |
 |-------|------------------|-------------|--------|-----------|
-| 0 THINK | `brainstorming` | (同) | (同) | (通用) |
-| 1 PLAN | `autoplan` + `delphi-review` | + `design-shotgun` | (同 web) | (同) |
-| 2 BUILD | TDD + blind-review | (同 backend) | + `vercel-react-native-skills` / `flutter-review` | (同) |
-| 3 REVIEW | `delphi-review --mode code-walkthrough` + `test-specification-alignment` + k6/locust/gatling | + `qa` + `design-review` + `benchmark` | Flutter: `flutter-test` / RN: `detox E2E` | k6/locust/gatling |
-| 4 FEEDBACK | `learn` + `retro` | (同) | (同) | (同) |
-| 5 SHIP | `finishing-a-development-branch` + `ship` | (同) | + platform deploy | (同) |
-| 6 LAND | `land-and-deploy` + canary | (同) | (同) | (同) |
-| 7 USER ACCEPTANCE | — 人工验收 | (同) | (同) | (同) |
-| 8 CLEANUP | worktree remove + branch delete + state update | (同) | (同) | (同) |
+| 2/6 DESIGN | `brainstorming` + `autoplan` + `delphi-review` | + `design-shotgun` | (同 web) | (通用) |
+| 3/6 BUILD | TDD + blind-review | (同 backend) | + `vercel-react-native-skills` / `flutter-review` | (同) |
+| 4/6 VERIFY | `delphi-review --mode code-walkthrough` + `test-specification-alignment` + k6/locust/gatling | + `qa` + `design-review` + `benchmark` | Flutter: `flutter-test` / RN: `detox E2E` | k6/locust/gatling |
+| 4/6 VERIFY (Feedback) | `learn` + `retro` | (同) | (同) | (同) |
+| 5/6 SHIP | `finishing-a-development-branch` + `ship` + `land-and-deploy` | (同) | + platform deploy | (同) |
+| 6/6 CLOSE | — 人工验收 → cleanup | (同) | (同) | (同) |
 | Browse | `localhost:3000` | 部署 URL + 表单/交互 | Flutter Web / RN Web | (专用) |
 
 **Mobile 工具链**: Flutter — `flutter analyze/test/build/pub publish`; RN — `metro/detox/jest/react-native run-ios/android`
@@ -473,7 +441,7 @@ Sprint Flow: ISOLATE → AUTO-ESTIMATE → THINK → PLAN → BUILD → REVIEW �
 
 **Sprint State**: 存储于 `<project-root>/.sprint-state/` — `sprint-state.yaml`/`.json` + `phase-outputs/` (pain-document.md / specification.yaml / mvp-v1 / review-report.md / emergent-issues.md / feedback-log.md / sprint-summary.md)
 
-**Sprint 2 自动触发**: Phase 7 完成时 — `emergent_issues_count == 0` → 结束; `> 0` → Critical 自动启动 Sprint 2, Major/Minor 询问用户
+**Sprint 2 自动触发**: Phase 6/6 CLOSE 完成时 — `emergent_issues_count == 0` → 结束; `> 0` → Critical 自动启动 Sprint 2, Major/Minor 询问用户
 
 ---
 
@@ -482,17 +450,17 @@ Sprint Flow: ISOLATE → AUTO-ESTIMATE → THINK → PLAN → BUILD → REVIEW �
 **编排器必须在每个 Phase 完成后更新 `.sprint-state/sprint-state.json`**：
 
 1. **Phase 完成后立即更新**（每个 Phase 结束前）：
-   - `phase`: 更新为当前 Phase 编号（如 `0`, `1`, `2`...）
+   - `phase`: 更新为当前 Phase 编号（如 `1`, `2`, `3`...）
    - `status`: 更新为 `"completed"`（已完成 Phase）
    - `phase_history`: 追加新条目
 
 2. **`phase_history` 数组条目 schema**：
    ```json
    {
-     "phase": 0,
-     "phase_name": "THINK",
+     "phase": 1,
+     "phase_name": "PREP",
      "status": "completed",
-     "timestamp": "2026-06-20T10:30:00Z"
+     "timestamp": "2026-07-08T10:30:00Z"
    }
    ```
 
@@ -504,21 +472,19 @@ Sprint Flow: ISOLATE → AUTO-ESTIMATE → THINK → PLAN → BUILD → REVIEW �
 4. **完整 sprint-state.json 示例**：
    ```json
    {
-     "id": "sprint-2026-06-20-01",
-     "phase": 2,
+     "id": "sprint-2026-07-08-01",
+     "phase": 3,
      "status": "in_progress",
      "phase_history": [
-       {"phase": -1, "phase_name": "ISOLATE", "status": "completed", "timestamp": "2026-06-20T10:00:00Z"},
-       {"phase": -0.5, "phase_name": "AUTO-ESTIMATE", "status": "completed", "timestamp": "2026-06-20T10:05:00Z"},
-       {"phase": 0, "phase_name": "THINK", "status": "completed", "timestamp": "2026-06-20T10:15:00Z"},
-       {"phase": 1, "phase_name": "PLAN", "status": "completed", "timestamp": "2026-06-20T10:30:00Z"}
+       {"phase": 1, "phase_name": "PREP", "status": "completed", "timestamp": "2026-07-08T10:00:00Z"},
+       {"phase": 2, "phase_name": "DESIGN", "status": "completed", "timestamp": "2026-07-08T10:30:00Z"}
      ],
      "isolation": {
-       "worktree_path": "/home/boyingliu01/projects/xp-gate/.worktrees/sprint/sprint-2026-06-20-01",
-       "branch": "sprint/2026-06-20-01"
+       "worktree_path": "/home/boyingliu01/projects/xp-gate/.worktrees/sprint/sprint-2026-07-08-01",
+       "branch": "sprint/2026-07-08-01"
      },
      "outputs": {
-       "pain_document": "phase-outputs/phase-0-summary.md",
+       "pain_document": "phase-outputs/phase-2-summary.md",
        "specification": "phase-outputs/specification.yaml"
      },
      "metrics": {
@@ -527,15 +493,17 @@ Sprint Flow: ISOLATE → AUTO-ESTIMATE → THINK → PLAN → BUILD → REVIEW �
    }
    ```
 
+**Backward compat**: Old sprint-state.json files using negative/legacy phase numbers (`-1`, `-0.5`, `0`..`8`) remain readable. Dashboard renders them as-is. New sprints use phase numbers 1-6.
+
 ---
 
 ## 使用示例
 
 | 场景 | 命令 | 说明 |
 |------|------|------|
-| 完整流水线 | `/sprint-flow "开发访谈机器人"` | 自动执行 11 阶段 → specification.yaml + PR URL |
-| 规划后停止 | `/sprint-flow "开发认证模块" --stop-at plan` | 输出 specification.yaml 后停止，供评审 |
-| 仅构建阶段 | `/sprint-flow "开发 API" --lang django --phase build-only` | 跳过隔离/规划，直接 Build |
+| 完整流水线 | `/sprint-flow "开发访谈机器人"` | 自动执行 6 阶段 → specification.yaml + PR URL |
+| 设计后停止 | `/sprint-flow "开发认证模块" --stop-at design` | 输出 specification.yaml 后停止，供评审 |
+| 仅构建阶段 | `/sprint-flow "开发 API" --lang django --phase build-only` | 跳过准备/设计，直接 Build |
 
 ## 底层 Skills 保持独立
 
@@ -548,11 +516,11 @@ Sprint Flow: ISOLATE → AUTO-ESTIMATE → THINK → PLAN → BUILD → REVIEW �
 | 错误 | 正确 |
 |------|------|
 | 把普通问答、解释、代码检索请求路由到 sprint-flow | 仅在用户明确要求开发/实现/一键开发完整需求时触发 sprint-flow |
-| 跳过 Phase -1 隔离，直接在 main/master/develop 上改代码 | 默认创建 worktree；除非用户显式使用 `--no-isolate` 或 `--force` 并确认风险 |
-| 未完成 Phase -0.5 AUTO-ESTIMATE 就套用完整重流程 | 先评估轻量/标准/复杂，再按推荐流程或用户确认后的流程执行 |
-| Plan 阶段跳过 Delphi 评审直接 Build | 所有需求级别（轻量/标准/复杂）必须经过 autoplan + delphi-review；未 APPROVED 禁止编码 |
-| 跳过 TDD 直接实现代码 | Phase 2 必须遵循 RED → GREEN → REFACTOR，测试与实现一起交付 |
-| 跳过用户验收直接 Ship | Phase 7 USER ACCEPTANCE 必须人工完成；不得自动化、跳过或伪造 |
+| 跳过 Phase 1/6 PREP 隔离，直接在 main/master/develop 上改代码 | 默认创建 worktree；除非用户显式使用 `--no-isolate` 或 `--force` 并确认风险 |
+| 未完成 PREP AUTO-ESTIMATE 就套用完整重流程 | 先评估轻量/标准/复杂，再按推荐流程或用户确认后的流程执行 |
+| DESIGN 阶段跳过 Delphi 评审直接 BUILD | 所有需求级别（轻量/标准/复杂）必须经过 autoplan + delphi-review；未 APPROVED 禁止编码 |
+| 跳过 TDD 直接实现代码 | Phase 3/6 BUILD 必须遵循 RED → GREEN → REFACTOR，测试与实现一起交付 |
+| 跳过用户验收直接 Ship | Phase 6/6 CLOSE USER ACCEPTANCE 必须人工完成；不得自动化、跳过或伪造 |
 | 验证失败后继续追加随机修改 | 最多 3 次修复循环；仍失败则 BLOCK 并请求用户决策 |
 | 未生成 Phase Summary 就进入下一阶段 | 每个 Phase 必须写入 `.sprint-state/phase-outputs/phase-{N}-summary.md` 并通过 transition gate |
 
@@ -576,31 +544,30 @@ See [Output Contract](#output-contract) below for the canonical machine-readable
 
 详细指令文件位于 `@references/`:
 
-> ⚠️ **Filename numbering note**: Reference filenames use legacy numbering that does NOT match the canonical phase numbers in this document. The table below provides the correct mapping.
+| File | Phase | Phase Name | Maps From (Old) |
+|------|-------|------------|-----------------|
+| `@references/phase-1-prep.md` | 1/6 | PREP | Phase -1 ISOLATE + Phase -0.5 AUTO-ESTIMATE |
+| `@references/phase-2-design.md` | 2/6 | DESIGN | Phase 0 THINK + Phase 1 PLAN |
+| `@references/phase-3-build.md` | 3/6 | BUILD | Phase 2 BUILD |
+| `@references/phase-4-verify.md` | 4/6 | VERIFY | Phase 3 REVIEW + Phase 4 FEEDBACK |
+| `@references/phase-5-ship.md` | 5/6 | SHIP | Phase 5 SHIP + Phase 6 LAND |
+| `@references/phase-6-close.md` | 6/6 | CLOSE | Phase 7 USER ACCEPTANCE + Phase 8 CLEANUP |
 
-| File | Canonical Phase | Phase Name |
-|------|----------------|------------|
-| `@references/phase-minus-1-isolate.md` | Phase -1 | ISOLATE |
-| `@references/phase-minus-0-5-auto-estimate.md` | Phase -0.5 | AUTO-ESTIMATE |
-| `@references/phase-0-think.md` | Phase 0 | THINK |
-| `@references/phase-1-plan.md` | Phase 1 | PLAN |
-| `@references/phase-2-build.md` | Phase 2 | BUILD |
-| `@references/phase-3-review.md` | Phase 3 | REVIEW |
-| `@references/phase-5-feedback.md` | Phase 4 | FEEDBACK (⚠️ filename says phase-5) |
-| `@references/phase-6-ship.md` | Phase 5 | SHIP (⚠️ filename says phase-6) |
-| `@references/phase-7-land.md` | Phase 6 | LAND (⚠️ filename says phase-7) |
-| `@references/phase-4-uat.md` | Phase 7 | USER ACCEPTANCE (⚠️ filename says phase-4) |
-| `@references/phase-8-cleanup.md` | Phase 8 | CLEANUP |
+Additional reference files:
+- `@references/force-levels.md` — Phase forcing rules
+- `@references/orchestration-rules.md` — Orchestration layer rules
+- `@references/components/` — Reusable phase building blocks
 
 ---
 
 ## Templates
 
 模板文件位于 `@templates/`:
-- `@templates/pain-document-template.md` — Pain Document 模板
-- `@templates/emergent-issues-template.md` — Emergent Issues 检查清单
-- `@templates/sprint-summary-template.md` — Sprint Summary 模板
+- `@templates/pain-document-template.md` — Pain Document 模板 (Phase 2/6 DESIGN)
+- `@templates/emergent-issues-template.md` — Emergent Issues 检查清单 (Phase 6/6 CLOSE)
+- `@templates/sprint-summary-template.md` — Sprint Summary 模板 (Phase 6/6 CLOSE)
 - `@templates/sprint-progress-template.md` — Sprint 进度看板（每个 Phase 完成后 + `--status` 查询时渲染）
+- `@templates/auto-estimate-output-template.md` — AUTO-ESTIMATE 输出格式 (Phase 1/6 PREP)
 
 ---
 
@@ -608,41 +575,36 @@ See [Output Contract](#output-contract) below for the canonical machine-readable
 
 | 证据 | 来源 | 应用 |
 |------|------|------|
-| One-shot = 单次迭代执行 | Boris Cherny interview | Phase 2 设计 |
-| 80% session 从 Plan Mode 开始 | Boris skill | Phase 1 设计 |
-| Verification improves 2-3x | Boris #1 tip | Phase 3 设计 |
-| Emergent requirements 无法消除 | Mike Cohn, Rafael Santos | Phase 7 人工设计 |
-| 78% failures invisible | arXiv research | Phase 7 必要性证明 |
+| One-shot = 单次迭代执行 | Boris Cherny interview | Phase 3/6 BUILD 设计 |
+| 80% session 从 Plan Mode 开始 | Boris skill | Phase 2/6 DESIGN 设计 |
+| Verification improves 2-3x | Boris #1 tip | Phase 4/6 VERIFY 设计 |
+| Emergent requirements 无法消除 | Mike Cohn, Rafael Santos | Phase 6/6 CLOSE 人工设计 |
+| 78% failures invisible | arXiv research | Phase 6/6 必要性证明 |
 | Think → Plan → Build → Ship | gstack ETHOS | 整体流程设计 |
 
 ---
 
 ## Phase Flow Consistency
 
-This section documents the canonical 11-phase order to ensure all future edits keep the phase sequence synchronized across all locations in this document and its reference files.
+This section documents the canonical 6-phase order to ensure all future edits keep the phase sequence synchronized across all locations in this document and its reference files.
 
-**Canonical Phase Order** (Phase -1, -0.5, 0..8):
+**Canonical Phase Order** (Phase 1/6..6/6):
 
 | Phase # | Name | Phase # | Name |
 |---------|------|---------|------|
-| -1 | ISOLATE | 4 | FEEDBACK |
-| -0.5 | AUTO-ESTIMATE | 5 | SHIP |
-| 0 | THINK | 6 | LAND |
-| 1 | PLAN | 7 | USER ACCEPTANCE |
-| 2 | BUILD | 8 | CLEANUP |
-| 3 | REVIEW | | |
+| 1/6 | PREP | 4/6 | VERIFY |
+| 2/6 | DESIGN | 5/6 | SHIP |
+| 3/6 | BUILD | 6/6 | CLOSE |
 
 **Locations that MUST keep this order synchronized**:
-1. **Frontmatter `workflow_steps`** (lines ~40-51): Phase list
-2. **Frontmatter `description` trigger text** (line ~16): Flow string
-3. **Body "完整流程" section** (lines ~115-127): Phase descriptions in order
-4. **Body "Phase Flow" diagram** (line ~164): ASCII flow diagram
-5. **Body "强制输出格式规范" section** (line ~204): Output format
-6. **Body "Workflow Steps" table** (lines ~149-162): Step/Phase table
-7. **Body "References" section** (lines ~516-521): Reference file list
-8. **`references/orchestration-rules.md` Phase Subagent Dispatch Matrix**: Phase/Name order
-9. **`references/phase-4-uat.md`**: Phase 7 USER ACCEPTANCE (⚠️ file named phase-4, phase number is 7)
-10. **`references/phase-5-feedback.md`**: Phase 4 FEEDBACK (⚠️ file named phase-5, phase number is 4)
+1. **Frontmatter `workflow_steps`** — Phase list
+2. **Frontmatter `description` trigger text** — Flow string
+3. **Body "完整流程" section** — Phase descriptions in order
+4. **Body "Phase Flow" diagram** — ASCII flow diagram
+5. **Body "强制输出格式规范" section** — Output format
+6. **Body "Workflow Steps" table** — Step/Phase table
+7. **Body "References" section** — Reference file list
+8. **`references/orchestration-rules.md` Phase Subagent Dispatch Matrix** — Phase/Name order
+9. **`references/force-levels.md`** — Phase references
 
-**⚠️ Known naming discrepancy**: Reference files use legacy numbering (`phase-4-uat.md` for Phase 7, `phase-5-feedback.md` for Phase 4, `phase-6-ship.md` for Phase 5, `phase-7-land.md` for Phase 6). The canonical phase NUMBER is determined by the `Phase #` column above — reference file names are mapped via the References section, not by their filename digits.
-
+**⚠️ Migration from old 11-phase model (v2.0)**: The 6-phase model was introduced in Issue #290 to reduce cognitive load. Old sprint-state.json files with negative/legacy phase numbers remain backward-compatible.

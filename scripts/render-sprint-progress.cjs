@@ -13,20 +13,141 @@
 const fs = require('fs');
 const path = require('path');
 
-// ── Phase definitions (ordered, 11 phases) ──────────────────────────────
+// ── Phase definitions (ordered, 6 phases — compact redesign v2) ─────────
+// Old 11-phase → New 6-phase mapping:
+//   -1 ISOLATE + -0.5 AUTO-ESTIMATE → 1 PREP
+//   0 THINK + 1 PLAN                → 2 DESIGN
+//   2 BUILD                         → 3 BUILD
+//   3 REVIEW + 4 FEEDBACK           → 4 VERIFY
+//   5 SHIP + 6 LAND                 → 5 SHIP
+//   7 USER ACCEPTANCE + 8 CLEANUP   → 6 CLOSE
 const PHASES = [
-  { num: -1,   name: 'ISOLATE',       label: 'Phase -1  ' },
-  { num: -0.5, name: 'AUTO-ESTIMATE', label: 'Phase -0.5' },
-  { num: 0,    name: 'THINK',         label: 'Phase 0   ' },
-  { num: 1,    name: 'PLAN',          label: 'Phase 1   ' },
-  { num: 2,    name: 'BUILD',         label: 'Phase 2   ' },
-  { num: 3,    name: 'REVIEW',        label: 'Phase 3   ' },
-  { num: 4,    name: 'USER ACCEPT',   label: 'Phase 4   ' },
-  { num: 5,    name: 'FEEDBACK',      label: 'Phase 5   ' },
-  { num: 6,    name: 'SHIP',          label: 'Phase 6   ' },
-  { num: 7,    name: 'LAND',          label: 'Phase 7   ' },
-  { num: 8,    name: 'CLEANUP',       label: 'Phase 8   ' },
+  { num: 1, name: 'PREP',   label: 'Phase 1/6' },
+  { num: 2, name: 'DESIGN', label: 'Phase 2/6' },
+  { num: 3, name: 'BUILD',  label: 'Phase 3/6' },
+  { num: 4, name: 'VERIFY', label: 'Phase 4/6' },
+  { num: 5, name: 'SHIP',   label: 'Phase 5/6' },
+  { num: 6, name: 'CLOSE',  label: 'Phase 6/6' },
 ];
+
+// ── Legacy phase number → new phase number mapping (backward compat) ────
+// Only map numbers that are UNAMBIGUOUSLY legacy:
+//   - Negative numbers (-1, -0.5) are always legacy
+//   - 0 is always legacy (THINK, doesn't exist in new model)
+//   - 7, 8 are always legacy (USER ACCEPTANCE, CLEANUP — not in new model's 1-6)
+// Numbers 1-6 are ambiguous (could be old or new), so they are NOT mapped here.
+// For legacy 1-6, the phase_history entry's phase_name provides disambiguation.
+const LEGACY_PHASE_MAP = {
+  '-1': 1,         // ISOLATE → PREP
+  '-0.5': 1,      // AUTO-ESTIMATE → PREP
+  '0': 2,          // THINK → DESIGN
+  '7': 6,          // USER ACCEPTANCE → CLOSE
+  '8': 6,          // CLEANUP → CLOSE
+};
+
+/**
+ * Detect whether a sprint-state uses legacy 11-phase or new 6-phase model.
+ * Legacy markers: negative phase numbers, 0, 7, 8, or legacy phase names.
+ * @param {object} state
+ * @returns {boolean}
+ */
+function isLegacyState(state) {
+  // Explicit schema version check
+  if (state.schema_version === 2 || state.phase_model === 'compact') {
+    return false;
+  }
+  // Check currentPhase for unambiguous legacy numbers
+  const cp = state.phase;
+  if (cp !== undefined && cp !== null) {
+    const key = String(cp);
+    if (['-1', '-0.5', '0', '7', '8'].includes(key)) return true;
+  }
+  // Check phase_history for legacy markers
+  const history = state.phase_history;
+  if (history) {
+    for (const h of history) {
+      const key = String(h.phase);
+      if (['-1', '-0.5', '0', '7', '8'].includes(key)) return true;
+      // Also check phase_name for legacy names that don't exist in new model
+      if (h.phase_name && LEGACY_ONLY_NAMES[h.phase_name]) return true;
+    }
+  }
+  return false;
+}
+
+// Phase names that only exist in legacy model (not in new 6-phase)
+const LEGACY_ONLY_NAMES = {
+  'ISOLATE': true,
+  'AUTO-ESTIMATE': true,
+  'THINK': true,
+  'PLAN': true,
+  'REVIEW': true,
+  'FEEDBACK': true,
+  'LAND': true,
+  'USER ACCEPT': true,
+  'USER ACCEPTANCE': true,
+};
+
+// Legacy phase names → new phase numbers (for phase_name based disambiguation)
+const LEGACY_PHASE_NAMES = {
+  'ISOLATE': 1,
+  'AUTO-ESTIMATE': 1,
+  'THINK': 2,
+  'PLAN': 2,
+  'BUILD': 3,
+  'REVIEW': 4,
+  'USER ACCEPT': 6,
+  'USER ACCEPTANCE': 6,
+  'FEEDBACK': 4,
+  'SHIP': 5,
+  'LAND': 5,
+  'CLEANUP': 6,
+};
+
+// Legacy phase numbers 1-6 → new phase numbers (only applied when isLegacyState)
+const LEGACY_NUM_MAP_1_6 = {
+  1: 2,   // PLAN → DESIGN
+  2: 3,   // BUILD → BUILD
+  3: 4,   // REVIEW → VERIFY
+  4: 4,   // FEEDBACK → VERIFY
+  5: 5,   // SHIP → SHIP
+  6: 5,   // LAND → SHIP
+};
+
+/**
+ * Normalize a phase number: if it's a legacy number, map to new.
+ * @param {number} phaseNum
+ * @param {boolean} isLegacy - if true, treat 1-6 as legacy numbers too
+ * @returns {number}
+ */
+function normalizePhaseNum(phaseNum, isLegacy) {
+  const key = String(phaseNum);
+  // Unambiguous legacy numbers always map
+  if (LEGACY_PHASE_MAP[key] !== undefined) {
+    return LEGACY_PHASE_MAP[key];
+  }
+  // Ambiguous 1-6: only map if we know this is a legacy state
+  if (isLegacy && LEGACY_NUM_MAP_1_6[phaseNum] !== undefined) {
+    return LEGACY_NUM_MAP_1_6[phaseNum];
+  }
+  return phaseNum;
+}
+
+/**
+ * Normalize a phase_history entry to new phase number.
+ * Uses phase_name for disambiguation when available.
+ * @param {{phase: number, phase_name?: string}} entry
+ * @param {boolean} isLegacy
+ * @returns {number}
+ */
+function normalizeHistoryPhase(entry, isLegacy) {
+  // If entry has phase_name and it's a legacy name, use name-based mapping
+  if (entry.phase_name && LEGACY_PHASE_NAMES[entry.phase_name] !== undefined) {
+    return LEGACY_PHASE_NAMES[entry.phase_name];
+  }
+  // Fall back to number-based mapping
+  return normalizePhaseNum(entry.phase, isLegacy);
+}
 
 const STATUS_ICONS = {
   completed: '\u2705',
@@ -44,23 +165,25 @@ const PROGRESS_CHARS = {
   skipped:   '\u2592',
 };
 
-// ── Next-action lookup ──────────────────────────────────────────────────
+// ── Next-action lookup (6-phase model) ──────────────────────────────────
 const NEXT_ACTIONS = {
-  '-1:completed':   ['\u786E\u8BA4\u73AF\u5883', '\u68C0\u67E5 worktree \u8DEF\u5F84\uFF0C\u51C6\u5907\u8FDB\u5165\u9700\u6C42\u5206\u6790'],
-  '-0.5:completed': ['\u786E\u8BA4\u8BC4\u4F30', '\u67E5\u770B AUTO-ESTIMATE \u7ED3\u679C\uFF0C\u9009\u62E9\u6D41\u7A0B\u7EA7\u522B'],
-  '0:completed':    ['\u786E\u8BA4\u8BBE\u8BA1', '\u5BA1\u9605\u8BBE\u8BA1\u6587\u6863\uFF0C\u786E\u8BA4\u540E\u8FDB\u5165 Phase 1'],
-  '0:paused':       ['\u5BA1\u9605\u8BBE\u8BA1', '\u8BBE\u8BA1\u6587\u6863\u7B49\u5F85\u60A8\u7684 APPROVED \u786E\u8BA4'],
-  '1:completed':    ['\u786E\u8BA4\u8BC4\u5BA1', 'delphi-review \u5DF2\u901A\u8FC7\uFF0C\u68C0\u67E5 specification.yaml'],
-  '1:paused':       ['\u7B49\u5F85\u8BC4\u5BA1', 'delphi-review \u8FDB\u884C\u4E2D\u6216\u7B49\u5F85 taste_decisions \u786E\u8BA4'],
-  '2:completed':    ['\u5BA1\u9605\u4EE3\u7801', 'BUILD \u5B8C\u6210\uFF0C\u8FDB\u5165 Phase 3 REVIEW'],
-  '2:running':      ['\u7B49\u5F85\u6784\u5EFA', 'ralph-loop \u8FED\u4EE3\u4E2D\uFF0C\u65E0\u9700\u64CD\u4F5C'],
-  '3:completed':    ['\u5F00\u59CB\u9A8C\u6536', '\u8FDB\u5165 Phase 4 \u4EBA\u5DE5\u9A8C\u6536'],
-  '4:completed':    ['\u786E\u8BA4\u53CD\u9988', '\u9A8C\u6536\u5B8C\u6210\uFF0CPhase 5 \u81EA\u52A8\u8FDB\u884C'],
-  '4:paused':       ['\u6267\u884C\u9A8C\u6536', '\u5FC5\u987B\u4EBA\u5DE5\u9A8C\u6536\uFF0C\u8BF7\u5B9E\u9645\u4F7F\u7528\u540E\u786E\u8BA4'],
-  '5:completed':    ['\u786E\u8BA4\u53D1\u5E03', '\u53CD\u9988\u5DF2\u6536\u96C6\uFF0C\u51C6\u5907\u8FDB\u5165 Phase 6 SHIP'],
-  '6:completed':    ['\u786E\u8BA4\u5408\u5E76', 'PR \u5DF2\u521B\u5EFA\uFF0C\u786E\u8BA4\u662F\u5426\u5408\u5E76'],
-  '7:completed':    ['\u786E\u8BA4\u6E05\u7406', '\u5408\u5E76\u6210\u529F\uFF0C\u51C6\u5907\u6E05\u7406 worktree'],
-  '8:completed':    ['Sprint \u5B8C\u6210', '\u68C0\u67E5 Sprint Summary\uFF0C\u5982\u6709 emergent issues \u8003\u8651 Sprint 2'],
+  '1:completed':   ['确认设计', '检查 worktree 路径和规模评估，准备进入设计阶段'],
+  '1:running':     ['准备环境', '正在创建 worktree 和评估规模'],
+  '1:paused':      ['确认评估', '查看 PREP 结果，确认流程级别'],
+  '2:completed':   ['确认设计', '设计已通过 Delphi 共识，检查 specification.yaml'],
+  '2:running':     ['等待设计', 'brainstorming + autoplan + delphi-review 进行中'],
+  '2:paused':      ['审阅设计', '设计文档等待您的 APPROVED 确认'],
+  '3:completed':   ['开始验证', 'BUILD 完成，进入 Phase 4 VERIFY'],
+  '3:running':     ['等待构建', 'ralph-loop 迭代中，无需操作'],
+  '4:completed':   ['准备发布', '验证完成，准备进入 Phase 5 SHIP'],
+  '4:running':     ['等待验证', 'code-walkthrough + QA + retro 进行中'],
+  '4:paused':      ['等待验证', '验证阶段暂停，检查评审结果'],
+  '5:completed':   ['确认合并', 'PR 已创建/合并，确认部署结果'],
+  '5:running':     ['等待发布', 'PR 创建 + 合并 + 部署进行中'],
+  '5:paused':      ['确认合并', 'PR 已创建，确认是否合并'],
+  '6:completed':   ['Sprint 完成', '检查 Sprint Summary，如有 emergent issues 考虑 Sprint 2'],
+  '6:running':     ['等待收尾', '用户验收或清理进行中'],
+  '6:paused':      ['执行验收', '必须人工验收，请实际使用后确认'],
 };
 
 // ── Helpers ─────────────────────────────────────────────────────────────
@@ -103,14 +226,17 @@ function formatTimestamp(iso) {
 
 /**
  * Get phase status from phase_history array or infer from currentPhase.
+ * Handles both new (1-6) and legacy (-1 to 8) phase numbers.
  * @param {Array|null} history
- * @param {number} phaseNum
- * @param {number} currentPhase
+ * @param {number} phaseNum - new phase number (1-6)
+ * @param {number} currentPhase - normalized new phase number (1-6)
+ * @param {boolean} isLegacy - whether the source state is legacy
  * @returns {string}
  */
-function getPhaseStatus(history, phaseNum, currentPhase) {
+function getPhaseStatus(history, phaseNum, currentPhase, isLegacy) {
   if (history) {
-    const entry = history.find((h) => h.phase === phaseNum);
+    // Check if any history entry maps to this new phase number
+    const entry = history.find((h) => normalizeHistoryPhase(h, isLegacy) === phaseNum);
     if (entry) return entry.status;
   }
   // Backward compat: infer from currentPhase
@@ -122,12 +248,13 @@ function getPhaseStatus(history, phaseNum, currentPhase) {
 /**
  * Get phase duration from phase_history.
  * @param {Array|null} history
- * @param {number} phaseNum
+ * @param {number} phaseNum - new phase number (1-6)
+ * @param {boolean} isLegacy
  * @returns {number|null}
  */
-function getPhaseDuration(history, phaseNum) {
+function getPhaseDuration(history, phaseNum, isLegacy) {
   if (!history) return null;
-  const entry = history.find((h) => h.phase === phaseNum);
+  const entry = history.find((h) => normalizeHistoryPhase(h, isLegacy) === phaseNum);
   return entry ? entry.duration_seconds : null;
 }
 
@@ -144,20 +271,24 @@ function renderDashboard(state) {
   const branch = (state.isolation && state.isolation.branch) || '-';
   const overallStatus = state.status || '-';
   const startedAt = formatTimestamp(state.started_at);
-  const currentPhase = state.phase != null ? state.phase : -1;
+  // Detect legacy vs new phase model
+  const isLegacy = isLegacyState(state);
+  // Normalize currentPhase
+  const rawPhase = state.phase != null ? state.phase : 1;
+  const currentPhase = normalizePhaseNum(rawPhase, isLegacy);
   const history = state.phase_history || null;
   const outputs = state.outputs || {};
 
   // Build phase rows
   const phaseRows = PHASES.map((p) => {
-    const status = getPhaseStatus(history, p.num, currentPhase);
+    const status = getPhaseStatus(history, p.num, currentPhase, isLegacy);
     const icon = STATUS_ICONS[status] || STATUS_ICONS.pending;
-    const duration = formatDuration(getPhaseDuration(history, p.num));
+    const duration = formatDuration(getPhaseDuration(history, p.num, isLegacy));
     return { ...p, status, icon, duration };
   });
 
   // Progress bar
-  const total = PHASES.length; // 11
+  const total = PHASES.length; // 6
   const completedCount = phaseRows.filter((r) => r.status === 'completed').length;
   const pct = Math.round((completedCount / total) * 100);
   const bar = phaseRows
@@ -166,7 +297,7 @@ function renderDashboard(state) {
 
   // Current phase info
   const currentDef = PHASES.find((p) => p.num === currentPhase) || PHASES[0];
-  const currentStatus = getPhaseStatus(history, currentPhase, currentPhase);
+  const currentStatus = getPhaseStatus(history, currentPhase, currentPhase, isLegacy);
 
   // Next action
   const actionKey = `${currentPhase}:${currentStatus}`;
@@ -259,7 +390,7 @@ function main() {
 }
 
 // Export for testing
-module.exports = { renderDashboard, formatDuration, formatTimestamp, getPhaseStatus, PHASES, STATUS_ICONS, PROGRESS_CHARS, NEXT_ACTIONS };
+module.exports = { renderDashboard, formatDuration, formatTimestamp, getPhaseStatus, normalizePhaseNum, normalizeHistoryPhase, isLegacyState, LEGACY_PHASE_MAP, LEGACY_PHASE_NAMES, LEGACY_NUM_MAP_1_6, PHASES, STATUS_ICONS, PROGRESS_CHARS, NEXT_ACTIONS };
 
 // Run if executed directly
 if (require.main === module) {
