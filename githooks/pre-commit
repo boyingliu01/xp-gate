@@ -1497,8 +1497,11 @@ else
           # Smart selection (Issue #286): only runs changed/related tests with --coverage,
           # producing coverage/coverage-summary.json for the tested subset.
           # Stage 2 enforcement reads global coverage from the subset run.
-          # If no tests were run (TESTS_EXIT_CODE=0 skip path), warn instead of blocking.
-          if [ -f "coverage/coverage-summary.json" ]; then
+          # If no tests were run (TESTS_SKIPPED=true), skip coverage check entirely.
+          if [ "${TESTS_SKIPPED:-false}" = "true" ]; then
+            echo "ℹ️  Test run was skipped — skipping coverage check."
+            COV_EXIT=0
+          elif [ -f "coverage/coverage-summary.json" ]; then
             echo "TypeScript coverage collected during test run."
             COV_EXIT=0
           else
