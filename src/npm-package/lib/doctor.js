@@ -804,6 +804,18 @@ async function doctor(args) {
   return issues > 0 ? 1 : 0;
 }
 
+function formatDoctorJson(checks, issues) {
+  const missing_tools = checks
+    .filter(c => c.status === 'WARN' || c.status === 'FAIL')
+    .map(c => ({ name: c.name, detail: c.detail }));
+  return {
+    ok: issues === 0,
+    issues,
+    checks: checks.map(c => ({ name: c.name, status: c.status, detail: c.detail })),
+    missing_tools,
+  };
+}
+
 module.exports = {
   doctor, isXpGateFile, SIGNATURES,
   fixVersionMismatch,
@@ -815,4 +827,5 @@ module.exports = {
   fixTuiRegistration,
   ensureTuiRegistration,
   readTuiJson,
+  formatDoctorJson,
 };

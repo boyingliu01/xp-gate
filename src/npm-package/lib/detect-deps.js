@@ -518,4 +518,6 @@ module.exports = {
   GATE_CLI_TOOLS,
   checkCliTool,
   getToolInstallCmd,
+  GATE_TOOLS: require('./gate-tools.js').GATE_TOOLS,
+  detectProjectLang: require('./gate-tools.js').detectProjectLang,
 };
