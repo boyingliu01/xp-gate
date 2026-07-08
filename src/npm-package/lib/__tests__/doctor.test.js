@@ -931,4 +931,32 @@ describe('doctor', () => {
     const currentContent = fs.readFileSync(path.join(projectAdaptersDir(), 'gate-3.sh'), 'utf8');
     expect(currentContent).toBe(originalContent);
   });
+
+  it('--format json returns valid JSON with tools field', async () => {
+    setupLocalInstall();
+    seedVersionCache();
+    mockExecSuccess();
+    const { doctor } = require('../doctor');
+    const { formatDoctorJson } = require('../doctor');
+
+    const checks = [
+      { name: 'CLI tool: jscpd (Gate 2)', status: 'PASS', detail: 'v0.3.5' },
+      { name: 'CLI tool: lizard (Gate 3)', status: 'WARN', detail: 'Not found' },
+    ];
+    const json = formatDoctorJson(checks, 1);
+    expect(json.ok).toBe(false);
+    expect(json.issues).toBe(1);
+    expect(json.checks).toHaveLength(2);
+    expect(json.missing_tools).toBeDefined();
+  });
+
+  it('--format json returns ok:true when no issues', async () => {
+    const { formatDoctorJson } = require('../doctor');
+    const checks = [
+      { name: 'CLI tool: jscpd (Gate 2)', status: 'PASS', detail: 'v0.3.5' },
+    ];
+    const json = formatDoctorJson(checks, 0);
+    expect(json.ok).toBe(true);
+    expect(json.issues).toBe(0);
+  });
 });

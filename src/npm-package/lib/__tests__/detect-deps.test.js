@@ -413,6 +413,94 @@ describe('detect-deps', () => {
 
   // ── checkCliTool tests (Issue #299 — Windows cross-platform) ──
 
+  describe('GATE_TOOLS classification', () => {
+    it('exports GATE_TOOLS with required categories', () => {
+      const { GATE_TOOLS } = require('../detect-deps');
+      expect(GATE_TOOLS.PLATFORM).toEqual(expect.arrayContaining(['jscpd', 'lizard', 'semgrep', 'gitleaks', 'npx']));
+      expect(GATE_TOOLS.IAC).toEqual(expect.arrayContaining(['checkov', 'hadolint', 'kube-score', 'tflint']));
+      expect(GATE_TOOLS.LANG_MAP.ts).toBe('typescript');
+      expect(GATE_TOOLS.LANG_MAP.py).toBe('python');
+    });
+
+    it('has LINT entries for all 12 supported languages', () => {
+      const { GATE_TOOLS } = require('../detect-deps');
+      expect(Object.keys(GATE_TOOLS.LINT).sort()).toEqual([
+        'cpp', 'dart', 'flutter', 'go', 'java', 'kotlin',
+        'objectivec', 'powershell', 'python', 'shell', 'swift', 'typescript',
+      ]);
+    });
+
+    it('has TEST entries for major languages', () => {
+      const { GATE_TOOLS } = require('../detect-deps');
+      expect(GATE_TOOLS.TEST.typescript).toContain('vitest');
+      expect(GATE_TOOLS.TEST.python).toContain('pytest');
+      expect(GATE_TOOLS.TEST.go).toContain('go');
+    });
+
+    it('has MUTATION entries for languages with mutation support', () => {
+      const { GATE_TOOLS } = require('../detect-deps');
+      expect(GATE_TOOLS.MUTATION.typescript).toContain('stryker');
+      expect(GATE_TOOLS.MUTATION.python).toContain('mutmut');
+      expect(GATE_TOOLS.MUTATION.go).toContain('gomutants');
+      expect(GATE_TOOLS.MUTATION.java).toContain('pitest');
+    });
+
+    it('has SPECIAL with jq, tsx, node descriptors', () => {
+      const { GATE_TOOLS } = require('../detect-deps');
+      expect(GATE_TOOLS.SPECIAL.jq.gate).toBe('MW');
+      expect(GATE_TOOLS.SPECIAL.tsx.gate).toContain('M');
+      expect(GATE_TOOLS.SPECIAL.node.gate).toContain('0');
+    });
+
+    it('LANG_MAP values all exist as LINT keys', () => {
+      const { GATE_TOOLS } = require('../detect-deps');
+      const lintKeys = Object.keys(GATE_TOOLS.LINT);
+      for (const full of Object.values(GATE_TOOLS.LANG_MAP)) {
+        expect(lintKeys).toContain(full);
+      }
+    });
+  });
+
+  describe('detectProjectLang', () => {
+    it('returns empty array for project with no known markers', () => {
+      const { detectProjectLang } = require('../detect-deps');
+      expect(detectProjectLang(tmpHome)).toEqual([]);
+    });
+
+    it('detects typescript from tsconfig.json', () => {
+      fs.writeFileSync(path.join(tmpHome, 'tsconfig.json'), '{}');
+      const { detectProjectLang } = require('../detect-deps');
+      expect(detectProjectLang(tmpHome)).toContain('typescript');
+    });
+
+    it('detects python from pyproject.toml', () => {
+      fs.writeFileSync(path.join(tmpHome, 'pyproject.toml'), '[project]\n');
+      const { detectProjectLang } = require('../detect-deps');
+      expect(detectProjectLang(tmpHome)).toContain('python');
+    });
+
+    it('detects go from go.mod', () => {
+      fs.writeFileSync(path.join(tmpHome, 'go.mod'), 'module example.com/m\n');
+      const { detectProjectLang } = require('../detect-deps');
+      expect(detectProjectLang(tmpHome)).toContain('go');
+    });
+
+    it('detects java from pom.xml', () => {
+      fs.writeFileSync(path.join(tmpHome, 'pom.xml'), '<project></project>');
+      const { detectProjectLang } = require('../detect-deps');
+      expect(detectProjectLang(tmpHome)).toContain('java');
+    });
+
+    it('detects multiple languages in monorepo', () => {
+      fs.writeFileSync(path.join(tmpHome, 'package.json'), JSON.stringify({ devDependencies: { typescript: '^5.0.0' } }));
+      fs.writeFileSync(path.join(tmpHome, 'go.mod'), 'module example.com/m\n');
+      const { detectProjectLang } = require('../detect-deps');
+      const langs = detectProjectLang(tmpHome);
+      expect(langs).toContain('typescript');
+      expect(langs).toContain('go');
+    });
+  });
+
   describe('checkCliTool', () => {
     const { execSync: realExecSync } = require('child_process');
 
