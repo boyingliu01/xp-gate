@@ -410,4 +410,141 @@ describe('detect-deps', () => {
       vi.restoreAllMocks();
     });
   });
+
+  // ── checkCliTool tests (Issue #299 — Windows cross-platform) ──
+
+  describe('checkCliTool', () => {
+    const { execSync: realExecSync } = require('child_process');
+
+    afterEach(() => {
+      vi.restoreAllMocks();
+    });
+
+    it('returns available:true when which finds the tool and --version succeeds', () => {
+      vi.spyOn(require('child_process'), 'execSync')
+        .mockReturnValueOnce('/usr/local/bin/jscpd\n')
+        .mockReturnValueOnce('cpd 5.0.11\n');
+
+      const { checkCliTool } = require('../detect-deps');
+      const result = checkCliTool('jscpd');
+
+      expect(result.available).toBe(true);
+      expect(result.path).toBe('/usr/local/bin/jscpd');
+      expect(result.version).toBe('cpd 5.0.11');
+    });
+
+    it('returns available:false when which and direct exec both fail', () => {
+      vi.spyOn(require('child_process'), 'execSync')
+        .mockImplementation(() => { throw new Error('not found'); });
+
+      const { checkCliTool } = require('../detect-deps');
+      const result = checkCliTool('nonexistent-tool');
+
+      expect(result.available).toBe(false);
+    });
+
+    it('falls through to direct exec when which returns empty', () => {
+      vi.spyOn(require('child_process'), 'execSync')
+        .mockReturnValueOnce('')
+        .mockReturnValueOnce('1.21.3\n');
+
+      const { checkCliTool } = require('../detect-deps');
+      const result = checkCliTool('lizard');
+
+      expect(result.available).toBe(true);
+      expect(result.path).toBe('lizard');
+      expect(result.version).toBe('1.21.3');
+    });
+
+    it('uses where on win32 instead of which', () => {
+      const originalPlatform = process.platform;
+      Object.defineProperty(process, 'platform', { value: 'win32' });
+
+      const execSpy = vi.spyOn(require('child_process'), 'execSync')
+        .mockReturnValueOnce('C:\\Users\\test\\AppData\\Roaming\\npm\\jscpd.cmd\r\n')
+        .mockReturnValueOnce('cpd 5.0.11\n');
+
+      const { checkCliTool } = require('../detect-deps');
+      const result = checkCliTool('jscpd');
+
+      expect(result.available).toBe(true);
+      expect(execSpy.mock.calls[0][0]).toMatch(/^where jscpd/);
+      expect(execSpy.mock.calls[0][1].shell).toBe('cmd.exe');
+
+      Object.defineProperty(process, 'platform', { value: originalPlatform });
+    });
+
+    it('uses 2>nul on win32 instead of 2>/dev/null', () => {
+      const originalPlatform = process.platform;
+      Object.defineProperty(process, 'platform', { value: 'win32' });
+
+      const execSpy = vi.spyOn(require('child_process'), 'execSync')
+        .mockImplementation(() => { throw new Error('not found'); });
+
+      const { checkCliTool } = require('../detect-deps');
+      checkCliTool('jscpd');
+
+      const versionCallArgs = execSpy.mock.calls.map(c => c[0]);
+      const hasUnixRedir = versionCallArgs.some(cmd => typeof cmd === 'string' && cmd.includes('2>/dev/null'));
+      expect(hasUnixRedir).toBe(false);
+
+      Object.defineProperty(process, 'platform', { value: originalPlatform });
+    });
+
+    it('uses 2>/dev/null on linux (not 2>nul)', () => {
+      const originalPlatform = process.platform;
+      Object.defineProperty(process, 'platform', { value: 'linux' });
+
+      const execSpy = vi.spyOn(require('child_process'), 'execSync')
+        .mockImplementation(() => { throw new Error('not found'); });
+
+      const { checkCliTool } = require('../detect-deps');
+      checkCliTool('jscpd');
+
+      const versionCallArgs = execSpy.mock.calls.map(c => c[0]);
+      const hasWindowsRedir = versionCallArgs.some(cmd => typeof cmd === 'string' && cmd.includes('2>nul'));
+      expect(hasWindowsRedir).toBe(false);
+
+      Object.defineProperty(process, 'platform', { value: originalPlatform });
+    });
+
+    it('explicitly sets shell option for cross-platform consistency', () => {
+      const execSpy = vi.spyOn(require('child_process'), 'execSync')
+        .mockImplementation(() => { throw new Error('not found'); });
+
+      const { checkCliTool } = require('../detect-deps');
+      checkCliTool('jscpd');
+
+      for (const call of execSpy.mock.calls) {
+        expect(call[1].shell).toBeDefined();
+      }
+    });
+
+    it('sets timeout to 15000ms for version checks (Python cold start)', () => {
+      const execSpy = vi.spyOn(require('child_process'), 'execSync')
+        .mockImplementation(() => { throw new Error('not found'); });
+
+      const { checkCliTool } = require('../detect-deps');
+      checkCliTool('checkov');
+
+      const locatorCalls = execSpy.mock.calls.filter(c => c[1].timeout === 15000);
+      expect(locatorCalls.length).toBeGreaterThan(0);
+    });
+
+    it('checks ~/.local/bin fallback path when tool not in PATH', () => {
+      vi.spyOn(require('child_process'), 'execSync')
+        .mockImplementation(() => { throw new Error('not found'); });
+      vi.spyOn(fs, 'existsSync').mockReturnValue(true);
+      vi.spyOn(require('child_process'), 'execSync')
+        .mockImplementationOnce(() => { throw new Error('which: not found'); })
+        .mockImplementationOnce(() => { throw new Error('direct exec: not found'); })
+        .mockReturnValueOnce('hadolint 2.14.0\n');
+
+      const { checkCliTool } = require('../detect-deps');
+      const result = checkCliTool('hadolint');
+
+      expect(result.available).toBe(true);
+      expect(result.path).toContain('.local');
+    });
+  });
 });
