@@ -2,7 +2,7 @@
 
 ## 使用说明
 
-此模板用于 Phase 0 (THINK) 输出。基于 office-hours 六个强制问题验证需求真实性。
+此模板用于 Phase 2/6 DESIGN (brainstorming) 输出。基于 office-hours 六个强制问题验证需求真实性。
 
 ---
 
@@ -12,8 +12,8 @@
 
 ```yaml
 生成日期: YYYY-MM-DD
-生成阶段: Phase 0 - THINK
-来源: office-hours skill
+生成阶段: Phase 2/6 - DESIGN
+来源: brainstorming / office-hours skill
 Sprint ID: sprint-YYYY-MM-DD-NN
 ```
 
@@ -111,5 +111,5 @@ Sprint ID: sprint-YYYY-MM-DD-NN
 
 ## Next Step
 
-- 进入 Phase 1 (PLAN) 自动执行
-- 调用 autoplan skill 进行需求评审
+- 进入 Phase 2/6 DESIGN (PLAN 阶段) 自动执行
+- 调用 autoplan + delphi-review 进行设计评审

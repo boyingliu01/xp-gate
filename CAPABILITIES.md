@@ -6,7 +6,7 @@
 
 ## 1. Overview
 
-XP-Gate 整合质量门禁、AI 多专家评审和 Sprint 流程编排三大核心模块。质量门禁在每次 `git commit` 时自动运行 10 项检查 (Gate 0-9，按脚本数字编号；旧文档以 "6 道门禁" 作概念分组)，每次 `git push` 自动运行 Gate M / MD / ML / MW / MS + 代码走查校验。任何失败都会阻止提交或推送。Delphi Review 采用多轮匿名评审机制，直到所有专家达成共识（≥90%）。Sprint Flow 提供一键式 11 阶段 (Phase -1 ~ Phase 8) 完整开发流程编排，从需求探索到发布部署全程自动化。
+XP-Gate 整合质量门禁、AI 多专家评审和 Sprint 流程编排三大核心模块。质量门禁在每次 `git commit` 时自动运行 10 项检查 (Gate 0-9，按脚本数字编号；旧文档以 "6 道门禁" 作概念分组)，每次 `git push` 自动运行 Gate M / MD / ML / MW / MS + 代码走查校验。任何失败都会阻止提交或推送。Delphi Review 采用多轮匿名评审机制，直到所有专家达成共识（≥90%）。Sprint Flow 提供一键式 6 阶段 (Phase 1-6) 完整开发流程编排，从需求探索到发布部署全程自动化。
 
 ---
 
@@ -82,66 +82,46 @@ XP-Gate 支持 12 种编程语言的质量门禁和静态分析：
 
 ## 4. Sprint Flow Capabilities Map
 
-Sprint Flow 提供 11 个阶段 (Phase -1, -0.5, 0..8) 的完整开发流程编排：
+Sprint Flow 提供 6 个阶段 (Phase 1-6) 的完整开发流程编排：
 
 ```
-Phase -1: ISOLATE ────┐
-  └─ worktree 隔离    │
+Phase 1: PREP ────────┐
+  └─ worktree + sizing│
                       │
-Phase -0.5: AUTO-EST ─┤
-  └─ 规模评估         │
-                      │
-Phase 0: THINK ───────┤
+Phase 2: DESIGN ──────┤
   ├─ brainstorming    │
-  └─ CONTEXT.md + ADR │
-                      │
-Phase 1: PLAN ────────┤
   ├─ autoplan         │
-  ├─ delphi-review    │ ← HARD-GATE (≥90% 共识才能进入 Phase 2)
-  └─ specification    │
+  └─ delphi-review    │ ← HARD-GATE (≥90% 共识才能进入 Phase 3)
                       │
-Phase 2: BUILD ───────┤
+Phase 3: BUILD ───────┤
   ├─ ralph-loop (默认)│
   ├─ TDD (RED/GREEN)  │
-  ├─ freeze/unfreeze  │
   └─ verification     │
                       │
-Phase 3: REVIEW ──────┤
+Phase 4: VERIFY ──────┤
   ├─ code-walkthrough │
-  ├─ test-spec-align  │
-  └─ browse QA        │
+  ├─ QA + benchmark   │
+  └─ retro + learn    │
                       │
-Phase 4: ACCEPT ──────┤ ⚠️ 必须人工
-  ├─ 人工验收         │
-  └─ Emergent Issues  │
-                      │
-Phase 5: FEEDBACK ────┤
-  ├─ learn (Sprint 级)│
-  ├─ retro            │
-  └─ debugging        │
-                      │
-Phase 6: SHIP ────────┤
+Phase 5: SHIP ────────┤
   ├─ finishing-branch │
-  └─ ship (PR 创建)   │
+  ├─ PR + merge       │
+  └─ deploy + canary  │
                       │
-Phase 7: LAND ────────┤
-  ├─ land-and-deploy  │
-  └─ canary           │
-                      │
-Phase 8: CLEANUP ─────┘
-  └─ Sprint 分支清理
+Phase 6: CLOSE ───────┘
+  └─ UAT + cleanup
 ```
 
 **暂停点设计**:
 
 | 阶段 | 暂停条件 | 用户操作 |
 |------|---------|---------|
-| Phase 0 | 设计未 APPROVED | 修改设计文档 |
-| Phase 1 | autoplan taste_decisions | 确认设计决策 |
-| Phase 1 | delphi-review 未通过 | 修复并重新评审 |
-| Phase 2 | 验证失败超过 max 3 | 修复或放弃 |
-| Phase 2 | 成本超阈值 | 继续或暂停 |
-| Phase 4 | **必须人工验收** | 实际使用确认 |
+| Phase 2 | 设计未 APPROVED | 修改设计文档 |
+| Phase 2 | autoplan taste_decisions | 确认设计决策 |
+| Phase 2 | delphi-review 未通过 | 修复并重新评审 |
+| Phase 3 | 验证失败超过 max 3 | 修复或放弃 |
+| Phase 3 | 成本超阈值 | 继续或暂停 |
+| Phase 5 | **必须人工验收** | 实际使用确认 |
 | Phase 6 | finishing-branch | 选择 merge/PR/discard/keep |
 
 ---
@@ -261,7 +241,7 @@ XP-Gate 集成的 AI Skills 体系：
 | **覆盖率阈值** | 提交前强制 ≥80% | 合并前检查 |
 | **架构验证** | 层边界检查（archlint） | 通常无 |
 | **测试冻结** | Phase 2 freeze 机制 | 通常无 |
-| **Sprint 编排** | 11 阶段完整流程 (Phase -1 ~ Phase 8) | 通常无 |
+| **Sprint 编排** | 6 阶段完整流程 (Phase 1-6) | 通常无 |
 | **并行执行** | dispatching-parallel-agents | 通常无 |
 | **安全审计** | CSO 15 阶段深度扫描 | 基础安全扫描 |
 | **成本** | 本地运行，AI 调用按需 | CI 服务器持续运行 |

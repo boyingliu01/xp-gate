@@ -2,7 +2,7 @@
 
 ## 使用说明
 
-此模板用于 Phase 6 (SHIP) 结束时生成 Sprint 总结。
+此模板用于 Phase 6/6 CLOSE 结束时生成 Sprint 总结。
 
 ---
 
@@ -25,13 +25,12 @@ MVP 版本: v1.0
 
 | Phase | 耗时 | 状态 | 暂停次数 | 备注 |
 |-------|------|------|---------|------|
-| Phase 0: THINK | [X min] | ✅ 完成 | 0 | [备注] |
-| Phase 1: PLAN | [X min] | ✅ 完成 | [N] | [备注] |
-| Phase 2: BUILD | [X min] | ✅ 完成 | [N] | [备注] |
-| Phase 3: REVIEW | [X min] | ✅ 完成 | [N] | [备注] |
-| Phase 4: UAT | [X min] | ✅ 完成 | 1 (必须) | [备注] |
-| Phase 5: FEEDBACK | [X min] | ✅ 完成 | 0 | [备注] |
-| Phase 6: SHIP | [X min] | ✅ 完成 | [N] | [备注] |
+| 1/6: PREP | [X min] | ✅ 完成 | 0 | worktree + 规模评估 |
+| 2/6: DESIGN | [X min] | ✅ 完成 | [N] | brainstorming + delphi-review |
+| 3/6: BUILD | [X min] | ✅ 完成 | [N] | ralph-loop + TDD |
+| 4/6: VERIFY | [X min] | ✅ 完成 | [N] | code-walkthrough + QA + feedback |
+| 5/6: SHIP | [X min] | ✅ 完成 | [N] | PR + deploy + canary |
+| 6/6: CLOSE | [X min] | ✅ 完成 | 1 (UAT 必须) | 人工验收 + cleanup |
 
 ---
 
@@ -39,16 +38,18 @@ MVP 版本: v1.0
 
 | Skill | 调用次数 | 结果 | 备注 |
 |-------|---------|------|------|
-| office-hours | 1 | ✅ | Pain Document 生成 |
+| brainstorming | 1 | ✅ | design doc |
 | autoplan | 1 | ✅/⚠️ | [taste_decisions 数量] |
-| delphi-review | [N] rounds | ✅ APPROVED | [Round 数量] |
-| specification.yaml | 1 | ✅ | specification.yaml |
-| BUILD (TDD + review) | 1 | ✅ APPROVED | [Gate 1 失败次数] |
-| test-driven-development | [N] | ✅ | [BUILD (TDD + review) 内部调用] |
-| cross-model-review | [N] rounds | ✅ APPROVED | [Round 数量] |
+| delphi-review (design) | [N] rounds | ✅ APPROVED | [Round 数量] |
+| delphi-review (code-walkthrough) | [N] rounds | ✅ APPROVED | [Round 数量] |
+| to-issues | 1 | ✅ | slices-manifest.json |
+| test-driven-development | [N] | ✅ | BUILD 内部调用 |
 | test-specification-alignment | 1 | ✅ | [覆盖率] |
 | browse | 1 | ✅ | [QA 通过] |
+| qa (web) | 1 | ✅ | [health score] |
+| benchmark (web) | 1 | ✅ | [perf baseline] |
 | learn | 1 | ✅ | [记录数量] |
+| retro | 1 | ✅ | Sprint 回顾 |
 | ship | 1 | ✅ | [PR URL] |
 | land-and-deploy | 1 | ✅ | [部署 URL] |
 | canary | 1 | ✅ | [监控正常] |

@@ -1,12 +1,12 @@
 # PROJECT KNOWLEDGE BASE
 
-**Generated:** 2026-07-07
-**Commit:** 2e4e578
-**Branch:** main
-**Version:** 0.12.14.0
+**Generated:** 2026-07-08
+**Commit:** 6f868ee
+**Branch:** sprint/2026-07-07-01
+**Version:** 0.13.0.0
 
 ## OVERVIEW
-XP-Gate — deterministic git quality gates + AI-driven multi-expert review (Delphi) + Sprint Flow pipeline + npm zero-install distribution + cross-platform plugin system (Claude Code / OpenCode / Qoder). Pre-commit runs **10 numbered gates (Gate 0–9)** at the script level, conceptually grouped as **6 categories** in user-facing docs (README, CAPABILITIES.md). Pre-push runs **3 mutation/mock gates (M, M2, M3) + Delphi code-walkthrough**. Implements 14 Clean Code/SOLID rules across 9 language adapters (TypeScript engine), 13 shell adapters (gate routing), Boy Scout Rule baseline enforcement, test-specification alignment, mock policy enforcement, and incremental mutation testing.
+XP-Gate — deterministic git quality gates + AI-driven multi-expert review (Delphi) + Sprint Flow pipeline (6 phases: PREP, DESIGN, BUILD, VERIFY, SHIP, CLOSE) + npm zero-install distribution + cross-platform plugin system (Claude Code / OpenCode / Qoder). Pre-commit runs **10 numbered gates (Gate 0–9)** at the script level, conceptually grouped as **6 categories** in user-facing docs (README, CAPABILITIES.md). Pre-push runs **3 mutation/mock gates (M, M2, M3) + Delphi code-walkthrough**. Implements 14 Clean Code/SOLID rules across 9 language adapters (TypeScript engine), 13 shell adapters (gate routing), Boy Scout Rule baseline enforcement, test-specification alignment, mock policy enforcement, and incremental mutation testing.
 
 > **Doc-vs-script drift, intentional:** README/CAPABILITIES.md describe "6 Gates" as a conceptual grouping; the actual `githooks/pre-commit` script runs Gate 0–9. Tracked as a doc-alignment issue, not a bug.
 >
@@ -48,7 +48,7 @@ XP-Gate — deterministic git quality gates + AI-driven multi-expert review (Del
 │   ├── QUALITY-GATES-CODE-OF-CONDUCT.md
 │   └── __tests__/      # BATS tests
 ├── skills/             # 8 canonical AI workflow skills (SKILL.md + references/ + templates/)
-│   ├── sprint-flow/    # 11-phase pipeline (Phase -1, -0.5, 0..8); docs say "7-phase" (drift logged)
+│   ├── sprint-flow/    # 6-phase pipeline (Phase 1-6: PREP, DESIGN, BUILD, VERIFY, SHIP, CLOSE); docs say "6 阶段流水线"
 │   ├── delphi-review/  # ≥90% consensus (SKILL.md)
 │   ├── test-specification-alignment/   # 2-phase (align modifiable → execute frozen)
 │   ├── test-driven-development/        # NEW in 0.8.x; bundles testing-anti-patterns.md
@@ -99,7 +99,7 @@ XP-Gate — deterministic git quality gates + AI-driven multi-expert review (Del
 | Language adapters | githooks/adapters/ | 13 .sh files + 5 plugin extensions |
 | Adapter routing | githooks/adapter-common.sh | 3-tier: global → project → script dir |
 | Code of Conduct | githooks/QUALITY-GATES-CODE-OF-CONDUCT.md | --no-verify prohibited |
-| Sprint Flow | skills/sprint-flow/SKILL.md | 11 phases; phase docs in references/phase-*.md |
+| Sprint Flow | skills/sprint-flow/SKILL.md | 6 phases; phase docs in references/phase-*.md |
 | Delphi Review | skills/delphi-review/SKILL.md | Design + code-walkthrough modes; ≥90% consensus |
 | Test Alignment | skills/test-specification-alignment/SKILL.md | Phase 1 modifiable / Phase 2 frozen |
 | Principles Engine | src/principles/ | analyzer.ts + index.ts CLI; SARIF 2.1.0 output |

@@ -1,6 +1,6 @@
 # AUTO-ESTIMATE 输出模板
 
-本模板定义了 Phase -0.5 在终端向用户展示 AUTO-ESTIMATE 结果的标准格式。
+本模板定义了 Phase 1/6 PREP 在终端向用户展示 AUTO-ESTIMATE 结果的标准格式。
 
 ## 输出格式
 
@@ -41,7 +41,7 @@
 | `{circular_dep_status}` | 循环依赖状态 | ✅ 无 / ⚠️ 存在 (A ↔ B) |
 | `{public_api_count}` | Public API 暴露数 | 5 |
 | `{additional_metrics}` | 附加指标（可选行） | 测试文件：4 个 / 影响范围：3 层调用 |
-| `{recommended_flow}` | 建议流程描述 | 轻量流程 (Phase 0-3, reduced-intensity Delphi) |
+| `{recommended_flow}` | 建议流程描述 | 轻量流程 (reduced-intensity Delphi) |
 | `{risk_warning}` | 风险警告（可选块） | ⚠️ 此操作涉及循环依赖… |
 | 操作按钮 | 用户确认选项 | 接受建议 / 修改流程 / 取消 |
 
@@ -56,14 +56,6 @@
 |                                                             |
 ```
 
-示例：
-```
-|                                                             |
-| ⚠️ 此操作涉及循环依赖，建议保留层级结构作为过渡方案           |
-|   避免直接删除导致编译失败                                    |
-|                                                             |
-```
-
 ## 修改流程子菜单
 
 当用户选择「修改流程」时，展示以下选项：
@@ -72,9 +64,9 @@
 +-------------------------------------------------------------+
 | 选择流程级别：                                                |
 |                                                             |
-| [1] 轻量流程 — minimal THINK + 简化 Delphi + BUILD/REVIEW (Phase 0-3) |
-| [2] 标准流程 — brainstorming + Delphi + BUILD + REVIEW (Phase 0-4)    |
-| [3] 完整流程 — 完整 Sprint Flow (Phase 0-8)                          |
+| [1] 轻量流程 — reduced DESIGN + 简化 Delphi + BUILD/VERIFY   |
+| [2] 标准流程 — brainstorming + Delphi + BUILD + VERIFY       |
+| [3] 完整流程 — 完整 Sprint Flow (6 phases)                   |
 |                                                             |
 | 修改原因（必填）：____________________                        |
 |                                                             |
@@ -90,7 +82,7 @@
 |------|---------|------|
 | 引用计数 | `grep -rn "{target_pattern}" --include="*.{ext}" | wc -l` | bash |
 | 跨模块依赖 | 分析 import 语句中不同目录层级的引用 | bash + grep |
-| 循环依赖 | 检查 import 图是否存在环（简单检查：A imports B, B imports A） | bash |
+| 循环依赖 | 检查 import 图是否存在环 | bash |
 | Public API 暴露 | `grep -rn "^export "` 计数 | bash |
 | 测试文件数 | `find . -name "*{target}*.test.*" | wc -l` | bash |
 
@@ -98,35 +90,21 @@
 
 | 指标 | 计算方式 | 来源 |
 |------|---------|------|
-| 新增模块数 | 设计文档中列出的模块数 | Phase 0 输出 |
-| 跨系统集成 | 涉及 API/DB/外部 数量 | Phase 0 输出 |
-| 状态复杂度 | 状态机状态数 | Phase 0 输出 |
-| REQ 数量 | user_stories 数量 | Phase 1 输出 |
+| 新增模块数 | 设计文档中列出的模块数 | Phase 2/6 DESIGN 输出 |
+| 跨系统集成 | 涉及 API/DB/外部 数量 | Phase 2/6 DESIGN 输出 |
+| 状态复杂度 | 状态机状态数 | Phase 2/6 DESIGN 输出 |
+| REQ 数量 | user_stories 数量 | Phase 2/6 DESIGN 输出 |
 
 ## 路由决策表
 
 | 评估结果 | 路由 | 说明 |
 |---------|------|------|
-| **轻量** (引用 ≤3, 同模块，无循环依赖) | Phase 0-3（minimal THINK → 简化 Delphi 评审 → BUILD/REVIEW） | 低强度执行，仍需 DELPHI-GATE APPROVED |
-| **标准** (引用 4-10, 跨 1-2 模块) | Phase 0-4（完整 THINK → BUILD → REVIEW） | 标准 sprint |
-| **复杂** (引用 >10 或 循环依赖 或 跨 3+ 模块) | Phase 0-8（完整 sprint-flow） | 完整流程 + 风险警告 |
+| **轻量** (引用 ≤3, 同模块，无循环依赖) | reduced DESIGN → 简化 Delphi → BUILD/VERIFY（6 phases, reduced intensity） | 低强度执行，仍需 DELPHI-GATE APPROVED |
+| **标准** (引用 4-10, 跨 1-2 模块) | 完整 DESIGN → BUILD → VERIFY（6 phases） | 标准 sprint |
+| **复杂** (引用 >10 或 循环依赖 或 跨 3+ 模块) | 完整 Sprint Flow（6 phases） | 完整流程 + 风险警告 |
 
-**所有流程路线均需在 Phase 2 前获得 delphi-review APPROVED verdict。**
+**所有流程路线均需在 Phase 3/6 BUILD 前获得 delphi-review APPROVED verdict。**
 
 ## 学习闭环
 
-当用户选择「修改流程」时，记录 override 数据：
-
-```json
-{
-  "sprint_id": "sprint-YYYY-MM-DD-NN",
-  "task_description": "原始需求描述",
-  "estimated_level": "标准",
-  "user_override_level": "轻量",
-  "override_reason": "用户输入原因",
-  "actual_effort": "TBD",
-  "timestamp": "ISO 8601"
-}
-```
-
-数据写入 `.sprint-state/auto-estimate-learning.json`（追加模式），用于阈值迭代优化。
+当用户选择「修改流程」时，记录 override 数据到 `.sprint-state/auto-estimate-learning.json`（追加模式），用于阈值迭代优化。

@@ -4,7 +4,7 @@
 
 [![Git Hooks](https://img.shields.io/badge/Git%20Hooks-Gate%200--11-green)](./githooks)
 [![AI Review](https://img.shields.io/badge/AI%20Review-Delphi%20≥90%25-blue)](./skills/delphi-review)
-[![Sprint Flow](https://img.shields.io/badge/Sprint%20Flow-11%20Phases-purple)](./skills/sprint-flow)
+[![Sprint Flow](https://img.shields.io/badge/Sprint%20Flow-6%20Phases-purple)](./skills/sprint-flow)
 [![npm package](https://img.shields.io/badge/npm%20registry-npm%20install%20--g%20%40boyingliu01%2Fxp--gate-blue?logo=npm)](src/npm-package)
 
 > **v0.8.1**: xp-gate 已从 GitHub Packages 迁移到公共 npm registry。新增 `xp-gate uninstall` / `doctor` / `migrate` / `check` / `principles` / `arch` 命令。
@@ -50,7 +50,7 @@ XP-Gate 通过 **确定性门禁 + AI 多专家共识 + 全流程编排** 解决
 │   质量门禁      │    AI 评审      │    Sprint Flow      │
 │   (确定性)      │   (共识驱动)    │   (流程编排)        │
 ├─────────────────┼─────────────────┼─────────────────────┤
-│ • 12 道门禁 0-11 │ • Delphi 方法   │ • 11 阶段流水线     │
+│ • 12 道门禁 0-11 │ • Delphi 方法   │ • 6 阶段流水线      │
 │ • 13 语言适配   │ • ≥90% 共识     │ • 硬门槛控制        │
 │ • 零容忍策略    │ • 国产模型      │ • 自动并行执行      │
 └─────────────────┴─────────────────┴─────────────────────┘
@@ -71,7 +71,7 @@ Git 提交时自动触发，**纯代码逻辑，无 AI 参与**，确保快速�
 
 一键启动完整开发流水线：
 ```
-THINK → PLAN → BUILD → REVIEW → USER ACCEPT → FEEDBACK → SHIP
+PREP → DESIGN → BUILD → VERIFY → SHIP → CLOSE
 ```
 
 ---
@@ -211,35 +211,28 @@ XP-Gate 支持 **12 种语言** + IaC 文件，通过适配器自动检测和路
 ## Sprint Flow 全流程
 
 ```
-Phase -1     Phase -0.5      Phase 0      Phase 1     Phase 2      Phase 3       Phase 4       Phase 5      Phase 6     Phase 7      Phase 8
-ISOLATE  →  AUTO-ESTIMATE →  THINK    →   PLAN    →   BUILD    →  REVIEW    → USER ACCEPT  → FEEDBACK   →  SHIP    →   LAND    →  CLEANUP
-   │             │             │             │           │           │              │             │            │           │            │
-   ▼             ▼             ▼             ▼           ▼           ▼              ▼             ▼            ▼           ▼            ▼
-worktree      sizing        brainstorm   autoplan    ralph-loop  code-walk      manual        learn +    finishing-   land +     sprint
-isolation     pass          + CONTEXT    + delphi    (default)   + QA / web     verification  retro      dev-branch   deploy +   branch
-              + estimate    + ADR        review +    TDD +       benchmark     (78% bugs      debug      + ship       canary     cleanup
-                                         spec.yaml   test-align                 invisible)
-                                              │
-                                           HARD-GATE ← 设计未达 ≥90% Delphi 共识 → 禁止编码
+Phase 1       Phase 2       Phase 3       Phase 4       Phase 5       Phase 6
+PREP     →    DESIGN   →    BUILD    →    VERIFY   →    SHIP     →    CLOSE
+   │             │             │             │             │             │
+   ▼             ▼             ▼             ▼             ▼             ▼
+worktree      brainstorm    ralph-loop    code-walk     PR + merge     UAT +
++ sizing      + autoplan    + TDD         + QA + retro  + deploy       cleanup
+              + delphi      + test-align  + learn       + canary
+              (HARD-GATE)
 ```
 
-> **完整 11 阶段** (Phase -1, -0.5, 0..8)。`Phase 2 BUILD` 默认使用 `ralph-loop` (REQ 级迭代，干净上下文，节约 40-67% token)。`Phase 1 PLAN` 与 `Phase 2 BUILD` 之间存在 HARD-GATE — 设计必须通过 Delphi 评审 (≥90% 共识，≥2 家不同模型厂家) 才能开始实施。
+> **6 阶段** (Phase 1-6)。`Phase 3/6 BUILD` 默认使用 `ralph-loop`。`Phase 2/6 DESIGN` 内部包含 HARD-GATE — 设计必须通过 Delphi 评审 (≥90% 共识) 才能开始实施。
 
 ### 各阶段说明
 
 | 阶段 | 名称 | 关键动作 | 输出 |
 |------|------|---------|------|
-| -1 | ISOLATE | worktree 隔离 | 隔离工作树 |
-| -0.5 | AUTO-ESTIMATE | 规模评估 | estimate 模板 |
-| 0 | THINK | brainstorming | CONTEXT.md + ADR |
-| 1 | PLAN | autoplan → delphi-review (HARD-GATE ≥90% 共识) | specification.yaml |
-| 2 | BUILD | ralph-loop (默认) + TDD + test-spec-alignment | 功能代码 |
-| 3 | REVIEW | code-walkthrough + QA + benchmark | 评审报告 |
-| 4 | USER ACCEPT | 人工验收 | 验收确认 |
-| 5 | FEEDBACK | retro + systematic-debugging + learn (Sprint 级) | 改进建议 |
-| 6 | SHIP | finishing-a-development-branch + PR | PR 已创建 |
-| 7 | LAND | land + deploy + canary | 生产部署完成 |
-| 8 | CLEANUP | Sprint 分支清理 | Sprint 状态归档 |
+| 1/6 | PREP | worktree 隔离 + 规模评估 | 隔离工作树 + 评估 |
+| 2/6 | DESIGN | brainstorming → autoplan → delphi-review (HARD-GATE ≥90% 共识) | 设计文档 + specification.yaml |
+| 3/6 | BUILD | ralph-loop (默认) + TDD + test-spec-alignment | 功能代码 |
+| 4/6 | VERIFY | code-walkthrough + QA + benchmark + retro + learn | 评审报告 + 反馈 |
+| 5/6 | SHIP | finishing-dev-branch + PR + merge + deploy + canary | PR + 部署 |
+| 6/6 | CLOSE | 人工验收 + emergent issues + 清理 | 验收确认 + 归档 |
 
 ### 使用方式
 
@@ -377,7 +370,7 @@ XP-Gate 集成 15+ 个专业 AI 技能，按 Sprint Flow 阶段排列：
 
 ### Phase 2 构建模式说明
 
-Sprint Flow 的 Phase 2 BUILD 有两种模式：
+Sprint Flow 的 Phase 3/6 BUILD 有两种模式：
 
 | 模式 | 说明 | 默认 |
 |------|------|------|
@@ -407,7 +400,7 @@ XP-Gate 不只是一个工具——它是一套 AI 辅助开发的纪律体系�
 ### 1. 每天这样用（开发者日常流程）
 
 ```
-写需求 → /sprint-flow "XXX"  → 自动走完 11 阶段  → 审查 PR  → merge
+写需求 → /sprint-flow "XXX"  → 自动走完 6 阶段  → 审查 PR  → merge
 ```
 
 **最简路径：** 一条命令启动全流程：
@@ -416,10 +409,10 @@ XP-Gate 不只是一个工具——它是一套 AI 辅助开发的纪律体系�
 ```
 
 Sprint Flow 会自动走完：
-- Phase 0: brainstorming 探索需求，生成设计文档
-- Phase 1: autoplan + delphi-review 多专家评审设计（≥90% 共识才放行）
-- Phase 2: ralph-loop **逐 REQ 迭代构建**（每个 REQ 干净上下文，节省 40-67% token）
-- Phase 3-6: 代码走查、用户验收、复盘、发布
+- Phase 1: PREP worktree 隔离 + 规模评估
+- Phase 2: DESIGN brainstorming → autoplan → delphi-review 多专家评审设计（≥90% 共识才放行，HARD-GATE）
+- Phase 3: BUILD ralph-loop **逐 REQ 迭代构建**（每个 REQ 干净上下文，节省 40-67% token）
+- Phase 4-6: VERIFY/SHIP/CLOSE 代码走查、用户验收、复盘、发布、清理
 
 > **关键：** 不要跳过 delphi-review 环节。设计未通过 HARD-GATE 就写代码，等于裸奔。
 
@@ -436,12 +429,12 @@ Sprint Flow 会自动走完：
 XP-Gate 的核心纪律：**设计未通过，禁止写一行代码**。
 
 ```
-THINK (brainstorming) → PLAN (autoplan) → delphi-review (3 专家共识) → 才轮到 BUILD
+PREP → DESIGN (brainstorming → autoplan → delphi-review) → BUILD → VERIFY → SHIP → CLOSE
 ```
 
 - `/to-issues`：需求拆成垂直切片式 Issue，每个 Issue 可独立交付
 - brainstorming 自动生成 `CONTEXT.md` 和 `ADR` 记录——共享语言比个人脑嗨重要
-- 3 位中国模型专家匿名评审，91% 共识阈值——避免单人视角盲区
+- 3 位中国模型专家匿名评审，90% 共识阈值——避免单人视角盲区
 
 ### 4. 定期体检（/improve-codebase-architecture）
 
@@ -617,7 +610,7 @@ Copyright (c) 2024-2025 XP-Gate Contributors
 ## 相关链接
 
 - [Sprint Flow 详细文档](./skills/sprint-flow/SKILL.md)
-- [Ralph Loop 构建模式](./skills/ralph-loop/SKILL.md) — Phase 2 默认 REQ 级迭代构建，Token 节约 40-67%
+- [Ralph Loop 构建模式](./skills/ralph-loop/SKILL.md) — Phase 3/6 BUILD 默认 REQ 级迭代构建，Token 节约 40-67%
 - [Delphi 评审规范](./skills/delphi-review/SKILL.md)
 - [测试对齐验证](./skills/test-specification-alignment/SKILL.md)
 - [质量门禁守则](./githooks/QUALITY-GATES-CODE-OF-CONDUCT.md)
