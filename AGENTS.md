@@ -1,9 +1,9 @@
 # PROJECT KNOWLEDGE BASE
 
-**Generated:** 2026-07-08
-**Commit:** 229cf7d
-**Branch:** main
-**Version:** 0.14.0.0
+**Generated:** 2026-07-09
+**Commit:** e53b728
+**Branch:** sprint/2026-07-09-01
+**Version:** 0.14.1.0
 
 ## OVERVIEW
 XP-Gate — deterministic git quality gates + AI-driven multi-expert review (Delphi) + Sprint Flow pipeline (6 phases: PREP, DESIGN, BUILD, VERIFY, SHIP, CLOSE) + npm zero-install distribution + cross-platform plugin system (Claude Code / OpenCode / Qoder). Pre-commit runs **10 numbered gates (Gate 0–9)** at the script level, conceptually grouped as **6 categories** in user-facing docs (README, CAPABILITIES.md). Pre-push runs **3 mutation/mock gates (M, M2, M3) + Delphi code-walkthrough**. Implements 14 Clean Code/SOLID rules across 9 language adapters (TypeScript engine), 13 shell adapters (gate routing), Boy Scout Rule baseline enforcement, test-specification alignment, mock policy enforcement, and incremental mutation testing.
@@ -177,6 +177,7 @@ Subcommands registered in 0.8.8.0 (verified against bin source):
 - **Test annotations are mandatory.** Every test file must carry `@test REQ-XXX`, `@intent ...`, `@covers AC-XXX` JSDoc tags. Missing tags ⇒ test rejected.
 - **TypeScript strict mode, always.** No `as any`, `@ts-ignore`, or `@ts-expect-error`. No empty `catch` blocks. No `print()` — use `logging`.
 - **Adapters are duplicated** between `githooks/adapters/` and `src/npm-package/adapters/`. Edit `githooks/` first, then resync via build scripts. Known tech debt.
+- **TDD mandatory before implementation (v0.14.0+).** Every implementation change MUST follow RED → GREEN → REFACTOR. Before delegating any implementation work, verify a failing test exists. If no test exists, write one first and mark the todo as `[TDD-RED]`. Only delegate implementation AFTER the RED test is committed. See `skills/sprint-flow/references/phase-3-build.md` for the full TDD-GATE specification. ralph-loop creates tests as step 0 — this is the pre-ralph-loop check, not a replacement.
 
 ## ANTI-PATTERNS (THIS PROJECT)
 - Do NOT bypass any gate with `--no-verify`. Process violation.

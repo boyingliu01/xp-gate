@@ -2,6 +2,16 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.14.1.0] - 2026-07-09
+
+### Fixed
+- **#305**: Sprint-flow BUILD 阶段新增 TDD-GATE 强制执行 — 在 BUILD 入口验证 failing test 存在后才允许 delegation (AGENTS.md + SKILL.md + phase-3-build.md)
+- **#307**: CI Mutation Testing 修复 — update-hooks.test.js 中 getProjectHooksDir 测试现在创建 .git 目录隔离，不再因 Stryker 沙箱环境失败
+
+### Changed
+- **#306**: Sprint-flow DESIGN 阶段路由分叉 — 根据 PREP 的 `change_type` 区分新产品设计 vs 增量优化路径，增量变更跳过 autoplan 直接进入 lightweight delphi-review
+- **#308**: Sprint 迭代结束归档 — CLOSE 阶段新增 Part A.5 ARCHIVE，将 .sprint-state/ 归档到 .sprint-history/ 供后续回溯
+
 ## [0.14.0.0] - 2026-07-08
 
 ### Added
