@@ -338,16 +338,19 @@ Sprint Flow: PREP → DESIGN → BUILD → VERIFY → SHIP → CLOSE
 
 **对应旧模型**: Phase 5 SHIP + Phase 6 LAND
 
-**详细指令**: 参见 `references/phase-5-ship.md` — GITHOOKS-GATE / VERSION-GATE / VERSION CHANGESET (Issue #142) / changeset schema。
+**详细指令**: 参见 `references/phase-5-ship.md` — VERSION-GATE (MANDATORY) / finishing-a-development-branch / VERSION CHANGESET (Issue #142) / changeset schema。
 
 **快速参考**:
-- **Orchestrator 直接执行**: `finishing-a-development-branch` 和 `ship` 均为交互式 skill（4 选项菜单 + PR 确认），**必须由 orchestrator 直接调用** `skill(name="finishing-a-development-branch")` 和 `skill(name="ship")`
-- 输入: phase-4-summary.md + feedback-log.md → 输出: PR URL
+- **Step 0: VERSION-GATE (MANDATORY — 必须在 finishing-a-development-branch 之前)**: bump VERSION → update CHANGELOG.md → run sync-version.sh → commit + push → verify PR updated。详见 `references/phase-5-ship.md#step-0-version-gate`
+- **Step 1: finishing-a-development-branch**: 4 选项菜单，选择 "Push and create a Pull Request"
+- **Orchestrator 直接执行**: `finishing-a-development-branch` 和 `ship` 均为交互式 skill，**必须由 orchestrator 直接调用** `skill(name="finishing-a-development-branch")` 和 `skill(name="ship")`
+- 输入: phase-4-summary.md + feedback-log.md → 输出: PR URL (含版本变更 commit)
 - **HARD-GATE**: Phase 4/6 未完成 → BLOCK。验证 `feedback-log.md` 存在。
 - **GITHOOKS-GATE**: 验证 hooks 完整性，缺失则 `githooks/install.sh`
-- **VERSION-GATE**: bump PATCH/MINOR/MAJOR → `sync-version.sh` → CHANGELOG.md → `git diff VERSION` 验证
 - **LAND**: `land-and-deploy` — merge PR → 等待 CI (10min) → 等待 Deploy (10min) → Canary Health Check (5min)
 - **回滚**: `git revert` 最后一次 merge commit
+
+**⚠️ VERSION-GATE 必须在 finishing-a-development-branch 之前执行。顺序反了会导致 PR 不含版本变更 → CI release workflow 不触发 → 无新版本发布。**
 
 ### Phase 6/6: CLOSE (收尾 — ⚠️ 人工验收 + 清理)
 
