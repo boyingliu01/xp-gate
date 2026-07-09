@@ -1,0 +1,77 @@
+---
+specification:
+  id: SPEC-INSTALL-001
+  name: 安装卸载体验全面升级
+  version: "1.0.0"
+  source_document: docs/plans/2026-07-08-install-uninstall-experience-design.md
+  delphi_status: APPROVED
+  delphi_rounds: 2
+  delphi_consensus: "3/3"
+
+  requirements:
+    - id: REQ-INSTALL-001
+      description: 新增 xp-gate install 命令 — 项目级一键安装入口，整合 init + bootstrap + doctor
+      priority: MUST
+      acceptance_criteria:
+        - id: AC-INSTALL-001-01
+          description: xp-gate install 在干净环境完整执行 hooks 部署、工具安装、完整性检查
+        - id: AC-INSTALL-001-02
+          description: xp-gate install --global 执行全局 adapters + 工具安装 + doctor
+        - id: AC-INSTALL-001-03
+          description: 安装完成打印已装/未装工具清单
+        - id: AC-INSTALL-001-04
+          description: npm install -g 后 postinstall 打印引导提示（不执行安装）
+
+    - id: REQ-INSTALL-002
+      description: xp-gate uninstall --purge 全面清理包括备份机制
+      priority: MUST
+      acceptance_criteria:
+        - id: AC-INSTALL-002-01
+          description: --purge 前自动备份到 /tmp/xp-gate-backup-{timestamp}/
+        - id: AC-INSTALL-002-02
+          description: 清理 ~/.xp-gate/, ~/.config/xp-gate/, 项目 .xp-gate/
+        - id: AC-INSTALL-002-03
+          description: 取消 git config --global core.hooksPath（如果指向 xp-gate）
+        - id: AC-INSTALL-002-04
+          description: --dry-run 仅预览不执行；二次确认才执行
+
+    - id: REQ-INSTALL-003
+      description: gate-9.sh 文件头修正 — 对齐 shell 脚本编号体系
+      priority: MUST
+      acceptance_criteria:
+        - id: AC-INSTALL-003-01
+          description: 文件头从 GATE 10 改为 GATE 9
+        - id: AC-INSTALL-003-02
+          description: 审计日志从 gate-10 改为 gate-9
+        - id: AC-INSTALL-003-03
+          description: src/npm-package/hooks/gate-9.sh 副本同步修正
+
+    - id: REQ-INSTALL-004
+      description: GATE_TOOLS 分类重构 + doctor 按分组展示 + --format json 兼容
+      priority: MUST
+      acceptance_criteria:
+        - id: AC-INSTALL-004-01
+          description: GATE_TOOLS 按 PLATFORM/IAC/GATE0/BUILD_INTEGRITY/LINT/TEST/MUTATION/SPECIAL 分类
+        - id: AC-INSTALL-004-02
+          description: verify-tool-map.js 交叉验证 GATE_TOOLS 与 adapter 脚本一致性
+        - id: AC-INSTALL-004-03
+          description: doctor 分组输出（平台/IaC/语言/Pre-push/特殊依赖）
+        - id: AC-INSTALL-004-04
+          description: doctor --format json 输出向后兼容 JSON
+        - id: AC-INSTALL-004-05
+          description: 不相关语言工具不检查不报错
+
+    - id: REQ-INSTALL-005
+      description: bootstrap 跨平台扩展 — installWithFallback + PEP 668 + --lang
+      priority: SHOULD
+      acceptance_criteria:
+        - id: AC-INSTALL-005-01
+          description: installWithFallback 替换 installViaScript/installViaInline
+        - id: AC-INSTALL-005-02
+          description: PEP 668 三级回退（pipx安装 → pipx → pip --break-system-packages → 手动提示）
+        - id: AC-INSTALL-005-03
+          description: bootstrap --lang ts/py/go 安装语言特定工具
+        - id: AC-INSTALL-005-04
+          description: npm 不可用时检测 yarn/pnpm 回退
+        - id: AC-INSTALL-005-05
+          description: Windows winget→choco→scoop 降级，--skip-admin 跳过提权
