@@ -4,16 +4,25 @@ OpenCode plugin exposing xp-gate quality gates and AI workflow skills.
 
 ## Tools
 
-These three tools are **dual-surface**: callable both as OpenCode tools (from
-inside an OpenCode session) and as `xp-gate` CLI subcommands (from any shell).
-Both paths produce identical output. See repo README for the matching CLI table.
-
 - **gate-check** ⇄ `xp-gate check <path>`: Run user-invokable quality gates
   (Gate 4 Principles + Gate 6 Architecture) on a file or directory.
 - **gate-principles** ⇄ `xp-gate principles <path>`: Run Clean Code + SOLID
   principles checker (Gate 4 standalone).
 - **gate-arch** ⇄ `xp-gate arch`: Run architecture validation (Gate 6
   standalone, layer boundary checks).
+- **session-rename**: Rename an OpenCode session. When called without a
+  `newTitle`, analyzes the session's recent user messages and auto-generates a
+  descriptive title. Works by directly updating the OpenCode SQLite database
+  (`~/.local/share/opencode/opencode.db`).
+
+  Usage:
+  ```typescript
+  // Rename current session with auto-generated title
+  session-rename()
+
+  // Rename a specific session with a custom title
+  session-rename({ sessionId: "ses_xxx", newTitle: "Fix auth middleware bug" })
+  ```
 
 > Earlier docs said "all 6 quality gates" — that was inaccurate. `gate-check`
 > intentionally runs only the two user-invokable gates (Principles + Arch); the

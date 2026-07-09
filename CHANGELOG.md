@@ -2,6 +2,11 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.14.2.0] - 2026-07-09
+
+### Added
+- **#310**: OpenCode plugin 新增 session-rename tool — 支持手动指定标题或从最近 10 条用户消息中自动生成标题，直接操作 OpenCode SQLite 数据库，零新依赖
+
 ## [0.14.1.0] - 2026-07-09
 
 ### Fixed
