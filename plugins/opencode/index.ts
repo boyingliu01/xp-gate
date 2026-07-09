@@ -257,6 +257,65 @@ async function getUpgradeSuggestion(cwd: string): Promise<string> {
   }
 }
 
+// ── Session title auto-generation ──
+
+function generateSessionTitle(dbPath: string, sessionId: string): string {
+  try {
+    const escapedId = sessionId.replace(/'/g, "''")
+    const sql = `
+      SELECT json_extract(p.data, '$.text') as text
+      FROM part p
+      JOIN message m ON p.message_id = m.id
+      WHERE m.session_id = '${escapedId}'
+        AND json_extract(m.data, '$.role') = 'user'
+        AND json_extract(p.data, '$.type') = 'text'
+      ORDER BY m.time_created DESC
+      LIMIT 10
+    `
+    const raw = execSync(`sqlite3 "${dbPath}" "${sql}"`, {
+      encoding: "utf8",
+      timeout: 5000,
+    })
+
+    if (!raw.trim()) return ""
+
+    const userMessages = raw
+      .split("\n")
+      .map((line) => line.trim())
+      .filter((line) => line.length > 0)
+
+    const combined = userMessages.join(" ")
+    return extractTitleFromText(combined)
+  } catch {
+    return ""
+  }
+}
+
+function extractTitleFromText(text: string): string {
+  const taskMarkers = [
+    /(?:implement|add|create|build|develop|fix|refactor|optimize|update|remove|merge|deploy|release|publish|design|review)\s+[^.?!\n]{5,80}/gi,
+  ]
+
+  const matches: string[] = []
+  for (const marker of taskMarkers) {
+    const hits = text.matchAll(marker)
+    for (const hit of hits) {
+      matches.push(hit[0].trim())
+    }
+  }
+
+  if (matches.length > 0) {
+    return matches[0].substring(0, 120)
+  }
+
+  const firstSentence = text.split(/[.?!]\s+/).filter(s => s.length > 10)[0]
+  if (firstSentence && firstSentence.length > 5) {
+    return firstSentence.substring(0, 120).trim()
+  }
+
+  return ""
+}
+
 // ── Plugin definition ──
 
 export const XpGatePlugin = async (input: OpenCodePluginInput) => {
@@ -315,6 +374,45 @@ export const XpGatePlugin = async (input: OpenCodePluginInput) => {
           }
           const cmd = `npx -y @archlinter/cli scan . --config ${config}`
           return runCmd(cmd, cwd)
+        },
+      }),
+      "session-rename": tool({
+        description: "Rename an OpenCode session. When called without newTitle, analyzes the session's recent conversation and auto-generates a descriptive title based on the work done.",
+        args: {
+          sessionId: z.string().optional().describe("Session ID to rename (defaults to current session)"),
+          newTitle: z.string().optional().describe("New session title. If omitted, auto-generates from conversation content."),
+        },
+        async execute(args, ctx) {
+          const sessionId = args.sessionId || ctx.sessionID
+          const dbPath = join(homedir(), ".local", "share", "opencode", "opencode.db")
+
+          if (!existsSync(dbPath)) {
+            return "Session rename failed: OpenCode database not found at " + dbPath
+          }
+
+          let title: string
+          if (args.newTitle) {
+            title = args.newTitle
+          } else {
+            title = generateSessionTitle(dbPath, sessionId)
+          }
+
+          if (!title || title.trim().length === 0) {
+            return "Session rename failed: could not generate a title (no user messages found)"
+          }
+
+          title = title.trim().substring(0, 120)
+
+          const escapedTitle = title.replace(/'/g, "''")
+          const escapedId = sessionId.replace(/'/g, "''")
+          const sql = `UPDATE session SET title = '${escapedTitle}', time_updated = ${Date.now()} WHERE id = '${escapedId}'`
+          try {
+            execSync(`sqlite3 "${dbPath}" "${sql}"`, { timeout: 5000 })
+            return `Session renamed to: "${title}"`
+          } catch (err) {
+            const msg = err instanceof Error ? err.message : String(err)
+            return `Session rename failed: ${msg}`
+          }
         },
       }),
     },
