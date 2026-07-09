@@ -577,9 +577,13 @@ fi
 # ============================================================================
 # GATE 1: Code Quality (Static Analysis + Linting + Shell Check combined)
 # Combination of: Old Gates 1 (Static), Gate 2 (Linting), Gate 5 (Shell Check)
+# v0.14.3+ (Issue #312): Skip if no code files changed
 # ============================================================================
  2>&1 echo ""
  2>&1 echo "→ Gate 1: Code Quality (static analysis + linting)..."
+if ! any_changed_files_match "\.(ts|tsx|js|jsx|py|go|java|kt|cpp|c|swift|m|mm|dart|sh)$" "\.ya?ml$" "\.json$" "Dockerfile" "\.tf$"; then
+  echo "✅ PASSED - No code files changed, skipping lint."
+else
 GATE_1_START=$(gate_start_ms)
 
 if [ "$PROJECT_LANG" = "documentation-only" ]; then
@@ -943,6 +947,7 @@ else
     echo "⏭️  SKIPPED - Code quality (no specific checks for $PROJECT_LANG)"
   fi
 fi
+fi  # End: if ! any_changed_files_match (Issue #312 skip)
 GATE_1_STATUS="PASS"
 GATE_1_TOOL="${PROJECT_LANG}"
 record_gate_audit "gate-1" "code-quality" "$GATE_1_STATUS" "0" "$GATE_1_START"
@@ -1038,6 +1043,11 @@ source "$GATE_DIR/gate-4.sh"
 # ============================================================================
 # GATE 5: Tests & Coverage Combined (Combines Old Gates 3 - Tests and 4 - Coverage)
 # Uses adapter system to run tests + coverage for language
+# 
+# v0.14.3+ (Issue #312): Skip test run when no code files changed.
+# Code files = src/**/*.ts, plugins/**/*.ts, *.ts, *.tsx, etc. (language-aware).
+# VERSION, CHANGELOG, docs, config-only changes → SKIP test run entirely.
+# Gate 5a (new file pairing) and Gate 5b (mock density) still run — they're lightweight.
 # ============================================================================
  2>&1 echo ""
  2>&1 echo "→ Gate 5: Tests & coverage..."
@@ -1343,6 +1353,24 @@ else
   fi
 
   # ============================================================================
+  # v0.14.3+ (Issue #312): Early skip when no code files changed.
+  # If the commit only touches VERSION, CHANGELOG, docs, config, .gitignore,
+  # or similar non-code files, skip the test run entirely.
+  # Gate 5a (new file pairing) and 5b (mock density) are cheap and still run.
+  # ============================================================================
+  CODE_EXTENSIONS="\.(ts|tsx|js|jsx|py|go|java|kt|kts|cpp|cc|cxx|c|swift|m|mm|dart|sh|ps1)$"
+  CHANGED_CODE_FILES=$(echo "$CHANGED_FILES" | grep -E "$CODE_EXTENSIONS" || true)
+  if [ -z "$CHANGED_CODE_FILES" ]; then
+    echo "✅ PASSED - No code files changed (only docs/config/VERSION), skipping test run."
+    echo "   Changed files: $(echo "$CHANGED_FILES" | tr '\n' ' ')"
+    TESTS_EXIT_CODE=0
+    TESTS_SKIPPED=true
+    GATE_5_END=$(gate_start_ms)
+    GATE_5_ELAPSED=$((GATE_5_END - GATE_5_START))
+    echo "   ⏱️  Gate 5: ${GATE_5_ELAPSED}ms (skipped — no code changes)"
+  else
+
+  # ============================================================================
   # Smart test selection (Issue #286): only run tests affected by changed files.
   # Reuses CHANGED_TEST_FILES already computed in Gate 5b (line 1244).
   # Full run fallback: >20 changed test files, or vitest not found.
@@ -1485,8 +1513,13 @@ else
   else
     echo "✅ PASSED - No ${PROJECT_LANG} adapter found for tests, assuming none to run."
   fi
-  
-  # Next, run coverage check (skip for TypeScript — already done above)
+
+  fi  # End: if [ -n "$CHANGED_CODE_FILES" ] (Issue #312 early skip)
+   
+  # Next, run coverage check (skip if tests were skipped — Issue #312)
+  if [ "${TESTS_SKIPPED:-false}" = "true" ]; then
+    echo "ℹ️  Test run was skipped — skipping coverage check."
+  else
   echo "Running coverage check..."
 
   if [ "${PROJECT_LANG}" != "unknown" ] && [ -n "$ADAPTER_FILE" ]; then
@@ -1688,6 +1721,8 @@ else
     echo "ℹ️  Coverage enforcement not applicable for ${PROJECT_LANG}"
   fi
   echo "✅ PASSED - Coverage check completed."
+
+  fi  # End: if [ "${TESTS_SKIPPED:-false}" != "true" ] (Issue #312 coverage skip)
 
   # ============================================================================
   # Stage 3: Per-file coverage check for NEW files (Issue #103)
@@ -1959,8 +1994,13 @@ record_gate_audit "gate-6" "architecture-boy-scout" "$GATE_6_STATUS" "${BS_BLOCK
 # ============================================================================
 # GATE 7: IaC Security Scanning (Terraform, Kubernetes, Docker)
 # Extracted to gate-7.sh for maintainability
+# v0.14.3+ (Issue #312): Skip if no IaC files changed
 # ============================================================================
+if any_changed_files_match "\.tf$" "\.tfvars$" "Dockerfile" "\.kube/" "\.ya?ml$"; then
 source "$GATE_DIR/gate-7.sh"
+else
+  echo "✅ PASSED - No IaC files changed, skipping Gate 7."
+fi
 
 
 # GATE 8: Secret Scanning (gitleaks)
@@ -2030,9 +2070,14 @@ echo ""
 
 # ============================================================================
 # GATE 10: Semgrep SAST Security Scan
-# Extracted to gate-10.sh for maintainability
+# Extracted to gate-10.sh for maintainability (sourced as gate-9.sh)
+# v0.14.3+ (Issue #312): Skip if no code files changed
 # ============================================================================
+if any_changed_files_match "\.(ts|tsx|js|jsx|py|go|java|kt|cpp|c|swift|m|dart|sh)$"; then
 source "$GATE_DIR/gate-9.sh"
+else
+  echo "✅ PASSED - No code files changed, skipping SAST scan."
+fi
 # ============================================================================
 
 # ============================================================================
