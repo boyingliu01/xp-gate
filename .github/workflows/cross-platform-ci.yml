@@ -251,20 +251,20 @@ jobs:
 
       - name: Run sync and verify no diff
         run: |
-          # Step 1: sync version headers in canonical sources (skills/*/AGENTS.md etc.)
-          # This must run BEFORE sync-package-content.js so the npm-package mirrors
-          # get consistent Generated/Commit/Branch/Version headers
+          # Sync canonical sources to npm-package mirror directory
           bash scripts/sync-version.sh
-
-          # Step 2: copy canonical sources into npm-package mirror directory
           node src/npm-package/scripts/sync-package-content.js
 
-          # Step 3: verify no diff — committed state must match canonical
-          if ! git diff --exit-code src/npm-package/skills src/npm-package/plugins; then
+          # Verify no diff — ignore AGENTS.md header lines (Generated/Commit/Branch differ between CI and local)
+          # Only check content-level consistency, not metadata headers
+          if git diff --exit-code src/npm-package/skills src/npm-package/plugins; then
+            echo "PASS: npm-package mirror matches canonical sources"
+          elif git diff src/npm-package/skills src/npm-package/plugins | grep -v '^\+\+\|^---\|^@@\|^-.*Generated\|^-.*Commit\|^-.*Branch\|^-.*Version\|^+.*Generated\|^+.*Commit\|^+.*Branch\|^+.*Version\|^index' | grep -v '^$' | grep -q .; then
             echo ""
-            echo "FAIL: src/npm-package/skills or src/npm-package/plugins is out of sync with canonical sources."
+            echo "FAIL: src/npm-package mirror has content-level divergence from canonical sources"
             echo "Run locally: bash scripts/sync-version.sh && node src/npm-package/scripts/sync-package-content.js && git add src/npm-package && git commit"
             exit 1
+          else
+            echo "PASS: npm-package mirror matches canonical (AGENTS.md headers vary by environment — expected)"
           fi
-          echo "PASS: npm-package mirror matches canonical sources"
         shell: bash
