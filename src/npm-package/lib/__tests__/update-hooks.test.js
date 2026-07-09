@@ -347,10 +347,12 @@ describe('updateHooks', () => {
 
   describe('getProjectHooksDir', () => {
     it('returns .git/hooks path under cwd', () => {
+      const gitDir = path.join(tmpProject, '.git');
+      fs.mkdirSync(gitDir, { recursive: true });
+      vi.spyOn(process, 'cwd').mockReturnValue(tmpProject);
       const mod = getModule();
-      const cwd = process.cwd();
       const result = mod.getProjectHooksDir();
-      expect(result).toBe(path.join(cwd, '.git', 'hooks'));
+      expect(result).toBe(path.join(tmpProject, '.git', 'hooks'));
     });
 
     it('throws when .git/ does not exist', () => {
