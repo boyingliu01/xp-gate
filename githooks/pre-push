@@ -997,6 +997,44 @@ fi
 # ALL CHECKS PASSED
 # ============================================================================
 echo ""
+
+# ============================================================================
+# SPRINT-STATE BACKUP CHECK (WARNING ONLY — Issue #318)
+# Scan for worktree sprint-state directories that haven't been backed up
+# to .sprint-history/ before push. WARN only (doesn't block) — sprint-state
+# inside worktrees is deleted on `git worktree remove`, causing permanent
+# data loss if orchestrator forgets to back up during CLOSE phase.
+# ============================================================================
+if [ -d ".worktrees/sprint" ]; then
+  for worktree_dir in .worktrees/sprint/sprint-*; do
+    [ -d "$worktree_dir" ] || continue
+    sprint_id=$(basename "$worktree_dir")
+    if [ -f "$worktree_dir/.sprint-state/sprint-state.json" ]; then
+      if [ ! -d ".sprint-history/$sprint_id" ]; then
+        echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+        echo "   ⚠️  SPRINT-STATE NOT BACKED UP: $sprint_id"
+        echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+        echo ""
+        echo "Unarchived sprint state found in worktree:"
+        echo "  Path: $worktree_dir/.sprint-state/"
+        echo "  Backup: .sprint-history/$sprint_id/ (MISSING)"
+        echo ""
+        echo "RISK: If this worktree is removed before CLOSE backup,"
+        echo "      design docs, Delphi verdicts, and phase summaries"
+        echo "      are permanently lost."
+        echo ""
+        echo "Backup now:"
+        echo "  mkdir -p .sprint-history/$sprint_id"
+        echo "  cp -r $worktree_dir/.sprint-state/* .sprint-history/$sprint_id/"
+        echo ""
+        echo "See: https://github.com/boyingliu01/xp-gate/issues/318"
+        echo ""
+      fi
+    fi
+  done
+fi
+
+echo ""
 echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
   echo "   ✅ GATE MW: CODE WALKTHROUGH VERIFIED"
 echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
