@@ -29,10 +29,12 @@ function contentIncludes(str) {
   return skillContent.includes(str) || phaseOverviewContent.includes(str);
 }
 function contentSplit(str) {
-  // Return the part after str from whichever file contains it
+  // Return the part after str from whichever file contains it.
+  // Throws descriptive error instead of returning undefined so callers
+  // get a clear assertion message rather than a TypeError crash.
   if (skillContent.includes(str)) return skillContent.split(str)[1];
   if (phaseOverviewContent.includes(str)) return phaseOverviewContent.split(str)[1];
-  return undefined;
+  throw new Error(`Section "${str}" not found in SKILL.md or references/phase-overview.md`);
 }
 
 function parseFrontmatter(content) {
