@@ -1,0 +1,16 @@
+{
+  "mode": "design",
+  "timestamp": "2026-07-08T07:50:00Z",
+  "verdict": "APPROVED",
+  "consensus_ratio": 1.0,
+  "rounds": 2,
+  "experts": {
+    "A": { "verdict": "APPROVED", "confidence": 9, "round": 2 },
+    "B": { "verdict": "APPROVED", "confidence": 8, "round": 2 },
+    "C": { "verdict": "APPROVED", "confidence": 9, "round": 2 }
+  },
+  "specification_path": ".sprint-state/phase-outputs/specification.yaml",
+  "consensus_report": "docs/plans/2026-07-08-install-uninstall-experience-consensus.md",
+  "remaining_minor_issues": 8,
+  "design_doc": "docs/plans/2026-07-08-install-uninstall-experience-design.md"
+}
