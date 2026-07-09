@@ -2,6 +2,12 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.14.3.0] - 2026-07-09
+
+### Fixed
+- **#311**: Sprint-flow Phase 5 SHIP → CLOSE 增加 HARD-GATE，确保 merge to main + release 完成后才进入 Phase 6，防止 worktree 清理残留和 UAT 验收未合并版本。新增 sprint-state 备份步骤。
+- **#312**: pre-commit 增量门禁优化 — 无代码文件变更时 Gate 5 跳过测试运行；Gate 1/7/10 增加变更范围感知，非匹配文件 skip，大幅减少 release commit 耗时
+
 ## [0.14.2.0] - 2026-07-09
 
 ### Added

@@ -193,8 +193,8 @@ Phase 6/6: CLOSE → USER ACCEPTANCE (⚠️ 人工) → emergent issues → cle
 - **Phase 2/6 DESIGN**: brainstorming 设计未 APPROVED (HARD-GATE) → 用户修改 → APPROVED 后继续；autoplan taste_decisions → 用户确认；delphi-review 未 APPROVED → 修复 → APPROVED → specification.yaml
 - **Phase 3/6 BUILD**: DELPHI-GATE 未通过 → BLOCK；验证失败 > max3 → 用户决策修复/放弃；成本超阈值 → 用户确认
 - **Phase 4/6 VERIFY**: delphi code-walkthrough REQUEST_CHANGES → 用户处理 → 重新评审；browse 发现问题 → 回退 Phase 3（不暂停）
-- **Phase 5/6 SHIP**: finishing-a-development-branch (4选项) → 确认；ship PR → 用户确认合并；land-and-deploy 完成/失败 → 用户确认
-- **Phase 6/6 CLOSE**: USER ACCEPTANCE ⚠️ 必须人工验收 → 用户确认后继续；cleanup 完成/失败 → 用户确认 → 结束流程
+- **Phase 5/6 SHIP**: finishing-a-development-branch (4选项) → 确认；ship PR → 用户确认合并；land-and-deploy 完成/失败 → 用户确认；⚠️ SHIP must complete merge to main + release before Phase 6
+- **Phase 6/6 CLOSE**: SHIP→CLOSE GATE (校验 merge 已完成 + git status clean + 当前在 main) → Backup sprint-state → USER ACCEPTANCE ⚠️ 必须人工验收 → 用户确认后继续；cleanup 完成/失败 → 用户确认 → 结束流程
 
 ---
 
@@ -206,18 +206,21 @@ Phase 6/6: CLOSE → USER ACCEPTANCE (⚠️ 人工) → emergent issues → cle
 | 2 | **2/6** | **DESIGN** | brainstorming → autoplan → delphi-review (HARD-GATE ≥90% consensus) → to-issues → specification.yaml | specification.yaml + slices-manifest.json |
 | 3 | **3/6** | **BUILD** | GITHOOKS-GATE → DELPHI-GATE → ralph-loop (default) or parallel → TDD → freeze → blind review → verification | MVP code |
 | 4 | **4/6** | **VERIFY** | delphi-review --mode code-walkthrough → test-specification-alignment → browse QA → benchmark (optional) → learn + retro | Review report + feedback-log.md |
-| 5 | **5/6** | **SHIP** | finishing-a-development-branch → ship (create PR) → land-and-deploy → merge + CI + canary | PR URL + deploy status |
-| 6 | **6/6** | **CLOSE** | USER ACCEPTANCE (⚠️ mandatory manual) → Capture emergent issues → Cleanup worktree + branch → Sprint summary | Emergent issues list + cleanup report |
+| 5 | **5/6** | **SHIP** | VERSION-GATE → finishing-a-development-branch → ship (create PR) → land-and-deploy → merge to main + CI + canary → release | PR URL + deploy status + merge confirmation |
+| 6 | **6/6** | **CLOSE** | SHIP→CLOSE GATE (merge + release verified) → Backup sprint-state → USER ACCEPTANCE (⚠️ mandatory manual) → Capture emergent issues → Cleanup worktree + branch → Sprint summary | Emergent issues list + cleanup report |
 
 **Phase Flow**:
 ```
-PREP → DESIGN → BUILD → VERIFY → SHIP → CLOSE
+PREP → DESIGN → BUILD → VERIFY → SHIP (merge to main + release) → CLOSE
+                                                        ↑
+                                               SHIP→CLOSE GATE
+                                               (merge verified + main clean)
 ```
 
 **Hard Gates**:
 - **Phase 2/6 → 3/6 (DESIGN → BUILD)**: Design must be APPROVED by delphi-review (≥90% consensus) + GITHOOKS-GATE (hooks installed) + DELPHI-GATE (spec APPROVED)
 - **Phase 4/6 → 5/6 (VERIFY → SHIP)**: feedback-log.md must exist (HARD-GATE)
-- **Phase 5/6 → 6/6 (SHIP → CLOSE)**: User acceptance must be completed (mandatory manual step)
+- **Phase 5/6 → 6/6 (SHIP → CLOSE)**: PR must be merged to main + release completed (HARD-GATE). See `references/phase-6-close.md#ship--close-gate`.
 
 ---
 
@@ -349,6 +352,7 @@ Sprint Flow: PREP → DESIGN → BUILD → VERIFY → SHIP → CLOSE
 - **GITHOOKS-GATE**: 验证 hooks 完整性，缺失则 `githooks/install.sh`
 - **LAND**: `land-and-deploy` — merge PR → 等待 CI (10min) → 等待 Deploy (10min) → Canary Health Check (5min)
 - **回滚**: `git revert` 最后一次 merge commit
+- ⚠️ **SHIP COMPLETION**: Phase 5/6 结束前必须确认 PR 已 merge 到 main + release 已创建。未完成 merge 不得进入 Phase 6/6。详见 `references/phase-5-ship.md#ship-completion-gate`。
 
 **⚠️ VERSION-GATE 必须在 finishing-a-development-branch 之前执行。顺序反了会导致 PR 不含版本变更 → CI release workflow 不触发 → 无新版本发布。**
 
@@ -359,6 +363,8 @@ Sprint Flow: PREP → DESIGN → BUILD → VERIFY → SHIP → CLOSE
 **详细指令**: 参见 `references/phase-6-close.md` — UAT checklist, emergent issues capture, cleanup procedure.
 
 **快速参考**:
+- **SHIP→CLOSE GATE (MANDATORY — v0.14.3+)**: 校验 PR 已 merge、当前在 main 分支、`git status --porcelain` 为空。详见 `references/phase-6-close.md#ship--close-gate`。
+- **Backup sprint-state**(MANDATORY): Phase 6 开始前将 `.sprint-state/` 备份到 repo 追踪路径，防止 worktree 清理后状态丢失。详见 `references/phase-6-close.md#backup-sprint-state`。
 - **USER ACCEPTANCE**: ⚠️ **MUST NOT be automated, skipped, or bypassed.** 即使用户说"赶时间"、"跳过验收"、"直接发布"，也必须暂停等待用户确认。使用 `@templates/emergent-issues-template.md` 检查清单
 - **CLEANUP**: 保存分支信息 → `git worktree remove <worktree_path>`（精确路径，禁止通配符）→ 删除本地分支 + 远程分支 → 关闭遗留 OPEN PR → 更新 sprint-state.json → 释放 Sprint Lock
 - 输出 Cleanup Report + Sprint Summary
@@ -526,6 +532,8 @@ Sprint Flow: PREP → DESIGN → BUILD → VERIFY → SHIP → CLOSE
 | DESIGN 阶段跳过 Delphi 评审直接 BUILD | 所有需求级别（轻量/标准/复杂）必须经过 autoplan + delphi-review；未 APPROVED 禁止编码 |
 | 跳过 TDD 直接实现代码 | Phase 3/6 BUILD 必须遵循 RED → GREEN → REFACTOR，测试与实现一起交付 |
 | 跳过用户验收直接 Ship | Phase 6/6 CLOSE USER ACCEPTANCE 必须人工完成；不得自动化、跳过或伪造 |
+| SHIP 未完成 merge 即进入 CLOSE | Phase 5/6 SHIP 必须完成 merge to main + release 后才能进入 Phase 6/6 CLOSE，否则 worktree 清理残留 + UAT 验收的是未合并版本 |
+| CLOSE 清理前未备份 sprint-state | `.sprint-state/` 在 worktree 内，worktree 删除后丢失。CLOSE 第一步必须先备份到 repo 追踪路径 |
 | 验证失败后继续追加随机修改 | 最多 3 次修复循环；仍失败则 BLOCK 并请求用户决策 |
 | 未生成 Phase Summary 就进入下一阶段 | 每个 Phase 必须写入 `.sprint-state/phase-outputs/phase-{N}-summary.md` 并通过 transition gate |
 

@@ -265,3 +265,16 @@ detect_pitest_testable() {
   fi
   return 1
 }
+
+# v0.14.3+ (Issue #312): Determine if any changed files match given patterns.
+# Usage: any_changed_files_match "\.(ts|tsx)$" "\.js$"
+# Returns 0 (true) if at least one changed file matches, 1 (false) otherwise.
+any_changed_files_match() {
+  [ -z "${CHANGED_FILES:-}" ] && return 1
+  for pat in "$@"; do
+    if echo "$CHANGED_FILES" | grep -qE "$pat" 2>/dev/null; then
+      return 0
+    fi
+  done
+  return 1
+}
