@@ -1,8 +1,8 @@
 # PROJECT KNOWLEDGE BASE
 
-**Generated:** 2026-07-08
-**Commit:** 229cf7d
-**Branch:** main
+**Generated:** 2026-07-09
+**Commit:** 97f5128
+**Branch:** sprint/2026-07-09-01
 **Version:** 0.14.0.0
 
 ## OVERVIEW
@@ -177,6 +177,7 @@ Subcommands registered in 0.8.8.0 (verified against bin source):
 - **Test annotations are mandatory.** Every test file must carry `@test REQ-XXX`, `@intent ...`, `@covers AC-XXX` JSDoc tags. Missing tags ⇒ test rejected.
 - **TypeScript strict mode, always.** No `as any`, `@ts-ignore`, or `@ts-expect-error`. No empty `catch` blocks. No `print()` — use `logging`.
 - **Adapters are duplicated** between `githooks/adapters/` and `src/npm-package/adapters/`. Edit `githooks/` first, then resync via build scripts. Known tech debt.
+- **TDD mandatory before implementation (v0.14.0+).** Every implementation change MUST follow RED → GREEN → REFACTOR. Before delegating any implementation work, verify a failing test exists. If no test exists, write one first and mark the todo as `[TDD-RED]`. Only delegate implementation AFTER the RED test is committed. See `skills/sprint-flow/references/phase-3-build.md` for the full TDD-GATE specification. ralph-loop creates tests as step 0 — this is the pre-ralph-loop check, not a replacement.
 
 ## ANTI-PATTERNS (THIS PROJECT)
 - Do NOT bypass any gate with `--no-verify`. Process violation.

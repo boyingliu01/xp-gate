@@ -304,10 +304,11 @@ Sprint Flow: PREP → DESIGN → BUILD → VERIFY → SHIP → CLOSE
 
 **快速参考**:
 1. **DELPHI-GATE**: 验证 `.sprint-state/delphi-reviewed.json` 存在且 `verdict = "APPROVED"` → 否则 BLOCK
-2. **输入**: `slices-manifest.json`（Phase 2/6 生成），按 `execution_order` 逐个执行
-3. **模式**: 默认 `ralph-loop`（逐 REQ 迭代，token 节约 40-67%），可选 `--mode parallel`
-4. **Skill 步骤**: hooks-install → dispatching-parallel-agents → TDD (RED/GREEN/REFACTOR) → freeze → blind-review → unfreeze → verification-before-completion → 成本监控
-5. **Mock Minimization**: integration-first, mock 仅限 external services, 密度 > 30% 需 `@mock-justified`
+2. **TDD-GATE (MANDATORY — v0.14.0+)**: 在 delegation 前验证每个 REQ 存在 failing test。无 test → mark `[TDD-RED]`（ralph-loop 创建）。有 test 且 GREEN 且无实现 → BLOCK（TDD bypass）。详见 `references/phase-3-build.md#tdd-gate-pre-implementation-tdd-check-mandatory`。
+3. **输入**: `slices-manifest.json`（Phase 2/6 生成），按 `execution_order` 逐个执行
+4. **模式**: 默认 `ralph-loop`（逐 REQ 迭代，token 节约 40-67%），可选 `--mode parallel`
+5. **Skill 步骤**: hooks-install → TDD-GATE → dispatching-parallel-agents → TDD (RED/GREEN/REFACTOR) → freeze → blind-review → unfreeze → verification-before-completion → 成本监控
+6. **Mock Minimization**: integration-first, mock 仅限 external services, 密度 > 30% 需 `@mock-justified`
 
 ### Phase 4/6: VERIFY (验证 — 代码走查 + QA + 反馈获取)
 

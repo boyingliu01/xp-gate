@@ -81,6 +81,69 @@ SKIP_UNCOMMITTED_GATE=1
 
 ---
 
+## TDD-GATE: Pre-Implementation TDD Check (MANDATORY — v0.14.0+)
+
+**Purpose**: Enforce RED → GREEN → REFACTOR discipline at BUILD entry before any delegation.
+
+**Execution**: Before dispatching to ralph-loop or parallel agents, the orchestrator MUST verify for each REQ:
+
+### Gate Logic
+
+```
+FOR each REQ in slices-manifest.json:
+  IF test file exists for this REQ:
+    IF test passes (GREEN state) AND no implementation exists:
+      → BLOCK: TDD bypass detected. Test is passing before implementation.
+    ELSE IF test fails (RED state):
+      → ALLOW: Proceed to implementation (GREEN phase).
+  ELSE (no test file exists):
+    → ALLOW: Mark REQ as [TDD-RED]. ralph-loop creates the test as step 0.
+```
+
+### Todo Prefix Convention
+
+Each todo item MUST carry a TDD phase prefix in the content field:
+- `[TDD-RED]`: Write failing test first. No implementation yet.
+- `[TDD-GREEN]`: Write minimal implementation to make test pass.
+- `[TDD-REFACTOR]`: Refactor while keeping tests green.
+
+The priority field (high/medium/low) is separate and unchanged.
+
+Example:
+```
+"[TDD-RED] src/lib/auth.ts: Add validateToken() test for expired tokens - expect test to fail"
+"[TDD-GREEN] src/lib/auth.ts: Implement validateToken() to pass test - expect test passes"
+"[TDD-REFACTOR] src/lib/auth.ts: Extract token parsing into parseToken() helper - expect tests stay green"
+```
+
+### Deadlock Prevention
+
+The TDD-GATE is a PRE-RALPH-LOOP check, NOT a replacement for ralph-loop's internal TDD:
+- If no test exists → ralph-loop IS allowed to proceed (creates test as step 0)
+- If test exists and is GREEN without implementation → BLOCK (TDD bypass)
+- The gate verifies TDD DISCIPLINE was followed, not that TDD was skipped
+
+### Limitation
+
+This enforcement is instructional (LLM follows SKILL.md instructions), not programmatic. For stronger enforcement, consider a future automated pre-commit hook that checks git staging order (test file must be staged before source file).
+
+### Log Format (`.sprint-state/tdd-gate-log.json`)
+
+```json
+{
+  "checked": true,
+  "blocked": false,
+  "skipped": false,
+  "reqs_checked": 4,
+  "reqs_blocked": 0,
+  "timestamp": "2026-07-09T00:00:00Z"
+}
+```
+
+**Log location**: `.sprint-state/tdd-gate-log.json` — written on every gate execution for audit trail.
+
+---
+
 ## TDD 强制执行
 
 ### Gate 5a-BLOCK: 新增文件测试强制
