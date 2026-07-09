@@ -166,10 +166,15 @@ autoplan_result:
 #### Step 2b: 调用 delphi-review（强制，orchestrator 直接执行）
 
 ```
+# 标准路径（3 专家）
 skill(name="delphi-review", user_message="[设计文档 + taste_decisions 确认结果]")
+
+# 增量优化路径（2 专家, 1 轮 — 来自 Step 0.5 路由）
+skill(name="delphi-review", user_message="[设计文档]", experts=2, max_rounds=1)
 ```
 
-- Round 1: 3 专家匿名独立评审
+- **标准路径**: Round 1: 3 专家匿名独立评审
+- **增量优化路径**: 2 专家, 1 轮 (来自 Step 0.5 DESIGN 路由分叉)
 - Round 2+: 交换意见直到共识
 - 输出: APPROVED / REQUEST_CHANGES
 
