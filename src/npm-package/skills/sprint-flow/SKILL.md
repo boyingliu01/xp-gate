@@ -200,6 +200,7 @@ Every phase MUST output its header as the first line of that phase's output. For
 4. On `/sprint-flow` trigger, first line MUST output: `Sprint Flow: PREP → DESIGN → BUILD → VERIFY → SHIP → CLOSE`
 5. Each phase completion MUST write Phase Summary to `.sprint-state/phase-outputs/phase-{N}-summary.md`
 6. Each phase completion MUST update `.sprint-state/sprint-state.json`
+7. Each phase completion MUST render the ASCII progress dashboard using `templates/sprint-progress-template.md` — the orchestrator reads `sprint-state.json` and outputs the dashboard after every phase's status block, so the user always sees current global progress without needing to ask
 
 ### Phase Output Status Schema (MANDATORY per phase)
 
