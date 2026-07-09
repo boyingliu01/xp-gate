@@ -263,7 +263,8 @@ jobs:
             echo "PASS: npm-package mirror matches canonical sources"
           else
             # Strip all diff metadata lines and AGENTS.md header lines
-            content_diff=$(echo "$diff_output" | sed '/^diff --git/d; /^index /d; /^--- /d; /^+++ /d; /^@@ /d; /^\*\*Generated:/d; /^\*\*Commit:/d; /^\*\*Branch:/d; /^\*\*Version:/d' | grep -v '^$' || true)
+            # Pattern: lines starting with - or + followed by **header-name:
+            content_diff=$(echo "$diff_output" | sed '/^diff --git/d; /^index /d; /^--- /d; /^+++ /d; /^@@ /d; /^[-+]\*\*Generated:/d; /^[-+]\*\*Commit:/d; /^[-+]\*\*Branch:/d; /^[-+]\*\*Version:/d' | grep -v '^$' || true)
             if [ -n "$content_diff" ]; then
               echo ""
               echo "FAIL: src/npm-package mirror has content-level divergence from canonical sources"
