@@ -102,7 +102,33 @@ skill(name="brainstorming", user_message="[需求描述]")
 skill(name="design-shotgun", user_message="[Pain Document 内容 + 需求描述]")
 ```
 
-#### Step 1: 调用 autoplan skill
+#### Step 0.5: DESIGN 路由分叉（v0.14.0+ — Issue #306）
+
+根据 Phase 1/6 PREP (AUTO-ESTIMATE) 的 `change_type` 决定走哪条路径：
+
+```
+读取 .sprint-state/sprint-state.json → auto_estimate.change_type
+
+IF change_type == "修改已存在代码":
+  → 增量优化路径: SKIP autoplan
+  → 直接进入 Step 2b: delphi-review (lightweight: 2 专家, 1 轮)
+ELSE (change_type == "新增功能" 或 未定义):
+  → 标准路径: 继续 Step 1 (autoplan) → Step 2
+```
+
+**路由决策表**:
+
+| change_type | 路径 | autoplan | delphi-review |
+|------------|------|----------|---------------|
+| `修改已存在代码` | 增量优化 | ❌ SKIP | lightweight (2 专家, 1 轮) |
+| `新增功能` | 标准 | ✅ 执行 | 标准 (3 专家) |
+| `undefined` / 缺失 | 标准 (fail-safe) | ✅ 执行 | 标准 (3 专家) |
+
+**HARD-GATE 不变**: 两条路径最终都必须产出 APPROVED 的 delphi-reviewed.json。
+
+#### Step 1: 调用 autoplan skill（仅标准路径）
+
+**仅当 change_type != "修改已存在代码" 时执行。**
 
 ```
 skill(name="autoplan", user_message="[Pain Document 内容]")

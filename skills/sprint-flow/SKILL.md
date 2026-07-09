@@ -274,8 +274,9 @@ Sprint Flow: PREP → DESIGN → BUILD → VERIFY → SHIP → CLOSE
 **详细指令**: 参见 `references/phase-2-design.md` — 完整流程、条件分支、HARD-GATE。
 
 **快速参考**:
+- **Step 0.5: DESIGN 路由分叉 (v0.14.0+)**: 根据 PREP 的 `change_type` 决定路径。`修改已存在代码` → SKIP autoplan, 直接 lightweight delphi-review (2 专家, 1 轮)。`新增功能` 或 undefined → 标准 autoplan 路径。详见 `references/phase-2-design.md#step-05-design-路由分叉`。
 - **Step 1: brainstorming** — `skill(name="brainstorming")` — 输出设计文档 + CONTEXT.md + ADR。**HARD-GATE**: 设计未批准 → 不可进入实现
-- **Step 2: autoplan** — `skill(name="autoplan")` — CEO/设计/工程自动评审 → 用户确认 taste_decisions
+- **Step 2: autoplan** — `skill(name="autoplan")` — CEO/设计/工程自动评审 → 用户确认 taste_decisions（仅标准路径）
 - **Step 3: delphi-review** — `skill(name="delphi-review")` — 等待 APPROVED（非 APPROVED 暂停等待用户确认）
 - **Step 4: to-issues** — `skill(name="to-issues")` — 垂直切片 Issue 拆分 → slices-manifest.json
 - **Step 5: specification.yaml** — 从 APPROVED 设计文档自动提取
