@@ -1008,6 +1008,7 @@ echo ""
 if [ -d ".worktrees/sprint" ]; then
   for worktree_dir in .worktrees/sprint/sprint-*; do
     [ -d "$worktree_dir" ] || continue
+    [ -d "$worktree_dir/.sprint-state" ] || continue
     sprint_id=$(basename "$worktree_dir")
     if [ -f "$worktree_dir/.sprint-state/sprint-state.json" ]; then
       if [ ! -d ".sprint-history/$sprint_id" ]; then
