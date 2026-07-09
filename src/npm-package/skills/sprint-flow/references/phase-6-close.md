@@ -1,9 +1,50 @@
 # Phase 6/6: CLOSE（收尾 — ⚠️ 人工验收 + 清理）
 
-**执行时机**: Phase 5/6 SHIP 完成后。
+**执行时机**: Phase 5/6 SHIP 完成后（merge to main + release 已完成）。
 **对应旧模型**: Phase 7 USER ACCEPTANCE + Phase 8 CLEANUP
 
 **NETWORK-RESILIENCE**: 与 Phase 5/6 相同，GitHub API 在大中华区存在间歇性超时。CLEANUP 中的 `gh pr list` 和 `git push --delete` 需容忍重试。详见 `phase-5-ship.md` NETWORK-RESILIENCE 指南。
+
+---
+
+## ⚠️ HARD-GATE: SHIP→CLOSE GATE (MANDATORY — v0.14.3+)
+
+**Purpose**: Verify that Phase 5/6 SHIP fully completed (merge to main + release) before entering Phase 6/6 CLOSE. This gate prevents:
+- Worktree cleanup failure (uncommitted changes prevent `git worktree remove`)
+- UAT on wrong version (PR branch instead of merged main)
+
+**Execution**: Before ANY Phase 6/6 step, run the SHIP→CLOSE GATE checks defined in `phase-5-ship.md#ship-completion-gate`.
+
+**If gate fails**: Return to Phase 5/6 SHIP to complete merge/release. Do NOT proceed with CLOSE.
+
+---
+
+## Backup Sprint State (MANDATORY — v0.14.3+)
+
+**Purpose**: `.sprint-state/` is gitignored and lives inside the worktree. When the worktree is removed during CLEANUP, all sprint state is lost. This step copies it into the main repository before cleanup.
+
+**Execution** (immediately after SHIP→CLOSE GATE passes):
+
+```bash
+# 1. Read sprint ID
+SPRINT_ID=$(cat .sprint-state/sprint-state.json | grep '"id"' | head -1 | sed 's/.*"id": *"\([^"]*\)".*/\1/')
+
+# 2. Backup to repo-tracked path (.sprint-history is NOT in .gitignore)
+BACKUP_DIR=".sprint-history/${SPRINT_ID}"
+mkdir -p "$BACKUP_DIR"
+cp -r .sprint-state/* "$BACKUP_DIR/"
+
+# 3. Verify backup
+ls "$BACKUP_DIR/sprint-state.json" && echo "✅ Sprint state backed up to $BACKUP_DIR"
+```
+
+**GATE CHECK**:
+```
+[BACKUP] sprint-state.json copied ✓
+[BACKUP] phase-outputs/ preserved ✓
+```
+
+**Output**: `.sprint-history/<sprint-id>/` contains full sprint state, safely outside the worktree.
 
 ---
 

@@ -9,13 +9,30 @@ const path = require('path');
 
 const SKILL_MD_PATH = path.join(__dirname, '..', 'SKILL.md');
 const REFERENCES_DIR = path.join(__dirname, '..', 'references');
+const PHASE_OVERVIEW_PATH = path.join(REFERENCES_DIR, 'phase-overview.md');
 const PHASE_2_BUILD_PATH = path.join(REFERENCES_DIR, 'phase-3-build.md');
 const ORCHESTRATION_RULES_PATH = path.join(REFERENCES_DIR, 'orchestration-rules.md');
 
 let skillContent = '';
+let phaseOverviewContent = '';
 
 function loadSkillMd() {
   skillContent = fs.readFileSync(SKILL_MD_PATH, 'utf-8');
+  if (fs.existsSync(PHASE_OVERVIEW_PATH)) {
+    phaseOverviewContent = fs.readFileSync(PHASE_OVERVIEW_PATH, 'utf-8');
+  }
+}
+
+// Search across SKILL.md AND references/phase-overview.md (progressive disclosure: sections
+// like "Unique Value Proposition" and "Phase Flow Consistency" moved to reference file).
+function contentIncludes(str) {
+  return skillContent.includes(str) || phaseOverviewContent.includes(str);
+}
+function contentSplit(str) {
+  // Return the part after str from whichever file contains it
+  if (skillContent.includes(str)) return skillContent.split(str)[1];
+  if (phaseOverviewContent.includes(str)) return phaseOverviewContent.split(str)[1];
+  return undefined;
 }
 
 function parseFrontmatter(content) {
@@ -182,21 +199,21 @@ function testPhaseFlowDiagramOrder() {
 }
 
 function testPhaseFlowConsistencySectionExists() {
-  if (!skillContent.includes('Phase Flow Consistency')) {
-    throw new Error('SKILL.md must contain "Phase Flow Consistency" section');
+  if (!contentIncludes('Phase Flow Consistency')) {
+    throw new Error('SKILL.md or references/phase-overview.md must contain "Phase Flow Consistency" section');
   }
   console.log('  ✓ Phase Flow Consistency section exists');
 }
 
 function testCanonicalPhaseOrderTableExists() {
-  if (!skillContent.includes('Canonical Phase Order')) {
-    throw new Error('SKILL.md must contain "Canonical Phase Order" table');
+  if (!contentIncludes('Canonical Phase Order')) {
+    throw new Error('SKILL.md or references/phase-overview.md must contain "Canonical Phase Order" table');
   }
   console.log('  ✓ Canonical Phase Order table exists');
 }
 
 function testAll11PhasesInPhaseFlowConsistency() {
-  const section = skillContent.split('Phase Flow Consistency')[1];
+  const section = contentSplit('Phase Flow Consistency');
   const requiredPhases = [
     'PREP', 'DESIGN', 'BUILD', 'VERIFY', 'SHIP', 'CLOSE',
   ];
@@ -235,14 +252,14 @@ function testForceLevelsRequiresDelphi() {
 // === Value Proposition Tests ===
 
 function testUniqueValuePropositionExists() {
-  if (!skillContent.includes('Unique Value Proposition')) {
-    throw new Error('SKILL.md must contain "Unique Value Proposition" section');
+  if (!contentIncludes('Unique Value Proposition')) {
+    throw new Error('SKILL.md or references/phase-overview.md must contain "Unique Value Proposition" section');
   }
   console.log('  ✓ Unique Value Proposition section exists');
 }
 
 function testUvpMentionsTokenSavings() {
-  const section = skillContent.split('Unique Value Proposition')[1];
+  const section = contentSplit('Unique Value Proposition');
   if (!section.includes('40') || !section.includes('67') || !section.includes('token')) {
     throw new Error('Unique Value Proposition must mention 40-67% token savings');
   }
@@ -250,7 +267,7 @@ function testUvpMentionsTokenSavings() {
 }
 
 function testUvpMentionsHardGate() {
-  const section = skillContent.split('Unique Value Proposition')[1];
+  const section = contentSplit('Unique Value Proposition');
   if (!section.includes('HARD-GATE')) {
     throw new Error('Unique Value Proposition must mention HARD-GATE discipline');
   }
@@ -258,7 +275,7 @@ function testUvpMentionsHardGate() {
 }
 
 function testUvpMentionsEmergentRequirements() {
-  const section = skillContent.split('Unique Value Proposition')[1];
+  const section = contentSplit('Unique Value Proposition');
   if (!section.toLowerCase().includes('emergent')) {
     throw new Error('Unique Value Proposition must mention emergent requirements');
   }
@@ -360,7 +377,7 @@ function runTests(opts = {}) {
   }
 
   console.log(`\n=== Results: ${passed} passed, ${failed} failed ===\n`);
-  errors.forEach(e => console.log(e));
+  for (const e of errors) console.log(e);
 
   if (exitOnFail && failed > 0) {
     process.exit(1);

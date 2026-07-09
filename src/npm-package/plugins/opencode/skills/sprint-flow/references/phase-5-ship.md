@@ -93,3 +93,45 @@
 **条件跳过**: 无部署配置时仅 merge + CI
 
 **输出**: 部署状态 (success/failure/skipped), Canary 报告
+
+---
+
+## SHIP COMPLETION GATE (MANDATORY — v0.14.3+)
+
+**Purpose**: Ensure merge to main + release is complete before Phase 6/6 CLOSE. Without this gate, worktree cleanup fails (uncommitted changes + unmerged branch) and UAT happens on the wrong version (PR branch, not main).
+
+**Execution** (BEFORE transitioning to Phase 6/6):
+
+```
+1. Verify PR is merged:
+   gh pr list --head <sprint-branch> --state merged --json number
+   → If no merged PR: BLOCK. Do NOT proceed to Phase 6/6.
+
+2. Verify current branch is main:
+   CURRENT_BRANCH=$(git rev-parse --abbrev-ref HEAD)
+   → If not main/master: BLOCK. Switch to main first.
+
+3. Verify git status is clean:
+   git status --porcelain
+   → If not empty: BLOCK. Stash or commit changes first.
+
+4. Verify release exists:
+   gh release view v<X.Y.Z> --json tagName
+   → If not found: WARNING (manual release may have failed). Ask user.
+
+5. Pull latest main:
+   git checkout main && git pull
+```
+
+**GATE CHECK** (BEFORE Phase 6/6 CLOSE):
+```
+[SHIP→CLOSE GATE] PR merged ✓        # PR is in merged state
+[SHIP→CLOSE GATE] on main branch ✓   # Current branch is main/master
+[SHIP→CLOSE GATE] clean status ✓     # No uncommitted changes
+[SHIP→CLOSE GATE] release exists ✓   # GitHub Release created
+[SHIP→CLOSE GATE] main up-to-date ✓  # Pulled latest
+```
+
+**IF GATE FAILS**: Orchestrator MUST complete the merge/release steps BEFORE proceeding to Phase 6/6. Do NOT skip to CLOSE.
+
+**Output**: SHIP completion confirmation, ready for Phase 6/6.
