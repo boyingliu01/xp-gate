@@ -3,6 +3,8 @@
 **执行时机**: Phase 5/6 SHIP 完成后。
 **对应旧模型**: Phase 7 USER ACCEPTANCE + Phase 8 CLEANUP
 
+**NETWORK-RESILIENCE**: 与 Phase 5/6 相同，GitHub API 在大中华区存在间歇性超时。CLEANUP 中的 `gh pr list` 和 `git push --delete` 需容忍重试。详见 `phase-5-ship.md` NETWORK-RESILIENCE 指南。
+
 ---
 
 ## Part A: USER ACCEPTANCE（⚠️ 人工验收）

@@ -19,6 +19,16 @@
 
 **GITHOOKS-GATE**: 验证 hooks 完整性，缺失则 `githooks/install.sh`
 
+**NETWORK-RESILIENCE**: GitHub API 在大中华区存在间歇性 TLS/超时问题。所有 `gh` CLI 调用应容忍偶尔失败：
+- `gh` 命令失败时等待 2-5 秒后重试（最多 3 次）
+- 优先使用 REST API (`gh api /repos/...`) 而非 GraphQL (`gh pr view --json ...`)，REST 更轻量更可靠
+- 验证 CI 状态时使用 `gh run list --branch ... --limit 1 --json status,conclusion` 代替 `gh pr view --json statusCheckRollup`
+- 如果 `gh` 持续超时，fallback 到 `curl + token`:
+  ```
+  curl -s -H "Authorization: token $(gh auth token)" \
+    "https://api.github.com/repos/OWNER/REPO/commits/HEAD/status"
+  ```
+
 ### Step 0: VERSION-GATE（MANDATORY — 在 finishing-a-development-branch 之前执行）
 
 **Purpose**: Ensure version bump, changelog update, and sync before creating PR. This MUST run BEFORE calling `finishing-a-development-branch` — the skill's "Create PR" option creates the PR immediately, so version changes must be committed first.
