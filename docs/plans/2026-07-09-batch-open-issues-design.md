@@ -41,6 +41,9 @@ The TDD-GATE at BUILD entry is a PRE-RALPH-LOOP check, not a replacement for ral
 - If test exists and is GREEN before any implementation → BLOCK (TDD bypass)
 - The gate verifies TDD DISCIPLINE was followed, not that TDD was skipped
 
+### Limitation
+This enforcement is instructional (LLM follows SKILL.md instructions), not programmatic. The same mechanism that allows the orchestrator to skip TDD also allows it to skip this check. A future automated gate (e.g., checking git staging order: test file must be staged before source file) would provide stronger enforcement. For now, making the requirement explicit in SKILL.md shifts the default from "delegate immediately" to "check for test first."
+
 ---
 
 ## Issue #306: DESIGN Routing Fork
@@ -86,12 +89,12 @@ The lightweight mode is selected by passing expert count and round limit as para
 The test `updateHooks getProjectHooksDir returns .git/hooks path under cwd` assumes `process.cwd()` resolves to a directory containing `.git`. Stryker's sandboxed test execution changes the working directory to one without `.git`.
 
 ### Solution
-Fix the test, not the production code. The production function is correct — it should throw when `.git` is absent. The test needs proper isolation using the existing test suite's real-filesystem pattern:
+Fix the test, not the production code. The production function is correct — it should throw when `.git` is absent. The test needs proper isolation following the existing test pattern already used in the same test file:
 
-1. In the specific test case that exercises `getProjectHooksDir()`, add `fs.mkdirSync(path.join(tmpProject, '.git'))` before `process.chdir(tmpProject)` in the test's setup
-2. The test suite's `afterEach` already cleans up with `fs.rmSync(tmpProject, { recursive: true, force: true })` which handles the `.git` subdirectory correctly
-3. This preserves the integration-test nature of the test suite (all other tests verify real filesystem behavior)
-4. No mocking needed — the test already creates real temp directories via `beforeEach`
+1. The test suite already uses `vi.spyOn(process, 'cwd').mockReturnValue()` pattern for other tests (e.g., the "throws when .git/ does not exist" test)
+2. For the specific test `updateHooks getProjectHooksDir returns .git/hooks path under cwd`: mock `process.cwd()` to return a path that contains a `.git` subdirectory
+3. Create a temp directory with `fs.mkdirSync(path.join(tmpProject, '.git'))` before the test assertion
+4. The test suite's `afterEach` already cleans up with `fs.rmSync(tmpProject, { recursive: true, force: true })` which handles the `.git` subdirectory
 
 ### Verification
 - Local: `npm test -- update-hooks` passes
