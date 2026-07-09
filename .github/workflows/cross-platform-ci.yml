@@ -7,6 +7,9 @@ on:
     branches: [ main, master ]
   workflow_dispatch:
 
+permissions:
+  contents: read
+
 jobs:
   # AC-09a: npm install -g + xp-gate init on all platforms
   install-init:
@@ -248,11 +251,19 @@ jobs:
 
       - name: Run sync and verify no diff
         run: |
+          # Step 1: sync version headers in canonical sources (skills/*/AGENTS.md etc.)
+          # This must run BEFORE sync-package-content.js so the npm-package mirrors
+          # get consistent Generated/Commit/Branch/Version headers
+          bash scripts/sync-version.sh
+
+          # Step 2: copy canonical sources into npm-package mirror directory
           node src/npm-package/scripts/sync-package-content.js
+
+          # Step 3: verify no diff — committed state must match canonical
           if ! git diff --exit-code src/npm-package/skills src/npm-package/plugins; then
             echo ""
             echo "FAIL: src/npm-package/skills or src/npm-package/plugins is out of sync with canonical sources."
-            echo "Run locally: node src/npm-package/scripts/sync-package-content.js && git add src/npm-package && git commit"
+            echo "Run locally: bash scripts/sync-version.sh && node src/npm-package/scripts/sync-package-content.js && git add src/npm-package && git commit"
             exit 1
           fi
           echo "PASS: npm-package mirror matches canonical sources"
