@@ -3,6 +3,8 @@
 **执行时机**: Phase 5/6 SHIP 完成后。
 **对应旧模型**: Phase 7 USER ACCEPTANCE + Phase 8 CLEANUP
 
+**NETWORK-RESILIENCE**: 与 Phase 5/6 相同，GitHub API 在大中华区存在间歇性超时。CLEANUP 中的 `gh pr list` 和 `git push --delete` 需容忍重试。详见 `phase-5-ship.md` NETWORK-RESILIENCE 指南。
+
 ---
 
 ## Part A: USER ACCEPTANCE（⚠️ 人工验收）
@@ -100,7 +102,64 @@ Phase 6/6 CLOSE 完成时:
 ### 输出
 
 - Emergent Issues List (`emergent-issues.md`)
-- 进入 Part B CLEANUP 自动执行（如果用户确认验收）
+- 进入 Part A.5 ARCHIVE 自动执行（如果用户确认验收）
+
+---
+
+## Part A.5: ARCHIVE（归档 — v0.14.0+ Issue #308）
+
+**Purpose**: Preserve sprint decision records before cleanup. `.sprint-state/` is gitignored and deleted during CLEANUP; this step copies structured outputs to `.sprint-history/` which is tracked by git.
+
+**Execution**: After USER ACCEPTANCE (Part A) confirms continuation, BEFORE CLEANUP (Part B).
+
+### Step 1: Read Sprint ID
+
+Read `sprint-state.json` → `id` field (e.g., `sprint-2026-07-09-01`).
+
+### Step 2: Check for Conflicts
+
+```
+IF .sprint-history/<sprint-id>/ already exists:
+  → Append timestamp suffix: <sprint-id>-20260709T120000
+  → Log warning: "Sprint archive conflict, using timestamp suffix"
+```
+
+### Step 3: Archive Files
+
+Copy from `.sprint-state/` to `.sprint-history/<sprint-id>/`:
+
+**Included** (all `.yaml`, `.json`, `.md` files under `.sprint-state/`):
+- `specification.yaml` (if in phase-outputs/)
+- `delphi-reviewed.json`
+- `sprint-state.json`
+- `phase-outputs/*.yaml`, `phase-outputs/*.json`, `phase-outputs/*.md`
+- `tdd-gate-log.json`, `uncommitted-gate-log.json`
+
+**Excluded** (temporary/cache):
+- `*.tmp`, `*.cache` files
+- `sprint.lock` (session lock file)
+
+### Step 4: Verify Git Tracking
+
+```bash
+# .sprint-history/ is NOT in .gitignore (verified — no change needed)
+# Verify files are trackable:
+git status .sprint-history/
+```
+
+**No `.gitignore` change needed**: `.sprint-history/` is NOT currently listed in `.gitignore`. The `.sprint-state/` ignore (line 59) only matches `.sprint-state/` exactly — it does NOT match `.sprint-history/`.
+
+### Step 5: Commit Archive (Optional)
+
+The orchestrator MAY commit the archive:
+```
+git add .sprint-history/<sprint-id>/ && git commit -m "archive: sprint <sprint-id>"
+```
+
+### Output
+
+- `.sprint-history/<sprint-id>/` directory with archived sprint state
+- Git-tracked sprint decision records for future retro/review
 
 ---
 

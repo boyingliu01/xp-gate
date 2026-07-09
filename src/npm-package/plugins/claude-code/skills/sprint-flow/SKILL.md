@@ -274,8 +274,9 @@ Sprint Flow: PREP → DESIGN → BUILD → VERIFY → SHIP → CLOSE
 **详细指令**: 参见 `references/phase-2-design.md` — 完整流程、条件分支、HARD-GATE。
 
 **快速参考**:
+- **Step 0.5: DESIGN 路由分叉 (v0.14.0+)**: 根据 PREP 的 `change_type` 决定路径。`修改已存在代码` → SKIP autoplan, 直接 lightweight delphi-review (2 专家, 1 轮)。`新增功能` 或 undefined → 标准 autoplan 路径。详见 `references/phase-2-design.md#step-05-design-路由分叉`。
 - **Step 1: brainstorming** — `skill(name="brainstorming")` — 输出设计文档 + CONTEXT.md + ADR。**HARD-GATE**: 设计未批准 → 不可进入实现
-- **Step 2: autoplan** — `skill(name="autoplan")` — CEO/设计/工程自动评审 → 用户确认 taste_decisions
+- **Step 2: autoplan** — `skill(name="autoplan")` — CEO/设计/工程自动评审 → 用户确认 taste_decisions（仅标准路径）
 - **Step 3: delphi-review** — `skill(name="delphi-review")` — 等待 APPROVED（非 APPROVED 暂停等待用户确认）
 - **Step 4: to-issues** — `skill(name="to-issues")` — 垂直切片 Issue 拆分 → slices-manifest.json
 - **Step 5: specification.yaml** — 从 APPROVED 设计文档自动提取
@@ -304,10 +305,11 @@ Sprint Flow: PREP → DESIGN → BUILD → VERIFY → SHIP → CLOSE
 
 **快速参考**:
 1. **DELPHI-GATE**: 验证 `.sprint-state/delphi-reviewed.json` 存在且 `verdict = "APPROVED"` → 否则 BLOCK
-2. **输入**: `slices-manifest.json`（Phase 2/6 生成），按 `execution_order` 逐个执行
-3. **模式**: 默认 `ralph-loop`（逐 REQ 迭代，token 节约 40-67%），可选 `--mode parallel`
-4. **Skill 步骤**: hooks-install → dispatching-parallel-agents → TDD (RED/GREEN/REFACTOR) → freeze → blind-review → unfreeze → verification-before-completion → 成本监控
-5. **Mock Minimization**: integration-first, mock 仅限 external services, 密度 > 30% 需 `@mock-justified`
+2. **TDD-GATE (MANDATORY — v0.14.0+)**: 在 delegation 前验证每个 REQ 存在 failing test。无 test → mark `[TDD-RED]`（ralph-loop 创建）。有 test 且 GREEN 且无实现 → BLOCK（TDD bypass）。详见 `references/phase-3-build.md#tdd-gate-pre-implementation-tdd-check-mandatory`。
+3. **输入**: `slices-manifest.json`（Phase 2/6 生成），按 `execution_order` 逐个执行
+4. **模式**: 默认 `ralph-loop`（逐 REQ 迭代，token 节约 40-67%），可选 `--mode parallel`
+5. **Skill 步骤**: hooks-install → TDD-GATE → dispatching-parallel-agents → TDD (RED/GREEN/REFACTOR) → freeze → blind-review → unfreeze → verification-before-completion → 成本监控
+6. **Mock Minimization**: integration-first, mock 仅限 external services, 密度 > 30% 需 `@mock-justified`
 
 ### Phase 4/6: VERIFY (验证 — 代码走查 + QA + 反馈获取)
 
@@ -336,16 +338,19 @@ Sprint Flow: PREP → DESIGN → BUILD → VERIFY → SHIP → CLOSE
 
 **对应旧模型**: Phase 5 SHIP + Phase 6 LAND
 
-**详细指令**: 参见 `references/phase-5-ship.md` — GITHOOKS-GATE / VERSION-GATE / VERSION CHANGESET (Issue #142) / changeset schema。
+**详细指令**: 参见 `references/phase-5-ship.md` — VERSION-GATE (MANDATORY) / finishing-a-development-branch / VERSION CHANGESET (Issue #142) / changeset schema。
 
 **快速参考**:
-- **Orchestrator 直接执行**: `finishing-a-development-branch` 和 `ship` 均为交互式 skill（4 选项菜单 + PR 确认），**必须由 orchestrator 直接调用** `skill(name="finishing-a-development-branch")` 和 `skill(name="ship")`
-- 输入: phase-4-summary.md + feedback-log.md → 输出: PR URL
+- **Step 0: VERSION-GATE (MANDATORY — 必须在 finishing-a-development-branch 之前)**: bump VERSION → update CHANGELOG.md → run sync-version.sh → commit + push → verify PR updated。详见 `references/phase-5-ship.md#step-0-version-gate`
+- **Step 1: finishing-a-development-branch**: 4 选项菜单，选择 "Push and create a Pull Request"
+- **Orchestrator 直接执行**: `finishing-a-development-branch` 和 `ship` 均为交互式 skill，**必须由 orchestrator 直接调用** `skill(name="finishing-a-development-branch")` 和 `skill(name="ship")`
+- 输入: phase-4-summary.md + feedback-log.md → 输出: PR URL (含版本变更 commit)
 - **HARD-GATE**: Phase 4/6 未完成 → BLOCK。验证 `feedback-log.md` 存在。
 - **GITHOOKS-GATE**: 验证 hooks 完整性，缺失则 `githooks/install.sh`
-- **VERSION-GATE**: bump PATCH/MINOR/MAJOR → `sync-version.sh` → CHANGELOG.md → `git diff VERSION` 验证
 - **LAND**: `land-and-deploy` — merge PR → 等待 CI (10min) → 等待 Deploy (10min) → Canary Health Check (5min)
 - **回滚**: `git revert` 最后一次 merge commit
+
+**⚠️ VERSION-GATE 必须在 finishing-a-development-branch 之前执行。顺序反了会导致 PR 不含版本变更 → CI release workflow 不触发 → 无新版本发布。**
 
 ### Phase 6/6: CLOSE (收尾 — ⚠️ 人工验收 + 清理)
 
