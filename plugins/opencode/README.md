@@ -10,6 +10,20 @@ OpenCode plugin exposing xp-gate quality gates and AI workflow skills.
   principles checker (Gate 4 standalone).
 - **gate-arch** ⇄ `xp-gate arch`: Run architecture validation (Gate 6
   standalone, layer boundary checks).
+- **session-reload-model**: Reload session model from config. After switching
+  provider configs (opencode.json + oh-my-openagent.json via switch-coding-plan.sh),
+  updates the session model in OpenCode DB to match the new config, so restarted
+  sessions use the current provider/model.
+
+  Usage:
+  ```typescript
+  // Reload current session model from config
+  session-reload-model()
+
+  // Reload a specific session
+  session-reload-model({ sessionId: "ses_xxx" })
+  ```
+
 - **session-rename**: Rename an OpenCode session. When called without a
   `newTitle`, analyzes the session's recent user messages and auto-generates a
   descriptive title. Works by directly updating the OpenCode SQLite database
