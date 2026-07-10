@@ -2,6 +2,11 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.14.6.2] - 2026-07-10
+
+### Added
+- **#313**: OpenCode plugin 新增 `session-reload-model` tool — 在切换模型供应商配置后，将 `oh-my-openagent.json` 中的 sisyphus 模型同步到 OpenCode SQLite DB，确保 session 恢复后使用新的 provider/model 配置
+
 ## [0.14.3.0] - 2026-07-09
 
 ### Fixed
