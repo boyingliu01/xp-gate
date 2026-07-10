@@ -1,9 +1,9 @@
 # GITHOOKS KNOWLEDGE BASE
 
-**Generated:** 2026-07-09
-**Commit:** df2023f
+**Generated:** 2026-07-10
+**Commit:** b8d9945
 **Branch:** main
-**Version:** 0.14.6.0
+**Version:** 0.14.6.1
 
 ## OVERVIEW
 Git quality gates: pre-commit runs **10 numbered gates** (Gate 0–9, conceptually grouped as "6 categories" in user-facing docs) via 13 language adapters; pre-push runs **Gate M + Gate M2 + Gate M3 + Delphi code-walkthrough validator**. Zero-tolerance policy per `QUALITY-GATES-CODE-OF-CONDUCT.md` — `--no-verify` strictly prohibited.
