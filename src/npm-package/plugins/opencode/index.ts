@@ -376,6 +376,78 @@ export const XpGatePlugin = async (input: OpenCodePluginInput) => {
           return runCmd(cmd, cwd)
         },
       }),
+      "session-reload-model": tool({
+        description: "Reload session model from config. After switching provider configs (opencode.json + oh-my-openagent.json via switch-coding-plan.sh), updates the session model in OpenCode DB to match the new config. This ensures restarted sessions use the current provider/model.",
+        args: {
+          sessionId: z.string().optional().describe("Session ID to reload (defaults to current session)"),
+        },
+        async execute(args, ctx) {
+          const sessionId = args.sessionId || ctx.sessionID
+          const dbPath = join(homedir(), ".local", "share", "opencode", "opencode.db")
+          const configDir = join(homedir(), ".config", "opencode")
+          const omoConfigPath = join(configDir, "oh-my-openagent.json")
+
+          if (!existsSync(dbPath)) {
+            return "Session reload failed: OpenCode database not found at " + dbPath
+          }
+          if (!existsSync(omoConfigPath)) {
+            return "Session reload failed: oh-my-openagent.json not found at " + omoConfigPath
+          }
+
+          let omoConfig: Record<string, unknown>
+          try {
+            omoConfig = JSON.parse(readFileSync(omoConfigPath, "utf8"))
+          } catch (err) {
+            const msg = err instanceof Error ? err.message : String(err)
+            return "Session reload failed: could not parse oh-my-openagent.json: " + msg
+          }
+
+          const agents = omoConfig?.["agents"] as Record<string, { model?: string }> | undefined
+          const sisyphusModel = agents?.["sisyphus"]?.["model"]
+          if (!sisyphusModel || typeof sisyphusModel !== "string") {
+            return "Session reload failed: could not find sisyphus.model in oh-my-openagent.json"
+          }
+
+          const slashIdx = sisyphusModel.indexOf("/")
+          if (slashIdx === -1) {
+            return `Session reload failed: model "${sisyphusModel}" is not in provider/model format`
+          }
+          const providerID = sisyphusModel.substring(0, slashIdx)
+          const modelID = sisyphusModel.substring(slashIdx + 1)
+
+          let oldModel = "unknown"
+          try {
+            const escapedId = sessionId.replace(/'/g, "''")
+            const currentRaw = execSync(
+              `sqlite3 "${dbPath}" "SELECT model FROM session WHERE id = '${escapedId}'"`,
+              { encoding: "utf8", timeout: 5000 }
+            ).trim()
+            if (currentRaw) {
+              try {
+                const parsed = JSON.parse(currentRaw)
+                oldModel = `${parsed.providerID || "?"}/${parsed.id || "?"}`
+              } catch {
+                oldModel = currentRaw
+              }
+            }
+          } catch {
+            oldModel = "unknown"
+          }
+
+          const newModelJson = JSON.stringify({ id: modelID, providerID })
+          const escapedId = sessionId.replace(/'/g, "''")
+          const escapedModel = newModelJson.replace(/'/g, "''")
+          const sql = `UPDATE session SET model = '${escapedModel}', time_updated = ${Date.now()} WHERE id = '${escapedId}'`
+
+          try {
+            execSync(`sqlite3 "${dbPath}" "${sql}"`, { timeout: 5000 })
+            return `Session model reloaded: ${oldModel} → ${providerID}/${modelID}`
+          } catch (err) {
+            const msg = err instanceof Error ? err.message : String(err)
+            return `Session reload failed: ${msg}`
+          }
+        },
+      }),
       "session-rename": tool({
         description: "Rename an OpenCode session. When called without newTitle, analyzes the session's recent conversation and auto-generates a descriptive title based on the work done.",
         args: {
