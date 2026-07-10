@@ -13,14 +13,19 @@ description: >
   before push, architecture evaluation, or "/delphi-review".
   NOT WHEN: Asking HOW to review something (educational), mentioning "review" in passing without intent,
   requesting a simple code check or lint, asking about the Delphi process itself, or mentioning
-  "review" as part of a different workflow (e.g., "code review" without multi-expert intent).
+  "review" as part of a different workflow (e.g., "code review" without multi-expert intent),
+  asking for review guidelines/checklists/formats, individual peer review, or casual review requests.
 
   TRIGGERS: "/delphi-review", "review this design", "评审这个需求", "评审这个设计", "design review",
   "多专家评审", "consensus review", "code walkthrough", "push review", "architecture review",
-  "delphi review", "run delphi", "start delphi".
+  "delphi review", "run delphi", "start delphi", "评审这个架构", "review this architecture",
+  "评审PR", "review this PR with delphi", "delphi评审", "delphi 评审", "run delphi review",
+  "执行delphi", "启动delphi评审".
   NEGATIVE TRIGGERS: "how does delphi work", "what is delphi review", "code review checklist",
   "review my code quickly", "can you review this", "peer review", "I need a review",
-  "explain the review process", "review guidelines".
+  "explain the review process", "review guidelines", "how to review a design",
+  "code review template", "review format", "PR review", "帮我review一下",
+  "just review this", "quick review", "review steps".
 maturity: beta
 auto_continue: true
 triggers:
@@ -37,6 +42,15 @@ triggers:
   - "delphi review"
   - "run delphi"
   - "start delphi"
+  - "评审这个架构"
+  - "review this architecture"
+  - "评审PR"
+  - "review this PR with delphi"
+  - "delphi评审"
+  - "delphi 评审"
+  - "run delphi review"
+  - "执行delphi"
+  - "启动delphi评审"
 triggers_negative_examples:
   - "how does delphi work"       # educational question about the process
   - "what is delphi review"      # asking for explanation, not execution
@@ -49,6 +63,15 @@ triggers_negative_examples:
   - "review guidelines"          # asking about guidelines, not executing
   - "how to review a design"     # educational
   - "PR review"                  # single-reviewer PR check, not multi-expert Delphi
+  - "review my PR"               # informal PR review request, not Delphi
+  - "帮我review一下"             # casual Chinese review request, no multi-expert intent
+  - "just review this"           # casual, single-pass review request
+  - "quick review"               # explicitly contradicts multi-round Delphi process
+  - "review steps"               # asking for review instructions, not running review
+  - "code review template"       # asking for a template, not executing review
+  - "review format"              # asking about format, not executing
+  - "show me how to review"      # educational request about reviewing
+  - "review checklist example"   # asking for examples, not running review
 triggers_negative_test_cases:
   - input: "how does delphi work"
     expect: "NOT triggered"
@@ -86,6 +109,24 @@ triggers_negative_test_cases:
     expect: "triggered"
   - input: "delphi review"
     expect: "triggered"
+  - input: "评审这个架构"
+    expect: "triggered"
+  - input: "delphi 评审"
+    expect: "triggered"
+  - input: "run delphi review"
+    expect: "triggered"
+  - input: "review my PR"
+    expect: "NOT triggered"
+  - input: "帮我review一下"
+    expect: "NOT triggered"
+  - input: "just review this"
+    expect: "NOT triggered"
+  - input: "quick review"
+    expect: "NOT triggered"
+  - input: "review steps"
+    expect: "NOT triggered"
+  - input: "code review template"
+    expect: "NOT triggered"
   - input: "run delphi"
     expect: "triggered"
 workflow_steps:
@@ -153,6 +194,15 @@ tools_denied:
 - delphi review
 - run delphi
 - start delphi
+- 评审这个架构
+- review this architecture
+- 评审PR
+- review this PR with delphi
+- delphi评审
+- delphi 评审
+- run delphi review
+- 执行delphi
+- 启动delphi评审
 
 **NOT triggered by:**
 - "how does delphi work" (educational)
@@ -163,6 +213,15 @@ tools_denied:
 - "I need a review" (too vague)
 - "explain the review process" (educational)
 - "review guidelines" (asking about guidelines)
+- "PR review" (single-reviewer PR check)
+- "review my PR" (informal PR review)
+- "帮我review一下" (casual Chinese request)
+- "just review this" (casual single-pass)
+- "quick review" (contradicts multi-round process)
+- "review steps" (asking for instructions)
+- "code review template" (asking for template)
+- "review format" (asking about format)
+- "show me how to review" (educational)
 
 ## Workflow
 
