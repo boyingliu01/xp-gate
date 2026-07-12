@@ -6,6 +6,7 @@ All notable changes to this project will be documented in this file.
 
 ### Added
 - **#325**: Quality Gate Enhancement (Delphi APPROVED, 100% consensus) — Boy Scout Rule (`boy-scout.ts`) 差异化警告执行 + 13 语言适配器 (java/kotlin/cpp/objectivec 等) + baseline CLI (`xp-gate baseline`) + pre-push Gate M/MD/ML/MW/MS 兼容验证
+- **#323**: Restore `xp-gate next-sprint` command (removed in v0.12.1 slimming)
 
 ### Changed
 - **#321**: `sprint-status.js` 迁移至 6-phase 命名（PREP/DESIGN/BUILD/VERIFY/SHIP/CLOSE），替换旧 11-phase schema。向后兼容旧 sprint-state.json（未识别的 phase key 显示原始值）
