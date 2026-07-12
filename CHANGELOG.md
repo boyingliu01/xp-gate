@@ -2,6 +2,16 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.14.7.0] - 2026-07-12
+
+### Changed
+- **#321**: `sprint-status.js` 迁移至 6-phase 命名（PREP/DESIGN/BUILD/VERIFY/SHIP/CLOSE），替换旧 11-phase schema。向后兼容旧 sprint-state.json（未识别的 phase key 显示原始值）
+
+### Fixed
+- 归档 stale sprint-2026-07-09-01 状态至 `.sprint-history/`
+- `gates/README.md` TODO 状态更新 — 准确标记完成/延期项，补充 monolithic pre-commit 设计说明
+- `whalecloud-java` PMD 自定义规则 TODO 标记为 Deferred，同步 npm-package 镜像
+
 ## [0.14.6.2] - 2026-07-10
 
 ### Added
