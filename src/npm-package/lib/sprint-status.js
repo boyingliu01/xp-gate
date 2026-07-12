@@ -13,11 +13,10 @@ const { discoverActiveSprints } = require('./sprint-discovery');
 
 // Phase constants (inlined; was shared-phase-constants.js, removed in v0.13.0 slimming)
 const PHASE_NAMES = {
-  '-1': 'ISOLATE', '-0.5': 'AUTO-ESTIMATE',
-  '0': 'THINK', '1': 'PLAN', '2': 'BUILD', '3': 'REVIEW',
-  '4': 'USER ACCEPTANCE', '5': 'FEEDBACK', '6': 'SHIP', '7': 'LAND', '8': 'CLEANUP',
+  '1': 'PREP', '2': 'DESIGN', '3': 'BUILD',
+  '4': 'VERIFY', '5': 'SHIP', '6': 'CLOSE',
 };
-const PHASE_ORDER = ['-1', '-0.5', '0', '1', '2', '3', '4', '5', '6', '7', '8'];
+const PHASE_ORDER = ['1', '2', '3', '4', '5', '6'];
 
 function parseTime(value) {
   if (!value) return 0;

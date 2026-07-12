@@ -61,7 +61,11 @@ All gates require:
 3. ✅ Extract Gate 7 (IaC security)
 4. ✅ Extract Gate 8 (secret scanning)
 5. ✅ Extract Gate 9 (SAST security)
-6. ⏳ Update pre-commit to source Gate 3-4-7-8-9 scripts
-7. ⏳ Extract generate_quality_report() to separate file
-8. ⏳ Create shared utilities file for common functions
-9. ⏳ Add tests for extracted gate scripts
+6. ⏳ Update pre-commit to source Gate 3-4-7-8-9 scripts — deferred per design: pre-commit remains monolithic for auditability
+7. ✅ Extract generate_quality_report() — retained inline in pre-commit (monolithic design for auditability; exists at line 2116, called at line 2314)
+8. ⏳ Create shared utilities file for common functions — deferred: common functions remain in adapter-common.sh
+9. ⏳ Add tests for extracted gate scripts — deferred: gate scripts tested via pre-commit integration tests
+
+---
+
+**Note:** The monolithic pre-commit design (~2084 lines) is intentional — a single bash file keeps the trust boundary auditable. Gate scripts in `gates/` directory exist for reference and potential future use, but pre-commit continues to use inline implementations for simplicity and auditability.

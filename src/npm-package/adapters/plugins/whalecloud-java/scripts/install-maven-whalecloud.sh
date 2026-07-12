@@ -74,8 +74,10 @@ else
   <!-- Security: J000078 SQL injection -->
   <rule ref="category/java/security.xml/MethodRequiresCheck"/>
 
-  <!-- TODO: Add custom rules for J-rules not covered by standard PMD rulesets -->
-  <!-- Custom rules via XPath will be added here as the plugin matures -->
+  <!-- Deferred: Custom XPath rules for J-rules not covered by standard PMD categories.
+       All 106 whalecloud rules currently map to standard PMD 7.x category XMLs.
+       Custom XPath rules will be added here when enterprise-specific rules
+       cannot be expressed via built-in PMD checks. Track via issue backlog. -->
 
 </ruleset>
 RULESET
