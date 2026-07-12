@@ -16,11 +16,11 @@ const TMP_DIR = fs.mkdtempSync(path.join(os.tmpdir(), 'sprint-status-test-'));
 const STATE_DIR = path.join(TMP_DIR, '.sprint-state');
 const STATE_FILE = path.join(STATE_DIR, 'sprint-state.json');
 
-// Active sprint state (canonical format per SKILL.md L893-942)
+// Active sprint state (canonical format per SKILL.md L893-942, 6-phase schema)
 const ACTIVE_STATE = {
   id: 'sprint-2026-06-16-01',
   task_description: 'Test sprint',
-  phase: 2,
+  phase: 3,
   status: 'running',
   started_at: '2026-06-16T10:00:00Z',
   isolation: {
@@ -29,22 +29,13 @@ const ACTIVE_STATE = {
     created_from: 'main',
     created_from_commit: 'abc123'
   },
-  auto_estimate: {
-    change_type: '新增功能',
-    estimated_level: '轻量',
-    user_decision: 'accepted'
-  },
   phase_history: [
-    { phase: -1, phase_name: 'ISOLATE', status: 'completed',
+    { phase: 1, phase_name: 'PREP', status: 'completed',
       started_at: '2026-06-16T10:00:00Z', completed_at: '2026-06-16T10:03:00Z', duration_seconds: 180 },
-    { phase: -0.5, phase_name: 'AUTO-ESTIMATE', status: 'completed',
-      started_at: '2026-06-16T10:03:00Z', completed_at: '2026-06-16T10:05:00Z', duration_seconds: 120 },
-    { phase: 0, phase_name: 'THINK', status: 'completed',
-      started_at: '2026-06-16T10:05:00Z', completed_at: '2026-06-16T10:15:00Z', duration_seconds: 600 },
-    { phase: 1, phase_name: 'PLAN', status: 'completed',
-      started_at: '2026-06-16T10:15:00Z', completed_at: '2026-06-16T10:25:00Z', duration_seconds: 600 },
-    { phase: 2, phase_name: 'BUILD', status: 'in_progress',
-      started_at: '2026-06-16T10:25:00Z', completed_at: null, duration_seconds: null,
+    { phase: 2, phase_name: 'DESIGN', status: 'completed',
+      started_at: '2026-06-16T10:03:00Z', completed_at: '2026-06-16T10:15:00Z', duration_seconds: 720 },
+    { phase: 3, phase_name: 'BUILD', status: 'in_progress',
+      started_at: '2026-06-16T10:15:00Z', completed_at: null, duration_seconds: null,
       reqs: {
         'REQ-001': { name: 'Feature A', status: 'completed' },
         'REQ-002': { name: 'Feature B', status: 'in_progress' }
@@ -103,7 +94,7 @@ describe('sprint-status: readSprintState', () => {
     expect(state).not.toBeNull();
     const stateObj = state as Record<string, unknown>;
     expect(stateObj.task_description).toBe('Test sprint');
-    expect(stateObj.phase).toBe(2);
+    expect(stateObj.phase).toBe(3);
     expect(stateObj.status).toBe('running');
     expect(Array.isArray(stateObj.phase_history)).toBe(true);
   });
@@ -216,6 +207,6 @@ describe('sprint-status: jsonMode', () => {
     const json = sprintStatus!.jsonMode(ACTIVE_STATE);
     const parsed = JSON.parse(json);
     expect(parsed.task_description).toBe('Test sprint');
-    expect(parsed.phase).toBe(2);
+    expect(parsed.phase).toBe(3);
   });
 });
