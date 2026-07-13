@@ -9,7 +9,7 @@ const fs = require('fs');
 const path = require('path');
 const os = require('os');
 
-const { checkDocsDrift } = require('../sync-package-content');
+const { checkDocsDrift, checkAdapterDrift } = require('../sync-package-content');
 
 function createTempDir() {
   return fs.mkdtempSync(path.join(os.tmpdir(), 'drift-test-'));
@@ -219,6 +219,98 @@ describe('checkDocsDrift', () => {
     writeDoc(agentsPath, agentsContent);
 
     const result = checkDocsDrift(preCommitPath, prePushPath, readmePath, agentsPath);
+    expect(result).toBe(true);
+  });
+});
+
+/**
+ * @test REQ-329 adapter-mirror-drift
+ * @intent Verify checkAdapterDrift() detects file count and content mismatches
+ *        between githooks/adapters/ (source of truth) and npm-package mirror.
+ * @covers AC-329-01, AC-329-02, AC-329-03
+ */
+describe('checkAdapterDrift', () => {
+  let tempDir;
+  let srcDir;
+  let mirrorDir;
+
+  beforeEach(() => {
+    tempDir = createTempDir();
+    srcDir = path.join(tempDir, 'githooks', 'adapters');
+    mirrorDir = path.join(tempDir, 'npm-package', 'adapters');
+    fs.mkdirSync(srcDir, { recursive: true });
+    fs.mkdirSync(mirrorDir, { recursive: true });
+  });
+
+  afterEach(() => {
+    cleanupTempDir(tempDir);
+  });
+
+  test('returns true when adapter files are byte-identical between source and mirror', () => {
+    const content = '#!/bin/bash\necho "hello world"\n';
+    fs.writeFileSync(path.join(srcDir, 'adapter-typescript.sh'), content);
+    fs.writeFileSync(path.join(mirrorDir, 'adapter-typescript.sh'), content);
+
+    fs.writeFileSync(path.join(srcDir, 'adapter-python.sh'), '#!/bin/bash\necho "python"\n');
+    fs.writeFileSync(path.join(mirrorDir, 'adapter-python.sh'), '#!/bin/bash\necho "python"\n');
+
+    const result = checkAdapterDrift(srcDir, mirrorDir);
+    expect(result).toBe(true);
+  });
+
+  test('returns false when file in source is missing from mirror', () => {
+    fs.writeFileSync(path.join(srcDir, 'adapter-typescript.sh'), '#!/bin/bash');
+    // NOT writing to mirrorDir
+
+    const result = checkAdapterDrift(srcDir, mirrorDir);
+    expect(result).toBe(false);
+  });
+
+  test('returns false when file in mirror is missing from source', () => {
+    fs.writeFileSync(path.join(mirrorDir, 'extra.sh'), '#!/bin/bash');
+    // NOT writing to srcDir
+
+    const result = checkAdapterDrift(srcDir, mirrorDir);
+    expect(result).toBe(false);
+  });
+
+  test('returns false when file content differs (checksum mismatch)', () => {
+    fs.writeFileSync(path.join(srcDir, 'adapter-typescript.sh'), '#!/bin/bash\n# line 1\n');
+    fs.writeFileSync(path.join(mirrorDir, 'adapter-typescript.sh'), '#!/bin/bash\n# different line\n');
+
+    const result = checkAdapterDrift(srcDir, mirrorDir);
+    expect(result).toBe(false);
+  });
+
+  test('skips with true when source directory does not exist', () => {
+    const nonExistentSrc = path.join(tempDir, 'nonexistent');
+    fs.mkdirSync(mirrorDir, { recursive: true });
+    fs.writeFileSync(path.join(mirrorDir, 'adapter-typescript.sh'), '#!/bin/bash');
+
+    const result = checkAdapterDrift(nonExistentSrc, mirrorDir);
+    expect(result).toBe(true);
+  });
+
+  test('skips with true when mirror directory does not exist', () => {
+    const nonExistentMirror = path.join(tempDir, 'nonexistent');
+    fs.writeFileSync(path.join(srcDir, 'adapter-typescript.sh'), '#!/bin/bash');
+
+    const result = checkAdapterDrift(srcDir, nonExistentMirror);
+    expect(result).toBe(true);
+  });
+
+  test('handles subdirectories in adapter tree', () => {
+    const pluginsDir = path.join(srcDir, 'plugins');
+    fs.mkdirSync(pluginsDir, { recursive: true });
+    fs.writeFileSync(path.join(srcDir, 'adapter-common.sh'), 'common');
+    fs.writeFileSync(path.join(pluginsDir, 'p3c-plugin.sh'), 'p3c');
+
+    const mirrorPluginsDir = path.join(mirrorDir, 'plugins');
+    fs.mkdirSync(mirrorPluginsDir, { recursive: true });
+    fs.writeFileSync(path.join(mirrorDir, 'adapter-common.sh'), 'common');
+    fs.writeFileSync(path.join(mirrorPluginsDir, 'p3c-plugin.sh'), 'p3c');
+
+    const result = checkAdapterDrift(srcDir, mirrorDir);
     expect(result).toBe(true);
   });
 });

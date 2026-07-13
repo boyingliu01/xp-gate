@@ -95,6 +95,14 @@ async function handleApplyMode(result, pkgName) {
     // Also check for and update the local OpenCode plugin if installed.
     await upgradeOpenCodePlugin();
 
+    // Update all installed skills to match the newly upgraded package (#332)
+    try {
+      const { updateSkill } = require('./update-skill.js');
+      await updateSkill(null, { all: true, verbose: false });
+    } catch {
+      // Non-blocking: skill update failure should never break the main upgrade flow.
+    }
+
     return 0;
   } catch (err) {
     const msg = err.message || '';
