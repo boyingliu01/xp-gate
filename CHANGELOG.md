@@ -2,15 +2,23 @@
 
 All notable changes to this project will be documented in this file.
 
-## [0.14.7.0] - 2026-07-12
+## [0.14.8.0] - 2026-07-13
 
 ### Added
+- **#327**: Mock-policy 单元测试覆盖 — `gate-m3.test.ts` (17 tests) + `schema.test.ts` (23 tests)，共 40 个新测试
+- **#323**: 恢复 `xp-gate next-sprint` 命令 — 从 git history 恢复 `next-sprint.js` (129 lines) + `next-sprint.test.js` (14 tests) + CLI 注册
 - **#325**: Quality Gate Enhancement (Delphi APPROVED, 100% consensus) — Boy Scout Rule (`boy-scout.ts`) 差异化警告执行 + 13 语言适配器 (java/kotlin/cpp/objectivec 等) + baseline CLI (`xp-gate baseline`) + pre-push Gate M/MD/ML/MW/MS 兼容验证
-- **#323**: Restore `xp-gate next-sprint` command (removed in v0.12.1 slimming)
+
+### Changed
+- **#324**: Sprint branch cleanup 设计文档状态 DRAFT → APPROVED — Phase 6/6 CLOSE 已包含完整分支清理步骤 (保存分支信息 → worktree remove → branch -D → push --delete → 关闭遗留 PR)，13 个遗留 sprint 远程分支已清理
+
+### Fixed
+- **#326**: Principles rules 单元测试验证 — 确认 15 个规则测试已存在 (100 tests, 16 files, 1462 lines)
+
+## [0.14.7.0] - 2026-07-12
 
 ### Changed
 - **#321**: `sprint-status.js` 迁移至 6-phase 命名（PREP/DESIGN/BUILD/VERIFY/SHIP/CLOSE），替换旧 11-phase schema。向后兼容旧 sprint-state.json（未识别的 phase key 显示原始值）
-- **#324**: Sprint branch cleanup 设计文档状态 DRAFT → APPROVED — Phase 6/6 CLOSE 已包含完整分支清理步骤 (保存分支信息 → worktree remove → branch -D → push --delete → 关闭遗留 PR)，13 个遗留 sprint 远程分支已清理
 
 ### Fixed
 - 归档 stale sprint-2026-07-09-01 状态至 `.sprint-history/`
