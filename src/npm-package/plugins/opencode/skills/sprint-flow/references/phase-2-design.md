@@ -11,6 +11,27 @@
 
 ## Part A: THINK（需求探索与设计）
 
+### Step 0: CONTEXT.md 预检（v0.14.9+ — Issue #322）
+
+在进入 brainstorming 前，检查 `CONTEXT.md` 是否已存在：
+
+```
+IF CONTEXT.md 存在于项目根目录:
+  → 读取已有设计上下文
+  → SKIP brainstorming（设计已存在，避免重复探索）
+  → 直接进入 Part B PLAN（使用已有 CONTEXT.md 和设计文档作为输入）
+  → 输出: "[sprint-flow] CONTEXT.md 已存在，跳过需求探索，直接进入共识评审"
+ELSE:
+  → 继续执行 Step 1（结构化需求探索）
+```
+
+**CONTEXT.md 预检路由表**:
+
+| CONTEXT.md 状态 | brainstorming | 输入到 Part B | 说明 |
+|----------------|---------------|---------------|------|
+| 不存在 | ✅ 执行 | brainstorming 输出 + autoplan 输出 | 标准路径 |
+| 存在 | ❌ SKIP | 已有 CONTEXT.md + 设计文档 | 快速路径 (Issue #322) |
+
 ### 调用 Skills
 
 - `brainstorming` (superpowers) — **HARD-GATE**: 设计未批准 → 不可进入实现
@@ -102,14 +123,18 @@ skill(name="brainstorming", user_message="[需求描述]")
 skill(name="design-shotgun", user_message="[Pain Document 内容 + 需求描述]")
 ```
 
-#### Step 0.5: DESIGN 路由分叉（v0.14.0+ — Issue #306）
+#### Step 0.5: DESIGN 路由分叉（v0.14.0+ — Issue #306, #322）
 
-根据 Phase 1/6 PREP (AUTO-ESTIMATE) 的 `change_type` 决定走哪条路径：
+根据 Phase 1/6 PREP (AUTO-ESTIMATE) 的 `change_type` 以及 Part A 的 CONTEXT.md 预检结果，决定走哪条路径：
 
 ```
 读取 .sprint-state/sprint-state.json → auto_estimate.change_type
+读取 CONTEXT.md 存在状态
 
-IF change_type == "修改已存在代码":
+IF CONTEXT.md 存在（Part A Step 0 预检结果）:
+  → 快速路径: SKIP brainstorming, 使用已有 CONTEXT.md + 设计文档
+  → 直接进入 autoplan (标准) 或 delphi-review (增量)
+ELSE IF change_type == "修改已存在代码":
   → 增量优化路径: SKIP autoplan
   → 直接进入 Step 2b: delphi-review (lightweight: 2 专家, 1 轮)
 ELSE (change_type == "新增功能" 或 未定义):
@@ -118,11 +143,12 @@ ELSE (change_type == "新增功能" 或 未定义):
 
 **路由决策表**:
 
-| change_type | 路径 | autoplan | delphi-review |
-|------------|------|----------|---------------|
-| `修改已存在代码` | 增量优化 | ❌ SKIP | lightweight (2 专家, 1 轮) |
-| `新增功能` | 标准 | ✅ 执行 | 标准 (3 专家) |
-| `undefined` / 缺失 | 标准 (fail-safe) | ✅ 执行 | 标准 (3 专家) |
+| CONTEXT.md | change_type | brainstorming | autoplan | delphi-review |
+|-----------|------------|---------------|----------|---------------|
+| 存在 | 任意 | ❌ SKIP | ✅ 执行 (标准) | 标准 (3 专家) |
+| 不存在 | `修改已存在代码` | ✅ 执行 | ❌ SKIP | lightweight (2 专家, 1 轮) |
+| 不存在 | `新增功能` | ✅ 执行 | ✅ 执行 | 标准 (3 专家) |
+| 不存在 | `undefined` / 缺失 | ✅ 执行 | ✅ 执行 | 标准 (3 专家) |
 
 **HARD-GATE 不变**: 两条路径最终都必须产出 APPROVED 的 delphi-reviewed.json。
 

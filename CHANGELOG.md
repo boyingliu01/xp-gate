@@ -2,6 +2,22 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.14.9.0] - 2026-07-13
+
+### Added
+- **#332 (P0 Bugfix)**: `upgrade --apply` 现在更新已安装的 skills — `handleApplyMode()` 在升级 OpenCode 插件后调用 `updateSkill(null, { all: true })`，修复了升级后 skill 版本不更新的 bug
+- **#332 (Doctor)**: `doctor` 新增 Check 9 (`diagnoseInstalledSkills()`) — 对比已安装 skills 与 npm 包内置 SKILL.md 内容，检测版本不一致
+- **#328**: mutation 模块测试覆盖 — 5 个新测试文件 (stryker-runner, mutmut-runner, runners-index, init-baseline, update-baseline), 136 个测试
+- **#329**: adapter 镜像漂移检测 — `checkAdapterDrift()` 在 `sync-package-content.js` 中使用 SHA-256 哈希比对 `githooks/adapters/` (源) 与 `src/npm-package/adapters/` (镜像)，不一致时阻断 prepack。`copy-skills.sh` 新增 `--verify` 模式进行 checksum 校验。7 个测试
+- **#322**: Phase 2/6 DESIGN 路由优化 — `CONTEXT.md` 存在时跳过 brainstorming，直接使用已有设计上下文进入 autoplan/delphi-review
+
+### Changed
+- **#329**: `copy-skills.sh` 新增 `--verify` 参数 — 复制后通过 SHA-256 比较验证文件完整性
+
+### Fixed
+- 修复 `mutmut-runner.test.ts` 中未使用的 `callCount` 变量 (lint 错误)
+- 修复 `update-baseline.test.ts` 中空 arrow function (lint 警告)
+
 ## [0.14.8.0] - 2026-07-13
 
 ### Added
