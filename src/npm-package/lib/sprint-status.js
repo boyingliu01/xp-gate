@@ -10,6 +10,7 @@
 const fs = require('fs');
 const path = require('path');
 const { discoverActiveSprints } = require('./sprint-discovery');
+const { SprintStateManager } = require('./sprint-state-manager');
 
 // Phase constants (inlined; was shared-phase-constants.js, removed in v0.13.0 slimming)
 const PHASE_NAMES = {
@@ -47,15 +48,14 @@ function isStale(state) {
 
 /**
  * Read and parse sprint-state.json from a project directory.
+ * Uses SprintStateManager for schema validation + auto-migration.
  * @param {string} dir - Project root directory
  * @returns {object|null} Parsed sprint state, or null if not found or malformed
  */
 function readSprintState(dir) {
   try {
-    const stateFile = path.join(dir, '.sprint-state', 'sprint-state.json');
-    if (!fs.existsSync(stateFile)) return null;
-    const raw = fs.readFileSync(stateFile, 'utf8');
-    return JSON.parse(raw);
+    const manager = new SprintStateManager(dir);
+    return manager.read();
   } catch {
     return null;
   }

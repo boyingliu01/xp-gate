@@ -12,7 +12,7 @@ export interface PhaseTokenOptions {
   tokensUsed: number;
 }
 
-function buildPhaseTimeline(state: { phase_history?: { phase: number; phase_name: string; status: string; timestamp: string }[] }): string[] {
+function buildPhaseTimeline(state: { phase_history?: { phase: number; phase_name: string; status: string; timestamp?: string; started_at?: string }[] }): string[] {
   const phases: string[] = [];
   const seen = new Set<string>();
   for (const ph of state.phase_history || []) {
@@ -25,7 +25,7 @@ function buildPhaseTimeline(state: { phase_history?: { phase: number; phase_name
   return phases;
 }
 
-function buildTokenSnapshots(state: { metrics?: Record<string, unknown>; phase_history?: { phase: number; phase_name: string; status: string; timestamp: string }[] }): { phase: string; tokens: number }[] {
+function buildTokenSnapshots(state: { metrics?: Record<string, unknown>; phase_history?: { phase: number; phase_name: string; status: string; timestamp?: string; started_at?: string }[] }): { phase: string; tokens: number }[] {
   const tokenMap: Record<string, number> = {};
   if (state.metrics && typeof state.metrics === 'object') {
     for (const [key, val] of Object.entries(state.metrics)) {
