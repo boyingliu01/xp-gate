@@ -1,13 +1,21 @@
 {
-  "commit": "ccd179c4318d9a3d217e7dc08d7253acb96951f2",
+  "commit": "55065ebbe2b0c1c6a87a3d60404d35116eba4d77",
   "branch": "sprint/2026-07-13-01",
-  "timestamp": "2026-07-14T01:00:46Z",
-  "expires": "2026-07-14T02:00:46Z",
+  "timestamp": "2026-07-14T12:52:53Z",
+  "expires": "2026-07-14T13:52:53Z",
   "verdict": "APPROVED",
   "confidence": 8.5,
   "experts": [
-    { "id": "Expert A (Architecture)", "verdict": "APPROVED", "confidence": 9 },
-    { "id": "Expert B (Technical)", "verdict": "APPROVED", "confidence": 8 }
+    {
+      "id": "Expert A (Architecture)",
+      "verdict": "APPROVED",
+      "confidence": 9
+    },
+    {
+      "id": "Expert B (Technical)",
+      "verdict": "APPROVED",
+      "confidence": 8
+    }
   ],
   "issues": [],
   "consensus_ratio": 1.0,
@@ -26,7 +34,7 @@
     "checkAllGates no longer special-cases Gate 4/6 failure counting",
     "parseCheckArgs() properly separates flags from positional args",
     "Gate 6 has_project_lang powershell fallback added",
-    "execSync → execFileSync hardening for user-controlled paths",
+    "execSync \u2192 execFileSync hardening for user-controlled paths",
     "require() hoisting in xp-gate.js",
     "Dead code removal in check.js"
   ],
