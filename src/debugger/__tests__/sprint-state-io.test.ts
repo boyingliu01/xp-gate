@@ -2,6 +2,7 @@
  * @test REQ-002 Token 差分采集器
  * @intent 验证 sprint-state-io 共享读写函数的正确性
  * @covers AC-002-01
+ * @note Sprint E: 委托给 SprintStateManager
  */
 
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';

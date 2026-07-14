@@ -9,7 +9,6 @@
  * @covers AC-002-01
  */
 
-// eslint-disable-next-line @typescript-eslint/no-var-requires
 const { SprintStateManager } = require('../npm-package/lib/sprint-state-manager');
 
 /**
