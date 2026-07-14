@@ -994,6 +994,136 @@ if [[ "$CURRENT_TIME" > "$RESULT_EXPIRES" ]]; then
 fi
 
 # ============================================================================
+# PROVENANCE VALIDATION (Issue #339)
+# Validate that the walkthrough was genuinely produced by Delphi review,
+# not fabricated by an LLM.
+# ============================================================================
+
+# Check provenance fields exist
+EXPERTS_COUNT=$(jq -r '.experts // [] | length' "$RESULT_FILE")
+CONSENSUS=$(jq -r '.consensus // 0' "$RESULT_FILE")
+WALKTHROUGH_HASH=$(jq -r '.walkthroughHash // empty' "$RESULT_FILE")
+GENERATED_AT=$(jq -r '.generatedAt // empty' "$RESULT_FILE")
+
+# Grace period: configurable via env var (default 30 days)
+GRACE_DAYS="${XP_GATE_MW_GRACE_DAYS:-30}"
+
+# Check if this is a "new" walkthrough (has provenance fields)
+HAS_PROVENANCE="false"
+if [ -n "$WALKTHROUGH_HASH" ] && [ -n "$GENERATED_AT" ] && [ "$EXPERTS_COUNT" -ge 3 ]; then
+  HAS_PROVENANCE="true"
+fi
+
+if [ "$HAS_PROVENANCE" = "true" ]; then
+  # Full provenance validation
+  
+  # 1. Experts count check (minimum 3)
+  if [ "$EXPERTS_COUNT" -lt 3 ]; then
+    echo ""
+    echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+    echo "   ❌ INSUFFICIENT EXPERTS - PUSH BLOCKED"
+    echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+    echo ""
+    echo "Walkthrough requires minimum 3 experts:"
+    echo "  Found: $EXPERTS_COUNT experts"
+    echo ""
+    echo "Re-run: /delphi-review --mode code-walkthrough"
+    echo ""
+    exit 1
+  fi
+
+  # 2. Consensus check (≥90%)
+  # Use integer math: multiply by 10 to avoid bc dependency
+  CONSENSUS_X10=$(echo "$CONSENSUS * 10" | bc -l | cut -d'.' -f1)
+  if [ "$CONSENSUS_X10" -lt 900 ]; then
+    echo ""
+    echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+    echo "   ❌ CONSENSUS TOO LOW - PUSH BLOCKED"
+    echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+    echo ""
+    echo "Walkthrough requires ≥90% consensus:"
+    echo "  Found: ${CONSENSUS}%"
+    echo ""
+    echo "Re-run: /delphi-review --mode code-walkthrough"
+    echo ""
+    exit 1
+  fi
+
+  # 3. Walkthrough hash verification
+  WALKTHROUGH_DOC=".delphi/code-walkthrough.md"
+  if [ ! -f "$WALKTHROUGH_DOC" ]; then
+    echo ""
+    echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+    echo "   ❌ WALKTHROUGH DOC MISSING - PUSH BLOCKED"
+    echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+    echo ""
+    echo "Walkthrough document not found:"
+    echo "  Expected: $WALKTHROUGH_DOC"
+    echo ""
+    echo "Re-run: /delphi-review --mode code-walkthrough"
+    echo ""
+    exit 1
+  fi
+
+  # Cross-platform SHA-256 computation
+  COMPUTED_HASH=""
+  if command -v sha256sum &> /dev/null; then
+    COMPUTED_HASH=$(sha256sum "$WALKTHROUGH_DOC" | cut -d' ' -f1)
+  elif command -v shasum &> /dev/null; then
+    COMPUTED_HASH=$(shasum -a 256 "$WALKTHROUGH_DOC" | cut -d' ' -f1)
+  elif command -v openssl &> /dev/null; then
+    COMPUTED_HASH=$(openssl sha256 -r "$WALKTHROUGH_DOC" | cut -d' ' -f1)
+  fi
+
+  if [ -z "$COMPUTED_HASH" ]; then
+    echo ""
+    echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+    echo "   ❌ NO SHA-256 TOOL - PUSH BLOCKED"
+    echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+    echo ""
+    echo "No SHA-256 tool available (install sha256sum, shasum, or openssl)"
+    echo ""
+    exit 1
+  fi
+
+  if [ "$WALKTHROUGH_HASH" != "$COMPUTED_HASH" ]; then
+    echo ""
+    echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+    echo "   ❌ WALKTHROUGH HASH MISMATCH - PUSH BLOCKED"
+    echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+    echo ""
+    echo "Walkthrough document has been modified after review:"
+    echo "  Expected: $WALKTHROUGH_HASH"
+    echo "  Found:    $COMPUTED_HASH"
+    echo ""
+    echo "Re-run: /delphi-review --mode code-walkthrough"
+    echo ""
+    exit 1
+  fi
+
+  # 4. generatedAt check (replay protection)
+  if [ -z "$GENERATED_AT" ]; then
+    echo ""
+    echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+    echo "   ❌ MISSING generatedAt - PUSH BLOCKED"
+    echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+    echo ""
+    echo "Walkthrough result missing generatedAt timestamp"
+    echo ""
+    echo "Re-run: /delphi-review --mode code-walkthrough"
+    echo ""
+    exit 1
+  fi
+else
+  # Grace period: old walkthroughs without provenance get WARNING
+  echo ""
+  echo "⚠️ WARNING: Legacy walkthrough format (no provenance fields)"
+  echo "  Provenance fields will be required after grace period (${GRACE_DAYS} days)"
+  echo "  Consider re-running: /delphi-review --mode code-walkthrough"
+  echo ""
+fi
+
+# ============================================================================
 # ALL CHECKS PASSED
 # ============================================================================
 echo ""
