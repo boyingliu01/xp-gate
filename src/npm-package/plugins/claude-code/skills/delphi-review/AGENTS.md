@@ -1,9 +1,9 @@
 # SKILLS/DELPHI-REVIEW KNOWLEDGE BASE
 
 **Generated:** 2026-07-13
-**Commit:** d83bb96
-**Branch:** main
-**Version:** 0.14.8.0
+**Commit:** cb954fe
+**Branch:** sprint/2026-07-13-01
+**Version:** 0.14.9.0
 
 ## OVERVIEW
 Delphi Consensus Review — multi-round anonymous expert review (≥90% threshold, 3 experts from ≥2 providers, domestic models only). Supports design + code-walkthrough modes.

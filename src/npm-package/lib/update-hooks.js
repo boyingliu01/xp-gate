@@ -190,7 +190,7 @@ function copyAdapters(srcDir, destDir, dryRun, noBackup) {
 function copyGateScripts(srcDir, destDir, dryRun, noBackup) {
   if (!fs.existsSync(srcDir)) return;
   fs.readdirSync(srcDir).forEach(f => {
-    if (f.startsWith('gate-') && f.endsWith('.sh')) {
+    if ((f.startsWith('gate-') || f === 'sprint-gate.sh') && f.endsWith('.sh')) {
       const src = path.join(srcDir, f);
       const dest = path.join(destDir, f);
       atomicCopyFile(src, dest, dryRun, noBackup, f);

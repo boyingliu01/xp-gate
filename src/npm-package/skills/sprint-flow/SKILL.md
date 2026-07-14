@@ -167,7 +167,7 @@ PREP → DESIGN → BUILD → VERIFY → SHIP → CLOSE
 | Phase | Name | Key Actions | Output |
 |-------|------|-------------|--------|
 | 1/6 | PREP | Detect protected branch → Create git worktree → AUTO-ESTIMATE sizing → Classify (lightweight/standard/complex) | Worktree path + impact assessment |
-| 2/6 | DESIGN | brainstorming → autoplan → delphi-review (HARD-GATE ≥90% consensus) → to-issues → specification.yaml | specification.yaml + slices-manifest.json |
+| 2/6 | DESIGN | CONTEXT.md 预检 (#322) → brainstorming (如需要) → autoplan → delphi-review (HARD-GATE ≥90% consensus) → to-issues → specification.yaml | specification.yaml + slices-manifest.json |
 | 3/6 | BUILD | GITHOOKS-GATE → DELPHI-GATE → ralph-loop (default) or parallel → TDD → freeze → blind review → verification | MVP code |
 | 4/6 | VERIFY | delphi-review --mode code-walkthrough → test-specification-alignment → browse QA → learn + retro | Review report + feedback-log.md |
 | 5/6 | SHIP | VERSION-GATE → finishing-a-development-branch → ship (create PR) → land-and-deploy → merge to main + CI + canary | PR URL + deploy status + merge confirmation |

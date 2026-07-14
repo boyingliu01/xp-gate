@@ -14,6 +14,7 @@ const { arch } = require('../lib/arch.js');
 const { upgrade } = require('../lib/upgrade.js');
 const { bootstrap } = require('../lib/bootstrap.js');
 const { updateHooks } = require('../lib/update-hooks.js');
+const gateRunner = require('../lib/gate-runner.js');
 
 function handleUIReview() {
   const { execSync } = require('child_process');
@@ -105,9 +106,9 @@ const COMMANDS = {
     usage: 'xp-gate baseline <create|show|reset|diff>'
   },
   'check': {
-    description: 'Run user-invokable quality gates (Gate 4 Principles + Gate 6 Architecture) on a path',
+    description: 'Run quality gates (--list, --all, --gates <ids>, or <gate-id>)',
     run: subargs => check(subargs).then(code => process.exit(code)),
-    usage: 'xp-gate check <file_or_directory> [--gates principles,arch]'
+    usage: 'xp-gate check <file_or_directory|gate_number> [--gates gates] [--all] [--list]'
   },
   'principles': {
     description: 'Run Clean Code + SOLID principles checker (Gate 4 standalone)',
@@ -173,8 +174,28 @@ const COMMANDS = {
       install(subargs).then(code => process.exit(code));
     },
     usage: 'xp-gate install [--global]'
+  },
+  'gate-list': {
+    description: 'List all quality gates and their availability',
+    run: subargs => check(['--list']).then(code => process.exit(code)),
+    usage: 'xp-gate gate-list'
+  },
+  'gate-all': {
+    description: 'Run all invokable quality gates',
+    run: subargs => check(['--all', ...subargs]).then(code => process.exit(code)),
+    usage: 'xp-gate gate-all [<path>]'
   }
 };
+
+for (let i = 0; i <= 11; i++) {
+  const gateId = String(i);
+  const gateInfo = gateRunner.GATE_REGISTRY[gateId];
+  COMMANDS[`gate-${gateId}`] = {
+    description: `Run Gate ${gateId}: ${gateInfo?.name || 'Unknown'}`,
+    run: subargs => gateRunner.runGate(gateId, subargs[0]).then(code => process.exit(code)),
+    usage: `xp-gate gate-${gateId} [<path>]`
+  };
+}
 
 function printHelp() {
   console.log('xp-gate - AI development workflow tool');
