@@ -224,6 +224,50 @@ describe('checkDocsDrift', () => {
 });
 
 /**
+ * @test REQ-335 sprint-gate-sync
+ * @intent Verify syncAdapters() includes sprint-gate.sh in gate script sync
+ *        (not only gate-*.sh)
+ * @covers AC-335-01
+ */
+describe('syncGateScripts', () => {
+  const { syncAdapters } = require('../sync-package-content');
+  let tempDir;
+  let pkgRoot;
+  let repoRoot;
+
+  beforeEach(() => {
+    tempDir = createTempDir();
+    pkgRoot = path.join(tempDir, 'pkg');
+    fs.mkdirSync(pkgRoot, { recursive: true });
+    fs.mkdirSync(path.join(pkgRoot, 'adapters'), { recursive: true });
+
+    repoRoot = path.join(tempDir, 'repo');
+    const githooksDir = path.join(repoRoot, 'githooks');
+    fs.mkdirSync(githooksDir, { recursive: true });
+    fs.mkdirSync(path.join(githooksDir, 'adapters'), { recursive: true });
+
+    fs.writeFileSync(path.join(githooksDir, 'gate-3.sh'), '#!/bin/bash\necho "gate3"');
+    fs.writeFileSync(path.join(githooksDir, 'gate-4.sh'), '#!/bin/bash\necho "gate4"');
+    fs.writeFileSync(path.join(githooksDir, 'sprint-gate.sh'), '#!/bin/bash\necho "sprint-gate"');
+  });
+
+  afterEach(() => {
+    cleanupTempDir(tempDir);
+  });
+
+  test('syncAdapters includes sprint-gate.sh in gate script sync (#335)', () => {
+    const githooksDir = path.join(repoRoot, 'githooks');
+    const gateFiles = fs.readdirSync(githooksDir).filter(f =>
+      (f.startsWith('gate-') || f === 'sprint-gate.sh') && f.endsWith('.sh')
+    );
+
+    expect(gateFiles).toContain('sprint-gate.sh');
+    expect(gateFiles).toContain('gate-3.sh');
+    expect(gateFiles).toContain('gate-4.sh');
+  });
+});
+
+/**
  * @test REQ-329 adapter-mirror-drift
  * @intent Verify checkAdapterDrift() detects file count and content mismatches
  *        between githooks/adapters/ (source of truth) and npm-package mirror.

@@ -60,7 +60,7 @@ function copyAdapters(srcDir, destDir) {
   const githooksDir = path.resolve(srcDir, '..', '..', '..', 'githooks');
   if (fs.existsSync(githooksDir)) {
     fs.readdirSync(githooksDir).forEach(f => {
-      if (f.startsWith('gate-') && f.endsWith('.sh')) {
+      if ((f.startsWith('gate-') || f === 'sprint-gate.sh') && f.endsWith('.sh')) {
         fs.copyFileSync(path.join(githooksDir, f), path.join(destDir, f));
       }
     });

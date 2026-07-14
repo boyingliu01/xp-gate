@@ -142,7 +142,9 @@ function syncAdapters() {
   // Sync gate scripts (gate-*.sh) from githooks/ to package root so they ship
   // with the npm package and can be installed to the global adapter dir.
   const githooksDir = path.join(REPO_ROOT, 'githooks');
-  const gateFiles = fs.readdirSync(githooksDir).filter(f => f.startsWith('gate-') && f.endsWith('.sh'));
+  const gateFiles = fs.readdirSync(githooksDir).filter(f =>
+    (f.startsWith('gate-') || f === 'sprint-gate.sh') && f.endsWith('.sh')
+  );
   for (const f of gateFiles) {
     fs.copyFileSync(path.join(githooksDir, f), path.join(PKG_ROOT, f));
   }
