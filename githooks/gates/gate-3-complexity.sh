@@ -8,10 +8,10 @@ CC_WARNINGS=0
 
 GATE_3_START=$(gate_start_ms)
 
-if [ "$PROJECT_LANG" = "documentation-only" ]; then
+if has_project_lang "documentation-only" 2>/dev/null || [ "$PROJECT_LANG" = "documentation-only" ]; then
   echo "✅ PASSED - Skipped (documentation project)."
 
-elif [ "$PROJECT_LANG" = "powershell" ]; then
+elif has_project_lang "powershell" 2>/dev/null || [ "$PROJECT_LANG" = "powershell" ]; then
   echo "ℹ️  No PowerShell principles checker available"
   echo "✅ PASSED - Skipped (no PowerShell Clean Code / SOLID tool)"
   
