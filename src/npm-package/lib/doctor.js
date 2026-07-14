@@ -263,6 +263,9 @@ function diagnose() {
   // --- Check 8: TUI auto-registration ---
   issues += diagnoseTuiRegistration(checks);
 
+  // --- Check 9: Installed skills version consistency (#332) ---
+  issues += diagnoseInstalledSkills(config, checks);
+
   return { checks, issues };
 }
 
@@ -687,6 +690,66 @@ function diagnoseTuiRegistration(checks) {
 
   checks.push({ name: 'TUI registration', status: 'FAIL', detail: 'Not registered' });
   return 1;
+}
+
+/**
+ * Check 9: Installed skills vs package-bundled skills (#332).
+ * Reports WARN for each installed skill whose SKILL.md differs from the bundled version.
+ * @param {object} config
+ * @param {Array} checks
+ * @returns {number} issue count
+ */
+function diagnoseInstalledSkills(config, checks) {
+  const installedSkills = config.installedSkills || {};
+  const skillNames = Object.keys(installedSkills);
+  if (skillNames.length === 0) {
+    checks.push({ name: 'Installed skills', status: 'SKIP', detail: 'No skills installed' });
+    return 0;
+  }
+
+  const bundledSkillsDir = path.join(PKG_DIR, 'skills');
+  if (!fs.existsSync(bundledSkillsDir)) {
+    checks.push({ name: 'Installed skills', status: 'SKIP', detail: 'Package skills dir not found' });
+    return 0;
+  }
+
+  const platform = detectPlatform();
+  let userSkillsDir;
+  if (platform === 'qoder') {
+    userSkillsDir = path.join(HOME_DIR, '.qoder', 'skills');
+  } else if (platform === 'claude-code') {
+    userSkillsDir = path.join(HOME_DIR, '.claude', 'skills');
+  } else {
+    userSkillsDir = path.join(HOME_DIR, '.config', 'opencode', 'skills');
+  }
+
+  let issues = 0;
+  for (const name of skillNames) {
+    const bundledSkillMd = path.join(bundledSkillsDir, name, 'SKILL.md');
+    const userSkillMd = path.join(userSkillsDir, name, 'SKILL.md');
+
+    if (!fs.existsSync(bundledSkillMd)) continue;
+    if (!fs.existsSync(userSkillMd)) {
+      checks.push({ name: `Skill: ${name}`, status: 'FAIL', detail: 'Installed SKILL.md missing' });
+      issues++;
+      continue;
+    }
+
+    const bundledContent = fs.readFileSync(bundledSkillMd, 'utf8');
+    const userContent = fs.readFileSync(userSkillMd, 'utf8');
+    if (bundledContent !== userContent) {
+      checks.push({
+        name: `Skill: ${name}`,
+        status: 'WARN',
+        detail: 'Outdated — run xp-gate update-skill --all',
+      });
+      issues++;
+    } else {
+      checks.push({ name: `Skill: ${name}`, status: 'PASS', detail: 'Up to date' });
+    }
+  }
+
+  return issues;
 }
 
 /**

@@ -142,7 +142,9 @@ function syncAdapters() {
   // Sync gate scripts (gate-*.sh) from githooks/ to package root so they ship
   // with the npm package and can be installed to the global adapter dir.
   const githooksDir = path.join(REPO_ROOT, 'githooks');
-  const gateFiles = fs.readdirSync(githooksDir).filter(f => f.startsWith('gate-') && f.endsWith('.sh'));
+  const gateFiles = fs.readdirSync(githooksDir).filter(f =>
+    (f.startsWith('gate-') || f === 'sprint-gate.sh') && f.endsWith('.sh')
+  );
   for (const f of gateFiles) {
     fs.copyFileSync(path.join(githooksDir, f), path.join(PKG_ROOT, f));
   }
@@ -273,6 +275,92 @@ function checkPrePushDrift(prePushPath, readmePath) {
  * actual gate definitions in githooks/pre-commit and githooks/pre-push.
  * Blocks publish if counts diverge.
  */
+/**
+ * Adapter mirror drift check (REQ-329): compares githooks/adapters/ (source of truth)
+ * against src/npm-package/adapters/ (npm mirror). Content must be byte-identical;
+ * any mismatch blocks publish because syncAdapters() would overwrite the mirror.
+ */
+function checkAdapterDrift(srcRootPath, mirrorRootPath) {
+  const srcRoot = srcRootPath || path.join(REPO_ROOT, 'githooks', 'adapters');
+  const mirrorRoot = mirrorRootPath || path.join(PKG_ROOT, 'adapters');
+
+  if (!fs.existsSync(srcRoot)) {
+    console.error('[drift-check] WARN: githooks/adapters not found, skipping adapter drift check');
+    return true;
+  }
+  if (!fs.existsSync(mirrorRoot)) {
+    console.error('[drift-check] WARN: src/npm-package/adapters not found, skipping adapter drift check');
+    return true;
+  }
+
+  const crypto = require('crypto');
+
+  /**
+   * Recursively compute a sorted, deterministic hash table for a directory.
+   * Keys are relative paths (POSIX separators); values are SHA-256 hex digests.
+   */
+  function hashDirectory(root) {
+    const table = {};
+    function walk(dir, base) {
+      const entries = fs.readdirSync(dir, { withFileTypes: true });
+      // Sort for determinism
+      entries.sort((a, b) => a.name.localeCompare(b.name));
+      for (const entry of entries) {
+        if (SKIP_DIRS.has(entry.name)) continue;
+        const full = path.join(dir, entry.name);
+        const rel = path.posix.join(base, entry.name);
+        if (entry.isDirectory()) {
+          walk(full, rel);
+        } else if (entry.isFile()) {
+          if (shouldSkipFile(entry.name)) continue;
+          const buf = fs.readFileSync(full);
+          table[rel] = crypto.createHash('sha256').update(buf).digest('hex');
+        }
+      }
+    }
+    walk(root, '');
+    return table;
+  }
+
+  const srcHashes = hashDirectory(srcRoot);
+  const mirrorHashes = hashDirectory(mirrorRoot);
+
+  // Check for files only in one side
+  const srcOnly = Object.keys(srcHashes).filter((f) => !(f in mirrorHashes));
+  const mirrorOnly = Object.keys(mirrorHashes).filter((f) => !(f in srcHashes));
+
+  // Check for content mismatches
+  const mismatched = [];
+  for (const f of Object.keys(srcHashes)) {
+    if (mirrorHashes[f] && srcHashes[f] !== mirrorHashes[f]) {
+      mismatched.push(f);
+    }
+  }
+
+  if (srcOnly.length > 0) {
+    console.error(`[drift-check] ERROR: ${srcOnly.length} file(s) in githooks/adapters/ missing from npm-package mirror:`);
+    for (const f of srcOnly) console.error(`  - ${f}`);
+  }
+  if (mirrorOnly.length > 0) {
+    console.error(`[drift-check] ERROR: ${mirrorOnly.length} file(s) in npm-package mirror NOT in githooks/adapters/:`);
+    for (const f of mirrorOnly) console.error(`  - ${f}`);
+  }
+  if (mismatched.length > 0) {
+    console.error(`[drift-check] ERROR: ${mismatched.length} adapter file(s) have drifted (SHA-256 mismatch):`);
+    for (const f of mismatched) console.error(`  - ${f}`);
+    console.error('[drift-check] Fix: Run `node src/npm-package/scripts/sync-package-content.js` (or `npm pack`) to resync.');
+  }
+
+  if (srcOnly.length > 0 || mirrorOnly.length > 0 || mismatched.length > 0) {
+    return false;
+  }
+
+  const totalSrc = Object.keys(srcHashes).length;
+  const totalMirror = Object.keys(mirrorHashes).length;
+  console.error(`[drift-check] OK: ${totalSrc} adapter files match between githooks/adapters/ and npm-package mirror (${totalMirror} files)`);
+  return true;
+}
+
 function checkDocsDrift(preCommitPath, prePushPath, readmePath, agentsPath) {
   const preCommitScript = preCommitPath || path.join(REPO_ROOT, 'githooks', 'pre-commit');
   const prePushScript = prePushPath || path.join(REPO_ROOT, 'githooks', 'pre-push');
@@ -291,6 +379,9 @@ function main() {
   console.error(`[sync] repo root: ${REPO_ROOT}`);
   console.error(`[sync] package root: ${PKG_ROOT}`);
   if (checkDocsDrift() === false) {
+    process.exit(1);
+  }
+  if (checkAdapterDrift() === false) {
     process.exit(1);
   }
   const skills = syncSkills();
@@ -314,7 +405,7 @@ console.error(`[sync] done: ${skills} skill(s), ${plugins} plugin(s), ${adapters
 }
 
 if (require.main !== module) {
-  module.exports = { checkDocsDrift };
+  module.exports = { checkDocsDrift, checkAdapterDrift };
 }
 
 main();

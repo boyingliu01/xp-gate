@@ -140,6 +140,18 @@ describe('updateHooks', () => {
       expect(fs.readFileSync(path.join(dest, 'gate-4.sh'), 'utf8')).toContain('gate4-v2');
     });
 
+    it('copies sprint-gate.sh alongside gate-*.sh scripts (#335)', () => {
+      createPackageSource();
+      fs.writeFileSync(path.join(tmpPackage, 'sprint-gate.sh'), '#!/bin/bash\necho "sprint-gate-v1"');
+      const mod = getModule();
+      const dest = path.join(tmpProject, 'gates-sprint');
+      fs.mkdirSync(dest, { recursive: true });
+
+      mod.copyGateScripts(tmpPackage, dest, false, true);
+
+      expect(fs.readFileSync(path.join(dest, 'sprint-gate.sh'), 'utf8')).toContain('sprint-gate-v1');
+    });
+
     it('does not copy non-gate files', () => {
       createPackageSource();
       fs.writeFileSync(path.join(tmpPackage, 'some-other.sh'), 'echo other');

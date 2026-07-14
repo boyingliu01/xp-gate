@@ -8,7 +8,7 @@ WARNING_COUNT=0
 
 GATE_4_START=$(gate_start_ms)
 
-if [ "$PROJECT_LANG" = "documentation-only" ]; then
+if has_project_lang "documentation-only" 2>/dev/null || [ "$PROJECT_LANG" = "documentation-only" ]; then
   echo "✅ PASSED - Skipped (documentation project)."
   
 else
