@@ -13,6 +13,7 @@
 
 const fs = require('fs');
 const path = require('path');
+const { SprintStateManager } = require('./sprint-state-manager');
 
 /**
  * Maximum number of active sprints to return.
@@ -62,16 +63,15 @@ function findGitRoot(startDir) {
 
 /**
  * Read and parse a sprint-state.json from a given project directory.
+ * Uses SprintStateManager for schema validation + auto-migration.
  *
  * @param {string} dir - Directory containing .sprint-state/
  * @returns {object|null} Parsed sprint state, or null if not found or malformed
  */
 function readSprintState(dir) {
   try {
-    const stateFile = path.join(dir, '.sprint-state', 'sprint-state.json');
-    if (!fs.existsSync(stateFile)) return null;
-    const raw = fs.readFileSync(stateFile, 'utf8');
-    return JSON.parse(raw);
+    const manager = new SprintStateManager(dir);
+    return manager.read();
   } catch {
     return null;
   }

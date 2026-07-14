@@ -17,16 +17,17 @@ afterEach(() => {
 
 function writeState(phaseHistory: { phase: number; phase_name: string }[]): void {
   const state = {
+    _schema_version: 1,
     id: 'sprint-2026-07-02-01',
-    phase: phaseHistory.length > 0 ? phaseHistory[phaseHistory.length - 1].phase : -1,
-    status: 'running',
+    phase: phaseHistory.length > 0 ? phaseHistory[phaseHistory.length - 1].phase : 1,
+    status: 'in_progress',
     task_description: 'test sprint',
     started_at: new Date().toISOString(),
     phase_history: phaseHistory.map(ph => ({
       phase: ph.phase,
       phase_name: ph.phase_name,
       status: 'completed',
-      timestamp: new Date().toISOString(),
+      started_at: new Date().toISOString(),
     })),
     metrics: {},
   };

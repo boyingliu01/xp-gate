@@ -322,10 +322,12 @@ describe('sprint-discovery: discoverActiveSprints', () => {
       // no id, no status, no started_at
       task_description: 'Partial fields only',
     });
-    // Should not throw, result should be skipped (no valid id)
+    // After migration, missing id gets auto-generated, so result is found
     const results = sprintDiscovery.discoverActiveSprints(TMP_ROOT);
     const partials = results.filter(r => r.state.task_description === 'Partial fields only');
-    expect(partials.length).toBe(0);
+    expect(partials.length).toBe(1);
+    // Migrated state should have auto-generated id
+    expect(partials[0].state.id).toMatch(/^sprint-\d+$/);
   });
 
   test('handles EACCES on .sprint-state/ directory gracefully', () => {
@@ -359,7 +361,7 @@ describe('sprint-discovery: discoverActiveSprints', () => {
     const results = sprintDiscovery.discoverActiveSprints(TMP_ROOT);
     const desc = results.filter(r => r.state.id === 'sprint-2026-06-23-nodesc');
     expect(desc.length).toBe(1);
-    // task_description will be null/undefined, but entry should still be returned
-    expect(desc[0].state.task_description).toBeUndefined();
+    // After migration, missing task_description gets default '-'
+    expect(desc[0].state.task_description).toBe('-');
   });
 });
