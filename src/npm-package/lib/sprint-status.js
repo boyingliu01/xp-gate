@@ -70,6 +70,7 @@ function statusIcon(status) {
   switch (status) {
     case 'completed': return '✅';
     case 'in_progress': return '🔄';
+    case 'skipped': return '⏭️';
     default: return '⏳';
   }
 }
@@ -145,7 +146,8 @@ function formatPhaseLine(key, history, maxNameLen) {
   const icon = statusIcon(status);
   const dur = formatDuration(history?.duration_seconds);
   const statusLabel = status === 'completed' ? 'Completed' :
-    status === 'in_progress' ? 'In Progress' : 'Pending';
+    status === 'in_progress' ? 'In Progress' :
+    status === 'skipped' ? 'Skipped' : 'Pending';
   return `  Phase ${key.padStart(4)}  ${name.padEnd(maxNameLen + 1)} ${icon} ${dur.padEnd(5)} ${statusLabel}`;
 }
 
