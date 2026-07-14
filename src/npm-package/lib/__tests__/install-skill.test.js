@@ -178,7 +178,8 @@ describe('install-skill', () => {
     expect(fs.existsSync(configFile)).toBe(true);
     const config = JSON.parse(fs.readFileSync(configFile, 'utf8'));
     expect(config.installedSkills).toHaveProperty('delphi-review');
-    expect(config.installedSkills['delphi-review'].version).toBe('1.0.0');
+    // Version should be actual CLI version (0.14.9.0), not hardcoded '1.0.0'
+    expect(config.installedSkills['delphi-review'].version).toBe('0.14.9.0');
     expect(config.installedSkills['delphi-review'].installedAt).toMatch(/^\d{4}-/);
   });
 
