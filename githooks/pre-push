@@ -897,16 +897,11 @@ if ! command -v jq &> /dev/null; then
 fi
 
 # Validate result file content
-# SHA self-reference paradox fix: if the result file was committed as part of
-# HEAD, its content references HEAD^ (the commit being reviewed), not HEAD.
+# SHA self-reference paradox fix (Issue #346):
+# The walkthrough file may reference an earlier commit if it was generated before
+# subsequent walkthrough-only commits. We check if the referenced commit is in
+# the current branch's history and if no functional commits occurred after it.
 CURRENT_COMMIT=$(git rev-parse HEAD)
-if git diff-tree --no-commit-id --name-only -r HEAD 2>/dev/null | grep -qx "$RESULT_FILE"; then
-  # Result file is part of the latest commit — compare against the reviewed commit
-  EXPECTED_COMMIT=$(git rev-parse HEAD^ 2>/dev/null || echo "unknown")
-else
-  # Result file is working-tree only — compare against current HEAD
-  EXPECTED_COMMIT="$CURRENT_COMMIT"
-fi
 
 # Check JSON validity
 if ! jq empty "$RESULT_FILE" 2>/dev/null; then
@@ -938,16 +933,34 @@ if [ "$RESULT_BRANCH" != "$CURRENT_BRANCH" ]; then
   echo "Proceeding with commit verification..."
 fi
 
-# Commit match check
-if [ "$RESULT_COMMIT" != "$EXPECTED_COMMIT" ]; then
+# Commit match check (Issue #346: flexible matching to avoid circular dependency)
+# Check if RESULT_COMMIT is in the current branch's history
+if ! git merge-base --is-ancestor "$RESULT_COMMIT" HEAD 2>/dev/null; then
+  echo ""
+  echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+  echo "   ❌ RESULT FILE INVALID - PUSH BLOCKED"
+  echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+  echo ""
+  echo "Result file references a commit not in current branch:"
+  echo "  Referenced: $RESULT_COMMIT"
+  echo "  Current HEAD: $CURRENT_COMMIT"
+  echo ""
+  echo "Re-run: /delphi-review --mode code-walkthrough"
+  echo ""
+  exit 1
+fi
+
+# Check if there are any functional commits after RESULT_COMMIT
+# Functional commits are those that are NOT walkthrough-only updates
+FUNCTIONAL_COMMITS_AFTER=$(git log --oneline "$RESULT_COMMIT"..HEAD -- . ':!.code-walkthrough-result.json' 2>/dev/null | wc -l)
+if [ "$FUNCTIONAL_COMMITS_AFTER" -gt 0 ]; then
   echo ""
   echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
   echo "   ❌ RESULT FILE OUTDATED - PUSH BLOCKED"
   echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
   echo ""
-  echo "Result file is for a different commit:"
-    echo "  Expected: $EXPECTED_COMMIT"
-    echo "  Found: $RESULT_COMMIT"
+  echo "Functional commits found after walkthrough:"
+  git log --oneline "$RESULT_COMMIT"..HEAD -- . ':!.code-walkthrough-result.json' 2>/dev/null | head -5
   echo ""
   echo "Re-run: /delphi-review --mode code-walkthrough"
   echo ""
