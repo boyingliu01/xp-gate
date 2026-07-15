@@ -40,7 +40,7 @@
   ],
   "consensus": 100,
   "generatedAt": "2026-07-15T00:30:00Z",
-  "walkthroughHash": "manual-generation-no-hash",
+  "walkthroughHash": "58d90174c77c912cdcc81f3fbdd009b436ad50a79fb96ccd66edb1e875fb5862",
   "changedFiles": [
     "src/npm-package/lib/sprint-state-manager.js",
     "src/npm-package/lib/sprint-state-migrator.js",
