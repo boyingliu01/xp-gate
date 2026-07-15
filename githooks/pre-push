@@ -952,7 +952,11 @@ fi
 
 # Check if there are any functional commits after RESULT_COMMIT
 # Functional commits are those that are NOT walkthrough-only updates or Gate MW fixes
-FUNCTIONAL_COMMITS_AFTER=$(git log --oneline "$RESULT_COMMIT"..HEAD -- . ':!.code-walkthrough-result.json' ':!githooks/pre-push' ':!src/npm-package/hooks/pre-push' 2>/dev/null | wc -l)
+FUNCTIONAL_COMMITS_AFTER=$(git log --oneline "$RESULT_COMMIT"..HEAD -- . \
+  ':!.code-walkthrough-result.json' \
+  ':!.delphi/code-walkthrough.md' \
+  ':!githooks/pre-push' \
+  ':!src/npm-package/hooks/pre-push' 2>/dev/null | wc -l)
 if [ "$FUNCTIONAL_COMMITS_AFTER" -gt 0 ]; then
   echo ""
   echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
@@ -960,7 +964,11 @@ if [ "$FUNCTIONAL_COMMITS_AFTER" -gt 0 ]; then
   echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
   echo ""
   echo "Functional commits found after walkthrough:"
-  git log --oneline "$RESULT_COMMIT"..HEAD -- . ':!.code-walkthrough-result.json' ':!githooks/pre-push' ':!src/npm-package/hooks/pre-push' 2>/dev/null | head -5
+  git log --oneline "$RESULT_COMMIT"..HEAD -- . \
+    ':!.code-walkthrough-result.json' \
+    ':!.delphi/code-walkthrough.md' \
+    ':!githooks/pre-push' \
+    ':!src/npm-package/hooks/pre-push' 2>/dev/null | head -5
   echo ""
   echo "Re-run: /delphi-review --mode code-walkthrough"
   echo ""
