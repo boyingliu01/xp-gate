@@ -1,9 +1,9 @@
 # DOCUMENTATION KNOWLEDGE BASE
 
-**Generated:** 2026-07-13
-**Commit:** cb954fe
-**Branch:** sprint/2026-07-13-01
-**Version:** 0.14.9.0
+**Generated:** 2026-07-16
+**Commit:** 6193b64
+**Branch:** sprint/2026-07-14-01
+**Version:** 0.14.10.0
 
 ## OVERVIEW
 Reference guides, design history, postmortems, and weekly retros. **30+ chronologically-archived design plans** under `plans/`. Plan docs follow `YYYY-MM-DD-topic.md` and each typically corresponds to a Delphi consensus report or implementation plan.
