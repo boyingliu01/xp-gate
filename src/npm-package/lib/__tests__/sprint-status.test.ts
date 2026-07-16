@@ -16,12 +16,13 @@ const TMP_DIR = fs.mkdtempSync(path.join(os.tmpdir(), 'sprint-status-test-'));
 const STATE_DIR = path.join(TMP_DIR, '.sprint-state');
 const STATE_FILE = path.join(STATE_DIR, 'sprint-state.json');
 
-// Active sprint state (canonical format per SKILL.md L893-942, 6-phase schema)
+// Active sprint state (v1 schema per sprint-state-manager.js, 6-phase schema)
 const ACTIVE_STATE = {
+  _schema_version: 1,
   id: 'sprint-2026-06-16-01',
   task_description: 'Test sprint',
   phase: 3,
-  status: 'running',
+  status: 'in_progress',
   started_at: '2026-06-16T10:00:00Z',
   isolation: {
     worktree_path: '.worktrees/sprint/sprint-2026-06-16-01',
@@ -95,7 +96,7 @@ describe('sprint-status: readSprintState', () => {
     const stateObj = state as Record<string, unknown>;
     expect(stateObj.task_description).toBe('Test sprint');
     expect(stateObj.phase).toBe(3);
-    expect(stateObj.status).toBe('running');
+    expect(stateObj.status).toBe('in_progress');
     expect(Array.isArray(stateObj.phase_history)).toBe(true);
   });
 

@@ -1,12 +1,11 @@
 const childProcess = require('child_process');
-const fs = require('fs');
 const path = require('path');
+const { SprintStateManager } = require('./sprint-state-manager');
 
 function readSprintState(dir) {
   try {
-    const stateFile = path.join(dir, '.sprint-state', 'sprint-state.json');
-    if (!fs.existsSync(stateFile)) return null;
-    return JSON.parse(fs.readFileSync(stateFile, 'utf8'));
+    const manager = new SprintStateManager(dir);
+    return manager.read();
   } catch {
     return null;
   }

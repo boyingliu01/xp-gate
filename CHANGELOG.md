@@ -2,6 +2,29 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.14.10.0] - 2026-07-15
+
+### Added
+- **#343 Sprint State Manager**: 集中式状态管理 — `SprintStateManager` (JS CommonJS) 提供 `read()`/`write()`/`transitionPhase()`/`rollback()` API，统一 schema 验证 + 自动迁移 + 原子写入
+- **#338 Auto-Render Enforcement**: 通过 `onTransition` 回调机制实现 Phase 转换后自动渲染进度看板，消除文本级 MUST 指令的不可执行性
+- **#339 Gate MW Provenance Validation**: pre-push 新增溯源验证 — 检查 `experts[]` (≥3)、`consensus` (≥90%)、`walkthroughHash` (SHA-256 跨平台验证)、`generatedAt`，防止 LLM 伪造 walkthrough 结果
+- **Migration Mechanism**: 自动迁移遗留 sprint-state.json (无 `_schema_version`) 到 v1 schema，备份原文件，记录迁移警告
+- **Grace Period Support**: Gate MW 溯源验证支持 `XP_GATE_MW_GRACE_DAYS` 环境变量 (默认 30 天)，旧格式 walkthrough 获得 WARNING 而非 BLOCK
+
+### Changed
+- **Reader Refactoring**: 4 个 reader 统一使用 `SprintStateManager` — `sprint-status.js`、`sprint-discovery.js`、`next-sprint.js`、`sprint-state-io.ts`
+- **Version Tracking**: `install-skill.js` 使用 `getCliVersion()` 读取实际版本号 (从 VERSION 文件)，替代硬编码 `'1.0.0'`
+- **Test Updates**: 7 个测试文件更新以适配 v1 schema — `sprint-state-manager.test.js` (15 tests)、`sprint-status.test.js`、`sprint-discovery.test.ts`、`sprint-recorder.test.ts`、`span-tracer.test.ts`、`sprint-state-io.test.ts`、`install-skill.test.js`
+
+### Fixed
+- **#332**: `install-skill` 现在记录实际 CLI 版本而非硬编码 `'1.0.0'`，`upgrade --apply` 同步已修复
+- **#334**: 验证多语言检测正常工作 — `PROJECT_LANGS` 基于文件扩展名检测，混合技术栈项目所有语言均受门禁保护
+
+### Architecture
+- **Module Separation**: `SprintStateManager` 拆分为 `sprint-state-manager.js` (核心 API) + `sprint-state-migrator.js` (迁移逻辑)，满足 god-class 规则 (≤15 methods)
+- **Atomic Write Pattern**: 所有状态写入使用 tmp + rename 模式，防止并发写入导致数据损坏
+- **Observer Pattern**: `transitionPhase()` 支持 `onTransition` 回调，渲染失败降级为 WARNING 而非 BLOCK
+
 ## [0.14.9.0] - 2026-07-13
 
 ### Added

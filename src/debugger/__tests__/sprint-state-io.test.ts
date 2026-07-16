@@ -2,6 +2,7 @@
  * @test REQ-002 Token 差分采集器
  * @intent 验证 sprint-state-io 共享读写函数的正确性
  * @covers AC-002-01
+ * @note Sprint E: 委托给 SprintStateManager
  */
 
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
@@ -36,7 +37,14 @@ describe('sprint-state-io', () => {
     });
 
     it('should read valid sprint state', () => {
-      const state: SprintState = { id: 'test-sprint', phase: 2 };
+      const state: SprintState = {
+        _schema_version: 1,
+        id: 'test-sprint',
+        task_description: 'Test',
+        phase: 2,
+        status: 'in_progress',
+        started_at: '2026-01-01T00:00:00Z',
+      };
       const sf = path.join(tmpDir, '.sprint-state', 'sprint-state.json');
       fs.writeFileSync(sf, JSON.stringify(state), 'utf8');
       const result = readSprintState(tmpDir);
@@ -45,13 +53,17 @@ describe('sprint-state-io', () => {
 
     it('should read state with phase_history', () => {
       const state: SprintState = {
+        _schema_version: 1,
         id: 'test-sprint',
+        task_description: 'Test',
         phase: 3,
+        status: 'in_progress',
+        started_at: '2026-01-01T00:00:00Z',
         phase_history: [
-          { phase: 0, phase_name: 'THINK', status: 'completed', timestamp: '2026-01-01T00:00:00Z' },
-          { phase: 1, phase_name: 'PLAN', status: 'completed', timestamp: '2026-01-01T01:00:00Z' },
+          { phase: 2, phase_name: 'DESIGN', status: 'completed', started_at: '2026-01-01T00:00:00Z', completed_at: '2026-01-01T01:00:00Z' },
+          { phase: 3, phase_name: 'BUILD', status: 'in_progress', started_at: '2026-01-01T01:00:00Z' },
         ],
-        metrics: { tokens_phase_0: 100, tokens_phase_1: 200 },
+        metrics: { tokens_phase_2: 100, tokens_phase_3: 200 },
       };
       const sf = path.join(tmpDir, '.sprint-state', 'sprint-state.json');
       fs.writeFileSync(sf, JSON.stringify(state), 'utf8');

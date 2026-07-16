@@ -20,6 +20,15 @@ function getSkillsDir() {
   return path.join(HOME_DIR, '.config', 'opencode', 'skills');
 }
 
+function getCliVersion() {
+  try {
+    const versionFile = path.join(__dirname, '..', '..', '..', 'VERSION');
+    return fs.readFileSync(versionFile, 'utf8').trim();
+  } catch {
+    return '0.0.0';
+  }
+}
+
 const SKILLS_REGISTRY = {
   'sprint-flow': { repo: 'boyingliu01/xp-gate', path: 'skills/sprint-flow' },
   'delphi-review': { repo: 'boyingliu01/xp-gate', path: 'skills/delphi-review' },
@@ -123,10 +132,14 @@ async function performInstall(skillInfo, name, targetDir, offline, verbose) {
   }
 
   ensureConfigDir();
+  
+  // Read actual CLI version from VERSION file
+  const version = getCliVersion();
+  
   updateConfig({
     installedSkills: {
       ...(getConfig().installedSkills || {}),
-      [name]: { version: '1.0.0', installedAt: new Date().toISOString() }
+      [name]: { version, installedAt: new Date().toISOString() }
     }
   });
 

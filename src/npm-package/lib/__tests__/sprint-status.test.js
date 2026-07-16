@@ -14,12 +14,13 @@ const TMP_DIR = fs.mkdtempSync(path.join(os.tmpdir(), 'sprint-status-test-'));
 const STATE_DIR = path.join(TMP_DIR, '.sprint-state');
 const STATE_FILE = path.join(STATE_DIR, 'sprint-state.json');
 
-// Active sprint state (canonical format per SKILL.md L893-942)
+// Active sprint state (v1 schema per sprint-state-manager.js)
 const ACTIVE_STATE = {
+  _schema_version: 1,
   id: 'sprint-2026-06-16-01',
   task_description: 'Test sprint',
-  phase: 2,
-  status: 'running',
+  phase: 3,
+  status: 'in_progress',
   started_at: '2026-06-16T10:00:00Z',
   isolation: {
     worktree_path: '.worktrees/sprint/sprint-2026-06-16-01',
@@ -33,15 +34,11 @@ const ACTIVE_STATE = {
     user_decision: 'accepted'
   },
   phase_history: [
-    { phase: -1, phase_name: 'ISOLATE', status: 'completed',
+    { phase: 1, phase_name: 'PREP', status: 'completed',
       started_at: '2026-06-16T10:00:00Z', completed_at: '2026-06-16T10:03:00Z', duration_seconds: 180 },
-    { phase: -0.5, phase_name: 'AUTO-ESTIMATE', status: 'completed',
-      started_at: '2026-06-16T10:03:00Z', completed_at: '2026-06-16T10:05:00Z', duration_seconds: 120 },
-    { phase: 0, phase_name: 'THINK', status: 'completed',
+    { phase: 2, phase_name: 'DESIGN', status: 'completed',
       started_at: '2026-06-16T10:05:00Z', completed_at: '2026-06-16T10:15:00Z', duration_seconds: 600 },
-    { phase: 1, phase_name: 'PLAN', status: 'completed',
-      started_at: '2026-06-16T10:15:00Z', completed_at: '2026-06-16T10:25:00Z', duration_seconds: 600 },
-    { phase: 2, phase_name: 'BUILD', status: 'in_progress',
+    { phase: 3, phase_name: 'BUILD', status: 'in_progress',
       started_at: '2026-06-16T10:25:00Z', completed_at: null, duration_seconds: null,
       reqs: {
         'REQ-001': { name: 'Feature A', status: 'completed' },
@@ -87,8 +84,8 @@ describe('sprint-status: readSprintState', () => {
     const state = sprintStatus.readSprintState(TMP_DIR);
     expect(state).not.toBeNull();
     expect(state.task_description).toBe('Test sprint');
-    expect(state.phase).toBe(2);
-    expect(state.status).toBe('running');
+    expect(state.phase).toBe(3);
+    expect(state.status).toBe('in_progress');
     expect(Array.isArray(state.phase_history)).toBe(true);
     expect(state.phase_history.length).toBeGreaterThan(0);
   });
@@ -166,7 +163,7 @@ describe('sprint-status: formatSprintTable', () => {
     const json = sprintStatus.jsonMode(ACTIVE_STATE);
     const parsed = JSON.parse(json);
     expect(parsed.task_description).toBe('Test sprint');
-    expect(parsed.phase).toBe(2);
+    expect(parsed.phase).toBe(3);
   });
 
   // AC-SPRINTSTATUS-001-09: Stale state detection

@@ -142,6 +142,7 @@ describe('createSpanTracer', () => {
     );
 
     const tracer = createSpanTracer({ projectRoot: tmpDir });
-    expect(tracer.sprintId).toMatch(/^trace-/);
+    // After migration, empty state gets a generated sprint ID
+    expect(tracer.sprintId).toMatch(/^sprint-/);
   });
 });
