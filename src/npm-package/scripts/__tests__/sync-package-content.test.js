@@ -5,8 +5,6 @@
  */
 'use strict';
 
-const { describe, it, before, after, beforeEach, afterEach } = require('node:test');
-const { strictEqual, deepStrictEqual } = require('node:assert');
 const fs = require('fs');
 const path = require('path');
 const os = require('os');
@@ -21,12 +19,12 @@ function cleanupTempDir(dir) {
   fs.rmSync(dir, { recursive: true, force: true });
 }
 
-function writeScript(path, content) {
-  fs.writeFileSync(path, content, 'utf8');
+function writeScript(filePath, content) {
+  fs.writeFileSync(filePath, content, 'utf8');
 }
 
-function writeDoc(path, content) {
-  fs.writeFileSync(path, content, 'utf8');
+function writeDoc(filePath, content) {
+  fs.writeFileSync(filePath, content, 'utf8');
 }
 
 describe('checkDocsDrift', () => {
@@ -49,14 +47,14 @@ describe('checkDocsDrift', () => {
   });
 
   it('returns true when pre-commit gate counts match between script and docs', () => {
-    // Script with 3 gates (GATE 1, GATE 2, GATE 3)
+    // Script with 3 gates (Gate 1, Gate 2, Gate 3)
     const scriptContent = [
       '#!/bin/bash',
-      '# GATE 1: Code Quality',
+      '# Gate 1: Code Quality',
       'echo "running gate 1"',
-      '# GATE 2: Duplicate Code',
+      '# Gate 2: Duplicate Code',
       'echo "running gate 2"',
-      '# GATE 3: Complexity',
+      '# Gate 3: Complexity',
       'echo "running gate 3"',
     ].join('\n');
     writeScript(preCommitPath, scriptContent);
@@ -64,34 +62,34 @@ describe('checkDocsDrift', () => {
     // Pre-push with 0 M-gates (not relevant for this test)
     writeScript(prePushPath, '#!/bin/bash\necho "no gates"');
 
-    // README with 3 pre-commit gates (Gate 0, Gate 1, Gate 2)
+    // README with 3 pre-commit gates (Gate 1, Gate 2, Gate 3) - match script
     const readmeContent = [
       '# README',
       '| Gate | Name |',
       '|------|------|',
-      '| Gate 0 | Version |',
       '| Gate 1 | Code Quality |',
       '| Gate 2 | Duplicate Code |',
+      '| Gate 3 | Complexity |',
     ].join('\n');
     writeDoc(readmePath, readmeContent);
 
-    // AGENTS.md with 3 pre-commit gates (0, 1, 2)
+    // AGENTS.md with 3 pre-commit gates (1, 2, 3) - match script
     const agentsContent = [
       '# AGENTS',
       '| Gate | Name |',
       '|------|------|',
-      '| 0 | Version |',
       '| 1 | Code Quality |',
       '| 2 | Duplicate Code |',
+      '| 3 | Complexity |',
     ].join('\n');
     writeDoc(agentsPath, agentsContent);
 
     const result = checkDocsDrift(preCommitPath, prePushPath, readmePath, agentsPath);
-    strictEqual(result, true, 'should return true when gate counts match');
+    expect(result).toBe(true, 'should return true when gate counts match');
   });
 
   it('returns false when pre-commit gate count in script exceeds docs', () => {
-    // Script with 3 gates (use "Gate" not "GATE" to match actual regex)
+    // Script with 3 gates
     const scriptContent = [
       '#!/bin/bash',
       '# Gate 1: Code Quality',
@@ -101,38 +99,39 @@ describe('checkDocsDrift', () => {
     writeScript(preCommitPath, scriptContent);
     writeScript(prePushPath, '#!/bin/bash');
 
-    // README with only 2 pre-commit gates (fewer than script)
+    // README with only 2 pre-commit gates (fewer than script: 1, 2)
     const readmeContent = [
       '| Gate | Name |',
       '|------|------|',
-      '| Gate 0 | Version |',
       '| Gate 1 | Code Quality |',
+      '| Gate 2 | Duplicate Code |',
     ].join('\n');
     writeDoc(readmePath, readmeContent);
 
-    // AGENTS.md with 3 pre-commit gates (matches script)
+    // AGENTS.md with 2 pre-commit gates (1, 2) - matches README
     const agentsContent = [
       '| Gate | Name |',
       '|------|------|',
-      '| 0 | Version |',
       '| 1 | Code Quality |',
       '| 2 | Duplicate Code |',
     ].join('\n');
     writeDoc(agentsPath, agentsContent);
 
     const result = checkDocsDrift(preCommitPath, prePushPath, readmePath, agentsPath);
-    strictEqual(result, false, 'should return false when gate count exceeds docs');
+    expect(result).toBe(false, 'should return false when gate count exceeds docs');
   });
 
   it('returns false when pre-push gate count mismatches', () => {
     // Pre-commit: 1 gate in script, 1 in docs (match)
-    const scriptContent = '#!/bin/bash\n# GATE 1: Code Quality';
+    const scriptContent = '#!/bin/bash\n# Gate 1: Code Quality';
     writeScript(preCommitPath, scriptContent);
+    const readmePreCommit = '| Gate | Name |\n|------|------|\n| Gate 1 | Code Quality |';
+    const agentsPreCommit = '| Gate | Name |\n|------|------|\n| 1 | Code Quality |';
 
     // Pre-push: 2 M-gates in script (M, M2)
     const prePushContent = [
       '#!/bin/bash',
-      '# GATE M: Mutation Testing',
+      '# Gate M: Mutation Testing',
       'echo "gate m"',
       '# Gate M2: Mock Density',
       'echo "gate m2"',
@@ -141,9 +140,7 @@ describe('checkDocsDrift', () => {
 
     // README: 1 pre-push gate (only M, missing M2)
     const readmeContent = [
-      '| Gate | Name |',
-      '|------|------|',
-      '| Gate 0 | Version |',
+      readmePreCommit,
       '',
       '| Gate M | Mutation |',
     ].join('\n');
@@ -151,9 +148,7 @@ describe('checkDocsDrift', () => {
 
     // AGENTS.md: 2 pre-push gates (M, M2 — matches script)
     const agentsContent = [
-      '| Gate | Name |',
-      '|------|------|',
-      '| 0 | Version |',
+      agentsPreCommit,
       '',
       '| M | Mutation |',
       '| M2 | Mock Density |',
@@ -161,12 +156,12 @@ describe('checkDocsDrift', () => {
     writeDoc(agentsPath, agentsContent);
 
     const result = checkDocsDrift(preCommitPath, prePushPath, readmePath, agentsPath);
-    strictEqual(result, false, 'should return false when pre-push gate count mismatches');
+    expect(result).toBe(false, 'should return false when pre-push gate count mismatches');
   });
 
   it('skips missing doc files with warning instead of crashing', () => {
     // Script with 1 gate
-    const scriptContent = '#!/bin/bash\n# GATE 1: Code Quality';
+    const scriptContent = '#!/bin/bash\n# Gate 1: Code Quality';
     writeScript(preCommitPath, scriptContent);
     writeScript(prePushPath, '#!/bin/bash');
 
@@ -174,7 +169,7 @@ describe('checkDocsDrift', () => {
     const readmeContent = [
       '| Gate | Name |',
       '|------|------|',
-      '| Gate 0 | Version |',
+      '| Gate 1 | Code Quality |',
     ].join('\n');
     writeDoc(readmePath, readmeContent);
 
@@ -182,20 +177,20 @@ describe('checkDocsDrift', () => {
     const nonExistentAgents = path.join(tempDir, 'NONEXISTENT_AGENTS.md');
 
     const result = checkDocsDrift(preCommitPath, prePushPath, readmePath, nonExistentAgents);
-    strictEqual(result, true, 'should return true when missing doc skipped');
+    expect(result).toBe(true, 'should return true when missing doc skipped');
   });
 
   it('returns true when pre-push gate counts match', () => {
     // Pre-commit: 1 gate in script, 1 in docs
-    writeScript(preCommitPath, '#!/bin/bash\n# GATE 1: Code Quality');
-    const readmePreCommit = '| Gate | Name |\n|------|------|\n| Gate 0 | Version |';
-    const agentsPreCommit = '| Gate | Name |\n|------|------|\n| 0 | Version |';
+    writeScript(preCommitPath, '#!/bin/bash\n# Gate 1: Code Quality');
+    const readmePreCommit = '| Gate | Name |\n|------|------|\n| Gate 1 | Code Quality |';
+    const agentsPreCommit = '| Gate | Name |\n|------|------|\n| 1 | Code Quality |';
 
     // Pre-push: 3 M-gates in script (M, M2, M3)
     const prePushContent = [
       '#!/bin/bash',
-      '# GATE M: Mutation Testing',
-      '# GATE M2: Mock Density',
+      '# Gate M: Mutation Testing',
+      '# Gate M2: Mock Density',
       '# Gate M3: Mock Policy',
     ].join('\n');
     writeScript(prePushPath, prePushContent);
@@ -221,7 +216,7 @@ describe('checkDocsDrift', () => {
     writeDoc(agentsPath, agentsContent);
 
     const result = checkDocsDrift(preCommitPath, prePushPath, readmePath, agentsPath);
-    strictEqual(result, true, 'should return true when pre-push gate counts match');
+    expect(result).toBe(true, 'should return true when pre-push gate counts match');
   });
 });
 
@@ -263,7 +258,7 @@ describe('syncGateScripts', () => {
       (f.startsWith('gate-') || f === 'sprint-gate.sh') && f.endsWith('.sh')
     );
 
-    deepStrictEqual(gateFiles.sort(), ['gate-3.sh', 'gate-4.sh', 'sprint-gate.sh'].sort(), 'should include all gate files');
+    expect(gateFiles.sort()).toEqual(['gate-3.sh', 'gate-4.sh', 'sprint-gate.sh'].sort(), 'should include all gate files');
   });
 });
 
@@ -299,7 +294,7 @@ describe('checkAdapterDrift', () => {
     fs.writeFileSync(path.join(mirrorDir, 'adapter-python.sh'), '#!/bin/bash\necho "python"\n');
 
     const result = checkAdapterDrift(srcDir, mirrorDir);
-    strictEqual(result, true, 'should return true when files are byte-identical');
+    expect(result).toBe(true, 'should return true when files are byte-identical');
   });
 
   it('returns false when file in source is missing from mirror', () => {
@@ -307,7 +302,7 @@ describe('checkAdapterDrift', () => {
     // NOT writing to mirrorDir
 
     const result = checkAdapterDrift(srcDir, mirrorDir);
-    strictEqual(result, false, 'should return false when source file missing from mirror');
+    expect(result).toBe(false, 'should return false when source file missing from mirror');
   });
 
   it('returns false when file in mirror is missing from source', () => {
@@ -315,7 +310,7 @@ describe('checkAdapterDrift', () => {
     // NOT writing to srcDir
 
     const result = checkAdapterDrift(srcDir, mirrorDir);
-    strictEqual(result, false, 'should return false when mirror file missing from source');
+    expect(result).toBe(false, 'should return false when mirror file missing from source');
   });
 
   it('returns false when file content differs (checksum mismatch)', () => {
@@ -323,7 +318,7 @@ describe('checkAdapterDrift', () => {
     fs.writeFileSync(path.join(mirrorDir, 'adapter-typescript.sh'), '#!/bin/bash\n# different line\n');
 
     const result = checkAdapterDrift(srcDir, mirrorDir);
-    strictEqual(result, false, 'should return false when content differs');
+    expect(result).toBe(false, 'should return false when content differs');
   });
 
   it('skips with true when source directory does not exist', () => {
@@ -332,7 +327,7 @@ describe('checkAdapterDrift', () => {
     fs.writeFileSync(path.join(mirrorDir, 'adapter-typescript.sh'), '#!/bin/bash');
 
     const result = checkAdapterDrift(nonExistentSrc, mirrorDir);
-    strictEqual(result, true, 'should return true when source skipped');
+    expect(result).toBe(true, 'should return true when source skipped');
   });
 
   it('skips with true when mirror directory does not exist', () => {
@@ -340,7 +335,7 @@ describe('checkAdapterDrift', () => {
     fs.writeFileSync(path.join(srcDir, 'adapter-typescript.sh'), '#!/bin/bash');
 
     const result = checkAdapterDrift(srcDir, nonExistentMirror);
-    strictEqual(result, true, 'should return true when mirror skipped');
+    expect(result).toBe(true, 'should return true when mirror skipped');
   });
 
   it('handles subdirectories in adapter tree', () => {
@@ -355,7 +350,7 @@ describe('checkAdapterDrift', () => {
     fs.writeFileSync(path.join(mirrorPluginsDir, 'p3c-plugin.sh'), 'p3c');
 
     const result = checkAdapterDrift(srcDir, mirrorDir);
-    strictEqual(result, true, 'should return true with subdirectories');
+    expect(result).toBe(true, 'should return true with subdirectories');
   });
 });
 
@@ -400,54 +395,54 @@ describe('sync-package-content subprocess invocation', () => {
   it('sync-package-content.js copies skills from repo to package', () => {
     const syncScript = path.join(WORKTREE_PATH, 'src', 'npm-package', 'scripts', 'sync-package-content.js');
     const nodeExe = process.execPath;
-    
+
     // Ensure skills directory is empty first
     cleanupPackageDirectories();
-    
+
     // Run sync as subprocess
     const result = spawnSync(nodeExe, [syncScript], {
       cwd: WORKTREE_PATH,
       stdio: 'pipe',
     });
-    
-    strictEqual(result.status, 0, 'sync script should exit with status 0');
-    
+
+    expect(result.status).toBe(0, 'sync script should exit with status 0');
+
     // Verify skills were copied from repo to package
     for (const skillName of CORE_SKILLS) {
       const skillSrc = path.join(REPO_ROOT, 'skills', skillName, 'SKILL.md');
       const skillDest = path.join(PKG_ROOT, 'skills', skillName, 'SKILL.md');
-      
+
       // Source must exist (we're testing copy from existing repo)
       if (!fs.existsSync(skillSrc)) {
         console.warn(`Skill source not found, skipping: ${skillName}`);
         continue;
       }
-      
-      strictEqual(fs.existsSync(skillDest), true, `skill ${skillName} should be copied`);
+
+      expect(fs.existsSync(skillDest)).toBe(true, `skill ${skillName} should be copied`);
       const content = fs.readFileSync(skillDest, 'utf8');
       // SKILL.md files contain 'SKILL.md' or have content
-      strictEqual(content.length > 0, true, `skill ${skillName} should have content`);
+      expect(content.length > 0).toBe(true, `skill ${skillName} should have content`);
     }
   }, 10000);
 
   it('sync-package-content.js copies plugins from repo to package', () => {
     const syncScript = path.join(WORKTREE_PATH, 'src', 'npm-package', 'scripts', 'sync-package-content.js');
     const nodeExe = process.execPath;
-    
+
     const result = spawnSync(nodeExe, [syncScript], {
       cwd: WORKTREE_PATH,
       stdio: 'pipe',
     });
-    
-    strictEqual(result.status, 0, 'sync script should exit with status 0');
-    
+
+    expect(result.status).toBe(0, 'sync script should exit with status 0');
+
     // Verify plugin manifests were copied
     const plugins = ['claude-code', 'opencode', 'qoder'];
     for (const pluginName of plugins) {
       const pluginManifest = path.join(PKG_ROOT, 'plugins', pluginName, 'plugin.json');
       if (fs.existsSync(pluginManifest)) {
         const content = fs.readFileSync(pluginManifest, 'utf8');
-        strictEqual(content.includes('"name"'), true, `plugin ${pluginName} should have "name" field`);
+        expect(content.includes('"name"')).toBe(true, `plugin ${pluginName} should have "name" field`);
       }
     }
   }, 10000);
@@ -455,42 +450,42 @@ describe('sync-package-content subprocess invocation', () => {
   it('sync-package-content.js copies adapters from githooks to package', () => {
     const syncScript = path.join(WORKTREE_PATH, 'src', 'npm-package', 'scripts', 'sync-package-content.js');
     const nodeExe = process.execPath;
-    
+
     const result = spawnSync(nodeExe, [syncScript], {
       cwd: WORKTREE_PATH,
       stdio: 'pipe',
     });
-    
-    strictEqual(result.status, 0, 'sync script should exit with status 0');
-    
+
+    expect(result.status).toBe(0, 'sync script should exit with status 0');
+
     // Verify adapters directory exists and has files
     const adaptersDir = path.join(PKG_ROOT, 'adapters');
-    strictEqual(fs.existsSync(adaptersDir), true, 'adapters directory should exist');
-    
+    expect(fs.existsSync(adaptersDir)).toBe(true, 'adapters directory should exist');
+
     // Check for common adapter patterns (adapter-*.sh or *.sh)
     const adapterFiles = fs.readdirSync(adaptersDir).filter(f => f.endsWith('.sh'));
-    strictEqual(adapterFiles.length > 0, true, 'should have at least one adapter file');
+    expect(adapterFiles.length > 0).toBe(true, 'should have at least one adapter file');
   }, 10000);
 
   it('sync-package-content.js runs without modifying package.json dependencies (zero-install)', () => {
     const syncScript = path.join(WORKTREE_PATH, 'src', 'npm-package', 'scripts', 'sync-package-content.js');
     const nodeExe = process.execPath;
-    
+
     const pkgJsonPath = path.join(PKG_ROOT, 'package.json');
     const pkgJsonBefore = JSON.parse(fs.readFileSync(pkgJsonPath, 'utf8'));
-    
+
     // Zero-install: dependencies should be empty (or undefined if key missing)
-    strictEqual(Object.keys(pkgJsonBefore.dependencies || {}).length, 0, 'dependencies should be empty');
-    
+    expect(Object.keys(pkgJsonBefore.dependencies || {}).length).toBe(0, 'dependencies should be empty');
+
     const result = spawnSync(nodeExe, [syncScript], {
       cwd: WORKTREE_PATH,
       stdio: 'pipe',
     });
-    
-    strictEqual(result.status, 0, 'sync script should exit with status 0');
-    
+
+    expect(result.status).toBe(0, 'sync script should exit with status 0');
+
     // Verify package.json dependencies remained empty
     const pkgJsonAfter = JSON.parse(fs.readFileSync(pkgJsonPath, 'utf8'));
-    strictEqual(Object.keys(pkgJsonAfter.dependencies || {}).length, 0, 'dependencies should remain empty');
+    expect(Object.keys(pkgJsonAfter.dependencies || {}).length).toBe(0, 'dependencies should remain empty');
   }, 10000);
 });
