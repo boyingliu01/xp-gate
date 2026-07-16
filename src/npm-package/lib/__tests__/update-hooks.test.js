@@ -94,7 +94,12 @@ describe('updateHooks', () => {
       mod.copyHooks(tmpPackage, dest, false, true);
 
       const stat = fs.statSync(path.join(dest, 'pre-commit'));
-      expect(stat.mode & 0o100).toBeTruthy();
+      // Windows does not support Unix file permissions — chmod is a no-op
+      if (process.platform !== 'win32') {
+        expect(stat.mode & 0o100).toBeTruthy();
+      } else {
+        expect(stat.isFile()).toBe(true);
+      }
     });
   });
 

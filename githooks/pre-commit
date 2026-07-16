@@ -1967,8 +1967,8 @@ elif has_project_lang "powershell" 2>/dev/null || [ "$PROJECT_LANG" = "powershel
      echo "     ⏭️  SKIPPED - Architecture validation (no tool for PowerShell)"
 
 else
-  # Check if architecture config exists
-  if [ -f "architecture.yaml" ] || [ -f ".architecturerc" ] || [ -f ".archlint.yaml" ]; then
+  # Check if architecture config exists (use $PROJECT_ROOT — hook may have cd'd to a subdir via ARCH-03)
+  if [ -f "$PROJECT_ROOT/architecture.yaml" ] || [ -f "$PROJECT_ROOT/.architecturerc" ] || [ -f "$PROJECT_ROOT/.archlint.yaml" ]; then
     # Different architecture tools per language
     for CURRENT_LANG in $PROJECT_LANGS; do
     case "$CURRENT_LANG" in
@@ -2069,7 +2069,7 @@ else
     done  # end for CURRENT_LANG (architecture)
   else
     # Architecture config is REQUIRED — BLOCK if missing
-    if [ -f ".architecture-skip" ]; then
+    if [ -f "$PROJECT_ROOT/.architecture-skip" ]; then
       echo "     ⚠️  Architecture config missing but .architecture-skip present — allowed to skip"
       echo "     ⏭️  SKIPPED - Architecture validation (.architecture-skip exemption)"
     else
