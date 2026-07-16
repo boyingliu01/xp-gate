@@ -11,18 +11,21 @@ const GATE_REGISTRY = {
   '0': {
     name: 'Version Consistency',
     description: 'Check VERSION file matches all package.json versions',
+    aliases: ['version', '0'],
     preCommitOnly: true,
     reason: 'Requires git-staged context to compare VERSION with package.json files',
   },
   '1': {
     name: 'Code Quality',
     description: 'Language-specific static analysis and linting (ESLint, Ruff, govet, etc.)',
+    aliases: ['lint', '1'],
     preCommitOnly: true,
     reason: 'Requires language detection from changed files and adapter routing',
   },
   '2': {
     name: 'Duplicate Code',
     description: 'jscpd duplicate code detection',
+    aliases: ['duplicates', 'dup', '2'],
     run: (targetPath) => {
       const jscpdConfig = findConfig(targetPath, 'jscpd.conf.json');
       const args = [targetPath || '.'];
@@ -33,6 +36,7 @@ const GATE_REGISTRY = {
   '3': {
     name: 'Cyclomatic Complexity',
     description: 'lizard cyclomatic complexity analysis',
+    aliases: ['complexity', 'ccn', '3'],
     run: (targetPath) => {
       const script = resolveGateScript('3');
       if (script) {
@@ -47,6 +51,7 @@ const GATE_REGISTRY = {
   '4': {
     name: 'Clean Code + SOLID Principles',
     description: '14 Clean Code/SOLID rules across 9 languages',
+    aliases: ['principles', 'principle', '4'],
     run: (targetPath) => {
       const { principles } = require('./principles.js');
       return principles([targetPath || '.']);
@@ -55,12 +60,14 @@ const GATE_REGISTRY = {
   '5': {
     name: 'Tests + Coverage',
     description: 'Unit test execution and code coverage enforcement (≥80%)',
+    aliases: ['tests', 'test', '5'],
     preCommitOnly: true,
     reason: 'Requires language detection and adapter-sourced test execution with coverage reports',
   },
   '6': {
     name: 'Architecture + Boy Scout Rule',
     description: 'Architecture layer boundary validation and warning baseline enforcement',
+    aliases: ['architecture', 'arch', '6'],
     run: (targetPath) => {
       const { arch } = require('./arch.js');
       return arch([]);
@@ -69,6 +76,7 @@ const GATE_REGISTRY = {
   '7': {
     name: 'IaC Security',
     description: 'Infrastructure-as-Code security scanning (checkov, hadolint, kube-score, tflint)',
+    aliases: ['iac', 'infra', '7'],
     run: (targetPath) => {
       const script = resolveGateScript('7');
       if (script) {
@@ -82,6 +90,7 @@ const GATE_REGISTRY = {
   '8': {
     name: 'Secret Scanning',
     description: 'gitleaks secret and credential detection',
+    aliases: ['secrets', 'secret', '8'],
     run: (targetPath) => {
       const script = resolveGateScript('8');
       if (script) {
@@ -95,6 +104,7 @@ const GATE_REGISTRY = {
   '9': {
     name: 'SAST Security',
     description: 'semgrep static application security testing',
+    aliases: ['sast', 'semgrep', '9'],
     run: (targetPath) => {
       const script = resolveGateScript('9');
       if (script) {
@@ -108,16 +118,50 @@ const GATE_REGISTRY = {
   '10': {
     name: 'Build Integrity',
     description: 'TypeScript compilation, npm pack, and import validation',
+    aliases: ['build', '10'],
     preCommitOnly: true,
     reason: 'Build integrity checks require language detection and build tool context',
   },
   '11': {
     name: 'Sprint Flow Enforcement',
     description: 'Sprint state and delphi-review validation',
+    aliases: ['sprint', '11'],
     preCommitOnly: true,
     reason: 'Requires sprint state (.sprint-state/) and git branch context',
   },
 };
+
+// Reverse-lookup: alias → gate ID (built once at module load)
+const ALIAS_MAP = {};
+(function buildAliasMap() {
+  for (const [id, info] of Object.entries(GATE_REGISTRY)) {
+    const aliases = Array.isArray(info.aliases) ? info.aliases : [];
+    for (const alias of aliases) {
+      ALIAS_MAP[String(alias).toLowerCase()] = id;
+    }
+  }
+})();
+
+/**
+ * Resolve a gate alias (name or number string) to its canonical gate ID.
+ * Returns null if no match.
+ */
+function resolveAlias(maybeAlias) {
+  if (maybeAlias == null) return null;
+  const key = String(maybeAlias).toLowerCase();
+  // Direct numeric ID lookup
+  if (GATE_REGISTRY[key]) return key;
+  // Alias lookup
+  return ALIAS_MAP[key] || null;
+}
+
+/**
+ * Get all aliases for a given gate ID, or empty array.
+ */
+function getAliases(gateId) {
+  const info = GATE_REGISTRY[String(gateId)];
+  return info && Array.isArray(info.aliases) ? info.aliases : [];
+}
 
 function findConfig(basePath, fileName) {
   const candidates = [
@@ -167,6 +211,7 @@ function getAllGates() {
     id,
     name: info.name,
     description: info.description,
+    aliases: Array.isArray(info.aliases) ? info.aliases : [],
     preCommitOnly: info.preCommitOnly || false,
     reason: info.reason || null,
   }));
@@ -206,4 +251,4 @@ async function runGate(gateId, targetPath) {
   return 1;
 }
 
-module.exports = { GATE_REGISTRY, getGateInfo, getAllGates, runGate };
+module.exports = { GATE_REGISTRY, getGateInfo, getAllGates, runGate, resolveAlias, getAliases };
