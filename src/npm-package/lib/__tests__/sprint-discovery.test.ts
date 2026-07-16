@@ -185,7 +185,7 @@ describe('sprint-discovery: discoverActiveSprints', () => {
     expect(active[0].state.task_description).toBe('Fix issue #247 sprint status worktree discovery');
     expect(active[0].state.status).toBe('in_progress');
     expect(active[0].worktreeExists).toBe(true);
-    expect(active[0].sourcePath).toContain('.worktrees/sprint/sprint-2026-06-23-01');
+    expect(active[0].sourcePath).toContain(path.join('.worktrees', 'sprint', 'sprint-2026-06-23-01'));
   });
 
   test('includes completed sprints with existing worktrees', () => {
