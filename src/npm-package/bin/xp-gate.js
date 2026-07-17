@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+const path = require('path');
 const { init } = require('../lib/init.js');
 const { installSkill } = require('../lib/install-skill.js');
 const { updateSkill } = require('../lib/update-skill.js');
@@ -55,8 +56,18 @@ const COMMANDS = {
   'update-skill': {
     description: 'Update installed skill(s)',
     run: subargs => {
-      const name = subargs[0];
-      const options = parseOptions(subargs.slice(1));
+      // Detect --all flag BEFORE extracting name (fix #347)
+      const allFlagIndex = subargs.indexOf('--all');
+      let name, options;
+      if (allFlagIndex !== -1) {
+        // Remove --all from args before parsing, name is undefined
+        options = parseOptions([...subargs.slice(0, allFlagIndex), ...subargs.slice(allFlagIndex + 1)]);
+        options.all = true;
+        name = undefined;  // explicit: no single name when --all is used
+      } else {
+        name = subargs[0];
+        options = parseOptions(subargs.slice(1));
+      }
       updateSkill(name, options).then(code => process.exit(code));
     },
     usage: 'xp-gate update-skill [<name>] [--all] [--check]'

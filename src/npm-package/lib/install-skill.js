@@ -101,6 +101,8 @@ function backupExisting(targetDir, installId, backupDir) {
   if (fs.existsSync(targetDir)) {
     fs.mkdirSync(backupDir, { recursive: true });
     copyDirRecursive(targetDir, backupDir);
+    // CRITICAL: remove original BEFORE fresh install so old reference/ files don't leak through
+    fs.rmSync(targetDir, { recursive: true, force: true });
   }
 }
 

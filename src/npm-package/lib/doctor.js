@@ -1,6 +1,9 @@
 const fs = require('fs');
 const path = require('path');
 const { execSync } = require('child_process');
+const { exec } = require('child_process');
+const util = require('util');
+const execAsync = util.promisify(exec);
 const {
   HOME_DIR,
   CONFIG_DIR,
@@ -38,6 +41,29 @@ const SIGNATURES = {
   'adapter-common.sh': 'detect_project_lang()'
 };
 
+/**
+ * Hard timeout for all execSync calls in doctor diagnostics.
+ * Prevents hanging subprocesses (e.g., missing CLI tools on Windows)
+ * from blocking the entire doctor run.
+ */
+const EXEC_TIMEOUT_MS = 3000;
+
+/**
+ * Execute a command with a hard timeout using async exec.
+ * Returns { stdout, stderr } on success, null on failure/timeout.
+ */
+async function execWithTimeout(cmd, opts = {}) {
+  try {
+    const { stdout, stderr } = await execAsync(cmd, {
+      ...opts,
+      timeout: opts.timeout || EXEC_TIMEOUT_MS,
+    });
+    return { stdout: stdout.trim(), stderr: stderr.trim() };
+  } catch {
+    return null;
+  }
+}
+
 function isXpGateFile(filePath, signature) {
   if (!fs.existsSync(filePath)) return false;
   try {
@@ -61,45 +87,83 @@ function saveConfig(config) {
   fs.writeFileSync(CONFIG_FILE, JSON.stringify(config, null, 2));
 }
 
-function getGitDir() {
+async function getGitDir() {
   try {
-    return execSync('git rev-parse --git-dir', { encoding: 'utf8' }).trim();
+    const result = await execWithTimeout('git rev-parse --git-dir');
+    return result ? result.stdout : null;
   } catch {
     return null;
   }
 }
 
-function getCurrentHooksPath() {
+/**
+ * Synchronous version for --fix code path (runs before async diagnosis).
+ * Always includes a 3-second timeout.
+ */
+function getGitDirSync() {
   try {
-    const result = execSync('git config --global core.hooksPath', {
+    return execSync('git rev-parse --git-dir', {
       encoding: 'utf8',
-      stdio: ['pipe', 'pipe', 'pipe']
-    });
-    return result.trim();
+      timeout: EXEC_TIMEOUT_MS,
+      stdio: ['pipe', 'pipe', 'pipe'],
+    }).trim();
   } catch {
     return null;
   }
 }
 
-function checkEnv(checks) {
+async function getCurrentHooksPath() {
+  const result = await execWithTimeout('git config --global core.hooksPath', {
+    stdio: ['pipe', 'pipe', 'pipe']
+  });
+  return result ? result.stdout : null;
+}
+
+/**
+ * Synchronous version for --fix code path (runs before async diagnosis).
+ * Always includes a 3-second timeout.
+ */
+function getCurrentHooksPathSync() {
+  try {
+    return execSync('git config --global core.hooksPath', {
+      encoding: 'utf8',
+      timeout: EXEC_TIMEOUT_MS,
+      stdio: ['pipe', 'pipe', 'pipe'],
+    }).trim();
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Check environment dependencies — runs all checks IN PARALLEL.
+ * @param {Array} checks — mutated with results
+ * @returns {Promise<boolean>} all ok
+ */
+async function checkEnv(checks) {
   const envChecks = [
-    { name: 'Node.js', cmd: 'node --version', label: null },
-    { name: 'Git', cmd: 'git --version', label: null },
-    { name: 'Bash', cmd: 'bash --version', label: null }
+    { name: 'Node.js', cmd: 'node --version' },
+    { name: 'Git', cmd: 'git --version' },
+    { name: 'Bash', cmd: 'bash --version' }
   ];
 
+  const results = await Promise.allSettled(
+    envChecks.map(async (env) => {
+      const result = await execWithTimeout(env.cmd, { stdio: ['ignore', 'pipe', 'pipe'] });
+      return { name: env.name, result };
+    })
+  );
+
   let allOk = true;
-  for (const env of envChecks) {
-    try {
-      const output = execSync(env.cmd, {
-        encoding: 'utf8',
-        stdio: ['ignore', 'pipe', 'pipe']
-      });
-      const version = output.trim().split('\n')[0];
-      env.label = version;
-      checks.push({ name: `Environment: ${env.name}`, status: 'PASS', detail: version });
-    } catch {
-      checks.push({ name: `Environment: ${env.name}`, status: 'FAIL', detail: 'Not found' });
+  for (const entry of envChecks) {
+    const settled = results.find(r => r.value && r.value.name === entry.name);
+    const version = settled && settled.value && settled.value.result
+      ? settled.value.result.stdout.split('\n')[0]
+      : null;
+    if (version) {
+      checks.push({ name: `Environment: ${entry.name}`, status: 'PASS', detail: version });
+    } else {
+      checks.push({ name: `Environment: ${entry.name}`, status: 'FAIL', detail: 'Not found' });
       allOk = false;
     }
   }
@@ -132,9 +196,9 @@ function checkConfig() {
   ], issues: 0 };
 }
 
-function checkLocalHooks(checks) {
+async function checkLocalHooks(checks) {
   let issues = 0;
-  const gitDir = getGitDir();
+  const gitDir = await getGitDir();
   if (!gitDir) {
     checks.push({ name: 'Git repository', status: 'FAIL', detail: 'Not in a git repo' });
     return 1;
@@ -145,12 +209,12 @@ function checkLocalHooks(checks) {
   return issues;
 }
 
-function checkGlobalHooks(checks) {
+async function checkGlobalHooks(checks) {
   let issues = 0;
   issues += checkSingleHook(GLOBAL_HOOKS_DIR, 'pre-commit', SIGNATURES['pre-commit'], 'Global hooks', checks);
   issues += checkSingleHook(GLOBAL_HOOKS_DIR, 'pre-push', SIGNATURES['pre-push'], 'Global hooks', checks);
 
-  const hooksPath = getCurrentHooksPath();
+  const hooksPath = await getCurrentHooksPath();
   if (hooksPath === null || hooksPath === '') {
     checks.push({ name: 'Git core.hooksPath', status: 'FAIL', detail: 'Not set' });
     issues++;
@@ -188,7 +252,8 @@ const EXPECTED_GATE_SCRIPTS = [
   'gate-9.sh',
 ];
 
-function checkAdapters(checks, mode, gitDir) {
+async function checkAdapters(checks, mode, gitDirPromise) {
+  const gitDir = typeof gitDirPromise === 'string' ? gitDirPromise : await gitDirPromise;
   let issues = 0;
   const adaptersDir = mode === 'local'
     ? path.join(path.dirname(gitDir || ''), 'githooks', 'adapters')
@@ -224,12 +289,20 @@ function checkAdapters(checks, mode, gitDir) {
 /**
  * Build check report for the doctor.
  * Returns { checks: Array<{name, status, detail}>, issues: number }
+ *
+ * Uses Promise.allSettled to run independent checks in parallel.
+ * Check groups:
+ *   A) Config-dependent (config, version, templateDir) — sequential (data deps)
+ *   B) Hooks — depends on config.mode + gitDir
+ *   C) Adapters — depends on config.mode
+ *   D) Env + CLI tools — fully independent, run IN PARALLEL
+ *   E) TUI + Skills — independent, run IN PARALLEL
  */
-function diagnose() {
+async function diagnoseAsync() {
   const checks = [];
   let issues = 0;
 
-  // --- Check 1: Config file ---
+  // --- Phase 1: Config-dependent checks (sequential, data dependencies) ---
   const configResult = checkConfig();
   if (configResult.config === null) {
     return { checks: configResult.checks, issues: configResult.issues };
@@ -238,35 +311,188 @@ function diagnose() {
   checks.push(...configResult.checks);
   issues += configResult.issues;
 
-  // --- Check 2: Version mismatch ---
+  // Version check (sync, no I/O)
   issues += diagnoseVersion(config, getPackageVersion(), checks);
-
-  // --- Check 3: templateDir validation ---
+  // TemplateDir check (sync, no I/O)
   issues += diagnoseTemplateDir(config, checks);
 
-  // --- Check 4: Hooks files ---
-  if (config.mode === 'local') {
-    issues += checkLocalHooks(checks);
-  } else {
-    issues += checkGlobalHooks(checks);
+  // --- Phase 2: Fetch gitDir early (needed by hooks and adapters) ---
+  const gitDirPromise = getGitDir();
+
+  // --- Phase 3: Run independent groups in parallel ---
+  // Group A: Hooks (needs config.mode + gitDir)
+  const hooksPromise = (async () => {
+    if (config.mode === 'local') {
+      return checkLocalHooks(checks);
+    }
+    return checkGlobalHooks(checks);
+  })();
+
+  // Group B: Adapters (needs config.mode + gitDir)
+  const adaptersPromise = checkAdapters(checks, config.mode, gitDirPromise);
+
+  // Group C: Environment checks + CLI tools — fully parallel
+  const envPromise = checkEnv(checks);
+  const cliToolsPromise = diagnoseCliToolsAsync(checks);
+
+  // Group D: TUI + Skills (independent)
+  const tuiPromise = diagnoseTuiRegistration(checks);
+  const skillsPromise = diagnoseInstalledSkills(config, checks);
+
+  // Wait for ALL parallel groups
+  const results = await Promise.allSettled([
+    hooksPromise,
+    adaptersPromise,
+    envPromise,
+    cliToolsPromise,
+    tuiPromise,
+    skillsPromise,
+  ]);
+
+  // Collect issue counts from settled promises
+  for (const result of results) {
+    if (result.status === 'fulfilled' && typeof result.value === 'number') {
+      issues += result.value;
+    }
   }
 
-  // --- Check 5: Adapters directory ---
-  issues += checkAdapters(checks, config.mode, getGitDir());
-
-  // --- Check 6: Environment dependencies ---
-  checkEnv(checks);
-
-  // --- Check 7: CLI tools for quality gates (Issue #261) ---
-  issues += diagnoseCliTools(checks);
-
-  // --- Check 8: TUI auto-registration ---
-  issues += diagnoseTuiRegistration(checks);
-
-  // --- Check 9: Installed skills version consistency (#332) ---
-  issues += diagnoseInstalledSkills(config, checks);
-
   return { checks, issues };
+}
+
+/**
+ * Async CLI tools check — runs each tool detection with a 3-second timeout
+ * using async exec. Tools are checked IN PARALLEL via Promise.allSettled.
+ * This mirrors checkCliTool logic but uses async exec for parallelization.
+ *
+ * @param {Array} checks
+ * @returns {Promise<number>} issue count
+ */
+async function diagnoseCliToolsAsync(checks) {
+  let issues = 0;
+  const platform = process.platform;
+  const isWindows = platform === 'win32';
+
+  // Build parallel checks for each tool
+  const toolChecks = GATE_CLI_TOOLS.map(async (entry) => {
+    const toolName = entry.tool;
+    const result = await detectCliToolAsync(toolName, isWindows);
+    return { entry, toolName, result };
+  });
+
+  // Run ALL tool checks in parallel
+  const results = await Promise.allSettled(toolChecks);
+
+  // Collect results (maintain original order)
+  for (const settled of results) {
+    if (settled.status === 'rejected') continue;
+    const { entry, result } = settled.value;
+    const gateLabels = entry.gates.join(', ');
+
+    if (result.available) {
+      checks.push({
+        name: `CLI tool: ${entry.tool} (${gateLabels})`,
+        status: 'PASS',
+        detail: result.version || 'available',
+      });
+    } else {
+      const installCmd = getToolInstallCmd(entry, platform);
+      checks.push({
+        name: `CLI tool: ${entry.tool} (${gateLabels})`,
+        status: 'WARN',
+        detail: `Not found — install with: ${installCmd}`,
+      });
+      issues++;
+    }
+  }
+
+  return issues;
+}
+
+/**
+ * Async CLI tool detection — mirrors checkCliTool but uses async exec
+ * with a hard 3-second timeout per subprocess call.
+ *
+ * @param {string} toolName
+ * @param {boolean} isWindows
+ * @returns {Promise<{available: boolean, version?: string, path?: string}>}
+ */
+async function detectCliToolAsync(toolName, isWindows) {
+  const shell = isWindows ? 'cmd.exe' : '/bin/sh';
+  const execOpts = { encoding: 'utf8', stdio: ['pipe', 'pipe', 'pipe'], shell, timeout: EXEC_TIMEOUT_MS };
+
+  // Step 1: Locate tool via which/where (async, 3s timeout)
+  const locator = isWindows ? 'where' : 'which';
+  const locatorResult = await execWithTimeout(`${locator} ${toolName}`, execOpts);
+  if (locatorResult && locatorResult.stdout) {
+    const resolvedPath = locatorResult.stdout.split('\n')[0].trim();
+    if (resolvedPath) {
+      const version = await getVersionAsync(resolvedPath, isWindows);
+      return { available: true, path: resolvedPath, version };
+    }
+  }
+
+  // Step 2: Direct exec fallback (async, 3s timeout)
+  const fallbackCmd = isWindows
+    ? `${toolName} --version`
+    : `${toolName} --version 2>/dev/null || ${toolName} -v 2>/dev/null`;
+  const fallbackResult = await execWithTimeout(fallbackCmd, execOpts);
+  if (fallbackResult && fallbackResult.stdout) {
+    return { available: true, path: toolName, version: fallbackResult.stdout.split('\n')[0] };
+  }
+
+  // Step 3: Check local fallback paths (sync fs, no exec)
+  const localPaths = getLocalFallbackPathsSync(toolName, isWindows);
+  for (const localPath of localPaths) {
+    if (!fs.existsSync(localPath)) continue;
+    const version = await getVersionAsync(localPath, isWindows);
+    if (version) {
+      return { available: true, path: localPath, version };
+    }
+  }
+
+  return { available: false };
+}
+
+/**
+ * Get version string from a tool path using async exec with 3s timeout.
+ */
+async function getVersionAsync(execPath, isWindows) {
+  const fallbackCmd = isWindows
+    ? `"${execPath}" --version`
+    : `"${execPath}" --version 2>/dev/null || "${execPath}" -v 2>/dev/null`;
+  const result = await execWithTimeout(fallbackCmd);
+  return result && result.stdout ? result.stdout.split('\n')[0] : undefined;
+}
+
+/**
+ * Get local fallback paths for CLI tool (sync, no exec).
+ * Mirrors getLocalFallbackPaths from detect-deps.js.
+ */
+function getLocalFallbackPathsSync(toolName, isWindows) {
+  const os = require('os');
+  const home = os.homedir();
+  const paths = [path.join(home, '.local', 'bin', toolName)];
+
+  if (isWindows) {
+    const appData = process.env.APPDATA || path.join(home, 'AppData', 'Roaming');
+    const localAppData = process.env.LOCALAPPDATA || path.join(home, 'AppData', 'Local');
+    paths.push(
+      path.join(appData, 'npm', `${toolName}.cmd`),
+      path.join(home, '.local', 'bin', `${toolName}.exe`),
+    );
+    const pythonBase = path.join(localAppData, 'Programs', 'Python');
+    if (fs.existsSync(pythonBase)) {
+      try {
+        for (const entry of fs.readdirSync(pythonBase)) {
+          if (entry.startsWith('Python')) {
+            paths.push(path.join(pythonBase, entry, 'Scripts', `${toolName}.exe`));
+          }
+        }
+      } catch { /* skip */ }
+    }
+  }
+
+  return paths;
 }
 
 /**
@@ -426,7 +652,8 @@ function fixMissingHooks(mode, srcDir, hooksDir) {
 function fixCoreHooksPath(globalHooksDir) {
   try {
     execSync(`git config --global core.hooksPath "${globalHooksDir}"`, {
-      stdio: ['pipe', 'pipe', 'pipe']
+      stdio: ['pipe', 'pipe', 'pipe'],
+      timeout: EXEC_TIMEOUT_MS,
     });
     console.log(`  ✓ Set core.hooksPath to ${globalHooksDir}`);
     return true;
@@ -500,7 +727,7 @@ function fixConfigMismatches(config) {
 function fixHooksByMode(config, srcDir) {
   let fixed = false;
   if (config.mode === 'local') {
-    const gitDir = getGitDir();
+    const gitDir = getGitDirSync();
     if (gitDir) {
       const hooksDir = path.join(gitDir, 'hooks');
       fixed = fixMissingHooks('local', srcDir, hooksDir) || fixed;
@@ -513,7 +740,7 @@ function fixHooksByMode(config, srcDir) {
 
 function fixGlobalHooksPath(config) {
   if (config.mode !== 'global') return false;
-  const hooksPath = getCurrentHooksPath();
+  const hooksPath = getCurrentHooksPathSync();
   if (hooksPath !== GLOBAL_HOOKS_DIR) {
     return fixCoreHooksPath(GLOBAL_HOOKS_DIR);
   }
@@ -522,7 +749,7 @@ function fixGlobalHooksPath(config) {
 
 function getAdaptersDirByMode(config) {
   return config.mode === 'local'
-    ? path.join(path.dirname(getGitDir() || ''), 'githooks', 'adapters')
+    ? path.join(path.dirname(getGitDirSync() || ''), 'githooks', 'adapters')
     : GLOBAL_ADAPTERS_DIR;
 }
 
@@ -842,7 +1069,7 @@ async function doctor(args) {
     fixIssues(null, config);
   }
 
-  const { checks, issues: diagnosedIssues } = diagnose();
+  const { checks, issues: diagnosedIssues } = await diagnoseAsync();
   let issues = diagnosedIssues;
 
   printReport(checks);
@@ -860,7 +1087,7 @@ async function doctor(args) {
   // Re-run diagnosis after fix to report updated status
   if (fixMode && isActiveMode(config)) {
     console.log('\nRe-running diagnosis after fix...');
-    const { checks: postChecks } = diagnose();
+    const { checks: postChecks } = await diagnoseAsync();
     printReport(postChecks);
   }
 

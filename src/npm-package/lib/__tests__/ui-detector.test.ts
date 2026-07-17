@@ -378,6 +378,7 @@ describe('ui-detector', () => {
         cwd: cwd ?? process.cwd(),
         encoding: 'utf-8',
         input: stdin,
+        shell: true, // Required for npx.cmd resolution on Windows
         env: { ...process.env, NODE_V8_COVERAGE: coverageDir },
       });
       return {
