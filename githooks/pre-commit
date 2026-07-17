@@ -343,7 +343,8 @@ fi
 # Multi-language detection (v0.15.0+): detect all languages from changed file
 # extensions, with fallback to manifest-based detection.
 # Result: PROJECT_LANGS (space-separated string), PROJECT_LANG (first language for
-# compatibility), PROJECT_SUBDIRS (per-language subdir override, empty = root).
+# compatibility), PROJECT_SUBDIR (derived from changed file paths in monorepos;
+# v0.15.1+; ARCH-03 fix), PROJECT_SUBDIRS (per-language subdir override, empty = root).
 # ============================================================================
 
 # XP_GATE_LANG env var override — skip all detection, use single language
@@ -458,9 +459,67 @@ else
     fi
   fi
 
+  # ---- Derive PROJECT_SUBDIR from changed file paths (v0.15.1+; ARCH-03 fix) ----
+  # Extension-based detection sets PROJECT_LANGS but leaves PROJECT_SUBDIR empty.
+  # In a monorepo where config files (tsconfig.json, pyproject.toml, ...) live in
+  # subdirectories (e.g. packages/frontend/), we must derive the subdirectory from
+  # the actual changed files so that Gates 1-9 run in the correct context.
+  PROJECT_SUBDIR=""
+  if [ -n "$PROJECT_LANGS" ]; then
+    # Walk up from each changed file to find the nearest project marker.
+    _detect_subdir() {
+      local fdir
+      fdir=$(dirname "$1")
+      while [ "$fdir" != "." ] && [ "$fdir" != "/" ]; do
+        # Skip node_modules, .git, and other non-project directories
+        case "$fdir" in
+          */node_modules/*) fdir="${fdir%/*}" ; continue ;;
+          */.git/*) fdir="${fdir%/*}" ; continue ;;
+        esac
+        if [ -f "$fdir/tsconfig.json" ] || [ -f "$fdir/package.json" ] || \
+           [ -f "$fdir/pyproject.toml" ] || [ -f "$fdir/setup.py" ] || \
+           [ -f "$fdir/go.mod" ] || [ -f "$fdir/pubspec.yaml" ] || \
+           [ -f "$fdir/pom.xml" ] || [ -f "$fdir/build.gradle" ] || \
+           [ -f "$fdir/build.gradle.kts" ] || [ -f "$fdir/CMakeLists.txt" ]; then
+          echo "$fdir"
+          return 0
+        fi
+        case "$fdir" in
+          */*) fdir="${fdir%/*}" ;;
+          *) break ;;
+        esac
+      done
+      return 1
+    }
+    _subdir_set=""
+    while IFS= read -r _changed; do
+      [ -z "$_changed" ] && continue
+      _d=$(_detect_subdir "$_changed" 2>/dev/null) || true
+      if [ -n "$_d" ] && [ "$_d" != "." ]; then
+        case " $_subdir_set " in
+          *" $_d "*) ;; # already seen
+          *) _subdir_set="${_subdir_set} $_d" ;;
+        esac
+      fi
+    done <<CHANGEDFILELIST
+$CHANGED_FILES
+CHANGEDFILELIST
+    _subdir_count=$(echo "$_subdir_set" | awk '{ n=0; for(i=1;i<=NF;i++) n++; print n }')
+    if [ "$_subdir_count" = "1" ]; then
+      PROJECT_SUBDIR=$(echo "$_subdir_set" | awk '{print $1}')
+      echo ""
+      echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+      echo "   📁 MULTILANGUAGE SUBDIR DETECTED FROM CHANGED FILES"
+      echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+      echo ""
+      echo "Language: $PROJECT_LANGS"
+      echo "Location: $PROJECT_SUBDIR/"
+      echo ""
+    fi
+  fi
+
   # ---- Subdirectory fallback (for single-language projects in subdirectories) ----
   # Only used when extension-based detection found nothing
-  PROJECT_SUBDIR=""
   if [ -z "$PROJECT_LANGS" ]; then
     # Search for TypeScript/JavaScript projects
     TSCONFIG_SUB=$(find . -maxdepth 2 -name "tsconfig.json" -not -path "./.git/*" -not -path "./node_modules/*" 2>/dev/null | head -1)
@@ -1908,8 +1967,8 @@ elif has_project_lang "powershell" 2>/dev/null || [ "$PROJECT_LANG" = "powershel
      echo "     ⏭️  SKIPPED - Architecture validation (no tool for PowerShell)"
 
 else
-  # Check if architecture config exists
-  if [ -f "architecture.yaml" ] || [ -f ".architecturerc" ] || [ -f ".archlint.yaml" ]; then
+  # Check if architecture config exists (use $PROJECT_ROOT — hook may have cd'd to a subdir via ARCH-03)
+  if [ -f "$PROJECT_ROOT/architecture.yaml" ] || [ -f "$PROJECT_ROOT/.architecturerc" ] || [ -f "$PROJECT_ROOT/.archlint.yaml" ]; then
     # Different architecture tools per language
     for CURRENT_LANG in $PROJECT_LANGS; do
     case "$CURRENT_LANG" in
@@ -2010,7 +2069,7 @@ else
     done  # end for CURRENT_LANG (architecture)
   else
     # Architecture config is REQUIRED — BLOCK if missing
-    if [ -f ".architecture-skip" ]; then
+    if [ -f "$PROJECT_ROOT/.architecture-skip" ]; then
       echo "     ⚠️  Architecture config missing but .architecture-skip present — allowed to skip"
       echo "     ⏭️  SKIPPED - Architecture validation (.architecture-skip exemption)"
     else
