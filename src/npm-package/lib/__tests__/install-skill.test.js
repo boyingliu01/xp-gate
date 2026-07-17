@@ -178,8 +178,9 @@ describe('install-skill', () => {
     expect(fs.existsSync(configFile)).toBe(true);
     const config = JSON.parse(fs.readFileSync(configFile, 'utf8'));
     expect(config.installedSkills).toHaveProperty('delphi-review');
-    // Version should be actual CLI version (0.14.11.0), not hardcoded '1.0.0'
-    expect(config.installedSkills['delphi-review'].version).toBe('0.14.11.0');
+    // Read version dynamically from VERSION file — no hardcoded version to break on bump
+    const expectedVersion = fs.readFileSync(path.join(__dirname, '..', '..', '..', '..', 'VERSION'), 'utf8').trim();
+    expect(config.installedSkills['delphi-review'].version).toBe(expectedVersion);
     expect(config.installedSkills['delphi-review'].installedAt).toMatch(/^\d{4}-/);
   });
 

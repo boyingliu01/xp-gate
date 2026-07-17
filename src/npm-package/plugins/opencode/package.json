@@ -1,6 +1,6 @@
 {
   "name": "@boyingliu01/opencode-plugin",
-  "version": "0.14.11",
+  "version": "0.14.12",
   "type": "module",
   "main": "index.ts",
   "description": "XP-Gate quality gates + AI workflow skills + Sprint Flow TUI sidebar for OpenCode",

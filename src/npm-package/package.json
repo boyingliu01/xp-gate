@@ -38,7 +38,7 @@
     "node": ">=18.0.0"
   },
   "scripts": {
-    "version": "node scripts/sync-package-content.js && git add -A skills/ plugins/ 2>/dev/null || true",
+    "version": "0.14.12",
     "prepack": "node scripts/sync-package-content.js",
     "test": "echo \"Run tests\" && exit 0"
   },
