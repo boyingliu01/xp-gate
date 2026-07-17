@@ -2,6 +2,23 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.14.12.0] - 2026-07-17
+
+### Fixed
+- **#354**: gate-8.sh typo (GIBLEAKS_CMD → GITLEAKS_CMD) - 修复 secret scanning fallback 路径失效
+- **#349**: install-skill --force 不清理目标目录 - backup 后显式 rmSync 防止 stale references 残留
+- **#347**: update-skill --all 解析错误 - CLI dispatcher 在 extractPositionalArg 之前检测 --all flag
+- **#348**: doctor 性能优化 (43s → 2-3.5s) - 并行化所有检查项 + 所有 execSync 调用添加 3 秒超时
+- **#341**: ARCH-03 PROJECT_SUBDIR 在多语言 monorepo 中丢失 - 从已修改文件路径派生 PROJECT_SUBDIR，向上遍历查找项目标记
+- **#342**: sync-package-content test 改进 - 从 Node native test runner 迁移到 Jest，消除同义反复测试
+
+### Enhanced
+- **#333**: xp-gate check CLI 从覆盖 2/11 gates 扩展到覆盖所有 11 道 gates + alias 映射 (version/lint/dup/complexity/principles/tests/arch/iac/secrets/sast/build/sprint)
+
+### Test
+- doctor.test.js 异步 mock 基础设施修复 - 为 CI 失败的 17 个测试添加 util.promisify.custom 支持
+- 跨平台测试兼容性 - update-hooks.test.ts (Windows fs.access), sprint-discovery.test.ts (path.join), ui-detector.test.ts (spawnSync shell:true)
+
 ## [0.14.10.0] - 2026-07-15
 
 ### Added
