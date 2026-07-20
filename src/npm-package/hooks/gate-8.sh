@@ -13,7 +13,7 @@ GITLEAKS_CMD=""
 if command -v gitleaks >/dev/null 2>&1; then
   GITLEAKS_CMD="gitleaks"
 elif [ -f "$HOME/.local/bin/gitleaks" ]; then
-  GIBLEAKS_CMD="$HOME/.local/bin/gitleaks"
+  GITLEAKS_CMD="$HOME/.local/bin/gitleaks"
 fi
 
 if [ -n "$GITLEAKS_CMD" ]; then

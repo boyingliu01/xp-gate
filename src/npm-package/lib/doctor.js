@@ -45,8 +45,17 @@ const SIGNATURES = {
  * Hard timeout for all execSync calls in doctor diagnostics.
  * Prevents hanging subprocesses (e.g., missing CLI tools on Windows)
  * from blocking the entire doctor run.
+ * Reduced from 3000ms to 1500ms — Windows cmd.exe spawn is slow;
+ * if a tool can't respond in 1.5s it's effectively unavailable.
  */
-const EXEC_TIMEOUT_MS = 3000;
+const EXEC_TIMEOUT_MS = 1500;
+
+/**
+ * Global timeout for the entire diagnosis flow.
+ * Prevents doctor from running longer than this even if individual
+ * checks haven't completed (e.g., network timeouts stacking up).
+ */
+const GLOBAL_DIAGNOSIS_TIMEOUT_MS = 10000;
 
 /**
  * Execute a command with a hard timeout using async exec.
@@ -1069,12 +1078,27 @@ async function doctor(args) {
     fixIssues(null, config);
   }
 
-  const { checks, issues: diagnosedIssues } = await diagnoseAsync();
+  // Global timeout wrapper — ensures doctor completes within GLOBAL_DIAGNOSIS_TIMEOUT_MS
+  // even if network/subprocess checks stack up (fix #348: 43s on Windows).
+  const diagnosisPromise = diagnoseAsync();
+  const timeoutPromise = new Promise((resolve) => {
+    setTimeout(() => resolve({ checks: [{ name: 'Diagnosis', status: 'WARN', detail: `Timed out after ${GLOBAL_DIAGNOSIS_TIMEOUT_MS / 1000}s — some checks incomplete` }], issues: 0, timedOut: true }), GLOBAL_DIAGNOSIS_TIMEOUT_MS);
+  });
+  const { checks, issues: diagnosedIssues } = await Promise.race([
+    diagnosisPromise.then(r => ({ ...r, timedOut: false })),
+    timeoutPromise,
+  ]);
   let issues = diagnosedIssues;
 
   printReport(checks);
 
-  await diagnoseUpgrade();
+  // Upgrade check with its own short timeout (3s) — non-blocking
+  try {
+    const upgradePromise = diagnoseUpgrade();
+    const upgradeTimeout = new Promise((resolve) => setTimeout(() => resolve(), 3000));
+    await Promise.race([upgradePromise, upgradeTimeout]);
+  } catch { /* non-blocking */ }
+
   issues += diagnoseOpenCodePlugin(checks);
 
   if (issues === 0) {
@@ -1087,7 +1111,11 @@ async function doctor(args) {
   // Re-run diagnosis after fix to report updated status
   if (fixMode && isActiveMode(config)) {
     console.log('\nRe-running diagnosis after fix...');
-    const { checks: postChecks } = await diagnoseAsync();
+    const postDiagPromise = diagnoseAsync();
+    const postTimeout = new Promise((resolve) => {
+      setTimeout(() => resolve({ checks: [{ name: 'Post-fix diagnosis', status: 'WARN', detail: 'Timed out' }] }), GLOBAL_DIAGNOSIS_TIMEOUT_MS);
+    });
+    const { checks: postChecks } = await Promise.race([postDiagPromise, postTimeout]);
     printReport(postChecks);
   }
 

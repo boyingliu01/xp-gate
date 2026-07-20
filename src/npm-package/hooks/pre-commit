@@ -339,239 +339,333 @@ if [ -z "$CHANGED_FILES" ]; then
   exit 0
 fi
 
-# Determine project language stack
-PROJECT_LANG=""
-if [ -f "package.json" ]; then
-  # Check if it's a React Native project
-  HAS_RN=$(grep -q "react-native" package.json 2>/dev/null && echo "yes" || echo "no")
-  HAS_IOS=$([ -d "ios" ] && echo "yes" || echo "no")
-  HAS_ANDROID=$([ -d "android" ] && echo "yes" || echo "no")
-  if [ "$HAS_RN" = "yes" ] || { [ "$HAS_IOS" = "yes" ] && [ "$HAS_ANDROID" = "yes" ]; }; then
-    PROJECT_LANG="react-native"
-  else
-    PROJECT_LANG="typescript"
-  fi
-elif [ -f "pyproject.toml" ] || [ -f "setup.py" ] || [ -f "requirements.txt" ]; then
-  PROJECT_LANG="python"
-elif [ -f "go.mod" ]; then
-  PROJECT_LANG="go"
-elif [ -f "pubspec.yaml" ]; then
-  # Check if it's a Flutter project
-  if grep -q "flutter:" pubspec.yaml 2>/dev/null || [ -f ".metadata" ]; then
-    PROJECT_LANG="flutter"
-  else
-    PROJECT_LANG="dart"
-  fi
-elif [ -n "$(find . -name '*.ps1' -not -path './.git/*' -maxdepth 2 | head -1)" ]; then
-  PROJECT_LANG="powershell"
-elif [ -f "CMakeLists.txt" ] || [ -f "Makefile" ]; then
-  CPP_FILES=$(find . -maxdepth 2 \( -name "*.cpp" -o -name "*.cxx" -o -name "*.cc" \) -not -path "./.git/*" 2>/dev/null | head -1)
-  OBJC_FILES=$(find . -maxdepth 2 \( -name "*.m" -o -name "*.mm" \) -not -path "./.git/*" 2>/dev/null | head -1)
-  if [ -n "$CPP_FILES" ]; then
-    PROJECT_LANG="cpp"
-  elif [ -n "$OBJC_FILES" ]; then
-    PROJECT_LANG="objectivec"
-  fi
-elif [ -f "*.xcodeproj" ] || [ -d "*.xcworkspace" ]; then
-  # Xcode project - Objective-C or Swift
-  OBJC_FILES=$(find . -maxdepth 2 \( -name "*.m" -o -name "*.mm" \) -not -path "./.git/*" 2>/dev/null | head -1)
-  if [ -n "$OBJC_FILES" ]; then
-    PROJECT_LANG="objectivec"
-  fi
-elif [ -f "pom.xml" ] || [ -f "build.gradle" ] || [ -f "build.gradle.kts" ]; then
-  # Check if it's Kotlin or Java
-  KOTLIN_FILES=$(find . -name "*.kt" -not -path "./.git/*" 2>/dev/null | wc -l)
-  if [ "$KOTLIN_FILES" -gt 0 ]; then
-    PROJECT_LANG="kotlin"
-  else
-    PROJECT_LANG="java"
-  fi
-elif [ -n "$(find . -maxdepth 2 -name "*.ps1" -not -path "./.git/*" 2>/dev/null | head -1)" ] || [ -f "*.ps1" ]; then
-  PROJECT_LANG="powershell"
-fi
+# ============================================================================
+# Multi-language detection (v0.15.0+): detect all languages from changed file
+# extensions, with fallback to manifest-based detection.
+# Result: PROJECT_LANGS (space-separated string), PROJECT_LANG (first language for
+# compatibility), PROJECT_SUBDIR (derived from changed file paths in monorepos;
+# v0.15.1+; ARCH-03 fix), PROJECT_SUBDIRS (per-language subdir override, empty = root).
+# ============================================================================
 
-# If not found at root, search subdirectories (max depth 2) for project manifests
-# This supports mixed/hybrid project structures like:
-#   root: Documentation + scripts
-#   subdirectory: Flutter/TypeScript/Python/Go project
-# v0.15.1+ (ARCH-03 fix): Also derive PROJECT_SUBDIR from changed file paths
-# when root-level config exists but actual project is in a subdirectory.
-PROJECT_SUBDIR=""
-if [ -z "$PROJECT_LANG" ]; then
-  # Search for TypeScript/JavaScript projects (excluding React Native)
-  TSCONFIG_SUB=$(find . -maxdepth 2 -name "tsconfig.json" -not -path "./.git/*" -not -path "./node_modules/*" 2>/dev/null | head -1)
-  if [ -n "$TSCONFIG_SUB" ]; then
-    PROJECT_SUBDIR=$(dirname "$TSCONFIG_SUB")
-    # Check if it's React Native
-    if [ -f "$PROJECT_SUBDIR/package.json" ] && grep -q "react-native" "$PROJECT_SUBDIR/package.json" 2>/dev/null; then
-      PROJECT_LANG="react-native"
-    else
-      PROJECT_LANG="typescript"
-    fi
-  fi
+# XP_GATE_LANG env var override — skip all detection, use single language
+if [ -n "${XP_GATE_LANG:-}" ]; then
+  PROJECT_LANGS="$XP_GATE_LANG"
+  PROJECT_LANG="$XP_GATE_LANG"
+  echo ""
+  echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+  echo "   🔧 XP_GATE_LANG OVERRIDE: $PROJECT_LANG"
+  echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+  echo ""
 else
-  # v0.15.1+ (ARCH-03 fix): PROJECT_LANG was set from root config, but in a monorepo
-  # the actual project may be in a subdirectory. Derive PROJECT_SUBDIR from changed files.
-  _detect_subdir_pkg() {
-    local fdir
-    fdir=$(dirname "$1")
-    while [ "$fdir" != "." ] && [ "$fdir" != "/" ]; do
-      case "$fdir" in
-        */node_modules/*) fdir="${fdir%/*}" ; continue ;;
-        */.git/*) fdir="${fdir%/*}" ; continue ;;
-      esac
-      if [ -f "$fdir/tsconfig.json" ] || [ -f "$fdir/package.json" ] || \
-         [ -f "$fdir/pyproject.toml" ] || [ -f "$fdir/setup.py" ] || \
-         [ -f "$fdir/go.mod" ] || [ -f "$fdir/pubspec.yaml" ] || \
-         [ -f "$fdir/pom.xml" ] || [ -f "$fdir/build.gradle" ] || \
-         [ -f "$fdir/build.gradle.kts" ] || [ -f "$fdir/CMakeLists.txt" ]; then
-        echo "$fdir"
+  # ---- Extension → language mapping ----
+  # Extracts unique languages from changed file extensions
+  PROJECT_LANGS=""
+  _detect_ext_lang() {
+    for ext in "$@"; do
+      if echo "$CHANGED_FILES" | grep -qE "\.${ext}$" 2>/dev/null; then
+        echo "1"
         return 0
       fi
-      case "$fdir" in
-        */*) fdir="${fdir%/*}" ;;
-        *) break ;;
-      esac
     done
+    echo "0"
     return 1
   }
-  _subdir_set=""
-  while IFS= read -r _changed; do
-    [ -z "$_changed" ] && continue
-    _d=$(_detect_subdir_pkg "$_changed" 2>/dev/null) || true
-    if [ -n "$_d" ] && [ "$_d" != "." ]; then
-      case " $_subdir_set " in
-        *" $_d "*) ;;
-        *) _subdir_set="${_subdir_set} $_d" ;;
-      esac
+
+  # Check changed files for each language by extension
+  if [ "$(_detect_ext_lang "ts" "tsx" "js" "jsx" "mjs")" = "1" ]; then
+    PROJECT_LANGS="$PROJECT_LANGS typescript"
+  fi
+  if [ "$(_detect_ext_lang "py")" = "1" ]; then
+    PROJECT_LANGS="$PROJECT_LANGS python"
+  fi
+  if [ "$(_detect_ext_lang "go")" = "1" ]; then
+    PROJECT_LANGS="$PROJECT_LANGS go"
+  fi
+  if [ "$(_detect_ext_lang "java")" = "1" ]; then
+    PROJECT_LANGS="$PROJECT_LANGS java"
+  fi
+  if [ "$(_detect_ext_lang "kt" "kts")" = "1" ]; then
+    PROJECT_LANGS="$PROJECT_LANGS kotlin"
+  fi
+  if [ "$(_detect_ext_lang "dart")" = "1" ]; then
+    # Check for Flutter: if pubspec.yaml exists and contains flutter
+    if [ -f "pubspec.yaml" ] && grep -q "flutter:" pubspec.yaml 2>/dev/null; then
+      PROJECT_LANGS="$PROJECT_LANGS flutter"
+    else
+      PROJECT_LANGS="$PROJECT_LANGS dart"
     fi
-  done <<CHANGEDFILELIST
+  fi
+  if [ "$(_detect_ext_lang "swift")" = "1" ]; then
+    PROJECT_LANGS="$PROJECT_LANGS swift"
+  fi
+  if [ "$(_detect_ext_lang "m" "mm")" = "1" ]; then
+    PROJECT_LANGS="$PROJECT_LANGS objectivec"
+  fi
+  if [ "$(_detect_ext_lang "cpp" "cxx" "cc" "c" "hpp" "h")" = "1" ]; then
+    PROJECT_LANGS="$PROJECT_LANGS cpp"
+  fi
+  if [ "$(_detect_ext_lang "sh")" = "1" ]; then
+    PROJECT_LANGS="$PROJECT_LANGS shell"
+  fi
+  if [ "$(_detect_ext_lang "ps1" "psm1")" = "1" ]; then
+    PROJECT_LANGS="$PROJECT_LANGS powershell"
+  fi
+  # IaC: .tf, .tfvars, Dockerfile, docker-compose*, .yaml/.yml in kube context
+  if echo "$CHANGED_FILES" | grep -qE '(\.tf$|\.tfvars$|Dockerfile|docker-compose)' 2>/dev/null; then
+    PROJECT_LANGS="$PROJECT_LANGS iac"
+  fi
+
+  # Trim leading space
+  PROJECT_LANGS="${PROJECT_LANGS# }"
+
+  # ---- Fallback: manifest-based detection when no extension matches ----
+  if [ -z "$PROJECT_LANGS" ]; then
+    if [ -f "package.json" ]; then
+      HAS_RN=$(grep -q "react-native" package.json 2>/dev/null && echo "yes" || echo "no")
+      HAS_IOS=$([ -d "ios" ] && echo "yes" || echo "no")
+      HAS_ANDROID=$([ -d "android" ] && echo "yes" || echo "no")
+      if [ "$HAS_RN" = "yes" ] || { [ "$HAS_IOS" = "yes" ] && [ "$HAS_ANDROID" = "yes" ]; }; then
+        PROJECT_LANGS="react-native"
+      else
+        PROJECT_LANGS="typescript"
+      fi
+    elif [ -f "pyproject.toml" ] || [ -f "setup.py" ] || [ -f "requirements.txt" ]; then
+      PROJECT_LANGS="python"
+    elif [ -f "go.mod" ]; then
+      PROJECT_LANGS="go"
+    elif [ -f "pubspec.yaml" ]; then
+      if grep -q "flutter:" pubspec.yaml 2>/dev/null || [ -f ".metadata" ]; then
+        PROJECT_LANGS="flutter"
+      else
+        PROJECT_LANGS="dart"
+      fi
+    elif [ -f "pom.xml" ] || [ -f "build.gradle" ] || [ -f "build.gradle.kts" ]; then
+      KOTLIN_FILES=$(find . -name "*.kt" -not -path "./.git/*" 2>/dev/null | wc -l)
+      if [ "$KOTLIN_FILES" -gt 0 ]; then
+        PROJECT_LANGS="kotlin"
+      else
+        PROJECT_LANGS="java"
+      fi
+    elif [ -f "CMakeLists.txt" ] || [ -f "Makefile" ]; then
+      CPP_FILES=$(find . -maxdepth 2 \( -name "*.cpp" -o -name "*.cxx" -o -name "*.cc" \) -not -path "./.git/*" 2>/dev/null | head -1)
+      OBJC_FILES=$(find . -maxdepth 2 \( -name "*.m" -o -name "*.mm" \) -not -path "./.git/*" 2>/dev/null | head -1)
+      if [ -n "$CPP_FILES" ]; then
+        PROJECT_LANGS="cpp"
+      elif [ -n "$OBJC_FILES" ]; then
+        PROJECT_LANGS="objectivec"
+      fi
+    elif [ -n "$(find . -maxdepth 2 -name "*.ps1" -not -path "./.git/*" 2>/dev/null | head -1)" ]; then
+      PROJECT_LANGS="powershell"
+    fi
+  fi
+
+  # ---- Derive PROJECT_SUBDIR from changed file paths (v0.15.1+; ARCH-03 fix) ----
+  # Extension-based detection sets PROJECT_LANGS but leaves PROJECT_SUBDIR empty.
+  # In a monorepo where config files (tsconfig.json, pyproject.toml, ...) live in
+  # subdirectories (e.g. packages/frontend/), we must derive the subdirectory from
+  # the actual changed files so that Gates 1-9 run in the correct context.
+  PROJECT_SUBDIR=""
+  if [ -n "$PROJECT_LANGS" ]; then
+    # Walk up from each changed file to find the nearest project marker.
+    _detect_subdir() {
+      local fdir
+      fdir=$(dirname "$1")
+      while [ "$fdir" != "." ] && [ "$fdir" != "/" ]; do
+        # Skip node_modules, .git, and other non-project directories
+        case "$fdir" in
+          */node_modules/*) fdir="${fdir%/*}" ; continue ;;
+          */.git/*) fdir="${fdir%/*}" ; continue ;;
+        esac
+        if [ -f "$fdir/tsconfig.json" ] || [ -f "$fdir/package.json" ] || \
+           [ -f "$fdir/pyproject.toml" ] || [ -f "$fdir/setup.py" ] || \
+           [ -f "$fdir/go.mod" ] || [ -f "$fdir/pubspec.yaml" ] || \
+           [ -f "$fdir/pom.xml" ] || [ -f "$fdir/build.gradle" ] || \
+           [ -f "$fdir/build.gradle.kts" ] || [ -f "$fdir/CMakeLists.txt" ]; then
+          echo "$fdir"
+          return 0
+        fi
+        case "$fdir" in
+          */*) fdir="${fdir%/*}" ;;
+          *) break ;;
+        esac
+      done
+      return 1
+    }
+    _subdir_set=""
+    while IFS= read -r _changed; do
+      [ -z "$_changed" ] && continue
+      _d=$(_detect_subdir "$_changed" 2>/dev/null) || true
+      if [ -n "$_d" ] && [ "$_d" != "." ]; then
+        case " $_subdir_set " in
+          *" $_d "*) ;; # already seen
+          *) _subdir_set="${_subdir_set} $_d" ;;
+        esac
+      fi
+    done <<CHANGEDFILELIST
 $CHANGED_FILES
 CHANGEDFILELIST
-  _subdir_count=$(echo "$_subdir_set" | awk '{ n=0; for(i=1;i<=NF;i++) n++; print n }')
-  if [ "$_subdir_count" = "1" ]; then
-    PROJECT_SUBDIR=$(echo "$_subdir_set" | awk '{print $1}')
+    _subdir_count=$(echo "$_subdir_set" | awk '{ n=0; for(i=1;i<=NF;i++) n++; print n }')
+    if [ "$_subdir_count" = "1" ]; then
+      PROJECT_SUBDIR=$(echo "$_subdir_set" | awk '{print $1}')
+      echo ""
+      echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+      echo "   📁 MULTILANGUAGE SUBDIR DETECTED FROM CHANGED FILES"
+      echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+      echo ""
+      echo "Language: $PROJECT_LANGS"
+      echo "Location: $PROJECT_SUBDIR/"
+      echo ""
+    fi
+  fi
+
+  # ---- Subdirectory fallback (for single-language projects in subdirectories) ----
+  # Only used when extension-based detection found nothing
+  if [ -z "$PROJECT_LANGS" ]; then
+    # Search for TypeScript/JavaScript projects
+    TSCONFIG_SUB=$(find . -maxdepth 2 -name "tsconfig.json" -not -path "./.git/*" -not -path "./node_modules/*" 2>/dev/null | head -1)
+    if [ -n "$TSCONFIG_SUB" ]; then
+      PROJECT_SUBDIR=$(dirname "$TSCONFIG_SUB")
+      if [ -f "$PROJECT_SUBDIR/package.json" ] && grep -q "react-native" "$PROJECT_SUBDIR/package.json" 2>/dev/null; then
+        PROJECT_LANGS="react-native"
+      else
+        PROJECT_LANGS="typescript"
+      fi
+    fi
+
+    # Search for Python projects
+    if [ -z "$PROJECT_LANGS" ]; then
+      PYPROJECT_SUB=$(find . -maxdepth 2 -name "pyproject.toml" -not -path "./.git/*" 2>/dev/null | head -1)
+      if [ -n "$PYPROJECT_SUB" ]; then
+        PROJECT_LANGS="python"
+        PROJECT_SUBDIR=$(dirname "$PYPROJECT_SUB")
+      fi
+    fi
+
+    # Search for Go projects
+    if [ -z "$PROJECT_LANGS" ]; then
+      GOMOD_SUB=$(find . -maxdepth 2 -name "go.mod" -not -path "./.git/*" 2>/dev/null | head -1)
+      if [ -n "$GOMOD_SUB" ]; then
+        PROJECT_LANGS="go"
+        PROJECT_SUBDIR=$(dirname "$GOMOD_SUB")
+      fi
+    fi
+
+    # Search for Flutter/Dart projects
+    if [ -z "$PROJECT_LANGS" ]; then
+      PUBSPEC_SUB=$(find . -maxdepth 2 -name "pubspec.yaml" -not -path "./.git/*" 2>/dev/null | head -1)
+      if [ -n "$PUBSPEC_SUB" ]; then
+        if grep -q "flutter:" "$PUBSPEC_SUB" 2>/dev/null || [ -f "$(dirname "$PUBSPEC_SUB")/.metadata" ]; then
+          PROJECT_LANGS="flutter"
+        else
+          PROJECT_LANGS="dart"
+        fi
+        PROJECT_SUBDIR=$(dirname "$PUBSPEC_SUB")
+      fi
+    fi
+
+    # Search for Java/Kotlin projects
+    if [ -z "$PROJECT_LANGS" ]; then
+      POM_SUB=$(find . -maxdepth 2 -name "pom.xml" -not -path "./.git/*" 2>/dev/null | head -1)
+      GRADLE_SUB=$(find . -maxdepth 2 -name "build.gradle" -not -path "./.git/*" 2>/dev/null | head -1)
+      if [ -n "$POM_SUB" ] || [ -n "$GRADLE_SUB" ]; then
+        MANIFEST_FILE="${POM_SUB:-$GRADLE_SUB}"
+        PROJECT_SUBDIR=$(dirname "$MANIFEST_FILE")
+        KOTLIN_COUNT=$(find "$PROJECT_SUBDIR" -name "*.kt" -not -path "*/.git/*" 2>/dev/null | wc -l)
+        if [ "$KOTLIN_COUNT" -gt 0 ]; then
+          PROJECT_LANGS="kotlin"
+        else
+          PROJECT_LANGS="java"
+        fi
+      fi
+    fi
+
+    # Search for C++ projects
+    if [ -z "$PROJECT_LANGS" ]; then
+      CMAKE_SUB=$(find . -maxdepth 2 -name "CMakeLists.txt" -not -path "./.git/*" 2>/dev/null | head -1)
+      if [ -n "$CMAKE_SUB" ]; then
+        PROJECT_LANGS="cpp"
+        PROJECT_SUBDIR=$(dirname "$CMAKE_SUB")
+      fi
+    fi
+
+    # Search for React Native projects (ios/ + android/ directories)
+    if [ -z "$PROJECT_LANGS" ]; then
+      RN_SUB=$(find . -maxdepth 2 -type d -name "ios" -not -path "./.git/*" 2>/dev/null | head -1)
+      if [ -n "$RN_SUB" ]; then
+        PROJECT_SUBDIR=$(dirname "$RN_SUB")
+        if [ -d "$PROJECT_SUBDIR/android" ] || [ -f "$PROJECT_SUBDIR/package.json" ]; then
+          PROJECT_LANGS="react-native"
+        fi
+      fi
+    fi
+
+    # Search for PowerShell projects
+    if [ -z "$PROJECT_LANGS" ]; then
+      PS_SUB=$(find . -maxdepth 2 -name "*.ps1" -not -path "./.git/*" 2>/dev/null | head -1)
+      if [ -n "$PS_SUB" ]; then
+        PROJECT_LANGS="powershell"
+        PROJECT_SUBDIR=$(dirname "$PS_SUB")
+      fi
+    fi
+
+    # Report detected subdirectory project
+    if [ -n "$PROJECT_SUBDIR" ] && [ -n "$PROJECT_LANGS" ]; then
+      echo ""
+      echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+      echo "   📁 SUBDIRECTORY PROJECT DETECTED"
+      echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+      echo ""
+      echo "Language: $PROJECT_LANGS"
+      echo "Location: $PROJECT_SUBDIR/"
+      echo ""
+    fi
+  fi
+
+  # Set PROJECT_LANG for backward compatibility (first language in list)
+  PROJECT_LANG=$(echo "$PROJECT_LANGS" | awk '{print $1}')
+
+  # ---- Documentation-only fallback ----
+  if [ -z "$PROJECT_LANGS" ]; then
+    CODE_FILES=$(find . -type f \( -name "*.py" -o -name "*.js" -o -name "*.ts" -o -name "*.tsx" -o -name "*.java" -o -name "*.go" -o -name "*.rs" -o -name "*.cpp" -o -name "*.c" -o -name "*.swift" -o -name "*.kt" -o -name "*.sh" -o -name "*.dart" -o -name "*.ps1" \) -not -path "./.git/*" 2>/dev/null | wc -l)
+
+    if [ "$CODE_FILES" -eq 0 ]; then
+      PROJECT_LANGS="documentation-only"
+      PROJECT_LANG="documentation-only"
+      echo ""
+      echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+      echo "   📚 DOCUMENTATION-ONLY PROJECT DETECTED"
+      echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+      echo ""
+      echo "This project contains no source code files."
+      echo "Skipping static analysis and test gates."
+      echo ""
+      echo "Proceeding with documentation-only checks..."
+    fi
+  fi
+
+  # ---- Multi-language project banner ----
+  _lang_count=$(echo "$PROJECT_LANGS" | wc -w)
+  if [ "$_lang_count" -gt 1 ]; then
     echo ""
     echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-    echo "   📁 SUBDIR DETECTED FROM CHANGED FILES (ARCH-03 fix)"
+    echo "   🌐 MULTI-LANGUAGE PROJECT DETECTED"
     echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
     echo ""
-    echo "Language: $PROJECT_LANG"
-    echo "Location: $PROJECT_SUBDIR/"
+    echo "Detected $_lang_count languages from changed files:"
+    for _l in $PROJECT_LANGS; do
+      echo "  • $_l"
+    done
     echo ""
   fi
 fi
 
-if [ -z "$PROJECT_LANG" ]; then
-  # Search for Python projects
-  if [ -z "$PROJECT_LANG" ]; then
-    PYPROJECT_SUB=$(find . -maxdepth 2 -name "pyproject.toml" -not -path "./.git/*" 2>/dev/null | head -1)
-    if [ -n "$PYPROJECT_SUB" ]; then
-      PROJECT_LANG="python"
-      PROJECT_SUBDIR=$(dirname "$PYPROJECT_SUB")
-    fi
-  fi
-  
-  # Search for Go projects
-  if [ -z "$PROJECT_LANG" ]; then
-    GOMOD_SUB=$(find . -maxdepth 2 -name "go.mod" -not -path "./.git/*" 2>/dev/null | head -1)
-    if [ -n "$GOMOD_SUB" ]; then
-      PROJECT_LANG="go"
-      PROJECT_SUBDIR=$(dirname "$GOMOD_SUB")
-    fi
-  fi
-  
-  # Search for Flutter/Dart projects
-  if [ -z "$PROJECT_LANG" ]; then
-    PUBSPEC_SUB=$(find . -maxdepth 2 -name "pubspec.yaml" -not -path "./.git/*" 2>/dev/null | head -1)
-    if [ -n "$PUBSPEC_SUB" ]; then
-      if grep -q "flutter:" "$PUBSPEC_SUB" 2>/dev/null || [ -f "$(dirname "$PUBSPEC_SUB")/.metadata" ]; then
-        PROJECT_LANG="flutter"
-      else
-        PROJECT_LANG="dart"
-      fi
-      PROJECT_SUBDIR=$(dirname "$PUBSPEC_SUB")
-    fi
-  fi
-  
-  # Search for Java/Kotlin projects
-  if [ -z "$PROJECT_LANG" ]; then
-    POM_SUB=$(find . -maxdepth 2 -name "pom.xml" -not -path "./.git/*" 2>/dev/null | head -1)
-    GRADLE_SUB=$(find . -maxdepth 2 -name "build.gradle" -not -path "./.git/*" 2>/dev/null | head -1)
-    if [ -n "$POM_SUB" ] || [ -n "$GRADLE_SUB" ]; then
-      MANIFEST_FILE="${POM_SUB:-$GRADLE_SUB}"
-      PROJECT_SUBDIR=$(dirname "$MANIFEST_FILE")
-      # Check for Kotlin files in subdirectory
-      KOTLIN_COUNT=$(find "$PROJECT_SUBDIR" -name "*.kt" -not -path "*/.git/*" 2>/dev/null | wc -l)
-      if [ "$KOTLIN_COUNT" -gt 0 ]; then
-        PROJECT_LANG="kotlin"
-      else
-        PROJECT_LANG="java"
-      fi
-    fi
-  fi
-  
-  # Search for C++ projects
-  if [ -z "$PROJECT_LANG" ]; then
-    CMAKE_SUB=$(find . -maxdepth 2 -name "CMakeLists.txt" -not -path "./.git/*" 2>/dev/null | head -1)
-    if [ -n "$CMAKE_SUB" ]; then
-      PROJECT_LANG="cpp"
-      PROJECT_SUBDIR=$(dirname "$CMAKE_SUB")
-    fi
-  fi
-  
-  # Search for React Native projects (ios/ + android/ directories)
-  if [ -z "$PROJECT_LANG" ]; then
-    RN_SUB=$(find . -maxdepth 2 -type d -name "ios" -not -path "./.git/*" 2>/dev/null | head -1)
-    if [ -n "$RN_SUB" ]; then
-      PROJECT_SUBDIR=$(dirname "$RN_SUB")
-      if [ -d "$PROJECT_SUBDIR/android" ] || [ -f "$PROJECT_SUBDIR/package.json" ]; then
-        PROJECT_LANG="react-native"
-      fi
-    fi
-  fi
-  
-  # Search for PowerShell projects
-  if [ -z "$PROJECT_LANG" ]; then
-    PS_SUB=$(find . -maxdepth 2 -name "*.ps1" -not -path "./.git/*" 2>/dev/null | head -1)
-    if [ -n "$PS_SUB" ]; then
-      PROJECT_LANG="powershell"
-      PROJECT_SUBDIR=$(dirname "$PS_SUB")
-    fi
-  fi
-  
-  # Report detected subdirectory project
-  if [ -n "$PROJECT_SUBDIR" ] && [ -n "$PROJECT_LANG" ]; then
-    echo ""
-    echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-    echo "   📁 SUBDIRECTORY PROJECT DETECTED"
-    echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-    echo ""
-    echo "Language: $PROJECT_LANG"
-    echo "Location: $PROJECT_SUBDIR/"
-    echo ""
-  fi
-fi
-
-# Check if this is a documentation-only project (no source code)
-# Such projects have only markdown, yaml, json, skills, docs - no actual code
-if [ -z "$PROJECT_LANG" ]; then
-  # Count source code files (including shell scripts)
-  CODE_FILES=$(find . -type f \( -name "*.py" -o -name "*.js" -o -name "*.ts" -o -name "*.tsx" -o -name "*.java" -o -name "*.go" -o -name "*.rs" -o -name "*.cpp" -o -name "*.c" -o -name "*.swift" -o -name "*.kt" -o -name "*.sh" -o -name "*.dart" -o -name "*.ps1" \) -not -path "./.git/*" 2>/dev/null | wc -l)
-  
-  if [ "$CODE_FILES" -eq 0 ]; then
-    PROJECT_LANG="documentation-only"
-    echo ""
-    echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-    echo "   📚 DOCUMENTATION-ONLY PROJECT DETECTED"
-    echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-    echo ""
-    echo "This project contains no source code files."
-    echo "Skipping static analysis and test gates."
-    echo ""
-    echo "Proceeding with documentation-only checks..."
-  fi
-fi
+# Helper: check if a language is in PROJECT_LANGS
+has_project_lang() {
+  for lang in $PROJECT_LANGS; do
+    if [ "$lang" = "$1" ]; then return 0; fi
+  done
+  return 1
+}
 
 # ============================================================================
 # Audit helper — records gate execution to .xp-gate/audit.jsonl
@@ -619,10 +713,11 @@ gate_start_ms() {
   date +%s%3N 2>/dev/null || python3 -c "import time;print(int(time.time()*1000))" 2>/dev/null || echo "0"
 }
 
-# Switch to subdirectory if detected (for mixed/hybrid projects)
-# All subsequent gates will run in the subdirectory context
+# Switch to subdirectory if detected (for single-language subdirectory projects).
+# Multi-language projects stay at root — each adapter handles its own path.
 ORIGINAL_DIR=""
-if [ -n "$PROJECT_SUBDIR" ] && [ "$PROJECT_SUBDIR" != "." ] && [ "$PROJECT_LANG" != "documentation-only" ]; then
+_lang_count=$(echo "$PROJECT_LANGS" | wc -w)
+if [ -n "$PROJECT_SUBDIR" ] && [ "$PROJECT_SUBDIR" != "." ] && [ "$PROJECT_LANG" != "documentation-only" ] && [ "$_lang_count" -le 1 ]; then
   ORIGINAL_DIR=$(pwd)
   cd "$PROJECT_SUBDIR"
   echo "Working in: $PROJECT_SUBDIR/"
@@ -632,16 +727,24 @@ fi
 # ============================================================================
 # GATE 1: Code Quality (Static Analysis + Linting + Shell Check combined)
 # Combination of: Old Gates 1 (Static), Gate 2 (Linting), Gate 5 (Shell Check)
+# v0.14.3+ (Issue #312): Skip if no code files changed
 # ============================================================================
  2>&1 echo ""
  2>&1 echo "→ Gate 1: Code Quality (static analysis + linting)..."
+if ! any_changed_files_match "\.(ts|tsx|js|jsx|py|go|java|kt|cpp|c|swift|m|mm|dart|sh)$" "\.ya?ml$" "\.json$" "Dockerfile" "\.tf$"; then
+  echo "✅ PASSED - No code files changed, skipping lint."
+else
 GATE_1_START=$(gate_start_ms)
 
 if [ "$PROJECT_LANG" = "documentation-only" ]; then
   # Documentation-only project - skip static analysis
   echo "⏭️  SKIPPED - Code quality (documentation project)."
   
-  elif [ "$PROJECT_LANG" = "typescript" ]; then
+else
+  for CURRENT_LANG in $PROJECT_LANGS; do
+    echo "   ── Checking $CURRENT_LANG ──"
+    case "$CURRENT_LANG" in
+      typescript)
   # TypeScript: static analysis (tsc) + linting (eslint)
   if ! command -v npx &> /dev/null; then
     echo "ℹ️  npx not available — skipping TypeScript checks"
@@ -798,8 +901,9 @@ if [ "$PROJECT_LANG" = "documentation-only" ]; then
       fi
     fi
   fi
-
-elif [ "$PROJECT_LANG" = "python" ]; then
+    ;;
+    
+    python)
   # Python: Ruff (includes syntax + linting) + mypy (optional typing)
   if ! command -v ruff &> /dev/null; then
     echo "ℹ️  ruff not available — skipping Python linting"
@@ -878,8 +982,9 @@ elif [ "$PROJECT_LANG" = "python" ]; then
       echo "ℹ️  Mypy not available - Skipping optional type check"
     fi
   fi
-
-elif [ "$PROJECT_LANG" = "go" ]; then
+    ;;
+    
+    go)
   # Go: go vet + golangci-lint
   if ! command -v golangci-lint &> /dev/null; then
     echo "ℹ️  golangci-lint not available — skipping Go linting"
@@ -896,8 +1001,9 @@ elif [ "$PROJECT_LANG" = "go" ]; then
     fi
     echo "✅ PASSED - golangci-lint."
   fi
-
-elif [ "$PROJECT_LANG" = "shell" ] || echo "$CHANGED_FILES" | grep -qE '\.sh$'; then
+    ;;
+    
+    shell)
   # Shell: check staged shell files only. Installed hook adapters are infrastructure,
   # not project changes, and should not be linted on unrelated commits.
   SHELL_FILES=$(echo "$CHANGED_FILES" | grep '\.sh$' || true)
@@ -967,39 +1073,44 @@ elif [ "$PROJECT_LANG" = "shell" ] || echo "$CHANGED_FILES" | grep -qE '\.sh$'; 
     done
     echo "✅ PASSED - Basic shell script syntax check."
   fi
-
-else
-  # Route to appropriate adapter for other languages
-  ADAPTER_FILE=$(resolve_adapter_path "$PROJECT_LANG")
-  if [ -n "$ADAPTER_FILE" ] && source "$ADAPTER_FILE" 2>/dev/null; then
-    echo "Running static analysis for $PROJECT_LANG..."
-    run_static_analysis | head -30 2>/dev/null
-    ANALYSIS_EXIT=$?
-    if [ "$ANALYSIS_EXIT" -ne 0 ]; then
-      echo "⚠️  Static analysis had issues (may be non-blocking)"
-    fi
+    ;;
     
-    echo "Running lint check for $PROJECT_LANG..."
-    run_lint | head -30 2>/dev/null
-    LINT_EXIT=$?
-    if [ "$LINT_EXIT" -ne 0 ]; then
-      echo "ℹ️  Lint check had issues (may be non-blocking)"
-    fi
+    *)
+      # Route to appropriate adapter for other languages
+      ADAPTER_FILE=$(resolve_adapter_path "$CURRENT_LANG")
+      if [ -n "$ADAPTER_FILE" ] && source "$ADAPTER_FILE" 2>/dev/null; then
+        echo "Running static analysis for $CURRENT_LANG..."
+        run_static_analysis | head -30 2>/dev/null
+        ANALYSIS_EXIT=$?
+        if [ "$ANALYSIS_EXIT" -ne 0 ]; then
+          echo "⚠️  Static analysis had issues (may be non-blocking)"
+        fi
     
-    if [ "$ANALYSIS_EXIT" -eq 0 ] && [ "$LINT_EXIT" -eq 0 ]; then
-      echo "✅ PASSED - Language-specific code quality checks."
-    else
-      # Tools unavailable or failed — skip non-blockingly
-      echo "⏭️  SKIPPED - Code quality (tools unavailable or failed)"
-    fi
-  else
-    # If no adapter exists for this language, skip
-    echo "ℹ️  No specific adapter for $PROJECT_LANG — using generic checks if any"
-    echo "⏭️  SKIPPED - Code quality (no specific checks for $PROJECT_LANG)"
-  fi
+        echo "Running lint check for $CURRENT_LANG..."
+        run_lint | head -30 2>/dev/null
+        LINT_EXIT=$?
+        if [ "$LINT_EXIT" -ne 0 ]; then
+          echo "ℹ️  Lint check had issues (may be non-blocking)"
+        fi
+    
+        if [ "$ANALYSIS_EXIT" -eq 0 ] && [ "$LINT_EXIT" -eq 0 ]; then
+          echo "✅ PASSED - Language-specific code quality checks."
+        else
+          # Tools unavailable or failed — skip non-blockingly
+          echo "⏭️  SKIPPED - Code quality (tools unavailable or failed)"
+        fi
+      else
+        # If no adapter exists for this language, skip
+        echo "ℹ️  No specific adapter for $CURRENT_LANG — using generic checks if any"
+        echo "⏭️  SKIPPED - Code quality (no specific checks for $CURRENT_LANG)"
+      fi
+      ;;
+    esac
+  done
 fi
+fi  # End: if ! any_changed_files_match (Issue #312 skip)
 GATE_1_STATUS="PASS"
-GATE_1_TOOL="${PROJECT_LANG}"
+GATE_1_TOOL="${PROJECT_LANGS}"
 record_gate_audit "gate-1" "code-quality" "$GATE_1_STATUS" "0" "$GATE_1_START"
 
 # ============================================================================
@@ -1013,7 +1124,11 @@ GATE_2_START=$(gate_start_ms)
 if [ "$PROJECT_LANG" = "documentation-only" ]; then
 echo "⏭️  SKIPPED - Duplicate code (documentation project)."
 
-elif [ "$PROJECT_LANG" = "typescript" ]; then
+else
+  for CURRENT_LANG in $PROJECT_LANGS; do
+    echo "   ── Checking $CURRENT_LANG ──"
+    case "$CURRENT_LANG" in
+      typescript)
   if ! require_tool "jscpd" "Gate 2" "npm install -D jscpd"; then
     exit 1
   fi
@@ -1026,8 +1141,9 @@ elif [ "$PROJECT_LANG" = "typescript" ]; then
     echo "   Consider refactoring duplicate code blocks."
   fi
   echo "✅ PASSED - jscpd duplicate code check completed."
-
-elif [ "$PROJECT_LANG" = "python" ]; then
+    ;;
+    
+    python)
   if command -v pylint &> /dev/null; then
     echo "Running pylint duplicate detection..."
     pylint --disable=all --enable=duplicate-code $(echo "$CHANGED_FILES" | grep "\.py$")
@@ -1041,8 +1157,9 @@ elif [ "$PROJECT_LANG" = "python" ]; then
     echo "ℹ️  pylint not found — skipping Python duplicate code check."
     echo "   Install pylint: pip install pylint"
   fi
-
-elif [ "$PROJECT_LANG" = "go" ]; then
+    ;;
+    
+    go)
   if ! require_tool "jscpd" "Gate 2" "npm install -D jscpd"; then
     exit 1
   fi
@@ -1053,16 +1170,19 @@ elif [ "$PROJECT_LANG" = "go" ]; then
     jscpd $FILES_TO_CHECK 2>&1 | head -10
   fi
   echo "✅ PASSED - Go duplicate code check completed."
-
-elif [ "$PROJECT_LANG" = "powershell" ]; then
+    ;;
+    
+    powershell)
   echo "ℹ️  No PowerShell-native duplicate detector (jscpd does not support .ps1)"
   echo "⏭️  SKIPPED - Duplicate code (no tool for PowerShell)"
-
-elif [ "$PROJECT_LANG" = "shell" ]; then
+    ;;
+    
+    shell)
   echo "ℹ️  Duplicate detection not typically used for shell scripts"
   echo "⏭️  SKIPPED - Duplicate code (no tool for shell scripts)"
-
-else
+    ;;
+    
+    *)
   SOURCE_FILES=$(echo "$CHANGED_FILES" | grep -E '\.(ts|tsx|js|jsx|py|go|java|scala|kt|cpp|c|h|rs|php|dart|swift)$')
   if [ -n "$SOURCE_FILES" ]; then
     if ! require_tool "jscpd" "Gate 2" "npm install -D jscpd"; then
@@ -1074,6 +1194,9 @@ else
   else
     echo "✅ PASSED - No source files detected for duplicate checking."
   fi
+    ;;
+    esac
+  done
 fi
 GATE_2_STATUS="PASS"
 record_gate_audit "gate-2" "duplicate-code" "$GATE_2_STATUS" "0" "$GATE_2_START"
@@ -1093,6 +1216,11 @@ source "$GATE_DIR/gate-4.sh"
 # ============================================================================
 # GATE 5: Tests & Coverage Combined (Combines Old Gates 3 - Tests and 4 - Coverage)
 # Uses adapter system to run tests + coverage for language
+# 
+# v0.14.3+ (Issue #312): Skip test run when no code files changed.
+# Code files = src/**/*.ts, plugins/**/*.ts, *.ts, *.tsx, etc. (language-aware).
+# VERSION, CHANGELOG, docs, config-only changes → SKIP test run entirely.
+# Gate 5a (new file pairing) and Gate 5b (mock density) still run — they're lightweight.
 # ============================================================================
  2>&1 echo ""
  2>&1 echo "→ Gate 5: Tests & coverage..."
@@ -1398,6 +1526,24 @@ else
   fi
 
   # ============================================================================
+  # v0.14.3+ (Issue #312): Early skip when no code files changed.
+  # If the commit only touches VERSION, CHANGELOG, docs, config, .gitignore,
+  # or similar non-code files, skip the test run entirely.
+  # Gate 5a (new file pairing) and 5b (mock density) are cheap and still run.
+  # ============================================================================
+  CODE_EXTENSIONS="\.(ts|tsx|js|jsx|py|go|java|kt|kts|cpp|cc|cxx|c|swift|m|mm|dart|sh|ps1)$"
+  CHANGED_CODE_FILES=$(echo "$CHANGED_FILES" | grep -E "$CODE_EXTENSIONS" || true)
+  if [ -z "$CHANGED_CODE_FILES" ]; then
+    echo "✅ PASSED - No code files changed (only docs/config/VERSION), skipping test run."
+    echo "   Changed files: $(echo "$CHANGED_FILES" | tr '\n' ' ')"
+    TESTS_EXIT_CODE=0
+    TESTS_SKIPPED=true
+    GATE_5_END=$(gate_start_ms)
+    GATE_5_ELAPSED=$((GATE_5_END - GATE_5_START))
+    echo "   ⏱️  Gate 5: ${GATE_5_ELAPSED}ms (skipped — no code changes)"
+  else
+
+  # ============================================================================
   # Smart test selection (Issue #286): only run tests affected by changed files.
   # Reuses CHANGED_TEST_FILES already computed in Gate 5b (line 1244).
   # Full run fallback: >20 changed test files, or vitest not found.
@@ -1405,11 +1551,12 @@ else
   echo "Running tests..."
   
   # Route to appropriate test runner via adapter
-  ADAPTER_FILE=$(resolve_adapter_path "$PROJECT_LANG")
-  if [ "${PROJECT_LANG}" != "unknown" ] && [ -n "$ADAPTER_FILE" ]; then
+  for CURRENT_LANG in $PROJECT_LANGS; do
+    ADAPTER_FILE=$(resolve_adapter_path "$CURRENT_LANG")
+    if [ "${CURRENT_LANG}" != "unknown" ] && [ -n "$ADAPTER_FILE" ]; then
     if source "$ADAPTER_FILE" 2>/dev/null; then
       # TypeScript: vitest with smart test selection
-      if [ "$PROJECT_LANG" = "typescript" ] && [ -f "package.json" ]; then
+      if [ "$CURRENT_LANG" = "typescript" ] && [ -f "package.json" ]; then
         if npx vitest --version >/dev/null 2>&1; then
           # Count changed test files to decide strategy
           CHANGED_TEST_FILE_COUNT=$(echo "$CHANGED_TEST_FILES" | grep -c '.' || echo "0")
@@ -1480,6 +1627,7 @@ else
             done
             if [ -n "$RELATED_TESTS" ]; then
               echo "   Found related test(s): $(echo "$RELATED_TESTS" | tr '\n' ' ')"
+              PARTIAL_TEST_RUN=true  # Mark as partial run for coverage check
               TESTS_OUTPUT=$(npx vitest run --coverage $RELATED_TESTS 2>&1)
               TESTS_EXIT_CODE=$?
               echo "$TESTS_OUTPUT" | head -60
@@ -1530,23 +1678,31 @@ else
           echo ""
           echo "❌ BLOCKED - Tests FAILED"
           exit 1
-        else
-          echo "✅ PASSED - Unit tests passed."
+      else
+        echo "✅ PASSED - Unit tests passed."
         fi
       fi
     else
-      echo "✅ PASSED - Could not source ${PROJECT_LANG} adapter for tests, assuming none to run."
+      echo "✅ PASSED - Could not source ${CURRENT_LANG} adapter for tests, assuming none to run."
     fi
   else
-    echo "✅ PASSED - No ${PROJECT_LANG} adapter found for tests, assuming none to run."
+    echo "✅ PASSED - No ${CURRENT_LANG} adapter found for tests, assuming none to run."
   fi
-  
-  # Next, run coverage check (skip for TypeScript — already done above)
+  done  # end for CURRENT_LANG
+
+  fi  # End: if [ -n "$CHANGED_CODE_FILES" ] (Issue #312 early skip)
+   
+  # Next, run coverage check (skip if tests were skipped — Issue #312)
+  if [ "${TESTS_SKIPPED:-false}" = "true" ]; then
+    echo "ℹ️  Test run was skipped — skipping coverage check."
+  else
   echo "Running coverage check..."
 
-  if [ "${PROJECT_LANG}" != "unknown" ] && [ -n "$ADAPTER_FILE" ]; then
+  for CURRENT_LANG in $PROJECT_LANGS; do
+  ADAPTER_FILE=$(resolve_adapter_path "$CURRENT_LANG")
+  if [ "${CURRENT_LANG}" != "unknown" ] && [ -n "$ADAPTER_FILE" ]; then
     if source "$ADAPTER_FILE" 2>/dev/null; then
-      case "$PROJECT_LANG" in
+      case "$CURRENT_LANG" in
         "typescript")
           # Coverage collected during the test section above.
           # Smart selection (Issue #286): only runs changed/related tests with --coverage,
@@ -1601,14 +1757,15 @@ else
       esac
     else
       # Adapter source failed — warn and let Stage 2 attempt file-based enforcement
-      echo "⚠️  Could not source ${PROJECT_LANG} adapter from ${ADAPTER_FILE}, will check coverage files directly..."
+      echo "⚠️  Could not source ${CURRENT_LANG} adapter from ${ADAPTER_FILE}, will check coverage files directly..."
       COV_EXIT=0
     fi
   else
     # No adapter available — warn and let Stage 2 attempt file-based enforcement
-    echo "⚠️  No adapter found for ${PROJECT_LANG} (searched: ${ADAPTER_DIR}/, ${ADAPTER_DIR}/adapters/, ${PROJECT_GITHOOKS}/adapters/, ${SCRIPT_DIR}/adapters/) — will check coverage files directly..."
+    echo "⚠️  No adapter found for ${CURRENT_LANG} (searched: ${ADAPTER_DIR}/, ${ADAPTER_DIR}/adapters/, ${PROJECT_GITHOOKS}/adapters/, ${SCRIPT_DIR}/adapters/) — will check coverage files directly..."
     COV_EXIT=0
   fi
+  done  # end for CURRENT_LANG (Stage 1 coverage)
 
   # ============================================================================
   # Stage 2: UNCONDITIONAL coverage percentage enforcement
@@ -1622,7 +1779,8 @@ else
   # ============================================================================
   COVERAGE_ENFORCED=false
 
-  case "$PROJECT_LANG" in
+  for CURRENT_LANG in $PROJECT_LANGS; do
+  case "$CURRENT_LANG" in
     "typescript")
       COVERAGE_ENFORCED=true
       if [ "${TESTS_SKIPPED:-false}" = "true" ]; then
@@ -1637,8 +1795,8 @@ else
         " 2>/dev/null)
         if [ "$COVERAGE_PERCENT" != "parse_error" ] && [ -n "$COVERAGE_PERCENT" ]; then
           if [ "$COVERAGE_PERCENT" -lt 80 ]; then
-            # If only subset of tests ran, warn instead of block
-            if [ -n "${CHANGED_TEST_FILE_COUNT:-}" ] && [ "${CHANGED_TEST_FILE_COUNT:-0}" -gt 0 ] 2>/dev/null; then
+            # If only subset of tests ran (partial run or related tests), warn instead of block
+            if [ "${PARTIAL_TEST_RUN:-false}" = "true" ] || { [ -n "${CHANGED_TEST_FILE_COUNT:-}" ] && [ "${CHANGED_TEST_FILE_COUNT:-0}" -gt 0 ] 2>/dev/null; }; then
               echo "⚠️  Partial coverage ${COVERAGE_PERCENT}% (subset test run, not full suite)."
               echo "    Run 'npx vitest run --coverage' for full coverage check."
             else
@@ -1724,12 +1882,12 @@ else
       fi
       if [ -n "$COVERAGE_PERCENT" ] && [ "$COVERAGE_PERCENT" != "parse_error" ] && [ "$COVERAGE_PERCENT" -gt 0 ]; then
         if [ "$COVERAGE_PERCENT" -lt 80 ]; then
-          echo "❌ BLOCKED - ${PROJECT_LANG} coverage ${COVERAGE_PERCENT}% below 80% threshold"
+          echo "❌ BLOCKED - ${CURRENT_LANG} coverage ${COVERAGE_PERCENT}% below 80% threshold"
           exit 1
         fi
-        echo "${PROJECT_LANG} coverage: ${COVERAGE_PERCENT}% ✅ (≥ 80%)"
+        echo "${CURRENT_LANG} coverage: ${COVERAGE_PERCENT}% ✅ (≥ 80%)"
       else
-        echo "⚠️  Could not determine ${PROJECT_LANG} coverage percentage. No standard coverage report files found."
+        echo "⚠️  Could not determine ${CURRENT_LANG} coverage percentage. No standard coverage report files found."
       fi
       ;;
   esac
@@ -1740,15 +1898,18 @@ else
     exit 1
   fi
   if [ "$COVERAGE_ENFORCED" = false ]; then
-    echo "ℹ️  Coverage enforcement not applicable for ${PROJECT_LANG}"
+    echo "ℹ️  Coverage enforcement not applicable for ${CURRENT_LANG}"
   fi
   echo "✅ PASSED - Coverage check completed."
+  done  # end for CURRENT_LANG (Stage 2 coverage)
+
+  fi  # End: if [ "${TESTS_SKIPPED:-false}" != "true" ] (Issue #312 coverage skip)
 
   # ============================================================================
   # Stage 3: Per-file coverage check for NEW files (Issue #103)
   # New files must have ≥80% coverage individually.
   # ============================================================================
-  if [ "$PROJECT_LANG" = "typescript" ] && [ -f "coverage/coverage-summary.json" ]; then
+  if has_project_lang "typescript" && [ -f "coverage/coverage-summary.json" ]; then
     NEW_SOURCE_FILES=$(git diff --cached --name-only --diff-filter=A | grep -E '\.(ts|tsx)$' | grep -v '__tests__' | grep -v '\.test\.' | grep -v '\.spec\.' | grep -v '__snapshots__' | grep -v '\.d\.ts$' || true)
     if [ -n "$NEW_SOURCE_FILES" ]; then
       echo ""
@@ -1802,15 +1963,16 @@ GATE_6_START=$(gate_start_ms)
 if [ "$PROJECT_LANG" = "documentation-only" ]; then
   echo "     ✅ Skipped (documentation project)."
 
-elif [ "$PROJECT_LANG" = "powershell" ]; then
+elif has_project_lang "powershell" 2>/dev/null || [ "$PROJECT_LANG" = "powershell" ]; then
   echo "     ℹ️  No PowerShell architecture tooling available"
      echo "     ⏭️  SKIPPED - Architecture validation (no tool for PowerShell)"
 
 else
-  # Check if architecture config exists
-  if [ -f "architecture.yaml" ] || [ -f ".architecturerc" ] || [ -f ".archlint.yaml" ]; then
+  # Check if architecture config exists (use $PROJECT_ROOT — hook may have cd'd to a subdir via ARCH-03)
+  if [ -f "$PROJECT_ROOT/architecture.yaml" ] || [ -f "$PROJECT_ROOT/.architecturerc" ] || [ -f "$PROJECT_ROOT/.archlint.yaml" ]; then
     # Different architecture tools per language
-    case "$PROJECT_LANG" in
+    for CURRENT_LANG in $PROJECT_LANGS; do
+    case "$CURRENT_LANG" in
       "typescript")
         # Try local npx install first (devDependencies), fall back to global
         if npx --no-install @archlinter/cli --version >/dev/null 2>&1; then
@@ -1901,13 +2063,14 @@ else
         fi
         ;;
       *)
-        echo "     ℹ️  Architecture validation not configured for $PROJECT_LANG"
-        echo "     ⏭️  SKIPPED - Architecture validation (not configured for $PROJECT_LANG)"
+        echo "     ℹ️  Architecture validation not configured for $CURRENT_LANG"
+        echo "     ⏭️  SKIPPED - Architecture validation (not configured for $CURRENT_LANG)"
         ;;
     esac
+    done  # end for CURRENT_LANG (architecture)
   else
     # Architecture config is REQUIRED — BLOCK if missing
-    if [ -f ".architecture-skip" ]; then
+    if [ -f "$PROJECT_ROOT/.architecture-skip" ]; then
       echo "     ⚠️  Architecture config missing but .architecture-skip present — allowed to skip"
       echo "     ⏭️  SKIPPED - Architecture validation (.architecture-skip exemption)"
     else
@@ -2014,8 +2177,13 @@ record_gate_audit "gate-6" "architecture-boy-scout" "$GATE_6_STATUS" "${BS_BLOCK
 # ============================================================================
 # GATE 7: IaC Security Scanning (Terraform, Kubernetes, Docker)
 # Extracted to gate-7.sh for maintainability
+# v0.14.3+ (Issue #312): Skip if no IaC files changed
 # ============================================================================
+if any_changed_files_match "\.tf$" "\.tfvars$" "Dockerfile" "\.kube/" "\.ya?ml$"; then
 source "$GATE_DIR/gate-7.sh"
+else
+  echo "✅ PASSED - No IaC files changed, skipping Gate 7."
+fi
 
 
 # GATE 8: Secret Scanning (gitleaks)
@@ -2085,9 +2253,14 @@ echo ""
 
 # ============================================================================
 # GATE 10: Semgrep SAST Security Scan
-# Extracted to gate-10.sh for maintainability
+# Extracted to gate-10.sh for maintainability (sourced as gate-9.sh)
+# v0.14.3+ (Issue #312): Skip if no code files changed
 # ============================================================================
+if any_changed_files_match "\.(ts|tsx|js|jsx|py|go|java|kt|cpp|c|swift|m|dart|sh)$"; then
 source "$GATE_DIR/gate-9.sh"
+else
+  echo "✅ PASSED - No code files changed, skipping SAST scan."
+fi
 # ============================================================================
 
 # ============================================================================
@@ -2121,6 +2294,21 @@ GATE_11_END=$(date +%s)
 GATE_11_DURATION=$((GATE_11_END - GATE_11_START))
 echo "✅ Gate 11 completed in ${GATE_11_DURATION}s"
 echo ""
+# ============================================================================
+
+# ============================================================================
+# GATE 12: File Hygiene Check
+# Detects trailing whitespace, missing EOF newlines, merge conflict markers,
+# and oversized files in staged changes.
+# v0.14.15+ (Issue #350, #351)
+# ============================================================================
+if [ -f "$GATE_DIR/gate-12-file-hygiene.sh" ]; then
+  source "$GATE_DIR/gate-12-file-hygiene.sh"
+elif [ -f "$(git rev-parse --show-toplevel 2>/dev/null)/githooks/gate-12-file-hygiene.sh" ]; then
+  source "$(git rev-parse --show-toplevel)/githooks/gate-12-file-hygiene.sh"
+else
+  echo "⏭️  SKIPPED - Gate 12: File Hygiene (gate-12-file-hygiene.sh not found)"
+fi
 # ============================================================================
 
 generate_quality_report() {
@@ -2181,7 +2369,7 @@ generate_quality_report() {
   "generatedAt": "$TIMESTAMP",
   "branch": "$BRANCH",
   "commit": "$COMMIT_HASH",
-  "language": "${PROJECT_LANG:-unknown}",
+  "language": "${PROJECT_LANGS:-${PROJECT_LANG:-unknown}}",
   "overall": {
     "gatesPassed": $PASSED_COUNT,
     "gatesTotal": $TOTAL_GATES,

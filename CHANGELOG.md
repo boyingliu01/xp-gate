@@ -2,6 +2,20 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.14.15.0] - 2026-07-20
+
+### Added
+- **#350 File Hygiene Gate (Gate 12)**: 新增 `gate-12-file-hygiene.sh`，检测 staged files 中的 trailing whitespace、missing EOF newline、merge conflict markers、oversized files (>1MB)。Conflict markers 硬阻断，其他问题仅警告。
+- **#351 YAML/JSON Syntax Validation**: Gate 12 集成 YAML/JSON 语法校验（Check 5），使用 Python yaml 模块（YAML）和 Node.js JSON.parse（JSON）检测语法错误。语法错误硬阻断。
+
+### Fixed
+- **#354**: npm-package hooks 镜像同步 — `src/npm-package/hooks/gate-8.sh` 中 GIBLEAKS_CMD 拼写错误修复（githooks 源已在 v0.14.12 修复）
+- **#348**: doctor 性能进一步优化 — EXEC_TIMEOUT_MS 从 3000ms 降至 1500ms；新增全局诊断超时保护 (10s)；upgrade check 独立 3s 超时，防止网络延迟叠加
+
+### Infrastructure
+- pre-commit hook 集成 Gate 12（source gate-12-file-hygiene.sh），含 3-tier fallback 路径解析
+- npm-package 镜像同步（gate-12-file-hygiene.sh + pre-commit）
+
 ## [0.14.12.0] - 2026-07-17
 
 ### Fixed
