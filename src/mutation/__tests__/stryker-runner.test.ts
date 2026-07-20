@@ -140,7 +140,7 @@ describe('StrykerRunner', () => {
           '--mutate', 'src/a.ts',
           '--mutate', 'src/b.tsx',
         ],
-        expect.objectContaining({ cwd: tmpDir, stdio: 'pipe', shell: false }),
+        expect.objectContaining({ cwd: tmpDir, stdio: 'pipe', shell: true }),
       );
 
       expect(result.timedOut).toBe(false);

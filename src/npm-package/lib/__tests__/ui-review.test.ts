@@ -17,7 +17,7 @@ const TEST_DIR = join(process.cwd(), '.ui-review-test');
 
 describe('ui-review', () => {
   beforeEach(() => {
-    vi.clearAllMocks();
+    vi.resetAllMocks();
     if (existsSync(TEST_DIR)) {
       rmSync(TEST_DIR, { recursive: true, force: true });
     }
@@ -52,13 +52,26 @@ describe('ui-review', () => {
     expect(getChangedFilesForReview()).toEqual(['src/components/Fallback.tsx']);
   });
 
-  it('should fall back to find command when git ls-files fails', async () => {
+  it('should fall back to filesystem scan when git ls-files fails', async () => {
+    // Set up a temp directory with known UI files for the filesystem walk
+    const scanDir = join(TEST_DIR, 'scan-test');
+    mkdirSync(join(scanDir, 'views'), { recursive: true });
+    mkdirSync(join(scanDir, 'src'), { recursive: true });
+    existsSync(join(scanDir, 'views', 'index.html')) || require('fs').writeFileSync(join(scanDir, 'views', 'index.html'), '<html></html>');
+    require('fs').writeFileSync(join(scanDir, 'src', 'app.ts'), 'export const x = 1;');
+
+    const cwdSpy = vi.spyOn(process, 'cwd').mockReturnValue(scanDir);
     mockExecSync
-      .mockReturnValueOnce('')
-      .mockImplementationOnce(() => { throw new Error('not git'); })
-      .mockReturnValueOnce('views/index.html\n');
+      .mockReturnValueOnce('')                         // git diff → no changes
+      .mockImplementationOnce(() => { throw new Error('not git'); }); // git ls-files fails
+
     const { getChangedFilesForReview } = await import('../ui-review');
-    expect(getChangedFilesForReview()).toEqual(['views/index.html']);
+    const result = getChangedFilesForReview();
+    // Should find files via filesystem walk (cross-platform, no find command)
+    expect(result).toContain('views/index.html'.replace(/\//g, require('path').sep));
+    expect(result).toContain('src/app.ts'.replace(/\//g, require('path').sep));
+    expect(result.length).toBe(2);
+    cwdSpy.mockRestore();
   });
 
   it('should build an approved review result with 24h expiry', async () => {

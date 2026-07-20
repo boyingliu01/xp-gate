@@ -80,6 +80,7 @@ async function handleApplyMode(result, pkgName) {
   try {
     const child = spawn('npm', ['install', '-g', `${pkgName}@${result.remote}`], {
       stdio: 'inherit',
+      shell: true,
       timeout: 120000,
     });
     await new Promise((resolve, reject) => {
@@ -125,7 +126,7 @@ async function upgradeOpenCodePlugin() {
     const hasPlugin = await hasOpenCodePlugin();
     if (!hasPlugin) return;
 
-    const { stdout: versionOut } = await execAsync('npm list -g ' + OPENCODE_PLUGIN + ' --depth=0 --json 2>/dev/null');
+    const { stdout: versionOut } = await execAsync('npm list -g ' + OPENCODE_PLUGIN + ' --depth=0 --json');
     let currentVersion = '';
     try {
       const parsed = JSON.parse(versionOut);
@@ -138,6 +139,7 @@ async function upgradeOpenCodePlugin() {
 
     const child = spawn('npm', ['install', '-g', OPENCODE_PLUGIN + '@latest'], {
       stdio: 'pipe',
+      shell: true,
       timeout: 120000,
     });
     const exitCode = await new Promise((resolve) => {
@@ -156,6 +158,7 @@ function hasOpenCodePlugin() {
   return new Promise((resolve) => {
     const child = spawn('npm', ['list', '-g', OPENCODE_PLUGIN, '--depth=0'], {
       stdio: 'pipe',
+      shell: true,
       timeout: 10000,
     });
     child.on('close', (code) => resolve(code === 0));

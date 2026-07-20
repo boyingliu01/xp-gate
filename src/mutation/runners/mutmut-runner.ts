@@ -70,7 +70,7 @@ export class MutmutRunner implements MutationRunner {
     return new Promise((resolve) => {
       const child = spawn('mutmut', ['run'], {
         stdio: 'pipe',
-        shell: false,
+        shell: true,
         cwd: options.cwd,
       });
 

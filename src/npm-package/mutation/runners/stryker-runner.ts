@@ -25,7 +25,7 @@ export class StrykerRunner implements MutationRunner {
       const { spawnSync } = await import('child_process');
       const result = spawnSync('npx', ['stryker', '--version'], {
         stdio: 'pipe',
-        shell: false,
+        shell: true,
         timeout: 5000,
       });
       return result.status !== null && result.status === 0;
@@ -46,7 +46,7 @@ export class StrykerRunner implements MutationRunner {
 
       const child = spawn('npx', args, {
         stdio: 'pipe',
-        shell: false,
+        shell: true,
         cwd: options.cwd,
       });
 

@@ -4,6 +4,27 @@ const { execSync, execFileSync } = require('child_process');
 const fs = require('fs');
 const path = require('path');
 
+/**
+ * Run a bash shell script cross-platform.
+ * On Unix: uses bash directly.
+ * On Windows: tries bash from PATH (Git Bash / WSL), falls back to a clear message.
+ */
+function runBashScript(scriptPath) {
+  if (process.platform === 'win32') {
+    // Check if bash is available on Windows (Git Bash, MSYS2, WSL)
+    try {
+      execSync('bash --version', { stdio: 'pipe', timeout: 5000 });
+    } catch {
+      console.log('⚠️  This gate requires bash to run shell scripts.');
+      console.log('   On Windows, install Git for Windows (includes Git Bash) or enable WSL.');
+      console.log('   Alternatively, install the required tool directly and run the gate again.');
+      return;
+    }
+  }
+  // bash is available — run the script (Unix always, or Windows after check above)
+  execSync(`bash "${scriptPath}"`, { stdio: 'inherit' });
+}
+
 // Gate metadata registry — maps gate IDs to names, descriptions, and how to run them.
 // Standalone gates (<gate-id>: { run }) are invokable via xp-gate gate-<id>.
 // Pre-commit-only gates (<gate-id>: { preCommitOnly: true }) run only in git commit context.
@@ -30,7 +51,7 @@ const GATE_REGISTRY = {
       const jscpdConfig = findConfig(targetPath, 'jscpd.conf.json');
       const args = [targetPath || '.'];
       if (jscpdConfig) args.push('--config', jscpdConfig);
-      execFileSync('npx', ['-y', 'jscpd', ...args], { stdio: 'inherit' });
+      execFileSync('npx', ['-y', 'jscpd', ...args], { stdio: 'inherit', shell: true });
     },
   },
   '3': {
@@ -40,11 +61,11 @@ const GATE_REGISTRY = {
     run: (targetPath) => {
       const script = resolveGateScript('3');
       if (script) {
-        execSync(`bash "${script}"`, { stdio: 'inherit' });
+        runBashScript(script);
       } else {
         const target = targetPath || '.';
         console.log(`Running lizard on ${target}...`);
-        execFileSync('lizard', [target, '--CCN', '10', '--length', '50', '--arguments', '5', '--warnings_only'], { stdio: 'inherit' });
+        execFileSync('lizard', [target, '--CCN', '10', '--length', '50', '--arguments', '5', '--warnings_only'], { stdio: 'inherit', shell: true });
       }
     },
   },
@@ -80,7 +101,7 @@ const GATE_REGISTRY = {
     run: (targetPath) => {
       const script = resolveGateScript('7');
       if (script) {
-        execSync(`bash "${script}"`, { stdio: 'inherit' });
+        runBashScript(script);
       } else {
         console.log('IaC security scan requires git-staged context for changed files detection.');
         console.log('Run: git commit to trigger Gate 7 automatically.');
@@ -94,7 +115,7 @@ const GATE_REGISTRY = {
     run: (targetPath) => {
       const script = resolveGateScript('8');
       if (script) {
-        execSync(`bash "${script}"`, { stdio: 'inherit' });
+        runBashScript(script);
       } else {
         console.log('Secret scanning requires git-staged context for changed files detection.');
         console.log('Run: git commit to trigger Gate 8 automatically.');
@@ -108,7 +129,7 @@ const GATE_REGISTRY = {
     run: (targetPath) => {
       const script = resolveGateScript('9');
       if (script) {
-        execSync(`bash "${script}"`, { stdio: 'inherit' });
+        runBashScript(script);
       } else {
         console.log('SAST scanning requires git-staged context for changed files detection.');
         console.log('Run: git commit to trigger Gate 9 automatically.');

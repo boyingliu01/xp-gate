@@ -137,7 +137,7 @@ export class PitestRunner implements MutationRunner {
         ],
         {
           stdio: 'pipe',
-          shell: false,
+          shell: true,
           cwd: options.cwd,
         },
       );
@@ -190,7 +190,7 @@ export class PitestRunner implements MutationRunner {
 
       const child = spawn(gradleCmd, ['pitest'], {
         stdio: 'pipe',
-        shell: false,
+        shell: true,
         cwd: options.cwd,
       });
 

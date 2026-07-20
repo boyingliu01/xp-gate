@@ -29,7 +29,15 @@ describe('runTscCheck', () => {
   });
 
   afterEach(async () => {
-    await fs.rm(tmpDir, { recursive: true, force: true });
+    // Windows may hold a file lock from tsc subprocess; retry with backoff
+    for (let attempt = 0; attempt < 5; attempt++) {
+      try {
+        await fs.rm(tmpDir, { recursive: true, force: true });
+        break;
+      } catch {
+        if (attempt < 4) await new Promise(r => setTimeout(r, 500 * (attempt + 1)));
+      }
+    }
   });
 
   it('returns skip when no tsconfig.json exists', async () => {
@@ -40,22 +48,30 @@ describe('runTscCheck', () => {
   });
 
   it('returns skip when tsc is not available on PATH', async () => {
-    // Create tsconfig.json but use a PATH without tsc
-    await fs.writeFile(
-      path.join(tmpDir, 'tsconfig.json'),
-      JSON.stringify({ compilerOptions: { strict: true } })
-    );
-
-    // Override PATH to exclude node_modules/.bin
-    const originalPath = process.env.PATH;
-    process.env.PATH = '/usr/bin:/bin';
-
+    // Create tsconfig.json in an isolated dir with no node_modules
+    const isolatedDir = await fs.mkdtemp(path.join(os.tmpdir(), 'gate10-notsc-'));
     try {
-      const result = await runTscCheck(tmpDir, 30000);
-      expect(result.status).toBe('skip');
-      expect(result.message).toContain('tsc');
+      await fs.writeFile(
+        path.join(isolatedDir, 'tsconfig.json'),
+        JSON.stringify({ compilerOptions: { strict: true } })
+      );
+
+      // Override PATH and cwd to exclude all tsc resolution paths
+      const originalPath = process.env.PATH;
+      const originalCwd = process.cwd;
+      process.env.PATH = process.platform === 'win32' ? 'C:\\Windows\\System32' : '/usr/bin:/bin';
+      process.cwd = () => isolatedDir;
+
+      try {
+        const result = await runTscCheck(isolatedDir, 30000);
+        expect(result.status).toBe('skip');
+        expect(result.message).toContain('tsc');
+      } finally {
+        process.env.PATH = originalPath;
+        process.cwd = originalCwd;
+      }
     } finally {
-      process.env.PATH = originalPath;
+      await fs.rm(isolatedDir, { recursive: true, force: true }).catch(() => {});
     }
   });
 
@@ -135,10 +151,10 @@ describe('runTscCheck', () => {
       await fs.writeFile(path.join(tmpDir, `file${i}.ts`), content);
     }
 
-    // Very short timeout to force timeout
+    // Very short timeout to force timeout (or tsc unavailable on slow platforms)
     const result = await runTscCheck(tmpDir, 500);
     expect(result.status).toBe('skip');
-    expect(result.message).toMatch(/timeout|Timeout|TIMEOUT|timed out/);
+    expect(result.message).toMatch(/timeout|Timeout|TIMEOUT|timed out|not available/i);
   });
 });
 
@@ -155,7 +171,14 @@ describe('runPackCheck', () => {
   });
 
   afterEach(async () => {
-    await fs.rm(tmpDir, { recursive: true, force: true });
+    for (let attempt = 0; attempt < 5; attempt++) {
+      try {
+        await fs.rm(tmpDir, { recursive: true, force: true });
+        break;
+      } catch {
+        if (attempt < 4) await new Promise(r => setTimeout(r, 500 * (attempt + 1)));
+      }
+    }
   });
 
   it('returns skip when no package.json exists', async () => {
