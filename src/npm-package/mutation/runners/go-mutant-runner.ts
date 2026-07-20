@@ -47,7 +47,7 @@ export class GoMutantRunner implements MutationRunner {
 
       const child = spawn('gomutants', args, {
         stdio: 'pipe',
-        shell: false,
+        shell: true,
         cwd: options.cwd,
       });
 

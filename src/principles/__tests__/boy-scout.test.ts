@@ -569,6 +569,7 @@ describe('Boy Scout Rule Enforcement', () => {
       const result = spawnSync('npx', ['tsx', BOY_SCOUT_PATH, ...args], {
         cwd: cwd ?? process.cwd(),
         encoding: 'utf-8',
+        shell: true,
         env: { ...process.env, NODE_V8_COVERAGE: coverageDir },
       });
       return {

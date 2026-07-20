@@ -492,6 +492,32 @@ describe('doctor', () => {
       }
       return '';
     };
+    // Async exec mock for execWithTimeout (util.promisify(exec) in doctor.js)
+    const mockAsyncExec = (cmd, opts, callback) => {
+      if (typeof opts === 'function') { callback = opts; opts = {}; }
+      if (cmd === 'git rev-parse --git-dir') {
+        callback(null, path.join(tmpProject, '.git') + '\n', '');
+      } else if (cmd.includes('git config --global core.hooksPath')) {
+        callback(null, cmd.includes('--unset') ? '' : '/wrong/path\n', '');
+      } else if (cmd === 'node --version') {
+        callback(null, 'v20.0.0\n', '');
+      } else if (cmd === 'git --version') {
+        callback(null, 'git version 2.39.0\n', '');
+      } else if (cmd === 'bash --version') {
+        callback(null, 'GNU bash, version 5.1.16\n', '');
+      } else {
+        callback(null, '', '');
+      }
+    };
+    mockAsyncExec[util.promisify.custom] = (cmd, options) => {
+      return new Promise((resolve, reject) => {
+        mockAsyncExec(cmd, options, (err, stdout, stderr) => {
+          if (err) { err.stdout = stdout || ''; err.stderr = stderr || ''; reject(err); }
+          else { resolve({ stdout, stderr }); }
+        });
+      });
+    };
+    cp.exec = mockAsyncExec;
     const { doctor } = require('../doctor');
 
     const result = await doctor(['--fix']);

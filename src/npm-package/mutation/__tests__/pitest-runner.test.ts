@@ -252,7 +252,7 @@ describe('PitestRunner', () => {
       expect(spawn).toHaveBeenCalledWith(join(tmpDir, 'gradlew'), ['pitest'], {
         cwd: tmpDir,
         stdio: 'pipe',
-        shell: false,
+        shell: true,
       });
       expect(result.timedOut).toBe(false);
       expect(result.report).not.toBeNull();

@@ -65,13 +65,42 @@ export async function runTscCheck(
     };
   }
 
-  // Check if tsc is available (run from projectRoot where node_modules should exist)
+  // Resolve tsc binary: try multiple strategies for cross-platform reliability
+  function findTsc(): string | null {
+    // Strategy 1: projectRoot/node_modules/typescript/bin/tsc
+    const direct = path.join(projectRoot, 'node_modules', 'typescript', 'bin', 'tsc');
+    try { fsNative.accessSync(direct); return direct; } catch { /* continue */ }
+
+    // Strategy 2: resolve from cwd's node_modules (works when test symlinks or in project)
+    const fromCwd = path.join(process.cwd(), 'node_modules', 'typescript', 'bin', 'tsc');
+    try { fsNative.accessSync(fromCwd); return fromCwd; } catch { /* continue */ }
+
+    // Strategy 3: resolve via require.resolve from this file's location
+    try {
+      const resolved = require.resolve('typescript/bin/tsc', { paths: [projectRoot, process.cwd()] });
+      try { fsNative.accessSync(resolved); return resolved; } catch { /* continue */ }
+    } catch { /* continue */ }
+
+    return null;
+  }
+
+  const resolvedTsc = findTsc();
+
+  // Check if tsc is available
   try {
-    await execFileAsync('npx', ['tsc', '--version'], {
-      cwd: projectRoot,
-      timeout: 5000,
-      env: { ...process.env, PATH: process.env.PATH },
-    });
+    if (resolvedTsc) {
+      await execFileAsync(process.execPath, [resolvedTsc, '--version'], {
+        cwd: projectRoot,
+        timeout: 10000,
+      });
+    } else {
+      await execFileAsync('npx', ['tsc', '--version'], {
+        cwd: projectRoot,
+        timeout: 10000,
+        shell: true,
+        env: { ...process.env, PATH: process.env.PATH },
+      });
+    }
   } catch {
     return {
       status: 'skip',
@@ -82,12 +111,17 @@ export async function runTscCheck(
 
   // Run tsc --noEmit --incremental
   try {
+    const tscCmd = resolvedTsc ? process.execPath : 'npx';
+    const tscArgs = resolvedTsc
+      ? [resolvedTsc, '--noEmit', '--incremental']
+      : ['tsc', '--noEmit', '--incremental'];
     const { stdout, stderr } = await execFileAsync(
-      'npx',
-      ['tsc', '--noEmit', '--incremental'],
+      tscCmd,
+      tscArgs,
       {
         cwd: projectRoot,
         timeout: timeoutMs,
+        shell: !resolvedTsc,
         maxBuffer: 10 * 1024 * 1024, // 10MB
       }
     );
@@ -241,8 +275,9 @@ export function resolveImportPath(importPath: string, fromFile: string): string 
     if (tryAccess(resolved + tryExt)) return resolved + tryExt;
   }
 
-  for (const idx of ['/index.ts', '/index.js']) {
-    if (tryAccess(resolved + idx)) return resolved + idx;
+  for (const idxName of ['index.ts', 'index.js']) {
+    const candidate = path.join(resolved, idxName);
+    if (tryAccess(candidate)) return candidate;
   }
 
   return null;
@@ -369,6 +404,7 @@ export async function runPackCheck(
     const { stdout } = await execFileAsync('npm', ['pack', '--dry-run', '--json'], {
       cwd: projectRoot,
       timeout: timeoutMs,
+      shell: true,
       maxBuffer: 10 * 1024 * 1024,
     });
 

@@ -1,6 +1,6 @@
 import { execSync } from 'child_process';
-import { writeFileSync } from 'fs';
-import { join } from 'path';
+import { writeFileSync, readdirSync, statSync } from 'fs';
+import { join, relative, extname } from 'path';
 import { collectUiMatches, parseRenamedFile } from './ui-detector';
 
 const RESULT_FILE = '.ui-gate-result.json';
@@ -42,11 +42,31 @@ export function getFallbackFileList(): string[] {
   try {
     return parseFileList(execSync('git ls-files', { encoding: 'utf8' }).trim());
   } catch {
-    const output = execSync(
-      'find . -maxdepth 3 -type f -name "*.ts" -o -name "*.html" -o -name "*.css" -o -name "*.scss" -o -name "*.tsx" -o -name "*.vue" -o -name "*.svelte" 2>/dev/null | grep -v node_modules | grep -v .git',
-      { encoding: 'utf8' },
-    ).trim();
-    return parseFileList(output);
+    // Not a git repo — fall back to filesystem scan (cross-platform)
+    const UI_EXTENSIONS = new Set(['.ts', '.html', '.css', '.scss', '.tsx', '.vue', '.svelte']);
+    const results: string[] = [];
+
+    function walk(dir: string, depth: number) {
+      if (depth > 3) return;
+      try {
+        const entries = readdirSync(dir);
+        for (const entry of entries) {
+          if (entry === 'node_modules' || entry === '.git') continue;
+          const fullPath = join(dir, entry);
+          try {
+            const st = statSync(fullPath);
+            if (st.isDirectory()) {
+              walk(fullPath, depth + 1);
+            } else if (st.isFile() && UI_EXTENSIONS.has(extname(entry))) {
+              results.push(relative(process.cwd(), fullPath));
+            }
+          } catch { /* skip inaccessible entries */ }
+        }
+      } catch { /* skip inaccessible directories */ }
+    }
+
+    walk(process.cwd(), 0);
+    return results;
   }
 }
 
@@ -69,7 +89,11 @@ export function writeUiReviewResult(result: UiReviewResult, repoRoot: string = p
 }
 
 function getCurrentCommit(): string {
-  return execSync('git rev-parse HEAD 2>/dev/null || echo "no-commit"', { encoding: 'utf8' }).trim();
+  try {
+    return execSync('git rev-parse HEAD', { encoding: 'utf8', stdio: ['pipe', 'pipe', 'pipe'] }).trim();
+  } catch {
+    return 'no-commit';
+  }
 }
 
 export function main(): void {

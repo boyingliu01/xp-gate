@@ -27,7 +27,14 @@ describe('runGate10', () => {
   });
 
   afterEach(async () => {
-    await fs.rm(tmpDir, { recursive: true, force: true });
+    for (let attempt = 0; attempt < 5; attempt++) {
+      try {
+        await fs.rm(tmpDir, { recursive: true, force: true });
+        break;
+      } catch {
+        if (attempt < 4) await new Promise(r => setTimeout(r, 500 * (attempt + 1)));
+      }
+    }
   });
 
   it('returns skip status when no package.json exists', async () => {
@@ -223,7 +230,14 @@ describe('main', () => {
 
   afterEach(async () => {
     consoleSpy.mockRestore();
-    await fs.rm(tmpDir, { recursive: true, force: true });
+    for (let attempt = 0; attempt < 5; attempt++) {
+      try {
+        await fs.rm(tmpDir, { recursive: true, force: true });
+        break;
+      } catch {
+        if (attempt < 4) await new Promise(r => setTimeout(r, 500 * (attempt + 1)));
+      }
+    }
   });
 
   it('returns 0 when no changed files provided', async () => {
