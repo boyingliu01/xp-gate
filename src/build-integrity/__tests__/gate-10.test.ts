@@ -71,7 +71,7 @@ describe('runTscCheck', () => {
         process.cwd = originalCwd;
       }
     } finally {
-      await fs.rm(isolatedDir, { recursive: true, force: true }).catch(() => {});
+      await fs.rm(isolatedDir, { recursive: true, force: true }).catch(() => { /* ignore cleanup errors */ });
     }
   });
 
