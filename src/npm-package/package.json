@@ -1,6 +1,6 @@
 {
   "name": "@boyingliu01/xp-gate",
-  "version": "0.14.15",
+  "version": "0.14.16",
   "description": "AI-driven development workflow: 6 quality gates + Delphi review + Sprint Flow",
   "bin": {
     "xp-gate": "./bin/xp-gate.js"
@@ -38,7 +38,7 @@
     "node": ">=18.0.0"
   },
   "scripts": {
-    "version": "0.14.15",
+    "version": "0.14.16",
     "prepack": "node scripts/sync-package-content.js",
     "test": "echo \"Run tests\" && exit 0"
   },
