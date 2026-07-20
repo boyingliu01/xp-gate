@@ -2,6 +2,11 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.14.16.0] - 2026-07-20
+
+### Fixed
+- npm publish 版本冲突修复 — 0.14.15 已被占用，升级到 0.14.16 重新发布
+
 ## [0.14.15.0] - 2026-07-20
 
 ### Added
