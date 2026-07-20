@@ -1627,6 +1627,7 @@ else
             done
             if [ -n "$RELATED_TESTS" ]; then
               echo "   Found related test(s): $(echo "$RELATED_TESTS" | tr '\n' ' ')"
+              PARTIAL_TEST_RUN=true  # Mark as partial run for coverage check
               TESTS_OUTPUT=$(npx vitest run --coverage $RELATED_TESTS 2>&1)
               TESTS_EXIT_CODE=$?
               echo "$TESTS_OUTPUT" | head -60
@@ -1794,8 +1795,8 @@ else
         " 2>/dev/null)
         if [ "$COVERAGE_PERCENT" != "parse_error" ] && [ -n "$COVERAGE_PERCENT" ]; then
           if [ "$COVERAGE_PERCENT" -lt 80 ]; then
-            # If only subset of tests ran, warn instead of block
-            if [ -n "${CHANGED_TEST_FILE_COUNT:-}" ] && [ "${CHANGED_TEST_FILE_COUNT:-0}" -gt 0 ] 2>/dev/null; then
+            # If only subset of tests ran (partial run or related tests), warn instead of block
+            if [ "${PARTIAL_TEST_RUN:-false}" = "true" ] || { [ -n "${CHANGED_TEST_FILE_COUNT:-}" ] && [ "${CHANGED_TEST_FILE_COUNT:-0}" -gt 0 ] 2>/dev/null; }; then
               echo "⚠️  Partial coverage ${COVERAGE_PERCENT}% (subset test run, not full suite)."
               echo "    Run 'npx vitest run --coverage' for full coverage check."
             else
@@ -2293,6 +2294,21 @@ GATE_11_END=$(date +%s)
 GATE_11_DURATION=$((GATE_11_END - GATE_11_START))
 echo "✅ Gate 11 completed in ${GATE_11_DURATION}s"
 echo ""
+# ============================================================================
+
+# ============================================================================
+# GATE 12: File Hygiene Check
+# Detects trailing whitespace, missing EOF newlines, merge conflict markers,
+# and oversized files in staged changes.
+# v0.14.15+ (Issue #350, #351)
+# ============================================================================
+if [ -f "$GATE_DIR/gate-12-file-hygiene.sh" ]; then
+  source "$GATE_DIR/gate-12-file-hygiene.sh"
+elif [ -f "$(git rev-parse --show-toplevel 2>/dev/null)/githooks/gate-12-file-hygiene.sh" ]; then
+  source "$(git rev-parse --show-toplevel)/githooks/gate-12-file-hygiene.sh"
+else
+  echo "⏭️  SKIPPED - Gate 12: File Hygiene (gate-12-file-hygiene.sh not found)"
+fi
 # ============================================================================
 
 generate_quality_report() {

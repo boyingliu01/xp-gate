@@ -1,12 +1,12 @@
 # XP-Gate Capability Matrix
 
-**XP-Gate** 是一套 AI 驱动的开发工作流工具集，提供 11 道质量门禁 (Gate 0–11) + 5 道 pre-push 门禁 (M/MD/ML/MW/MS) + Delphi 多专家评审机制，确保代码提交前的自动化验证和设计决策的共识达成。
+**XP-Gate** 是一套 AI 驱动的开发工作流工具集，提供 13 道质量门禁 (Gate 0–12) + 5 道 pre-push 门禁 (M/MD/ML/MW/MS) + Delphi 多专家评审机制，确保代码提交前的自动化验证和设计决策的共识达成。
 
 ---
 
 ## 1. Overview
 
-XP-Gate 整合质量门禁、AI 多专家评审和 Sprint 流程编排三大核心模块。质量门禁在每次 `git commit` 时自动运行 10 项检查 (Gate 0-9，按脚本数字编号；旧文档以 "6 道门禁" 作概念分组)，每次 `git push` 自动运行 Gate M / MD / ML / MW / MS + 代码走查校验。任何失败都会阻止提交或推送。Delphi Review 采用多轮匿名评审机制，直到所有专家达成共识（≥90%）。Sprint Flow 提供一键式 6 阶段 (Phase 1-6) 完整开发流程编排，从需求探索到发布部署全程自动化。
+XP-Gate 整合质量门禁、AI 多专家评审和 Sprint 流程编排三大核心模块。质量门禁在每次 `git commit` 时自动运行 13 项检查 (Gate 0-12，按脚本数字编号；旧文档以 "6 道门禁" 作概念分组)，每次 `git push` 自动运行 Gate M / MD / ML / MW / MS + 代码走查校验。任何失败都会阻止提交或推送。Delphi Review 采用多轮匿名评审机制，直到所有专家达成共识（≥90%）。Sprint Flow 提供一键式 6 阶段 (Phase 1-6) 完整开发流程编排，从需求探索到发布部署全程自动化。
 
 ---
 

@@ -251,9 +251,9 @@ worktree      brainstorm    ralph-loop    code-walk     PR + merge     UAT +
 
 ## 质量门禁详解
 
-每次 `git commit` 自动执行 12 道门禁 (Gate 0-11)，每次 `git push` 自动执行 Gate M / M2 / M3 / MW / MS + Delphi 代码走查校验：
+每次 `git commit` 自动执行 13 道门禁 (Gate 0-12)，每次 `git push` 自动执行 Gate M / M2 / M3 / MW / MS + Delphi 代码走查校验：
 
-### Pre-commit（12 道门禁 Gate 0-11）
+### Pre-commit（13 道门禁 Gate 0-12）
 
 | 门禁 | 检查内容 | 阈值 | 失败行为 |
 |------|---------|------|---------|
@@ -269,6 +269,7 @@ worktree      brainstorm    ralph-loop    code-walk     PR + merge     UAT +
 | Gate 9 | 构建完整性 (tsc + npm pack + import check) | 编译通过、打包成功、import 合法 | 阻断提交 |
 | Gate 10 | SAST 安全扫描 (semgrep) | 无 High 级别漏洞 | 阻断提交 |
 | Gate 11 | Sprint Flow 执行 | specification.yaml 合规 | 阻断提交 |
+| Gate 12 | 文件卫生检查 (trailing whitespace, EOF newline, conflict markers, oversized files, YAML/JSON 语法) | 无 conflict markers + YAML/JSON 语法正确 | 阻断/警告 |
 
 > **概念分组（旧 "6 道门禁" 视角）**：Gates 1+2+5 = 代码质量集群，Gate 3 = 复杂度，Gate 4 = 原则，Gate 6 = 架构，Gates 7+8+9+10 = 安全 + 构建完整性（v0.11.0+），Gate 0 = 预检。
 
