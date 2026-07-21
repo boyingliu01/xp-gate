@@ -2,6 +2,22 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.14.17.0] - 2026-07-21
+
+### Added
+- **Delphi Review 跨模型评审 (Qoder)**: 新增 `scripts/delphi-external-review.cjs` 脚本，通过 OpenAI-compatible API 直接调用外部模型（DeepSeek/Qwen/GLM），实现 Qoder 平台真正的跨模型交叉评审。支持 profiles 配置切换、混合模式（local + external）、4 层 JSON 容错提取、分级重试策略。
+- **.delphi-config.json profiles**: 配置文件支持多 profile（如 default/starter），一键切换不同模型组合。支持 `provider: "local"` 混合模式渐进式配置。
+- **设计文档**: `docs/superpowers/specs/2026-07-21-delphi-review-qoder-cross-model-design.md` — 经 Delphi 两轮评审通过的设计方案。
+
+### Changed
+- Qoder SKILL.md / INSTALL.md / AGENTS.md 更新：移除 opencode.json 引用，改为 Bash 调用外部脚本模式。
+- `.delphi-config.json.example` 重构：profiles + providers + experts 新格式，含 starter 混合模式示例。
+- `sync-package-content.js` 新增 `syncScripts()` 函数，打包时自动复制 `delphi-external-review.cjs` 到 npm 包。
+
+### Infrastructure
+- 29 个单元测试覆盖脚本所有纯逻辑函数（parseArgs, readConfig, validateCrossProvider, extractJsonFromResponse 等）。
+- npm 包分发：脚本通过 sync-package-content.js 自动同步到 `src/npm-package/scripts/`。
+
 ## [0.14.16.0] - 2026-07-20
 
 ### Fixed

@@ -115,6 +115,23 @@ function syncPlugins() {
   return copied;
 }
 
+function syncScripts() {
+  const srcRoot = path.join(REPO_ROOT, 'scripts');
+  const destRoot = path.join(PKG_ROOT, 'scripts');
+  const scriptsToSync = ['delphi-external-review.cjs'];
+  let copied = 0;
+  for (const name of scriptsToSync) {
+    const src = path.join(srcRoot, name);
+    if (fs.existsSync(src)) {
+      fs.mkdirSync(destRoot, { recursive: true });
+      fs.copyFileSync(src, path.join(destRoot, name));
+      copied += 1;
+      console.error(`[sync] scripts/${name}`);
+    }
+  }
+  return copied;
+}
+
 function syncAdapters() {
   const srcRoot = path.join(REPO_ROOT, 'githooks', 'adapters');
   const destRoot = path.join(PKG_ROOT, 'adapters');
@@ -386,12 +403,13 @@ function main() {
   }
   const skills = syncSkills();
   const plugins = syncPlugins();
+  const scripts = syncScripts();
   const adapters = syncAdapters();
 const principles = syncModules('principles');
 const mutation = syncModules('mutation');
 const mockPolicy = syncModules('mock-policy');
 const buildIntegrity = syncModules('build-integrity');
-console.error(`[sync] done: ${skills} skill(s), ${plugins} plugin(s), ${adapters} adapter entries, ${principles + mutation + mockPolicy + buildIntegrity} module(s)`);
+console.error(`[sync] done: ${skills} skill(s), ${plugins} plugin(s), ${scripts} script(s), ${adapters} adapter entries, ${principles + mutation + mockPolicy + buildIntegrity} module(s)`);
   if (skills !== CORE_SKILLS.length) {
     console.error(`[sync] ERROR: expected ${CORE_SKILLS.length} skills, copied ${skills}`);
     process.exit(1);
