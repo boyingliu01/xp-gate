@@ -89,24 +89,19 @@
    - 格式：YAML frontmatter + Markdown body（body ≤ 50 行）
    - 大小限制：≤ 40,000 字符（≈ 10,000 tokens）
 
-2. **更新 sprint-state.json**：
-   - `phase`: 当前阶段编号 (1-6)
-   - `outputs`: 新增当前阶段输出文件路径
-   - `phase_history`: 追加或更新当前阶段的记录
-     - Phase 开始时：追加 `{ "phase": N, "phase_name": "NAME", "status": "running", "started_at": "<ISO 8601>", "completed_at": null, "duration_seconds": null }`
-     - Phase 完成时：更新对应条目，填充 `completed_at`（ISO 8601）和 `duration_seconds`
-     - Phase 跳过时：设置 `status: "skipped"`
+2. **调用 phase-transition CLI**（替代手动更新 sprint-state.json + 手动渲染看板）：
+   ```
+   npx xp-gate phase-transition <phase> <status> --render [--outputs '<json>']
+   ```
+   - Phase 开始时：`npx xp-gate phase-transition <N> in_progress --render`
+   - Phase 完成时：`npx xp-gate phase-transition <N> completed --render --outputs '{"key":"value"}'`
+   - Phase 跳过时：`npx xp-gate phase-transition <N> skipped --render`
+   - CLI 自动完成：更新 `sprint-state.json`（phase, phase_history, outputs）+ 渲染 ASCII 看板
+   - 看板规则：已完成 ✅ + 耗时，当前 🔄，待做 ⬜，跳过 ⏭️，失败 ❌
+   - 进度条：`[████▓░░░░░░] {pct}%`
+   - **禁止**手动写入 `sprint-state.json` 或手动调用 `render-sprint-progress.cjs`（已废弃）
 
 3. **等待用户确认 checkpoint**（如适用）
-
-4. **展示进度看板**：执行 `node scripts/render-sprint-progress.cjs` 渲染进度看板
-   - 脚本自动读取 `.sprint-state/sprint-state.json` 并输出 ASCII 进度看板
-   - 渲染规则：已完成阶段显示 ✅ + 耗时，当前阶段 🔄，待做 ⬜，跳过 ⏭️，失败 ❌
-   - 进度条：`[████▓░░░░░░] {pct}%`（已完成数/总阶段数 6）
-   - 下一步行动：根据当前阶段 + 状态，自动查找对应提示
-   - 输出物路径：列出 `outputs` 中已有的文件路径
-   - 时机：每个 Phase 完成后的 transition 阶段自动展示
-   - 向后兼容：旧版 `sprint-state.json` 缺少 `phase_history` 时，从 `phase` 字段推断状态
 
 ### Background Task Resume Protocol (MANDATORY — Issue #248)
 

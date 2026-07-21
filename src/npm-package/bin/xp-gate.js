@@ -195,6 +195,14 @@ const COMMANDS = {
     description: 'Run all invokable quality gates',
     run: subargs => check(['--all', ...subargs]).then(code => process.exit(code)),
     usage: 'xp-gate gate-all [<path>]'
+  },
+  'phase-transition': {
+    description: 'Transition sprint phase + auto-render dashboard (resolves #338)',
+    run: subargs => {
+      const { handlePhaseTransition } = require('../lib/phase-transition.js');
+      handlePhaseTransition(subargs).then(code => process.exit(code));
+    },
+    usage: 'xp-gate phase-transition <phase> <status> [--render] [--outputs <json>]'
   }
 };
 
