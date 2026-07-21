@@ -199,11 +199,26 @@ Every phase MUST output its header as the first line of that phase's output. For
 3. NEVER merge phase output — each phase gets its own header
 4. On `/sprint-flow` trigger, first line MUST output: `Sprint Flow: PREP → DESIGN → BUILD → VERIFY → SHIP → CLOSE`
 5. Each phase completion MUST write Phase Summary to `.sprint-state/phase-outputs/phase-{N}-summary.md`
-6. Each phase completion MUST update `.sprint-state/sprint-state.json`
+6. Each phase completion MUST call `xp-gate phase-transition <N> <status> --render` — this programmatically updates `sprint-state.json` AND renders the ASCII dashboard in one command (resolves #338, #146)
 
-### Required Rendering (MANDATORY per phase)
+### Phase Transition CLI (MANDATORY — replaces manual state updates)
 
-7. Each phase completion MUST render the ASCII progress dashboard using `templates/sprint-progress-template.md` — the orchestrator reads `sprint-state.json` and outputs the dashboard after every phase's status block, so the user always sees current global progress without needing to ask
+7. **NEVER** manually write to `sprint-state.json` or manually render the dashboard from template. ALWAYS use:
+   ```
+   npx xp-gate phase-transition <phase> <status> --render [--outputs '<json>']
+   ```
+   - `<phase>`: 1-6
+   - `<status>`: `in_progress` | `completed` | `skipped` | `failed` | `paused`
+   - `--render`: Auto-renders ASCII progress dashboard after state update
+   - `--outputs '<json>'`: Optional JSON of phase outputs to record
+   
+   Example (end of each phase):
+   ```
+   npx xp-gate phase-transition 1 completed --render --outputs '{"estimate":"3 story points"}'
+   npx xp-gate phase-transition 2 in_progress --render
+   ```
+   
+   This is a **HARD GATE** — the orchestrator MUST invoke this CLI command. Text-level instructions to "update state" or "render dashboard" are DEPRECATED; the CLI is the single source of truth for state transitions and dashboard rendering.
 
 ### Phase Output Status Schema (MANDATORY per phase)
 
