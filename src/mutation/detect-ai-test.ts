@@ -72,6 +72,36 @@ export function detectTestLayer(testFilePath: string): TestLayer {
   return 'unknown';
 }
 
+const TEST_TYPE_ANNOTATION = /@test-type\s+(unit|integration|e2e)/i;
+
+/**
+ * Detect test layer from file content by parsing @test-type annotation.
+ * Supports both JSDoc block comments and line comments.
+ * Returns null if no valid @test-type annotation is found.
+ */
+export function detectTestLayerFromContent(content: string): TestLayer | null {
+  const match = content.match(TEST_TYPE_ANNOTATION);
+  if (!match) return null;
+  return match[1].toLowerCase() as TestLayer;
+}
+
+/**
+ * Detect test layer with annotation-first priority.
+ * 1. Read file content and check @test-type annotation
+ * 2. Fall back to path-based detection
+ * 3. Return 'unknown' if neither matches
+ */
+export async function detectTestLayerWithAnnotation(testFilePath: string): Promise<TestLayer> {
+  try {
+    const content = await fs.readFile(testFilePath, 'utf-8');
+    const annotationLayer = detectTestLayerFromContent(content);
+    if (annotationLayer) return annotationLayer;
+  } catch {
+    // File not readable — fall through to path-based detection
+  }
+  return detectTestLayer(testFilePath);
+}
+
 function detectLayerAwareDensity(
   content: string,
   testFilePath: string

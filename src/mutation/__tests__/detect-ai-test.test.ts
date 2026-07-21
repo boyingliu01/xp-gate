@@ -6,7 +6,7 @@
 
 import { describe, it, expect, vi } from 'vitest';
 import fs from 'fs/promises';
-import { detectAITestCharacteristics, detectTestLayer } from '../detect-ai-test';
+import { detectAITestCharacteristics, detectTestLayer, detectTestLayerFromContent, detectTestLayerWithAnnotation } from '../detect-ai-test';
 
 vi.mock('fs/promises');
 
@@ -39,6 +39,77 @@ describe('detect-ai-test.ts - AI Test Detection', () => {
     it('should prioritize e2e over other patterns', () => {
       expect(detectTestLayer('src/__tests__/login.e2e.test.ts')).toBe('e2e');
       expect(detectTestLayer('src/integration/user.e2e.test.ts')).toBe('e2e');
+    });
+  });
+
+  describe('detectTestLayerFromContent — @test-type annotation', () => {
+    it('should return unit for @test-type unit annotation', () => {
+      const content = `/**\n * @test-type unit\n * @test REQ-001\n */\nimport { describe, it } from 'vitest';`;
+      expect(detectTestLayerFromContent(content)).toBe('unit');
+    });
+
+    it('should return integration for @test-type integration annotation', () => {
+      const content = `/**\n * @test-type integration\n * @test REQ-002\n */\nimport { describe, it } from 'vitest';`;
+      expect(detectTestLayerFromContent(content)).toBe('integration');
+    });
+
+    it('should return e2e for @test-type e2e annotation', () => {
+      const content = `/**\n * @test-type e2e\n * @test REQ-003\n */\nimport { describe, it } from 'vitest';`;
+      expect(detectTestLayerFromContent(content)).toBe('e2e');
+    });
+
+    it('should support line comment format', () => {
+      const content = `// @test-type integration\nimport { describe, it } from 'vitest';`;
+      expect(detectTestLayerFromContent(content)).toBe('integration');
+    });
+
+    it('should return null when no @test-type annotation present', () => {
+      const content = `/**\n * @test REQ-001\n * @intent some intent\n */\nimport { describe, it } from 'vitest';`;
+      expect(detectTestLayerFromContent(content)).toBeNull();
+    });
+
+    it('should be case-insensitive', () => {
+      const content = `/**\n * @Test-Type E2E\n */\nimport { describe, it } from 'vitest';`;
+      expect(detectTestLayerFromContent(content)).toBe('e2e');
+    });
+
+    it('should return null for invalid @test-type value', () => {
+      const content = `/**\n * @test-type invalid\n */\nimport { describe, it } from 'vitest';`;
+      expect(detectTestLayerFromContent(content)).toBeNull();
+    });
+  });
+
+  describe('detectTestLayerWithAnnotation — annotation-first detection', () => {
+    it('should prioritize @test-type annotation over path pattern', async () => {
+      // File is in __tests__/ (would be 'unit' by path), but annotation says 'integration'
+      const content = `/**\n * @test-type integration\n */\nimport { describe, it } from 'vitest';`;
+      vi.mocked(fs.readFile).mockResolvedValue(content);
+
+      const result = await detectTestLayerWithAnnotation('src/__tests__/user.test.ts');
+      expect(result).toBe('integration');
+    });
+
+    it('should fall back to path detection when no annotation', async () => {
+      const content = `import { describe, it } from 'vitest';`;
+      vi.mocked(fs.readFile).mockResolvedValue(content);
+
+      const result = await detectTestLayerWithAnnotation('src/e2e/login.e2e.test.ts');
+      expect(result).toBe('e2e');
+    });
+
+    it('should return unknown when neither annotation nor path matches', async () => {
+      const content = `import { describe, it } from 'vitest';`;
+      vi.mocked(fs.readFile).mockResolvedValue(content);
+
+      const result = await detectTestLayerWithAnnotation('src/services/user.ts');
+      expect(result).toBe('unknown');
+    });
+
+    it('should fall back to path when file read fails', async () => {
+      vi.mocked(fs.readFile).mockRejectedValue(new Error('ENOENT'));
+
+      const result = await detectTestLayerWithAnnotation('src/__tests__/user.test.ts');
+      expect(result).toBe('unit');
     });
   });
 

@@ -724,6 +724,13 @@ if [ -n "$PROJECT_SUBDIR" ] && [ "$PROJECT_SUBDIR" != "." ] && [ "$PROJECT_LANG"
   echo ""
 fi
 
+# Global prefix for file existence checks when hook runs in a subdirectory.
+# git diff paths are always repo-root-relative, but after cd the CWD is the subdir.
+_CHECK_PREFIX=""
+if [ -n "${ORIGINAL_DIR:-}" ] && [ "$(pwd)" != "$ORIGINAL_DIR" ]; then
+  _CHECK_PREFIX="$ORIGINAL_DIR/"
+fi
+
 # ============================================================================
 # GATE 1: Code Quality (Static Analysis + Linting + Shell Check combined)
 # Combination of: Old Gates 1 (Static), Gate 2 (Linting), Gate 5 (Shell Check)
@@ -1294,12 +1301,12 @@ else
       esac
       # Skip files with @no-test-required (reason >= 10 chars) or legacy @no-test annotation
       # Order matters: @no-test-required must be checked first — @no-test is a substring match
-      if grep -q '@no-test-required' "$src_file" 2>/dev/null; then
-        if grep -qE '@no-test-required\s*:\s*.{10,}' "$src_file" 2>/dev/null; then
+      if grep -q '@no-test-required' "${_CHECK_PREFIX}${src_file}" 2>/dev/null; then
+        if grep -qE '@no-test-required\s*:\s*.{10,}' "${_CHECK_PREFIX}${src_file}" 2>/dev/null; then
           continue
         fi
         # @no-test-required with short reason (< 10 chars) — fall through to BLOCK
-      elif grep -q '@no-test' "$src_file" 2>/dev/null; then
+      elif grep -q '@no-test' "${_CHECK_PREFIX}${src_file}" 2>/dev/null; then
         continue
       fi
 
@@ -1316,9 +1323,9 @@ else
 
       for pattern in "${patterns[@]}"; do
         if [[ "$pattern" == *'*'* ]]; then
-          found=$(find . -path "*/${pattern}" -type f 2>/dev/null | head -1)
+          found=$(find "${_CHECK_PREFIX:-.}" -path "*/${pattern}" -type f 2>/dev/null | head -1)
           if [ -n "$found" ]; then TEST_FOUND=true; break; fi
-        elif [ -f "$pattern" ]; then
+        elif [ -f "${_CHECK_PREFIX}${pattern}" ]; then
           TEST_FOUND=true
           break
         fi
@@ -1446,9 +1453,9 @@ else
 
       for pattern in "${patterns[@]}"; do
         if [[ "$pattern" == *'*'* ]]; then
-          found=$(find . -path "*/${pattern}" -type f 2>/dev/null | head -1)
+          found=$(find "${_CHECK_PREFIX:-.}" -path "*/${pattern}" -type f 2>/dev/null | head -1)
           if [ -n "$found" ]; then TEST_FOUND=true; break; fi
-        elif [ -f "$pattern" ]; then
+        elif [ -f "${_CHECK_PREFIX}${pattern}" ]; then
           TEST_FOUND=true
           break
         fi
@@ -1523,6 +1530,50 @@ else
         fi
       fi
     done
+  fi
+
+  # ========================================================================
+  # Gate 5c: @test-type Annotation Check (Issue #359)
+  # New test files (.test.ts/.spec.ts) must have @test-type annotation.
+  # Annotation format: @test-type unit|integration|e2e
+  # New files without annotation → BLOCK
+  # Existing (modified) files without annotation → WARNING (backward compatible)
+  # ========================================================================
+  TEST_TYPE_ANNOTATION_REGEX='@test-type[[:space:]]+(unit|integration|e2e)'
+  NEW_TEST_FILES=$(echo "$CHANGED_FILES" | grep -E '\.(test|spec)\.ts$' | while read -r f; do
+    if git diff --cached --diff-filter=A --name-only 2>/dev/null | grep -qF "$f"; then
+      echo "$f"
+    fi
+  done)
+  MODIFIED_TEST_FILES=$(echo "$CHANGED_FILES" | grep -E '\.(test|spec)\.ts$' | while read -r f; do
+    if git diff --cached --diff-filter=M --name-only 2>/dev/null | grep -qF "$f"; then
+      echo "$f"
+    fi
+  done)
+
+  GATE_5C_BLOCKED=0
+  if [ -n "$NEW_TEST_FILES" ]; then
+    for test_file in $NEW_TEST_FILES; do
+      if ! grep -qiE "$TEST_TYPE_ANNOTATION_REGEX" "${_CHECK_PREFIX}${test_file}" 2>/dev/null; then
+        echo "✗ MISSING @test-type: $test_file — new test files must declare test layer"
+        echo "   Add: /** @test-type unit|integration|e2e */"
+        GATE_5C_BLOCKED=1
+      fi
+    done
+  fi
+  if [ -n "$MODIFIED_TEST_FILES" ]; then
+    for test_file in $MODIFIED_TEST_FILES; do
+      if ! grep -qiE "$TEST_TYPE_ANNOTATION_REGEX" "${_CHECK_PREFIX}${test_file}" 2>/dev/null; then
+        echo "⚠️  MISSING @test-type (legacy): $test_file — consider adding @test-type annotation"
+      fi
+    done
+  fi
+  if [ "$GATE_5C_BLOCKED" = "1" ]; then
+    echo "✗ Gate 5c FAILED — new test files must have @test-type annotation"
+    GATE_5_END=$(gate_start_ms)
+    GATE_5_ELAPSED=$((GATE_5_END - GATE_5_START))
+    record_gate_audit "gate-5c" "test-type-annotation" "FAIL" "1" "$GATE_5_START"
+    exit 1
   fi
 
   # ============================================================================

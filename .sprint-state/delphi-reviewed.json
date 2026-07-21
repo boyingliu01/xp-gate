@@ -1,11 +1,17 @@
 {
   "mode": "design",
-  "timestamp": "2026-07-14T14:40:00Z",
+  "timestamp": "2026-07-21T10:30:00Z",
   "verdict": "APPROVED",
   "consensus_ratio": 1.0,
-  "experts": ["A", "B", "C"],
-  "rounds": 2,
-  "round1_verdicts": {"A": "REQUEST_CHANGES", "B": "REQUEST_CHANGES", "C": "REQUEST_CHANGES"},
-  "round2_verdicts": {"A": "APPROVED", "B": "APPROVED", "C": "APPROVED"},
-  "specification_path": ".sprint-state/phase-outputs/specification.yaml"
+  "rounds": 3,
+  "experts": 3,
+  "specification_path": ".sprint-state/phase-outputs/specification.yaml",
+  "design_doc_path": "docs/plans/2026-07-21-layered-test-protection-network-design.md",
+  "key_adjustments": [
+    "REQ-002 从分层覆盖率报告器改为分层测试统计报告器（不做源代码覆盖率聚合）",
+    "mock 密度分层管控明确归 Gate M2/M3，Gate 5 聚焦注解校验和 E2E 贯通",
+    "pre-commit 做注解校验，pre-push 做统计报告",
+    "新测试文件 @test-type 缺失 → BLOCK，旧文件不追溯",
+    "e2e-flow-validator.ts 放入 src/mock-policy/"
+  ]
 }
