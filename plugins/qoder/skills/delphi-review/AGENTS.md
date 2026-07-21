@@ -26,15 +26,18 @@ skills/delphi-review/
 |------|----------|-------|
 | Core methodology | SKILL.md | Delphi process, expert roles, consensus rules |
 | Code-walkthrough | references/code-walkthrough.md | Pre-push mode: 20 files/500 LOC limit |
-| Config example | .delphi-config.json.example | 3 experts, domestic models |
+| Config example | .delphi-config.json.example | 3 experts, providers + API keys |
+| External API script | scripts/delphi-external-review.cjs | Calls model APIs, returns JSON verdict |
 
 ## CONVENTIONS
 - 3 experts anonymous in Round 1 (no cross-expert bias)
 - ≥90% consensus threshold (was 95%, now unified to 90%)
 - Max 5 rounds before forcing decision
-- Cross-provider required: experts from ≥2 different providers (model list read from `opencode.json` agent config, not hardcoded)
-- Model selection: reads `delphi-reviewer-*` agent `model` fields from `opencode.json`
-- No hardcoded model lists — models defined by user's `opencode.json` configuration
+- Cross-provider required: experts from ≥2 different providers (config read from `.delphi-config.json`, not hardcoded)
+- Model selection: reads provider/model from `.delphi-config.json` active profile
+- Mixed mode: `provider: "local"` falls back to orchestrator model (reduced diversity warning)
+- No hardcoded model lists — models defined by user's `.delphi-config.json` configuration
+- Execution: via Bash tool calling `delphi-external-review.cjs` script (not subagent dispatch)
 - Code-walkthrough mode: triggered on git push, stores result in .code-walkthrough-result.json
 - Code-walkthrough skipped on main/master pushes (by design)
 

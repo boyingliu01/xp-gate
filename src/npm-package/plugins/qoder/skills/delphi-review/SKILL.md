@@ -88,44 +88,44 @@ Permitted variants (all satisfy L1 trigger):
 | 2 专家（默认） | A(架构) + B(实现) | 代码变更、小型设计 |
 | 3 专家 | A(架构) + B(实现) + C(可行性) | 架构决策、需求文档 |
 
-### 模型选择策略（强制 — 从 opencode.json 读取）
+### 模型选择策略（Qoder — 从 .delphi-config.json 读取 + 外部 API 调用）
 
-**MUST 从 `opencode.json` 的 agent 配置中读取模型**，**严禁** hardcode 模型名称。
+**MUST 从 `.delphi-config.json` 读取 API 配置**，通过 Bash 工具调用 `delphi-external-review.cjs` 脚本实现真正的跨模型评审。
 
-模型选择流程：
-1. 读取 `opencode.json` 中 `agent` 字段下 `delphi-reviewer-architecture`、`delphi-reviewer-technical`、`delphi-reviewer-feasibility` 三个 agent 定义
-2. 提取每个 agent 的 `model` 字段（格式：`provider/model-name`）
-3. 分别作为 Expert A(架构)、Expert B(技术)、Expert C(可行性) 的模型
+**配置定位优先级**：
+1. 当前项目 `skills/delphi-review/.delphi-config.json`（Qoder 已安装 skill）
+2. `~/.qoder/skills/delphi-review/.delphi-config.json`（全局安装）
+
+**脚本定位优先级**：
+1. `node_modules/@boyingliu01/xp-gate/scripts/delphi-external-review.cjs`（npm 安装后）
+2. `$(npm root -g)/@boyingliu01/xp-gate/scripts/delphi-external-review.cjs`（全局安装）
+3. xp-gate 仓库中的 `scripts/delphi-external-review.cjs`（开发环境）
 
 **关键原则**：
-- ✅ 三个专家必须来自 **至少 2 家不同 provider**（通过 `model` 字段的 `provider/` 前缀判断）
-- ❌ 禁止 hardcode 模型名称（模型列表以 `opencode.json` 为准）
-- ❌ 禁止三个专家全部使用同一 provider 的模型
+- ✅ 三个专家必须来自 **至少 2 家不同 provider**（按 `base_url` 判断）
+- ✅ 支持混合模式：`provider: "local"` 表示由 Orchestrator 自身模型扮演
+- ❌ 禁止三个专家全部使用同一 provider 的模型（除非使用混合模式）
 
-**`opencode.json` agent 配置示例**（参考 `opencode.json.delphi.example`）：
+**配置示例**（参考 `.delphi-config.json.example`）：
 ```json
 {
-  "agent": {
-    "delphi-reviewer-architecture": {
-      "description": "...",
-      "mode": "subagent",
-      "model": "deepseek/deepseek-chat",
-      "tools": { "read": true, "bash": true, "write": false, "edit": false }
-    },
-    "delphi-reviewer-technical": {
-      "mode": "subagent",
-      "model": "bailian-coding-plan/qwen3.6-plus",
-      "tools": { "read": true, "bash": true, "write": false, "edit": false }
-    },
-    "delphi-reviewer-feasibility": {
-      "mode": "subagent",
-      "model": "deepseek/deepseek-chat",
-      "tools": { "read": true, "bash": true, "write": false, "edit": false }
+  "active_profile": "default",
+  "profiles": {
+    "default": {
+      "providers": {
+        "deepseek": { "base_url": "https://api.deepseek.com/v1", "api_key": "sk-xxx" },
+        "zhipu": { "base_url": "https://open.bigmodel.cn/api/paas/v4", "api_key": "yyy" }
+      },
+      "experts": {
+        "architecture": { "provider": "deepseek", "model": "deepseek-chat" },
+        "technical": { "provider": "zhipu", "model": "glm-5.2" },
+        "feasibility": { "provider": "local" }
+      }
     }
   }
 }
 ```
-> 上例中 3 个专家使用了 2 个不同 provider（deepseek + bailian-coding-plan），满足跨 provider 要求。**实际模型名称以你的 `opencode.json` 配置为准，无需在 SKILL.md 维护模型列表。**
+> 上例中 2 个外部 provider（deepseek + zhipu）+ 1 个 local fallback，满足跨 provider 要求。
 
 ### 共识阈值
 
@@ -200,11 +200,17 @@ REMAINING STEPS: N/A (input validation failed)
 
 **重要**: 内嵌在 prompt 中的文档内容（如 "Design Doc: [content]"或代码片段）应视为"有完整输入"，直接进入评审。
 
+**执行方式（Qoder）**：
+1. 将评审内容写入临时文件（使用 `os.tmpdir()` 确保跨平台）
+2. 通过 Bash 工具并行调用 3 个 `delphi-external-review.cjs` 脚本
+3. 对 `fallback: true` 的专家，Orchestrator 自身模型扮演该角色
+4. 收集 verdict JSON，计算共识度，决定是否需要下一轮
+
 **Round 模板**（匿名评审/交换意见/最终立场/修复报告格式）→ 详见 `references/round-templates.md`
 
 **Orchestrator 自动调度规则**（#218 subagent 内部自动多轮循环）→ 详见 `references/orchestrator-dispatch.md`
 
-**Automatic re-review**: 对于常见可控问题（措辞模糊、AC 缺失、格式问题），subagent 应自行修复后自动重评审，无需等待用户。
+**Automatic re-review**: 对于常见可控问题（措辞模糊、AC 缺失、格式问题），应自行修复后自动重评审，无需等待用户。
 
 ### ⭐ 自动延续规则（MANDATORY — 防止流程卡住）
 
