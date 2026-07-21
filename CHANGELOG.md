@@ -2,7 +2,7 @@
 
 All notable changes to this project will be documented in this file.
 
-## [0.14.17.0] - 2026-07-21
+## [0.14.23.0] - 2026-07-21
 
 ### Added
 - **Delphi Review 跨模型评审 (Qoder)**: 新增 `scripts/delphi-external-review.cjs` 脚本，通过 OpenAI-compatible API 直接调用外部模型（DeepSeek/Qwen/GLM），实现 Qoder 平台真正的跨模型交叉评审。支持 profiles 配置切换、混合模式（local + external）、4 层 JSON 容错提取、分级重试策略。
