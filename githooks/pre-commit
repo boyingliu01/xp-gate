@@ -664,7 +664,6 @@ CHANGEDFILELIST
     done
     echo ""
   fi
-fi
 
 # Helper: check if a language is in PROJECT_LANGS
 has_project_lang() {
