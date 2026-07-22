@@ -64,7 +64,7 @@ function copyDir(src, dest) {
 
 function syncSkills() {
   const destRoot = path.join(PKG_ROOT, 'skills');
-  rmrf(destRoot);
+  // In-place copy (no rmrf) to avoid race condition with parallel test readers.
   fs.mkdirSync(destRoot, { recursive: true });
   let copied = 0;
   for (const name of CORE_SKILLS) {
@@ -80,7 +80,7 @@ function syncSkills() {
 
 function injectCanonicalSkills(pluginDest) {
   const skillsDest = path.join(pluginDest, 'skills');
-  rmrf(skillsDest);
+  // In-place copy (no rmrf) to avoid race condition with parallel test readers.
   fs.mkdirSync(skillsDest, { recursive: true });
   for (const name of CORE_SKILLS) {
     const src = path.join(REPO_ROOT, 'skills', name);
@@ -97,7 +97,7 @@ function injectCanonicalSkills(pluginDest) {
 
 function syncPlugins() {
   const destRoot = path.join(PKG_ROOT, 'plugins');
-  rmrf(destRoot);
+  // In-place copy (no rmrf) to avoid race condition with parallel test readers.
   fs.mkdirSync(destRoot, { recursive: true });
   let copied = 0;
   for (const name of PLUGINS) {
@@ -139,7 +139,8 @@ function syncAdapters() {
     console.error(`[sync] SKIP adapters (missing): ${srcRoot}`);
     return 0;
   }
-  rmrf(destRoot);
+  // In-place copy (no rmrf) to avoid race condition where parallel tests
+  // (e.g. doctor.test.js) read from destRoot during the delete-recreate window.
   fs.mkdirSync(destRoot, { recursive: true });
   const entries = fs.readdirSync(srcRoot, { withFileTypes: true });
   let copied = 0;

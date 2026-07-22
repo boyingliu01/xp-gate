@@ -144,6 +144,77 @@ This enforcement is instructional (LLM follows SKILL.md instructions), not progr
 
 ---
 
+## In-Session Verification (MANDATORY — v0.14.31+)
+
+**Purpose**: Ensure every implementation change is immediately verified and recorded, enabling Better Loop Harness (and other observability tools) to capture normalized change→validation event pairs.
+
+**Problem it solves**: Without explicit in-session verification, Agents may edit files and move on without running tests or linters. This creates unverified changes that are invisible to post-hoc review tools, breaking the traceability chain between "what changed" and "was it validated".
+
+### Mandatory Verification Protocol
+
+After **every** implementation change (file edit, refactor, new feature, bug fix), the Agent MUST execute the following sequence BEFORE claiming the change is complete:
+
+1. **Run tests**: `npm test` or `npx vitest run` (or project-specific test command)
+2. **Run linter**: `npm run lint` or `npx eslint .` (or project-specific lint command)
+3. **Type-check** (TypeScript projects): `npx tsc --noEmit`
+4. **Record the result**: Append a structured verification event (see format below)
+
+### Verification Event Format
+
+Each verification event MUST be recorded as a structured JSON object. Agents should output this to stdout or append to `.sprint-state/phase-outputs/verification-events.jsonl`:
+
+```json
+{
+  "timestamp": "2026-07-22T10:30:00Z",
+  "change": {
+    "type": "edit|refactor|feature|bugfix",
+    "files": ["src/lib/auth.ts", "src/lib/auth.test.ts"],
+    "description": "Implement validateToken() for expired token handling"
+  },
+  "verification": {
+    "tests": { "command": "npx vitest run src/lib/auth.test.ts", "status": "pass|fail", "summary": "4 passed, 0 failed" },
+    "lint": { "command": "npm run lint", "status": "pass|fail|warn", "summary": "0 errors, 2 warnings" },
+    "typecheck": { "command": "npx tsc --noEmit", "status": "pass|fail|skip", "summary": "No type errors" }
+  },
+  "outcome": "verified|failed|partial",
+  "req": "REQ-003"
+}
+```
+
+### Integration with ralph-loop
+
+When using ralph-loop mode (default BUILD strategy), each REQ iteration MUST include verification as the final step before marking the REQ complete:
+
+```
+ralph-loop iteration:
+  1. [TDD-RED] Write failing test
+  2. [TDD-GREEN] Implement minimal code to pass
+  3. [TDD-REFACTOR] Clean up while keeping tests green
+  4. [VERIFY] Run tests + lint + typecheck ← MANDATORY
+  5. [RECORD] Append verification event ← MANDATORY
+  6. Mark REQ complete and continue to next
+```
+
+### Anti-Patterns
+
+| ❌ Error | ✅ Correct |
+|----------|----------|
+| Edit file → claim done → move to next task | Edit file → run tests + lint → record result → claim done |
+| "Tests should pass" (assertion without evidence) | "Tests passed: 4 passed, 0 failed (npx vitest run)" |
+| Run tests only at end of entire BUILD phase | Run tests after every individual change/REQ |
+| Skip type-check because "I didn't touch types" | Always run `tsc --noEmit` on TypeScript projects |
+
+### Harness Integration
+
+Better Loop Harness captures change and verification events by inspecting session history. The structured verification events above serve as the canonical signal that:
+- A change occurred (the `change` field)
+- The change was validated (the `verification` field)
+- The outcome is attributable (the `outcome` field ties result to specific change)
+
+Without these events, the Harness can only infer changes from file diffs and has no verification signal, resulting in lower "改动验证" (Change Verification) dimension scores.
+
+---
+
 ## TDD 强制执行
 
 ### Gate 5a-BLOCK: 新增文件测试强制
