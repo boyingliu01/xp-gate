@@ -294,14 +294,34 @@ Each round MUST output a structured round marker:
 | 2 专家（默认） | A(架构) + B(实现) | 代码变更、小型设计 |
 | 3 专家 | A(架构) + B(实现) + C(可行性) | 架构决策、需求文档 |
 
-### 模型选择策略（强制 — 从 opencode.json 读取）
-
-**MUST 从 `opencode.json` 的 agent 配置中读取模型**，**严禁** hardcode 模型名称。
+### 模型选择策略（强制 — 平台适配）
 
 **关键原则**：
 - ✅ 三个专家必须来自 **至少 2 家不同 provider**
-- ❌ 禁止 hardcode 模型名称（模型列表以 `opencode.json` 为准）
+- ❌ 禁止 hardcode 模型名称
 - ❌ 禁止三个专家全部使用同一 provider 的模型
+- ❌ 禁止使用 Anthropic/OpenAI/Google 等国外模型
+
+#### Qoder 平台（推荐 — Custom Agent 模式）
+
+Qoder 环境下使用 **Custom Agent** 机制，每个专家是一个独立的 custom agent，配置不同的 Qoder 内置模型：
+
+| 专家 | Agent 文件 | 模型 | Credits 费率 |
+|------|-----------|------|-------------|
+| Architecture (A) | `.qoder/agents/delphi-architecture.md` | Qwen3.7-Max | 0.5× |
+| Technical (B) | `.qoder/agents/delphi-technical.md` | GLM-5.2 | 0.6× |
+| Feasibility (C) | `.qoder/agents/delphi-feasibility.md` | DeepSeek-V4-Pro | 0.5× |
+
+**执行方式**：通过 Agent tool 并行启动 3 个 subagent（type=GeneralPurpose），每个 agent 使用自己配置的模型独立评审，主 orchestrator 收集结果后计算共识。
+
+**优势**：无需外部 API key，直接使用 Qoder Credits，模型由平台统一管理。
+
+#### OpenCode 平台（External API 模式）
+
+OpenCode 环境下通过 `opencode.json` 的 agent 配置 + `.delphi-config.json` 调用外部 API：
+- **MUST 从 `opencode.json` 的 agent 配置中读取模型**
+- 通过 `scripts/delphi-external-review.cjs` 调用各 provider 的 OpenAI 兼容 API
+- 需要用户自行配置 API key（环境变量注入）
 
 ### 共识阈值
 
