@@ -377,33 +377,34 @@ describe('sync-package-content subprocess invocation', () => {
     'to-issues',
   ];
 
-  function cleanupPackageDirectories() {
-    // Clean up if they exist
-    ['skills', 'plugins', 'adapters'].forEach(dir => {
-      const fullPath = path.join(PKG_ROOT, dir);
-      if (fs.existsSync(fullPath)) {
-        fs.rmSync(fullPath, { recursive: true, force: true });
-      }
+  /**
+   * afterAll: Ensure package directories are restored after all tests.
+   * Prevents race condition where other test files (e.g. doctor.test.js)
+   * read from src/npm-package/adapters/ while sync tests temporarily delete it.
+   */
+  afterAll(() => {
+    const syncScript = path.join(WORKTREE_PATH, 'src', 'npm-package', 'scripts', 'sync-package-content.js');
+    spawnSync(process.execPath, [syncScript], {
+      cwd: WORKTREE_PATH,
+      stdio: 'pipe',
     });
-  }
-
-  function restorePackageDirectories() {
-    // Restore from backup if they existed before test
-    // Since we just tested them being empty, just ensure they exist after sync
-  }
+  });
 
   it('sync-package-content.js copies skills from repo to package', () => {
     const syncScript = path.join(WORKTREE_PATH, 'src', 'npm-package', 'scripts', 'sync-package-content.js');
     const nodeExe = process.execPath;
 
-    // Ensure skills directory is empty first
-    cleanupPackageDirectories();
-
-    // Run sync as subprocess
+    // Run sync as subprocess (overwrites existing files — no need to delete first)
     const result = spawnSync(nodeExe, [syncScript], {
       cwd: WORKTREE_PATH,
       stdio: 'pipe',
+      timeout: 15000,
     });
+
+    if (result.status !== 0) {
+      console.error('sync stderr:', result.stderr?.toString() || '(empty)');
+      console.error('sync stdout:', result.stdout?.toString() || '(empty)');
+    }
 
     expect(result.status).toBe(0, 'sync script should exit with status 0');
 
@@ -432,7 +433,13 @@ describe('sync-package-content subprocess invocation', () => {
     const result = spawnSync(nodeExe, [syncScript], {
       cwd: WORKTREE_PATH,
       stdio: 'pipe',
+      timeout: 15000,
     });
+
+    if (result.status !== 0) {
+      console.error('sync stderr:', result.stderr?.toString() || '(empty)');
+      console.error('sync stdout:', result.stdout?.toString() || '(empty)');
+    }
 
     expect(result.status).toBe(0, 'sync script should exit with status 0');
 
@@ -454,7 +461,13 @@ describe('sync-package-content subprocess invocation', () => {
     const result = spawnSync(nodeExe, [syncScript], {
       cwd: WORKTREE_PATH,
       stdio: 'pipe',
+      timeout: 15000,
     });
+
+    if (result.status !== 0) {
+      console.error('sync stderr:', result.stderr?.toString() || '(empty)');
+      console.error('sync stdout:', result.stdout?.toString() || '(empty)');
+    }
 
     expect(result.status).toBe(0, 'sync script should exit with status 0');
 
@@ -480,7 +493,13 @@ describe('sync-package-content subprocess invocation', () => {
     const result = spawnSync(nodeExe, [syncScript], {
       cwd: WORKTREE_PATH,
       stdio: 'pipe',
+      timeout: 15000,
     });
+
+    if (result.status !== 0) {
+      console.error('sync stderr:', result.stderr?.toString() || '(empty)');
+      console.error('sync stdout:', result.stdout?.toString() || '(empty)');
+    }
 
     expect(result.status).toBe(0, 'sync script should exit with status 0');
 

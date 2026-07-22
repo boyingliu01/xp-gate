@@ -664,6 +664,7 @@ CHANGEDFILELIST
     done
     echo ""
   fi
+fi  # close XP_GATE_LANG if/else (line 358)
 
 # Helper: check if a language is in PROJECT_LANGS
 has_project_lang() {
@@ -1482,6 +1483,13 @@ else
   # ========================================================================
   CHANGED_TEST_FILES=$(git diff --cached --name-only --diff-filter=ACM | grep -E '\.(test|spec)\.(ts|tsx|js|jsx|py|go)$' || true)
 
+  # Strip PROJECT_SUBDIR prefix from test file paths when running in subdirectory.
+  # git diff returns repo-root relative paths, but after cd "$PROJECT_SUBDIR" (line 728)
+  # vitest and [ -f ] checks need subdirectory-relative paths. (v0.14.31+ fix)
+  if [ -n "$PROJECT_SUBDIR" ] && [ "$PROJECT_SUBDIR" != "." ] && [ -n "$CHANGED_TEST_FILES" ]; then
+    CHANGED_TEST_FILES=$(echo "$CHANGED_TEST_FILES" | sed "s|^${PROJECT_SUBDIR}/||")
+  fi
+
   if [ -n "$CHANGED_TEST_FILES" ]; then
     echo "Checking mock density in test files..."
     for test_file in $CHANGED_TEST_FILES; do
@@ -1569,6 +1577,10 @@ else
           
           # Also get changed source files (non-test) for related-test lookup
           CHANGED_SRC_FILES=$(git diff --cached --name-only --diff-filter=ACM | grep -E '\.(ts|tsx|js|jsx)$' | grep -v '\.test\.' | grep -v '\.spec\.' | grep -v '__tests__' | grep -v '\.d\.ts$' | grep -v '__snapshots__' || true)
+          # Strip PROJECT_SUBDIR prefix (same as CHANGED_TEST_FILES fix above)
+          if [ -n "$PROJECT_SUBDIR" ] && [ "$PROJECT_SUBDIR" != "." ] && [ -n "$CHANGED_SRC_FILES" ]; then
+            CHANGED_SRC_FILES=$(echo "$CHANGED_SRC_FILES" | sed "s|^${PROJECT_SUBDIR}/||")
+          fi
           CHANGED_SRC_COUNT=$(echo "$CHANGED_SRC_FILES" | grep -c '.' || echo "0")
           
           # Decide strategy
