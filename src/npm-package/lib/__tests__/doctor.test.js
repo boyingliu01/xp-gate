@@ -299,10 +299,7 @@ describe('doctor', () => {
     expect(logSpy).toHaveBeenCalledWith(expect.stringContaining('All checks passed'));
   });
 
-  // TODO: Test infrastructure needed after async/execWithTimeout refactor
-  // This test fails because doctor.js now uses execAsync (util.promisify(exec))
-  // but the test mocks execSync. Need to update mock strategy to handle both.
-  it.skip('AC-05: doctor reports all checks passed for healthy global install', async () => {
+  it('AC-05: doctor reports all checks passed for healthy global install', async () => {
     setupGlobalInstall();
     ensureTuiRegistered();
     seedVersionCache();
@@ -319,10 +316,7 @@ describe('doctor', () => {
 
   // === AC-08: partial uninstall detection ===
 
-  // TODO: Test infrastructure needed after async/execWithTimeout refactor
-  // This test fails because doctor.js now uses execAsync (util.promisify(exec))
-  // but the test mocks execSync. Need to update mock strategy to handle both.
-  it.skip('AC-08: doctor detects missing hooks in partial install', async () => {
+  it('AC-08: doctor detects missing hooks in partial install', async () => {
     setupLocalInstall();
     seedVersionCache();
     // Remove hooks to simulate partial state
@@ -368,10 +362,7 @@ describe('doctor', () => {
     );
   });
 
-  // TODO: Test infrastructure needed after async/execWithTimeout refactor
-  // This test fails because doctor.js now uses execAsync (util.promisify(exec))
-  // but the test mocks execSync. Need to update mock strategy to handle both.
-  it.skip('AC-08: doctor detects missing adapters', async () => {
+  it('AC-08: doctor detects missing adapters', async () => {
     setupLocalInstall();
     seedVersionCache();
     // Remove adapters dir
@@ -390,12 +381,10 @@ describe('doctor', () => {
     );
   });
 
-  // TODO: Test infrastructure needed after async/execWithTimeout refactor
-  // This test fails because doctor.js now uses execAsync (util.promisify(exec))
-  // but the test mocks execSync. Need to update mock strategy to handle both.
-  it.skip('AC-08: doctor detects wrong core.hooksPath in global mode', async () => {
+  it('AC-08: doctor detects wrong core.hooksPath in global mode', async () => {
     setupGlobalInstall();
     seedVersionCache();
+    // Custom mock: returns wrong hooksPath to trigger detection
     cp.execSync = (cmd) => {
       if (cmd.includes('git config --global core.hooksPath')) {
         if (cmd.includes('--unset')) {
@@ -417,6 +406,32 @@ describe('doctor', () => {
       }
       return '';
     };
+    // Async mock matching execSync above
+    const mockAsyncExec = (cmd, opts, callback) => {
+      if (typeof opts === 'function') { callback = opts; opts = {}; }
+      if (cmd.includes('git config --global core.hooksPath')) {
+        callback(null, cmd.includes('--unset') ? '' : '/wrong/path\n', '');
+      } else if (cmd === 'git rev-parse --git-dir') {
+        callback(null, path.join(tmpProject, '.git') + '\n', '');
+      } else if (cmd === 'node --version') {
+        callback(null, 'v20.0.0\n', '');
+      } else if (cmd === 'git --version') {
+        callback(null, 'git version 2.39.0\n', '');
+      } else if (cmd === 'bash --version') {
+        callback(null, 'GNU bash, version 5.1.16\n', '');
+      } else {
+        callback(null, '', '');
+      }
+    };
+    mockAsyncExec[util.promisify.custom] = (cmd, options) => {
+      return new Promise((resolve, reject) => {
+        mockAsyncExec(cmd, options, (err, stdout, stderr) => {
+          if (err) { err.stdout = stdout || ''; err.stderr = stderr || ''; reject(err); }
+          else { resolve({ stdout, stderr }); }
+        });
+      });
+    };
+    cp.exec = mockAsyncExec;
     const { doctor } = require('../doctor');
     const result = await doctor([]);
     expect(result).toBe(1);
@@ -551,11 +566,7 @@ describe('doctor', () => {
     expect(result).toBe(1);
   });
 
-  // TODO: Test infrastructure needed after async/execWithTimeout refactor
-  // This test fails because doctor.js now uses execAsync (util.promisify(exec))
-  // to detect missing environment dependencies, but the test mocks execSync.
-  // Need to update mock strategy to handle asynchronous environment checks.
-  it.skip('detects missing environment dependencies', async () => {
+  it('detects missing environment dependencies', async () => {
     setupLocalInstall();
     seedVersionCache();
     mockExecFail();
@@ -772,11 +783,7 @@ describe('doctor', () => {
 
   // === Issue #186: --fix syncs global hooks from package source ===
 
-  // TODO: Test infrastructure needed after async/execWithTimeout refactor
-  // This test fails because doctor.js now uses execAsync (util.promisify(exec))
-  // for --fix operations, but the test mocks execSync. Need to update mock
-  // strategy to handle asynchronous fix operations.
-  it.skip('--fix syncs global hooks when they are outdated', async () => {
+  it('--fix syncs global hooks when they are outdated', async () => {
     setupGlobalInstall();
     seedVersionCache();
     // Write an outdated pre-commit hook (different content)
@@ -961,11 +968,7 @@ describe('doctor', () => {
     );
   });
 
-  // TODO: Test infrastructure needed after async/execWithTimeout refactor
-  // This test fails because doctor.js now uses execAsync (util.promisify(exec))
-  // to check gate scripts, but the test mocks execSync. Need to update mock
-  // strategy to handle asynchronous gate script validation.
-  it.skip('gate scripts: FAIL when gate scripts are missing', async () => {
+  it('gate scripts: FAIL when gate scripts are missing', async () => {
     setupLocalInstall();
     seedVersionCache();
     // Clear adapters dir and create with only language adapters, no gate scripts
