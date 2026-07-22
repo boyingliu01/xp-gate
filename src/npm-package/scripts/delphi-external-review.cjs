@@ -95,9 +95,23 @@ function readConfig(configPath, profileOverride) {
     process.exit(1);
   }
 
+  // Resolve ${ENV_VAR} references in provider api_key fields
+  const providers = profile.providers || {};
+  for (const [name, prov] of Object.entries(providers)) {
+    if (prov.api_key && prov.api_key.startsWith('${') && prov.api_key.endsWith('}')) {
+      const envName = prov.api_key.slice(2, -1);
+      const envVal = process.env[envName];
+      if (envVal) {
+        prov.api_key = envVal;
+      } else {
+        console.error(`[delphi-review] WARNING: Environment variable ${envName} not set (provider: ${name}). API calls will fail.`);
+      }
+    }
+  }
+
   return {
     active_profile: profileName,
-    providers: profile.providers || {},
+    providers,
     experts: profile.experts || {},
     consensus: raw.consensus || { threshold_percent: 90, max_review_rounds: 5 },
   };

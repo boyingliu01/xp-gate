@@ -1,0 +1,40 @@
+{
+  "active_profile": "default",
+  "profiles": {
+    "default": {
+      "providers": {
+        "dashscope": {
+          "base_url": "https://dashscope.aliyuncs.com/compatible-mode/v1",
+          "api_key": "${DASHSCOPE_API_KEY}"
+        },
+        "zhipu": {
+          "base_url": "https://open.bigmodel.cn/api/paas/v4",
+          "api_key": "${ZHIPU_API_KEY}"
+        },
+        "deepseek": {
+          "base_url": "https://api.deepseek.com/v1",
+          "api_key": "${DEEPSEEK_API_KEY}"
+        }
+      },
+      "experts": {
+        "architecture": {
+          "provider": "dashscope",
+          "model": "qwen-3.8-max-preview"
+        },
+        "technical": {
+          "provider": "zhipu",
+          "model": "glm-5.2"
+        },
+        "feasibility": {
+          "provider": "deepseek",
+          "model": "deepseek-v4-pro"
+        }
+      }
+    }
+  },
+  "consensus": {
+    "threshold_percent": 90,
+    "max_review_rounds": 5,
+    "cross_provider_required": true
+  }
+}

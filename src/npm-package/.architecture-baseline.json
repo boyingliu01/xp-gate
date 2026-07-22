@@ -1,0 +1,1156 @@
+{
+  "schemaVersion": 1,
+  "archlintVersion": "0.16.0",
+  "generatedAt": "2026-07-22T01:19:48.139625500+00:00",
+  "commit": "9d4f0cb",
+  "smells": [
+    {
+      "id": "clone:3aaabaa03f6aaab1d67bd0f9f1fca46124c67319461965730f3d386d13a6fcad",
+      "smellType": "CodeClone",
+      "severity": "High",
+      "files": [
+        "mutation/init-baseline.ts",
+        "mutation/__tests__/init-baseline.test.ts"
+      ],
+      "metrics": {
+        "cloneInstances": 2,
+        "cloneHash": "3aaabaa03f6aaab1d67bd0f9f1fca46124c67319461965730f3d386d13a6fcad",
+        "tokenCount": 149
+      },
+      "details": {
+        "type": "codeClone",
+        "clone_hash": "3aaabaa03f6aaab1d67bd0f9f1fca46124c67319461965730f3d386d13a6fcad",
+        "token_count": 149
+      },
+      "locations": [
+        {
+          "file": "mutation/__tests__/init-baseline.test.ts",
+          "line": 73,
+          "column": 1,
+          "range": {
+            "start_line": 73,
+            "start_column": 1,
+            "end_line": 116,
+            "end_column": 2
+          },
+          "description": "Duplicated code (149 tokens, lines 73-116). Also found in: mutation\\init-baseline.ts:123-160"
+        },
+        {
+          "file": "mutation/init-baseline.ts",
+          "line": 123,
+          "column": 1,
+          "range": {
+            "start_line": 123,
+            "start_column": 1,
+            "end_line": 160,
+            "end_column": 2
+          },
+          "description": "Duplicated code (149 tokens, lines 123-160). Also found in: mutation\\__tests__\\init-baseline.test.ts:73-116"
+        }
+      ]
+    },
+    {
+      "id": "clone:af002b89d7c4a9d182137416294b4903f8432633d299acc643694c3fa0eaf600",
+      "smellType": "CodeClone",
+      "severity": "High",
+      "files": [
+        "plugins/opencode/scripts/prepack.cjs",
+        "scripts/sync-package-content.js"
+      ],
+      "metrics": {
+        "tokenCount": 137,
+        "cloneInstances": 2,
+        "cloneHash": "af002b89d7c4a9d182137416294b4903f8432633d299acc643694c3fa0eaf600"
+      },
+      "details": {
+        "type": "codeClone",
+        "clone_hash": "af002b89d7c4a9d182137416294b4903f8432633d299acc643694c3fa0eaf600",
+        "token_count": 137
+      },
+      "locations": [
+        {
+          "file": "plugins/opencode/scripts/prepack.cjs",
+          "line": 28,
+          "column": 1,
+          "range": {
+            "start_line": 28,
+            "start_column": 1,
+            "end_line": 83,
+            "end_column": 2
+          },
+          "description": "Duplicated code (137 tokens, lines 28-83). Also found in: scripts\\sync-package-content.js:35-79"
+        },
+        {
+          "file": "scripts/sync-package-content.js",
+          "line": 35,
+          "column": 1,
+          "range": {
+            "start_line": 35,
+            "start_column": 1,
+            "end_line": 79,
+            "end_column": 2
+          },
+          "description": "Duplicated code (137 tokens, lines 35-79). Also found in: plugins\\opencode\\scripts\\prepack.cjs:28-83"
+        }
+      ]
+    },
+    {
+      "id": "clone:b9fe68c7e39a894bd950567afcc731cec75f3b3f5a22ea84f46f9d1fd009404f",
+      "smellType": "CodeClone",
+      "severity": "High",
+      "files": [
+        "lib/doctor.js",
+        "lib/detect-deps.js"
+      ],
+      "metrics": {
+        "cloneInstances": 2,
+        "cloneHash": "b9fe68c7e39a894bd950567afcc731cec75f3b3f5a22ea84f46f9d1fd009404f",
+        "tokenCount": 112
+      },
+      "details": {
+        "type": "codeClone",
+        "clone_hash": "b9fe68c7e39a894bd950567afcc731cec75f3b3f5a22ea84f46f9d1fd009404f",
+        "token_count": 112
+      },
+      "locations": [
+        {
+          "file": "lib/detect-deps.js",
+          "line": 178,
+          "column": 3,
+          "range": {
+            "start_line": 178,
+            "start_column": 3,
+            "end_line": 216,
+            "end_column": 2
+          },
+          "description": "Duplicated code (112 tokens, lines 178-216). Also found in: lib\\doctor.js:482-522"
+        },
+        {
+          "file": "lib/doctor.js",
+          "line": 482,
+          "column": 3,
+          "range": {
+            "start_line": 482,
+            "start_column": 3,
+            "end_line": 522,
+            "end_column": 2
+          },
+          "description": "Duplicated code (112 tokens, lines 482-522). Also found in: lib\\detect-deps.js:178-216"
+        }
+      ]
+    },
+    {
+      "id": "ccog:lib/bootstrap.js:bootstrap:83",
+      "smellType": "HighCognitiveComplexity",
+      "severity": "Medium",
+      "files": [
+        "lib/bootstrap.js"
+      ],
+      "metrics": {
+        "cognitiveComplexity": 19
+      },
+      "details": {
+        "type": "highCognitiveComplexity",
+        "name": "bootstrap",
+        "line": 83,
+        "complexity": 19
+      },
+      "locations": [
+        {
+          "file": "lib/bootstrap.js",
+          "line": 83,
+          "column": 10,
+          "range": {
+            "start_line": 83,
+            "start_column": 10,
+            "end_line": 83,
+            "end_column": 19
+          },
+          "description": "Function 'bootstrap' (cognitive complexity: 19)"
+        }
+      ]
+    },
+    {
+      "id": "ccog:lib/uninstall.js:uninstall:329",
+      "smellType": "HighCognitiveComplexity",
+      "severity": "Medium",
+      "files": [
+        "lib/uninstall.js"
+      ],
+      "metrics": {
+        "cognitiveComplexity": 41
+      },
+      "details": {
+        "type": "highCognitiveComplexity",
+        "name": "uninstall",
+        "line": 329,
+        "complexity": 41
+      },
+      "locations": [
+        {
+          "file": "lib/uninstall.js",
+          "line": 329,
+          "column": 16,
+          "range": {
+            "start_line": 329,
+            "start_column": 16,
+            "end_line": 329,
+            "end_column": 25
+          },
+          "description": "Function 'uninstall' (cognitive complexity: 41)"
+        }
+      ]
+    },
+    {
+      "id": "ccog:plugins/opencode/index.ts:<anonymous>:384",
+      "smellType": "HighCognitiveComplexity",
+      "severity": "Medium",
+      "files": [
+        "plugins/opencode/index.ts"
+      ],
+      "metrics": {
+        "cognitiveComplexity": 18
+      },
+      "details": {
+        "type": "highCognitiveComplexity",
+        "name": "<anonymous>",
+        "line": 384,
+        "complexity": 18
+      },
+      "locations": [
+        {
+          "file": "plugins/opencode/index.ts",
+          "line": 384,
+          "column": 22,
+          "range": {
+            "start_line": 384,
+            "start_column": 22,
+            "end_line": 449,
+            "end_column": 10
+          },
+          "description": "Function '<anonymous>' (cognitive complexity: 18)"
+        }
+      ]
+    },
+    {
+      "id": "ccog:principles/baseline.ts:aggregateTool:51",
+      "smellType": "HighCognitiveComplexity",
+      "severity": "Medium",
+      "files": [
+        "principles/baseline.ts"
+      ],
+      "metrics": {
+        "cognitiveComplexity": 16
+      },
+      "details": {
+        "type": "highCognitiveComplexity",
+        "name": "aggregateTool",
+        "line": 51,
+        "complexity": 16
+      },
+      "locations": [
+        {
+          "file": "principles/baseline.ts",
+          "line": 51,
+          "column": 10,
+          "range": {
+            "start_line": 51,
+            "start_column": 10,
+            "end_line": 51,
+            "end_column": 23
+          },
+          "description": "Function 'aggregateTool' (cognitive complexity: 16)"
+        }
+      ]
+    },
+    {
+      "id": "ccog:principles/baseline.ts:BaselineStorage.createFromFiles:149",
+      "smellType": "HighCognitiveComplexity",
+      "severity": "Medium",
+      "files": [
+        "principles/baseline.ts"
+      ],
+      "metrics": {
+        "cognitiveComplexity": 21
+      },
+      "details": {
+        "type": "highCognitiveComplexity",
+        "name": "BaselineStorage.createFromFiles",
+        "line": 149,
+        "complexity": 21
+      },
+      "locations": [
+        {
+          "file": "principles/baseline.ts",
+          "line": 149,
+          "column": 9,
+          "range": {
+            "start_line": 149,
+            "start_column": 9,
+            "end_line": 149,
+            "end_column": 24
+          },
+          "description": "Function 'BaselineStorage.createFromFiles' (cognitive complexity: 21)"
+        }
+      ]
+    },
+    {
+      "id": "ccog:lib/phase-transition.js:renderDashboard:34",
+      "smellType": "HighCognitiveComplexity",
+      "severity": "Medium",
+      "files": [
+        "lib/phase-transition.js"
+      ],
+      "metrics": {
+        "cognitiveComplexity": 25
+      },
+      "details": {
+        "type": "highCognitiveComplexity",
+        "name": "renderDashboard",
+        "line": 34,
+        "complexity": 25
+      },
+      "locations": [
+        {
+          "file": "lib/phase-transition.js",
+          "line": 34,
+          "column": 10,
+          "range": {
+            "start_line": 34,
+            "start_column": 10,
+            "end_line": 34,
+            "end_column": 25
+          },
+          "description": "Function 'renderDashboard' (cognitive complexity: 25)"
+        }
+      ]
+    },
+    {
+      "id": "ccog:principles/adapters/cpp.ts:CppAdapter.extractCodeBlock:52",
+      "smellType": "HighCognitiveComplexity",
+      "severity": "Medium",
+      "files": [
+        "principles/adapters/cpp.ts"
+      ],
+      "metrics": {
+        "cognitiveComplexity": 51
+      },
+      "details": {
+        "type": "highCognitiveComplexity",
+        "name": "CppAdapter.extractCodeBlock",
+        "line": 52,
+        "complexity": 51
+      },
+      "locations": [
+        {
+          "file": "principles/adapters/cpp.ts",
+          "line": 52,
+          "column": 12,
+          "range": {
+            "start_line": 52,
+            "start_column": 12,
+            "end_line": 52,
+            "end_column": 28
+          },
+          "description": "Function 'CppAdapter.extractCodeBlock' (cognitive complexity: 51)"
+        }
+      ]
+    },
+    {
+      "id": "ccog:scripts/sync-package-content.js:checkAdapterDrift:300",
+      "smellType": "HighCognitiveComplexity",
+      "severity": "Medium",
+      "files": [
+        "scripts/sync-package-content.js"
+      ],
+      "metrics": {
+        "cognitiveComplexity": 19
+      },
+      "details": {
+        "type": "highCognitiveComplexity",
+        "name": "checkAdapterDrift",
+        "line": 300,
+        "complexity": 19
+      },
+      "locations": [
+        {
+          "file": "scripts/sync-package-content.js",
+          "line": 300,
+          "column": 10,
+          "range": {
+            "start_line": 300,
+            "start_column": 10,
+            "end_line": 300,
+            "end_column": 27
+          },
+          "description": "Function 'checkAdapterDrift' (cognitive complexity: 19)"
+        }
+      ]
+    },
+    {
+      "id": "ccog:lib/sprint-discovery.js:discoverActiveSprints:111",
+      "smellType": "HighCognitiveComplexity",
+      "severity": "Medium",
+      "files": [
+        "lib/sprint-discovery.js"
+      ],
+      "metrics": {
+        "cognitiveComplexity": 48
+      },
+      "details": {
+        "type": "highCognitiveComplexity",
+        "name": "discoverActiveSprints",
+        "line": 111,
+        "complexity": 48
+      },
+      "locations": [
+        {
+          "file": "lib/sprint-discovery.js",
+          "line": 111,
+          "column": 10,
+          "range": {
+            "start_line": 111,
+            "start_column": 10,
+            "end_line": 111,
+            "end_column": 31
+          },
+          "description": "Function 'discoverActiveSprints' (cognitive complexity: 48)"
+        }
+      ]
+    },
+    {
+      "id": "ccog:principles/lint-baseline.ts:diffBaselines:232",
+      "smellType": "HighCognitiveComplexity",
+      "severity": "Medium",
+      "files": [
+        "principles/lint-baseline.ts"
+      ],
+      "metrics": {
+        "cognitiveComplexity": 16
+      },
+      "details": {
+        "type": "highCognitiveComplexity",
+        "name": "diffBaselines",
+        "line": 232,
+        "complexity": 16
+      },
+      "locations": [
+        {
+          "file": "principles/lint-baseline.ts",
+          "line": 232,
+          "column": 17,
+          "range": {
+            "start_line": 232,
+            "start_column": 17,
+            "end_line": 232,
+            "end_column": 30
+          },
+          "description": "Function 'diffBaselines' (cognitive complexity: 16)"
+        }
+      ]
+    },
+    {
+      "id": "ccog:lib/baseline.js:createBaseline:72",
+      "smellType": "HighCognitiveComplexity",
+      "severity": "Medium",
+      "files": [
+        "lib/baseline.js"
+      ],
+      "metrics": {
+        "cognitiveComplexity": 103
+      },
+      "details": {
+        "type": "highCognitiveComplexity",
+        "name": "createBaseline",
+        "line": 72,
+        "complexity": 103
+      },
+      "locations": [
+        {
+          "file": "lib/baseline.js",
+          "line": 72,
+          "column": 16,
+          "range": {
+            "start_line": 72,
+            "start_column": 16,
+            "end_line": 72,
+            "end_column": 30
+          },
+          "description": "Function 'createBaseline' (cognitive complexity: 103)"
+        }
+      ]
+    },
+    {
+      "id": "ccog:scripts/delphi-external-review.cjs:readConfig:74",
+      "smellType": "HighCognitiveComplexity",
+      "severity": "Medium",
+      "files": [
+        "scripts/delphi-external-review.cjs"
+      ],
+      "metrics": {
+        "cognitiveComplexity": 16
+      },
+      "details": {
+        "type": "highCognitiveComplexity",
+        "name": "readConfig",
+        "line": 74,
+        "complexity": 16
+      },
+      "locations": [
+        {
+          "file": "scripts/delphi-external-review.cjs",
+          "line": 74,
+          "column": 10,
+          "range": {
+            "start_line": 74,
+            "start_column": 10,
+            "end_line": 74,
+            "end_column": 20
+          },
+          "description": "Function 'readConfig' (cognitive complexity: 16)"
+        }
+      ]
+    },
+    {
+      "id": "ccog:build-integrity/gate-10.ts:runTscCheck:50",
+      "smellType": "HighCognitiveComplexity",
+      "severity": "Medium",
+      "files": [
+        "build-integrity/gate-10.ts"
+      ],
+      "metrics": {
+        "cognitiveComplexity": 17
+      },
+      "details": {
+        "type": "highCognitiveComplexity",
+        "name": "runTscCheck",
+        "line": 50,
+        "complexity": 17
+      },
+      "locations": [
+        {
+          "file": "build-integrity/gate-10.ts",
+          "line": 50,
+          "column": 23,
+          "range": {
+            "start_line": 50,
+            "start_column": 23,
+            "end_line": 50,
+            "end_column": 34
+          },
+          "description": "Function 'runTscCheck' (cognitive complexity: 17)"
+        }
+      ]
+    },
+    {
+      "id": "ccog:build-integrity/gate-10.ts:extractImports:189",
+      "smellType": "HighCognitiveComplexity",
+      "severity": "Medium",
+      "files": [
+        "build-integrity/gate-10.ts"
+      ],
+      "metrics": {
+        "cognitiveComplexity": 23
+      },
+      "details": {
+        "type": "highCognitiveComplexity",
+        "name": "extractImports",
+        "line": 189,
+        "complexity": 23
+      },
+      "locations": [
+        {
+          "file": "build-integrity/gate-10.ts",
+          "line": 189,
+          "column": 17,
+          "range": {
+            "start_line": 189,
+            "start_column": 17,
+            "end_line": 189,
+            "end_column": 31
+          },
+          "description": "Function 'extractImports' (cognitive complexity: 23)"
+        }
+      ]
+    },
+    {
+      "id": "ccog:build-integrity/gate-10.ts:resolveImportPath:258",
+      "smellType": "HighCognitiveComplexity",
+      "severity": "Medium",
+      "files": [
+        "build-integrity/gate-10.ts"
+      ],
+      "metrics": {
+        "cognitiveComplexity": 18
+      },
+      "details": {
+        "type": "highCognitiveComplexity",
+        "name": "resolveImportPath",
+        "line": 258,
+        "complexity": 18
+      },
+      "locations": [
+        {
+          "file": "build-integrity/gate-10.ts",
+          "line": 258,
+          "column": 17,
+          "range": {
+            "start_line": 258,
+            "start_column": 17,
+            "end_line": 258,
+            "end_column": 34
+          },
+          "description": "Function 'resolveImportPath' (cognitive complexity: 18)"
+        }
+      ]
+    },
+    {
+      "id": "ccog:build-integrity/gate-10.ts:runImportCheck:295",
+      "smellType": "HighCognitiveComplexity",
+      "severity": "Medium",
+      "files": [
+        "build-integrity/gate-10.ts"
+      ],
+      "metrics": {
+        "cognitiveComplexity": 17
+      },
+      "details": {
+        "type": "highCognitiveComplexity",
+        "name": "runImportCheck",
+        "line": 295,
+        "complexity": 17
+      },
+      "locations": [
+        {
+          "file": "build-integrity/gate-10.ts",
+          "line": 295,
+          "column": 23,
+          "range": {
+            "start_line": 295,
+            "start_column": 23,
+            "end_line": 295,
+            "end_column": 37
+          },
+          "description": "Function 'runImportCheck' (cognitive complexity: 17)"
+        }
+      ]
+    },
+    {
+      "id": "dead:mock-policy/mock-decision-engine.ts:MockDecisionEngine.decide:111",
+      "smellType": "DeadSymbol",
+      "severity": "Medium",
+      "files": [
+        "mock-policy/mock-decision-engine.ts"
+      ],
+      "metrics": {},
+      "details": {
+        "type": "deadSymbol",
+        "name": "MockDecisionEngine.decide",
+        "kind": "Class Method"
+      },
+      "locations": [
+        {
+          "file": "mock-policy/mock-decision-engine.ts",
+          "line": 111,
+          "column": 3,
+          "range": {
+            "start_line": 111,
+            "start_column": 3,
+            "end_line": 111,
+            "end_column": 9
+          },
+          "description": "Class Method 'MockDecisionEngine.decide' definition"
+        }
+      ]
+    },
+    {
+      "id": "barrelfileabuse:1767a26a",
+      "smellType": "BarrelFileAbuse",
+      "severity": "Medium",
+      "files": [
+        "mutation/runners/index.ts"
+      ],
+      "metrics": {
+        "dependentCount": 12
+      },
+      "details": {
+        "type": "barrelFileAbuse"
+      }
+    },
+    {
+      "id": "deadcode:bd771769",
+      "smellType": "DeadCode",
+      "severity": "Medium",
+      "files": [
+        "mutation/init-baseline.ts"
+      ],
+      "metrics": {},
+      "details": {
+        "type": "deadCode"
+      }
+    },
+    {
+      "id": "deadcode:ed44cb8a",
+      "smellType": "DeadCode",
+      "severity": "Medium",
+      "files": [
+        "plugins/opencode/scripts/prepack.cjs"
+      ],
+      "metrics": {},
+      "details": {
+        "type": "deadCode"
+      }
+    },
+    {
+      "id": "deadcode:0fd10a0f",
+      "smellType": "DeadCode",
+      "severity": "Medium",
+      "files": [
+        "scripts/delphi-external-review.cjs"
+      ],
+      "metrics": {},
+      "details": {
+        "type": "deadCode"
+      }
+    },
+    {
+      "id": "deadcode:83c7b458",
+      "smellType": "DeadCode",
+      "severity": "Medium",
+      "files": [
+        "bin/xp-gate.js"
+      ],
+      "metrics": {},
+      "details": {
+        "type": "deadCode"
+      }
+    },
+    {
+      "id": "ccycl:lib/uninstall.js:uninstall:329",
+      "smellType": "HighCyclomaticComplexity",
+      "severity": "Medium",
+      "files": [
+        "lib/uninstall.js"
+      ],
+      "metrics": {
+        "cyclomaticComplexity": 29
+      },
+      "details": {
+        "type": "highCyclomaticComplexity",
+        "name": "uninstall",
+        "line": 329,
+        "complexity": 29
+      },
+      "locations": [
+        {
+          "file": "lib/uninstall.js",
+          "line": 329,
+          "column": 16,
+          "range": {
+            "start_line": 329,
+            "start_column": 16,
+            "end_line": 329,
+            "end_column": 25
+          },
+          "description": "Function 'uninstall' (cyclomatic complexity: 29)"
+        }
+      ]
+    },
+    {
+      "id": "ccycl:plugins/opencode/index.ts:<anonymous>:384",
+      "smellType": "HighCyclomaticComplexity",
+      "severity": "Medium",
+      "files": [
+        "plugins/opencode/index.ts"
+      ],
+      "metrics": {
+        "cyclomaticComplexity": 16
+      },
+      "details": {
+        "type": "highCyclomaticComplexity",
+        "name": "<anonymous>",
+        "line": 384,
+        "complexity": 16
+      },
+      "locations": [
+        {
+          "file": "plugins/opencode/index.ts",
+          "line": 384,
+          "column": 22,
+          "range": {
+            "start_line": 384,
+            "start_column": 22,
+            "end_line": 449,
+            "end_column": 10
+          },
+          "description": "Function '<anonymous>' (cyclomatic complexity: 16)"
+        }
+      ]
+    },
+    {
+      "id": "ccycl:principles/baseline.ts:aggregateTool:51",
+      "smellType": "HighCyclomaticComplexity",
+      "severity": "Medium",
+      "files": [
+        "principles/baseline.ts"
+      ],
+      "metrics": {
+        "cyclomaticComplexity": 16
+      },
+      "details": {
+        "type": "highCyclomaticComplexity",
+        "name": "aggregateTool",
+        "line": 51,
+        "complexity": 16
+      },
+      "locations": [
+        {
+          "file": "principles/baseline.ts",
+          "line": 51,
+          "column": 10,
+          "range": {
+            "start_line": 51,
+            "start_column": 10,
+            "end_line": 51,
+            "end_column": 23
+          },
+          "description": "Function 'aggregateTool' (cyclomatic complexity: 16)"
+        }
+      ]
+    },
+    {
+      "id": "ccycl:lib/phase-transition.js:renderDashboard:34",
+      "smellType": "HighCyclomaticComplexity",
+      "severity": "Medium",
+      "files": [
+        "lib/phase-transition.js"
+      ],
+      "metrics": {
+        "cyclomaticComplexity": 22
+      },
+      "details": {
+        "type": "highCyclomaticComplexity",
+        "name": "renderDashboard",
+        "line": 34,
+        "complexity": 22
+      },
+      "locations": [
+        {
+          "file": "lib/phase-transition.js",
+          "line": 34,
+          "column": 10,
+          "range": {
+            "start_line": 34,
+            "start_column": 10,
+            "end_line": 34,
+            "end_column": 25
+          },
+          "description": "Function 'renderDashboard' (cyclomatic complexity: 22)"
+        }
+      ]
+    },
+    {
+      "id": "ccycl:principles/adapters/cpp.ts:CppAdapter.extractCodeBlock:52",
+      "smellType": "HighCyclomaticComplexity",
+      "severity": "Medium",
+      "files": [
+        "principles/adapters/cpp.ts"
+      ],
+      "metrics": {
+        "cyclomaticComplexity": 27
+      },
+      "details": {
+        "type": "highCyclomaticComplexity",
+        "name": "CppAdapter.extractCodeBlock",
+        "line": 52,
+        "complexity": 27
+      },
+      "locations": [
+        {
+          "file": "principles/adapters/cpp.ts",
+          "line": 52,
+          "column": 12,
+          "range": {
+            "start_line": 52,
+            "start_column": 12,
+            "end_line": 52,
+            "end_column": 28
+          },
+          "description": "Function 'CppAdapter.extractCodeBlock' (cyclomatic complexity: 27)"
+        }
+      ]
+    },
+    {
+      "id": "ccycl:scripts/sync-package-content.js:checkAdapterDrift:300",
+      "smellType": "HighCyclomaticComplexity",
+      "severity": "Medium",
+      "files": [
+        "scripts/sync-package-content.js"
+      ],
+      "metrics": {
+        "cyclomaticComplexity": 17
+      },
+      "details": {
+        "type": "highCyclomaticComplexity",
+        "name": "checkAdapterDrift",
+        "line": 300,
+        "complexity": 17
+      },
+      "locations": [
+        {
+          "file": "scripts/sync-package-content.js",
+          "line": 300,
+          "column": 10,
+          "range": {
+            "start_line": 300,
+            "start_column": 10,
+            "end_line": 300,
+            "end_column": 27
+          },
+          "description": "Function 'checkAdapterDrift' (cyclomatic complexity: 17)"
+        }
+      ]
+    },
+    {
+      "id": "ccycl:lib/sprint-discovery.js:discoverActiveSprints:111",
+      "smellType": "HighCyclomaticComplexity",
+      "severity": "Medium",
+      "files": [
+        "lib/sprint-discovery.js"
+      ],
+      "metrics": {
+        "cyclomaticComplexity": 29
+      },
+      "details": {
+        "type": "highCyclomaticComplexity",
+        "name": "discoverActiveSprints",
+        "line": 111,
+        "complexity": 29
+      },
+      "locations": [
+        {
+          "file": "lib/sprint-discovery.js",
+          "line": 111,
+          "column": 10,
+          "range": {
+            "start_line": 111,
+            "start_column": 10,
+            "end_line": 111,
+            "end_column": 31
+          },
+          "description": "Function 'discoverActiveSprints' (cyclomatic complexity: 29)"
+        }
+      ]
+    },
+    {
+      "id": "ccycl:lib/baseline.js:createBaseline:72",
+      "smellType": "HighCyclomaticComplexity",
+      "severity": "Medium",
+      "files": [
+        "lib/baseline.js"
+      ],
+      "metrics": {
+        "cyclomaticComplexity": 46
+      },
+      "details": {
+        "type": "highCyclomaticComplexity",
+        "name": "createBaseline",
+        "line": 72,
+        "complexity": 46
+      },
+      "locations": [
+        {
+          "file": "lib/baseline.js",
+          "line": 72,
+          "column": 16,
+          "range": {
+            "start_line": 72,
+            "start_column": 16,
+            "end_line": 72,
+            "end_column": 30
+          },
+          "description": "Function 'createBaseline' (cyclomatic complexity: 46)"
+        }
+      ]
+    },
+    {
+      "id": "ccycl:scripts/delphi-external-review.cjs:parseArgs:22",
+      "smellType": "HighCyclomaticComplexity",
+      "severity": "Medium",
+      "files": [
+        "scripts/delphi-external-review.cjs"
+      ],
+      "metrics": {
+        "cyclomaticComplexity": 23
+      },
+      "details": {
+        "type": "highCyclomaticComplexity",
+        "name": "parseArgs",
+        "line": 22,
+        "complexity": 23
+      },
+      "locations": [
+        {
+          "file": "scripts/delphi-external-review.cjs",
+          "line": 22,
+          "column": 10,
+          "range": {
+            "start_line": 22,
+            "start_column": 10,
+            "end_line": 22,
+            "end_column": 19
+          },
+          "description": "Function 'parseArgs' (cyclomatic complexity: 23)"
+        }
+      ]
+    },
+    {
+      "id": "largefile:lib/doctor.js",
+      "smellType": "LargeFile",
+      "severity": "Medium",
+      "files": [
+        "lib/doctor.js"
+      ],
+      "metrics": {
+        "lines": 1150
+      },
+      "details": {
+        "type": "largeFile"
+      }
+    },
+    {
+      "id": "clone:ad1faab081e659a2314c3cf93589cfb34e1f96b2a6b7eb8176d7f601f3826021",
+      "smellType": "CodeClone",
+      "severity": "Medium",
+      "files": [
+        "mutation/init-baseline.ts",
+        "mutation/__tests__/init-baseline.test.ts"
+      ],
+      "metrics": {
+        "cloneHash": "ad1faab081e659a2314c3cf93589cfb34e1f96b2a6b7eb8176d7f601f3826021",
+        "tokenCount": 67,
+        "cloneInstances": 2
+      },
+      "details": {
+        "type": "codeClone",
+        "clone_hash": "ad1faab081e659a2314c3cf93589cfb34e1f96b2a6b7eb8176d7f601f3826021",
+        "token_count": 67
+      },
+      "locations": [
+        {
+          "file": "mutation/__tests__/init-baseline.test.ts",
+          "line": 56,
+          "column": 3,
+          "range": {
+            "start_line": 56,
+            "start_column": 3,
+            "end_line": 84,
+            "end_column": 2
+          },
+          "description": "Duplicated code (67 tokens, lines 56-84). Also found in: mutation\\init-baseline.ts:50-80"
+        },
+        {
+          "file": "mutation/init-baseline.ts",
+          "line": 50,
+          "column": 3,
+          "range": {
+            "start_line": 50,
+            "start_column": 3,
+            "end_line": 80,
+            "end_column": 2
+          },
+          "description": "Duplicated code (67 tokens, lines 50-80). Also found in: mutation\\__tests__\\init-baseline.test.ts:56-84"
+        }
+      ]
+    },
+    {
+      "id": "clone:6c00273b8ebf40f5638fa9f9d2824f2e086b996317bf1d659323a2ef118e3c3a",
+      "smellType": "CodeClone",
+      "severity": "Medium",
+      "files": [
+        "mutation/__tests__/init-baseline.test.ts",
+        "mutation/init-baseline.ts"
+      ],
+      "metrics": {
+        "cloneInstances": 2,
+        "tokenCount": 68,
+        "cloneHash": "6c00273b8ebf40f5638fa9f9d2824f2e086b996317bf1d659323a2ef118e3c3a"
+      },
+      "details": {
+        "type": "codeClone",
+        "clone_hash": "6c00273b8ebf40f5638fa9f9d2824f2e086b996317bf1d659323a2ef118e3c3a",
+        "token_count": 68
+      },
+      "locations": [
+        {
+          "file": "mutation/__tests__/init-baseline.test.ts",
+          "line": 15,
+          "column": 11,
+          "range": {
+            "start_line": 15,
+            "start_column": 11,
+            "end_line": 55,
+            "end_column": 19
+          },
+          "description": "Duplicated code (68 tokens, lines 15-55). Also found in: mutation\\init-baseline.ts:8-48"
+        },
+        {
+          "file": "mutation/init-baseline.ts",
+          "line": 8,
+          "column": 11,
+          "range": {
+            "start_line": 8,
+            "start_column": 11,
+            "end_line": 48,
+            "end_column": 19
+          },
+          "description": "Duplicated code (68 tokens, lines 8-48). Also found in: mutation\\__tests__\\init-baseline.test.ts:15-55"
+        }
+      ]
+    },
+    {
+      "id": "nest:lib/baseline.js:createBaseline:72",
+      "smellType": "DeepNesting",
+      "severity": "Medium",
+      "files": [
+        "lib/baseline.js"
+      ],
+      "metrics": {
+        "depth": 5
+      },
+      "details": {
+        "type": "deepNesting",
+        "name": "createBaseline",
+        "depth": 5,
+        "line": 72
+      },
+      "locations": [
+        {
+          "file": "lib/baseline.js",
+          "line": 72,
+          "column": 16,
+          "range": {
+            "start_line": 72,
+            "start_column": 16,
+            "end_line": 72,
+            "end_column": 30
+          },
+          "description": "Function 'createBaseline' is too deeply nested"
+        }
+      ]
+    }
+  ],
+  "summary": {
+    "totalSmells": 38,
+    "filesAnalyzed": 182,
+    "cycles": 0,
+    "godModules": 0,
+    "deadCode": 4,
+    "deadSymbols": 1,
+    "layerViolations": 0,
+    "highCyclomaticComplexity": 9,
+    "highCognitiveComplexity": 16,
+    "hubModules": 0
+  },
+  "grade": "ArchitectureGrade { score: 7.164835, level: Fair, density: 4.6703296 }"
+}
