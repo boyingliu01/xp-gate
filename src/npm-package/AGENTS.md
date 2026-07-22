@@ -1,7 +1,7 @@
 # SRC/NPM-PACKAGE KNOWLEDGE BASE
 
 **Generated:** 2026-07-22
-**Commit:** 18b636a
+**Commit:** b7e2e5c
 **Branch:** main
 **Version:** 0.14.31.0
 
@@ -79,7 +79,7 @@ src/npm-package/
 
 ## CONVENTIONS
 - **Zero runtime dependencies.** `package.json` `dependencies` MUST stay empty. The point is a hook installer that works without `npm install` in the consumer repo.
-- **VERSION as truth.** Repo root `VERSION` (4-digit MAJOR.MINOR.PATCH.MICRO) is propagated by `scripts/sync-version.sh` into this `package.json` as 3-digit npm semver (MAJOR.MINOR.PATCH). Never hand-edit.
+- **VERSION as truth.** Repo root `VERSION` (4-digit MAJOR.MINOR.PATCH.MICRO) is propagated by `scripts/sync-version.cjs` into this `package.json` as 3-digit npm semver (MAJOR.MINOR.PATCH). Never hand-edit.
 - **Adapters duplicated** from `githooks/adapters/`. Source of truth = `githooks/`. Sync via `scripts/sync-package-content.js` (runs in `prepack`).
 - **Lib files mostly `.js`**, not `.ts` — keeps `bin/xp-gate.js` runnable with raw Node, no transpile step at install time. The few `.ts` files (`audit-log.ts`, `gate-audit.ts`, `ui-detector.ts`, `ui-review.ts`) are loaded via `npx tsx` on demand.
 - **Tests** live alongside source under `lib/__tests__/`.
@@ -89,7 +89,7 @@ src/npm-package/
 - Do NOT add anything to `dependencies` in `package.json`. Use `devDependencies` if you need it for development; everything that ships must be vendored or stdlib.
 - Do NOT edit `adapters/` here directly — edit `../../githooks/adapters/` and resync.
 - Do NOT skip `scripts/sync-package-content.js` in the `prepack` flow. Published artifacts will lose the skill/plugin bundle.
-- Do NOT hand-edit `package.json` `version`. Run `scripts/sync-version.sh` against the repo root `VERSION`.
+- Do NOT hand-edit `package.json` `version`. Run `node scripts/sync-version.cjs` against the repo root `VERSION`.
 - Do NOT introduce a new CLI subcommand without also updating: (a) `bin/xp-gate.js` switch, (b) this file's CLI table, (c) the root `AGENTS.md` CLI table, (d) `README.md`, (e) `MANIFEST.md`.
 
 ## UNIQUE STYLES

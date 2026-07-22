@@ -18,7 +18,8 @@
 #     - If sprint-state.json missing/invalid → SKIP (non-sprint commit)
 #     - If phase >= 1 (PLAN completed) and delphi-reviewed.json missing → DENY
 #     - If delphi-reviewed.json exists, verdict must be "APPROVED"
-#     - If jq unavailable → WARN but ALLOW (graceful degradation)
+#     - If jq AND node unavailable → WARN but ALLOW (graceful degradation)
+#     - If jq unavailable but node available → use Node.js JSON parser fallback
 #
 #   --pre-push:
 #     - If .sprint-state/ missing → SKIP
@@ -26,11 +27,12 @@
 #     - If delphi-reviewed.json missing or verdict != "APPROVED" → DENY
 #     - If phase < 2 (BUILD not started) → DENY
 #     - If phase >= 2 and specification.yaml missing → DENY
+#     - If jq AND node unavailable → DENY (cannot verify verdict)
 #
 # GRACEFUL DEGRADATION:
 #   - If .sprint-state/ directory doesn't exist → SKIP (not a sprint project)
 #   - If sprint-state.json is missing/invalid → SKIP (non-sprint commit)
-#   - If jq not available → WARN but ALLOW (zero degradation for non-sprint projects)
+#   - JSON parser fallback chain: jq → Node.js → explicit degradation message
 #
 # OUTPUT: JSON to stdout — {"decision":"allow|deny|skip",...}
 # EXIT: 0 = pass/skip, 1 = block
@@ -64,11 +66,82 @@ if [ ! -d "$SPRINT_STATE_DIR" ]; then
   exit 0
 fi
 
-# --- Helper: check jq availability ---
+# --- Helper: check tool availability ---
 HAS_JQ=false
 if command -v jq &>/dev/null; then
   HAS_JQ=true
 fi
+
+HAS_NODE=false
+if command -v node &>/dev/null; then
+  HAS_NODE=true
+fi
+
+# JSON_PARSER: "jq" | "node" | "none"
+if $HAS_JQ; then
+  JSON_PARSER="jq"
+elif $HAS_NODE; then
+  JSON_PARSER="node"
+else
+  JSON_PARSER="none"
+fi
+
+# --- Helper: validate JSON file ---
+# Returns 0 if valid, 1 if invalid or no parser available
+json_validate() {
+  local file="$1"
+  if [ ! -f "$file" ]; then
+    return 1
+  fi
+  case "$JSON_PARSER" in
+    jq)
+      jq empty "$file" 2>/dev/null
+      return $?
+      ;;
+    node)
+      node -e "try{JSON.parse(require('fs').readFileSync('$file','utf8'));process.exit(0)}catch(e){process.exit(1)}" 2>/dev/null
+      return $?
+      ;;
+    *)
+      return 1
+      ;;
+  esac
+}
+
+# --- Helper: extract JSON field ---
+# Usage: json_extract <file> <jq-filter>
+# jq-filter is a jq expression like '.phase // -1' or '.verdict // ""'
+# Falls back to Node.js when jq is unavailable
+json_extract() {
+  local file="$1"
+  local filter="$2"
+  case "$JSON_PARSER" in
+    jq)
+      jq -r "$filter" "$file" 2>/dev/null
+      return $?
+      ;;
+    node)
+      # Translate simple jq filters to Node.js
+      # Supports: .field // default patterns
+      local field default_val
+      field=$(echo "$filter" | sed 's/^\.//;s/ *\/\/.*$//')
+      default_val=$(echo "$filter" | sed -n 's/.*\/\/ *//p')
+      node -e "
+        try {
+          var d=JSON.parse(require('fs').readFileSync('$file','utf8'));
+          var v=d['${field}'];
+          if(v===undefined||v===null){v=${default_val:-null}}
+          process.stdout.write(String(v));
+        }catch(e){process.stdout.write('${default_val:-}');process.exit(1)}
+      " 2>/dev/null
+      return $?
+      ;;
+    *)
+      echo ""
+      return 1
+      ;;
+  esac
+}
 
 # --- Helper: read phase from sprint-state.json ---
 # Returns phase number or -1 if unreadable
@@ -77,16 +150,16 @@ read_phase() {
     echo "-1"
     return
   fi
-  if ! $HAS_JQ; then
+  if [ "$JSON_PARSER" = "none" ]; then
     echo "-1"
     return
   fi
-  if ! jq empty "$SPRINT_STATE_JSON" 2>/dev/null; then
+  if ! json_validate "$SPRINT_STATE_JSON"; then
     echo "-1"
     return
   fi
   local phase
-  phase=$(jq -r '.phase // -1' "$SPRINT_STATE_JSON" 2>/dev/null) || phase="-1"
+  phase=$(json_extract "$SPRINT_STATE_JSON" '.phase // -1') || phase="-1"
   echo "$phase"
 }
 
@@ -97,15 +170,15 @@ read_verdict() {
     echo ""
     return
   fi
-  if ! $HAS_JQ; then
+  if [ "$JSON_PARSER" = "none" ]; then
     echo ""
     return
   fi
-  if ! jq empty "$APPROVED_FILE" 2>/dev/null; then
+  if ! json_validate "$APPROVED_FILE"; then
     echo ""
     return
   fi
-  jq -r '.verdict // ""' "$APPROVED_FILE" 2>/dev/null || echo ""
+  json_extract "$APPROVED_FILE" '.verdict // ""' || echo ""
 }
 
 # --- Pre-commit mode ---
@@ -117,7 +190,7 @@ if [ "$MODE" = "pre-commit" ]; then
     if [ ! -f "$SPRINT_STATE_JSON" ]; then
       echo '{"decision":"skip","reason":"sprint-state.json not found, non-sprint commit"}'
     else
-      echo '{"decision":"skip","warning":"sprint-state.json is not valid JSON or jq not available, allowing commit"}'
+      echo '{"decision":"skip","warning":"sprint-state.json is not valid JSON or no JSON parser available (install jq or node), allowing commit"}'
     fi
     exit 0
   fi
@@ -130,14 +203,14 @@ if [ "$MODE" = "pre-commit" ]; then
       exit 1
     fi
 
-    # If jq not available, warn but allow (graceful degradation)
-    if ! $HAS_JQ; then
-      echo '{"decision":"allow","warning":"jq not available, cannot verify delphi-review verdict. Install jq for full protection."}'
+    # If no JSON parser available, warn but allow (graceful degradation)
+    if [ "$JSON_PARSER" = "none" ]; then
+      echo '{"decision":"allow","warning":"neither jq nor node available, cannot verify delphi-review verdict. Install jq or node for full protection."}'
       exit 0
     fi
 
     # Validate delphi-reviewed.json is valid JSON
-    if ! jq empty "$APPROVED_FILE" 2>/dev/null; then
+    if ! json_validate "$APPROVED_FILE"; then
       echo '{"decision":"deny","reason":"delphi-reviewed.json is not valid JSON. Re-run: /delphi-review"}'
       exit 1
     fi
@@ -184,12 +257,12 @@ if [ "$MODE" = "pre-push" ]; then
     exit 1
   fi
 
-  if ! $HAS_JQ; then
-    echo '{"decision":"deny","reason":"jq not available, cannot verify delphi-review verdict. Install jq to push from sprint branch."}'
+  if [ "$JSON_PARSER" = "none" ]; then
+    echo '{"decision":"deny","reason":"neither jq nor node available, cannot verify delphi-review verdict. Install jq or node to push from sprint branch."}'
     exit 1
   fi
 
-  if ! jq empty "$APPROVED_FILE" 2>/dev/null; then
+  if ! json_validate "$APPROVED_FILE"; then
     echo '{"decision":"deny","reason":"delphi-reviewed.json is not valid JSON. Re-run: /delphi-review"}'
     exit 1
   fi

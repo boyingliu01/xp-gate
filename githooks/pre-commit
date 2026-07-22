@@ -212,13 +212,20 @@ if [ "$is_protected" = "true" ]; then
 
   # If either VERSION or CHANGELOG.md is staged, pass
   if [ "$has_version_change" = "true" ] || [ "$has_changelog_change" = "true" ]; then
-    # Auto-run sync-version.sh when VERSION is staged (issue #206 follow-up).
-    # Propagates VERSION → 4 package.json + refreshes 32 AGENTS.md headers,
-    # then stages only files sync-version.sh is known to touch (NOT runtime
+    # Auto-run sync-version when VERSION is staged (issue #206 follow-up).
+    # Propagates VERSION → 4 package.json + refreshes AGENTS.md headers,
+    # then stages only files sync-version is known to touch (NOT runtime
     # journals or unrelated edits) so the commit captures it atomically.
-    if [ "$has_version_change" = "true" ] && [ -f "$ROOT_DIR/scripts/sync-version.sh" ]; then
-      echo "🔄 Gate 0: VERSION staged — running sync-version.sh to fan out to package.json + AGENTS.md headers..."
-      if bash "$ROOT_DIR/scripts/sync-version.sh" > /tmp/xp-gate-sync-version.log 2>&1; then
+    # Prefer Node.js (.cjs) for cross-platform; fall back to bash (.sh).
+    SYNC_VERSION_CMD=""
+    if [ -f "$ROOT_DIR/scripts/sync-version.cjs" ] && command -v node >/dev/null 2>&1; then
+      SYNC_VERSION_CMD="node $ROOT_DIR/scripts/sync-version.cjs"
+    elif [ -f "$ROOT_DIR/scripts/sync-version.sh" ]; then
+      SYNC_VERSION_CMD="bash $ROOT_DIR/scripts/sync-version.sh"
+    fi
+    if [ "$has_version_change" = "true" ] && [ -n "$SYNC_VERSION_CMD" ]; then
+      echo "🔄 Gate 0: VERSION staged — running sync-version to fan out to package.json + AGENTS.md headers..."
+      if $SYNC_VERSION_CMD > /tmp/xp-gate-sync-version.log 2>&1; then
         SYNC_STAGED=0
         # Stage the 4 known package.json targets if modified
         for pkg in package.json src/npm-package/package.json \
@@ -238,9 +245,9 @@ if [ "$is_protected" = "true" ]; then
             SYNC_STAGED=$((SYNC_STAGED + 1))
           fi
         done < <(find "$ROOT_DIR" -name 'AGENTS.md' -not -path '*/node_modules/*' -not -path '*/.git/*' -print0)
-        echo "   auto-staged $SYNC_STAGED file(s) from sync-version.sh (package.json × ≤6 + AGENTS.md headers)"
+        echo "   auto-staged $SYNC_STAGED file(s) from sync-version (package.json × ≤6 + AGENTS.md headers)"
       else
-        echo "⚠️  sync-version.sh failed; see /tmp/xp-gate-sync-version.log — continuing without auto-sync"
+        echo "⚠️  sync-version failed; see /tmp/xp-gate-sync-version.log — continuing without auto-sync"
       fi
     fi
     echo "✅ PASSED - Gate 0: Version Consistency Check (VERSION/CHANGELOG staged)"
@@ -314,7 +321,7 @@ This bypasses the ship workflow and causes version drift.
 Before committing:
   1. Update VERSION file with new version
   2. Add entry to CHANGELOG.md
-  3. Run: bash scripts/sync-version.sh
+  3. Run: node scripts/sync-version.cjs
 
 Or use --no-verify (discouraged) or include [skip-version-check] in commit message.
 

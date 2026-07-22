@@ -115,3 +115,6 @@ src/npm-package/plugins/opencode/node_modules/
 .code-walkthrough-result.json
 architecture-report.sarif.json
 undefined/
+
+# Better Loop report artifacts (auto-generated, local-only)
+.qoder/better-loop/

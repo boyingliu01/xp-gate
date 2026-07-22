@@ -1,7 +1,7 @@
 # PROJECT KNOWLEDGE BASE
 
 **Generated:** 2026-07-22
-**Commit:** 18b636a
+**Commit:** b7e2e5c
 **Branch:** main
 **Version:** 0.14.31.0
 
@@ -57,7 +57,7 @@ XP-Gate — deterministic git quality gates + AI-driven multi-expert review (Del
 │   ├── to-issues/                      # Vertical-slice issue splitter
 │   └── admin-template-guidelines/
 ├── docs/               # 30+ design plans, incidents, retros, guides
-├── scripts/            # build-plugin.sh, copy-skills.sh, sync-version.sh, test-plugins.sh,
+├── scripts/            # build-plugin.sh, copy-skills.sh, sync-version.cjs, test-plugins.sh,
 │                       #   install-{hooks,skills,all}.sh, prepack.cjs
 ├── dashboard/          # Quality dashboard (serve.js + dashboard.js → localhost:3333)
 ├── .github/workflows/  # 5 CI pipelines: quality-gates (~948 LOC), npm-publish, cross-platform-ci,
@@ -108,7 +108,7 @@ XP-Gate — deterministic git quality gates + AI-driven multi-expert review (Del
 | Mutation Gate M | src/mutation/gate-m.ts | Incremental mutation on changed TS files |
 | Mock Policy Gate M3 | src/mock-policy/gate-m3.ts | runGateM3() orchestrator |
 | Debugger | src/debugger/ | trace-collector.ts + summarizer.ts |
-| Version sync | scripts/sync-version.sh | VERSION → 4 package.json files (3-digit npm semver) |
+| Version sync | scripts/sync-version.cjs | VERSION → 4 package.json files (3-digit npm semver) |
 | Quality Dashboard | dashboard/ | `npm run dashboard` → :3333 |
 | CI Workflows | .github/workflows/ | 5 pipelines (~948 LOC quality-gates) |
 | Design history | docs/plans/ | 30+ chronological design plans (YYYY-MM-DD-topic.md) |
@@ -134,16 +134,22 @@ XP-Gate — deterministic git quality gates + AI-driven multi-expert review (Del
 > CodeQ (1+2+5) · Complexity (3) · Principles (4) · Tests (3+4+5) · Architecture (6) · plus newer Security gates (7+8+9). Gate 0 is treated as a pre-flight check.
 > The two views are intentionally maintained until the README rewrite catches up.
 
-### Pre-push — `githooks/pre-push`, ~607 lines
+### Pre-push — `githooks/pre-push`, ~1212 lines
 
 | Gate | Name | Source | Block on |
 |------|------|--------|----------|
 | M | Incremental Mutation | `src/mutation/gate-m.ts` (Stryker, prepush config) | Mutation score < threshold (TS only) |
 | M2 | Mock Density Check | inline in pre-push | >30% mock density (Phase 1 WARNING) without `@mock-justified` |
-| M3 | Mock Layering Policy | `src/mock-policy/gate-m3.ts` | Per-layer mock policy violation (severity=error) |
-| Delphi | Code-walkthrough validator | `.code-walkthrough-result.json` | Missing or stale walkthrough vs HEAD commit |
+| ML (M3) | Mock Layering Policy | `src/mock-policy/gate-m3.ts` | Per-layer mock policy violation (severity=error) |
+| UI | UI Sprint Quality Gates | inline in pre-push | UI regression or missing UI review for UI-bearing changes |
+| MW (Delphi) | Code-walkthrough validator | `.code-walkthrough-result.json` | Missing or stale walkthrough vs HEAD commit |
 
-> Pre-push hard limits: max **20 files** or **500 LOC** per push. Code-walkthrough skipped on main/master pushes (by design). All pre-push runs are journaled to `.xp-gate/reports/pre-push/*.json`.
+> Pre-push size limits were intentionally removed for AI workflows. All pre-push runs are journaled to `.xp-gate/reports/pre-push/*.json`.
+>
+> **Three gates skip on main/master pushes (by design — pre-reviewed via PR):**
+> - **Mock Layering (Gate ML)** — `pre-push` line 715–718: `SKIP — pushing to main/master`
+> - **UI Sprint Quality Gates (Gate UI)** — `pre-push` line 786–788: `UI Gate skipped (pre-reviewed via PR)`
+> - **Code Walkthrough (Gate MW)** — `pre-push` line 858–860: `MW walkthrough skipped`
 
 ## CLI (`src/npm-package/bin/xp-gate.js`)
 
@@ -168,11 +174,11 @@ Subcommands registered in 0.8.8.0 (verified against bin source):
 > Older docs said "8 commands"; 0.8.8 grew to ≥11; 0.8.9 added `check`/`principles`/`arch` for parity with the OpenCode plugin (fixes #208). v0.8.16 added `sprint-status`, bringing the total to ≥16.
 
 ## CONVENTIONS
-- **VERSION as single source of truth.** `scripts/sync-version.sh` propagates `MAJOR.MINOR.PATCH.MICRO` from `VERSION` into npm package.json files (3-digit) and plugin manifests. Root `package.json` uses 3-digit version. Never edit `package.json` versions by hand.
+- **VERSION as single source of truth.** `scripts/sync-version.cjs` propagates `MAJOR.MINOR.PATCH.MICRO` from `VERSION` into npm package.json files (3-digit) and plugin manifests. Root `package.json` uses 3-digit version. Never edit `package.json` versions by hand.
 - **No `--no-verify` ever.** `githooks/QUALITY-GATES-CODE-OF-CONDUCT.md` makes hook bypass a process violation.
 - **Tool missing → SKIP, not BLOCK.** When a language tool isn't installed, the adapter degrades the gate to SKIP instead of blocking the commit. Hard-block only fires when the tool exists and the check fails.
 - **Boy Scout Rule (Gate 6).** New files: zero warnings. Modified files: warning count cannot increase vs `.warnings-baseline.json`. Untouched files: unchecked.
-- **Pre-push hard limits.** Max 20 files or 500 LOC per push, enforced by `pre-push`.
+- **Pre-push size limits removed.** File/LOC hard limits were intentionally removed for AI workflows; pre-push still enforces mutation, mock, and code-walkthrough gates.
 - **Domestic-models-only for Delphi.** `.delphi-config.json` must use glm/kimi/minimax/qwen/deepseek; ≥2 different providers across the 3 experts. Anthropic/OpenAI/Google are forbidden.
 - **Test annotations are mandatory.** Every test file must carry `@test REQ-XXX`, `@intent ...`, `@covers AC-XXX` JSDoc tags. Missing tags ⇒ test rejected.
 - **TypeScript strict mode, always.** No `as any`, `@ts-ignore`, or `@ts-expect-error`. No empty `catch` blocks. No `print()` — use `logging`.
@@ -183,13 +189,13 @@ Subcommands registered in 0.8.8.0 (verified against bin source):
 - Do NOT bypass any gate with `--no-verify`. Process violation.
 - Do NOT edit `src/npm-package/adapters/` directly. Edit `githooks/adapters/` and resync.
 - Do NOT edit a skill's `AGENTS.md` mirror under `plugins/*/skills/` or `src/npm-package/**/skills/` — those are byte-identical copies of `skills/<name>/AGENTS.md`. Edit the canonical file then re-copy.
-- Do NOT hand-edit `package.json` versions. Run `scripts/sync-version.sh` against `VERSION`.
+- Do NOT hand-edit `package.json` versions. Run `node scripts/sync-version.cjs` against `VERSION`.
 - Do NOT add runtime dependencies to `src/npm-package/` — it ships zero-install.
 - Do NOT use Anthropic/OpenAI/Google models in `.delphi-config.json`. Domestic-only.
 - Do NOT skip `delphi-review` in Sprint Flow Phase 1 — HARD-GATE blocks Phase 2.
 - Do NOT terminate Delphi review before ≥90% consensus or 5 rounds (whichever first).
 - Do NOT modify tests during Phase 2 of test-specification-alignment (freeze enforced).
-- Do NOT push from main/master and expect code-walkthrough to run — by design it's skipped.
+- Do NOT push from main/master and expect Gate ML, Gate UI, or Gate MW to run — by design all three are skipped (pre-reviewed via PR).
 - Do NOT delete or rename `.code-walkthrough-result.json` before push.
 
 ## KNOWN DRIFT HISTORY
