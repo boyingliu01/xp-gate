@@ -66,6 +66,7 @@ Git 提交时自动触发，**纯代码逻辑，无 AI 参与**，确保快速�
 - 匿名性：第一轮专家互不知晓
 - 迭代性：多轮直到共识
 - 统计共识：≥90% 一致才算通过
+- **平台适配**：Qoder 使用 Custom Agent（内置模型，零配置）；OpenCode 使用外部 API（需各平台 API key）
 
 ### 3. Sprint Flow
 
@@ -110,7 +111,11 @@ npm 包 **不提供** IDE 内的即时 gate 调用和 skill 自动发现。
 
 ### 第二步：安装 IDE 插件（推荐 — AI 对话内质量工具 + 技能自动加载）
 
-XP-Gate 同时支持 **Claude Code** 和 **OpenCode** 插件分发：
+XP-Gate 同时支持 **Qoder**、**Claude Code** 和 **OpenCode** 插件分发：
+
+**Qoder 插件**（推荐）：
+
+Qoder 用户无需额外配置 — `xp-gate init` 自动检测 Qoder 平台并部署 Delphi 评审所需的 3 个 Custom Agent（架构/技术/可行性专家），分别使用 Qwen3.7-Max、GLM-5.2、DeepSeek-V4-Pro 内置模型，直接消耗 Qoder Credits，无需注册外部 API。
 
 **OpenCode 插件**：
 ```json

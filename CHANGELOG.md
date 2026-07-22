@@ -2,6 +2,23 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.14.24.0] - 2026-07-22
+
+### Added
+- **Qoder Delphi Agent 自动部署**: `xp-gate init` 检测 Qoder 平台时自动部署 3 个 Custom Agent（架构/技术/可行性）到 `.qoder/agents/`，使用 Qwen3.7-Max、GLM-5.2、DeepSeek-V4-Pro 内置模型，零配置开箱即用。
+- **Agent 模板分发**: 新增 `plugins/qoder/agents/` 目录，随 npm 包同步分发。`configureQoderDelphiAgents()` 函数幂等部署，不覆盖用户自定义。
+- **3 个单元测试**: 覆盖部署、用户自定义保护、非 Qoder 平台跳过三个场景。
+
+### Changed
+- README.md: 新增 Qoder 插件说明，Delphi Review 平台适配描述。
+- CAPABILITIES.md: Delphi 专家配置区分 Qoder（零配置）和 OpenCode（外部 API）两平台。
+- AGENTS.md: Qoder plugin 描述更新，含 Delphi agent 自动部署。
+- SKILL.md: 各平台副本同步（delphi-review 模型选择策略）。
+
+### Infrastructure
+- `init.js` 新增 `configureQoderDelphiAgents()` 函数，平台感知安装流程。
+- `sync-package-content.js` 自动同步 `plugins/qoder/agents/` 到 npm 包。
+
 ## [0.14.23.0] - 2026-07-21
 
 ### Added

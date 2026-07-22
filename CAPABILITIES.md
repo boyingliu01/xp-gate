@@ -197,13 +197,25 @@ XP-Gate 集成的 AI Skills 体系：
 
 ### Delphi Review 专家配置
 
+**Qoder 平台（推荐 — 零配置）**：
+
+| Expert | 角色 | 模型 | Credits 费率 |
+|--------|------|------|----------|
+| Architecture | 架构 | Qwen3.7-Max | 0.5× |
+| Technical | 技术 | GLM-5.2 | 0.6× |
+| Feasibility | 可行性 | DeepSeek-V4-Pro | 0.5× |
+
+`xp-gate init` 自动检测 Qoder 平台并部署 3 个 Custom Agent 到 `.qoder/agents/`，无需外部 API key。
+
+**OpenCode 平台（外部 API）**：
+
 | Expert | 角色 | 推荐模型 | 备选模型 |
-|--------|------|---------|---------|
+|--------|------|---------|----------|
 | Expert A | 架构 | deepseek-v4-pro | qwen3.6-plus, glm-5.1 |
 | Expert B | 技术 | kimi-k2.6 | deepseek-v4-pro, minimax-m2.7 |
 | Expert C | 可行性 | qwen3.6-plus | kimi-k2.6, glm-5.1 |
 
-**强制要求**:
+**强制要求**（两平台通用）：
 - 至少 2 家不同厂商模型
 - 禁止使用 Anthropic/OpenAI/Google 国外模型
 - 共识阈值 ≥90%
@@ -272,7 +284,8 @@ git push ──→ CI/CD Pipeline ──→ Build/Test/Deploy
 | `.principlesrc` | 自定义检查阈值 |
 | `architecture.yaml` | 架构层边界规则 |
 | `specification.yaml` | 需求规范（自动生成） |
-| `.delphi-config.json` | Delphi 专家配置 |
+| `.delphi-config.json` | Delphi 专家配置（OpenCode 平台） |
+| `.qoder/agents/delphi-*.md` | Delphi 专家配置（Qoder 平台，`xp-gate init` 自动部署） |
 | `.warnings-baseline.json` | 童子军规则基线 |
 
 ### 输出格式

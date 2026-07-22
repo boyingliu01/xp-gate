@@ -1,9 +1,9 @@
 # PROJECT KNOWLEDGE BASE
 
-**Generated:** 2026-07-21
-**Commit:** 03e9223
+**Generated:** 2026-07-22
+**Commit:** e331f2c
 **Branch:** main
-**Version:** 0.14.23.0
+**Version:** 0.14.24.0
 
 ## OVERVIEW
 XP-Gate — deterministic git quality gates + AI-driven multi-expert review (Delphi) + Sprint Flow pipeline (6 phases: PREP, DESIGN, BUILD, VERIFY, SHIP, CLOSE) + npm zero-install distribution + cross-platform plugin system (Claude Code / OpenCode / Qoder). Pre-commit runs **10 numbered gates (Gate 0–9)** at the script level, conceptually grouped as **6 categories** in user-facing docs (README, CAPABILITIES.md). Pre-push runs **3 mutation/mock gates (M, M2, M3) + Delphi code-walkthrough**. Implements 14 Clean Code/SOLID rules across 9 language adapters (TypeScript engine), 13 shell adapters (gate routing), Boy Scout Rule baseline enforcement, test-specification alignment, mock policy enforcement, and incremental mutation testing.
@@ -90,7 +90,7 @@ XP-Gate — deterministic git quality gates + AI-driven multi-expert review (Del
 | CLI implementations | src/npm-package/lib/ | init, install/update/uninstall-skill, doctor, migrate, uninstall, baseline, audit-log, gate-audit, rollback, ui-detector, ui-review, download-skill, shared-* |
 | Claude Code plugin | plugins/claude-code/ | Manifest: .claude-plugin/plugin.json; hooks: hooks/hooks.json |
 | OpenCode plugin | plugins/opencode/ | index.ts exposes gate-check, gate-principles, gate-arch |
-| Qoder plugin | plugins/qoder/ | 7 skills (expects npx xp-gate for gate tooling) |
+| Qoder plugin | plugins/qoder/ | 7 skills + 3 Delphi agents (auto-deployed by `xp-gate init` on Qoder platform) |
 | Plugin builder | scripts/build-plugin.sh | --platform claude-code\|opencode\|qoder |
 | Skill copy | scripts/copy-skills.sh | Preserves references/ and templates/ |
 | Plugin tests | scripts/test-plugins.sh | 28 integration tests |
