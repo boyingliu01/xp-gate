@@ -402,6 +402,7 @@ async function installLocal(args) {
 
   injectKarpathyPrinciples(projectRoot);
   configureOpenCodePlugin(srcDir, projectRoot);
+  configureQoderDelphiAgents(srcDir, projectRoot);
 
   // Auto-register TUI plugin globally (idempotent)
   try {
@@ -501,6 +502,53 @@ async function setupGlobal(args) {
   console.log('  4. Add "types": ["vitest/globals"] to tsconfig.json');
   console.log('  5. Run "xp-gate doctor" to verify');
   return 0;
+}
+
+/**
+ * Deploy Qoder-native Delphi review agents when platform is Qoder.
+ * Copies agent templates from the bundled qoder plugin to the project's
+ * .qoder/agents/ directory. Idempotent — never overwrites existing files.
+ *
+ * @param {string} srcDir - npm package source directory
+ * @param {string} projectRoot - user's project root
+ */
+function configureQoderDelphiAgents(srcDir, projectRoot) {
+  const platform = detectPlatform();
+  if (platform !== 'qoder') {
+    return; // Not Qoder — skip (OpenCode uses .delphi-config.json instead)
+  }
+
+  const agentSrcDir = path.join(srcDir, 'plugins', 'qoder', 'agents');
+  if (!fs.existsSync(agentSrcDir)) {
+    console.log('  Qoder Delphi agents: SKIP (templates not bundled)');
+    return;
+  }
+
+  const agentsDestDir = path.join(projectRoot, '.qoder', 'agents');
+  fs.mkdirSync(agentsDestDir, { recursive: true });
+
+  const agentFiles = fs.readdirSync(agentSrcDir).filter(f => f.endsWith('.md'));
+  let deployed = 0;
+  let skipped = 0;
+  for (const file of agentFiles) {
+    const destFile = path.join(agentsDestDir, file);
+    if (fs.existsSync(destFile)) {
+      skipped++;
+      continue; // Don't overwrite user customizations
+    }
+    fs.copyFileSync(path.join(agentSrcDir, file), destFile);
+    deployed++;
+  }
+
+  if (deployed > 0) {
+    console.log(`  Qoder Delphi agents: deployed ${deployed} agent(s) to .qoder/agents/`);
+  }
+  if (skipped > 0) {
+    console.log(`  Qoder Delphi agents: ${skipped} existing agent(s) preserved`);
+  }
+  if (deployed === 0 && skipped === 0) {
+    console.log('  Qoder Delphi agents: no agent templates found');
+  }
 }
 
 function configureOpenCodePlugin(srcDir, projectRoot) {

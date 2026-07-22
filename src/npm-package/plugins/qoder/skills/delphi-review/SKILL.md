@@ -1,7 +1,167 @@
 ---
 name: delphi-review
-description: "Use when asked to review a design, plan, or architecture; before implementation starts; or when multi-expert consensus is needed. See ## Triggers for trigger phrases."
+version: 1.1.0
+description: >
+  Performs multi-round anonymous expert consensus review using the Delphi method. Supports
+  design review (default) and code-walkthrough (--mode code-walkthrough) modes. Uses 2-3 experts
+  from at least 2 different domestic model providers with a >=90% statistical consensus threshold.
+  Outputs structured verdict (APPROVED/PASS_WITH_CAVEATS/REQUEST_CHANGES/BLOCKED).
+
+  WHAT: Anonymous multi-expert review with iterative consensus building for designs, plans,
+  architecture, code changes, and PRs. NOT a single-reviewer pass, NOT a linter, NOT a test runner.
+  WHEN: User explicitly requests a review, design validation, multi-expert consensus, code walkthrough
+  before push, architecture evaluation, or "/delphi-review".
+  NOT WHEN: Asking HOW to review something (educational), mentioning "review" in passing without intent,
+  requesting a simple code check or lint, asking about the Delphi process itself, or mentioning
+  "review" as part of a different workflow (e.g., "code review" without multi-expert intent),
+  asking for review guidelines/checklists/formats, individual peer review, or casual review requests.
+
+  TRIGGERS: "/delphi-review", "review this design", "评审这个需求", "评审这个设计", "design review",
+  "多专家评审", "consensus review", "code walkthrough", "push review", "architecture review",
+  "delphi review", "run delphi", "start delphi", "评审这个架构", "review this architecture",
+  "评审PR", "review this PR with delphi", "delphi评审", "delphi 评审", "run delphi review",
+  "执行delphi", "启动delphi评审".
+  NEGATIVE TRIGGERS: "how does delphi work", "what is delphi review", "code review checklist",
+  "review my code quickly", "can you review this", "peer review", "I need a review",
+  "explain the review process", "review guidelines", "how to review a design",
+  "code review template", "review format", "PR review", "帮我review一下",
+  "just review this", "quick review", "review steps".
+maturity: beta
 auto_continue: true
+triggers:
+  - "/delphi-review"
+  - "review this design"
+  - "评审这个需求"
+  - "评审这个设计"
+  - "design review"
+  - "多专家评审"
+  - "consensus review"
+  - "code walkthrough"
+  - "push review"
+  - "architecture review"
+  - "delphi review"
+  - "run delphi"
+  - "start delphi"
+  - "评审这个架构"
+  - "review this architecture"
+  - "评审PR"
+  - "review this PR with delphi"
+  - "delphi评审"
+  - "delphi 评审"
+  - "run delphi review"
+  - "执行delphi"
+  - "启动delphi评审"
+triggers_negative_examples:
+  - "how does delphi work"       # educational question about the process
+  - "what is delphi review"      # asking for explanation, not execution
+  - "code review checklist"      # asking for a checklist, not running review
+  - "review my code quickly"     # single-pass quick review, not Delphi multi-round
+  - "can you review this"        # ambiguous — could be casual peer review
+  - "peer review"                # different process from Delphi
+  - "I need a review"            # too vague, casual request
+  - "explain the review process" # educational, not executional
+  - "review guidelines"          # asking about guidelines, not executing
+  - "how to review a design"     # educational
+  - "PR review"                  # single-reviewer PR check, not multi-expert Delphi
+  - "review my PR"               # informal PR review request, not Delphi
+  - "帮我review一下"             # casual Chinese review request, no multi-expert intent
+  - "just review this"           # casual, single-pass review request
+  - "quick review"               # explicitly contradicts multi-round Delphi process
+  - "review steps"               # asking for review instructions, not running review
+  - "code review template"       # asking for a template, not executing review
+  - "review format"              # asking about format, not executing
+  - "show me how to review"      # educational request about reviewing
+  - "review checklist example"   # asking for examples, not running review
+triggers_negative_test_cases:
+  - input: "how does delphi work"
+    expect: "NOT triggered"
+  - input: "code review checklist"
+    expect: "NOT triggered"
+  - input: "review my code quickly"
+    expect: "NOT triggered"
+  - input: "can you review this"
+    expect: "NOT triggered"
+  - input: "peer review"
+    expect: "NOT triggered"
+  - input: "I need a review"
+    expect: "NOT triggered"
+  - input: "explain the review process"
+    expect: "NOT triggered"
+  - input: "review guidelines"
+    expect: "NOT triggered"
+  - input: "/delphi-review"
+    expect: "triggered"
+  - input: "review this design"
+    expect: "triggered"
+  - input: "评审这个需求"
+    expect: "triggered"
+  - input: "评审这个设计"
+    expect: "triggered"
+  - input: "design review"
+    expect: "triggered"
+  - input: "多专家评审"
+    expect: "triggered"
+  - input: "consensus review"
+    expect: "triggered"
+  - input: "code walkthrough"
+    expect: "triggered"
+  - input: "architecture review"
+    expect: "triggered"
+  - input: "delphi review"
+    expect: "triggered"
+  - input: "评审这个架构"
+    expect: "triggered"
+  - input: "delphi 评审"
+    expect: "triggered"
+  - input: "run delphi review"
+    expect: "triggered"
+  - input: "review my PR"
+    expect: "NOT triggered"
+  - input: "帮我review一下"
+    expect: "NOT triggered"
+  - input: "just review this"
+    expect: "NOT triggered"
+  - input: "quick review"
+    expect: "NOT triggered"
+  - input: "review steps"
+    expect: "NOT triggered"
+  - input: "code review template"
+    expect: "NOT triggered"
+  - input: "run delphi"
+    expect: "triggered"
+workflow_steps:
+  - "Step 0: Input Validation → Output: [DelphiReview] or [DelphiReview:BLOCKED]"
+  - "Round 1: Anonymous Independent Review → Output: [DelphiReview Round 1] expert JSON verdicts"
+  - "Consensus Check → Output: consensus_ratio, verdict summary"
+  - "Round 2: Exchange Opinions (if needed) → Output: [DelphiReview Round 2] revised verdicts"
+  - "Round 3: Final Positions (if needed) → Output: [DelphiReview Round 3] final verdicts"
+  - "Fix & Re-Review (if REQUEST_CHANGES) → restart from Round 2"
+  - "Generate Output: consensus report + specification.yaml (design) or .code-walkthrough-result.json (walkthrough)"
+hooks:
+  security:
+    - "/careful": "Safety guardrails for destructive commands — ensure review is read-only"
+    - "/freeze": "Restrict edits to review scope — prevent accidental changes during review"
+    - "/guard": "Full safety mode combining careful + freeze for maximum protection"
+  operational:
+    - "/context-save": "Save review context before pause or handoff"
+    - "/context-restore": "Restore review context on resume"
+tools_allowed:
+  - "Read"                       # read design docs, code, configs, specification.yaml
+  - "Glob"                       # find files by pattern
+  - "Grep"                       # search code content
+  - "Bash"                       # read-only: git diff, git log, file stats
+  - "Task(subagent_type=oracle)" # dispatch oracle for deep analysis
+  - "Task(subagent_type=delphi-reviewer-architecture)"    # dispatch architecture expert
+  - "Task(subagent_type=delphi-reviewer-technical)"     # dispatch technical expert
+  - "Task(subagent_type=delphi-reviewer-feasibility)"   # dispatch feasibility expert
+  - "Write(specification.yaml, .code-walkthrough-result.json, delphi-reviewed.json)"  # write output artifacts only
+  - "Skill"                      # invoke related skills for context
+  - "Question"                   # ask user at decision points
+tools_denied:
+  - "Edit(source code)"           # NEVER edit implementation code during review
+  - "Write(source code)"          # NEVER write implementation code
+  - "Bash(git commit, git push)"  # NEVER commit or push during review
+  - "Task(category=*, subagent_type=build)"  # NEVER delegate build/implementation
 ---
 
 # Delphi Consensus Review
@@ -31,27 +191,73 @@ auto_continue: true
 - code walkthrough
 - push review
 - architecture review
-- PR review
+- delphi review
+- run delphi
+- start delphi
+- 评审这个架构
+- review this architecture
+- 评审PR
+- review this PR with delphi
+- delphi评审
+- delphi 评审
+- run delphi review
+- 执行delphi
+- 启动delphi评审
 
-## 工作流程
+**NOT triggered by:**
+- "how does delphi work" (educational)
+- "code review checklist" (asking for a list)
+- "review my code quickly" (single-pass, not multi-expert)
+- "can you review this" (ambiguous casual review)
+- "peer review" (different process)
+- "I need a review" (too vague)
+- "explain the review process" (educational)
+- "review guidelines" (asking about guidelines)
+- "PR review" (single-reviewer PR check)
+- "review my PR" (informal PR review)
+- "帮我review一下" (casual Chinese request)
+- "just review this" (casual single-pass)
+- "quick review" (contradicts multi-round process)
+- "review steps" (asking for instructions)
+- "code review template" (asking for template)
+- "review format" (asking about format)
+- "show me how to review" (educational)
 
-1. Input Validation: 检查输入是否包含可评审内容（设计文档/代码/spec），空输入阻断
-2. Expert Assignment: 分配 2-3 位专家，至少来自 2 家不同厂商（国产模型）
-3. Round 1: 匿名独立评审 — 各专家互不知对方意见，独立输出 verdict JSON
-4. Consensus Check: 共识检查 — 共识 ≥90% 且全部 APPROVED 则完成
-5. Round 2: 交换意见 — 未达成共识时，专家查看他人意见后重新评审
-6. Round 3: 最终立场 — 仍未达成共识时，输出最终立场和分歧点
-7. Fix & Re-Review: REQUEST_CHANGES → 修复 Critical+Major → 从 Round 2 重新评审
-8. Generate Output: 生成共识报告 + specification.yaml + delphi-reviewed.json
+## Workflow
 
-## Activation
-**MANDATORY**: Every delphi-review response MUST begin with `[DelphiReview]` as the first line.
-This marker is required for skill-cert L1 trigger detection.
+1. **Step 0: Input Validation** — Check input contains reviewable content (design doc/code/spec/diff). Empty input → `[DelphiReview:BLOCKED]`.
+2. **Round 1: Anonymous Independent Review** — Experts review without seeing each other's opinions. Output individual verdict JSON.
+3. **Consensus Check** — Consensus >=90% AND all APPROVED → complete.
+4. **Round 2: Exchange Opinions** — Experts see others' opinions, re-evaluate.
+5. **Round 3: Final Positions** — Final stance, output disagreements if any.
+6. **Fix & Re-Review** — REQUEST_CHANGES → fix Critical+Major → restart from Round 2.
+7. **Generate Output** — Consensus report + specification.yaml (design) or `.code-walkthrough-result.json` (walkthrough) + `delphi-reviewed.json`.
 
-Permitted variants (all satisfy L1 trigger):
-- `[DelphiReview]` — standard entry
-- `[DelphiReview:BLOCKED]` — Step 0 input validation failure
-- `[DelphiReview:WARNING]` — red flag detected (reserved)
+## Activation (MANDATORY for L1 Trigger Detection)
+
+Every delphi-review response MUST begin with an activation marker as the first line:
+
+| Marker | Meaning |
+|--------|---------|
+| `[DelphiReview]` | Standard entry — review proceeding |
+| `[DelphiReview:BLOCKED]` | Step 0 input validation failure |
+| `[DelphiReview:WARNING]` | Red flag detected (reserved) |
+
+## Round Markers (MANDATORY for L3 Step Adherence)
+
+Each round MUST output a structured round marker:
+
+```
+[DelphiReview Round 1] Anonymous Independent Review
+[DelphiReview Round 2] Exchange Opinions
+[DelphiReview Round 3] Final Positions
+```
+
+**Rules**:
+- Every round marker MUST appear as a separate, identifiable line
+- Round numbering MUST be sequential (1, 2, 3)
+- After each round, output consensus summary: `consensus_ratio=N/N`, `verdict_status: converging | stable | diverging`
+- Final round MUST output verdict: `APPROVED | PASS_WITH_CAVEATS | REQUEST_CHANGES | PROCESS_BLOCK`
 
 ## 核心原则
 
@@ -88,44 +294,34 @@ Permitted variants (all satisfy L1 trigger):
 | 2 专家（默认） | A(架构) + B(实现) | 代码变更、小型设计 |
 | 3 专家 | A(架构) + B(实现) + C(可行性) | 架构决策、需求文档 |
 
-### 模型选择策略（Qoder — 从 .delphi-config.json 读取 + 外部 API 调用）
-
-**MUST 从 `.delphi-config.json` 读取 API 配置**，通过 Bash 工具调用 `delphi-external-review.cjs` 脚本实现真正的跨模型评审。
-
-**配置定位优先级**：
-1. 当前项目 `skills/delphi-review/.delphi-config.json`（Qoder 已安装 skill）
-2. `~/.qoder/skills/delphi-review/.delphi-config.json`（全局安装）
-
-**脚本定位优先级**：
-1. `node_modules/@boyingliu01/xp-gate/scripts/delphi-external-review.cjs`（npm 安装后）
-2. `$(npm root -g)/@boyingliu01/xp-gate/scripts/delphi-external-review.cjs`（全局安装）
-3. xp-gate 仓库中的 `scripts/delphi-external-review.cjs`（开发环境）
+### 模型选择策略（强制 — 平台适配）
 
 **关键原则**：
-- ✅ 三个专家必须来自 **至少 2 家不同 provider**（按 `base_url` 判断）
-- ✅ 支持混合模式：`provider: "local"` 表示由 Orchestrator 自身模型扮演
-- ❌ 禁止三个专家全部使用同一 provider 的模型（除非使用混合模式）
+- ✅ 三个专家必须来自 **至少 2 家不同 provider**
+- ❌ 禁止 hardcode 模型名称
+- ❌ 禁止三个专家全部使用同一 provider 的模型
+- ❌ 禁止使用 Anthropic/OpenAI/Google 等国外模型
 
-**配置示例**（参考 `.delphi-config.json.example`）：
-```json
-{
-  "active_profile": "default",
-  "profiles": {
-    "default": {
-      "providers": {
-        "deepseek": { "base_url": "https://api.deepseek.com/v1", "api_key": "sk-xxx" },
-        "zhipu": { "base_url": "https://open.bigmodel.cn/api/paas/v4", "api_key": "yyy" }
-      },
-      "experts": {
-        "architecture": { "provider": "deepseek", "model": "deepseek-chat" },
-        "technical": { "provider": "zhipu", "model": "glm-5.2" },
-        "feasibility": { "provider": "local" }
-      }
-    }
-  }
-}
-```
-> 上例中 2 个外部 provider（deepseek + zhipu）+ 1 个 local fallback，满足跨 provider 要求。
+#### Qoder 平台（推荐 — Custom Agent 模式）
+
+Qoder 环境下使用 **Custom Agent** 机制，每个专家是一个独立的 custom agent，配置不同的 Qoder 内置模型：
+
+| 专家 | Agent 文件 | 模型 | Credits 费率 |
+|------|-----------|------|-------------|
+| Architecture (A) | `.qoder/agents/delphi-architecture.md` | Qwen3.7-Max | 0.5× |
+| Technical (B) | `.qoder/agents/delphi-technical.md` | GLM-5.2 | 0.6× |
+| Feasibility (C) | `.qoder/agents/delphi-feasibility.md` | DeepSeek-V4-Pro | 0.5× |
+
+**执行方式**：通过 Agent tool 并行启动 3 个 subagent（type=GeneralPurpose），每个 agent 使用自己配置的模型独立评审，主 orchestrator 收集结果后计算共识。
+
+**优势**：无需外部 API key，直接使用 Qoder Credits，模型由平台统一管理。
+
+#### OpenCode 平台（External API 模式）
+
+OpenCode 环境下通过 `opencode.json` 的 agent 配置 + `.delphi-config.json` 调用外部 API：
+- **MUST 从 `opencode.json` 的 agent 配置中读取模型**
+- 通过 `scripts/delphi-external-review.cjs` 调用各 provider 的 OpenAI 兼容 API
+- 需要用户自行配置 API key（环境变量注入）
 
 ### 共识阈值
 
@@ -166,84 +362,14 @@ Phase 0: 准备 → Round 1: 匿名独立评审 → 共识检查
 
 1. **有完整输入** → 直接进入 Phase 0（准备阶段），开始 Round 1
 2. **有部分输入**（占位符、描述性文本）→ 按输入内容执行评审，标注 `[INPUT: PARTIAL]`，但继续执行
-3. **无输入**（仅触发词，无文档/代码）→ 输出以下阻断响应，记入步骤完成：
+3. **无输入**（仅触发词，无文档/代码）→ 输出阻断响应
 
-**Detection heuristics for Step 0**:
-- **Complete**: Contains ≥1 structural element (e.g., `##`, `requirement`, `AC-`, `function`, `class`, `interface`, YAML frontmatter, code block with language tag) AND ≥50 non-whitespace characters of actual content (not placeholder brackets like `[...]`, `{...}`, `<insert here>`).
-- **Partial**: Contains descriptive text referencing a design/code artifact BUT lacks substantive structure (e.g., "I need to review my login module" with no actual code/design attached), OR contains obvious placeholders like `[...]`, `(content)`, `<insert here>`, `TODO`.
-- **None**: Only trigger words (`/delphi-review`, "review this") with zero additional content, OR content that is exclusively questions about the review process itself ("how does delphi work?").
+**Detection heuristics**:
+- **Complete**: >=1 structural element (##, requirement, AC-, function, class, interface, YAML frontmatter, code block) AND >=50 non-whitespace chars.
+- **Partial**: Descriptive text referencing a design/code artifact BUT lacks structure, OR contains placeholders.
+- **None**: Only trigger words with zero additional content, OR questions about the review process itself.
 
-**Partial input constraint**: When input is PARTIAL, cap review to 1 round with `confidence=low` annotation. Do NOT proceed with full multi-round review on insufficient input.
-
-**File path validation**: If user provides a file path (e.g., `--spec specification.yaml`):
-- Verify the file exists and is non-empty
-- If path is invalid → output: `[DelphiReview:BLOCKED] File not found: [path]. Please verify the path.`
-- If file is empty → output: `[DelphiReview:BLOCKED] File is empty: [path]. Please provide valid content.`
-
-```
-[DelphiReview:BLOCKED] 需要设计文档或代码内容才能启动评审。
-
-请提供以下之一：
-- 设计文档（design doc / specification）
-- 代码变更（code diff / PR link）
-- specification.yaml 文件路径
-- 架构设计说明
-
-评审输入示例：
-/delphi-review "Design Doc: [your content here]"
-/delphi-review --spec specification.yaml
-/delphi-review --mode code-walkthrough
-REMAINING STEPS: N/A (input validation failed)
-```
-
-在此状态下，BLOCKED 视为步骤已完成（后续步骤标记为 N/A）。
-
-**重要**: 内嵌在 prompt 中的文档内容（如 "Design Doc: [content]"或代码片段）应视为"有完整输入"，直接进入评审。
-
-**执行方式（Qoder）**：
-1. 将评审内容写入临时文件（使用 `os.tmpdir()` 确保跨平台）
-2. 通过 Bash 工具并行调用 3 个 `delphi-external-review.cjs` 脚本
-3. 对 `fallback: true` 的专家，Orchestrator 自身模型扮演该角色
-4. 收集 verdict JSON，计算共识度，决定是否需要下一轮
-
-**Round 模板**（匿名评审/交换意见/最终立场/修复报告格式）→ 详见 `references/round-templates.md`
-
-**Orchestrator 自动调度规则**（#218 subagent 内部自动多轮循环）→ 详见 `references/orchestrator-dispatch.md`
-
-**Automatic re-review**: 对于常见可控问题（措辞模糊、AC 缺失、格式问题），应自行修复后自动重评审，无需等待用户。
-
-### ⭐ 自动延续规则（MANDATORY — 防止流程卡住）
-
-当 Delphi Review 启动多轮评审（Round 2+）时，**orchestrator 必须自动延续流程，不得等待用户输入**。
-
-**触发条件**：
-- Round N 完成，但未达到终止条件（100% approved + ≥90% consensus + 所有 Critical/Major 已处理）
-- 存在待处理的背景任务（subagent  dispatched tasks）
-
-**自动延续动作**：
-1. **收集背景任务结果**：等待 `<system-reminder>` 通知后，立即调用 `background_output(task_id="bg_...")` 获取所有 subagent 输出
-2. **合成 Round N 总结**：汇总专家意见、共识度、待处理问题
-3. **自动启动 Round N+1**：立即 dispatch 新一轮 subagent 任务，携带上一轮总结作为上下文
-4. **循环直至终止**：重复步骤 1-3，直到达到终止条件
-
-**终止条件**（满足全部）：
-- ✅ 所有专家状态 = APPROVED
-- ✅ 共识度 ≥ 90%
-- ✅ 所有 Critical 级别问题已解决
-- ✅ 所有 Major 级别问题已处理（或已记录为已知问题）
-
-**例外情况**（直接输出，不进入下一轮）：
-- Round 1 即达到 100% approved + 100% consensus → 直接输出最终报告
-- 已达最大轮数（5 轮）→ 输出"未达成共识"报告，标记为 PROCESS_BLOCK
-
-**禁止行为**：
-- ❌ 询问用户"要继续吗？"
-- ❌ 等待用户手动触发 Round N+1
-- ❌ 在未达到终止条件时停止流程
-
-**错误处理**：
-- 背景任务超时（>10min）→ 标记为 TIMEOUT，输出部分结果并终止
-- 背景任务失败（subagent 错误）→ 重试 1 次，仍失败则输出错误报告并终止
+**Partial input constraint**: Cap review to 1 round with `confidence=low` annotation.
 
 ---
 
@@ -265,24 +391,12 @@ REMAINING STEPS: N/A (input validation failed)
 
 ---
 
-## Output Format (MANDATORY)
-
-**Single 模式简化输出**: 当 single reviewer 模式（非 Multi-Expert）时，可使用简化输出格式：
-- verdict + confidence + issues_list（合并 critical/major/minor）+ summary
-- 完整 JSON 格式保留用于 multi-expert 多轮评审场景
-
-**Single 模式简化模板**:
-```
-[DelphiReview] verdict=APPROVED | REQUEST_CHANGES | BLOCKED
-confidence=N/10
-issues=[critical: N, major: N, minor: N]
-summary: [1-2 sentence verdict summary]
-```
+## Output Format (MANDATORY for L3)
 
 **⚠️ Single vs Multi-Expert Output**:
-- **Multi-Expert Mode (default)**: MUST use the full JSON schema below. Each expert outputs independently; the orchestrator aggregates into `consensus_report`. DO NOT use the simplified template.
-- **Single Reviewer Mode** (explicitly invoked with `--single`): MAY use the simplified text template above.
-- **Never mix formats**. If you are one of multiple experts in the same round, output JSON only.
+- **Multi-Expert Mode (default)**: MUST use the full JSON schema below. Each expert outputs independently; the orchestrator aggregates into `consensus_report`.
+- **Single Reviewer Mode** (explicit `--single`): MAY use simplified text template: `[DelphiReview] verdict=APPROVED|REQUEST_CHANGES|BLOCKED confidence=N/10 issues=[critical:N, major:N, minor:N] summary: [1-2 sentences]`.
+- **Never mix formats**.
 
 ```json
 {
@@ -321,12 +435,10 @@ summary: [1-2 sentence verdict summary]
 - [ ] 最终裁决是 **APPROVED** 或 **APPROVED_WITH_MINOR**
 - [ ] 共识报告生成并保存
 - [ ] IF REQUEST_CHANGES → 已修复 → 已重新评审 → APPROVED
-- [ ] ⭐ **IF APPROVED (design mode): 生成 specification.yaml**（自动或用户确认后）
-- [ ] ⭐ **状态文件**: 写入 `.sprint-state/delphi-reviewed.json`（`verdict`, `consensus_ratio`, `timestamp`）
-- [ ] **Code-walkthrough mode**: 写入 `.code-walkthrough-result.json`（commit hash 匹配 HEAD）
+- [ ] ⭐ **IF APPROVED (design mode): 生成 specification.yaml**
+- [ ] ⭐ **状态文件**: 写入 `.sprint-state/delphi-reviewed.json`
 
 **IF REQUEST_CHANGES/REJECTED → CANNOT claim complete**
-**IF 任何条件未满足 → MUST BLOCK**
 
 ### 状态文件格式
 
@@ -339,8 +451,6 @@ summary: [1-2 sentence verdict summary]
 ```json
 {"mode":"code-walkthrough","commit":"abc123...","timestamp":"...","verdict":"APPROVED","consensus_ratio":1.0}
 ```
-
-> Phase 2 BUILD 入口检查 (DELPHI-GATE) 读取此文件。`verdict != "APPROVED"` → 禁止编码。
 
 ---
 
@@ -362,24 +472,13 @@ summary: [1-2 sentence verdict summary]
 
 ## Red Flags
 
-### 检测触发器（模型可执行检测）
-
 | 用户输入模式 | 触发词 | 响应动作 |
 |-------------|--------|---------|
-| 要求跳过评审 | "skip review", "不用评审", "跳过评审", "直接提交", "不评审" | → 提醒: `[DelphiReview] 评审是投资而非开销。Delphi 设计要求多轮共识(>=90%)，不可快速跳过。` |
-| 时间压力 | "来不及", "时间紧", "emergency", "赶时间", "deadline" | → 提醒: `[DelphiReview] 时间紧迫正是需要评审的时刻。跳过评审省 30 分钟，后期修复可能花 3 天。` |
-| 提前终止 | Round 1 后用户说 "可以了", "够了", "enough" | → BLOCK: `[DelphiReview:BLOCKED] 评审未达终止条件。仍需 [共识>=90% + 所有 Critical/Major 已处理]。` |
-| 单专家自评 | 用户仅指定 1 个专家 或 说 "我自己看了" | → 提醒: `[DelphiReview] 至少需要 2 位不同 provider 的专家参与评审。` |
-| 无文档输入 | 仅触发词，无设计/代码内容 | → 输出 `[DelphiReview:BLOCKED]` 阻断响应（见 Step 0） |
-
-### 原则性声明
-
-| 借口 | 现实 |
-|------|------|
-| "这只是小变更" | 所有变更都需要评审 |
-| "Round 1 就够了" | 不够，必须多轮直到共识 |
-| "生成报告就完成了" | APPROVED 才算完成 |
-| "2/3 同意就是共识" | 还要检查问题共识比例 >=90% |
+| 要求跳过评审 | "skip review", "不用评审", "跳过评审" | → 提醒评审是投资而非开销 |
+| 时间压力 | "来不及", "时间紧", "emergency" | → 提醒时间紧迫正是需要评审的时刻 |
+| 提前终止 | Round 1 后用户说 "可以了", "够了" | → BLOCK: 评审未达终止条件 |
+| 单专家自评 | 用户仅指定 1 个专家 | → 提醒至少需要 2 位专家 |
+| 无文档输入 | 仅触发词，无设计/代码内容 | → `[DelphiReview:BLOCKED]` |
 
 ---
 
@@ -392,3 +491,13 @@ summary: [1-2 sentence verdict summary]
 5. ✅ 状态文件已写入
 
 **缺少任何一项 = 未完成**
+
+## References
+
+> **Path convention**: `@references/` resolves relative to the skill directory (`skills/delphi-review/`).
+
+| File | Content |
+|------|---------|
+| `@references/code-walkthrough.md` | Code-walkthrough mode specification |
+| `@references/orchestrator-dispatch.md` | Orchestrator auto-dispatch rules (#218 subagent multi-round loop) |
+| `@references/round-templates.md` | Round templates (anonymous/exchange/final/fix report formats) |
