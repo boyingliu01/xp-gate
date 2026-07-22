@@ -104,6 +104,18 @@ const GATE_CLI_TOOLS = [
     },
     docUrl: 'https://docs.npmjs.com/cli/v10/commands/npx',
   },
+  {
+    tool: 'jq',
+    gates: ['Gate MW (Code Walkthrough)', 'Sprint Gate (sprint-gate.sh)'],
+    checkCmd: 'jq --version',
+    install: {
+      darwin: 'brew install jq',
+      linux: 'apt-get install jq (Debian/Ubuntu) || yum install jq (RHEL/CentOS)',
+      win32: 'choco install jq || winget install jq',
+    },
+    docUrl: 'https://stedolan.github.io/jq/',
+    fallback: 'Node.js JSON parser fallback in sprint-gate.sh when jq is unavailable',
+  },
 ];
 
 /**

@@ -2,6 +2,19 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.14.30.0] - 2026-07-22
+
+### Added
+- **Sprint State 双层强制执行机制**: Layer 1（phase-transition 前置检查，确保前一 Phase 已完成）+ Layer 1.5（Phase 6 completed 自动提醒运行 sprint-audit）+ Layer 2（`xp-gate sprint-audit` CLI，检查 phase 覆盖度、时间记录、输出物、状态一致性）。
+- **`xp-gate sprint-audit` CLI 命令**: 最终完整性审计，verdict 分级（PASS / PASS_WITH_WARNINGS / FAIL / SKIP），支持 `--json` 和 `--dir` 参数，报告持久化到 `.sprint-state/audit-report.json`。
+- **PHASE_NAMES 共享常量**: 从 `phase-transition.js` 导出，供 `sprint-audit.js` 引用。
+- **20 个新测试**: 8 个 Layer 1 前置检查测试 + 12 个 Layer 2 审计测试，33 个测试全部通过。
+
+### Changed
+- `phase-transition.js`: 新增 Layer 1 前置检查逻辑 + Layer 1.5 自动提醒 + PHASE_NAMES 导出。
+- `orchestration-rules.md`: 新增 Step 4（Phase 6 CLOSE 后运行 sprint-audit）。
+- 架构基线更新（`.architecture-baseline.json`）。
+
 ## [0.14.29.0] - 2026-07-22
 
 ### Changed
