@@ -1,8 +1,8 @@
 {
   "schemaVersion": 1,
   "archlintVersion": "0.16.0",
-  "generatedAt": "2026-07-22T03:44:11.396734300+00:00",
-  "commit": "4bf9560",
+  "generatedAt": "2026-07-22T05:59:21.791286100+00:00",
+  "commit": "43fcbd2",
   "smells": [
     {
       "id": "clone:fa8580f07e29eec45822279e17c38574850cbfd33c0e462d0bcf3830eac52139",
@@ -13,9 +13,9 @@
         "src/build-integrity/__tests__/gate-10.test.ts"
       ],
       "metrics": {
-        "cloneHash": "fa8580f07e29eec45822279e17c38574850cbfd33c0e462d0bcf3830eac52139",
+        "tokenCount": 898,
         "cloneInstances": 2,
-        "tokenCount": 898
+        "cloneHash": "fa8580f07e29eec45822279e17c38574850cbfd33c0e462d0bcf3830eac52139"
       },
       "details": {
         "type": "codeClone",
@@ -58,9 +58,9 @@
         "src/npm-package/build-integrity/__tests__/import-resolver.test.ts"
       ],
       "metrics": {
-        "cloneHash": "f817ec0f6b5c5e483c9a8aa49264e39987e867c49ba00e9d57d1c402d3392eee",
+        "tokenCount": 1642,
         "cloneInstances": 2,
-        "tokenCount": 1642
+        "cloneHash": "f817ec0f6b5c5e483c9a8aa49264e39987e867c49ba00e9d57d1c402d3392eee"
       },
       "details": {
         "type": "codeClone",
@@ -103,8 +103,8 @@
         "src/npm-package/scripts/delphi-external-review.cjs"
       ],
       "metrics": {
-        "tokenCount": 1388,
         "cloneInstances": 2,
+        "tokenCount": 1388,
         "cloneHash": "0eb998ba486b655a56d616f163201e1c0c61f9f6edd50515599ef10f055abe2e"
       },
       "details": {
@@ -144,12 +144,12 @@
       "smellType": "CodeClone",
       "severity": "High",
       "files": [
-        "src/build-integrity/gate-10.ts",
-        "src/npm-package/build-integrity/gate-10.ts"
+        "src/npm-package/build-integrity/gate-10.ts",
+        "src/build-integrity/gate-10.ts"
       ],
       "metrics": {
-        "tokenCount": 1902,
         "cloneHash": "4e3868a1d1df18434b7a93165f373b3366070ab4741354e86c7af55f044f7b2c",
+        "tokenCount": 1902,
         "cloneInstances": 2
       },
       "details": {
@@ -185,6 +185,77 @@
       ]
     },
     {
+      "id": "clone:08f69a3dbf0001f2863d641ed6de225881d8450cf88ca616ec4c05b396423431",
+      "smellType": "CodeClone",
+      "severity": "High",
+      "files": [
+        "src/npm-package/skills/sprint-flow/__tests__/sprint-flow.test.cjs",
+        "src/npm-package/plugins/opencode/skills/sprint-flow/__tests__/sprint-flow.test.cjs",
+        "src/npm-package/plugins/claude-code/skills/sprint-flow/__tests__/sprint-flow.test.cjs",
+        "CUsersthink/.qoder/skills/sprint-flow/__tests__/sprint-flow.test.cjs"
+      ],
+      "metrics": {
+        "tokenCount": 1588,
+        "cloneHash": "08f69a3dbf0001f2863d641ed6de225881d8450cf88ca616ec4c05b396423431",
+        "cloneInstances": 4
+      },
+      "details": {
+        "type": "codeClone",
+        "clone_hash": "08f69a3dbf0001f2863d641ed6de225881d8450cf88ca616ec4c05b396423431",
+        "token_count": 1588
+      },
+      "locations": [
+        {
+          "file": "CUsersthink/.qoder/skills/sprint-flow/__tests__/sprint-flow.test.cjs",
+          "line": 7,
+          "column": 1,
+          "range": {
+            "start_line": 7,
+            "start_column": 1,
+            "end_line": 457,
+            "end_column": 28
+          },
+          "description": "Duplicated code (1588 tokens, lines 7-457). Also found in: src\\npm-package\\plugins\\claude-code\\skills\\sprint-flow\\__tests__\\sprint-flow.test.cjs:7-457, src\\npm-package\\plugins\\opencode\\skills\\sprint-flow\\__tests__\\sprint-flow.test.cjs:7-457, src\\npm-package\\skills\\sprint-flow\\__tests__\\sprint-flow.test.cjs:7-457"
+        },
+        {
+          "file": "src/npm-package/plugins/claude-code/skills/sprint-flow/__tests__/sprint-flow.test.cjs",
+          "line": 7,
+          "column": 1,
+          "range": {
+            "start_line": 7,
+            "start_column": 1,
+            "end_line": 457,
+            "end_column": 28
+          },
+          "description": "Duplicated code (1588 tokens, lines 7-457). Also found in: CUsersthink\\.qoder\\skills\\sprint-flow\\__tests__\\sprint-flow.test.cjs:7-457, src\\npm-package\\plugins\\opencode\\skills\\sprint-flow\\__tests__\\sprint-flow.test.cjs:7-457, src\\npm-package\\skills\\sprint-flow\\__tests__\\sprint-flow.test.cjs:7-457"
+        },
+        {
+          "file": "src/npm-package/plugins/opencode/skills/sprint-flow/__tests__/sprint-flow.test.cjs",
+          "line": 7,
+          "column": 1,
+          "range": {
+            "start_line": 7,
+            "start_column": 1,
+            "end_line": 457,
+            "end_column": 28
+          },
+          "description": "Duplicated code (1588 tokens, lines 7-457). Also found in: CUsersthink\\.qoder\\skills\\sprint-flow\\__tests__\\sprint-flow.test.cjs:7-457, src\\npm-package\\plugins\\claude-code\\skills\\sprint-flow\\__tests__\\sprint-flow.test.cjs:7-457, src\\npm-package\\skills\\sprint-flow\\__tests__\\sprint-flow.test.cjs:7-457"
+        },
+        {
+          "file": "src/npm-package/skills/sprint-flow/__tests__/sprint-flow.test.cjs",
+          "line": 7,
+          "column": 1,
+          "range": {
+            "start_line": 7,
+            "start_column": 1,
+            "end_line": 457,
+            "end_column": 28
+          },
+          "description": "Duplicated code (1588 tokens, lines 7-457). Also found in: CUsersthink\\.qoder\\skills\\sprint-flow\\__tests__\\sprint-flow.test.cjs:7-457, src\\npm-package\\plugins\\claude-code\\skills\\sprint-flow\\__tests__\\sprint-flow.test.cjs:7-457, src\\npm-package\\plugins\\opencode\\skills\\sprint-flow\\__tests__\\sprint-flow.test.cjs:7-457"
+        }
+      ]
+    },
+    {
       "id": "clone:3aaabaa03f6aaab1d67bd0f9f1fca46124c67319461965730f3d386d13a6fcad",
       "smellType": "CodeClone",
       "severity": "High",
@@ -193,9 +264,9 @@
         "src/mutation/__tests__/init-baseline.test.ts"
       ],
       "metrics": {
+        "cloneHash": "3aaabaa03f6aaab1d67bd0f9f1fca46124c67319461965730f3d386d13a6fcad",
         "cloneInstances": 2,
-        "tokenCount": 149,
-        "cloneHash": "3aaabaa03f6aaab1d67bd0f9f1fca46124c67319461965730f3d386d13a6fcad"
+        "tokenCount": 149
       },
       "details": {
         "type": "codeClone",
@@ -234,13 +305,13 @@
       "smellType": "CodeClone",
       "severity": "High",
       "files": [
-        "src/npm-package/build-integrity/__tests__/orchestrator.test.ts",
-        "src/build-integrity/__tests__/orchestrator.test.ts"
+        "src/build-integrity/__tests__/orchestrator.test.ts",
+        "src/npm-package/build-integrity/__tests__/orchestrator.test.ts"
       ],
       "metrics": {
-        "cloneHash": "50c2867885bd7ae0e5885dd4597fd900eebce80254c1aa21d24b8e5c1831e3df",
+        "tokenCount": 1261,
         "cloneInstances": 2,
-        "tokenCount": 1261
+        "cloneHash": "50c2867885bd7ae0e5885dd4597fd900eebce80254c1aa21d24b8e5c1831e3df"
       },
       "details": {
         "type": "codeClone",
@@ -329,8 +400,8 @@
       ],
       "metrics": {
         "cloneInstances": 2,
-        "cloneHash": "62e60abd033748b75351bde7fe72d972b2cd22698e13e9427ee5af507adab3b6",
-        "tokenCount": 272
+        "tokenCount": 272,
+        "cloneHash": "62e60abd033748b75351bde7fe72d972b2cd22698e13e9427ee5af507adab3b6"
       },
       "details": {
         "type": "codeClone",
@@ -373,8 +444,8 @@
         "src/npm-package/build-integrity/__tests__/ccn-refactor-gate10.test.ts"
       ],
       "metrics": {
-        "cloneInstances": 2,
         "tokenCount": 510,
+        "cloneInstances": 2,
         "cloneHash": "efa76578236d190a7a88ce13b4181b6bac8209467850662d48adbad4e1bb3060"
       },
       "details": {
@@ -410,18 +481,62 @@
       ]
     },
     {
+      "id": "clone:a4265eacc43567d5f967cbd1a9bcd2254bd8a5f6445cfeb70c22cb48dc5a57f7",
+      "smellType": "CodeClone",
+      "severity": "High",
+      "files": [
+        "CUsersthink/.qoder/skills/sprint-flow/__tests__/sprint-flow.test.cjs"
+      ],
+      "metrics": {
+        "tokenCount": 171,
+        "cloneInstances": 2,
+        "cloneHash": "a4265eacc43567d5f967cbd1a9bcd2254bd8a5f6445cfeb70c22cb48dc5a57f7"
+      },
+      "details": {
+        "type": "codeClone",
+        "clone_hash": "a4265eacc43567d5f967cbd1a9bcd2254bd8a5f6445cfeb70c22cb48dc5a57f7",
+        "token_count": 171
+      },
+      "locations": [
+        {
+          "file": "CUsersthink/.qoder/skills/sprint-flow/__tests__/sprint-flow.test.cjs",
+          "line": 342,
+          "column": 3,
+          "range": {
+            "start_line": 342,
+            "start_column": 3,
+            "end_line": 366,
+            "end_column": 76
+          },
+          "description": "Duplicated code (171 tokens, lines 342-366). Also found in: CUsersthink\\.qoder\\skills\\sprint-flow\\__tests__\\sprint-flow.test.cjs:425-449"
+        },
+        {
+          "file": "CUsersthink/.qoder/skills/sprint-flow/__tests__/sprint-flow.test.cjs",
+          "line": 425,
+          "column": 3,
+          "range": {
+            "start_line": 425,
+            "start_column": 3,
+            "end_line": 449,
+            "end_column": 76
+          },
+          "description": "Duplicated code (171 tokens, lines 425-449). Also found in: CUsersthink\\.qoder\\skills\\sprint-flow\\__tests__\\sprint-flow.test.cjs:342-366"
+        }
+      ]
+    },
+    {
       "id": "clone:af002b89d7c4a9d182137416294b4903f8432633d299acc643694c3fa0eaf600",
       "smellType": "CodeClone",
       "severity": "High",
       "files": [
-        "src/npm-package/scripts/sync-package-content.js",
+        "src/npm-package/plugins/opencode/scripts/prepack.cjs",
         "plugins/opencode/scripts/prepack.cjs",
-        "src/npm-package/plugins/opencode/scripts/prepack.cjs"
+        "src/npm-package/scripts/sync-package-content.js"
       ],
       "metrics": {
-        "cloneInstances": 3,
+        "cloneHash": "af002b89d7c4a9d182137416294b4903f8432633d299acc643694c3fa0eaf600",
         "tokenCount": 137,
-        "cloneHash": "af002b89d7c4a9d182137416294b4903f8432633d299acc643694c3fa0eaf600"
+        "cloneInstances": 3
       },
       "details": {
         "type": "codeClone",
@@ -520,9 +635,9 @@
         "src/npm-package/lib/__tests__/download-skill.test.js"
       ],
       "metrics": {
-        "tokenCount": 117,
+        "cloneInstances": 2,
         "cloneHash": "1385924ab318ef52563b2348a68fd84c8e1d3d3e6d3b600edaacdfa04b0f03ae",
-        "cloneInstances": 2
+        "tokenCount": 117
       },
       "details": {
         "type": "codeClone",
@@ -561,8 +676,8 @@
       "smellType": "CodeClone",
       "severity": "High",
       "files": [
-        "src/npm-package/lib/detect-deps.js",
-        "src/npm-package/lib/doctor.js"
+        "src/npm-package/lib/doctor.js",
+        "src/npm-package/lib/detect-deps.js"
       ],
       "metrics": {
         "tokenCount": 112,
@@ -602,1593 +717,64 @@
       ]
     },
     {
-      "id": "clone:6af4aa5557dcfd50ebea6479ad0e797387e9e1804f38ba1347b006cc83b016c2",
-      "smellType": "CodeClone",
-      "severity": "Medium",
-      "files": [
-        "src/npm-package/lib/__tests__/doctor.test.js"
-      ],
-      "metrics": {
-        "tokenCount": 60,
-        "cloneInstances": 2,
-        "cloneHash": "6af4aa5557dcfd50ebea6479ad0e797387e9e1804f38ba1347b006cc83b016c2"
-      },
-      "details": {
-        "type": "codeClone",
-        "clone_hash": "6af4aa5557dcfd50ebea6479ad0e797387e9e1804f38ba1347b006cc83b016c2",
-        "token_count": 60
-      },
-      "locations": [
-        {
-          "file": "src/npm-package/lib/__tests__/doctor.test.js",
-          "line": 716,
-          "column": 12,
-          "range": {
-            "start_line": 716,
-            "start_column": 12,
-            "end_line": 725,
-            "end_column": 27
-          },
-          "description": "Duplicated code (60 tokens, lines 716-725). Also found in: src\\npm-package\\lib\\__tests__\\doctor.test.js:743-752"
-        },
-        {
-          "file": "src/npm-package/lib/__tests__/doctor.test.js",
-          "line": 743,
-          "column": 12,
-          "range": {
-            "start_line": 743,
-            "start_column": 12,
-            "end_line": 752,
-            "end_column": 31
-          },
-          "description": "Duplicated code (60 tokens, lines 743-752). Also found in: src\\npm-package\\lib\\__tests__\\doctor.test.js:716-725"
-        }
-      ]
-    },
-    {
-      "id": "clone:5d8d4511b1bccc73d474b06f9d849f87170f7f2cc7c1efb0dd60561e3fe5139e",
-      "smellType": "CodeClone",
-      "severity": "Medium",
-      "files": [
-        "src/mutation/__tests__/mutmut-runner.test.ts"
-      ],
-      "metrics": {
-        "tokenCount": 67,
-        "cloneHash": "5d8d4511b1bccc73d474b06f9d849f87170f7f2cc7c1efb0dd60561e3fe5139e",
-        "cloneInstances": 8
-      },
-      "details": {
-        "type": "codeClone",
-        "clone_hash": "5d8d4511b1bccc73d474b06f9d849f87170f7f2cc7c1efb0dd60561e3fe5139e",
-        "token_count": 67
-      },
-      "locations": [
-        {
-          "file": "src/mutation/__tests__/mutmut-runner.test.ts",
-          "line": 94,
-          "column": 9,
-          "range": {
-            "start_line": 94,
-            "start_column": 9,
-            "end_line": 108,
-            "end_column": 30
-          },
-          "description": "Duplicated code (67 tokens, lines 94-108). Also found in: src\\mutation\\__tests__\\mutmut-runner.test.ts:229-241, src\\mutation\\__tests__\\mutmut-runner.test.ts:269-281, src\\mutation\\__tests__\\mutmut-runner.test.ts:304-316, src\\mutation\\__tests__\\mutmut-runner.test.ts:335-347, src\\mutation\\__tests__\\mutmut-runner.test.ts:371-381, src\\mutation\\__tests__\\mutmut-runner.test.ts:421-430, src\\mutation\\__tests__\\mutmut-runner.test.ts:469-478"
-        },
-        {
-          "file": "src/mutation/__tests__/mutmut-runner.test.ts",
-          "line": 229,
-          "column": 9,
-          "range": {
-            "start_line": 229,
-            "start_column": 9,
-            "end_line": 241,
-            "end_column": 31
-          },
-          "description": "Duplicated code (67 tokens, lines 229-241). Also found in: src\\mutation\\__tests__\\mutmut-runner.test.ts:269-281, src\\mutation\\__tests__\\mutmut-runner.test.ts:304-316, src\\mutation\\__tests__\\mutmut-runner.test.ts:335-347, src\\mutation\\__tests__\\mutmut-runner.test.ts:371-381, src\\mutation\\__tests__\\mutmut-runner.test.ts:421-430, src\\mutation\\__tests__\\mutmut-runner.test.ts:469-478, src\\mutation\\__tests__\\mutmut-runner.test.ts:94-108"
-        },
-        {
-          "file": "src/mutation/__tests__/mutmut-runner.test.ts",
-          "line": 269,
-          "column": 9,
-          "range": {
-            "start_line": 269,
-            "start_column": 9,
-            "end_line": 281,
-            "end_column": 30
-          },
-          "description": "Duplicated code (67 tokens, lines 269-281). Also found in: src\\mutation\\__tests__\\mutmut-runner.test.ts:229-241, src\\mutation\\__tests__\\mutmut-runner.test.ts:304-316, src\\mutation\\__tests__\\mutmut-runner.test.ts:335-347, src\\mutation\\__tests__\\mutmut-runner.test.ts:371-381, src\\mutation\\__tests__\\mutmut-runner.test.ts:421-430, src\\mutation\\__tests__\\mutmut-runner.test.ts:469-478, src\\mutation\\__tests__\\mutmut-runner.test.ts:94-108"
-        },
-        {
-          "file": "src/mutation/__tests__/mutmut-runner.test.ts",
-          "line": 304,
-          "column": 9,
-          "range": {
-            "start_line": 304,
-            "start_column": 9,
-            "end_line": 316,
-            "end_column": 30
-          },
-          "description": "Duplicated code (67 tokens, lines 304-316). Also found in: src\\mutation\\__tests__\\mutmut-runner.test.ts:229-241, src\\mutation\\__tests__\\mutmut-runner.test.ts:269-281, src\\mutation\\__tests__\\mutmut-runner.test.ts:335-347, src\\mutation\\__tests__\\mutmut-runner.test.ts:371-381, src\\mutation\\__tests__\\mutmut-runner.test.ts:421-430, src\\mutation\\__tests__\\mutmut-runner.test.ts:469-478, src\\mutation\\__tests__\\mutmut-runner.test.ts:94-108"
-        },
-        {
-          "file": "src/mutation/__tests__/mutmut-runner.test.ts",
-          "line": 335,
-          "column": 9,
-          "range": {
-            "start_line": 335,
-            "start_column": 9,
-            "end_line": 347,
-            "end_column": 30
-          },
-          "description": "Duplicated code (67 tokens, lines 335-347). Also found in: src\\mutation\\__tests__\\mutmut-runner.test.ts:229-241, src\\mutation\\__tests__\\mutmut-runner.test.ts:269-281, src\\mutation\\__tests__\\mutmut-runner.test.ts:304-316, src\\mutation\\__tests__\\mutmut-runner.test.ts:371-381, src\\mutation\\__tests__\\mutmut-runner.test.ts:421-430, src\\mutation\\__tests__\\mutmut-runner.test.ts:469-478, src\\mutation\\__tests__\\mutmut-runner.test.ts:94-108"
-        },
-        {
-          "file": "src/mutation/__tests__/mutmut-runner.test.ts",
-          "line": 371,
-          "column": 9,
-          "range": {
-            "start_line": 371,
-            "start_column": 9,
-            "end_line": 381,
-            "end_column": 27
-          },
-          "description": "Duplicated code (67 tokens, lines 371-381). Also found in: src\\mutation\\__tests__\\mutmut-runner.test.ts:229-241, src\\mutation\\__tests__\\mutmut-runner.test.ts:269-281, src\\mutation\\__tests__\\mutmut-runner.test.ts:304-316, src\\mutation\\__tests__\\mutmut-runner.test.ts:335-347, src\\mutation\\__tests__\\mutmut-runner.test.ts:421-430, src\\mutation\\__tests__\\mutmut-runner.test.ts:469-478, src\\mutation\\__tests__\\mutmut-runner.test.ts:94-108"
-        },
-        {
-          "file": "src/mutation/__tests__/mutmut-runner.test.ts",
-          "line": 421,
-          "column": 9,
-          "range": {
-            "start_line": 421,
-            "start_column": 9,
-            "end_line": 430,
-            "end_column": 27
-          },
-          "description": "Duplicated code (67 tokens, lines 421-430). Also found in: src\\mutation\\__tests__\\mutmut-runner.test.ts:229-241, src\\mutation\\__tests__\\mutmut-runner.test.ts:269-281, src\\mutation\\__tests__\\mutmut-runner.test.ts:304-316, src\\mutation\\__tests__\\mutmut-runner.test.ts:335-347, src\\mutation\\__tests__\\mutmut-runner.test.ts:371-381, src\\mutation\\__tests__\\mutmut-runner.test.ts:469-478, src\\mutation\\__tests__\\mutmut-runner.test.ts:94-108"
-        },
-        {
-          "file": "src/mutation/__tests__/mutmut-runner.test.ts",
-          "line": 469,
-          "column": 9,
-          "range": {
-            "start_line": 469,
-            "start_column": 9,
-            "end_line": 478,
-            "end_column": 27
-          },
-          "description": "Duplicated code (67 tokens, lines 469-478). Also found in: src\\mutation\\__tests__\\mutmut-runner.test.ts:229-241, src\\mutation\\__tests__\\mutmut-runner.test.ts:269-281, src\\mutation\\__tests__\\mutmut-runner.test.ts:304-316, src\\mutation\\__tests__\\mutmut-runner.test.ts:335-347, src\\mutation\\__tests__\\mutmut-runner.test.ts:371-381, src\\mutation\\__tests__\\mutmut-runner.test.ts:421-430, src\\mutation\\__tests__\\mutmut-runner.test.ts:94-108"
-        }
-      ]
-    },
-    {
-      "id": "clone:6910326483e20798cd96b2edf170a06548addcf78990960b07e23c4810c76d8c",
-      "smellType": "CodeClone",
-      "severity": "Medium",
-      "files": [
-        "src/principles/__tests__/boy-scout-integration.test.ts",
-        "src/principles/__tests__/boy-scout.test.ts"
-      ],
-      "metrics": {
-        "cloneHash": "6910326483e20798cd96b2edf170a06548addcf78990960b07e23c4810c76d8c",
-        "tokenCount": 77,
-        "cloneInstances": 2
-      },
-      "details": {
-        "type": "codeClone",
-        "clone_hash": "6910326483e20798cd96b2edf170a06548addcf78990960b07e23c4810c76d8c",
-        "token_count": 77
-      },
-      "locations": [
-        {
-          "file": "src/principles/__tests__/boy-scout-integration.test.ts",
-          "line": 8,
-          "column": 1,
-          "range": {
-            "start_line": 8,
-            "start_column": 1,
-            "end_line": 36,
-            "end_column": 42
-          },
-          "description": "Duplicated code (77 tokens, lines 8-36). Also found in: src\\principles\\__tests__\\boy-scout.test.ts:3-39"
-        },
-        {
-          "file": "src/principles/__tests__/boy-scout.test.ts",
-          "line": 3,
-          "column": 1,
-          "range": {
-            "start_line": 3,
-            "start_column": 1,
-            "end_line": 39,
-            "end_column": 49
-          },
-          "description": "Duplicated code (77 tokens, lines 3-39). Also found in: src\\principles\\__tests__\\boy-scout-integration.test.ts:8-36"
-        }
-      ]
-    },
-    {
-      "id": "clone:32dbe95ef39e3b7ff143f7418ced20dd414bdaeee9c5fdb15db6a10cb14649df",
-      "smellType": "CodeClone",
-      "severity": "Medium",
-      "files": [
-        "src/mutation/__tests__/update-baseline.test.ts"
-      ],
-      "metrics": {
-        "tokenCount": 65,
-        "cloneInstances": 6,
-        "cloneHash": "32dbe95ef39e3b7ff143f7418ced20dd414bdaeee9c5fdb15db6a10cb14649df"
-      },
-      "details": {
-        "type": "codeClone",
-        "clone_hash": "32dbe95ef39e3b7ff143f7418ced20dd414bdaeee9c5fdb15db6a10cb14649df",
-        "token_count": 65
-      },
-      "locations": [
-        {
-          "file": "src/mutation/__tests__/update-baseline.test.ts",
-          "line": 112,
-          "column": 7,
-          "range": {
-            "start_line": 112,
-            "start_column": 7,
-            "end_line": 123,
-            "end_column": 13
-          },
-          "description": "Duplicated code (65 tokens, lines 112-123). Also found in: src\\mutation\\__tests__\\update-baseline.test.ts:193-205, src\\mutation\\__tests__\\update-baseline.test.ts:219-230, src\\mutation\\__tests__\\update-baseline.test.ts:243-254, src\\mutation\\__tests__\\update-baseline.test.ts:262-273, src\\mutation\\__tests__\\update-baseline.test.ts:319-330"
-        },
-        {
-          "file": "src/mutation/__tests__/update-baseline.test.ts",
-          "line": 193,
-          "column": 7,
-          "range": {
-            "start_line": 193,
-            "start_column": 7,
-            "end_line": 205,
-            "end_column": 13
-          },
-          "description": "Duplicated code (65 tokens, lines 193-205). Also found in: src\\mutation\\__tests__\\update-baseline.test.ts:112-123, src\\mutation\\__tests__\\update-baseline.test.ts:219-230, src\\mutation\\__tests__\\update-baseline.test.ts:243-254, src\\mutation\\__tests__\\update-baseline.test.ts:262-273, src\\mutation\\__tests__\\update-baseline.test.ts:319-330"
-        },
-        {
-          "file": "src/mutation/__tests__/update-baseline.test.ts",
-          "line": 219,
-          "column": 7,
-          "range": {
-            "start_line": 219,
-            "start_column": 7,
-            "end_line": 230,
-            "end_column": 13
-          },
-          "description": "Duplicated code (65 tokens, lines 219-230). Also found in: src\\mutation\\__tests__\\update-baseline.test.ts:112-123, src\\mutation\\__tests__\\update-baseline.test.ts:193-205, src\\mutation\\__tests__\\update-baseline.test.ts:243-254, src\\mutation\\__tests__\\update-baseline.test.ts:262-273, src\\mutation\\__tests__\\update-baseline.test.ts:319-330"
-        },
-        {
-          "file": "src/mutation/__tests__/update-baseline.test.ts",
-          "line": 243,
-          "column": 7,
-          "range": {
-            "start_line": 243,
-            "start_column": 7,
-            "end_line": 254,
-            "end_column": 43
-          },
-          "description": "Duplicated code (65 tokens, lines 243-254). Also found in: src\\mutation\\__tests__\\update-baseline.test.ts:112-123, src\\mutation\\__tests__\\update-baseline.test.ts:193-205, src\\mutation\\__tests__\\update-baseline.test.ts:219-230, src\\mutation\\__tests__\\update-baseline.test.ts:262-273, src\\mutation\\__tests__\\update-baseline.test.ts:319-330"
-        },
-        {
-          "file": "src/mutation/__tests__/update-baseline.test.ts",
-          "line": 262,
-          "column": 7,
-          "range": {
-            "start_line": 262,
-            "start_column": 7,
-            "end_line": 273,
-            "end_column": 28
-          },
-          "description": "Duplicated code (65 tokens, lines 262-273). Also found in: src\\mutation\\__tests__\\update-baseline.test.ts:112-123, src\\mutation\\__tests__\\update-baseline.test.ts:193-205, src\\mutation\\__tests__\\update-baseline.test.ts:219-230, src\\mutation\\__tests__\\update-baseline.test.ts:243-254, src\\mutation\\__tests__\\update-baseline.test.ts:319-330"
-        },
-        {
-          "file": "src/mutation/__tests__/update-baseline.test.ts",
-          "line": 319,
-          "column": 7,
-          "range": {
-            "start_line": 319,
-            "start_column": 7,
-            "end_line": 330,
-            "end_column": 55
-          },
-          "description": "Duplicated code (65 tokens, lines 319-330). Also found in: src\\mutation\\__tests__\\update-baseline.test.ts:112-123, src\\mutation\\__tests__\\update-baseline.test.ts:193-205, src\\mutation\\__tests__\\update-baseline.test.ts:219-230, src\\mutation\\__tests__\\update-baseline.test.ts:243-254, src\\mutation\\__tests__\\update-baseline.test.ts:262-273"
-        }
-      ]
-    },
-    {
-      "id": "clone:5282e49e1c7169876c8ba6f191b344e11a479c23fba13a8d4e844389a81d7a1f",
-      "smellType": "CodeClone",
-      "severity": "Medium",
-      "files": [
-        "src/mutation/__tests__/update-baseline.test.ts"
-      ],
-      "metrics": {
-        "tokenCount": 69,
-        "cloneHash": "5282e49e1c7169876c8ba6f191b344e11a479c23fba13a8d4e844389a81d7a1f",
-        "cloneInstances": 2
-      },
-      "details": {
-        "type": "codeClone",
-        "clone_hash": "5282e49e1c7169876c8ba6f191b344e11a479c23fba13a8d4e844389a81d7a1f",
-        "token_count": 69
-      },
-      "locations": [
-        {
-          "file": "src/mutation/__tests__/update-baseline.test.ts",
-          "line": 111,
-          "column": 7,
-          "range": {
-            "start_line": 111,
-            "start_column": 7,
-            "end_line": 123,
-            "end_column": 13
-          },
-          "description": "Duplicated code (69 tokens, lines 111-123). Also found in: src\\mutation\\__tests__\\update-baseline.test.ts:261-273"
-        },
-        {
-          "file": "src/mutation/__tests__/update-baseline.test.ts",
-          "line": 261,
-          "column": 7,
-          "range": {
-            "start_line": 261,
-            "start_column": 7,
-            "end_line": 273,
-            "end_column": 13
-          },
-          "description": "Duplicated code (69 tokens, lines 261-273). Also found in: src\\mutation\\__tests__\\update-baseline.test.ts:111-123"
-        }
-      ]
-    },
-    {
-      "id": "clone:f1e25a3a0b4a8f988e1842dc4090a7b35e4ac858f4ad3a03c1ac8d62d40f195e",
-      "smellType": "CodeClone",
-      "severity": "Medium",
-      "files": [
-        "src/npm-package/lib/__tests__/install-skill.test.js",
-        "src/npm-package/lib/__tests__/download-skill.test.js"
-      ],
-      "metrics": {
-        "cloneInstances": 2,
-        "cloneHash": "f1e25a3a0b4a8f988e1842dc4090a7b35e4ac858f4ad3a03c1ac8d62d40f195e",
-        "tokenCount": 65
-      },
-      "details": {
-        "type": "codeClone",
-        "clone_hash": "f1e25a3a0b4a8f988e1842dc4090a7b35e4ac858f4ad3a03c1ac8d62d40f195e",
-        "token_count": 65
-      },
-      "locations": [
-        {
-          "file": "src/npm-package/lib/__tests__/download-skill.test.js",
-          "line": 55,
-          "column": 5,
-          "range": {
-            "start_line": 55,
-            "start_column": 5,
-            "end_line": 64,
-            "end_column": 53
-          },
-          "description": "Duplicated code (65 tokens, lines 55-64). Also found in: src\\npm-package\\lib\\__tests__\\install-skill.test.js:44-53"
-        },
-        {
-          "file": "src/npm-package/lib/__tests__/install-skill.test.js",
-          "line": 44,
-          "column": 5,
-          "range": {
-            "start_line": 44,
-            "start_column": 5,
-            "end_line": 53,
-            "end_column": 53
-          },
-          "description": "Duplicated code (65 tokens, lines 44-53). Also found in: src\\npm-package\\lib\\__tests__\\download-skill.test.js:55-64"
-        }
-      ]
-    },
-    {
-      "id": "clone:fddd3c6c0ffa135e0b0de450c01c856f72a47718bef1d3cbff2f234eb4524a43",
-      "smellType": "CodeClone",
-      "severity": "Medium",
-      "files": [
-        "src/mutation/__tests__/pitest-runner.test.ts",
-        "src/mutation/__tests__/go-mutant-runner.test.ts"
-      ],
-      "metrics": {
-        "tokenCount": 64,
-        "cloneInstances": 2,
-        "cloneHash": "fddd3c6c0ffa135e0b0de450c01c856f72a47718bef1d3cbff2f234eb4524a43"
-      },
-      "details": {
-        "type": "codeClone",
-        "clone_hash": "fddd3c6c0ffa135e0b0de450c01c856f72a47718bef1d3cbff2f234eb4524a43",
-        "token_count": 64
-      },
-      "locations": [
-        {
-          "file": "src/mutation/__tests__/go-mutant-runner.test.ts",
-          "line": 159,
-          "column": 7,
-          "range": {
-            "start_line": 159,
-            "start_column": 7,
-            "end_line": 170,
-            "end_column": 42
-          },
-          "description": "Duplicated code (64 tokens, lines 159-170). Also found in: src\\mutation\\__tests__\\pitest-runner.test.ts:372-383"
-        },
-        {
-          "file": "src/mutation/__tests__/pitest-runner.test.ts",
-          "line": 372,
-          "column": 7,
-          "range": {
-            "start_line": 372,
-            "start_column": 7,
-            "end_line": 383,
-            "end_column": 40
-          },
-          "description": "Duplicated code (64 tokens, lines 372-383). Also found in: src\\mutation\\__tests__\\go-mutant-runner.test.ts:159-170"
-        }
-      ]
-    },
-    {
-      "id": "clone:ad1faab081e659a2314c3cf93589cfb34e1f96b2a6b7eb8176d7f601f3826021",
-      "smellType": "CodeClone",
-      "severity": "Medium",
-      "files": [
-        "src/mutation/__tests__/init-baseline.test.ts",
-        "src/mutation/init-baseline.ts"
-      ],
-      "metrics": {
-        "tokenCount": 67,
-        "cloneHash": "ad1faab081e659a2314c3cf93589cfb34e1f96b2a6b7eb8176d7f601f3826021",
-        "cloneInstances": 2
-      },
-      "details": {
-        "type": "codeClone",
-        "clone_hash": "ad1faab081e659a2314c3cf93589cfb34e1f96b2a6b7eb8176d7f601f3826021",
-        "token_count": 67
-      },
-      "locations": [
-        {
-          "file": "src/mutation/__tests__/init-baseline.test.ts",
-          "line": 56,
-          "column": 3,
-          "range": {
-            "start_line": 56,
-            "start_column": 3,
-            "end_line": 84,
-            "end_column": 2
-          },
-          "description": "Duplicated code (67 tokens, lines 56-84). Also found in: src\\mutation\\init-baseline.ts:50-80"
-        },
-        {
-          "file": "src/mutation/init-baseline.ts",
-          "line": 50,
-          "column": 3,
-          "range": {
-            "start_line": 50,
-            "start_column": 3,
-            "end_line": 80,
-            "end_column": 2
-          },
-          "description": "Duplicated code (67 tokens, lines 50-80). Also found in: src\\mutation\\__tests__\\init-baseline.test.ts:56-84"
-        }
-      ]
-    },
-    {
-      "id": "clone:63a124ff89641c3c04fdc78cf058fac72cff5cb635ea9b5bb01ccd425f03a713",
-      "smellType": "CodeClone",
-      "severity": "Medium",
-      "files": [
-        "src/npm-package/lib/__tests__/uninstall.test.js"
-      ],
-      "metrics": {
-        "cloneInstances": 3,
-        "cloneHash": "63a124ff89641c3c04fdc78cf058fac72cff5cb635ea9b5bb01ccd425f03a713",
-        "tokenCount": 55
-      },
-      "details": {
-        "type": "codeClone",
-        "clone_hash": "63a124ff89641c3c04fdc78cf058fac72cff5cb635ea9b5bb01ccd425f03a713",
-        "token_count": 55
-      },
-      "locations": [
-        {
-          "file": "src/npm-package/lib/__tests__/uninstall.test.js",
-          "line": 226,
-          "column": 5,
-          "range": {
-            "start_line": 226,
-            "start_column": 5,
-            "end_line": 238,
-            "end_column": 88
-          },
-          "description": "Duplicated code (55 tokens, lines 226-238). Also found in: src\\npm-package\\lib\\__tests__\\uninstall.test.js:461-493, src\\npm-package\\lib\\__tests__\\uninstall.test.js:516-537"
-        },
-        {
-          "file": "src/npm-package/lib/__tests__/uninstall.test.js",
-          "line": 461,
-          "column": 5,
-          "range": {
-            "start_line": 461,
-            "start_column": 5,
-            "end_line": 493,
-            "end_column": 5
-          },
-          "description": "Duplicated code (55 tokens, lines 461-493). Also found in: src\\npm-package\\lib\\__tests__\\uninstall.test.js:226-238, src\\npm-package\\lib\\__tests__\\uninstall.test.js:516-537"
-        },
-        {
-          "file": "src/npm-package/lib/__tests__/uninstall.test.js",
-          "line": 516,
-          "column": 5,
-          "range": {
-            "start_line": 516,
-            "start_column": 5,
-            "end_line": 537,
-            "end_column": 5
-          },
-          "description": "Duplicated code (55 tokens, lines 516-537). Also found in: src\\npm-package\\lib\\__tests__\\uninstall.test.js:226-238, src\\npm-package\\lib\\__tests__\\uninstall.test.js:461-493"
-        }
-      ]
-    },
-    {
-      "id": "clone:d0f40d4c1b19e622e56b4f5a5e2acabe805649e8cecd06ceadd8639b13dfe4ae",
-      "smellType": "CodeClone",
-      "severity": "Medium",
-      "files": [
-        "src/npm-package/build-integrity/__tests__/gate-10.test.ts",
-        "src/npm-package/build-integrity/__tests__/orchestrator.test.ts",
-        "src/build-integrity/__tests__/orchestrator.test.ts",
-        "src/build-integrity/__tests__/gate-10.test.ts"
-      ],
-      "metrics": {
-        "cloneHash": "d0f40d4c1b19e622e56b4f5a5e2acabe805649e8cecd06ceadd8639b13dfe4ae",
-        "cloneInstances": 4,
-        "tokenCount": 72
-      },
-      "details": {
-        "type": "codeClone",
-        "clone_hash": "d0f40d4c1b19e622e56b4f5a5e2acabe805649e8cecd06ceadd8639b13dfe4ae",
-        "token_count": 72
-      },
-      "locations": [
-        {
-          "file": "src/build-integrity/__tests__/gate-10.test.ts",
-          "line": 22,
-          "column": 5,
-          "range": {
-            "start_line": 22,
-            "start_column": 5,
-            "end_line": 43,
-            "end_column": 5
-          },
-          "description": "Duplicated code (72 tokens, lines 22-43). Also found in: src\\build-integrity\\__tests__\\orchestrator.test.ts:22-40, src\\npm-package\\build-integrity\\__tests__\\gate-10.test.ts:22-43, src\\npm-package\\build-integrity\\__tests__\\orchestrator.test.ts:22-40"
-        },
-        {
-          "file": "src/build-integrity/__tests__/orchestrator.test.ts",
-          "line": 22,
-          "column": 5,
-          "range": {
-            "start_line": 22,
-            "start_column": 5,
-            "end_line": 40,
-            "end_column": 5
-          },
-          "description": "Duplicated code (72 tokens, lines 22-40). Also found in: src\\build-integrity\\__tests__\\gate-10.test.ts:22-43, src\\npm-package\\build-integrity\\__tests__\\gate-10.test.ts:22-43, src\\npm-package\\build-integrity\\__tests__\\orchestrator.test.ts:22-40"
-        },
-        {
-          "file": "src/npm-package/build-integrity/__tests__/gate-10.test.ts",
-          "line": 22,
-          "column": 5,
-          "range": {
-            "start_line": 22,
-            "start_column": 5,
-            "end_line": 43,
-            "end_column": 5
-          },
-          "description": "Duplicated code (72 tokens, lines 22-43). Also found in: src\\build-integrity\\__tests__\\gate-10.test.ts:22-43, src\\build-integrity\\__tests__\\orchestrator.test.ts:22-40, src\\npm-package\\build-integrity\\__tests__\\orchestrator.test.ts:22-40"
-        },
-        {
-          "file": "src/npm-package/build-integrity/__tests__/orchestrator.test.ts",
-          "line": 22,
-          "column": 5,
-          "range": {
-            "start_line": 22,
-            "start_column": 5,
-            "end_line": 40,
-            "end_column": 5
-          },
-          "description": "Duplicated code (72 tokens, lines 22-40). Also found in: src\\build-integrity\\__tests__\\gate-10.test.ts:22-43, src\\build-integrity\\__tests__\\orchestrator.test.ts:22-40, src\\npm-package\\build-integrity\\__tests__\\gate-10.test.ts:22-43"
-        }
-      ]
-    },
-    {
-      "id": "clone:4e4f55f24e6d4b4406bfe0bf7bd9b6a575de93f0e308aaa8aaef1bbb63f31ace",
-      "smellType": "CodeClone",
-      "severity": "Medium",
-      "files": [
-        "src/npm-package/lib/__tests__/check-version.test.js",
-        "src/npm-package/lib/__tests__/upgrade-exec.test.js"
-      ],
-      "metrics": {
-        "cloneHash": "4e4f55f24e6d4b4406bfe0bf7bd9b6a575de93f0e308aaa8aaef1bbb63f31ace",
-        "tokenCount": 76,
-        "cloneInstances": 3
-      },
-      "details": {
-        "type": "codeClone",
-        "clone_hash": "4e4f55f24e6d4b4406bfe0bf7bd9b6a575de93f0e308aaa8aaef1bbb63f31ace",
-        "token_count": 76
-      },
-      "locations": [
-        {
-          "file": "src/npm-package/lib/__tests__/check-version.test.js",
-          "line": 192,
-          "column": 7,
-          "range": {
-            "start_line": 192,
-            "start_column": 7,
-            "end_line": 205,
-            "end_column": 63
-          },
-          "description": "Duplicated code (76 tokens, lines 192-205). Also found in: src\\npm-package\\lib\\__tests__\\upgrade-exec.test.js:158-171, src\\npm-package\\lib\\__tests__\\upgrade-exec.test.js:53-66"
-        },
-        {
-          "file": "src/npm-package/lib/__tests__/upgrade-exec.test.js",
-          "line": 53,
-          "column": 5,
-          "range": {
-            "start_line": 53,
-            "start_column": 5,
-            "end_line": 66,
-            "end_column": 61
-          },
-          "description": "Duplicated code (76 tokens, lines 53-66). Also found in: src\\npm-package\\lib\\__tests__\\check-version.test.js:192-205, src\\npm-package\\lib\\__tests__\\upgrade-exec.test.js:158-171"
-        },
-        {
-          "file": "src/npm-package/lib/__tests__/upgrade-exec.test.js",
-          "line": 158,
-          "column": 5,
-          "range": {
-            "start_line": 158,
-            "start_column": 5,
-            "end_line": 171,
-            "end_column": 61
-          },
-          "description": "Duplicated code (76 tokens, lines 158-171). Also found in: src\\npm-package\\lib\\__tests__\\check-version.test.js:192-205, src\\npm-package\\lib\\__tests__\\upgrade-exec.test.js:53-66"
-        }
-      ]
-    },
-    {
-      "id": "clone:1e62c3b4cd08883d3470249116d8628def9a00c5a54d20d7583f0dd202df1b5d",
-      "smellType": "CodeClone",
-      "severity": "Medium",
-      "files": [
-        "src/npm-package/lib/__tests__/init.test.js",
-        "src/npm-package/lib/__tests__/uninstall.test.js"
-      ],
-      "metrics": {
-        "cloneInstances": 2,
-        "tokenCount": 64,
-        "cloneHash": "1e62c3b4cd08883d3470249116d8628def9a00c5a54d20d7583f0dd202df1b5d"
-      },
-      "details": {
-        "type": "codeClone",
-        "clone_hash": "1e62c3b4cd08883d3470249116d8628def9a00c5a54d20d7583f0dd202df1b5d",
-        "token_count": 64
-      },
-      "locations": [
-        {
-          "file": "src/npm-package/lib/__tests__/init.test.js",
-          "line": 25,
-          "column": 12,
-          "range": {
-            "start_line": 25,
-            "start_column": 12,
-            "end_line": 40,
-            "end_column": 7
-          },
-          "description": "Duplicated code (64 tokens, lines 25-40). Also found in: src\\npm-package\\lib\\__tests__\\uninstall.test.js:28-45"
-        },
-        {
-          "file": "src/npm-package/lib/__tests__/uninstall.test.js",
-          "line": 28,
-          "column": 12,
-          "range": {
-            "start_line": 28,
-            "start_column": 12,
-            "end_line": 45,
-            "end_column": 5
-          },
-          "description": "Duplicated code (64 tokens, lines 28-45). Also found in: src\\npm-package\\lib\\__tests__\\init.test.js:25-40"
-        }
-      ]
-    },
-    {
-      "id": "clone:2756ee44745bfb7f90cea88413511594b29033dfb0578bb74725583e9a9701c9",
-      "smellType": "CodeClone",
-      "severity": "Medium",
-      "files": [
-        "src/npm-package/lib/__tests__/update-hooks.test.js"
-      ],
-      "metrics": {
-        "cloneHash": "2756ee44745bfb7f90cea88413511594b29033dfb0578bb74725583e9a9701c9",
-        "cloneInstances": 3,
-        "tokenCount": 54
-      },
-      "details": {
-        "type": "codeClone",
-        "clone_hash": "2756ee44745bfb7f90cea88413511594b29033dfb0578bb74725583e9a9701c9",
-        "token_count": 54
-      },
-      "locations": [
-        {
-          "file": "src/npm-package/lib/__tests__/update-hooks.test.js",
-          "line": 389,
-          "column": 7,
-          "range": {
-            "start_line": 389,
-            "start_column": 7,
-            "end_line": 401,
-            "end_column": 28
-          },
-          "description": "Duplicated code (54 tokens, lines 389-401). Also found in: src\\npm-package\\lib\\__tests__\\update-hooks.test.js:436-449, src\\npm-package\\lib\\__tests__\\update-hooks.test.js:458-471"
-        },
-        {
-          "file": "src/npm-package/lib/__tests__/update-hooks.test.js",
-          "line": 436,
-          "column": 7,
-          "range": {
-            "start_line": 436,
-            "start_column": 7,
-            "end_line": 449,
-            "end_column": 13
-          },
-          "description": "Duplicated code (54 tokens, lines 436-449). Also found in: src\\npm-package\\lib\\__tests__\\update-hooks.test.js:389-401, src\\npm-package\\lib\\__tests__\\update-hooks.test.js:458-471"
-        },
-        {
-          "file": "src/npm-package/lib/__tests__/update-hooks.test.js",
-          "line": 458,
-          "column": 7,
-          "range": {
-            "start_line": 458,
-            "start_column": 7,
-            "end_line": 471,
-            "end_column": 13
-          },
-          "description": "Duplicated code (54 tokens, lines 458-471). Also found in: src\\npm-package\\lib\\__tests__\\update-hooks.test.js:389-401, src\\npm-package\\lib\\__tests__\\update-hooks.test.js:436-449"
-        }
-      ]
-    },
-    {
-      "id": "clone:03de1c3afb9d8f79177329811401509ad863f964785bd718d80fd5a21bc664dc",
-      "smellType": "CodeClone",
-      "severity": "Medium",
-      "files": [
-        "scripts/__tests__/render-sprint-progress.test.cjs"
-      ],
-      "metrics": {
-        "cloneHash": "03de1c3afb9d8f79177329811401509ad863f964785bd718d80fd5a21bc664dc",
-        "cloneInstances": 2,
-        "tokenCount": 55
-      },
-      "details": {
-        "type": "codeClone",
-        "clone_hash": "03de1c3afb9d8f79177329811401509ad863f964785bd718d80fd5a21bc664dc",
-        "token_count": 55
-      },
-      "locations": [
-        {
-          "file": "scripts/__tests__/render-sprint-progress.test.cjs",
-          "line": 235,
-          "column": 7,
-          "range": {
-            "start_line": 235,
-            "start_column": 7,
-            "end_line": 241,
-            "end_column": 48
-          },
-          "description": "Duplicated code (55 tokens, lines 235-241). Also found in: scripts\\__tests__\\render-sprint-progress.test.cjs:355-361"
-        },
-        {
-          "file": "scripts/__tests__/render-sprint-progress.test.cjs",
-          "line": 355,
-          "column": 7,
-          "range": {
-            "start_line": 355,
-            "start_column": 7,
-            "end_line": 361,
-            "end_column": 48
-          },
-          "description": "Duplicated code (55 tokens, lines 355-361). Also found in: scripts\\__tests__\\render-sprint-progress.test.cjs:235-241"
-        }
-      ]
-    },
-    {
-      "id": "clone:2e1a7c126620e5a4ff898281d95803355a816f46cfe953d957a9da56c83bbd9c",
-      "smellType": "CodeClone",
-      "severity": "Medium",
-      "files": [
-        "src/npm-package/lib/__tests__/doctor.test.js"
-      ],
-      "metrics": {
-        "tokenCount": 58,
-        "cloneHash": "2e1a7c126620e5a4ff898281d95803355a816f46cfe953d957a9da56c83bbd9c",
-        "cloneInstances": 2
-      },
-      "details": {
-        "type": "codeClone",
-        "clone_hash": "2e1a7c126620e5a4ff898281d95803355a816f46cfe953d957a9da56c83bbd9c",
-        "token_count": 58
-      },
-      "locations": [
-        {
-          "file": "src/npm-package/lib/__tests__/doctor.test.js",
-          "line": 398,
-          "column": 5,
-          "range": {
-            "start_line": 398,
-            "start_column": 5,
-            "end_line": 420,
-            "end_column": 45
-          },
-          "description": "Duplicated code (58 tokens, lines 398-420). Also found in: src\\npm-package\\lib\\__tests__\\doctor.test.js:471-511"
-        },
-        {
-          "file": "src/npm-package/lib/__tests__/doctor.test.js",
-          "line": 471,
-          "column": 5,
-          "range": {
-            "start_line": 471,
-            "start_column": 5,
-            "end_line": 511,
-            "end_column": 7
-          },
-          "description": "Duplicated code (58 tokens, lines 471-511). Also found in: src\\npm-package\\lib\\__tests__\\doctor.test.js:398-420"
-        }
-      ]
-    },
-    {
-      "id": "clone:43895f475b8ef9e21aed713a8baf05bf06ce9beca54ac8ba32184597144c446e",
-      "smellType": "CodeClone",
-      "severity": "Medium",
-      "files": [
-        "src/mock-policy/__tests__/integration.test.ts",
-        "src/mock-policy/__tests__/mock-decision-engine.test.ts"
-      ],
-      "metrics": {
-        "tokenCount": 62,
-        "cloneHash": "43895f475b8ef9e21aed713a8baf05bf06ce9beca54ac8ba32184597144c446e",
-        "cloneInstances": 2
-      },
-      "details": {
-        "type": "codeClone",
-        "clone_hash": "43895f475b8ef9e21aed713a8baf05bf06ce9beca54ac8ba32184597144c446e",
-        "token_count": 62
-      },
-      "locations": [
-        {
-          "file": "src/mock-policy/__tests__/integration.test.ts",
-          "line": 97,
-          "column": 1,
-          "range": {
-            "start_line": 97,
-            "start_column": 1,
-            "end_line": 123,
-            "end_column": 22
-          },
-          "description": "Duplicated code (62 tokens, lines 97-123). Also found in: src\\mock-policy\\__tests__\\mock-decision-engine.test.ts:18-44"
-        },
-        {
-          "file": "src/mock-policy/__tests__/mock-decision-engine.test.ts",
-          "line": 18,
-          "column": 1,
-          "range": {
-            "start_line": 18,
-            "start_column": 1,
-            "end_line": 44,
-            "end_column": 22
-          },
-          "description": "Duplicated code (62 tokens, lines 18-44). Also found in: src\\mock-policy\\__tests__\\integration.test.ts:97-123"
-        }
-      ]
-    },
-    {
-      "id": "clone:a02714dd3b9f4cb4f5154940b0b3ac8f4f915eb84f3236c798077f1489f6bb40",
-      "smellType": "CodeClone",
-      "severity": "Medium",
-      "files": [
-        "src/mutation/__tests__/go-mutant-runner.test.ts",
-        "src/mutation/__tests__/pitest-runner.test.ts"
-      ],
-      "metrics": {
-        "cloneInstances": 2,
-        "tokenCount": 61,
-        "cloneHash": "a02714dd3b9f4cb4f5154940b0b3ac8f4f915eb84f3236c798077f1489f6bb40"
-      },
-      "details": {
-        "type": "codeClone",
-        "clone_hash": "a02714dd3b9f4cb4f5154940b0b3ac8f4f915eb84f3236c798077f1489f6bb40",
-        "token_count": 61
-      },
-      "locations": [
-        {
-          "file": "src/mutation/__tests__/go-mutant-runner.test.ts",
-          "line": 136,
-          "column": 7,
-          "range": {
-            "start_line": 136,
-            "start_column": 7,
-            "end_line": 147,
-            "end_column": 42
-          },
-          "description": "Duplicated code (61 tokens, lines 136-147). Also found in: src\\mutation\\__tests__\\pitest-runner.test.ts:340-351"
-        },
-        {
-          "file": "src/mutation/__tests__/pitest-runner.test.ts",
-          "line": 340,
-          "column": 7,
-          "range": {
-            "start_line": 340,
-            "start_column": 7,
-            "end_line": 351,
-            "end_column": 40
-          },
-          "description": "Duplicated code (61 tokens, lines 340-351). Also found in: src\\mutation\\__tests__\\go-mutant-runner.test.ts:136-147"
-        }
-      ]
-    },
-    {
-      "id": "clone:d59aa1705d6fc95f6c21e276042b3b0c782418779bc98065f37304fa2a59bc0a",
-      "smellType": "CodeClone",
-      "severity": "Medium",
-      "files": [
-        "src/mutation/__tests__/go-mutant-runner.test.ts",
-        "src/mutation/__tests__/pitest-runner.test.ts"
-      ],
-      "metrics": {
-        "tokenCount": 72,
-        "cloneInstances": 8,
-        "cloneHash": "d59aa1705d6fc95f6c21e276042b3b0c782418779bc98065f37304fa2a59bc0a"
-      },
-      "details": {
-        "type": "codeClone",
-        "clone_hash": "d59aa1705d6fc95f6c21e276042b3b0c782418779bc98065f37304fa2a59bc0a",
-        "token_count": 72
-      },
-      "locations": [
-        {
-          "file": "src/mutation/__tests__/go-mutant-runner.test.ts",
-          "line": 91,
-          "column": 7,
-          "range": {
-            "start_line": 91,
-            "start_column": 7,
-            "end_line": 101,
-            "end_column": 76
-          },
-          "description": "Duplicated code (72 tokens, lines 91-101). Also found in: src\\mutation\\__tests__\\go-mutant-runner.test.ts:245-255, src\\mutation\\__tests__\\pitest-runner.test.ts:166-180, src\\mutation\\__tests__\\pitest-runner.test.ts:221-240, src\\mutation\\__tests__\\pitest-runner.test.ts:275-291, src\\mutation\\__tests__\\pitest-runner.test.ts:407-421, src\\mutation\\__tests__\\pitest-runner.test.ts:496-510, src\\mutation\\__tests__\\pitest-runner.test.ts:537-551"
-        },
-        {
-          "file": "src/mutation/__tests__/go-mutant-runner.test.ts",
-          "line": 245,
-          "column": 7,
-          "range": {
-            "start_line": 245,
-            "start_column": 7,
-            "end_line": 255,
-            "end_column": 76
-          },
-          "description": "Duplicated code (72 tokens, lines 245-255). Also found in: src\\mutation\\__tests__\\go-mutant-runner.test.ts:91-101, src\\mutation\\__tests__\\pitest-runner.test.ts:166-180, src\\mutation\\__tests__\\pitest-runner.test.ts:221-240, src\\mutation\\__tests__\\pitest-runner.test.ts:275-291, src\\mutation\\__tests__\\pitest-runner.test.ts:407-421, src\\mutation\\__tests__\\pitest-runner.test.ts:496-510, src\\mutation\\__tests__\\pitest-runner.test.ts:537-551"
-        },
-        {
-          "file": "src/mutation/__tests__/pitest-runner.test.ts",
-          "line": 166,
-          "column": 7,
-          "range": {
-            "start_line": 166,
-            "start_column": 7,
-            "end_line": 180,
-            "end_column": 54
-          },
-          "description": "Duplicated code (72 tokens, lines 166-180). Also found in: src\\mutation\\__tests__\\go-mutant-runner.test.ts:245-255, src\\mutation\\__tests__\\go-mutant-runner.test.ts:91-101, src\\mutation\\__tests__\\pitest-runner.test.ts:221-240, src\\mutation\\__tests__\\pitest-runner.test.ts:275-291, src\\mutation\\__tests__\\pitest-runner.test.ts:407-421, src\\mutation\\__tests__\\pitest-runner.test.ts:496-510, src\\mutation\\__tests__\\pitest-runner.test.ts:537-551"
-        },
-        {
-          "file": "src/mutation/__tests__/pitest-runner.test.ts",
-          "line": 221,
-          "column": 7,
-          "range": {
-            "start_line": 221,
-            "start_column": 7,
-            "end_line": 240,
-            "end_column": 10
-          },
-          "description": "Duplicated code (72 tokens, lines 221-240). Also found in: src\\mutation\\__tests__\\go-mutant-runner.test.ts:245-255, src\\mutation\\__tests__\\go-mutant-runner.test.ts:91-101, src\\mutation\\__tests__\\pitest-runner.test.ts:166-180, src\\mutation\\__tests__\\pitest-runner.test.ts:275-291, src\\mutation\\__tests__\\pitest-runner.test.ts:407-421, src\\mutation\\__tests__\\pitest-runner.test.ts:496-510, src\\mutation\\__tests__\\pitest-runner.test.ts:537-551"
-        },
-        {
-          "file": "src/mutation/__tests__/pitest-runner.test.ts",
-          "line": 275,
-          "column": 7,
-          "range": {
-            "start_line": 275,
-            "start_column": 7,
-            "end_line": 291,
-            "end_column": 10
-          },
-          "description": "Duplicated code (72 tokens, lines 275-291). Also found in: src\\mutation\\__tests__\\go-mutant-runner.test.ts:245-255, src\\mutation\\__tests__\\go-mutant-runner.test.ts:91-101, src\\mutation\\__tests__\\pitest-runner.test.ts:166-180, src\\mutation\\__tests__\\pitest-runner.test.ts:221-240, src\\mutation\\__tests__\\pitest-runner.test.ts:407-421, src\\mutation\\__tests__\\pitest-runner.test.ts:496-510, src\\mutation\\__tests__\\pitest-runner.test.ts:537-551"
-        },
-        {
-          "file": "src/mutation/__tests__/pitest-runner.test.ts",
-          "line": 407,
-          "column": 7,
-          "range": {
-            "start_line": 407,
-            "start_column": 7,
-            "end_line": 421,
-            "end_column": 42
-          },
-          "description": "Duplicated code (72 tokens, lines 407-421). Also found in: src\\mutation\\__tests__\\go-mutant-runner.test.ts:245-255, src\\mutation\\__tests__\\go-mutant-runner.test.ts:91-101, src\\mutation\\__tests__\\pitest-runner.test.ts:166-180, src\\mutation\\__tests__\\pitest-runner.test.ts:221-240, src\\mutation\\__tests__\\pitest-runner.test.ts:275-291, src\\mutation\\__tests__\\pitest-runner.test.ts:496-510, src\\mutation\\__tests__\\pitest-runner.test.ts:537-551"
-        },
-        {
-          "file": "src/mutation/__tests__/pitest-runner.test.ts",
-          "line": 496,
-          "column": 7,
-          "range": {
-            "start_line": 496,
-            "start_column": 7,
-            "end_line": 510,
-            "end_column": 42
-          },
-          "description": "Duplicated code (72 tokens, lines 496-510). Also found in: src\\mutation\\__tests__\\go-mutant-runner.test.ts:245-255, src\\mutation\\__tests__\\go-mutant-runner.test.ts:91-101, src\\mutation\\__tests__\\pitest-runner.test.ts:166-180, src\\mutation\\__tests__\\pitest-runner.test.ts:221-240, src\\mutation\\__tests__\\pitest-runner.test.ts:275-291, src\\mutation\\__tests__\\pitest-runner.test.ts:407-421, src\\mutation\\__tests__\\pitest-runner.test.ts:537-551"
-        },
-        {
-          "file": "src/mutation/__tests__/pitest-runner.test.ts",
-          "line": 537,
-          "column": 7,
-          "range": {
-            "start_line": 537,
-            "start_column": 7,
-            "end_line": 551,
-            "end_column": 42
-          },
-          "description": "Duplicated code (72 tokens, lines 537-551). Also found in: src\\mutation\\__tests__\\go-mutant-runner.test.ts:245-255, src\\mutation\\__tests__\\go-mutant-runner.test.ts:91-101, src\\mutation\\__tests__\\pitest-runner.test.ts:166-180, src\\mutation\\__tests__\\pitest-runner.test.ts:221-240, src\\mutation\\__tests__\\pitest-runner.test.ts:275-291, src\\mutation\\__tests__\\pitest-runner.test.ts:407-421, src\\mutation\\__tests__\\pitest-runner.test.ts:496-510"
-        }
-      ]
-    },
-    {
-      "id": "clone:f0bd90e9dcd57ec2de0d7e6b3a89bf3c7db5534258f6edb143c515f0334b6aca",
-      "smellType": "CodeClone",
-      "severity": "Medium",
-      "files": [
-        "src/npm-package/lib/__tests__/update-hooks.test.js"
-      ],
-      "metrics": {
-        "cloneInstances": 2,
-        "cloneHash": "f0bd90e9dcd57ec2de0d7e6b3a89bf3c7db5534258f6edb143c515f0334b6aca",
-        "tokenCount": 59
-      },
-      "details": {
-        "type": "codeClone",
-        "clone_hash": "f0bd90e9dcd57ec2de0d7e6b3a89bf3c7db5534258f6edb143c515f0334b6aca",
-        "token_count": 59
-      },
-      "locations": [
-        {
-          "file": "src/npm-package/lib/__tests__/update-hooks.test.js",
-          "line": 237,
-          "column": 7,
-          "range": {
-            "start_line": 237,
-            "start_column": 7,
-            "end_line": 243,
-            "end_column": 47
-          },
-          "description": "Duplicated code (59 tokens, lines 237-243). Also found in: src\\npm-package\\lib\\__tests__\\update-hooks.test.js:252-258"
-        },
-        {
-          "file": "src/npm-package/lib/__tests__/update-hooks.test.js",
-          "line": 252,
-          "column": 7,
-          "range": {
-            "start_line": 252,
-            "start_column": 7,
-            "end_line": 258,
-            "end_column": 47
-          },
-          "description": "Duplicated code (59 tokens, lines 252-258). Also found in: src\\npm-package\\lib\\__tests__\\update-hooks.test.js:237-243"
-        }
-      ]
-    },
-    {
-      "id": "clone:bc815d39dd74bfd7922c8ffa7c1d027adef20326778fc486a18414c0a033ccf8",
-      "smellType": "CodeClone",
-      "severity": "Medium",
-      "files": [
-        "src/npm-package/lib/__tests__/uninstall.test.js",
-        "src/npm-package/lib/__tests__/doctor.test.js"
-      ],
-      "metrics": {
-        "cloneInstances": 2,
-        "tokenCount": 72,
-        "cloneHash": "bc815d39dd74bfd7922c8ffa7c1d027adef20326778fc486a18414c0a033ccf8"
-      },
-      "details": {
-        "type": "codeClone",
-        "clone_hash": "bc815d39dd74bfd7922c8ffa7c1d027adef20326778fc486a18414c0a033ccf8",
-        "token_count": 72
-      },
-      "locations": [
-        {
-          "file": "src/npm-package/lib/__tests__/doctor.test.js",
-          "line": 78,
-          "column": 5,
-          "range": {
-            "start_line": 78,
-            "start_column": 5,
-            "end_line": 101,
-            "end_column": 4
-          },
-          "description": "Duplicated code (72 tokens, lines 78-101). Also found in: src\\npm-package\\lib\\__tests__\\uninstall.test.js:38-61"
-        },
-        {
-          "file": "src/npm-package/lib/__tests__/uninstall.test.js",
-          "line": 38,
-          "column": 5,
-          "range": {
-            "start_line": 38,
-            "start_column": 5,
-            "end_line": 61,
-            "end_column": 4
-          },
-          "description": "Duplicated code (72 tokens, lines 38-61). Also found in: src\\npm-package\\lib\\__tests__\\doctor.test.js:78-101"
-        }
-      ]
-    },
-    {
-      "id": "clone:b0296c21fab2bb33b65ea935c1fc693fb49a95434bbeb8807f916f1485efb984",
-      "smellType": "CodeClone",
-      "severity": "Medium",
-      "files": [
-        "src/npm-package/lib/__tests__/upgrade.test.js",
-        "src/npm-package/lib/__tests__/upgrade-exec.test.js"
-      ],
-      "metrics": {
-        "cloneInstances": 2,
-        "tokenCount": 54,
-        "cloneHash": "b0296c21fab2bb33b65ea935c1fc693fb49a95434bbeb8807f916f1485efb984"
-      },
-      "details": {
-        "type": "codeClone",
-        "clone_hash": "b0296c21fab2bb33b65ea935c1fc693fb49a95434bbeb8807f916f1485efb984",
-        "token_count": 54
-      },
-      "locations": [
-        {
-          "file": "src/npm-package/lib/__tests__/upgrade-exec.test.js",
-          "line": 19,
-          "column": 5,
-          "range": {
-            "start_line": 19,
-            "start_column": 5,
-            "end_line": 26,
-            "end_column": 36
-          },
-          "description": "Duplicated code (54 tokens, lines 19-26). Also found in: src\\npm-package\\lib\\__tests__\\upgrade.test.js:25-32"
-        },
-        {
-          "file": "src/npm-package/lib/__tests__/upgrade.test.js",
-          "line": 25,
-          "column": 5,
-          "range": {
-            "start_line": 25,
-            "start_column": 5,
-            "end_line": 32,
-            "end_column": 36
-          },
-          "description": "Duplicated code (54 tokens, lines 25-32). Also found in: src\\npm-package\\lib\\__tests__\\upgrade-exec.test.js:19-26"
-        }
-      ]
-    },
-    {
-      "id": "clone:6ee582ea259e1aef90ab5229e778066cf3931ab8e4eabdc16eafd98d0e2bea0c",
-      "smellType": "CodeClone",
-      "severity": "Medium",
-      "files": [
-        "src/mock-policy/__tests__/config.test.ts"
-      ],
-      "metrics": {
-        "tokenCount": 61,
-        "cloneHash": "6ee582ea259e1aef90ab5229e778066cf3931ab8e4eabdc16eafd98d0e2bea0c",
-        "cloneInstances": 2
-      },
-      "details": {
-        "type": "codeClone",
-        "clone_hash": "6ee582ea259e1aef90ab5229e778066cf3931ab8e4eabdc16eafd98d0e2bea0c",
-        "token_count": 61
-      },
-      "locations": [
-        {
-          "file": "src/mock-policy/__tests__/config.test.ts",
-          "line": 112,
-          "column": 9,
-          "range": {
-            "start_line": 112,
-            "start_column": 9,
-            "end_line": 123,
-            "end_column": 53
-          },
-          "description": "Duplicated code (61 tokens, lines 112-123). Also found in: src\\mock-policy\\__tests__\\config.test.ts:200-211"
-        },
-        {
-          "file": "src/mock-policy/__tests__/config.test.ts",
-          "line": 200,
-          "column": 9,
-          "range": {
-            "start_line": 200,
-            "start_column": 9,
-            "end_line": 211,
-            "end_column": 53
-          },
-          "description": "Duplicated code (61 tokens, lines 200-211). Also found in: src\\mock-policy\\__tests__\\config.test.ts:112-123"
-        }
-      ]
-    },
-    {
-      "id": "clone:86455fd1435ec17c5bc3ecce67ef6b76b664f8d77a3df4e8c37360dabbc442f2",
-      "smellType": "CodeClone",
-      "severity": "Medium",
-      "files": [
-        "src/npm-package/lib/__tests__/uninstall.test.js",
-        "src/npm-package/lib/__tests__/migrate.test.js"
-      ],
-      "metrics": {
-        "tokenCount": 63,
-        "cloneHash": "86455fd1435ec17c5bc3ecce67ef6b76b664f8d77a3df4e8c37360dabbc442f2",
-        "cloneInstances": 2
-      },
-      "details": {
-        "type": "codeClone",
-        "clone_hash": "86455fd1435ec17c5bc3ecce67ef6b76b664f8d77a3df4e8c37360dabbc442f2",
-        "token_count": 63
-      },
-      "locations": [
-        {
-          "file": "src/npm-package/lib/__tests__/migrate.test.js",
-          "line": 23,
-          "column": 5,
-          "range": {
-            "start_line": 23,
-            "start_column": 5,
-            "end_line": 31,
-            "end_column": 50
-          },
-          "description": "Duplicated code (63 tokens, lines 23-31). Also found in: src\\npm-package\\lib\\__tests__\\uninstall.test.js:31-39"
-        },
-        {
-          "file": "src/npm-package/lib/__tests__/uninstall.test.js",
-          "line": 31,
-          "column": 5,
-          "range": {
-            "start_line": 31,
-            "start_column": 5,
-            "end_line": 39,
-            "end_column": 50
-          },
-          "description": "Duplicated code (63 tokens, lines 31-39). Also found in: src\\npm-package\\lib\\__tests__\\migrate.test.js:23-31"
-        }
-      ]
-    },
-    {
-      "id": "clone:c75135a44381ee19b07ae171a73da9e08717ef89870e3c83c204dc1d99e5ff40",
-      "smellType": "CodeClone",
-      "severity": "Medium",
-      "files": [
-        "src/mutation/__tests__/go-mutant-runner.test.ts",
-        "src/mutation/__tests__/mutmut-runner.test.ts"
-      ],
-      "metrics": {
-        "tokenCount": 56,
-        "cloneHash": "c75135a44381ee19b07ae171a73da9e08717ef89870e3c83c204dc1d99e5ff40",
-        "cloneInstances": 2
-      },
-      "details": {
-        "type": "codeClone",
-        "clone_hash": "c75135a44381ee19b07ae171a73da9e08717ef89870e3c83c204dc1d99e5ff40",
-        "token_count": 56
-      },
-      "locations": [
-        {
-          "file": "src/mutation/__tests__/go-mutant-runner.test.ts",
-          "line": 150,
-          "column": 9,
-          "range": {
-            "start_line": 150,
-            "start_column": 9,
-            "end_line": 162,
-            "end_column": 29
-          },
-          "description": "Duplicated code (56 tokens, lines 150-162). Also found in: src\\mutation\\__tests__\\mutmut-runner.test.ts:150-162"
-        },
-        {
-          "file": "src/mutation/__tests__/mutmut-runner.test.ts",
-          "line": 150,
-          "column": 9,
-          "range": {
-            "start_line": 150,
-            "start_column": 9,
-            "end_line": 162,
-            "end_column": 37
-          },
-          "description": "Duplicated code (56 tokens, lines 150-162). Also found in: src\\mutation\\__tests__\\go-mutant-runner.test.ts:150-162"
-        }
-      ]
-    },
-    {
-      "id": "clone:6c00273b8ebf40f5638fa9f9d2824f2e086b996317bf1d659323a2ef118e3c3a",
-      "smellType": "CodeClone",
-      "severity": "Medium",
-      "files": [
-        "src/mutation/__tests__/init-baseline.test.ts",
-        "src/mutation/init-baseline.ts"
-      ],
-      "metrics": {
-        "tokenCount": 68,
-        "cloneInstances": 2,
-        "cloneHash": "6c00273b8ebf40f5638fa9f9d2824f2e086b996317bf1d659323a2ef118e3c3a"
-      },
-      "details": {
-        "type": "codeClone",
-        "clone_hash": "6c00273b8ebf40f5638fa9f9d2824f2e086b996317bf1d659323a2ef118e3c3a",
-        "token_count": 68
-      },
-      "locations": [
-        {
-          "file": "src/mutation/__tests__/init-baseline.test.ts",
-          "line": 15,
-          "column": 11,
-          "range": {
-            "start_line": 15,
-            "start_column": 11,
-            "end_line": 55,
-            "end_column": 19
-          },
-          "description": "Duplicated code (68 tokens, lines 15-55). Also found in: src\\mutation\\init-baseline.ts:8-48"
-        },
-        {
-          "file": "src/mutation/init-baseline.ts",
-          "line": 8,
-          "column": 11,
-          "range": {
-            "start_line": 8,
-            "start_column": 11,
-            "end_line": 48,
-            "end_column": 19
-          },
-          "description": "Duplicated code (68 tokens, lines 8-48). Also found in: src\\mutation\\__tests__\\init-baseline.test.ts:15-55"
-        }
-      ]
-    },
-    {
-      "id": "clone:df6b445d916f1083fa1e20f67ce95233ef0d777140cdb2c7916886bcc830ef2d",
-      "smellType": "CodeClone",
-      "severity": "Medium",
-      "files": [
-        "src/npm-package/lib/__tests__/uninstall.test.js"
-      ],
-      "metrics": {
-        "cloneInstances": 2,
-        "tokenCount": 52,
-        "cloneHash": "df6b445d916f1083fa1e20f67ce95233ef0d777140cdb2c7916886bcc830ef2d"
-      },
-      "details": {
-        "type": "codeClone",
-        "clone_hash": "df6b445d916f1083fa1e20f67ce95233ef0d777140cdb2c7916886bcc830ef2d",
-        "token_count": 52
-      },
-      "locations": [
-        {
-          "file": "src/npm-package/lib/__tests__/uninstall.test.js",
-          "line": 231,
-          "column": 5,
-          "range": {
-            "start_line": 231,
-            "start_column": 5,
-            "end_line": 238,
-            "end_column": 56
-          },
-          "description": "Duplicated code (52 tokens, lines 231-238). Also found in: src\\npm-package\\lib\\__tests__\\uninstall.test.js:322-327"
-        },
-        {
-          "file": "src/npm-package/lib/__tests__/uninstall.test.js",
-          "line": 322,
-          "column": 5,
-          "range": {
-            "start_line": 322,
-            "start_column": 5,
-            "end_line": 327,
-            "end_column": 56
-          },
-          "description": "Duplicated code (52 tokens, lines 322-327). Also found in: src\\npm-package\\lib\\__tests__\\uninstall.test.js:231-238"
-        }
-      ]
-    },
-    {
-      "id": "clone:5f4af6bcc4f0b40398fc94045182631eb98197413b7ecea19900c51c1c22ec01",
-      "smellType": "CodeClone",
-      "severity": "Medium",
-      "files": [
-        "src/npm-package/build-integrity/__tests__/ccn-refactor-gate10.test.ts",
-        "src/build-integrity/__tests__/orchestrator.test.ts",
-        "src/npm-package/build-integrity/__tests__/orchestrator.test.ts",
-        "src/build-integrity/__tests__/ccn-refactor-gate10.test.ts"
-      ],
-      "metrics": {
-        "cloneHash": "5f4af6bcc4f0b40398fc94045182631eb98197413b7ecea19900c51c1c22ec01",
-        "cloneInstances": 4,
-        "tokenCount": 52
-      },
-      "details": {
-        "type": "codeClone",
-        "clone_hash": "5f4af6bcc4f0b40398fc94045182631eb98197413b7ecea19900c51c1c22ec01",
-        "token_count": 52
-      },
-      "locations": [
-        {
-          "file": "src/build-integrity/__tests__/ccn-refactor-gate10.test.ts",
-          "line": 60,
-          "column": 7,
-          "range": {
-            "start_line": 60,
-            "start_column": 7,
-            "end_line": 85,
-            "end_column": 5
-          },
-          "description": "Duplicated code (52 tokens, lines 60-85). Also found in: src\\build-integrity\\__tests__\\orchestrator.test.ts:44-51, src\\npm-package\\build-integrity\\__tests__\\ccn-refactor-gate10.test.ts:60-85, src\\npm-package\\build-integrity\\__tests__\\orchestrator.test.ts:44-51"
-        },
-        {
-          "file": "src/build-integrity/__tests__/orchestrator.test.ts",
-          "line": 44,
-          "column": 7,
-          "range": {
-            "start_line": 44,
-            "start_column": 7,
-            "end_line": 51,
-            "end_column": 42
-          },
-          "description": "Duplicated code (52 tokens, lines 44-51). Also found in: src\\build-integrity\\__tests__\\ccn-refactor-gate10.test.ts:60-85, src\\npm-package\\build-integrity\\__tests__\\ccn-refactor-gate10.test.ts:60-85, src\\npm-package\\build-integrity\\__tests__\\orchestrator.test.ts:44-51"
-        },
-        {
-          "file": "src/npm-package/build-integrity/__tests__/ccn-refactor-gate10.test.ts",
-          "line": 60,
-          "column": 7,
-          "range": {
-            "start_line": 60,
-            "start_column": 7,
-            "end_line": 85,
-            "end_column": 5
-          },
-          "description": "Duplicated code (52 tokens, lines 60-85). Also found in: src\\build-integrity\\__tests__\\ccn-refactor-gate10.test.ts:60-85, src\\build-integrity\\__tests__\\orchestrator.test.ts:44-51, src\\npm-package\\build-integrity\\__tests__\\orchestrator.test.ts:44-51"
-        },
-        {
-          "file": "src/npm-package/build-integrity/__tests__/orchestrator.test.ts",
-          "line": 44,
-          "column": 7,
-          "range": {
-            "start_line": 44,
-            "start_column": 7,
-            "end_line": 51,
-            "end_column": 42
-          },
-          "description": "Duplicated code (52 tokens, lines 44-51). Also found in: src\\build-integrity\\__tests__\\ccn-refactor-gate10.test.ts:60-85, src\\build-integrity\\__tests__\\orchestrator.test.ts:44-51, src\\npm-package\\build-integrity\\__tests__\\ccn-refactor-gate10.test.ts:60-85"
-        }
-      ]
-    },
-    {
-      "id": "clone:2c1d6957970e6f4cd66ca5bbe47bc1988528d610243e6e3d9262a10294054fe5",
-      "smellType": "CodeClone",
-      "severity": "Medium",
-      "files": [
-        "src/build-integrity/types.ts",
-        "src/npm-package/build-integrity/types.ts"
-      ],
-      "metrics": {
-        "tokenCount": 58,
-        "cloneHash": "2c1d6957970e6f4cd66ca5bbe47bc1988528d610243e6e3d9262a10294054fe5",
-        "cloneInstances": 2
-      },
-      "details": {
-        "type": "codeClone",
-        "clone_hash": "2c1d6957970e6f4cd66ca5bbe47bc1988528d610243e6e3d9262a10294054fe5",
-        "token_count": 58
-      },
-      "locations": [
-        {
-          "file": "src/build-integrity/types.ts",
-          "line": 4,
-          "column": 18,
-          "range": {
-            "start_line": 4,
-            "start_column": 18,
-            "end_line": 50,
-            "end_column": 9
-          },
-          "description": "Duplicated code (58 tokens, lines 4-50). Also found in: src\\npm-package\\build-integrity\\types.ts:4-50"
-        },
-        {
-          "file": "src/npm-package/build-integrity/types.ts",
-          "line": 4,
-          "column": 18,
-          "range": {
-            "start_line": 4,
-            "start_column": 18,
-            "end_line": 50,
-            "end_column": 9
-          },
-          "description": "Duplicated code (58 tokens, lines 4-50). Also found in: src\\build-integrity\\types.ts:4-50"
-        }
-      ]
-    },
-    {
-      "id": "nest:src/npm-package/lib/baseline.js:createBaseline:72",
-      "smellType": "DeepNesting",
-      "severity": "Medium",
-      "files": [
-        "src/npm-package/lib/baseline.js"
-      ],
-      "metrics": {
-        "depth": 5
-      },
-      "details": {
-        "type": "deepNesting",
-        "name": "createBaseline",
-        "depth": 5,
-        "line": 72
-      },
-      "locations": [
-        {
-          "file": "src/npm-package/lib/baseline.js",
-          "line": 72,
-          "column": 16,
-          "range": {
-            "start_line": 72,
-            "start_column": 16,
-            "end_line": 72,
-            "end_column": 30
-          },
-          "description": "Function 'createBaseline' is too deeply nested"
-        }
-      ]
-    },
-    {
-      "id": "ccog:scripts/render-sprint-progress.cjs:isLegacyState:54",
+      "id": "ccog:src/principles/adapters/cpp.ts:CppAdapter.extractCodeBlock:52",
       "smellType": "HighCognitiveComplexity",
       "severity": "Medium",
       "files": [
-        "scripts/render-sprint-progress.cjs"
+        "src/principles/adapters/cpp.ts"
       ],
       "metrics": {
-        "cognitiveComplexity": 16
+        "cognitiveComplexity": 51
       },
       "details": {
         "type": "highCognitiveComplexity",
-        "name": "isLegacyState",
-        "line": 54,
-        "complexity": 16
+        "name": "CppAdapter.extractCodeBlock",
+        "line": 52,
+        "complexity": 51
       },
       "locations": [
         {
-          "file": "scripts/render-sprint-progress.cjs",
-          "line": 54,
-          "column": 10,
+          "file": "src/principles/adapters/cpp.ts",
+          "line": 52,
+          "column": 12,
           "range": {
-            "start_line": 54,
-            "start_column": 10,
-            "end_line": 54,
-            "end_column": 23
+            "start_line": 52,
+            "start_column": 12,
+            "end_line": 52,
+            "end_column": 28
           },
-          "description": "Function 'isLegacyState' (cognitive complexity: 16)"
+          "description": "Function 'CppAdapter.extractCodeBlock' (cognitive complexity: 51)"
+        }
+      ]
+    },
+    {
+      "id": "ccog:src/npm-package/lib/sprint-audit.js:handleSprintAudit:30",
+      "smellType": "HighCognitiveComplexity",
+      "severity": "Medium",
+      "files": [
+        "src/npm-package/lib/sprint-audit.js"
+      ],
+      "metrics": {
+        "cognitiveComplexity": 46
+      },
+      "details": {
+        "type": "highCognitiveComplexity",
+        "name": "handleSprintAudit",
+        "line": 30,
+        "complexity": 46
+      },
+      "locations": [
+        {
+          "file": "src/npm-package/lib/sprint-audit.js",
+          "line": 30,
+          "column": 16,
+          "range": {
+            "start_line": 30,
+            "start_column": 16,
+            "end_line": 30,
+            "end_column": 33
+          },
+          "description": "Function 'handleSprintAudit' (cognitive complexity: 46)"
         }
       ]
     },
@@ -2255,95 +841,95 @@
       ]
     },
     {
-      "id": "ccog:skills/sprint-flow/__tests__/sprint-flow.test.cjs:parseFrontmatter:40",
+      "id": "ccog:src/npm-package/lib/phase-transition.js:renderDashboard:44",
       "smellType": "HighCognitiveComplexity",
       "severity": "Medium",
       "files": [
-        "skills/sprint-flow/__tests__/sprint-flow.test.cjs"
+        "src/npm-package/lib/phase-transition.js"
       ],
       "metrics": {
-        "cognitiveComplexity": 21
+        "cognitiveComplexity": 25
       },
       "details": {
         "type": "highCognitiveComplexity",
-        "name": "parseFrontmatter",
-        "line": 40,
-        "complexity": 21
+        "name": "renderDashboard",
+        "line": 44,
+        "complexity": 25
       },
       "locations": [
         {
-          "file": "skills/sprint-flow/__tests__/sprint-flow.test.cjs",
-          "line": 40,
+          "file": "src/npm-package/lib/phase-transition.js",
+          "line": 44,
           "column": 10,
           "range": {
-            "start_line": 40,
+            "start_line": 44,
             "start_column": 10,
-            "end_line": 40,
-            "end_column": 26
+            "end_line": 44,
+            "end_column": 25
           },
-          "description": "Function 'parseFrontmatter' (cognitive complexity: 21)"
+          "description": "Function 'renderDashboard' (cognitive complexity: 25)"
         }
       ]
     },
     {
-      "id": "ccog:src/principles/lint-baseline.ts:diffBaselines:232",
+      "id": "ccog:src/npm-package/lib/phase-transition.js:handlePhaseTransition:143",
       "smellType": "HighCognitiveComplexity",
       "severity": "Medium",
       "files": [
-        "src/principles/lint-baseline.ts"
+        "src/npm-package/lib/phase-transition.js"
       ],
       "metrics": {
-        "cognitiveComplexity": 16
+        "cognitiveComplexity": 25
       },
       "details": {
         "type": "highCognitiveComplexity",
-        "name": "diffBaselines",
-        "line": 232,
-        "complexity": 16
+        "name": "handlePhaseTransition",
+        "line": 143,
+        "complexity": 25
       },
       "locations": [
         {
-          "file": "src/principles/lint-baseline.ts",
-          "line": 232,
-          "column": 17,
+          "file": "src/npm-package/lib/phase-transition.js",
+          "line": 143,
+          "column": 16,
           "range": {
-            "start_line": 232,
-            "start_column": 17,
-            "end_line": 232,
-            "end_column": 30
+            "start_line": 143,
+            "start_column": 16,
+            "end_line": 143,
+            "end_column": 37
           },
-          "description": "Function 'diffBaselines' (cognitive complexity: 16)"
+          "description": "Function 'handlePhaseTransition' (cognitive complexity: 25)"
         }
       ]
     },
     {
-      "id": "ccog:src/npm-package/lib/sprint-discovery.js:discoverActiveSprints:111",
+      "id": "ccog:src/npm-package/scripts/sync-package-content.js:checkAdapterDrift:300",
       "smellType": "HighCognitiveComplexity",
       "severity": "Medium",
       "files": [
-        "src/npm-package/lib/sprint-discovery.js"
+        "src/npm-package/scripts/sync-package-content.js"
       ],
       "metrics": {
-        "cognitiveComplexity": 48
+        "cognitiveComplexity": 19
       },
       "details": {
         "type": "highCognitiveComplexity",
-        "name": "discoverActiveSprints",
-        "line": 111,
-        "complexity": 48
+        "name": "checkAdapterDrift",
+        "line": 300,
+        "complexity": 19
       },
       "locations": [
         {
-          "file": "src/npm-package/lib/sprint-discovery.js",
-          "line": 111,
+          "file": "src/npm-package/scripts/sync-package-content.js",
+          "line": 300,
           "column": 10,
           "range": {
-            "start_line": 111,
+            "start_line": 300,
             "start_column": 10,
-            "end_line": 111,
-            "end_column": 31
+            "end_line": 300,
+            "end_column": 27
           },
-          "description": "Function 'discoverActiveSprints' (cognitive complexity: 48)"
+          "description": "Function 'checkAdapterDrift' (cognitive complexity: 19)"
         }
       ]
     },
@@ -2379,33 +965,33 @@
       ]
     },
     {
-      "id": "ccog:src/npm-package/lib/uninstall.js:uninstall:329",
+      "id": "ccog:src/npm-package/lib/baseline.js:createBaseline:72",
       "smellType": "HighCognitiveComplexity",
       "severity": "Medium",
       "files": [
-        "src/npm-package/lib/uninstall.js"
+        "src/npm-package/lib/baseline.js"
       ],
       "metrics": {
-        "cognitiveComplexity": 41
+        "cognitiveComplexity": 103
       },
       "details": {
         "type": "highCognitiveComplexity",
-        "name": "uninstall",
-        "line": 329,
-        "complexity": 41
+        "name": "createBaseline",
+        "line": 72,
+        "complexity": 103
       },
       "locations": [
         {
-          "file": "src/npm-package/lib/uninstall.js",
-          "line": 329,
+          "file": "src/npm-package/lib/baseline.js",
+          "line": 72,
           "column": 16,
           "range": {
-            "start_line": 329,
+            "start_line": 72,
             "start_column": 16,
-            "end_line": 329,
-            "end_column": 25
+            "end_line": 72,
+            "end_column": 30
           },
-          "description": "Function 'uninstall' (cognitive complexity: 41)"
+          "description": "Function 'createBaseline' (cognitive complexity: 103)"
         }
       ]
     },
@@ -2441,6 +1027,285 @@
       ]
     },
     {
+      "id": "ccog:scripts/render-sprint-progress.cjs:isLegacyState:54",
+      "smellType": "HighCognitiveComplexity",
+      "severity": "Medium",
+      "files": [
+        "scripts/render-sprint-progress.cjs"
+      ],
+      "metrics": {
+        "cognitiveComplexity": 16
+      },
+      "details": {
+        "type": "highCognitiveComplexity",
+        "name": "isLegacyState",
+        "line": 54,
+        "complexity": 16
+      },
+      "locations": [
+        {
+          "file": "scripts/render-sprint-progress.cjs",
+          "line": 54,
+          "column": 10,
+          "range": {
+            "start_line": 54,
+            "start_column": 10,
+            "end_line": 54,
+            "end_column": 23
+          },
+          "description": "Function 'isLegacyState' (cognitive complexity: 16)"
+        }
+      ]
+    },
+    {
+      "id": "ccog:src/npm-package/scripts/delphi-external-review.cjs:readConfig:74",
+      "smellType": "HighCognitiveComplexity",
+      "severity": "Medium",
+      "files": [
+        "src/npm-package/scripts/delphi-external-review.cjs"
+      ],
+      "metrics": {
+        "cognitiveComplexity": 16
+      },
+      "details": {
+        "type": "highCognitiveComplexity",
+        "name": "readConfig",
+        "line": 74,
+        "complexity": 16
+      },
+      "locations": [
+        {
+          "file": "src/npm-package/scripts/delphi-external-review.cjs",
+          "line": 74,
+          "column": 10,
+          "range": {
+            "start_line": 74,
+            "start_column": 10,
+            "end_line": 74,
+            "end_column": 20
+          },
+          "description": "Function 'readConfig' (cognitive complexity: 16)"
+        }
+      ]
+    },
+    {
+      "id": "ccog:src/npm-package/lib/sprint-discovery.js:discoverActiveSprints:111",
+      "smellType": "HighCognitiveComplexity",
+      "severity": "Medium",
+      "files": [
+        "src/npm-package/lib/sprint-discovery.js"
+      ],
+      "metrics": {
+        "cognitiveComplexity": 48
+      },
+      "details": {
+        "type": "highCognitiveComplexity",
+        "name": "discoverActiveSprints",
+        "line": 111,
+        "complexity": 48
+      },
+      "locations": [
+        {
+          "file": "src/npm-package/lib/sprint-discovery.js",
+          "line": 111,
+          "column": 10,
+          "range": {
+            "start_line": 111,
+            "start_column": 10,
+            "end_line": 111,
+            "end_column": 31
+          },
+          "description": "Function 'discoverActiveSprints' (cognitive complexity: 48)"
+        }
+      ]
+    },
+    {
+      "id": "ccog:scripts/delphi-external-review.cjs:readConfig:74",
+      "smellType": "HighCognitiveComplexity",
+      "severity": "Medium",
+      "files": [
+        "scripts/delphi-external-review.cjs"
+      ],
+      "metrics": {
+        "cognitiveComplexity": 16
+      },
+      "details": {
+        "type": "highCognitiveComplexity",
+        "name": "readConfig",
+        "line": 74,
+        "complexity": 16
+      },
+      "locations": [
+        {
+          "file": "scripts/delphi-external-review.cjs",
+          "line": 74,
+          "column": 10,
+          "range": {
+            "start_line": 74,
+            "start_column": 10,
+            "end_line": 74,
+            "end_column": 20
+          },
+          "description": "Function 'readConfig' (cognitive complexity: 16)"
+        }
+      ]
+    },
+    {
+      "id": "ccog:src/npm-package/lib/uninstall.js:uninstall:329",
+      "smellType": "HighCognitiveComplexity",
+      "severity": "Medium",
+      "files": [
+        "src/npm-package/lib/uninstall.js"
+      ],
+      "metrics": {
+        "cognitiveComplexity": 41
+      },
+      "details": {
+        "type": "highCognitiveComplexity",
+        "name": "uninstall",
+        "line": 329,
+        "complexity": 41
+      },
+      "locations": [
+        {
+          "file": "src/npm-package/lib/uninstall.js",
+          "line": 329,
+          "column": 16,
+          "range": {
+            "start_line": 329,
+            "start_column": 16,
+            "end_line": 329,
+            "end_column": 25
+          },
+          "description": "Function 'uninstall' (cognitive complexity: 41)"
+        }
+      ]
+    },
+    {
+      "id": "ccog:plugins/opencode/index.ts:<anonymous>:384",
+      "smellType": "HighCognitiveComplexity",
+      "severity": "Medium",
+      "files": [
+        "plugins/opencode/index.ts"
+      ],
+      "metrics": {
+        "cognitiveComplexity": 18
+      },
+      "details": {
+        "type": "highCognitiveComplexity",
+        "name": "<anonymous>",
+        "line": 384,
+        "complexity": 18
+      },
+      "locations": [
+        {
+          "file": "plugins/opencode/index.ts",
+          "line": 384,
+          "column": 22,
+          "range": {
+            "start_line": 384,
+            "start_column": 22,
+            "end_line": 449,
+            "end_column": 10
+          },
+          "description": "Function '<anonymous>' (cognitive complexity: 18)"
+        }
+      ]
+    },
+    {
+      "id": "ccog:src/principles/lint-baseline.ts:diffBaselines:232",
+      "smellType": "HighCognitiveComplexity",
+      "severity": "Medium",
+      "files": [
+        "src/principles/lint-baseline.ts"
+      ],
+      "metrics": {
+        "cognitiveComplexity": 16
+      },
+      "details": {
+        "type": "highCognitiveComplexity",
+        "name": "diffBaselines",
+        "line": 232,
+        "complexity": 16
+      },
+      "locations": [
+        {
+          "file": "src/principles/lint-baseline.ts",
+          "line": 232,
+          "column": 17,
+          "range": {
+            "start_line": 232,
+            "start_column": 17,
+            "end_line": 232,
+            "end_column": 30
+          },
+          "description": "Function 'diffBaselines' (cognitive complexity: 16)"
+        }
+      ]
+    },
+    {
+      "id": "ccog:skills/sprint-flow/__tests__/sprint-flow.test.cjs:parseFrontmatter:40",
+      "smellType": "HighCognitiveComplexity",
+      "severity": "Medium",
+      "files": [
+        "skills/sprint-flow/__tests__/sprint-flow.test.cjs"
+      ],
+      "metrics": {
+        "cognitiveComplexity": 21
+      },
+      "details": {
+        "type": "highCognitiveComplexity",
+        "name": "parseFrontmatter",
+        "line": 40,
+        "complexity": 21
+      },
+      "locations": [
+        {
+          "file": "skills/sprint-flow/__tests__/sprint-flow.test.cjs",
+          "line": 40,
+          "column": 10,
+          "range": {
+            "start_line": 40,
+            "start_column": 10,
+            "end_line": 40,
+            "end_column": 26
+          },
+          "description": "Function 'parseFrontmatter' (cognitive complexity: 21)"
+        }
+      ]
+    },
+    {
+      "id": "ccog:CUsersthink/.qoder/skills/sprint-flow/__tests__/sprint-flow.test.cjs:parseFrontmatter:40",
+      "smellType": "HighCognitiveComplexity",
+      "severity": "Medium",
+      "files": [
+        "CUsersthink/.qoder/skills/sprint-flow/__tests__/sprint-flow.test.cjs"
+      ],
+      "metrics": {
+        "cognitiveComplexity": 21
+      },
+      "details": {
+        "type": "highCognitiveComplexity",
+        "name": "parseFrontmatter",
+        "line": 40,
+        "complexity": 21
+      },
+      "locations": [
+        {
+          "file": "CUsersthink/.qoder/skills/sprint-flow/__tests__/sprint-flow.test.cjs",
+          "line": 40,
+          "column": 10,
+          "range": {
+            "start_line": 40,
+            "start_column": 10,
+            "end_line": 40,
+            "end_column": 26
+          },
+          "description": "Function 'parseFrontmatter' (cognitive complexity: 21)"
+        }
+      ]
+    },
+    {
       "id": "ccog:src/npm-package/principles/adapters/cpp.ts:CppAdapter.extractCodeBlock:52",
       "smellType": "HighCognitiveComplexity",
       "severity": "Medium",
@@ -2468,68 +1333,6 @@
             "end_column": 28
           },
           "description": "Function 'CppAdapter.extractCodeBlock' (cognitive complexity: 51)"
-        }
-      ]
-    },
-    {
-      "id": "ccog:src/npm-package/lib/phase-transition.js:renderDashboard:34",
-      "smellType": "HighCognitiveComplexity",
-      "severity": "Medium",
-      "files": [
-        "src/npm-package/lib/phase-transition.js"
-      ],
-      "metrics": {
-        "cognitiveComplexity": 25
-      },
-      "details": {
-        "type": "highCognitiveComplexity",
-        "name": "renderDashboard",
-        "line": 34,
-        "complexity": 25
-      },
-      "locations": [
-        {
-          "file": "src/npm-package/lib/phase-transition.js",
-          "line": 34,
-          "column": 10,
-          "range": {
-            "start_line": 34,
-            "start_column": 10,
-            "end_line": 34,
-            "end_column": 25
-          },
-          "description": "Function 'renderDashboard' (cognitive complexity: 25)"
-        }
-      ]
-    },
-    {
-      "id": "ccog:src/npm-package/scripts/sync-package-content.js:checkAdapterDrift:300",
-      "smellType": "HighCognitiveComplexity",
-      "severity": "Medium",
-      "files": [
-        "src/npm-package/scripts/sync-package-content.js"
-      ],
-      "metrics": {
-        "cognitiveComplexity": 19
-      },
-      "details": {
-        "type": "highCognitiveComplexity",
-        "name": "checkAdapterDrift",
-        "line": 300,
-        "complexity": 19
-      },
-      "locations": [
-        {
-          "file": "src/npm-package/scripts/sync-package-content.js",
-          "line": 300,
-          "column": 10,
-          "range": {
-            "start_line": 300,
-            "start_column": 10,
-            "end_line": 300,
-            "end_column": 27
-          },
-          "description": "Function 'checkAdapterDrift' (cognitive complexity: 19)"
         }
       ]
     },
@@ -2720,99 +1523,6 @@
       ]
     },
     {
-      "id": "ccog:plugins/opencode/index.ts:<anonymous>:384",
-      "smellType": "HighCognitiveComplexity",
-      "severity": "Medium",
-      "files": [
-        "plugins/opencode/index.ts"
-      ],
-      "metrics": {
-        "cognitiveComplexity": 18
-      },
-      "details": {
-        "type": "highCognitiveComplexity",
-        "name": "<anonymous>",
-        "line": 384,
-        "complexity": 18
-      },
-      "locations": [
-        {
-          "file": "plugins/opencode/index.ts",
-          "line": 384,
-          "column": 22,
-          "range": {
-            "start_line": 384,
-            "start_column": 22,
-            "end_line": 449,
-            "end_column": 10
-          },
-          "description": "Function '<anonymous>' (cognitive complexity: 18)"
-        }
-      ]
-    },
-    {
-      "id": "ccog:scripts/delphi-external-review.cjs:readConfig:74",
-      "smellType": "HighCognitiveComplexity",
-      "severity": "Medium",
-      "files": [
-        "scripts/delphi-external-review.cjs"
-      ],
-      "metrics": {
-        "cognitiveComplexity": 16
-      },
-      "details": {
-        "type": "highCognitiveComplexity",
-        "name": "readConfig",
-        "line": 74,
-        "complexity": 16
-      },
-      "locations": [
-        {
-          "file": "scripts/delphi-external-review.cjs",
-          "line": 74,
-          "column": 10,
-          "range": {
-            "start_line": 74,
-            "start_column": 10,
-            "end_line": 74,
-            "end_column": 20
-          },
-          "description": "Function 'readConfig' (cognitive complexity: 16)"
-        }
-      ]
-    },
-    {
-      "id": "ccog:src/npm-package/lib/baseline.js:createBaseline:72",
-      "smellType": "HighCognitiveComplexity",
-      "severity": "Medium",
-      "files": [
-        "src/npm-package/lib/baseline.js"
-      ],
-      "metrics": {
-        "cognitiveComplexity": 103
-      },
-      "details": {
-        "type": "highCognitiveComplexity",
-        "name": "createBaseline",
-        "line": 72,
-        "complexity": 103
-      },
-      "locations": [
-        {
-          "file": "src/npm-package/lib/baseline.js",
-          "line": 72,
-          "column": 16,
-          "range": {
-            "start_line": 72,
-            "start_column": 16,
-            "end_line": 72,
-            "end_column": 30
-          },
-          "description": "Function 'createBaseline' (cognitive complexity: 103)"
-        }
-      ]
-    },
-    {
       "id": "ccog:src/npm-package/build-integrity/gate-10.ts:runTscCheck:50",
       "smellType": "HighCognitiveComplexity",
       "severity": "Medium",
@@ -2937,374 +1647,1835 @@
       ]
     },
     {
-      "id": "ccog:src/principles/adapters/cpp.ts:CppAdapter.extractCodeBlock:52",
-      "smellType": "HighCognitiveComplexity",
+      "id": "barrelfileabuse:d7ee1b86",
+      "smellType": "BarrelFileAbuse",
       "severity": "Medium",
       "files": [
-        "src/principles/adapters/cpp.ts"
+        "src/mutation/runners/index.ts"
       ],
       "metrics": {
-        "cognitiveComplexity": 51
+        "dependentCount": 12
       },
       "details": {
-        "type": "highCognitiveComplexity",
-        "name": "CppAdapter.extractCodeBlock",
-        "line": 52,
-        "complexity": 51
-      },
-      "locations": [
-        {
-          "file": "src/principles/adapters/cpp.ts",
-          "line": 52,
-          "column": 12,
-          "range": {
-            "start_line": 52,
-            "start_column": 12,
-            "end_line": 52,
-            "end_column": 28
-          },
-          "description": "Function 'CppAdapter.extractCodeBlock' (cognitive complexity: 51)"
-        }
-      ]
+        "type": "barrelFileAbuse"
+      }
     },
     {
-      "id": "ccog:src/npm-package/scripts/delphi-external-review.cjs:readConfig:74",
-      "smellType": "HighCognitiveComplexity",
+      "id": "barrelfileabuse:5a71e429",
+      "smellType": "BarrelFileAbuse",
       "severity": "Medium",
       "files": [
-        "src/npm-package/scripts/delphi-external-review.cjs"
+        "src/npm-package/mutation/runners/index.ts"
       ],
       "metrics": {
-        "cognitiveComplexity": 16
+        "dependentCount": 12
       },
       "details": {
-        "type": "highCognitiveComplexity",
-        "name": "readConfig",
-        "line": 74,
-        "complexity": 16
-      },
-      "locations": [
-        {
-          "file": "src/npm-package/scripts/delphi-external-review.cjs",
-          "line": 74,
-          "column": 10,
-          "range": {
-            "start_line": 74,
-            "start_column": 10,
-            "end_line": 74,
-            "end_column": 20
-          },
-          "description": "Function 'readConfig' (cognitive complexity: 16)"
-        }
-      ]
+        "type": "barrelFileAbuse"
+      }
     },
     {
-      "id": "ccycl:src/principles/baseline.ts:aggregateTool:51",
-      "smellType": "HighCyclomaticComplexity",
+      "id": "deadcode:407980a2",
+      "smellType": "DeadCode",
       "severity": "Medium",
       "files": [
-        "src/principles/baseline.ts"
+        "src/npm-package/mutation/init-baseline.ts"
       ],
-      "metrics": {
-        "cyclomaticComplexity": 16
-      },
+      "metrics": {},
       "details": {
-        "type": "highCyclomaticComplexity",
-        "name": "aggregateTool",
-        "line": 51,
-        "complexity": 16
-      },
-      "locations": [
-        {
-          "file": "src/principles/baseline.ts",
-          "line": 51,
-          "column": 10,
-          "range": {
-            "start_line": 51,
-            "start_column": 10,
-            "end_line": 51,
-            "end_column": 23
-          },
-          "description": "Function 'aggregateTool' (cyclomatic complexity: 16)"
-        }
-      ]
+        "type": "deadCode"
+      }
     },
     {
-      "id": "ccycl:src/npm-package/lib/sprint-discovery.js:discoverActiveSprints:111",
-      "smellType": "HighCyclomaticComplexity",
+      "id": "deadcode:ed44cb8a",
+      "smellType": "DeadCode",
       "severity": "Medium",
       "files": [
-        "src/npm-package/lib/sprint-discovery.js"
+        "plugins/opencode/scripts/prepack.cjs"
       ],
-      "metrics": {
-        "cyclomaticComplexity": 29
-      },
+      "metrics": {},
       "details": {
-        "type": "highCyclomaticComplexity",
-        "name": "discoverActiveSprints",
-        "line": 111,
-        "complexity": 29
-      },
-      "locations": [
-        {
-          "file": "src/npm-package/lib/sprint-discovery.js",
-          "line": 111,
-          "column": 10,
-          "range": {
-            "start_line": 111,
-            "start_column": 10,
-            "end_line": 111,
-            "end_column": 31
-          },
-          "description": "Function 'discoverActiveSprints' (cyclomatic complexity: 29)"
-        }
-      ]
+        "type": "deadCode"
+      }
     },
     {
-      "id": "ccycl:src/npm-package/lib/uninstall.js:uninstall:329",
-      "smellType": "HighCyclomaticComplexity",
+      "id": "deadcode:2caab309",
+      "smellType": "DeadCode",
       "severity": "Medium",
       "files": [
-        "src/npm-package/lib/uninstall.js"
+        "src/npm-package/bin/xp-gate.js"
       ],
-      "metrics": {
-        "cyclomaticComplexity": 29
-      },
+      "metrics": {},
       "details": {
-        "type": "highCyclomaticComplexity",
-        "name": "uninstall",
-        "line": 329,
-        "complexity": 29
-      },
-      "locations": [
-        {
-          "file": "src/npm-package/lib/uninstall.js",
-          "line": 329,
-          "column": 16,
-          "range": {
-            "start_line": 329,
-            "start_column": 16,
-            "end_line": 329,
-            "end_column": 25
-          },
-          "description": "Function 'uninstall' (cyclomatic complexity: 29)"
-        }
-      ]
+        "type": "deadCode"
+      }
     },
     {
-      "id": "ccycl:src/npm-package/principles/adapters/cpp.ts:CppAdapter.extractCodeBlock:52",
-      "smellType": "HighCyclomaticComplexity",
-      "severity": "Medium",
-      "files": [
-        "src/npm-package/principles/adapters/cpp.ts"
-      ],
-      "metrics": {
-        "cyclomaticComplexity": 27
-      },
-      "details": {
-        "type": "highCyclomaticComplexity",
-        "name": "CppAdapter.extractCodeBlock",
-        "line": 52,
-        "complexity": 27
-      },
-      "locations": [
-        {
-          "file": "src/npm-package/principles/adapters/cpp.ts",
-          "line": 52,
-          "column": 12,
-          "range": {
-            "start_line": 52,
-            "start_column": 12,
-            "end_line": 52,
-            "end_column": 28
-          },
-          "description": "Function 'CppAdapter.extractCodeBlock' (cyclomatic complexity: 27)"
-        }
-      ]
-    },
-    {
-      "id": "ccycl:src/npm-package/lib/phase-transition.js:renderDashboard:34",
-      "smellType": "HighCyclomaticComplexity",
-      "severity": "Medium",
-      "files": [
-        "src/npm-package/lib/phase-transition.js"
-      ],
-      "metrics": {
-        "cyclomaticComplexity": 22
-      },
-      "details": {
-        "type": "highCyclomaticComplexity",
-        "name": "renderDashboard",
-        "line": 34,
-        "complexity": 22
-      },
-      "locations": [
-        {
-          "file": "src/npm-package/lib/phase-transition.js",
-          "line": 34,
-          "column": 10,
-          "range": {
-            "start_line": 34,
-            "start_column": 10,
-            "end_line": 34,
-            "end_column": 25
-          },
-          "description": "Function 'renderDashboard' (cyclomatic complexity: 22)"
-        }
-      ]
-    },
-    {
-      "id": "ccycl:src/npm-package/scripts/sync-package-content.js:checkAdapterDrift:300",
-      "smellType": "HighCyclomaticComplexity",
-      "severity": "Medium",
-      "files": [
-        "src/npm-package/scripts/sync-package-content.js"
-      ],
-      "metrics": {
-        "cyclomaticComplexity": 17
-      },
-      "details": {
-        "type": "highCyclomaticComplexity",
-        "name": "checkAdapterDrift",
-        "line": 300,
-        "complexity": 17
-      },
-      "locations": [
-        {
-          "file": "src/npm-package/scripts/sync-package-content.js",
-          "line": 300,
-          "column": 10,
-          "range": {
-            "start_line": 300,
-            "start_column": 10,
-            "end_line": 300,
-            "end_column": 27
-          },
-          "description": "Function 'checkAdapterDrift' (cyclomatic complexity: 17)"
-        }
-      ]
-    },
-    {
-      "id": "ccycl:src/npm-package/principles/baseline.ts:aggregateTool:51",
-      "smellType": "HighCyclomaticComplexity",
-      "severity": "Medium",
-      "files": [
-        "src/npm-package/principles/baseline.ts"
-      ],
-      "metrics": {
-        "cyclomaticComplexity": 16
-      },
-      "details": {
-        "type": "highCyclomaticComplexity",
-        "name": "aggregateTool",
-        "line": 51,
-        "complexity": 16
-      },
-      "locations": [
-        {
-          "file": "src/npm-package/principles/baseline.ts",
-          "line": 51,
-          "column": 10,
-          "range": {
-            "start_line": 51,
-            "start_column": 10,
-            "end_line": 51,
-            "end_column": 23
-          },
-          "description": "Function 'aggregateTool' (cyclomatic complexity: 16)"
-        }
-      ]
-    },
-    {
-      "id": "ccycl:plugins/opencode/index.ts:<anonymous>:384",
-      "smellType": "HighCyclomaticComplexity",
-      "severity": "Medium",
-      "files": [
-        "plugins/opencode/index.ts"
-      ],
-      "metrics": {
-        "cyclomaticComplexity": 16
-      },
-      "details": {
-        "type": "highCyclomaticComplexity",
-        "name": "<anonymous>",
-        "line": 384,
-        "complexity": 16
-      },
-      "locations": [
-        {
-          "file": "plugins/opencode/index.ts",
-          "line": 384,
-          "column": 22,
-          "range": {
-            "start_line": 384,
-            "start_column": 22,
-            "end_line": 449,
-            "end_column": 10
-          },
-          "description": "Function '<anonymous>' (cyclomatic complexity: 16)"
-        }
-      ]
-    },
-    {
-      "id": "ccycl:scripts/delphi-external-review.cjs:parseArgs:22",
-      "smellType": "HighCyclomaticComplexity",
+      "id": "deadcode:0fd10a0f",
+      "smellType": "DeadCode",
       "severity": "Medium",
       "files": [
         "scripts/delphi-external-review.cjs"
       ],
-      "metrics": {
-        "cyclomaticComplexity": 23
-      },
+      "metrics": {},
       "details": {
-        "type": "highCyclomaticComplexity",
-        "name": "parseArgs",
-        "line": 22,
-        "complexity": 23
+        "type": "deadCode"
+      }
+    },
+    {
+      "id": "deadcode:8cf3a492",
+      "smellType": "DeadCode",
+      "severity": "Medium",
+      "files": [
+        "dashboard/dashboard.js"
+      ],
+      "metrics": {},
+      "details": {
+        "type": "deadCode"
+      }
+    },
+    {
+      "id": "deadcode:6d58c087",
+      "smellType": "DeadCode",
+      "severity": "Medium",
+      "files": [
+        "src/npm-package/scripts/delphi-external-review.cjs"
+      ],
+      "metrics": {},
+      "details": {
+        "type": "deadCode"
+      }
+    },
+    {
+      "id": "deadcode:b3f67e51",
+      "smellType": "DeadCode",
+      "severity": "Medium",
+      "files": [
+        "scripts/__tests__/render-sprint-progress.test.cjs"
+      ],
+      "metrics": {},
+      "details": {
+        "type": "deadCode"
+      }
+    },
+    {
+      "id": "deadcode:8c277596",
+      "smellType": "DeadCode",
+      "severity": "Medium",
+      "files": [
+        "CUsersthink/.qoder/skills/sprint-flow/__tests__/sprint-flow.test.cjs"
+      ],
+      "metrics": {},
+      "details": {
+        "type": "deadCode"
+      }
+    },
+    {
+      "id": "deadcode:ac85c42b",
+      "smellType": "DeadCode",
+      "severity": "Medium",
+      "files": [
+        "skills/sprint-flow/__tests__/sprint-flow.test.cjs"
+      ],
+      "metrics": {},
+      "details": {
+        "type": "deadCode"
+      }
+    },
+    {
+      "id": "deadcode:1f12a1d6",
+      "smellType": "DeadCode",
+      "severity": "Medium",
+      "files": [
+        "scripts/__tests__/delphi-external-review.test.cjs"
+      ],
+      "metrics": {},
+      "details": {
+        "type": "deadCode"
+      }
+    },
+    {
+      "id": "dead:src/npm-package/mock-policy/mock-decision-engine.ts:MockDecisionEngine.decide:111",
+      "smellType": "DeadSymbol",
+      "severity": "Medium",
+      "files": [
+        "src/npm-package/mock-policy/mock-decision-engine.ts"
+      ],
+      "metrics": {},
+      "details": {
+        "type": "deadSymbol",
+        "name": "MockDecisionEngine.decide",
+        "kind": "Class Method"
       },
       "locations": [
         {
-          "file": "scripts/delphi-external-review.cjs",
-          "line": 22,
-          "column": 10,
+          "file": "src/npm-package/mock-policy/mock-decision-engine.ts",
+          "line": 111,
+          "column": 3,
           "range": {
-            "start_line": 22,
-            "start_column": 10,
-            "end_line": 22,
-            "end_column": 19
+            "start_line": 111,
+            "start_column": 3,
+            "end_line": 111,
+            "end_column": 9
           },
-          "description": "Function 'parseArgs' (cyclomatic complexity: 23)"
+          "description": "Class Method 'MockDecisionEngine.decide' definition"
         }
       ]
     },
     {
-      "id": "ccycl:src/npm-package/lib/baseline.js:createBaseline:72",
-      "smellType": "HighCyclomaticComplexity",
+      "id": "dead:src/mock-policy/mock-decision-engine.ts:MockDecisionEngine.decide:111",
+      "smellType": "DeadSymbol",
       "severity": "Medium",
       "files": [
-        "src/npm-package/lib/baseline.js"
+        "src/mock-policy/mock-decision-engine.ts"
       ],
-      "metrics": {
-        "cyclomaticComplexity": 46
-      },
+      "metrics": {},
       "details": {
-        "type": "highCyclomaticComplexity",
-        "name": "createBaseline",
-        "line": 72,
-        "complexity": 46
+        "type": "deadSymbol",
+        "name": "MockDecisionEngine.decide",
+        "kind": "Class Method"
       },
       "locations": [
         {
-          "file": "src/npm-package/lib/baseline.js",
-          "line": 72,
-          "column": 16,
+          "file": "src/mock-policy/mock-decision-engine.ts",
+          "line": 111,
+          "column": 3,
           "range": {
-            "start_line": 72,
-            "start_column": 16,
-            "end_line": 72,
+            "start_line": 111,
+            "start_column": 3,
+            "end_line": 111,
+            "end_column": 9
+          },
+          "description": "Class Method 'MockDecisionEngine.decide' definition"
+        }
+      ]
+    },
+    {
+      "id": "clone:6af4aa5557dcfd50ebea6479ad0e797387e9e1804f38ba1347b006cc83b016c2",
+      "smellType": "CodeClone",
+      "severity": "Medium",
+      "files": [
+        "src/npm-package/lib/__tests__/doctor.test.js"
+      ],
+      "metrics": {
+        "tokenCount": 60,
+        "cloneInstances": 2,
+        "cloneHash": "6af4aa5557dcfd50ebea6479ad0e797387e9e1804f38ba1347b006cc83b016c2"
+      },
+      "details": {
+        "type": "codeClone",
+        "clone_hash": "6af4aa5557dcfd50ebea6479ad0e797387e9e1804f38ba1347b006cc83b016c2",
+        "token_count": 60
+      },
+      "locations": [
+        {
+          "file": "src/npm-package/lib/__tests__/doctor.test.js",
+          "line": 716,
+          "column": 12,
+          "range": {
+            "start_line": 716,
+            "start_column": 12,
+            "end_line": 725,
+            "end_column": 27
+          },
+          "description": "Duplicated code (60 tokens, lines 716-725). Also found in: src\\npm-package\\lib\\__tests__\\doctor.test.js:743-752"
+        },
+        {
+          "file": "src/npm-package/lib/__tests__/doctor.test.js",
+          "line": 743,
+          "column": 12,
+          "range": {
+            "start_line": 743,
+            "start_column": 12,
+            "end_line": 752,
+            "end_column": 31
+          },
+          "description": "Duplicated code (60 tokens, lines 743-752). Also found in: src\\npm-package\\lib\\__tests__\\doctor.test.js:716-725"
+        }
+      ]
+    },
+    {
+      "id": "clone:5d8d4511b1bccc73d474b06f9d849f87170f7f2cc7c1efb0dd60561e3fe5139e",
+      "smellType": "CodeClone",
+      "severity": "Medium",
+      "files": [
+        "src/mutation/__tests__/mutmut-runner.test.ts"
+      ],
+      "metrics": {
+        "tokenCount": 67,
+        "cloneInstances": 8,
+        "cloneHash": "5d8d4511b1bccc73d474b06f9d849f87170f7f2cc7c1efb0dd60561e3fe5139e"
+      },
+      "details": {
+        "type": "codeClone",
+        "clone_hash": "5d8d4511b1bccc73d474b06f9d849f87170f7f2cc7c1efb0dd60561e3fe5139e",
+        "token_count": 67
+      },
+      "locations": [
+        {
+          "file": "src/mutation/__tests__/mutmut-runner.test.ts",
+          "line": 94,
+          "column": 9,
+          "range": {
+            "start_line": 94,
+            "start_column": 9,
+            "end_line": 108,
             "end_column": 30
           },
-          "description": "Function 'createBaseline' (cyclomatic complexity: 46)"
+          "description": "Duplicated code (67 tokens, lines 94-108). Also found in: src\\mutation\\__tests__\\mutmut-runner.test.ts:229-241, src\\mutation\\__tests__\\mutmut-runner.test.ts:269-281, src\\mutation\\__tests__\\mutmut-runner.test.ts:304-316, src\\mutation\\__tests__\\mutmut-runner.test.ts:335-347, src\\mutation\\__tests__\\mutmut-runner.test.ts:371-381, src\\mutation\\__tests__\\mutmut-runner.test.ts:421-430, src\\mutation\\__tests__\\mutmut-runner.test.ts:469-478"
+        },
+        {
+          "file": "src/mutation/__tests__/mutmut-runner.test.ts",
+          "line": 229,
+          "column": 9,
+          "range": {
+            "start_line": 229,
+            "start_column": 9,
+            "end_line": 241,
+            "end_column": 31
+          },
+          "description": "Duplicated code (67 tokens, lines 229-241). Also found in: src\\mutation\\__tests__\\mutmut-runner.test.ts:269-281, src\\mutation\\__tests__\\mutmut-runner.test.ts:304-316, src\\mutation\\__tests__\\mutmut-runner.test.ts:335-347, src\\mutation\\__tests__\\mutmut-runner.test.ts:371-381, src\\mutation\\__tests__\\mutmut-runner.test.ts:421-430, src\\mutation\\__tests__\\mutmut-runner.test.ts:469-478, src\\mutation\\__tests__\\mutmut-runner.test.ts:94-108"
+        },
+        {
+          "file": "src/mutation/__tests__/mutmut-runner.test.ts",
+          "line": 269,
+          "column": 9,
+          "range": {
+            "start_line": 269,
+            "start_column": 9,
+            "end_line": 281,
+            "end_column": 30
+          },
+          "description": "Duplicated code (67 tokens, lines 269-281). Also found in: src\\mutation\\__tests__\\mutmut-runner.test.ts:229-241, src\\mutation\\__tests__\\mutmut-runner.test.ts:304-316, src\\mutation\\__tests__\\mutmut-runner.test.ts:335-347, src\\mutation\\__tests__\\mutmut-runner.test.ts:371-381, src\\mutation\\__tests__\\mutmut-runner.test.ts:421-430, src\\mutation\\__tests__\\mutmut-runner.test.ts:469-478, src\\mutation\\__tests__\\mutmut-runner.test.ts:94-108"
+        },
+        {
+          "file": "src/mutation/__tests__/mutmut-runner.test.ts",
+          "line": 304,
+          "column": 9,
+          "range": {
+            "start_line": 304,
+            "start_column": 9,
+            "end_line": 316,
+            "end_column": 30
+          },
+          "description": "Duplicated code (67 tokens, lines 304-316). Also found in: src\\mutation\\__tests__\\mutmut-runner.test.ts:229-241, src\\mutation\\__tests__\\mutmut-runner.test.ts:269-281, src\\mutation\\__tests__\\mutmut-runner.test.ts:335-347, src\\mutation\\__tests__\\mutmut-runner.test.ts:371-381, src\\mutation\\__tests__\\mutmut-runner.test.ts:421-430, src\\mutation\\__tests__\\mutmut-runner.test.ts:469-478, src\\mutation\\__tests__\\mutmut-runner.test.ts:94-108"
+        },
+        {
+          "file": "src/mutation/__tests__/mutmut-runner.test.ts",
+          "line": 335,
+          "column": 9,
+          "range": {
+            "start_line": 335,
+            "start_column": 9,
+            "end_line": 347,
+            "end_column": 30
+          },
+          "description": "Duplicated code (67 tokens, lines 335-347). Also found in: src\\mutation\\__tests__\\mutmut-runner.test.ts:229-241, src\\mutation\\__tests__\\mutmut-runner.test.ts:269-281, src\\mutation\\__tests__\\mutmut-runner.test.ts:304-316, src\\mutation\\__tests__\\mutmut-runner.test.ts:371-381, src\\mutation\\__tests__\\mutmut-runner.test.ts:421-430, src\\mutation\\__tests__\\mutmut-runner.test.ts:469-478, src\\mutation\\__tests__\\mutmut-runner.test.ts:94-108"
+        },
+        {
+          "file": "src/mutation/__tests__/mutmut-runner.test.ts",
+          "line": 371,
+          "column": 9,
+          "range": {
+            "start_line": 371,
+            "start_column": 9,
+            "end_line": 381,
+            "end_column": 27
+          },
+          "description": "Duplicated code (67 tokens, lines 371-381). Also found in: src\\mutation\\__tests__\\mutmut-runner.test.ts:229-241, src\\mutation\\__tests__\\mutmut-runner.test.ts:269-281, src\\mutation\\__tests__\\mutmut-runner.test.ts:304-316, src\\mutation\\__tests__\\mutmut-runner.test.ts:335-347, src\\mutation\\__tests__\\mutmut-runner.test.ts:421-430, src\\mutation\\__tests__\\mutmut-runner.test.ts:469-478, src\\mutation\\__tests__\\mutmut-runner.test.ts:94-108"
+        },
+        {
+          "file": "src/mutation/__tests__/mutmut-runner.test.ts",
+          "line": 421,
+          "column": 9,
+          "range": {
+            "start_line": 421,
+            "start_column": 9,
+            "end_line": 430,
+            "end_column": 27
+          },
+          "description": "Duplicated code (67 tokens, lines 421-430). Also found in: src\\mutation\\__tests__\\mutmut-runner.test.ts:229-241, src\\mutation\\__tests__\\mutmut-runner.test.ts:269-281, src\\mutation\\__tests__\\mutmut-runner.test.ts:304-316, src\\mutation\\__tests__\\mutmut-runner.test.ts:335-347, src\\mutation\\__tests__\\mutmut-runner.test.ts:371-381, src\\mutation\\__tests__\\mutmut-runner.test.ts:469-478, src\\mutation\\__tests__\\mutmut-runner.test.ts:94-108"
+        },
+        {
+          "file": "src/mutation/__tests__/mutmut-runner.test.ts",
+          "line": 469,
+          "column": 9,
+          "range": {
+            "start_line": 469,
+            "start_column": 9,
+            "end_line": 478,
+            "end_column": 27
+          },
+          "description": "Duplicated code (67 tokens, lines 469-478). Also found in: src\\mutation\\__tests__\\mutmut-runner.test.ts:229-241, src\\mutation\\__tests__\\mutmut-runner.test.ts:269-281, src\\mutation\\__tests__\\mutmut-runner.test.ts:304-316, src\\mutation\\__tests__\\mutmut-runner.test.ts:335-347, src\\mutation\\__tests__\\mutmut-runner.test.ts:371-381, src\\mutation\\__tests__\\mutmut-runner.test.ts:421-430, src\\mutation\\__tests__\\mutmut-runner.test.ts:94-108"
+        }
+      ]
+    },
+    {
+      "id": "clone:6910326483e20798cd96b2edf170a06548addcf78990960b07e23c4810c76d8c",
+      "smellType": "CodeClone",
+      "severity": "Medium",
+      "files": [
+        "src/principles/__tests__/boy-scout.test.ts",
+        "src/principles/__tests__/boy-scout-integration.test.ts"
+      ],
+      "metrics": {
+        "cloneHash": "6910326483e20798cd96b2edf170a06548addcf78990960b07e23c4810c76d8c",
+        "cloneInstances": 2,
+        "tokenCount": 77
+      },
+      "details": {
+        "type": "codeClone",
+        "clone_hash": "6910326483e20798cd96b2edf170a06548addcf78990960b07e23c4810c76d8c",
+        "token_count": 77
+      },
+      "locations": [
+        {
+          "file": "src/principles/__tests__/boy-scout-integration.test.ts",
+          "line": 8,
+          "column": 1,
+          "range": {
+            "start_line": 8,
+            "start_column": 1,
+            "end_line": 36,
+            "end_column": 42
+          },
+          "description": "Duplicated code (77 tokens, lines 8-36). Also found in: src\\principles\\__tests__\\boy-scout.test.ts:3-39"
+        },
+        {
+          "file": "src/principles/__tests__/boy-scout.test.ts",
+          "line": 3,
+          "column": 1,
+          "range": {
+            "start_line": 3,
+            "start_column": 1,
+            "end_line": 39,
+            "end_column": 49
+          },
+          "description": "Duplicated code (77 tokens, lines 3-39). Also found in: src\\principles\\__tests__\\boy-scout-integration.test.ts:8-36"
+        }
+      ]
+    },
+    {
+      "id": "clone:32dbe95ef39e3b7ff143f7418ced20dd414bdaeee9c5fdb15db6a10cb14649df",
+      "smellType": "CodeClone",
+      "severity": "Medium",
+      "files": [
+        "src/mutation/__tests__/update-baseline.test.ts"
+      ],
+      "metrics": {
+        "cloneInstances": 6,
+        "cloneHash": "32dbe95ef39e3b7ff143f7418ced20dd414bdaeee9c5fdb15db6a10cb14649df",
+        "tokenCount": 65
+      },
+      "details": {
+        "type": "codeClone",
+        "clone_hash": "32dbe95ef39e3b7ff143f7418ced20dd414bdaeee9c5fdb15db6a10cb14649df",
+        "token_count": 65
+      },
+      "locations": [
+        {
+          "file": "src/mutation/__tests__/update-baseline.test.ts",
+          "line": 112,
+          "column": 7,
+          "range": {
+            "start_line": 112,
+            "start_column": 7,
+            "end_line": 123,
+            "end_column": 13
+          },
+          "description": "Duplicated code (65 tokens, lines 112-123). Also found in: src\\mutation\\__tests__\\update-baseline.test.ts:193-205, src\\mutation\\__tests__\\update-baseline.test.ts:219-230, src\\mutation\\__tests__\\update-baseline.test.ts:243-254, src\\mutation\\__tests__\\update-baseline.test.ts:262-273, src\\mutation\\__tests__\\update-baseline.test.ts:319-330"
+        },
+        {
+          "file": "src/mutation/__tests__/update-baseline.test.ts",
+          "line": 193,
+          "column": 7,
+          "range": {
+            "start_line": 193,
+            "start_column": 7,
+            "end_line": 205,
+            "end_column": 13
+          },
+          "description": "Duplicated code (65 tokens, lines 193-205). Also found in: src\\mutation\\__tests__\\update-baseline.test.ts:112-123, src\\mutation\\__tests__\\update-baseline.test.ts:219-230, src\\mutation\\__tests__\\update-baseline.test.ts:243-254, src\\mutation\\__tests__\\update-baseline.test.ts:262-273, src\\mutation\\__tests__\\update-baseline.test.ts:319-330"
+        },
+        {
+          "file": "src/mutation/__tests__/update-baseline.test.ts",
+          "line": 219,
+          "column": 7,
+          "range": {
+            "start_line": 219,
+            "start_column": 7,
+            "end_line": 230,
+            "end_column": 13
+          },
+          "description": "Duplicated code (65 tokens, lines 219-230). Also found in: src\\mutation\\__tests__\\update-baseline.test.ts:112-123, src\\mutation\\__tests__\\update-baseline.test.ts:193-205, src\\mutation\\__tests__\\update-baseline.test.ts:243-254, src\\mutation\\__tests__\\update-baseline.test.ts:262-273, src\\mutation\\__tests__\\update-baseline.test.ts:319-330"
+        },
+        {
+          "file": "src/mutation/__tests__/update-baseline.test.ts",
+          "line": 243,
+          "column": 7,
+          "range": {
+            "start_line": 243,
+            "start_column": 7,
+            "end_line": 254,
+            "end_column": 43
+          },
+          "description": "Duplicated code (65 tokens, lines 243-254). Also found in: src\\mutation\\__tests__\\update-baseline.test.ts:112-123, src\\mutation\\__tests__\\update-baseline.test.ts:193-205, src\\mutation\\__tests__\\update-baseline.test.ts:219-230, src\\mutation\\__tests__\\update-baseline.test.ts:262-273, src\\mutation\\__tests__\\update-baseline.test.ts:319-330"
+        },
+        {
+          "file": "src/mutation/__tests__/update-baseline.test.ts",
+          "line": 262,
+          "column": 7,
+          "range": {
+            "start_line": 262,
+            "start_column": 7,
+            "end_line": 273,
+            "end_column": 28
+          },
+          "description": "Duplicated code (65 tokens, lines 262-273). Also found in: src\\mutation\\__tests__\\update-baseline.test.ts:112-123, src\\mutation\\__tests__\\update-baseline.test.ts:193-205, src\\mutation\\__tests__\\update-baseline.test.ts:219-230, src\\mutation\\__tests__\\update-baseline.test.ts:243-254, src\\mutation\\__tests__\\update-baseline.test.ts:319-330"
+        },
+        {
+          "file": "src/mutation/__tests__/update-baseline.test.ts",
+          "line": 319,
+          "column": 7,
+          "range": {
+            "start_line": 319,
+            "start_column": 7,
+            "end_line": 330,
+            "end_column": 55
+          },
+          "description": "Duplicated code (65 tokens, lines 319-330). Also found in: src\\mutation\\__tests__\\update-baseline.test.ts:112-123, src\\mutation\\__tests__\\update-baseline.test.ts:193-205, src\\mutation\\__tests__\\update-baseline.test.ts:219-230, src\\mutation\\__tests__\\update-baseline.test.ts:243-254, src\\mutation\\__tests__\\update-baseline.test.ts:262-273"
+        }
+      ]
+    },
+    {
+      "id": "clone:5282e49e1c7169876c8ba6f191b344e11a479c23fba13a8d4e844389a81d7a1f",
+      "smellType": "CodeClone",
+      "severity": "Medium",
+      "files": [
+        "src/mutation/__tests__/update-baseline.test.ts"
+      ],
+      "metrics": {
+        "tokenCount": 69,
+        "cloneHash": "5282e49e1c7169876c8ba6f191b344e11a479c23fba13a8d4e844389a81d7a1f",
+        "cloneInstances": 2
+      },
+      "details": {
+        "type": "codeClone",
+        "clone_hash": "5282e49e1c7169876c8ba6f191b344e11a479c23fba13a8d4e844389a81d7a1f",
+        "token_count": 69
+      },
+      "locations": [
+        {
+          "file": "src/mutation/__tests__/update-baseline.test.ts",
+          "line": 111,
+          "column": 7,
+          "range": {
+            "start_line": 111,
+            "start_column": 7,
+            "end_line": 123,
+            "end_column": 13
+          },
+          "description": "Duplicated code (69 tokens, lines 111-123). Also found in: src\\mutation\\__tests__\\update-baseline.test.ts:261-273"
+        },
+        {
+          "file": "src/mutation/__tests__/update-baseline.test.ts",
+          "line": 261,
+          "column": 7,
+          "range": {
+            "start_line": 261,
+            "start_column": 7,
+            "end_line": 273,
+            "end_column": 13
+          },
+          "description": "Duplicated code (69 tokens, lines 261-273). Also found in: src\\mutation\\__tests__\\update-baseline.test.ts:111-123"
+        }
+      ]
+    },
+    {
+      "id": "clone:f1e25a3a0b4a8f988e1842dc4090a7b35e4ac858f4ad3a03c1ac8d62d40f195e",
+      "smellType": "CodeClone",
+      "severity": "Medium",
+      "files": [
+        "src/npm-package/lib/__tests__/install-skill.test.js",
+        "src/npm-package/lib/__tests__/download-skill.test.js"
+      ],
+      "metrics": {
+        "cloneInstances": 2,
+        "cloneHash": "f1e25a3a0b4a8f988e1842dc4090a7b35e4ac858f4ad3a03c1ac8d62d40f195e",
+        "tokenCount": 65
+      },
+      "details": {
+        "type": "codeClone",
+        "clone_hash": "f1e25a3a0b4a8f988e1842dc4090a7b35e4ac858f4ad3a03c1ac8d62d40f195e",
+        "token_count": 65
+      },
+      "locations": [
+        {
+          "file": "src/npm-package/lib/__tests__/download-skill.test.js",
+          "line": 55,
+          "column": 5,
+          "range": {
+            "start_line": 55,
+            "start_column": 5,
+            "end_line": 64,
+            "end_column": 53
+          },
+          "description": "Duplicated code (65 tokens, lines 55-64). Also found in: src\\npm-package\\lib\\__tests__\\install-skill.test.js:44-53"
+        },
+        {
+          "file": "src/npm-package/lib/__tests__/install-skill.test.js",
+          "line": 44,
+          "column": 5,
+          "range": {
+            "start_line": 44,
+            "start_column": 5,
+            "end_line": 53,
+            "end_column": 53
+          },
+          "description": "Duplicated code (65 tokens, lines 44-53). Also found in: src\\npm-package\\lib\\__tests__\\download-skill.test.js:55-64"
+        }
+      ]
+    },
+    {
+      "id": "clone:fddd3c6c0ffa135e0b0de450c01c856f72a47718bef1d3cbff2f234eb4524a43",
+      "smellType": "CodeClone",
+      "severity": "Medium",
+      "files": [
+        "src/mutation/__tests__/go-mutant-runner.test.ts",
+        "src/mutation/__tests__/pitest-runner.test.ts"
+      ],
+      "metrics": {
+        "cloneHash": "fddd3c6c0ffa135e0b0de450c01c856f72a47718bef1d3cbff2f234eb4524a43",
+        "cloneInstances": 2,
+        "tokenCount": 64
+      },
+      "details": {
+        "type": "codeClone",
+        "clone_hash": "fddd3c6c0ffa135e0b0de450c01c856f72a47718bef1d3cbff2f234eb4524a43",
+        "token_count": 64
+      },
+      "locations": [
+        {
+          "file": "src/mutation/__tests__/go-mutant-runner.test.ts",
+          "line": 159,
+          "column": 7,
+          "range": {
+            "start_line": 159,
+            "start_column": 7,
+            "end_line": 170,
+            "end_column": 42
+          },
+          "description": "Duplicated code (64 tokens, lines 159-170). Also found in: src\\mutation\\__tests__\\pitest-runner.test.ts:372-383"
+        },
+        {
+          "file": "src/mutation/__tests__/pitest-runner.test.ts",
+          "line": 372,
+          "column": 7,
+          "range": {
+            "start_line": 372,
+            "start_column": 7,
+            "end_line": 383,
+            "end_column": 40
+          },
+          "description": "Duplicated code (64 tokens, lines 372-383). Also found in: src\\mutation\\__tests__\\go-mutant-runner.test.ts:159-170"
+        }
+      ]
+    },
+    {
+      "id": "clone:ad1faab081e659a2314c3cf93589cfb34e1f96b2a6b7eb8176d7f601f3826021",
+      "smellType": "CodeClone",
+      "severity": "Medium",
+      "files": [
+        "src/mutation/__tests__/init-baseline.test.ts",
+        "src/mutation/init-baseline.ts"
+      ],
+      "metrics": {
+        "cloneInstances": 2,
+        "tokenCount": 67,
+        "cloneHash": "ad1faab081e659a2314c3cf93589cfb34e1f96b2a6b7eb8176d7f601f3826021"
+      },
+      "details": {
+        "type": "codeClone",
+        "clone_hash": "ad1faab081e659a2314c3cf93589cfb34e1f96b2a6b7eb8176d7f601f3826021",
+        "token_count": 67
+      },
+      "locations": [
+        {
+          "file": "src/mutation/__tests__/init-baseline.test.ts",
+          "line": 56,
+          "column": 3,
+          "range": {
+            "start_line": 56,
+            "start_column": 3,
+            "end_line": 84,
+            "end_column": 2
+          },
+          "description": "Duplicated code (67 tokens, lines 56-84). Also found in: src\\mutation\\init-baseline.ts:50-80"
+        },
+        {
+          "file": "src/mutation/init-baseline.ts",
+          "line": 50,
+          "column": 3,
+          "range": {
+            "start_line": 50,
+            "start_column": 3,
+            "end_line": 80,
+            "end_column": 2
+          },
+          "description": "Duplicated code (67 tokens, lines 50-80). Also found in: src\\mutation\\__tests__\\init-baseline.test.ts:56-84"
+        }
+      ]
+    },
+    {
+      "id": "clone:63a124ff89641c3c04fdc78cf058fac72cff5cb635ea9b5bb01ccd425f03a713",
+      "smellType": "CodeClone",
+      "severity": "Medium",
+      "files": [
+        "src/npm-package/lib/__tests__/uninstall.test.js"
+      ],
+      "metrics": {
+        "cloneInstances": 3,
+        "cloneHash": "63a124ff89641c3c04fdc78cf058fac72cff5cb635ea9b5bb01ccd425f03a713",
+        "tokenCount": 55
+      },
+      "details": {
+        "type": "codeClone",
+        "clone_hash": "63a124ff89641c3c04fdc78cf058fac72cff5cb635ea9b5bb01ccd425f03a713",
+        "token_count": 55
+      },
+      "locations": [
+        {
+          "file": "src/npm-package/lib/__tests__/uninstall.test.js",
+          "line": 226,
+          "column": 5,
+          "range": {
+            "start_line": 226,
+            "start_column": 5,
+            "end_line": 238,
+            "end_column": 88
+          },
+          "description": "Duplicated code (55 tokens, lines 226-238). Also found in: src\\npm-package\\lib\\__tests__\\uninstall.test.js:461-493, src\\npm-package\\lib\\__tests__\\uninstall.test.js:516-537"
+        },
+        {
+          "file": "src/npm-package/lib/__tests__/uninstall.test.js",
+          "line": 461,
+          "column": 5,
+          "range": {
+            "start_line": 461,
+            "start_column": 5,
+            "end_line": 493,
+            "end_column": 5
+          },
+          "description": "Duplicated code (55 tokens, lines 461-493). Also found in: src\\npm-package\\lib\\__tests__\\uninstall.test.js:226-238, src\\npm-package\\lib\\__tests__\\uninstall.test.js:516-537"
+        },
+        {
+          "file": "src/npm-package/lib/__tests__/uninstall.test.js",
+          "line": 516,
+          "column": 5,
+          "range": {
+            "start_line": 516,
+            "start_column": 5,
+            "end_line": 537,
+            "end_column": 5
+          },
+          "description": "Duplicated code (55 tokens, lines 516-537). Also found in: src\\npm-package\\lib\\__tests__\\uninstall.test.js:226-238, src\\npm-package\\lib\\__tests__\\uninstall.test.js:461-493"
+        }
+      ]
+    },
+    {
+      "id": "clone:d0f40d4c1b19e622e56b4f5a5e2acabe805649e8cecd06ceadd8639b13dfe4ae",
+      "smellType": "CodeClone",
+      "severity": "Medium",
+      "files": [
+        "src/build-integrity/__tests__/gate-10.test.ts",
+        "src/build-integrity/__tests__/orchestrator.test.ts",
+        "src/npm-package/build-integrity/__tests__/gate-10.test.ts",
+        "src/npm-package/build-integrity/__tests__/orchestrator.test.ts"
+      ],
+      "metrics": {
+        "cloneInstances": 4,
+        "cloneHash": "d0f40d4c1b19e622e56b4f5a5e2acabe805649e8cecd06ceadd8639b13dfe4ae",
+        "tokenCount": 72
+      },
+      "details": {
+        "type": "codeClone",
+        "clone_hash": "d0f40d4c1b19e622e56b4f5a5e2acabe805649e8cecd06ceadd8639b13dfe4ae",
+        "token_count": 72
+      },
+      "locations": [
+        {
+          "file": "src/build-integrity/__tests__/gate-10.test.ts",
+          "line": 22,
+          "column": 5,
+          "range": {
+            "start_line": 22,
+            "start_column": 5,
+            "end_line": 43,
+            "end_column": 5
+          },
+          "description": "Duplicated code (72 tokens, lines 22-43). Also found in: src\\build-integrity\\__tests__\\orchestrator.test.ts:22-40, src\\npm-package\\build-integrity\\__tests__\\gate-10.test.ts:22-43, src\\npm-package\\build-integrity\\__tests__\\orchestrator.test.ts:22-40"
+        },
+        {
+          "file": "src/build-integrity/__tests__/orchestrator.test.ts",
+          "line": 22,
+          "column": 5,
+          "range": {
+            "start_line": 22,
+            "start_column": 5,
+            "end_line": 40,
+            "end_column": 5
+          },
+          "description": "Duplicated code (72 tokens, lines 22-40). Also found in: src\\build-integrity\\__tests__\\gate-10.test.ts:22-43, src\\npm-package\\build-integrity\\__tests__\\gate-10.test.ts:22-43, src\\npm-package\\build-integrity\\__tests__\\orchestrator.test.ts:22-40"
+        },
+        {
+          "file": "src/npm-package/build-integrity/__tests__/gate-10.test.ts",
+          "line": 22,
+          "column": 5,
+          "range": {
+            "start_line": 22,
+            "start_column": 5,
+            "end_line": 43,
+            "end_column": 5
+          },
+          "description": "Duplicated code (72 tokens, lines 22-43). Also found in: src\\build-integrity\\__tests__\\gate-10.test.ts:22-43, src\\build-integrity\\__tests__\\orchestrator.test.ts:22-40, src\\npm-package\\build-integrity\\__tests__\\orchestrator.test.ts:22-40"
+        },
+        {
+          "file": "src/npm-package/build-integrity/__tests__/orchestrator.test.ts",
+          "line": 22,
+          "column": 5,
+          "range": {
+            "start_line": 22,
+            "start_column": 5,
+            "end_line": 40,
+            "end_column": 5
+          },
+          "description": "Duplicated code (72 tokens, lines 22-40). Also found in: src\\build-integrity\\__tests__\\gate-10.test.ts:22-43, src\\build-integrity\\__tests__\\orchestrator.test.ts:22-40, src\\npm-package\\build-integrity\\__tests__\\gate-10.test.ts:22-43"
+        }
+      ]
+    },
+    {
+      "id": "clone:4e4f55f24e6d4b4406bfe0bf7bd9b6a575de93f0e308aaa8aaef1bbb63f31ace",
+      "smellType": "CodeClone",
+      "severity": "Medium",
+      "files": [
+        "src/npm-package/lib/__tests__/upgrade-exec.test.js",
+        "src/npm-package/lib/__tests__/check-version.test.js"
+      ],
+      "metrics": {
+        "tokenCount": 76,
+        "cloneHash": "4e4f55f24e6d4b4406bfe0bf7bd9b6a575de93f0e308aaa8aaef1bbb63f31ace",
+        "cloneInstances": 3
+      },
+      "details": {
+        "type": "codeClone",
+        "clone_hash": "4e4f55f24e6d4b4406bfe0bf7bd9b6a575de93f0e308aaa8aaef1bbb63f31ace",
+        "token_count": 76
+      },
+      "locations": [
+        {
+          "file": "src/npm-package/lib/__tests__/check-version.test.js",
+          "line": 192,
+          "column": 7,
+          "range": {
+            "start_line": 192,
+            "start_column": 7,
+            "end_line": 205,
+            "end_column": 63
+          },
+          "description": "Duplicated code (76 tokens, lines 192-205). Also found in: src\\npm-package\\lib\\__tests__\\upgrade-exec.test.js:158-171, src\\npm-package\\lib\\__tests__\\upgrade-exec.test.js:53-66"
+        },
+        {
+          "file": "src/npm-package/lib/__tests__/upgrade-exec.test.js",
+          "line": 53,
+          "column": 5,
+          "range": {
+            "start_line": 53,
+            "start_column": 5,
+            "end_line": 66,
+            "end_column": 61
+          },
+          "description": "Duplicated code (76 tokens, lines 53-66). Also found in: src\\npm-package\\lib\\__tests__\\check-version.test.js:192-205, src\\npm-package\\lib\\__tests__\\upgrade-exec.test.js:158-171"
+        },
+        {
+          "file": "src/npm-package/lib/__tests__/upgrade-exec.test.js",
+          "line": 158,
+          "column": 5,
+          "range": {
+            "start_line": 158,
+            "start_column": 5,
+            "end_line": 171,
+            "end_column": 61
+          },
+          "description": "Duplicated code (76 tokens, lines 158-171). Also found in: src\\npm-package\\lib\\__tests__\\check-version.test.js:192-205, src\\npm-package\\lib\\__tests__\\upgrade-exec.test.js:53-66"
+        }
+      ]
+    },
+    {
+      "id": "clone:1e62c3b4cd08883d3470249116d8628def9a00c5a54d20d7583f0dd202df1b5d",
+      "smellType": "CodeClone",
+      "severity": "Medium",
+      "files": [
+        "src/npm-package/lib/__tests__/init.test.js",
+        "src/npm-package/lib/__tests__/uninstall.test.js"
+      ],
+      "metrics": {
+        "cloneInstances": 2,
+        "cloneHash": "1e62c3b4cd08883d3470249116d8628def9a00c5a54d20d7583f0dd202df1b5d",
+        "tokenCount": 64
+      },
+      "details": {
+        "type": "codeClone",
+        "clone_hash": "1e62c3b4cd08883d3470249116d8628def9a00c5a54d20d7583f0dd202df1b5d",
+        "token_count": 64
+      },
+      "locations": [
+        {
+          "file": "src/npm-package/lib/__tests__/init.test.js",
+          "line": 25,
+          "column": 12,
+          "range": {
+            "start_line": 25,
+            "start_column": 12,
+            "end_line": 40,
+            "end_column": 7
+          },
+          "description": "Duplicated code (64 tokens, lines 25-40). Also found in: src\\npm-package\\lib\\__tests__\\uninstall.test.js:28-45"
+        },
+        {
+          "file": "src/npm-package/lib/__tests__/uninstall.test.js",
+          "line": 28,
+          "column": 12,
+          "range": {
+            "start_line": 28,
+            "start_column": 12,
+            "end_line": 45,
+            "end_column": 5
+          },
+          "description": "Duplicated code (64 tokens, lines 28-45). Also found in: src\\npm-package\\lib\\__tests__\\init.test.js:25-40"
+        }
+      ]
+    },
+    {
+      "id": "clone:2756ee44745bfb7f90cea88413511594b29033dfb0578bb74725583e9a9701c9",
+      "smellType": "CodeClone",
+      "severity": "Medium",
+      "files": [
+        "src/npm-package/lib/__tests__/update-hooks.test.js"
+      ],
+      "metrics": {
+        "cloneInstances": 3,
+        "tokenCount": 54,
+        "cloneHash": "2756ee44745bfb7f90cea88413511594b29033dfb0578bb74725583e9a9701c9"
+      },
+      "details": {
+        "type": "codeClone",
+        "clone_hash": "2756ee44745bfb7f90cea88413511594b29033dfb0578bb74725583e9a9701c9",
+        "token_count": 54
+      },
+      "locations": [
+        {
+          "file": "src/npm-package/lib/__tests__/update-hooks.test.js",
+          "line": 389,
+          "column": 7,
+          "range": {
+            "start_line": 389,
+            "start_column": 7,
+            "end_line": 401,
+            "end_column": 28
+          },
+          "description": "Duplicated code (54 tokens, lines 389-401). Also found in: src\\npm-package\\lib\\__tests__\\update-hooks.test.js:436-449, src\\npm-package\\lib\\__tests__\\update-hooks.test.js:458-471"
+        },
+        {
+          "file": "src/npm-package/lib/__tests__/update-hooks.test.js",
+          "line": 436,
+          "column": 7,
+          "range": {
+            "start_line": 436,
+            "start_column": 7,
+            "end_line": 449,
+            "end_column": 13
+          },
+          "description": "Duplicated code (54 tokens, lines 436-449). Also found in: src\\npm-package\\lib\\__tests__\\update-hooks.test.js:389-401, src\\npm-package\\lib\\__tests__\\update-hooks.test.js:458-471"
+        },
+        {
+          "file": "src/npm-package/lib/__tests__/update-hooks.test.js",
+          "line": 458,
+          "column": 7,
+          "range": {
+            "start_line": 458,
+            "start_column": 7,
+            "end_line": 471,
+            "end_column": 13
+          },
+          "description": "Duplicated code (54 tokens, lines 458-471). Also found in: src\\npm-package\\lib\\__tests__\\update-hooks.test.js:389-401, src\\npm-package\\lib\\__tests__\\update-hooks.test.js:436-449"
+        }
+      ]
+    },
+    {
+      "id": "clone:03de1c3afb9d8f79177329811401509ad863f964785bd718d80fd5a21bc664dc",
+      "smellType": "CodeClone",
+      "severity": "Medium",
+      "files": [
+        "scripts/__tests__/render-sprint-progress.test.cjs"
+      ],
+      "metrics": {
+        "cloneInstances": 2,
+        "cloneHash": "03de1c3afb9d8f79177329811401509ad863f964785bd718d80fd5a21bc664dc",
+        "tokenCount": 55
+      },
+      "details": {
+        "type": "codeClone",
+        "clone_hash": "03de1c3afb9d8f79177329811401509ad863f964785bd718d80fd5a21bc664dc",
+        "token_count": 55
+      },
+      "locations": [
+        {
+          "file": "scripts/__tests__/render-sprint-progress.test.cjs",
+          "line": 235,
+          "column": 7,
+          "range": {
+            "start_line": 235,
+            "start_column": 7,
+            "end_line": 241,
+            "end_column": 48
+          },
+          "description": "Duplicated code (55 tokens, lines 235-241). Also found in: scripts\\__tests__\\render-sprint-progress.test.cjs:355-361"
+        },
+        {
+          "file": "scripts/__tests__/render-sprint-progress.test.cjs",
+          "line": 355,
+          "column": 7,
+          "range": {
+            "start_line": 355,
+            "start_column": 7,
+            "end_line": 361,
+            "end_column": 48
+          },
+          "description": "Duplicated code (55 tokens, lines 355-361). Also found in: scripts\\__tests__\\render-sprint-progress.test.cjs:235-241"
+        }
+      ]
+    },
+    {
+      "id": "clone:2e1a7c126620e5a4ff898281d95803355a816f46cfe953d957a9da56c83bbd9c",
+      "smellType": "CodeClone",
+      "severity": "Medium",
+      "files": [
+        "src/npm-package/lib/__tests__/doctor.test.js"
+      ],
+      "metrics": {
+        "cloneInstances": 2,
+        "tokenCount": 58,
+        "cloneHash": "2e1a7c126620e5a4ff898281d95803355a816f46cfe953d957a9da56c83bbd9c"
+      },
+      "details": {
+        "type": "codeClone",
+        "clone_hash": "2e1a7c126620e5a4ff898281d95803355a816f46cfe953d957a9da56c83bbd9c",
+        "token_count": 58
+      },
+      "locations": [
+        {
+          "file": "src/npm-package/lib/__tests__/doctor.test.js",
+          "line": 398,
+          "column": 5,
+          "range": {
+            "start_line": 398,
+            "start_column": 5,
+            "end_line": 420,
+            "end_column": 45
+          },
+          "description": "Duplicated code (58 tokens, lines 398-420). Also found in: src\\npm-package\\lib\\__tests__\\doctor.test.js:471-511"
+        },
+        {
+          "file": "src/npm-package/lib/__tests__/doctor.test.js",
+          "line": 471,
+          "column": 5,
+          "range": {
+            "start_line": 471,
+            "start_column": 5,
+            "end_line": 511,
+            "end_column": 7
+          },
+          "description": "Duplicated code (58 tokens, lines 471-511). Also found in: src\\npm-package\\lib\\__tests__\\doctor.test.js:398-420"
+        }
+      ]
+    },
+    {
+      "id": "clone:43895f475b8ef9e21aed713a8baf05bf06ce9beca54ac8ba32184597144c446e",
+      "smellType": "CodeClone",
+      "severity": "Medium",
+      "files": [
+        "src/mock-policy/__tests__/integration.test.ts",
+        "src/mock-policy/__tests__/mock-decision-engine.test.ts"
+      ],
+      "metrics": {
+        "tokenCount": 62,
+        "cloneHash": "43895f475b8ef9e21aed713a8baf05bf06ce9beca54ac8ba32184597144c446e",
+        "cloneInstances": 2
+      },
+      "details": {
+        "type": "codeClone",
+        "clone_hash": "43895f475b8ef9e21aed713a8baf05bf06ce9beca54ac8ba32184597144c446e",
+        "token_count": 62
+      },
+      "locations": [
+        {
+          "file": "src/mock-policy/__tests__/integration.test.ts",
+          "line": 97,
+          "column": 1,
+          "range": {
+            "start_line": 97,
+            "start_column": 1,
+            "end_line": 123,
+            "end_column": 22
+          },
+          "description": "Duplicated code (62 tokens, lines 97-123). Also found in: src\\mock-policy\\__tests__\\mock-decision-engine.test.ts:18-44"
+        },
+        {
+          "file": "src/mock-policy/__tests__/mock-decision-engine.test.ts",
+          "line": 18,
+          "column": 1,
+          "range": {
+            "start_line": 18,
+            "start_column": 1,
+            "end_line": 44,
+            "end_column": 22
+          },
+          "description": "Duplicated code (62 tokens, lines 18-44). Also found in: src\\mock-policy\\__tests__\\integration.test.ts:97-123"
+        }
+      ]
+    },
+    {
+      "id": "clone:a02714dd3b9f4cb4f5154940b0b3ac8f4f915eb84f3236c798077f1489f6bb40",
+      "smellType": "CodeClone",
+      "severity": "Medium",
+      "files": [
+        "src/mutation/__tests__/go-mutant-runner.test.ts",
+        "src/mutation/__tests__/pitest-runner.test.ts"
+      ],
+      "metrics": {
+        "cloneHash": "a02714dd3b9f4cb4f5154940b0b3ac8f4f915eb84f3236c798077f1489f6bb40",
+        "cloneInstances": 2,
+        "tokenCount": 61
+      },
+      "details": {
+        "type": "codeClone",
+        "clone_hash": "a02714dd3b9f4cb4f5154940b0b3ac8f4f915eb84f3236c798077f1489f6bb40",
+        "token_count": 61
+      },
+      "locations": [
+        {
+          "file": "src/mutation/__tests__/go-mutant-runner.test.ts",
+          "line": 136,
+          "column": 7,
+          "range": {
+            "start_line": 136,
+            "start_column": 7,
+            "end_line": 147,
+            "end_column": 42
+          },
+          "description": "Duplicated code (61 tokens, lines 136-147). Also found in: src\\mutation\\__tests__\\pitest-runner.test.ts:340-351"
+        },
+        {
+          "file": "src/mutation/__tests__/pitest-runner.test.ts",
+          "line": 340,
+          "column": 7,
+          "range": {
+            "start_line": 340,
+            "start_column": 7,
+            "end_line": 351,
+            "end_column": 40
+          },
+          "description": "Duplicated code (61 tokens, lines 340-351). Also found in: src\\mutation\\__tests__\\go-mutant-runner.test.ts:136-147"
+        }
+      ]
+    },
+    {
+      "id": "clone:473fd7416629ad45b5d64447a5c74c9a3f611cbef688fed9ad4bdb7aba36ba0a",
+      "smellType": "CodeClone",
+      "severity": "Medium",
+      "files": [
+        "src/npm-package/lib/__tests__/sprint-audit.test.js"
+      ],
+      "metrics": {
+        "cloneInstances": 2,
+        "cloneHash": "473fd7416629ad45b5d64447a5c74c9a3f611cbef688fed9ad4bdb7aba36ba0a",
+        "tokenCount": 59
+      },
+      "details": {
+        "type": "codeClone",
+        "clone_hash": "473fd7416629ad45b5d64447a5c74c9a3f611cbef688fed9ad4bdb7aba36ba0a",
+        "token_count": 59
+      },
+      "locations": [
+        {
+          "file": "src/npm-package/lib/__tests__/sprint-audit.test.js",
+          "line": 94,
+          "column": 7,
+          "range": {
+            "start_line": 94,
+            "start_column": 7,
+            "end_line": 102,
+            "end_column": 7
+          },
+          "description": "Duplicated code (59 tokens, lines 94-102). Also found in: src\\npm-package\\lib\\__tests__\\sprint-audit.test.js:105-113"
+        },
+        {
+          "file": "src/npm-package/lib/__tests__/sprint-audit.test.js",
+          "line": 105,
+          "column": 7,
+          "range": {
+            "start_line": 105,
+            "start_column": 7,
+            "end_line": 113,
+            "end_column": 7
+          },
+          "description": "Duplicated code (59 tokens, lines 105-113). Also found in: src\\npm-package\\lib\\__tests__\\sprint-audit.test.js:94-102"
+        }
+      ]
+    },
+    {
+      "id": "clone:d59aa1705d6fc95f6c21e276042b3b0c782418779bc98065f37304fa2a59bc0a",
+      "smellType": "CodeClone",
+      "severity": "Medium",
+      "files": [
+        "src/mutation/__tests__/pitest-runner.test.ts",
+        "src/mutation/__tests__/go-mutant-runner.test.ts"
+      ],
+      "metrics": {
+        "cloneInstances": 8,
+        "tokenCount": 72,
+        "cloneHash": "d59aa1705d6fc95f6c21e276042b3b0c782418779bc98065f37304fa2a59bc0a"
+      },
+      "details": {
+        "type": "codeClone",
+        "clone_hash": "d59aa1705d6fc95f6c21e276042b3b0c782418779bc98065f37304fa2a59bc0a",
+        "token_count": 72
+      },
+      "locations": [
+        {
+          "file": "src/mutation/__tests__/go-mutant-runner.test.ts",
+          "line": 91,
+          "column": 7,
+          "range": {
+            "start_line": 91,
+            "start_column": 7,
+            "end_line": 101,
+            "end_column": 76
+          },
+          "description": "Duplicated code (72 tokens, lines 91-101). Also found in: src\\mutation\\__tests__\\go-mutant-runner.test.ts:245-255, src\\mutation\\__tests__\\pitest-runner.test.ts:166-180, src\\mutation\\__tests__\\pitest-runner.test.ts:221-240, src\\mutation\\__tests__\\pitest-runner.test.ts:275-291, src\\mutation\\__tests__\\pitest-runner.test.ts:407-421, src\\mutation\\__tests__\\pitest-runner.test.ts:496-510, src\\mutation\\__tests__\\pitest-runner.test.ts:537-551"
+        },
+        {
+          "file": "src/mutation/__tests__/go-mutant-runner.test.ts",
+          "line": 245,
+          "column": 7,
+          "range": {
+            "start_line": 245,
+            "start_column": 7,
+            "end_line": 255,
+            "end_column": 76
+          },
+          "description": "Duplicated code (72 tokens, lines 245-255). Also found in: src\\mutation\\__tests__\\go-mutant-runner.test.ts:91-101, src\\mutation\\__tests__\\pitest-runner.test.ts:166-180, src\\mutation\\__tests__\\pitest-runner.test.ts:221-240, src\\mutation\\__tests__\\pitest-runner.test.ts:275-291, src\\mutation\\__tests__\\pitest-runner.test.ts:407-421, src\\mutation\\__tests__\\pitest-runner.test.ts:496-510, src\\mutation\\__tests__\\pitest-runner.test.ts:537-551"
+        },
+        {
+          "file": "src/mutation/__tests__/pitest-runner.test.ts",
+          "line": 166,
+          "column": 7,
+          "range": {
+            "start_line": 166,
+            "start_column": 7,
+            "end_line": 180,
+            "end_column": 54
+          },
+          "description": "Duplicated code (72 tokens, lines 166-180). Also found in: src\\mutation\\__tests__\\go-mutant-runner.test.ts:245-255, src\\mutation\\__tests__\\go-mutant-runner.test.ts:91-101, src\\mutation\\__tests__\\pitest-runner.test.ts:221-240, src\\mutation\\__tests__\\pitest-runner.test.ts:275-291, src\\mutation\\__tests__\\pitest-runner.test.ts:407-421, src\\mutation\\__tests__\\pitest-runner.test.ts:496-510, src\\mutation\\__tests__\\pitest-runner.test.ts:537-551"
+        },
+        {
+          "file": "src/mutation/__tests__/pitest-runner.test.ts",
+          "line": 221,
+          "column": 7,
+          "range": {
+            "start_line": 221,
+            "start_column": 7,
+            "end_line": 240,
+            "end_column": 10
+          },
+          "description": "Duplicated code (72 tokens, lines 221-240). Also found in: src\\mutation\\__tests__\\go-mutant-runner.test.ts:245-255, src\\mutation\\__tests__\\go-mutant-runner.test.ts:91-101, src\\mutation\\__tests__\\pitest-runner.test.ts:166-180, src\\mutation\\__tests__\\pitest-runner.test.ts:275-291, src\\mutation\\__tests__\\pitest-runner.test.ts:407-421, src\\mutation\\__tests__\\pitest-runner.test.ts:496-510, src\\mutation\\__tests__\\pitest-runner.test.ts:537-551"
+        },
+        {
+          "file": "src/mutation/__tests__/pitest-runner.test.ts",
+          "line": 275,
+          "column": 7,
+          "range": {
+            "start_line": 275,
+            "start_column": 7,
+            "end_line": 291,
+            "end_column": 10
+          },
+          "description": "Duplicated code (72 tokens, lines 275-291). Also found in: src\\mutation\\__tests__\\go-mutant-runner.test.ts:245-255, src\\mutation\\__tests__\\go-mutant-runner.test.ts:91-101, src\\mutation\\__tests__\\pitest-runner.test.ts:166-180, src\\mutation\\__tests__\\pitest-runner.test.ts:221-240, src\\mutation\\__tests__\\pitest-runner.test.ts:407-421, src\\mutation\\__tests__\\pitest-runner.test.ts:496-510, src\\mutation\\__tests__\\pitest-runner.test.ts:537-551"
+        },
+        {
+          "file": "src/mutation/__tests__/pitest-runner.test.ts",
+          "line": 407,
+          "column": 7,
+          "range": {
+            "start_line": 407,
+            "start_column": 7,
+            "end_line": 421,
+            "end_column": 42
+          },
+          "description": "Duplicated code (72 tokens, lines 407-421). Also found in: src\\mutation\\__tests__\\go-mutant-runner.test.ts:245-255, src\\mutation\\__tests__\\go-mutant-runner.test.ts:91-101, src\\mutation\\__tests__\\pitest-runner.test.ts:166-180, src\\mutation\\__tests__\\pitest-runner.test.ts:221-240, src\\mutation\\__tests__\\pitest-runner.test.ts:275-291, src\\mutation\\__tests__\\pitest-runner.test.ts:496-510, src\\mutation\\__tests__\\pitest-runner.test.ts:537-551"
+        },
+        {
+          "file": "src/mutation/__tests__/pitest-runner.test.ts",
+          "line": 496,
+          "column": 7,
+          "range": {
+            "start_line": 496,
+            "start_column": 7,
+            "end_line": 510,
+            "end_column": 42
+          },
+          "description": "Duplicated code (72 tokens, lines 496-510). Also found in: src\\mutation\\__tests__\\go-mutant-runner.test.ts:245-255, src\\mutation\\__tests__\\go-mutant-runner.test.ts:91-101, src\\mutation\\__tests__\\pitest-runner.test.ts:166-180, src\\mutation\\__tests__\\pitest-runner.test.ts:221-240, src\\mutation\\__tests__\\pitest-runner.test.ts:275-291, src\\mutation\\__tests__\\pitest-runner.test.ts:407-421, src\\mutation\\__tests__\\pitest-runner.test.ts:537-551"
+        },
+        {
+          "file": "src/mutation/__tests__/pitest-runner.test.ts",
+          "line": 537,
+          "column": 7,
+          "range": {
+            "start_line": 537,
+            "start_column": 7,
+            "end_line": 551,
+            "end_column": 42
+          },
+          "description": "Duplicated code (72 tokens, lines 537-551). Also found in: src\\mutation\\__tests__\\go-mutant-runner.test.ts:245-255, src\\mutation\\__tests__\\go-mutant-runner.test.ts:91-101, src\\mutation\\__tests__\\pitest-runner.test.ts:166-180, src\\mutation\\__tests__\\pitest-runner.test.ts:221-240, src\\mutation\\__tests__\\pitest-runner.test.ts:275-291, src\\mutation\\__tests__\\pitest-runner.test.ts:407-421, src\\mutation\\__tests__\\pitest-runner.test.ts:496-510"
+        }
+      ]
+    },
+    {
+      "id": "clone:be8e4fcf3775e9607380d522b669a40c6ea88fdbc7da6ed2d17737697b24eba3",
+      "smellType": "CodeClone",
+      "severity": "Medium",
+      "files": [
+        "src/npm-package/lib/__tests__/sprint-audit.test.js"
+      ],
+      "metrics": {
+        "tokenCount": 61,
+        "cloneInstances": 3,
+        "cloneHash": "be8e4fcf3775e9607380d522b669a40c6ea88fdbc7da6ed2d17737697b24eba3"
+      },
+      "details": {
+        "type": "codeClone",
+        "clone_hash": "be8e4fcf3775e9607380d522b669a40c6ea88fdbc7da6ed2d17737697b24eba3",
+        "token_count": 61
+      },
+      "locations": [
+        {
+          "file": "src/npm-package/lib/__tests__/sprint-audit.test.js",
+          "line": 139,
+          "column": 7,
+          "range": {
+            "start_line": 139,
+            "start_column": 7,
+            "end_line": 144,
+            "end_column": 28
+          },
+          "description": "Duplicated code (61 tokens, lines 139-144). Also found in: src\\npm-package\\lib\\__tests__\\sprint-audit.test.js:157-162, src\\npm-package\\lib\\__tests__\\sprint-audit.test.js:171-176"
+        },
+        {
+          "file": "src/npm-package/lib/__tests__/sprint-audit.test.js",
+          "line": 157,
+          "column": 7,
+          "range": {
+            "start_line": 157,
+            "start_column": 7,
+            "end_line": 162,
+            "end_column": 20
+          },
+          "description": "Duplicated code (61 tokens, lines 157-162). Also found in: src\\npm-package\\lib\\__tests__\\sprint-audit.test.js:139-144, src\\npm-package\\lib\\__tests__\\sprint-audit.test.js:171-176"
+        },
+        {
+          "file": "src/npm-package/lib/__tests__/sprint-audit.test.js",
+          "line": 171,
+          "column": 7,
+          "range": {
+            "start_line": 171,
+            "start_column": 7,
+            "end_line": 176,
+            "end_column": 20
+          },
+          "description": "Duplicated code (61 tokens, lines 171-176). Also found in: src\\npm-package\\lib\\__tests__\\sprint-audit.test.js:139-144, src\\npm-package\\lib\\__tests__\\sprint-audit.test.js:157-162"
+        }
+      ]
+    },
+    {
+      "id": "clone:f0bd90e9dcd57ec2de0d7e6b3a89bf3c7db5534258f6edb143c515f0334b6aca",
+      "smellType": "CodeClone",
+      "severity": "Medium",
+      "files": [
+        "src/npm-package/lib/__tests__/update-hooks.test.js"
+      ],
+      "metrics": {
+        "cloneInstances": 2,
+        "tokenCount": 59,
+        "cloneHash": "f0bd90e9dcd57ec2de0d7e6b3a89bf3c7db5534258f6edb143c515f0334b6aca"
+      },
+      "details": {
+        "type": "codeClone",
+        "clone_hash": "f0bd90e9dcd57ec2de0d7e6b3a89bf3c7db5534258f6edb143c515f0334b6aca",
+        "token_count": 59
+      },
+      "locations": [
+        {
+          "file": "src/npm-package/lib/__tests__/update-hooks.test.js",
+          "line": 237,
+          "column": 7,
+          "range": {
+            "start_line": 237,
+            "start_column": 7,
+            "end_line": 243,
+            "end_column": 47
+          },
+          "description": "Duplicated code (59 tokens, lines 237-243). Also found in: src\\npm-package\\lib\\__tests__\\update-hooks.test.js:252-258"
+        },
+        {
+          "file": "src/npm-package/lib/__tests__/update-hooks.test.js",
+          "line": 252,
+          "column": 7,
+          "range": {
+            "start_line": 252,
+            "start_column": 7,
+            "end_line": 258,
+            "end_column": 47
+          },
+          "description": "Duplicated code (59 tokens, lines 252-258). Also found in: src\\npm-package\\lib\\__tests__\\update-hooks.test.js:237-243"
+        }
+      ]
+    },
+    {
+      "id": "clone:bc815d39dd74bfd7922c8ffa7c1d027adef20326778fc486a18414c0a033ccf8",
+      "smellType": "CodeClone",
+      "severity": "Medium",
+      "files": [
+        "src/npm-package/lib/__tests__/doctor.test.js",
+        "src/npm-package/lib/__tests__/uninstall.test.js"
+      ],
+      "metrics": {
+        "cloneInstances": 2,
+        "cloneHash": "bc815d39dd74bfd7922c8ffa7c1d027adef20326778fc486a18414c0a033ccf8",
+        "tokenCount": 72
+      },
+      "details": {
+        "type": "codeClone",
+        "clone_hash": "bc815d39dd74bfd7922c8ffa7c1d027adef20326778fc486a18414c0a033ccf8",
+        "token_count": 72
+      },
+      "locations": [
+        {
+          "file": "src/npm-package/lib/__tests__/doctor.test.js",
+          "line": 78,
+          "column": 5,
+          "range": {
+            "start_line": 78,
+            "start_column": 5,
+            "end_line": 101,
+            "end_column": 4
+          },
+          "description": "Duplicated code (72 tokens, lines 78-101). Also found in: src\\npm-package\\lib\\__tests__\\uninstall.test.js:38-61"
+        },
+        {
+          "file": "src/npm-package/lib/__tests__/uninstall.test.js",
+          "line": 38,
+          "column": 5,
+          "range": {
+            "start_line": 38,
+            "start_column": 5,
+            "end_line": 61,
+            "end_column": 4
+          },
+          "description": "Duplicated code (72 tokens, lines 38-61). Also found in: src\\npm-package\\lib\\__tests__\\doctor.test.js:78-101"
+        }
+      ]
+    },
+    {
+      "id": "clone:b0296c21fab2bb33b65ea935c1fc693fb49a95434bbeb8807f916f1485efb984",
+      "smellType": "CodeClone",
+      "severity": "Medium",
+      "files": [
+        "src/npm-package/lib/__tests__/upgrade.test.js",
+        "src/npm-package/lib/__tests__/upgrade-exec.test.js"
+      ],
+      "metrics": {
+        "cloneHash": "b0296c21fab2bb33b65ea935c1fc693fb49a95434bbeb8807f916f1485efb984",
+        "tokenCount": 54,
+        "cloneInstances": 2
+      },
+      "details": {
+        "type": "codeClone",
+        "clone_hash": "b0296c21fab2bb33b65ea935c1fc693fb49a95434bbeb8807f916f1485efb984",
+        "token_count": 54
+      },
+      "locations": [
+        {
+          "file": "src/npm-package/lib/__tests__/upgrade-exec.test.js",
+          "line": 19,
+          "column": 5,
+          "range": {
+            "start_line": 19,
+            "start_column": 5,
+            "end_line": 26,
+            "end_column": 36
+          },
+          "description": "Duplicated code (54 tokens, lines 19-26). Also found in: src\\npm-package\\lib\\__tests__\\upgrade.test.js:25-32"
+        },
+        {
+          "file": "src/npm-package/lib/__tests__/upgrade.test.js",
+          "line": 25,
+          "column": 5,
+          "range": {
+            "start_line": 25,
+            "start_column": 5,
+            "end_line": 32,
+            "end_column": 36
+          },
+          "description": "Duplicated code (54 tokens, lines 25-32). Also found in: src\\npm-package\\lib\\__tests__\\upgrade-exec.test.js:19-26"
+        }
+      ]
+    },
+    {
+      "id": "clone:6ee582ea259e1aef90ab5229e778066cf3931ab8e4eabdc16eafd98d0e2bea0c",
+      "smellType": "CodeClone",
+      "severity": "Medium",
+      "files": [
+        "src/mock-policy/__tests__/config.test.ts"
+      ],
+      "metrics": {
+        "tokenCount": 61,
+        "cloneHash": "6ee582ea259e1aef90ab5229e778066cf3931ab8e4eabdc16eafd98d0e2bea0c",
+        "cloneInstances": 2
+      },
+      "details": {
+        "type": "codeClone",
+        "clone_hash": "6ee582ea259e1aef90ab5229e778066cf3931ab8e4eabdc16eafd98d0e2bea0c",
+        "token_count": 61
+      },
+      "locations": [
+        {
+          "file": "src/mock-policy/__tests__/config.test.ts",
+          "line": 112,
+          "column": 9,
+          "range": {
+            "start_line": 112,
+            "start_column": 9,
+            "end_line": 123,
+            "end_column": 53
+          },
+          "description": "Duplicated code (61 tokens, lines 112-123). Also found in: src\\mock-policy\\__tests__\\config.test.ts:200-211"
+        },
+        {
+          "file": "src/mock-policy/__tests__/config.test.ts",
+          "line": 200,
+          "column": 9,
+          "range": {
+            "start_line": 200,
+            "start_column": 9,
+            "end_line": 211,
+            "end_column": 53
+          },
+          "description": "Duplicated code (61 tokens, lines 200-211). Also found in: src\\mock-policy\\__tests__\\config.test.ts:112-123"
+        }
+      ]
+    },
+    {
+      "id": "clone:86455fd1435ec17c5bc3ecce67ef6b76b664f8d77a3df4e8c37360dabbc442f2",
+      "smellType": "CodeClone",
+      "severity": "Medium",
+      "files": [
+        "src/npm-package/lib/__tests__/migrate.test.js",
+        "src/npm-package/lib/__tests__/uninstall.test.js"
+      ],
+      "metrics": {
+        "tokenCount": 63,
+        "cloneHash": "86455fd1435ec17c5bc3ecce67ef6b76b664f8d77a3df4e8c37360dabbc442f2",
+        "cloneInstances": 2
+      },
+      "details": {
+        "type": "codeClone",
+        "clone_hash": "86455fd1435ec17c5bc3ecce67ef6b76b664f8d77a3df4e8c37360dabbc442f2",
+        "token_count": 63
+      },
+      "locations": [
+        {
+          "file": "src/npm-package/lib/__tests__/migrate.test.js",
+          "line": 23,
+          "column": 5,
+          "range": {
+            "start_line": 23,
+            "start_column": 5,
+            "end_line": 31,
+            "end_column": 50
+          },
+          "description": "Duplicated code (63 tokens, lines 23-31). Also found in: src\\npm-package\\lib\\__tests__\\uninstall.test.js:31-39"
+        },
+        {
+          "file": "src/npm-package/lib/__tests__/uninstall.test.js",
+          "line": 31,
+          "column": 5,
+          "range": {
+            "start_line": 31,
+            "start_column": 5,
+            "end_line": 39,
+            "end_column": 50
+          },
+          "description": "Duplicated code (63 tokens, lines 31-39). Also found in: src\\npm-package\\lib\\__tests__\\migrate.test.js:23-31"
+        }
+      ]
+    },
+    {
+      "id": "clone:c75135a44381ee19b07ae171a73da9e08717ef89870e3c83c204dc1d99e5ff40",
+      "smellType": "CodeClone",
+      "severity": "Medium",
+      "files": [
+        "src/mutation/__tests__/mutmut-runner.test.ts",
+        "src/mutation/__tests__/go-mutant-runner.test.ts"
+      ],
+      "metrics": {
+        "cloneHash": "c75135a44381ee19b07ae171a73da9e08717ef89870e3c83c204dc1d99e5ff40",
+        "tokenCount": 56,
+        "cloneInstances": 2
+      },
+      "details": {
+        "type": "codeClone",
+        "clone_hash": "c75135a44381ee19b07ae171a73da9e08717ef89870e3c83c204dc1d99e5ff40",
+        "token_count": 56
+      },
+      "locations": [
+        {
+          "file": "src/mutation/__tests__/go-mutant-runner.test.ts",
+          "line": 150,
+          "column": 9,
+          "range": {
+            "start_line": 150,
+            "start_column": 9,
+            "end_line": 162,
+            "end_column": 29
+          },
+          "description": "Duplicated code (56 tokens, lines 150-162). Also found in: src\\mutation\\__tests__\\mutmut-runner.test.ts:150-162"
+        },
+        {
+          "file": "src/mutation/__tests__/mutmut-runner.test.ts",
+          "line": 150,
+          "column": 9,
+          "range": {
+            "start_line": 150,
+            "start_column": 9,
+            "end_line": 162,
+            "end_column": 37
+          },
+          "description": "Duplicated code (56 tokens, lines 150-162). Also found in: src\\mutation\\__tests__\\go-mutant-runner.test.ts:150-162"
+        }
+      ]
+    },
+    {
+      "id": "clone:6c00273b8ebf40f5638fa9f9d2824f2e086b996317bf1d659323a2ef118e3c3a",
+      "smellType": "CodeClone",
+      "severity": "Medium",
+      "files": [
+        "src/mutation/init-baseline.ts",
+        "src/mutation/__tests__/init-baseline.test.ts"
+      ],
+      "metrics": {
+        "tokenCount": 68,
+        "cloneInstances": 2,
+        "cloneHash": "6c00273b8ebf40f5638fa9f9d2824f2e086b996317bf1d659323a2ef118e3c3a"
+      },
+      "details": {
+        "type": "codeClone",
+        "clone_hash": "6c00273b8ebf40f5638fa9f9d2824f2e086b996317bf1d659323a2ef118e3c3a",
+        "token_count": 68
+      },
+      "locations": [
+        {
+          "file": "src/mutation/__tests__/init-baseline.test.ts",
+          "line": 15,
+          "column": 11,
+          "range": {
+            "start_line": 15,
+            "start_column": 11,
+            "end_line": 55,
+            "end_column": 19
+          },
+          "description": "Duplicated code (68 tokens, lines 15-55). Also found in: src\\mutation\\init-baseline.ts:8-48"
+        },
+        {
+          "file": "src/mutation/init-baseline.ts",
+          "line": 8,
+          "column": 11,
+          "range": {
+            "start_line": 8,
+            "start_column": 11,
+            "end_line": 48,
+            "end_column": 19
+          },
+          "description": "Duplicated code (68 tokens, lines 8-48). Also found in: src\\mutation\\__tests__\\init-baseline.test.ts:15-55"
+        }
+      ]
+    },
+    {
+      "id": "clone:df6b445d916f1083fa1e20f67ce95233ef0d777140cdb2c7916886bcc830ef2d",
+      "smellType": "CodeClone",
+      "severity": "Medium",
+      "files": [
+        "src/npm-package/lib/__tests__/uninstall.test.js"
+      ],
+      "metrics": {
+        "cloneHash": "df6b445d916f1083fa1e20f67ce95233ef0d777140cdb2c7916886bcc830ef2d",
+        "cloneInstances": 2,
+        "tokenCount": 52
+      },
+      "details": {
+        "type": "codeClone",
+        "clone_hash": "df6b445d916f1083fa1e20f67ce95233ef0d777140cdb2c7916886bcc830ef2d",
+        "token_count": 52
+      },
+      "locations": [
+        {
+          "file": "src/npm-package/lib/__tests__/uninstall.test.js",
+          "line": 231,
+          "column": 5,
+          "range": {
+            "start_line": 231,
+            "start_column": 5,
+            "end_line": 238,
+            "end_column": 56
+          },
+          "description": "Duplicated code (52 tokens, lines 231-238). Also found in: src\\npm-package\\lib\\__tests__\\uninstall.test.js:322-327"
+        },
+        {
+          "file": "src/npm-package/lib/__tests__/uninstall.test.js",
+          "line": 322,
+          "column": 5,
+          "range": {
+            "start_line": 322,
+            "start_column": 5,
+            "end_line": 327,
+            "end_column": 56
+          },
+          "description": "Duplicated code (52 tokens, lines 322-327). Also found in: src\\npm-package\\lib\\__tests__\\uninstall.test.js:231-238"
+        }
+      ]
+    },
+    {
+      "id": "clone:5f4af6bcc4f0b40398fc94045182631eb98197413b7ecea19900c51c1c22ec01",
+      "smellType": "CodeClone",
+      "severity": "Medium",
+      "files": [
+        "src/npm-package/build-integrity/__tests__/orchestrator.test.ts",
+        "src/build-integrity/__tests__/orchestrator.test.ts",
+        "src/build-integrity/__tests__/ccn-refactor-gate10.test.ts",
+        "src/npm-package/build-integrity/__tests__/ccn-refactor-gate10.test.ts"
+      ],
+      "metrics": {
+        "cloneHash": "5f4af6bcc4f0b40398fc94045182631eb98197413b7ecea19900c51c1c22ec01",
+        "cloneInstances": 4,
+        "tokenCount": 52
+      },
+      "details": {
+        "type": "codeClone",
+        "clone_hash": "5f4af6bcc4f0b40398fc94045182631eb98197413b7ecea19900c51c1c22ec01",
+        "token_count": 52
+      },
+      "locations": [
+        {
+          "file": "src/build-integrity/__tests__/ccn-refactor-gate10.test.ts",
+          "line": 60,
+          "column": 7,
+          "range": {
+            "start_line": 60,
+            "start_column": 7,
+            "end_line": 85,
+            "end_column": 5
+          },
+          "description": "Duplicated code (52 tokens, lines 60-85). Also found in: src\\build-integrity\\__tests__\\orchestrator.test.ts:44-51, src\\npm-package\\build-integrity\\__tests__\\ccn-refactor-gate10.test.ts:60-85, src\\npm-package\\build-integrity\\__tests__\\orchestrator.test.ts:44-51"
+        },
+        {
+          "file": "src/build-integrity/__tests__/orchestrator.test.ts",
+          "line": 44,
+          "column": 7,
+          "range": {
+            "start_line": 44,
+            "start_column": 7,
+            "end_line": 51,
+            "end_column": 42
+          },
+          "description": "Duplicated code (52 tokens, lines 44-51). Also found in: src\\build-integrity\\__tests__\\ccn-refactor-gate10.test.ts:60-85, src\\npm-package\\build-integrity\\__tests__\\ccn-refactor-gate10.test.ts:60-85, src\\npm-package\\build-integrity\\__tests__\\orchestrator.test.ts:44-51"
+        },
+        {
+          "file": "src/npm-package/build-integrity/__tests__/ccn-refactor-gate10.test.ts",
+          "line": 60,
+          "column": 7,
+          "range": {
+            "start_line": 60,
+            "start_column": 7,
+            "end_line": 85,
+            "end_column": 5
+          },
+          "description": "Duplicated code (52 tokens, lines 60-85). Also found in: src\\build-integrity\\__tests__\\ccn-refactor-gate10.test.ts:60-85, src\\build-integrity\\__tests__\\orchestrator.test.ts:44-51, src\\npm-package\\build-integrity\\__tests__\\orchestrator.test.ts:44-51"
+        },
+        {
+          "file": "src/npm-package/build-integrity/__tests__/orchestrator.test.ts",
+          "line": 44,
+          "column": 7,
+          "range": {
+            "start_line": 44,
+            "start_column": 7,
+            "end_line": 51,
+            "end_column": 42
+          },
+          "description": "Duplicated code (52 tokens, lines 44-51). Also found in: src\\build-integrity\\__tests__\\ccn-refactor-gate10.test.ts:60-85, src\\build-integrity\\__tests__\\orchestrator.test.ts:44-51, src\\npm-package\\build-integrity\\__tests__\\ccn-refactor-gate10.test.ts:60-85"
+        }
+      ]
+    },
+    {
+      "id": "clone:2c1d6957970e6f4cd66ca5bbe47bc1988528d610243e6e3d9262a10294054fe5",
+      "smellType": "CodeClone",
+      "severity": "Medium",
+      "files": [
+        "src/build-integrity/types.ts",
+        "src/npm-package/build-integrity/types.ts"
+      ],
+      "metrics": {
+        "cloneInstances": 2,
+        "cloneHash": "2c1d6957970e6f4cd66ca5bbe47bc1988528d610243e6e3d9262a10294054fe5",
+        "tokenCount": 58
+      },
+      "details": {
+        "type": "codeClone",
+        "clone_hash": "2c1d6957970e6f4cd66ca5bbe47bc1988528d610243e6e3d9262a10294054fe5",
+        "token_count": 58
+      },
+      "locations": [
+        {
+          "file": "src/build-integrity/types.ts",
+          "line": 4,
+          "column": 18,
+          "range": {
+            "start_line": 4,
+            "start_column": 18,
+            "end_line": 50,
+            "end_column": 9
+          },
+          "description": "Duplicated code (58 tokens, lines 4-50). Also found in: src\\npm-package\\build-integrity\\types.ts:4-50"
+        },
+        {
+          "file": "src/npm-package/build-integrity/types.ts",
+          "line": 4,
+          "column": 18,
+          "range": {
+            "start_line": 4,
+            "start_column": 18,
+            "end_line": 50,
+            "end_column": 9
+          },
+          "description": "Duplicated code (58 tokens, lines 4-50). Also found in: src\\build-integrity\\types.ts:4-50"
         }
       ]
     },
@@ -3340,6 +3511,192 @@
       ]
     },
     {
+      "id": "ccycl:src/npm-package/lib/sprint-audit.js:handleSprintAudit:30",
+      "smellType": "HighCyclomaticComplexity",
+      "severity": "Medium",
+      "files": [
+        "src/npm-package/lib/sprint-audit.js"
+      ],
+      "metrics": {
+        "cyclomaticComplexity": 33
+      },
+      "details": {
+        "type": "highCyclomaticComplexity",
+        "name": "handleSprintAudit",
+        "line": 30,
+        "complexity": 33
+      },
+      "locations": [
+        {
+          "file": "src/npm-package/lib/sprint-audit.js",
+          "line": 30,
+          "column": 16,
+          "range": {
+            "start_line": 30,
+            "start_column": 16,
+            "end_line": 30,
+            "end_column": 33
+          },
+          "description": "Function 'handleSprintAudit' (cyclomatic complexity: 33)"
+        }
+      ]
+    },
+    {
+      "id": "ccycl:src/principles/baseline.ts:aggregateTool:51",
+      "smellType": "HighCyclomaticComplexity",
+      "severity": "Medium",
+      "files": [
+        "src/principles/baseline.ts"
+      ],
+      "metrics": {
+        "cyclomaticComplexity": 16
+      },
+      "details": {
+        "type": "highCyclomaticComplexity",
+        "name": "aggregateTool",
+        "line": 51,
+        "complexity": 16
+      },
+      "locations": [
+        {
+          "file": "src/principles/baseline.ts",
+          "line": 51,
+          "column": 10,
+          "range": {
+            "start_line": 51,
+            "start_column": 10,
+            "end_line": 51,
+            "end_column": 23
+          },
+          "description": "Function 'aggregateTool' (cyclomatic complexity: 16)"
+        }
+      ]
+    },
+    {
+      "id": "ccycl:src/npm-package/lib/phase-transition.js:renderDashboard:44",
+      "smellType": "HighCyclomaticComplexity",
+      "severity": "Medium",
+      "files": [
+        "src/npm-package/lib/phase-transition.js"
+      ],
+      "metrics": {
+        "cyclomaticComplexity": 22
+      },
+      "details": {
+        "type": "highCyclomaticComplexity",
+        "name": "renderDashboard",
+        "line": 44,
+        "complexity": 22
+      },
+      "locations": [
+        {
+          "file": "src/npm-package/lib/phase-transition.js",
+          "line": 44,
+          "column": 10,
+          "range": {
+            "start_line": 44,
+            "start_column": 10,
+            "end_line": 44,
+            "end_column": 25
+          },
+          "description": "Function 'renderDashboard' (cyclomatic complexity: 22)"
+        }
+      ]
+    },
+    {
+      "id": "ccycl:src/npm-package/lib/phase-transition.js:handlePhaseTransition:143",
+      "smellType": "HighCyclomaticComplexity",
+      "severity": "Medium",
+      "files": [
+        "src/npm-package/lib/phase-transition.js"
+      ],
+      "metrics": {
+        "cyclomaticComplexity": 22
+      },
+      "details": {
+        "type": "highCyclomaticComplexity",
+        "name": "handlePhaseTransition",
+        "line": 143,
+        "complexity": 22
+      },
+      "locations": [
+        {
+          "file": "src/npm-package/lib/phase-transition.js",
+          "line": 143,
+          "column": 16,
+          "range": {
+            "start_line": 143,
+            "start_column": 16,
+            "end_line": 143,
+            "end_column": 37
+          },
+          "description": "Function 'handlePhaseTransition' (cyclomatic complexity: 22)"
+        }
+      ]
+    },
+    {
+      "id": "ccycl:src/npm-package/scripts/sync-package-content.js:checkAdapterDrift:300",
+      "smellType": "HighCyclomaticComplexity",
+      "severity": "Medium",
+      "files": [
+        "src/npm-package/scripts/sync-package-content.js"
+      ],
+      "metrics": {
+        "cyclomaticComplexity": 17
+      },
+      "details": {
+        "type": "highCyclomaticComplexity",
+        "name": "checkAdapterDrift",
+        "line": 300,
+        "complexity": 17
+      },
+      "locations": [
+        {
+          "file": "src/npm-package/scripts/sync-package-content.js",
+          "line": 300,
+          "column": 10,
+          "range": {
+            "start_line": 300,
+            "start_column": 10,
+            "end_line": 300,
+            "end_column": 27
+          },
+          "description": "Function 'checkAdapterDrift' (cyclomatic complexity: 17)"
+        }
+      ]
+    },
+    {
+      "id": "ccycl:src/npm-package/lib/baseline.js:createBaseline:72",
+      "smellType": "HighCyclomaticComplexity",
+      "severity": "Medium",
+      "files": [
+        "src/npm-package/lib/baseline.js"
+      ],
+      "metrics": {
+        "cyclomaticComplexity": 46
+      },
+      "details": {
+        "type": "highCyclomaticComplexity",
+        "name": "createBaseline",
+        "line": 72,
+        "complexity": 46
+      },
+      "locations": [
+        {
+          "file": "src/npm-package/lib/baseline.js",
+          "line": 72,
+          "column": 16,
+          "range": {
+            "start_line": 72,
+            "start_column": 16,
+            "end_line": 72,
+            "end_column": 30
+          },
+          "description": "Function 'createBaseline' (cyclomatic complexity: 46)"
+        }
+      ]
+    },
+    {
       "id": "ccycl:src/npm-package/scripts/delphi-external-review.cjs:parseArgs:22",
       "smellType": "HighCyclomaticComplexity",
       "severity": "Medium",
@@ -3371,196 +3728,221 @@
       ]
     },
     {
-      "id": "dead:src/mock-policy/mock-decision-engine.ts:MockDecisionEngine.decide:111",
-      "smellType": "DeadSymbol",
+      "id": "ccycl:src/npm-package/lib/sprint-discovery.js:discoverActiveSprints:111",
+      "smellType": "HighCyclomaticComplexity",
       "severity": "Medium",
       "files": [
-        "src/mock-policy/mock-decision-engine.ts"
+        "src/npm-package/lib/sprint-discovery.js"
       ],
-      "metrics": {},
+      "metrics": {
+        "cyclomaticComplexity": 29
+      },
       "details": {
-        "type": "deadSymbol",
-        "name": "MockDecisionEngine.decide",
-        "kind": "Class Method"
+        "type": "highCyclomaticComplexity",
+        "name": "discoverActiveSprints",
+        "line": 111,
+        "complexity": 29
       },
       "locations": [
         {
-          "file": "src/mock-policy/mock-decision-engine.ts",
+          "file": "src/npm-package/lib/sprint-discovery.js",
           "line": 111,
-          "column": 3,
+          "column": 10,
           "range": {
             "start_line": 111,
-            "start_column": 3,
+            "start_column": 10,
             "end_line": 111,
-            "end_column": 9
+            "end_column": 31
           },
-          "description": "Class Method 'MockDecisionEngine.decide' definition"
+          "description": "Function 'discoverActiveSprints' (cyclomatic complexity: 29)"
         }
       ]
     },
     {
-      "id": "dead:src/npm-package/mock-policy/mock-decision-engine.ts:MockDecisionEngine.decide:111",
-      "smellType": "DeadSymbol",
-      "severity": "Medium",
-      "files": [
-        "src/npm-package/mock-policy/mock-decision-engine.ts"
-      ],
-      "metrics": {},
-      "details": {
-        "type": "deadSymbol",
-        "name": "MockDecisionEngine.decide",
-        "kind": "Class Method"
-      },
-      "locations": [
-        {
-          "file": "src/npm-package/mock-policy/mock-decision-engine.ts",
-          "line": 111,
-          "column": 3,
-          "range": {
-            "start_line": 111,
-            "start_column": 3,
-            "end_line": 111,
-            "end_column": 9
-          },
-          "description": "Class Method 'MockDecisionEngine.decide' definition"
-        }
-      ]
-    },
-    {
-      "id": "barrelfileabuse:5a71e429",
-      "smellType": "BarrelFileAbuse",
-      "severity": "Medium",
-      "files": [
-        "src/npm-package/mutation/runners/index.ts"
-      ],
-      "metrics": {
-        "dependentCount": 12
-      },
-      "details": {
-        "type": "barrelFileAbuse"
-      }
-    },
-    {
-      "id": "barrelfileabuse:d7ee1b86",
-      "smellType": "BarrelFileAbuse",
-      "severity": "Medium",
-      "files": [
-        "src/mutation/runners/index.ts"
-      ],
-      "metrics": {
-        "dependentCount": 12
-      },
-      "details": {
-        "type": "barrelFileAbuse"
-      }
-    },
-    {
-      "id": "deadcode:ed44cb8a",
-      "smellType": "DeadCode",
-      "severity": "Medium",
-      "files": [
-        "plugins/opencode/scripts/prepack.cjs"
-      ],
-      "metrics": {},
-      "details": {
-        "type": "deadCode"
-      }
-    },
-    {
-      "id": "deadcode:2caab309",
-      "smellType": "DeadCode",
-      "severity": "Medium",
-      "files": [
-        "src/npm-package/bin/xp-gate.js"
-      ],
-      "metrics": {},
-      "details": {
-        "type": "deadCode"
-      }
-    },
-    {
-      "id": "deadcode:b3f67e51",
-      "smellType": "DeadCode",
-      "severity": "Medium",
-      "files": [
-        "scripts/__tests__/render-sprint-progress.test.cjs"
-      ],
-      "metrics": {},
-      "details": {
-        "type": "deadCode"
-      }
-    },
-    {
-      "id": "deadcode:1f12a1d6",
-      "smellType": "DeadCode",
-      "severity": "Medium",
-      "files": [
-        "scripts/__tests__/delphi-external-review.test.cjs"
-      ],
-      "metrics": {},
-      "details": {
-        "type": "deadCode"
-      }
-    },
-    {
-      "id": "deadcode:6d58c087",
-      "smellType": "DeadCode",
-      "severity": "Medium",
-      "files": [
-        "src/npm-package/scripts/delphi-external-review.cjs"
-      ],
-      "metrics": {},
-      "details": {
-        "type": "deadCode"
-      }
-    },
-    {
-      "id": "deadcode:407980a2",
-      "smellType": "DeadCode",
-      "severity": "Medium",
-      "files": [
-        "src/npm-package/mutation/init-baseline.ts"
-      ],
-      "metrics": {},
-      "details": {
-        "type": "deadCode"
-      }
-    },
-    {
-      "id": "deadcode:8cf3a492",
-      "smellType": "DeadCode",
-      "severity": "Medium",
-      "files": [
-        "dashboard/dashboard.js"
-      ],
-      "metrics": {},
-      "details": {
-        "type": "deadCode"
-      }
-    },
-    {
-      "id": "deadcode:0fd10a0f",
-      "smellType": "DeadCode",
+      "id": "ccycl:scripts/delphi-external-review.cjs:parseArgs:22",
+      "smellType": "HighCyclomaticComplexity",
       "severity": "Medium",
       "files": [
         "scripts/delphi-external-review.cjs"
       ],
-      "metrics": {},
+      "metrics": {
+        "cyclomaticComplexity": 23
+      },
       "details": {
-        "type": "deadCode"
-      }
+        "type": "highCyclomaticComplexity",
+        "name": "parseArgs",
+        "line": 22,
+        "complexity": 23
+      },
+      "locations": [
+        {
+          "file": "scripts/delphi-external-review.cjs",
+          "line": 22,
+          "column": 10,
+          "range": {
+            "start_line": 22,
+            "start_column": 10,
+            "end_line": 22,
+            "end_column": 19
+          },
+          "description": "Function 'parseArgs' (cyclomatic complexity: 23)"
+        }
+      ]
     },
     {
-      "id": "deadcode:ac85c42b",
-      "smellType": "DeadCode",
+      "id": "ccycl:src/npm-package/lib/uninstall.js:uninstall:329",
+      "smellType": "HighCyclomaticComplexity",
       "severity": "Medium",
       "files": [
-        "skills/sprint-flow/__tests__/sprint-flow.test.cjs"
+        "src/npm-package/lib/uninstall.js"
       ],
-      "metrics": {},
+      "metrics": {
+        "cyclomaticComplexity": 29
+      },
       "details": {
-        "type": "deadCode"
-      }
+        "type": "highCyclomaticComplexity",
+        "name": "uninstall",
+        "line": 329,
+        "complexity": 29
+      },
+      "locations": [
+        {
+          "file": "src/npm-package/lib/uninstall.js",
+          "line": 329,
+          "column": 16,
+          "range": {
+            "start_line": 329,
+            "start_column": 16,
+            "end_line": 329,
+            "end_column": 25
+          },
+          "description": "Function 'uninstall' (cyclomatic complexity: 29)"
+        }
+      ]
+    },
+    {
+      "id": "ccycl:plugins/opencode/index.ts:<anonymous>:384",
+      "smellType": "HighCyclomaticComplexity",
+      "severity": "Medium",
+      "files": [
+        "plugins/opencode/index.ts"
+      ],
+      "metrics": {
+        "cyclomaticComplexity": 16
+      },
+      "details": {
+        "type": "highCyclomaticComplexity",
+        "name": "<anonymous>",
+        "line": 384,
+        "complexity": 16
+      },
+      "locations": [
+        {
+          "file": "plugins/opencode/index.ts",
+          "line": 384,
+          "column": 22,
+          "range": {
+            "start_line": 384,
+            "start_column": 22,
+            "end_line": 449,
+            "end_column": 10
+          },
+          "description": "Function '<anonymous>' (cyclomatic complexity: 16)"
+        }
+      ]
+    },
+    {
+      "id": "ccycl:src/npm-package/principles/adapters/cpp.ts:CppAdapter.extractCodeBlock:52",
+      "smellType": "HighCyclomaticComplexity",
+      "severity": "Medium",
+      "files": [
+        "src/npm-package/principles/adapters/cpp.ts"
+      ],
+      "metrics": {
+        "cyclomaticComplexity": 27
+      },
+      "details": {
+        "type": "highCyclomaticComplexity",
+        "name": "CppAdapter.extractCodeBlock",
+        "line": 52,
+        "complexity": 27
+      },
+      "locations": [
+        {
+          "file": "src/npm-package/principles/adapters/cpp.ts",
+          "line": 52,
+          "column": 12,
+          "range": {
+            "start_line": 52,
+            "start_column": 12,
+            "end_line": 52,
+            "end_column": 28
+          },
+          "description": "Function 'CppAdapter.extractCodeBlock' (cyclomatic complexity: 27)"
+        }
+      ]
+    },
+    {
+      "id": "ccycl:src/npm-package/principles/baseline.ts:aggregateTool:51",
+      "smellType": "HighCyclomaticComplexity",
+      "severity": "Medium",
+      "files": [
+        "src/npm-package/principles/baseline.ts"
+      ],
+      "metrics": {
+        "cyclomaticComplexity": 16
+      },
+      "details": {
+        "type": "highCyclomaticComplexity",
+        "name": "aggregateTool",
+        "line": 51,
+        "complexity": 16
+      },
+      "locations": [
+        {
+          "file": "src/npm-package/principles/baseline.ts",
+          "line": 51,
+          "column": 10,
+          "range": {
+            "start_line": 51,
+            "start_column": 10,
+            "end_line": 51,
+            "end_column": 23
+          },
+          "description": "Function 'aggregateTool' (cyclomatic complexity: 16)"
+        }
+      ]
+    },
+    {
+      "id": "nest:src/npm-package/lib/baseline.js:createBaseline:72",
+      "smellType": "DeepNesting",
+      "severity": "Medium",
+      "files": [
+        "src/npm-package/lib/baseline.js"
+      ],
+      "metrics": {
+        "depth": 5
+      },
+      "details": {
+        "type": "deepNesting",
+        "name": "createBaseline",
+        "depth": 5,
+        "line": 72
+      },
+      "locations": [
+        {
+          "file": "src/npm-package/lib/baseline.js",
+          "line": 72,
+          "column": 16,
+          "range": {
+            "start_line": 72,
+            "start_column": 16,
+            "end_line": 72,
+            "end_column": 30
+          },
+          "description": "Function 'createBaseline' is too deeply nested"
+        }
+      ]
     },
     {
       "id": "largefile:src/npm-package/lib/doctor.js",
@@ -3592,16 +3974,16 @@
     }
   ],
   "summary": {
-    "totalSmells": 96,
-    "filesAnalyzed": 326,
+    "totalSmells": 106,
+    "filesAnalyzed": 329,
     "cycles": 0,
     "godModules": 0,
-    "deadCode": 9,
+    "deadCode": 10,
     "deadSymbols": 2,
     "layerViolations": 0,
-    "highCyclomaticComplexity": 12,
-    "highCognitiveComplexity": 27,
+    "highCyclomaticComplexity": 14,
+    "highCognitiveComplexity": 30,
     "hubModules": 0
   },
-  "grade": "ArchitectureGrade { score: 5.9785275, level: Moderate, density: 7.0858893 }"
+  "grade": "ArchitectureGrade { score: 5.7971125, level: Moderate, density: 7.81155 }"
 }

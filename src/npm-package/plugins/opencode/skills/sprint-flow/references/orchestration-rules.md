@@ -103,6 +103,16 @@
 
 3. **等待用户确认 checkpoint**（如适用）
 
+4. **Phase 6 CLOSE 完成后运行 sprint-audit**（自动提醒，Layer 1.5 触发）：
+   ```
+   npx xp-gate sprint-audit
+   ```
+   - 检查 phase 覆盖度、时间记录、输出物记录、状态一致性
+   - 输出人类可读报告或 JSON（`--json`）
+   - 报告写入 `.sprint-state/audit-report.json`（最新覆盖）
+   - Verdict: PASS / PASS_WITH_WARNINGS / FAIL / SKIP
+   - `phase-transition` CLI 在 Phase 6 completed 时自动输出提醒，无需额外指令
+
 ### Background Task Resume Protocol (MANDATORY — Issue #248)
 
 After dispatching background agents with `run_in_background=true`:

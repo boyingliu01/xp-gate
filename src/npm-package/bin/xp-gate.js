@@ -203,6 +203,14 @@ const COMMANDS = {
       handlePhaseTransition(subargs).then(code => process.exit(code));
     },
     usage: 'xp-gate phase-transition <phase> <status> [--render] [--outputs <json>]'
+  },
+  'sprint-audit': {
+    description: 'Final sprint completeness audit (Phase 6 CLOSE)',
+    run: subargs => {
+      const { handleSprintAudit } = require('../lib/sprint-audit.js');
+      handleSprintAudit(subargs).then(code => process.exit(code));
+    },
+    usage: 'xp-gate sprint-audit [--dir <path>] [--json]'
   }
 };
 

@@ -8,11 +8,11 @@
  * @covers AC-338-04 (--outputs flag records outputs in state)
  */
 
-import { describe, it, expect, beforeEach, afterEach } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import fs from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
-import { handlePhaseTransition, renderDashboard } from '../phase-transition.js';
+import { handlePhaseTransition, renderDashboard, PHASE_NAMES } from '../phase-transition.js';
 
 describe('phase-transition', () => {
   let tmpDir;
@@ -169,6 +169,104 @@ describe('phase-transition', () => {
       const result = renderDashboard(state);
       expect(result).toContain('SPRINT PROGRESS');
       expect(result).toContain('sprint-min');
+    });
+  });
+  describe('Layer 1: Pre-transition gate check', () => {
+    it('warns when previous phase not completed', async () => {
+      // Set up: Phase 1 completed, then try Phase 3 in_progress (skipping Phase 2)
+      await handlePhaseTransition(['1', 'completed', '--dir', tmpDir]);
+
+      const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+      const code = await handlePhaseTransition(['3', 'in_progress', '--dir', tmpDir]);
+      expect(code).toBe(0);
+      expect(warnSpy).toHaveBeenCalledWith(
+        expect.stringContaining('Phase 2 (DESIGN) not recorded')
+      );
+      warnSpy.mockRestore();
+    });
+
+    it('does NOT warn when previous phase is completed', async () => {
+      await handlePhaseTransition(['1', 'completed', '--dir', tmpDir]);
+      await handlePhaseTransition(['2', 'completed', '--dir', tmpDir]);
+
+      const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+      const code = await handlePhaseTransition(['3', 'in_progress', '--dir', tmpDir]);
+      expect(code).toBe(0);
+      expect(warnSpy).not.toHaveBeenCalled();
+      warnSpy.mockRestore();
+    });
+
+    it('does NOT warn when previous phase is skipped', async () => {
+      await handlePhaseTransition(['1', 'completed', '--dir', tmpDir]);
+      await handlePhaseTransition(['2', 'skipped', '--dir', tmpDir]);
+
+      const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+      const code = await handlePhaseTransition(['3', 'in_progress', '--dir', tmpDir]);
+      expect(code).toBe(0);
+      expect(warnSpy).not.toHaveBeenCalled();
+      warnSpy.mockRestore();
+    });
+
+    it('skips check when no sprint-state.json exists', async () => {
+      // No state file — fresh project
+      const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+      const code = await handlePhaseTransition(['2', 'in_progress', '--dir', tmpDir]);
+      expect(code).toBe(0);
+      expect(warnSpy).not.toHaveBeenCalled();
+      warnSpy.mockRestore();
+    });
+
+    it('does NOT check for Phase 1 (no predecessor)', async () => {
+      const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+      const code = await handlePhaseTransition(['1', 'in_progress', '--dir', tmpDir]);
+      expect(code).toBe(0);
+      expect(warnSpy).not.toHaveBeenCalled();
+      warnSpy.mockRestore();
+    });
+
+    it('handles phase_history with gaps correctly', async () => {
+      // Set up: Phase 1 completed, Phase 3 completed (gap at Phase 2)
+      await handlePhaseTransition(['1', 'completed', '--dir', tmpDir]);
+      // Manually add Phase 3 without Phase 2
+      const stateFile = path.join(tmpDir, '.sprint-state', 'sprint-state.json');
+      const state = JSON.parse(fs.readFileSync(stateFile, 'utf8'));
+      state.phase_history.push({ phase: 3, phase_name: 'BUILD', status: 'completed' });
+      state.phase = 3;
+      fs.writeFileSync(stateFile, JSON.stringify(state));
+
+      const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+      const code = await handlePhaseTransition(['4', 'in_progress', '--dir', tmpDir]);
+      expect(code).toBe(0);
+      // Phase 3 is completed, so no warning for Phase 3→4 transition
+      expect(warnSpy).not.toHaveBeenCalled();
+      warnSpy.mockRestore();
+    });
+  });
+
+  describe('Layer 1.5: Phase 6 auto-trigger', () => {
+    it('outputs sprint-audit reminder on Phase 6 completed', async () => {
+      // Set up state through Phase 5
+      await handlePhaseTransition(['1', 'completed', '--dir', tmpDir]);
+      await handlePhaseTransition(['2', 'completed', '--dir', tmpDir]);
+      await handlePhaseTransition(['3', 'completed', '--dir', tmpDir]);
+      await handlePhaseTransition(['4', 'completed', '--dir', tmpDir]);
+      await handlePhaseTransition(['5', 'completed', '--dir', tmpDir]);
+
+      const logSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
+      const code = await handlePhaseTransition(['6', 'completed', '--dir', tmpDir]);
+      expect(code).toBe(0);
+      expect(logSpy).toHaveBeenCalledWith(
+        expect.stringContaining('sprint-audit')
+      );
+      logSpy.mockRestore();
+    });
+  });
+
+  describe('PHASE_NAMES export', () => {
+    it('exports PHASE_NAMES as shared constant', () => {
+      expect(PHASE_NAMES).toBeDefined();
+      expect(PHASE_NAMES[1]).toBe('PREP');
+      expect(PHASE_NAMES[6]).toBe('CLOSE');
     });
   });
 });
