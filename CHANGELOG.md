@@ -2,6 +2,12 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.14.28.0] - 2026-07-22
+
+### Changed
+- 版本号升级至 0.14.28.0（npm registry 版本占用，顺延发布）。
+- 功能内容与 0.14.27.0 一致：Qoder Delphi Agent 自动部署 + 文档同步。
+
 ## [0.14.27.0] - 2026-07-22
 
 ### Added
