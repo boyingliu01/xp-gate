@@ -167,7 +167,7 @@ PREP → DESIGN → BUILD → VERIFY → SHIP → CLOSE
 | Phase | Name | Key Actions | Output |
 |-------|------|-------------|--------|
 | 1/6 | PREP | Detect protected branch → Create git worktree → AUTO-ESTIMATE sizing → Classify (lightweight/standard/complex) | Worktree path + impact assessment |
-| 2/6 | DESIGN | brainstorming → autoplan → delphi-review (HARD-GATE ≥90% consensus) → to-issues → specification.yaml | specification.yaml + slices-manifest.json |
+| 2/6 | DESIGN | CONTEXT.md 预检 (#322) → brainstorming (如需要) → autoplan → delphi-review (HARD-GATE ≥90% consensus) → to-issues → specification.yaml | specification.yaml + slices-manifest.json |
 | 3/6 | BUILD | GITHOOKS-GATE → DELPHI-GATE → ralph-loop (default) or parallel → TDD → freeze → blind review → verification | MVP code |
 | 4/6 | VERIFY | delphi-review --mode code-walkthrough → test-specification-alignment → browse QA → learn + retro | Review report + feedback-log.md |
 | 5/6 | SHIP | VERSION-GATE → finishing-a-development-branch → ship (create PR) → land-and-deploy → merge to main + CI + canary | PR URL + deploy status + merge confirmation |
@@ -199,11 +199,26 @@ Every phase MUST output its header as the first line of that phase's output. For
 3. NEVER merge phase output — each phase gets its own header
 4. On `/sprint-flow` trigger, first line MUST output: `Sprint Flow: PREP → DESIGN → BUILD → VERIFY → SHIP → CLOSE`
 5. Each phase completion MUST write Phase Summary to `.sprint-state/phase-outputs/phase-{N}-summary.md`
-6. Each phase completion MUST update `.sprint-state/sprint-state.json`
+6. Each phase completion MUST call `xp-gate phase-transition <N> <status> --render` — this programmatically updates `sprint-state.json` AND renders the ASCII dashboard in one command (resolves #338, #146)
 
-### Required Rendering (MANDATORY per phase)
+### Phase Transition CLI (MANDATORY — replaces manual state updates)
 
-7. Each phase completion MUST render the ASCII progress dashboard using `templates/sprint-progress-template.md` — the orchestrator reads `sprint-state.json` and outputs the dashboard after every phase's status block, so the user always sees current global progress without needing to ask
+7. **NEVER** manually write to `sprint-state.json` or manually render the dashboard from template. ALWAYS use:
+   ```
+   npx xp-gate phase-transition <phase> <status> --render [--outputs '<json>']
+   ```
+   - `<phase>`: 1-6
+   - `<status>`: `in_progress` | `completed` | `skipped` | `failed` | `paused`
+   - `--render`: Auto-renders ASCII progress dashboard after state update
+   - `--outputs '<json>'`: Optional JSON of phase outputs to record
+   
+   Example (end of each phase):
+   ```
+   npx xp-gate phase-transition 1 completed --render --outputs '{"estimate":"3 story points"}'
+   npx xp-gate phase-transition 2 in_progress --render
+   ```
+   
+   This is a **HARD GATE** — the orchestrator MUST invoke this CLI command. Text-level instructions to "update state" or "render dashboard" are DEPRECATED; the CLI is the single source of truth for state transitions and dashboard rendering.
 
 ### Phase Output Status Schema (MANDATORY per phase)
 
@@ -254,6 +269,7 @@ next_phase_context: [key info for next phase]
 | Clean up CLOSE without backing up sprint-state first | `.sprint-state/` is inside worktree; it's lost on worktree removal. CLOSE step 1 MUST back up to repo-tracked path first |
 | Keep adding random changes after verification failures | Max 3 fix cycles; if still failing, BLOCK and request user decision |
 | Enter next phase without generating Phase Summary | Every phase MUST write `.sprint-state/phase-outputs/phase-{N}-summary.md` and pass transition gate |
+| Complete implementation change without running verification | After every file edit/refactor/feature, MUST run `npm test` + `npm run lint` + `npx tsc --noEmit` and record the structured verification event (see `phase-3-build.md` §In-Session Verification) |
 
 ---
 
