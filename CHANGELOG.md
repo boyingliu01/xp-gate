@@ -2,7 +2,7 @@
 
 All notable changes to this project will be documented in this file.
 
-## [0.14.24.0] - 2026-07-22
+## [0.14.25.0] - 2026-07-22
 
 ### Added
 - **Qoder Delphi Agent 自动部署**: `xp-gate init` 检测 Qoder 平台时自动部署 3 个 Custom Agent（架构/技术/可行性）到 `.qoder/agents/`，使用 Qwen3.7-Max、GLM-5.2、DeepSeek-V4-Pro 内置模型，零配置开箱即用。
