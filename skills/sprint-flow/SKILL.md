@@ -269,6 +269,7 @@ next_phase_context: [key info for next phase]
 | Clean up CLOSE without backing up sprint-state first | `.sprint-state/` is inside worktree; it's lost on worktree removal. CLOSE step 1 MUST back up to repo-tracked path first |
 | Keep adding random changes after verification failures | Max 3 fix cycles; if still failing, BLOCK and request user decision |
 | Enter next phase without generating Phase Summary | Every phase MUST write `.sprint-state/phase-outputs/phase-{N}-summary.md` and pass transition gate |
+| Complete implementation change without running verification | After every file edit/refactor/feature, MUST run `npm test` + `npm run lint` + `npx tsc --noEmit` and record the structured verification event (see `phase-3-build.md` §In-Session Verification) |
 
 ---
 

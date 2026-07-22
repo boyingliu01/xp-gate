@@ -184,6 +184,7 @@ Subcommands registered in 0.8.8.0 (verified against bin source):
 - **TypeScript strict mode, always.** No `as any`, `@ts-ignore`, or `@ts-expect-error`. No empty `catch` blocks. No `print()` — use `logging`.
 - **Adapters are duplicated** between `githooks/adapters/` and `src/npm-package/adapters/`. Edit `githooks/` first, then resync via build scripts. Known tech debt.
 - **TDD mandatory before implementation (v0.14.0+).** Every implementation change MUST follow RED → GREEN → REFACTOR. Before delegating any implementation work, verify a failing test exists. If no test exists, write one first and mark the todo as `[TDD-RED]`. Only delegate implementation AFTER the RED test is committed. See `skills/sprint-flow/references/phase-3-build.md` for the full TDD-GATE specification. ralph-loop creates tests as step 0 — this is the pre-ralph-loop check, not a replacement.
+- **In-session verification after changes (v0.14.31+).** After every implementation change (file edit, refactor, new feature, bug fix), the Agent MUST: (1) run the relevant verification commands (`npm test`, `npx vitest run`, `npm run lint`, `npx tsc --noEmit`, or project-specific equivalents) and (2) record the verification result in a structured format that external tools (e.g. Better Loop Harness) can capture. Never claim a change is complete without running and recording verification. See `skills/sprint-flow/references/phase-3-build.md` §In-Session Verification for the full specification.
 
 ## ANTI-PATTERNS (THIS PROJECT)
 - Do NOT bypass any gate with `--no-verify`. Process violation.
@@ -197,6 +198,7 @@ Subcommands registered in 0.8.8.0 (verified against bin source):
 - Do NOT modify tests during Phase 2 of test-specification-alignment (freeze enforced).
 - Do NOT push from main/master and expect Gate ML, Gate UI, or Gate MW to run — by design all three are skipped (pre-reviewed via PR).
 - Do NOT delete or rename `.code-walkthrough-result.json` before push.
+- Do NOT claim a change is complete without running verification commands and recording the result. Every file edit, refactor, or feature implementation MUST be followed by `npm test` (or equivalent) + `npm run lint` and the output recorded. Unverified changes are invisible to Better Loop Harness and break the change→validation traceability chain.
 
 ## KNOWN DRIFT HISTORY
 
