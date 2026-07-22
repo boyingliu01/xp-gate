@@ -370,4 +370,81 @@ describe('init', () => {
     const result = await init(['--core-only']);
     expect(result).toBe(0);
   });
+
+  describe('configureQoderDelphiAgents', () => {
+    function qoderSkillsDir() {
+      return path.join(tmpHome, '.qoder', 'skills');
+    }
+
+    function setupQoderPlatform() {
+      fs.mkdirSync(qoderSkillsDir(), { recursive: true });
+    }
+
+    function agentTemplateDir() {
+      // srcDir = path.dirname(__dirname) = src/npm-package/lib -> src/npm-package
+      return path.join(__dirname, '..', '..', 'plugins', 'qoder', 'agents');
+    }
+
+    it('deploys Delphi agents when platform is Qoder and agents do not exist', async () => {
+      fs.mkdirSync(path.join(tmpProject, '.git', 'hooks'), { recursive: true });
+      mockExecSuccess();
+      setupQoderPlatform();
+
+      // Ensure agent templates exist in the npm package
+      const templateDir = agentTemplateDir();
+      fs.mkdirSync(templateDir, { recursive: true });
+      fs.writeFileSync(path.join(templateDir, 'delphi-architecture.md'), '---\nname: test\n---\narch expert');
+
+      vi.resetModules();
+      delete require.cache[require.resolve('../init')];
+      delete require.cache[require.resolve('../detect-deps.js')];
+      delete require.cache[require.resolve('../shared-paths')];
+
+      const { init } = require('../init');
+      const result = await init(['--core-only']);
+      expect(result).toBe(0);
+
+      const deployedAgent = path.join(tmpProject, '.qoder', 'agents', 'delphi-architecture.md');
+      expect(fs.existsSync(deployedAgent)).toBe(true);
+      expect(fs.readFileSync(deployedAgent, 'utf8')).toContain('arch expert');
+    });
+
+    it('does not overwrite existing agent files (preserves user customizations)', async () => {
+      fs.mkdirSync(path.join(tmpProject, '.git', 'hooks'), { recursive: true });
+      mockExecSuccess();
+      setupQoderPlatform();
+
+      // Pre-existing user-customized agent
+      const agentsDir = path.join(tmpProject, '.qoder', 'agents');
+      fs.mkdirSync(agentsDir, { recursive: true });
+      fs.writeFileSync(path.join(agentsDir, 'delphi-architecture.md'), 'CUSTOM USER CONTENT');
+
+      // Template in npm package
+      const templateDir = agentTemplateDir();
+      fs.mkdirSync(templateDir, { recursive: true });
+      fs.writeFileSync(path.join(templateDir, 'delphi-architecture.md'), 'TEMPLATE CONTENT');
+
+      vi.resetModules();
+      delete require.cache[require.resolve('../init')];
+      delete require.cache[require.resolve('../detect-deps.js')];
+      delete require.cache[require.resolve('../shared-paths')];
+
+      const { init } = require('../init');
+      await init(['--core-only']);
+
+      // User content preserved
+      expect(fs.readFileSync(path.join(agentsDir, 'delphi-architecture.md'), 'utf8')).toBe('CUSTOM USER CONTENT');
+    });
+
+    it('skips deployment when platform is not Qoder', async () => {
+      fs.mkdirSync(path.join(tmpProject, '.git', 'hooks'), { recursive: true });
+      mockExecSuccess();
+      // Default platform is 'opencode' (no .qoder/skills dir)
+
+      const { init } = require('../init');
+      await init(['--core-only']);
+
+      expect(fs.existsSync(path.join(tmpProject, '.qoder', 'agents'))).toBe(false);
+    });
+  });
 });
