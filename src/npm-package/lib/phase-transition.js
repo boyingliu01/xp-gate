@@ -23,7 +23,17 @@
 'use strict';
 
 const path = require('path');
+const fs = require('fs');
 const { SprintStateManager } = require('./sprint-state-manager');
+
+/**
+ * Shared phase name lookup — single source of truth.
+ * Used by renderDashboard, sprint-audit, and Layer 1 gate check.
+ */
+const PHASE_NAMES = {
+  1: 'PREP', 2: 'DESIGN', 3: 'BUILD',
+  4: 'VERIFY', 5: 'SHIP', 6: 'CLOSE',
+};
 
 /**
  * Render ASCII dashboard from sprint state.
@@ -34,10 +44,7 @@ const { SprintStateManager } = require('./sprint-state-manager');
 function renderDashboard(state) {
   if (!state) return 'No sprint state found';
 
-  const PHASE_NAMES = {
-    '1': 'PREP', '2': 'DESIGN', '3': 'BUILD',
-    '4': 'VERIFY', '5': 'SHIP', '6': 'CLOSE',
-  };
+  const PHASE_NAMES_LOCAL = PHASE_NAMES;
 
   function statusIcon(status) {
     switch (status) {
@@ -75,7 +82,7 @@ function renderDashboard(state) {
   }
 
   const currentPhase = state.phase || 1;
-  const currentPhaseName = PHASE_NAMES[String(currentPhase)] || `Phase ${currentPhase}`;
+  const currentPhaseName = PHASE_NAMES_LOCAL[String(currentPhase)] || `Phase ${currentPhase}`;
 
   // Progress bar
   const completedCount = Object.values(historyLookup).filter(h => h.status === 'completed').length;
@@ -99,7 +106,7 @@ function renderDashboard(state) {
   for (let i = 1; i <= 6; i++) {
     const entry = historyLookup[String(i)];
     const icon = statusIcon(entry?.status || (i < currentPhase ? 'completed' : i === currentPhase ? 'in_progress' : 'pending'));
-    const name = (PHASE_NAMES[String(i)] || `Phase ${i}`).padEnd(10);
+    const name = (PHASE_NAMES_LOCAL[String(i)] || `Phase ${i}`).padEnd(10);
     const dur = formatDuration(entry?.duration_seconds).padEnd(8);
     lines.push(`|  ${icon} Phase ${i}/6  ${name} ${dur}          |`);
   }
@@ -190,9 +197,40 @@ async function handlePhaseTransition(args = []) {
   // Execute transition
   try {
     const manager = new SprintStateManager(projectDir);
+
+    // ── Layer 1: Pre-transition gate check ──
+    // Check BEFORE transitionPhase() to validate previous phase completion.
+    // Runs when status === 'in_progress' and phase >= 2.
+    // No side effects — only outputs WARNING, does not modify state.
+    if (status === 'in_progress' && phase >= 2) {
+      const preState = manager.read();
+      if (preState && Array.isArray(preState.phase_history)) {
+        const prevPhase = phase - 1;
+        const prevEntry = preState.phase_history.find(e => e.phase === prevPhase);
+        const prevName = PHASE_NAMES[prevPhase] || `Phase ${prevPhase}`;
+        // 'completed' and 'skipped' are both valid predecessor statuses
+        if (!prevEntry || (prevEntry.status !== 'completed' && prevEntry.status !== 'skipped')) {
+          console.warn(
+            `⚠️  [sprint-audit] Phase ${prevPhase} (${prevName}) not recorded as 'completed'`
+          );
+          console.warn(
+            `   Previous phase may have been skipped. Run: xp-gate phase-transition ${prevPhase} completed`
+          );
+        }
+      }
+      // If no sprint-state.json exists yet, skip check (no previous phase to validate)
+    }
+
     const newState = manager.transitionPhase(phase, status, { outputs });
 
     console.log(`✅ Phase ${phase} transitioned to '${status}'`);
+
+    // ── Layer 1.5: Auto-trigger Layer 2 reminder on Phase 6 completed ──
+    if (phase === 6 && status === 'completed') {
+      console.log('');
+      console.log('📋 [sprint-audit] Sprint complete — run final coverage audit:');
+      console.log('   npx xp-gate sprint-audit');
+    }
 
     // Auto-render dashboard if --render flag is set
     if (renderFlag) {
@@ -208,4 +246,4 @@ async function handlePhaseTransition(args = []) {
   }
 }
 
-module.exports = { handlePhaseTransition, renderDashboard };
+module.exports = { handlePhaseTransition, renderDashboard, PHASE_NAMES };

@@ -1,11 +1,35 @@
 {
   "mode": "design",
-  "timestamp": "2026-07-14T14:40:00Z",
+  "document": "docs/plans/2026-07-21-sprint-state-enforcement-design.md",
+  "title": "Sprint State 双层强制执行机制设计",
+  "timestamp": "2026-07-22T04:40:00Z",
   "verdict": "APPROVED",
   "consensus_ratio": 1.0,
-  "experts": ["A", "B", "C"],
-  "rounds": 2,
-  "round1_verdicts": {"A": "REQUEST_CHANGES", "B": "REQUEST_CHANGES", "C": "REQUEST_CHANGES"},
-  "round2_verdicts": {"A": "APPROVED", "B": "APPROVED", "C": "APPROVED"},
-  "specification_path": ".sprint-state/phase-outputs/specification.yaml"
+  "rounds_completed": 3,
+  "experts": [
+    {"id": "A", "role": "Architecture", "model": "Qwen3.7-Max (via GeneralPurpose)"},
+    {"id": "B", "role": "Technical", "model": "GLM-5.2 (via GeneralPurpose)"},
+    {"id": "C", "role": "Feasibility", "model": "DeepSeek-V4-Pro (via GeneralPurpose)"}
+  ],
+  "round1_verdicts": {"A": "APPROVED", "B": "REQUEST_CHANGES", "C": "APPROVED"},
+  "final_verdicts": {"A": "APPROVED", "B": "APPROVED", "C": "APPROVED"},
+  "agreed_items": [
+    "Layer 2 auto-trigger: phase-transition 处理 Phase 6 completed 时自动输出提醒",
+    "Check ordering: Layer 1 检查在 transitionPhase() 之前执行",
+    "--render inconsistency: 修正 SKILL.md 与 CLI 规格的 flag 定义",
+    "Skipped phase: 将 skipped 视为合法前置状态，不触发 WARNING",
+    "Report overwrite: 文档声明'最新覆盖'为预期行为",
+    "Idempotency: 改为'无副作用'，每次调用都输出 WARNING",
+    "WARNING effectiveness: 3 个 Sprint 后回顾，数据驱动决定是否升级"
+  ],
+  "disagreed_items": [],
+  "conditions": [
+    "在 phase-transition handler 中 Phase 6 completed 时自动触发 Layer 2 提醒",
+    "代码注释明确 gate check 在 transitionPhase() 之前执行",
+    "修正 --render 文档不一致",
+    "Layer 1 检查逻辑中将 skipped 视为合法前置状态",
+    "文档声明 audit-report.json 覆盖策略",
+    "幂等性措辞改为'无副作用'",
+    "设定 3-Sprint 监控期，回顾 WARNING 有效性"
+  ]
 }
