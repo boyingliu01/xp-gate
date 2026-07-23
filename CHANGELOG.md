@@ -2,6 +2,21 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.16.0.0] - 2026-07-22
+
+### Added
+- **PowerShell 适配器原生支持 (#357)**: Gate 3/7/8/9 TypeScript 模块支持 PowerShell 项目语言检测与路由；PowerShell 项目自动路由到 PSScriptAnalyzer 规则。
+- **Python 环境健康检查 (#356)**: 双层架构 — Layer 1 bash preflight（pre-commit 热路径，零延迟）+ Layer 2 TypeScript 完整诊断（CLI/doctor 按需运行）；Windows Store 存根自动过滤。
+- **分层测试分析 (#359)**: `xp-gate test-layers` 报告 unit/integration/e2e 测试分布与源文件-测试文件配对统计；analytics-only 模式，不 BLOCK 提交。
+- **PBT 检测 (#337)**: `xp-gate pbt` 检测 fast-check/jsverify/jest-property/ava-fast-check 框架使用情况并输出覆盖率报告；analytics-only 模式，不 BLOCK 提交。
+- **TypeScript Gate 共享基础设施**: `src/gates/common.ts` 提供 `isToolAvailable()` 3层检测、`runTool()` spawnSync 封装、`recordAudit()` 审计日志、`getChangedFiles()`/`detectProjectLang()` 等通用功能。
+
+### Fixed
+- **OpenCode plugin shell:true (#365)**: 修复 gate-runner.js 中 `runTsGate()` 在 Windows 下未设置 `shell: true` 导致 `npx tsx` 启动失败的问题。
+
+### Changed
+- **ESLint 配置优化**: 测试文件 (`__tests__/**/*.ts`, `*.test.ts`) 关闭 `@typescript-eslint/no-explicit-any` 规则；`src/npm-package/coverage/` 加入 ignores。
+
 ## [0.15.4.0] - 2026-07-22
 
 ### Changed

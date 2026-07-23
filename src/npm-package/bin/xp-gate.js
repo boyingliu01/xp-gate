@@ -248,6 +248,18 @@ for (let i = 0; i <= 11; i++) {
   };
 }
 
+// Named utility gates (analytics/report tools)
+for (const gateId of ['python-health', 'test-layers', 'pbt']) {
+  const gateInfo = gateRunner.GATE_REGISTRY[gateId];
+  if (gateInfo) {
+    COMMANDS[gateId] = {
+      description: gateInfo.description,
+      run: subargs => gateRunner.runGate(gateId, subargs[0]).then(code => process.exit(code)),
+      usage: `xp-gate ${gateId} [<path>]`
+    };
+  }
+}
+
 function printHelp() {
   console.log('xp-gate - AI development workflow tool');
   console.log('');
