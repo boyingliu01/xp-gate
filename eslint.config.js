@@ -25,6 +25,12 @@ export default [
     },
   },
   {
-    ignores: ["node_modules/", "dist/", "coverage/", "eslint.config.js", "githooks/", ".github/"],
+    files: ["src/**/__tests__/**/*.ts", "src/**/*.test.ts"],
+    rules: {
+      "@typescript-eslint/no-explicit-any": "off",
+    },
+  },
+  {
+    ignores: ["node_modules/", "dist/", "coverage/", "src/npm-package/coverage/", "eslint.config.js", "githooks/", ".github/"],
   },
 ];

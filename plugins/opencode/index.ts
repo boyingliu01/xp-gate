@@ -132,6 +132,7 @@ async function checkXpGateUpdate(): Promise<UpgradeResult> {
     const exitCode = await new Promise<number | null>((resolve, reject) => {
       const child = spawn("npm", ["install", "-g", `${XP_GATE_NPM_PKG}@${remoteVersion}`], {
         stdio: "pipe",
+        shell: true,  // Required on Windows: npm is a .cmd file
         timeout: 120_000,
       })
       child.on("close", (code) => resolve(code))

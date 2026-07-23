@@ -1,6 +1,6 @@
 'use strict';
 
-const { execSync, execFileSync } = require('child_process');
+const { execSync, execFileSync, spawnSync } = require('child_process');
 const fs = require('fs');
 const path = require('path');
 
@@ -28,6 +28,54 @@ function runBashScript(scriptPath) {
 // Gate metadata registry — maps gate IDs to names, descriptions, and how to run them.
 // Standalone gates (<gate-id>: { run }) are invokable via xp-gate gate-<id>.
 // Pre-commit-only gates (<gate-id>: { preCommitOnly: true }) run only in git commit context.
+
+/**
+ * Run a TypeScript gate module via npx tsx.
+ * Finds the .ts entry point, spawns tsx with --run flag.
+ * Falls back to bash script if TypeScript module not found.
+ */
+function runTsGate(gateModule, targetPath) {
+  const entry = findTsGateEntry(gateModule);
+  if (!entry) {
+    // Fallback to bash script
+    const script = resolveGateScript(gateModule.replace('gate-', ''));
+    if (script) {
+      runBashScript(script);
+    } else {
+      console.log(`Gate ${gateModule}: TypeScript module not found and no bash fallback available.`);
+    }
+    return 0;
+  }
+
+  const args = ['-y', 'tsx', entry, '--run'];
+  if (targetPath) args.push('--cwd', targetPath);
+
+  const result = spawnSync('npx', args, {
+    stdio: 'inherit',
+    shell: process.platform === 'win32',
+    cwd: targetPath || process.cwd(),
+    timeout: 120000,
+  });
+
+  return result.status === null ? 1 : result.status;
+}
+
+function findTsGateEntry(gateModule) {
+  const candidates = [
+    // Development layout
+    path.resolve(__dirname, '..', '..', '..', 'src', 'gates', `${gateModule}.ts`),
+    // npm package bundled layout
+    path.resolve(__dirname, '..', 'gates', `${gateModule}.ts`),
+    // node_modules install
+    path.resolve(__dirname, '..', '..', 'src', 'gates', `${gateModule}.ts`),
+    // Repo root
+    path.resolve(process.cwd(), 'src', 'gates', `${gateModule}.ts`),
+  ];
+  for (const c of candidates) {
+    if (fs.existsSync(c)) return c;
+  }
+  return null;
+}
 const GATE_REGISTRY = {
   '0': {
     name: 'Version Consistency',
@@ -59,14 +107,7 @@ const GATE_REGISTRY = {
     description: 'lizard cyclomatic complexity analysis',
     aliases: ['complexity', 'ccn', '3'],
     run: (targetPath) => {
-      const script = resolveGateScript('3');
-      if (script) {
-        runBashScript(script);
-      } else {
-        const target = targetPath || '.';
-        console.log(`Running lizard on ${target}...`);
-        execFileSync('lizard', [target, '--CCN', '10', '--length', '50', '--arguments', '5', '--warnings_only'], { stdio: 'inherit', shell: true });
-      }
+      return runTsGate('gate-3', targetPath);
     },
   },
   '4': {
@@ -99,13 +140,7 @@ const GATE_REGISTRY = {
     description: 'Infrastructure-as-Code security scanning (checkov, hadolint, kube-score, tflint)',
     aliases: ['iac', 'infra', '7'],
     run: (targetPath) => {
-      const script = resolveGateScript('7');
-      if (script) {
-        runBashScript(script);
-      } else {
-        console.log('IaC security scan requires git-staged context for changed files detection.');
-        console.log('Run: git commit to trigger Gate 7 automatically.');
-      }
+      return runTsGate('gate-7', targetPath);
     },
   },
   '8': {
@@ -113,13 +148,7 @@ const GATE_REGISTRY = {
     description: 'gitleaks secret and credential detection',
     aliases: ['secrets', 'secret', '8'],
     run: (targetPath) => {
-      const script = resolveGateScript('8');
-      if (script) {
-        runBashScript(script);
-      } else {
-        console.log('Secret scanning requires git-staged context for changed files detection.');
-        console.log('Run: git commit to trigger Gate 8 automatically.');
-      }
+      return runTsGate('gate-8', targetPath);
     },
   },
   '9': {
@@ -127,13 +156,7 @@ const GATE_REGISTRY = {
     description: 'semgrep static application security testing',
     aliases: ['sast', 'semgrep', '9'],
     run: (targetPath) => {
-      const script = resolveGateScript('9');
-      if (script) {
-        runBashScript(script);
-      } else {
-        console.log('SAST scanning requires git-staged context for changed files detection.');
-        console.log('Run: git commit to trigger Gate 9 automatically.');
-      }
+      return runTsGate('gate-9', targetPath);
     },
   },
   '10': {
@@ -149,6 +172,30 @@ const GATE_REGISTRY = {
     aliases: ['sprint', '11'],
     preCommitOnly: true,
     reason: 'Requires sprint state (.sprint-state/) and git branch context',
+  },
+  'python-health': {
+    name: 'Python Environment Health',
+    description: 'Comprehensive Python environment diagnostics',
+    aliases: ['python-health', 'py-health'],
+    run: (targetPath) => {
+      return runTsGate('python-health', targetPath);
+    },
+  },
+  'test-layers': {
+    name: 'Test Layer Analytics',
+    description: 'Report test distribution across unit/integration/e2e layers',
+    aliases: ['test-layers', 'layers', 'test-analytics'],
+    run: (targetPath) => {
+      return runTsGate('test-layers', targetPath);
+    },
+  },
+  'pbt': {
+    name: 'Property-Based Testing Detection',
+    description: 'Detect PBT framework usage and report coverage',
+    aliases: ['pbt', 'pbt-detect', 'property-based-testing'],
+    run: (targetPath) => {
+      return runTsGate('pbt-detect', targetPath);
+    },
   },
 };
 
