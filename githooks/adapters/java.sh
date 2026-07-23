@@ -79,16 +79,45 @@ run_tests() {
   fi
 }
 
+_detect_jacoco_configured() {
+  local build_system="$1"
+  if [ "$build_system" = "maven" ]; then
+    # Check for jacoco-maven-plugin in pom.xml
+    grep -q 'jacoco-maven-plugin\|org.jacoco' pom.xml 2>/dev/null && return 0
+    # Check for jacoco.xml report already generated
+    [ -f "target/site/jacoco/jacoco.xml" ] && return 0
+    return 1
+  elif [ "$build_system" = "gradle" ]; then
+    # Check for jacoco plugin in build.gradle or build.gradle.kts
+    grep -q "id.*jacoco\|apply.*plugin.*jacoco\|jacoco" build.gradle build.gradle.kts 2>/dev/null && return 0
+    [ -f "build/reports/jacoco/test/jacocoTestReport.xml" ] && return 0
+    return 1
+  fi
+  return 1
+}
+
 run_coverage() {
   local build_system
   build_system=$(_detect_java_build)
 
   if [ "$build_system" = "maven" ]; then
-    mvn test jacoco:report -q 2>&1 | tail -10
-    return "${PIPESTATUS[0]}"
+    if _detect_jacoco_configured "$build_system"; then
+      mvn test jacoco:report -q 2>&1 | tail -10
+      return "${PIPESTATUS[0]}"
+    else
+      echo "ℹ️  JaCoCo not configured in pom.xml — SKIP coverage check"
+      echo "   To enable: add jacoco-maven-plugin to your pom.xml"
+      return 0
+    fi
   elif [ "$build_system" = "gradle" ]; then
-    gradle jacocoTestReport --quiet 2>&1 | tail -10
-    return "${PIPESTATUS[0]}"
+    if _detect_jacoco_configured "$build_system"; then
+      gradle jacocoTestReport --quiet 2>&1 | tail -10
+      return "${PIPESTATUS[0]}"
+    else
+      echo "ℹ️  JaCoCo not configured in Gradle build — SKIP coverage check"
+      echo "   To enable: add 'id \"jacoco\"' to your build.gradle plugins block"
+      return 0
+    fi
   else
     echo "No Maven/Gradle project detected"
     return 1

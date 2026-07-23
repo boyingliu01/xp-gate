@@ -2,6 +2,25 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.15.0.0] - 2026-07-22
+
+### Added
+- **Gate 1 Python 增强**: `ruff format --check` 格式检查 + `breakpoint()`/`pdb.set_trace()` 调试语句检测（阻塞提交）。
+- **Gate 1 JS/TS 增强**: `debugger` 语句检测（阻塞提交）。
+- **Java JaCoCo 检测**: `_detect_jacoco_configured()` 函数，未配置 JaCoCo 时覆盖率检查降级为 SKIP 而非 BLOCK。
+- **语言覆盖 3-tier 优先级**: `.xp-gate-lang` 文件 > `git config xp-gate.lang` > `XP_GATE_LANG` env（deprecated warning）。
+- **Python Principles 适配器增强**: `extractFunctions()` 返回 startLine/length/params；`extractClasses()` 返回 startLine/length/methodCount；新增 `extractExports()` 方法。
+
+### Changed
+- **Windows 兼容性**: 所有 `/dev/stdin` 替换为 `fs.readFileSync(0,'utf8')`（10 处），解决 Git Bash 下路径不存在问题。
+- **python3 依赖移除**: pre-commit/pre-push/gate-9 中所有 `python3` 调用替换为 Node.js 等效实现（时间戳、JSON 解析、报告写入）。
+- Python 适配器 `getCodeBlock` 上限从 50 行提升到 200 行。
+
+### Fixed
+- 修复 Windows Git Bash 下 Gate 1 因 `/dev/stdin` 不存在而静默失效的问题 (#361)。
+- 修复 Windows 下 `python3` 不可用导致时间戳/报告生成失败的问题 (#362)。
+- 修复 Java 项目无 JaCoCo 时覆盖率门禁误阻塞的问题 (#363)。
+
 ## [0.14.30.0] - 2026-07-22
 
 ### Added

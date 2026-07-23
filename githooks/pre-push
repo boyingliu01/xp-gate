@@ -27,39 +27,7 @@ write_pre_push_report() {
   commit_hash=$(git rev-parse HEAD 2>/dev/null || echo "unknown")
   verdict=$([ "$exit_code" -eq 0 ] && echo "PASS" || echo "BLOCKED")
   mkdir -p "$reports_dir"
-  python3 - <<PY 2>/dev/null || true
-import json
-from pathlib import Path
-pushed_files = '''${PUSHED_FILES:-}'''.splitlines()
-report = {
-  'timestamp': '$timestamp',
-  'trigger': 'pre-push',
-  'branch': '$CURRENT_BRANCH',
-  'commit': '$commit_hash',
-  'changed_files': [f for f in pushed_files if f],
-  'overall': {
-    'score': '10.0/10' if '$verdict' == 'PASS' else '0.0/10',
-    'gates_passed': 1 if '$verdict' == 'PASS' else 0,
-    'gates_total': 1,
-    'verdict': '$verdict',
-  },
-  'gates': [
-    {'id': '10', 'name': 'Build Integrity', 'status': '${GATE_10_STATUS:-SKIP}', 'details': {}},
-    {'id': 'M', 'name': 'Mutation Testing', 'status': '${GATE_M_STATUS:-SKIP}', 'details': {}},
-    {'id': 'M-Python', 'name': 'Mutation Testing (Python)', 'status': '${GATE_M_PYTHON_STATUS:-SKIP}', 'details': {}},
-    {'id': 'M-Go', 'name': 'Mutation Testing (Go)', 'status': '${GATE_M_GO_STATUS:-SKIP}', 'details': {}},
-    {'id': 'M-Java', 'name': 'Mutation Testing (Java)', 'status': '${GATE_M_JAVA_STATUS:-SKIP}', 'details': {}},
-    {'id': 'M-Kotlin', 'name': 'Mutation Testing (Kotlin)', 'status': '${GATE_M_KOTLIN_STATUS:-SKIP}', 'details': {}},
-    {'id': 'MD', 'name': 'Mock Density', 'status': '${GATE_M2_STATUS:-SKIP}', 'details': {}},
-    {'id': 'ML', 'name': 'Mock Layering', 'status': '${GATE_M3_STATUS:-SKIP}', 'details': {}},
-    {'id': 'UI', 'name': 'UI Sprint Gates', 'status': '${GATE_UI_STATUS:-SKIP}', 'details': {}},
-    {'id': 'MW', 'name': 'Code Walkthrough', 'status': '${GATE_DELPHI_STATUS:-SKIP}', 'details': {'remote': '$REMOTE', 'url': '$URL'}}
-  ],
-  'warnings': [],
-  'errors': [] if '$verdict' == 'PASS' else ['pre-push hook exited with code $exit_code'],
-}
-Path('$report_file').write_text(json.dumps(report, indent=2) + '\n')
-PY
+  _XP_RF="$report_file" _XP_TS="$timestamp" _XP_BR="$CURRENT_BRANCH" _XP_CH="$commit_hash" _XP_PF="${PUSHED_FILES:-}" _XP_VD="$verdict" _XP_EC="$exit_code" _XP_G10="${GATE_10_STATUS:-SKIP}" _XP_GM="${GATE_M_STATUS:-SKIP}" _XP_GMP="${GATE_M_PYTHON_STATUS:-SKIP}" _XP_GMGO="${GATE_M_GO_STATUS:-SKIP}" _XP_GMJA="${GATE_M_JAVA_STATUS:-SKIP}" _XP_GMKO="${GATE_M_KOTLIN_STATUS:-SKIP}" _XP_GMD="${GATE_M2_STATUS:-SKIP}" _XP_GML="${GATE_M3_STATUS:-SKIP}" _XP_GUI="${GATE_UI_STATUS:-SKIP}" _XP_GMW="${GATE_DELPHI_STATUS:-SKIP}" _XP_RM="$REMOTE" _XP_URL="$URL" node -e "const fs=require('fs');const e=process.env;const pf=(e._XP_PF||'').split('\n').filter(f=>f);const r={timestamp:e._XP_TS,trigger:'pre-push',branch:e._XP_BR,commit:e._XP_CH,changed_files:pf,overall:{score:e._XP_VD==='PASS'?'10.0/10':'0.0/10',gates_passed:e._XP_VD==='PASS'?1:0,gates_total:1,verdict:e._XP_VD},gates:[{id:'10',name:'Build Integrity',status:e._XP_G10,details:{}},{id:'M',name:'Mutation Testing',status:e._XP_GM,details:{}},{id:'M-Python',name:'Mutation Testing (Python)',status:e._XP_GMP,details:{}},{id:'M-Go',name:'Mutation Testing (Go)',status:e._XP_GMGO,details:{}},{id:'M-Java',name:'Mutation Testing (Java)',status:e._XP_GMJA,details:{}},{id:'M-Kotlin',name:'Mutation Testing (Kotlin)',status:e._XP_GMKO,details:{}},{id:'MD',name:'Mock Density',status:e._XP_GMD,details:{}},{id:'ML',name:'Mock Layering',status:e._XP_GML,details:{}},{id:'UI',name:'UI Sprint Gates',status:e._XP_GUI,details:{}},{id:'MW',name:'Code Walkthrough',status:e._XP_GMW,details:{remote:e._XP_RM,url:e._XP_URL}}],warnings:[],errors:e._XP_VD==='PASS'?[]:['pre-push hook exited with code '+e._XP_EC]};fs.writeFileSync(e._XP_RF,JSON.stringify(r,null,2)+'\n');" 2>/dev/null || true
 }
 
 _pre_push_report_on_exit() {
