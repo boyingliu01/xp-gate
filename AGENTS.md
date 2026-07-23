@@ -1,9 +1,9 @@
 # PROJECT KNOWLEDGE BASE
 
 **Generated:** 2026-07-23
-**Commit:** 0280d4f
+**Commit:** 884f68c
 **Branch:** main
-**Version:** 0.15.3.0
+**Version:** 0.15.4.0
 
 ## OVERVIEW
 XP-Gate — deterministic git quality gates + AI-driven multi-expert review (Delphi) + Sprint Flow pipeline (6 phases: PREP, DESIGN, BUILD, VERIFY, SHIP, CLOSE) + npm zero-install distribution + cross-platform plugin system (Claude Code / OpenCode / Qoder). Pre-commit runs **10 numbered gates (Gate 0–9)** at the script level, conceptually grouped as **6 categories** in user-facing docs (README, CAPABILITIES.md). Pre-push runs **3 mutation/mock gates (M, M2, M3) + Delphi code-walkthrough**. Implements 14 Clean Code/SOLID rules across 9 language adapters (TypeScript engine), 13 shell adapters (gate routing), Boy Scout Rule baseline enforcement, test-specification alignment, mock policy enforcement, and incremental mutation testing.
@@ -203,4 +203,25 @@ Subcommands registered in 0.8.8.0 (verified against bin source):
 ## KNOWN DRIFT HISTORY
 
 All 10 documented drift items (Gate count, pre-push gates, Delphi threshold, Sprint Flow phases, CLI count, qoder manifest, skill bundling, C adapter, CHANGELOG date, AGENTS.md staleness) were resolved in v0.8.9–v0.9.2. Run `/init-deep` whenever VERSION bumps a minor digit to prevent AGENTS.md mirror staleness.
+
+
+## AI CODING DISCIPLINE (Karpathy Principles)
+
+**原则 3: Surgical Changes（外科手术式改动）**
+- 只碰必须碰的代码。只清理自己制造的混乱。
+- 编辑现有代码时，不"优化"相邻代码、注释或 formatting
+- 不重构没坏的东西
+- 匹配现有代码风格，即使 AI 更喜欢另一种
+- 发现无关的死代码 → 提及但不要删除（除非用户明确要求）
+- 自己的改动产生的 orphaned import/variable/function → 必须清理
+- 判定标准: 每一行改动都应能直接追溯到用户的请求
+
+**原则 4: Goal-Driven Execution（目标驱动执行）**
+- 定义成功标准。循环直到验证。
+- 把指令转化为可验证目标：
+  - "加验证" → "写测试 → 让测试通过"
+  - "修 bug" → "写复现测试 → 让测试通过"
+  - "重构 X" → "确保重构前后测试都通过"
+- 多步骤任务列出验证点
+- 改完任何代码后必须运行测试确认无 regression
 

@@ -174,6 +174,8 @@ echo ""
 # ============================================================================
 # Gate 0: Version Consistency Check (Protected Branches)
 # ============================================================================
+GATE_0_START=$(gate_start_ms)
+GATE_0_STATUS="PASS"
 
 CURRENT_BRANCH=$(git rev-parse --abbrev-ref HEAD)
 PROTECTED_BRANCHES="master develop trunk mainline"
@@ -327,6 +329,8 @@ Or use --no-verify (discouraged) or include [skip-version-check] in commit messa
 
 Staged files: $(echo "$STAGED_FILES" | tr '\n' ', ' | sed 's/,$//')
 "
+        GATE_0_STATUS="BLOCK"
+        record_gate_audit "gate-0" "version-consistency" "$GATE_0_STATUS" "1" "$GATE_0_START"
         exit 1
       fi
     fi
@@ -335,6 +339,8 @@ Staged files: $(echo "$STAGED_FILES" | tr '\n' ', ' | sed 's/,$//')
 else
   echo "✅ PASSED - Gate 0: Version Consistency Check (non-protected branch: $CURRENT_BRANCH)"
 fi
+
+record_gate_audit "gate-0" "version-consistency" "$GATE_0_STATUS" "0" "$GATE_0_START"
 
 echo ""
 
@@ -2345,6 +2351,7 @@ fi
 GATE_9_END=$(date +%s)
 GATE_9_DURATION=$((GATE_9_END - GATE_9_START))
 echo "✅ Gate 9 completed in ${GATE_9_DURATION}s"
+record_gate_audit "gate-9" "build-integrity" "$GATE_9_STATUS" "0" "$GATE_9_START"
 echo ""
 # ============================================================================
 
@@ -2379,6 +2386,7 @@ if [ -n "$SPRINT_GATE_SCRIPT" ]; then
   if ! bash "$SPRINT_GATE_SCRIPT" --pre-commit; then
     GATE_11_STATUS="BLOCK"
     echo "❌ BLOCKED - Gate 11: Sprint Flow Enforcement"
+    record_gate_audit "gate-11" "sprint-flow" "$GATE_11_STATUS" "1" "$GATE_11_START"
     # Sprint gate failure is a hard block — exit immediately
     exit 1
   fi
@@ -2390,6 +2398,7 @@ fi
 GATE_11_END=$(date +%s)
 GATE_11_DURATION=$((GATE_11_END - GATE_11_START))
 echo "✅ Gate 11 completed in ${GATE_11_DURATION}s"
+record_gate_audit "gate-11" "sprint-flow" "$GATE_11_STATUS" "0" "$GATE_11_START"
 echo ""
 # ============================================================================
 

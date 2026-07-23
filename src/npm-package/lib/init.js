@@ -341,14 +341,16 @@ async function init(args) {
   if (!installMode) { printUsage(); return 0; }
   if (installMode === 'global') return setupGlobal(args);
   const code = await installLocal(args);
-  if (code === 0 && args.includes('--baseline')) {
+  // Always create lint baseline for local installs (Boy Scout Rule needs it)
+  // --baseline flag is now a no-op (baseline is always created)
+  if (code === 0) {
     try {
       const { createBaseline } = require('./baseline.js');
-      console.log('\nCreating lint baseline...');
+      console.log('\nCreating lint baseline (Boy Scout Rule)...');
       const baseline = await createBaseline();
-      console.log(`✅ Lint baseline created — ${Object.keys(baseline).length} files tracked.`);
+      console.log(`\u2705 Lint baseline created \u2014 ${Object.keys(baseline).length} files tracked.`);
     } catch (e) {
-      console.log(`ℹ️  Lint baseline creation skipped: ${e.message}`);
+      console.log(`\u2139\ufe0f  Lint baseline creation skipped: ${e.message}`);
     }
   }
   return code;

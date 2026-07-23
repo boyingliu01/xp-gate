@@ -2,6 +2,18 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.15.4.0] - 2026-07-22
+
+### Changed
+- **`xp-gate install` 一键安装**: 重写为 `init` + `baseline` + `bootstrap` + `doctor --fix` 的完整编排，用户只需记一个命令。
+- **`xp-gate doctor --fix` 自动修复增强**: 自动同步过时 hooks（update-hooks）、自动安装缺失 CLI 工具（bootstrap）、自动安装缺失语言工具（install-tools）。
+- **`xp-gate init` 默认创建 baseline**: Boy Scout Rule 开箱即用，不再需要 `--baseline` flag。
+- **`xp-gate uninstall` 清理增强**: 自动清理 `.xp-gate-config.json` 和 `.warnings-baseline.json`。
+
+### Added
+- **pre-commit audit 覆盖**: Gate 0（版本一致性）、Gate 9（构建完整性）、Gate 11（Sprint Flow）补充 audit 记录，实现全门禁审计追踪。
+- **Sprint Flow Phase 4 集成**: 新增 `xp-gate check --all` 步骤，自动运行所有可用质量门禁。
+
 ## [0.15.3.0] - 2026-07-22
 
 ### Added
