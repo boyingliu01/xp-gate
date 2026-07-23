@@ -44,57 +44,31 @@ else
       GATE_9_STATUS="PASS"
     elif [ "$SEMGREP_EXIT" -eq 1 ]; then
       # Findings detected - parse JSON to categorize
-      CRITICAL_HIGH=$(echo "$SEMGREP_OUTPUT" | python3 -c "
-import sys, json
-try:
-    data = json.load(sys.stdin)
-    results = data.get('results', [])
-    count = 0
-    for r in results:
-        extra = r.get('extra', {})
-        severity = extra.get('severity', '').upper()
-        if severity in ('CRITICAL', 'HIGH'):
-            count += 1
-    print(count)
-except:
-    print('0')
-" 2>/dev/null || echo "0")
+      CRITICAL_HIGH=$(echo "$SEMGREP_OUTPUT" | node -e "
+let d='';process.stdin.on('data',c=>d+=c);process.stdin.on('end',()=>{
+try{const data=JSON.parse(d);const results=data.results||[];
+const count=results.filter(r=>{const s=(r.extra&&r.extra.severity||'').toUpperCase();return s==='CRITICAL'||s==='HIGH';}).length;
+console.log(count);}catch(e){console.log('0');}
+});" 2>/dev/null || echo "0")
 
-      MEDIUM_LOW=$(echo "$SEMGREP_OUTPUT" | python3 -c "
-import sys, json
-try:
-    data = json.load(sys.stdin)
-    results = data.get('results', [])
-    count = 0
-    for r in results:
-        extra = r.get('extra', {})
-        severity = extra.get('severity', '').upper()
-        if severity in ('MEDIUM', 'LOW'):
-            count += 1
-    print(count)
-except:
-    print('0')
-" 2>/dev/null || echo "0")
+      MEDIUM_LOW=$(echo "$SEMGREP_OUTPUT" | node -e "
+let d='';process.stdin.on('data',c=>d+=c);process.stdin.on('end',()=>{
+try{const data=JSON.parse(d);const results=data.results||[];
+const count=results.filter(r=>{const s=(r.extra&&r.extra.severity||'').toUpperCase();return s==='MEDIUM'||s==='LOW';}).length;
+console.log(count);}catch(e){console.log('0');}
+});" 2>/dev/null || echo "0")
 
       # Extract top finding details
-      FINDING_DETAILS=$(echo "$SEMGREP_OUTPUT" | python3 -c "
-import sys, json
-try:
-    data = json.load(sys.stdin)
-    results = data.get('results', [])
-    for r in results[:5]:  # Show top 5
-        extra = r.get('extra', {})
-        severity = extra.get('severity', 'UNKNOWN').upper()
-        rule_id = r.get('check_id', 'unknown')
-        path = r.get('path', 'unknown')
-        start_line = r.get('start', {}).get('line', '?')
-        message = extra.get('message', '')[:80]
-        print(f'  [{severity}] {rule_id}')
-        print(f'  {path}:{start_line} → {message}')
-        print()
-except:
-    print('  (Failed to parse semgrep output)')
-" 2>/dev/null || echo "  (Failed to parse semgrep output)")
+      FINDING_DETAILS=$(echo "$SEMGREP_OUTPUT" | node -e "
+let d='';process.stdin.on('data',c=>d+=c);process.stdin.on('end',()=>{
+try{const data=JSON.parse(d);const results=data.results||[];
+results.slice(0,5).forEach(r=>{const extra=r.extra||{};
+const severity=(extra.severity||'UNKNOWN').toUpperCase();
+const ruleId=r.check_id||'unknown';const path=r.path||'unknown';
+const line=(r.start&&r.start.line)||'?';const msg=(extra.message||'').slice(0,80);
+console.log('  ['+severity+'] '+ruleId);console.log('  '+path+':'+line+' → '+msg);console.log();});
+}catch(e){console.log('  (Failed to parse semgrep output)');}
+});" 2>/dev/null || echo "  (Failed to parse semgrep output)")
 
       if [ "$CRITICAL_HIGH" -gt 0 ]; then
         echo ""

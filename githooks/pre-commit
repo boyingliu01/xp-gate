@@ -354,13 +354,25 @@ fi
 # v0.15.1+; ARCH-03 fix), PROJECT_SUBDIRS (per-language subdir override, empty = root).
 # ============================================================================
 
-# XP_GATE_LANG env var override — skip all detection, use single language
-if [ -n "${XP_GATE_LANG:-}" ]; then
-  PROJECT_LANGS="$XP_GATE_LANG"
-  PROJECT_LANG="$XP_GATE_LANG"
+# Language override resolution (project-level > git config > env var)
+# Priority: .xp-gate-lang file > git config xp-gate.lang > XP_GATE_LANG env
+_RESOLVED_LANG_OVERRIDE=""
+if [ -f ".xp-gate-lang" ]; then
+  _RESOLVED_LANG_OVERRIDE=$(sed -n '1p' .xp-gate-lang 2>/dev/null | tr -d '[:space:]')
+elif git config xp-gate.lang >/dev/null 2>&1; then
+  _RESOLVED_LANG_OVERRIDE=$(git config xp-gate.lang 2>/dev/null)
+elif [ -n "${XP_GATE_LANG:-}" ]; then
+  _RESOLVED_LANG_OVERRIDE="$XP_GATE_LANG"
+  echo "⚠️  XP_GATE_LANG env var is deprecated for multi-project use."
+  echo "   Prefer: echo '$XP_GATE_LANG' > .xp-gate-lang  OR  git config xp-gate.lang $XP_GATE_LANG"
+fi
+
+if [ -n "$_RESOLVED_LANG_OVERRIDE" ]; then
+  PROJECT_LANGS="$_RESOLVED_LANG_OVERRIDE"
+  PROJECT_LANG="$_RESOLVED_LANG_OVERRIDE"
   echo ""
   echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-  echo "   🔧 XP_GATE_LANG OVERRIDE: $PROJECT_LANG"
+  echo "   🔧 LANGUAGE OVERRIDE: $PROJECT_LANG"
   echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
   echo ""
 else
@@ -664,7 +676,7 @@ CHANGEDFILELIST
     done
     echo ""
   fi
-fi  # close XP_GATE_LANG if/else (line 358)
+fi  # close language override if/else
 
 # Helper: check if a language is in PROJECT_LANGS
 has_project_lang() {
@@ -689,7 +701,7 @@ record_gate_audit() {
   local issues_found="$4"
   local start_ms="$5"
   local end_ms
-  end_ms=$(date +%s%3N 2>/dev/null || python3 -c "import time;print(int(time.time()*1000))" 2>/dev/null || echo "0")
+  end_ms=$(date +%s%3N 2>/dev/null || node -e "console.log(Date.now())" 2>/dev/null || echo "0")
   local duration_ms=$((end_ms - start_ms))
   if [ "$duration_ms" -lt 0 ] 2>/dev/null; then
     duration_ms=0
@@ -717,7 +729,7 @@ record_gate_audit() {
 
 # Get milliseconds timestamp (used by gates for duration measurement)
 gate_start_ms() {
-  date +%s%3N 2>/dev/null || python3 -c "import time;print(int(time.time()*1000))" 2>/dev/null || echo "0"
+  date +%s%3N 2>/dev/null || node -e "console.log(Date.now())" 2>/dev/null || echo "0"
 }
 
 # Switch to subdirectory if detected (for single-language subdirectory projects).
@@ -832,13 +844,13 @@ else
             # Compare against lint baseline
             BASELINE_WARNINGS=$(echo "$ESLINT_FILES" | tr ' ' '\n' | node -e "
               const fs=require('fs');const b=JSON.parse(fs.readFileSync('.xp-gate/lint-baseline.json','utf8'));
-              const stdin=require('fs').readFileSync('/dev/stdin','utf8').trim();
+              const stdin=require('fs').readFileSync(0,'utf8').trim();
               const files=stdin?stdin.split('\n'):[];
               let total=0;for(const f of files){if(b[f])total+=b[f].totalWarnings||0}
               console.log(total);
             ")
             CURRENT_WARNINGS=$(echo "$ESLINT_OUTPUT" | node -e "
-              const d=JSON.parse(require('fs').readFileSync('/dev/stdin','utf8'));
+              const d=JSON.parse(require('fs').readFileSync(0,'utf8'));
               console.log(d.reduce((s,f)=>s+(f.warningCount||0)+(f.errorCount||0),0));
             ")
             if [ "$CURRENT_WARNINGS" -gt "$BASELINE_WARNINGS" ]; then
@@ -907,6 +919,20 @@ else
         fi
       fi
     fi
+
+    # Debug statement detection (debugger statement in JS/TS)
+    TS_DEBUG_FILES=$(echo "$CHANGED_FILES" | grep -E '\.(ts|tsx|js|jsx)$' || true)
+    if [ -n "$TS_DEBUG_FILES" ]; then
+      DEBUGGER_HITS=$(grep -n '^\s*debugger\s*;\?\s*$' $TS_DEBUG_FILES 2>/dev/null || true)
+      if [ -n "$DEBUGGER_HITS" ]; then
+        echo ""
+        echo "❌ BLOCKED - 'debugger' statements detected:"
+        echo "$DEBUGGER_HITS" | head -10
+        echo ""
+        echo "Remove debugger statements before committing."
+        exit 1
+      fi
+    fi
   fi
     ;;
     
@@ -927,19 +953,19 @@ else
         if [ -n "$PY_FILES" ]; then
           BASELINE_WARNINGS=$(echo "$PY_FILES" | node -e "
             const fs=require('fs');const b=JSON.parse(fs.readFileSync('.xp-gate/lint-baseline.json','utf8'));
-            const stdin=require('fs').readFileSync('/dev/stdin','utf8').trim();
+            const stdin=require('fs').readFileSync(0,'utf8').trim();
             const files=stdin?stdin.split('\n'):[];
             let total=0;for(const f of files){if(b[f])total+=b[f].totalWarnings||0}
             console.log(total);
           ")
           CURRENT_WARNINGS=$(echo "$RUFF_OUTPUT" | node -e "
-            const d=JSON.parse(require('fs').readFileSync('/dev/stdin','utf8'));
+            const d=JSON.parse(require('fs').readFileSync(0,'utf8'));
             console.log(d.reduce((s,f)=>s+(f.messages?f.messages.length:0),0));
           ")
           if [ "$CURRENT_WARNINGS" -gt "$BASELINE_WARNINGS" ]; then
             NEW_WARNINGS=$((CURRENT_WARNINGS - BASELINE_WARNINGS))
             echo "$RUFF_OUTPUT" | node -e "
-              const d=JSON.parse(require('fs').readFileSync('/dev/stdin','utf8'));
+              const d=JSON.parse(require('fs').readFileSync(0,'utf8'));
               for(const f of d){for(const m of f.messages||[]){console.log(m.kind+': '+m.message)}}
             " | head -30
             echo ""
@@ -959,7 +985,7 @@ else
         fi
       else
         echo "$RUFF_OUTPUT" | node -e "
-          const d=JSON.parse(require('fs').readFileSync('/dev/stdin','utf8'));
+          const d=JSON.parse(require('fs').readFileSync(0,'utf8'));
           for(const f of d){for(const m of f.messages||[]){console.log(m.kind+': '+m.message)}}
         " | head -30
         echo ""
@@ -971,6 +997,37 @@ else
       fi
     else
       echo "✅ PASSED - Ruff linting."
+    fi
+
+    # Ruff format check (formatting gate)
+    if command -v ruff &> /dev/null; then
+      PY_FMT_FILES=$(echo "$CHANGED_FILES" | grep '\.py$' || true)
+      if [ -n "$PY_FMT_FILES" ]; then
+        RUFF_FMT_OUTPUT=$(ruff format --check $PY_FMT_FILES 2>&1)
+        RUFF_FMT_EXIT=$?
+        if [ "$RUFF_FMT_EXIT" -ne 0 ]; then
+          echo "$RUFF_FMT_OUTPUT" | head -20
+          echo ""
+          echo "❌ BLOCKED - Ruff format check failed"
+          echo "Fix formatting: run 'ruff format .' to auto-format."
+          exit 1
+        fi
+        echo "✅ PASSED - Ruff format check."
+      fi
+    fi
+
+    # Debug statement detection (breakpoint/pdb/ipdb)
+    PY_DEBUG_FILES=$(echo "$CHANGED_FILES" | grep '\.py$' || true)
+    if [ -n "$PY_DEBUG_FILES" ]; then
+      DEBUG_HITS=$(grep -n 'breakpoint()\|pdb\.set_trace()\|ipdb\.set_trace()\|import pdb\|import ipdb' $PY_DEBUG_FILES 2>/dev/null || true)
+      if [ -n "$DEBUG_HITS" ]; then
+        echo ""
+        echo "❌ BLOCKED - Debug statements detected in Python files:"
+        echo "$DEBUG_HITS" | head -10
+        echo ""
+        echo "Remove breakpoint()/pdb.set_trace() before committing."
+        exit 1
+      fi
     fi
     
     # Optional: Type checking with mypy
@@ -1025,19 +1082,19 @@ else
       if [ -f ".xp-gate/lint-baseline.json" ] && command -v node &> /dev/null; then
         BASELINE_WARNINGS=$(echo "$SHELL_FILES" | node -e "
           const fs=require('fs');const b=JSON.parse(fs.readFileSync('.xp-gate/lint-baseline.json','utf8'));
-          const stdin=require('fs').readFileSync('/dev/stdin','utf8').trim();
+          const stdin=require('fs').readFileSync(0,'utf8').trim();
           const files=stdin?stdin.split('\n'):[];
           let total=0;for(const f of files){if(b[f])total+=b[f].totalWarnings||0}
           console.log(total);
         ")
         CURRENT_WARNINGS=$(echo "$SHELLCHECK_OUTPUT" | node -e "
-          const d=JSON.parse(require('fs').readFileSync('/dev/stdin','utf8'));
+          const d=JSON.parse(require('fs').readFileSync(0,'utf8'));
           console.log(d.length);
         ")
         if [ "$CURRENT_WARNINGS" -gt "$BASELINE_WARNINGS" ]; then
           NEW_WARNINGS=$((CURRENT_WARNINGS - BASELINE_WARNINGS))
           echo "$SHELLCHECK_OUTPUT" | node -e "
-            const d=JSON.parse(require('fs').readFileSync('/dev/stdin','utf8'));
+            const d=JSON.parse(require('fs').readFileSync(0,'utf8'));
             for(const i of d){console.log(i.file+':'+i.line+': '+i.level+': '+i.message)}
           " | head -30
           echo ""
@@ -1054,7 +1111,7 @@ else
         fi
       else
         echo "$SHELLCHECK_OUTPUT" | node -e "
-          const d=JSON.parse(require('fs').readFileSync('/dev/stdin','utf8'));
+          const d=JSON.parse(require('fs').readFileSync(0,'utf8'));
           for(const i of d){console.log(i.file+':'+i.line+': '+i.level+': '+i.message)}
         " | head -30
         echo ""
@@ -2465,24 +2522,7 @@ ENDJSON
   REPORT_TS=$(date -u +"%Y-%m-%d-%H%M%S")
   local PERSISTED_REPORT_FILE="${REPORTS_DIR}/${REPORT_TS}.json"
   mkdir -p "$REPORTS_DIR"
-  python3 - <<PY 2>/dev/null || cp "$REPORT_FILE" "$PERSISTED_REPORT_FILE"
-import json
-from pathlib import Path
-branch_report = json.loads(Path('$REPORT_FILE').read_text())
-changed_files = '''${CHANGED_FILES:-}'''.splitlines()
-report = {
-  'timestamp': '$TIMESTAMP',
-  'trigger': 'pre-commit',
-  'branch': '$BRANCH',
-  'commit': '$COMMIT_HASH',
-  'changed_files': [f for f in changed_files if f],
-  'overall': branch_report.get('overall', {}),
-  'gates': branch_report.get('gates', {}),
-  'warnings': [],
-  'errors': [],
-}
-Path('$PERSISTED_REPORT_FILE').write_text(json.dumps(report, indent=2) + '\n')
-PY
+  _XP_RF="$REPORT_FILE" _XP_PRF="$PERSISTED_REPORT_FILE" _XP_TS="$TIMESTAMP" _XP_BR="$BRANCH" _XP_CH="$COMMIT_HASH" _XP_CF="${CHANGED_FILES:-}" node -e "const fs=require('fs');const e=process.env;const br=JSON.parse(fs.readFileSync(e._XP_RF,'utf8'));const cf=(e._XP_CF||'').split('\n').filter(f=>f);const r={timestamp:e._XP_TS,trigger:'pre-commit',branch:e._XP_BR,commit:e._XP_CH,changed_files:cf,overall:br.overall||{},gates:br.gates||{},warnings:[],errors:[]};fs.writeFileSync(e._XP_PRF,JSON.stringify(r,null,2)+'\n');" 2>/dev/null || cp "$REPORT_FILE" "$PERSISTED_REPORT_FILE"
 
   # ── History append (unchanged — append-only for trend) ────────────────────────────
   local GATES_JSON="{"
