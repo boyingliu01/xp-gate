@@ -179,7 +179,7 @@ const COMMANDS = {
     usage: 'xp-gate update-hooks [--global] [--force] [--dry-run] [--no-backup] [--scope hooks|adapters|all]'
   },
   'install': {
-    description: 'One-step install (init + bootstrap + doctor)',
+    description: 'One-step install (init + baseline + bootstrap + doctor --fix)',
     run: subargs => {
       const { install } = require('../lib/install-cmd');
       install(subargs).then(code => process.exit(code));

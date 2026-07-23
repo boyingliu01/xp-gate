@@ -59,6 +59,16 @@ skill(name="test-specification-alignment", user_message="--spec specification.ya
 
 Phase 1: 验证对齐（可修改测试） → Phase 2: 执行测试（禁止修改测试）
 
+#### Step 2.5: 质量门禁全量验证
+
+```
+npx xp-gate check --all
+```
+
+运行所有可用的质量门禁（Gate 0–9）并输出汇总报告。任何 BLOCK 状态 → 回退 Phase 3/6 修复。
+
+> 此步骤自动调用各独立门禁（lint、复杂度、principles、架构、安全扫描等），无需手动逐个执行。
+
 #### Step 2.5-2.10: 项目类型特定验证（Web/Mobile/Backend）
 
 - **Web**: qa → design-review → benchmark

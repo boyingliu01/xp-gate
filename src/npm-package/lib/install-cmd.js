@@ -1,57 +1,46 @@
-const fs = require('fs');
+/**
+ * One-step install command — delegates to init + doctor.
+ *
+ * `xp-gate install` is the single entry point for new users.
+ * It wraps init (which already handles hooks, bootstrap, language detection,
+ * and baseline creation) and follows up with doctor --fix for health verification.
+ *
+ * Local mode:  init --core-only --yes → auto baseline → doctor --fix
+ * Global mode: init --global --yes   → doctor --fix
+ */
 const path = require('path');
-const { execSync } = require('child_process');
-const { copyHooks, copyAdapters } = require('./shared-utils');
 
-async function install(args = [], cwd = process.cwd()) {
+async function install(args = []) {
   const isGlobal = args.includes('--global');
 
-  if (isGlobal) {
-    return setupGlobal(cwd);
-  }
-  return setupLocal(cwd);
-}
+  console.log('XP-Gate One-Step Install');
+  console.log('========================\n');
 
-function setupGlobal(cwd) {
-  const srcDir = path.dirname(__dirname);
+  // Build init args: always auto-yes for non-interactive friendliness
+  const initArgs = isGlobal ? ['--global', '--yes'] : ['--core-only', '--yes'];
 
-  const globalHooksDir = path.join(require('os').homedir(), '.config', 'xp-gate', 'hooks');
-  const globalAdaptersDir = path.join(require('os').homedir(), '.config', 'xp-gate', 'adapters');
+  const { init } = require('./init.js');
+  const code = await init(initArgs);
 
-  fs.mkdirSync(globalHooksDir, { recursive: true });
-  fs.mkdirSync(globalAdaptersDir, { recursive: true });
-
-  copyHooks(srcDir, globalHooksDir);
-  copyAdapters(srcDir, globalAdaptersDir);
-
-  try {
-    execSync(`git config --global core.hooksPath "${globalHooksDir}"`, { stdio: 'pipe' });
-  } catch (err) {
-    console.warn(`  Warning: Could not set global core.hooksPath: ${err.message}`);
+  if (code !== 0) {
+    console.error('\nInstallation encountered errors.');
+    console.error('Run "xp-gate doctor" for diagnostics.');
+    return code;
   }
 
-  console.log('Global installation complete.');
-  return 0;
-}
+  // Post-install: run doctor --fix to verify and auto-repair
+  console.log('\n━━━ Post-Install Health Check ━━━\n');
+  const { doctor } = require('./doctor.js');
+  const doctorCode = await doctor(['--fix']);
 
-function setupLocal(projectRoot) {
-  const gitDir = path.join(projectRoot, '.git');
-  if (!fs.existsSync(gitDir)) {
-    console.error('Error: Not a git repository');
-    return 1;
+  if (doctorCode === 0) {
+    console.log('\n✓ Installation complete and verified!');
+  } else {
+    console.log('\n⚠ Installation complete, but some issues remain.');
+    console.log('  Run "xp-gate doctor" for details.');
   }
 
-  const srcDir = path.dirname(__dirname);
-  const hooksDir = path.join(gitDir, 'hooks');
-  const githooksDir = path.join(projectRoot, 'githooks');
-
-  copyHooks(srcDir, hooksDir);
-
-  fs.mkdirSync(path.join(githooksDir, 'adapters'), { recursive: true });
-  copyAdapters(srcDir, githooksDir);
-
-  console.log('Local installation complete.');
-  return 0;
+  return doctorCode;
 }
 
 module.exports = { install };

@@ -15,6 +15,10 @@ const {
 } = require('./shared-paths.js');
 const { checkUpgrade, formatUpgradeMsg } = require('./check-version.js');
 const { GATE_CLI_TOOLS, checkCliTool, getToolInstallCmd } = require('./detect-deps.js');
+const {
+  diagnoseTuiRegistration, diagnoseInstalledSkills,
+  fixTuiRegistration, ensureTuiRegistration, readTuiJson,
+} = require('./doctor-tui.js');
 
 // npm package source dir (template hooks/adapters)
 const PKG_DIR = path.dirname(__dirname);
@@ -779,11 +783,72 @@ function fixIssues(checks, config) {
   fixed = fixGlobalHooksPath(config) || fixed;
   fixed = fixMissingAdapters(config.mode, srcDir, getAdaptersDirByMode(config)) || fixed;
   fixed = fixMissingGateScripts(srcDir, getAdaptersDirByMode(config)) || fixed;
+  fixed = fixStaleHooks(config) || fixed;
+  fixed = fixMissingCliTools() || fixed;
   fixed = fixTuiRegistration() || fixed;
   fixed = printCliToolGuidance() || fixed;
 
   if (!fixed) {
     console.log('  No fixable issues found.');
+  }
+}
+
+/**
+ * Sync hooks/adapters from the installed package to the project/global dir.
+ * Catches cases where xp-gate was upgraded (npm update) but hooks are stale.
+ * Uses update-hooks logic with --force to overwrite outdated files.
+ *
+ * @returns {boolean} Whether any hooks were updated
+ */
+function fixStaleHooks(config) {
+  try {
+    const { updateHooks, detectLocalModifications, getPackageRoot } = require('./update-hooks.js');
+    const isGlobal = config.mode === 'global';
+    const srcDir = getPackageRoot();
+
+    let hooksDestDir, adaptersDestDir;
+    if (isGlobal) {
+      hooksDestDir = GLOBAL_HOOKS_DIR;
+      adaptersDestDir = GLOBAL_ADAPTERS_DIR;
+    } else {
+      const gitDir = getGitDirSync();
+      if (!gitDir) return false;
+      const projectRoot = path.dirname(gitDir);
+      hooksDestDir = path.join(gitDir, 'hooks');
+      adaptersDestDir = path.join(projectRoot, 'githooks');
+    }
+
+    // Check if any hook files are stale (differ from package version)
+    const modified = detectLocalModifications(srcDir, hooksDestDir, adaptersDestDir);
+    if (modified.length === 0) return false;
+
+    console.log(`  Syncing ${modified.length} outdated hook/adapter file(s)...`);
+    updateHooks({ global: isGlobal, force: true, dryRun: false, noBackup: true, scope: 'all' });
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Auto-install missing CLI tools via bootstrap.
+ * @returns {boolean} Whether any tools were installed
+ */
+function fixMissingCliTools() {
+  try {
+    const { bootstrap } = require('./bootstrap.js');
+    const missing = [];
+    for (const entry of GATE_CLI_TOOLS) {
+      const { available } = checkCliTool(entry.tool);
+      if (!available) missing.push(entry.tool);
+    }
+    if (missing.length === 0) return false;
+
+    console.log(`  Auto-installing ${missing.length} missing CLI tool(s)...`);
+    const code = bootstrap([]);
+    return code === 0;
+  } catch {
+    return false;
   }
 }
 
@@ -881,184 +946,6 @@ function diagnoseOpenCodePlugin(checks) {
 }
 
 /**
- * TUI registration path and expected plugin entry.
- */
-const TUI_JSON_PATH = path.join(HOME_DIR, '.config', 'opencode', 'tui.json');
-const TUI_PLUGIN_ENTRY = '@boyingliu01/opencode-plugin/tui';
-
-/**
- * Read and parse tui.json, returning { data, error }.
- * data = parsed object on success, null on file missing, undefined on corrupt.
- */
-function readTuiJson() {
-  if (!fs.existsSync(TUI_JSON_PATH)) return { data: null, error: null };
-  try {
-    const raw = fs.readFileSync(TUI_JSON_PATH, 'utf8');
-    const data = JSON.parse(raw);
-    return { data, error: null };
-  } catch (e) {
-    return { data: undefined, error: `Corrupt JSON: ${e.message}` };
-  }
-}
-
-/**
- * Check 9: TUI auto-registration in ~/.config/opencode/tui.json.
- * @returns {number} issue count
- */
-function diagnoseTuiRegistration(checks) {
-  const { data, error } = readTuiJson();
-
-  if (error) {
-    checks.push({ name: 'TUI registration', status: 'FAIL', detail: error });
-    return 1;
-  }
-
-  if (data === null) {
-    checks.push({ name: 'TUI registration', status: 'FAIL', detail: 'Not registered' });
-    return 1;
-  }
-
-  const plugins = Array.isArray(data.plugin) ? data.plugin : [];
-  if (plugins.includes(TUI_PLUGIN_ENTRY)) {
-    checks.push({ name: 'TUI registration', status: 'PASS', detail: `${TUI_PLUGIN_ENTRY} registered` });
-    return 0;
-  }
-
-  checks.push({ name: 'TUI registration', status: 'FAIL', detail: 'Not registered' });
-  return 1;
-}
-
-/**
- * Check 9: Installed skills vs package-bundled skills (#332).
- * Reports WARN for each installed skill whose SKILL.md differs from the bundled version.
- * @param {object} config
- * @param {Array} checks
- * @returns {number} issue count
- */
-function diagnoseInstalledSkills(config, checks) {
-  const installedSkills = config.installedSkills || {};
-  const skillNames = Object.keys(installedSkills);
-  if (skillNames.length === 0) {
-    checks.push({ name: 'Installed skills', status: 'SKIP', detail: 'No skills installed' });
-    return 0;
-  }
-
-  const bundledSkillsDir = path.join(PKG_DIR, 'skills');
-  if (!fs.existsSync(bundledSkillsDir)) {
-    checks.push({ name: 'Installed skills', status: 'SKIP', detail: 'Package skills dir not found' });
-    return 0;
-  }
-
-  const platform = detectPlatform();
-  let userSkillsDir;
-  if (platform === 'qoder') {
-    userSkillsDir = path.join(HOME_DIR, '.qoder', 'skills');
-  } else if (platform === 'claude-code') {
-    userSkillsDir = path.join(HOME_DIR, '.claude', 'skills');
-  } else {
-    userSkillsDir = path.join(HOME_DIR, '.config', 'opencode', 'skills');
-  }
-
-  let issues = 0;
-  for (const name of skillNames) {
-    const bundledSkillMd = path.join(bundledSkillsDir, name, 'SKILL.md');
-    const userSkillMd = path.join(userSkillsDir, name, 'SKILL.md');
-
-    if (!fs.existsSync(bundledSkillMd)) continue;
-    if (!fs.existsSync(userSkillMd)) {
-      checks.push({ name: `Skill: ${name}`, status: 'FAIL', detail: 'Installed SKILL.md missing' });
-      issues++;
-      continue;
-    }
-
-    const bundledContent = fs.readFileSync(bundledSkillMd, 'utf8');
-    const userContent = fs.readFileSync(userSkillMd, 'utf8');
-    if (bundledContent !== userContent) {
-      checks.push({
-        name: `Skill: ${name}`,
-        status: 'WARN',
-        detail: 'Outdated — run xp-gate update-skill --all',
-      });
-      issues++;
-    } else {
-      checks.push({ name: `Skill: ${name}`, status: 'PASS', detail: 'Up to date' });
-    }
-  }
-
-  return issues;
-}
-
-/**
- * Fix TUI registration: ensure @boyingliu01/opencode-plugin/tui is in tui.json.
- * Uses atomic write (tmp + renameSync) for JSON safety.
- * On corrupt JSON: backup to .corrupt-{timestamp}.bak then rebuild.
- * Idempotent: skips if already registered.
- * @returns {boolean} Whether a fix was applied
- */
-function fixTuiRegistration() {
-  const { data, error } = readTuiJson();
-
-  // Corrupt JSON: backup old file, rebuild from scratch
-  if (error && data === undefined) {
-    const ts = Date.now();
-    const backupPath = `${TUI_JSON_PATH}.corrupt-${ts}.bak`;
-    try {
-      fs.copyFileSync(TUI_JSON_PATH, backupPath);
-      console.log(`  ⚠ TUI config corrupted — backed up to ${backupPath}`);
-    } catch { /* non-critical */ }
-    // Rebuild fresh
-    const dir = path.dirname(TUI_JSON_PATH);
-    fs.mkdirSync(dir, { recursive: true });
-    const newConfig = { plugin: [TUI_PLUGIN_ENTRY] };
-    const tmpPath = `${TUI_JSON_PATH}.tmp`;
-    fs.writeFileSync(tmpPath, JSON.stringify(newConfig, null, 2));
-    fs.renameSync(tmpPath, TUI_JSON_PATH);
-    console.log(`  ✓ Registered ${TUI_PLUGIN_ENTRY} in TUI (rebuilt after corrupt backup)`);
-    return true;
-  }
-
-  // File doesn't exist: create it
-  if (data === null) {
-    const dir = path.dirname(TUI_JSON_PATH);
-    fs.mkdirSync(dir, { recursive: true });
-    const newConfig = { plugin: [TUI_PLUGIN_ENTRY] };
-    const tmpPath = `${TUI_JSON_PATH}.tmp`;
-    fs.writeFileSync(tmpPath, JSON.stringify(newConfig, null, 2));
-    fs.renameSync(tmpPath, TUI_JSON_PATH);
-    console.log(`  ✓ Created TUI config with ${TUI_PLUGIN_ENTRY}`);
-    return true;
-  }
-
-  // File exists, check if plugin already registered (idempotent)
-  const plugins = Array.isArray(data.plugin) ? data.plugin : [];
-  if (plugins.includes(TUI_PLUGIN_ENTRY)) return false;
-
-  // Append plugin entry
-  data.plugin = plugins.concat([TUI_PLUGIN_ENTRY]);
-  const tmpPath = `${TUI_JSON_PATH}.tmp`;
-  fs.writeFileSync(tmpPath, JSON.stringify(data, null, 2));
-  fs.renameSync(tmpPath, TUI_JSON_PATH);
-  console.log(`  ✓ Added ${TUI_PLUGIN_ENTRY} to TUI config`);
-  return true;
-}
-
-/**
- * Wrapper for init.js: ensure TUI is registered without console output.
- * Returns true if the plugin is already registered or was just added.
- */
-function ensureTuiRegistration() {
-  const { data } = readTuiJson();
-  if (data === null || data === undefined) {
-    fixTuiRegistration();
-    return;
-  }
-  const plugins = Array.isArray(data.plugin) ? data.plugin : [];
-  if (!plugins.includes(TUI_PLUGIN_ENTRY)) {
-    fixTuiRegistration();
-  }
-}
-
-/**
  * Diagnose language-specific tool availability.
  * @returns {number} Number of issues found (missing required tools)
  */
@@ -1149,7 +1036,36 @@ async function doctor(args) {
   issues += diagnoseOpenCodePlugin(checks);
 
   // Language-specific tool status
-  issues += diagnoseLanguageTools();
+  const langIssues = diagnoseLanguageTools();
+  issues += langIssues;
+
+  // In --fix mode, auto-install missing language tools
+  if (fixMode && langIssues > 0) {
+    try {
+      const { detectProjectLanguages, getToolsForLanguages, installTool, generateProjectConfig, LANGUAGE_REGISTRY } = require('./language-tools.js');
+      const projectRoot = process.cwd();
+      const { detected } = detectProjectLanguages(projectRoot);
+      if (detected.length > 0) {
+        const toolStatus = getToolsForLanguages(detected);
+        let installed = 0;
+        for (const [lang, tools] of Object.entries(toolStatus)) {
+          for (const t of tools) {
+            if (t.status === 'missing') {
+              const result = installTool(t.tool);
+              if (result.success) {
+                console.log(`  \u2713 ${t.tool.name} (${lang}) installed`);
+                installed++;
+              }
+            }
+          }
+        }
+        if (installed > 0) {
+          console.log(`  ${installed} language tool(s) installed.`);
+          generateProjectConfig(projectRoot, detected, toolStatus);
+        }
+      }
+    } catch { /* non-blocking */ }
+  }
 
   if (issues === 0) {
     console.log('\n✓ All checks passed');
