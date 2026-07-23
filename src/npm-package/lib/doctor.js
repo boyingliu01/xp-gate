@@ -1058,6 +1058,53 @@ function ensureTuiRegistration() {
   }
 }
 
+/**
+ * Diagnose language-specific tool availability.
+ * @returns {number} Number of issues found (missing required tools)
+ */
+function diagnoseLanguageTools() {
+  try {
+    const { detectProjectLanguages, getToolsForLanguages, LANGUAGE_REGISTRY } = require('./language-tools.js');
+    const projectRoot = process.cwd();
+    const { detected } = detectProjectLanguages(projectRoot);
+
+    if (detected.length === 0) return 0;
+
+    console.log('');
+    console.log('Language-Specific Tools:');
+    console.log('------------------------');
+
+    const toolStatus = getToolsForLanguages(detected);
+    let issues = 0;
+
+    for (const [lang, tools] of Object.entries(toolStatus)) {
+      const langDef = LANGUAGE_REGISTRY[lang];
+      console.log(`  ${langDef?.name || lang}:`);
+
+      for (const t of tools) {
+        const statusIcon = t.status === 'available' ? '✓' : '✗';
+        const optMark = t.tool.optional ? ' (optional)' : '';
+        const version = t.version || 'N/A';
+        console.log(`    ${statusIcon} ${t.tool.name}${optMark} — ${version}`);
+
+        if (t.status === 'missing' && !t.tool.optional) {
+          issues++;
+        }
+      }
+    }
+
+    if (issues > 0) {
+      console.log('');
+      console.log(`  ${issues} required tool(s) missing — gates will SKIP.`);
+      console.log('  Run "xp-gate install-tools --yes" to install.');
+    }
+
+    return issues;
+  } catch {
+    return 0;
+  }
+}
+
 async function doctor(args) {
   const fixMode = args.includes('--fix');
 
@@ -1100,6 +1147,9 @@ async function doctor(args) {
   } catch { /* non-blocking */ }
 
   issues += diagnoseOpenCodePlugin(checks);
+
+  // Language-specific tool status
+  issues += diagnoseLanguageTools();
 
   if (issues === 0) {
     console.log('\n✓ All checks passed');

@@ -2,6 +2,21 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.15.2.0] - 2026-07-22
+
+### Added
+- **多语言质量门禁完善**: 自动检测项目语言 + 检查/安装语言特定工具 + 项目级配置持久化。
+- **`xp-gate detect-languages` CLI**: 检测项目使用的编程语言，生成 `.xp-gate-config.json` 配置文件。
+- **`xp-gate check-tools` CLI**: 检查每种语言所需的质量门禁工具可用性（必需/可选分类）。
+- **`xp-gate install-tools` CLI**: 自动安装缺失的语言特定工具（支持 `--dry-run` 和 `--yes`）。
+- **`language-tools.js` 模块**: 12 种语言的工具注册表（TypeScript/Python/Java/Go/Kotlin/Swift/Dart/Flutter/C++/Shell/PowerShell/IaC）。
+- **`xp-gate init` 增强**: 初始化时自动检测项目语言、检查工具状态、提示安装缺失工具。
+- **`xp-gate doctor` 增强**: 诊断报告中显示语言特定工具状态。
+- **pre-commit hook 增强**: 读取 `.xp-gate-config.json` 作为语言检测的补充来源（优先级：override > config file > extension detection）。
+
+### Changed
+- **多语言模式完善**: 每个项目支持多语言模式，不再要求单一语言。工具缺失时优雅降级（SKIP 而非 BLOCK）。
+
 ## [0.15.1.0] - 2026-07-22
 
 ### Added
