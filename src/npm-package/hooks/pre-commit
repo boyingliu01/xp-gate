@@ -676,7 +676,7 @@ CHANGEDFILELIST
     done
     echo ""
   fi
-fi
+fi  # close language override if/else
 
 # Helper: check if a language is in PROJECT_LANGS
 has_project_lang() {
