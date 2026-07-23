@@ -2,7 +2,7 @@
 
 All notable changes to this project will be documented in this file.
 
-## [0.15.2.0] - 2026-07-22
+## [0.15.3.0] - 2026-07-22
 
 ### Added
 - **多语言质量门禁完善**: 自动检测项目语言 + 检查/安装语言特定工具 + 项目级配置持久化。
