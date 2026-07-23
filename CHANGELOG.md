@@ -2,7 +2,7 @@
 
 All notable changes to this project will be documented in this file.
 
-## [0.15.0.0] - 2026-07-22
+## [0.15.1.0] - 2026-07-22
 
 ### Added
 - **Gate 1 Python 增强**: `ruff format --check` 格式检查 + `breakpoint()`/`pdb.set_trace()` 调试语句检测（阻塞提交）。
