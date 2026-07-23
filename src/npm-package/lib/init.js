@@ -354,6 +354,93 @@ async function init(args) {
   return code;
 }
 
+/**
+ * Detect project languages and check/install language-specific tools.
+ * @param {string} projectRoot - Project root directory
+ * @param {boolean} autoYes - Auto-install missing tools
+ */
+async function detectAndReportLanguages(projectRoot, autoYes) {
+  const { detectProjectLanguages, getToolsForLanguages, generateProjectConfig, LANGUAGE_REGISTRY } = require('./language-tools.js');
+
+  console.log('');
+  console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
+  console.log('  Multi-Language Quality Gates');
+  console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
+  console.log('');
+
+  const { detected, configFiles } = detectProjectLanguages(projectRoot);
+
+  if (detected.length === 0) {
+    console.log('  No project languages detected.');
+    return;
+  }
+
+  console.log(`  Detected ${detected.length} language(s):`);
+  for (const lang of detected) {
+    const langDef = LANGUAGE_REGISTRY[lang];
+    console.log(`    • ${langDef?.name || lang}`);
+  }
+  console.log('');
+
+  const toolStatus = getToolsForLanguages(detected);
+  const missingRequired = [];
+  const missingOptional = [];
+
+  for (const [lang, tools] of Object.entries(toolStatus)) {
+    for (const t of tools) {
+      if (t.status === 'missing') {
+        if (t.tool.optional) {
+          missingOptional.push({ lang, tool: t.tool });
+        } else {
+          missingRequired.push({ lang, tool: t.tool });
+        }
+      }
+    }
+  }
+
+  if (missingRequired.length === 0 && missingOptional.length === 0) {
+    console.log('  ✓ All language-specific tools are available.');
+  } else {
+    if (missingRequired.length > 0) {
+      console.log(`  ✗ ${missingRequired.length} required tool(s) missing:`);
+      for (const { lang, tool } of missingRequired) {
+        console.log(`    • ${tool.name} (${lang}) — gates will SKIP`);
+      }
+    }
+    if (missingOptional.length > 0) {
+      console.log(`  ⚠ ${missingOptional.length} optional tool(s) missing (fallback available):`);
+      for (const { lang, tool } of missingOptional) {
+        console.log(`    • ${tool.name} (${lang})`);
+      }
+    }
+    console.log('');
+
+    if (autoYes || (process.stdin.isTTY && await askYesNo('  Install missing language-specific tools now?'))) {
+      console.log('');
+      const { installTool } = require('./language-tools.js');
+      let installed = 0;
+      for (const { lang, tool } of [...missingRequired, ...missingOptional]) {
+        const result = installTool(tool);
+        if (result.success) {
+          console.log(`  ✓ ${tool.name} installed`);
+          installed++;
+        } else {
+          console.log(`  ✗ ${tool.name}: ${result.message}`);
+        }
+      }
+      if (installed > 0) {
+        console.log(`\n  ${installed} tool(s) installed successfully.`);
+      }
+    } else {
+      console.log('  Skipped. Run "xp-gate install-tools --yes" later.');
+    }
+  }
+
+  // Generate project config
+  generateProjectConfig(projectRoot, detected, toolStatus);
+  console.log(`\n  Generated .xp-gate-config.json`);
+}
+
 async function installLocal(args) {
   const gitDir = getGitDir();
   if (!gitDir) {
@@ -416,6 +503,10 @@ async function installLocal(args) {
   // Auto-install missing CLI tools (prompt user)
   const autoYes = args.includes('--yes') || args.includes('--auto-install');
   await promptBootstrap(autoYes);
+
+  // Detect project languages and check language-specific tools
+  await detectAndReportLanguages(projectRoot, autoYes);
+
   console.log('━━━ FIRST-CLASS TEST QUALITY ━━━');
   console.log('XP-Gate treats test code as a first-class citizen:');
   console.log('  • TypeScript: test files are type-checked, not excluded from tsconfig.json');

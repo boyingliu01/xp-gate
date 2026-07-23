@@ -211,6 +211,30 @@ const COMMANDS = {
       handleSprintAudit(subargs).then(code => process.exit(code));
     },
     usage: 'xp-gate sprint-audit [--dir <path>] [--json]'
+  },
+  'detect-languages': {
+    description: 'Detect project languages and generate .xp-gate-config.json',
+    run: subargs => {
+      const { handleDetectLanguages } = require('../lib/language-tools.js');
+      handleDetectLanguages(subargs).then(code => process.exit(code));
+    },
+    usage: 'xp-gate detect-languages [--json] [--write]'
+  },
+  'check-tools': {
+    description: 'Check quality gate tool availability per language',
+    run: subargs => {
+      const { handleCheckTools } = require('../lib/language-tools.js');
+      handleCheckTools(subargs).then(code => process.exit(code));
+    },
+    usage: 'xp-gate check-tools [--languages <langs>] [--json]'
+  },
+  'install-tools': {
+    description: 'Install missing quality gate tools for detected languages',
+    run: subargs => {
+      const { handleInstallTools } = require('../lib/language-tools.js');
+      handleInstallTools(subargs).then(code => process.exit(code));
+    },
+    usage: 'xp-gate install-tools [--languages <langs>] [--dry-run] [--yes]'
   }
 };
 
