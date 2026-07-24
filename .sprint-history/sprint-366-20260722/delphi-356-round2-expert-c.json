@@ -1,0 +1,88 @@
+{
+  "expert_id": "C",
+  "round": 2,
+  "mode": "design",
+  "issue": 356,
+  "verdict": "PASS_WITH_CAVEATS",
+  "confidence": 9,
+  "round1_consensus_summary": {
+    "unanimous_issues": [
+      "Shell↔TypeScript 调用链未定义（A:MC-1, B:MC-3, C:C1）— 三位专家一致认为是首要阻塞问题",
+      "缓存策略缺失（A:mC-3, B:MC-2, C:M2）— 三位专家均指出'缓存检查结果'仅有承诺无方案",
+      "与 doctor.js / common.ts / language-tools.js 的复用关系不清晰（A:MC-2/MC-3, B:mC-1, C:M1/m3）"
+    ],
+    "expert_unique_contributions": {
+      "A": "LanguageHealthChecker 抽象接口建议、GateInput/GateOutput 一致性审计问题、CLI 路由集成确认",
+      "B": "Windows Store Python 存根问题（高价值发现）、pyenv/conda/uv 环境管理器覆盖缺失、pip 与 Python 解释器一致性、并行检测优化",
+      "C": "增强 doctor 而非新增 gate 的替代方案、XP_GATE_SKIP 回滚逃生舱、require_tool() 已覆盖部分场景"
+    }
+  },
+  "refined_assessment": {
+    "critical_issues_resolved": false,
+    "critical_resolution_required": [
+      {
+        "id": "CR-1",
+        "title": "必须明确 shell↔TS 调用链的实现方案",
+        "consensus": "A/B/C 三方一致",
+        "required_decision": "设计文档必须在实施前明确选择以下方案之一：(A) 纯 bash 轻量 preflight 留在 python.sh，完整 TS 健康检查仅通过 CLI/doctor 暴露（B/mC-1 和 C/S1 推荐）；(B) TS 健康检查作为 pre-commit TypeScript 编排器的前置步骤，不经过 shell 适配器（C/S2 推荐）；(C) python.sh 通过 npx xp-gate check python-health CLI 子命令调用（A/MC-1 方案A）。方案 A 可行性最高、延迟最低、与现有架构最一致。"
+      },
+      {
+        "id": "CR-2",
+        "title": "必须定义缓存策略的具体参数",
+        "consensus": "A/B/C 三方一致",
+        "required_decision": "缓存键（建议 python exe path + version + venv path hash）、TTL（建议 1h，B 建议 24h 偏长）、存储位置（建议 .xp-gate/cache/python-health.json）、失效条件（venv 目录 mtime 变化或 XP_GATE_NO_CACHE=1）。"
+      }
+    ],
+    "major_concerns_from_round1": [
+      {
+        "id": "RM-1",
+        "title": "Windows Store Python 存根（B 独有发现，C 确认高价值）",
+        "status": "需纳入设计",
+        "detail": "B 发现的 Windows Store python.exe 存根问题是真实的生产风险。%LOCALAPPDATA%/Microsoft/WindowsApps/python.exe 会打开 Microsoft Store 而非返回版本号，导致检测挂起。必须在 Python 候选检测中加入 3s 超时验证 + WindowsApps 路径过滤。这直接影响可行性评估——如果不处理，Windows 用户的 pre-commit 会卡死。"
+      },
+      {
+        "id": "RM-2",
+        "title": "pyenv/conda/uv 环境管理器覆盖（B 提出，C 补充）",
+        "status": "建议纳入但可降级",
+        "detail": "设计仅检查 VIRTUAL_ENV 环境变量，但 pyenv（.python-version 文件）、conda（CONDA_PREFIX）、uv（.python-version/uv.lock）在开发者中广泛使用。建议至少检测 .python-version 文件和 .venv/venv 目录存在性，作为 venv 检测的补充。完整的环境类型标注可放到后续迭代。"
+      },
+      {
+        "id": "RM-3",
+        "title": "与 doctor.js 的关系需要明确定位",
+        "status": "需纳入设计",
+        "detail": "C 在 R1 提出增强 doctor 而非新增 gate。经过 R1 交叉评审，三方实际上趋向共识：pre-commit 路径需要轻量前置检查（自动化，不可跳过），doctor 提供深度诊断（按需运行）。关键决策是：pre-commit 路径的检查应该是 bash 实现（快速、零延迟）还是 TS 实现（功能完整但有调用开销）。C 现在认为 bash preflight + doctor 增强的双层方案最优，既解决了 A 的模块边界担忧，也解决了 B 的性能担忧。"
+      },
+      {
+        "id": "RM-4",
+        "title": "复用 isToolAvailable() 和 checkTool()（A:mC-1, B:mC-1, C:m3/S4）",
+        "status": "需纳入设计",
+        "detail": "三方均指出 python-health.ts 应复用现有基础设施。common.ts 的 isToolAvailable() 提供 3-tier 检测，language-tools.js 的 checkTool() 提供跨平台版本检查。python-health.ts 不应重新实现工具检测逻辑，而应在其上层构建 Python 语义（版本解析、venv 检测、工具链完整性判断）。"
+      }
+    ],
+    "minor_concerns_carried_forward": [
+      "Python 版本阈值可配置化（C/m2）— 建议读取 pyproject.toml 的 requires-python 或 .xp-gate-config.json",
+      "版本解析防御性处理（B/mC-2）— 正则 /^Python (\\d+)\\.(\\d+)\\.(\\d+)/ + unknown 降级为 WARN",
+      "pip 与 Python 解释器一致性（B/mC-3）— 使用 <detected-python> -m pip --version",
+      "spawnSync 超时和崩溃场景（B/mC-4）— 所有 spawn 调用 5s 超时 + EACCES/ENOENT/ETIMEDOUT 处理",
+      "回滚逃生舱（C/S3）— XP_GATE_SKIP_PYTHON_HEALTH=1 环境变量",
+      "8 SP 估算偏低（C/m1）— 如果采用 bash preflight + doctor 增强方案可降至 5-6 SP"
+    ]
+  },
+  "feasibility_recommendation": {
+    "preferred_architecture": "双层方案：(1) python.sh 中增加纯 bash python_env_preflight() 函数（约25行），仅检查 python 可执行 + pip 可用 + 基本版本验证，零额外延迟，无跨语言调用；(2) 完整 TypeScript 健康检查模块（python-health.ts）通过 CLI 命令 'xp-gate check python-health' 和增强版 'xp-gate doctor' 暴露，不在 pre-commit 热路径中调用。",
+    "rationale": "此方案解决了 R1 三方共识的所有核心问题：无 shell↔TS 调用链问题（A/B/C）、pre-commit 零额外延迟（B）、不重复 doctor 逻辑而是增强 doctor（C）、复用现有 isToolAvailable()/checkTool()（A/B/C）、Windows Store 存根问题可在 TS 层完整处理（B）。",
+    "revised_estimate": "5-6 SP（bash preflight 2SP + TS 模块 2SP + doctor 增强 1SP + 测试 1SP）",
+    "implementation_phases": [
+      "Phase 1 (MVP): bash python_env_preflight() in python.sh — python/pip 可执行检查 + 3s 超时版本验证",
+      "Phase 2: src/gates/python-health.ts 完整 TS 模块 + CLI 命令 + Windows Store 存根处理 + pyenv/conda 检测",
+      "Phase 3: doctor.js 增强 — 调用 python-health.ts 输出结构化 Python 诊断 + 修复建议"
+    ]
+  },
+  "changes_from_round1": [
+    "置信度从 8 提升到 9——R1 三方共识确认了核心问题的识别是准确的",
+    "从 R1 的'建议替代方案'升级为'推荐架构'——bash preflight + TS doctor 双层方案得到三方间接共识支持",
+    "采纳 B 的 Windows Store 存根问题为必要处理项（R1 中 C 未识别此风险）",
+    "采纳 A 的复用建议，明确 python-health.ts 应构建在 isToolAvailable()/checkTool() 之上而非替代",
+    "SP 估算从 10-11 SP 下调到 5-6 SP——双层方案显著降低了 pre-commit 路径的复杂度"
+  ]
+}

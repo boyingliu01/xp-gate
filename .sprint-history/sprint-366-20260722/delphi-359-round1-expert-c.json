@@ -1,0 +1,66 @@
+{
+  "expert_id": "C",
+  "round": 1,
+  "mode": "design",
+  "issue": 359,
+  "verdict": "PASS_WITH_CAVEATS",
+  "confidence": 7,
+  "critical_issues": [
+    {
+      "id": "C1",
+      "title": "与现有 Gate 5/5a/M2/M3 职责重叠，ROI 不清晰",
+      "detail": "现有 Gate 5 已检查整体覆盖率 ≥80%，Gate M2 已按 test layer 区分 mock density 阈值，Gate M3 已做 mock layering policy enforcement。新增的 test-layers 功能与这些 gate 存在显著职责重叠：Layer 1 的源文件-测试配对与 Gate M 的 findTestFileForSource() 重复；Layer 2 的跨模块检测与 Gate M3 的 import 分析重复；Layer 3 的 E2E 统计价值有限。设计文档未说明 test-layers 相比现有 gate 的增量价值是什么，用户为什么要用这个新功能而不是已有的 gate。建议：1) 明确 test-layers 解决的痛点是现有 gate 无法解决的；2) 或者将功能整合到现有 gate（如增强 Gate 5 的分层统计，增强 Gate M2/M3 的报告）。"
+    },
+    {
+      "id": "C2",
+      "title": "工作量估算偏高，收益不确定",
+      "detail": "设计文档描述了 4 个实现步骤：创建 test-layers.ts、CLI 集成、Gate 5 集成、测试。但实际工作量包括：1) 实现源文件-测试文件配对算法（需处理多语言、排除规则、边界情况）；2) 实现跨模块检测逻辑（需定义模块边界、解析 import、处理循环依赖）；3) 实现 E2E 场景统计（需定义什么是 '端到端场景'）；4) 编写单元测试覆盖各种场景；5) 集成到 gate-runner 和 CLI；6) 文档和示例。估算至少 3-5 天工作量。但收益不明确：Layer 1 的配对检查价值有限（有测试文件不代表测试质量好）；Layer 2/3 的静态分析不够准确（import 不等于调用，describe 不等于场景）。建议：先做 MVP，只实现 Layer 1 的简单版本（统计有测试的源文件占比），验证用户价值后再扩展 Layer 2/3。"
+    }
+  ],
+  "major_concerns": [
+    {
+      "id": "C3",
+      "title": "用户价值主张不够强",
+      "detail": "设计文档的问题陈述是 '整体覆盖率 ≥80% 但不区分测试层级'，但这不一定是问题：1) 80% 覆盖率是行业最佳实践，不区分层级是合理的；2) 强制分层覆盖率会增加用户负担（需要写更多测试文件）；3) 对于小型项目，分层测试可能过度（单元测试足够）。设计文档未提供实际案例说明 '单元测试覆盖率高但集成测试缺失' 导致的真实问题。建议：1) 提供 2-3 个真实案例说明 test-layers 能发现的问题；2) 或者做用户调研，了解用户是否真的有这个痛点；3) 或者将 test-layers 设为可选功能（opt-in），而不是默认启用。"
+    },
+    {
+      "id": "C4",
+      "title": "Layer 2/3 的强制规则会导致用户反感",
+      "detail": "设计文档 Layer 2 要求 '当项目有 ≥5 个模块时，至少需要 1 个集成测试文件'，Layer 3 仅 WARNING。但：1) '≥5 个模块' 的阈值是拍脑袋的，没有依据；2) 强制要求集成测试会增加用户负担（集成测试编写成本高）；3) 对于某些项目（如纯工具库、CLI 工具），集成测试价值有限。建议：1) Layer 2/3 全部改为 WARNING only，不 BLOCK；2) 或者提供配置选项，允许用户禁用某些 layer 的检查；3) 或者提供 '学习模式'，先统计当前项目的测试分层情况，让用户自行决定是否要达到某个标准。"
+    }
+  ],
+  "minor_concerns": [
+    {
+      "id": "C5",
+      "title": "缺少迁移计划和向后兼容性",
+      "detail": "设计文档未说明：1) 现有项目如何迁移到 test-layers？如果项目当前没有集成测试，新增 Layer 2 强制规则会导致 CI 失败；2) 是否需要提供迁移工具（如自动生成集成测试骨架）？3) 是否需要提供 'grace period'（如前 30 天只 WARNING 不 BLOCK）？建议：1) 提供迁移指南；2) 提供配置选项（如 --strict 模式 vs --lenient 模式）；3) 提供自动修复工具（如自动生成集成测试模板）。"
+    },
+    {
+      "id": "C6",
+      "title": "缺少成功指标和反馈机制",
+      "detail": "设计文档未说明如何衡量 test-layers 的成功：1) 用户 adoption rate 是多少？2) test-layers 发现的问题数量？3) 用户满意度如何？建议：1) 定义成功指标（如 80% 的项目启用 test-layers，发现 10+ 个真实问题）；2) 添加 audit 日志，记录 test-layers 的执行结果；3) 提供反馈渠道（如 GitHub issue template）。"
+    }
+  ],
+  "suggestions": [
+    {
+      "id": "S1",
+      "title": "采用渐进式发布策略",
+      "detail": "不要一次性发布所有 layer，而是分阶段：Phase 1（1-2 天）：只实现 Layer 1 的简单版本（统计有测试的源文件占比，WARNING only）；Phase 2（1 周）：收集用户反馈，验证价值；Phase 3（2-3 天）：根据反馈决定是否实现 Layer 2/3。这样可以降低风险，避免投入大量工作量后发现用户不需要。"
+    },
+    {
+      "id": "S2",
+      "title": "将 test-layers 定位为 '报告工具' 而非 '强制工具'",
+      "detail": "不要强制 BLOCK，而是提供详细的报告：1) 测试分层统计（unit/integration/e2e 占比）；2) 未覆盖的源文件列表；3) 跨模块测试覆盖情况；4) 建议和改进方向。让用户根据报告自行决定是否需要改进，而不是强制要求达到某个标准。这样可以降低用户反感，提高 adoption rate。"
+    },
+    {
+      "id": "S3",
+      "title": "与现有 Gate 整合而非独立",
+      "detail": "不要创建独立的 test-layers gate，而是增强现有 gate：1) 增强 Gate 5：在覆盖率报告中增加分层统计；2) 增强 Gate M2：在 mock density 报告中增加测试分层统计；3) 增强 Gate M3：在 mock policy 报告中增加跨模块测试统计。这样可以避免 gate 膨胀，复用现有基础设施，降低用户学习成本。"
+    },
+    {
+      "id": "S4",
+      "title": "提供配置化和可定制性",
+      "detail": "不同项目有不同的测试策略，不要一刀切：1) 提供配置文件（.test-layers-config.json），允许用户定义排除规则、阈值、启用的 layer；2) 提供 preset（如 'minimal'、'standard'、'strict'），适配不同项目规模；3) 允许通过注释注解（如 @test-layer: integration）显式标记测试层级。"
+    }
+  ]
+}

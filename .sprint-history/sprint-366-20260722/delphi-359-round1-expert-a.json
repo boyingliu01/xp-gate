@@ -1,0 +1,61 @@
+{
+  "expert_id": "A",
+  "round": 1,
+  "mode": "design",
+  "issue": 359,
+  "verdict": "PASS_WITH_CAVEATS",
+  "confidence": 8,
+  "critical_issues": [
+    {
+      "id": "A1",
+      "title": "Gate 5a 不存在于当前代码库",
+      "detail": "设计文档提到 '已有 Gate 5a 对 .ts/.tsx 新文件 BLOCK'，但实际代码库中不存在 Gate 5a。Gate 5 在 gate-runner.js 中注册为 preCommitOnly: true，没有独立的 TypeScript gate 模块文件（src/gates/ 下无 gate-5*.ts）。设计基于一个不存在的前提做增强，需要明确 test-layers 到底是独立 gate 还是 Gate 5 的子模块。"
+    },
+    {
+      "id": "A2",
+      "title": "模块放置位置与现有架构不一致",
+      "detail": "设计提出创建 src/gates/test-layers.ts，但现有 src/gates/ 下的模块（gate-3, gate-7, gate-8, gate-9）都是独立 gate，通过 gate-runner.js 的 GATE_REGISTRY 注册。test-layers 不是独立 gate（无编号），也不在 GATE_REGISTRY 中。建议要么放入 src/mutation/（与 detect-ai-test.ts 同模块），要么创建新的 src/test-layers/ 目录作为独立功能模块。"
+    }
+  ],
+  "major_concerns": [
+    {
+      "id": "A3",
+      "title": "与 Gate M 系列职责边界模糊",
+      "detail": "Gate M (mutation) 已有 findTestFileForSource() 做源文件-测试文件配对，detectTestLayer() 做层级分类，Gate M2 做 mock density 按层区分阈值，Gate M3 做 mock layering policy。新增的 test-layers 功能与这些模块存在显著职责重叠，特别是 Layer 1 的源文件-测试文件配对检测。需要明确 test-layers 与 Gate M 系列的边界：是补充（提供聚合报告）还是替代（接管部分 M 系列功能）？"
+    },
+    {
+      "id": "A4",
+      "title": "CLI 集成路径不清晰",
+      "detail": "设计说 '在 gate-runner.js 中添加 test-layers 别名路由'，但 gate-runner 的 GATE_REGISTRY 是数字编号体系。test-layers 没有 gate 编号，作为别名加入会破坏现有 '数字→gate' 的映射约定。需要设计一个合理的集成方式：是作为 Gate 5 的增强（preCommitOnly 逻辑内），还是作为独立可调用命令（类似 python-health 的非数字 ID）？"
+    }
+  ],
+  "minor_concerns": [
+    {
+      "id": "A5",
+      "title": "TestLayerReport 接口设计过于扁平",
+      "detail": "TestLayerReport 将三个 layer 的结果平铺在一个对象中，不利于单独扩展某一层的检测逻辑。建议每个 layer 有独立的 analyzer 接口，TestLayerReport 作为聚合层。"
+    },
+    {
+      "id": "A6",
+      "title": "changedFiles 参数在 Layer 1 全量扫描时语义矛盾",
+      "detail": "设计风险表提到 '仅分析 changedFiles，不扫描全量'，但 Layer 1 要求 '每个 src/**/*.ts 源文件必须有对应测试'，这是全量扫描语义。仅分析 changedFiles 只能检查新增/修改文件的测试配对，无法给出全局覆盖率视图。接口签名 analyzeTestLayers(cwd, changedFiles) 需要明确 changedFiles 是增量还是全量上下文。"
+    }
+  ],
+  "suggestions": [
+    {
+      "id": "S1",
+      "title": "采用插件式 layer analyzer 架构",
+      "detail": "定义 LayerAnalyzer 接口 { analyze(cwd, files): LayerResult }，每个 layer 独立实现。test-layers 模块作为编排器，聚合各 layer 结果。这样未来新增 layer（如 contract test）只需添加实现，不修改核心逻辑。"
+    },
+    {
+      "id": "S2",
+      "title": "复用 Gate M 的 findTestFileForSource()",
+      "detail": "Gate M 已有完善的多语言源文件-测试文件配对逻辑（支持 TS/Python/Go/Java/Kotlin），test-layers 的 Layer 1 应直接复用而非重新实现，避免逻辑分叉和维护负担。"
+    },
+    {
+      "id": "S3",
+      "title": "考虑将 test-layers 作为 Gate 5 的增强子模块",
+      "detail": "Gate 5 当前是 preCommitOnly 的 shell 脚本 gate。可以将 test-layers 作为 Gate 5 的 TypeScript 增强模块，在 gate-runner 中注册为 Gate 5 的一部分（类似 Gate 3 有 TypeScript gate 模块），这样既保持 gate 编号体系一致，又能复用 Gate 5 的执行上下文。"
+    }
+  ]
+}

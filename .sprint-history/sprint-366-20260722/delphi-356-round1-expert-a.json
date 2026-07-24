@@ -1,0 +1,73 @@
+{
+  "expert_id": "A",
+  "round": 1,
+  "mode": "design",
+  "issue": 356,
+  "verdict": "PASS_WITH_CAVEATS",
+  "confidence": 8,
+  "critical_issues": [],
+  "major_concerns": [
+    {
+      "id": "MC-1",
+      "category": "integration",
+      "description": "Bash-to-TypeScript 调用链未明确。设计 Step 2 提出在 python.sh 中调用 `python_health_check`，但健康检查逻辑在 src/gates/python-health.ts（TypeScript 模块）。设计文档未说明 bash 适配器如何调用 TS 模块——是通过 `npx tsx src/gates/python-health.ts`、编译后的 JS、还是 CLI 子命令？现有 python.sh 的所有函数（run_static_analysis, run_lint 等）都是纯 bash，突然引入跨语言调用会增加复杂性和启动延迟。",
+      "recommendation": "明确调用方式。建议方案：(A) 健康检查作为 `xp-gate check python-health` CLI 子命令，python.sh 通过 `npx xp-gate check python-health` 调用；或 (B) 将核心检测逻辑下沉到 adapter-common.sh 的 bash 函数，TS 模块仅做格式化输出。方案 A 更符合设计意图但需确认延迟可接受；方案 B 与现有模式一致但逻辑重复。"
+    },
+    {
+      "id": "MC-2",
+      "category": "module-boundary",
+      "description": "python-health.ts 与 common.ts 的工具检测存在职责重叠。common.ts 已提供 isToolAvailable() 做跨平台工具检测（3-tier fallback），而 python-health.ts 的 PythonHealthResult 接口重新实现了类似的检测逻辑（python exe 查找、pip 检测、工具版本获取）。如果 python-health.ts 不复用 isToolAvailable()，会导致两套并行的检测路径，增加维护负担。",
+      "recommendation": "python-health.ts 应复用 common.ts 的 isToolAvailable() 和 runTool() 基础设施，仅在其上增加 Python 特有的语义层（版本解析、venv 检测、工具链完整性判断）。在 PythonHealthResult.tools 字段的填充中直接调用 isToolAvailable()。"
+    },
+    {
+      "id": "MC-3",
+      "category": "module-boundary",
+      "description": "python-health.ts 与 language-tools.js 的工具注册表存在数据耦合但无接口契约。设计说'复用现有注册表，不改变其接口'，但 language-tools.js 是 CommonJS 模块（src/npm-package/lib/），python-health.ts 是 TypeScript 模块（src/gates/），两者在不同构建域。TS 模块如何读取 LANGUAGE_REGISTRY.python.tools 列表？直接 import 跨域可能有构建/类型问题；硬编码工具列表则会在 language-tools.js 更新时产生不一致。",
+      "recommendation": "定义一个共享的类型/接口（如在 common.ts 中），让 language-tools.js 的 Python 工具列表和 python-health.ts 的检查逻辑都引用同一数据源。或者 python-health.ts 接受工具列表作为参数，由调用方从 language-tools.js 注入。"
+    }
+  ],
+  "minor_concerns": [
+    {
+      "id": "mC-1",
+      "category": "extensibility",
+      "description": "设计完全绑定 Python，没有为未来其他语言的健康检查预留抽象。如果将来需要 Go 环境健康检查（go version、go mod 完整性）或 Java 健康检查（JDK 版本、Maven/Gradle 可用性），会各自为政。",
+      "recommendation": "建议定义一个 LanguageHealthChecker 接口（check(): LanguageHealthResult），python-health.ts 作为首个实现。即使现在只做 Python，接口成本很低，但为未来统一 doctor 输出和 CLI 命令打下基础。"
+    },
+    {
+      "id": "mC-2",
+      "category": "architecture-consistency",
+      "description": "现有 gate 模块遵循 GateInput → GateOutput 模式并调用 recordAudit()。python-health.ts 使用独立的 PythonHealthResult 接口，不产出 GateOutput，也不走审计日志。这在 gate 体系中是一个'旁路'模块，破坏了 gate 模块的一致性。",
+      "recommendation": "明确 python-health.ts 的定位：它是一个 pre-flight 诊断工具而非 gate，不需要走 GateInput/GateOutput 流程。但建议在 JSDoc 和文件头注释中明确说明其定位，避免后续开发者误将其当作 gate 模块。同时考虑将健康检查结果也写入 audit.jsonl 以便诊断追溯。"
+    },
+    {
+      "id": "mC-3",
+      "category": "integration",
+      "description": "设计提到'缓存检查结果'以缓解 pre-commit 延迟风险，但未说明缓存策略（TTL、缓存键、失效条件）。Python 环境状态变化频率低（安装/卸载工具），但缓存在 CI 环境中可能导致陈旧结果。",
+      "recommendation": "明确缓存策略：建议基于文件哈希（python exe 路径 + pip freeze 输出哈希）作为缓存键，TTL 设为 1 小时。CI 环境下可通过环境变量 XP_GATE_NO_CACHE=1 禁用缓存。"
+    },
+    {
+      "id": "mC-4",
+      "category": "integration",
+      "description": "设计 Step 3 提出 `xp-gate check python-health` CLI 命令，但未说明如何集成到现有 CLI 路由。当前 npm-package 的 CLI 入口和命令路由逻辑需要确认是否已有 `check` 子命令框架。",
+      "recommendation": "确认现有 CLI 路由结构，如果 `xp-gate check` 已存在则添加 python-health 子命令；如果不存在，考虑与 `xp-gate doctor` 合并，将健康检查作为 doctor 的增强输出的一部分。"
+    }
+  ],
+  "suggestions": [
+    {
+      "id": "S-1",
+      "description": "考虑将 python-health 的检查结果结构化输出（JSON）与人类可读输出分离。CLI 直接运行时输出可读格式，被其他模块（doctor、CI 脚本）调用时输出 JSON，便于程序化消费。"
+    },
+    {
+      "id": "S-2",
+      "description": "Python 可执行文件检测顺序（python3 → python → py）应与 language-tools.js 和 adapter-common.sh 中的检测逻辑保持一致。建议抽取为共享的 detectPythonExe() 函数放在 common.ts 中，与 detectPowerShell() 对称。"
+    },
+    {
+      "id": "S-3",
+      "description": "设计文档的'不做的事'中提到'不修改 language-tools.js'，这是正确的克制。但建议在 python-health.ts 中通过 import 读取 language-tools.js 的 Python 工具列表（而非硬编码），确保单一数据源。如果跨模块 import 有困难，可以在 python-health.ts 中定义工具列表并通过注释标注 'sync with language-tools.js LANGUAGE_REGISTRY.python'。"
+    },
+    {
+      "id": "S-4",
+      "description": "测试策略中提到 mock spawnSync，建议同时增加 fixture-based 测试：创建临时目录模拟不同 Python 项目场景（有/无 venv、有/无 pyproject.toml、不同 Python 版本 mock），验证 checkPythonHealth() 在各种组合下的行为。这与现有 gate 测试模式（gate-3.test.ts）一致。"
+    }
+  ]
+}

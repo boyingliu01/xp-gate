@@ -1,0 +1,60 @@
+{
+  "_schema_version": 1,
+  "id": "sprint-366-20260722",
+  "task_description": "sprint-flow phase-transition 程序化强制执行机制 (#366)",
+  "phase": 6,
+  "status": "completed",
+  "started_at": "2026-07-22T16:00:00.000Z",
+  "phase_history": [
+    {
+      "phase": 1,
+      "name": "PREP",
+      "completed_at": "2026-07-22T16:05:00.000Z",
+      "note": "v0.16.0 committed+pushed. 1 open issue: #366 (8SP, standard). No worktree isolation.",
+      "status": "completed"
+    },
+    {
+      "phase": 2,
+      "phase_name": "DESIGN",
+      "status": "completed",
+      "started_at": "2026-07-23T09:36:36.571Z",
+      "completed_at": "2026-07-24T01:35:43.805Z",
+      "duration_seconds": 57547
+    },
+    {
+      "phase": 3,
+      "phase_name": "BUILD",
+      "status": "completed",
+      "started_at": "2026-07-24T01:35:59.091Z",
+      "completed_at": "2026-07-24T03:07:23.154Z",
+      "duration_seconds": 5484
+    },
+    {
+      "phase": 4,
+      "phase_name": "VERIFY",
+      "status": "completed",
+      "completed_at": "2026-07-24T03:07:38.951Z"
+    },
+    {
+      "phase": 5,
+      "phase_name": "SHIP",
+      "status": "completed",
+      "completed_at": "2026-07-24T03:07:51.295Z"
+    },
+    {
+      "phase": 6,
+      "phase_name": "CLOSE",
+      "status": "completed",
+      "completed_at": "2026-07-24T03:08:03.029Z"
+    }
+  ],
+  "isolation": {
+    "worktree_path": "E:\\projects\\xp-gate",
+    "branch": "main"
+  },
+  "outputs": {
+    "issues": "#366",
+    "estimate": "8 story points",
+    "classification": "standard"
+  }
+}

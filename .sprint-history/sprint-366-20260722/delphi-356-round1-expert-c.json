@@ -1,0 +1,67 @@
+{
+  "expert_id": "C",
+  "round": 1,
+  "mode": "design",
+  "issue": 356,
+  "verdict": "PASS_WITH_CAVEATS",
+  "confidence": 8,
+  "critical_issues": [
+    {
+      "id": "C1",
+      "title": "Shell↔TypeScript 调用链未定义",
+      "detail": "设计提出创建 src/gates/python-health.ts（TypeScript 模块），并在 githooks/adapters/python.sh（shell 脚本）中调用它，但没有说明具体的跨语言调用机制。现有 src/gates/*.ts 模块（gate-3/7/8/9）都是由 TypeScript 编排器直接 import 调用的，而非由 shell 适配器调用。从 python.sh 调用 TS 模块需要 npx tsx 或编译后的 JS，这在 pre-commit 热路径中会引入 2-5 秒额外延迟（Windows 上 npx spawn 更慢，doctor.js 中 EXEC_TIMEOUT_MS=1500ms 反映了这个问题）。设计文档需要明确：(a) python.sh 如何调用 python-health.ts？(b) 是否需要先编译？(c) 延迟预算是多少？",
+      "severity": "critical"
+    }
+  ],
+  "major_concerns": [
+    {
+      "id": "M1",
+      "title": "与 doctor.js 功能高度重叠，应优先增强 doctor",
+      "detail": "doctor.js（1115 行）已包含 Python 环境诊断逻辑：Windows Python 路径扫描（L496-504）、工具可用性检测（通过 language-tools.js 的 checkTool()）、自动修复建议。新增 python-health.ts 会重复这些逻辑。更合理的做法是：(1) 增强 doctor.js 的 Python 诊断能力（加 venv 检测、版本检查）；(2) 在 python.sh 中添加轻量级纯 shell 前置检查（仅验证 python3/python 可执行、pip 可用）。这样既避免逻辑重复，又保持 pre-commit 路径轻量。"
+    },
+    {
+      "id": "M2",
+      "title": "缓存策略未定义，可能拖慢 pre-commit",
+      "detail": "设计提到'缓存检查结果'作为风险缓解措施，但没有给出具体方案。Python 环境在两次 commit 之间很少变化，缓存是合理的，但需要定义：缓存位置（.xp-gate/ 下？）、TTL（多久过期？）、失效条件（pip install 后如何感知？）。缺少缓存意味着每次 pre-commit 都要 spawn 多个 python3/pip 子进程检测版本，在 Windows 上可能增加 3-5 秒。"
+    }
+  ],
+  "minor_concerns": [
+    {
+      "id": "m1",
+      "title": "8 SP 估算可能偏低",
+      "detail": "考虑到 shell↔TS 集成复杂度、缓存机制设计、Windows 多候选 Python 路径检测（python3/python/py）、跨平台测试矩阵，实际工作量可能在 10-11 SP。如果改为纯 shell 前置检查 + 增强 doctor.js 的方案，可降至 5-6 SP。"
+    },
+    {
+      "id": "m2",
+      "title": "Python 版本 ≥3.8 的硬编码阈值需要可配置化",
+      "detail": "设计提到'要求 ≥3.8（可配置）'，但没有说明配置机制。不同项目的 Python 最低版本要求不同（有些项目要求 3.9+、3.10+）。建议复用 .xp-gate-config.json 或 pyproject.toml 中的 requires-python 字段。"
+    },
+    {
+      "id": "m3",
+      "title": "require_tool() 已提供部分健康检查能力",
+      "detail": "adapter-common.sh 的 require_tool() 函数（L143-162）已经在每个工具调用前检查可用性，并给出清晰的错误信息（'❌ BLOCKED - Required tool X not available'）。python.sh 的 run_static_analysis() 和 run_tests() 都调用了 require_tool。新增的健康检查需要比这更有价值（如版本检查、venv 检测），否则只是重复。"
+    }
+  ],
+  "suggestions": [
+    {
+      "id": "S1",
+      "title": "替代方案：纯 shell 前置检查 + 增强 doctor.js",
+      "detail": "建议在 adapter-common.sh 或 python.sh 中添加纯 shell 的 python_env_preflight() 函数，仅检查：(1) python3/python/py 是否可执行（command -v）；(2) pip/pip3 是否可用。这只需 ~20 行 shell 代码，零额外延迟，不引入跨语言调用。深层诊断（版本、venv、工具完整性）增强到 doctor.js 中，用户通过 xp-gate doctor 按需运行。"
+    },
+    {
+      "id": "S2",
+      "title": "如果坚持 TS 模块方案，考虑作为 pre-commit 编排器的前置步骤",
+      "detail": "如果健康检查必须用 TS 实现，建议将其集成到 TypeScript 编排器层面（类似 gate-3.ts 等模块的调用方式），而非从 shell 适配器调用。在 pre-commit hook 的 TypeScript 路由逻辑中，检测到 Python 项目后先运行健康检查 gate，再路由到 python.sh 适配器。这样避免了 shell→TS 的跨语言调用。"
+    },
+    {
+      "id": "S3",
+      "title": "回滚策略：添加 --skip-python-health 逃生舱",
+      "detail": "设计缺少回滚机制。如果健康检查误报（例如特殊的 Python 环境配置导致误判），用户应能通过环境变量 XP_GATE_SKIP_PYTHON_HEALTH=1 或 CLI 标志绕过检查。这与现有 gate 的 SKIP 语义一致。"
+    },
+    {
+      "id": "S4",
+      "title": "复用 language-tools.js 的 checkTool() 而非重新实现",
+      "detail": "language-tools.js 的 checkTool() 函数（L478-495）已经实现了跨平台工具检测（含 Windows shell 差异处理）。python-health.ts 应直接 import 并复用此函数，而非重新实现工具检测逻辑。设计文档提到'复用现有注册表'但未明确是否复用 checkTool()。"
+    }
+  ]
+}

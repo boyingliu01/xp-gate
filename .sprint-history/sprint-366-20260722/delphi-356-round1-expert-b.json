@@ -1,0 +1,95 @@
+{
+  "expert_id": "B",
+  "round": 1,
+  "mode": "design",
+  "issue": 356,
+  "verdict": "PASS_WITH_CAVEATS",
+  "confidence": 7,
+  "critical_issues": [],
+  "major_concerns": [
+    {
+      "id": "MC-1",
+      "category": "cross-platform",
+      "title": "Windows Store Python 存根未处理",
+      "description": "Windows 10/11 上存在 'python.exe' 存根（位于 %LOCALAPPDATA%/Microsoft/WindowsApps），它不是真正的 Python，而是打开 Microsoft Store 的 launcher。如果检测顺序是 python3 → python → py，且 where python 命中了这个存根，后续 python --version 会挂起或返回非预期输出。",
+      "recommendation": "在检测到 python.exe 后，先用短超时（3s）执行 python --version，验证 stdout 包含 'Python 3.x' 格式输出。如果超时或输出不匹配，跳过该候选继续下一个。同时检查路径是否包含 'WindowsApps' 作为启发式过滤。",
+      "severity": "high"
+    },
+    {
+      "id": "MC-2",
+      "category": "performance",
+      "title": "Pre-commit 路径缺少缓存策略细节",
+      "description": "设计提到'缓存检查结果'但未定义缓存键、TTL 和失效策略。健康检查需要多次 spawnSync 调用（python --version、pip --version、各工具 --version），在 pre-commit 热路径上可能增加 2-5 秒延迟。",
+      "recommendation": "明确缓存方案：建议以 python exe 路径 + version + venv path 的 hash 为缓存键，TTL 设为 24 小时或直到 venv 目录 mtime 变化时失效。缓存文件放在 .xp-gate/cache/python-health.json。同时考虑对 version 检查设置 3s 超时上限。",
+      "severity": "high"
+    },
+    {
+      "id": "MC-3",
+      "category": "integration",
+      "title": "Bash 适配器调用 TypeScript 健康检查的机制未定义",
+      "description": "Step 2 展示了一个 bash 函数 python_health_check()，但未说明 python.sh 如何调用 checkPythonHealth()。是通过 npx tsx 调用？还是编译后的 JS？还是 bash 原生实现？这直接影响可靠性和性能。",
+      "recommendation": "建议两条路径：(1) bash 适配器中用原生 bash 实现轻量级健康检查（仅验证 python 可执行 + 版本），(2) 完整的 TypeScript 健康检查通过 CLI 命令 'xp-gate check python-health' 暴露。避免在 bash 适配器中引入 npx tsx 调用链，增加复杂度和延迟。",
+      "severity": "medium"
+    },
+    {
+      "id": "MC-4",
+      "category": "completeness",
+      "title": "未覆盖 pyenv/conda/uv 等 Python 环境管理器",
+      "description": "设计仅检查 VIRTUAL_ENV 环境变量来判断虚拟环境，但 pyenv 使用 shims 目录、conda 使用 CONDA_DEFAULT_ENV/CONDA_PREFIX、uv 使用 .venv/.python-version。这些工具在开发者中广泛使用，遗漏会导致误判。",
+      "recommendation": "扩展虚拟环境检测逻辑：(1) 检查 CONDA_PREFIX 或 CONDA_DEFAULT_ENV；(2) 检查 .venv 或 venv 目录是否存在；(3) 检查 pyenv 的 .python-version 文件；(4) 检查 uv 的 .python-version 或 uv.lock。将检测结果标注环境类型（venv/conda/pyenv/uv/system）。",
+      "severity": "medium"
+    }
+  ],
+  "minor_concerns": [
+    {
+      "id": "mC-1",
+      "category": "reuse",
+      "title": "应复用 isToolAvailable() 进行工具检测",
+      "description": "common.ts 已有 isToolAvailable() 支持 PATH → npx → custom 三级检测，但设计文档的 checkPythonHealth 接口未提及复用。Python 工具（mypy/ruff/pytest）的检测应利用此基础设施，避免重复实现。",
+      "recommendation": "在 checkPythonHealth 内部，对 pip/mypy/ruff/pytest 的检测调用 isToolAvailable()，而不是单独 spawnSync。Python 解释器本身的检测可作为特殊路径（多候选 + 版本验证）。"
+    },
+    {
+      "id": "mC-2",
+      "category": "correctness",
+      "title": "Python 版本解析需要防御性处理",
+      "description": "python --version 的输出格式在不同版本/发行版间可能不同（如 'Python 3.11.4'、'Python 3.12.0rc1'、Anaconda 的额外后缀）。设计未说明版本解析和比较逻辑。",
+      "recommendation": "使用正则 /^Python (\\d+)\\.(\\d+)\\.(\\d+)/ 提取主版本号，用 semver 比较逻辑判断 ≥3.8。对解析失败的版本字符串标记为 'unknown' 并发出 WARN 而非 BLOCK。"
+    },
+    {
+      "id": "mC-3",
+      "category": "edge-case",
+      "title": "pip 可用性与 Python 版本的一致性",
+      "description": "设计检查 pip 可用性但未验证 pip 对应的 Python 版本。在多 Python 环境（如系统 Python 3.8 + venv Python 3.12）中，pip 可能指向错误的环境。",
+      "recommendation": "使用 '<detected-python-exe> -m pip --version' 而非直接 'pip --version'，确保 pip 与检测到的 Python 解释器一致。"
+    },
+    {
+      "id": "mC-4",
+      "category": "error-handling",
+      "title": "spawnSync 超时和崩溃场景未覆盖",
+      "description": "设计中各检查步骤未考虑：(1) python --version 挂起（损坏的安装）；(2) 权限不足导致 EACCES；(3) 动态链接库缺失导致 segfault。这些在 Windows 上尤其常见。",
+      "recommendation": "为所有 spawnSync 调用设置明确超时（建议 5s），捕获 error 字段检查 EACCES/ENOENT/ETIMEDOUT，在 issues 数组中输出具体错误而非仅 'not available'。"
+    }
+  ],
+  "suggestions": [
+    {
+      "id": "S-1",
+      "title": "考虑增加 Python 项目标记文件检测的扩展",
+      "description": "detectProjectLang() 当前检测 pyproject.toml/setup.py/requirements.txt，但缺少 Pipfile、Pipfile.lock、.python-version。建议同步扩展检测逻辑，确保 uv/poetry/pipenv 项目也能触发 Python 健康检查。"
+    },
+    {
+      "id": "S-2",
+      "title": "健康检查结果结构化输出",
+      "description": "建议 PythonHealthResult 增加 'environment_type' 字段（system/venv/conda/pyenv/uv），便于 'xp-gate doctor' 命令提供更精确的诊断建议。同时考虑增加 'fix_suggestions' 数组，为每个 issue 提供对应的修复命令。"
+    },
+    {
+      "id": "S-3",
+      "title": "增加并行检测优化",
+      "description": "当前设计是串行检查 python → pip → venv → tools。由于各检查相互独立（除 tools 依赖 python exe），可考虑用 Promise.all 并行执行版本检查，减少 pre-commit 延迟。"
+    },
+    {
+      "id": "S-4",
+      "title": "与 language-tools.js 注册表的集成方式需明确",
+      "description": "设计说'复用现有注册表'但未说明具体方式。建议 checkPythonHealth 接受一个 requiredTools 参数，由调用方从 language-tools.js 的 python.tools 中过滤 optional=false 的工具传入，而非硬编码 mypy/ruff/pytest 列表。"
+    }
+  ]
+}
