@@ -2,6 +2,16 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.17.0.0] - 2026-07-22
+
+### Added
+- **Sprint 初始化 CLI (`xp-gate sprint-init`)**: Phase 1 PREP 自动创建 sprint-state.json，消除编排器"记住"手动写入状态文件的依赖。
+- **Phase-Transition 程序化强制执行 (#366)**: 三层强制机制 — Layer 1 sprint-init 自动初始化 + Layer 2 TodoWrite 嵌入式调用 + Layer 3 sprint-gate.sh 门禁检查。
+- **SKILL.md 结构化重写**: frontmatter WHAT/WHEN/NOT WHEN/TRIGGERS 完整描述、Phase 1 展开（触发条件/输入/步骤/输出）、门禁条件表、状态机图、决策记录模板、失败处理策略。
+
+### Changed
+- Sprint-flow SKILL.md 从纯文本指令升级为结构化状态机文档，支持程序化验证。
+
 ## [0.16.0.0] - 2026-07-22
 
 ### Added
