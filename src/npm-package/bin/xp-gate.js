@@ -149,6 +149,14 @@ const COMMANDS = {
     },
     usage: 'xp-gate sprint-status [--json] [--watch] [--dir <path>]'
   },
+  'sprint-init': {
+    description: 'Initialize sprint state (single entry point for sprint creation, resolves #366)',
+    run: subargs => {
+      const { handleSprintInit } = require('../lib/sprint-init.js');
+      handleSprintInit(subargs).then(code => process.exit(code));
+    },
+    usage: 'xp-gate sprint-init "<task_description>" [--issues "<#123>"] [--force] [--dry-run] [--dir <path>]'
+  },
   'next-sprint': {
     description: 'Analyze remaining open issues and plan next iteration',
     run: subargs => {
