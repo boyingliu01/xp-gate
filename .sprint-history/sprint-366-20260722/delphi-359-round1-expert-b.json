@@ -1,0 +1,71 @@
+{
+  "expert_id": "B",
+  "round": 1,
+  "mode": "design",
+  "issue": 359,
+  "verdict": "REQUEST_CHANGES",
+  "confidence": 9,
+  "critical_issues": [
+    {
+      "id": "B1",
+      "title": "源文件-测试文件配对算法存在严重误报风险",
+      "detail": "设计文档 Layer 1 要求 '每个 src/**/*.ts 源文件必须有对应的 __tests__/**/*.test.ts'，但实际项目中存在大量合法无测试文件：types.ts、index.ts、constants.ts、utils.ts、config.ts、migrations/、seeds/、fixtures/ 等。设计虽提到 '排除 .d.ts、types.ts、index.ts'，但排除列表不完整。建议：1) 明确完整的排除规则（纯声明文件、配置文件、工具函数、迁移文件等）；2) 采用白名单而非黑名单策略；3) 允许通过注释注解（如 @no-test）显式标记不需要测试的文件。"
+    },
+    {
+      "id": "B2",
+      "title": "跨模块检测逻辑过于简单，无法准确识别集成测试",
+      "detail": "设计文档 Layer 2 要求 '扫描 import 语句，确认集成测试引用了 ≥2 个不同模块'，但 '模块' 的定义不清晰。是按目录划分（src/moduleA vs src/moduleB）？还是按 npm 包划分？还是按业务域划分？现有代码库中 src/ 下有 9 个子目录（architecture、build-integrity、debugger、gates、mock-policy、mutation、npm-package、principles、rules），但这些是技术分层而非业务模块。简单的 import 路径分析会产生大量误报：1) 导入 ../../utils 算跨模块吗？2) 导入 @types/node 算吗？3) 导入同一个 module 下的两个文件算吗？需要明确 '模块边界' 的定义，建议基于 architecture.yaml 或 .architecture-baseline.json 中的模块划分。"
+    }
+  ],
+  "major_concerns": [
+    {
+      "id": "B3",
+      "title": "detectTestLayer() 的模式匹配不够健壮",
+      "detail": "现有 detectTestLayer() 使用简单的字符串模式匹配：'.e2e.'、'/e2e/'、'e2e/' 等。这会导致：1) 文件名包含 'integration' 但实际是单元测试（如 integration-utils.test.ts）被误分类；2) 路径中包含 'e2e' 但实际不是 E2E 测试（如 src/e2e-helpers/）被误分类；3) Windows 路径分隔符 \\ 虽已做 replace，但模式匹配本身不够精确。建议：1) 优先基于文件命名约定（*.integration.test.ts、*.e2e.test.ts）；2) 其次基于目录约定（src/__integration__/、src/__e2e__/）；3) 最后才 fallback 到路径包含检测。"
+    },
+    {
+      "id": "B4",
+      "title": "Layer 2 '覆盖至少 1 个跨模块调用路径' 无法验证",
+      "detail": "设计文档要求 '集成测试必须覆盖至少 1 个跨模块调用路径'，但静态分析 import 语句只能证明测试文件引用了多个模块，无法证明测试执行时真的跨模块调用了。一个集成测试可以 import 两个模块但只测试其中一个，另一个只是类型引用。要真正验证 '覆盖跨模块调用路径'，需要：1) 运行时覆盖率数据（vitest --coverage）；2) 调用链追踪（需要 APM 工具）；3) 或者降低要求为 '引用了多个模块'（但这太弱了）。建议：明确这是 '静态引用检查' 还是 '运行时覆盖验证'，前者容易实现但价值有限，后者准确但实现复杂。"
+    },
+    {
+      "id": "B5",
+      "title": "Layer 3 '扫描 describe 块确认端到端场景描述' 过于模糊",
+      "detail": "设计文档要求 '扫描测试文件中的 describe 块，确认有端到端场景描述'，但 '端到端场景描述' 没有明确标准。是检查 describe 块的文本内容包含特定关键词（如 'e2e'、'user journey'、'workflow'）？还是检查 describe 块的数量？还是检查 describe 块的嵌套深度？现有代码库中很多单元测试也用 describe 块（如 describe('detectTestLayer', ...)），如何区分 '端到端场景描述' 和 '普通单元测试分组'？建议：明确检测规则，或改为更简单的指标（如 E2E 测试文件数量、测试用例数量）。"
+    }
+  ],
+  "minor_concerns": [
+    {
+      "id": "B6",
+      "title": "性能问题：全量扫描 src/ 目录可能很慢",
+      "detail": "设计文档风险表提到 '仅分析 changedFiles，不扫描全量'，但 Layer 1 的 '每个源文件必须有对应测试' 语义上需要全量扫描。如果项目有 1000+ 源文件，每次 pre-push 都全量扫描会很慢。建议：1) 明确是增量检查（只检查 changedFiles）还是全量检查；2) 如果是全量检查，考虑缓存机制（如 .test-layers-cache.json）；3) 或者改为 '新增/修改的源文件必须有对应测试'（增量语义）。"
+    },
+    {
+      "id": "B7",
+      "title": "缺少对多语言项目的支持",
+      "detail": "设计文档只提到 TypeScript（src/**/*.ts），但 xp-gate 支持多语言（Python、Go、Java、Kotlin 等）。Gate M 的 findTestFileForSource() 已支持多语言的测试文件配对。如果 test-layers 只支持 TypeScript，会与 Gate M 的多语言能力不一致。建议：1) 明确 test-layers 是否只支持 TypeScript；2) 如果支持多语言，需要为每种语言定义测试文件命名约定和配对规则。"
+    }
+  ],
+  "suggestions": [
+    {
+      "id": "S1",
+      "title": "Layer 1 采用配置化的排除规则",
+      "detail": "不要硬编码排除列表，而是通过配置文件（如 .test-layers-config.json）定义排除规则：{ \"exclude\": [\"**/*.d.ts\", \"**/types.ts\", \"**/index.ts\", \"**/constants.ts\", \"**/config.ts\", \"**/migrations/**\", \"**/seeds/**\", \"**/fixtures/**\"] }。这样用户可以根据项目实际情况调整，避免误报。"
+    },
+    {
+      "id": "S2",
+      "title": "Layer 2 基于 architecture.yaml 定义模块边界",
+      "detail": "项目已有 architecture.yaml 和 .architecture-baseline.json，定义了模块划分和依赖规则。Layer 2 的跨模块检测应该基于这些架构定义，而不是简单的目录划分。可以复用 Gate 6 (Architecture) 的模块解析逻辑，判断集成测试是否真的跨了架构定义的模块边界。"
+    },
+    {
+      "id": "S3",
+      "title": "Layer 2/3 改为统计性指标而非强制性规则",
+      "detail": "Layer 2 和 Layer 3 的检测逻辑不够可靠（静态 import 分析无法证明真的跨模块调用，describe 块扫描无法证明真的是端到端场景）。建议改为统计性报告：1) 报告集成测试文件数量和占比；2) 报告 E2E 测试文件数量和占比；3) 报告跨模块引用次数（但不强制阈值）。让用户根据报告自行判断，而不是强制 BLOCK。"
+    },
+    {
+      "id": "S4",
+      "title": "复用 Gate M3 的 import 解析逻辑",
+      "detail": "Gate M3 已有完善的 import 解析逻辑（collectImports、IMPORT_REGEXES），支持多种 import 语法（static import、dynamic import、require、re-export）。test-layers 的 Layer 2 应该复用这些逻辑，而不是重新实现。"
+    }
+  ]
+}

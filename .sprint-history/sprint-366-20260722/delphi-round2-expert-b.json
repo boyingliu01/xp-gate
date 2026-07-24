@@ -1,0 +1,46 @@
+{
+  "expert_id": "B",
+  "round": 2,
+  "mode": "design",
+  "verdict": "APPROVED",
+  "confidence": 9,
+  "round1_issues_resolved": [
+    {
+      "issue": "Critical: execSync 存在 shell 注入风险且参数拼接不可靠",
+      "resolution": "设计文档 L78 明确使用 spawnSync，L56 runTool 签名使用 args: string[] 数组传参，彻底避免 shell 字符串拼接",
+      "status": "RESOLVED"
+    },
+    {
+      "issue": "Critical: 环境变量传递缺失，子进程无法继承 gate 所需的上下文变量",
+      "resolution": "L56 runTool opts 包含 env: Record<string,string>，L80 明确'环境变量通过 spawnSync 的 env 选项显式传递'",
+      "status": "RESOLVED"
+    },
+    {
+      "issue": "Critical: /tmp 路径在 Windows 不存在，导致硬编码路径失败",
+      "resolution": "L74 提供 getTempDir() 使用 os.tmpdir()，L79 明确说明跨平台临时目录策略",
+      "status": "RESOLVED"
+    },
+    {
+      "issue": "Major: bash 输出解析与 TypeScript 输出解析可能存在差异（换行符、编码、颜色码等）",
+      "resolution": "L133 引入 Golden test cases 机制——从 bash 版本提取输入/输出/退出码三元组作为验收基准，L134 增加项目语言矩阵测试",
+      "status": "RESOLVED"
+    },
+    {
+      "issue": "Major: PowerShell 5.1 语法限制可能导致 .ps1 脚本不兼容",
+      "resolution": "L139 明确'不创建 PowerShell gate 脚本（.ps1）'，L157 风险表说明'不涉及 .ps1 脚本编写，TypeScript 模块通过 spawnSync 调用 pwsh/powershell.exe'",
+      "status": "RESOLVED"
+    },
+    {
+      "issue": "Major: 路径格式差异（Windows 反斜杠 vs Unix 正斜杠）",
+      "resolution": "L81 明确'路径统一使用 path.join() / path.resolve()，传入外部工具前不做格式转换'",
+      "status": "RESOLVED"
+    },
+    {
+      "issue": "Major: git diff 输出编码问题，非 ASCII 文件名可能乱码",
+      "resolution": "spawnSync 默认以 UTF-8 Buffer 返回 stdout（L78 的 spawnSync 选择已隐含此点），getChangedFiles() 在 Node.js 侧实现（L62），Node.js 字符串原生 UTF-8。虽未显式提及 encoding 选项，但 spawnSync 默认行为已正确处理",
+      "status": "RESOLVED"
+    }
+  ],
+  "remaining_concerns": [],
+  "rationale": "Round 1 提出的 3 个 Critical 和 4 个 Major 问题全部得到充分解决。修订版设计在以下方面显著改进：(1) spawnSync 替代 execSync 消除注入风险；(2) env 选项显式传递环境变量；(3) os.tmpdir() 解决跨平台临时目录；(4) Golden test cases + 语言矩阵测试保证行为一致性；(5) 明确不编写 .ps1 脚本规避 PS 5.1 限制；(6) path.join/path.resolve 统一路径处理。此外，Expert A 建议的 changedFiles 获取（L62 getChangedFiles）、渐进式迁移（L143-147 XP_GATE_ENGINE 环境变量回退机制）、Expert C 的两个正交维度重构（L3-15）也已完善。设计整体技术可行性高，风险缓解措施充分，予以 APPROVED。"
+}

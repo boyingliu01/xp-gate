@@ -1,0 +1,24 @@
+{
+  "expert_id": "A",
+  "round": 1,
+  "mode": "design",
+  "verdict": "APPROVED",
+  "confidence": 9,
+  "critical_issues": [],
+  "major_concerns": [
+    "设计未明确 changedFiles 和 projectLang 在 Node.js CLI 上下文中的获取方式。在 pre-commit bash 路径中，这些值由 adapter-common.sh 的 detect_project_lang() 和 git diff --cached 计算。TypeScript 模块需要自行实现等效逻辑（Node.js 侧的 detectLang() 和 getChangedFiles()），否则 gate-runner.js 无法向 gate 模块传递正确参数。建议在 Step 2 中补充这两个函数的实现来源或提取策略。",
+    "渐进式迁移策略缺失。4 个 gate 模块（gate-3/7/8/9）一次性重写存在集成风险。建议明确优先级顺序——先从最简单的 gate-8（gitleaks，57 行 bash，逻辑最线性）开始作为里程碑 1 验证架构可行性，再推进其余 gate。",
+    "pre-commit bash 路径与 Node.js TypeScript 路径的长期共存策略未说明。设计只说'保持不变'，但未给出收敛时间线。建议在'不做的事'中补充：'bash gate 脚本标记为 legacy，在 TypeScript 路径经过 N 个版本验证后逐步废弃'。"
+  ],
+  "minor_concerns": [
+    "Step 3 的 common.ts 接口定义不够完整。isToolAvailable() 需要处理 PATH 查找、npx 回退、自定义路径（如 ~/.local/bin/）等多层检测逻辑——现有 bash 版本的 require_tool() 有 3 层回退（command -v → npx → 自定义路径），TypeScript 版本需要等价实现。",
+    "gate-runner.js 是 JavaScript（非 TypeScript），但新增的 gate 模块是 TypeScript。需要明确编译/运行策略：是通过 tsx 直接运行 .ts，还是先编译为 .js？现有 gate-m.ts 通过 npx tsx 运行，但 gate-runner.js 中 require('./principles.js') 暗示需要编译产物。建议统一说明。",
+    "recordAudit() 在 bash 路径中写入 .xp-gate/audit.jsonl。TypeScript 版本需要确保写入格式和路径完全一致，否则审计数据会分裂为两套。建议在 common.ts 中锁定 JSONL schema。",
+    "风险表中'TypeScript 重写与 bash 逻辑不一致'的缓解措施（'测试用例覆盖所有分支'）过于笼统。建议补充：从 bash 版本提取 golden test cases（输入/输出/退出码三元组），作为 TypeScript 版本的验收基准。"
+  ],
+  "suggestions": [
+    "建议在架构图中补充数据流：Node.js CLI → gate-runner.js → TypeScript gate module → spawnSync(外部工具) → 解析输出 → 返回结果。明确外部工具（lizard/gitleaks/semgrep/checkov）在 Windows 上的可用性前提——这些工具本身是否支持 Windows 原生运行？如果某些工具仅支持 bash/Linux，TypeScript 重写仍然无法解决问题。",
+    "建议为 src/gates/ 目录建立统一的类型定义（types.ts），定义 GateInput、GateOutput、GateStatus 等接口，避免 4 个模块各自定义不一致的接口。",
+    "考虑在 gate-runner.js 中添加 fallback 链：TypeScript 模块执行失败时（如外部工具未安装导致 spawnSync 异常），给出清晰的安装指引而非静默失败。现有 bash 版本在这方面做得较好（如 gate-3.sh 的 'Install with: pip install --user lizard'）。"
+  ]
+}

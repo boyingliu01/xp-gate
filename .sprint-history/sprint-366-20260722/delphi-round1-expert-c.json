@@ -1,0 +1,30 @@
+{
+  "expert_id": "C",
+  "round": 1,
+  "mode": "design",
+  "verdict": "REQUEST_CHANGES",
+  "confidence": 9,
+  "critical_issues": [
+    "设计丢失了 PowerShell 项目语言支持的核心组件。用户明确澄清：目标是'支持 PowerShell 项目语言'（当被分析的项目是 PowerShell 项目时），而非'支持在原生 PowerShell 环境中运行 xp-gate'（运行环境问题）。设计原本应包含两个关键组件：(1) powershell.sh（139 行）作为 PowerShell 语言适配器——该文件实际已存在于 githooks/adapters/powershell.sh，处理 Gate 1（PSScriptAnalyzer 静态分析）和 Gate 5（Pester 测试+覆盖率）；(2) adapter-common.ps1 作为共享函数库。但当前设计文档已完全重写为 TypeScript 跨平台重写方案，这两个组件均未被引用或整合。设计解决了'Node.js CLI 如何运行 gate'的问题，却丢弃了'PowerShell 项目如何在各 gate 中被正确处理'的问题。",
+    "设计问题定义与实际目标根本性错位。设计文档第 3-11 行的问题陈述和根因分析均围绕'运行环境跨平台'展开（'Windows 原生 PowerShell 环境下无法运行'、'原生 PowerShell 用户'），但实际目标应该是'PowerShell 项目语言支持'。这是两个正交维度。现有 powershell.sh 已证明项目语言适配模式有效——它通过 bash 调用 pwsh/powershell.exe 来运行 PowerShell 工具，而非让 xp-gate 本身在 PowerShell 中运行。设计文档应将问题重新定义为'PowerShell 项目在各 gate 中的覆盖空白'。",
+    "TypeScript 重写方案解决了运行环境问题，但未触及 PowerShell 项目语言支持的核心缺口。当前 gate 对 PowerShell 项目存在明确的支持空白：(1) gate-3.sh 第 14-17 行对 PowerShell 项目直接 SKIP（'No PowerShell Clean Code / SOLID tool available'）；(2) gate-9.sh 第 29 行的文件过滤不包含 .ps1 扩展名，且 semgrep 本身不支持 PowerShell；(3) gate-7.sh 第 12 行的 IaC 检测不覆盖 PowerShell DSC（Desired State Configuration）文件。TypeScript 重写如果不解决这些空白，只是换了实现语言但没有增强 PowerShell 项目支持。"
+  ],
+  "major_concerns": [
+    "adapter-common.ps1 共享函数库在设计中完全缺失。用户明确指出设计应包含 adapter-common.ps1 提供共享函数（如 Detect-OsEnv、Gate-StartMs、Record-GateAudit、Get-ChangedFiles、Invoke-ToolCheck），对应 adapter-common.sh 的 268 行共享逻辑。当前 TypeScript 方案用 src/gates/common.ts 替代了这一角色，但 common.ts 仅包含工具检测和审计记录函数，缺少 PowerShell 项目语言场景下的关键能力：当 projectLang === 'powershell' 时如何检测 pwsh 可执行文件（参考 powershell.sh 的 _detect_pwsh() 模式）、如何调用 PSScriptAnalyzer/Pester、如何处理 PowerShell DSC 文件检测等。",
+    "PowerShell 项目语言支持的具体增强策略缺失：设计应明确每个 gate 对 PowerShell 项目的处理策略——(1) Gate 3（复杂度）：lizard 不支持 .ps1，但 PSScriptAnalyzer 可提供基于规则的代码质量检查，TypeScript 模块应检测 projectLang === 'powershell' 并路由到 PSScriptAnalyzer；(2) Gate 7（IaC）：PowerShell DSC 配置（*.configuration.ps1、*.mof 文件）是 IaC 的一种形式，应被检测；(3) Gate 8（Secret）：gitleaks 支持任意文本文件的正则扫描，.ps1 文件应被包含；(4) Gate 9（SAST）：semgrep 不支持 .ps1，需考虑 PSScriptAnalyzer 的安全相关规则作为替代。",
+    "powershell.sh 适配器的架构决策（第 10-17 行注释）未被设计文档引用或整合。powershell.sh 明确记录了 Gate 2/3/4/6 对 PowerShell 项目标记为 SKIP 的原因（'lizard does not analyze .ps1'、'No PowerShell principles checker'等）。设计文档应明确：TypeScript 重写后这些 SKIP 决策是否仍然有效？是否有新的工具或方法可以填补空白？",
+    "回滚策略缺失：设计未提及如果 TypeScript 重写后行为与 bash 版本不一致如何回滚。建议保留 bash 脚本作为 fallback，通过环境变量（如 XP_GATE_ENGINE=ts|bash）切换。"
+  ],
+  "minor_concerns": [
+    "gate-runner.js 中 gate-4 已走 TypeScript 路线（通过 require('./principles.js')），设计方向与此一致。但 gate-4 的 TypeScript 实现（src/principles/index.ts）通过 npx tsx 调用，而非纯 JavaScript require——设计文档的 require('../gates/gate-3.js') 模式需要考虑编译/运行链。",
+    "powershell.sh 第 10-17 行的注释是宝贵的架构知识，记录了每个 gate 对 PowerShell 的支持状态和原因。TypeScript 重写时应将这些注释转化为代码中的显式处理逻辑和文档，而非丢失这些知识。",
+    "src/gates/common.ts 的工具检测应参考 powershell.sh 的 _detect_pwsh() 模式（第 20-30 行）——先检测 pwsh（7+），再回退到 powershell.exe（5.1）。当项目语言为 PowerShell 时，gate 模块应能自动检测并使用 pwsh 来运行 PowerShell 工具。"
+  ],
+  "suggestions": [
+    "【核心建议】设计应明确区分并覆盖两个正交维度：(1) 跨平台运行：TypeScript 重写消除 Node.js CLI 对 bash 的依赖（当前设计已覆盖）；(2) 项目语言支持增强：确保每个 gate 对 PowerShell 项目有明确的处理策略（当前设计缺失）。powershell.sh 已处理 Gate 1/5 的 PowerShell 项目支持，设计应聚焦于 Gate 3/7/8/9 的增量覆盖。",
+    "【恢复 adapter-common.ps1 的核心理念】虽然实现方式从 PowerShell 改为 TypeScript，但 adapter-common.ps1 的设计意图——为 PowerShell 项目提供共享的项目语言支持函数——应在 src/gates/common.ts 中体现。具体包括：detectPowerShell() 函数（参考 _detect_pwsh()）、runPowerShellTool(toolName, args) 函数（封装 pwsh -Command 调用）、isPowerShellProject(projectLang) 判断函数。这些函数让各 gate 模块能统一处理 PowerShell 项目场景。",
+    "【复用现有 powershell.sh 资产】TypeScript gate 模块应整合 powershell.sh 的能力：(1) gate-3.ts 当 projectLang === 'powershell' 时，调用 PSScriptAnalyzer 进行代码质量检查；(2) gate-7.ts 的 IaC 检测增加 PowerShell DSC 文件模式；(3) gate-8.ts 的 gitleaks 扫描包含 .ps1 文件；(4) gate-9.ts 当 projectLang === 'powershell' 时，使用 PSScriptAnalyzer 安全规则替代 semgrep。",
+    "【测试策略增强】增加'项目语言矩阵测试'：为 TypeScript、Python、Go、PowerShell 等每种支持的项目语言准备 fixture，验证每个 gate 对每种语言的行为是否符合预期。",
+    "【Phase 分层】建议分为：Phase 1 = TypeScript 重写（gate-3/7/8/9.ts），解决跨平台运行问题；Phase 2 = PowerShell 项目语言支持增强，填补各 gate 对 .ps1 文件的检查空白，与 powershell.sh 整合。Phase 1 可独立交付和验证。"
+  ]
+}

@@ -1,0 +1,30 @@
+{
+  "expert_id": "B",
+  "round": 1,
+  "mode": "design",
+  "verdict": "REQUEST_CHANGES",
+  "confidence": 8,
+  "critical_issues": [
+    "Node.js 路由层实现错误：设计中的 getGateScriptPath() 返回 { path, shell } 对象，但实际 gate-runner.js 使用 execSync() 而非 spawnSync()。execSync 需要完整命令字符串，不是分离的 path 和 shell 参数。应该改为：const cmd = isWindows ? `powershell -ExecutionPolicy Bypass -File \"${scriptPath}\"` : `bash \"${scriptPath}\"`; execSync(cmd, { stdio: 'inherit' })",
+    "环境变量传递机制缺失：设计提到 PowerShell 脚本通过环境变量接收 CHANGED_FILES、PROJECT_LANG，但未说明 Node.js 如何设置这些环境变量。当前 runBashScript() 直接调用 execSync 未设置 env，需要在调用 PowerShell 脚本时显式设置 process.env.CHANGED_FILES 等，或通过 spawn 的 env 选项传递",
+    "临时文件路径不兼容：gate-4.sh 使用 /tmp/principles-output.json，gate-8.sh 使用 /tmp/gitleaks-report.json。Windows PowerShell 中 /tmp 不存在，需要改用 $env:TEMP 或 [System.IO.Path]::GetTempPath()"
+  ],
+  "major_concerns": [
+    "外部工具输出解析差异：bash 脚本大量使用 grep/awk/sed 解析工具输出（如 lizard 的 'Warning cnt'、semgrep 的 JSON），PowerShell 需要用 Select-String、ConvertFrom-Json 等重新实现。设计未明确这些转换细节，容易导致逻辑漂移",
+    "PowerShell 5.1 语法限制未充分考虑：PS 5.1 不支持某些现代语法（如 ?? 空值合并运算符、三元运算符等）。设计仅声明'兼容 PS 5.1'但未列出具体约束，实现时可能踩坑",
+    "路径格式转换问题：Windows 路径使用反斜杠，但外部工具（lizard、semgrep）可能期望正斜杠。设计提到使用 Join-Path 但未说明如何统一路径格式，建议在传入外部工具前统一转换为正斜杠",
+    "git diff 命令在 PowerShell 中的行为：gate-7.sh 和 gate-9.sh 使用 git diff --cached --name-only，在 PowerShell 中执行时输出格式可能因编码问题不同，需要添加 -Encoding UTF8 参数或验证输出一致性"
+  ],
+  "minor_concerns": [
+    "adapter-common.ps1 函数命名不一致：设计中的 Detect-OsEnv、Gate-StartMs 等使用 PascalCase（PowerShell 惯例），但与 bash 版本的 snake_case（detect_os_env、gate_start_ms）不对应，增加维护成本。建议保持命名风格一致或提供映射表",
+    "Pester 测试框架配置缺失：设计提到'Pester 测试'但未说明如何配置 Pester（需要 Install-Module Pester -Force）、如何集成到 CI、如何与现有 vitest 测试矩阵协调",
+    "安装路径选择存疑：设计将 .ps1 文件安装到 ~/.config/xp-gate/adapters/，但 Windows 惯例是 $env:APPDATA 或 $env:LOCALAPPDATA。~/.config 在 Windows 上不是标准路径，可能影响用户查找和维护"
+  ],
+  "suggestions": [
+    "考虑混合方案：gate-4（principles checker）和 gate-9（semgrep JSON 解析）已大量使用 Node.js，建议直接用 TypeScript 重写这两个 gate 的核心逻辑，而非移植到 PowerShell。只有 gate-3/7/8 需要 PowerShell 版本",
+    "添加 PowerShell 脚本的单元测试覆盖：每个 .ps1 脚本应该有对应的 Pester 测试，mock 外部工具调用（lizard、gitleaks 等），验证输出解析逻辑和退出码",
+    "在 Node.js 路由层添加 fallback 机制：如果 PowerShell 脚本不存在，尝试使用 bash 版本（通过 Git Bash），而非直接失败。这可以提高向后兼容性",
+    "提供 PowerShell 5.1 兼容性检查清单：列出 PS 5.1 不支持的语法特性（如 ??、?.、三元运算符等），在代码审查时作为检查依据",
+    "考虑使用 PowerShell 的 [System.Environment]::GetEnvironmentVariable() 而非 $env: 读取环境变量，以确保在受限执行环境下也能正确获取"
+  ]
+}

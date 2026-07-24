@@ -1,0 +1,71 @@
+{
+  "expert_id": "C",
+  "round": 2,
+  "mode": "design",
+  "verdict": "PASS_WITH_CAVEATS",
+  "confidence": 8,
+  "round1_issues_resolved": [
+    {
+      "id": "C-C1",
+      "severity": "Critical",
+      "issue": "设计混淆两个正交维度（跨平台运行 vs PowerShell 项目支持）",
+      "status": "RESOLVED",
+      "evidence": "问题陈述明确拆分为「维度 1 — 跨平台运行环境」和「维度 2 — PowerShell 项目语言支持空白」，两个维度在架构、实施步骤、风险表中均独立处理。"
+    },
+    {
+      "id": "C-C2",
+      "severity": "Critical",
+      "issue": "设计丢失 PowerShell 项目语言支持核心组件",
+      "status": "RESOLVED",
+      "evidence": "Step 2 表格新增「PowerShell 项目策略」列，逐 gate 覆盖：gate-8 显式包含 .ps1 扫描；gate-3 路由到 PSScriptAnalyzer PSAvoid* 规则；gate-7 增加 DSC 文件模式检测；gate-9 使用 PSScriptAnalyzer 安全规则。四个 gate 的 PS 项目支持均有明确方案。"
+    },
+    {
+      "id": "C-C3",
+      "severity": "Critical",
+      "issue": "TypeScript 重写未触及 PowerShell 项目支持缺口",
+      "status": "RESOLVED",
+      "evidence": "Step 2 表格每个 gate 模块均包含 PowerShell 项目策略列，TypeScript 重写与 PS 项目支持同步设计，不再遗漏。"
+    },
+    {
+      "id": "C-M1",
+      "severity": "Major",
+      "issue": "adapter-common.ps1 缺失，PowerShell 项目检测无实现载体",
+      "status": "RESOLVED",
+      "evidence": "common.ts 新增 detectPowerShell()、isPowerShellProject()、runPowerShellTool() 三个函数，承担了原 adapter-common.ps1 的职责。选择不创建 .ps1 脚本而是将逻辑内聚到 TypeScript 基础设施中，是合理的架构简化。"
+    },
+    {
+      "id": "C-M2",
+      "severity": "Major",
+      "issue": "powershell.sh 架构知识未整合",
+      "status": "RESOLVED",
+      "evidence": "detectPowerShell() 注释明确说明「先检测 pwsh 7+，回退 powershell.exe 5.1」，整合了 powershell.sh 中 _detect_pwsh() 的核心逻辑。"
+    }
+  ],
+  "other_expert_issues_assessment": {
+    "Expert_A": {
+      "changedFiles/projectLang 获取": "RESOLVED — common.ts 新增 getChangedFiles() 和 detectProjectLang()，含 .ps1/.psd1/.psm1 检测",
+      "渐进式迁移": "RESOLVED — 新增「渐进式迁移与共存策略」章节，含 XP_GATE_ENGINE 环境变量回退",
+      "golden test cases": "RESOLVED — Step 4 明确 golden test cases（bash I/O/exit code 三元组）+ 项目语言矩阵测试",
+      "统一类型定义": "RESOLVED — GateInput/GateOutput 接口统一定义"
+    },
+    "Expert_B": {
+      "spawnSync 替代 execSync": "RESOLVED — common.ts 明确使用 spawnSync，关键设计决策中说明避免 shell 注入",
+      "env 传递": "RESOLVED — runTool() opts 含 env 参数，通过 spawnSync 的 env 选项显式传递",
+      "os.tmpdir()": "RESOLVED — common.ts 新增 getTempDir() 使用 os.tmpdir()",
+      "路径格式": "RESOLVED — 关键设计决策明确使用 path.join()/path.resolve()"
+    }
+  },
+  "remaining_concerns": [
+    {
+      "severity": "Minor",
+      "concern": "gate-3 PowerShell 替代策略：用 PSScriptAnalyzer PSAvoid* 规则替代 lizard 复杂度检查，语义上并非等价（PSAvoid* 侧重代码质量而非圈复杂度）。作为填补空白的务实方案可以接受，但文档中应注明这是「近似替代」而非「等效替代」，避免后续维护者误解覆盖范围。",
+      "mitigation": "实现时在代码注释和测试用例中明确标注语义差异。"
+    },
+    {
+      "severity": "Minor",
+      "concern": "gate-7 DSC 检测范围未细化：仅提到「*.configuration.ps1, *.mof」模式，但 DSC 资源模块（*.dsc.resource.ps1）和 MOF 编译产物的处理策略未说明。",
+      "mitigation": "实现时参考 checkov 的 DSC 插件覆盖范围，初始版本可保守处理（仅检测明确的 DSC 文件模式），后续迭代扩展。"
+    }
+  ],
+  "rationale": "修订版设计文档充分回应了 Round 1 中我提出的全部 2 个 Critical 和 3 个 Major 问题。两个正交维度清晰分离，PowerShell 项目语言支持在 4 个 gate（3/7/8/9）中均有明确策略，common.ts 提供了完整的 PS 项目检测和工具调用基础设施。Expert A 和 Expert B 的问题也均得到妥善解决。剩余 2 个 Minor 问题（gate-3 替代策略的语义差异、gate-7 DSC 范围细化）不影响设计可行性，可在实现阶段处理。设计整体可行，准予通过。"
+}

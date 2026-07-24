@@ -1,0 +1,60 @@
+{
+  "expert_id": "A",
+  "round": 2,
+  "mode": "design",
+  "verdict": "APPROVED",
+  "confidence": 9,
+  "round1_issues_resolved": [
+    {
+      "issue": "changedFiles/projectLang 获取方式未明确",
+      "severity": "Major",
+      "status": "RESOLVED",
+      "evidence": "Step 1 common.ts 新增 getChangedFiles() 和 detectProjectLang()，语义与 adapter-common.sh 的 git diff --cached --name-only / detect_project_lang() 等效，且增加 .psd1/.psm1/.ps1 检测"
+    },
+    {
+      "issue": "渐进式迁移策略缺失",
+      "severity": "Major",
+      "status": "RESOLVED",
+      "evidence": "新增「渐进式迁移与共存策略」章节：XP_GATE_ENGINE=ts|bash 环境变量回退，bash 标记 legacy，3 版本后废弃"
+    },
+    {
+      "issue": "bash/TS 共存策略未说明",
+      "severity": "Major",
+      "status": "RESOLVED",
+      "evidence": "架构图清晰展示 pre-commit(bash) 标记 legacy 保持不变，Node.js CLI 路径走 TypeScript 模块；风险表最后一行明确共享 gate 语义 + 测试契约保证一致性"
+    }
+  ],
+  "other_experts_issues_assessment": {
+    "expert_B": {
+      "summary": "4 项 Critical/Major 全部解决",
+      "details": [
+        "execSync → spawnSync：common.ts 明确使用 spawnSync，设计决策段落显式说明理由 ✓",
+        "环境变量传递：spawnSync 的 env 选项显式传递 ✓",
+        "/tmp 路径不兼容：getTempDir() 使用 os.tmpdir()，注释标注 Windows/Linux 行为 ✓",
+        "输出解析/PS 5.1/路径格式/编码：path.join()/path.resolve() 统一处理；不涉及 .ps1 编写故无 PS 5.1 语法风险；spawnSync 返回结构化 stdout/stderr 避免解析差异 ✓"
+      ]
+    },
+    "expert_C": {
+      "summary": "3 项 Critical 全部解决",
+      "details": [
+        "两维度混淆：问题陈述修订版明确区分维度 1（跨平台运行环境）和维度 2（PowerShell 项目语言支持），结构清晰 ✓",
+        "PowerShell 项目语言支持丢失：Step 2 表格每行增加「PowerShell 项目策略」列，4 个 gate 均有明确策略 ✓",
+        "gate 对 .ps1 覆盖空白：gate-8 显式包含 .ps1、gate-3 路由到 PSScriptAnalyzer PSAvoid*、gate-7 增加 DSC 模式检测、gate-9 用 PSScriptAnalyzer 安全规则替代 semgrep ✓"
+      ]
+    }
+  },
+  "remaining_concerns": [
+    {
+      "concern": "Golden test cases 从 bash 版本提取 I/O 三元组的可行性 — bash 脚本输出格式可能不统一，提取工作量可能被低估",
+      "severity": "Minor",
+      "mitigation": "建议在实施时先对 gate-8（最简单的 gitleaks 封装）做 POC 验证 golden test 提取流程，再推广到其他 gate"
+    },
+    {
+      "concern": "gate-runner.js 中 require 编译后 .js 产物的路径约定（dist/gates/ vs 其他）需要与 tsconfig.json 的 outDir 保持一致",
+      "severity": "Minor",
+      "mitigation": "实施时确认 tsconfig.json outDir 与 gate-runner.js require 路径对齐"
+    }
+  ],
+  "rationale": "修订后的设计文档充分解决了 Round 1 中三位专家提出的所有 Major 及以上问题。架构层面：(1) 问题陈述正确分离两个正交维度，消除了概念混淆；(2) common.ts 提供完整的共享基础设施（工具检测、spawnSync 封装、变更文件获取、项目语言检测、PowerShell 支持、跨平台临时目录）；(3) 渐进式迁移策略清晰（XP_GATE_ENGINE 回退 + 3 版本废弃周期）；(4) 每个 gate 模块的 PowerShell 项目策略明确。仅剩 2 项 Minor 级别关注点（golden test 提取可行性、tsconfig outDir 路径对齐），均为实施细节，不影响设计通过。",
+  "final_statement": "设计已充分吸收三轮专家反馈，架构完整、策略清晰、风险可控。APPROVED，建议进入实施阶段。"
+}
