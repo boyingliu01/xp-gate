@@ -147,7 +147,15 @@ const COMMANDS = {
       const { handleSprintStatus } = require('../lib/sprint-status.js');
       handleSprintStatus(subargs).then(code => process.exit(code));
     },
-    usage: 'xp-gate sprint-status [--json] [--watch] [--dir <path>]'
+    usage: 'xp-gate sprint-status [--json] [--watch] [--dir <path>] [--rework-check] [--window-days N]'
+  },
+  'retro': {
+    description: 'Generate sprint engineering retrospective (#369)',
+    run: subargs => {
+      const { handleRetro } = require('../lib/retro.js');
+      handleRetro(subargs).then(code => process.exit(code));
+    },
+    usage: 'xp-gate retro [--days N] [--all] [--json] [--sprint <id>]'
   },
   'sprint-init': {
     description: 'Initialize sprint state (single entry point for sprint creation, resolves #366)',
