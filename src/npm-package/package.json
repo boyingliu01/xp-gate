@@ -40,7 +40,8 @@
   },
   "scripts": {
     "version": "0.14.31",
-    "prepack": "node scripts/sync-package-content.js",
+    "license-check": "node scripts/check-mattpocock-license.cjs",
+    "prepack": "node scripts/check-mattpocock-license.cjs && node scripts/sync-package-content.js",
     "test": "echo \"Run tests\" && exit 0"
   },
   "keywords": [

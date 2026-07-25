@@ -199,11 +199,28 @@ Every phase MUST output its header as the first line of that phase's output. For
 3. NEVER merge phase output — each phase gets its own header
 4. On `/sprint-flow` trigger, first line MUST output: `Sprint Flow: PREP → DESIGN → BUILD → VERIFY → SHIP → CLOSE`
 5. Each phase completion MUST write Phase Summary to `.sprint-state/phase-outputs/phase-{N}-summary.md`
-6. Each phase completion MUST call `xp-gate phase-transition <N> <status> --render` — this programmatically updates `sprint-state.json` AND renders the ASCII dashboard in one command (resolves #338, #146)
 
-### Phase Transition CLI (MANDATORY — replaces manual state updates)
+### Phase Transition — TodoWrite Embedded (MANDATORY, resolves #366)
 
-7. **NEVER** manually write to `sprint-state.json` or manually render the dashboard from template. ALWAYS use:
+6. **Sprint initialization**: Phase 1 PREP MUST begin with `npx xp-gate sprint-init "<task_description>"` — this is the single entry point for sprint creation. NEVER manually write sprint-state.json.
+
+7. **Phase transitions are embedded in TodoWrite items**, not as separate post-actions. Each phase's TodoWrite item MUST include the phase-transition call as part of the same atomic step:
+
+   ```
+   TodoWrite item format:
+   - "Phase N: <main task> + phase-transition N completed → N+1 in_progress --render"
+   ```
+
+   Example TodoWrite items for a sprint:
+   ```
+   - Phase 1: PREP — estimate + sprint-init + phase-transition 1 completed --render
+   - Phase 2: DESIGN — delphi review + phase-transition 2 completed --render
+   - Phase 3: BUILD — implementation + phase-transition 3 completed --render
+   ```
+
+   **Rationale**: TodoWrite items are the LLM's most consistently executed operations. Embedding phase-transition elevates it from "post-action meta-info" (priority 4, ignored) to "main task step" (priority 2, executed).
+
+8. **NEVER** manually write to `sprint-state.json` or manually render the dashboard. ALWAYS use:
    ```
    npx xp-gate phase-transition <phase> <status> --render [--outputs '<json>']
    ```
@@ -211,14 +228,8 @@ Every phase MUST output its header as the first line of that phase's output. For
    - `<status>`: `in_progress` | `completed` | `skipped` | `failed` | `paused`
    - `--render`: Auto-renders ASCII progress dashboard after state update
    - `--outputs '<json>'`: Optional JSON of phase outputs to record
-   
-   Example (end of each phase):
-   ```
-   npx xp-gate phase-transition 1 completed --render --outputs '{"estimate":"3 story points"}'
-   npx xp-gate phase-transition 2 in_progress --render
-   ```
-   
-   This is a **HARD GATE** — the orchestrator MUST invoke this CLI command. Text-level instructions to "update state" or "render dashboard" are DEPRECATED; the CLI is the single source of truth for state transitions and dashboard rendering.
+
+   This is a **HARD GATE** — the CLI is the single source of truth for state transitions and dashboard rendering.
 
 ### Phase Output Status Schema (MANDATORY per phase)
 
@@ -233,25 +244,73 @@ next_phase_context: [key info for next phase]
 
 ---
 
-## Detailed Phase Instructions
+## Phase 1/6: PREP (准备工作)
 
-**All detailed phase instructions are in `references/phase-overview.md`**. The router file above provides the canonical structure; load the reference file for step-by-step execution guides, skill integration details, parameter documentation, output contracts, templates, and research evidence.
+**触发条件**：用户输入匹配 Triggers 表中任一短语，或显式调用 `/sprint-flow`。
 
-> **Path convention**: `@references/` and `@templates/` resolve relative to the skill directory (`skills/sprint-flow/`). The per-phase reference files (`phase-*.md`) are the authoritative source for implementation details — this router file provides summary and dispatch logic only.
+**输入**：
+| 输入 | 来源 | 必需 |
+|------|------|------|
+| 功能描述 | 用户命令参数 | 是 |
+| 当前分支 | `git branch --show-current` | 自动检测 |
+| 项目语言 | `--lang` 参数或自动检测 | 否 |
 
-**Key reference files:**
-| File | Phase | Content |
-|------|-------|---------|
-| `@references/phase-overview.md` | ALL | Complete phase details, skill integration, params, output contract |
-| `@references/phase-1-prep.md` | 1/6 | PREP — worktree isolation + sizing |
-| `@references/phase-2-design.md` | 2/6 | DESIGN — brainstorming + delphi-review HARD-GATE |
-| `@references/phase-3-build.md` | 3/6 | BUILD — ralph-loop default + TDD |
-| `@references/phase-4-verify.md` | 4/6 | VERIFY — code-walkthrough + QA + feedback |
-| `@references/phase-5-ship.md` | 5/6 | SHIP — PR + merge + deploy + canary |
-| `@references/phase-6-close.md` | 6/6 | CLOSE — UAT + cleanup |
-| `@references/orchestration-rules.md` | ALL | Agent dispatch, context inheritance, transition gates |
-| `@references/force-levels.md` | ALL | Phase forcing rules |
-| `@templates/` | ALL | Pain doc, emergent issues, sprint summary, progress templates |
+**步骤**：
+1. 输出首行：`Sprint Flow: PREP → DESIGN → BUILD → VERIFY → SHIP → CLOSE`
+2. 检测当前分支是否为保护分支（main/master/develop）
+3. 创建 git worktree 隔离（除非 `--no-isolate`）：
+   ```bash
+   git worktree add .worktrees/sprint-$(date +%Y%m%d-%H%M%S) -b sprint/YYYY-MM-DD-NN
+   ```
+4. AUTO-ESTIMATE 规模评估（分析功能描述复杂度）
+5. 分类：lightweight / standard / complex
+6. 执行 `npx xp-gate sprint-init "<task_description>"` 初始化状态
+7. 执行 `npx xp-gate phase-transition 1 completed --render`
+
+**输出**：
+| 输出物 | 路径 | 格式 |
+|--------|------|------|
+| Worktree 路径 | `.worktrees/sprint-*` | 目录 |
+| Sprint 状态 | `.sprint-state/sprint-state.json` | JSON |
+| Phase Summary | `.sprint-state/phase-outputs/phase-1-summary.md` | Markdown |
+
+**详细参考**：`@references/phase-1-prep.md`
+
+---
+
+## 门禁条件表 (Gate Conditions)
+
+| 门禁 | 位置 | 条件 | 失败处理 |
+|------|------|------|----------|
+| GITHOOKS-GATE | Phase 2→3 | hooks 已安装且可执行 | 自动修复 (`xp-gate doctor --fix`)，失败则 BLOCK |
+| DELPHI-GATE | Phase 2→3 | delphi-review APPROVED (≥90%) | 重新设计或用户覆盖（记录原因） |
+| VERSION-GATE | Phase 4→5 | VERSION 文件与 package.json 一致 | 执行 `node scripts/sync-version.cjs` |
+| SHIP→CLOSE GATE | Phase 5→6 | PR 已合并 + release 完成 | BLOCK，等待合并确认 |
+| feedback-log GATE | Phase 4→5 | feedback-log.md 存在 | BLOCK，必须完成 VERIFY |
+
+---
+
+## Phase 2–6 详细指令
+
+> Phase 2–6 的完整步骤、输入/输出契约、模板和 Skill 集成详情见 `references/` 目录。本节提供路由摘要。
+
+| Phase | 参考文件 | 核心 Skill 链 |
+|-------|----------|---------------|
+| 2/6 DESIGN | `@references/phase-2-design.md` | CONTEXT.md 预检 → brainstorming → autoplan → delphi-review → to-issues |
+| 3/6 BUILD | `@references/phase-3-build.md` | GITHOOKS-GATE → DELPHI-GATE → ralph-loop (TDD) → freeze → blind review |
+| 4/6 VERIFY | `@references/phase-4-verify.md` | delphi code-walkthrough → test-spec-alignment → browse QA → retro |
+| 5/6 SHIP | `@references/phase-5-ship.md` | VERSION-GATE → finishing-branch → ship (PR) → land-and-deploy → merge |
+| 6/6 CLOSE | `@references/phase-6-close.md` | SHIP→CLOSE GATE → backup → USER ACCEPTANCE → emergent → cleanup |
+
+**路径约定**：`@references/` 和 `@templates/` 相对于 skill 目录（`skills/sprint-flow/`）解析。
+
+**完整参考文件索引**：
+| 文件 | 内容 |
+|------|------|
+| `@references/phase-overview.md` | 全阶段详情、Skill 集成、参数、输出契约 |
+| `@references/orchestration-rules.md` | Agent 调度、上下文继承、转换门禁 |
+| `@references/force-levels.md` | 阶段强制执行规则 |
+| `@templates/` | Pain doc、emergent issues、sprint summary、progress 模板 |
 
 ---
 
@@ -270,6 +329,72 @@ next_phase_context: [key info for next phase]
 | Keep adding random changes after verification failures | Max 3 fix cycles; if still failing, BLOCK and request user decision |
 | Enter next phase without generating Phase Summary | Every phase MUST write `.sprint-state/phase-outputs/phase-{N}-summary.md` and pass transition gate |
 | Complete implementation change without running verification | After every file edit/refactor/feature, MUST run `npm test` + `npm run lint` + `npx tsc --noEmit` and record the structured verification event (see `phase-3-build.md` §In-Session Verification) |
+
+---
+
+## 状态机 (State Machine)
+
+```mermaid
+stateDiagram-v2
+    [*] --> PREP : trigger matched
+    PREP --> DESIGN : worktree ready
+    DESIGN --> BUILD : APPROVED ≥90%
+    DESIGN --> DESIGN : REQUEST_CHANGES (max 3 rounds)
+    BUILD --> VERIFY : tests pass
+    BUILD --> BUILD : fix cycle (max 3)
+    VERIFY --> SHIP : feedback-log exists
+    VERIFY --> BUILD : critical issues found
+    SHIP --> CLOSE : PR merged
+    SHIP --> SHIP : CI failed (retry)
+    CLOSE --> [*] : UAT confirmed
+    BUILD --> BLOCKED : 3 fix cycles exhausted
+    DESIGN --> BLOCKED : 3 redesign rounds exhausted
+    BLOCKED --> [*] : user decision
+```
+
+---
+
+## 决策记录模板 (Decision Record)
+
+每个用户决策点必须记录到 `.sprint-state/decisions.md`：
+
+```markdown
+## Decision DR-{NNN}
+- **Phase**: {phase_number}/6 {PHASE_NAME}
+- **Question**: {what was asked}
+- **Options**: {options presented}
+- **Choice**: {user's selection}
+- **Rationale**: {why this choice}
+- **Timestamp**: {ISO 8601}
+```
+
+**强制决策点**：
+| 决策点 | 阶段 | 触发条件 |
+|--------|------|----------|
+| 规模确认 | PREP | AUTO-ESTIMATE 结果与用户预期不符 |
+| 设计审批 | DESIGN | delphi-review 返回 REQUEST_CHANGES |
+| 修复策略 | BUILD | 修复循环达到 3 次上限 |
+| 发布确认 | SHIP | PR 创建后等待用户确认合并 |
+| UAT 结果 | CLOSE | 用户手动验收（必须手动，禁止自动化） |
+
+---
+
+## 失败处理 (Failure Handling)
+
+| 失败场景 | 处理策略 | 升级条件 |
+|----------|----------|----------|
+| Worktree 创建失败 | 重试 1 次，失败则提示用户手动处理 | 磁盘空间不足或权限问题 |
+| delphi-review 连续 REQUEST_CHANGES | 最多 3 轮重设计，超过则 BLOCK | 3 轮后仍未 APPROVED |
+| BUILD 修复循环超限 | 最多 3 次 fix cycle，超过则 BLOCK + 用户决策 | 测试持续失败 |
+| CI 失败 | 分析失败原因，尝试 1 次自动修复 | 非 flaky 失败 |
+| PR 合并冲突 | 提示用户手动解决 | 始终（禁止自动 force） |
+| 工具缺失 | SKIP（不 BLOCK），记录到 phase summary | 始终不阻断 |
+
+**BLOCK 状态处理**：
+1. 写入 `.sprint-state/sprint-state.json` 状态为 `blocked`
+2. 输出阻塞原因 + 已完成工作 + 建议操作
+3. 等待用户决策（继续/放弃/降级）
+4. 记录决策到 `decisions.md`
 
 ---
 

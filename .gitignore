@@ -142,3 +142,8 @@ undefined/
 
 # Better Loop report artifacts (auto-generated, local-only)
 .qoder/better-loop/
+
+# C0 license verification artifacts (transient runtime evidence, not committed)
+.xp-gate/mattpocock-license.cache.md
+.xp-gate/clean-room-decision.json
+src/npm-package/lib/mattpocock-license-verdict.json

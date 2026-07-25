@@ -31,11 +31,16 @@ description: "Use when asked to run tests, verify tests, align tests with specif
 
 ## Output Format (MANDATORY)
 
+> **MANDATORY FILE OUTPUT**: When invoked, you MUST write this report as valid JSON to the file `.sprint-state/phase-outputs/test-alignment-report.json` in the project root. Stdout output alone is not sufficient — `xp-gate phase-transition 4 completed` validates the file, not the stdout.
+
 ```json
 {
   "alignment_status": "PASS|FAIL|BLOCKED",
   "phase": "1|2",
   "score": 85.5,
+  "head_commit": "<git rev-parse HEAD output>",
+  "spec_hash": "<SHA-256 of specification.yaml if exists, else null>",
+  "timestamp": "<ISO 8601>",
   "misaligned_tests": [
     {"test_name": "test_checkout", "spec_requirement": "REQ-003", "gap": "Missing @test annotation"}
   ],
@@ -44,7 +49,7 @@ description: "Use when asked to run tests, verify tests, align tests with specif
 }
 ```
 
-**Eval assertions check for:** `alignment_status`, `phase`, `score`, `anti_pattern_detected`.
+**Eval assertions check for:** `alignment_status`, `phase`, `score`, `head_commit`, `spec_hash`, `anti_pattern_detected`.
 
 ---
 
