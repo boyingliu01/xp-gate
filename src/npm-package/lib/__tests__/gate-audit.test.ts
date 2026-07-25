@@ -201,6 +201,44 @@ describe('gate-audit', () => {
     });
   });
 
+  describe('duration_anomaly handling', () => {
+    it('should exclude duration_anomaly entries from avg_ms calculation', () => {
+      const repoRoot = join(TEST_DIR, 'anomaly-avg-test');
+      // 2 normal entries: 100ms + 200ms → avg 150ms
+      appendAuditEntry(makeEntry({ repo_path: repoRoot, gate_id: 'gate-1', duration_ms: 100 }), repoRoot);
+      appendAuditEntry(makeEntry({ repo_path: repoRoot, gate_id: 'gate-1', duration_ms: 200 }), repoRoot);
+      // 1 anomalous entry: should be excluded from avg
+      appendAuditEntry(
+        makeEntry({ repo_path: repoRoot, gate_id: 'gate-1', duration_ms: 1784536915891, duration_anomaly: true }),
+        repoRoot,
+      );
+
+      const stats = computeStats(repoRoot);
+      const g1 = stats.find(s => s.gate_id === 'gate-1')!;
+      // avg should be (100+200)/2 = 150, NOT (100+200+1784536915891)/3
+      expect(g1.avg_ms).toBe(150);
+    });
+
+    it('should count anomaly entries separately in stats output', () => {
+      const repoRoot = join(TEST_DIR, 'anomaly-count-test');
+      appendAuditEntry(makeEntry({ repo_path: repoRoot, gate_id: 'gate-5', duration_ms: 500 }), repoRoot);
+      appendAuditEntry(
+        makeEntry({ repo_path: repoRoot, gate_id: 'gate-5', duration_ms: 9999999999999, duration_anomaly: true }),
+        repoRoot,
+      );
+      appendAuditEntry(
+        makeEntry({ repo_path: repoRoot, gate_id: 'gate-5', duration_ms: 8888888888888, duration_anomaly: true }),
+        repoRoot,
+      );
+
+      const stats = computeStats(repoRoot);
+      const g5 = stats.find(s => s.gate_id === 'gate-5')!;
+      expect(g5.anomaly_count).toBe(2);
+      // avg_ms only from the 1 normal entry
+      expect(g5.avg_ms).toBe(500);
+    });
+  });
+
   describe('CLI helpers', () => {
     it('should parse CLI options and skip dangling flags', () => {
       expect(parseCliOptions(['--gate-id', 'gate-1', '--passed', 'true', '--dangling'])).toEqual({
