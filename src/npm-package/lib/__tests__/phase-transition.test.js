@@ -12,7 +12,7 @@ import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import fs from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
-import { handlePhaseTransition, renderDashboard, PHASE_NAMES } from '../phase-transition.js';
+import { handlePhaseTransition, renderDashboard, PHASE_NAMES, validateEvidence } from '../phase-transition.js';
 
 describe('phase-transition', () => {
   let tmpDir;
@@ -24,6 +24,29 @@ describe('phase-transition', () => {
   afterEach(() => {
     fs.rmSync(tmpDir, { recursive: true, force: true });
   });
+
+  /** Helper: write phase 2 evidence (requirements-reviewed.json) so phase 2 completed passes */
+  function writePhase2Evidence(dir) {
+    const outputsDir = path.join(dir, '.sprint-state', 'phase-outputs');
+    fs.mkdirSync(outputsDir, { recursive: true });
+    fs.writeFileSync(path.join(outputsDir, 'requirements-reviewed.json'), JSON.stringify({
+      verdict: 'APPROVED',
+      requirements_hash: 'test-hash-placeholder',
+      timestamp: new Date().toISOString(),
+    }));
+  }
+
+  /** Helper: write phase 4 evidence (test-alignment-report.json) so phase 4 completed passes */
+  function writePhase4Evidence(dir) {
+    const outputsDir = path.join(dir, '.sprint-state', 'phase-outputs');
+    fs.mkdirSync(outputsDir, { recursive: true });
+    fs.writeFileSync(path.join(outputsDir, 'test-alignment-report.json'), JSON.stringify({
+      alignment_status: 'PASS',
+      head_commit: 'unknown',
+      spec_hash: null,
+      timestamp: new Date().toISOString(),
+    }));
+  }
 
   describe('handlePhaseTransition()', () => {
     it('returns 0 and shows help with --help', async () => {
@@ -61,6 +84,7 @@ describe('phase-transition', () => {
     });
 
     it('records outputs when --outputs flag is provided', async () => {
+      writePhase2Evidence(tmpDir);
       const outputs = JSON.stringify({ spec: 'path/to/spec.yaml' });
       const code = await handlePhaseTransition(['2', 'completed', '--outputs', outputs, '--dir', tmpDir]);
       expect(code).toBe(0);
@@ -78,6 +102,7 @@ describe('phase-transition', () => {
     it('transitions through multiple phases sequentially', async () => {
       await handlePhaseTransition(['1', 'completed', '--dir', tmpDir]);
       await handlePhaseTransition(['2', 'in_progress', '--dir', tmpDir]);
+      writePhase2Evidence(tmpDir);
       await handlePhaseTransition(['2', 'completed', '--dir', tmpDir]);
       await handlePhaseTransition(['3', 'in_progress', '--dir', tmpDir]);
 
@@ -187,6 +212,7 @@ describe('phase-transition', () => {
 
     it('does NOT warn when previous phase is completed', async () => {
       await handlePhaseTransition(['1', 'completed', '--dir', tmpDir]);
+      writePhase2Evidence(tmpDir);
       await handlePhaseTransition(['2', 'completed', '--dir', tmpDir]);
 
       const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
@@ -247,8 +273,10 @@ describe('phase-transition', () => {
     it('outputs sprint-audit reminder on Phase 6 completed', async () => {
       // Set up state through Phase 5
       await handlePhaseTransition(['1', 'completed', '--dir', tmpDir]);
+      writePhase2Evidence(tmpDir);
       await handlePhaseTransition(['2', 'completed', '--dir', tmpDir]);
       await handlePhaseTransition(['3', 'completed', '--dir', tmpDir]);
+      writePhase4Evidence(tmpDir);
       await handlePhaseTransition(['4', 'completed', '--dir', tmpDir]);
       await handlePhaseTransition(['5', 'completed', '--dir', tmpDir]);
 
@@ -267,6 +295,218 @@ describe('phase-transition', () => {
       expect(PHASE_NAMES).toBeDefined();
       expect(PHASE_NAMES[1]).toBe('PREP');
       expect(PHASE_NAMES[6]).toBe('CLOSE');
+    });
+  });
+
+  describe('evidence validation', () => {
+    /** Helper: create a sprint-state.json with given evidence_schema_version */
+    function createSprintState(dir, evidenceSchemaVersion) {
+      const stateDir = path.join(dir, '.sprint-state');
+      fs.mkdirSync(stateDir, { recursive: true });
+      const state = {
+        _schema_version: 1,
+        id: 'sprint-test-evidence',
+        task_description: 'Evidence test',
+        phase: 4,
+        status: 'in_progress',
+        started_at: new Date().toISOString(),
+        phase_history: [
+          { phase: 1, phase_name: 'PREP', status: 'completed' },
+          { phase: 2, phase_name: 'DESIGN', status: 'completed' },
+          { phase: 3, phase_name: 'BUILD', status: 'completed' },
+          { phase: 4, phase_name: 'VERIFY', status: 'in_progress' },
+        ],
+        isolation: { worktree_path: dir, branch: null },
+        outputs: {},
+        metrics: {},
+      };
+      if (evidenceSchemaVersion !== undefined) {
+        state.evidence_schema_version = evidenceSchemaVersion;
+      }
+      fs.writeFileSync(path.join(stateDir, 'sprint-state.json'), JSON.stringify(state, null, 2));
+    }
+
+    /** Helper: write a test-alignment-report.json */
+    function writeAlignmentReport(dir, report) {
+      const outputsDir = path.join(dir, '.sprint-state', 'phase-outputs');
+      fs.mkdirSync(outputsDir, { recursive: true });
+      fs.writeFileSync(path.join(outputsDir, 'test-alignment-report.json'), JSON.stringify(report, null, 2));
+    }
+
+    it('(a) BLOCKs when evidence file is missing for new sprint (evidence_schema_version >= 2)', () => {
+      createSprintState(tmpDir, 2);
+      const result = validateEvidence(4, tmpDir);
+      expect(result.ok).toBe(false);
+      expect(result.errors.length).toBeGreaterThan(0);
+      expect(result.errors[0]).toContain('test-alignment-report.json');
+    });
+
+    it('(b) BLOCKs when alignment_status is FAIL', () => {
+      createSprintState(tmpDir, 2);
+      writeAlignmentReport(tmpDir, {
+        alignment_status: 'FAIL',
+        head_commit: 'unknown',
+        spec_hash: null,
+        timestamp: new Date().toISOString(),
+      });
+      const result = validateEvidence(4, tmpDir);
+      expect(result.ok).toBe(false);
+      expect(result.errors.some(e => e.includes('alignment') || e.includes('PASS'))).toBe(true);
+    });
+
+    it('(c) BLOCKs when head_commit is stale (does not match current HEAD)', () => {
+      createSprintState(tmpDir, 2);
+      writeAlignmentReport(tmpDir, {
+        alignment_status: 'PASS',
+        head_commit: 'deadbeef00000000000000000000000000000000',
+        spec_hash: null,
+        timestamp: new Date().toISOString(),
+      });
+      const result = validateEvidence(4, tmpDir);
+      // In tmpDir (no git repo), current HEAD is 'unknown'.
+      // A non-'unknown' head_commit that doesn't match 'unknown' should BLOCK.
+      expect(result.ok).toBe(false);
+      expect(result.errors.some(e => e.includes('head_commit'))).toBe(true);
+    });
+
+    it('(d) BLOCKs when evidence file is malformed JSON (treated as missing)', () => {
+      createSprintState(tmpDir, 2);
+      const outputsDir = path.join(tmpDir, '.sprint-state', 'phase-outputs');
+      fs.mkdirSync(outputsDir, { recursive: true });
+      fs.writeFileSync(path.join(outputsDir, 'test-alignment-report.json'), '{invalid json!!!');
+      const result = validateEvidence(4, tmpDir);
+      expect(result.ok).toBe(false);
+      expect(result.errors.some(e => e.includes('malformed'))).toBe(true);
+    });
+
+    it('(e) WARNs but does NOT block for legacy sprint (no evidence_schema_version)', () => {
+      createSprintState(tmpDir); // no evidence_schema_version
+      const result = validateEvidence(4, tmpDir);
+      expect(result.ok).toBe(true);
+      expect(result.warnings.length).toBeGreaterThan(0);
+      expect(result.warnings[0]).toContain('evidence_schema_version');
+    });
+
+    it('(f) allows bypass with --skip-evidence and --reason via handlePhaseTransition', async () => {
+      createSprintState(tmpDir, 2);
+      // No evidence file — would normally BLOCK
+      const code = await handlePhaseTransition([
+        '4', 'completed', '--dir', tmpDir,
+        '--skip-evidence', 'Emergency hotfix',
+      ]);
+      expect(code).toBe(0);
+
+      // Verify audit entry was written
+      const auditFile = path.join(tmpDir, '.xp-gate', 'audit.jsonl');
+      expect(fs.existsSync(auditFile)).toBe(true);
+      const lines = fs.readFileSync(auditFile, 'utf8').trim().split('\n');
+      const lastEntry = JSON.parse(lines[lines.length - 1]);
+      expect(lastEntry.event).toBe('evidence_skipped');
+      expect(lastEntry.phase).toBe(4);
+      expect(lastEntry.reason).toBe('Emergency hotfix');
+    });
+
+    it('(g) rejects --skip-evidence without --reason', async () => {
+      createSprintState(tmpDir, 2);
+      const code = await handlePhaseTransition([
+        '4', 'completed', '--dir', tmpDir,
+        '--skip-evidence',
+      ]);
+      expect(code).toBe(1);
+    });
+
+    it('returns ok for phases without evidence requirements (phase 1, 3, 5, 6)', () => {
+      createSprintState(tmpDir, 2);
+      for (const phase of [1, 3, 5, 6]) {
+        const result = validateEvidence(phase, tmpDir);
+        expect(result.ok).toBe(true);
+        expect(result.errors).toHaveLength(0);
+      }
+    });
+
+    it('accepts valid evidence with head_commit matching current HEAD (unknown in non-git dir)', () => {
+      createSprintState(tmpDir, 2);
+      writeAlignmentReport(tmpDir, {
+        alignment_status: 'PASS',
+        head_commit: 'unknown', // matches non-git tmpDir
+        spec_hash: null,
+        timestamp: new Date().toISOString(),
+      });
+      const result = validateEvidence(4, tmpDir);
+      expect(result.ok).toBe(true);
+      expect(result.errors).toHaveLength(0);
+    });
+
+    it('validates spec_hash when specification.yaml exists', () => {
+      createSprintState(tmpDir, 2);
+      // Create a specification.yaml
+      const specContent = 'requirements:\n  - id: REQ-001\n';
+      fs.writeFileSync(path.join(tmpDir, 'specification.yaml'), specContent);
+
+      // Compute expected hash
+      const crypto = require('crypto');
+      const expectedHash = crypto.createHash('sha256').update(specContent, 'utf8').digest('hex');
+
+      writeAlignmentReport(tmpDir, {
+        alignment_status: 'PASS',
+        head_commit: 'unknown',
+        spec_hash: expectedHash,
+        timestamp: new Date().toISOString(),
+      });
+      const result = validateEvidence(4, tmpDir);
+      expect(result.ok).toBe(true);
+    });
+
+    it('BLOCKs when spec_hash does not match specification.yaml', () => {
+      createSprintState(tmpDir, 2);
+      fs.writeFileSync(path.join(tmpDir, 'specification.yaml'), 'requirements:\n  - id: REQ-001\n');
+      writeAlignmentReport(tmpDir, {
+        alignment_status: 'PASS',
+        head_commit: 'unknown',
+        spec_hash: 'wronghash000000000000000000000000000000000000000000000000000000',
+        timestamp: new Date().toISOString(),
+      });
+      const result = validateEvidence(4, tmpDir);
+      expect(result.ok).toBe(false);
+      expect(result.errors.some(e => e.includes('spec_hash'))).toBe(true);
+    });
+
+    it('BLOCKs when required fields are missing from evidence', () => {
+      createSprintState(tmpDir, 2);
+      writeAlignmentReport(tmpDir, {
+        alignment_status: 'PASS',
+        // missing head_commit and spec_hash
+      });
+      const result = validateEvidence(4, tmpDir);
+      expect(result.ok).toBe(false);
+      expect(result.errors.some(e => e.includes('head_commit'))).toBe(true);
+    });
+
+    it('does NOT validate evidence for non-completed statuses', async () => {
+      createSprintState(tmpDir, 2);
+      // in_progress should not trigger evidence validation
+      const code = await handlePhaseTransition(['4', 'in_progress', '--dir', tmpDir]);
+      expect(code).toBe(0);
+    });
+
+    it('handlePhaseTransition BLOCKs phase 4 completed without evidence for new sprint', async () => {
+      createSprintState(tmpDir, 2);
+      const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+      const code = await handlePhaseTransition(['4', 'completed', '--dir', tmpDir]);
+      expect(code).toBe(1);
+      errorSpy.mockRestore();
+    });
+
+    it('handlePhaseTransition allows phase 4 completed with valid evidence', async () => {
+      createSprintState(tmpDir, 2);
+      writeAlignmentReport(tmpDir, {
+        alignment_status: 'PASS',
+        head_commit: 'unknown',
+        spec_hash: null,
+        timestamp: new Date().toISOString(),
+      });
+      const code = await handlePhaseTransition(['4', 'completed', '--dir', tmpDir]);
+      expect(code).toBe(0);
     });
   });
 });

@@ -100,6 +100,7 @@ function migrateState(state, stateDir) {
 function createInitialState(projectRoot) {
   return {
     _schema_version: 1,
+    evidence_schema_version: 2,
     id: `sprint-${Date.now()}`,
     task_description: '-',
     phase: 1,
