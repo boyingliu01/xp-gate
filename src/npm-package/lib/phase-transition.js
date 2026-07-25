@@ -24,6 +24,8 @@
 
 const path = require('path');
 const fs = require('fs');
+const crypto = require('crypto');
+const { execSync } = require('child_process');
 const { SprintStateManager } = require('./sprint-state-manager');
 
 /**
@@ -34,6 +36,214 @@ const PHASE_NAMES = {
   1: 'PREP', 2: 'DESIGN', 3: 'BUILD',
   4: 'VERIFY', 5: 'SHIP', 6: 'CLOSE',
 };
+
+/**
+ * Phase-specific evidence file requirements.
+ * Each entry defines the evidence file path, required fields, and a blocking check.
+ * Phases NOT in this map require no evidence validation in v0.17.1.
+ */
+const EVIDENCE_FILES = {
+  2: {
+    path: '.sprint-state/phase-outputs/requirements-reviewed.json',
+    requiredFields: ['verdict', 'requirements_hash'],
+    blockingCheck: (data) => data.verdict === 'APPROVED',
+    blockingMessage: 'Requirements review verdict is not APPROVED',
+  },
+  4: {
+    path: '.sprint-state/phase-outputs/test-alignment-report.json',
+    requiredFields: ['alignment_status', 'head_commit', 'spec_hash'],
+    blockingCheck: (data) => data.alignment_status === 'PASS',
+    blockingMessage: 'Test alignment status is not PASS',
+  },
+};
+
+/**
+ * Get current HEAD commit hash from a project directory.
+ * Returns 'unknown' if not in a git repo.
+ * @param {string} projectDir
+ * @returns {string}
+ */
+function getCurrentHeadCommit(projectDir) {
+  try {
+    return execSync('git rev-parse HEAD', {
+      cwd: projectDir,
+      encoding: 'utf8',
+      stdio: ['pipe', 'pipe', 'pipe'],
+    }).trim();
+  } catch {
+    return 'unknown';
+  }
+}
+
+/**
+ * Compute SHA-256 hash of a file's contents.
+ * @param {string} filePath
+ * @returns {string} hex digest
+ */
+function computeFileHash(filePath) {
+  const content = fs.readFileSync(filePath, 'utf8');
+  return crypto.createHash('sha256').update(content, 'utf8').digest('hex');
+}
+
+/**
+ * Validate phase evidence files for a given phase transition.
+ *
+ * Returns { ok: boolean, errors: string[], warnings: string[] }.
+ * - For phases not in EVIDENCE_FILES: ok=true, no errors.
+ * - For phases with evidence requirements:
+ *   - If evidence_schema_version >= 2 (new sprint): missing/invalid evidence → ok=false (BLOCK)
+ *   - If evidence_schema_version missing or < 2 (legacy sprint): missing/invalid → ok=true with WARNING
+ *
+ * @param {number} phase - Phase number (1-6)
+ * @param {string} projectDir - Project root directory
+ * @returns {{ ok: boolean, errors: string[], warnings: string[] }}
+ */
+function validateEvidence(phase, projectDir) {
+  const evidenceConfig = EVIDENCE_FILES[phase];
+  if (!evidenceConfig) {
+    return { ok: true, errors: [], warnings: [] };
+  }
+
+  // Read sprint state to determine evidence_schema_version
+  let evidenceSchemaVersion = 0;
+  try {
+    const manager = new SprintStateManager(projectDir);
+    const state = manager.read();
+    if (state && typeof state.evidence_schema_version === 'number') {
+      evidenceSchemaVersion = state.evidence_schema_version;
+    }
+  } catch {
+    // If state can't be read, treat as legacy (version 0)
+  }
+
+  const isLegacySprint = evidenceSchemaVersion < 2;
+  const errors = [];
+  const warnings = [];
+
+  const evidenceFilePath = path.join(projectDir, evidenceConfig.path);
+  const fileName = path.basename(evidenceConfig.path);
+
+  // Check file existence
+  if (!fs.existsSync(evidenceFilePath)) {
+    const msg = `Evidence file missing: ${evidenceConfig.path}`;
+    if (isLegacySprint) {
+      warnings.push(`WARNING: ${msg}. Upgrade sprint with evidence_schema_version >= 2 to enforce.`);
+      return { ok: true, errors: [], warnings };
+    }
+    errors.push(msg);
+    return { ok: false, errors, warnings };
+  }
+
+  // Parse JSON
+  let data;
+  try {
+    const raw = fs.readFileSync(evidenceFilePath, 'utf8');
+    data = JSON.parse(raw);
+  } catch {
+    const msg = `${fileName} is malformed JSON`;
+    if (isLegacySprint) {
+      warnings.push(`WARNING: ${msg}. Upgrade sprint with evidence_schema_version >= 2 to enforce.`);
+      return { ok: true, errors: [], warnings };
+    }
+    errors.push(msg);
+    return { ok: false, errors, warnings };
+  }
+
+  // Check required fields
+  for (const field of evidenceConfig.requiredFields) {
+    if (!(field in data)) {
+      const msg = `${fileName} is missing required field: ${field}`;
+      if (isLegacySprint) {
+        warnings.push(`WARNING: ${msg}. Upgrade sprint with evidence_schema_version >= 2 to enforce.`);
+      } else {
+        errors.push(msg);
+      }
+    }
+  }
+
+  // If any required fields missing for new sprint, block early
+  if (errors.length > 0) {
+    return { ok: false, errors, warnings };
+  }
+
+  // Run blocking check
+  if (!evidenceConfig.blockingCheck(data)) {
+    const msg = `${fileName}: ${evidenceConfig.blockingMessage} (got: ${JSON.stringify(data[evidenceConfig.requiredFields[0]])})`;
+    if (isLegacySprint) {
+      warnings.push(`WARNING: ${msg}. Upgrade sprint with evidence_schema_version >= 2 to enforce.`);
+      return { ok: true, errors: [], warnings };
+    }
+    errors.push(msg);
+    return { ok: false, errors, warnings };
+  }
+
+  // Phase-specific anti-staleness checks
+  if (phase === 4) {
+    // head_commit check
+    const currentHead = getCurrentHeadCommit(projectDir);
+    if (data.head_commit !== currentHead) {
+      const msg = `${fileName}: head_commit mismatch — report has "${data.head_commit}", current HEAD is "${currentHead}"`;
+      if (isLegacySprint) {
+        warnings.push(`WARNING: ${msg}. Upgrade sprint with evidence_schema_version >= 2 to enforce.`);
+      } else {
+        errors.push(msg);
+      }
+    }
+
+    // spec_hash check (only if specification.yaml exists)
+    const specPath = path.join(projectDir, 'specification.yaml');
+    if (fs.existsSync(specPath)) {
+      const expectedHash = computeFileHash(specPath);
+      if (data.spec_hash !== expectedHash) {
+        const msg = `${fileName}: spec_hash mismatch — specification.yaml has changed since report was generated`;
+        if (isLegacySprint) {
+          warnings.push(`WARNING: ${msg}. Upgrade sprint with evidence_schema_version >= 2 to enforce.`);
+        } else {
+          errors.push(msg);
+        }
+      }
+    }
+  }
+
+  // Phase 2: requirements_hash existence check (full verification in v0.18.0)
+  if (phase === 2) {
+    if (typeof data.requirements_hash !== 'string' || data.requirements_hash.length === 0) {
+      const msg = `${fileName}: requirements_hash must be a non-empty string`;
+      if (isLegacySprint) {
+        warnings.push(`WARNING: ${msg}. Upgrade sprint with evidence_schema_version >= 2 to enforce.`);
+      } else {
+        errors.push(msg);
+      }
+    }
+  }
+
+  if (errors.length > 0) {
+    return { ok: false, errors, warnings };
+  }
+
+  return { ok: true, errors: [], warnings };
+}
+
+/**
+ * Append an evidence-skipped audit entry to .xp-gate/audit.jsonl.
+ * @param {string} projectDir
+ * @param {number} phase
+ * @param {string} reason
+ */
+function logEvidenceSkip(projectDir, phase, reason) {
+  const auditDir = path.join(projectDir, '.xp-gate');
+  if (!fs.existsSync(auditDir)) {
+    fs.mkdirSync(auditDir, { recursive: true });
+  }
+  const entry = {
+    timestamp: new Date().toISOString(),
+    event: 'evidence_skipped',
+    phase,
+    reason,
+    commit_hash: getCurrentHeadCommit(projectDir),
+  };
+  fs.appendFileSync(path.join(auditDir, 'audit.jsonl'), JSON.stringify(entry) + '\n', 'utf8');
+}
 
 /**
  * Render ASCII dashboard from sprint state.
@@ -152,11 +362,13 @@ async function handlePhaseTransition(args = []) {
     console.log('  --outputs <json>   JSON object of outputs to record');
     console.log('  --render           Render ASCII dashboard after transition');
     console.log('  --dir <path>       Project directory (default: cwd)');
+    console.log('  --skip-evidence <reason>  Skip evidence validation (requires reason)');
     console.log('');
     console.log('Examples:');
     console.log('  xp-gate phase-transition 1 completed');
     console.log('  xp-gate phase-transition 3 completed --render');
     console.log('  xp-gate phase-transition 2 in_progress --outputs \'{"spec":"path.yaml"}\'');
+    console.log('  xp-gate phase-transition 4 completed --skip-evidence "Emergency hotfix"');
     return 0;
   }
 
@@ -179,6 +391,19 @@ async function handlePhaseTransition(args = []) {
     } catch (err) {
       console.error(`Error: Invalid JSON for --outputs: ${err.message}`);
       return 1;
+    }
+  }
+
+  // Parse --skip-evidence flag
+  const skipEvidenceIdx = args.indexOf('--skip-evidence');
+  let skipEvidence = false;
+  let skipEvidenceReason = '';
+  if (skipEvidenceIdx >= 0) {
+    skipEvidence = true;
+    const nextArg = args[skipEvidenceIdx + 1];
+    // Reason is the next arg if it exists and doesn't start with '--'
+    if (nextArg && !nextArg.startsWith('--')) {
+      skipEvidenceReason = nextArg;
     }
   }
 
@@ -221,6 +446,31 @@ async function handlePhaseTransition(args = []) {
       // If no sprint-state.json exists yet, skip check (no previous phase to validate)
     }
 
+    // ── Layer 2: Evidence validation (blocks on status === 'completed') ──
+    if (status === 'completed' && EVIDENCE_FILES[phase]) {
+      if (skipEvidence) {
+        if (!skipEvidenceReason) {
+          console.error('Error: --skip-evidence requires --reason "<text>" to be provided');
+          return 1;
+        }
+        logEvidenceSkip(projectDir, phase, skipEvidenceReason);
+        console.warn('⚠️  Evidence skipped. This will appear in retro reports. Single-sprint limit: >2 skips per sprint will trigger an alert.');
+      } else {
+        const evidence = validateEvidence(phase, projectDir);
+        for (const w of evidence.warnings) {
+          console.warn(`⚠️  [sprint-audit] ${w}`);
+        }
+        if (!evidence.ok) {
+          for (const e of evidence.errors) {
+            console.error(`❌ [sprint-audit] ${e}`);
+          }
+          console.error(`   Phase ${phase} (${PHASE_NAMES[phase]}) cannot transition to 'completed' without valid evidence.`);
+          console.error(`   Use --skip-evidence "<reason>" to bypass (audited).`);
+          return 1;
+        }
+      }
+    }
+
     const newState = manager.transitionPhase(phase, status, { outputs });
 
     console.log(`✅ Phase ${phase} transitioned to '${status}'`);
@@ -246,4 +496,4 @@ async function handlePhaseTransition(args = []) {
   }
 }
 
-module.exports = { handlePhaseTransition, renderDashboard, PHASE_NAMES };
+module.exports = { handlePhaseTransition, renderDashboard, PHASE_NAMES, validateEvidence };
