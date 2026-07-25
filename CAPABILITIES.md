@@ -27,8 +27,8 @@ XP-Gate 整合质量门禁、AI 多专家评审和 Sprint 流程编排三大核�
 | **AI 评审** | Delphi 设计评审 | ✅ 完全支持 | 多轮匿名评审，共识阈值 ≥90% |
 | | Code Walkthrough | ✅ 完全支持 | git push 前代码走查验证 |
 | | 测试规范对齐 | ✅ 完全支持 | 两阶段验证，Phase 2 freeze 保护 |
-| **Sprint Flow** | Phase 0 Think | ✅ 完全支持 | brainstorming 需求探索 |
-| | Phase 1 Plan | ✅ 完全支持 | autoplan + delphi-review 生成 specification.yaml |
+| **Sprint Flow** | Phase 0 Think | ✅ 完全支持 | grill-with-docs 需求探索 |
+| | Phase 1 Plan | ✅ 完全支持 | batch-grill-me + delphi-review 生成 specification.yaml |
 | | Phase 2 Build | ✅ 完全支持 | TDD + freeze/unfreeze + requesting-code-review |
 | | Phase 3 Review | ✅ 完全支持 | code-walkthrough + test-spec-alignment + browse |
 | | Phase 4 Accept | ✅ 完全支持 | 人工验收环节（必须人工确认） |
@@ -46,7 +46,8 @@ XP-Gate 整合质量门禁、AI 多专家评审和 Sprint 流程编排三大核�
 | | STRIDE 威胁建模 | ✅ 完全支持 | 系统性威胁分析 |
 | **并行执行** | 任务分发 | ✅ 完全支持 | dispatching-parallel-agents 并行子任务 |
 | | 独立执行 | ✅ 完全支持 | 无共享状态的任务并行化 |
-| **工程回顾** | 周回顾 | ✅ 完全支持 | retro 提交历史和工作模式分析 |
+| **工程回顾** | 周回顾 | ✅ 完全支持 | `xp-gate retro` 命令：提交历史和工作模式分析，生成回顾报告（活动摘要、返工率趋势、证据跳过暴露、质量趋势） |
+| | 返工率追踪 | ✅ 完全支持 | `xp-gate sprint-status --rework-check`：统计 sprint 完成后的 fix commits 计算返工率（30% 阈值告警） |
 | | 系统调试 | ✅ 完全支持 | systematic-debugging 根因分析四阶段 |
 | **发布决策** | Merge | ✅ 完全支持 | finishing-a-development-branch 4 选项之一 |
 | | PR | ✅ 完全支持 | ship 自动创建 PR |
@@ -89,9 +90,10 @@ Phase 1: PREP ────────┐
   └─ worktree + sizing│
                       │
 Phase 2: DESIGN ──────┤
-  ├─ brainstorming    │
-  ├─ autoplan         │
-  └─ delphi-review    │ ← HARD-GATE (≥90% 共识才能进入 Phase 3)
+  ├─ grill-with-docs  │
+  ├─ R1 requirements  │
+  ├─ batch-grill-me   │
+  └─ R2 delphi-review │ ← HARD-GATE (R1 requirements-reviewed.json + R2 delphi-reviewed.json ≥90% 共识才能进入 Phase 3)
                       │
 Phase 3: BUILD ───────┤
   ├─ ralph-loop (默认)│
@@ -116,9 +118,10 @@ Phase 6: CLOSE ───────┘
 
 | 阶段 | 暂停条件 | 用户操作 |
 |------|---------|---------|
+| Phase 2 | R1 需求评审未通过 | 修复需求文档 |
 | Phase 2 | 设计未 APPROVED | 修改设计文档 |
-| Phase 2 | autoplan taste_decisions | 确认设计决策 |
-| Phase 2 | delphi-review 未通过 | 修复并重新评审 |
+| Phase 2 | batch-grill-me 决策 | 确认设计决策 |
+| Phase 2 | R2 delphi-review 未通过 | 修复并重新评审 |
 | Phase 3 | 验证失败超过 max 3 | 修复或放弃 |
 | Phase 3 | 成本超阈值 | 继续或暂停 |
 | Phase 5 | **必须人工验收** | 实际使用确认 |
@@ -178,8 +181,10 @@ XP-Gate 集成的 AI Skills 体系：
 | **delphi-review** | 多专家共识评审 | `/delphi-review` |
 | **test-specification-alignment** | 测试规范对齐 | `/test-specification-alignment` |
 | **sprint-flow** | Sprint 流程编排 | `/sprint-flow "需求"` |
-| **brainstorming** | 需求探索 | Phase 0 自动调用 |
-| **autoplan** | 自动计划生成 | Phase 1 自动调用 |
+| **grill-with-docs** | 需求访谈探索（brainstorming 替代） | Phase 2 THINK 自动调用 |
+| **batch-grill-me** | 批量决策生成（autoplan 替代） | Phase 2 自动调用 |
+| **grilling** | 持续追问引擎（grill-with-docs 依赖） | grill 系列触发词 |
+| **domain-modeling** | CONTEXT.md/ADR 维护 | Phase 2 CONTEXT.md 预检 |
 | **requesting-code-review** | 代码评审请求 | Phase 2 freeze 后 |
 | **verification-before-completion** | 完成前验证 | Phase 2 末尾 |
 | **finishing-a-development-branch** | 分支完成处理 | Phase 6 |
@@ -196,6 +201,14 @@ XP-Gate 集成的 AI Skills 体系：
 | **freeze/unfreeze** | 目录锁定 | Phase 2 |
 
 ### Delphi Review 专家配置
+
+**三种评审模式** (v0.18.0+)：
+
+| 模式 | 调用 | 用途 | 输出 |
+|------|------|------|------|
+| **design** (默认) | `/delphi-review` | 设计方案评审 | delphi-reviewed.json + specification.yaml |
+| **code-walkthrough** | `--mode code-walkthrough` | git push 前代码走查 | .code-walkthrough-result.json |
+| **requirements** | `--mode requirements` | R1 轻量需求评审（2 专家 × 1 轮，2/2 共识） | requirements-reviewed.json |
 
 **Qoder 平台（推荐 — 零配置）**：
 

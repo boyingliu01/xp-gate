@@ -38,7 +38,8 @@ components:
       - "xp-gate uninstall-skill <name> --force"
       - "xp-gate audit [--tail | --stats | record]"
       - "xp-gate ui-review"
-      - "xp-gate sprint-status [--json] [--watch] [--dir <path>]"  # added in 0.8.16, #214
+      - "xp-gate sprint-status [--json] [--watch] [--dir <path>] [--rework-check]"  # added in 0.8.16, #214; --rework-check (0.18.0, #369) calculates rework rate by counting fix commits after sprint completion
+      - "xp-gate retro [--days N] [--all] [--json] [--sprint <id>]"  # added in 0.18.0, #369 — Generates engineering retrospective report with activity summary, rework rate trends, evidence skip exposure, and quality trends
       - "xp-gate check <path> [--gates principles,arch]"      # added in 0.8.9, fixes #208
       - "xp-gate principles <path> [--format console|json|sarif]"  # added in 0.8.9, fixes #208
       - "xp-gate arch [--config <path>]"                       # added in 0.8.9, fixes #208
@@ -91,7 +92,7 @@ components:
 
   - id: delphi-review
     name: "Delphi Review Skill"
-    description: "Multi-expert anonymous consensus review. Two modes: design (default) and code-walkthrough. MANDATORY before implementation."
+    description: "Multi-expert anonymous consensus review. Three modes: design (default), code-walkthrough, and requirements (R1 lightweight review, 2 experts × 1 round). MANDATORY before implementation."
     type: ai-skill
     install_command: "bash <(curl -fsSL https://raw.githubusercontent.com/boyingliu01/xp-gate/repo-main/scripts/install-delphi-review.sh) (LEGACY - GHP version only, use npm install -g xp-gate instead)"
     local_install: "bash scripts/install-delphi-review.sh"
@@ -115,7 +116,7 @@ components:
 
   - id: sprint-flow
     name: "Sprint Flow Skill (Orchestrator)"
-    description: "One-Shot Sprint 自动流水线. Orchestrates: office-hours → autoplan → delphi-review → TDD → review → ship. Optional composite."
+    description: "One-Shot Sprint 自动流水线. Orchestrates: grill-with-docs → R1 requirements review → batch-grill-me → R2 design review → TDD → review → ship. Optional composite."
     type: ai-skill
     install_command: "bash <(curl -fsSL https://raw.githubusercontent.com/boyingliu01/xp-gate/repo-main/scripts/install-sprint-flow.sh) (LEGACY - GHP version only, use npm install -g xp-gate instead)"
     local_install: "bash scripts/install-sprint-flow.sh"
