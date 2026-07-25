@@ -1,9 +1,9 @@
 # PROJECT KNOWLEDGE BASE
 
-**Generated:** 2026-07-24
-**Commit:** 8152a68
+**Generated:** 2026-07-25
+**Commit:** 3150b22
 **Branch:** main
-**Version:** 0.17.0.0
+**Version:** 0.18.0.0
 
 ## OVERVIEW
 XP-Gate — deterministic git quality gates + AI-driven multi-expert review (Delphi) + Sprint Flow pipeline (6 phases: PREP, DESIGN, BUILD, VERIFY, SHIP, CLOSE) + npm zero-install distribution + cross-platform plugin system (Claude Code / OpenCode / Qoder). Pre-commit runs **10 numbered gates (Gate 0–9)** at the script level, conceptually grouped as **6 categories** in user-facing docs (README, CAPABILITIES.md). Pre-push runs **3 mutation/mock gates (M, M2, M3) + Delphi code-walkthrough**. Implements 14 Clean Code/SOLID rules across 9 language adapters (TypeScript engine), 13 shell adapters (gate routing), Boy Scout Rule baseline enforcement, test-specification alignment, mock policy enforcement, and incremental mutation testing.
@@ -23,7 +23,7 @@ XP-Gate — deterministic git quality gates + AI-driven multi-expert review (Del
 │   │   ├── lib/                        # init, install/update/uninstall-skill, doctor, migrate,
 │   │   │                               # baseline, audit-log, gate-audit, rollback, ui-detector,
 │   │   │                               # ui-review, download-skill, shared-paths, shared-utils
-│   │   ├── skills/                     # 8 skills bundled at publish time (mirror of repo skills/)
+│   │   ├── skills/                     # 12 skills bundled at publish time (mirror of repo skills/)
 │   │   ├── plugins/                    # claude-code/, opencode/, qoder/ bundled at publish time
 │   │   └── scripts/sync-package-content.js  # prepack hook that copies skills+plugins in
 │   ├── principles/     # 14 Clean Code/SOLID rules × 9 language adapters (Gate 4)
@@ -33,9 +33,9 @@ XP-Gate — deterministic git quality gates + AI-driven multi-expert review (Del
 │   ├── mutation/       # Gate M (incremental mutation) + Gate M2 helpers (detect-ai-test) + baselines
 │   └── rules/          # Shared rule index
 ├── plugins/            # Cross-platform plugin sources (v0.4.0+; rebuilt into src/npm-package/plugins/)
-│   ├── claude-code/    # JSON manifest + bash hooks + bin wrapper; ships all 8 skills
-│   ├── opencode/       # TS module with 3 tools (gate-check, gate-principles, gate-arch); ships all 8 skills
-│   ├── qoder/          # 7 skills (expects npx xp-gate call for gate tooling; plugin.json exists)
+│   ├── claude-code/    # JSON manifest + bash hooks + bin wrapper; ships all 12 skills
+│   ├── opencode/       # TS module with 3 tools (gate-check, gate-principles, gate-arch); ships all 12 skills
+│   ├── qoder/          # 8 skills (expects npx xp-gate call for gate tooling; plugin.json exists)
 │   └── shared/         # Cross-platform docs (when present)
 ├── githooks/           # Source-of-truth hook scripts (also bundled into npm package)
 │   ├── pre-commit      # ~2084 lines: Gate 0 (Version Consistency) + Gates 1–9
@@ -47,15 +47,19 @@ XP-Gate — deterministic git quality gates + AI-driven multi-expert review (Del
 │   │                   # book299-{20132-python,4081-c,4083-javascriptes5}
 │   ├── QUALITY-GATES-CODE-OF-CONDUCT.md
 │   └── __tests__/      # BATS tests
-├── skills/             # 8 canonical AI workflow skills (SKILL.md + references/ + templates/)
+├── skills/             # 12 canonical AI workflow skills (SKILL.md + references/ + templates/)
 │   ├── sprint-flow/    # 6-phase pipeline (Phase 1-6: PREP, DESIGN, BUILD, VERIFY, SHIP, CLOSE); docs say "6 阶段流水线"
-│   ├── delphi-review/  # ≥90% consensus (SKILL.md)
+│   ├── delphi-review/  # ≥90% consensus; 3 modes (design, code-walkthrough, requirements) (SKILL.md)
 │   ├── test-specification-alignment/   # 2-phase (align modifiable → execute frozen)
 │   ├── test-driven-development/        # NEW in 0.8.x; bundles testing-anti-patterns.md
 │   ├── ralph-loop/                     # Phase 2 default build mode (REQ-level; 40-67% token savings)
 │   ├── improve-codebase-architecture/  # Periodic architecture health check
 │   ├── to-issues/                      # Vertical-slice issue splitter
-│   └── admin-template-guidelines/
+│   ├── admin-template-guidelines/
+│   ├── grill-with-docs/                # NEW in 0.18.0 (Matt Pocock); Phase 2 THINK main, brainstorming replacement
+│   ├── batch-grill-me/                 # NEW in 0.18.0 (Matt Pocock); Phase 2 batch decisions, autoplan replacement
+│   ├── grilling/                       # NEW in 0.18.0 (Matt Pocock); grill engine, dependency of grill-with-docs
+│   └── domain-modeling/                # NEW in 0.18.0 (Matt Pocock); CONTEXT.md/ADR maintenance, with templates
 ├── docs/               # 30+ design plans, incidents, retros, guides
 ├── scripts/            # build-plugin.sh, copy-skills.sh, sync-version.cjs, test-plugins.sh,
 │                       #   install-{hooks,skills,all}.sh, prepack.cjs
@@ -67,7 +71,7 @@ XP-Gate — deterministic git quality gates + AI-driven multi-expert review (Del
 ├── MANIFEST.md         # Machine-readable component manifest
 ├── architecture.yaml   # ARCH-001..014 rule definitions
 ├── specification.yaml  # Requirements (auto-generated from APPROVED design docs)
-├── VERSION             # Single source of truth: 0.9.2.0 (MAJOR.MINOR.PATCH.MICRO)
+├── VERSION             # Single source of truth: 0.18.0.0 (MAJOR.MINOR.PATCH.MICRO)
 ├── .architecture-baseline.json  # ARCH baseline snapshot (~20 KB)
 ├── .archlint.yaml      # Architecture lint config
 ├── .mockpolicyrc       # Gate M3 mock policy config
@@ -99,8 +103,8 @@ XP-Gate — deterministic git quality gates + AI-driven multi-expert review (Del
 | Language adapters | githooks/adapters/ | 13 .sh files + 5 plugin extensions |
 | Adapter routing | githooks/adapter-common.sh | 3-tier: global → project → script dir |
 | Code of Conduct | githooks/QUALITY-GATES-CODE-OF-CONDUCT.md | --no-verify prohibited |
-| Sprint Flow | skills/sprint-flow/SKILL.md | 6 phases; phase docs in references/phase-*.md |
-| Delphi Review | skills/delphi-review/SKILL.md | Design + code-walkthrough modes; ≥90% consensus |
+| Sprint Flow | skills/sprint-flow/SKILL.md | 6 phases; Phase 2 DESIGN: grill-with-docs → R1 requirements → batch-grill-me → R2 delphi-review; phase docs in references/phase-*.md |
+| Delphi Review | skills/delphi-review/SKILL.md | 3 modes: design + code-walkthrough + requirements; ≥90% consensus |
 | Test Alignment | skills/test-specification-alignment/SKILL.md | Phase 1 modifiable / Phase 2 frozen |
 | Principles Engine | src/principles/ | analyzer.ts + index.ts CLI; SARIF 2.1.0 output |
 | Boy Scout Rule | src/principles/boy-scout.ts | Differential warning enforcement (Gate 6) |
@@ -168,10 +172,30 @@ Subcommands registered in 0.8.8.0 (verified against bin source):
 | `xp-gate uninstall-skill <name> --force` | Remove an installed skill |
 | `xp-gate audit [--tail \| --stats \| record]` | Inspect / record gate audit log |
 | `xp-gate ui-review` | Visual review for UI-bearing changes (delegates to ui-review.ts) |
-| `xp-gate sprint-status [--json] [--watch] [--dir <path>]` | Show Sprint Flow progress (reads `.sprint-state/sprint-state.json`) |
+| `xp-gate sprint-status [--json] [--watch] [--dir <path>] [--rework-check]` | Show Sprint Flow progress (reads `.sprint-state/sprint-state.json`); `--rework-check` calculates rework rate by counting fix commits after sprint completion (#369) |
+| `xp-gate retro [--days N] [--all] [--json] [--sprint <id>]` | Generate engineering retrospective report (activity summary, rework rate trends, evidence skip exposure, quality trends) (#369) |
 | `xp-gate --version` | Print version (from VERSION file) |
 
-> Older docs said "8 commands"; 0.8.8 grew to ≥11; 0.8.9 added `check`/`principles`/`arch` for parity with the OpenCode plugin (fixes #208). v0.8.16 added `sprint-status`, bringing the total to ≥16.
+> Older docs said "8 commands"; 0.8.8 grew to ≥11; 0.8.9 added `check`/`principles`/`arch` for parity with the OpenCode plugin (fixes #208). v0.8.16 added `sprint-status`, bringing the total to ≥16. v0.18.0 added `retro` and `sprint-status --rework-check` (#369).
+
+## EVIDENCE VALIDATION FRAMEWORK (v0.18.0+)
+
+Sprint phase transitions (`xp-gate phase-transition`) validate evidence artifacts before allowing progression. Enforcement strictness depends on the sprint's `evidence_schema_version`.
+
+| Evidence file | Location | Purpose | Required at |
+|---------------|----------|---------|-------------|
+| `requirements-reviewed.json` | `.sprint-state/phase-outputs/` | R1 requirements review evidence (Delphi `--mode requirements`) | Phase 2 → 3 (DESIGN → BUILD) |
+| `test-alignment-report.json` | `.sprint-state/phase-outputs/` | Phase 4 test-specification alignment evidence (HARD-GATE) | Phase 4 (VERIFY) |
+
+**Enforcement by schema version:**
+- `evidence_schema_version >= 2` (new sprints): missing/invalid evidence → **BLOCK** (ok=false)
+- `evidence_schema_version` missing or `< 2` (legacy sprints): missing/invalid evidence → **WARNING** (ok=true; upgrade sprint to `evidence_schema_version: 2` to enforce)
+
+**Escape hatch:** `--skip-evidence --reason "<text>"` bypasses evidence validation for emergencies (e.g. hotfix). The skip is **audit-logged** (`.xp-gate/audit.jsonl`) and surfaced in `xp-gate retro` as "evidence skip exposure". A reason is mandatory — `--skip-evidence` without `--reason` is rejected.
+
+```
+xp-gate phase-transition 4 completed --skip-evidence "Emergency hotfix"
+```
 
 ## CONVENTIONS
 - **VERSION as single source of truth.** `scripts/sync-version.cjs` propagates `MAJOR.MINOR.PATCH.MICRO` from `VERSION` into npm package.json files (3-digit) and plugin manifests. Root `package.json` uses 3-digit version. Never edit `package.json` versions by hand.
@@ -193,7 +217,7 @@ Subcommands registered in 0.8.8.0 (verified against bin source):
 - Do NOT hand-edit `package.json` versions. Run `node scripts/sync-version.cjs` against `VERSION`.
 - Do NOT add runtime dependencies to `src/npm-package/` — it ships zero-install.
 - Do NOT use Anthropic/OpenAI/Google models in `.delphi-config.json`. Domestic-only.
-- Do NOT skip `delphi-review` in Sprint Flow Phase 1 — HARD-GATE blocks Phase 2.
+- Do NOT skip `R1 requirements review` or `R2 delphi-review` in Sprint Flow Phase 2 (DESIGN) — HARD-GATE blocks Phase 3 (BUILD).
 - Do NOT terminate Delphi review before ≥90% consensus or 5 rounds (whichever first).
 - Do NOT modify tests during Phase 2 of test-specification-alignment (freeze enforced).
 - Do NOT push from main/master and expect Gate ML, Gate UI, or Gate MW to run — by design all three are skipped (pre-reviewed via PR).
