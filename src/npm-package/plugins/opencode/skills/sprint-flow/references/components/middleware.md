@@ -61,7 +61,7 @@ Phase 6: SHIP → finishing-a-development-branch → canary → Sprint Summary
 | `CIRCUIT_BREAKER_TRIGGERED` | sprint-flow 编排层监控成本，超阈值 BLOCK + 用户决策 |
 | `ROLLBACK_TO_ROUND1` | verification-before-completion 失败 → 修复 max 3 次 → 仍失败 BLOCK |
 | `GATE1_FAILED`/`GATE1_COMPLETE` | verification-before-completion 内置此区分 |
-| `GATE2_RUNNING` | `cso` (gstack) — Phase 1-6 安全审计 |
+| `GATE2_RUNNING` | `xp-gate check --all`（Gate 7/8/9）— Phase 1-6 安全审计 |
 
 ---
 

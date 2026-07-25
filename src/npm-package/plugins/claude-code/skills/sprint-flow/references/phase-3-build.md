@@ -6,7 +6,7 @@
 
 **摘要**: TDD 执行, 多 Agent 并行加速, 盲评验证, Gate 1 验证通过。
 
-**关键链路**: DELPHI-GATE → parallel-dispatch/ralph-loop → TDD → freeze → blind-review → unfreeze → verification → cost monitor
+**关键链路**: BUILD-ENTRY-CONTRACT → DELPHI-GATE → parallel-dispatch/ralph-loop → TDD → blind-review (read-only subagent) → verification → cost monitor
 
 **输出**: MVP v1
 
@@ -21,6 +21,27 @@
 | Gate M2 | Mock 密度检查 | 30% WARNING (Phase 1); 可配置 via `.mockpolicyrc` |
 
 ---
+
+## BUILD Entry Contract Check (MANDATORY — v0.18.0+, 程序化)
+
+**Purpose**: Validate `slices-manifest.json` schema and slice↔REQ cross-artifact consistency before entering BUILD.
+
+**Execution**: `phase-transition 3 in_progress` 时程序化校验：
+
+```
+1. slices-manifest.json 存在且 schema 合法
+2. manifest 每个 slice 引用的 REQ 必须存在于 specification.yaml
+3. 不合法 → BLOCK
+```
+
+**GATE CHECK**:
+```
+[BUILD-ENTRY] slices-manifest.json exists ✓
+[BUILD-ENTRY] manifest schema valid ✓
+[BUILD-ENTRY] slice↔REQ consistency ✓    # 每个 slice 的 REQ 引用在 specification.yaml 中存在
+```
+
+**IF GATE FAILS**: BLOCK — 返回 Phase 2/6 修复 manifest 或 specification.yaml。
 
 ---
 
@@ -215,6 +236,52 @@ Without these events, the Harness can only infer changes from file diffs and has
 
 ---
 
+## Blind Review — Read-Only Subagent Convention (v0.18.0+, 证据型标准步骤)
+
+**Purpose**: Code review by an isolated subagent with read-only tool access. Replaces the former `freeze/unfreeze` mechanism.
+
+**Convention**: The blind-review reviewer runs as a Task subagent with restricted tools:
+
+```
+tools: [Read, Grep, Glob]    # 只读 — 禁止 Write/Edit/Bash 写操作
+```
+
+**Execution**:
+1. Orchestrator dispatches a Task subagent with `tools: [Read, Grep, Glob]`
+2. Subagent reviews all changed files (from `git diff` or slices-manifest scope)
+3. Subagent outputs review findings (issues, suggestions, risks)
+4. Orchestrator records findings to `.sprint-state/phase-outputs/blind-review-report.md`
+
+**Classification**: 证据型标准步骤（非 HARD-GATE）— 执行并留存评审记录，不设程序化阻断。Worktree 本身已是隔离边界。
+
+**Anti-Pattern**: Reviewer subagent MUST NOT have Write, Edit, or Bash permissions. This ensures the review is truly read-only and cannot accidentally modify code under review.
+
+---
+
+## Learnings Capture (v0.18.0+, 原生)
+
+**Purpose**: Record patterns and lessons learned during BUILD for future sprints.
+
+**Execution**: ralph-loop 迭代中或 BUILD 完成后，将有价值的模式/教训写入：
+
+```
+.sprint-history/learnings.md
+```
+
+**Format**:
+```markdown
+## [YYYY-MM-DD] Sprint <id> — BUILD Learnings
+
+### Pattern: <title>
+- **Context**: <when this applies>
+- **Insight**: <what was learned>
+- **Action**: <how to apply in future>
+```
+
+**Note**: 替代原 `gstack/learn` 调用，纯原生文件写入，零外部依赖。
+
+---
+
 ## TDD 强制执行
 
 ### Gate 5a-BLOCK: 新增文件测试强制
@@ -249,7 +316,7 @@ SKIP_GATE_5A_BLOCK=1 git commit -m "message"
 | ralph-loop (per REQ) | TDD + verification per requirement | 5-15 min | 30 min/REQ | Mark REQ as `timeout`, continue next REQ |
 | parallel dispatch | Multi-agent parallel build | 10-30 min | 45 min | Collect partial results, continue |
 | TDD cycle (per unit) | RED → GREEN → REFACTOR | 2-5 min | 10 min | Skip unit, log failure |
-| freeze + blind-review | Code review in isolation | 5-10 min | 20 min | WARNING, continue |
+| blind-review (read-only subagent) | Code review via read-only subagent | 5-10 min | 20 min | WARNING, continue |
 | verification | Test suite + coverage check | 2-5 min | 15 min | Retry once, then BLOCK |
 | cost monitor | Token cost accounting | <1s | 5s | Skip, log warning |
 | Phase 3/6 total (lightweight) | ≤3 REQs | 15-30 min | 45 min | — |

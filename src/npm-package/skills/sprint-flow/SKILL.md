@@ -3,7 +3,7 @@ name: sprint-flow
 version: 2.1.0
 description: >
   Orchestrates a 6-phase end-to-end feature development pipeline (PREP → DESIGN → BUILD → VERIFY → SHIP → CLOSE).
-  Integrates brainstorming, autoplan, delphi-review, TDD, ralph-loop, code-walkthrough, ship, and other skills.
+  Integrates grill-with-docs, batch-grill-me, delphi-review (R1 requirements + R2 design), TDD, ralph-loop, code-walkthrough, and native ship/land steps.
   Pauses at key gates for user decisions. Acknowledges emergent requirements with mandatory manual UAT in CLOSE phase.
 
   WHAT: Automates the full development lifecycle from worktree isolation to production deployment.
@@ -87,12 +87,10 @@ workflow_steps:
   - "Phase 6/6: CLOSE → Output: ## Phase 6/6: CLOSE (收尾)"
 hooks:
   security:
-    - "/careful": "Safety guardrails for destructive commands — activate before any rm, force-push, or git reset"
-    - "/freeze": "Restrict edits to sprint worktree directory — prevent accidental changes outside scope"
-    - "/guard": "Full safety mode combining careful + freeze for maximum protection"
+    - "tools_denied": "Destructive commands blocked via tools_denied (rm -rf, git push --force, DROP TABLE)"
+    - "Security Notes": "See Security Notes section for safety guarantees"
   operational:
-    - "/context-save": "Save sprint context before pause or handoff"
-    - "/context-restore": "Restore sprint context on resume"
+    - "sprint-state.json": "Native sprint state persistence + --resume-from for context restore"
 tools_allowed:
   - "Bash(git, gh, npm, node)"  # git worktree/branch/commit, gh PR/release, npm/node CLI
   - "Read"                       # read project files, configs, docs
@@ -101,7 +99,7 @@ tools_allowed:
   - "Glob"                       # find project files by pattern
   - "Grep"                       # search file contents
   - "Task"                       # delegate to subagents (quick, deep, unspecified-high)
-  - "Skill"                      # invoke integrated skills (brainstorming, autoplan, delphi-review, etc.)
+  - "Skill"                      # invoke integrated skills (grill-with-docs, batch-grill-me, delphi-review, to-issues, etc.)
   - "TodoWrite"                  # track sprint progress
   - "Question"                   # ask user at decision gates
 tools_denied:
@@ -167,15 +165,15 @@ PREP → DESIGN → BUILD → VERIFY → SHIP → CLOSE
 | Phase | Name | Key Actions | Output |
 |-------|------|-------------|--------|
 | 1/6 | PREP | Detect protected branch → Create git worktree → AUTO-ESTIMATE sizing → Classify (lightweight/standard/complex) | Worktree path + impact assessment |
-| 2/6 | DESIGN | CONTEXT.md 预检 (#322) → brainstorming (如需要) → autoplan → delphi-review (HARD-GATE ≥90% consensus) → to-issues → specification.yaml | specification.yaml + slices-manifest.json |
-| 3/6 | BUILD | GITHOOKS-GATE → DELPHI-GATE → ralph-loop (default) or parallel → TDD → freeze → blind review → verification | MVP code |
-| 4/6 | VERIFY | delphi-review --mode code-walkthrough → test-specification-alignment → browse QA → learn + retro | Review report + feedback-log.md |
-| 5/6 | SHIP | VERSION-GATE → finishing-a-development-branch → ship (create PR) → land-and-deploy → merge to main + CI + canary | PR URL + deploy status + merge confirmation |
-| 6/6 | CLOSE | SHIP→CLOSE GATE (merge verified) → Backup sprint-state → USER ACCEPTANCE (⚠️ mandatory manual) → Capture emergent issues → Cleanup worktree + branch | Emergent issues list + cleanup report |
+| 2/6 | DESIGN | CONTEXT.md 预检 (#322) → grill-with-docs → R1 需求评审 → 设计文档+APPROVAL (HARD-GATE) → batch-grill-me → R2 delphi-review (≥90% consensus) → to-issues → specification.yaml | specification.yaml + slices-manifest.json + requirements-reviewed.json |
+| 3/6 | BUILD | BUILD-ENTRY-CONTRACT → GITHOOKS-GATE → DELPHI-GATE → ralph-loop (default) or parallel → TDD → blind-review (read-only subagent) → verification | MVP code |
+| 4/6 | VERIFY | delphi-review --mode code-walkthrough → test-specification-alignment (#367 HARD-GATE) → xp-gate check --all → browser (Layer 4) → learnings + xp-gate retro | Review report + feedback-log.md + test-alignment-report.json |
+| 5/6 | SHIP | VERSION-GATE → 分支完成决策 (4选项) → native ship (create PR) → native land (merge + CI + canary) | PR URL + deploy status + merge confirmation |
+| 6/6 | CLOSE | SHIP→CLOSE GATE (merge verified) → Backup sprint-state → #369 返工指标 → USER ACCEPTANCE (⚠️ mandatory manual) → Capture emergent issues → Cleanup worktree + branch | Emergent issues list + cleanup report + metrics |
 
 **Hard Gates**:
-- **DESIGN → BUILD**: Design must be APPROVED by delphi-review (≥90% consensus) + GITHOOKS-GATE + DELPHI-GATE
-- **VERIFY → SHIP**: feedback-log.md must exist (HARD-GATE)
+- **DESIGN → BUILD**: R1 需求评审 APPROVED + 设计文档用户 APPROVED + R2 delphi-review APPROVED (≥90% consensus) + GITHOOKS-GATE + DELPHI-GATE + BUILD-ENTRY-CONTRACT (manifest schema + slice↔REQ)
+- **VERIFY → SHIP**: feedback-log.md must exist + test-alignment-report.json PASS (#367 程序化 HARD-GATE)
 - **SHIP → CLOSE**: PR must be merged to main + release completed (HARD-GATE)
 
 ---
@@ -282,9 +280,11 @@ next_phase_context: [key info for next phase]
 
 | 门禁 | 位置 | 条件 | 失败处理 |
 |------|------|------|----------|
+| BUILD-ENTRY-CONTRACT | Phase 2→3 | slices-manifest.json schema 合法 + slice↔REQ 一致 | BLOCK，返回 Phase 2 修复 |
 | GITHOOKS-GATE | Phase 2→3 | hooks 已安装且可执行 | 自动修复 (`xp-gate doctor --fix`)，失败则 BLOCK |
-| DELPHI-GATE | Phase 2→3 | delphi-review APPROVED (≥90%) | 重新设计或用户覆盖（记录原因） |
+| DELPHI-GATE | Phase 2→3 | R2 delphi-review APPROVED (≥90%) | 重新设计或用户覆盖（记录原因） |
 | VERSION-GATE | Phase 4→5 | VERSION 文件与 package.json 一致 | 执行 `node scripts/sync-version.cjs` |
+| #367 EVIDENCE-GATE | Phase 4→5 | test-alignment-report.json PASS + head_commit + spec_hash | BLOCK（--skip-evidence 需 --reason，≤2 次/sprint） |
 | SHIP→CLOSE GATE | Phase 5→6 | PR 已合并 + release 完成 | BLOCK，等待合并确认 |
 | feedback-log GATE | Phase 4→5 | feedback-log.md 存在 | BLOCK，必须完成 VERIFY |
 
@@ -296,11 +296,11 @@ next_phase_context: [key info for next phase]
 
 | Phase | 参考文件 | 核心 Skill 链 |
 |-------|----------|---------------|
-| 2/6 DESIGN | `@references/phase-2-design.md` | CONTEXT.md 预检 → brainstorming → autoplan → delphi-review → to-issues |
-| 3/6 BUILD | `@references/phase-3-build.md` | GITHOOKS-GATE → DELPHI-GATE → ralph-loop (TDD) → freeze → blind review |
-| 4/6 VERIFY | `@references/phase-4-verify.md` | delphi code-walkthrough → test-spec-alignment → browse QA → retro |
-| 5/6 SHIP | `@references/phase-5-ship.md` | VERSION-GATE → finishing-branch → ship (PR) → land-and-deploy → merge |
-| 6/6 CLOSE | `@references/phase-6-close.md` | SHIP→CLOSE GATE → backup → USER ACCEPTANCE → emergent → cleanup |
+| 2/6 DESIGN | `@references/phase-2-design.md` | CONTEXT.md 预检 → grill-with-docs → R1 需求评审 → 设计文档+APPROVAL → batch-grill-me → R2 delphi-review → to-issues |
+| 3/6 BUILD | `@references/phase-3-build.md` | BUILD-ENTRY-CONTRACT → GITHOOKS-GATE → DELPHI-GATE → ralph-loop (TDD) → blind-review (read-only subagent) |
+| 4/6 VERIFY | `@references/phase-4-verify.md` | delphi code-walkthrough → test-spec-alignment (#367) → xp-gate check --all → browser (Layer 4) → learnings + retro |
+| 5/6 SHIP | `@references/phase-5-ship.md` | VERSION-GATE → 分支完成决策 (4选项) → native ship (PR) → native land (merge+CI+canary) |
+| 6/6 CLOSE | `@references/phase-6-close.md` | SHIP→CLOSE GATE → backup → #369 返工指标 → USER ACCEPTANCE → emergent → cleanup |
 
 **路径约定**：`@references/` 和 `@templates/` 相对于 skill 目录（`skills/sprint-flow/`）解析。
 
@@ -321,7 +321,7 @@ next_phase_context: [key info for next phase]
 | Route Q&A, explanation, or code-search requests to sprint-flow | Only trigger for explicit feature development/implementation requests |
 | Skip Phase 1/6 PREP isolation, edit directly on main/master/develop | Default: create worktree; only bypass with `--no-isolate` or `--force` + user confirmation |
 | Skip AUTO-ESTIMATE and apply full heavy pipeline blindly | Evaluate lightweight/standard/complex first, follow recommended or user-confirmed flow |
-| Skip Delphi review in DESIGN, go straight to BUILD | All requirement levels (lightweight/standard/complex) must pass autoplan + delphi-review; APPROVED before coding |
+| Skip Delphi review in DESIGN, go straight to BUILD | All requirement levels (lightweight/standard/complex) must pass R1 需求评审 + R2 delphi-review; APPROVED before coding |
 | Skip TDD, implement code directly | Phase 3/6 BUILD must follow RED → GREEN → REFACTOR; tests and implementation delivered together |
 | Skip user acceptance, go straight to Ship | Phase 6/6 CLOSE USER ACCEPTANCE must be manual; never automate, skip, or fake |
 | Enter CLOSE without SHIP completing merge to main | Phase 5/6 SHIP must complete merge to main + release before entering Phase 6/6 CLOSE; otherwise worktree cleanup leaves residue + UAT reviews unmerged code |
@@ -408,4 +408,4 @@ stateDiagram-v2
 
 ## 底层 Skills 保持独立
 
-所有被调用的 Skills 独立可用：`delphi-review` (单独评审), `test-driven-development` (TDD)，sprint-flow 仅自动串联
+所有被调用的 Skills 独立可用：`delphi-review` (单独评审), `test-driven-development` (TDD), `grill-with-docs` (需求访谈), `batch-grill-me` (批量决策), `to-issues` (切片拆分)，sprint-flow 仅自动串联

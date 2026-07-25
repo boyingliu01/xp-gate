@@ -15,15 +15,17 @@
 
 | Skill | 来源 | 触发条件 | 输出 |
 |-------|------|---------|------|
-| `brainstorming` | superpowers | 无条件（首个 Skill） | 结构化设计文档 |
+| `grill-with-docs` | Matt Pocock (内置) | CONTEXT.md 不存在时（首个 Skill） | 访谈记录 + CONTEXT.md + ADR |
+| `delphi-review --mode requirements` | xp-gate | R1 需求评审（轻量 2 专家 1 轮） | requirements-reviewed.json |
+| 原生设计文档生成 | sprint-flow 编排层 | R1 APPROVED 后 | docs/plans/YYYY-MM-DD-<topic>-design.md |
 | **硬闸门** | — | 设计未批准 → 停止 | 禁止进入 Plan |
 
 ### Phase 1: PLAN
 
 | Skill | 来源 | 触发条件 | 条件分支 |
 |-------|------|---------|---------|
-| `autoplan` | gstack | 进入 Phase 1 自动调用 | 输出 AUTO_APPROVED 或 NEEDS_REVIEW |
-| `delphi-review` | xp-gate | Phase 1 强制调用；AUTO_APPROVED + 无 taste_decisions 使用 lightweight delphi-review | 必须产生 `.sprint-state/delphi-reviewed.json` 且 verdict=APPROVED |
+| `batch-grill-me` | Matt Pocock (内置) | 标准路径（change_type != "修改已存在代码"） | 批量前置决策 |
+| `delphi-review` | xp-gate | R2 设计评审；lightweight 路径使用 2 专家 1 轮 | 必须产生 `.sprint-state/delphi-reviewed.json` 且 verdict=APPROVED |
 | `to-issues` | xp-gate | delphi-review APPROVED 后 | 拆解为垂直切片 → slices-manifest.json |
 
 ### Phase 2: BUILD
@@ -31,22 +33,22 @@
 | 步骤 | Skill | 来源 | 参数注入 |
 |------|-------|------|---------|
 | -1 | `hooks-install` | githooks | 无 |
-| 0 | `dispatching-parallel-agents` | superpowers | 仅分发 AFK 切片（dependency_graph 判定） |
-| 1 | `test-driven-development` | superpowers | `--lang` 注入对应 TDD skill |
-| 2 | `executing-plans` | superpowers | 隔离 session，review checkpoint |
-| 3 | `freeze` | gstack | 锁定业务代码 |
-| 4 | `requesting-code-review` | superpowers | 盲评 agent |
-| 5 | `unfreeze` | gstack | 解锁 |
-| 6 | `verification-before-completion` | superpowers | 运行测试 + lint |
-| 7 | 成本监控 | sprint-flow 编排层 | token 阈值 |
+| 0 | BUILD-ENTRY-CONTRACT | xp-gate CLI | slices-manifest.json schema + slice↔REQ 校验 |
+| 1 | `test-driven-development` | xp-gate (内置) | `--lang` 注入对应 TDD skill |
+| 2 | ralph-loop / parallel dispatch | sprint-flow 编排层 | 隔离 session，review checkpoint |
+| 3 | blind-review (read-only subagent) | sprint-flow 编排层 | tools: [Read, Grep, Glob] |
+| 4 | verification-before-completion | sprint-flow 编排层 | 运行测试 + lint |
+| 5 | 成本监控 | sprint-flow 编排层 | token 阈值 |
+| 6 | learnings.md 写入 | sprint-flow 编排层 | 原生文件写入 |
 
 ### Phase 3: REVIEW
 
 | Skill | 模式 | 触发条件 |
 |-------|------|---------|
 | `delphi-review` | `--mode code-walkthrough` | 强制调用 |
-| `test-specification-alignment` | 默认 | 强制调用 |
-| `browse` | gstack | 强制调用 |
+| `test-specification-alignment` | 默认 | 强制调用（#367 程序化 HARD-GATE） |
+| `xp-gate check --all` | 全量门禁 | 强制调用 |
+| 浏览器验证 | Layer 4 可选链 | gstack browse > browser-use MCP > SKIP |
 | `k6`/`locust`/`gatling` | 性能测试 | `--with-performance` 或 `--type backend-*` |
 
 ### Phase 4: USER ACCEPTANCE
@@ -59,18 +61,17 @@
 
 | Skill | 来源 | 说明 |
 |-------|------|------|
-| `learn` | gstack | 模式记录 |
-| `retro` | gstack | 工程回顾 |
-| `systematic-debugging` | superpowers | 根因调试 |
+| learnings.md 写入 | 原生 | 模式记录（替代原 gstack learn） |
+| `xp-gate retro` | 原生 CLI | 工程回顾（含 #369 返工率区块） |
+| systematic-debugging | Layer 4 可选 | 根因调试（如已安装；否则"无根因不修复"文本纪律） |
 
 ### Phase 6: SHIP
 
 | Skill | 说明 |
 |-------|------|
-| `finishing-a-development-branch` | 4 选项 |
-| `ship` | 创建 PR（可选） |
-| `land-and-deploy` | 合并部署 |
-| `canary` | 监控告警 |
+| 分支完成决策（原生 4 选项） | merge / PR / keep / discard |
+| native ship 步骤 | test → VERSION-GATE → commit → push → gh pr create |
+| native land 步骤 | merge 确认 → wait CI → canary → fail git revert |
 
 ---
 

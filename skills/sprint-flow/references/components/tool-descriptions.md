@@ -16,14 +16,13 @@
 | 步骤 | Skill | 来源 | 说明 |
 |------|-------|------|------|
 | -1 | `hooks-install` | githooks | `githooks/verify.sh` → 缺失则 `githooks/install.sh` |
-| 0 | `dispatching-parallel-agents` | superpowers | 检测可并行任务 |
-| 1 | `test-driven-development` | superpowers | RED → GREEN → REFACTOR |
-| 2 | `executing-plans` | superpowers | 隔离 session，review checkpoint |
-| 3 | `freeze` | gstack | 盲评隔离 |
-| 4 | `requesting-code-review` | superpowers | 独立 agent 评审 |
-| 5 | `unfreeze` | gstack | 解锁 |
-| 6 | `verification-before-completion` | superpowers | 测试 + lint |
-| 7 | 成本监控 | sprint-flow 编排层 | 超阈值 BLOCK |
+| 0 | BUILD-ENTRY-CONTRACT | xp-gate CLI | slices-manifest.json schema + slice↔REQ 校验 |
+| 1 | `test-driven-development` | xp-gate (内置) | RED → GREEN → REFACTOR |
+| 2 | ralph-loop / parallel dispatch | sprint-flow 编排层 | 隔离 session，review checkpoint |
+| 3 | blind-review (read-only subagent) | sprint-flow 编排层 | tools: [Read, Grep, Glob]，只读盲评 |
+| 4 | verification-before-completion | sprint-flow 编排层 | 测试 + lint |
+| 5 | 成本监控 | sprint-flow 编排层 | 超阈值 BLOCK |
+| 6 | learnings.md 写入 | sprint-flow 编排层 | 原生模式记录 |
 
 ### GITHOOKS-GATE (Phase 1→2 闸门)
 
@@ -46,8 +45,9 @@
 | Skill | 模式 | 说明 |
 |-------|------|------|
 | `delphi-review` | `--mode code-walkthrough` | 多专家匿名代码走查 |
-| `test-specification-alignment` | 默认 | 测试与 Spec 对齐验证 |
-| `browse` | gstack | 浏览器自动化测试 |
+| `test-specification-alignment` | 默认 | 测试与 Spec 对齐验证（#367 程序化 HARD-GATE） |
+| `xp-gate check --all` | 全量门禁 | Gate 0–9 含安全审计 |
+| 浏览器验证 | Layer 4 可选链 | gstack browse > browser-use MCP > SKIP |
 | `k6` / `locust` / `gatling` | 可选 | 后端负载测试 |
 
 ---
@@ -56,9 +56,9 @@
 
 | Skill | 说明 |
 |-------|------|
-| `learn` | gstack，模式记录 |
-| `retro` | gstack，工程回顾 |
-| `systematic-debugging` | superpowers，根因调试 |
+| learnings.md 写入 | 原生模式记录（替代原 gstack learn） |
+| `xp-gate retro` | 原生工程回顾（含 #369 返工率区块） |
+| systematic-debugging | Layer 4 可选，根因调试（如已安装） |
 
 ---
 
@@ -66,10 +66,9 @@
 
 | Skill | 说明 |
 |-------|------|
-| `finishing-a-development-branch` | 4 选项: merge / PR / discard / keep |
-| `ship` | gstack，创建 PR |
-| `land-and-deploy` | 合并部署 |
-| `canary` | 监控告警 |
+| 分支完成决策（原生 4 选项） | merge / PR / keep / discard |
+| native ship 步骤 | test → VERSION-GATE → commit → push → gh pr create |
+| native land 步骤 | merge 确认 → wait CI → canary → fail git revert |
 
 ---
 
@@ -77,12 +76,12 @@
 
 | Phase | Backend (default) | Web Frontend | Mobile |
 |-------|------------------|-------------|--------|
-| Phase 0 (THINK) | `brainstorming` | (同) | (同) |
-| Phase 1 (PLAN) | `autoplan` + `delphi-review` | + `design-shotgun` | (同 web) |
-| Phase 2 (BUILD) | TDD + blind-review | (同 backend) | + `vercel-react-native-skills` / `flutter-review` |
-| Phase 3 (REVIEW) | `delphi-review --mode code-walkthrough` | + `qa` + `design-review` + `benchmark` | `flutter-test` / `detox E2E` |
-| Phase 5 (FEEDBACK) | `learn` + `retro` | (同) | (同) |
-| Phase 6 (SHIP) | `finishing-a-development-branch` + `ship` | (同) | + platform deploy |
+| Phase 0 (THINK) | `grill-with-docs` + R1 `delphi-review --mode requirements` | (同) | (同) |
+| Phase 1 (PLAN) | `batch-grill-me` + R2 `delphi-review` | + OPTIONAL `design-shotgun` | (同 web) |
+| Phase 2 (BUILD) | TDD + blind-review (read-only subagent) | (同 backend) | + `vercel-react-native-skills` / `flutter-review` |
+| Phase 3 (REVIEW) | `delphi-review --mode code-walkthrough` + `xp-gate check --all` | + `xp-gate ui-review` + OPTIONAL qa/design-review/benchmark | `flutter-test` / `detox E2E` |
+| Phase 5 (FEEDBACK) | learnings.md + `xp-gate retro` | (同) | (同) |
+| Phase 6 (SHIP) | 原生 4 选项 + native ship + native land | (同) | + platform deploy |
 
 ---
 

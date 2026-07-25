@@ -242,7 +242,7 @@ Phase 1: PLAN     → autoplan → delphi-review → specification.yaml
                   → **/to-issues** → slices-manifest.json + Issue 列表
 Phase 2: BUILD    → 按 execution_order 逐个切片执行
                   → 每个切片 = 一个 REQ（ralph-loop 模式）
-                  → 或通过 dispatching-parallel-agents 并行（无依赖的 AFK 切片）
+                  → 或通过原生 Task 并行派发（无依赖的 AFK 切片）
 Phase 3: REVIEW   → **整体 review**（全部切片完成后统一 code-walkthrough）
                   → browse / QA 验证端到端行为
 Phase 4: USER ACC → 人工验收（全部切片集成后的完整功能）

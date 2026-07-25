@@ -73,7 +73,7 @@ ralph-loop 内部分类:
 - `permanent`: 跨 REQ 持久化（通用约束、模式）
 - `contextual`: 当前 REQ 生命周期内有效
 
-gstack/learn 调用分类: permanent / contextual 通过 progress.log 持久化。
+learnings.md 写入分类: permanent / contextual 通过 `.sprint-history/learnings.md` 持久化（原生，替代原 gstack/learn）。
 
 ---
 
