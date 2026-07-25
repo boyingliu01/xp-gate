@@ -9,6 +9,7 @@
 
 const fs = require('fs');
 const path = require('path');
+const { execSync } = require('child_process');
 const { discoverActiveSprints } = require('./sprint-discovery');
 const { SprintStateManager } = require('./sprint-state-manager');
 
@@ -216,6 +217,109 @@ function jsonMode(state) {
   return JSON.stringify(state, null, 2);
 }
 
+// #369: fix commit matching — conventional commits + keyword boundary
+const FIX_RE = /^(fix(\(.+\))?:)|\b(fix|bugfix|hotfix|patch|修复)\b/i;
+
+/**
+ * Count fix commits in a git repo since a given date (#369).
+ * Scans all branches (--all) per Round 1 repo-wide decision.
+ * @param {string} repoDir - Repository root
+ * @param {string} sinceDate - ISO 8601 date string
+ * @returns {number} Count of fix commits
+ */
+function getFixCommitCount(repoDir, sinceDate) {
+  try {
+    const out = execSync(
+      `git log --all --since="${sinceDate}" --pretty=format:"%s"`,
+      { cwd: repoDir, encoding: 'utf8', stdio: ['pipe', 'pipe', 'pipe'] }
+    );
+    return out.split('\n').filter(l => l.trim() && FIX_RE.test(l.trim())).length;
+  } catch {
+    return 0;
+  }
+}
+
+/**
+ * Handle --rework-check mode: compute rework rate for recently closed sprints (#369).
+ * @param {string} searchDir - Project root directory
+ * @param {number} windowDays - Window in days after completed_at
+ * @returns {Promise<number>} Exit code
+ */
+async function handleReworkCheck(searchDir, windowDays) {
+  const stateDir = path.join(searchDir, '.sprint-state');
+  const historyDir = path.join(stateDir, 'sprint-history');
+  const sprintStateFile = path.join(stateDir, 'sprint-state.json');
+
+  const sprints = [];
+
+  // Current sprint-state.json
+  if (fs.existsSync(sprintStateFile)) {
+    try {
+      const state = JSON.parse(fs.readFileSync(sprintStateFile, 'utf8'));
+      if (state.metrics && state.metrics.completed_at) {
+        sprints.push({ id: state.id || 'unknown', state, file: sprintStateFile });
+      }
+    } catch { /* skip malformed */ }
+  }
+
+  // History files
+  if (fs.existsSync(historyDir)) {
+    for (const f of fs.readdirSync(historyDir).filter(f => f.endsWith('.json'))) {
+      try {
+        const fp = path.join(historyDir, f);
+        const state = JSON.parse(fs.readFileSync(fp, 'utf8'));
+        if (state.metrics && state.metrics.completed_at) {
+          sprints.push({ id: state.id || f.replace('.json', ''), state, file: fp });
+        }
+      } catch { /* skip malformed */ }
+    }
+  }
+
+  const now = Date.now();
+  const windowMs = windowDays * 86400000;
+  const inWindow = sprints.filter(s => {
+    const t = new Date(s.state.metrics.completed_at).getTime();
+    return !isNaN(t) && (now - t) <= windowMs;
+  });
+
+  if (inWindow.length === 0) {
+    console.log(`No closed sprints within ${windowDays} day${windowDays === 1 ? '' : 's'}`);
+    return 0;
+  }
+
+  console.log(`Rework Rate Check (window: ${windowDays} days)`);
+  console.log('─'.repeat(60));
+
+  let hasAlert = false;
+  for (const { id, state, file } of inWindow) {
+    const totalCommits = state.metrics.total_sprint_commits || 0;
+    const fixCommits = getFixCommitCount(searchDir, state.metrics.completed_at);
+    const rate = fixCommits / Math.max(totalCommits, 1);
+
+    // Write rework_rate back to the source file
+    state.metrics.rework_rate = rate;
+    try {
+      fs.writeFileSync(file, JSON.stringify(state, null, 2));
+    } catch { /* non-fatal */ }
+
+    const pct = (rate * 100).toFixed(1);
+    console.log(`  ${id}: ${pct}% (${fixCommits} fix / ${totalCommits} total commits)`);
+    if (rate > 0.30) {
+      console.log(`  ⚠️  ${id}: ${pct}% rework — exceeds 30% threshold`);
+      hasAlert = true;
+    }
+  }
+
+  console.log('─'.repeat(60));
+  if (hasAlert) {
+    console.log('⚠️  Rework rate alert: one or more sprints exceed 30% threshold');
+  } else {
+    console.log('All sprints within acceptable rework rate (≤30%)');
+  }
+
+  return 0;
+}
+
 /**
  * CLI entry point. Parses args and executes the appropriate mode.
  * @param {string[]} args - CLI subargs (without 'sprint-status')
@@ -235,6 +339,13 @@ async function handleSprintStatus(args = []) {
       console.error('Error: --dir path must be under current working directory');
       return 1;
     }
+  }
+
+  // #369: --rework-check is mutually exclusive with regular status view
+  if (args.includes('--rework-check')) {
+    const wdIdx = args.indexOf('--window-days');
+    const windowDays = (wdIdx >= 0 && args[wdIdx + 1]) ? parseInt(args[wdIdx + 1], 10) : 7;
+    return handleReworkCheck(searchDir, isNaN(windowDays) ? 7 : windowDays);
   }
 
   if (allFlag) {
