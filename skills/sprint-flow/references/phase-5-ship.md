@@ -3,17 +3,15 @@
 **执行时机**: Phase 4/6 VERIFY 完成后、Phase 6/6 CLOSE 之前。
 **对应旧模型**: Phase 5 SHIP + Phase 6 LAND
 
-**摘要**: 结构化分支完成决策, 创建 PR, 合并部署, 监控. 生成 Sprint Summary.
+**摘要**: 结构化分支完成决策（原生 4 选项）, 创建 PR（原生步骤）, 合并部署（原生步骤）, 监控. 生成 Sprint Summary.
 
 ---
 
 ## Part A: SHIP（发布准备）
 
-**完整指令**: @see SKILL.md Phase 5/6 SHIP section.
+**Orchestrator 直接执行**: 分支完成决策和 PR 创建均为交互式步骤（4 选项菜单 + PR 确认），**必须由 orchestrator 直接执行**。
 
-**Orchestrator 直接执行**: `finishing-a-development-branch` 和 `ship` 均为交互式 skill（4 选项菜单 + PR 确认），**必须由 orchestrator 直接调用**。
-
-**关键链**: VERSION-GATE(MANDATORY) → finishing-a-development-branch(4选项) → push PR
+**关键链**: VERSION-GATE(MANDATORY) → 分支完成决策(4选项) → push PR
 
 **HARD-GATE**: Phase 4/6 VERIFY 未完成 → BLOCK。验证 `feedback-log.md` 存在。
 
@@ -29,9 +27,9 @@
     "https://api.github.com/repos/OWNER/REPO/commits/HEAD/status"
   ```
 
-### Step 0: VERSION-GATE（MANDATORY — 在 finishing-a-development-branch 之前执行）
+### Step 0: VERSION-GATE（MANDATORY — 在分支完成决策之前执行）
 
-**Purpose**: Ensure version bump, changelog update, and sync before creating PR. This MUST run BEFORE calling `finishing-a-development-branch` — the skill's "Create PR" option creates the PR immediately, so version changes must be committed first.
+**Purpose**: Ensure version bump, changelog update, and sync before creating PR. This MUST run BEFORE the branch completion decision — the "Create PR" option creates the PR immediately, so version changes must be committed first.
 
 **Execution**:
 
@@ -65,7 +63,7 @@
    gh pr view <PR_NUMBER> --json state  # 确认 CI 已开始
 ```
 
-**GATE CHECK** (BEFORE proceeding to finishing-a-development-branch):
+**GATE CHECK** (BEFORE proceeding to branch completion decision):
 ```
 [VERSION-GATE] VERSION bump ✓   # VERSION 文件已更新
 [VERSION-GATE] CHANGELOG ✓      # 新版本条目已添加
@@ -74,23 +72,110 @@
 [VERSION-GATE] PR updated ✓     # PR 已包含版本变更 commit
 ```
 
-**⚠️ ANTI-PATTERN**: 先调用 finishing-a-development-branch 创建 PR，再 bump VERSION 会导致 PR 不含版本变更 → CI 不触发 release workflow → 无新版本发布。
+**⚠️ ANTI-PATTERN**: 先创建 PR 再 bump VERSION 会导致 PR 不含版本变更 → CI 不触发 release workflow → 无新版本发布。
 
 **输出**: 版本变更 commit 包含在 PR 中
 
+### Step 1: 分支完成决策（原生 4 选项 — AskUserQuestion）
+
+VERSION-GATE 通过后，orchestrator 向用户展示 4 选项菜单：
+
+```
+⚠️ Phase 5/6 SHIP: 分支完成决策
+
+Sprint 分支已准备就绪。请选择操作：
+
+1. **Merge to main** — 直接合并到主分支（适用于个人项目或已确认无需 PR 审查）
+2. **Push and create a Pull Request** — 推送并创建 PR（推荐，含 CI 验证）
+3. **Keep branch** — 保留分支，稍后处理
+4. **Discard** — 丢弃分支（⚠️ 需要输入确认）
+
+请选择 (1-4):
+```
+
+**Option 4 (Discard) 安全确认**: 要求用户输入分支名确认，防止误删。
+
+**默认推荐**: Option 2（Push and create a Pull Request）。
+
+### Step 2: 原生 Ship 步骤序列（选择 Option 2 时执行）
+
+```
+1. 运行测试:
+   npm test  # 或项目特定测试命令
+
+2. VERSION-GATE 已通过（Step 0）
+
+3. 提交所有变更:
+   git add -A && git commit -m "feat: <sprint-description>"
+
+4. 推送到远程:
+   git push -u origin <sprint-branch>
+
+5. 创建 PR:
+   gh pr create --title "feat: <description>" --body "<sprint-summary>"
+
+6. 输出 PR URL
+```
+
+**输出**: PR URL (含版本变更 commit)
+
 ---
 
-## Part B: LAND（合并 + 部署）
+## Part B: LAND（合并 + 部署 — 原生步骤）
 
-**Orchestrator 直接执行**: `land-and-deploy` 包含 merge 确认和 rollback 决策，**必须由 orchestrator 直接调用** `skill(name="land-and-deploy")`
+**Orchestrator 直接执行**: 合并确认和 rollback 决策均为用户交互点，**必须由 orchestrator 直接执行**。
 
 **输入**: PR URL → 输出: 部署状态 + Canary 报告
 
-**流程**: Merge PR → 等待 CI (10min) → 等待 Deploy (10min) → Canary Health Check (5min)
+### Step 1: Merge 确认
 
-**回滚**: `git revert` 最后一次 merge commit
+```
+⚠️ 确认合并 PR #<number> 到 main?
 
-**条件跳过**: 无部署配置时仅 merge + CI
+PR: <PR URL>
+变更: <files changed> 个文件, +<additions>/-<deletions>
+
+确认合并? (yes/no):
+```
+
+### Step 2: 等待 CI
+
+```
+# 等待 CI 完成（最多 10 分钟）
+gh run list --branch main --limit 1 --json status,conclusion
+
+# 轮询直到完成
+WHILE status != "completed":
+  等待 30 秒
+  重新查询
+```
+
+### Step 3: 等待 Deploy（如适用）
+
+```
+# 等待部署完成（最多 10 分钟）
+# 检测部署平台（Fly.io/Render/Vercel/Netlify/Heroku/GitHub Actions）
+# 查询部署状态
+```
+
+**条件跳过**: 无部署配置时仅 merge + CI。
+
+### Step 4: Canary Health Check（如适用，最多 5 分钟）
+
+```
+# 健康检查端点
+curl -s <health-check-url>
+# 验证返回 200 + 预期响应
+```
+
+### Step 5: 失败回滚
+
+```
+IF CI 失败 OR 部署失败 OR canary 异常:
+  git revert <merge-commit-sha>
+  git push
+  输出 "[ROLLBACK] 已回滚 merge commit"
+```
 
 **输出**: 部署状态 (success/failure/skipped), Canary 报告
 

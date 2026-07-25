@@ -29,30 +29,32 @@
 | Phase | 名称 | Subagent? | Category | load_skills | 执行者 |
 |-------|------|:---------:|----------|-------------|--------|
 | 1/6 | PREP | ❌ | Bash（直接执行） | 无 | orchestrator |
-| 2/6 | DESIGN | ❌ | orchestrator（直接执行） | `["brainstorming", "autoplan", "delphi-review", "to-issues"]` | orchestrator |
+| 2/6 | DESIGN | ❌ | orchestrator（直接执行） | `["grill-with-docs", "batch-grill-me", "delphi-review", "to-issues"]` | orchestrator |
 | 3/6 | BUILD | ✅ | ralph-loop | `["test-driven-development"]` | subagent |
-| 4/6 | VERIFY | ❌ | orchestrator（直接执行） | `["delphi-review", "test-specification-alignment", "learn", "retro", "systematic-debugging"]` | orchestrator |
-| 5/6 | SHIP | ❌ | orchestrator（直接执行） | `["finishing-a-development-branch", "ship", "land-and-deploy"]` | orchestrator |
+| 4/6 | VERIFY | ❌ | orchestrator（直接执行） | `["delphi-review", "test-specification-alignment"]` | orchestrator |
+| 5/6 | SHIP | ❌ | orchestrator（直接执行） | 无（原生步骤） | orchestrator |
 | 6/6 | CLOSE | ❌ | **强制人工 (UAT)** + Bash (CLEANUP) | 无 | 用户 + orchestrator |
 
 **⚠️ 交互式 skill 必须由 orchestrator 直接执行（不可 dispatch 到 subagent）**：
 
 | Phase | Skill | 为什么不能在 subagent 中执行 |
 |-------|-------|---------------------------|
-| 2/6 | `brainstorming` | 需要与用户对话确认需求、提出澄清问题。Subagent 是 fire-and-forget 模式，无法暂停等待用户输入（Issue #217） |
-| 2/6 | `autoplan` | taste_decisions 节点暂停等待用户确认。必须由 orchestrator 直接执行（Issue #225） |
+| 2/6 | `grill-with-docs` | 需要与用户对话确认需求、提出澄清问题。Subagent 是 fire-and-forget 模式，无法暂停等待用户输入（Issue #217） |
+| 2/6 | `batch-grill-me` | 批量决策节点暂停等待用户确认。必须由 orchestrator 直接执行 |
 | 2/6 | `delphi-review` | design 模式需等待 verdict APPROVED；非 APPROVED 时需用户确认是否接受分歧方案（Issue #249） |
 | 2/6 | `to-issues` | Step 6 "向用户确认" — 展示拆分结果，等待用户批准后才生成 slices-manifest.json |
 | 4/6 | `delphi-review --mode code-walkthrough` | Code walkthrough 非 APPROVED 时需暂停等待用户处理 Critical Issues（Issue #249） |
-| 5/6 | `finishing-a-development-branch` | 4 选项菜单 (merge/PR/keep/discard) 需要用户选择；Option 4 (discard) 要求 typed confirmation |
-| 5/6 | `ship` | PR 创建前需要用户确认；包含 AskUserQuestion STOP 点 |
-| 5/6 | `land-and-deploy` | Merge 确认、rollback 决策 — 均为用户交互点 |
+| 5/6 | 分支完成决策 | 4 选项菜单 (merge/PR/keep/discard) 需要用户选择；Option 4 (discard) 要求 typed confirmation |
+| 5/6 | native ship | PR 创建前需要用户确认 |
+| 5/6 | native land | Merge 确认、rollback 决策 — 均为用户交互点 |
 
 **Phase 2/6 DESIGN 执行模式（全部 orchestrator 直接执行）**：
-1. **Orchestrator 直接执行 brainstorming**：`skill(name="brainstorming")` → 等待 APPROVED
-2. **Orchestrator 直接执行 autoplan**：`skill(name="autoplan")` → 等待用户确认 taste_decisions
-3. **Orchestrator 直接执行 delphi-review**：`skill(name="delphi-review")` → 等待 APPROVED
-4. **Orchestrator 直接执行 to-issues**：`skill(name="to-issues")` → 等待用户确认 Issue 拆分
+1. **Orchestrator 直接执行 grill-with-docs**：`skill(name="grill-with-docs")` → 访谈 + CONTEXT.md/ADR
+2. **Orchestrator 执行 R1 需求评审**：`npx xp-gate delphi-review --mode requirements` → requirements-reviewed.json
+3. **Orchestrator 生成设计文档** → 等待用户 APPROVED
+4. **Orchestrator 直接执行 batch-grill-me**：`skill(name="batch-grill-me")` → 批量决策确认
+5. **Orchestrator 直接执行 R2 delphi-review**：`skill(name="delphi-review")` → 等待 APPROVED
+6. **Orchestrator 直接执行 to-issues**：`skill(name="to-issues")` → 等待用户确认 Issue 拆分
 
 **上下文隔离原则**：
 - 每个 Subagent 在**独立 session** 中启动，不继承 orchestrator 的对话历史

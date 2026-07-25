@@ -10,7 +10,7 @@
 | 原则 | 说明 |
 |------|------|
 | **单一入口** | 用户只需调用 `/sprint-flow`，自动串联全流程 |
-| **自动流水线** | 类似 autoplan，自动执行多个阶段 |
+| **自动流水线** | 自动执行多个阶段，原生步骤 + 内置 Matt Pocock skill |
 | **关键节点暂停** | APPROVED 确认、DELPHI-GATE 通过、Ship 确认、⚠️ Phase 6 CLOSE 必须人工 |
 | **承认 Emergent** | 用户验收环节必须人工，无法自动化（78% 失败不可见） |
 | **复用现有 Skills** | 不重新发明，整合调用现有体系 |
@@ -52,11 +52,11 @@ Sprint Flow is NOT just a sequential launcher of existing skills. Here's what ma
 
 ```
 Phase 1/6: PREP → worktree隔离 + 规模评估 + 流程路由
-Phase 2/6: DESIGN → brainstorming → autoplan → delphi-review → specification.yaml
-Phase 3/6: BUILD → GITHOOKS-GATE → DELPHI-GATE → ralph-loop/TDD → freeze/盲评 → verification
-Phase 4/6: VERIFY → delphi-review --mode code-walkthrough → test-alignment → browse → learn + retro
-Phase 5/6: SHIP → finishing-a-development-branch → ship → land-and-deploy → canary
-Phase 6/6: CLOSE → USER ACCEPTANCE (⚠️ 人工) → emergent issues → cleanup
+Phase 2/6: DESIGN → grill-with-docs → R1 需求评审 → 设计文档+APPROVAL → batch-grill-me → R2 delphi-review → to-issues → specification.yaml
+Phase 3/6: BUILD → BUILD-ENTRY-CONTRACT → GITHOOKS-GATE → DELPHI-GATE → ralph-loop/TDD → blind-review (read-only subagent) → verification
+Phase 4/6: VERIFY → delphi-review --mode code-walkthrough → test-alignment (#367 HARD-GATE) → xp-gate check --all → browser (Layer 4) → learnings + retro
+Phase 5/6: SHIP → VERSION-GATE → 分支完成决策(4选项) → native ship (PR) → native land (merge+CI+canary)
+Phase 6/6: CLOSE → USER ACCEPTANCE (⚠️ 人工) → #369 返工指标 → emergent issues → cleanup
 ```
 
 **v2.0 Compact Redesign** (Issue #290): Merged from 11 phases to 6. PREP = old ISOLATE + AUTO-ESTIMATE. DESIGN = old THINK + PLAN. BUILD = old BUILD (unchanged). VERIFY = old REVIEW + FEEDBACK. SHIP = old SHIP + LAND. CLOSE = old USER ACCEPTANCE + CLEANUP.
@@ -66,11 +66,11 @@ Phase 6/6: CLOSE → USER ACCEPTANCE (⚠️ 人工) → emergent issues → cle
 ## 暂停点设计（不是随时停，而是设计明确的暂停点）
 
 - **Phase 1/6 PREP**: 保护分支强制隔离 → 输出警告或自动创建 worktree → 自动恢复；AUTO-ESTIMATE 结果展示 → 用户确认 → 按路由继续
-- **Phase 2/6 DESIGN**: brainstorming 设计未 APPROVED (HARD-GATE) → 用户修改 → APPROVED 后继续；autoplan taste_decisions → 用户确认；delphi-review 未 APPROVED → 修复 → APPROVED → specification.yaml
-- **Phase 3/6 BUILD**: DELPHI-GATE 未通过 → BLOCK；验证失败 > max3 → 用户决策修复/放弃；成本超阈值 → 用户确认
-- **Phase 4/6 VERIFY**: delphi code-walkthrough REQUEST_CHANGES → 用户处理 → 重新评审；browse 发现问题 → 回退 Phase 3（不暂停）
-- **Phase 5/6 SHIP**: finishing-a-development-branch (4选项) → 确认；ship PR → 用户确认合并；land-and-deploy 完成/失败 → 用户确认；⚠️ SHIP must complete merge to main + release before Phase 6
-- **Phase 6/6 CLOSE**: SHIP→CLOSE GATE (校验 merge 已完成 + git status clean + 当前在 main) → Backup sprint-state → USER ACCEPTANCE ⚠️ 必须人工验收 → 用户确认后继续；cleanup 完成/失败 → 用户确认 → 结束流程
+- **Phase 2/6 DESIGN**: grill-with-docs 访谈 → R1 需求评审 GAPS_FOUND → 补充访谈（最多 2 轮）；设计文档未 APPROVED (HARD-GATE) → 用户修改 → APPROVED 后继续；batch-grill-me 批量决策 → 用户确认；R2 delphi-review 未 APPROVED → 修复 → APPROVED → specification.yaml
+- **Phase 3/6 BUILD**: BUILD-ENTRY-CONTRACT 未通过 → BLOCK；DELPHI-GATE 未通过 → BLOCK；验证失败 > max3 → 用户决策修复/放弃；成本超阈值 → 用户确认
+- **Phase 4/6 VERIFY**: delphi code-walkthrough REQUEST_CHANGES → 用户处理 → 重新评审；test-alignment 失败 (#367) → 回退 Phase 3（不暂停）；浏览器验证发现问题 → 回退 Phase 3（不暂停）
+- **Phase 5/6 SHIP**: 分支完成决策 (4选项) → 确认；native ship PR → 用户确认合并；native land 完成/失败 → 用户确认；⚠️ SHIP must complete merge to main + release before Phase 6
+- **Phase 6/6 CLOSE**: SHIP→CLOSE GATE (校验 merge 已完成 + git status clean + 当前在 main) → Backup sprint-state → #369 返工指标写入 → USER ACCEPTANCE ⚠️ 必须人工验收 → 用户确认后继续；cleanup 完成/失败 → 用户确认 → 结束流程
 
 ---
 
@@ -79,11 +79,11 @@ Phase 6/6: CLOSE → USER ACCEPTANCE (⚠️ 人工) → emergent issues → cle
 | Step | Phase | Name | Key Actions | Output |
 |------|-------|------|-------------|--------|
 | 1 | **1/6** | **PREP** | Detect protected branch → Create git worktree → AUTO-ESTIMATE sizing → Classify (lightweight/standard/complex) | Worktree path + impact assessment |
-| 2 | **2/6** | **DESIGN** | brainstorming → autoplan → delphi-review (HARD-GATE ≥90% consensus) → to-issues → specification.yaml | specification.yaml + slices-manifest.json |
-| 3 | **3/6** | **BUILD** | GITHOOKS-GATE → DELPHI-GATE → ralph-loop (default) or parallel → TDD → freeze → blind review → verification | MVP code |
-| 4 | **4/6** | **VERIFY** | delphi-review --mode code-walkthrough → test-specification-alignment → browse QA → benchmark (optional) → learn + retro | Review report + feedback-log.md |
-| 5 | **5/6** | **SHIP** | VERSION-GATE → finishing-a-development-branch → ship (create PR) → land-and-deploy → merge to main + CI + canary → release | PR URL + deploy status + merge confirmation |
-| 6 | **6/6** | **CLOSE** | SHIP→CLOSE GATE (merge + release verified) → Backup sprint-state → USER ACCEPTANCE (⚠️ mandatory manual) → Capture emergent issues → Cleanup worktree + branch → Sprint summary | Emergent issues list + cleanup report |
+| 2 | **2/6** | **DESIGN** | grill-with-docs → R1 需求评审 → 设计文档+APPROVAL (HARD-GATE) → batch-grill-me → R2 delphi-review (≥90% consensus) → to-issues → specification.yaml | specification.yaml + slices-manifest.json + requirements-reviewed.json |
+| 3 | **3/6** | **BUILD** | BUILD-ENTRY-CONTRACT → GITHOOKS-GATE → DELPHI-GATE → ralph-loop (default) or parallel → TDD → blind-review (read-only subagent) → verification | MVP code |
+| 4 | **4/6** | **VERIFY** | delphi-review --mode code-walkthrough → test-specification-alignment (#367 HARD-GATE) → xp-gate check --all → browser (Layer 4 optional) → learnings + xp-gate retro | Review report + feedback-log.md + test-alignment-report.json |
+| 5 | **5/6** | **SHIP** | VERSION-GATE → 分支完成决策 (4选项) → native ship (create PR) → native land (merge + CI + canary) → release | PR URL + deploy status + merge confirmation |
+| 6 | **6/6** | **CLOSE** | SHIP→CLOSE GATE (merge + release verified) → Backup sprint-state → #369 返工指标 → USER ACCEPTANCE (⚠️ mandatory manual) → Capture emergent issues → Cleanup worktree + branch → Sprint summary | Emergent issues list + cleanup report + metrics |
 
 **Phase Flow**:
 ```
@@ -94,8 +94,8 @@ PREP → DESIGN → BUILD → VERIFY → SHIP (merge to main + release) → CLOS
 ```
 
 **Hard Gates**:
-- **Phase 2/6 → 3/6 (DESIGN → BUILD)**: Design must be APPROVED by delphi-review (≥90% consensus) + GITHOOKS-GATE (hooks installed) + DELPHI-GATE (spec APPROVED)
-- **Phase 4/6 → 5/6 (VERIFY → SHIP)**: feedback-log.md must exist (HARD-GATE)
+- **Phase 2/6 → 3/6 (DESIGN → BUILD)**: R1 需求评审 APPROVED + 设计文档用户 APPROVED + R2 delphi-review APPROVED (≥90% consensus) + GITHOOKS-GATE (hooks installed) + DELPHI-GATE (spec APPROVED) + BUILD-ENTRY-CONTRACT (manifest schema + slice↔REQ 一致性)
+- **Phase 4/6 → 5/6 (VERIFY → SHIP)**: feedback-log.md must exist + test-alignment-report.json PASS (#367 程序化 HARD-GATE)
 - **Phase 5/6 → 6/6 (SHIP → CLOSE)**: PR must be merged to main + release completed (HARD-GATE). See `references/phase-6-close.md#ship--close-gate`.
 
 ---
@@ -144,7 +144,7 @@ Sprint Flow: PREP → DESIGN → BUILD → VERIFY → SHIP → CLOSE
 6. 输出评估结果 → 用户确认后按路由继续
 7. **参数**: `--no-isolate` (跳过), `--branch-name <name>`, `--force` (绕过保护分支)
 
-### Phase 2/6: DESIGN (设计 — 需求探索 + 共识评审)
+### Phase 2/6: DESIGN (设计 — 需求探索 + 双点评审)
 
 **对应旧模型**: Phase 0 THINK + Phase 1 PLAN
 
@@ -153,14 +153,17 @@ Sprint Flow: PREP → DESIGN → BUILD → VERIFY → SHIP → CLOSE
 **详细指令**: 参见 `references/phase-2-design.md` — 完整流程、条件分支、HARD-GATE。
 
 **快速参考**:
-- **Step 0.5: DESIGN 路由分叉 (v0.14.0+)**: 根据 PREP 的 `change_type` 决定路径。`修改已存在代码` → SKIP autoplan, 直接 lightweight delphi-review (2 专家, 1 轮)。`新增功能` 或 undefined → 标准 autoplan 路径。详见 `references/phase-2-design.md#step-05-design-路由分叉`。
-- **Step 1: brainstorming** — `skill(name="brainstorming")` — 输出设计文档 + CONTEXT.md + ADR。**HARD-GATE**: 设计未批准 → 不可进入实现
-- **Step 2: autoplan** — `skill(name="autoplan")` — CEO/设计/工程自动评审 → 用户确认 taste_decisions（仅标准路径）
-- **Step 3: delphi-review** — `skill(name="delphi-review")` — 等待 APPROVED（非 APPROVED 暂停等待用户确认）
-- **Step 4: to-issues** — `skill(name="to-issues")` — 垂直切片 Issue 拆分 → slices-manifest.json
-- **Step 5: specification.yaml** — 从 APPROVED 设计文档自动提取
-- **Web 前端额外注入**: `design-shotgun`
-- **条件分支**: IF autoplan AUTO_APPROVED → lightweight delphi-review (2 专家、1 轮); ELSE → 标准 delphi-review (3 专家)
+- **Step 0: CONTEXT.md 预检 (#322)**: 存在则 SKIP grill 访谈，但 R1 需求评审仍执行（CONTEXT.md 可能陈旧）
+- **Step 1: grill-with-docs** — `skill(name="grill-with-docs")` — 逐个追问 + CONTEXT.md/ADR 沉淀。**HARD-GATE**: 设计未批准 → 不可进入实现
+- **Step 2: R1 需求评审 (#368)** — `npx xp-gate delphi-review --mode requirements` — 轻量 2 专家 1 轮，输出 requirements-reviewed.json（含 requirements_hash 防陈旧绑定）。lightweight sprint 跳过 R1 合并入 R2
+- **Step 3: 原生设计文档生成** — `docs/plans/YYYY-MM-DD-<topic>-design.md`（需求摘要、2-3 方案、推荐、成功标准）
+- **Step 4: HARD-GATE APPROVAL** — 用户审批设计文档
+- **Step 5: 路由分叉** — `change_type == "修改已存在代码"` → SKIP batch-grill-me, lightweight R2
+- **Step 6: batch-grill-me** — `skill(name="batch-grill-me")` — 批量前置决策（替代 autoplan taste_decisions）
+- **Step 7: R2 delphi-review** — `skill(name="delphi-review")` — 等待 APPROVED（≥90% 共识）
+- **Step 8: to-issues** — `skill(name="to-issues")` — 垂直切片 Issue 拆分 → slices-manifest.json
+- **Step 9: specification.yaml** — 从 APPROVED 设计文档自动提取（每 REQ 含验收标准 — #368）
+- **Web 前端额外注入**: OPTIONAL design-shotgun（如已安装）
 
 ### Phase 2/6→3/6: GITHOOKS-GATE（质量门禁安装检查）
 
@@ -183,12 +186,13 @@ Sprint Flow: PREP → DESIGN → BUILD → VERIFY → SHIP → CLOSE
 **详细指令**: 参见 `references/phase-3-build.md`。
 
 **快速参考**:
-1. **DELPHI-GATE**: 验证 `.sprint-state/delphi-reviewed.json` 存在且 `verdict = "APPROVED"` → 否则 BLOCK
-2. **TDD-GATE (MANDATORY — v0.14.0+)**: 在 delegation 前验证每个 REQ 存在 failing test。无 test → mark `[TDD-RED]`（ralph-loop 创建）。有 test 且 GREEN 且无实现 → BLOCK（TDD bypass）。详见 `references/phase-3-build.md#tdd-gate-pre-implementation-tdd-check-mandatory`。
-3. **输入**: `slices-manifest.json`（Phase 2/6 生成），按 `execution_order` 逐个执行
-4. **模式**: 默认 `ralph-loop`（逐 REQ 迭代，token 节约 40-67%），可选 `--mode parallel`
-5. **Skill 步骤**: hooks-install → TDD-GATE → dispatching-parallel-agents → TDD (RED/GREEN/REFACTOR) → freeze → blind-review → unfreeze → verification-before-completion → 成本监控
-6. **Mock Minimization**: integration-first, mock 仅限 external services, 密度 > 30% 需 `@mock-justified`
+1. **BUILD-ENTRY-CONTRACT (MANDATORY — v0.18.0+)**: `phase-transition 3 in_progress` 校验 slices-manifest.json schema + slice↔REQ 一致性 → 不合法 BLOCK
+2. **DELPHI-GATE**: 验证 `.sprint-state/delphi-reviewed.json` 存在且 `verdict = "APPROVED"` → 否则 BLOCK
+3. **TDD-GATE (MANDATORY — v0.14.0+)**: 在 delegation 前验证每个 REQ 存在 failing test。无 test → mark `[TDD-RED]`（ralph-loop 创建）。有 test 且 GREEN 且无实现 → BLOCK（TDD bypass）。详见 `references/phase-3-build.md#tdd-gate-pre-implementation-tdd-check-mandatory`。
+4. **输入**: `slices-manifest.json`（Phase 2/6 生成），按 `execution_order` 逐个执行
+5. **模式**: 默认 `ralph-loop`（逐 REQ 迭代，token 节约 40-67%），可选 `--mode parallel`
+6. **Skill 步骤**: BUILD-ENTRY-CONTRACT → hooks-install → TDD-GATE → TDD (RED/GREEN/REFACTOR) → blind-review (read-only subagent, tools: [Read, Grep, Glob]) → verification-before-completion → 成本监控 → learnings.md 写入
+7. **Mock Minimization**: integration-first, mock 仅限 external services, 密度 > 30% 需 `@mock-justified`
 
 ### Phase 4/6: VERIFY (验证 — 代码走查 + QA + 反馈获取)
 
@@ -198,11 +202,11 @@ Sprint Flow: PREP → DESIGN → BUILD → VERIFY → SHIP → CLOSE
 
 **快速参考**:
 - **Orchestrator 直接执行**: delphi-review code-walkthrough 需要用户确认 verdict（Issue #249），**必须由 orchestrator 直接调用** `skill(name="delphi-review")`
-- **执行顺序**: `delphi-review --mode code-walkthrough` → 等待 APPROVED → `test-specification-alignment` → `browse` (gstack) → 可选 `qa`/`design-review`/`benchmark` (gstack)
-- **Feedback 子阶段**: `learn` (Sprint 级复盘) + `retro` (工程回顾) + 可选 `systematic-debugging` (根因调试)
-- **Subagent**: `task(category="quick", load_skills=["learn", "retro", "systematic-debugging"])`
-- 输出: 评审报告 + feedback-log.md
-- **HARD-GATE**: feedback-log.md must exist before Phase 5/6
+- **执行顺序**: `delphi-review --mode code-walkthrough` → 等待 APPROVED → `test-specification-alignment` (#367 程序化 HARD-GATE: test-alignment-report.json + head_commit + spec_hash) → `xp-gate check --all` → 浏览器验证 (Layer 4: gstack browse > browser-use MCP > SKIP)
+- **Web 前端**: `xp-gate ui-review`（原生）+ OPTIONAL gstack qa/design-review/benchmark（如已安装）
+- **Feedback 子阶段**: learnings.md 写入（原生）+ `xp-gate retro`（原生，含 #369 返工率区块）+ OPTIONAL systematic-debugging（Layer 4，保留"无根因不修复"纪律）
+- 输出: 评审报告 + feedback-log.md + test-alignment-report.json
+- **HARD-GATE**: feedback-log.md must exist + test-alignment-report.json PASS before Phase 5/6
 
 ### 负载/压力测试（可选）
 
@@ -220,17 +224,17 @@ Sprint Flow: PREP → DESIGN → BUILD → VERIFY → SHIP → CLOSE
 **详细指令**: 参见 `references/phase-5-ship.md` — VERSION-GATE (MANDATORY) / finishing-a-development-branch / VERSION CHANGESET (Issue #142) / changeset schema。
 
 **快速参考**:
-- **Step 0: VERSION-GATE (MANDATORY — 必须在 finishing-a-development-branch 之前)**: bump VERSION → update CHANGELOG.md → run sync-version.sh → commit + push → verify PR updated。详见 `references/phase-5-ship.md#step-0-version-gate`
-- **Step 1: finishing-a-development-branch**: 4 选项菜单，选择 "Push and create a Pull Request"
-- **Orchestrator 直接执行**: `finishing-a-development-branch` 和 `ship` 均为交互式 skill，**必须由 orchestrator 直接调用** `skill(name="finishing-a-development-branch")` 和 `skill(name="ship")`
+- **Step 0: VERSION-GATE (MANDATORY — 必须在分支完成决策之前)**: bump VERSION → update CHANGELOG.md → run sync-version.sh → commit + push → verify PR updated。详见 `references/phase-5-ship.md#step-0-version-gate`
+- **Step 1: 分支完成决策（原生 4 选项）**: AskUserQuestion 菜单 (merge/PR/keep/discard)，默认推荐 Option 2 (Push and create a Pull Request)
+- **Step 2: 原生 Ship 步骤**: test → VERSION-GATE → commit → push → `gh pr create`
 - 输入: phase-4-summary.md + feedback-log.md → 输出: PR URL (含版本变更 commit)
-- **HARD-GATE**: Phase 4/6 未完成 → BLOCK。验证 `feedback-log.md` 存在。
+- **HARD-GATE**: Phase 4/6 未完成 → BLOCK。验证 `feedback-log.md` 存在 + test-alignment-report.json PASS。
 - **GITHOOKS-GATE**: 验证 hooks 完整性，缺失则 `githooks/install.sh`
-- **LAND**: `land-and-deploy` — merge PR → 等待 CI (10min) → 等待 Deploy (10min) → Canary Health Check (5min)
+- **LAND（原生步骤）**: merge 确认 → `gh run list` 等 CI (10min) → 等 Deploy (10min) → Canary Health Check (5min)
 - **回滚**: `git revert` 最后一次 merge commit
 - ⚠️ **SHIP COMPLETION**: Phase 5/6 结束前必须确认 PR 已 merge 到 main + release 已创建。未完成 merge 不得进入 Phase 6/6。详见 `references/phase-5-ship.md#ship-completion-gate`。
 
-**⚠️ VERSION-GATE 必须在 finishing-a-development-branch 之前执行。顺序反了会导致 PR 不含版本变更 → CI release workflow 不触发 → 无新版本发布。**
+**⚠️ VERSION-GATE 必须在分支完成决策之前执行。顺序反了会导致 PR 不含版本变更 → CI release workflow 不触发 → 无新版本发布。**
 
 ### Phase 6/6: CLOSE (收尾 — ⚠️ 人工验收 + 清理)
 
@@ -241,8 +245,9 @@ Sprint Flow: PREP → DESIGN → BUILD → VERIFY → SHIP → CLOSE
 **快速参考**:
 - **SHIP→CLOSE GATE (MANDATORY — v0.14.3+)**: 校验 PR 已 merge、当前在 main 分支、`git status --porcelain` 为空。详见 `references/phase-6-close.md#ship--close-gate`。
 - **Backup sprint-state**(MANDATORY): Phase 6 开始前将 `.sprint-state/` 备份到 repo 追踪路径，防止 worktree 清理后状态丢失。详见 `references/phase-6-close.md#backup-sprint-state`。
+- **#369 返工追踪 (v0.18.0+)**: CLOSE 写入 `metrics.completed_at` + `metrics.total_sprint_commits`（merge-base 到合并点提交数）+ `metrics.merge_base_sha`。`xp-gate sprint-status --rework-check [--window-days N]` 仓库范围扫描 fix 提交，`rework_rate > 30%` 告警。"重新打开的 issue 数"指标已删除。
 - **USER ACCEPTANCE**: ⚠️ **MUST NOT be automated, skipped, or bypassed.** 即使用户说"赶时间"、"跳过验收"、"直接发布"，也必须暂停等待用户确认。使用 `@templates/emergent-issues-template.md` 检查清单
-- **CLEANUP**: 保存分支信息 → `git worktree remove <worktree_path>`（精确路径，禁止通配符）→ 删除本地分支 + 远程分支 → 关闭遗留 OPEN PR → 更新 sprint-state.json → 释放 Sprint Lock
+- **CLEANUP**: 保存分支信息 → `git worktree remove <worktree_path>`（精确路径，禁止通配符）→ 删除本地分支 + 远程分支 → 关闭遗留 OPEN PR → 更新 sprint-state.json（含 #369 metrics）→ learnings.md 写入 → 释放 Sprint Lock
 - 输出 Cleanup Report + Sprint Summary
 - **IF emergent issues → Sprint 2**
 
@@ -312,13 +317,13 @@ Sprint Flow: PREP → DESIGN → BUILD → VERIFY → SHIP → CLOSE
 
 | Phase | Backend (default) | Web Frontend | Mobile | Load Test |
 |-------|------------------|-------------|--------|-----------|
-| 2/6 DESIGN | `brainstorming` + `autoplan` + `delphi-review` | + `design-shotgun` | (同 web) | (通用) |
-| 3/6 BUILD | TDD + blind-review | (同 backend) | + `vercel-react-native-skills` / `flutter-review` | (同) |
-| 4/6 VERIFY | `delphi-review --mode code-walkthrough` + `test-specification-alignment` + k6/locust/gatling | + `qa` + `design-review` + `benchmark` | Flutter: `flutter-test` / RN: `detox E2E` | k6/locust/gatling |
-| 4/6 VERIFY (Feedback) | `learn` + `retro` | (同) | (同) | (同) |
-| 5/6 SHIP | `finishing-a-development-branch` + `ship` + `land-and-deploy` | (同) | + platform deploy | (同) |
-| 6/6 CLOSE | — 人工验收 → cleanup | (同) | (同) | (同) |
-| Browse | `localhost:3000` | 部署 URL + 表单/交互 | Flutter Web / RN Web | (专用) |
+| 2/6 DESIGN | `grill-with-docs` + R1 `delphi-review --mode requirements` + `batch-grill-me` + R2 `delphi-review` | + OPTIONAL `design-shotgun` | (同 web) | (通用) |
+| 3/6 BUILD | TDD + blind-review (read-only subagent) | (同 backend) | + `vercel-react-native-skills` / `flutter-review` | (同) |
+| 4/6 VERIFY | `delphi-review --mode code-walkthrough` + `test-specification-alignment` + `xp-gate check --all` + k6/locust/gatling | + `xp-gate ui-review` + OPTIONAL qa/design-review/benchmark | Flutter: `flutter-test` / RN: `detox E2E` | k6/locust/gatling |
+| 4/6 VERIFY (Feedback) | learnings.md + `xp-gate retro` | (同) | (同) | (同) |
+| 5/6 SHIP | VERSION-GATE + 原生 4 选项 + native ship + native land | (同) | + platform deploy | (同) |
+| 6/6 CLOSE | — 人工验收 → #369 返工指标 → cleanup | (同) | (同) | (同) |
+| Browse | Layer 4 可选链 (gstack browse > browser-use MCP > SKIP) | 部署 URL + 表单/交互 | Flutter Web / RN Web | (专用) |
 
 **Mobile 工具链**: Flutter — `flutter analyze/test/build/pub publish`; RN — `metro/detox/jest/react-native run-ios/android`
 
@@ -451,7 +456,7 @@ Additional reference files:
 | Verification improves 2-3x | Boris #1 tip | Phase 4/6 VERIFY 设计 |
 | Emergent requirements 无法消除 | Mike Cohn, Rafael Santos | Phase 6/6 CLOSE 人工设计 |
 | 78% failures invisible | arXiv research | Phase 6/6 必要性证明 |
-| Think → Plan → Build → Ship | gstack ETHOS | 整体流程设计 |
+| Think → Plan → Build → Ship | 行业通用流程 | 整体流程设计 |
 
 ---
 

@@ -10,7 +10,7 @@ description: "Use when asked to run tests, verify tests, align tests with specif
 1. **Load Phase 0** — Verify `specification.yaml` and `tests/` directory exist; BLOCK if missing with guidance to complete brainstorming → delphi-review → specification-generator flow first
 2. **Phase 1 Alignment (Modify Allowed)** — Parse specification.yaml + test files (AST); validate alignment rules; generate alignment report; optionally fix tests to align with requirements; require score ≥80% to proceed
 3. **Coverage Mapping** — Map each REQ-* to at least one test with `@test` annotation; map each AC-* to at least one assertion; verify `@test`, `@intent`, `@covers` tags
-4. **Pre-Phase 2 Freeze** — Invoke `/freeze` skill to lock test directories; return confirmation before proceeding
+4. **Pre-Phase 2 Freeze** — Lock test directories via read-only subagent convention (reviewer tools restricted to `[Read, Grep, Glob]`, no Write/Edit/Bash); return confirmation before proceeding
 5. **Phase 2 Execution (Frozen)** — Run all tests; Agent BLOCKED from modifying/deleting/skipping tests; analyze failures into 4 categories
 6. **Failure Classification** — For each failing test, output with Type, Test, Root Cause, Action fields; SPECIFICATION_ERROR requires ESCALATE_TO_HUMAN with user options (A: fix spec → re-Phase 1, B: confirm spec → modify code, C: clarify ambiguity)
 7. **JSON Report Output** — Generate alignment report as valid JSON
@@ -58,7 +58,7 @@ description: "Use when asked to run tests, verify tests, align tests with specif
 ### Automatic
 - BUILD (TDD + review) Round 1 after Driver outputs tests
 - Gate 1 verification before proceeding
-- gstack-ship release before deployment
+- Phase 5 SHIP release before deployment (native phase-5 steps)
 
 ### Manual
 - `/test-specification-alignment`, `/verify-tests`, "run tests", "verify tests"
