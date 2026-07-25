@@ -722,6 +722,12 @@ has_project_lang() {
 AUDIT_SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT_FOR_AUDIT="$(git rev-parse --show-toplevel 2>/dev/null || echo "$AUDIT_SCRIPT_DIR/../..")"
 
+# Issue #370: source cross-platform now_ms() helper (node-preferred, regex-validated)
+source "${AUDIT_SCRIPT_DIR}/lib/now-ms.sh"
+
+# Read max_duration_ms from .xp-gate-config.json (default 7200000 = 2 hours)
+_MAX_DURATION_MS=$(node -e "try{const c=JSON.parse(require('fs').readFileSync('${PROJECT_ROOT_FOR_AUDIT}/.xp-gate-config.json','utf8'));console.log((c.audit&&c.audit.max_duration_ms)||7200000);}catch(e){console.log(7200000);}" 2>/dev/null || echo "7200000")
+
 record_gate_audit() {
   local gate_id="$1"
   local gate_name="$2"
@@ -729,10 +735,16 @@ record_gate_audit() {
   local issues_found="$4"
   local start_ms="$5"
   local end_ms
-  end_ms=$(date +%s%3N 2>/dev/null || node -e "console.log(Date.now())" 2>/dev/null || echo "0")
+  end_ms=$(now_ms)
   local duration_ms=$((end_ms - start_ms))
   if [ "$duration_ms" -lt 0 ] 2>/dev/null; then
     duration_ms=0
+  fi
+
+  # Issue #370: detect anomalous duration (poisoned timestamp arithmetic)
+  local duration_anomaly_flag=""
+  if [ "$duration_ms" -gt "$_MAX_DURATION_MS" ] 2>/dev/null; then
+    duration_anomaly_flag="--duration-anomaly true"
   fi
 
   # Determine gate result: PASS or FAIL based on status variable
@@ -749,6 +761,7 @@ record_gate_audit() {
       --passed "$gate_result" \
       --issues-found "$issues_found" \
       --duration-ms "$duration_ms" \
+      $duration_anomaly_flag \
       --trigger commit \
       2>/dev/null
   } &
@@ -756,8 +769,9 @@ record_gate_audit() {
 }
 
 # Get milliseconds timestamp (used by gates for duration measurement)
+# Issue #370: delegates to now_ms() — node-preferred, regex-validated, cross-platform
 gate_start_ms() {
-  date +%s%3N 2>/dev/null || node -e "console.log(Date.now())" 2>/dev/null || echo "0"
+  now_ms
 }
 
 # Switch to subdirectory if detected (for single-language subdirectory projects).

@@ -36,6 +36,7 @@ export interface GateAuditEntry {
   trigger: 'commit' | 'push' | 'manual';
   repo_path: string;
   commit_hash: string;
+  duration_anomaly?: boolean; // Issue #370: set when duration_ms > max_duration_ms
 }
 
 // ── Public API ───────────────────────────────────────────────────────────────
@@ -145,14 +146,19 @@ function parseAuditEntries(logPath: string): GateAuditEntry[] {
 /**
  * Aggregate audit entries by gate_id, computing sums for passed/ms/issues.
  */
-function aggregateByGate(entries: GateAuditEntry[]): Map<string, { total: number; passed: number; ms: number; issues: number }> {
-  const buckets = new Map<string, { total: number; passed: number; ms: number; issues: number }>();
+function aggregateByGate(entries: GateAuditEntry[]): Map<string, { total: number; passed: number; ms: number; issues: number; anomaly_count: number }> {
+  const buckets = new Map<string, { total: number; passed: number; ms: number; issues: number; anomaly_count: number }>();
 
   for (const e of entries) {
-    const b = buckets.get(e.gate_id) ?? { total: 0, passed: 0, ms: 0, issues: 0 };
+    const b = buckets.get(e.gate_id) ?? { total: 0, passed: 0, ms: 0, issues: 0, anomaly_count: 0 };
     b.total += 1;
     if (e.passed) b.passed += 1;
-    b.ms += e.duration_ms;
+    // Issue #370: exclude anomalous durations from ms aggregation
+    if (e.duration_anomaly === true) {
+      b.anomaly_count += 1;
+    } else {
+      b.ms += e.duration_ms;
+    }
     b.issues += e.issues_found;
     buckets.set(e.gate_id, b);
   }
@@ -165,7 +171,7 @@ function aggregateByGate(entries: GateAuditEntry[]): Map<string, { total: number
  */
 export function computeStats(
   repoRoot: string = process.cwd(),
-): { gate_id: string; pass_pct: string; avg_ms: number; avg_issues: number }[] {
+): { gate_id: string; pass_pct: string; avg_ms: number; avg_issues: number; anomaly_count: number }[] {
   const logPath = join(repoRoot, AUDIT_DIR, AUDIT_FILE);
   const entries = parseAuditEntries(logPath);
   if (entries.length === 0) {
@@ -174,14 +180,17 @@ export function computeStats(
 
   const buckets = aggregateByGate(entries);
 
-  const results: { gate_id: string; pass_pct: string; avg_ms: number; avg_issues: number }[] = [];
+  const results: { gate_id: string; pass_pct: string; avg_ms: number; avg_issues: number; anomaly_count: number }[] = [];
 
   for (const [gate_id, b] of Array.from(buckets.entries())) {
+    // Issue #370: avg_ms computed only over non-anomalous entries
+    const normalCount = b.total - b.anomaly_count;
     results.push({
       gate_id,
       pass_pct: (b.total > 0 ? ((b.passed / b.total) * 100).toFixed(1) + '%' : 'N/A'),
-      avg_ms: b.total > 0 ? Math.round(b.ms / b.total) : 0,
+      avg_ms: normalCount > 0 ? Math.round(b.ms / normalCount) : 0,
       avg_issues: b.total > 0 ? parseFloat((b.issues / b.total).toFixed(2)) : 0,
+      anomaly_count: b.anomaly_count,
     });
   }
 
@@ -247,6 +256,8 @@ function runCli(): void {
       trigger: (opts['trigger'] as 'commit' | 'push' | 'manual') || 'manual',
       repo_path: process.cwd(),
       commit_hash: getCommitHash(),
+      // Issue #370: only set when explicitly flagged (omit field otherwise)
+      ...(opts['duration-anomaly'] === 'true' ? { duration_anomaly: true } : {}),
     };
     appendAuditEntry(entry);
   } else {
