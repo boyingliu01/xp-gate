@@ -3,8 +3,9 @@ name: delphi-review
 version: 1.1.0
 description: >
   Performs multi-round anonymous expert consensus review using the Delphi method. Supports
-  design review (default) and code-walkthrough (--mode code-walkthrough) modes. Uses 2-3 experts
-  from at least 2 different domestic model providers with a >=90% statistical consensus threshold.
+  design review (default), code-walkthrough (--mode code-walkthrough), and requirements
+  (lightweight, --mode requirements) modes. Uses 2-3 experts from at least 2 different domestic
+  model providers with a >=90% statistical consensus threshold.
   Outputs structured verdict (APPROVED/PASS_WITH_CAVEATS/REQUEST_CHANGES/BLOCKED).
 
   WHAT: Anonymous multi-expert review with iterative consensus building for designs, plans,
@@ -20,12 +21,13 @@ description: >
   "多专家评审", "consensus review", "code walkthrough", "push review", "architecture review",
   "delphi review", "run delphi", "start delphi", "评审这个架构", "review this architecture",
   "评审PR", "review this PR with delphi", "delphi评审", "delphi 评审", "run delphi review",
-  "执行delphi", "启动delphi评审".
+  "执行delphi", "启动delphi评审", "review the requirements", "评审需求", "requirements review",
+  "/requirements-review".
   NEGATIVE TRIGGERS: "how does delphi work", "what is delphi review", "code review checklist",
   "review my code quickly", "can you review this", "peer review", "I need a review",
   "explain the review process", "review guidelines", "how to review a design",
   "code review template", "review format", "PR review", "帮我review一下",
-  "just review this", "quick review", "review steps".
+  "just review this", "quick review", "review steps", "review my requirements document".
 maturity: beta
 auto_continue: true
 triggers:
@@ -51,6 +53,10 @@ triggers:
   - "run delphi review"
   - "执行delphi"
   - "启动delphi评审"
+  - "review the requirements"
+  - "评审需求"
+  - "requirements review"
+  - "/requirements-review"
 triggers_negative_examples:
   - "how does delphi work"       # educational question about the process
   - "what is delphi review"      # asking for explanation, not execution
@@ -72,6 +78,7 @@ triggers_negative_examples:
   - "review format"              # asking about format, not executing
   - "show me how to review"      # educational request about reviewing
   - "review checklist example"   # asking for examples, not running review
+  - "review my requirements document"  # educational discussion about requirements, not executing review
 triggers_negative_test_cases:
   - input: "how does delphi work"
     expect: "NOT triggered"
@@ -129,6 +136,16 @@ triggers_negative_test_cases:
     expect: "NOT triggered"
   - input: "run delphi"
     expect: "triggered"
+  - input: "review the requirements"
+    expect: "triggered"
+  - input: "评审需求"
+    expect: "triggered"
+  - input: "requirements review"
+    expect: "triggered"
+  - input: "/requirements-review"
+    expect: "triggered"
+  - input: "review my requirements document"
+    expect: "NOT triggered"
 workflow_steps:
   - "Step 0: Input Validation → Output: [DelphiReview] or [DelphiReview:BLOCKED]"
   - "Round 1: Anonymous Independent Review → Output: [DelphiReview Round 1] expert JSON verdicts"
@@ -203,6 +220,10 @@ tools_denied:
 - run delphi review
 - 执行delphi
 - 启动delphi评审
+- review the requirements
+- 评审需求
+- requirements review
+- /requirements-review
 
 **NOT triggered by:**
 - "how does delphi work" (educational)
@@ -222,6 +243,7 @@ tools_denied:
 - "code review template" (asking for template)
 - "review format" (asking about format)
 - "show me how to review" (educational)
+- "review my requirements document" (educational discussion, not execution)
 
 ## Workflow
 
@@ -280,8 +302,11 @@ Each round MUST output a structured round marker:
 |------|------|------|------|
 | `design`（默认） | `/delphi-review` | 需求/设计/架构/PR 评审 | 共识报告 + specification.yaml |
 | `code-walkthrough` | `--mode code-walkthrough` | git push 前代码走查 | `.code-walkthrough-result.json` |
+| `requirements` | `--mode requirements` | Phase 2 THINK 阶段需求评审 | `.sprint-state/phase-outputs/requirements-reviewed.json` |
 
 **Code Walkthrough 模式**的完整规范 → 详见 `references/code-walkthrough.md`
+
+**Requirements 模式**的完整规范 → 详见 `references/requirements.md`
 
 ---
 
@@ -419,6 +444,28 @@ Phase 0: 准备 → Round 1: 匿名独立评审 → 共识检查
 
 **For code-walkthrough mode**, output follows `.code-walkthrough-result.json` schema (see `references/code-walkthrough.md`).
 
+**For requirements mode**, output follows `requirements-reviewed.json` schema (see `references/requirements.md`):
+
+```json
+{
+  "mode": "requirements",
+  "verdict": "APPROVED|GAPS_FOUND",
+  "timestamp": "2026-07-25T10:30:00Z",
+  "requirements_hash": "<SHA-256 hex digest>",
+  "head_commit": "<git rev-parse HEAD>",
+  "context_file_used": "CONTEXT.md",
+  "round": 1,
+  "expert_verdicts": [
+    { "role": "architecture", "verdict": "APPROVED", "confidence": 9 },
+    { "role": "feasibility", "verdict": "APPROVED", "confidence": 8 }
+  ],
+  "requirements_statement": "<short summary of what was reviewed>",
+  "gaps_found": [],
+  "rounds_used": 1,
+  "escalation_needed": false
+}
+```
+
 **Anti-patterns mapping:**
 - `Round 1 → "评审完成"` → MUST NOT have `verdict: APPROVED` if `critical_issues` exist
 - `只处理 Critical，忽略 Major` → MUST include `major_concerns` array
@@ -452,6 +499,11 @@ Phase 0: 准备 → Round 1: 匿名独立评审 → 共识检查
 {"mode":"code-walkthrough","commit":"abc123...","timestamp":"...","verdict":"APPROVED","consensus_ratio":1.0}
 ```
 
+**Requirements mode APPROVED** → `.sprint-state/delphi-reviewed.json`:
+```json
+{"mode":"requirements","timestamp":"...","verdict":"APPROVED","consensus_ratio":1.0}
+```
+
 ---
 
 ## Anti-Patterns
@@ -467,6 +519,8 @@ Phase 0: 准备 → Round 1: 匿名独立评审 → 共识检查
 | 三个专家同一厂家 | 必须来自至少 2 家不同厂家 |
 
 **Code-walkthrough 专属 Anti-Patterns** → 详见 `references/code-walkthrough.md`
+
+**Requirements 专属 Anti-Patterns** → 详见 `references/requirements.md`
 
 ---
 
@@ -499,5 +553,6 @@ Phase 0: 准备 → Round 1: 匿名独立评审 → 共识检查
 | File | Content |
 |------|---------|
 | `@references/code-walkthrough.md` | Code-walkthrough mode specification |
+| `@references/requirements.md` | Requirements mode specification |
 | `@references/orchestrator-dispatch.md` | Orchestrator auto-dispatch rules (#218 subagent multi-round loop) |
 | `@references/round-templates.md` | Round templates (anonymous/exchange/final/fix report formats) |
