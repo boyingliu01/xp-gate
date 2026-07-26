@@ -42,6 +42,13 @@ function copyHooks(srcDir, destDir) {
       fs.chmodSync(dest, 0o755);
     }
   });
+
+  // Copy lib/ directory (e.g. now-ms.sh) — sourced by pre-commit at runtime
+  const libSrc = path.join(srcDir, 'hooks', 'lib');
+  const libDest = path.join(destDir, 'lib');
+  if (fs.existsSync(libSrc)) {
+    copyDirRecursive(libSrc, libDest);
+  }
 }
 
 function copyAdapters(srcDir, destDir) {

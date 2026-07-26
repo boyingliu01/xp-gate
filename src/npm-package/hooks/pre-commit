@@ -165,6 +165,69 @@ file_exists_in_subdir() {
   fi
 }
 
+# ============================================================================
+# Audit/Timing helpers — must be defined BEFORE first gate call (line ~197)
+# Bash executes top-to-bottom; gate_start_ms + record_gate_audit are called
+# in every gate, so their definitions lead the first call.
+# ============================================================================
+AUDIT_SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+PROJECT_ROOT_FOR_AUDIT="$(git rev-parse --show-toplevel 2>/dev/null || echo "$AUDIT_SCRIPT_DIR/../..")"
+
+# Issue #370: source cross-platform now_ms() helper (node-preferred, regex-validated)
+source "${AUDIT_SCRIPT_DIR}/lib/now-ms.sh"
+
+# Read max_duration_ms from .xp-gate-config.json (default 7200000 = 2 hours)
+_MAX_DURATION_MS=$(node -e "try{const c=JSON.parse(require('fs').readFileSync('${PROJECT_ROOT_FOR_AUDIT}/.xp-gate-config.json','utf8'));console.log((c.audit&&c.audit.max_duration_ms)||7200000);}catch(e){console.log(7200000);}" 2>/dev/null || echo "7200000")
+
+# Get milliseconds timestamp (used by gates for duration measurement)
+# Issue #370: delegates to now_ms() — node-preferred, regex-validated, cross-platform
+gate_start_ms() {
+  now_ms
+}
+
+# Audit helper — records gate execution to .xp-gate/audit.jsonl
+# NEVER blocks commit on failure (try/catch around npx tsx).
+# Usage: record_gate_audit <gate_id> <gate_name> <passed> <issues_found> <start_ms>
+record_gate_audit() {
+  local gate_id="$1"
+  local gate_name="$2"
+  local passed="$3"
+  local issues_found="$4"
+  local start_ms="$5"
+  local end_ms
+  end_ms=$(now_ms)
+  local duration_ms=$((end_ms - start_ms))
+  if [ "$duration_ms" -lt 0 ] 2>/dev/null; then
+    duration_ms=0
+  fi
+
+  # Issue #370: detect anomalous duration (poisoned timestamp arithmetic)
+  local duration_anomaly_flag=""
+  if [ "$duration_ms" -gt "$_MAX_DURATION_MS" ] 2>/dev/null; then
+    duration_anomaly_flag="--duration-anomaly true"
+  fi
+
+  # Determine gate result: PASS or FAIL based on status variable
+  local gate_result="true"
+  if [ "$passed" != "PASS" ] && [ "$passed" != "SKIP" ]; then
+    gate_result="false"
+  fi
+
+  # Fire-and-forget: audit must never block the commit
+  {
+    npx tsx "${PROJECT_ROOT_FOR_AUDIT}/src/npm-package/lib/gate-audit.ts" record \
+      --gate-id "$gate_id" \
+      --gate-name "$gate_name" \
+      --passed "$gate_result" \
+      --issues-found "$issues_found" \
+      --duration-ms "$duration_ms" \
+      $duration_anomaly_flag \
+      --trigger commit \
+      2>/dev/null
+  } &
+  disown 2>/dev/null || true
+}
+
 echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
 echo "   QUALITY GATES - PRE-COMMIT CHECK"
 echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
@@ -713,67 +776,6 @@ has_project_lang() {
   done
   return 1
 }
-
-# ============================================================================
-# Audit helper — records gate execution to .xp-gate/audit.jsonl
-# NEVER blocks commit on failure (try/catch around npx tsx).
-# Usage: record_gate_audit <gate_id> <gate_name> <passed> <issues_found> <start_ms>
-# ============================================================================
-AUDIT_SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-PROJECT_ROOT_FOR_AUDIT="$(git rev-parse --show-toplevel 2>/dev/null || echo "$AUDIT_SCRIPT_DIR/../..")"
-
-# Issue #370: source cross-platform now_ms() helper (node-preferred, regex-validated)
-source "${AUDIT_SCRIPT_DIR}/lib/now-ms.sh"
-
-# Read max_duration_ms from .xp-gate-config.json (default 7200000 = 2 hours)
-_MAX_DURATION_MS=$(node -e "try{const c=JSON.parse(require('fs').readFileSync('${PROJECT_ROOT_FOR_AUDIT}/.xp-gate-config.json','utf8'));console.log((c.audit&&c.audit.max_duration_ms)||7200000);}catch(e){console.log(7200000);}" 2>/dev/null || echo "7200000")
-
-record_gate_audit() {
-  local gate_id="$1"
-  local gate_name="$2"
-  local passed="$3"
-  local issues_found="$4"
-  local start_ms="$5"
-  local end_ms
-  end_ms=$(now_ms)
-  local duration_ms=$((end_ms - start_ms))
-  if [ "$duration_ms" -lt 0 ] 2>/dev/null; then
-    duration_ms=0
-  fi
-
-  # Issue #370: detect anomalous duration (poisoned timestamp arithmetic)
-  local duration_anomaly_flag=""
-  if [ "$duration_ms" -gt "$_MAX_DURATION_MS" ] 2>/dev/null; then
-    duration_anomaly_flag="--duration-anomaly true"
-  fi
-
-  # Determine gate result: PASS or FAIL based on status variable
-  local gate_result="true"
-  if [ "$passed" != "PASS" ] && [ "$passed" != "SKIP" ]; then
-    gate_result="false"
-  fi
-
-  # Fire-and-forget: audit must never block the commit
-  {
-    npx tsx "${PROJECT_ROOT_FOR_AUDIT}/src/npm-package/lib/gate-audit.ts" record \
-      --gate-id "$gate_id" \
-      --gate-name "$gate_name" \
-      --passed "$gate_result" \
-      --issues-found "$issues_found" \
-      --duration-ms "$duration_ms" \
-      $duration_anomaly_flag \
-      --trigger commit \
-      2>/dev/null
-  } &
-  disown 2>/dev/null || true
-}
-
-# Get milliseconds timestamp (used by gates for duration measurement)
-# Issue #370: delegates to now_ms() — node-preferred, regex-validated, cross-platform
-gate_start_ms() {
-  now_ms
-}
-
 # Switch to subdirectory if detected (for single-language subdirectory projects).
 # Multi-language projects stay at root — each adapter handles its own path.
 ORIGINAL_DIR=""
