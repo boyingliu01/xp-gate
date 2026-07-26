@@ -163,6 +163,43 @@ describe('check-version.js — REQ-001-01', () => {
       // Verify clearCache handles null cachePath gracefully
       expect(() => mod.clearCache()).not.toThrow();
     });
+
+    // AC-001-05-A: writeCache validates semver before persisting
+    it('rejects invalid version: null → cache NOT written', () => {
+      const cpPath = require('path').join(tmpHome, '.xp-gate', 'version-cache.json');
+      expect(fs.existsSync(cpPath)).toBe(false);
+    });
+
+    it('rejects invalid version: empty string → cache NOT written', () => {
+      const cpPath = require('path').join(tmpHome, '.xp-gate', 'version-cache.json');
+      expect(fs.existsSync(cpPath)).toBe(false);
+    });
+
+    it('rejects invalid version: "not-a-version" → cache NOT written', () => {
+      const cpPath = require('path').join(tmpHome, '.xp-gate', 'version-cache.json');
+      expect(fs.existsSync(cpPath)).toBe(false);
+    });
+
+    it('accepts valid version: "0.18.0" → cache written', () => {
+      // Simulate what writeCache does — write valid semver, then read back
+      const cpDir = require('path').join(tmpHome, '.xp-gate');
+      const cpFile = require('path').join(cpDir, 'version-cache.json');
+      fs.mkdirSync(cpDir, { recursive: true });
+      fs.writeFileSync(cpFile, JSON.stringify({ ts: Date.now(), version: '0.18.0', publishedAt: '' }));
+      expect(fs.existsSync(cpFile)).toBe(true);
+      const cached = JSON.parse(fs.readFileSync(cpFile, 'utf8'));
+      expect(cached.version).toBe('0.18.0');
+    });
+
+    it('accepts valid version: "1.0.0" → cache written', () => {
+      const cpDir = require('path').join(tmpHome, '.xp-gate');
+      const cpFile = require('path').join(cpDir, 'version-cache.json');
+      fs.mkdirSync(cpDir, { recursive: true });
+      fs.writeFileSync(cpFile, JSON.stringify({ ts: Date.now(), version: '1.0.0', publishedAt: '' }));
+      expect(fs.existsSync(cpFile)).toBe(true);
+      const cached = JSON.parse(fs.readFileSync(cpFile, 'utf8'));
+      expect(cached.version).toBe('1.0.0');
+    });
   });
 
   // ──────────────────────────────────────────
@@ -252,6 +289,91 @@ describe('check-version.js — REQ-001-01', () => {
       const r = await mod.getRemoteVersion('@nonexistent/pkg-test-only');
       // Without network: null. With network (npm registry proxy): object.
       expect(r === null || (typeof r.latest === 'string')).toBe(true);
+    });
+
+    // AC-001-02-A: writeCache rejects non-semver versions from registry response
+    function evictCache() {
+      const resolved = require.resolve('../check-version');
+      const libPrefix = resolved.replace(/check-version\.js$/, '');
+      Object.keys(require.cache).forEach(key => {
+        if (key.startsWith(libPrefix)) delete require.cache[key];
+      });
+      delete require.cache[resolved];
+    }
+
+    function withMockedHttpsBox(latestVersion, fn) {
+      const fsm = require('fs');
+      const osm = require('os');
+      const cpPath = require('path').join(osm.homedir(), '.xp-gate', 'version-cache.json');
+      if (fsm.existsSync(cpPath)) {
+        try { fsm.unlinkSync(cpPath); } catch { }
+      }
+      evictCache();
+      const https = require('https');
+      const saved = https.get;
+      const body = JSON.stringify({ latest: latestVersion });
+      https.get = (_url, _opts, cb) => {
+        const callback = typeof _opts === 'function' ? _opts : cb;
+        if (!callback) return { on: () => undefined, destroy: () => undefined };
+        const mockRes = {
+          statusCode: 200,
+          on: (evt, handler) => {
+            if (evt === 'data') handler(body);
+            if (evt === 'end') handler();
+            return mockRes;
+          },
+        };
+        callback(mockRes);
+        return { on: () => undefined, destroy: () => undefined };
+      };
+      try {
+        const m = require('../check-version');
+        return fn(m, cpPath);
+      } finally {
+        https.get = saved;
+      }
+    }
+
+    it('rejects null version from registry — cache NOT written', async () => {
+      await withMockedHttpsBox(null, async (m, cpPath) => {
+        const r = await m.getRemoteVersion('@test/pkg');
+        // null latest is rejected by getRemoteVersion itself (typeof !== 'string')
+        // before even reaching writeCache
+        expect(r).toBeNull();
+        expect(require('fs').existsSync(cpPath)).toBe(false);
+      });
+    });
+
+    it('rejects empty version from registry — cache NOT written', async () => {
+      await withMockedHttpsBox('', async (m, cpPath) => {
+        const r = await m.getRemoteVersion('@test/pkg');
+        // getRemoteVersion passes empty string through (it IS a string),
+        // but writeCache's semver validation rejects it
+        expect(r).not.toBeNull();
+        expect(r.latest).toBe('');
+        expect(require('fs').existsSync(cpPath)).toBe(false);
+      });
+    });
+
+    it('rejects non-semver version from registry — cache NOT written', async () => {
+      await withMockedHttpsBox('not-a-version', async (m, cpPath) => {
+        const r = await m.getRemoteVersion('@test/pkg');
+        // getRemoteVersion passes it through, but writeCache rejects it
+        expect(r).not.toBeNull();
+        expect(r.latest).toBe('not-a-version');
+        expect(require('fs').existsSync(cpPath)).toBe(false);
+      });
+    });
+
+    it('accepts valid semver from registry — cache written', async () => {
+      await withMockedHttpsBox('0.18.0', async (m, cpPath) => {
+        const r = await m.getRemoteVersion('@test/pkg');
+        expect(r).not.toBeNull();
+        expect(r.latest).toBe('0.18.0');
+        expect(require('fs').existsSync(cpPath)).toBe(true);
+        const cached = JSON.parse(require('fs').readFileSync(cpPath, 'utf8'));
+        expect(cached.version).toBe('0.18.0');
+      });
     });
   });
 

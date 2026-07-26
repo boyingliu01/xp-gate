@@ -263,6 +263,56 @@ describe('syncGateScripts', () => {
 });
 
 /**
+ * @test REQ-450 sync-hooks
+ * @intent Verify syncHooks() copies githooks pre-commit, pre-push, adapter-common.sh,
+ *        and lib/ subdirectory to src/npm-package/hooks/
+ * @covers AC-450-01, AC-450-02, AC-450-03, AC-450-04
+ */
+describe('syncHooks', () => {
+  const WORKTREE_PATH = path.resolve(__dirname, '..', '..', '..', '..');
+  const PKG_ROOT = path.join(WORKTREE_PATH, 'src', 'npm-package');
+  const HOOKS_DIR = path.join(PKG_ROOT, 'hooks');
+  const syncScript = path.join(WORKTREE_PATH, 'src', 'npm-package', 'scripts', 'sync-package-content.js');
+  const nodeExe = process.execPath;
+
+  // Ensure hooks are re-synced once before tests run; share the result.
+  let syncOk = false;
+  beforeAll(() => {
+    const result = spawnSync(nodeExe, [syncScript], {
+      cwd: WORKTREE_PATH,
+      stdio: 'pipe',
+      timeout: 15000,
+    });
+    syncOk = result.status === 0;
+    if (!syncOk) {
+      console.error('sync stderr:', result.stderr?.toString() || '(empty)');
+      console.error('sync stdout:', result.stdout?.toString() || '(empty)');
+    }
+  }, 15000);
+
+  it('syncHooks copies pre-commit to hooks dir', () => {
+    expect(syncOk, 'sync script must exit 0').toBe(true);
+    expect(fs.existsSync(path.join(HOOKS_DIR, 'pre-commit')), 'pre-commit must exist').toBe(true);
+  });
+
+  it('syncHooks copies pre-push to hooks dir', () => {
+    expect(syncOk, 'sync script must exit 0').toBe(true);
+    expect(fs.existsSync(path.join(HOOKS_DIR, 'pre-push')), 'pre-push must exist').toBe(true);
+  });
+
+  it('syncHooks copies adapter-common.sh to hooks dir', () => {
+    expect(syncOk, 'sync script must exit 0').toBe(true);
+    expect(fs.existsSync(path.join(HOOKS_DIR, 'adapter-common.sh')), 'adapter-common.sh must exist').toBe(true);
+  });
+
+  it('syncHooks copies lib/now-ms.sh to hooks/lib dir', () => {
+    expect(syncOk, 'sync script must exit 0').toBe(true);
+    const libFile = path.join(HOOKS_DIR, 'lib', 'now-ms.sh');
+    expect(fs.existsSync(libFile), `lib/now-ms.sh must exist in hooks dir: ${libFile}`).toBe(true);
+  });
+});
+
+/**
  * @test REQ-329 adapter-mirror-drift
  * @intent Verify checkAdapterDrift() detects file count and content mismatches
  *        between githooks/adapters/ (source of truth) and npm-package mirror.

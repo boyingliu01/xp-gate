@@ -58,8 +58,43 @@ function diagnoseTuiRegistration(checks) {
 }
 
 /**
+ * Extract version from SKILL.md YAML frontmatter (between first --- and second ---).
+ * Returns version string or undefined if no version field found.
+ * @param {string} content - SKILL.md file content
+ * @returns {string|undefined}
+ */
+function extractSkillVersion(content) {
+  const match = content.match(/^---\n([\s\S]*?)\n---/);
+  if (!match) return undefined;
+  const frontmatter = match[1];
+  const versionMatch = frontmatter.match(/version:\s*(\S+)/);
+  return versionMatch ? versionMatch[1] : undefined;
+}
+
+/**
+ * Compare two semver strings. Returns:
+ *   -1 if a < b, 0 if a == b, 1 if a > b, undefined if either is not valid semver.
+ * @param {string} a
+ * @param {string} b
+ * @returns {number|undefined}
+ */
+function compareSemver(a, b) {
+  const aParts = a.split('.').map(Number);
+  const bParts = b.split('.').map(Number);
+  if (aParts.some(n => isNaN(n)) || bParts.some(n => isNaN(n))) return undefined;
+  for (let i = 0; i < Math.max(aParts.length, bParts.length); i++) {
+    const na = aParts[i] || 0;
+    const nb = bParts[i] || 0;
+    if (na < nb) return -1;
+    if (na > nb) return 1;
+  }
+  return 0;
+}
+
+/**
  * Check 9: Installed skills vs package-bundled skills (#332).
- * Reports WARN for each installed skill whose SKILL.md differs from the bundled version.
+ * Uses semver version comparison on SKILL.md frontmatter when available;
+ * falls back to byte-for-byte content comparison for skills without version field.
  * @param {object} config
  * @param {Array} checks
  * @returns {number} issue count
@@ -102,15 +137,48 @@ function diagnoseInstalledSkills(config, checks) {
 
     const bundledContent = fs.readFileSync(bundledSkillMd, 'utf8');
     const userContent = fs.readFileSync(userSkillMd, 'utf8');
-    if (bundledContent !== userContent) {
-      checks.push({
-        name: `Skill: ${name}`,
-        status: 'WARN',
-        detail: 'Outdated — run xp-gate update-skill --all',
-      });
-      issues++;
+
+    // Try semver comparison if both SKILL.md files have version frontmatter
+    const bundledVersion = extractSkillVersion(bundledContent);
+    const userVersion = extractSkillVersion(userContent);
+
+    if (bundledVersion !== undefined && userVersion !== undefined) {
+      const cmp = compareSemver(userVersion, bundledVersion);
+      if (cmp === undefined) {
+        // Version strings not valid semver — fall back to byte comparison
+        if (bundledContent !== userContent) {
+          checks.push({
+            name: `Skill: ${name}`,
+            status: 'WARN',
+            detail: `Outdated — run xp-gate update-skill --all (installed: ${userVersion}, bundled: ${bundledVersion})`,
+          });
+          issues++;
+        } else {
+          checks.push({ name: `Skill: ${name}`, status: 'PASS', detail: 'Up to date' });
+        }
+      } else if (cmp < 0) {
+        checks.push({
+          name: `Skill: ${name}`,
+          status: 'WARN',
+          detail: `Outdated — run xp-gate update-skill --all (installed: ${userVersion}, bundled: ${bundledVersion})`,
+        });
+        issues++;
+      } else {
+        // cmp >= 0: installed version is same or newer than bundled
+        checks.push({ name: `Skill: ${name}`, status: 'PASS', detail: 'Up to date' });
+      }
     } else {
-      checks.push({ name: `Skill: ${name}`, status: 'PASS', detail: 'Up to date' });
+      // No version in at least one file — fall back to byte-for-byte comparison
+      if (bundledContent !== userContent) {
+        checks.push({
+          name: `Skill: ${name}`,
+          status: 'WARN',
+          detail: 'Outdated — run xp-gate update-skill --all',
+        });
+        issues++;
+      } else {
+        checks.push({ name: `Skill: ${name}`, status: 'PASS', detail: 'Up to date' });
+      }
     }
   }
 
@@ -195,4 +263,6 @@ module.exports = {
   diagnoseInstalledSkills,
   fixTuiRegistration,
   ensureTuiRegistration,
+  extractSkillVersion,
+  compareSemver,
 };
