@@ -14,7 +14,7 @@ const {
   getTemplateDir,
 } = require('./shared-paths.js');
 const { checkUpgrade, formatUpgradeMsg } = require('./check-version.js');
-const { GATE_CLI_TOOLS, checkCliTool, getToolInstallCmd } = require('./detect-deps.js');
+const { GATE_CLI_TOOLS, checkCliTool, getToolInstallCmd, checkBash } = require('./detect-deps.js');
 const {
   diagnoseTuiRegistration, diagnoseInstalledSkills,
   fixTuiRegistration, ensureTuiRegistration, readTuiJson,
@@ -156,8 +156,7 @@ function getCurrentHooksPathSync() {
 async function checkEnv(checks) {
   const envChecks = [
     { name: 'Node.js', cmd: 'node --version' },
-    { name: 'Git', cmd: 'git --version' },
-    { name: 'Bash', cmd: 'bash --version' }
+    { name: 'Git', cmd: 'git --version' }
   ];
 
   const results = await Promise.allSettled(
@@ -179,6 +178,19 @@ async function checkEnv(checks) {
       checks.push({ name: `Environment: ${entry.name}`, status: 'FAIL', detail: 'Not found' });
       allOk = false;
     }
+  }
+
+  // Bash check uses checkBash() for robust cross-platform detection
+  // (handles Windows Git Bash at common install paths)
+  const bashResult = checkBash();
+  if (bashResult.ok) {
+    const versionStr = bashResult.version
+      ? `GNU bash, version ${bashResult.version} (${bashResult.path})`
+      : `bash found at ${bashResult.path}`;
+    checks.push({ name: 'Environment: Bash', status: 'PASS', detail: versionStr });
+  } else {
+    checks.push({ name: 'Environment: Bash', status: 'FAIL', detail: 'Not found' });
+    allOk = false;
   }
 
   return allOk;

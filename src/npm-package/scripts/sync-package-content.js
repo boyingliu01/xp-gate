@@ -176,6 +176,48 @@ function syncAdapters() {
   return copied + gateFiles.length;
 }
 
+function syncHooks() {
+  const SRC = path.join(REPO_ROOT, 'githooks');
+  const DST = path.join(PKG_ROOT, 'hooks');
+  // In-place copy (no rmrf) to avoid race condition with parallel test readers.
+  fs.mkdirSync(DST, { recursive: true });
+
+  const HOOK_FILES = ['pre-commit', 'pre-push', 'adapter-common.sh'];
+  let copied = 0;
+
+  for (const name of HOOK_FILES) {
+    const srcPath = path.join(SRC, name);
+    const dstPath = path.join(DST, name);
+    if (fs.existsSync(srcPath)) {
+      fs.copyFileSync(srcPath, dstPath);
+      copied += 1;
+    }
+  }
+
+  // Copy lib/ subdirectory recursively
+  const libSrc = path.join(SRC, 'lib');
+  const libDst = path.join(DST, 'lib');
+  if (fs.existsSync(libSrc)) {
+    copyDir(libSrc, libDst);
+    copied += 1;
+  }
+
+  // Copy gate-*.sh files from githooks root to hooks/
+  const gateFiles = fs.readdirSync(SRC).filter(f =>
+    f.endsWith('.sh') && (f.startsWith('gate-') || f === 'sprint-gate.sh')
+  );
+  for (const f of gateFiles) {
+    fs.copyFileSync(path.join(SRC, f), path.join(DST, f));
+  }
+  if (gateFiles.length > 0) {
+    console.error(`[sync] hooks/ gate scripts: ${gateFiles.join(', ')}`);
+    copied += gateFiles.length;
+  }
+
+  console.error(`[sync] hooks/ (${copied} entries)`);
+  return copied;
+}
+
 function syncModules(moduleName) {
   const src = path.join(REPO_ROOT, 'src', moduleName);
   const dest = path.join(PKG_ROOT, moduleName);
@@ -410,11 +452,12 @@ function main() {
   const plugins = syncPlugins();
   const scripts = syncScripts();
   const adapters = syncAdapters();
-const principles = syncModules('principles');
-const mutation = syncModules('mutation');
-const mockPolicy = syncModules('mock-policy');
-const buildIntegrity = syncModules('build-integrity');
-console.error(`[sync] done: ${skills} skill(s), ${plugins} plugin(s), ${scripts} script(s), ${adapters} adapter entries, ${principles + mutation + mockPolicy + buildIntegrity} module(s)`);
+  const hooks = syncHooks();
+  const principles = syncModules('principles');
+  const mutation = syncModules('mutation');
+  const mockPolicy = syncModules('mock-policy');
+  const buildIntegrity = syncModules('build-integrity');
+  console.error(`[sync] done: ${skills} skill(s), ${plugins} plugin(s), ${scripts} script(s), ${adapters} adapter entries, ${hooks} hook entries, ${principles + mutation + mockPolicy + buildIntegrity} module(s)`);
   if (skills !== CORE_SKILLS.length) {
     console.error(`[sync] ERROR: expected ${CORE_SKILLS.length} skills, copied ${skills}`);
     process.exit(1);
