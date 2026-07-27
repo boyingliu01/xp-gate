@@ -31,6 +31,12 @@ describe('doctor', () => {
       originalDetectDepsTools = [...detectDeps.GATE_CLI_TOOLS];
       detectDeps.GATE_CLI_TOOLS.length = 0;
     }
+    // Mock checkBash to return success by default (tests override as needed)
+    detectDeps.checkBash = () => ({
+      ok: true,
+      path: 'bash',
+      version: '5.1.16',
+    });
   });
 
   afterAll(() => {
@@ -217,9 +223,6 @@ describe('doctor', () => {
       if (cmd === 'git --version') {
         return 'git version 2.39.0\n';
       }
-      if (cmd === 'bash --version') {
-        return 'GNU bash, version 5.1.16\n';
-      }
       return '';
     };
 
@@ -237,8 +240,6 @@ describe('doctor', () => {
         callback(null, 'v20.0.0\n', '');
       } else if (cmd === 'git --version') {
         callback(null, 'git version 2.39.0\n', '');
-      } else if (cmd === 'bash --version') {
-        callback(null, 'GNU bash, version 5.1.16\n', '');
       } else {
         callback(null, '', '');
       }
@@ -401,9 +402,6 @@ describe('doctor', () => {
       if (cmd === 'git --version') {
         return 'git version 2.39.0\n';
       }
-      if (cmd === 'bash --version') {
-        return 'GNU bash, version 5.1.16\n';
-      }
       return '';
     };
     // Async mock matching execSync above
@@ -417,8 +415,6 @@ describe('doctor', () => {
         callback(null, 'v20.0.0\n', '');
       } else if (cmd === 'git --version') {
         callback(null, 'git version 2.39.0\n', '');
-      } else if (cmd === 'bash --version') {
-        callback(null, 'GNU bash, version 5.1.16\n', '');
       } else {
         callback(null, '', '');
       }
@@ -502,9 +498,6 @@ describe('doctor', () => {
       if (cmd === 'git --version') {
         return 'git version 2.39.0\n';
       }
-      if (cmd === 'bash --version') {
-        return 'GNU bash, version 5.1.16\n';
-      }
       return '';
     };
     // Async exec mock for execWithTimeout (util.promisify(exec) in doctor.js)
@@ -518,8 +511,6 @@ describe('doctor', () => {
         callback(null, 'v20.0.0\n', '');
       } else if (cmd === 'git --version') {
         callback(null, 'git version 2.39.0\n', '');
-      } else if (cmd === 'bash --version') {
-        callback(null, 'GNU bash, version 5.1.16\n', '');
       } else {
         callback(null, '', '');
       }
@@ -569,6 +560,10 @@ describe('doctor', () => {
   it('detects missing environment dependencies', async () => {
     setupLocalInstall();
     seedVersionCache();
+    // Make checkBash fail for this test (detect-deps module already loaded + mocked in beforeAll)
+    const detectDeps = require('../detect-deps.js');
+    const origCheckBash = detectDeps.checkBash;
+    detectDeps.checkBash = () => ({ ok: false, message: 'Not found' });
     mockExecFail();
     const { doctor } = require('../doctor');
 
@@ -578,6 +573,9 @@ describe('doctor', () => {
     expect(logSpy).toHaveBeenCalledWith(
       expect.stringContaining('Not found')
     );
+
+    // Restore
+    detectDeps.checkBash = origCheckBash;
   });
 
   // === Issue #186: Version mismatch detection ===

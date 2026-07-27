@@ -89,6 +89,15 @@ function readCache() {
 }
 
 function writeCache(latest, publishedAt) {
+  // Validate version before writing — prevent corrupted/non-semver values
+  // from persisting in version-cache.json (e.g. undefined, empty string, placeholders).
+  // Uses 3-digit semver: MAJOR.MINOR.PATCH with optional pre-release tag.
+  const semverRegex = /^\d+\.\d+\.\d+(-[\w.]+)?$/;
+  if (typeof latest !== 'string' || !semverRegex.test(latest)) {
+    console.warn(`[version-cache] Invalid version "${latest}" — not writing to cache`);
+    return;
+  }
+
   const cp = cachePath();
   if (!cp) return;
   ensureDir(path.dirname(cp));

@@ -318,6 +318,7 @@ async function init(args) {
   console.log('====================\n');
 
   // Check bash availability (required for shell hooks)
+  console.log('Checking bash availability...');
   const bashCheck = checkBash();
   if (bashCheck.ok) {
     console.log(`Bash: ✓ ${bashCheck.path} (v${bashCheck.version})\n`);
@@ -327,8 +328,10 @@ async function init(args) {
   }
 
   // Check CLI tools availability (quality gates will SKIP silently if tools are missing)
+  console.log('Checking CLI tools...');
   printCliToolStatus();
 
+  console.log('Checking platform dependencies...');
   // Detect platform and check/auto-install dependencies
   const platform = detectPlatform();
   console.log(`Platform: ${platform}\n`);
@@ -534,18 +537,22 @@ async function setupGlobal(args) {
   console.log(`Global hooks: ${GLOBAL_HOOKS_DIR}`);
   console.log(`Global adapters: ${GLOBAL_ADAPTERS_DIR}\n`);
 
+  console.log('[setup-global] Creating global directories...');
   fs.mkdirSync(GLOBAL_HOOKS_DIR, { recursive: true });
   fs.mkdirSync(GLOBAL_ADAPTERS_DIR, { recursive: true });
 
+  console.log('[setup-global] Installing git hooks...');
   copyHooks(srcDir, GLOBAL_HOOKS_DIR);
   console.log('Installing hooks...');
   console.log(`  pre-commit -> ${GLOBAL_HOOKS_DIR}`);
   console.log(`  pre-push -> ${GLOBAL_HOOKS_DIR}`);
 
+  console.log('[setup-global] Installing adapters...');
   copyAdapters(srcDir, GLOBAL_ADAPTERS_DIR);
   console.log(`  adapter-common.sh + adapters -> ${GLOBAL_ADAPTERS_DIR}`);
 
   // Install principles/, mutation/, mock-policy/ to global modules dir
+  console.log('[setup-global] Installing quality gate modules...');
   const globalModulesDir = path.join(CONFIG_DIR, 'modules');
   ['principles', 'mutation', 'mock-policy'].forEach(module => {
     const moduleSrc = path.join(srcDir, module);
@@ -557,6 +564,7 @@ async function setupGlobal(args) {
     }
   });
 
+  console.log('[setup-global] Configuring git...');
   const { execSync } = require('child_process');
   try {
     execSync(`git config --global core.hooksPath "${GLOBAL_HOOKS_DIR}"`);
@@ -567,6 +575,7 @@ async function setupGlobal(args) {
 
   ensureConfigDir();
 
+  console.log('[setup-global] Generating installation manifest...');
   const manifest = generateGlobalManifest(srcDir);
   updateConfig({ lastInit: new Date().toISOString(), mode: 'global', templateDir: TEMPLATE_DIR, manifest });
 
@@ -581,6 +590,7 @@ async function setupGlobal(args) {
   console.log('Per-project adapters can still override by creating <repo>/githooks/');
 
   // Auto-install missing CLI tools (prompt user)
+  console.log('[setup-global] Checking quality gate CLI tools...');
   const autoYes = args.includes('--yes') || args.includes('--auto-install');
   await promptBootstrap(autoYes);
 
