@@ -74,6 +74,8 @@ AI 辅助编程把这个问题彻底改变了。AI 写完一段代码的速度�
 - **Gate 8**: 密钥扫描 — 不泄露密钥
 - **Gate 9**: 构建完整性 — TypeScript 编译、打包、import 检查
 - **Gate 10**: SAST 安全扫描 — 代码层安全漏洞
+- **Gate 11**: Sprint Flow — 流程合规
+- **Gate 12**: 文件卫生 — 冲突标记、语法检查（警告级）
 
 这个环闭合了约 90%。目标：100%。
 
@@ -247,7 +249,10 @@ xp-gate sprint-status --watch
 | Gate 8 | 密钥扫描 (gitleaks) | 阻断 |
 | Gate 9 | 构建完整性 (tsc + npm pack + import check) | 阻断 |
 | Gate 10 | SAST 安全扫描 (semgrep) | 阻断 |
-| Gate 11 | Sprint Flow 执行 + 文件卫生 | 阻断 |
+| Gate 11 | Sprint Flow 执行 | 阻断 |
+| Gate 12 | 文件卫生 (conflict markers, YAML/JSON 语法) — **警告，不阻断** | 警告 |
+
+> Gate 12 (File Hygiene) 仅对冲突标记和 YAML/JSON 语法错误阻断提交；其他问题（trailing whitespace, 缺少 EOF 换行）仅警告，不阻断。
 
 ### Pre-push（8 道门禁）
 
@@ -348,11 +353,11 @@ XP-Gate 内置 12 个专业 AI 技能，另在 Sprint Flow 中集成了多个外
 | test-specification-alignment | 内置 | 测试对齐验证 | Phase 3, 4 |
 | to-issues | 内置 | 垂直切片 Issue 拆分 | Phase 2 |
 | improve-codebase-architecture | 内置 | 架构健康检查 | 定期 |
-| verify-before-completion | 内置 | 变更完成前验证 | Phase 4 |
-| requesting-code-review | 内置 | 代码评审请求 | Phase 4 |
-| receiving-code-review | 内置 | 处理评审反馈 | Phase 4 |
-| systematic-debugging | 内置 | 根因调试 | Phase 3-5 |
-| brainstorming | 内置 | 需求探索、方案设计 | Phase 2 |
+| grill-with-docs | 内置 | 基于文档的需求梳理（v0.18.0+） | Phase 2 |
+| batch-grill-me | 内置 | 批量设计决策（v0.18.0+） | Phase 2 |
+| domain-modeling | 内置 | CONTEXT.md / ADR 维护（v0.18.0+） | Phase 2 |
+| admin-template-guidelines | 内置 | 管理界面代码规范（Fastify + Nunjucks） | 定期 |
+| grilling | 内置 | Grill 引擎（grill-with-docs 的依赖） | Phase 2 |
 | qa | 外部 (gstack) | Web QA 测试 | Phase 4 |
 | design-review | 外部 (gstack) | 视觉审计 | Phase 4 |
 | benchmark | 外部 (gstack) | 性能基准 | Phase 4 |
