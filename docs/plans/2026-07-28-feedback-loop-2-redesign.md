@@ -447,3 +447,14 @@ This makes bypass have concrete, unavoidable consequences — the sprint cannot 
 - `githooks/pre-push` lines 824-1179 — current code-walkthrough validation
 - `skills/delphi-review/SKILL.md` — evidence output schemas
 - `specification.yaml` — real spec format (274 lines, 6 REQs)
+
+## Implementation Status (Updated 2026-07-28)
+
+| Phase | Content | Commit |
+|-------|---------|--------|
+| Phase 1 | Deterministic alignment engine (TDD: 22/22) | `791d825` |
+| Phase 2 | AI-friendly hook footer + post-commit bypass detection | `7159046` |
+| Phase 3 | Gate 5c semantic annotation check | `00b8fc2` |
+| Phase 4 | checkEvidence + checkWalkthrough + checkBypassAudit | `ce9d71a` |
+| Phase 5 | Schema unification + path consolidation | `(this commit)` |
+| Phase 6 | Outer loop closure (retro → sprint-init, new sprints default to evidence_schema_version=2) | `(this commit)` |

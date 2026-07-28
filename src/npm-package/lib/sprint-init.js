@@ -166,10 +166,32 @@ async function handleSprintInit(args = []) {
     return 0;
   }
 
+  // Read previous sprint retro data for auto-population (Phase 6 / D7)
+  const historyDir = path.join(projectDir, '.sprint-history');
+  let previousRetro = null;
+  if (fs.existsSync(historyDir)) {
+    const entries = fs.readdirSync(historyDir).filter(f => f.startsWith('sprint-')).sort().reverse();
+    for (const entry of entries) {
+      if (entry.endsWith('.json') && !entry.includes('retro')) continue;
+      const retroPath = path.join(historyDir, entry);
+      if (fs.existsSync(retroPath)) {
+        try {
+          const raw = fs.readFileSync(retroPath, 'utf8');
+          previousRetro = JSON.parse(raw);
+          break;
+        } catch {
+          // Skip unparseable files
+        }
+      }
+      break; // Only check the most recent sprint
+    }
+  }
+
   // Create new sprint state
   const sprintId = generateSprintId();
   const newState = {
     _schema_version: 1,
+    evidence_schema_version: 2,  // Phase 5: new sprints default to full BLOCK enforcement
     id: sprintId,
     task_description: taskDescription.trim(),
     phase: 1,
@@ -190,6 +212,25 @@ async function handleSprintInit(args = []) {
     outputs: issues ? { issues } : {},
     metrics: {},
   };
+
+  // Phase 6 / D7: Auto-populate from previous sprint retro data
+  if (previousRetro) {
+    if (previousRetro.rework_rate != null) {
+      newState.metrics.previous_rework_rate = previousRetro.rework_rate;
+    }
+    if (previousRetro.evidence_skips != null) {
+      newState.metrics.previous_evidence_skips = previousRetro.evidence_skips;
+    }
+    if (previousRetro.duration_seconds != null) {
+      newState.metrics.previous_duration_seconds = previousRetro.duration_seconds;
+    }
+    if (Object.keys(newState.metrics).length > 0) {
+      console.log('📊 Auto-populated from previous sprint retro data:');
+      for (const [key, value] of Object.entries(newState.metrics)) {
+        console.log(`   ${key}: ${value}`);
+      }
+    }
+  }
 
   // Write state atomically
   manager.write(newState);

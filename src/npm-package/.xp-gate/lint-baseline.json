@@ -1,0 +1,162 @@
+{
+  "plugins/claude-code/bin/xp-gate-version-check.sh": {
+    "shellcheck": {
+      "warnings": 1,
+      "errors": 0
+    },
+    "totalWarnings": 1,
+    "lastAnalyzed": "2026-07-28T12:29:53.527Z"
+  },
+  "hooks/gate-9.sh": {
+    "shellcheck": {
+      "warnings": 1,
+      "errors": 1
+    },
+    "totalWarnings": 1,
+    "lastAnalyzed": "2026-07-28T12:29:53.527Z"
+  },
+  "hooks/gate-8.sh": {
+    "shellcheck": {
+      "warnings": 0,
+      "errors": 1
+    },
+    "totalWarnings": 0,
+    "lastAnalyzed": "2026-07-28T12:29:53.527Z"
+  },
+  "hooks/gate-7.sh": {
+    "shellcheck": {
+      "warnings": 1,
+      "errors": 1
+    },
+    "totalWarnings": 1,
+    "lastAnalyzed": "2026-07-28T12:29:53.527Z"
+  },
+  "hooks/gate-4.sh": {
+    "shellcheck": {
+      "warnings": 4,
+      "errors": 1
+    },
+    "totalWarnings": 4,
+    "lastAnalyzed": "2026-07-28T12:29:53.527Z"
+  },
+  "hooks/gate-3.sh": {
+    "shellcheck": {
+      "warnings": 1,
+      "errors": 1
+    },
+    "totalWarnings": 1,
+    "lastAnalyzed": "2026-07-28T12:29:53.527Z"
+  },
+  "hooks/gate-12-file-hygiene.sh": {
+    "shellcheck": {
+      "warnings": 4,
+      "errors": 1
+    },
+    "totalWarnings": 4,
+    "lastAnalyzed": "2026-07-28T12:29:53.527Z"
+  },
+  "hooks/adapter-common.sh": {
+    "shellcheck": {
+      "warnings": 2,
+      "errors": 0
+    },
+    "totalWarnings": 2,
+    "lastAnalyzed": "2026-07-28T12:29:53.527Z"
+  },
+  "adapters/typescript.sh": {
+    "shellcheck": {
+      "warnings": 1,
+      "errors": 0
+    },
+    "totalWarnings": 1,
+    "lastAnalyzed": "2026-07-28T12:29:53.527Z"
+  },
+  "adapters/python.sh": {
+    "shellcheck": {
+      "warnings": 2,
+      "errors": 0
+    },
+    "totalWarnings": 2,
+    "lastAnalyzed": "2026-07-28T12:29:53.527Z"
+  },
+  "adapters/plugins/whalecloud-java/scripts/install-gradle-whalecloud.sh": {
+    "shellcheck": {
+      "warnings": 1,
+      "errors": 0
+    },
+    "totalWarnings": 1,
+    "lastAnalyzed": "2026-07-28T12:29:53.527Z"
+  },
+  "adapters/kotlin.sh": {
+    "shellcheck": {
+      "warnings": 6,
+      "errors": 0
+    },
+    "totalWarnings": 6,
+    "lastAnalyzed": "2026-07-28T12:29:53.527Z"
+  },
+  "adapters/iac.sh": {
+    "shellcheck": {
+      "warnings": 15,
+      "errors": 0
+    },
+    "totalWarnings": 15,
+    "lastAnalyzed": "2026-07-28T12:29:53.527Z"
+  },
+  "adapters/go.sh": {
+    "shellcheck": {
+      "warnings": 1,
+      "errors": 0
+    },
+    "totalWarnings": 1,
+    "lastAnalyzed": "2026-07-28T12:29:53.527Z"
+  },
+  "adapters/gate-9.sh": {
+    "shellcheck": {
+      "warnings": 1,
+      "errors": 1
+    },
+    "totalWarnings": 1,
+    "lastAnalyzed": "2026-07-28T12:29:53.527Z"
+  },
+  "adapters/gate-8.sh": {
+    "shellcheck": {
+      "warnings": 0,
+      "errors": 1
+    },
+    "totalWarnings": 0,
+    "lastAnalyzed": "2026-07-28T12:29:53.527Z"
+  },
+  "adapters/gate-7.sh": {
+    "shellcheck": {
+      "warnings": 1,
+      "errors": 1
+    },
+    "totalWarnings": 1,
+    "lastAnalyzed": "2026-07-28T12:29:53.527Z"
+  },
+  "adapters/gate-4.sh": {
+    "shellcheck": {
+      "warnings": 4,
+      "errors": 1
+    },
+    "totalWarnings": 4,
+    "lastAnalyzed": "2026-07-28T12:29:53.527Z"
+  },
+  "adapters/gate-3.sh": {
+    "shellcheck": {
+      "warnings": 1,
+      "errors": 1
+    },
+    "totalWarnings": 1,
+    "lastAnalyzed": "2026-07-28T12:29:53.527Z"
+  },
+  "adapters/cpp.sh": {
+    "shellcheck": {
+      "warnings": 3,
+      "errors": 0
+    },
+    "totalWarnings": 3,
+    "lastAnalyzed": "2026-07-28T12:29:53.527Z"
+  }
+}
