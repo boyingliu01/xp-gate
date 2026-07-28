@@ -61,7 +61,7 @@ githooks/
 | 8 | Secret Scanning | gitleaks (`.gitleaks.toml`) | Any leaked secret |
 | 9 | Semgrep SAST | semgrep ruleset | High-severity finding |
 
-> The README/CAPABILITIES.md "6 Gates" framing is a conceptual grouping (CodeQ, Complexity, Principles, Tests, Architecture, Security) over these 10 script-level gates. See root `AGENTS.md` → "Known Drift" #1.
+> The README/docs/CAPABILITIES.md "6 Gates" framing is a conceptual grouping (CodeQ, Complexity, Principles, Tests, Architecture, Security) over these 10 script-level gates. See root `AGENTS.md` → "Known Drift" #1.
 
 ### Pre-push (Gate M / M2 / M3 + walkthrough)
 

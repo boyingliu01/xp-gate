@@ -6,9 +6,9 @@
 **Version:** 0.18.1.0
 
 ## OVERVIEW
-XP-Gate — deterministic git quality gates + AI-driven multi-expert review (Delphi) + Sprint Flow pipeline (6 phases: PREP, DESIGN, BUILD, VERIFY, SHIP, CLOSE) + npm zero-install distribution + cross-platform plugin system (Claude Code / OpenCode / Qoder). Pre-commit runs **10 numbered gates (Gate 0–9)** at the script level, conceptually grouped as **6 categories** in user-facing docs (README, CAPABILITIES.md). Pre-push runs **3 mutation/mock gates (M, M2, M3) + Delphi code-walkthrough**. Implements 14 Clean Code/SOLID rules across 9 language adapters (TypeScript engine), 13 shell adapters (gate routing), Boy Scout Rule baseline enforcement, test-specification alignment, mock policy enforcement, and incremental mutation testing.
+XP-Gate — deterministic git quality gates + AI-driven multi-expert review (Delphi) + Sprint Flow pipeline (6 phases: PREP, DESIGN, BUILD, VERIFY, SHIP, CLOSE) + npm zero-install distribution + cross-platform plugin system (Claude Code / OpenCode / Qoder). Pre-commit runs **10 numbered gates (Gate 0–9)** at the script level, conceptually grouped as **6 categories** in user-facing docs (README, docs/CAPABILITIES.md). Pre-push runs **3 mutation/mock gates (M, M2, M3) + Delphi code-walkthrough**. Implements 14 Clean Code/SOLID rules across 9 language adapters (TypeScript engine), 13 shell adapters (gate routing), Boy Scout Rule baseline enforcement, test-specification alignment, mock policy enforcement, and incremental mutation testing.
 
-> **Doc-vs-script drift, intentional:** README/CAPABILITIES.md describe "6 Gates" as a conceptual grouping; the actual `githooks/pre-commit` script runs Gate 0–9. Tracked as a doc-alignment issue, not a bug.
+> **Doc-vs-script drift, intentional:** README/docs/CAPABILITIES.md describe "6 Gates" as a conceptual grouping; the actual `githooks/pre-commit` script runs Gate 0–9. Tracked as a doc-alignment issue, not a bug.
 >
 > **v0.9.2**: Windows Git Bash compatibility — `detect_os_env()`, `head→sed` migration (46 changes), `[[ ]]→[ ]` POSIX conditionals (47 changes), winget install hints, Windows CI job. All 37 githooks `.sh` files are now `head`-free.
 
@@ -60,15 +60,12 @@ XP-Gate — deterministic git quality gates + AI-driven multi-expert review (Del
 │   ├── batch-grill-me/                 # NEW in 0.18.0 (Matt Pocock); Phase 2 batch decisions, autoplan replacement
 │   ├── grilling/                       # NEW in 0.18.0 (Matt Pocock); grill engine, dependency of grill-with-docs
 │   └── domain-modeling/                # NEW in 0.18.0 (Matt Pocock); CONTEXT.md/ADR maintenance, with templates
-├── docs/               # 30+ design plans, incidents, retros, guides
+├── docs/               # 30+ design plans, incidents, retros, guides + ARCHITECTURE.md, CAPABILITIES.md, MANIFEST.md
 ├── scripts/            # build-plugin.sh, copy-skills.sh, sync-version.cjs, test-plugins.sh,
 │                       #   install-{hooks,skills,all}.sh, prepack.cjs
 ├── dashboard/          # Quality dashboard (serve.js + dashboard.js → localhost:3333)
 ├── .github/workflows/  # 5 CI pipelines: quality-gates (~948 LOC), npm-publish, cross-platform-ci,
 │                       #   security-audit, mutation-test
-├── ARCHITECTURE.md     # 818-line architecture reference
-├── CAPABILITIES.md     # 298-line capability catalog
-├── MANIFEST.md         # Machine-readable component manifest
 ├── architecture.yaml   # ARCH-001..014 rule definitions
 ├── specification.yaml  # Requirements (auto-generated from APPROVED design docs)
 ├── VERSION             # Single source of truth: 0.18.0.0 (MAJOR.MINOR.PATCH.MICRO)
@@ -134,7 +131,7 @@ XP-Gate — deterministic git quality gates + AI-driven multi-expert review (Del
 | 8 | Secret Scanning | gitleaks (`.gitleaks.toml`) | Any leaked secret |
 | 9 | Semgrep SAST | semgrep ruleset | High-severity finding |
 
-> **Conceptual grouping in README/CAPABILITIES.md (still called "6 Gates"):**
+> **Conceptual grouping in README/docs/CAPABILITIES.md (still called "6 Gates"):**
 > CodeQ (1+2+5) · Complexity (3) · Principles (4) · Tests (3+4+5) · Architecture (6) · plus newer Security gates (7+8+9). Gate 0 is treated as a pre-flight check.
 > The two views are intentionally maintained until the README rewrite catches up.
 
