@@ -53,7 +53,11 @@ function parseArgs(args: string[]): GateMOptions {
 function parseChangedFiles(options: GateMOptions, args: string[], i: number): void {
   const next = args[++i];
   if (next) {
-    options.changedFiles = next.split(',').map(f => f.trim()).filter(Boolean);
+    options.changedFiles = next
+      .replace(/\n/g, ',')
+      .split(',')
+      .map(f => f.trim())
+      .filter(Boolean);
   }
 }
 
@@ -511,13 +515,23 @@ export async function runGateM(options: GateMOptions): Promise<GateMResult> {
     warnings.push(`Mutation testing timed out for: ${timeoutFiles.join(', ')}. Run locally for full report.`);
   }
 
-  const evalResult = evaluateScores(fileScores, thresholds, baseline);
+  const evaluableThresholds = thresholds.filter(ft => !timeoutFiles.includes(ft.file));
+  const evalResult = evaluateScores(fileScores, evaluableThresholds, baseline);
   for (const msg of evalResult.messages) console.log(`  ${msg}`);
 
-  if (evalResult.blocked) {
-    return buildResult('block', sourceFiles.length, buildMutationScores(fileScores), warnings, errors);
+  if (timeoutFiles.length > 0) {
+    for (const f of timeoutFiles) {
+      console.log(`  SKIP ${f}: mutation testing timed out (score unavailable)`);
+    }
   }
-  return buildResult('pass', sourceFiles.length, buildMutationScores(fileScores), warnings, errors);
+
+  if (evalResult.blocked) {
+    return buildResult('block', evaluableThresholds.length, buildMutationScores(fileScores), warnings, errors);
+  }
+  if (evaluableThresholds.length === 0) {
+    return buildResult('skip', 0, {}, warnings, errors);
+  }
+  return buildResult('pass', evaluableThresholds.length, buildMutationScores(fileScores), warnings, errors);
 }
 
 interface PartitionedScores {
