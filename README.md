@@ -2,7 +2,7 @@
 
 > **AI 写 100 行代码只需 5 秒，但判断这 100 行对不对仍然要人工花 30 分钟。XP-Gate 把这 30 分钟压缩回秒级。**
 >
-> 三个机器驱动的反馈环，实现极限编程在 AI 时代的速度。
+> Three machine-driven feedback loops bringing Extreme Programming speed to the AI era. *(English docs: see `skills/*/SKILL.md`)*
 
 [![Delphi](https://img.shields.io/badge/AI%20Review-Delphi%20≥90%25-blue)](./skills/delphi-review)
 [![Sprint Flow](https://img.shields.io/badge/Sprint%20Flow-6%20Phases-purple)](./skills/sprint-flow)
@@ -15,9 +15,9 @@
 1. [为什么是极限编程](#为什么是极限编程)
 2. [三个反馈环](#三个反馈环)
 3. [快速开始](#快速开始)
-4. [Sprint Flow 全流程](#sprint-flow-全流程)
-5. [质量门禁详解](#质量门禁详解)
-6. [Delphi 多专家评审](#delphi-多专家评审)
+4. [Sprint Flow 全流程](#sprint-flow-全流程)（反馈环 1–3 的工作流实现）
+5. [质量门禁详解](#质量门禁详解)（反馈环 1）
+6. [Delphi 多专家评审](#delphi-多专家评审)（反馈环 2·第一步）
 7. [语言支持](#语言支持)
 8. [AI 技能集成](#ai-技能集成)
 9. [配置说明](#配置说明)
@@ -103,11 +103,19 @@ AI 辅助编程把这个问题彻底改变了。AI 写完一段代码的速度�
 
 这个环闭合了约 55%。剩余缺口：环 3 的数据产量够了，但**自动驱动**下一个 Sprint 的机制还不完善。
 
+> 以上就是三个反馈环的理念。下面来看这些理念如何在真实开发流程中落地实现。
+
 ---
 
 ## 快速开始
 
-XP-Gate 由 **两个互补的发行渠道** 组成，建议同时安装：
+XP-Gate 由 **两个互补的发行渠道** 组成：
+
+| 安装场景 | 你能得到 | 你会错过 |
+|----------|---------|---------|
+| 只装 npm 包 | Git Hooks + CLI 命令 | AI 对话内工具、技能自动发现 |
+| 只装 IDE 插件 | AI 对话内工具 + 技能自动加载 | Git Hooks、提交门禁 |
+| 两者都装 | 全部 — 提交门禁 + IDE 集成 | — |
 
 ### 第一步：安装 npm 包（必需 — Git Hooks + 全流程基础设施）
 
@@ -126,7 +134,7 @@ npm 包提供：
 
 ### 第二步：安装 IDE 插件（推荐 — AI 对话内质量工具 + 技能自动加载）
 
-**Qoder 插件**（推荐）：`xp-gate init` 自动检测并部署 Delphi 评审所需的 3 个 Custom Agent，直接消耗 Qoder Credits，无需外部 API。
+**Qoder 插件**：`xp-gate init` 自动检测并部署 Delphi 评审所需的 3 个 Custom Agent，直接消耗 Qoder Credits，无需外部 API。
 
 **OpenCode 插件**：
 ```json
@@ -155,16 +163,19 @@ IDE 插件提供 AI 对话内的质量工具（`gate-check`、`gate-principles`�
 | `xp-gate principles <path>` | 运行 Clean Code + SOLID 检查 (Gate 4) |
 | `xp-gate arch` | 运行架构合规检查 (Gate 6) |
 | `xp-gate sprint-status [--json] [--watch]` | 查看 Sprint Flow 进度 |
+| `xp-gate sprint-init` | 初始化 Sprint 项目结构 |
+| `xp-gate phase-transition <phase>` | 执行 Sprint 阶段转换（含证据验证） |
 | `xp-gate retro [--days N] [--json]` | 生成工程复盘报告 |
 | `xp-gate audit [--tail \| --stats \| record]` | 查看/记录 gate 审计日志 |
 | `xp-gate install-skill <name>` | 从 GitHub 下载 Skill |
+| `xp-gate update-hooks` | 更新 Git Hooks 到最新版本 |
 | `xp-gate uninstall [--dry-run]` | 完整卸载 xp-gate |
 | `xp-gate migrate` | v0.4.x → 清理残留配置 |
 | `xp-gate --version` | 查看版本 |
 
 ---
 
-### 遗留安装路径（仓库直接克隆）
+### 遗留安装路径（仓库直接克隆 — 适用于开发者或无法使用 npm 的环境）
 
 ```bash
 git clone https://github.com/boyingliu01/xp-gate.git && cd xp-gate
@@ -279,6 +290,8 @@ Delphi 方法论解决这个问题的核心设计：
 | `requirements` | Phase 2 DESIGN 之后 | specification.yaml | `requirements-reviewed.json` |
 | `design` | 架构/方案设计 | 设计文档 | 评审报告 |
 | `code-walkthrough` | Phase 4 VERIFY（pre-push 时） | 代码 diff | `.code-walkthrough-result.json` |
+
+> `requirements` 模式目前通过 `delphi-review --mode requirements` 触发，输出 `delphi-reviewed.json` 供 Phase 2→3 硬闸门使用。该模式的重构计划参见[反馈环 2 设计文档](./docs/plans/2026-07-28-feedback-loop-2-redesign.md)。
 
 ### 与 `test-alignment` 的关系
 

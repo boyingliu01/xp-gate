@@ -6,7 +6,7 @@
 **Version:** 0.18.0.0
 
 ## OVERVIEW
-Git quality gates: pre-commit runs **10 numbered gates** (Gate 0–9, conceptually grouped as "6 categories" in user-facing docs) via 13 language adapters; pre-push runs **Gate M + Gate M2 + Gate M3 + Delphi code-walkthrough validator**. Zero-tolerance policy per `QUALITY-GATES-CODE-OF-CONDUCT.md` — `--no-verify` strictly prohibited.
+Git quality gates: pre-commit runs **12 numbered gates** (Gate 0–11) plus Gate 12 (File Hygiene, warning-only) via 13 language adapters; pre-push runs **8 gates**: Gate 10 (Build Integrity), Gate M (TS mutation), Gate M-Python, M-Go, M-Java, M-Kotlin (multi-lang mutation), Gate M2 (Mock Density, WARNING-only), Gate ML (Mock Layering), Gate UI (UI Sprint Gates), Gate MW (Code Walkthrough), and Gate S (Sprint Flow). Zero-tolerance policy per `QUALITY-GATES-CODE-OF-CONDUCT.md` — `--no-verify` strictly prohibited.
 
 ## STRUCTURE
 ```
@@ -46,7 +46,7 @@ githooks/
 
 ## GATES
 
-### Pre-commit (10 numbered gates)
+### Pre-commit (12 numbered gates)
 
 | Gate | Name | Tool / Source | Block on |
 |------|------|---------------|----------|
@@ -59,18 +59,28 @@ githooks/
 | 6 | Architecture + Boy Scout | `.archlint.yaml` + `../src/principles/boy-scout.ts` | New warnings on modified files |
 | 7 | IaC Security | checkov / hadolint / kube-score / tflint | High-severity finding |
 | 8 | Secret Scanning | gitleaks (`.gitleaks.toml`) | Any leaked secret |
-| 9 | Semgrep SAST | semgrep ruleset | High-severity finding |
+| 9 | Build Integrity | tsc + npm pack + import check | Build/compilation failure |
+| 10 | SAST Security | semgrep ruleset | High-severity finding |
+| 11 | Sprint Flow | sprint-gate.sh | Sprint compliance violation |
+| 12 | File Hygiene | gate-12-file-hygiene.sh | WARNING-only (conflict markers, YAML/JSON syntax block) |
 
 > The README/docs/CAPABILITIES.md "6 Gates" framing is a conceptual grouping (CodeQ, Complexity, Principles, Tests, Architecture, Security) over these 10 script-level gates. See root `AGENTS.md` → "Known Drift" #1.
 
-### Pre-push (Gate M / M2 / M3 + walkthrough)
+### Pre-push (8 gates)
 
 | Gate | Name | Source | Block on |
 |------|------|--------|----------|
-| M | Incremental Mutation | `../src/mutation/gate-m.ts` (Stryker, `stryker.prepush.conf.json`) | Mutation score < threshold (TS only) |
-| M2 | Mock Density Check | inline in `pre-push` (keyword scan: vi.mock, jest.mock, mockResolvedValue, MagicMock, `.patch(`, gomock, EXPECT, ...) | >30% mock density without `// @mock-justified: <reason>` (≥10 chars). Phase 1: WARNING only. Configurable via `.mockpolicyrc`. |
-| M3 | Mock Layering Policy | `../src/mock-policy/gate-m3.ts` | Per-layer mock policy violation when `severity=error` |
-| Delphi | Code-walkthrough validator | reads `.code-walkthrough-result.json` | File missing, OR commit hash stale vs HEAD |
+| 10 | Build Integrity | tsc + npm pack | Build/compilation failure |
+| M | Incremental Mutation (TS) | `../src/mutation/gate-m.ts` (Stryker, `stryker.prepush.conf.json`) | Mutation score < threshold |
+| M-Python | Incremental Mutation (Python) | inline in pre-push | Mutation score < threshold |
+| M-Go | Incremental Mutation (Go) | inline in pre-push | Mutation score < threshold |
+| M-Java | Incremental Mutation (Java) | inline in pre-push | Mutation score < threshold |
+| M-Kotlin | Incremental Mutation (Kotlin) | inline in pre-push | Mutation score < threshold |
+| M2 | Mock Density | inline in `pre-push` (keyword scan: vi.mock, jest.mock, etc.) | WARNING only (>30% mock density without `@mock-justified`) |
+| ML | Mock Layering Policy | `../src/mock-policy/gate-m3.ts` | Per-layer mock policy violation when `severity=error` |
+| UI | UI Sprint Quality Gates | inline in pre-push | UI regression or missing UI review |
+| MW | Code-walkthrough validator | reads `.code-walkthrough-result.json` | File missing, OR commit hash stale vs HEAD |
+| S | Sprint Flow Enforcement | sprint-gate.sh | specification.yaml compliance |
 
 Pre-push hard limits: max **20 files** or **500 LOC** per push. Code-walkthrough skipped on main/master pushes (by design). All pre-push runs write a JSON journal under `.xp-gate/reports/pre-push/<UTC-timestamp>.json`.
 

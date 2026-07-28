@@ -6,9 +6,9 @@
 **Version:** 0.18.1.0
 
 ## OVERVIEW
-XP-Gate — deterministic git quality gates + AI-driven multi-expert review (Delphi) + Sprint Flow pipeline (6 phases: PREP, DESIGN, BUILD, VERIFY, SHIP, CLOSE) + npm zero-install distribution + cross-platform plugin system (Claude Code / OpenCode / Qoder). Pre-commit runs **10 numbered gates (Gate 0–9)** at the script level, conceptually grouped as **6 categories** in user-facing docs (README, docs/CAPABILITIES.md). Pre-push runs **3 mutation/mock gates (M, M2, M3) + Delphi code-walkthrough**. Implements 14 Clean Code/SOLID rules across 9 language adapters (TypeScript engine), 13 shell adapters (gate routing), Boy Scout Rule baseline enforcement, test-specification alignment, mock policy enforcement, and incremental mutation testing.
+XP-Gate — deterministic git quality gates + AI-driven multi-expert review (Delphi) + Sprint Flow pipeline (6 phases: PREP, DESIGN, BUILD, VERIFY, SHIP, CLOSE) + npm zero-install distribution + cross-platform plugin system (Claude Code / OpenCode / Qoder). Pre-commit runs **12 numbered gates (Gate 0–11) plus Gate 12 (File Hygiene, warning-only)**. Pre-push runs **8 gates: Gate 10 (Build Integrity), Gate M/M-Python/M-Go/M-Java/M-Kotlin (Mutation), Gate M2 (Mock Density, WARNING), Gate ML (Mock Layering), Gate UI (UI Sprint Gates), Gate MW (Code Walkthrough), and Gate S (Sprint Flow)**. Implements 14 Clean Code/SOLID rules across 9 language adapters (TypeScript engine), 13 shell adapters (gate routing), Boy Scout Rule baseline enforcement, test-specification alignment, mock policy enforcement, and incremental mutation testing.
 
-> **Doc-vs-script drift, intentional:** README/docs/CAPABILITIES.md describe "6 Gates" as a conceptual grouping; the actual `githooks/pre-commit` script runs Gate 0–9. Tracked as a doc-alignment issue, not a bug.
+> **Doc-vs-script drift resolved in v0.18.2:** Gate counts in docs, script comments, and AGENTS.md files are now consistent: pre-commit = 12 numbered gates (0–11 + 12 file hygiene warning-only), pre-push = 8 gates.
 >
 > **v0.9.2**: Windows Git Bash compatibility — `detect_os_env()`, `head→sed` migration (46 changes), `[[ ]]→[ ]` POSIX conditionals (47 changes), winget install hints, Windows CI job. All 37 githooks `.sh` files are now `head`-free.
 
