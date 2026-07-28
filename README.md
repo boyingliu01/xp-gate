@@ -1,6 +1,8 @@
 # XP-Gate
 
-> **极限编程 (XP) 的 AI 时代实现 — 三个反馈环闭合 AI 驱动开发的质量缺口**
+> **AI 写 100 行代码只需 5 秒，但判断这 100 行对不对仍然要人工花 30 分钟。XP-Gate 把这 30 分钟压缩回秒级。**
+>
+> 三个机器驱动的反馈环，实现极限编程在 AI 时代的速度。
 
 [![Delphi](https://img.shields.io/badge/AI%20Review-Delphi%20≥90%25-blue)](./skills/delphi-review)
 [![Sprint Flow](https://img.shields.io/badge/Sprint%20Flow-6%20Phases-purple)](./skills/sprint-flow)
@@ -54,7 +56,7 @@ AI 辅助编程把这个问题彻底改变了。AI 写完一段代码的速度�
 ├──────────────┼──────────────────────┼────────────────────────────┤
 │ 确定性        │ 确定性 + Delphi 评审  │ 数据驱动的                    │
 │ 秒级反馈      │ 分钟级反馈 (2 次提交)  │ 迭代级反馈 (每 Sprint)        │
-│ 90% 闭合      │ ~80% 闭合            │ ~55% 闭合                   │
+│ 约 90% 闭合   │ 约 80% 闭合           │ 约 55% 闭合                  │
 └──────────────┴──────────────────────┴────────────────────────────┘
 ```
 
@@ -68,9 +70,12 @@ AI 辅助编程把这个问题彻底改变了。AI 写完一段代码的速度�
 - **Gate 4**: Clean Code + SOLID — 14 条确定性规则
 - **Gate 5**: 单元测试 + 覆盖率 + 文件配对 — 测试写了且写对了
 - **Gate 6**: 架构合规 — 不破坏分层
-- **Gate 7-10**: 安全扫描 — 不泄露密钥、不引入漏洞
+- **Gate 7**: IaC 安全扫描 — 基础设施即代码的漏洞
+- **Gate 8**: 密钥扫描 — 不泄露密钥
+- **Gate 9**: 构建完整性 — TypeScript 编译、打包、import 检查
+- **Gate 10**: SAST 安全扫描 — 代码层安全漏洞
 
-这个环闭合了 90%。目标：100%。
+这个环闭合了约 90%。目标：100%。
 
 ### 环 2：需求层 — "这段代码做对了吗？"
 
@@ -78,7 +83,7 @@ AI 辅助编程把这个问题彻底改变了。AI 写完一段代码的速度�
 
 **第一步（AI 参与）：Delphi 多专家匿名评审**
 
-3 位不同厂家的国产模型匿名评审需求和设计，必须 ≥90% 一致才能通过。这一步在**写代码之前**完成，回答"需求是否合理"。基于 RAND 公司 1948 年的 Delphi 方法论，消除锚定效应和单一视角盲区。
+3 位不同厂家的国产模型匿名评审需求和设计，必须 ≥90% 一致才能通过。这一步在**写代码之前**完成，回答"需求是否合理"。基于 RAND 公司 1950 年代开发的 Delphi 方法论，消除锚定效应和单一视角盲区。
 
 **第二步（确定性）：`test-alignment` 引擎**
 
@@ -115,8 +120,8 @@ xp-gate init
 ```
 
 npm 包提供：
-- **Git Hooks**（pre-commit Gate 0–9 + pre-push Gate M/M2/M3/MW）— 每次提交/推送自动执行
-- **CLI 管理命令**（doctor, baseline, audit, check-alignment 等 15+ 子命令）
+- **Git Hooks**（pre-commit 12 道门禁 + pre-push 8 道门禁）— 每次提交/推送自动执行
+- **CLI 管理命令**（doctor, baseline, audit, check-alignment 等 20+ 子命令）
 - **Skill 下载器**（`xp-gate install-skill` 按版本下载 SKILL.md）
 
 ### 第二步：安装 IDE 插件（推荐 — AI 对话内质量工具 + 技能自动加载）
@@ -178,16 +183,20 @@ Phase 1       Phase 2       Phase 3       Phase 4       Phase 5       Phase 6
 PREP     →    DESIGN   →    BUILD    →    VERIFY   →    SHIP     →    CLOSE
    │             │             │             │             │             │
    ▼             ▼             ▼             ▼             ▼             ▼
-worktree      brainstorm    ralph-loop    code-walk     PR + merge     UAT +
-+ sizing      + autoplan    + TDD         + QA + retro  + deploy       cleanup
-              + delphi      + test-align  + learn       + canary
+worktree      grill-with    ralph-loop    code-walk     PR + merge     UAT +
++ sizing      -docs → R1    + TDD         + QA + retro  + deploy       cleanup
+              → batch-      + test-align  + learn       + canary
+              grill-me
+              → R2 delphi
               (HARD-GATE)
 ```
+
+> v0.18.0+：Phase 2 DESIGN 使用 grill-with-docs（需求梳理）→ batch-grill-me（批量决策）→ delphi-review 多轮评审。旧版文档中提及的 brainstorming/autoplan 是 v0.17.x 及之前的 Phase 2 流程。
 
 | 阶段 | 名称 | 关键动作 | 对应反馈环 |
 |------|------|---------|-----------|
 | 1/6 | PREP | worktree 隔离 + 规模评估 | — |
-| 2/6 | DESIGN | brainstorming → autoplan → delphi-review (HARD-GATE ≥90% 共识) | 环 2（需求评审） |
+| 2/6 | DESIGN | grill-with-docs → R1 requirements → batch-grill-me → R2 delphi-review (HARD-GATE ≥90% 共识) | 环 2（需求评审） |
 | 3/6 | BUILD | ralph-loop (默认) + TDD + test-alignment | 环 1（代码质量） + 环 2（测试对齐） |
 | 4/6 | VERIFY | code-walkthrough + QA + benchmark + retro + learn | 环 1（质量验证） + 环 3（复盘数据） |
 | 5/6 | SHIP | PR + merge + deploy + canary | — |
@@ -210,9 +219,9 @@ xp-gate sprint-status --watch
 
 ## 质量门禁详解
 
-每次 `git commit` 自动执行 13 道门禁 (Gate 0-12)，每次 `git push` 自动执行 Gate M/MD/ML/MW/MS：
+每次 `git commit` 自动执行 12 道门禁 (Gate 0-11)，每次 `git push` 自动执行 8 道门禁：
 
-### Pre-commit（13 道门禁）
+### Pre-commit（12 道门禁）
 
 | 门禁 | 检查内容 | 失败行为 |
 |------|---------|---------|
@@ -227,18 +236,22 @@ xp-gate sprint-status --watch
 | Gate 8 | 密钥扫描 (gitleaks) | 阻断 |
 | Gate 9 | 构建完整性 (tsc + npm pack + import check) | 阻断 |
 | Gate 10 | SAST 安全扫描 (semgrep) | 阻断 |
-| Gate 11 | Sprint Flow 执行 | 阻断 |
-| Gate 12 | 文件卫生 (conflict markers, YAML/JSON 语法, trailing whitespace) | 阻断/警告 |
+| Gate 11 | Sprint Flow 执行 + 文件卫生 | 阻断 |
 
-### Pre-push
+### Pre-push（8 道门禁）
 
 | 门禁 | 检查内容 | 失败行为 |
 |------|---------|---------|
-| Gate M | 增量变异测试 (Stryker, TS only, 默认 60%/关键路径 80%) | 阻断 |
-| Gate MD | Mock 密度扫描 (≤30% 或带 `@mock-justified`) | 阻断 |
-| Gate ML | Mock 分层策略 | 阻断 |
+| Gate 10 | 构建完整性 (推送到远程前的最后编译检查) | 阻断 |
+| Gate M | 增量变异测试 (Stryker, TS, 默认 60%/关键路径 80%) | 阻断 |
+| Gate M-Python/Go/Java/Kotlin | 多语言变异测试（按项目语言自动选择） | 阻断 |
+| Gate M2 (Mock Density) | Mock 密度扫描 (≤30% 或带 `@mock-justified`) — **警告，不阻断** | 警告 |
+| Gate ML (Mock Layering) | Mock 分层策略 | 阻断 |
+| Gate UI | UI Sprint 质量门禁 (UI 相关变更时) | 阻断 |
 | Gate MW | 代码走查 (`.code-walkthrough-result.json` 必须存在且未过期) | 阻断 |
-| Gate MS | Sprint Flow 执行 | 阻断 |
+| Gate S | Sprint Flow 执行 | 阻断 |
+
+> **Pre-push 大小限制已移除**：AI 工作流产生大体积累积推送，文件数量不是质量信号。预推送门禁强制执行突变、模拟和代码走查，但不限制推送大小。
 
 > **设计原则：工具不可用 = SKIP，不阻断。** 某语言的工具装不上，该语言的检查自动跳过，不影响其他语言。
 > **`--no-verify` 严格禁止。** 绕过门禁等于放弃反馈环。
@@ -247,7 +260,7 @@ xp-gate sprint-status --watch
 
 ## Delphi 多专家评审
 
-作为**环 2 的第一步**，Delphi 评审在写代码之前就验证需求和设计。基于 RAND 公司 1948 年的 Delphi 方法论：
+作为**环 2 的第一步**，Delphi 评审在写代码之前就验证需求和设计。基于 RAND 公司 1950 年代开发的 Delphi 方法论：
 
 ### 为什么是 Delphi？
 
@@ -281,13 +294,7 @@ specification.yaml
 
 ### 模型选择（强制国产 + 多厂家交叉）
 
-| 专家 | 推荐模型 | 备选 |
-|------|---------|------|
-| Expert A (架构) | deepseek-v4-pro | qwen3.6-plus, glm-5.1 |
-| Expert B (技术) | kimi-k2.6 | deepseek-v4-pro, minimax-m2.7 |
-| Expert C (可行性) | qwen3.6-plus | kimi-k2.6, glm-5.1 |
-
-**关键原则：** 三个专家必须来自至少 2 家不同厂家。
+模型配置通过 `.delphi-config.json` 管理，推荐使用国产模型（如 DeepSeek、Qwen、GLM、Kimi、MiniMax 等）。**三个专家必须来自至少 2 家不同厂家**，避免单一模型的系统性盲区。具体模型名称以你的服务商 API 文档为准，配置示例见下方[配置说明](#配置说明)。
 
 ---
 
@@ -311,35 +318,44 @@ XP-Gate 支持 **12 种语言** + IaC，通过适配器自动检测和路由：
 | PowerShell | `adapter-powershell.sh` | PSScriptAnalyzer | Pester | lizard |
 | IaC | `adapter-iac.sh` | checkov/hadolint/kube-score/tflint | N/A | N/A |
 
+> \* 所有编程语言统一使用 [lizard](https://github.com/terryyin/lizard) 进行圈复杂度分析。
+
 ---
 
 ## AI 技能集成
 
-XP-Gate 集成 15+ 个专业 AI 技能，按 Sprint Flow 阶段排列：
+XP-Gate 内置 12 个专业 AI 技能，另在 Sprint Flow 中集成了多个外部技能。以下按 Sprint Flow 阶段排列：
 
-| 技能 | 用途 | 触发时机 |
-|------|------|---------|
-| brainstorming | 需求探索、方案设计，自动创建 CONTEXT.md + ADR | Phase 2 |
-| to-issues | 垂直切片 Issue 拆分 | Phase 2 |
-| delphi-review | 多专家匿名共识评审 | Phase 2, 4 |
-| ralph-loop | REQ 级迭代构建（默认模式），Token 节约 40-67% | Phase 3 |
-| test-driven-development | RED → GREEN → REFACTOR 循环 | Phase 3 |
-| test-specification-alignment | 测试对齐验证 | Phase 3, 4 |
-| qa | Web QA 测试 | Phase 4 |
-| design-review | 视觉审计 | Phase 4 |
-| benchmark | 性能基准 | Phase 4 |
-| systematic-debugging | 根因调试 | Phase 3-5 |
-| retro | 工程复盘 | Phase 4 |
-| learn | 经验教训总结 | Phase 4, 每个 REQ 完成时 |
-| finishing-a-development-branch | 分支收尾决策 | Phase 5-6 |
-| cso | 安全审计 | 定期/发布前 |
-| improve-codebase-architecture | 架构健康检查 | 定期 |
+| 技能 | 来源 | 用途 | 触发时机 |
+|------|------|------|---------|
+| delphi-review | 内置 | 多专家匿名共识评审 | Phase 2, 4 |
+| sprint-flow | 内置 | 6 阶段全流程编排 | — |
+| ralph-loop | 内置 | REQ 级迭代构建（默认模式） | Phase 3 |
+| test-driven-development | 内置 | RED → GREEN → REFACTOR 循环 | Phase 3 |
+| test-specification-alignment | 内置 | 测试对齐验证 | Phase 3, 4 |
+| to-issues | 内置 | 垂直切片 Issue 拆分 | Phase 2 |
+| improve-codebase-architecture | 内置 | 架构健康检查 | 定期 |
+| verify-before-completion | 内置 | 变更完成前验证 | Phase 4 |
+| requesting-code-review | 内置 | 代码评审请求 | Phase 4 |
+| receiving-code-review | 内置 | 处理评审反馈 | Phase 4 |
+| systematic-debugging | 内置 | 根因调试 | Phase 3-5 |
+| brainstorming | 内置 | 需求探索、方案设计 | Phase 2 |
+| qa | 外部 (gstack) | Web QA 测试 | Phase 4 |
+| design-review | 外部 (gstack) | 视觉审计 | Phase 4 |
+| benchmark | 外部 (gstack) | 性能基准 | Phase 4 |
+| retro | 外部 (gstack) | 工程复盘 | Phase 4 |
+| learn | 外部 (gstack) | 经验教训总结 | Phase 4 |
+| cso | 外部 (gstack) | 安全审计 | 定期/发布前 |
+
+> 内置技能通过 `xp-gate install-skill <name>` 安装。外部技能由 Sprint Flow 工作流自动调用，无需单独安装。
 
 ---
 
 ## 配置说明
 
 ### .principlesrc（原则检查配置）
+
+在项目根目录创建，Gate 4 读取此文件：
 
 ```json
 {
@@ -354,7 +370,9 @@ XP-Gate 集成 15+ 个专业 AI 技能，按 Sprint Flow 阶段排列：
 }
 ```
 
-### architecture.yaml（架构规则）
+### architecture.yaml（架构规则，共 14 条规则 ARCH-001 至 ARCH-014）
+
+在项目根目录创建，Gate 6 读取此文件。示例：
 
 ```yaml
 rules:
@@ -364,23 +382,29 @@ rules:
     severity: error
   - id: ARCH-002
     name: 依赖方向检查
-    description: 内层不依赖外层
+    description: 禁止反向依赖（内层不依赖外层）
     severity: error
 ```
 
+完整规则列表见项目根目录的 `architecture.yaml`。
+
 ### .delphi-config.json（Delphi 评审配置）
+
+在项目根目录创建，定义评审专家和共识参数。模型名称以你的服务商 API 文档为准：
 
 ```json
 {
   "experts": [
-    { "id": "A", "role": "architecture", "model": "deepseek-v4-pro" },
-    { "id": "B", "role": "implementation", "model": "kimi-k2.6" }
+    { "id": "A", "role": "architecture", "model": "deepseek/deepseek-chat" },
+    { "id": "B", "role": "implementation", "model": "bailian/qwen-plus" },
+    { "id": "C", "role": "feasibility", "model": "zhipu/glm-4" }
   ],
   "consensus_threshold": 0.90,
-  "max_rounds": 5,
-  "timeout": 3600
+  "max_rounds": 5
 }
 ```
+
+> 配置示例包含 3 位专家、2 家不同厂家（deepseek + bailian + zhipu），满足跨厂家要求。2 专家配置（默认）适用于代码变更和简单设计评审。
 
 ---
 
@@ -399,8 +423,8 @@ bash githooks/verify.sh
 - 所有提交必须通过 pre-commit 门禁
 - 禁止 `--no-verify`
 - 禁止 `as any`、`@ts-ignore`、空 catch 块
-- 每次推送 ≤20 个文件或 ≤500 LOC
 - 修改文件的警告数持平或下降（童子军规则）
+- Pre-push 大小限制已移除 — AI 工作流产生大体积累积推送，数量不是质量信号
 
 ### 测试规范
 
@@ -419,7 +443,7 @@ describe('Feature', () => {
 
 ## 许可证
 
-MIT License. Copyright (c) 2024-2025 XP-Gate Contributors.
+MIT License. Copyright (c) 2024-2026 XP-Gate Contributors.
 
 ---
 
