@@ -90,7 +90,7 @@ src/npm-package/
 - Do NOT edit `adapters/` here directly — edit `../../githooks/adapters/` and resync.
 - Do NOT skip `scripts/sync-package-content.js` in the `prepack` flow. Published artifacts will lose the skill/plugin bundle.
 - Do NOT hand-edit `package.json` `version`. Run `node scripts/sync-version.cjs` against the repo root `VERSION`.
-- Do NOT introduce a new CLI subcommand without also updating: (a) `bin/xp-gate.js` switch, (b) this file's CLI table, (c) the root `AGENTS.md` CLI table, (d) `README.md`, (e) `MANIFEST.md`.
+- Do NOT introduce a new CLI subcommand without also updating: (a) `bin/xp-gate.js` switch, (b) this file's CLI table, (c) the root `AGENTS.md` CLI table, (d) `README.md`, (e) `docs/MANIFEST.md`.
 
 ## UNIQUE STYLES
 - **Single source-of-truth for hooks/adapters/skills**: this package re-bundles from sibling directories, never duplicates content in version control beyond the necessary mirror.
