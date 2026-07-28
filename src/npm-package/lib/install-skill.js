@@ -30,10 +30,18 @@ function getCliVersion() {
 }
 
 const SKILLS_REGISTRY = {
-  'sprint-flow': { repo: 'boyingliu01/xp-gate', path: 'skills/sprint-flow' },
+  'admin-template-guidelines': { repo: 'boyingliu01/xp-gate', path: 'skills/admin-template-guidelines' },
+  'batch-grill-me': { repo: 'boyingliu01/xp-gate', path: 'skills/batch-grill-me' },
   'delphi-review': { repo: 'boyingliu01/xp-gate', path: 'skills/delphi-review' },
-  'test-spec': { repo: 'boyingliu01/xp-gate', path: 'skills/test-spec' },
-  'ralph-loop': { repo: 'boyingliu01/xp-gate', path: 'skills/ralph-loop' }
+  'domain-modeling': { repo: 'boyingliu01/xp-gate', path: 'skills/domain-modeling' },
+  'grill-with-docs': { repo: 'boyingliu01/xp-gate', path: 'skills/grill-with-docs' },
+  'grilling': { repo: 'boyingliu01/xp-gate', path: 'skills/grilling' },
+  'improve-codebase-architecture': { repo: 'boyingliu01/xp-gate', path: 'skills/improve-codebase-architecture' },
+  'ralph-loop': { repo: 'boyingliu01/xp-gate', path: 'skills/ralph-loop' },
+  'sprint-flow': { repo: 'boyingliu01/xp-gate', path: 'skills/sprint-flow' },
+  'test-driven-development': { repo: 'boyingliu01/xp-gate', path: 'skills/test-driven-development' },
+  'test-specification-alignment': { repo: 'boyingliu01/xp-gate', path: 'skills/test-specification-alignment' },
+  'to-issues': { repo: 'boyingliu01/xp-gate', path: 'skills/to-issues' }
 };
 
 async function installSkill(name, options = {}) {
