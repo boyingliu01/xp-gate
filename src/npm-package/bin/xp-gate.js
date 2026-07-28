@@ -28,6 +28,46 @@ function handleUIReview() {
   }
 }
 
+async function runAlignmentCheck(subargs) {
+  const specIdx = subargs.indexOf('--spec');
+  const specPath = specIdx >= 0 ? subargs[specIdx + 1] : path.join(process.cwd(), 'specification.yaml');
+
+  const testsIdx = subargs.indexOf('--tests');
+  const testDirs = testsIdx >= 0 ? [subargs[testsIdx + 1]] : undefined;
+
+  const outputIdx = subargs.indexOf('--output');
+  const outputPath = outputIdx >= 0 ? subargs[outputIdx + 1] : undefined;
+
+  const jsonMode = subargs.includes('--json');
+
+  // Load TS module via tsx
+  const { execSync } = require('child_process');
+  const alignmentPath = path.join(__dirname, '..', 'lib', 'test-alignment.ts');
+
+  try {
+    execSync(`npx tsx -e "
+      import { runFullAlignment } from '${alignmentPath}';
+      const report = runFullAlignment({
+        specPath: '${specPath}',
+        testDirs: ${JSON.stringify(testDirs || null)},
+        headCommit: require('child_process').execSync('git rev-parse HEAD 2>/dev/null || echo unknown').toString().trim(),
+        outputPath: ${outputPath ? `'${outputPath}'` : 'undefined'},
+      });
+      if (${jsonMode}) {
+        console.log(JSON.stringify(report, null, 2));
+      } else {
+        console.log('Status:', report.alignment_status);
+        console.log('Score:', report.score);
+        console.log('Misaligned:', report.misaligned_tests.length);
+      }
+      process.exit(report.alignment_status === 'PASS' ? 0 : 1);
+    "`, { stdio: 'inherit' });
+  } catch (err) {
+    return 1;
+  }
+  return 0;
+}
+
 const COMMANDS = {
   'init': {
     description: 'Initialize xp-gate (use --global for all projects)',
@@ -130,6 +170,11 @@ const COMMANDS = {
     description: 'Run architecture validation (Gate 6 standalone, uses architecture.yaml)',
     run: subargs => arch(subargs).then(code => process.exit(code)),
     usage: 'xp-gate arch [--config <path>]'
+  },
+  'check-alignment': {
+    description: 'Run test-specification alignment check (deterministic, no LLM)',
+    run: subargs => runAlignmentCheck(subargs).then(code => process.exit(code)),
+    usage: 'xp-gate check-alignment [--spec <path>] [--tests <dir>] [--json] [--output <path>]'
   },
   'upgrade': {
     description: 'Check for xp-gate updates (--preview for JSON, --apply to upgrade)',
