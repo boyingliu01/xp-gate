@@ -1,0 +1,70 @@
+{
+  "version": "2.0.0",
+  "date": "2026-07-28T09:30:00+08:00",
+  "mode": "daily",
+  "scope": "full",
+  "diff_mode": false,
+  "phases_run": [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14],
+  "attack_surface": {
+    "code": {
+      "public_endpoints": 0, "authenticated": 0, "admin": 0,
+      "api": 0, "uploads": 0, "integrations": 1,
+      "background_jobs": 0, "websockets": 0
+    },
+    "infrastructure": {
+      "ci_workflows": 5, "webhook_receivers": 0,
+      "container_configs": 0, "iac_configs": 0,
+      "deploy_targets": 1, "secret_management": "github_secrets"
+    }
+  },
+  "findings": [
+    {
+      "id": 1,
+      "severity": "HIGH",
+      "confidence": 9,
+      "status": "VERIFIED",
+      "phase": 3,
+      "phase_name": "Dependency Supply Chain",
+      "category": "Supply Chain",
+      "title": "Vitest UI Server arbitrary file read (CVE CVSS 9.8, dev-only)",
+      "file": "package.json",
+      "description": "Vitest direct devDependency has critical CVE when UI server is listening. Requires explicitly running vitest --ui, dev-only.",
+      "exploit_scenario": "Attacker on same network as dev running vitest --ui could read arbitrary files via path traversal.",
+      "impact": "File disclosure on developer workstation during local dev.",
+      "recommendation": "Update vitest to patched version, or disallow UI server bind to 0.0.0.0.",
+      "verification": "self-verified"
+    },
+    {
+      "id": 2,
+      "severity": "MEDIUM",
+      "confidence": 9,
+      "status": "VERIFIED",
+      "phase": 3,
+      "phase_name": "Dependency Supply Chain",
+      "category": "Supply Chain",
+      "title": "js-yaml merge-key chain DoS (CVE CVSS 7.5, direct dependency)",
+      "file": "package.json",
+      "description": "js-yaml@4.2.0 has quadratic CPU consumption via YAML merge-key chains. Used to parse architecture.yaml, specification.yaml etc.",
+      "exploit_scenario": "Maliciously crafted YAML with deep merge-key chains causes CPU exhaustion during xp-gate architecture validation.",
+      "impact": "DoS via crafted YAML input during git hooks.",
+      "recommendation": "Update to js-yaml@4.3.0+.",
+      "verification": "self-verified"
+    }
+  ],
+  "supply_chain_summary": {
+    "direct_deps": 4, "transitive_deps": 500,
+    "critical_cves": 1, "high_cves": 1,
+    "install_scripts": 0, "lockfile_present": true, "lockfile_tracked": true,
+    "tools_skipped": []
+  },
+  "filter_stats": {
+    "candidates_scanned": 15, "hard_exclusion_filtered": 12,
+    "confidence_gate_filtered": 1, "verification_filtered": 0, "reported": 2
+  },
+  "totals": { "critical": 0, "high": 1, "medium": 1, "tentative": 0 },
+  "trend": {
+    "prior_report_date": null,
+    "resolved": 0, "persistent": 0, "new": 2,
+    "direction": "first_run"
+  }
+}
