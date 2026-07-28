@@ -2612,7 +2612,22 @@ ENDJSON
   echo "  History saved: $HISTORY_FILE"
   echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
   echo ""
+  # AI-friendly common footer: tells LLM agents how to fix issues instead of bypassing
+  echo "  ── AI AGENT DIRECTIVE ──"
+  echo "  If any gate FAILED above:"
+  echo "    - Each error includes a file path and rule identifier"
+  echo "    - Fix each issue, then re-run: git commit"
+  echo "    - Do NOT use --no-verify — bypassed commits block sprint progression"
+  echo "  ─────────────────────────"
+  echo ""
 }
+
+# Post-commit bypass marker: write a sentinel file in .git/ directory
+# that the post-commit hook checks to detect --no-verify bypasses
+_wp_marker="$(git rev-parse --git-dir 2>/dev/null)/xp-gate-precommit-marker"
+if [ -n "$_wp_marker" ] && [ "$_wp_marker" != "/xp-gate-precommit-marker" ]; then
+  echo "$(date +%s)" > "$_wp_marker"
+fi
 
 generate_quality_report
 
