@@ -249,7 +249,7 @@ describe('install-skill', () => {
     mockHttpsGet({ statusCode: 200, body: '# X' });
 
     const { installSkill } = require('../install-skill');
-    await installSkill('test-spec', { verbose: true });
+    await installSkill('test-driven-development', { verbose: true });
 
     expect(console.log).toHaveBeenCalledWith(expect.stringContaining('Downloading '));
     expect(console.log).toHaveBeenCalledWith(expect.stringContaining('Installed to '));
@@ -320,10 +320,10 @@ describe('install-skill', () => {
     mockHttpsGet({ errorAfter: true });
 
     const { installSkill } = require('../install-skill');
-    const result = await installSkill('test-spec');
+    const result = await installSkill('test-driven-development');
 
     expect(result).toBe(1);
     expect(console.warn).not.toHaveBeenCalled();
-    expect(console.error).toHaveBeenCalledWith('Error: Failed to download test-spec');
+    expect(console.error).toHaveBeenCalledWith('Error: Failed to download test-driven-development');
   });
 });
