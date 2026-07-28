@@ -496,4 +496,109 @@ async function handlePhaseTransition(args = []) {
   }
 }
 
-module.exports = { handlePhaseTransition, renderDashboard, PHASE_NAMES, validateEvidence };
+/**
+ * Read-only evidence check for a given phase. Validates evidence without modifying sprint state.
+ * D3 (Unify Evidence Validation): replaces sprint-gate.sh inline JSON parsing.
+ *
+ * @param {number} phase - Phase number (1-6)
+ * @param {string} projectDir - Project root directory
+ * @returns {{ ok: boolean, errors: string[], warnings: string[] }}
+ */
+function checkEvidence(phase, projectDir) {
+  return validateEvidence(phase, projectDir);
+}
+
+/**
+ * Validate .code-walkthrough-result.json for code walkthrough mode.
+ * Ported from githooks/pre-push Gate MW inline jq logic.
+ *
+ * @param {string} projectDir - Project root directory
+ * @returns {{ ok: boolean, errors: string[], warnings: string[] }}
+ */
+function checkWalkthrough(projectDir) {
+  const walkthroughFile = path.join(projectDir, '.code-walkthrough-result.json');
+  const errors = [];
+  const warnings = [];
+
+  if (!fs.existsSync(walkthroughFile)) {
+    errors.push('.code-walkthrough-result.json not found — run delphi-review --mode code-walkthrough before push');
+    return { ok: false, errors, warnings };
+  }
+
+  let data;
+  try {
+    data = JSON.parse(fs.readFileSync(walkthroughFile, 'utf8'));
+  } catch {
+    errors.push('.code-walkthrough-result.json is malformed JSON');
+    return { ok: false, errors, warnings };
+  }
+
+  // Check verdict
+  if (data.verdict !== 'APPROVED') {
+    errors.push(`Code walkthrough verdict is "${data.verdict}" — must be APPROVED`);
+    return { ok: false, errors, warnings };
+  }
+
+  // Check commit is ancestor of HEAD
+  if (data.commit) {
+    try {
+      execSync(`git merge-base --is-ancestor ${data.commit} HEAD`, {
+        cwd: projectDir, stdio: 'pipe',
+      });
+    } catch {
+      errors.push(`Code walkthrough commit ${data.commit} is not an ancestor of HEAD`);
+      return { ok: false, errors, warnings };
+    }
+  }
+
+  // Check expiration
+  if (data.expires) {
+    const expiry = new Date(data.expires).getTime();
+    if (Date.now() > expiry) {
+      errors.push(`Code walkthrough expired at ${data.expires}`);
+      return { ok: false, errors, warnings };
+    }
+  }
+
+  return { ok: true, errors, warnings };
+}
+
+/**
+ * D8 Layer 3: Check bypass audit log for any --no-verify bypassed commits on the current branch.
+ * Blocks phase transition if bypassed commits exist.
+ *
+ * @param {string} projectDir - Project root directory
+ * @returns {{ ok: boolean, bypassedCommits: string[] }}
+ */
+function checkBypassAudit(projectDir) {
+  const auditFile = path.join(projectDir, '.xp-gate', 'bypass-audit.jsonl');
+  const bypassedCommits = [];
+
+  if (!fs.existsSync(auditFile)) {
+    return { ok: true, bypassedCommits };
+  }
+
+  const lines = fs.readFileSync(auditFile, 'utf8').trim().split('\n').filter(Boolean);
+  for (const line of lines) {
+    try {
+      const entry = JSON.parse(line);
+      if (entry.type === 'precommit_bypass' && entry.commit) {
+        // Verify the commit is on the current branch
+        try {
+          execSync(`git merge-base --is-ancestor ${entry.commit} HEAD`, {
+            cwd: projectDir, stdio: 'pipe',
+          });
+          bypassedCommits.push(entry.commit);
+        } catch {
+          // Commit not on current branch — not relevant
+        }
+      }
+    } catch {
+      // Skip malformed lines
+    }
+  }
+
+  return { ok: bypassedCommits.length === 0, bypassedCommits };
+}
+
+module.exports = { handlePhaseTransition, renderDashboard, PHASE_NAMES, validateEvidence, checkEvidence, checkWalkthrough, checkBypassAudit };
