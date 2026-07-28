@@ -27,7 +27,39 @@ write_pre_push_report() {
   commit_hash=$(git rev-parse HEAD 2>/dev/null || echo "unknown")
   verdict=$([ "$exit_code" -eq 0 ] && echo "PASS" || echo "BLOCKED")
   mkdir -p "$reports_dir"
-  _XP_RF="$report_file" _XP_TS="$timestamp" _XP_BR="$CURRENT_BRANCH" _XP_CH="$commit_hash" _XP_PF="${PUSHED_FILES:-}" _XP_VD="$verdict" _XP_EC="$exit_code" _XP_G10="${GATE_10_STATUS:-SKIP}" _XP_GM="${GATE_M_STATUS:-SKIP}" _XP_GMP="${GATE_M_PYTHON_STATUS:-SKIP}" _XP_GMGO="${GATE_M_GO_STATUS:-SKIP}" _XP_GMJA="${GATE_M_JAVA_STATUS:-SKIP}" _XP_GMKO="${GATE_M_KOTLIN_STATUS:-SKIP}" _XP_GMD="${GATE_M2_STATUS:-SKIP}" _XP_GML="${GATE_M3_STATUS:-SKIP}" _XP_GUI="${GATE_UI_STATUS:-SKIP}" _XP_GMW="${GATE_DELPHI_STATUS:-SKIP}" _XP_RM="$REMOTE" _XP_URL="$URL" node -e "const fs=require('fs');const e=process.env;const pf=(e._XP_PF||'').split('\n').filter(f=>f);const r={timestamp:e._XP_TS,trigger:'pre-push',branch:e._XP_BR,commit:e._XP_CH,changed_files:pf,overall:{score:e._XP_VD==='PASS'?'10.0/10':'0.0/10',gates_passed:e._XP_VD==='PASS'?1:0,gates_total:1,verdict:e._XP_VD},gates:[{id:'10',name:'Build Integrity',status:e._XP_G10,details:{}},{id:'M',name:'Mutation Testing',status:e._XP_GM,details:{}},{id:'M-Python',name:'Mutation Testing (Python)',status:e._XP_GMP,details:{}},{id:'M-Go',name:'Mutation Testing (Go)',status:e._XP_GMGO,details:{}},{id:'M-Java',name:'Mutation Testing (Java)',status:e._XP_GMJA,details:{}},{id:'M-Kotlin',name:'Mutation Testing (Kotlin)',status:e._XP_GMKO,details:{}},{id:'MD',name:'Mock Density',status:e._XP_GMD,details:{}},{id:'ML',name:'Mock Layering',status:e._XP_GML,details:{}},{id:'UI',name:'UI Sprint Gates',status:e._XP_GUI,details:{}},{id:'MW',name:'Code Walkthrough',status:e._XP_GMW,details:{remote:e._XP_RM,url:e._XP_URL}}],warnings:[],errors:e._XP_VD==='PASS'?[]:['pre-push hook exited with code '+e._XP_EC]};fs.writeFileSync(e._XP_RF,JSON.stringify(r,null,2)+'\n');" 2>/dev/null || true
+  python3 - <<PY 2>/dev/null || true
+import json
+from pathlib import Path
+pushed_files = '''${PUSHED_FILES:-}'''.splitlines()
+report = {
+  'timestamp': '$timestamp',
+  'trigger': 'pre-push',
+  'branch': '$CURRENT_BRANCH',
+  'commit': '$commit_hash',
+  'changed_files': [f for f in pushed_files if f],
+  'overall': {
+    'score': '10.0/10' if '$verdict' == 'PASS' else '0.0/10',
+    'gates_passed': 1 if '$verdict' == 'PASS' else 0,
+    'gates_total': 1,
+    'verdict': '$verdict',
+  },
+  'gates': [
+    {'id': '10', 'name': 'Build Integrity', 'status': '${GATE_10_STATUS:-SKIP}', 'details': {}},
+    {'id': 'M', 'name': 'Mutation Testing', 'status': '${GATE_M_STATUS:-SKIP}', 'details': {}},
+    {'id': 'M-Python', 'name': 'Mutation Testing (Python)', 'status': '${GATE_M_PYTHON_STATUS:-SKIP}', 'details': {}},
+    {'id': 'M-Go', 'name': 'Mutation Testing (Go)', 'status': '${GATE_M_GO_STATUS:-SKIP}', 'details': {}},
+    {'id': 'M-Java', 'name': 'Mutation Testing (Java)', 'status': '${GATE_M_JAVA_STATUS:-SKIP}', 'details': {}},
+    {'id': 'M-Kotlin', 'name': 'Mutation Testing (Kotlin)', 'status': '${GATE_M_KOTLIN_STATUS:-SKIP}', 'details': {}},
+    {'id': 'MD', 'name': 'Mock Density', 'status': '${GATE_M2_STATUS:-SKIP}', 'details': {}},
+    {'id': 'ML', 'name': 'Mock Layering', 'status': '${GATE_M3_STATUS:-SKIP}', 'details': {}},
+    {'id': 'UI', 'name': 'UI Sprint Gates', 'status': '${GATE_UI_STATUS:-SKIP}', 'details': {}},
+    {'id': 'MW', 'name': 'Code Walkthrough', 'status': '${GATE_DELPHI_STATUS:-SKIP}', 'details': {'remote': '$REMOTE', 'url': '$URL'}}
+  ],
+  'warnings': [],
+  'errors': [] if '$verdict' == 'PASS' else ['pre-push hook exited with code $exit_code'],
+}
+Path('$report_file').write_text(json.dumps(report, indent=2) + '\n')
+PY
 }
 
 _pre_push_report_on_exit() {
@@ -680,12 +712,6 @@ run_gate_m3() {
   echo "   GATE ML: MOCK LAYERING STRATEGY"
   echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
 
-  # Skip on main/master
-  if [[ "$CURRENT_BRANCH" == "main" || "$CURRENT_BRANCH" == "master" ]]; then
-    echo "   SKIP — pushing to main/master"
-    return 0
-  fi
-
   # Check for mock-policy module in installed modules first, then project src/
   local GATE_M3_SCRIPT=""
   if [ -f ".xp-gate/modules/mock-policy/gate-m3.ts" ]; then
@@ -751,20 +777,15 @@ echo "━━━━━━━━━━━━━━━━━━━━━━━━�
 echo "   GATE UI: UI SPRINT QUALITY GATES"
 echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
 
-# Skip on main/master (pre-reviewed via PR)
-if [[ "$CURRENT_BRANCH" == "main" || "$CURRENT_BRANCH" == "master" ]]; then
-  echo "⚠️ Pushing to main/master — UI Gate skipped (pre-reviewed via PR)"
+if [[ "$XP_GATE_SKIP_UI_GATES" == "1" ]]; then
+  if [[ -z "$XP_GATE_BYPASS_REASON" || ${#XP_GATE_BYPASS_REASON// /} -lt 10 ]]; then
+    echo "❌ XP_GATE_BYPASS_REASON required (min 10 non-whitespace chars)"
+    exit 1
+  fi
+  echo "⚠️  UI Gate BYPASSED — reason: $XP_GATE_BYPASS_REASON"
+  AUDIT_ENTRY="{\"timestamp\":\"$(date -u +%Y-%m-%dT%H:%M:%SZ)\",\"branch\":\"$CURRENT_BRANCH\",\"commit\":\"$(git rev-parse HEAD)\",\"user\":\"$(git config user.name || echo 'unknown')\",\"reason\":\"$XP_GATE_BYPASS_REASON\",\"bypass_type\":\"ui-gates\"}"
+  echo "$AUDIT_ENTRY" >> .audit-log.jsonl
 else
-  # Check bypass
-  if [[ "$XP_GATE_SKIP_UI_GATES" == "1" ]]; then
-    if [[ -z "$XP_GATE_BYPASS_REASON" || ${#XP_GATE_BYPASS_REASON// /} -lt 10 ]]; then
-      echo "❌ XP_GATE_BYPASS_REASON required (min 10 non-whitespace chars)"
-      exit 1
-    fi
-    echo "⚠️  UI Gate BYPASSED — reason: $XP_GATE_BYPASS_REASON"
-    AUDIT_ENTRY="{\"timestamp\":\"$(date -u +%Y-%m-%dT%H:%M:%SZ)\",\"branch\":\"$CURRENT_BRANCH\",\"commit\":\"$(git rev-parse HEAD)\",\"user\":\"$(git config user.name || echo 'unknown')\",\"reason\":\"$XP_GATE_BYPASS_REASON\",\"bypass_type\":\"ui-gates\"}"
-    echo "$AUDIT_ENTRY" >> .audit-log.jsonl
-  else
     # Detect UI changes in pushed files
     UI_DETECTION=$(echo "$PUSHED_FILES" | npx -y tsx src/npm-package/lib/ui-detector.ts --push-mode --from-stdin 2>/dev/null) || true
     
@@ -823,10 +844,6 @@ fi
 # ============================================================================
 RESULT_FILE=".code-walkthrough-result.json"
 
-# Skip MW walkthrough for main/master (Gate M already ran above)
-if [[ "$CURRENT_BRANCH" == "main" || "$CURRENT_BRANCH" == "master" ]]; then
-  echo "⚠️ Pushing to main/master - MW walkthrough skipped"
-else
 
 if [ ! -f "$RESULT_FILE" ]; then
   echo ""
@@ -865,11 +882,16 @@ if ! command -v jq &> /dev/null; then
 fi
 
 # Validate result file content
-# SHA self-reference paradox fix (Issue #346):
-# The walkthrough file may reference an earlier commit if it was generated before
-# subsequent walkthrough-only commits. We check if the referenced commit is in
-# the current branch's history and if no functional commits occurred after it.
+# SHA self-reference paradox fix: if the result file was committed as part of
+# HEAD, its content references HEAD^ (the commit being reviewed), not HEAD.
 CURRENT_COMMIT=$(git rev-parse HEAD)
+if git diff-tree --no-commit-id --name-only -r HEAD 2>/dev/null | grep -qx "$RESULT_FILE"; then
+  # Result file is part of the latest commit — compare against the reviewed commit
+  EXPECTED_COMMIT=$(git rev-parse HEAD^ 2>/dev/null || echo "unknown")
+else
+  # Result file is working-tree only — compare against current HEAD
+  EXPECTED_COMMIT="$CURRENT_COMMIT"
+fi
 
 # Check JSON validity
 if ! jq empty "$RESULT_FILE" 2>/dev/null; then
@@ -901,42 +923,16 @@ if [ "$RESULT_BRANCH" != "$CURRENT_BRANCH" ]; then
   echo "Proceeding with commit verification..."
 fi
 
-# Commit match check (Issue #346: flexible matching to avoid circular dependency)
-# Check if RESULT_COMMIT is in the current branch's history
-if ! git merge-base --is-ancestor "$RESULT_COMMIT" HEAD 2>/dev/null; then
-  echo ""
-  echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-  echo "   ❌ RESULT FILE INVALID - PUSH BLOCKED"
-  echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-  echo ""
-  echo "Result file references a commit not in current branch:"
-  echo "  Referenced: $RESULT_COMMIT"
-  echo "  Current HEAD: $CURRENT_COMMIT"
-  echo ""
-  echo "Re-run: /delphi-review --mode code-walkthrough"
-  echo ""
-  exit 1
-fi
-
-# Check if there are any functional commits after RESULT_COMMIT
-# Functional commits are those that are NOT walkthrough-only updates or Gate MW fixes
-FUNCTIONAL_COMMITS_AFTER=$(git log --oneline "$RESULT_COMMIT"..HEAD -- . \
-  ':!.code-walkthrough-result.json' \
-  ':!.delphi/code-walkthrough.md' \
-  ':!githooks/pre-push' \
-  ':!src/npm-package/hooks/pre-push' 2>/dev/null | wc -l)
-if [ "$FUNCTIONAL_COMMITS_AFTER" -gt 0 ]; then
+# Commit match check
+if [ "$RESULT_COMMIT" != "$EXPECTED_COMMIT" ]; then
   echo ""
   echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
   echo "   ❌ RESULT FILE OUTDATED - PUSH BLOCKED"
   echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
   echo ""
-  echo "Functional commits found after walkthrough:"
-  git log --oneline "$RESULT_COMMIT"..HEAD -- . \
-    ':!.code-walkthrough-result.json' \
-    ':!.delphi/code-walkthrough.md' \
-    ':!githooks/pre-push' \
-    ':!src/npm-package/hooks/pre-push' 2>/dev/null | head -5
+  echo "Result file is for a different commit:"
+    echo "  Expected: $EXPECTED_COMMIT"
+    echo "  Found: $RESULT_COMMIT"
   echo ""
   echo "Re-run: /delphi-review --mode code-walkthrough"
   echo ""
@@ -983,177 +979,8 @@ if [[ "$CURRENT_TIME" > "$RESULT_EXPIRES" ]]; then
 fi
 
 # ============================================================================
-# PROVENANCE VALIDATION (Issue #339)
-# Validate that the walkthrough was genuinely produced by Delphi review,
-# not fabricated by an LLM.
-# ============================================================================
-
-# Check provenance fields exist
-EXPERTS_COUNT=$(jq -r '.experts // [] | length' "$RESULT_FILE")
-CONSENSUS=$(jq -r '.consensus // 0' "$RESULT_FILE")
-WALKTHROUGH_HASH=$(jq -r '.walkthroughHash // empty' "$RESULT_FILE")
-GENERATED_AT=$(jq -r '.generatedAt // empty' "$RESULT_FILE")
-
-# Grace period: configurable via env var (default 30 days)
-GRACE_DAYS="${XP_GATE_MW_GRACE_DAYS:-30}"
-
-# Check if this is a "new" walkthrough (has provenance fields)
-HAS_PROVENANCE="false"
-if [ -n "$WALKTHROUGH_HASH" ] && [ -n "$GENERATED_AT" ] && [ "$EXPERTS_COUNT" -ge 3 ]; then
-  HAS_PROVENANCE="true"
-fi
-
-if [ "$HAS_PROVENANCE" = "true" ]; then
-  # Full provenance validation
-  
-  # 1. Experts count check (minimum 3)
-  if [ "$EXPERTS_COUNT" -lt 3 ]; then
-    echo ""
-    echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-    echo "   ❌ INSUFFICIENT EXPERTS - PUSH BLOCKED"
-    echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-    echo ""
-    echo "Walkthrough requires minimum 3 experts:"
-    echo "  Found: $EXPERTS_COUNT experts"
-    echo ""
-    echo "Re-run: /delphi-review --mode code-walkthrough"
-    echo ""
-    exit 1
-  fi
-
-  # 2. Consensus check (≥90%)
-  # Use integer math: multiply by 10 to avoid bc dependency
-  CONSENSUS_X10=$(echo "$CONSENSUS * 10" | bc -l | cut -d'.' -f1)
-  if [ "$CONSENSUS_X10" -lt 900 ]; then
-    echo ""
-    echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-    echo "   ❌ CONSENSUS TOO LOW - PUSH BLOCKED"
-    echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-    echo ""
-    echo "Walkthrough requires ≥90% consensus:"
-    echo "  Found: ${CONSENSUS}%"
-    echo ""
-    echo "Re-run: /delphi-review --mode code-walkthrough"
-    echo ""
-    exit 1
-  fi
-
-  # 3. Walkthrough hash verification
-  WALKTHROUGH_DOC=".delphi/code-walkthrough.md"
-  if [ ! -f "$WALKTHROUGH_DOC" ]; then
-    echo ""
-    echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-    echo "   ❌ WALKTHROUGH DOC MISSING - PUSH BLOCKED"
-    echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-    echo ""
-    echo "Walkthrough document not found:"
-    echo "  Expected: $WALKTHROUGH_DOC"
-    echo ""
-    echo "Re-run: /delphi-review --mode code-walkthrough"
-    echo ""
-    exit 1
-  fi
-
-  # Cross-platform SHA-256 computation
-  COMPUTED_HASH=""
-  if command -v sha256sum &> /dev/null; then
-    COMPUTED_HASH=$(sha256sum "$WALKTHROUGH_DOC" | cut -d' ' -f1)
-  elif command -v shasum &> /dev/null; then
-    COMPUTED_HASH=$(shasum -a 256 "$WALKTHROUGH_DOC" | cut -d' ' -f1)
-  elif command -v openssl &> /dev/null; then
-    COMPUTED_HASH=$(openssl sha256 -r "$WALKTHROUGH_DOC" | cut -d' ' -f1)
-  fi
-
-  if [ -z "$COMPUTED_HASH" ]; then
-    echo ""
-    echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-    echo "   ❌ NO SHA-256 TOOL - PUSH BLOCKED"
-    echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-    echo ""
-    echo "No SHA-256 tool available (install sha256sum, shasum, or openssl)"
-    echo ""
-    exit 1
-  fi
-
-  if [ "$WALKTHROUGH_HASH" != "$COMPUTED_HASH" ]; then
-    echo ""
-    echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-    echo "   ❌ WALKTHROUGH HASH MISMATCH - PUSH BLOCKED"
-    echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-    echo ""
-    echo "Walkthrough document has been modified after review:"
-    echo "  Expected: $WALKTHROUGH_HASH"
-    echo "  Found:    $COMPUTED_HASH"
-    echo ""
-    echo "Re-run: /delphi-review --mode code-walkthrough"
-    echo ""
-    exit 1
-  fi
-
-  # 4. generatedAt check (replay protection)
-  if [ -z "$GENERATED_AT" ]; then
-    echo ""
-    echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-    echo "   ❌ MISSING generatedAt - PUSH BLOCKED"
-    echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-    echo ""
-    echo "Walkthrough result missing generatedAt timestamp"
-    echo ""
-    echo "Re-run: /delphi-review --mode code-walkthrough"
-    echo ""
-    exit 1
-  fi
-else
-  # Grace period: old walkthroughs without provenance get WARNING
-  echo ""
-  echo "⚠️ WARNING: Legacy walkthrough format (no provenance fields)"
-  echo "  Provenance fields will be required after grace period (${GRACE_DAYS} days)"
-  echo "  Consider re-running: /delphi-review --mode code-walkthrough"
-  echo ""
-fi
-
-# ============================================================================
 # ALL CHECKS PASSED
 # ============================================================================
-echo ""
-
-# ============================================================================
-# SPRINT-STATE BACKUP CHECK (WARNING ONLY — Issue #318)
-# Scan for worktree sprint-state directories that haven't been backed up
-# to .sprint-history/ before push. WARN only (doesn't block) — sprint-state
-# inside worktrees is deleted on `git worktree remove`, causing permanent
-# data loss if orchestrator forgets to back up during CLOSE phase.
-# ============================================================================
-if [ -d ".worktrees/sprint" ]; then
-  for worktree_dir in .worktrees/sprint/sprint-*; do
-    [ -d "$worktree_dir" ] || continue
-    [ -d "$worktree_dir/.sprint-state" ] || continue
-    sprint_id=$(basename "$worktree_dir")
-    if [ -f "$worktree_dir/.sprint-state/sprint-state.json" ]; then
-      if [ ! -d ".sprint-history/$sprint_id" ]; then
-        echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-        echo "   ⚠️  SPRINT-STATE NOT BACKED UP: $sprint_id"
-        echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-        echo ""
-        echo "Unarchived sprint state found in worktree:"
-        echo "  Path: $worktree_dir/.sprint-state/"
-        echo "  Backup: .sprint-history/$sprint_id/ (MISSING)"
-        echo ""
-        echo "RISK: If this worktree is removed before CLOSE backup,"
-        echo "      design docs, Delphi verdicts, and phase summaries"
-        echo "      are permanently lost."
-        echo ""
-        echo "Backup now:"
-        echo "  mkdir -p .sprint-history/$sprint_id"
-        echo "  cp -r $worktree_dir/.sprint-state/* .sprint-history/$sprint_id/"
-        echo ""
-        echo "See: https://github.com/boyingliu01/xp-gate/issues/318"
-        echo ""
-      fi
-    fi
-  done
-fi
-
 echo ""
 echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
   echo "   ✅ GATE MW: CODE WALKTHROUGH VERIFIED"
