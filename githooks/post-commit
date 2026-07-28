@@ -1,0 +1,39 @@
+#!/usr/bin/env bash
+# ============================================================================
+# XP-Gate Post-Commit Hook — Bypass Detection (D8 Layer 2)
+#
+# Detects when pre-commit was bypassed via git commit --no-verify.
+#
+# Mechanism:
+#   - pre-commit writes .git/xp-gate-precommit-marker on successful run
+#   - post-commit checks if the marker exists
+#   - If marker is absent → --no-verify was used (or pre-commit crashed)
+#   - Bypass events are logged to .xp-gate/bypass-audit.jsonl
+#   - Phase transition (Phase 4 impl) will check this audit file and block
+#     sprint progression if any bypassed commits exist on the branch
+#
+# Git semantics: post-commit cannot block the commit (git limitation).
+# It creates an audit trail for later enforcement.
+# ============================================================================
+
+set -e
+
+git_dir="$(git rev-parse --git-dir 2>/dev/null)"
+if [ -z "$git_dir" ]; then
+  exit 0
+fi
+
+marker="$git_dir/xp-gate-precommit-marker"
+
+if [ ! -f "$marker" ]; then
+  commit="$(git rev-parse HEAD 2>/dev/null)"
+  if [ -n "$commit" ]; then
+    bypass_dir=".xp-gate"
+    mkdir -p "$bypass_dir"
+    echo "{\"commit\":\"$commit\",\"timestamp\":\"$(date -Iseconds)\",\"type\":\"precommit_bypass\",\"branch\":\"$(git rev-parse --abbrev-ref HEAD 2>/dev/null)\"}" >> "$bypass_dir/bypass-audit.jsonl"
+  fi
+else
+  rm -f "$marker"
+fi
+
+exit 0
