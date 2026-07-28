@@ -454,3 +454,4 @@ MIT License. Copyright (c) 2024-2026 XP-Gate Contributors.
 - [Delphi 评审规范](./skills/delphi-review/SKILL.md)
 - [测试对齐验证](./skills/test-specification-alignment/SKILL.md)
 - [质量门禁守则](./githooks/QUALITY-GATES-CODE-OF-CONDUCT.md)
+
