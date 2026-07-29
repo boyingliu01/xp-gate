@@ -1,8 +1,12 @@
 #!/bin/bash
-# Pre-push Hook - Code Walkthrough Result Validator
+# Pre-push Hook — 8 gates: Gate 10 (Build Integrity) + M/M-Python/M-Go/M-Java/M-Kotlin (Mutation)
+# + M2 (Mock Density, WARNING) + ML (Mock Layering) + UI (UI Sprint Gates) + MW (Code Walkthrough) + S (Sprint Flow)
 #
-# DESIGN: Hook validates result file, Skill executes review
+# DESIGN: Hook validates result/executes checks, Skill executes AI review
 # No CLI skill invocation - avoids OpenCode architecture mismatch
+#
+# Size limits intentionally REMOVED — AI workflows generate large cumulative pushes;
+# file count is not a quality signal. All pre-push runs journaled to .xp-gate/reports/pre-push/.
 #
 # See: docs/plans/delphi-review --mode code-walkthrough-pre-push-design-v2.md
 #
@@ -31,6 +35,7 @@ write_pre_push_report() {
 import json
 from pathlib import Path
 pushed_files = '''${PUSHED_FILES:-}'''.splitlines()
+passed = 1 if '$verdict' == 'PASS' else 0
 report = {
   'timestamp': '$timestamp',
   'trigger': 'pre-push',
@@ -39,8 +44,8 @@ report = {
   'changed_files': [f for f in pushed_files if f],
   'overall': {
     'score': '10.0/10' if '$verdict' == 'PASS' else '0.0/10',
-    'gates_passed': 1 if '$verdict' == 'PASS' else 0,
-    'gates_total': 1,
+    'gates_passed': passed,
+    'gates_total': 8,
     'verdict': '$verdict',
   },
   'gates': [
@@ -50,10 +55,11 @@ report = {
     {'id': 'M-Go', 'name': 'Mutation Testing (Go)', 'status': '${GATE_M_GO_STATUS:-SKIP}', 'details': {}},
     {'id': 'M-Java', 'name': 'Mutation Testing (Java)', 'status': '${GATE_M_JAVA_STATUS:-SKIP}', 'details': {}},
     {'id': 'M-Kotlin', 'name': 'Mutation Testing (Kotlin)', 'status': '${GATE_M_KOTLIN_STATUS:-SKIP}', 'details': {}},
-    {'id': 'MD', 'name': 'Mock Density', 'status': '${GATE_M2_STATUS:-SKIP}', 'details': {}},
+    {'id': 'M2', 'name': 'Mock Density (WARNING only)', 'status': '${GATE_M2_STATUS:-SKIP}', 'details': {}},
     {'id': 'ML', 'name': 'Mock Layering', 'status': '${GATE_M3_STATUS:-SKIP}', 'details': {}},
     {'id': 'UI', 'name': 'UI Sprint Gates', 'status': '${GATE_UI_STATUS:-SKIP}', 'details': {}},
-    {'id': 'MW', 'name': 'Code Walkthrough', 'status': '${GATE_DELPHI_STATUS:-SKIP}', 'details': {'remote': '$REMOTE', 'url': '$URL'}}
+    {'id': 'MW', 'name': 'Code Walkthrough', 'status': '${GATE_DELPHI_STATUS:-SKIP}', 'details': {'remote': '$REMOTE', 'url': '$URL'}},
+    {'id': 'S', 'name': 'Sprint Flow Enforcement', 'status': '${GATE_S_STATUS:-SKIP}', 'details': {}}
   ],
   'warnings': [],
   'errors': [] if '$verdict' == 'PASS' else ['pre-push hook exited with code $exit_code'],
@@ -837,7 +843,6 @@ else
       echo "ℹ️  No UI changes detected — skipping UI Gate"
     fi
   fi
-fi
 
 # ============================================================================
 # GATE MW: VALIDATE CODE WALKTHROUGH RESULT FILE
@@ -1003,5 +1008,4 @@ fi
 
 echo ""
 echo "Proceeding with push..."
-fi
 exit 0
