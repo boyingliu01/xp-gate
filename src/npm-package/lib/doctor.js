@@ -41,7 +41,7 @@ function getPackageVersion() {
  */
 const SIGNATURES = {
   'pre-commit': 'OpenCode Quality Gates - Pre-Commit Hook',
-  'pre-push': 'Pre-push Hook - Code Walkthrough Result Validator',
+  'pre-push': 'Pre-push Hook — 8 gates:',
   'adapter-common.sh': 'detect_project_lang()'
 };
 
