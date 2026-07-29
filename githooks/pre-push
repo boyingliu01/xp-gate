@@ -843,7 +843,6 @@ else
       echo "ℹ️  No UI changes detected — skipping UI Gate"
     fi
   fi
-fi
 
 # ============================================================================
 # GATE MW: VALIDATE CODE WALKTHROUGH RESULT FILE
@@ -1009,5 +1008,4 @@ fi
 
 echo ""
 echo "Proceeding with push..."
-fi
 exit 0
