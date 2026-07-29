@@ -102,3 +102,4 @@ console.log('  ['+severity+'] '+ruleId);console.log('  '+path+':'+line+' → '+m
   fi
 fi
 record_gate_audit "gate-9" "sast-security" "$GATE_9_STATUS" "0" "$GATE_9_START"
+
