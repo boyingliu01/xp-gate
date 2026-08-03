@@ -25,6 +25,63 @@ function runBashScript(scriptPath) {
   execSync(`bash "${scriptPath}"`, { stdio: 'inherit' });
 }
 
+/**
+ * Run a gate adapter fragment standalone.
+ *
+ * The gate fragments in githooks/adapters/gate-*.sh are designed to be *sourced*
+ * into the pre-commit hook, which pre-defines the context they rely on:
+ *   - PROJECT_LANG (from detect_project_lang)
+ *   - CHANGED_FILES (from git)
+ *   - gate_start_ms() / record_gate_audit() / now_ms() audit & timing helpers
+ *
+ * When `xp-gate check` invokes a gate standalone, that context is missing and
+ * the fragments fail with "command not found". This wrapper reconstructs the
+ * same preamble the pre-commit hook sets up, then *sources* the fragment so it
+ * behaves exactly as it does inside the commit hook.
+ */
+function runGateAdapter(scriptPath) {
+  if (process.platform === 'win32') {
+    try {
+      execSync('bash --version', { stdio: 'pipe', timeout: 5000 });
+    } catch {
+      console.log('⚠️  This gate requires bash to run shell scripts.');
+      console.log('   On Windows, install Git for Windows (includes Git Bash) or enable WSL.');
+      console.log('   Alternatively, install the required tool directly and run the gate again.');
+      return;
+    }
+  }
+  const adapterDir = path.dirname(scriptPath);
+  const commonScript = path.join(adapterDir, 'adapter-common.sh');
+
+  // Build the shell preamble the pre-commit hook would otherwise inject before
+  // sourcing the gate fragment, then source that fragment. Deliberately NOT
+  // set -u (the pre-commit hook does not use it), so fragments that reference
+  // a not-yet-defined variable fail the same way inside the commit hook.
+  const wrap = [
+    'if [ -f "' + commonScript + '" ]; then source "' + commonScript + '"; fi',
+    'now_ms() {',
+    '  local ts',
+    "  ts=$(node -e 'console.log(Date.now())' 2>/dev/null)",
+    "  if [[ \"$ts\" =~ ^[0-9]+$ ]]; then echo \"$ts\"; return; fi",
+    '  ts=$(date +%s 2>/dev/null)',
+    '  if [[ "$ts" =~ ^[0-9]+$ ]]; then echo $((ts * 1000)); return; fi',
+    '  echo 0',
+    '}',
+    'gate_start_ms() { now_ms; }',
+    'record_gate_audit() { :; }',
+    'PROJECT_LANG="$(detect_project_lang 2>/dev/null || echo unknown)"',
+    'CHANGED_FILES="$(git diff --cached --name-only --diff-filter=ACM 2>/dev/null || true)"',
+    'if [ -z "${CHANGED_FILES}" ] && [ -n "$(git rev-parse HEAD 2>/dev/null)" ]; then',
+    '  CHANGED_FILES="$(git diff HEAD --name-only --diff-filter=ACM 2>/dev/null || true)"',
+    'fi',
+    'source "' + scriptPath + '"',
+  ].join('\n');
+
+  // execFileSync avoids an extra /bin/sh layer, so bash receives the script as a
+  // single argv arg (no shell-metacharacter injection through the path).
+  execFileSync('bash', ['--noprofile', '--norc', '-c', wrap], { stdio: 'inherit' });
+}
+
 // Gate metadata registry — maps gate IDs to names, descriptions, and how to run them.
 // Standalone gates (<gate-id>: { run }) are invokable via xp-gate gate-<id>.
 // Pre-commit-only gates (<gate-id>: { preCommitOnly: true }) run only in git commit context.
@@ -38,9 +95,10 @@ function runTsGate(gateModule, targetPath) {
   const entry = findTsGateEntry(gateModule);
   if (!entry) {
     // Fallback to bash script
-    const script = resolveGateScript(gateModule.replace('gate-', ''));
+    const gateNum = gateModule.replace('gate-', '');
+    const script = resolveGateScript(gateNum);
     if (script) {
-      runBashScript(script);
+      runGateAdapter(script);
     } else {
       console.log(`Gate ${gateModule}: TypeScript module not found and no bash fallback available.`);
     }
@@ -319,4 +377,4 @@ async function runGate(gateId, targetPath) {
   return 1;
 }
 
-module.exports = { GATE_REGISTRY, getGateInfo, getAllGates, runGate, resolveAlias, getAliases };
+module.exports = { GATE_REGISTRY, getGateInfo, getAllGates, runGate, resolveAlias, getAliases, runGateAdapter, findTsGateEntry, resolveGateScript };
