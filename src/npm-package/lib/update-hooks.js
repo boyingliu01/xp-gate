@@ -5,7 +5,7 @@
  */
 const fs = require('node:fs');
 const path = require('node:path');
-const { GLOBAL_HOOKS_DIR, GLOBAL_ADAPTERS_DIR } = require('./shared-paths.js');
+const { GLOBAL_HOOKS_DIR, GLOBAL_ADAPTERS_DIR, GLOBAL_MODULES_DIR } = require('./shared-paths.js');
 
 /**
  * Get the xp-gate package root directory (src/npm-package/).
@@ -95,6 +95,17 @@ function detectLocalModifications(srcDir, hooksDestDir, adaptersDestDir) {
         }
       }
     });
+  }
+
+  // Check sprint-gate.sh in the hooks directory (Gate MS resolves it there)
+  const sprintGateSrc = path.join(srcDir, 'sprint-gate.sh');
+  const sprintGateDest = path.join(hooksDestDir, 'sprint-gate.sh');
+  if (fs.existsSync(sprintGateDest) && fs.existsSync(sprintGateSrc)) {
+    const srcContent = fs.readFileSync(sprintGateSrc, 'utf8');
+    const destContent = fs.readFileSync(sprintGateDest, 'utf8');
+    if (srcContent !== destContent) {
+      modified.push('sprint-gate.sh');
+    }
   }
 
   return modified;
@@ -205,10 +216,69 @@ function copyAdapters(srcDir, destDir, dryRun, noBackup) {
 function copyGateScripts(srcDir, destDir, dryRun, noBackup) {
   if (!fs.existsSync(srcDir)) return;
   fs.readdirSync(srcDir).forEach(f => {
-    if ((f.startsWith('gate-') || f === 'sprint-gate.sh') && f.endsWith('.sh')) {
+    if (f.startsWith('gate-') && f.endsWith('.sh')) {
       const src = path.join(srcDir, f);
       const dest = path.join(destDir, f);
       atomicCopyFile(src, dest, dryRun, noBackup, f);
+    }
+  });
+}
+
+/**
+ * Copy sprint-gate.sh from package root to the hooks directory.
+ * The pre-push Gate MS resolves it at $(dirname "$0")/sprint-gate.sh, i.e.
+ * alongside pre-commit/pre-push — NOT the adapters directory.
+ * @param {string} srcDir - Package root directory
+ * @param {string} hooksDestDir - Destination hooks directory
+ * @param {boolean} dryRun
+ * @param {boolean} noBackup
+ */
+function copySprintGate(srcDir, hooksDestDir, dryRun, noBackup) {
+  const src = path.join(srcDir, 'sprint-gate.sh');
+  if (!fs.existsSync(src)) return;
+  atomicCopyFile(src, path.join(hooksDestDir, 'sprint-gate.sh'), dryRun, noBackup, 'sprint-gate.sh');
+}
+
+/**
+ * Copy quality gate modules (principles, mutation, mock-policy, build-integrity)
+ * into the modules directory. These ship in the npm package but were never
+ * installed by an already-initialized global setup, so update-hooks must
+ * re-deploy them to repair Gate 9/10 (build-integrity) on existing installs.
+ * @param {string} srcDir - Package root directory
+ * @param {string} modulesDestDir - Destination modules directory
+ * @param {boolean} dryRun
+ * @param {boolean} noBackup
+ */
+const MODULES = ['principles', 'mutation', 'mock-policy', 'build-integrity'];
+function copyModules(srcDir, modulesDestDir, dryRun, noBackup) {
+  MODULES.forEach(module => {
+    const srcDirPath = path.join(srcDir, module);
+    if (!fs.existsSync(srcDirPath)) return;
+    const destDirPath = path.join(modulesDestDir, module);
+    fs.mkdirSync(destDirPath, { recursive: true });
+    fs.readdirSync(srcDirPath).forEach(entry => {
+      const srcEntry = path.join(srcDirPath, entry);
+      const destEntry = path.join(destDirPath, entry);
+      const stats = fs.statSync(srcEntry);
+      if (stats.isDirectory()) {
+        copyRecursiveDir(srcEntry, destEntry, dryRun, noBackup, module);
+      } else if (!dryRun) {
+        atomicCopyFile(srcEntry, destEntry, dryRun, noBackup, `${module}/${entry}`);
+      }
+    });
+    if (!dryRun) console.log(`  ${module}/ -> ${modulesDestDir}/${module}/`);
+  });
+}
+
+function copyRecursiveDir(src, dest, dryRun, noBackup, label) {
+  fs.mkdirSync(dest, { recursive: true });
+  fs.readdirSync(src).forEach(entry => {
+    const srcEntry = path.join(src, entry);
+    const destEntry = path.join(dest, entry);
+    if (fs.statSync(srcEntry).isDirectory()) {
+      copyRecursiveDir(srcEntry, destEntry, dryRun, noBackup, label);
+    } else {
+      atomicCopyFile(srcEntry, destEntry, dryRun, noBackup, `${label}/${entry}`);
     }
   });
 }
@@ -220,24 +290,26 @@ function resolveSrcDir() {
 }
 
 function resolveDirs(global) {
-  if (global) return { hooksDestDir: GLOBAL_HOOKS_DIR, adaptersDestDir: GLOBAL_ADAPTERS_DIR };
-  return { hooksDestDir: getProjectHooksDir(), adaptersDestDir: path.join(process.cwd(), 'githooks') };
+  if (global) return { hooksDestDir: GLOBAL_HOOKS_DIR, adaptersDestDir: GLOBAL_ADAPTERS_DIR, modulesDestDir: GLOBAL_MODULES_DIR };
+  return { hooksDestDir: getProjectHooksDir(), adaptersDestDir: path.join(process.cwd(), 'githooks'), modulesDestDir: path.join(process.cwd(), '.xp-gate', 'modules') };
 }
 
-function ensureDirsExist(adaptersDestDir, hooksDestDir) {
+function ensureDirsExist(adaptersDestDir, hooksDestDir, modulesDestDir) {
   fs.mkdirSync(hooksDestDir, { recursive: true });
   fs.mkdirSync(adaptersDestDir, { recursive: true });
   fs.mkdirSync(path.join(adaptersDestDir, 'adapters'), { recursive: true });
+  if (modulesDestDir) fs.mkdirSync(modulesDestDir, { recursive: true });
 }
 
 function printUpdateHeader(opts) {
-  const { global, srcDir, hooksDestDir, adaptersDestDir, scope, dryRun } = opts;
+  const { global, srcDir, hooksDestDir, adaptersDestDir, modulesDestDir, scope, dryRun } = opts;
   console.log(`XP-Gate Update Hooks`);
   console.log(`====================`);
   console.log(`Mode: ${global ? 'Global' : 'Local'}`);
   console.log(`Source: ${srcDir}`);
   console.log(`Hooks destination: ${hooksDestDir}`);
   console.log(`Adapters destination: ${adaptersDestDir}`);
+  if (modulesDestDir) console.log(`Modules destination: ${modulesDestDir}`);
   console.log(`Scope: ${scope}`);
   if (dryRun) console.log(`Dry run: yes (no files will be modified)`);
   console.log('');
@@ -256,7 +328,7 @@ function checkLocalModifications(srcDir, hooksDestDir, adaptersDestDir, force, d
 }
 
 function copyByScope(opts) {
-  const { scope, srcDir, hooksDestDir, adaptersDestDir, dryRun, noBackup } = opts;
+  const { scope, srcDir, hooksDestDir, adaptersDestDir, modulesDestDir, dryRun, noBackup } = opts;
   if (scope === 'all' || scope === 'hooks') {
     printInfo('hooks');
     copyHooks(srcDir, hooksDestDir, dryRun, noBackup);
@@ -268,6 +340,13 @@ function copyByScope(opts) {
   if (scope === 'all') {
     printInfo('gate scripts');
     copyGateScripts(srcDir, adaptersDestDir, dryRun, noBackup);
+    if (modulesDestDir) {
+      printInfo('modules');
+      copyModules(srcDir, modulesDestDir, dryRun, noBackup);
+    }
+  }
+  if (scope === 'all' || scope === 'hooks') {
+    copySprintGate(srcDir, hooksDestDir, dryRun, noBackup);
   }
 }
 
@@ -279,15 +358,15 @@ function printInfo(label) { console.log(`Updating ${label}...`); }
 function updateHooks(options = {}) {
   const { global = false, force = false, dryRun = false, noBackup = false, scope = 'all' } = options;
   const srcDir = resolveSrcDir();
-  const { hooksDestDir, adaptersDestDir } = resolveDirs(global);
+  const { hooksDestDir, adaptersDestDir, modulesDestDir } = resolveDirs(global);
 
-  ensureDirsExist(adaptersDestDir, hooksDestDir);
-  printUpdateHeader({ global, srcDir, hooksDestDir, adaptersDestDir, scope, dryRun });
+  ensureDirsExist(adaptersDestDir, hooksDestDir, modulesDestDir);
+  printUpdateHeader({ global, srcDir, hooksDestDir, adaptersDestDir, modulesDestDir, scope, dryRun });
 
   const modCheck = checkLocalModifications(srcDir, hooksDestDir, adaptersDestDir, force, dryRun);
   if (modCheck !== 0) return modCheck;
 
-  copyByScope({ scope, srcDir, hooksDestDir, adaptersDestDir, dryRun, noBackup });
+  copyByScope({ scope, srcDir, hooksDestDir, adaptersDestDir, modulesDestDir, dryRun, noBackup });
 
   if (!dryRun) console.log('\nUpdate complete!');
   return 0;
@@ -299,6 +378,8 @@ module.exports = {
   copyHooks,
   copyAdapters,
   copyGateScripts,
+  copySprintGate,
+  copyModules,
   atomicCopyFile,
   getPackageRoot,
   getProjectHooksDir,
