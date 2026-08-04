@@ -5,7 +5,7 @@
  */
 const fs = require('node:fs');
 const path = require('node:path');
-const { GLOBAL_HOOKS_DIR, GLOBAL_ADAPTERS_DIR, GLOBAL_MODULES_DIR } = require('./shared-paths.js');
+const { GLOBAL_HOOKS_DIR, GLOBAL_ADAPTERS_DIR, GLOBAL_MODULES_DIR, CONFIG_DIR } = require('./shared-paths.js');
 
 /**
  * Get the xp-gate package root directory (src/npm-package/).
@@ -350,6 +350,20 @@ function copyByScope(opts) {
   }
 }
 
+function warnMissingModuleDeps(global, dryRun) {
+  if (!global || dryRun) return;
+  // Copied gate modules (e.g. mock-policy) import js-yaml/zod installed into
+  // <CONFIG_DIR>/node_modules by setup-global. If absent (e.g. an install made
+  // before that step existed), Gate ML would crash at push — guide the user to
+  // re-run setup-global rather than silently failing.
+  const depsDir = path.join(CONFIG_DIR, 'node_modules', 'js-yaml');
+  if (!fs.existsSync(depsDir)) {
+    console.warn('\n[warn] Global quality-gate module runtime deps not found.');
+    console.warn(`  Expected: ${path.join(CONFIG_DIR, 'node_modules')}`);
+    console.warn('  Run `xp-gate setup-global` once to install them (Gate ML needs js-yaml/zod).');
+  }
+}
+
 function printInfo(label) { console.log(`Updating ${label}...`); }
 
 /**
@@ -367,6 +381,7 @@ function updateHooks(options = {}) {
   if (modCheck !== 0) return modCheck;
 
   copyByScope({ scope, srcDir, hooksDestDir, adaptersDestDir, modulesDestDir, dryRun, noBackup });
+  warnMissingModuleDeps(global, dryRun);
 
   if (!dryRun) console.log('\nUpdate complete!');
   return 0;
@@ -380,6 +395,7 @@ module.exports = {
   copyGateScripts,
   copySprintGate,
   copyModules,
+  warnMissingModuleDeps,
   atomicCopyFile,
   getPackageRoot,
   getProjectHooksDir,

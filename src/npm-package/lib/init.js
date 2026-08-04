@@ -24,6 +24,27 @@ function copyRecursive(src, dest) {
   }
 }
 
+// Third-party packages imported by the copied quality-gate modules. When the
+// modules run via `npx tsx` from <CONFIG_DIR>/modules/<module>, these must be
+// resolvable from an ancestor directory, so they are installed once into
+// <CONFIG_DIR>/node_modules. Keep in sync with each module's imports.
+const MODULE_RUNTIME_DEPS = { 'js-yaml': '^5.2.2', 'zod': '^4.4.3' };
+
+function installModuleRuntimeDeps(configDir) {
+  const { execSync } = require('child_process');
+  const pkgPath = path.join(configDir, 'package.json');
+  try {
+    const existing = fs.existsSync(pkgPath) ? JSON.parse(fs.readFileSync(pkgPath, 'utf8')) : {};
+    const mergedDeps = { ...(existing.dependencies || {}), ...MODULE_RUNTIME_DEPS };
+    fs.writeFileSync(pkgPath, JSON.stringify({ ...existing, dependencies: mergedDeps }, null, 2) + '\n');
+    execSync('npm install --omit=dev --no-audit --no-fund', { cwd: configDir, stdio: ['ignore', 'inherit', 'inherit'] });
+    console.log(`  module runtime deps -> ${path.join(configDir, 'node_modules')}`);
+  } catch (e) {
+    console.warn(`  Warning: could not install module runtime deps into ${configDir} (${e.message})`);
+    console.warn('  Gate ML (mock-policy) may SKIP until deps are available.');
+  }
+}
+
 function logDeps(depCheck) {
   if (!depCheck.ok) {
     console.warn('Warning: Missing dependencies');
@@ -482,6 +503,7 @@ async function installLocal(args) {
       console.log(`  ${module}/ -> .xp-gate/modules/${module}/`);
     }
   });
+  installModuleRuntimeDeps(path.join(projectRoot, '.xp-gate'));
 
   fs.mkdirSync(TEMPLATE_DIR, { recursive: true });
   copyHooks(srcDir, TEMPLATE_DIR);
@@ -563,6 +585,13 @@ async function setupGlobal(args) {
       console.log(`  ${module}/ -> ${globalModulesDir}/${module}/`);
     }
   });
+
+  // Copied modules are pure TS sourced into <CONFIG_DIR>/modules/. Any of them
+  // that import third-party packages (currently only mock-policy: js-yaml, zod)
+  // resolve them via Node's ancestor lookup up from the module location, so we
+  // install those deps into <CONFIG_DIR>/node_modules once. Best-effort: a
+  // missing register/network must not break global setup.
+  installModuleRuntimeDeps(CONFIG_DIR);
 
   console.log('[setup-global] Configuring git...');
   const { execSync } = require('child_process');
@@ -742,4 +771,4 @@ function injectKarpathyPrinciples(projectRoot) {
   }
 }
 
-module.exports = { init, promptBootstrap };
+module.exports = { init, promptBootstrap, installModuleRuntimeDeps };

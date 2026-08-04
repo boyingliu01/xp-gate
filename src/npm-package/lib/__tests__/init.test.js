@@ -447,4 +447,36 @@ describe('init', () => {
       expect(fs.existsSync(path.join(tmpProject, '.qoder', 'agents'))).toBe(false);
     });
   });
+
+  describe('installModuleRuntimeDeps', () => {
+    it('writes a package.json with module runtime deps and runs npm install', () => {
+      let execArgs = null;
+      vi.spyOn(childProcess, 'execSync').mockImplementation((cmd, opts) => {
+        execArgs = { cmd, cwd: opts && opts.cwd };
+        return Buffer.from('');
+      });
+
+      const { installModuleRuntimeDeps } = require('../init');
+      installModuleRuntimeDeps(tmpHome);
+
+      const pkg = JSON.parse(fs.readFileSync(path.join(tmpHome, 'package.json'), 'utf8'));
+      expect(pkg.dependencies['js-yaml']).toBeDefined();
+      expect(pkg.dependencies['zod']).toBeDefined();
+      expect(execArgs).not.toBeNull();
+      expect(execArgs.cmd).toContain('npm install');
+      expect(execArgs.cwd).toBe(tmpHome);
+    });
+
+    it('fails gracefully (warning, no throw) when npm install fails', () => {
+      vi.spyOn(childProcess, 'execSync').mockImplementation(() => {
+        throw new Error('registry offline');
+      });
+      const warnBefore = console.warn;
+
+      const { installModuleRuntimeDeps } = require('../init');
+      expect(() => installModuleRuntimeDeps(tmpHome)).not.toThrow();
+
+      expect(console.warn).toHaveBeenCalled();
+    });
+  });
 });
