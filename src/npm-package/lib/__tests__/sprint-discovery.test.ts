@@ -13,7 +13,6 @@ import os from 'os';
 
 // Types mirroring DiscoveredSprint interface
 interface DiscoveredSprint {
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   state: any;
   sourcePath: string;
   worktreeExists: boolean;

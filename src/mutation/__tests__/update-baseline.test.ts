@@ -41,9 +41,7 @@ describe('update-baseline.ts - Mutation Baseline Update CLI', () => {
   let originalArgv: string[];
   let originalExit: typeof process.exit;
   let originalCwd: typeof process.cwd;
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   let consoleLogSpy: any;
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   let consoleErrorSpy: any;
   let exitCode: number | undefined;
 

@@ -271,9 +271,7 @@ describe('runGateM3', () => {
 // ---------------------------------------------------------------------------
 describe('main', () => {
   let tmpDir: string;
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   let consoleErrorSpy: any;
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   let consoleLogSpy: any;
 
   beforeEach(() => {
@@ -335,7 +333,6 @@ describe('main', () => {
     const exitCode = await main([testFile]);
 
     const logCalls: string[] = consoleLogSpy.mock.calls.map(
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
       (c: any[]) => String(c[0]),
     );
     expect(logCalls.some((msg) => msg.includes('Gate M3'))).toBe(true);
@@ -357,7 +354,6 @@ describe('main', () => {
     await main([testFile]);
 
     const logCalls: string[] = consoleLogSpy.mock.calls.map(
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
       (c: any[]) => String(c[0]),
     );
     const hasPassLabel = logCalls.some(
@@ -373,7 +369,6 @@ describe('main', () => {
     await main([testFile]);
 
     const logCalls: string[] = consoleLogSpy.mock.calls.map(
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
       (c: any[]) => String(c[0]),
     );
     const hasFileCount = logCalls.some(

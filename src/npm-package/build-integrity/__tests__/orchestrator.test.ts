@@ -215,7 +215,6 @@ describe('runGate10', () => {
  */
 describe('main', () => {
   let tmpDir: string;
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   let consoleSpy: any;
 
   beforeEach(async () => {
