@@ -29,6 +29,20 @@ setup() {
   [ "$status" -eq 1 ]
 }
 
+@test "run_without_git_context isolates nested git commands from hook environment" {
+  outer_repo=$(mktemp -d)
+  nested_repo=$(mktemp -d)
+  git -C "$outer_repo" init --quiet
+
+  export GIT_DIR="$outer_repo/.git"
+  export GIT_INDEX_FILE="$outer_repo/.git/index"
+
+  run run_without_git_context git -C "$nested_repo" init --quiet
+
+  [ "$status" -eq 0 ]
+  [ -d "$nested_repo/.git" ]
+}
+
 @test "detect_project_lang returns typescript for tsconfig.json project" {
   # Create temp tsconfig.json
   echo '{}' > /tmp/test-tsconfig.json
@@ -222,4 +236,3 @@ setup() {
   # For now, we just verify the hook runs
   [[ "$PRE_COMMIT_OUTPUT" != "" ]]
 }
-
