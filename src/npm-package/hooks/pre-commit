@@ -1766,7 +1766,7 @@ else
           if [ "$CHANGED_TEST_FILE_COUNT" -gt 20 ] 2>/dev/null; then
             # Too many test files changed → full run
             echo "Too many test files changed ($CHANGED_TEST_FILE_COUNT), running full test suite..."
-            TESTS_OUTPUT=$(npx vitest run --coverage 2>&1)
+            TESTS_OUTPUT=$(run_without_git_context npx vitest run --coverage 2>&1)
             TESTS_EXIT_CODE=$?
             echo "$TESTS_OUTPUT" | head -60
             if [ "$TESTS_EXIT_CODE" -ne 0 ]; then
@@ -1781,7 +1781,7 @@ else
             SMART_TARGETS=$(echo "$CHANGED_TEST_FILES" | tr '\n' ' ')
             echo "Running ${CHANGED_TEST_FILE_COUNT} changed test file(s) with coverage..."
             echo "   Target(s): $(echo "$CHANGED_TEST_FILES" | tr '\n' ' ')"
-            TESTS_OUTPUT=$(npx vitest run --coverage $SMART_TARGETS 2>&1)
+            TESTS_OUTPUT=$(run_without_git_context npx vitest run --coverage $SMART_TARGETS 2>&1)
             TESTS_EXIT_CODE=$?
             echo "$TESTS_OUTPUT" | head -60
             if [ "$TESTS_EXIT_CODE" -ne 0 ]; then
@@ -1825,7 +1825,7 @@ else
             if [ -n "$RELATED_TESTS" ]; then
               echo "   Found related test(s): $(echo "$RELATED_TESTS" | tr '\n' ' ')"
               PARTIAL_TEST_RUN=true  # Mark as partial run for coverage check
-              TESTS_OUTPUT=$(npx vitest run --coverage $RELATED_TESTS 2>&1)
+              TESTS_OUTPUT=$(run_without_git_context npx vitest run --coverage $RELATED_TESTS 2>&1)
               TESTS_EXIT_CODE=$?
               echo "$TESTS_OUTPUT" | head -60
               if [ "$TESTS_EXIT_CODE" -ne 0 ]; then
@@ -1838,7 +1838,7 @@ else
             else
               # No related tests found → full run is safest
               echo "   No related test files found, running full test suite..."
-              TESTS_OUTPUT=$(npx vitest run --coverage 2>&1)
+              TESTS_OUTPUT=$(run_without_git_context npx vitest run --coverage 2>&1)
               TESTS_EXIT_CODE=$?
               echo "$TESTS_OUTPUT" | head -60
               if [ "$TESTS_EXIT_CODE" -ne 0 ]; then
