@@ -43,6 +43,17 @@ setup() {
   [ -d "$nested_repo/.git" ]
 }
 
+@test "run_without_git_context isolates nested git when hook Git dir is invalid" {
+  nested_repo=$(mktemp -d)
+  export GIT_DIR=/missing/hook/git-dir
+  export GIT_INDEX_FILE=/missing/hook/index
+
+  run run_without_git_context git -C "$nested_repo" init --quiet
+
+  [ "$status" -eq 0 ]
+  [ -d "$nested_repo/.git" ]
+}
+
 @test "detect_project_lang returns typescript for tsconfig.json project" {
   # Create temp tsconfig.json
   echo '{}' > /tmp/test-tsconfig.json
