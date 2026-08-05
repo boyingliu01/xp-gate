@@ -30,6 +30,30 @@ source "$ADAPTER_DIR/adapter-common.sh" 2>/dev/null || {
   exit 1
 }
 
+# BEGIN GIT CONTEXT FALLBACK
+if ! declare -F run_without_git_context >/dev/null 2>&1; then
+  run_without_git_context() {
+    env \
+      -u GIT_ALTERNATE_OBJECT_DIRECTORIES \
+      -u GIT_CONFIG \
+      -u GIT_CONFIG_PARAMETERS \
+      -u GIT_CONFIG_COUNT \
+      -u GIT_OBJECT_DIRECTORY \
+      -u GIT_DIR \
+      -u GIT_WORK_TREE \
+      -u GIT_IMPLICIT_WORK_TREE \
+      -u GIT_GRAFT_FILE \
+      -u GIT_INDEX_FILE \
+      -u GIT_NO_REPLACE_OBJECTS \
+      -u GIT_REPLACE_REF_BASE \
+      -u GIT_PREFIX \
+      -u GIT_SHALLOW_FILE \
+      -u GIT_COMMON_DIR \
+      "$@"
+  }
+fi
+# END GIT CONTEXT FALLBACK
+
 # Resolve adapter file path — handles both layouts:
 #   Global:      ~/.config/xp-gate/adapters/typescript.sh      (flat)
 #   Project:     <repo>/githooks/adapters/typescript.sh          (nested)

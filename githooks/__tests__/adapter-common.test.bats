@@ -75,6 +75,23 @@ EOF
   [ "$status" -eq 0 ]
 }
 
+@test "pre-commit provides Git context fallback for stale global adapters" {
+  unset -f run_without_git_context
+  fallback=$(awk '
+    /^# BEGIN GIT CONTEXT FALLBACK$/ { capture = 1; next }
+    /^# END GIT CONTEXT FALLBACK$/ { capture = 0 }
+    capture
+  ' "$BATS_TEST_DIRNAME/../pre-commit")
+  eval "$fallback"
+  export GIT_DIR=/missing/hook/git-dir
+  export GIT_INDEX_FILE=/missing/hook/index
+
+  run run_without_git_context bash -c \
+    '[ -z "${GIT_DIR-}" ] && [ -z "${GIT_INDEX_FILE-}" ]'
+
+  [ "$status" -eq 0 ]
+}
+
 @test "detect_project_lang returns typescript for tsconfig.json project" {
   # Create temp tsconfig.json
   echo '{}' > /tmp/test-tsconfig.json
