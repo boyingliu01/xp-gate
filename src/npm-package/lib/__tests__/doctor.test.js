@@ -66,7 +66,7 @@ describe('doctor', () => {
     // and reloading it would restore the full tool list, breaking the test mock setup.
     const modulesToInvalidate = [
       '../doctor', '../uninstall', '../init', '../shared-paths',
-      '../check-version.js',
+      '../check-version.js', '../doctor-tui',
     ];
     for (const mod of modulesToInvalidate) {
       try { delete require.cache[require.resolve(mod)]; } catch { /* first load */ }
@@ -126,7 +126,7 @@ describe('doctor', () => {
     fs.mkdirSync(dir, { recursive: true });
     fs.writeFileSync(
       path.join(dir, 'pre-push'),
-      '#!/bin/bash\n# Pre-push Hook - Code Walkthrough Result Validator\n'
+      '#!/bin/bash\n# Pre-push Hook — 8 gates:\n'
     );
   }
 
