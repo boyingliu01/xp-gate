@@ -54,6 +54,27 @@ setup() {
   [ -d "$nested_repo/.git" ]
 }
 
+@test "TypeScript adapter clears hook Git context before running tests" {
+  fake_bin=$(mktemp -d)
+  cat > "$fake_bin/npx" <<'EOF'
+#!/usr/bin/env bash
+if [ "$2" = "--version" ]; then
+  exit 0
+fi
+[ -z "${GIT_DIR-}" ]
+[ -z "${GIT_INDEX_FILE-}" ]
+EOF
+  chmod +x "$fake_bin/npx"
+  PATH="$fake_bin:$PATH"
+  export GIT_DIR=/missing/hook/git-dir
+  export GIT_INDEX_FILE=/missing/hook/index
+  source "$BATS_TEST_DIRNAME/../adapters/typescript.sh"
+
+  run run_tests
+
+  [ "$status" -eq 0 ]
+}
+
 @test "detect_project_lang returns typescript for tsconfig.json project" {
   # Create temp tsconfig.json
   echo '{}' > /tmp/test-tsconfig.json

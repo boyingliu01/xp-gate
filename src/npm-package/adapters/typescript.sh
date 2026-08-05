@@ -108,9 +108,9 @@ run_tests() {
   if command -v npx >/dev/null 2>&1; then
     echo "Running TypeScript tests..."
     if npx vitest --version >/dev/null 2>&1; then
-      npx vitest run
+      run_without_git_context npx vitest run
     elif npx jest --version >/dev/null 2>&1; then
-      npx jest --passWithNoTests
+      run_without_git_context npx jest --passWithNoTests
     else
       echo "No test runner available (vitest or jest required)"
       return 1
@@ -126,9 +126,9 @@ run_coverage() {
   if command -v npx >/dev/null 2>&1; then
     echo "Running TypeScript coverage..."
     if npx vitest --version >/dev/null 2>&1; then
-      npx vitest run --coverage
+      run_without_git_context npx vitest run --coverage
     elif npx jest --version >/dev/null 2>&1; then
-      npx jest --coverage
+      run_without_git_context npx jest --coverage
     else
       echo "No test runner available for coverage"
       return 1
