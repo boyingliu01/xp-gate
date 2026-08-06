@@ -182,6 +182,11 @@ function syncHooks() {
   // In-place copy (no rmrf) to avoid race condition with parallel test readers.
   fs.mkdirSync(DST, { recursive: true });
 
+  const adapterCommonSrc = path.join(SRC, 'adapter-common.sh');
+  if (fs.existsSync(adapterCommonSrc)) {
+    fs.copyFileSync(adapterCommonSrc, path.join(PKG_ROOT, 'adapter-common.sh'));
+  }
+
   const HOOK_FILES = ['pre-commit', 'pre-push', 'adapter-common.sh'];
   let copied = 0;
 
