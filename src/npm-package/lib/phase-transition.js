@@ -25,7 +25,7 @@
 const path = require('path');
 const fs = require('fs');
 const crypto = require('crypto');
-const { execSync } = require('child_process');
+const { execFileSync, execSync } = require('child_process');
 const { SprintStateManager } = require('./sprint-state-manager');
 
 /**
@@ -559,7 +559,7 @@ function checkWalkthrough(projectDir) {
   // Check commit is ancestor of HEAD
   if (data.commit) {
     try {
-      execSync(`git merge-base --is-ancestor ${data.commit} HEAD`, {
+      execFileSync('git', ['merge-base', '--is-ancestor', data.commit, 'HEAD'], {
         cwd: projectDir,
         env: createRepositoryGitEnv(),
         stdio: 'pipe',
@@ -604,7 +604,7 @@ function checkBypassAudit(projectDir) {
       if (entry.type === 'precommit_bypass' && entry.commit) {
         // Verify the commit is on the current branch
         try {
-          execSync(`git merge-base --is-ancestor ${entry.commit} HEAD`, {
+          execFileSync('git', ['merge-base', '--is-ancestor', entry.commit, 'HEAD'], {
             cwd: projectDir,
             env: createRepositoryGitEnv(),
             stdio: 'pipe',

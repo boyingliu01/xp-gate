@@ -287,6 +287,37 @@ describe('phase-transition', () => {
         fs.rmSync(outerDir, { recursive: true, force: true });
       }
     });
+
+    it('does not execute shell syntax from a walkthrough commit value', () => {
+      const targetCommit = createRepository(tmpDir, 'target commit');
+      const markerFile = path.join(tmpDir, 'walkthrough-injection-marker');
+      fs.writeFileSync(path.join(tmpDir, '.code-walkthrough-result.json'), JSON.stringify({
+        verdict: 'APPROVED',
+        commit: `${targetCommit}; touch ${markerFile}; #`,
+        expires: new Date(Date.now() + 3600000).toISOString(),
+      }));
+
+      const result = checkWalkthrough(tmpDir);
+
+      expect(result.ok).toBe(false);
+      expect(fs.existsSync(markerFile)).toBe(false);
+    });
+
+    it('does not execute shell syntax from a bypass-audit commit value', () => {
+      const targetCommit = createRepository(tmpDir, 'target bypass');
+      const markerFile = path.join(tmpDir, 'bypass-injection-marker');
+      const auditDir = path.join(tmpDir, '.xp-gate');
+      fs.mkdirSync(auditDir, { recursive: true });
+      fs.writeFileSync(path.join(auditDir, 'bypass-audit.jsonl'), JSON.stringify({
+        type: 'precommit_bypass',
+        commit: `${targetCommit}; touch ${markerFile}; #`,
+      }));
+
+      const result = checkBypassAudit(tmpDir);
+
+      expect(result.bypassedCommits).toEqual([]);
+      expect(fs.existsSync(markerFile)).toBe(false);
+    });
   });
   describe('Layer 1: Pre-transition gate check', () => {
     it('warns when previous phase not completed', async () => {
