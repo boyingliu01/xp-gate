@@ -9,10 +9,47 @@
  */
 
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
+import { execSync } from 'node:child_process';
 import fs from 'node:fs';
-import path from 'node:path';
 import os from 'node:os';
-import { handlePhaseTransition, renderDashboard, PHASE_NAMES, validateEvidence } from '../phase-transition.js';
+import path from 'node:path';
+import {
+  handlePhaseTransition,
+  renderDashboard,
+  PHASE_NAMES,
+  validateEvidence,
+  checkWalkthrough,
+  checkBypassAudit,
+} from '../phase-transition.js';
+
+function git(command, cwd) {
+  const env = { ...process.env };
+  for (const name of [
+    'GIT_ALTERNATE_OBJECT_DIRECTORIES', 'GIT_CONFIG', 'GIT_CONFIG_PARAMETERS',
+    'GIT_CONFIG_COUNT', 'GIT_OBJECT_DIRECTORY', 'GIT_DIR', 'GIT_WORK_TREE',
+    'GIT_IMPLICIT_WORK_TREE', 'GIT_GRAFT_FILE', 'GIT_INDEX_FILE',
+    'GIT_NO_REPLACE_OBJECTS', 'GIT_REPLACE_REF_BASE', 'GIT_PREFIX',
+    'GIT_SHALLOW_FILE', 'GIT_COMMON_DIR',
+  ]) {
+    delete env[name];
+  }
+  return execSync(`git ${command}`, {
+    cwd,
+    env,
+    encoding: 'utf8',
+    stdio: ['pipe', 'pipe', 'pipe'],
+  }).trim();
+}
+
+function createRepository(dir, message) {
+  git('init --quiet', dir);
+  git('config user.email "test@test.com"', dir);
+  git('config user.name "Test"', dir);
+  fs.writeFileSync(path.join(dir, 'file.txt'), message);
+  git('add file.txt', dir);
+  git(`commit --quiet -m "${message}"`, dir);
+  return git('rev-parse HEAD', dir);
+}
 
 describe('phase-transition', () => {
   let tmpDir;
@@ -194,6 +231,61 @@ describe('phase-transition', () => {
       const result = renderDashboard(state);
       expect(result).toContain('SPRINT PROGRESS');
       expect(result).toContain('sprint-min');
+    });
+  });
+
+  describe('repository-scoped Git checks', () => {
+    it('checks walkthrough ancestry in projectDir when hook Git variables point elsewhere', () => {
+      const outerDir = fs.mkdtempSync(path.join(os.tmpdir(), 'phase-outer-'));
+      const targetCommit = createRepository(tmpDir, 'target commit');
+      createRepository(outerDir, 'outer commit');
+      fs.writeFileSync(path.join(tmpDir, '.code-walkthrough-result.json'), JSON.stringify({
+        verdict: 'APPROVED',
+        commit: targetCommit,
+        expires: new Date(Date.now() + 3600000).toISOString(),
+      }));
+      const previousGitDir = process.env.GIT_DIR;
+      const previousWorkTree = process.env.GIT_WORK_TREE;
+      process.env.GIT_DIR = path.join(outerDir, '.git');
+      process.env.GIT_WORK_TREE = outerDir;
+
+      try {
+        expect(checkWalkthrough(tmpDir).ok).toBe(true);
+      } finally {
+        if (previousGitDir === undefined) delete process.env.GIT_DIR;
+        else process.env.GIT_DIR = previousGitDir;
+        if (previousWorkTree === undefined) delete process.env.GIT_WORK_TREE;
+        else process.env.GIT_WORK_TREE = previousWorkTree;
+        fs.rmSync(outerDir, { recursive: true, force: true });
+      }
+    });
+
+    it('checks bypass commits in projectDir when hook Git variables point elsewhere', () => {
+      const outerDir = fs.mkdtempSync(path.join(os.tmpdir(), 'phase-outer-'));
+      const targetCommit = createRepository(tmpDir, 'target bypass');
+      createRepository(outerDir, 'outer commit');
+      const auditDir = path.join(tmpDir, '.xp-gate');
+      fs.mkdirSync(auditDir, { recursive: true });
+      fs.writeFileSync(path.join(auditDir, 'bypass-audit.jsonl'), JSON.stringify({
+        type: 'precommit_bypass',
+        commit: targetCommit,
+      }));
+      const previousGitDir = process.env.GIT_DIR;
+      const previousWorkTree = process.env.GIT_WORK_TREE;
+      process.env.GIT_DIR = path.join(outerDir, '.git');
+      process.env.GIT_WORK_TREE = outerDir;
+
+      try {
+        const result = checkBypassAudit(tmpDir);
+        expect(result.ok).toBe(false);
+        expect(result.bypassedCommits).toEqual([targetCommit]);
+      } finally {
+        if (previousGitDir === undefined) delete process.env.GIT_DIR;
+        else process.env.GIT_DIR = previousGitDir;
+        if (previousWorkTree === undefined) delete process.env.GIT_WORK_TREE;
+        else process.env.GIT_WORK_TREE = previousWorkTree;
+        fs.rmSync(outerDir, { recursive: true, force: true });
+      }
     });
   });
   describe('Layer 1: Pre-transition gate check', () => {
