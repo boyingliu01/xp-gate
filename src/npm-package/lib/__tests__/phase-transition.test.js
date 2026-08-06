@@ -260,6 +260,31 @@ describe('phase-transition', () => {
       }
     });
 
+    it('rejects a walkthrough bound to an older ancestor commit', () => {
+      const reviewedCommit = createRepository(tmpDir, 'reviewed commit');
+      fs.writeFileSync(path.join(tmpDir, 'file.txt'), 'new unreviewed change');
+      git('add file.txt', tmpDir);
+      git('commit --quiet -m "unreviewed commit"', tmpDir);
+      fs.writeFileSync(path.join(tmpDir, '.code-walkthrough-result.json'), JSON.stringify({
+        verdict: 'APPROVED',
+        commit: reviewedCommit,
+        expires: new Date(Date.now() + 3600000).toISOString(),
+      }));
+
+      expect(checkWalkthrough(tmpDir).ok).toBe(false);
+    });
+
+    it('accepts a walkthrough bound to the current HEAD commit', () => {
+      const reviewedCommit = createRepository(tmpDir, 'reviewed commit');
+      fs.writeFileSync(path.join(tmpDir, '.code-walkthrough-result.json'), JSON.stringify({
+        verdict: 'APPROVED',
+        commit: reviewedCommit,
+        expires: new Date(Date.now() + 3600000).toISOString(),
+      }));
+
+      expect(checkWalkthrough(tmpDir).ok).toBe(true);
+    });
+
     it('checks bypass commits in projectDir when hook Git variables point elsewhere', () => {
       const outerDir = fs.mkdtempSync(path.join(os.tmpdir(), 'phase-outer-'));
       const targetCommit = createRepository(tmpDir, 'target bypass');
