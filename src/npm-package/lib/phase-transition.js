@@ -556,18 +556,21 @@ function checkWalkthrough(projectDir) {
     return { ok: false, errors, warnings };
   }
 
+  if (typeof data.commit !== 'string' || !/^[0-9a-f]{7,64}$/i.test(data.commit)) {
+    errors.push('Code walkthrough commit must be a hexadecimal Git commit ID');
+    return { ok: false, errors, warnings };
+  }
+
   // Check commit is ancestor of HEAD
-  if (data.commit) {
-    try {
-      execFileSync('git', ['merge-base', '--is-ancestor', data.commit, 'HEAD'], {
-        cwd: projectDir,
-        env: createRepositoryGitEnv(),
-        stdio: 'pipe',
-      });
-    } catch {
-      errors.push(`Code walkthrough commit ${data.commit} is not an ancestor of HEAD`);
-      return { ok: false, errors, warnings };
-    }
+  try {
+    execFileSync('git', ['merge-base', '--is-ancestor', data.commit, 'HEAD'], {
+      cwd: projectDir,
+      env: createRepositoryGitEnv(),
+      stdio: 'pipe',
+    });
+  } catch {
+    errors.push(`Code walkthrough commit ${data.commit} is not an ancestor of HEAD`);
+    return { ok: false, errors, warnings };
   }
 
   // Check expiration
