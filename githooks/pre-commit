@@ -14,7 +14,21 @@
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ADAPTER_DIR=""
 GLOBAL_ADAPTER_DIR="$HOME/.config/xp-gate/adapters"
-PROJECT_GITHOOKS="$(git rev-parse --show-toplevel 2>/dev/null)/githooks"
+
+# BEGIN GIT CONTEXT FALLBACK
+if ! declare -F run_without_git_context >/dev/null 2>&1; then
+  run_without_git_context() (
+    unset GIT_ALTERNATE_OBJECT_DIRECTORIES GIT_CONFIG GIT_CONFIG_PARAMETERS
+    unset GIT_CONFIG_COUNT GIT_OBJECT_DIRECTORY GIT_DIR GIT_WORK_TREE
+    unset GIT_IMPLICIT_WORK_TREE GIT_GRAFT_FILE GIT_INDEX_FILE
+    unset GIT_NO_REPLACE_OBJECTS GIT_REPLACE_REF_BASE GIT_PREFIX
+    unset GIT_SHALLOW_FILE GIT_COMMON_DIR
+    "$@"
+  )
+fi
+# END GIT CONTEXT FALLBACK
+
+PROJECT_GITHOOKS="$(run_without_git_context git rev-parse --show-toplevel 2>/dev/null)/githooks"
 GATES_DIR="$SCRIPT_DIR/gates"
 
 if [ -f "$GLOBAL_ADAPTER_DIR/adapter-common.sh" ]; then
@@ -29,30 +43,6 @@ source "$ADAPTER_DIR/adapter-common.sh" 2>/dev/null || {
   echo "Run: xp-gate init (per-project) or xp-gate setup-global (all projects)"
   exit 1
 }
-
-# BEGIN GIT CONTEXT FALLBACK
-if ! declare -F run_without_git_context >/dev/null 2>&1; then
-  run_without_git_context() {
-    env \
-      -u GIT_ALTERNATE_OBJECT_DIRECTORIES \
-      -u GIT_CONFIG \
-      -u GIT_CONFIG_PARAMETERS \
-      -u GIT_CONFIG_COUNT \
-      -u GIT_OBJECT_DIRECTORY \
-      -u GIT_DIR \
-      -u GIT_WORK_TREE \
-      -u GIT_IMPLICIT_WORK_TREE \
-      -u GIT_GRAFT_FILE \
-      -u GIT_INDEX_FILE \
-      -u GIT_NO_REPLACE_OBJECTS \
-      -u GIT_REPLACE_REF_BASE \
-      -u GIT_PREFIX \
-      -u GIT_SHALLOW_FILE \
-      -u GIT_COMMON_DIR \
-      "$@"
-  }
-fi
-# END GIT CONTEXT FALLBACK
 
 # Resolve adapter file path — handles both layouts:
 #   Global:      ~/.config/xp-gate/adapters/typescript.sh      (flat)
@@ -1881,7 +1871,7 @@ else
           fi
         else
           # Fallback: run_tests without coverage
-          TESTS_OUTPUT=$(run_tests 2>&1)
+          TESTS_OUTPUT=$(run_without_git_context run_tests 2>&1)
           TESTS_EXIT_CODE=$?
           echo "$TESTS_OUTPUT" | head -50
           if [ "$TESTS_EXIT_CODE" -ne 0 ]; then
@@ -1892,7 +1882,7 @@ else
         fi
       else
         # Non-TypeScript: standard adapter test flow
-        TESTS_OUTPUT=$(run_tests 2>&1)
+        TESTS_OUTPUT=$(run_without_git_context run_tests 2>&1)
         TESTS_EXIT_CODE=$?
         echo "$TESTS_OUTPUT" | head -50
         if [ "$TESTS_EXIT_CODE" -ne 0 ]; then
