@@ -249,4 +249,35 @@ describe('sprint-status --rework-check (#369)', () => {
       fs.rmSync(outerDir, { recursive: true, force: true });
     }
   });
+
+  test('(f) completed_at cannot inject shell commands into the Git log query', async () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'rework-injection-'));
+    const markerFile = path.join(dir, 'injection-marker');
+    cwdSpy.mockReturnValue(dir);
+    git('init', dir);
+    git('config user.email "test@test.com"', dir);
+    git('config user.name "Test"', dir);
+    makeCommit('fix: target bug', dir);
+
+    writeSprintState({
+      _schema_version: 1,
+      id: 'sprint-injection',
+      phase: 6,
+      status: 'completed',
+      metrics: {
+        completed_at: `Thu, 06 Aug 2026 00:00:00 GMT ("; touch ${markerFile}; #)`,
+        total_sprint_commits: 1,
+      },
+    }, dir);
+
+    const logSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
+    try {
+      const code = await handleSprintStatus(['--rework-check', '--window-days', '3650', '--dir', dir]);
+      expect(code).toBe(0);
+      expect(fs.existsSync(markerFile)).toBe(false);
+    } finally {
+      logSpy.mockRestore();
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+  });
 });

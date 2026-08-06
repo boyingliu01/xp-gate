@@ -9,7 +9,7 @@
 
 const fs = require('fs');
 const path = require('path');
-const { execSync } = require('child_process');
+const { execFileSync } = require('child_process');
 const { discoverActiveSprints } = require('./sprint-discovery');
 const { SprintStateManager } = require('./sprint-state-manager');
 
@@ -239,8 +239,9 @@ function getFixCommitCount(repoDir, sinceDate) {
     ]) {
       delete gitEnv[name];
     }
-    const out = execSync(
-      `git log --all --since="${sinceDate}" --pretty=format:"%s"`,
+    const out = execFileSync(
+      'git',
+      ['log', '--all', '--since', sinceDate, '--pretty=format:%s'],
       { cwd: repoDir, env: gitEnv, encoding: 'utf8', stdio: ['pipe', 'pipe', 'pipe'] }
     );
     return out.split('\n').filter(l => l.trim() && FIX_RE.test(l.trim())).length;
