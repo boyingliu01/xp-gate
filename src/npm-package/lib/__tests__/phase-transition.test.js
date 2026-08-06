@@ -303,6 +303,27 @@ describe('phase-transition', () => {
       expect(fs.existsSync(markerFile)).toBe(false);
     });
 
+    it.each([
+      ['missing', undefined],
+      ['null', null],
+      ['numeric', 123],
+      ['empty', ''],
+      ['malformed', 'not-a-commit'],
+    ])('rejects a %s walkthrough commit', (_label, commit) => {
+      createRepository(tmpDir, 'target commit');
+      const walkthrough = {
+        verdict: 'APPROVED',
+        expires: new Date(Date.now() + 3600000).toISOString(),
+      };
+      if (commit !== undefined) walkthrough.commit = commit;
+      fs.writeFileSync(
+        path.join(tmpDir, '.code-walkthrough-result.json'),
+        JSON.stringify(walkthrough)
+      );
+
+      expect(checkWalkthrough(tmpDir).ok).toBe(false);
+    });
+
     it('does not execute shell syntax from a bypass-audit commit value', () => {
       const targetCommit = createRepository(tmpDir, 'target bypass');
       const markerFile = path.join(tmpDir, 'bypass-injection-marker');
