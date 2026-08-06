@@ -561,15 +561,19 @@ function checkWalkthrough(projectDir) {
     return { ok: false, errors, warnings };
   }
 
-  // Check commit is ancestor of HEAD
   try {
-    execFileSync('git', ['merge-base', '--is-ancestor', data.commit, 'HEAD'], {
+    const currentCommit = execFileSync('git', ['rev-parse', 'HEAD'], {
       cwd: projectDir,
       env: createRepositoryGitEnv(),
+      encoding: 'utf8',
       stdio: 'pipe',
-    });
+    }).trim();
+    if (data.commit !== currentCommit) {
+      errors.push(`Code walkthrough commit ${data.commit} does not match HEAD ${currentCommit}`);
+      return { ok: false, errors, warnings };
+    }
   } catch {
-    errors.push(`Code walkthrough commit ${data.commit} is not an ancestor of HEAD`);
+    errors.push('Unable to resolve the current Git commit for code walkthrough validation');
     return { ok: false, errors, warnings };
   }
 
