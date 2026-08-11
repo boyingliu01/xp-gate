@@ -216,7 +216,7 @@ describe('check-version.js — REQ-001-01', () => {
       delete require.cache[resolved];
     }
 
-    function withMockedHttps(latestVersion, fn) {
+    async function withMockedHttps(latestVersion, fn) {
       const fsm = require('fs');
       const osm = require('os');
       const cpPath = require('path').join(osm.homedir(), '.xp-gate', 'version-cache.json');
@@ -256,7 +256,7 @@ describe('check-version.js — REQ-001-01', () => {
       };
       try {
         const m = require('../check-version');
-        return fn(m);
+        return await fn(m);
       } finally {
         https.get = saved;
         fsm.readFileSync = savedReadFileSync;
