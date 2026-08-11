@@ -83,6 +83,11 @@ EOF
   [ "$status" -eq 0 ]
 }
 
+@test "pre-commit uses project-root package metadata from nested directories" {
+  run grep -F 'if [ "$CURRENT_LANG" = "typescript" ] && { [ -f "package.json" ] || [ -f "$PROJECT_ROOT/package.json" ]; }; then' "$BATS_TEST_DIRNAME/../pre-commit"
+  [ "$status" -eq 0 ]
+}
+
 @test "pre-commit provides Git context fallback for stale global adapters" {
   unset -f run_without_git_context
   fallback=$(awk '
