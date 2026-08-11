@@ -1764,7 +1764,7 @@ else
     if source "$ADAPTER_FILE" 2>/dev/null; then
       # TypeScript: vitest with smart test selection
       if [ "$CURRENT_LANG" = "typescript" ] && [ -f "package.json" ]; then
-        if npx vitest --version >/dev/null 2>&1; then
+        if run_without_git_context npx vitest --version >/dev/null 2>&1; then
           # Count changed test files to decide strategy
           CHANGED_TEST_FILE_COUNT=$(echo "$CHANGED_TEST_FILES" | grep -c '.' || echo "0")
           
