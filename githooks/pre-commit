@@ -2186,11 +2186,11 @@ else
     case "$CURRENT_LANG" in
       "typescript")
         # Try local npx install first (devDependencies), fall back to global
-        if npx --no-install @archlinter/cli --version >/dev/null 2>&1; then
-          ARCHLINT_CMD="npx --no-install @archlinter/cli"
+        if [ -x "$PROJECT_ROOT/node_modules/.bin/archlint" ]; then
+          ARCHLINT_CMD="$PROJECT_ROOT/node_modules/.bin/archlint"
         elif command -v archlint >/dev/null 2>&1; then
           ARCHLINT_CMD="archlint"
-        elif npx @archlinter/cli --version >/dev/null 2>&1; then
+        elif (cd "$PROJECT_ROOT" && npx @archlinter/cli --version) >/dev/null 2>&1; then
           ARCHLINT_CMD="npx @archlinter/cli"
         else
           echo "     ❌ BLOCKED - archlint not installed"
@@ -2210,7 +2210,7 @@ else
          if [ "$ARCHLINT_EXIT" -ne 0 ]; then
            echo ""
            echo "❌ BLOCKED - Architecture violations detected"
-           if [ -f ".architecture-baseline.json" ]; then
+            if [ -f ".architecture-baseline.json" ]; then
              echo "New architecture violations found (baseline ratchet mode)."
              echo "Fix the new violations above, or update the baseline with: npx @archlinter/cli snapshot -o .architecture-baseline.json"
            else
@@ -2219,7 +2219,7 @@ else
            fi
            exit 1
          fi
-         if [ -f ".architecture-baseline.json" ]; then
+          if [ -f ".architecture-baseline.json" ]; then
            echo "     ✅ TypeScript architecture validation completed (baseline ratchet mode)."
          else
            echo "     ✅ TypeScript architecture validation completed (zero-tolerance mode). no baseline found."
