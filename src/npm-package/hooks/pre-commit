@@ -103,7 +103,7 @@ _quality_report_on_exit() {
 }
 trap '_quality_report_on_exit' EXIT
 
-PROJECT_ROOT="$(git rev-parse --show-toplevel 2>/dev/null || echo "$(cd "$SCRIPT_DIR/../.." 2>/dev/null || echo "$SCRIPT_DIR/..")" )"
+PROJECT_ROOT="$(run_without_git_context git rev-parse --show-toplevel 2>/dev/null || echo "$(cd "$SCRIPT_DIR/../.." 2>/dev/null || echo "$SCRIPT_DIR/..")" )"
 if [[ -d "$PROJECT_ROOT/node_modules/.bin" ]]; then
   export PATH="$PROJECT_ROOT/node_modules/.bin:$PATH"
 fi
