@@ -131,6 +131,11 @@ EOF
   [ "$fallback_line" -lt "$discovery_line" ]
 }
 
+@test "pre-commit isolates the project-root repository lookup" {
+  run grep -F 'PROJECT_ROOT="$(run_without_git_context git rev-parse --show-toplevel' "$BATS_TEST_DIRNAME/../pre-commit"
+  [ "$status" -eq 0 ]
+}
+
 @test "detect_project_lang returns typescript for tsconfig.json project" {
   # Create temp tsconfig.json
   echo '{}' > /tmp/test-tsconfig.json
