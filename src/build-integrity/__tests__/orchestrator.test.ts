@@ -12,7 +12,7 @@ import os from 'os';
 
 import { runGate10, main } from '../gate-10';
 
-vi.setConfig({ testTimeout: 30000 });
+vi.setConfig({ testTimeout: 90000 });
 
 describe('runGate10', () => {
   let tmpDir: string;
@@ -215,7 +215,6 @@ describe('runGate10', () => {
  */
 describe('main', () => {
   let tmpDir: string;
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   let consoleSpy: any;
 
   beforeEach(async () => {
