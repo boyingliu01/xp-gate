@@ -198,16 +198,6 @@ export function parseSpecification(specPath: string): SpecificationMap {
 // Step 2: parseTestFiles()
 // ============================================================================
 
-const REQ_ID_PATTERN = /REQ-[A-Z0-9]+-[A-Z0-9]+/;
-
-function extractTag(text: string, tag: string): string | null {
-  // Match @tag value (single line extraction, stops at newline or */)
-  const regex = new RegExp('@' + tag.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '\\s+(.+?)(?:\\n|\\*\\/)', 's');
-  const match = text.match(regex);
-  if (!match) return null;
-  return match[1]!.trim();
-}
-
 function extractAllTags(text: string, tag: string): string[] {
   const escapedTag = tag.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
   const regex = new RegExp('@' + escapedTag + '\\s+(.+?)(?:\\n|\\*\\/)', 'gs');
@@ -396,7 +386,7 @@ export function verifyAlignment(
   // Collect all requirement IDs and acceptance criteria IDs from spec
   const allReqIds = new Set<string>();
   const allAcIds = new Set<string>();
-  let totalEdgeCases = 0;
+  const totalEdgeCases = 0;
 
   for (const req of specMap.requirements) {
     allReqIds.add(req.id);
@@ -583,7 +573,7 @@ export function runFullAlignment(options: AlignmentOptions): TestAlignmentReport
   let spec: SpecificationMap;
   try {
     spec = parseSpecification(specPath);
-  } catch (e: any) {
+  } catch (e) {
     return {
       alignment_status: 'BLOCKED',
       phase: 0,
@@ -593,7 +583,7 @@ export function runFullAlignment(options: AlignmentOptions): TestAlignmentReport
       timestamp: new Date().toISOString(),
       misaligned_tests: [],
       anti_pattern_detected: false,
-      errors: [`Failed to parse specification: ${e.message}`],
+      errors: [`Failed to parse specification: ${e instanceof Error ? e.message : String(e)}`],
     };
   }
 
