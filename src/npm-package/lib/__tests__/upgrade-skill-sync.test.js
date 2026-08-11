@@ -57,7 +57,7 @@ describe('doctor skill version check — #332', () => {
 
   // AC-332-05: diagnoseInstalledSkills compares installed skills against package-bundled skills
   it('AC-332-05: diagnoseInstalledSkills reads config installedSkills and package skills dir', () => {
-    const source = fs.readFileSync(require.resolve('../doctor.js'), 'utf8');
+    const source = fs.readFileSync(require.resolve('../doctor-tui.js'), 'utf8');
     expect(source).toContain('installedSkills');
     expect(source).toContain('diagnoseInstalledSkills');
     expect(source).toContain('skills');

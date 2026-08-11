@@ -14,7 +14,21 @@
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ADAPTER_DIR=""
 GLOBAL_ADAPTER_DIR="$HOME/.config/xp-gate/adapters"
-PROJECT_GITHOOKS="$(git rev-parse --show-toplevel 2>/dev/null)/githooks"
+
+# BEGIN GIT CONTEXT FALLBACK
+if ! declare -F run_without_git_context >/dev/null 2>&1; then
+  run_without_git_context() (
+    unset GIT_ALTERNATE_OBJECT_DIRECTORIES GIT_CONFIG GIT_CONFIG_PARAMETERS
+    unset GIT_CONFIG_COUNT GIT_OBJECT_DIRECTORY GIT_DIR GIT_WORK_TREE
+    unset GIT_IMPLICIT_WORK_TREE GIT_GRAFT_FILE GIT_INDEX_FILE
+    unset GIT_NO_REPLACE_OBJECTS GIT_REPLACE_REF_BASE GIT_PREFIX
+    unset GIT_SHALLOW_FILE GIT_COMMON_DIR
+    "$@"
+  )
+fi
+# END GIT CONTEXT FALLBACK
+
+PROJECT_GITHOOKS="$(run_without_git_context git rev-parse --show-toplevel 2>/dev/null)/githooks"
 GATES_DIR="$SCRIPT_DIR/gates"
 
 if [ -f "$GLOBAL_ADAPTER_DIR/adapter-common.sh" ]; then
@@ -89,7 +103,7 @@ _quality_report_on_exit() {
 }
 trap '_quality_report_on_exit' EXIT
 
-PROJECT_ROOT="$(git rev-parse --show-toplevel 2>/dev/null || echo "$(cd "$SCRIPT_DIR/../.." 2>/dev/null || echo "$SCRIPT_DIR/..")" )"
+PROJECT_ROOT="$(run_without_git_context git rev-parse --show-toplevel 2>/dev/null || echo "$(cd "$SCRIPT_DIR/../.." 2>/dev/null || echo "$SCRIPT_DIR/..")" )"
 if [[ -d "$PROJECT_ROOT/node_modules/.bin" ]]; then
   export PATH="$PROJECT_ROOT/node_modules/.bin:$PATH"
 fi
@@ -1749,8 +1763,8 @@ else
     if [ "${CURRENT_LANG}" != "unknown" ] && [ -n "$ADAPTER_FILE" ]; then
     if source "$ADAPTER_FILE" 2>/dev/null; then
       # TypeScript: vitest with smart test selection
-      if [ "$CURRENT_LANG" = "typescript" ] && [ -f "package.json" ]; then
-        if npx vitest --version >/dev/null 2>&1; then
+      if [ "$CURRENT_LANG" = "typescript" ] && { [ -f "package.json" ] || [ -f "$PROJECT_ROOT/package.json" ]; }; then
+        if run_without_git_context npx vitest --version >/dev/null 2>&1; then
           # Count changed test files to decide strategy
           CHANGED_TEST_FILE_COUNT=$(echo "$CHANGED_TEST_FILES" | grep -c '.' || echo "0")
           
@@ -1766,7 +1780,7 @@ else
           if [ "$CHANGED_TEST_FILE_COUNT" -gt 20 ] 2>/dev/null; then
             # Too many test files changed → full run
             echo "Too many test files changed ($CHANGED_TEST_FILE_COUNT), running full test suite..."
-            TESTS_OUTPUT=$(npx vitest run --coverage 2>&1)
+            TESTS_OUTPUT=$(run_without_git_context npx vitest run --coverage 2>&1)
             TESTS_EXIT_CODE=$?
             echo "$TESTS_OUTPUT" | head -60
             if [ "$TESTS_EXIT_CODE" -ne 0 ]; then
@@ -1781,7 +1795,7 @@ else
             SMART_TARGETS=$(echo "$CHANGED_TEST_FILES" | tr '\n' ' ')
             echo "Running ${CHANGED_TEST_FILE_COUNT} changed test file(s) with coverage..."
             echo "   Target(s): $(echo "$CHANGED_TEST_FILES" | tr '\n' ' ')"
-            TESTS_OUTPUT=$(npx vitest run --coverage $SMART_TARGETS 2>&1)
+            TESTS_OUTPUT=$(run_without_git_context npx vitest run --coverage $SMART_TARGETS 2>&1)
             TESTS_EXIT_CODE=$?
             echo "$TESTS_OUTPUT" | head -60
             if [ "$TESTS_EXIT_CODE" -ne 0 ]; then
@@ -1825,7 +1839,7 @@ else
             if [ -n "$RELATED_TESTS" ]; then
               echo "   Found related test(s): $(echo "$RELATED_TESTS" | tr '\n' ' ')"
               PARTIAL_TEST_RUN=true  # Mark as partial run for coverage check
-              TESTS_OUTPUT=$(npx vitest run --coverage $RELATED_TESTS 2>&1)
+              TESTS_OUTPUT=$(run_without_git_context npx vitest run --coverage $RELATED_TESTS 2>&1)
               TESTS_EXIT_CODE=$?
               echo "$TESTS_OUTPUT" | head -60
               if [ "$TESTS_EXIT_CODE" -ne 0 ]; then
@@ -1838,7 +1852,7 @@ else
             else
               # No related tests found → full run is safest
               echo "   No related test files found, running full test suite..."
-              TESTS_OUTPUT=$(npx vitest run --coverage 2>&1)
+              TESTS_OUTPUT=$(run_without_git_context npx vitest run --coverage 2>&1)
               TESTS_EXIT_CODE=$?
               echo "$TESTS_OUTPUT" | head -60
               if [ "$TESTS_EXIT_CODE" -ne 0 ]; then
@@ -1857,7 +1871,7 @@ else
           fi
         else
           # Fallback: run_tests without coverage
-          TESTS_OUTPUT=$(run_tests 2>&1)
+          TESTS_OUTPUT=$(run_without_git_context run_tests 2>&1)
           TESTS_EXIT_CODE=$?
           echo "$TESTS_OUTPUT" | head -50
           if [ "$TESTS_EXIT_CODE" -ne 0 ]; then
@@ -1868,7 +1882,7 @@ else
         fi
       else
         # Non-TypeScript: standard adapter test flow
-        TESTS_OUTPUT=$(run_tests 2>&1)
+        TESTS_OUTPUT=$(run_without_git_context run_tests 2>&1)
         TESTS_EXIT_CODE=$?
         echo "$TESTS_OUTPUT" | head -50
         if [ "$TESTS_EXIT_CODE" -ne 0 ]; then
@@ -2172,11 +2186,11 @@ else
     case "$CURRENT_LANG" in
       "typescript")
         # Try local npx install first (devDependencies), fall back to global
-        if npx --no-install @archlinter/cli --version >/dev/null 2>&1; then
-          ARCHLINT_CMD="npx --no-install @archlinter/cli"
+        if [ -x "$PROJECT_ROOT/node_modules/.bin/archlint" ]; then
+          ARCHLINT_CMD="$PROJECT_ROOT/node_modules/.bin/archlint"
         elif command -v archlint >/dev/null 2>&1; then
           ARCHLINT_CMD="archlint"
-        elif npx @archlinter/cli --version >/dev/null 2>&1; then
+        elif (cd "$PROJECT_ROOT" && npx @archlinter/cli --version) >/dev/null 2>&1; then
           ARCHLINT_CMD="npx @archlinter/cli"
         else
           echo "     ❌ BLOCKED - archlint not installed"
@@ -2196,7 +2210,7 @@ else
          if [ "$ARCHLINT_EXIT" -ne 0 ]; then
            echo ""
            echo "❌ BLOCKED - Architecture violations detected"
-           if [ -f ".architecture-baseline.json" ]; then
+            if [ -f ".architecture-baseline.json" ]; then
              echo "New architecture violations found (baseline ratchet mode)."
              echo "Fix the new violations above, or update the baseline with: npx @archlinter/cli snapshot -o .architecture-baseline.json"
            else
@@ -2205,7 +2219,7 @@ else
            fi
            exit 1
          fi
-         if [ -f ".architecture-baseline.json" ]; then
+          if [ -f ".architecture-baseline.json" ]; then
            echo "     ✅ TypeScript architecture validation completed (baseline ratchet mode)."
          else
            echo "     ✅ TypeScript architecture validation completed (zero-tolerance mode). no baseline found."

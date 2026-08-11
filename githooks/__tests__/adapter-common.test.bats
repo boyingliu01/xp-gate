@@ -29,6 +29,113 @@ setup() {
   [ "$status" -eq 1 ]
 }
 
+@test "run_without_git_context isolates nested git commands from hook environment" {
+  outer_repo=$(mktemp -d)
+  nested_repo=$(mktemp -d)
+  git -C "$outer_repo" init --quiet
+
+  export GIT_DIR="$outer_repo/.git"
+  export GIT_INDEX_FILE="$outer_repo/.git/index"
+
+  run run_without_git_context git -C "$nested_repo" init --quiet
+
+  [ "$status" -eq 0 ]
+  [ -d "$nested_repo/.git" ]
+}
+
+@test "run_without_git_context isolates nested git when hook Git dir is invalid" {
+  nested_repo=$(mktemp -d)
+  export GIT_DIR=/missing/hook/git-dir
+  export GIT_INDEX_FILE=/missing/hook/index
+
+  run run_without_git_context git -C "$nested_repo" init --quiet
+
+  [ "$status" -eq 0 ]
+  [ -d "$nested_repo/.git" ]
+}
+
+@test "TypeScript adapter clears hook Git context before running tests" {
+  fake_bin=$(mktemp -d)
+  cat > "$fake_bin/npx" <<'EOF'
+#!/usr/bin/env bash
+[ -z "${GIT_DIR-}" ]
+[ -z "${GIT_INDEX_FILE-}" ]
+if [ "$2" = "--version" ]; then
+  exit 0
+fi
+EOF
+  chmod +x "$fake_bin/npx"
+  PATH="$fake_bin:$PATH"
+  export GIT_DIR=/missing/hook/git-dir
+  export GIT_INDEX_FILE=/missing/hook/index
+  source "$BATS_TEST_DIRNAME/../adapters/typescript.sh"
+
+  run run_tests
+
+  [ "$status" -eq 0 ]
+}
+
+@test "TypeScript test runner discovery clears hook Git context" {
+  run grep -F 'if run_without_git_context npx vitest --version' "$BATS_TEST_DIRNAME/../adapters/typescript.sh"
+  [ "$status" -eq 0 ]
+
+  run grep -F 'if run_without_git_context npx vitest --version' "$BATS_TEST_DIRNAME/../pre-commit"
+  [ "$status" -eq 0 ]
+}
+
+@test "pre-commit uses project-root package metadata from nested directories" {
+  run grep -F 'if [ "$CURRENT_LANG" = "typescript" ] && { [ -f "package.json" ] || [ -f "$PROJECT_ROOT/package.json" ]; }; then' "$BATS_TEST_DIRNAME/../pre-commit"
+  [ "$status" -eq 0 ]
+}
+
+@test "pre-commit provides Git context fallback for stale global adapters" {
+  unset -f run_without_git_context
+  fallback=$(awk '
+    /^# BEGIN GIT CONTEXT FALLBACK$/ { capture = 1; next }
+    /^# END GIT CONTEXT FALLBACK$/ { capture = 0 }
+    capture
+  ' "$BATS_TEST_DIRNAME/../pre-commit")
+  eval "$fallback"
+  export GIT_DIR=/missing/hook/git-dir
+  export GIT_INDEX_FILE=/missing/hook/index
+
+  run run_without_git_context bash -c \
+    '[ -z "${GIT_DIR-}" ] && [ -z "${GIT_INDEX_FILE-}" ]'
+
+  [ "$status" -eq 0 ]
+}
+
+@test "pre-commit isolates stale adapter test functions from Git context" {
+  unset -f run_without_git_context
+  fallback=$(awk '
+    /^# BEGIN GIT CONTEXT FALLBACK$/ { capture = 1; next }
+    /^# END GIT CONTEXT FALLBACK$/ { capture = 0 }
+    capture
+  ' "$BATS_TEST_DIRNAME/../pre-commit")
+  eval "$fallback"
+  run_tests() {
+    [ -z "${GIT_DIR-}" ] && [ -z "${GIT_INDEX_FILE-}" ]
+  }
+  export GIT_DIR=/missing/hook/git-dir
+  export GIT_INDEX_FILE=/missing/hook/index
+
+  run run_without_git_context run_tests
+
+  [ "$status" -eq 0 ]
+}
+
+@test "pre-commit defines Git context fallback before repository discovery" {
+  fallback_line=$(grep -n '^# BEGIN GIT CONTEXT FALLBACK$' "$BATS_TEST_DIRNAME/../pre-commit" | cut -d: -f1)
+  discovery_line=$(grep -n '^PROJECT_GITHOOKS=' "$BATS_TEST_DIRNAME/../pre-commit" | cut -d: -f1)
+
+  [ "$fallback_line" -lt "$discovery_line" ]
+}
+
+@test "pre-commit isolates the project-root repository lookup" {
+  run grep -F 'PROJECT_ROOT="$(run_without_git_context git rev-parse --show-toplevel' "$BATS_TEST_DIRNAME/../pre-commit"
+  [ "$status" -eq 0 ]
+}
+
 @test "detect_project_lang returns typescript for tsconfig.json project" {
   # Create temp tsconfig.json
   echo '{}' > /tmp/test-tsconfig.json
@@ -222,4 +329,3 @@ setup() {
   # For now, we just verify the hook runs
   [[ "$PRE_COMMIT_OUTPUT" != "" ]]
 }
-

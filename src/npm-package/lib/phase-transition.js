@@ -25,7 +25,7 @@
 const path = require('path');
 const fs = require('fs');
 const crypto = require('crypto');
-const { execSync } = require('child_process');
+const { execFileSync, execSync } = require('child_process');
 const { SprintStateManager } = require('./sprint-state-manager');
 
 /**
@@ -57,6 +57,22 @@ const EVIDENCE_FILES = {
   },
 };
 
+const GIT_REPOSITORY_ENV_VARS = [
+  'GIT_ALTERNATE_OBJECT_DIRECTORIES', 'GIT_CONFIG', 'GIT_CONFIG_PARAMETERS',
+  'GIT_CONFIG_COUNT', 'GIT_OBJECT_DIRECTORY', 'GIT_DIR', 'GIT_WORK_TREE',
+  'GIT_IMPLICIT_WORK_TREE', 'GIT_GRAFT_FILE', 'GIT_INDEX_FILE',
+  'GIT_NO_REPLACE_OBJECTS', 'GIT_REPLACE_REF_BASE', 'GIT_PREFIX',
+  'GIT_SHALLOW_FILE', 'GIT_COMMON_DIR',
+];
+
+function createRepositoryGitEnv() {
+  const env = { ...process.env };
+  for (const name of GIT_REPOSITORY_ENV_VARS) {
+    delete env[name];
+  }
+  return env;
+}
+
 /**
  * Get current HEAD commit hash from a project directory.
  * Returns 'unknown' if not in a git repo.
@@ -67,6 +83,7 @@ function getCurrentHeadCommit(projectDir) {
   try {
     return execSync('git rev-parse HEAD', {
       cwd: projectDir,
+      env: createRepositoryGitEnv(),
       encoding: 'utf8',
       stdio: ['pipe', 'pipe', 'pipe'],
     }).trim();
@@ -539,16 +556,25 @@ function checkWalkthrough(projectDir) {
     return { ok: false, errors, warnings };
   }
 
-  // Check commit is ancestor of HEAD
-  if (data.commit) {
-    try {
-      execSync(`git merge-base --is-ancestor ${data.commit} HEAD`, {
-        cwd: projectDir, stdio: 'pipe',
-      });
-    } catch {
-      errors.push(`Code walkthrough commit ${data.commit} is not an ancestor of HEAD`);
+  if (typeof data.commit !== 'string' || !/^[0-9a-f]{7,64}$/i.test(data.commit)) {
+    errors.push('Code walkthrough commit must be a hexadecimal Git commit ID');
+    return { ok: false, errors, warnings };
+  }
+
+  try {
+    const currentCommit = execFileSync('git', ['rev-parse', 'HEAD'], {
+      cwd: projectDir,
+      env: createRepositoryGitEnv(),
+      encoding: 'utf8',
+      stdio: 'pipe',
+    }).trim();
+    if (data.commit !== currentCommit) {
+      errors.push(`Code walkthrough commit ${data.commit} does not match HEAD ${currentCommit}`);
       return { ok: false, errors, warnings };
     }
+  } catch {
+    errors.push('Unable to resolve the current Git commit for code walkthrough validation');
+    return { ok: false, errors, warnings };
   }
 
   // Check expiration
@@ -585,8 +611,10 @@ function checkBypassAudit(projectDir) {
       if (entry.type === 'precommit_bypass' && entry.commit) {
         // Verify the commit is on the current branch
         try {
-          execSync(`git merge-base --is-ancestor ${entry.commit} HEAD`, {
-            cwd: projectDir, stdio: 'pipe',
+          execFileSync('git', ['merge-base', '--is-ancestor', entry.commit, 'HEAD'], {
+            cwd: projectDir,
+            env: createRepositoryGitEnv(),
+            stdio: 'pipe',
           });
           bypassedCommits.push(entry.commit);
         } catch {
