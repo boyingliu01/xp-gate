@@ -58,11 +58,11 @@ setup() {
   fake_bin=$(mktemp -d)
   cat > "$fake_bin/npx" <<'EOF'
 #!/usr/bin/env bash
+[ -z "${GIT_DIR-}" ]
+[ -z "${GIT_INDEX_FILE-}" ]
 if [ "$2" = "--version" ]; then
   exit 0
 fi
-[ -z "${GIT_DIR-}" ]
-[ -z "${GIT_INDEX_FILE-}" ]
 EOF
   chmod +x "$fake_bin/npx"
   PATH="$fake_bin:$PATH"
@@ -72,6 +72,14 @@ EOF
 
   run run_tests
 
+  [ "$status" -eq 0 ]
+}
+
+@test "TypeScript test runner discovery clears hook Git context" {
+  run grep -F 'if run_without_git_context npx vitest --version' "$BATS_TEST_DIRNAME/../adapters/typescript.sh"
+  [ "$status" -eq 0 ]
+
+  run grep -F 'if run_without_git_context npx vitest --version' "$BATS_TEST_DIRNAME/../pre-commit"
   [ "$status" -eq 0 ]
 }
 
