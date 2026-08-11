@@ -19,6 +19,14 @@ teardown() {
   rm -rf "$TEST_DIR"
 }
 
+@test "local archlint resolves to a project-root binary" {
+  run grep -F 'if [ -x "$PROJECT_ROOT/node_modules/.bin/archlint" ]; then' "$BATS_TEST_DIRNAME/../pre-commit"
+  [ "$status" -eq 0 ]
+
+  run grep -F 'ARCHLINT_CMD="$PROJECT_ROOT/node_modules/.bin/archlint"' "$BATS_TEST_DIRNAME/../pre-commit"
+  [ "$status" -eq 0 ]
+}
+
 @test "Gate 9 header displayed in pre-commit output" {
   cat > package.json << 'EOF'
 {
