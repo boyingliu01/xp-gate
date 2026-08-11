@@ -38,7 +38,7 @@ describe('upgrade.js --apply execSync path', () => {
     return ee;
   }
 
-  function withMockedEnv(latestVersion, spawnImpl, fn) {
+  async function withMockedEnv(latestVersion, spawnImpl, fn) {
     const fs = require('fs');
     const os = require('os');
     const cpPath = require('path').join(os.homedir(), '.xp-gate', 'version-cache.json');
@@ -48,8 +48,21 @@ describe('upgrade.js --apply execSync path', () => {
     evictCache();
     const cp = require('child_process');
     const https = require('https');
-    const saved = { spawn: cp.spawn, httpsGet: https.get };
+    const updateSkillPath = require.resolve('../update-skill');
+    const saved = {
+      spawn: cp.spawn,
+      httpsGet: https.get,
+      updateSkillCache: require.cache[updateSkillPath],
+    };
     cp.spawn = spawnImpl;
+    require.cache[updateSkillPath] = {
+      id: updateSkillPath,
+      filename: updateSkillPath,
+      loaded: true,
+      exports: { updateSkill: vi.fn(async () => 0) },
+      children: [],
+      paths: [],
+    };
     const body = JSON.stringify({ latest: latestVersion });
     https.get = (_url, _opts, cb) => {
       const callback = typeof _opts === 'function' ? _opts : cb;
@@ -67,10 +80,12 @@ describe('upgrade.js --apply execSync path', () => {
     };
     try {
       const m = require('../upgrade');
-      return fn(m);
+      return await fn(m);
     } finally {
       cp.spawn = saved.spawn;
       https.get = saved.httpsGet;
+      if (saved.updateSkillCache) require.cache[updateSkillPath] = saved.updateSkillCache;
+      else delete require.cache[updateSkillPath];
     }
   }
 
@@ -134,7 +149,7 @@ describe('upgrade.js --apply execSync path', () => {
   }, 10000);
 
   // ── withMockedEnv variant: also mocks getLocalVersion() to return null ──
-  function withMockedEnvNoLocal(latestVersion, spawnImpl, fn) {
+  async function withMockedEnvNoLocal(latestVersion, spawnImpl, fn) {
     const fs = require('fs');
     const os = require('os');
     const cpPath = require('path').join(os.homedir(), '.xp-gate', 'version-cache.json');
@@ -172,7 +187,7 @@ describe('upgrade.js --apply execSync path', () => {
     };
     try {
       const m = require('../upgrade');
-      return fn(m);
+      return await fn(m);
     } finally {
       cp.spawn = saved.spawn;
       https.get = saved.httpsGet;

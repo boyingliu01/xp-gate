@@ -27,6 +27,17 @@ detect_os_env() {
     esac
 }
 
+# Git exports repository-local variables to hooks. Child test processes must
+# not inherit them, or nested git repositories modify the caller's repository.
+run_without_git_context() (
+  unset GIT_ALTERNATE_OBJECT_DIRECTORIES GIT_CONFIG GIT_CONFIG_PARAMETERS
+  unset GIT_CONFIG_COUNT GIT_OBJECT_DIRECTORY GIT_DIR GIT_WORK_TREE
+  unset GIT_IMPLICIT_WORK_TREE GIT_GRAFT_FILE GIT_INDEX_FILE
+  unset GIT_NO_REPLACE_OBJECTS GIT_REPLACE_REF_BASE GIT_PREFIX
+  unset GIT_SHALLOW_FILE GIT_COMMON_DIR
+  "$@"
+)
+
 detect_project_lang() {
   if [ -f "tsconfig.json" ]; then
     echo "typescript"

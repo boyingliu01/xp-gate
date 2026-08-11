@@ -97,3 +97,16 @@ describe('publishConfig for scoped packages', () => {
     expect(pkg.publishConfig?.access).toBe('public');
   });
 });
+
+describe('published adapter-common.sh', () => {
+  it('matches the canonical Git hook adapter helper', () => {
+    const canonical = fs.readFileSync(
+      path.join(pkgDir, '..', '..', 'githooks', 'adapter-common.sh'),
+      'utf8'
+    );
+    const published = fs.readFileSync(path.join(pkgDir, 'adapter-common.sh'), 'utf8');
+
+    expect(published).toBe(canonical);
+    expect(published).toContain('run_without_git_context');
+  });
+});

@@ -14,7 +14,22 @@ let TMP_DIR;
 let cwdSpy;
 
 function git(cmd, dir) {
-  return execSync(`git ${cmd}`, { cwd: dir || TMP_DIR, encoding: 'utf8', stdio: ['pipe', 'pipe', 'pipe'] });
+  const gitEnv = { ...process.env };
+  for (const name of [
+    'GIT_ALTERNATE_OBJECT_DIRECTORIES', 'GIT_CONFIG', 'GIT_CONFIG_PARAMETERS',
+    'GIT_CONFIG_COUNT', 'GIT_OBJECT_DIRECTORY', 'GIT_DIR', 'GIT_WORK_TREE',
+    'GIT_IMPLICIT_WORK_TREE', 'GIT_GRAFT_FILE', 'GIT_INDEX_FILE',
+    'GIT_NO_REPLACE_OBJECTS', 'GIT_REPLACE_REF_BASE', 'GIT_PREFIX',
+    'GIT_SHALLOW_FILE', 'GIT_COMMON_DIR',
+  ]) {
+    delete gitEnv[name];
+  }
+  return execSync(`git ${cmd}`, {
+    cwd: dir || TMP_DIR,
+    env: gitEnv,
+    encoding: 'utf8',
+    stdio: ['pipe', 'pipe', 'pipe'],
+  });
 }
 
 function writeSprintState(state, dir) {
@@ -180,5 +195,89 @@ describe('sprint-status --rework-check (#369)', () => {
 
     expect(code).toBe(0);
     expect(output).toContain('No closed sprints within 1 day');
+  });
+
+  test('(e) --dir takes precedence over inherited Git hook repository variables', async () => {
+    const targetDir = fs.mkdtempSync(path.join(os.tmpdir(), 'rework-target-'));
+    const outerDir = fs.mkdtempSync(path.join(os.tmpdir(), 'rework-outer-'));
+
+    for (const dir of [targetDir, outerDir]) {
+      git('init', dir);
+      git('config user.email "test@test.com"', dir);
+      git('config user.name "Test"', dir);
+    }
+    makeCommit('feat: target initial', targetDir);
+    makeCommit('fix: target bug', targetDir);
+    makeCommit('fix: outer one', outerDir);
+    makeCommit('fix: outer two', outerDir);
+    makeCommit('fix: outer three', outerDir);
+
+    writeSprintState({
+      _schema_version: 1,
+      id: 'sprint-hook-env',
+      task_description: 'Hook environment sprint',
+      phase: 6,
+      status: 'completed',
+      started_at: daysAgo(9),
+      isolation: { worktree_path: null, branch: 'main' },
+      phase_history: [],
+      metrics: { completed_at: daysAgo(2), total_sprint_commits: 10 },
+    }, targetDir);
+    cwdSpy.mockReturnValue(targetDir);
+
+    const previousGitDir = process.env.GIT_DIR;
+    const previousWorkTree = process.env.GIT_WORK_TREE;
+    process.env.GIT_DIR = path.join(outerDir, '.git');
+    process.env.GIT_WORK_TREE = outerDir;
+    const logSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
+    try {
+      const code = await handleSprintStatus([
+        '--rework-check', '--window-days', '7', '--dir', targetDir,
+      ]);
+      const output = logSpy.mock.calls.map(c => c.join(' ')).join('\n');
+
+      expect(code).toBe(0);
+      expect(output).toContain('10.0%');
+      expect(output).toContain('1 fix / 10 total commits');
+    } finally {
+      logSpy.mockRestore();
+      if (previousGitDir === undefined) delete process.env.GIT_DIR;
+      else process.env.GIT_DIR = previousGitDir;
+      if (previousWorkTree === undefined) delete process.env.GIT_WORK_TREE;
+      else process.env.GIT_WORK_TREE = previousWorkTree;
+      fs.rmSync(targetDir, { recursive: true, force: true });
+      fs.rmSync(outerDir, { recursive: true, force: true });
+    }
+  });
+
+  test('(f) completed_at cannot inject shell commands into the Git log query', async () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'rework-injection-'));
+    const markerFile = path.join(dir, 'injection-marker');
+    cwdSpy.mockReturnValue(dir);
+    git('init', dir);
+    git('config user.email "test@test.com"', dir);
+    git('config user.name "Test"', dir);
+    makeCommit('fix: target bug', dir);
+
+    writeSprintState({
+      _schema_version: 1,
+      id: 'sprint-injection',
+      phase: 6,
+      status: 'completed',
+      metrics: {
+        completed_at: `Thu, 06 Aug 2026 00:00:00 GMT ("; touch ${markerFile}; #)`,
+        total_sprint_commits: 1,
+      },
+    }, dir);
+
+    const logSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
+    try {
+      const code = await handleSprintStatus(['--rework-check', '--window-days', '3650', '--dir', dir]);
+      expect(code).toBe(0);
+      expect(fs.existsSync(markerFile)).toBe(false);
+    } finally {
+      logSpy.mockRestore();
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
   });
 });
