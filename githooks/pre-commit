@@ -2179,6 +2179,15 @@ elif has_project_lang "powershell" 2>/dev/null || [ "$PROJECT_LANG" = "powershel
      echo "     ⏭️  SKIPPED - Architecture validation (no tool for PowerShell)"
 
 else
+  run_archlint() (
+    cd "$PROJECT_ROOT" || exit 1
+    if [ "$ARCHLINT_KIND" = "npx" ]; then
+      npx @archlinter/cli "$@"
+    else
+      "$ARCHLINT_BIN" "$@"
+    fi
+  )
+
   # Check if architecture config exists (use $PROJECT_ROOT — hook may have cd'd to a subdir via ARCH-03)
   if [ -f "$PROJECT_ROOT/architecture.yaml" ] || [ -f "$PROJECT_ROOT/.architecturerc" ] || [ -f "$PROJECT_ROOT/.archlint.yaml" ]; then
     # Different architecture tools per language
@@ -2187,11 +2196,13 @@ else
       "typescript")
         # Try local npx install first (devDependencies), fall back to global
         if [ -x "$PROJECT_ROOT/node_modules/.bin/archlint" ]; then
-          ARCHLINT_CMD="$PROJECT_ROOT/node_modules/.bin/archlint"
+          ARCHLINT_KIND="binary"
+          ARCHLINT_BIN="$PROJECT_ROOT/node_modules/.bin/archlint"
         elif command -v archlint >/dev/null 2>&1; then
-          ARCHLINT_CMD="archlint"
+          ARCHLINT_KIND="binary"
+          ARCHLINT_BIN="$(command -v archlint)"
         elif (cd "$PROJECT_ROOT" && npx @archlinter/cli --version) >/dev/null 2>&1; then
-          ARCHLINT_CMD="npx @archlinter/cli"
+          ARCHLINT_KIND="npx"
         else
           echo "     ❌ BLOCKED - archlint not installed"
           echo "     Install with: npm install --save-dev @archlinter/cli"
@@ -2200,17 +2211,17 @@ else
          echo "     Running archlint for TypeScript..."
           # Use diff mode with baseline for ratchet (block only new violations)
           # Fall back to raw scan if no baseline exists (new project, zero-tolerance)
-          if [ -f ".architecture-baseline.json" ]; then
-            ARCHLINT_OUTPUT=$($ARCHLINT_CMD diff .architecture-baseline.json --fail-on high 2>&1)
+          if [ -f "$PROJECT_ROOT/.architecture-baseline.json" ]; then
+            ARCHLINT_OUTPUT=$(run_archlint diff .architecture-baseline.json --fail-on high 2>&1)
           else
-            ARCHLINT_OUTPUT=$($ARCHLINT_CMD scan . -f table --quiet 2>&1)
+            ARCHLINT_OUTPUT=$(run_archlint scan . -f table --quiet 2>&1)
           fi
          ARCHLINT_EXIT=$?
          echo "$ARCHLINT_OUTPUT" | tail -30
          if [ "$ARCHLINT_EXIT" -ne 0 ]; then
            echo ""
            echo "❌ BLOCKED - Architecture violations detected"
-            if [ -f ".architecture-baseline.json" ]; then
+             if [ -f "$PROJECT_ROOT/.architecture-baseline.json" ]; then
              echo "New architecture violations found (baseline ratchet mode)."
              echo "Fix the new violations above, or update the baseline with: npx @archlinter/cli snapshot -o .architecture-baseline.json"
            else
@@ -2219,7 +2230,7 @@ else
            fi
            exit 1
          fi
-          if [ -f ".architecture-baseline.json" ]; then
+           if [ -f "$PROJECT_ROOT/.architecture-baseline.json" ]; then
            echo "     ✅ TypeScript architecture validation completed (baseline ratchet mode)."
          else
            echo "     ✅ TypeScript architecture validation completed (zero-tolerance mode). no baseline found."
@@ -2290,7 +2301,7 @@ else
       echo "   Required configuration file (.archlint.yaml / architecture.yaml) is NOT found."
       echo "   Architecture Quality Gate requires explicit architecture constraints."
       echo ""
-      echo "   Create .archlint.yaml with: npx archlint init --no-interactive"
+  echo "   Quick fix: create .archlint.yaml with: npx archlint init --no-interactive"
       echo "   Or architecture.yaml for custom Clean Architecture layer definitions:"
       echo "     layers:"
       echo "       - name: api"
