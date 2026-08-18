@@ -62,6 +62,7 @@ rules:
     - 'src/npm-package/principles/**'
     - 'src/npm-package/mock-policy/**'
     - 'src/npm-package/mutation/**'
+    - 'src/npm-package/build-integrity/**'
     - 'src/npm-package/debugger/**'
     - 'src/npm-package/architecture/**'
     - 'src/npm-package/rules/**'
