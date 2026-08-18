@@ -28,6 +28,31 @@ describe('check-version.js — REQ-001-01', () => {
   let tmpHome;
   let origReadFileSync;
 
+  function installFakeHttpsGet(latestVersion) {
+    const https = require('https');
+    const saved = https.get;
+    https.get = (_url, options, callbackArg) => {
+      const callback = typeof options === 'function' ? options : callbackArg;
+      if (!callback) return { on: () => undefined, destroy: () => undefined };
+      const response = {
+        statusCode: 200,
+        on: (event, handler) => {
+          const eventArgs = {
+            data: [JSON.stringify({ latest: latestVersion })],
+            end: [],
+          };
+          if (Object.hasOwn(eventArgs, event)) handler(...eventArgs[event]);
+          return response;
+        },
+      };
+      callback(response);
+      return { on: () => undefined, destroy: () => undefined };
+    };
+    return () => {
+      https.get = saved;
+    };
+  }
+
   beforeEach(() => {
     vi.resetModules();
     origHome = process.env.HOME;
@@ -224,23 +249,7 @@ describe('check-version.js — REQ-001-01', () => {
         try { fsm.unlinkSync(cpPath); } catch { }
       }
       evictCache();
-      const https = require('https');
-      const saved = https.get;
-      const body = JSON.stringify({ latest: latestVersion });
-      https.get = (_url, _opts, cb) => {
-        const callback = typeof _opts === 'function' ? _opts : cb;
-        if (!callback) return { on: () => undefined, destroy: () => undefined };
-        const mockRes = {
-          statusCode: 200,
-          on: (evt, handler) => {
-            if (evt === 'data') handler(body);
-            if (evt === 'end') handler();
-            return mockRes;
-          },
-        };
-        callback(mockRes);
-        return { on: () => undefined, destroy: () => undefined };
-      };
+      const restoreHttpsGet = installFakeHttpsGet(latestVersion);
       // Mock getLocalVersion to return a fixed version so tests don't
       // depend on the real package.json version (which drifts over time).
       const savedReadFileSync = fsm.readFileSync;
@@ -258,7 +267,7 @@ describe('check-version.js — REQ-001-01', () => {
         const m = require('../check-version');
         return await fn(m);
       } finally {
-        https.get = saved;
+        restoreHttpsGet();
         fsm.readFileSync = savedReadFileSync;
       }
     }
@@ -309,28 +318,12 @@ describe('check-version.js — REQ-001-01', () => {
         try { fsm.unlinkSync(cpPath); } catch { }
       }
       evictCache();
-      const https = require('https');
-      const saved = https.get;
-      const body = JSON.stringify({ latest: latestVersion });
-      https.get = (_url, _opts, cb) => {
-        const callback = typeof _opts === 'function' ? _opts : cb;
-        if (!callback) return { on: () => undefined, destroy: () => undefined };
-        const mockRes = {
-          statusCode: 200,
-          on: (evt, handler) => {
-            if (evt === 'data') handler(body);
-            if (evt === 'end') handler();
-            return mockRes;
-          },
-        };
-        callback(mockRes);
-        return { on: () => undefined, destroy: () => undefined };
-      };
+      const restoreHttpsGet = installFakeHttpsGet(latestVersion);
       try {
         const m = require('../check-version');
         return fn(m, cpPath);
       } finally {
-        https.get = saved;
+        restoreHttpsGet();
       }
     }
 
