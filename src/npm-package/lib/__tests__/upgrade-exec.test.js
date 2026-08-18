@@ -13,8 +13,36 @@
  */
 
 const { EventEmitter } = require('events');
+const fs = require('fs');
+const os = require('os');
+const path = require('path');
 
 describe('upgrade.js --apply execSync path', () => {
+  let cacheDir;
+  let savedCacheDir;
+  let savedHttpsGet;
+  let savedSpawn;
+  let savedReadFileSync;
+
+  beforeEach(() => {
+    savedCacheDir = process.env.XP_GATE_CACHE_DIR;
+    savedHttpsGet = require('https').get;
+    savedSpawn = require('child_process').spawn;
+    savedReadFileSync = fs.readFileSync;
+    cacheDir = undefined;
+    cacheDir = fs.mkdtempSync(path.join(os.tmpdir(), 'upgrade-cache-'));
+    process.env.XP_GATE_CACHE_DIR = cacheDir;
+  });
+
+  afterEach(() => {
+    if (savedCacheDir === undefined) delete process.env.XP_GATE_CACHE_DIR;
+    else process.env.XP_GATE_CACHE_DIR = savedCacheDir;
+    require('https').get = savedHttpsGet;
+    require('child_process').spawn = savedSpawn;
+    fs.readFileSync = savedReadFileSync;
+    if (cacheDir) fs.rmSync(cacheDir, { recursive: true, force: true });
+  });
+
   function installFakeHttpsGet(latestVersion) {
     const https = require('https');
     const saved = https.get;
@@ -59,9 +87,7 @@ describe('upgrade.js --apply execSync path', () => {
   }
 
   async function withMockedEnv(latestVersion, spawnImpl, fn) {
-    const fs = require('fs');
-    const os = require('os');
-    const cpPath = require('path').join(os.homedir(), '.xp-gate', 'version-cache.json');
+    const cpPath = path.join(cacheDir, 'version-cache.json');
     if (fs.existsSync(cpPath)) {
       try { fs.unlinkSync(cpPath); } catch { }
     }
@@ -154,9 +180,7 @@ describe('upgrade.js --apply execSync path', () => {
 
   // ── withMockedEnv variant: also mocks getLocalVersion() to return null ──
   async function withMockedEnvNoLocal(latestVersion, spawnImpl, fn) {
-    const fs = require('fs');
-    const os = require('os');
-    const cpPath = require('path').join(os.homedir(), '.xp-gate', 'version-cache.json');
+    const cpPath = path.join(cacheDir, 'version-cache.json');
     if (fs.existsSync(cpPath)) {
       try { fs.unlinkSync(cpPath); } catch { }
     }
