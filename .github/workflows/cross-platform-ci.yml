@@ -251,16 +251,14 @@ jobs:
 
       - name: Run sync and verify no diff
         run: |
+          # Validate committed trees before sync can repair missing or stale files.
+          bash scripts/check-build-integrity-mirror.sh
+
           # Sync canonical sources to npm-package mirror directory
           bash scripts/sync-version.sh
           node src/npm-package/scripts/sync-package-content.js
 
-          # build-integrity is intentionally excluded from clone detection because
-          # sync-package-content.js generates this byte-identical npm mirror.
-          if ! diff -ru src/build-integrity src/npm-package/build-integrity; then
-            echo "FAIL: src/npm-package/build-integrity differs from canonical src/build-integrity"
-            exit 1
-          fi
+          bash scripts/check-build-integrity-mirror.sh --post-sync
 
           # Verify committed mirrors remain current after sync. A stale committed
           # build-integrity mirror is rewritten above and must still fail this guard.
