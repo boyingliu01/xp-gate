@@ -39,7 +39,7 @@ function runBashScript(scriptPath) {
  * same preamble the pre-commit hook sets up, then *sources* the fragment so it
  * behaves exactly as it does inside the commit hook.
  */
-function runGateAdapter(scriptPath) {
+function runGateAdapter(scriptPath, cwd = process.cwd()) {
   if (process.platform === 'win32') {
     try {
       execSync('bash --version', { stdio: 'pipe', timeout: 5000 });
@@ -50,23 +50,26 @@ function runGateAdapter(scriptPath) {
       return;
     }
   }
-  const adapterDir = path.dirname(scriptPath);
-  const commonScript = path.join(adapterDir, 'adapter-common.sh');
+  const scriptDir = path.dirname(scriptPath);
+  const commonScript = [
+    path.join(scriptDir, 'adapter-common.sh'),
+    path.join(scriptDir, '..', 'adapter-common.sh'),
+    path.join(cwd, 'githooks', 'adapter-common.sh'),
+  ].find(candidate => fs.existsSync(candidate)) || '';
+  const nowMsScript = [
+    path.join(scriptDir, 'lib', 'now-ms.sh'),
+    path.join(scriptDir, '..', 'lib', 'now-ms.sh'),
+    path.resolve(__dirname, '..', 'hooks', 'lib', 'now-ms.sh'),
+  ].find(candidate => fs.existsSync(candidate)) || '';
 
   // Build the shell preamble the pre-commit hook would otherwise inject before
   // sourcing the gate fragment, then source that fragment. Deliberately NOT
   // set -u (the pre-commit hook does not use it), so fragments that reference
   // a not-yet-defined variable fail the same way inside the commit hook.
   const wrap = [
-    'if [ -f "' + commonScript + '" ]; then source "' + commonScript + '"; fi',
-    'now_ms() {',
-    '  local ts',
-    "  ts=$(node -e 'console.log(Date.now())' 2>/dev/null)",
-    "  if [[ \"$ts\" =~ ^[0-9]+$ ]]; then echo \"$ts\"; return; fi",
-    '  ts=$(date +%s 2>/dev/null)',
-    '  if [[ "$ts" =~ ^[0-9]+$ ]]; then echo $((ts * 1000)); return; fi',
-    '  echo 0',
-    '}',
+    'if [ -n "$1" ] && [ -f "$1" ]; then source "$1"; fi',
+    'if [ -n "$2" ] && [ -f "$2" ]; then source "$2"; fi',
+    'if ! command -v now_ms >/dev/null 2>&1; then now_ms() { "$4" -e "console.log(Date.now())"; }; fi',
     'gate_start_ms() { now_ms; }',
     'record_gate_audit() { :; }',
     'PROJECT_LANG="$(detect_project_lang 2>/dev/null || echo unknown)"',
@@ -74,12 +77,16 @@ function runGateAdapter(scriptPath) {
     'if [ -z "${CHANGED_FILES}" ] && [ -n "$(git rev-parse HEAD 2>/dev/null)" ]; then',
     '  CHANGED_FILES="$(git diff HEAD --name-only --diff-filter=ACM 2>/dev/null || true)"',
     'fi',
-    'source "' + scriptPath + '"',
+    'source "$3"',
   ].join('\n');
 
   // execFileSync avoids an extra /bin/sh layer, so bash receives the script as a
   // single argv arg (no shell-metacharacter injection through the path).
-  execFileSync('bash', ['--noprofile', '--norc', '-c', wrap], { stdio: 'inherit' });
+  execFileSync(
+    'bash',
+    ['--noprofile', '--norc', '-c', wrap, 'xp-gate', commonScript, nowMsScript, scriptPath, process.execPath],
+    { stdio: 'inherit', cwd }
+  );
 }
 
 // Gate metadata registry — maps gate IDs to names, descriptions, and how to run them.
@@ -92,13 +99,14 @@ function runGateAdapter(scriptPath) {
  * Falls back to bash script if TypeScript module not found.
  */
 function runTsGate(gateModule, targetPath) {
+  const targetCwd = targetPath ? path.resolve(targetPath) : process.cwd();
   const entry = findTsGateEntry(gateModule);
   if (!entry) {
     // Fallback to bash script
     const gateNum = gateModule.replace('gate-', '');
-    const script = resolveGateScript(gateNum);
+    const script = resolveGateScript(gateNum, targetCwd);
     if (script) {
-      runGateAdapter(script);
+      runGateAdapter(script, targetCwd);
     } else {
       console.log(`Gate ${gateModule}: TypeScript module not found and no bash fallback available.`);
     }
@@ -111,7 +119,7 @@ function runTsGate(gateModule, targetPath) {
   const result = spawnSync('npx', args, {
     stdio: 'inherit',
     shell: process.platform === 'win32',
-    cwd: targetPath || process.cwd(),
+    cwd: targetCwd,
     timeout: 120000,
   });
 
@@ -134,6 +142,7 @@ function findTsGateEntry(gateModule) {
   }
   return null;
 }
+// allow: SIZE_OK - this module's bulk is the declarative gate registry below.
 const GATE_REGISTRY = {
   '0': {
     name: 'Version Consistency',
@@ -300,10 +309,10 @@ function findConfig(basePath, fileName) {
   return null;
 }
 
-function resolveGateScript(gateNum) {
+function resolveGateScript(gateNum, cwd = process.cwd()) {
   const candidates = [
-    path.join(process.cwd(), 'githooks', 'gates', `gate-${gateNum}-*.sh`),
-    path.join(process.cwd(), 'githooks', `gate-${gateNum}.sh`),
+    path.join(cwd, 'githooks', 'gates', `gate-${gateNum}-*.sh`),
+    path.join(cwd, 'githooks', `gate-${gateNum}.sh`),
   ];
 
   // Try glob patterns
