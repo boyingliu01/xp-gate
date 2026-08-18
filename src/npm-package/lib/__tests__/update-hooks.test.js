@@ -3,9 +3,9 @@
  * @intent Verify updateHooks correctly syncs hook files with proper backup, dry-run, scope, and detection behavior
  * @covers AC-265-01, AC-265-02, AC-265-03, AC-265-04, AC-265-05
  */
-const fs = require('fs');
-const path = require('path');
-const os = require('os');
+const fs = require('node:fs');
+const path = require('node:path');
+const os = require('node:os');
 
 describe('updateHooks', () => {
   let tmpHome;
@@ -14,7 +14,6 @@ describe('updateHooks', () => {
   let originalHome;
   let logSpy;
   let warnSpy;
-  let errorSpy;
 
   beforeEach(() => {
     originalHome = process.env.HOME;
@@ -25,7 +24,6 @@ describe('updateHooks', () => {
     vi.resetModules();
     logSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
     warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
-    errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
   });
 
   afterEach(() => {
@@ -39,14 +37,14 @@ describe('updateHooks', () => {
   /** Helper: create a fake package structure under tmpPackage */
   function createPackageSource(overrides = {}) {
     const hooksDir = path.join(tmpPackage, 'hooks');
-    const hookLibDir = path.join(hooksDir, 'lib');
+    const hooksLibDir = path.join(hooksDir, 'lib');
     const adaptersDir = path.join(tmpPackage, 'adapters');
-    fs.mkdirSync(hookLibDir, { recursive: true });
+    fs.mkdirSync(hooksLibDir, { recursive: true });
     fs.mkdirSync(adaptersDir, { recursive: true });
 
     fs.writeFileSync(path.join(hooksDir, 'pre-commit'), overrides['hooks/pre-commit'] || '#!/bin/bash\necho "hook-v2"');
     fs.writeFileSync(path.join(hooksDir, 'pre-push'), overrides['hooks/pre-push'] || '#!/bin/bash\necho "push-v2"');
-    fs.writeFileSync(path.join(hookLibDir, 'validate-code-walkthrough.cjs'), overrides['hooks/lib/validate-code-walkthrough.cjs'] || 'module.exports = "validator-v2";');
+    fs.writeFileSync(path.join(hooksLibDir, 'now-ms.sh'), overrides['hooks/lib/now-ms.sh'] || 'now_ms() { echo 123; }');
     fs.writeFileSync(path.join(tmpPackage, 'adapter-common.sh'), overrides['adapter-common.sh'] || '#!/bin/bash\necho "adapter-common-v2"');
     fs.writeFileSync(path.join(adaptersDir, 'typescript.sh'), overrides['adapters/typescript.sh'] || '#!/bin/bash\necho "ts-v2"');
     fs.writeFileSync(path.join(adaptersDir, 'python.sh'), overrides['adapters/python.sh'] || '#!/bin/bash\necho "py-v2"');
@@ -74,16 +72,6 @@ describe('updateHooks', () => {
 
       expect(fs.readFileSync(path.join(dest, 'pre-commit'), 'utf8')).toContain('hook-v2');
       expect(fs.readFileSync(path.join(dest, 'pre-push'), 'utf8')).toContain('push-v2');
-    });
-
-    it('installs hook libraries beside pre-push', () => {
-      createPackageSource();
-      const mod = getModule();
-      const dest = path.join(tmpProject, '.git', 'hooks');
-
-      mod.copyHooks(tmpPackage, dest, false, true);
-
-      expect(fs.readFileSync(path.join(dest, 'lib', 'validate-code-walkthrough.cjs'), 'utf8')).toContain('validator-v2');
     });
 
     it('creates destination directory if it does not exist', () => {
@@ -415,6 +403,47 @@ describe('updateHooks', () => {
       mod.getPackageRoot = origGetPackageRoot;
     });
 
+    it('copies hooks/lib/now-ms.sh during a normal update', () => {
+      createPackageSource();
+      const hooksDest = path.join(tmpProject, '.git', 'hooks');
+      fs.mkdirSync(hooksDest, { recursive: true });
+      vi.spyOn(process, 'cwd').mockReturnValue(tmpProject);
+      const mod = getModule();
+      mod.getPackageRoot = () => tmpPackage;
+
+      const result = mod.updateHooks({
+        global: false,
+        force: true,
+        dryRun: false,
+        noBackup: true,
+        scope: 'hooks',
+      });
+
+      expect(result).toBe(0);
+      expect(fs.readFileSync(path.join(hooksDest, 'lib', 'now-ms.sh'), 'utf8')).toContain('echo 123');
+    });
+
+    it('does not write hooks/lib/now-ms.sh during a dry run', () => {
+      createPackageSource();
+      const hooksDest = path.join(tmpProject, '.git', 'hooks');
+      fs.mkdirSync(hooksDest, { recursive: true });
+      vi.spyOn(process, 'cwd').mockReturnValue(tmpProject);
+      const mod = getModule();
+      mod.getPackageRoot = () => tmpPackage;
+
+      const result = mod.updateHooks({
+        global: false,
+        force: true,
+        dryRun: true,
+        noBackup: true,
+        scope: 'hooks',
+      });
+
+      expect(result).toBe(0);
+      expect(logSpy).toHaveBeenCalledWith('  would update: lib/now-ms.sh');
+      expect(fs.existsSync(path.join(hooksDest, 'lib', 'now-ms.sh'))).toBe(false);
+    });
+
     it('returns 1 when local modifications detected and no --force', () => {
       createPackageSource();
       const hooksDest = path.join(tmpProject, '.git', 'hooks');
@@ -483,8 +512,6 @@ describe('updateHooks', () => {
       expect(logSpy).toHaveBeenCalledWith('Dry run: yes (no files will be modified)');
       expect(logSpy).toHaveBeenCalledWith('  would update: pre-commit');
       expect(logSpy).toHaveBeenCalledWith('  would update: pre-push');
-      expect(logSpy).toHaveBeenCalledWith('  would update: lib/validate-code-walkthrough.cjs');
-      expect(fs.existsSync(path.join(gitDir, 'hooks', 'lib', 'validate-code-walkthrough.cjs'))).toBe(false);
 
       mod.getPackageRoot = origGetPackageRoot;
     });
@@ -508,7 +535,6 @@ describe('updateHooks', () => {
 
       expect(logSpy).toHaveBeenCalledWith('Updating hooks...');
       expect(logSpy).not.toHaveBeenCalledWith('Updating adapters...');
-      expect(fs.readFileSync(path.join(gitDir, 'hooks', 'lib', 'validate-code-walkthrough.cjs'), 'utf8')).toContain('validator-v2');
 
       mod.getPackageRoot = origGetPackageRoot;
     });
