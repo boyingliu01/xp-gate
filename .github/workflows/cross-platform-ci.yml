@@ -235,8 +235,8 @@ jobs:
           fi
           echo "PASS: detect_os_env() correctly handles OSTYPE=cygwin"
 
-  # Mirror Parity Guard: src/npm-package/skills/ and src/npm-package/plugins/ must equal canonical sources
-  # Prevents silent divergence between source-of-truth and npm-distributed copies (C-CRIT-2)
+  # Mirror Parity Guard: npm-package mirrors must equal their canonical sources.
+  # Prevents silent divergence in bundled skills, plugins, and build-integrity (C-CRIT-2).
   mirror-parity:
     name: Mirror Parity (npm-package vs canonical)
     runs-on: ubuntu-latest
@@ -254,6 +254,13 @@ jobs:
           # Sync canonical sources to npm-package mirror directory
           bash scripts/sync-version.sh
           node src/npm-package/scripts/sync-package-content.js
+
+          # build-integrity is intentionally excluded from clone detection because
+          # sync-package-content.js generates this byte-identical npm mirror.
+          if ! diff -ru src/build-integrity src/npm-package/build-integrity; then
+            echo "FAIL: src/npm-package/build-integrity differs from canonical src/build-integrity"
+            exit 1
+          fi
 
           # Verify content-level consistency only (ignore AGENTS.md metadata headers
           # which differ between CI and local because sync-version.sh writes
