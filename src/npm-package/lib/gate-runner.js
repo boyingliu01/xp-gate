@@ -1,29 +1,7 @@
-'use strict';
-
-const { execSync, execFileSync, spawnSync } = require('child_process');
-const fs = require('fs');
-const path = require('path');
-
-/**
- * Run a bash shell script cross-platform.
- * On Unix: uses bash directly.
- * On Windows: tries bash from PATH (Git Bash / WSL), falls back to a clear message.
- */
-function runBashScript(scriptPath) {
-  if (process.platform === 'win32') {
-    // Check if bash is available on Windows (Git Bash, MSYS2, WSL)
-    try {
-      execSync('bash --version', { stdio: 'pipe', timeout: 5000 });
-    } catch {
-      console.log('⚠️  This gate requires bash to run shell scripts.');
-      console.log('   On Windows, install Git for Windows (includes Git Bash) or enable WSL.');
-      console.log('   Alternatively, install the required tool directly and run the gate again.');
-      return;
-    }
-  }
-  // bash is available — run the script (Unix always, or Windows after check above)
-  execSync(`bash "${scriptPath}"`, { stdio: 'inherit' });
-}
+const { execSync, execFileSync, spawnSync } = require('node:child_process');
+const fs = require('node:fs');
+const os = require('node:os');
+const path = require('node:path');
 
 /**
  * Run a gate adapter fragment standalone.
@@ -61,6 +39,7 @@ function runGateAdapter(scriptPath, cwd = process.cwd()) {
     path.join(scriptDir, '..', 'lib', 'now-ms.sh'),
     path.resolve(__dirname, '..', 'hooks', 'lib', 'now-ms.sh'),
   ].find(candidate => fs.existsSync(candidate)) || '';
+  const changedFilesParameter = ['$', '{CHANGED_FILES}'].join('');
 
   // Build the shell preamble the pre-commit hook would otherwise inject before
   // sourcing the gate fragment, then source that fragment. Deliberately NOT
@@ -74,7 +53,7 @@ function runGateAdapter(scriptPath, cwd = process.cwd()) {
     'record_gate_audit() { :; }',
     'PROJECT_LANG="$(detect_project_lang 2>/dev/null || echo unknown)"',
     'CHANGED_FILES="$(git diff --cached --name-only --diff-filter=ACM 2>/dev/null || true)"',
-    'if [ -z "${CHANGED_FILES}" ] && [ -n "$(git rev-parse HEAD 2>/dev/null)" ]; then',
+    `if [ -z "${changedFilesParameter}" ] && [ -n "$(git rev-parse HEAD 2>/dev/null)" ]; then`,
     '  CHANGED_FILES="$(git diff HEAD --name-only --diff-filter=ACM 2>/dev/null || true)"',
     'fi',
     'source "$3"',
@@ -197,7 +176,7 @@ const GATE_REGISTRY = {
     name: 'Architecture + Boy Scout Rule',
     description: 'Architecture layer boundary validation and warning baseline enforcement',
     aliases: ['architecture', 'arch', '6'],
-    run: (targetPath) => {
+    run: () => {
       const { arch } = require('./arch.js');
       return arch([]);
     },
@@ -319,7 +298,6 @@ function resolveGateScript(gateNum, cwd = process.cwd()) {
   for (const pattern of candidates) {
     if (pattern.includes('*')) {
       const dir = path.dirname(pattern);
-      const prefix = path.basename(pattern).replace('*', '');
       if (fs.existsSync(dir)) {
         const match = fs.readdirSync(dir).find(f => f.startsWith(`gate-${gateNum}-`) && f.endsWith('.sh'));
         if (match) return path.join(dir, match);
@@ -330,7 +308,7 @@ function resolveGateScript(gateNum, cwd = process.cwd()) {
   }
 
   // Check global install
-  const globalDir = path.join(require('os').homedir(), '.config', 'xp-gate', 'adapters');
+  const globalDir = path.join(os.homedir(), '.config', 'xp-gate', 'adapters');
   const globalScript = path.join(globalDir, `gate-${gateNum}.sh`);
   if (fs.existsSync(globalScript)) return globalScript;
 
@@ -356,7 +334,7 @@ async function runGate(gateId, targetPath) {
   const gate = GATE_REGISTRY[String(gateId)];
   if (!gate) {
     console.error(`Unknown gate: ${gateId}`);
-    console.error('Available gates: ' + Object.keys(GATE_REGISTRY).join(', '));
+    console.error(`Available gates: ${Object.keys(GATE_REGISTRY).join(', ')}`);
     return 1;
   }
 
