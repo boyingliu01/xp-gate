@@ -85,7 +85,7 @@ AI 辅助编程把这个问题彻底改变了。AI 写完一段代码的速度�
 
 **第一步（AI 参与）：Delphi 多专家匿名评审**
 
-3 位不同厂家的国产模型匿名评审需求和设计，必须 ≥90% 一致才能通过。这一步在**写代码之前**完成，回答"需求是否合理"。基于 RAND 公司 1950 年代开发的 Delphi 方法论，消除锚定效应和单一视角盲区。
+3 位专家使用三个 distinct trimmed executable model IDs，匿名评审需求和设计，必须 ≥90% 一致才能通过。模型 provider、厂商、gateway 和国籍均不受限制，一个 provider 和 token plan 也可以服务三个角色。这一步在**写代码之前**完成，回答"需求是否合理"。基于 RAND 公司 1950 年代开发的 Delphi 方法论，消除锚定效应和单一视角盲区。
 
 **第二步（确定性）：`test-alignment` 引擎**
 
@@ -310,9 +310,9 @@ specification.yaml
        └── test-alignment ──► "测试是否覆盖每个需求、每个验收条件"
 ```
 
-### 模型选择（强制国产 + 多厂家交叉）
+### 模型选择（强制三个 distinct executable models）
 
-模型配置通过 `.delphi-config.json` 管理，推荐使用国产模型（如 DeepSeek、Qwen、GLM、Kimi、MiniMax 等）。**三个专家必须来自至少 2 家不同厂家**，避免单一模型的系统性盲区。具体模型名称以你的服务商 API 文档为准，配置示例见下方[配置说明](#配置说明)。
+模型配置通过 `.delphi-config.json` 管理。**architecture、technical、feasibility 三个专家必须成功执行，且 requested_model trimmed 后互不相同**。Provider、vendor、gateway 和模型国籍均不受限制。`provider: local` fallback 不能计数，local hosted endpoint 可以作为普通 callable provider。具体模型名称以你的 provider API 文档为准，配置示例见下方[配置说明](#配置说明)。
 
 ---
 
@@ -413,16 +413,20 @@ rules:
 ```json
 {
   "experts": [
-    { "id": "A", "role": "architecture", "model": "deepseek/deepseek-chat" },
-    { "id": "B", "role": "implementation", "model": "bailian/qwen-plus" },
-    { "id": "C", "role": "feasibility", "model": "zhipu/glm-4" }
+    { "id": "A", "role": "architecture", "model": "bailian-tp/qwen-plus" },
+    { "id": "B", "role": "technical", "model": "bailian-tp/deepseek-v3" },
+    { "id": "C", "role": "feasibility", "model": "bailian-tp/glm-4.5" }
   ],
-  "consensus_threshold": 0.90,
-  "max_rounds": 5
+  "consensus": {
+    "threshold_percent": 90,
+    "max_review_rounds": 5,
+    "distinct_models_required": true,
+    "cross_provider_required": true
+  }
 }
 ```
 
-> 配置示例包含 3 位专家、2 家不同厂家（deepseek + bailian + zhipu），满足跨厂家要求。2 专家配置（默认）适用于代码变更和简单设计评审。
+> 配置示例使用一个 provider 和 token plan，但三个 distinct 模型 ID。`cross_provider_required` 已废弃并忽略，只产生 `cross_provider_required_ignored` warning，不构成绕过。
 
 ---
 
@@ -472,4 +476,3 @@ MIT License. Copyright (c) 2024-2026 XP-Gate Contributors.
 - [Delphi 评审规范](./skills/delphi-review/SKILL.md)
 - [测试对齐验证](./skills/test-specification-alignment/SKILL.md)
 - [质量门禁守则](./githooks/QUALITY-GATES-CODE-OF-CONDUCT.md)
-
