@@ -627,6 +627,24 @@ describe('provider calls and provenance', () => {
     expect(JSON.stringify(result)).not.toContain('SECRET_TOKEN');
   });
 
+  it('redacts mutable network error metadata', async () => {
+    const { callModelAPI } = loadModule();
+    const networkError = new Error('SECRET_ERROR_MESSAGE');
+    networkError.name = 'SECRET_ERROR_NAME';
+    vi.stubGlobal('fetch', vi.fn().mockRejectedValue(networkError));
+
+    const result = await callModelAPI(
+      { base_url: 'https://example.test/v1', api_key: 'key' },
+      'model-a',
+      'system',
+      'user',
+    );
+
+    expect(result).toEqual({ error: true, message: 'Network error.' });
+    expect(JSON.stringify(result)).not.toContain('SECRET_ERROR_NAME');
+    expect(JSON.stringify(result)).not.toContain('SECRET_ERROR_MESSAGE');
+  });
+
   it('builds separate requested and resolved model provenance', () => {
     const { buildReviewOutput } = loadModule();
     const result = buildReviewOutput(
