@@ -165,61 +165,74 @@ describe('readConfig', () => {
   });
 });
 
-// ── validateCrossProvider ──────────────────────────────────────────────
-describe('validateCrossProvider', () => {
-  const { validateCrossProvider } = loadModule();
+// ── validateDistinctModels ─────────────────────────────────────────────
+describe('validateDistinctModels', () => {
+  const { validateDistinctModels } = loadModule();
 
-  it('passes with 2+ different providers', () => {
+  it('passes when one provider serves three distinct models', () => {
     const experts = {
-      architecture: { provider: 'deepseek', model: 'm1' },
-      technical: { provider: 'zhipu', model: 'm2' },
-      feasibility: { provider: 'dashscope', model: 'm3' },
+      architecture: { provider: 'bailian-tp', model: 'qwen3.7-max' },
+      technical: { provider: 'bailian-tp', model: 'deepseek-v4-pro' },
+      feasibility: { provider: 'bailian-tp', model: 'glm-5.2' },
     };
-    const providers = {
-      deepseek: { base_url: 'https://a.com' },
-      zhipu: { base_url: 'https://b.com' },
-      dashscope: { base_url: 'https://c.com' },
-    };
-    const result = validateCrossProvider(experts, providers);
-    expect(result.valid).toBe(true);
+    expect(validateDistinctModels(experts, {})).toEqual({ valid: true });
   });
 
-  it('fails when all experts use same provider', () => {
-    const experts = {
-      architecture: { provider: 'ds', model: 'm1' },
-      technical: { provider: 'ds', model: 'm1' },
-      feasibility: { provider: 'ds', model: 'm1' },
-    };
-    const providers = { ds: { base_url: 'https://a.com' } };
-    const result = validateCrossProvider(experts, providers);
+  it('fails when different providers use the same model', () => {
+    const result = validateDistinctModels({
+      architecture: { provider: 'qwen-provider', model: 'shared-model' },
+      technical: { provider: 'deepseek-provider', model: ' shared-model ' },
+      feasibility: { provider: 'glm-provider', model: 'other-model' },
+    }, {});
     expect(result.valid).toBe(false);
-    expect(result.reason).toContain('provider');
+    expect(result.reason).toContain('duplicate');
+    expect(result.reason).not.toContain('API key');
   });
 
-  it('ignores "local" experts when counting providers', () => {
-    const experts = {
-      architecture: { provider: 'deepseek', model: 'm1' },
-      technical: { provider: 'local' },
-      feasibility: { provider: 'zhipu', model: 'm2' },
-    };
-    const providers = {
-      deepseek: { base_url: 'https://a.com' },
-      zhipu: { base_url: 'https://b.com' },
-    };
-    const result = validateCrossProvider(experts, providers);
+  it('fails when a role has a missing model', () => {
+    const result = validateDistinctModels({
+      architecture: { provider: 'p', model: 'm1' },
+      technical: { provider: 'p' },
+      feasibility: { provider: 'p', model: 'm3' },
+    }, {});
+    expect(result.valid).toBe(false);
+    expect(result.reason).toContain('technical');
+  });
+
+  it('fails when a model is blank after trimming', () => {
+    const result = validateDistinctModels({
+      architecture: { provider: 'p', model: 'm1' },
+      technical: { provider: 'p', model: '   ' },
+      feasibility: { provider: 'p', model: 'm3' },
+    }, {});
+    expect(result.valid).toBe(false);
+    expect(result.reason).toContain('technical');
+  });
+
+  it('passes with three distinct local models', () => {
+    expect(validateDistinctModels({
+      architecture: { provider: 'local', model: 'local-a' },
+      technical: { provider: 'local', model: 'local-b' },
+      feasibility: { provider: 'local', model: 'local-c' },
+    }, {})).toEqual({ valid: true });
+  });
+
+  it('does not restore provider blocking when the legacy option is present', () => {
+    const result = validateDistinctModels({
+      architecture: { provider: 'same-provider', model: 'model-a' },
+      technical: { provider: 'same-provider', model: 'model-b' },
+      feasibility: { provider: 'same-provider', model: 'model-c' },
+    }, {}, { cross_provider_required: true });
     expect(result.valid).toBe(true);
   });
 
-  it('passes with only local experts (degraded mode)', () => {
-    const experts = {
-      architecture: { provider: 'local' },
-      technical: { provider: 'local' },
-      feasibility: { provider: 'local' },
-    };
-    const providers = {};
-    const result = validateCrossProvider(experts, providers);
-    expect(result.valid).toBe(true);
-    expect(result.warning).toBeTruthy();
+  it('requires all three expert roles', () => {
+    const result = validateDistinctModels({
+      architecture: { provider: 'p', model: 'm1' },
+      technical: { provider: 'p', model: 'm2' },
+    }, {});
+    expect(result.valid).toBe(false);
+    expect(result.reason).toContain('feasibility');
   });
 });
 
