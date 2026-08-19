@@ -18,6 +18,10 @@ describe('build-integrity mirror validation', () => {
     return spawnSync('git', args, { cwd: fixture, env: gitEnv, encoding: 'utf8' });
   }
 
+  function validate(...args) {
+    return spawnSync('bash', [script, ...args], { cwd: fixture, env: gitEnv, encoding: 'utf8' });
+  }
+
   beforeEach(() => {
     fixture = fs.mkdtempSync(path.join(os.tmpdir(), 'build-integrity-mirror-'));
     fs.mkdirSync(path.join(fixture, 'src/build-integrity'), { recursive: true });
@@ -68,5 +72,27 @@ describe('build-integrity mirror validation', () => {
     const result = spawnSync('bash', [script, '--post-sync'], { cwd: fixture, env: gitEnv, encoding: 'utf8' });
     expect(result.status).toBe(1);
     expect(result.stderr).toContain('?? src/npm-package/build-integrity/new.ts');
+  });
+
+  it.each([
+    ['canonical', 'src/build-integrity'],
+    ['npm mirror', 'src/npm-package/build-integrity'],
+  ])('rejects a committed symlinked %s tree before and after sync', (_name, relativePath) => {
+    const treePath = path.join(fixture, relativePath);
+    const targetPath = path.join(fixture, `target-${relativePath.replaceAll('/', '-')}`);
+    fs.mkdirSync(targetPath);
+    fs.writeFileSync(path.join(targetPath, 'existing.ts'), 'canonical\n');
+    fs.rmSync(treePath, { recursive: true });
+    try {
+      fs.symlinkSync(path.relative(path.dirname(treePath), targetPath), treePath, 'dir');
+    } catch (error) {
+      if (process.platform === 'win32' && error && error.code === 'EPERM') return;
+      throw error;
+    }
+    git(['add', '.']);
+    git(['commit', '-qm', `symlink ${relativePath}`]);
+
+    expect(validate().status).toBe(1);
+    expect(validate('--post-sync').status).toBe(1);
   });
 });
