@@ -62,10 +62,10 @@ grill 访谈达成共享理解后（或 CONTEXT.md 快速路径下读取已有�
 npx xp-gate delphi-review --mode requirements
 ```
 
-**评审配置**（轻量）：
+**评审配置**：
 - 复用现有 3 专家（architecture/feasibility/technical），`--mode requirements` 切换评审焦点提示词
 - 所有路径固定使用 3 专家，Round 1 独立执行并验证 distinct model IDs，最多 5 轮
-- lightweight sprint（`change_type == "修改已存在代码"`）：跳过 R1，需求评审合并入 R2
+- force level 只调整上下文深度与迭代预算；所有路径都执行 R1，不减少专家数
 
 **评审焦点**：
 - 用户场景遗漏
@@ -82,7 +82,13 @@ npx xp-gate delphi-review --mode requirements
   "verdict": "APPROVED | GAPS_FOUND",
   "timestamp": "<ISO 8601>",
   "requirements_hash": "<SHA-256 of 需求陈述 + CONTEXT.md 内容>",
-  "experts": 2,
+  "head_commit": "<git rev-parse HEAD>",
+  "experts": 3,
+  "expert_verdicts": [
+    { "role": "architecture", "result_type": "delphi_expert_result", "requested_model": "provider/model-a" },
+    { "role": "technical", "result_type": "delphi_expert_result", "requested_model": "provider/model-b" },
+    { "role": "feasibility", "result_type": "delphi_expert_result", "requested_model": "provider/model-c" }
+  ],
   "rounds": 1,
   "gaps": []
 }
@@ -90,10 +96,10 @@ npx xp-gate delphi-review --mode requirements
 
 **GAPS_FOUND 处理**：
 - 回到 Step 1 补充访谈（或补充 CONTEXT.md 内容）
-- 最多 2 轮循环后升级给用户决策
+- 最多 5 轮循环后升级给用户决策
 
 **程序化校验**：
-- `phase-transition 2 completed` 校验该文件存在、`verdict=APPROVED` 且 `requirements_hash` 匹配当前需求内容
+- `phase-transition 2 completed` 校验该文件存在、`verdict=APPROVED`、`requirements_hash` 有效且 `head_commit` 匹配当前 HEAD
 - 不匹配 → BLOCK（防陈旧绑定）
 
 ### Step 3: 原生设计文档生成
@@ -125,7 +131,7 @@ orchestrator 基于访谈记录 + CONTEXT.md + R1 评审结论生成设计文档
 
 | 暂停点 | 触发条件 | 用户操作 | 自动恢复条件 |
 |--------|---------|---------|-------------|
-| R1 GAPS_FOUND | 需求评审发现缺口 | 补充访谈/上下文 | 重新 R1 评审（最多 2 轮） |
+| R1 GAPS_FOUND | 需求评审发现缺口 | 补充访谈/上下文 | 重新 R1 评审（最多 5 轮） |
 | **HARD-GATE** | 设计文档未 APPROVED | 用户审批设计文档 | 设计 APPROVED 后自动进入 Part B |
 
 ### 输出

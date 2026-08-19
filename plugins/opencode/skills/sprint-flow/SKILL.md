@@ -339,7 +339,7 @@ stateDiagram-v2
     [*] --> PREP : trigger matched
     PREP --> DESIGN : worktree ready
     DESIGN --> BUILD : APPROVED ≥90%
-    DESIGN --> DESIGN : REQUEST_CHANGES (max 3 rounds)
+    DESIGN --> DESIGN : REQUEST_CHANGES (max 5 Delphi rounds)
     BUILD --> VERIFY : tests pass
     BUILD --> BUILD : fix cycle (max 3)
     VERIFY --> SHIP : feedback-log exists
@@ -348,7 +348,7 @@ stateDiagram-v2
     SHIP --> SHIP : CI failed (retry)
     CLOSE --> [*] : UAT confirmed
     BUILD --> BLOCKED : 3 fix cycles exhausted
-    DESIGN --> BLOCKED : 3 redesign rounds exhausted
+    DESIGN --> BLOCKED : 5 Delphi rounds exhausted
     BLOCKED --> [*] : user decision
 ```
 

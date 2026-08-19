@@ -277,7 +277,7 @@ Each round MUST output a structured round marker:
 
 **Rules**:
 - Every round marker MUST appear as a separate, identifiable line
-- Round numbering MUST be sequential (1, 2, 3)
+- Round numbering MUST be sequential (1 through at most 5)
 - After each round, output consensus summary: `consensus_ratio=N/N`, `verdict_status: converging | stable | diverging`
 - Final round MUST output verdict: `APPROVED | PASS_WITH_CAVEATS | REQUEST_CHANGES | PROCESS_BLOCK`
 
@@ -418,10 +418,7 @@ Phase 0: 准备 → Round 1: 匿名独立评审 → 共识检查
 
 ## Output Format (MANDATORY for L3)
 
-**⚠️ Single vs Multi-Expert Output**:
-- **Multi-Expert Mode (default)**: MUST use the full JSON schema below. Each expert outputs independently; the orchestrator aggregates into `consensus_report`.
-- **Single Reviewer Mode** (explicit `--single`): MAY use simplified text template: `[DelphiReview] verdict=APPROVED|REQUEST_CHANGES|BLOCKED confidence=N/10 issues=[critical:N, major:N, minor:N] summary: [1-2 sentences]`.
-- **Never mix formats**.
+Every Delphi mode MUST use the full JSON schema below. Architecture, technical, and feasibility each output independently; the orchestrator verifies all three executions before aggregating `consensus_report`. There is no single-reviewer Delphi approval path.
 
 ```json
 {
@@ -456,8 +453,9 @@ Phase 0: 准备 → Round 1: 匿名独立评审 → 共识检查
   "context_file_used": "CONTEXT.md",
   "round": 1,
   "expert_verdicts": [
-    { "role": "architecture", "verdict": "APPROVED", "confidence": 9 },
-    { "role": "feasibility", "verdict": "APPROVED", "confidence": 8 }
+    { "role": "architecture", "verdict": "APPROVED", "confidence": 9, "result_type": "delphi_expert_result", "requested_model": "provider/model-a" },
+    { "role": "technical", "verdict": "APPROVED", "confidence": 8, "result_type": "delphi_expert_result", "requested_model": "provider/model-b" },
+    { "role": "feasibility", "verdict": "APPROVED", "confidence": 8, "result_type": "delphi_expert_result", "requested_model": "provider/model-c" }
   ],
   "requirements_statement": "<short summary of what was reviewed>",
   "gaps_found": [],
@@ -476,7 +474,7 @@ Phase 0: 准备 → Round 1: 匿名独立评审 → 共识检查
 ## Terminal State Checklist
 
 - [ ] Phase 0 完成（文档验证 + 专家分配）
-- [ ] Round 1-3 完成（所有专家评审）
+- [ ] 已完成所需轮次（最多 5 轮，每轮三位专家均执行）
 - [ ] 问题共识比例 >=90%
 - [ ] 所有 Critical Issues 已解决，Major Concerns 已处理
 - [ ] 最终裁决是 **APPROVED** 或 **APPROVED_WITH_MINOR**
@@ -531,7 +529,7 @@ Phase 0: 准备 → Round 1: 匿名独立评审 → 共识检查
 | 要求跳过评审 | "skip review", "不用评审", "跳过评审" | → 提醒评审是投资而非开销 |
 | 时间压力 | "来不及", "时间紧", "emergency" | → 提醒时间紧迫正是需要评审的时刻 |
 | 提前终止 | Round 1 后用户说 "可以了", "够了" | → BLOCK: 评审未达终止条件 |
-| 单专家自评 | 用户仅指定 1 个专家 | → 提醒至少需要 2 位专家 |
+| 单专家自评 | 用户仅指定 1 个专家 | → BLOCK：Delphi 必须执行 architecture、technical、feasibility 三位专家 |
 | 无文档输入 | 仅触发词，无设计/代码内容 | → `[DelphiReview:BLOCKED]` |
 
 ---

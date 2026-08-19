@@ -2,11 +2,12 @@
 
 **执行时机**: Phase 2/6 DESIGN 之前，PREP AUTO-ESTIMATE 完成后。
 
-**目的**: 根据需求规模匹配适度评审流程，平衡质量保障与效率。
+**目的**: 根据需求规模调整上下文深度与迭代预算，平衡质量保障与效率。Force level 永远不改变专家数量或批准语义。
 
 **核心原则**:
 - 所有级别**必须经过 Delphi 评审**，不可跳过
-- 所有级别都采用三专家 Delphi，Round 1 独立执行并验证 distinct model IDs
+- 所有级别都采用 architecture、technical、feasibility 三专家 Delphi；Round 1 独立执行并验证三份成功结果
+- 模型 ID、provider、vendor、gateway 和国籍不受限制；`requested_model` trimmed 后必须 distinct
 - 评审达到 ≥90% 共识，最多 5 轮；失败或无法验证时阻断
 - 自动升级机制：当出现风险信号时强制升级级别
 
@@ -56,7 +57,7 @@
 | 触发条件 | 原级别 | 升级至 | 说明 |
 |---------|--------|--------|------|
 | Delphi 评审出现 REQUEST_CHANGES | 轻量 | 标准 | 需要第二轮评审 |
-| 专家意见分歧（1 票反对） | 轻量/标准 | 复杂 | 需要第 3 专家仲裁 |
+| 专家意见分歧 | 轻量/标准 | 复杂 | 增加上下文深度与后续轮次预算，不增加或替换专家 |
 | 涉及公共 API 变更 | 轻量 | 标准 | 影响外部调用方 |
 | 修改文件数 > 5 或 LOC > 200 | 轻量 | 标准 | 改动规模超出轻量范围 |
 | 存在循环依赖 | 轻量/标准 | 复杂 | 架构风险高 |
@@ -183,14 +184,14 @@ AUTO-ESTIMATE 输出 → Force Levels 执行 → 自动升级机制（如触发�
 - 公共 API 重大变更
 
 **执行流程**:
-1. 3 位专家独立评审（DeepSeek-v4-pro + Kimi-K2.6 + Qwen3.6-Plus）
-2. 最多 3 轮评审（Round 1-3）
-3. **3/3 批准**才通过
+1. architecture、technical、feasibility 三位专家使用用户配置的任意可执行模型独立评审
+2. 最多 5 轮评审
+3. 三份成功结果聚合达到 ≥90% 且全部 APPROVED 才通过
 4. 评审通过后写入 `.sprint-state/delphi-reviewed.json`
 
-**仲裁机制**:
-- Round 2 仍有分歧 → 第 3 专家（Qwen3.6-Plus）加入仲裁
-- Round 3 必须达成一致，否则 BLOCK 进入 Phase 3/6 BUILD
+**分歧处理**:
+- 每轮都保持同一组 architecture、technical、feasibility 三个角色，不新增仲裁者，也不减少执行
+- Round 5 仍未达到批准共识时 BLOCK 进入 Phase 3/6 BUILD
 
 ---
 
