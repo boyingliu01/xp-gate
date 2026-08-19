@@ -206,7 +206,7 @@ function validateDistinctModels(experts, providers, consensus = {}) {
   if (consensus.cross_provider_required === true) {
     return {
       valid: true,
-      warning: 'cross_provider_required is deprecated and ignored; distinct model identifiers are enforced.',
+      warning: 'cross_provider_required_ignored',
     };
   }
 
@@ -310,7 +310,7 @@ function resolveInputContent(args) {
 }
 
 // ── API call ───────────────────────────────────────────────────────────
-async function callModelAPI(providerConfig, model, systemPrompt, userPrompt) {
+async function callModelAPI(providerConfig, model, systemPrompt, userPrompt, options = {}) {
   const url = `${providerConfig.base_url.replace(/\/$/, '')}/chat/completions`;
 
   const body = {
@@ -323,8 +323,10 @@ async function callModelAPI(providerConfig, model, systemPrompt, userPrompt) {
     response_format: { type: 'json_object' },
   };
 
+  const timeoutMs = options.timeoutMs ?? 30000;
   const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), 30000);
+  const timeout = setTimeout(() => controller.abort(), timeoutMs);
+  let responseReceived = false;
 
   try {
     const response = await fetch(url, {
@@ -336,8 +338,7 @@ async function callModelAPI(providerConfig, model, systemPrompt, userPrompt) {
       body: JSON.stringify(body),
       signal: controller.signal,
     });
-
-    clearTimeout(timeout);
+    responseReceived = true;
 
     if (response.status === 401 || response.status === 403) {
       return { error: true, message: `Authentication failed (${response.status}). Check API key in .delphi-config.json.` };
@@ -356,29 +357,70 @@ async function callModelAPI(providerConfig, model, systemPrompt, userPrompt) {
     }
 
     const data = await response.json();
-    const content = data.choices?.[0]?.message?.content;
-    if (!content) {
-      return { error: true, message: 'Empty response from model.' };
+    if (!isPlainObject(data) || !Array.isArray(data.choices)) {
+      return { error: true, message: 'Invalid response from model.' };
+    }
+    const firstChoice = data.choices[0];
+    const message = isPlainObject(firstChoice) ? firstChoice.message : null;
+    const content = isPlainObject(message) ? message.content : null;
+    if (typeof content !== 'string' || content.trim() === '') {
+      return { error: true, message: 'Invalid response from model.' };
     }
 
     return {
       success: true,
-      content,
+      content: content.trim(),
       resolved_model: typeof data.model === 'string' && data.model.trim() !== '' ? data.model.trim() : null,
     };
   } catch (err) {
-    clearTimeout(timeout);
-    if (err.name === 'AbortError') {
-      return { error: true, retryable: true, message: 'Request timed out (30s).' };
+    if (err instanceof Error && err.name === 'AbortError') {
+      return { error: true, retryable: true, message: `Request timed out (${timeoutMs}ms).` };
     }
-    return { error: true, message: `Network error: ${err.message}` };
+    if (responseReceived) {
+      return { error: true, message: 'Invalid response from model.' };
+    }
+    const category = err instanceof Error ? err.name : 'UnknownError';
+    return { error: true, message: `Network error (${category}).` };
+  } finally {
+    clearTimeout(timeout);
   }
 }
 
+function isPlainObject(value) {
+  if (value === null || typeof value !== 'object' || Array.isArray(value)) return false;
+  const prototype = Object.getPrototypeOf(value);
+  return prototype === Object.prototype || prototype === null;
+}
+
+function parseExpertVerdict(value) {
+  if (!isPlainObject(value)) return { valid: false, message: 'Invalid expert verdict.' };
+  const verdicts = ['APPROVED', 'REQUEST_CHANGES', 'REJECTED'];
+  if (!verdicts.includes(value.verdict)) return { valid: false, message: 'Invalid expert verdict.' };
+  if (!Number.isFinite(value.confidence) || value.confidence < 1 || value.confidence > 10) {
+    return { valid: false, message: 'Invalid expert verdict.' };
+  }
+  for (const field of ['critical_issues', 'major_concerns', 'minor_concerns']) {
+    if (!Array.isArray(value[field]) || !value[field].every(item => typeof item === 'string')) {
+      return { valid: false, message: 'Invalid expert verdict.' };
+    }
+  }
+  if (typeof value.summary !== 'string') return { valid: false, message: 'Invalid expert verdict.' };
+  return {
+    valid: true,
+    verdict: {
+      verdict: value.verdict,
+      confidence: value.confidence,
+      critical_issues: value.critical_issues,
+      major_concerns: value.major_concerns,
+      minor_concerns: value.minor_concerns,
+      summary: value.summary,
+    },
+  };
+}
+
 function buildReviewOutput(verdict, args, provenance) {
-  const expertVerdict = verdict && typeof verdict === 'object' && !Array.isArray(verdict) ? verdict : {};
+  const parsed = parseExpertVerdict(verdict);
   const output = {
-    result_type: 'delphi_expert_result',
     expert_id: { architecture: 'A', technical: 'B', feasibility: 'C' }[args.expert],
     expert_role: args.expert,
     model_used: `${provenance.provider}/${provenance.requested_model}`,
@@ -387,12 +429,10 @@ function buildReviewOutput(verdict, args, provenance) {
     round: args.round,
     mode: args.mode,
   };
-  for (const field of ['verdict', 'confidence', 'critical_issues', 'major_concerns', 'minor_concerns', 'summary']) {
-    if (Object.hasOwn(expertVerdict, field)) {
-      output[field] = expertVerdict[field];
-    }
+  if (!parsed.valid) {
+    return { ...output, result_type: 'delphi_expert_error', error: true, message: parsed.message };
   }
-  return output;
+  return { ...parsed.verdict, ...output, result_type: 'delphi_expert_result' };
 }
 
 // ── Retry logic ────────────────────────────────────────────────────────
@@ -490,6 +530,7 @@ async function main() {
   });
 
   console.log(JSON.stringify(output, null, 2));
+  if (output.error) process.exit(1);
 }
 
 // ── Module exports (for testing) ───────────────────────────────────────
@@ -505,6 +546,7 @@ if (require.main !== module) {
     checkNodeVersion,
     callModelAPI,
     callWithRetry,
+    parseExpertVerdict,
     buildReviewOutput,
   };
 } else {
