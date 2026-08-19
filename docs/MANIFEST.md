@@ -92,7 +92,7 @@ components:
 
   - id: delphi-review
     name: "Delphi Review Skill"
-    description: "Multi-expert anonymous consensus review. Three modes: design (default), code-walkthrough, and requirements (R1 lightweight review, 2 experts × 1 round). MANDATORY before implementation."
+    description: "Multi-expert anonymous consensus review. Three modes: design (default), code-walkthrough, and requirements (three independent experts, distinct executable model IDs, >=90% aggregate consensus within five rounds). MANDATORY before implementation."
     type: ai-skill
     install_command: "bash <(curl -fsSL https://raw.githubusercontent.com/boyingliu01/xp-gate/repo-main/scripts/install-delphi-review.sh) (LEGACY - GHP version only, use npm install -g xp-gate instead)"
     local_install: "bash scripts/install-delphi-review.sh"

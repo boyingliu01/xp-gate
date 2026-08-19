@@ -208,7 +208,7 @@ XP-Gate 集成的 AI Skills 体系：
 |------|------|------|------|
 | **design** (默认) | `/delphi-review` | 设计方案评审 | delphi-reviewed.json + specification.yaml |
 | **code-walkthrough** | `--mode code-walkthrough` | git push 前代码走查 | .code-walkthrough-result.json |
-| **requirements** | `--mode requirements` | R1 轻量需求评审（2 专家 × 1 轮，2/2 共识） | requirements-reviewed.json |
+| **requirements** | `--mode requirements` | R1 三专家独立评审，验证 distinct model IDs 后聚合 ≥90% 共识 | requirements-reviewed.json |
 
 **Qoder 平台（推荐 — 零配置）**：
 
@@ -229,8 +229,8 @@ XP-Gate 集成的 AI Skills 体系：
 | Expert C | 可行性 | qwen3.6-plus | kimi-k2.6, glm-5.1 |
 
 **强制要求**（两平台通用）：
-- 至少 2 家不同厂商模型
-- 禁止使用 Anthropic/OpenAI/Google 国外模型
+- 三个专家必须成功执行，且 `requested_model` trimmed 后 distinct
+- Provider、vendor、gateway 和模型国籍均不受限制，一个 provider 和 token plan 可以共享
 - 共识阈值 ≥90%
 
 ---
