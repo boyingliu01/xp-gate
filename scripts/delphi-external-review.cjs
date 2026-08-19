@@ -129,7 +129,7 @@ function validateDistinctModels(experts, _providers, consensus = {}) {
   const normalizedModels = [];
 
   for (const role of REQUIRED_EXPERT_ROLES) {
-    const expert = experts?.[role];
+    const expert = Object.hasOwn(experts || {}, role) ? experts[role] : undefined;
     if (!expert) {
       return { valid: false, reason: `Missing required expert role: ${role}.` };
     }
@@ -137,6 +137,11 @@ function validateDistinctModels(experts, _providers, consensus = {}) {
       return { valid: false, reason: `Expert ${role} must define a non-empty model.` };
     }
     normalizedModels.push({ role, model: expert.model.trim() });
+  }
+
+  const unexpectedRole = Object.keys(experts || {}).find(role => !REQUIRED_EXPERT_ROLES.includes(role));
+  if (unexpectedRole) {
+    return { valid: false, reason: `Unsupported expert role: ${unexpectedRole}.` };
   }
 
   const seen = new Map();
