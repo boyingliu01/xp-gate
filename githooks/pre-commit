@@ -429,6 +429,17 @@ if [ -z "$CHANGED_FILES" ]; then
   exit 0
 fi
 
+any_changed_files_match() {
+  local pattern
+
+  for pattern in "$@"; do
+    if printf '%s\n' "$CHANGED_FILES" | grep -qE -- "$pattern"; then
+      return 0
+    fi
+  done
+  return 1
+}
+
 # ============================================================================
 # Multi-language detection (v0.15.0+): detect all languages from changed file
 # extensions, with fallback to manifest-based detection.
