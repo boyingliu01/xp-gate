@@ -89,6 +89,25 @@ describe('readConfig', () => {
   const { readConfig } = loadModule();
   let tmpDir;
 
+  function writeConfig(consensus) {
+    const configPath = path.join(tmpDir, '.delphi-config.json');
+    fs.writeFileSync(configPath, JSON.stringify({
+      active_profile: 'default',
+      consensus,
+      profiles: {
+        default: {
+          providers: { gateway: { base_url: 'https://example.test/v1', api_key: 'key' } },
+          experts: {
+            architecture: { provider: 'gateway', model: 'model-a' },
+            technical: { provider: 'gateway', model: 'model-b' },
+            feasibility: { provider: 'gateway', model: 'model-c' },
+          },
+        },
+      },
+    }));
+    return readConfig(configPath);
+  }
+
   beforeEach(() => {
     tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'delphi-test-'));
   });
@@ -168,6 +187,40 @@ describe('readConfig', () => {
     expect(result.experts.architecture.model).toBe('qwen3.7-max');
     expect(result.consensus.distinct_models_required).toBe(true);
     expect(result.warnings).toContain('distinct_models_required_forced');
+  });
+
+  it('clamps threshold_percent to the 90 percent minimum', () => {
+    const result = writeConfig({ threshold_percent: 1 });
+    expect(result.consensus.threshold_percent).toBe(90);
+    expect(result.warnings).toContain('threshold_percent_clamped');
+  });
+
+  it('preserves threshold_percent above the minimum', () => {
+    const result = writeConfig({ threshold_percent: 95 });
+    expect(result.consensus.threshold_percent).toBe(95);
+    expect(result.warnings).not.toContain('threshold_percent_clamped');
+  });
+
+  it('clamps max_review_rounds to five', () => {
+    const result = writeConfig({ max_review_rounds: 999 });
+    expect(result.consensus.max_review_rounds).toBe(5);
+    expect(result.warnings).toContain('max_review_rounds_clamped');
+  });
+
+  it('preserves max_review_rounds within the allowed range', () => {
+    const result = writeConfig({ max_review_rounds: 3 });
+    expect(result.consensus.max_review_rounds).toBe(3);
+    expect(result.warnings).not.toContain('max_review_rounds_clamped');
+  });
+
+  it('uses safe defaults for invalid consensus bounds', () => {
+    const result = writeConfig({ threshold_percent: 'high', max_review_rounds: 0 });
+    expect(result.consensus.threshold_percent).toBe(90);
+    expect(result.consensus.max_review_rounds).toBe(1);
+    expect(result.warnings).toEqual(expect.arrayContaining([
+      'threshold_percent_clamped',
+      'max_review_rounds_clamped',
+    ]));
   });
 
   it('exits with error when config file not found', () => {
@@ -498,6 +551,10 @@ describe('provider calls and provenance', () => {
 
     expect(result.requested_model).toBe('qwen3.7-max');
     expect(result.resolved_model).toBe('qwen3.7-max-actual');
+    expect(result.result_type).toBe('delphi_expert_result');
+    expect(result.expert_role).toBe('architecture');
+    expect(result.verdict).toBe('APPROVED');
+    expect(result).not.toHaveProperty('consensus');
   });
 });
 

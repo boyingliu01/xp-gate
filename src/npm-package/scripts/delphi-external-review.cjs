@@ -120,15 +120,29 @@ function readConfig(configPath, profileOverride) {
   if (raw.consensus?.distinct_models_required === false) {
     warnings.push('distinct_models_required_forced');
   }
+  const configuredThreshold = raw.consensus?.threshold_percent;
+  const thresholdPercent = typeof configuredThreshold === 'number' && Number.isFinite(configuredThreshold)
+    ? Math.max(90, configuredThreshold)
+    : 90;
+  if (configuredThreshold !== undefined && configuredThreshold !== thresholdPercent) {
+    warnings.push('threshold_percent_clamped');
+  }
+  const configuredRounds = raw.consensus?.max_review_rounds;
+  const maxReviewRounds = typeof configuredRounds === 'number' && Number.isFinite(configuredRounds)
+    ? Math.min(5, Math.max(1, Math.trunc(configuredRounds)))
+    : 5;
+  if (configuredRounds !== undefined && configuredRounds !== maxReviewRounds) {
+    warnings.push('max_review_rounds_clamped');
+  }
 
   return {
     active_profile: profileName,
     providers,
     experts,
     consensus: {
-      threshold_percent: 90,
-      max_review_rounds: 5,
       ...(raw.consensus || {}),
+      threshold_percent: thresholdPercent,
+      max_review_rounds: maxReviewRounds,
       distinct_models_required: true,
     },
     warnings,
@@ -349,6 +363,7 @@ async function callModelAPI(providerConfig, model, systemPrompt, userPrompt) {
 function buildReviewOutput(verdict, args, provenance) {
   return {
     ...verdict,
+    result_type: 'delphi_expert_result',
     expert_id: { architecture: 'A', technical: 'B', feasibility: 'C' }[args.expert],
     expert_role: args.expert,
     model_used: `${provenance.provider}/${provenance.requested_model}`,
