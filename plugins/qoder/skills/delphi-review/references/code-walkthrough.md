@@ -14,7 +14,7 @@
 
 ## Five Core Properties
 
-1. **匿名性** — Expert A/B 互不知道对方意见
+1. **匿名性** — Expert A/B/C 在 Round 1 互不知道对方意见
 2. **迭代共识** — 多轮直到 APPROVED
 3. **零容忍** — Critical Issues 必须修复
 4. **零降级** — 环境/资源问题必须阻断，通知用户解决
@@ -74,9 +74,9 @@ pre-push hook
     │         │
     │         ├─→ 共识检查
     │         │      │
-    │         │      ├─→ 2/2 APPROVED → 允许推送
+    │         │      ├─→ 三份成功结果、三个 distinct requested_model、≥90% → 允许推送
     │         │      │
-    │         │      ├─→ 分歧 → Expert C 仲裁
+    │         │      ├─→ 分歧 → 继续下一轮（最多 5 轮）
     │         │      │
     │         │      └─→ REQUEST_CHANGES → 阻塞推送
     │         │
@@ -93,9 +93,9 @@ pre-push hook
 |------|------|------|
 | Expert A | 架构 + 设计评审 | `.delphi-config.json` → `experts.architecture` |
 | Expert B | 实现 + 代码质量 | `.delphi-config.json` → `experts.technical` |
-| Expert C (仲裁) | 冲突裁决 | `.delphi-config.json` → `experts.feasibility` |
+| Expert C | 可行性评审 | `.delphi-config.json` → `experts.feasibility` |
 
-> ⚠️ **注意**: 至少配置 **两个不同 provider** 的模型。详见 [INSTALL.md](./INSTALL.md)。
+> 必须成功执行三个专家角色，并验证三个 distinct trimmed requested_model。Provider、vendor、gateway 和模型国籍均不受限制；`provider: local` fallback 不能计数。
 
 ---
 
@@ -237,9 +237,9 @@ pre-push hook
 
 | 条件 | 结果 |
 |------|------|
-| 2/2 APPROVED + 无 Critical Issues | ✅ 允许推送 |
-| 2/2 APPROVED + 有 Minor Issues | ✅ 允许推送（记录问题） |
-| 1/2 APPROVED | ⚠️ 需要 Expert C 仲裁 |
+| 三份成功结果 + 三个 distinct requested_model + ≥90% + 无 Critical Issues | ✅ 允许推送 |
+| 三份成功结果 + 三个 distinct requested_model + ≥90% + 有 Minor Issues | ✅ 允许推送（记录问题） |
+| 未达到 ≥90% | ⚠️ 继续下一轮（最多 5 轮） |
 | 0/2 APPROVED | ❌ 阻塞推送 |
 | 有 Critical Issues | ❌ 阻塞推送 |
 | 有 Major Issues 且未处理 | ❌ 阻塞推送 |
@@ -451,7 +451,7 @@ Hook 验证以下条件（全部满足才允许 push）：
 - [ ] 共识检查完成
 
 **CRITICAL - 共识验证 (code-walkthrough):**
-- [ ] 至少 2/2 或 2/3 专家 APPROVED
+- [ ] 三个专家成功执行、requested_model 互异且达到 ≥90% 共识
 - [ ] 无 Critical Issues 未解决
 - [ ] 无 Major Issues 未处理（或有处理计划）
 

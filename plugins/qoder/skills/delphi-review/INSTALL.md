@@ -5,10 +5,10 @@ This guide walks you through setting up the Delphi consensus review skill in you
 ## Prerequisites
 
 - **Node.js >= 18** (script uses built-in `fetch`)
-- At least **2 different model providers** with API access (cross-provider requirement prevents homogenized blind spots)
+- Exactly **3 callable expert model configurations** with distinct trimmed executable model IDs
 - `@boyingliu01/xp-gate` npm package installed (for the `delphi-external-review.cjs` script)
 
-> **Why cross-provider?** Using models from the same vendor means they share training data and biases, defeating the purpose of multi-expert consensus.
+> Provider, vendor, gateway, and model nationality are unrestricted. One provider and token plan may serve all three roles.
 
 ## Quick Setup (4 steps)
 
@@ -47,7 +47,7 @@ Open `.delphi-config.json` and fill in your API keys and model preferences:
       "experts": {
         "architecture": { "provider": "deepseek", "model": "deepseek-chat" },
         "technical": { "provider": "zhipu", "model": "glm-5.2" },
-        "feasibility": { "provider": "local" }
+        "feasibility": { "provider": "deepseek", "model": "deepseek-reasoner" }
       }
     }
   }
@@ -82,7 +82,7 @@ Where `<script-path>` is located (in priority order):
 | `profiles` | ✅ | Named configuration profiles (for easy switching) |
 | `profiles.<name>.providers` | ✅ | Provider definitions: base_url + api_key |
 | `profiles.<name>.experts` | ✅ | Expert-to-provider/model mapping |
-| `profiles.<name>.experts.<role>.provider` | ✅ | Provider name, or `"local"` for orchestrator fallback |
+| `profiles.<name>.experts.<role>.provider` | ✅ | Callable provider name; `"local"` fallback cannot count |
 | `consensus.threshold_percent` | ❌ | Consensus threshold (default: 90) |
 | `consensus.max_review_rounds` | ❌ | Max review rounds (default: 5) |
 
@@ -90,9 +90,9 @@ Where `<script-path>` is located (in priority order):
 
 Edit `active_profile` in the config, or use the `--profile <name>` CLI argument to override temporarily.
 
-### Mixed mode (gradual setup)
+### Single-provider setup
 
-You can start with just 1 external API and use the orchestrator model for other experts:
+One provider may expose all three distinct executable models:
 
 ```json
 {
@@ -104,15 +104,15 @@ You can start with just 1 external API and use the orchestrator model for other 
       },
       "experts": {
         "architecture": { "provider": "deepseek", "model": "deepseek-chat" },
-        "technical": { "provider": "local" },
-        "feasibility": { "provider": "local" }
+        "technical": { "provider": "deepseek", "model": "deepseek-reasoner" },
+        "feasibility": { "provider": "deepseek", "model": "deepseek-coder" }
       }
     }
   }
 }
 ```
 
-> This works but produces a WARNING about reduced cross-model diversity. Add more external APIs over time.
+> All three model IDs must remain distinct after trimming, and all three calls must succeed.
 
 ## Usage
 
@@ -125,7 +125,7 @@ Once configured, invoke the skill via:
 The skill will:
 1. Read `.delphi-config.json` to find expert configurations
 2. Call external model APIs via `delphi-external-review.cjs` script
-3. For `provider: "local"` experts, use the orchestrator model
+3. Reject `provider: "local"` fallback as non-executed evidence
 4. Aggregate verdicts and compute consensus
 
 ## Troubleshooting
@@ -142,9 +142,9 @@ Install the npm package: `npm install -g @boyingliu01/xp-gate`
 
 Check your API key in `.delphi-config.json`. Ensure the key matches the provider.
 
-### "All experts use the same provider"
+### "Expert model IDs are not distinct"
 
-Configure at least 2 different providers, or use `provider: "local"` for mixed mode.
+Configure three distinct callable model IDs. They may use the same provider.
 
 ### "Node.js >= 18 required"
 

@@ -4,15 +4,7 @@
   "description": "Delphi review expert mapping — customize with your own models. Copy to .delphi-config.json and edit.",
   "num_experts": 3,
   "model_policy": {
-    "domestic_only": true,
-    "description": "Only domestic Chinese open-source models are allowed. NEVER use Anthropic, OpenAI, Google, or other foreign expensive models.",
-    "allowed_models": [
-      "glm-5.1", "glm-5.0",
-      "kimi-k2.6", "kimi-k2.5",
-      "minimax-m2.7", "minimax-m2.5",
-      "qwen3.6-plus", "qwen3.5-plus",
-      "deepseek-v4-pro", "deepseek-v4-lite"
-    ]
+    "description": "Provider, vendor, gateway, and model nationality are unrestricted. Three distinct trimmed executable model IDs are required."
   },
   "experts": {
     "architecture": {
@@ -38,8 +30,8 @@
     }
   },
   "consensus": {
-    "threshold_percent": 95,
+    "threshold_percent": 90,
     "max_review_rounds": 5,
-    "cross_provider_required": true
+    "distinct_models_required": true
   }
 }
