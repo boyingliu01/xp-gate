@@ -155,7 +155,7 @@ Sprint Flow: PREP → DESIGN → BUILD → VERIFY → SHIP → CLOSE
 **快速参考**:
 - **Step 0: CONTEXT.md 预检 (#322)**: 存在则 SKIP grill 访谈，但 R1 需求评审仍执行（CONTEXT.md 可能陈旧）
 - **Step 1: grill-with-docs** — `skill(name="grill-with-docs")` — 逐个追问 + CONTEXT.md/ADR 沉淀。**HARD-GATE**: 设计未批准 → 不可进入实现
-- **Step 2: R1 需求评审 (#368)** — `npx xp-gate delphi-review --mode requirements` — 三专家独立执行，验证 distinct model IDs 后聚合 ≥90% 共识，输出 requirements-reviewed.json（含 requirements_hash 防陈旧绑定）。lightweight sprint 跳过 R1 合并入 R2
+- **Step 2: R1 需求评审 (#368)** — `npx xp-gate delphi-review --mode requirements` — 所有路径都由三专家独立执行，验证 distinct model IDs 后聚合 ≥90% 共识，输出 requirements-reviewed.json（含 requirements_hash 与 exact-HEAD 防陈旧绑定）
 - **Step 3: 原生设计文档生成** — `docs/plans/YYYY-MM-DD-<topic>-design.md`（需求摘要、2-3 方案、推荐、成功标准）
 - **Step 4: HARD-GATE APPROVAL** — 用户审批设计文档
 - **Step 5: 路由分叉** — `change_type == "修改已存在代码"` → SKIP batch-grill-me, lightweight R2
