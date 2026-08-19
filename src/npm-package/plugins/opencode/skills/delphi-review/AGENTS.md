@@ -6,7 +6,7 @@
 **Version:** 0.18.3.0
 
 ## OVERVIEW
-Delphi Consensus Review — multi-round anonymous expert review (≥90% threshold, 3 experts from ≥2 providers, domestic models only). Supports design + code-walkthrough modes.
+Delphi Consensus Review — multi-round anonymous expert review (≥90% threshold, exactly 3 experts with distinct executable model IDs). Supports design, requirements, and code-walkthrough modes.
 
 ## STRUCTURE
 ```
@@ -26,13 +26,13 @@ skills/delphi-review/
 |------|----------|-------|
 | Core methodology | SKILL.md | Delphi process, expert roles, consensus rules |
 | Code-walkthrough | references/code-walkthrough.md | Pre-push mode: 20 files/500 LOC limit |
-| Config example | .delphi-config.json.example | 3 experts, domestic models |
+| Config example | .delphi-config.json.example | 3 experts, distinct models |
 
 ## CONVENTIONS
 - 3 experts anonymous in Round 1 (no cross-expert bias)
 - ≥90% consensus threshold (was 95%, now unified to 90%)
 - Max 5 rounds before forcing decision
-- Cross-provider required: experts from ≥2 different providers (model list read from `opencode.json` agent config, not hardcoded)
+- Provider/vendor/nationality unrestricted; exactly three distinct trimmed requested model IDs are required
 - Model selection: reads `delphi-reviewer-*` agent `model` fields from `opencode.json`
 - No hardcoded model lists — models defined by user's `opencode.json` configuration
 - Code-walkthrough mode: triggered on git push, stores result in .code-walkthrough-result.json
@@ -45,7 +45,7 @@ skills/delphi-review/
 - Do NOT skip code-walkthrough when over thresholds (BLOCK + user decision)
 - Do NOT degrade to single model on API errors (BLOCK)
 - Do NOT declare complete without writing .code-walkthrough-result.json
-- Do NOT use foreign models (Anthropic/GPT/Gemini)
+- Do NOT treat `provider: local` fallback as an executed expert
 
 ## UNIQUE STYLES
 - Anonymous expert reviews (Round 1)

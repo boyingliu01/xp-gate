@@ -5,10 +5,10 @@ This guide walks you through setting up the Delphi consensus review skill in you
 ## Prerequisites
 
 - OpenCode installed and configured
-- At least **2 different model providers** available (cross-provider requirement prevents homogenized blind spots)
-- Access to at least 3 different models (for 3-expert mode) or 2 models (for 2-expert mode)
+- Exactly **3 callable expert model configurations** are required.
+- The three configurations must use distinct trimmed executable model IDs. They may share one provider and token plan.
 
-> **Why cross-provider?** Using models from the same vendor (e.g., all OpenAI) means they share training data and biases, defeating the purpose of multi-expert consensus.
+> Provider, vendor, gateway, and model nationality are unrestricted. The enforced diversity boundary is three distinct requested model IDs, not provider diversity.
 
 ## Quick Setup (3 steps)
 
@@ -32,11 +32,8 @@ Then replace the provider/model placeholders:
 "model": "YOUR_PROVIDER/YOUR_MODEL_A"
 
 // After (your config):
-"model": "openai/gpt-4o"
-// or
-"model": "anthropic/claude-sonnet-4-20250514"
-// or
-"model": "bailian-coding-plan/qwen3.6-plus"
+"model": "bailian-tp/qwen-plus"
+// The other two role model fields must be different trimmed IDs.
 ```
 
 ### Step 3: Ensure provider configuration exists
@@ -73,7 +70,7 @@ For custom providers (like Ali Bailian), add a provider entry:
 
 ## Model Recommendations
 
-The skill requires at least 2 experts for code changes, 3 for architecture decisions. Here are recommended model selections:
+The skill requires exactly three experts for every mode. Choose three models that are callable through your configured provider.
 
 | Expert Role | Recommended | Alternatives |
 |-------------|-------------|-------------|
@@ -81,10 +78,11 @@ The skill requires at least 2 experts for code changes, 3 for architecture decis
 | **Technical (Expert B)** | Claude Haiku | Qwen-Coder, DeepSeek-Coder, GPT-4o-mini |
 | **Feasibility (Expert C)** | Claude Opus | GPT-4, Gemini 2.5 Pro, Qwen-Max |
 
-**Minimum viable setup** (2-expert mode):
-- Expert A: Any reasoning-strong model
-- Expert B: Any code-understanding-strong model
-- **Must be from different providers**
+**Minimum viable setup**:
+- Expert A: architecture model
+- Expert B: technical model
+- Expert C: feasibility model
+- All three requested model IDs must be distinct. A `provider: local` fallback does not count.
 
 ## Configuration File Reference
 
@@ -92,13 +90,13 @@ The skill requires at least 2 experts for code changes, 3 for architecture decis
 
 | Field | Description | Default |
 |-------|-------------|---------|
-| `num_experts` | Number of experts to use (2 or 3) | 3 |
+| `num_experts` | Number of experts to use | 3, fixed |
 | `experts.architecture` | Architecture reviewer configuration | Required |
 | `experts.technical` | Technical reviewer configuration | Required |
 | `experts.feasibility` | Feasibility reviewer configuration | Required for 3-expert mode |
     | `consensus.threshold_percent` | Agreement threshold | 90 |
 | `consensus.max_review_rounds` | Maximum review rounds | 5 |
-| `consensus.cross_provider_required` | Require different providers | true |
+| `consensus.cross_provider_required` | Deprecated and ignored; emits `cross_provider_required_ignored` | false or omitted |
 
 ### `opencode.json` agent block
 
@@ -133,11 +131,11 @@ You forgot to replace the placeholder. Search for `YOUR_PROVIDER` in your openco
 
 ### Both experts gave identical feedback
 
-Your models are from the same provider. Configure agents to use different providers.
+Shared providers are allowed. Configure three distinct executable model IDs and verify all three calls succeed.
 
 ### Review takes too long / costs too much
 
-Reduce to 2-expert mode in `.delphi-config.json`: set `num_experts: 2`.
+Do not reduce the expert count. Use three callable models and keep the threshold and round bounds unchanged.
 
 ## Advanced: JSON Schema Validation
 

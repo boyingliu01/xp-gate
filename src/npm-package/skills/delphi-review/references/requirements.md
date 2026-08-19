@@ -13,7 +13,7 @@
 **设计背景**: Issue #368 识别出原始意图中"需求评审一次 + 设计评审一次"的第一次评审被完全丢弃。本模式恢复该评审点，在需求探索（grill-with-docs）与设计文档生成之间插入一道轻量质量门禁。
 
 **定位**:
-- **轻量**: 2 专家（architecture + feasibility）、最多 1 轮（循环语义下最多 2 轮）
+- **固定三专家**: architecture + technical + feasibility，最多 5 轮
 - **需求焦点**: 评审对象是需求陈述 + CONTEXT.md，不是设计文档或代码
 - **程序化阻塞**: 输出 `requirements-reviewed.json`，由 `phase-transition 2 completed` 校验
 - **防陈旧绑定**: `requirements_hash`（SHA-256）绑定需求内容，防止旧证据复用
@@ -22,11 +22,11 @@
 
 ## Five Core Properties
 
-1. **匿名性** — Expert A/B 互不知道对方意见（Round 1）
-2. **迭代共识** — GAPS_FOUND 时回到 grill-with-docs 补充，最多 2 轮循环
+1. **匿名性** — Expert A/B/C 互不知道对方意见（Round 1）
+2. **迭代共识** — GAPS_FOUND 时回到 grill-with-docs 补充，最多 5 轮循环
 3. **关键缺口零容忍** — Critical requirement gaps 必须在进入设计前解决
 4. **防陈旧绑定** — requirements_hash 绑定需求内容 + CONTEXT.md，旧证据不可复用
-5. **轻量但严格** — 2 专家配置，但共识要求 2/2（100%），不因轻量而降标
+5. **执行可验证** — 三个专家都必须成功返回结构化结果，且 requested_model 三个 distinct
 
 ---
 
@@ -70,7 +70,9 @@ delphi-review --mode requirements
     ├─→ Expert A (architecture) anonymous review — focus: requirements completeness,
     │                                              requirement→AC coverage, scenario coverage
     │
-    ├─→ Expert B (feasibility) anonymous review — focus: testability of acceptance criteria,
+   ├─→ Expert B (technical) anonymous review — focus: technical clarity and edge cases
+   │
+   ├─→ Expert C (feasibility) anonymous review — focus: testability of acceptance criteria,
     │                                              user persona clarity, scope boundaries
     │
     ├─→ Consensus check
@@ -92,16 +94,15 @@ delphi-review --mode requirements
 | 专家 | 视角 | 配置 |
 |------|------|------|
 | Expert A (architecture) | 需求完整性 + 需求→AC 映射 + 场景覆盖 | `.delphi-config.json` → `experts.architecture` |
-| Expert B (feasibility) | AC 可测试性 + 用户画像 + 范围边界 | `.delphi-config.json` → `experts.feasibility` |
+| Expert B (technical) | 技术清晰度 + 边界条件 + 实现约束 | `.delphi-config.json` → `experts.technical` |
+| Expert C (feasibility) | AC 可测试性 + 用户画像 + 范围边界 | `.delphi-config.json` → `experts.feasibility` |
 
-> ⚠️ **注意**: requirements 模式**不使用** technical 专家。技术实现细节属于设计/实现阶段（design / code-walkthrough 模式），不属于需求评审范畴。
+> 三个角色必须使用三个 distinct trimmed executable model IDs。Provider、vendor、gateway 和模型国籍均不受限制；一个 provider 和 token plan 可以服务全部三个角色。
 
-> ⚠️ **注意**: 至少配置 **两个不同 provider** 的模型。详见 [INSTALL.md](./INSTALL.md)。
-
-**专家选择理由**（设计决策 §16.4 C3）:
+**专家选择理由**:
 - **architecture 专家**: 天然映射范围/覆盖到需求层面——需求完整性、需求→AC 映射、场景覆盖、领域术语一致性
 - **feasibility 专家**: 天然映射可测试性/假设到验收标准——AC 可测试性、用户画像清晰度、范围边界、隐含假设
-- **technical 专家**: 排除——技术实现细节在需求阶段尚未确定，评审无意义
+- **technical 专家**: 检查需求中的技术清晰度、边界条件和实现约束
 
 ---
 
@@ -117,7 +118,7 @@ delphi-review --mode requirements
 | **领域术语一致性** | 需求陈述中的术语是否与 CONTEXT.md 领域模型一致（交叉引用） |
 | **AC 精确度** | 验收标准是否具体、可度量、无歧义 |
 
-### Expert B (feasibility) — 需求模式焦点
+### Expert C (feasibility) — 需求模式焦点
 
 | 维度 | 检查内容 |
 |------|---------|
@@ -133,13 +134,13 @@ delphi-review --mode requirements
 
 | 条件 | 结果 |
 |------|------|
-| 2/2 APPROVED + 无 Critical gaps | ✅ verdict=APPROVED，进入设计文档生成 |
-| 2/2 APPROVED + 有 Minor gaps | ✅ verdict=APPROVED（记录 gaps 供参考） |
-| 1/2 APPROVED, 1/2 GAPS_FOUND | ❌ verdict=GAPS_FOUND，记录 gaps |
-| 0/2 APPROVED | ❌ verdict=GAPS_FOUND，记录 gaps |
+| 3/3 successful APPROVED + 无 Critical gaps | ✅ verdict=APPROVED，进入设计文档生成 |
+| 3/3 successful APPROVED + 有 Minor gaps | ✅ verdict=APPROVED（记录 gaps 供参考） |
+| 任一专家失败或缺失 | ❌ BLOCK，不能聚合或降级 |
+| 任一专家 GAPS_FOUND | ❌ verdict=GAPS_FOUND，记录 gaps |
 | 有 Critical requirement gaps | ❌ verdict=GAPS_FOUND |
 
-**共识要求**: 2/2 一致 APPROVED（100%）。轻量配置不降低共识标准。
+**共识要求**: 三个成功结果全部参与聚合，达到 >=90% 且最终 APPROVED。单个专家结果不能代表全局批准。
 
 ---
 
@@ -167,7 +168,7 @@ Round 2: delphi-review --mode requirements（带 Round 1 gaps 上下文）
 ```
 
 **硬性限制**:
-- **最多 2 轮**（Round 1 + 可选 Round 2）
+- **最多 5 轮**（Round 1 + 可选后续轮次）
 - **禁止无界循环** — Round 2 后仍 GAPS_FOUND 必须升级
 - **Round 2 上下文**: 专家看到 Round 1 的 gaps 列表，评估是否已修复
 - **升级语义**: `escalation_needed: true` 写入 requirements-reviewed.json，sprint-flow 负责 UX
@@ -187,10 +188,11 @@ Round 2: delphi-review --mode requirements（带 Round 1 gaps 上下文）
   "head_commit": "abc123def456789...",
   "context_file_used": "CONTEXT.md",
   "round": 1,
-  "expert_verdicts": [
-    { "role": "architecture", "verdict": "APPROVED", "confidence": 9 },
-    { "role": "feasibility", "verdict": "APPROVED", "confidence": 8 }
-  ],
+   "expert_verdicts": [
+     { "role": "architecture", "verdict": "APPROVED", "confidence": 9, "result_type": "delphi_expert_result", "requested_model": "bailian-tp/qwen-plus" },
+     { "role": "technical", "verdict": "APPROVED", "confidence": 8, "result_type": "delphi_expert_result", "requested_model": "bailian-tp/deepseek-v3" },
+     { "role": "feasibility", "verdict": "APPROVED", "confidence": 8, "result_type": "delphi_expert_result", "requested_model": "bailian-tp/glm-4.5" }
+   ],
   "requirements_statement": "实现用户注册流程，支持邮箱验证和密码重置",
   "gaps_found": [],
   "rounds_used": 1,
@@ -235,7 +237,7 @@ Round 2: delphi-review --mode requirements（带 Round 1 gaps 上下文）
 | `head_commit` | string | 当前 `git rev-parse HEAD` |
 | `context_file_used` | string | 引用的 CONTEXT.md 路径 |
 | `round` | number | 当前轮次（1 或 2） |
-| `expert_verdicts` | array | 各专家裁决（2 项：architecture + feasibility） |
+| `expert_verdicts` | array | 三位专家的成功结构化结果，包含 `result_type` 和 `requested_model` |
 | `requirements_statement` | string | 被评审需求的简短摘要 |
 | `gaps_found` | array | GAPS_FOUND 时的缺口列表（APPROVED 时为空数组） |
 | `rounds_used` | number | 实际使用的轮次数 |
@@ -306,11 +308,11 @@ requirements_statement + CONTEXT.md content + ISO timestamp prefix (YYYY-MM-DD)
 
 | ❌ Don't | ✅ Do | Why |
 |----------|------|-----|
-| 使用全部 3 个专家 | 仅使用 architecture + feasibility | 轻量配置（设计决策 §16.4 C3），technical 属设计阶段 |
-| 无界循环评审 | 最多 2 轮，之后升级 | 防止无限循环（设计 §5.3 step 3） |
+| 使用少于 3 个专家 | 必须使用 architecture + technical + feasibility | 三个角色共同构成全局证据 |
+| 无界循环评审 | 最多 5 轮，之后升级 | 防止无限循环 |
 | 跳过 CONTEXT.md 交叉引用 | 始终交叉引用领域术语 | 需求应使用 CONTEXT.md 中的规范术语 |
 | 输出泛化批准 | 输出 hash 绑定的需求陈述 | 防陈旧绑定（§8.4，Round 1 设计反馈 #14） |
-| 接受 1/2 APPROVED | 要求 2/2 共识（100%） | 轻量配置仍需严格共识 |
+| 接受单个专家批准 | 要求三份成功结果参与聚合，并达到 >=90% 共识 | 单个结果不能代表全局批准 |
 | Round 2 中复用 Round 1 gaps 作为新发现 | Round 2 专家获得 Round 1 gaps 上下文 | 迭代改进，避免重复劳动 |
 | 评审设计文档或代码 | 仅评审需求陈述 + CONTEXT.md | 设计/代码评审是 design / code-walkthrough 模式的职责 |
 | GAPS_FOUND 时写入 delphi-reviewed.json | 仅 APPROVED 时写入状态文件 | GAPS_FOUND 表示评审未完成 |
@@ -323,7 +325,7 @@ requirements_statement + CONTEXT.md content + ISO timestamp prefix (YYYY-MM-DD)
 - **只读评审**: requirements 模式不修改任何源文件，仅写入证据文件到 `.sprint-state/`
 - **Hash 完整性**: `requirements_hash` 使用 SHA-256，防止需求内容被篡改后复用旧证据
 - **Commit 绑定**: `head_commit` 记录评审时的 git HEAD，提供时间线追溯
-- **无外部 API 泄露**: 评审内容仅传递给配置的国产模型 provider，不经过第三方服务
+- **调用边界**: 评审内容只传递给用户配置的 callable provider；provider、vendor、gateway 和模型国籍不作额外限制
 - **证据不可伪造**: phase-transition.js 程序化校验证据文件，LLM 无法绕过
 
 ---
@@ -350,11 +352,12 @@ requirements_statement + CONTEXT.md content + ISO timestamp prefix (YYYY-MM-DD)
 **Pre-requisites (MANDATORY - BLOCK if missing):**
 - [ ] grill-with-docs 已完成（或 CONTEXT.md 快速路径）
 - [ ] 需求陈述可用（非空）
-- [ ] Expert A (architecture) 模型 API 可用
-- [ ] Expert B (feasibility) 模型 API 可用
+- [ ] Expert A (architecture)、Expert B (technical)、Expert C (feasibility) 均成功执行
+- [ ] 三个 `requested_model` trimmed 后 distinct
+- [ ] 三份结果均为 `result_type=delphi_expert_result`
 
 **CRITICAL - 共识验证 (requirements):**
-- [ ] 2/2 专家 APPROVED
+- [ ] 聚合共识 >=90%，且所有 Critical gaps 已处理
 - [ ] 无 Critical requirement gaps 未解决
 - [ ] requirements_hash 已计算并写入
 
