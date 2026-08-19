@@ -16,7 +16,7 @@
 | Skill | 来源 | 触发条件 | 输出 |
 |-------|------|---------|------|
 | `grill-with-docs` | Matt Pocock (内置) | CONTEXT.md 不存在时（首个 Skill） | 访谈记录 + CONTEXT.md + ADR |
-| `delphi-review --mode requirements` | xp-gate | R1 需求评审（轻量 2 专家 1 轮） | requirements-reviewed.json |
+| `delphi-review --mode requirements` | xp-gate | R1 三专家独立评审，验证 distinct model IDs 后聚合 ≥90% | requirements-reviewed.json |
 | 原生设计文档生成 | sprint-flow 编排层 | R1 APPROVED 后 | docs/plans/YYYY-MM-DD-<topic>-design.md |
 | **硬闸门** | — | 设计未批准 → 停止 | 禁止进入 Plan |
 
@@ -25,7 +25,7 @@
 | Skill | 来源 | 触发条件 | 条件分支 |
 |-------|------|---------|---------|
 | `batch-grill-me` | Matt Pocock (内置) | 标准路径（change_type != "修改已存在代码"） | 批量前置决策 |
-| `delphi-review` | xp-gate | R2 设计评审；lightweight 路径使用 2 专家 1 轮 | 必须产生 `.sprint-state/delphi-reviewed.json` 且 verdict=APPROVED |
+| `delphi-review` | xp-gate | R2 三专家独立评审，最多 5 轮 | 必须产生 `.sprint-state/delphi-reviewed.json` 且 verdict=APPROVED |
 | `to-issues` | xp-gate | delphi-review APPROVED 后 | 拆解为垂直切片 → slices-manifest.json |
 
 ### Phase 2: BUILD

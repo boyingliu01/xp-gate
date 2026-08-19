@@ -64,7 +64,7 @@ skills/sprint-flow/
 
 ## CONVENTIONS
 - **ralph-loop is Phase 3/6 BUILD default**. Each REQ runs in a clean context, saving 40-67% tokens.
-- **delphi-review HARD-GATE in Phase 2/6 DESIGN**: design must reach ≥90% consensus across ≥2 model providers, domestic models only. Unapproved → BLOCK coding.
+- **delphi-review HARD-GATE in Phase 2/6 DESIGN**: all three expert roles must execute with three distinct requested model IDs, then aggregate ≥90% consensus within 5 rounds. Unapproved or unverifiable → BLOCK coding.
 - **`learn` is called twice**: once per REQ in Phase 3/6 (ralph-loop internal) and once in Phase 4/6 VERIFY (Sprint-level retro).
 - **Phase isolation**: each phase has explicit entry/exit criteria documented in its `references/phase-*.md` file.
 - **Emergent Requirements** discovered in Phase 6/6 CLOSE (USER ACCEPTANCE) are explicitly captured via `templates/emergent-issues-template.md` — never silently merged.

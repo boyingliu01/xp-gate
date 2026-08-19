@@ -64,7 +64,7 @@ npx xp-gate delphi-review --mode requirements
 
 **评审配置**（轻量）：
 - 复用现有 3 专家（architecture/feasibility/technical），`--mode requirements` 切换评审焦点提示词
-- 轻量配置：2 专家、1 轮
+- 所有路径固定使用 3 专家，Round 1 独立执行并验证 distinct model IDs，最多 5 轮
 - lightweight sprint（`change_type == "修改已存在代码"`）：跳过 R1，需求评审合并入 R2
 
 **评审焦点**：
@@ -149,7 +149,7 @@ orchestrator 基于访谈记录 + CONTEXT.md + R1 评审结论生成设计文档
 
 IF change_type == "修改已存在代码":
   → 增量优化路径: SKIP batch-grill-me
-  → 直接进入 Step 7: lightweight R2 delphi-review (2 专家, 1 轮)
+   → 直接进入 Step 7: R2 delphi-review（3 专家，最多 5 轮）
 ELSE (change_type == "新增功能" 或 未定义):
   → 标准路径: 继续 Step 6 (batch-grill-me) → Step 7
 ```
@@ -158,7 +158,7 @@ ELSE (change_type == "新增功能" 或 未定义):
 
 | change_type | batch-grill-me | R2 delphi-review |
 |------------|----------------|------------------|
-| `修改已存在代码` | ❌ SKIP | lightweight (2 专家, 1 轮) |
+| `修改已存在代码` | ❌ SKIP | 3 专家，最多 5 轮 |
 | `新增功能` | ✅ 执行 | 标准 (3 专家) |
 | `undefined` / 缺失 | ✅ 执行 | 标准 (3 专家) |
 
@@ -183,12 +183,12 @@ batch-grill-me 替代 autoplan 的 taste_decisions 功能：
 # 标准路径（3 专家）
 skill(name="delphi-review", user_message="[设计文档 + batch-grill-me 决策结果]")
 
-# 增量优化路径（2 专家, 1 轮 — 来自 Step 5 路由）
-skill(name="delphi-review", user_message="[设计文档]", experts=2, max_rounds=1)
+# 增量优化路径（3 专家，最多 5 轮）
+skill(name="delphi-review", user_message="[设计文档]", experts=3, max_rounds=5)
 ```
 
 - **标准路径**: Round 1: 3 专家匿名独立评审 → Round 2+: 交换意见直到共识
-- **增量优化路径**: 2 专家, 1 轮
+- **增量优化路径**: 3 专家，最多 5 轮
 - ≥90% 共识 + APPROVED 才通过
 - 输出: APPROVED / REQUEST_CHANGES
 
