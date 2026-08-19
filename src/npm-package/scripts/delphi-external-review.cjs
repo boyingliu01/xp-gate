@@ -379,8 +379,7 @@ async function callModelAPI(providerConfig, model, systemPrompt, userPrompt, opt
     if (responseReceived) {
       return { error: true, message: 'Invalid response from model.' };
     }
-    const category = err instanceof Error ? err.name : 'UnknownError';
-    return { error: true, message: `Network error (${category}).` };
+    return { error: true, message: 'Network error.' };
   } finally {
     clearTimeout(timeout);
   }
