@@ -229,6 +229,9 @@ describe('validateDistinctModels', () => {
       feasibility: { provider: 'same-provider', model: 'model-c' },
     }, {}, { cross_provider_required: true });
     expect(result.valid).toBe(true);
+    expect(result.warning).toMatch(/cross_provider_required/i);
+    expect(result.warning).toMatch(/deprecated/i);
+    expect(result.warning).toMatch(/ignored/i);
   });
 
   it('requires all three expert roles', () => {
@@ -238,6 +241,18 @@ describe('validateDistinctModels', () => {
     }, {});
     expect(result.valid).toBe(false);
     expect(result.reason).toContain('feasibility');
+  });
+
+  it('rejects unsupported extra expert roles', () => {
+    const result = validateDistinctModels({
+      architecture: { provider: 'p', model: 'm1' },
+      technical: { provider: 'p', model: 'm2' },
+      feasibility: { provider: 'p', model: 'm3' },
+      security: { provider: 'p', model: 'm4' },
+    }, {});
+    expect(result.valid).toBe(false);
+    expect(result.reason).toMatch(/unsupported|extra/i);
+    expect(result.reason).toContain('security');
   });
 });
 
