@@ -172,7 +172,7 @@ tools_denied:
 - Multi-round anonymous expert consensus review (design + code-walkthrough modes)
 - Exactly 3 experts with distinct trimmed executable model IDs and statistical consensus (>= 90%)
 - Structured verdict: APPROVED / PASS_WITH_CAVEATS / REQUEST_CHANGES
-- Domestic models only (no Anthropic/OpenAI/Google)
+- Provider, vendor, gateway, country, and model nationality are unrestricted; any expert execution failure blocks approval
 
 **Out of Scope:**
 - Does NOT implement code changes (review only, implementation is separate)
