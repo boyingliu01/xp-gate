@@ -69,6 +69,7 @@ describe('phase-transition', () => {
     fs.writeFileSync(path.join(outputsDir, 'requirements-reviewed.json'), JSON.stringify({
       verdict: 'APPROVED',
       requirements_hash: 'test-hash-placeholder',
+      head_commit: 'unknown',
       timestamp: new Date().toISOString(),
     }));
   }
@@ -501,6 +502,77 @@ describe('phase-transition', () => {
       fs.mkdirSync(outputsDir, { recursive: true });
       fs.writeFileSync(path.join(outputsDir, 'test-alignment-report.json'), JSON.stringify(report, null, 2));
     }
+
+    function writeRequirementsReview(dir, report) {
+      const outputsDir = path.join(dir, '.sprint-state', 'phase-outputs');
+      fs.mkdirSync(outputsDir, { recursive: true });
+      fs.writeFileSync(path.join(outputsDir, 'requirements-reviewed.json'), JSON.stringify(report, null, 2));
+    }
+
+    it('BLOCKs schema-v2 requirements evidence without head_commit', () => {
+      createSprintState(tmpDir, 2);
+      writeRequirementsReview(tmpDir, {
+        verdict: 'APPROVED',
+        requirements_hash: 'requirements-v1',
+      });
+
+      const result = validateEvidence(2, tmpDir);
+
+      expect(result.ok).toBe(false);
+      expect(result.errors.some(error => error.includes('head_commit'))).toBe(true);
+    });
+
+    it('BLOCKs schema-v2 requirements evidence bound to a stale HEAD', () => {
+      const reviewedCommit = createRepository(tmpDir, 'reviewed requirements');
+      fs.writeFileSync(path.join(tmpDir, 'file.txt'), 'requirements changed');
+      git('add file.txt', tmpDir);
+      git('commit --quiet -m "changed requirements"', tmpDir);
+      createSprintState(tmpDir, 2);
+      writeRequirementsReview(tmpDir, {
+        verdict: 'APPROVED',
+        requirements_hash: 'requirements-v1',
+        head_commit: reviewedCommit,
+      });
+
+      const result = validateEvidence(2, tmpDir);
+
+      expect(result.ok).toBe(false);
+      expect(result.errors.some(error => error.includes('head_commit mismatch'))).toBe(true);
+    });
+
+    it('accepts schema-v2 requirements evidence bound to the current HEAD', () => {
+      const currentHead = createRepository(tmpDir, 'reviewed requirements');
+      createSprintState(tmpDir, 2);
+      writeRequirementsReview(tmpDir, {
+        verdict: 'APPROVED',
+        requirements_hash: 'requirements-v1',
+        head_commit: currentHead,
+      });
+
+      const result = validateEvidence(2, tmpDir);
+
+      expect(result.ok).toBe(true);
+      expect(result.errors).toHaveLength(0);
+    });
+
+    it.each([
+      ['missing', undefined],
+      ['stale', 'deadbeef00000000000000000000000000000000'],
+    ])('WARNs but accepts legacy requirements evidence with %s head_commit', (_label, headCommit) => {
+      createRepository(tmpDir, 'reviewed requirements');
+      createSprintState(tmpDir);
+      const report = {
+        verdict: 'APPROVED',
+        requirements_hash: 'requirements-v1',
+      };
+      if (headCommit !== undefined) report.head_commit = headCommit;
+      writeRequirementsReview(tmpDir, report);
+
+      const result = validateEvidence(2, tmpDir);
+
+      expect(result.ok).toBe(true);
+      expect(result.warnings.some(warning => warning.includes('head_commit'))).toBe(true);
+    });
 
     it('(a) BLOCKs when evidence file is missing for new sprint (evidence_schema_version >= 2)', () => {
       createSprintState(tmpDir, 2);

@@ -45,7 +45,7 @@ const PHASE_NAMES = {
 const EVIDENCE_FILES = {
   2: {
     path: '.sprint-state/phase-outputs/requirements-reviewed.json',
-    requiredFields: ['verdict', 'requirements_hash'],
+    requiredFields: ['verdict', 'requirements_hash', 'head_commit'],
     blockingCheck: (data) => data.verdict === 'APPROVED',
     blockingMessage: 'Requirements review verdict is not APPROVED',
   },
@@ -226,6 +226,16 @@ function validateEvidence(phase, projectDir) {
   if (phase === 2) {
     if (typeof data.requirements_hash !== 'string' || data.requirements_hash.length === 0) {
       const msg = `${fileName}: requirements_hash must be a non-empty string`;
+      if (isLegacySprint) {
+        warnings.push(`WARNING: ${msg}. Upgrade sprint with evidence_schema_version >= 2 to enforce.`);
+      } else {
+        errors.push(msg);
+      }
+    }
+
+    const currentHead = getCurrentHeadCommit(projectDir);
+    if (data.head_commit !== currentHead) {
+      const msg = `${fileName}: head_commit mismatch — review has "${data.head_commit}", current HEAD is "${currentHead}"; regenerate the requirements review for the current commit`;
       if (isLegacySprint) {
         warnings.push(`WARNING: ${msg}. Upgrade sprint with evidence_schema_version >= 2 to enforce.`);
       } else {
