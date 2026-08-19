@@ -3,8 +3,8 @@ name: delphi-review
 version: 1.1.0
 description: >
   Performs multi-round anonymous expert consensus review using the Delphi method. Supports
-  design review (default) and code-walkthrough (--mode code-walkthrough) modes. Uses 2-3 experts
-  from at least 2 different domestic model providers with a >=90% statistical consensus threshold.
+  design review (default) and code-walkthrough (--mode code-walkthrough) modes. Uses exactly 3
+  successfully executed experts with distinct model IDs and a >=90% statistical consensus threshold.
   Outputs structured verdict (APPROVED/PASS_WITH_CAVEATS/REQUEST_CHANGES/BLOCKED).
 
   WHAT: Anonymous multi-expert review with iterative consensus building for designs, plans,
@@ -170,7 +170,7 @@ tools_denied:
 
 **In Scope:**
 - Multi-round anonymous expert consensus review (design + code-walkthrough modes)
-- 2-3 experts from different providers with statistical consensus (>= 90%)
+- Exactly 3 experts with distinct trimmed executable model IDs and statistical consensus (>= 90%)
 - Structured verdict: APPROVED / PASS_WITH_CAVEATS / REQUEST_CHANGES
 - Domestic models only (no Anthropic/OpenAI/Google)
 
@@ -291,16 +291,15 @@ Each round MUST output a structured round marker:
 
 | 配置 | 专家 | 适用场景 |
 |------|------|---------|
-| 2 专家（默认） | A(架构) + B(实现) | 代码变更、小型设计 |
-| 3 专家 | A(架构) + B(实现) + C(可行性) | 架构决策、需求文档 |
+| 3 专家（强制） | A(架构) + B(实现) + C(可行性) | 所有评审模式 |
 
 ### 模型选择策略（强制 — 平台适配）
 
 **关键原则**：
-- ✅ 三个专家必须来自 **至少 2 家不同 provider**
+- ✅ 三个专家必须成功执行且使用 **三个 distinct trimmed model IDs**
 - ❌ 禁止 hardcode 模型名称
-- ❌ 禁止三个专家全部使用同一 provider 的模型
-- ❌ 禁止使用 Anthropic/OpenAI/Google 等国外模型
+- ✅ Provider、vendor、gateway 和模型国籍不受限制
+- ❌ `provider: local` fallback 不能计为成功执行
 
 #### Qoder 平台（推荐 — Custom Agent 模式）
 
@@ -460,11 +459,11 @@ Phase 0: 准备 → Round 1: 匿名独立评审 → 共识检查
 |---------|---------|
 | Round 1 未 APPROVED 就"评审完成" | 迭代直到 APPROVED，修复后重新评审 |
 | 只处理 Critical，忽略 Major | 零容忍：Critical/Major 全部必须处理 |
-| 单专家自评 | 至少 2 位不同 provider 的专家 |
+| 单专家自评 | 三个 distinct executable models 全部成功执行 |
 | 用户说"时间紧急"就跳过 | 评审是投资不是开销 |
 | "专家几乎一致"就通过 | "几乎" = 不一致，继续到 >=90% |
-| 使用 Anthropic/GPT/Gemini | 必须使用国产开源模型 |
-| 三个专家同一厂家 | 必须来自至少 2 家不同厂家 |
+| 按 provider 或模型国籍限制选择 | 仅强制三个 distinct trimmed model IDs |
+| `provider: local` fallback 计入 | fallback 不算成功执行证据 |
 
 **Code-walkthrough 专属 Anti-Patterns** → 详见 `references/code-walkthrough.md`
 

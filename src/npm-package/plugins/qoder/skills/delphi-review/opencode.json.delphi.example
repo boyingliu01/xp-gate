@@ -4,7 +4,7 @@
     "===========================================",
     "Copy the relevant 'agent' block below into your opencode.json.",
     "Replace YOUR_PROVIDER/YOUR_MODEL with your actual provider and model names.",
-    "At least 2 of the 3 agents should use different providers for cross-bias protection."
+    "All 3 agents must use distinct trimmed executable model IDs; providers may be shared."
   ],
 
   "$example_providers": {
