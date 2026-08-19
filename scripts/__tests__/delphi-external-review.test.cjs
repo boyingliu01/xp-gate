@@ -147,6 +147,29 @@ describe('readConfig', () => {
     expect(result.experts.architecture.model).toBe('m2');
   });
 
+  it('normalizes configured model IDs and prevents enforcement bypass', () => {
+    const configPath = path.join(tmpDir, '.delphi-config.json');
+    fs.writeFileSync(configPath, JSON.stringify({
+      active_profile: 'default',
+      consensus: { distinct_models_required: false },
+      profiles: {
+        default: {
+          providers: { gateway: { base_url: 'https://example.test/v1', api_key: 'key' } },
+          experts: {
+            architecture: { provider: 'gateway', model: ' qwen3.7-max ' },
+            technical: { provider: 'gateway', model: 'model-b' },
+            feasibility: { provider: 'gateway', model: 'model-c' },
+          },
+        },
+      },
+    }));
+
+    const result = readConfig(configPath);
+    expect(result.experts.architecture.model).toBe('qwen3.7-max');
+    expect(result.consensus.distinct_models_required).toBe(true);
+    expect(result.warnings).toContain('distinct_models_required_forced');
+  });
+
   it('exits with error when config file not found', () => {
     const mockExit = vi.spyOn(process, 'exit').mockImplementation(() => { throw new Error('exit'); });
     const mockError = vi.spyOn(console, 'error').mockImplementation(() => {});
@@ -214,12 +237,14 @@ describe('validateDistinctModels', () => {
     expect(result.reason).toContain('technical');
   });
 
-  it('passes with three distinct local models', () => {
-    expect(validateDistinctModels({
+  it('rejects local fallback labels because they do not execute models', () => {
+    const result = validateDistinctModels({
       architecture: { provider: 'local', model: 'local-a' },
       technical: { provider: 'local', model: 'local-b' },
       feasibility: { provider: 'local', model: 'local-c' },
-    }, {})).toEqual({ valid: true });
+    }, {});
+    expect(result.valid).toBe(false);
+    expect(result.reason).toMatch(/architecture|callable provider/i);
   });
 
   it('does not restore provider blocking when the legacy option is present', () => {
@@ -393,15 +418,86 @@ describe('resolveInputContent', () => {
   });
 });
 
-// ── resolveLocalFallback ───────────────────────────────────────────────
-describe('resolveLocalFallback', () => {
-  const { resolveLocalFallback } = loadModule();
+// ── Provider calls and provenance ──────────────────────────────────────
+describe('provider calls and provenance', () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
 
-  it('returns fallback JSON when provider is "local"', () => {
-    const result = resolveLocalFallback('feasibility');
-    expect(result.fallback).toBe(true);
-    expect(result.expert_role).toBe('feasibility');
-    expect(result.reason).toBe('local');
+  it('sends the normalized configured model and preserves provider resolution', async () => {
+    const { callModelAPI } = loadModule();
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      status: 200,
+      json: async () => ({
+        model: 'qwen3.7-max-actual',
+        choices: [{ message: { content: '{"verdict":"APPROVED"}' } }],
+      }),
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    const result = await callModelAPI(
+      { base_url: 'https://example.test/v1', api_key: 'key' },
+      'qwen3.7-max',
+      'system',
+      'user',
+    );
+
+    const requestBody = JSON.parse(fetchMock.mock.calls[0][1].body);
+    expect(requestBody.model).toBe('qwen3.7-max');
+    expect(result.content).toBe('{"verdict":"APPROVED"}');
+    expect(result.resolved_model).toBe('qwen3.7-max-actual');
+  });
+
+  it('does not expose non-success provider bodies', async () => {
+    const { callModelAPI } = loadModule();
+    const text = vi.fn().mockResolvedValue('SECRET_TOKEN');
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue({
+      ok: false,
+      status: 400,
+      text,
+    }));
+
+    const result = await callModelAPI(
+      { base_url: 'https://example.test/v1', api_key: 'key' },
+      'model-a',
+      'system',
+      'user',
+    );
+
+    expect(result.message).toContain('400');
+    expect(result.message).not.toContain('SECRET_TOKEN');
+    expect(text).not.toHaveBeenCalled();
+  });
+
+  it('records null when the provider omits resolved model identity', async () => {
+    const { callModelAPI } = loadModule();
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue({
+      ok: true,
+      status: 200,
+      json: async () => ({ choices: [{ message: { content: '{"verdict":"APPROVED"}' } }] }),
+    }));
+
+    const result = await callModelAPI(
+      { base_url: 'https://example.test/v1', api_key: 'key' },
+      'requested-alias',
+      'system',
+      'user',
+    );
+
+    expect(result.resolved_model).toBeNull();
+  });
+
+  it('builds separate requested and resolved model provenance', () => {
+    const { buildReviewOutput } = loadModule();
+    const result = buildReviewOutput(
+      { verdict: 'APPROVED' },
+      { expert: 'architecture', round: 1, mode: 'design' },
+      { provider: 'gateway', requested_model: 'qwen3.7-max', resolved_model: 'qwen3.7-max-actual' },
+    );
+
+    expect(result.requested_model).toBe('qwen3.7-max');
+    expect(result.resolved_model).toBe('qwen3.7-max-actual');
   });
 });
 
