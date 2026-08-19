@@ -101,6 +101,7 @@ describe('readConfig', () => {
     const configPath = path.join(tmpDir, '.delphi-config.json');
     fs.writeFileSync(configPath, JSON.stringify({
       active_profile: 'default',
+      consensus: { cross_provider_required: true },
       profiles: {
         default: {
           providers: {
@@ -119,6 +120,10 @@ describe('readConfig', () => {
     expect(result.active_profile).toBe('default');
     expect(result.experts.architecture.provider).toBe('deepseek');
     expect(result.experts.architecture.model).toBe('deepseek-chat');
+    expect(result.consensus.distinct_models_required).toBe(true);
+    expect(result.consensus.threshold_percent).toBe(90);
+    expect(result.consensus.max_review_rounds).toBe(5);
+    expect(result.consensus.cross_provider_required).toBe(true);
   });
 
   it('supports --profile override', () => {

@@ -113,24 +113,48 @@ function readConfig(configPath, profileOverride) {
     active_profile: profileName,
     providers,
     experts: profile.experts || {},
-    consensus: raw.consensus || { threshold_percent: 90, max_review_rounds: 5 },
+    consensus: {
+      distinct_models_required: true,
+      threshold_percent: 90,
+      max_review_rounds: 5,
+      ...(raw.consensus || {}),
+    },
   };
 }
 
-// ── Cross-provider validation ──────────────────────────────────────────
-function validateCrossProvider(experts, providers) {
-  const nonLocalExperts = Object.values(experts).filter(e => e.provider !== 'local');
+// ── Distinct-model validation ───────────────────────────────────────────
+const REQUIRED_EXPERT_ROLES = ['architecture', 'technical', 'feasibility'];
 
-  if (nonLocalExperts.length === 0) {
-    return { valid: true, warning: 'All experts are "local" — no cross-model diversity. Consider configuring external APIs.' };
+function validateDistinctModels(experts, _providers, consensus = {}) {
+  const normalizedModels = [];
+
+  for (const role of REQUIRED_EXPERT_ROLES) {
+    const expert = experts?.[role];
+    if (!expert) {
+      return { valid: false, reason: `Missing required expert role: ${role}.` };
+    }
+    if (typeof expert.model !== 'string' || expert.model.trim() === '') {
+      return { valid: false, reason: `Expert ${role} must define a non-empty model.` };
+    }
+    normalizedModels.push({ role, model: expert.model.trim() });
   }
 
-  const uniqueProviders = new Set(nonLocalExperts.map(e => e.provider));
+  const seen = new Map();
+  for (const assignment of normalizedModels) {
+    const previousRole = seen.get(assignment.model);
+    if (previousRole) {
+      return {
+        valid: false,
+        reason: `duplicate model "${assignment.model}" assigned to ${previousRole} and ${assignment.role}.`,
+      };
+    }
+    seen.set(assignment.model, assignment.role);
+  }
 
-  if (uniqueProviders.size < 2 && nonLocalExperts.length >= 2) {
+  if (consensus.cross_provider_required === true) {
     return {
-      valid: false,
-      reason: `All ${nonLocalExperts.length} non-local experts use the same provider. At least 2 different providers required for cross-model diversity.`,
+      valid: true,
+      warning: 'cross_provider_required is deprecated and ignored; distinct model identifiers are enforced.',
     };
   }
 
@@ -331,6 +355,16 @@ async function main() {
   const args = parseArgs(process.argv.slice(2));
   const config = readConfig(args.config, args.profile);
 
+  // Validate the complete expert map before fallback or provider lookup.
+  const validation = validateDistinctModels(config.experts, config.providers, config.consensus);
+  if (!validation.valid) {
+    console.error(`[delphi-review] ERROR: ${validation.reason}`);
+    process.exit(1);
+  }
+  if (validation.warning) {
+    console.error(`[delphi-review] WARNING: ${validation.warning}`);
+  }
+
   // Get expert config
   const expertConfig = config.experts[args.expert];
   if (!expertConfig) {
@@ -343,16 +377,6 @@ async function main() {
     const fallback = resolveLocalFallback(args.expert);
     console.log(JSON.stringify(fallback));
     return;
-  }
-
-  // Validate cross-provider
-  const validation = validateCrossProvider(config.experts, config.providers);
-  if (!validation.valid) {
-    console.error(`[delphi-review] ERROR: ${validation.reason}`);
-    process.exit(1);
-  }
-  if (validation.warning) {
-    console.error(`[delphi-review] WARNING: ${validation.warning}`);
   }
 
   // Get provider config
@@ -414,7 +438,7 @@ if (require.main !== module) {
   module.exports = {
     parseArgs,
     readConfig,
-    validateCrossProvider,
+    validateDistinctModels,
     extractJsonFromResponse,
     buildSystemPrompt,
     buildUserPrompt,
