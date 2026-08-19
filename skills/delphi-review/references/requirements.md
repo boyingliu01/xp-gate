@@ -53,7 +53,7 @@ sprint-flow Phase 2 THINK:
   Step 4: HARD-GATE（用户审批设计文档）
 ```
 
-**lightweight sprint 例外**: 当 `change_type == "修改已存在代码"` 时，sprint-flow 跳过 R1 需求评审，需求维度合并入 R2 设计评审。
+所有 Sprint 路径都执行 R1。Force level 只调整上下文深度和后续迭代预算，不跳过需求评审，也不减少三位专家执行。
 
 ---
 
@@ -77,14 +77,14 @@ delphi-review --mode requirements
     │
     ├─→ Consensus check
     │      │
-    │      ├─→ Both APPROVED → write requirements-reviewed.json verdict=APPROVED
+    │      ├─→ All three APPROVED → write requirements-reviewed.json verdict=APPROVED
     │      │
-    │      └─→ Either GAPS_FOUND → record gaps, set verdict=GAPS_FOUND
+    │      └─→ Any GAPS_FOUND → record gaps, set verdict=GAPS_FOUND
     │
     └─→ Return to sprint-flow orchestrator
          │
          ├─→ APPROVED → proceed to design doc generation
-         └─→ GAPS_FOUND → loop back to grill-with-docs (1 more round, max 2 total)
+         └─→ GAPS_FOUND → loop back to grill-with-docs (up to 5 total rounds)
 ```
 
 ---
@@ -169,7 +169,7 @@ Round 2: delphi-review --mode requirements（带 Round 1 gaps 上下文）
 
 **硬性限制**:
 - **最多 5 轮**（Round 1 + 可选后续轮次）
-- **禁止无界循环** — Round 2 后仍 GAPS_FOUND 必须升级
+- **禁止无界循环** — Round 5 后仍 GAPS_FOUND 必须升级
 - **Round 2 上下文**: 专家看到 Round 1 的 gaps 列表，评估是否已修复
 - **升级语义**: `escalation_needed: true` 写入 requirements-reviewed.json，sprint-flow 负责 UX
 
@@ -212,8 +212,9 @@ Round 2: delphi-review --mode requirements（带 Round 1 gaps 上下文）
   "context_file_used": "CONTEXT.md",
   "round": 1,
   "expert_verdicts": [
-    { "role": "architecture", "verdict": "APPROVED", "confidence": 8 },
-    { "role": "feasibility", "verdict": "GAPS_FOUND", "confidence": 7 }
+    { "role": "architecture", "verdict": "APPROVED", "confidence": 8, "result_type": "delphi_expert_result", "requested_model": "provider/model-a" },
+    { "role": "technical", "verdict": "GAPS_FOUND", "confidence": 7, "result_type": "delphi_expert_result", "requested_model": "provider/model-b" },
+    { "role": "feasibility", "verdict": "APPROVED", "confidence": 8, "result_type": "delphi_expert_result", "requested_model": "provider/model-c" }
   ],
   "requirements_statement": "实现用户注册流程，支持邮箱验证和密码重置",
   "gaps_found": [
@@ -236,12 +237,12 @@ Round 2: delphi-review --mode requirements（带 Round 1 gaps 上下文）
 | `requirements_hash` | string | SHA-256 hex digest（防陈旧绑定，见下文） |
 | `head_commit` | string | 当前 `git rev-parse HEAD` |
 | `context_file_used` | string | 引用的 CONTEXT.md 路径 |
-| `round` | number | 当前轮次（1 或 2） |
+| `round` | number | 当前轮次（1 至 5） |
 | `expert_verdicts` | array | 三位专家的成功结构化结果，包含 `result_type` 和 `requested_model` |
 | `requirements_statement` | string | 被评审需求的简短摘要 |
 | `gaps_found` | array | GAPS_FOUND 时的缺口列表（APPROVED 时为空数组） |
 | `rounds_used` | number | 实际使用的轮次数 |
-| `escalation_needed` | boolean | Round 2 后仍 GAPS_FOUND 时为 `true` |
+| `escalation_needed` | boolean | Round 5 后仍 GAPS_FOUND 时为 `true` |
 
 ### 状态文件: `.sprint-state/delphi-reviewed.json`
 
@@ -367,7 +368,7 @@ requirements_statement + CONTEXT.md content + ISO timestamp prefix (YYYY-MM-DD)
 - [ ] verdict 为 APPROVED 或 GAPS_FOUND
 - [ ] IF APPROVED: `.sprint-state/delphi-reviewed.json` 已写入（mode=requirements）
 - [ ] IF GAPS_FOUND: gaps_found 数组非空，escalation_needed 正确设置
-- [ ] IF Round 2 后仍 GAPS_FOUND: escalation_needed = true
+- [ ] IF Round 5 后仍 GAPS_FOUND: escalation_needed = true
 
 **IF 任何 Pre-requisite 缺失:**
 - **CANNOT 完成评审**
