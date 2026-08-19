@@ -306,7 +306,7 @@ IF 任何检查失败:
 ## Expert 评审输出格式
 
 ```markdown
-## Code Walkthrough - Expert [A/B]
+## Code Walkthrough - Expert [A/B/C]
 
 ### 变更摘要
 [变更的主要内容]
@@ -341,6 +341,7 @@ IF 任何检查失败:
 ### 专家意见汇总
 - Expert A: [APPROVED / REQUEST_CHANGES]
 - Expert B: [APPROVED / REQUEST_CHANGES]
+- Expert C: [APPROVED / REQUEST_CHANGES]
 
 ### 共识结果
 [CONSENSUS / DISAGREEMENT]
@@ -371,8 +372,9 @@ IF 任何检查失败:
   "verdict": "APPROVED",
   "confidence": 9,
   "experts": [
-    { "id": "Expert A", "verdict": "APPROVED", "confidence": 9 },
-    { "id": "Expert B", "verdict": "APPROVED", "confidence": 8 }
+    { "id": "Expert A", "role": "architecture", "verdict": "APPROVED", "confidence": 9, "result_type": "delphi_expert_result", "requested_model": "provider/model-a" },
+    { "id": "Expert B", "role": "technical", "verdict": "APPROVED", "confidence": 8, "result_type": "delphi_expert_result", "requested_model": "provider/model-b" },
+    { "id": "Expert C", "role": "feasibility", "verdict": "APPROVED", "confidence": 8, "result_type": "delphi_expert_result", "requested_model": "provider/model-c" }
   ],
   "issues": [],
   "consensus_ratio": 1.0,
@@ -448,6 +450,7 @@ Hook 验证以下条件（全部满足才允许 push）：
 - [ ] 变更大小在阈值内（文件 ≤20，行数 ≤500）
 - [ ] Expert A 完成匿名评审
 - [ ] Expert B 完成匿名评审
+- [ ] Expert C 完成匿名评审
 - [ ] 共识检查完成
 
 **CRITICAL - 共识验证 (code-walkthrough):**

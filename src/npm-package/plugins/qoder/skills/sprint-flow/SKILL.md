@@ -280,7 +280,7 @@ Sprint Flow: PREP → DESIGN → BUILD → VERIFY → SHIP → CLOSE
 - **Step 4: to-issues** — `skill(name="to-issues")` — 垂直切片 Issue 拆分 → slices-manifest.json
 - **Step 5: specification.yaml** — 从 APPROVED 设计文档自动提取
 - **Web 前端额外注入**: `design-shotgun`
-- **条件分支**: IF autoplan AUTO_APPROVED → lightweight delphi-review (2 专家、1 轮); ELSE → 标准 delphi-review (3 专家)
+- **条件分支**: force level 只调整上下文深度；所有路径都执行 architecture、technical、feasibility 三个 Custom Agent，最多 5 轮
 
 ### Phase 2/6→3/6: GITHOOKS-GATE（质量门禁安装检查）
 

@@ -317,7 +317,7 @@ requirements_statement + CONTEXT.md content + ISO timestamp prefix (YYYY-MM-DD)
 | Round 2 中复用 Round 1 gaps 作为新发现 | Round 2 专家获得 Round 1 gaps 上下文 | 迭代改进，避免重复劳动 |
 | 评审设计文档或代码 | 仅评审需求陈述 + CONTEXT.md | 设计/代码评审是 design / code-walkthrough 模式的职责 |
 | GAPS_FOUND 时写入 delphi-reviewed.json | 仅 APPROVED 时写入状态文件 | GAPS_FOUND 表示评审未完成 |
-| 在 lightweight sprint 中执行 R1 | `change_type == "修改已存在代码"` 时跳过 R1 | 需求维度合并入 R2 设计评审 |
+| 在 lightweight sprint 中减少或跳过 R1 | 所有路径都执行三专家 R1，仅缩短上下文 | Force level 不改变专家数或批准证据 |
 
 ---
 
@@ -378,7 +378,7 @@ requirements_statement + CONTEXT.md content + ISO timestamp prefix (YYYY-MM-DD)
 - 返回 sprint-flow → grill-with-docs 补充
 - 重新执行 requirements 评审（Round 2）
 
-**IF GAPS_FOUND (Round 2):**
+**IF GAPS_FOUND (Round 5):**
 - **escalation_needed = true**
 - **MUST 升级给用户决策**
 - **CANNOT 自动继续**
