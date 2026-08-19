@@ -109,16 +109,29 @@ function readConfig(configPath, profileOverride) {
     }
   }
 
+  const experts = Object.fromEntries(Object.entries(profile.experts || {}).map(([role, expert]) => [
+    role,
+    {
+      ...expert,
+      model: typeof expert.model === 'string' ? expert.model.trim() : expert.model,
+    },
+  ]));
+  const warnings = [];
+  if (raw.consensus?.distinct_models_required === false) {
+    warnings.push('distinct_models_required_forced');
+  }
+
   return {
     active_profile: profileName,
     providers,
-    experts: profile.experts || {},
+    experts,
     consensus: {
-      distinct_models_required: true,
       threshold_percent: 90,
       max_review_rounds: 5,
       ...(raw.consensus || {}),
+      distinct_models_required: true,
     },
+    warnings,
   };
 }
 
@@ -134,6 +147,9 @@ function validateDistinctModels(experts, _providers, consensus = {}) {
     const expert = expertRoles.includes(role) ? expertMap[role] : undefined;
     if (!expert) {
       return { valid: false, reason: `Missing required expert role: ${role}.` };
+    }
+    if (expert.provider === 'local') {
+      return { valid: false, reason: `Expert ${role} requires a callable provider when distinct models are enforced.` };
     }
     if (typeof expert.model !== 'string' || expert.model.trim() === '') {
       return { valid: false, reason: `Expert ${role} must define a non-empty model.` };
@@ -264,15 +280,6 @@ function resolveInputContent(args) {
   return args.input || '';
 }
 
-// ── Local fallback ─────────────────────────────────────────────────────
-function resolveLocalFallback(expertRole) {
-  return {
-    fallback: true,
-    expert_role: expertRole,
-    reason: 'local',
-  };
-}
-
 // ── API call ───────────────────────────────────────────────────────────
 async function callModelAPI(providerConfig, model, systemPrompt, userPrompt) {
   const url = `${providerConfig.base_url.replace(/\/$/, '')}/chat/completions`;
@@ -316,8 +323,7 @@ async function callModelAPI(providerConfig, model, systemPrompt, userPrompt) {
     }
 
     if (!response.ok) {
-      const text = await response.text();
-      return { error: true, message: `API error (${response.status}): ${text}` };
+      return { error: true, message: `API request failed (${response.status}). Provider response was not included.` };
     }
 
     const data = await response.json();
@@ -326,7 +332,11 @@ async function callModelAPI(providerConfig, model, systemPrompt, userPrompt) {
       return { error: true, message: 'Empty response from model.' };
     }
 
-    return { success: true, content };
+    return {
+      success: true,
+      content,
+      resolved_model: typeof data.model === 'string' && data.model.trim() !== '' ? data.model.trim() : null,
+    };
   } catch (err) {
     clearTimeout(timeout);
     if (err.name === 'AbortError') {
@@ -334,6 +344,19 @@ async function callModelAPI(providerConfig, model, systemPrompt, userPrompt) {
     }
     return { error: true, message: `Network error: ${err.message}` };
   }
+}
+
+function buildReviewOutput(verdict, args, provenance) {
+  return {
+    ...verdict,
+    expert_id: { architecture: 'A', technical: 'B', feasibility: 'C' }[args.expert],
+    expert_role: args.expert,
+    model_used: `${provenance.provider}/${provenance.requested_model}`,
+    requested_model: provenance.requested_model,
+    resolved_model: provenance.resolved_model,
+    round: args.round,
+    mode: args.mode,
+  };
 }
 
 // ── Retry logic ────────────────────────────────────────────────────────
@@ -371,19 +394,15 @@ async function main() {
   if (validation.warning) {
     console.error(`[delphi-review] WARNING: ${validation.warning}`);
   }
+  for (const warning of config.warnings) {
+    console.error(`[delphi-review] WARNING: ${warning}`);
+  }
 
   // Get expert config
   const expertConfig = config.experts[args.expert];
   if (!expertConfig) {
     console.error(`[delphi-review] ERROR: Expert "${args.expert}" not found in config.`);
     process.exit(1);
-  }
-
-  // Handle local fallback
-  if (expertConfig.provider === 'local') {
-    const fallback = resolveLocalFallback(args.expert);
-    console.log(JSON.stringify(fallback));
-    return;
   }
 
   // Get provider config
@@ -428,14 +447,11 @@ async function main() {
   }
 
   // Enrich output
-  const output = {
-    ...verdict,
-    expert_id: { architecture: 'A', technical: 'B', feasibility: 'C' }[args.expert],
-    expert_role: args.expert,
-    model_used: `${expertConfig.provider}/${expertConfig.model}`,
-    round: args.round,
-    mode: args.mode,
-  };
+  const output = buildReviewOutput(verdict, args, {
+    provider: expertConfig.provider,
+    requested_model: expertConfig.model,
+    resolved_model: result.resolved_model,
+  });
 
   console.log(JSON.stringify(output, null, 2));
 }
@@ -450,10 +466,10 @@ if (require.main !== module) {
     buildSystemPrompt,
     buildUserPrompt,
     resolveInputContent,
-    resolveLocalFallback,
     checkNodeVersion,
     callModelAPI,
     callWithRetry,
+    buildReviewOutput,
   };
 } else {
   main().catch(err => {
