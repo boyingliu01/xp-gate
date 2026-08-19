@@ -152,8 +152,9 @@ function readConfig(configPath, profileOverride) {
 // ── Distinct-model validation ───────────────────────────────────────────
 const REQUIRED_EXPERT_ROLES = ['architecture', 'technical', 'feasibility'];
 
-function validateDistinctModels(experts, _providers, consensus = {}) {
+function validateDistinctModels(experts, providers, consensus = {}) {
   const expertMap = experts && typeof experts === 'object' ? experts : {};
+  const providerMap = providers && typeof providers === 'object' ? providers : {};
   const expertRoles = Object.keys(expertMap);
   const normalizedModels = [];
 
@@ -161,9 +162,6 @@ function validateDistinctModels(experts, _providers, consensus = {}) {
     const expert = expertRoles.includes(role) ? expertMap[role] : undefined;
     if (!expert) {
       return { valid: false, reason: `Missing required expert role: ${role}.` };
-    }
-    if (expert.provider === 'local') {
-      return { valid: false, reason: `Expert ${role} requires a callable provider when distinct models are enforced.` };
     }
     if (typeof expert.model !== 'string' || expert.model.trim() === '') {
       return { valid: false, reason: `Expert ${role} must define a non-empty model.` };
@@ -186,6 +184,23 @@ function validateDistinctModels(experts, _providers, consensus = {}) {
       };
     }
     seen.set(assignment.model, assignment.role);
+  }
+
+  for (const role of REQUIRED_EXPERT_ROLES) {
+    const expert = expertMap[role];
+    if (typeof expert.provider !== 'string' || expert.provider.trim() === '' || expert.provider === 'local') {
+      return { valid: false, reason: `Expert ${role} must define a non-local callable provider.` };
+    }
+    const provider = providerMap[expert.provider];
+    if (!provider || typeof provider !== 'object' || Array.isArray(provider)) {
+      return { valid: false, reason: `Expert ${role} provider configuration must be an object.` };
+    }
+    if (typeof provider.base_url !== 'string' || provider.base_url.trim() === '') {
+      return { valid: false, reason: `Expert ${role} provider must define a non-empty base_url.` };
+    }
+    if (typeof provider.api_key !== 'string' || provider.api_key.trim() === '') {
+      return { valid: false, reason: `Expert ${role} provider must define a non-empty api_key.` };
+    }
   }
 
   if (consensus.cross_provider_required === true) {
@@ -361,8 +376,8 @@ async function callModelAPI(providerConfig, model, systemPrompt, userPrompt) {
 }
 
 function buildReviewOutput(verdict, args, provenance) {
-  return {
-    ...verdict,
+  const expertVerdict = verdict && typeof verdict === 'object' && !Array.isArray(verdict) ? verdict : {};
+  const output = {
     result_type: 'delphi_expert_result',
     expert_id: { architecture: 'A', technical: 'B', feasibility: 'C' }[args.expert],
     expert_role: args.expert,
@@ -372,6 +387,12 @@ function buildReviewOutput(verdict, args, provenance) {
     round: args.round,
     mode: args.mode,
   };
+  for (const field of ['verdict', 'confidence', 'critical_issues', 'major_concerns', 'minor_concerns', 'summary']) {
+    if (Object.hasOwn(expertVerdict, field)) {
+      output[field] = expertVerdict[field];
+    }
+  }
+  return output;
 }
 
 // ── Retry logic ────────────────────────────────────────────────────────
