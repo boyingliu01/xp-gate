@@ -216,7 +216,7 @@ find . -name "*{target}*.test.*" -o -name "*{target}*.spec.*" | grep -v node_mod
 
 **DELPHI-GATE invariant**: 所有流程级别（轻量/标准/复杂）的 Phase 3/6 BUILD 启动前，**必须**检查 `.sprint-state/delphi-reviewed.json` 的 verdict 为 `APPROVED`。未通过 delphi-review 直接路由到 BUILD 属于严重违规。
 
-**轻量级的正确理解**: 轻量级意味着 reduced-intensity 的 delphi-review（**2 专家、1 轮、2/2 APPROVED、较短上下文**），**不是**跳过 delphi-review，**不是** 1 专家评审。见 references/force-levels.md 的轻量级流程定义。
+**轻量级的正确理解**: 轻量级意味着 reduced-intensity 的 delphi-review（**3 专家、最多 5 轮、≥90% 聚合共识、较短上下文**），**不是**跳过 delphi-review，**不是**减少专家或模型执行。见 references/force-levels.md 的轻量级流程定义。
 
 **自动 escalation 规则**（检测到以下情况时，自动提升流程级别）:
 
