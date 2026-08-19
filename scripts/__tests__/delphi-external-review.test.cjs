@@ -243,6 +243,21 @@ describe('validateDistinctModels', () => {
     expect(result.reason).toContain('feasibility');
   });
 
+  it('rejects a non-enumerable required expert role', () => {
+    const experts = {
+      technical: { provider: 'p', model: 'm2' },
+      feasibility: { provider: 'p', model: 'm3' },
+    };
+    Object.defineProperty(experts, 'architecture', {
+      value: { provider: 'p', model: 'm1' },
+      enumerable: false,
+    });
+
+    const result = validateDistinctModels(experts, {});
+    expect(result.valid).toBe(false);
+    expect(result.reason).toMatch(/architecture|enumerable/i);
+  });
+
   it('rejects unsupported extra expert roles', () => {
     const result = validateDistinctModels({
       architecture: { provider: 'p', model: 'm1' },

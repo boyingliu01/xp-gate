@@ -126,10 +126,12 @@ function readConfig(configPath, profileOverride) {
 const REQUIRED_EXPERT_ROLES = ['architecture', 'technical', 'feasibility'];
 
 function validateDistinctModels(experts, _providers, consensus = {}) {
+  const expertMap = experts && typeof experts === 'object' ? experts : {};
+  const expertRoles = Object.keys(expertMap);
   const normalizedModels = [];
 
   for (const role of REQUIRED_EXPERT_ROLES) {
-    const expert = Object.hasOwn(experts || {}, role) ? experts[role] : undefined;
+    const expert = expertRoles.includes(role) ? expertMap[role] : undefined;
     if (!expert) {
       return { valid: false, reason: `Missing required expert role: ${role}.` };
     }
@@ -139,7 +141,7 @@ function validateDistinctModels(experts, _providers, consensus = {}) {
     normalizedModels.push({ role, model: expert.model.trim() });
   }
 
-  const unexpectedRole = Object.keys(experts || {}).find(role => !REQUIRED_EXPERT_ROLES.includes(role));
+  const unexpectedRole = expertRoles.find(role => !REQUIRED_EXPERT_ROLES.includes(role));
   if (unexpectedRole) {
     return { valid: false, reason: `Unsupported expert role: ${unexpectedRole}.` };
   }
