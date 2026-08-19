@@ -124,7 +124,7 @@ autoplan_result:
 ├───────────────────────────────────────────────────────────────────┤
 │ IF autoplan_result.verdict == "AUTO_APPROVED"                      │
 │    AND autoplan_result.taste_decisions == []                       │
-│  → 调用 lightweight delphi-review（2 专家、1 轮、2/2 APPROVED）     │
+│  → 调用轻量上下文 delphi-review（三个 Custom Agent，最多 5 轮）      │
 │                                                                    │
 │ IF autoplan_result.verdict == "NEEDS_REVIEW"                       │
 │    OR autoplan_result.taste_decisions.length > 0                   │
@@ -143,8 +143,9 @@ autoplan_result:
 skill(name="delphi-review", user_message="[设计文档 + taste_decisions 确认结果]")
 ```
 
-- Round 1: 3 专家匿名独立评审
-- Round 2+: 交换意见直到共识
+- Round 1: architecture、technical、feasibility 三个 Custom Agent 匿名独立评审
+- 验证三份成功结果与三个 distinct trimmed `requested_model`
+- Round 2+: 三个 Agent 交换意见直到共识，最多 5 轮
 - 输出: APPROVED / REQUEST_CHANGES
 
 **如果 REQUEST_CHANGES**: 暂停等待用户处理 → 修复后重新评审 → 直到 APPROVED

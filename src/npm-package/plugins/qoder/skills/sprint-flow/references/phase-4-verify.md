@@ -18,7 +18,7 @@ Web 前端项目额外增加：系统化 QA、视觉审计、性能基线。
 ### 调用 Skills
 
 **所有项目**:
-- `delphi-review --mode code-walkthrough` — 多专家匿名代码走查（2-3 domestic models, ≥90% consensus）
+- `delphi-review --mode code-walkthrough` — 三个 Qoder Custom Agent 匿名代码走查（模型不受 provider、vendor 或国籍限制，≥90% consensus）
 - `test-specification-alignment` — 测试与 Spec 对齐验证
 - `browse` (gstack) — 浏览器自动化测试
 
@@ -43,11 +43,10 @@ Web 前端项目额外增加：系统化 QA、视觉审计、性能基线。
 skill(name="delphi-review", user_message="--mode code-walkthrough")
 ```
 
-- 2-3 位国内模型专家匿名独立评审（DeepSeek-v4-pro + Kimi-K2.6 + Qwen3.6-Plus）
-- Round 1: 匿名独立评审（防止 anchoring bias）
-- Round 2: 交换意见，响应关切
-- Round 3: 最终立场（如需）
-- ≥90% 共识 + APPROVED 才通过
+- architecture、technical、feasibility 三个 Custom Agent 匿名独立评审
+- Round 1 验证三份成功结果及三个 distinct trimmed `requested_model`
+- 后续轮次保持三个 Agent，最多执行到 Round 5
+- 三份结果聚合 ≥90% 共识 + APPROVED 才通过；任一执行失败都阻断
 
 **如果 REQUEST_CHANGES**: 暂停等待用户处理 → 修复后重新评审。**如果 APPROVED**: 写入 `.code-walkthrough-result.json`（1 小时有效期）→ 进入 Step 2。
 

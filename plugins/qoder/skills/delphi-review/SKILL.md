@@ -226,11 +226,11 @@ tools_denied:
 ## Workflow
 
 1. **Step 0: Input Validation** — Check input contains reviewable content (design doc/code/spec/diff). Empty input → `[DelphiReview:BLOCKED]`.
-2. **Round 1: Anonymous Independent Review** — Experts review without seeing each other's opinions. Output individual verdict JSON.
-3. **Consensus Check** — Consensus >=90% AND all APPROVED → complete.
-4. **Round 2: Exchange Opinions** — Experts see others' opinions, re-evaluate.
-5. **Round 3: Final Positions** — Final stance, output disagreements if any.
-6. **Fix & Re-Review** — REQUEST_CHANGES → fix Critical+Major → restart from Round 2.
+2. **Round 1: Anonymous Independent Review** — Launch the architecture, technical, and feasibility Custom Agents independently. Record three successful `delphi_expert_result` records and each `requested_model`.
+3. **Execution Verification** — Require all three records and three distinct trimmed requested model IDs. Model provider, vendor, gateway, and nationality are unrestricted.
+4. **Consensus Check** — Aggregate all three results; consensus >=90% AND all APPROVED → complete.
+5. **Rounds 2-5** — Exchange evidence and re-evaluate with all three Custom Agents until approved or five rounds are exhausted.
+6. **Failure Handling** — Missing/failed agents, duplicate model IDs, or no consensus after Round 5 → BLOCK; never reduce the expert count.
 7. **Generate Output** — Consensus report + specification.yaml (design) or `.code-walkthrough-result.json` (walkthrough) + `delphi-reviewed.json`.
 
 ## Activation (MANDATORY for L1 Trigger Detection)
@@ -255,7 +255,7 @@ Each round MUST output a structured round marker:
 
 **Rules**:
 - Every round marker MUST appear as a separate, identifiable line
-- Round numbering MUST be sequential (1, 2, 3)
+- Round numbering MUST be sequential (1 through at most 5)
 - After each round, output consensus summary: `consensus_ratio=N/N`, `verdict_status: converging | stable | diverging`
 - Final round MUST output verdict: `APPROVED | PASS_WITH_CAVEATS | REQUEST_CHANGES | PROCESS_BLOCK`
 
@@ -392,10 +392,7 @@ Phase 0: 准备 → Round 1: 匿名独立评审 → 共识检查
 
 ## Output Format (MANDATORY for L3)
 
-**⚠️ Single vs Multi-Expert Output**:
-- **Multi-Expert Mode (default)**: MUST use the full JSON schema below. Each expert outputs independently; the orchestrator aggregates into `consensus_report`.
-- **Single Reviewer Mode** (explicit `--single`): MAY use simplified text template: `[DelphiReview] verdict=APPROVED|REQUEST_CHANGES|BLOCKED confidence=N/10 issues=[critical:N, major:N, minor:N] summary: [1-2 sentences]`.
-- **Never mix formats**.
+Every Delphi mode MUST use the full JSON schema below. Each of the three Qoder Custom Agents outputs independently and the orchestrator aggregates only after execution verification. There is no single-reviewer Delphi approval path.
 
 ```json
 {
@@ -428,7 +425,7 @@ Phase 0: 准备 → Round 1: 匿名独立评审 → 共识检查
 ## Terminal State Checklist
 
 - [ ] Phase 0 完成（文档验证 + 专家分配）
-- [ ] Round 1-3 完成（所有专家评审）
+- [ ] 已完成所需轮次（最多 5 轮，每轮三个 Custom Agent 均执行）
 - [ ] 问题共识比例 >=90%
 - [ ] 所有 Critical Issues 已解决，Major Concerns 已处理
 - [ ] 最终裁决是 **APPROVED** 或 **APPROVED_WITH_MINOR**
@@ -476,7 +473,7 @@ Phase 0: 准备 → Round 1: 匿名独立评审 → 共识检查
 | 要求跳过评审 | "skip review", "不用评审", "跳过评审" | → 提醒评审是投资而非开销 |
 | 时间压力 | "来不及", "时间紧", "emergency" | → 提醒时间紧迫正是需要评审的时刻 |
 | 提前终止 | Round 1 后用户说 "可以了", "够了" | → BLOCK: 评审未达终止条件 |
-| 单专家自评 | 用户仅指定 1 个专家 | → 提醒至少需要 2 位专家 |
+| 单专家自评 | 用户仅指定 1 个专家 | → BLOCK：必须执行 architecture、technical、feasibility 三个 Custom Agent |
 | 无文档输入 | 仅触发词，无设计/代码内容 | → `[DelphiReview:BLOCKED]` |
 
 ---
