@@ -79,4 +79,25 @@ describe('Delphi runner mirror validation', () => {
     expect(result.status).toBe(1);
     expect(result.stderr).toContain('?? src/npm-package/scripts/delphi-external-review.cjs');
   });
+
+  it.each([
+    ['canonical', 'scripts/delphi-external-review.cjs'],
+    ['npm mirror', 'src/npm-package/scripts/delphi-external-review.cjs'],
+  ])('rejects a committed symlinked %s before and after sync', (_name, relativePath) => {
+    const filePath = path.join(fixture, relativePath);
+    const targetPath = path.join(fixture, `target-${path.basename(relativePath)}`);
+    fs.writeFileSync(targetPath, 'canonical\n');
+    fs.rmSync(filePath);
+    try {
+      fs.symlinkSync(path.relative(path.dirname(filePath), targetPath), filePath);
+    } catch (error) {
+      if (process.platform === 'win32' && error && error.code === 'EPERM') return;
+      throw error;
+    }
+    git(['add', '.']);
+    git(['commit', '-qm', `symlink ${relativePath}`]);
+
+    expect(validate().status).toBe(1);
+    expect(validate('--post-sync').status).toBe(1);
+  });
 });
