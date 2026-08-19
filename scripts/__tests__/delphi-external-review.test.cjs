@@ -348,9 +348,7 @@ describe('validateDistinctModels', () => {
       feasibility: { provider: 'same-provider', model: 'model-c' },
     }, { 'same-provider': validProvider }, { cross_provider_required: true });
     expect(result.valid).toBe(true);
-    expect(result.warning).toMatch(/cross_provider_required/i);
-    expect(result.warning).toMatch(/deprecated/i);
-    expect(result.warning).toMatch(/ignored/i);
+    expect(result.warning).toBe('cross_provider_required_ignored');
   });
 
   it('requires all three expert roles', () => {
@@ -582,10 +580,60 @@ describe('provider calls and provenance', () => {
     expect(result.resolved_model).toBeNull();
   });
 
+  it('keeps the timeout active while the response body is parsed', async () => {
+    vi.useFakeTimers();
+    const { callModelAPI } = loadModule();
+    vi.stubGlobal('fetch', vi.fn().mockImplementation(async (_url, options) => ({
+      ok: true,
+      status: 200,
+      json: () => new Promise((_resolve, reject) => {
+        options.signal.addEventListener('abort', () => reject(new DOMException('aborted', 'AbortError')));
+      }),
+    })));
+
+    const resultPromise = callModelAPI(
+      { base_url: 'https://example.test/v1', api_key: 'key' },
+      'model-a',
+      'system',
+      'user',
+      { timeoutMs: 25 },
+    );
+    await vi.advanceTimersByTimeAsync(25);
+
+    await expect(resultPromise).resolves.toEqual({
+      error: true,
+      retryable: true,
+      message: 'Request timed out (25ms).',
+    });
+    vi.useRealTimers();
+  });
+
+  it('redacts errors raised while parsing a successful response body', async () => {
+    const { callModelAPI } = loadModule();
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue({
+      ok: true,
+      status: 200,
+      json: async () => { throw new Error('malformed SECRET_TOKEN'); },
+    }));
+
+    const result = await callModelAPI(
+      { base_url: 'https://example.test/v1', api_key: 'key' },
+      'model-a',
+      'system',
+      'user',
+    );
+
+    expect(result).toEqual({ error: true, message: 'Invalid response from model.' });
+    expect(JSON.stringify(result)).not.toContain('SECRET_TOKEN');
+  });
+
   it('builds separate requested and resolved model provenance', () => {
     const { buildReviewOutput } = loadModule();
     const result = buildReviewOutput(
-      { verdict: 'APPROVED' },
+      {
+        verdict: 'APPROVED', confidence: 9,
+        critical_issues: [], major_concerns: [], minor_concerns: [], summary: 'ready',
+      },
       { expert: 'architecture', round: 1, mode: 'design' },
       { provider: 'gateway', requested_model: 'qwen3.7-max', resolved_model: 'qwen3.7-max-actual' },
     );
@@ -667,6 +715,65 @@ describe('provider calls and provenance', () => {
       { expert: 'feasibility', round: 1, mode: 'design' },
       { provider: 'gateway', requested_model: 'model-c', resolved_model: null },
     )).not.toThrow();
+  });
+
+  it.each([
+    ['invalid verdict', { verdict: 'PASS' }],
+    ['array verdict payload', []],
+    ['confidence string', { confidence: '9' }],
+    ['confidence NaN', { confidence: Number.NaN }],
+    ['confidence below range', { confidence: 0 }],
+    ['confidence above range', { confidence: 11 }],
+    ['critical issues scalar', { critical_issues: 'none' }],
+    ['major concerns with non-string', { major_concerns: [1] }],
+    ['minor concerns scalar', { minor_concerns: {} }],
+    ['summary non-string', { summary: 1 }],
+  ])('rejects %s without emitting an expert approval result', (_name, override) => {
+    const { buildReviewOutput } = loadModule();
+    const validVerdict = {
+      verdict: 'APPROVED',
+      confidence: 9,
+      critical_issues: [],
+      major_concerns: [],
+      minor_concerns: [],
+      summary: 'ready',
+      ...override,
+    };
+    const verdict = Array.isArray(override) ? override : validVerdict;
+
+    const result = buildReviewOutput(
+      verdict,
+      { expert: 'architecture', round: 1, mode: 'design' },
+      { provider: 'gateway', requested_model: 'model-a', resolved_model: null },
+    );
+
+    expect(result.result_type).not.toBe('delphi_expert_result');
+    expect(result).not.toHaveProperty('verdict', 'APPROVED');
+    expect(result).toEqual(expect.objectContaining({ error: true, message: 'Invalid expert verdict.' }));
+  });
+
+  it.each(['APPROVED', 'REQUEST_CHANGES', 'REJECTED'])('accepts a valid %s expert verdict', (verdict) => {
+    const { parseExpertVerdict } = loadModule();
+    const result = parseExpertVerdict({
+      verdict,
+      confidence: 8,
+      critical_issues: ['critical'],
+      major_concerns: ['major'],
+      minor_concerns: ['minor'],
+      summary: 'reviewed',
+    });
+
+    expect(result).toEqual({
+      valid: true,
+      verdict: {
+        verdict,
+        confidence: 8,
+        critical_issues: ['critical'],
+        major_concerns: ['major'],
+        minor_concerns: ['minor'],
+        summary: 'reviewed',
+      },
+    });
   });
 });
 
