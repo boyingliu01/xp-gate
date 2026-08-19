@@ -66,3 +66,5 @@ rules:
     - 'src/npm-package/debugger/**'
     - 'src/npm-package/architecture/**'
     - 'src/npm-package/rules/**'
+    # Mechanical copy guarded before and after sync by check-delphi-runner-mirror.sh
+    - 'src/npm-package/scripts/delphi-external-review.cjs'
