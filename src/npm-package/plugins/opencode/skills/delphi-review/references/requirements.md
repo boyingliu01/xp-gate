@@ -398,5 +398,5 @@ IF mode == `requirements` AND 最终裁决是 APPROVED，评审完成后必须�
 1. 写入 `.sprint-state/phase-outputs/requirements-reviewed.json`
 2. 写入 `.sprint-state/delphi-reviewed.json`（状态文件）
 3. 验证 JSON 格式有效
-4. 验证 requirements_hash 非空
+4. 验证 requirements_hash 为 64 位 hex 且运行时重新计算匹配
 5. 验证 head_commit 匹配当前 HEAD
