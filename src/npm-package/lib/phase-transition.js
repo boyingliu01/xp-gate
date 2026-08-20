@@ -45,7 +45,7 @@ const PHASE_NAMES = {
 const EVIDENCE_FILES = {
   2: {
     path: '.sprint-state/phase-outputs/requirements-reviewed.json',
-    requiredFields: ['verdict', 'requirements_hash', 'head_commit'],
+    requiredFields: ['verdict', 'requirements_hash', 'head_commit', 'expert_verdicts', 'consensus_ratio'],
     blockingCheck: (data) => data.verdict === 'APPROVED',
     blockingMessage: 'Requirements review verdict is not APPROVED',
   },
@@ -75,9 +75,9 @@ function createRepositoryGitEnv() {
 
 /**
  * Get current HEAD commit hash from a project directory.
- * Returns 'unknown' if not in a git repo.
+ * Returns null if HEAD cannot be resolved.
  * @param {string} projectDir
- * @returns {string}
+ * @returns {string | null}
  */
 function getCurrentHeadCommit(projectDir) {
   try {
@@ -88,8 +88,42 @@ function getCurrentHeadCommit(projectDir) {
       stdio: ['pipe', 'pipe', 'pipe'],
     }).trim();
   } catch {
-    return 'unknown';
+    return null;
   }
+}
+
+function validateRequirementsExpertEvidence(data) {
+  const validationErrors = [];
+  if (!Array.isArray(data.expert_verdicts) || data.expert_verdicts.length !== 3) {
+    validationErrors.push('expert_verdicts must contain exactly 3 expert results');
+    return validationErrors;
+  }
+
+  const expectedRoles = new Set(['architecture', 'technical', 'feasibility']);
+  const roles = data.expert_verdicts.map(expert => expert?.role);
+  if (roles.some(role => !expectedRoles.has(role)) || new Set(roles).size !== expectedRoles.size) {
+    validationErrors.push('expert_verdicts roles must be exactly architecture, technical, and feasibility');
+  }
+  if (data.expert_verdicts.some(expert => expert?.verdict !== 'APPROVED')) {
+    validationErrors.push('every expert verdict must be APPROVED');
+  }
+  if (data.expert_verdicts.some(expert => expert?.result_type !== 'delphi_expert_result')) {
+    validationErrors.push('every expert result_type must be delphi_expert_result');
+  }
+
+  const requestedModels = data.expert_verdicts.map(expert =>
+    typeof expert?.requested_model === 'string' ? expert.requested_model.trim() : ''
+  );
+  if (requestedModels.some(model => model.length === 0)) {
+    validationErrors.push('every requested_model must be a non-empty trimmed string');
+  } else if (new Set(requestedModels).size !== requestedModels.length) {
+    validationErrors.push('requested_model values must be distinct after trimming');
+  }
+
+  if (!Number.isFinite(data.consensus_ratio) || data.consensus_ratio < 0.9 || data.consensus_ratio > 1) {
+    validationErrors.push('consensus_ratio must be a finite number from 0.90 through 1');
+  }
+  return validationErrors;
 }
 
 /**
@@ -166,6 +200,15 @@ function validateEvidence(phase, projectDir) {
     return { ok: false, errors, warnings };
   }
 
+  if (data === null || typeof data !== 'object' || Array.isArray(data)) {
+    const msg = `${fileName} must contain a JSON object`;
+    if (isLegacySprint) {
+      warnings.push(`WARNING: ${msg}. Upgrade sprint with evidence_schema_version >= 2 to enforce.`);
+      return { ok: true, errors: [], warnings };
+    }
+    return { ok: false, errors: [msg], warnings };
+  }
+
   // Check required fields
   for (const field of evidenceConfig.requiredFields) {
     if (!(field in data)) {
@@ -185,7 +228,7 @@ function validateEvidence(phase, projectDir) {
 
   // Run blocking check
   if (!evidenceConfig.blockingCheck(data)) {
-    const msg = `${fileName}: ${evidenceConfig.blockingMessage} (got: ${JSON.stringify(data[evidenceConfig.requiredFields[0]])})`;
+    const msg = `${fileName}: ${evidenceConfig.blockingMessage}`;
     if (isLegacySprint) {
       warnings.push(`WARNING: ${msg}. Upgrade sprint with evidence_schema_version >= 2 to enforce.`);
       return { ok: true, errors: [], warnings };
@@ -195,10 +238,16 @@ function validateEvidence(phase, projectDir) {
   }
 
   // Phase-specific anti-staleness checks
-  if (phase === 4) {
-    // head_commit check
+  if (phase === 2 || phase === 4) {
     const currentHead = getCurrentHeadCommit(projectDir);
-    if (data.head_commit !== currentHead) {
+    if (currentHead === null) {
+      const msg = `${fileName}: unable to resolve current Git HEAD; evidence identity cannot be verified`;
+      if (isLegacySprint) {
+        warnings.push(`WARNING: ${msg}. Upgrade sprint with evidence_schema_version >= 2 to enforce.`);
+      } else {
+        errors.push(msg);
+      }
+    } else if (data.head_commit !== currentHead) {
       const msg = `${fileName}: head_commit mismatch — report has "${data.head_commit}", current HEAD is "${currentHead}"`;
       if (isLegacySprint) {
         warnings.push(`WARNING: ${msg}. Upgrade sprint with evidence_schema_version >= 2 to enforce.`);
@@ -206,7 +255,9 @@ function validateEvidence(phase, projectDir) {
         errors.push(msg);
       }
     }
+  }
 
+  if (phase === 4) {
     // spec_hash check (only if specification.yaml exists)
     const specPath = path.join(projectDir, 'specification.yaml');
     if (fs.existsSync(specPath)) {
@@ -226,6 +277,14 @@ function validateEvidence(phase, projectDir) {
   if (phase === 2) {
     if (typeof data.requirements_hash !== 'string' || data.requirements_hash.length === 0) {
       const msg = `${fileName}: requirements_hash must be a non-empty string`;
+      if (isLegacySprint) {
+        warnings.push(`WARNING: ${msg}. Upgrade sprint with evidence_schema_version >= 2 to enforce.`);
+      } else {
+        errors.push(msg);
+      }
+    }
+    for (const validationError of validateRequirementsExpertEvidence(data)) {
+      const msg = `${fileName}: ${validationError}`;
       if (isLegacySprint) {
         warnings.push(`WARNING: ${msg}. Upgrade sprint with evidence_schema_version >= 2 to enforce.`);
       } else {
@@ -267,7 +326,7 @@ function logEvidenceSkip(projectDir, phase, reason) {
     event: 'evidence_skipped',
     phase,
     reason,
-    commit_hash: getCurrentHeadCommit(projectDir),
+    commit_hash: getCurrentHeadCommit(projectDir) ?? 'unknown',
   };
   fs.appendFileSync(path.join(auditDir, 'audit.jsonl'), JSON.stringify(entry) + '\n', 'utf8');
 }
