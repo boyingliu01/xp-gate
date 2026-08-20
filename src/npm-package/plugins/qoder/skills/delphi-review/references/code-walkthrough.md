@@ -173,9 +173,9 @@ pre-push hook
     │         │
     │         └─→ Step 2: Delphi Code Walkthrough
     │                  │
-    │                  ├─→ Expert A 评审 (含 principles_findings)
-    │                  ├─→ Expert B 评审 (含 principles_findings)
-    │                  ├─→ Expert C 评审 (含 principles_findings)
+    │                  ├─→ Expert A / architecture 评审 (含 principles_findings)
+    │                  ├─→ Expert B / technical 评审 (含 principles_findings)
+    │                  ├─→ Expert C / feasibility 评审 (含 principles_findings)
     │                  └─→ 共识检查
     │
     └─→ 允许/阻塞推送

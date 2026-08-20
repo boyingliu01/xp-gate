@@ -74,6 +74,7 @@ skill(name="delphi-review", user_message="--mode requirements [需求陈述 + br
 ```
 
 - 并行执行 Qoder architecture、technical、feasibility 三个 Custom Agent
+- 每个 Custom Agent 调用都使用 requirements mode；三次独立执行后由 skill orchestrator 聚合，禁止单进程执行全部模型
 - 每份成功结果必须包含 `role`、`verdict: APPROVED`、`result_type: delphi_expert_result` 和非空 trimmed `requested_model`
 - 三个角色必须恰好各出现一次，三个 trimmed `requested_model` 必须 distinct
 - 聚合 `consensus_ratio` 必须是 `0.90..1`；任一条件失败则 BLOCK 并继续需求澄清
@@ -83,7 +84,10 @@ skill(name="delphi-review", user_message="--mode requirements [需求陈述 + br
 ```json
 {
   "verdict": "APPROVED",
-  "requirements_hash": "<non-empty SHA-256 hex digest>",
+  "timestamp": "2026-08-20T10:30:00Z",
+  "requirements_statement": "<被评审的原始需求陈述>",
+  "context_file_used": "CONTEXT.md | null",
+  "requirements_hash": "<SHA-256 of requirements_statement + context exact UTF-8 content if used + timestamp YYYY-MM-DD>",
   "head_commit": "<exact git rev-parse HEAD>",
   "consensus_ratio": 0.90,
   "expert_verdicts": [
