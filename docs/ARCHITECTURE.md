@@ -361,6 +361,10 @@ triggers:
 
 ```yaml
 Modes:
+  requirements:      # R1 需求评审
+    - Phase 2 中在设计生成前评审需求陈述 + CONTEXT.md
+    - 输出: requirements-reviewed.json
+
   design:            # 设计评审
     - 需求/设计/架构/PR 评审
     - 输出: 共识报告 + specification.yaml
@@ -607,13 +611,16 @@ git push
 ```json
 {
   "experts": [
-    { "id": "A", "name": "架构专家", "model": "deepseek-v4-pro" },
-    { "id": "B", "name": "技术专家", "model": "kimi-k2.6" }
+    { "id": "A", "role": "architecture", "model": "gateway/model-a" },
+    { "id": "B", "role": "technical", "model": "gateway/model-b" },
+    { "id": "C", "role": "feasibility", "model": "gateway/model-c" }
   ],
   "consensus_threshold": 0.90,
   "max_rounds": 5
 }
 ```
+
+三个角色必须配置互不相同的 trimmed model ID；provider、vendor、gateway 和模型国籍均不受限制。
 
 **package.json 脚本**
 

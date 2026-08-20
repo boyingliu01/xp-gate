@@ -50,13 +50,14 @@ skills/delphi-review/
 ## UNIQUE STYLES
 - Anonymous expert reviews (Round 1)
 - Statistical consensus measurement (≥90% threshold)
-- Two modes: design review + code-walkthrough
+- Three modes: requirements review + design review + code-walkthrough
 - Pre-push integration: .code-walkthrough-result.json stores commit hash + verdict
 - Delphi guard in claude-code plugin: blocks Edit/Write before APPROVAL
 
 ## COMMANDS
 ```bash
 /delphi-review                              # Design review mode
+/delphi-review --mode requirements          # Phase 2 R1 requirements review
 /delphi-review --mode code-walkthrough      # Pre-push code walkthrough
 ```
 
