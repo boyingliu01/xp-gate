@@ -867,116 +867,47 @@ if [ ! -f "$RESULT_FILE" ]; then
   exit 1
 fi
 
-# Check jq availability (MANDATORY - zero degradation)
-if ! command -v jq &> /dev/null; then
+# Check Node.js availability (MANDATORY - zero degradation)
+if ! command -v node >/dev/null 2>&1; then
   echo ""
   echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
   echo "   ❌ ENVIRONMENT ERROR - PUSH BLOCKED"
   echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
   echo ""
-  echo "jq is NOT installed. Required for JSON validation."
+  echo "Node.js is NOT installed. Required for JSON validation."
   echo ""
-  echo "Install jq:"
-  echo "  apt-get install jq (Debian/Ubuntu)"
-  echo "  brew install jq (macOS)"
-  echo "  choco install jq (Windows)"
-  echo ""
-  echo "Zero degradation principle: Cannot proceed without jq."
+  echo "Install Node.js 18 or newer, then retry the push."
   echo ""
   exit 1
 fi
 
-# Validate result file content
-# SHA self-reference paradox fix: if the result file was committed as part of
-# HEAD, its content references HEAD^ (the commit being reviewed), not HEAD.
-CURRENT_COMMIT=$(git rev-parse HEAD)
-if git diff-tree --no-commit-id --name-only -r HEAD 2>/dev/null | grep -qx "$RESULT_FILE"; then
-  # Result file is part of the latest commit — compare against the reviewed commit
-  EXPECTED_COMMIT=$(git rev-parse HEAD^ 2>/dev/null || echo "unknown")
-else
-  # Result file is working-tree only — compare against current HEAD
-  EXPECTED_COMMIT="$CURRENT_COMMIT"
-fi
+# Walkthrough evidence must bind to the exact feature-branch HEAD being pushed.
+EXPECTED_COMMIT=$(git rev-parse HEAD)
 
-# Check JSON validity
-if ! jq empty "$RESULT_FILE" 2>/dev/null; then
+# Validate the complete evidence contract without interpolating JSON into shell.
+HOOK_DIR=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
+MW_VALIDATOR="$HOOK_DIR/lib/validate-code-walkthrough.cjs"
+if [ ! -f "$MW_VALIDATOR" ]; then
   echo ""
   echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
   echo "   ❌ RESULT FILE INVALID - PUSH BLOCKED"
   echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
   echo ""
-  echo "$RESULT_FILE is not valid JSON."
+  echo "Gate MW validator is missing: $MW_VALIDATOR"
   echo ""
   echo "Re-run: /delphi-review --mode code-walkthrough"
   echo ""
   exit 1
 fi
 
-RESULT_COMMIT=$(jq -r '.commit' "$RESULT_FILE")
-RESULT_VERDICT=$(jq -r '.verdict' "$RESULT_FILE")
-RESULT_EXPIRES=$(jq -r '.expires' "$RESULT_FILE")
-RESULT_BRANCH=$(jq -r '.branch' "$RESULT_FILE")
 CURRENT_TIME=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
-
-# Branch match check (optional but recommended)
-if [ "$RESULT_BRANCH" != "$CURRENT_BRANCH" ]; then
-  echo ""
-  echo "⚠️ WARNING: Result file is for different branch"
-  echo "  Expected: $CURRENT_BRANCH"
-  echo "  Found: $RESULT_BRANCH"
-  echo ""
-  echo "Proceeding with commit verification..."
-fi
-
-# Commit match check
-if [ "$RESULT_COMMIT" != "$EXPECTED_COMMIT" ]; then
+if ! VALIDATION_ERROR=$(node "$MW_VALIDATOR" "$RESULT_FILE" "$EXPECTED_COMMIT" "$CURRENT_BRANCH" "$CURRENT_TIME" 2>&1); then
   echo ""
   echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
   echo "   ❌ RESULT FILE OUTDATED - PUSH BLOCKED"
   echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
   echo ""
-  echo "Result file is for a different commit:"
-    echo "  Expected: $EXPECTED_COMMIT"
-    echo "  Found: $RESULT_COMMIT"
-  echo ""
-  echo "Re-run: /delphi-review --mode code-walkthrough"
-  echo ""
-  exit 1
-fi
-
-# Verdict check
-if [ "$RESULT_VERDICT" != "APPROVED" ]; then
-  echo ""
-  echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-  echo "   ❌ GATE MW: CODE WALKTHROUGH NOT APPROVED - PUSH BLOCKED"
-  echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-  echo ""
-  echo "Verdict: $RESULT_VERDICT"
-  echo ""
-  
-  # Show issues if available
-  ISSUES=$(jq -r '.issues[] | "- [\(.severity)] \(.description)"' "$RESULT_FILE" 2>/dev/null)
-  if [ -n "$ISSUES" ]; then
-    echo "Issues found:"
-    echo "$ISSUES"
-    echo ""
-  fi
-  
-  echo "Fix issues and re-run: /delphi-review --mode code-walkthrough"
-  echo ""
-  exit 1
-fi
-
-# Expiration check
-if [[ "$CURRENT_TIME" > "$RESULT_EXPIRES" ]]; then
-  echo ""
-  echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-  echo "   ❌ RESULT FILE EXPIRED - PUSH BLOCKED"
-  echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-  echo ""
-  echo "Code walkthrough result has expired:"
-  echo "  Expired: $RESULT_EXPIRES"
-  echo "  Current: $CURRENT_TIME"
+  echo "$VALIDATION_ERROR"
   echo ""
   echo "Re-run: /delphi-review --mode code-walkthrough"
   echo ""
@@ -996,15 +927,8 @@ echo "Files changed: $FILES_CHANGED"
 echo "Lines: +$LINES_ADDED -$LINES_DELETED"
 echo ""
 echo "Code walkthrough result:"
-echo "  Commit: $RESULT_COMMIT"
+echo "  Commit: $EXPECTED_COMMIT"
 echo "  Verdict: APPROVED"
-echo "  Expires: $RESULT_EXPIRES"
-
-# Show confidence if available
-CONFIDENCE=$(jq -r '.confidence' "$RESULT_FILE" 2>/dev/null)
-if [ -n "$CONFIDENCE" ] && [ "$CONFIDENCE" != "null" ]; then
-  echo "  Confidence: $CONFIDENCE/10"
-fi
 
 echo ""
 echo "Proceeding with push..."
