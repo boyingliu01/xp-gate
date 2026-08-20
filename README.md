@@ -292,11 +292,11 @@ Delphi 方法论解决这个问题的核心设计：
 
 | 模式 | 触发时机 | 输入 | 输出 |
 |------|---------|------|------|
-| `requirements` | Phase 2 DESIGN 之后 | specification.yaml | `requirements-reviewed.json` |
+| `requirements` | Phase 2 DESIGN 中、设计生成之前（R1） | 需求陈述 + `CONTEXT.md` | `requirements-reviewed.json` |
 | `design` | 架构/方案设计 | 设计文档 | 评审报告 |
 | `code-walkthrough` | Phase 4 VERIFY（pre-push 时） | 代码 diff | `.code-walkthrough-result.json` |
 
-> `requirements` 模式目前通过 `delphi-review --mode requirements` 触发，输出 `delphi-reviewed.json` 供 Phase 2→3 硬闸门使用。该模式的重构计划参见[反馈环 2 设计文档](./docs/plans/2026-07-28-feedback-loop-2-redesign.md)。
+> `requirements` 模式通过 `delphi-review --mode requirements` 触发，输出 `requirements-reviewed.json`，并由 Phase 2→3 硬闸门验证。R2 `design` 评审在设计生成后独立执行，产生设计评审证据，不替代 R1 需求证据。
 
 ### 与 `test-alignment` 的关系
 
