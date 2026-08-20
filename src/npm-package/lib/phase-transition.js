@@ -45,7 +45,10 @@ const PHASE_NAMES = {
 const EVIDENCE_FILES = {
   2: {
     path: '.sprint-state/phase-outputs/requirements-reviewed.json',
-    requiredFields: ['verdict', 'requirements_hash', 'head_commit', 'expert_verdicts', 'consensus_ratio'],
+    requiredFields: [
+      'verdict', 'requirements_statement', 'timestamp', 'consensus_ratio',
+      'expert_verdicts', 'head_commit', 'requirements_hash',
+    ],
     blockingCheck: (data) => data.verdict === 'APPROVED',
     blockingMessage: 'Requirements review verdict is not APPROVED',
   },
@@ -134,6 +137,66 @@ function validateRequirementsExpertEvidence(data) {
 function computeFileHash(filePath) {
   const content = fs.readFileSync(filePath, 'utf8');
   return crypto.createHash('sha256').update(content, 'utf8').digest('hex');
+}
+
+function parseEvidenceDate(timestamp) {
+  if (typeof timestamp !== 'string' || !/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,3})?Z$/.test(timestamp)) {
+    return null;
+  }
+  const parsed = new Date(timestamp);
+  if (!Number.isFinite(parsed.getTime()) || parsed.toISOString().slice(0, 10) !== timestamp.slice(0, 10)) {
+    return null;
+  }
+  return timestamp.slice(0, 10);
+}
+
+function readRequirementsContext(data, projectDir) {
+  const contextFile = data.context_file_used;
+  if (contextFile === null || contextFile === undefined || contextFile === '') {
+    return { content: '' };
+  }
+  if (typeof contextFile !== 'string' || path.isAbsolute(contextFile)) {
+    return { error: 'context_file_used must be a safe project-relative regular file path' };
+  }
+
+  const projectRoot = fs.realpathSync(projectDir);
+  const candidatePath = path.resolve(projectRoot, contextFile);
+  const relativeCandidate = path.relative(projectRoot, candidatePath);
+  if (relativeCandidate.startsWith('..') || path.isAbsolute(relativeCandidate) || !fs.existsSync(candidatePath)) {
+    return { error: 'context_file_used must be a safe project-relative regular file path' };
+  }
+
+  const realContextPath = fs.realpathSync(candidatePath);
+  const relativeRealPath = path.relative(projectRoot, realContextPath);
+  if (relativeRealPath.startsWith('..') || path.isAbsolute(relativeRealPath) || !fs.statSync(realContextPath).isFile()) {
+    return { error: 'context_file_used must be a safe project-relative regular file path' };
+  }
+  return { content: fs.readFileSync(realContextPath, 'utf8') };
+}
+
+function computeRequirementsHash(data, projectDir) {
+  if (typeof data.requirements_statement !== 'string') {
+    return { error: 'requirements_statement must be a string' };
+  }
+  const evidenceDate = parseEvidenceDate(data.timestamp);
+  if (evidenceDate === null) {
+    return { error: 'timestamp must be a valid UTC ISO-8601 timestamp' };
+  }
+
+  let context;
+  try {
+    context = readRequirementsContext(data, projectDir);
+  } catch {
+    return { error: 'context_file_used must be a safe project-relative regular file path' };
+  }
+  if (context.error) {
+    return context;
+  }
+  return {
+    hash: crypto.createHash('sha256')
+      .update(`${data.requirements_statement}${context.content}${evidenceDate}`, 'utf8')
+      .digest('hex'),
+  };
 }
 
 /**
@@ -273,14 +336,28 @@ function validateEvidence(phase, projectDir) {
     }
   }
 
-  // Phase 2: requirements_hash existence check (full verification in v0.18.0)
   if (phase === 2) {
-    if (typeof data.requirements_hash !== 'string' || data.requirements_hash.length === 0) {
-      const msg = `${fileName}: requirements_hash must be a non-empty string`;
+    if (typeof data.requirements_hash !== 'string' || !/^[a-fA-F0-9]{64}$/.test(data.requirements_hash)) {
+      const msg = `${fileName}: requirements_hash must be a 64-character hexadecimal SHA-256 digest`;
       if (isLegacySprint) {
         warnings.push(`WARNING: ${msg}. Upgrade sprint with evidence_schema_version >= 2 to enforce.`);
       } else {
         errors.push(msg);
+      }
+    } else {
+      const computedHash = computeRequirementsHash(data, projectDir);
+      const hashError = computedHash.error || (
+        data.requirements_hash.toLowerCase() !== computedHash.hash
+          ? 'requirements_hash mismatch; regenerate the requirements review from current inputs'
+          : null
+      );
+      if (hashError) {
+        const msg = `${fileName}: ${hashError}`;
+        if (isLegacySprint) {
+          warnings.push(`WARNING: ${msg}. Upgrade sprint with evidence_schema_version >= 2 to enforce.`);
+        } else {
+          errors.push(msg);
+        }
       }
     }
     for (const validationError of validateRequirementsExpertEvidence(data)) {
