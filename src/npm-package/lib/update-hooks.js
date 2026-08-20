@@ -51,6 +51,19 @@ function detectLocalModifications(srcDir, hooksDestDir, adaptersDestDir) {
     }
   });
 
+  const hookLibSrcDir = path.join(srcDir, 'hooks', 'lib');
+  if (fs.existsSync(hookLibSrcDir)) {
+    fs.readdirSync(hookLibSrcDir).forEach(file => {
+      const srcPath = path.join(hookLibSrcDir, file);
+      const destPath = path.join(hooksDestDir, 'lib', file);
+      if (fs.statSync(srcPath).isFile() && fs.existsSync(destPath)) {
+        if (!fs.readFileSync(srcPath).equals(fs.readFileSync(destPath))) {
+          modified.push(`lib/${file}`);
+        }
+      }
+    });
+  }
+
   // Check adapter-common.sh
   const adapterCommonSrc = path.join(srcDir, 'adapter-common.sh');
   const adapterCommonDest = path.join(adaptersDestDir, 'adapter-common.sh');
@@ -152,6 +165,15 @@ function copyHooks(srcDir, destDir, dryRun, noBackup) {
     const dest = path.join(destDir, hook);
     atomicCopyFile(src, dest, dryRun, noBackup, hook);
   });
+  const libSrcDir = path.join(hooksSrcDir, 'lib');
+  if (fs.existsSync(libSrcDir)) {
+    fs.readdirSync(libSrcDir).forEach(file => {
+      const src = path.join(libSrcDir, file);
+      if (fs.statSync(src).isFile()) {
+        atomicCopyFile(src, path.join(destDir, 'lib', file), dryRun, noBackup, `lib/${file}`);
+      }
+    });
+  }
 }
 
 /**

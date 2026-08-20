@@ -310,6 +310,35 @@ describe('syncHooks', () => {
     const libFile = path.join(HOOKS_DIR, 'lib', 'now-ms.sh');
     expect(fs.existsSync(libFile), `lib/now-ms.sh must exist in hooks dir: ${libFile}`).toBe(true);
   });
+
+  it('syncHooks keeps every hook library as a regular byte-identical mirror', () => {
+    expect(syncOk, 'sync script must exit 0').toBe(true);
+    const canonicalDir = path.join(WORKTREE_PATH, 'githooks', 'lib');
+    for (const name of fs.readdirSync(canonicalDir)) {
+      const canonical = path.join(canonicalDir, name);
+      const mirror = path.join(HOOKS_DIR, 'lib', name);
+      expect(fs.lstatSync(canonical).isSymbolicLink(), `${canonical} must not be a symlink`).toBe(false);
+      expect(fs.lstatSync(mirror).isSymbolicLink(), `${mirror} must not be a symlink`).toBe(false);
+      expect(fs.statSync(canonical).isFile(), `${canonical} must be a regular file`).toBe(true);
+      expect(fs.statSync(mirror).isFile(), `${mirror} must be a regular file`).toBe(true);
+      expect(fs.readFileSync(mirror).equals(fs.readFileSync(canonical)), `${mirror} must match ${canonical}`).toBe(true);
+    }
+  });
+
+  it('syncHooks removes stale generated hook libraries', () => {
+    const staleFile = path.join(HOOKS_DIR, 'lib', 'stale-generated-file.sh');
+    fs.mkdirSync(path.dirname(staleFile), { recursive: true });
+    fs.writeFileSync(staleFile, 'stale');
+
+    const result = spawnSync(nodeExe, [syncScript], {
+      cwd: WORKTREE_PATH,
+      stdio: 'pipe',
+      timeout: 15000,
+    });
+
+    expect(result.status).toBe(0, 'sync script must exit 0');
+    expect(fs.existsSync(staleFile), 'stale generated hook library must be removed').toBe(false);
+  });
 });
 
 /**

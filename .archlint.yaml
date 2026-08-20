@@ -68,3 +68,5 @@ rules:
     - 'src/npm-package/rules/**'
     # Mechanical copy guarded before and after sync by check-delphi-runner-mirror.sh
     - 'src/npm-package/scripts/delphi-external-review.cjs'
+    # Mechanical copy guarded by check-hook-lib-mirror.sh and install/sync tests
+    - 'src/npm-package/hooks/lib/validate-code-walkthrough.cjs'
