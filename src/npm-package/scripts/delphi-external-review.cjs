@@ -17,7 +17,7 @@ function checkNodeVersion() {
 
 // ── Argument parsing ───────────────────────────────────────────────────
 const VALID_EXPERTS = ['architecture', 'technical', 'feasibility'];
-const VALID_MODES = ['design', 'code-walkthrough'];
+const VALID_MODES = ['design', 'code-walkthrough', 'requirements'];
 
 function parseArgs(argv) {
   const args = {};
@@ -282,8 +282,15 @@ const SYSTEM_PROMPTS = {
 输出要求：返回结构化 JSON，包含 verdict (APPROVED/REQUEST_CHANGES/REJECTED)、confidence (1-10)、critical_issues、major_concerns、minor_concerns、summary。`,
 };
 
-function buildSystemPrompt(role) {
-  return SYSTEM_PROMPTS[role] || SYSTEM_PROMPTS.architecture;
+const MODE_FOCUS_PROMPTS = {
+  design: '',
+  'code-walkthrough': '\n\n本次评审聚焦已实现代码的正确性、风险和可验证结果。',
+  requirements: '\n\n本次评审聚焦需求陈述的完整性、一致性、可验收性和约束清晰度。',
+};
+
+function buildSystemPrompt(role, mode = 'design') {
+  const rolePrompt = SYSTEM_PROMPTS[role] || SYSTEM_PROMPTS.architecture;
+  return `${rolePrompt}${MODE_FOCUS_PROMPTS[mode] || ''}`;
 }
 
 // ── User prompt construction ───────────────────────────────────────────
@@ -497,7 +504,7 @@ async function main() {
   }
 
   // Build prompts
-  const systemPrompt = buildSystemPrompt(args.expert);
+  const systemPrompt = buildSystemPrompt(args.expert, args.mode);
   const userPrompt = buildUserPrompt(reviewContent, otherExpertsContent, args.round);
 
   // Call API with retry

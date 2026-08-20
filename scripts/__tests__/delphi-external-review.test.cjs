@@ -47,6 +47,18 @@ describe('parseArgs', () => {
     expect(result.otherExpertsFile).toBe('/tmp/verdicts.json');
   });
 
+  it('accepts requirements mode for a per-expert invocation', () => {
+    const result = parseArgs([
+      '--expert', 'feasibility',
+      '--input', 'requirements statement',
+      '--round', '1',
+      '--config', '/path/config.json',
+      '--mode', 'requirements',
+    ]);
+
+    expect(result.mode).toBe('requirements');
+  });
+
   it('exits with error when required args missing', () => {
     const mockExit = vi.spyOn(process, 'exit').mockImplementation(() => { throw new Error('process.exit'); });
     const mockError = vi.spyOn(console, 'error').mockImplementation(() => {});
@@ -449,6 +461,15 @@ describe('buildSystemPrompt', () => {
   it('returns feasibility prompt for feasibility role', () => {
     const prompt = buildSystemPrompt('feasibility');
     expect(prompt).toContain('可行性');
+  });
+
+  it('selects a requirements focus without replacing the expert role lens', () => {
+    const designPrompt = buildSystemPrompt('architecture', 'design');
+    const requirementsPrompt = buildSystemPrompt('architecture', 'requirements');
+    const technicalRequirementsPrompt = buildSystemPrompt('technical', 'requirements');
+
+    expect(requirementsPrompt).not.toBe(designPrompt);
+    expect(technicalRequirementsPrompt).not.toBe(requirementsPrompt);
   });
 });
 
