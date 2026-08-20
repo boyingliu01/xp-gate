@@ -369,7 +369,7 @@ Modes:
     - 变更代码评审
     - 输出: .code-walkthrough-result.json
 
-Experts: 2-3 位来自不同提供商的模型
+Experts: architecture、technical、feasibility 三个角色，各自使用 distinct trimmed executable model ID；provider 不受限制
 Consensus: >=90% 一致性
 Rounds: 多轮直到 APPROVED 或达到 max_rounds
 ```
@@ -756,7 +756,7 @@ Delphi 方法 (兰德公司开发) 相比单一 AI 评审有显著优势：
 | 置信度 | 主观判断 | 量化的 confidence 评分 |
 
 **关键设计**:
-- 至少 2 位来自不同提供商的专家
+- architecture、technical、feasibility 三个角色必须分别成功执行三个不同的 trimmed model ID；provider、vendor、gateway 和模型国籍不受限制
 - 多轮迭代直到共识
 - 零容忍: Critical/Major 问题必须全部处理
 

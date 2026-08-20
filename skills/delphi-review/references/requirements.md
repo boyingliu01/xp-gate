@@ -184,9 +184,10 @@ Round 2: delphi-review --mode requirements（带 Round 1 gaps 上下文）
   "mode": "requirements",
   "verdict": "APPROVED",
   "timestamp": "2026-07-25T10:30:00Z",
-  "requirements_hash": "a1b2c3d4e5f6...（SHA-256 hex digest）",
+  "consensus_ratio": 1.0,
+  "requirements_hash": "7f650ddf715ebe75ca0317efa1e8618ae39d2c0bafea7a6f85aacfdbf3735a5f",
   "head_commit": "abc123def456789...",
-  "context_file_used": "CONTEXT.md",
+  "context_file_used": null,
   "round": 1,
    "expert_verdicts": [
      { "role": "architecture", "verdict": "APPROVED", "confidence": 9, "result_type": "delphi_expert_result", "requested_model": "bailian-tp/qwen-plus" },
@@ -207,9 +208,10 @@ Round 2: delphi-review --mode requirements（带 Round 1 gaps 上下文）
   "mode": "requirements",
   "verdict": "GAPS_FOUND",
   "timestamp": "2026-07-25T10:30:00Z",
-  "requirements_hash": "a1b2c3d4e5f6...",
+  "consensus_ratio": 0.67,
+  "requirements_hash": "7f650ddf715ebe75ca0317efa1e8618ae39d2c0bafea7a6f85aacfdbf3735a5f",
   "head_commit": "abc123def456789...",
-  "context_file_used": "CONTEXT.md",
+  "context_file_used": null,
   "round": 1,
   "expert_verdicts": [
     { "role": "architecture", "verdict": "APPROVED", "confidence": 8, "result_type": "delphi_expert_result", "requested_model": "provider/model-a" },
@@ -234,9 +236,10 @@ Round 2: delphi-review --mode requirements（带 Round 1 gaps 上下文）
 | `mode` | string | 固定值 `"requirements"` |
 | `verdict` | string | `APPROVED` 或 `GAPS_FOUND` |
 | `timestamp` | string | 评审完成时间 (ISO 8601 UTC) |
+| `consensus_ratio` | number | 三位专家的共识比例；APPROVED 必须为 `0.90` 至 `1.0` |
 | `requirements_hash` | string | SHA-256 hex digest（防陈旧绑定，见下文） |
 | `head_commit` | string | 当前 `git rev-parse HEAD` |
-| `context_file_used` | string | 引用的 CONTEXT.md 路径 |
+| `context_file_used` | string \| null | 项目根目录内引用的 context 文件相对路径；未使用时为 `null` 或空字符串 |
 | `round` | number | 当前轮次（1 至 5） |
 | `expert_verdicts` | array | 三位专家的成功结构化结果，包含 `result_type` 和 `requested_model` |
 | `requirements_statement` | string | 被评审需求的简短摘要 |
@@ -270,23 +273,28 @@ requirements_statement + CONTEXT.md content + ISO timestamp prefix (YYYY-MM-DD)
 ```
 
 **计算规则**:
-1. 拼接: `requirements_statement` 字符串 + `CONTEXT.md` 文件完整内容（若存在）+ 当日日期前缀 `YYYY-MM-DD`
-2. 对拼接结果计算 SHA-256 hex digest
-3. 若 CONTEXT.md 不存在，仅拼接 `requirements_statement` + 日期前缀
+1. 从 evidence `timestamp` 解析严格有效的 ISO 8601 UTC 时间，并取其 `YYYY-MM-DD` 前缀
+2. 若 `context_file_used` 非空，只允许项目根目录内的相对路径；拒绝绝对路径、`..` 穿越、缺失/非普通文件，以及 realpath 逃出项目根目录的符号链接
+3. 按 UTF-8 原样读取 context 文件，不添加分隔符或换行；拼接精确字符串 `requirements_statement + context content + YYYY-MM-DD`
+4. 对拼接结果计算 SHA-256；生成值使用 64 位小写 hex，校验时大小写不敏感
+5. 未使用 context 时，精确拼接 `requirements_statement + YYYY-MM-DD`
 
 **目的**: 防止旧证据复用。`phase-transition 2 completed` 校验时：
 - 文件必须存在
 - `verdict` 必须为 `APPROVED`
-- `requirements_hash` 必须为非空字符串
+- `requirements_hash` 必须为 64 位 hex，并与运行时重新计算值匹配
 - 若 hash 与当前需求内容不匹配 → BLOCK（防陈旧绑定）
 
-**与 phase-transition.js 的集成**（v0.17.1 已实现）:
+**与 phase-transition.js 的集成**:
 
 ```javascript
 // EVIDENCE_FILES[2] — 已存在于 phase-transition.js
 {
   path: '.sprint-state/phase-outputs/requirements-reviewed.json',
-  requiredFields: ['verdict', 'requirements_hash'],
+  requiredFields: [
+    'verdict', 'requirements_statement', 'timestamp', 'consensus_ratio',
+    'expert_verdicts', 'head_commit', 'requirements_hash'
+  ],
   blockingCheck: (data) => data.verdict === 'APPROVED',
   blockingMessage: 'Requirements review verdict is not APPROVED',
 }
