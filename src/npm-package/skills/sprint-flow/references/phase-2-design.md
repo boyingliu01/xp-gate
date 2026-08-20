@@ -59,8 +59,10 @@ grill-with-docs 执行：
 grill 访谈达成共享理解后（或 CONTEXT.md 快速路径下读取已有上下文后）、设计文档生成前，调用需求评审：
 
 ```
-npx xp-gate delphi-review --mode requirements
+/delphi-review --mode requirements
 ```
+
+这是 Agent skill 调用，不是 `xp-gate` npm CLI 子命令。Skill orchestrator 必须分别调用 per-expert runner 三次，每次保留 `--expert <architecture|technical|feasibility> --mode requirements`，再聚合三份结果；禁止用一个 runner 进程执行全部模型。
 
 **评审配置**：
 - 复用现有 3 专家（architecture/feasibility/technical），`--mode requirements` 切换评审焦点提示词
@@ -81,13 +83,15 @@ npx xp-gate delphi-review --mode requirements
 {
   "verdict": "APPROVED | GAPS_FOUND",
   "timestamp": "<ISO 8601>",
-  "requirements_hash": "<SHA-256 of 需求陈述 + CONTEXT.md 内容>",
+  "requirements_statement": "<被评审的原始需求陈述>",
+  "context_file_used": "CONTEXT.md | null",
+  "requirements_hash": "<SHA-256 of requirements_statement + context file exact UTF-8 content if used + timestamp YYYY-MM-DD>",
   "head_commit": "<git rev-parse HEAD>",
-  "experts": 3,
+  "consensus_ratio": 1.0,
   "expert_verdicts": [
-    { "role": "architecture", "result_type": "delphi_expert_result", "requested_model": "provider/model-a" },
-    { "role": "technical", "result_type": "delphi_expert_result", "requested_model": "provider/model-b" },
-    { "role": "feasibility", "result_type": "delphi_expert_result", "requested_model": "provider/model-c" }
+    { "role": "architecture", "verdict": "APPROVED", "result_type": "delphi_expert_result", "requested_model": "provider/model-a" },
+    { "role": "technical", "verdict": "APPROVED", "result_type": "delphi_expert_result", "requested_model": "provider/model-b" },
+    { "role": "feasibility", "verdict": "APPROVED", "result_type": "delphi_expert_result", "requested_model": "provider/model-c" }
   ],
   "rounds": 1,
   "gaps": []
@@ -99,7 +103,7 @@ npx xp-gate delphi-review --mode requirements
 - 最多 5 轮循环后升级给用户决策
 
 **程序化校验**：
-- `phase-transition 2 completed` 校验该文件存在、`verdict=APPROVED`、`requirements_hash` 有效且 `head_commit` 匹配当前 HEAD
+- `phase-transition 2 completed` 校验 schema-v2 必填字段、`verdict=APPROVED`、三份专家证据、`consensus_ratio`、当前 HEAD，并从需求陈述、可选 context 文件和 timestamp 日期重新计算 `requirements_hash`
 - 不匹配 → BLOCK（防陈旧绑定）
 
 ### Step 3: 原生设计文档生成

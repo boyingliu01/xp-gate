@@ -295,7 +295,10 @@ APPROVED 后读取 `git rev-parse HEAD` 的精确结果并写入 `.sprint-state/
 {
   "mode": "requirements",
   "verdict": "APPROVED",
-  "requirements_hash": "<non-empty SHA-256 hex digest>",
+  "timestamp": "2026-08-20T10:30:00Z",
+  "requirements_statement": "<被评审的原始需求陈述>",
+  "context_file_used": "CONTEXT.md | null",
+  "requirements_hash": "<SHA-256 of requirements_statement + context exact UTF-8 content if used + timestamp YYYY-MM-DD>",
   "head_commit": "<exact git rev-parse HEAD>",
   "consensus_ratio": 0.90,
   "expert_verdicts": [
@@ -305,6 +308,8 @@ APPROVED 后读取 `git rev-parse HEAD` 的精确结果并写入 `.sprint-state/
   ]
 }
 ```
+
+Schema-v2 对 context 路径执行项目根目录 containment 与 realpath 检查，并在 Phase 2 transition 时重新计算 hash；生成 hash 为小写 hex，比较时大小写不敏感。
 
 `confidence` 可以由 Custom Agent 提供，但不是 R1 evidence contract 的必需字段。Phase 2 全部步骤完成、进入 Phase 3 前必须执行 `npx xp-gate phase-transition 2 completed`；schema-v2 Sprint 只有通过程序化校验才能继续。
 
