@@ -448,6 +448,7 @@ Every Delphi mode MUST use the full JSON schema below. Architecture, technical, 
   "mode": "requirements",
   "verdict": "APPROVED|GAPS_FOUND",
   "timestamp": "2026-07-25T10:30:00Z",
+  "consensus_ratio": 1.0,
   "requirements_hash": "<SHA-256 hex digest>",
   "head_commit": "<git rev-parse HEAD>",
   "context_file_used": "CONTEXT.md",
@@ -463,6 +464,8 @@ Every Delphi mode MUST use the full JSON schema below. Architecture, technical, 
   "escalation_needed": false
 }
 ```
+
+Schema-v2 Phase 2 requires `requirements_statement`, `timestamp`, `consensus_ratio`, `expert_verdicts`, `head_commit`, and `requirements_hash`. The hash is SHA-256 of the exact concatenation `requirements_statement + project-relative context file UTF-8 content if used + timestamp YYYY-MM-DD`; context paths must remain inside the project after realpath resolution.
 
 **Anti-patterns mapping:**
 - `Round 1 → "评审完成"` → MUST NOT have `verdict: APPROVED` if `critical_issues` exist
