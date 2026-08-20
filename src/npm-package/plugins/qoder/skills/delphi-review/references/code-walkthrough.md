@@ -72,6 +72,8 @@ pre-push hook
     │         │
     │         ├─→ Expert B (实现 + 代码质量) 匿名评审 (含 principles_findings)
     │         │
+    │         ├─→ Expert C (可行性) 匿名评审 (含 principles_findings)
+    │         │
     │         ├─→ 共识检查
     │         │      │
     │         │      ├─→ 三份成功结果、三个 distinct requested_model、≥90% → 允许推送
@@ -173,6 +175,7 @@ pre-push hook
     │                  │
     │                  ├─→ Expert A 评审 (含 principles_findings)
     │                  ├─→ Expert B 评审 (含 principles_findings)
+    │                  ├─→ Expert C 评审 (含 principles_findings)
     │                  └─→ 共识检查
     │
     └─→ 允许/阻塞推送
@@ -240,7 +243,7 @@ pre-push hook
 | 三份成功结果 + 三个 distinct requested_model + ≥90% + 无 Critical Issues | ✅ 允许推送 |
 | 三份成功结果 + 三个 distinct requested_model + ≥90% + 有 Minor Issues | ✅ 允许推送（记录问题） |
 | 未达到 ≥90% | ⚠️ 继续下一轮（最多 5 轮） |
-| 0/2 APPROVED | ❌ 阻塞推送 |
+| 任一专家不是 APPROVED | ❌ 阻塞推送 |
 | 有 Critical Issues | ❌ 阻塞推送 |
 | 有 Major Issues 且未处理 | ❌ 阻塞推送 |
 
@@ -282,7 +285,7 @@ IF 超过阈值:
 BEFORE code walkthrough:
   ├─ 检查 Expert A 模型可用性
   ├─ 检查 Expert B 模型可用性
-  ├─ 检查 Expert C 模型可用性（仲裁时需要）
+  ├─ 检查 Expert C 模型可用性（每轮强制执行）
   └─ 检查 OpenCode CLI 可用性
 
 IF 任何检查失败:
@@ -298,6 +301,7 @@ IF 任何检查失败:
 |------|------|
 | Expert A API 错误 | BLOCK + 提示用户检查 API key |
 | Expert B API 错误 | BLOCK + 提示用户检查 API key |
+| Expert C API 错误 | BLOCK + 提示用户检查 API key |
 | OpenCode CLI 缺失 | BLOCK + 提示用户安装 OpenCode |
 
 ---

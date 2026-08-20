@@ -3,7 +3,8 @@ name: delphi-review
 version: 1.1.0
 description: >
   Performs multi-round anonymous expert consensus review using the Delphi method. Supports
-  design review (default) and code-walkthrough (--mode code-walkthrough) modes. Uses exactly 3
+  design review (default), code-walkthrough (--mode code-walkthrough), and requirements
+  (--mode requirements) modes. Uses exactly 3
   successfully executed experts with distinct model IDs and a >=90% statistical consensus threshold.
   Outputs structured verdict (APPROVED/PASS_WITH_CAVEATS/REQUEST_CHANGES/BLOCKED).
 
@@ -169,7 +170,7 @@ tools_denied:
 ## Scope
 
 **In Scope:**
-- Multi-round anonymous expert consensus review (design + code-walkthrough modes)
+- Multi-round anonymous expert consensus review (design + requirements + code-walkthrough modes)
 - Exactly 3 experts with distinct trimmed executable model IDs and statistical consensus (>= 90%)
 - Structured verdict: APPROVED / PASS_WITH_CAVEATS / REQUEST_CHANGES
 - Provider, vendor, gateway, country, and model nationality are unrestricted; any expert execution failure blocks approval
@@ -280,8 +281,32 @@ Each round MUST output a structured round marker:
 |------|------|------|------|
 | `design`（默认） | `/delphi-review` | 需求/设计/架构/PR 评审 | 共识报告 + specification.yaml |
 | `code-walkthrough` | `--mode code-walkthrough` | git push 前代码走查 | `.code-walkthrough-result.json` |
+| `requirements` | `--mode requirements` | Phase 2 R1 需求完整性评审 | `.sprint-state/phase-outputs/requirements-reviewed.json` |
 
 **Code Walkthrough 模式**的完整规范 → 详见 `references/code-walkthrough.md`
+
+### Requirements 模式（Qoder Custom Agents）
+
+在 Phase 2 需求探索完成、设计审批前，并行运行 Qoder 的 architecture、technical、feasibility 三个 Custom Agent。Round 1 保持匿名；任一 Agent 未成功返回、任一裁决不是 `APPROVED`、三个 trimmed `requested_model` 不互异，或聚合 `consensus_ratio < 0.90` 时，R1 必须 BLOCK，不能减少专家数或使用仲裁结果代替。
+
+APPROVED 后读取 `git rev-parse HEAD` 的精确结果并写入 `.sprint-state/phase-outputs/requirements-reviewed.json`。无法解析 HEAD 时不得写 APPROVED 证据：
+
+```json
+{
+  "mode": "requirements",
+  "verdict": "APPROVED",
+  "requirements_hash": "<non-empty SHA-256 hex digest>",
+  "head_commit": "<exact git rev-parse HEAD>",
+  "consensus_ratio": 0.90,
+  "expert_verdicts": [
+    { "role": "architecture", "verdict": "APPROVED", "result_type": "delphi_expert_result", "requested_model": "provider/model-a" },
+    { "role": "technical", "verdict": "APPROVED", "result_type": "delphi_expert_result", "requested_model": "provider/model-b" },
+    { "role": "feasibility", "verdict": "APPROVED", "result_type": "delphi_expert_result", "requested_model": "provider/model-c" }
+  ]
+}
+```
+
+`confidence` 可以由 Custom Agent 提供，但不是 R1 evidence contract 的必需字段。Phase 2 全部步骤完成、进入 Phase 3 前必须执行 `npx xp-gate phase-transition 2 completed`；schema-v2 Sprint 只有通过程序化校验才能继续。
 
 ---
 
@@ -415,6 +440,8 @@ Every Delphi mode MUST use the full JSON schema below. Each of the three Qoder C
 
 **For code-walkthrough mode**, output follows `.code-walkthrough-result.json` schema (see `references/code-walkthrough.md`).
 
+**For requirements mode**, output follows the Requirements 模式 schema above and includes exact HEAD plus all three successful Custom Agent results.
+
 **Anti-patterns mapping:**
 - `Round 1 → "评审完成"` → MUST NOT have `verdict: APPROVED` if `critical_issues` exist
 - `只处理 Critical，忽略 Major` → MUST include `major_concerns` array
@@ -446,6 +473,11 @@ Every Delphi mode MUST use the full JSON schema below. Each of the three Qoder C
 **Code-walkthrough mode APPROVED** → `.sprint-state/delphi-reviewed.json`:
 ```json
 {"mode":"code-walkthrough","commit":"abc123...","timestamp":"...","verdict":"APPROVED","consensus_ratio":1.0}
+```
+
+**Requirements mode APPROVED** → `.sprint-state/delphi-reviewed.json`:
+```json
+{"mode":"requirements","timestamp":"...","verdict":"APPROVED","consensus_ratio":1.0}
 ```
 
 ---
