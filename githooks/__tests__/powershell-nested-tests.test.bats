@@ -13,14 +13,14 @@ setup() {
   mkdir -p \
     "$TEST_DIR/tests" \
     "$TEST_DIR/test" \
-    "$TEST_DIR/plugins/qoder/skills/clipboard-vision/__tests__" \
-    "$TEST_DIR/plugins/qoder/skills/clip board's vision/__tests__" \
+    "$TEST_DIR/skills/clipboard-vision/__tests__" \
+    "$TEST_DIR/skills/clip board's vision/__tests__" \
     "$TEST_DIR/src"
   touch \
     "$TEST_DIR/tests/top-level.Tests.ps1" \
     "$TEST_DIR/test/legacy.Tests.ps1" \
-    "$TEST_DIR/plugins/qoder/skills/clipboard-vision/__tests__/clipboard-vision.Tests.ps1" \
-    "$TEST_DIR/plugins/qoder/skills/clip board's vision/__tests__/quoted.Tests.ps1" \
+    "$TEST_DIR/skills/clipboard-vision/__tests__/clipboard-vision.Tests.ps1" \
+    "$TEST_DIR/skills/clip board's vision/__tests__/quoted.Tests.ps1" \
     "$TEST_DIR/src/module.ps1" \
     "$TEST_DIR/src/not-coverage.Tests.ps1"
 
@@ -29,6 +29,18 @@ setup() {
     touch \
       "$TEST_DIR/$excluded_root/nested/excluded.Tests.ps1" \
       "$TEST_DIR/$excluded_root/nested/excluded-source.ps1"
+  done
+
+  for excluded_root in \
+    plugins/claude-code/skills \
+    plugins/opencode/skills \
+    plugins/qoder/skills \
+    src/npm-package/skills \
+    src/npm-package/plugins; do
+    mkdir -p "$TEST_DIR/$excluded_root/clipboard-vision/__tests__"
+    touch \
+      "$TEST_DIR/$excluded_root/clipboard-vision/__tests__/excluded.Tests.ps1" \
+      "$TEST_DIR/$excluded_root/clipboard-vision/excluded-source.ps1"
   done
 
   cat > "$TEST_DIR/fake-pwsh" <<'EOF'
@@ -60,12 +72,17 @@ assert_test_array() {
   [[ "$command" == *"Invoke-Pester -Path @("* ]]
   [[ "$command" == *"'./tests/top-level.Tests.ps1'"* ]]
   [[ "$command" == *"'./test/legacy.Tests.ps1'"* ]]
-  [[ "$command" == *"'./plugins/qoder/skills/clipboard-vision/__tests__/clipboard-vision.Tests.ps1'"* ]]
-  [[ "$command" == *"'./plugins/qoder/skills/clip board''s vision/__tests__/quoted.Tests.ps1'"* ]]
+  [[ "$command" == *"'./skills/clipboard-vision/__tests__/clipboard-vision.Tests.ps1'"* ]]
+  [[ "$command" == *"'./skills/clip board''s vision/__tests__/quoted.Tests.ps1'"* ]]
   [[ "$command" != *"/.git/"* ]]
   [[ "$command" != *"/node_modules/"* ]]
   [[ "$command" != *"/dist/"* ]]
   [[ "$command" != *"/coverage/"* ]]
+  [[ "$command" != *"/plugins/claude-code/skills/"* ]]
+  [[ "$command" != *"/plugins/opencode/skills/"* ]]
+  [[ "$command" != *"/plugins/qoder/skills/"* ]]
+  [[ "$command" != *"/src/npm-package/skills/"* ]]
+  [[ "$command" != *"/src/npm-package/plugins/"* ]]
 }
 
 @test "run_tests passes explicit top-level and nested test paths with safe quoting" {
@@ -127,4 +144,36 @@ assert_test_array() {
   run grep -En '(^|[[:space:]])(mapfile|readarray)([[:space:]]|$)' "$ADAPTER"
 
   [ "$status" -ne 0 ]
+}
+
+@test "Windows PowerShell test invocation uses process-scoped ExecutionPolicy Bypass" {
+  for executable in powershell.exe powershell; do
+    cp "$TEST_DIR/fake-pwsh" "$TEST_DIR/$executable"
+    chmod +x "$TEST_DIR/$executable"
+    # shellcheck disable=SC2317
+    _detect_pwsh() { printf '%s\n' "$TEST_DIR/$executable"; }
+
+    run run_tests
+
+    [ "$status" -eq 0 ]
+    [ "$(sed -n '1p' "$CAPTURE_FILE")" = "-NoProfile" ]
+    [ "$(sed -n '2p' "$CAPTURE_FILE")" = "-ExecutionPolicy" ]
+    [ "$(sed -n '3p' "$CAPTURE_FILE")" = "Bypass" ]
+    [ "$(sed -n '4p' "$CAPTURE_FILE")" = "-Command" ]
+  done
+}
+
+@test "pwsh test invocation remains compatible without Windows-only policy arguments" {
+  cp "$TEST_DIR/fake-pwsh" "$TEST_DIR/pwsh"
+  chmod +x "$TEST_DIR/pwsh"
+  # shellcheck disable=SC2317
+  _detect_pwsh() { printf '%s\n' "$TEST_DIR/pwsh"; }
+
+  run run_tests
+
+  [ "$status" -eq 0 ]
+  run grep -F -- '-ExecutionPolicy' "$CAPTURE_FILE"
+  [ "$status" -ne 0 ]
+  run grep -F -- '-Command' "$CAPTURE_FILE"
+  [ "$status" -eq 0 ]
 }
