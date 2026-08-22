@@ -16,6 +16,7 @@ const REPO_ROOT = path.resolve(PLUGIN_ROOT, '..', '..');
 
 const CORE_SKILLS = [
   'admin-template-guidelines',
+  'clipboard-vision',
   'delphi-review',
   'improve-codebase-architecture',
   'ralph-loop',
