@@ -2081,6 +2081,45 @@ else
         echo "⚠️  coverage/lcov.info not found. Ensure dart test --coverage was run."
       fi
       ;;
+    "powershell")
+      COVERAGE_ENFORCED=true
+      if [ -f "coverage.xml" ]; then
+        COVERAGE_RESULT=$(node -e "
+          try {
+            const fs = require('fs');
+            const xml = fs.readFileSync('coverage.xml', 'utf8');
+            const counters = [...xml.matchAll(/<counter\b([^>]*)\/?\s*>/gi)]
+              .map((match) => Object.fromEntries(
+                [...match[1].matchAll(/([\w:-]+)\s*=\s*(['\"])(.*?)\2/g)]
+                  .map((attribute) => [attribute[1].toUpperCase(), attribute[3]])
+              ))
+              .filter((counter) => counter.TYPE === 'LINE');
+            const reportCounter = counters.at(-1);
+            const missed = Number(reportCounter?.MISSED);
+            const covered = Number(reportCounter?.COVERED);
+            const total = missed + covered;
+            if (!Number.isFinite(missed) || !Number.isFinite(covered) || missed < 0 || covered < 0 || total <= 0) {
+              throw new Error('invalid LINE counter');
+            }
+            const percentage = (covered / total) * 100;
+            console.log((percentage < 80 ? 'below' : 'pass') + '|' + Math.round(percentage));
+          } catch (error) { console.log('parse_error'); }
+        " 2>/dev/null) || COVERAGE_RESULT="parse_error"
+        if [ "$COVERAGE_RESULT" != "parse_error" ] && [ -n "$COVERAGE_RESULT" ]; then
+          COVERAGE_STATUS=${COVERAGE_RESULT%%|*}
+          COVERAGE_PERCENT=${COVERAGE_RESULT#*|}
+          if [ "$COVERAGE_STATUS" = "below" ]; then
+            echo "❌ BLOCKED - PowerShell coverage ${COVERAGE_PERCENT}% below 80% threshold"
+            exit 1
+          fi
+          echo "PowerShell coverage: ${COVERAGE_PERCENT}% ✅ (≥ 80%)"
+        else
+          echo "⚠️  Could not parse PowerShell coverage from coverage.xml"
+        fi
+      else
+        echo "⚠️  coverage.xml not found. Ensure Pester coverage was run."
+      fi
+      ;;
     *)
       # Default: attempt to parse coverage from common formats regardless of language
       COVERAGE_ENFORCED=true
