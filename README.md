@@ -412,21 +412,30 @@ rules:
 
 ```json
 {
-  "experts": [
-    { "id": "A", "role": "architecture", "model": "bailian-tp/qwen-plus" },
-    { "id": "B", "role": "technical", "model": "bailian-tp/deepseek-v3" },
-    { "id": "C", "role": "feasibility", "model": "bailian-tp/glm-4.5" }
-  ],
+  "active_profile": "default",
+  "profiles": {
+    "default": {
+      "providers": {
+        "bailian-tp": {
+          "base_url": "https://coding.dashscope.aliyuncs.com/v1",
+          "api_key": "${BAILIAN_API_KEY}"
+        }
+      },
+      "experts": {
+        "architecture": { "provider": "bailian-tp", "model": "qwen3-coder-plus" },
+        "technical": { "provider": "bailian-tp", "model": "deepseek-v3.2" },
+        "feasibility": { "provider": "bailian-tp", "model": "kimi-k2.5" }
+      }
+    }
+  },
   "consensus": {
     "threshold_percent": 90,
-    "max_review_rounds": 5,
-    "distinct_models_required": true,
-    "cross_provider_required": true
+    "max_review_rounds": 5
   }
 }
 ```
 
-> 配置示例使用一个 provider 和 token plan，但三个 distinct 模型 ID。`cross_provider_required` 已废弃并忽略，只产生 `cross_provider_required_ignored` warning，不构成绕过。
+> 配置示例使用一个 provider 和 token plan，但三个 distinct 模型 ID。将 `BAILIAN_API_KEY` 设置为你的 API key；不要把密钥写入配置文件或提交到版本控制。
 
 ---
 
