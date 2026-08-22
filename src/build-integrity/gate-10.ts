@@ -38,6 +38,11 @@ import type {
  */
 
 const execFileAsync = promisify(execFile);
+const SUPPORTED_MODULE_EXTENSIONS = new Set(['.ts', '.tsx', '.js', '.jsx', '.mjs', '.cjs']);
+
+function isSupportedModuleFile(file: string): boolean {
+  return SUPPORTED_MODULE_EXTENSIONS.has(path.extname(file));
+}
 
 /**
  * Gate 10: Build Integrity Check — TypeScript compilation verification.
@@ -303,6 +308,8 @@ export async function runImportCheck(
     const fsSync = fsNative;
 
   for (const file of changedFiles) {
+    if (!isSupportedModuleFile(file)) continue;
+
     // Skip test files — they contain intentionally broken imports for unit testing.
     // The published npm package does not include __tests__ directories.
     if (file.includes('__tests__')) continue;
