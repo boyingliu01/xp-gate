@@ -88,7 +88,7 @@ npx vitest run src/mock-policy/__tests__/integration.test.ts
 
 ## NOTES
 - Gate M3 is invoked by pre-push hook after Gate M (mutation) and Gate M2 (AI test detection)
-- push limits: max 20 files or 500 LOC per push — Gate M3 respects this via the changed files input
+- code walkthrough scope: no hard file-count or LOC threshold; large diffs require complete review or user-directed splitting, never a size-based bypass
 - Coverage exclude: src/mock-policy/ controlled by vitest config
 - The integration test creates real temporary directories under os.tmpdir()
 - Dependencies on: `src/mutation/detect-ai-test.ts` (detectTestLayer)
