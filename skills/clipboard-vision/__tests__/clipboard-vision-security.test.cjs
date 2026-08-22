@@ -164,6 +164,8 @@ describe('clipboard-vision security boundaries', () => {
   it('requires PowerShell behavior cases through the executable script seams', () => {
     const script = fs.readFileSync(POWERSHELL_SCRIPT, 'utf8');
     const harness = fs.readFileSync(path.join(ROOT, '__tests__', 'clipboard-vision.Tests.ps1'), 'utf8');
+    expect(harness).toMatch(/Describe\s+['"]clipboard-vision PowerShell behavior['"]\s+\{/);
+    expect(harness.match(/\bIt\s+['"]/g)?.length).toBeGreaterThanOrEqual(8);
     expect(script).not.toMatch(/\$Output|Set-Content.*Result/);
     expect(script).not.toMatch(/\[string\]\$ConfirmRemote,\s*\)/);
     expect(harness).toContain('No output parameter');
