@@ -38,6 +38,11 @@ ignore:
 - 'src/npm-package/adapters/**'
 - 'src/npm-package/hooks/**'
 
+entry_points:
+- 'scripts/**/*.cjs'
+- 'scripts/**/*.mjs'
+- 'skills/**/__tests__/*.cjs'
+
 # Per-rule configuration
 #
 # code_clone detector reports a single smell that pairs each clone with its
@@ -53,6 +58,7 @@ rules:
     exclude:
     - 'plugins/**/*.ts'
     - 'plugins/**/*.js'
+    - 'plugins/qoder/skills/**'
     - 'skills/**'
     - 'githooks/adapters/**'
     - 'githooks/pre-commit'
