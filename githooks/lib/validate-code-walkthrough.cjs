@@ -4,6 +4,7 @@
 const fs = require('node:fs');
 
 const REQUIRED_ROLES = ['architecture', 'technical', 'feasibility'];
+const VALIDITY_MS = 60 * 60 * 1000;
 
 function fail(message) {
   console.error(`Invalid code walkthrough evidence: ${message}`);
@@ -17,12 +18,33 @@ function isPlainObject(value) {
 }
 
 function parseTimestamp(value, field) {
-  if (typeof value !== 'string' || value.trim() !== value || value === '') {
-    fail(`${field} must be a non-empty trimmed timestamp.`);
+  const match = typeof value === 'string'
+    ? value.match(/^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2}):(\d{2})(?:\.(\d{1,3}))?Z$/)
+    : null;
+  if (!match) fail(`${field} must be a canonical UTC ISO-8601 timestamp.`);
+
+  const [, yearText, monthText, dayText, hourText, minuteText, secondText, fractionText] = match;
+  const year = Number(yearText);
+  const month = Number(monthText);
+  const day = Number(dayText);
+  const hour = Number(hourText);
+  const minute = Number(minuteText);
+  const second = Number(secondText);
+  const milliseconds = Number((fractionText || '').padEnd(3, '0') || 0);
+  const date = new Date(0);
+  date.setUTCFullYear(year, month - 1, day);
+  date.setUTCHours(hour, minute, second, milliseconds);
+
+  if (date.getUTCFullYear() !== year
+      || date.getUTCMonth() !== month - 1
+      || date.getUTCDate() !== day
+      || date.getUTCHours() !== hour
+      || date.getUTCMinutes() !== minute
+      || date.getUTCSeconds() !== second
+      || date.getUTCMilliseconds() !== milliseconds) {
+    fail(`${field} must contain a valid UTC calendar date and time.`);
   }
-  const epoch = Date.parse(value);
-  if (!Number.isFinite(epoch)) fail(`${field} must be a valid timestamp.`);
-  return epoch;
+  return date.getTime();
 }
 
 function validateExpert(expert, index, roles, models) {
@@ -62,7 +84,9 @@ function validateEvidence(evidence, expectedCommit, expectedBranch, now) {
   const expires = parseTimestamp(evidence.expires, 'expires');
   if (timestamp > now) fail('timestamp is in the future.');
   if (expires <= now) fail('evidence has expired.');
-  if (expires <= timestamp) fail('expires must be later than timestamp.');
+  if (expires - timestamp !== VALIDITY_MS) {
+    fail('expires must be exactly one hour after timestamp.');
+  }
 
   if (typeof evidence.consensus_ratio !== 'number'
       || !Number.isFinite(evidence.consensus_ratio)
