@@ -113,6 +113,12 @@ function validateRequirementsExpertEvidence(data) {
   if (data.expert_verdicts.some(expert => expert?.result_type !== 'delphi_expert_result')) {
     validationErrors.push('every expert result_type must be delphi_expert_result');
   }
+  if (data.expert_verdicts.some(expert =>
+    (expert?.error !== undefined && expert.error !== false && expert.error !== null)
+    || (expert?.fallback !== undefined && expert.fallback !== false && expert.fallback !== null)
+  )) {
+    validationErrors.push('expert results must not contain an error or fallback marker');
+  }
 
   const requestedModels = data.expert_verdicts.map(expert =>
     typeof expert?.requested_model === 'string' ? expert.requested_model.trim() : ''
