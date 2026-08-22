@@ -23,6 +23,11 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
+      - name: Run clipboard-vision PowerShell behavior harness
+        if: matrix.os == 'windows-latest'
+        shell: pwsh
+        run: ./skills/clipboard-vision/__tests__/clipboard-vision.Tests.ps1
+
       - name: Setup Node.js 20
         uses: actions/setup-node@v4
         with:
