@@ -17,6 +17,7 @@ const REPO_ROOT = path.resolve(__dirname, '..');
 // When adding a new skill, append it here AND under skills/.
 const EXPECTED_SKILLS = [
   'admin-template-guidelines',
+  'clipboard-vision',
   'delphi-review',
   'improve-codebase-architecture',
   'ralph-loop',
