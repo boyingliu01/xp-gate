@@ -775,6 +775,37 @@ describe('phase-transition', () => {
       expect(result.errors.some(error => error.includes(expectedError))).toBe(true);
     });
 
+    it.each([
+      ['error true', { error: true }],
+      ['error string', { error: 'provider failed' }],
+      ['error false-shaped string', { error: 'false' }],
+      ['fallback true', { fallback: true }],
+      ['fallback object', { fallback: { provider: 'local' } }],
+      ['fallback false-shaped number', { fallback: 0 }],
+    ])('BLOCKs schema-v2 requirements evidence with an expert %s marker', (_label, marker) => {
+      createSprintState(tmpDir, 2);
+      const evidence = validRequirementsReview(tmpDir);
+      Object.assign(evidence.expert_verdicts[0], marker);
+      writeRequirementsReview(tmpDir, evidence);
+
+      const result = validateEvidence(2, tmpDir);
+
+      expect(result.ok).toBe(false);
+      expect(result.errors.some(error => error.includes('error or fallback marker'))).toBe(true);
+    });
+
+    it('accepts schema-v2 expert records with omitted or explicitly clear markers', () => {
+      createSprintState(tmpDir, 2);
+      const evidence = validRequirementsReview(tmpDir);
+      evidence.expert_verdicts[0].error = false;
+      evidence.expert_verdicts[0].fallback = null;
+      evidence.expert_verdicts[1].error = null;
+      evidence.expert_verdicts[1].fallback = false;
+      writeRequirementsReview(tmpDir, evidence);
+
+      expect(validateEvidence(2, tmpDir).ok).toBe(true);
+    });
+
     it('does not include arbitrary expert payloads in validation errors', () => {
       createSprintState(tmpDir, 2);
       writeRequirementsReview(tmpDir, validRequirementsReview(tmpDir, {
@@ -820,6 +851,11 @@ describe('phase-transition', () => {
 
     it.each([
       ['invalid expert evidence', { expert_verdicts: [] }, 'expert_verdicts'],
+      ['expert failure marker', { expert_verdicts: [
+        { role: 'architecture', verdict: 'APPROVED', result_type: 'delphi_expert_result', requested_model: 'model-a', error: true },
+        { role: 'technical', verdict: 'APPROVED', result_type: 'delphi_expert_result', requested_model: 'model-b' },
+        { role: 'feasibility', verdict: 'APPROVED', result_type: 'delphi_expert_result', requested_model: 'model-c' },
+      ] }, 'error or fallback marker'],
       ['unresolved HEAD', null, 'resolve current Git HEAD'],
       ['stale HEAD', { head_commit: 'deadbeef00000000000000000000000000000000' }, 'head_commit mismatch'],
       ['stale requirements hash', { requirements_hash: '0'.repeat(64) }, 'requirements_hash'],
