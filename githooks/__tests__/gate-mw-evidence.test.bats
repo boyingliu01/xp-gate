@@ -25,7 +25,7 @@ write_valid_fixture() {
   "commit": "$EXPECTED_COMMIT",
   "branch": "$EXPECTED_BRANCH",
   "verdict": "APPROVED",
-  "timestamp": "2026-08-20T11:00:00Z",
+  "timestamp": "2026-08-20T12:00:00Z",
   "expires": "2026-08-20T13:00:00Z",
   "consensus_ratio": 0.90,
   "experts": [
@@ -54,6 +54,20 @@ run_validator() {
 @test "valid all-three walkthrough evidence passes when provider omits one resolved model" {
   run_validator
   [ "$status" -eq 0 ]
+}
+
+@test "expiry exactly one hour after timestamp passes" {
+  run_validator
+  [ "$status" -eq 0 ]
+}
+
+@test "expiry shorter or longer than exactly one hour fails" {
+  for expires in '2026-08-20T12:59:59Z' '2026-08-20T13:00:01Z'; do
+    write_valid_fixture
+    mutate_fixture "evidence.expires=\"$expires\""
+    run_validator
+    [ "$status" -ne 0 ]
+  done
 }
 
 @test "legacy minimal approval evidence fails closed" {
@@ -116,8 +130,22 @@ run_validator() {
   done
 }
 
-@test "invalid, future, or expired timestamps fail" {
-  for mutation in 'evidence.timestamp="not-a-date"' 'evidence.timestamp="2026-08-20T14:00:00Z"' 'evidence.expires="2026-08-20T11:30:00Z"'; do
+@test "invalid, future, expired, or invalid expiry timestamps fail" {
+  for mutation in 'evidence.timestamp="not-a-date"' 'evidence.timestamp="2026-08-20T14:00:00Z"' 'evidence.timestamp="2026-08-20T11:00:00Z"; evidence.expires="2026-08-20T12:00:00Z"' 'evidence.expires="not-a-date"'; do
+    write_valid_fixture
+    mutate_fixture "$mutation"
+    run_validator
+    [ "$status" -ne 0 ]
+  done
+}
+
+@test "non-canonical UTC timestamp representations fail" {
+  for mutation in \
+    'evidence.timestamp="2026-08-20"' \
+    'evidence.timestamp="2026-08-20T12:00:00"' \
+    'evidence.timestamp="2026-08-20T12:00:00+00:00"' \
+    'evidence.timestamp="2026-02-30T12:00:00Z"' \
+    'evidence.timestamp="2026-08-20T12:00:00.1234Z"'; do
     write_valid_fixture
     mutate_fixture "$mutation"
     run_validator
