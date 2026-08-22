@@ -25,7 +25,7 @@ skills/delphi-review/
 | Task | Location | Notes |
 |------|----------|-------|
 | Core methodology | SKILL.md | Delphi process, expert roles, consensus rules |
-| Code-walkthrough | references/code-walkthrough.md | Pre-push mode: 20 files/500 LOC limit |
+| Code-walkthrough | references/code-walkthrough.md | Pre-push mode: complete review evidence with no hard file/LOC threshold |
 | Config example | .delphi-config.json.example | 3 experts, distinct models |
 
 ## CONVENTIONS
@@ -42,7 +42,7 @@ skills/delphi-review/
 - Do NOT terminate before achieving true consensus (≥90%)
 - Do NOT reveal other experts' opinions during Round 1
 - Do NOT accept partial agreement without resolution
-- Do NOT skip code-walkthrough when over thresholds (BLOCK + user decision)
+- Do NOT auto-skip or bypass code-walkthrough based on change size; review large diffs completely or split them by user choice
 - Do NOT degrade to single model on API errors (BLOCK)
 - Do NOT declare complete without writing .code-walkthrough-result.json
 - Do NOT treat `provider: local` fallback as an executed expert
