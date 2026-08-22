@@ -25,19 +25,16 @@ skills/delphi-review/
 | Task | Location | Notes |
 |------|----------|-------|
 | Core methodology | SKILL.md | Delphi process, expert roles, consensus rules |
-| Code-walkthrough | references/code-walkthrough.md | Pre-push mode: 20 files/500 LOC limit |
-| Config example | .delphi-config.json.example | 3 experts, providers + API keys |
-| External API script | scripts/delphi-external-review.cjs | Calls model APIs, returns JSON verdict |
+| Code-walkthrough | references/code-walkthrough.md | Pre-push mode: complete review evidence with no hard file/LOC threshold |
+| Config example | .delphi-config.json.example | 3 experts, distinct models |
 
 ## CONVENTIONS
 - 3 experts anonymous in Round 1 (no cross-expert bias)
 - ≥90% consensus threshold (was 95%, now unified to 90%)
 - Max 5 rounds before forcing decision
 - Provider/vendor/nationality unrestricted; exactly three distinct trimmed requested model IDs are required
-- Model selection: reads provider/model from `.delphi-config.json` active profile
-- `provider: "local"` fallback cannot count as an executed expert
-- No hardcoded model lists — models defined by user's `.delphi-config.json` configuration
-- Execution: via Bash tool calling `delphi-external-review.cjs` script (not subagent dispatch)
+- Model selection: reads `delphi-reviewer-*` agent `model` fields from `opencode.json`
+- No hardcoded model lists — models defined by user's `opencode.json` configuration
 - Code-walkthrough mode: triggered on git push, stores result in .code-walkthrough-result.json
 - Code-walkthrough skipped on main/master pushes (by design)
 
@@ -45,7 +42,7 @@ skills/delphi-review/
 - Do NOT terminate before achieving true consensus (≥90%)
 - Do NOT reveal other experts' opinions during Round 1
 - Do NOT accept partial agreement without resolution
-- Do NOT skip code-walkthrough when over thresholds (BLOCK + user decision)
+- Do NOT auto-skip or bypass code-walkthrough based on change size; review large diffs completely or split them by user choice
 - Do NOT degrade to single model on API errors (BLOCK)
 - Do NOT declare complete without writing .code-walkthrough-result.json
 - Do NOT treat `provider: local` fallback as an executed expert
