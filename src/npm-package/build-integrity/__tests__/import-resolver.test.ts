@@ -321,6 +321,28 @@ describe('runImportCheck', () => {
     expect(result.violations[0].reason).toMatch(/not found|does not exist|missing/i);
   });
 
+  it('skips YAML files containing JavaScript-like require text', async () => {
+    const workflowDir = path.join(tmpDir, '.github', 'workflows');
+    await fs.mkdir(workflowDir, { recursive: true });
+
+    const workflowFile = path.join(workflowDir, 'cross-platform-ci.yml');
+    await fs.writeFile(workflowFile, `run: node -e "require('../test')"\n`);
+
+    const result = await runImportCheck([workflowFile], tmpDir, 30000);
+    expect(result.status).toBe('pass');
+    expect(result.violations).toEqual([]);
+  });
+
+  it('still reports missing relative imports in supported JavaScript modules', async () => {
+    const sourceFile = path.join(tmpDir, 'source.mjs');
+    await fs.writeFile(sourceFile, `import './missing.js';\n`);
+
+    const result = await runImportCheck([sourceFile], tmpDir, 30000);
+    expect(result.status).toBe('fail');
+    expect(result.violations).toHaveLength(1);
+    expect(result.violations[0].importPath).toBe('./missing.js');
+  });
+
   it('returns pass when only bare npm imports are used', async () => {
     const srcDir = path.join(tmpDir, 'src');
     await fs.mkdir(srcDir);
