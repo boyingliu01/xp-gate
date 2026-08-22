@@ -32,6 +32,7 @@ function getCliVersion() {
 const SKILLS_REGISTRY = {
   'admin-template-guidelines': { repo: 'boyingliu01/xp-gate', path: 'skills/admin-template-guidelines' },
   'batch-grill-me': { repo: 'boyingliu01/xp-gate', path: 'skills/batch-grill-me' },
+  'clipboard-vision': { repo: 'boyingliu01/xp-gate', path: 'skills/clipboard-vision' },
   'delphi-review': { repo: 'boyingliu01/xp-gate', path: 'skills/delphi-review' },
   'domain-modeling': { repo: 'boyingliu01/xp-gate', path: 'skills/domain-modeling' },
   'grill-with-docs': { repo: 'boyingliu01/xp-gate', path: 'skills/grill-with-docs' },
