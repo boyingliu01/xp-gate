@@ -58,6 +58,8 @@ rules:
     exclude:
     - 'plugins/**/*.ts'
     - 'plugins/**/*.js'
+    - 'plugins/**/*.cjs'
+    - 'plugins/**/*.mjs'
     - 'plugins/qoder/skills/**'
     - 'skills/**'
     - 'githooks/adapters/**'

@@ -25,6 +25,13 @@ describe('Archlint analysis boundaries', () => {
     expect(config.rules.code_clone.exclude).toContain('plugins/qoder/skills/**');
   });
 
+  it.each([
+    'plugins/**/*.cjs',
+    'plugins/**/*.mjs',
+  ])('excludes %s plugin sources from clone analysis', pluginSource => {
+    expect(config.rules.code_clone.exclude).toContain(pluginSource);
+  });
+
   it('keeps generated npm skill and plugin mirrors globally ignored', () => {
     expect(config.ignore).toEqual(expect.arrayContaining([
       'src/npm-package/skills/**',
