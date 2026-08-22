@@ -99,7 +99,16 @@ describe('parseArgs', () => {
 // ── readConfig ─────────────────────────────────────────────────────────
 describe('readConfig', () => {
   const { readConfig } = loadModule();
+  const projectRoot = path.resolve(__dirname, '..', '..');
   let tmpDir;
+  let originalBailianApiKey;
+
+  function extractDelphiConfigExample(relativePath) {
+    const markdown = fs.readFileSync(path.join(projectRoot, relativePath), 'utf8');
+    const section = markdown.match(/(?:### |\*\*)\.delphi-config\.json[^\n]*\n[\s\S]*?```json\n([\s\S]*?)\n```/);
+    if (!section) throw new Error(`${relativePath} must contain a .delphi-config.json JSON example`);
+    return section[1];
+  }
 
   function writeConfig(consensus) {
     const configPath = path.join(tmpDir, '.delphi-config.json');
@@ -122,9 +131,12 @@ describe('readConfig', () => {
 
   beforeEach(() => {
     tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'delphi-test-'));
+    originalBailianApiKey = process.env.BAILIAN_API_KEY;
   });
 
   afterEach(() => {
+    if (originalBailianApiKey === undefined) delete process.env.BAILIAN_API_KEY;
+    else process.env.BAILIAN_API_KEY = originalBailianApiKey;
     fs.rmSync(tmpDir, { recursive: true, force: true });
   });
 
@@ -156,6 +168,26 @@ describe('readConfig', () => {
     expect(result.consensus.max_review_rounds).toBe(5);
     expect(result.consensus.cross_provider_required).toBe(true);
   });
+
+  it.each(['README.md', 'docs/ARCHITECTURE.md'])(
+    'parses the %s .delphi-config.json example through readConfig',
+    (relativePath) => {
+      const configPath = path.join(tmpDir, '.delphi-config.json');
+      fs.writeFileSync(configPath, extractDelphiConfigExample(relativePath));
+      process.env.BAILIAN_API_KEY = 'test-key';
+
+      const result = readConfig(configPath);
+
+      expect(result.active_profile).toBe('default');
+      expect(Object.keys(result.providers)).toEqual(['bailian-tp']);
+      expect(result.providers['bailian-tp'].api_key).toBe('test-key');
+      expect(result.providers['bailian-tp'].base_url).toBe('https://coding.dashscope.aliyuncs.com/v1');
+      expect(Object.keys(result.experts)).toEqual(['architecture', 'technical', 'feasibility']);
+      expect(new Set(Object.values(result.experts).map(expert => expert.model)).size).toBe(3);
+      expect(result.consensus.threshold_percent).toBe(90);
+      expect(result.consensus.max_review_rounds).toBe(5);
+    }
+  );
 
   it('supports --profile override', () => {
     const configPath = path.join(tmpDir, '.delphi-config.json');

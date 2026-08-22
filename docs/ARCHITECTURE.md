@@ -96,7 +96,7 @@ XP-Gate 将确定性质量门禁（纯代码）与 AI 智能评审（多专家�
 │   │                        pre-push (Code Walkthrough)                   │   │
 │   │                                                                      │   │
 │   │  Validates .code-walkthrough-result.json (file-based, not CLI)      │   │
-│   │  - Max 20 files / 500 LOC per push                                  │   │
+│   │  - Complete walkthrough evidence; no hard file/LOC threshold        │   │
 │   │  - Verdict: APPROVED + commit match + not expired                   │   │
 │   └─────────────────────────────────────────────────────────────────────┘   │
 └─────────────────────────────────────────────────────────────────────────────┘
@@ -172,7 +172,7 @@ pre-push 在 `git push` 前验证代码走查结果：
 # 2. commit hash 匹配当前 HEAD
 # 3. verdict == "APPROVED"
 # 4. 未过期 (expires > now)
-# 5. 变更大小: max 20 files, max 500 LOC
+# 5. 变更审阅: 大型变更完整评审或由用户在评审前拆分
 ```
 
 **设计原则**: Hook 只验证结果文件，不直接调用 Skill。Skill 的执行在 Agent 会话中完成，通过文件传递结果。
@@ -610,17 +610,30 @@ git push
 
 ```json
 {
-  "experts": [
-    { "id": "A", "role": "architecture", "model": "gateway/model-a" },
-    { "id": "B", "role": "technical", "model": "gateway/model-b" },
-    { "id": "C", "role": "feasibility", "model": "gateway/model-c" }
-  ],
-  "consensus_threshold": 0.90,
-  "max_rounds": 5
+  "active_profile": "default",
+  "profiles": {
+    "default": {
+      "providers": {
+        "bailian-tp": {
+          "base_url": "https://coding.dashscope.aliyuncs.com/v1",
+          "api_key": "${BAILIAN_API_KEY}"
+        }
+      },
+      "experts": {
+        "architecture": { "provider": "bailian-tp", "model": "qwen3-coder-plus" },
+        "technical": { "provider": "bailian-tp", "model": "deepseek-v3.2" },
+        "feasibility": { "provider": "bailian-tp", "model": "kimi-k2.5" }
+      }
+    }
+  },
+  "consensus": {
+    "threshold_percent": 90,
+    "max_review_rounds": 5
+  }
 }
 ```
 
-三个角色必须配置互不相同的 trimmed model ID；provider、vendor、gateway 和模型国籍均不受限制。
+三个角色必须配置互不相同的 trimmed model ID。将 `BAILIAN_API_KEY` 设置为你的 API key，不要把密钥写入配置文件或提交到版本控制。
 
 **package.json 脚本**
 
