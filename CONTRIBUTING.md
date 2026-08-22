@@ -107,12 +107,9 @@ describe('Feature', () => {
 **后续提交**：修改的文件警告数必须下降或持平
 **新文件**：零容忍（任何警告都会阻止提交）
 
-## Push Limits
+## Walkthrough Scope
 
-- Maximum **20 files** per push
-- Maximum **500 LOC** changes per push
-
-Split large changes into multiple commits.
+Code walkthroughs have no hard file-count or LOC limit. Large diffs must be reviewed completely or split by user choice before review; size-based bypass is not permitted.
 
 ## Skill Development
 
