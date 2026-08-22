@@ -32,6 +32,13 @@ describe('Archlint analysis boundaries', () => {
     expect(config.rules.code_clone.exclude).toContain(pluginSource);
   });
 
+  it.each([
+    'src/npm-package/plugins/**/*.cjs',
+    'src/npm-package/plugins/**/*.mjs',
+  ])('excludes %s generated plugin mirrors from clone analysis', pluginMirror => {
+    expect(config.rules.code_clone.exclude).toContain(pluginMirror);
+  });
+
   it('keeps generated npm skill and plugin mirrors globally ignored', () => {
     expect(config.ignore).toEqual(expect.arrayContaining([
       'src/npm-package/skills/**',

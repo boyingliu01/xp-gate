@@ -67,6 +67,8 @@ rules:
     - 'githooks/pre-push'
     - 'githooks/adapter-common.sh'
     # Mirror trees: src/npm-package/*/ are sync copies of src/*
+    - 'src/npm-package/plugins/**/*.cjs'
+    - 'src/npm-package/plugins/**/*.mjs'
     - 'src/npm-package/principles/**'
     - 'src/npm-package/mock-policy/**'
     - 'src/npm-package/mutation/**'
