@@ -1412,6 +1412,14 @@ else
   # --- BLOCK path: New .ts/.tsx files without corresponding tests ---
   NEW_TS_FILES=$(git diff --cached --name-only --diff-filter=A | grep -E '\.(ts|tsx)$' | grep -v '\.d\.ts$' | grep -v '__tests__' | grep -v '\.test\.' | grep -v '\.spec\.' | grep -v '__snapshots__' | grep -v 'node_modules/' | grep -v '\.next/' | grep -v '\.nuxt/' | grep -v 'dist/' | grep -v 'build/' | grep -v '.turbo/' | grep -v '.cache/' | grep -Ev '(^|/)vitest\.config\.' | grep -Ev '(^|/)vite\.config\.' | grep -Ev '(^|/)jest\.config\.' | grep -Ev '(^|/)tsconfig\.' | grep -Ev '(^|/)eslint\.' | grep -Ev '(^|/)prettier\.' | grep -Ev '(^|/)tailwind\.' || true)
 
+  # Strip PROJECT_SUBDIR prefix from new-TS-file paths when running in a subdirectory.
+  # git diff returns repo-root relative paths, but after cd "$PROJECT_SUBDIR"
+  # the test-pairing [ -f ] checks below need subdirectory-relative paths.
+  # (Mirrors the v0.14.31+ Gate 5b fix at lines 1603-1608; Gate 5a was missing it.)
+  if [ -n "$PROJECT_SUBDIR" ] && [ "$PROJECT_SUBDIR" != "." ] && [ -n "$NEW_TS_FILES" ]; then
+    NEW_TS_FILES=$(echo "$NEW_TS_FILES" | sed "s|^${PROJECT_SUBDIR}/||")
+  fi
+
   if [ -n "$NEW_TS_FILES" ]; then
     BLOCKED_TS_FILES=0
     for src_file in $NEW_TS_FILES; do
