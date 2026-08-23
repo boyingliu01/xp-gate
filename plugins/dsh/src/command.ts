@@ -43,7 +43,12 @@ function buildInner(options: BuildCommandOptions): string {
   if (subcommand === "check") {
     const tokens = ["xp-gate", "check"]
     if (target !== undefined) tokens.push(shq(target))
-    if (gates !== undefined && gates.length > 0) tokens.push("--gates", shq(gates.join(",")))
+    if (gates !== undefined && gates.length > 0) {
+      // Defense-in-depth: the JSON-schema enum already rejects unknown gate ids,
+      // but we also whitelist here so a non-whitelisted value can never reach the shell.
+      const allowed = gates.filter(isGateAllowed)
+      if (allowed.length > 0) tokens.push("--gates", shq(allowed.join(",")))
+    }
     return tokens.join(" ")
   }
   if (subcommand === "principles") {

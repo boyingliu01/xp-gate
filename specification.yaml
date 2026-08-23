@@ -1,274 +1,138 @@
 ---
 specification:
-  id: SPEC-SLIM-001
-  name: Sprint-Flow Skill Slimming
+  id: SPEC-DSH-001
+  name: XP-Gate 移植为 DeepSeek Harness (DSH) 原生插件
   version: "1.0.0"
-  source_document: docs/plans/2026-06-17-sprint-flow-skill-slimming-design.md
+  source_document: docs/plans/2026-08-23-dsh-plugin-design.md
   delphi_status: APPROVED
-  delphi_rounds: 4
+  delphi_rounds: 2
   delphi_consensus: "3/3"
 
   requirements:
     # ============================================================
-    # REQ-SLIM-001: Phase 0 — Pre-fix document integrity
+    # REQ-DSH-001: DSH 插件包脚手架 + bundle patch
     # ============================================================
-    - id: REQ-SLIM-001
-      description: Fix document integrity issues before slimming — create missing references/ files and fix broken indexes
-      priority: MUST
-      context: |
-        SKILL.md line 1306 references @references/phase-minus-1-isolate.md which does NOT exist on disk.
-        SKILL.md References section (lines 1305-1313) is missing entries:
-          - phase-7-land.md
-          - phase-8-cleanup.md
-          - phase-minus-0-5-auto-estimate.md
-          - phase-minus-1-isolate.md (referenced but file doesn't exist)
-        AGENTS.md STRUCTURE tree (lines 21-34) is missing entries:
-          - phase-7-land.md
-          - phase-8-cleanup.md
-
+    - id: REQ-DSH-001
+      description: 新增 plugins/dsh/ 包，声明 dsh.bundle.patch 指向 cordis.patch.yml，使 dsh plugin add 后自动进入 bundle 层栈
+      priority: critical
       acceptance_criteria:
-        - id: AC-SLIM-001-01
-          given: references/phase-minus-1-isolate.md does not exist
-          when: Phase 0 completes
-          then: references/phase-minus-1-isolate.md is created containing Phase -1 instructions
-
-        - id: AC-SLIM-001-02
-          given: SKILL.md References section is missing entries
-          when: Phase 0 completes
-          then: References section includes phase-minus-1-isolate, phase-7-land, phase-8-cleanup, phase-minus-0-5-auto-estimate
-
-        - id: AC-SLIM-001-03
-          given: AGENTS.md STRUCTURE tree is missing entries
-          when: Phase 0 completes
-          then: STRUCTURE tree includes phase-7-land.md, phase-8-cleanup.md
+        - id: AC-DSH-001-01
+          criteria: package.json 含 dsh.bundle.patch，cordis.patch.yml insert id=tool-xp-gate；dsh plugin add 后 profile bundles 包含该包
+          test_type: integration
 
     # ============================================================
-    # REQ-SLIM-002: Phase 1 — Deduplication
+    # REQ-DSH-002: gate-check 工具
     # ============================================================
-    - id: REQ-SLIM-002
-      description: Remove duplicate content from SKILL.md — 3x Anti-Patterns, 2x Security Notes, 2x Output Format, YAML/body overlap, 11 examples
-      priority: MUST
-      context: |
-        Measured duplicates:
-        - 3x Anti-Patterns at lines 1222, 1327, 1385 — keep 1 (line 1222, most comprehensive)
-        - 2x Security Notes at lines 144, 1291 — keep 1 (line 144, shorter)
-        - 2x Output Format at lines 1342, 1400 — keep 1 (line 1342, with phase_history)
-        - YAML frontmatter (lines 1-52) overlaps body Triggers/Scope/Examples/Params
-        - 11 usage examples → slim to 3
-
+    - id: REQ-DSH-002
+      description: 注册 gate-check 工具，调用 xp-gate check 对文件/目录运行质量门禁
+      priority: critical
       acceptance_criteria:
-        - id: AC-SLIM-002-01
-          given: 3 Anti-Patterns sections exist
-          when: Phase 1 completes
-          then: Exactly 1 Anti-Patterns section remains
-        - id: AC-SLIM-002-02
-          given: 2 Security Notes sections exist
-          when: Phase 1 completes
-          then: Exactly 1 Security Notes section remains
-        - id: AC-SLIM-002-03
-          given: 2 Output Format sections exist
-          when: Phase 1 completes
-          then: Exactly 1 Output Format section remains
-        - id: AC-SLIM-002-04
-          given: Body Triggers/Scope/Examples duplicate YAML frontmatter
-          when: Phase 1 completes
-          then: Body sections removed; canonical info in frontmatter only
-        - id: AC-SLIM-002-05
-          given: 11 usage examples exist
-          when: Phase 1 completes
-          then: Exactly 3 examples remain (full-sprint, --stop-at, --resume-from)
+        - id: AC-DSH-002-01
+          criteria: apply(ctx) 调用后 ctx.tools.register 注册了 gate-check，参数含 path(required)/gates(optional)
+          test_type: unit
 
     # ============================================================
-    # REQ-SLIM-003: Phase 2 — Phase instructions → references/
+    # REQ-DSH-003: gate-principles 工具
     # ============================================================
-    - id: REQ-SLIM-003
-      description: Move Phase execution instructions from SKILL.md to references/ files, leaving 3-5 line summaries
-      priority: MUST
-      context: |
-        Currently Phase -1 through Phase 8 instructions total ~22KB.
-        Each phase reduced to 3-5 line summary with @see references/phase-N.md.
-        New files: references/orchestration-rules.md, references/phase-summary-format.md.
-
+    - id: REQ-DSH-003
+      description: 注册 gate-principles 工具（Gate 4 Clean Code + SOLID 规则检查）
+      priority: high
       acceptance_criteria:
-        - id: AC-SLIM-003-01
-          given: Phase -1 instructions in SKILL.md lines 289-344
-          when: Phase 2 completes
-          then: Phase -1 is 3-5 line summary with @see references/phase-minus-1-isolate.md
-        - id: AC-SLIM-003-02
-          given: Each Phase section has @references/ annotations
-          when: Phase 2 completes
-          then: All @references/ target files exist on disk
-        - id: AC-SLIM-003-03
-          given: references/orchestration-rules.md does not exist
-          when: Phase 2 completes
-          then: references/orchestration-rules.md exists with Agent Dispatch + Transition Gate
-        - id: AC-SLIM-003-04
-          given: references/phase-summary-format.md does not exist
-          when: Phase 2 completes
-          then: references/phase-summary-format.md exists with Phase Summary schema
+        - id: AC-DSH-003-01
+          criteria: gate-principles 已注册，execute 调 xp-gate principles <path>
+          test_type: unit
 
     # ============================================================
-    # REQ-SLIM-004: Phase 3 — Inline bash → logic descriptions
+    # REQ-DSH-004: gate-arch 工具
     # ============================================================
-    - id: REQ-SLIM-004
-      description: Replace all >3 line bash code blocks with 4-field logic descriptions
-      priority: MUST
-      context: |
-        ~12KB of inline bash scripts replaced with WHAT/HOW/CHECKS/ERRORS blocks (~3KB).
-        Full command sequences move to references/orchestration-rules.md.
-
+    - id: REQ-DSH-004
+      description: 注册 gate-arch 工具（Gate 6 架构校验）
+      priority: high
       acceptance_criteria:
-        - id: AC-SLIM-004-01
-          given: SKILL.md has ~12KB of inline bash scripts
-          when: Phase 3 completes
-          then: All >3 line bash blocks replaced with 4-field logic descriptions
-        - id: AC-SLIM-004-02
-          given: Bash scripts removed from SKILL.md
-          when: Phase 3 completes
-          then: Full command sequences exist in references/orchestration-rules.md
-        - id: AC-SLIM-004-03
-          given: A 4-field logic description exists
-          when: Phase 3 completes
-          then: Each replacement follows WHAT/HOW/CHECKS/ERRORS format
+        - id: AC-DSH-004-01
+          criteria: gate-arch 已注册，execute 调 xp-gate arch
+          test_type: unit
 
     # ============================================================
-    # REQ-SLIM-005: Phase 4 — Validation and CI
+    # REQ-DSH-005: xp-gate CLI fallback（优雅降级）
     # ============================================================
-    - id: REQ-SLIM-005
-      description: Create validation scripts and verify slimming results
-      priority: MUST
-      context: |
-        Create scripts/check-skill-size.sh for automated validation.
-        Manual verification of each Phase summary vs references/ content.
-        Integration tests for core scenarios.
-
+    - id: REQ-DSH-005
+      description: xp-gate CLI fallback（优雅降级）：优先全局 xp-gate，未命中返回清晰可操作提示（工具缺失→SKIP 语义，不抛错不崩），不做 vendored CLI 随包
+      priority: critical
       acceptance_criteria:
-        - id: AC-SLIM-005-01
-          given: scripts/check-skill-size.sh is created
-          when: Phase 4 completes
-          then: Script checks SKILL.md size (>30KB WARN, >35KB ERROR)
-        - id: AC-SLIM-005-02
-          given: SKILL.md has @references/ annotations
-          when: Script runs
-          then: All @references/ target files exist on disk
-        - id: AC-SLIM-005-03
-          given: 7 AGENTS.md mirrors exist
-          when: Script runs
-          then: All mirrors are byte-identical
+        - id: AC-DSH-005-01
+          criteria: command -v xp-gate 失败时返回优雅降级提示（含安装指引），不抛错不返回门禁失败
+          test_type: unit
 
     # ============================================================
-    # REQ-SLIM-006: On-demand loading protocol
+    # REQ-DSH-006: 12 技能随包集成
     # ============================================================
-    - id: REQ-SLIM-006
-      description: Implement on-demand loading protocol so Agent reads references/ files sequentially during phases
-      priority: MUST
-      context: |
-        Protocol from design §3.3:
-        1. SKILL.md loaded by runtime
-        2. Agent reads Phase N summary (3-5 lines)
-        3. Agent detects @see references/phase-N.md annotation
-        4. Agent reads references/phase-N.md for detailed instructions
-        5. Agent executes Phase
-        6. Next Phase → repeat 2-5
-
+    - id: REQ-DSH-006
+      description: 12 个 SKILL.md 技能随包经平台原生 bundledSkillDir（$DSH_BUNDLED_SKILL_DIR）集成，skill 工具可发现/加载
+      priority: high
       acceptance_criteria:
-        - id: AC-SLIM-006-01
-          given: SKILL.md loaded
-          when: Agent reads a Phase summary
-          then: Summary ends with @see references/phase-N.md annotation
-        - id: AC-SLIM-006-02
-          given: references/phase-N.md does not exist
-          when: Agent attempts on-demand load
-          then: Falls back to SKILL.md summary + generic defaults
+        - id: AC-DSH-006-01
+          criteria: 12 个 skills/*/SKILL.md frontmatter 满足 DSH 契约（name kebab-case + description 非空）
+          test_type: unit
 
-  # ============================================================
-  # Design Decisions
-  # ============================================================
+    # ============================================================
+    # REQ-DSH-007: 超时与协作式取消分离
+    # ============================================================
+    - id: REQ-DSH-007
+      description: 超时与协作式取消分离：execute 透传 timeoutMs + exec.signal；result.aborted→throw HarnessError(TOOL_ABORTED)，result.timedOut→render 标记不抛
+      priority: medium
+      acceptance_criteria:
+        - id: AC-DSH-007-01
+          criteria: result.aborted 时 execute throw 的错误 code === "ABORTED"（不悬挂）；result.timedOut 不抛、render 含超时标记
+          test_type: unit
+
+    # ============================================================
+    # REQ-DSH-008: 单测覆盖 + TDD
+    # ============================================================
+    - id: REQ-DSH-008
+      description: 单测覆盖三工具注册 + fallback + 取消/超时 + shq 转义；TDD（RED → GREEN → REFACTOR）
+      priority: high
+      acceptance_criteria:
+        - id: AC-DSH-008-01
+          criteria: npm test + npm run lint + npx tsc --noEmit 全绿，无既有测试回归
+          test_type: e2e
+
+    # ============================================================
+    # REQ-DSH-009: 命令注入防护
+    # ============================================================
+    - id: REQ-DSH-009
+      description: 命令注入防护：buildCommand() 纯函数对模型可控输入做 POSIX 单引号 shq() 转义，gates 用 enum 白名单
+      priority: critical
+      acceptance_criteria:
+        - id: AC-DSH-009-01
+          criteria: buildCommand 对含 $()/反引号/引号的 path 输出被单引号转义；非法 gates 值被白名单拒绝
+          test_type: unit
+
+    # ============================================================
+    # REQ-DSH-010: 打包契约
+    # ============================================================
+    - id: REQ-DSH-010
+      description: 打包契约：tsc 编译 src→lib，files 白名单，prepack，publishConfig.access=public，main/exports 指向编译产物
+      priority: critical
+      acceptance_criteria:
+        - id: AC-DSH-010-01
+          criteria: npm pack 产出含 lib/index.js + cordis.patch.yml + skills/；main 指向 lib/index.js；publishConfig.access=public
+          test_type: integration
+
   design_decisions:
-    - id: DD-SLIM-001
-      description: Keep YAML frontmatter as canonical, remove body Triggers/Scope/Params/Examples
-      rationale: Frontmatter already contains triggers, parameters, examples, scope. Body duplicates ~5KB.
-      alternatives_considered:
-        - "Keep both — redundant info inflating token count"
-        - "Remove frontmatter — breaks skill loader"
-
-    - id: DD-SLIM-002
-      description: Keep 3 usage examples (full-sprint, --stop-at, --resume-from)
-      rationale: 11 examples add ~2.5KB to every load. 3 covers 90% of use cases.
-      alternatives_considered:
-        - "Keep all 11 — useful but costly"
-        - "Keep 5 — marginal benefit over 3"
-
-    - id: DD-SLIM-003
-      description: Keep most comprehensive Anti-Patterns table (line 1222, 10 rows)
-      rationale: Line 1222 version has 10 rows vs 8 in others, covers more anti-patterns.
-      alternatives_considered:
-        - "Merge all 3 versions — creates 3rd version with 12 rows"
-
-    - id: DD-SLIM-004
-      description: Phase migration done in one batch per §4
-      rationale: Batch avoids mixed inline/reference inconsistency. Per-phase batches (Option B in design) prolong instability.
-
-    - id: DD-SLIM-005
-      description: "\"@references/\" paths relative to SKILL_DIR, not absolute"
-      rationale: SKILL_DIR varies by deployment (OpenCode, Claude Code, npm). Relative paths work everywhere.
-
-  # ============================================================
-  # Success Metrics
-  # ============================================================
-  success_metrics:
-    skill_md_size:
-      current_bytes: 76108
-      target_bytes: 28000
-      reduction_pct: 63
-    initial_load_tokens:
-      current: ~47428
-      target: ~38000
-      reduction_pct: 62
-    duplication:
-      current_kb: 12
-      target_kb: 0
-    inline_bash:
-      current_kb: 12
-      target_kb: 3
-    references_files:
-      current: 16
-      target: 19
-    verification_script:
-      exists: false
-      target: true
-
-  # ============================================================
-  # File Changes (by phase)
-  # ============================================================
-  file_changes:
-    - phase: "0"
-      changes:
-        - "references/phase-minus-1-isolate.md (new)"
-        - "SKILL.md (modified — fix References index)"
-        - "AGENTS.md (modified — fix STRUCTURE tree)"
-    - phase: "1"
-      changes:
-        - "SKILL.md (modified — deduplicate Anti-Patterns/Security/Output/body/examples)"
-    - phase: "2"
-      changes:
-        - "SKILL.md (modified — Phase instructions slimmed to summaries)"
-        - "references/orchestration-rules.md (new)"
-        - "references/phase-summary-format.md (new)"
-    - phase: "3"
-      changes:
-        - "SKILL.md (modified — bash → logic descriptions)"
-        - "references/orchestration-rules.md (modified — add bash commands)"
-    - phase: "4"
-      changes:
-        - "scripts/check-skill-size.sh (new)"
-
-  # ============================================================
-  # Configuration
-  # ============================================================
-  configuration:
-    skill_dir: ~/.config/opencode/skills/sprint-flow/
-    copy_script: scripts/copy-skills.sh
-    check_script: scripts/check-skill-size.sh
-    size_warn_kb: 30
-    size_error_kb: 35
+    - id: DD-001
+      decision: 走薄桥（方案 A）在 ctx.tools 注册三工具，而非独立 MCP server 或纯技能
+      rationale: 与 opencode 插件 1:1 映射、DSH 原生 API 直接支持、工作量最小；符合 RFC「薄桥而非重写」结论
+      alternatives_considered: ["技能-only（丢失确定性门禁价值）", "独立 MCP server（过度设计，需额外进程）"]
+    - id: DD-002
+      decision: fallback 采用「全局 xp-gate → 优雅降级提示」，不做 vendored CLI 随包
+      rationale: vendored CLI 过重、与 src/npm-package「零运行时依赖」冲突、且 pluginDir 解析不可靠；优雅降级对齐项目「工具缺失→SKIP 非 BLOCK」约定
+      alternatives_considered: ["随包打进 xp-gate CLI（过重+零依赖冲突，被 Delphi R1 否决）"]
+    - id: DD-003
+      decision: execute 内用 ctx.shell.run（注入 shell）并透传沙箱策略，不用 node:child_process 直连；buildCommand 纯函数做 shq() 转义
+      rationale: 获得协作式取消、超时、沙箱策略复用 + 防命令注入
+      alternatives_considered: ["node:child_process exec（无取消/超时/沙箱）", "双引号插值（注入风险，被 Delphi R1 否决）"]
+    - id: DD-004
+      decision: 12 个 skills 随发布包经平台原生 bundledSkillDir（$DSH_BUNDLED_SKILL_DIR）分发，不做 customSkillDirs/cp
+      rationale: dsh plugin add 后技能即可被 skill 工具自动发现，AC 不依赖手工操作
+      alternatives_considered: ["customSkillDirs/cp（靠用户手工，被 Delphi R1 否决）"]

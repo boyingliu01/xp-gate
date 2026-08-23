@@ -1,8 +1,3 @@
-/**
- * @test REQ-007 (超时与协作式取消分离)
- * @intent 验证 runXpGate 的取消/超时/退出码/sandbox denial 语义，以及 renderGateResult 的输出拼接
- * @covers AC-007
- */
 import { describe, it, expect } from "vitest"
 import type { ShellExecRequest, ShellRunResult } from "@deepseek-ai/dsh-shell"
 import { renderGateResult, runXpGate, type XpGateShell } from "./gate-runner.js"
@@ -85,11 +80,21 @@ describe("runXpGate", () => {
     expect(requests[0]?.signal).toBe(signal)
   })
 
-  it("throws an AbortError with code ABORTED when the call was cancelled", async () => {
+  /**
+   * @test REQ-DSH-007
+   * @intent 验证取消与超时分离：result.aborted 抛 code=ABORTED 的 AbortError（不悬挂），result.timedOut 仅渲染标记不抛错
+   * @covers AC-DSH-007-01
+   */
+  it("throws an AbortError (code ABORTED) only on cancellation, not on timeout", async () => {
     const { shell } = makeShell(result({ aborted: true, exitCode: null }))
     await expect(runXpGate(shell, new AbortController().signal, "cmd", "/w", 1000)).rejects.toMatchObject({
       name: "AbortError",
       code: "ABORTED",
     })
+    // timeout resolves (render marker) rather than throwing
+    const timeoutShell = makeShell(result({ timedOut: true, exitCode: null, stdout: { text: "", truncated: false } })).shell
+    await expect(runXpGate(timeoutShell, new AbortController().signal, "cmd", "/w", 1000)).resolves.toContain(
+      "[timed out after 1000ms]",
+    )
   })
 })

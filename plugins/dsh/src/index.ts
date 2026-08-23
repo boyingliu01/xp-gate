@@ -34,7 +34,7 @@ export function apply(ctx: Context, _config: unknown = {}): void {
       },
       timeoutMs: DEFAULT_TIMEOUT_MS,
       async execute(args, exec) {
-        const cwd = exec.agent?.session.header.cwd ?? process.cwd()
+        const cwd = exec.agent?.session?.header?.cwd ?? process.cwd()
         const target = resolveTarget(args.path, cwd)
         const command = buildCommand({ subcommand: "check", target, gates: args.gates })
         return runXpGate(shell, exec.signal, command, cwd, DEFAULT_TIMEOUT_MS)
@@ -60,7 +60,7 @@ export function apply(ctx: Context, _config: unknown = {}): void {
       },
       timeoutMs: DEFAULT_TIMEOUT_MS,
       async execute(args, exec) {
-        const cwd = exec.agent?.session.header.cwd ?? process.cwd()
+        const cwd = exec.agent?.session?.header?.cwd ?? process.cwd()
         const target = resolveTarget(args.path, cwd)
         const command = buildCommand({ subcommand: "principles", target })
         return runXpGate(shell, exec.signal, command, cwd, DEFAULT_TIMEOUT_MS)
@@ -85,7 +85,7 @@ export function apply(ctx: Context, _config: unknown = {}): void {
       },
       timeoutMs: DEFAULT_TIMEOUT_MS,
       async execute(args, exec) {
-        const cwd = exec.agent?.session.header.cwd ?? process.cwd()
+        const cwd = exec.agent?.session?.header?.cwd ?? process.cwd()
         const command = buildCommand({ subcommand: "arch", config: args.config })
         return runXpGate(shell, exec.signal, command, cwd, DEFAULT_TIMEOUT_MS)
       },
