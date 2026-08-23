@@ -1,8 +1,3 @@
-/**
- * @test REQ-009 (命令注入防护)
- * @intent 验证 buildCommand/shq 纯函数：POSIX 单引号转义防注入、gates 白名单、优雅降级 fallback、target 路径解析
- * @covers AC-003, AC-005, AC-009
- */
 import { describe, it, expect } from "vitest"
 import {
   FALLBACK_MESSAGE,
@@ -18,10 +13,15 @@ describe("shq (POSIX single-quote escaping)", () => {
     expect(shq("abc")).toBe("'abc'")
   })
 
-  it("escapes embedded single quotes with the '\"' quote-close idiom", () => {
+  it("escapes embedded single quotes with the quote-close idiom", () => {
     expect(shq("a'b")).toBe("'a'\\''b'")
   })
 
+  /**
+   * @test REQ-DSH-009
+   * @intent 验证 shq() 对命令替换/反引号等 shell 元字符做 POSIX 单引号转义，防止命令注入
+   * @covers AC-DSH-009-01
+   */
   it("neutralizes shell metacharacters by quoting them literally", () => {
     const payload = "$(touch /tmp/pwned); `id`"
     expect(shq(payload)).toBe("'$(touch /tmp/pwned); `id`'")
@@ -50,6 +50,12 @@ describe("buildCommand", () => {
     expect(cmd).toContain(shq(FALLBACK_MESSAGE))
   })
 
+  it("drops non-whitelisted gates before building the command", () => {
+    const cmd = buildCommand({ subcommand: "check", target: "src", gates: ["principles", "bogus$(id)"] })
+    expect(cmd).toContain("xp-gate check 'src' --gates 'principles'")
+    expect(cmd).not.toContain("bogus")
+  })
+
   it("escapes a hostile target path", () => {
     const cmd = buildCommand({ subcommand: "check", target: "a'b$(id)" })
     expect(cmd).toContain("xp-gate check 'a'\\''b$(id)'")
@@ -65,6 +71,11 @@ describe("buildCommand", () => {
     expect(buildCommand({ subcommand: "arch" })).toContain("xp-gate arch --config 'architecture.yaml'")
   })
 
+  /**
+   * @test REQ-DSH-005
+   * @intent 验证 xp-gate CLI 缺失时 buildCommand 走 else 分支输出优雅降级安装提示，而非抛错或返回门禁失败
+   * @covers AC-DSH-005-01
+   */
   it("emits the graceful-degradation fallback when xp-gate is absent", () => {
     const cmd = buildCommand({ subcommand: "check", target: "src" })
     expect(cmd).toContain("else printf")

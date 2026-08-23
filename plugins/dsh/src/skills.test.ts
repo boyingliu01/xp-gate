@@ -1,8 +1,3 @@
-/**
- * @test REQ-006 (技能打包契约)
- * @intent 验证 plugins/dsh/skills/ 随包技能（12 个 SKILL.md）frontmatter 满足 DSH 契约：name kebab-case + description 非空
- * @covers AC-006, REQ-006
- */
 import { describe, it, expect } from "vitest"
 import { readdirSync, readFileSync, existsSync } from "node:fs"
 import { join, resolve } from "node:path"
@@ -36,7 +31,7 @@ function readFrontmatter(file: string): Record<string, unknown> {
   return parse(m[1]) as Record<string, unknown>
 }
 
-describe("bundled skills (REQ-006)", () => {
+describe("bundled skills", () => {
   it("ships all 12 skills as directories", () => {
     expect(existsSync(SKILLS_DIR)).toBe(true)
     const dirs = readdirSync(SKILLS_DIR, { withFileTypes: true })
@@ -46,6 +41,11 @@ describe("bundled skills (REQ-006)", () => {
     expect(dirs).toEqual([...EXPECTED_SKILLS].sort())
   })
 
+  /**
+   * @test REQ-DSH-006
+   * @intent 验证随包 12 个 skills 目录里各 SKILL.md 的 frontmatter 满足 DSH 契约（name kebab-case + description 非空）
+   * @covers AC-DSH-006-01
+   */
   it("every SKILL.md satisfies the DSH frontmatter contract", () => {
     for (const name of EXPECTED_SKILLS) {
       const fm = readFrontmatter(join(SKILLS_DIR, name, "SKILL.md"))
