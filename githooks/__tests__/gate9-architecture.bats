@@ -3,16 +3,60 @@
 # TDD: Tests for Clean Architecture layer boundary validation
 
 setup() {
-  TEST_DIR="$(mktemp -d)"
+  TEST_DIR="$(mktemp -d '/tmp/xp gate9.XXXXXX')"
   export TEST_DIR
-  
+  export HOME="$TEST_DIR/home"
+  mkdir -p "$HOME" "$TEST_DIR/lib" "$TEST_DIR/adapters" "$TEST_DIR/bin"
   cp "${BATS_TEST_DIRNAME}/../pre-commit" "${TEST_DIR}/pre-commit"
+  cp "${BATS_TEST_DIRNAME}/../adapter-common.sh" "${TEST_DIR}/adapter-common.sh"
+  cp "${BATS_TEST_DIRNAME}/../lib/now-ms.sh" "${TEST_DIR}/lib/now-ms.sh"
+  cp "${BATS_TEST_DIRNAME}/../adapters/typescript.sh" "${TEST_DIR}/adapters/typescript.sh"
   chmod +x "${TEST_DIR}/pre-commit"
+  cat > "$TEST_DIR/bin/npx" <<'EOF'
+#!/usr/bin/env bash
+case "$*" in
+  *"vitest --version"*) exit 0 ;;
+  *"vitest run --coverage"*) mkdir -p coverage; printf '{"total":{"lines":{"pct":100}}}' > coverage/coverage-summary.json; exit 0 ;;
+  *"vitest run"*|*"tsc"*|*"jscpd"*|*"tsx"*) exit 0 ;;
+esac
+exit 1
+EOF
+  chmod +x "$TEST_DIR/bin/npx"
+  export PATH="$TEST_DIR/bin:/usr/bin:/bin"
   
   cd "$TEST_DIR"
   git init --quiet
   git config user.email "test@test.com"
   git config user.name "Test User"
+  cat >> .git/info/exclude <<'EOF'
+pre-commit
+adapter-common.sh
+lib/
+adapters/
+bin/
+EOF
+}
+
+@test "nested TypeScript project runs root archlint baseline from repository root" {
+  mkdir -p "$TEST_DIR/node_modules/.bin" "$TEST_DIR/apps/nested/src"
+  cat > "$TEST_DIR/node_modules/.bin/archlint" <<'EOF'
+#!/usr/bin/env bash
+printf '%s\n' "$PWD" > "$ARCHLINT_LOG.cwd"
+printf '%s\n' "$@" > "$ARCHLINT_LOG.args"
+exit 0
+EOF
+  chmod +x "$TEST_DIR/node_modules/.bin/archlint"
+  echo '{}' > "$TEST_DIR/.archlint.yaml"
+  echo '{}' > "$TEST_DIR/.architecture-baseline.json"
+  echo '{"name":"nested","version":"1.0.0"}' > "$TEST_DIR/apps/nested/package.json"
+  echo '{}' > "$TEST_DIR/apps/nested/tsconfig.json"
+  echo '// @no-test-required: Gate 6 fixture' > "$TEST_DIR/apps/nested/src/index.ts"
+  git add .archlint.yaml .architecture-baseline.json apps/nested/package.json apps/nested/tsconfig.json apps/nested/src/index.ts
+  export ARCHLINT_LOG="$TEST_DIR/archlint"
+  run ./pre-commit
+  [ -f "$ARCHLINT_LOG.cwd" ]
+  [ "$(cat "$ARCHLINT_LOG.cwd")" = "$TEST_DIR" ]
+  [ "$(tr '\n' ' ' < "$ARCHLINT_LOG.args")" = "diff .architecture-baseline.json --fail-on high " ]
 }
 
 teardown() {
@@ -23,7 +67,7 @@ teardown() {
   run grep -F 'if [ -x "$PROJECT_ROOT/node_modules/.bin/archlint" ]; then' "$BATS_TEST_DIRNAME/../pre-commit"
   [ "$status" -eq 0 ]
 
-  run grep -F 'ARCHLINT_CMD="$PROJECT_ROOT/node_modules/.bin/archlint"' "$BATS_TEST_DIRNAME/../pre-commit"
+  run grep -F 'ARCHLINT_BIN="$PROJECT_ROOT/node_modules/.bin/archlint"' "$BATS_TEST_DIRNAME/../pre-commit"
   [ "$status" -eq 0 ]
 }
 
@@ -43,7 +87,7 @@ layers:
 EOF
 
   mkdir -p src/domain
-  touch src/domain/entity.ts
+  echo '// @no-test-required: architecture fixture' > src/domain/entity.ts
   
   git add .
   
@@ -61,7 +105,7 @@ EOF
 EOF
 
   mkdir -p src/domain
-  touch src/domain/entity.ts
+  echo '// @no-test-required: architecture fixture' > src/domain/entity.ts
   
   git add .
   
@@ -329,6 +373,9 @@ EOF
   "version": "1.0.0"
 }
 EOF
+
+  mkdir -p src
+  echo '// @no-test-required: architecture fixture' > src/index.ts
 
   git add .
   

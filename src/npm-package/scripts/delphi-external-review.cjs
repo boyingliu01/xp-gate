@@ -17,7 +17,7 @@ function checkNodeVersion() {
 
 // ── Argument parsing ───────────────────────────────────────────────────
 const VALID_EXPERTS = ['architecture', 'technical', 'feasibility'];
-const VALID_MODES = ['design', 'code-walkthrough'];
+const VALID_MODES = ['design', 'code-walkthrough', 'requirements'];
 
 function parseArgs(argv) {
   const args = {};
@@ -109,28 +109,104 @@ function readConfig(configPath, profileOverride) {
     }
   }
 
+  const experts = Object.fromEntries(Object.entries(profile.experts || {}).map(([role, expert]) => [
+    role,
+    {
+      ...expert,
+      model: typeof expert.model === 'string' ? expert.model.trim() : expert.model,
+    },
+  ]));
+  const warnings = [];
+  if (raw.consensus?.distinct_models_required === false) {
+    warnings.push('distinct_models_required_forced');
+  }
+  const configuredThreshold = raw.consensus?.threshold_percent;
+  const thresholdPercent = typeof configuredThreshold === 'number' && Number.isFinite(configuredThreshold)
+    ? Math.max(90, configuredThreshold)
+    : 90;
+  if (configuredThreshold !== undefined && configuredThreshold !== thresholdPercent) {
+    warnings.push('threshold_percent_clamped');
+  }
+  const configuredRounds = raw.consensus?.max_review_rounds;
+  const maxReviewRounds = typeof configuredRounds === 'number' && Number.isFinite(configuredRounds)
+    ? Math.min(5, Math.max(1, Math.trunc(configuredRounds)))
+    : 5;
+  if (configuredRounds !== undefined && configuredRounds !== maxReviewRounds) {
+    warnings.push('max_review_rounds_clamped');
+  }
+
   return {
     active_profile: profileName,
     providers,
-    experts: profile.experts || {},
-    consensus: raw.consensus || { threshold_percent: 90, max_review_rounds: 5 },
+    experts,
+    consensus: {
+      ...(raw.consensus || {}),
+      threshold_percent: thresholdPercent,
+      max_review_rounds: maxReviewRounds,
+      distinct_models_required: true,
+    },
+    warnings,
   };
 }
 
-// ── Cross-provider validation ──────────────────────────────────────────
-function validateCrossProvider(experts, providers) {
-  const nonLocalExperts = Object.values(experts).filter(e => e.provider !== 'local');
+// ── Distinct-model validation ───────────────────────────────────────────
+const REQUIRED_EXPERT_ROLES = ['architecture', 'technical', 'feasibility'];
 
-  if (nonLocalExperts.length === 0) {
-    return { valid: true, warning: 'All experts are "local" — no cross-model diversity. Consider configuring external APIs.' };
+function validateDistinctModels(experts, providers, consensus = {}) {
+  const expertMap = experts && typeof experts === 'object' ? experts : {};
+  const providerMap = providers && typeof providers === 'object' ? providers : {};
+  const expertRoles = Object.keys(expertMap);
+  const normalizedModels = [];
+
+  for (const role of REQUIRED_EXPERT_ROLES) {
+    const expert = expertRoles.includes(role) ? expertMap[role] : undefined;
+    if (!expert) {
+      return { valid: false, reason: `Missing required expert role: ${role}.` };
+    }
+    if (typeof expert.model !== 'string' || expert.model.trim() === '') {
+      return { valid: false, reason: `Expert ${role} must define a non-empty model.` };
+    }
+    normalizedModels.push({ role, model: expert.model.trim() });
   }
 
-  const uniqueProviders = new Set(nonLocalExperts.map(e => e.provider));
+  const unexpectedRole = expertRoles.find(role => !REQUIRED_EXPERT_ROLES.includes(role));
+  if (unexpectedRole) {
+    return { valid: false, reason: `Unsupported expert role: ${unexpectedRole}.` };
+  }
 
-  if (uniqueProviders.size < 2 && nonLocalExperts.length >= 2) {
+  const seen = new Map();
+  for (const assignment of normalizedModels) {
+    const previousRole = seen.get(assignment.model);
+    if (previousRole) {
+      return {
+        valid: false,
+        reason: `duplicate model "${assignment.model}" assigned to ${previousRole} and ${assignment.role}.`,
+      };
+    }
+    seen.set(assignment.model, assignment.role);
+  }
+
+  for (const role of REQUIRED_EXPERT_ROLES) {
+    const expert = expertMap[role];
+    if (typeof expert.provider !== 'string' || expert.provider.trim() === '' || expert.provider === 'local') {
+      return { valid: false, reason: `Expert ${role} must define a non-local callable provider.` };
+    }
+    const provider = providerMap[expert.provider];
+    if (!provider || typeof provider !== 'object' || Array.isArray(provider)) {
+      return { valid: false, reason: `Expert ${role} provider configuration must be an object.` };
+    }
+    if (typeof provider.base_url !== 'string' || provider.base_url.trim() === '') {
+      return { valid: false, reason: `Expert ${role} provider must define a non-empty base_url.` };
+    }
+    if (typeof provider.api_key !== 'string' || provider.api_key.trim() === '') {
+      return { valid: false, reason: `Expert ${role} provider must define a non-empty api_key.` };
+    }
+  }
+
+  if (consensus.cross_provider_required === true) {
     return {
-      valid: false,
-      reason: `All ${nonLocalExperts.length} non-local experts use the same provider. At least 2 different providers required for cross-model diversity.`,
+      valid: true,
+      warning: 'cross_provider_required_ignored',
     };
   }
 
@@ -206,8 +282,15 @@ const SYSTEM_PROMPTS = {
 输出要求：返回结构化 JSON，包含 verdict (APPROVED/REQUEST_CHANGES/REJECTED)、confidence (1-10)、critical_issues、major_concerns、minor_concerns、summary。`,
 };
 
-function buildSystemPrompt(role) {
-  return SYSTEM_PROMPTS[role] || SYSTEM_PROMPTS.architecture;
+const MODE_FOCUS_PROMPTS = {
+  design: '',
+  'code-walkthrough': '\n\n本次评审聚焦已实现代码的正确性、风险和可验证结果。',
+  requirements: '\n\n本次评审聚焦需求陈述的完整性、一致性、可验收性和约束清晰度。',
+};
+
+function buildSystemPrompt(role, mode = 'design') {
+  const rolePrompt = SYSTEM_PROMPTS[role] || SYSTEM_PROMPTS.architecture;
+  return `${rolePrompt}${MODE_FOCUS_PROMPTS[mode] || ''}`;
 }
 
 // ── User prompt construction ───────────────────────────────────────────
@@ -233,17 +316,8 @@ function resolveInputContent(args) {
   return args.input || '';
 }
 
-// ── Local fallback ─────────────────────────────────────────────────────
-function resolveLocalFallback(expertRole) {
-  return {
-    fallback: true,
-    expert_role: expertRole,
-    reason: 'local',
-  };
-}
-
 // ── API call ───────────────────────────────────────────────────────────
-async function callModelAPI(providerConfig, model, systemPrompt, userPrompt) {
+async function callModelAPI(providerConfig, model, systemPrompt, userPrompt, options = {}) {
   const url = `${providerConfig.base_url.replace(/\/$/, '')}/chat/completions`;
 
   const body = {
@@ -256,8 +330,10 @@ async function callModelAPI(providerConfig, model, systemPrompt, userPrompt) {
     response_format: { type: 'json_object' },
   };
 
+  const timeoutMs = options.timeoutMs ?? 30000;
   const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), 30000);
+  const timeout = setTimeout(() => controller.abort(), timeoutMs);
+  let responseReceived = false;
 
   try {
     const response = await fetch(url, {
@@ -269,8 +345,7 @@ async function callModelAPI(providerConfig, model, systemPrompt, userPrompt) {
       body: JSON.stringify(body),
       signal: controller.signal,
     });
-
-    clearTimeout(timeout);
+    responseReceived = true;
 
     if (response.status === 401 || response.status === 403) {
       return { error: true, message: `Authentication failed (${response.status}). Check API key in .delphi-config.json.` };
@@ -285,24 +360,85 @@ async function callModelAPI(providerConfig, model, systemPrompt, userPrompt) {
     }
 
     if (!response.ok) {
-      const text = await response.text();
-      return { error: true, message: `API error (${response.status}): ${text}` };
+      return { error: true, message: `API request failed (${response.status}). Provider response was not included.` };
     }
 
     const data = await response.json();
-    const content = data.choices?.[0]?.message?.content;
-    if (!content) {
-      return { error: true, message: 'Empty response from model.' };
+    if (!isPlainObject(data) || !Array.isArray(data.choices)) {
+      return { error: true, message: 'Invalid response from model.' };
+    }
+    const firstChoice = data.choices[0];
+    const message = isPlainObject(firstChoice) ? firstChoice.message : null;
+    const content = isPlainObject(message) ? message.content : null;
+    if (typeof content !== 'string' || content.trim() === '') {
+      return { error: true, message: 'Invalid response from model.' };
     }
 
-    return { success: true, content };
+    return {
+      success: true,
+      content: content.trim(),
+      resolved_model: typeof data.model === 'string' && data.model.trim() !== '' ? data.model.trim() : null,
+    };
   } catch (err) {
-    clearTimeout(timeout);
-    if (err.name === 'AbortError') {
-      return { error: true, retryable: true, message: 'Request timed out (30s).' };
+    if (err instanceof Error && err.name === 'AbortError') {
+      return { error: true, retryable: true, message: `Request timed out (${timeoutMs}ms).` };
     }
-    return { error: true, message: `Network error: ${err.message}` };
+    if (responseReceived) {
+      return { error: true, message: 'Invalid response from model.' };
+    }
+    return { error: true, message: 'Network error.' };
+  } finally {
+    clearTimeout(timeout);
   }
+}
+
+function isPlainObject(value) {
+  if (value === null || typeof value !== 'object' || Array.isArray(value)) return false;
+  const prototype = Object.getPrototypeOf(value);
+  return prototype === Object.prototype || prototype === null;
+}
+
+function parseExpertVerdict(value) {
+  if (!isPlainObject(value)) return { valid: false, message: 'Invalid expert verdict.' };
+  const verdicts = ['APPROVED', 'REQUEST_CHANGES', 'REJECTED'];
+  if (!verdicts.includes(value.verdict)) return { valid: false, message: 'Invalid expert verdict.' };
+  if (!Number.isFinite(value.confidence) || value.confidence < 1 || value.confidence > 10) {
+    return { valid: false, message: 'Invalid expert verdict.' };
+  }
+  for (const field of ['critical_issues', 'major_concerns', 'minor_concerns']) {
+    if (!Array.isArray(value[field]) || !value[field].every(item => typeof item === 'string')) {
+      return { valid: false, message: 'Invalid expert verdict.' };
+    }
+  }
+  if (typeof value.summary !== 'string') return { valid: false, message: 'Invalid expert verdict.' };
+  return {
+    valid: true,
+    verdict: {
+      verdict: value.verdict,
+      confidence: value.confidence,
+      critical_issues: value.critical_issues,
+      major_concerns: value.major_concerns,
+      minor_concerns: value.minor_concerns,
+      summary: value.summary,
+    },
+  };
+}
+
+function buildReviewOutput(verdict, args, provenance) {
+  const parsed = parseExpertVerdict(verdict);
+  const output = {
+    expert_id: { architecture: 'A', technical: 'B', feasibility: 'C' }[args.expert],
+    expert_role: args.expert,
+    model_used: `${provenance.provider}/${provenance.requested_model}`,
+    requested_model: provenance.requested_model,
+    resolved_model: provenance.resolved_model,
+    round: args.round,
+    mode: args.mode,
+  };
+  if (!parsed.valid) {
+    return { ...output, result_type: 'delphi_expert_error', error: true, message: parsed.message };
+  }
+  return { ...parsed.verdict, ...output, result_type: 'delphi_expert_result' };
 }
 
 // ── Retry logic ────────────────────────────────────────────────────────
@@ -331,28 +467,24 @@ async function main() {
   const args = parseArgs(process.argv.slice(2));
   const config = readConfig(args.config, args.profile);
 
-  // Get expert config
-  const expertConfig = config.experts[args.expert];
-  if (!expertConfig) {
-    console.error(`[delphi-review] ERROR: Expert "${args.expert}" not found in config.`);
-    process.exit(1);
-  }
-
-  // Handle local fallback
-  if (expertConfig.provider === 'local') {
-    const fallback = resolveLocalFallback(args.expert);
-    console.log(JSON.stringify(fallback));
-    return;
-  }
-
-  // Validate cross-provider
-  const validation = validateCrossProvider(config.experts, config.providers);
+  // Validate the complete expert map before fallback or provider lookup.
+  const validation = validateDistinctModels(config.experts, config.providers, config.consensus);
   if (!validation.valid) {
     console.error(`[delphi-review] ERROR: ${validation.reason}`);
     process.exit(1);
   }
   if (validation.warning) {
     console.error(`[delphi-review] WARNING: ${validation.warning}`);
+  }
+  for (const warning of config.warnings) {
+    console.error(`[delphi-review] WARNING: ${warning}`);
+  }
+
+  // Get expert config
+  const expertConfig = config.experts[args.expert];
+  if (!expertConfig) {
+    console.error(`[delphi-review] ERROR: Expert "${args.expert}" not found in config.`);
+    process.exit(1);
   }
 
   // Get provider config
@@ -372,7 +504,7 @@ async function main() {
   }
 
   // Build prompts
-  const systemPrompt = buildSystemPrompt(args.expert);
+  const systemPrompt = buildSystemPrompt(args.expert, args.mode);
   const userPrompt = buildUserPrompt(reviewContent, otherExpertsContent, args.round);
 
   // Call API with retry
@@ -397,16 +529,14 @@ async function main() {
   }
 
   // Enrich output
-  const output = {
-    ...verdict,
-    expert_id: { architecture: 'A', technical: 'B', feasibility: 'C' }[args.expert],
-    expert_role: args.expert,
-    model_used: `${expertConfig.provider}/${expertConfig.model}`,
-    round: args.round,
-    mode: args.mode,
-  };
+  const output = buildReviewOutput(verdict, args, {
+    provider: expertConfig.provider,
+    requested_model: expertConfig.model,
+    resolved_model: result.resolved_model,
+  });
 
   console.log(JSON.stringify(output, null, 2));
+  if (output.error) process.exit(1);
 }
 
 // ── Module exports (for testing) ───────────────────────────────────────
@@ -414,15 +544,16 @@ if (require.main !== module) {
   module.exports = {
     parseArgs,
     readConfig,
-    validateCrossProvider,
+    validateDistinctModels,
     extractJsonFromResponse,
     buildSystemPrompt,
     buildUserPrompt,
     resolveInputContent,
-    resolveLocalFallback,
     checkNodeVersion,
     callModelAPI,
     callWithRetry,
+    parseExpertVerdict,
+    buildReviewOutput,
   };
 } else {
   main().catch(err => {

@@ -45,7 +45,10 @@ const PHASE_NAMES = {
 const EVIDENCE_FILES = {
   2: {
     path: '.sprint-state/phase-outputs/requirements-reviewed.json',
-    requiredFields: ['verdict', 'requirements_hash'],
+    requiredFields: [
+      'verdict', 'requirements_statement', 'timestamp', 'consensus_ratio',
+      'expert_verdicts', 'head_commit', 'requirements_hash',
+    ],
     blockingCheck: (data) => data.verdict === 'APPROVED',
     blockingMessage: 'Requirements review verdict is not APPROVED',
   },
@@ -75,9 +78,9 @@ function createRepositoryGitEnv() {
 
 /**
  * Get current HEAD commit hash from a project directory.
- * Returns 'unknown' if not in a git repo.
+ * Returns null if HEAD cannot be resolved.
  * @param {string} projectDir
- * @returns {string}
+ * @returns {string | null}
  */
 function getCurrentHeadCommit(projectDir) {
   try {
@@ -88,8 +91,48 @@ function getCurrentHeadCommit(projectDir) {
       stdio: ['pipe', 'pipe', 'pipe'],
     }).trim();
   } catch {
-    return 'unknown';
+    return null;
   }
+}
+
+function validateRequirementsExpertEvidence(data) {
+  const validationErrors = [];
+  if (!Array.isArray(data.expert_verdicts) || data.expert_verdicts.length !== 3) {
+    validationErrors.push('expert_verdicts must contain exactly 3 expert results');
+    return validationErrors;
+  }
+
+  const expectedRoles = new Set(['architecture', 'technical', 'feasibility']);
+  const roles = data.expert_verdicts.map(expert => expert?.role);
+  if (roles.some(role => !expectedRoles.has(role)) || new Set(roles).size !== expectedRoles.size) {
+    validationErrors.push('expert_verdicts roles must be exactly architecture, technical, and feasibility');
+  }
+  if (data.expert_verdicts.some(expert => expert?.verdict !== 'APPROVED')) {
+    validationErrors.push('every expert verdict must be APPROVED');
+  }
+  if (data.expert_verdicts.some(expert => expert?.result_type !== 'delphi_expert_result')) {
+    validationErrors.push('every expert result_type must be delphi_expert_result');
+  }
+  if (data.expert_verdicts.some(expert =>
+    (expert?.error !== undefined && expert.error !== false && expert.error !== null)
+    || (expert?.fallback !== undefined && expert.fallback !== false && expert.fallback !== null)
+  )) {
+    validationErrors.push('expert results must not contain an error or fallback marker');
+  }
+
+  const requestedModels = data.expert_verdicts.map(expert =>
+    typeof expert?.requested_model === 'string' ? expert.requested_model.trim() : ''
+  );
+  if (requestedModels.some(model => model.length === 0)) {
+    validationErrors.push('every requested_model must be a non-empty trimmed string');
+  } else if (new Set(requestedModels).size !== requestedModels.length) {
+    validationErrors.push('requested_model values must be distinct after trimming');
+  }
+
+  if (!Number.isFinite(data.consensus_ratio) || data.consensus_ratio < 0.9 || data.consensus_ratio > 1) {
+    validationErrors.push('consensus_ratio must be a finite number from 0.90 through 1');
+  }
+  return validationErrors;
 }
 
 /**
@@ -100,6 +143,66 @@ function getCurrentHeadCommit(projectDir) {
 function computeFileHash(filePath) {
   const content = fs.readFileSync(filePath, 'utf8');
   return crypto.createHash('sha256').update(content, 'utf8').digest('hex');
+}
+
+function parseEvidenceDate(timestamp) {
+  if (typeof timestamp !== 'string' || !/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,3})?Z$/.test(timestamp)) {
+    return null;
+  }
+  const parsed = new Date(timestamp);
+  if (!Number.isFinite(parsed.getTime()) || parsed.toISOString().slice(0, 10) !== timestamp.slice(0, 10)) {
+    return null;
+  }
+  return timestamp.slice(0, 10);
+}
+
+function readRequirementsContext(data, projectDir) {
+  const contextFile = data.context_file_used;
+  if (contextFile === null || contextFile === undefined || contextFile === '') {
+    return { content: '' };
+  }
+  if (typeof contextFile !== 'string' || path.isAbsolute(contextFile)) {
+    return { error: 'context_file_used must be a safe project-relative regular file path' };
+  }
+
+  const projectRoot = fs.realpathSync(projectDir);
+  const candidatePath = path.resolve(projectRoot, contextFile);
+  const relativeCandidate = path.relative(projectRoot, candidatePath);
+  if (relativeCandidate.startsWith('..') || path.isAbsolute(relativeCandidate) || !fs.existsSync(candidatePath)) {
+    return { error: 'context_file_used must be a safe project-relative regular file path' };
+  }
+
+  const realContextPath = fs.realpathSync(candidatePath);
+  const relativeRealPath = path.relative(projectRoot, realContextPath);
+  if (relativeRealPath.startsWith('..') || path.isAbsolute(relativeRealPath) || !fs.statSync(realContextPath).isFile()) {
+    return { error: 'context_file_used must be a safe project-relative regular file path' };
+  }
+  return { content: fs.readFileSync(realContextPath, 'utf8') };
+}
+
+function computeRequirementsHash(data, projectDir) {
+  if (typeof data.requirements_statement !== 'string') {
+    return { error: 'requirements_statement must be a string' };
+  }
+  const evidenceDate = parseEvidenceDate(data.timestamp);
+  if (evidenceDate === null) {
+    return { error: 'timestamp must be a valid UTC ISO-8601 timestamp' };
+  }
+
+  let context;
+  try {
+    context = readRequirementsContext(data, projectDir);
+  } catch {
+    return { error: 'context_file_used must be a safe project-relative regular file path' };
+  }
+  if (context.error) {
+    return context;
+  }
+  return {
+    hash: crypto.createHash('sha256')
+      .update(`${data.requirements_statement}${context.content}${evidenceDate}`, 'utf8')
+      .digest('hex'),
+  };
 }
 
 /**
@@ -166,6 +269,15 @@ function validateEvidence(phase, projectDir) {
     return { ok: false, errors, warnings };
   }
 
+  if (data === null || typeof data !== 'object' || Array.isArray(data)) {
+    const msg = `${fileName} must contain a JSON object`;
+    if (isLegacySprint) {
+      warnings.push(`WARNING: ${msg}. Upgrade sprint with evidence_schema_version >= 2 to enforce.`);
+      return { ok: true, errors: [], warnings };
+    }
+    return { ok: false, errors: [msg], warnings };
+  }
+
   // Check required fields
   for (const field of evidenceConfig.requiredFields) {
     if (!(field in data)) {
@@ -185,7 +297,7 @@ function validateEvidence(phase, projectDir) {
 
   // Run blocking check
   if (!evidenceConfig.blockingCheck(data)) {
-    const msg = `${fileName}: ${evidenceConfig.blockingMessage} (got: ${JSON.stringify(data[evidenceConfig.requiredFields[0]])})`;
+    const msg = `${fileName}: ${evidenceConfig.blockingMessage}`;
     if (isLegacySprint) {
       warnings.push(`WARNING: ${msg}. Upgrade sprint with evidence_schema_version >= 2 to enforce.`);
       return { ok: true, errors: [], warnings };
@@ -195,10 +307,16 @@ function validateEvidence(phase, projectDir) {
   }
 
   // Phase-specific anti-staleness checks
-  if (phase === 4) {
-    // head_commit check
+  if (phase === 2 || phase === 4) {
     const currentHead = getCurrentHeadCommit(projectDir);
-    if (data.head_commit !== currentHead) {
+    if (currentHead === null) {
+      const msg = `${fileName}: unable to resolve current Git HEAD; evidence identity cannot be verified`;
+      if (isLegacySprint) {
+        warnings.push(`WARNING: ${msg}. Upgrade sprint with evidence_schema_version >= 2 to enforce.`);
+      } else {
+        errors.push(msg);
+      }
+    } else if (data.head_commit !== currentHead) {
       const msg = `${fileName}: head_commit mismatch — report has "${data.head_commit}", current HEAD is "${currentHead}"`;
       if (isLegacySprint) {
         warnings.push(`WARNING: ${msg}. Upgrade sprint with evidence_schema_version >= 2 to enforce.`);
@@ -206,7 +324,9 @@ function validateEvidence(phase, projectDir) {
         errors.push(msg);
       }
     }
+  }
 
+  if (phase === 4) {
     // spec_hash check (only if specification.yaml exists)
     const specPath = path.join(projectDir, 'specification.yaml');
     if (fs.existsSync(specPath)) {
@@ -222,10 +342,42 @@ function validateEvidence(phase, projectDir) {
     }
   }
 
-  // Phase 2: requirements_hash existence check (full verification in v0.18.0)
   if (phase === 2) {
-    if (typeof data.requirements_hash !== 'string' || data.requirements_hash.length === 0) {
-      const msg = `${fileName}: requirements_hash must be a non-empty string`;
+    if (typeof data.requirements_hash !== 'string' || !/^[a-fA-F0-9]{64}$/.test(data.requirements_hash)) {
+      const msg = `${fileName}: requirements_hash must be a 64-character hexadecimal SHA-256 digest`;
+      if (isLegacySprint) {
+        warnings.push(`WARNING: ${msg}. Upgrade sprint with evidence_schema_version >= 2 to enforce.`);
+      } else {
+        errors.push(msg);
+      }
+    } else {
+      const computedHash = computeRequirementsHash(data, projectDir);
+      const hashError = computedHash.error || (
+        data.requirements_hash.toLowerCase() !== computedHash.hash
+          ? 'requirements_hash mismatch; regenerate the requirements review from current inputs'
+          : null
+      );
+      if (hashError) {
+        const msg = `${fileName}: ${hashError}`;
+        if (isLegacySprint) {
+          warnings.push(`WARNING: ${msg}. Upgrade sprint with evidence_schema_version >= 2 to enforce.`);
+        } else {
+          errors.push(msg);
+        }
+      }
+    }
+    for (const validationError of validateRequirementsExpertEvidence(data)) {
+      const msg = `${fileName}: ${validationError}`;
+      if (isLegacySprint) {
+        warnings.push(`WARNING: ${msg}. Upgrade sprint with evidence_schema_version >= 2 to enforce.`);
+      } else {
+        errors.push(msg);
+      }
+    }
+
+    const currentHead = getCurrentHeadCommit(projectDir);
+    if (data.head_commit !== currentHead) {
+      const msg = `${fileName}: head_commit mismatch — review has "${data.head_commit}", current HEAD is "${currentHead}"; regenerate the requirements review for the current commit`;
       if (isLegacySprint) {
         warnings.push(`WARNING: ${msg}. Upgrade sprint with evidence_schema_version >= 2 to enforce.`);
       } else {
@@ -257,7 +409,7 @@ function logEvidenceSkip(projectDir, phase, reason) {
     event: 'evidence_skipped',
     phase,
     reason,
-    commit_hash: getCurrentHeadCommit(projectDir),
+    commit_hash: getCurrentHeadCommit(projectDir) ?? 'unknown',
   };
   fs.appendFileSync(path.join(auditDir, 'audit.jsonl'), JSON.stringify(entry) + '\n', 'utf8');
 }

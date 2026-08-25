@@ -39,12 +39,14 @@ describe('updateHooks', () => {
   /** Helper: create a fake package structure under tmpPackage */
   function createPackageSource(overrides = {}) {
     const hooksDir = path.join(tmpPackage, 'hooks');
+    const hookLibDir = path.join(hooksDir, 'lib');
     const adaptersDir = path.join(tmpPackage, 'adapters');
-    fs.mkdirSync(hooksDir, { recursive: true });
+    fs.mkdirSync(hookLibDir, { recursive: true });
     fs.mkdirSync(adaptersDir, { recursive: true });
 
     fs.writeFileSync(path.join(hooksDir, 'pre-commit'), overrides['hooks/pre-commit'] || '#!/bin/bash\necho "hook-v2"');
     fs.writeFileSync(path.join(hooksDir, 'pre-push'), overrides['hooks/pre-push'] || '#!/bin/bash\necho "push-v2"');
+    fs.writeFileSync(path.join(hookLibDir, 'validate-code-walkthrough.cjs'), overrides['hooks/lib/validate-code-walkthrough.cjs'] || 'module.exports = "validator-v2";');
     fs.writeFileSync(path.join(tmpPackage, 'adapter-common.sh'), overrides['adapter-common.sh'] || '#!/bin/bash\necho "adapter-common-v2"');
     fs.writeFileSync(path.join(adaptersDir, 'typescript.sh'), overrides['adapters/typescript.sh'] || '#!/bin/bash\necho "ts-v2"');
     fs.writeFileSync(path.join(adaptersDir, 'python.sh'), overrides['adapters/python.sh'] || '#!/bin/bash\necho "py-v2"');
@@ -72,6 +74,16 @@ describe('updateHooks', () => {
 
       expect(fs.readFileSync(path.join(dest, 'pre-commit'), 'utf8')).toContain('hook-v2');
       expect(fs.readFileSync(path.join(dest, 'pre-push'), 'utf8')).toContain('push-v2');
+    });
+
+    it('installs hook libraries beside pre-push', () => {
+      createPackageSource();
+      const mod = getModule();
+      const dest = path.join(tmpProject, '.git', 'hooks');
+
+      mod.copyHooks(tmpPackage, dest, false, true);
+
+      expect(fs.readFileSync(path.join(dest, 'lib', 'validate-code-walkthrough.cjs'), 'utf8')).toContain('validator-v2');
     });
 
     it('creates destination directory if it does not exist', () => {
@@ -471,6 +483,8 @@ describe('updateHooks', () => {
       expect(logSpy).toHaveBeenCalledWith('Dry run: yes (no files will be modified)');
       expect(logSpy).toHaveBeenCalledWith('  would update: pre-commit');
       expect(logSpy).toHaveBeenCalledWith('  would update: pre-push');
+      expect(logSpy).toHaveBeenCalledWith('  would update: lib/validate-code-walkthrough.cjs');
+      expect(fs.existsSync(path.join(gitDir, 'hooks', 'lib', 'validate-code-walkthrough.cjs'))).toBe(false);
 
       mod.getPackageRoot = origGetPackageRoot;
     });
@@ -494,6 +508,7 @@ describe('updateHooks', () => {
 
       expect(logSpy).toHaveBeenCalledWith('Updating hooks...');
       expect(logSpy).not.toHaveBeenCalledWith('Updating adapters...');
+      expect(fs.readFileSync(path.join(gitDir, 'hooks', 'lib', 'validate-code-walkthrough.cjs'), 'utf8')).toContain('validator-v2');
 
       mod.getPackageRoot = origGetPackageRoot;
     });

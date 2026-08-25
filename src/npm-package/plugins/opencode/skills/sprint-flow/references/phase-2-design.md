@@ -59,13 +59,15 @@ grill-with-docs 执行：
 grill 访谈达成共享理解后（或 CONTEXT.md 快速路径下读取已有上下文后）、设计文档生成前，调用需求评审：
 
 ```
-npx xp-gate delphi-review --mode requirements
+/delphi-review --mode requirements
 ```
 
-**评审配置**（轻量）：
+这是 Agent skill 调用，不是 `xp-gate` npm CLI 子命令。Skill orchestrator 必须分别调用 per-expert runner 三次，每次保留 `--expert <architecture|technical|feasibility> --mode requirements`，再聚合三份结果；禁止用一个 runner 进程执行全部模型。
+
+**评审配置**：
 - 复用现有 3 专家（architecture/feasibility/technical），`--mode requirements` 切换评审焦点提示词
-- 轻量配置：2 专家、1 轮
-- lightweight sprint（`change_type == "修改已存在代码"`）：跳过 R1，需求评审合并入 R2
+- 所有路径固定使用 3 专家，Round 1 独立执行并验证 distinct model IDs，最多 5 轮
+- force level 只调整上下文深度与迭代预算；所有路径都执行 R1，不减少专家数
 
 **评审焦点**：
 - 用户场景遗漏
@@ -81,8 +83,16 @@ npx xp-gate delphi-review --mode requirements
 {
   "verdict": "APPROVED | GAPS_FOUND",
   "timestamp": "<ISO 8601>",
-  "requirements_hash": "<SHA-256 of 需求陈述 + CONTEXT.md 内容>",
-  "experts": 2,
+  "requirements_statement": "<被评审的原始需求陈述>",
+  "context_file_used": "CONTEXT.md | null",
+  "requirements_hash": "<SHA-256 of requirements_statement + context file exact UTF-8 content if used + timestamp YYYY-MM-DD>",
+  "head_commit": "<git rev-parse HEAD>",
+  "consensus_ratio": 1.0,
+  "expert_verdicts": [
+    { "role": "architecture", "verdict": "APPROVED", "result_type": "delphi_expert_result", "requested_model": "provider/model-a" },
+    { "role": "technical", "verdict": "APPROVED", "result_type": "delphi_expert_result", "requested_model": "provider/model-b" },
+    { "role": "feasibility", "verdict": "APPROVED", "result_type": "delphi_expert_result", "requested_model": "provider/model-c" }
+  ],
   "rounds": 1,
   "gaps": []
 }
@@ -90,10 +100,10 @@ npx xp-gate delphi-review --mode requirements
 
 **GAPS_FOUND 处理**：
 - 回到 Step 1 补充访谈（或补充 CONTEXT.md 内容）
-- 最多 2 轮循环后升级给用户决策
+- 最多 5 轮循环后升级给用户决策
 
 **程序化校验**：
-- `phase-transition 2 completed` 校验该文件存在、`verdict=APPROVED` 且 `requirements_hash` 匹配当前需求内容
+- `phase-transition 2 completed` 校验 schema-v2 必填字段、`verdict=APPROVED`、三份专家证据、`consensus_ratio`、当前 HEAD，并从需求陈述、可选 context 文件和 timestamp 日期重新计算 `requirements_hash`
 - 不匹配 → BLOCK（防陈旧绑定）
 
 ### Step 3: 原生设计文档生成
@@ -125,7 +135,7 @@ orchestrator 基于访谈记录 + CONTEXT.md + R1 评审结论生成设计文档
 
 | 暂停点 | 触发条件 | 用户操作 | 自动恢复条件 |
 |--------|---------|---------|-------------|
-| R1 GAPS_FOUND | 需求评审发现缺口 | 补充访谈/上下文 | 重新 R1 评审（最多 2 轮） |
+| R1 GAPS_FOUND | 需求评审发现缺口 | 补充访谈/上下文 | 重新 R1 评审（最多 5 轮） |
 | **HARD-GATE** | 设计文档未 APPROVED | 用户审批设计文档 | 设计 APPROVED 后自动进入 Part B |
 
 ### 输出
@@ -149,7 +159,7 @@ orchestrator 基于访谈记录 + CONTEXT.md + R1 评审结论生成设计文档
 
 IF change_type == "修改已存在代码":
   → 增量优化路径: SKIP batch-grill-me
-  → 直接进入 Step 7: lightweight R2 delphi-review (2 专家, 1 轮)
+   → 直接进入 Step 7: R2 delphi-review（3 专家，最多 5 轮）
 ELSE (change_type == "新增功能" 或 未定义):
   → 标准路径: 继续 Step 6 (batch-grill-me) → Step 7
 ```
@@ -158,7 +168,7 @@ ELSE (change_type == "新增功能" 或 未定义):
 
 | change_type | batch-grill-me | R2 delphi-review |
 |------------|----------------|------------------|
-| `修改已存在代码` | ❌ SKIP | lightweight (2 专家, 1 轮) |
+| `修改已存在代码` | ❌ SKIP | 3 专家，最多 5 轮 |
 | `新增功能` | ✅ 执行 | 标准 (3 专家) |
 | `undefined` / 缺失 | ✅ 执行 | 标准 (3 专家) |
 
@@ -183,12 +193,12 @@ batch-grill-me 替代 autoplan 的 taste_decisions 功能：
 # 标准路径（3 专家）
 skill(name="delphi-review", user_message="[设计文档 + batch-grill-me 决策结果]")
 
-# 增量优化路径（2 专家, 1 轮 — 来自 Step 5 路由）
-skill(name="delphi-review", user_message="[设计文档]", experts=2, max_rounds=1)
+# 增量优化路径（3 专家，最多 5 轮）
+skill(name="delphi-review", user_message="[设计文档]", experts=3, max_rounds=5)
 ```
 
 - **标准路径**: Round 1: 3 专家匿名独立评审 → Round 2+: 交换意见直到共识
-- **增量优化路径**: 2 专家, 1 轮
+- **增量优化路径**: 3 专家，最多 5 轮
 - ≥90% 共识 + APPROVED 才通过
 - 输出: APPROVED / REQUEST_CHANGES
 

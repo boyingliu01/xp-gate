@@ -200,7 +200,7 @@ xp-gate phase-transition 4 completed --skip-evidence "Emergency hotfix"
 - **Tool missing → SKIP, not BLOCK.** When a language tool isn't installed, the adapter degrades the gate to SKIP instead of blocking the commit. Hard-block only fires when the tool exists and the check fails.
 - **Boy Scout Rule (Gate 6).** New files: zero warnings. Modified files: warning count cannot increase vs `.warnings-baseline.json`. Untouched files: unchecked.
 - **Pre-push size limits removed.** File/LOC hard limits were intentionally removed for AI workflows; pre-push still enforces mutation, mock, and code-walkthrough gates.
-- **Domestic-models-only for Delphi.** `.delphi-config.json` must use glm/kimi/minimax/qwen/deepseek; ≥2 different providers across the 3 experts. Anthropic/OpenAI/Google are forbidden.
+- **Three-model Delphi policy.** `.delphi-config.json` must configure architecture, technical, and feasibility. All three must execute successfully with distinct trimmed requested model IDs. Provider, vendor, gateway, and model nationality are unrestricted; one provider and token plan are allowed. `provider: local` fallback cannot count.
 - **Test annotations are mandatory.** Every test file must carry `@test REQ-XXX`, `@intent ...`, `@covers AC-XXX` JSDoc tags. Missing tags ⇒ test rejected.
 - **TypeScript strict mode, always.** No `as any`, `@ts-ignore`, or `@ts-expect-error`. No empty `catch` blocks. No `print()` — use `logging`.
 - **Adapters are duplicated** between `githooks/adapters/` and `src/npm-package/adapters/`. Edit `githooks/` first, then resync via build scripts. Known tech debt.
@@ -213,7 +213,7 @@ xp-gate phase-transition 4 completed --skip-evidence "Emergency hotfix"
 - Do NOT edit a skill's `AGENTS.md` mirror under `plugins/*/skills/` or `src/npm-package/**/skills/` — those are byte-identical copies of `skills/<name>/AGENTS.md`. Edit the canonical file then re-copy.
 - Do NOT hand-edit `package.json` versions. Run `node scripts/sync-version.cjs` against `VERSION`.
 - Do NOT add runtime dependencies to `src/npm-package/` — it ships zero-install.
-- Do NOT use Anthropic/OpenAI/Google models in `.delphi-config.json`. Domestic-only.
+- Do NOT bypass the three distinct executable model requirement. `cross_provider_required` is deprecated and ignored with a warning.
 - Do NOT skip `R1 requirements review` or `R2 delphi-review` in Sprint Flow Phase 2 (DESIGN) — HARD-GATE blocks Phase 3 (BUILD).
 - Do NOT terminate Delphi review before ≥90% consensus or 5 rounds (whichever first).
 - Do NOT modify tests during Phase 2 of test-specification-alignment (freeze enforced).
@@ -245,4 +245,3 @@ All 10 documented drift items (Gate count, pre-push gates, Delphi threshold, Spr
   - "重构 X" → "确保重构前后测试都通过"
 - 多步骤任务列出验证点
 - 改完任何代码后必须运行测试确认无 regression
-

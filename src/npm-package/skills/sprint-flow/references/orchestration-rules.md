@@ -50,7 +50,7 @@
 
 **Phase 2/6 DESIGN 执行模式（全部 orchestrator 直接执行）**：
 1. **Orchestrator 直接执行 grill-with-docs**：`skill(name="grill-with-docs")` → 访谈 + CONTEXT.md/ADR
-2. **Orchestrator 执行 R1 需求评审**：`npx xp-gate delphi-review --mode requirements` → requirements-reviewed.json
+2. **Orchestrator 调用 R1 Agent skill**：`/delphi-review --mode requirements`，分别执行 architecture、technical、feasibility 三个 per-expert runner → requirements-reviewed.json
 3. **Orchestrator 生成设计文档** → 等待用户 APPROVED
 4. **Orchestrator 直接执行 batch-grill-me**：`skill(name="batch-grill-me")` → 批量决策确认
 5. **Orchestrator 直接执行 R2 delphi-review**：`skill(name="delphi-review")` → 等待 APPROVED

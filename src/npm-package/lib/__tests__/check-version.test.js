@@ -25,20 +25,58 @@ function cleanupDir(dir) {
 describe('check-version.js — REQ-001-01', () => {
   let mod;
   let origHome;
+  let origCacheDir;
   let tmpHome;
+  let tmpCacheDir;
   let origReadFileSync;
+  let origHttpsGet;
+
+  function installFakeHttpsGet(latestVersion) {
+    const https = require('https');
+    const saved = https.get;
+    https.get = (_url, options, callbackArg) => {
+      const callback = typeof options === 'function' ? options : callbackArg;
+      if (!callback) return { on: () => undefined, destroy: () => undefined };
+      const response = {
+        statusCode: 200,
+        on: (event, handler) => {
+          const eventArgs = {
+            data: [JSON.stringify({ latest: latestVersion })],
+            end: [],
+          };
+          if (Object.hasOwn(eventArgs, event)) handler(...eventArgs[event]);
+          return response;
+        },
+      };
+      callback(response);
+      return { on: () => undefined, destroy: () => undefined };
+    };
+    return () => {
+      https.get = saved;
+    };
+  }
 
   beforeEach(() => {
     vi.resetModules();
     origHome = process.env.HOME;
-    tmpHome = fakeHome();
+    origCacheDir = process.env.XP_GATE_CACHE_DIR;
     origReadFileSync = fs.readFileSync;
+    origHttpsGet = require('https').get;
+    tmpHome = undefined;
+    tmpCacheDir = undefined;
+    tmpHome = fakeHome();
+    tmpCacheDir = fs.mkdtempSync(path.join(os.tmpdir(), 'ckv-cache-'));
+    process.env.XP_GATE_CACHE_DIR = tmpCacheDir;
   });
 
   afterEach(() => {
     process.env.HOME = origHome;
+    if (origCacheDir === undefined) delete process.env.XP_GATE_CACHE_DIR;
+    else process.env.XP_GATE_CACHE_DIR = origCacheDir;
     cleanupDir(tmpHome);
-    fs.readFileSync = origReadFileSync;
+    cleanupDir(tmpCacheDir);
+    if (origReadFileSync) fs.readFileSync = origReadFileSync;
+    if (origHttpsGet) require('https').get = origHttpsGet;
   });
 
   // ──────────────────────────────────────────
@@ -159,6 +197,14 @@ describe('check-version.js — REQ-001-01', () => {
       expect(() => mod.clearCache()).not.toThrow();
     });
 
+    it('does not touch the home-directory cache when XP_GATE_CACHE_DIR is set', () => {
+      const homeCache = path.join(tmpHome, '.xp-gate', 'version-cache.json');
+      fs.mkdirSync(path.dirname(homeCache), { recursive: true });
+      fs.writeFileSync(homeCache, 'sentinel');
+      mod.clearCache();
+      expect(fs.readFileSync(homeCache, 'utf8')).toBe('sentinel');
+    });
+
     it('cachePath returns null when XP_GATE_DIR is inaccessible', () => {
       // Verify clearCache handles null cachePath gracefully
       expect(() => mod.clearCache()).not.toThrow();
@@ -218,29 +264,12 @@ describe('check-version.js — REQ-001-01', () => {
 
     async function withMockedHttps(latestVersion, fn) {
       const fsm = require('fs');
-      const osm = require('os');
-      const cpPath = require('path').join(osm.homedir(), '.xp-gate', 'version-cache.json');
+      const cpPath = require('path').join(process.env.XP_GATE_CACHE_DIR, 'version-cache.json');
       if (fsm.existsSync(cpPath)) {
         try { fsm.unlinkSync(cpPath); } catch { }
       }
       evictCache();
-      const https = require('https');
-      const saved = https.get;
-      const body = JSON.stringify({ latest: latestVersion });
-      https.get = (_url, _opts, cb) => {
-        const callback = typeof _opts === 'function' ? _opts : cb;
-        if (!callback) return { on: () => undefined, destroy: () => undefined };
-        const mockRes = {
-          statusCode: 200,
-          on: (evt, handler) => {
-            if (evt === 'data') handler(body);
-            if (evt === 'end') handler();
-            return mockRes;
-          },
-        };
-        callback(mockRes);
-        return { on: () => undefined, destroy: () => undefined };
-      };
+      const restoreHttpsGet = installFakeHttpsGet(latestVersion);
       // Mock getLocalVersion to return a fixed version so tests don't
       // depend on the real package.json version (which drifts over time).
       const savedReadFileSync = fsm.readFileSync;
@@ -258,7 +287,7 @@ describe('check-version.js — REQ-001-01', () => {
         const m = require('../check-version');
         return await fn(m);
       } finally {
-        https.get = saved;
+        restoreHttpsGet();
         fsm.readFileSync = savedReadFileSync;
       }
     }
@@ -301,38 +330,30 @@ describe('check-version.js — REQ-001-01', () => {
       delete require.cache[resolved];
     }
 
-    function withMockedHttpsBox(latestVersion, fn) {
+    async function withMockedHttpsBox(latestVersion, fn) {
       const fsm = require('fs');
-      const osm = require('os');
-      const cpPath = require('path').join(osm.homedir(), '.xp-gate', 'version-cache.json');
+      const cpPath = require('path').join(process.env.XP_GATE_CACHE_DIR, 'version-cache.json');
       if (fsm.existsSync(cpPath)) {
         try { fsm.unlinkSync(cpPath); } catch { }
       }
       evictCache();
-      const https = require('https');
-      const saved = https.get;
-      const body = JSON.stringify({ latest: latestVersion });
-      https.get = (_url, _opts, cb) => {
-        const callback = typeof _opts === 'function' ? _opts : cb;
-        if (!callback) return { on: () => undefined, destroy: () => undefined };
-        const mockRes = {
-          statusCode: 200,
-          on: (evt, handler) => {
-            if (evt === 'data') handler(body);
-            if (evt === 'end') handler();
-            return mockRes;
-          },
-        };
-        callback(mockRes);
-        return { on: () => undefined, destroy: () => undefined };
-      };
+      const restoreHttpsGet = installFakeHttpsGet(latestVersion);
       try {
         const m = require('../check-version');
-        return fn(m, cpPath);
+        return await fn(m, cpPath);
       } finally {
-        https.get = saved;
+        restoreHttpsGet();
       }
     }
+
+    it('restores HTTPS after an asynchronous callback rejects', async () => {
+      const savedGet = require('https').get;
+      await expect(withMockedHttpsBox('0.18.0', async () => {
+        await Promise.resolve();
+        throw new Error('callback failed');
+      })).rejects.toThrow('callback failed');
+      expect(require('https').get).toBe(savedGet);
+    });
 
     it('rejects null version from registry — cache NOT written', async () => {
       await withMockedHttpsBox(null, async (m, cpPath) => {

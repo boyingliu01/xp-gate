@@ -96,7 +96,7 @@ XP-Gate 将确定性质量门禁（纯代码）与 AI 智能评审（多专家�
 │   │                        pre-push (Code Walkthrough)                   │   │
 │   │                                                                      │   │
 │   │  Validates .code-walkthrough-result.json (file-based, not CLI)      │   │
-│   │  - Max 20 files / 500 LOC per push                                  │   │
+│   │  - Complete walkthrough evidence; no hard file/LOC threshold        │   │
 │   │  - Verdict: APPROVED + commit match + not expired                   │   │
 │   └─────────────────────────────────────────────────────────────────────┘   │
 └─────────────────────────────────────────────────────────────────────────────┘
@@ -172,7 +172,7 @@ pre-push 在 `git push` 前验证代码走查结果：
 # 2. commit hash 匹配当前 HEAD
 # 3. verdict == "APPROVED"
 # 4. 未过期 (expires > now)
-# 5. 变更大小: max 20 files, max 500 LOC
+# 5. 变更审阅: 大型变更完整评审或由用户在评审前拆分
 ```
 
 **设计原则**: Hook 只验证结果文件，不直接调用 Skill。Skill 的执行在 Agent 会话中完成，通过文件传递结果。
@@ -361,6 +361,10 @@ triggers:
 
 ```yaml
 Modes:
+  requirements:      # R1 需求评审
+    - Phase 2 中在设计生成前评审需求陈述 + CONTEXT.md
+    - 输出: requirements-reviewed.json
+
   design:            # 设计评审
     - 需求/设计/架构/PR 评审
     - 输出: 共识报告 + specification.yaml
@@ -369,7 +373,7 @@ Modes:
     - 变更代码评审
     - 输出: .code-walkthrough-result.json
 
-Experts: 2-3 位来自不同提供商的模型
+Experts: architecture、technical、feasibility 三个角色，各自使用 distinct trimmed executable model ID；provider 不受限制
 Consensus: >=90% 一致性
 Rounds: 多轮直到 APPROVED 或达到 max_rounds
 ```
@@ -606,14 +610,30 @@ git push
 
 ```json
 {
-  "experts": [
-    { "id": "A", "name": "架构专家", "model": "deepseek-v4-pro" },
-    { "id": "B", "name": "技术专家", "model": "kimi-k2.6" }
-  ],
-  "consensus_threshold": 0.90,
-  "max_rounds": 5
+  "active_profile": "default",
+  "profiles": {
+    "default": {
+      "providers": {
+        "bailian-tp": {
+          "base_url": "https://coding.dashscope.aliyuncs.com/v1",
+          "api_key": "${BAILIAN_API_KEY}"
+        }
+      },
+      "experts": {
+        "architecture": { "provider": "bailian-tp", "model": "qwen3-coder-plus" },
+        "technical": { "provider": "bailian-tp", "model": "deepseek-v3.2" },
+        "feasibility": { "provider": "bailian-tp", "model": "kimi-k2.5" }
+      }
+    }
+  },
+  "consensus": {
+    "threshold_percent": 90,
+    "max_review_rounds": 5
+  }
 }
 ```
+
+三个角色必须配置互不相同的 trimmed model ID。将 `BAILIAN_API_KEY` 设置为你的 API key，不要把密钥写入配置文件或提交到版本控制。
 
 **package.json 脚本**
 
@@ -756,7 +776,7 @@ Delphi 方法 (兰德公司开发) 相比单一 AI 评审有显著优势：
 | 置信度 | 主观判断 | 量化的 confidence 评分 |
 
 **关键设计**:
-- 至少 2 位来自不同提供商的专家
+- architecture、technical、feasibility 三个角色必须分别成功执行三个不同的 trimmed model ID；provider、vendor、gateway 和模型国籍不受限制
 - 多轮迭代直到共识
 - 零容忍: Critical/Major 问题必须全部处理
 

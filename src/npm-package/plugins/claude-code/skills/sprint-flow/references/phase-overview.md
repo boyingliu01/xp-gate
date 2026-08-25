@@ -36,7 +36,7 @@ Sprint Flow is NOT just a sequential launcher of existing skills. Here's what ma
 
 1. **40-67% Token Savings via Ralph Loop**: Phase 3 BUILD default (`ralph-loop`) processes one REQ at a time with clean context, avoiding the linear context accumulation that costs 150K+ tokens in parallel mode.
 
-2. **HARD-GATE Discipline**: Design must pass Delphi review (≥90% consensus, ≥2 model providers, domestic models only) before Phase 3 BUILD can start. This is enforced both in SKILL.md instructions and via the Claude Code plugin's PreToolUse hook.
+2. **HARD-GATE Discipline**: Design must pass Delphi review with all three expert roles executed successfully, three distinct requested model IDs verified, and ≥90% aggregate consensus within five rounds before Phase 3 BUILD can start. This is enforced both in SKILL.md instructions and via the Claude Code plugin's PreToolUse hook.
 
 3. **Emergent Requirements Acknowledgment**: Based on research showing 78% of failures are invisible to AI (arXiv study), Phase 6 CLOSE includes mandatory manual UAT verification — cannot be automated, skipped, or bypassed.
 
@@ -155,7 +155,7 @@ Sprint Flow: PREP → DESIGN → BUILD → VERIFY → SHIP → CLOSE
 **快速参考**:
 - **Step 0: CONTEXT.md 预检 (#322)**: 存在则 SKIP grill 访谈，但 R1 需求评审仍执行（CONTEXT.md 可能陈旧）
 - **Step 1: grill-with-docs** — `skill(name="grill-with-docs")` — 逐个追问 + CONTEXT.md/ADR 沉淀。**HARD-GATE**: 设计未批准 → 不可进入实现
-- **Step 2: R1 需求评审 (#368)** — `npx xp-gate delphi-review --mode requirements` — 轻量 2 专家 1 轮，输出 requirements-reviewed.json（含 requirements_hash 防陈旧绑定）。lightweight sprint 跳过 R1 合并入 R2
+- **Step 2: R1 需求评审 (#368)** — `/delphi-review --mode requirements` Agent skill — 所有路径都由三专家独立执行，验证 distinct model IDs 后聚合 ≥90% 共识，输出 requirements-reviewed.json（含可重新计算的 requirements_hash 与 exact-HEAD 防陈旧绑定）
 - **Step 3: 原生设计文档生成** — `docs/plans/YYYY-MM-DD-<topic>-design.md`（需求摘要、2-3 方案、推荐、成功标准）
 - **Step 4: HARD-GATE APPROVAL** — 用户审批设计文档
 - **Step 5: 路由分叉** — `change_type == "修改已存在代码"` → SKIP batch-grill-me, lightweight R2

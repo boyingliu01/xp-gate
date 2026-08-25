@@ -4,7 +4,7 @@ export default defineConfig({
   test: {
     globals: true,
     environment: 'node',
-    exclude: ['src/_wip/**', '**/node_modules/**', '.opencode/**', '.omo/**', '.worktrees/**', '.stryker-tmp/**', 'plugins/**', 'src/npm-package/plugins/**'],
+    exclude: ['src/_wip/**', '**/node_modules/**', '.opencode/**', '.omo/**', '.worktrees/**', '.stryker-tmp/**', 'plugins/**', 'src/npm-package/plugins/**', 'dist/**', 'coverage/**'],
     coverage: {
       provider: 'v8',
       reporter: ['text', 'json', 'json-summary', 'html'],

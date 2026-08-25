@@ -4,9 +4,10 @@
     "======================================",
     "Copy this file to .delphi-config.json and fill in your API keys.",
     "Place this file alongside SKILL.md in the delphi-review skill directory.",
-    "At least 2 of the 3 experts should use different providers for cross-bias protection.",
+    "Exactly three roles are required, with distinct trimmed executable model IDs.",
     "",
-    "Provider field: set provider to \"local\" to use the orchestrator model (mixed mode)."
+    "Provider and vendor are unrestricted. provider=local is a fallback and cannot count as a successful expert execution.",
+    "cross_provider_required is deprecated and ignored with warning code cross_provider_required_ignored."
   ],
 
   "active_profile": "default",
@@ -14,53 +15,47 @@
   "profiles": {
     "default": {
       "providers": {
-        "deepseek": {
-          "base_url": "https://api.deepseek.com/v1",
-          "api_key": "YOUR_DEEPSEEK_API_KEY"
-        },
-        "zhipu": {
-          "base_url": "https://open.bigmodel.cn/api/paas/v4",
-          "api_key": "YOUR_ZHIPU_API_KEY"
-        },
-        "dashscope": {
+        "bailian-tp": {
           "base_url": "https://dashscope.aliyuncs.com/compatible-mode/v1",
-          "api_key": "YOUR_DASHSCOPE_API_KEY"
+          "api_key": "YOUR_API_KEY"
         }
       },
       "experts": {
         "architecture": {
-          "provider": "deepseek",
-          "model": "deepseek-chat"
+          "provider": "bailian-tp",
+          "model": "qwen-plus"
         },
         "technical": {
-          "provider": "zhipu",
-          "model": "glm-5.2"
+          "provider": "bailian-tp",
+          "model": "deepseek-v3"
         },
         "feasibility": {
-          "provider": "dashscope",
-          "model": "qwen-3.8-plus"
+          "provider": "bailian-tp",
+          "model": "glm-4.5"
         }
       }
     },
 
     "starter": {
-      "$comment": "Mixed mode: only 1 external API, others use orchestrator model",
+      "$comment": "One provider and token plan serving three distinct models",
       "providers": {
-        "deepseek": {
-          "base_url": "https://api.deepseek.com/v1",
-          "api_key": "YOUR_DEEPSEEK_API_KEY"
+        "bailian-tp": {
+          "base_url": "https://dashscope.aliyuncs.com/compatible-mode/v1",
+          "api_key": "YOUR_API_KEY"
         }
       },
       "experts": {
         "architecture": {
-          "provider": "deepseek",
-          "model": "deepseek-chat"
+          "provider": "bailian-tp",
+          "model": "qwen-plus"
         },
         "technical": {
-          "provider": "local"
+          "provider": "bailian-tp",
+          "model": "deepseek-v3"
         },
         "feasibility": {
-          "provider": "local"
+          "provider": "bailian-tp",
+          "model": "glm-4.5"
         }
       }
     }
@@ -68,6 +63,8 @@
 
   "consensus": {
     "threshold_percent": 90,
-    "max_review_rounds": 5
+    "max_review_rounds": 5,
+    "distinct_models_required": true,
+    "cross_provider_required": true
   }
 }

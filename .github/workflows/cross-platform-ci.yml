@@ -235,8 +235,8 @@ jobs:
           fi
           echo "PASS: detect_os_env() correctly handles OSTYPE=cygwin"
 
-  # Mirror Parity Guard: src/npm-package/skills/ and src/npm-package/plugins/ must equal canonical sources
-  # Prevents silent divergence between source-of-truth and npm-distributed copies (C-CRIT-2)
+  # Mirror Parity Guard: npm-package mirrors must equal their canonical sources.
+  # Prevents silent divergence in bundled skills, plugins, and build-integrity (C-CRIT-2).
   mirror-parity:
     name: Mirror Parity (npm-package vs canonical)
     runs-on: ubuntu-latest
@@ -251,14 +251,22 @@ jobs:
 
       - name: Run sync and verify no diff
         run: |
+          # Validate committed trees before sync can repair missing or stale files.
+          bash scripts/check-build-integrity-mirror.sh
+          bash scripts/check-delphi-runner-mirror.sh
+
           # Sync canonical sources to npm-package mirror directory
           bash scripts/sync-version.sh
           node src/npm-package/scripts/sync-package-content.js
 
-          # Verify content-level consistency only (ignore AGENTS.md metadata headers
-          # which differ between CI and local because sync-version.sh writes
-          # branch=HEAD / commit=merge-commit in CI)
-          diff_output=$(git diff src/npm-package/skills src/npm-package/plugins 2>&1) || true
+          bash scripts/check-build-integrity-mirror.sh --post-sync
+          bash scripts/check-delphi-runner-mirror.sh --post-sync
+
+          # Verify committed mirrors remain current after sync. A stale committed
+          # build-integrity mirror is rewritten above and must still fail this guard.
+          # AGENTS.md metadata headers can differ because sync-version.sh writes
+          # branch=HEAD / commit=merge-commit in CI.
+          diff_output=$(git diff src/npm-package/skills src/npm-package/plugins src/npm-package/build-integrity src/npm-package/scripts/delphi-external-review.cjs 2>&1) || true
           if [ -z "$diff_output" ]; then
             echo "PASS: npm-package mirror matches canonical sources"
           else
@@ -267,7 +275,7 @@ jobs:
             content_diff=$(echo "$diff_output" | sed '/^diff --git/d; /^index /d; /^--- /d; /^+++ /d; /^@@ /d; /^[-+]\*\*Generated:/d; /^[-+]\*\*Commit:/d; /^[-+]\*\*Branch:/d; /^[-+]\*\*Version:/d; /^ /d' | grep -v '^$' || true)
             if [ -n "$content_diff" ]; then
               echo ""
-              echo "FAIL: src/npm-package mirror has content-level divergence from canonical sources"
+              echo "FAIL: committed src/npm-package mirrors differ from canonical sources after sync"
               echo "Content diff (excluding headers):"
               echo "$content_diff" | head -20
               echo "Run locally: bash scripts/sync-version.sh && node src/npm-package/scripts/sync-package-content.js && git add src/npm-package && git commit"

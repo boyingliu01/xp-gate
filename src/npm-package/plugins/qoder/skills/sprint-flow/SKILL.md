@@ -160,7 +160,7 @@ Sprint Flow is NOT just a sequential launcher of existing skills. Here's what ma
 
 1. **40-67% Token Savings via Ralph Loop**: Phase 3 BUILD default (`ralph-loop`) processes one REQ at a time with clean context, avoiding the linear context accumulation that costs 150K+ tokens in parallel mode.
 
-2. **HARD-GATE Discipline**: Design must pass Delphi review (≥90% consensus, ≥2 model providers, domestic models only) before Phase 3 BUILD can start. This is enforced both in SKILL.md instructions and via the Claude Code plugin's PreToolUse hook.
+2. **HARD-GATE Discipline**: Design must pass Delphi review (≥90% consensus from exactly three successfully executed, distinct model IDs; provider, vendor, and country unrestricted) before Phase 3 BUILD can start. Any expert execution failure blocks approval. This is enforced both in SKILL.md instructions and via the Claude Code plugin's PreToolUse hook.
 
 3. **Emergent Requirements Acknowledgment**: Based on research showing 78% of failures are invisible to AI (arXiv study), Phase 6 CLOSE includes mandatory manual UAT verification — cannot be automated, skipped, or bypassed.
 
@@ -280,7 +280,7 @@ Sprint Flow: PREP → DESIGN → BUILD → VERIFY → SHIP → CLOSE
 - **Step 4: to-issues** — `skill(name="to-issues")` — 垂直切片 Issue 拆分 → slices-manifest.json
 - **Step 5: specification.yaml** — 从 APPROVED 设计文档自动提取
 - **Web 前端额外注入**: `design-shotgun`
-- **条件分支**: IF autoplan AUTO_APPROVED → lightweight delphi-review (2 专家、1 轮); ELSE → 标准 delphi-review (3 专家)
+- **条件分支**: force level 只调整上下文深度；所有路径都执行 architecture、technical、feasibility 三个 Custom Agent，最多 5 轮
 
 ### Phase 2/6→3/6: GITHOOKS-GATE（质量门禁安装检查）
 

@@ -10,6 +10,7 @@
 
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { execSync } from 'node:child_process';
+import crypto from 'node:crypto';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -42,7 +43,8 @@ function git(command, cwd) {
 }
 
 function createRepository(dir, message) {
-  git('init --quiet', dir);
+  git('init --quiet --template=', dir);
+  git('config core.hooksPath /dev/null', dir);
   git('config user.email "test@test.com"', dir);
   git('config user.name "Test"', dir);
   fs.writeFileSync(path.join(dir, 'file.txt'), message);
@@ -64,22 +66,42 @@ describe('phase-transition', () => {
 
   /** Helper: write phase 2 evidence (requirements-reviewed.json) so phase 2 completed passes */
   function writePhase2Evidence(dir) {
+    const headCommit = fs.existsSync(path.join(dir, '.git'))
+      ? git('rev-parse HEAD', dir)
+      : createRepository(dir, 'phase 2 evidence');
+    const requirementsStatement = 'Phase 2 evidence fixture';
+    const timestamp = new Date().toISOString();
+    const requirementsHash = crypto.createHash('sha256')
+      .update(`${requirementsStatement}${timestamp.slice(0, 10)}`, 'utf8')
+      .digest('hex');
     const outputsDir = path.join(dir, '.sprint-state', 'phase-outputs');
     fs.mkdirSync(outputsDir, { recursive: true });
     fs.writeFileSync(path.join(outputsDir, 'requirements-reviewed.json'), JSON.stringify({
       verdict: 'APPROVED',
-      requirements_hash: 'test-hash-placeholder',
-      timestamp: new Date().toISOString(),
+      requirements_statement: requirementsStatement,
+      context_file_used: null,
+      requirements_hash: requirementsHash,
+      head_commit: headCommit,
+      consensus_ratio: 0.9,
+      expert_verdicts: [
+        { role: 'architecture', verdict: 'APPROVED', result_type: 'delphi_expert_result', requested_model: 'model-a' },
+        { role: 'technical', verdict: 'APPROVED', result_type: 'delphi_expert_result', requested_model: 'model-b' },
+        { role: 'feasibility', verdict: 'APPROVED', result_type: 'delphi_expert_result', requested_model: 'model-c' },
+      ],
+      timestamp,
     }));
   }
 
   /** Helper: write phase 4 evidence (test-alignment-report.json) so phase 4 completed passes */
   function writePhase4Evidence(dir) {
+    const headCommit = fs.existsSync(path.join(dir, '.git'))
+      ? git('rev-parse HEAD', dir)
+      : createRepository(dir, 'phase 4 evidence');
     const outputsDir = path.join(dir, '.sprint-state', 'phase-outputs');
     fs.mkdirSync(outputsDir, { recursive: true });
     fs.writeFileSync(path.join(outputsDir, 'test-alignment-report.json'), JSON.stringify({
       alignment_status: 'PASS',
-      head_commit: 'unknown',
+      head_commit: headCommit,
       spec_hash: null,
       timestamp: new Date().toISOString(),
     }));
@@ -502,6 +524,375 @@ describe('phase-transition', () => {
       fs.writeFileSync(path.join(outputsDir, 'test-alignment-report.json'), JSON.stringify(report, null, 2));
     }
 
+    function writeRequirementsReview(dir, report) {
+      const outputsDir = path.join(dir, '.sprint-state', 'phase-outputs');
+      fs.mkdirSync(outputsDir, { recursive: true });
+      fs.writeFileSync(path.join(outputsDir, 'requirements-reviewed.json'), JSON.stringify(report, null, 2));
+    }
+
+    function validRequirementsReview(dir, overrides = {}) {
+      const headCommit = fs.existsSync(path.join(dir, '.git'))
+        ? git('rev-parse HEAD', dir)
+        : createRepository(dir, 'reviewed requirements');
+      const review = {
+        verdict: 'APPROVED',
+        requirements_statement: 'The release must preserve current quality gates.',
+        context_file_used: null,
+        timestamp: '2026-08-20T10:30:00.000Z',
+        head_commit: headCommit,
+        consensus_ratio: 0.9,
+        expert_verdicts: [
+          { role: 'architecture', verdict: 'APPROVED', result_type: 'delphi_expert_result', requested_model: 'model-a' },
+          { role: 'technical', verdict: 'APPROVED', result_type: 'delphi_expert_result', requested_model: 'model-b' },
+          { role: 'feasibility', verdict: 'APPROVED', result_type: 'delphi_expert_result', requested_model: 'model-c' },
+        ],
+        ...overrides,
+      };
+      const contextContent = review.context_file_used
+        ? fs.readFileSync(path.join(dir, review.context_file_used), 'utf8')
+        : '';
+      return {
+        ...review,
+        requirements_hash: overrides.requirements_hash ?? crypto
+          .createHash('sha256')
+          .update(`${review.requirements_statement}${contextContent}${review.timestamp.slice(0, 10)}`, 'utf8')
+          .digest('hex'),
+      };
+    }
+
+    it('BLOCKs schema-v2 requirements evidence without head_commit', () => {
+      createSprintState(tmpDir, 2);
+      writeRequirementsReview(tmpDir, {
+        verdict: 'APPROVED',
+        requirements_hash: 'requirements-v1',
+      });
+
+      const result = validateEvidence(2, tmpDir);
+
+      expect(result.ok).toBe(false);
+      expect(result.errors.some(error => error.includes('head_commit'))).toBe(true);
+    });
+
+    it('BLOCKs schema-v2 requirements evidence bound to a stale HEAD', () => {
+      const reviewedCommit = createRepository(tmpDir, 'reviewed requirements');
+      fs.writeFileSync(path.join(tmpDir, 'file.txt'), 'requirements changed');
+      git('add file.txt', tmpDir);
+      git('commit --quiet -m "changed requirements"', tmpDir);
+      createSprintState(tmpDir, 2);
+      writeRequirementsReview(tmpDir, validRequirementsReview(tmpDir, { head_commit: reviewedCommit }));
+
+      const result = validateEvidence(2, tmpDir);
+
+      expect(result.ok).toBe(false);
+      expect(result.errors.some(error => error.includes('head_commit mismatch'))).toBe(true);
+    });
+
+    it('accepts schema-v2 requirements evidence bound to the current HEAD', () => {
+      createSprintState(tmpDir, 2);
+      writeRequirementsReview(tmpDir, validRequirementsReview(tmpDir));
+
+      const result = validateEvidence(2, tmpDir);
+
+      expect(result.ok).toBe(true);
+      expect(result.errors).toHaveLength(0);
+    });
+
+    it.each([
+      ['requirements_statement', { requirements_statement: undefined }],
+      ['timestamp', { timestamp: undefined }],
+      ['consensus_ratio', { consensus_ratio: undefined }],
+      ['expert_verdicts', { expert_verdicts: undefined }],
+      ['head_commit', { head_commit: undefined }],
+      ['requirements_hash', { requirements_hash: undefined }],
+    ])('BLOCKs schema-v2 requirements evidence missing %s', (field, overrides) => {
+      createSprintState(tmpDir, 2);
+      const evidence = validRequirementsReview(tmpDir);
+      delete evidence[field];
+      writeRequirementsReview(tmpDir, { ...evidence, ...overrides });
+
+      const result = validateEvidence(2, tmpDir);
+
+      expect(result.ok).toBe(false);
+      expect(result.errors.some(error => error.includes(field))).toBe(true);
+    });
+
+    it.each([
+      ['non-hex hash', 'requirements-v1'],
+      ['short hash', 'abc123'],
+      ['valid-looking stale hash', '0'.repeat(64)],
+    ])('BLOCKs schema-v2 requirements evidence with %s', (_label, requirementsHash) => {
+      createSprintState(tmpDir, 2);
+      writeRequirementsReview(tmpDir, validRequirementsReview(tmpDir, {
+        requirements_hash: requirementsHash,
+      }));
+
+      const result = validateEvidence(2, tmpDir);
+
+      expect(result.ok).toBe(false);
+      expect(result.errors.some(error => error.includes('requirements_hash'))).toBe(true);
+    });
+
+    it('accepts an uppercase recomputable requirements hash', () => {
+      createSprintState(tmpDir, 2);
+      const evidence = validRequirementsReview(tmpDir);
+      evidence.requirements_hash = evidence.requirements_hash.toUpperCase();
+      writeRequirementsReview(tmpDir, evidence);
+
+      expect(validateEvidence(2, tmpDir).ok).toBe(true);
+    });
+
+    it('BLOCKs when requirements_statement changes after hashing', () => {
+      createSprintState(tmpDir, 2);
+      const evidence = validRequirementsReview(tmpDir);
+      evidence.requirements_statement = 'Changed after review.';
+      writeRequirementsReview(tmpDir, evidence);
+
+      const result = validateEvidence(2, tmpDir);
+
+      expect(result.ok).toBe(false);
+      expect(result.errors.some(error => error.includes('requirements_hash mismatch'))).toBe(true);
+    });
+
+    it('accepts a recomputable hash using a project-relative context file', () => {
+      createSprintState(tmpDir, 2);
+      fs.writeFileSync(path.join(tmpDir, 'CONTEXT.md'), 'bounded context\n', 'utf8');
+      writeRequirementsReview(tmpDir, validRequirementsReview(tmpDir, {
+        context_file_used: 'CONTEXT.md',
+      }));
+
+      expect(validateEvidence(2, tmpDir).ok).toBe(true);
+    });
+
+    it('BLOCKs when context file content changes after hashing', () => {
+      createSprintState(tmpDir, 2);
+      fs.writeFileSync(path.join(tmpDir, 'CONTEXT.md'), 'original context\n', 'utf8');
+      const evidence = validRequirementsReview(tmpDir, { context_file_used: 'CONTEXT.md' });
+      fs.writeFileSync(path.join(tmpDir, 'CONTEXT.md'), 'changed context\n', 'utf8');
+      writeRequirementsReview(tmpDir, evidence);
+
+      const result = validateEvidence(2, tmpDir);
+
+      expect(result.ok).toBe(false);
+      expect(result.errors.some(error => error.includes('requirements_hash mismatch'))).toBe(true);
+    });
+
+    it.each([
+      ['missing path', 'missing/CONTEXT.md'],
+      ['absolute path', '/tmp/CONTEXT.md'],
+      ['traversal path', '../CONTEXT.md'],
+    ])('BLOCKs schema-v2 requirements evidence with %s context', (_label, contextFileUsed) => {
+      createSprintState(tmpDir, 2);
+      const evidence = validRequirementsReview(tmpDir);
+      evidence.context_file_used = contextFileUsed;
+      writeRequirementsReview(tmpDir, evidence);
+
+      const result = validateEvidence(2, tmpDir);
+
+      expect(result.ok).toBe(false);
+      expect(result.errors.some(error => error.includes('context_file_used'))).toBe(true);
+    });
+
+    it('BLOCKs a context symlink that resolves outside the project root', () => {
+      createSprintState(tmpDir, 2);
+      const outsideDir = fs.mkdtempSync(path.join(os.tmpdir(), 'requirements-context-'));
+      const outsideFile = path.join(outsideDir, 'CONTEXT.md');
+      fs.writeFileSync(outsideFile, 'outside context\n', 'utf8');
+      fs.symlinkSync(outsideFile, path.join(tmpDir, 'CONTEXT.md'));
+      const evidence = validRequirementsReview(tmpDir, { context_file_used: 'CONTEXT.md' });
+      writeRequirementsReview(tmpDir, evidence);
+
+      const result = validateEvidence(2, tmpDir);
+
+      expect(result.ok).toBe(false);
+      expect(result.errors.some(error => error.includes('context_file_used'))).toBe(true);
+      fs.rmSync(outsideDir, { recursive: true, force: true });
+    });
+
+    it.each([
+      ['invalid timestamp', 'not-a-timestamp'],
+      ['invalid calendar date', '2026-02-30T10:30:00.000Z'],
+    ])('BLOCKs schema-v2 requirements evidence with %s', (_label, timestamp) => {
+      createSprintState(tmpDir, 2);
+      const evidence = validRequirementsReview(tmpDir);
+      evidence.timestamp = timestamp;
+      writeRequirementsReview(tmpDir, evidence);
+
+      const result = validateEvidence(2, tmpDir);
+
+      expect(result.ok).toBe(false);
+      expect(result.errors.some(error => error.includes('timestamp'))).toBe(true);
+    });
+
+    it.each([
+      ['missing expert_verdicts', { expert_verdicts: undefined }, 'expert_verdicts'],
+      ['too few expert_verdicts', { expert_verdicts: [
+        { role: 'architecture', verdict: 'APPROVED', result_type: 'delphi_expert_result', requested_model: 'model-a' },
+        { role: 'technical', verdict: 'APPROVED', result_type: 'delphi_expert_result', requested_model: 'model-b' },
+      ] }, 'exactly 3'],
+      ['too many expert_verdicts', { expert_verdicts: [
+        { role: 'architecture', verdict: 'APPROVED', result_type: 'delphi_expert_result', requested_model: 'model-a' },
+        { role: 'technical', verdict: 'APPROVED', result_type: 'delphi_expert_result', requested_model: 'model-b' },
+        { role: 'feasibility', verdict: 'APPROVED', result_type: 'delphi_expert_result', requested_model: 'model-c' },
+        { role: 'extra', verdict: 'APPROVED', result_type: 'delphi_expert_result', requested_model: 'model-d' },
+      ] }, 'exactly 3'],
+      ['duplicate role', { expert_verdicts: [
+        { role: 'architecture', verdict: 'APPROVED', result_type: 'delphi_expert_result', requested_model: 'model-a' },
+        { role: 'architecture', verdict: 'APPROVED', result_type: 'delphi_expert_result', requested_model: 'model-b' },
+        { role: 'feasibility', verdict: 'APPROVED', result_type: 'delphi_expert_result', requested_model: 'model-c' },
+      ] }, 'roles'],
+      ['missing role', { expert_verdicts: [
+        { role: 'architecture', verdict: 'APPROVED', result_type: 'delphi_expert_result', requested_model: 'model-a' },
+        { role: 'technical', verdict: 'APPROVED', result_type: 'delphi_expert_result', requested_model: 'model-b' },
+        { verdict: 'APPROVED', result_type: 'delphi_expert_result', requested_model: 'model-c' },
+      ] }, 'roles'],
+      ['non-approved expert verdict', { expert_verdicts: [
+        { role: 'architecture', verdict: 'APPROVED', result_type: 'delphi_expert_result', requested_model: 'model-a' },
+        { role: 'technical', verdict: 'REQUEST_CHANGES', result_type: 'delphi_expert_result', requested_model: 'model-b' },
+        { role: 'feasibility', verdict: 'APPROVED', result_type: 'delphi_expert_result', requested_model: 'model-c' },
+      ] }, 'APPROVED'],
+      ['wrong result_type', { expert_verdicts: [
+        { role: 'architecture', verdict: 'APPROVED', result_type: 'summary', requested_model: 'model-a' },
+        { role: 'technical', verdict: 'APPROVED', result_type: 'delphi_expert_result', requested_model: 'model-b' },
+        { role: 'feasibility', verdict: 'APPROVED', result_type: 'delphi_expert_result', requested_model: 'model-c' },
+      ] }, 'result_type'],
+      ['blank requested_model', { expert_verdicts: [
+        { role: 'architecture', verdict: 'APPROVED', result_type: 'delphi_expert_result', requested_model: '   ' },
+        { role: 'technical', verdict: 'APPROVED', result_type: 'delphi_expert_result', requested_model: 'model-b' },
+        { role: 'feasibility', verdict: 'APPROVED', result_type: 'delphi_expert_result', requested_model: 'model-c' },
+      ] }, 'requested_model'],
+      ['duplicate trimmed requested_model', { expert_verdicts: [
+        { role: 'architecture', verdict: 'APPROVED', result_type: 'delphi_expert_result', requested_model: 'model-a' },
+        { role: 'technical', verdict: 'APPROVED', result_type: 'delphi_expert_result', requested_model: ' model-a ' },
+        { role: 'feasibility', verdict: 'APPROVED', result_type: 'delphi_expert_result', requested_model: 'model-c' },
+      ] }, 'distinct'],
+    ])('BLOCKs schema-v2 requirements evidence with %s', (_label, overrides, expectedError) => {
+      createSprintState(tmpDir, 2);
+      writeRequirementsReview(tmpDir, validRequirementsReview(tmpDir, overrides));
+
+      const result = validateEvidence(2, tmpDir);
+
+      expect(result.ok).toBe(false);
+      expect(result.errors.some(error => error.includes(expectedError))).toBe(true);
+    });
+
+    it.each([
+      ['error true', { error: true }],
+      ['error string', { error: 'provider failed' }],
+      ['error false-shaped string', { error: 'false' }],
+      ['fallback true', { fallback: true }],
+      ['fallback object', { fallback: { provider: 'local' } }],
+      ['fallback false-shaped number', { fallback: 0 }],
+    ])('BLOCKs schema-v2 requirements evidence with an expert %s marker', (_label, marker) => {
+      createSprintState(tmpDir, 2);
+      const evidence = validRequirementsReview(tmpDir);
+      Object.assign(evidence.expert_verdicts[0], marker);
+      writeRequirementsReview(tmpDir, evidence);
+
+      const result = validateEvidence(2, tmpDir);
+
+      expect(result.ok).toBe(false);
+      expect(result.errors.some(error => error.includes('error or fallback marker'))).toBe(true);
+    });
+
+    it('accepts schema-v2 expert records with omitted or explicitly clear markers', () => {
+      createSprintState(tmpDir, 2);
+      const evidence = validRequirementsReview(tmpDir);
+      evidence.expert_verdicts[0].error = false;
+      evidence.expert_verdicts[0].fallback = null;
+      evidence.expert_verdicts[1].error = null;
+      evidence.expert_verdicts[1].fallback = false;
+      writeRequirementsReview(tmpDir, evidence);
+
+      expect(validateEvidence(2, tmpDir).ok).toBe(true);
+    });
+
+    it('does not include arbitrary expert payloads in validation errors', () => {
+      createSprintState(tmpDir, 2);
+      writeRequirementsReview(tmpDir, validRequirementsReview(tmpDir, {
+        verdict: 'REQUEST_CHANGES',
+        expert_verdicts: [{ private_payload: 'do-not-leak' }],
+      }));
+
+      const result = validateEvidence(2, tmpDir);
+
+      expect(result.ok).toBe(false);
+      expect(result.errors.join('\n')).not.toContain('do-not-leak');
+    });
+
+    it.each([
+      ['missing', undefined],
+      ['non-number', '0.95'],
+      ['below threshold', 0.89],
+      ['above one', 1.01],
+      ['non-finite', Number.POSITIVE_INFINITY],
+    ])('BLOCKs schema-v2 requirements evidence with %s consensus_ratio', (_label, consensusRatio) => {
+      createSprintState(tmpDir, 2);
+      const evidence = validRequirementsReview(tmpDir, { consensus_ratio: consensusRatio });
+      if (consensusRatio === undefined) delete evidence.consensus_ratio;
+      writeRequirementsReview(tmpDir, evidence);
+
+      const result = validateEvidence(2, tmpDir);
+
+      expect(result.ok).toBe(false);
+      expect(result.errors.some(error => error.includes('consensus_ratio'))).toBe(true);
+    });
+
+    it('BLOCKs schema-v2 requirements evidence when Git HEAD cannot be resolved', () => {
+      createSprintState(tmpDir, 2);
+      const evidence = validRequirementsReview(tmpDir);
+      fs.rmSync(path.join(tmpDir, '.git'), { recursive: true, force: true });
+      writeRequirementsReview(tmpDir, evidence);
+
+      const result = validateEvidence(2, tmpDir);
+
+      expect(result.ok).toBe(false);
+      expect(result.errors.some(error => error.includes('resolve current Git HEAD'))).toBe(true);
+    });
+
+    it.each([
+      ['invalid expert evidence', { expert_verdicts: [] }, 'expert_verdicts'],
+      ['expert failure marker', { expert_verdicts: [
+        { role: 'architecture', verdict: 'APPROVED', result_type: 'delphi_expert_result', requested_model: 'model-a', error: true },
+        { role: 'technical', verdict: 'APPROVED', result_type: 'delphi_expert_result', requested_model: 'model-b' },
+        { role: 'feasibility', verdict: 'APPROVED', result_type: 'delphi_expert_result', requested_model: 'model-c' },
+      ] }, 'error or fallback marker'],
+      ['unresolved HEAD', null, 'resolve current Git HEAD'],
+      ['stale HEAD', { head_commit: 'deadbeef00000000000000000000000000000000' }, 'head_commit mismatch'],
+      ['stale requirements hash', { requirements_hash: '0'.repeat(64) }, 'requirements_hash'],
+      ['invalid timestamp', { timestamp: 'not-a-timestamp' }, 'timestamp'],
+      ['unsafe context path', { context_file_used: '../CONTEXT.md' }, 'context_file_used'],
+    ])('WARNs but accepts legacy requirements evidence with %s', (_label, overrides, expectedWarning) => {
+      const evidence = validRequirementsReview(tmpDir);
+      if (overrides) Object.assign(evidence, overrides);
+      if (overrides === null) fs.rmSync(path.join(tmpDir, '.git'), { recursive: true, force: true });
+      createSprintState(tmpDir);
+      writeRequirementsReview(tmpDir, evidence);
+
+      const result = validateEvidence(2, tmpDir);
+
+      expect(result.ok).toBe(true);
+      expect(result.warnings.some(warning => warning.includes(expectedWarning))).toBe(true);
+    });
+
+    it.each([
+      ['missing', undefined],
+      ['stale', 'deadbeef00000000000000000000000000000000'],
+    ])('WARNs but accepts legacy requirements evidence with %s head_commit', (_label, headCommit) => {
+      createRepository(tmpDir, 'reviewed requirements');
+      createSprintState(tmpDir);
+      const report = {
+        verdict: 'APPROVED',
+        requirements_hash: 'requirements-v1',
+      };
+      if (headCommit !== undefined) report.head_commit = headCommit;
+      writeRequirementsReview(tmpDir, report);
+
+      const result = validateEvidence(2, tmpDir);
+
+      expect(result.ok).toBe(true);
+      expect(result.warnings.some(warning => warning.includes('head_commit'))).toBe(true);
+    });
+
     it('(a) BLOCKs when evidence file is missing for new sprint (evidence_schema_version >= 2)', () => {
       createSprintState(tmpDir, 2);
       const result = validateEvidence(4, tmpDir);
@@ -524,6 +915,7 @@ describe('phase-transition', () => {
     });
 
     it('(c) BLOCKs when head_commit is stale (does not match current HEAD)', () => {
+      createRepository(tmpDir, 'aligned tests');
       createSprintState(tmpDir, 2);
       writeAlignmentReport(tmpDir, {
         alignment_status: 'PASS',
@@ -532,10 +924,36 @@ describe('phase-transition', () => {
         timestamp: new Date().toISOString(),
       });
       const result = validateEvidence(4, tmpDir);
-      // In tmpDir (no git repo), current HEAD is 'unknown'.
-      // A non-'unknown' head_commit that doesn't match 'unknown' should BLOCK.
       expect(result.ok).toBe(false);
       expect(result.errors.some(e => e.includes('head_commit'))).toBe(true);
+    });
+
+    it('BLOCKs schema-v2 phase 4 evidence when Git HEAD cannot be resolved', () => {
+      createSprintState(tmpDir, 2);
+      writeAlignmentReport(tmpDir, {
+        alignment_status: 'PASS',
+        head_commit: 'unknown',
+        spec_hash: null,
+      });
+
+      const result = validateEvidence(4, tmpDir);
+
+      expect(result.ok).toBe(false);
+      expect(result.errors.some(error => error.includes('resolve current Git HEAD'))).toBe(true);
+    });
+
+    it('WARNs but accepts legacy phase 4 evidence when Git HEAD cannot be resolved', () => {
+      createSprintState(tmpDir);
+      writeAlignmentReport(tmpDir, {
+        alignment_status: 'PASS',
+        head_commit: 'unknown',
+        spec_hash: null,
+      });
+
+      const result = validateEvidence(4, tmpDir);
+
+      expect(result.ok).toBe(true);
+      expect(result.warnings.some(warning => warning.includes('resolve current Git HEAD'))).toBe(true);
     });
 
     it('(d) BLOCKs when evidence file is malformed JSON (treated as missing)', () => {
@@ -573,6 +991,7 @@ describe('phase-transition', () => {
       expect(lastEntry.event).toBe('evidence_skipped');
       expect(lastEntry.phase).toBe(4);
       expect(lastEntry.reason).toBe('Emergency hotfix');
+      expect(lastEntry.commit_hash).toBe('unknown');
     });
 
     it('(g) rejects --skip-evidence without --reason', async () => {
@@ -593,11 +1012,12 @@ describe('phase-transition', () => {
       }
     });
 
-    it('accepts valid evidence with head_commit matching current HEAD (unknown in non-git dir)', () => {
+    it('accepts valid phase 4 evidence with head_commit matching current HEAD', () => {
+      const currentHead = createRepository(tmpDir, 'aligned tests');
       createSprintState(tmpDir, 2);
       writeAlignmentReport(tmpDir, {
         alignment_status: 'PASS',
-        head_commit: 'unknown', // matches non-git tmpDir
+        head_commit: currentHead,
         spec_hash: null,
         timestamp: new Date().toISOString(),
       });
@@ -607,6 +1027,7 @@ describe('phase-transition', () => {
     });
 
     it('validates spec_hash when specification.yaml exists', () => {
+      const currentHead = createRepository(tmpDir, 'aligned specification');
       createSprintState(tmpDir, 2);
       // Create a specification.yaml
       const specContent = 'requirements:\n  - id: REQ-001\n';
@@ -618,7 +1039,7 @@ describe('phase-transition', () => {
 
       writeAlignmentReport(tmpDir, {
         alignment_status: 'PASS',
-        head_commit: 'unknown',
+        head_commit: currentHead,
         spec_hash: expectedHash,
         timestamp: new Date().toISOString(),
       });
@@ -627,11 +1048,12 @@ describe('phase-transition', () => {
     });
 
     it('BLOCKs when spec_hash does not match specification.yaml', () => {
+      const currentHead = createRepository(tmpDir, 'stale specification');
       createSprintState(tmpDir, 2);
       fs.writeFileSync(path.join(tmpDir, 'specification.yaml'), 'requirements:\n  - id: REQ-001\n');
       writeAlignmentReport(tmpDir, {
         alignment_status: 'PASS',
-        head_commit: 'unknown',
+        head_commit: currentHead,
         spec_hash: 'wronghash000000000000000000000000000000000000000000000000000000',
         timestamp: new Date().toISOString(),
       });
@@ -667,10 +1089,11 @@ describe('phase-transition', () => {
     });
 
     it('handlePhaseTransition allows phase 4 completed with valid evidence', async () => {
+      const currentHead = createRepository(tmpDir, 'aligned tests');
       createSprintState(tmpDir, 2);
       writeAlignmentReport(tmpDir, {
         alignment_status: 'PASS',
-        head_commit: 'unknown',
+        head_commit: currentHead,
         spec_hash: null,
         timestamp: new Date().toISOString(),
       });

@@ -82,12 +82,12 @@ githooks/
 | MW | Code-walkthrough validator | reads `.code-walkthrough-result.json` | File missing, OR commit hash stale vs HEAD |
 | S | Sprint Flow Enforcement | sprint-gate.sh | specification.yaml compliance |
 
-Pre-push hard limits: max **20 files** or **500 LOC** per push. Code-walkthrough skipped on main/master pushes (by design). All pre-push runs write a JSON journal under `.xp-gate/reports/pre-push/<UTC-timestamp>.json`.
+Code-walkthrough has no hard file-count or LOC threshold. Large diffs must be reviewed completely or split by user choice; size-based bypass is not permitted. Code-walkthrough is skipped on main/master pushes by design. All pre-push runs write a JSON journal under `.xp-gate/reports/pre-push/<UTC-timestamp>.json`.
 
 ## CONVENTIONS
 - **3-tier adapter resolution**: `~/.config/xp-gate/adapters/<lang>.sh` (global) → `<project>/githooks/adapters/<lang>.sh` (project) → script dir (fallback).
 - **Tool unavailable → SKIP, not BLOCK.** Adapter degrades the gate to SKIP when the underlying tool isn't installed. Block fires only when the tool exists and the check fails.
-- **Pre-push hard limits**: 20 files OR 500 LOC, whichever first.
+- **Code-walkthrough scope**: no hard file-count or LOC threshold; large diffs require complete review or user-directed splitting, never a size-based bypass.
 - **Code-walkthrough skipped on main/master.** Gate M, M2, M3 still run.
 - **Boy Scout Rule (Gate 6)**: new files zero-tolerance; modified files cannot increase warnings; untouched files unchecked.
 - **Adapter plugins** under `adapters/plugins/` extend the base language adapters (P3C/whalecloud for Java, book299 for Python/C/ES5 JS). Opt-in per project.
@@ -96,7 +96,7 @@ Pre-push hard limits: max **20 files** or **500 LOC** per push. Code-walkthrough
 
 ## ANTI-PATTERNS (THIS PROJECT)
 - Do NOT use `--no-verify` to bypass any gate. Process violation per `QUALITY-GATES-CODE-OF-CONDUCT.md`.
-- Do NOT push large commits that exceed the 20-file / 500-LOC limit.
+- Do NOT use change size as authorization to bypass code-walkthrough; review large diffs completely or split them before review.
 - Do NOT hardcode tool paths in an adapter — use the routing in `adapter-common.sh`.
 - Do NOT delete or rename `.code-walkthrough-result.json` before push; the validator will block.
 - Do NOT add a new gate without adding both a script-level Gate N row AND updating root `AGENTS.md` + `README.md`.
@@ -125,4 +125,3 @@ cd githooks/__tests__ && bats *.bats
 - Pre-push reads `.code-walkthrough-result.json` and compares `commit_hash` to `git rev-parse HEAD`.
 - Main-branch push: Gate M / M2 / M3 still execute; only the walkthrough validator is skipped.
 - Mutation testing CI: `.github/workflows/mutation-test.yml` (45-min timeout) runs the full suite outside this hook.
-

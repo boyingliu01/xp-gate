@@ -13,8 +13,56 @@
  */
 
 const { EventEmitter } = require('events');
+const fs = require('fs');
+const os = require('os');
+const path = require('path');
 
 describe('upgrade.js --apply execSync path', () => {
+  let cacheDir;
+  let savedCacheDir;
+  let savedHttpsGet;
+  let savedSpawn;
+  let savedReadFileSync;
+
+  beforeEach(() => {
+    savedCacheDir = process.env.XP_GATE_CACHE_DIR;
+    savedHttpsGet = require('https').get;
+    savedSpawn = require('child_process').spawn;
+    savedReadFileSync = fs.readFileSync;
+    cacheDir = undefined;
+    cacheDir = fs.mkdtempSync(path.join(os.tmpdir(), 'upgrade-cache-'));
+    process.env.XP_GATE_CACHE_DIR = cacheDir;
+  });
+
+  afterEach(() => {
+    if (savedCacheDir === undefined) delete process.env.XP_GATE_CACHE_DIR;
+    else process.env.XP_GATE_CACHE_DIR = savedCacheDir;
+    require('https').get = savedHttpsGet;
+    require('child_process').spawn = savedSpawn;
+    fs.readFileSync = savedReadFileSync;
+    if (cacheDir) fs.rmSync(cacheDir, { recursive: true, force: true });
+  });
+
+  function installFakeHttpsGet(latestVersion) {
+    const https = require('https');
+    const saved = https.get;
+    https.get = (_url, options, callbackArg) => {
+      const callback = typeof options === 'function' ? options : callbackArg;
+      const request = new EventEmitter();
+      request.destroy = () => undefined;
+      if (!callback) return request;
+      const response = new EventEmitter();
+      response.statusCode = 200;
+      callback(response);
+      response.emit('data', JSON.stringify({ latest: latestVersion }));
+      response.emit('end');
+      return request;
+    };
+    return () => {
+      https.get = saved;
+    };
+  }
+
   function evictCache() {
     const resolved = require.resolve('../upgrade');
     const cvResolved = require.resolve('../check-version');
@@ -39,19 +87,15 @@ describe('upgrade.js --apply execSync path', () => {
   }
 
   async function withMockedEnv(latestVersion, spawnImpl, fn) {
-    const fs = require('fs');
-    const os = require('os');
-    const cpPath = require('path').join(os.homedir(), '.xp-gate', 'version-cache.json');
+    const cpPath = path.join(cacheDir, 'version-cache.json');
     if (fs.existsSync(cpPath)) {
       try { fs.unlinkSync(cpPath); } catch { }
     }
     evictCache();
     const cp = require('child_process');
-    const https = require('https');
     const updateSkillPath = require.resolve('../update-skill');
     const saved = {
       spawn: cp.spawn,
-      httpsGet: https.get,
       updateSkillCache: require.cache[updateSkillPath],
     };
     cp.spawn = spawnImpl;
@@ -63,27 +107,13 @@ describe('upgrade.js --apply execSync path', () => {
       children: [],
       paths: [],
     };
-    const body = JSON.stringify({ latest: latestVersion });
-    https.get = (_url, _opts, cb) => {
-      const callback = typeof _opts === 'function' ? _opts : cb;
-      if (!callback) return { on: () => undefined, destroy: () => undefined };
-      const mockRes = {
-        statusCode: 200,
-        on: (evt, handler) => {
-          if (evt === 'data') handler(body);
-          if (evt === 'end') handler();
-          return mockRes;
-        },
-      };
-      callback(mockRes);
-      return { on: () => undefined, destroy: () => undefined };
-    };
+    const restoreHttpsGet = installFakeHttpsGet(latestVersion);
     try {
       const m = require('../upgrade');
       return await fn(m);
     } finally {
       cp.spawn = saved.spawn;
-      https.get = saved.httpsGet;
+      restoreHttpsGet();
       if (saved.updateSkillCache) require.cache[updateSkillPath] = saved.updateSkillCache;
       else delete require.cache[updateSkillPath];
     }
@@ -150,16 +180,13 @@ describe('upgrade.js --apply execSync path', () => {
 
   // ── withMockedEnv variant: also mocks getLocalVersion() to return null ──
   async function withMockedEnvNoLocal(latestVersion, spawnImpl, fn) {
-    const fs = require('fs');
-    const os = require('os');
-    const cpPath = require('path').join(os.homedir(), '.xp-gate', 'version-cache.json');
+    const cpPath = path.join(cacheDir, 'version-cache.json');
     if (fs.existsSync(cpPath)) {
       try { fs.unlinkSync(cpPath); } catch { }
     }
     evictCache();
     const cp = require('child_process');
-    const https = require('https');
-    const saved = { spawn: cp.spawn, httpsGet: https.get, fsReadFileSync: fs.readFileSync };
+    const saved = { spawn: cp.spawn, fsReadFileSync: fs.readFileSync };
     cp.spawn = spawnImpl;
     // Make getLocalVersion() return null by making fs.readFileSync throw for package.json
     fs.readFileSync = (filePath, encoding) => {
@@ -170,27 +197,13 @@ describe('upgrade.js --apply execSync path', () => {
       }
       return saved.fsReadFileSync.call(fs, filePath, encoding);
     };
-    const body = JSON.stringify({ latest: latestVersion });
-    https.get = (_url, _opts, cb) => {
-      const callback = typeof _opts === 'function' ? _opts : cb;
-      if (!callback) return { on: () => undefined, destroy: () => undefined };
-      const mockRes = {
-        statusCode: 200,
-        on: (evt, handler) => {
-          if (evt === 'data') handler(body);
-          if (evt === 'end') handler();
-          return mockRes;
-        },
-      };
-      callback(mockRes);
-      return { on: () => undefined, destroy: () => undefined };
-    };
+    const restoreHttpsGet = installFakeHttpsGet(latestVersion);
     try {
       const m = require('../upgrade');
       return await fn(m);
     } finally {
       cp.spawn = saved.spawn;
-      https.get = saved.httpsGet;
+      restoreHttpsGet();
       fs.readFileSync = saved.fsReadFileSync;
     }
   }

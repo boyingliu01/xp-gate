@@ -38,6 +38,11 @@ ignore:
 - 'src/npm-package/adapters/**'
 - 'src/npm-package/hooks/**'
 
+entry_points:
+- 'scripts/**/*.cjs'
+- 'scripts/**/*.mjs'
+- 'skills/**/__tests__/*.cjs'
+
 # Per-rule configuration
 #
 # code_clone detector reports a single smell that pairs each clone with its
@@ -53,15 +58,25 @@ rules:
     exclude:
     - 'plugins/**/*.ts'
     - 'plugins/**/*.js'
+    - 'plugins/**/*.cjs'
+    - 'plugins/**/*.mjs'
+    - 'plugins/qoder/skills/**'
     - 'skills/**'
     - 'githooks/adapters/**'
     - 'githooks/pre-commit'
     - 'githooks/pre-push'
     - 'githooks/adapter-common.sh'
     # Mirror trees: src/npm-package/*/ are sync copies of src/*
+    - 'src/npm-package/plugins/**/*.cjs'
+    - 'src/npm-package/plugins/**/*.mjs'
     - 'src/npm-package/principles/**'
     - 'src/npm-package/mock-policy/**'
     - 'src/npm-package/mutation/**'
+    - 'src/npm-package/build-integrity/**'
     - 'src/npm-package/debugger/**'
     - 'src/npm-package/architecture/**'
     - 'src/npm-package/rules/**'
+    # Mechanical copy guarded before and after sync by check-delphi-runner-mirror.sh
+    - 'src/npm-package/scripts/delphi-external-review.cjs'
+    # Mechanical copy guarded by check-hook-lib-mirror.sh and install/sync tests
+    - 'src/npm-package/hooks/lib/validate-code-walkthrough.cjs'
