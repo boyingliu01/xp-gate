@@ -18,7 +18,7 @@ Web 前端项目额外增加：原生 UI 审查 + 可选增强。
 ### 调用 Skills
 
 **所有项目（原生 HARD-GATE 链）**:
-- `delphi-review --mode code-walkthrough` — 多专家匿名代码走查（2-3 domestic models, ≥90% consensus）
+- `delphi-review --mode code-walkthrough` — 三位专家匿名代码走查，验证三个 distinct requested_model 并聚合 ≥90% consensus
 - `test-specification-alignment` — 测试与 Spec 对齐验证（#367 程序化 HARD-GATE）
 - `xp-gate check --all` — 全量质量门禁（Gate 0–9，含安全审计）
 
@@ -50,11 +50,11 @@ ELSE → SKIP 并记录 "[sprint-flow] 浏览器验证 SKIP（无可用浏览器
 skill(name="delphi-review", user_message="--mode code-walkthrough")
 ```
 
-- 2-3 位国内模型专家匿名独立评审（DeepSeek-v4-pro + Kimi-K2.6 + Qwen3.6-Plus）
-- Round 1: 匿名独立评审（防止 anchoring bias）
-- Round 2: 交换意见，响应关切
-- Round 3: 最终立场（如需）
-- ≥90% 共识 + APPROVED 才通过
+- architecture、technical、feasibility 三位专家匿名独立评审，模型 ID 必须 distinct
+- Round 1: 三位专家独立执行，输出 `result_type=delphi_expert_result`
+- 验证三份成功结果和三个 distinct requested_model 后再聚合
+- 后续轮次最多到 Round 5，≥90% 共识 + APPROVED 才通过
+- 任一失败或模型重复都阻断，不降级为少数专家
 
 **如果 REQUEST_CHANGES**: 暂停等待用户处理 → 修复后重新评审。**如果 APPROVED**: 写入 `.code-walkthrough-result.json`（1 小时有效期）→ 进入 Step 2。
 

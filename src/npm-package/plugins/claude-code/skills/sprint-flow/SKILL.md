@@ -165,14 +165,14 @@ PREP → DESIGN → BUILD → VERIFY → SHIP → CLOSE
 | Phase | Name | Key Actions | Output |
 |-------|------|-------------|--------|
 | 1/6 | PREP | Detect protected branch → Create git worktree → AUTO-ESTIMATE sizing → Classify (lightweight/standard/complex) | Worktree path + impact assessment |
-| 2/6 | DESIGN | CONTEXT.md 预检 (#322) → grill-with-docs → R1 需求评审 → 设计文档+APPROVAL (HARD-GATE) → batch-grill-me → R2 delphi-review (≥90% consensus) → to-issues → specification.yaml | specification.yaml + slices-manifest.json + requirements-reviewed.json |
+| 2/6 | DESIGN | CONTEXT.md 预检 (#322) → grill-with-docs → R1 需求评审 → 设计文档+APPROVAL (HARD-GATE) → batch-grill-me → R2 delphi-review (3 distinct models, ≥90% consensus, max 5 rounds) → to-issues → specification.yaml | specification.yaml + slices-manifest.json + requirements-reviewed.json |
 | 3/6 | BUILD | BUILD-ENTRY-CONTRACT → GITHOOKS-GATE → DELPHI-GATE → ralph-loop (default) or parallel → TDD → blind-review (read-only subagent) → verification | MVP code |
 | 4/6 | VERIFY | delphi-review --mode code-walkthrough → test-specification-alignment (#367 HARD-GATE) → xp-gate check --all → browser (Layer 4) → learnings + xp-gate retro | Review report + feedback-log.md + test-alignment-report.json |
 | 5/6 | SHIP | VERSION-GATE → 分支完成决策 (4选项) → native ship (create PR) → native land (merge + CI + canary) | PR URL + deploy status + merge confirmation |
 | 6/6 | CLOSE | SHIP→CLOSE GATE (merge verified) → Backup sprint-state → #369 返工指标 → USER ACCEPTANCE (⚠️ mandatory manual) → Capture emergent issues → Cleanup worktree + branch | Emergent issues list + cleanup report + metrics |
 
 **Hard Gates**:
-- **DESIGN → BUILD**: R1 需求评审 APPROVED + 设计文档用户 APPROVED + R2 delphi-review APPROVED (≥90% consensus) + GITHOOKS-GATE + DELPHI-GATE + BUILD-ENTRY-CONTRACT (manifest schema + slice↔REQ)
+- **DESIGN → BUILD**: R1 and R2 invoke all three expert roles independently, verify successful results with three distinct requested models, then aggregate APPROVED consensus ≥90% within 5 rounds, plus GITHOOKS-GATE + DELPHI-GATE + BUILD-ENTRY-CONTRACT (manifest schema + slice↔REQ)
 - **VERIFY → SHIP**: feedback-log.md must exist + test-alignment-report.json PASS (#367 程序化 HARD-GATE)
 - **SHIP → CLOSE**: PR must be merged to main + release completed (HARD-GATE)
 
@@ -339,7 +339,7 @@ stateDiagram-v2
     [*] --> PREP : trigger matched
     PREP --> DESIGN : worktree ready
     DESIGN --> BUILD : APPROVED ≥90%
-    DESIGN --> DESIGN : REQUEST_CHANGES (max 3 rounds)
+    DESIGN --> DESIGN : REQUEST_CHANGES (max 5 Delphi rounds)
     BUILD --> VERIFY : tests pass
     BUILD --> BUILD : fix cycle (max 3)
     VERIFY --> SHIP : feedback-log exists
@@ -348,7 +348,7 @@ stateDiagram-v2
     SHIP --> SHIP : CI failed (retry)
     CLOSE --> [*] : UAT confirmed
     BUILD --> BLOCKED : 3 fix cycles exhausted
-    DESIGN --> BLOCKED : 3 redesign rounds exhausted
+    DESIGN --> BLOCKED : 5 Delphi rounds exhausted
     BLOCKED --> [*] : user decision
 ```
 

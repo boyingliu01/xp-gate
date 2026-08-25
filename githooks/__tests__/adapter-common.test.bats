@@ -24,8 +24,8 @@ setup() {
 }
 
 @test "check_if_tool_available returns 1 for jscpd when not in PATH" {
-  # jscpd is in node_modules/.bin, not in global PATH
-  run check_if_tool_available "jscpd"
+  empty_path=$(mktemp -d)
+  run env PATH="$empty_path" /bin/bash -c "source '$BATS_TEST_DIRNAME/../adapter-common.sh'; check_if_tool_available jscpd"
   [ "$status" -eq 1 ]
 }
 

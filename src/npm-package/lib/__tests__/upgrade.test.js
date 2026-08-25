@@ -18,8 +18,9 @@ function capture() {
 }
 
 describe('upgrade.js — REQ-001-02', () => {
-  let mod;
   let r;
+  let cacheDir;
+  let savedCacheDir;
 
   function evictLibCache() {
     const resolved = require.resolve('../upgrade');
@@ -33,20 +34,22 @@ describe('upgrade.js — REQ-001-02', () => {
   }
 
   beforeEach(() => {
-    // Clear disk cache so checkUpgrade doesn't see stale data from
-    // upgrade-exec.test.js's mock (which wrote version-cache.json).
-    const fs = require('fs');
-    const os = require('os');
-    const cpPath = require('path').join(os.homedir(), '.xp-gate', 'version-cache.json');
-    if (fs.existsSync(cpPath)) { try { fs.unlinkSync(cpPath); } catch { } }
+    savedCacheDir = process.env.XP_GATE_CACHE_DIR;
+    r = undefined;
+    cacheDir = undefined;
+    cacheDir = fs.mkdtempSync(path.join(require('os').tmpdir(), 'upgrade-test-cache-'));
+    process.env.XP_GATE_CACHE_DIR = cacheDir;
     evictLibCache();
     vi.resetModules();
     r = capture();
-    mod = require('../upgrade');
+    require('../upgrade');
   });
 
   afterEach(() => {
-    r.restore();
+    r?.restore();
+    if (savedCacheDir === undefined) delete process.env.XP_GATE_CACHE_DIR;
+    else process.env.XP_GATE_CACHE_DIR = savedCacheDir;
+    if (cacheDir) fs.rmSync(cacheDir, { recursive: true, force: true });
   });
 
   // AC-002-01 through AC-002-06: tested in upgrade-exec.test.js (isolated, no real network)
@@ -73,5 +76,3 @@ describe('upgrade.js — REQ-001-02', () => {
     });
   });
 });
-
-

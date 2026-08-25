@@ -203,6 +203,7 @@ function syncHooks() {
   const libSrc = path.join(SRC, 'lib');
   const libDst = path.join(DST, 'lib');
   if (fs.existsSync(libSrc)) {
+    fs.rmSync(libDst, { recursive: true, force: true });
     copyDir(libSrc, libDst);
     copied += 1;
   }

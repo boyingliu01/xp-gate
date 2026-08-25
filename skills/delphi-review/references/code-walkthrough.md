@@ -14,11 +14,11 @@
 
 ## Five Core Properties
 
-1. **匿名性** — Expert A/B 互不知道对方意见
+1. **匿名性** — Expert A/B/C 在 Round 1 互不知道对方意见
 2. **迭代共识** — 多轮直到 APPROVED
 3. **零容忍** — Critical Issues 必须修复
 4. **零降级** — 环境/资源问题必须阻断，通知用户解决
-5. **强制覆盖** — 超过阈值必须 BLOCK，不能跳过
+5. **强制覆盖** — 变更必须完整评审；大型变更由用户选择完整评审或在评审前拆分
 
 ---
 
@@ -72,11 +72,13 @@ pre-push hook
     │         │
     │         ├─→ Expert B (实现 + 代码质量) 匿名评审 (含 principles_findings)
     │         │
+    │         ├─→ Expert C (可行性) 匿名评审 (含 principles_findings)
+    │         │
     │         ├─→ 共识检查
     │         │      │
-    │         │      ├─→ 2/2 APPROVED → 允许推送
+    │         │      ├─→ 三份成功结果、三个 distinct requested_model、≥90% → 允许推送
     │         │      │
-    │         │      ├─→ 分歧 → Expert C 仲裁
+    │         │      ├─→ 分歧 → 继续下一轮（最多 5 轮）
     │         │      │
     │         │      └─→ REQUEST_CHANGES → 阻塞推送
     │         │
@@ -93,9 +95,9 @@ pre-push hook
 |------|------|------|
 | Expert A | 架构 + 设计评审 | `.delphi-config.json` → `experts.architecture` |
 | Expert B | 实现 + 代码质量 | `.delphi-config.json` → `experts.technical` |
-| Expert C (仲裁) | 冲突裁决 | `.delphi-config.json` → `experts.feasibility` |
+| Expert C | 可行性评审 | `.delphi-config.json` → `experts.feasibility` |
 
-> ⚠️ **注意**: 至少配置 **两个不同 provider** 的模型。详见 [INSTALL.md](./INSTALL.md)。
+> 必须成功执行三个专家角色，并验证三个 distinct trimmed requested_model。Provider、vendor、gateway 和模型国籍均不受限制。`provider: local` fallback 不能计数，local hosted endpoint 可作为普通 callable provider。
 
 ---
 
@@ -171,8 +173,9 @@ pre-push hook
     │         │
     │         └─→ Step 2: Delphi Code Walkthrough
     │                  │
-    │                  ├─→ Expert A 评审 (含 principles_findings)
-    │                  ├─→ Expert B 评审 (含 principles_findings)
+    │                  ├─→ Expert A / architecture 评审 (含 principles_findings)
+    │                  ├─→ Expert B / technical 评审 (含 principles_findings)
+    │                  ├─→ Expert C / feasibility 评审 (含 principles_findings)
     │                  └─→ 共识检查
     │
     └─→ 允许/阻塞推送
@@ -237,10 +240,10 @@ pre-push hook
 
 | 条件 | 结果 |
 |------|------|
-| 2/2 APPROVED + 无 Critical Issues | ✅ 允许推送 |
-| 2/2 APPROVED + 有 Minor Issues | ✅ 允许推送（记录问题） |
-| 1/2 APPROVED | ⚠️ 需要 Expert C 仲裁 |
-| 0/2 APPROVED | ❌ 阻塞推送 |
+| 三份成功结果、三个 distinct requested_model、≥90% 且无 Critical Issues | ✅ 允许推送 |
+| 三份成功结果、≥90% 且有 Minor Issues | ✅ 允许推送（记录问题） |
+| 任一专家失败、缺失或模型重复 | ❌ 阻塞推送 |
+| 共识不足或有 Critical Issues | ❌ 阻塞推送 |
 | 有 Critical Issues | ❌ 阻塞推送 |
 | 有 Major Issues 且未处理 | ❌ 阻塞推送 |
 
@@ -251,26 +254,9 @@ pre-push hook
 | 指标 | 阈值 | 处理 |
 |------|------|------|
 | 单次走查成本 | ~$0.03 | 正常执行 |
-| 最大评审文件数 | 20 个文件 | 超过 → **BLOCK** |
-| 最大 diff 行数 | 500 行 | 超过 → **BLOCK** |
+| 变更规模 | 无硬性文件数或行数上限 | 大型变更必须完整评审或由用户选择拆分 |
 
-**超过阈值处理 (零降级)**：
-
-```
-IF 超过阈值:
-  → BLOCK 推送
-  → 通知用户：变更过大，无法有效评审
-  → 用户选项：
-     A. 拆分变更（推荐）
-     B. 用户明确授权跳过走查（需书面确认风险）
-
-  ❌ 禁止自动跳过走查
-  ❌ 禁止自动分批并批准
-```
-
-**设计原则**：
-- 大变更跳过评审 = 质量风险泄露到生产环境
-- 用户有权决定是否接受风险，AI 不能自动跳过
+大型变更没有自动跳过或绕过路径。用户可以选择完整评审，或在评审前主动拆分变更；每个变更仍须通过完整的走查和证据验证。
 
 ---
 
@@ -282,7 +268,7 @@ IF 超过阈值:
 BEFORE code walkthrough:
   ├─ 检查 Expert A 模型可用性
   ├─ 检查 Expert B 模型可用性
-  ├─ 检查 Expert C 模型可用性（仲裁时需要）
+  ├─ 检查 Expert C 模型可用性
   └─ 检查 OpenCode CLI 可用性
 
 IF 任何检查失败:
@@ -296,8 +282,7 @@ IF 任何检查失败:
 
 | 情况 | 处理 |
 |------|------|
-| Expert A API 错误 | BLOCK + 提示用户检查 API key |
-| Expert B API 错误 | BLOCK + 提示用户检查 API key |
+| 任一专家 API 错误 | BLOCK + 提示用户检查 provider/API key |
 | OpenCode CLI 缺失 | BLOCK + 提示用户安装 OpenCode |
 
 ---
@@ -305,7 +290,7 @@ IF 任何检查失败:
 ## Expert 评审输出格式
 
 ```markdown
-## Code Walkthrough - Expert [A/B]
+## Code Walkthrough - Expert [A/B/C]
 
 ### 变更摘要
 [变更的主要内容]
@@ -340,6 +325,7 @@ IF 任何检查失败:
 ### 专家意见汇总
 - Expert A: [APPROVED / REQUEST_CHANGES]
 - Expert B: [APPROVED / REQUEST_CHANGES]
+- Expert C: [APPROVED / REQUEST_CHANGES]
 
 ### 共识结果
 [CONSENSUS / DISAGREEMENT]
@@ -370,8 +356,9 @@ IF 任何检查失败:
   "verdict": "APPROVED",
   "confidence": 9,
   "experts": [
-    { "id": "Expert A", "verdict": "APPROVED", "confidence": 9 },
-    { "id": "Expert B", "verdict": "APPROVED", "confidence": 8 }
+    { "id": "Expert A", "role": "architecture", "verdict": "APPROVED", "confidence": 9, "result_type": "delphi_expert_result", "requested_model": "provider/model-a", "resolved_model": "provider/model-a" },
+    { "id": "Expert B", "role": "technical", "verdict": "APPROVED", "confidence": 8, "result_type": "delphi_expert_result", "requested_model": "provider/model-b", "resolved_model": null },
+    { "id": "Expert C", "role": "feasibility", "verdict": "APPROVED", "confidence": 8, "result_type": "delphi_expert_result", "requested_model": "provider/model-c", "resolved_model": "provider/model-c" }
   ],
   "issues": [],
   "consensus_ratio": 1.0,
@@ -409,7 +396,8 @@ Hook 验证以下条件（全部满足才允许 push）：
 2. JSON 格式有效
 3. commit hash 匹配当前 HEAD
 4. verdict = APPROVED
-5. timestamp 未过期 (< 1小时)
+5. timestamp 未过期
+6. expires 必须是 timestamp 之后恰好 1 小时
 
 ---
 
@@ -430,8 +418,7 @@ Hook 验证以下条件（全部满足才允许 push）：
 | 错误 | 正确 |
 |------|------|
 | Expert 不可用时跳过走查 | BLOCK + 提示用户修复环境 |
-| 超过阈值自动跳过走查 | BLOCK + 提示用户拆分变更 |
-| 超过阈值自动分批评审 | BLOCK + 用户决定是否拆分或授权跳过 |
+| 大型变更 | 完整评审或由用户在评审前拆分 |
 | OpenCode CLI 缺失时允许推送 | BLOCK + 提示用户安装 OpenCode |
 | 模型 API 错误时降级单模型 | BLOCK + 提示用户检查 API 配置 |
 | 未写入 `.code-walkthrough-result.json` 就声明完成 | MUST 写入结果文件后才能完成 |
@@ -443,15 +430,17 @@ Hook 验证以下条件（全部满足才允许 push）：
 
 **Pre-requisites (MANDATORY - BLOCK if missing):**
 - [ ] OpenCode CLI 已安装且可用
-- [ ] Expert A 模型 API 可用
-- [ ] Expert B 模型 API 可用
-- [ ] 变更大小在阈值内（文件 ≤20，行数 ≤500）
+- [ ] 三个专家模型 API 均可用
+- [ ] 变更已由用户选择完整评审或拆分为可审阅的变更
 - [ ] Expert A 完成匿名评审
 - [ ] Expert B 完成匿名评审
+- [ ] Expert C 完成匿名评审
 - [ ] 共识检查完成
 
 **CRITICAL - 共识验证 (code-walkthrough):**
-- [ ] 至少 2/2 或 2/3 专家 APPROVED
+- [ ] 三个成功结果均为 `result_type=delphi_expert_result`
+- [ ] 三个 `requested_model` trimmed 后 distinct
+- [ ] 聚合共识 >=90%，并在 exact HEAD 上写入结果
 - [ ] 无 Critical Issues 未解决
 - [ ] 无 Major Issues 未处理（或有处理计划）
 
@@ -470,11 +459,6 @@ Hook 验证以下条件（全部满足才允许 push）：
 **IF 有 Critical Issues:**
 - **CANNOT 允许推送**
 - **MUST 修复后重新走查**
-
-**IF 超过大小阈值:**
-- **CANNOT 允许推送**
-- **MUST BLOCK 并提示拆分变更**
-- **用户可明确授权跳过（需确认风险）**
 
 **⭐ APPROVED 后必做 (code-walkthrough mode)：写入结果文件**
 

@@ -47,7 +47,7 @@
 
 ## Round 3: 最终立场（如需要）
 
-触发条件：Round 2 后仍无共识。所有专家提交最终绑定立场。3 专家模式下若仍无完全一致，2/3 或 3/3 多数裁决生效，记录少数派意见。
+触发条件：Round 2 后仍无共识。所有专家提交最终绑定立场。必须基于三份成功结果聚合达到 ≥90% 共识，不能以多数票或单个专家结果替代全局批准。
 
 ### 输出格式
 
@@ -65,3 +65,70 @@
 ### Critical Issues 修复 | ### Major Concerns 处理 | ### Minor Concerns 说明
 ### 请求重新评审
 ```
+
+---
+
+## Requirements Mode: Round 1（匿名独立需求评审）
+
+### 执行方式
+
+architecture、technical、feasibility 三位专家分别独立收到：需求陈述 + CONTEXT.md + grill session 摘要 + "独立评审需求完整性，不知道其他专家意见"。三次执行必须全部成功，且每份结果都记录 `result_type=delphi_expert_result` 和实际请求的 `requested_model`；模型 ID、provider、vendor、gateway 和国籍不受限制。
+
+### 输出格式
+
+```markdown
+## Requirements Review - Expert [A(architecture)/B(technical)/C(feasibility)]
+
+### 需求摘要
+[被评审需求的简短概括]
+
+### 评审焦点
+- 需求完整性: [评估]
+- 需求→AC 映射: [评估]
+- 场景覆盖: [评估]
+- AC 可测试性: [评估]
+- 用户画像清晰度: [评估]
+- 范围边界: [评估]
+
+### 缺口清单 (Gaps)
+#### Critical Gaps (必须解决才能进入设计)
+1. [缺口描述] - 影响: [...] - 补充建议: [...]
+#### Minor Gaps (建议补充但不阻塞)
+1. [...]
+
+### 裁决: [APPROVED / GAPS_FOUND]
+### 置信度: [X/10]
+### 关键理由
+1. [...]
+```
+
+## Requirements Mode: Round 2（带上下文的补充评审，如需要）
+
+### 触发条件
+
+前一轮裁决为 GAPS_FOUND，grill-with-docs 补充访谈后重新评审。最多执行 5 轮。
+
+### 执行方式
+
+三位专家分别收到：更新后的需求陈述 + CONTEXT.md + **前一轮 gaps 列表** + "评估已有缺口是否已修复，是否有新缺口"。每轮仍需三份成功、可验证的独立结果，不得减少专家数。
+
+### 输出格式
+
+```markdown
+## Requirements Review Round [2-5] - Expert [A(architecture)/B(technical)/C(feasibility)]
+
+### Round 1 缺口修复验证
+| Round 1 Gap | 状态 | 说明 |
+|-------------|------|------|
+| [gap 描述] | ✅ 已修复 / ❌ 仍存在 | [验证说明] |
+
+### 新发现缺口（如有）
+1. [新缺口描述]
+
+### 裁决: [APPROVED / GAPS_FOUND]
+### 置信度: [X/10]
+### 立场变化说明
+[与 Round 1 相比的立场变化]
+```
+
+> ⚠️ Round 5 后仍 GAPS_FOUND → `escalation_needed: true`，升级给用户决策。任何较早轮次都不能以两位专家、多数票或单个结果产生 APPROVED 证据。

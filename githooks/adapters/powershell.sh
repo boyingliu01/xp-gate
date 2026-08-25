@@ -29,14 +29,57 @@ _detect_pwsh() {
   fi
 }
 
+_find_powershell_files() {
+  local name_pattern="$1"
+  find . \
+    \( -type d \( \
+      -name .git -o \
+      -name node_modules -o \
+      -name dist -o \
+      -name coverage -o \
+      -path './plugins/claude-code/skills' -o \
+      -path './plugins/opencode/skills' -o \
+      -path './plugins/qoder/skills' -o \
+      -path './src/npm-package/skills' -o \
+      -path './src/npm-package/plugins' \
+    \) -prune \) -o \
+    \( -type f -name "$name_pattern" -print \) 2>/dev/null
+}
+
+_powershell_invocation() {
+  local executable="$1"
+  POWERSHELL_ARGS=(-NoProfile)
+  case "${executable##*/}" in
+    powershell.exe|powershell)
+      POWERSHELL_ARGS[${#POWERSHELL_ARGS[@]}]=-ExecutionPolicy
+      POWERSHELL_ARGS[${#POWERSHELL_ARGS[@]}]=Bypass
+      ;;
+  esac
+  POWERSHELL_ARGS[${#POWERSHELL_ARGS[@]}]=-Command
+}
+
+_powershell_path_array() {
+  local path
+  local separator=""
+  printf '@('
+  for path in "$@"; do
+    path=${path//\'/\'\'}
+    printf "%s'%s'" "$separator" "$path"
+    separator=","
+  done
+  printf ')'
+}
+
 run_static_analysis() {
   local PWSH
   PWSH=$(_detect_pwsh)
   if [ -n "$PWSH" ]; then
+    local POWERSHELL_ARGS
+    _powershell_invocation "$PWSH"
     echo "Running PSScriptAnalyzer static analysis on PowerShell scripts..."
     # Recursively analyze all .ps1 files from repo root
     # Exit with non-zero if Error or Warning severity issues found
-    "$PWSH" -NoProfile -Command "
+    "$PWSH" "${POWERSHELL_ARGS[@]}" "
       \$results = Invoke-ScriptAnalyzer -Path . -Recurse -Severity Error,Warning
       if (\$results) {
         \$results | Format-Table -AutoSize
@@ -64,30 +107,24 @@ run_tests() {
     return 0
   fi
 
-  # Check if Pester tests exist in common locations
-  local test_paths=""
-  if [ -d "tests" ]; then
-    test_paths="tests/"
-  elif [ -d "test" ]; then
-    test_paths="test/"
-  fi
+  local POWERSHELL_ARGS
+  _powershell_invocation "$PWSH"
 
-  if [ -n "$test_paths" ] && find "$test_paths" -name "*.Tests.ps1" -type f 2>/dev/null | sed -n '1p; 1q' | grep -q "."; then
+  local test_files=()
+  local discovery_file
+  local path
+  local test_paths
+  discovery_file=$(mktemp)
+  _find_powershell_files "*.Tests.ps1" > "$discovery_file"
+  while IFS= read -r path; do
+    test_files[${#test_files[@]}]="$path"
+  done < "$discovery_file"
+  rm -f "$discovery_file"
+  if [ "${#test_files[@]}" -gt 0 ]; then
+    test_paths=$(_powershell_path_array "${test_files[@]}")
     echo "Running Pester tests..."
-    "$PWSH" -NoProfile -Command "
-      \$results = Invoke-Pester -Path '$test_paths' -PassThru
-      if (\$results.FailedCount -gt 0) {
-        Write-Host \"FAILED: \$(\$results.FailedCount) test(s)\"
-        exit 1
-      }
-      Write-Host \"PASSED: \$(\$results.PassedCount) test(s)\"
-      exit 0
-    "
-    return $?
-  elif find . -maxdepth 2 -name "*.Tests.ps1" -type f 2>/dev/null | sed -n '1p; 1q' | grep -q "."; then
-    echo "Running Pester tests in current directory..."
-    "$PWSH" -NoProfile -Command "
-      \$results = Invoke-Pester -CI -PassThru
+    "$PWSH" "${POWERSHELL_ARGS[@]}" "
+      \$results = Invoke-Pester -Path $test_paths -PassThru
       if (\$results.FailedCount -gt 0) {
         Write-Host \"FAILED: \$(\$results.FailedCount) test(s)\"
         exit 1
@@ -110,18 +147,32 @@ run_coverage() {
     return 0
   fi
 
-  local test_paths=""
-  if [ -d "tests" ]; then
-    test_paths="tests/"
-  elif [ -d "test" ]; then
-    test_paths="test/"
-  fi
+  local POWERSHELL_ARGS
+  _powershell_invocation "$PWSH"
 
-  if [ -n "$test_paths" ] || find . -maxdepth 2 -name "*.Tests.ps1" -type f 2>/dev/null | sed -n '1p; 1q' | grep -q "."; then
+  local test_files=()
+  local source_files=()
+  local discovery_file
+  local path
+  local test_paths
+  local coverage_paths
+  discovery_file=$(mktemp)
+  _find_powershell_files "*.Tests.ps1" > "$discovery_file"
+  # Discovery is line-delimited; filenames containing newlines are unsupported.
+  while IFS= read -r path; do
+    test_files[${#test_files[@]}]="$path"
+  done < "$discovery_file"
+  if [ "${#test_files[@]}" -gt 0 ]; then
+    _find_powershell_files "*.ps1" | grep -v '\.Tests\.ps1$' > "$discovery_file"
+    while IFS= read -r path; do
+      source_files[${#source_files[@]}]="$path"
+    done < "$discovery_file"
+    rm -f "$discovery_file"
+    test_paths=$(_powershell_path_array "${test_files[@]}")
+    coverage_paths=$(_powershell_path_array "${source_files[@]}")
     echo "Running Pester with code coverage..."
-    local path_arg="${test_paths:-.}"
-    "$PWSH" -NoProfile -Command "
-      \$results = Invoke-Pester -Path '$path_arg' -CodeCoverage @(Get-ChildItem -Path . -Filter *.ps1 -Recurse -Exclude *.Tests.ps1) -PassThru
+    "$PWSH" "${POWERSHELL_ARGS[@]}" "
+      \$results = Invoke-Pester -Path $test_paths -CodeCoverage $coverage_paths -PassThru
       \$pct = [math]::Round(\$results.CodeCoverage.CoveragePercent, 1)
       Write-Host \"Coverage: \$pct%\"
       if (\$pct -lt 80) {
@@ -132,6 +183,7 @@ run_coverage() {
     " 2>&1
     return $?
   else
+    rm -f "$discovery_file"
     echo "No Pester tests found for coverage measurement"
     return 0
   fi

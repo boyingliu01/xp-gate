@@ -41,6 +41,8 @@ MOCK
   mkdir -p .git/hooks
   cp "$SOURCE_GITHOOKS/pre-push" .git/hooks/pre-push
   chmod +x .git/hooks/pre-push
+  mkdir -p .git/hooks/lib
+  cp "$SOURCE_GITHOOKS/lib/validate-code-walkthrough.cjs" .git/hooks/lib/validate-code-walkthrough.cjs
   # adapter-common.sh is sourced by pre-push at Gate M
   cp "$SOURCE_GITHOOKS/adapter-common.sh" .git/hooks/adapter-common.sh 2>/dev/null || true
 
@@ -56,9 +58,15 @@ MOCK
 {
   "commit": "$current_sha",
   "verdict": "APPROVED",
+  "timestamp": "$(date -u -d '-1 minute' +%Y-%m-%dT%H:%M:%SZ)",
   "expires": "$(date -u -d '+1 hour' +%Y-%m-%dT%H:%M:%SZ)",
   "branch": "test-branch",
-  "confidence": 9
+  "consensus_ratio": 0.95,
+  "experts": [
+    {"role":"architecture","verdict":"APPROVED","result_type":"delphi_expert_result","requested_model":"model-a","resolved_model":"model-a"},
+    {"role":"technical","verdict":"APPROVED","result_type":"delphi_expert_result","requested_model":"model-b","resolved_model":null},
+    {"role":"feasibility","verdict":"APPROVED","result_type":"delphi_expert_result","requested_model":"model-c","resolved_model":"model-c"}
+  ]
 }
 EOF
 }
@@ -101,9 +109,15 @@ run_pre_push() {
 {
   "commit": "$local_sha",
   "verdict": "APPROVED",
+  "timestamp": "$(date -u -d '-1 minute' +%Y-%m-%dT%H:%M:%SZ)",
   "expires": "$(date -u -d '+1 hour' +%Y-%m-%dT%H:%M:%SZ)",
   "branch": "test-branch",
-  "confidence": 9
+  "consensus_ratio": 0.95,
+  "experts": [
+    {"role":"architecture","verdict":"APPROVED","result_type":"delphi_expert_result","requested_model":"model-a","resolved_model":"model-a"},
+    {"role":"technical","verdict":"APPROVED","result_type":"delphi_expert_result","requested_model":"model-b","resolved_model":null},
+    {"role":"feasibility","verdict":"APPROVED","result_type":"delphi_expert_result","requested_model":"model-c","resolved_model":"model-c"}
+  ]
 }
 EOF
   run bash -c "echo 'refs/heads/main $local_sha refs/heads/main $zeros' | .git/hooks/pre-push origin https://example.com"
