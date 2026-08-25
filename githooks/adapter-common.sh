@@ -252,6 +252,22 @@ detect_go_mutation_testable() {
   fi
   return 1
 }
+
+# Check if any changed file matches any of the given regex patterns.
+# Usage: any_changed_files_match "\.ts$" "\.py$"
+# Returns 0 (true) if at least one changed file matches any pattern, 1 (false) otherwise.
+any_changed_files_match() {
+  if [ -z "${CHANGED_FILES:-}" ]; then
+    return 1
+  fi
+  for pattern in "$@"; do
+    if echo "$CHANGED_FILES" | grep -qE "$pattern" 2>/dev/null; then
+      return 0
+    fi
+  done
+  return 1
+}
+
 # Detect if a Java/Kotlin project has PITest (pitest-maven or pitest-gradle) configured
 detect_pitest_testable() {
   # Check for Maven + pitest-maven plugin
