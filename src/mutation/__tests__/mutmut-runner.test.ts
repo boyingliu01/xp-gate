@@ -34,11 +34,15 @@ describe('MutmutRunner', () => {
 
   beforeEach(async () => {
     vi.clearAllMocks();
+    vi.mocked(execSync).mockReset();
+    vi.mocked(spawn).mockReset();
+    vi.mocked(execSync).mockReturnValue('mutmut, version 3.0.0\n');
     tmpDir = join(tmpdir(), `xp-gate-mutmut-test-${Date.now()}`);
     MutmutRunner = (await import('../runners/mutmut-runner')).MutmutRunner;
   });
 
   afterEach(() => {
+    vi.useRealTimers();
     vi.restoreAllMocks();
   });
 
@@ -77,6 +81,57 @@ describe('MutmutRunner', () => {
       const runner = new MutmutRunner();
       const result = await runner.isAvailable();
       expect(result).toBe(false);
+    });
+
+    it('should use WSL when native mutmut is unavailable on Windows', async () => {
+      vi.mocked(execSync).mockImplementation((command) => {
+        if (command === 'mutmut --version') {
+          throw new Error('command not found: mutmut');
+        }
+        return 'mutmut, version 3.0.0\n';
+      });
+
+      const runner = new MutmutRunner('win32');
+      const result = await runner.isAvailable();
+
+      expect(result).toBe(true);
+      expect(execSync).toHaveBeenNthCalledWith(2, 'wsl mutmut --version', {
+        stdio: 'pipe',
+        timeout: 5000,
+      });
+    });
+
+    it('should keep native detection unchanged on non-Windows platforms', async () => {
+      vi.mocked(execSync).mockReturnValue('mutmut, version 3.0.0\n');
+
+      const runner = new MutmutRunner('linux');
+      const result = await runner.isAvailable();
+
+      expect(result).toBe(true);
+      expect(execSync).toHaveBeenCalledTimes(1);
+      expect(execSync).toHaveBeenCalledWith('mutmut --version', {
+        stdio: 'pipe',
+        timeout: 5000,
+      });
+    });
+
+    it('should report unavailable when native mutmut and WSL are unavailable', async () => {
+      vi.mocked(execSync).mockImplementation(() => {
+        throw new Error('command not found');
+      });
+
+      const runner = new MutmutRunner('win32');
+      const result = await runner.isAvailable();
+
+      expect(result).toBe(false);
+      const outcome = await runner.run({
+        files: ['src/main.py'],
+        timeoutMs: 60000,
+        cwd: tmpDir,
+      });
+
+      expect(outcome).toEqual({ report: null, timedOut: false });
+      expect(spawn).not.toHaveBeenCalled();
     });
   });
 
@@ -131,7 +186,393 @@ describe('MutmutRunner', () => {
       expect(result.report!.nrOfSurvivedMutants).toBe(29);
     });
 
-    it('should return timedOut=true when process is killed (code=null)', async () => {
+    it('should execute native mutmut when native detection succeeds on Windows', async () => {
+      let closeCb: ((code: number | null) => void) | null = null;
+      const mockChild = {
+        stdout: { on: vi.fn() },
+        stderr: { on: vi.fn() },
+        on: vi.fn((event: string, cb: (code: number | null) => void) => {
+          if (event === 'close') closeCb = cb;
+        }),
+        kill: vi.fn(),
+        killed: false,
+      };
+      vi.mocked(execSync).mockImplementation((command) => {
+        if (command === 'mutmut --version') return 'mutmut, version 3.0.0\n';
+        throw new Error('WSL unavailable');
+      });
+      vi.mocked(spawn).mockReturnValue(mockChild as unknown as ChildProcess);
+      vi.mocked(existsSync).mockReturnValue(false);
+
+      const runner = new MutmutRunner('win32');
+      expect(await runner.isAvailable()).toBe(true);
+      const promise = runner.run({
+        files: ['src/main.py'],
+        timeoutMs: 60000,
+        cwd: 'C:\\work\\project',
+      });
+      closeCb!(0);
+      await promise;
+
+      expect(execSync).toHaveBeenCalledTimes(1);
+      expect(spawn).toHaveBeenCalledWith(
+        'mutmut',
+        ['run'],
+        expect.objectContaining({ cwd: 'C:\\work\\project' }),
+      );
+    });
+
+    it('should execute selected WSL route with Linux --cd and Windows host cwd', async () => {
+      let closeCb: ((code: number | null) => void) | null = null;
+      const mockChild = {
+        stdout: { on: vi.fn() },
+        stderr: { on: vi.fn() },
+        on: vi.fn((event: string, cb: (code: number | null) => void) => {
+          if (event === 'close') closeCb = cb;
+        }),
+        kill: vi.fn(),
+        killed: false,
+      };
+      vi.mocked(execSync).mockImplementation((command) => {
+        if (command === 'mutmut --version') {
+          throw new Error('native mutmut unavailable');
+        }
+        return 'mutmut, version 3.0.0\n';
+      });
+      vi.mocked(spawn).mockReturnValue(mockChild as unknown as ChildProcess);
+      vi.mocked(existsSync).mockReturnValue(false);
+
+      const runner = new MutmutRunner('win32');
+      expect(await runner.isAvailable()).toBe(true);
+      const promise = runner.run({
+        files: ['src/main.py'],
+        timeoutMs: 60000,
+        cwd: 'C:\\work\\project',
+      });
+      closeCb!(0);
+      await promise;
+
+      expect(spawn).toHaveBeenCalledWith(
+        'wsl',
+        ['--cd', '/mnt/c/work/project', 'mutmut', 'run'],
+        expect.objectContaining({ cwd: 'C:\\work\\project' }),
+      );
+      expect(vi.mocked(spawn).mock.calls[0]?.[2]).not.toHaveProperty('shell');
+    });
+
+    it('should preserve spaced and metacharacter paths as one WSL argv item', async () => {
+      let closeCb: ((code: number | null) => void) | null = null;
+      const mockChild = {
+        stdout: { on: vi.fn() },
+        stderr: { on: vi.fn() },
+        on: vi.fn((event: string, cb: (code: number | null) => void) => {
+          if (event === 'close') closeCb = cb;
+        }),
+        kill: vi.fn(),
+        killed: false,
+      };
+      vi.mocked(execSync).mockImplementation((command) => {
+        if (command === 'mutmut --version') throw new Error('native unavailable');
+        return 'mutmut, version 3.0.0\n';
+      });
+      vi.mocked(spawn).mockReturnValue(mockChild as unknown as ChildProcess);
+      vi.mocked(existsSync).mockReturnValue(false);
+
+      const runner = new MutmutRunner('win32');
+      expect(await runner.isAvailable()).toBe(true);
+      const promise = runner.run({
+        files: ['src/main.py'],
+        timeoutMs: 60000,
+        cwd: 'C:\\work dir\\safe; echo injected',
+      });
+      closeCb!(0);
+      await promise;
+
+      expect(spawn).toHaveBeenCalledWith(
+        'wsl',
+        ['--cd', '/mnt/c/work dir/safe; echo injected', 'mutmut', 'run'],
+        expect.objectContaining({ cwd: 'C:\\work dir\\safe; echo injected' }),
+      );
+      expect(vi.mocked(spawn).mock.calls[0]?.[2]).not.toHaveProperty('shell');
+    });
+
+    it.each([
+      ['uppercase drive', 'C:\\Work\\Project', '/mnt/c/Work/Project'],
+      ['forward slash drive', 'D:/Work/Project', '/mnt/d/Work/Project'],
+    ])('should convert %s paths for WSL', async (_name, windowsPath, linuxPath) => {
+      let closeCb: ((code: number | null) => void) | null = null;
+      const mockChild = {
+        stdout: { on: vi.fn() },
+        stderr: { on: vi.fn() },
+        on: vi.fn((event: string, cb: (code: number | null) => void) => {
+          if (event === 'close') closeCb = cb;
+        }),
+        kill: vi.fn(),
+        killed: false,
+      };
+      vi.mocked(execSync).mockImplementation((command) => {
+        if (command === 'mutmut --version') throw new Error('native unavailable');
+        return 'mutmut, version 3.0.0\n';
+      });
+      vi.mocked(spawn).mockReturnValue(mockChild as unknown as ChildProcess);
+      vi.mocked(existsSync).mockReturnValue(false);
+
+      const runner = new MutmutRunner('win32');
+      expect(await runner.isAvailable()).toBe(true);
+      const promise = runner.run({ files: ['src/main.py'], timeoutMs: 60000, cwd: windowsPath });
+      closeCb!(0);
+      await promise;
+
+      expect(vi.mocked(spawn).mock.calls[0]?.[1]).toEqual(['--cd', linuxPath, 'mutmut', 'run']);
+    });
+
+    it.each(['relative/project', '\\\\server\\share\\project'])(
+      'should fail closed for non-drive WSL path %s', async (cwd) => {
+        vi.mocked(execSync).mockImplementation((command) => {
+          if (command === 'mutmut --version') throw new Error('native unavailable');
+          return 'mutmut, version 3.0.0\n';
+        });
+        vi.mocked(existsSync).mockReturnValue(false);
+
+        const runner = new MutmutRunner('win32');
+        expect(await runner.isAvailable()).toBe(true);
+        const outcome = await runner.run({ files: ['src/main.py'], timeoutMs: 60000, cwd });
+
+        expect(outcome).toEqual({ report: null, timedOut: false });
+        expect(spawn).not.toHaveBeenCalled();
+      },
+    );
+
+    it('should follow repeated native to WSL availability transitions', async () => {
+      let closeCb: ((code: number | null) => void) | null = null;
+      const mockChild = {
+        stdout: { on: vi.fn() },
+        stderr: { on: vi.fn() },
+        on: vi.fn((event: string, cb: (code: number | null) => void) => {
+          if (event === 'close') closeCb = cb;
+        }),
+        kill: vi.fn(),
+        killed: false,
+      };
+      let nativeAvailable = true;
+      vi.mocked(execSync).mockImplementation((command) => {
+        if (command === 'mutmut --version' && nativeAvailable) return 'native';
+        if (command === 'wsl mutmut --version') return 'wsl';
+        throw new Error('unavailable');
+      });
+      vi.mocked(spawn).mockReturnValue(mockChild as unknown as ChildProcess);
+      vi.mocked(existsSync).mockReturnValue(false);
+
+      const runner = new MutmutRunner('win32');
+      expect(await runner.isAvailable()).toBe(true);
+      nativeAvailable = false;
+      expect(await runner.isAvailable()).toBe(true);
+      const promise = runner.run({ files: ['src/main.py'], timeoutMs: 60000, cwd: 'C:\\repo' });
+      closeCb!(0);
+      await promise;
+
+        expect(vi.mocked(spawn).mock.calls[0]?.[0]).toBe('wsl');
+    });
+
+    it('should follow repeated WSL to native availability transitions', async () => {
+      const mockChild = {
+        stdout: { on: vi.fn() },
+        stderr: { on: vi.fn() },
+        on: vi.fn((event: string, cb: (code: number | null) => void) => {
+          if (event === 'close') cb(0);
+        }),
+        kill: vi.fn(),
+        killed: false,
+      };
+      let nativeAvailable = false;
+      vi.mocked(execSync).mockImplementation((command) => {
+        if (command === 'mutmut --version' && nativeAvailable) return 'native';
+        if (command === 'wsl mutmut --version') return 'wsl';
+        throw new Error('unavailable');
+      });
+      vi.mocked(spawn).mockReturnValue(mockChild as unknown as ChildProcess);
+      vi.mocked(existsSync).mockReturnValue(false);
+
+      const runner = new MutmutRunner('win32');
+      expect(await runner.isAvailable()).toBe(true);
+      nativeAvailable = true;
+      expect(await runner.isAvailable()).toBe(true);
+      await runner.run({ files: ['src/main.py'], timeoutMs: 60000, cwd: 'C:\\repo' });
+
+      expect(vi.mocked(spawn).mock.calls[0]?.[0]).toBe('mutmut');
+    });
+
+    it('should stop spawning after availability transitions to unavailable', async () => {
+      vi.mocked(execSync).mockImplementation(() => {
+        throw new Error('unavailable');
+      });
+      vi.mocked(existsSync).mockReturnValue(false);
+
+      const runner = new MutmutRunner('win32');
+      expect(await runner.isAvailable()).toBe(false);
+      const outcome = await runner.run({ files: ['src/main.py'], timeoutMs: 60000, cwd: 'C:\\repo' });
+
+      expect(outcome).toEqual({ report: null, timedOut: false });
+      expect(spawn).not.toHaveBeenCalled();
+    });
+
+    it('should clear timers when the child closes before timeout', async () => {
+      vi.useFakeTimers();
+      const mockChild = {
+        stdout: { on: vi.fn() },
+        stderr: { on: vi.fn() },
+        on: vi.fn((event: string, cb: (code: number | null) => void) => {
+          if (event === 'close') cb(0);
+        }),
+        kill: vi.fn(),
+        killed: false,
+      };
+      vi.mocked(spawn).mockReturnValue(mockChild as unknown as ChildProcess);
+      vi.mocked(existsSync).mockReturnValue(false);
+
+      const result = await new MutmutRunner('linux').run({
+        files: ['src/main.py'],
+        timeoutMs: 100,
+        cwd: tmpDir,
+      });
+      await vi.advanceTimersByTimeAsync(5100);
+
+      expect(result.timedOut).toBe(false);
+      expect(mockChild.kill).not.toHaveBeenCalled();
+    });
+
+    it('should clear timers when the child emits an error', async () => {
+      vi.useFakeTimers();
+      const mockChild = {
+        stdout: { on: vi.fn() },
+        stderr: { on: vi.fn() },
+        on: vi.fn((event: string, cb: (error: Error) => void) => {
+          if (event === 'error') cb(new Error('spawn failed'));
+        }),
+        kill: vi.fn(),
+        killed: false,
+      };
+      vi.mocked(spawn).mockReturnValue(mockChild as unknown as ChildProcess);
+      vi.mocked(existsSync).mockReturnValue(false);
+
+      const result = await new MutmutRunner('linux').run({
+        files: ['src/main.py'],
+        timeoutMs: 100,
+        cwd: tmpDir,
+      });
+      await vi.advanceTimersByTimeAsync(5100);
+
+      expect(result.error).toBe('spawn failed');
+      expect(mockChild.kill).not.toHaveBeenCalled();
+    });
+
+    it('should report timeout when the timed-out process closes with a code', async () => {
+      vi.useFakeTimers();
+      let closeCb: ((code: number | null) => void) | null = null;
+      const mockChild = {
+        stdout: { on: vi.fn() },
+        stderr: { on: vi.fn() },
+        on: vi.fn((event: string, cb: (code: number | null) => void) => {
+          if (event === 'close') closeCb = cb;
+        }),
+        kill: vi.fn(),
+        killed: false,
+      };
+      vi.mocked(execSync).mockImplementation((command) => {
+        if (command === 'mutmut --version') throw new Error('native unavailable');
+        return 'wsl';
+      });
+      vi.mocked(spawn).mockReturnValue(mockChild as unknown as ChildProcess);
+      vi.mocked(existsSync).mockReturnValue(false);
+
+      const runner = new MutmutRunner('win32');
+      expect(await runner.isAvailable()).toBe(true);
+      const promise = runner.run({ files: ['src/main.py'], timeoutMs: 100, cwd: 'C:\\repo' });
+      await vi.advanceTimersByTimeAsync(100);
+      closeCb!(1);
+      const outcome = await promise;
+
+      expect(outcome.timedOut).toBe(true);
+    });
+
+    it('should escalate to SIGKILL when SIGTERM does not close the child', async () => {
+      vi.useFakeTimers();
+      let closeCb: ((code: number | null) => void) | null = null;
+      let killCount = 0;
+      const mockChild = {
+        stdout: { on: vi.fn() },
+        stderr: { on: vi.fn() },
+        on: vi.fn((event: string, cb: (code: number | null) => void) => {
+          if (event === 'close') closeCb = cb;
+        }),
+        kill: vi.fn(() => {
+          killCount += 1;
+          if (killCount === 2) closeCb?.(null);
+          return true;
+        }),
+        killed: false,
+      };
+      vi.mocked(execSync).mockImplementation((command) => {
+        if (command === 'mutmut --version') throw new Error('native unavailable');
+        return 'wsl';
+      });
+      vi.mocked(spawn).mockReturnValue(mockChild as unknown as ChildProcess);
+      vi.mocked(existsSync).mockReturnValue(false);
+
+      const runner = new MutmutRunner('win32');
+      expect(await runner.isAvailable()).toBe(true);
+      const promise = runner.run({ files: ['src/main.py'], timeoutMs: 100, cwd: 'C:\\repo' });
+      await vi.advanceTimersByTimeAsync(100);
+      await vi.advanceTimersByTimeAsync(5000);
+
+      expect(mockChild.kill).toHaveBeenNthCalledWith(1, 'SIGTERM');
+      expect(mockChild.kill).toHaveBeenNthCalledWith(2, 'SIGKILL');
+      await promise;
+    });
+
+    it('should kill the selected WSL process and report timeout', async () => {
+      vi.useFakeTimers();
+      let closeCb: ((code: number | null) => void) | null = null;
+      const mockChild = {
+        stdout: { on: vi.fn() },
+        stderr: { on: vi.fn() },
+        on: vi.fn((event: string, cb: (code: number | null) => void) => {
+          if (event === 'close') closeCb = cb;
+        }),
+        kill: vi.fn(() => {
+          closeCb?.(null);
+          return true;
+        }),
+        killed: false,
+      };
+      vi.mocked(execSync).mockImplementation((command) => {
+        if (command === 'mutmut --version') throw new Error('native unavailable');
+        return 'mutmut, version 3.0.0\n';
+      });
+      vi.mocked(spawn).mockReturnValue(mockChild as unknown as ChildProcess);
+      vi.mocked(existsSync).mockReturnValue(false);
+
+      const runner = new MutmutRunner('win32');
+      expect(await runner.isAvailable()).toBe(true);
+      const promise = runner.run({
+        files: ['src/main.py'],
+        timeoutMs: 100,
+        cwd: 'D:\\repo',
+      });
+      await vi.advanceTimersByTimeAsync(100);
+      const result = await promise;
+
+      expect(spawn).toHaveBeenCalledWith(
+        'wsl',
+        ['--cd', '/mnt/d/repo', 'mutmut', 'run'],
+        expect.objectContaining({ cwd: 'D:\\repo' }),
+      );
+      expect(mockChild.kill).toHaveBeenCalledWith('SIGTERM');
+      expect(result).toEqual({ report: null, timedOut: true });
+      expect(vi.getTimerCount()).toBe(0);
+    });
+
+    it('should return timedOut=false when process closes before timeout (code=null)', async () => {
       const mockChild = {
         stdout: { on: vi.fn() },
         stderr: { on: vi.fn() },
@@ -151,7 +592,7 @@ describe('MutmutRunner', () => {
         cwd: tmpDir,
       });
 
-      expect(result.timedOut).toBe(true);
+      expect(result.timedOut).toBe(false);
       expect(result.report).toBeNull();
     });
 
