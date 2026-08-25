@@ -9,6 +9,9 @@ import type {
   MutationRunResult,
 } from './types';
 
+type Platform = NodeJS.Platform;
+type MutmutRoute = 'native' | 'wsl' | 'unavailable' | 'unresolved';
+
 /**
  * mutmut mutation runner for Python files.
  *
@@ -25,16 +28,40 @@ export class MutmutRunner implements MutationRunner {
   readonly name = 'mutmut';
   readonly extensions = ['py'];
 
+  private route: MutmutRoute = 'unresolved';
+
+  constructor(private readonly platform: Platform = process.platform) {}
+
   async isAvailable(): Promise<boolean> {
     try {
       execSync('mutmut --version', { stdio: 'pipe', timeout: 5000 });
+      this.route = 'native';
       return true;
     } catch {
-      return false;
+      if (this.platform !== 'win32') {
+        this.route = 'unavailable';
+        return false;
+      }
+
+      try {
+        execSync('wsl mutmut --version', { stdio: 'pipe', timeout: 5000 });
+        this.route = 'wsl';
+        return true;
+      } catch {
+        this.route = 'unavailable';
+        return false;
+      }
     }
   }
 
   async run(options: RunMutationOptions): Promise<MutationRunOutcome> {
+    if (this.route === 'unresolved' && this.platform === 'win32') {
+      await this.isAvailable();
+    }
+    if (this.route === 'unavailable') {
+      return { report: null, timedOut: false };
+    }
+
     // Extract unique directories from file list
     const sourceDirs = this.extractUniqueDirs(options.files);
 
@@ -68,14 +95,36 @@ export class MutmutRunner implements MutationRunner {
 
   private async runMutmut(options: RunMutationOptions): Promise<MutationRunOutcome> {
     return new Promise((resolve) => {
-      const child = spawn('mutmut', ['run'], {
-        stdio: 'pipe',
-        shell: true,
-        cwd: options.cwd,
-      });
+      const command = this.route === 'wsl' ? 'wsl' : 'mutmut';
+      const wslPath = this.route === 'wsl' ? this.toWslPath(options.cwd) : options.cwd;
+      if (wslPath === null) {
+        resolve({ report: null, timedOut: false });
+        return;
+      }
+      const args = this.route === 'wsl' ? ['--cd', wslPath, 'mutmut', 'run'] : ['run'];
+      const child = spawn(command, args, { stdio: 'pipe', cwd: options.cwd });
 
       let stderr = '';
       let stdout = '';
+      let didTimeOut = false;
+      let settled = false;
+      const timeoutId = setTimeout(() => {
+        didTimeOut = true;
+        child.kill('SIGTERM');
+        if (settled) return;
+        escalationId = setTimeout(() => {
+          if (!settled) child.kill('SIGKILL');
+        }, 5000);
+      }, options.timeoutMs);
+      let escalationId: NodeJS.Timeout | undefined;
+
+      const settle = (outcome: MutationRunOutcome): void => {
+        if (settled) return;
+        settled = true;
+        if (timeoutId) clearTimeout(timeoutId);
+        if (escalationId) clearTimeout(escalationId);
+        resolve(outcome);
+      };
 
       child.stdout?.on('data', (data: Buffer) => {
         stdout += data.toString();
@@ -85,35 +134,36 @@ export class MutmutRunner implements MutationRunner {
         stderr += data.toString();
       });
 
-      const timeoutId = setTimeout(() => {
-        child.kill('SIGTERM');
-        setTimeout(() => {
-          if (!child.killed) child.kill('SIGKILL');
-        }, 5000);
-      }, options.timeoutMs);
-
       child.on('close', (code) => {
         clearTimeout(timeoutId);
 
         if (code === null) {
-          resolve({ report: null, timedOut: true });
+          settle({ report: null, timedOut: didTimeOut });
           return;
         }
 
         // Parse results from mutmut run stdout (v3.x emoji progress)
         const report = this.parseEmojiProgress(stdout);
-        resolve({
+        settle({
           report,
-          timedOut: false,
+          timedOut: didTimeOut,
           error: code !== 0 ? stderr || stdout : undefined,
         });
       });
 
       child.on('error', (err) => {
         clearTimeout(timeoutId);
-        resolve({ report: null, timedOut: false, error: err.message });
+        settle({ report: null, timedOut: didTimeOut, error: err.message });
       });
     });
+  }
+
+  private toWslPath(path: string): string | null {
+    const match = path.match(/^([A-Za-z]):[\\/](.*)$/);
+    if (!match) return null;
+    const drive = match[1]?.toLowerCase();
+    const remainder = match[2]?.replaceAll('\\', '/');
+    return `/mnt/${drive}/${remainder}`;
   }
 
   /**
