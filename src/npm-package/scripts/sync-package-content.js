@@ -10,6 +10,7 @@ const REPO_ROOT = path.resolve(PKG_ROOT, '..', '..');
 const CORE_SKILLS = [
   'admin-template-guidelines',
   'batch-grill-me',
+  'clipboard-vision',
   'delphi-review',
   'domain-modeling',
   'grill-with-docs',

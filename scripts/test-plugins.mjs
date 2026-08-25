@@ -161,6 +161,7 @@ opencodeBuildResult.status === 0
 console.log('');
 console.log('Test 6: Skill packaging');
 const expectedSkills = [
+  'clipboard-vision',
   'sprint-flow',
   'delphi-review',
   'test-specification-alignment',
@@ -175,6 +176,9 @@ for (const skill of expectedSkills) {
   fileExists(path.join(REPO_ROOT, `plugins/opencode/skills/${skill}/SKILL.md`))
     ? pass(`opencode/skills/${skill}/SKILL.md`)
     : fail(`opencode/skills/${skill}/SKILL.md missing`);
+  fileExists(path.join(REPO_ROOT, `plugins/qoder/skills/${skill}/SKILL.md`))
+    ? pass(`qoder/skills/${skill}/SKILL.md`)
+    : fail(`qoder/skills/${skill}/SKILL.md missing`);
 }
 
 // ---------- Test 7: xp-gate-check graceful degradation ----------

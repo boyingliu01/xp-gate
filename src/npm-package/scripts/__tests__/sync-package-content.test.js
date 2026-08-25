@@ -447,6 +447,7 @@ describe('sync-package-content subprocess invocation', () => {
   const REPO_ROOT = path.join(WORKTREE_PATH);
   const CORE_SKILLS = [
     'admin-template-guidelines',
+    'clipboard-vision',
     'delphi-review',
     'improve-codebase-architecture',
     'ralph-loop',

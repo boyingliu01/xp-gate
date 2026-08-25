@@ -67,6 +67,7 @@ bash "$SCRIPT_DIR/copy-skills.sh" --source "$SKILLS_SOURCE" --dest "$PLUGIN_DIR/
 # When adding a new skill, append it here AND under skills/.
 EXPECTED_SKILLS=(
   "admin-template-guidelines"
+  "clipboard-vision"
   "delphi-review"
   "improve-codebase-architecture"
   "ralph-loop"
