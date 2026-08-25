@@ -1882,15 +1882,21 @@ else
         fi
       else
         # Non-TypeScript: standard adapter test flow
-        TESTS_OUTPUT=$(run_without_git_context run_tests 2>&1)
-        TESTS_EXIT_CODE=$?
-        echo "$TESTS_OUTPUT" | head -50
-        if [ "$TESTS_EXIT_CODE" -ne 0 ]; then
-          echo ""
-          echo "❌ BLOCKED - Tests FAILED"
-          exit 1
-      else
-        echo "✅ PASSED - Unit tests passed."
+        # Skip for Python — tests already run with coverage in the coverage section below.
+        # Running them here first without coverage doubles pre-commit time for no benefit.
+        if [ "$CURRENT_LANG" = "python" ]; then
+          echo "ℹ️  Python tests deferred to coverage section (single pass)."
+        else
+          TESTS_OUTPUT=$(run_without_git_context run_tests 2>&1)
+          TESTS_EXIT_CODE=$?
+          echo "$TESTS_OUTPUT" | head -50
+          if [ "$TESTS_EXIT_CODE" -ne 0 ]; then
+            echo ""
+            echo "❌ BLOCKED - Tests FAILED"
+            exit 1
+          else
+            echo "✅ PASSED - Unit tests passed."
+          fi
         fi
       fi
     else
