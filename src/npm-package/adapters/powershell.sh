@@ -99,6 +99,21 @@ run_lint() {
   run_static_analysis
 }
 
+# Timeout guard for Pester runs.
+# A hanging Pester test (e.g. a test that dot-sources a script whose body performs
+# WMI/registry/scheduled-task scans) would otherwise block `git commit` forever.
+# Default 300s, override via XP_GATE_POWERSHELL_TEST_TIMEOUT_S.
+_pester_timeout() {
+  local default_s="${XP_GATE_POWERSHELL_TEST_TIMEOUT_S:-300}"
+  # Prefer GNU timeout (Git Bash / Linux). On Windows where `timeout` resolves to
+  # the native timeout.exe, fall back to running without a hard timeout.
+  if command -v timeout >/dev/null 2>&1 && timeout --version 2>/dev/null | grep -qi "coreutils"; then
+    timeout "${default_s}s" "$@"
+  else
+    "$@"
+  fi
+}
+
 run_tests() {
   local PWSH
   PWSH=$(_detect_pwsh)
@@ -123,7 +138,7 @@ run_tests() {
   if [ "${#test_files[@]}" -gt 0 ]; then
     test_paths=$(_powershell_path_array "${test_files[@]}")
     echo "Running Pester tests..."
-    "$PWSH" "${POWERSHELL_ARGS[@]}" "
+    _pester_timeout "$PWSH" "${POWERSHELL_ARGS[@]}" "
       \$results = Invoke-Pester -Path $test_paths -PassThru
       if (\$results.FailedCount -gt 0) {
         Write-Host \"FAILED: \$(\$results.FailedCount) test(s)\"
@@ -132,7 +147,14 @@ run_tests() {
       Write-Host \"PASSED: \$(\$results.PassedCount) test(s)\"
       exit 0
     "
-    return $?
+    local run_exit=$?
+    if [ "$run_exit" = "124" ]; then
+      echo "⚠️  Pester tests TIMED OUT after ${XP_GATE_POWERSHELL_TEST_TIMEOUT_S:-300}s (may be hanging)."
+      echo "    A test may be blocking on a system call (WMI/registry/scheduled-task)."
+      echo "    Fix the hanging test, or set XP_GATE_POWERSHELL_TEST_TIMEOUT_S to a higher value."
+      return 1
+    fi
+    return $run_exit
   else
     echo "No Pester tests found"
     return 0
@@ -171,7 +193,7 @@ run_coverage() {
     test_paths=$(_powershell_path_array "${test_files[@]}")
     coverage_paths=$(_powershell_path_array "${source_files[@]}")
     echo "Running Pester with code coverage..."
-    "$PWSH" "${POWERSHELL_ARGS[@]}" "
+    _pester_timeout "$PWSH" "${POWERSHELL_ARGS[@]}" "
       \$results = Invoke-Pester -Path $test_paths -CodeCoverage $coverage_paths -PassThru
       \$pct = [math]::Round(\$results.CodeCoverage.CoveragePercent, 1)
       Write-Host \"Coverage: \$pct%\"
@@ -181,7 +203,12 @@ run_coverage() {
       }
       exit 0
     " 2>&1
-    return $?
+    local cov_exit=$?
+    if [ "$cov_exit" = "124" ]; then
+      echo "⚠️  Pester coverage TIMED OUT after ${XP_GATE_POWERSHELL_TEST_TIMEOUT_S:-300}s (may be hanging)."
+      return 1
+    fi
+    return $cov_exit
   else
     rm -f "$discovery_file"
     echo "No Pester tests found for coverage measurement"
