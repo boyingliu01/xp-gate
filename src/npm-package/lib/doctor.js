@@ -275,6 +275,7 @@ const EXPECTED_GATE_SCRIPTS = [
   'gate-7.sh',
   'gate-8.sh',
   'gate-9.sh',
+  'gate-10.sh',
 ];
 
 async function checkAdapters(checks, mode, gitDirPromise) {
@@ -713,7 +714,7 @@ function fixMissingAdapters(mode, srcDir, adaptersDir) {
 
 /**
  * Restore missing gate scripts from package root to adapters directory.
- * Gate scripts (gate-3.sh through gate-9.sh) are stored in the package root,
+ * Gate scripts (gate-3.sh through gate-10.sh) are stored in the package root,
  * not in the adapters subdirectory.
  */
 function fixMissingGateScripts(srcDir, adaptersDir) {

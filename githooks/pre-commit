@@ -2532,13 +2532,20 @@ echo ""
 
 # ============================================================================
 # GATE 10: Semgrep SAST Security Scan
-# Extracted to gate-10.sh for maintainability (sourced as gate-9.sh)
+# Extracted to gate-10.sh for maintainability
 # v0.14.3+ (Issue #312): Skip if no code files changed
+# v0.18.5 (Issue #397): Fix gate status variable collision — SAST now sets GATE_10_STATUS
 # ============================================================================
 if any_changed_files_match "\.(ts|tsx|js|jsx|py|go|java|kt|cpp|c|swift|m|dart|sh)$"; then
-source "$GATE_DIR/gate-9.sh"
+  if [ -f "$GATE_DIR/gate-10.sh" ]; then
+    source "$GATE_DIR/gate-10.sh"
+  else
+    echo "⏭️  SKIPPED - SAST (gate-10.sh not found)"
+    GATE_10_STATUS="SKIP"
+  fi
 else
   echo "✅ PASSED - No code files changed, skipping SAST scan."
+  GATE_10_STATUS="PASS"
 fi
 # ============================================================================
 
@@ -2642,7 +2649,7 @@ generate_quality_report() {
   # ── Branch-level quality status file ─────────────────────────────────────────────
   local STATUS_DIR=".xp-gate/quality-status"
   local REPORT_FILE="${STATUS_DIR}/${BRANCH}.json"
-  mkdir -p "$STATUS_DIR"
+  mkdir -p "$(dirname "$REPORT_FILE")"
 
   cat > "$REPORT_FILE" << ENDJSON
 {
@@ -2795,5 +2802,6 @@ if [ -n "$_wp_marker" ] && [ "$_wp_marker" != "/xp-gate-precommit-marker" ]; the
 fi
 
 generate_quality_report
+_QUALITY_REPORT_DONE=1
 
 exit 0
