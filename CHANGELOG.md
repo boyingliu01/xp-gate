@@ -15,6 +15,11 @@ All notable changes to this project will be documented in this file.
 ### Added
 - **clipboard-vision skill (#379)**: 跨平台剪贴板图片识别 skill，支持 Windows (PowerShell) 和 WSL/Linux/macOS (bash+xclip/osascript)。使用 `CLIPBOARD_VISION_API_KEY` 环境变量配置 API key，通过 LOCAL/Qwen3.5-122B-A10B 视觉模型将剪贴板截图转为文字描述。包含 `describe-clipboard.ps1`（Windows）和 `describe-clipboard.sh`（跨平台 bash）双脚本实现。
 
+## [0.18.5.1] - 2026-08-26
+
+### Fixed
+- **PowerShell 测试超时保护 (#405)**: `run_tests` / `run_coverage` 现在通过 GNU `timeout` 包裹 `Invoke-Pester`，默认 300s（可用 `XP_GATE_POWERSHELL_TEST_TIMEOUT_S` 覆盖）。此前若某个 Pester 测试挂起（例如测试点源了脚本、脚本体执行 WMI/注册表/计划任务扫描），`git commit` 会无限阻塞。现在超时后会打印清晰警告并返回非零退出码，而非永久挂起。
+
 ## [0.17.0.0] - 2026-07-22
 
 ### Added
