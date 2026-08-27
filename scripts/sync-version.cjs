@@ -106,10 +106,12 @@ const syncTargets = [
   { file: path.join(ROOT_DIR, 'plugins', 'claude-code', '.claude-plugin', 'plugin.json'), version: NPM_VERSION, label: 'plugins/claude-code/.claude-plugin/plugin.json' },
   { file: path.join(ROOT_DIR, 'plugins', 'opencode', 'package.json'), version: NPM_VERSION, label: 'plugins/opencode/package.json' },
   { file: path.join(ROOT_DIR, 'plugins', 'qoder', 'plugin.json'), version: NPM_VERSION, label: 'plugins/qoder/plugin.json' },
+  { file: path.join(ROOT_DIR, 'plugins', 'dsh', 'package.json'), version: NPM_VERSION, label: 'plugins/dsh/package.json' },
   // npm-package mirror copies (for Mirror Parity CI check)
   { file: path.join(ROOT_DIR, 'src', 'npm-package', 'plugins', 'claude-code', '.claude-plugin', 'plugin.json'), version: NPM_VERSION, label: 'src/npm-package/plugins/claude-code/.claude-plugin/plugin.json' },
   { file: path.join(ROOT_DIR, 'src', 'npm-package', 'plugins', 'opencode', 'package.json'), version: NPM_VERSION, label: 'src/npm-package/plugins/opencode/package.json' },
   { file: path.join(ROOT_DIR, 'src', 'npm-package', 'plugins', 'qoder', 'plugin.json'), version: NPM_VERSION, label: 'src/npm-package/plugins/qoder/plugin.json' },
+  { file: path.join(ROOT_DIR, 'src', 'npm-package', 'plugins', 'dsh', 'package.json'), version: NPM_VERSION, label: 'src/npm-package/plugins/dsh/package.json' },
 ];
 
 for (const target of syncTargets) {

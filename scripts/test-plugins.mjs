@@ -98,6 +98,8 @@ dirExists(path.join(REPO_ROOT, 'plugins/claude-code/bin'))
   ? pass('claude-code/bin/') : fail('claude-code/bin/ missing');
 dirExists(path.join(REPO_ROOT, 'plugins/opencode'))
   ? pass('opencode/') : fail('opencode/ missing');
+dirExists(path.join(REPO_ROOT, 'plugins/dsh'))
+  ? pass('dsh/') : fail('dsh/ missing');
 
 // ---------- Test 2: Manifests are valid JSON ----------
 
@@ -109,6 +111,10 @@ isValidJson(path.join(REPO_ROOT, 'plugins/claude-code/hooks/hooks.json'))
   ? pass('Claude hooks.json valid JSON') : fail('Claude hooks.json invalid JSON');
 isValidJson(path.join(REPO_ROOT, 'plugins/opencode/package.json'))
   ? pass('OpenCode package.json valid JSON') : fail('OpenCode package.json invalid JSON');
+isValidJson(path.join(REPO_ROOT, 'plugins/dsh/package.json'))
+  ? pass('dsh package.json valid JSON') : fail('dsh package.json invalid JSON');
+fileExists(path.join(REPO_ROOT, 'plugins/dsh/cordis.patch.yml'))
+  ? pass('dsh cordis.patch.yml present') : fail('dsh cordis.patch.yml missing');
 
 // ---------- Test 3: Version consistency ----------
 
@@ -116,6 +122,7 @@ console.log('');
 console.log('Test 3: Version consistency across manifests');
 const claudeVersion = readJsonField(path.join(REPO_ROOT, 'plugins/claude-code/.claude-plugin/plugin.json'), 'version');
 const opencodeVersion = readJsonField(path.join(REPO_ROOT, 'plugins/opencode/package.json'), 'version');
+const dshVersion = readJsonField(path.join(REPO_ROOT, 'plugins/dsh/package.json'), 'version');
 const npmPkgVersion = readJsonField(path.join(REPO_ROOT, 'src/npm-package/package.json'), 'version');
 
 claudeVersion === npmVersion
@@ -124,6 +131,9 @@ claudeVersion === npmVersion
 opencodeVersion === npmVersion
   ? pass(`OpenCode plugin matches VERSION (${npmVersion})`)
   : fail(`OpenCode plugin version mismatch: ${opencodeVersion} vs ${npmVersion}`);
+dshVersion === npmVersion
+  ? pass(`dsh plugin matches VERSION (${npmVersion})`)
+  : fail(`dsh plugin version mismatch: ${dshVersion} vs ${npmVersion}`);
 npmPkgVersion === npmVersion
   ? pass(`npm package matches VERSION (${npmVersion})`)
   : fail(`npm package version mismatch: ${npmPkgVersion} vs ${npmVersion}`);
