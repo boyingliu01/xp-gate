@@ -2562,6 +2562,8 @@ if [ -f "$GATE_DIR/sprint-gate.sh" ]; then
   SPRINT_GATE_SCRIPT="$GATE_DIR/sprint-gate.sh"
 elif [ -f "$(git rev-parse --show-toplevel 2>/dev/null)/githooks/sprint-gate.sh" ]; then
   SPRINT_GATE_SCRIPT="$(git rev-parse --show-toplevel)/githooks/sprint-gate.sh"
+elif [ -f "$SCRIPT_DIR/sprint-gate.sh" ]; then
+  SPRINT_GATE_SCRIPT="$SCRIPT_DIR/sprint-gate.sh"
 fi
 
 if [ -n "$SPRINT_GATE_SCRIPT" ]; then

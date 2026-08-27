@@ -22,7 +22,9 @@
     "gate-4.sh",
     "gate-7.sh",
     "gate-8.sh",
-    "gate-9.sh"
+    "gate-9.sh",
+    "gate-12-file-hygiene.sh",
+    "sprint-gate.sh"
   ],
   "exports": {
     "./tui": "./plugins/opencode/tui-plugin.ts"

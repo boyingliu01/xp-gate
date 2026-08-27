@@ -20,6 +20,7 @@ const CONFIG_DIR = path.join(HOME_DIR, '.config', 'xp-gate');
 const CONFIG_FILE = path.join(CONFIG_DIR, 'xp-gate.json');
 const GLOBAL_HOOKS_DIR = path.join(CONFIG_DIR, 'hooks');
 const GLOBAL_ADAPTERS_DIR = path.join(CONFIG_DIR, 'adapters');
+const GLOBAL_MODULES_DIR = path.join(CONFIG_DIR, 'modules');
 
 /**
  * Detect which AI agent platform is currently in use.
@@ -61,6 +62,7 @@ module.exports = {
   TEMPLATE_DIR,
   GLOBAL_HOOKS_DIR,
   GLOBAL_ADAPTERS_DIR,
+  GLOBAL_MODULES_DIR,
   detectPlatform,
   getTemplateDir,
 };
