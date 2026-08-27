@@ -707,4 +707,19 @@ describe('updateHooks', () => {
       mod.getPackageRoot = origGetPackageRoot;
     });
   });
+
+  describe('warnMissingModuleDeps', () => {
+    it('warns when global module runtime deps are absent', () => {
+      const mod = getModule();
+      mod.warnMissingModuleDeps(true, false);
+      expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining('setup-global'));
+    });
+
+    it('does not warn for local installs or dry-runs', () => {
+      const mod = getModule();
+      mod.warnMissingModuleDeps(false, false);
+      mod.warnMissingModuleDeps(true, true);
+      expect(warnSpy).not.toHaveBeenCalled();
+    });
+  });
 });
