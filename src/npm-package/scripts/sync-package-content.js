@@ -23,14 +23,14 @@ const CORE_SKILLS = [
   'to-issues',
 ];
 
-const PLUGINS = ['claude-code', 'opencode', 'qoder'];
+const PLUGINS = ['claude-code', 'opencode', 'qoder', 'dsh'];
 
 // Plugins whose `skills/` subtree is gitignored (build artifact). For these,
 // the source-of-truth skill content lives in repo-root `skills/` and must be
 // injected during sync so the npm-package mirror is complete even on a clean
 // checkout (e.g. CI Mirror Parity job). Plugins not listed here are expected
 // to ship their own committed `skills/` subtree (e.g. `plugins/qoder/skills/`).
-const PLUGINS_WITH_GITIGNORED_SKILLS = new Set(['claude-code', 'opencode']);
+const PLUGINS_WITH_GITIGNORED_SKILLS = new Set(['claude-code', 'opencode', 'dsh']);
 
 function rmrf(target) {
   if (!fs.existsSync(target)) return;

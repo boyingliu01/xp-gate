@@ -1,6 +1,6 @@
 {
   "name": "xp-gate",
-  "version": "0.18.3.1",
+  "version": "0.19.0.0",
   "description": "XP-Gate - Quality Gate & AI Review for Every Commit",
   "type": "module",
   "engines": {
@@ -18,7 +18,8 @@
     "build": "tsc",
     "build:claude-plugin": "node scripts/build-plugin.mjs --platform claude-code",
     "build:opencode-plugin": "node scripts/build-plugin.mjs --platform opencode",
-    "build:plugins": "npm run build:claude-plugin && npm run build:opencode-plugin",
+    "build:dsh-plugin": "node scripts/build-plugin.mjs --platform dsh",
+    "build:plugins": "npm run build:claude-plugin && npm run build:opencode-plugin && npm run build:dsh-plugin",
     "build:all": "npm run build && npm run build:plugins",
     "test:plugins": "node scripts/test-plugins.mjs",
     "lint": "eslint src --ext .ts",

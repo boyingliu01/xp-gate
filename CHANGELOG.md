@@ -2,6 +2,14 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.19.0.0] - 2026-08-24
+
+### Added
+- **DeepSeek Harness (DSH) 原生插件 (`@boyingliu01/dsh-plugin-xp-gate`)**: 以原生插件契约 (`name`/`inject`/`apply`) 集成 gate-check / gate-principles / gate-arch 三个确定性质量门禁工具，并随包捆绑 12 个 SKILL.md 技能 (Issue #393)。
+
+### Changed
+- dsh 插件接入 build/version/test 流水线：`sync-package-content.js` (PLUGINS)、`sync-version.cjs` (targets)、`build-plugin.mjs` (~platform dsh)、`test-plugins.mjs` (manifest 校验)。
+
 ## [0.18.6.0] - 2026-07-29
 
 ### Added
