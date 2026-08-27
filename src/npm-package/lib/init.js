@@ -471,9 +471,9 @@ async function installLocal(args) {
   copyAdapters(srcDir, path.join(projectRoot, 'githooks'));
   console.log(`  adapter-common.sh + adapters -> ${projectRoot}/githooks/`);
 
-  // Install principles/, mutation/, mock-policy/ to .xp-gate/modules/
+  // Install principles/, mutation/, mock-policy/, build-integrity/ to .xp-gate/modules/
   const modulesDir = path.join(projectRoot, '.xp-gate', 'modules');
-  ['principles', 'mutation', 'mock-policy'].forEach(module => {
+  ['principles', 'mutation', 'mock-policy', 'build-integrity'].forEach(module => {
     const moduleSrc = path.join(srcDir, module);
     const moduleDest = path.join(modulesDir, module);
     if (fs.existsSync(moduleSrc)) {
@@ -551,10 +551,10 @@ async function setupGlobal(args) {
   copyAdapters(srcDir, GLOBAL_ADAPTERS_DIR);
   console.log(`  adapter-common.sh + adapters -> ${GLOBAL_ADAPTERS_DIR}`);
 
-  // Install principles/, mutation/, mock-policy/ to global modules dir
+  // Install principles/, mutation/, mock-policy/, build-integrity/ to global modules dir
   console.log('[setup-global] Installing quality gate modules...');
   const globalModulesDir = path.join(CONFIG_DIR, 'modules');
-  ['principles', 'mutation', 'mock-policy'].forEach(module => {
+  ['principles', 'mutation', 'mock-policy', 'build-integrity'].forEach(module => {
     const moduleSrc = path.join(srcDir, module);
     const moduleDest = path.join(globalModulesDir, module);
     if (fs.existsSync(moduleSrc)) {

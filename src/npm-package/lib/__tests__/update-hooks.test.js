@@ -50,6 +50,13 @@ describe('updateHooks', () => {
     fs.writeFileSync(path.join(adaptersDir, 'python.sh'), overrides['adapters/python.sh'] || '#!/bin/bash\necho "py-v2"');
     fs.writeFileSync(path.join(tmpPackage, 'gate-3.sh'), overrides['gate-3.sh'] || '#!/bin/bash\necho "gate3-v2"');
     fs.writeFileSync(path.join(tmpPackage, 'gate-4.sh'), overrides['gate-4.sh'] || '#!/bin/bash\necho "gate4-v2"');
+
+    // Quality gate modules (principles, mutation, mock-policy, build-integrity)
+    ['principles', 'build-integrity'].forEach(module => {
+      const moduleDir = path.join(tmpPackage, module);
+      fs.mkdirSync(moduleDir, { recursive: true });
+      fs.writeFileSync(path.join(moduleDir, 'index.ts'), overrides[`${module}/index.ts`] || `export const ${module} = 1;`);
+    });
   }
 
   /** Helper: get fresh updateHooks module */
@@ -145,16 +152,16 @@ describe('updateHooks', () => {
       expect(fs.readFileSync(path.join(dest, 'gate-4.sh'), 'utf8')).toContain('gate4-v2');
     });
 
-    it('copies sprint-gate.sh alongside gate-*.sh scripts (#335)', () => {
+    it('copies gate-12-file-hygiene.sh to the adapters directory', () => {
       createPackageSource();
-      fs.writeFileSync(path.join(tmpPackage, 'sprint-gate.sh'), '#!/bin/bash\necho "sprint-gate-v1"');
+      fs.writeFileSync(path.join(tmpPackage, 'gate-12-file-hygiene.sh'), '#!/bin/bash\necho "hygiene-v1"');
       const mod = getModule();
-      const dest = path.join(tmpProject, 'gates-sprint');
+      const dest = path.join(tmpProject, 'gates-hygiene');
       fs.mkdirSync(dest, { recursive: true });
 
       mod.copyGateScripts(tmpPackage, dest, false, true);
 
-      expect(fs.readFileSync(path.join(dest, 'sprint-gate.sh'), 'utf8')).toContain('sprint-gate-v1');
+      expect(fs.readFileSync(path.join(dest, 'gate-12-file-hygiene.sh'), 'utf8')).toContain('hygiene-v1');
     });
 
     it('does not copy non-gate files', () => {
@@ -167,6 +174,7 @@ describe('updateHooks', () => {
       mod.copyGateScripts(tmpPackage, dest, false, true);
 
       expect(fs.existsSync(path.join(dest, 'some-other.sh'))).toBe(false);
+      expect(fs.existsSync(path.join(dest, 'sprint-gate.sh'))).toBe(false);
     });
 
     it('handles missing source directory gracefully', () => {
@@ -178,6 +186,73 @@ describe('updateHooks', () => {
 
       const gateFiles = fs.readdirSync(dest).filter(f => f.startsWith('gate-'));
       expect(gateFiles).toEqual([]);
+    });
+  });
+
+  // ===== copySprintGate tests =====
+
+  describe('copySprintGate', () => {
+    it('copies sprint-gate.sh to the hooks directory', () => {
+      createPackageSource();
+      fs.writeFileSync(path.join(tmpPackage, 'sprint-gate.sh'), '#!/bin/bash\necho "sprint-gate-v1"');
+      const mod = getModule();
+      const hooksDest = path.join(tmpProject, 'hooks-dest');
+      fs.mkdirSync(hooksDest, { recursive: true });
+
+      mod.copySprintGate(tmpPackage, hooksDest, false, true);
+
+      expect(fs.readFileSync(path.join(hooksDest, 'sprint-gate.sh'), 'utf8')).toContain('sprint-gate-v1');
+    });
+
+    it('skips silently when sprint-gate.sh is absent from package root', () => {
+      createPackageSource();
+      const mod = getModule();
+      const hooksDest = path.join(tmpProject, 'hooks-no-sprint');
+      fs.mkdirSync(hooksDest, { recursive: true });
+
+      mod.copySprintGate(tmpPackage, hooksDest, false, true);
+
+      expect(fs.existsSync(path.join(hooksDest, 'sprint-gate.sh'))).toBe(false);
+    });
+  });
+
+  // ===== copyModules tests =====
+
+  describe('copyModules', () => {
+    it('copies quality gate module directories to the modules destination', () => {
+      createPackageSource();
+      const mod = getModule();
+      const modulesDest = path.join(tmpProject, 'modules-dest');
+      fs.mkdirSync(modulesDest, { recursive: true });
+
+      mod.copyModules(tmpPackage, modulesDest, false, true);
+
+      expect(fs.readFileSync(path.join(modulesDest, 'principles', 'index.ts'), 'utf8')).toContain('principles');
+      expect(fs.readFileSync(path.join(modulesDest, 'build-integrity', 'index.ts'), 'utf8')).toContain('build-integrity');
+    });
+
+    it('skips modules absent from the package root', () => {
+      createPackageSource();
+      const mod = getModule();
+      const modulesDest = path.join(tmpProject, 'modules-dest-skip');
+      fs.mkdirSync(modulesDest, { recursive: true });
+      fs.rmSync(path.join(tmpPackage, 'mutation'), { recursive: true, force: true });
+
+      mod.copyModules(tmpPackage, modulesDest, false, true);
+
+      expect(fs.existsSync(path.join(modulesDest, 'mutation'))).toBe(false);
+      expect(fs.existsSync(path.join(modulesDest, 'principles'))).toBe(true);
+    });
+
+    it('does not write files in dry-run mode', () => {
+      createPackageSource();
+      const mod = getModule();
+      const modulesDest = path.join(tmpProject, 'modules-dest-dry');
+      fs.mkdirSync(modulesDest, { recursive: true });
+
+      mod.copyModules(tmpPackage, modulesDest, true, true);
+
+      expect(fs.existsSync(path.join(modulesDest, 'principles', 'index.ts'))).toBe(false);
     });
   });
 
@@ -488,6 +563,8 @@ describe('updateHooks', () => {
       });
       expect(result).toBe(0);
       expect(fs.readFileSync(path.join(hooksDest, 'pre-commit'), 'utf8')).toContain('hook-v2');
+      // scope 'all' also re-deploys quality-gate modules (repairs existing installs)
+      expect(fs.readFileSync(path.join(tmpProject, '.xp-gate', 'modules', 'build-integrity', 'index.ts'), 'utf8')).toContain('build-integrity');
 
       mod.getPackageRoot = origGetPackageRoot;
     });
