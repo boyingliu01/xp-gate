@@ -1,17 +1,24 @@
-'use strict';
-
-const { execSync, execFileSync, spawnSync } = require('child_process');
-const fs = require('fs');
-const path = require('path');
+const { execSync, execFileSync, spawnSync } = require('node:child_process');
+const fs = require('node:fs');
+const os = require('node:os');
+const path = require('node:path');
 
 /**
- * Run a bash shell script cross-platform.
- * On Unix: uses bash directly.
- * On Windows: tries bash from PATH (Git Bash / WSL), falls back to a clear message.
+ * Run a gate adapter fragment standalone.
+ *
+ * The gate fragments in githooks/adapters/gate-*.sh are designed to be *sourced*
+ * into the pre-commit hook, which pre-defines the context they rely on:
+ *   - PROJECT_LANG (from detect_project_lang)
+ *   - CHANGED_FILES (from git)
+ *   - gate_start_ms() / record_gate_audit() / now_ms() audit & timing helpers
+ *
+ * When `xp-gate check` invokes a gate standalone, that context is missing and
+ * the fragments fail with "command not found". This wrapper reconstructs the
+ * same preamble the pre-commit hook sets up, then *sources* the fragment so it
+ * behaves exactly as it does inside the commit hook.
  */
-function runBashScript(scriptPath) {
+function runGateAdapter(scriptPath, cwd = process.cwd()) {
   if (process.platform === 'win32') {
-    // Check if bash is available on Windows (Git Bash, MSYS2, WSL)
     try {
       execSync('bash --version', { stdio: 'pipe', timeout: 5000 });
     } catch {
@@ -21,8 +28,44 @@ function runBashScript(scriptPath) {
       return;
     }
   }
-  // bash is available — run the script (Unix always, or Windows after check above)
-  execSync(`bash "${scriptPath}"`, { stdio: 'inherit' });
+  const scriptDir = path.dirname(scriptPath);
+  const commonScript = [
+    path.join(scriptDir, 'adapter-common.sh'),
+    path.join(scriptDir, '..', 'adapter-common.sh'),
+    path.join(cwd, 'githooks', 'adapter-common.sh'),
+  ].find(candidate => fs.existsSync(candidate)) || '';
+  const nowMsScript = [
+    path.join(scriptDir, 'lib', 'now-ms.sh'),
+    path.join(scriptDir, '..', 'lib', 'now-ms.sh'),
+    path.resolve(__dirname, '..', 'hooks', 'lib', 'now-ms.sh'),
+  ].find(candidate => fs.existsSync(candidate)) || '';
+  const changedFilesParameter = ['$', '{CHANGED_FILES}'].join('');
+
+  // Build the shell preamble the pre-commit hook would otherwise inject before
+  // sourcing the gate fragment, then source that fragment. Deliberately NOT
+  // set -u (the pre-commit hook does not use it), so fragments that reference
+  // a not-yet-defined variable fail the same way inside the commit hook.
+  const wrap = [
+    'if [ -n "$1" ] && [ -f "$1" ]; then source "$1"; fi',
+    'if [ -n "$2" ] && [ -f "$2" ]; then source "$2"; fi',
+    'if ! command -v now_ms >/dev/null 2>&1; then now_ms() { "$4" -e "console.log(Date.now())"; }; fi',
+    'gate_start_ms() { now_ms; }',
+    'record_gate_audit() { :; }',
+    'PROJECT_LANG="$(detect_project_lang 2>/dev/null || echo unknown)"',
+    'CHANGED_FILES="$(git diff --cached --name-only --diff-filter=ACM 2>/dev/null || true)"',
+    `if [ -z "${changedFilesParameter}" ] && [ -n "$(git rev-parse HEAD 2>/dev/null)" ]; then`,
+    '  CHANGED_FILES="$(git diff HEAD --name-only --diff-filter=ACM 2>/dev/null || true)"',
+    'fi',
+    'source "$3"',
+  ].join('\n');
+
+  // execFileSync avoids an extra /bin/sh layer, so bash receives the script as a
+  // single argv arg (no shell-metacharacter injection through the path).
+  execFileSync(
+    'bash',
+    ['--noprofile', '--norc', '-c', wrap, 'xp-gate', commonScript, nowMsScript, scriptPath, process.execPath],
+    { stdio: 'inherit', cwd }
+  );
 }
 
 // Gate metadata registry — maps gate IDs to names, descriptions, and how to run them.
@@ -35,12 +78,14 @@ function runBashScript(scriptPath) {
  * Falls back to bash script if TypeScript module not found.
  */
 function runTsGate(gateModule, targetPath) {
+  const targetCwd = targetPath ? path.resolve(targetPath) : process.cwd();
   const entry = findTsGateEntry(gateModule);
   if (!entry) {
     // Fallback to bash script
-    const script = resolveGateScript(gateModule.replace('gate-', ''));
+    const gateNum = gateModule.replace('gate-', '');
+    const script = resolveGateScript(gateNum, targetCwd);
     if (script) {
-      runBashScript(script);
+      runGateAdapter(script, targetCwd);
     } else {
       console.log(`Gate ${gateModule}: TypeScript module not found and no bash fallback available.`);
     }
@@ -53,7 +98,7 @@ function runTsGate(gateModule, targetPath) {
   const result = spawnSync('npx', args, {
     stdio: 'inherit',
     shell: process.platform === 'win32',
-    cwd: targetPath || process.cwd(),
+    cwd: targetCwd,
     timeout: 120000,
   });
 
@@ -76,6 +121,7 @@ function findTsGateEntry(gateModule) {
   }
   return null;
 }
+// allow: SIZE_OK - this module's bulk is the declarative gate registry below.
 const GATE_REGISTRY = {
   '0': {
     name: 'Version Consistency',
@@ -130,7 +176,7 @@ const GATE_REGISTRY = {
     name: 'Architecture + Boy Scout Rule',
     description: 'Architecture layer boundary validation and warning baseline enforcement',
     aliases: ['architecture', 'arch', '6'],
-    run: (targetPath) => {
+    run: () => {
       const { arch } = require('./arch.js');
       return arch([]);
     },
@@ -242,17 +288,16 @@ function findConfig(basePath, fileName) {
   return null;
 }
 
-function resolveGateScript(gateNum) {
+function resolveGateScript(gateNum, cwd = process.cwd()) {
   const candidates = [
-    path.join(process.cwd(), 'githooks', 'gates', `gate-${gateNum}-*.sh`),
-    path.join(process.cwd(), 'githooks', `gate-${gateNum}.sh`),
+    path.join(cwd, 'githooks', 'gates', `gate-${gateNum}-*.sh`),
+    path.join(cwd, 'githooks', `gate-${gateNum}.sh`),
   ];
 
   // Try glob patterns
   for (const pattern of candidates) {
     if (pattern.includes('*')) {
       const dir = path.dirname(pattern);
-      const prefix = path.basename(pattern).replace('*', '');
       if (fs.existsSync(dir)) {
         const match = fs.readdirSync(dir).find(f => f.startsWith(`gate-${gateNum}-`) && f.endsWith('.sh'));
         if (match) return path.join(dir, match);
@@ -263,7 +308,7 @@ function resolveGateScript(gateNum) {
   }
 
   // Check global install
-  const globalDir = path.join(require('os').homedir(), '.config', 'xp-gate', 'adapters');
+  const globalDir = path.join(os.homedir(), '.config', 'xp-gate', 'adapters');
   const globalScript = path.join(globalDir, `gate-${gateNum}.sh`);
   if (fs.existsSync(globalScript)) return globalScript;
 
@@ -289,7 +334,7 @@ async function runGate(gateId, targetPath) {
   const gate = GATE_REGISTRY[String(gateId)];
   if (!gate) {
     console.error(`Unknown gate: ${gateId}`);
-    console.error('Available gates: ' + Object.keys(GATE_REGISTRY).join(', '));
+    console.error(`Available gates: ${Object.keys(GATE_REGISTRY).join(', ')}`);
     return 1;
   }
 
@@ -319,4 +364,4 @@ async function runGate(gateId, targetPath) {
   return 1;
 }
 
-module.exports = { GATE_REGISTRY, getGateInfo, getAllGates, runGate, resolveAlias, getAliases };
+module.exports = { GATE_REGISTRY, getGateInfo, getAllGates, runGate, resolveAlias, getAliases, runGateAdapter, findTsGateEntry, resolveGateScript };

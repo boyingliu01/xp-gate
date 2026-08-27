@@ -3,8 +3,8 @@
  * @intent Sync latest hook versions from xp-gate package to project or global directory
  * @covers AC-265-01, AC-265-02, AC-265-03, AC-265-04
  */
-const fs = require('fs');
-const path = require('path');
+const fs = require('node:fs');
+const path = require('node:path');
 const { GLOBAL_HOOKS_DIR, GLOBAL_ADAPTERS_DIR } = require('./shared-paths.js');
 
 /**
@@ -50,19 +50,6 @@ function detectLocalModifications(srcDir, hooksDestDir, adaptersDestDir) {
       }
     }
   });
-
-  const hookLibSrcDir = path.join(srcDir, 'hooks', 'lib');
-  if (fs.existsSync(hookLibSrcDir)) {
-    fs.readdirSync(hookLibSrcDir).forEach(file => {
-      const srcPath = path.join(hookLibSrcDir, file);
-      const destPath = path.join(hooksDestDir, 'lib', file);
-      if (fs.statSync(srcPath).isFile() && fs.existsSync(destPath)) {
-        if (!fs.readFileSync(srcPath).equals(fs.readFileSync(destPath))) {
-          modified.push(`lib/${file}`);
-        }
-      }
-    });
-  }
 
   // Check adapter-common.sh
   const adapterCommonSrc = path.join(srcDir, 'adapter-common.sh');
@@ -167,12 +154,18 @@ function copyHooks(srcDir, destDir, dryRun, noBackup) {
   });
   const libSrcDir = path.join(hooksSrcDir, 'lib');
   if (fs.existsSync(libSrcDir)) {
-    fs.readdirSync(libSrcDir).forEach(file => {
-      const src = path.join(libSrcDir, file);
-      if (fs.statSync(src).isFile()) {
-        atomicCopyFile(src, path.join(destDir, 'lib', file), dryRun, noBackup, `lib/${file}`);
-      }
-    });
+    fs.readdirSync(libSrcDir, { withFileTypes: true })
+      .filter(entry => entry.isFile())
+      .forEach(entry => {
+        const label = `lib/${entry.name}`;
+        atomicCopyFile(
+          path.join(libSrcDir, entry.name),
+          path.join(destDir, label),
+          dryRun,
+          noBackup,
+          label
+        );
+      });
   }
 }
 
@@ -221,7 +214,7 @@ function copyGateScripts(srcDir, destDir, dryRun, noBackup) {
 }
 
 function resolveSrcDir() {
-  return (module.exports && module.exports.getPackageRoot)
+  return module.exports?.getPackageRoot
     ? module.exports.getPackageRoot()
     : getPackageRoot();
 }
@@ -255,7 +248,9 @@ function checkLocalModifications(srcDir, hooksDestDir, adaptersDestDir, force, d
   const localMods = detectLocalModifications(srcDir, hooksDestDir, adaptersDestDir);
   if (localMods.length === 0) return 0;
   console.warn(`[WARN] Detected ${localMods.length} locally modified file(s):`);
-  localMods.forEach(f => console.warn(`  - ${f}`));
+  localMods.forEach(f => {
+    console.warn(`  - ${f}`);
+  });
   console.warn('Use --force to overwrite, or manually backup first.');
   return 1;
 }
