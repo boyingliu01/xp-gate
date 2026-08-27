@@ -408,26 +408,29 @@ jobs:
               if command -v npm >/dev/null 2>&1; then
                 # Check if test scripts exist in package.json
                 if grep -q "\"test\"" package.json; then
-                  echo "Running npm test..."
-                  npm test
-                  NPM_TEST_STATUS=$?
-                  
-                  if [[ $NPM_TEST_STATUS -ne 0 ]]; then
-                    echo "❌ Tests failed"
-                    exit 1
-                  fi
-                  
-                  # Check if test:cover script exists
+                  # Run tests once with coverage. `vitest run --coverage` (or the
+                  # project's coverage script) already executes the full suite AND
+                  # validates coverage, so running `npm test` separately would run
+                  # the suite a second time — a redundant full regression pass.
                   if grep -q "\"test:cover\|test:coverage\|cover\|coverage\"" package.json; then
-                    echo "Checking coverage..."
+                    echo "Running tests with coverage (single pass)..."
                     npm run test:coverage || npm run test:cover
-                    COV_STATUS=$?
-                    
-                    if [[ $COV_STATUS -ne 0 ]]; then
-                      echo "⚠️ Coverage execution had issues"
+                    NPM_TEST_STATUS=$?
+
+                    if [[ $NPM_TEST_STATUS -ne 0 ]]; then
+                      echo "❌ Tests or coverage failed"
+                      exit 1
                     fi
+                    echo "✅ Tests passed with coverage"
                   else
-                    echo "No coverage script found in package.json"
+                    echo "No coverage script found, running tests only..."
+                    npm test
+                    NPM_TEST_STATUS=$?
+                    if [[ $NPM_TEST_STATUS -ne 0 ]]; then
+                      echo "❌ Tests failed"
+                      exit 1
+                    fi
+                    echo "✅ Tests passed"
                   fi
                 else
                   echo "No test script found in package.json, skipping test run"
