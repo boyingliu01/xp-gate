@@ -1,6 +1,6 @@
 {
   "name": "@boyingliu01/dsh-plugin-xp-gate",
-  "version": "0.19.0",
+  "version": "0.19.1",
   "description": "XP-Gate deterministic quality gates + AI workflow skills as a DeepSeek Harness (DSH) native plugin: gate-check / gate-principles / gate-arch tools + 12 SKILL.md skills",
   "type": "module",
   "main": "./lib/index.js",

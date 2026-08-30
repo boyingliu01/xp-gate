@@ -2,6 +2,11 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.19.1.0] - 2026-08-30
+
+### Fixed
+- **PowerShell Pester 测试运行器超时保护 (#406)**: 为 PowerShell Pester 测试执行添加超时防护，避免无响应的 Pester 测试进程挂起并阻塞门禁链路。
+
 ## [0.19.0.0] - 2026-08-24
 
 ### Added
