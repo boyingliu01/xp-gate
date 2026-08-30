@@ -1,0 +1,90 @@
+{
+  "sprint_id": "sprint-2026-07-29-01",
+  "recovery_base": {
+    "ref": "origin/main",
+    "commit": "1ff6ec342e8cbeeb666b111da80bef48c4c29897",
+    "confidence": "confirmed"
+  },
+  "sources": [
+    {
+      "kind": "git_ref",
+      "name": "sprint/2026-07-29-01",
+      "commit": "2cb30ce2b5033ee36fbbb382243d9ce943d0102b",
+      "parent": "cc210d4da3d13f8b13149b34a8ef78de35818304",
+      "confidence": "confirmed",
+      "finding": "The tracked sprint tip contains only two OpenCode plugin files and no sprint history, issue #376 implementation, or clipboard-vision skill."
+    },
+    {
+      "kind": "git_ref",
+      "name": "origin/feature/clipboard-vision",
+      "commit": "f7fea888ee93af6f8fbd2c145e30969cfeffe7d2",
+      "parent": "2605877cde5aae2f1d383e4ed73da65794e82869",
+      "confidence": "confirmed",
+      "finding": "The clipboard-vision implementation exists on an unmerged feature branch and is not an ancestor of origin/main."
+    },
+    {
+      "kind": "github_pr_query",
+      "query": "head:sprint/2026-07-29-01 state:all",
+      "result_count": 0,
+      "confidence": "confirmed",
+      "finding": "No pull request exists for the sprint branch."
+    },
+    {
+      "kind": "damaged_worktree_file",
+      "path": ".sprint-state/sprint-state.json",
+      "sha256": "821d9dabc6f7b246bd8d12a031279442b67295351ef3607fda59bc3700adf693",
+      "confidence": "unverified",
+      "finding": "Claims phases 1 through 4 completed. The file is untracked and preserved in the damaged checkout."
+    },
+    {
+      "kind": "damaged_worktree_file",
+      "path": ".sprint-state/delphi-reviewed.json",
+      "sha256": "d09a19d2afb4fe98bb0c620795bd86beca9c9a9e87aa0ff52fb2e50a0f0e4a98",
+      "confidence": "unverified"
+    },
+    {
+      "kind": "damaged_worktree_file",
+      "path": ".sprint-state/phase-outputs/phase-3-summary.md",
+      "sha256": "2686196cbb08b29ac17856b9bbc8428621088b799f7131f9ccfa66dff5a060df",
+      "confidence": "contradicted",
+      "finding": "Claims issues #376 and #379 were completed, but neither implementation is present in the sprint tip or origin/main."
+    },
+    {
+      "kind": "damaged_worktree_file",
+      "path": ".sprint-state/phase-outputs/phase-4-summary.md",
+      "sha256": "b9300279faed666e8af6c1ecee356ef0f5b2866858c5755833e8c405d3f3e5e5",
+      "confidence": "unverified",
+      "finding": "Claims an APPROVED code walkthrough, but the referenced result is not tracked in the sprint tip."
+    },
+    {
+      "kind": "damaged_worktree_file",
+      "path": ".sprint-state/phase-outputs/feedback-log.md",
+      "sha256": "20da1a6e6ecdc45e35327e7f1a3300e42020cb5597ab4f924c5a440fe42b40a8",
+      "confidence": "unverified"
+    }
+  ],
+  "phase_assessment": {
+    "prep": "reported",
+    "design": "corroborated",
+    "build": "contradicted",
+    "verify": "unverified",
+    "ship": "unverified",
+    "close": "unverified"
+  },
+  "missing_evidence": [
+    "Sprint pull request",
+    "Merge commit into origin/main",
+    "Release associated with the sprint",
+    "Tracked code-walkthrough result",
+    "User acceptance record",
+    "Emergent-issues record",
+    "Cleanup confirmation"
+  ],
+  "preservation": {
+    "damaged_worktree_modified": false,
+    "untracked_checkout_files_copied": false,
+    "recovery_refs_modified": false,
+    "recovery_bundles_modified": false,
+    "stash_modified": false
+  }
+}
