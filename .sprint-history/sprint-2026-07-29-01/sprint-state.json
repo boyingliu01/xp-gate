@@ -1,0 +1,46 @@
+{
+  "id": "sprint-2026-07-29-01",
+  "phase": 4,
+  "status": "paused",
+  "phase_history": [
+    {
+      "phase": 1,
+      "phase_name": "PREP",
+      "status": "completed",
+      "timestamp": "2026-07-29T04:01:00Z"
+    },
+    {
+      "phase": 2,
+      "phase_name": "DESIGN",
+      "status": "completed",
+      "timestamp": "2026-07-29T10:30:00Z"
+    },
+    {
+      "phase": 3,
+      "phase_name": "BUILD",
+      "status": "completed",
+      "timestamp": "2026-07-29T14:10:00Z"
+    },
+    {
+      "phase": 4,
+      "phase_name": "VERIFY",
+      "status": "completed",
+      "timestamp": "2026-07-29T20:00:00Z"
+    }
+  ],
+  "isolation": {
+    "worktree_path": "/home/boyingliu01/projects/xp-gate/.worktrees/sprint/sprint-2026-07-29-01",
+    "branch": "sprint/2026-07-29-01"
+  },
+  "outputs": {
+    "recovery_manifest": ".sprint-history/sprint-2026-07-29-01/evidence-manifest.json",
+    "recovery_report": ".sprint-history/sprint-2026-07-29-01/RECOVERY.md"
+  },
+  "recovery": {
+    "classification": "recovered_with_gaps",
+    "last_defensible_phase": 4,
+    "ship": "unverified",
+    "close": "unverified",
+    "reason": "No sprint PR, merge, release, UAT, or cleanup evidence was found. The damaged checkout remains preserved and is not authoritative by itself."
+  }
+}
