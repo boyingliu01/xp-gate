@@ -196,7 +196,11 @@ delphi-review 在 Qoder 平台的官方执行路径是 **Custom Agent 模式**�
 5. 重装前后对比：`~/.qoder/skills/delphi-review/` 原仅 1 个 SKILL.md（内容与任何官方源均不匹配，系手工拷贝且混入未回灌仓库的新改动）→ 证实 B1 与 B4 的双向漂移
 6. 仓库基线：本地 main 曾停 0.14.30（0.14 脚本行为与 0.19 相反：同 provider BLOCK、支持 local、无 provenance 字段）；`origin/main` = 0.19.1.0 与 npm 一致
 
-## 需求受理记录（issue 正文摘要）
+## 需求受理记录
+
+**GitHub Issue**: [boyingliu01/xp-gate#414](https://github.com/boyingliu01/xp-gate/issues/414) (labels: enhancement, sprint-qoder)
+
+> 以下为 issue 正文摘要
 
 > **Title**: Qoder 平台 delphi-review 双通道适配（内置模型优先 + 外部 API 降级）+ 安装/自检链路补全
 > **Labels**: enhancement, delphi-review, qoder
