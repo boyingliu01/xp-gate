@@ -329,15 +329,27 @@ Each round MUST output a structured round marker:
 
 #### Qoder 平台（推荐 — Custom Agent 模式）
 
-Qoder 环境下使用 **Custom Agent** 机制，每个专家是一个独立的 custom agent，配置不同的 Qoder 内置模型：
+Qoder 的内置模型**没有本地推理端点**：推理请求由 Qoder 客户端经服务端代理发出，凭证是一次性 job token。所以不能照搬 OpenCode 的 `base_url + api_key` 直连方式，Qoder 侧的唯一入口是 **Custom Agent** —— 每个专家是一个独立 agent 文件，各自绑定一个内置模型。
 
-| 专家 | Agent 文件 | 模型 | Credits 费率 |
-|------|-----------|------|-------------|
-| Architecture (A) | `.qoder/agents/delphi-architecture.md` | Qwen3.7-Max | 0.5× |
-| Technical (B) | `.qoder/agents/delphi-technical.md` | GLM-5.2 | 0.6× |
-| Feasibility (C) | `.qoder/agents/delphi-feasibility.md` | DeepSeek-V4-Pro | 0.5× |
+| 专家 | Agent 文件 | 模型（modelId） | Credits 费率 |
+|------|-----------|----------------|-------------|
+| Architecture (A) | `.qoder/agents/delphi-architecture.md` | Qwen3.8-Flash (`qfmodel`) | 0.1× |
+| Technical (B) | `.qoder/agents/delphi-technical.md` | GLM-5.3-Flash (`gfmodel`) | 0.1× |
+| Feasibility (C) | `.qoder/agents/delphi-feasibility.md` | DeepSeek-Flash (`dfmodel`) | 0.1× |
 
-**执行方式**：通过 Agent tool 并行启动 3 个 subagent（type=GeneralPurpose），每个 agent 使用自己配置的模型独立评审，主 orchestrator 收集结果后计算共识。
+默认选 0.1× 档位是最省的组合；换模型时在 Qoder 的模型选择器里确认模型名与 ID（目录随版本变化，可在 Quest → Setting → Agents → Change Model 里逐个改）。
+
+**安装位置**（`xp-gate init` 自动部署，已存在的文件不覆盖）：
+- 项目级：`<project>/.qoder/agents/`（`xp-gate init`）
+- 用户级：`~/.qoder/agents/`（`xp-gate init --global`）
+
+**model 字段格式（强制）**：必须写成 `"[DisplayName](modelId)"`。裸名字（如 `model: GLM-5.2`）或目录里已不存在的 ID **不会报错**，而是静默回退到当前会话模型 —— 结果是三个专家跑在同一个模型上，直接违反"三个不同可执行模型 ID"的契约，共识比例失去意义。
+
+**执行方式**：用 Agent tool 并行派发 3 个 subagent，`subagent_type` 分别取 `delphi-architecture`、`delphi-technical`、`delphi-feasibility`（不是 GeneralPurpose，否则会共用会话模型）。主 orchestrator 收集三份 `delphi_expert_result` 后计算共识。
+
+**新建或修改 agent 文件后必须重开会话**：Qoder 只在会话启动时加载 agent 注册表，本会话内新建的 agent 无法派发（报 `Unknown agent type`）。
+
+**验证真的跑在三个不同模型上**：不要采信专家自述的 `requested_model`。读 `~/.qoder/logs/runs/*/manifest.json`，每个 subagent 是一次独立的 worker 调用，其 `argv` 中含 `--model <modelId>`；一轮三方评审应出现三个不同的 modelId。
 
 **优势**：无需外部 API key，直接使用 Qoder Credits，模型由平台统一管理。
 
@@ -345,7 +357,7 @@ Qoder 环境下使用 **Custom Agent** 机制，每个专家是一个独立的 c
 
 OpenCode 环境下通过 `opencode.json` 的 agent 配置 + `.delphi-config.json` 调用外部 API：
 - **MUST 从 `opencode.json` 的 agent 配置中读取模型**
-- 通过 `scripts/delphi-external-review.cjs` 调用各 provider 的兼容 API
+- 通过 `scripts/delphi-external-review.cjs` 调用各 provider 的兼容 API（注意：该脚本目前在仓库根 `scripts/` 下，尚未随 skill 目录分发）
 - 需要用户自行配置 API key（环境变量注入）
 
 ### 共识阈值

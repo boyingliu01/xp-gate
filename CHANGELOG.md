@@ -2,6 +2,16 @@
 
 All notable changes to this project will be documented in this file.
 
+## [Unreleased]
+
+### Fixed
+- **Qoder Delphi 专家 agent 从未按配置模型执行**: `plugins/qoder/agents/delphi-*.md` 的 `model` 字段写成裸模型名（`Qwen3.7-Max` / `GLM-5.2` / `DeepSeek-V4-Pro`），而 Qoder Custom Agent 要求 `"[DisplayName](modelId)"` 格式；格式不符或模型已不在内置目录中时 Qoder 不报错，静默回退到当前会话模型，导致三个专家实际跑在同一个模型上，违反"三个不同可执行模型 ID"契约。现改为 `qfmodel` / `gfmodel` / `dfmodel` 三个 0.1× 内置模型，并新增模板格式回归测试。
+- **`init --global` 不部署 Qoder 专家 agent**: `configureQoderDelphiAgents()` 只在 local init 调用，全局安装的用户拿不到任何 agent 模板。现在 `setupGlobal` 同时部署到 `~/.qoder/agents/`（已存在的用户自定义文件仍不覆盖）。
+- **单测污染 npm 包模板**: `init.test.js` 用 `fs.writeFileSync` 直接向 `src/npm-package/plugins/qoder/agents/delphi-architecture.md` 写入 `'arch expert'` / `'TEMPLATE CONTENT'` 且从不恢复，跑完测试后发布用模板被替换成 1 行垃圾内容。改为断言包内真实模板内容，不再写模板目录。
+
+### Changed
+- **delphi-review 的 Qoder 章节重写**: 说明内置模型无本地端点、必须按 `"[Name](modelId)"` 绑定、通过 `subagent_type=delphi-architecture|technical|feasibility` 派发（原文档写的 `type=GeneralPurpose` 会共用会话模型）、新建 agent 文件需重开会话才注册，以及用 `~/.qoder/logs/runs/*/manifest.json` 的 `--model` 参数做客观验证；同步更新 `docs/CAPABILITIES.md` 与各 skill 镜像。
+
 ## [0.19.2.0] - 2026-09-22
 
 ### Fixed

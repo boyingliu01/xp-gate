@@ -593,6 +593,10 @@ async function setupGlobal(args) {
   // missing register/network must not break global setup.
   installModuleRuntimeDeps(CONFIG_DIR);
 
+  // Qoder loads user-level custom agents from ~/.qoder/agents/, so a global
+  // setup must deploy the Delphi expert templates there as well.
+  configureQoderDelphiAgents(srcDir, HOME_DIR);
+
   console.log('[setup-global] Configuring git...');
   const { execSync } = require('child_process');
   try {
@@ -638,13 +642,14 @@ async function setupGlobal(args) {
 
 /**
  * Deploy Qoder-native Delphi review agents when platform is Qoder.
- * Copies agent templates from the bundled qoder plugin to the project's
- * .qoder/agents/ directory. Idempotent — never overwrites existing files.
+ * Copies agent templates from the bundled qoder plugin into <targetRoot>/.qoder/agents/
+ * — the project dir for local init, the home dir for global init (Qoder reads
+ * user-level agents from ~/.qoder/agents/). Idempotent — never overwrites existing files.
  *
  * @param {string} srcDir - npm package source directory
- * @param {string} projectRoot - user's project root
+ * @param {string} targetRoot - project root (local) or home directory (global)
  */
-function configureQoderDelphiAgents(srcDir, projectRoot) {
+function configureQoderDelphiAgents(srcDir, targetRoot) {
   const platform = detectPlatform();
   if (platform !== 'qoder') {
     return; // Not Qoder — skip (OpenCode uses .delphi-config.json instead)
@@ -656,7 +661,7 @@ function configureQoderDelphiAgents(srcDir, projectRoot) {
     return;
   }
 
-  const agentsDestDir = path.join(projectRoot, '.qoder', 'agents');
+  const agentsDestDir = path.join(targetRoot, '.qoder', 'agents');
   fs.mkdirSync(agentsDestDir, { recursive: true });
 
   const agentFiles = fs.readdirSync(agentSrcDir).filter(f => f.endsWith('.md'));
@@ -673,7 +678,7 @@ function configureQoderDelphiAgents(srcDir, projectRoot) {
   }
 
   if (deployed > 0) {
-    console.log(`  Qoder Delphi agents: deployed ${deployed} agent(s) to .qoder/agents/`);
+    console.log(`  Qoder Delphi agents: deployed ${deployed} agent(s) to ${agentsDestDir}`);
   }
   if (skipped > 0) {
     console.log(`  Qoder Delphi agents: ${skipped} existing agent(s) preserved`);

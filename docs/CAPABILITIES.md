@@ -212,13 +212,13 @@ XP-Gate 集成的 AI Skills 体系：
 
 **Qoder 平台（推荐 — 零配置）**：
 
-| Expert | 角色 | 模型 | Credits 费率 |
-|--------|------|------|----------|
-| Architecture | 架构 | Qwen3.7-Max | 0.5× |
-| Technical | 技术 | GLM-5.2 | 0.6× |
-| Feasibility | 可行性 | DeepSeek-V4-Pro | 0.5× |
+| Expert | 角色 | 模型（modelId） | Credits 费率 |
+|--------|------|----------------|----------|
+| Architecture | 架构 | Qwen3.8-Flash (`qfmodel`) | 0.1× |
+| Technical | 技术 | GLM-5.3-Flash (`gfmodel`) | 0.1× |
+| Feasibility | 可行性 | DeepSeek-Flash (`dfmodel`) | 0.1× |
 
-`xp-gate init` 自动检测 Qoder 平台并部署 3 个 Custom Agent 到 `.qoder/agents/`，无需外部 API key。
+`xp-gate init` 自动检测 Qoder 平台并部署 3 个 Custom Agent 到 `.qoder/agents/`（`init --global` 部署到 `~/.qoder/agents/`），无需外部 API key。Agent 的 `model` 字段必须写成 `"[DisplayName](modelId)"`，否则 Qoder 会静默回退到会话模型，三个专家将跑在同一个模型上。新建 agent 后需重开会话才会被加载。
 
 **OpenCode 平台（外部 API）**：
 
