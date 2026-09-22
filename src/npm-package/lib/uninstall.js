@@ -489,6 +489,9 @@ async function uninstall(args) {
 
   // Print summary
   console.log('\nUninstall complete');
+  console.log('Note: Qoder Delphi expert agents (.qoder/agents/delphi-*.md) are user-owned files');
+  console.log('      that init never overwrites, so they were left in place — delete them by hand');
+  console.log('      (then restart the Qoder session) if you want them gone.');
   if (hadErrors) {
     console.log('Some items could not be removed. Run doctor for diagnostics.');
   }

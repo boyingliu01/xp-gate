@@ -445,12 +445,11 @@ describe('init', () => {
 
     it('pins every expert template to a distinct built-in model in "[Name](modelId)" form', () => {
       const templateDir = agentTemplateDir();
+      const { readQoderModelId } = require('../init');
       const models = ['delphi-architecture', 'delphi-technical', 'delphi-feasibility'].map(name => {
-        const content = fs.readFileSync(path.join(templateDir, `${name}.md`), 'utf8');
-        const declared = content.match(/^model:\s*(.+)$/m);
-        expect(declared).not.toBeNull();
-        expect(declared[1].trim()).toMatch(/^"?\[[^\]]+\]\([a-z0-9_]+\)"?$/);
-        return declared[1].match(/\(([a-z0-9_]+)\)/)[1];
+        const modelId = readQoderModelId(path.join(templateDir, `${name}.md`));
+        expect(modelId).not.toBeNull();
+        return modelId;
       });
       expect(new Set(models).size).toBe(3);
     });
