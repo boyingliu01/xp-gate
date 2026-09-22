@@ -63,6 +63,16 @@ jobs:
           fi
           echo "PASS: tarball under 2MB"
 
+      - name: Debug OIDC availability
+        run: |
+          echo "ACTIONS_ID_TOKEN_REQUEST_URL: ${ACTIONS_ID_TOKEN_REQUEST_URL:+SET}"
+          echo "ACTIONS_ID_TOKEN_REQUEST_TOKEN: ${ACTIONS_ID_TOKEN_REQUEST_TOKEN:+SET}"
+          echo "GITHUB_ACTIONS: ${GITHUB_ACTIONS:-unset}"
+          echo "registry: $(npm config get registry)"
+          USERCONFIG=$(npm config get userconfig)
+          echo "userconfig: $USERCONFIG"
+          sed 's/_authToken=.*/_authToken=<redacted>/' "$USERCONFIG" 2>/dev/null || echo "(no userconfig file)"
+
       - name: npm publish with provenance
         working-directory: src/npm-package
         run: npm publish --provenance --access public
