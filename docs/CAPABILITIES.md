@@ -210,15 +210,17 @@ XP-Gate 集成的 AI Skills 体系：
 | **code-walkthrough** | `--mode code-walkthrough` | git push 前代码走查 | .code-walkthrough-result.json |
 | **requirements** | `--mode requirements` | R1 三专家独立评审，验证 distinct model IDs 后聚合 ≥90% 共识 | requirements-reviewed.json |
 
-**Qoder 平台（推荐 — 零配置）**：
+**Qoder 平台（Custom Agent — 同模型三角色，不满足三模型契约）**：
 
-| Expert | 角色 | 模型（modelId） | Credits 费率 |
-|--------|------|----------------|----------|
-| Architecture | 架构 | Qwen3.8-Flash (`qfmodel`) | 0.1× |
-| Technical | 技术 | GLM-5.3-Flash (`gfmodel`) | 0.1× |
-| Feasibility | 可行性 | DeepSeek-Flash (`dfmodel`) | 0.1× |
+| Expert | 角色 | 绑定的 modelId | 实际执行模型 |
+|--------|------|---------------|-------------|
+| Architecture | 架构 | Qwen3.8-Flash (`qfmodel`) | 会话模型 |
+| Technical | 技术 | GLM-5.3-Flash (`gfmodel`) | 会话模型 |
+| Feasibility | 可行性 | DeepSeek-Flash (`dfmodel`) | 会话模型 |
 
-`xp-gate init` 自动检测 Qoder 平台并部署 3 个 Custom Agent 到 `.qoder/agents/`（`init --global` 部署到 `~/.qoder/agents/`），无需外部 API key。Agent 的 `model` 字段必须写成 `"[DisplayName](modelId)"`，否则 Qoder 会静默回退到会话模型，三个专家将跑在同一个模型上。新建 agent 后需重开会话才会被加载。
+`xp-gate init` 自动检测 Qoder 平台并部署 3 个 Custom Agent 到 `.qoder/agents/`（`init --global` 部署到 `~/.qoder/agents/`），无需外部 API key。Agent 的 `model` 字段必须写成 `"[DisplayName](modelId)"`，裸名字或已下线 ID 会被平台静默忽略。新建 agent 后需重开会话才会被加载。
+
+**2026-09-22 实测边界**：即使三份文件的绑定格式与 modelId 都正确，`subagent_type` 派发的三个专家仍全部跑在当前会话模型上（一轮评审 116 次 `model.request.started` 事件全为同一 modelId，而 `agent_id` 确实是三个不同实例）。所以这条路径只能作同模型、三角色的自查，其共识比例不满足"三个不同可执行模型 ID"契约，也不能当作 Gate MW 的三模型凭据；契约合规的 Delphi 需配置外部 provider（`.delphi-config.json`）。客观验证请读 `~/.qoder/logs/sessions/<project>/<sessionId>/segments/*.jsonl` 中 `model.request.started` 的 `model` 字段——`~/.qoder/logs/runs/*/manifest.json` 的 argv `--model` 是会话模型，对 subagent 无判别力。
 
 部署语义是"已存在不覆盖"，因此每次 `init` 都会审计已部署的 `delphi-*.md`：绑定缺失/格式非法或 modelId 与本版本模板不一致时点名文件并提示"删除 → 重跑 init → 重启会话"。这些 agent 是用户文件，`xp-gate uninstall` 只提示不删除。
 

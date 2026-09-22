@@ -5,7 +5,7 @@ All notable changes to this project will be documented in this file.
 ## [Unreleased]
 
 ### Fixed
-- **Qoder Delphi 专家 agent 从未按配置模型执行**: `plugins/qoder/agents/delphi-*.md` 的 `model` 字段写成裸模型名（`Qwen3.7-Max` / `GLM-5.2` / `DeepSeek-V4-Pro`），而 Qoder Custom Agent 要求 `"[DisplayName](modelId)"` 格式；格式不符或模型已不在内置目录中时 Qoder 不报错，静默回退到当前会话模型，导致三个专家实际跑在同一个模型上，违反"三个不同可执行模型 ID"契约。现改为 `qfmodel` / `gfmodel` / `dfmodel` 三个 0.1× 内置模型，并新增模板格式回归测试。
+- **Qoder Delphi 专家 agent 从未按配置模型执行**: `plugins/qoder/agents/delphi-*.md` 的 `model` 字段写成裸模型名（`Qwen3.7-Max` / `GLM-5.2` / `DeepSeek-V4-Pro`），而 Qoder Custom Agent 要求 `"[DisplayName](modelId)"` 格式；格式不符或模型已不在内置目录中时 Qoder 不报错，静默回退到当前会话模型，导致三个专家实际跑在同一个模型上，违反"三个不同可执行模型 ID"契约。现改为 `qfmodel` / `gfmodel` / `dfmodel` 三个 0.1× 内置模型，并新增模板格式回归测试。（注：实测表明修好格式只是消除声明层面的非法绑定，subagent 的执行模型仍被平台固定为会话模型，详见下方 Changed 条目。）
 - **`init --global` 不部署 Qoder 专家 agent**: `configureQoderDelphiAgents()` 只在 local init 调用，全局安装的用户拿不到任何 agent 模板。现在 `setupGlobal` 同时部署到 `~/.qoder/agents/`（已存在的用户自定义文件仍不覆盖）。
 - **单测污染 npm 包模板**: `init.test.js` 用 `fs.writeFileSync` 直接向 `src/npm-package/plugins/qoder/agents/delphi-architecture.md` 写入 `'arch expert'` / `'TEMPLATE CONTENT'` 且从不恢复，跑完测试后发布用模板被替换成 1 行垃圾内容。改为断言包内真实模板内容，不再写模板目录。
 - **Delphi agent 部署缺少失败隔离与自检**: `configureQoderDelphiAgents()` 抛错会在 hooks/adapters 已复制之后中断整个 setup；包内模板若丢失 model 绑定会被原样部署；旧格式（裸模型名）模板被保留时完全无提示；非 Qoder 平台跳过时静默无输出。现在 (1) 调用点改用 `deployQoderDelphiAgents()` 包裹 try/catch，失败只降级为一条 SKIP 告警；(2) 部署前校验模板绑定，不合法即跳过并告警；(3) 审计已部署模板（见下条）；(4) 跳过时输出检测到的平台名。新增 `__tests__/qoder-delphi-agents.test.js` 覆盖以上不变量与三处模板镜像。
@@ -14,8 +14,8 @@ All notable changes to this project will be documented in this file.
 - **Gate 6 因 `.git/hooks/` 安装副本而恒定 BLOCKED**: `xp-gate init` 会把 `githooks/lib/*` 按字节复制进 `.git/hooks/lib/`，archlint 却把 `.git/` 当源码树扫描，于是安装副本与规范文件配成一对 HIGH CodeClone；`--fail-on high` 下任何触及该库的提交都会被阻塞（其余 MEDIUM 回归只列不拦，且每次采样集合不同，看起来像门禁抖动）。`.archlint.yaml` 现在 `ignore` 里排除 `.git/**`（消除其 DeadCode 误报），并按本文件已记录的"克隆对须两侧同时排除"约定在 `rules.code_clone.exclude` 补 `.git/**` 与 `githooks/lib/**`；`archlint-config.test.cjs` 锁定这三条排除项。
 
 ### Changed
-- **delphi-review 的 Qoder 章节重写**: 说明内置模型无本地端点、必须按 `"[Name](modelId)"` 绑定、通过 `subagent_type=delphi-architecture|technical|feasibility` 派发（原文档写的 `type=GeneralPurpose` 会共用会话模型）、新建 agent 文件需重开会话才注册，以及用 `~/.qoder/logs/runs/*/manifest.json` 的 `--model` 参数做客观验证；同步更新 `docs/CAPABILITIES.md` 与各 skill 镜像。
-- **Execution Verification 不再接受专家自述**: 文档中的验证步骤要求以平台执行记录核对模型（OpenCode 为 provider 调用日志，Qoder 为 run manifest 的 `--model` 参数），修正了与"三个不同模型"契约之间只看 `requested_model` 字段的自相矛盾；同时补充 0.1× Flash 档位的质量权衡说明和"从 #417 之前版本升级"的迁移指引。
+- **delphi-review 的 Qoder 章节按实测重写**: 原文承诺"绑定格式正确即可让三个专家各跑一个内置模型"，但 2026-09-22 实测（Qoder 桌面版）三份 `~/.qoder/agents/delphi-*.md` 绑定格式与 modelId 均正确、且早于会话启动部署，一轮三方评审的 116 次 `model.request.started` 仍全部落在同一个 modelId（`agent_id` 确为三个实例）。故章节改为明示：Custom Agent 路径只能提供**同模型、三角色**评审，其共识不满足"三个不同可执行模型 ID"契约，也不得用作 Gate MW 的三模型凭据；契约合规仍需外部 provider（`.delphi-config.json`）。同时保留并说明绑定格式要求、`subagent_type` 派发方式、注册表需重开会话、部署不覆盖 + `init` 审计与升级步骤；同步更新 `docs/CAPABILITIES.md` 与各 skill 镜像。
+- **Execution Verification 不再接受专家自述，且验证口径纠正**: 验证步骤要求以平台执行记录核对模型。原文给的 Qoder 口径（`~/.qoder/logs/runs/*/manifest.json` 的 argv `--model`）实测记录的是会话/进程启动模型、对 subagent 无判别力，已改为 `~/.qoder/logs/sessions/<project>/<sessionId>/segments/*.jsonl` 里 `model.request.started` 事件的 `model` 字段（OpenCode 仍为 provider 调用日志）；并补充"平台把 subagent 固定到会话模型时该检查根本无法通过"的处置说明。
 
 ## [0.19.2.0] - 2026-09-22
 
