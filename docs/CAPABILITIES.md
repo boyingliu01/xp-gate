@@ -220,7 +220,7 @@ XP-Gate 集成的 AI Skills 体系：
 
 `xp-gate init` 自动检测 Qoder 平台并部署 3 个 Custom Agent 到 `.qoder/agents/`（`init --global` 部署到 `~/.qoder/agents/`），无需外部 API key。Agent 的 `model` 字段必须写成 `"[DisplayName](modelId)"`，裸名字或已下线 ID 会被平台静默忽略。新建 agent 后需重开会话才会被加载。
 
-**2026-09-22/23 隔离复测边界**：即使三份文件的绑定格式与 modelId 都正确，并且文件修复后**新开**会话（新 CLI 进程，注册表已加载正确绑定）再派发，三个专家 subagent 仍全部跑在当前会话模型上——`turn.started` / `model.request.started` / `model.response.completed` 三处记录的 `model` 全为同一 modelId，而三个 `is_subagent:true` 的独立 turn 与各自命中的角色视角证明派发路径确实采纳了 Custom Agent 的提示词、只丢弃了 `model` 绑定。所以这条路径只能作同模型、三角色的自查，其共识比例不满足"三个不同可执行模型 ID"契约，也不能当作 Gate MW 的三模型凭据；契约合规的 Delphi 需配置外部 provider（`.delphi-config.json`）。客观验证请读 `~/.qoder/logs/sessions/<project>/<sessionId>/segments/*.jsonl` 中 `model.request.started` 的 `model` 字段——`~/.qoder/logs/runs/*/manifest.json` 的 argv `--model` 是会话模型，对 subagent 无判别力。
+**2026-09-23 隔离复测边界**：即使三份文件的绑定格式与 modelId 都正确，并且文件修复后**新开**会话（新 CLI 进程，注册表已加载正确绑定）再派发，三个专家 subagent 仍全部跑在当前会话模型上——`turn.started` / `model.request.started` / `model.response.completed` 三处记录的 `model` 全为同一 modelId，而三个 `is_subagent:true` 的独立 turn 与各自命中的角色视角证明派发路径确实采纳了 Custom Agent 的提示词、只丢弃了 `model` 绑定。验证时要让被检角色绑一个**不等于会话模型**的 modelId（架构角通常与会话模型同为 `qfmodel`，没有判别力，有判别力的是技术角与可行性角）。所以这条路径只能作同模型、三角色的自查，其共识比例不满足"三个不同可执行模型 ID"契约，也不能当作 Gate MW 的三模型凭据；契约合规的 Delphi 需配置外部 provider（`.delphi-config.json`）。客观验证请读 `~/.qoder/logs/sessions/<project>/<sessionId>/segments/*.jsonl` 中 `model.request.started` 的 `model` 字段——`~/.qoder/logs/runs/*/manifest.json` 的 argv `--model` 是会话模型，对 subagent 无判别力。
 
 部署语义是"已存在不覆盖"，因此每次 `init` 都会审计已部署的 `delphi-*.md`：绑定缺失/格式非法或 modelId 与本版本模板不一致时点名文件并提示"删除 → 重跑 init → 重启会话"。这些 agent 是用户文件，`xp-gate uninstall` 只提示不删除。
 
