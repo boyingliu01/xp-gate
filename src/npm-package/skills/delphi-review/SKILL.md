@@ -249,7 +249,7 @@ tools_denied:
 
 1. **Step 0: Input Validation** — Check input contains reviewable content (design doc/code/spec/diff). Empty input → `[DelphiReview:BLOCKED]`.
 2. **Round 1: Anonymous Independent Review** — Invoke architecture, technical, and feasibility independently without exposing their opinions to one another. Every successful result must use `result_type=delphi_expert_result`.
-3. **Execution Verification** — Verify that all three results succeeded and that their `requested_model` values are three distinct trimmed IDs. A local fallback (`provider: local`) is not an executed expert and cannot satisfy this check; a local hosted endpoint configured as an ordinary callable provider can.
+3. **Execution Verification** — Verify that all three results succeeded and that their `requested_model` values are three distinct trimmed IDs, confirmed against the platform's execution record rather than expert self-report alone (OpenCode: the provider call log; Qoder: the `--model` argument in `~/.qoder/logs/runs/*/manifest.json`). A local fallback (`provider: local`) is not an executed expert and cannot satisfy this check; a local hosted endpoint configured as an ordinary callable provider can.
 4. **Consensus Check** — Aggregate all three successful expert results. Consensus >=90% AND all APPROVED → complete. One expert result is never global approval.
 5. **Rounds 2-5: Exchange and Final Positions** — If needed, expose prior aggregate evidence, re-evaluate, and stop at the first approved consensus or after five rounds.
 6. **Failure Handling** — Any expert failure, missing result, duplicate model ID, or unverifiable execution blocks the review. Do not substitute a local fallback or silently reduce the expert count.
@@ -337,11 +337,13 @@ Qoder 的内置模型**没有本地推理端点**：推理请求由 Qoder 客户
 | Technical (B) | `.qoder/agents/delphi-technical.md` | GLM-5.3-Flash (`gfmodel`) | 0.1× |
 | Feasibility (C) | `.qoder/agents/delphi-feasibility.md` | DeepSeek-Flash (`dfmodel`) | 0.1× |
 
-默认选 0.1× 档位是最省的组合；换模型时在 Qoder 的模型选择器里确认模型名与 ID（目录随版本变化，可在 Quest → Setting → Agents → Change Model 里逐个改）。
+默认选 0.1× 档位是最省的组合，但它是轻量模型：以成本最优为目标，不等同于最高评审质量；用于阻塞性发布决策的严格评审，建议在 Qoder 模型选择器里换更高档位（也可在 Quest → Setting → Agents → Change Model 逐个改）。
 
 **安装位置**（`xp-gate init` 自动部署，已存在的文件不覆盖）：
 - 项目级：`<project>/.qoder/agents/`（`xp-gate init`）
 - 用户级：`~/.qoder/agents/`（`xp-gate init --global`）
+
+**从 #417 之前升级（重要）**：因为部署语义是"已存在不覆盖"，重跑 `init` 不会修好旧模板。用过旧版本的用户需要手工删除 `<project>/.qoder/agents/delphi-*.md` 与 `~/.qoder/agents/delphi-*.md`，重跑对应的 `init`，再重启 Qoder 会话。`xp-gate init` 会在检测到旧格式（裸模型名）模板时打印告警提示这一动作。
 
 **model 字段格式（强制）**：必须写成 `"[DisplayName](modelId)"`。裸名字（如 `model: GLM-5.2`）或目录里已不存在的 ID **不会报错**，而是静默回退到当前会话模型 —— 结果是三个专家跑在同一个模型上，直接违反"三个不同可执行模型 ID"的契约，共识比例失去意义。
 

@@ -516,7 +516,7 @@ async function installLocal(args) {
 
   injectKarpathyPrinciples(projectRoot);
   configureOpenCodePlugin(srcDir, projectRoot);
-  configureQoderDelphiAgents(srcDir, projectRoot);
+  deployQoderDelphiAgents(srcDir, projectRoot);
 
   // Auto-register TUI plugin globally (idempotent)
   try {
@@ -595,7 +595,7 @@ async function setupGlobal(args) {
 
   // Qoder loads user-level custom agents from ~/.qoder/agents/, so a global
   // setup must deploy the Delphi expert templates there as well.
-  configureQoderDelphiAgents(srcDir, HOME_DIR);
+  deployQoderDelphiAgents(srcDir, HOME_DIR);
 
   console.log('[setup-global] Configuring git...');
   const { execSync } = require('child_process');
@@ -641,6 +641,21 @@ async function setupGlobal(args) {
 }
 
 /**
+ * Qoder Custom Agents must bind their model as "[DisplayName](modelId)"; a bare
+ * model name makes Qoder silently fall back to the session model, which would
+ * collapse the three Delphi experts onto one model.
+ */
+const QODER_MODEL_BINDING = /^model:\s*"?\[[^"\]]+\]\([A-Za-z0-9_.-]+\)"?\s*$/m;
+
+function hasModelBinding(file) {
+  try {
+    return QODER_MODEL_BINDING.test(fs.readFileSync(file, 'utf8'));
+  } catch {
+    return false;
+  }
+}
+
+/**
  * Deploy Qoder-native Delphi review agents when platform is Qoder.
  * Copies agent templates from the bundled qoder plugin into <targetRoot>/.qoder/agents/
  * — the project dir for local init, the home dir for global init (Qoder reads
@@ -652,12 +667,13 @@ async function setupGlobal(args) {
 function configureQoderDelphiAgents(srcDir, targetRoot) {
   const platform = detectPlatform();
   if (platform !== 'qoder') {
-    return; // Not Qoder — skip (OpenCode uses .delphi-config.json instead)
+    console.log(`  Qoder Delphi agents: SKIP (platform detected: ${platform})`);
+    return; // Not Qoder — OpenCode uses .delphi-config.json instead
   }
 
   const agentSrcDir = path.join(srcDir, 'plugins', 'qoder', 'agents');
   if (!fs.existsSync(agentSrcDir)) {
-    console.log('  Qoder Delphi agents: SKIP (templates not bundled)');
+    console.warn('  Qoder Delphi agents: SKIP (templates not bundled — reinstall xp-gate)');
     return;
   }
 
@@ -668,12 +684,23 @@ function configureQoderDelphiAgents(srcDir, targetRoot) {
   let deployed = 0;
   let skipped = 0;
   for (const file of agentFiles) {
+    const srcFile = path.join(agentSrcDir, file);
     const destFile = path.join(agentsDestDir, file);
     if (fs.existsSync(destFile)) {
       skipped++;
+      if (!hasModelBinding(destFile)) {
+        console.warn(`  ⚠ ${destFile} does not bind a model as "[Name](modelId)".`);
+        console.warn('    Qoder will silently run this expert on the session model, which breaks');
+        console.warn('    Delphi\'s three-distinct-models contract. Delete the file, re-run');
+        console.warn('    `xp-gate init` (or `--global`), then restart the Qoder session.');
+      }
       continue; // Don't overwrite user customizations
     }
-    fs.copyFileSync(path.join(agentSrcDir, file), destFile);
+    if (!hasModelBinding(srcFile)) {
+      console.warn(`  ⚠ Bundled agent template ${srcFile} has no valid model binding; skipped.`);
+      continue;
+    }
+    fs.copyFileSync(srcFile, destFile);
     deployed++;
   }
 
@@ -685,6 +712,21 @@ function configureQoderDelphiAgents(srcDir, targetRoot) {
   }
   if (deployed === 0 && skipped === 0) {
     console.log('  Qoder Delphi agents: no agent templates found');
+  }
+}
+
+/**
+ * Best-effort wrapper: a failed or partially readable agents dir must never
+ * abort the surrounding setup after hooks/adapters/modules are already copied.
+ *
+ * @param {string} srcDir - npm package source directory
+ * @param {string} targetRoot - project root (local) or home directory (global)
+ */
+function deployQoderDelphiAgents(srcDir, targetRoot) {
+  try {
+    configureQoderDelphiAgents(srcDir, targetRoot);
+  } catch (err) {
+    console.warn(`  Qoder Delphi agents: SKIP (deployment failed: ${err.message})`);
   }
 }
 
@@ -776,4 +818,4 @@ function injectKarpathyPrinciples(projectRoot) {
   }
 }
 
-module.exports = { init, promptBootstrap, installModuleRuntimeDeps };
+module.exports = { init, promptBootstrap, installModuleRuntimeDeps, deployQoderDelphiAgents, configureQoderDelphiAgents };
