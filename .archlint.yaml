@@ -14,6 +14,10 @@
 # skipped. See src/npm-package/scripts/sync-package-content.js for the
 # authoritative source→mirror mapping.
 ignore:
+# Git metadata: `xp-gate init` installs byte-identical copies of githooks/lib/*
+# under .git/hooks/lib/. They are deployment output, not source.
+- '.git/**'
+
 # Test fixtures (synthetic test data, not test code)
 - '**/__fixtures__/**'
 - '**/__snapshots__/**'
@@ -56,6 +60,10 @@ rules:
   code_clone:
     severity: high
     exclude:
+    # `xp-gate init` installs a byte-identical copy of githooks/lib/* into
+    # .git/hooks/lib/. Both sides must be excluded or the pair is still reported.
+    - '.git/**'
+    - 'githooks/lib/**'
     - 'plugins/**/*.ts'
     - 'plugins/**/*.js'
     - 'plugins/**/*.cjs'
