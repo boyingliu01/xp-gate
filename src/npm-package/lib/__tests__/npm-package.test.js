@@ -110,3 +110,28 @@ describe('published adapter-common.sh', () => {
     expect(published).toContain('run_without_git_context');
   });
 });
+
+// ---------- Issue #411: gate scripts must be publishable (doctor parity) ----------
+
+describe('Issue #411: every gate-*.sh at package root is listed in "files"', () => {
+  const GATE_SCRIPT_RE = /^gate-\d+.*\.sh$/;
+
+  it('files array covers all gate scripts present at package root', () => {
+    const rootScripts = fs.readdirSync(pkgDir).filter(f => GATE_SCRIPT_RE.test(f));
+    expect(rootScripts.length).toBeGreaterThan(0);
+    const files = pkg.files || [];
+    const missing = rootScripts.filter(f => !files.includes(f));
+    expect(missing).toEqual([]);
+  });
+
+  it('files array covers doctor EXPECTED_GATE_SCRIPTS', () => {
+    const doctorSrc = fs.readFileSync(path.join(pkgDir, 'lib', 'doctor.js'), 'utf8');
+    const match = doctorSrc.match(/EXPECTED_GATE_SCRIPTS\s*=\s*\[([^\]]*)\]/);
+    expect(match).not.toBeNull();
+    const expected = [...match[1].matchAll(/'([^']+)'/g)].map(m => m[1]);
+    expect(expected).toContain('gate-10.sh');
+    const files = pkg.files || [];
+    const missing = expected.filter(f => !files.includes(f));
+    expect(missing).toEqual([]);
+  });
+});
