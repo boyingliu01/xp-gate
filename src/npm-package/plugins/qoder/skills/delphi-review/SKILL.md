@@ -347,7 +347,7 @@ Qoder 的内置模型**没有本地推理端点**：推理请求由 Qoder 客户
 - 项目级：`<project>/.qoder/agents/`（`xp-gate init`）
 - 用户级：`~/.qoder/agents/`（`xp-gate init --global`）
 
-**从 #417 之前升级（重要）**：因为部署语义是"已存在不覆盖"，重跑 `init` 不会修好旧模板。用过旧版本的用户需要手工删除 `<project>/.qoder/agents/delphi-*.md` 与 `~/.qoder/agents/delphi-*.md`，重跑对应的 `init`，再重启 Qoder 会话。`xp-gate init` 会在检测到旧格式（裸模型名）模板时打印告警提示这一动作。
+**从 #417 之前升级（重要）**：因为部署语义是"已存在不覆盖"，重跑 `init` 不会修好旧模板。用过旧版本的用户需要手工删除 `<project>/.qoder/agents/delphi-*.md` 与 `~/.qoder/agents/delphi-*.md`，重跑对应的 `init`，再重启 Qoder 会话。`xp-gate init` 会审计已部署的 `delphi-*.md`：绑定格式非法（裸模型名）或 modelId 与本版本模板不一致时，会点名文件并给出上述修复提示。
 
 **model 字段格式（强制）**：必须写成 `"[DisplayName](modelId)"`。裸名字（如 `model: GLM-5.2`）或目录里已不存在的 ID **不会报错**，而是静默回退到当前会话模型 —— 结果是三个专家跑在同一个模型上，直接违反"三个不同可执行模型 ID"的契约，共识比例失去意义。
 

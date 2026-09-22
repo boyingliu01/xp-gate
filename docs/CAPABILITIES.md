@@ -220,6 +220,8 @@ XP-Gate 集成的 AI Skills 体系：
 
 `xp-gate init` 自动检测 Qoder 平台并部署 3 个 Custom Agent 到 `.qoder/agents/`（`init --global` 部署到 `~/.qoder/agents/`），无需外部 API key。Agent 的 `model` 字段必须写成 `"[DisplayName](modelId)"`，否则 Qoder 会静默回退到会话模型，三个专家将跑在同一个模型上。新建 agent 后需重开会话才会被加载。
 
+部署语义是"已存在不覆盖"，因此每次 `init` 都会审计已部署的 `delphi-*.md`：绑定缺失/格式非法或 modelId 与本版本模板不一致时点名文件并提示"删除 → 重跑 init → 重启会话"。这些 agent 是用户文件，`xp-gate uninstall` 只提示不删除。
+
 **OpenCode 平台（外部 API）**：
 
 | Expert | 角色 | 推荐模型 | 备选模型 |
