@@ -335,7 +335,7 @@ Schema-v2 对 context 路径执行项目根目录 containment 与 realpath 检�
 
 Qoder 的内置模型**没有本地推理端点**：推理请求由 Qoder 客户端经服务端代理发出，凭证是一次性 job token。所以不能照搬 OpenCode 的 `base_url + api_key` 直连方式；Qoder 侧内置模型的唯一入口是 **Custom Agent** —— 每个专家一个独立 agent 文件，frontmatter 用 `model` 字段声明模型。
 
-**契约结论（先说结论）**：这条路径**不满足**"三个不同可执行模型 ID"契约。2026-09-22 实测（Qoder 桌面版 + xp-gate 0.19.x）：`~/.qoder/agents/delphi-*.md` 三份文件已按 `"[Qwen3.8-Flash](qfmodel)"` / `"[DeepSeek-Flash](dfmodel)"` / `"[GLM-5.3-Flash](gfmodel)"` 正确绑定、且早于会话启动部署，但一轮三方评审的 116 次 `model.request.started` 事件**全部是 `qfmodel`**。三个 subagent 实例确实各自起来了（`agent_id` 分别为 `adelphi-architecture-*` / `adelphi-technical-*` / `adelphi-feasibility-*`，角色提示词生效），实际执行模型却始终是会话模型：`subagent_type` 派发路径不采纳 Custom Agent 的 `model` 绑定。
+**契约结论（先说结论）**：这条路径**不满足**"三个不同可执行模型 ID"契约。2026-09-22/23 在 Qoder 桌面版 + xp-gate 0.19.x 上做了隔离复测：先把 `~/.qoder/agents/delphi-*.md` 三份文件改成 `"[Qwen3.8-Flash](qfmodel)"` / `"[GLM-5.3-Flash](gfmodel)"` / `"[DeepSeek-Flash](dfmodel)"`，**再**新开一个会话（新 CLI 进程，注册表必然加载已修好的绑定），只派发三个 subagent 各回一句话。结果：三个 subagent 确实以 `is_subagent=true` 各自起了独立 turn、角色提示词生效（回复内容分别命中架构/技术/可行性视角），而 `turn.started` / `model.request.started` / `model.response.completed` 三处记录的 `model` 全部是会话模型 `qfmodel`，没有一次 `gfmodel`/`dfmodel`。即 `subagent_type` 派发路径采纳 Custom Agent 的角色提示词，但**不采纳**它的 `model` 绑定。
 
 因此 Qoder 原生模式只能作为**同模型、三角色（persona）的自查**，其共识比例不能当作多模型交叉验证的证据，也不应用作 Gate MW 的三模型凭据。需要契约合规的 Delphi 时，按上面的外部 provider 方式配置 `.delphi-config.json`（Qoder 与 OpenCode 同用，条件是模型确有可调端点）。
 
@@ -360,7 +360,7 @@ grep '"type":"model.request.started"' ~/.qoder/logs/sessions/<project>/<sessionI
   | grep -oE '"model":"[^"]*"' | sort | uniq -c
 ```
 
-同一文件里的 `agent_id` 可确认三个角色确实各自执行。专家自述的 `requested_model` 只是在复述自己 frontmatter 里的绑定，不构成证据。
+同一文件里的 `turn.started`（`is_subagent:true`）与 `model.response.completed` 可交叉核对：前者证明三个角色各自起了独立 turn，后者带 `provider` 字段。注意两件事：改完 agent 文件必须**换新会话**再测，否则测到的仍是旧绑定（注册表只在会话启动时加载，用旧会话的数据下结论会被混杂因素污染）；专家自述的 `requested_model` 只是在复述自己 frontmatter 里的声明，不构成证据。
 
 **成本**：走这条路径不消耗外部 API key，只计 Qoder Credits。
 
