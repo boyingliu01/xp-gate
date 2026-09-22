@@ -769,6 +769,19 @@ function reportQoderAgentDeployment(summary, agentsDestDir, templateCount) {
 }
 
 /**
+ * A legal binding is not an executed binding: measured on 2026-09-23, Qoder's
+ * subagent dispatch adopts the agent persona but pins the model to the session's.
+ * Without this line a user leaves `init` believing the three-model contract holds.
+ */
+function warnQoderBindingBoundary() {
+  console.warn('  ⚠ Platform boundary: Qoder Custom Agent dispatch does not adopt the model');
+  console.warn('    bindings declared in these agent files. Every expert still runs on the');
+  console.warn('    current session model, so the native path is a same-model three-persona');
+  console.warn("    self-check. Delphi's three-distinct-models contract");
+  console.warn('    requires an external provider configured in .delphi-config.json.');
+}
+
+/**
  * Deploy Qoder-native Delphi review agents when platform is Qoder.
  * Copies agent templates from the bundled qoder plugin into <targetRoot>/.qoder/agents/
  * — the project dir for local init, the home dir for global init (Qoder reads
@@ -795,6 +808,7 @@ function configureQoderDelphiAgents(srcDir, targetRoot) {
   const summary = deployQoderTemplates(agentSrcDir, agentsDestDir, bundled);
   auditDeployedQoderAgents(agentsDestDir, bundled);
   reportQoderAgentDeployment(summary, agentsDestDir, bundled ? Object.keys(bundled).length : 0);
+  warnQoderBindingBoundary();
 }
 
 /**

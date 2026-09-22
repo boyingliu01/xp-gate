@@ -214,6 +214,39 @@ describe('Qoder Delphi agent templates (#417)', () => {
     }
   });
 
+  it('states the platform boundary even when every deployed binding is valid', () => {
+    const dirs = tempAgentPair(
+      'delphi-architecture.md',
+      agentTemplate('model: "[Qwen3.8-Flash](qfmodel)"', 'delphi-architecture'),
+      null
+    );
+    withDirs(dirs, () => {
+      const { configureQoderDelphiAgents } = require('../init');
+      configureQoderDelphiAgents(dirs.srcDir, dirs.targetRoot);
+
+      // A legal binding is not an executed binding. Without this line the user
+      // leaves `init` believing three experts now run on three models.
+      expect(fs.existsSync(path.join(dirs.destAgents, 'delphi-architecture.md'))).toBe(true);
+      expect(warned()).toContain('does not adopt');
+      expect(warned()).toContain('.delphi-config.json');
+    });
+  });
+
+  it('does not state the boundary on a non-Qoder platform', () => {
+    fs.rmSync(path.join(tmpHome, '.qoder', 'skills'), { recursive: true, force: true });
+    const dirs = tempAgentPair(
+      'delphi-architecture.md',
+      agentTemplate('model: "[Qwen3.8-Flash](qfmodel)"', 'delphi-architecture'),
+      null
+    );
+    withDirs(dirs, () => {
+      const { configureQoderDelphiAgents } = require('../init');
+      configureQoderDelphiAgents(dirs.srcDir, dirs.targetRoot);
+
+      expect(warned()).not.toContain('does not adopt');
+    });
+  });
+
   it('reports the detected platform when skipping agent deployment', () => {
     fs.rmSync(path.join(tmpHome, '.qoder', 'skills'), { recursive: true, force: true });
     const dirs = tempAgentPair('delphi-technical.md', null, null);
