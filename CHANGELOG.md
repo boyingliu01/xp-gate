@@ -2,6 +2,11 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.19.2.0] - 2026-09-22
+
+### Fixed
+- **npm 发布包缺失 `gate-10.sh` (#411)**: `files` 数组遗漏 `gate-10.sh`，导致发布 tarball 缺该文件、全局安装后 `doctor --fix` 从包根恢复时静默失败。新增回归测试锁定两条不变量：包根 `gate-*.sh` 必须全部列入 `files`，且 `files` 必须覆盖 doctor `EXPECTED_GATE_SCRIPTS`。
+
 ## [0.19.1.0] - 2026-08-30
 
 ### Fixed
