@@ -46,6 +46,15 @@ describe('Archlint analysis boundaries', () => {
     ]));
   });
 
+  it('ignores the installed git hook copies under .git', () => {
+    // `xp-gate init` copies githooks/lib/* into .git/hooks/lib/, which archlint
+    // otherwise scans as a second source tree.
+    expect(config.ignore).toContain('.git/**');
+    expect(config.rules.code_clone.exclude).toEqual(
+      expect.arrayContaining(['.git/**', 'githooks/lib/**'])
+    );
+  });
+
   it.each([
     'skills/**',
     'skills/**/__tests__/**',
