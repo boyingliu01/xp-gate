@@ -249,7 +249,7 @@ tools_denied:
 
 1. **Step 0: Input Validation** — Check input contains reviewable content (design doc/code/spec/diff). Empty input → `[DelphiReview:BLOCKED]`.
 2. **Round 1: Anonymous Independent Review** — Invoke architecture, technical, and feasibility independently without exposing their opinions to one another. Every successful result must use `result_type=delphi_expert_result`.
-3. **Execution Verification** — Verify that all three results succeeded and that their `requested_model` values are three distinct trimmed IDs, confirmed against the platform's execution record rather than expert self-report alone (OpenCode: the provider call log; Qoder: the `--model` argument in `~/.qoder/logs/runs/*/manifest.json`). A local fallback (`provider: local`) is not an executed expert and cannot satisfy this check; a local hosted endpoint configured as an ordinary callable provider can.
+3. **Execution Verification** — Verify that all three results succeeded and that their `requested_model` values are three distinct trimmed IDs, confirmed against the platform's execution record rather than expert self-report alone (OpenCode: the provider call log; Qoder: the `model` field of `model.request.started` events under `~/.qoder/logs/sessions/<project>/<sessionId>/segments/*.jsonl` — the `--model` argv in `~/.qoder/logs/runs/*/manifest.json` is the session model and proves nothing about subagents). A local fallback (`provider: local`) is not an executed expert and cannot satisfy this check; a local hosted endpoint configured as an ordinary callable provider can. Where the platform pins subagents to the session model (current Qoder Custom Agent dispatch, see the Qoder section below), the check cannot pass on built-in models at all and the external provider path is required.
 4. **Consensus Check** — Aggregate all three successful expert results. Consensus >=90% AND all APPROVED → complete. One expert result is never global approval.
 5. **Rounds 2-5: Exchange and Final Positions** — If needed, expose prior aggregate evidence, re-evaluate, and stop at the first approved consensus or after five rounds.
 6. **Failure Handling** — Any expert failure, missing result, duplicate model ID, or unverifiable execution blocks the review. Do not substitute a local fallback or silently reduce the expert count.
@@ -327,33 +327,38 @@ Each round MUST output a structured round marker:
 - ✅ 三个角色可以共享一个 provider 和 token 计划
 - ❌ `provider: local` 的特殊 fallback 不能计为一次成功执行
 
-#### Qoder 平台（推荐 — Custom Agent 模式）
+#### Qoder 平台（Custom Agent 模式 — 只能做到同模型三角色）
 
-Qoder 的内置模型**没有本地推理端点**：推理请求由 Qoder 客户端经服务端代理发出，凭证是一次性 job token。所以不能照搬 OpenCode 的 `base_url + api_key` 直连方式，Qoder 侧的唯一入口是 **Custom Agent** —— 每个专家是一个独立 agent 文件，各自绑定一个内置模型。
+Qoder 的内置模型**没有本地推理端点**：推理请求由 Qoder 客户端经服务端代理发出，凭证是一次性 job token。所以不能照搬 OpenCode 的 `base_url + api_key` 直连方式；Qoder 侧内置模型的唯一入口是 **Custom Agent** —— 每个专家一个独立 agent 文件，frontmatter 用 `model` 字段声明模型。
 
-| 专家 | Agent 文件 | 模型（modelId） | Credits 费率 |
-|------|-----------|----------------|-------------|
-| Architecture (A) | `.qoder/agents/delphi-architecture.md` | Qwen3.8-Flash (`qfmodel`) | 0.1× |
-| Technical (B) | `.qoder/agents/delphi-technical.md` | GLM-5.3-Flash (`gfmodel`) | 0.1× |
-| Feasibility (C) | `.qoder/agents/delphi-feasibility.md` | DeepSeek-Flash (`dfmodel`) | 0.1× |
+**契约结论（先说结论）**：这条路径**不满足**"三个不同可执行模型 ID"契约。2026-09-22 实测（Qoder 桌面版 + xp-gate 0.19.x）：`~/.qoder/agents/delphi-*.md` 三份文件已按 `"[Qwen3.8-Flash](qfmodel)"` / `"[DeepSeek-Flash](dfmodel)"` / `"[GLM-5.3-Flash](gfmodel)"` 正确绑定、且早于会话启动部署，但一轮三方评审的 116 次 `model.request.started` 事件**全部是 `qfmodel`**。三个 subagent 实例确实各自起来了（`agent_id` 分别为 `adelphi-architecture-*` / `adelphi-technical-*` / `adelphi-feasibility-*`，角色提示词生效），实际执行模型却始终是会话模型：`subagent_type` 派发路径不采纳 Custom Agent 的 `model` 绑定。
 
-默认选 0.1× 档位是最省的组合，但它是轻量模型：以成本最优为目标，不等同于最高评审质量；用于阻塞性发布决策的严格评审，建议在 Qoder 模型选择器里换更高档位（也可在 Quest → Setting → Agents → Change Model 逐个改）。
+因此 Qoder 原生模式只能作为**同模型、三角色（persona）的自查**，其共识比例不能当作多模型交叉验证的证据，也不应用作 Gate MW 的三模型凭据。需要契约合规的 Delphi 时，按上面的外部 provider 方式配置 `.delphi-config.json`（Qoder 与 OpenCode 同用，条件是模型确有可调端点）。
+
+| 角色 | Agent 文件 | 绑定的 modelId | 实际执行模型 |
+|------|-----------|---------------|-------------|
+| Architecture (A) | `.qoder/agents/delphi-architecture.md` | `qfmodel` | 会话模型 |
+| Technical (B) | `.qoder/agents/delphi-technical.md` | `gfmodel` | 会话模型 |
+| Feasibility (C) | `.qoder/agents/delphi-feasibility.md` | `dfmodel` | 会话模型 |
 
 **安装位置**（`xp-gate init` 自动部署，已存在的文件不覆盖）：
 - 项目级：`<project>/.qoder/agents/`（`xp-gate init`）
 - 用户级：`~/.qoder/agents/`（`xp-gate init --global`）
 
-**从 #417 之前升级（重要）**：因为部署语义是"已存在不覆盖"，重跑 `init` 不会修好旧模板。用过旧版本的用户需要手工删除 `<project>/.qoder/agents/delphi-*.md` 与 `~/.qoder/agents/delphi-*.md`，重跑对应的 `init`，再重启 Qoder 会话。`xp-gate init` 会审计已部署的 `delphi-*.md`：绑定格式非法（裸模型名）或 modelId 与本版本模板不一致时，会点名文件并给出上述修复提示。
+**model 字段格式**：仍须写成 `"[DisplayName](modelId)"`。裸名字或已下线 ID 不会报错，会被平台静默忽略。`xp-gate init` 会审计已部署的 `delphi-*.md`，格式非法或 modelId 与本版本模板不一致时点名文件并给出"删除 → 重跑 `init` → 重启会话"提示；因为部署语义是"已存在不覆盖"，从 #417 之前的版本升级必须手工删旧文件再重跑 `init`。注意：修好绑定也只是让角色声明规范，并不改变上表的执行模型结论。
 
-**model 字段格式（强制）**：必须写成 `"[DisplayName](modelId)"`。裸名字（如 `model: GLM-5.2`）或目录里已不存在的 ID **不会报错**，而是静默回退到当前会话模型 —— 结果是三个专家跑在同一个模型上，直接违反"三个不同可执行模型 ID"的契约，共识比例失去意义。
+**执行方式**：用 Agent tool 并行派发 3 个 subagent，`subagent_type` 分别取 `delphi-architecture`、`delphi-technical`、`delphi-feasibility`。**新建或修改 agent 文件后必须重开会话**——注册表只在会话启动时加载，否则报 `Unknown agent type`。
 
-**执行方式**：用 Agent tool 并行派发 3 个 subagent，`subagent_type` 分别取 `delphi-architecture`、`delphi-technical`、`delphi-feasibility`（不是 GeneralPurpose，否则会共用会话模型）。主 orchestrator 收集三份 `delphi_expert_result` 后计算共识。
+**客观验证（不要采信专家自述）**：`~/.qoder/logs/runs/*/manifest.json` 的 argv `--model` 记录的是**会话/进程启动模型**，对 subagent 没有判别力（历史上所有运行都是同一个 ID）。真正的证据在按会话分段的日志里：
 
-**新建或修改 agent 文件后必须重开会话**：Qoder 只在会话启动时加载 agent 注册表，本会话内新建的 agent 无法派发（报 `Unknown agent type`）。
+```bash
+grep '"type":"model.request.started"' ~/.qoder/logs/sessions/<project>/<sessionId>/segments/*.jsonl \
+  | grep -oE '"model":"[^"]*"' | sort | uniq -c
+```
 
-**验证真的跑在三个不同模型上**：不要采信专家自述的 `requested_model`。读 `~/.qoder/logs/runs/*/manifest.json`，每个 subagent 是一次独立的 worker 调用，其 `argv` 中含 `--model <modelId>`；一轮三方评审应出现三个不同的 modelId。
+同一文件里的 `agent_id` 可确认三个角色确实各自执行。专家自述的 `requested_model` 只是在复述自己 frontmatter 里的绑定，不构成证据。
 
-**优势**：无需外部 API key，直接使用 Qoder Credits，模型由平台统一管理。
+**成本**：走这条路径不消耗外部 API key，只计 Qoder Credits。
 
 #### OpenCode 平台（External API 模式）
 
