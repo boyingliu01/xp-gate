@@ -390,11 +390,6 @@ describe('init', () => {
       mockExecSuccess();
       setupQoderPlatform();
 
-      // Ensure agent templates exist in the npm package
-      const templateDir = agentTemplateDir();
-      fs.mkdirSync(templateDir, { recursive: true });
-      fs.writeFileSync(path.join(templateDir, 'delphi-architecture.md'), '---\nname: test\n---\narch expert');
-
       vi.resetModules();
       delete require.cache[require.resolve('../init')];
       delete require.cache[require.resolve('../detect-deps.js')];
@@ -406,7 +401,7 @@ describe('init', () => {
 
       const deployedAgent = path.join(tmpProject, '.qoder', 'agents', 'delphi-architecture.md');
       expect(fs.existsSync(deployedAgent)).toBe(true);
-      expect(fs.readFileSync(deployedAgent, 'utf8')).toContain('arch expert');
+      expect(fs.readFileSync(deployedAgent, 'utf8')).toContain('name: delphi-architecture');
     });
 
     it('does not overwrite existing agent files (preserves user customizations)', async () => {
@@ -419,11 +414,6 @@ describe('init', () => {
       fs.mkdirSync(agentsDir, { recursive: true });
       fs.writeFileSync(path.join(agentsDir, 'delphi-architecture.md'), 'CUSTOM USER CONTENT');
 
-      // Template in npm package
-      const templateDir = agentTemplateDir();
-      fs.mkdirSync(templateDir, { recursive: true });
-      fs.writeFileSync(path.join(templateDir, 'delphi-architecture.md'), 'TEMPLATE CONTENT');
-
       vi.resetModules();
       delete require.cache[require.resolve('../init')];
       delete require.cache[require.resolve('../detect-deps.js')];
@@ -434,6 +424,35 @@ describe('init', () => {
 
       // User content preserved
       expect(fs.readFileSync(path.join(agentsDir, 'delphi-architecture.md'), 'utf8')).toBe('CUSTOM USER CONTENT');
+    });
+
+    it('deploys Delphi agents to the user-level agents dir in global mode', async () => {
+      mockExecSuccess();
+      setupQoderPlatform();
+
+      vi.resetModules();
+      delete require.cache[require.resolve('../init')];
+      delete require.cache[require.resolve('../detect-deps.js')];
+      delete require.cache[require.resolve('../shared-paths')];
+
+      const { init } = require('../init');
+      const result = await init(['--global']);
+      expect(result).toBe(0);
+
+      const globalAgent = path.join(tmpHome, '.qoder', 'agents', 'delphi-architecture.md');
+      expect(fs.existsSync(globalAgent)).toBe(true);
+    });
+
+    it('pins every expert template to a distinct built-in model in "[Name](modelId)" form', () => {
+      const templateDir = agentTemplateDir();
+      const models = ['delphi-architecture', 'delphi-technical', 'delphi-feasibility'].map(name => {
+        const content = fs.readFileSync(path.join(templateDir, `${name}.md`), 'utf8');
+        const declared = content.match(/^model:\s*(.+)$/m);
+        expect(declared).not.toBeNull();
+        expect(declared[1].trim()).toMatch(/^"?\[[^\]]+\]\([a-z0-9_]+\)"?$/);
+        return declared[1].match(/\(([a-z0-9_]+)\)/)[1];
+      });
+      expect(new Set(models).size).toBe(3);
     });
 
     it('skips deployment when platform is not Qoder', async () => {
