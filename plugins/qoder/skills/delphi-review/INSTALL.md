@@ -1,151 +1,150 @@
-# Installing and Configuring Delphi Review (Qoder)
+# Installing and Configuring Delphi Review
 
-This guide walks you through setting up the Delphi consensus review skill in your Qoder environment.
+This guide walks you through setting up the Delphi consensus review skill in your OpenCode environment.
 
 ## Prerequisites
 
-- **Node.js >= 18** (script uses built-in `fetch`)
-- Exactly **3 callable expert model configurations** with distinct trimmed executable model IDs
-- `@boyingliu01/xp-gate` npm package installed (for the `delphi-external-review.cjs` script)
+- OpenCode installed and configured
+- Exactly **3 callable expert model configurations** are required.
+- The three configurations must use distinct trimmed executable model IDs. They may share one provider and token plan.
 
-> Provider, vendor, gateway, and model nationality are unrestricted. One provider and token plan may serve all three roles.
+> Provider, vendor, gateway, and model nationality are unrestricted. The enforced diversity boundary is three distinct requested model IDs, not provider diversity.
 
-## Quick Setup (4 steps)
+## Quick Setup (3 steps)
 
 ### Step 1: Copy the configuration template
 
 ```bash
-# From your project root:
-cp skills/delphi-review/.delphi-config.json.example skills/delphi-review/.delphi-config.json
+# From your project root (where opencode.json lives):
+cp skills/delphi-review/.delphi-config.json.example .delphi-config.json
 ```
 
-Or if installed globally:
+This file maps abstract expert roles to agent names. You typically don't need to edit this unless you want custom agent names.
 
-```bash
-cp ~/.qoder/skills/delphi-review/.delphi-config.json.example ~/.qoder/skills/delphi-review/.delphi-config.json
-```
+### Step 2: Add agent definitions to opencode.json
 
-### Step 2: Edit the configuration
+Copy the `agent` block from `skills/delphi-review/opencode.json.delphi.example` into your `opencode.json`.
 
-Open `.delphi-config.json` and fill in your API keys and model preferences:
+Then replace the provider/model placeholders:
 
 ```json
-{
-  "active_profile": "default",
-  "profiles": {
-    "default": {
-      "providers": {
-        "deepseek": {
-          "base_url": "https://api.deepseek.com/v1",
-          "api_key": "sk-your-key-here"
+// Before (template):
+"model": "YOUR_PROVIDER/YOUR_MODEL_A"
+
+// After (your config):
+"model": "bailian-tp/qwen-plus"
+// The other two role model fields must be different trimmed IDs.
+```
+
+### Step 3: Ensure provider configuration exists
+
+Your `opencode.json` must have the provider definitions. If you're using OpenCode's built-in providers (OpenAI, Anthropic, etc.), you just need API keys set in your environment.
+
+For custom providers (like Ali Bailian), add a provider entry:
+
+```json
+"provider": {
+  "my-custom-provider": {
+    "npm": "@ai-sdk/anthropic",
+    "name": "My Custom Provider",
+    "options": {
+      "baseURL": "https://your-api-endpoint.com/v1",
+      "apiKey": "your-api-key"
+    },
+    "models": {
+      "my-model-name": {
+        "name": "My Model Name",
+        "modalities": {
+          "input": ["text"],
+          "output": ["text"]
         },
-        "zhipu": {
-          "base_url": "https://open.bigmodel.cn/api/paas/v4",
-          "api_key": "your-key-here"
+        "limit": {
+          "context": 128000,
+          "output": 8192
         }
-      },
-      "experts": {
-        "architecture": { "provider": "deepseek", "model": "deepseek-chat" },
-        "technical": { "provider": "zhipu", "model": "glm-5.2" },
-        "feasibility": { "provider": "deepseek", "model": "deepseek-reasoner" }
       }
     }
   }
 }
 ```
 
-### Step 3: Verify Node.js version
+## Model Recommendations
 
-```bash
-node --version  # Must be >= 18.0.0
-```
+The skill requires exactly three experts for every mode. Choose three models that are callable through your configured provider.
 
-### Step 4: Verify configuration
+| Expert Role | Recommended | Alternatives |
+|-------------|-------------|-------------|
+| **Architecture (Expert A)** | Claude Sonnet 4 | GPT-4o, Qwen-Plus, Gemini 2.5 Pro |
+| **Technical (Expert B)** | Claude Haiku | Qwen-Coder, DeepSeek-Coder, GPT-4o-mini |
+| **Feasibility (Expert C)** | Claude Opus | GPT-4, Gemini 2.5 Pro, Qwen-Max |
 
-Test that the script can read your config and the API is reachable:
+**Minimum viable setup**:
+- Expert A: architecture model
+- Expert B: technical model
+- Expert C: feasibility model
+- All three requested model IDs must be distinct. A `provider: local` fallback does not count.
 
-```bash
-node <script-path> --expert architecture --input "Test review: verify connectivity" --round 1 --config skills/delphi-review/.delphi-config.json
-```
-
-Where `<script-path>` is located (in priority order):
-1. `node_modules/@boyingliu01/xp-gate/scripts/delphi-external-review.cjs`
-2. `$(npm root -g)/@boyingliu01/xp-gate/scripts/delphi-external-review.cjs`
-
-## Configuration Reference
+## Configuration File Reference
 
 ### `.delphi-config.json`
 
-| Field | Required | Description |
-|-------|----------|-------------|
-| `active_profile` | ✅ | Name of the active configuration profile |
-| `profiles` | ✅ | Named configuration profiles (for easy switching) |
-| `profiles.<name>.providers` | ✅ | Provider definitions: base_url + api_key |
-| `profiles.<name>.experts` | ✅ | Expert-to-provider/model mapping |
-| `profiles.<name>.experts.<role>.provider` | ✅ | Callable provider name; `"local"` fallback cannot count |
-| `consensus.threshold_percent` | ❌ | Consensus threshold (default: 90) |
-| `consensus.max_review_rounds` | ❌ | Max review rounds (default: 5) |
+| Field | Description | Default |
+|-------|-------------|---------|
+| `num_experts` | Number of experts to use | 3, fixed |
+| `experts.architecture` | Architecture reviewer configuration | Required |
+| `experts.technical` | Technical reviewer configuration | Required |
+| `experts.feasibility` | Feasibility reviewer configuration | Required for 3-expert mode |
+    | `consensus.threshold_percent` | Agreement threshold | 90 |
+| `consensus.max_review_rounds` | Maximum review rounds | 5 |
+| `consensus.cross_provider_required` | Deprecated and ignored; emits `cross_provider_required_ignored` | false or omitted |
 
-### Switching profiles
+### `opencode.json` agent block
 
-Edit `active_profile` in the config, or use the `--profile <name>` CLI argument to override temporarily.
-
-### Single-provider setup
-
-One provider may expose all three distinct executable models:
-
-```json
-{
-  "active_profile": "starter",
-  "profiles": {
-    "starter": {
-      "providers": {
-        "deepseek": { "base_url": "https://api.deepseek.com/v1", "api_key": "sk-xxx" }
-      },
-      "experts": {
-        "architecture": { "provider": "deepseek", "model": "deepseek-chat" },
-        "technical": { "provider": "deepseek", "model": "deepseek-reasoner" },
-        "feasibility": { "provider": "deepseek", "model": "deepseek-coder" }
-      }
-    }
-  }
-}
-```
-
-> All three model IDs must remain distinct after trimming, and all three calls must succeed.
+| Field | Description |
+|-------|-------------|
+| `model` | Provider/model identifier (e.g., `openai/gpt-4o`) |
+| `mode` | Must be `"subagent"` |
+| `prompt` | Expert role instructions |
+| `tools` | Tool permissions (read: true, write: false recommended) |
 
 ## Usage
 
 Once configured, invoke the skill via:
 
-```
+```bash
 /delphi-review
 ```
 
-The skill will:
-1. Read `.delphi-config.json` to find expert configurations
-2. Call external model APIs via `delphi-external-review.cjs` script
-3. Reject `provider: "local"` fallback as non-executed evidence
-4. Aggregate verdicts and compute consensus
+Or reference it in your workflows. The skill will automatically use the agents defined in your `opencode.json`.
 
 ## Troubleshooting
 
-### "Config file not found"
+### "Agent delphi-reviewer-xxx not found"
 
-Copy `.delphi-config.json.example` to `.delphi-config.json` and fill in your API keys.
+The agent definitions in `opencode.json` don't match the names in `.delphi-config.json`. Verify:
+1. Agent names in `.delphi-config.json` match keys in `opencode.json` `agent` block
+2. opencode.js is valid JSON (use `jq . opencode.json` to verify)
 
-### "Script not found"
+### "Model YOUR_PROVIDER/YOUR_MODEL not available"
 
-Install the npm package: `npm install -g @boyingliu01/xp-gate`
+You forgot to replace the placeholder. Search for `YOUR_PROVIDER` in your opencode.json and replace with actual values.
 
-### "Authentication failed (401)"
+### Both experts gave identical feedback
 
-Check your API key in `.delphi-config.json`. Ensure the key matches the provider.
+Shared providers are allowed. Configure three distinct executable model IDs and verify all three calls succeed.
 
-### "Expert model IDs are not distinct"
+### Review takes too long / costs too much
 
-Configure three distinct callable model IDs. They may use the same provider.
+Do not reduce the expert count. Use three callable models and keep the threshold and round bounds unchanged.
 
-### "Node.js >= 18 required"
+## Advanced: JSON Schema Validation
 
-Upgrade Node.js. The script uses the built-in `fetch` API.
+For IDE autocompletion and validation, reference the schema in your `.delphi-config.json`:
+
+```json
+{
+  "$schema": "https://example.com/delphi-config.schema.json"
+}
+```
+
+The schema file is available at `.delphi-config.schema.json` in this directory.

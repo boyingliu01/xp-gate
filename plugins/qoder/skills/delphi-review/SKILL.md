@@ -4,8 +4,8 @@ version: 1.1.0
 description: >
   Performs multi-round anonymous expert consensus review using the Delphi method. Supports
   design review (default), code-walkthrough (--mode code-walkthrough), and requirements
-  (--mode requirements) modes. Uses exactly 3
-  successfully executed experts with distinct model IDs and a >=90% statistical consensus threshold.
+  (lightweight, --mode requirements) modes. Uses exactly three experts with distinct executable
+  model IDs and a >=90% statistical consensus threshold.
   Outputs structured verdict (APPROVED/PASS_WITH_CAVEATS/REQUEST_CHANGES/BLOCKED).
 
   WHAT: Anonymous multi-expert review with iterative consensus building for designs, plans,
@@ -21,12 +21,13 @@ description: >
   "多专家评审", "consensus review", "code walkthrough", "push review", "architecture review",
   "delphi review", "run delphi", "start delphi", "评审这个架构", "review this architecture",
   "评审PR", "review this PR with delphi", "delphi评审", "delphi 评审", "run delphi review",
-  "执行delphi", "启动delphi评审".
+  "执行delphi", "启动delphi评审", "review the requirements", "评审需求", "requirements review",
+  "/requirements-review".
   NEGATIVE TRIGGERS: "how does delphi work", "what is delphi review", "code review checklist",
   "review my code quickly", "can you review this", "peer review", "I need a review",
   "explain the review process", "review guidelines", "how to review a design",
   "code review template", "review format", "PR review", "帮我review一下",
-  "just review this", "quick review", "review steps".
+  "just review this", "quick review", "review steps", "review my requirements document".
 maturity: beta
 auto_continue: true
 triggers:
@@ -52,6 +53,10 @@ triggers:
   - "run delphi review"
   - "执行delphi"
   - "启动delphi评审"
+  - "review the requirements"
+  - "评审需求"
+  - "requirements review"
+  - "/requirements-review"
 triggers_negative_examples:
   - "how does delphi work"       # educational question about the process
   - "what is delphi review"      # asking for explanation, not execution
@@ -73,6 +78,7 @@ triggers_negative_examples:
   - "review format"              # asking about format, not executing
   - "show me how to review"      # educational request about reviewing
   - "review checklist example"   # asking for examples, not running review
+  - "review my requirements document"  # educational discussion about requirements, not executing review
 triggers_negative_test_cases:
   - input: "how does delphi work"
     expect: "NOT triggered"
@@ -130,6 +136,16 @@ triggers_negative_test_cases:
     expect: "NOT triggered"
   - input: "run delphi"
     expect: "triggered"
+  - input: "review the requirements"
+    expect: "triggered"
+  - input: "评审需求"
+    expect: "triggered"
+  - input: "requirements review"
+    expect: "triggered"
+  - input: "/requirements-review"
+    expect: "triggered"
+  - input: "review my requirements document"
+    expect: "NOT triggered"
 workflow_steps:
   - "Step 0: Input Validation → Output: [DelphiReview] or [DelphiReview:BLOCKED]"
   - "Round 1: Anonymous Independent Review → Output: [DelphiReview Round 1] expert JSON verdicts"
@@ -170,10 +186,10 @@ tools_denied:
 ## Scope
 
 **In Scope:**
-- Multi-round anonymous expert consensus review (design + requirements + code-walkthrough modes)
-- Exactly 3 experts with distinct trimmed executable model IDs and statistical consensus (>= 90%)
+- Multi-round anonymous expert consensus review (design + code-walkthrough modes)
+- Exactly three experts with distinct normalized executable model IDs and statistical consensus (>= 90%)
 - Structured verdict: APPROVED / PASS_WITH_CAVEATS / REQUEST_CHANGES
-- Provider, vendor, gateway, country, and model nationality are unrestricted; any expert execution failure blocks approval
+- Model nationality, vendor, provider, and gateway are unrestricted.
 
 **Out of Scope:**
 - Does NOT implement code changes (review only, implementation is separate)
@@ -204,6 +220,10 @@ tools_denied:
 - run delphi review
 - 执行delphi
 - 启动delphi评审
+- review the requirements
+- 评审需求
+- requirements review
+- /requirements-review
 
 **NOT triggered by:**
 - "how does delphi work" (educational)
@@ -223,16 +243,17 @@ tools_denied:
 - "code review template" (asking for template)
 - "review format" (asking about format)
 - "show me how to review" (educational)
+- "review my requirements document" (educational discussion, not execution)
 
 ## Workflow
 
 1. **Step 0: Input Validation** — Check input contains reviewable content (design doc/code/spec/diff). Empty input → `[DelphiReview:BLOCKED]`.
-2. **Round 1: Anonymous Independent Review** — Launch the architecture, technical, and feasibility Custom Agents independently. Record three successful `delphi_expert_result` records and each `requested_model`.
-3. **Execution Verification** — Require all three records and three distinct trimmed requested model IDs. Model provider, vendor, gateway, and nationality are unrestricted.
-4. **Consensus Check** — Aggregate all three results; consensus >=90% AND all APPROVED → complete.
-5. **Rounds 2-5** — Exchange evidence and re-evaluate with all three Custom Agents until approved or five rounds are exhausted.
-6. **Failure Handling** — Missing/failed agents, duplicate model IDs, or no consensus after Round 5 → BLOCK; never reduce the expert count.
-7. **Generate Output** — Consensus report + specification.yaml (design) or `.code-walkthrough-result.json` (walkthrough) + `delphi-reviewed.json`.
+2. **Round 1: Anonymous Independent Review** — Invoke architecture, technical, and feasibility independently without exposing their opinions to one another. Every successful result must use `result_type=delphi_expert_result`.
+3. **Execution Verification** — Verify that all three results succeeded and that their `requested_model` values are three distinct trimmed IDs. A local fallback (`provider: local`) is not an executed expert and cannot satisfy this check; a local hosted endpoint configured as an ordinary callable provider can.
+4. **Consensus Check** — Aggregate all three successful expert results. Consensus >=90% AND all APPROVED → complete. One expert result is never global approval.
+5. **Rounds 2-5: Exchange and Final Positions** — If needed, expose prior aggregate evidence, re-evaluate, and stop at the first approved consensus or after five rounds.
+6. **Failure Handling** — Any expert failure, missing result, duplicate model ID, or unverifiable execution blocks the review. Do not substitute a local fallback or silently reduce the expert count.
+7. **Generate Output** — Write the consensus report and mode-specific evidence only after aggregation. For code walkthrough, bind the exact-HEAD result after aggregation.
 
 ## Activation (MANDATORY for L1 Trigger Detection)
 
@@ -281,37 +302,11 @@ Each round MUST output a structured round marker:
 |------|------|------|------|
 | `design`（默认） | `/delphi-review` | 需求/设计/架构/PR 评审 | 共识报告 + specification.yaml |
 | `code-walkthrough` | `--mode code-walkthrough` | git push 前代码走查 | `.code-walkthrough-result.json` |
-| `requirements` | `--mode requirements` | Phase 2 R1 需求完整性评审 | `.sprint-state/phase-outputs/requirements-reviewed.json` |
+| `requirements` | `--mode requirements` | Phase 2 THINK 阶段需求评审 | `.sprint-state/phase-outputs/requirements-reviewed.json` |
 
 **Code Walkthrough 模式**的完整规范 → 详见 `references/code-walkthrough.md`
 
-### Requirements 模式（Qoder Custom Agents）
-
-在 Phase 2 需求探索完成、设计审批前，并行运行 Qoder 的 architecture、technical、feasibility 三个 Custom Agent。Round 1 保持匿名；任一 Agent 未成功返回、任一裁决不是 `APPROVED`、三个 trimmed `requested_model` 不互异，或聚合 `consensus_ratio < 0.90` 时，R1 必须 BLOCK，不能减少专家数或使用仲裁结果代替。
-
-APPROVED 后读取 `git rev-parse HEAD` 的精确结果并写入 `.sprint-state/phase-outputs/requirements-reviewed.json`。无法解析 HEAD 时不得写 APPROVED 证据：
-
-```json
-{
-  "mode": "requirements",
-  "verdict": "APPROVED",
-  "timestamp": "2026-08-20T10:30:00Z",
-  "requirements_statement": "<被评审的原始需求陈述>",
-  "context_file_used": "CONTEXT.md | null",
-  "requirements_hash": "<SHA-256 of requirements_statement + context exact UTF-8 content if used + timestamp YYYY-MM-DD>",
-  "head_commit": "<exact git rev-parse HEAD>",
-  "consensus_ratio": 0.90,
-  "expert_verdicts": [
-    { "role": "architecture", "verdict": "APPROVED", "result_type": "delphi_expert_result", "requested_model": "provider/model-a" },
-    { "role": "technical", "verdict": "APPROVED", "result_type": "delphi_expert_result", "requested_model": "provider/model-b" },
-    { "role": "feasibility", "verdict": "APPROVED", "result_type": "delphi_expert_result", "requested_model": "provider/model-c" }
-  ]
-}
-```
-
-Schema-v2 对 context 路径执行项目根目录 containment 与 realpath 检查，并在 Phase 2 transition 时重新计算 hash；生成 hash 为小写 hex，比较时大小写不敏感。
-
-`confidence` 可以由 Custom Agent 提供，但不是 R1 evidence contract 的必需字段。Phase 2 全部步骤完成、进入 Phase 3 前必须执行 `npx xp-gate phase-transition 2 completed`；schema-v2 Sprint 只有通过程序化校验才能继续。
+**Requirements 模式**的完整规范 → 详见 `references/requirements.md`
 
 ---
 
@@ -321,15 +316,16 @@ Schema-v2 对 context 路径执行项目根目录 containment 与 realpath 检�
 
 | 配置 | 专家 | 适用场景 |
 |------|------|---------|
-| 3 专家（强制） | A(架构) + B(实现) + C(可行性) | 所有评审模式 |
+| 3 专家（固定） | A(架构) + B(实现) + C(可行性) | 所有评审模式 |
 
 ### 模型选择策略（强制 — 平台适配）
 
 **关键原则**：
-- ✅ 三个专家必须成功执行且使用 **三个 distinct trimmed model IDs**
-- ❌ 禁止 hardcode 模型名称
-- ✅ Provider、vendor、gateway 和模型国籍不受限制
-- ❌ `provider: local` fallback 不能计为成功执行
+- ✅ 必须配置 architecture、technical、feasibility 三个专家角色
+- ✅ 三个角色必须使用三个不同的 trimmed、可执行模型 ID
+- ✅ 模型国籍、厂商、provider 和 gateway 不受限制
+- ✅ 三个角色可以共享一个 provider 和 token 计划
+- ❌ `provider: local` 的特殊 fallback 不能计为一次成功执行
 
 #### Qoder 平台（推荐 — Custom Agent 模式）
 
@@ -349,7 +345,7 @@ Qoder 环境下使用 **Custom Agent** 机制，每个专家是一个独立的 c
 
 OpenCode 环境下通过 `opencode.json` 的 agent 配置 + `.delphi-config.json` 调用外部 API：
 - **MUST 从 `opencode.json` 的 agent 配置中读取模型**
-- 通过 `scripts/delphi-external-review.cjs` 调用各 provider 的 OpenAI 兼容 API
+- 通过 `scripts/delphi-external-review.cjs` 调用各 provider 的兼容 API
 - 需要用户自行配置 API key（环境变量注入）
 
 ### 共识阈值
@@ -422,7 +418,7 @@ Phase 0: 准备 → Round 1: 匿名独立评审 → 共识检查
 
 ## Output Format (MANDATORY for L3)
 
-Every Delphi mode MUST use the full JSON schema below. Each of the three Qoder Custom Agents outputs independently and the orchestrator aggregates only after execution verification. There is no single-reviewer Delphi approval path.
+Every Delphi mode MUST use the full JSON schema below. Architecture, technical, and feasibility each output independently; the orchestrator verifies all three executions before aggregating `consensus_report`. There is no single-reviewer Delphi approval path.
 
 ```json
 {
@@ -445,7 +441,31 @@ Every Delphi mode MUST use the full JSON schema below. Each of the three Qoder C
 
 **For code-walkthrough mode**, output follows `.code-walkthrough-result.json` schema (see `references/code-walkthrough.md`).
 
-**For requirements mode**, output follows the Requirements 模式 schema above and includes exact HEAD plus all three successful Custom Agent results.
+**For requirements mode**, output follows `requirements-reviewed.json` schema (see `references/requirements.md`):
+
+```json
+{
+  "mode": "requirements",
+  "verdict": "APPROVED|GAPS_FOUND",
+  "timestamp": "2026-07-25T10:30:00Z",
+  "consensus_ratio": 1.0,
+  "requirements_hash": "<SHA-256 hex digest>",
+  "head_commit": "<git rev-parse HEAD>",
+  "context_file_used": "CONTEXT.md",
+  "round": 1,
+  "expert_verdicts": [
+    { "role": "architecture", "verdict": "APPROVED", "confidence": 9, "result_type": "delphi_expert_result", "requested_model": "provider/model-a" },
+    { "role": "technical", "verdict": "APPROVED", "confidence": 8, "result_type": "delphi_expert_result", "requested_model": "provider/model-b" },
+    { "role": "feasibility", "verdict": "APPROVED", "confidence": 8, "result_type": "delphi_expert_result", "requested_model": "provider/model-c" }
+  ],
+  "requirements_statement": "<short summary of what was reviewed>",
+  "gaps_found": [],
+  "rounds_used": 1,
+  "escalation_needed": false
+}
+```
+
+Schema-v2 Phase 2 requires `requirements_statement`, `timestamp`, `consensus_ratio`, `expert_verdicts`, `head_commit`, and `requirements_hash`. The hash is SHA-256 of the exact concatenation `requirements_statement + project-relative context file UTF-8 content if used + timestamp YYYY-MM-DD`; context paths must remain inside the project after realpath resolution.
 
 **Anti-patterns mapping:**
 - `Round 1 → "评审完成"` → MUST NOT have `verdict: APPROVED` if `critical_issues` exist
@@ -457,7 +477,7 @@ Every Delphi mode MUST use the full JSON schema below. Each of the three Qoder C
 ## Terminal State Checklist
 
 - [ ] Phase 0 完成（文档验证 + 专家分配）
-- [ ] 已完成所需轮次（最多 5 轮，每轮三个 Custom Agent 均执行）
+- [ ] 已完成所需轮次（最多 5 轮，每轮三位专家均执行）
 - [ ] 问题共识比例 >=90%
 - [ ] 所有 Critical Issues 已解决，Major Concerns 已处理
 - [ ] 最终裁决是 **APPROVED** 或 **APPROVED_WITH_MINOR**
@@ -493,13 +513,15 @@ Every Delphi mode MUST use the full JSON schema below. Each of the three Qoder C
 |---------|---------|
 | Round 1 未 APPROVED 就"评审完成" | 迭代直到 APPROVED，修复后重新评审 |
 | 只处理 Critical，忽略 Major | 零容忍：Critical/Major 全部必须处理 |
-| 单专家自评 | 三个 distinct executable models 全部成功执行 |
+| 单专家自评 | 必须运行 architecture、technical、feasibility 三位专家，并聚合三份成功结果 |
 | 用户说"时间紧急"就跳过 | 评审是投资不是开销 |
 | "专家几乎一致"就通过 | "几乎" = 不一致，继续到 >=90% |
-| 按 provider 或模型国籍限制选择 | 仅强制三个 distinct trimmed model IDs |
-| `provider: local` fallback 计入 | fallback 不算成功执行证据 |
+| 使用任何国籍或厂商的模型 | 模型国籍和厂商均不受限制，仍必须满足三个 distinct executable model IDs |
+| 三个专家同一 provider | 允许共享 provider，只要三个 requested_model IDs distinct 且每个调用成功 |
 
 **Code-walkthrough 专属 Anti-Patterns** → 详见 `references/code-walkthrough.md`
+
+**Requirements 专属 Anti-Patterns** → 详见 `references/requirements.md`
 
 ---
 
@@ -510,7 +532,7 @@ Every Delphi mode MUST use the full JSON schema below. Each of the three Qoder C
 | 要求跳过评审 | "skip review", "不用评审", "跳过评审" | → 提醒评审是投资而非开销 |
 | 时间压力 | "来不及", "时间紧", "emergency" | → 提醒时间紧迫正是需要评审的时刻 |
 | 提前终止 | Round 1 后用户说 "可以了", "够了" | → BLOCK: 评审未达终止条件 |
-| 单专家自评 | 用户仅指定 1 个专家 | → BLOCK：必须执行 architecture、technical、feasibility 三个 Custom Agent |
+| 单专家自评 | 用户仅指定 1 个专家 | → BLOCK：Delphi 必须执行 architecture、technical、feasibility 三位专家 |
 | 无文档输入 | 仅触发词，无设计/代码内容 | → `[DelphiReview:BLOCKED]` |
 
 ---
@@ -532,5 +554,6 @@ Every Delphi mode MUST use the full JSON schema below. Each of the three Qoder C
 | File | Content |
 |------|---------|
 | `@references/code-walkthrough.md` | Code-walkthrough mode specification |
+| `@references/requirements.md` | Requirements mode specification |
 | `@references/orchestrator-dispatch.md` | Orchestrator auto-dispatch rules (#218 subagent multi-round loop) |
 | `@references/round-templates.md` | Round templates (anonymous/exchange/final/fix report formats) |
