@@ -116,7 +116,10 @@ describe('Qoder Delphi agent templates (#417)', () => {
       };
       expect(write('---\nmodel: "[Qwen3.8-Flash](qfmodel)"\n---\n')).toBe('qfmodel');
       expect(write("---\nmodel: '[Qwen3.8-Flash](qfmodel)'\n---\n")).toBe('qfmodel');
-      expect(write('---\nmodel: [Qwen3.8-Flash](qfmodel)\n---\n')).toBe('qfmodel');
+      // Unquoted is not a legal Custom Agent binding: the docs require
+      // "[Name](modelId)", and accepting the bare form lets a hand-edited file
+      // pass the audit while Qoder reads something else entirely.
+      expect(write('---\nmodel: [Qwen3.8-Flash](qfmodel)\n---\n')).toBeNull();
       expect(write('---\nmodel: "[Qwen3.8-Flash](qfmodel)\n---\n')).toBeNull(); // unbalanced quote
       expect(write('---\nmodel: Qwen3.7-Max\n---\n')).toBeNull(); // bare name
       expect(write('---\nname: x\n---\n\nExample:\n```md\nmodel: "[Doc](docmodel)"\n```\n')).toBeNull();
@@ -164,6 +167,25 @@ describe('Qoder Delphi agent templates (#417)', () => {
 
       expect(warned()).toContain('templates not bundled');
       expect(warned()).toContain('delphi-architecture.md');
+      // Nothing came from this install, so the summary must not claim there were
+      // simply no templates, nor lecture about a binding we never deployed.
+      expect(logged()).not.toContain('no agent templates found');
+      expect(warned()).not.toContain('does not adopt');
+    });
+  });
+
+  it('refuses a bundled template whose binding is unquoted', () => {
+    const dirs = tempAgentPair(
+      'delphi-technical.md',
+      agentTemplate('model: [DeepSeek-Flash](dfmodel)', 'delphi-technical'),
+      null
+    );
+    withDirs(dirs, () => {
+      const { configureQoderDelphiAgents } = require('../init');
+      configureQoderDelphiAgents(dirs.srcDir, dirs.targetRoot);
+
+      expect(fs.existsSync(path.join(dirs.destAgents, 'delphi-technical.md'))).toBe(false);
+      expect(warned()).toContain('1 bundled template(s) rejected');
     });
   });
 
@@ -192,6 +214,7 @@ describe('Qoder Delphi agent templates (#417)', () => {
       expect(warned()).toContain('no valid model binding');
       expect(warned()).toContain('1 bundled template(s) rejected');
       expect(logged()).not.toContain('no agent templates found');
+      expect(warned()).not.toContain('does not adopt');
     });
   });
 
