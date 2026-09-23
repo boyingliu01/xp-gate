@@ -1,0 +1,70 @@
+{
+  "$comment": [
+    "Delphi Review Configuration Template",
+    "======================================",
+    "Copy this file to .delphi-config.json and fill in your API keys.",
+    "Place this file alongside SKILL.md in the delphi-review skill directory.",
+    "Exactly three roles are required, with distinct trimmed executable model IDs.",
+    "",
+    "Provider and vendor are unrestricted. provider=local is a fallback and cannot count as a successful expert execution.",
+    "cross_provider_required is deprecated and ignored with warning code cross_provider_required_ignored."
+  ],
+
+  "active_profile": "default",
+
+  "profiles": {
+    "default": {
+      "providers": {
+        "bailian-tp": {
+          "base_url": "https://dashscope.aliyuncs.com/compatible-mode/v1",
+          "api_key": "YOUR_API_KEY"
+        }
+      },
+      "experts": {
+        "architecture": {
+          "provider": "bailian-tp",
+          "model": "qwen-plus"
+        },
+        "technical": {
+          "provider": "bailian-tp",
+          "model": "deepseek-v3"
+        },
+        "feasibility": {
+          "provider": "bailian-tp",
+          "model": "glm-4.5"
+        }
+      }
+    },
+
+    "starter": {
+      "$comment": "One provider and token plan serving three distinct models",
+      "providers": {
+        "bailian-tp": {
+          "base_url": "https://dashscope.aliyuncs.com/compatible-mode/v1",
+          "api_key": "YOUR_API_KEY"
+        }
+      },
+      "experts": {
+        "architecture": {
+          "provider": "bailian-tp",
+          "model": "qwen-plus"
+        },
+        "technical": {
+          "provider": "bailian-tp",
+          "model": "deepseek-v3"
+        },
+        "feasibility": {
+          "provider": "bailian-tp",
+          "model": "glm-4.5"
+        }
+      }
+    }
+  },
+
+  "consensus": {
+    "threshold_percent": 90,
+    "max_review_rounds": 5,
+    "distinct_models_required": true,
+    "cross_provider_required": true
+  }
+}
