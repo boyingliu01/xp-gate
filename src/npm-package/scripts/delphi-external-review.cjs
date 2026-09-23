@@ -18,9 +18,16 @@ function checkNodeVersion() {
 // ── Argument parsing ───────────────────────────────────────────────────
 const VALID_EXPERTS = ['architecture', 'technical', 'feasibility'];
 const VALID_MODES = ['design', 'code-walkthrough', 'requirements'];
+const DEFAULT_TIMEOUT_MS = 30000;
+
+// Shared by CLI --timeout-ms and provider timeout_ms validation.
+function isValidTimeoutMs(value) {
+  return Number.isInteger(value) && value >= 1000 && value <= 600000;
+}
 
 function parseArgs(argv) {
   const args = {};
+  let timeoutMsRaw;
   for (let i = 0; i < argv.length; i++) {
     switch (argv[i]) {
       case '--expert': args.expert = argv[++i]; break;
@@ -31,6 +38,7 @@ function parseArgs(argv) {
       case '--mode': args.mode = argv[++i]; break;
       case '--profile': args.profile = argv[++i]; break;
       case '--other-experts-file': args.otherExpertsFile = argv[++i]; break;
+      case '--timeout-ms': timeoutMsRaw = argv[++i]; break;
       case '--fallback-local': args.fallbackLocal = true; break;
       default: break;
     }
@@ -58,6 +66,16 @@ function parseArgs(argv) {
   if (args.input && args.inputFile) {
     console.error('[delphi-review] ERROR: --input and --input-file are mutually exclusive. Use only one.');
     process.exit(1);
+  }
+
+  // Validate --timeout-ms: integer within [1000, 600000]
+  if (timeoutMsRaw !== undefined) {
+    const parsed = /^\d+$/.test(timeoutMsRaw) ? Number(timeoutMsRaw) : NaN;
+    if (!isValidTimeoutMs(parsed)) {
+      console.error('[delphi-review] ERROR: --timeout-ms must be an integer between 1000 and 600000.');
+      process.exit(1);
+    }
+    args.timeoutMs = parsed;
   }
 
   // Defaults
@@ -201,6 +219,12 @@ function validateDistinctModels(experts, providers, consensus = {}) {
     if (typeof provider.api_key !== 'string' || provider.api_key.trim() === '') {
       return { valid: false, reason: `Expert ${role} provider must define a non-empty api_key.` };
     }
+    if (provider.timeout_ms !== undefined && !isValidTimeoutMs(provider.timeout_ms)) {
+      return {
+        valid: false,
+        reason: `Expert ${role} provider ${expert.provider} timeout_ms must be an integer between 1000 and 600000.`,
+      };
+    }
   }
 
   if (consensus.cross_provider_required === true) {
@@ -316,6 +340,14 @@ function resolveInputContent(args) {
   return args.input || '';
 }
 
+// ── Timeout resolution ─────────────────────────────────────────────────
+// CLI --timeout-ms > provider timeout_ms > default (30000, unchanged behavior).
+function resolveTimeoutMs(args, providerConfig) {
+  if (args && isValidTimeoutMs(args.timeoutMs)) return args.timeoutMs;
+  if (providerConfig && isValidTimeoutMs(providerConfig.timeout_ms)) return providerConfig.timeout_ms;
+  return DEFAULT_TIMEOUT_MS;
+}
+
 // ── API call ───────────────────────────────────────────────────────────
 async function callModelAPI(providerConfig, model, systemPrompt, userPrompt, options = {}) {
   const url = `${providerConfig.base_url.replace(/\/$/, '')}/chat/completions`;
@@ -381,7 +413,7 @@ async function callModelAPI(providerConfig, model, systemPrompt, userPrompt, opt
     };
   } catch (err) {
     if (err instanceof Error && err.name === 'AbortError') {
-      return { error: true, retryable: true, message: `Request timed out (${timeoutMs}ms).` };
+      return { error: true, retryable: true, message: `Request timed out (${timeoutMs}ms). Raise --timeout-ms or the provider's timeout_ms.` };
     }
     if (responseReceived) {
       return { error: true, message: 'Invalid response from model.' };
@@ -442,10 +474,10 @@ function buildReviewOutput(verdict, args, provenance) {
 }
 
 // ── Retry logic ────────────────────────────────────────────────────────
-async function callWithRetry(providerConfig, model, systemPrompt, userPrompt, maxRetries = 2) {
+async function callWithRetry(providerConfig, model, systemPrompt, userPrompt, maxRetries = 2, timeoutMs = DEFAULT_TIMEOUT_MS) {
   let lastResult;
   for (let attempt = 0; attempt <= maxRetries; attempt++) {
-    const result = await callModelAPI(providerConfig, model, systemPrompt, userPrompt);
+    const result = await callModelAPI(providerConfig, model, systemPrompt, userPrompt, { timeoutMs });
 
     if (result.success) return result;
     if (!result.retryable) return result;
@@ -508,7 +540,8 @@ async function main() {
   const userPrompt = buildUserPrompt(reviewContent, otherExpertsContent, args.round);
 
   // Call API with retry
-  const result = await callWithRetry(provider, expertConfig.model, systemPrompt, userPrompt);
+  const timeoutMs = resolveTimeoutMs(args, provider);
+  const result = await callWithRetry(provider, expertConfig.model, systemPrompt, userPrompt, 2, timeoutMs);
 
   if (result.error) {
     const errorOutput = {
@@ -549,6 +582,7 @@ if (require.main !== module) {
     buildSystemPrompt,
     buildUserPrompt,
     resolveInputContent,
+    resolveTimeoutMs,
     checkNodeVersion,
     callModelAPI,
     callWithRetry,
