@@ -385,28 +385,35 @@ describe('init', () => {
       return path.join(__dirname, '..', '..', 'plugins', 'qoder', 'agents');
     }
 
-    it('deploys Delphi agents when platform is Qoder and agents do not exist', async () => {
-      fs.mkdirSync(path.join(tmpProject, '.git', 'hooks'), { recursive: true });
-      mockExecSuccess();
-      setupQoderPlatform();
-
-      // Ensure agent templates exist in the npm package
+    // Real agent templates ship inside the git-tracked mirror
+    // (src/npm-package/plugins/qoder/agents/) — tests must never write there.
+    function assertRealTemplatePresent() {
       const templateDir = agentTemplateDir();
-      fs.mkdirSync(templateDir, { recursive: true });
-      fs.writeFileSync(path.join(templateDir, 'delphi-architecture.md'), '---\nname: test\n---\narch expert');
+      expect(fs.existsSync(path.join(templateDir, 'delphi-architecture.md'))).toBe(true);
+    }
 
+    // Fresh module registry so init() picks up this test's tmpProject/tmpHome.
+    function reloadInit() {
       vi.resetModules();
       delete require.cache[require.resolve('../init')];
       delete require.cache[require.resolve('../detect-deps.js')];
       delete require.cache[require.resolve('../shared-paths')];
+      return require('../init');
+    }
 
-      const { init } = require('../init');
+    it('deploys Delphi agents when platform is Qoder and agents do not exist', async () => {
+      fs.mkdirSync(path.join(tmpProject, '.git', 'hooks'), { recursive: true });
+      mockExecSuccess();
+      setupQoderPlatform();
+      assertRealTemplatePresent();
+
+      const { init } = reloadInit();
       const result = await init(['--core-only']);
       expect(result).toBe(0);
 
       const deployedAgent = path.join(tmpProject, '.qoder', 'agents', 'delphi-architecture.md');
       expect(fs.existsSync(deployedAgent)).toBe(true);
-      expect(fs.readFileSync(deployedAgent, 'utf8')).toContain('arch expert');
+      expect(fs.readFileSync(deployedAgent, 'utf8')).toContain('Delphi Method 架构评审专家');
     });
 
     it('does not overwrite existing agent files (preserves user customizations)', async () => {
@@ -419,17 +426,9 @@ describe('init', () => {
       fs.mkdirSync(agentsDir, { recursive: true });
       fs.writeFileSync(path.join(agentsDir, 'delphi-architecture.md'), 'CUSTOM USER CONTENT');
 
-      // Template in npm package
-      const templateDir = agentTemplateDir();
-      fs.mkdirSync(templateDir, { recursive: true });
-      fs.writeFileSync(path.join(templateDir, 'delphi-architecture.md'), 'TEMPLATE CONTENT');
+      assertRealTemplatePresent();
 
-      vi.resetModules();
-      delete require.cache[require.resolve('../init')];
-      delete require.cache[require.resolve('../detect-deps.js')];
-      delete require.cache[require.resolve('../shared-paths')];
-
-      const { init } = require('../init');
+      const { init } = reloadInit();
       await init(['--core-only']);
 
       // User content preserved
