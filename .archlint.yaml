@@ -18,6 +18,16 @@ ignore:
 - '**/__fixtures__/**'
 - '**/__snapshots__/**'
 
+# Git metadata is not source. .git/hooks/ holds machine-local hook installs
+# whose copies of githooks/lib/* trip the Code Clone detector, making gate
+# results differ between machines. Never scan it.
+# Note: a bare directory name prunes the tree — '.git/**' does NOT, because
+# the '**' suffix never matches the directory entry itself.
+- '.git'
+# 'diff' (Gate 6's mode) walks .git/ even with the bare '.git' above, so a
+# file-level pattern is kept as well.
+- '.git/hooks/**'
+
 # tsc compilation output (tsconfig.json: outDir=./dist, rootDir=./src)
 - 'dist/**'
 
@@ -69,6 +79,12 @@ rules:
     # Mirror trees: src/npm-package/*/ are sync copies of src/*
     - 'src/npm-package/plugins/**/*.cjs'
     - 'src/npm-package/plugins/**/*.mjs'
+    # Machine-local hook install: update-hooks copies hooks/lib/* into the
+    # user project's .git/hooks/lib, whose .cjs helpers are byte-identical
+    # to githooks/lib/* and trip CodeClone. Unlike other detectors, the clone
+    # detector does not honor the ignore list in 'diff' mode, so the path
+    # must also be excluded here.
+    - '.git/hooks/lib/**'
     - 'src/npm-package/principles/**'
     - 'src/npm-package/mock-policy/**'
     - 'src/npm-package/mutation/**'

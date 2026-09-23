@@ -143,7 +143,7 @@ function generateManifest(srcDir, projectRoot) {
   const githooksDir = path.join(projectRoot, 'githooks');
 
   // Hooks
-  ['pre-commit', 'pre-push'].forEach(hook => {
+  ['pre-commit', 'pre-push', 'post-merge'].forEach(hook => {
     const hookPath = path.join(hooksDir, hook);
     if (fs.existsSync(hookPath)) {
       const stat = fs.statSync(hookPath);
@@ -204,7 +204,7 @@ function generateGlobalManifest(srcDir) {
   };
 
   // Global hooks
-  ['pre-commit', 'pre-push'].forEach(hook => {
+  ['pre-commit', 'pre-push', 'post-merge'].forEach(hook => {
     const hookPath = path.join(GLOBAL_HOOKS_DIR, hook);
     if (fs.existsSync(hookPath)) {
       const stat = fs.statSync(hookPath);

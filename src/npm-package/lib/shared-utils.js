@@ -34,7 +34,7 @@ function readXpGateConfig() {
 }
 
 function copyHooks(srcDir, destDir) {
-  ['pre-commit', 'pre-push'].forEach(hook => {
+  ['pre-commit', 'pre-push', 'post-merge'].forEach(hook => {
     const src = path.join(srcDir, 'hooks', hook);
     const dest = path.join(destDir, hook);
     if (fs.existsSync(src)) {
@@ -64,11 +64,21 @@ function copyAdapters(srcDir, destDir) {
       }
     });
   }
-  const githooksDir = path.resolve(srcDir, '..', '..', '..', 'githooks');
+  const githooksDir = path.resolve(srcDir, '..', '..', 'githooks');
   if (fs.existsSync(githooksDir)) {
     fs.readdirSync(githooksDir).forEach(f => {
       if ((f.startsWith('gate-') || f === 'sprint-gate.sh') && f.endsWith('.sh')) {
         fs.copyFileSync(path.join(githooksDir, f), path.join(destDir, f));
+      }
+    });
+  }
+  // Gate scripts ship at the package root — sync-package-content.js copies them
+  // from githooks/ during prepack. Installed environments have no repo-level
+  // githooks/, so the package root is the only reliable source.
+  if (fs.existsSync(srcDir)) {
+    fs.readdirSync(srcDir).forEach(f => {
+      if ((f.startsWith('gate-') || f === 'sprint-gate.sh') && f.endsWith('.sh')) {
+        fs.copyFileSync(path.join(srcDir, f), path.join(destDir, f));
       }
     });
   }
