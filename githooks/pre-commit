@@ -1013,8 +1013,16 @@ else
   else
     # Run Ruff (includes syntax check, linting)
     echo "Running Ruff linting (syntax + lint)..."
-    RUFF_OUTPUT=$(ruff check "$CHANGED_FILES" --output-format json 2>&1)
-    RUFF_EXIT=$?
+    # Filter to *.py (unquoted) like the format/debug gates below; skip ruff
+    # when no Python files are staged so yaml/.gitignore are never parsed.
+    PY_LINT_FILES=$(echo "$CHANGED_FILES" | grep '\.py$' || true)
+    if [ -z "$PY_LINT_FILES" ]; then
+      RUFF_OUTPUT="[]"
+      RUFF_EXIT=0
+    else
+      RUFF_OUTPUT=$(ruff check $PY_LINT_FILES --output-format json 2>&1)
+      RUFF_EXIT=$?
+    fi
     if [ "$RUFF_EXIT" -ne 0 ]; then
       if [ -f ".xp-gate/lint-baseline.json" ] && command -v node &> /dev/null; then
         # Get baseline warnings for changed Python files
@@ -1101,9 +1109,14 @@ else
     
     # Optional: Type checking with mypy
     if command -v mypy &> /dev/null; then
-      echo "Running mypy type checking (optional)..."
-      mypy --ignore-missing-imports $(echo "$CHANGED_FILES" | grep "\.py$" || echo ".") 2>&1 | head -20 | tail -10
-      MYPY_EXIT=$?
+      PY_MYPY_FILES=$(echo "$CHANGED_FILES" | grep "\.py$" || true)
+      if [ -z "$PY_MYPY_FILES" ]; then
+        MYPY_EXIT=0
+      else
+        echo "Running mypy type checking (optional)..."
+        mypy --ignore-missing-imports $PY_MYPY_FILES 2>&1 | head -20 | tail -10
+        MYPY_EXIT=$?
+      fi
       if [ "$MYPY_EXIT" -ne 0 ]; then
         echo ""
         echo "❌ BLOCKED - MYPI TYPE ERRORS detected"
