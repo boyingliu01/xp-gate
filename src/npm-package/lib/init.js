@@ -645,9 +645,11 @@ async function setupGlobal(args) {
  * model name makes Qoder silently fall back to the session model, which would
  * collapse the three Delphi experts onto one model. Paired quotes only, and
  * matched only inside the frontmatter block so example lines in the body cannot
- * satisfy it.
+ * satisfy it. Unquoted is rejected: the docs require the paired-quote form, an
+ * unquoted link is not a legal YAML scalar, and accepting it would let a
+ * hand-edited file pass the audit while Qoder reads something else.
  */
-const QODER_MODEL_BINDING = /^model:[ \t]*(?:"\[[^"\]]+\]\(([A-Za-z0-9_.-]+)\)"|'\[[^'\]]+\]\(([A-Za-z0-9_.-]+)\)'|\[[^"\]]+\]\(([A-Za-z0-9_.-]+)\))[ \t]*$/m;
+const QODER_MODEL_BINDING = /^model:[ \t]*(?:"\[[^"\]]+\]\(([A-Za-z0-9_.-]+)\)"|'\[[^'\]]+\]\(([A-Za-z0-9_.-]+)\)')[ \t]*$/m;
 
 /**
  * @param {string} file - agent markdown file
@@ -665,7 +667,7 @@ function readQoderModelId(file) {
     return null;
   }
   const match = QODER_MODEL_BINDING.exec(frontmatter);
-  return match ? (match[1] || match[2] || match[3]) : null;
+  return match ? (match[1] || match[2]) : null;
 }
 
 function warnUnusableQoderAgent(file, boundId, bundledId) {
@@ -807,8 +809,14 @@ function configureQoderDelphiAgents(srcDir, targetRoot) {
 
   const summary = deployQoderTemplates(agentSrcDir, agentsDestDir, bundled);
   auditDeployedQoderAgents(agentsDestDir, bundled);
-  reportQoderAgentDeployment(summary, agentsDestDir, bundled ? Object.keys(bundled).length : 0);
-  warnQoderBindingBoundary();
+  // 'templates not bundled' already explains a null bundle; a second,
+  // contradictory 'no agent templates found' would muddy the same fact.
+  if (bundled) {
+    reportQoderAgentDeployment(summary, agentsDestDir, Object.keys(bundled).length);
+  }
+  if (summary.deployed + summary.skipped > 0) {
+    warnQoderBindingBoundary();
+  }
 }
 
 /**
