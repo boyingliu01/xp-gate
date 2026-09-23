@@ -2147,6 +2147,10 @@ else
         echo "⚠️  coverage.xml not found. Ensure Pester coverage was run."
       fi
       ;;
+    "iac")
+      # IaC has no coverage concept — must not borrow the TypeScript report
+      # that Stage 1 leaves behind (same rule as the PowerShell branch).
+      ;;
     *)
       # Default: attempt to parse coverage from common formats regardless of language
       COVERAGE_ENFORCED=true
@@ -2170,10 +2174,18 @@ else
       fi
       if [ -n "$COVERAGE_PERCENT" ] && [ "$COVERAGE_PERCENT" != "parse_error" ] && [ "$COVERAGE_PERCENT" -gt 0 ]; then
         if [ "$COVERAGE_PERCENT" -lt 80 ]; then
-          echo "❌ BLOCKED - ${CURRENT_LANG} coverage ${COVERAGE_PERCENT}% below 80% threshold"
-          exit 1
+          # If only a subset of tests ran (partial run or related tests),
+          # warn instead of block — the full suite may still reach ≥80%.
+          if [ "${PARTIAL_TEST_RUN:-false}" = "true" ] || { [ -n "${CHANGED_TEST_FILE_COUNT:-}" ] && [ "${CHANGED_TEST_FILE_COUNT:-0}" -gt 0 ] 2>/dev/null; }; then
+            echo "⚠️  Partial coverage ${COVERAGE_PERCENT}% (subset test run, not full suite)."
+            echo "    Run the full test suite for a complete ${CURRENT_LANG} coverage check."
+          else
+            echo "❌ BLOCKED - ${CURRENT_LANG} coverage ${COVERAGE_PERCENT}% below 80% threshold"
+            exit 1
+          fi
+        else
+          echo "${CURRENT_LANG} coverage: ${COVERAGE_PERCENT}% ✅ (≥ 80%)"
         fi
-        echo "${CURRENT_LANG} coverage: ${COVERAGE_PERCENT}% ✅ (≥ 80%)"
       else
         echo "⚠️  Could not determine ${CURRENT_LANG} coverage percentage. No standard coverage report files found."
       fi
