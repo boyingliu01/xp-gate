@@ -1,6 +1,6 @@
 /**
  * @test REQ-006-01 Archlint executable and generated-mirror modeling
- * @intent Verify dead-code entry points cover canonical CJS/MJS executables while clone exclusions target generated skill mirrors
+ * @intent Verify dead-code entry points cover canonical CJS/MJS executables while clone exclusions target generated skill mirrors and machine-local git hook installs
  * @covers AC-006-01
  */
 
@@ -44,6 +44,19 @@ describe('Archlint analysis boundaries', () => {
       'src/npm-package/skills/**',
       'src/npm-package/plugins/**',
     ]));
+  });
+
+  it.each([
+    '.git',
+    '.git/hooks/**',
+  ])('keeps machine-local git metadata out of analysis: %s', gitPath => {
+    expect(config.ignore).toContain(gitPath);
+  });
+
+  it('excludes the machine-local git hook clone pair from clone analysis', () => {
+    // '.git/hooks/lib/*.cjs' duplicates 'githooks/lib/*' and would report
+    // CodeClone (HIGH) on any machine with hooks installed.
+    expect(config.rules.code_clone.exclude).toContain('.git/hooks/lib/**');
   });
 
   it.each([
