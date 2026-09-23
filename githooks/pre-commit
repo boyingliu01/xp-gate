@@ -2314,10 +2314,20 @@ else
          fi
          ;;
       "python")
-        if [ -f ".import-linter.yml" ] || [ -f "import_linter_config.yml" ]; then
+        # detect any import-linter carrier (incl. pyproject.toml [tool.importlinter])
+        if [ -f "$PROJECT_ROOT/.import-linter.yml" ] || [ -f "$PROJECT_ROOT/import_linter_config.yml" ] || [ -f "$PROJECT_ROOT/.importlinter" ] || grep -q '^\[tool\.importlinter\]' "$PROJECT_ROOT/pyproject.toml" 2>/dev/null; then
           if require_tool "lint-imports" "Gate 6" "pip install import-linter"; then
             echo "     Running import-linter for Python..."
-            lint-imports 2>&1 | head -20
+            # run at PROJECT_ROOT (hook may have cd'd); block on exit code
+            LINT_IMPORTS_OUTPUT=$(cd "$PROJECT_ROOT" && lint-imports 2>&1)
+            LINT_IMPORTS_EXIT=$?
+            echo "$LINT_IMPORTS_OUTPUT" | head -30
+            if [ "$LINT_IMPORTS_EXIT" -ne 0 ]; then
+              echo ""
+              echo "❌ BLOCKED - Python architecture contract violations (import-linter)"
+              echo "Fix the broken contracts above before committing."
+              exit 1
+            fi
             echo "     ✅ Python architecture validation completed."
           else
             echo "     ❌ BLOCKED - import-linter not installed"
@@ -2325,7 +2335,7 @@ else
             exit 1
           fi
         else
-          echo "     ℹ️  No .import-linter.yml found - skipping Python architecture"
+          echo "     ℹ️  No import-linter config found (.import-linter.yml/.importlinter/[tool.importlinter]) - skipping"
           echo "     ⏭️  SKIPPED - Python architecture validation (no config)"
         fi
         ;;
@@ -2583,6 +2593,8 @@ if [ -f "$GATE_DIR/sprint-gate.sh" ]; then
   SPRINT_GATE_SCRIPT="$GATE_DIR/sprint-gate.sh"
 elif [ -f "$(git rev-parse --show-toplevel 2>/dev/null)/githooks/sprint-gate.sh" ]; then
   SPRINT_GATE_SCRIPT="$(git rev-parse --show-toplevel)/githooks/sprint-gate.sh"
+elif [ -f "$SCRIPT_DIR/sprint-gate.sh" ]; then
+  SPRINT_GATE_SCRIPT="$SCRIPT_DIR/sprint-gate.sh"
 fi
 
 if [ -n "$SPRINT_GATE_SCRIPT" ]; then

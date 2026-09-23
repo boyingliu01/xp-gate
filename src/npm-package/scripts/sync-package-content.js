@@ -188,7 +188,7 @@ function syncHooks() {
     fs.copyFileSync(adapterCommonSrc, path.join(PKG_ROOT, 'adapter-common.sh'));
   }
 
-  const HOOK_FILES = ['pre-commit', 'pre-push', 'adapter-common.sh'];
+  const HOOK_FILES = ['pre-commit', 'pre-push', 'post-merge', 'adapter-common.sh'];
   let copied = 0;
 
   for (const name of HOOK_FILES) {
