@@ -1013,14 +1013,20 @@ else
   else
     # Run Ruff (includes syntax check, linting)
     echo "Running Ruff linting (syntax + lint)..."
-    # Filter to *.py (unquoted) like the format/debug gates below; skip ruff
-    # when no Python files are staged so yaml/.gitignore are never parsed.
-    PY_LINT_FILES=$(echo "$CHANGED_FILES" | grep '\.py$' || true)
-    if [ -z "$PY_LINT_FILES" ]; then
+    # Filter to *.py/*.pyi into a bash array so each staged path is passed as
+    # ONE argument even when it contains whitespace; skip ruff when no Python
+    # files are staged so yaml/.gitignore are never parsed.
+    RUFF_ARGS=()
+    while IFS= read -r staged_file; do
+      case "$staged_file" in
+        *.py|*.pyi) RUFF_ARGS+=("$staged_file") ;;
+      esac
+    done <<< "$CHANGED_FILES"
+    if [ "${#RUFF_ARGS[@]}" -eq 0 ]; then
       RUFF_OUTPUT="[]"
       RUFF_EXIT=0
     else
-      RUFF_OUTPUT=$(ruff check $PY_LINT_FILES --output-format json 2>&1)
+      RUFF_OUTPUT=$(ruff check "${RUFF_ARGS[@]}" --output-format json 2>&1)
       RUFF_EXIT=$?
     fi
     if [ "$RUFF_EXIT" -ne 0 ]; then
@@ -1078,9 +1084,14 @@ else
 
     # Ruff format check (formatting gate)
     if command -v ruff &> /dev/null; then
-      PY_FMT_FILES=$(echo "$CHANGED_FILES" | grep '\.py$' || true)
-      if [ -n "$PY_FMT_FILES" ]; then
-        RUFF_FMT_OUTPUT=$(ruff format --check $PY_FMT_FILES 2>&1)
+      FMT_ARGS=()
+      while IFS= read -r staged_file; do
+        case "$staged_file" in
+          *.py|*.pyi) FMT_ARGS+=("$staged_file") ;;
+        esac
+      done <<< "$CHANGED_FILES"
+      if [ "${#FMT_ARGS[@]}" -gt 0 ]; then
+        RUFF_FMT_OUTPUT=$(ruff format --check "${FMT_ARGS[@]}" 2>&1)
         RUFF_FMT_EXIT=$?
         if [ "$RUFF_FMT_EXIT" -ne 0 ]; then
           echo "$RUFF_FMT_OUTPUT" | head -20
@@ -1094,9 +1105,14 @@ else
     fi
 
     # Debug statement detection (breakpoint/pdb/ipdb)
-    PY_DEBUG_FILES=$(echo "$CHANGED_FILES" | grep '\.py$' || true)
-    if [ -n "$PY_DEBUG_FILES" ]; then
-      DEBUG_HITS=$(grep -n 'breakpoint()\|pdb\.set_trace()\|ipdb\.set_trace()\|import pdb\|import ipdb' $PY_DEBUG_FILES 2>/dev/null || true)
+    DEBUG_ARGS=()
+    while IFS= read -r staged_file; do
+      case "$staged_file" in
+        *.py|*.pyi) DEBUG_ARGS+=("$staged_file") ;;
+      esac
+    done <<< "$CHANGED_FILES"
+    if [ "${#DEBUG_ARGS[@]}" -gt 0 ]; then
+      DEBUG_HITS=$(grep -n 'breakpoint()\|pdb\.set_trace()\|ipdb\.set_trace()\|import pdb\|import ipdb' "${DEBUG_ARGS[@]}" 2>/dev/null || true)
       if [ -n "$DEBUG_HITS" ]; then
         echo ""
         echo "❌ BLOCKED - Debug statements detected in Python files:"
@@ -1109,12 +1125,17 @@ else
     
     # Optional: Type checking with mypy
     if command -v mypy &> /dev/null; then
-      PY_MYPY_FILES=$(echo "$CHANGED_FILES" | grep "\.py$" || true)
-      if [ -z "$PY_MYPY_FILES" ]; then
+      MYPY_ARGS=()
+      while IFS= read -r staged_file; do
+        case "$staged_file" in
+          *.py|*.pyi) MYPY_ARGS+=("$staged_file") ;;
+        esac
+      done <<< "$CHANGED_FILES"
+      if [ "${#MYPY_ARGS[@]}" -eq 0 ]; then
         MYPY_EXIT=0
       else
         echo "Running mypy type checking (optional)..."
-        mypy --ignore-missing-imports $PY_MYPY_FILES 2>&1 | head -20 | tail -10
+        mypy --ignore-missing-imports "${MYPY_ARGS[@]}" 2>&1 | head -20 | tail -10
         MYPY_EXIT=$?
       fi
       if [ "$MYPY_EXIT" -ne 0 ]; then
