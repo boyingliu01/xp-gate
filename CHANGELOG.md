@@ -20,6 +20,16 @@ All notable changes to this project will be documented in this file.
 - **delphi-review 的 Qoder 章节按实测重写**: 原文承诺"绑定格式正确即可让三个专家各跑一个内置模型"。2026-09-23 的隔离复测否定了这一承诺：三份 `~/.qoder/agents/delphi-*.md` 绑定为 `qfmodel`/`gfmodel`/`dfmodel` 且格式正确，文件修复**之后**新开一个会话（新 CLI 进程，注册表必然加载新绑定）再并行派发三个专家，`turn.started` / `model.request.started` / `model.response.completed` 记录到的 `model` 仍是三个独立的 `is_subagent:true` turn 全部落在会话模型上（架构角与会话模型同名、无判别力，判定依据是绑 `dfmodel` / `gfmodel` 的技术角与可行性角同样落在会话模型上）。故章节改为明示：Custom Agent 路径只能提供**同模型、三角色**评审，其共识不满足"三个不同可执行模型 ID"契约，也不得用作 Gate MW 的三模型凭据；契约合规仍需外部 provider（`.delphi-config.json`）。同时保留并说明绑定格式要求、`subagent_type` 派发方式、注册表需重开会话、部署不覆盖 + `init` 审计与升级步骤；同步更新 `docs/CAPABILITIES.md` 与各 skill 镜像。
 - **Execution Verification 不再接受专家自述，且验证口径纠正**: 验证步骤要求以平台执行记录核对模型。原文给的 Qoder 口径（`~/.qoder/logs/runs/*/manifest.json` 的 argv `--model`）实测记录的是会话/进程启动模型、对 subagent 无判别力，已改为 `~/.qoder/logs/sessions/<project>/<sessionId>/segments/*.jsonl` 里 `model.request.started` 事件的 `model` 字段（OpenCode 仍为 provider 调用日志）；并补充"平台把 subagent 固定到会话模型时该检查根本无法通过"的处置说明。
 
+## [0.19.3.0] - 2026-09-24
+
+### Fixed
+- **Gate 11 (`sprint-gate.sh`) 解析链回归 (#430)**: 镜像同步意外回滚了 2026-08-03 的 mirror-only 热修，导致 `xp-gate init` 安装的项目中 Gate 11 因解析链断裂而静默跳过。现将 `SCRIPT_DIR` tier 恢复到 canonical `githooks/pre-commit`（tier 顺序 GATE_DIR → repo-root → SCRIPT_DIR，带 BEGIN/END 标记），并以 5 个 BATS 测试锁定（tier1/2/3/none + npm 镜像字节一致性）。
+- **镜像 executable bit 回归 (#430)**: `sprint-gate.sh` 与 `clipboard-vision.sh` 的镜像副本在 resync 中从 100755 退化为 100644；597 对镜像 mode 审计已归零。
+- **插件 manifest 门禁计数陈旧 (#430)**: Qoder 与 Claude Code 的 plugin.json description 由 "10 quality gates (Gate 0-9), Sprint Flow (11 phases)" 更正为 "12 pre-commit gates (Gate 0-11), 8 pre-push gates, Sprint Flow (6 phases)"。
+
+### Changed
+- **Qoder 插件与 npm 镜像全量重同步 (#430)**: 13 个 canonical `skills/**` 同步进 `plugins/qoder/skills/**` 及 npm 镜像（sprint-flow 2.0.0 → 2.1.0）；7 个被 canonical 镜像取代的 legacy 技能树（30 文件）删除；`src/npm-package/plugins/dsh/**` 快照首次纳入跟踪。
+
 ## [0.19.2.0] - 2026-09-22
 
 ### Fixed
