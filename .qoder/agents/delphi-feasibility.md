@@ -1,7 +1,7 @@
 ---
 name: delphi-feasibility
 description: Delphi Method 可行性分析专家。独立评审实际约束、风险识别、执行复杂度、替代方案和回滚策略。输出结构化评审意见和量化裁决。
-model: DeepSeek-V4-Pro
+model: "[DeepSeek-Flash](dfmodel)"
 tools: Read, Grep, Glob
 skills: []
 ---

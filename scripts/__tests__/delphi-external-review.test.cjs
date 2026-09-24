@@ -656,7 +656,7 @@ describe('provider calls and provenance', () => {
     await expect(resultPromise).resolves.toEqual({
       error: true,
       retryable: true,
-      message: 'Request timed out (25ms).',
+      message: 'Request timed out (25ms). Raise --timeout-ms or the provider\'s timeout_ms.',
     });
     vi.useRealTimers();
   });
@@ -857,5 +857,142 @@ describe('checkNodeVersion', () => {
     if (major >= 18) {
       expect(checkNodeVersion()).toBe(true);
     }
+  });
+});
+
+// ── Timeout configuration ──────────────────────────────────────────────
+describe('timeout configuration', () => {
+  describe('parseArgs --timeout-ms', () => {
+    it('parses a valid --timeout-ms into args.timeoutMs', () => {
+      const { parseArgs } = loadModule();
+      const result = parseArgs([
+        '--expert', 'architecture',
+        '--round', '1',
+        '--config', 'c.json',
+        '--input', 'x',
+        '--timeout-ms', '120000',
+      ]);
+      expect(result.timeoutMs).toBe(120000);
+    });
+
+    it('leaves args.timeoutMs undefined when --timeout-ms is absent', () => {
+      const { parseArgs } = loadModule();
+      const result = parseArgs([
+        '--expert', 'architecture',
+        '--round', '1',
+        '--config', 'c.json',
+        '--input', 'x',
+      ]);
+      expect(result.timeoutMs).toBeUndefined();
+    });
+
+    it.each(['abc', '999', '600001', '12.5', '0', '-5'])(
+      'rejects invalid --timeout-ms value %s',
+      (value) => {
+        const { parseArgs } = loadModule();
+        const mockExit = vi.spyOn(process, 'exit').mockImplementation(() => { throw new Error('process.exit'); });
+        const mockError = vi.spyOn(console, 'error').mockImplementation(() => {});
+        expect(() => parseArgs([
+          '--expert', 'architecture',
+          '--round', '1',
+          '--config', 'c.json',
+          '--input', 'x',
+          '--timeout-ms', value,
+        ])).toThrow('process.exit');
+        expect(mockExit).toHaveBeenCalledWith(1);
+        expect(mockError).toHaveBeenCalledWith('[delphi-review] ERROR: --timeout-ms must be an integer between 1000 and 600000.');
+        mockExit.mockRestore();
+        mockError.mockRestore();
+      },
+    );
+  });
+
+  describe('validateDistinctModels provider timeout_ms', () => {
+    const experts = {
+      architecture: { provider: 'gateway', model: 'model-a' },
+      technical: { provider: 'gateway', model: 'model-b' },
+      feasibility: { provider: 'gateway', model: 'model-c' },
+    };
+
+    it('accepts a provider timeout_ms within range', () => {
+      const { validateDistinctModels } = loadModule();
+      const providers = {
+        gateway: { base_url: 'https://example.test/v1', api_key: 'key', timeout_ms: 180000 },
+      };
+      expect(validateDistinctModels(experts, providers).valid).toBe(true);
+    });
+
+    it('rejects a provider timeout_ms below the minimum, naming provider and timeout_ms', () => {
+      const { validateDistinctModels } = loadModule();
+      const providers = {
+        gateway: { base_url: 'https://example.test/v1', api_key: 'key', timeout_ms: 100 },
+      };
+      const result = validateDistinctModels(experts, providers);
+      expect(result.valid).toBe(false);
+      expect(result.reason).toContain('timeout_ms');
+      expect(result.reason).toContain('gateway');
+    });
+
+    it.each([
+      ['non-integer', 12.5],
+      ['above maximum', 600001],
+      ['string value', '180000'],
+    ])('rejects provider timeout_ms that is %s', (_name, value) => {
+      const { validateDistinctModels } = loadModule();
+      const providers = {
+        gateway: { base_url: 'https://example.test/v1', api_key: 'key', timeout_ms: value },
+      };
+      const result = validateDistinctModels(experts, providers);
+      expect(result.valid).toBe(false);
+      expect(result.reason).toContain('timeout_ms');
+    });
+  });
+
+  describe('resolveTimeoutMs', () => {
+    it('prefers CLI --timeout-ms over provider timeout_ms', () => {
+      const { resolveTimeoutMs } = loadModule();
+      expect(resolveTimeoutMs({ timeoutMs: 120000 }, { timeout_ms: 180000 })).toBe(120000);
+    });
+
+    it('falls back to provider timeout_ms when CLI value is absent', () => {
+      const { resolveTimeoutMs } = loadModule();
+      expect(resolveTimeoutMs({}, { timeout_ms: 180000 })).toBe(180000);
+    });
+
+    it('defaults to 30000 when neither source provides a value', () => {
+      const { resolveTimeoutMs } = loadModule();
+      expect(resolveTimeoutMs({}, {})).toBe(30000);
+      expect(resolveTimeoutMs(undefined, undefined)).toBe(30000);
+    });
+  });
+
+  describe('callWithRetry timeout passthrough', () => {
+    afterEach(() => {
+      vi.useRealTimers();
+      vi.unstubAllGlobals();
+    });
+
+    it('passes the resolved timeout to callModelAPI and hints at the raise option', async () => {
+      vi.useFakeTimers();
+      const { callWithRetry } = loadModule();
+      vi.stubGlobal('fetch', vi.fn((_url, options) => new Promise((_resolve, reject) => {
+        options.signal.addEventListener('abort', () => reject(new DOMException('aborted', 'AbortError')));
+      })));
+
+      const promise = callWithRetry(
+        { base_url: 'https://example.test/v1', api_key: 'key' },
+        'model-a',
+        'system',
+        'user',
+        0,
+        1000,
+      );
+      await vi.advanceTimersByTimeAsync(30000);
+      const result = await promise;
+
+      expect(result.error).toBe(true);
+      expect(result.message).toContain('timed out (1000ms)');
+      expect(result.message).toContain('Raise --timeout-ms');
+    });
   });
 });

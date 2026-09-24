@@ -1,7 +1,7 @@
 ---
 name: delphi-architecture
 description: Delphi Method 架构评审专家。独立评审需求对齐度、系统一致性、模块边界清晰度和架构演进性。输出结构化评审意见和量化裁决。
-model: Qwen3.7-Max
+model: "[Qwen3.8-Flash](qfmodel)"
 tools: Read, Grep, Glob
 skills: []
 ---
