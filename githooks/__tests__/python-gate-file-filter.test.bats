@@ -28,19 +28,19 @@ check_hook() {
   # --- ruff gate: buggy unfiltered invocation must be GONE --------------
   run grep -F 'ruff check "$CHANGED_FILES"' "$hook"
   [ "$status" -ne 0 ]
-  # --- ruff gate: fixed filtered invocation must be PRESENT -------------
-  run grep -F 'PY_LINT_FILES=$(echo "$CHANGED_FILES" | grep' "$hook"
+  # --- ruff gate: filtered *.py invocation must be PRESENT ---------------
+  run grep -F '*.py|*.pyi) RUFF_ARGS+=("$staged_file")' "$hook"
   [ "$status" -eq 0 ]
-  run grep -F 'ruff check $PY_LINT_FILES' "$hook"
+  run grep -F 'ruff check "${RUFF_ARGS[@]}"' "$hook"
   [ "$status" -eq 0 ]
 
   # --- mypy gate: buggy whole-project fallback must be GONE -------------
   run grep -F 'mypy --ignore-missing-imports $(echo' "$hook"
   [ "$status" -ne 0 ]
-  # --- mypy gate: fixed filtered invocation must be PRESENT -------------
-  run grep -F 'PY_MYPY_FILES=$(echo "$CHANGED_FILES" | grep' "$hook"
+  # --- mypy gate: filtered *.py invocation must be PRESENT ---------------
+  run grep -F '*.py|*.pyi) MYPY_ARGS+=("$staged_file")' "$hook"
   [ "$status" -eq 0 ]
-  run grep -F 'mypy --ignore-missing-imports $PY_MYPY_FILES' "$hook"
+  run grep -F 'mypy --ignore-missing-imports "${MYPY_ARGS[@]}"' "$hook"
   [ "$status" -eq 0 ]
 }
 
