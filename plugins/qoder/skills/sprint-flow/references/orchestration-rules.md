@@ -29,30 +29,32 @@
 | Phase | 名称 | Subagent? | Category | load_skills | 执行者 |
 |-------|------|:---------:|----------|-------------|--------|
 | 1/6 | PREP | ❌ | Bash（直接执行） | 无 | orchestrator |
-| 2/6 | DESIGN | ❌ | orchestrator（直接执行） | `["brainstorming", "autoplan", "delphi-review", "to-issues"]` | orchestrator |
+| 2/6 | DESIGN | ❌ | orchestrator（直接执行） | `["grill-with-docs", "batch-grill-me", "delphi-review", "to-issues"]` | orchestrator |
 | 3/6 | BUILD | ✅ | ralph-loop | `["test-driven-development"]` | subagent |
-| 4/6 | VERIFY | ❌ | orchestrator（直接执行） | `["delphi-review", "test-specification-alignment", "learn", "retro", "systematic-debugging"]` | orchestrator |
-| 5/6 | SHIP | ❌ | orchestrator（直接执行） | `["finishing-a-development-branch", "ship", "land-and-deploy"]` | orchestrator |
+| 4/6 | VERIFY | ❌ | orchestrator（直接执行） | `["delphi-review", "test-specification-alignment"]` | orchestrator |
+| 5/6 | SHIP | ❌ | orchestrator（直接执行） | 无（原生步骤） | orchestrator |
 | 6/6 | CLOSE | ❌ | **强制人工 (UAT)** + Bash (CLEANUP) | 无 | 用户 + orchestrator |
 
 **⚠️ 交互式 skill 必须由 orchestrator 直接执行（不可 dispatch 到 subagent）**：
 
 | Phase | Skill | 为什么不能在 subagent 中执行 |
 |-------|-------|---------------------------|
-| 2/6 | `brainstorming` | 需要与用户对话确认需求、提出澄清问题。Subagent 是 fire-and-forget 模式，无法暂停等待用户输入（Issue #217） |
-| 2/6 | `autoplan` | taste_decisions 节点暂停等待用户确认。必须由 orchestrator 直接执行（Issue #225） |
+| 2/6 | `grill-with-docs` | 需要与用户对话确认需求、提出澄清问题。Subagent 是 fire-and-forget 模式，无法暂停等待用户输入（Issue #217） |
+| 2/6 | `batch-grill-me` | 批量决策节点暂停等待用户确认。必须由 orchestrator 直接执行 |
 | 2/6 | `delphi-review` | design 模式需等待 verdict APPROVED；非 APPROVED 时需用户确认是否接受分歧方案（Issue #249） |
 | 2/6 | `to-issues` | Step 6 "向用户确认" — 展示拆分结果，等待用户批准后才生成 slices-manifest.json |
 | 4/6 | `delphi-review --mode code-walkthrough` | Code walkthrough 非 APPROVED 时需暂停等待用户处理 Critical Issues（Issue #249） |
-| 5/6 | `finishing-a-development-branch` | 4 选项菜单 (merge/PR/keep/discard) 需要用户选择；Option 4 (discard) 要求 typed confirmation |
-| 5/6 | `ship` | PR 创建前需要用户确认；包含 AskUserQuestion STOP 点 |
-| 5/6 | `land-and-deploy` | Merge 确认、rollback 决策 — 均为用户交互点 |
+| 5/6 | 分支完成决策 | 4 选项菜单 (merge/PR/keep/discard) 需要用户选择；Option 4 (discard) 要求 typed confirmation |
+| 5/6 | native ship | PR 创建前需要用户确认 |
+| 5/6 | native land | Merge 确认、rollback 决策 — 均为用户交互点 |
 
 **Phase 2/6 DESIGN 执行模式（全部 orchestrator 直接执行）**：
-1. **Orchestrator 直接执行 brainstorming**：`skill(name="brainstorming")` → 等待 APPROVED
-2. **Orchestrator 直接执行 autoplan**：`skill(name="autoplan")` → 等待用户确认 taste_decisions
-3. **Orchestrator 直接执行 delphi-review**：`skill(name="delphi-review")` → 等待 APPROVED
-4. **Orchestrator 直接执行 to-issues**：`skill(name="to-issues")` → 等待用户确认 Issue 拆分
+1. **Orchestrator 直接执行 grill-with-docs**：`skill(name="grill-with-docs")` → 访谈 + CONTEXT.md/ADR
+2. **Orchestrator 调用 R1 Agent skill**：`/delphi-review --mode requirements`，分别执行 architecture、technical、feasibility 三个 per-expert runner → requirements-reviewed.json
+3. **Orchestrator 生成设计文档** → 等待用户 APPROVED
+4. **Orchestrator 直接执行 batch-grill-me**：`skill(name="batch-grill-me")` → 批量决策确认
+5. **Orchestrator 直接执行 R2 delphi-review**：`skill(name="delphi-review")` → 等待 APPROVED
+6. **Orchestrator 直接执行 to-issues**：`skill(name="to-issues")` → 等待用户确认 Issue 拆分
 
 **上下文隔离原则**：
 - 每个 Subagent 在**独立 session** 中启动，不继承 orchestrator 的对话历史
@@ -89,24 +91,29 @@
    - 格式：YAML frontmatter + Markdown body（body ≤ 50 行）
    - 大小限制：≤ 40,000 字符（≈ 10,000 tokens）
 
-2. **更新 sprint-state.json**：
-   - `phase`: 当前阶段编号 (1-6)
-   - `outputs`: 新增当前阶段输出文件路径
-   - `phase_history`: 追加或更新当前阶段的记录
-     - Phase 开始时：追加 `{ "phase": N, "phase_name": "NAME", "status": "running", "started_at": "<ISO 8601>", "completed_at": null, "duration_seconds": null }`
-     - Phase 完成时：更新对应条目，填充 `completed_at`（ISO 8601）和 `duration_seconds`
-     - Phase 跳过时：设置 `status: "skipped"`
+2. **调用 phase-transition CLI**（替代手动更新 sprint-state.json + 手动渲染看板）：
+   ```
+   npx xp-gate phase-transition <phase> <status> --render [--outputs '<json>']
+   ```
+   - Phase 开始时：`npx xp-gate phase-transition <N> in_progress --render`
+   - Phase 完成时：`npx xp-gate phase-transition <N> completed --render --outputs '{"key":"value"}'`
+   - Phase 跳过时：`npx xp-gate phase-transition <N> skipped --render`
+   - CLI 自动完成：更新 `sprint-state.json`（phase, phase_history, outputs）+ 渲染 ASCII 看板
+   - 看板规则：已完成 ✅ + 耗时，当前 🔄，待做 ⬜，跳过 ⏭️，失败 ❌
+   - 进度条：`[████▓░░░░░░] {pct}%`
+   - **禁止**手动写入 `sprint-state.json` 或手动调用 `render-sprint-progress.cjs`（已废弃）
 
 3. **等待用户确认 checkpoint**（如适用）
 
-4. **展示进度看板**：执行 `node scripts/render-sprint-progress.cjs` 渲染进度看板
-   - 脚本自动读取 `.sprint-state/sprint-state.json` 并输出 ASCII 进度看板
-   - 渲染规则：已完成阶段显示 ✅ + 耗时，当前阶段 🔄，待做 ⬜，跳过 ⏭️，失败 ❌
-   - 进度条：`[████▓░░░░░░] {pct}%`（已完成数/总阶段数 6）
-   - 下一步行动：根据当前阶段 + 状态，自动查找对应提示
-   - 输出物路径：列出 `outputs` 中已有的文件路径
-   - 时机：每个 Phase 完成后的 transition 阶段自动展示
-   - 向后兼容：旧版 `sprint-state.json` 缺少 `phase_history` 时，从 `phase` 字段推断状态
+4. **Phase 6 CLOSE 完成后运行 sprint-audit**（自动提醒，Layer 1.5 触发）：
+   ```
+   npx xp-gate sprint-audit
+   ```
+   - 检查 phase 覆盖度、时间记录、输出物记录、状态一致性
+   - 输出人类可读报告或 JSON（`--json`）
+   - 报告写入 `.sprint-state/audit-report.json`（最新覆盖）
+   - Verdict: PASS / PASS_WITH_WARNINGS / FAIL / SKIP
+   - `phase-transition` CLI 在 Phase 6 completed 时自动输出提醒，无需额外指令
 
 ### Background Task Resume Protocol (MANDATORY — Issue #248)
 

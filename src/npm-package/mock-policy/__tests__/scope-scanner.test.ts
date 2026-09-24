@@ -196,9 +196,12 @@ describe('resolveToRealPath', () => {
 // ---------------------------------------------------------------------------
 describe('loadExternalDependencies', () => {
   let tmpDir: string;
+  let tmpCounter = 0;
 
   beforeEach(() => {
-    tmpDir = join(tmpdir(), `scope-scanner-test-${Date.now()}`);
+    // Monotonic counter avoids Date.now() collisions when tests run fast
+    tmpCounter += 1;
+    tmpDir = join(tmpdir(), `scope-scanner-test-${process.pid}-${tmpCounter}`);
     mkdirSync(tmpDir, { recursive: true });
   });
 
@@ -361,9 +364,12 @@ describe('classifyDependency', () => {
 // ---------------------------------------------------------------------------
 describe('scanProjectScope', () => {
   let tmpDir: string;
+  let tmpCounter = 0;
 
   beforeEach(() => {
-    tmpDir = join(tmpdir(), `scope-scanner-integration-${Date.now()}`);
+    // Monotonic counter avoids Date.now() collisions when tests run fast
+    tmpCounter += 1;
+    tmpDir = join(tmpdir(), `scope-scanner-integration-${process.pid}-${tmpCounter}`);
     mkdirSync(tmpDir, { recursive: true });
 
     // Create a real project structure
