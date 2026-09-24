@@ -15,7 +15,6 @@ const VALIDATOR = path.join(PROJECT_ROOT, 'githooks', 'lib', 'validate-code-walk
 const KNOWLEDGE_BASE_DOCS = [
   'skills/delphi-review/AGENTS.md',
   'plugins/qoder/skills/delphi-review/AGENTS.md',
-  'src/npm-package/delphi-review/AGENTS.md',
   'src/npm-package/skills/delphi-review/AGENTS.md',
   'src/npm-package/plugins/claude-code/skills/delphi-review/AGENTS.md',
   'src/npm-package/plugins/opencode/skills/delphi-review/AGENTS.md',
