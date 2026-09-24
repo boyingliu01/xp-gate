@@ -2,6 +2,16 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.19.3.0] - 2026-09-24
+
+### Fixed
+- **Gate 11 (`sprint-gate.sh`) 解析链回归 (#430)**: 镜像同步意外回滚了 2026-08-03 的 mirror-only 热修，导致 `xp-gate init` 安装的项目中 Gate 11 因解析链断裂而静默跳过。现将 `SCRIPT_DIR` tier 恢复到 canonical `githooks/pre-commit`（tier 顺序 GATE_DIR → repo-root → SCRIPT_DIR，带 BEGIN/END 标记），并以 5 个 BATS 测试锁定（tier1/2/3/none + npm 镜像字节一致性）。
+- **镜像 executable bit 回归 (#430)**: `sprint-gate.sh` 与 `clipboard-vision.sh` 的镜像副本在 resync 中从 100755 退化为 100644；597 对镜像 mode 审计已归零。
+- **插件 manifest 门禁计数陈旧 (#430)**: Qoder 与 Claude Code 的 plugin.json description 由 "10 quality gates (Gate 0-9), Sprint Flow (11 phases)" 更正为 "12 pre-commit gates (Gate 0-11), 8 pre-push gates, Sprint Flow (6 phases)"。
+
+### Changed
+- **Qoder 插件与 npm 镜像全量重同步 (#430)**: 13 个 canonical `skills/**` 同步进 `plugins/qoder/skills/**` 及 npm 镜像（sprint-flow 2.0.0 → 2.1.0）；7 个被 canonical 镜像取代的 legacy 技能树（30 文件）删除；`src/npm-package/plugins/dsh/**` 快照首次纳入跟踪。
+
 ## [0.19.2.0] - 2026-09-22
 
 ### Fixed
