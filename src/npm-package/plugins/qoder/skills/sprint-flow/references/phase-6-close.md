@@ -1,7 +1,50 @@
 # Phase 6/6: CLOSE（收尾 — ⚠️ 人工验收 + 清理）
 
-**执行时机**: Phase 5/6 SHIP 完成后。
+**执行时机**: Phase 5/6 SHIP 完成后（merge to main + release 已完成）。
 **对应旧模型**: Phase 7 USER ACCEPTANCE + Phase 8 CLEANUP
+
+**NETWORK-RESILIENCE**: 与 Phase 5/6 相同，GitHub API 在大中华区存在间歇性超时。CLEANUP 中的 `gh pr list` 和 `git push --delete` 需容忍重试。详见 `phase-5-ship.md` NETWORK-RESILIENCE 指南。
+
+---
+
+## ⚠️ HARD-GATE: SHIP→CLOSE GATE (MANDATORY — v0.14.3+)
+
+**Purpose**: Verify that Phase 5/6 SHIP fully completed (merge to main + release) before entering Phase 6/6 CLOSE. This gate prevents:
+- Worktree cleanup failure (uncommitted changes prevent `git worktree remove`)
+- UAT on wrong version (PR branch instead of merged main)
+
+**Execution**: Before ANY Phase 6/6 step, run the SHIP→CLOSE GATE checks defined in `phase-5-ship.md#ship-completion-gate`.
+
+**If gate fails**: Return to Phase 5/6 SHIP to complete merge/release. Do NOT proceed with CLOSE.
+
+---
+
+## Backup Sprint State (MANDATORY — v0.14.3+)
+
+**Purpose**: `.sprint-state/` is gitignored and lives inside the worktree. When the worktree is removed during CLEANUP, all sprint state is lost. This step copies it into the main repository before cleanup.
+
+**Execution** (immediately after SHIP→CLOSE GATE passes):
+
+```bash
+# 1. Read sprint ID
+SPRINT_ID=$(cat .sprint-state/sprint-state.json | grep '"id"' | head -1 | sed 's/.*"id": *"\([^"]*\)".*/\1/')
+
+# 2. Backup to repo-tracked path (.sprint-history is NOT in .gitignore)
+BACKUP_DIR=".sprint-history/${SPRINT_ID}"
+mkdir -p "$BACKUP_DIR"
+cp -r .sprint-state/* "$BACKUP_DIR/"
+
+# 3. Verify backup
+ls "$BACKUP_DIR/sprint-state.json" && echo "✅ Sprint state backed up to $BACKUP_DIR"
+```
+
+**GATE CHECK**:
+```
+[BACKUP] sprint-state.json copied ✓
+[BACKUP] phase-outputs/ preserved ✓
+```
+
+**Output**: `.sprint-history/<sprint-id>/` contains full sprint state, safely outside the worktree.
 
 ---
 
@@ -100,13 +143,101 @@ Phase 6/6 CLOSE 完成时:
 ### 输出
 
 - Emergent Issues List (`emergent-issues.md`)
-- 进入 Part B CLEANUP 自动执行（如果用户确认验收）
+- 进入 Part A.5 ARCHIVE 自动执行（如果用户确认验收）
 
 ---
 
-## Part B: CLEANUP（清理 + 总结）
+## Part A.5: ARCHIVE（归档 — v0.14.0+ Issue #308）
 
-**摘要**: 自动清理 worktree, 更新 sprint-state.json, 输出 Sprint Summary, 处理 emergent issues.
+**Purpose**: Preserve sprint decision records before cleanup. `.sprint-state/` is gitignored and deleted during CLEANUP; this step copies structured outputs to `.sprint-history/` which is tracked by git.
+
+**Execution**: After USER ACCEPTANCE (Part A) confirms continuation, BEFORE CLEANUP (Part B).
+
+### Step 1: Read Sprint ID
+
+Read `sprint-state.json` → `id` field (e.g., `sprint-2026-07-09-01`).
+
+### Step 2: Check for Conflicts
+
+```
+IF .sprint-history/<sprint-id>/ already exists:
+  → Append timestamp suffix: <sprint-id>-20260709T120000
+  → Log warning: "Sprint archive conflict, using timestamp suffix"
+```
+
+### Step 3: Archive Files
+
+Copy from `.sprint-state/` to `.sprint-history/<sprint-id>/`:
+
+**Included** (all `.yaml`, `.json`, `.md` files under `.sprint-state/`):
+- `specification.yaml` (if in phase-outputs/)
+- `delphi-reviewed.json`
+- `sprint-state.json`
+- `phase-outputs/*.yaml`, `phase-outputs/*.json`, `phase-outputs/*.md`
+- `tdd-gate-log.json`, `uncommitted-gate-log.json`
+
+**Excluded** (temporary/cache):
+- `*.tmp`, `*.cache` files
+- `sprint.lock` (session lock file)
+
+### Step 4: Verify Git Tracking
+
+```bash
+# .sprint-history/ is NOT in .gitignore (verified — no change needed)
+# Verify files are trackable:
+git status .sprint-history/
+```
+
+**No `.gitignore` change needed**: `.sprint-history/` is NOT currently listed in `.gitignore`. The `.sprint-state/` ignore (line 59) only matches `.sprint-state/` exactly — it does NOT match `.sprint-history/`.
+
+### Step 5: Commit Archive (Optional)
+
+The orchestrator MAY commit the archive:
+```
+git add .sprint-history/<sprint-id>/ && git commit -m "archive: sprint <sprint-id>"
+```
+
+### Output
+
+- `.sprint-history/<sprint-id>/` directory with archived sprint state
+- Git-tracked sprint decision records for future retro/review
+
+---
+
+## Part B: CLEANUP（清理 + 总结 + 返工追踪）
+
+**摘要**: 写入 #369 返工指标, 自动清理 worktree, 更新 sprint-state.json, 输出 Sprint Summary, 处理 emergent issues.
+
+### Step 0: #369 返工追踪指标写入（v0.18.0+）
+
+**Purpose**: Sprint 完成后追踪返工率，暴露"门禁全过但仍返工"的质量问题。
+
+**Execution** (CLEANUP 开始时，worktree 清理前):
+
+```
+1. 写入 metrics.completed_at:
+   ISO 8601 时间戳 → sprint-state.json metrics.completed_at
+
+2. 计算 metrics.total_sprint_commits:
+   精确定义: sprint 分支 base（merge-base）到 sprint 合并点的提交数
+   CLOSE 时由 CLI 计算写入:
+   npx xp-gate sprint-status --rework-check
+
+3. 写入 metrics.merge_base_sha:
+   merge-base SHA → sprint-state.json metrics.merge_base_sha
+   （SHIP 阶段存入，供删分支后 rework-check 使用 — C5 澄清）
+```
+
+**返工率计算** (`xp-gate sprint-status --rework-check [--window-days N]`):
+- 默认窗口: 7 天（可配置）
+- 扫描范围: **仓库范围**（不限同一分支 — 主工作流"合并 PR + 删除分支"下同分支判定恒为 0）
+- fix 提交匹配: conventional commits 优先 `^fix(\(.+\))?:`，辅以词边界关键词 `\b(fix|bugfix|hotfix|patch|修复)\b`
+- 计算: `rework_rate = fix_commits_in_window / total_sprint_commits`
+- 写回 `metrics.rework_rate`
+
+**告警**: `rework_rate > 30%` → 告警输出（并纳入 `xp-gate retro` 报告区块）
+
+**注意**: "重新打开的 issue 数"指标已删除（Round 1 修订：零依赖原则下无可靠数据源）。
 
 ### 执行步骤
 
@@ -117,10 +248,11 @@ Phase 6/6 CLOSE 完成时:
 3. **删除本地分支**: `git branch -D sprint/YYYY-MM-DD-NN`
 4. **删除远程分支**: `git push origin --delete sprint/YYYY-MM-DD-NN`
 5. **关闭遗留 OPEN PR**: `gh pr list --head sprint/YYYY-MM-DD-NN --state open`
-6. **更新 sprint-state.json**: 设置 `phase: 6`, `status: "completed"`
+6. **更新 sprint-state.json**: 设置 `phase: 6`, `status: "completed"`, 写入 `metrics.completed_at` + `metrics.total_sprint_commits`（#369）
 7. **释放 Sprint Lock** (Issue #144): 删除 `.sprint-state/sprint.lock`
-8. **Sprint Summary**: 使用 `templates/sprint-summary-template.md` 生成总结
-9. **处理 Emergent Issues**: 如 Part A 发现 emergent issues → 触发 Sprint 2 逻辑
+8. **Learnings 写入**（原生）: 将 Sprint 中发现的模式/教训追加到 `.sprint-history/learnings.md`
+9. **Sprint Summary**: 使用 `templates/sprint-summary-template.md` 生成总结
+10. **处理 Emergent Issues**: 如 Part A 发现 emergent issues → 触发 Sprint 2 逻辑
 
 ### 输出
 
