@@ -43,6 +43,18 @@ check_hook() {
   # --- both gates accept .pyi stubs ---------------------------------------
   run grep -F '*.py|*.pyi)' "$hook"
   [ "$status" -eq 0 ]
+
+  # --- format gate: buggy unquoted expansion must be GONE ------------------
+  run grep -F 'ruff format --check $PY_FMT_FILES' "$hook"
+  [ "$status" -ne 0 ]
+  run grep -F 'ruff format --check "${FMT_ARGS[@]}"' "$hook"
+  [ "$status" -eq 0 ]
+
+  # --- debug-statement gate: buggy unquoted expansion must be GONE ---------
+  run grep -F "ipdb' \$PY_DEBUG_FILES" "$hook"
+  [ "$status" -ne 0 ]
+  run grep -F "ipdb' \"\${DEBUG_ARGS[@]}\"" "$hook"
+  [ "$status" -eq 0 ]
 }
 
 @test "whitespace-safe: githooks/pre-commit passes py files as arrays" {

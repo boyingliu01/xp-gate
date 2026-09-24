@@ -1084,9 +1084,14 @@ else
 
     # Ruff format check (formatting gate)
     if command -v ruff &> /dev/null; then
-      PY_FMT_FILES=$(echo "$CHANGED_FILES" | grep '\.py$' || true)
-      if [ -n "$PY_FMT_FILES" ]; then
-        RUFF_FMT_OUTPUT=$(ruff format --check $PY_FMT_FILES 2>&1)
+      FMT_ARGS=()
+      while IFS= read -r staged_file; do
+        case "$staged_file" in
+          *.py|*.pyi) FMT_ARGS+=("$staged_file") ;;
+        esac
+      done <<< "$CHANGED_FILES"
+      if [ "${#FMT_ARGS[@]}" -gt 0 ]; then
+        RUFF_FMT_OUTPUT=$(ruff format --check "${FMT_ARGS[@]}" 2>&1)
         RUFF_FMT_EXIT=$?
         if [ "$RUFF_FMT_EXIT" -ne 0 ]; then
           echo "$RUFF_FMT_OUTPUT" | head -20
@@ -1100,9 +1105,14 @@ else
     fi
 
     # Debug statement detection (breakpoint/pdb/ipdb)
-    PY_DEBUG_FILES=$(echo "$CHANGED_FILES" | grep '\.py$' || true)
-    if [ -n "$PY_DEBUG_FILES" ]; then
-      DEBUG_HITS=$(grep -n 'breakpoint()\|pdb\.set_trace()\|ipdb\.set_trace()\|import pdb\|import ipdb' $PY_DEBUG_FILES 2>/dev/null || true)
+    DEBUG_ARGS=()
+    while IFS= read -r staged_file; do
+      case "$staged_file" in
+        *.py|*.pyi) DEBUG_ARGS+=("$staged_file") ;;
+      esac
+    done <<< "$CHANGED_FILES"
+    if [ "${#DEBUG_ARGS[@]}" -gt 0 ]; then
+      DEBUG_HITS=$(grep -n 'breakpoint()\|pdb\.set_trace()\|ipdb\.set_trace()\|import pdb\|import ipdb' "${DEBUG_ARGS[@]}" 2>/dev/null || true)
       if [ -n "$DEBUG_HITS" ]; then
         echo ""
         echo "❌ BLOCKED - Debug statements detected in Python files:"
