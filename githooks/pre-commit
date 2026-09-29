@@ -115,6 +115,26 @@ set -o pipefail
 # Helper Functions
 # ============================================================================
 
+# Run a TypeScript entrypoint under tsx without routing arguments through the
+# npx shim: Windows cmd.exe caps command lines at 8191 chars and long staged
+# file lists (Boy Scout, build integrity) overflow it, turning a healthy run
+# into a false BLOCK. Prefer the repo-local tsx CLI driven by node directly;
+# keep npx as fallback for consumer repos relying on a global install.
+# RUN_TSX_TIMEOUT (e.g. "120s") wraps the invocation in `timeout`.
+if ! declare -F run_tsx >/dev/null 2>&1; then
+  run_tsx() {
+    local _root="${PROJECT_ROOT:-$(pwd)}" _timeout=()
+    if [ -n "${RUN_TSX_TIMEOUT:-}" ]; then
+      _timeout=(timeout "$RUN_TSX_TIMEOUT")
+    fi
+    if [ -f "$_root/node_modules/tsx/dist/cli.mjs" ] && command -v node >/dev/null 2>&1; then
+      "${_timeout[@]}" node "$_root/node_modules/tsx/dist/cli.mjs" "$@"
+    else
+      "${_timeout[@]}" npx tsx "$@"
+    fi
+  }
+fi
+
 # Parse LCOV file and return coverage percentage
 # Usage: parse_lcov_coverage <lcov_file>
 # Returns: coverage percentage (e.g., "85.5")
@@ -2450,7 +2470,7 @@ else
         if [ -z "$(echo "$NEW_FILES" | tr -d ' ')" ] && [ -z "$(echo "$MODIFIED_FILES" | tr -d ' ')" ]; then
           echo "     ✅ No new or modified source files for Boy Scout check."
         else
-          BOY_SCOUT_OUTPUT=$(npx tsx $BOY_SCOUT_SCRIPT \
+          BOY_SCOUT_OUTPUT=$(run_tsx "$BOY_SCOUT_SCRIPT" \
             --new-files "$(echo "$NEW_FILES" | tr ' ' ',')" \
             --modified-files "$(echo "$MODIFIED_FILES" | tr ' ' ',')" \
             --baseline ".warnings-baseline.json" 2>&1)
@@ -2538,7 +2558,7 @@ if [ -f "package.json" ] && [ -f "tsconfig.json" ]; then
   if [ -n "$GATE_9_SCRIPT" ]; then
     CHANGED_FILES_CSV=$(echo "$CHANGED_FILES" | tr ' ' ',')
     GATE_9_OUTPUT=$(mktemp)
-    if timeout 120s npx tsx "$GATE_9_SCRIPT" --changed-files "$CHANGED_FILES_CSV" --project-root "$PROJECT_ROOT" --timeout 115000 > "$GATE_9_OUTPUT" 2>&1; then
+    if RUN_TSX_TIMEOUT=120s run_tsx "$GATE_9_SCRIPT" --changed-files "$CHANGED_FILES_CSV" --project-root "$PROJECT_ROOT" --timeout 115000 > "$GATE_9_OUTPUT" 2>&1; then
       GATE_9_STATUS="PASS"
       echo "     ✅ Build integrity check passed."
     else
