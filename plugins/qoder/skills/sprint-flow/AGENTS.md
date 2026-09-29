@@ -1,9 +1,9 @@
 # SKILLS/SPRINT-FLOW KNOWLEDGE BASE
 
-**Generated:** 2026-09-22
-**Commit:** 3d1d1bf
+**Generated:** 2026-09-24
+**Commit:** 467174d
 **Branch:** main
-**Version:** 0.19.2.0
+**Version:** 0.19.3.0
 
 ## OVERVIEW
 **6-phase** development pipeline (v2.0 compact redesign, Issue #290): PREP → DESIGN → BUILD → VERIFY → SHIP → CLOSE. Phase 3/6 BUILD default build mode is **ralph-loop** (REQ-level iteration, 40-67% token savings vs parallel). HARD-GATE between DESIGN (2/6) and BUILD (3/6): design must pass Delphi review (≥90% consensus) before any coding.
@@ -64,7 +64,7 @@ skills/sprint-flow/
 
 ## CONVENTIONS
 - **ralph-loop is Phase 3/6 BUILD default**. Each REQ runs in a clean context, saving 40-67% tokens.
-- **delphi-review HARD-GATE in Phase 2/6 DESIGN**: design must reach ≥90% consensus from exactly three successfully executed, distinct model IDs. Provider, vendor, and country are unrestricted; any expert execution failure or unapproved result → BLOCK coding.
+- **delphi-review HARD-GATE in Phase 2/6 DESIGN**: all three expert roles must execute with three distinct requested model IDs, then aggregate ≥90% consensus within 5 rounds. Unapproved or unverifiable → BLOCK coding.
 - **`learn` is called twice**: once per REQ in Phase 3/6 (ralph-loop internal) and once in Phase 4/6 VERIFY (Sprint-level retro).
 - **Phase isolation**: each phase has explicit entry/exit criteria documented in its `references/phase-*.md` file.
 - **Emergent Requirements** discovered in Phase 6/6 CLOSE (USER ACCEPTANCE) are explicitly captured via `templates/emergent-issues-template.md` — never silently merged.

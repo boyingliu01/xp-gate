@@ -516,7 +516,7 @@ async function installLocal(args) {
 
   injectKarpathyPrinciples(projectRoot);
   configureOpenCodePlugin(srcDir, projectRoot);
-  configureQoderDelphiAgents(srcDir, projectRoot);
+  deployQoderDelphiAgents(srcDir, projectRoot);
 
   // Auto-register TUI plugin globally (idempotent)
   try {
@@ -593,6 +593,10 @@ async function setupGlobal(args) {
   // missing register/network must not break global setup.
   installModuleRuntimeDeps(CONFIG_DIR);
 
+  // Qoder loads user-level custom agents from ~/.qoder/agents/, so a global
+  // setup must deploy the Delphi expert templates there as well.
+  deployQoderDelphiAgents(srcDir, HOME_DIR);
+
   console.log('[setup-global] Configuring git...');
   const { execSync } = require('child_process');
   try {
@@ -637,49 +641,196 @@ async function setupGlobal(args) {
 }
 
 /**
+ * Qoder Custom Agents must bind their model as "[DisplayName](modelId)"; a bare
+ * model name makes Qoder silently fall back to the session model, which would
+ * collapse the three Delphi experts onto one model. Paired quotes only, and
+ * matched only inside the frontmatter block so example lines in the body cannot
+ * satisfy it. Unquoted is rejected: the docs require the paired-quote form, an
+ * unquoted link is not a legal YAML scalar, and accepting it would let a
+ * hand-edited file pass the audit while Qoder reads something else.
+ */
+const QODER_MODEL_BINDING = /^model:[ \t]*(?:"\[[^"\]]+\]\(([A-Za-z0-9_.-]+)\)"|'\[[^'\]]+\]\(([A-Za-z0-9_.-]+)\)')[ \t]*$/m;
+
+/**
+ * @param {string} file - agent markdown file
+ * @returns {string|null} the bound modelId, or null when the binding is missing/invalid
+ */
+function readQoderModelId(file) {
+  let frontmatter;
+  try {
+    const lines = fs.readFileSync(file, 'utf8').split(/\r?\n/);
+    if (lines[0].trim() !== '---') return null;
+    const end = lines.indexOf('---', 1);
+    if (end === -1) return null;
+    frontmatter = lines.slice(1, end).join('\n');
+  } catch {
+    return null;
+  }
+  const match = QODER_MODEL_BINDING.exec(frontmatter);
+  return match ? (match[1] || match[2]) : null;
+}
+
+function warnUnusableQoderAgent(file, boundId, bundledId) {
+  if (boundId === null) {
+    console.warn(`  ⚠ ${file} does not bind a model as "[Name](modelId)".`);
+    console.warn('    Qoder will silently run this expert on the session model, which breaks');
+    console.warn("    Delphi's three-distinct-models contract.");
+  } else {
+    console.warn(`  ⚠ ${file} binds "${boundId}" but this xp-gate version pins "${bundledId}".`);
+    console.warn('    A stale or hand-edited binding leaves the expert on a model this review');
+    console.warn('    contract was never validated against.');
+  }
+  console.warn('    Delete the file, re-run `xp-gate init` (or `--global`), then restart the');
+  console.warn('    Qoder session so the agent registry reloads.');
+}
+
+/**
+ * Report already-deployed agents whose binding is missing, stale or hand-diverged.
+ * Runs even when the bundled templates are unreadable — a broken install is exactly
+ * the case where the user needs the repair hint.
+ *
+ * @param {string} agentsDestDir - deployed agents directory
+ * @param {Object<string, string|null>|null} bundled - modelId per bundled template, null if unbundled
+ */
+function auditDeployedQoderAgents(agentsDestDir, bundled) {
+  if (!fs.existsSync(agentsDestDir)) return;
+  for (const file of fs.readdirSync(agentsDestDir).filter(f => f.endsWith('.md'))) {
+    // Unrelated user agents are none of our business; only Delphi experts are.
+    if (!file.startsWith('delphi-') && !(bundled && file in bundled)) continue;
+    const destFile = path.join(agentsDestDir, file);
+    const boundId = readQoderModelId(destFile);
+    const bundledId = bundled ? bundled[file] : undefined;
+    if (boundId === null || (bundledId !== undefined && bundledId !== boundId)) {
+      warnUnusableQoderAgent(destFile, boundId, bundledId);
+    }
+  }
+}
+
+/**
+ * Read the bundled agent templates and extract the modelId each one binds.
+ *
+ * @param {string} agentSrcDir - bundled plugins/qoder/agents directory
+ * @returns {Object<string, string|null>|null} file → modelId, null when not bundled
+ */
+function readBundledQoderTemplates(agentSrcDir) {
+  if (!fs.existsSync(agentSrcDir)) return null;
+  const bundled = {};
+  for (const file of fs.readdirSync(agentSrcDir).filter(f => f.endsWith('.md'))) {
+    bundled[file] = readQoderModelId(path.join(agentSrcDir, file));
+  }
+  return bundled;
+}
+
+/**
+ * Copy missing templates into the agents dir, refusing any that lack a valid binding.
+ *
+ * @param {string} agentSrcDir - bundled plugins/qoder/agents directory
+ * @param {string} agentsDestDir - deployed agents directory
+ * @param {Object<string, string|null>|null} bundled - file → modelId, null when not bundled
+ * @returns {{deployed: number, skipped: number, rejected: number}}
+ */
+function deployQoderTemplates(agentSrcDir, agentsDestDir, bundled) {
+  const summary = { deployed: 0, skipped: 0, rejected: 0 };
+  if (!bundled) return summary;
+  fs.mkdirSync(agentsDestDir, { recursive: true });
+  for (const file of Object.keys(bundled)) {
+    const srcFile = path.join(agentSrcDir, file);
+    if (fs.existsSync(path.join(agentsDestDir, file))) {
+      summary.skipped++; // Don't overwrite user customizations
+      continue;
+    }
+    if (bundled[file] === null) {
+      console.warn(`  ⚠ Bundled agent template ${srcFile} has no valid model binding; skipped.`);
+      summary.rejected++;
+      continue;
+    }
+    fs.copyFileSync(srcFile, path.join(agentsDestDir, file));
+    summary.deployed++;
+  }
+  return summary;
+}
+
+/**
+ * @param {{deployed: number, skipped: number, rejected: number}} summary
+ * @param {string} agentsDestDir - deployed agents directory
+ * @param {number} templateCount - templates found in the bundle
+ */
+function reportQoderAgentDeployment(summary, agentsDestDir, templateCount) {
+  if (summary.deployed > 0) {
+    console.log(`  Qoder Delphi agents: deployed ${summary.deployed} agent(s) to ${agentsDestDir}`);
+  }
+  if (summary.skipped > 0) {
+    console.log(`  Qoder Delphi agents: ${summary.skipped} existing agent(s) preserved`);
+  }
+  if (summary.rejected > 0) {
+    console.warn(`  Qoder Delphi agents: ${summary.rejected} bundled template(s) rejected (invalid model binding)`);
+  }
+  if (templateCount === 0 && summary.deployed === 0 && summary.skipped === 0 && summary.rejected === 0) {
+    console.log('  Qoder Delphi agents: no agent templates found');
+  }
+}
+
+/**
+ * A legal binding is not an executed binding: measured on 2026-09-23, Qoder's
+ * subagent dispatch adopts the agent persona but pins the model to the session's.
+ * Without this line a user leaves `init` believing the three-model contract holds.
+ */
+function warnQoderBindingBoundary() {
+  console.warn('  ⚠ Platform boundary: Qoder Custom Agent dispatch does not adopt the model');
+  console.warn('    bindings declared in these agent files. Every expert still runs on the');
+  console.warn('    current session model, so the native path is a same-model three-persona');
+  console.warn("    self-check. Delphi's three-distinct-models contract");
+  console.warn('    requires an external provider configured in .delphi-config.json.');
+}
+
+/**
  * Deploy Qoder-native Delphi review agents when platform is Qoder.
- * Copies agent templates from the bundled qoder plugin to the project's
- * .qoder/agents/ directory. Idempotent — never overwrites existing files.
+ * Copies agent templates from the bundled qoder plugin into <targetRoot>/.qoder/agents/
+ * — the project dir for local init, the home dir for global init (Qoder reads
+ * user-level agents from ~/.qoder/agents/). Idempotent — never overwrites existing files.
  *
  * @param {string} srcDir - npm package source directory
- * @param {string} projectRoot - user's project root
+ * @param {string} targetRoot - project root (local) or home directory (global)
  */
-function configureQoderDelphiAgents(srcDir, projectRoot) {
+function configureQoderDelphiAgents(srcDir, targetRoot) {
   const platform = detectPlatform();
   if (platform !== 'qoder') {
-    return; // Not Qoder — skip (OpenCode uses .delphi-config.json instead)
+    console.log(`  Qoder Delphi agents: SKIP (platform detected: ${platform})`);
+    return; // Not Qoder — OpenCode uses .delphi-config.json instead
   }
 
   const agentSrcDir = path.join(srcDir, 'plugins', 'qoder', 'agents');
-  if (!fs.existsSync(agentSrcDir)) {
-    console.log('  Qoder Delphi agents: SKIP (templates not bundled)');
-    return;
+  const agentsDestDir = path.join(targetRoot, '.qoder', 'agents');
+
+  const bundled = readBundledQoderTemplates(agentSrcDir);
+  if (!bundled) {
+    console.warn('  Qoder Delphi agents: SKIP (templates not bundled — reinstall xp-gate)');
   }
 
-  const agentsDestDir = path.join(projectRoot, '.qoder', 'agents');
-  fs.mkdirSync(agentsDestDir, { recursive: true });
+  const summary = deployQoderTemplates(agentSrcDir, agentsDestDir, bundled);
+  auditDeployedQoderAgents(agentsDestDir, bundled);
+  // 'templates not bundled' already explains a null bundle; a second,
+  // contradictory 'no agent templates found' would muddy the same fact.
+  if (bundled) {
+    reportQoderAgentDeployment(summary, agentsDestDir, Object.keys(bundled).length);
+  }
+  if (summary.deployed + summary.skipped > 0) {
+    warnQoderBindingBoundary();
+  }
+}
 
-  const agentFiles = fs.readdirSync(agentSrcDir).filter(f => f.endsWith('.md'));
-  let deployed = 0;
-  let skipped = 0;
-  for (const file of agentFiles) {
-    const destFile = path.join(agentsDestDir, file);
-    if (fs.existsSync(destFile)) {
-      skipped++;
-      continue; // Don't overwrite user customizations
-    }
-    fs.copyFileSync(path.join(agentSrcDir, file), destFile);
-    deployed++;
-  }
-
-  if (deployed > 0) {
-    console.log(`  Qoder Delphi agents: deployed ${deployed} agent(s) to .qoder/agents/`);
-  }
-  if (skipped > 0) {
-    console.log(`  Qoder Delphi agents: ${skipped} existing agent(s) preserved`);
-  }
-  if (deployed === 0 && skipped === 0) {
-    console.log('  Qoder Delphi agents: no agent templates found');
+/**
+ * Best-effort wrapper: a failed or partially readable agents dir must never
+ * abort the surrounding setup after hooks/adapters/modules are already copied.
+ *
+ * @param {string} srcDir - npm package source directory
+ * @param {string} targetRoot - project root (local) or home directory (global)
+ */
+function deployQoderDelphiAgents(srcDir, targetRoot) {
+  try {
+    configureQoderDelphiAgents(srcDir, targetRoot);
+  } catch (err) {
+    console.warn(`  Qoder Delphi agents: SKIP (deployment failed: ${err && err.message ? err.message : String(err)})`);
   }
 }
 
@@ -771,4 +922,4 @@ function injectKarpathyPrinciples(projectRoot) {
   }
 }
 
-module.exports = { init, promptBootstrap, installModuleRuntimeDeps };
+module.exports = { init, promptBootstrap, installModuleRuntimeDeps, deployQoderDelphiAgents, configureQoderDelphiAgents, readQoderModelId };
