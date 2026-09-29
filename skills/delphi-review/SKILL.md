@@ -367,6 +367,30 @@ OpenCode 环境下通过 `opencode.json` 的 agent 配置 + `.delphi-config.json
 - 通过 `scripts/delphi-external-review.cjs` 调用各 provider 的兼容 API（注意：该脚本目前在仓库根 `scripts/` 下，尚未随 skill 目录分发）
 - 需要用户自行配置 API key（环境变量注入）
 
+#### WorkBuddy 平台（Expert 团队模式）
+
+WorkBuddy 侧以 Team 型专家团（示例：`delphi-review-team`，安装在 `~/.workbuddy/plugins/marketplaces/my-experts/plugins/`，创建方式见 [docs/platform-workbuddy.md](../../docs/platform-workbuddy.md)）承载评审，触发本技能后按此路由执行：
+
+| 角色 | Agent ID | 绑定模型 | 倍率 |
+|------|----------|---------|------|
+| 主理人（衡定一，会话自身） | delphi-review-team-team-lead | 会话模型，固定用 `local-deepseek-v4-flash` | 零 credits |
+| Architecture (A) | delphi-arch-reviewer | `deepseek-v4.1-flash` | x0.11 |
+| Technical (B) | delphi-tech-reviewer | `glm-5.3-flash` | x0.06 |
+| Feasibility (C) | delphi-feasibility-reviewer | `hy3` | x0.00（免费） |
+
+**执行方式**：
+- 主理人开场自检：会话模型不是 `local-deepseek-v4-flash` 时，先提醒用户切换再开始。
+- 已启用专家团 → 按其团队机制 spawn 3 位成员；未启用 → 用 `Agent` 工具同一消息**并行** spawn 3 个 `general-purpose` 子代理，prompt = 对应专家 MD 全文人设（读专家团 `agents/` 目录）+ 匿名评审模板 + 待评审材料，`model` 参数按上表传。
+- Round 1 三个子代理互不见对方输出（匿名铁律不变）。
+
+**执行验证（适配本平台，2026-09-29 校准）**：
+- 参数层路由 ✅ 已实测：`Agent` 工具 `model` 参数传 `deepseek-v4.1-flash` / `glm-5.3-flash` / `hy3` 三个 ID 均被接受，3 个 general-purpose 子代理并行执行成功。
+- 执行层证据 ⚠️ 平台暂缺：WorkBuddy 审计日志（`~/.workbuddy/audit-log/`）只记 command-safety 事件，无 per-request 模型路由记录，无法像 Qoder/OpenCode 那样从日志取证 distinct models。
+- **WorkBuddy 过渡验证标准**：参数级校准（model ID 被平台接受且子代理成功执行）+ 专家 `requested_model` 自述如实记录；报告中必须注明「执行层验证待平台日志支持」。若 `model` 参数被拒绝（报错/回落会话模型），按本技能 Failure Handling 处理，不得静默降级冒充三模型共识。
+- 契约合规兜底：需要严格证据时，走外部 provider 路径（`.delphi-config.json` + 兼容 API，如 whalecloud 网关 3 个模型 ID）。
+
+**成本**：3 专家合计 x0.17/轮；主理人选 local 会话模型则零 credits。
+
 ### 共识阈值
 
 | 阈值 | 说明 |
