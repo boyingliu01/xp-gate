@@ -97,6 +97,14 @@ describe('uninstall', () => {
     );
   }
 
+  function createXpGatePostMerge(dir) {
+    fs.mkdirSync(dir, { recursive: true });
+    fs.writeFileSync(
+      path.join(dir, 'post-merge'),
+      '#!/usr/bin/env bash\n# post-merge - XP-Gate VERSION sync hook\n'
+    );
+  }
+
   function createXpGateAdapterCommon(dir) {
     fs.mkdirSync(dir, { recursive: true });
     fs.writeFileSync(
@@ -131,6 +139,7 @@ describe('uninstall', () => {
     // Create project .git/hooks with xp-gate hooks
     createXpGatePreCommit(projectHooksDir());
     createXpGatePrePush(projectHooksDir());
+    createXpGatePostMerge(projectHooksDir());
 
     // Create project githooks/ with adapters
     createXpGateAdapterCommon(projectGithooksDir());
@@ -246,6 +255,17 @@ describe('uninstall', () => {
     const cfg = JSON.parse(fs.readFileSync(configFile(), 'utf8'));
     expect(cfg.mode).toBe('uninstalled');
     expect(cfg.uninstalled).toBeDefined();
+  });
+
+  it('AC-01: uninstall in local mode removes the deployed post-merge hook', async () => {
+    setupLocalInstall();
+    mockExecSuccess();
+    const { uninstall } = require('../uninstall');
+
+    const result = await uninstall([]);
+
+    expect(result).toBe(0);
+    expect(fs.existsSync(path.join(projectHooksDir(), 'post-merge'))).toBe(false);
   });
 
   it('AC-01: uninstall returns 0 even when no files exist (graceful)', async () => {

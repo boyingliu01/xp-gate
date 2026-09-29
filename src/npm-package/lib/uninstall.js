@@ -19,6 +19,7 @@ const BACKUP_DIR = path.join(CONFIG_DIR, '.uninstall-backup');
 const SIGNATURES = {
   'pre-commit': 'OpenCode Quality Gates - Pre-Commit Hook',
   'pre-push': 'Pre-push Hook - Code Walkthrough Result Validator',
+  'post-merge': 'XP-Gate VERSION sync hook',
   'adapter-common.sh': 'detect_project_lang()'
 };
 
@@ -199,6 +200,14 @@ function buildPlan(mode) {
         signature: SIGNATURES['pre-push'],
         label: '.git/hooks/pre-push',
         manifestKey: '.git/hooks/pre-push',
+        critical: true
+      });
+      plan.push({
+        type: 'file',
+        path: path.join(hooksDir, 'post-merge'),
+        signature: SIGNATURES['post-merge'],
+        label: '.git/hooks/post-merge',
+        manifestKey: '.git/hooks/post-merge',
         critical: true
       });
       plan.push({
