@@ -17,6 +17,8 @@ setup() {
 }
 
 teardown() {
+  # Leave the temp dir before deleting it: Windows cannot remove a cwd.
+  cd "$BATS_TEST_DIRNAME" || return 1
   rm -rf "$TEST_DIR"
 }
 
@@ -58,14 +60,25 @@ extract_stage2_harness() {
   [[ "$output" == *"Coverage enforcement not applicable for iac"* ]]
 }
 
-@test "generic language Stage 2 warns instead of blocking on a subset test run" {
-  harness=$(extract_stage2_harness java 'CHANGED_TEST_FILE_COUNT=2')
+@test "generic language Stage 2 blocks low coverage after a full suite run" {
+  # >20 changed test files makes Stage 1 run the full suite, so the coverage
+  # report is complete and a sub-80% result must block (regression: a nonzero
+  # changed-test-file count used to be mistaken for a subset run).
+  harness=$(extract_stage2_harness java 'CHANGED_TEST_FILE_COUNT=25')
 
   run bash "$harness"
 
-  [ "$status" -eq 0 ]
-  [[ "$output" == *"Partial coverage 16% (subset test run, not full suite)."* ]]
-  [[ ! "$output" =~ "BLOCKED" ]]
+  [ "$status" -ne 0 ]
+  [[ "$output" =~ "BLOCKED - java coverage 16% below 80% threshold" ]]
+}
+
+@test "TypeScript Stage 2 blocks low coverage after a full suite run" {
+  harness=$(extract_stage2_harness typescript 'CHANGED_TEST_FILE_COUNT=25')
+
+  run bash "$harness"
+
+  [ "$status" -ne 0 ]
+  [[ "$output" =~ "BLOCKED - TypeScript coverage 16% below 80% threshold" ]]
 }
 
 @test "generic language Stage 2 warns when PARTIAL_TEST_RUN is set" {

@@ -12,21 +12,26 @@
 setup() {
   TEST_DIR=$(mktemp -d)
   HOOK_PATH="$BATS_TEST_DIRNAME/../pre-commit"
+  PREPUSH_PATH="$BATS_TEST_DIRNAME/../pre-push"
+  GATE4_PATH="$BATS_TEST_DIRNAME/../gate-4.sh"
   mkdir -p "$TEST_DIR/bin"
   cd "$TEST_DIR" || return 1
 }
 
 teardown() {
+  # Leave the temp dir before deleting it: Windows cannot remove a cwd.
+  cd "$BATS_TEST_DIRNAME" || return 1
   rm -rf "$TEST_DIR"
 }
 
-# Extract the real run_tsx definition from the hook and invoke it once.
+# Extract the real run_tsx definition from the given hook and invoke it once.
 extract_run_tsx() {
+  local hook="${1:-$HOOK_PATH}"
   local harness="$TEST_DIR/run-tsx.sh"
   {
     printf '%s\n' '#!/usr/bin/env bash'
     # shellcheck disable=SC2016
-    sed -n '/^if ! declare -F run_tsx >\/dev\/null 2>&1; then$/,/^fi$/p' "$HOOK_PATH"
+    sed -n '/^if ! declare -F run_tsx >\/dev\/null 2>&1; then$/,/^fi$/p' "$hook"
     printf '%s\n' 'run_tsx "$@"'
   } > "$harness"
   printf '%s\n' "$harness"
@@ -99,4 +104,41 @@ SH
 
   run grep -F 'timeout 120s npx tsx "$GATE_9_SCRIPT"' "$HOOK_PATH"
   [ "$status" -ne 0 ]
+}
+
+@test "pre-push keeps npx tsx only as the run_tsx fallback" {
+  # Exactly one occurrence: the helper's own `npx tsx "$@"` fallback branch.
+  count=$(grep -cF 'npx tsx' "$PREPUSH_PATH")
+  [ "$count" -eq 1 ]
+
+  run grep -F 'npx tsx "$@"' "$PREPUSH_PATH"
+  [ "$status" -eq 0 ]
+
+  run grep -F 'RUN_TSX_TIMEOUT=120s run_tsx "$GATE_10_SCRIPT"' "$PREPUSH_PATH"
+  [ "$status" -eq 0 ]
+}
+
+@test "pre-push run_tsx prefers the repo-local tsx CLI through node" {
+  install_fake_local_tsx
+  install_fake_npx
+  harness=$(extract_run_tsx "$PREPUSH_PATH")
+
+  run env PROJECT_ROOT="$TEST_DIR" PATH="$TEST_DIR/bin:$PATH" \
+    bash "$harness" src/mutation/gate-m.ts --changed-files a.ts,b.ts
+
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"LOCAL-TSX:src/mutation/gate-m.ts --changed-files a.ts,b.ts"* ]]
+  [[ "$output" != *"NPX-SHIM"* ]]
+}
+
+@test "gate-4 keeps npx tsx only as the run_tsx fallback" {
+  # Exactly one occurrence: the guarded helper's own fallback branch.
+  count=$(grep -cF 'npx tsx' "$GATE4_PATH")
+  [ "$count" -eq 1 ]
+
+  run grep -F 'npx tsx "$@"' "$GATE4_PATH"
+  [ "$status" -eq 0 ]
+
+  run grep -F 'run_tsx "$PRINCIPLES_DIR/index.ts"' "$GATE4_PATH"
+  [ "$status" -eq 0 ]
 }

@@ -3,6 +3,26 @@
 # Reuses existing principles checker logic
 # ============================================================================
 
+# Run a TypeScript entrypoint under tsx without routing arguments through the
+# npx shim: Windows cmd.exe caps command lines at 8191 chars and long staged
+# file lists overflow it, turning a healthy run into a false BLOCK. Prefer the
+# repo-local tsx CLI driven by node directly; keep npx as fallback for consumer
+# repos relying on a global install. Defined here as well so this module also
+# works when sourced outside pre-commit.
+if ! declare -F run_tsx >/dev/null 2>&1; then
+  run_tsx() {
+    local _root="${PROJECT_ROOT:-$(pwd)}" _timeout=()
+    if [ -n "${RUN_TSX_TIMEOUT:-}" ]; then
+      _timeout=(timeout "$RUN_TSX_TIMEOUT")
+    fi
+    if [ -f "$_root/node_modules/tsx/dist/cli.mjs" ] && command -v node >/dev/null 2>&1; then
+      "${_timeout[@]}" node "$_root/node_modules/tsx/dist/cli.mjs" "$@"
+    else
+      "${_timeout[@]}" npx tsx "$@"
+    fi
+  }
+fi
+
  2>&1 echo ""
  2>&1 echo "→ Gate 4: Principles checker (Clean Code + SOLID)..."
 GATE_4_START=$(gate_start_ms)
@@ -31,9 +51,9 @@ else
     if [ -n "$PRINCIPLES_DIR" ]; then
       echo "Checking Clean Code + SOLID principles..."
       
-      if command -v npx > /dev/null 2>&1; then
+      if command -v npx > /dev/null 2>&1 || [ -f "${PROJECT_ROOT:-$(pwd)}/node_modules/tsx/dist/cli.mjs" ]; then
         # Run principles checker and store results
-        if npx tsx $PRINCIPLES_DIR/index.ts --files $PRINCIPLES_FILES --format json > /tmp/principles-output.json 2>/dev/null; then
+        if run_tsx "$PRINCIPLES_DIR/index.ts" --files $PRINCIPLES_FILES --format json > /tmp/principles-output.json 2>/dev/null; then
           # Check severity levels
           ERROR_COUNT=$(grep -c '"severity":"error"' /tmp/principles-output.json 2>/dev/null || true)
           ERROR_COUNT=${ERROR_COUNT:-0}
@@ -47,7 +67,7 @@ else
             echo "  - error-handling violations"
             echo "  - SOLID principle violations"
             echo "  - architectural violations"
-            npx tsx $PRINCIPLES_DIR/index.ts --files $PRINCIPLES_FILES --format console
+            run_tsx "$PRINCIPLES_DIR/index.ts" --files $PRINCIPLES_FILES --format console
             GATE_4_STATUS="FAIL"
             exit 1
           fi
@@ -63,8 +83,8 @@ else
           GATE_4_STATUS="SKIP"
         fi
       else
-        echo "ℹ️  npx not available - skipping principles check"
-        echo "⏭️  SKIPPED - Principles check (no Node.js/npx)"
+        echo "ℹ️  npx/tsx not available - skipping principles check"
+        echo "⏭️  SKIPPED - Principles check (no Node.js/tsx)"
         GATE_4_STATUS="SKIP"
       fi
     else
