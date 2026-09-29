@@ -1,78 +1,60 @@
+const fs = require('node:fs');
+const os = require('node:os');
+const path = require('node:path');
 const { bootstrap } = require('../bootstrap.js');
+
+const GATE_TOOLS = ['jscpd', 'lizard', 'checkov', 'hadolint', 'gitleaks', 'semgrep', 'npx', 'jq'];
 
 describe('bootstrap', () => {
   let consoleLogSpy;
+  let realPath;
+  let stubDir;
 
+  // The module mocks these tests used to declare were never applied: bootstrap.js
+  // is CommonJS, so its internal require of detect-deps.js bypasses the mock
+  // registry and every case fell through to the real installer (global npm/pip
+  // installs, ~60s in CI). Stubbing the tools on PATH exercises the real
+  // detection path without touching the environment.
   beforeEach(() => {
     consoleLogSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
+    realPath = process.env.PATH;
+    stubDir = fs.mkdtempSync(path.join(os.tmpdir(), 'xp-gate-bootstrap-'));
+    for (const tool of GATE_TOOLS) {
+      const stub = path.join(stubDir, process.platform === 'win32' ? `${tool}.cmd` : tool);
+      fs.writeFileSync(stub, process.platform === 'win32' ? '@echo 1.0.0\r\n' : '#!/bin/sh\necho 1.0.0\n');
+      if (process.platform !== 'win32') fs.chmodSync(stub, 0o755);
+    }
+    process.env.PATH = `${stubDir}${path.delimiter}${realPath}`;
   });
 
   afterEach(() => {
+    process.env.PATH = realPath;
+    fs.rmSync(stubDir, { recursive: true, force: true });
     vi.restoreAllMocks();
   });
 
   it('returns 0 when --dry-run given with no missing tools', () => {
-    vi.mock('../detect-deps.js', () => ({
-      GATE_CLI_TOOLS: [],
-      checkCliTool: () => ({ available: true }),
-      getToolInstallCmd: () => 'echo done',
-    }));
-
-    const { bootstrap } = require('../bootstrap.js');
     const code = bootstrap(['--dry-run']);
     expect(code).toBe(0);
-    vi.restoreAllMocks();
   });
 
   it('returns 0 when all CLI tools are available', () => {
-    vi.mock('../detect-deps.js', () => ({
-      GATE_CLI_TOOLS: [{ tool: 'testtool', gates: ['Gate 1'], install: { linux: 'echo ok' } }],
-      checkCliTool: () => ({ available: true, version: '1.0' }),
-      getToolInstallCmd: () => 'echo ok',
-    }));
-
-    const { bootstrap } = require('../bootstrap.js');
     const code = bootstrap([]);
     expect(code).toBe(0);
-    vi.restoreAllMocks();
   });
 
   it('accepts --lang ts parameter', () => {
-    vi.mock('../detect-deps.js', () => ({
-      GATE_CLI_TOOLS: [],
-      checkCliTool: () => ({ available: true }),
-      getToolInstallCmd: () => 'echo done',
-    }));
-
-    const { bootstrap } = require('../bootstrap.js');
     const code = bootstrap(['--lang', 'ts']);
     expect(code).toBe(0);
-    vi.restoreAllMocks();
   });
 
   it('accepts --lang ts,py parameter', () => {
-    vi.mock('../detect-deps.js', () => ({
-      GATE_CLI_TOOLS: [],
-      checkCliTool: () => ({ available: true }),
-      getToolInstallCmd: () => 'echo done',
-    }));
-
-    const { bootstrap } = require('../bootstrap.js');
     const code = bootstrap(['--lang', 'ts,py']);
     expect(code).toBe(0);
-    vi.restoreAllMocks();
   });
 
   it('recognizes --verbose flag without error', () => {
-    vi.mock('../detect-deps.js', () => ({
-      GATE_CLI_TOOLS: [],
-      checkCliTool: () => ({ available: true }),
-      getToolInstallCmd: () => 'echo done',
-    }));
-
-    const { bootstrap } = require('../bootstrap.js');
     const code = bootstrap(['--verbose']);
     expect(code).toBe(0);
-    vi.restoreAllMocks();
   });
 });

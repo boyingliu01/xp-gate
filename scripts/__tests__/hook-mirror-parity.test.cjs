@@ -13,6 +13,25 @@ describe('hook mirror validation', () => {
   let fixture;
   const script = path.resolve(__dirname, '../check-hook-mirror.sh');
   const repoRoot = path.resolve(__dirname, '../..');
+
+  // Index-based assertions only hold when the tree under test IS the Git work
+  // tree. Stryker copies the project into .stryker-tmp/ inside the repository,
+  // where `git ls-files` resolves to the real root and would report every
+  // copied file as untracked.
+  function isGitTopLevel(dir) {
+    const result = spawnSync('git', ['rev-parse', '--show-toplevel'], { cwd: dir, encoding: 'utf8' });
+    if (result.status !== 0 || !result.stdout.trim()) return false;
+    const canonical = (p) => {
+      try { return fs.realpathSync(p); } catch { return path.resolve(p); }
+    };
+    const toplevel = canonical(result.stdout.trim());
+    const target = canonical(dir);
+    return process.platform === 'win32'
+      ? toplevel.toLowerCase() === target.toLowerCase()
+      : toplevel === target;
+  }
+
+  const runsInRealWorktree = isGitTopLevel(repoRoot);
   const hookFiles = [
     'adapter-common.sh', 'gate-3.sh', 'gate-4.sh', 'gate-7.sh', 'gate-8.sh', 'gate-9.sh',
     'gate-10.sh', 'gate-12-file-hygiene.sh', 'post-merge', 'pre-commit', 'pre-push',
@@ -40,7 +59,7 @@ describe('hook mirror validation', () => {
 
   afterEach(() => fs.rmSync(fixture, { recursive: true, force: true }));
 
-  it('passes on the real repository, where mirrors are byte- and mode-identical', () => {
+  it.skipIf(!runsInRealWorktree)('passes on the real repository, where mirrors are byte- and mode-identical', () => {
     const result = validate(repoRoot);
 
     expect(result.stderr).toBe('');
