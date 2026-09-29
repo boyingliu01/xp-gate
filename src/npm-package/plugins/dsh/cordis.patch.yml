@@ -1,0 +1,7 @@
+# XP-Gate DSH bundle patch: mounts the xp-gate tool plugin into a dsh profile.
+# Applied as ONE insert over the empty profile root; reconciled by
+# `dsh plugin add @boyingliu01/dsh-plugin-xp-gate`.
+
+- insert:
+    - id: tool-xp-gate
+      name: '@boyingliu01/dsh-plugin-xp-gate'

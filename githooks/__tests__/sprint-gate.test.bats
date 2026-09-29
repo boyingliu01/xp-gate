@@ -205,3 +205,58 @@ teardown() {
   [ "$status" -eq 1 ]
   [[ "$output" == *"DELPHI-REVIEW CORRUPT"* ]]
 }
+
+# ── pre-commit SPRINT_GATE_SCRIPT resolution ─────────────────────────
+# The resolution block is extracted verbatim so the real logic runs in-test
+# (same pattern as the GIT CONTEXT FALLBACK tests in adapter-common.test.bats).
+
+extract_sprint_gate_resolution() {
+  awk '
+/^# BEGIN SPRINT_GATE_SCRIPT RESOLUTION$/ { capture = 1; next }
+/^# END SPRINT_GATE_SCRIPT RESOLUTION$/ { capture = 0 }
+    capture
+  ' "$BATS_TEST_DIRNAME/../pre-commit"
+}
+
+@test "pre-commit resolution: GATE_DIR wins when sprint-gate.sh exists everywhere" {
+  mkdir -p hooks gatedir githooks
+  touch hooks/sprint-gate.sh gatedir/sprint-gate.sh githooks/sprint-gate.sh
+  SCRIPT_DIR="hooks"
+  GATE_DIR="gatedir"
+  SPRINT_GATE_SCRIPT=""
+  eval "$(extract_sprint_gate_resolution)"
+  [ "$SPRINT_GATE_SCRIPT" = "$GATE_DIR/sprint-gate.sh" ]
+}
+
+@test "pre-commit resolution: repo-root githooks beats the SCRIPT_DIR hooks dir" {
+  mkdir -p hooks gatedir githooks
+  touch hooks/sprint-gate.sh githooks/sprint-gate.sh
+  SCRIPT_DIR="hooks"
+  GATE_DIR="gatedir"
+  SPRINT_GATE_SCRIPT=""
+  eval "$(extract_sprint_gate_resolution)"
+  [ "$SPRINT_GATE_SCRIPT" = "$(git rev-parse --show-toplevel)/githooks/sprint-gate.sh" ]
+}
+
+@test "pre-commit resolution: SCRIPT_DIR hooks dir is the last resort" {
+  mkdir -p hooks gatedir
+  touch hooks/sprint-gate.sh
+  SCRIPT_DIR="hooks"
+  GATE_DIR="gatedir"
+  SPRINT_GATE_SCRIPT=""
+  eval "$(extract_sprint_gate_resolution)"
+  [ "$SPRINT_GATE_SCRIPT" = "$SCRIPT_DIR/sprint-gate.sh" ]
+}
+
+@test "pre-commit resolution: stays empty when sprint-gate.sh is absent everywhere" {
+  mkdir -p hooks gatedir
+  SCRIPT_DIR="hooks"
+  GATE_DIR="gatedir"
+  SPRINT_GATE_SCRIPT=""
+  eval "$(extract_sprint_gate_resolution)"
+  [ -z "$SPRINT_GATE_SCRIPT" ]
+}
+
+@test "npm mirror pre-commit stays byte-identical to the canonical hook" {
+  cmp -s "$BATS_TEST_DIRNAME/../pre-commit" "$BATS_TEST_DIRNAME/../../src/npm-package/hooks/pre-commit"
+}

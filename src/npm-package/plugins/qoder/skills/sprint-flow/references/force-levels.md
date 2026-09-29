@@ -8,7 +8,6 @@
 - 所有级别**必须经过 Delphi 评审**，不可跳过
 - 所有级别都采用 architecture、technical、feasibility 三专家 Delphi；Round 1 独立执行并验证三份成功结果
 - 模型 ID、provider、vendor、gateway 和国籍不受限制；`requested_model` trimmed 后必须 distinct
-- Qoder 上三个角色分别由对应 Custom Agent 执行；force level 只改变传给 Agent 的上下文深度与迭代预算
 - 评审达到 ≥90% 共识，最多 5 轮；失败或无法验证时阻断
 - 自动升级机制：当出现风险信号时强制升级级别
 

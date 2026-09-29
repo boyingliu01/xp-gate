@@ -1,7 +1,7 @@
 ---
 name: delphi-technical
 description: Delphi Method 技术实现评审专家。独立评审实现正确性、代码质量、边界处理、性能和可测试性。输出结构化评审意见和量化裁决。
-model: GLM-5.2
+model: "[GLM-5.3-Flash](gfmodel)"
 tools: Read, Grep, Glob
 skills: []
 ---
