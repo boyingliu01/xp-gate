@@ -1844,6 +1844,7 @@ else
             fi
           elif [ "$CHANGED_TEST_FILE_COUNT" -gt 0 ] 2>/dev/null; then
             # Run only changed test files with coverage
+            PARTIAL_TEST_RUN=true  # Mark as partial run for coverage check
             SMART_TARGETS=$(echo "$CHANGED_TEST_FILES" | tr '\n' ' ')
             echo "Running ${CHANGED_TEST_FILE_COUNT} changed test file(s) with coverage..."
             echo "   Target(s): $(echo "$CHANGED_TEST_FILES" | tr '\n' ' ')"
@@ -2064,8 +2065,9 @@ else
         " 2>/dev/null)
         if [ "$COVERAGE_PERCENT" != "parse_error" ] && [ -n "$COVERAGE_PERCENT" ]; then
           if [ "$COVERAGE_PERCENT" -lt 80 ]; then
-            # If only subset of tests ran (partial run or related tests), warn instead of block
-            if [ "${PARTIAL_TEST_RUN:-false}" = "true" ] || { [ -n "${CHANGED_TEST_FILE_COUNT:-}" ] && [ "${CHANGED_TEST_FILE_COUNT:-0}" -gt 0 ] 2>/dev/null; }; then
+            # Only a subset test run (smart selection) leaves partial coverage data;
+            # a full suite run must block on <80% even when many test files changed.
+            if [ "${PARTIAL_TEST_RUN:-false}" = "true" ]; then
               echo "⚠️  Partial coverage ${COVERAGE_PERCENT}% (subset test run, not full suite)."
               echo "    Run 'npx vitest run --coverage' for full coverage check."
             else
@@ -2194,9 +2196,9 @@ else
       fi
       if [ -n "$COVERAGE_PERCENT" ] && [ "$COVERAGE_PERCENT" != "parse_error" ] && [ "$COVERAGE_PERCENT" -gt 0 ]; then
         if [ "$COVERAGE_PERCENT" -lt 80 ]; then
-          # If only a subset of tests ran (partial run or related tests),
-          # warn instead of block — the full suite may still reach ≥80%.
-          if [ "${PARTIAL_TEST_RUN:-false}" = "true" ] || { [ -n "${CHANGED_TEST_FILE_COUNT:-}" ] && [ "${CHANGED_TEST_FILE_COUNT:-0}" -gt 0 ] 2>/dev/null; }; then
+          # Only a subset test run (smart selection) warns — the full suite may
+          # still reach ≥80%; a full suite run must block.
+          if [ "${PARTIAL_TEST_RUN:-false}" = "true" ]; then
             echo "⚠️  Partial coverage ${COVERAGE_PERCENT}% (subset test run, not full suite)."
             echo "    Run the full test suite for a complete ${CURRENT_LANG} coverage check."
           else
@@ -2465,7 +2467,7 @@ else
       echo "     ✅ No new or modified files to check."
     else
       # Run Boy Scout Rule enforcement
-      if command -v npx &> /dev/null; then
+      if command -v npx &> /dev/null || [ -f "${PROJECT_ROOT:-$(pwd)}/node_modules/tsx/dist/cli.mjs" ]; then
         # Skip if no files to check
         if [ -z "$(echo "$NEW_FILES" | tr -d ' ')" ] && [ -z "$(echo "$MODIFIED_FILES" | tr -d ' ')" ]; then
           echo "     ✅ No new or modified source files for Boy Scout check."
@@ -2501,8 +2503,8 @@ else
         echo "     ✅ PASSED - Boy Scout Rule compliance."
         fi
       else
-        echo "     ℹ️  npx not available - skipping Boy Scout Rule"
-        echo "     ⏭️  SKIPPED - Boy Scout Rule (Node.js/npx not available)"
+        echo "     ℹ️  npx/tsx not available - skipping Boy Scout Rule"
+        echo "     ⏭️  SKIPPED - Boy Scout Rule (Node.js/tsx not available)"
       fi
     fi
   else
