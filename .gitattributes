@@ -1,2 +1,17 @@
 # Shell scripts — enforce LF line endings across platforms
 *.sh text eol=lf
+
+# Extensionless hook scripts (bash) — CRLF breaks their shebang/interpretation
+githooks/pre-commit text eol=lf
+githooks/pre-push text eol=lf
+githooks/post-commit text eol=lf
+githooks/post-merge text eol=lf
+src/npm-package/hooks/pre-commit text eol=lf
+src/npm-package/hooks/pre-push text eol=lf
+src/npm-package/hooks/post-merge text eol=lf
+
+# Extensionless CLI wrappers (node shebang) shipped in plugins
+plugins/claude-code/bin/xp-gate-check text eol=lf
+plugins/qoder/bin/xp-gate-check text eol=lf
+src/npm-package/plugins/claude-code/bin/xp-gate-check text eol=lf
+src/npm-package/plugins/qoder/bin/xp-gate-check text eol=lf

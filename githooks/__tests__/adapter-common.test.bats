@@ -324,6 +324,7 @@ EOF
   # Before fix: output would contain "SKIP" and "PASSED"
   
   # Clean up
+  cd "$BATS_TEST_DIRNAME" || return 1
   rm -rf "$TEST_DIR"
   
   # For now, we just verify the hook runs

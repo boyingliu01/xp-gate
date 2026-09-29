@@ -17,6 +17,7 @@ setup() {
 
 teardown() {
   # Clean up test directory
+  cd "$BATS_TEST_DIRNAME" || return 1
   rm -rf "$TEST_DIR"
 }
 
