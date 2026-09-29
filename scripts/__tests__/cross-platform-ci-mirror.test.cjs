@@ -23,4 +23,16 @@ describe('cross-platform mirror parity workflow', () => {
     expect(postcheck).toBeGreaterThan(sync);
     expect(trackedGuard).toBeGreaterThan(postcheck);
   });
+
+  it('runs the hook mirror check before package sync', () => {
+    const workflow = fs.readFileSync(
+      path.resolve(__dirname, '../../.github/workflows/cross-platform-ci.yml'),
+      'utf8',
+    );
+    const hookCheck = workflow.indexOf('bash scripts/check-hook-mirror.sh\n');
+    const sync = workflow.indexOf('node src/npm-package/scripts/sync-package-content.js');
+
+    expect(hookCheck).toBeGreaterThan(-1);
+    expect(sync).toBeGreaterThan(hookCheck);
+  });
 });
