@@ -10,24 +10,25 @@ setup() {
 }
 
 teardown() {
+  cd "$BATS_TEST_DIRNAME" || return 1
   rm -rf "$TEST_DIR"
 }
 
-HOOK_PATH="$BATS_TEST_DIRNAME/../pre-commit"
+HOOKS_DIR="$BATS_TEST_DIRNAME/.."
 
 @test "Issue #187: lizard install message uses pip (not pip3) for cross-platform compat" {
-  # Check the pre-commit hook for pip3 references in lizard install message
+  # Lizard install guidance lives in the Gate 3 adapters, not pre-commit
   # The message should say "pip install" not "pip3 install"
-  run grep -n "pip.*install.*lizard" "$HOOK_PATH"
+  run grep -n "pip.*install.*lizard" "$HOOKS_DIR/gate-3.sh" "$HOOKS_DIR/gates/gate-3-complexity.sh"
   echo "Lizard install lines: $output"
 
-  # Must NOT contain pip3 (Windows-incompatible)
-  run grep "pip3.*install.*lizard" "$HOOK_PATH"
+  # Must NOT contain pip3 (Windows-incompatible) anywhere in the hooks tree
+  run grep -rn "pip3.*install.*lizard" "$HOOKS_DIR" --exclude-dir=__tests__
   echo "pip3 lines found: $output"
   [ "$status" -ne 0 ]
 
   # Must contain pip (cross-platform)
-  run grep "pip.*install.*lizard" "$HOOK_PATH"
+  run grep -n "pip.*install.*lizard" "$HOOKS_DIR/gate-3.sh" "$HOOKS_DIR/gates/gate-3-complexity.sh"
   echo "pip lines found: $output"
   [ "$status" -eq 0 ]
 }
