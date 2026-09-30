@@ -73,6 +73,18 @@ describe('root package-lock registry pinning', () => {
     }
     expect(offenders).toEqual([]);
   });
+
+  it('pins every http(s) resolved value with a raw-text oracle', () => {
+    // The check above shares its classifier with the tool, so a systematic
+    // misjudgement there would be invisible to both. This oracle reads the bytes
+    // and can never be influenced by the repair path.
+    const rawResolved = [...lockText.matchAll(/"resolved"\s*:\s*"([^"]*)"/g)].map((m) => m[1]);
+    expect(rawResolved.length).toBe(resolvedCount);
+    const straying = rawResolved.filter(
+      (url) => /^https?:\/\//.test(url) && !url.startsWith('https://registry.npmjs.org/'),
+    );
+    expect(straying).toEqual([]);
+  });
 });
 
 describe('normalizeLockRegistry', () => {
@@ -424,10 +436,42 @@ describe('normalize-lock CLI', () => {
     expect(status(dir)).toBe(1);
   });
 
-  it('defaults to the repo root lock and reports a clean one as a no-op', () => {
-    // The bare invocation is what `npm run normalize-lock` runs; it must target
-    // the repo lock rather than the fixture directory.
-    expect(run()).toContain('0 resolved source(s) rewritten');
+  it('reports a corrupt target without aborting the remaining arguments', () => {
+    const broken = path.join(dir, 'broken.json');
+    const good = path.join(dir, 'good.json');
+    fs.writeFileSync(broken, '{"lockfileVersion": 3, "packages":');
+    fs.writeFileSync(good, `{"packages":{"a":{"resolved":"${mirrorUrl}"}}}\n`);
+
+    let combined = '';
+    try {
+      combined = run(broken, good);
+    } catch (error) {
+      combined = `${error.stdout}${error.stderr}`;
+      expect(error.status).toBe(1);
+    }
+    expect(combined).toContain('not processed');
+    expect(combined).toContain('1 resolved source(s) rewritten');
+  });
+
+  it('resolves its default target next to itself, not in the repo', () => {
+    // `npm run normalize-lock` invokes the tool with no arguments. Running that
+    // against the real lock would let a guard test repair the artifact it is
+    // supposed to observe, so exercise the default through a throwaway copy.
+    const repoLockBefore = fs.readFileSync(LOCK_PATH);
+    const toolCopy = path.join(dir, 'scripts', 'normalize-lock-registry.cjs');
+    fs.mkdirSync(path.dirname(toolCopy), { recursive: true });
+    fs.copyFileSync(TOOL_PATH, toolCopy);
+    fs.writeFileSync(
+      path.join(dir, 'package-lock.json'),
+      `{"packages":{"a":{"resolved":"${mirrorUrl}"}}}\n`,
+    );
+
+    expect(execFileSync(process.execPath, [toolCopy], { encoding: 'utf8', cwd: dir }))
+      .toContain('1 resolved source(s) rewritten');
+    expect(fs.readFileSync(path.join(dir, 'package-lock.json'), 'utf8')).toContain(
+      'https://registry.npmjs.org/pkg/-/pkg-1.0.0.tgz',
+    );
+    expect(fs.readFileSync(LOCK_PATH)).toEqual(repoLockBefore);
   });
 });
 

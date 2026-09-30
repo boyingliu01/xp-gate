@@ -5,8 +5,10 @@
  * a targeted, source-only text edit (so integrity, version and formatting survive).
  *
  * Why not `.npmrc` replace-registry-host: measured on npm 11.17.0 against
- * registry.npmmirror.com the option is a no-op for every value tried, see
- * docs/plans/2026-09-30-package-lock-registry-normalization.md.
+ * registry.npmmirror.com, no value of that option changes the mirror host npm
+ * *writes* into `resolved` (at download time it does rewrite hosts, which is why
+ * this tool only guards the artifact). See
+ * docs/plans/2026-09-30-package-lock-registry-normalization.md (M3/M4, M8).
  */
 
 const fs = require('node:fs');
@@ -253,7 +255,17 @@ function main() {
       failures += 1;
       continue;
     }
-    const { changed, remaining } = normalizeFile(target);
+    let changed;
+    let remaining;
+    try {
+      ({ changed, remaining } = normalizeFile(target));
+    } catch (error) {
+      // One unreadable target must not abort the remaining arguments, and a
+      // stack trace is not an actionable message at a terminal.
+      console.error(`${target}: not processed — ${error.message}`);
+      failures += 1;
+      continue;
+    }
     console.log(`${target}: ${changed} resolved source(s) rewritten`);
     if (remaining.length > 0) {
       failures += 1;
