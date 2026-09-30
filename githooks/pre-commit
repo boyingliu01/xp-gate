@@ -1734,7 +1734,7 @@ else
       echo "⚠️  Gate 5c: req-ids.json is stale (specification.yaml updated since last check-alignment)"
       echo "   Run 'xp-gate check-alignment' to regenerate before next commit."
     else
-      CHANGED_TEST_FILES_ANNOTATED=$(echo "$CHANGED_FILES" | grep -E '\.(test|spec)\.(ts|tsx|js|jsx)$' || true)
+      CHANGED_TEST_FILES_ANNOTATED=$(echo "$CHANGED_FILES" | grep -E '\.(test|spec)\.(ts|tsx|js|jsx|cjs|mjs)$' || true)
       if [ -n "$CHANGED_TEST_FILES_ANNOTATED" ]; then
         echo "  → Checking @test REQ-XXX annotations..."
         ANNOTATION_ERRORS=0
@@ -1763,7 +1763,7 @@ else
         # Check reverse: any REQ in spec with no annotated test → visible FAIL (non-blocking)
         ALL_SPEC_REQS=$(jq -r '.[]' "$REQ_IDS_FILE" 2>/dev/null)
         ANNOTATED_ALL=""
-        for tf in $(echo "$CHANGED_FILES" | grep -E '\.(test|spec)\.(ts|tsx|js|jsx)$' || true); do
+        for tf in $(echo "$CHANGED_FILES" | grep -E '\.(test|spec)\.(ts|tsx|js|jsx|cjs|mjs)$' || true); do
           if [ -f "$tf" ]; then
             ANNOTATED_ALL="$ANNOTATED_ALL $(grep -oE '@test\s+REQ-[A-Z0-9-]+' "$tf" 2>/dev/null | sed 's/@test\s*//' || true)"
           fi

@@ -1,0 +1,67 @@
+# XP-Gate + DSH 集成覆盖层（overlay patch）
+#
+# 用途：为 DeepSeek Harness 启用 Delphi 交叉评审所需的「subagent 模型选择」能力，
+#       并把 XP-Gate 的 skill 根暴露给 DSH。
+#
+# 用法（任选其一）：
+#   A. 追加到 profile 的用户补丁层：C:\Users\think\.dsh\profiles\web\cordis.patch.yml
+#   B. 启动时叠加：dsh --patch <此文件>
+#
+# 说明：DSH 的 patch 语义是「整段替换 config」，不是深合并。
+#       因此这里只声明需要改动的行；agent-preset 的 plugins 行由 preset 自己拥有，
+#       在 profile 层用 id 覆盖它的内部行并不可靠 —— 推荐用 GUI 的 Plugins 页面
+#       设置 subagentModelSelection（见文末），本文件主要用于 skill 根与备用开关。
+
+# ── 1. 把仓库 skills/ 暴露给 DSH（项目级，rank 300 custom） ────────────────
+# DSH 默认发现根：<projectRoot>/.dsh/skills (100) → <projectRoot>/.agents/skills (200)
+#                → customSkillDirs (300) → ~/.dsh/skills (400) → ~/.agents/skills (500)
+# 当前 ~/.agents/skills 是指向 ~/.qoder/skills 的 junction，所以 DSH 现在加载的是
+# Qoder 版 skill。要改用仓库版本，二选一：
+#   (a) 在项目里建 .dsh/skills junction（推荐，见 README-zh.md 的脚本）
+#   (b) 在这里加 customSkillDirs
+- id: skill-filesystem
+  name: '@deepseek-ai/dsh-skill-filesystem'
+  config:
+    customSkillDirs:
+      - 'D:/projects/xp-gate/skills'
+
+# ── 2. 启用 subagent 模型选择（Delphi 三专家不同模型的前提） ────────────────
+# 注意：这一行的 config 会被 GUI Plugins 页面的设置覆盖。
+# enabled 与 allowedModels 是 volatile 的 host 设置，推荐直接在 GUI 里设置：
+#
+#   Plugins 页面 → subagent model selection:
+#     enabled = true
+#     allowedModels = [
+#       { provider: whalecloud, model: g-deepseek-v4-pro },
+#       { provider: whalecloud, model: g-qwen3.8-max  },
+#       { provider: whalecloud, model: g-glm-5.3       }
+#     ]
+#
+# 启用后，`subagent` 工具会多出 provider / model / reasoning_effort 参数，
+# 并注册 `list_subagent_models` 工具，delphi-review 即可让三个专家使用不同模型。
+#
+# 若偏好用 patch 而非 GUI，取消下面注释（requires @deepseek-ai/dsh-tool-subagent/
+# model-selection-settings，已由 dsh-web-app bundle 在 host 层注册）：
+#
+# - id: subagent-model-selection-settings
+#   name: '@deepseek-ai/dsh-tool-subagent/model-selection-settings'
+#   config:
+#     enabled: true
+#     allowedModels:
+#       - provider: whalecloud
+#         model: g-deepseek-v4-pro
+#       - provider: whalecloud
+#         model: g-qwen3.8-max
+#       - provider: whalecloud
+#         model: g-glm-5.3
+
+# ── 3. （可选）启用 DSH 原生 ralph 工具 ───────────────────────────────────
+# base bundle 默认 disabled（理由：完成与否是 worker 自报，非独立评估）。
+# XP-Gate 的 sprint-flow Phase 2 BUILD 若想用原生 ralph 替代 ralph-loop skill，
+# 在 profile 层恢复它。注意 preset 层已声明该行 id，此处仅作说明：
+#
+# - id: tool-ralph
+#   disabled: false
+#   config:
+#     subagentProvider: spawn
+#     maxRounds: 64
