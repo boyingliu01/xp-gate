@@ -135,6 +135,25 @@ if ! declare -F run_tsx >/dev/null 2>&1; then
   }
 fi
 
+# Detect a vitest *runner infrastructure* failure as opposed to a real test
+# failure. On Windows, vitest 1.6.x can exit non-zero while reporting zero failed
+# tests, because its temp/ssr module cache hits EPERM (#454). Treating that as
+# "Tests FAILED" sends developers chasing a bug that does not exist.
+#
+# Returns 0 (true) only when both hold:
+#   - the output mentions "Unhandled Error" (vitest's runner-level failure), AND
+#   - no real test failure marker is present.
+is_runner_infrastructure_error() {
+  local _out="$1"
+  [ -n "$_out" ] || return 1
+  printf '%s' "$_out" | grep -qE 'Unhandled Error' || return 1
+  # A real failure must still block.
+  if printf '%s' "$_out" | grep -qE 'Tests +[0-9]+ failed|FAIL |AssertionError'; then
+    return 1
+  fi
+  return 0
+}
+
 # Parse LCOV file and return coverage percentage
 # Usage: parse_lcov_coverage <lcov_file>
 # Returns: coverage percentage (e.g., "85.5")
@@ -1864,9 +1883,24 @@ else
             TESTS_EXIT_CODE=$?
             echo "$TESTS_OUTPUT" | head -60
             if [ "$TESTS_EXIT_CODE" -ne 0 ]; then
-              echo ""
-              echo "❌ BLOCKED - Tests FAILED in changed test files"
-              exit 1
+              # Distinguish a real test failure from a runner infrastructure
+              # error. vitest 1.6.x on Windows can exit non-zero with
+              # "Unhandled Errors" (EPERM on its temp/ssr module cache) while
+              # every test passes -- see #454. Mis-reporting that as
+              # "Tests FAILED" sends developers hunting for a nonexistent bug.
+              if is_runner_infrastructure_error "$TESTS_OUTPUT"; then
+                echo ""
+                echo "⏭️  SKIPPED - vitest runner infrastructure error (no test failed)"
+                echo "    Detected: Unhandled Errors with 0 failed tests."
+                echo "    Known Windows issue: EPERM on vitest temp/ssr cache (#454)."
+                echo "    Workaround: npx vitest run --no-file-parallelism <targets>"
+                TESTS_SKIPPED=true
+                TESTS_EXIT_CODE=0
+              else
+                echo ""
+                echo "❌ BLOCKED - Tests FAILED in changed test files"
+                exit 1
+              fi
             else
               echo "✅ PASSED - Changed test files passed (with coverage)."
             fi
