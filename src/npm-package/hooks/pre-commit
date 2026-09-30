@@ -1650,7 +1650,15 @@ else
   # Gate 5b: Mock Density ADVISORY Scan (pure bash — no npx tsx overhead)
   # 30% = ADVISORY, 50% = suggests @mock-justified. Does NOT block commit.
   # ========================================================================
-  CHANGED_TEST_FILES=$(git diff --cached --name-only --diff-filter=ACM | grep -E '\.(test|spec)\.(ts|tsx|js|jsx|py|go)$' || true)
+  CHANGED_TEST_FILES=$(git diff --cached --name-only --diff-filter=ACM | grep -E '\.(test|spec)\.(ts|tsx|js|jsx|cjs|mjs|py|go)$' || true)
+
+  # Nested plugin sub-projects (plugins/<name>/) own their own vitest config and
+  # are excluded from the root suite (`vitest.config.ts` excludes `plugins/**`,
+  # because plugins/*/node_modules contains vendored tests). Feeding their test
+  # paths to the root vitest yields "No test files found" → false BLOCK, so drop
+  # them here and let the per-plugin suite cover them (CI runs `npm test` inside
+  # each plugin directory).
+  CHANGED_TEST_FILES=$(echo "$CHANGED_TEST_FILES" | grep -vE '^plugins/[^/]+/' || true)
 
   # Strip PROJECT_SUBDIR prefix from test file paths when running in subdirectory.
   # git diff returns repo-root relative paths, but after cd "$PROJECT_SUBDIR" (line 728)
@@ -1822,6 +1830,10 @@ else
           
           # Also get changed source files (non-test) for related-test lookup
           CHANGED_SRC_FILES=$(git diff --cached --name-only --diff-filter=ACM | grep -E '\.(ts|tsx|js|jsx)$' | grep -v '\.test\.' | grep -v '\.spec\.' | grep -v '__tests__' | grep -v '\.d\.ts$' | grep -v '__snapshots__' || true)
+          # Nested plugin sub-projects are excluded from the root suite; their
+          # sources must not drive root-vitest related-test lookup either (it
+          # would resolve to plugin-local paths vitest cannot collect).
+          CHANGED_SRC_FILES=$(echo "$CHANGED_SRC_FILES" | grep -vE '^plugins/[^/]+/' || true)
           # Strip PROJECT_SUBDIR prefix (same as CHANGED_TEST_FILES fix above)
           if [ -n "$PROJECT_SUBDIR" ] && [ "$PROJECT_SUBDIR" != "." ] && [ -n "$CHANGED_SRC_FILES" ]; then
             CHANGED_SRC_FILES=$(echo "$CHANGED_SRC_FILES" | sed "s|^${PROJECT_SUBDIR}/||")
