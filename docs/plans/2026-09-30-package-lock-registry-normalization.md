@@ -2,8 +2,9 @@
 
 > 分支: chore/package-lock-registry　日期: 2026-09-30　类型: 供应链卫生（非 bug 修复）
 > 触发: PR #422 合并后发现 `package-lock.json` 内 127/555 条 `resolved` 指向 `registry.npmmirror.com`
-> 本文经 Delphi code-walkthrough Round 1（3× REQUEST_CHANGES）、Round 2（1× REQUEST_CHANGES + 2× PASS_WITH_CAVEATS）
-> 与 Round 3（1× APPROVED + 2× PASS_WITH_CAVEATS，零 Critical/Major）修订，修订映射见 §0
+> 本文经 Delphi code-walkthrough Round 1（3× REQUEST_CHANGES）、Round 2（1× REQUEST_CHANGES + 2× PASS_WITH_CAVEATS）、
+> Round 3（1× APPROVED + 2× PASS_WITH_CAVEATS，零 Critical/Major）
+> 与 Round 4（1× APPROVED + 2× PASS_WITH_CAVEATS，0 Critical / 3 Major，全部指向文档陈述未被实测）修订，修订映射见 §0
 
 ---
 
@@ -15,7 +16,7 @@
 | R1 | A-C1 / C-C2 | `npm ci \|\| npm install` 兜底静默掩盖复发 | §3 移除兜底（`cross-platform-ci.yml:69`） |
 | R1 | C-M1 / B-M2 | `new URL().host` 协议过宽、describe 收集期解析 | §3 检测改为 JSON 语义 + 协议限定 + `beforeAll` |
 | R1 | A-M1 / B-M1 | `REQ-010-04` 不在 spec、`.cjs` 逃过 Gate 5c | §5 登记为已知悬空编号族与门禁盲区（本文显式声明 out-of-spec 注解） |
-| R1 | A-M5 | 无 `lockfileVersion` 断言、host 白名单硬编码 | §3 `expect(lock.lockfileVersion).toBe(3)`；允许 host 由模块单点导出 |
+| R1 | A-M5 | 无 `lockfileVersion` 断言、host 白名单硬编码 | §3 形状哨兵；允许主机收敛为模块内单点常量（`CANONICAL_REGISTRY_HOST` / `AUTO_FIXABLE_HOSTS`）。<br>*修订注记*：本行原写 "`expect(lock.lockfileVersion).toBe(3)`" 与 "由模块单点**导出**"，均与最终实现不符 —— 形状断言放宽为 `[1,2,3]`（工具同时兼容 legacy 树），常量刻意**不**导出（R4-A 认定"三处口径同模块"是设计优点）。以 R3/R4 行为准。 |
 | R2 | A-CI-1 / B-Major-1 | 行级正则在 CRLF 工作区静默 0 改写且 exit 0，而守护仍红 → 修复路径二次失效 | **检测改为 `JSON.parse` 语义 + 按 URL 值定点文本替换**（与行尾/空格无关），并在改写后自校验残留 |
 | R2 | B-Major-2 | 守护用 `url.host`（含端口）、脚本用原始串比较 → `:443` 条目红灯无解 | 统一用 `url.hostname`，检测与改写共用 `findRegistryOffenders` |
 | R2 | B-Major-4 | 非原子写覆盖 ~2MB lock | `lockPath.tmp` + `renameSync` |
@@ -23,14 +24,19 @@
 | R2 | A-MJ-1 | §4 以"必须新增编号 Gate、同步五处文档"否决本地拦截，前提不成立 | §4 更正：`githooks/gate-12-file-hygiene.sh` 为 warning-only 且已在 `*.json)` 分支遍历 staged 文件，落点确实存在；本 PR 仍不做，理由改记于 §4 |
 | R2 | C-N2 | 否决 `prepare` 归一化的理由是"隐藏副作用"，与实际惯例不符 | §5 更正为决定性理由：`prepare` 会让 CI 的 `npm ci` 先把工作区 lock 洗白，从而抹平 lock-only 提交唯一的实时拦截点 |
 | R2 | B-Minor | 代码与文档同 commit，违反 `docs/agents.md` 反模式 | 拆为 code commit + docs commit |
-| R3 | A-1 / B3-M2 | `normalizeFile` 与 CLI 的 exit-code 分支被导出却零测试，而 `scripts/*.cjs` 又逃在 Gate 1 lint 与覆盖率口径之外 → 原子写与非零退出没有第二张安全网 | 补 `normalizeFile` 落盘/幂等/无 `.tmp` 残留/`changed=0` 不动 mtime，以及 CLI 非零退出与"目标不是 lockfile"共 5 条测试（12 → 24） |
+| R3 | A-1 / B3-M2 | `normalizeFile` 与 CLI 的 exit-code 分支被导出却零测试，而 `scripts/*.cjs` 又逃在 Gate 1 lint 与覆盖率口径之外 → 原子写与非零退出没有第二张安全网 | 补 `normalizeFile` 落盘/幂等/无 `.tmp` 残留/`changed=0` 不动 mtime，以及 CLI 非零退出与"目标不是 lockfile"共 5 条测试（12 → 24；R4 再补 5 条 → 29） |
 | R3 | B3-M1 | 守护 fail-open：`http:` 明文、非默认端口、带凭据以及 `new URL` 解析失败的值被静默跳过，实际口径宽于 AGENTS.md/CHANGELOG 宣称的不变量 | 判净条件收紧为 `https:` + 裸 canonical 主机（无端口、无凭据）；解析失败值上报为 `unparseable` offender 而非跳过；明文 http 自动升级为 https，端口/凭据只上报不擅自改路由 |
 | R3 | B3-M4 | 固定 `.tmp` 名在并发/失败下留残留或二次 rename 抛错 | `${lockPath}.${pid}.tmp` + `try/finally` 强制清理 |
 | R3 | B3-M5 | legacy `dependencies` 分支缺 `meta` 守卫，null 条目以裸 TypeError 崩掉工具与守护 | 补守卫与畸形输入测试 |
 | R3 | B3-M3 / B3-M7 / B3-M8 | 按条目重复全文扫描、`approvedHosts` 形参与 `AUTO_FIXABLE_HOSTS` 导出无消费者、`JSON.parse(output)` 只证明"仍是合法 JSON"而不证明"只改了 resolved" | 唯一 URL 去重扫描；删除未用形参与死导出；新增 `assertOnlyResolvedChanged` 深比较，非 `resolved` 叶差异直接抛错 |
 | R3 | B3-M6 | `lockfileVersion === 3` 断言写在 `beforeAll`，npm 出新版本当日 12 条测试因无关原因集体变红 | 解耦为独立的"lock 形状可理解"断言，接受 v1/2/3 |
 | R3 | C3-2 / C3-3 / C3-4 | 回滚表述隐含 squash 合并前提；未记在途依赖分支的协调动作；归一化后 fresh `npm ci` 对官方 registry 的可达性依赖从 77% 升到 100% 而未记账 | §6 补回滚前提与合并后协调行；§5 补可达性残留条目 |
-| R3 | C3-1 | M7 的 `555/555` 无可重放入库工具，属口头数字 | 接受为残留：`integrity` 字段本身已使投喂不同字节变为 `EINTEGRITY` 硬失败（可发现、可回滚）。可重放工具 `scripts/verify-lock-integrity.cjs` 列为后续项 |
+| R3 | C3-1 | M7 的 `555/555` 无可重放入库工具，属口头数字 | 接受为残留：`integrity` 字段本身已使投喂不同字节变为 `EINTEGRITY` 硬失败（可发现、可回滚）。可重放工具 `scripts/verify-lock-integrity.cjs` 列为后续项（R4-C1 后升级为"登记在 PR 描述、必须排期"，见 §5 末条） |
+| R4 | A-Major-1 | §5 的恢复路径"临时 `--registry` 覆盖"是**未证的断言**：`npm ci` 按 lock 的绝对 `resolved` 下载，覆盖可能根本不生效；叠加 AGENTS.md"禁止手改 lock"，受限网络机器可能无路可走 | §2 新增 **M8**：读 `npm 11.17.0` 捆绑 arborist 源码（`index.js:128-130` + `reify.js:710 → :902-946`）实证下载期主机改写机制；§5 该条改为按 `replace-registry-host` 取值分情况给出**生效**的命令，并说明 `npm ci` 不写 lock、`npm install` 才写 |
+| R4 | C-Major-1 | 绿证据从未执行 win32/darwin 的根 lock 安装路径，M7 又不可重放 → PR 声称的平台覆盖面大于实证范围 | §6 按 job 逐条记账：三 OS job 走 `npm install -g ./src/npm-package`（`cross-platform-ci.yml:17/:21/:38`）**不解析根 lock**，故平台二进制仅由 M7 覆盖；§5 末条把 `verify-lock-integrity.cjs` 从"后续项"改为登记于 PR 描述的必排期项 |
+| R4 | C-Major-2 | "合并后通知在途分支"无载体；且 77%→100% 的可达性叙述夸大了对镜像使用者的实际冲击 | §6 协调条改为**实测在途面**（2026-09-30：开放 PR #438/#435 的 `gh pr diff --name-only` 均不含根 lock）+ 条件触发的 ①②③ 载体；§5 按 M8 修正冲击面为"默认配置行为不变，仅 `replace-registry-host=never` 的机器需处置" |
+| R4 | B-APPROVED（0 Critical / 0 Major） | B1/B2：文本切片 authority 吞掉 `?query` → 改写丢查询串且被判干净；canonical 主机带 query 的凭据被 `isClean` 放行 → 两条"既不进 changed 也不进 remaining"的静默死角 | `urlIdentity` 同时给出解析 tail 与文本 textTail，二者不一致即拒绝自动改写；`isClean` 增加 `hasQueryOrFragment`；改写结果等于输入即判不可修（§3 前两行） |
+| R4 | B4/B5/B6/B8/B10 | 非字符串 `resolved` 被误标 `unparseable`；报错文案在括号中间断行；"可修+不可修并存"与零参数默认目标两条真实恢复路径无测试；R1-A-M5 行的历史表述与最终实现不符 | `not-a-string` 标签；文案重排；测试 24 → **29** 条（含混合恢复路径、`main()` 零参数）；§0 该 R1 行加修订注记 |
 
 ## 1. 问题
 
@@ -50,19 +56,26 @@
 | M5 | 在**已归一化**的根 lock 上增量 `npm install --package-lock-only left-pad` | 只有新增的 1 条变回镜像，其余 554 条保持官方 host → 复发面是"每次新增依赖 1 条" |
 | M6 | `cross-platform-ci.yml` 最近一次运行 | `npm ci` 成功（`added 475 packages`），兜底路径未被触发 |
 | M7 | **官方元数据逐条比对**：取 lock 内全部 555 条 `resolved`，按包名向 `registry.npmjs.org` 拉 metadata，比对 `versions[ver].dist.integrity` 与 lock 内 `integrity` | `checked=555 mismatch=0 missing=0`（470 个不同包路径，含 `@esbuild/*`、`@ast-grep/cli-*`、`@archlinter/cli-win32-x64` 等 `cpu`/`os` 门控平台二进制） |
+| M8 | **npm 下载期主机改写机制**（读安装侧源码，非推测）：本机 `npm 11.17.0` 捆绑的 `@npmcli/arborist` —— `lib/arborist/index.js:128-130` 把 `replaceRegistryHost` 的空值/`npmjs` 归一为字面量 `registry.npmjs.org`；`lib/arborist/reify.js:710` 调 `#registryResolved`（`:902-946`），当 `replaceRegistryHost === resolvedURL.hostname` 或为 `always` 时，用**配置的 registry** 覆盖 hostname/port/protocol，并把改写后的 URL 交给 pacote 下载 | 默认配置下，lock 里的 `registry.npmjs.org` **会在下载期被换成开发者 `.npmrc` 的 registry**。因此 `--registry` 覆盖对 `npm ci` 确实有效（§5 的处置成立），同时本 PR 的不变量边界也只到"制品层"，见结论 4 |
 
 **结论 1（M3/M4）**：`.npmrc replace-registry-host` 只替换 npm 认定的 registry 主机，镜像元数据里
 `dist.tarball` 的主机不在其作用范围，实测四种取值全为 no-op —— Round 1 首选的"仓库级 `.npmrc` 治根"方案被否证。
 **结论 2（M5）**：复发面是每次新增依赖 1 条，守护必须给出可直接执行的修复命令。
 **结论 3（M7）**：`integrity` 等价性不再是假设 —— lock 内每条摘要都等于官方 registry 公布的
 `dist.integrity`，即镜像投喂的 tarball 与官方 tarball 摘要一致；这覆盖了任何 ubuntu runner 都不会下载的平台二进制。
+**结论 4（M8，不变量的边界）**：本 PR 买到的是**制品层**保证，不是**下载层**保证。
+lock 归一化后，仓库对第三方镜像的隐式依赖消失，CI（无镜像配置）按 lock 原样从官方 host 下载；
+但按 M8，任何把 `.npmrc registry` 指向镜像的开发者，其 `npm ci` 仍会在下载期被 npm 改写回镜像 ——
+这与 lock 写的是哪个 host 无关。守护测试因此**不可能**、也不声称能发现"某人实际从镜像下载"这件事；
+要收口那一层需要仓库级 `.npmrc`（已被 M2 的可达性波动与 M3/M4 一并在 §4 否证），属另一议题。
 
 ## 3. 决策
 
 | 措施 | 落点 | 依据 |
 |------|------|------|
 | 定点重写 `resolved` 的 scheme+authority（`integrity`/`version`/路径/格式/行序不动） | `scripts/normalize-lock-registry.cjs`（`npm run normalize-lock`） | M2/M3/M4：不需要官方 registry 也能修；M7 前置实测：输出与人工 host 替换逐字节一致，重跑 0 改写 |
-| 判净条件收紧为 `https:` + 裸 `registry.npmjs.org`（无端口、无凭据），解析失败值上报为 `unparseable` | `collectOffenders` / `isClean` | R3-B3-M1：守护的口径不能宽于 AGENTS.md/CHANGELOG 宣称的不变量，否则"绿"是虚假安全感 |
+| 判净条件收紧为 `https:` + 裸 `registry.npmjs.org`（无端口、无凭据、**无 query/fragment**）；解析失败值上报 `unparseable`、非字符串值上报 `not-a-string` | `collectOffenders` / `isClean` | R3-B3-M1：守护的口径不能宽于 AGENTS.md/CHANGELOG 宣称的不变量，否则"绿"是虚假安全感。R4-B2：token 也能藏在 `?access_token=` 里，只查 userinfo 等于漏一半 |
+| 只有当"文本切出的 tail"与"URL 解析出的 tail"逐字相等时才允许自动改写；改写结果与输入相同也判为不可修 | `fixableOffender` / `canonicalTarget` | R4-B1：authority 之后没有 `/` 的 URL（`https://host?query`）会让文本切片吞掉 query，改写后丢掉查询串却被判为干净 —— 静默降级为"既不在 changed 也不在 remaining"的死角 |
 | 明文 `http:` 自动升级为 https；canonical 主机上的端口/凭据**只上报不擅自改路由** | `fixableOffender` | canonical 主机带端口或凭据说明有东西在被路由，静默剥离等于把拦截点藏起来 |
 | 深比较断言"只有 `resolved` 叶发生变化"，否则抛错 | `assertOnlyResolvedChanged` | R3-B3-M8：把结构性巧合变成显式契约 |
 | 唯一 URL 去重扫描 + `${pid}.tmp` + `try/finally` 清理 + legacy 树 `meta` 守卫 | 同上 | R3-B3-M3/M4/M5 |
@@ -70,7 +83,7 @@
 | 改写后自校验残留，残留非空即 exit 1；缺失文件 exit 1；写盘走 `.tmp` + `renameSync` | 同上 | R2-B-Major-4 |
 | 根 lock 归一化（127 → 0） | `package-lock.json` | 127 插入 / 127 删除，全部落在 `"resolved"` 行，非 resolved 行改动 0 |
 | `package-lock.json text eol=lf` | `.gitattributes` | 仓库原先只对 `.sh` 与 hook 文件强制 LF。本机实测 `core.autocrlf=input`（checkout 不会给出 CRLF lock），此条是为 `autocrlf=true` 的贡献者把不变量固定在仓库侧而非机器侧；改写本身已与行尾解耦，见 §0 R2 首行 |
-| 守护测试 24 条：纯函数（CRLF/紧凑排版/端口/凭据/legacy 树/共享 URL/幂等/解析失败）+ `normalizeFile` 落盘与 mtime 不变 + CLI 非零退出，另含 `lockfileVersion` 形状断言、`>100` 规模哨兵、offender 附修复命令 | `scripts/__tests__/package-lock-registry.test.cjs` | M5：新增依赖即红灯且提示一键修复 |
+| 守护测试 29 条：纯函数（CRLF/紧凑排版/端口/凭据/query/文本-解析 tail 不一致/共享 URL/legacy 树/幂等/解析失败/非字符串）+ `normalizeFile` 落盘与 mtime 不变 + CLI 非零退出与默认目标，另含 `lockfileVersion` 形状断言、`>100` 规模哨兵、offender 附修复命令 | `scripts/__tests__/package-lock-registry.test.cjs` | M5：新增依赖即红灯且提示一键修复。R4-B8：补齐"同一文件内可修 + 不可修并存"的真实恢复路径与零参数默认目标 |
 | 移除 CI 安装兜底 `npm ci \|\| npm install` | `.github/workflows/cross-platform-ci.yml:69` | M6：`npm ci` 现为绿；兜底只会静默重装并重写工作区 lock |
 
 ## 4. 否决的替代方案
@@ -99,34 +112,45 @@
   本次沿用同目录既有编号（`REQ-010-04`）并在测试头显式声明 out-of-spec，属止损而非修复；
   根治需要把该族迁到独立前缀或正式登记进 `specification.yaml`，另开分支处理。
 - **`scripts/*.cjs` 不在 Gate 1 与覆盖率口径内**：`npm run lint` = `eslint src --ext .ts`，
-  `vitest.config.ts` 的 coverage `include` 为 `src/**`。新工具虽有 24 条单测（纯函数 + `normalizeFile`
+  `vitest.config.ts` 的 coverage `include` 为 `src/**`。新工具虽有 29 条单测（纯函数 + `normalizeFile`
   落盘 + CLI 退出码），但不受 80% 阈值约束，也不受 lint 约束。
-- **fresh `npm ci` 对官方 registry 的可达性依赖升高**（R3-C3-4）：清洗前 77% 的 tarball 走镜像、
-  清洗后 100% 走 `registry.npmjs.org`，而 M2 实测本机对该主机的可达性在一天内波动。
-  镜像-only 的受限网络机器上全新安装可能失败；处置是临时 `--registry` 覆盖，
-  **不得**让它写回 lock（一旦写回，守护会在下一次 CI 变红）。
+- **可达性影响的真实面比"77% → 100%"小**（R3-C3-4 + R4-A1/C2，由 M8 定量收敛）：lock 的**声明**来源从
+  77% 官方升到 100% 官方，但按 M8，`replace-registry-host` 默认值恰好等于 `registry.npmjs.org`，
+  npm 在下载期会把官方 host 改写回该机器 `.npmrc` 配置的 registry —— 即镜像-only 的受限网络机器
+  **默认配置下行为不变**，不需要临时覆盖，也不会因本 PR 突然装不上。
+  需要手工处置的只剩一类机器：显式设了 `replace-registry-host=never` 的（此时 lock host 逐字使用）。
+  其恢复路径是 `--registry=<mirror>` **配** `replace-registry-host=always`；单给 `--registry` 在 `never` 下无效。
+  两种情况都**不得**让镜像写回 lock：`npm ci` 不写 lock，`npm install` 会（M5 的复发面正是它），
+  一旦写回守护会在下一次 CI 变红。AGENTS.md 的"禁止手改 lock"与此不冲突 —— 恢复动作是配置层，不是制品层。
 - **允许/可修白名单三处耦合**（R3-A2）：`CANONICAL_REGISTRY_HOST`、`AUTO_FIXABLE_HOSTS` 与
   `isClean` 的判净条件共同决定"什么算干净"。将来引入私有或 vendored registry 需同时改这三处，
   届时应从 npm 配置派生允许主机，而不是再加常量。本 PR 不做该抽象。
-- **M7 是单次 ad-hoc 实测，仓库内无可重放脚本**（R3-C3-1）：`checked=555 mismatch=0 missing=0`
-  这个数字后来者无法复跑。兜底事实是 `integrity` 字段本身已在 `npm ci` 期强制摘要校验，
+- **M7 是单次 ad-hoc 实测，仓库内无可重放脚本**（R3-C3-1 + R4-C1）：`checked=555 mismatch=0 missing=0`
+  这个数字后来者无法复跑。**证据分工要写清，不能让 CI 背它没跑的账**：
+  本次改写涉及的 127 条里，linux-x64 子集由 CI 的 `npm ci` 逐条摘要校验实证（§6），
+  只有 win32/darwin 门控条目仅由 M7 覆盖。兜底事实是 `integrity` 字段本身已在 `npm ci` 期强制摘要校验，
   所以 M7 若失实，后果是 win32/darwin 开发者本机 `EINTEGRITY` 硬失败（可发现、可回滚），
-  不是静默不安全。后续项：把逐条元数据比对固化为 `scripts/verify-lock-integrity.cjs`（需出网，
-  不可达时按本仓"工具缺失即 SKIP"惯例降级）。
+  不是静默不安全。后续项（独立 PR，登记在本 PR 描述的 Follow-up 段）：把逐条元数据比对固化为
+  `scripts/verify-lock-integrity.cjs`（需出网，不可达时按本仓"工具缺失即 SKIP"惯例降级），
+  使这个不变量对后来者**可证伪**；在此之前，本 PR 的"平台二进制同样安全"是**已实测但不可重放**。
 
 ## 6. 合入门槛与回滚
 
 - **integrity 等价性由 M7 用官方元数据逐条实测**（555/555 摘要一致，仓库内不可重放，见 §5 末条），
   因此不再把它写成"待 CI 证伪的假设"。
   CI 侧仍以 `npm ci` 为安装路径回归门槛：`quality-gates.yml:133/:214/:674`、`security-audit.yml:29`、
-  `mutation-test.yml:31`、`cross-platform-ci.yml:69`（Node 18/20/22 × ubuntu）。注意这些 job 只下载 linux-x64 子集，
-  平台门控二进制的字节一致性由 M7 的元数据比对覆盖，而非由 CI 覆盖。
+  `mutation-test.yml:31`、`cross-platform-ci.yml:69`（Node 18/20/22 × ubuntu）。注意这些 job 只下载 linux-x64 子集；
+  `cross-platform-ci.yml:17/:21/:38` 的三 OS job 走的是 `npm install -g ./src/npm-package`，**根本不解析根 lock**，
+  所以 win32/darwin 在 CI 里既不下载也不摘要校验 —— 平台门控二进制的字节一致性只由 M7 的元数据比对覆盖，不由 CI 覆盖。
 - `mutation-test.yml` 自 2026-07-21 起持续 45 分钟超时被取消，与本改动无关，**不计入绿证据**（独立跟进项）。
 - **回滚前提是squash/merge-commit 合并**（R3-C3-2）：此时单 commit revert 即同时退回 lock、脚本与守护测试。
   若逐 commit 合并，只 revert `9bd0416` 会留下 `f3b93ed` 的 RED 守护测试使 CI 常红，
   需按 `3437ab7..f3b93ed` 逆序全 revert。若仍出现 `EINTEGRITY`，采整 PR revert 而非"只回滚单个 offender"
   ——平台包摘要无法在本机与 CI 双证，逐条回滚的定位成本更高。
-- **合并后协调动作**（R3-C3-3）：任何在途且 touch lock 的开放分支（依赖 bump PR）会遇 lock 冲突；
-  以旧基线合并还会把镜像条目重新带回，届时守护在下一次 CI 变红。合并后通知这些分支
-  `rebase` 后重跑 `npm run normalize-lock` 再推送。
+- **合并后协调动作**（R3-C3-3 + R4-C2，落到具体载体而非"记得说一声"）：**2026-09-30 实测**，
+  开放 PR 只有 #438 / #435，`gh pr diff --name-only` 两者均不含根 `package-lock.json` → 当前无在途冲突面，
+  协调动作是**条件触发**：若合并前出现 touch lock 的开放 PR（依赖 bump 最典型），以旧基线合并会把镜像条目重新带回，
+  届时守护在下一次 CI 变红。执行顺序：① 本 PR 描述的 Follow-up 段列出"重跑 `npm run normalize-lock`"这一必做动作；
+  ② 在那些分支上留一条 rebase 提示评论；③ 下一次发布的 CHANGELOG 顶部条目带同一句话。
+  守护的报错文本本身已含可执行修复命令（M5 的落点），所以 ①②③ 是缩短发现延迟，不是唯一防线。
 - 首个 CI 周期 `hashFiles('package-lock.json')` 缓存失效，流水线时长会小幅上升（预期行为）。
