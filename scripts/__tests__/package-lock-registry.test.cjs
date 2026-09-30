@@ -262,6 +262,55 @@ describe('normalizeLockRegistry', () => {
     expect(occurrences).toBe(2);
   });
 
+  it('refuses to rewrite when the tail cannot be recovered verbatim', () => {
+    // No '/' after the authority: slicing the authority out of the raw text
+    // would swallow ?query and certify the shortened URL as clean.
+    const input = lockWith('https://registry.npmmirror.com?query=1');
+    const result = normalizeLockRegistry(input);
+
+    expect(result.changed).toBe(0);
+    expect(result.text).toBe(input);
+    expect(result.remaining).toEqual(['node_modules/pkg -> registry.npmmirror.com']);
+  });
+
+  it('reports a canonical host carrying a query instead of certifying it clean', () => {
+    const input = lockWith('https://registry.npmjs.org/pkg/-/pkg-1.0.0.tgz?access_token=secret');
+    const result = normalizeLockRegistry(input);
+
+    expect(result.changed).toBe(0);
+    expect(result.text).toBe(input);
+    expect(result.remaining).toEqual(['node_modules/pkg -> registry.npmjs.org']);
+  });
+
+  it('names a non-string resolved value rather than calling it unparseable', () => {
+    const input = `${JSON.stringify({
+      lockfileVersion: 3,
+      packages: { '': {}, 'node_modules/pkg': { resolved: 42 } },
+    })}\n`;
+
+    expect(offenderLines(input)).toEqual(['node_modules/pkg -> not-a-string']);
+  });
+
+  it('rewrites what it can and still reports what it cannot in one pass', () => {
+    const input = `${JSON.stringify({
+      lockfileVersion: 3,
+      packages: {
+        '': {},
+        'node_modules/a': { version: '1.0.0', resolved: mirrorUrl, integrity: 'sha512-abc=' },
+        'node_modules/b': {
+          version: '1.0.0',
+          resolved: 'https://mirror.example.com/b/-/b-1.0.0.tgz',
+          integrity: 'sha512-def=',
+        },
+      },
+    })}\n`;
+    const result = normalizeLockRegistry(input);
+
+    expect(result.changed).toBe(1);
+    expect(result.text).toContain(canonicalUrl);
+    expect(result.remaining).toEqual(['node_modules/b -> mirror.example.com']);
+  });
+
   it('is idempotent', () => {
     const once = normalizeLockRegistry(lockWith(mirrorUrl)).text;
     const twice = normalizeLockRegistry(once);
@@ -373,6 +422,12 @@ describe('normalize-lock CLI', () => {
   it('exits non-zero for a target that is not a lockfile', () => {
     expect(status(path.join(dir, 'absent.json'))).toBe(1);
     expect(status(dir)).toBe(1);
+  });
+
+  it('defaults to the repo root lock and reports a clean one as a no-op', () => {
+    // The bare invocation is what `npm run normalize-lock` runs; it must target
+    // the repo lock rather than the fixture directory.
+    expect(run()).toContain('0 resolved source(s) rewritten');
   });
 });
 

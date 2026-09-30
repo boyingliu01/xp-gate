@@ -17,6 +17,19 @@ const CANONICAL_REGISTRY_HOST = 'registry.npmjs.org';
 const AUTO_FIXABLE_HOSTS = ['registry.npmmirror.com'];
 
 function urlIdentity(resolved) {
+  if (typeof resolved !== 'string') {
+    return {
+      host: null,
+      hostWithPort: null,
+      authority: null,
+      protocol: null,
+      hasCredentials: false,
+      hasQueryOrFragment: false,
+      tail: null,
+      textTail: null,
+      parseError: 'not-a-string',
+    };
+  }
   try {
     const url = new URL(resolved);
     const start = resolved.indexOf('//') + 2;
@@ -28,6 +41,11 @@ function urlIdentity(resolved) {
       authority: pathStart === -1 ? resolved.slice(start) : resolved.slice(start, pathStart),
       protocol: url.protocol,
       hasCredentials: Boolean(url.username || url.password),
+      hasQueryOrFragment: Boolean(url.search || url.hash),
+      // Two independent readings of the same tail: the parsed one is what npm
+      // would fetch, the text slice is what a host swap can re-attach verbatim.
+      tail: `${url.pathname}${url.search}${url.hash}`,
+      textTail: pathStart === -1 ? '' : resolved.slice(pathStart),
       parseError: null,
     };
   } catch {
@@ -37,6 +55,9 @@ function urlIdentity(resolved) {
       authority: null,
       protocol: null,
       hasCredentials: false,
+      hasQueryOrFragment: false,
+      tail: null,
+      textTail: null,
       parseError: 'unparseable',
     };
   }
@@ -44,8 +65,11 @@ function urlIdentity(resolved) {
 
 function eachResolved(lock) {
   const entries = [];
+  // A present-but-non-string value is corruption, not absence: collect it so the
+  // classifier reports it instead of certifying the entry clean.
+  const isPresent = (meta) => meta !== undefined && meta !== null;
   for (const [name, meta] of Object.entries(lock.packages || {})) {
-    if (meta && meta.resolved) {
+    if (meta && isPresent(meta.resolved)) {
       entries.push({ name, resolved: meta.resolved });
     }
   }
@@ -56,7 +80,7 @@ function eachResolved(lock) {
       if (!meta || typeof meta !== 'object') {
         continue;
       }
-      if (meta.resolved) {
+      if (isPresent(meta.resolved)) {
         entries.push({ name: full, resolved: meta.resolved });
       }
       if (meta.dependencies) {
@@ -70,11 +94,12 @@ function eachResolved(lock) {
 
 // The invariant is narrower than "the hostname looks right": a resolved entry
 // counts as clean only over https, on the bare canonical host, with no
-// credentials and no port.
+// credentials, no port and no query — a token can hide in either.
 function isClean(identity) {
   return (
     identity.protocol === 'https:' &&
     !identity.hasCredentials &&
+    !identity.hasQueryOrFragment &&
     identity.hostWithPort === CANONICAL_REGISTRY_HOST
   );
 }
@@ -95,7 +120,13 @@ function collectOffenders(lock) {
     if (isClean(identity)) {
       continue;
     }
-    offenders.push({ ...entry, host: identity.host, authority: identity.authority });
+    offenders.push({
+      ...entry,
+      host: identity.host,
+      authority: identity.authority,
+      tail: identity.tail,
+      textTail: identity.textTail,
+    });
   }
   return offenders;
 }
@@ -120,19 +151,28 @@ function replaceResolvedValue(text, from, to) {
 }
 
 function canonicalTarget(offender) {
-  const tail = offender.resolved.slice(
-    offender.resolved.indexOf('//') + 2 + offender.authority.length,
-  );
-  return `https://${CANONICAL_REGISTRY_HOST}${tail}`;
+  return `https://${CANONICAL_REGISTRY_HOST}${offender.textTail}`;
 }
 
 function fixableOffender(offender) {
+  // The rewrite re-attaches the text tail under a new authority. When the two
+  // readings of the tail disagree, part of the URL lives inside the authority
+  // being discarded, so refuse to guess and let the caller see it.
+  if (offender.tail !== offender.textTail) {
+    return false;
+  }
   // A canonical hostname on a non-default port is not a mirror leak — silently
   // re-routing it would hide whatever interception the port implies.
   if (offender.host === CANONICAL_REGISTRY_HOST) {
-    return offender.authority === CANONICAL_REGISTRY_HOST;
+    if (offender.authority !== CANONICAL_REGISTRY_HOST) {
+      return false;
+    }
+  } else if (!AUTO_FIXABLE_HOSTS.includes(offender.host)) {
+    return false;
   }
-  return AUTO_FIXABLE_HOSTS.includes(offender.host);
+  // A rewrite that lands back on the input is not a fix; report it instead of
+  // counting a no-op as repaired.
+  return canonicalTarget(offender) !== offender.resolved;
 }
 
 // Every differing leaf path must be a "resolved" value: this is what makes the
@@ -218,8 +258,8 @@ function main() {
     if (remaining.length > 0) {
       failures += 1;
       console.error(
-        `  ${remaining.length} offender(s) left, not auto-fixable (rewrite by hand only\n` +
-          '  after verifying each tarball against registry.npmjs.org metadata):',
+        `  ${remaining.length} offender(s) left, not auto-fixable:\n` +
+          '  rewrite by hand only after verifying each tarball against registry.npmjs.org metadata',
       );
       console.error(`    ${remaining.slice(0, 5).join('\n    ')}`);
     }
