@@ -1,6 +1,6 @@
 import { defineTool } from "@deepseek-ai/dsh-tools"
 import type { Context } from "@deepseek-ai/cordis"
-import { GATE_WHITELIST, buildCommand, resolveTarget } from "./command.js"
+import { GATE_WHITELIST, buildCommand, detectDialect, resolveTarget } from "./command.js"
 import { runXpGate } from "./gate-runner.js"
 
 export const name = "tool-xp-gate"
@@ -10,6 +10,9 @@ const DEFAULT_TIMEOUT_MS = 120_000
 
 export function apply(ctx: Context, _config: unknown = {}): void {
   const shell = ctx.shell
+  // DSH runs a POSIX shell off-Windows and PowerShell on Windows; generating the
+  // wrong dialect makes every tool fail to parse rather than degrade gracefully.
+  const dialect = detectDialect()
 
   ctx.tools.register(
     defineTool({
@@ -36,7 +39,7 @@ export function apply(ctx: Context, _config: unknown = {}): void {
       async execute(args, exec) {
         const cwd = exec.agent?.session?.header?.cwd ?? process.cwd()
         const target = resolveTarget(args.path, cwd)
-        const command = buildCommand({ subcommand: "check", target, gates: args.gates })
+        const command = buildCommand({ subcommand: "check", target, gates: args.gates, dialect })
         return runXpGate(shell, exec.signal, command, cwd, DEFAULT_TIMEOUT_MS)
       },
     }),
@@ -62,7 +65,7 @@ export function apply(ctx: Context, _config: unknown = {}): void {
       async execute(args, exec) {
         const cwd = exec.agent?.session?.header?.cwd ?? process.cwd()
         const target = resolveTarget(args.path, cwd)
-        const command = buildCommand({ subcommand: "principles", target })
+        const command = buildCommand({ subcommand: "principles", target, dialect })
         return runXpGate(shell, exec.signal, command, cwd, DEFAULT_TIMEOUT_MS)
       },
     }),
@@ -86,7 +89,7 @@ export function apply(ctx: Context, _config: unknown = {}): void {
       timeoutMs: DEFAULT_TIMEOUT_MS,
       async execute(args, exec) {
         const cwd = exec.agent?.session?.header?.cwd ?? process.cwd()
-        const command = buildCommand({ subcommand: "arch", config: args.config })
+        const command = buildCommand({ subcommand: "arch", config: args.config, dialect })
         return runXpGate(shell, exec.signal, command, cwd, DEFAULT_TIMEOUT_MS)
       },
     }),
