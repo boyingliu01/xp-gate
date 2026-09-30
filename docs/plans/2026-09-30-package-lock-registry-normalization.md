@@ -2,7 +2,8 @@
 
 > 分支: chore/package-lock-registry　日期: 2026-09-30　类型: 供应链卫生（非 bug 修复）
 > 触发: PR #422 合并后发现 `package-lock.json` 内 127/555 条 `resolved` 指向 `registry.npmmirror.com`
-> 本文经 Delphi code-walkthrough Round 1（3× REQUEST_CHANGES）与 Round 2（1× REQUEST_CHANGES + 2× PASS_WITH_CAVEATS）修订，修订映射见 §0
+> 本文经 Delphi code-walkthrough Round 1（3× REQUEST_CHANGES）、Round 2（1× REQUEST_CHANGES + 2× PASS_WITH_CAVEATS）
+> 与 Round 3（1× APPROVED + 2× PASS_WITH_CAVEATS，零 Critical/Major）修订，修订映射见 §0
 
 ---
 
@@ -22,6 +23,14 @@
 | R2 | A-MJ-1 | §4 以"必须新增编号 Gate、同步五处文档"否决本地拦截，前提不成立 | §4 更正：`githooks/gate-12-file-hygiene.sh` 为 warning-only 且已在 `*.json)` 分支遍历 staged 文件，落点确实存在；本 PR 仍不做，理由改记于 §4 |
 | R2 | C-N2 | 否决 `prepare` 归一化的理由是"隐藏副作用"，与实际惯例不符 | §5 更正为决定性理由：`prepare` 会让 CI 的 `npm ci` 先把工作区 lock 洗白，从而抹平 lock-only 提交唯一的实时拦截点 |
 | R2 | B-Minor | 代码与文档同 commit，违反 `docs/agents.md` 反模式 | 拆为 code commit + docs commit |
+| R3 | A-1 / B3-M2 | `normalizeFile` 与 CLI 的 exit-code 分支被导出却零测试，而 `scripts/*.cjs` 又逃在 Gate 1 lint 与覆盖率口径之外 → 原子写与非零退出没有第二张安全网 | 补 `normalizeFile` 落盘/幂等/无 `.tmp` 残留/`changed=0` 不动 mtime，以及 CLI 非零退出与"目标不是 lockfile"共 5 条测试（12 → 24） |
+| R3 | B3-M1 | 守护 fail-open：`http:` 明文、非默认端口、带凭据以及 `new URL` 解析失败的值被静默跳过，实际口径宽于 AGENTS.md/CHANGELOG 宣称的不变量 | 判净条件收紧为 `https:` + 裸 canonical 主机（无端口、无凭据）；解析失败值上报为 `unparseable` offender 而非跳过；明文 http 自动升级为 https，端口/凭据只上报不擅自改路由 |
+| R3 | B3-M4 | 固定 `.tmp` 名在并发/失败下留残留或二次 rename 抛错 | `${lockPath}.${pid}.tmp` + `try/finally` 强制清理 |
+| R3 | B3-M5 | legacy `dependencies` 分支缺 `meta` 守卫，null 条目以裸 TypeError 崩掉工具与守护 | 补守卫与畸形输入测试 |
+| R3 | B3-M3 / B3-M7 / B3-M8 | 按条目重复全文扫描、`approvedHosts` 形参与 `AUTO_FIXABLE_HOSTS` 导出无消费者、`JSON.parse(output)` 只证明"仍是合法 JSON"而不证明"只改了 resolved" | 唯一 URL 去重扫描；删除未用形参与死导出；新增 `assertOnlyResolvedChanged` 深比较，非 `resolved` 叶差异直接抛错 |
+| R3 | B3-M6 | `lockfileVersion === 3` 断言写在 `beforeAll`，npm 出新版本当日 12 条测试因无关原因集体变红 | 解耦为独立的"lock 形状可理解"断言，接受 v1/2/3 |
+| R3 | C3-2 / C3-3 / C3-4 | 回滚表述隐含 squash 合并前提；未记在途依赖分支的协调动作；归一化后 fresh `npm ci` 对官方 registry 的可达性依赖从 77% 升到 100% 而未记账 | §6 补回滚前提与合并后协调行；§5 补可达性残留条目 |
+| R3 | C3-1 | M7 的 `555/555` 无可重放入库工具，属口头数字 | 接受为残留：`integrity` 字段本身已使投喂不同字节变为 `EINTEGRITY` 硬失败（可发现、可回滚）。可重放工具 `scripts/verify-lock-integrity.cjs` 列为后续项 |
 
 ## 1. 问题
 
@@ -52,12 +61,16 @@
 
 | 措施 | 落点 | 依据 |
 |------|------|------|
-| host-only 定点重写（按 `resolved` 的 URL 值替换，`integrity`/`version`/格式/行序不动） | `scripts/normalize-lock-registry.cjs`（`npm run normalize-lock`） | M2/M3/M4：不需要官方 registry 也能修；M7 前置实测：输出与人工 host 替换逐字节一致，重跑 0 改写 |
+| 定点重写 `resolved` 的 scheme+authority（`integrity`/`version`/路径/格式/行序不动） | `scripts/normalize-lock-registry.cjs`（`npm run normalize-lock`） | M2/M3/M4：不需要官方 registry 也能修；M7 前置实测：输出与人工 host 替换逐字节一致，重跑 0 改写 |
+| 判净条件收紧为 `https:` + 裸 `registry.npmjs.org`（无端口、无凭据），解析失败值上报为 `unparseable` | `collectOffenders` / `isClean` | R3-B3-M1：守护的口径不能宽于 AGENTS.md/CHANGELOG 宣称的不变量，否则"绿"是虚假安全感 |
+| 明文 `http:` 自动升级为 https；canonical 主机上的端口/凭据**只上报不擅自改路由** | `fixableOffender` | canonical 主机带端口或凭据说明有东西在被路由，静默剥离等于把拦截点藏起来 |
+| 深比较断言"只有 `resolved` 叶发生变化"，否则抛错 | `assertOnlyResolvedChanged` | R3-B3-M8：把结构性巧合变成显式契约 |
+| 唯一 URL 去重扫描 + `${pid}.tmp` + `try/finally` 清理 + legacy 树 `meta` 守卫 | 同上 | R3-B3-M3/M4/M5 |
 | 检测与改写共用同一实现（`findRegistryOffenders`，JSON 语义 + `url.hostname` + 协议限定 + 兼容 legacy `dependencies` 树） | 同上 + `scripts/__tests__/package-lock-registry.test.cjs` | R2-A-CI-1 / B-Major-2：避免"守护判红、工具说没事"的双清单死角 |
 | 改写后自校验残留，残留非空即 exit 1；缺失文件 exit 1；写盘走 `.tmp` + `renameSync` | 同上 | R2-B-Major-4 |
 | 根 lock 归一化（127 → 0） | `package-lock.json` | 127 插入 / 127 删除，全部落在 `"resolved"` 行，非 resolved 行改动 0 |
-| `package-lock.json text eol=lf` | `.gitattributes` | 仓库原先只对 `.sh` 与 hook 文件强制 LF，`core.autocrlf=true` 的 Windows checkout 会拿到 CRLF lock |
-| 守护测试：`lockfileVersion` 断言、`>100` 规模哨兵、offender 附修复命令 | `scripts/__tests__/package-lock-registry.test.cjs` | M5：新增依赖即红灯且提示一键修复 |
+| `package-lock.json text eol=lf` | `.gitattributes` | 仓库原先只对 `.sh` 与 hook 文件强制 LF。本机实测 `core.autocrlf=input`（checkout 不会给出 CRLF lock），此条是为 `autocrlf=true` 的贡献者把不变量固定在仓库侧而非机器侧；改写本身已与行尾解耦，见 §0 R2 首行 |
+| 守护测试 24 条：纯函数（CRLF/紧凑排版/端口/凭据/legacy 树/共享 URL/幂等/解析失败）+ `normalizeFile` 落盘与 mtime 不变 + CLI 非零退出，另含 `lockfileVersion` 形状断言、`>100` 规模哨兵、offender 附修复命令 | `scripts/__tests__/package-lock-registry.test.cjs` | M5：新增依赖即红灯且提示一键修复 |
 | 移除 CI 安装兜底 `npm ci \|\| npm install` | `.github/workflows/cross-platform-ci.yml:69` | M6：`npm ci` 现为绿；兜底只会静默重装并重写工作区 lock |
 
 ## 4. 否决的替代方案
@@ -86,15 +99,34 @@
   本次沿用同目录既有编号（`REQ-010-04`）并在测试头显式声明 out-of-spec，属止损而非修复；
   根治需要把该族迁到独立前缀或正式登记进 `specification.yaml`，另开分支处理。
 - **`scripts/*.cjs` 不在 Gate 1 与覆盖率口径内**：`npm run lint` = `eslint src --ext .ts`，
-  `vitest.config.ts` 的 coverage `include` 为 `src/**`。新工具虽有 12 条单测，但不受 80% 阈值约束。
+  `vitest.config.ts` 的 coverage `include` 为 `src/**`。新工具虽有 24 条单测（纯函数 + `normalizeFile`
+  落盘 + CLI 退出码），但不受 80% 阈值约束，也不受 lint 约束。
+- **fresh `npm ci` 对官方 registry 的可达性依赖升高**（R3-C3-4）：清洗前 77% 的 tarball 走镜像、
+  清洗后 100% 走 `registry.npmjs.org`，而 M2 实测本机对该主机的可达性在一天内波动。
+  镜像-only 的受限网络机器上全新安装可能失败；处置是临时 `--registry` 覆盖，
+  **不得**让它写回 lock（一旦写回，守护会在下一次 CI 变红）。
+- **允许/可修白名单三处耦合**（R3-A2）：`CANONICAL_REGISTRY_HOST`、`AUTO_FIXABLE_HOSTS` 与
+  `isClean` 的判净条件共同决定"什么算干净"。将来引入私有或 vendored registry 需同时改这三处，
+  届时应从 npm 配置派生允许主机，而不是再加常量。本 PR 不做该抽象。
+- **M7 是单次 ad-hoc 实测，仓库内无可重放脚本**（R3-C3-1）：`checked=555 mismatch=0 missing=0`
+  这个数字后来者无法复跑。兜底事实是 `integrity` 字段本身已在 `npm ci` 期强制摘要校验，
+  所以 M7 若失实，后果是 win32/darwin 开发者本机 `EINTEGRITY` 硬失败（可发现、可回滚），
+  不是静默不安全。后续项：把逐条元数据比对固化为 `scripts/verify-lock-integrity.cjs`（需出网，
+  不可达时按本仓"工具缺失即 SKIP"惯例降级）。
 
 ## 6. 合入门槛与回滚
 
-- **integrity 等价性已由 M7 用官方元数据逐条证实**（555/555 摘要一致），因此 §6 不再把它写成"待 CI 证伪的假设"。
+- **integrity 等价性由 M7 用官方元数据逐条实测**（555/555 摘要一致，仓库内不可重放，见 §5 末条），
+  因此不再把它写成"待 CI 证伪的假设"。
   CI 侧仍以 `npm ci` 为安装路径回归门槛：`quality-gates.yml:133/:214/:674`、`security-audit.yml:29`、
-  `cross-platform-ci.yml:69`（Node 18/20/22 × ubuntu）。注意这些 job 只下载 linux-x64 子集，
+  `mutation-test.yml:31`、`cross-platform-ci.yml:69`（Node 18/20/22 × ubuntu）。注意这些 job 只下载 linux-x64 子集，
   平台门控二进制的字节一致性由 M7 的元数据比对覆盖，而非由 CI 覆盖。
 - `mutation-test.yml` 自 2026-07-21 起持续 45 分钟超时被取消，与本改动无关，**不计入绿证据**（独立跟进项）。
-- 回滚为单 commit revert，同时退回 lock、脚本与守护测试；若仍出现 `EINTEGRITY`，采整 PR revert 而非"只回滚单个 offender"
+- **回滚前提是squash/merge-commit 合并**（R3-C3-2）：此时单 commit revert 即同时退回 lock、脚本与守护测试。
+  若逐 commit 合并，只 revert `9bd0416` 会留下 `f3b93ed` 的 RED 守护测试使 CI 常红，
+  需按 `3437ab7..f3b93ed` 逆序全 revert。若仍出现 `EINTEGRITY`，采整 PR revert 而非"只回滚单个 offender"
   ——平台包摘要无法在本机与 CI 双证，逐条回滚的定位成本更高。
+- **合并后协调动作**（R3-C3-3）：任何在途且 touch lock 的开放分支（依赖 bump PR）会遇 lock 冲突；
+  以旧基线合并还会把镜像条目重新带回，届时守护在下一次 CI 变红。合并后通知这些分支
+  `rebase` 后重跑 `npm run normalize-lock` 再推送。
 - 首个 CI 周期 `hashFiles('package-lock.json')` 缓存失效，流水线时长会小幅上升（预期行为）。
