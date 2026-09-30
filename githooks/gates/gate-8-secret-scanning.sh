@@ -18,16 +18,34 @@ fi
 if [ -n "$GITLEAKS_CMD" ]; then
   GITLEAKS_CONFIG=""
   if [ -f ".gitleaks.toml" ]; then
-    GITLEAKS_CONFIG="--config=.gitleaks.toml"
+    # gitleaks is a native binary and may not understand MSYS paths, so pass an
+    # absolute path in the host's own format when we can derive one (#449).
+    if command -v cygpath >/dev/null 2>&1; then
+      GITLEAKS_CONFIG="--config=$(cygpath -w "$(pwd)/.gitleaks.toml")"
+    else
+      GITLEAKS_CONFIG="--config=$(pwd)/.gitleaks.toml"
+    fi
   fi
 
-  # Run gitleaks on staged changes only (pre-commit mode for speed)
-  GITLEAKS_OUTPUT=$($GITLEAKS_CMD git --pre-commit --redact --no-banner $GITLEAKS_CONFIG --report-format=json --report-path=/tmp/gitleaks-report.json 2>&1)
+  # Scan the INDEX, not history. gitleaks 8.x `git --pre-commit` walks committed
+  # revisions and reports "0 commits scanned" on a pre-commit run -- so a staged
+  # secret was never seen and Gate 8 always passed. `git --staged` scans
+  # `git diff --cached`, which is exactly the pre-commit payload (#449).
+  GITLEAKS_REPORT="${TMPDIR:-/tmp}/gitleaks-report.json"
+  GITLEAKS_OUTPUT=$($GITLEAKS_CMD git --staged --redact --no-banner $GITLEAKS_CONFIG --report-format=json --report-path="$GITLEAKS_REPORT" 2>&1)
   GITLEAKS_EXIT=$?
 
   if [ "$GITLEAKS_EXIT" -eq 0 ]; then
-    echo "     ✅ PASSED - No secrets detected."
-    GATE_8_STATUS="PASS"
+    # Guard against a silent void: if gitleaks scanned nothing there is no
+    # evidence the gate ran, so say so explicitly rather than claiming PASS.
+    if printf '%s' "$GITLEAKS_OUTPUT" | grep -qE '0 commits scanned' && \
+       printf '%s' "$GITLEAKS_OUTPUT" | grep -qE 'scanned ~0 bytes'; then
+      echo "     ⏭️  SKIPPED - gitleaks scanned no content (nothing staged)"
+      GATE_8_STATUS="SKIP"
+    else
+      echo "     ✅ PASSED - No secrets detected."
+      GATE_8_STATUS="PASS"
+    fi
   elif [ "$GITLEAKS_EXIT" -eq 1 ]; then
     # Secrets found — output details
     echo "$GITLEAKS_OUTPUT"
