@@ -564,12 +564,16 @@ describe('Boy Scout Rule Enforcement', () => {
 
     const BOY_SCOUT_PATH = path.resolve(__dirname, '../boy-scout.ts');
 
+    // Resolve the local tsx CLI once: spawning `npx tsx` per test re-resolves
+    // the package each call and needs shell:true on Windows; running the
+    // resolved CLI through process.execPath is far faster and shell-free.
+    const tsxCli = require.resolve('tsx/cli');
+
     function runCli(args: string[], cwd?: string): { code: number; stdout: string; stderr: string } {
       const coverageDir = process.env.NODE_V8_COVERAGE ?? path.join(process.cwd(), 'coverage', '.tmp');
-      const result = spawnSync('npx', ['tsx', BOY_SCOUT_PATH, ...args], {
+      const result = spawnSync(process.execPath, [tsxCli, BOY_SCOUT_PATH, ...args], {
         cwd: cwd ?? process.cwd(),
         encoding: 'utf-8',
-        shell: true,
         env: { ...process.env, NODE_V8_COVERAGE: coverageDir },
       });
       return {

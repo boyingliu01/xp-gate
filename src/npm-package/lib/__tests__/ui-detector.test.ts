@@ -372,13 +372,17 @@ describe('ui-detector', () => {
 
     const UI_DETECTOR_PATH = path.resolve(__dirname, '../ui-detector.ts');
 
+    // Resolve the local tsx CLI once: spawning `npx tsx` per test re-resolves
+    // the package each call and needs shell:true on Windows; running the
+    // resolved CLI through process.execPath is far faster and shell-free.
+    const tsxCli = require.resolve('tsx/cli');
+
     function runCli(args: string[], stdin?: string, cwd?: string): { code: number; stdout: string; stderr: string } {
       const coverageDir = process.env.NODE_V8_COVERAGE ?? path.join(process.cwd(), 'coverage', '.tmp');
-      const result = realSpawnSync('npx', ['tsx', UI_DETECTOR_PATH, ...args], {
+      const result = realSpawnSync(process.execPath, [tsxCli, UI_DETECTOR_PATH, ...args], {
         cwd: cwd ?? process.cwd(),
         encoding: 'utf-8',
         input: stdin,
-        shell: true, // Required for npx.cmd resolution on Windows
         env: { ...process.env, NODE_V8_COVERAGE: coverageDir },
       });
       return {

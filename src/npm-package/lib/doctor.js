@@ -42,6 +42,7 @@ function getPackageVersion() {
 const SIGNATURES = {
   'pre-commit': 'OpenCode Quality Gates - Pre-Commit Hook',
   'pre-push': 'Pre-push Hook — 8 gates:',
+  'post-merge': 'XP-Gate VERSION sync hook',
   'adapter-common.sh': 'detect_project_lang()'
 };
 
@@ -231,6 +232,7 @@ async function checkLocalHooks(checks) {
   const hooksDir = path.join(gitDir, 'hooks');
   issues += checkSingleHook(hooksDir, 'pre-commit', SIGNATURES['pre-commit'], 'Hooks', checks);
   issues += checkSingleHook(hooksDir, 'pre-push', SIGNATURES['pre-push'], 'Hooks', checks);
+  issues += checkSingleHook(hooksDir, 'post-merge', SIGNATURES['post-merge'], 'Hooks', checks);
   return issues;
 }
 
@@ -238,6 +240,7 @@ async function checkGlobalHooks(checks) {
   let issues = 0;
   issues += checkSingleHook(GLOBAL_HOOKS_DIR, 'pre-commit', SIGNATURES['pre-commit'], 'Global hooks', checks);
   issues += checkSingleHook(GLOBAL_HOOKS_DIR, 'pre-push', SIGNATURES['pre-push'], 'Global hooks', checks);
+  issues += checkSingleHook(GLOBAL_HOOKS_DIR, 'post-merge', SIGNATURES['post-merge'], 'Global hooks', checks);
 
   const hooksPath = await getCurrentHooksPath();
   if (hooksPath === null || hooksPath === '') {
@@ -665,8 +668,10 @@ function fixMissingHooks(mode, srcDir, hooksDir) {
   const label = mode === 'local' ? '' : 'global ';
   const preCommitLabel = `${label}pre-commit hook`;
   const prePushLabel = `${label}pre-push hook`;
+  const postMergeLabel = `${label}post-merge hook`;
   fixed = restoreHook(path.join(srcDir, 'hooks', 'pre-commit'), path.join(hooksDir, 'pre-commit'), preCommitLabel) || fixed;
   fixed = restoreHook(path.join(srcDir, 'hooks', 'pre-push'), path.join(hooksDir, 'pre-push'), prePushLabel) || fixed;
+  fixed = restoreHook(path.join(srcDir, 'hooks', 'post-merge'), path.join(hooksDir, 'post-merge'), postMergeLabel) || fixed;
   return fixed;
 }
 

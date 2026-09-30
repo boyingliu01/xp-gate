@@ -44,6 +44,7 @@ describe('updateHooks', () => {
 
     fs.writeFileSync(path.join(hooksDir, 'pre-commit'), overrides['hooks/pre-commit'] || '#!/bin/bash\necho "hook-v2"');
     fs.writeFileSync(path.join(hooksDir, 'pre-push'), overrides['hooks/pre-push'] || '#!/bin/bash\necho "push-v2"');
+    fs.writeFileSync(path.join(hooksDir, 'post-merge'), overrides['hooks/post-merge'] || '#!/bin/bash\necho "merge-v2"');
     fs.writeFileSync(path.join(hooksLibDir, 'now-ms.sh'), overrides['hooks/lib/now-ms.sh'] || 'now_ms() { echo 123; }');
     fs.writeFileSync(path.join(tmpPackage, 'adapter-common.sh'), overrides['adapter-common.sh'] || '#!/bin/bash\necho "adapter-common-v2"');
     fs.writeFileSync(path.join(adaptersDir, 'typescript.sh'), overrides['adapters/typescript.sh'] || '#!/bin/bash\necho "ts-v2"');
@@ -79,6 +80,17 @@ describe('updateHooks', () => {
 
       expect(fs.readFileSync(path.join(dest, 'pre-commit'), 'utf8')).toContain('hook-v2');
       expect(fs.readFileSync(path.join(dest, 'pre-push'), 'utf8')).toContain('push-v2');
+    });
+
+    it('copies post-merge to destination (VERSION sync hook)', () => {
+      createPackageSource();
+      const mod = getModule();
+      const dest = path.join(tmpProject, 'hooks-postmerge');
+      fs.mkdirSync(dest, { recursive: true });
+
+      mod.copyHooks(tmpPackage, dest, false, true);
+
+      expect(fs.readFileSync(path.join(dest, 'post-merge'), 'utf8')).toContain('merge-v2');
     });
 
     it('creates destination directory if it does not exist', () => {

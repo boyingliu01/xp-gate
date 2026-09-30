@@ -152,6 +152,26 @@ echo "Files changed: $FILES_CHANGED"
 echo "Lines: +$LINES_ADDED -$LINES_DELETED"
 echo ""
 
+# Run a TypeScript entrypoint under tsx without routing arguments through the
+# npx shim: Windows cmd.exe caps command lines at 8191 chars and long changed-file
+# lists overflow it, turning a healthy run into a false BLOCK. Prefer the
+# repo-local tsx CLI driven by node directly; keep npx as fallback for consumer
+# repos relying on a global install. RUN_TSX_TIMEOUT (e.g. "120s") wraps the
+# invocation in `timeout`.
+if ! declare -F run_tsx >/dev/null 2>&1; then
+  run_tsx() {
+    local _root="${PROJECT_ROOT:-$(pwd)}" _timeout=()
+    if [ -n "${RUN_TSX_TIMEOUT:-}" ]; then
+      _timeout=(timeout "$RUN_TSX_TIMEOUT")
+    fi
+    if [ -f "$_root/node_modules/tsx/dist/cli.mjs" ] && command -v node >/dev/null 2>&1; then
+      "${_timeout[@]}" node "$_root/node_modules/tsx/dist/cli.mjs" "$@"
+    else
+      "${_timeout[@]}" npx tsx "$@"
+    fi
+  }
+fi
+
 # ============================================================================
 # GATE S: SPRINT FLOW ENFORCEMENT
 # Validates sprint state consistency before push
@@ -210,7 +230,7 @@ if [[ -f "package.json" ]] && [[ -f "tsconfig.json" ]] && [[ -n "$TS_FILES" ]]; 
     done <<< "$TS_FILES"
 
     GATE_10_OUTPUT=$(mktemp)
-    if timeout 120s npx tsx "$GATE_10_SCRIPT" --changed-files "$GATE_10_FILE_LIST" --project-root "$PROJECT_ROOT" > "$GATE_10_OUTPUT" 2>&1; then
+    if RUN_TSX_TIMEOUT=120s run_tsx "$GATE_10_SCRIPT" --changed-files "$GATE_10_FILE_LIST" --project-root "$PROJECT_ROOT" > "$GATE_10_OUTPUT" 2>&1; then
       cat "$GATE_10_OUTPUT"
       GATE_10_STATUS="PASS"
       echo "✅ Gate 10: PASS"
@@ -298,7 +318,7 @@ else
       else
         # Run mutation gate with timeout matching stryker.conf.json (timeoutMS: 600000 = 10min)
         MUTATION_OUTPUT=$(mktemp)
-        timeout 600s npx tsx $MUTATION_SCRIPT --changed-files "$CHANGED_SOURCE_FILES" > "$MUTATION_OUTPUT" 2>&1
+        RUN_TSX_TIMEOUT=600s run_tsx $MUTATION_SCRIPT --changed-files "$CHANGED_SOURCE_FILES" > "$MUTATION_OUTPUT" 2>&1
         MUTATION_EXIT=$?
 
         case $MUTATION_EXIT in
@@ -361,7 +381,7 @@ else
   if detect_python_mutation_testable 2>/dev/null; then
     if [ -f "src/mutation/gate-m.ts" ]; then
       MUTATION_OUTPUT=$(mktemp)
-      timeout 120s npx tsx src/mutation/gate-m.ts --changed-files "$PYTHON_FILE_LIST" > "$MUTATION_OUTPUT" 2>&1
+      RUN_TSX_TIMEOUT=120s run_tsx src/mutation/gate-m.ts --changed-files "$PYTHON_FILE_LIST" > "$MUTATION_OUTPUT" 2>&1
       MUTATION_EXIT=$?
 
       case $MUTATION_EXIT in
@@ -430,7 +450,7 @@ else
       echo "⚠ Gate M script not found. SKIP — Gate M (Go)."
     else
       MUTATION_OUTPUT=$(mktemp)
-      timeout 120s npx tsx "$MUTATION_SCRIPT" --changed-files "$GO_FILE_LIST" --timeout-ms 120000 > "$MUTATION_OUTPUT" 2>&1
+      RUN_TSX_TIMEOUT=120s run_tsx "$MUTATION_SCRIPT" --changed-files "$GO_FILE_LIST" --timeout-ms 120000 > "$MUTATION_OUTPUT" 2>&1
       MUTATION_EXIT=$?
 
       case $MUTATION_EXIT in
@@ -500,7 +520,7 @@ else
       echo "⚠ Gate M script not found. SKIP — Gate M (Java)."
     else
       MUTATION_OUTPUT=$(mktemp)
-      timeout 600s npx tsx "$MUTATION_SCRIPT" --changed-files "$JAVA_FILE_LIST" --timeout-ms 600000 > "$MUTATION_OUTPUT" 2>&1
+      RUN_TSX_TIMEOUT=600s run_tsx "$MUTATION_SCRIPT" --changed-files "$JAVA_FILE_LIST" --timeout-ms 600000 > "$MUTATION_OUTPUT" 2>&1
       MUTATION_EXIT=$?
 
       case $MUTATION_EXIT in
@@ -570,7 +590,7 @@ else
       echo "⚠ Gate M script not found. SKIP — Gate M (Kotlin)."
     else
       MUTATION_OUTPUT=$(mktemp)
-      timeout 600s npx tsx "$MUTATION_SCRIPT" --changed-files "$KT_FILE_LIST" --timeout-ms 600000 > "$MUTATION_OUTPUT" 2>&1
+      RUN_TSX_TIMEOUT=600s run_tsx "$MUTATION_SCRIPT" --changed-files "$KT_FILE_LIST" --timeout-ms 600000 > "$MUTATION_OUTPUT" 2>&1
       MUTATION_EXIT=$?
 
       case $MUTATION_EXIT in
@@ -752,7 +772,7 @@ run_gate_m3() {
     [[ -n "$f" ]] && args+=("$f")
   done <<< "$test_files"
 
-  if npx tsx "$GATE_M3_SCRIPT" "${args[@]}"; then
+  if run_tsx "$GATE_M3_SCRIPT" "${args[@]}"; then
     echo "✅ Gate ML: PASS"
     return 0
   else
