@@ -15,3 +15,6 @@ plugins/claude-code/bin/xp-gate-check text eol=lf
 plugins/qoder/bin/xp-gate-check text eol=lf
 src/npm-package/plugins/claude-code/bin/xp-gate-check text eol=lf
 src/npm-package/plugins/qoder/bin/xp-gate-check text eol=lf
+
+# Root lockfile — registry guard matches "resolved" values textually
+package-lock.json text eol=lf
