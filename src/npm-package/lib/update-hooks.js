@@ -38,8 +38,8 @@ function getProjectHooksDir() {
 function detectLocalModifications(srcDir, hooksDestDir, adaptersDestDir) {
   const modified = [];
 
-  // Check hook files: pre-commit, pre-push
-  ['pre-commit', 'pre-push'].forEach(hook => {
+  // Check hook files: pre-commit, pre-push, post-merge
+  ['pre-commit', 'pre-push', 'post-merge'].forEach(hook => {
     const srcPath = path.join(srcDir, 'hooks', hook);
     const destPath = path.join(hooksDestDir, hook);
     if (fs.existsSync(destPath) && fs.existsSync(srcPath)) {
@@ -150,7 +150,7 @@ function atomicCopyFile(src, dest, dryRun, noBackup, label) {
 }
 
 /**
- * Copy hook files (pre-commit, pre-push) from package to destination.
+ * Copy hook files (pre-commit, pre-push, post-merge) from package to destination.
  * @param {string} srcDir - Package root directory
  * @param {string} destDir - Destination hooks directory
  * @param {boolean} dryRun
@@ -158,7 +158,7 @@ function atomicCopyFile(src, dest, dryRun, noBackup, label) {
  */
 function copyHooks(srcDir, destDir, dryRun, noBackup) {
   const hooksSrcDir = path.join(srcDir, 'hooks');
-  ['pre-commit', 'pre-push'].forEach(hook => {
+  ['pre-commit', 'pre-push', 'post-merge'].forEach(hook => {
     const src = path.join(hooksSrcDir, hook);
     const dest = path.join(destDir, hook);
     atomicCopyFile(src, dest, dryRun, noBackup, hook);

@@ -1,0 +1,100 @@
+#!/usr/bin/env bash
+#
+# post-merge — XP-Gate VERSION sync hook
+#
+# Detects whether VERSION changed during a merge (via ORIG_HEAD comparison)
+# and, if so, runs scripts/sync-version.cjs (cross-platform Node — preferred)
+# or falls back to scripts/sync-version.sh (legacy, kept for compatibility).
+#
+# Safety features:
+#   - Guard file (.xp-gate/.version-synced) prevents infinite loops
+#   - Runtime check (node/bash) before running the sync script
+#   - [skip ci] in auto-commit message to prevent recursive CI triggers
+#   - ORIG_HEAD fallback: if ORIG_HEAD is missing (shallow clone / first commit),
+#     the check is skipped with a warning.
+#
+set -e
+
+PROJECT_ROOT="$(git rev-parse --show-toplevel 2>/dev/null || echo '')"
+if [[ -z "$PROJECT_ROOT" ]]; then
+  # not a git repo — silently exit
+  exit 0
+fi
+
+GUARD_FILE="$PROJECT_ROOT/.xp-gate/.version-synced"
+
+# ── Guard: skip if already synced for this commit ──
+CURRENT_HEAD="$(git rev-parse HEAD 2>/dev/null || echo '')"
+if [[ -f "$GUARD_FILE" ]]; then
+  read -r GUARD_HASH < "$GUARD_FILE" 2>/dev/null || true
+  if [[ "$GUARD_HASH" == "$CURRENT_HEAD" ]]; then
+    # already synced for this commit — skip
+    exit 0
+  fi
+fi
+
+# ── Only proceed if this is an xp-gate project ──
+SYNC_CJS="$PROJECT_ROOT/scripts/sync-version.cjs"
+SYNC_SH="$PROJECT_ROOT/scripts/sync-version.sh"
+if [[ ! -f "$SYNC_CJS" && ! -f "$SYNC_SH" ]]; then
+  exit 0
+fi
+
+# ── ORIG_HEAD check: detect VERSION change during merge ──
+ORIG_HEAD="$(git rev-parse ORIG_HEAD 2>/dev/null || echo '')"
+if [[ -z "$ORIG_HEAD" ]]; then
+  # ORIG_HEAD not available (shallow clone, first commit, or non-merge operation)
+  exit 0
+fi
+
+VERSION_CHANGED=false
+if git diff-tree --name-only -r "$ORIG_HEAD" HEAD 2>/dev/null | grep -q '^VERSION$'; then
+  VERSION_CHANGED=true
+fi
+
+if [[ "$VERSION_CHANGED" != "true" ]]; then
+  # VERSION not changed — zero overhead
+  exit 0
+fi
+
+# ── Run sync-version — .cjs preferred (cross-platform, covers more targets) ──
+SYNC_OK=false
+
+if [[ -f "$SYNC_CJS" ]] && command -v node &>/dev/null; then
+  echo "[xp-gate] VERSION changed in merge — running sync-version.cjs..."
+  if node "$SYNC_CJS"; then
+    SYNC_OK=true
+  else
+    echo "[xp-gate] Warning: sync-version.cjs failed — VERSION files may be out of sync." >&2
+  fi
+elif [[ -f "$SYNC_SH" ]]; then
+  # Legacy fallback — the .sh implementation is Unix-only (MSYS path bug on Windows)
+  if ! command -v bash &>/dev/null; then
+    echo "[xp-gate] Warning: bash not found — cannot run sync-version.sh" >&2
+    exit 0
+  fi
+  echo "[xp-gate] VERSION changed in merge — running sync-version.sh (fallback)..."
+  if bash "$SYNC_SH"; then
+    SYNC_OK=true
+  else
+    echo "[xp-gate] Warning: sync-version.sh failed — VERSION files may be out of sync." >&2
+  fi
+else
+  echo "[xp-gate] Warning: node not found — cannot run sync-version.cjs" >&2
+fi
+
+if [[ "$SYNC_OK" == "true" ]]; then
+  # record guard
+  mkdir -p "$(dirname "$GUARD_FILE")"
+  echo "$CURRENT_HEAD" > "$GUARD_FILE"
+  echo "[xp-gate] VERSION synced. Affected files:"
+  echo "  - VERSION"
+  echo "  - package.json (+ src/npm-package/package.json)"
+  echo "  - plugins/{claude-code,opencode,qoder,dsh} manifests"
+  echo "  - src/npm-package/plugins/** mirrors"
+  echo "  - AGENTS.md headers (date/commit/branch/version)"
+  echo "[skip ci]"
+  echo "Run 'git add' and 'git commit' to commit these changes."
+fi
+
+exit 0

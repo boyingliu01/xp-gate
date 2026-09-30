@@ -130,6 +130,14 @@ describe('doctor', () => {
     );
   }
 
+  function createXpGatePostMerge(dir) {
+    fs.mkdirSync(dir, { recursive: true });
+    fs.writeFileSync(
+      path.join(dir, 'post-merge'),
+      '#!/usr/bin/env bash\n# post-merge - XP-Gate VERSION sync hook\n'
+    );
+  }
+
   function createXpGateAdapterCommon(dir) {
     fs.mkdirSync(dir, { recursive: true });
     fs.writeFileSync(
@@ -166,6 +174,7 @@ describe('doctor', () => {
   function setupLocalInstall() {
     createXpGatePreCommit(projectHooksDir());
     createXpGatePrePush(projectHooksDir());
+    createXpGatePostMerge(projectHooksDir());
     createXpGateAdapterCommon(projectGithooksDir());
     createXpGateAdapterScripts(projectGithooksDir());
 
@@ -182,6 +191,7 @@ describe('doctor', () => {
   function setupGlobalInstall() {
     createXpGatePreCommit(globalHooksDir());
     createXpGatePrePush(globalHooksDir());
+    createXpGatePostMerge(globalHooksDir());
     createXpGateAdapterCommon(globalAdaptersDir());
     // For global mode, create adapters directly in globalAdaptersDir (not in a subdirectory)
     fs.mkdirSync(globalAdaptersDir(), { recursive: true });
@@ -337,6 +347,21 @@ describe('doctor', () => {
     );
   });
 
+  it('AC-08: doctor detects a missing post-merge hook', async () => {
+    setupLocalInstall();
+    seedVersionCache();
+    fs.unlinkSync(path.join(projectHooksDir(), 'post-merge'));
+    mockExecSuccess();
+    const { doctor } = require('../doctor');
+
+    const result = await doctor([]);
+
+    expect(result).toBe(1);
+    expect(logSpy).toHaveBeenCalledWith(
+      expect.stringContaining('post-merge')
+    );
+  });
+
   it('AC-08: doctor detects missing config file', async () => {
     // No config at all
     const { doctor } = require('../doctor');
@@ -461,6 +486,19 @@ describe('doctor', () => {
     expect(result).toBe(0);
     expect(fs.existsSync(path.join(projectHooksDir(), 'pre-commit'))).toBe(true);
     expect(fs.existsSync(path.join(projectHooksDir(), 'pre-push'))).toBe(true);
+  });
+
+  it('AC-10: doctor --fix restores a missing post-merge hook', async () => {
+    setupLocalInstall();
+    seedVersionCache();
+    fs.unlinkSync(path.join(projectHooksDir(), 'post-merge'));
+    mockExecSuccess();
+    const { doctor } = require('../doctor');
+
+    const result = await doctor(['--fix']);
+
+    expect(result).toBe(0);
+    expect(fs.existsSync(path.join(projectHooksDir(), 'post-merge'))).toBe(true);
   });
 
   it('AC-10: doctor --fix reinstall adapters when mode is active and adapters missing', async () => {
