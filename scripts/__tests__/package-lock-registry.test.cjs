@@ -1,6 +1,6 @@
 /**
  * @test REQ-010-04 dependency lockfile registry pinning
- * @intent Verify the committed root lockfile carries no mirror registry host, and that the offline repair tool rewrites hosts only
+ * @intent Verify the committed root lockfile resolves every tarball over https from the canonical registry, and that the offline repair tool rewrites resolved sources only
  * @covers AC-010-04
  *
  * Scope: root package-lock.json only. src/npm-package ships zero dependencies,
@@ -11,14 +11,18 @@
  */
 
 const fs = require('node:fs');
+const os = require('node:os');
 const path = require('node:path');
+const { execFileSync } = require('node:child_process');
 const {
   normalizeLockRegistry,
+  normalizeFile,
   findRegistryOffenders,
   CANONICAL_REGISTRY_HOST,
 } = require('../normalize-lock-registry.cjs');
 
 const LOCK_PATH = path.resolve(__dirname, '../../package-lock.json');
+const TOOL_PATH = path.resolve(__dirname, '../normalize-lock-registry.cjs');
 
 function offenderLines(text) {
   return findRegistryOffenders(text).map((o) => `${o.name} -> ${o.host}`);
@@ -26,6 +30,7 @@ function offenderLines(text) {
 
 describe('root package-lock registry pinning', () => {
   let lockText;
+  let lockfileVersion;
   let resolvedCount;
 
   beforeAll(() => {
@@ -40,9 +45,16 @@ describe('root package-lock registry pinning', () => {
     } catch (error) {
       throw new Error(`cannot parse ${LOCK_PATH}: ${error.message}`);
     }
-    // Fail loudly if npm changes the lock shape the guard and the tool rely on.
-    expect(lock.lockfileVersion).toBe(3);
-    resolvedCount = Object.values(lock.packages || {}).filter((meta) => meta.resolved).length;
+    lockfileVersion = lock.lockfileVersion;
+    resolvedCount = Object.values(lock.packages || {}).filter(
+      (meta) => meta && meta.resolved,
+    ).length;
+  });
+
+  // Decoupled on purpose: a future lockfileVersion must not turn every registry
+  // guard red for a reason unrelated to the invariant it protects.
+  it('is a lock shape the guard and the tool understand', () => {
+    expect([1, 2, 3]).toContain(lockfileVersion);
   });
 
   it('inspects a non-trivial set of resolved tarballs', () => {
@@ -56,7 +68,7 @@ describe('root package-lock registry pinning', () => {
       throw new Error(
         `${offenders.length} resolved entries outside ${CANONICAL_REGISTRY_HOST}:\n` +
           `  ${offenders.slice(0, 5).join('\n  ')}\n` +
-          'Fix: npm run normalize-lock (host-only rewrite, offline-safe)',
+          'Fix: npm run normalize-lock (rewrites resolved sources only, offline-safe)',
       );
     }
     expect(offenders).toEqual([]);
@@ -159,6 +171,13 @@ describe('normalizeLockRegistry', () => {
     expect(offenderLines(result.text)).toEqual([]);
   });
 
+  it('survives a malformed legacy tree entry instead of crashing', () => {
+    const malformed = '{"lockfileVersion":1,"dependencies":{"a":null,"b":{"dependencies":null}}}\n';
+
+    expect(offenderLines(malformed)).toEqual([]);
+    expect(normalizeLockRegistry(malformed).changed).toBe(0);
+  });
+
   it('leaves hosts it cannot vouch for in place and reports them', () => {
     const result = normalizeLockRegistry(
       lockWith('https://mirror.example.com/pkg/-/pkg-1.0.0.tgz'),
@@ -169,11 +188,10 @@ describe('normalizeLockRegistry', () => {
     expect(result.text).toContain('https://mirror.example.com/pkg/-/pkg-1.0.0.tgz');
   });
 
-  it('ignores non-registry sources and canonical hosts carrying a port', () => {
+  it('ignores non-registry sources', () => {
     for (const url of [
       'git+ssh://git@github.com/acme/pkg.git#v1.0.0',
       'file:../local/pkg',
-      'https://registry.npmjs.org:443/pkg/-/pkg-1.0.0.tgz',
     ]) {
       const input = lockWith(url);
       const result = normalizeLockRegistry(input);
@@ -182,6 +200,66 @@ describe('normalizeLockRegistry', () => {
       expect(result.remaining).toEqual([]);
       expect(result.text).toBe(input);
     }
+  });
+
+  // A canonical hostname reached over http is not the canonical endpoint;
+  // accepting it would make the guard weaker than the invariant AGENTS.md and
+  // the CHANGELOG claim.
+  it('upgrades a canonical host reached over http', () => {
+    const url = 'http://registry.npmjs.org/pkg/-/pkg-1.0.0.tgz';
+
+    expect(offenderLines(lockWith(url))).toEqual(['node_modules/pkg -> registry.npmjs.org']);
+
+    const result = normalizeLockRegistry(lockWith(url));
+    expect(result.changed).toBe(1);
+    expect(result.text).toContain(canonicalUrl);
+    expect(result.remaining).toEqual([]);
+  });
+
+  // Credentials or a non-default port on the canonical hostname mean something
+  // is being routed there; stripping them silently would hide the interception.
+  it('reports canonical-host entries it must not re-route by itself', () => {
+    for (const url of [
+      'https://token@registry.npmjs.org/pkg/-/pkg-1.0.0.tgz',
+      'https://registry.npmjs.org:8080/pkg/-/pkg-1.0.0.tgz',
+    ]) {
+      const result = normalizeLockRegistry(lockWith(url));
+
+      expect(result.changed).toBe(0);
+      expect(result.remaining).toEqual(['node_modules/pkg -> registry.npmjs.org']);
+    }
+  });
+
+  it('treats an explicit default port as the canonical endpoint', () => {
+    expect(
+      offenderLines(lockWith('https://registry.npmjs.org:443/pkg/-/pkg-1.0.0.tgz')),
+    ).toEqual([]);
+  });
+
+  it('reports a resolved value it cannot parse instead of skipping it', () => {
+    const offenders = offenderLines(lockWith('registry.npmmirror.com/pkg/-/pkg-1.0.0.tgz'));
+
+    expect(offenders).toEqual(['node_modules/pkg -> unparseable']);
+    expect(normalizeLockRegistry(lockWith('registry.npmmirror.com/pkg/-/pkg-1.0.0.tgz')).changed).toBe(0);
+  });
+
+  it('rewrites only the resolved key, never a value that merely looks like one', () => {
+    const input = `${JSON.stringify({
+      lockfileVersion: 3,
+      packages: {
+        'node_modules/pkg': {
+          version: '1.0.0',
+          resolved: mirrorUrl,
+          funding: mirrorUrl,
+          unresolved: mirrorUrl,
+        },
+      },
+    })}\n`;
+    const result = normalizeLockRegistry(input);
+
+    expect(result.changed).toBe(1);
+    const occurrences = result.text.split(mirrorUrl).length - 1;
+    expect(occurrences).toBe(2);
   });
 
   it('is idempotent', () => {
@@ -196,3 +274,105 @@ describe('normalizeLockRegistry', () => {
     expect(() => normalizeLockRegistry('{"lockfileVersion": 3, "packages":')).toThrow();
   });
 });
+
+describe('normalizeFile', () => {
+  let dir;
+  const mirrorUrl = 'https://registry.npmmirror.com/pkg/-/pkg-1.0.0.tgz';
+
+  function writeLock(name, resolved) {
+    const lockPath = path.join(dir, name);
+    fs.writeFileSync(
+      lockPath,
+      `${JSON.stringify(
+        { lockfileVersion: 3, packages: { 'node_modules/pkg': { resolved, integrity: 'sha512-abc=' } } },
+        null,
+        2,
+      )}\n`,
+    );
+    return lockPath;
+  }
+
+  beforeEach(() => {
+    dir = fs.mkdtempSync(path.join(os.tmpdir(), 'xp-lock-'));
+  });
+
+  afterEach(() => {
+    fs.rmSync(dir, { recursive: true, force: true });
+  });
+
+  it('lands the rewrite on disk and leaves no temp file behind', () => {
+    const lockPath = writeLock('package-lock.json', mirrorUrl);
+    const result = normalizeFile(lockPath);
+
+    expect(result.changed).toBe(1);
+    expect(fs.readFileSync(lockPath, 'utf8')).toContain('registry.npmjs.org');
+    expect(fs.readdirSync(dir)).toEqual(['package-lock.json']);
+    expect(normalizeFile(lockPath).changed).toBe(0);
+  });
+
+  it('does not touch a lock that has nothing to rewrite', () => {
+    const lockPath = writeLock('package-lock.json', 'https://registry.npmjs.org/pkg/-/pkg-1.0.0.tgz');
+    const before = fs.statSync(lockPath);
+
+    expect(normalizeFile(lockPath).changed).toBe(0);
+    expect(fs.readdirSync(dir)).toEqual(['package-lock.json']);
+    expect(fs.statSync(lockPath).mtimeMs).toBe(before.mtimeMs);
+  });
+
+  it('keeps an unfixable offender visible to the caller instead of washing it', () => {
+    const lockPath = writeLock('package-lock.json', 'https://mirror.example.com/pkg/-/pkg-1.0.0.tgz');
+    const result = normalizeFile(lockPath);
+
+    expect(result.changed).toBe(0);
+    expect(result.remaining).toEqual(['node_modules/pkg -> mirror.example.com']);
+    expect(fs.readFileSync(lockPath, 'utf8')).toContain('mirror.example.com');
+  });
+});
+
+describe('normalize-lock CLI', () => {
+  let dir;
+  const mirrorUrl = 'https://registry.npmmirror.com/pkg/-/pkg-1.0.0.tgz';
+
+  function run(...args) {
+    return execFileSync(process.execPath, [TOOL_PATH, ...args], { encoding: 'utf8' });
+  }
+
+  // Node reports a non-zero child differently per platform, so read the status.
+  function status(...args) {
+    try {
+      run(...args);
+    } catch (error) {
+      return error.status;
+    }
+    return 0;
+  }
+
+  beforeEach(() => {
+    dir = fs.mkdtempSync(path.join(os.tmpdir(), 'xp-lock-cli-'));
+  });
+
+  afterEach(() => {
+    fs.rmSync(dir, { recursive: true, force: true });
+  });
+
+  it('exits non-zero when an offender it cannot vouch for survives', () => {
+    const lockPath = path.join(dir, 'package-lock.json');
+    fs.writeFileSync(lockPath, `{"packages":{"a":{"resolved":"${mirrorUrl}"}}}\n`);
+    fs.writeFileSync(
+      path.join(dir, 'other.json'),
+      '{"packages":{"a":{"resolved":"https://mirror.example.com/a/-/a-1.tgz"}}}\n',
+    );
+
+    expect(run(lockPath)).toContain('1 resolved source(s) rewritten');
+    expect(fs.readFileSync(lockPath, 'utf8')).toContain(
+      'https://registry.npmjs.org/pkg/-/pkg-1.0.0.tgz',
+    );
+    expect(status(path.join(dir, 'other.json'))).toBe(1);
+  });
+
+  it('exits non-zero for a target that is not a lockfile', () => {
+    expect(status(path.join(dir, 'absent.json'))).toBe(1);
+    expect(status(dir)).toBe(1);
+  });
+});
+
