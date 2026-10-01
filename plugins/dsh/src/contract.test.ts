@@ -51,12 +51,42 @@ describe("packaging contract", () => {
    * @covers AC-DSH-008-01
    */
   it("every test file carries @test/@intent/@covers annotations", () => {
-    const files = ["command.test.ts", "gate-runner.test.ts", "index.test.ts", "skills.test.ts"]
+    const files = [
+      "command.test.ts",
+      "gate-runner.test.ts",
+      "index.test.ts",
+      "skills.test.ts",
+      "dialect.test.ts",
+      "delphi.test.ts",
+      "delphi-config.test.ts",
+      "delphi-run.test.ts",
+    ]
     for (const f of files) {
       const content = readFileSync(join(PKG_ROOT, "src", f), "utf8")
       expect(content, `${f}: @test`).toMatch(/@test\s+REQ-\S+/)
       expect(content, `${f}: @intent`).toMatch(/@intent\s+/)
       expect(content, `${f}: @covers`).toMatch(/@covers\s+AC-\S+/)
     }
+  })
+
+  /**
+   * @test REQ-DSH-016
+   * @intent 验证多模型交叉评审已在 DSH 中固化：插件注册 delphi-review 工具，
+   *         且实现强制三条 Delphi 不变量（3 位专家、模型两两不同、90% 阈值）。
+   * @covers AC-DSH-016-01
+   */
+  it("registers the delphi-review tool and enforces Delphi invariants", () => {
+    const entry = readFileSync(join(PKG_ROOT, "src", "index.ts"), "utf8")
+    expect(entry).toContain('name: "delphi-review"')
+    expect(entry).toContain("loadDelphiConfig")
+    expect(entry).toContain("runReview")
+
+    // The invariants must live in code, not only in prose.
+    const core = readFileSync(join(PKG_ROOT, "src", "delphi.ts"), "utf8")
+    expect(core).toMatch(/REQUIRED_EXPERTS\s*=\s*3/)
+    expect(core).toMatch(/DEFAULT_THRESHOLD_PERCENT\s*=\s*90/)
+    expect(core).toMatch(/distinct/)
+    // A report with no explicit verdict must not be counted toward consensus.
+    expect(core).toContain("INVALID_NO_VERDICT")
   })
 })
