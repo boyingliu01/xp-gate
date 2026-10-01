@@ -258,9 +258,12 @@ async function autoInitBaseline(
 
 async function runInitBaselineCommand(parsed: Record<string, unknown>): Promise<number> {
   try {
-    await initBaselineCommand((parsed.files ?? []) as string[]);
-    console.log('Baseline initialized successfully');
-    return 0;
+    // Honor --baseline; the old code hardcoded the default path (#445).
+    const baselinePath = (parsed.baselinePath as string) || '.warnings-baseline.json';
+    const result = await initBaselineCommand((parsed.files ?? []) as string[], baselinePath);
+    // Use the explicit result, never process.exitCode: global exit state can be
+    // set by unrelated code and would misreport this command's outcome.
+    return result.ok ? 0 : 1;
   } catch (error: unknown) {
     console.error('Error initializing baseline:', error);
     return 1;
@@ -344,9 +347,48 @@ Examples:
 `);
 }
 
-async function initBaselineCommand(files: string[]): Promise<void> {
-  const baseline = await initBaseline(files);
-  await saveBaseline('.warnings-baseline.json', baseline);
+/**
+ * Initialize/extend the warning baseline for the given files.
+ *
+ * MERGE semantics: entries already present in `baselinePath` that are not part of
+ * `files` are preserved. The previous implementation wrote a freshly built object
+ * containing only `files`, which silently destroyed every unrelated entry (#445),
+ * and it hardcoded `.warnings-baseline.json`, ignoring `--baseline`.
+ */
+async function initBaselineCommand(
+  files: string[],
+  baselinePath = '.warnings-baseline.json',
+): Promise<{ ok: boolean; reason?: string }> {
+  const existing = await loadBaseline(baselinePath);
+  const existingKeys = Object.keys(existing);
+
+  const analyzed = await initBaseline(files);
+
+  // Preserve anything already tracked; only add/refresh entries for `files`.
+  const merged: Record<string, BaselineEntry> = { ...existing };
+  const added: string[] = [];
+  const refreshed: string[] = [];
+  for (const [file, entry] of Object.entries(analyzed)) {
+    if (existing[file]) {
+      refreshed.push(file);
+    } else {
+      added.push(file);
+    }
+    merged[file] = entry;
+  }
+
+  // `merged` starts as a copy of `existing`, so a non-empty baseline can never
+  // become empty here -- the destructive overwrite fixed in #445 is structurally
+  // impossible now. No guard is needed; failure is reported via the return value
+  // rather than by mutating process.exitCode.
+  await saveBaseline(baselinePath, merged);
+
+  const preserved = existingKeys.filter(k => !(k in analyzed));
+  console.log(`ℹ️  Baseline updated: ${baselinePath}`);
+  console.log(`   added:    ${added.length > 0 ? added.join(', ') : '(none)'}`);
+  console.log(`   refreshed:${refreshed.length > 0 ? ` ${refreshed.join(', ')}` : ' (none)'}`);
+  console.log(`   preserved:${preserved.length > 0 ? ` ${preserved.join(', ')}` : ' (none)'}`);
+  return { ok: true };
 }
 
 async function runEnforcement(newFiles: string[], modifiedFiles: string[], baselinePath: string): Promise<EnforcementResult> {

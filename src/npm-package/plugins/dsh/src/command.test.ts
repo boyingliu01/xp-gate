@@ -1,4 +1,5 @@
 import { describe, it, expect } from "vitest"
+import { resolve } from "node:path"
 import {
   FALLBACK_MESSAGE,
   GATE_WHITELIST,
@@ -89,7 +90,13 @@ describe("resolveTarget", () => {
   })
 
   it("resolves relative paths against the session cwd", () => {
-    expect(resolveTarget("src", "/workspace")).toBe("/workspace/src")
+    // path.resolve is platform-native, so assert against the same call rather
+    // than a POSIX literal (which fails on Windows by construction).
+    expect(resolveTarget("src", "/workspace")).toBe(resolve("/workspace", "src"))
+  })
+
+  it("resolves a Windows-relative path against a Windows cwd", () => {
+    expect(resolveTarget("src", "C:\\workspace")).toBe(resolve("C:\\workspace", "src"))
   })
 })
 
@@ -98,5 +105,62 @@ describe("GATE_WHITELIST", () => {
     expect(GATE_WHITELIST).toContain("principles")
     expect(GATE_WHITELIST).toContain("arch")
     expect(GATE_WHITELIST).toContain("secrets")
+  })
+})
+
+/**
+ * @test REQ-DSH-010
+ * @intent 验证 PowerShell 方言下生成的命令使用 Get-Command/Write-Output 而非 POSIX 的
+ *         command -v/printf，避免 DSH 在 win32（pwsh executor）下因语法错误导致三个工具全部不可用
+ * @covers AC-DSH-010-01
+ */
+describe("PowerShell dialect (regression: DSH win32 uses the pwsh executor)", () => {
+  it("uses Get-Command instead of command -v", () => {
+    const cmd = buildCommand({ subcommand: "principles", target: "src/x.ts", dialect: "powershell" })
+    expect(cmd).toContain("Get-Command xp-gate -ErrorAction SilentlyContinue")
+    expect(cmd).not.toContain("command -v")
+  })
+
+  it("uses Write-Output instead of printf for the fallback hint", () => {
+    const cmd = buildCommand({ subcommand: "check", target: "src", dialect: "powershell" })
+    expect(cmd).toContain("Write-Output")
+    expect(cmd).not.toContain("printf")
+    expect(cmd).toContain(FALLBACK_MESSAGE)
+  })
+
+  it("never emits POSIX shell syntax that PowerShell cannot parse", () => {
+    const cmd = buildCommand({ subcommand: "check", target: "src", gates: ["principles"], dialect: "powershell" })
+    // `/dev/null` and `; then … ; fi` are the constructs that produced
+    // "if语句中的'if'后缺少\"(\"" under the pwsh executor.
+    expect(cmd).not.toContain("/dev/null")
+    expect(cmd).not.toContain("then ")
+    expect(cmd).not.toContain("; fi")
+    expect(cmd).not.toContain("2>&1")
+  })
+
+  it("preserves the xp-gate invocation and gate subset", () => {
+    const cmd = buildCommand({
+      subcommand: "check",
+      target: "src",
+      gates: ["principles", "arch"],
+      dialect: "powershell",
+    })
+    expect(cmd).toContain("xp-gate check 'src' --gates 'principles,arch'")
+  })
+
+  it("still drops non-whitelisted gates", () => {
+    const cmd = buildCommand({
+      subcommand: "check",
+      target: "src",
+      gates: ["principles", "bogus$(id)"],
+      dialect: "powershell",
+    })
+    expect(cmd).toContain("--gates 'principles'")
+    expect(cmd).not.toContain("bogus")
+  })
+
+  it("defaults to the POSIX dialect when none is given (backwards compatible)", () => {
+    const cmd = buildCommand({ subcommand: "arch" })
+    expect(cmd).toContain("command -v xp-gate")
   })
 })

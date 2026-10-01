@@ -2505,9 +2505,19 @@ else
   if [ -n "$BOY_SCOUT_SCRIPT" ]; then
     echo "     Checking Boy Scout Rule compliance..."
     
-    # Separate new files and modified files
-    NEW_FILES=$(git diff --cached --name-only --diff-filter=A | tr '\n' ' ')
-    MODIFIED_FILES=$(git diff --cached --name-only --diff-filter=M | tr '\n' ' ') 
+    # Separate new files and modified files.
+    #
+    # src/npm-package/** is a byte-identical MIRROR of canonical sources
+    # (plugins/**, src/principles/**, githooks/**) produced by
+    # sync-package-content.js at publish time. Checking it here double-counts
+    # every warning: the mirror path enters the baseline instead of the source
+    # path, so a violation gets recorded against a path nobody edits and the
+    # real source path stays unbudgeted. Exclude it and let the mirroring be
+    # governed by Mirror Parity in CI, which compares content rather than
+    # re-linting it. (See the same exclusion in adapters/powershell.sh.)
+    MIRROR_EXCLUDE='^src/npm-package/'
+    NEW_FILES=$(git diff --cached --name-only --diff-filter=A | grep -v "$MIRROR_EXCLUDE" | tr '\n' ' ')
+    MODIFIED_FILES=$(git diff --cached --name-only --diff-filter=M | grep -v "$MIRROR_EXCLUDE" | tr '\n' ' ')
     
     if [ -z "$NEW_FILES" ] && [ -z "$MODIFIED_FILES" ]; then
       echo "     ✅ No new or modified files to check."
