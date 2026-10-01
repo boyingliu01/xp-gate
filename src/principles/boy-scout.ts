@@ -260,8 +260,10 @@ async function runInitBaselineCommand(parsed: Record<string, unknown>): Promise<
   try {
     // Honor --baseline; the old code hardcoded the default path (#445).
     const baselinePath = (parsed.baselinePath as string) || '.warnings-baseline.json';
-    await initBaselineCommand((parsed.files ?? []) as string[], baselinePath);
-    return process.exitCode === 1 ? 1 : 0;
+    const result = await initBaselineCommand((parsed.files ?? []) as string[], baselinePath);
+    // Use the explicit result, never process.exitCode: global exit state can be
+    // set by unrelated code and would misreport this command's outcome.
+    return result.ok ? 0 : 1;
   } catch (error: unknown) {
     console.error('Error initializing baseline:', error);
     return 1;
@@ -353,7 +355,10 @@ Examples:
  * containing only `files`, which silently destroyed every unrelated entry (#445),
  * and it hardcoded `.warnings-baseline.json`, ignoring `--baseline`.
  */
-async function initBaselineCommand(files: string[], baselinePath = '.warnings-baseline.json'): Promise<void> {
+async function initBaselineCommand(
+  files: string[],
+  baselinePath = '.warnings-baseline.json',
+): Promise<{ ok: boolean; reason?: string }> {
   const existing = await loadBaseline(baselinePath);
   const existingKeys = Object.keys(existing);
 
@@ -372,14 +377,10 @@ async function initBaselineCommand(files: string[], baselinePath = '.warnings-ba
     merged[file] = entry;
   }
 
-  // Refuse to persist an empty baseline over a non-empty one: that is the
-  // destructive case this command used to hit when analysis found no warnings.
-  if (Object.keys(merged).length === 0 && existingKeys.length > 0) {
-    console.error('❌ Refusing to overwrite a non-empty baseline with an empty one (#445).');
-    process.exitCode = 1;
-    return;
-  }
-
+  // `merged` starts as a copy of `existing`, so a non-empty baseline can never
+  // become empty here -- the destructive overwrite fixed in #445 is structurally
+  // impossible now. No guard is needed; failure is reported via the return value
+  // rather than by mutating process.exitCode.
   await saveBaseline(baselinePath, merged);
 
   const preserved = existingKeys.filter(k => !(k in analyzed));
@@ -387,6 +388,7 @@ async function initBaselineCommand(files: string[], baselinePath = '.warnings-ba
   console.log(`   added:    ${added.length > 0 ? added.join(', ') : '(none)'}`);
   console.log(`   refreshed:${refreshed.length > 0 ? ` ${refreshed.join(', ')}` : ' (none)'}`);
   console.log(`   preserved:${preserved.length > 0 ? ` ${preserved.join(', ')}` : ' (none)'}`);
+  return { ok: true };
 }
 
 async function runEnforcement(newFiles: string[], modifiedFiles: string[], baselinePath: string): Promise<EnforcementResult> {

@@ -120,4 +120,39 @@ describe('initBaselineCommand must not destroy existing baselines (#445)', () =>
     expect(output).toMatch(/src\/new\.ts/);
     log.mockRestore();
   });
+
+  it('signals outcome via its return value, never process.exitCode', async () => {
+    // Delphi Round 1: three experts independently flagged that this command
+    // reported failure by mutating global exit state, so an unrelated
+    // non-zero process.exitCode would be misread as this command failing.
+    mockReadFile.mockRejectedValue(new Error('ENOENT') as never);
+    mockAnalyze.mockResolvedValue(violationsFor({ 'src/a.ts': 1 }) as never);
+    const previousExitCode = process.exitCode;
+    process.exitCode = 0;
+
+    const result = await initBaselineCommand(['src/a.ts'], '.warnings-baseline.json');
+
+    expect(result.ok).toBe(true);
+    // Global state must be untouched by the command.
+    expect(process.exitCode).toBe(0);
+
+    process.exitCode = previousExitCode;
+  });
+
+  it('can never empty a non-empty baseline, even when analysis finds nothing', async () => {
+    // The merge starts from the existing entries, so the destructive overwrite
+    // from #445 is structurally impossible rather than merely guarded.
+    const existing = {
+      'src/legacy.ts': { totalWarnings: 1, lastAnalyzed: '2026-01-01T00:00:00.000Z' },
+    };
+    mockReadFile.mockResolvedValue(JSON.stringify(existing) as never);
+    mockAnalyze.mockResolvedValue(violationsFor({}) as never);
+
+    const result = await initBaselineCommand(['src/clean.ts'], '.warnings-baseline.json');
+
+    expect(result.ok).toBe(true);
+    const [, writtenRaw] = mockWriteFile.mock.calls[0];
+    const written = JSON.parse(String(writtenRaw));
+    expect(Object.keys(written)).toContain('src/legacy.ts');
+  });
 });

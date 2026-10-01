@@ -15,8 +15,18 @@ const IO_CALLEES = [
  */
 const IO_GLOBAL_CALLEES = ['exec', 'execSync', 'spawn', 'spawnSync', 'request'];
 
-const IO_CALLEE_RE = new RegExp(`\\b(?:${IO_CALLEES.join('|')})\\s*\\(`, 'g');
-const IO_GLOBAL_RE = new RegExp(`(?:^|[^.\\w$])(?:${IO_GLOBAL_CALLEES.join('|')})\\s*\\(`, 'gm');
+/**
+ * Builders, not shared literals: a module-level regex with the `g` flag carries
+ * mutable `lastIndex` across calls, so any caller that forgets to reset it
+ * silently drops matches. Fresh instances keep every call independent.
+ */
+function ioCalleeRe(): RegExp {
+  return new RegExp(`\\b(?:${IO_CALLEES.join('|')})\\s*\\(`, 'g');
+}
+
+function ioGlobalRe(): RegExp {
+  return new RegExp(`(?:^|[^.\\w$])(?:${IO_GLOBAL_CALLEES.join('|')})\\s*\\(`, 'gm');
+}
 
 /** Keywords that look like `name(` but are control flow, not callables. */
 const CONTROL_KEYWORDS = new Set([
@@ -192,13 +202,11 @@ function maxNesting(body: string): number {
 /** Which IO callees appear in this body. */
 function ioOperationsIn(body: string): string[] {
   const found = new Set<string>();
-  IO_CALLEE_RE.lastIndex = 0;
-  let m: RegExpExecArray | null;
-  while ((m = IO_CALLEE_RE.exec(body)) !== null) {
+  // Fresh regex instances per call: no shared lastIndex to reset or leak.
+  for (const m of body.matchAll(ioCalleeRe())) {
     found.add(m[0].replace(/\s*\($/, ''));
   }
-  IO_GLOBAL_RE.lastIndex = 0;
-  while ((m = IO_GLOBAL_RE.exec(body)) !== null) {
+  for (const m of body.matchAll(ioGlobalRe())) {
     const name = /(\w+)\s*\($/.exec(m[0].trim());
     if (name) found.add(name[1]);
   }
@@ -312,6 +320,22 @@ export class TypeScriptAdapter extends BaseAdapter implements Adapter {
     return this.createParseResult('typescript');
   }
 
+  private maskedCache?: string;
+
+  /**
+   * The file with comments and string/template/regex literals blanked out,
+   * computed ONCE per adapter instance. Every extraction pass used to call
+   * maskLiterals(this.fileContent) itself, and buildFunction() called it again
+   * for each function -- O(functions x fileLength) per file.
+   */
+  private get maskedSource(): string {
+    if (this.maskedCache === undefined) {
+      this.maskedCache = maskLiterals(this.fileContent);
+    }
+    return this.maskedCache;
+  }
+
+
   /**
    * Numeric literals for the magic-numbers rule, which reads
    * `adapter.extract()` -> `[{value, line}]`. Numbers inside comments and
@@ -320,7 +344,7 @@ export class TypeScriptAdapter extends BaseAdapter implements Adapter {
   extract(): Array<{ value: number; line: number }> {
     const src = this.fileContent;
     const results: Array<{ value: number; line: number }> = [];
-    const masked = maskLiterals(src);
+    const masked = this.maskedSource;
 
     const numRe = /(?<![\w$.])(\d+(?:\.\d+)?)(?![\w$])/g;
     let m: RegExpExecArray | null;
@@ -395,7 +419,7 @@ export class TypeScriptAdapter extends BaseAdapter implements Adapter {
    */
   extractInterfaces(): Array<{ name: string; line: number; methods: string[]; methodCount: number; code: string }> {
     const src = this.fileContent;
-    const masked = maskLiterals(src);
+    const masked = this.maskedSource;
     const results: Array<{ name: string; line: number; methods: string[]; methodCount: number; code: string }> = [];
     const ifaceRe = /(?:export\s+)?(?:declare\s+)?interface\s+(\w+)/g;
     let m: RegExpExecArray | null;
@@ -428,7 +452,7 @@ export class TypeScriptAdapter extends BaseAdapter implements Adapter {
     const src = this.fileContent;
     // Bodies/positions come from the real source; brace matching uses the masked
     // text so braces inside regex/string literals cannot desync the block scan.
-    const masked = maskLiterals(src);
+    const masked = this.maskedSource;
     const { inner } = readParenGroup(masked, parenIndex);
     const bodyEnd = findBlockEnd(masked, bodyOpen);
     const body = src.substring(bodyOpen, bodyEnd);
@@ -459,7 +483,7 @@ export class TypeScriptAdapter extends BaseAdapter implements Adapter {
     // Match declarations against the masked source so identifiers that appear
     // only in comments or strings are never mistaken for functions, while
     // bodies/positions still come from the original text (same offsets).
-    const masked = maskLiterals(src);
+    const masked = this.maskedSource;
     const found: FunctionMetrics[] = [];
     const seen = new Set<string>();
 
@@ -565,7 +589,7 @@ export class TypeScriptAdapter extends BaseAdapter implements Adapter {
     const src = this.fileContent;
     const classRe = /(export\s+)?(?:default\s+)?(?:abstract\s+)?class\s+(\w+)/g;
     const results: Array<Record<string, unknown>> = [];
-    const masked = maskLiterals(src);
+    const masked = this.maskedSource;
     let m: RegExpExecArray | null;
 
     while ((m = classRe.exec(masked)) !== null) {
