@@ -608,7 +608,9 @@ describe('Boy Scout Rule Enforcement', () => {
         fs.writeFileSync(path.join(tmp, 'a.ts'), 'export const x = 1;\n');
         const { code, stdout } = runCli(['--init-baseline', 'a.ts'], tmp);
         expect(code).toBe(0);
-        expect(stdout).toContain('Baseline initialized successfully');
+        // The command MERGES into any existing baseline rather than replacing it
+        // (#445), so the message reports an update, not a fresh initialization.
+        expect(stdout).toContain('Baseline updated:');
         expect(fs.existsSync(path.join(tmp, '.warnings-baseline.json'))).toBe(true);
       } finally {
         fs.rmSync(tmp, { recursive: true, force: true });
