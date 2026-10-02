@@ -52,7 +52,8 @@ src/principles/
 | Output | reporter.ts | Emits Console, JSON, or SARIF 2.1.0 |
 | Thresholds | config.ts + .principlesrc | Defaults + project overrides |
 | Boy Scout enforcement | boy-scout.ts | classifyFiles → calculateDelta → enforceBoyScoutRule |
-| Baseline lifecycle | baseline.ts | loadBaseline, saveBaseline, initBaseline |
+| Baseline lifecycle | boy-scout.ts | loadBaseline, saveBaseline, initBaseline |
+| Baseline storage | baseline.ts | BaselineStorage (size/timeout/batch guards) + filterBaselineWarnings |
 | Adapter for new language | adapters/base.ts + add `<lang>.ts` | Subclass base; export via index |
 | C / C++ extraction | adapters/cpp.ts | Regex-based; handles both `.cpp` and `.c` |
 | Tests | __tests__/ | Adapter, rule, and core tests |
@@ -67,9 +68,9 @@ src/principles/
 | classifyFiles | Function | boy-scout.ts | new / modified / untouched bucket assignment |
 | calculateDelta | Function | boy-scout.ts | Diff vs `.warnings-baseline.json` |
 | enforceBoyScoutRule | Function | boy-scout.ts | Block when modified-file warnings increase |
-| loadBaseline | Function | baseline.ts | Read `.warnings-baseline.json` |
-| saveBaseline | Function | baseline.ts | Write updated baseline after successful commit |
-| initBaseline | Function | baseline.ts | First-time auto-snapshot (≤5 warnings ⇒ must clear to zero) |
+| loadBaseline | Function | boy-scout.ts | Read `.warnings-baseline.json` |
+| saveBaseline | Function | boy-scout.ts | Write updated baseline after successful commit |
+| initBaseline | Function | boy-scout.ts | First-time auto-snapshot (≤5 warnings ⇒ must clear to zero) |
 
 ## CONVENTIONS
 - **Rule ID format**: `clean-code.long-function`, `solid.srp`. Stable, dot-namespaced.
