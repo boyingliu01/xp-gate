@@ -986,7 +986,12 @@ else
     # ── Biome lint/format check ──
     if [ -f "biome.json" ] || [ -f "biome.jsonc" ]; then
       echo "Running Biome lint/format check..."
-      if ! npx biome check --staged . 2>/dev/null; then
+      # --no-errors-on-unmatched: Biome exits 1 with "No files were processed in the
+      # specified paths" when the staged set contains nothing it can lint (docs-only,
+      # config-only, or Biome-ignored paths). That is "nothing to do", not a violation;
+      # without this flag every such commit is blocked even though `biome check .`
+      # passes on the whole repository.
+      if ! npx biome check --staged --no-errors-on-unmatched . 2>/dev/null; then
         npx biome check . 2>&1 | head -50
         echo ""
         echo "❌ BLOCKED - Biome check failed"
