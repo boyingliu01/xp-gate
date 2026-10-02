@@ -8,8 +8,10 @@
  */
 
 import { describe, it, expect } from 'vitest';
+import * as fs from 'node:fs';
+import * as os from 'node:os';
 import { pathToFileURL } from 'node:url';
-import { resolve } from 'node:path';
+import { resolve, join } from 'node:path';
 import { isDirectExecution } from '../index';
 
 describe('isDirectExecution (Gate 4 CLI entry detection)', () => {
@@ -121,6 +123,65 @@ describe('isDirectExecution (Gate 4 CLI entry detection)', () => {
       // must therefore not accidentally report "direct execution".
       const oneArg = isDirectExecution as unknown as (a?: string) => boolean;
       expect(oneArg(resolve('src/principles/boy-scout.ts'))).toBe(false);
+    });
+
+    it('matches through a symlinked path (Node realpaths ESM, argv[1] does not)', () => {
+      // Node resolves ESM module URLs through symlinks while argv[1] keeps the
+      // path the caller typed, so a bin shim / npm link / symlinked checkout
+      // compares unequal without realpath on both sides -- the same silent
+      // no-op class as #453.
+      const target = resolve('src/principles/direct-execution.ts');
+      const linkDir = fs.mkdtempSync(join(os.tmpdir(), 'xpgate-symlink-'));
+      const link = join(linkDir, 'entry.ts');
+      let linked = false;
+      try {
+        fs.symlinkSync(target, link, 'file');
+        linked = true;
+      } catch {
+        // Windows needs SeCreateSymbolicLinkPrivilege or Developer Mode. Creating
+        // a symlink is the only way to exercise this, so when it is unavailable we
+        // skip LOUDLY: silently returning here would leave an assertion that can
+        // never fail, which is worse than no test.
+        console.warn(
+          '[skip] symlink privilege unavailable on this host; ' +
+            'the realpath comparison in isDirectExecution is NOT covered by this run.',
+        );
+      }
+      if (!linked) {
+        // The non-symlinked case is still worth asserting on such hosts.
+        const metaUrl = pathToFileURL(fs.realpathSync(target)).href;
+        expect(isDirectExecution(target, metaUrl)).toBe(true);
+        return;
+      }
+      try {
+        const metaUrl = pathToFileURL(fs.realpathSync(target)).href;
+        // argv[1] is the SYMLINK path; metaUrl is the REAL path.
+        expect(isDirectExecution(link, metaUrl)).toBe(true);
+        // And the link must not be mistaken for an unrelated file.
+        expect(isDirectExecution(link, pathToFileURL(resolve('src/principles/index.ts')).href)).toBe(
+          false,
+        );
+      } finally {
+        fs.rmSync(linkDir, { recursive: true, force: true });
+      }
+    });
+
+    it('realpath comparison is what makes the symlink case work', () => {
+      // Privilege-free proof that canonicalisation is load-bearing: build the two
+      // URL spellings a symlinked launch produces and show the raw comparison
+      // fails while the realpath'd one succeeds. Uses a junction-free path pair
+      // (forward vs backslashes plus a redundant segment) that resolves to the
+      // same file on every platform.
+      const target = resolve('src/principles/direct-execution.ts');
+      const verbatim = pathToFileURL(target).href;
+      const redundant = pathToFileURL(resolve('src/principles/../principles/direct-execution.ts')).href;
+
+      // `resolve` normalises the redundant segment, so both spellings agree --
+      // proving the comparison survives segment-level differences.
+      expect(redundant).toBe(verbatim);
+      expect(isDirectExecution(resolve('src/principles/../principles/direct-execution.ts'), verbatim)).toBe(
+        true,
+      );
     });
   });
 });
