@@ -1,9 +1,8 @@
-import { resolve } from 'node:path';
-import { pathToFileURL } from 'node:url';
 import { analyze, getAdapterForFile } from './analyzer';
 import { formatConsole, formatJSON, formatSARIF } from './reporter';
 import { loadConfig } from './config';
 import { getAllPrincipleRules } from './rules';
+import { isDirectExecution } from './direct-execution.js';
 
 interface CLIOptions {
   files: string[];
@@ -77,33 +76,13 @@ export async function main(args: string[]): Promise<number> {
 // Support both CJS (require.main === module) and ESM (import.meta.url) runtimes.
 // npx tsx loads files via import() making require.main unreliable.
 //
-// The ESM branch must compare *normalized* file URLs: `file://${argv1}` yields
-// `file://D:\a\b.ts` on Windows while `import.meta.url` is `file:///D:/a/b.ts`,
-// so naive concatenation never matches and the CLI silently no-ops (Gate 4 then
-// reports nothing and always "passes" — see #444).
-export function isDirectExecution(
-  argv1: string | undefined = process.argv[1],
-  metaUrl: string | undefined = typeof import.meta !== 'undefined' ? import.meta.url : undefined,
-): boolean {
-  if (typeof require !== 'undefined' && require.main === module) {
-    return true;
-  }
-  if (!metaUrl || !argv1) {
-    return false;
-  }
-  // pathToFileURL handles win32 drive letters, backslashes, and percent-encoding;
-  // resolve() makes a relative tsx invocation absolute before normalization.
-  let candidate: string;
-  try {
-    candidate = pathToFileURL(resolve(argv1)).href;
-  } catch {
-    return false;
-  }
-  return metaUrl === candidate;
-}
+// The implementation lives in ./direct-execution.ts so the identical guard can be
+// shared with boy-scout.ts without either module exceeding the 10-export limit.
+// Re-exported here because it is part of this module's public contract (#444).
+export { isDirectExecution } from './direct-execution.js';
 
 const args = process.argv.slice(2);
-if (isDirectExecution()) {
+if (isDirectExecution(process.argv[1], import.meta.url)) {
   main(args)
     .then(exitCode => {
       if (exitCode !== 0) {

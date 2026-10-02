@@ -74,7 +74,6 @@ describe('isDirectExecution (Gate 4 CLI entry detection)', () => {
       expect(isDirectExecution(argv1, metaUrl)).toBe(false);
     });
   });
-
   describe('relative argv[1] (tsx passes the resolved path)', () => {
     it('resolves a relative argv[1] before comparing', () => {
       const rel = 'src/principles/index.ts';
@@ -82,6 +81,46 @@ describe('isDirectExecution (Gate 4 CLI entry detection)', () => {
       const metaUrl = pathToFileURL(abs).href;
 
       expect(isDirectExecution(rel, metaUrl)).toBe(true);
+    });
+  });
+
+  /**
+   * @test REQ-DSH-017
+   * @intent 验证 boy-scout 的旧判据 `argv[1].includes('boy-scout')` 被替换后：
+   *         子串撞名不再误触发（误报方向），且 argv[1] 不含文件名的真实调用
+   *         （CI 下的路径）能正确触发（漏报方向，缺陷 #453）
+   * @covers AC-DSH-017-01
+   */
+  describe('substring matching is not used (#453)', () => {
+    const SELF = pathToFileURL(resolve('src/principles/boy-scout.ts')).href;
+
+    it('is false for an unrelated path that merely contains the name', () => {
+      // `includes('boy-scout')` was true here, wrongly starting the CLI.
+      const decoy = resolve('tmp/boy-scout-notes/run.ts');
+      expect(isDirectExecution(decoy, SELF)).toBe(false);
+    });
+
+    it('is true for the real script even when argv[1] does not repeat the name', () => {
+      // CI shape: the runner is argv[1]; only URL comparison against this
+      // module's own URL identifies the entry point. The old guard no-oped
+      // here, so the CLI printed nothing and the stdout assertion failed.
+      const abs = resolve('src/principles/boy-scout.ts');
+      expect(isDirectExecution(abs, SELF)).toBe(true);
+    });
+
+    it('is false when argv[1] is a different file in the same directory', () => {
+      const sibling = resolve('src/principles/boy-scout.test.ts');
+      expect(isDirectExecution(sibling, SELF)).toBe(false);
+    });
+
+    it('has no default metaUrl -- import.meta.url must come from the caller', () => {
+      // `import.meta.url` is evaluated where it is WRITTEN. If this function
+      // defaulted metaUrl to its own import.meta.url, every caller would compare
+      // against direct-execution.ts and always get false, which is exactly the
+      // silent no-op (#453) it was written to remove. Calling with one argument
+      // must therefore not accidentally report "direct execution".
+      const oneArg = isDirectExecution as unknown as (a?: string) => boolean;
+      expect(oneArg(resolve('src/principles/boy-scout.ts'))).toBe(false);
     });
   });
 });

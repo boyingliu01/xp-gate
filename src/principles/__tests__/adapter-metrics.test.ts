@@ -219,6 +219,48 @@ export function f() { return 12345; }
       expect(values).not.toContain(1234);
       for (const n of nums) expect(n.line).toBeGreaterThan(0);
     });
+
+    /**
+     * @test REQ-DSH-018
+     * @intent 验证「命名常量的初始化值」不被当作 magic number：规则的修复建议
+     *         就是「改用命名常量」，若常量本身仍被标记，该违规永远无法消除
+     * @covers AC-DSH-018-01
+     */
+    it('skips the initializer of a named constant but still reports bare literals', () => {
+      // Fixtures are bare fragments: no `export`, so this file does not itself
+      // trip the many-exports rule that the adapter under test is meant to flag.
+      const content = `
+const RENAME_PARTS = 3;
+const BUDGET: number = 5;
+function f(): number {
+  return 137;
+}
+`;
+      const nums = (adapterFor(content) as unknown as {
+        extract: () => Array<{ value: number; line: number }>;
+      }).extract();
+      const values = nums.map(n => n.value);
+
+      // The rule asks for named constants, so the constants must not be flagged.
+      expect(values).not.toContain(3);
+      expect(values).not.toContain(5);
+      // A bare literal in a body is the actual target and must still be reported.
+      expect(values).toContain(137);
+    });
+
+    it('still reports a number assigned to a non-constant binding', () => {
+      // Only `const`/`readonly` declarations are exempt; `let x = 99` is not.
+      const content = `
+function f(): number {
+  let x = 99;
+  return x;
+}
+`;
+      const nums = (adapterFor(content) as unknown as {
+        extract: () => Array<{ value: number; line: number }>;
+      }).extract();
+      expect(nums.map(n => n.value)).toContain(99);
+    });
   });
 
   describe('extractInterfaces (ISP, #446)', () => {
