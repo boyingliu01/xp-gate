@@ -1,6 +1,7 @@
 import * as fs from 'fs/promises';
 import { analyze, getAdapterForFile } from './analyzer';
 import { getAllRules } from './index';
+import { isDirectExecution } from './direct-execution.js';
 
 interface FileClassification {
   new: string[];
@@ -8,6 +9,17 @@ interface FileClassification {
   deleted: string[];
   renamed: { oldPath: string; newPath: string }[];
 }
+
+/** A git rename line is `R<score> <oldPath> <newPath>` -- three fields minimum. */
+const RENAME_PARTS = 3;
+
+/**
+ * A file already tracked with at most this many warnings must be brought to
+ * zero the next time it is modified. Above it, the normal "must not increase"
+ * contract applies. Named rather than inlined so the threshold is greppable and
+ * so it stops registering as a magic number.
+ */
+const SMALL_WARNING_BUDGET = 5;
 
 // Exported helper to get warning counts for a batch of files using the principles checker
 export async function analyzeWarningsForFiles(filesInput: string | string[]): Promise<Record<string, number>> {
@@ -83,6 +95,17 @@ export function classifyFiles(gitDiffLines: string[]): FileClassification {
     if (parts.length < 2) continue;
 
     const status = parts[0].trim();
+    // Guard the rename case before the switch so the body needs no extra level.
+    if (status.charAt(0) === 'R') {
+      // A rename line carries both the old and the new path.
+      if (parts.length < RENAME_PARTS) continue;
+      result.renamed.push({
+        oldPath: parts[1],
+        newPath: parts[2]
+      });
+      continue;
+    }
+
     switch (status.charAt(0)) {
       case 'A':
         result.new.push(parts.slice(1).join(' '));
@@ -92,14 +115,6 @@ export function classifyFiles(gitDiffLines: string[]): FileClassification {
         break;
       case 'D':
         result.deleted.push(parts.slice(1).join(' '));
-        break;
-      case 'R':
-        if (parts.length >= 3) {
-          result.renamed.push({
-            oldPath: parts[1],
-            newPath: parts[2]
-          });
-        }
         break;
       default:
         break;
@@ -119,8 +134,22 @@ export async function loadBaseline(baselinePath: string): Promise<Record<string,
   }
 }
 
+/**
+ * Persist the baseline.
+ *
+ * A write failure here is not cosmetic: the caller's whole contract is "record
+ * what we found so the next run can compare against it". Silently swallowing the
+ * error would leave the baseline stale while reporting success, so the failure
+ * is wrapped with the path and re-thrown -- callers already surface a thrown
+ * error as a non-zero exit.
+ */
 export async function saveBaseline(baselinePath: string, baseline: Record<string, BaselineEntry>): Promise<void> {
-  await fs.writeFile(baselinePath, JSON.stringify(baseline, null, 2));
+  try {
+    await fs.writeFile(baselinePath, JSON.stringify(baseline, null, 2));
+  } catch (error) {
+    const reason = error instanceof Error ? error.message : String(error);
+    throw new Error(`Failed to write baseline to ${baselinePath}: ${reason}`);
+  }
 }
 
 function evaluateNewFile(currentWarnings: number): Pick<DeltaResult, 'enforcement' | 'reason'> {
@@ -155,7 +184,7 @@ function evaluateModifiedFile(
     };
   }
 
-  if (baselineWarnings <= 5 && currentWarnings > 0) {
+  if (baselineWarnings <= SMALL_WARNING_BUDGET && currentWarnings > 0) {
     return {
       enforcement: 'BLOCK',
       reason: `Files with <=5 warnings must clear to zero (currently: ${currentWarnings}/${baselineWarnings}). Boy Scout Rule: Leave the code cleaner than you found it.`,
@@ -216,20 +245,43 @@ export async function initBaseline(files: string[]): Promise<Record<string, Base
   const baseline: Record<string, BaselineEntry> = {};
 
   for (const file of files) {
-    try {
-      const warningCount = currentWarnings[file] || 0;
-      if (warningCount > 0) {
-        baseline[file] = {
-          totalWarnings: warningCount,
-          lastAnalyzed: new Date().toISOString(),
-        };
-      }
-    } catch (error: unknown) {
-      console.error(`Failed to analyze file for baseline: ${file}`, error);
-    }
+    const entry = baselineEntryFor(currentWarnings[file]);
+    if (entry) baseline[file] = entry;
   }
 
   return baseline;
+}
+
+/**
+ * Build the baseline entry for one file, or null when there is nothing to record.
+ *
+ * Extracted from `initBaseline` so the loop body is a single call: the previous
+ * try/if nesting reached 5 levels, over the 4-level limit. Analysis failures are
+ * handled by `analyzeWarningsForFiles`, which omits files it cannot read, so a
+ * missing count here means "no warnings", not "the read blew up".
+ */
+function baselineEntryFor(warningCount: number | undefined): BaselineEntry | null {
+  const total = warningCount || 0;
+  // Only files that actually carry warnings are tracked; a clean file needs no budget.
+  if (total === 0) return null;
+  return { totalWarnings: total, lastAnalyzed: new Date().toISOString() };
+}
+
+/**
+ * Record a first-seen count for files with no baseline entry yet.
+ *
+ * Extracted from `runEnforcement`, whose if/for/if nesting reached 5 levels.
+ * Files that are already clean gain no entry -- there is nothing to budget.
+ */
+function recordAutoInitializedEntries(
+  baseline: Record<string, BaselineEntry>,
+  files: string[],
+  currentWarnings: Record<string, number>,
+): void {
+  for (const file of files) {
+    const entry = baselineEntryFor(currentWarnings[file]);
+    if (entry) baseline[file] = entry;
+  }
 }
 
  /**
@@ -405,18 +457,10 @@ async function runEnforcement(newFiles: string[], modifiedFiles: string[], basel
     }
   }
   
-  // If there are missing baseline entries, auto-initialize them
+  // Files being modified for the first time get their current count recorded, so
+  // the next modification is compared against a real budget instead of nothing.
   if (missingBaselineEntries.length > 0) {
-    for (const file of missingBaselineEntries) {
-      const warningCount = currentWarnings[file] || 0;
-      if (warningCount > 0) {
-        baseline[file] = {
-          totalWarnings: warningCount,
-          lastAnalyzed: new Date().toISOString(),
-        };
-      }
-    }
-    // Save the updated baseline
+    recordAutoInitializedEntries(baseline, missingBaselineEntries, currentWarnings);
     await saveBaseline(baselinePath, baseline);
     console.log(`ℹ️  Auto-initialized baseline for ${missingBaselineEntries.length} files`);
   }
@@ -441,8 +485,10 @@ async function runEnforcement(newFiles: string[], modifiedFiles: string[], basel
   return enforceBoyScoutRule(deltaResults);
 }
 
-if ((typeof require !== 'undefined' && require.main === module) || 
-    (typeof require === 'undefined' && process.argv[1]?.includes('boy-scout'))) {
+// Fires only when this file IS the entry point. The previous check --
+// `process.argv[1]?.includes('boy-scout')` -- both over- and under-matched, and
+// silently no-oped under CI where argv[1] does not repeat the filename (#453).
+if (isDirectExecution(process.argv[1], import.meta.url)) {
   main()
     .then(code => process.exit(code))
     .catch(error => {

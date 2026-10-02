@@ -340,15 +340,30 @@ export class TypeScriptAdapter extends BaseAdapter implements Adapter {
    * Numeric literals for the magic-numbers rule, which reads
    * `adapter.extract()` -> `[{value, line}]`. Numbers inside comments and
    * string/template literals are skipped via maskLiterals().
+   *
+   * A number that IS the initializer of a named constant is skipped: the rule's
+   * own advice is "consider using a named constant instead", so reporting the
+   * constant it just asked for made the violation unfixable -- extracting the
+   * literal could never clear it.
    */
   extract(): Array<{ value: number; line: number }> {
     const src = this.fileContent;
     const results: Array<{ value: number; line: number }> = [];
     const masked = this.maskedSource;
 
-    const numRe = /(?<![\w$.])(\d+(?:\.\d+)?)(?![\w$])/g;
+    // `const NAME = 3` / `const NAME: T = 3` -- capture the value's offset so the
+    // literal can be matched positionally rather than by value.
+    const namedConstRe = /\b(?:const|readonly)\s+[A-Za-z_$][\w$]*\s*(?::[^=;]+)?=\s*(-?\d+(?:\.\d+)?)\s*;/g;
+    const namedConstOffsets = new Set<number>();
+    let c: RegExpExecArray | null;
+    while ((c = namedConstRe.exec(masked)) !== null) {
+      namedConstOffsets.add(c.index + c[0].lastIndexOf(c[1]));
+    }
+
+    const numRe = /(?<![\w$.])(-?\d+(?:\.\d+)?)(?![\w$])/g;
     let m: RegExpExecArray | null;
     while ((m = numRe.exec(masked)) !== null) {
+      if (namedConstOffsets.has(m.index)) continue;
       results.push({ value: Number(m[1]), line: lineOf(src, m.index) });
     }
     return results;
