@@ -1,10 +1,11 @@
 {
   "$schema": "./node_modules/@stryker-mutator/core/schema/stryker-schema.json",
   "testRunner": "vitest",
-  "coverageAnalysis": "all",
+  "coverageAnalysis": "perTest",
   "tsconfigFile": "tsconfig.stryker.json",
   "timeoutMS": 600000,
   "timeoutFactor": 1,
+  "dryRunTimeoutMinutes": 20,
   "mutate": [
     "src/principles/**/*.ts",
     "!src/principles/**/*.test.ts",
@@ -19,5 +20,8 @@
   "reporters": ["clear-text", "json", "progress"],
   "jsonReporter": {
     "fileName": "reports/mutation/report.json"
+  },
+  "vitest": {
+    "configFile": "vitest.config.ts"
   }
 }

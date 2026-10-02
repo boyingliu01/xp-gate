@@ -32,6 +32,61 @@ describe('MutmutRunner', () => {
   let MutmutRunner: typeof import('../runners/mutmut-runner').MutmutRunner;
   let tmpDir: string;
 
+  /**
+   * Wait until the runner has actually spawned the child process.
+   *
+   * `run()` awaits `isAvailable()` when the platform is win32 (the route is
+   * resolved via a version probe), so `spawn` is NOT called synchronously with
+   * `run()`. Calling `stdoutCb` right after `run()` therefore raced on Windows:
+   * the callback had not been captured yet and the test threw
+   * `stdoutCb is not a function`. Linux skipped the await entirely, which is why
+   * CI stayed green while the same suite failed locally.
+   */
+  async function waitForSpawn(): Promise<void> {
+    for (let i = 0; i < 50 && !vi.mocked(spawn).mock.calls.length; i++) {
+      await new Promise(resolve => setTimeout(resolve, 0));
+    }
+  }
+
+  /**
+   * Build a fake child process whose `stdout`/`close` callbacks are captured so a
+   * test can drive them by hand. Shared because every spawn-based test needs the
+   * same shape, and inlining it in each one pushed those callbacks past the
+   * function-length rule.
+   */
+  function mockChildProcess(capture: {
+    stdout?: (cb: (d: Buffer) => void) => void;
+    stderr?: (cb: (d: Buffer) => void) => void;
+    close?: (cb: (code: number | null) => void) => void;
+    /** Run when `close` is subscribed, instead of the test driving it by hand. */
+    onClose?: (emit: { stderr: (d: Buffer) => void; close: (code: number) => void }) => void;
+  }) {
+    let stderrCb: ((d: Buffer) => void) | null = null;
+    let closeCb: ((code: number | null) => void) | null = null;
+    return {
+      stdout: {
+        on: vi.fn((_event: string, cb: (d: Buffer) => void) => capture.stdout?.(cb)),
+      },
+      stderr: {
+        on: vi.fn((_event: string, cb: (d: Buffer) => void) => {
+          stderrCb = cb;
+          capture.stderr?.(cb);
+        }),
+      },
+      on: vi.fn((event: string, cb: (code: number | null) => void) => {
+        if (event !== 'close') return;
+        closeCb = cb;
+        capture.close?.(cb);
+        capture.onClose?.({
+          stderr: d => stderrCb?.(d),
+          close: code => closeCb?.(code),
+        });
+      }),
+      kill: vi.fn(),
+      killed: false,
+    } as unknown as ChildProcess;
+  }
+
   beforeEach(async () => {
     vi.clearAllMocks();
     vi.mocked(execSync).mockReset();
@@ -140,20 +195,12 @@ describe('MutmutRunner', () => {
       let stdoutCb: ((d: Buffer) => void) | null = null;
       let closeCb: ((code: number | null) => void) | null = null;
 
-      const mockChild = {
-        stdout: {
-          on: vi.fn((_event: string, cb: (d: Buffer) => void) => {
-            stdoutCb = cb;
-          }),
-        },
-        stderr: { on: vi.fn() },
-        on: vi.fn((event: string, cb: (code: number | null) => void) => {
-          if (event === 'close') closeCb = cb;
+      vi.mocked(spawn).mockReturnValue(
+        mockChildProcess({
+          stdout: cb => { stdoutCb = cb; },
+          close: cb => { closeCb = cb; },
         }),
-        kill: vi.fn(),
-        killed: false,
-      };
-      vi.mocked(spawn).mockReturnValue(mockChild as unknown as ChildProcess);
+      );
 
       // No existing pyproject.toml
       vi.mocked(existsSync).mockReturnValue(false);
@@ -165,9 +212,11 @@ describe('MutmutRunner', () => {
         cwd: tmpDir,
       });
 
-      // Simulate stdout with emoji progress
+      // Simulate stdout with emoji progress. One wait covers both callbacks --
+      // they are captured by the same spawn invocation.
       const progressOutput =
         '38/38  🎉 9 🫥 29  ⏰ 0  🤔 0  🙁 0  🔇 0  🧙 0\n';
+      await waitForSpawn();
       stdoutCb!(Buffer.from(progressOutput));
       closeCb!(0);
 
@@ -211,6 +260,7 @@ describe('MutmutRunner', () => {
         timeoutMs: 60000,
         cwd: 'C:\\work\\project',
       });
+      await waitForSpawn();
       closeCb!(0);
       await promise;
 
@@ -249,6 +299,7 @@ describe('MutmutRunner', () => {
         timeoutMs: 60000,
         cwd: 'C:\\work\\project',
       });
+      await waitForSpawn();
       closeCb!(0);
       await promise;
 
@@ -285,6 +336,7 @@ describe('MutmutRunner', () => {
         timeoutMs: 60000,
         cwd: 'C:\\work dir\\safe; echo injected',
       });
+      await waitForSpawn();
       closeCb!(0);
       await promise;
 
@@ -320,6 +372,7 @@ describe('MutmutRunner', () => {
       const runner = new MutmutRunner('win32');
       expect(await runner.isAvailable()).toBe(true);
       const promise = runner.run({ files: ['src/main.py'], timeoutMs: 60000, cwd: windowsPath });
+      await waitForSpawn();
       closeCb!(0);
       await promise;
 
@@ -368,6 +421,7 @@ describe('MutmutRunner', () => {
       nativeAvailable = false;
       expect(await runner.isAvailable()).toBe(true);
       const promise = runner.run({ files: ['src/main.py'], timeoutMs: 60000, cwd: 'C:\\repo' });
+      await waitForSpawn();
       closeCb!(0);
       await promise;
 
@@ -489,6 +543,7 @@ describe('MutmutRunner', () => {
       expect(await runner.isAvailable()).toBe(true);
       const promise = runner.run({ files: ['src/main.py'], timeoutMs: 100, cwd: 'C:\\repo' });
       await vi.advanceTimersByTimeAsync(100);
+      await waitForSpawn();
       closeCb!(1);
       const outcome = await promise;
 
@@ -622,26 +677,18 @@ describe('MutmutRunner', () => {
     });
 
     it('should return error message when exit code is non-zero', async () => {
-      let stderrCb: ((d: Buffer) => void) | null = null;
-      const mockChild = {
-        stdout: { on: vi.fn() },
-        stderr: {
-          on: vi.fn((_event: string, cb: (d: Buffer) => void) => {
-            stderrCb = cb;
-          }),
-        },
-        on: vi.fn((event: string, cb: (code: number | null) => void) => {
-          if (event === 'close') {
+      // The stderr line and the non-zero exit must arrive together, so the
+      // factory emits both as soon as the runner subscribes to `close`.
+      vi.mocked(spawn).mockReturnValue(
+        mockChildProcess({
+          onClose: emit => {
             setTimeout(() => {
-              if (stderrCb) stderrCb(Buffer.from('mutation failed'));
-              cb(1);
+              emit.stderr(Buffer.from('mutation failed'));
+              emit.close(1);
             }, 10);
-          }
+          },
         }),
-        kill: vi.fn(),
-        killed: false,
-      };
-      vi.mocked(spawn).mockReturnValue(mockChild as unknown as ChildProcess);
+      );
       vi.mocked(existsSync).mockReturnValue(false);
 
       const runner = new MutmutRunner();
@@ -685,6 +732,7 @@ describe('MutmutRunner', () => {
       });
 
       const output = '20/20  🎉 10 🫥 5  ⏰ 2  🤔 1  🙁 2  🔇 0  🧙 0\n';
+      await waitForSpawn();
       stdoutCb!(Buffer.from(output));
       closeCb!(0);
 
@@ -724,9 +772,11 @@ describe('MutmutRunner', () => {
         cwd: tmpDir,
       });
 
-      stdoutCb!(Buffer.from('Some random output without emoji\n'));
-      closeCb!(0);
+      await waitForSpawn();
 
+      stdoutCb!(Buffer.from('Some random output without emoji\n'));
+      await waitForSpawn();
+      closeCb!(0);
       const result = await promise;
       expect(result.report).toBeNull();
       expect(result.timedOut).toBe(false);
@@ -760,6 +810,7 @@ describe('MutmutRunner', () => {
       });
 
       const output = '0/0  🎉 0 🫥 0  ⏰ 0  🤔 0  🙁 0  🔇 0  🧙 0\n';
+      await waitForSpawn();
       stdoutCb!(Buffer.from(output));
       closeCb!(0);
 
@@ -789,6 +840,7 @@ describe('MutmutRunner', () => {
         timeoutMs: 60000,
         cwd: tmpDir,
       });
+      await waitForSpawn();
       closeCb!(0);
       await promise;
 
@@ -839,6 +891,7 @@ describe('MutmutRunner', () => {
         timeoutMs: 60000,
         cwd: tmpDir,
       });
+      await waitForSpawn();
       closeCb!(0);
       await promise;
 
@@ -888,6 +941,7 @@ describe('MutmutRunner', () => {
         timeoutMs: 60000,
         cwd: tmpDir,
       });
+      await waitForSpawn();
       closeCb!(0);
       await promise;
 
@@ -905,16 +959,9 @@ describe('MutmutRunner', () => {
   describe('cleanup', () => {
     it('should restore backup after run completes', async () => {
       let closeCb: ((code: number | null) => void) | null = null;
-      const mockChild = {
-        stdout: { on: vi.fn() },
-        stderr: { on: vi.fn() },
-        on: vi.fn((event: string, cb: (code: number | null) => void) => {
-          if (event === 'close') closeCb = cb;
-        }),
-        kill: vi.fn(),
-        killed: false,
-      };
-      vi.mocked(spawn).mockReturnValue(mockChild as unknown as ChildProcess);
+      vi.mocked(spawn).mockReturnValue(
+        mockChildProcess({ close: cb => { closeCb = cb; } }),
+      );
 
       vi.mocked(existsSync).mockImplementation((path) => {
         const p = path.toString();
@@ -939,6 +986,7 @@ describe('MutmutRunner', () => {
         timeoutMs: 60000,
         cwd: tmpDir,
       });
+      await waitForSpawn();
       closeCb!(0);
       await promise;
 
@@ -989,6 +1037,7 @@ describe('MutmutRunner', () => {
         timeoutMs: 60000,
         cwd: tmpDir,
       });
+      await waitForSpawn();
       closeCb!(0);
       await promise;
 
