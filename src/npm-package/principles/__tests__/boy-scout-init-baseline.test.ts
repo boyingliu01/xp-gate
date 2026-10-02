@@ -44,6 +44,15 @@ function violationsFor(counts: Record<string, number>) {
 }
 
 /**
+ * A realistic ENOENT. `loadBaseline` distinguishes "no file yet" from every other
+ * I/O failure by `error.code`, so a mock that only says `new Error('ENOENT')`
+ * (no `code`) is not a real ENOENT and would be treated as unreadable (#455).
+ */
+function enoent(): NodeJS.ErrnoException {
+  return Object.assign(new Error('ENOENT: no such file or directory'), { code: 'ENOENT' });
+}
+
+/**
  * @test REQ-DSH-014
  * @intent 验证 `--init-baseline` 是**合并**语义而非覆盖：既有基线条目必须保留，
  *         且写入路径必须尊重 `--baseline` 参数，不得硬编码 .warnings-baseline.json
@@ -79,7 +88,7 @@ describe('initBaselineCommand must not destroy existing baselines (#445)', () =>
   });
 
   it('writes to the path given by --baseline, not the hardcoded default', async () => {
-    mockReadFile.mockRejectedValue(new Error('ENOENT') as never);
+    mockReadFile.mockRejectedValue(enoent() as never);
     mockAnalyze.mockResolvedValue(violationsFor({ 'src/a.ts': 1 }) as never);
 
     await initBaselineCommand(['src/a.ts'], 'custom/baseline.json');
@@ -125,7 +134,7 @@ describe('initBaselineCommand must not destroy existing baselines (#445)', () =>
     // Delphi Round 1: three experts independently flagged that this command
     // reported failure by mutating global exit state, so an unrelated
     // non-zero process.exitCode would be misread as this command failing.
-    mockReadFile.mockRejectedValue(new Error('ENOENT') as never);
+    mockReadFile.mockRejectedValue(enoent() as never);
     mockAnalyze.mockResolvedValue(violationsFor({ 'src/a.ts': 1 }) as never);
     const previousExitCode = process.exitCode;
     process.exitCode = 0;

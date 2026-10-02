@@ -62,6 +62,13 @@ interface DeltaResult {
 
 beforeEach(() => {
   vi.clearAllMocks();
+  // Default the mocked reader to "no baseline yet". A bare vi.fn() resolves to
+  // undefined, which loadBaseline now correctly rejects as unreadable content --
+  // so tests that do not arm a baseline must say ENOENT explicitly, exactly as a
+  // real first run would.
+  const enoent = Object.assign(new Error('ENOENT: no such file or directory'), { code: 'ENOENT' });
+  (mockReadFile as ReturnType<typeof vi.fn>).mockRejectedValue(enoent);
+  (mockAccess as ReturnType<typeof vi.fn>).mockRejectedValue(enoent);
 });
 
 /**
@@ -424,7 +431,8 @@ describe('Boy Scout Rule Enforcement', () => {
       const result = await loadBaseline('/tmp/test-baseline.json');
 
       expect(result).toEqual(mockData);
-      expect(mockAccess).toHaveBeenCalledWith('/tmp/test-baseline.json');
+      // `access` is no longer called first: probing then reading is a TOCTOU race,
+      // and it made every I/O failure look like "no baseline yet" (#455 review).
       expect(mockReadFile).toHaveBeenCalledWith('/tmp/test-baseline.json', 'utf-8');
     });
 
@@ -507,24 +515,60 @@ describe('Boy Scout Rule Enforcement', () => {
      * @covers AC-QG-005-03
      */
     describe('repair path tolerates corrupt entries (#455)', () => {
-      it('drops a malformed entry instead of refusing to run', async () => {
-        (mockAccess as ReturnType<typeof vi.fn>).mockResolvedValue(undefined);
-        (mockReadFile as ReturnType<typeof vi.fn>).mockResolvedValue(
-          JSON.stringify({ 'src/bad.ts': 1 }),
-        );
+      const armRepair = (content: string) => {
+        (mockReadFile as ReturnType<typeof vi.fn>).mockResolvedValue(content);
         mockAnalyze.mockResolvedValue({
           files: [],
           violations: [],
           summary: { totalFiles: 1, totalViolations: 0, errorCount: 0, warningCount: 0, infoCount: 0, bySeverity: {} },
         } as never);
         vi.mocked(mockWriteFile).mockResolvedValue(undefined);
+      };
+
+      it('drops a malformed entry instead of refusing to run', async () => {
+        armRepair(JSON.stringify({ 'src/bad.ts': 1 }));
 
         const result = await initBaselineCommand(['src/new.ts'], '/tmp/x.json');
 
-        expect(result.ok).toBe(true);
-        // The corrupt entry must not survive into the rewritten baseline.
+        // The corrupt entry must not survive into the rewritten baseline...
         const written = JSON.parse(vi.mocked(mockWriteFile).mock.calls[0][1] as string);
         expect(written).not.toHaveProperty('src/bad.ts');
+        // ...and losing a budget must not be reported as success: the entry is
+        // gone unless the caller names it, so the exit code has to say so.
+        expect(result.ok).toBe(false);
+        expect(result.reason).toContain('src/bad.ts');
+      });
+
+      it('reports success when every dropped entry is rebuilt from the file list', async () => {
+        // Same corrupt file, but this time the caller asks for that very path, so
+        // the entry is measured afresh and nothing is lost.
+        armRepair(JSON.stringify({ 'src/bad.ts': 1 }));
+        mockAnalyze.mockResolvedValue({
+          files: [],
+          violations: [
+            { file: 'src/bad.ts', ruleId: 'clean-code.magic-numbers', severity: 'warning', line: 1, message: 'x' },
+          ],
+          summary: { totalFiles: 1, totalViolations: 1, errorCount: 0, warningCount: 1, infoCount: 0, bySeverity: {} },
+        } as never);
+
+        const result = await initBaselineCommand(['src/bad.ts'], '/tmp/x.json');
+
+        expect(result.ok).toBe(true);
+        const written = JSON.parse(vi.mocked(mockWriteFile).mock.calls[0][1] as string);
+        expect(written['src/bad.ts'].totalWarnings).toBe(1);
+      });
+
+      it('refuses to write when the baseline cannot be read at all', async () => {
+        // EACCES and friends must not be treated as "empty", or the save below
+        // would replace content we never managed to inspect.
+        const eacces = Object.assign(new Error('EACCES: permission denied'), { code: 'EACCES' });
+        (mockReadFile as ReturnType<typeof vi.fn>).mockRejectedValue(eacces);
+
+        const result = await initBaselineCommand(['src/new.ts'], '/tmp/x.json');
+
+        expect(result.ok).toBe(false);
+        expect(result.reason).toMatch(/Cannot read baseline/);
+        expect(mockWriteFile).not.toHaveBeenCalled();
       });
     });
 
