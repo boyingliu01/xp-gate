@@ -101,6 +101,11 @@ describe('Boy Scout Rule Enforcement', () => {
    */
   describe('baseline management', () => {
     it('returns empty baseline when file missing', async () => {
+      // `fs/promises` is mocked for this file, so a bare call would hit a stub
+      // `access` that resolves and a stub `readFile` returning undefined. Arm
+      // the ENOENT path explicitly so this test exercises its stated intent.
+      (mockAccess as ReturnType<typeof vi.fn>).mockRejectedValue(new Error('ENOENT'));
+
       const baseline = await loadBaseline('.nonexistent-baseline.json');
       expect(baseline).toEqual({});
     });
@@ -431,13 +436,134 @@ describe('Boy Scout Rule Enforcement', () => {
       expect(result).toEqual({});
     });
 
-    it('returns empty object when JSON parse fails', async () => {
+    it('throws when the file exists but is not valid JSON', async () => {
       (mockAccess as ReturnType<typeof vi.fn>).mockResolvedValue(undefined);
       (mockReadFile as ReturnType<typeof vi.fn>).mockResolvedValue('not json');
 
-      const result = await loadBaseline('/tmp/bad.json');
+      // Behaviour changed in #455: a present-but-unreadable baseline used to
+      // degrade to `{}`, which silently gave every file an empty budget and made
+      // the gate pass everything. A corrupt file must fail loudly instead.
+      await expect(loadBaseline('/tmp/bad.json')).rejects.toThrow(/not valid JSON/i);
+    });
 
-      expect(result).toEqual({});
+    /**
+     * @test REQ-QG-005
+     * @intent 验证畸形基线条目（裸数字而非 {totalWarnings,...} 对象）被拒绝：
+     *         畸形条目会让 entry.totalWarnings 取到 undefined，使
+     *         `currentWarnings > undefined` 与 `undefined <= 5` 同时为假 ->
+     *         该文件无论增加多少警告都永远 PASS（issue #455）
+     * @covers AC-QG-005-01
+     */
+    describe('malformed entries (#455)', () => {
+      const armBaseline = (content: string) => {
+        (mockAccess as ReturnType<typeof vi.fn>).mockResolvedValue(undefined);
+        (mockReadFile as ReturnType<typeof vi.fn>).mockResolvedValue(content);
+      };
+
+      it('rejects a bare number where an entry object is required', async () => {
+        // This is the exact shape committed in 791d825 and still in HEAD:
+        // {"src/npm-package/lib/test-alignment.ts": 1}
+        armBaseline(JSON.stringify({ 'src/a.ts': 1 }));
+
+        await expect(loadBaseline('/tmp/x.json')).rejects.toThrow(/malformed/i);
+      });
+
+      it('rejects an entry whose totalWarnings is not a finite number', async () => {
+        armBaseline(JSON.stringify({ 'src/a.ts': { lastAnalyzed: '2024-01-01' } }));
+
+        await expect(loadBaseline('/tmp/x.json')).rejects.toThrow(/malformed/i);
+      });
+
+      it('rejects an entry whose totalWarnings is null', async () => {
+        armBaseline(JSON.stringify({ 'src/a.ts': { totalWarnings: null, lastAnalyzed: 'x' } }));
+
+        await expect(loadBaseline('/tmp/x.json')).rejects.toThrow(/malformed/i);
+      });
+
+      it('names the offending file so the broken entry can be found', async () => {
+        armBaseline(JSON.stringify({ 'src/ok.ts': { totalWarnings: 2, lastAnalyzed: 'x' }, 'src/bad.ts': 1 }));
+
+        await expect(loadBaseline('/tmp/x.json')).rejects.toThrow(/src\/bad\.ts/);
+      });
+
+      it('still accepts a well-formed baseline', async () => {
+        const good = { 'src/a.ts': { totalWarnings: 3, lastAnalyzed: '2024-01-01' } };
+        armBaseline(JSON.stringify(good));
+
+        await expect(loadBaseline('/tmp/x.json')).resolves.toEqual(good);
+      });
+
+      it('accepts an empty baseline object', async () => {
+        armBaseline('{}');
+
+        await expect(loadBaseline('/tmp/x.json')).resolves.toEqual({});
+      });
+    });
+
+    /**
+     * @test REQ-QG-005
+     * @intent 验证修复路径可用：initBaselineCommand 是修坏基线的工具，
+     *         因此不能要求基线先完好，否则畸形条目无法通过任何受支持路径修复（#455）
+     * @covers AC-QG-005-03
+     */
+    describe('repair path tolerates corrupt entries (#455)', () => {
+      it('drops a malformed entry instead of refusing to run', async () => {
+        (mockAccess as ReturnType<typeof vi.fn>).mockResolvedValue(undefined);
+        (mockReadFile as ReturnType<typeof vi.fn>).mockResolvedValue(
+          JSON.stringify({ 'src/bad.ts': 1 }),
+        );
+        mockAnalyze.mockResolvedValue({
+          files: [],
+          violations: [],
+          summary: { totalFiles: 1, totalViolations: 0, errorCount: 0, warningCount: 0, infoCount: 0, bySeverity: {} },
+        } as never);
+        vi.mocked(mockWriteFile).mockResolvedValue(undefined);
+
+        const result = await initBaselineCommand(['src/new.ts'], '/tmp/x.json');
+
+        expect(result.ok).toBe(true);
+        // The corrupt entry must not survive into the rewritten baseline.
+        const written = JSON.parse(vi.mocked(mockWriteFile).mock.calls[0][1] as string);
+        expect(written).not.toHaveProperty('src/bad.ts');
+      });
+    });
+
+    /**
+     * @test REQ-QG-005
+     * @intent 验证 delta 为 NaN 时判定为 BLOCK：NaN 只可能来自损坏的基线，
+     *         而 `NaN > n` 与 `NaN <= n` 都是 false，会让门禁静默通过
+     * @covers AC-QG-005-02
+     */
+    describe('non-finite delta (#455)', () => {
+      it('blocks when the baseline value is not a finite number', () => {
+        const broken = { totalWarnings: undefined, lastAnalyzed: 'x' } as unknown as BaselineEntry;
+
+        const result = calculateDelta(broken, 5, 'MODIFIED');
+
+        expect(result.enforcement).toBe('BLOCK');
+        // delta must be NaN ("cannot compute"), never a real-looking number.
+        expect(Number.isNaN(result.delta)).toBe(true);
+      });
+
+      it('blocks the bare-number baseline shape that shipped in 791d825', () => {
+        // {"src/a.ts": 1} -- JSON.parse accepts it, TS accepts the cast, and
+        // `entry.totalWarnings` is undefined. Before the fix both block
+        // conditions compared false against undefined and the file passed.
+        const bareNumber = 1 as unknown as BaselineEntry;
+
+        const result = calculateDelta(bareNumber, 14, 'MODIFIED');
+
+        expect(result.enforcement).toBe('BLOCK');
+        expect(result.reason).toMatch(/corrupt/i);
+      });
+
+      it('still enforces the normal threshold for a well-formed baseline', () => {
+        // Guard against the fix being implemented by blocking everything.
+        const good = { totalWarnings: 13, lastAnalyzed: 'x' } as BaselineEntry;
+
+        expect(calculateDelta(good, 13, 'MODIFIED').enforcement).toBe('PASS');
+        expect(calculateDelta(good, 14, 'MODIFIED').enforcement).toBe('BLOCK');
+      });
     });
   });
 

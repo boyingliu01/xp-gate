@@ -124,14 +124,119 @@ export function classifyFiles(gitDiffLines: string[]): FileClassification {
   return result;
 }
 
+/**
+ * Validate one baseline entry.
+ *
+ * The on-disk shape is `{ totalWarnings: number, lastAnalyzed: string }`. A bare
+ * number -- `{"src/a.ts": 1}` -- is accepted by `JSON.parse` and by TypeScript's
+ * unchecked cast, but `entry.totalWarnings` then reads `undefined`, and BOTH
+ * block conditions in `evaluateModifiedFile` become false:
+ *
+ *   `currentWarnings > undefined`  === false
+ *   `undefined <= 5`               === false
+ *
+ * So the file silently passes forever no matter how many warnings it gains. That
+ * exact shape is committed in 791d825 and still present in HEAD, which is why
+ * this is a hard failure rather than a warning (#455). A baseline whose numbers
+ * cannot be trusted is worse than no baseline, because the gate still reports
+ * "PASSED" and nobody looks.
+ */
+function assertValidEntry(file: string, entry: unknown): asserts entry is BaselineEntry {
+  const malformed = (detail: string): never => {
+    throw new Error(
+      `Malformed baseline entry for ${file}: ${detail}. ` +
+        `Expected { totalWarnings: number, lastAnalyzed: string }. ` +
+        `Repair it with \`xp-gate baseline create\` rather than editing by hand.`,
+    );
+  };
+
+  if (entry === null || typeof entry !== 'object' || Array.isArray(entry)) {
+    malformed(`got ${Array.isArray(entry) ? 'an array' : typeof entry}`);
+  }
+  const total = (entry as BaselineEntry).totalWarnings;
+  if (typeof total !== 'number' || !Number.isFinite(total)) {
+    malformed(`totalWarnings is ${total === undefined ? 'missing' : String(total)}`);
+  }
+}
+
+/**
+ * Read the warning baseline.
+ *
+ * A missing file is normal (first run) and yields `{}`. A file that exists but
+ * cannot be parsed or whose entries are malformed is an error: continuing with
+ * silently-empty budgets is what let the gate pass everything in #455.
+ */
 export async function loadBaseline(baselinePath: string): Promise<Record<string, BaselineEntry>> {
+  let baselineContent: string;
   try {
     await fs.access(baselinePath);
-    const baselineContent = await fs.readFile(baselinePath, 'utf-8');
-    return JSON.parse(baselineContent);
+    baselineContent = await fs.readFile(baselinePath, 'utf-8');
   } catch {
+    // Not present yet -- nothing has been snapshotted. Callers treat this as an
+    // empty budget, which is the documented first-run behaviour.
     return {};
   }
+
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(baselineContent);
+  } catch (error) {
+    const reason = error instanceof Error ? error.message : String(error);
+    throw new Error(`Baseline ${baselinePath} is not valid JSON: ${reason}`);
+  }
+
+  if (parsed === null || typeof parsed !== 'object' || Array.isArray(parsed)) {
+    throw new Error(`Baseline ${baselinePath} must be a JSON object mapping paths to entries.`);
+  }
+
+  for (const [file, entry] of Object.entries(parsed as Record<string, unknown>)) {
+    assertValidEntry(file, entry);
+  }
+  return parsed as Record<string, BaselineEntry>;
+}
+
+/**
+ * Read the baseline for repair, tolerating entries `loadBaseline` would reject.
+ *
+ * `initBaselineCommand` is the tool that fixes a broken baseline, so it cannot
+ * require the baseline to be well-formed first -- otherwise a corrupt entry is
+ * unrecoverable by any supported path (#455). Malformed entries are dropped and
+ * reported; everything else is preserved, because silently discarding unrelated
+ * budgets is the destructive overwrite fixed in #445.
+ */
+async function loadBaselineForRepair(
+  baselinePath: string,
+): Promise<{ entries: Record<string, BaselineEntry>; dropped: string[] }> {
+  let raw: Record<string, BaselineEntry>;
+  try {
+    raw = await loadBaseline(baselinePath);
+    return { entries: raw, dropped: [] };
+  } catch {
+    // Fall through to the tolerant path below.
+  }
+
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(await fs.readFile(baselinePath, 'utf-8'));
+  } catch {
+    // Unreadable or absent: nothing to preserve, so start from empty.
+    return { entries: {}, dropped: [] };
+  }
+  if (parsed === null || typeof parsed !== 'object' || Array.isArray(parsed)) {
+    return { entries: {}, dropped: [] };
+  }
+
+  const entries: Record<string, BaselineEntry> = {};
+  const dropped: string[] = [];
+  for (const [file, entry] of Object.entries(parsed as Record<string, unknown>)) {
+    try {
+      assertValidEntry(file, entry);
+      entries[file] = entry;
+    } catch {
+      dropped.push(file);
+    }
+  }
+  return { entries, dropped };
 }
 
 /**
@@ -203,6 +308,26 @@ export function calculateDelta(
   status: 'NEW' | 'MODIFIED'
 ): DeltaResult {
   const baselineWarnings = baselineEntry ? baselineEntry.totalWarnings : 0;
+
+  // A non-finite baseline can only come from a corrupt entry. `loadBaseline`
+  // rejects those, but this is the last line of defence: `NaN` compares false
+  // against everything, so without this check the file would PASS forever
+  // instead of failing loudly (#455).
+  if (!Number.isFinite(baselineWarnings)) {
+    return {
+      file: '',
+      status,
+      baselineWarnings,
+      currentWarnings,
+      // NaN, not null: the field is typed `number`, and NaN is the honest value
+      // for "cannot be computed". It serialises to `null` in JSON, which reads
+      // as unavailable rather than as a real 0 delta.
+      delta: Number.NaN,
+      enforcement: 'BLOCK',
+      reason: `Baseline for this file is corrupt (totalWarnings is ${String(baselineWarnings)}). Repair .warnings-baseline.json before committing.`,
+    };
+  }
+
   const delta = status === 'NEW' ? currentWarnings : currentWarnings - baselineWarnings;
 
   const evaluation = status === 'NEW'
@@ -411,7 +536,7 @@ async function initBaselineCommand(
   files: string[],
   baselinePath = '.warnings-baseline.json',
 ): Promise<{ ok: boolean; reason?: string }> {
-  const existing = await loadBaseline(baselinePath);
+  const { entries: existing, dropped } = await loadBaselineForRepair(baselinePath);
   const existingKeys = Object.keys(existing);
 
   const analyzed = await initBaseline(files);
@@ -427,6 +552,16 @@ async function initBaselineCommand(
       added.push(file);
     }
     merged[file] = entry;
+  }
+
+  // A dropped entry is recreated from the current tree only if it is in `files`.
+  // Otherwise it is gone: we cannot invent a warning count we never measured, and
+  // a wrong number would silently re-arm the gate, which is the bug being fixed.
+  if (dropped.length > 0) {
+    console.log(`⚠️  Dropped ${dropped.length} malformed baseline ${dropped.length === 1 ? 'entry' : 'entries'}:`);
+    for (const file of dropped) {
+      console.log(`   - ${file} (recreated only if passed via --new-files/--modified-files)`);
+    }
   }
 
   // `merged` starts as a copy of `existing`, so a non-empty baseline can never
