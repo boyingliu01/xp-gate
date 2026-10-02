@@ -477,7 +477,19 @@ async function runInitBaselineCommand(parsed: Record<string, unknown>): Promise<
   try {
     // Honor --baseline; the old code hardcoded the default path (#445).
     const baselinePath = (parsed.baselinePath as string) || '.warnings-baseline.json';
-    const result = await initBaselineCommand((parsed.files ?? []) as string[], baselinePath);
+    const files = collectBaselineTargets(parsed);
+    if (files.length === 0) {
+      // Writing an empty baseline while reporting success is how a caller ends up
+      // believing a file was recorded when nothing was. `--init-baseline` takes
+      // its targets as its own value; `--new-files`/`--modified-files` also work,
+      // and previously writing them was silently ignored as well.
+      console.error(
+        'No files to record. Pass them to --init-baseline <file1,file2,...>, ' +
+          'or via --new-files/--modified-files.',
+      );
+      return 1;
+    }
+    const result = await initBaselineCommand(files, baselinePath);
     // Use the explicit result, never process.exitCode: global exit state can be
     // set by unrelated code and would misreport this command's outcome.
     return result.ok ? 0 : 1;
@@ -485,6 +497,30 @@ async function runInitBaselineCommand(parsed: Record<string, unknown>): Promise<
     console.error('Error initializing baseline:', error);
     return 1;
   }
+}
+
+/**
+ * Merge every way a caller can name files for `--init-baseline`.
+ *
+ * `--init-baseline` carries its own list (`parsed.files`), while
+ * `--new-files`/`--modified-files` populate separate keys. Requiring exactly one
+ * spelling meant the other was read as an empty list, so the command wrote `{}`
+ * and exited 0 -- a silent no-op (#455 family). Union them instead, preserving
+ * order and dropping duplicates.
+ */
+function collectBaselineTargets(parsed: Record<string, unknown>): string[] {
+  const groups = [
+    parsed.files as string[] | undefined,
+    parsed.newFiles as string[] | undefined,
+    parsed.modifiedFiles as string[] | undefined,
+  ];
+  const seen = new Set<string>();
+  for (const group of groups) {
+    for (const file of group ?? []) {
+      if (file) seen.add(file);
+    }
+  }
+  return [...seen];
 }
 
 export async function runEnforcementCommand(parsed: Record<string, unknown>): Promise<number> {
@@ -513,14 +549,32 @@ function splitCsvArg(raw: string | undefined): string[] {
   return raw?.split(',').map((s: string) => s.trim()).filter(Boolean) || [];
 }
 
+/**
+ * Read a flag's value, refusing to swallow the next flag.
+ *
+ * A bare `next` is taken as the value only when it does not itself look like a
+ * flag; otherwise the flag is treated as having no value and the following token
+ * is parsed normally. Without this, `--baseline --new-files x` recorded the
+ * literal string "--new-files" as a path (#455).
+ */
+function takeValue(next: string | undefined): { value: string | undefined; consumed: boolean } {
+  const isFlag = typeof next === 'string' && next.startsWith('--');
+  return isFlag || next === undefined ? { value: undefined, consumed: false } : { value: next, consumed: true };
+}
+
 const ARG_HANDLERS: Record<string, (parsed: Record<string, unknown>, next: string | undefined) => boolean> = {
-  '--new-files': (parsed, next) => { parsed.newFiles = splitCsvArg(next); return true; },
-  '--modified-files': (parsed, next) => { parsed.modifiedFiles = splitCsvArg(next); return true; },
-  '--baseline': (parsed, next) => { parsed.baselinePath = next; return true; },
+  '--new-files': (parsed, next) => { const v = takeValue(next); parsed.newFiles = splitCsvArg(v.value); return v.consumed; },
+  '--modified-files': (parsed, next) => { const v = takeValue(next); parsed.modifiedFiles = splitCsvArg(v.value); return v.consumed; },
+  '--baseline': (parsed, next) => { const v = takeValue(next); parsed.baselinePath = v.value; return v.consumed; },
   '--init-baseline': (parsed, next) => {
     parsed.command = 'init-baseline';
-    parsed.files = splitCsvArg(next);
-    return true;
+    // The file list is OPTIONAL and positional: `--init-baseline a.ts,b.ts` works,
+    // and so does `--init-baseline --new-files a.ts`. Consuming the next token
+    // unconditionally swallowed the following FLAG, which silently produced an
+    // empty baseline that the command then reported as success (#455).
+    const v = takeValue(next);
+    parsed.files = splitCsvArg(v.value);
+    return v.consumed;
   },
 };
 
