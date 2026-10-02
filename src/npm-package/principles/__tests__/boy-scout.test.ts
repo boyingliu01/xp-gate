@@ -819,5 +819,75 @@ describe('Boy Scout Rule Enforcement', () => {
         fs.rmSync(tmp, { recursive: true, force: true });
       }
     });
+
+    /**
+     * @test REQ-QG-005
+     * @intent 验证 `--init-baseline` 的两种文件来源都被接受，且传了文件却没记录
+     *         任何东西时必须失败：早先它无条件消费下一个 token，于是
+     *         `--init-baseline --new-files a.ts` 把 flag 当文件名、静默写空基线并 exit 0
+     * @covers AC-QG-005-04
+     */
+    describe('--init-baseline accepts both file sources (#455)', () => {
+      // A long function is a WARNING (a bare magic number is only `info`), and
+      // `initBaseline` counts warning-severity violations only -- so the fixture
+      // has to trip a warning rule or the entry is legitimately absent.
+      const LONG_FUNCTION = 'export function f(): number {\n' + '  const a = 1;\n'.repeat(55) + '  return a;\n}\n';
+
+      it('records files named via --new-files, not just positional ones', () => {
+        const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'boy-scout-init-nf-'));
+        try {
+          fs.writeFileSync(path.join(tmp, 'warn.ts'), LONG_FUNCTION);
+          const baselinePath = path.join(tmp, '.warnings-baseline.json');
+          const { code, stdout } = runCli([
+            '--init-baseline', '--new-files', 'warn.ts',
+            '--baseline', baselinePath,
+          ], tmp);
+
+          expect(code).toBe(0);
+          expect(stdout).toContain('Baseline updated:');
+          const written = JSON.parse(fs.readFileSync(baselinePath, 'utf-8'));
+          // The regression: this used to be {} because the file list was read as
+          // empty, so a caller was told the file was recorded when it was not.
+          expect(written['warn.ts']?.totalWarnings).toBeGreaterThan(0);
+        } finally {
+          fs.rmSync(tmp, { recursive: true, force: true });
+        }
+      });
+
+      it('does not swallow the following flag as a filename', () => {
+        const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'boy-scout-init-swallow-'));
+        try {
+          fs.writeFileSync(path.join(tmp, 'warn.ts'), LONG_FUNCTION);
+          const baselinePath = path.join(tmp, 'custom-baseline.json');
+          const { code } = runCli([
+            '--init-baseline', 'warn.ts',
+            '--baseline', baselinePath,
+          ], tmp);
+
+          expect(code).toBe(0);
+          // The baseline must land at the path given by --baseline. If the parser
+          // ate '--baseline' as a filename, the default path gets written instead.
+          expect(fs.existsSync(baselinePath)).toBe(true);
+          expect(fs.existsSync(path.join(tmp, '.warnings-baseline.json'))).toBe(false);
+        } finally {
+          fs.rmSync(tmp, { recursive: true, force: true });
+        }
+      });
+
+      it('fails loudly when no files are given at all', () => {
+        const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'boy-scout-init-none-'));
+        try {
+          const baselinePath = path.join(tmp, '.warnings-baseline.json');
+          const { code, stderr } = runCli(['--init-baseline', '--baseline', baselinePath], tmp);
+
+          // Writing an empty baseline and exiting 0 is how a caller concludes a
+          // file was recorded when nothing was.
+          expect(code).toBe(1);
+          expect(stderr).toMatch(/No files to record/);
+        } finally {
+          fs.rmSync(tmp, { recursive: true, force: true });
+        }
+      });
+    });
   });
 });
