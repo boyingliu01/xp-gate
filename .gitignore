@@ -169,3 +169,5 @@ coverage.xml
 .rescue/
 # Delphi review scratch space (contains 0-byte debris that trips Gate 12)
 .delphi-r2/
+
+.cm.txt
