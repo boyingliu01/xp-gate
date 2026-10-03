@@ -293,7 +293,7 @@ echo ""
 GATE_0_START=$(gate_start_ms)
 GATE_0_STATUS="PASS"
 
-CURRENT_BRANCH=$(git rev-parse --abbrev-ref HEAD)
+CURRENT_BRANCH=$(git symbolic-ref --short HEAD 2>/dev/null || git rev-parse --abbrev-ref HEAD 2>/dev/null || echo "HEAD")
 PROTECTED_BRANCHES="master develop trunk mainline"
 ROOT_DIR=$(git rev-parse --show-toplevel 2>/dev/null || echo ".")
 
@@ -1458,7 +1458,7 @@ else
 
   SKIP_5A_BLOCK=false
   if [ "${SKIP_GATE_5A_BLOCK:-0}" = "1" ]; then
-    CURRENT_BRANCH=$(git rev-parse --abbrev-ref HEAD)
+    CURRENT_BRANCH=$(git symbolic-ref --short HEAD 2>/dev/null || git rev-parse --abbrev-ref HEAD 2>/dev/null || echo "HEAD")
     if [ "$CURRENT_BRANCH" != "main" ] && [ "$CURRENT_BRANCH" != "master" ]; then
       REASON="${SKIP_GATE_5A_BLOCK_REASON:-not specified}"
       mkdir -p .xp-gate/reports
@@ -2658,8 +2658,9 @@ else
   echo "     ⏭️  SKIPPED - Build integrity (not a TypeScript project)"
 fi
 
-GATE_9_END=$(date +%s)
-GATE_9_DURATION=$((GATE_9_END - GATE_9_START))
+GATE_9_END=$(gate_start_ms)
+GATE_9_DURATION_MS=$((GATE_9_END - GATE_9_START))
+GATE_9_DURATION=$((GATE_9_DURATION_MS / 1000))
 echo "✅ Gate 9 completed in ${GATE_9_DURATION}s"
 record_gate_audit "gate-9" "build-integrity" "$GATE_9_STATUS" "0" "$GATE_9_START"
 echo ""
