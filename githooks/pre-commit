@@ -154,6 +154,45 @@ is_runner_infrastructure_error() {
   return 0
 }
 
+# Judge a non-zero vitest exit and report the outcome (Issue #454).
+#
+# Before this helper existed, each Gate 5 branch carried its own
+# `echo "❌ BLOCKED - Tests FAILED"`, and only ONE of them consulted
+# is_runner_infrastructure_error. The others therefore reported a Windows
+# EPERM-on-temp-cache runner error as a genuine test failure, sending
+# developers hunting for a bug that did not exist. Routing every vitest branch
+# through one helper makes that class of drift structurally impossible.
+#
+# Usage: handle_test_failure <output> <site-context>
+#   $1 = captured test output (passed EXPLICITLY -- never read a global, so a
+#        branch that forgets to set one fails loudly instead of silently
+#        treating empty output as "no runner error")
+#   $2 = short context label used in the BLOCK message; may be empty
+# Returns 0 when the run should be treated as SKIPPED (runner infrastructure
+# error), 1 when it must BLOCK. Callers use `|| exit 1`.
+#
+# NOTE: only vitest branches may call this. The generic `run_tests` fallbacks
+# (non-TS adapters) are deliberately left unguarded: their output format is not
+# guaranteed to look like vitest's, so guarding them could let a real failure
+# through.
+handle_test_failure() {
+  local _out="$1"
+  local _ctx="$2"
+  if is_runner_infrastructure_error "$_out"; then
+    echo ""
+    echo "⏭️  SKIPPED - vitest runner infrastructure error (no test failed)"
+    echo "    Detected: Unhandled Errors with 0 failed tests."
+    echo "    Known Windows issue: EPERM on vitest temp/ssr cache (#454)."
+    echo "    Workaround: npx vitest run --no-file-parallelism <targets>"
+    TESTS_SKIPPED=true
+    TESTS_EXIT_CODE=0
+    return 0
+  fi
+  echo ""
+  echo "❌ BLOCKED - Tests FAILED${_ctx:+ in ${_ctx}}"
+  return 1
+}
+
 # Parse LCOV file and return coverage percentage
 # Usage: parse_lcov_coverage <lcov_file>
 # Returns: coverage percentage (e.g., "85.5")
@@ -1881,9 +1920,7 @@ else
             TESTS_EXIT_CODE=$?
             echo "$TESTS_OUTPUT" | head -60
             if [ "$TESTS_EXIT_CODE" -ne 0 ]; then
-              echo ""
-              echo "❌ BLOCKED - Tests FAILED"
-              exit 1
+              handle_test_failure "$TESTS_OUTPUT" "full test suite" || exit 1
             else
               echo "✅ PASSED - Full test suite passed (with coverage)."
             fi
@@ -1898,23 +1935,9 @@ else
             echo "$TESTS_OUTPUT" | head -60
             if [ "$TESTS_EXIT_CODE" -ne 0 ]; then
               # Distinguish a real test failure from a runner infrastructure
-              # error. vitest 1.6.x on Windows can exit non-zero with
-              # "Unhandled Errors" (EPERM on its temp/ssr module cache) while
-              # every test passes -- see #454. Mis-reporting that as
-              # "Tests FAILED" sends developers hunting for a nonexistent bug.
-              if is_runner_infrastructure_error "$TESTS_OUTPUT"; then
-                echo ""
-                echo "⏭️  SKIPPED - vitest runner infrastructure error (no test failed)"
-                echo "    Detected: Unhandled Errors with 0 failed tests."
-                echo "    Known Windows issue: EPERM on vitest temp/ssr cache (#454)."
-                echo "    Workaround: npx vitest run --no-file-parallelism <targets>"
-                TESTS_SKIPPED=true
-                TESTS_EXIT_CODE=0
-              else
-                echo ""
-                echo "❌ BLOCKED - Tests FAILED in changed test files"
-                exit 1
-              fi
+              # error -- see #454. handle_test_failure routes both cases and
+              # keeps the message consistent across every Gate 5 branch.
+              handle_test_failure "$TESTS_OUTPUT" "changed test files" || exit 1
             else
               echo "✅ PASSED - Changed test files passed (with coverage)."
             fi
@@ -1956,9 +1979,7 @@ else
               TESTS_EXIT_CODE=$?
               echo "$TESTS_OUTPUT" | head -60
               if [ "$TESTS_EXIT_CODE" -ne 0 ]; then
-                echo ""
-                echo "❌ BLOCKED - Tests FAILED in related test files"
-                exit 1
+                handle_test_failure "$TESTS_OUTPUT" "related test files" || exit 1
               else
                 echo "✅ PASSED - Related test files passed (with coverage)."
               fi
@@ -1969,9 +1990,7 @@ else
               TESTS_EXIT_CODE=$?
               echo "$TESTS_OUTPUT" | head -60
               if [ "$TESTS_EXIT_CODE" -ne 0 ]; then
-                echo ""
-                echo "❌ BLOCKED - Tests FAILED"
-                exit 1
+                handle_test_failure "$TESTS_OUTPUT" "full test suite" || exit 1
               else
                 echo "✅ PASSED - Full test suite passed (with coverage)."
               fi
