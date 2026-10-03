@@ -1,14 +1,36 @@
 {
   "mode": "code-walkthrough",
-  "branch": "fix/standalone-gate-context",
-  "commit": "4744b64a6f0bf4f00783ce3e1aa9723c5aedc916",
-  "timestamp": "2026-08-26T16:03:45.850Z",
+  "branch": "fix/hook-drift-detection",
+  "commit": "208f8faf82443aa6b3e4b808e3faf328dc94e6b1",
+  "timestamp": "2026-10-03T05:20:47.300Z",
+  "expires": "2026-10-03T06:20:47.300Z",
   "verdict": "APPROVED",
   "consensus_ratio": 1,
+  "rounds": 3,
   "experts": [
-    "delphi-reviewer-architecture",
-    "delphi-reviewer-technical",
-    "delphi-reviewer-feasibility"
-  ],
-  "rounds": 1
+    {
+      "role": "architecture",
+      "verdict": "APPROVED",
+      "confidence": 8,
+      "result_type": "delphi_expert_result",
+      "requested_model": "g-glm-5.3-flash",
+      "resolved_model": "glm-5-3-flash-260826"
+    },
+    {
+      "role": "technical",
+      "verdict": "APPROVED",
+      "confidence": 9,
+      "result_type": "delphi_expert_result",
+      "requested_model": "g-qwen3.8-flash",
+      "resolved_model": "qwen3.8-flash"
+    },
+    {
+      "role": "feasibility",
+      "verdict": "APPROVED",
+      "confidence": 8,
+      "result_type": "delphi_expert_result",
+      "requested_model": "g-deepseek-flash",
+      "resolved_model": "deepseek-flash"
+    }
+  ]
 }
