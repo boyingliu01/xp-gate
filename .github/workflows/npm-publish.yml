@@ -197,6 +197,9 @@ jobs:
 
   create-release:
     needs: [publish-cli, publish-opencode-plugin, publish-dsh-plugin]
+    # Skip rather than cancel when an upstream publish job fails or is cancelled,
+    # so a transient npm failure doesn't silently drop the tag/release step (#419).
+    if: ${{ !failure() && !cancelled() }}
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
