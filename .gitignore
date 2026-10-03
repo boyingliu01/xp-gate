@@ -171,3 +171,4 @@ coverage.xml
 .delphi-r2/
 
 .cm.txt
+tsconfig.tsbuildinfo
