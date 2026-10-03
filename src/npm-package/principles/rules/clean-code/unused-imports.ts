@@ -4,7 +4,7 @@ import { getActiveConfig } from '../../config';
 export const unusedImportsRule: Rule = {
   id: 'clean-code.unused-imports',
   name: 'Unused Imports Rule',
-  threshold: 0,
+  threshold: 1,
   severity: 'info',
   check: (file: string, adapter: unknown): Violation[] => {
     const violations: Violation[] = [];

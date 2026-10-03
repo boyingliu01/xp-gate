@@ -28,6 +28,13 @@ __pycache__/
 # Init-generated module mirrors (principles, mutation, mock-policy)
 .xp-gate/modules/
 
+# Verification-time scratch scripts (adversarial probes, walkthrough drivers).
+# These assert machine-specific behaviour and must never be committed; naming them
+# with a dot prefix keeps `git add -A` from sweeping them in.
+.cw-*
+.adv-*
+.mw-e2e*
+
 # Init-generated adapter copies and per-project configs
 githooks/cpp.sh
 githooks/dart.sh
