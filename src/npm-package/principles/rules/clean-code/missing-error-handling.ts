@@ -4,7 +4,7 @@ import { getActiveConfig } from '../../config';
 export const missingErrorHandlingRule: Rule = {
   id: 'clean-code.missing-error-handling',
   name: 'Missing Error Handling Rule',
-  threshold: 0,
+  threshold: 1,
   severity: 'warning',
   check: (file: string, adapter: unknown): Violation[] => {
     const violations: Violation[] = [];

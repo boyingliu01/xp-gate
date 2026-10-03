@@ -33,15 +33,25 @@ else
       # enforces the SAME thresholds regardless of the process's cwd (#457).
       # Before this, `.principlesrc` was parsed and discarded, so the built-in
       # defaults were enforced instead of the project's.
-      PRINCIPLES_CONFIG=""
+      #
+      # Passed as an ARRAY, not a string: the repo path can contain spaces (the
+      # default Windows checkout is under `C:/Users/<name>/...`, and names contain
+      # spaces), and an unquoted `--config <path>` would split into two argv entries
+      # so the config would be silently ignored -- reintroducing exactly the defect
+      # #457 fixes, but only on paths with spaces. Deliberately not written as
+      # `PRINCIPLES_CONFIG="--config $PRINCIPLES_ROOT/.principlesrc"`: word splitting
+      # on expansion is the bug.
+      PRINCIPLES_CONFIG=()
       PRINCIPLES_ROOT="$(run_without_git_context git rev-parse --show-toplevel 2>/dev/null || echo "$PWD")"
       if [ -f "$PRINCIPLES_ROOT/.principlesrc" ]; then
-        PRINCIPLES_CONFIG="--config $PRINCIPLES_ROOT/.principlesrc"
+        PRINCIPLES_CONFIG=(--config "$PRINCIPLES_ROOT/.principlesrc")
       fi
       
       if command -v npx > /dev/null 2>&1; then
-        # Run principles checker and store results
-        if npx tsx $PRINCIPLES_DIR/index.ts --files $PRINCIPLES_FILES --format json $PRINCIPLES_CONFIG > /tmp/principles-output.json 2>/dev/null; then
+        # Run principles checker and store results. `${PRINCIPLES_CONFIG[@]+"${PRINCIPLES_CONFIG[@]}"}`
+        # expands to nothing when the array is empty, which `set -u` requires on older
+        # bash versions (macOS ships 3.2, where a bare `"${arr[@]}"` is an unbound error).
+        if npx tsx $PRINCIPLES_DIR/index.ts --files $PRINCIPLES_FILES --format json ${PRINCIPLES_CONFIG[@]+"${PRINCIPLES_CONFIG[@]}"} > /tmp/principles-output.json 2>/dev/null; then
           # Check severity levels. The reporter emits JSON.stringify(out, null, 2),
           # i.e. `"severity": "warning"` WITH a space; tolerate any whitespace so a
           # future minified format cannot silently zero these counts again (#444).
