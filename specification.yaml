@@ -119,6 +119,92 @@ specification:
           criteria: npm pack 产出含 lib/index.js + cordis.patch.yml + skills/；main 指向 lib/index.js；publishConfig.access=public
           test_type: integration
 
+    # ============================================================
+    # Sprint sprint-20261003-75: P0/P1 质量门禁缺陷修复
+    # 设计来源：docs/plans/2026-10-03-p0-p1-gate-defects.md（Delphi R2，共识 100%）
+    # ============================================================
+    - id: REQ-457
+      description: .principlesrc 配置必须真正生效 —— loadConfig 解析并校验配置文件，规则模块在运行时读取生效配置，而非模块加载时固化内置默认值
+      priority: critical
+      acceptance_criteria:
+        - id: AC-457-01
+          criteria: 传入 --config <path> 时，large-file.threshold 等数值项按该文件生效
+          test_type: unit
+        - id: AC-457-02
+          criteria: 未传 --config 时回退到 git toplevel 的 .principlesrc；该文件不存在才用内置默认值
+          test_type: unit
+        - id: AC-457-03
+          criteria: --config 的取值不得被当作待分析的源文件
+          test_type: unit
+        - id: AC-457-04
+          criteria: 规则项 enabled:false 时该规则不产出任何违规
+          test_type: unit
+        - id: AC-457-05
+          criteria: 类型不匹配的配置项回退内置默认值并告警，不得抛异常
+          test_type: unit
+        - id: AC-457-06
+          criteria: getDefaultConfig() 每次返回全新副本，调用方修改互不影响
+          test_type: unit
+        - id: AC-457-07
+          criteria: main() 退出码由 errorCount 决定，info 级别违规不得让 Gate 4 降级为 SKIPPED
+          test_type: unit
+
+    - id: REQ-452
+      description: Boy Scout baseline 必须可剪枝 —— 已删除文件的条目不得长期滞留并继承旧的警告额度
+      priority: high
+      acceptance_criteria:
+        - id: AC-452-10
+          criteria: pruneBaselineEntries 只删除「磁盘不存在 且 git 未跟踪」的条目（双重确认）
+          test_type: unit
+        - id: AC-452-11
+          criteria: git 不可用时全部条目保留（fail-closed）
+          test_type: unit
+        - id: AC-452-12
+          criteria: 默认 dry-run 不写盘；--apply 才落盘，且只删除过期条目
+          test_type: unit
+        - id: AC-452-13
+          criteria: baseline 格式非法时保留原文件并报错，不得判定为「全部过期」
+          test_type: unit
+
+    - id: REQ-454
+      description: Gate 5 必须区分 vitest runner 基础设施错误与真实测试失败 —— 同一判定逻辑覆盖全部 vitest 调用点
+      priority: critical
+      acceptance_criteria:
+        - id: AC-454-01
+          criteria: 全部 vitest 调用点经由 handle_test_failure 统一判定，输出显式传入而非读全局
+          test_type: unit
+        - id: AC-454-02
+          criteria: 仅含 Unhandled Error 且 0 个失败测试的输出判为 SKIP（TESTS_SKIPPED=true）
+          test_type: unit
+        - id: AC-454-03
+          criteria: 同时含 runner 噪音与真实失败测试时必须 BLOCK，不得因噪音放行
+          test_type: unit
+        - id: AC-454-04
+          criteria: 非 vitest 的通用兜底分支保持不加守卫（其输出格式无保证）
+          test_type: unit
+
+    - id: REQ-423
+      description: Gate MW 证据必须证明模型来源 —— channel 为显式白名单，resolved_model 必须非空且互异，杜绝伪造
+      priority: critical
+      acceptance_criteria:
+        - id: AC-423-01
+          criteria: 三个互异的真实模型且 channel 为 external/local 时校验通过
+          test_type: unit
+        - id: AC-423-02
+          criteria: channel 缺失、未知、大小写不符、非字符串时一律失败（不得默认取值）
+          test_type: unit
+        - id: AC-423-03
+          criteria: resolved_model 重复或为 null 时失败
+          test_type: unit
+        - id: AC-423-04
+          criteria: resolved_model 比较前 trim 并转小写，大小写变体视为重复
+          test_type: unit
+        - id: AC-423-05
+          criteria: 生产者遇网关未回传 model 时报硬错误，不写入 null
+          test_type: unit
+        - id: AC-423-06
+          criteria: requested_model 去重校验保持有效
+          test_type: unit
   design_decisions:
     - id: DD-001
       decision: 走薄桥（方案 A）在 ctx.tools 注册三工具，而非独立 MCP server 或纯技能
@@ -136,3 +222,4 @@ specification:
       decision: 12 个 skills 随发布包经平台原生 bundledSkillDir（$DSH_BUNDLED_SKILL_DIR）分发，不做 customSkillDirs/cp
       rationale: dsh plugin add 后技能即可被 skill 工具自动发现，AC 不依赖手工操作
       alternatives_considered: ["customSkillDirs/cp（靠用户手工，被 Delphi R1 否决）"]
+
