@@ -62,6 +62,13 @@ interface DeltaResult {
 
 beforeEach(() => {
   vi.clearAllMocks();
+  // Default the mocked reader to "no baseline yet". A bare vi.fn() resolves to
+  // undefined, which loadBaseline now correctly rejects as unreadable content --
+  // so tests that do not arm a baseline must say ENOENT explicitly, exactly as a
+  // real first run would.
+  const enoent = Object.assign(new Error('ENOENT: no such file or directory'), { code: 'ENOENT' });
+  (mockReadFile as ReturnType<typeof vi.fn>).mockRejectedValue(enoent);
+  (mockAccess as ReturnType<typeof vi.fn>).mockRejectedValue(enoent);
 });
 
 /**
@@ -101,6 +108,11 @@ describe('Boy Scout Rule Enforcement', () => {
    */
   describe('baseline management', () => {
     it('returns empty baseline when file missing', async () => {
+      // `fs/promises` is mocked for this file, so a bare call would hit a stub
+      // `access` that resolves and a stub `readFile` returning undefined. Arm
+      // the ENOENT path explicitly so this test exercises its stated intent.
+      (mockAccess as ReturnType<typeof vi.fn>).mockRejectedValue(new Error('ENOENT'));
+
       const baseline = await loadBaseline('.nonexistent-baseline.json');
       expect(baseline).toEqual({});
     });
@@ -419,7 +431,8 @@ describe('Boy Scout Rule Enforcement', () => {
       const result = await loadBaseline('/tmp/test-baseline.json');
 
       expect(result).toEqual(mockData);
-      expect(mockAccess).toHaveBeenCalledWith('/tmp/test-baseline.json');
+      // `access` is no longer called first: probing then reading is a TOCTOU race,
+      // and it made every I/O failure look like "no baseline yet" (#455 review).
       expect(mockReadFile).toHaveBeenCalledWith('/tmp/test-baseline.json', 'utf-8');
     });
 
@@ -431,13 +444,170 @@ describe('Boy Scout Rule Enforcement', () => {
       expect(result).toEqual({});
     });
 
-    it('returns empty object when JSON parse fails', async () => {
+    it('throws when the file exists but is not valid JSON', async () => {
       (mockAccess as ReturnType<typeof vi.fn>).mockResolvedValue(undefined);
       (mockReadFile as ReturnType<typeof vi.fn>).mockResolvedValue('not json');
 
-      const result = await loadBaseline('/tmp/bad.json');
+      // Behaviour changed in #455: a present-but-unreadable baseline used to
+      // degrade to `{}`, which silently gave every file an empty budget and made
+      // the gate pass everything. A corrupt file must fail loudly instead.
+      await expect(loadBaseline('/tmp/bad.json')).rejects.toThrow(/not valid JSON/i);
+    });
 
-      expect(result).toEqual({});
+    /**
+     * @test REQ-QG-005
+     * @intent 验证畸形基线条目（裸数字而非 {totalWarnings,...} 对象）被拒绝：
+     *         畸形条目会让 entry.totalWarnings 取到 undefined，使
+     *         `currentWarnings > undefined` 与 `undefined <= 5` 同时为假 ->
+     *         该文件无论增加多少警告都永远 PASS（issue #455）
+     * @covers AC-QG-005-01
+     */
+    describe('malformed entries (#455)', () => {
+      const armBaseline = (content: string) => {
+        (mockAccess as ReturnType<typeof vi.fn>).mockResolvedValue(undefined);
+        (mockReadFile as ReturnType<typeof vi.fn>).mockResolvedValue(content);
+      };
+
+      it('rejects a bare number where an entry object is required', async () => {
+        // This is the exact shape committed in 791d825 and still in HEAD:
+        // {"src/npm-package/lib/test-alignment.ts": 1}
+        armBaseline(JSON.stringify({ 'src/a.ts': 1 }));
+
+        await expect(loadBaseline('/tmp/x.json')).rejects.toThrow(/malformed/i);
+      });
+
+      it('rejects an entry whose totalWarnings is not a finite number', async () => {
+        armBaseline(JSON.stringify({ 'src/a.ts': { lastAnalyzed: '2024-01-01' } }));
+
+        await expect(loadBaseline('/tmp/x.json')).rejects.toThrow(/malformed/i);
+      });
+
+      it('rejects an entry whose totalWarnings is null', async () => {
+        armBaseline(JSON.stringify({ 'src/a.ts': { totalWarnings: null, lastAnalyzed: 'x' } }));
+
+        await expect(loadBaseline('/tmp/x.json')).rejects.toThrow(/malformed/i);
+      });
+
+      it('names the offending file so the broken entry can be found', async () => {
+        armBaseline(JSON.stringify({ 'src/ok.ts': { totalWarnings: 2, lastAnalyzed: 'x' }, 'src/bad.ts': 1 }));
+
+        await expect(loadBaseline('/tmp/x.json')).rejects.toThrow(/src\/bad\.ts/);
+      });
+
+      it('still accepts a well-formed baseline', async () => {
+        const good = { 'src/a.ts': { totalWarnings: 3, lastAnalyzed: '2024-01-01' } };
+        armBaseline(JSON.stringify(good));
+
+        await expect(loadBaseline('/tmp/x.json')).resolves.toEqual(good);
+      });
+
+      it('accepts an empty baseline object', async () => {
+        armBaseline('{}');
+
+        await expect(loadBaseline('/tmp/x.json')).resolves.toEqual({});
+      });
+    });
+
+    /**
+     * @test REQ-QG-005
+     * @intent 验证修复路径可用：initBaselineCommand 是修坏基线的工具，
+     *         因此不能要求基线先完好，否则畸形条目无法通过任何受支持路径修复（#455）
+     * @covers AC-QG-005-03
+     */
+    describe('repair path tolerates corrupt entries (#455)', () => {
+      const armRepair = (content: string) => {
+        (mockReadFile as ReturnType<typeof vi.fn>).mockResolvedValue(content);
+        mockAnalyze.mockResolvedValue({
+          files: [],
+          violations: [],
+          summary: { totalFiles: 1, totalViolations: 0, errorCount: 0, warningCount: 0, infoCount: 0, bySeverity: {} },
+        } as never);
+        vi.mocked(mockWriteFile).mockResolvedValue(undefined);
+      };
+
+      it('drops a malformed entry instead of refusing to run', async () => {
+        armRepair(JSON.stringify({ 'src/bad.ts': 1 }));
+
+        const result = await initBaselineCommand(['src/new.ts'], '/tmp/x.json');
+
+        // The corrupt entry must not survive into the rewritten baseline...
+        const written = JSON.parse(vi.mocked(mockWriteFile).mock.calls[0][1] as string);
+        expect(written).not.toHaveProperty('src/bad.ts');
+        // ...and losing a budget must not be reported as success: the entry is
+        // gone unless the caller names it, so the exit code has to say so.
+        expect(result.ok).toBe(false);
+        expect(result.reason).toContain('src/bad.ts');
+      });
+
+      it('reports success when every dropped entry is rebuilt from the file list', async () => {
+        // Same corrupt file, but this time the caller asks for that very path, so
+        // the entry is measured afresh and nothing is lost.
+        armRepair(JSON.stringify({ 'src/bad.ts': 1 }));
+        mockAnalyze.mockResolvedValue({
+          files: [],
+          violations: [
+            { file: 'src/bad.ts', ruleId: 'clean-code.magic-numbers', severity: 'warning', line: 1, message: 'x' },
+          ],
+          summary: { totalFiles: 1, totalViolations: 1, errorCount: 0, warningCount: 1, infoCount: 0, bySeverity: {} },
+        } as never);
+
+        const result = await initBaselineCommand(['src/bad.ts'], '/tmp/x.json');
+
+        expect(result.ok).toBe(true);
+        const written = JSON.parse(vi.mocked(mockWriteFile).mock.calls[0][1] as string);
+        expect(written['src/bad.ts'].totalWarnings).toBe(1);
+      });
+
+      it('refuses to write when the baseline cannot be read at all', async () => {
+        // EACCES and friends must not be treated as "empty", or the save below
+        // would replace content we never managed to inspect.
+        const eacces = Object.assign(new Error('EACCES: permission denied'), { code: 'EACCES' });
+        (mockReadFile as ReturnType<typeof vi.fn>).mockRejectedValue(eacces);
+
+        const result = await initBaselineCommand(['src/new.ts'], '/tmp/x.json');
+
+        expect(result.ok).toBe(false);
+        expect(result.reason).toMatch(/Cannot read baseline/);
+        expect(mockWriteFile).not.toHaveBeenCalled();
+      });
+    });
+
+    /**
+     * @test REQ-QG-005
+     * @intent 验证 delta 为 NaN 时判定为 BLOCK：NaN 只可能来自损坏的基线，
+     *         而 `NaN > n` 与 `NaN <= n` 都是 false，会让门禁静默通过
+     * @covers AC-QG-005-02
+     */
+    describe('non-finite delta (#455)', () => {
+      it('blocks when the baseline value is not a finite number', () => {
+        const broken = { totalWarnings: undefined, lastAnalyzed: 'x' } as unknown as BaselineEntry;
+
+        const result = calculateDelta(broken, 5, 'MODIFIED');
+
+        expect(result.enforcement).toBe('BLOCK');
+        // delta must be NaN ("cannot compute"), never a real-looking number.
+        expect(Number.isNaN(result.delta)).toBe(true);
+      });
+
+      it('blocks the bare-number baseline shape that shipped in 791d825', () => {
+        // {"src/a.ts": 1} -- JSON.parse accepts it, TS accepts the cast, and
+        // `entry.totalWarnings` is undefined. Before the fix both block
+        // conditions compared false against undefined and the file passed.
+        const bareNumber = 1 as unknown as BaselineEntry;
+
+        const result = calculateDelta(bareNumber, 14, 'MODIFIED');
+
+        expect(result.enforcement).toBe('BLOCK');
+        expect(result.reason).toMatch(/corrupt/i);
+      });
+
+      it('still enforces the normal threshold for a well-formed baseline', () => {
+        // Guard against the fix being implemented by blocking everything.
+        const good = { totalWarnings: 13, lastAnalyzed: 'x' } as BaselineEntry;
+
+        expect(calculateDelta(good, 13, 'MODIFIED').enforcement).toBe('PASS');
+        expect(calculateDelta(good, 14, 'MODIFIED').enforcement).toBe('BLOCK');
+      });
     });
   });
 
@@ -608,7 +778,9 @@ describe('Boy Scout Rule Enforcement', () => {
         fs.writeFileSync(path.join(tmp, 'a.ts'), 'export const x = 1;\n');
         const { code, stdout } = runCli(['--init-baseline', 'a.ts'], tmp);
         expect(code).toBe(0);
-        expect(stdout).toContain('Baseline initialized successfully');
+        // The command MERGES into any existing baseline rather than replacing it
+        // (#445), so the message reports an update, not a fresh initialization.
+        expect(stdout).toContain('Baseline updated:');
         expect(fs.existsSync(path.join(tmp, '.warnings-baseline.json'))).toBe(true);
       } finally {
         fs.rmSync(tmp, { recursive: true, force: true });
@@ -646,6 +818,76 @@ describe('Boy Scout Rule Enforcement', () => {
       } finally {
         fs.rmSync(tmp, { recursive: true, force: true });
       }
+    });
+
+    /**
+     * @test REQ-QG-005
+     * @intent 验证 `--init-baseline` 的两种文件来源都被接受，且传了文件却没记录
+     *         任何东西时必须失败：早先它无条件消费下一个 token，于是
+     *         `--init-baseline --new-files a.ts` 把 flag 当文件名、静默写空基线并 exit 0
+     * @covers AC-QG-005-04
+     */
+    describe('--init-baseline accepts both file sources (#455)', () => {
+      // A long function is a WARNING (a bare magic number is only `info`), and
+      // `initBaseline` counts warning-severity violations only -- so the fixture
+      // has to trip a warning rule or the entry is legitimately absent.
+      const LONG_FUNCTION = 'export function f(): number {\n' + '  const a = 1;\n'.repeat(55) + '  return a;\n}\n';
+
+      it('records files named via --new-files, not just positional ones', () => {
+        const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'boy-scout-init-nf-'));
+        try {
+          fs.writeFileSync(path.join(tmp, 'warn.ts'), LONG_FUNCTION);
+          const baselinePath = path.join(tmp, '.warnings-baseline.json');
+          const { code, stdout } = runCli([
+            '--init-baseline', '--new-files', 'warn.ts',
+            '--baseline', baselinePath,
+          ], tmp);
+
+          expect(code).toBe(0);
+          expect(stdout).toContain('Baseline updated:');
+          const written = JSON.parse(fs.readFileSync(baselinePath, 'utf-8'));
+          // The regression: this used to be {} because the file list was read as
+          // empty, so a caller was told the file was recorded when it was not.
+          expect(written['warn.ts']?.totalWarnings).toBeGreaterThan(0);
+        } finally {
+          fs.rmSync(tmp, { recursive: true, force: true });
+        }
+      });
+
+      it('does not swallow the following flag as a filename', () => {
+        const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'boy-scout-init-swallow-'));
+        try {
+          fs.writeFileSync(path.join(tmp, 'warn.ts'), LONG_FUNCTION);
+          const baselinePath = path.join(tmp, 'custom-baseline.json');
+          const { code } = runCli([
+            '--init-baseline', 'warn.ts',
+            '--baseline', baselinePath,
+          ], tmp);
+
+          expect(code).toBe(0);
+          // The baseline must land at the path given by --baseline. If the parser
+          // ate '--baseline' as a filename, the default path gets written instead.
+          expect(fs.existsSync(baselinePath)).toBe(true);
+          expect(fs.existsSync(path.join(tmp, '.warnings-baseline.json'))).toBe(false);
+        } finally {
+          fs.rmSync(tmp, { recursive: true, force: true });
+        }
+      });
+
+      it('fails loudly when no files are given at all', () => {
+        const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'boy-scout-init-none-'));
+        try {
+          const baselinePath = path.join(tmp, '.warnings-baseline.json');
+          const { code, stderr } = runCli(['--init-baseline', '--baseline', baselinePath], tmp);
+
+          // Writing an empty baseline and exiting 0 is how a caller concludes a
+          // file was recorded when nothing was.
+          expect(code).toBe(1);
+          expect(stderr).toMatch(/No files to record/);
+        } finally {
+          fs.rmSync(tmp, { recursive: true, force: true });
+        }
+      });
     });
   });
 });

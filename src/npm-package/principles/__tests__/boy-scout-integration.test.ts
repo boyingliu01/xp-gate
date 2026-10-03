@@ -2,6 +2,8 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { exec } from 'child_process';
 import { promisify } from 'util';
 import * as path from 'path';
+import { tmpdir } from 'os';
+import { mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
 
 const execAsync = promisify(exec);
 
@@ -248,12 +250,48 @@ describe('CLI integration', () => {
     expect(stdout).toContain('Usage: boy-scout');
   }, CLI_TEST_TIMEOUT);
 
-  it('runs init-baseline via CLI', async () => {
+  it('runs init-baseline via CLI against an isolated baseline', async () => {
+    // Never point --baseline at the repo's tracked .warnings-baseline.json: this
+    // test must not mutate tracked state. Use a throwaway path instead (#445).
+    // NOTE: this file mocks 'fs/promises' (which also covers 'node:fs/promises'),
+    // so use node:fs sync APIs -- they are not intercepted.
+    const tmpBaseline = path.join(mkdtempSync(path.join(tmpdir(), 'bs-init-')), 'baseline.json');
     const { stdout } = await execAsync(
-      `npx tsx ${BOY_SCOUT_PATH} --init-baseline src/principles/boy-scout.ts`,
+      `npx tsx ${BOY_SCOUT_PATH} --init-baseline src/principles/boy-scout.ts --baseline "${tmpBaseline}"`,
       { timeout: 30000 }
     );
-    expect(stdout).toContain('Baseline initialized successfully');
+    // The command now reports a merge summary instead of the old (misleading)
+    // "Baseline initialized successfully" — it updates rather than replaces.
+    expect(stdout).toContain('Baseline updated');
+    expect(stdout).toContain(tmpBaseline);
+    expect(typeof readFileSync(tmpBaseline, 'utf-8')).toBe('string');
+  }, CLI_TEST_TIMEOUT);
+
+  /**
+   * @test REQ-DSH-014
+   * @intent 验证 CLI 的 --init-baseline 是合并语义：既有条目不因初始化无关文件而丢失
+   *         （#445 实测会把已跟踪基线摧毁成 {}）
+   * @covers AC-DSH-014-01
+   */
+  it('init-baseline preserves pre-existing entries (merge, not replace)', async () => {
+    const dir = mkdtempSync(path.join(tmpdir(), 'bs-merge-'));
+    const tmpBaseline = path.join(dir, 'baseline.json');
+    writeFileSync(
+      tmpBaseline,
+      JSON.stringify({
+        'src/legacy.ts': { totalWarnings: 3, lastAnalyzed: '2026-01-01T00:00:00.000Z' },
+      }),
+      'utf-8'
+    );
+
+    await execAsync(
+      `npx tsx ${BOY_SCOUT_PATH} --init-baseline src/principles/boy-scout.ts --baseline "${tmpBaseline}"`,
+      { timeout: 30000 }
+    );
+
+    const written = JSON.parse(readFileSync(tmpBaseline, 'utf-8'));
+    expect(written['src/legacy.ts']).toBeDefined();
+    expect(written['src/legacy.ts'].totalWarnings).toBe(3);
   }, CLI_TEST_TIMEOUT);
 
   it('runs enforcement via CLI with empty files', async () => {

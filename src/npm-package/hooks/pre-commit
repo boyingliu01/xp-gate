@@ -135,6 +135,25 @@ if ! declare -F run_tsx >/dev/null 2>&1; then
   }
 fi
 
+# Detect a vitest *runner infrastructure* failure as opposed to a real test
+# failure. On Windows, vitest 1.6.x can exit non-zero while reporting zero failed
+# tests, because its temp/ssr module cache hits EPERM (#454). Treating that as
+# "Tests FAILED" sends developers chasing a bug that does not exist.
+#
+# Returns 0 (true) only when both hold:
+#   - the output mentions "Unhandled Error" (vitest's runner-level failure), AND
+#   - no real test failure marker is present.
+is_runner_infrastructure_error() {
+  local _out="$1"
+  [ -n "$_out" ] || return 1
+  printf '%s' "$_out" | grep -qE 'Unhandled Error' || return 1
+  # A real failure must still block.
+  if printf '%s' "$_out" | grep -qE 'Tests +[0-9]+ failed|FAIL |AssertionError'; then
+    return 1
+  fi
+  return 0
+}
+
 # Parse LCOV file and return coverage percentage
 # Usage: parse_lcov_coverage <lcov_file>
 # Returns: coverage percentage (e.g., "85.5")
@@ -1650,7 +1669,15 @@ else
   # Gate 5b: Mock Density ADVISORY Scan (pure bash — no npx tsx overhead)
   # 30% = ADVISORY, 50% = suggests @mock-justified. Does NOT block commit.
   # ========================================================================
-  CHANGED_TEST_FILES=$(git diff --cached --name-only --diff-filter=ACM | grep -E '\.(test|spec)\.(ts|tsx|js|jsx|py|go)$' || true)
+  CHANGED_TEST_FILES=$(git diff --cached --name-only --diff-filter=ACM | grep -E '\.(test|spec)\.(ts|tsx|js|jsx|cjs|mjs|py|go)$' || true)
+
+  # Nested plugin sub-projects (plugins/<name>/) own their own vitest config and
+  # are excluded from the root suite (`vitest.config.ts` excludes `plugins/**`,
+  # because plugins/*/node_modules contains vendored tests). Feeding their test
+  # paths to the root vitest yields "No test files found" → false BLOCK, so drop
+  # them here and let the per-plugin suite cover them (CI runs `npm test` inside
+  # each plugin directory).
+  CHANGED_TEST_FILES=$(echo "$CHANGED_TEST_FILES" | grep -vE '^plugins/[^/]+/' || true)
 
   # Strip PROJECT_SUBDIR prefix from test file paths when running in subdirectory.
   # git diff returns repo-root relative paths, but after cd "$PROJECT_SUBDIR" (line 728)
@@ -1734,7 +1761,7 @@ else
       echo "⚠️  Gate 5c: req-ids.json is stale (specification.yaml updated since last check-alignment)"
       echo "   Run 'xp-gate check-alignment' to regenerate before next commit."
     else
-      CHANGED_TEST_FILES_ANNOTATED=$(echo "$CHANGED_FILES" | grep -E '\.(test|spec)\.(ts|tsx|js|jsx)$' || true)
+      CHANGED_TEST_FILES_ANNOTATED=$(echo "$CHANGED_FILES" | grep -E '\.(test|spec)\.(ts|tsx|js|jsx|cjs|mjs)$' || true)
       if [ -n "$CHANGED_TEST_FILES_ANNOTATED" ]; then
         echo "  → Checking @test REQ-XXX annotations..."
         ANNOTATION_ERRORS=0
@@ -1763,7 +1790,7 @@ else
         # Check reverse: any REQ in spec with no annotated test → visible FAIL (non-blocking)
         ALL_SPEC_REQS=$(jq -r '.[]' "$REQ_IDS_FILE" 2>/dev/null)
         ANNOTATED_ALL=""
-        for tf in $(echo "$CHANGED_FILES" | grep -E '\.(test|spec)\.(ts|tsx|js|jsx)$' || true); do
+        for tf in $(echo "$CHANGED_FILES" | grep -E '\.(test|spec)\.(ts|tsx|js|jsx|cjs|mjs)$' || true); do
           if [ -f "$tf" ]; then
             ANNOTATED_ALL="$ANNOTATED_ALL $(grep -oE '@test\s+REQ-[A-Z0-9-]+' "$tf" 2>/dev/null | sed 's/@test\s*//' || true)"
           fi
@@ -1822,6 +1849,10 @@ else
           
           # Also get changed source files (non-test) for related-test lookup
           CHANGED_SRC_FILES=$(git diff --cached --name-only --diff-filter=ACM | grep -E '\.(ts|tsx|js|jsx)$' | grep -v '\.test\.' | grep -v '\.spec\.' | grep -v '__tests__' | grep -v '\.d\.ts$' | grep -v '__snapshots__' || true)
+          # Nested plugin sub-projects are excluded from the root suite; their
+          # sources must not drive root-vitest related-test lookup either (it
+          # would resolve to plugin-local paths vitest cannot collect).
+          CHANGED_SRC_FILES=$(echo "$CHANGED_SRC_FILES" | grep -vE '^plugins/[^/]+/' || true)
           # Strip PROJECT_SUBDIR prefix (same as CHANGED_TEST_FILES fix above)
           if [ -n "$PROJECT_SUBDIR" ] && [ "$PROJECT_SUBDIR" != "." ] && [ -n "$CHANGED_SRC_FILES" ]; then
             CHANGED_SRC_FILES=$(echo "$CHANGED_SRC_FILES" | sed "s|^${PROJECT_SUBDIR}/||")
@@ -1852,9 +1883,24 @@ else
             TESTS_EXIT_CODE=$?
             echo "$TESTS_OUTPUT" | head -60
             if [ "$TESTS_EXIT_CODE" -ne 0 ]; then
-              echo ""
-              echo "❌ BLOCKED - Tests FAILED in changed test files"
-              exit 1
+              # Distinguish a real test failure from a runner infrastructure
+              # error. vitest 1.6.x on Windows can exit non-zero with
+              # "Unhandled Errors" (EPERM on its temp/ssr module cache) while
+              # every test passes -- see #454. Mis-reporting that as
+              # "Tests FAILED" sends developers hunting for a nonexistent bug.
+              if is_runner_infrastructure_error "$TESTS_OUTPUT"; then
+                echo ""
+                echo "⏭️  SKIPPED - vitest runner infrastructure error (no test failed)"
+                echo "    Detected: Unhandled Errors with 0 failed tests."
+                echo "    Known Windows issue: EPERM on vitest temp/ssr cache (#454)."
+                echo "    Workaround: npx vitest run --no-file-parallelism <targets>"
+                TESTS_SKIPPED=true
+                TESTS_EXIT_CODE=0
+              else
+                echo ""
+                echo "❌ BLOCKED - Tests FAILED in changed test files"
+                exit 1
+              fi
             else
               echo "✅ PASSED - Changed test files passed (with coverage)."
             fi
@@ -2459,9 +2505,19 @@ else
   if [ -n "$BOY_SCOUT_SCRIPT" ]; then
     echo "     Checking Boy Scout Rule compliance..."
     
-    # Separate new files and modified files
-    NEW_FILES=$(git diff --cached --name-only --diff-filter=A | tr '\n' ' ')
-    MODIFIED_FILES=$(git diff --cached --name-only --diff-filter=M | tr '\n' ' ') 
+    # Separate new files and modified files.
+    #
+    # src/npm-package/** is a byte-identical MIRROR of canonical sources
+    # (plugins/**, src/principles/**, githooks/**) produced by
+    # sync-package-content.js at publish time. Checking it here double-counts
+    # every warning: the mirror path enters the baseline instead of the source
+    # path, so a violation gets recorded against a path nobody edits and the
+    # real source path stays unbudgeted. Exclude it and let the mirroring be
+    # governed by Mirror Parity in CI, which compares content rather than
+    # re-linting it. (See the same exclusion in adapters/powershell.sh.)
+    MIRROR_EXCLUDE='^src/npm-package/'
+    NEW_FILES=$(git diff --cached --name-only --diff-filter=A | grep -v "$MIRROR_EXCLUDE" | tr '\n' ' ')
+    MODIFIED_FILES=$(git diff --cached --name-only --diff-filter=M | grep -v "$MIRROR_EXCLUDE" | tr '\n' ' ')
     
     if [ -z "$NEW_FILES" ] && [ -z "$MODIFIED_FILES" ]; then
       echo "     ✅ No new or modified files to check."

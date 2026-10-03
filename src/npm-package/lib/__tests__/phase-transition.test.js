@@ -697,7 +697,21 @@ describe('phase-transition', () => {
       const outsideDir = fs.mkdtempSync(path.join(os.tmpdir(), 'requirements-context-'));
       const outsideFile = path.join(outsideDir, 'CONTEXT.md');
       fs.writeFileSync(outsideFile, 'outside context\n', 'utf8');
-      fs.symlinkSync(outsideFile, path.join(tmpDir, 'CONTEXT.md'));
+      // Creating a symlink needs SeCreateSymbolicLinkPrivilege (or Developer Mode)
+      // on Windows and fails with EPERM otherwise. Returning early here would
+      // leave an assertion that can never fail, so the gap is reported instead --
+      // and the try/finally below still cleans up the temp dir.
+      try {
+        fs.symlinkSync(outsideFile, path.join(tmpDir, 'CONTEXT.md'));
+      } catch (error) {
+        fs.rmSync(outsideDir, { recursive: true, force: true });
+        console.warn(
+          '[skip] symlink privilege unavailable on this host; the outside-root ' +
+            'context symlink rejection is NOT covered by this run.',
+        );
+        expect(error.code).toBe('EPERM');
+        return;
+      }
       const evidence = validRequirementsReview(tmpDir, { context_file_used: 'CONTEXT.md' });
       writeRequirementsReview(tmpDir, evidence);
 
