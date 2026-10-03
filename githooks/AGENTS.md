@@ -118,10 +118,37 @@ bash githooks/verify.sh
 
 # Run BATS tests
 cd githooks/__tests__ && bats *.bats
+
+# Check / repair drift between this directory and the INSTALLED hooks
+xp-gate doctor                # reports hook drift + which copy is in charge
+xp-gate doctor --sync-hooks   # copy githooks/* over the installed copy
 ```
+
+## EFFECTIVE HOOKS — READ THIS BEFORE EDITING A HOOK
+
+This directory is the **source of truth in version control**, but it is **not
+necessarily what executes**. When `core.hooksPath` is set (global install), git
+runs the copy under `~/.config/xp-gate/hooks/` instead:
+
+```
+$ git config --get core.hooksPath
+C:/Users/think/.config/xp-gate/hooks
+```
+
+Editing a hook here therefore has **no local effect** until you sync. This was
+the whole of issue #451, and it is easy to misread as "my edit does nothing".
+
+```bash
+xp-gate doctor                # shows "Effective hooks:", the drift, and its direction
+xp-gate doctor --sync-hooks   # make this directory effective, then commit as normal
+```
+
+`xp-gate doctor` reports drift only when the current project actually carries
+hook files here (i.e. this repo, or a fork). Consumer projects get only
+`githooks/adapters/` from `xp-gate init`, which is not a hook source of truth.
 
 ## NOTES
 - See repo root `AGENTS.md` → "Known Drift" for the canonical list of doc-vs-reality gaps (gate count, C-adapter claim, etc).
 - Pre-push reads `.code-walkthrough-result.json` and compares `commit_hash` to `git rev-parse HEAD`.
 - Main-branch push: Gate M / M2 / M3 still execute; only the walkthrough validator is skipped.
-- Mutation testing CI: `.github/workflows/mutation-test.yml` (45-min timeout) runs the full suite outside this hook.
+- Mutation testing CI: `.github/workflows/mutation-test.yml` narrows `--mutate` to the files changed in the PR (full-suite runs exceed the 45-min budget).

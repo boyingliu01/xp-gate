@@ -161,7 +161,7 @@ Subcommands registered in 0.8.8.0 (verified against bin source):
 | `xp-gate init` | Install hooks + adapter infrastructure into current project |
 | `xp-gate setup-global` | Install adapters globally under `~/.config/xp-gate/` |
 | `xp-gate uninstall` | Reverse of `init`; supports `--dry-run --force --local --global` |
-| `xp-gate doctor` | Diagnose hook/adapter/env health; `--fix` for auto-repair |
+| `xp-gate doctor` | Diagnose hook/adapter/env health; `--fix` for auto-repair; `--sync-hooks` copies repo `githooks/` over the installed copy and reports which hooks actually execute (#451) |
 | `xp-gate migrate` | Clean v0.4.x GitHub-Packages residue from `~/.npmrc` |
 | `xp-gate baseline <create\|show\|reset\|diff>` | Manage lint baseline (Boy Scout track) |
 | `xp-gate install-skill <name>` | Download + install a skill from GitHub |

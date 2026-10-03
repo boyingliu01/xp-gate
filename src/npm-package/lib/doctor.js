@@ -256,6 +256,202 @@ async function checkGlobalHooks(checks) {
 }
 
 /**
+ * Hook files eligible for repo-vs-installed drift comparison. Only hooks that
+ * exist on both sides are compared, so a repo without post-merge is not flagged.
+ */
+const DRIFT_COMPARED_HOOKS = ['pre-commit', 'pre-push', 'post-merge'];
+
+/**
+ * Compare the hooks that actually execute (the installed copy under
+ * core.hooksPath) against the repository's source-of-truth `githooks/` (#451).
+ *
+ * Editing `githooks/pre-commit` in a repo has no local effect when
+ * `core.hooksPath` points at an installed copy, and nothing used to report how
+ * far the two had diverged or in which direction. A stale installed copy makes
+ * the local gate *looser* than the repo (silent under-enforcement); a newer one
+ * makes it *stricter* (spurious local failures). Both need to be visible.
+ *
+ * Direction uses mtime, which is the only ordering signal available without a
+ * shared version marker. It is reported as a hint, not as proof of content order.
+ *
+ * @param {{repoRoot?: string, repoHooks?: string, installedHooks?: string}} [ctx]
+ * @returns {{checks: Array<{name: string, status: string, detail: string}>, issues: number}}
+ */
+function diagnoseHookDrift(ctx = {}) {
+  const checks = [];
+  let issues = 0;
+
+  // XP_GATE_REPO_ROOT lets a caller (or a test) name the canonical repo
+  // explicitly instead of inferring it from the process cwd.
+  const repoRoot = ctx.repoRoot || process.env.XP_GATE_REPO_ROOT || process.cwd();
+  const repoHooks = ctx.repoHooks || path.join(repoRoot, 'githooks');
+  const installedHooks = ctx.installedHooks || GLOBAL_HOOKS_DIR;
+
+  // Nothing to compare when the project carries no canonical *hook* source, or
+  // when no global copy exists at all. Both must stay completely silent.
+  //
+  // A `githooks/` directory holding only `adapters/` is NOT a hook source of
+  // truth -- consumer projects get that layout from `xp-gate init`, and the
+  // adapters there are unrelated to which hook file executes.
+  if (!hasCanonicalHooks(repoHooks) || !fs.existsSync(installedHooks)) {
+    return { checks, issues };
+  }
+
+  for (const name of DRIFT_COMPARED_HOOKS) {
+    const repoFile = path.join(repoHooks, name);
+    const installedFile = path.join(installedHooks, name);
+    if (!fs.existsSync(repoFile) || !fs.existsSync(installedFile)) continue;
+
+    const label = `Hook drift: ${name}`;
+    let repoStat;
+    let installedStat;
+    try {
+      repoStat = fs.statSync(repoFile);
+      installedStat = fs.statSync(installedFile);
+    } catch {
+      continue;
+    }
+
+    if (filesAreIdentical(repoFile, installedFile)) {
+      checks.push({ name: label, status: 'PASS', detail: 'Installed copy matches githooks/' });
+      continue;
+    }
+
+    const direction = installedStat.mtimeMs > repoStat.mtimeMs
+      ? 'installed copy is newer than githooks/'
+      : 'githooks/ is newer than the installed copy (installed copy is older)';
+    checks.push({
+      name: label,
+      status: 'FAIL',
+      detail: `${direction} — local commits run githooks/${name} only after syncing`,
+    });
+    issues++;
+  }
+
+  return { checks, issues };
+}
+
+/** Compare two files by content length first, then by bytes. */
+function filesAreIdentical(fileA, fileB) {
+  try {
+    const a = fs.readFileSync(fileA);
+    const b = fs.readFileSync(fileB);
+    return a.length === b.length && a.equals(b);
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Does this directory actually hold canonical hook source?
+ *
+ * Requires at least one of the compared hook files to exist. A directory with
+ * only `adapters/` (what `xp-gate init` writes into consumer projects) does not
+ * qualify: there is no hook there to be the source of truth.
+ *
+ * @param {string} repoHooks
+ * @returns {boolean}
+ */
+function hasCanonicalHooks(repoHooks) {
+  if (!fs.existsSync(repoHooks)) return false;
+  return DRIFT_COMPARED_HOOKS.some((name) => fs.existsSync(path.join(repoHooks, name)));
+}
+
+/**
+ * Print which hook files git will actually execute, and where they come from
+ * (#451 REQ-3). A developer who edits `githooks/pre-commit` and sees no change
+ * has no way to discover that a different copy is in charge; this makes the
+ * effective path and its origin explicit.
+ */
+function printEffectiveHooks() {
+  const projectHooksPath = path.join(process.cwd(), '.git', 'hooks');
+
+  let configured = null;
+  try {
+    configured = execSync('git config --get core.hooksPath', {
+      encoding: 'utf8',
+      timeout: EXEC_TIMEOUT_MS,
+      stdio: ['pipe', 'pipe', 'pipe'],
+    }).trim();
+  } catch {
+    // No explicit core.hooksPath -> git falls back to .git/hooks.
+    configured = '';
+  }
+
+  const effective = configured || projectHooksPath;
+  const source = configured
+    ? 'core.hooksPath (global install)'
+    : '.git/hooks (project default)';
+
+  console.log('');
+  console.log('Effective hooks:');
+  console.log('----------------');
+  console.log(`  ${effective}`);
+  console.log(`  source: ${source}`);
+}
+
+/**
+ * Copy the repository's `githooks/` over the installed global hooks (#451 REQ-2).
+ *
+ * This is the one-command escape from "I edited githooks/ and nothing changed".
+ * Only hooks that exist in the repo are copied; unrelated files in the installed
+ * directory are left alone.
+ *
+ * @param {{repoRoot?: string, repoHooks?: string, installedHooks?: string}} [ctx]
+ * @returns {{synced: string[], skipped: string[], errors: string[], installedHooks: string}}
+ */
+function syncGlobalHooksFromRepo(ctx = {}) {
+  const repoRoot = ctx.repoRoot || process.cwd();
+  const repoHooks = ctx.repoHooks || path.join(repoRoot, 'githooks');
+  const installedHooks = ctx.installedHooks || GLOBAL_HOOKS_DIR;
+
+  const synced = [];
+  const skipped = [];
+  const errors = [];
+
+  if (!fs.existsSync(repoHooks)) {
+    errors.push(`no githooks/ directory at ${repoHooks}`);
+    return { synced, skipped, errors, installedHooks };
+  }
+
+  if (!hasCanonicalHooks(repoHooks)) {
+    errors.push(`no hook files in ${repoHooks} (only adapters?) -- nothing to sync from`);
+    return { synced, skipped, errors, installedHooks };
+  }
+
+  try {
+    fs.mkdirSync(installedHooks, { recursive: true });
+  } catch (err) {
+    errors.push(`cannot create ${installedHooks}: ${err.message}`);
+    return { synced, skipped, errors, installedHooks };
+  }
+
+  for (const name of DRIFT_COMPARED_HOOKS) {
+    const source = path.join(repoHooks, name);
+    if (!fs.existsSync(source)) {
+      skipped.push(name);
+      continue;
+    }
+    const target = path.join(installedHooks, name);
+    try {
+      if (fs.existsSync(target) && filesAreIdentical(source, target)) {
+        skipped.push(name);
+        continue;
+      }
+      // copyFileSync preserves content; the exec bit is re-applied explicitly
+      // because a copied hook that is not executable silently never runs.
+      fs.copyFileSync(source, target);
+      fs.chmodSync(target, 0o755);
+      synced.push(name);
+    } catch (err) {
+      errors.push(`${name}: ${err.message}`);
+    }
+  }
+
+  return { synced, skipped, errors, installedHooks };
+}
+
+/**
  * Check a single hook file exists and is an xp-gate file.
  */
 function checkSingleHook(hooksDir, name, signature, label, checks) {
@@ -368,6 +564,15 @@ async function diagnoseAsync() {
   const tuiPromise = diagnoseTuiRegistration(checks);
   const skillsPromise = diagnoseInstalledSkills(config, checks);
 
+  // Group E: repo-vs-installed hook drift (#451). Independent of config.mode:
+  // the drift matters exactly because the installed copy, not githooks/, is
+  // what executes. Detect if this is the xp-gate repo itself.
+  const driftPromise = Promise.resolve().then(() => {
+    const drift = diagnoseHookDrift();
+    checks.push(...drift.checks);
+    return drift.issues;
+  });
+
   // Wait for ALL parallel groups
   const results = await Promise.allSettled([
     hooksPromise,
@@ -376,6 +581,7 @@ async function diagnoseAsync() {
     cliToolsPromise,
     tuiPromise,
     skillsPromise,
+    driftPromise,
   ]);
 
   // Collect issue counts from settled promises
@@ -802,6 +1008,7 @@ function fixIssues(checks, config) {
   fixed = fixMissingAdapters(config.mode, srcDir, getAdaptersDirByMode(config)) || fixed;
   fixed = fixMissingGateScripts(srcDir, getAdaptersDirByMode(config)) || fixed;
   fixed = fixStaleHooks(config) || fixed;
+  fixed = fixHookDriftFromRepo() || fixed;
   fixed = fixMissingCliTools() || fixed;
   fixed = fixTuiRegistration() || fixed;
   fixed = printCliToolGuidance() || fixed;
@@ -809,6 +1016,30 @@ function fixIssues(checks, config) {
   if (!fixed) {
     console.log('  No fixable issues found.');
   }
+}
+
+/**
+ * Repair repo-vs-installed hook drift (#451).
+ *
+ * Only acts when the current project carries its own `githooks/` -- i.e. the
+ * xp-gate repo (or a fork) rather than a consumer project, where githooks/ is
+ * absent and the installed copy is the only source of truth.
+ *
+ * @returns {boolean} whether anything was synced
+ */
+function fixHookDriftFromRepo() {
+  const repoHooks = path.join(process.cwd(), 'githooks');
+  if (!fs.existsSync(repoHooks)) return false;
+
+  const { synced, errors } = syncGlobalHooksFromRepo();
+  if (errors.length > 0) {
+    for (const err of errors) console.log(`  ✗ ${err}`);
+    return false;
+  }
+  if (synced.length === 0) return false;
+
+  console.log(`  ✓ Synced ${synced.join(', ')} from githooks/ to ${GLOBAL_HOOKS_DIR}`);
+  return true;
 }
 
 /**
@@ -1012,9 +1243,14 @@ function diagnoseLanguageTools() {
 
 async function doctor(args) {
   const fixMode = args.includes('--fix');
+  const syncHooks = args.includes('--sync-hooks');
 
   console.log('XP-Gate Doctor');
   console.log('==============');
+
+  // §4.13 (#451 REQ-3): state which hook files actually execute, so "I edited
+  // githooks/ but nothing changed" is answerable without reading git config.
+  printEffectiveHooks();
 
   const config = getConfig();
 
@@ -1023,6 +1259,21 @@ async function doctor(args) {
     console.log('xp-gate is not installed.');
     console.log('Run xp-gate init to install.');
     return 0;
+  }
+
+  // §4.13 (#451 REQ-2): explicit one-command sync from the repo's githooks/.
+  if (syncHooks) {
+    const { synced, skipped, errors, installedHooks } = syncGlobalHooksFromRepo();
+    if (errors.length > 0) {
+      for (const err of errors) console.log(`  ✗ ${err}`);
+      return 1;
+    }
+    if (synced.length > 0) {
+      console.log(`  ✓ Synced ${synced.join(', ')} from githooks/ to ${installedHooks}`);
+      console.log('    The updated hooks take effect on the next commit.');
+    } else {
+      console.log(`  ✓ Global hooks already match githooks/ (${skipped.join(', ') || 'nothing to sync'})`);
+    }
   }
 
   // §4.13: --fix only when mode === "active"
@@ -1130,4 +1381,6 @@ module.exports = {
   ensureTuiRegistration,
   readTuiJson,
   formatDoctorJson,
+  diagnoseHookDrift,
+  syncGlobalHooksFromRepo,
 };
