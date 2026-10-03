@@ -1005,16 +1005,30 @@ else
     # ── Biome lint/format check ──
     if [ -f "biome.json" ] || [ -f "biome.jsonc" ]; then
       echo "Running Biome lint/format check..."
-      if ! npx biome check --staged . 2>/dev/null; then
-        npx biome check . 2>&1 | head -50
-        echo ""
-        echo "❌ BLOCKED - Biome check failed"
-        echo "Fix the errors above before committing."
-        echo "Tip: Run 'npx biome check --write .' to auto-fix formatting and safe lint issues."
-        echo "     Run 'npx biome check --write --unsafe .' to also fix unsafe lint issues."
-        exit 1
+      BIOME_OUT=$(npx biome check --staged . 2>&1)
+      BIOME_STATUS=$?
+      if [ "$BIOME_STATUS" -ne 0 ]; then
+        # Biome exits 1 with `internalError/io - No files were processed` when the
+        # staged set yields nothing lintable (docs-only / config-only commit, or
+        # everything excluded by biome.json). That is "nothing to do", not a lint
+        # violation -- blocking on it makes documentation uncommittable (#458).
+        # This matches the hook's stated principle: tool available + check
+        # SUCCEEDS = PASS. Real violations still carry diagnostics, so they block.
+        if echo "$BIOME_OUT" | grep -qE 'internalError/io|No files were processed'; then
+          echo "$BIOME_OUT"
+          echo "✅ PASSED - Biome check (no lintable files staged)."
+        else
+          echo "$BIOME_OUT" | head -50
+          echo ""
+          echo "❌ BLOCKED - Biome check failed"
+          echo "Fix the errors above before committing."
+          echo "Tip: Run 'npx biome check --write .' to auto-fix formatting and safe lint issues."
+          echo "     Run 'npx biome check --write --unsafe .' to also fix unsafe lint issues."
+          exit 1
+        fi
+      else
+        echo "✅ PASSED - Biome check."
       fi
-      echo "✅ PASSED - Biome check."
     else
       if [ -f "package.json" ] && command -v node &> /dev/null; then
         HAS_BIOME=$(node -e "try{const p=JSON.parse(require('fs').readFileSync('package.json','utf8'));const d=p.devDependencies||{};const deps=p.dependencies||{};console.log((d['@biomejs/biome']||deps['@biomejs/biome'])?'yes':'no')}catch{console.log('no')}") && true
