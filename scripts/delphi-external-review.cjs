@@ -385,19 +385,27 @@ async function callModelAPI(providerConfig, model, systemPrompt, userPrompt, opt
 
     if (response.status === 429) {
       // A 429 is not always a transient rate limit. WhaleCloud returns 429 with
-      // `type: "budget_exceeded"` when the account lacks the quota for a model
-      // ("需要专项额度...尚未配置"). Retrying that only wastes two more round-trips
-      // and the retryable flag let callers report it as a flake. Surface the
-      // provider's type so non-retryable quota rejections are flagged as such.
-      let quota = false;
+      // `type: "budget_exceeded"` in two distinct non-retryable cases, which a
+      // blind retry cannot clear and would otherwise burn two round-trips before
+      // failing:
+      //   - `error.param === "category_quota"`: the account has no ECONOMY/STANDARD
+      //     quota configured for the model ("需要专项额度...尚未配置") — needs an
+      //     admin to add it.
+      //   - `error.param === "cost_quota"`: the account's daily spending cap is
+      //     exhausted ("今日额度已耗尽...限额: 100.00元") — resets the next day.
+      // Surface which kind it is so the caller knows whether to wait or to request
+      // an admin change, rather than treating both as a generic rate limit.
+      let quotaType = '';
       try {
         const body = await response.json();
-        quota = Boolean(body && body.error && body.error.type === 'budget_exceeded');
+        if (body && body.error && body.error.type === 'budget_exceeded') {
+          quotaType = body.error.param === 'cost_quota' ? 'daily budget exhausted' : 'quota not configured';
+        }
       } catch {
         // body is not JSON; fall through to the generic rate-limit handling
       }
-      if (quota) {
-        return { error: true, retryable: false, message: 'Quota not configured for this model (budget_exceeded).' };
+      if (quotaType) {
+        return { error: true, retryable: false, message: `WhaleCloud budget_exceeded: ${quotaType} for this model.` };
       }
       return { error: true, retryable: true, message: 'Rate limit exceeded (429).' };
     }
