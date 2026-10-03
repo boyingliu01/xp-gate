@@ -1,27 +1,27 @@
 import { Rule, Violation, Severity } from '../../types';
-import { getDefaultConfig } from '../../config';
-
-const config = getDefaultConfig();
+import { getActiveConfig } from '../../config';
 
 export const codeDuplicationRule: Rule = {
   id: 'clean-code.code-duplication',
   name: 'Code Duplication Rule',
-  threshold: config.rules['clean-code']['code-duplication'].threshold ?? 15,
-  severity: config.rules['clean-code']['code-duplication'].severity as Severity,
+  threshold: 15,
+  severity: 'warning',
   check: (file: string, adapter: unknown): Violation[] => {
     const violations: Violation[] = [];
+    // Read the ACTIVE config per invocation; a module-load snapshot was #457.
+    const settings = getActiveConfig().rules['clean-code']['code-duplication'];
     
     try {
       const typedAdapter = adapter as { duplicationPercentage?: number };
       const duplicationPercentage = typedAdapter.duplicationPercentage;
       
-      if (duplicationPercentage && duplicationPercentage > (config.rules['clean-code']['code-duplication'].threshold as number)) {
+      if (duplicationPercentage && duplicationPercentage > (settings.threshold ?? 0)) {
         violations.push({
           file,
           line: 1,
           ruleId: 'clean-code.code-duplication',
-          message: `Code duplication detected: ${duplicationPercentage}% (threshold: ${config.rules['clean-code']['code-duplication'].threshold}%). Consider refactoring duplicated code.`,
-          severity: config.rules['clean-code']['code-duplication'].severity as Severity
+          message: `Code duplication detected: ${duplicationPercentage}% (threshold: ${settings.threshold}%). Consider refactoring duplicated code.`,
+          severity: (settings.severity as Severity) ?? 'warning'
         });
       }
     } catch { }

@@ -1,15 +1,15 @@
 import { Rule, Violation, Severity } from '../../types';
-import { getDefaultConfig } from '../../config';
-
-const config = getDefaultConfig();
+import { getActiveConfig } from '../../config';
 
 export const unusedImportsRule: Rule = {
   id: 'clean-code.unused-imports',
   name: 'Unused Imports Rule',
-  threshold: 1,
-  severity: config.rules['clean-code']['unused-imports'].severity as Severity,
+  threshold: 0,
+  severity: 'info',
   check: (file: string, adapter: unknown): Violation[] => {
     const violations: Violation[] = [];
+    // Read the ACTIVE config per invocation; a module-load snapshot was #457.
+    const settings = getActiveConfig().rules['clean-code']['unused-imports'];
     
     try {
       const typedAdapter = adapter as { imports?: Array<{name?: string; line?: number; used?: boolean; type?: string;}> | undefined };
@@ -22,7 +22,7 @@ export const unusedImportsRule: Rule = {
             line: imp.line ?? 1,
             ruleId: 'clean-code.unused-imports',
             message: `Unused import "${imp.name}" - consider removing`,
-            severity: config.rules['clean-code']['unused-imports'].severity as Severity
+            severity: (settings.severity as Severity) ?? 'info'
           });
         }
       }

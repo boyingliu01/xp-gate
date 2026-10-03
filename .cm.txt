@@ -1,0 +1,39 @@
+fix(principles): make .principlesrc actually enforce (#457)
+
+`.principlesrc` was parsed and then discarded. `index.ts` called
+`await loadConfig();` without using the result, and every one of the 15 rule
+modules snapshotted `getDefaultConfig()` at module load. A project that set
+`large-file.threshold: 1050` was therefore still gated at the built-in 1150 --
+a silent fail-open gate. Gate 6 (Boy Scout) shared the same frozen singletons,
+so Gates 4 and 6 could disagree about a file's warning count.
+
+Fix:
+- config.ts: export the config interfaces; add getActiveConfig /
+  setActiveConfig / resetActiveConfig; deep-merge per rule (a file mentioning
+  only `clean-code` no longer drops `solid`); resolve `.principlesrc` from the
+  git toplevel; validate each value's shape and keep the default on a type
+  mismatch; warn loudly instead of swallowing parse errors.
+- 15 rule modules: read settings from getActiveConfig() inside check().
+- analyzer.ts: honour `enabled: false`, which nothing read before.
+- index.ts: `setActiveConfig(await loadConfig(...))`, a real `--config` flag
+  (previously `--config x` was filed into `files` and analysed as source), and
+  exit 1 only on ERROR-severity violations. Exiting 1 for any violation made
+  info-level noise look like a tool crash, so Gate 4 downgraded itself to
+  SKIPPED and silently stopped checking anything.
+- boy-scout.ts: load the same config so Gate 4 and Gate 6 agree.
+- types.ts: document that Rule.threshold/severity are now only the built-in
+  defaults, not the enforced values.
+- gate-4-principles.sh: pass --config from the git toplevel.
+
+Tests: new config-enforcement.test.ts (13 cases) asserts the END-TO-END effect
+-- a configured threshold changes which violations are produced -- rather than
+that loadConfig() returns an object. The pre-existing config.test.ts asserted
+only `toBeDefined()`, which is why this survived. One case guards the fresh-copy
+contract of getDefaultConfig(), since hoisting the defaults to module constants
+had made callers share (and corrupt) one object.
+
+Verified: 471/471 principles tests pass; ESLint and tsc clean; Gate 6 reports 0
+warnings on the new test file and on config.ts; full suite has zero new failures
+vs baseline (33 pre-existing Windows/WSL-bash failures unchanged).
+
+Closes #457
