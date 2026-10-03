@@ -615,16 +615,17 @@ describe('provider calls and provenance', () => {
     expect(text).not.toHaveBeenCalled();
   });
 
-  it('marks a quota rejection (429 budget_exceeded) as non-retryable', async () => {
-    // WhaleCloud returns 429 with `type: "budget_exceeded"` when the account has
-    // no quota for a model. Retrying that is pure waste (it cannot clear without a
-    // config change), so it must be non-retryable with a clear message rather than
-    // being lumped into the generic rate-limit bucket.
+  it('marks a quota rejection (429 budget_exceeded/category_quota) as non-retryable', async () => {
+    // WhaleCloud returns 429 with `type: "budget_exceeded"` and
+    // `param: "category_quota"` when the account has no ECONOMY/STANDARD quota
+    // configured for a model. Retrying that is pure waste (it cannot clear without
+    // an admin change), so it must be non-retryable with a clear message rather
+    // than being lumped into the generic rate-limit bucket.
     const { callModelAPI } = loadModule();
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue({
       ok: false,
       status: 429,
-      json: async () => ({ error: { type: 'budget_exceeded', message: '需要专项额度' } }),
+      json: async () => ({ error: { type: 'budget_exceeded', param: 'category_quota', message: '需要专项额度' } }),
     }));
 
     const result = await callModelAPI(
@@ -637,6 +638,30 @@ describe('provider calls and provenance', () => {
     expect(result.error).toBe(true);
     expect(result.retryable).toBe(false);
     expect(result.message).toMatch(/budget_exceeded/);
+    expect(result.message).toMatch(/quota not configured/);
+  });
+
+  it('marks a daily-spend-cap 429 (budget_exceeded/cost_quota) as non-retryable', async () => {
+    // Same `type` but `param: "cost_quota"` — the account's daily spending cap is
+    // exhausted and resets the next day. Also non-retryable, and the message
+    // should say so.
+    const { callModelAPI } = loadModule();
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue({
+      ok: false,
+      status: 429,
+      json: async () => ({ error: { type: 'budget_exceeded', param: 'cost_quota', message: '今日额度已耗尽' } }),
+    }));
+
+    const result = await callModelAPI(
+      { base_url: 'https://example.test/v1', api_key: 'key' },
+      'model-a',
+      'system',
+      'user',
+    );
+
+    expect(result.error).toBe(true);
+    expect(result.retryable).toBe(false);
+    expect(result.message).toMatch(/daily budget exhausted/);
   });
 
   it('keeps a plain 429 as a retryable rate limit', async () => {
