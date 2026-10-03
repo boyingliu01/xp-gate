@@ -39,7 +39,11 @@ jobs:
           echo "xp-gate installed: $(xp-gate --version)"
           mkdir -p /tmp/test-init-project
           cd /tmp/test-init-project
-          git init
+          # Use a non-protected branch: this job verifies that `xp-gate init`
+          # installs hooks, not Gate 0's version-consistency policy. A bare
+          # `git init` yields `master`, which is a protected branch, so any
+          # commit without a VERSION/CHANGELOG update is (correctly) blocked.
+          git init -b ci-test
           git config user.email "ci@test.com"
           git config user.name "CI"
           xp-gate init
@@ -73,7 +77,11 @@ jobs:
           rm -rf /tmp/test-commit-project
           mkdir -p /tmp/test-commit-project
           cd /tmp/test-commit-project
-          git init
+          # Non-protected branch so Gate 0's version-consistency check does not
+          # mask the gate behaviour under test (see issue #463). A default
+          # `git init` produces `master`, which Gate 0 treats as protected and
+          # therefore blocks this intentionally version-less fixture commit.
+          git init -b ci-test
           git config user.email "ci@test.com"
           git config user.name "CI"
           export PATH="$GITHUB_WORKSPACE/node_modules/.bin:$PATH"
