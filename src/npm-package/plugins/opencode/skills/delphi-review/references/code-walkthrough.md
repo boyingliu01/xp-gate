@@ -356,9 +356,9 @@ IF 任何检查失败:
   "verdict": "APPROVED",
   "confidence": 9,
   "experts": [
-    { "id": "Expert A", "role": "architecture", "verdict": "APPROVED", "confidence": 9, "result_type": "delphi_expert_result", "requested_model": "provider/model-a", "resolved_model": "provider/model-a" },
-    { "id": "Expert B", "role": "technical", "verdict": "APPROVED", "confidence": 8, "result_type": "delphi_expert_result", "requested_model": "provider/model-b", "resolved_model": null },
-    { "id": "Expert C", "role": "feasibility", "verdict": "APPROVED", "confidence": 8, "result_type": "delphi_expert_result", "requested_model": "provider/model-c", "resolved_model": "provider/model-c" }
+    { "id": "Expert A", "role": "architecture", "verdict": "APPROVED", "confidence": 9, "result_type": "delphi_expert_result", "requested_model": "provider/model-a", "resolved_model": "provider/model-a", "channel": "external" },
+    { "id": "Expert B", "role": "technical", "verdict": "APPROVED", "confidence": 8, "result_type": "delphi_expert_result", "requested_model": "provider/model-b", "resolved_model": "provider/model-b", "channel": "external" },
+    { "id": "Expert C", "role": "feasibility", "verdict": "APPROVED", "confidence": 8, "result_type": "delphi_expert_result", "requested_model": "provider/model-c", "resolved_model": "provider/model-c", "channel": "external" }
   ],
   "issues": [],
   "consensus_ratio": 1.0,

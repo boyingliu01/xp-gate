@@ -615,7 +615,10 @@ describe('provider calls and provenance', () => {
     expect(text).not.toHaveBeenCalled();
   });
 
-  it('records null when the provider omits resolved model identity', async () => {
+  it('fails when the provider omits resolved model identity (#423)', async () => {
+    // Previously this recorded `resolved_model: null`, which Gate MW accepted,
+    // so an expert whose model could not be identified still counted as a
+    // successful model call. The runner now refuses such a response.
     const { callModelAPI } = loadModule();
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue({
       ok: true,
@@ -630,7 +633,8 @@ describe('provider calls and provenance', () => {
       'user',
     );
 
-    expect(result.resolved_model).toBeNull();
+    expect(result.error).toBe(true);
+    expect(result.message).toMatch(/resolved model/i);
   });
 
   it('keeps the timeout active while the response body is parsed', async () => {
