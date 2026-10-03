@@ -18,6 +18,7 @@ describe('doctor', () => {
   let tmpProject;
   let originalHome;
   let originalXpGateCacheDir;
+  let originalRepoRoot;
   let originalDetectDepsTools;
   let originalExecSync;
   let originalExec;
@@ -54,12 +55,19 @@ describe('doctor', () => {
   beforeEach(() => {
     originalHome = process.env.HOME;
     originalXpGateCacheDir = process.env.XP_GATE_CACHE_DIR;
+    originalRepoRoot = process.env.XP_GATE_REPO_ROOT;
     originalExecSync = cp.execSync;
     originalExec = cp.exec;
     // Unique per-describe + per-test prefixes to avoid parallel collisions.
     tmpHome = fs.mkdtempSync(path.join(os.tmpdir(), `xpgate-dr-${DESCRIBE_ID}-`));
     tmpProject = fs.mkdtempSync(path.join(os.tmpdir(), `xpgate-dr-proj-${DESCRIBE_ID}-`));
     process.env.HOME = tmpHome;
+    // #451: the hook-drift check reads the canonical githooks/ of *this* repo
+    // when no override is given. In a fixture whose whole point is "a healthy
+    // installation", that would compare the real checkout against synthetic
+    // temp files and always report drift. Point it at an empty dir instead:
+    // these tests assert installation health, not drift.
+    process.env.XP_GATE_REPO_ROOT = path.join(tmpProject, 'no-repo-hooks');
     vi.resetModules();
     // Invalidate all cached modules that load path/environment globals at require-time.
     // Do NOT invalidate detect-deps.js — its GATE_CLI_TOOLS was already cleared in beforeAll
@@ -79,6 +87,8 @@ describe('doctor', () => {
   afterEach(() => {
     process.env.HOME = originalHome;
     process.env.XP_GATE_CACHE_DIR = originalXpGateCacheDir;
+    if (originalRepoRoot === undefined) delete process.env.XP_GATE_REPO_ROOT;
+    else process.env.XP_GATE_REPO_ROOT = originalRepoRoot;
     cp.execSync = originalExecSync;
     cp.exec = originalExec;
     if (tmpHome && fs.existsSync(tmpHome)) {
