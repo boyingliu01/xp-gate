@@ -615,6 +615,69 @@ describe('provider calls and provenance', () => {
     expect(text).not.toHaveBeenCalled();
   });
 
+  it('marks a quota rejection (429 budget_exceeded) as non-retryable', async () => {
+    // WhaleCloud returns 429 with `type: "budget_exceeded"` when the account has
+    // no quota for a model. Retrying that is pure waste (it cannot clear without a
+    // config change), so it must be non-retryable with a clear message rather than
+    // being lumped into the generic rate-limit bucket.
+    const { callModelAPI } = loadModule();
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue({
+      ok: false,
+      status: 429,
+      json: async () => ({ error: { type: 'budget_exceeded', message: '需要专项额度' } }),
+    }));
+
+    const result = await callModelAPI(
+      { base_url: 'https://example.test/v1', api_key: 'key' },
+      'model-a',
+      'system',
+      'user',
+    );
+
+    expect(result.error).toBe(true);
+    expect(result.retryable).toBe(false);
+    expect(result.message).toMatch(/budget_exceeded/);
+  });
+
+  it('keeps a plain 429 as a retryable rate limit', async () => {
+    const { callModelAPI } = loadModule();
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue({
+      ok: false,
+      status: 429,
+      json: async () => ({ error: { type: 'rate_limit_exceeded' } }),
+    }));
+
+    const result = await callModelAPI(
+      { base_url: 'https://example.test/v1', api_key: 'key' },
+      'model-a',
+      'system',
+      'user',
+    );
+
+    expect(result.error).toBe(true);
+    expect(result.retryable).toBe(true);
+    expect(result.message).toMatch(/rate limit/i);
+  });
+
+  it('keeps a 429 with a non-JSON body as a retryable rate limit', async () => {
+    const { callModelAPI } = loadModule();
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue({
+      ok: false,
+      status: 429,
+      json: async () => { throw new Error('not json'); },
+    }));
+
+    const result = await callModelAPI(
+      { base_url: 'https://example.test/v1', api_key: 'key' },
+      'model-a',
+      'system',
+      'user',
+    );
+
+    expect(result.error).toBe(true);
+    expect(result.retryable).toBe(true);
+  });
+
   it('fails when the provider omits resolved model identity (#423)', async () => {
     // Previously this recorded `resolved_model: null`, which Gate MW accepted,
     // so an expert whose model could not be identified still counted as a

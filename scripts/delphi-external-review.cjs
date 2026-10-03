@@ -384,6 +384,21 @@ async function callModelAPI(providerConfig, model, systemPrompt, userPrompt, opt
     }
 
     if (response.status === 429) {
+      // A 429 is not always a transient rate limit. WhaleCloud returns 429 with
+      // `type: "budget_exceeded"` when the account lacks the quota for a model
+      // ("需要专项额度...尚未配置"). Retrying that only wastes two more round-trips
+      // and the retryable flag let callers report it as a flake. Surface the
+      // provider's type so non-retryable quota rejections are flagged as such.
+      let quota = false;
+      try {
+        const body = await response.json();
+        quota = Boolean(body && body.error && body.error.type === 'budget_exceeded');
+      } catch {
+        // body is not JSON; fall through to the generic rate-limit handling
+      }
+      if (quota) {
+        return { error: true, retryable: false, message: 'Quota not configured for this model (budget_exceeded).' };
+      }
       return { error: true, retryable: true, message: 'Rate limit exceeded (429).' };
     }
 
@@ -430,6 +445,9 @@ async function callModelAPI(providerConfig, model, systemPrompt, userPrompt, opt
     if (responseReceived) {
       return { error: true, message: 'Invalid response from model.' };
     }
+    // Deliberately do NOT surface the underlying cause here. Provider errors can
+    // carry mutable metadata (tokens, keys, hostnames) that must not leak into the
+    // evidence file; the test suite asserts this redaction. Keep the generic form.
     return { error: true, message: 'Network error.' };
   } finally {
     clearTimeout(timeout);
