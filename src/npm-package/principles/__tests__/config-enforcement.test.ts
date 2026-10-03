@@ -4,7 +4,7 @@
  *         modules used to snapshot config at module load, so a project's
  *         threshold was silently ignored and the checker enforced the built-in
  *         default instead -- a fail-open gate.
- * @covers AC-457-01, AC-457-02, AC-457-03, AC-457-05, AC-457-06, AC-457-07
+ * @covers AC-457-01, AC-457-02, AC-457-03, AC-457-04, AC-457-05, AC-457-06, AC-457-07
  *
  * The pre-existing `config.test.ts` asserted only `expect(config).toBeDefined()`
  * for `loadConfig`, which is why the defect survived: the loader returned the
@@ -161,7 +161,7 @@ describe('#457 .principlesrc actually changes enforcement', () => {
     expect(checkLargeFile(STUB_LINE_COUNT)).toHaveLength(0);
   });
 
-  it('AC-457-03: `enabled: false` disables a rule (previously ignored everywhere)', () => {
+  it('AC-457-04: `enabled: false` disables a rule (previously ignored everywhere)', () => {
     const disabled = getDefaultConfig();
     disabled.rules['clean-code']['large-file'].enabled = false;
     setActiveConfig(disabled);
