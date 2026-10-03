@@ -41,9 +41,6 @@ function makeTempDir() {
   return dir;
 }
 
-/* eslint-disable no-unused-vars */
-
-
 /** Build one expert record, with `channel: 'external'` unless overridden. */
 function expert(overrides = {}) {
   const record = {
