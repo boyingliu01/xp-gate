@@ -61,6 +61,35 @@ function makeRepoWithCommit(): { root: string; tracked: string } {
 }
 
 /**
+ * Stage many paths at once, to push `git ls-files` output past the 1 MiB default
+ * stdout buffer that `execFileSync` would otherwise apply.
+ *
+ * Uses `git update-index --index-info` to write the index directly rather than
+ * creating files and running `git add`: that path costs over 50s for this many
+ * entries (filesystem + index churn), whereas feeding the index in one batch takes
+ * under a second. The blob hash is git's well-known empty-blob id, so nothing needs
+ * to exist on disk -- which is fine, because the assertion is about `git ls-files`
+ * reporting the index, not about the working tree.
+ */
+function stageManyPaths(root: string, count: number, nameFor: (index: number) => string): void {
+  const EMPTY_BLOB = 'e69de29bb2d1d6434b8b29ae775ad8c2e48c5391';
+  const lines: string[] = [];
+  for (let i = 0; i < count; i += 1) {
+    lines.push(`100644 ${EMPTY_BLOB}\t${nameFor(i)}`);
+  }
+  try {
+    execFileSync('git', ['update-index', '--index-info'], {
+      cwd: root,
+      input: `${lines.join('\n')}\n`,
+      stdio: ['pipe', 'ignore', 'ignore'],
+    });
+  } catch (error) {
+    const detail = error instanceof Error ? error.message : String(error);
+    throw new Error(`could not stage filler paths: ${detail}`);
+  }
+}
+
+/**
  * A baseline shaped like the real `.warnings-baseline.json` payload.
  *
  * The on-disk format is a FLAT path -> entry map, verified against the committed
@@ -174,5 +203,25 @@ describe('#452 REQ-3 stale baseline entries are pruned', () => {
 
     expect(result.removed).toHaveLength(0);
     expect(result.error).toBeDefined();
+  });
+
+  it('AC-452-10: pruning still works when the git index exceeds the default pipe buffer', () => {
+    // `execFileSync` defaults to a 1 MiB stdout buffer. A repo whose `git
+    // ls-files` output exceeds it throws, which `listTrackedFiles` would report
+    // as "git unavailable" -- silently disabling pruning at exactly the scale
+    // where a stale baseline is most likely. Committing enough paths to blow past
+    // 1 MiB proves the raised maxBuffer is actually in effect: without it every
+    // entry is merely "kept" and the stale path below would never be reported.
+    const { root } = makeRepoWithCommit();
+    // Measured: each path is ~48 bytes once `git ls-files` newline-joins it, so
+    // 1 MiB / 48 = ~21.8k entries. Use 30000 (~1.4 MiB) so the threshold is
+    // cleared with real headroom rather than marginally -- an earlier version used
+    // 19000, which came to 0.88 MiB and passed even with the buffer bug present.
+    stageManyPaths(root, 30000, (i) => `filler/s${i}/a-fairly-long-file-name-padding.ts`);
+
+    const result = pruneBaselineEntries(baselineWith(['deleted-long-ago.ts']), root);
+
+    expect(result.removed).toEqual(['deleted-long-ago.ts']);
+    expect(result.error).toBeUndefined();
   });
 });
