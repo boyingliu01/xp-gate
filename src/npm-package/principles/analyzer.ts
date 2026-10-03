@@ -114,11 +114,14 @@ function computeSummary(
 
 function runRuleOnFile(ctx: RunRuleContext): void {
   const { file, rule, adapter, violations, fileResult, ruleResult, errors } = ctx;
+  // Honour `enabled: false` from `.principlesrc`. Nothing read this flag before
+  // #457, so a project could not turn a rule off.
+  //
+  // Checked BEFORE `filesChecked++`: a rule that never ran must not report that it
+  // examined a file, or the per-rule stats claim coverage the rule did not perform.
+  if (!isRuleEnabled(rule.id)) return;
   ruleResult.filesChecked++;
   try {
-    // Honour `enabled: false` from `.principlesrc`. Nothing read this flag
-    // before #457, so a project could not turn a rule off.
-    if (!isRuleEnabled(rule.id)) return;
     const ruleViolations = rule.check(file, adapter);
     if (ruleViolations.length > 0) {
       violations.push(...ruleViolations);
