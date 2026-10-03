@@ -2167,6 +2167,64 @@ else
         echo "⚠️  coverage.py not available, cannot enforce Python coverage threshold."
       fi
       ;;
+    "java")
+      COVERAGE_ENFORCED=true
+      # JaCoCo writes target/site/jacoco/ (Maven) or build/reports/jacoco/test/
+      # (Gradle), i.e. neither path probed by the default branch below, so Java
+      # needs its own branch to be measurable at all.
+      jacoco_csv=""
+      for jacoco_candidate in \
+        "target/site/jacoco/jacoco.csv" \
+        "build/reports/jacoco/test/jacocoTestReport.csv"; do
+        [ -f "$jacoco_candidate" ] && { jacoco_csv="$jacoco_candidate"; break; }
+      done
+
+      if [ -n "$jacoco_csv" ]; then
+        # Aggregate INSTRUCTION_MISSED / INSTRUCTION_COVERED over every class row.
+        # Columns are located by header name because their position is not part of
+        # the CSV's stable contract.
+        COVERAGE_PERCENT=$(awk -F, '
+          NR == 1 {
+            for (i = 1; i <= NF; i++) {
+              if ($i == "INSTRUCTION_MISSED") missed_col = i;
+              if ($i == "INSTRUCTION_COVERED") covered_col = i;
+            }
+            next;
+          }
+          missed_col && covered_col {
+            missed += $missed_col;
+            covered += $covered_col;
+          }
+          END {
+            total = missed + covered;
+            if (total > 0) printf "%.2f", (covered / total) * 100;
+            else print "";
+          }
+        ' "$jacoco_csv" 2>/dev/null) || COVERAGE_PERCENT=""
+
+        if [ -n "$COVERAGE_PERCENT" ]; then
+          # Compare on the unrounded value so 79.5% cannot pass as 80%.
+          COVERAGE_ROUNDED=${COVERAGE_PERCENT%.*}
+          if awk -v pct="$COVERAGE_PERCENT" 'BEGIN { exit !(pct < 80) }'; then
+            if [ "${PARTIAL_TEST_RUN:-false}" = "true" ]; then
+              echo "⚠️  Partial coverage ${COVERAGE_ROUNDED}% (subset test run, not full suite)."
+              echo "    Run the full test suite for a complete Java coverage check."
+            else
+              echo "❌ BLOCKED - Java coverage ${COVERAGE_ROUNDED}% below 80% threshold"
+              exit 1
+            fi
+          else
+            echo "Java coverage: ${COVERAGE_ROUNDED}% ✅ (≥ 80%)"
+          fi
+        else
+          echo "⚠️  Could not parse Java coverage from ${jacoco_csv} (no instruction data)."
+        fi
+      else
+        echo "⚠️  No JaCoCo report found. Run 'mvn verify' or 'gradle jacocoTestReport'"
+        echo "    so that target/site/jacoco/jacoco.csv exists — otherwise Java coverage"
+        echo "    cannot be enforced (see also: JaCoCo detection in adapters/java.sh)."
+      fi
+      ;;
     "go")
       # Go enforcement already handled inline in Stage 1 (lines 933-942)
       ;;
