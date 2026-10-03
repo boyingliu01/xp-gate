@@ -139,7 +139,7 @@ const COMMANDS = {
   'doctor': {
     description: 'Diagnose xp-gate installation health',
     run: subargs => doctor(subargs).then(code => process.exit(code)),
-    usage: 'xp-gate doctor [--fix]'
+    usage: 'xp-gate doctor [--fix] [--sync-hooks]'
   },
   'ui-review': {
     description: 'Run UI review for non-sprint developers (generates .ui-gate-result.json)',
