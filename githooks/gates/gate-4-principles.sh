@@ -29,9 +29,19 @@ else
     if [ -n "$PRINCIPLES_DIR" ]; then
       echo "Checking Clean Code + SOLID principles..."
       
+      # Resolve the project's `.principlesrc` from the git toplevel so the gate
+      # enforces the SAME thresholds regardless of the process's cwd (#457).
+      # Before this, `.principlesrc` was parsed and discarded, so the built-in
+      # defaults were enforced instead of the project's.
+      PRINCIPLES_CONFIG=""
+      PRINCIPLES_ROOT="$(run_without_git_context git rev-parse --show-toplevel 2>/dev/null || echo "$PWD")"
+      if [ -f "$PRINCIPLES_ROOT/.principlesrc" ]; then
+        PRINCIPLES_CONFIG="--config $PRINCIPLES_ROOT/.principlesrc"
+      fi
+      
       if command -v npx > /dev/null 2>&1; then
         # Run principles checker and store results
-        if npx tsx $PRINCIPLES_DIR/index.ts --files $PRINCIPLES_FILES --format json > /tmp/principles-output.json 2>/dev/null; then
+        if npx tsx $PRINCIPLES_DIR/index.ts --files $PRINCIPLES_FILES --format json $PRINCIPLES_CONFIG > /tmp/principles-output.json 2>/dev/null; then
           # Check severity levels. The reporter emits JSON.stringify(out, null, 2),
           # i.e. `"severity": "warning"` WITH a space; tolerate any whitespace so a
           # future minified format cannot silently zero these counts again (#444).

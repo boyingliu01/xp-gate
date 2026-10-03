@@ -1,6 +1,7 @@
 import * as fs from 'fs/promises';
 import { analyze, getAdapterForFile } from './analyzer';
 import { getAllRules } from './index';
+import { loadConfig, setActiveConfig } from './config';
 import { isDirectExecution } from './direct-execution.js';
 
 interface FileClassification {
@@ -540,6 +541,11 @@ export async function runEnforcementCommand(parsed: Record<string, unknown>): Pr
 
 export async function main(): Promise<number> {
   const parsed = parseArgs(process.argv.slice(2));
+  // Install the project's `.principlesrc` before any rule runs. Gate 6 shares
+  // the same rule singletons as Gate 4, so without this the two gates would
+  // disagree about a file's warning count whenever a threshold is overridden
+  // (#457).
+  setActiveConfig(await loadConfig(typeof parsed.configPath === 'string' ? parsed.configPath : undefined));
   return parsed.command === 'init-baseline'
     ? runInitBaselineCommand(parsed)
     : runEnforcementCommand(parsed);
@@ -566,6 +572,9 @@ const ARG_HANDLERS: Record<string, (parsed: Record<string, unknown>, next: strin
   '--new-files': (parsed, next) => { const v = takeValue(next); parsed.newFiles = splitCsvArg(v.value); return v.consumed; },
   '--modified-files': (parsed, next) => { const v = takeValue(next); parsed.modifiedFiles = splitCsvArg(v.value); return v.consumed; },
   '--baseline': (parsed, next) => { const v = takeValue(next); parsed.baselinePath = v.value; return v.consumed; },
+  // Lets Gate 6 be pointed at a specific `.principlesrc`, so it agrees with
+  // Gate 4 when the project overrides a threshold (#457).
+  '--config': (parsed, next) => { const v = takeValue(next); parsed.configPath = v.value; return v.consumed; },
   '--init-baseline': (parsed, next) => {
     parsed.command = 'init-baseline';
     // The file list is OPTIONAL and positional: `--init-baseline a.ts,b.ts` works,
@@ -584,6 +593,7 @@ function parseArgs(args: string[]): Record<string, unknown> {
     newFiles: [],
     modifiedFiles: [],
     baselinePath: null,
+    configPath: null,
   };
 
   for (let i = 0; i < args.length; i++) {

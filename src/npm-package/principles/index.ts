@@ -1,6 +1,6 @@
 import { analyze, getAdapterForFile } from './analyzer';
 import { formatConsole, formatJSON, formatSARIF } from './reporter';
-import { loadConfig } from './config';
+import { loadConfig, setActiveConfig } from './config';
 import { getAllPrincipleRules } from './rules';
 import { isDirectExecution } from './direct-execution.js';
 
@@ -9,6 +9,8 @@ interface CLIOptions {
   format: 'console' | 'json' | 'sarif';
   changedOnly: boolean;
   showScore: boolean;
+  /** Explicit `.principlesrc` path; falls back to git-toplevel/cwd lookup. */
+  configPath?: string;
 }
 
 const VALID_FORMATS: readonly string[] = ['json', 'console', 'sarif'] as const;
@@ -37,6 +39,12 @@ export function parseArgs(args: string[]): CLIOptions {
       case '--show-score':
         options.showScore = true;
         break;
+      // Previously absent, so `--config .principlesrc` was silently filed into
+      // `files` and the path was analysed as if it were source (#457).
+      case '--config':
+        const cfg = args[++i];
+        if (cfg) options.configPath = cfg;
+        break;
       default:
         if (!args[i].startsWith('--')) options.files.push(args[i]);
     }
@@ -55,11 +63,15 @@ export async function main(args: string[]): Promise<number> {
   const options = parseArgs(args);
   
   if (options.files.length === 0) {
-    console.error('Usage: principles-checker --files <file1> <file2> ... [--format console|json|sarif] [--changed-only]');
+    console.error('Usage: principles-checker --files <file1> <file2> ... [--format console|json|sarif] [--changed-only] [--config <path>]');
     return 1;
   }
   
-  await loadConfig();
+  // Install the loaded config so rules read the PROJECT's thresholds. The
+  // previous `await loadConfig();` discarded the result, so `.principlesrc` was
+  // parsed and thrown away while the built-in defaults were enforced (#457).
+  setActiveConfig(await loadConfig(options.configPath));
+
   const rules = getAllRules();
   const result = await analyze(options.files, rules, getAdapterForFile);
   
@@ -70,7 +82,11 @@ export async function main(args: string[]): Promise<number> {
   };
   console.log(formatters[options.format](result));
   
-  return result.summary.totalViolations > 0 ? 1 : 0;
+  // Exit 1 only for ERROR-severity violations. Returning 1 for any violation
+  // made info/warning noise (e.g. magic-numbers `info`) look like a tool
+  // failure: Gate 4 treats a non-zero exit as "checker execution failed" and
+  // downgrades itself to SKIPPED, silently disabling the gate.
+  return result.summary.errorCount > 0 ? 1 : 0;
 }
 
 // Support both CJS (require.main === module) and ESM (import.meta.url) runtimes.

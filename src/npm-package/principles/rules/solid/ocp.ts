@@ -1,15 +1,16 @@
 import { Rule, Violation } from '../../types';
-import { getDefaultConfig } from '../../config';
-
-const config = getDefaultConfig();
+import { getActiveConfig } from '../../config';
 
 export const ocpRule: Rule = {
   id: 'solid.ocp',
   name: 'Open/Closed Principle Rule',
   threshold: 0,
-  severity: config.rules['solid']['ocp'].severity as "error" | "warning" | "info",
+  severity: 'info',
   check: (file: string, adapter: import('../../types').Adapter): Violation[] => {
     const violations: Violation[] = [];
+    // Read the ACTIVE config per invocation; a module-load snapshot was #457.
+    const settings = getActiveConfig().rules['solid']['ocp'];
+    const severity = (settings.severity as "error" | "warning" | "info") ?? 'info';
     
     try {
       const classes = adapter.extractClasses() || [];
@@ -28,7 +29,7 @@ export const ocpRule: Rule = {
               line: cls.line ?? 1,
               ruleId: 'solid.ocp',
               message: `Possible modification of base class "${baseClass}" while extending. Extension should not require modifying the base.`,
-              severity: config.rules['solid']['ocp'].severity as "error" | "warning" | "info"
+              severity: severity
             });
           }
         }
