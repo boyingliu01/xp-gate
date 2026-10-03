@@ -18,24 +18,73 @@ on:
       - 'vitest.config.ts'
   workflow_dispatch:
 
+# Least privilege: read the repo; only the timeout-comment step needs to write,
+# and it only comments on the PR. Satisfies CKV2_GHA_1 (no write-all).
+permissions:
+  contents: read
+  pull-requests: write
+
 jobs:
   mutation:
     runs-on: ubuntu-latest
     timeout-minutes: 45
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0   # full history so the changed-file diff has a merge base
       - uses: actions/setup-node@v4
         with:
           node-version: '20'
           cache: 'npm'
       - run: npm ci
+
+      - name: Determine changed principles files
+        id: changed
+        run: |
+          set -euo pipefail
+          # Scope mutation to the files this change actually touched. Mutating all
+          # of src/principles/** is ~2014 mutants (~2h of work) and cannot finish
+          # inside the 45-min job budget -- it was cancelled on every run. This
+          # mirrors how the pre-push config already works incrementally.
+          if [ "${{ github.event_name }}" = "pull_request" ]; then
+            BASE="origin/${{ github.base_ref }}"
+            RANGE="$BASE...HEAD"
+          elif [ -n "${{ github.event.before }}" ] && [ "${{ github.event.before }}" != "0000000000000000000000000000000000000000" ]; then
+            RANGE="${{ github.event.before }}..HEAD"
+          else
+            RANGE="HEAD~1..HEAD"
+          fi
+
+          # `:(glob)` is required: a bare `src/principles/**/*.ts` pathspec does NOT
+          # match top-level files like boy-scout.ts -- it silently skipped the most
+          # important changed file when tested against this very branch.
+          CHANGED=$(git diff --name-only --diff-filter=ACMR "$RANGE" -- ':(glob)src/principles/**/*.ts' \
+            | grep -v -E '\.test\.ts$|\.d\.ts$|/adapters/' || true)
+
+          if [ -z "$CHANGED" ]; then
+            echo "No mutable principles files changed -- skipping mutation."
+            echo "files=" >> "$GITHUB_OUTPUT"
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+          else
+            # Stryker's --mutate takes a COMMA-SEPARATED list, not a JSON array.
+            # Passing JSON makes it warn "No files found for mutation" and mutate
+            # nothing while still exiting 0 -- a silent no-op gate.
+            LIST=$(printf '%s' "$CHANGED" | paste -sd, -)
+            echo "Mutating: $LIST"
+            echo "files=$LIST" >> "$GITHUB_OUTPUT"
+            echo "skip=false" >> "$GITHUB_OUTPUT"
+          fi
+
       - name: Run mutation tests
         id: mutation
+        if: steps.changed.outputs.skip != 'true'
         run: |
-          npx stryker run &
+          # Pass the changed-file list through so the run stays proportional to
+          # the change. --mutate overrides the config's glob.
+          npx stryker run --mutate "${{ steps.changed.outputs.files }}" &
           STRYKER_PID=$!
 
-          # Watchdog: warn when approaching 45-minute CI timeout
+          # Watchdog: warn when approaching the 45-minute CI timeout
           WARNED=0
           while kill -0 $STRYKER_PID 2>/dev/null; do
             sleep 60
