@@ -367,6 +367,48 @@ OpenCode 环境下通过 `opencode.json` 的 agent 配置 + `.delphi-config.json
 - 通过 `scripts/delphi-external-review.cjs` 调用各 provider 的兼容 API（注意：该脚本目前在仓库根 `scripts/` 下，尚未随 skill 目录分发）
 - 需要用户自行配置 API key（环境变量注入）
 
+#### DeepSeek Harness 平台（`delphi-review` 工具 — 推荐）
+
+DSH 里**不要**用 `subagent` 工具派发三个专家。原因和 Qoder 同源：DSH 的 subagent
+继承宿主配置的**单一**模型（`SubagentModelSelectionConfig.enabled` 默认 `false`），
+三个"专家"会是同一模型的三个实例 —— 按本 skill 的规则必须 BLOCK。
+
+DSH 的正确入口是插件提供的 **`delphi-review` 工具**（`@boyingliu01/dsh-plugin-xp-gate`）：
+
+```
+delphi-review(
+  subject:   <待评审材料：diff / 设计 / 规格>,
+  addressed: <可选：上一轮之后改了什么，用于后续轮次>,
+  maxRounds: <可选：覆盖默认 5 轮>
+)
+```
+
+该工具**直连外部 OpenAI 兼容网关**，每个席位绑定一个不同模型，因此不依赖宿主配置即可
+满足不变量。它复用**同一份** `.delphi-config.json`，无需额外配置。
+
+**代码强制的不变量**（不是文档约定，违反即报错）：
+
+| 不变量 | 违反时 |
+|---|---|
+| 恰好 3 位专家 | `DelphiConfigError` |
+| 3 个 `requested_model` 去空白后两两不同 | `DelphiConfigError` |
+| 模型不得为未展开的 `${...}` 占位符 | `DelphiConfigError`（在**任何网络调用之前**） |
+| 缺密钥 / 缺 provider / 专家跨网关 | `DelphiSetupError`，报变量名而非回显配置 |
+| 报告缺 `### VERDICT` 段 | 记为 `INVALID_NO_VERDICT`，**不计入共识** |
+| 退出码 0 但内容为空 | 记为 ERROR（推理模型可能把预算全烧在隐藏 token 上） |
+
+**轮次语义与本 skill 一致**：Round 1 匿名且并发；Round 2+ 回传**汇总票型**与"已修改项"，
+个体报告始终匿名。达到阈值即停，否则到 `max_review_rounds` 为止并如实返回 `NO CONSENSUS`。
+
+**推理模型注意**：`g-glm-5.3-flash` 这类模型会先产出隐藏推理 token。
+实测 `max_tokens=4000` 时 `finish_reason=length` 且 **content 为空**；
+席位需独立预算（该席位配置为 32000）。工具把"空内容"记为 ERROR 而非空评审。
+
+> 备选：若希望 DSH **原生** `subagent` 也能选模型，需同时满足
+> (1) `dsh-tool-subagent` 的 `modelSelectionSettings: true`（仅能力开关），
+> (2) 宿主设置 `SubagentModelSelectionConfig.enabled = true` 且 `allowedModels` ≥3 个不同模型。
+> 该路线依赖宿主配置，CI / 一次性会话不可靠，故不作为默认路径。
+
 ### 共识阈值
 
 | 阈值 | 说明 |

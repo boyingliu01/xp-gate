@@ -1,10 +1,11 @@
 {
   "$schema": "./node_modules/@stryker-mutator/core/schema/stryker-schema.json",
   "testRunner": "vitest",
-  "coverageAnalysis": "all",
+  "coverageAnalysis": "perTest",
   "tsconfigFile": "tsconfig.stryker.json",
   "timeoutMS": 600000,
   "timeoutFactor": 1,
+  "dryRunTimeoutMinutes": 20,
   "mutate": [
     "src/principles/**/*.ts",
     "!src/principles/**/*.test.ts",
@@ -19,5 +20,9 @@
   "reporters": ["clear-text", "json", "progress"],
   "jsonReporter": {
     "fileName": "reports/mutation/report.json"
-  }
+  },
+  "vitest": {
+    "configFile": "vitest.config.ts"
+  },
+  "_comment": "`mutate` is the default for a local full run (npm run test:mutation). CI narrows it per-change via `npx stryker run --mutate <comma-separated files>` because mutating this whole glob is ~2014 mutants (~2h) and cannot finish inside the 45-min job budget."
 }

@@ -54,10 +54,12 @@ else
       if command -v npx > /dev/null 2>&1 || [ -f "${PROJECT_ROOT:-$(pwd)}/node_modules/tsx/dist/cli.mjs" ]; then
         # Run principles checker and store results
         if run_tsx "$PRINCIPLES_DIR/index.ts" --files $PRINCIPLES_FILES --format json > /tmp/principles-output.json 2>/dev/null; then
-          # Check severity levels
-          ERROR_COUNT=$(grep -c '"severity":"error"' /tmp/principles-output.json 2>/dev/null || true)
+          # Check severity levels. The reporter emits JSON.stringify(out, null, 2),
+          # i.e. `"severity": "warning"` WITH a space; tolerate any whitespace so a
+          # future minified format cannot silently zero these counts again (#444).
+          ERROR_COUNT=$(grep -cE '"severity"[[:space:]]*:[[:space:]]*"error"' /tmp/principles-output.json 2>/dev/null || true)
           ERROR_COUNT=${ERROR_COUNT:-0}
-          WARNING_COUNT=$(grep -c '"severity":"warning"' /tmp/principles-output.json 2>/dev/null || true)
+          WARNING_COUNT=$(grep -cE '"severity"[[:space:]]*:[[:space:]]*"warning"' /tmp/principles-output.json 2>/dev/null || true)
           WARNING_COUNT=${WARNING_COUNT:-0}
           
           if [ "$ERROR_COUNT" -gt 0 ]; then

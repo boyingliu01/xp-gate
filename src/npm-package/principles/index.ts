@@ -2,6 +2,7 @@ import { analyze, getAdapterForFile } from './analyzer';
 import { formatConsole, formatJSON, formatSARIF } from './reporter';
 import { loadConfig } from './config';
 import { getAllPrincipleRules } from './rules';
+import { isDirectExecution } from './direct-execution.js';
 
 interface CLIOptions {
   files: string[];
@@ -74,19 +75,14 @@ export async function main(args: string[]): Promise<number> {
 
 // Support both CJS (require.main === module) and ESM (import.meta.url) runtimes.
 // npx tsx loads files via import() making require.main unreliable.
-function isDirectExecution(): boolean {
-  if (typeof require !== 'undefined' && require.main === module) {
-    return true;
-  }
-  if (typeof import.meta !== 'undefined' && import.meta.url && process.argv[1]) {
-    const fileUrl = `file://${process.argv[1]}`;
-    return import.meta.url === fileUrl || import.meta.url.endsWith(`/${process.argv[1]}`);
-  }
-  return false;
-}
+//
+// The implementation lives in ./direct-execution.ts so the identical guard can be
+// shared with boy-scout.ts without either module exceeding the 10-export limit.
+// Re-exported here because it is part of this module's public contract (#444).
+export { isDirectExecution } from './direct-execution.js';
 
 const args = process.argv.slice(2);
-if (isDirectExecution()) {
+if (isDirectExecution(process.argv[1], import.meta.url)) {
   main(args)
     .then(exitCode => {
       if (exitCode !== 0) {

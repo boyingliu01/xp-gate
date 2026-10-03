@@ -1,6 +1,7 @@
 import * as fs from 'fs/promises';
 import { analyze, getAdapterForFile } from './analyzer';
 import { getAllRules } from './index';
+import { isDirectExecution } from './direct-execution.js';
 
 interface FileClassification {
   new: string[];
@@ -8,6 +9,17 @@ interface FileClassification {
   deleted: string[];
   renamed: { oldPath: string; newPath: string }[];
 }
+
+/** A git rename line is `R<score> <oldPath> <newPath>` -- three fields minimum. */
+const RENAME_PARTS = 3;
+
+/**
+ * A file already tracked with at most this many warnings must be brought to
+ * zero the next time it is modified. Above it, the normal "must not increase"
+ * contract applies. Named rather than inlined so the threshold is greppable and
+ * so it stops registering as a magic number.
+ */
+const SMALL_WARNING_BUDGET = 5;
 
 // Exported helper to get warning counts for a batch of files using the principles checker
 export async function analyzeWarningsForFiles(filesInput: string | string[]): Promise<Record<string, number>> {
@@ -83,6 +95,17 @@ export function classifyFiles(gitDiffLines: string[]): FileClassification {
     if (parts.length < 2) continue;
 
     const status = parts[0].trim();
+    // Guard the rename case before the switch so the body needs no extra level.
+    if (status.charAt(0) === 'R') {
+      // A rename line carries both the old and the new path.
+      if (parts.length < RENAME_PARTS) continue;
+      result.renamed.push({
+        oldPath: parts[1],
+        newPath: parts[2]
+      });
+      continue;
+    }
+
     switch (status.charAt(0)) {
       case 'A':
         result.new.push(parts.slice(1).join(' '));
@@ -93,14 +116,6 @@ export function classifyFiles(gitDiffLines: string[]): FileClassification {
       case 'D':
         result.deleted.push(parts.slice(1).join(' '));
         break;
-      case 'R':
-        if (parts.length >= 3) {
-          result.renamed.push({
-            oldPath: parts[1],
-            newPath: parts[2]
-          });
-        }
-        break;
       default:
         break;
     }
@@ -109,18 +124,177 @@ export function classifyFiles(gitDiffLines: string[]): FileClassification {
   return result;
 }
 
-export async function loadBaseline(baselinePath: string): Promise<Record<string, BaselineEntry>> {
-  try {
-    await fs.access(baselinePath);
-    const baselineContent = await fs.readFile(baselinePath, 'utf-8');
-    return JSON.parse(baselineContent);
-  } catch {
-    return {};
+/**
+ * Validate one baseline entry.
+ *
+ * The on-disk shape is `{ totalWarnings: number, lastAnalyzed: string }`. A bare
+ * number -- `{"src/a.ts": 1}` -- is accepted by `JSON.parse` and by TypeScript's
+ * unchecked cast, but `entry.totalWarnings` then reads `undefined`, and BOTH
+ * block conditions in `evaluateModifiedFile` become false:
+ *
+ *   `currentWarnings > undefined`  === false
+ *   `undefined <= 5`               === false
+ *
+ * So the file silently passes forever no matter how many warnings it gains. That
+ * exact shape is committed in 791d825 and still present in HEAD, which is why
+ * this is a hard failure rather than a warning (#455). A baseline whose numbers
+ * cannot be trusted is worse than no baseline, because the gate still reports
+ * "PASSED" and nobody looks.
+ */
+function assertValidEntry(file: string, entry: unknown): asserts entry is BaselineEntry {
+  const malformed = (detail: string): never => {
+    throw new Error(
+      `Malformed baseline entry for ${file}: ${detail}. ` +
+        `Expected { totalWarnings: number, lastAnalyzed: string }. ` +
+        `Repair it with \`xp-gate baseline create\` rather than editing by hand.`,
+    );
+  };
+
+  if (entry === null || typeof entry !== 'object' || Array.isArray(entry)) {
+    malformed(`got ${Array.isArray(entry) ? 'an array' : typeof entry}`);
+  }
+  const total = (entry as BaselineEntry).totalWarnings;
+  if (typeof total !== 'number' || !Number.isFinite(total)) {
+    malformed(`totalWarnings is ${total === undefined ? 'missing' : String(total)}`);
   }
 }
 
+/**
+ * Read the warning baseline.
+ *
+ * A missing file is normal (first run) and yields `{}`. A file that exists but
+ * cannot be parsed or whose entries are malformed is an error: continuing with
+ * silently-empty budgets is what let the gate pass everything in #455.
+ */
+export async function loadBaseline(baselinePath: string): Promise<Record<string, BaselineEntry>> {
+  let baselineContent: string;
+  try {
+    baselineContent = await fs.readFile(baselinePath, 'utf-8');
+  } catch (error) {
+    // ONLY "not there yet" means first run. Any other I/O failure (EACCES, EPERM,
+    // a TOCTOU between access and read, a transient disk error) must NOT be read
+    // as an empty budget: callers react to an empty baseline by auto-initialising
+    // and then SAVING, which overwrites whatever real entries the file held --
+    // exactly the destructive overwrite #445 removed. Reporting a hard error is
+    // the only safe response when we cannot tell what the baseline contains.
+    if ((error as NodeJS.ErrnoException)?.code === 'ENOENT') {
+      return {};
+    }
+    const reason = error instanceof Error ? error.message : String(error);
+    throw new Error(`Cannot read baseline ${baselinePath}: ${reason}`);
+  }
+
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(baselineContent);
+  } catch (error) {
+    const reason = error instanceof Error ? error.message : String(error);
+    throw new Error(`Baseline ${baselinePath} is not valid JSON: ${reason}`);
+  }
+
+  if (parsed === null || typeof parsed !== 'object' || Array.isArray(parsed)) {
+    throw new Error(`Baseline ${baselinePath} must be a JSON object mapping paths to entries.`);
+  }
+
+  for (const [file, entry] of Object.entries(parsed as Record<string, unknown>)) {
+    assertValidEntry(file, entry);
+  }
+  return parsed as Record<string, BaselineEntry>;
+}
+
+/**
+ * Read the baseline for repair, tolerating entries `loadBaseline` would reject.
+ *
+ * `initBaselineCommand` is the tool that fixes a broken baseline, so it cannot
+ * require the baseline to be well-formed first -- otherwise a corrupt entry is
+ * unrecoverable by any supported path (#455). Malformed entries are dropped and
+ * reported; everything else is preserved, because silently discarding unrelated
+ * budgets is the destructive overwrite fixed in #445.
+ *
+ * The file is read once and parsed once -- re-reading after `loadBaseline` threw
+ * would race a concurrent writer and could report a different set of drops than
+ * the caller then saves.
+ */
+async function loadBaselineForRepair(
+  baselinePath: string,
+): Promise<{ entries: Record<string, BaselineEntry>; dropped: string[]; readError: string | null }> {
+  const absent = (readError: string | null) => ({ entries: {} as Record<string, BaselineEntry>, dropped: [] as string[], readError });
+
+  const content = await readBaselineText(baselinePath);
+  if (typeof content !== 'string') {
+    // `null` means the file is simply not there yet -- a normal first run. Any
+    // other failure must be reported rather than treated as empty, so the caller
+    // can refuse to write instead of saving over content we never inspected.
+    return absent(content === null ? null : `Cannot read baseline ${baselinePath}: ${content.reason}`);
+  }
+
+  const parsed = parseBaselineJson(content, baselinePath);
+  if (typeof parsed === 'string') {
+    return absent(parsed);
+  }
+
+  return { ...partitionEntries(parsed), readError: null };
+}
+
+/** Read the baseline file. Returns the text, `null` when absent, or the failure. */
+async function readBaselineText(baselinePath: string): Promise<string | null | { reason: string }> {
+  try {
+    return await fs.readFile(baselinePath, 'utf-8');
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException)?.code === 'ENOENT') return null;
+    return { reason: error instanceof Error ? error.message : String(error) };
+  }
+}
+
+/** Parse the baseline JSON. Returns the object, or a human-readable failure. */
+function parseBaselineJson(content: string, baselinePath: string): Record<string, unknown> | string {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(content);
+  } catch (error) {
+    const reason = error instanceof Error ? error.message : String(error);
+    return `Baseline ${baselinePath} is not valid JSON: ${reason}`;
+  }
+  if (parsed === null || typeof parsed !== 'object' || Array.isArray(parsed)) {
+    return `Baseline ${baselinePath} must be a JSON object mapping paths to entries.`;
+  }
+  return parsed as Record<string, unknown>;
+}
+
+/** Split entries into the valid ones and the names of the malformed ones. */
+function partitionEntries(parsed: Record<string, unknown>): {
+  entries: Record<string, BaselineEntry>;
+  dropped: string[];
+} {
+  const entries: Record<string, BaselineEntry> = {};
+  const dropped: string[] = [];
+  for (const [file, entry] of Object.entries(parsed)) {
+    try {
+      assertValidEntry(file, entry);
+      entries[file] = entry;
+    } catch {
+      dropped.push(file);
+    }
+  }
+  return { entries, dropped };
+}
+
+/**
+ * Persist the baseline.
+ *
+ * A write failure here is not cosmetic: the caller's whole contract is "record
+ * what we found so the next run can compare against it". Silently swallowing the
+ * error would leave the baseline stale while reporting success, so the failure
+ * is wrapped with the path and re-thrown -- callers already surface a thrown
+ * error as a non-zero exit.
+ */
 export async function saveBaseline(baselinePath: string, baseline: Record<string, BaselineEntry>): Promise<void> {
-  await fs.writeFile(baselinePath, JSON.stringify(baseline, null, 2));
+  try {
+    await fs.writeFile(baselinePath, JSON.stringify(baseline, null, 2));
+  } catch (error) {
+    const reason = error instanceof Error ? error.message : String(error);
+    throw new Error(`Failed to write baseline to ${baselinePath}: ${reason}`);
+  }
 }
 
 function evaluateNewFile(currentWarnings: number): Pick<DeltaResult, 'enforcement' | 'reason'> {
@@ -155,7 +329,7 @@ function evaluateModifiedFile(
     };
   }
 
-  if (baselineWarnings <= 5 && currentWarnings > 0) {
+  if (baselineWarnings <= SMALL_WARNING_BUDGET && currentWarnings > 0) {
     return {
       enforcement: 'BLOCK',
       reason: `Files with <=5 warnings must clear to zero (currently: ${currentWarnings}/${baselineWarnings}). Boy Scout Rule: Leave the code cleaner than you found it.`,
@@ -174,6 +348,26 @@ export function calculateDelta(
   status: 'NEW' | 'MODIFIED'
 ): DeltaResult {
   const baselineWarnings = baselineEntry ? baselineEntry.totalWarnings : 0;
+
+  // A non-finite baseline can only come from a corrupt entry. `loadBaseline`
+  // rejects those, but this is the last line of defence: `NaN` compares false
+  // against everything, so without this check the file would PASS forever
+  // instead of failing loudly (#455).
+  if (!Number.isFinite(baselineWarnings)) {
+    return {
+      file: '',
+      status,
+      baselineWarnings,
+      currentWarnings,
+      // NaN, not null: the field is typed `number`, and NaN is the honest value
+      // for "cannot be computed". It serialises to `null` in JSON, which reads
+      // as unavailable rather than as a real 0 delta.
+      delta: Number.NaN,
+      enforcement: 'BLOCK',
+      reason: `Baseline for this file is corrupt (totalWarnings is ${String(baselineWarnings)}). Repair .warnings-baseline.json before committing.`,
+    };
+  }
+
   const delta = status === 'NEW' ? currentWarnings : currentWarnings - baselineWarnings;
 
   const evaluation = status === 'NEW'
@@ -216,20 +410,43 @@ export async function initBaseline(files: string[]): Promise<Record<string, Base
   const baseline: Record<string, BaselineEntry> = {};
 
   for (const file of files) {
-    try {
-      const warningCount = currentWarnings[file] || 0;
-      if (warningCount > 0) {
-        baseline[file] = {
-          totalWarnings: warningCount,
-          lastAnalyzed: new Date().toISOString(),
-        };
-      }
-    } catch (error: unknown) {
-      console.error(`Failed to analyze file for baseline: ${file}`, error);
-    }
+    const entry = baselineEntryFor(currentWarnings[file]);
+    if (entry) baseline[file] = entry;
   }
 
   return baseline;
+}
+
+/**
+ * Build the baseline entry for one file, or null when there is nothing to record.
+ *
+ * Extracted from `initBaseline` so the loop body is a single call: the previous
+ * try/if nesting reached 5 levels, over the 4-level limit. Analysis failures are
+ * handled by `analyzeWarningsForFiles`, which omits files it cannot read, so a
+ * missing count here means "no warnings", not "the read blew up".
+ */
+function baselineEntryFor(warningCount: number | undefined): BaselineEntry | null {
+  const total = warningCount || 0;
+  // Only files that actually carry warnings are tracked; a clean file needs no budget.
+  if (total === 0) return null;
+  return { totalWarnings: total, lastAnalyzed: new Date().toISOString() };
+}
+
+/**
+ * Record a first-seen count for files with no baseline entry yet.
+ *
+ * Extracted from `runEnforcement`, whose if/for/if nesting reached 5 levels.
+ * Files that are already clean gain no entry -- there is nothing to budget.
+ */
+function recordAutoInitializedEntries(
+  baseline: Record<string, BaselineEntry>,
+  files: string[],
+  currentWarnings: Record<string, number>,
+): void {
+  for (const file of files) {
+    const entry = baselineEntryFor(currentWarnings[file]);
+    if (entry) baseline[file] = entry;
+  }
 }
 
  /**
@@ -258,13 +475,52 @@ async function autoInitBaseline(
 
 async function runInitBaselineCommand(parsed: Record<string, unknown>): Promise<number> {
   try {
-    await initBaselineCommand((parsed.files ?? []) as string[]);
-    console.log('Baseline initialized successfully');
-    return 0;
+    // Honor --baseline; the old code hardcoded the default path (#445).
+    const baselinePath = (parsed.baselinePath as string) || '.warnings-baseline.json';
+    const files = collectBaselineTargets(parsed);
+    if (files.length === 0) {
+      // Writing an empty baseline while reporting success is how a caller ends up
+      // believing a file was recorded when nothing was. `--init-baseline` takes
+      // its targets as its own value; `--new-files`/`--modified-files` also work,
+      // and previously writing them was silently ignored as well.
+      console.error(
+        'No files to record. Pass them to --init-baseline <file1,file2,...>, ' +
+          'or via --new-files/--modified-files.',
+      );
+      return 1;
+    }
+    const result = await initBaselineCommand(files, baselinePath);
+    // Use the explicit result, never process.exitCode: global exit state can be
+    // set by unrelated code and would misreport this command's outcome.
+    return result.ok ? 0 : 1;
   } catch (error: unknown) {
     console.error('Error initializing baseline:', error);
     return 1;
   }
+}
+
+/**
+ * Merge every way a caller can name files for `--init-baseline`.
+ *
+ * `--init-baseline` carries its own list (`parsed.files`), while
+ * `--new-files`/`--modified-files` populate separate keys. Requiring exactly one
+ * spelling meant the other was read as an empty list, so the command wrote `{}`
+ * and exited 0 -- a silent no-op (#455 family). Union them instead, preserving
+ * order and dropping duplicates.
+ */
+function collectBaselineTargets(parsed: Record<string, unknown>): string[] {
+  const groups = [
+    parsed.files as string[] | undefined,
+    parsed.newFiles as string[] | undefined,
+    parsed.modifiedFiles as string[] | undefined,
+  ];
+  const seen = new Set<string>();
+  for (const group of groups) {
+    for (const file of group ?? []) {
+      if (file) seen.add(file);
+    }
+  }
+  return [...seen];
 }
 
 export async function runEnforcementCommand(parsed: Record<string, unknown>): Promise<number> {
@@ -293,14 +549,32 @@ function splitCsvArg(raw: string | undefined): string[] {
   return raw?.split(',').map((s: string) => s.trim()).filter(Boolean) || [];
 }
 
+/**
+ * Read a flag's value, refusing to swallow the next flag.
+ *
+ * A bare `next` is taken as the value only when it does not itself look like a
+ * flag; otherwise the flag is treated as having no value and the following token
+ * is parsed normally. Without this, `--baseline --new-files x` recorded the
+ * literal string "--new-files" as a path (#455).
+ */
+function takeValue(next: string | undefined): { value: string | undefined; consumed: boolean } {
+  const isFlag = typeof next === 'string' && next.startsWith('--');
+  return isFlag || next === undefined ? { value: undefined, consumed: false } : { value: next, consumed: true };
+}
+
 const ARG_HANDLERS: Record<string, (parsed: Record<string, unknown>, next: string | undefined) => boolean> = {
-  '--new-files': (parsed, next) => { parsed.newFiles = splitCsvArg(next); return true; },
-  '--modified-files': (parsed, next) => { parsed.modifiedFiles = splitCsvArg(next); return true; },
-  '--baseline': (parsed, next) => { parsed.baselinePath = next; return true; },
+  '--new-files': (parsed, next) => { const v = takeValue(next); parsed.newFiles = splitCsvArg(v.value); return v.consumed; },
+  '--modified-files': (parsed, next) => { const v = takeValue(next); parsed.modifiedFiles = splitCsvArg(v.value); return v.consumed; },
+  '--baseline': (parsed, next) => { const v = takeValue(next); parsed.baselinePath = v.value; return v.consumed; },
   '--init-baseline': (parsed, next) => {
     parsed.command = 'init-baseline';
-    parsed.files = splitCsvArg(next);
-    return true;
+    // The file list is OPTIONAL and positional: `--init-baseline a.ts,b.ts` works,
+    // and so does `--init-baseline --new-files a.ts`. Consuming the next token
+    // unconditionally swallowed the following FLAG, which silently produced an
+    // empty baseline that the command then reported as success (#455).
+    const v = takeValue(next);
+    parsed.files = splitCsvArg(v.value);
+    return v.consumed;
   },
 };
 
@@ -344,9 +618,89 @@ Examples:
 `);
 }
 
-async function initBaselineCommand(files: string[]): Promise<void> {
-  const baseline = await initBaseline(files);
-  await saveBaseline('.warnings-baseline.json', baseline);
+/**
+ * Initialize/extend the warning baseline for the given files.
+ *
+ * MERGE semantics: entries already present in `baselinePath` that are not part of
+ * `files` are preserved. The previous implementation wrote a freshly built object
+ * containing only `files`, which silently destroyed every unrelated entry (#445),
+ * and it hardcoded `.warnings-baseline.json`, ignoring `--baseline`.
+ */
+async function initBaselineCommand(
+  files: string[],
+  baselinePath = '.warnings-baseline.json',
+): Promise<{ ok: boolean; reason?: string }> {
+  const { entries: existing, dropped, readError } = await loadBaselineForRepair(baselinePath);
+
+  // Refuse to write when we could not determine what the file holds. Saving now
+  // would replace unknown content with just our own entries.
+  if (readError) {
+    return { ok: false, reason: readError };
+  }
+
+  const analyzed = await initBaseline(files);
+
+  // Preserve anything already tracked; only add/refresh entries for `files`.
+  // `merged` starts as a copy of `existing`, so a non-empty baseline can never
+  // become empty here -- the destructive overwrite fixed in #445 is structurally
+  // impossible rather than merely guarded.
+  const merged: Record<string, BaselineEntry> = { ...existing };
+  const added: string[] = [];
+  const refreshed: string[] = [];
+  for (const [file, entry] of Object.entries(analyzed)) {
+    if (existing[file]) {
+      refreshed.push(file);
+    } else {
+      added.push(file);
+    }
+    merged[file] = entry;
+  }
+
+  reportDroppedEntries(dropped, analyzed);
+  await saveBaseline(baselinePath, merged);
+  reportBaselineUpdate(baselinePath, added, refreshed, Object.keys(existing).filter(k => !(k in analyzed)));
+
+  // Non-zero exit when repair cost us an entry that could not be rebuilt. The
+  // write still happened (the rest of the file is valid), but a caller scripting
+  // this must not see success for a run that permanently lost a budget. We cannot
+  // invent a warning count we never measured, and a wrong number would silently
+  // re-arm the gate -- the very bug being fixed.
+  const stillDropped = dropped.filter(file => !(file in analyzed));
+  if (stillDropped.length > 0) {
+    return {
+      ok: false,
+      reason: `Dropped ${stillDropped.length} unrecoverable baseline ${stillDropped.length === 1 ? 'entry' : 'entries'}: ${stillDropped.join(', ')}. Re-run with those paths to rebuild them.`,
+    };
+  }
+  return { ok: true };
+}
+
+/**
+ * Report malformed entries that had to be discarded, distinguishing the ones the
+ * current run measured afresh from the ones that are now permanently gone.
+ */
+function reportDroppedEntries(dropped: string[], analyzed: Record<string, BaselineEntry>): void {
+  if (dropped.length === 0) return;
+  const noun = dropped.length === 1 ? 'entry' : 'entries';
+  console.log(`⚠️  Dropped ${dropped.length} malformed baseline ${noun}:`);
+  for (const file of dropped) {
+    const fate = file in analyzed ? '(recreated from the current tree)' : '(lost -- not in the file list)';
+    console.log(`   - ${file} ${fate}`);
+  }
+}
+
+/** Print the add/refresh/preserve summary for a completed baseline write. */
+function reportBaselineUpdate(
+  baselinePath: string,
+  added: string[],
+  refreshed: string[],
+  preserved: string[],
+): void {
+  const list = (items: string[]) => (items.length > 0 ? items.join(', ') : '(none)');
+  console.log(`ℹ️  Baseline updated: ${baselinePath}`);
+  console.log(`   added:    ${list(added)}`);
+  console.log(`   refreshed:${refreshed.length > 0 ? ` ${list(refreshed)}` : ' (none)'}`);
+  console.log(`   preserved:${preserved.length > 0 ? ` ${list(preserved)}` : ' (none)'}`);
 }
 
 async function runEnforcement(newFiles: string[], modifiedFiles: string[], baselinePath: string): Promise<EnforcementResult> {
@@ -363,18 +717,10 @@ async function runEnforcement(newFiles: string[], modifiedFiles: string[], basel
     }
   }
   
-  // If there are missing baseline entries, auto-initialize them
+  // Files being modified for the first time get their current count recorded, so
+  // the next modification is compared against a real budget instead of nothing.
   if (missingBaselineEntries.length > 0) {
-    for (const file of missingBaselineEntries) {
-      const warningCount = currentWarnings[file] || 0;
-      if (warningCount > 0) {
-        baseline[file] = {
-          totalWarnings: warningCount,
-          lastAnalyzed: new Date().toISOString(),
-        };
-      }
-    }
-    // Save the updated baseline
+    recordAutoInitializedEntries(baseline, missingBaselineEntries, currentWarnings);
     await saveBaseline(baselinePath, baseline);
     console.log(`ℹ️  Auto-initialized baseline for ${missingBaselineEntries.length} files`);
   }
@@ -399,8 +745,10 @@ async function runEnforcement(newFiles: string[], modifiedFiles: string[], basel
   return enforceBoyScoutRule(deltaResults);
 }
 
-if ((typeof require !== 'undefined' && require.main === module) || 
-    (typeof require === 'undefined' && process.argv[1]?.includes('boy-scout'))) {
+// Fires only when this file IS the entry point. The previous check --
+// `process.argv[1]?.includes('boy-scout')` -- both over- and under-matched, and
+// silently no-oped under CI where argv[1] does not repeat the filename (#453).
+if (isDirectExecution(process.argv[1], import.meta.url)) {
   main()
     .then(code => process.exit(code))
     .catch(error => {
