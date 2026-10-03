@@ -135,6 +135,13 @@ function listTrackedFiles(projectRoot: string): Set<string> | null {
       cwd: projectRoot,
       encoding: 'utf-8',
       stdio: ['ignore', 'pipe', 'ignore'],
+      // `execFileSync` defaults to a 1 MiB buffer. A repo with a few tens of
+      // thousands of tracked paths exceeds that, and the throw would be caught
+      // below and reported as "git unavailable" -- silently disabling pruning at
+      // exactly the scale where a stale baseline is most likely. Raised well past
+      // any realistic index size; the failure mode we care about is correctness,
+      // not memory.
+      maxBuffer: 256 * 1024 * 1024,
     });
     const set = new Set<string>();
     for (const line of out.split('\n')) {
