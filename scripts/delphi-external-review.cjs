@@ -406,10 +406,22 @@ async function callModelAPI(providerConfig, model, systemPrompt, userPrompt, opt
       return { error: true, message: 'Invalid response from model.' };
     }
 
+    // The gateway must echo which model actually served the request. Writing
+    // `null` here used to be tolerated downstream, which let a run that never
+    // resolved a model count as a successful expert call (#423). Fail at the
+    // source instead, so the evidence never records an unverifiable expert.
+    const resolvedModel = typeof data.model === 'string' ? data.model.trim() : '';
+    if (resolvedModel === '') {
+      return {
+        error: true,
+        message: 'Gateway response did not include a resolved model id; cannot prove which model ran.',
+      };
+    }
+
     return {
       success: true,
       content: content.trim(),
-      resolved_model: typeof data.model === 'string' && data.model.trim() !== '' ? data.model.trim() : null,
+      resolved_model: resolvedModel,
     };
   } catch (err) {
     if (err instanceof Error && err.name === 'AbortError') {
@@ -464,6 +476,11 @@ function buildReviewOutput(verdict, args, provenance) {
     model_used: `${provenance.provider}/${provenance.requested_model}`,
     requested_model: provenance.requested_model,
     resolved_model: provenance.resolved_model,
+    // Provenance marker required by Gate MW (#423). This script talks to an
+    // external gateway, so every record it emits is `external`. The field is
+    // explicit rather than inferred: the validator rejects a missing value
+    // instead of defaulting it, which is what makes forgery costly.
+    channel: provenance.channel,
     round: args.round,
     mode: args.mode,
   };
@@ -566,6 +583,9 @@ async function main() {
     provider: expertConfig.provider,
     requested_model: expertConfig.model,
     resolved_model: result.resolved_model,
+    // This runner only ever reaches an external provider; local/offline
+    // fallbacks are recorded by a different path (#423).
+    channel: 'external',
   });
 
   console.log(JSON.stringify(output, null, 2));

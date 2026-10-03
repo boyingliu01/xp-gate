@@ -6,6 +6,17 @@ const fs = require('node:fs');
 const REQUIRED_ROLES = ['architecture', 'technical', 'feasibility'];
 const VALIDITY_MS = 60 * 60 * 1000;
 
+/**
+ * Allowed provenance values for an expert record.
+ *
+ * `channel` is an EXPLICIT whitelist. An absent field is rejected rather than
+ * defaulted: treating "missing" as `local` (or as anything else) would be a
+ * zero-cost bypass, since omitting one key would let evidence that never came
+ * from a real model call pass the gate. Only these exact strings are accepted;
+ * casing and whitespace are not normalised.
+ */
+const VALID_CHANNELS = ['external', 'local'];
+
 function fail(message) {
   console.error(`Invalid code walkthrough evidence: ${message}`);
   process.exit(1);
@@ -47,7 +58,7 @@ function parseTimestamp(value, field) {
   return date.getTime();
 }
 
-function validateExpert(expert, index, roles, models) {
+function validateExpert(expert, index, roles, models, resolvedModels) {
   if (!isPlainObject(expert)) fail(`experts[${index}] must be a plain object.`);
   if (!REQUIRED_ROLES.includes(expert.role)) fail(`experts[${index}].role is invalid.`);
   if (roles.has(expert.role)) fail(`expert role ${expert.role} is duplicated.`);
@@ -61,6 +72,15 @@ function validateExpert(expert, index, roles, models) {
     fail(`expert ${expert.role} contains an error or fallback marker.`);
   }
 
+  // Provenance is mandatory and must be an exact whitelist value (#423). Without
+  // this, three hand-written records with distinct model NAMES satisfied the old
+  // check while no model was ever called.
+  if (!VALID_CHANNELS.includes(expert.channel)) {
+    fail(
+      `expert ${expert.role} channel must be one of: ${VALID_CHANNELS.join(', ')}.`
+    );
+  }
+
   if (typeof expert.requested_model !== 'string' || expert.requested_model.trim() === '') {
     fail(`expert ${expert.role} requested_model must be non-empty.`);
   }
@@ -68,10 +88,18 @@ function validateExpert(expert, index, roles, models) {
   if (models.has(model)) fail(`requested_model ${model} is duplicated.`);
   models.add(model);
 
-  if (expert.resolved_model !== null
-      && (typeof expert.resolved_model !== 'string' || expert.resolved_model.trim() === '')) {
-    fail(`expert ${expert.role} resolved_model must be non-empty or null.`);
+  // `resolved_model` must be a real, DISTINCT model. Previously null was allowed,
+  // so an expert that never resolved a model still counted as successful; and
+  // nothing compared resolved models, so all three could report the same one
+  // while `requested_model` differed.
+  if (typeof expert.resolved_model !== 'string' || expert.resolved_model.trim() === '') {
+    fail(`expert ${expert.role} resolved_model must be a non-empty string.`);
   }
+  const resolved = expert.resolved_model.trim().toLowerCase();
+  if (resolvedModels.has(resolved)) {
+    fail(`expert ${expert.role} resolved_model ${expert.resolved_model.trim()} is duplicated.`);
+  }
+  resolvedModels.add(resolved);
 }
 
 function validateEvidence(evidence, expectedCommit, expectedBranch, now) {
@@ -100,8 +128,11 @@ function validateEvidence(evidence, expectedCommit, expectedBranch, now) {
   }
   const roles = new Set();
   const models = new Set();
+  // Scoped to this validation run, so one document's models cannot leak into the
+  // next (a long-lived process validating several pushes).
+  const resolvedModels = new Set();
   evidence.experts.forEach((expert, index) => {
-    validateExpert(expert, index, roles, models);
+    validateExpert(expert, index, roles, models, resolvedModels);
   });
   if (roles.size !== REQUIRED_ROLES.length) fail('all required expert roles must be present.');
 }

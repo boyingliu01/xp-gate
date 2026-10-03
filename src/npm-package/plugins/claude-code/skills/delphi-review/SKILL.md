@@ -249,7 +249,7 @@ tools_denied:
 
 1. **Step 0: Input Validation** — Check input contains reviewable content (design doc/code/spec/diff). Empty input → `[DelphiReview:BLOCKED]`.
 2. **Round 1: Anonymous Independent Review** — Invoke architecture, technical, and feasibility independently without exposing their opinions to one another. Every successful result must use `result_type=delphi_expert_result`.
-3. **Execution Verification** — Verify that all three results succeeded and that their `requested_model` values are three distinct trimmed IDs, confirmed against the platform's execution record rather than expert self-report alone (OpenCode: the provider call log; Qoder: the `model` field of `model.request.started` events under `~/.qoder/logs/sessions/<project>/<sessionId>/segments/*.jsonl` — the `--model` argv in `~/.qoder/logs/runs/*/manifest.json` is the session model and proves nothing about subagents). A local fallback (`provider: local`) is not an executed expert and cannot satisfy this check; a local hosted endpoint configured as an ordinary callable provider can. Where the platform pins subagents to the session model (current Qoder Custom Agent dispatch, see the Qoder section below), the check cannot pass on built-in models at all and the external provider path is required.
+3. **Execution Verification** — Verify that all three results succeeded and that their `requested_model` values are three distinct trimmed IDs, confirmed against the platform's execution record rather than expert self-report alone (OpenCode: the provider call log; Qoder: the `model` field of `model.request.started` events under `~/.qoder/logs/sessions/<project>/<sessionId>/segments/*.jsonl` — the `--model` argv in `~/.qoder/logs/runs/*/manifest.json` is the session model and proves nothing about subagents). A local fallback (`provider: local`) is not an executed expert and cannot satisfy this check; a local hosted endpoint configured as an ordinary callable provider can. Each expert record must also carry an explicit `channel` of either `external` or `local`; the value is a whitelist and a missing or unknown value fails the gate (it is never defaulted, since defaulting would let a forged record pass by simply omitting the field). Where the platform pins subagents to the session model (current Qoder Custom Agent dispatch, see the Qoder section below), the check cannot pass on built-in models at all and the external provider path is required.
 4. **Consensus Check** — Aggregate all three successful expert results. Consensus >=90% AND all APPROVED → complete. One expert result is never global approval.
 5. **Rounds 2-5: Exchange and Final Positions** — If needed, expose prior aggregate evidence, re-evaluate, and stop at the first approved consensus or after five rounds.
 6. **Failure Handling** — Any expert failure, missing result, duplicate model ID, or unverifiable execution blocks the review. Do not substitute a local fallback or silently reduce the expert count.
@@ -515,9 +515,9 @@ Every Delphi mode MUST use the full JSON schema below. Architecture, technical, 
   "context_file_used": "CONTEXT.md",
   "round": 1,
   "expert_verdicts": [
-    { "role": "architecture", "verdict": "APPROVED", "confidence": 9, "result_type": "delphi_expert_result", "requested_model": "provider/model-a" },
-    { "role": "technical", "verdict": "APPROVED", "confidence": 8, "result_type": "delphi_expert_result", "requested_model": "provider/model-b" },
-    { "role": "feasibility", "verdict": "APPROVED", "confidence": 8, "result_type": "delphi_expert_result", "requested_model": "provider/model-c" }
+    { "role": "architecture", "verdict": "APPROVED", "confidence": 9, "result_type": "delphi_expert_result", "requested_model": "provider/model-a", "resolved_model": "provider/model-a", "channel": "external" },
+    { "role": "technical", "verdict": "APPROVED", "confidence": 8, "result_type": "delphi_expert_result", "requested_model": "provider/model-b", "resolved_model": "provider/model-b", "channel": "external" },
+    { "role": "feasibility", "verdict": "APPROVED", "confidence": 8, "result_type": "delphi_expert_result", "requested_model": "provider/model-c", "resolved_model": "provider/model-c", "channel": "external" }
   ],
   "requirements_statement": "<short summary of what was reviewed>",
   "gaps_found": [],
