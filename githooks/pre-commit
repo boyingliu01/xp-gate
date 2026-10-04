@@ -882,7 +882,35 @@ else
     echo "   ── Checking $CURRENT_LANG ──"
     case "$CURRENT_LANG" in
       typescript)
-  # TypeScript: static analysis (tsc) + linting (eslint)
+  # TypeScript: static analysis (tsc) + linting (eslint/biome)
+  #
+  # Resolve the TS project directory. The probes below used to run against the
+  # repo root only; in multi-language monorepos (e.g. web/ + backend/, where the
+  # hook stays at the root — see the cd block above) tsconfig.json / biome.json
+  # live in the language subdirectory, so the whole TS half of Gate 1 silently
+  # SKIPped ("tsconfig.json not found") while a project config existed.
+  # Order: repo root first (unchanged behaviour for plain projects), then the
+  # detected language subdirectory, then a shallow search.
+  TS_PROJECT_DIR=""
+  for _ts_dir in "." "${PROJECT_SUBDIR:-}"; do
+    [ -z "$_ts_dir" ] && continue
+    if [ -f "$_ts_dir/tsconfig.json" ] || [ -f "$_ts_dir/biome.json" ] || [ -f "$_ts_dir/biome.jsonc" ] \
+       || [ -f "$_ts_dir/eslint.config.js" ] || [ -f "$_ts_dir/.eslintrc.json" ] \
+       || [ -f "$_ts_dir/.eslintrc.js" ] || [ -f "$_ts_dir/.eslintrc.cjs" ]; then
+      TS_PROJECT_DIR="$_ts_dir"
+      break
+    fi
+  done
+  if [ -z "$TS_PROJECT_DIR" ]; then
+    _TSCONFIG_CAND=$(find . -maxdepth 2 \( -name tsconfig.json -o -name biome.json -o -name biome.jsonc -o -name eslint.config.js \) -not -path './.git/*' -not -path './node_modules/*' 2>/dev/null | head -1)
+    if [ -n "$_TSCONFIG_CAND" ]; then
+      TS_PROJECT_DIR=$(dirname "$_TSCONFIG_CAND")
+    fi
+  fi
+  [ -z "$TS_PROJECT_DIR" ] && TS_PROJECT_DIR="."
+  if [ "$TS_PROJECT_DIR" != "." ]; then
+    echo "   TypeScript project directory: $TS_PROJECT_DIR/"
+  fi
   if ! command -v npx &> /dev/null; then
     echo "ℹ️  npx not available — skipping TypeScript checks"
     echo "⏭️  SKIPPED - Code quality (npx not available)"
@@ -891,10 +919,12 @@ else
     TSC_OUTPUT=$(npx tsc --version 2>&1)
     if echo "$TSC_OUTPUT" | grep -q "Version"; then
       # Only run tsc if tsconfig.json exists (without it tsc prints help and exits non-zero)
-      if [ -f "tsconfig.json" ]; then
-        # Run TypeScript type checking
+      if [ -f "$TS_PROJECT_DIR/tsconfig.json" ]; then
+        # Run TypeScript type checking (--project so the config is found even
+        # when the TS project lives in a subdirectory; identical to auto
+        # discovery when TS_PROJECT_DIR is ".")
         echo "Running TypeScript static analysis ($TSC_OUTPUT)..."
-        npx tsc --noEmit --skipLibCheck 2>&1 | head -30
+        npx tsc --noEmit --skipLibCheck --project "$TS_PROJECT_DIR/tsconfig.json" 2>&1 | head -30
         TSC_EXIT=$?
         if [ "$TSC_EXIT" -ne 0 ]; then
           echo ""
@@ -907,22 +937,24 @@ else
         # Also check test files if they exist (Issue #293)
         # Many projects exclude __tests__/ from tsconfig.json, so test file type
         # errors silently accumulate.
-        if [ -d "src/__tests__" ] || [ -d "src/tests" ] || [ -d "tests" ] || [ -d "__tests__" ]; then
+        if [ -d "$TS_PROJECT_DIR/src/__tests__" ] || [ -d "$TS_PROJECT_DIR/src/tests" ] || [ -d "$TS_PROJECT_DIR/tests" ] || [ -d "$TS_PROJECT_DIR/__tests__" ]; then
           HAS_TESTS_IN_TSC=false
-          if npx tsc --noEmit --skipLibCheck --listFiles 2>/dev/null | grep -qE '__tests__/|\.test\.ts|\.spec\.ts'; then
+          if npx tsc --noEmit --skipLibCheck --project "$TS_PROJECT_DIR/tsconfig.json" --listFiles 2>/dev/null | grep -qE '__tests__/|\.test\.ts|\.spec\.ts'; then
             HAS_TESTS_IN_TSC=true
           fi
           if [ "$HAS_TESTS_IN_TSC" = false ]; then
             TSC_TEST_EXIT=0
-            if [ -f "tsconfig.tests.json" ]; then
+            if [ -f "$TS_PROJECT_DIR/tsconfig.tests.json" ]; then
               echo "Checking test files with tsconfig.tests.json..."
-              npx tsc --noEmit --project tsconfig.tests.json 2>&1 | head -30
+              npx tsc --noEmit --project "$TS_PROJECT_DIR/tsconfig.tests.json" 2>&1 | head -30
               TSC_TEST_EXIT=$?
             else
               echo "Checking test files for type errors..."
-              TEMP_TSCONFIG=".tsconfig.withtests.json"
+              # Write the temp config next to the real one so its relative
+              # "include" paths keep resolving against the project directory.
+              TEMP_TSCONFIG="$TS_PROJECT_DIR/.tsconfig.withtests.json"
               node -e "
-                const cfg = JSON.parse(require('fs').readFileSync('tsconfig.json','utf8'));
+                const cfg = JSON.parse(require('fs').readFileSync('$TS_PROJECT_DIR/tsconfig.json','utf8'));
                 delete cfg.exclude;
                 cfg.include = cfg.include || ['src/**/*'];
                 cfg.include.push('src/**/__tests__/**','src/**/*.test.ts','src/**/*.spec.ts');
@@ -949,13 +981,21 @@ else
       echo "Install typescript (npm install typescript --save-dev) for type checking."
     fi
     
-    # Run ESLint linting if config exists
-    if [ -f ".eslintrc.json" ] || [ -f ".eslintrc.js" ] || [ -f ".eslintrc.cjs" ] || [ -f "eslint.config.js" ]; then
+    # Run ESLint linting if config exists (root or TS project subdirectory)
+    if [ -f "$TS_PROJECT_DIR/.eslintrc.json" ] || [ -f "$TS_PROJECT_DIR/.eslintrc.js" ] || [ -f "$TS_PROJECT_DIR/.eslintrc.cjs" ] || [ -f "$TS_PROJECT_DIR/eslint.config.js" ]; then
       echo "Running ESLint linting..."
       # Filter to only TS/JS files - ESLint config ignores non-matching files
       ESLINT_FILES=$(echo "$CHANGED_FILES" | grep -E '\.(ts|tsx|js|jsx)$' || true)
       if [ -n "$ESLINT_FILES" ]; then
-        ESLINT_OUTPUT=$(npx eslint $ESLINT_FILES -f json --no-warn-ignored 2>&1)
+        # File paths from git are repo-root relative, so they are correct from
+        # the root. Legacy .eslintrc.* configs are discovered by walking up from
+        # each linted file (found in the subdirectory automatically); flat
+        # configs are discovered from the CWD, so point at them explicitly.
+        if [ "$TS_PROJECT_DIR" != "." ] && [ -f "$TS_PROJECT_DIR/eslint.config.js" ]; then
+          ESLINT_OUTPUT=$(npx eslint --config "$TS_PROJECT_DIR/eslint.config.js" $ESLINT_FILES -f json --no-warn-ignored 2>&1)
+        else
+          ESLINT_OUTPUT=$(npx eslint $ESLINT_FILES -f json --no-warn-ignored 2>&1)
+        fi
         ESLINT_EXIT=$?
         if [ "$ESLINT_EXIT" -ne 0 ]; then
           if [ -f ".xp-gate/lint-baseline.json" ] && command -v node &> /dev/null; then
@@ -1002,8 +1042,8 @@ else
       fi
     else
       echo "ℹ️  No ESLint configuration found - Skipping"
-      if [ -f "package.json" ] && command -v node &> /dev/null; then
-        HAS_ESLINT=$(node -e "try{const p=JSON.parse(require('fs').readFileSync('package.json','utf8'));const d=p.devDependencies||{};const deps=p.dependencies||{};console.log((d.eslint||deps.eslint)?'yes':'no')}catch{console.log('no')}") && true
+      if [ -f "$TS_PROJECT_DIR/package.json" ] && command -v node &> /dev/null; then
+        HAS_ESLINT=$(node -e "try{const p=JSON.parse(require('fs').readFileSync('$TS_PROJECT_DIR/package.json','utf8'));const d=p.devDependencies||{};const deps=p.dependencies||{};console.log((d.eslint||deps.eslint)?'yes':'no')}catch{console.log('no')}") && true
         if [ "$HAS_ESLINT" = "yes" ]; then
           echo "⚠️  WARNING: eslint is installed in package.json but no eslint config found"
           echo "   Either create .eslintrc.* / eslint.config.* or remove eslint from dependencies"
@@ -1013,9 +1053,17 @@ else
     fi
 
     # ── Biome lint/format check ──
-    if [ -f "biome.json" ] || [ -f "biome.jsonc" ]; then
+    # Default the project dir so this branch stays runnable standalone
+    # (the gate-1-biome-noop suite extracts it verbatim); a no-op inside the
+    # hook, where TS_PROJECT_DIR is resolved above.
+    TS_PROJECT_DIR="${TS_PROJECT_DIR:-.}"
+    if [ -f "$TS_PROJECT_DIR/biome.json" ] || [ -f "$TS_PROJECT_DIR/biome.jsonc" ]; then
       echo "Running Biome lint/format check..."
-      BIOME_OUT=$(npx biome check --staged . 2>&1)
+      # Run from the TS project directory so Biome auto-discovers its config and
+      # scopes --staged to that subdirectory (mirrors the single-language subdir
+      # mode, which executes after cd "$PROJECT_SUBDIR"). Empirically verified:
+      # `biome check --staged .` from the subdir checks the staged files under it.
+      BIOME_OUT=$(cd "$TS_PROJECT_DIR" && npx biome check --staged . 2>&1)
       BIOME_STATUS=$?
       if [ "$BIOME_STATUS" -ne 0 ]; then
         # Biome exits 1 with `internalError/io - No files were processed` when the
@@ -1040,8 +1088,8 @@ else
         echo "✅ PASSED - Biome check."
       fi
     else
-      if [ -f "package.json" ] && command -v node &> /dev/null; then
-        HAS_BIOME=$(node -e "try{const p=JSON.parse(require('fs').readFileSync('package.json','utf8'));const d=p.devDependencies||{};const deps=p.dependencies||{};console.log((d['@biomejs/biome']||deps['@biomejs/biome'])?'yes':'no')}catch{console.log('no')}") && true
+      if [ -f "$TS_PROJECT_DIR/package.json" ] && command -v node &> /dev/null; then
+        HAS_BIOME=$(node -e "try{const p=JSON.parse(require('fs').readFileSync('$TS_PROJECT_DIR/package.json','utf8'));const d=p.devDependencies||{};const deps=p.dependencies||{};console.log((d['@biomejs/biome']||deps['@biomejs/biome'])?'yes':'no')}catch{console.log('no')}") && true
         if [ "$HAS_BIOME" = "yes" ]; then
           echo ""
           echo "⚠️  WARNING: @biomejs/biome is installed in package.json but no biome.json found"
