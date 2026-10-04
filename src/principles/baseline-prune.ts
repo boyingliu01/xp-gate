@@ -15,6 +15,13 @@ import { execFileSync } from 'child_process';
 import { existsSync } from 'fs';
 import { resolve } from 'path';
 
+/**
+ * Ceiling on any single git call. Generous enough that a healthy `git ls-files`
+ * over a very large index never trips it, short enough that a wedged git degrades
+ * to "keep the entry" rather than hanging the hook this runs inside.
+ */
+const GIT_TIMEOUT_MS = 30_000;
+
 /** Outcome of a baseline prune: which entries survived, and which were dropped. */
 export interface PruneResult {
   /** Baseline keys confirmed to still exist (or that we could not disprove). */
@@ -48,6 +55,18 @@ export function pruneBaselineEntries(baselineJson: string, projectRoot: string):
   const tracked = listTrackedFiles(projectRoot);
   const kept: string[] = [];
   const removed: string[] = [];
+
+  if (tracked === null) {
+    // Nothing can be proven stale without the index, so every entry is kept --
+    // but that must be said out loud. Reported as "no stale entries" it is
+    // indistinguishable from a successful prune, which is the same silent no-op
+    // this module was introduced to remove.
+    return {
+      kept: Object.keys(files),
+      removed,
+      error: 'could not consult the git index, so no entry could be proven stale',
+    };
+  }
 
   for (const key of Object.keys(files)) {
     if (isEntryStale(key, projectRoot, tracked)) {
@@ -103,10 +122,11 @@ function parseBaselineFiles(baselineJson: string): Record<string, unknown> | str
 /**
  * Whether a baseline key is safe to drop.
  *
- * `tracked === null` means git was unavailable, in which case nothing is stale.
+ * Callers must have confirmed the index is readable; an unavailable git is handled
+ * by the caller, which reports it rather than deciding silently here.
  */
-function isEntryStale(key: string, projectRoot: string, tracked: Set<string> | null): boolean {
-  if (tracked === null) return false;
+function isEntryStale(key: string, projectRoot: string, tracked: Set<string>): boolean {
+  if (tracked.has(normalizeBaselinePath(key))) return false;
   if (tracked.has(normalizeBaselinePath(key))) return false;
   try {
     return !existsSync(resolve(projectRoot, key));
@@ -142,6 +162,12 @@ function listTrackedFiles(projectRoot: string): Set<string> | null {
       // any realistic index size; the failure mode we care about is correctness,
       // not memory.
       maxBuffer: 256 * 1024 * 1024,
+      // Bound the wait. This runs inside a pre-commit hook, so an unbounded call
+      // turns a wedged git (locked index, stalled credential prompt, network-backed
+      // filesystem) into a commit that never returns -- strictly worse than the
+      // silent no-op the maxBuffer above fixed. On expiry the catch below reports
+      // "git unavailable" and every entry is kept, which fails closed.
+      timeout: GIT_TIMEOUT_MS,
     });
     const set = new Set<string>();
     for (const line of out.split('\n')) {
