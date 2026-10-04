@@ -842,11 +842,21 @@ has_project_lang() {
 }
 # Switch to subdirectory if detected (for single-language subdirectory projects).
 # Multi-language projects stay at root — each adapter handles its own path.
+#
+# IN_PROJECT_SUBDIR records whether this cd actually happened. Git reports
+# staged paths relative to the repo root; after cd "$PROJECT_SUBDIR" the [ -f ]
+# probes below need subdirectory-relative paths (hence the PROJECT_SUBDIR
+# prefix strips in Gates 5a/5b/5c), but when the hook stays at the root
+# (multi-language projects) stripping the prefix makes every path-based check
+# resolve against the wrong directory — false BLOCKs in Gate 5a, silent no-ops
+# in 5b/5c. Only strip when we really are inside the subdirectory.
 ORIGINAL_DIR=""
+IN_PROJECT_SUBDIR=0
 _lang_count=$(echo "$PROJECT_LANGS" | wc -w)
 if [ -n "$PROJECT_SUBDIR" ] && [ "$PROJECT_SUBDIR" != "." ] && [ "$PROJECT_LANG" != "documentation-only" ] && [ "$_lang_count" -le 1 ]; then
   ORIGINAL_DIR=$(pwd)
   cd "$PROJECT_SUBDIR"
+  IN_PROJECT_SUBDIR=1
   echo "Working in: $PROJECT_SUBDIR/"
   echo ""
 fi
@@ -1478,11 +1488,15 @@ else
   # --- BLOCK path: New .ts/.tsx files without corresponding tests ---
   NEW_TS_FILES=$(git diff --cached --name-only --diff-filter=A | grep -E '\.(ts|tsx)$' | grep -v '\.d\.ts$' | grep -v '__tests__' | grep -v '\.test\.' | grep -v '\.spec\.' | grep -v '__snapshots__' | grep -v 'node_modules/' | grep -v '\.next/' | grep -v '\.nuxt/' | grep -v 'dist/' | grep -v 'build/' | grep -v '.turbo/' | grep -v '.cache/' | grep -Ev '(^|/)vitest\.config\.' | grep -Ev '(^|/)vite\.config\.' | grep -Ev '(^|/)jest\.config\.' | grep -Ev '(^|/)tsconfig\.' | grep -Ev '(^|/)eslint\.' | grep -Ev '(^|/)prettier\.' | grep -Ev '(^|/)tailwind\.' || true)
 
-  # Strip PROJECT_SUBDIR prefix from new-TS-file paths when running in a subdirectory.
-  # git diff returns repo-root relative paths, but after cd "$PROJECT_SUBDIR"
-  # the test-pairing [ -f ] checks below need subdirectory-relative paths.
+  # Strip PROJECT_SUBDIR prefix from new-TS-file paths ONLY when the hook
+  # actually cd'd into the subdirectory (IN_PROJECT_SUBDIR=1; single-language
+  # subdirectory projects). git diff returns repo-root relative paths; after
+  # cd "$PROJECT_SUBDIR" the test-pairing [ -f ] checks below need
+  # subdirectory-relative paths. When the hook stays at the repo root
+  # (multi-language projects) the paths must KEEP their prefix or every
+  # [ -f ] lookup misses and paired files are falsely BLOCKED.
   # (Mirrors the v0.14.31+ Gate 5b fix at lines 1603-1608; Gate 5a was missing it.)
-  if [ -n "$PROJECT_SUBDIR" ] && [ "$PROJECT_SUBDIR" != "." ] && [ -n "$NEW_TS_FILES" ]; then
+  if [ "$IN_PROJECT_SUBDIR" = "1" ] && [ -n "$NEW_TS_FILES" ]; then
     NEW_TS_FILES=$(echo "$NEW_TS_FILES" | sed "s|^${PROJECT_SUBDIR}/||")
   fi
 
@@ -1693,10 +1707,13 @@ else
   # each plugin directory).
   CHANGED_TEST_FILES=$(echo "$CHANGED_TEST_FILES" | grep -vE '^plugins/[^/]+/' || true)
 
-  # Strip PROJECT_SUBDIR prefix from test file paths when running in subdirectory.
-  # git diff returns repo-root relative paths, but after cd "$PROJECT_SUBDIR" (line 728)
-  # vitest and [ -f ] checks need subdirectory-relative paths. (v0.14.31+ fix)
-  if [ -n "$PROJECT_SUBDIR" ] && [ "$PROJECT_SUBDIR" != "." ] && [ -n "$CHANGED_TEST_FILES" ]; then
+  # Strip PROJECT_SUBDIR prefix from test file paths ONLY when the hook
+  # actually cd'd into the subdirectory (IN_PROJECT_SUBDIR=1). git diff returns
+  # repo-root relative paths; after cd "$PROJECT_SUBDIR" vitest and [ -f ]
+  # checks need subdirectory-relative paths. At the repo root (multi-language
+  # projects) stripping would silently skip the mock-density scan and feed
+  # vitest paths that do not exist. (v0.14.31+ fix, gated on the cd in v0.19.x)
+  if [ "$IN_PROJECT_SUBDIR" = "1" ] && [ -n "$CHANGED_TEST_FILES" ]; then
     CHANGED_TEST_FILES=$(echo "$CHANGED_TEST_FILES" | sed "s|^${PROJECT_SUBDIR}/||")
   fi
 
@@ -1867,8 +1884,11 @@ else
           # sources must not drive root-vitest related-test lookup either (it
           # would resolve to plugin-local paths vitest cannot collect).
           CHANGED_SRC_FILES=$(echo "$CHANGED_SRC_FILES" | grep -vE '^plugins/[^/]+/' || true)
-          # Strip PROJECT_SUBDIR prefix (same as CHANGED_TEST_FILES fix above)
-          if [ -n "$PROJECT_SUBDIR" ] && [ "$PROJECT_SUBDIR" != "." ] && [ -n "$CHANGED_SRC_FILES" ]; then
+          # Strip PROJECT_SUBDIR prefix ONLY when the hook cd'd into the
+          # subdirectory (IN_PROJECT_SUBDIR=1; same gate as the CHANGED_TEST_FILES
+          # fix above — at the repo root the paths must stay root-relative or the
+          # related-test lookup and vitest targets resolve against the wrong dir)
+          if [ "$IN_PROJECT_SUBDIR" = "1" ] && [ -n "$CHANGED_SRC_FILES" ]; then
             CHANGED_SRC_FILES=$(echo "$CHANGED_SRC_FILES" | sed "s|^${PROJECT_SUBDIR}/||")
           fi
           CHANGED_SRC_COUNT=$(echo "$CHANGED_SRC_FILES" | grep -c '.' || echo "0")
