@@ -64,7 +64,11 @@ export async function main(args: string[]): Promise<number> {
   
   if (options.files.length === 0) {
     console.error('Usage: principles-checker --files <file1> <file2> ... [--format console|json|sarif] [--changed-only] [--config <path>]');
-    return 1;
+    // 2, not 1. Under this module's contract exit 1 asserts "I examined files and
+    // found ERROR-severity violations". A gate that sees 1 with an empty report
+    // reads it as a clean pass, so returning 1 here would let a miswired hook
+    // announce PASSED having checked nothing at all.
+    return 2;
   }
   
   // Install the loaded config so rules read the PROJECT's thresholds. The

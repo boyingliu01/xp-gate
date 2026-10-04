@@ -16,6 +16,16 @@ if [ "$PROJECT_LANG" = "documentation-only" ]; then
 else
   # Get source files to check against principles
   PRINCIPLES_FILES=$(echo "$CHANGED_FILES" | grep -E '\.(ts|tsx|js|jsx|py|go|java|kt|dart|swift|cpp|c|hpp|h|m|mm)$' || true)
+
+  # One path per line, into an array. Passing $PRINCIPLES_FILES unquoted relies on
+  # word splitting to turn the list into separate argv entries, which also splits
+  # any path containing a space -- handing the checker two bogus paths and checking
+  # neither. Quoting it would instead collapse the list into one argument. An array
+  # is the only form that does both. Same defect class as the --config fix (#457).
+  PRINCIPLES_ARGS=()
+  while IFS= read -r _principles_file; do
+    [ -n "$_principles_file" ] && PRINCIPLES_ARGS+=("$_principles_file")
+  done <<< "$PRINCIPLES_FILES"
   
   if [ -n "$PRINCIPLES_FILES" ]; then
     # Check for principles checker in installed modules first, then project src/
@@ -45,7 +55,7 @@ else
         # script never reaches the assignment, and `|| true` would overwrite the
         # status with 0 -- which is exactly the distinction this gate depends on.
         PRINCIPLES_EXIT=0
-        npx tsx $PRINCIPLES_DIR/index.ts --files $PRINCIPLES_FILES --format json > /tmp/principles-output.json 2>/dev/null || PRINCIPLES_EXIT=$?
+        npx tsx "$PRINCIPLES_DIR/index.ts" --files ${PRINCIPLES_ARGS[@]+"${PRINCIPLES_ARGS[@]}"} --format json > /tmp/principles-output.json 2>/dev/null || PRINCIPLES_EXIT=$?
 
         if [ "$PRINCIPLES_EXIT" -ge 2 ]; then
           echo "⚠️  Warning: Principles checker execution failed"
@@ -67,7 +77,7 @@ else
             echo "  - error-handling violations"
             echo "  - SOLID principle violations"
             echo "  - architectural violations"
-            npx tsx $PRINCIPLES_DIR/index.ts --files $PRINCIPLES_FILES --format console
+            npx tsx "$PRINCIPLES_DIR/index.ts" --files ${PRINCIPLES_ARGS[@]+"${PRINCIPLES_ARGS[@]}"} --format console
             GATE_4_STATUS="FAIL"
             exit 1
           fi
