@@ -127,7 +127,6 @@ function parseBaselineFiles(baselineJson: string): Record<string, unknown> | str
  */
 function isEntryStale(key: string, projectRoot: string, tracked: Set<string>): boolean {
   if (tracked.has(normalizeBaselinePath(key))) return false;
-  if (tracked.has(normalizeBaselinePath(key))) return false;
   try {
     return !existsSync(resolve(projectRoot, key));
   } catch {
