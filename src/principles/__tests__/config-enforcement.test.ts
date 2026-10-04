@@ -300,4 +300,15 @@ describe('#457 .principlesrc actually changes enforcement', () => {
 
     expect(crashed.status).toBe(2);
   });
+
+  it('AC-457-09: a usage error also exits 2, never the findings code', () => {
+    // Raised by the Delphi walkthrough (architecture seat, MC-01). Returning 1
+    // here means "I found ERROR-severity violations" under the contract this
+    // change introduces. Gate 4 branches on >=2 for the crash path, so exit 1 plus
+    // an empty report reads as "checked everything, found nothing": the gate would
+    // announce PASSED having examined no files at all.
+    const misused = runChecker(['--format', 'json']);
+
+    expect(misused.status).toBe(2);
+  });
 });

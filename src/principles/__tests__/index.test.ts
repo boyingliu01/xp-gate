@@ -58,10 +58,13 @@ describe('index.ts - CLI Entry Point', () => {
       vi.spyOn(console, 'error').mockImplementation(() => undefined);
     });
 
-    it('should return 1 when no files provided', async () => {
+    it('should return 2 when no files provided', async () => {
       const result = await main([]);
-      
-      expect(result).toBe(1);
+
+      // 2, not 1. Exit 1 asserts "I examined files and found ERROR-severity
+      // violations"; a gate that sees 1 with an empty report reads a clean pass, so
+      // a miswired hook would announce PASSED having checked nothing (#457).
+      expect(result).toBe(2);
       expect(console.error).toHaveBeenCalled();
     });
 
