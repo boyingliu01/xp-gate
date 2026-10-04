@@ -203,6 +203,13 @@ function mergeConfig(
   return {
     ...defaults,
     ...user,
+    // `rules` needs the group-aware merge below. The other sections are plain
+    // option bags, and spreading `...user` alone would let a partial block wipe
+    // its sibling defaults -- naming one key under `output` silently discarded
+    // `show-score` and `colorize`. Same fail-open shape #457 exists to remove,
+    // just outside `rules`; found by the Delphi walkthrough.
+    output: mergeSection(defaults.output, user.output),
+    performance: mergeSection(defaults.performance, user.performance),
     rules: {
       'clean-code': mergeGroup(
         defaults.rules['clean-code'],
@@ -211,6 +218,16 @@ function mergeConfig(
       'solid': mergeGroup(defaults.rules['solid'], user.rules?.['solid'])
     }
   };
+}
+
+/** Merge one flat options section, keeping defaults for keys the user omitted. */
+function mergeSection<T extends object>(
+  defaults: T | undefined,
+  user: Partial<T> | undefined
+): T | undefined {
+  if (!isPlainObject(defaults)) return user as T | undefined;
+  if (!isPlainObject(user)) return defaults;
+  return { ...defaults, ...user };
 }
 
 /**
