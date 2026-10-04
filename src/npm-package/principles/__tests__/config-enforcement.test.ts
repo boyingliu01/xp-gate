@@ -213,6 +213,28 @@ describe('#457 .principlesrc actually changes enforcement', () => {
     expect(config.rules['solid']['dip'].enabled).toBe(true);
   });
 
+  it('AC-457-10: a partial output block keeps the sibling output defaults', async () => {
+    // `rules` was deep-merged but the other nested sections were not, so naming
+    // one key under `output` discarded its siblings -- the same fail-open shape
+    // #457 was raised to eliminate. Raised by the Delphi walkthrough (MC-02).
+    const config = await loadConfig(
+      writeConfig(makeTempDir(), JSON.stringify({ output: { format: 'json' } }), 'out.json'),
+    );
+
+    expect(config.output?.format).toBe('json');
+    expect(config.output?.['show-score']).toBe(true);
+    expect(config.output?.colorize).toBe(true);
+  });
+
+  it('AC-457-10: a partial performance block keeps the sibling defaults', async () => {
+    const config = await loadConfig(
+      writeConfig(makeTempDir(), JSON.stringify({ performance: { mode: 'all-files' } }), 'perf.json'),
+    );
+
+    expect(config.performance?.mode).toBe('all-files');
+    expect(config.performance?.mediumProjectDefinition).toBeDefined();
+  });
+
   it('AC-457-05: an array override replaces rather than concatenates', async () => {
     const raw = arrayConfig('magic-numbers', 'exclude', [0, 1]);
     const config = await loadConfig(writeConfig(makeTempDir(), raw));
