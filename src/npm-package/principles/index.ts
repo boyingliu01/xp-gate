@@ -107,6 +107,13 @@ if (isDirectExecution(process.argv[1], import.meta.url)) {
     })
     .catch(err => {
       console.error('Analysis failed:', err.message);
-      process.exit(1);
+      // Exit 2, not 1. Gate 4 decides by testing the exit status, and exit 1 now
+      // means "the checker ran and found ERROR-severity violations". Reusing 1 for
+      // a crash would make a genuine finding indistinguishable from a broken tool,
+      // and the gate's `else` branch SKIPs -- releasing exactly the most serious
+      // violations. 2 is this repo's existing convention for a runtime error:
+      // src/gates/gate-8.ts and gate-9.ts both SKIP on exit >= 2 and treat 1 as a
+      // real finding.
+      process.exit(2);
     });
 }

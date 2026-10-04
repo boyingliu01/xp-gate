@@ -15,6 +15,7 @@
  */
 
 import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { spawnSync } from 'node:child_process';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
@@ -50,8 +51,8 @@ function makeTempDir(): string {
 }
 
 /** Write a `.principlesrc` fixture into a temp dir and return its path. */
-function writeConfig(dir: string, contents: string): string {
-  const configPath = join(dir, '.principlesrc');
+function writeConfig(dir: string, contents: string, name = '.principlesrc'): string {
+  const configPath = join(dir, name);
   try {
     writeFileSync(configPath, contents, 'utf8');
   } catch (error) {
@@ -59,6 +60,29 @@ function writeConfig(dir: string, contents: string): string {
     throw new Error(`could not write fixture ${configPath}: ${detail}`);
   }
   return configPath;
+}
+
+/**
+ * Run the real CLI in a child process and report both its exit status and its
+ * parsed JSON. The exit code is part of this module's contract -- Gate 4 branches
+ * on it -- so it can only be asserted through an actual process, not by calling
+ * `main()` in-process.
+ */
+function runChecker(args: string[]): { status: number; summary: Record<string, number> } {
+  const result = spawnSync(
+    process.execPath,
+    [join(process.cwd(), 'node_modules', 'tsx', 'dist', 'cli.mjs'),
+      join(process.cwd(), 'src', 'principles', 'index.ts'), ...args],
+    { encoding: 'utf8', cwd: process.cwd(), timeout: 120000 },
+  );
+  const stdout = result.stdout ?? '';
+  let summary: Record<string, number> = {};
+  try {
+    summary = JSON.parse(stdout.slice(stdout.indexOf('{'))).summary;
+  } catch {
+    // A crash emits no parseable report; the caller asserts on `status`.
+  }
+  return { status: result.status ?? -1, summary };
 }
 
 /** A `.principlesrc` that sets one numeric threshold for one rule. */
@@ -221,5 +245,37 @@ describe('#457 .principlesrc actually changes enforcement', () => {
     setActiveConfig(await loadConfig(configPath));
 
     expect(checkLargeFile(STUB_LINE_COUNT).length).toBeGreaterThan(0);
+  });
+
+  // AC-457-08/09: the exit code has to separate "violations found" from "the
+  // checker crashed". Gate 4 decides by testing the exit status (`if run_tsx ...`),
+  // so a crash and an error-severity finding that share exit 1 are indistinguishable.
+  // Fixing #457 alone moved the hole rather than closing it: warnings no longer look
+  // like crashes, but ERROR-severity violations now do -- and the gate SKIPs,
+  // releasing exactly the most serious findings. Found by the Delphi walkthrough.
+  it('AC-457-08: exits 1 for an ERROR-severity violation and 0 without one', () => {
+    const root = makeTempDir();
+    const target = join(root, 'target.ts');
+    writeFileSync(target, 'export const x = 1;\n', 'utf8');
+    const strict = writeConfig(root, '{"rules":{"clean-code":{"large-file":{"enabled":true,"threshold":1,"severity":"error"}}}}');
+
+    const blocking = runChecker(['--files', target, '--format', 'json', '--config', strict]);
+    expect(blocking.summary.errorCount).toBeGreaterThan(0);
+    expect(blocking.status).toBe(1);
+
+    const loose = writeConfig(root, '{"rules":{"clean-code":{"large-file":{"enabled":true,"threshold":100000}}}}', 'loose.json');
+    const clean = runChecker(['--files', target, '--format', 'json', '--config', loose]);
+    expect(clean.status).toBe(0);
+  });
+
+  it('AC-457-09: a checker crash exits 2, not 1, so gates can tell it from violations', () => {
+    // Exit 2 is this repo's existing convention for "tool ran into a runtime
+    // error" (see src/gates/gate-8.ts and gate-9.ts, which SKIP on exit >= 2 and
+    // treat 1 as a real finding).
+    const missing = join(makeTempDir(), 'never-written.ts');
+
+    const crashed = runChecker(['--files', missing, '--format', 'json']);
+
+    expect(crashed.status).toBe(2);
   });
 });

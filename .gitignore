@@ -34,6 +34,7 @@ __pycache__/
 .cw-*
 .adv-*
 .mw-e2e*
+.agent-tmp/
 
 # Init-generated adapter copies and per-project configs
 githooks/cpp.sh

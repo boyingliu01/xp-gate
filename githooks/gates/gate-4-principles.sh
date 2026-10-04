@@ -51,7 +51,24 @@ else
         # Run principles checker and store results. `${PRINCIPLES_CONFIG[@]+"${PRINCIPLES_CONFIG[@]}"}`
         # expands to nothing when the array is empty, which `set -u` requires on older
         # bash versions (macOS ships 3.2, where a bare `"${arr[@]}"` is an unbound error).
-        if npx tsx $PRINCIPLES_DIR/index.ts --files $PRINCIPLES_FILES --format json ${PRINCIPLES_CONFIG[@]+"${PRINCIPLES_CONFIG[@]}"} > /tmp/principles-output.json 2>/dev/null; then
+        # The trailing `|| PRINCIPLES_EXIT=$?` captures the exit status without
+        # letting a non-zero return abort the hook under `set -e`. Do not simplify
+        # this to a bare call followed by `PRINCIPLES_EXIT=$?`: under `set -e` the
+        # script never reaches the assignment, and `|| true` would overwrite the
+        # status with 0 -- which is exactly the distinction this gate depends on.
+        PRINCIPLES_EXIT=0
+        npx tsx $PRINCIPLES_DIR/index.ts --files $PRINCIPLES_FILES --format json ${PRINCIPLES_CONFIG[@]+"${PRINCIPLES_CONFIG[@]}"} > /tmp/principles-output.json 2>/dev/null || PRINCIPLES_EXIT=$?
+
+        # Exit codes are distinct on purpose: 0 = ran clean, 1 = ran and found
+        # ERROR-severity violations, >=2 = the tool itself failed. Branching on
+        # `if run_tsx ...` collapsed 1 and 2 together, so an ERROR-severity finding
+        # took the crash branch and the gate SKIPped -- releasing the most serious
+        # violations while reporting "PASSED (SKIP)".
+        if [ "$PRINCIPLES_EXIT" -ge 2 ]; then
+          echo "⚠️  Warning: Principles checker execution failed"
+          echo "⏭️  SKIPPED - Principles check (execution issue)"
+          GATE_4_STATUS="SKIP"
+        else
           # Check severity levels. The reporter emits JSON.stringify(out, null, 2),
           # i.e. `"severity": "warning"` WITH a space; tolerate any whitespace so a
           # future minified format cannot silently zero these counts again (#444).
@@ -76,10 +93,6 @@ else
           if [ "$WARNING_COUNT" -gt 0 ]; then
             echo "ℹ️  $WARNING_COUNT warnings found (will be handled by Boy Scout Rule)."
           fi
-        else
-          echo "⚠️  Warning: Principles checker execution failed"
-          echo "✅ PASSED - Principles check (SKIP, execution issue)"
-          GATE_4_STATUS="SKIP"
         fi
       else
         echo "ℹ️  npx not available - skipping principles check"

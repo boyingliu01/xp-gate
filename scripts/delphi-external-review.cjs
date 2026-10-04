@@ -281,7 +281,7 @@ const SYSTEM_PROMPTS = {
 4) 架构演进性 — 是否为未来扩展留有空间
 5) 技术选型合理性 — 技术栈选择是否有充分依据
 
-输出要求：返回结构化 JSON，包含 verdict (APPROVED/REQUEST_CHANGES/REJECTED)、confidence (1-10)、critical_issues、major_concerns、minor_concerns、summary。`,
+输出要求：返回结构化 JSON，包含 verdict (APPROVED/REQUEST_CHANGES/REJECTED)、confidence (1-10，整数，10 为最高)、summary (字符串)。critical_issues、major_concerns、minor_concerns 必须是字符串数组（string[]），每项是一句自包含的完整描述（可加 "CI-01: " 前缀，但整体必须是字符串，不是对象）。不要把问题写成 {id, title, description} 对象。`,
 
   technical: `你是技术实现评审专家（Delphi Method - Technical Expert）。
 
@@ -292,7 +292,7 @@ const SYSTEM_PROMPTS = {
 4) 性能影响 — 是否有性能瓶颈或资源泄漏风险
 5) 可测试性 — 代码是否易于编写单元测试
 
-输出要求：返回结构化 JSON，包含 verdict (APPROVED/REQUEST_CHANGES/REJECTED)、confidence (1-10)、critical_issues、major_concerns、minor_concerns、summary。`,
+输出要求：返回结构化 JSON，包含 verdict (APPROVED/REQUEST_CHANGES/REJECTED)、confidence (1-10，整数，10 为最高)、summary (字符串)。critical_issues、major_concerns、minor_concerns 必须是字符串数组（string[]），每项是一句自包含的完整描述（可加 "MC-01: " 前缀，但整体必须是字符串，不是对象）。不要把问题写成 {id, title, description} 对象。`,
 
   feasibility: `你是可行性分析专家（Delphi Method - Feasibility Expert）。
 
@@ -303,7 +303,7 @@ const SYSTEM_PROMPTS = {
 4) 替代方案 — 是否有更简单或更可靠的替代方案
 5) 回滚策略 — 如果实施失败，是否有退路
 
-输出要求：返回结构化 JSON，包含 verdict (APPROVED/REQUEST_CHANGES/REJECTED)、confidence (1-10)、critical_issues、major_concerns、minor_concerns、summary。`,
+输出要求：返回结构化 JSON，包含 verdict (APPROVED/REQUEST_CHANGES/REJECTED)、confidence (1-10，整数，10 为最高)、summary (字符串)。critical_issues、major_concerns、minor_concerns 必须是字符串数组（string[]），每项是一句自包含的完整描述（可加 "FC-01: " 前缀，但整体必须是字符串，不是对象）。不要把问题写成 {id, title, description} 对象。`,
 };
 
 const MODE_FOCUS_PROMPTS = {
