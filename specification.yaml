@@ -176,6 +176,10 @@ specification:
         - id: AC-452-13
           criteria: baseline 格式非法时保留原文件并报错，不得判定为「全部过期」
           test_type: unit
+        - id: AC-452-14
+          criteria: git 调用必须带超时上限；git 不可用时保留全部条目并显式报告原因，
+            不得静默伪装成「无过期条目」
+          test_type: unit
 
     - id: REQ-454
       description: Gate 5 必须区分 vitest runner 基础设施错误与真实测试失败 —— 同一判定逻辑覆盖全部 vitest 调用点
