@@ -32,8 +32,26 @@ else
       echo "Checking Clean Code + SOLID principles..."
       
       if command -v npx > /dev/null 2>&1; then
-        # Run principles checker and store results
-        if npx tsx $PRINCIPLES_DIR/index.ts --files $PRINCIPLES_FILES --format json > /tmp/principles-output.json 2>/dev/null; then
+        # Run principles checker and store results.
+        #
+        # Do NOT wrap this in `if ...; then`: the checker's exit codes are
+        # deliberately distinct (0 clean, 1 ERROR-severity findings, >=2 tool
+        # failure), and an `if` collapses 1 and 2 into "failed". That sent real
+        # error-severity findings down the crash branch, which SKIPs and prints
+        # PASSED -- releasing exactly the most serious violations.
+        # The trailing `|| PRINCIPLES_EXIT=$?` captures the exit status without
+        # letting a non-zero return abort the hook under `set -e`. Do not simplify
+        # this to a bare call followed by `PRINCIPLES_EXIT=$?`: under `set -e` the
+        # script never reaches the assignment, and `|| true` would overwrite the
+        # status with 0 -- which is exactly the distinction this gate depends on.
+        PRINCIPLES_EXIT=0
+        npx tsx $PRINCIPLES_DIR/index.ts --files $PRINCIPLES_FILES --format json > /tmp/principles-output.json 2>/dev/null || PRINCIPLES_EXIT=$?
+
+        if [ "$PRINCIPLES_EXIT" -ge 2 ]; then
+          echo "⚠️  Warning: Principles checker execution failed"
+          echo "⏭️  SKIPPED - Principles check (execution issue)"
+          GATE_4_STATUS="SKIP"
+        else
           # Check severity levels. The reporter emits JSON.stringify(out, null, 2),
           # i.e. `"severity": "warning"` WITH a space; tolerate any whitespace so a
           # future minified format cannot silently zero these counts again (#444).
@@ -59,10 +77,6 @@ else
           if [ "$WARNING_COUNT" -gt 0 ]; then
             echo "ℹ️  $WARNING_COUNT warnings found (will be handled by Boy Scout Rule)."
           fi
-        else
-          echo "⚠️  Warning: Principles checker execution failed"
-          echo "⏭️  SKIPPED - Principles check (execution issue)"
-          GATE_4_STATUS="SKIP"
         fi
       else
         echo "ℹ️  npx not available - skipping principles check"

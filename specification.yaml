@@ -148,6 +148,13 @@ specification:
         - id: AC-457-07
           criteria: main() 退出码由 errorCount 决定，info 级别违规不得让 Gate 4 降级为 SKIPPED
           test_type: unit
+        - id: AC-457-08
+          criteria: ERROR 级违规退出码为 1、无违规时为 0（经真实子进程验证）
+          test_type: integration
+        - id: AC-457-09
+          criteria: 检查器自身崩溃退出码为 2（区别于 1），Gate 4 据此区分「有发现」与「工具故障」，
+            error 级违规必须 BLOCK 而不得走 SKIP 分支放行
+          test_type: integration
 
     - id: REQ-452
       description: Boy Scout baseline 必须可剪枝 —— 已删除文件的条目不得长期滞留并继承旧的警告额度
