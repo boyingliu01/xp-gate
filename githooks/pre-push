@@ -181,11 +181,17 @@ GATE_S_STATUS="PASS"
 PROJECT_ROOT="$(git rev-parse --show-toplevel 2>/dev/null || echo ".")"
 SPRINT_GATE_SCRIPT=""
 
-if [ -f "$PROJECT_ROOT/githooks/sprint-gate.sh" ]; then
-  SPRINT_GATE_SCRIPT="$PROJECT_ROOT/githooks/sprint-gate.sh"
-elif [ -f "$(dirname "$0")/sprint-gate.sh" ]; then
-  SPRINT_GATE_SCRIPT="$(dirname "$0")/sprint-gate.sh"
-fi
+# Same chain as pre-commit's Gate 11 (#476). The two tiers here both point at
+# gate-script directories, while update-hooks installs sprint-gate.sh under
+# ~/.config/xp-gate/hooks -- a correctly installed machine was told the file was
+# missing here too. Nothing is sourced for this: pre-push resolves its libraries
+# further down (ADAPTER_COMMON), and this gate must decide before that.
+for _sprint_gate_dir in "$PROJECT_ROOT/githooks" "$(dirname "$0")" "$HOME/.config/xp-gate/hooks"; do
+  if [ -n "$_sprint_gate_dir" ] && [ -f "$_sprint_gate_dir/sprint-gate.sh" ]; then
+    SPRINT_GATE_SCRIPT="$_sprint_gate_dir/sprint-gate.sh"
+    break
+  fi
+done
 
 if [ -n "$SPRINT_GATE_SCRIPT" ]; then
   if ! bash "$SPRINT_GATE_SCRIPT" --pre-push; then
@@ -194,7 +200,7 @@ if [ -n "$SPRINT_GATE_SCRIPT" ]; then
     exit 1
   fi
 else
-  echo "⏭️  SKIPPED - Gate MS: Sprint Flow (sprint-gate.sh not found)"
+  echo "⏭️  SKIPPED - Gate MS: Sprint Flow (sprint-gate.sh not found; searched: $PROJECT_ROOT/githooks, $(dirname "$0"), $HOME/.config/xp-gate/hooks)"
   GATE_S_STATUS="SKIP"
 fi
 echo ""
