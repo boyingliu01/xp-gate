@@ -205,3 +205,19 @@ Gate 4 的 `-ge 2` 分支读不到约定；`df5521c`（prompt 预算）与 `38e0
 `SKILL.md`/`phase-2-design.md` 缺 #423 之后补上的执行校验表述。
 本轮把改到的 `code-walkthrough.md` 同步到全部 9 份副本（校验：9 份 SHA-256 全等 canonical），
 上述 3 个文件的回灌单独一个提交，避免把机械修复和内容改动混在同一次评审输入里。
+
+## 待办（本轮记录，未动代码）
+
+- **`scripts/test-plugins.sh` 在 Windows/Git Bash 上必然假失败。** 第 7 行
+  `REPO_ROOT="$(cd … && pwd)"` 得到 `/d/projects/xp-gate`，随后被插进 `node -e "…readFileSync('$REPO_ROOT/…')"`，
+  node 按当前盘根解析成 `D:\d\projects\xp-gate\…` → `ENOENT`，输出「✗ Claude hooks.json invalid JSON」
+  「✗ OpenCode package.json invalid JSON」——三个 manifest 其实都合法。修法是一行
+  （`pwd -W 2>/dev/null || pwd`，同仓 `detect_os_env()` 的既有思路），但它已被
+  `scripts/test-plugins.mjs` 取代：本轮实测 `node scripts/test-plugins.mjs` 全绿（Failed: 0），
+  而 `.sh` 没有任何 CI job 或脚本调用。所以真正要裁定的是**删除还是修复**——留着一个会自己造
+  假失败的测试脚本，比缺它更糟。另开 issue，本分支不动。
+- `specification.yaml` 缺一条「必须能被 js-yaml 解析」的守卫（现在靠正则抽取，格式坏了也过）。
+- 技能副本缺一条 tracked 文件的逐字节 parity 守卫：`hook-mirror`/`hook-lib`/`delphi-runner` 三套守卫
+  都只钉脚本副本，`plugins/qoder/skills` 与 `src/npm-package/plugins/qoder/skills` 这次的漂移无人拦截。
+- MAJ-02（Gate 4 抽库 + 安装器第三层解析）、MI-05（进程级 `activeConfig`）、MC-03（SKIP 聚合监控）、
+  `pruneBaselineEntries` 不剪零告警条目——理由见上文「记录的决定」。
