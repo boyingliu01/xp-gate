@@ -3,7 +3,7 @@
  * @intent Gate 5 must distinguish a real test failure from a vitest *runner
  *         infrastructure* error (EPERM on the temp/ssr module cache), so the
  *         guard cannot silently regress to a blanket "Tests FAILED" message.
- * @covers AC-454-01, AC-454-02, AC-454-03, AC-454-04, AC-454-06, AC-473-02
+ * @covers AC-454-01, AC-454-02, AC-454-03, AC-454-04, AC-454-06, AC-454-07, AC-473-02
  *
  * Background: on Windows vitest 1.6.x can exit non-zero while reporting zero
  * failed tests. `is_runner_infrastructure_error` already existed, but only ONE
@@ -94,8 +94,18 @@ const FALLBACK_BLOCK_CHARS = 2500;
 /** Minimum number of Gate 5 vitest branches that must route through the helper. */
 const MIN_GUARDED_BRANCHES = 4;
 
-/** Maximum hand-rolled BLOCKED sites: 1 in the helper + 2 generic fallbacks. */
-const MAX_HANDROLLED_BLOCK_SITES = 3;
+/**
+ * How many lines above a hand-rolled BLOCKED site the producing command may be.
+ *
+ * Measured against the real hook: the `run_tests` line sits 3 lines above each
+ * fallback's BLOCKED, while the nearest vitest invocation is ~25 lines away and in
+ * a sibling branch -- so this bound reaches a site's own command without reaching
+ * a neighbouring branch.
+ */
+const PRODUCING_COMMAND_LOOKBACK_LINES = 12;
+
+/** Declared vitest major whose default reporter emits the `Unhandled Error` shape. */
+const ASSUMED_VITEST_MAJOR = 1;
 
 /**
  * Write the stub `npx` into `bin` and return the path of its call log.
@@ -235,6 +245,25 @@ function readHook(): string {
   }
 }
 
+/**
+ * Which test command produced the BLOCKED at `index`, by walking up to the nearest
+ * command that runs tests.
+ *
+ * The nearest one wins because that is the branch the message belongs to: a fixed
+ * character window reached past the fallback's own `run_tests` line into the
+ * vitest branches above it and mislabelled every site.
+ */
+function producingCommand(hook: string, index: number): string {
+  const lines = hook.slice(0, index).split('\n');
+  // Bounded so a site cannot inherit a command from an unrelated branch far above.
+  const floor = Math.max(0, lines.length - PRODUCING_COMMAND_LOOKBACK_LINES);
+  for (let i = lines.length - 1; i >= floor; i -= 1) {
+    if (/run_without_git_context run_tests/.test(lines[i])) return 'run_tests';
+    if (/run_without_git_context npx vitest run/.test(lines[i])) return 'vitest';
+  }
+  return 'none';
+}
+
 /** Gate 5's judgement library, which the hook sources at startup (#473). */
 function readLib(): string {
   try {
@@ -265,12 +294,53 @@ describe('Gate 5 distinguishes runner infrastructure errors from real failures (
     expect(readLib()).toContain('if is_runner_infrastructure_error "$_out"');
   });
 
-  it('AC-454-01: no vitest branch hand-rolls its own BLOCKED message', () => {
-    // Every `❌ BLOCKED - Tests FAILED` must live inside handle_test_failure;
-    // a stray one elsewhere means a branch bypassed the guard.
+  it('AC-454-01: every hand-rolled BLOCKED site sits in a generic run_tests fallback', () => {
+    // The guard's BLOCKED message lives in the library, so any BLOCKED written
+    // directly in the hook belongs to a branch that bypassed the guard. That is
+    // allowed only for the non-vitest `run_tests` fallbacks, whose output shape is
+    // not vitest's (AC-454-06).
+    //
+    // This is stated as a property of each site rather than as a cap on the count:
+    // an earlier version asserted `sites <= 3`, which failed on every legitimate
+    // new fallback and passed on a vitest branch that hand-rolled its own BLOCKED.
     const hook = readHook();
-    const blockSites = (hook.match(/^\s*echo "❌ BLOCKED - Tests FAILED/gm) ?? []).length;
-    expect(blockSites).toBeLessThanOrEqual(MAX_HANDROLLED_BLOCK_SITES);
+    const sites = [...hook.matchAll(/^(\s*)echo "❌ BLOCKED - Tests FAILED/gm)];
+    // Anti-vacuity: the scan must actually find the two fallback sites.
+    expect(sites.length).toBeGreaterThanOrEqual(2);
+    for (const site of sites) {
+      const owner = producingCommand(hook, site.index);
+      if (owner !== 'run_tests') {
+        throw new Error(
+          `Hand-rolled BLOCKED at offset ${site.index} belongs to the \`${owner}\` branch. ` +
+            'A vitest branch must route through handle_test_failure instead.'
+        );
+      }
+    }
+  });
+
+  it('AC-454-07: the runner-error patterns carry an explicit vitest version assumption', () => {
+    // Every output fixture in this file is a canned string, so the suite stays
+    // green even if a vitest upgrade stops emitting "Unhandled Error" -- the guard
+    // would silently revert to false BLOCKs with no failing test to say so.
+    // Pinning the declared version turns that upgrade into a test failure that
+    // names exactly what to re-verify.
+    const pkg = JSON.parse(readFileSync(join(REPO_ROOT, 'package.json'), 'utf8')) as {
+      devDependencies?: Record<string, string>;
+    };
+    const declared = pkg.devDependencies?.vitest;
+    expect(declared, 'vitest must be a declared devDependency').toBeDefined();
+    const major = Number((declared ?? '').replace(/^[\^~>=\s]+/, '').split('.')[0]);
+    if (major !== ASSUMED_VITEST_MAJOR) {
+      throw new Error(
+        `package.json declares vitest ${declared}, but the runner-error patterns in ` +
+          `githooks/lib/test-failure.sh assume major ${ASSUMED_VITEST_MAJOR}. ` +
+          "Re-verify the 'Unhandled Error' and 'Tests N failed' shapes against the new " +
+          'reporter output, then update ASSUMED_VITEST_MAJOR and the lib comment.',
+      );
+    }
+    // The assumption has to be stated where a maintainer edits the patterns, not
+    // only in this test.
+    expect(readLib()).toContain('vitest: ^1');
   });
 
   it('AC-454-06: the generic run_tests fallback does NOT consult the guard', () => {
@@ -347,3 +417,4 @@ describe('Gate 5 distinguishes runner infrastructure errors from real failures (
     expect(stdout).not.toContain('BLOCKED - Tests FAILED');
   });
 });
+

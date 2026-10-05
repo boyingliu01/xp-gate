@@ -81,6 +81,13 @@ function validateExpert(expert, index, roles, models, resolvedModels) {
     );
   }
 
+  // requested_model is compared EXACTLY (after trimming); resolved_model below is
+  // compared case-INSENSITIVELY. The asymmetry is intentional, not an oversight:
+  // a requested ID is a case-sensitive gateway identifier and AGENTS.md requires
+  // "three distinct trimmed requested model IDs", whereas resolved_model answers
+  // "did these actually run on one model?" -- and gateways do report the same model
+  // with different casing per call, which is how #423 slipped through. Pinned by
+  // scripts/__tests__/gate-mw-provenance.test.cjs (AC-423-08).
   if (typeof expert.requested_model !== 'string' || expert.requested_model.trim() === '') {
     fail(`expert ${expert.role} requested_model must be non-empty.`);
   }
