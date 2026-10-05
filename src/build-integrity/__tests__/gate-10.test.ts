@@ -251,3 +251,77 @@ describe('runPackCheck', () => {
     expect(result.durationMs).toBeGreaterThanOrEqual(0);
   });
 });
+
+/**
+ * @test Gate 10 runTscCheck - project typecheck script preference
+ * @intent Issue #436 (Gate 9 half): a bare tsc run is not SFC-aware and
+ *         produces false module-resolution errors on wrapper projects
+ *         (Vue -> vue-tsc). The project's declared typecheck script is the
+ *         authoritative compilation check and must run INSTEAD of raw tsc.
+ *         Type errors on every path must still FAIL.
+ * @covers runTscCheck
+ */
+describe('runTscCheck project typecheck script (#436)', () => {
+  let tmpDir: string;
+
+  beforeEach(async () => {
+    tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), 'gate10-script-'));
+    await fs.writeFile(
+      path.join(tmpDir, 'tsconfig.json'),
+      JSON.stringify({ compilerOptions: { strict: true, noEmit: true }, include: ['*.ts'] })
+    );
+  });
+
+  afterEach(async () => {
+    for (let attempt = 0; attempt < 5; attempt++) {
+      try {
+        await fs.rm(tmpDir, { recursive: true, force: true });
+        break;
+      } catch {
+        if (attempt < 4) await new Promise(r => setTimeout(r, 500 * (attempt + 1)));
+      }
+    }
+  });
+
+  it('runs the declared typecheck script instead of raw tsc (broken TS must not fail)', async () => {
+    // Raw tsc would FAIL on this file (unknown type); the stub script is the
+    // authoritative check and succeeds - proving the script path was taken.
+    await fs.writeFile(path.join(tmpDir, 'broken.ts'), 'const x: NotARealType = 1;\n');
+    await fs.writeFile(path.join(tmpDir, 'ok.js'), 'console.log("project typecheck ok");\n');
+    await fs.writeFile(
+      path.join(tmpDir, 'package.json'),
+      JSON.stringify({ name: 'fixture', scripts: { typecheck: 'node ok.js' } })
+    );
+
+    const result = await runTscCheck(tmpDir, 30000);
+    expect(result.status).toBe('pass');
+    expect(result.message).toContain('project typecheck ok');
+  });
+
+  it('FAILs when the declared typecheck script reports errors', async () => {
+    await fs.writeFile(path.join(tmpDir, 'fail.js'), 'console.error("error TS2304: Cannot find name x"); process.exit(1);\n');
+    await fs.writeFile(
+      path.join(tmpDir, 'package.json'),
+      JSON.stringify({ name: 'fixture', scripts: { typecheck: 'node fail.js' } })
+    );
+
+    const result = await runTscCheck(tmpDir, 30000);
+    expect(result.status).toBe('fail');
+    expect(result.message).toContain('project typecheck');
+    expect(result.message).toContain('TS2304');
+  });
+
+  it('keeps raw tsc behaviour when no typecheck script is declared', async () => {
+    await fs.writeFile(path.join(tmpDir, 'broken.ts'), 'const x: NotARealType = 1;\n');
+    const projectNodeModules = path.join(process.cwd(), 'node_modules');
+    try {
+      await fs.symlink(projectNodeModules, path.join(tmpDir, 'node_modules'), 'dir');
+    } catch {
+      // ignore
+    }
+
+    const result = await runTscCheck(tmpDir, 30000);
+    expect(result.status).toBe('fail');
+    expect(result.message).toContain('TypeScript compilation failed');
+  });
+});
