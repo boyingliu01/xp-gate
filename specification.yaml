@@ -168,6 +168,10 @@ specification:
           criteria: 配置解析路径上的 git 调用（含 gitToplevel）必须带超时上限，
             git 卡死或不可用时回退到 cwd / 内置默认值，不得挂住 pre-commit hook
           test_type: unit
+        - id: AC-457-13
+          criteria: rule ID 必须是「单个点」的 group.name 形式且 group 在配置中真实存在，
+            否则 isRuleEnabled 的首个点切分会解析到错误条目并静默沿用内置阈值
+          test_type: unit
 
     - id: REQ-452
       description: Boy Scout baseline 必须可剪枝 —— 已删除文件的条目不得长期滞留并继承旧的警告额度

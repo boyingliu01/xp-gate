@@ -340,4 +340,25 @@ describe('#457 .principlesrc actually changes enforcement', () => {
       expect(config.rules['clean-code']['large-file'].severity).toBe(good);
     }
   });
+
+  it('AC-457-13: every rule id has exactly one dot, as config lookup requires', () => {
+    // isRuleEnabled splits on the FIRST dot to get group and name. A future id like
+    // `clean-code.sub.rule` would resolve to group "clean-code", name "sub.rule",
+    // find no config entry, and default to enabled with built-in thresholds --
+    // silently ignoring whatever the project configured. The invariant held by
+    // inspection until this test said so (Delphi walkthrough FC-04).
+    const ids = getAllRules().map((rule) => rule.id);
+
+    expect(ids.length).toBeGreaterThan(0);
+    for (const id of ids) {
+      expect(id.split('.')).toHaveLength(2);
+    }
+  });
+
+  it('AC-457-13: every rule id resolves to a real group in the config', () => {
+    const groups = Object.keys(getDefaultConfig().rules);
+    for (const rule of getAllRules()) {
+      expect(groups).toContain(rule.id.slice(0, rule.id.indexOf('.')));
+    }
+  });
 });
