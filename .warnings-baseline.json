@@ -2,13 +2,5 @@
   "src/npm-package/lib/test-alignment.ts": {
     "totalWarnings": 13,
     "lastAnalyzed": "2026-10-02T12:35:14.851Z"
-  },
-  "src/principles/config.ts": {
-    "totalWarnings": 1,
-    "lastAnalyzed": "2026-10-03T08:53:37.104Z"
-  },
-  "src/principles/__tests__/config-enforcement.test.ts": {
-    "totalWarnings": 2,
-    "lastAnalyzed": "2026-10-04T08:09:10.762Z"
   }
 }
