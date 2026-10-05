@@ -218,6 +218,9 @@ source "${AUDIT_SCRIPT_DIR}/lib/now-ms.sh"
 # so the fail-closed contract is unit-testable without executing this hook.
 source "${AUDIT_SCRIPT_DIR}/lib/test-failure.sh"
 
+# Issue #477: Gate 2's jscpd config probe and outcome classification, same reason.
+source "${AUDIT_SCRIPT_DIR}/lib/jscpd-run.sh"
+
 # Read max_duration_ms from .xp-gate-config.json (default 7200000 = 2 hours)
 _MAX_DURATION_MS=$(node -e "try{const c=JSON.parse(require('fs').readFileSync('${PROJECT_ROOT_FOR_AUDIT}/.xp-gate-config.json','utf8'));console.log((c.audit&&c.audit.max_duration_ms)||7200000);}catch(e){console.log(7200000);}" 2>/dev/null || echo "7200000")
 
@@ -1251,6 +1254,7 @@ record_gate_audit "gate-1" "code-quality" "$GATE_1_STATUS" "0" "$GATE_1_START"
  2>&1 echo ""
  2>&1 echo "→ Gate 2: Duplicate code detection..."
 GATE_2_START=$(gate_start_ms)
+GATE_2_STATUS="PASS"
 
 if [ "$PROJECT_LANG" = "documentation-only" ]; then
 echo "⏭️  SKIPPED - Duplicate code (documentation project)."
@@ -1265,13 +1269,34 @@ else
   fi
   
   echo "Running jscpd for duplicate code detection..."
-  jscpd --config jscpd.conf.json $(echo "$CHANGED_FILES" | tr '\n' ' ') 2>&1 | head -30
-  JSCPD_EXIT=$?
-  if [ "$JSCPD_EXIT" -ne 0 ]; then
+  # #477: only pass --config when the file actually exists, and let jscpd's report
+  # decide the message. Before this, a missing config produced "os error 2" and a
+  # non-zero exit that the gate translated into a fabricated "found duplicated
+  # code"; a real clone report that exited 0 was announced as a clean pass.
+  JSCPD_CONFIG=$(resolve_jscpd_config)
+  JSCPD_ARGS=()
+  if [ -n "$JSCPD_CONFIG" ]; then
+    JSCPD_ARGS=(--config "$JSCPD_CONFIG")
+  else
+    echo "ℹ️  No jscpd.conf.json found - using jscpd defaults"
+  fi
+  JSCPD_OUTPUT=$(mktemp)
+  JSCPD_EXIT=0
+  # shellcheck disable=SC2086 # pre-existing splitting of the file list; #477 changes the reporting, not the scan set
+  jscpd ${JSCPD_ARGS[@]+"${JSCPD_ARGS[@]}"} $(echo "$CHANGED_FILES" | tr '\n' ' ') > "$JSCPD_OUTPUT" 2>&1 || JSCPD_EXIT=$?
+  head -30 "$JSCPD_OUTPUT"
+  JSCPD_OUTCOME=$(classify_jscpd_run "$JSCPD_EXIT" "$(cat "$JSCPD_OUTPUT")")
+  rm -f "$JSCPD_OUTPUT"
+  if [ "$JSCPD_OUTCOME" = "duplicates" ]; then
     echo "ℹ️  jscpd found duplicated code (warning, not blocking by default)"
     echo "   Consider refactoring duplicate code blocks."
+  elif [ "$JSCPD_OUTCOME" = "error" ]; then
+    echo "⚠️  jscpd exited with code $JSCPD_EXIT without a report — the output above is its real error"
+    echo "⏭️  SKIPPED - Duplicate code (jscpd run error)"
+    GATE_2_STATUS="SKIP"
+  else
+    echo "✅ PASSED - jscpd duplicate code check completed."
   fi
-  echo "✅ PASSED - jscpd duplicate code check completed."
     ;;
     
     python)
@@ -1329,7 +1354,8 @@ else
     esac
   done
 fi
-GATE_2_STATUS="PASS"
+# Set at the top of this gate; a branch may already have marked it SKIP (#477). The
+# audit must record what happened, not what the gate defaults to.
 record_gate_audit "gate-2" "duplicate-code" "$GATE_2_STATUS" "0" "$GATE_2_START"
 
 # ============================================================================
