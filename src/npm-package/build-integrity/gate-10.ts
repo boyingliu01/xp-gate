@@ -70,6 +70,64 @@ export async function runTscCheck(
     };
   }
 
+  // Issue #436 (Gate 9 half of the defect already fixed for Gate 1): a bare
+  // tsc run is not SFC-aware, so wrapper projects (Vue -> vue-tsc, etc.)
+  // produce false module-resolution errors (30 x TS2307 on a real Vue
+  // consumer once Gate 9's subdir discovery started running). The project's
+  // declared typecheck script IS its authoritative compilation check — prefer
+  // it over raw tsc, exactly like Gate 1. Type errors still FAIL on every
+  // path; plain TS repos without such a script keep the raw tsc behaviour.
+  let typecheckScript: string | null = null;
+  try {
+    const pkgRaw = await fs.readFile(path.join(projectRoot, 'package.json'), 'utf-8');
+    const pkg = JSON.parse(pkgRaw) as { scripts?: Record<string, string> };
+    for (const name of ['typecheck', 'check-types', 'type-check', 'check:types', 'tsc']) {
+      if (pkg.scripts && pkg.scripts[name]) {
+        typecheckScript = name;
+        break;
+      }
+    }
+  } catch {
+    typecheckScript = null;
+  }
+
+  if (typecheckScript) {
+    try {
+      const { stdout, stderr } = await execFileAsync('npm', ['run', '--silent', typecheckScript], {
+        cwd: projectRoot,
+        timeout: timeoutMs,
+        shell: true,
+        maxBuffer: 10 * 1024 * 1024,
+      });
+      return {
+        status: 'pass',
+        message: (stdout + stderr).trim() || `project typecheck (${typecheckScript}) successful`,
+        durationMs: Date.now() - startTime,
+      };
+    } catch (error: unknown) {
+      const err = error as {
+        code?: number | null;
+        signal?: string;
+        killed?: boolean;
+        stdout?: string;
+        stderr?: string;
+      };
+      if (err.killed || err.signal === 'SIGTERM' || err.code === null) {
+        return {
+          status: 'skip',
+          message: `project typecheck (${typecheckScript}) timed out after ${timeoutMs}ms`,
+          durationMs: Date.now() - startTime,
+        };
+      }
+      const output = ((err.stdout || '') + (err.stderr || '')).slice(0, 2000);
+      return {
+        status: 'fail',
+        message: `project typecheck (${typecheckScript}) failed:\n${output}`,
+        durationMs: Date.now() - startTime,
+      };
+    }
+  }
+
   // Resolve tsc binary: try multiple strategies for cross-platform reliability
   function findTsc(): string | null {
     // Strategy 1: projectRoot/node_modules/typescript/bin/tsc
