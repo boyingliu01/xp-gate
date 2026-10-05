@@ -221,3 +221,51 @@ Gate 4 的 `-ge 2` 分支读不到约定；`df5521c`（prompt 预算）与 `38e0
   都只钉脚本副本，`plugins/qoder/skills` 与 `src/npm-package/plugins/qoder/skills` 这次的漂移无人拦截。
 - MAJ-02（Gate 4 抽库 + 安装器第三层解析）、MI-05（进程级 `activeConfig`）、MC-03（SKIP 聚合监控）、
   `pruneBaselineEntries` 不剪零告警条目——理由见上文「记录的决定」。
+
+# 追加：Round 2 结果与处置（2026-10-06）
+
+评审区间 `af027da..6ebbd5a`，输入按席位分别装配到 38461 / 39538 / 36944 字节（system+user，UTF-8）。
+
+| 席位 | 模型（requested/resolved） | Round 1 | Round 2 |
+|---|---|---|---|
+| architecture | g-glm-5.3-flash / glm-5.3-flash | REQUEST_CHANGES(7) | **未产出：两次 "Network error."（38461 字节，`retryable:false`）** |
+| technical | g-qwen3.8-flash / qwen3.8-flash | APPROVED(8) | APPROVED(9)，2 major / 3 minor |
+| feasibility | g-deepseek-flash / deepseek-flash | REQUEST_CHANGES(7) | APPROVED(7)，6 major / 7 minor |
+
+## 一个必须记录的测量反转：40000 不是「安全值」
+
+同一个 `g-glm-5.3-flash` 席位，Round 1 在同量级 prompt 下答完（225s），Round 2 在 **38461 字节**
+（低于 AC-457-19 的默认预算）连续两次以 "Network error." 失败；同时另两个席位在 39538 / 36944 字节都成功。
+用小 prompt（约 100 字节）冒烟重跑该席位 7 秒返回正常，排除了网关整体故障。
+结论：**prompt 上限是席位（模型）属性，不是全局属性**——`max_prompt_bytes` 的存在是对的，
+但「默认 40000 经验安全」这句话没有依据，它只是当时那一次实测的取值。
+Round 3 因此把装配体积压到 ~35KB（diff 改用 `-U0`，三个配置文件的 diff 换成处置表里的事实陈述），
+并把这条反转写进评审输入，而不是悄悄把预算调大。
+
+## Round 2 发现的逐项处置
+
+| 编号 | 提出 | 处置 | 落点 / 理由 |
+|---|---|---|---|
+| 非法 `max_prompt_bytes` 静默回退 | technical MN-02 + feasibility | **已修** | `0a6ce31`：值存在但无法生效时打 WARNING，未设置与合法值保持静默；AC-457-19 同步补这句 |
+| pickaxe 可能多命中、缺「命中数=1」断言 | feasibility | 驳回 | `git log` 新→旧，`tail -1` 取的是**最旧**命中即引入提交；零命中时 `[ -n "$fix_commit" ]` 直接失败并说明原因；取到的副本还必须含 `/tmp/principles-output.json` 否则再失败。三种失配都可见，不存在「静默取错父」 |
+| 「测试引用的每个 AC 必须存在于 spec」应落地为守卫 | technical MC-02 + feasibility | 记录决定 + 实测规模 | 全量扫描（canonical，168 个测试文件，排除 npm 镜像与 `.xp-gate/`）：**97 个 AC 引用在 `specification.yaml` 中不存在，分布在 22 个 REQ**（001–006、010、174、327、337、356、357、359、379、428、436、458、475、476、477、478、59）。AC-478-01..04 只是其中 10 处引用的一小部分。守卫一旦上线即全仓红，写齐 22 个 REQ 不是本分支范围；另开 issue，附上面这份规模数据作为工作量依据 |
+| MAJ-02 延后必须绑定 issue 与交付批次 | feasibility | 记录决定 | 与上一轮同一结论；issue 待用户裁定后创建（见文末「需要用户裁定的三件事」） |
+| 跟踪态技能副本无 parity 守卫 | feasibility | 记录决定 | 守卫要做的是 `plugins/qoder/skills/**` 与 `src/npm-package/plugins/qoder/skills/**` 两处对 `skills/**` 逐字节比对，可以复用 `check-hook-mirror.sh` 的形状；但它是新面（74 个跟踪文件）且与本分支的 P0 误阻断无关，另开 issue |
+| `.bats` 不在任何自动执行路径 | feasibility | 记录决定 | 加 CI job 需要先在 CI 里装 bats-core，且要决定跑哪几个文件；本分支只做了一件相关的事——把 `6ebbd5a` 的自曝缺陷讲清楚。另开 issue |
+| `FC-01/MC-01` 没有代码级降级开关 | feasibility | 记录决定 | 「validator 与 producer 成对回滚」已在文档写明；加降级开关等于给 #423 留一个零成本绕过口，与该修复的初衷相反 |
+| 旧机器级钩子导致「谁在最终环境验证钩子行为」缺位 | feasibility | 记录决定 | 见下方新增环境发现；本轮的可验证证据是仓库内直接跑的 bats，合并前的钩子行为验证需要用户裁定 `doctor --sync-hooks` |
+| `test-plugins.sh` 删除 vs 修复 | technical MN-01 + feasibility | 记录决定 | 已在上一节「待办」写明两条路，倾向删除（`.mjs` 孪生版本全绿且无人引用）；等裁定 |
+| `filesystemFoldsCase` 在大小写敏感 APFS 卷上误判 | technical MN-03 | 记录决定 | 后果是 fail-safe（保留条目不误删）；环境变量覆盖属增强，另案 |
+| `max_prompt_bytes` 语义（system+user 之和）未写进配置注释 | feasibility | 记录决定 | AC-457-19 与代码一致（求和），注释补充随下一次配置文档改动一起做 |
+| `getEffectiveConfigFor` 只切第一个点，三段式 ruleId 会被误解析 | feasibility | 记录决定 | 当前 15 个 rule ID 均为 `group.name` 形态且由既有测试钉住形状；前瞻性提示 |
+| `Violation.effectiveThreshold` 缺类型层强制 | feasibility | 记录决定 | 与上一轮同一结论：不引入第二真值来源 |
+| hooksPath / prompt 预算不对称 / Boy Scout 复发等 7 条 minor | feasibility, technical | 记录决定 | 均为观察项或已在处置表内，逐条见席位原文 |
+
+## 新增环境发现（影响的不只是本分支）
+
+`core.hooksPath` 指向的旧机器级钩子在 Gate 2 把 **已经安装** 的 jscpd 判定为「required tool not available」并 BLOCK。
+根因不是缺依赖：`node_modules/jscpd/bin` 与 `node_modules/.bin/jscpd` 都在，
+而是 git 钩子进程的 PATH 不含 `./node_modules/.bin`（npm lifecycle 才会注入）。
+把该目录加进 PATH 后同一次提交即通过（`0a6ce31`）。
+这是陈旧副本的第二个具体后果——仓库内修复后的 gate-2 走的是「运行错误 vs 重复发现」三态分类、
+且遵循「工具缺失 = SKIP」；陈旧副本这里直接 BLOCK，等于把已修好的误阻断在提交路径上又制造了一遍。

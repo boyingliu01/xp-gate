@@ -195,7 +195,8 @@ specification:
           test_type: integration
         - id: AC-457-19
           criteria: Delphi runner 在发送前按 UTF-8 字节度量 system+user 提示并拒绝超限请求
-            （默认 40000 字节，席位可用 max_prompt_bytes 覆盖；非法覆盖值回退默认而不是关闭守卫）
+            （默认 40000 字节，席位可用 max_prompt_bytes 覆盖；非法覆盖值回退默认而不是关闭守卫，
+            且「已设置但无法生效」的覆盖值必须发出可见告警，未设置与合法值保持静默）
           test_type: unit
         - id: AC-457-20
           criteria: 超限拒绝必须可执行——报错点明如何缩小范围或提高该席位预算，
