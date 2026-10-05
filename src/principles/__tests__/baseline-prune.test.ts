@@ -4,7 +4,7 @@
  *         forever. Previously `classifyFiles` parsed `deleted` but nothing
  *         consumed it, so `.warnings-baseline.json` accumulated stale entries
  *         that let a re-created file inherit a bogus allowance.
- * @covers AC-452-10, AC-452-11, AC-452-12, AC-452-13
+ * @covers AC-452-10, AC-452-11, AC-452-12, AC-452-13, AC-452-14
  *
  * The removal is deliberately DOUBLE-CONFIRMED: a path is only treated as
  * deleted when the filesystem says it is absent AND git no longer tracks it.
@@ -101,6 +101,30 @@ function baselineWith(paths: string[]): string {
     files[path] = { totalWarnings: 3, lastAnalyzed: '2026-10-03T00:00:00.000Z' };
   }
   return JSON.stringify(files);
+}
+
+/**
+ * Stage exact paths in the index without creating working-tree files.
+ *
+ * Index-only staging is what makes the case-sensitivity assertions portable:
+ * neither spelling exists on disk (so the `existsSync` half of the double-confirm
+ * is false everywhere), and the only signal left is the comparison against the
+ * git index -- which is exactly the behavior under test. The blob hash is git's
+ * well-known empty-blob id, so nothing needs to exist on disk.
+ */
+function stageIndexOnly(root: string, paths: string[]): void {
+  const EMPTY_BLOB = 'e69de29bb2d1d6434b8b29ae775ad8c2e48c5391';
+  const input = paths.map((path) => `100644 ${EMPTY_BLOB}\t${path}`).join('\n');
+  try {
+    execFileSync('git', ['update-index', '--index-info'], {
+      cwd: root,
+      input: `${input}\n`,
+      stdio: ['pipe', 'ignore', 'ignore'],
+    });
+  } catch (error) {
+    const detail = error instanceof Error ? error.message : String(error);
+    throw new Error(`could not stage index paths: ${detail}`);
+  }
 }
 
 afterEach(() => {
@@ -223,5 +247,92 @@ describe('#452 REQ-3 stale baseline entries are pruned', () => {
 
     expect(result.removed).toEqual(['deleted-long-ago.ts']);
     expect(result.error).toBeUndefined();
+  });
+
+  it('AC-452-14: on a case-sensitive filesystem the index path is the canonical form', () => {
+    // Two tracked files whose names differ only by case are two DIFFERENT files on
+    // Linux. A baseline key that matches neither spelling exactly is a phantom:
+    // folding it to `case/alpha.ts` used to match the index and retain the entry
+    // forever -- the same stale-allowance bug this module exists to remove, since
+    // re-creating `case/ALPHA.ts` would inherit the retained allowance.
+    const { root } = makeRepoWithCommit();
+    stageIndexOnly(root, ['case/Alpha.ts', 'case/alpha.ts']);
+
+    const result = pruneBaselineEntries(
+      baselineWith(['case/ALPHA.ts']),
+      root,
+      { caseInsensitivePaths: false },
+    );
+
+    expect(result.removed).toEqual(['case/ALPHA.ts']);
+    expect(result.kept).toHaveLength(0);
+  });
+
+  it('AC-452-14: a case-sensitive filesystem does not conflate a differently-cased key with a tracked path', () => {
+    const { root } = makeRepoWithCommit();
+    stageIndexOnly(root, ['src/Tracked.ts']);
+
+    const result = pruneBaselineEntries(
+      baselineWith(['src/tracked.ts']),
+      root,
+      { caseInsensitivePaths: false },
+    );
+
+    expect(result.removed).toEqual(['src/tracked.ts']);
+  });
+
+  it('AC-452-14: an exact index match is kept on a case-sensitive filesystem', () => {
+    // Guards against the opposite regression: dropping the fold must not turn a
+    // legitimately tracked path into a prunable one.
+    const { root } = makeRepoWithCommit();
+    stageIndexOnly(root, ['case/alpha.ts']);
+
+    const result = pruneBaselineEntries(
+      baselineWith(['case/alpha.ts']),
+      root,
+      { caseInsensitivePaths: false },
+    );
+
+    expect(result.kept).toContain('case/alpha.ts');
+    expect(result.removed).toHaveLength(0);
+  });
+
+  it('AC-452-14: a case-insensitive filesystem keeps the retain-bias for a differently-cased key', () => {
+    // On Windows (and macOS default volumes) `src/tracked.ts` and `src/Tracked.ts`
+    // are the same file, and the key can be written by a tool that reported a
+    // different casing than the index. Losing that allowance in a sparse checkout
+    // -- when `existsSync` cannot confirm either spelling -- is the failure mode
+    // the original fold was introduced to prevent, so case-folding stays enabled
+    // exactly where the filesystem actually folds.
+    const { root } = makeRepoWithCommit();
+    stageIndexOnly(root, ['src/Tracked.ts']);
+
+    const result = pruneBaselineEntries(
+      baselineWith(['src/tracked.ts']),
+      root,
+      { caseInsensitivePaths: true },
+    );
+
+    expect(result.kept).toContain('src/tracked.ts');
+    expect(result.removed).toHaveLength(0);
+  });
+
+  it('AC-452-14: the default follows the host filesystem, not a hardcoded assumption', () => {
+    // This repository's own tests must stay portable: Linux CI and this Windows
+    // checkout have to disagree here, because the correct answer IS platform
+    // dependent. The assertion pins the wiring (default = detection) rather than a
+    // single outcome.
+    const { root } = makeRepoWithCommit();
+    stageIndexOnly(root, ['src/Tracked.ts']);
+
+    const result = pruneBaselineEntries(baselineWith(['src/tracked.ts']), root);
+    const folded = process.platform === 'win32' || process.platform === 'darwin';
+
+    if (folded) {
+      expect(result.kept).toContain('src/tracked.ts');
+      expect(result.removed).toHaveLength(0);
+    } else {
+      expect(result.removed).toEqual(['src/tracked.ts']);
+    }
   });
 });
