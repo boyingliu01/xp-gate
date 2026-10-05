@@ -6,7 +6,7 @@
 
 import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { analyze } from '../analyzer';
-import { getActiveConfig, getDefaultConfig, setActiveConfig } from '../config';
+import { getDefaultConfig, resetActiveConfig, setActiveConfig } from '../config';
 import { Rule, Adapter, Severity } from '../types';
 
 describe('analyzer.ts - Rule Orchestration Engine', () => {
@@ -119,7 +119,6 @@ describe('analyzer.ts - Rule Orchestration Engine', () => {
       // `filesChecked` used to be incremented before the `enabled` check, so a rule
       // that never ran still claimed it had examined the file -- inflating per-rule
       // coverage statistics for work the rule did not do.
-      const previous = getActiveConfig();
       const disabled = getDefaultConfig();
       disabled.rules['clean-code']['long-function'].enabled = false;
       try {
@@ -129,7 +128,10 @@ describe('analyzer.ts - Rule Orchestration Engine', () => {
         expect(result.ruleResults['clean-code.long-function'].filesChecked).toBe(0);
       } finally {
         // Restore the process-global config so later tests are unaffected.
-        setActiveConfig(previous);
+        // `resetActiveConfig()` rather than re-installing the captured config:
+        // replacing an already-installed config is exactly what the #457
+        // guardrail reports, and this suite never installs a non-default one.
+        resetActiveConfig();
       }
     });
 
