@@ -148,3 +148,28 @@ ERROR: Coverage for lines (10%) does not meet global threshold (80%)'
   block_line="$(echo "$output" | cut -d: -f1)"
   [ "$guard_line" -lt "$block_line" ]
 }
+
+@test "#473 wiring: the #454 runner-error branch precedes the #473 guard at the changed-tests site" {
+  # The docstring promises the elif sits BETWEEN the runner-error branch and
+  # the BLOCKED else; pin all three relative positions, not just two.
+  run bash -c "
+    awk '/changed test file\(s\) with coverage/,/PASSED - Changed test files/' '$HOOK' \\
+      | grep -nE 'is_runner_infrastructure_error|is_partial_threshold_only_exit' | head -2
+  "
+  runner_line="$(echo "$output" | sed -n '1p' | cut -d: -f1)"
+  guard_line="$(echo "$output" | sed -n '2p' | cut -d: -f1)"
+  [ -n "$runner_line" ] && [ -n "$guard_line" ]
+  [ "$runner_line" -lt "$guard_line" ]
+}
+
+@test "#473 contract: excuse branches do NOT set TESTS_SKIPPED (coverage path still runs)" {
+  # Setting TESTS_SKIPPED would skip Stage 1/2 coverage for every language and
+  # suppress the partial-run warning this fix exists to reach. The tests DID
+  # run and DID produce coverage data — only the vitest threshold exit is excused.
+  # Start only at call sites (guard invoked with "$TESTS_OUTPUT"), NOT at the
+  # function definition, whose range would swallow the unrelated #454 branch.
+  run bash -c "
+    awk '/is_partial_threshold_only_exit \"/,/BLOCKED - Tests FAILED/' '$HOOK' | grep -c 'TESTS_SKIPPED=true' || true
+  "
+  [ "$output" -eq 0 ]
+}

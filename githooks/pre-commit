@@ -1937,11 +1937,14 @@ else
                 TESTS_EXIT_CODE=0
               elif is_partial_threshold_only_exit "$TESTS_OUTPUT"; then
                 echo ""
-                echo "⚠️  SKIPPED - coverage thresholds unmet by subset run (no test failed)"
+                echo "⚠️  EXCUSED - coverage thresholds unmet by subset run (no test failed)"
                 echo "    Detected: 'does not meet global threshold' with 0 failed tests."
                 echo "    A subset run cannot reach global thresholds (#473); the full"
                 echo "    suite / CI coverage job still enforces them."
-                TESTS_SKIPPED=true
+                # Deliberately NOT setting TESTS_SKIPPED here (review #473): the
+                # tests ran and produced coverage data, so the downstream
+                # partial-run warning path must still execute. Only the
+                # vitest-level threshold exit is excused.
                 TESTS_EXIT_CODE=0
               else
                 echo ""
@@ -1991,11 +1994,12 @@ else
               if [ "$TESTS_EXIT_CODE" -ne 0 ]; then
                 if is_partial_threshold_only_exit "$TESTS_OUTPUT"; then
                   echo ""
-                  echo "⚠️  SKIPPED - coverage thresholds unmet by subset run (no test failed)"
+                  echo "⚠️  EXCUSED - coverage thresholds unmet by subset run (no test failed)"
                   echo "    Detected: 'does not meet global threshold' with 0 failed tests."
                   echo "    A subset run cannot reach global thresholds (#473); the full"
                   echo "    suite / CI coverage job still enforces them."
-                  TESTS_SKIPPED=true
+                  # Deliberately NOT setting TESTS_SKIPPED (review #473) — see
+                  # the changed-tests site for the rationale.
                   TESTS_EXIT_CODE=0
                 else
                   echo ""
