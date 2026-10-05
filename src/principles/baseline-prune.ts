@@ -32,6 +32,29 @@ export interface PruneResult {
   error?: string;
 }
 
+/** How the project root's filesystem resolves path names. */
+export interface PruneOptions {
+  /**
+   * Whether `A.ts` and `a.ts` name the same file at this root.
+   *
+   * Defaults to platform detection. Tests pass it explicitly so both branches are
+   * exercisable from a single checkout.
+   */
+  caseInsensitivePaths?: boolean;
+}
+
+/**
+ * Whether the host filesystem folds case by default.
+ *
+ * Windows always does; a default APFS/_HFS+ volume on macOS does. A deliberately
+ * case-sensitive macOS volume is misread as folding here, and the consequence is
+ * the retain direction (an entry is kept rather than dropped) -- the fail-safe side
+ * of this comparison.
+ */
+function filesystemFoldsCase(): boolean {
+  return process.platform === 'win32' || process.platform === 'darwin';
+}
+
 /**
  * Identify baseline entries whose file no longer exists.
  *
@@ -46,13 +69,18 @@ export interface PruneResult {
  *
  * Pure with respect to `baselineJson`: the caller decides when to persist.
  */
-export function pruneBaselineEntries(baselineJson: string, projectRoot: string): PruneResult {
+export function pruneBaselineEntries(
+  baselineJson: string,
+  projectRoot: string,
+  options: PruneOptions = {},
+): PruneResult {
   const files = parseBaselineFiles(baselineJson);
   if (typeof files === 'string') {
     return { kept: [], removed: [], error: files };
   }
 
-  const tracked = listTrackedFiles(projectRoot);
+  const caseInsensitivePaths = options.caseInsensitivePaths ?? filesystemFoldsCase();
+  const tracked = listTrackedFiles(projectRoot, caseInsensitivePaths);
   const kept: string[] = [];
   const removed: string[] = [];
 
@@ -69,7 +97,7 @@ export function pruneBaselineEntries(baselineJson: string, projectRoot: string):
   }
 
   for (const key of Object.keys(files)) {
-    if (isEntryStale(key, projectRoot, tracked)) {
+    if (isEntryStale(key, projectRoot, tracked, caseInsensitivePaths)) {
       removed.push(key);
     } else {
       kept.push(key);
@@ -125,8 +153,13 @@ function parseBaselineFiles(baselineJson: string): Record<string, unknown> | str
  * Callers must have confirmed the index is readable; an unavailable git is handled
  * by the caller, which reports it rather than deciding silently here.
  */
-function isEntryStale(key: string, projectRoot: string, tracked: Set<string>): boolean {
-  if (tracked.has(normalizeBaselinePath(key))) return false;
+function isEntryStale(
+  key: string,
+  projectRoot: string,
+  tracked: Set<string>,
+  caseInsensitivePaths: boolean,
+): boolean {
+  if (tracked.has(normalizeBaselinePath(key, caseInsensitivePaths))) return false;
   try {
     return !existsSync(resolve(projectRoot, key));
   } catch {
@@ -138,17 +171,21 @@ function isEntryStale(key: string, projectRoot: string, tracked: Set<string>): b
 /**
  * Canonical form for comparing a baseline key with a git index path.
  *
- * The git index is authoritative for casing and separators, so both sides are
- * lowercased with `/` separators. Without this, a Windows checkout that records
- * `Src/A.ts` would not match a baseline key of `src/A.ts` and the entry would be
- * wrongly deleted.
+ * The git index is authoritative for casing, so the default comparison is exact
+ * after separator normalization. Case folding is applied only when the filesystem
+ * at this root folds case, because that is the one setting where `Src/A.ts` in the
+ * index and a baseline key of `src/A.ts` name the same file. On a case-sensitive
+ * filesystem folding both sides conflated two distinct files, so a key matching
+ * neither spelling exactly still found a "tracked" hit and the phantom allowance
+ * was retained forever -- the failure mode this module was introduced to remove.
  */
-function normalizeBaselinePath(value: string): string {
-  return value.replace(/\\/g, '/').toLowerCase();
+function normalizeBaselinePath(value: string, caseInsensitivePaths: boolean): string {
+  const separators = value.replace(/\\/g, '/');
+  return caseInsensitivePaths ? separators.toLowerCase() : separators;
 }
 
 /** Tracked paths per the git index, or null when git cannot be consulted. */
-function listTrackedFiles(projectRoot: string): Set<string> | null {
+function listTrackedFiles(projectRoot: string, caseInsensitivePaths: boolean): Set<string> | null {
   try {
     const out = execFileSync('git', ['ls-files'], {
       cwd: projectRoot,
@@ -171,7 +208,7 @@ function listTrackedFiles(projectRoot: string): Set<string> | null {
     const set = new Set<string>();
     for (const line of out.split('\n')) {
       const trimmed = line.trim();
-      if (trimmed) set.add(normalizeBaselinePath(trimmed));
+      if (trimmed) set.add(normalizeBaselinePath(trimmed, caseInsensitivePaths));
     }
     return set;
   } catch {
