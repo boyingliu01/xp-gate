@@ -49,8 +49,16 @@ const NUMERIC_KEYS = ['threshold', 'methodThreshold'] as const;
 /** Config keys that must remain arrays. */
 const ARRAY_KEYS = ['exclude'] as const;
 
-/** Config keys that must remain non-empty strings. */
-const STRING_KEYS = ['severity'] as const;
+/**
+ * `severity` is not a free-form string: `summary.errorCount` and Gate 4's report
+ * grep both match the exact lowercase literal `error`, so anything else -- "Error",
+ * "fatal" -- runs the rule, reports the violation, and blocks nothing. Validated
+ * against the vocabulary rather than treated as an opaque string.
+ */
+const SEVERITIES = ['error', 'warning', 'info'] as const;
+
+/** Config keys whose value must be one of a fixed set, with that set. */
+const ENUM_KEYS = { severity: SEVERITIES } as const;
 
 /**
  * Built-in defaults, hoisted out of `getDefaultConfig()`.
@@ -293,13 +301,16 @@ function mergeRule(
     }
   }
 
-  for (const key of STRING_KEYS) {
+  for (const key of Object.keys(ENUM_KEYS) as (keyof typeof ENUM_KEYS)[]) {
+    const allowed: readonly string[] = ENUM_KEYS[key];
     const value = override[key];
     if (value === undefined) continue;
-    if (typeof value === 'string' && value.length > 0) {
+    if (typeof value === 'string' && allowed.includes(value)) {
       merged[key] = value;
     } else {
-      warn(`rules.${ruleId}.${key} must be a non-empty string — keeping default`);
+      // Loud on purpose: silently keeping the default would let a project believe
+      // it raised a rule to blocking when it did not.
+      warn(`rules.${ruleId}.${key} must be one of ${allowed.join(', ')} — keeping default`);
     }
   }
 

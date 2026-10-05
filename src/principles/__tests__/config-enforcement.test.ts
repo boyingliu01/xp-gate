@@ -311,4 +311,33 @@ describe('#457 .principlesrc actually changes enforcement', () => {
 
     expect(misused.status).toBe(2);
   });
+
+  // Severity override fixture. Hoisted so both cases below read as a loop over
+  // values rather than a loop over nested literals.
+  const severityConfig = (severity: string) => JSON.stringify({
+    rules: { 'clean-code': { 'large-file': { enabled: true, threshold: 1, severity } } },
+  });
+
+  it('AC-457-11: a severity outside the vocabulary is rejected, not silently obeyed', async () => {
+    // Raised by the Delphi walkthrough (architecture seat, MJ-01). `severity` was
+    // validated only as "non-empty string", but both summary.errorCount and Gate 4's
+    // grep match the exact lowercase literal `error`. Measured with severity "Error":
+    // the rule still runs, still reports the violation, yet errorCount is 0, exit is
+    // 0, and the gate passes -- a typo that silently un-blocks a rule with no warning
+    // anywhere. Same fail-open shape #457 exists to remove.
+    const dir = makeTempDir();
+
+    for (const bad of ['Error', 'ERROR', 'errorX', 'fatal']) {
+      const config = await loadConfig(writeConfig(dir, severityConfig(bad)));
+      expect(config.rules['clean-code']['large-file'].severity).toBe('warning');
+    }
+  });
+
+  it('AC-457-11: the three documented severities are all accepted', async () => {
+    const dir = makeTempDir();
+    for (const good of ['error', 'warning', 'info']) {
+      const config = await loadConfig(writeConfig(dir, severityConfig(good)));
+      expect(config.rules['clean-code']['large-file'].severity).toBe(good);
+    }
+  });
 });
