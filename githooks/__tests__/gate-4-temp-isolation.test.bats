@@ -23,8 +23,20 @@ STUB
   chmod +x "$TEST_DIR/bin/npx"
 
   # The pre-fix module, recovered from git rather than reimplemented, so the
-  # "provably broken before" assertion runs the real old code path.
-  git -C "$REPO_ROOT" show HEAD:githooks/gate-4.sh > "$TEST_DIR/gate-4.shared-path.sh"
+  # "provably broken before" assertion runs the real old code path. Resolved from
+  # history, not from HEAD and not from a pinned SHA: HEAD's copy became the fixed
+  # module the moment the fix was committed (the guard passed only while the author
+  # ran it inside that commit's own pre-commit hook), and a rebase would move a
+  # literal SHA. The pickaxe string is the per-invocation report, not `mktemp` --
+  # the stderr temp predates the fix.
+  local fix_commit
+  fix_commit="$(git -C "$REPO_ROOT" log --format=%H -S'PRINCIPLES_JSON=$(mktemp)' -- githooks/gate-4.sh | tail -1)"
+  [ -n "$fix_commit" ] || { echo "cannot locate the commit that introduced the per-invocation report" >&2; return 1; }
+  git -C "$REPO_ROOT" show "$fix_commit^:githooks/gate-4.sh" > "$TEST_DIR/gate-4.shared-path.sh"
+  grep -q '/tmp/principles-output.json' "$TEST_DIR/gate-4.shared-path.sh" || {
+    echo "the resolved pre-fix module does not use the shared report path" >&2
+    return 1
+  }
 }
 
 teardown() {
@@ -150,7 +162,8 @@ gate_status_with() {
 }
 
 @test "AC-457-18 regression guard: the pre-fix shared-path module is provably wrong" {
-  # The same interleaving against HEAD's copy. If this stops passing, the fixture no
-  # longer reproduces the bug and the assertion above proves nothing.
+  # The same interleaving against the module as it stood before the fix. If this
+  # stops passing, the fixture no longer reproduces the bug and the assertion above
+  # proves nothing.
   [ "$(gate_status_with "$TEST_DIR/gate-4.shared-path.sh" 1 interleave)" = "PASS" ]
 }
