@@ -1079,6 +1079,29 @@ describe('timeout configuration', () => {
       expect(resolvePromptBudgetBytes({ max_prompt_bytes: 'lots' })).toBe(40000);
     });
 
+    // Round 2 (technical MN-02): a value that is *set* but cannot be honoured is
+    // the one configuration mistake that produced no signal at all -- the operator
+    // raises a seat's ceiling, the run still refuses, and nothing says the ceiling
+    // was never applied. An absent key is not a mistake, so it stays silent.
+    it('AC-457-19: a present but invalid override warns instead of falling back silently', () => {
+      const { resolvePromptBudgetBytes } = loadModule();
+      const errors = vi.spyOn(console, 'error').mockImplementation(() => {});
+      try {
+        expect(resolvePromptBudgetBytes({ max_prompt_bytes: 0 })).toBe(40000);
+        expect(resolvePromptBudgetBytes({ max_prompt_bytes: 'lots' })).toBe(40000);
+        const warned = errors.mock.calls.filter((call) => /max_prompt_bytes/.test(String(call[0])));
+        expect(warned).toHaveLength(2);
+        expect(String(warned[0][0])).toMatch(/WARNING/);
+
+        errors.mockClear();
+        expect(resolvePromptBudgetBytes({})).toBe(40000);
+        expect(resolvePromptBudgetBytes({ max_prompt_bytes: 65536 })).toBe(65536);
+        expect(errors.mock.calls.filter((call) => /max_prompt_bytes/.test(String(call[0])))).toHaveLength(0);
+      } finally {
+        errors.mockRestore();
+      }
+    });
+
     it('AC-457-19: measures UTF-8 bytes of the whole request, not characters', () => {
       const { checkPromptBudget } = loadModule();
       // The review content is Chinese prose; a length-in-code-units check would

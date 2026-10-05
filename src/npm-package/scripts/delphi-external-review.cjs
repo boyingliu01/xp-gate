@@ -364,6 +364,15 @@ function resolvePromptBudgetBytes(expertConfig) {
   if (typeof configured === 'number' && Number.isFinite(configured) && configured > 0) {
     return Math.trunc(configured);
   }
+  if (configured !== undefined) {
+    // Silently falling back is how a raised ceiling looks like a still-broken
+    // guard: the operator edits the config, the run still refuses, and nothing
+    // says the value never took effect.
+    console.error(
+      `[delphi-review] WARNING: max_prompt_bytes=${JSON.stringify(configured)} cannot be honoured ` +
+      `(needs a finite number > 0); using the ${DEFAULT_PROMPT_BUDGET_BYTES} byte default instead.`
+    );
+  }
   return DEFAULT_PROMPT_BUDGET_BYTES;
 }
 
