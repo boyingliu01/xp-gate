@@ -4,6 +4,10 @@ export default defineConfig({
   test: {
     globals: true,
     environment: 'node',
+    // Fails the run if the suite itself writes into the work tree (#428 symptom B).
+    // Paths already dirty when the run started are excluded, so this never blames a
+    // developer's uncommitted work for what a test did.
+    globalSetup: ['./scripts/vitest-worktree-guard.cjs'],
     // The `src/npm-package/` tree is a byte-identical MIRROR of canonical
     // sources, and 58 of its test files are byte-identical to their siblings in
     // `src/`. Collecting both ran every mirrored test twice, which is the bulk
