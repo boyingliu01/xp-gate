@@ -3,7 +3,7 @@
  * @intent Gate 5 must distinguish a real test failure from a vitest *runner
  *         infrastructure* error (EPERM on the temp/ssr module cache), so the
  *         guard cannot silently regress to a blanket "Tests FAILED" message.
- * @covers AC-454-01, AC-454-02, AC-454-03, AC-454-04, AC-454-06, AC-454-07, AC-473-02
+ * @covers AC-454-01, AC-454-02, AC-454-03, AC-454-04, AC-454-06, AC-454-07, AC-454-08, AC-473-02
  *
  * Background: on Windows vitest 1.6.x can exit non-zero while reporting zero
  * failed tests. `is_runner_infrastructure_error` already existed, but only ONE
@@ -106,6 +106,22 @@ const PRODUCING_COMMAND_LOOKBACK_LINES = 12;
 
 /** Declared vitest major whose default reporter emits the `Unhandled Error` shape. */
 const ASSUMED_VITEST_MAJOR = 1;
+
+/**
+ * Every copy of the Gate 4 module that branches on the checker's exit status.
+ *
+ * `githooks/gates/gate-4-principles.sh` is sourced by nothing today; it is listed
+ * because the comment under test was copied into it too, and a claim that names
+ * this file must hold for it.
+ */
+const GATE_4_COPIES = [
+  'githooks/gate-4.sh',
+  'githooks/adapters/gate-4.sh',
+  'githooks/gates/gate-4-principles.sh',
+];
+
+/** `set -e` in any spelling: bare, bundled (`set -euo pipefail`), or long-form. */
+const ERREXIT_OPTION = /(^|[\s;])set\s+(-[a-zA-Z]*e[a-zA-Z]*|-o\s+errexit)\b/;
 
 /**
  * Write the stub `npx` into `bin` and return the path of its call log.
@@ -415,6 +431,54 @@ describe('Gate 5 distinguishes runner infrastructure errors from real failures (
     // on the whole hook output would make this test about Gate 6, not Gate 5.
     expect(stdout).toContain('PASSED - Changed test files passed');
     expect(stdout).not.toContain('BLOCKED - Tests FAILED');
+  });
+
+  it('AC-454-08: the hook really does run without errexit, which the status-capture idiom assumes', () => {
+    // Gate 4's `cmd > out 2>err || PRINCIPLES_EXIT=$?` is the only form that works
+    // whether or not errexit is on, and its comment claims the hook it runs inside
+    // has `set -o pipefail` and NOT `set -e`. A claim about the shell options in
+    // force is a claim about behaviour: adding `set -e` tomorrow would make every
+    // `if ! cmd` / `cmd || rc=$?` branch in the hook behave differently, and no
+    // other test here would notice. Comment lines are dropped first -- the modules
+    // discuss `set -e` at length, and matching that prose is a false positive.
+    const code = readHook()
+      .split('\n')
+      .filter((line) => !/^\s*#/.test(line))
+      .join('\n');
+    expect(code).toContain('set -o pipefail');
+    expect(ERREXIT_OPTION.test(code)).toBe(false);
+  });
+
+  it('AC-454-08: every Gate 4 copy captures the checker status on the invoking line', () => {
+    for (const rel of GATE_4_COPIES) {
+      const src = readFileSync(join(REPO_ROOT, rel), 'utf8');
+      const code = src
+        .split('\n')
+        .filter((line) => !/^\s*#/.test(line))
+        .join('\n');
+      expect(code, `${rel} must capture the exit status inline`).toContain('|| PRINCIPLES_EXIT=$?');
+      // The form the comment forbids: a bare call whose status is read afterwards.
+      // Separated, the assignment observes the PREVIOUS command under `set -e`.
+      expect(code, `${rel} reads $? on a line of its own`).not.toMatch(/^\s*PRINCIPLES_EXIT=\$\?$/m);
+    }
+  });
+
+  it('AC-454-08 anti-vacuity: the two capture forms genuinely differ under errexit', () => {
+    // Without this, both assertions above could be satisfied by a convention that
+    // describes nothing. Run the two forms under `set -e` and show that only the
+    // inline one ever records the status.
+    const runForm = (body: string): string => {
+      try {
+        return execFileSync(bashPath(), ['-c', `set -e\n${body}`], {
+          encoding: 'utf8',
+        }).trim();
+      } catch (err) {
+        const failure = err as { stdout?: string };
+        return String(failure.stdout ?? '').trim();
+      }
+    };
+    expect(runForm('rc=0\nfalse || rc=$?\necho "rc=$rc"')).toBe('rc=1');
+    expect(runForm('rc=0\nfalse\nrc=$?\necho "rc=$rc"')).not.toContain('rc=');
   });
 });
 
