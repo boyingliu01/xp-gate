@@ -3,7 +3,7 @@
  * @intent Gate 5 must distinguish a real test failure from a vitest *runner
  *         infrastructure* error (EPERM on the temp/ssr module cache), so the
  *         guard cannot silently regress to a blanket "Tests FAILED" message.
- * @covers AC-454-01, AC-454-02, AC-454-03, AC-454-04, AC-454-06
+ * @covers AC-454-01, AC-454-02, AC-454-03, AC-454-04, AC-454-06, AC-473-02
  *
  * Background: on Windows vitest 1.6.x can exit non-zero while reporting zero
  * failed tests. `is_runner_infrastructure_error` already existed, but only ONE
@@ -33,6 +33,7 @@ import { afterAll, describe, expect, it } from 'vitest';
 
 const REPO_ROOT = process.cwd();
 const HOOK = join(REPO_ROOT, 'githooks', 'pre-commit');
+const LIB = join(REPO_ROOT, 'githooks', 'lib', 'test-failure.sh');
 
 /** Git Bash ships with Git for Windows; `bash` on PATH resolves to the WSL launcher. */
 function bashPath(): string {
@@ -234,9 +235,22 @@ function readHook(): string {
   }
 }
 
+/** Gate 5's judgement library, which the hook sources at startup (#473). */
+function readLib(): string {
+  try {
+    return readFileSync(LIB, 'utf8');
+  } catch (err) {
+    throw new Error(`Cannot read the Gate 5 library under test at ${LIB}: ${String(err)}`);
+  }
+}
+
 describe('Gate 5 distinguishes runner infrastructure errors from real failures (#454)', () => {
-  it('AC-454-01: the guard helper is defined in the hook', () => {
-    expect(readHook()).toContain('is_runner_infrastructure_error()');
+  it('AC-454-01: the guard helper is defined in the library the hook sources', () => {
+    // #473 moved the judgement into githooks/lib/test-failure.sh so it can be
+    // unit-tested without executing the hook. The hook must still load that library;
+    // a hook that ships without lib/ beside it fails closed on every commit.
+    expect(readLib()).toContain('is_runner_infrastructure_error()');
+    expect(readHook()).toContain('source "${AUDIT_SCRIPT_DIR}/lib/test-failure.sh"');
   });
 
   it('AC-454-01: the guard is consulted at every vitest Gate 5 block site', () => {
@@ -247,8 +261,8 @@ describe('Gate 5 distinguishes runner infrastructure errors from real failures (
     const hook = readHook();
     const callSites = (hook.match(/handle_test_failure "\$TESTS_OUTPUT"/g) ?? []).length;
     expect(callSites).toBeGreaterThanOrEqual(MIN_GUARDED_BRANCHES);
-    // And the discriminator must still be what the helper delegates to.
-    expect(hook).toContain('if is_runner_infrastructure_error "$_out"');
+    // And the discriminator must still be what the handler delegates to.
+    expect(readLib()).toContain('if is_runner_infrastructure_error "$_out"');
   });
 
   it('AC-454-01: no vitest branch hand-rolls its own BLOCKED message', () => {
@@ -304,6 +318,22 @@ describe('Gate 5 distinguishes runner infrastructure errors from real failures (
     assertStubRan(callsFile, 'AC-454-04');
     expect(stdout).toContain('Tests FAILED');
     expect(stdout).not.toContain('SKIPPED - vitest runner infrastructure error');
+  });
+
+  it('AC-473-02: a threshold-only subset run is excused by the real hook, not blocked', () => {
+    // #473: Gate 5 runs only the changed test files, whose coverage can never reach
+    // the global threshold, so vitest exits 1 having failed nothing. The fixture
+    // stages every file, which is exactly the partial-run condition.
+    const out = [
+      ' Test Files  1 passed (1)',
+      '      Tests  1 passed (1)',
+      '% Coverage for lines (42.31%)',
+      'ERROR: Coverage for lines (42.31%) does not meet global threshold (80%)',
+    ].join('\n');
+    const { stdout, callsFile } = runHookWithVitestOutput(out, 1);
+    assertStubRan(callsFile, 'AC-473-02');
+    expect(stdout).toContain('SKIPPED - coverage threshold judgement');
+    expect(stdout).not.toContain('BLOCKED - Tests FAILED');
   });
 
   it('AC-454-05: a fully passing run PASSES (regression)', () => {
