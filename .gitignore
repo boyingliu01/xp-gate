@@ -28,12 +28,10 @@ __pycache__/
 # Init-generated module mirrors (principles, mutation, mock-policy)
 .xp-gate/modules/
 
-# Verification-time scratch scripts (adversarial probes, walkthrough drivers).
-# These assert machine-specific behaviour and must never be committed; naming them
-# with a dot prefix keeps `git add -A` from sweeping them in.
-.cw-*
-.adv-*
-.mw-e2e*
+# Verification-time scratch (walkthrough drivers, adversarial probes, review
+# round dumps) lives in one directory. Filename-prefix rules were tried first
+# and rejected: `.cw-*` also swallows a legitimately committed file that happens
+# to start with that prefix, and the other two prefixes matched nothing.
 .agent-tmp/
 
 # Init-generated adapter copies and per-project configs
@@ -175,8 +173,6 @@ coverage.xml
 
 # Hook backup snapshots written by the rescue path (transient, never committed)
 .rescue/
-# Delphi review scratch space (contains 0-byte debris that trips Gate 12)
-.delphi-r2/
 
 .cm.txt
 tsconfig.tsbuildinfo
