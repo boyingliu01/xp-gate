@@ -911,72 +911,16 @@ else
     echo "   ── Checking $CURRENT_LANG ──"
     case "$CURRENT_LANG" in
       typescript)
-  # TypeScript: static analysis (tsc) + linting (eslint)
-  if ! command -v npx &> /dev/null; then
-    echo "ℹ️  npx not available — skipping TypeScript checks"
-    echo "⏭️  SKIPPED - Code quality (npx not available)"
-  else
-    # Verify tsc is real TypeScript compiler (npx may fetch deprecated tsc@2.0.4 placeholder)
-    TSC_OUTPUT=$(npx tsc --version 2>&1)
-    if echo "$TSC_OUTPUT" | grep -q "Version"; then
-      # Only run tsc if tsconfig.json exists (without it tsc prints help and exits non-zero)
-      if [ -f "tsconfig.json" ]; then
-        # Run TypeScript type checking
-        echo "Running TypeScript static analysis ($TSC_OUTPUT)..."
-        npx tsc --noEmit --skipLibCheck 2>&1 | head -30
-        TSC_EXIT=$?
-        if [ "$TSC_EXIT" -ne 0 ]; then
-          echo ""
-          echo "❌ BLOCKED - TYPE ERRORS detected"
-          echo "Fix the type errors above before committing."
-          exit 1
-        fi
-        echo "✅ PASSED - TypeScript static analysis."
-        
-        # Also check test files if they exist (Issue #293)
-        # Many projects exclude __tests__/ from tsconfig.json, so test file type
-        # errors silently accumulate.
-        if [ -d "src/__tests__" ] || [ -d "src/tests" ] || [ -d "tests" ] || [ -d "__tests__" ]; then
-          HAS_TESTS_IN_TSC=false
-          if npx tsc --noEmit --skipLibCheck --listFiles 2>/dev/null | grep -qE '__tests__/|\.test\.ts|\.spec\.ts'; then
-            HAS_TESTS_IN_TSC=true
-          fi
-          if [ "$HAS_TESTS_IN_TSC" = false ]; then
-            TSC_TEST_EXIT=0
-            if [ -f "tsconfig.tests.json" ]; then
-              echo "Checking test files with tsconfig.tests.json..."
-              npx tsc --noEmit --project tsconfig.tests.json 2>&1 | head -30
-              TSC_TEST_EXIT=$?
-            else
-              echo "Checking test files for type errors..."
-              TEMP_TSCONFIG=".tsconfig.withtests.json"
-              node -e "
-                const cfg = JSON.parse(require('fs').readFileSync('tsconfig.json','utf8'));
-                delete cfg.exclude;
-                cfg.include = cfg.include || ['src/**/*'];
-                cfg.include.push('src/**/__tests__/**','src/**/*.test.ts','src/**/*.spec.ts');
-                require('fs').writeFileSync('$TEMP_TSCONFIG', JSON.stringify(cfg, null, 2));
-              " 2>/dev/null
-              npx tsc --noEmit --project "$TEMP_TSCONFIG" --skipLibCheck 2>&1 | head -30
-              TSC_TEST_EXIT=$?
-              rm -f "$TEMP_TSCONFIG"
-            fi
-            if [ $TSC_TEST_EXIT -ne 0 ]; then
-              echo ""
-              echo "❌ BLOCKED - TYPE ERRORS in test files"
-              echo "Your project's tsconfig.json excludes test files from type checking."
-              echo "Add a tsconfig.tests.json to customise test file checking."
-              exit 1
-            fi
-          fi
-        fi
-      else
-        echo "ℹ️  SKIP - tsconfig.json not found (no TypeScript project config)"
-      fi
-    else
-      echo "ℹ️  SKIP - tsc not properly installed ($TSC_OUTPUT)"
-      echo "Install typescript (npm install typescript --save-dev) for type checking."
-    fi
+  # TypeScript: static analysis + linting (eslint). The type-check decision lives
+  # in githooks/lib/typecheck.sh so a project's own checker (vue-tsc, svelte-check,
+  # a `typecheck` script) is used instead of a hardcoded tsc that cannot resolve
+  # single-file components (#436).
+  source "${AUDIT_SCRIPT_DIR}/lib/typecheck.sh"
+  run_typescript_typecheck
+  TS_CHECK_EXIT=$?
+  if [ "$TS_CHECK_EXIT" -eq 1 ]; then
+    exit 1
+  fi
     
     # Run ESLint linting if config exists
     if [ -f ".eslintrc.json" ] || [ -f ".eslintrc.js" ] || [ -f ".eslintrc.cjs" ] || [ -f "eslint.config.js" ]; then
@@ -1094,7 +1038,6 @@ else
         exit 1
       fi
     fi
-  fi
     ;;
     
     python)
