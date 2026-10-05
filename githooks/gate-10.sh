@@ -95,9 +95,17 @@ console.log('  ['+severity+'] '+ruleId);console.log('  '+path+':'+line+' → '+m
         GATE_10_STATUS="PASS"
       fi
     else
-      # semgrep runtime error (timeout, config error, etc.)
+      # semgrep runtime error (timeout, config error, network/ruleset fetch
+      # failure, unusable paths, etc.) — exit code 2 is an OPERATIONAL error,
+      # not a security verdict, so the gate still SKIPs. But the real cause
+      # must not be swallowed: show the captured output tail so an intermittent
+      # failure is actionable instead of a mystery (#475).
       echo "     ⚠️  semgrep exited with code ${SEMGREP_EXIT} — skipping gate"
-      echo "     ⏭️  SKIPPED - SAST (semgrep runtime error)"
+      if [ -n "$SEMGREP_OUTPUT" ]; then
+        echo "     semgrep said:"
+        echo "$SEMGREP_OUTPUT" | tail -8 | sed 's/^/       /'
+      fi
+      echo "     ⏭️  SKIPPED - SAST (semgrep runtime error, see above)"
       GATE_10_STATUS="SKIP"
     fi
   fi
