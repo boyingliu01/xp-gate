@@ -71,10 +71,10 @@ run_gate() {
       done
       if [ -n "$_missing" ]; then
         printf 'Analysis failed: Could not read file:%s\n' "$_missing" >&2
-        printf '{"violations":[],"summary":{}}' > /tmp/principles-output.json
+        printf '{"violations":[],"summary":{}}' > "${PRINCIPLES_JSON:?gate set no output path}"
         return 2
       fi
-      printf '{"violations":[],"summary":{"totalViolations":0,"errorCount":0,"warningCount":0}}' > /tmp/principles-output.json
+      printf '{"violations":[],"summary":{"totalViolations":0,"errorCount":0,"warningCount":0}}' > "${PRINCIPLES_JSON:?gate set no output path}"
       return 0
     }
     # shellcheck disable=SC1091
@@ -112,7 +112,7 @@ run_gate() {
     WARNING_COUNT=0
     run_tsx() {
       pwd > "$TEST_DIR/checker-cwd"
-      printf '{"violations":[],"summary":{"totalViolations":0,"errorCount":0,"warningCount":0}}' > /tmp/principles-output.json
+      printf '{"violations":[],"summary":{"totalViolations":0,"errorCount":0,"warningCount":0}}' > "${PRINCIPLES_JSON:?gate set no output path}"
       return 0
     }
     # shellcheck disable=SC1091

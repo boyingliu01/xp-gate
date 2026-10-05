@@ -26,7 +26,9 @@ run_gate_with_exit() {
     PRINCIPLES_FILES="src/test.ts"
     PRINCIPLES_DIR="src/principles"
     run_tsx() {
-      printf '%s' "$payload" > /tmp/principles-output.json
+      # The gate chooses the report path per invocation (mktemp) and exports it, so a
+      # fixture that writes anywhere else proves nothing -- `:?` fails loudly instead.
+      printf '%s' "$payload" > "${PRINCIPLES_JSON:?gate set no output path}"
       return "$exit_status"
     }
     # shellcheck disable=SC1091

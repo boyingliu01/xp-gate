@@ -62,18 +62,27 @@ else
         # expands to nothing when the array is empty, which `set -u` requires on older
         # bash versions (macOS ships 3.2, where a bare `"${arr[@]}"` is an unbound error).
         # The trailing `|| PRINCIPLES_EXIT=$?` captures the exit status without
-        # letting a non-zero return abort the hook under `set -e`. Do not simplify
-        # this to a bare call followed by `PRINCIPLES_EXIT=$?`: under `set -e` the
-        # script never reaches the assignment, and `|| true` would overwrite the
-        # status with 0 -- which is exactly the distinction this gate depends on.
+        # letting a non-zero return abort the hook under `set -e`. pre-commit itself
+        # runs with only `set -o pipefail` (no `set -e`, pinned by
+        # scripts/__tests__/gate-5-runner-error.test.ts AC-454-08), but this module is
+        # also sourced by consumer hooks that may set it, and a bare call followed by
+        # `PRINCIPLES_EXIT=$?` never reaches the assignment under `set -e`. `|| true`
+        # would erase the status -- which is exactly the distinction this gate depends
+        # on.
         PRINCIPLES_EXIT=0
         # Keep stderr: it carries the checker's configuration warnings -- a rejected
         # threshold or an out-of-vocabulary severity says so here and nowhere else.
         # Sending it to /dev/null made an exit-2 SKIP undiagnosable and hid every
         # .principlesrc typo (Delphi walkthrough MC-03). Captured to a file so a clean
         # run stays quiet, then replayed only when the checker had a problem.
+        #
+        # Per-invocation mktemp, not a shared `/tmp/principles-output.json`: two commits
+        # racing on one machine overwrote each other's report before it was counted, so
+        # a run with ERROR findings could read a clean report and PASS (#457).
         PRINCIPLES_STDERR=$(mktemp)
-        npx tsx "$PRINCIPLES_DIR/index.ts" --files ${PRINCIPLES_ARGS[@]+"${PRINCIPLES_ARGS[@]}"} --format json ${PRINCIPLES_CONFIG[@]+"${PRINCIPLES_CONFIG[@]}"} > /tmp/principles-output.json 2>"$PRINCIPLES_STDERR" || PRINCIPLES_EXIT=$?
+        PRINCIPLES_JSON=$(mktemp)
+        export PRINCIPLES_JSON
+        npx tsx "$PRINCIPLES_DIR/index.ts" --files ${PRINCIPLES_ARGS[@]+"${PRINCIPLES_ARGS[@]}"} --format json ${PRINCIPLES_CONFIG[@]+"${PRINCIPLES_CONFIG[@]}"} > "$PRINCIPLES_JSON" 2>"$PRINCIPLES_STDERR" || PRINCIPLES_EXIT=$?
 
         if [ -s "$PRINCIPLES_STDERR" ]; then
           sed 's/^/     /' "$PRINCIPLES_STDERR"
@@ -89,14 +98,16 @@ else
           echo "⚠️  Warning: Principles checker execution failed"
           echo "⏭️  SKIPPED - Principles check (execution issue)"
           GATE_4_STATUS="SKIP"
+          rm -f "$PRINCIPLES_JSON"
         else
           # Check severity levels. The reporter emits JSON.stringify(out, null, 2),
           # i.e. `"severity": "warning"` WITH a space; tolerate any whitespace so a
           # future minified format cannot silently zero these counts again (#444).
-          ERROR_COUNT=$(grep -cE '"severity"[[:space:]]*:[[:space:]]*"error"' /tmp/principles-output.json 2>/dev/null || true)
+          ERROR_COUNT=$(grep -cE '"severity"[[:space:]]*:[[:space:]]*"error"' "$PRINCIPLES_JSON" 2>/dev/null || true)
           ERROR_COUNT=${ERROR_COUNT:-0}
-          WARNING_COUNT=$(grep -cE '"severity"[[:space:]]*:[[:space:]]*"warning"' /tmp/principles-output.json 2>/dev/null || true)
+          WARNING_COUNT=$(grep -cE '"severity"[[:space:]]*:[[:space:]]*"warning"' "$PRINCIPLES_JSON" 2>/dev/null || true)
           WARNING_COUNT=${WARNING_COUNT:-0}
+          rm -f "$PRINCIPLES_JSON"
           
           if [ "$ERROR_COUNT" -gt 0 ]; then
             echo ""
