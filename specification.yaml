@@ -174,7 +174,7 @@ specification:
           test_type: unit
         - id: AC-457-14
           criteria: 调用方显式传入的 --config 路径不存在时必须失败（加载抛错、CLI 退出码 2），
-            不得回退内置默认值——声明了配置却找不到文件属于配置错误，静默沿用默认值正是 #457 要消除的 fail-open；
+            不得回退内置默认值——声明了配置却找不到文件属于配置错误，静默沿用默认值正是「#457」要消除的 fail-open；
             未显式传入时「项目没有 .principlesrc」仍按正常状态回退默认值
           test_type: integration
         - id: AC-457-15
@@ -185,6 +185,22 @@ specification:
           criteria: getEffectiveConfigFor(ruleId) 返回当前生效配置中该规则的条目（与 check() 读到的同一对象），
             未知 ID 或非 group.name 形式必须报错而非回退默认值；
             Rule.threshold / Rule.severity 的过期快照不再是消费方可读取的生效来源
+          test_type: unit
+        - id: AC-457-17
+          criteria: 检查器报告不得写入固定的共享路径——Gate 4 各副本必须用每次调用独立的临时文件，
+            且不得存在任何写向 /tmp/principles-output.json 之类的固定路径
+          test_type: integration
+        - id: AC-457-18
+          criteria: 同机两次 Gate 4 运行互不遮蔽：一次零违规运行不得让另一次带 error 级违规的运行变成 PASS
+          test_type: integration
+        - id: AC-457-19
+          criteria: Delphi runner 在发送前按 UTF-8 字节度量 system+user 提示并拒绝超限请求
+            （默认 40000 字节，席位可用 max_prompt_bytes 覆盖；非法覆盖值回退默认而不是关闭守卫）
+          test_type: unit
+        - id: AC-457-20
+          criteria: 超限拒绝必须可执行——报错点明如何缩小范围或提高该席位预算，
+            并在 stdout 以 error_type=prompt_budget_exceeded 告知编排方「未发出请求」，
+            与「模型答错」区分；不得让席位以 "Network error." 形态崩溃
           test_type: unit
 
     - id: REQ-452
@@ -207,6 +223,11 @@ specification:
           criteria: git 调用必须带超时上限；git 不可用时保留全部条目并显式报告原因，
             不得静默伪装成「无过期条目」
           test_type: unit
+        - id: AC-452-15
+          criteria: .warnings-baseline.json 中每条额度都必须对应该文件当前真实存在的告警数——
+            已清零的文件不得留下幽灵额度（幽灵额度等于日后偷偷加回同量告警的许可），
+            条目计数也不得高于当前实测值
+          test_type: unit
 
     - id: REQ-454
       description: Gate 5 必须区分 vitest runner 基础设施错误与真实测试失败 —— 同一判定逻辑覆盖全部 vitest 调用点
@@ -223,6 +244,22 @@ specification:
           test_type: unit
         - id: AC-454-04
           criteria: 非 vitest 的通用兜底分支保持不加守卫（其输出格式无保证）
+          test_type: unit
+        - id: AC-454-05
+          criteria: 全量通过的测试运行判为 PASS（守卫接入不得改变正常路径）
+          test_type: integration
+        - id: AC-454-06
+          criteria: 通用 run_tests 兜底分支不得调用 handle_test_failure，
+            其手写的 BLOCKED 只允许出现在该兜底路径里
+          test_type: unit
+        - id: AC-454-07
+          criteria: runner-error 判别模式所依赖的 vitest 大版本必须写进声明处并被测试钉住：
+            package.json 里 vitest 的声明一旦离开既定大版本，测试立刻失败并说明要重新核对哪些输出形态
+          test_type: unit
+        - id: AC-454-08
+          criteria: pre-commit 只启用 set -o pipefail、不启用 errexit（Gate 4 的状态捕获习语以此为前提），
+            Gate 4 各副本必须以 `|| PRINCIPLES_EXIT=$?` 内联取状态；
+            并含一个真跑 `set -e` 证明两种写法分化的反空洞用例
           test_type: unit
 
     - id: REQ-423
@@ -250,6 +287,31 @@ specification:
         - id: AC-423-07
           criteria: 瞬态走查证据 .code-walkthrough-result.json 不被仓库跟踪（.gitignore 规则已存在，跟踪状态才是漏洞）
           test_type: unit
+        - id: AC-423-08
+          criteria: requested_model 与 resolved_model 的查重大小写敏感性刻意不对称——前者按 AGENTS.md 的
+            「distinct trimmed requested model IDs」只做 trim、区分大小写，后者 trim 后转小写；
+            测试须把这一不对称钉住，而不是把两边统一
+          test_type: unit
+
+    - id: REQ-473
+      description: Gate 5 子集运行不得假阻断，且抽取出的 hook 库必须被安装器完整落地 —— 部分运行的覆盖率阈值缺口只豁免阈值本身，真实断言失败仍然阻断
+      priority: critical
+      acceptance_criteria:
+        - id: AC-473-01
+          criteria: 子集 vitest 运行只报覆盖率阈值不达标时，Gate 5 判定为豁免并继续走下游 PARTIAL_TEST_RUN 的降级告警；
+            同一分支遇到真实断言失败仍必须 BLOCK，且豁免路径不得置 TESTS_SKIPPED（覆盖率门禁保持有效）
+          test_type: integration
+        - id: AC-473-02
+          criteria: 阈值豁免的判定逻辑位于 githooks/lib/test-failure.sh，并由一个真跑 pre-commit 的用例证明端到端接线，
+            而不只是可单测
+          test_type: integration
+        - id: AC-473-03
+          criteria: install.sh 把 githooks/lib 下每个 .sh 逐字节安装到 .git/hooks/lib，缺文件或内容不一致即失败
+          test_type: integration
+        - id: AC-473-04
+          criteria: 已安装的 hook 库不得 source lib/ 之外的路径（../、/scripts/、/src/），
+            否则换台机器就找不到文件；同目录兄弟引用不算违规（反空洞用例分别证伪与证实）
+          test_type: integration
   design_decisions:
     - id: DD-001
       decision: 走薄桥（方案 A）在 ctx.tools 注册三工具，而非独立 MCP server 或纯技能
