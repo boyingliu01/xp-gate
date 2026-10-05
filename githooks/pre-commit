@@ -911,20 +911,77 @@ else
   if [ "$TS_PROJECT_DIR" != "." ]; then
     echo "   TypeScript project directory: $TS_PROJECT_DIR/"
   fi
+  # Issue #436: prefer the project's OWN typecheck script over a bare tsc run.
+  # Projects whose type checking needs a wrapper (Vue SFC -> vue-tsc, etc.) get
+  # false TS2307 module-resolution errors from plain tsc, while `npx tsc` from
+  # a root without a local TypeScript may fetch a random compiler from the
+  # network. If the project declares one of the recognised typecheck scripts,
+  # that command IS the project's type check and runs INSTEAD of the tsc pass
+  # (it is the project-authoritative check, so the tsc-based test-file
+  # supplement below does not apply to it). Type errors still BLOCK on every
+  # path. Recognised scripts: typecheck, check-types, type-check, check:types,
+  # tsc (first match wins).
+  TYPECHECK_SCRIPT=""
+  if [ -f "$TS_PROJECT_DIR/package.json" ] && command -v node &> /dev/null; then
+    TYPECHECK_SCRIPT=$(node -e "
+      try {
+        const p = JSON.parse(require('fs').readFileSync('$TS_PROJECT_DIR/package.json', 'utf8'));
+        const s = p.scripts || {};
+        for (const n of ['typecheck', 'check-types', 'type-check', 'check:types', 'tsc']) {
+          if (s[n]) { console.log(n); process.exit(0); }
+        }
+      } catch (e) {}
+      process.exit(0);
+    " 2>/dev/null) || true
+  fi
+  TYPECHECK_DONE=false
+  if [ -n "$TYPECHECK_SCRIPT" ] && command -v npm &> /dev/null; then
+    echo "Running project typecheck (npm run $TYPECHECK_SCRIPT)..."
+    (cd "$TS_PROJECT_DIR" && npm run --silent "$TYPECHECK_SCRIPT") 2>&1 | head -30
+    TYPECHECK_EXIT=$?
+    if [ "$TYPECHECK_EXIT" -ne 0 ]; then
+      echo ""
+      echo "❌ BLOCKED - TYPE ERRORS detected"
+      echo "Fix the type errors above before committing."
+      exit 1
+    fi
+    echo "✅ PASSED - TypeScript static analysis."
+    TYPECHECK_DONE=true
+  fi
   if ! command -v npx &> /dev/null; then
     echo "ℹ️  npx not available — skipping TypeScript checks"
     echo "⏭️  SKIPPED - Code quality (npx not available)"
   else
-    # Verify tsc is real TypeScript compiler (npx may fetch deprecated tsc@2.0.4 placeholder)
-    TSC_OUTPUT=$(npx tsc --version 2>&1)
-    if echo "$TSC_OUTPUT" | grep -q "Version"; then
+    # Issue #436: resolve the tsc binary for the fallback pass. Prefer the
+    # project's LOCAL TypeScript ($TS_PROJECT_DIR/node_modules/.bin/tsc, then a
+    # hoisted ./node_modules/.bin/tsc) — a bare `npx tsc` may fetch a random
+    # TypeScript from the network when none is installed locally. `npx tsc` is
+    # kept only as a last resort when no local compiler exists.
+    TSC_CMD="npx tsc"
+    TSC_OUTPUT=""
+    if [ "$TYPECHECK_DONE" = false ]; then
+      for _tsc_cand in "$TS_PROJECT_DIR/node_modules/.bin/tsc" "./node_modules/.bin/tsc"; do
+        if [ -f "$_tsc_cand" ]; then
+          TSC_CMD="$_tsc_cand"
+          break
+        fi
+      done
+      # Verify tsc is real TypeScript compiler (npx may fetch deprecated tsc@2.0.4 placeholder)
+      TSC_OUTPUT=$($TSC_CMD --version 2>&1)
+    fi
+    if [ "$TYPECHECK_DONE" = true ]; then
+      # The project's own typecheck already ran and passed (#436); a plain tsc
+      # pass would only re-report wrapper-specific false errors (e.g. *.vue
+      # TS2307 in Vue projects).
+      :
+    elif echo "$TSC_OUTPUT" | grep -q "Version"; then
       # Only run tsc if tsconfig.json exists (without it tsc prints help and exits non-zero)
       if [ -f "$TS_PROJECT_DIR/tsconfig.json" ]; then
         # Run TypeScript type checking (--project so the config is found even
         # when the TS project lives in a subdirectory; identical to auto
         # discovery when TS_PROJECT_DIR is ".")
         echo "Running TypeScript static analysis ($TSC_OUTPUT)..."
-        npx tsc --noEmit --skipLibCheck --project "$TS_PROJECT_DIR/tsconfig.json" 2>&1 | head -30
+        $TSC_CMD --noEmit --skipLibCheck --project "$TS_PROJECT_DIR/tsconfig.json" 2>&1 | head -30
         TSC_EXIT=$?
         if [ "$TSC_EXIT" -ne 0 ]; then
           echo ""
@@ -939,14 +996,14 @@ else
         # errors silently accumulate.
         if [ -d "$TS_PROJECT_DIR/src/__tests__" ] || [ -d "$TS_PROJECT_DIR/src/tests" ] || [ -d "$TS_PROJECT_DIR/tests" ] || [ -d "$TS_PROJECT_DIR/__tests__" ]; then
           HAS_TESTS_IN_TSC=false
-          if npx tsc --noEmit --skipLibCheck --project "$TS_PROJECT_DIR/tsconfig.json" --listFiles 2>/dev/null | grep -qE '__tests__/|\.test\.ts|\.spec\.ts'; then
+          if $TSC_CMD --noEmit --skipLibCheck --project "$TS_PROJECT_DIR/tsconfig.json" --listFiles 2>/dev/null | grep -qE '__tests__/|\.test\.ts|\.spec\.ts'; then
             HAS_TESTS_IN_TSC=true
           fi
           if [ "$HAS_TESTS_IN_TSC" = false ]; then
             TSC_TEST_EXIT=0
             if [ -f "$TS_PROJECT_DIR/tsconfig.tests.json" ]; then
               echo "Checking test files with tsconfig.tests.json..."
-              npx tsc --noEmit --project "$TS_PROJECT_DIR/tsconfig.tests.json" 2>&1 | head -30
+              $TSC_CMD --noEmit --project "$TS_PROJECT_DIR/tsconfig.tests.json" 2>&1 | head -30
               TSC_TEST_EXIT=$?
             else
               echo "Checking test files for type errors..."
@@ -960,7 +1017,7 @@ else
                 cfg.include.push('src/**/__tests__/**','src/**/*.test.ts','src/**/*.spec.ts');
                 require('fs').writeFileSync('$TEMP_TSCONFIG', JSON.stringify(cfg, null, 2));
               " 2>/dev/null
-              npx tsc --noEmit --project "$TEMP_TSCONFIG" --skipLibCheck 2>&1 | head -30
+              $TSC_CMD --noEmit --project "$TEMP_TSCONFIG" --skipLibCheck 2>&1 | head -30
               TSC_TEST_EXIT=$?
               rm -f "$TEMP_TSCONFIG"
             fi
