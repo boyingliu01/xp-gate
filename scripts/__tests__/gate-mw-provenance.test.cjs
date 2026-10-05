@@ -4,7 +4,7 @@
  *         Nothing tied a record to a real model call, so three copies of one
  *         object -- or three experts all resolving to the same model -- passed.
  *         `channel` makes the provenance explicit and is now REQUIRED.
- * @covers AC-423-01, AC-423-02, AC-423-03, AC-423-04, AC-423-05, AC-423-06
+ * @covers AC-423-01, AC-423-02, AC-423-03, AC-423-04, AC-423-05, AC-423-06, AC-423-08
  *
  * DESIGN NOTE (why a missing `channel` must FAIL rather than default to local):
  * treating an absent field as `local` would be a zero-cost bypass -- omitting
@@ -229,5 +229,36 @@ describe('#423 Gate MW requires explicit provenance', () => {
 
     expect(result.exitCode).toBe(1);
     expect(result.output).toMatch(/channel/);
+  });
+
+  it('AC-423-08: requested_model is deduped case-SENSITIVELY while resolved_model is not', () => {
+    // The asymmetry is deliberate and this test is what makes it a contract rather
+    // than a typo two fields disagree on:
+    //   - `requested_model` is the identifier the gateway was ASKED for. AGENTS.md
+    //     requires "three distinct trimmed requested model IDs", and model IDs are
+    //     case-sensitive strings at the gateway, so `g-GLM-x` and `g-glm-x` are two
+    //     different requests and must not be collapsed.
+    //   - `resolved_model` is the answer to "did these actually run on the same
+    //     model?" Some gateways report the same model with different casing per
+    //     call, so the comparison folds case -- otherwise one model wearing two
+    //     casings would satisfy the three-model policy (#423 is exactly that bug).
+    // Trimming is common to both: whitespace is not part of either identity.
+    const experts = threeExperts();
+    experts[1].requested_model = experts[0].requested_model.toUpperCase();
+    expect(experts[1].requested_model).not.toBe(experts[0].requested_model);
+    expect(experts[1].resolved_model).not.toBe(experts[0].resolved_model);
+
+    const result = runValidator(evidence(experts));
+
+    expect(result.exitCode).toBe(0);
+
+    // And the same shape on the resolved side is still a duplicate.
+    const folded = threeExperts();
+    folded[1].resolved_model = folded[0].resolved_model.toUpperCase();
+
+    const rejected = runValidator(evidence(folded));
+
+    expect(rejected.exitCode).toBe(1);
+    expect(rejected.output).toMatch(/resolved_model/);
   });
 });

@@ -9,6 +9,14 @@
 # tests, because its temp/ssr module cache hits EPERM (#454). Treating that as
 # "Tests FAILED" sends developers chasing a bug that does not exist.
 #
+# The two patterns below are vitest's DEFAULT-REPORTER shape for the assumed major
+# (declared as `vitest: ^1.6.1` in package.json). They are not universal: a reporter
+# change or a vitest 2 upgrade could stop emitting "Unhandled Error", and the
+# detection would silently revert to false BLOCKs. That assumption is therefore
+# asserted, not assumed -- scripts/__tests__/gate-5-runner-error.test.ts
+# (AC-454-07) fails the moment the declared version leaves the pinned range, which
+# is the signal to re-verify these patterns against the new output shape.
+#
 # Returns 0 (true) only when both hold:
 #   - the output mentions "Unhandled Error" (vitest's runner-level failure), AND
 #   - no real test failure marker is present.
