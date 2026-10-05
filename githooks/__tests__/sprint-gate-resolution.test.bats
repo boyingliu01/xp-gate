@@ -22,15 +22,19 @@ check_resolution_chain() {
   local hook="$1"
   [ -f "$hook" ]
 
+  # One flat candidate list, resolved by the shared library (#476). The four
+  # directories below are the contract; the hand-written if/elif chain they used to be
+  # written as could not be unit-tested and omitted the canonical global hooks dir.
+  run grep -F 'resolve_sprint_gate_script' "$hook"
+  [ "$status" -eq 0 ]
   # tier 1: adapters / gate directory
-  run grep -F 'SPRINT_GATE_SCRIPT="$GATE_DIR/sprint-gate.sh"' "$hook"
-  [ "$status" -eq 0 ]
+  grep -qF '"$GATE_DIR"' "$hook" || return 1
   # tier 2: project-local githooks/
-  run grep -F 'githooks/sprint-gate.sh' "$hook"
-  [ "$status" -eq 0 ]
+  grep -qF '/githooks"' "$hook" || return 1
   # tier 3: alongside the hook itself (global installs)
-  run grep -F 'SPRINT_GATE_SCRIPT="$SCRIPT_DIR/sprint-gate.sh"' "$hook"
-  [ "$status" -eq 0 ]
+  grep -qF '"$SCRIPT_DIR"' "$hook" || return 1
+  # tier 4: the canonical global hooks directory that update-hooks writes to
+  grep -qF '"$HOME/.config/xp-gate/hooks"' "$hook" || return 1
 }
 
 @test "Gate 11: githooks/pre-commit resolves sprint-gate.sh via all 3 tiers" {

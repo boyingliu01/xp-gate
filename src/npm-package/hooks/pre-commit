@@ -221,6 +221,9 @@ source "${AUDIT_SCRIPT_DIR}/lib/test-failure.sh"
 # Issue #477: Gate 2's jscpd config probe and outcome classification, same reason.
 source "${AUDIT_SCRIPT_DIR}/lib/jscpd-run.sh"
 
+# Issue #476: Gate 11's sprint-gate.sh resolution chain and decision translation.
+source "${AUDIT_SCRIPT_DIR}/lib/sprint-gate-report.sh"
+
 # Read max_duration_ms from .xp-gate-config.json (default 7200000 = 2 hours)
 _MAX_DURATION_MS=$(node -e "try{const c=JSON.parse(require('fs').readFileSync('${PROJECT_ROOT_FOR_AUDIT}/.xp-gate-config.json','utf8'));console.log((c.audit&&c.audit.max_duration_ms)||7200000);}catch(e){console.log(7200000);}" 2>/dev/null || echo "7200000")
 
@@ -2632,34 +2635,65 @@ GATE_11_START=$(date +%s)
 GATE_11_STATUS="PASS"
 
 # BEGIN SPRINT_GATE_SCRIPT RESOLUTION
-# Tier order: GATE_DIR (gate scripts dir) -> repo-root githooks/ -> SCRIPT_DIR
-# (hooks dir; update-hooks installs sprint-gate.sh beside pre-commit/pre-push).
-SPRINT_GATE_SCRIPT=""
-if [ -f "$GATE_DIR/sprint-gate.sh" ]; then
-  SPRINT_GATE_SCRIPT="$GATE_DIR/sprint-gate.sh"
-elif [ -f "$(git rev-parse --show-toplevel 2>/dev/null)/githooks/sprint-gate.sh" ]; then
-  SPRINT_GATE_SCRIPT="$(git rev-parse --show-toplevel)/githooks/sprint-gate.sh"
-elif [ -f "$SCRIPT_DIR/sprint-gate.sh" ]; then
-  SPRINT_GATE_SCRIPT="$SCRIPT_DIR/sprint-gate.sh"
-fi
+# Every tier is a *directory*; the resolver returns the first one that actually holds
+# sprint-gate.sh. The chain used to stop at the gate-script directories, but the flat
+# global layout ($GATE_DIR -> ~/.config/xp-gate/adapters) carries gate-3/4/7/8/9/10.sh
+# and never this script: update-hooks installs sprint-gate.sh under
+# ~/.config/xp-gate/hooks, which nothing probed, so a correctly installed machine was
+# told the file was missing (#476).
+SPRINT_GATE_CANDIDATES=(
+  "$GATE_DIR"
+  "$(git rev-parse --show-toplevel 2>/dev/null)/githooks"
+  "$SCRIPT_DIR"
+  "$HOME/.config/xp-gate/hooks"
+)
+SPRINT_GATE_SCRIPT=$(resolve_sprint_gate_script ${SPRINT_GATE_CANDIDATES[@]+"${SPRINT_GATE_CANDIDATES[@]}"})
 # END SPRINT_GATE_SCRIPT RESOLUTION
 
+echo "→ Gate 11: Sprint Flow Enforcement..."
+
 if [ -n "$SPRINT_GATE_SCRIPT" ]; then
-  if ! bash "$SPRINT_GATE_SCRIPT" --pre-commit; then
+  # The decision JSON was piped straight to the terminal with no heading, so it landed
+  # under Gate 10's banner and a legitimate "skip: not a sprint project" looked like a
+  # bare machine object. The exit status stays the authority for blocking; the JSON only
+  # decides which words the user reads.
+  SPRINT_GATE_EXIT=0
+  SPRINT_GATE_OUTPUT=$(bash "$SPRINT_GATE_SCRIPT" --pre-commit 2>&1) || SPRINT_GATE_EXIT=$?
+  SPRINT_GATE_DECISION=$(sprint_gate_decision "$SPRINT_GATE_OUTPUT")
+  SPRINT_GATE_DETAIL=$(sprint_gate_detail "$SPRINT_GATE_OUTPUT")
+
+  if [ "$SPRINT_GATE_EXIT" -ne 0 ]; then
     GATE_11_STATUS="BLOCK"
-    echo "❌ BLOCKED - Gate 11: Sprint Flow Enforcement"
+    echo "❌ BLOCKED - Gate 11: Sprint Flow (${SPRINT_GATE_DETAIL:-sprint gate denied})"
+    printf '%s\n' "$SPRINT_GATE_OUTPUT" | sed 's/^/     /'
     record_gate_audit "gate-11" "sprint-flow" "$GATE_11_STATUS" "1" "$GATE_11_START"
     # Sprint gate failure is a hard block — exit immediately
     exit 1
   fi
+
+  case "$SPRINT_GATE_DECISION" in
+    skip)
+      echo "⏭️  SKIPPED - Gate 11: Sprint Flow (${SPRINT_GATE_DETAIL:-no reason given})"
+      GATE_11_STATUS="SKIP"
+      ;;
+    allow)
+      echo "✅ PASSED - Gate 11: Sprint Flow (${SPRINT_GATE_DETAIL:-sprint state validated})"
+      ;;
+    *)
+      # A run that succeeded but said nothing this gate understands. Pass on the exit
+      # status, but keep the raw output visible rather than inventing a verdict.
+      echo "✅ PASSED - Gate 11: Sprint Flow (no recognisable decision in the gate output)"
+      printf '%s\n' "$SPRINT_GATE_OUTPUT" | sed 's/^/     /'
+      ;;
+  esac
 else
-  echo "⏭️  SKIPPED - Gate 11: Sprint Flow (sprint-gate.sh not found)"
+  echo "⏭️  SKIPPED - Gate 11: Sprint Flow (sprint-gate.sh not found; searched: $(IFS=', '; printf '%s' "${SPRINT_GATE_CANDIDATES[*]}"))"
   GATE_11_STATUS="SKIP"
 fi
 
 GATE_11_END=$(date +%s)
 GATE_11_DURATION=$((GATE_11_END - GATE_11_START))
-echo "✅ Gate 11 completed in ${GATE_11_DURATION}s"
+echo "   Gate 11 ($GATE_11_STATUS) completed in ${GATE_11_DURATION}s"
 record_gate_audit "gate-11" "sprint-flow" "$GATE_11_STATUS" "0" "$GATE_11_START"
 echo ""
 # ============================================================================
