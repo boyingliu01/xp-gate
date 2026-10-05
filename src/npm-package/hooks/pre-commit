@@ -135,63 +135,9 @@ if ! declare -F run_tsx >/dev/null 2>&1; then
   }
 fi
 
-# Detect a vitest *runner infrastructure* failure as opposed to a real test
-# failure. On Windows, vitest 1.6.x can exit non-zero while reporting zero failed
-# tests, because its temp/ssr module cache hits EPERM (#454). Treating that as
-# "Tests FAILED" sends developers chasing a bug that does not exist.
-#
-# Returns 0 (true) only when both hold:
-#   - the output mentions "Unhandled Error" (vitest's runner-level failure), AND
-#   - no real test failure marker is present.
-is_runner_infrastructure_error() {
-  local _out="$1"
-  [ -n "$_out" ] || return 1
-  printf '%s' "$_out" | grep -qE 'Unhandled Error' || return 1
-  # A real failure must still block.
-  if printf '%s' "$_out" | grep -qE 'Tests +[0-9]+ failed|FAIL |AssertionError'; then
-    return 1
-  fi
-  return 0
-}
-
-# Judge a non-zero vitest exit and report the outcome (Issue #454).
-#
-# Before this helper existed, each Gate 5 branch carried its own
-# `echo "❌ BLOCKED - Tests FAILED"`, and only ONE of them consulted
-# is_runner_infrastructure_error. The others therefore reported a Windows
-# EPERM-on-temp-cache runner error as a genuine test failure, sending
-# developers hunting for a bug that did not exist. Routing every vitest branch
-# through one helper makes that class of drift structurally impossible.
-#
-# Usage: handle_test_failure <output> <site-context>
-#   $1 = captured test output (passed EXPLICITLY -- never read a global, so a
-#        branch that forgets to set one fails loudly instead of silently
-#        treating empty output as "no runner error")
-#   $2 = short context label used in the BLOCK message; may be empty
-# Returns 0 when the run should be treated as SKIPPED (runner infrastructure
-# error), 1 when it must BLOCK. Callers use `|| exit 1`.
-#
-# NOTE: only vitest branches may call this. The generic `run_tests` fallbacks
-# (non-TS adapters) are deliberately left unguarded: their output format is not
-# guaranteed to look like vitest's, so guarding them could let a real failure
-# through.
-handle_test_failure() {
-  local _out="$1"
-  local _ctx="$2"
-  if is_runner_infrastructure_error "$_out"; then
-    echo ""
-    echo "⏭️  SKIPPED - vitest runner infrastructure error (no test failed)"
-    echo "    Detected: Unhandled Errors with 0 failed tests."
-    echo "    Known Windows issue: EPERM on vitest temp/ssr cache (#454)."
-    echo "    Workaround: npx vitest run --no-file-parallelism <targets>"
-    TESTS_SKIPPED=true
-    TESTS_EXIT_CODE=0
-    return 0
-  fi
-  echo ""
-  echo "❌ BLOCKED - Tests FAILED${_ctx:+ in ${_ctx}}"
-  return 1
-}
+# Gate 5's vitest exit-code judgement (is_runner_infrastructure_error,
+# is_partial_threshold_only_exit, handle_test_failure) is sourced from
+# lib/test-failure.sh below, next to the other hook libraries.
 
 # Parse LCOV file and return coverage percentage
 # Usage: parse_lcov_coverage <lcov_file>
@@ -267,6 +213,10 @@ PROJECT_ROOT_FOR_AUDIT="$(git rev-parse --show-toplevel 2>/dev/null || echo "$AU
 
 # Issue #370: source cross-platform now_ms() helper (node-preferred, regex-validated)
 source "${AUDIT_SCRIPT_DIR}/lib/now-ms.sh"
+
+# Issue #473 (+ #454): Gate 5's vitest exit-code judgement, sourced as a library
+# so the fail-closed contract is unit-testable without executing this hook.
+source "${AUDIT_SCRIPT_DIR}/lib/test-failure.sh"
 
 # Read max_duration_ms from .xp-gate-config.json (default 7200000 = 2 hours)
 _MAX_DURATION_MS=$(node -e "try{const c=JSON.parse(require('fs').readFileSync('${PROJECT_ROOT_FOR_AUDIT}/.xp-gate-config.json','utf8'));console.log((c.audit&&c.audit.max_duration_ms)||7200000);}catch(e){console.log(7200000);}" 2>/dev/null || echo "7200000")
