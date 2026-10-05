@@ -313,6 +313,30 @@ specification:
           criteria: 已安装的 hook 库不得 source lib/ 之外的路径（../、/scripts/、/src/），
             否则换台机器就找不到文件；同目录兄弟引用不算违规（反空洞用例分别证伪与证实）
           test_type: integration
+
+    - id: REQ-478
+      description: Gate 4 必须以调用参数同一基准的目录运行检查器 —— pre-commit 已 cd 进单语言子目录时，
+        仓库根相对的 diff 路径会被检查器读成 web/web/...，可用的门禁静默退化为 SKIPPED（#478）
+      priority: critical
+      acceptance_criteria:
+        - id: AC-478-01
+          criteria: 子项目模式（PROJECT_SUBDIR=web 且 ORIGINAL_DIR 已设置）下检查器的工作目录必须等于
+            PROJECT_ROOT，传给 --files 的路径保持仓库根相对（web/src/api/index.ts，不得出现双重前缀），
+            结果判为 PASS 且不得出现 SKIPPED
+          test_type: integration
+        - id: AC-478-02
+          criteria: 没有子项目布局的仓库（PROJECT_SUBDIR 与 ORIGINAL_DIR 均为空）仍须 PASS，
+            且检查器的工作目录同样是 PROJECT_ROOT
+          test_type: integration
+        - id: AC-478-03
+          criteria: 检查器真的无法启动/读不到文件时判为 SKIP，不得判为 PASS —— 工具失败与「零发现」
+            必须是两种可区分的状态（反假 PASS）
+          test_type: integration
+        - id: AC-478-04
+          criteria: 反空洞用例逐份检查随包分发的 gate-4 副本（githooks/gate-4.sh、
+            githooks/adapters/gate-4.sh），每份都必须以 PROJECT_ROOT 解析检查器基目录，
+            并从该同一基目录调用检查器；任一副本回退到 hook 当前目录即失败
+          test_type: integration
   design_decisions:
     - id: DD-001
       decision: 走薄桥（方案 A）在 ctx.tools 注册三工具，而非独立 MCP server 或纯技能
