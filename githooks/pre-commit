@@ -2768,7 +2768,30 @@ fi
 GATE_9_START=$(gate_start_ms)
 GATE_9_STATUS="SKIP"
 
-if [ -f "package.json" ] && [ -f "tsconfig.json" ]; then
+# Resolve the TS project directory (root -> PROJECT_SUBDIR -> shallow search),
+# mirroring Gate 1's discovery (#470 family, follow-up comment on #470): in a
+# web/ + backend/ monorepo the hook sits at the repo root where package.json /
+# tsconfig.json do not exist, so the root-only probe below reported
+# "Not a TypeScript project" in the very run where Gate 1 had just run tsc
+# successfully on web/tsconfig.json.
+GATE9_TS_DIR=""
+for _g9_dir in "." "${PROJECT_ROOT:-}" "${PROJECT_SUBDIR:-}"; do
+  [ -z "$_g9_dir" ] && continue
+  if [ -f "$_g9_dir/package.json" ] && [ -f "$_g9_dir/tsconfig.json" ]; then
+    GATE9_TS_DIR="$_g9_dir"
+    break
+  fi
+done
+if [ -z "$GATE9_TS_DIR" ]; then
+  # Search from PROJECT_ROOT so a non-root CWD cannot narrow the window
+  # (#470 review finding).
+  _G9_TS_CAND=$(find "${PROJECT_ROOT:-.}" -maxdepth 2 -name tsconfig.json -not -path '*/.git/*' -not -path '*/node_modules/*' 2>/dev/null | head -1)
+  if [ -n "$_G9_TS_CAND" ] && [ -f "$(dirname "$_G9_TS_CAND")/package.json" ]; then
+    GATE9_TS_DIR=$(dirname "$_G9_TS_CAND")
+  fi
+fi
+
+if [ -n "$GATE9_TS_DIR" ]; then
   GATE_9_SCRIPT=""
   if [ -f "$PROJECT_ROOT/src/build-integrity/gate-10.ts" ]; then
     GATE_9_SCRIPT="$PROJECT_ROOT/src/build-integrity/gate-10.ts"
@@ -2781,7 +2804,14 @@ if [ -f "package.json" ] && [ -f "tsconfig.json" ]; then
   if [ -n "$GATE_9_SCRIPT" ]; then
     CHANGED_FILES_CSV=$(echo "$CHANGED_FILES" | tr ' ' ',')
     GATE_9_OUTPUT=$(mktemp)
-    if RUN_TSX_TIMEOUT=120s run_tsx "$GATE_9_SCRIPT" --changed-files "$CHANGED_FILES_CSV" --project-root "$PROJECT_ROOT" --timeout 115000 > "$GATE_9_OUTPUT" 2>&1; then
+    # Hand the checker the TS project dir as --project-root so its
+    # <projectRoot>/tsconfig.json probe sees web/tsconfig.json instead of the
+    # repo root (#470 family). Plain root projects keep the old value.
+    GATE9_PROJECT_ROOT_ARG="$PROJECT_ROOT"
+    if [ "$GATE9_TS_DIR" != "." ]; then
+      GATE9_PROJECT_ROOT_ARG="$(cd "$GATE9_TS_DIR" && pwd)"
+    fi
+    if RUN_TSX_TIMEOUT=120s run_tsx "$GATE_9_SCRIPT" --changed-files "$CHANGED_FILES_CSV" --project-root "$GATE9_PROJECT_ROOT_ARG" --timeout 115000 > "$GATE_9_OUTPUT" 2>&1; then
       GATE_9_STATUS="PASS"
       echo "     ✅ Build integrity check passed."
     else
@@ -2810,7 +2840,13 @@ else
 fi
 
 GATE_9_END=$(gate_start_ms)
-GATE_9_DURATION_MS=$((GATE_9_END - GATE_9_START))
+GATE_9_DURATION_MS=0
+# Issue #462 hardening: a failed/empty clock read must not render an absurd
+# duration (empty END made the delta equal -START, i.e. -1.78e12 "seconds").
+# Clamp to 0 like record_gate_audit already does for the audit trail.
+if [ -n "$GATE_9_START" ] && [ -n "$GATE_9_END" ] && [ "$GATE_9_END" -ge "$GATE_9_START" ] 2>/dev/null; then
+  GATE_9_DURATION_MS=$((GATE_9_END - GATE_9_START))
+fi
 GATE_9_DURATION=$((GATE_9_DURATION_MS / 1000))
 echo "✅ Gate 9 completed in ${GATE_9_DURATION}s"
 record_gate_audit "gate-9" "build-integrity" "$GATE_9_STATUS" "0" "$GATE_9_START"
