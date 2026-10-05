@@ -348,6 +348,43 @@ function resolveTimeoutMs(args, providerConfig) {
   return DEFAULT_TIMEOUT_MS;
 }
 
+// ── Prompt budget ──────────────────────────────────────────────────────
+// Measured on the whalecloud gateway during the #457 walkthrough: a 40 KB prompt
+// answered normally, a 50 KB one killed the seat with no usable error, and a
+// dead expert seat blocks the whole review. The ceiling is therefore checked
+// before the request is made, where the message can say what to narrow.
+const DEFAULT_PROMPT_BUDGET_BYTES = 40000;
+
+// A seat-level override (`max_prompt_bytes` on the expert entry) exists because
+// the ceiling is a property of the model behind the seat, not of the runner.
+// Values that cannot be honoured fall back to the default rather than disabling
+// the guard -- `max_prompt_bytes: 0` reads as "no limit" and is not.
+function resolvePromptBudgetBytes(expertConfig) {
+  const configured = expertConfig && expertConfig.max_prompt_bytes;
+  if (typeof configured === 'number' && Number.isFinite(configured) && configured > 0) {
+    return Math.trunc(configured);
+  }
+  return DEFAULT_PROMPT_BUDGET_BYTES;
+}
+
+// Bytes, never `String.length`: review content is Chinese prose, and a code-unit
+// count understates what the gateway actually receives by up to 3x.
+function checkPromptBudget({ systemPrompt, userPrompt, maxBytes }) {
+  const bytes = Buffer.byteLength(String(systemPrompt ?? ''), 'utf8')
+    + Buffer.byteLength(String(userPrompt ?? ''), 'utf8');
+  return { ok: bytes <= maxBytes, bytes, maxBytes };
+}
+
+function describePromptBudgetFailure({ bytes, maxBytes, expert }) {
+  return (
+    `Prompt for expert "${expert}" is ${bytes} bytes, over the ${maxBytes} byte budget. ` +
+    'The gateway drops oversized requests without a diagnosable error, so this run ' +
+    'refuses to send it. Narrow the review range (fewer commits or files, or exclude ' +
+    'vendored/lockfile content), or raise the seat\'s `max_prompt_bytes` in ' +
+    '.delphi-config.json if this model is known to accept larger requests.'
+  );
+}
+
 // ── API call ───────────────────────────────────────────────────────────
 async function callModelAPI(providerConfig, model, systemPrompt, userPrompt, options = {}) {
   const url = `${providerConfig.base_url.replace(/\/$/, '')}/chat/completions`;
@@ -582,6 +619,29 @@ async function main() {
   const systemPrompt = buildSystemPrompt(args.expert, args.mode);
   const userPrompt = buildUserPrompt(reviewContent, otherExpertsContent, args.round);
 
+  // Refuse before the request, not after the gateway kills it.
+  const budget = checkPromptBudget({
+    systemPrompt,
+    userPrompt,
+    maxBytes: resolvePromptBudgetBytes(expertConfig),
+  });
+  if (!budget.ok) {
+    const message = describePromptBudgetFailure({ ...budget, expert: args.expert });
+    console.error(`[delphi-review] ERROR: ${message}`);
+    // Same stdout contract as an API failure: an orchestrator parsing this stream
+    // must be able to tell "we never asked" from "the model answered wrongly".
+    console.log(JSON.stringify({
+      error: true,
+      error_type: 'prompt_budget_exceeded',
+      expert_role: args.expert,
+      message,
+      bytes: budget.bytes,
+      max_bytes: budget.maxBytes,
+      retryable: false,
+    }));
+    process.exit(1);
+  }
+
   // Call API with retry
   const timeoutMs = resolveTimeoutMs(args, provider);
   const result = await callWithRetry(provider, expertConfig.model, systemPrompt, userPrompt, 2, timeoutMs);
@@ -629,6 +689,10 @@ if (require.main !== module) {
     buildUserPrompt,
     resolveInputContent,
     resolveTimeoutMs,
+    resolvePromptBudgetBytes,
+    checkPromptBudget,
+    describePromptBudgetFailure,
+    DEFAULT_PROMPT_BUDGET_BYTES,
     checkNodeVersion,
     callModelAPI,
     callWithRetry,
