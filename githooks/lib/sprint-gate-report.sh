@@ -46,7 +46,7 @@ sprint_gate_decision() {
 # Echo the human-readable detail of a decision (reason, message, or warning --
 # in that order of preference), or nothing when the gate gave none.
 sprint_gate_detail() {
-  local _out="${1:-}" _field _detail _detail
+  local _out="${1:-}" _field _detail
   for _field in reason message warning; do
     _detail=$(printf '%s' "$_out" | sed -n "s/.*\"$_field\"[[:space:]]*:[[:space:]]*\"\([^\"]*\)\".*/\1/p" | tail -1)
     if [ -n "$_detail" ]; then
