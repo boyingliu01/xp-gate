@@ -1058,8 +1058,60 @@ describe('timeout configuration', () => {
     });
   });
 
-  describe('callWithRetry timeout passthrough', () => {
-    afterEach(() => {
+  // AC-457-19/20 (walkthrough FC-16) -- the request-size ceiling measured the
+  // hard way: 40 KB of prompt answered, 50 KB made the gateway seat die without
+  // a usable error. A limit that lives only in a plan document is a limit that
+  // gets re-discovered by the next crash, so it is enforced here instead.
+  describe('prompt budget', () => {
+    it('AC-457-19: defaults to the measured-safe ceiling', () => {
+      const { resolvePromptBudgetBytes, DEFAULT_PROMPT_BUDGET_BYTES } = loadModule();
+      expect(DEFAULT_PROMPT_BUDGET_BYTES).toBe(40000);
+      expect(resolvePromptBudgetBytes({})).toBe(40000);
+      expect(resolvePromptBudgetBytes(undefined)).toBe(40000);
+    });
+
+    it('AC-457-19: a seat may raise its own ceiling, junk values do not disable it', () => {
+      const { resolvePromptBudgetBytes } = loadModule();
+      expect(resolvePromptBudgetBytes({ max_prompt_bytes: 65536 })).toBe(65536);
+      // A non-positive or non-finite value would turn the guard off by typo.
+      expect(resolvePromptBudgetBytes({ max_prompt_bytes: 0 })).toBe(40000);
+      expect(resolvePromptBudgetBytes({ max_prompt_bytes: -1 })).toBe(40000);
+      expect(resolvePromptBudgetBytes({ max_prompt_bytes: 'lots' })).toBe(40000);
+    });
+
+    it('AC-457-19: measures UTF-8 bytes of the whole request, not characters', () => {
+      const { checkPromptBudget } = loadModule();
+      // The review content is Chinese prose; a length-in-code-units check would
+      // report a prompt that is ~3x larger than the gateway sees.
+      const cjk = '评审内容'.repeat(10);
+      const budget = checkPromptBudget({ systemPrompt: '', userPrompt: cjk, maxBytes: 100 });
+      expect(budget.bytes).toBe(Buffer.byteLength(cjk, 'utf8'));
+      expect(budget.bytes).toBeGreaterThan(cjk.length);
+      expect(budget.ok).toBe(false);
+    });
+
+    it('AC-457-19: budgets the system and user prompt together, not the review content alone', () => {
+      const { checkPromptBudget } = loadModule();
+      const within = checkPromptBudget({ systemPrompt: 's', userPrompt: 'u', maxBytes: 100 });
+      expect(within.ok).toBe(true);
+      const over = checkPromptBudget({ systemPrompt: 'x'.repeat(60), userPrompt: 'y'.repeat(60), maxBytes: 100 });
+      expect(over.ok).toBe(false);
+      expect(over.bytes).toBe(120);
+      expect(over.maxBytes).toBe(100);
+    });
+
+    it('AC-457-20: the refusal names what to do, because a bare size error is not actionable', () => {
+      const { describePromptBudgetFailure } = loadModule();
+      const message = describePromptBudgetFailure({ bytes: 51200, maxBytes: 40000, expert: 'architecture' });
+      expect(message).toContain('architecture');
+      expect(message).toContain('51200');
+      expect(message).toContain('40000');
+      expect(message).toMatch(/narrow/i);
+      expect(message).toMatch(/max_prompt_bytes/);
+    });
+  });
+
+  describe('callWithRetry timeout passthrough', () => {    afterEach(() => {
       vi.useRealTimers();
       vi.unstubAllGlobals();
     });
