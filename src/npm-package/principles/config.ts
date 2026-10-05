@@ -2,7 +2,7 @@ import { execFileSync } from 'child_process';
 import { existsSync, readFileSync } from 'fs';
 import { join, resolve } from 'path';
 
-interface RuleConfig {
+export interface RuleConfig {
   enabled: boolean;
   threshold?: number;
   exclude?: (string | number)[];
@@ -152,6 +152,12 @@ export function getDefaultConfig(): PrinciplesConfig {
  * are returned and a warning is printed. Invalid *values* (a string where a
  * number belongs, etc.) keep the default for that key rather than poisoning the
  * rule with a value it cannot compare against.
+ *
+ * One exception, for a path the CALLER named: if `configPath` is passed and that
+ * file does not exist, loading fails. "The project has no `.principlesrc`" is a
+ * normal state, but "the project declared one and it cannot be found" is a
+ * misconfiguration, and answering it with built-in thresholds re-creates exactly
+ * the fail-open gate this module exists to close (#457, walkthrough FC-08).
  */
 export async function loadConfig(configPath?: string): Promise<PrinciplesConfig> {
   const defaults = getDefaultConfig();
@@ -159,7 +165,7 @@ export async function loadConfig(configPath?: string): Promise<PrinciplesConfig>
 
   if (!resolvedPath || !existsSync(resolvedPath)) {
     if (configPath) {
-      warn(`config file not found: ${resolvedPath} — using built-in defaults`);
+      throw new Error(`config file not found: ${resolvedPath}`);
     }
     return defaults;
   }
@@ -354,19 +360,58 @@ function warn(message: string): void {
 // CONCURRENCY: this is process-global mutable state. A single process must not
 // evaluate two different projects' configs at the same time. Callers that need
 // isolation should run them in separate processes. Tests MUST call
-// `resetActiveConfig()` between cases to avoid leaking state.
+// `resetActiveConfig()` between cases to avoid leaking state -- and doing so is
+// no longer only a convention: `setActiveConfig` reports a replacement of an
+// already-installed config, so the leak fails visibly instead of silently.
 // ---------------------------------------------------------------------------
 
 let activeConfig: PrinciplesConfig = getDefaultConfig();
+
+// Set by setActiveConfig, cleared by resetActiveConfig. The concurrency contract
+// above was documentation only; this makes an undocumented second set visible
+// instead of letting the last writer silently win (walkthrough FC-02).
+let activeConfigInstalled = false;
 
 /** The configuration rules currently enforce. */
 export function getActiveConfig(): PrinciplesConfig {
   return activeConfig;
 }
 
+/**
+ * The effective configuration of one rule, read from what is being enforced NOW.
+ *
+ * `Rule.threshold` and `Rule.severity` are deprecated snapshots taken when the
+ * rule module was constructed; a project's `.principlesrc` overrides them at
+ * run time (#457). Consumers that report or compare thresholds must read them
+ * here, or they will describe a number `check()` never compared against
+ * (walkthrough MAJ-03 / FC-05).
+ *
+ * Fails on an unknown id rather than returning defaults: answering "there is no
+ * such rule" with a plausible-looking threshold is the same silent-defaults
+ * defect this module exists to remove.
+ */
+export function getEffectiveConfigFor(ruleId: string): RuleConfig {
+  const separator = ruleId.indexOf('.');
+  if (separator <= 0 || separator === ruleId.length - 1) {
+    throw new Error(`rule id must be in group.name form, got "${ruleId}"`);
+  }
+  const group = ruleId.slice(0, separator);
+  const name = ruleId.slice(separator + 1);
+  const groups = activeConfig.rules as Record<string, Record<string, RuleConfig> | undefined>;
+  const settings = groups[group]?.[name];
+  if (!settings) {
+    throw new Error(`no rule config for "${ruleId}" in the active configuration`);
+  }
+  return settings;
+}
+
 /** Install the configuration that rules should enforce. */
 export function setActiveConfig(config: PrinciplesConfig): void {
+  if (activeConfigInstalled) {
+    warn('active config replaced without resetActiveConfig(); one process should analyse one project with one config');
+  }
   activeConfig = config;
+  activeConfigInstalled = true;
 }
 
 /**
@@ -377,4 +422,5 @@ export function setActiveConfig(config: PrinciplesConfig): void {
  */
 export function resetActiveConfig(): void {
   activeConfig = getDefaultConfig();
+  activeConfigInstalled = false;
 }

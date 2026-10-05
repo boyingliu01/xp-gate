@@ -6,8 +6,18 @@
 
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { main, parseArgs } from '../index';
+import { resetActiveConfig } from '../config';
 
 describe('index.ts - CLI Entry Point', () => {
+  // Each main() call installs the config it loads. Production runs one process
+  // per invocation; this file calls main() repeatedly in one process, so the
+  // documented reset-per-run lifecycle is what keeps #457's replacement
+  // guardrail from reporting the test harness itself.
+  beforeEach(() => {
+    resetActiveConfig();
+  });
+
+
   describe('parseArgs', () => {
     it('should parse --files argument', () => {
       const args = ['--files', 'test.ts test2.ts'];

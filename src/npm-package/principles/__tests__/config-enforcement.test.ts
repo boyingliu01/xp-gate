@@ -4,7 +4,7 @@
  *         modules used to snapshot config at module load, so a project's
  *         threshold was silently ignored and the checker enforced the built-in
  *         default instead -- a fail-open gate.
- * @covers AC-457-01, AC-457-02, AC-457-03, AC-457-04, AC-457-05, AC-457-06, AC-457-07
+ * @covers AC-457-01, AC-457-02, AC-457-03, AC-457-04, AC-457-05, AC-457-06, AC-457-07, AC-457-14, AC-457-15, AC-457-16
  *
  * The pre-existing `config.test.ts` asserted only `expect(config).toBeDefined()`
  * for `loadConfig`, which is why the defect survived: the loader returned the
@@ -22,6 +22,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import {
   getActiveConfig,
   getDefaultConfig,
+  getEffectiveConfigFor,
   loadConfig,
   resetActiveConfig,
   setActiveConfig,
@@ -68,12 +69,12 @@ function writeConfig(dir: string, contents: string, name = '.principlesrc'): str
  * on it -- so it can only be asserted through an actual process, not by calling
  * `main()` in-process.
  */
-function runChecker(args: string[]): { status: number; summary: Record<string, number> } {
+function runChecker(args: string[], cwd = process.cwd()): { status: number; summary: Record<string, number> } {
   const result = spawnSync(
     process.execPath,
     [join(process.cwd(), 'node_modules', 'tsx', 'dist', 'cli.mjs'),
       join(process.cwd(), 'src', 'principles', 'index.ts'), ...args],
-    { encoding: 'utf8', cwd: process.cwd(), timeout: 120000 },
+    { encoding: 'utf8', cwd, timeout: 120000 },
   );
   const stdout = result.stdout ?? '';
   let summary: Record<string, number> = {};
@@ -89,6 +90,33 @@ function runChecker(args: string[]): { status: number; summary: Record<string, n
 function thresholdConfig(ruleId: string, threshold: number): string {
   const rule = { [ruleId]: { threshold } };
   return JSON.stringify({ rules: { 'clean-code': rule } });
+}
+
+/** The same threshold, already merged into a config object (no disk involved). */
+function thresholdConfigObject(
+  ruleId: keyof ReturnType<typeof getDefaultConfig>['rules']['clean-code'],
+  threshold: number,
+): ReturnType<typeof getDefaultConfig> {
+  const config = getDefaultConfig();
+  config.rules['clean-code'][ruleId].threshold = threshold;
+  return config;
+}
+
+/** Run `body` with `[principles]` diagnostics captured instead of printed. */
+function capturePrinciplesWarnings(body: () => void): string[] {
+  const captured: string[] = [];
+  const original = process.stderr.write;
+  process.stderr.write = ((chunk: unknown) => {
+    const text = String(chunk);
+    if (text.includes('[principles]')) captured.push(text.trim());
+    return true;
+  }) as typeof process.stderr.write;
+  try {
+    body();
+  } finally {
+    process.stderr.write = original;
+  }
+  return captured;
 }
 
 /** A `.principlesrc` that sets one array-valued key for one rule. */
@@ -248,10 +276,41 @@ describe('#457 .principlesrc actually changes enforcement', () => {
     expect(config.rules['clean-code']['large-file'].threshold).toBe(DEFAULT_LARGE_FILE_THRESHOLD);
   });
 
-  it('AC-457-07: a missing config path falls back to defaults without throwing', async () => {
-    const config = await loadConfig(join(makeTempDir(), 'does-not-exist.json'));
+  it('AC-457-02: an absent auto-resolved config falls back to built-in defaults', () => {
+    // No --config was given, so "this project has no .principlesrc" is a normal
+    // state and must not fail. Run from a temp directory: the repo's own
+    // .principlesrc would otherwise answer the question before the code does.
+    const root = makeTempDir();
+    const target = join(root, 'target.ts');
+    writeFileSync(target, 'export const x = 1;\n', 'utf8');
 
-    expect(config.rules['clean-code']['large-file'].threshold).toBe(DEFAULT_LARGE_FILE_THRESHOLD);
+    const clean = runChecker(['--files', target, '--format', 'json'], root);
+
+    expect(clean.status).toBe(0);
+  });
+
+  it('AC-457-14: an explicitly requested config that cannot be read fails loudly', async () => {
+    // Raised by the Delphi walkthrough (feasibility seat, FC-08). The caller
+    // declared this file; silently enforcing built-in defaults instead is the
+    // same fail-open shape #457 exists to remove, just reached from the other
+    // direction -- a typo'd or deleted `.principlesrc` would keep the gate green.
+    const missing = join(makeTempDir(), 'does-not-exist.json');
+
+    await expect(loadConfig(missing)).rejects.toThrow(/config file not found/);
+  });
+
+  it('AC-457-14: the CLI reports that failure as a tool error (exit 2), not as findings', () => {
+    // Exit 1 means "the checker ran and found ERROR-severity violations". A gate
+    // that reads 1 with an empty report announces PASSED. Exit 2 is this repo's
+    // runtime-error convention, which Gate 4 downgrades to SKIP -- loud, visible,
+    // and never mistaken for a clean run.
+    const missing = join(makeTempDir(), 'does-not-exist.json');
+    const target = join(makeTempDir(), 'target.ts');
+    writeFileSync(target, 'export const x = 1;\n', 'utf8');
+
+    const failed = runChecker(['--files', target, '--format', 'json', '--config', missing]);
+
+    expect(failed.status).toBe(2);
   });
 
   it('AC-457-07: a type-mismatched value keeps the default instead of poisoning it', async () => {
@@ -360,5 +419,51 @@ describe('#457 .principlesrc actually changes enforcement', () => {
     for (const rule of getAllRules()) {
       expect(groups).toContain(rule.id.slice(0, rule.id.indexOf('.')));
     }
+  });
+
+  it('AC-457-16: getEffectiveConfigFor reports the config a rule actually enforces', () => {
+    // Promised by the R2 design review (walkthrough MAJ-03 / FC-05) and never
+    // delivered: `Rule.threshold` on the rule object is a deprecated snapshot, so
+    // a consumer that reads it sees a number that may differ from what `check()`
+    // compared against. This is the one accessor that cannot drift.
+    setActiveConfig(thresholdConfigObject('large-file', TIGHT_THRESHOLD));
+
+    expect(getEffectiveConfigFor('clean-code.large-file').threshold).toBe(TIGHT_THRESHOLD);
+    expect(getDefaultConfig().rules['clean-code']['large-file'].threshold).toBe(
+      DEFAULT_LARGE_FILE_THRESHOLD
+    );
+  });
+
+  it('AC-457-16: an unknown or malformed rule id is refused, not answered with defaults', () => {
+    // Silently handing back built-in defaults would recreate the fail-open shape
+    // for the *reporting* path: a caller would believe it read the effective
+    // threshold for a rule that does not exist.
+    expect(() => getEffectiveConfigFor('clean-code.not-a-rule')).toThrow(/no rule/);
+    expect(() => getEffectiveConfigFor('large-file')).toThrow(/group.name/);
+  });
+
+  it('AC-457-15: replacing the active config without resetting it is reported', () => {
+    // The concurrency contract used to live only in a JSDoc comment (walkthrough
+    // FC-02). A caller that evaluates two projects in one process would silently
+    // enforce whichever config happened to be installed last.
+    const warnings = capturePrinciplesWarnings(() => {
+      setActiveConfig(thresholdConfigObject('large-file', TIGHT_THRESHOLD));
+      setActiveConfig(thresholdConfigObject('large-file', LOOSE_THRESHOLD));
+    });
+
+    expect(warnings.join('\n')).toMatch(/replaced without reset/);
+  });
+
+  it('AC-457-15: the documented single-set lifecycle stays quiet', () => {
+    // The guardrail must not turn the normal CLI path (load -> set once -> run)
+    // into warning noise, otherwise Gate 4's stderr becomes unreadable.
+    const warnings = capturePrinciplesWarnings(() => {
+      resetActiveConfig();
+      setActiveConfig(thresholdConfigObject('large-file', TIGHT_THRESHOLD));
+      resetActiveConfig();
+      setActiveConfig(thresholdConfigObject('large-file', LOOSE_THRESHOLD));
+    });
+
+    expect(warnings).toEqual([]);
   });
 });

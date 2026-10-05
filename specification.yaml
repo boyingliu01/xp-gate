@@ -172,6 +172,20 @@ specification:
           criteria: rule ID 必须是「单个点」的 group.name 形式且 group 在配置中真实存在，
             否则 isRuleEnabled 的首个点切分会解析到错误条目并静默沿用内置阈值
           test_type: unit
+        - id: AC-457-14
+          criteria: 调用方显式传入的 --config 路径不存在时必须失败（加载抛错、CLI 退出码 2），
+            不得回退内置默认值——声明了配置却找不到文件属于配置错误，静默沿用默认值正是 #457 要消除的 fail-open；
+            未显式传入时「项目没有 .principlesrc」仍按正常状态回退默认值
+          test_type: integration
+        - id: AC-457-15
+          criteria: 未先 resetActiveConfig() 就替换已安装的进程级配置必须给出可见告警，
+            并发/多项目约束不得只停留在注释里；正常单次 set 生命周期不得产生告警噪音
+          test_type: unit
+        - id: AC-457-16
+          criteria: getEffectiveConfigFor(ruleId) 返回当前生效配置中该规则的条目（与 check() 读到的同一对象），
+            未知 ID 或非 group.name 形式必须报错而非回退默认值；
+            Rule.threshold / Rule.severity 的过期快照不再是消费方可读取的生效来源
+          test_type: unit
 
     - id: REQ-452
       description: Boy Scout baseline 必须可剪枝 —— 已删除文件的条目不得长期滞留并继承旧的警告额度
