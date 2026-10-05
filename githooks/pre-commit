@@ -2877,12 +2877,19 @@ fi
 # Validates sprint state consistency (delphi-review APPROVED before BUILD)
 # Uses sprint-gate.sh for standalone validation logic
 # ============================================================================
+2>&1 echo ""
+2>&1 echo "→ Gate 11: Sprint Flow enforcement..."
 GATE_11_START=$(date +%s)
 GATE_11_STATUS="PASS"
 
 # BEGIN SPRINT_GATE_SCRIPT RESOLUTION
 # Tier order: GATE_DIR (gate scripts dir) -> repo-root githooks/ -> SCRIPT_DIR
-# (hooks dir; update-hooks installs sprint-gate.sh beside pre-commit/pre-push).
+# (hooks dir; update-hooks installs sprint-gate.sh beside pre-commit/pre-push)
+# -> ~/.config/xp-gate/hooks/ (canonical global install dir). The last tier is
+# explicit because the earlier ones miss it whenever GATE_DIR resolves to the
+# flat adapters layout (which carries gate-*.sh but NOT sprint-gate.sh) and
+# SCRIPT_DIR drifts — that combination produced the lying
+# "sprint-gate.sh not found" while the file sat in the install dir (#476).
 SPRINT_GATE_SCRIPT=""
 if [ -f "$GATE_DIR/sprint-gate.sh" ]; then
   SPRINT_GATE_SCRIPT="$GATE_DIR/sprint-gate.sh"
@@ -2890,19 +2897,60 @@ elif [ -f "$(git rev-parse --show-toplevel 2>/dev/null)/githooks/sprint-gate.sh"
   SPRINT_GATE_SCRIPT="$(git rev-parse --show-toplevel)/githooks/sprint-gate.sh"
 elif [ -f "$SCRIPT_DIR/sprint-gate.sh" ]; then
   SPRINT_GATE_SCRIPT="$SCRIPT_DIR/sprint-gate.sh"
+elif [ -f "$HOME/.config/xp-gate/hooks/sprint-gate.sh" ]; then
+  SPRINT_GATE_SCRIPT="$HOME/.config/xp-gate/hooks/sprint-gate.sh"
 fi
 # END SPRINT_GATE_SCRIPT RESOLUTION
 
 if [ -n "$SPRINT_GATE_SCRIPT" ]; then
-  if ! bash "$SPRINT_GATE_SCRIPT" --pre-commit; then
+  # `|| SPRINT_GATE_EXIT=$?` keeps the capture errexit-safe: sprint-gate's
+  # contract uses exit 1 for "deny", which must reach the BLOCK branch below
+  # instead of aborting the sourced gate.
+  SPRINT_GATE_EXIT=0
+  SPRINT_GATE_OUTPUT=$(bash "$SPRINT_GATE_SCRIPT" --pre-commit 2>&1) || SPRINT_GATE_EXIT=$?
+  if [ "$SPRINT_GATE_EXIT" -ne 0 ]; then
     GATE_11_STATUS="BLOCK"
     echo "❌ BLOCKED - Gate 11: Sprint Flow Enforcement"
+    [ -n "$SPRINT_GATE_OUTPUT" ] && echo "$SPRINT_GATE_OUTPUT"
     record_gate_audit "gate-11" "sprint-flow" "$GATE_11_STATUS" "1" "$GATE_11_START"
     # Sprint gate failure is a hard block — exit immediately
     exit 1
   fi
+  # Translate the tool's JSON verdict into a human line (#476). The raw JSON
+  # used to print straight under the Gate 10 heading with no attribution; the
+  # tool's own "not a sprint project" skip is by design (sprint-gate.sh:63-66)
+  # but must read as a Gate 11 result, not as anonymous output.
+  SPRINT_DECISION=$(echo "$SPRINT_GATE_OUTPUT" | grep -o '"decision"[[:space:]]*:[[:space:]]*"[^"]*"' | head -1 | grep -o '[a-z]*"$' | tr -d '"')
+  SPRINT_REASON=$(echo "$SPRINT_GATE_OUTPUT" | grep -o '"reason"[[:space:]]*:[[:space:]]*"[^"]*"' | head -1 | sed 's/.*"reason"[[:space:]]*:[[:space:]]*"//; s/"$//')
+  case "$SPRINT_DECISION" in
+    skip)
+      GATE_11_STATUS="SKIP"
+      echo "⏭️  SKIPPED - Gate 11: Sprint Flow (${SPRINT_REASON:-not a sprint project})"
+      ;;
+    deny)
+      # Defensive: sprint-gate exits 1 on deny today; a future version that
+      # printed deny with exit 0 must still block, never silently pass.
+      GATE_11_STATUS="BLOCK"
+      echo "❌ BLOCKED - Gate 11: Sprint Flow Enforcement (${SPRINT_REASON:-denied})"
+      [ -n "$SPRINT_GATE_OUTPUT" ] && echo "$SPRINT_GATE_OUTPUT"
+      record_gate_audit "gate-11" "sprint-flow" "$GATE_11_STATUS" "1" "$GATE_11_START"
+      exit 1
+      ;;
+    allow)
+      GATE_11_STATUS="PASS"
+      echo "✅ PASSED - Gate 11: Sprint Flow enforcement"
+      ;;
+    *)
+      # Fail-closed on an unrecognised verdict: a PASS here would let a JSON
+      # format drift silently downgrade enforcement. SKIP reports the anomaly
+      # truthfully without inventing a block (#476 review finding).
+      GATE_11_STATUS="SKIP"
+      echo "⚠️  Gate 11: could not interpret sprint-gate verdict - treating as SKIP"
+      [ -n "$SPRINT_GATE_OUTPUT" ] && echo "$SPRINT_GATE_OUTPUT"
+      ;;
+  esac
 else
-  echo "⏭️  SKIPPED - Gate 11: Sprint Flow (sprint-gate.sh not found)"
+  echo "⏭️  SKIPPED - Gate 11: Sprint Flow (sprint-gate.sh not found; searched: GATE_DIR=$GATE_DIR, <repo>/githooks/, SCRIPT_DIR=$SCRIPT_DIR, ~/.config/xp-gate/hooks/)"
   GATE_11_STATUS="SKIP"
 fi
 
