@@ -1448,7 +1448,33 @@ else
   fi
   
   echo "Running jscpd for duplicate code detection..."
-  jscpd --config jscpd.conf.json $(echo "$CHANGED_FILES" | tr '\n' ' ') 2>&1 | head -30
+  # Issue #477: only pass --config when the file actually exists. The old
+  # unconditional `--config jscpd.conf.json` made jscpd print "Using config
+  # from jscpd.conf.json" then die with os error 2 and fall back to its
+  # defaults anyway — a scary fake error, and the non-zero exit was then
+  # misreported as "found duplicated code". Probe CWD, the TS project dir and
+  # the repo root; without a config file run with jscpd defaults (identical
+  # effective thresholds to the old fallback — no behaviour change).
+  JSCPD_CONFIG=""
+  for _jcand in "jscpd.conf.json" "${TS_PROJECT_DIR:+$TS_PROJECT_DIR/jscpd.conf.json}" "${PROJECT_ROOT:+$PROJECT_ROOT/jscpd.conf.json}"; do
+    if [ -n "$_jcand" ] && [ -f "$_jcand" ]; then
+      # Canonicalise to an absolute path: the scan runs from PROJECT_ROOT
+      # below, so a CWD-relative hit must not stay CWD-relative — otherwise
+      # subdir mode reproduces the very os-error-2 failure this fixes (#477
+      # review finding).
+      JSCPD_CONFIG="$(cd "$(dirname "$_jcand")" && pwd)/$(basename "$_jcand")"
+      break
+    fi
+  done
+  # Run from the repo root with repo-root-relative paths: CHANGED_FILES is
+  # always repo-root-relative but in subdir mode the CWD is the language
+  # subdir, where those paths do not resolve (#477).
+  if [ -n "$JSCPD_CONFIG" ]; then
+    (cd "$PROJECT_ROOT" && jscpd --config "$JSCPD_CONFIG" $(echo "$CHANGED_FILES" | tr '\n' ' ') 2>&1 | head -30)
+  else
+    echo "   ℹ️  No jscpd.conf.json found - using jscpd defaults"
+    (cd "$PROJECT_ROOT" && jscpd $(echo "$CHANGED_FILES" | tr '\n' ' ') 2>&1 | head -30)
+  fi
   JSCPD_EXIT=$?
   if [ "$JSCPD_EXIT" -ne 0 ]; then
     echo "ℹ️  jscpd found duplicated code (warning, not blocking by default)"
