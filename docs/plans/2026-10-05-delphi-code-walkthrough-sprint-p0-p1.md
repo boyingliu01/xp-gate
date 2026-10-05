@@ -269,3 +269,40 @@ Round 3 因此把装配体积压到 ~35KB（diff 改用 `-U0`，三个配置文�
 把该目录加进 PATH 后同一次提交即通过（`0a6ce31`）。
 这是陈旧副本的第二个具体后果——仓库内修复后的 gate-2 走的是「运行错误 vs 重复发现」三态分类、
 且遵循「工具缺失 = SKIP」；陈旧副本这里直接 BLOCK，等于把已修好的误阻断在提交路径上又制造了一遍。
+
+# 追加：Round 3 结果与处置（2026-10-06）
+
+评审区间 `af027da..3141e3e`（16 个提交）。三席输入体积：tech 37677 / feas 36458 / arch 39414 字节。
+
+| 席位 | 模型 | 结果 | 裁决 |
+|---|---|---|---|
+| architecture | `g-glm-5.3-flash` | **未产出**：36897 字节（压缩后）仍两次 `Network error.`、`retryable:false`；同席位 ~60 字节冒烟 7 秒正常返回 | — |
+| technical | `g-qwen3.8-flash` | 37677 字节正常返回 | APPROVED(9)，0 Critical / 1 Major / 3 Minor |
+| feasibility | `g-deepseek-flash` | 36643 字节正常返回 | APPROVED(8)，0 Critical / 3 Major / 6 Minor |
+
+## 席位上限是席位属性，不是全局安全值（Round 2 结论的再确认）
+
+同一 arch 席位：Round 1 在同量级 prompt 答完，Round 2 在 38461 字节两次失败，Round 3 压到 36897 字节仍两次失败；
+而 feas 席位在 36643 字节、tech 席位在 37677 字节都成功。**同一字节数量级上跨席位结果相反**，
+说明 40000 的默认预算与「某个字节数以下一定安全」无关，arch 的失败更可能是该模型/网关路径在大 prompt 下的稳定性问题。
+本轮应对：Round 4 把三席 body 统一压到约 26KB（只发本轮新增的 5 条 AC 原文，其余 13 条沿用 R2/R3 已逐字发过的事实并声明），
+**依然不调大预算**。若 arch 仍失败，则 3/3 共识不可达，评审按 PROCESS_BLOCK 交用户裁定，不用两席结果冒充共识。
+
+## Round 3 发现的逐项处置
+
+| 编号 | 提出 | 处置 | 证据 / 落点 |
+|---|---|---|---|
+| FC-02 本分支新增测试引用 AC-478-01..04，`specification.yaml` 里没有 REQ-478 | feasibility Major | **已修** | `edec9f3` 写入 REQ-478 + 4 条 AC，判据逐条从 `githooks/__tests__/gate-4-subdir-paths.test.bats` 的实际断言反推；解析后 16 REQ / 60 AC / 4 DD / 无重复 ID。席位的意见是「全仓 97/22 另开issue可以，但本分支自己不能扩大缺口」——这条批评成立，且成本只有 24 行 |
+| FC-01 AC-452-15 的测试只钉了计数上界，没钉「已清零文件不得留幽灵额度」 | feasibility Major | **驳回（前提不成立）** | `src/principles/__tests__/warnings-baseline-budgets.test.ts:48-59` 第一个用例名即 `no entry grants a budget to a file that currently has zero warnings`，对 baseline 每个 key 实测告警数、凡 `=== 0` 仍留条目的收进 phantom 数组并 `toEqual([])`；`:61-73` 才是计数上界的第二个用例。AC 的两句判据各对应一个用例 |
+| FC-03 应把「席位实测上限」做成一等公民（失败后回写建议值、给标定方法） | feasibility Major | **记录决定 + 另开 issue** | 方向同意，但需要新的标定协议（按席位记录最大通过字节、失败分类、席位间互不污染），与本分支 P0 误阻断无关；issue 属共享状态，待用户裁定后创建 |
+| FC-04 `max_prompt_bytes: null` 会被判为「已设置」并告警 | feasibility Minor | **保留现状（有意为之）** | 显式写 `null` 属于「想覆盖但覆盖失败」，静默回退正是 `0a6ce31` 要消除的形态；告警不阻断，代价只是一次噪音 |
+| MC-01 陈旧机器级钩子：合并前须向用户明示 / 提供一键同步 | technical Major | **记录决定 + 待裁定** | 修复动作 `npx xp-gate doctor --sync-hooks` 改机器级目录、影响本机所有仓库，未获裁定不执行；本轮可验证证据是仓库内直接跑的 bats |
+| FC-05..FC-09（大小写敏感 APFS、`getEffectiveConfigFor` 单点切分、`test-plugins.sh`、bats 无自动执行路径、hooksPath 验证缺位） | feasibility Minor | **记录决定** | 与 Round 2 同结论，理由逐条见上一节处置表 |
+
+## Round 3 之后的验证（HEAD=`edec9f3`，全部重跑）
+
+- `npx vitest run src/principles` + `scripts/__tests__/{delphi-external-review,code-walkthrough-doc,gate-mw-provenance,walkthrough-evidence-artifact}.test.cjs` → 48 files / **625 passed**
+- `npx vitest run scripts/__tests__/gate-5-runner-error.test.ts` → **13 passed**（单独跑，72s）
+- `npx bats` 五个 gate-4/gate-5/install-hooks 文件 → **36 ok / 0 not ok**（exit 0）
+- 三个 mirror 守卫 → PASS；`npx tsc --noEmit` → clean；`node scripts/test-plugins.mjs` → **Failed: 0**
+- `js-yaml` 解析 `specification.yaml` → **16 REQ / 60 AC / 4 DD / 无重复 ID**
