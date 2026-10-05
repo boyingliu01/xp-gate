@@ -46,6 +46,12 @@ interface PrinciplesConfig {
 /** Config keys that carry a numeric threshold, per group. */
 const NUMERIC_KEYS = ['threshold', 'methodThreshold'] as const;
 
+/**
+ * Ceiling on any single git call made while resolving config. This runs inside a
+ * pre-commit hook, so an unbounded wait is not a slow commit but a hung one.
+ */
+const GIT_TIMEOUT_MS = 15_000;
+
 /** Config keys that must remain arrays. */
 const ARRAY_KEYS = ['exclude'] as const;
 
@@ -196,6 +202,12 @@ function gitToplevel(): string | null {
     const out = execFileSync('git', ['rev-parse', '--show-toplevel'], {
       encoding: 'utf-8',
       stdio: ['ignore', 'pipe', 'ignore'],
+      // Bounded like every other git call that runs inside a hook. Without it a
+      // wedged git (locked index, stalled credential prompt, network-backed fs) hangs
+      // the commit -- and this path is taken by every Gate 4 run, since gate-4.sh
+      // passes no --config. Raised by the Delphi walkthrough (MAJ-01), which noticed
+      // the timeout added to baseline-prune.ts had not been applied here too.
+      timeout: GIT_TIMEOUT_MS,
     }).trim();
     return out.length > 0 ? out : null;
   } catch {

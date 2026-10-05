@@ -164,6 +164,10 @@ specification:
             保留默认值并给出明确告警，不得静默生效而使规则悄悄失去阻断能力。
             checker 的 stderr（配置告警的唯一出口）不得被门禁丢弃
           test_type: unit
+        - id: AC-457-12
+          criteria: 配置解析路径上的 git 调用（含 gitToplevel）必须带超时上限，
+            git 卡死或不可用时回退到 cwd / 内置默认值，不得挂住 pre-commit hook
+          test_type: unit
 
     - id: REQ-452
       description: Boy Scout baseline 必须可剪枝 —— 已删除文件的条目不得长期滞留并继承旧的警告额度
