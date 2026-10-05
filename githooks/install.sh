@@ -41,6 +41,21 @@ for gate in $GATE_SCRIPTS; do
   fi
 done
 
+# Install the hook libraries. A hook resolves them against its own directory
+# ($SCRIPT_DIR/lib/...), so they have to sit next to the installed copy: without
+# lib/, pre-commit loses now_ms() and, since #473, Gate 5's handle_test_failure
+# — whose absence fails closed into a block on every commit.
+if [ -d "$HOOKS_DIR/lib" ]; then
+  mkdir -p "$TARGET_HOOKS/lib"
+  for libfile in "$HOOKS_DIR"/lib/*; do
+    [ -f "$libfile" ] || continue
+    libname=$(basename "$libfile")
+    cp "$libfile" "$TARGET_HOOKS/lib/$libname"
+    chmod +x "$TARGET_HOOKS/lib/$libname"
+    echo "  + lib/$libname -> .git/hooks/lib/"
+  done
+fi
+
 if [ -d "$TARGET_GITHOOKS" ]; then
   if [ "$1" != "--force" ]; then
     mkdir -p "$TARGET_GITHOOKS/adapters"
