@@ -96,7 +96,16 @@ console.log('  ['+severity+'] '+ruleId);console.log('  '+path+':'+line+' → '+m
       fi
     else
       # semgrep runtime error (timeout, config error, etc.)
+      #
+      # SEMGREP_OUTPUT is captured above and was never shown here, so an intermittent
+      # ruleset-fetch failure looked identical to a broken install: the gate printed
+      # "runtime error" and kept the reason to itself (#475). The verdict stays SKIP --
+      # an operational failure must not block the commit, and must not be called a pass.
       echo "     ⚠️  semgrep exited with code ${SEMGREP_EXIT} — skipping gate"
+      if [ -n "$SEMGREP_OUTPUT" ]; then
+        echo "     ── what semgrep reported ──"
+        printf '%s\n' "$SEMGREP_OUTPUT" | tail -10 | sed 's/^/     /'
+      fi
       echo "     ⏭️  SKIPPED - SAST (semgrep runtime error)"
       GATE_10_STATUS="SKIP"
     fi
