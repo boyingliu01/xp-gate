@@ -159,6 +159,11 @@ specification:
           criteria: rules 之外的嵌套段（output / performance）同样深合并，
             用户只写其中一个键时其余默认值不得丢失
           test_type: unit
+        - id: AC-457-11
+          criteria: severity 必须按 error/warning/info 词表校验；写成 "Error" 等词表外的值时
+            保留默认值并给出明确告警，不得静默生效而使规则悄悄失去阻断能力。
+            checker 的 stderr（配置告警的唯一出口）不得被门禁丢弃
+          test_type: unit
 
     - id: REQ-452
       description: Boy Scout baseline 必须可剪枝 —— 已删除文件的条目不得长期滞留并继承旧的警告额度

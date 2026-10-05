@@ -55,7 +55,18 @@ else
         # script never reaches the assignment, and `|| true` would overwrite the
         # status with 0 -- which is exactly the distinction this gate depends on.
         PRINCIPLES_EXIT=0
-        npx tsx "$PRINCIPLES_DIR/index.ts" --files ${PRINCIPLES_ARGS[@]+"${PRINCIPLES_ARGS[@]}"} --format json > /tmp/principles-output.json 2>/dev/null || PRINCIPLES_EXIT=$?
+        # Keep stderr: it carries the checker's configuration warnings -- a rejected
+        # threshold or an out-of-vocabulary severity says so here and nowhere else.
+        # Sending it to /dev/null made an exit-2 SKIP undiagnosable and hid every
+        # .principlesrc typo (Delphi walkthrough MC-03). Captured to a file so a clean
+        # run stays quiet, then replayed only when the checker had a problem.
+        PRINCIPLES_STDERR=$(mktemp)
+        npx tsx "$PRINCIPLES_DIR/index.ts" --files ${PRINCIPLES_ARGS[@]+"${PRINCIPLES_ARGS[@]}"} --format json > /tmp/principles-output.json 2>"$PRINCIPLES_STDERR" || PRINCIPLES_EXIT=$?
+
+        if [ -s "$PRINCIPLES_STDERR" ]; then
+          sed 's/^/     /' "$PRINCIPLES_STDERR"
+        fi
+        rm -f "$PRINCIPLES_STDERR"
 
         if [ "$PRINCIPLES_EXIT" -ge 2 ]; then
           echo "⚠️  Warning: Principles checker execution failed"
