@@ -154,6 +154,31 @@ is_runner_infrastructure_error() {
   return 0
 }
 
+# Detect a coverage-threshold-only exit from a SUBSET vitest run (Issue #473).
+# `vitest run --coverage <few files>` can never satisfy the project's GLOBAL
+# coverage thresholds, so vitest exits non-zero with
+# "does not meet global threshold" even when every test passed. Gate 5's
+# partial-run branches (PARTIAL_TEST_RUN=true) misread that as "Tests FAILED"
+# and blocked every commit touching a single test file. The downstream
+# coverage section already treats partial coverage as a mere warning — this
+# helper makes the vitest call sites consistent with that intent.
+#
+# Returns 0 (true) only when ALL hold:
+#   - PARTIAL_TEST_RUN=true (a full-suite threshold failure must still block),
+#   - the output mentions the global-threshold error, AND
+#   - no real test failure marker is present (fail-closed).
+is_partial_threshold_only_exit() {
+  local _out="$1"
+  [ "${PARTIAL_TEST_RUN:-false}" = "true" ] || return 1
+  [ -n "$_out" ] || return 1
+  printf '%s' "$_out" | grep -qE 'does not meet global threshold' || return 1
+  # A real failure must still block.
+  if printf '%s' "$_out" | grep -qE 'Tests +[0-9]+ failed|FAIL |AssertionError'; then
+    return 1
+  fi
+  return 0
+}
+
 # Parse LCOV file and return coverage percentage
 # Usage: parse_lcov_coverage <lcov_file>
 # Returns: coverage percentage (e.g., "85.5")
@@ -1910,6 +1935,14 @@ else
                 echo "    Workaround: npx vitest run --no-file-parallelism <targets>"
                 TESTS_SKIPPED=true
                 TESTS_EXIT_CODE=0
+              elif is_partial_threshold_only_exit "$TESTS_OUTPUT"; then
+                echo ""
+                echo "⚠️  SKIPPED - coverage thresholds unmet by subset run (no test failed)"
+                echo "    Detected: 'does not meet global threshold' with 0 failed tests."
+                echo "    A subset run cannot reach global thresholds (#473); the full"
+                echo "    suite / CI coverage job still enforces them."
+                TESTS_SKIPPED=true
+                TESTS_EXIT_CODE=0
               else
                 echo ""
                 echo "❌ BLOCKED - Tests FAILED in changed test files"
@@ -1956,9 +1989,19 @@ else
               TESTS_EXIT_CODE=$?
               echo "$TESTS_OUTPUT" | head -60
               if [ "$TESTS_EXIT_CODE" -ne 0 ]; then
-                echo ""
-                echo "❌ BLOCKED - Tests FAILED in related test files"
-                exit 1
+                if is_partial_threshold_only_exit "$TESTS_OUTPUT"; then
+                  echo ""
+                  echo "⚠️  SKIPPED - coverage thresholds unmet by subset run (no test failed)"
+                  echo "    Detected: 'does not meet global threshold' with 0 failed tests."
+                  echo "    A subset run cannot reach global thresholds (#473); the full"
+                  echo "    suite / CI coverage job still enforces them."
+                  TESTS_SKIPPED=true
+                  TESTS_EXIT_CODE=0
+                else
+                  echo ""
+                  echo "❌ BLOCKED - Tests FAILED in related test files"
+                  exit 1
+                fi
               else
                 echo "✅ PASSED - Related test files passed (with coverage)."
               fi
