@@ -48,20 +48,32 @@ else
   done <<< "$PRINCIPLES_FILES"
   
   if [ -n "$PRINCIPLES_FILES" ]; then
-    # Check for principles checker in installed modules first, then project src/
+    # The checker resolves every path it is given -- and every path in CHANGED_FILES
+    # comes from `git diff`, so it is repo-root relative -- against its own working
+    # directory. Resolving against the hook's CWD broke in single-language subdir
+    # mode, where pre-commit has already cd'd into $PROJECT_SUBDIR: web/src/a.ts was
+    # looked up as web/web/src/a.ts, the probes below missed the checker that was
+    # installed one level up, and a working gate degraded to SKIPPED (#478).
+    # Everything this gate reads is therefore anchored at the repo root.
+    PRINCIPLES_BASE="${PROJECT_ROOT:-$(pwd)}"
+
     PRINCIPLES_DIR=""
-    if [ -d ".xp-gate/modules/principles" ]; then
-      PRINCIPLES_DIR=".xp-gate/modules/principles"
-    elif [ -f "src/principles/index.ts" ]; then
-      PRINCIPLES_DIR="src/principles"
-    elif [ -d "$HOME/.config/xp-gate/modules/principles" ]; then
-      PRINCIPLES_DIR="$HOME/.config/xp-gate/modules/principles"
-    fi
+    for _principles_candidate in \
+      "$PRINCIPLES_BASE/.xp-gate/modules/principles" \
+      "$PRINCIPLES_BASE/src/principles" \
+      "$(pwd)/.xp-gate/modules/principles" \
+      "$(pwd)/src/principles" \
+      "$HOME/.config/xp-gate/modules/principles"; do
+      if [ -f "$_principles_candidate/index.ts" ]; then
+        PRINCIPLES_DIR="$_principles_candidate"
+        break
+      fi
+    done
     
     if [ -n "$PRINCIPLES_DIR" ]; then
       echo "Checking Clean Code + SOLID principles..."
       
-      if command -v npx > /dev/null 2>&1 || [ -f "${PROJECT_ROOT:-$(pwd)}/node_modules/tsx/dist/cli.mjs" ]; then
+      if command -v npx > /dev/null 2>&1 || [ -f "$PRINCIPLES_BASE/node_modules/tsx/dist/cli.mjs" ]; then
         # Run principles checker and store results.
         #
         # Do NOT wrap this in `if ...; then`: the checker's exit codes are
@@ -80,8 +92,14 @@ else
         # Sending it to /dev/null made an exit-2 SKIP undiagnosable and hid every
         # .principlesrc typo (Delphi walkthrough MC-03). Captured to a file so a clean
         # run stays quiet, then replayed only when the checker had a problem.
+        #
+        # `cd || exit 2`: a base we cannot enter means the checker never ran, which is
+        # this module's tool-failure code. Falling through would return the exit status
+        # of the failed cd (1), and 1 asserts "I examined files and found errors" -- an
+        # empty report at 1 reads as a clean pass.
         PRINCIPLES_STDERR=$(mktemp)
-        run_tsx "$PRINCIPLES_DIR/index.ts" --files ${PRINCIPLES_ARGS[@]+"${PRINCIPLES_ARGS[@]}"} --format json > /tmp/principles-output.json 2>"$PRINCIPLES_STDERR" || PRINCIPLES_EXIT=$?
+        ( cd "$PRINCIPLES_BASE" 2>/dev/null || exit 2
+          run_tsx "$PRINCIPLES_DIR/index.ts" --files ${PRINCIPLES_ARGS[@]+"${PRINCIPLES_ARGS[@]}"} --format json ) > /tmp/principles-output.json 2>"$PRINCIPLES_STDERR" || PRINCIPLES_EXIT=$?
 
         if [ -s "$PRINCIPLES_STDERR" ]; then
           sed 's/^/     /' "$PRINCIPLES_STDERR"
@@ -108,7 +126,8 @@ else
             echo "  - error-handling violations"
             echo "  - SOLID principle violations"
             echo "  - architectural violations"
-            run_tsx "$PRINCIPLES_DIR/index.ts" --files ${PRINCIPLES_ARGS[@]+"${PRINCIPLES_ARGS[@]}"} --format console
+            ( cd "$PRINCIPLES_BASE" 2>/dev/null || exit 2
+              run_tsx "$PRINCIPLES_DIR/index.ts" --files ${PRINCIPLES_ARGS[@]+"${PRINCIPLES_ARGS[@]}"} --format console )
             GATE_4_STATUS="FAIL"
             exit 1
           fi

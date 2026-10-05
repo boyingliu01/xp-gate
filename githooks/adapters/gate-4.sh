@@ -28,15 +28,24 @@ else
   done <<< "$PRINCIPLES_FILES"
   
   if [ -n "$PRINCIPLES_FILES" ]; then
-    # Check for principles checker in installed modules first, then project src/
+    # Same anchoring as githooks/gate-4.sh: CHANGED_FILES paths are repo-root relative
+    # and the checker resolves them against its own working directory, so both the
+    # probes and the invocation run from the repo root. Resolving them against the
+    # hook's CWD lost the checker in single-language subdir mode (#478).
+    PRINCIPLES_BASE="${PROJECT_ROOT:-$(pwd)}"
+
     PRINCIPLES_DIR=""
-    if [ -d ".xp-gate/modules/principles" ]; then
-      PRINCIPLES_DIR=".xp-gate/modules/principles"
-    elif [ -f "src/principles/index.ts" ]; then
-      PRINCIPLES_DIR="src/principles"
-    elif [ -d "$HOME/.config/xp-gate/modules/principles" ]; then
-      PRINCIPLES_DIR="$HOME/.config/xp-gate/modules/principles"
-    fi
+    for _principles_candidate in \
+      "$PRINCIPLES_BASE/.xp-gate/modules/principles" \
+      "$PRINCIPLES_BASE/src/principles" \
+      "$(pwd)/.xp-gate/modules/principles" \
+      "$(pwd)/src/principles" \
+      "$HOME/.config/xp-gate/modules/principles"; do
+      if [ -f "$_principles_candidate/index.ts" ]; then
+        PRINCIPLES_DIR="$_principles_candidate"
+        break
+      fi
+    done
     
     if [ -n "$PRINCIPLES_DIR" ]; then
       echo "Checking Clean Code + SOLID principles..."
@@ -60,8 +69,13 @@ else
         # Sending it to /dev/null made an exit-2 SKIP undiagnosable and hid every
         # .principlesrc typo (Delphi walkthrough MC-03). Captured to a file so a clean
         # run stays quiet, then replayed only when the checker had a problem.
+        # `cd || exit 2`: a base we cannot enter means the checker never ran, which is
+        # this module's tool-failure code. Falling through would return the exit status
+        # of the failed cd (1), and 1 asserts "I examined files and found errors" -- an
+        # empty report at 1 reads as a clean pass.
         PRINCIPLES_STDERR=$(mktemp)
-        npx tsx "$PRINCIPLES_DIR/index.ts" --files ${PRINCIPLES_ARGS[@]+"${PRINCIPLES_ARGS[@]}"} --format json > /tmp/principles-output.json 2>"$PRINCIPLES_STDERR" || PRINCIPLES_EXIT=$?
+        ( cd "$PRINCIPLES_BASE" 2>/dev/null || exit 2
+          npx tsx "$PRINCIPLES_DIR/index.ts" --files ${PRINCIPLES_ARGS[@]+"${PRINCIPLES_ARGS[@]}"} --format json ) > /tmp/principles-output.json 2>"$PRINCIPLES_STDERR" || PRINCIPLES_EXIT=$?
 
         if [ -s "$PRINCIPLES_STDERR" ]; then
           sed 's/^/     /' "$PRINCIPLES_STDERR"
@@ -88,7 +102,8 @@ else
             echo "  - error-handling violations"
             echo "  - SOLID principle violations"
             echo "  - architectural violations"
-            npx tsx "$PRINCIPLES_DIR/index.ts" --files ${PRINCIPLES_ARGS[@]+"${PRINCIPLES_ARGS[@]}"} --format console
+            ( cd "$PRINCIPLES_BASE" 2>/dev/null || exit 2
+              npx tsx "$PRINCIPLES_DIR/index.ts" --files ${PRINCIPLES_ARGS[@]+"${PRINCIPLES_ARGS[@]}"} --format console )
             GATE_4_STATUS="FAIL"
             exit 1
           fi
