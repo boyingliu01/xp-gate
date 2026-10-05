@@ -233,6 +233,9 @@ specification:
         - id: AC-423-06
           criteria: requested_model 去重校验保持有效
           test_type: unit
+        - id: AC-423-07
+          criteria: 瞬态走查证据 .code-walkthrough-result.json 不被仓库跟踪（.gitignore 规则已存在，跟踪状态才是漏洞）
+          test_type: unit
   design_decisions:
     - id: DD-001
       decision: 走薄桥（方案 A）在 ctx.tools 注册三工具，而非独立 MCP server 或纯技能
