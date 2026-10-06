@@ -79,11 +79,17 @@ function parseTimeout(options: GateMOptions, args: string[], i: number): void {
 // ── File filtering: excludes tests, declarations, adapters ──
 // Delegate per-language filtering to a helper.
 
-function filterSourceFiles(files: string[]): string[] {
+export function filterSourceFiles(files: string[]): string[] {
   return files.filter(file => {
     const ext = path.extname(file);
     // Skip test files
     if (file.includes('.test.') || file.includes('_test.')) return false;
+    // Skip whole test trees (#480): helpers, fixtures, and harnesses under a
+    // tests/|test/|__tests__/ segment are test infrastructure, not production
+    // source. They are exercised only by suites the project's mutation config
+    // may exclude, so a production mutation threshold against them is
+    // structurally unreachable (dialog-survey push block, 2026-10-06).
+    if (/(^|\/)(tests|test|__tests__)\//.test(file)) return false;
     // Skip Java/Kotlin test files: FooTest.java, FooSpec.kt, etc.
     if (/[A-Z]Test\.(java|kt|kts)$/.test(file)) return false;
     if (/[A-Z]Tests\.(java|kt|kts)$/.test(file)) return false;
