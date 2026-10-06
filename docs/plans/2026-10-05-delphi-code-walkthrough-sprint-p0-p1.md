@@ -306,3 +306,37 @@ Round 3 因此把装配体积压到 ~35KB（diff 改用 `-U0`，三个配置文�
 - `npx bats` 五个 gate-4/gate-5/install-hooks 文件 → **36 ok / 0 not ok**（exit 0）
 - 三个 mirror 守卫 → PASS；`npx tsc --noEmit` → clean；`node scripts/test-plugins.mjs` → **Failed: 0**
 - `js-yaml` 解析 `specification.yaml` → **16 REQ / 60 AC / 4 DD / 无重复 ID**
+
+# 追加：Round 4 结果与绑定（2026-10-06）
+
+## 席位处置
+
+architecture 席位（g-glm-5.3-flash）第 5、6 次失败（36897B / 38461B，均为 `Network error.` retryable:false）后，按用户裁定执行 **(a) 换 S 供应商路由**：`requested_model` 改为 `s-glm-5.3-flash`（Silver 供应商，whalecloud 网关同源换供应商前缀；b 前案「三个 G 全换 S」未触发）。该席位于 36KB 全量输入下一次通过。**注意**：`.delphi-config.json` 为 gitignored 本地文件，此次替换不随分支提交；换席理由已在证据文件 notes 中披露。
+
+## Round 4 三席裁决（绑定轮）
+
+| 席位 | requested_model | resolved_model | verdict | confidence | Major / Minor |
+|---|---|---|---|---|---|
+| architecture | s-glm-5.3-flash | glm-5.3-flash | APPROVED | 7 | 0 / 6 |
+| technical | g-qwen3.8-flash | qwen3.8-flash | APPROVED | 9 | 1 / 4 |
+| feasibility | g-deepseek-flash | deepseek-flash | APPROVED | 8 | 4 / 8 |
+
+consensus_ratio = 1.0（三席全 APPROVED，无对立项）。
+
+## Round 4 Major 逐项处置
+
+| 提出 | 内容 | 处置 |
+|---|---|---|
+| tech MC-01 / arch MN-A3 / feas M2 | 陈旧机器级 core.hooksPath 使提交路径上的 Gate PASS 只证明旧钩子未反对 | **待用户裁定**（`npx xp-gate doctor --sync-hooks` 改机器级目录，未获裁定不执行）；push 证据 notes 已显式注明该环境前提 |
+| feas AC-452-15 措辞 | 「spec 未写已清零文件不得留额度」 | **驳回（前提不成立）**：spec 原文含「已清零的文件不得留下幽灵额度」，与 R3 对测试文件的驳回证据互证 |
+| feas arch 席位警告 | 若 arch 本轮仍失败必须 PROCESS_BLOCK | 未触发（arch 本轮通过）；R4 证据含该处置承诺 |
+| arch MJ-01 / feas / tech | Gate 4 三副本 `--config` 1/1/4 分叉需定性 + 语义守卫 | **另开 issue**（Gate 4 三副本收敛或守卫） |
+| arch MJ-02 / feas | 97/22 全仓缺口另开 issue 但首提交必须绑增量守卫 | **另开 issue**（spec↔test 引用完整性守卫） |
+| arch MJ-03 | arch 席位按席位标定协议 | **另开 issue**（per-seat 标定协议，FC-03 同归并） |
+
+## 绑定与推送
+
+- 证据文件 `.code-walkthrough-result.json`：commit `f494785`，branch `fix/p0-false-blocks-436-428`，verdict APPROVED，`2026-10-06T11:10:31Z` 起 1 小时有效，consensus_ratio 1.0，三席均为 `channel: external` + `result_type: delphi_expert_result`；`node githooks/lib/validate-code-walkthrough.cjs` 自验 VALIDATOR_PASS。
+- 推送：`f494785` → origin 分支（Gate MW VERIFIED）并快进 origin/main（`6e29410..f494785`）。
+- 用户裁定的后续 6 个 issue 已创建：#481（席位标定）、#482（Gate 4 三副本）、#483（97/22 守卫）、#484（bats 接入 CI）、#485（技能镜像守卫 6×74）、#486（删除 test-plugins.sh）。
+- open PR 收尾：#467、#435 服务端合并（合并前 bats 19 ok / 4 ok 实测）；#474、#459、#472、#479 经逐提交核对为已被 main 取代后关闭（映射表见各 PR 关闭评论）；#438 冲突消解后并入 main（`8330c2f`，DSH 与 WorkBuddy 两平台段落共存 + 6 棵镜像树补拷）；#471 保持 open 并留移植方案（IN_PROJECT_SUBDIR 未被取代，Gate 1 段需按 `lib/typecheck.sh` 新结构移植）。
