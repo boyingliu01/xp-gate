@@ -1,0 +1,89 @@
+{
+  "name": "delphi-review-team",
+  "version": "1.0.0",
+  "description": "Delphi consensus review team: anonymous multi-expert review of designs, requirements and code with statistical consensus (>=90%) before build/merge.",
+  "author": {
+    "name": "boyingliu01",
+    "email": "boyingliu01@users.noreply.github.com"
+  },
+  "homepage": "https://github.com/boyingliu01/xp-gate",
+  "license": "MIT",
+  "agents": [
+    "./agents/delphi-review-team-team-lead.md",
+    "./agents/delphi-arch-reviewer.md",
+    "./agents/delphi-tech-reviewer.md",
+    "./agents/delphi-feasibility-reviewer.md"
+  ],
+  "skills": ["./skills/delphi-review"],
+
+  "expertType": "team",
+  "agentName": "delphi-review-team-team-lead",
+  "teamInfo": {
+    "leadAgent": "delphi-review-team-team-lead",
+    "memberAgents": [
+      "delphi-arch-reviewer",
+      "delphi-tech-reviewer",
+      "delphi-feasibility-reviewer"
+    ]
+  },
+
+  "displayName": {
+    "en": "Delphi Review Team",
+    "zh": "Delphi 评审专家团"
+  },
+  "profession": {
+    "en": "Delphi Review Team",
+    "zh": "Delphi 评审专家团"
+  },
+  "displayDescription": {
+    "en": "Three anonymous cross-model experts review designs, requirements and code; consensus reached at >=90% agreement before approval.",
+    "zh": "三位跨模型匿名专家对设计、需求与代码做多轮共识评审，≥90%一致才放行，兼顾三重视角"
+  },
+  "avatar": "avatars/team.png",
+  "categoryId": "10-ProjectQuality",
+  "defaultInitPrompt": {
+    "zh": "帮我评审这份设计/需求方案，我要一份多专家共识评审报告",
+    "en": "Review my design/requirements document and give me a multi-expert consensus report"
+  },
+  "plugin": "delphi-review-team",
+  "tags": [
+    { "en": "Code Review", "zh": "代码评审" },
+    { "en": "Consensus", "zh": "多专家共识" },
+    { "en": "Quality Gate", "zh": "质量门禁" }
+  ],
+  "quickPrompts": [
+    { "en": "Review my design/requirements document and give me a multi-expert consensus report", "zh": "帮我评审这份设计/需求方案，我要一份多专家共识评审报告" },
+    { "en": "Do a pre-push code walkthrough on my current changes", "zh": "对我当前的代码改动做一次 push 前代码走查" },
+    { "en": "Review the requirements before coding starts", "zh": "编码前先评审需求，确认可行再动手" }
+  ],
+  "members": [
+    {
+      "id": "delphi-review-team-team-lead",
+      "displayName": { "en": "Heng Dingyi", "zh": "衡定一" },
+      "profession": { "en": "Review Host", "zh": "评审主持人" },
+      "avatar": "avatars/delphi-review-team-team-lead.png",
+      "role": "lead"
+    },
+    {
+      "id": "delphi-arch-reviewer",
+      "displayName": { "en": "Gou Yuantu", "zh": "构远图" },
+      "profession": { "en": "Architecture Reviewer", "zh": "架构评审官" },
+      "avatar": "avatars/delphi-arch-reviewer.png",
+      "role": "member"
+    },
+    {
+      "id": "delphi-tech-reviewer",
+      "displayName": { "en": "Yan Maguan", "zh": "严码关" },
+      "profession": { "en": "Technical Reviewer", "zh": "技术评审官" },
+      "avatar": "avatars/delphi-tech-reviewer.png",
+      "role": "member"
+    },
+    {
+      "id": "delphi-feasibility-reviewer",
+      "displayName": { "en": "Wen Luodi", "zh": "稳落地" },
+      "profession": { "en": "Feasibility Reviewer", "zh": "可行性评审官" },
+      "avatar": "avatars/delphi-feasibility-reviewer.png",
+      "role": "member"
+    }
+  ]
+}
