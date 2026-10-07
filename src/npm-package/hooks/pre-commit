@@ -2832,8 +2832,10 @@ generate_quality_report() {
   if [ -n "$TESTS_OUTPUT" ] && echo "$TESTS_OUTPUT" | grep -qi "fail\|error\|FAILED"; then
     # Extract failure lines: "FAIL src/foo.test.ts" or "  ✗ test name"
     local FAIL_LINES
-    FAIL_LINES=$(echo "$TESTS_OUTPUT" | grep -E "^\s*(FAIL|✗|failed|AssertionError)" | head -10 | \
-      sed 's/"/\\"/g' | awk '{ printf "%s%s%s", sep, "\"", $0; sep="," }')
+    # errexit/pipefail-safe: grep returns 1 on zero matches (see #489) and this
+    # function is also sourced by consumer wrappers that may enable errexit
+    FAIL_LINES=$(echo "$TESTS_OUTPUT" | grep -E "^\s*(FAIL|✗|failed|AssertionError)" | sed -n '1,10p' | \
+      sed 's/"/\\"/g' | awk '{ printf "%s%s%s", sep, "\"", $0; sep="," }') || true
     if [ -n "$FAIL_LINES" ]; then
       FAILED_TESTS_JSON="[$FAIL_LINES]"
     fi
