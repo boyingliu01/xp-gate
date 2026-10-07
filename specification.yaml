@@ -457,6 +457,11 @@ specification:
           criteria: 非 Qoder 平台模拟（无任何 ~/.qoder 内容）仍判为 opencode，
             agent 部署跳过路径行为不变
           test_type: unit
+        - id: AC-424-04
+          criteria: 两个标记同时存在时的优先级写入契约：~/.qoder 优先于
+            ~/.claude/skills，二者都无才落 opencode（Round 2 架构席位 MA-01：
+            该行为只有 shared-paths.test.js 钉住、spec 未认领，契约与测试可发散）
+          test_type: unit
 
     - id: REQ-450
       description: Gate 0 的 [skip-version-check] 提示误导用户——实际 bypass 要求
@@ -476,6 +481,13 @@ specification:
           test_type: integration
         - id: AC-450-03
           criteria: 结构断言非空洞——缺少新提示的副本会被匹配器拒绝
+          test_type: integration
+        - id: AC-450-04
+          criteria: 提示承诺的四条必须被执行层验证，而不是只被文案断言：工具链路径 +
+            chore: 前缀的 bypass 放行；同一 bypass 遇生产源码仍 exit 1；未列出的
+            commit type 被拒绝；标记只在首行才生效。测试在运行期从随包真实
+            pre-commit 中抽出该门禁块求值，块被搬走即抽取为空并报错
+            （Round 2 架构席位 MA-01）
           test_type: integration
 
     - id: REQ-431
@@ -567,9 +579,12 @@ specification:
             SKILLS_REGISTRY；未知技能报错时列出的清单与目录内容完全一致
           test_type: unit
         - id: AC-416-06
-          criteria: 技能命令的参数解析只接受已实现的 flag；--offline 这类已从用法
+          criteria: 技能命令的参数解析只接受该命令已实现的 flag；--offline 这类已从用法
             中移除的 flag 必须报"Unknown argument(s)"并退出 1，不得静默 no-op
-            （与 #488 给 doctor 的契约同类，Round 1 架构席位 MA-02）
+            （与 #488 给 doctor 的契约同类，Round 1 架构席位 MA-02）。flag 白名单按
+            命令划分，不是全局一张表：install-skill 只吃 --verbose/--force，
+            update-skill 只吃 --verbose/--all/--check，uninstall-skill 只吃 --force
+            ——被解析但不被消费同样是被忽略的选项（Round 2 架构席位 MI-04）
           test_type: unit
     - id: REQ-429
       description: delphi-external-review 的三处静默失败：30000 超时默认值在两处
