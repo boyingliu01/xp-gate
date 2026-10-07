@@ -12,7 +12,7 @@
       "experts": {
         "architecture": {
           "provider": "whalecloud",
-          "model": "g-glm-5.3-flash",
+          "model": "s-glm-5.3-flash",
           "max_tokens": 32000
         },
         "technical": {

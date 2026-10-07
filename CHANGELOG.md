@@ -4,7 +4,36 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+## [0.20.0.0] - 2026-10-08
+
 ### Fixed
+
+**缺陷批（`fix/batch-defects-20261007`，逐个 open issue 复现后修复）**
+
+- **Gate 10 一次暂存 ≥2 个受支持文件时静默杀死提交（#490）**: `githooks/gate-10.sh` 把换行拼接的 `SEMGREP_FILES` 作为**单个**参数交给 `semgrep scan`，于是 semgrep 收到 `$'app.ts\nlib.ts'` 这样的非法扫描根并报 `Invalid scanning root`；单文件提交只是碰巧没有换行才看起来正常（#475 现场报告的"时好时坏"即此）。现改为逐行展开成 `SEMGREP_ARGS` 数组并以 `"${SEMGREP_ARGS[@]}"` 传参，且每个元素统一加 `./` 前缀——被跟踪的路径可以合法地以 `-` 开头（`git add -- ./-o.ts`），裸进 argv 就是选项，一个恶意或误名的文件足以改写它本该受限的那次扫描。5 个 BATS 用例锁定数组展开、`-` 开头与含空格文件名，并断言三份随包副本（`githooks/`、`src/npm-package/`、`src/npm-package/hooks/`）字节一致。
+- **`FAIL_LINES` 提取在消费方 wrapper 里泄漏 errexit，钩子在所有门禁打印 PASS 之后死掉（#489）**: 门禁模块是被 source 进 pre-commit 的，管道里 `grep` 零命中返回 1 时，`set -e` 上下文直接终止提交且不留任何输出。现改用 `sed -n '1,10p'`（同时补上 v0.9.2 head→sed 迁移漏掉的一处）并以 `|| true` 收尾；AC-489-02 在两份随包副本上都钉住该形态。
+- **Gate M 把测试树里的基础设施当生产代码评分（#480）**: 过滤器只按文件名排除 `*.test.*`，`tests/e2e/helpers/e2e-server.ts` 这类不改名的测试设施因此进入 Stryker，用 60% 的生产阈值评出一个结构性不可达的 0%，掐断 push。现按整段路径（`(^|/)(tests?|__tests__)/`）排除，且 Round 2 之后所有排除规则读取**同一个**分隔符视图（此前只有树段规则读 `normalized`，`.test.`/`_test.`、Java/Kotlin 与 `/adapters/` 读原始路径，Windows 反斜杠路径被两套口径同时评判）；`*.spec.*` 也与 pre-push 的过滤链对齐；Java/Kotlin 的 `Test/Tests/IT/Spec` 结尾匹配不再要求前一个大写字母（`[A-Z]Test\.` 只命中 `MyTest.java`，主流命名 `FooTest.java` 此前一直漏排）。新增 bash↔TS 过滤链 parity 测试，并把 `src/test-utils/`、`src/mytests/` 这类生产路径的豁免写成断言。
+- **`doctor` 判已安装技能新鲜度时把行尾差异报成 Outdated（#439）**: frontmatter 正则只认 LF，退化分支做字节比较，`core.autocrlf=true` 的工作树下 13 个技能里 12 个被假报过期并推荐带破坏性的 `update-skill --all`，唯一一条真差异被噪声淹没。现 `extractSkillVersion` 与内容比较都按 LF/CRLF/孤立 CR 三种约定归一。
+- **`doctor` 的 hook 同步与漂移检查漏掉 `githooks/lib/`（#488）**: pre-commit 运行期 source `lib/*.sh`，安装副本缺文件或停留在旧版会让钩子直接死在 source 那一行，而 `--sync-hooks` 从不复制、漂移检查从不看这些文件。现在 lib/ 下每个文件都有独立的 PASS/FAIL 标签与 0o755 权限同步。
+- **全新 Qoder 安装被误判为 opencode（#424）**: `detectPlatform` 只认 `~/.qoder/skills`，而 brand-new 安装还没有 `skills/`，于是 `configureQoderDelphiAgents` 部署零个 Delphi agent；同时 `detect-deps.js` 与 `shared-paths.js` 各有一份实现可发散。现任何 `~/.qoder` 内容都计为标记，`detect-deps.js` 改为 re-export 同一函数（引用相等），两标记并存时的优先级写入 AC-424-04。
+- **Gate 0 的 `[skip-version-check]` 提示与真实契约不符（#450）**: 旧文案"include [skip-version-check] in commit message"让人以为正文任意位置放标记即可，实际要求标记在**首行行首**、带 `chore:`/`docs:`/`release:` 前缀、且只覆盖构建工具链路径。提示已按真实契约重写；Round 2 之后新增一组 BATS 在运行期从随包真实 `pre-commit` 抽出该门禁块**执行**（工具链路径放行、生产源码仍 exit 1、未列类型被拒、标记只在首行生效），不再只断言文案。
+- **回归测试在 Windows 工作树下把 markdown 里的 JSON 示例读成"文档漂移"（#425）**: 提取示例的正则按裸 `\n` 写，CRLF 工作树必然不匹配。新增 `scripts/lib/read-markdown.cjs` 统一归一并声明其范围（只有 CRLF——唯一写入方是 git checkout，孤立 CR 无生产者，git 对路径里的控制字符是引用而非透传）。
+- **sprint-gate 的解析链测试不再执行真实契约（#431）**: `sprint-gate.test.bats` 与脚本实际解析顺序脱钩后一直绿着，等于没有守卫。已恢复为对真实合同的断言。
+- **`scripts/test-plugins.sh` 永久红（#486）**: 它把 MSYS 的 `REPO_ROOT` 插进 `node -e` 的路径参数，在 Windows/Git Bash 必然假失败，且与全绿的 `.mjs` 孪生并存、无人调用——两个半都留着只会训练团队忽略红色。已删除该脚本并把引用（含 `AGENTS.md`、`plugins/AGENTS.md`、clipboard-vision 各副本测试）指向 `.mjs`，`dead-plugin-test-script.test.cjs` 守卫"删得干净、且没把两个半都删掉"。
+- **`ARCHITECTURE.md` 的门禁计数陈旧（#432）**: 与 `pre-commit`/`pre-push` 现状对齐。
+- **语言检测对没有配置文件的语言视而不见（#468）**: `detectProjectLanguages()` 只按 `configFiles` 判定，而 shell/powershell 两项的 `configFiles` 是空数组，于是 147 个 `.sh` + 27 个 `.ps1` 的仓库在 `doctor`/`check-tools` 里根本不出现。现加入扩展名兜底，且**只对没有配置文件可依的语言生效**（IaC 注册了 `yaml/yml`，全局兜底会把任何有 CI YAML 的仓库判成 IaC 项目），扫描跳过 `node_modules/`、`.git/` 等依赖与 VCS 目录；遍历顺序改为字典序以保证可复现。
+
+### Changed
+
+- **未知命令行参数不再静默 no-op（#488 #416，Round 1/2 评审追加）**: `xp-gate doctor` 现在只接受 `--fix`/`--sync-hooks`，技能命令的 flag 白名单**按命令划分**而不是全局一张表（`install-skill` 只吃 `--verbose`/`--force`，`update-skill` 只吃 `--verbose`/`--all`/`--check`，`uninstall-skill` 只吃 `--force`）——被解析成功但从不消费的 flag 同样是被忽略的选项。**这是破坏性变更**：此前 `--offline` 之类已从用法里移除的写法会 exit 0 并假装执行，升级后任何依赖该行为的脚本会 exit 1 并列出该命令真正支持的 flag。迁移：删掉脚本里多余的 flag。
+- **Delphi 外部评审在配置边界 fail fast（#429）**: `api_key` 环境变量未设置由 WARNING 改为 exit(1)，`validateProviders` 现在校验 profile 内全部 provider（含未被任何专家引用的）。**这是破坏性变更**：历史遗留的不完整 `.delphi-config.json` 在升级后首次调用即硬失败，没有降级开关——这是有意的，因为配置不完整的评审产出的是不可用而非"部分可用"的凭据。迁移：升级后先跑一次单席位冒烟（`node scripts/delphi-external-review.cjs --expert architecture --mode code-walkthrough --profile <p> --config .delphi-config.json --input-file <小文件>`），把缺失的 `${ENV}` 补齐。
+- **`install-skill`/`update-skill` 改为复制随包整目录（#416）**: 原先从 GitHub main 分支拉单个 `SKILL.md`，13 个技能里 8 个的 `references/`、`templates/`、`scripts/` 全部缺失且技能运行时引用悬空；`update` 还会先删空目标目录再只写回一个 `SKILL.md`。现在从 npm 包内 `skills/<name>/` 整目录复制、无网络请求，"本包不含该技能"的检查发生在任何删除动作之前，`download-skill.js` 随之下线。文档（`README.md`、两份 `AGENTS.md`）同步改为"bundle-copied"。
+- **语言检测开始要求 shell/powershell 工具链（#468 的可见后果）**: 检出的语言集合变大后，`check-tools` 会开始提示安装 `shellcheck` 等。工具缺失仍按仓库既有契约降级为 SKIP、不阻断提交；不需要该语言的显式传 `--languages`（`--languages shell` 与 `--languages=shell` 两种写法现在都生效，此前空格形式被静默忽略）。
+
+**上一批（同一版本内，先前会话完成）**
+
+### Fixed
+
 - **Qoder Delphi 专家 agent 声明的模型从未生效**: `plugins/qoder/agents/delphi-*.md` 的 `model` 字段写成裸模型名（`Qwen3.7-Max` / `GLM-5.2` / `DeepSeek-V4-Pro`），而 Qoder Custom Agent 要求 `"[DisplayName](modelId)"` 格式；格式不符或模型已不在内置目录中时 Qoder 不报错，三个专家于是静默跑在同一个模型上，违反"三个不同可执行模型 ID"契约。模板现改为 `qfmodel` / `gfmodel` / `dfmodel` 三个 0.1× 内置模型，并新增模板格式回归测试。**但隔离复测（修好格式后新开会话再派发）表明这不足以恢复契约**：平台对 `subagent_type` 派发只采纳 Custom Agent 的角色提示词，`model` 绑定被忽略、执行模型固定为会话模型，因此本条只是消除声明层面的非法绑定；真实边界与迁移指引见下方 Changed 条目。
 - **`init --global` 不部署 Qoder 专家 agent**: `configureQoderDelphiAgents()` 只在 local init 调用，全局安装的用户拿不到任何 agent 模板。现在 `setupGlobal` 同时部署到 `~/.qoder/agents/`（已存在的用户自定义文件仍不覆盖）。
 - **单测污染 npm 包模板**: `init.test.js` 用 `fs.writeFileSync` 直接向 `src/npm-package/plugins/qoder/agents/delphi-architecture.md` 写入 `'arch expert'` / `'TEMPLATE CONTENT'` 且从不恢复，跑完测试后发布用模板被替换成 1 行垃圾内容。改为断言包内真实模板内容，不再写模板目录。
