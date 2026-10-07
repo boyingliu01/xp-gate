@@ -64,11 +64,24 @@ function diagnoseTuiRegistration(checks) {
  * @returns {string|undefined}
  */
 function extractSkillVersion(content) {
-  const match = content.match(/^---\n([\s\S]*?)\n---/);
+  // \r?\n, not \n: a working tree checked out with core.autocrlf=true ships CRLF
+  // SKILL.md files, and the LF-only pattern returned undefined for every one of
+  // them -- pushing each skill into the byte-comparison branch and reporting it
+  // Outdated (#439).
+  const match = content.match(/^---\r?\n([\s\S]*?)\r?\n---/);
   if (!match) return undefined;
   const frontmatter = match[1];
   const versionMatch = frontmatter.match(/version:\s*(\S+)/);
   return versionMatch ? versionMatch[1] : undefined;
+}
+
+/**
+ * Compare two SKILL.md bodies ignoring line-ending style. Bundled copies come from
+ * whichever checkout packed them, installed copies come from whatever the platform's
+ * writer chose, so endings are never evidence of staleness (#439).
+ */
+function sameContentIgnoringLineEndings(a, b) {
+  return a.replace(/\r\n/g, '\n') === b.replace(/\r\n/g, '\n');
 }
 
 /**
@@ -145,8 +158,8 @@ function diagnoseInstalledSkills(config, checks) {
     if (bundledVersion !== undefined && userVersion !== undefined) {
       const cmp = compareSemver(userVersion, bundledVersion);
       if (cmp === undefined) {
-        // Version strings not valid semver — fall back to byte comparison
-        if (bundledContent !== userContent) {
+        // Version strings not valid semver — fall back to content comparison
+        if (!sameContentIgnoringLineEndings(bundledContent, userContent)) {
           checks.push({
             name: `Skill: ${name}`,
             status: 'WARN',
@@ -168,8 +181,9 @@ function diagnoseInstalledSkills(config, checks) {
         checks.push({ name: `Skill: ${name}`, status: 'PASS', detail: 'Up to date' });
       }
     } else {
-      // No version in at least one file — fall back to byte-for-byte comparison
-      if (bundledContent !== userContent) {
+      // No version in at least one file — compare content, but not byte-for-byte:
+      // line endings alone are not evidence of staleness (#439).
+      if (!sameContentIgnoringLineEndings(bundledContent, userContent)) {
         checks.push({
           name: `Skill: ${name}`,
           status: 'WARN',
