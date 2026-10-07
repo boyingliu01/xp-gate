@@ -271,4 +271,59 @@ describe('doctor hook source-of-truth drift (#451)', () => {
     expect(result.skipped).toContain('pre-commit');
     expect(fs.statSync(installedFile).mtimeMs).toBe(before);
   });
+
+  // -------------------------------------------------------------------------
+  // REQ-488: sync and drift must cover the githooks/lib/ shared libraries.
+  // After pre-commit was refactored to `source lib/*.sh`, a synced pre-commit
+  // died at the source line on the machine: sync copied only the three hook
+  // files, so the installed lib/ stayed stale or empty (#488).
+  // -------------------------------------------------------------------------
+
+  it('REQ-488: syncGlobalHooksFromRepo copies githooks/lib/ shared libraries', () => {
+    const { repoRoot, repoHooks, installedHooks } = scaffold({
+      repoPreCommit: '#!/bin/bash\n# xp-gate pre-commit\nsource lib/typecheck.sh\n',
+    });
+    fs.mkdirSync(path.join(repoHooks, 'lib'), { recursive: true });
+    fs.writeFileSync(path.join(repoHooks, 'lib', 'typecheck.sh'), 'typecheck-lib\n');
+    fs.writeFileSync(path.join(repoHooks, 'lib', 'validate-code-walkthrough.cjs'), 'walkthrough-lib\n');
+
+    const { syncGlobalHooksFromRepo } = loadDoctor();
+    const result = syncGlobalHooksFromRepo({ repoRoot, repoHooks, installedHooks });
+
+    expect(result.errors).toEqual([]);
+    expect(fs.readFileSync(path.join(installedHooks, 'lib', 'typecheck.sh'), 'utf8')).toBe('typecheck-lib\n');
+    expect(fs.readFileSync(path.join(installedHooks, 'lib', 'validate-code-walkthrough.cjs'), 'utf8')).toBe('walkthrough-lib\n');
+    expect(result.synced).toContain('lib/typecheck.sh');
+  });
+
+  it('REQ-488: drift reports a missing or stale installed lib/ file', () => {
+    const { repoRoot, repoHooks, installedHooks } = scaffold({ repoPreCommit: 'same\n' });
+    fs.mkdirSync(path.join(repoHooks, 'lib'), { recursive: true });
+    fs.writeFileSync(path.join(repoHooks, 'lib', 'typecheck.sh'), 'repo-version\n');
+
+    const { diagnoseHookDrift } = loadDoctor();
+
+    const missing = diagnoseHookDrift({ repoRoot, repoHooks, installedHooks });
+    expect(missing.issues).toBe(1);
+    expect(missing.checks.some(c => c.name === 'Hook drift: lib/typecheck.sh' && c.status === 'FAIL')).toBe(true);
+
+    fs.mkdirSync(path.join(installedHooks, 'lib'), { recursive: true });
+    fs.writeFileSync(path.join(installedHooks, 'lib', 'typecheck.sh'), 'installed-version\n');
+    const stale = diagnoseHookDrift({ repoRoot, repoHooks, installedHooks });
+    expect(stale.issues).toBe(1);
+
+    fs.writeFileSync(path.join(installedHooks, 'lib', 'typecheck.sh'), 'repo-version\n');
+    const ok = diagnoseHookDrift({ repoRoot, repoHooks, installedHooks });
+    expect(ok.issues).toBe(0);
+  });
+
+  it('REQ-488: a repo without lib/ still syncs and drifts cleanly', () => {
+    const { repoRoot, repoHooks, installedHooks } = scaffold({ repoPreCommit: '#!/bin/bash\n# xp-gate pre-commit\n' });
+
+    const { syncGlobalHooksFromRepo, diagnoseHookDrift } = loadDoctor();
+    const syncResult = syncGlobalHooksFromRepo({ repoRoot, repoHooks, installedHooks });
+
+    expect(syncResult.errors).toEqual([]);
+    expect(diagnoseHookDrift({ repoRoot, repoHooks, installedHooks }).issues).toBe(0);
+  });
 });

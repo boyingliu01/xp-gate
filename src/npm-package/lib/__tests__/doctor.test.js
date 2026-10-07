@@ -599,6 +599,23 @@ describe('doctor', () => {
 
   // === Edge cases ===
 
+  it('AC-488: doctor rejects unknown flags instead of silently ignoring them', async () => {
+    const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+    const { doctor } = require('../doctor');
+    const result = await doctor(['--syn-hooks', 'extra-arg']);
+    expect(result).toBe(1);
+    expect(errorSpy).toHaveBeenCalledWith(expect.stringContaining('Unknown flag'));
+    errorSpy.mockRestore();
+  });
+
+  it('AC-488: doctor still accepts its documented flags', async () => {
+    const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+    const { doctor } = require('../doctor');
+    await doctor(['--fix', '--sync-hooks']);
+    expect(errorSpy).not.toHaveBeenCalled();
+    errorSpy.mockRestore();
+  });
+
   it('reports exit code 1 with unhealthy or missing install', async () => {
     const { doctor } = require('../doctor');
     const result = await doctor([]);

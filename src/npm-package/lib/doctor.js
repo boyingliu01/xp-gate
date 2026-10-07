@@ -258,6 +258,8 @@ async function checkGlobalHooks(checks) {
 /**
  * Hook files eligible for repo-vs-installed drift comparison. Only hooks that
  * exist on both sides are compared, so a repo without post-merge is not flagged.
+ * The lib/ shared libraries (sourced by pre-commit at runtime) are covered
+ * separately by diagnoseHookDrift/syncGlobalHooksFromRepo (#488).
  */
 const DRIFT_COMPARED_HOOKS = ['pre-commit', 'pre-push', 'post-merge'];
 
@@ -326,6 +328,43 @@ function diagnoseHookDrift(ctx = {}) {
       detail: `${direction} — local commits run githooks/${name} only after syncing`,
     });
     issues++;
+  }
+
+  // lib/ shared libraries: pre-commit sources lib/*.sh at runtime, so a missing
+  // or stale installed lib/ copy breaks the hook entirely after a sync (#488).
+  const repoLib = path.join(repoHooks, 'lib');
+  const installedLib = path.join(installedHooks, 'lib');
+  if (fs.existsSync(repoLib) && fs.statSync(repoLib).isDirectory()) {
+    let libEntries = [];
+    try {
+      libEntries = fs.readdirSync(repoLib, { withFileTypes: true });
+    } catch {
+      libEntries = [];
+    }
+    for (const entry of libEntries) {
+      if (!entry.isFile()) continue;
+      const rel = `lib/${entry.name}`;
+      const repoFile = path.join(repoLib, entry.name);
+      const installedFile = path.join(installedLib, entry.name);
+      const label = `Hook drift: ${rel}`;
+      if (!fs.existsSync(installedFile)) {
+        checks.push({
+          name: label,
+          status: 'FAIL',
+          detail: 'installed lib/ copy is missing (hooks source lib/ at runtime)',
+        });
+        issues++;
+      } else if (!filesAreIdentical(repoFile, installedFile)) {
+        checks.push({
+          name: label,
+          status: 'FAIL',
+          detail: 'installed lib/ copy differs from githooks/lib/',
+        });
+        issues++;
+      } else {
+        checks.push({ name: label, status: 'PASS', detail: 'Installed copy matches githooks/' });
+      }
+    }
   }
 
   return { checks, issues };
@@ -445,6 +484,43 @@ function syncGlobalHooksFromRepo(ctx = {}) {
       synced.push(name);
     } catch (err) {
       errors.push(`${name}: ${err.message}`);
+    }
+  }
+
+  // lib/ shared libraries: pre-commit sources lib/*.sh, so a synced hook file
+  // without its libraries dies at the source line on the machine (#488).
+  const repoLib = path.join(repoHooks, 'lib');
+  const installedLib = path.join(installedHooks, 'lib');
+  if (fs.existsSync(repoLib) && fs.statSync(repoLib).isDirectory()) {
+    try {
+      fs.mkdirSync(installedLib, { recursive: true });
+    } catch (err) {
+      errors.push(`cannot create ${installedLib}: ${err.message}`);
+      return { synced, skipped, errors, installedHooks };
+    }
+    let libEntries = [];
+    try {
+      libEntries = fs.readdirSync(repoLib, { withFileTypes: true });
+    } catch (err) {
+      errors.push(`cannot read ${repoLib}: ${err.message}`);
+      return { synced, skipped, errors, installedHooks };
+    }
+    for (const entry of libEntries) {
+      if (!entry.isFile()) continue;
+      const rel = `lib/${entry.name}`;
+      const source = path.join(repoLib, entry.name);
+      const target = path.join(installedLib, entry.name);
+      try {
+        if (fs.existsSync(target) && filesAreIdentical(source, target)) {
+          skipped.push(rel);
+          continue;
+        }
+        fs.copyFileSync(source, target);
+        fs.chmodSync(target, 0o755);
+        synced.push(rel);
+      } catch (err) {
+        errors.push(`${rel}: ${err.message}`);
+      }
     }
   }
 
@@ -1242,6 +1318,16 @@ function diagnoseLanguageTools() {
 }
 
 async function doctor(args) {
+  // #488: an unrecognised flag used to be silently ignored — the npm release
+  // that predates --sync-hooks made "doctor --sync-hooks" a silent no-op and
+  // the user believed a sync had happened. Fail loudly instead.
+  const KNOWN_FLAGS = ['--fix', '--sync-hooks'];
+  const unknownFlags = args.filter(a => !KNOWN_FLAGS.includes(a));
+  if (unknownFlags.length > 0) {
+    console.error(`Unknown flag(s) for doctor: ${unknownFlags.join(', ')}`);
+    console.error(`Supported flags: ${KNOWN_FLAGS.join(', ')}`);
+    return 1;
+  }
   const fixMode = args.includes('--fix');
   const syncHooks = args.includes('--sync-hooks');
 
