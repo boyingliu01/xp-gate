@@ -2,6 +2,7 @@
 const path = require('path');
 const fs = require('fs');
 const os = require('os');
+const { readMarkdown } = require('../lib/read-markdown.cjs');
 
 // Helper to load the module fresh for each test
 function loadModule() {
@@ -104,7 +105,7 @@ describe('readConfig', () => {
   let originalBailianApiKey;
 
   function extractDelphiConfigExample(relativePath) {
-    const markdown = fs.readFileSync(path.join(projectRoot, relativePath), 'utf8');
+    const markdown = readMarkdown(path.join(projectRoot, relativePath));
     const section = markdown.match(/(?:### |\*\*)\.delphi-config\.json[^\n]*\n[\s\S]*?```json\n([\s\S]*?)\n```/);
     if (!section) throw new Error(`${relativePath} must contain a .delphi-config.json JSON example`);
     return section[1];
