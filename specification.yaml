@@ -464,6 +464,28 @@ specification:
         - id: AC-450-03
           criteria: 结构断言非空洞——缺少新提示的副本会被匹配器拒绝
           test_type: integration
+
+    - id: REQ-431
+      description: sprint-gate.test.bats 的 pre-commit resolution 用例与 #476 后的
+        真实契约脱节（resolver 已移入 lib/sprint-gate-report.sh、tier 4 指向真实
+        $HOME、resolver 未命中时非零退出、Windows 临时目录 EBUSY），15/17 失败且
+        无任何 CI 运行 .bats 使其不可见（#431）
+      priority: medium
+      acceptance_criteria:
+        - id: AC-431-01
+          criteria: resolution 用例在 source 了 lib/sprint-gate-report.sh 之后才
+            eval 标记块；并有守卫断言两份 pre-commit 都 source 该 lib，否则测试
+            harness 会先于契约失效
+          test_type: integration
+        - id: AC-431-02
+          criteria: 每个 resolution 用例先把 HOME 指向临时目录，使 tier 4
+            （$HOME/.config/xp-gate/hooks）既可被断言"不存在则空"，也有命中该层
+            的正例；空值用例同时断言标记块确实被捕获（非空洞）
+          test_type: integration
+        - id: AC-431-03
+          criteria: teardown 对 Windows 短暂目录锁重试后再删，只有目录仍在才判失败；
+            全文件在 Windows 上 0 失败
+          test_type: integration
   design_decisions:
     - id: DD-001
       decision: 走薄桥（方案 A）在 ctx.tools 注册三工具，而非独立 MCP server 或纯技能
