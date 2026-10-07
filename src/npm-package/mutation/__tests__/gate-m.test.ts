@@ -138,8 +138,41 @@ describe('gate-m.ts - Mutation Testing Gate', () => {
       expect(result).toEqual([]);
     });
 
+    // Round 2 feasibility FC-03: only the test-tree regex read `normalized`, the
+    // `.test.`/`_test.`, Java/Kotlin and /adapters/ checks read the raw path, so a
+    // backslash-delimited path was judged by two different views of one string.
+    it('should judge every exclusion against one separator view of the path (#480)', () => {
+      for (const files of [
+        ['src\\adapters\\router.ts'],
+        ['src\\FooTest.java'],
+        ['src/FooTest.java'],
+        ['src/PaymentTests.kt'],
+        ['src/BillingSpec.kts'],
+        ['src\\helper_test.go'],
+        ['src\\__tests__\\harness.ts'],
+        ['src\\legacy.d.ts'],
+      ]) {
+        expect(filterSourceFiles(files)).toEqual([]);
+      }
+    });
+
+    // The same class as #480: pre-push excludes *.spec.* from the mutation
+    // candidate list, gate-m.ts did not, so the two definitions of "not
+    // production code" already disagreed on spec-named test files.
+    it('should filter out *.spec.* test files, as pre-push already does (#480)', () => {
+      expect(filterSourceFiles(['src/login.spec.ts'])).toEqual([]);
+      expect(filterSourceFiles(['src\\login.spec.ts'])).toEqual([]);
+    });
+
     it('should not exclude production paths that merely contain "test" as a substring (#480)', () => {
-      const files = ['src/latest/foo.ts', 'src/protest/foo.ts'];
+      // Round 2 technical MN-02 asked whether the tree segment is anchored: it is,
+      // so only a whole path segment named test/tests/__tests__ excludes.
+      const files = [
+        'src/latest/foo.ts',
+        'src/protest/foo.ts',
+        'src/test-utils/foo.ts',
+        'src/mytests/foo.ts',
+      ];
       const result = filterSourceFiles(files);
 
       expect(result).toEqual(files);
