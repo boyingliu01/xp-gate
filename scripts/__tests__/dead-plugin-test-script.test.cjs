@@ -18,6 +18,8 @@ const EXEMPT_PATHS = [
   'CHANGELOG.md',
   '.code-walkthrough-result.json',
   '.qoder' + path.sep,
+  // REQ-486 describes the deletion, so it necessarily names the script.
+  'specification.yaml',
   // This guard necessarily names the script it forbids.
   'scripts' + path.sep + '__tests__' + path.sep + 'dead-plugin-test-script.test.cjs',
 ];
@@ -67,6 +69,12 @@ describe('dead plugin-test script (#486)', () => {
   );
 
   it('has no remaining live reference to the deleted script', () => {
-    expect(liveFilesReferencing('test-plugins.sh')).toEqual([]);
+    const hits = liveFilesReferencing('test-plugins.sh');
+    // Anti-vacuity: the scan really walks the tree — a script the suite still
+    // owns must be found by the same helper.
+    expect(liveFilesReferencing('test-plugins.mjs')).toContain(
+      path.join('scripts', 'test-plugins.mjs')
+    );
+    expect(hits).toEqual([]);
   });
 });
