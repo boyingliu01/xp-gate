@@ -82,7 +82,7 @@ XP-Gate 将确定性质量门禁（纯代码）与 AI 智能评审（多专家�
 │                       Layer 1: Git Hooks (Deterministic)                     │
 │                                                                              │
 │   ┌─────────────────────────────────────────────────────────────────────┐   │
-│   │                    pre-commit (Gate 0-9, 10 道门禁)                    │   │
+│   │              pre-commit (Gate 0-11 阻断, Gate 12 警告)              │   │
 │   ├─────────────────────────────────────────────────────────────────────┤   │
 │   │ Gate 1 │ Gate 2 │ Gate 3 │ Gate 4 │ Gate 5 │ Gate 6                 │   │
 │   │ Code   │ Dup    │ CCN    │Principles│ Tests │Arch +                │   │
@@ -110,22 +110,29 @@ XP-Gate 将确定性质量门禁（纯代码）与 AI 智能评审（多专家�
 
 #### 3.1.1 pre-commit 钩子
 
-pre-commit 在每次 `git commit` 时自动运行 6 道质量门禁，任何一道失败都会阻止提交。
+pre-commit 在每次 `git commit` 时自动运行 12 道编号门禁（Gate 0–11），任何一道失败都会阻止提交；Gate 12 (File Hygiene) 只报警告，不阻断。
 
-**10 道门禁 (Gate 0-9)**
+**12 道编号门禁 (Gate 0-11) + Gate 12 (warning-only)**
 
 | Gate | 名称 | 检查内容 | 标准 |
 |------|------|----------|------|
+| 0 | Version Consistency | VERSION vs package.json（受保护分支） | 一致 |
 | 1 | Code Quality | 静态分析 + Lint + Shell 检查 | 零错误 |
 | 2 | Duplicate Code | 重复代码检测 | ≤5% 相似度 |
 | 3 | Cyclomatic Complexity | 圈复杂度 | ≤5 警告, ≤10 阻断 |
 | 4 | Principles | Clean Code + SOLID | 零错误 |
 | 5 | Tests + Coverage | 单元测试 + 覆盖率 | 全部通过 + ≥80% |
 | 6 | Architecture + Boy Scout | 层边界 + 童子军规则 | 不违规 + 警告不增 |
+| 7 | IaC Security | checkov/hadolint/kube-score/tflint | 无高危发现 |
+| 8 | Secret Scanning | gitleaks | 零密钥泄漏 |
+| 9 | Build Integrity | TypeScript 编译 + 包/导入解析 | 可编译可解析；非 TS 项目 SKIP |
+| 10 | SAST Security | semgrep ruleset | 无高危发现 |
+| 11 | Sprint Flow | sprint-gate.sh 决策 | allow/skip 放行 |
+| 12 | File Hygiene | 尾部空白/缺 EOF 换行/冲突标记/超大文件 | 警告，不阻断 |
 
 **关键文件**
 
-- `githooks/pre-commit` — 10 道门禁主脚本 (Gate 0-9, ~2084 行)
+- `githooks/pre-commit` — 门禁主编排脚本 (Gate 0-12, ~3000 行)
 - `githooks/adapter-common.sh` — 语言检测与路由 (130 行)
 
 #### 3.1.2 语言适配器模式
@@ -732,9 +739,9 @@ root/
 
 ## 7. 设计决策
 
-### 7.1 门禁数量演进 (9 → 6 → 10)
+### 7.1 门禁数量演进 (9 → 6 → 10 → 12)
 
-原始设计有 9 道门禁；中期重构合并为 6 道；v0.8.x 安全审计阶段又新增 3 道安全门禁 + Gate 0 版本一致性预检，得到当前的 10 道 (Gate 0-9)。
+原始设计有 9 道门禁；中期重构合并为 6 道；v0.8.x 安全审计阶段又新增 3 道安全门禁 + Gate 0 版本一致性预检，得到 10 道 (Gate 0-9)；v0.14.x 起补入构建完整性、SAST、Sprint Flow 与文件卫生，得到当前的 **12 道编号门禁 (Gate 0-11) + Gate 12（warning-only）**。
 
 **阶段一：原始 9 道（拆分过细）**
 
@@ -756,7 +763,16 @@ root/
 | Gate 8 (Secret Scanning) | gitleaks (`.gitleaks.toml`) | 防止密钥/凭证泄漏 |
 | Gate 9 (Semgrep SAST) | semgrep ruleset | 应用层 SAST 安全扫描 |
 
-**当前总数**: Gate 0-9 = 10 道（脚本数字编号）；用户文档仍可以 "代码质量(1+2+5) / 复杂度(3) / 原则(4) / 架构(6) / 安全(7+8+9)" 5 个概念簇 + Gate 0 预检的旧 "6 道" 视角阅读。
+**阶段三：v0.11.x / v0.14.x 补入的构建与流程门禁**
+
+| 新增/重编号门禁 | 来源 | 引入理由 |
+|----------------|------|----------|
+| Gate 9 (Build Integrity) | `src/build-integrity/gate-10.ts` | tsc 编译 + `npm pack --dry-run` + 导入路径合法性，v0.11.0 新增 |
+| Gate 10 (SAST Security) | 原 Gate 9 (Semgrep) | v0.11.0 重编号：Build Integrity 与 Semgrep 曾因共用 `GATE_9_STATUS` 互相覆盖结果 |
+| Gate 11 (Sprint Flow) | `githooks/sprint-gate.sh` | 校验 sprint 状态一致性（BUILD 前需 delphi-review APPROVED），v0.11.0 重编号 |
+| Gate 12 (File Hygiene) | `githooks/gate-12-file-hygiene.sh` | 尾部空白 / 缺 EOF 换行 / 冲突标记 / 超大文件 / YAML-JSON 语法，v0.14.15 新增；仅冲突标记与语法错误硬阻断，其余警告 |
+
+**当前总数**: Gate 0-11 = 12 道编号门禁（脚本数字编号，全部可阻断）+ Gate 12 (File Hygiene, warning-only)；用户文档仍可以 "代码质量(1+2+5) / 复杂度(3) / 原则(4) / 架构(6) / 安全(7+8+10)" 5 个概念簇 + Gate 0 预检的旧 "6 道" 视角阅读。
 
 **关键收益**:
 - 适配器统一封装语言工具链，跨语言一致行为
