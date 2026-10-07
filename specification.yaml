@@ -382,6 +382,11 @@ specification:
             "${SEMGREP_ARGS[@]}" 数组展开调用 semgrep，不得再把引号包裹的
             SEMGREP_FILES 当单参数传递
           test_type: integration
+        - id: AC-490-04
+          criteria: 以 - 开头的暂存路径（git add -- ./-o.ts）必须以 ./ 前缀形式
+            进入 argv，使任何参数解析器都无法把它读成选项；其余目标同样统一为
+            ./relative/path（Round 1 技术席位 MC-01）
+          test_type: integration
 
     - id: REQ-488
       description: doctor --sync-hooks 的同步与漂移检查必须覆盖 githooks/lib/ 共享库，
@@ -551,6 +556,11 @@ specification:
           criteria: 可安装技能清单由包内 skills/ 目录推导，不再有手工维护的
             SKILLS_REGISTRY；未知技能报错时列出的清单与目录内容完全一致
           test_type: unit
+        - id: AC-416-06
+          criteria: 技能命令的参数解析只接受已实现的 flag；--offline 这类已从用法
+            中移除的 flag 必须报"Unknown argument(s)"并退出 1，不得静默 no-op
+            （与 #488 给 doctor 的契约同类，Round 1 架构席位 MA-02）
+          test_type: unit
     - id: REQ-429
       description: delphi-external-review 的三处静默失败：30000 超时默认值在两处
         重复表达（改一处即分叉）；api_key 引用的环境变量未设置时只 WARNING 并继续
@@ -602,6 +612,10 @@ specification:
         - id: AC-468-05
           criteria: check-tools/install-tools 同时接受 --languages=<lang> 与
             --languages <lang>，空格形式不得静默回落到自动探测
+          test_type: unit
+        - id: AC-468-06
+          criteria: 空选择（--languages= 或 --languages=,）与裸 --languages 一样
+            回落到自动探测，绝不产生名为 '' 的语言（Round 1 架构席位 MI-02）
           test_type: unit
   design_decisions:
     - id: DD-001
