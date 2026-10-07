@@ -1844,8 +1844,10 @@ else
       # TypeScript: vitest with smart test selection
       if [ "$CURRENT_LANG" = "typescript" ] && { [ -f "package.json" ] || [ -f "$PROJECT_ROOT/package.json" ]; }; then
         if run_without_git_context npx vitest --version >/dev/null 2>&1; then
-          # Count changed test files to decide strategy
-          CHANGED_TEST_FILE_COUNT=$(echo "$CHANGED_TEST_FILES" | grep -c '.' || echo "0")
+          # Count changed test files to decide strategy. `grep -c '.'` prints its
+          # own zero AND exits 1 on an empty list, so `|| echo "0"` used to yield
+          # $'0\n0' -- the same two-value bug that false-blocked Gate 8 (#493).
+          CHANGED_TEST_FILE_COUNT=$(echo "$CHANGED_TEST_FILES" | grep -c '.' || true)
           
           # Also get changed source files (non-test) for related-test lookup
           CHANGED_SRC_FILES=$(git diff --cached --name-only --diff-filter=ACM | grep -E '\.(ts|tsx|js|jsx)$' | grep -v '\.test\.' | grep -v '\.spec\.' | grep -v '__tests__' | grep -v '\.d\.ts$' | grep -v '__snapshots__' || true)
@@ -1857,7 +1859,7 @@ else
           if [ -n "$PROJECT_SUBDIR" ] && [ "$PROJECT_SUBDIR" != "." ] && [ -n "$CHANGED_SRC_FILES" ]; then
             CHANGED_SRC_FILES=$(echo "$CHANGED_SRC_FILES" | sed "s|^${PROJECT_SUBDIR}/||")
           fi
-          CHANGED_SRC_COUNT=$(echo "$CHANGED_SRC_FILES" | grep -c '.' || echo "0")
+          CHANGED_SRC_COUNT=$(echo "$CHANGED_SRC_FILES" | grep -c '.' || true)
           
           # Decide strategy
           if [ "$CHANGED_TEST_FILE_COUNT" -gt 20 ] 2>/dev/null; then
