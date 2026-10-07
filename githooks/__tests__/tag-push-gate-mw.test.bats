@@ -11,6 +11,8 @@
 #   - tag on a local-only commit + no evidence → BLOCK (no smuggling path)
 #   - mixed push (branch ref + published tag) + no evidence → BLOCK
 #   - lightweight tag on an already-published commit + no evidence → PASS
+#   - tag-before-branch line order: branch side still gated (Round-1 arch)
+#   - tag reachable only from a NON-base remote branch → BLOCK (Round-1 tech)
 
 SOURCE_GITHOOKS="${XP_GATE_GITHOOKS:-$(cd "$BATS_TEST_DIRNAME/.." && pwd)}"
 
@@ -140,4 +142,34 @@ push_tag_ref() {
   push_tag_ref v1.0.0
   [ "$status" -eq 0 ]
   [[ "$output" != *"CODE WALKTHROUGH REQUIRED"* ]]
+}
+
+@test "tag listed BEFORE the branch ref still gates the branch side" {
+  git tag -a v1.0.0 -m "Release v1.0.0"
+  echo "export const d = 4;" >> src/foo.ts
+  echo "const y = 4;" >> src/foo.test.ts
+  git add . && git commit -q -m "unreviewed change"
+  rm -f .code-walkthrough-result.json
+  local tag_sha head_sha prev_sha
+  tag_sha="$(git rev-parse v1.0.0)"
+  head_sha="$(git rev-parse HEAD)"
+  prev_sha="$(git rev-parse HEAD^)"
+  run bash -c "printf '%s\n' 'refs/tags/v1.0.0 ${tag_sha} refs/tags/v1.0.0 ${ZEROS}' 'refs/heads/main ${head_sha} refs/heads/main ${prev_sha}' | '$PWD/.git/hooks/pre-push' origin https://example.com"
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"WALKTHROUGH"* ]]
+}
+
+@test "tag on a commit only on a NON-BASE remote branch is blocked (scope = protected base)" {
+  git tag -a v1.0.0 -m "Release v1.0.0"
+  echo "export const e = 5;" >> src/foo.ts
+  echo "const z = 5;" >> src/foo.test.ts
+  git add . && git commit -q -m "side branch work"
+  # --no-verify here only simulates pre-existing remote state for the fixture;
+  # the hook under test is invoked explicitly via stdin, not by this push.
+  git push -q --no-verify origin HEAD:refs/heads/feature/side
+  git tag -a v9.9.9 -m "tagged on side branch"
+  rm -f .code-walkthrough-result.json
+  push_tag_ref v9.9.9
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"WALKTHROUGH"* ]]
 }
