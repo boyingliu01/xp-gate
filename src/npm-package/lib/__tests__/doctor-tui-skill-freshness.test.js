@@ -59,6 +59,8 @@ describe('doctor-tui skill freshness (#439)', () => {
     expect(extractSkillVersion('---\r\nname: x\r\nversion: 2.1.0\r\n---\r\nbody\r\n')).toBe('2.1.0');
     // LF must keep working -- the fix is a widening, not a swap.
     expect(extractSkillVersion('---\nname: x\nversion: 2.1.0\n---\nbody\n')).toBe('2.1.0');
+    // ... and so must a lone CR, the third convention the helper's name covers.
+    expect(extractSkillVersion('---\rname: x\rversion: 2.1.0\r---\rbody\r')).toBe('2.1.0');
   });
 
   it('treats a versioned skill as up to date when only line endings differ', () => {
@@ -76,6 +78,17 @@ describe('doctor-tui skill freshness (#439)', () => {
     // so freshness can only be decided by content.
     expect(bundled).not.toMatch(/^version:/m);
     installSkill('grilling', flipLineEndings(bundled));
+    const { check } = runFreshness('grilling');
+    expect(check, JSON.stringify(check)).toBeDefined();
+    expect(check.status).toBe('PASS');
+  });
+
+  // AC-439-02 promises "differences beyond line endings" still report Outdated,
+  // which means every line-ending convention has to be tolerated, not just CRLF
+  // (Round 2 feasibility FC-05: the helper's name already says as much).
+  it('treats a lone-CR skill file as up to date too', () => {
+    const bundled = readBundled('grilling');
+    installSkill('grilling', bundled.replace(/\r\n/g, '\n').replace(/\n/g, '\r'));
     const { check } = runFreshness('grilling');
     expect(check, JSON.stringify(check)).toBeDefined();
     expect(check.status).toBe('PASS');

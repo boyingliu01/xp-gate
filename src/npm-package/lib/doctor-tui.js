@@ -64,11 +64,11 @@ function diagnoseTuiRegistration(checks) {
  * @returns {string|undefined}
  */
 function extractSkillVersion(content) {
-  // \r?\n, not \n: a working tree checked out with core.autocrlf=true ships CRLF
-  // SKILL.md files, and the LF-only pattern returned undefined for every one of
-  // them -- pushing each skill into the byte-comparison branch and reporting it
-  // Outdated (#439).
-  const match = content.match(/^---\r?\n([\s\S]*?)\r?\n---/);
+  // A line terminator, not "LF": a working tree checked out with
+  // core.autocrlf=true ships CRLF SKILL.md files, and the LF-only pattern
+  // returned undefined for every one of them -- pushing each skill into the
+  // byte-comparison branch and reporting it Outdated (#439).
+  const match = content.match(/^---(?:\r\n|\r|\n)([\s\S]*?)(?:\r\n|\r|\n)---/);
   if (!match) return undefined;
   const frontmatter = match[1];
   const versionMatch = frontmatter.match(/version:\s*(\S+)/);
@@ -78,10 +78,13 @@ function extractSkillVersion(content) {
 /**
  * Compare two SKILL.md bodies ignoring line-ending style. Bundled copies come from
  * whichever checkout packed them, installed copies come from whatever the platform's
- * writer chose, so endings are never evidence of staleness (#439).
+ * writer chose, so endings are never evidence of staleness (#439). Every convention
+ * normalizes: a lone CR is as much a line ending as CRLF, which is what this name
+ * already promises.
  */
 function sameContentIgnoringLineEndings(a, b) {
-  return a.replace(/\r\n/g, '\n') === b.replace(/\r\n/g, '\n');
+  const normalize = (s) => s.replace(/\r\n|\r|\n/g, '\n');
+  return normalize(a) === normalize(b);
 }
 
 /**
