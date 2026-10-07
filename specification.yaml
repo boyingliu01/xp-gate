@@ -389,6 +389,46 @@ specification:
             ./relative/path（Round 1 技术席位 MC-01）
           test_type: integration
 
+    - id: REQ-493
+      description: Gate 8 从 gitleaks JSON 报告读"发现数"时，零发现必须只得到一个值 ——
+        grep -c 在零匹配时既打印 0 又以 1 退出，`|| echo 0` 于是追加出第二行，
+        判决表三个字符串比较全部落空，干净扫描被当成"有发现"exit 1；只要 gitleaks
+        在钩子 PATH 上，每一次提交都被误 BLOCK（#493）
+      priority: critical
+      acceptance_criteria:
+        - id: AC-493-01
+          criteria: 空报告 [] 经生产计数表达式得到单一值 "0"（无内嵌换行），
+            因而命中 PASS 分支而不是落到 fail-closed 的 else
+          test_type: integration
+        - id: AC-493-02
+          criteria: 计数按出现次数而非匹配行数：同一行上的 N 个 RuleID 计为 N，
+            阻断信息里的数字与真实发现数一致
+          test_type: integration
+        - id: AC-493-03
+          criteria: 真实 gitleaks 干净扫描产物（本机 8.30.1 实测写出 []）计数为 0，
+            不依赖手写 fixture 的形状
+          test_type: integration
+        - id: AC-493-04
+          criteria: 全部随包 gate-8 副本（githooks/gate-8.sh、githooks/adapters/、
+            githooks/gates/、src/npm-package/ 的三份）计数行逐字一致，
+            生产与测试不得漂移（测试抽取生产表达式执行，而非誊写）
+          test_type: integration
+        - id: AC-493-05
+          criteria: 同类写法全库清除：任何随包 shell 不得再出现
+            `grep -c … || echo`（零匹配时产生两个值）
+          test_type: integration
+        - id: AC-493-06
+          criteria: 干净扫描端到端判 PASS，输出不出现 BLOCKED
+          test_type: integration
+        - id: AC-493-07
+          criteria: 有发现的报告仍然 exit 1，信息为 "reported 1 finding(s)" ——
+            修复不得把误 BLOCK 修成不检测
+          test_type: integration
+        - id: AC-493-08
+          criteria: gitleaks exit 0 但无报告工件，或工件不是 JSON 数组形状时保持
+            "?" 语义 → SKIP，绝不宣称 PASS（#449 的 fail-closed-on-the-claim）
+          test_type: integration
+
     - id: REQ-488
       description: doctor --sync-hooks 的同步与漂移检查必须覆盖 githooks/lib/ 共享库，
         且不得静默忽略未知 flag —— lib/ 重构后 pre-commit 运行时 source lib/*.sh，
