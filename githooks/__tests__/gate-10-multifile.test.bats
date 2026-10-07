@@ -6,7 +6,7 @@
 #         scanning root" -- silently killing the whole commit. Single-file
 #         commits worked by accident (no newline in the string), which is why
 #         this looked intermittent (#475's field reports).
-# @covers AC-490-01, AC-490-02, AC-490-03
+# @covers AC-490-01, AC-490-02, AC-490-03, AC-490-04
 
 setup() {
   REPO_ROOT="$(cd "$BATS_TEST_DIRNAME/../.." && pwd)"
@@ -70,8 +70,8 @@ STUB
   [[ "$output" == *"STATUS=PASS"* ]]
   NUM_TARGETS=$(grep -c '\.ts$' "$TEST_DIR/argv.txt")
   [ "$NUM_TARGETS" -eq 2 ]
-  grep -qx "app.ts" "$TEST_DIR/argv.txt"
-  grep -qx "lib.ts" "$TEST_DIR/argv.txt"
+  grep -qx './app.ts' "$TEST_DIR/argv.txt"
+  grep -qx './lib.ts' "$TEST_DIR/argv.txt"
 }
 
 @test "AC-490-02: a multi-file commit PASSes and reports the scanned file count" {
@@ -92,4 +92,20 @@ STUB
       return 1
     fi
   done
+}
+
+# Round 1 review (technical MC-01): an array element that begins with '-' is a
+# valid repo path (`git add -- ./-o.ts`) but semgrep reads it as an option, so a
+# single hostile or misnamed file could rewrite the scan it was supposed to run.
+# './' is the form no argument parser can misread.
+@test "AC-490-04: a staged path starting with '-' reaches semgrep as a path, not an option" {
+  write_argv_semgrep_stub
+  echo "export const negative = 1;" > ./-o.ts
+  git add -- ./-o.ts
+
+  run run_gate_with_argv_stub "$TEST_DIR/argv.txt"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"STATUS=PASS"* ]]
+  grep -qx './-o.ts' "$TEST_DIR/argv.txt"
+  ! grep -qx -- '-o.ts' "$TEST_DIR/argv.txt"
 }

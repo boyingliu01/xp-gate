@@ -84,4 +84,30 @@ function copyAdapters(srcDir, destDir) {
   }
 }
 
-module.exports = { copyDirRecursive, readXpGateConfig, copyHooks, copyAdapters };
+/**
+ * The flags the skill commands implement. A flag outside this list used to be
+ * dropped silently, so `xp-gate install-skill <name> --offline` — the form the
+ * CLI documented until the bundle-only installer (#416) removed it — exited 0
+ * having done nothing with the flag. Same defect class as the one #488 fixed for
+ * `doctor --sync-hooks`: an ignored option must be answered loudly.
+ */
+const SKILL_FLAGS = ['--verbose', '--force', '--all', '--check'];
+
+/**
+ * @param {string[]} args - arguments after the skill name
+ * @returns {{options: Object.<string, boolean>, unknown: string[]}}
+ */
+function parseSkillFlags(args) {
+  const options = { verbose: false, force: false, all: false, check: false };
+  const unknown = [];
+  for (const arg of args) {
+    if (!SKILL_FLAGS.includes(arg)) {
+      unknown.push(arg);
+      continue;
+    }
+    options[arg.slice(2)] = true;
+  }
+  return { options, unknown };
+}
+
+module.exports = { copyDirRecursive, readXpGateConfig, copyHooks, copyAdapters, SKILL_FLAGS, parseSkillFlags };
