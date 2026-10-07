@@ -10,6 +10,7 @@ import fs from 'fs/promises';
 // We need to test parseArgs and filterSourceFiles from gate-m
 // Import the module and test its public interface
 import { detectAITestCharacteristics } from '../detect-ai-test';
+import { filterSourceFiles } from '../gate-m';
 
 /* jscpd:disable */
 function parseArgs(args: string[]): {
@@ -55,16 +56,6 @@ function parseArgs(args: string[]): {
   return options;
 }
 /* jscpd:enable */
-
-function filterSourceFiles(files: string[]): string[] {
-  return files.filter(file => {
-    if (!file.endsWith('.ts')) return false;
-    if (file.endsWith('.test.ts')) return false;
-    if (file.endsWith('.d.ts')) return false;
-    if (file.includes('/adapters/')) return false;
-    return true;
-  });
-}
 
 vi.mock('fs/promises');
 
@@ -126,11 +117,13 @@ describe('gate-m.ts - Mutation Testing Gate', () => {
       expect(result).toEqual(['src/foo.ts']);
     });
 
-    it('should filter out non-TypeScript files', () => {
+    it('should keep files whose language has a registered runner', () => {
+      // Real filter behaviour: routing is by registered runner, not by .ts.
+      // Python has a runner (mutmut), plain JavaScript does not.
       const files = ['src/foo.ts', 'src/bar.js', 'src/baz.py'];
       const result = filterSourceFiles(files);
 
-      expect(result).toEqual(['src/foo.ts']);
+      expect(result).toEqual(['src/foo.ts', 'src/baz.py']);
     });
 
     it('should return empty array when no source files', () => {
@@ -138,6 +131,32 @@ describe('gate-m.ts - Mutation Testing Gate', () => {
       const result = filterSourceFiles(files);
 
       expect(result).toEqual([]);
+    });
+
+    // #480: the module header claims "excludes tests", but the implementation
+    // only skipped files *named* like test cases. Test-tree infrastructure
+    // (helpers/fixtures/harnesses under tests/|test/|__tests__/) fell through
+    // and got mutated against the production 60% threshold — structurally
+    // unreachable for files whose only consumers are suites the project's
+    // mutation config deliberately excludes.
+    it('should exclude test-tree helpers, not just *.test.* files (#480)', () => {
+      const files = [
+        'src/foo.ts',
+        'tests/e2e/helpers/e2e-server.ts',
+        'test/util.ts',
+        'src/__tests__/helpers.ts',
+        'a/b/tests/fixture-factory.ts',
+      ];
+      const result = filterSourceFiles(files);
+
+      expect(result).toEqual(['src/foo.ts']);
+    });
+
+    it('should keep production paths that merely resemble test names (#480)', () => {
+      const files = ['testing/reporter.ts', 'src/test-data.ts', 'tests-helper.ts'];
+      const result = filterSourceFiles(files);
+
+      expect(result).toEqual(files);
     });
   });
 
