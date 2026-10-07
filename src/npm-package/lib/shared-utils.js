@@ -85,23 +85,31 @@ function copyAdapters(srcDir, destDir) {
 }
 
 /**
- * The flags the skill commands implement. A flag outside this list used to be
- * dropped silently, so `xp-gate install-skill <name> --offline` — the form the
- * CLI documented until the bundle-only installer (#416) removed it — exited 0
+ * The flags each skill command consumes. A flag outside that command's list used
+ * to be dropped silently, so `xp-gate install-skill <name> --offline` — the form
+ * the CLI documented until the bundle-only installer (#416) removed it — exited 0
  * having done nothing with the flag. Same defect class as the one #488 fixed for
- * `doctor --sync-hooks`: an ignored option must be answered loudly.
+ * `doctor --sync-hooks`: an ignored option must be answered loudly. A flag that
+ * parses but is never destructured by the handler is ignored too, so the table is
+ * keyed per command (Round 2 architecture MI-04).
  */
-const SKILL_FLAGS = ['--verbose', '--force', '--all', '--check'];
+const SKILL_FLAGS_BY_COMMAND = {
+  'install-skill': ['--verbose', '--force'],
+  'update-skill': ['--verbose', '--all', '--check'],
+  'uninstall-skill': ['--force'],
+};
 
 /**
  * @param {string[]} args - arguments after the skill name
+ * @param {string} command - the subcommand whose flags are accepted
  * @returns {{options: Object.<string, boolean>, unknown: string[]}}
  */
-function parseSkillFlags(args) {
+function parseSkillFlags(args, command) {
   const options = { verbose: false, force: false, all: false, check: false };
+  const allowed = SKILL_FLAGS_BY_COMMAND[command] || [];
   const unknown = [];
   for (const arg of args) {
-    if (!SKILL_FLAGS.includes(arg)) {
+    if (!allowed.includes(arg)) {
       unknown.push(arg);
       continue;
     }
@@ -110,4 +118,4 @@ function parseSkillFlags(args) {
   return { options, unknown };
 }
 
-module.exports = { copyDirRecursive, readXpGateConfig, copyHooks, copyAdapters, SKILL_FLAGS, parseSkillFlags };
+module.exports = { copyDirRecursive, readXpGateConfig, copyHooks, copyAdapters, SKILL_FLAGS_BY_COMMAND, parseSkillFlags };

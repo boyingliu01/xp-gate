@@ -9,26 +9,40 @@ const { parseSkillFlags } = require('../shared-utils');
 
 describe('parseSkillFlags (#416)', () => {
   it('parses the flags the skill commands implement', () => {
-    const { options, unknown } = parseSkillFlags(['--verbose', '--force']);
+    const { options, unknown } = parseSkillFlags(['--verbose', '--force'], 'install-skill');
 
     expect(options).toMatchObject({ verbose: true, force: true, all: false, check: false });
     expect(unknown).toEqual([]);
   });
 
   it('names a flag it does not implement instead of swallowing it', () => {
-    const { unknown } = parseSkillFlags(['--offline', '--verbose']);
+    const { unknown } = parseSkillFlags(['--offline', '--verbose'], 'install-skill');
 
     expect(unknown).toEqual(['--offline']);
   });
 
   it('treats a value argument as unknown rather than silently dropping it', () => {
-    expect(parseSkillFlags(['main']).unknown).toEqual(['main']);
+    expect(parseSkillFlags(['main'], 'install-skill').unknown).toEqual(['main']);
   });
 
   it('reports no unknown flag for an empty argument list', () => {
-    expect(parseSkillFlags([])).toEqual({
+    expect(parseSkillFlags([], 'install-skill')).toEqual({
       options: { verbose: false, force: false, all: false, check: false },
       unknown: [],
     });
+  });
+
+  // Round 2 architecture MI-04: one global table meant `install-skill x --all`
+  // parsed clean and then dropped options.all on the floor -- parsed-but-not-
+  // consumed is the same silent no-op this branch exists to remove.
+  it('accepts a flag only for the command that consumes it', () => {
+    expect(parseSkillFlags(['--all'], 'install-skill').unknown).toEqual(['--all']);
+    expect(parseSkillFlags(['--check'], 'uninstall-skill').unknown).toEqual(['--check']);
+    expect(parseSkillFlags(['--verbose'], 'uninstall-skill').unknown).toEqual(['--verbose']);
+
+    const update = parseSkillFlags(['--all', '--check', '--verbose'], 'update-skill');
+    expect(update.unknown).toEqual([]);
+    expect(update.options).toMatchObject({ all: true, check: true, verbose: true });
+    expect(parseSkillFlags(['--force'], 'uninstall-skill').unknown).toEqual([]);
   });
 });

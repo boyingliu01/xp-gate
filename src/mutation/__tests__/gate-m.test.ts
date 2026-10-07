@@ -165,7 +165,14 @@ describe('gate-m.ts - Mutation Testing Gate', () => {
     });
 
     it('should not exclude production paths that merely contain "test" as a substring (#480)', () => {
-      const files = ['src/latest/foo.ts', 'src/protest/foo.ts'];
+      // Round 2 technical MN-02 asked whether the tree segment is anchored: it is,
+      // so only a whole path segment named test/tests/__tests__ excludes.
+      const files = [
+        'src/latest/foo.ts',
+        'src/protest/foo.ts',
+        'src/test-utils/foo.ts',
+        'src/mytests/foo.ts',
+      ];
       const result = filterSourceFiles(files);
 
       expect(result).toEqual(files);
