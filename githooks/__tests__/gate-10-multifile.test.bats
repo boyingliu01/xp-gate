@@ -109,3 +109,21 @@ STUB
   grep -qx './-o.ts' "$TEST_DIR/argv.txt"
   ! grep -qx -- '-o.ts' "$TEST_DIR/argv.txt"
 }
+
+# git prints both of these names unquoted, so an unquoted array expansion would
+# split "./with space.ts" into two arguments while the leading-dash name would
+# still read as an option.
+@test "AC-490-04: a space and a leading '-' in the same name arrive untouched" {
+  write_argv_semgrep_stub
+  echo "export const spaced = 1;" > "./with space.ts"
+  echo "export const both = 1;" > "./- dash.ts"
+  git add -- "./with space.ts" "./- dash.ts"
+
+  run run_gate_with_argv_stub "$TEST_DIR/argv.txt"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"STATUS=PASS"* ]]
+  grep -qx './with space.ts' "$TEST_DIR/argv.txt"
+  grep -qx './- dash.ts' "$TEST_DIR/argv.txt"
+  ! grep -qx './with' "$TEST_DIR/argv.txt"
+  ! grep -qx 'space.ts' "$TEST_DIR/argv.txt"
+}

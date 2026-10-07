@@ -42,6 +42,14 @@ else
     # '-' (`git add -- ./-o.ts`), and bare in argv that element reads as an option
     # and rewrites the scan it was meant to constrain. ./ is a path to every
     # argument parser.
+    #
+    # The unquoted heredoc below expands $SEMGREP_FILES once, then feeds literal
+    # lines to `read`; bash never rescans the result for separators. Its correct
+    # reading rests on one property of the producer above, not of the loop:
+    # `git diff --cached --name-only` terminates paths with LF and quotes control
+    # characters (a CR in a name arrives as the four bytes \215, never as a bare
+    # CR), so one line is exactly one path. Asserted for spaces and a leading '-'
+    # by AC-490-04.
     SEMGREP_ARGS=()
     while IFS= read -r _semgrep_file; do
       [ -n "$_semgrep_file" ] && SEMGREP_ARGS+=("./$_semgrep_file")
