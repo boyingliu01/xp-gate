@@ -89,6 +89,22 @@ while read local_ref local_sha remote_ref remote_sha; do
     echo "   ℹ️  Branch deletion detected ($local_ref). Skipping validation."
     continue
   elif [ "$remote_sha" = "0000000000000000000000000000000000000000" ]; then
+    # New ref — a branch or a tag.
+    # Tag push (#491): a tag carries no code beyond the commit it points at.
+    # If that commit is already reachable from a remote-tracking branch, its
+    # content passed these gates when the branch ref was pushed. Re-validating
+    # it here false-blocked every release: GATE MW binds evidence to the local
+    # HEAD, and a squash merge rewrote the reviewed commit's hash, so no
+    # genuine evidence could ever match. A tag on a NOT-yet-published commit
+    # falls through to the cumulative validation below — creating a tag must
+    # not become a path around review.
+    if [[ "$local_ref" == refs/tags/* ]]; then
+      _tag_commit=$(git rev-parse --verify "${local_sha}^{commit}" 2>/dev/null || true)
+      if [ -n "$_tag_commit" ] && git branch -r --contains "$_tag_commit" 2>/dev/null | grep -q .; then
+        echo "   ℹ️  Tag $local_ref points at already-published commit ${_tag_commit:0:12} — no new code content."
+        continue
+      fi
+    fi
     # New branch - compare cumulative diff vs base branch
     # Use git merge-base HEAD main/master to find the branch point,
     # then diff the full branch range. Falls back to HEAD-only diff if no base found.
