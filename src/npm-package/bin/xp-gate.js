@@ -85,13 +85,13 @@ const COMMANDS = {
       const name = subargs[0];
       if (!name) {
         console.error('Error: Skill name required');
-        console.error('Usage: xp-gate install-skill <name>[@<version>]');
+        console.error('Usage: xp-gate install-skill <name> [--verbose] [--force]');
         process.exit(1);
       }
       const options = parseOptions(subargs.slice(1));
       installSkill(name, options).then(code => process.exit(code));
     },
-    usage: 'xp-gate install-skill <name>[@<version>] [--offline] [--verbose] [--force]'
+    usage: 'xp-gate install-skill <name> [--verbose] [--force]'
   },
   'update-skill': {
     description: 'Update installed skill(s)',
@@ -488,9 +488,8 @@ function printStatsTable(stats) {
 }
 
 function parseOptions(args) {
-  const options = { offline: false, verbose: false, force: false, all: false, check: false };
+  const options = { verbose: false, force: false, all: false, check: false };
   for (const arg of args) {
-    if (arg === '--offline') options.offline = true;
     if (arg === '--verbose') options.verbose = true;
     if (arg === '--force') options.force = true;
     if (arg === '--all') options.all = true;

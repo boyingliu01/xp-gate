@@ -1,6 +1,7 @@
 /**
  * @test update-skill
  * @intent Verify updateSkill() handles check/all/single-name modes, config parsing, and delegates to installSkill correctly
+ * @covers AC-416-04
  */
 const fs = require('fs');
 const path = require('path');
@@ -218,21 +219,23 @@ describe('update-skill', () => {
     expect(logSpy).not.toHaveBeenCalledWith('✓ foo updated');
   });
 
-  it('removes existing targetDir before invoking installSkill', async () => {
+  it('leaves the target directory for installSkill to back up and replace', async () => {
     writeConfig({ foo: { version: '1.0.0' } });
     const dir = makeSkillDir('foo');
     expect(fs.existsSync(dir)).toBe(true);
 
-    let dirExistedDuringInstall = true;
+    let dirPresentDuringInstall = false;
     installSkillMock.mockImplementation(async () => {
-      dirExistedDuringInstall = fs.existsSync(dir);
+      dirPresentDuringInstall = fs.existsSync(dir);
       return 0;
     });
 
     const { updateSkill } = require('../update-skill');
     const result = await updateSkill('foo');
     expect(result).toBe(0);
-    expect(dirExistedDuringInstall).toBe(false); // rm'd before installSkill called
+    // update-skill has no delete of its own: installSkill backs the directory up
+    // before replacing it (#416).
+    expect(dirPresentDuringInstall).toBe(true);
   });
 
   it('does not crash when targetDir does not exist', async () => {
