@@ -576,6 +576,33 @@ specification:
             base_url / api_key / timeout_ms，包括三个专家都没用到的 provider，
             错误信息带完整 provider 路径
           test_type: unit
+    - id: REQ-468
+      description: detectProjectLanguages() 只按 configFiles 判定语言，而 shell 与
+        powershell 两条注册表项的 configFiles 是空数组，extensions 字段存在却从未
+        用于判定——装齐 53/53 工具的本机仍只看见 2 种语言，本仓库 147 个 .sh 与
+        27 个 .ps1 对 doctor/check-tools 完全隐形（#468）
+      priority: medium
+      acceptance_criteria:
+        - id: AC-468-01
+          criteria: 只含 .sh 文件、没有任何 shell 配置文件的最小 fixture 能被
+            检出为 Shell
+          test_type: unit
+        - id: AC-468-02
+          criteria: 含 .ps1 的 fixture 能被检出为 PowerShell
+          test_type: unit
+        - id: AC-468-03
+          criteria: 扫描有边界且不越界误报——没有脚本的项目不得虚报 Shell/PowerShell，
+            node_modules/.git 等依赖与版本库目录不得参与扩展名扫描
+          test_type: unit
+        - id: AC-468-04
+          criteria: 已有语言不退化：configFiles 命中路径与返回的 configFiles 内容不变，
+            扩展名兜底只对"没有配置文件可依"的语言生效（否则任意带 CI YAML 的仓库
+            都会被判成 IaC）
+          test_type: unit
+        - id: AC-468-05
+          criteria: check-tools/install-tools 同时接受 --languages=<lang> 与
+            --languages <lang>，空格形式不得静默回落到自动探测
+          test_type: unit
   design_decisions:
     - id: DD-001
       decision: 走薄桥（方案 A）在 ctx.tools 注册三工具，而非独立 MCP server 或纯技能
