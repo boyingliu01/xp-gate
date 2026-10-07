@@ -86,16 +86,20 @@ EOF
 }
 
 # push_tag_ref TAG [EXTRA_STDIN_LINE] — simulate the pre-push stdin lines.
+# Stdin goes through a file (never bash -c string interpolation) so fixture
+# paths and ref lines with spaces cannot break the invocation (Round-1 tech).
 push_tag_ref() {
   local tag="$1" extra_stdin="${2:-}"
-  local local_sha
+  local local_sha tag_line stdin_file
   local_sha="$(git rev-parse "$tag")"
-  local stdin_tag_line="refs/tags/${tag} ${local_sha} refs/tags/${tag} ${ZEROS}"
+  tag_line="refs/tags/${tag} ${local_sha} refs/tags/${tag} ${ZEROS}"
+  stdin_file="$BATS_TEST_TMPDIR/push-stdin.txt"
   if [ -n "$extra_stdin" ]; then
-    run bash -c "printf '%s\n' '${extra_stdin}' '${stdin_tag_line}' | '$PWD/.git/hooks/pre-push' origin https://example.com"
+    printf '%s\n%s\n' "$extra_stdin" "$tag_line" > "$stdin_file"
   else
-    run bash -c "printf '%s\n' '${stdin_tag_line}' | '$PWD/.git/hooks/pre-push' origin https://example.com"
+    printf '%s\n' "$tag_line" > "$stdin_file"
   fi
+  run .git/hooks/pre-push origin https://example.com < "$stdin_file"
 }
 
 @test "tag on an already-published commit passes despite stale evidence" {
@@ -150,11 +154,15 @@ push_tag_ref() {
   echo "const y = 4;" >> src/foo.test.ts
   git add . && git commit -q -m "unreviewed change"
   rm -f .code-walkthrough-result.json
-  local tag_sha head_sha prev_sha
+  local tag_sha head_sha prev_sha stdin_file
   tag_sha="$(git rev-parse v1.0.0)"
   head_sha="$(git rev-parse HEAD)"
   prev_sha="$(git rev-parse HEAD^)"
-  run bash -c "printf '%s\n' 'refs/tags/v1.0.0 ${tag_sha} refs/tags/v1.0.0 ${ZEROS}' 'refs/heads/main ${head_sha} refs/heads/main ${prev_sha}' | '$PWD/.git/hooks/pre-push' origin https://example.com"
+  stdin_file="$BATS_TEST_TMPDIR/push-stdin.txt"
+  printf '%s\n%s\n' \
+    "refs/tags/v1.0.0 ${tag_sha} refs/tags/v1.0.0 ${ZEROS}" \
+    "refs/heads/main ${head_sha} refs/heads/main ${prev_sha}" > "$stdin_file"
+  run .git/hooks/pre-push origin https://example.com < "$stdin_file"
   [ "$status" -ne 0 ]
   [[ "$output" == *"WALKTHROUGH"* ]]
 }
