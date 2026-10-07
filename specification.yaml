@@ -389,6 +389,35 @@ specification:
             ./relative/path（Round 1 技术席位 MC-01）
           test_type: integration
 
+    - id: REQ-494
+      description: Gate 5 的 smart selection 只能把根 vitest 项目真正能收集到的路径当目标 ——
+        vitest.config.ts 按 #418 把 src/npm-package/ 下的镜像子树与 plugins/、skills/ 整批排除，
+        门禁却照样传给 vitest；目标全部不可收集时 vitest 以 "No test files found" 退出 1，
+        Gate 5 把它读成"测试失败"，于是只同步镜像文件的提交被误 BLOCK（#494）
+      priority: critical
+      acceptance_criteria:
+        - id: AC-494-01
+          criteria: 镜像测试路径映射回 canonical 双生子（src/npm-package/{principles,mutation,
+            mock-policy,build-integrity}/ → src/…），映射结果确实是根项目可收集的路径
+          test_type: integration
+        - id: AC-494-02
+          criteria: canonical 侧不存在的镜像（src/npm-package/lib/ 等）原样保留，
+            映射或删除都不得吞掉真实覆盖
+          test_type: integration
+        - id: AC-494-03
+          criteria: 无 canonical 对应物且不可收集的目标（src/npm-package/{plugins,skills}/、
+            plugins/、skills/、src/_wip/）整行剔除且不残留空行；镜像与 canonical 同时出现时
+            折叠为一个目标
+          test_type: integration
+        - id: AC-494-04
+          criteria: 与 vitest.config.ts 的 test exclude 对账：其中每一棵可提交源码树都不得
+            仍有目标可选出（探测数设下限防伪通过）
+          test_type: integration
+        - id: AC-494-05
+          criteria: 每份随包 pre-commit 都定义该选择器，且 CHANGED_TEST_FILES 与
+            CHANGED_SRC_FILES 两处选择都经过它；剔除发生时打印 was/now，绝不静默改目标
+          test_type: integration
+
     - id: REQ-493
       description: Gate 8 从 gitleaks JSON 报告读"发现数"时，零发现必须只得到一个值 ——
         grep -c 在零匹配时既打印 0 又以 1 退出，`|| echo 0` 于是追加出第二行，
