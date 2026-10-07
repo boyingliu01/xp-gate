@@ -384,7 +384,8 @@ specification:
           test_type: integration
         - id: AC-490-04
           criteria: 以 - 开头的暂存路径（git add -- ./-o.ts）必须以 ./ 前缀形式
-            进入 argv，使任何参数解析器都无法把它读成选项；其余目标同样统一为
+            进入 argv，使任何参数解析器都无法把它读成选项；含空格的文件名同样作为
+            单个 argv 元素送达，不被拆分；其余目标同样统一为
             ./relative/path（Round 1 技术席位 MC-01）
           test_type: integration
 
@@ -427,6 +428,13 @@ specification:
         - id: AC-480-03
           criteria: 判定语义不变——过滤器只影响"哪些文件进入变更集"，
             阈值评估、BLOCK/SKIP 行为一律不动
+          test_type: unit
+        - id: AC-480-04
+          criteria: filterSourceFiles 的每条排除规则读取同一个分隔符视图
+            （normalized），不再出现"树段规则看 normalized、其余看原始路径"的两套
+            口径；与 pre-push 过滤链在同一份"非生产代码"定义上一致——*.spec.* 同样
+            排除，Java/Kotlin 按 Test/Tests/IT/Spec 结尾匹配（不再要求前一个大写字母，
+            FooTest.java 这类主流命名此前漏排）（Round 2 可行性席位 FC-03）
           test_type: unit
 
     - id: REQ-424
@@ -499,8 +507,10 @@ specification:
       priority: high
       acceptance_criteria:
         - id: AC-439-01
-          criteria: extractSkillVersion 同时识别 LF 与 CRLF 的 frontmatter 分隔符，
-            两侧行尾不同但版本相同的技能走 semver 判等，不再落到内容比较
+          criteria: extractSkillVersion 识别 LF、CRLF 与孤立 CR 三种 frontmatter
+            分隔符，sameContentIgnoringLineEndings 同样按三种约定归一（helper 的
+            名字承诺的就是行尾无关），两侧行尾不同但版本相同的技能走 semver 判等，
+            不再落到内容比较
           test_type: unit
         - id: AC-439-02
           criteria: 无 version 字段的技能按"忽略行尾的内容等价"判定，仅行尾差异
