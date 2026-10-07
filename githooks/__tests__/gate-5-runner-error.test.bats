@@ -90,18 +90,32 @@ Tests  20 passed (20)'
 # ---------------------------------------------------------------------------
 
 @test "#454 anti-vacuity: every vitest Gate 5 block site consults the handler" {
-  # The four sites that run vitest can emit the EPERM signature. Once the
+  # The five sites that run vitest can emit the EPERM signature. Once the
   # judgement moved into lib/test-failure.sh, the hook-side invariant is that
   # every site calls the handler AND none prints the blanket BLOCKED message
   # itself — an unguarded site is precisely the bug this issue was about.
   run grep -c 'handle_test_failure "\$TESTS_OUTPUT"' "$HOOK"
   [ "$status" -eq 0 ]
-  [ "$output" -ge 4 ]
+  # 4 vitest branches + the two typescript adapter fallbacks (#498).
+  [ "$output" -ge 6 ]
 
-  # Whatever blanket messages remain must be exactly the two generic run_tests
-  # paths that #454 deliberately leaves unguarded.
-  run bash -c "grep -B6 'BLOCKED - Tests FAILED' '$HOOK' | grep -c 'run_without_git_context run_tests'"
-  [ "$output" -eq 2 ]
+  # Whatever blanket messages remain must be exactly the one generic run_tests
+  # path that #454 genuinely leaves unguarded: the NON-vitest runner branch, whose
+  # output shape is not vitest's. The typescript paths used to be counted here as
+  # well, but adapters/typescript.sh runs vitest — leaving them unguarded is what
+  # false-blocked every test-less TS project (#498).
+  #
+  # The old form proved this with a `grep -B` lookback over `run_tests`, but that
+  # window had to grow every time a reason was written between the command and
+  # its block (#498 pushed it from 6 lines to 13). Locating the message inside
+  # the branch instead pins the structure, not the spacing.
+  run grep -c 'BLOCKED - Tests FAILED' "$HOOK"
+  [ "$status" -eq 0 ]
+  [ "$output" -eq 1 ]
+
+  run bash -c "awk '/Genuinely non-vitest runners/,/PASSED - Unit tests passed/' '$HOOK' | grep -c 'BLOCKED - Tests FAILED'"
+  [ "$status" -eq 0 ]
+  [ "$output" -eq 1 ]
 }
 
 @test "#454 anti-vacuity: the handler defines the guard and consults it" {
@@ -112,13 +126,29 @@ Tests  20 passed (20)'
 }
 
 @test "#454 non-vitest generic test paths keep blocking on any non-zero exit" {
-  # The two generic `run_tests` paths must NOT consult the guard: their output
-  # format is not guaranteed to be vitest-shaped, so a guard there could
-  # theoretically let a real failure through.
+  # The `run_tests` path for a language whose runner is NOT vitest must not consult
+  # the guard: its output shape is not vitest's, so a guard there could
+  # theoretically let a real failure through. #498 split this branch by runner
+  # rather than by label, so the boundary is now stated where it actually lives.
   # grep -c exits 1 when it finds nothing, which is the passing case here, so
   # only the count is asserted.
+  #
+  # Anti-vacuity first: an awk range whose start pattern stopped matching yields
+  # EMPTY input, and `grep -c` on empty input prints 0 -- the assertion below
+  # would then pass while proving nothing. Pin the range to be non-trivial.
+  run bash -c "awk '/Genuinely non-vitest runners/,/^            fi\$/' '$HOOK' | wc -l"
+  [ "$status" -eq 0 ]
+  [ "$output" -ge 5 ]
+
   run bash -c "
-    awk '/Fallback: run_tests without coverage/,/^        fi\$/' '$HOOK' | grep -cE 'is_runner_infrastructure_error|is_partial_threshold_only_exit|handle_test_failure'
+    awk '/Genuinely non-vitest runners/,/^            fi\$/' '$HOOK' | grep -cE 'is_runner_infrastructure_error|is_partial_threshold_only_exit|handle_test_failure'
   "
   [ "$output" -eq 0 ]
+
+  # And the split must be conditional on the runner, not unconditional. One
+  # occurrence is the truth: exactly one typescript arm, sitting next to the
+  # non-vitest arm the assertion above just proved is guard-free.
+  run bash -c "awk '/Adapter test flow for everything/,/^      fi\$/' '$HOOK' | grep -c 'CURRENT_LANG\" = \"typescript\"'"
+  [ "$status" -eq 0 ]
+  [ "$output" -ge 1 ]
 }
