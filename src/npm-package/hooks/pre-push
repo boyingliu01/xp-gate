@@ -89,13 +89,40 @@ while read local_ref local_sha remote_ref remote_sha; do
     echo "   ℹ️  Branch deletion detected ($local_ref). Skipping validation."
     continue
   elif [ "$remote_sha" = "0000000000000000000000000000000000000000" ]; then
-    # New branch - compare cumulative diff vs base branch
-    # Use git merge-base HEAD main/master to find the branch point,
-    # then diff the full branch range. Falls back to HEAD-only diff if no base found.
+    # New ref — a branch or a tag.
+    # Base-branch resolution shared by the tag check below (#491) and the
+    # cumulative new-branch diff.
     BASE_BRANCH="origin/main"
     if ! git rev-parse --verify "$BASE_BRANCH" >/dev/null 2>&1; then
       BASE_BRANCH="origin/master"
     fi
+    # Tag push (#491): a tag carries no code beyond the commit it points at.
+    # If that commit is already published on the base branch, its content
+    # passed these gates when the base ref was pushed. Re-validating it here
+    # false-blocked every release: GATE MW binds evidence to the local HEAD,
+    # and a squash merge rewrote the reviewed commit's hash, so no genuine
+    # evidence could ever match. The scope is deliberately the PROTECTED base
+    # ref, not "any remote-tracking branch": a commit that only ever lived on
+    # a side branch still gets the full gates. A tag on a NOT-yet-published
+    # commit falls through to the cumulative validation below — creating a
+    # tag must not become a path around review. Threat model: like any
+    # client-side hook this bounds honest workflows and accidents, not an
+    # adversary with write access to this repository — such an actor could
+    # forge refs AND the walkthrough evidence file itself; server-side branch
+    # protection remains the real boundary.
+    if [[ "$local_ref" == refs/tags/* ]]; then
+      _tag_commit=$(git rev-parse --verify "${local_sha}^{commit}" 2>/dev/null || true)
+      if [ -z "$_tag_commit" ]; then
+        echo "   ⚠️  Could not dereference $local_ref to a commit — treating it as un-published."
+      elif git rev-parse --verify "$BASE_BRANCH" >/dev/null 2>&1 \
+           && git merge-base --is-ancestor "$_tag_commit" "$BASE_BRANCH" 2>/dev/null; then
+        echo "   ℹ️  Tag $local_ref points at a commit already published on $BASE_BRANCH — no new code content."
+        continue
+      fi
+    fi
+    # New branch (or tag on un-published work) - compare cumulative diff vs base branch
+    # Use git merge-base HEAD main/master to find the branch point,
+    # then diff the full branch range. Falls back to HEAD-only diff if no base found.
     if git rev-parse --verify "$BASE_BRANCH" >/dev/null 2>&1; then
       MERGE_BASE=$(git merge-base HEAD "$BASE_BRANCH" 2>/dev/null)
       if [ -n "$MERGE_BASE" ] && [ "$MERGE_BASE" != "$(git rev-parse HEAD)" ]; then
