@@ -19,7 +19,6 @@ describe('clipboard-vision distribution', () => {
     'scripts/build-plugin.mjs',
     'scripts/build-plugin.sh',
     'scripts/test-plugins.mjs',
-    'scripts/test-plugins.sh',
     'src/npm-package/scripts/sync-package-content.js',
     'plugins/opencode/scripts/prepack.cjs',
     'src/npm-package/plugins/opencode/scripts/prepack.cjs',
