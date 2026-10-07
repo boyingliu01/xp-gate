@@ -54,12 +54,16 @@ MOCK
   # This is required by the pre-push hook's code-walkthrough section (lines 516-537)
   local current_sha
   current_sha="$(git rev-parse HEAD)"
+  # One base for both fields: the validator requires expires - timestamp to be
+  # exactly one hour, and two separate `date` calls would straddle seconds.
+  local evidence_base
+  evidence_base="$(date -u +%s)"
   cat > .code-walkthrough-result.json << EOF
 {
   "commit": "$current_sha",
   "verdict": "APPROVED",
-  "timestamp": "$(date -u -d '-1 minute' +%Y-%m-%dT%H:%M:%SZ)",
-  "expires": "$(date -u -d '+1 hour' +%Y-%m-%dT%H:%M:%SZ)",
+  "timestamp": "$(date -u -d "@$((evidence_base - 60))" +%Y-%m-%dT%H:%M:%SZ)",
+  "expires": "$(date -u -d "@$((evidence_base - 60 + 3600))" +%Y-%m-%dT%H:%M:%SZ)",
   "branch": "test-branch",
   "consensus_ratio": 0.95,
   "experts": [
@@ -105,13 +109,17 @@ run_pre_push() {
   local local_sha
   local_sha="$(git rev-parse HEAD)"
   local zeros="0000000000000000000000000000000000000000"
-  # Write walkthrough result with current HEAD so Delphi validator passes
+  # Write walkthrough result with current HEAD so Delphi validator passes.
+  # timestamp/expires share one base because the validator demands a gap of
+  # exactly one hour (#497).
+  local evidence_base
+  evidence_base="$(date -u +%s)"
   cat > .code-walkthrough-result.json << EOF
 {
   "commit": "$local_sha",
   "verdict": "APPROVED",
-  "timestamp": "$(date -u -d '-1 minute' +%Y-%m-%dT%H:%M:%SZ)",
-  "expires": "$(date -u -d '+1 hour' +%Y-%m-%dT%H:%M:%SZ)",
+  "timestamp": "$(date -u -d "@$((evidence_base - 60))" +%Y-%m-%dT%H:%M:%SZ)",
+  "expires": "$(date -u -d "@$((evidence_base - 60 + 3600))" +%Y-%m-%dT%H:%M:%SZ)",
   "branch": "test-branch",
   "consensus_ratio": 0.95,
   "experts": [
