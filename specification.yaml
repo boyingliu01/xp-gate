@@ -444,6 +444,26 @@ specification:
           criteria: 非 Qoder 平台模拟（无任何 ~/.qoder 内容）仍判为 opencode，
             agent 部署跳过路径行为不变
           test_type: unit
+
+    - id: REQ-450
+      description: Gate 0 的 [skip-version-check] 提示误导用户——实际 bypass 要求
+        标记位于 commit message 首行开头、后接 chore:/docs:/release: 前缀、且
+        diff 仅限构建工具链（adapters/、scripts/、hooks/），提示却只说
+        "include in commit message"，用户照做仍被二次拒绝（#450）
+      priority: medium
+      acceptance_criteria:
+        - id: AC-450-01
+          criteria: 提示给出可照抄的完整格式（首行 START + [skip-version-check]
+            chore: <description>）、列出全部三个允许前缀、并说明 bypass 仅覆盖
+            构建工具链路径
+          test_type: integration
+        - id: AC-450-02
+          criteria: 旧的误导文案不再出现在 githooks/pre-commit 与 npm 镜像任一副本；
+          两副本 bypass 提示保持一致
+          test_type: integration
+        - id: AC-450-03
+          criteria: 结构断言非空洞——缺少新提示的副本会被匹配器拒绝
+          test_type: integration
   design_decisions:
     - id: DD-001
       decision: 走薄桥（方案 A）在 ctx.tools 注册三工具，而非独立 MCP server 或纯技能
