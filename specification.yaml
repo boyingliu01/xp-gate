@@ -551,6 +551,31 @@ specification:
           criteria: 可安装技能清单由包内 skills/ 目录推导，不再有手工维护的
             SKILLS_REGISTRY；未知技能报错时列出的清单与目录内容完全一致
           test_type: unit
+    - id: REQ-429
+      description: delphi-external-review 的三处静默失败：30000 超时默认值在两处
+        重复表达（改一处即分叉）；api_key 引用的环境变量未设置时只 WARNING 并继续
+        发出字面量占位符，最终报成"认证失败，请检查 .delphi-config.json"，把排障
+        方向指错；provider 级字段只在"该 provider 被某个专家用到"时才校验，写错的
+        值静默存活到运行期才回落默认（#429）
+      priority: medium
+      acceptance_criteria:
+        - id: AC-429-01
+          criteria: 超时默认值只有 DEFAULT_TIMEOUT_MS 一个来源，callModelAPI 的
+            兜底必须引用该常量，源码中不得再出现第二个字面量默认值
+          test_type: unit
+        - id: AC-429-02
+          criteria: --timeout-ms 与 provider timeout_ms 在恰好合法的边界值
+            1000 / 600000 上必须通过（>=/<= 被改成 >/< 时要能被测出）
+          test_type: unit
+        - id: AC-429-03
+          criteria: api_key 引用了未设置的环境变量时立即 ERROR 并指名变量名与
+            provider 路径、退出码 1，不发出任何 API 请求；变量已设置时正常展开
+          test_type: unit
+        - id: AC-429-04
+          criteria: readConfig 阶段整体校验 profile 内每个 provider 的
+            base_url / api_key / timeout_ms，包括三个专家都没用到的 provider，
+            错误信息带完整 provider 路径
+          test_type: unit
   design_decisions:
     - id: DD-001
       decision: 走薄桥（方案 A）在 ctx.tools 注册三工具，而非独立 MCP server 或纯技能
