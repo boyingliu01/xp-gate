@@ -22,7 +22,7 @@ XP-Gate — deterministic git quality gates + AI-driven multi-expert review (Del
 │   │   ├── hooks/                      # pre-commit, pre-push, adapter-common.sh (shipped to user repos)
 │   │   ├── lib/                        # init, install/update/uninstall-skill, doctor, migrate,
 │   │   │                               # baseline, audit-log, gate-audit, rollback, ui-detector,
-│   │   │                               # ui-review, download-skill, shared-paths, shared-utils
+│   │   │                               # ui-review, shared-paths, shared-utils
 │   │   ├── skills/                     # 12 skills bundled at publish time (mirror of repo skills/)
 │   │   ├── plugins/                    # claude-code/, opencode/, qoder/ bundled at publish time
 │   │   └── scripts/sync-package-content.js  # prepack hook that copies skills+plugins in
@@ -88,7 +88,7 @@ XP-Gate — deterministic git quality gates + AI-driven multi-expert review (Del
 | Task | Location | Notes |
 |------|----------|-------|
 | npm CLI dispatcher | src/npm-package/bin/xp-gate.js | 11+ subcommands |
-| CLI implementations | src/npm-package/lib/ | init, install/update/uninstall-skill, doctor, migrate, uninstall, baseline, audit-log, gate-audit, rollback, ui-detector, ui-review, download-skill, shared-* |
+| CLI implementations | src/npm-package/lib/ | init, install/update/uninstall-skill, doctor, migrate, uninstall, baseline, audit-log, gate-audit, rollback, ui-detector, ui-review, shared-* |
 | Claude Code plugin | plugins/claude-code/ | Manifest: .claude-plugin/plugin.json; hooks: hooks/hooks.json |
 | OpenCode plugin | plugins/opencode/ | index.ts exposes gate-check, gate-principles, gate-arch |
 | Qoder plugin | plugins/qoder/ | 7 skills + 3 Delphi agents (auto-deployed by `xp-gate init` on Qoder platform) |
@@ -164,7 +164,7 @@ Subcommands registered in 0.8.8.0 (verified against bin source):
 | `xp-gate doctor` | Diagnose hook/adapter/env health; `--fix` for auto-repair; `--sync-hooks` copies repo `githooks/` over the installed copy and reports which hooks actually execute (#451) |
 | `xp-gate migrate` | Clean v0.4.x GitHub-Packages residue from `~/.npmrc` |
 | `xp-gate baseline <create\|show\|reset\|diff>` | Manage lint baseline (Boy Scout track) |
-| `xp-gate install-skill <name>` | Download + install a skill from GitHub |
+| `xp-gate install-skill <name>` | Install a skill from the package bundle (skills/<name>/) |
 | `xp-gate update-skill <name>` | Update an already-installed skill |
 | `xp-gate uninstall-skill <name> --force` | Remove an installed skill |
 | `xp-gate audit [--tail \| --stats \| record]` | Inspect / record gate audit log |
