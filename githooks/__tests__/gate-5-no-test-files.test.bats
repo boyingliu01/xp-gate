@@ -8,7 +8,7 @@
 #         失败掐断（#498）。githooks/__tests__/gate-5a-block.test.bats 的 14 条用例全部
 #         死在 setup 的初始提交上，撞的就是这条。本套件 source 生产 lib 并**执行**判决
 #         函数，同时锁住措辞：SKIP 可以，宣称 PASS 不行。
-# @covers AC-498-01, AC-498-02, AC-498-03, AC-498-04, AC-498-05
+# @covers AC-498-01, AC-498-02, AC-498-03, AC-498-04, AC-498-05, AC-498-06
 
 setup() {
   REPO_ROOT="$(cd "$BATS_TEST_DIRNAME/../.." && pwd)"
@@ -125,4 +125,33 @@ stdout | src/report.test.ts > prints "No test files found" for empty input'
     grep -q 'is_no_test_files_found "\$_out"' "$copy" || { echo "classifier never called in $copy" >&2; return 1; }
   done
   cmp -s "$LIB" "$SHIPPED_LIB" || { echo "shipped copy drifted from canonical" >&2; return 1; }
+}
+
+# The classifier is only half the fix: #498's own false block came from the
+# typescript adapter's no-package.json path, which #454 had left unguarded under
+# the label "Non-TypeScript". That label described the branch, not the runner --
+# adapters/typescript.sh runs vitest, so the branch needed the same judgement.
+# The genuinely non-vitest path must stay unguarded: a vitest-shaped excuse there
+# could let a real pytest/go failure through.
+@test "AC-498-06: the typescript adapter paths are guarded, the non-vitest path is not" {
+  HOOK="$REPO_ROOT/githooks/pre-commit"
+
+  ts_block=$(awk '/Fallback: run_tests without coverage/,/^        fi$/' "$HOOK")
+  [ -n "$ts_block" ] || { echo "typescript fallback block not found" >&2; return 1; }
+  printf '%s\n' "$ts_block" | grep -q 'handle_test_failure "\$TESTS_OUTPUT"' \
+    || { echo "typescript fallback still hand-rolls its BLOCKED" >&2; return 1; }
+
+  no_pkg_block=$(awk '/Adapter test flow for everything/,/^      fi$/' "$HOOK")
+  [ -n "$no_pkg_block" ] || { echo "adapter test-flow block not found" >&2; return 1; }
+  printf '%s\n' "$no_pkg_block" | grep -q 'handle_test_failure "\$TESTS_OUTPUT"' \
+    || { echo "typescript-without-package.json path is unguarded" >&2; return 1; }
+
+  non_vitest_block=$(awk '/Genuinely non-vitest runners/,/^            fi$/' "$HOOK")
+  [ -n "$non_vitest_block" ] || { echo "non-vitest path not found" >&2; return 1; }
+  if printf '%s\n' "$non_vitest_block" | grep -q 'handle_test_failure'; then
+    echo "vitest-only excuse applied to a non-vitest runner" >&2
+    return 1
+  fi
+  printf '%s\n' "$non_vitest_block" | grep -q 'exit 1' \
+    || { echo "non-vitest path no longer blocks" >&2; return 1; }
 }

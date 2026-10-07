@@ -1991,13 +1991,22 @@ else
           TESTS_EXIT_CODE=$?
           echo "$TESTS_OUTPUT" | head -50
           if [ "$TESTS_EXIT_CODE" -ne 0 ]; then
-            echo ""
-            echo "❌ BLOCKED - Tests FAILED"
-            exit 1
+            # This branch is reached from the typescript adapter, so run_tests ran
+            # vitest (adapters/typescript.sh) and its output is vitest-shaped: the
+            # same three non-failure exits (#454 runner EPERM, #473 partial
+            # threshold, #498 no test files) apply here as in the four branches
+            # above. #454 left it unguarded because its own comment covers the
+            # NON-typescript fallback below, whose runner is pytest/go/jest; this
+            # one is not that branch.
+            handle_test_failure "$TESTS_OUTPUT" "typescript adapter fallback" || exit 1
           fi
         fi
       else
-        # Non-TypeScript: standard adapter test flow
+        # Adapter test flow for everything the TypeScript branch above did not
+        # claim. The label this branch carried (#454) was "Non-TypeScript", which
+        # is not what reaches it: a TypeScript project without a package.json also
+        # lands here, and its adapter runs vitest — which is how a test-less TS
+        # repo got false-blocked on "No test files found" (#498).
         # Skip for Python — tests already run with coverage in the coverage section below.
         # Running them here first without coverage doubles pre-commit time for no benefit.
         if [ "$CURRENT_LANG" = "python" ]; then
@@ -2007,9 +2016,18 @@ else
           TESTS_EXIT_CODE=$?
           echo "$TESTS_OUTPUT" | head -50
           if [ "$TESTS_EXIT_CODE" -ne 0 ]; then
-            echo ""
-            echo "❌ BLOCKED - Tests FAILED"
-            exit 1
+            if [ "$CURRENT_LANG" = "typescript" ]; then
+              # vitest output, so the same three non-failure exits are judged
+              # here as in the branches above (#454, #473, #498).
+              handle_test_failure "$TESTS_OUTPUT" "typescript adapter (no package.json)" || exit 1
+            else
+              # Genuinely non-vitest runners (pytest/go/jest/...): their output
+              # shape is not vitest's, so the guard could excuse a real failure.
+              # They keep blocking on any non-zero exit (#454).
+              echo ""
+              echo "❌ BLOCKED - Tests FAILED"
+              exit 1
+            fi
           else
             echo "✅ PASSED - Unit tests passed."
           fi
