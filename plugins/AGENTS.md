@@ -45,7 +45,7 @@ plugins/
 | Qoder skills | qoder/skills/ | 7 skill dirs; no manifest registered |
 | Build script | ../scripts/build-plugin.sh | `--platform claude-code\|opencode\|qoder` |
 | Copy script | ../scripts/copy-skills.sh | Full skill dir copy (preserves references/, templates/) |
-| Plugin tests | ../scripts/test-plugins.sh | 28 integration tests |
+| Plugin tests | ../scripts/test-plugins.mjs | `npm run test:plugins` |
 
 ## CONVENTIONS
 - **Plugin skill mirrors are auto-populated** by `build-plugin.sh` — never hand-edit `plugins/*/skills/`. Edit `skills/<name>/` in repo root, then rebuild.
@@ -74,8 +74,8 @@ bash scripts/build-plugin.sh --platform claude-code    # Single platform
 bash scripts/build-plugin.sh --platform opencode
 bash scripts/build-plugin.sh --platform qoder
 
-# Test plugins (28 integration tests)
-bash scripts/test-plugins.sh
+# Test plugins (integration tests)
+node scripts/test-plugins.mjs
 
 # Install Claude plugin
 /plugin install boyingliu01/xp-gate                    # From GitHub
@@ -92,5 +92,5 @@ All 4 documented plugin issues (qoder manifest missing, claude-code/opencode inc
 - v0.4.0+: plugin system introduced.
 - v0.8.x: plugin version bumped to 0.8.8 (synced from repo `VERSION`).
 - OpenCode plugin exposes 3 tools: `gate-check`, `gate-principles`, `gate-arch`, each shelling out to `xp-gate check/principles/arch` subcommands (fixes #208).
-- `test-plugins.sh` validates JSON manifests, version pinning, build outputs, and graceful-degradation behavior.
+- `test-plugins.mjs` validates JSON manifests, version pinning, build outputs, and graceful-degradation behavior.
 

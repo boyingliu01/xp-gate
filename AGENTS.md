@@ -61,7 +61,7 @@ XP-Gate — deterministic git quality gates + AI-driven multi-expert review (Del
 │   ├── grilling/                       # NEW in 0.18.0 (Matt Pocock); grill engine, dependency of grill-with-docs
 │   └── domain-modeling/                # NEW in 0.18.0 (Matt Pocock); CONTEXT.md/ADR maintenance, with templates
 ├── docs/               # 30+ design plans, incidents, retros, guides + ARCHITECTURE.md, CAPABILITIES.md, MANIFEST.md
-├── scripts/            # build-plugin.sh, copy-skills.sh, sync-version.cjs, test-plugins.sh,
+├── scripts/            # build-plugin.sh, copy-skills.sh, sync-version.cjs, test-plugins.mjs,
 │                       #   install-{hooks,skills,all}.sh, prepack.cjs
 ├── dashboard/          # Quality dashboard (serve.js + dashboard.js → localhost:3333)
 ├── .github/workflows/  # 5 CI pipelines: quality-gates (~948 LOC), npm-publish, cross-platform-ci,
@@ -94,7 +94,7 @@ XP-Gate — deterministic git quality gates + AI-driven multi-expert review (Del
 | Qoder plugin | plugins/qoder/ | 7 skills + 3 Delphi agents (auto-deployed by `xp-gate init` on Qoder platform) |
 | Plugin builder | scripts/build-plugin.sh | --platform claude-code\|opencode\|qoder |
 | Skill copy | scripts/copy-skills.sh | Preserves references/ and templates/ |
-| Plugin tests | scripts/test-plugins.sh | 28 integration tests |
+| Plugin tests | scripts/test-plugins.mjs | `npm run test:plugins` |
 | Pre-commit gates | githooks/pre-commit | Gate 0–9 (see Gates section) |
 | Pre-push gates | githooks/pre-push | Gate M, M2, M3 + Delphi walkthrough |
 | Language adapters | githooks/adapters/ | 13 .sh files + 5 plugin extensions |
