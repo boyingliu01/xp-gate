@@ -523,6 +523,34 @@ specification:
           criteria: 全仓扫描（排除 docs/CHANGELOG/评审证据等历史记录）后，
             没有任何现役文件仍引用 test-plugins.sh
           test_type: unit
+    - id: REQ-416
+      description: install-skill/update-skill 只从 GitHub main 分支下载单个
+        SKILL.md，13 个技能中 8 个的 references/templates/scripts 全部缺失，
+        技能运行时引用的路径悬空；update 还会先删空目标目录再只写回 SKILL.md，
+        且始终拉 main 导致已装内容与所用 CLI 版本漂移（#416）
+      priority: high
+      acceptance_criteria:
+        - id: AC-416-01
+          criteria: 安装后的技能目录与包内 skills/<name>/ 逐文件一致（含
+            references/ 等辅助文件），不再只有 SKILL.md
+          test_type: unit
+        - id: AC-416-02
+          criteria: 安装全程不发起网络请求（https.get 不被调用），内容来源是
+            当前安装的 npm 包，因此不存在与 CLI 版本漂移的第二个来源
+          test_type: unit
+        - id: AC-416-03
+          criteria: update-skill 删除并重建"当前平台"的技能目录（Qoder 为
+            ~/.qoder/skills），其他平台的同名副本不受影响；陈旧目录中的多余
+            文件在更新后消失
+          test_type: unit
+        - id: AC-416-04
+          criteria: 技能不在本版本包内时退出码为 1 并给出升级指引，且该判断发生在
+            任何删除动作之前——已装目录必须原样保留（update 不得先删再失败）
+          test_type: unit
+        - id: AC-416-05
+          criteria: 可安装技能清单由包内 skills/ 目录推导，不再有手工维护的
+            SKILLS_REGISTRY；未知技能报错时列出的清单与目录内容完全一致
+          test_type: unit
   design_decisions:
     - id: DD-001
       decision: 走薄桥（方案 A）在 ctx.tools 注册三工具，而非独立 MCP server 或纯技能
