@@ -246,13 +246,32 @@ async function checkGlobalHooks(checks) {
   if (hooksPath === null || hooksPath === '') {
     checks.push({ name: 'Git core.hooksPath', status: 'FAIL', detail: 'Not set' });
     issues++;
-  } else if (hooksPath !== GLOBAL_HOOKS_DIR) {
+  } else if (!pathsEquivalent(hooksPath, GLOBAL_HOOKS_DIR)) {
     checks.push({ name: 'Git core.hooksPath', status: 'FAIL', detail: `Expected ${GLOBAL_HOOKS_DIR}, got ${hooksPath}` });
     issues++;
   } else {
     checks.push({ name: 'Git core.hooksPath', status: 'PASS', detail: GLOBAL_HOOKS_DIR });
   }
   return issues;
+}
+
+/**
+ * Compare two paths that must denote the same directory.
+ *
+ * `git config` echoes core.hooksPath with forward slashes on Windows while
+ * path.join builds GLOBAL_HOOKS_DIR with backslashes, and drive letters come
+ * back lower-cased depending on who wrote them. A byte comparison therefore
+ * reported every correctly configured Windows machine as broken, and --fix
+ * could never clear it because the value it wrote read back differently (#496).
+ */
+function pathsEquivalent(a, b) {
+  if (typeof a !== 'string' || typeof b !== 'string') return false;
+  const normalize = (p) => {
+    let s = p.replace(/[\\/]+/g, '/');
+    if (s.length > 1) s = s.replace(/\/+$/, '');
+    return s.replace(/^([A-Za-z]):/, (m, drive) => `${drive.toUpperCase()}:`);
+  };
+  return normalize(a) === normalize(b);
 }
 
 /**
@@ -1054,7 +1073,7 @@ function fixHooksByMode(config, srcDir) {
 function fixGlobalHooksPath(config) {
   if (config.mode !== 'global') return false;
   const hooksPath = getCurrentHooksPathSync();
-  if (hooksPath !== GLOBAL_HOOKS_DIR) {
+  if (!pathsEquivalent(hooksPath, GLOBAL_HOOKS_DIR)) {
     return fixCoreHooksPath(GLOBAL_HOOKS_DIR);
   }
   return false;
@@ -1469,4 +1488,5 @@ module.exports = {
   formatDoctorJson,
   diagnoseHookDrift,
   syncGlobalHooksFromRepo,
+  pathsEquivalent,
 };
