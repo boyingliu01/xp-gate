@@ -486,6 +486,25 @@ specification:
           criteria: teardown 对 Windows 短暂目录锁重试后再删，只有目录仍在才判失败；
             全文件在 Windows 上 0 失败
           test_type: integration
+
+    - id: REQ-439
+      description: doctor 判已安装技能新鲜度时，frontmatter 正则只认 LF 且退化分支
+        做字节比较；在 core.autocrlf=true 的工作树下 13 个技能里 12 个被假报
+        Outdated 并推荐有破坏性的 update-skill --all，唯一一条真差异被噪声淹没（#439）
+      priority: high
+      acceptance_criteria:
+        - id: AC-439-01
+          criteria: extractSkillVersion 同时识别 LF 与 CRLF 的 frontmatter 分隔符，
+            两侧行尾不同但版本相同的技能走 semver 判等，不再落到内容比较
+          test_type: unit
+        - id: AC-439-02
+          criteria: 无 version 字段的技能按"忽略行尾的内容等价"判定，仅行尾差异
+            报 PASS（Up to date），不再产生 Outdated 假告警
+          test_type: unit
+        - id: AC-439-03
+          criteria: 真实内容差异（超出行尾）仍必须报 WARN + Outdated 并计入 issues，
+            证明宽容不是把检查改成永真
+          test_type: unit
   design_decisions:
     - id: DD-001
       decision: 走薄桥（方案 A）在 ctx.tools 注册三工具，而非独立 MCP server 或纯技能
