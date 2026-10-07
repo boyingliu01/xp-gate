@@ -6,7 +6,7 @@ const { updateSkill } = require('../lib/update-skill.js');
 const { uninstallSkill } = require('../lib/uninstall-skill.js');
 const { uninstall } = require('../lib/uninstall.js');
 const { doctor } = require('../lib/doctor.js');
-const { parseSkillFlags, SKILL_FLAGS } = require('../lib/shared-utils.js');
+const { parseSkillFlags, SKILL_FLAGS_BY_COMMAND } = require('../lib/shared-utils.js');
 const { checkDeps } = require('../lib/detect-deps.js');
 const { migrate } = require('../lib/migrate.js');
 const { handleBaseline } = require('../lib/baseline.js');
@@ -489,10 +489,10 @@ function printStatsTable(stats) {
 }
 
 function parseOptions(args, command) {
-  const { options, unknown } = parseSkillFlags(args);
+  const { options, unknown } = parseSkillFlags(args, command);
   if (unknown.length > 0) {
     console.error(`Unknown argument(s) for ${command}: ${unknown.join(', ')}`);
-    console.error(`Supported flags: ${SKILL_FLAGS.join(', ')}`);
+    console.error(`Supported flags: ${(SKILL_FLAGS_BY_COMMAND[command] || []).join(', ') || '(none)'}`);
     process.exit(1);
   }
   return options;

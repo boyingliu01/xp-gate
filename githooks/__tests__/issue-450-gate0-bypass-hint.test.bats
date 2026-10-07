@@ -1,4 +1,9 @@
 #!/usr/bin/env bats
+# @test REQ-450
+# @intent Gate 0 的旧提示（"include [skip-version-check] in commit message"）误导用户：
+#         bypass 实际要求标记位于首行行首、带 chore:/docs:/release: 前缀，且只覆盖
+#         构建工具链路径；提示文案必须与执行口径一致，两个随包副本不得漂移
+# @covers AC-450-01, AC-450-02, AC-450-03
 
 # Gate 0 bypass hint contract (#450).
 # The old hint ("include [skip-version-check] in commit message") misled users:
