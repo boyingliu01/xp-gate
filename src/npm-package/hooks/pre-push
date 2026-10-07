@@ -300,8 +300,11 @@ else
     echo "⚠️ Stryker config not found or @stryker-mutator not installed."
     echo "   SKIP — Gate M mutation testing."
   else
-    # Filter to source files (exclude tests)
-    CHANGED_SOURCE_FILES=$(echo "$TS_FILES" | grep -v '__tests__' | grep -v '\.test\.' | grep -v '\.spec\.' | grep -v '\.d\.ts$' || true)
+    # Filter to source files (exclude tests). The tree-segment grep excludes
+    # test infrastructure (helpers/fixtures under tests/, test/, __tests__/)
+    # that is not named *.test.* -- it must be judged by the suites that run
+    # it, not by a mutation score budgeted for production code (#480).
+    CHANGED_SOURCE_FILES=$(echo "$TS_FILES" | grep -v '__tests__' | grep -v '\.test\.' | grep -v '\.spec\.' | grep -v '\.d\.ts$' | grep -v -E '(^|/)(tests?|__tests__)/' || true)
 
     if [ -z "$CHANGED_SOURCE_FILES" ]; then
       echo "📚 No changed TypeScript source files. SKIP — Gate M."

@@ -7,8 +7,10 @@
 import { describe, it, expect, vi } from 'vitest';
 import fs from 'fs/promises';
 
-// We need to test parseArgs and filterSourceFiles from gate-m
-// Import the module and test its public interface
+// The REAL filter is under test: the previous local duplicate diverged from
+// gate-m.ts (which is multi-language via registered runners) and could not
+// catch #480 for that exact reason.
+import { filterSourceFiles } from '../gate-m';
 import { detectAITestCharacteristics } from '../detect-ai-test';
 
 /* jscpd:disable */
@@ -55,16 +57,6 @@ function parseArgs(args: string[]): {
   return options;
 }
 /* jscpd:enable */
-
-function filterSourceFiles(files: string[]): string[] {
-  return files.filter(file => {
-    if (!file.endsWith('.ts')) return false;
-    if (file.endsWith('.test.ts')) return false;
-    if (file.endsWith('.d.ts')) return false;
-    if (file.includes('/adapters/')) return false;
-    return true;
-  });
-}
 
 vi.mock('fs/promises');
 
@@ -126,11 +118,31 @@ describe('gate-m.ts - Mutation Testing Gate', () => {
       expect(result).toEqual(['src/foo.ts']);
     });
 
-    it('should filter out non-TypeScript files', () => {
+    it('should filter out files with no registered runner', () => {
       const files = ['src/foo.ts', 'src/bar.js', 'src/baz.py'];
       const result = filterSourceFiles(files);
 
-      expect(result).toEqual(['src/foo.ts']);
+      // .ts (stryker) and .py (mutmut) have registered runners; .js has none.
+      expect(result).toEqual(['src/foo.ts', 'src/baz.py']);
+    });
+
+    it('should filter out test-tree helpers not named *.test.* (#480)', () => {
+      const files = [
+        'tests/e2e/helpers/e2e-server.ts',
+        'test/fixtures/setup.py',
+        'src/__tests__/harness.ts',
+        'tests\\e2e\\helpers\\e2e-server.ts',
+      ];
+      const result = filterSourceFiles(files);
+
+      expect(result).toEqual([]);
+    });
+
+    it('should not exclude production paths that merely contain "test" as a substring (#480)', () => {
+      const files = ['src/latest/foo.ts', 'src/protest/foo.ts'];
+      const result = filterSourceFiles(files);
+
+      expect(result).toEqual(files);
     });
 
     it('should return empty array when no source files', () => {
