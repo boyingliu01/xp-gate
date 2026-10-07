@@ -337,6 +337,30 @@ specification:
             githooks/adapters/gate-4.sh），每份都必须以 PROJECT_ROOT 解析检查器基目录，
             并从该同一基目录调用检查器；任一副本回退到 hook 当前目录即失败
           test_type: integration
+
+    - id: REQ-489
+      description: 被 source 进 pre-commit 的 gate 模块不得把 errexit 泄漏给钩子进程 ——
+        任何 `set -e` 泄漏都会让 generate_quality_report 里第一条零命中管道
+        （FAIL_LINES 提取）在全部门打印 PASS 之后杀死钩子，提交静默不落（#489）
+      priority: critical
+      acceptance_criteria:
+        - id: AC-489-01
+          criteria: source 任一份随仓/随包分发的 gate-4 副本（githooks/gate-4.sh、
+            githooks/adapters/gate-4.sh、githooks/gates/gate-4-principles.sh）后 errexit
+            必须保持关闭，且紧随其后的零命中 grep 管道（无 || true）不得终止钩子；
+            探针须运行在全新 bash 进程里，避免 bats `run` 自身的 errexit 抑制掩盖泄漏
+          test_type: integration
+        - id: AC-489-02
+          criteria: 每一份随包分发的 pre-commit（githooks/pre-commit、
+            src/npm-package/hooks/pre-commit）中 FAIL_LINES 提取管道必须以 `|| true`
+            收尾（grep 零命中返回 1，被 pipefail 放大为整条管道 1），并按 v0.9.2
+            head→sed 迁移约定以 `sed -n '1,10p'` 取代 `| head -10`
+          test_type: integration
+        - id: AC-489-03
+          criteria: 反空洞用例：同一探针对着历史泄漏写法（`set +e` 包裹后无条件
+            `set -e` 恢复）必须在 FAIL_LINES 赋值处死亡（exit 1、无 SURVIVED），
+            证明回归用例本身能抓住该缺陷
+          test_type: integration
   design_decisions:
     - id: DD-001
       decision: 走薄桥（方案 A）在 ctx.tools 注册三工具，而非独立 MCP server 或纯技能
