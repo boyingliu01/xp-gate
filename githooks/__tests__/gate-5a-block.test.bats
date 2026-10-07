@@ -40,6 +40,17 @@ echo '{"duplicates":[]}'
 exit 0
 MOCK
   chmod +x "$TEST_DIR/bin/jscpd"
+  # AC-TDD-001-12 stages a .py file, which routes Gate 5's coverage section at
+  # pytest; that section fail-closes on a missing required tool by design, so a
+  # fixture would otherwise pass or fail according to the machine's python
+  # toolchain instead of according to Gate 5a. Same reason as the jscpd stub
+  # above: the tool is stubbed, not assumed (#497).
+  cat > "$TEST_DIR/bin/pytest" << 'MOCK'
+#!/bin/bash
+echo "3 passed in 0.01s"
+exit 0
+MOCK
+  chmod +x "$TEST_DIR/bin/pytest"
   export PATH="$TEST_DIR/bin:$PATH"
 
   # Copy pre-commit hook + required infrastructure
@@ -48,6 +59,13 @@ MOCK
   chmod +x .git/hooks/pre-commit
   # adapter-common.sh is sourced by pre-commit at startup
   cp "$SOURCE_GITHOOKS/adapter-common.sh" .git/hooks/adapter-common.sh 2>/dev/null || true
+  # pre-commit sources lib/*.sh at runtime (#449), so a fixture that installs
+  # only the hook file dies at the source line and every assertion in this suite
+  # then tests a crashed hook (#497).
+  mkdir -p .git/hooks/lib
+  for lib_file in "$SOURCE_GITHOOKS"/lib/*.sh; do
+    [ -f "$lib_file" ] && cp "$lib_file" .git/hooks/lib/
+  done
 
   # Create initial commit so HEAD exists (include a .ts file so hook detects TypeScript project)
   echo "init" > README.md
@@ -80,7 +98,10 @@ teardown() {
 @test "new .ts file with corresponding test PASSES" {
   mkdir -p src
   echo "export const x = 1;" > src/foo.ts
-  echo "test('foo', () => {});" > src/foo.test.ts
+  # vitest defaults to `globals: false` and this fixture ships no config, so a
+  # bare test() is a ReferenceError at collection time. That fixture blocked on
+  # Gate 5 ("Tests FAILED") instead of proving Gate 5a lets the commit through.
+  printf "import { expect, test } from 'vitest';\ntest('foo', () => { expect(1).toBe(1); });\n" > src/foo.test.ts
   git add src/foo.ts src/foo.test.ts
   run git commit -m "add foo with test"
   [ "$status" -eq 0 ]
@@ -317,7 +338,7 @@ export const placeholder = true;' > "$FRESH/src/placeholder.ts"
 @test "multiple new TS files with one missing test BLOCKS" {
   mkdir -p src
   echo "export const x = 1;" > src/foo.ts
-  echo "test('foo', () => {});" > src/foo.test.ts
+  printf "import { expect, test } from 'vitest';\ntest('foo', () => { expect(1).toBe(1); });\n" > src/foo.test.ts
   echo "export const y = 2;" > src/bar.ts
   git add src/foo.ts src/foo.test.ts src/bar.ts
   run git commit -m "add foo and bar"
