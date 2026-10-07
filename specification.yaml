@@ -382,6 +382,26 @@ specification:
             "${SEMGREP_ARGS[@]}" 数组展开调用 semgrep，不得再把引号包裹的
             SEMGREP_FILES 当单参数传递
           test_type: integration
+
+    - id: REQ-488
+      description: doctor --sync-hooks 的同步与漂移检查必须覆盖 githooks/lib/ 共享库，
+        且不得静默忽略未知 flag —— lib/ 重构后 pre-commit 运行时 source lib/*.sh，
+        只拷钩子文件的同步产物在机器级目录直接挂掉；未知 flag 静默 no-op 让用户误以为同步已发生（#488）
+      priority: high
+      acceptance_criteria:
+        - id: AC-488-01
+          criteria: syncGlobalHooksFromRepo 把 githooks/lib/ 下每个文件逐字节拷到
+            installed lib/（copyFileSync + 0o755，与钩子同规则），synced 列表包含
+            lib/<name> 条目；仓库没有 lib/ 时行为不变
+          test_type: unit
+        - id: AC-488-02
+          criteria: diagnoseHookDrift 对 repo lib/ 每个文件与 installed lib/ 比较：
+            缺失或内容不一致都报 FAIL（label 含 lib/<name>），一致报 PASS
+          test_type: unit
+        - id: AC-488-03
+          criteria: doctor 收到未实现/拼错的 flag 时以 exit 1 显式报错并列出支持的
+            flag，不再静默忽略（--fix / --sync-hooks 继续按文档生效）
+          test_type: unit
   design_decisions:
     - id: DD-001
       decision: 走薄桥（方案 A）在 ctx.tools 注册三工具，而非独立 MCP server 或纯技能
