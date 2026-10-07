@@ -402,6 +402,27 @@ specification:
           criteria: doctor 收到未实现/拼错的 flag 时以 exit 1 显式报错并列出支持的
             flag，不再静默忽略（--fix / --sync-hooks 继续按文档生效）
           test_type: unit
+
+    - id: REQ-480
+      description: Gate M 的变更文件过滤必须排除测试树路径（任意段 tests/、test/、
+        __tests__/）——现过滤器只按文件名排除 *.test.*，tests/ 下不改名的
+        基础设施（helpers/fixtures/factories）被当生产代码送进 Stryker，
+        用生产阈值评出一个结构性不可达的 0% 分数，掐断 push（#480）
+      priority: high
+      acceptance_criteria:
+        - id: AC-480-01
+          criteria: filterSourceFiles（真实实现，已导出供测试）排除位于 tests/、
+            test/、__tests__/ 段下的文件，含 Windows 反斜杠路径；不含 "test"
+            作为整段子串的生产路径（latest/、protest/）不受影响
+          test_type: unit
+        - id: AC-480-02
+          criteria: githooks/pre-push 的 CHANGED_SOURCE_FILES 过滤链同步加入
+            树段排除（grep -v -E '(^|/)(tests?|__tests__)/'），且随包镜像一致
+          test_type: integration
+        - id: AC-480-03
+          criteria: 判定语义不变——过滤器只影响"哪些文件进入变更集"，
+            阈值评估、BLOCK/SKIP 行为一律不动
+          test_type: unit
   design_decisions:
     - id: DD-001
       decision: 走薄桥（方案 A）在 ctx.tools 注册三工具，而非独立 MCP server 或纯技能
