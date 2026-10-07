@@ -423,6 +423,27 @@ specification:
           criteria: 判定语义不变——过滤器只影响"哪些文件进入变更集"，
             阈值评估、BLOCK/SKIP 行为一律不动
           test_type: unit
+
+    - id: REQ-424
+      description: detectPlatform 只认 ~/.qoder/skills 作为 Qoder 标记，全新 Qoder
+        安装（skills/ 尚未生成）被误判为 opencode，configureQoderDelphiAgents
+        因此部署零个 Delphi agent；且 detect-deps.js 与 shared-paths.js 各有一份
+        可发散的实现（#424）
+      priority: high
+      acceptance_criteria:
+        - id: AC-424-01
+          criteria: 存在 ~/.qoder（无论 skills/、agents/ 还是任何内容）即判为
+            qoder；brand-new 安装（只有 ~/.qoder 目录本身）也判为 qoder，
+            Delphi agent 才能被部署
+          test_type: unit
+        - id: AC-424-02
+          criteria: detectPlatform 只保留一份实现——detect-deps.js 从 shared-paths.js
+            re-export 同一函数（引用相等），消除双份实现发散的可能
+          test_type: unit
+        - id: AC-424-03
+          criteria: 非 Qoder 平台模拟（无任何 ~/.qoder 内容）仍判为 opencode，
+            agent 部署跳过路径行为不变
+          test_type: unit
   design_decisions:
     - id: DD-001
       decision: 走薄桥（方案 A）在 ctx.tools 注册三工具，而非独立 MCP server 或纯技能
