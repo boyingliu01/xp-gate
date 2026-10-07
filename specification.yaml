@@ -361,6 +361,27 @@ specification:
             `set -e` 恢复）必须在 FAIL_LINES 赋值处死亡（exit 1、无 SURVIVED），
             证明回归用例本身能抓住该缺陷
           test_type: integration
+
+    - id: REQ-490
+      description: Gate 10 必须把暂存文件列表拆成独立参数传给 semgrep —— 引号包裹的
+        换行连接列表会被当成一个扫描目标，暂存 ≥2 个受支持文件时 semgrep 报
+        "Invalid scanning root" 静默掐断整个 pre-commit；单文件恰好无换行才一直没暴露（#490）
+      priority: critical
+      acceptance_criteria:
+        - id: AC-490-01
+          criteria: 暂存 2 个 .ts 文件时，semgrep 收到 2 个独立目标参数（逐行记录 argv
+            验证），判定语义不变（exit 0=PASS / 1=CRITICAL-HIGH 分级 BLOCK / 其它=SKIP）
+          test_type: integration
+        - id: AC-490-02
+          criteria: 多文件提交 PASS 行必须可见扫描目标数（files scanned: N），
+            避免「参数错了但看起来像没文件可扫」的静默；输出不得出现 Invalid scanning root
+          test_type: integration
+        - id: AC-490-03
+          criteria: 反空洞用例：随包分发的全部 gate-10 副本（githooks/gate-10.sh、
+            src/npm-package/gate-10.sh、src/npm-package/hooks/gate-10.sh）必须以
+            "${SEMGREP_ARGS[@]}" 数组展开调用 semgrep，不得再把引号包裹的
+            SEMGREP_FILES 当单参数传递
+          test_type: integration
   design_decisions:
     - id: DD-001
       decision: 走薄桥（方案 A）在 ctx.tools 注册三工具，而非独立 MCP server 或纯技能
