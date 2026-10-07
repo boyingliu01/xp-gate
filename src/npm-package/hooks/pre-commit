@@ -436,7 +436,11 @@ Before committing:
   2. Add entry to CHANGELOG.md
   3. Run: node scripts/sync-version.cjs
 
-Or use --no-verify (discouraged) or include [skip-version-check] in commit message.
+Or use the bypass prefix — the commit message FIRST LINE must START with:
+  [skip-version-check] chore: <description>
+Allowed types: chore: docs: release:. The bypass only permits build
+tooling changes (adapters/, scripts/, hooks/); production source files
+still require a VERSION/CHANGELOG update.
 
 Staged files: $(echo "$STAGED_FILES" | tr '\n' ', ' | sed 's/,$//')
 "
