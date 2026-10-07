@@ -37,9 +37,14 @@ else
     # semgrep ONE argument containing newlines -> "Invalid scanning root" once
     # >=2 files are staged (#490). Same defect class as the Gate 4 --files fix
     # (#457): an array is the only form that keeps spaces intact AND splits files.
+    #
+    # Each element gets a ./ prefix: a tracked path may legitimately start with
+    # '-' (`git add -- ./-o.ts`), and bare in argv that element reads as an option
+    # and rewrites the scan it was meant to constrain. ./ is a path to every
+    # argument parser.
     SEMGREP_ARGS=()
     while IFS= read -r _semgrep_file; do
-      [ -n "$_semgrep_file" ] && SEMGREP_ARGS+=("$_semgrep_file")
+      [ -n "$_semgrep_file" ] && SEMGREP_ARGS+=("./$_semgrep_file")
     done <<EOF
 $SEMGREP_FILES
 EOF

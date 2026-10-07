@@ -142,4 +142,17 @@ describe('check-tools language selection (#468)', () => {
     const reported = JSON.parse(console.log.mock.calls.at(-1)[0]);
     expect(Object.keys(reported)).toContain('shell');
   });
+
+  // Round 1 review (architecture MI-02): `--languages=` split into [''], which
+  // was treated as an explicit selection and reported a language named '' instead
+  // of falling back to detection like the bare flag does.
+  it('--languages= with an empty value falls back to auto-detection', async () => {
+    const { handleCheckTools } = require('../language-tools');
+    const code = await handleCheckTools(['--languages=', '--json']);
+
+    expect(code).toBe(0);
+    const reported = JSON.parse(console.log.mock.calls.at(-1)[0]);
+    expect(Object.keys(reported)).not.toContain('');
+    expect(Object.keys(reported)).toContain('shell');
+  });
 });

@@ -6,6 +6,7 @@ const { updateSkill } = require('../lib/update-skill.js');
 const { uninstallSkill } = require('../lib/uninstall-skill.js');
 const { uninstall } = require('../lib/uninstall.js');
 const { doctor } = require('../lib/doctor.js');
+const { parseSkillFlags, SKILL_FLAGS } = require('../lib/shared-utils.js');
 const { checkDeps } = require('../lib/detect-deps.js');
 const { migrate } = require('../lib/migrate.js');
 const { handleBaseline } = require('../lib/baseline.js');
@@ -80,7 +81,7 @@ const COMMANDS = {
     usage: 'xp-gate setup-global'
   },
   'install-skill': {
-    description: 'Install a xp-gate skill from GitHub',
+    description: 'Install a xp-gate skill from the package bundle',
     run: subargs => {
       const name = subargs[0];
       if (!name) {
@@ -88,7 +89,7 @@ const COMMANDS = {
         console.error('Usage: xp-gate install-skill <name> [--verbose] [--force]');
         process.exit(1);
       }
-      const options = parseOptions(subargs.slice(1));
+      const options = parseOptions(subargs.slice(1), 'install-skill');
       installSkill(name, options).then(code => process.exit(code));
     },
     usage: 'xp-gate install-skill <name> [--verbose] [--force]'
@@ -101,12 +102,12 @@ const COMMANDS = {
       let name, options;
       if (allFlagIndex !== -1) {
         // Remove --all from args before parsing, name is undefined
-        options = parseOptions([...subargs.slice(0, allFlagIndex), ...subargs.slice(allFlagIndex + 1)]);
+        options = parseOptions([...subargs.slice(0, allFlagIndex), ...subargs.slice(allFlagIndex + 1)], 'update-skill');
         options.all = true;
         name = undefined;  // explicit: no single name when --all is used
       } else {
         name = subargs[0];
-        options = parseOptions(subargs.slice(1));
+        options = parseOptions(subargs.slice(1), 'update-skill');
       }
       updateSkill(name, options).then(code => process.exit(code));
     },
@@ -121,7 +122,7 @@ const COMMANDS = {
         console.error('Usage: xp-gate uninstall-skill <name>');
         process.exit(1);
       }
-      const options = parseOptions(subargs.slice(1));
+      const options = parseOptions(subargs.slice(1), 'uninstall-skill');
       uninstallSkill(name, options).then(code => process.exit(code));
     },
     usage: 'xp-gate uninstall-skill <name> [--force]'
@@ -487,13 +488,12 @@ function printStatsTable(stats) {
   console.log('└──────────────────┴────────┴────────┴────────────┘');
 }
 
-function parseOptions(args) {
-  const options = { verbose: false, force: false, all: false, check: false };
-  for (const arg of args) {
-    if (arg === '--verbose') options.verbose = true;
-    if (arg === '--force') options.force = true;
-    if (arg === '--all') options.all = true;
-    if (arg === '--check') options.check = true;
+function parseOptions(args, command) {
+  const { options, unknown } = parseSkillFlags(args);
+  if (unknown.length > 0) {
+    console.error(`Unknown argument(s) for ${command}: ${unknown.join(', ')}`);
+    console.error(`Supported flags: ${SKILL_FLAGS.join(', ')}`);
+    process.exit(1);
   }
   return options;
 }

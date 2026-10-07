@@ -430,6 +430,10 @@ function extensionsPresentIn(projectRoot) {
     } catch {
       continue;
     }
+    // Sorted: readdir order is filesystem-dependent, and a bounded scan that
+    // stops at an entry count must give the same answer on every machine
+    // (Round 1: feasibility FC-03, architecture MI-01).
+    entries.sort((a, b) => (a.name < b.name ? -1 : a.name > b.name ? 1 : 0));
     for (const entry of entries) {
       if (inspected >= EXTENSION_SCAN_LIMIT) break;
       inspected += 1;
@@ -447,18 +451,25 @@ function extensionsPresentIn(projectRoot) {
 
 /**
  * Read the --languages selection, in either accepted form.
- * `--languages=<a,b>` and `--languages <a,b>`; a bare `--languages` with nothing
- * after it falls back to auto-detection rather than an empty list.
+ * `--languages=<a,b>` and `--languages <a,b>`; a bare `--languages`, and an
+ * inline `--languages=` with an empty value, both fall back to auto-detection
+ * rather than selecting a language named ''.
  * @param {string[]} args
  * @returns {string[]|null}
  */
 function parseLanguageFlag(args) {
   const inline = args.find((arg) => arg.startsWith('--languages='));
-  if (inline) return inline.split('=')[1].split(',');
-  const index = args.indexOf('--languages');
-  const value = index === -1 ? undefined : args[index + 1];
-  if (value && !value.startsWith('-')) return value.split(',');
-  return null;
+  let value;
+  if (inline !== undefined) {
+    value = inline.slice('--languages='.length);
+  } else {
+    const index = args.indexOf('--languages');
+    const following = index === -1 ? undefined : args[index + 1];
+    value = following && !following.startsWith('-') ? following : undefined;
+  }
+  if (value === undefined) return null;
+  const picked = value.split(',').filter(Boolean);
+  return picked.length > 0 ? picked : null;
 }
 
 /**
