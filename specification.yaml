@@ -505,6 +505,24 @@ specification:
           criteria: 真实内容差异（超出行尾）仍必须报 WARN + Outdated 并计入 issues，
             证明宽容不是把检查改成永真
           test_type: unit
+    - id: REQ-486
+      description: scripts/test-plugins.sh 在 Windows/Git Bash 下把 MSYS 的
+        REPO_ROOT 插进 node -e 的路径参数，必然假失败且无任何调用方；与全绿的
+        .mjs 孪生并存等于永久红的守卫，训练团队忽略红色（#486）
+      priority: medium
+      acceptance_criteria:
+        - id: AC-486-01
+          criteria: scripts/test-plugins.sh 不再存在，且 scripts/test-plugins.mjs
+            与 package.json 的 test:plugins 仍指向 .mjs（防把两个半都删掉）
+          test_type: unit
+        - id: AC-486-02
+          criteria: 根 AGENTS.md 与 plugins/AGENTS.md 指向 test-plugins.mjs，
+            不再出现 .sh 字样
+          test_type: unit
+        - id: AC-486-03
+          criteria: 全仓扫描（排除 docs/CHANGELOG/评审证据等历史记录）后，
+            没有任何现役文件仍引用 test-plugins.sh
+          test_type: unit
   design_decisions:
     - id: DD-001
       decision: 走薄桥（方案 A）在 ctx.tools 注册三工具，而非独立 MCP server 或纯技能
