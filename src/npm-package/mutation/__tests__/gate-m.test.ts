@@ -136,6 +136,10 @@ describe('gate-m.ts - Mutation Testing Gate', () => {
       const result = filterSourceFiles(files);
 
       expect(result).toEqual([]);
+
+      // The same exclusion inside a list that also carries production source:
+      // `a/b/tests/` is a tree segment, and src/foo.ts must survive next to it.
+      expect(filterSourceFiles(['src/foo.ts', 'a/b/tests/fixture-factory.ts'])).toEqual(['src/foo.ts']);
     });
 
     // Round 2 feasibility FC-03: only the test-tree regex read `normalized`, the
@@ -172,6 +176,9 @@ describe('gate-m.ts - Mutation Testing Gate', () => {
         'src/protest/foo.ts',
         'src/test-utils/foo.ts',
         'src/mytests/foo.ts',
+        'testing/reporter.ts',
+        'src/test-data.ts',
+        'tests-helper.ts',
       ];
       const result = filterSourceFiles(files);
 
