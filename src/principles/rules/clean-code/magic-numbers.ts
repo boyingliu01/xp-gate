@@ -1,17 +1,19 @@
 import { Rule, Violation, Severity } from '../../types';
-import { getDefaultConfig } from '../../config';
+import { getActiveConfig } from '../../config';
 
-const config = getDefaultConfig();
-
-const EXCLUDED_NUMBERS = config.rules['clean-code']['magic-numbers'].exclude || [0, 1, -1, 2, 10, 100, 1000, 60, 24, 7, 30, 365, 256, 1024];
+const DEFAULT_EXCLUDED_NUMBERS = [0, 1, -1, 2, 10, 100, 1000, 60, 24, 7, 30, 365, 256, 1024];
 
 export const magicNumbersRule: Rule = {
   id: 'clean-code.magic-numbers',
   name: 'Magic Numbers Rule',
+  // Not config-derived: this rule reports every non-excluded literal, so the
+  // static field is an informational placeholder rather than an enforced bound.
   threshold: 10,
-  severity: config.rules['clean-code']['magic-numbers'].severity as Severity,
+  severity: 'info',
   check: (file: string, adapter: unknown): Violation[] => {
     const violations: Violation[] = [];
+    // Read the ACTIVE config per invocation; a module-load snapshot was #457.
+    const settings = getActiveConfig().rules['clean-code']['magic-numbers'];
     
     try {
       interface NumberObject {
@@ -37,9 +39,10 @@ export const magicNumbersRule: Rule = {
         }
       } catch { }
       
+      const excludedNumbers = settings.exclude ?? DEFAULT_EXCLUDED_NUMBERS;
       const filteredNumbers = magicNumbers.filter(numObj => {
         const numValue = numObj.value;
-        return !EXCLUDED_NUMBERS.includes(numValue);
+        return !excludedNumbers.includes(numValue);
       });
       
       filteredNumbers.forEach(numObj => {
@@ -48,7 +51,7 @@ export const magicNumbersRule: Rule = {
           line: numObj.line,
           ruleId: 'clean-code.magic-numbers',
           message: `Potential magic number detected: ${numObj.value}. Consider using a named constant instead.`,
-          severity: config.rules['clean-code']['magic-numbers'].severity as Severity
+          severity: (settings.severity as Severity) ?? 'info'
         });
       });
       

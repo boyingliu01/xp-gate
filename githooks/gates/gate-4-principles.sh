@@ -14,6 +14,16 @@ if has_project_lang "documentation-only" 2>/dev/null || [ "$PROJECT_LANG" = "doc
 else
   # Get source files to check against principles
   PRINCIPLES_FILES=$(echo "$CHANGED_FILES" | grep -E '\.(ts|tsx|js|jsx|py|go|java|kt|dart|swift|cpp|c|hpp|h|m|mm)$' || true)
+
+  # One path per line, into an array. Passing $PRINCIPLES_FILES unquoted relies on
+  # word splitting to turn the list into separate argv entries, which also splits
+  # any path containing a space -- handing the checker two bogus paths and checking
+  # neither. Quoting it would instead collapse the list into one argument. An array
+  # is the only form that does both. Same defect class as the --config fix (#457).
+  PRINCIPLES_ARGS=()
+  while IFS= read -r _principles_file; do
+    [ -n "$_principles_file" ] && PRINCIPLES_ARGS+=("$_principles_file")
+  done <<< "$PRINCIPLES_FILES"
   
   if [ -n "$PRINCIPLES_FILES" ]; then
     # Check for principles checker in installed modules first, then project src/
@@ -29,16 +39,75 @@ else
     if [ -n "$PRINCIPLES_DIR" ]; then
       echo "Checking Clean Code + SOLID principles..."
       
+      # Resolve the project's `.principlesrc` from the git toplevel so the gate
+      # enforces the SAME thresholds regardless of the process's cwd (#457).
+      # Before this, `.principlesrc` was parsed and discarded, so the built-in
+      # defaults were enforced instead of the project's.
+      #
+      # Passed as an ARRAY, not a string: the repo path can contain spaces (the
+      # default Windows checkout is under `C:/Users/<name>/...`, and names contain
+      # spaces), and an unquoted `--config <path>` would split into two argv entries
+      # so the config would be silently ignored -- reintroducing exactly the defect
+      # #457 fixes, but only on paths with spaces. Deliberately not written as
+      # `PRINCIPLES_CONFIG="--config $PRINCIPLES_ROOT/.principlesrc"`: word splitting
+      # on expansion is the bug.
+      PRINCIPLES_CONFIG=()
+      PRINCIPLES_ROOT="$(run_without_git_context git rev-parse --show-toplevel 2>/dev/null || echo "$PWD")"
+      if [ -f "$PRINCIPLES_ROOT/.principlesrc" ]; then
+        PRINCIPLES_CONFIG=(--config "$PRINCIPLES_ROOT/.principlesrc")
+      fi
+      
       if command -v npx > /dev/null 2>&1; then
-        # Run principles checker and store results
-        if npx tsx $PRINCIPLES_DIR/index.ts --files $PRINCIPLES_FILES --format json > /tmp/principles-output.json 2>/dev/null; then
+        # Run principles checker and store results. `${PRINCIPLES_CONFIG[@]+"${PRINCIPLES_CONFIG[@]}"}`
+        # expands to nothing when the array is empty, which `set -u` requires on older
+        # bash versions (macOS ships 3.2, where a bare `"${arr[@]}"` is an unbound error).
+        # The trailing `|| PRINCIPLES_EXIT=$?` captures the exit status without
+        # letting a non-zero return abort the hook under `set -e`. pre-commit itself
+        # runs with only `set -o pipefail` (no `set -e`, pinned by
+        # scripts/__tests__/gate-5-runner-error.test.ts AC-454-08), but this module is
+        # also sourced by consumer hooks that may set it, and a bare call followed by
+        # `PRINCIPLES_EXIT=$?` never reaches the assignment under `set -e`. `|| true`
+        # would erase the status -- which is exactly the distinction this gate depends
+        # on.
+        PRINCIPLES_EXIT=0
+        # Keep stderr: it carries the checker's configuration warnings -- a rejected
+        # threshold or an out-of-vocabulary severity says so here and nowhere else.
+        # Sending it to /dev/null made an exit-2 SKIP undiagnosable and hid every
+        # .principlesrc typo (Delphi walkthrough MC-03). Captured to a file so a clean
+        # run stays quiet, then replayed only when the checker had a problem.
+        #
+        # Per-invocation mktemp, not a shared `/tmp/principles-output.json`: two commits
+        # racing on one machine overwrote each other's report before it was counted, so
+        # a run with ERROR findings could read a clean report and PASS (#457).
+        PRINCIPLES_STDERR=$(mktemp)
+        PRINCIPLES_JSON=$(mktemp)
+        export PRINCIPLES_JSON
+        npx tsx "$PRINCIPLES_DIR/index.ts" --files ${PRINCIPLES_ARGS[@]+"${PRINCIPLES_ARGS[@]}"} --format json ${PRINCIPLES_CONFIG[@]+"${PRINCIPLES_CONFIG[@]}"} > "$PRINCIPLES_JSON" 2>"$PRINCIPLES_STDERR" || PRINCIPLES_EXIT=$?
+
+        if [ -s "$PRINCIPLES_STDERR" ]; then
+          sed 's/^/     /' "$PRINCIPLES_STDERR"
+        fi
+        rm -f "$PRINCIPLES_STDERR"
+
+        # Exit codes are distinct on purpose: 0 = ran clean, 1 = ran and found
+        # ERROR-severity violations, >=2 = the tool itself failed. Branching on
+        # `if run_tsx ...` collapsed 1 and 2 together, so an ERROR-severity finding
+        # took the crash branch and the gate SKIPped -- releasing the most serious
+        # violations while reporting "PASSED (SKIP)".
+        if [ "$PRINCIPLES_EXIT" -ge 2 ]; then
+          echo "⚠️  Warning: Principles checker execution failed"
+          echo "⏭️  SKIPPED - Principles check (execution issue)"
+          GATE_4_STATUS="SKIP"
+          rm -f "$PRINCIPLES_JSON"
+        else
           # Check severity levels. The reporter emits JSON.stringify(out, null, 2),
           # i.e. `"severity": "warning"` WITH a space; tolerate any whitespace so a
           # future minified format cannot silently zero these counts again (#444).
-          ERROR_COUNT=$(grep -cE '"severity"[[:space:]]*:[[:space:]]*"error"' /tmp/principles-output.json 2>/dev/null || true)
+          ERROR_COUNT=$(grep -cE '"severity"[[:space:]]*:[[:space:]]*"error"' "$PRINCIPLES_JSON" 2>/dev/null || true)
           ERROR_COUNT=${ERROR_COUNT:-0}
-          WARNING_COUNT=$(grep -cE '"severity"[[:space:]]*:[[:space:]]*"warning"' /tmp/principles-output.json 2>/dev/null || true)
+          WARNING_COUNT=$(grep -cE '"severity"[[:space:]]*:[[:space:]]*"warning"' "$PRINCIPLES_JSON" 2>/dev/null || true)
           WARNING_COUNT=${WARNING_COUNT:-0}
+          rm -f "$PRINCIPLES_JSON"
           
           if [ "$ERROR_COUNT" -gt 0 ]; then
             echo ""
@@ -47,7 +116,7 @@ else
             echo "  - error-handling violations"
             echo "  - SOLID principle violations"
             echo "  - architectural violations"
-            npx tsx $PRINCIPLES_DIR/index.ts --files $PRINCIPLES_FILES --format console
+            npx tsx "$PRINCIPLES_DIR/index.ts" --files ${PRINCIPLES_ARGS[@]+"${PRINCIPLES_ARGS[@]}"} --format console
             GATE_4_STATUS="FAIL"
             exit 1
           fi
@@ -56,10 +125,6 @@ else
           if [ "$WARNING_COUNT" -gt 0 ]; then
             echo "ℹ️  $WARNING_COUNT warnings found (will be handled by Boy Scout Rule)."
           fi
-        else
-          echo "⚠️  Warning: Principles checker execution failed"
-          echo "✅ PASSED - Principles check (SKIP, execution issue)"
-          GATE_4_STATUS="SKIP"
         fi
       else
         echo "ℹ️  npx not available - skipping principles check"

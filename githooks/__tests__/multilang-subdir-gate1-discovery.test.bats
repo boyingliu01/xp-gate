@@ -13,7 +13,7 @@
 #   "ℹ️  No ESLint configuration found - Skipping"
 # while web/tsconfig.json and web/biome.json existed — the TS quality half of
 # Gate 1 never ran. Test matrix:
-#   - tsconfig in subdir -> tsc runs with --project web/tsconfig.json
+#   - tsconfig in subdir -> tsc runs from web/ (cwd-relative, #436/#470)
 #   - biome.json in subdir -> Biome check runs (from web/) and PASSES
 #   - root project (no subdir) -> unchanged behaviour (regression guard)
 
@@ -90,8 +90,10 @@ MOCK
   cp "$SOURCE_GITHOOKS/pre-commit" .git/hooks/pre-commit
   chmod +x .git/hooks/pre-commit
   cp "$SOURCE_GITHOOKS/adapter-common.sh" .git/hooks/adapter-common.sh 2>/dev/null || true
+  # The hook sources lib/typecheck.sh in Gate 1 (#436): ship the whole lib/
+  # directory, exactly like a real `xp-gate init` installation does.
   mkdir -p .git/hooks/lib
-  cp "$SOURCE_GITHOOKS/lib/now-ms.sh" .git/hooks/lib/now-ms.sh 2>/dev/null || true
+  cp -R "$SOURCE_GITHOOKS/lib/." .git/hooks/lib/ 2>/dev/null || true
 
   mkdir -p web/src/modules/training backend
   cat > web/tsconfig.json <<'EOF'
@@ -135,7 +137,7 @@ teardown() {
 # AC-TDD-016-01: tsc runs against web/tsconfig.json instead of SKIPping
 # ---------------------------------------------------------------------------
 
-@test "multilang: Gate 1 runs tsc with --project web/tsconfig.json" {
+@test "multilang: Gate 1 runs tsc from the web/ project directory" {
   echo "export const session = () => 1;" > web/src/modules/training/session.ts
   echo "test('session', () => {});" > web/src/modules/training/session.test.ts
   echo "def helper() -> int: return 1" > backend/helper.py
@@ -146,7 +148,10 @@ teardown() {
   [ "$status" -eq 0 ]
   [[ "$output" != *"tsconfig.json not found"* ]]
   [[ "$output" == *"Running TypeScript static analysis"* ]]
-  grep -q -- "--project web/tsconfig.json" "$NPX_LOG"
+  # #436 moved the type-check into lib/typecheck.sh (cwd-relative), and #470
+  # discovers the TS project directory and cds into it: tsc must be invoked
+  # from web/ (config auto-discovery), not with a --project path from the root.
+  grep -qE 'pwd=[^]]*/web\] tsc' "$NPX_LOG"
 }
 
 # ---------------------------------------------------------------------------
@@ -183,6 +188,8 @@ teardown() {
   cp "$SOURCE_GITHOOKS/pre-commit" "$FRESH/.git/hooks/pre-commit"
   chmod +x "$FRESH/.git/hooks/pre-commit"
   cp "$SOURCE_GITHOOKS/adapter-common.sh" "$FRESH/.git/hooks/adapter-common.sh" 2>/dev/null || true
+  mkdir -p "$FRESH/.git/hooks/lib"
+  cp -R "$SOURCE_GITHOOKS/lib/." "$FRESH/.git/hooks/lib/" 2>/dev/null || true
   git -C "$FRESH" config core.hooksPath "$FRESH/.git/hooks"
 
   cat > "$FRESH/tsconfig.json" <<'EOF'
@@ -211,7 +218,9 @@ EOF
   [ "$status" -eq 0 ]
   [[ "$output" == *"Running TypeScript static analysis"* ]]
   [[ "$output" != *"TypeScript project directory"* ]]
-  grep -q -- "--project ./tsconfig.json" "$NPX_LOG"
+  # Root project (TS_PROJECT_DIR="."): tsc runs at the repo root, cwd-relative,
+  # without any --project flag or directory notice.
+  grep -q '] tsc --noEmit --skipLibCheck' "$NPX_LOG"
 
   rm -rf "$FRESH"
 }

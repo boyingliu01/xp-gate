@@ -3,7 +3,7 @@ const path = require('path');
 const os = require('os');
 const { execSync } = require('child_process');
 
-const { HOME_DIR } = require('./shared-paths.js');
+const { HOME_DIR, detectPlatform } = require('./shared-paths.js');
 
 const REQUIRED_DEPS = [
   { name: 'superpowers', repo: 'obra/superpowers', minVersion: '1.0.0' },
@@ -257,25 +257,8 @@ const PLATFORM_PROFILES = {
   },
 };
 
-/**
- * Detect which AI agent platform is currently in use.
- * Checks for platform-specific directories in the user's home.
- * Falls back to 'opencode' if no platform is detected.
- *
- * @returns {'opencode' | 'claude-code' | 'qoder'}
- */
-function detectPlatform() {
-  // Check for Qoder-specific marker
-  if (fs.existsSync(path.join(HOME_DIR, '.qoder', 'skills'))) {
-    return 'qoder';
-  }
-  // Check for Claude Code-specific marker
-  if (fs.existsSync(path.join(HOME_DIR, '.claude', 'skills'))) {
-    return 'claude-code';
-  }
-  // Default to opencode (most common, backward compatible)
-  return 'opencode';
-}
+// detectPlatform() is re-exported from shared-paths.js — the single
+// implementation lives there (#424 removed the divergent copy).
 
 /**
  * Get the skills directories for a given platform.

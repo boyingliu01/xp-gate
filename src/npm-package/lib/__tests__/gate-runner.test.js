@@ -43,6 +43,17 @@ function shellParameter(expression) {
   return ['$', '{', expression, '}'].join('');
 }
 
+// Path segment that must survive quoting untouched. Windows rejects `"` and `*`
+// in a filename, so the hostile set there keeps the same bash hazards — word
+// split, parameter expansion, command substitution, quoting, list separator —
+// with legal characters instead (#428).
+function hostilePathSegment() {
+  if (process.platform === 'win32') {
+    return "space $HOME `marker` 'quoted' & (paren)";
+  }
+  return 'space $HOME `marker` "quoted"';
+}
+
 function initializeGitProject() {
   execFileSync('git', ['init', '-q'], { cwd: tmpProject });
   execFileSync('git', ['config', 'user.email', 'test@example.com'], { cwd: tmpProject });
@@ -171,20 +182,25 @@ describe('gate-runner.js — runGateAdapter', () => {
       path.join(callerProject, 'githooks', 'gates', 'gate-9-caller.sh'),
       'echo "__CALLER_REPO__"\n'
     );
+    // The fragment is written into the target project only, so a relative probe
+    // answers "which project did we run in?" without comparing path strings —
+    // bash reports $PWD in POSIX form, which can never equal the Windows path
+    // the test passes as an argument (#428).
     fs.writeFileSync(
       path.join(targetProject, 'githooks', 'gates', 'gate-9-target.sh'),
       [
-        'if [ "$PWD" != "$EXPECTED_TARGET" ]; then exit 88; fi',
+        'if [ ! -f "githooks/gates/gate-9-target.sh" ]; then exit 88; fi',
+        'if [ -f ".xpgate-caller-only" ]; then exit 88; fi',
         'echo "__TARGET_REPO__"',
       ].join('\n')
     );
+    fs.writeFileSync(path.join(callerProject, '.xpgate-caller-only'), 'caller\n');
 
     const result = spawnSync(
       process.execPath,
       [path.join(packageFixture, 'bin', 'xp-gate.js'), 'check', '9', targetProject],
       {
         cwd: callerProject,
-        env: { ...process.env, EXPECTED_TARGET: targetProject },
         encoding: 'utf8',
         timeout: 30000,
       }
@@ -197,7 +213,7 @@ describe('gate-runner.js — runGateAdapter', () => {
 
   it('sources fragment and helper paths containing shell metacharacters literally (REQ-standalone-gates-07)', () => {
     const runnerAbsPath = path.resolve(__dirname, '../gate-runner.js');
-    const hostileRoot = path.join(tmpProject, 'space $HOME `marker` "quoted"');
+    const hostileRoot = path.join(tmpProject, hostilePathSegment());
     tmpAdapters = path.join(hostileRoot, 'githooks', 'adapters');
     fs.mkdirSync(tmpAdapters, { recursive: true });
     writeAdapterCommon();

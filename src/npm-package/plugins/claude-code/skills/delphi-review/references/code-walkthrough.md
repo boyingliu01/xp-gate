@@ -255,8 +255,14 @@ pre-push hook
 |------|------|------|
 | 单次走查成本 | ~$0.03 | 正常执行 |
 | 变更规模 | 无硬性文件数或行数上限 | 大型变更必须完整评审或由用户选择拆分 |
+| 单席位 prompt 体积 | 默认 40000 字节（`max_prompt_bytes` 可按席位覆盖） | runner 发送前拒绝，报错里给出处置办法 |
 
 大型变更没有自动跳过或绕过路径。用户可以选择完整评审，或在评审前主动拆分变更；每个变更仍须通过完整的走查和证据验证。
+
+**prompt 预算是硬约束，不是建议**：实测 `g-glm-5.3-flash` 在 ~40KB 正常应答（225s）、~50KB 直接崩溃
+（305s，`0xC0000409` + libuv `UV_HANDLE_CLOSING`，表现为 "Network error."）——一个席位崩溃就会让整个共识无法完成。
+构造输入时按重要性排序、给每个席位独立预算、并在报告里显式列出因体积省略的文件；
+截断到「核心 hunk 看不见」比超限更糟：席位会花整轮报告「无法审计」，而这是评审者的真实缺陷而非代码缺陷。
 
 ---
 
@@ -356,9 +362,9 @@ IF 任何检查失败:
   "verdict": "APPROVED",
   "confidence": 9,
   "experts": [
-    { "id": "Expert A", "role": "architecture", "verdict": "APPROVED", "confidence": 9, "result_type": "delphi_expert_result", "requested_model": "provider/model-a", "resolved_model": "provider/model-a" },
-    { "id": "Expert B", "role": "technical", "verdict": "APPROVED", "confidence": 8, "result_type": "delphi_expert_result", "requested_model": "provider/model-b", "resolved_model": null },
-    { "id": "Expert C", "role": "feasibility", "verdict": "APPROVED", "confidence": 8, "result_type": "delphi_expert_result", "requested_model": "provider/model-c", "resolved_model": "provider/model-c" }
+    { "id": "Expert A", "role": "architecture", "verdict": "APPROVED", "confidence": 9, "result_type": "delphi_expert_result", "requested_model": "provider/model-a", "resolved_model": "provider/model-a", "channel": "external" },
+    { "id": "Expert B", "role": "technical", "verdict": "APPROVED", "confidence": 8, "result_type": "delphi_expert_result", "requested_model": "provider/model-b", "resolved_model": "provider/model-b", "channel": "external" },
+    { "id": "Expert C", "role": "feasibility", "verdict": "APPROVED", "confidence": 8, "result_type": "delphi_expert_result", "requested_model": "provider/model-c", "resolved_model": "provider/model-c", "channel": "external" }
   ],
   "issues": [],
   "consensus_ratio": 1.0,
@@ -398,6 +404,33 @@ Hook 验证以下条件（全部满足才允许 push）：
 4. verdict = APPROVED
 5. timestamp 未过期
 6. expires 必须是 timestamp 之后恰好 1 小时
+
+### experts[] 必填字段与 #423 的迁移说明
+
+`validate-code-walkthrough.cjs` 对每个 expert 对象强制要求：
+
+| 字段 | 约束 |
+|------|------|
+| `result_type` | 必须等于 `"delphi_expert_result"` |
+| `role` | 非空，三个席位 role 互异 |
+| `requested_model` | 非空；比较前只做 trim，**区分大小写**（规范原文是 "distinct trimmed requested model IDs"，见 AGENTS.md） |
+| `resolved_model` | 非空；比较前 trim + 转小写，三者互异 |
+| `channel` | 必须严格属于 `["external", "local"]`；`provider: local` 的 fallback 记录不能计为成功执行 |
+
+缺字段或取值不在白名单 → Gate MW **FAIL**（不是 SKIP）。
+
+**升级后旧证据怎么处置**：唯一正确做法是在当前 HEAD 重跑一次评审、由 runner 重新生成证据文件。
+不要手工给老文件补 `channel` —— 那等于伪造执行证据，而 `channel` 存在的目的正是让证据可追溯到一次真实调用。
+证据本来就与 commit 绑定（`commit` 必须等于 HEAD，有效期 1 小时），跨 commit 复用从来不是受支持的路径。
+
+**回滚语义**：validator 与证据生产者（`scripts/delphi-external-review.cjs`）必须成对回滚。
+
+- 旧 validator 读新证据：安全，多余字段被忽略。
+- 新 validator 读旧证据：必然 FAIL（缺 `channel`）。这是设计意图——宁可在发布关口停下，
+  也不放行一份无法证明模型来源的证据；把「三个不同模型真的跑过」降级为可选项，等于让门禁只剩形式。
+- 临时降级开关：**没有**。既没有 `XP_GATE_SKIP_MW` 之类的环境变量，也不允许 `--no-verify`
+  （见 `githooks/QUALITY-GATES-CODE-OF-CONDUCT.md`）。如果评审确实无法完成，处理方式是缩小
+  `--range` 或按席位调整 prompt 预算重跑，而不是放行。
 
 ---
 

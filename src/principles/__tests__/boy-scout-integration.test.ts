@@ -149,6 +149,51 @@ describe('Boy Scout Rule - runEnforcement', () => {
     expect(vi.mocked(mockWriteFile).mock.calls[0][0]).toBe('/tmp/test-baseline.json');
   });
 
+  // #452: the auto-init path inside runEnforcement once wrote only the current
+  // commit's files, silently dropping entries for untouched files -- which then
+  // made Gate 6 BLOCK files the commit never touched. The explicit
+  // init-baseline command got merge semantics (#445); these tests pin the same
+  // guarantee on the automatic path.
+  it('REQ-452: auto-init preserves entries for files not in the current commit', async () => {
+    // 6 warnings so the entry survives the "small baselines must clear" rule;
+    // a clean file gains no entry by design (nothing to budget).
+    const warnings = Array.from({ length: 6 }, (_, i) => ({
+      file: 'plugins/dsh/src/command.ts', line: i + 1, ruleId: 'test', severity: 'warning' as const, message: 'm',
+    }));
+    mockAnalyze.mockResolvedValue(fakeAnalysis(warnings));
+    mockAccess.mockResolvedValue(undefined);
+    mockReadFile.mockResolvedValue(
+      JSON.stringify({ 'src/npm-package/lib/test-alignment.ts': { totalWarnings: 1, lastAnalyzed: '2024-01-01' } })
+    );
+    mockWriteFile.mockResolvedValue(undefined);
+
+    const result = await runEnforcement([], ['plugins/dsh/src/command.ts'], '/tmp/test-baseline.json');
+
+    expect(result.overallStatus).toBe('PASS');
+    expect(mockWriteFile).toHaveBeenCalled();
+    const saved = JSON.parse(vi.mocked(mockWriteFile).mock.calls[0][1] as string) as Record<string, BaselineEntry>;
+    expect(saved['src/npm-package/lib/test-alignment.ts']).toEqual({ totalWarnings: 1, lastAnalyzed: '2024-01-01' });
+    expect(saved['plugins/dsh/src/command.ts']?.totalWarnings).toBe(6);
+  });
+
+  it('REQ-452: auto-init is idempotent -- a second run over the same files writes the same entries', async () => {
+    mockAnalyze.mockResolvedValue(emptyAnalysis());
+    mockAccess.mockResolvedValue(undefined);
+    mockWriteFile.mockResolvedValue(undefined);
+    const first = JSON.stringify({});
+
+    mockReadFile.mockResolvedValue(first);
+    await runEnforcement([], ['src/a.ts'], '/tmp/test-baseline.json');
+    const savedOnce = vi.mocked(mockWriteFile).mock.calls.at(-1)![1] as string;
+
+    mockReadFile.mockResolvedValue(savedOnce);
+    mockWriteFile.mockClear();
+    await runEnforcement([], ['src/a.ts'], '/tmp/test-baseline.json');
+    const savedTwice = vi.mocked(mockWriteFile).mock.calls.at(-1)![1] as string;
+
+    expect(JSON.parse(savedOnce)).toEqual(JSON.parse(savedTwice));
+  });
+
   it('blocks modified file with <=5 baseline warnings that are not cleared', async () => {
     mockAnalyze.mockResolvedValue(
       fakeAnalysis([{ file: 'src/mod.ts', line: 1, ruleId: 'test', severity: 'warning' as const, message: 'm' }])
@@ -251,20 +296,24 @@ describe('CLI integration', () => {
   }, CLI_TEST_TIMEOUT);
 
   it('runs init-baseline via CLI against an isolated baseline', async () => {
-    // Never point --baseline at the repo's tracked .warnings-baseline.json: this
-    // test must not mutate tracked state. Use a throwaway path instead (#445).
-    // NOTE: this file mocks 'fs/promises' (which also covers 'node:fs/promises'),
-    // so use node:fs sync APIs -- they are not intercepted.
-    const tmpBaseline = path.join(mkdtempSync(path.join(tmpdir(), 'bs-init-')), 'baseline.json');
-    const { stdout } = await execAsync(
-      `npx tsx ${BOY_SCOUT_PATH} --init-baseline src/principles/boy-scout.ts --baseline "${tmpBaseline}"`,
-      { timeout: 30000 }
-    );
-    // The command now reports a merge summary instead of the old (misleading)
-    // "Baseline initialized successfully" — it updates rather than replaces.
-    expect(stdout).toContain('Baseline updated');
-    expect(stdout).toContain(tmpBaseline);
-    expect(typeof readFileSync(tmpBaseline, 'utf-8')).toBe('string');
+    try {
+      // Never point --baseline at the repo's tracked .warnings-baseline.json: this
+      // test must not mutate tracked state. Use a throwaway path instead (#445).
+      // NOTE: this file mocks 'fs/promises' (which also covers 'node:fs/promises'),
+      // so use node:fs sync APIs -- they are not intercepted.
+      const tmpBaseline = path.join(mkdtempSync(path.join(tmpdir(), 'bs-init-')), 'baseline.json');
+      const { stdout } = await execAsync(
+        `npx tsx ${BOY_SCOUT_PATH} --init-baseline src/principles/boy-scout.ts --baseline "${tmpBaseline}"`,
+        { timeout: 30000 }
+      );
+      // The command now reports a merge summary instead of the old (misleading)
+      // "Baseline initialized successfully" — it updates rather than replaces.
+      expect(stdout).toContain('Baseline updated');
+      expect(stdout).toContain(tmpBaseline);
+      expect(typeof readFileSync(tmpBaseline, 'utf-8')).toBe('string');
+    } catch (error) {
+      throw error instanceof Error ? error : new Error(String(error));
+    }
   }, CLI_TEST_TIMEOUT);
 
   /**
@@ -274,24 +323,28 @@ describe('CLI integration', () => {
    * @covers AC-DSH-014-01
    */
   it('init-baseline preserves pre-existing entries (merge, not replace)', async () => {
-    const dir = mkdtempSync(path.join(tmpdir(), 'bs-merge-'));
-    const tmpBaseline = path.join(dir, 'baseline.json');
-    writeFileSync(
-      tmpBaseline,
-      JSON.stringify({
-        'src/legacy.ts': { totalWarnings: 3, lastAnalyzed: '2026-01-01T00:00:00.000Z' },
-      }),
-      'utf-8'
-    );
+    try {
+      const dir = mkdtempSync(path.join(tmpdir(), 'bs-merge-'));
+      const tmpBaseline = path.join(dir, 'baseline.json');
+      writeFileSync(
+        tmpBaseline,
+        JSON.stringify({
+          'src/legacy.ts': { totalWarnings: 3, lastAnalyzed: '2026-01-01T00:00:00.000Z' },
+        }),
+        'utf-8'
+      );
 
-    await execAsync(
-      `npx tsx ${BOY_SCOUT_PATH} --init-baseline src/principles/boy-scout.ts --baseline "${tmpBaseline}"`,
-      { timeout: 30000 }
-    );
+      await execAsync(
+        `npx tsx ${BOY_SCOUT_PATH} --init-baseline src/principles/boy-scout.ts --baseline "${tmpBaseline}"`,
+        { timeout: 30000 }
+      );
 
-    const written = JSON.parse(readFileSync(tmpBaseline, 'utf-8'));
-    expect(written['src/legacy.ts']).toBeDefined();
-    expect(written['src/legacy.ts'].totalWarnings).toBe(3);
+      const written = JSON.parse(readFileSync(tmpBaseline, 'utf-8'));
+      expect(written['src/legacy.ts']).toBeDefined();
+      expect(written['src/legacy.ts'].totalWarnings).toBe(3);
+    } catch (error) {
+      throw error instanceof Error ? error : new Error(String(error));
+    }
   }, CLI_TEST_TIMEOUT);
 
   it('runs enforcement via CLI with empty files', async () => {

@@ -190,9 +190,9 @@ Round 2: delphi-review --mode requirements（带 Round 1 gaps 上下文）
   "context_file_used": null,
   "round": 1,
    "expert_verdicts": [
-     { "role": "architecture", "verdict": "APPROVED", "confidence": 9, "result_type": "delphi_expert_result", "requested_model": "bailian-tp/qwen-plus" },
-     { "role": "technical", "verdict": "APPROVED", "confidence": 8, "result_type": "delphi_expert_result", "requested_model": "bailian-tp/deepseek-v3" },
-     { "role": "feasibility", "verdict": "APPROVED", "confidence": 8, "result_type": "delphi_expert_result", "requested_model": "bailian-tp/glm-4.5" }
+     { "role": "architecture", "verdict": "APPROVED", "confidence": 9, "result_type": "delphi_expert_result", "requested_model": "bailian-tp/qwen-plus", "resolved_model": "qwen-plus", "channel": "external" },
+     { "role": "technical", "verdict": "APPROVED", "confidence": 8, "result_type": "delphi_expert_result", "requested_model": "bailian-tp/deepseek-v3", "resolved_model": "deepseek-v3", "channel": "external" },
+     { "role": "feasibility", "verdict": "APPROVED", "confidence": 8, "result_type": "delphi_expert_result", "requested_model": "bailian-tp/glm-4.5", "resolved_model": "glm-4.5", "channel": "external" }
    ],
   "requirements_statement": "实现用户注册流程，支持邮箱验证和密码重置",
   "gaps_found": [],
@@ -214,9 +214,9 @@ Round 2: delphi-review --mode requirements（带 Round 1 gaps 上下文）
   "context_file_used": null,
   "round": 1,
   "expert_verdicts": [
-    { "role": "architecture", "verdict": "APPROVED", "confidence": 8, "result_type": "delphi_expert_result", "requested_model": "provider/model-a" },
-    { "role": "technical", "verdict": "GAPS_FOUND", "confidence": 7, "result_type": "delphi_expert_result", "requested_model": "provider/model-b" },
-    { "role": "feasibility", "verdict": "APPROVED", "confidence": 8, "result_type": "delphi_expert_result", "requested_model": "provider/model-c" }
+    { "role": "architecture", "verdict": "APPROVED", "confidence": 8, "result_type": "delphi_expert_result", "requested_model": "provider/model-a", "resolved_model": "provider/model-a", "channel": "external" },
+    { "role": "technical", "verdict": "GAPS_FOUND", "confidence": 7, "result_type": "delphi_expert_result", "requested_model": "provider/model-b", "resolved_model": "provider/model-b", "channel": "external" },
+    { "role": "feasibility", "verdict": "APPROVED", "confidence": 8, "result_type": "delphi_expert_result", "requested_model": "provider/model-c", "resolved_model": "provider/model-c", "channel": "external" }
   ],
   "requirements_statement": "实现用户注册流程，支持邮箱验证和密码重置",
   "gaps_found": [

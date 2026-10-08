@@ -97,8 +97,10 @@ MOCK
   cp "$SOURCE_GITHOOKS/pre-commit" .git/hooks/pre-commit
   chmod +x .git/hooks/pre-commit
   cp "$SOURCE_GITHOOKS/adapter-common.sh" .git/hooks/adapter-common.sh 2>/dev/null || true
+  # The hook sources lib/typecheck.sh in Gate 1 (#436): ship the whole lib/
+  # directory, exactly like a real `xp-gate init` installation does.
   mkdir -p .git/hooks/lib
-  cp "$SOURCE_GITHOOKS/lib/now-ms.sh" .git/hooks/lib/now-ms.sh 2>/dev/null || true
+  cp -R "$SOURCE_GITHOOKS/lib/." .git/hooks/lib/ 2>/dev/null || true
 
   # Multi-language monorepo fixture: TS project under web/, Python under backend/
   mkdir -p web/src/modules/training/stores backend

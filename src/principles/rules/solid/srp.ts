@@ -1,21 +1,20 @@
 import { Rule, Violation } from '../../types';
-import { getDefaultConfig } from '../../config';
-
-const config = getDefaultConfig();
-const { methodThreshold, severity } = config.rules['solid']['srp'];
+import { getActiveConfig } from '../../config';
 
 export const srpRule: Rule = {
   id: 'solid.srp',
   name: 'Single Responsibility Principle Rule',
-  threshold: methodThreshold as number,
-  severity: severity as "error" | "warning" | "info",
+  threshold: 15,
+  severity: 'warning',
   check: (file: string, adapter: import('../../types').Adapter): Violation[] => {
     const violations: Violation[] = [];
+    // Read the ACTIVE config per invocation; a module-load snapshot was #457.
+    const settings = getActiveConfig().rules['solid']['srp'];
 
     try {
       const classes = adapter.extractClasses() || [];
-      const maxMethods = methodThreshold as number;
-      const sev = severity as "error" | "warning" | "info";
+      const maxMethods = settings.methodThreshold as number;
+      const sev = (settings.severity as 'error' | 'warning' | 'info') ?? 'warning';
 
       for (const raw of classes) {
         const cls = raw as { code?: string; line?: number; name?: string; methodCount?: number; imports?: Record<string, unknown> };

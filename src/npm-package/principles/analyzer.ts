@@ -1,4 +1,5 @@
 import { Rule, Violation, Adapter } from './types';
+import { getActiveConfig } from './config';
 import { TypeScriptAdapter } from './adapters/typescript';
 import { PythonAdapter } from './adapters/python';
 import { GoAdapter } from './adapters/go';
@@ -113,6 +114,12 @@ function computeSummary(
 
 function runRuleOnFile(ctx: RunRuleContext): void {
   const { file, rule, adapter, violations, fileResult, ruleResult, errors } = ctx;
+  // Honour `enabled: false` from `.principlesrc`. Nothing read this flag before
+  // #457, so a project could not turn a rule off.
+  //
+  // Checked BEFORE `filesChecked++`: a rule that never ran must not report that it
+  // examined a file, or the per-rule stats claim coverage the rule did not perform.
+  if (!isRuleEnabled(rule.id)) return;
   ruleResult.filesChecked++;
   try {
     const ruleViolations = rule.check(file, adapter);
@@ -126,6 +133,21 @@ function runRuleOnFile(ctx: RunRuleContext): void {
     const msg = err instanceof Error ? err.message : String(err);
     errors.push(`Rule ${rule.id} failed on ${file}: ${msg}`);
   }
+}
+
+/**
+ * Whether `ruleId` (e.g. `clean-code.large-file`) is enabled in the active
+ * config. Unknown or malformed entries default to enabled: a config typo must
+ * not silently disable a gate.
+ */
+function isRuleEnabled(ruleId: string): boolean {
+  const separator = ruleId.indexOf('.');
+  if (separator <= 0) return true;
+  const group = ruleId.slice(0, separator);
+  const name = ruleId.slice(separator + 1);
+  const rules = getActiveConfig().rules as Record<string, Record<string, { enabled?: boolean }>>;
+  const settings = rules[group]?.[name];
+  return settings?.enabled !== false;
 }
 
 interface RunRuleContext {

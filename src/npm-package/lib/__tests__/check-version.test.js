@@ -318,7 +318,14 @@ describe('check-version.js — REQ-001-01', () => {
       const r = await mod.getRemoteVersion('@nonexistent/pkg-test-only');
       // Without network: null. With network (npm registry proxy): object.
       expect(r === null || (typeof r.latest === 'string')).toBe(true);
-    });
+      // This case performs a real registry lookup, so it must be given a budget
+      // ABOVE the module's own NETWORK_TIMEOUT_MS (5000). At vitest's 5000ms
+      // default the two race, and on a machine where the registry is slow or
+      // unreachable the test failed as "Test timed out" -- reporting a stuck test
+      // rather than the graceful degradation it exists to verify. Raised here
+      // rather than lowering the module timeout, which is deliberate production
+      // behaviour.
+    }, 20000);
 
     // AC-001-02-A: writeCache rejects non-semver versions from registry response
     function evictCache() {

@@ -6,6 +6,7 @@
 
 import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { analyze } from '../analyzer';
+import { getDefaultConfig, resetActiveConfig, setActiveConfig } from '../config';
 import { Rule, Adapter, Severity } from '../types';
 
 describe('analyzer.ts - Rule Orchestration Engine', () => {
@@ -112,6 +113,26 @@ describe('analyzer.ts - Rule Orchestration Engine', () => {
       // Only enabled rule should run
       expect(mockRule.check).toHaveBeenCalled();
       expect(disabledRule.check).not.toHaveBeenCalled();
+    });
+
+    it('a rule disabled by config must not report files as checked (#457)', async () => {
+      // `filesChecked` used to be incremented before the `enabled` check, so a rule
+      // that never ran still claimed it had examined the file -- inflating per-rule
+      // coverage statistics for work the rule did not do.
+      const disabled = getDefaultConfig();
+      disabled.rules['clean-code']['long-function'].enabled = false;
+      try {
+        setActiveConfig(disabled);
+        const result = await analyze(['test.ts'], [mockRule], mockAdapter, {});
+        expect(mockRule.check).not.toHaveBeenCalled();
+        expect(result.ruleResults['clean-code.long-function'].filesChecked).toBe(0);
+      } finally {
+        // Restore the process-global config so later tests are unaffected.
+        // `resetActiveConfig()` rather than re-installing the captured config:
+        // replacing an already-installed config is exactly what the #457
+        // guardrail reports, and this suite never installs a non-default one.
+        resetActiveConfig();
+      }
     });
 
     it('should return empty violations if all rules pass', async () => {
@@ -228,6 +249,13 @@ it('should skip files that do not match adapter language', async () => {
   });
 
   describe('runRuleOnFile (via analyze) — verifies context-object parameter bundling', () => {
+    // Extracted from the test body: inlining this callback pushed the test past the
+    // 4-level nesting limit for no readability gain.
+    const ruleACheck = vi.fn().mockImplementation((file: string) => {
+      if (file !== 'a.ts') return [];
+      return [{ file: 'a.ts', line: 1, ruleId: 'test.rule-a', message: 'violation in a', severity: 'warning' as Severity }];
+    });
+
     it('should correctly aggregate violations per file and per rule', async () => {
       const files = ['a.ts', 'b.ts'];
       const ruleA = {
@@ -235,12 +263,7 @@ it('should skip files that do not match adapter language', async () => {
         name: 'Rule A',
         threshold: 10,
         severity: 'warning' as Severity,
-        check: vi.fn().mockImplementation((file: string) => {
-          if (file === 'a.ts') {
-            return [{ file: 'a.ts', line: 1, ruleId: 'test.rule-a', message: 'violation in a', severity: 'warning' as Severity }];
-          }
-          return [];
-        })
+        check: ruleACheck
       } as Rule;
       const ruleB = {
         id: 'test.rule-b',

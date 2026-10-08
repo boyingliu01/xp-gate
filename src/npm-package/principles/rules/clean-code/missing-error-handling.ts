@@ -1,15 +1,15 @@
 import { Rule, Violation, Severity } from '../../types';
-import { getDefaultConfig } from '../../config';
-
-const config = getDefaultConfig();
+import { getActiveConfig } from '../../config';
 
 export const missingErrorHandlingRule: Rule = {
   id: 'clean-code.missing-error-handling',
   name: 'Missing Error Handling Rule',
   threshold: 1,
-  severity: config.rules['clean-code']['missing-error-handling'].severity as Severity,
+  severity: 'warning',
   check: (file: string, adapter: unknown): Violation[] => {
     const violations: Violation[] = [];
+    // Read the ACTIVE config per invocation; a module-load snapshot was #457.
+    const settings = getActiveConfig().rules['clean-code']['missing-error-handling'];
     
     try {
       const typedAdapter = adapter as { extractFunctions?: () => Array<{name?: string; startLine?: number; line?: number; ioOperations?: string[]; hasTryCatch?: boolean;}> | undefined };
@@ -22,7 +22,7 @@ export const missingErrorHandlingRule: Rule = {
             line: func.startLine ?? func.line ?? 1,
             ruleId: 'clean-code.missing-error-handling',
             message: `Function "${func.name}" has IO operations (${func.ioOperations.join(', ')}) without error handling`,
-            severity: config.rules['clean-code']['missing-error-handling'].severity as Severity
+            severity: (settings.severity as Severity) ?? 'warning'
           });
         }
       }

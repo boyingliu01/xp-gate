@@ -6,8 +6,18 @@
 
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { main, parseArgs } from '../index';
+import { resetActiveConfig } from '../config';
 
 describe('index.ts - CLI Entry Point', () => {
+  // Each main() call installs the config it loads. Production runs one process
+  // per invocation; this file calls main() repeatedly in one process, so the
+  // documented reset-per-run lifecycle is what keeps #457's replacement
+  // guardrail from reporting the test harness itself.
+  beforeEach(() => {
+    resetActiveConfig();
+  });
+
+
   describe('parseArgs', () => {
     it('should parse --files argument', () => {
       const args = ['--files', 'test.ts test2.ts'];
@@ -58,10 +68,13 @@ describe('index.ts - CLI Entry Point', () => {
       vi.spyOn(console, 'error').mockImplementation(() => undefined);
     });
 
-    it('should return 1 when no files provided', async () => {
+    it('should return 2 when no files provided', async () => {
       const result = await main([]);
-      
-      expect(result).toBe(1);
+
+      // 2, not 1. Exit 1 asserts "I examined files and found ERROR-severity
+      // violations"; a gate that sees 1 with an empty report reads a clean pass, so
+      // a miswired hook would announce PASSED having checked nothing (#457).
+      expect(result).toBe(2);
       expect(console.error).toHaveBeenCalled();
     });
 

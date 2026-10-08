@@ -1,0 +1,217 @@
+/**
+ * Stale-entry pruning for `.warnings-baseline.json` (#452 REQ-3).
+ *
+ * `classifyFiles` in boy-scout.ts has always parsed the git `D` status into a
+ * `deleted` list, but nothing consumed it, so the baseline accumulated entries
+ * for files that no longer exist. A stale entry is not merely untidy: if a path
+ * is later re-created it inherits the old allowance, and the Boy Scout gate then
+ * compares against a phantom history.
+ *
+ * Lives in its own module because boy-scout.ts is already at the 10-export
+ * clean-code.many-exports limit.
+ */
+
+import { execFileSync } from 'child_process';
+import { existsSync } from 'fs';
+import { resolve } from 'path';
+
+/**
+ * Ceiling on any single git call. Generous enough that a healthy `git ls-files`
+ * over a very large index never trips it, short enough that a wedged git degrades
+ * to "keep the entry" rather than hanging the hook this runs inside.
+ */
+const GIT_TIMEOUT_MS = 30_000;
+
+/** Outcome of a baseline prune: which entries survived, and which were dropped. */
+export interface PruneResult {
+  /** Baseline keys confirmed to still exist (or that we could not disprove). */
+  kept: string[];
+  /** Baseline keys safe to drop: absent from disk AND no longer tracked by git. */
+  removed: string[];
+  /** Set when the baseline could not be parsed; nothing is removed in that case. */
+  error?: string;
+}
+
+/** How the project root's filesystem resolves path names. */
+export interface PruneOptions {
+  /**
+   * Whether `A.ts` and `a.ts` name the same file at this root.
+   *
+   * Defaults to platform detection. Tests pass it explicitly so both branches are
+   * exercisable from a single checkout.
+   */
+  caseInsensitivePaths?: boolean;
+}
+
+/**
+ * Whether the host filesystem folds case by default.
+ *
+ * Windows always does; a default APFS/_HFS+ volume on macOS does. A deliberately
+ * case-sensitive macOS volume is misread as folding here, and the consequence is
+ * the retain direction (an entry is kept rather than dropped) -- the fail-safe side
+ * of this comparison.
+ */
+function filesystemFoldsCase(): boolean {
+  return process.platform === 'win32' || process.platform === 'darwin';
+}
+
+/**
+ * Identify baseline entries whose file no longer exists.
+ *
+ * REMOVAL IS DOUBLE-CONFIRMED, on purpose. Both signals are wrong on their own:
+ *   - `existsSync` alone: a sparse checkout, a mid-flight rebase, a symlinked
+ *     worktree, or a case-insensitive filesystem all make a live tracked file
+ *     look absent.
+ *   - `git ls-files` alone: a file can be present but deliberately untracked.
+ * So an entry is dropped only when the path is missing from disk AND git reports
+ * it untracked. If git cannot be consulted at all, everything is kept -- failing
+ * closed retains a legitimate allowance, whereas failing open would discard one.
+ *
+ * Pure with respect to `baselineJson`: the caller decides when to persist.
+ */
+export function pruneBaselineEntries(
+  baselineJson: string,
+  projectRoot: string,
+  options: PruneOptions = {},
+): PruneResult {
+  const files = parseBaselineFiles(baselineJson);
+  if (typeof files === 'string') {
+    return { kept: [], removed: [], error: files };
+  }
+
+  const caseInsensitivePaths = options.caseInsensitivePaths ?? filesystemFoldsCase();
+  const tracked = listTrackedFiles(projectRoot, caseInsensitivePaths);
+  const kept: string[] = [];
+  const removed: string[] = [];
+
+  if (tracked === null) {
+    // Nothing can be proven stale without the index, so every entry is kept --
+    // but that must be said out loud. Reported as "no stale entries" it is
+    // indistinguishable from a successful prune, which is the same silent no-op
+    // this module was introduced to remove.
+    return {
+      kept: Object.keys(files),
+      removed,
+      error: 'could not consult the git index, so no entry could be proven stale',
+    };
+  }
+
+  for (const key of Object.keys(files)) {
+    if (isEntryStale(key, projectRoot, tracked, caseInsensitivePaths)) {
+      removed.push(key);
+    } else {
+      kept.push(key);
+    }
+  }
+
+  return { kept, removed };
+}
+
+/**
+ * Extract the path -> entry map, or a string describing why it is unusable.
+ *
+ * The on-disk format is a FLAT map (`{"src/a.ts": {totalWarnings, lastAnalyzed}}`),
+ * not a `{files: {...}}` wrapper. A `files` wrapper is still accepted for forwards
+ * compatibility, but the flat form is what `saveBaseline` actually writes.
+ */
+function parseBaselineFiles(baselineJson: string): Record<string, unknown> | string {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(baselineJson);
+  } catch (error) {
+    const detail = error instanceof Error ? error.message : String(error);
+    // Fail safe: an unparsable baseline must never be reported as "all stale",
+    // which is exactly how the reporter's entries disappeared.
+    return `could not parse baseline: ${detail}`;
+  }
+
+  if (parsed === null || typeof parsed !== 'object' || Array.isArray(parsed)) {
+    return 'baseline is not a JSON object';
+  }
+
+  const record = parsed as Record<string, unknown>;
+  const nested = record.files;
+  if (nested !== null && typeof nested === 'object' && !Array.isArray(nested)) {
+    return nested as Record<string, unknown>;
+  }
+
+  // Keep only object-valued keys: scalars at the top level are metadata, not
+  // path entries, and a path whose entry is a bare number is the malformed shape
+  // that assertValidEntry rejects elsewhere (#455).
+  const entries: Record<string, unknown> = {};
+  for (const [key, value] of Object.entries(record)) {
+    if (value !== null && typeof value === 'object' && !Array.isArray(value)) {
+      entries[key] = value;
+    }
+  }
+  return entries;
+}
+
+/**
+ * Whether a baseline key is safe to drop.
+ *
+ * Callers must have confirmed the index is readable; an unavailable git is handled
+ * by the caller, which reports it rather than deciding silently here.
+ */
+function isEntryStale(
+  key: string,
+  projectRoot: string,
+  tracked: Set<string>,
+  caseInsensitivePaths: boolean,
+): boolean {
+  if (tracked.has(normalizeBaselinePath(key, caseInsensitivePaths))) return false;
+  try {
+    return !existsSync(resolve(projectRoot, key));
+  } catch {
+    // If the filesystem cannot answer, keep the entry.
+    return false;
+  }
+}
+
+/**
+ * Canonical form for comparing a baseline key with a git index path.
+ *
+ * The git index is authoritative for casing, so the default comparison is exact
+ * after separator normalization. Case folding is applied only when the filesystem
+ * at this root folds case, because that is the one setting where `Src/A.ts` in the
+ * index and a baseline key of `src/A.ts` name the same file. On a case-sensitive
+ * filesystem folding both sides conflated two distinct files, so a key matching
+ * neither spelling exactly still found a "tracked" hit and the phantom allowance
+ * was retained forever -- the failure mode this module was introduced to remove.
+ */
+function normalizeBaselinePath(value: string, caseInsensitivePaths: boolean): string {
+  const separators = value.replace(/\\/g, '/');
+  return caseInsensitivePaths ? separators.toLowerCase() : separators;
+}
+
+/** Tracked paths per the git index, or null when git cannot be consulted. */
+function listTrackedFiles(projectRoot: string, caseInsensitivePaths: boolean): Set<string> | null {
+  try {
+    const out = execFileSync('git', ['ls-files'], {
+      cwd: projectRoot,
+      encoding: 'utf-8',
+      stdio: ['ignore', 'pipe', 'ignore'],
+      // `execFileSync` defaults to a 1 MiB buffer. A repo with a few tens of
+      // thousands of tracked paths exceeds that, and the throw would be caught
+      // below and reported as "git unavailable" -- silently disabling pruning at
+      // exactly the scale where a stale baseline is most likely. Raised well past
+      // any realistic index size; the failure mode we care about is correctness,
+      // not memory.
+      maxBuffer: 256 * 1024 * 1024,
+      // Bound the wait. This runs inside a pre-commit hook, so an unbounded call
+      // turns a wedged git (locked index, stalled credential prompt, network-backed
+      // filesystem) into a commit that never returns -- strictly worse than the
+      // silent no-op the maxBuffer above fixed. On expiry the catch below reports
+      // "git unavailable" and every entry is kept, which fails closed.
+      timeout: GIT_TIMEOUT_MS,
+    });
+    const set = new Set<string>();
+    for (const line of out.split('\n')) {
+      const trimmed = line.trim();
+      if (trimmed) set.add(normalizeBaselinePath(trimmed, caseInsensitivePaths));
+    }
+    return set;
+  } catch {
+    return null;
+  }
+}

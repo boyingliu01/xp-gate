@@ -89,9 +89,9 @@ grill 访谈达成共享理解后（或 CONTEXT.md 快速路径下读取已有�
   "head_commit": "<git rev-parse HEAD>",
   "consensus_ratio": 1.0,
   "expert_verdicts": [
-    { "role": "architecture", "verdict": "APPROVED", "result_type": "delphi_expert_result", "requested_model": "provider/model-a" },
-    { "role": "technical", "verdict": "APPROVED", "result_type": "delphi_expert_result", "requested_model": "provider/model-b" },
-    { "role": "feasibility", "verdict": "APPROVED", "result_type": "delphi_expert_result", "requested_model": "provider/model-c" }
+    { "role": "architecture", "verdict": "APPROVED", "result_type": "delphi_expert_result", "requested_model": "provider/model-a", "resolved_model": "provider/model-a", "channel": "external" },
+    { "role": "technical", "verdict": "APPROVED", "result_type": "delphi_expert_result", "requested_model": "provider/model-b", "resolved_model": "provider/model-b", "channel": "external" },
+    { "role": "feasibility", "verdict": "APPROVED", "result_type": "delphi_expert_result", "requested_model": "provider/model-c", "resolved_model": "provider/model-c", "channel": "external" }
   ],
   "rounds": 1,
   "gaps": []

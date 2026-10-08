@@ -1,15 +1,15 @@
 import { Rule, Violation, Severity } from '../../types';
-import { getDefaultConfig } from '../../config';
-
-const config = getDefaultConfig();
+import { getActiveConfig } from '../../config';
 
 export const deepNestingRule: Rule = {
   id: 'clean-code.deep-nesting',
   name: 'Deep Nesting Rule',
-  threshold: config.rules['clean-code']['deep-nesting'].threshold ?? 4,
-  severity: config.rules['clean-code']['deep-nesting'].severity as Severity,
+  threshold: 4,
+  severity: 'warning',
   check: (file: string, adapter: unknown): Violation[] => {
     const violations: Violation[] = [];
+    // Read the ACTIVE config per invocation; a module-load snapshot was #457.
+    const settings = getActiveConfig().rules['clean-code']['deep-nesting'];
     
     try {
       interface TypedAdapter {
@@ -19,15 +19,15 @@ export const deepNestingRule: Rule = {
       const functions = typedAdapter.extractFunctions?.() || [];
       
       for (const func of functions) {
-        if (func.nestingDepth && func.nestingDepth > (config.rules['clean-code']['deep-nesting'].threshold as number)) {
+        if (func.nestingDepth && func.nestingDepth > (settings.threshold ?? 0)) {
           violations.push({
             file,
             line: func.startLine ?? func.line ?? 1,
             ruleId: 'clean-code.deep-nesting',
             message: `Function "${func.name}" has deep nesting: ${func.nestingDepth} levels (maximum: ${
-              config.rules['clean-code']['deep-nesting'].threshold
+              settings.threshold
             })`,
-            severity: config.rules['clean-code']['deep-nesting'].severity as Severity
+            severity: (settings.severity as Severity) ?? 'warning'
           });
         }
       }

@@ -1,8 +1,8 @@
-import { readFile } from 'fs/promises';
-import { existsSync } from 'fs';
-import { join } from 'path';
+import { execFileSync } from 'child_process';
+import { existsSync, readFileSync } from 'fs';
+import { join, resolve } from 'path';
 
-interface RuleConfig {
+export interface RuleConfig {
   enabled: boolean;
   threshold?: number;
   exclude?: (string | number)[];
@@ -43,36 +43,89 @@ interface PrinciplesConfig {
   };
 }
 
+/** Config keys that carry a numeric threshold, per group. */
+const NUMERIC_KEYS = ['threshold', 'methodThreshold'] as const;
+
+/**
+ * Ceiling on any single git call made while resolving config. This runs inside a
+ * pre-commit hook, so an unbounded wait is not a slow commit but a hung one.
+ */
+const GIT_TIMEOUT_MS = 15_000;
+
+/** Config keys that must remain arrays. */
+const ARRAY_KEYS = ['exclude'] as const;
+
+/**
+ * `severity` is not a free-form string: `summary.errorCount` and Gate 4's report
+ * grep both match the exact lowercase literal `error`, so anything else -- "Error",
+ * "fatal" -- runs the rule, reports the violation, and blocks nothing. Validated
+ * against the vocabulary rather than treated as an opaque string.
+ */
+const SEVERITIES = ['error', 'warning', 'info'] as const;
+
+/** Config keys whose value must be one of a fixed set, with that set. */
+const ENUM_KEYS = { severity: SEVERITIES } as const;
+
+/**
+ * Built-in defaults, hoisted out of `getDefaultConfig()`.
+ *
+ * Kept as module constants so the factory stays a single return statement and
+ * below the deep-nesting threshold (clean-code.deep-nesting), and so the two
+ * rule groups are readable side by side.
+ */
+const DEFAULT_CLEAN_CODE_RULES = {
+  'long-function': { enabled: true, threshold: 50, severity: 'warning' },
+  'large-file': { enabled: true, threshold: 1150, severity: 'warning' },
+  'god-class': { enabled: true, threshold: 15, severity: 'warning' },
+  'deep-nesting': { enabled: true, threshold: 4, severity: 'warning' },
+  'too-many-params': { enabled: true, threshold: 7, severity: 'info' },
+  'magic-numbers': {
+    enabled: true,
+    exclude: [0, 1, -1, 2, 10, 100, 1000, 60, 24, 7, 30, 365, 256, 1024],
+    severity: 'info'
+  },
+  'missing-error-handling': { enabled: true, severity: 'warning' },
+  'unused-imports': { enabled: true, severity: 'info' },
+  'code-duplication': { enabled: true, threshold: 15, severity: 'warning' },
+  'many-exports': { enabled: true, threshold: 10, severity: 'warning' }
+} satisfies PrinciplesConfig['rules']['clean-code'];
+
+const DEFAULT_SOLID_RULES = {
+  srp: { enabled: true, methodThreshold: 15, severity: 'warning' },
+  ocp: { enabled: true, severity: 'info' },
+  lsp: { enabled: true, severity: 'info' },
+  isp: { enabled: true, methodThreshold: 10, severity: 'info' },
+  dip: {
+    enabled: true,
+    exclude: ['Date', 'Map', 'Set', 'Error', 'Array', 'Object', 'Promise'],
+    severity: 'warning'
+  }
+} satisfies PrinciplesConfig['rules']['solid'];
+
+/**
+ * Deep-clone a rule group so callers cannot mutate the module constants.
+ *
+ * Without this, `getDefaultConfig()` would hand out references to
+ * `DEFAULT_CLEAN_CODE_RULES` / `DEFAULT_SOLID_RULES` and a caller that tweaks
+ * one rule (e.g. `config.rules['clean-code']['large-file'].threshold = 10`)
+ * would permanently corrupt the defaults for every later caller in the process.
+ */
+function cloneRules<T extends Record<string, RuleConfig>>(rules: T): T {
+  const copy: Record<string, RuleConfig> = {};
+  for (const [ruleId, rule] of Object.entries(rules)) {
+    copy[ruleId] = {
+      ...rule,
+      ...(rule.exclude ? { exclude: [...rule.exclude] } : {})
+    };
+  }
+  return copy as T;
+}
+
 export function getDefaultConfig(): PrinciplesConfig {
   return {
     rules: {
-      'clean-code': {
-        'long-function': { enabled: true, threshold: 50, severity: 'warning' },
-        'large-file': { enabled: true, threshold: 1150, severity: 'warning' },
-        'god-class': { enabled: true, threshold: 15, severity: 'warning' },
-        'deep-nesting': { enabled: true, threshold: 4, severity: 'warning' },
-        'too-many-params': { enabled: true, threshold: 7, severity: 'info' },
-        'magic-numbers': {
-          enabled: true,
-          exclude: [0, 1, -1, 2, 10, 100, 1000, 60, 24, 7, 30, 365, 256, 1024],
-          severity: 'info'
-        },
-        'missing-error-handling': { enabled: true, severity: 'warning' },
-        'unused-imports': { enabled: true, severity: 'info' },
-        'code-duplication': { enabled: true, threshold: 15, severity: 'warning' },
-        'many-exports': { enabled: true, threshold: 10, severity: 'warning' }
-      },
-      'solid': {
-        'srp': { enabled: true, methodThreshold: 15, severity: 'warning' },
-        'ocp': { enabled: true, severity: 'info' },
-        'lsp': { enabled: true, severity: 'info' },
-        'isp': { enabled: true, methodThreshold: 10, severity: 'info' },
-        'dip': {
-          enabled: true,
-          exclude: ['Date', 'Map', 'Set', 'Error', 'Array', 'Object', 'Promise'],
-          severity: 'warning'
-        }
-      }
+      'clean-code': cloneRules(DEFAULT_CLEAN_CODE_RULES),
+      'solid': cloneRules(DEFAULT_SOLID_RULES)
     },
     output: {
       format: 'console',
@@ -86,33 +139,288 @@ export function getDefaultConfig(): PrinciplesConfig {
   };
 }
 
-export async function loadConfig(): Promise<PrinciplesConfig> {
-  const defaultConfig = getDefaultConfig();
-  const configPath = join(process.cwd(), '.principlesrc');
+/**
+ * Load `.principlesrc`, falling back to built-in defaults.
+ *
+ * Resolution order when `configPath` is omitted:
+ *   1. `<git toplevel>/.principlesrc` -- so Gate 4 behaves the same regardless
+ *      of the process's cwd.
+ *   2. `<cwd>/.principlesrc` -- when git is unavailable (non-repo, broken
+ *      shallow checkout, sandboxed CI).
+ *
+ * A missing, unreadable, or malformed file never throws: the built-in defaults
+ * are returned and a warning is printed. Invalid *values* (a string where a
+ * number belongs, etc.) keep the default for that key rather than poisoning the
+ * rule with a value it cannot compare against.
+ *
+ * One exception, for a path the CALLER named: if `configPath` is passed and that
+ * file does not exist, loading fails. "The project has no `.principlesrc`" is a
+ * normal state, but "the project declared one and it cannot be found" is a
+ * misconfiguration, and answering it with built-in thresholds re-creates exactly
+ * the fail-open gate this module exists to close (#457, walkthrough FC-08).
+ */
+export async function loadConfig(configPath?: string): Promise<PrinciplesConfig> {
+  const defaults = getDefaultConfig();
+  const resolvedPath = configPath ? resolve(configPath) : resolveDefaultConfigPath();
 
-  if (!existsSync(configPath)) {
-    return defaultConfig;
+  if (!resolvedPath || !existsSync(resolvedPath)) {
+    if (configPath) {
+      throw new Error(`config file not found: ${resolvedPath}`);
+    }
+    return defaults;
   }
 
+  let parsed: unknown;
   try {
-    const content = await readFile(configPath, 'utf-8');
-    const userConfig = JSON.parse(content) as Partial<PrinciplesConfig>;
-
-    return {
-      ...defaultConfig,
-      ...userConfig,
-      rules: {
-        'clean-code': {
-          ...defaultConfig.rules['clean-code'],
-          ...userConfig.rules?.['clean-code']
-        },
-        'solid': {
-          ...defaultConfig.rules['solid'],
-          ...userConfig.rules?.['solid']
-        }
-      }
-    };
-  } catch {
-    return defaultConfig;
+    parsed = JSON.parse(readFileSync(resolvedPath, 'utf-8'));
+  } catch (error) {
+    warn(`could not parse ${resolvedPath}: ${describeError(error)} — using built-in defaults`);
+    return defaults;
   }
+
+  if (!isPlainObject(parsed)) {
+    warn(`${resolvedPath} must contain a JSON object — using built-in defaults`);
+    return defaults;
+  }
+
+  return mergeConfig(defaults, parsed as Partial<PrinciplesConfig>);
+}
+
+/** Resolve the default config path: git toplevel first, then cwd. */
+function resolveDefaultConfigPath(): string | null {
+  const toplevel = gitToplevel();
+  if (toplevel) {
+    const candidate = join(toplevel, '.principlesrc');
+    if (existsSync(candidate)) return candidate;
+  }
+  return join(process.cwd(), '.principlesrc');
+}
+
+/**
+ * `git rev-parse --show-toplevel`, or null when git is unavailable.
+ *
+ * Deliberately swallows failure: this runs in consumer projects, non-repo
+ * directories, and CI sandboxes where git may be absent or the checkout shallow.
+ * Callers fall back to cwd.
+ */
+function gitToplevel(): string | null {
+  try {
+    const out = execFileSync('git', ['rev-parse', '--show-toplevel'], {
+      encoding: 'utf-8',
+      stdio: ['ignore', 'pipe', 'ignore'],
+      // Bounded like every other git call that runs inside a hook. Without it a
+      // wedged git (locked index, stalled credential prompt, network-backed fs) hangs
+      // the commit -- and this path is taken by every Gate 4 run, since gate-4.sh
+      // passes no --config. Raised by the Delphi walkthrough (MAJ-01), which noticed
+      // the timeout added to baseline-prune.ts had not been applied here too.
+      timeout: GIT_TIMEOUT_MS,
+    }).trim();
+    return out.length > 0 ? out : null;
+  } catch {
+    return null;
+  }
+}
+
+/** Deep-merge a user config over the defaults, validating each value's shape. */
+function mergeConfig(
+  defaults: PrinciplesConfig,
+  user: Partial<PrinciplesConfig>
+): PrinciplesConfig {
+  return {
+    ...defaults,
+    ...user,
+    // `rules` needs the group-aware merge below. The other sections are plain
+    // option bags, and spreading `...user` alone would let a partial block wipe
+    // its sibling defaults -- naming one key under `output` silently discarded
+    // `show-score` and `colorize`. Same fail-open shape #457 exists to remove,
+    // just outside `rules`; found by the Delphi walkthrough.
+    output: mergeSection(defaults.output, user.output),
+    performance: mergeSection(defaults.performance, user.performance),
+    rules: {
+      'clean-code': mergeGroup(
+        defaults.rules['clean-code'],
+        user.rules?.['clean-code']
+      ),
+      'solid': mergeGroup(defaults.rules['solid'], user.rules?.['solid'])
+    }
+  };
+}
+
+/** Merge one flat options section, keeping defaults for keys the user omitted. */
+function mergeSection<T extends object>(
+  defaults: T | undefined,
+  user: Partial<T> | undefined
+): T | undefined {
+  if (!isPlainObject(defaults)) return user as T | undefined;
+  if (!isPlainObject(user)) return defaults;
+  return { ...defaults, ...user };
+}
+
+/**
+ * Merge one rule group.
+ *
+ * Crucially this starts from the defaults for *every* rule in the group, so
+ * mentioning only `clean-code` in the file cannot drop the `solid` group.
+ * The generic preserves the concrete key set of the group being merged.
+ */
+function mergeGroup<T extends Record<string, RuleConfig>>(
+  defaults: T,
+  user: Record<string, Partial<RuleConfig>> | undefined
+): T {
+  const result = { ...defaults };
+  if (!isPlainObject(user)) return result;
+
+  for (const ruleId of Object.keys(defaults)) {
+    const override = user[ruleId];
+    if (!isPlainObject(override)) continue;
+    // Safe: `ruleId` comes from Object.keys(defaults), so it is a key of T.
+    (result as Record<string, RuleConfig>)[ruleId] = mergeRule(
+      defaults[ruleId],
+      override as Partial<RuleConfig>,
+      ruleId
+    );
+  }
+  return result;
+}
+
+/** Merge one rule, keeping the default for any key whose override is mistyped. */
+function mergeRule(
+  base: RuleConfig,
+  override: Partial<RuleConfig>,
+  ruleId: string
+): RuleConfig {
+  const merged: RuleConfig = { ...base };
+
+  if (typeof override.enabled === 'boolean') {
+    merged.enabled = override.enabled;
+  } else if (override.enabled !== undefined) {
+    warn(`rules.${ruleId}.enabled must be a boolean — keeping default`);
+  }
+
+  for (const key of NUMERIC_KEYS) {
+    const value = override[key];
+    if (value === undefined) continue;
+    if (typeof value === 'number' && Number.isFinite(value)) {
+      merged[key] = value;
+    } else {
+      warn(`rules.${ruleId}.${key} must be a finite number — keeping default`);
+    }
+  }
+
+  for (const key of ARRAY_KEYS) {
+    const value = override[key];
+    if (value === undefined) continue;
+    // Arrays REPLACE rather than concatenate, matching how .principlesrc is
+    // written today (an exclude list is the project's complete list).
+    if (Array.isArray(value)) {
+      merged[key] = [...value] as RuleConfig[typeof key];
+    } else {
+      warn(`rules.${ruleId}.${key} must be an array — keeping default`);
+    }
+  }
+
+  for (const key of Object.keys(ENUM_KEYS) as (keyof typeof ENUM_KEYS)[]) {
+    const allowed: readonly string[] = ENUM_KEYS[key];
+    const value = override[key];
+    if (value === undefined) continue;
+    if (typeof value === 'string' && allowed.includes(value)) {
+      merged[key] = value;
+    } else {
+      // Loud on purpose: silently keeping the default would let a project believe
+      // it raised a rule to blocking when it did not.
+      warn(`rules.${ruleId}.${key} must be one of ${allowed.join(', ')} — keeping default`);
+    }
+  }
+
+  return merged;
+}
+
+function isPlainObject(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+function describeError(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
+}
+
+/** Emit a diagnostic without failing the run (Gate 4 must stay usable). */
+function warn(message: string): void {
+  process.stderr.write(`⚠️  [principles] ${message}\n`);
+}
+
+// ---------------------------------------------------------------------------
+// Active configuration
+// ---------------------------------------------------------------------------
+//
+// Rules read their thresholds lazily through `getActiveConfig()` instead of
+// snapshotting `getDefaultConfig()` at module load. That snapshot was #457: a
+// project's `.principlesrc` was parsed but never consulted, so Gate 4 silently
+// enforced the built-in defaults.
+//
+// CONCURRENCY: this is process-global mutable state. A single process must not
+// evaluate two different projects' configs at the same time. Callers that need
+// isolation should run them in separate processes. Tests MUST call
+// `resetActiveConfig()` between cases to avoid leaking state -- and doing so is
+// no longer only a convention: `setActiveConfig` reports a replacement of an
+// already-installed config, so the leak fails visibly instead of silently.
+// ---------------------------------------------------------------------------
+
+let activeConfig: PrinciplesConfig = getDefaultConfig();
+
+// Set by setActiveConfig, cleared by resetActiveConfig. The concurrency contract
+// above was documentation only; this makes an undocumented second set visible
+// instead of letting the last writer silently win (walkthrough FC-02).
+let activeConfigInstalled = false;
+
+/** The configuration rules currently enforce. */
+export function getActiveConfig(): PrinciplesConfig {
+  return activeConfig;
+}
+
+/**
+ * The effective configuration of one rule, read from what is being enforced NOW.
+ *
+ * `Rule.threshold` and `Rule.severity` are deprecated snapshots taken when the
+ * rule module was constructed; a project's `.principlesrc` overrides them at
+ * run time (#457). Consumers that report or compare thresholds must read them
+ * here, or they will describe a number `check()` never compared against
+ * (walkthrough MAJ-03 / FC-05).
+ *
+ * Fails on an unknown id rather than returning defaults: answering "there is no
+ * such rule" with a plausible-looking threshold is the same silent-defaults
+ * defect this module exists to remove.
+ */
+export function getEffectiveConfigFor(ruleId: string): RuleConfig {
+  const separator = ruleId.indexOf('.');
+  if (separator <= 0 || separator === ruleId.length - 1) {
+    throw new Error(`rule id must be in group.name form, got "${ruleId}"`);
+  }
+  const group = ruleId.slice(0, separator);
+  const name = ruleId.slice(separator + 1);
+  const groups = activeConfig.rules as Record<string, Record<string, RuleConfig> | undefined>;
+  const settings = groups[group]?.[name];
+  if (!settings) {
+    throw new Error(`no rule config for "${ruleId}" in the active configuration`);
+  }
+  return settings;
+}
+
+/** Install the configuration that rules should enforce. */
+export function setActiveConfig(config: PrinciplesConfig): void {
+  if (activeConfigInstalled) {
+    warn('active config replaced without resetActiveConfig(); one process should analyse one project with one config');
+  }
+  activeConfig = config;
+  activeConfigInstalled = true;
+}
+
+/**
+ * Restore the built-in defaults.
+ *
+ * Exists for test isolation: without it, one test's `setActiveConfig` leaks into
+ * the next and produces order-dependent failures.
+ */
+export function resetActiveConfig(): void {
+  activeConfig = getDefaultConfig();
+  activeConfigInstalled = false;
 }
