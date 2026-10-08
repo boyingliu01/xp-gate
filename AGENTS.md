@@ -197,7 +197,7 @@ xp-gate phase-transition 4 completed --skip-evidence "Emergency hotfix"
 ## CONVENTIONS
 - **VERSION as single source of truth.** `scripts/sync-version.cjs` propagates `MAJOR.MINOR.PATCH.MICRO` from `VERSION` into npm package.json files (3-digit) and plugin manifests. Root `package.json` uses 3-digit version. Never edit `package.json` versions by hand.
 - **No `--no-verify` ever.** `githooks/QUALITY-GATES-CODE-OF-CONDUCT.md` makes hook bypass a process violation.
-- **Tool missing → SKIP, not BLOCK.** When a language tool isn't installed, the adapter degrades the gate to SKIP instead of blocking the commit. Hard-block only fires when the tool exists and the check fails.
+- **Tool missing → SKIP, not BLOCK — except Gate 8.** When a language tool isn't installed, the adapter degrades the gate to SKIP instead of blocking the commit. Hard-block only fires when the tool exists and the check fails. Gate 8 (secret scanning) is fail-closed since #499: gitleaks missing or crashing BLOCKs, because a security gate that cannot run must not report success.
 - **Boy Scout Rule (Gate 6).** New files: zero warnings. Modified files: warning count cannot increase vs `.warnings-baseline.json`. Untouched files: unchecked.
 - **Pre-push size limits removed.** File/LOC hard limits were intentionally removed for AI workflows; pre-push still enforces mutation, mock, and code-walkthrough gates.
 - **Three-model Delphi policy.** `.delphi-config.json` must configure architecture, technical, and feasibility. All three must execute successfully with distinct trimmed requested model IDs. Provider, vendor, gateway, and model nationality are unrestricted; one provider and token plan are allowed. `provider: local` fallback cannot count.

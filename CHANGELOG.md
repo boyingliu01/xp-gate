@@ -4,6 +4,21 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+### Fixed
+
+**机器侧修复入库批（#501 / #499 / #452，Delphi 走查两轮达成共识）**
+
+- **Gate 8 密钥扫描改为 fail-closed（#499）——行为变更**: gitleaks 未安装或以非 0/1 退出码崩溃时，此前一律 SKIP（零防护静默放行），现在直接 **BLOCK** 并给出分平台安装指引。`detect-secrets-hook` + `.secrets.baseline` 同时存在时追加二级基线比对扫描（只拦基线外的新密钥；文件清单 NUL 直通管道，绕开命令替换吞 NUL 的 bash 限制）。6 份随包 bash 副本字节同步；CI `first-commit-gates` 预装 gitleaks（版本钉在 v8.30.1）。**存量用户注意**：升级后首次提交若未装 gitleaks 会被阻断，按提示安装即可（brew/winget/install-gitleaks.sh）。
+- **机器侧适配器修复入库（#501）**: `adapters/python.sh` 的 mypy 口径对齐 CI type job（`mypy src/` + `mypy scripts/`，永不写裸 `mypy .`——后者会扫进从未声明的调研脚本与 tests/，实测 87 条假错并阻断包括纯文档在内的任何提交）、pytest 默认 `-m "not e2e"`、覆盖率阈值回归 pyproject `[tool.coverage.report] fail_under` 单一事实源（删除硬编码 `--cov-fail-under`）、mutmut 缺失时回退 `python3 -m mutmut`；`adapters/powershell.sh` 支持 `.xp-gate-powershell-coverage-ignore` 项目级覆盖率豁免（每行一个 glob，`#` 注释，全排除时跳过 coverage 而非静默忽略）、Pester 5 `New-PesterConfiguration` 现代配置对象（Pester 4 参数集在 5.x 直接报错且静默产出零覆盖）、删除假阈值 WARNING+exit 0。两份契约由新增的 `adapter-mypy-pester-scope.test.bats` 双向锁定（含"不得写回裸 mypy ."）。
+- **`.warnings-baseline.json` 自动初始化的可见性与工作区卫生（#452 REQ-2/3/4）**: 执行路径的自动初始化现在区分并打印 **Baseline created/updated**，且逐一列出自动登记的条目（此前只有一条计数）；hook 在自动改写该入库文件后将其 `git add` 进本次提交，预算更新随引发它的提交走，不再留下一个无解释的 ` M .warnings-baseline.json` 工作区脏改动。
+- **`CHANGED_FILES` 剔除字节镜像路径（Gate 2/3/4/6 等 lint 语料口径统一）**: `src/npm-package/**` 是字节镜像，归 CI Mirror Parity 管（Gate 6 的 MIRROR_EXCLUDE、#494 的测试选择已确立该原则）。此前 Gate 2 的 jscpd 语料含镜像，源文件与镜像同改时被判 100% 全文克隆，撞上 Gate 6 "≤5 条警告必须清零"规则后**任何**镜像化文件的编辑都无法通过提交——且该警告结构性无法清除。现在镜像路径只从 lint 语料中剔除；**早退判断改用未过滤的原始暂存清单**，纯镜像提交仍会执行无条件的 fail-closed Gate 8 密钥扫描，不留下安全旁路。
+- **`sync-package-content.js` 新增 `--fix`**: 漂移门禁先于同步执行并 exit 1（CI Mirror Parity 依赖"漂移即失败"而非"静默自愈"，故不能调换顺序），导致漂移发生后按提示运行脚本自己也修不了——先 exit 了。`--fix` 跳过漂移门执行真正同步；无参调用语义不变。
+
+### Fixed (docs)
+
+- **#432 收尾**: `docs/CAPABILITIES.md`、`docs/MANIFEST.md`、`githooks/TOOL-INSTALLATION-GUIDE.md`、`plugins/opencode/README.md`（含镜像）残留的 "Gate 0-9 / 10 道门禁" 全部对齐为 **Gate 0-11 + Gate 12（12 道编号门禁 + 文件卫生 warning-only）**；四处 "工具缺失 → SKIP" 契约声明同步补充 Gate 8 fail-closed 例外。
+- **#425 收尾**: `scripts/__tests__/delphi-external-review.test.cjs` 与 `code-walkthrough-doc.test.cjs` 的 markdown JSON 示例提取正则改为 CRLF 兼容（`\r?\n`），Windows `core.autocrlf=true` 工作树下不再误报"文档缺示例"。
+
 ## [0.20.0.0] - 2026-10-08
 
 ### Fixed

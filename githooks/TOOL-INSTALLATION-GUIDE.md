@@ -539,7 +539,7 @@ pip install lizard checkov semgrep
 
 | Gate | Windows 状态 | 原因 |
 |------|-------------|------|
-| Gate 0-9 | ✅ 全部通过 | 所有 shell 命令已 POSIX 兼容 |
+| Gate 0-11 + Gate 12 | ✅ 全部通过 | 所有 shell 命令已 POSIX 兼容 |
 | Gate M (Mutation) | ⚠️ 需 WSL | Stryker 需要 Node.js 原生环境，Git Bash 下建议用 WSL |
 | Gate 6 架构 | ✅ 已支持 | archlint 通过 npm 全局安装，Git Bash 可用 |
 

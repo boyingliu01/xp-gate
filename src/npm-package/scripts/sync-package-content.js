@@ -419,7 +419,7 @@ function checkAdapterDrift(srcRootPath, mirrorRootPath) {
   if (mismatched.length > 0) {
     console.error(`[drift-check] ERROR: ${mismatched.length} adapter file(s) have drifted (SHA-256 mismatch):`);
     for (const f of mismatched) console.error(`  - ${f}`);
-    console.error('[drift-check] Fix: Run `node src/npm-package/scripts/sync-package-content.js` (or `npm pack`) to resync.');
+    console.error('[drift-check] Fix: Run `node src/npm-package/scripts/sync-package-content.js --fix` to resync (plain invocation is a check-only gate for CI).');
   }
 
   if (srcOnly.length > 0 || mirrorOnly.length > 0 || mismatched.length > 0) {
@@ -449,11 +449,18 @@ function checkDocsDrift(preCommitPath, prePushPath, readmePath, agentsPath) {
 function main() {
   console.error(`[sync] repo root: ${REPO_ROOT}`);
   console.error(`[sync] package root: ${PKG_ROOT}`);
-  if (checkDocsDrift() === false) {
-    process.exit(1);
-  }
-  if (checkAdapterDrift() === false) {
-    process.exit(1);
+  // Drift gates run BEFORE the sync on purpose: CI's Mirror Parity job relies
+  // on a drifted commit failing here rather than being silently healed by the
+  // copy loop. Local repair therefore needs the explicit `--fix` escape hatch
+  // (the pre-sync "Fix: Run …" advice used to deadlock against this gate).
+  const fixMode = process.argv.includes('--fix');
+  if (!fixMode) {
+    if (checkDocsDrift() === false) {
+      process.exit(1);
+    }
+    if (checkAdapterDrift() === false) {
+      process.exit(1);
+    }
   }
   const skills = syncSkills();
   const plugins = syncPlugins();
