@@ -190,6 +190,9 @@ AssertionError: expected 1 to be 2' 'changed test files'
 @test "#473 anti-vacuity: every vitest Gate 5 branch still funnels through the handler" {
   run grep -c 'handle_test_failure "\$TESTS_OUTPUT"' "$HOOK"
   [ "$status" -eq 0 ]
-  # 4 partial/full vitest sites, unchanged by the extraction.
-  [ "$output" -eq 4 ]
+  # 4 vitest branches, plus the two typescript adapter fallbacks that #498 showed
+  # run vitest too (one without package.json, one without coverage). Stated as a
+  # floor on purpose: an exact count here rejected every legitimate new branch
+  # while still passing if a branch bypassed the handler.
+  [ "$output" -ge 6 ]
 }

@@ -124,7 +124,7 @@ run_static_analysis() {
 
     # Print captured output then check for failures
     cat "$checkov_log"
-    local failed_count=$(grep -c "FAILED for resource" "$checkov_log" 2>/dev/null || echo 0)
+    local failed_count=$(grep -c "FAILED for resource" "$checkov_log" 2>/dev/null || true)
     rm -f "$checkov_log"
 
     if [ "$failed_count" -gt 0 ]; then

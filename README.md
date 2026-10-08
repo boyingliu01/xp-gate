@@ -132,7 +132,7 @@ xp-gate init
 npm 包提供：
 - **Git Hooks**（pre-commit 12 道门禁 + pre-push 8 道门禁）— 每次提交/推送自动执行
 - **CLI 管理命令**（doctor, baseline, audit, check-alignment 等 20+ 子命令）
-- **Skill 下载器**（`xp-gate install-skill` 按版本下载 SKILL.md）
+- **Skill 安装器**（`xp-gate install-skill` 从包内 `skills/<name>/` 全量复制，无需网络）
 
 ### 第二步：安装 IDE 插件（推荐 — AI 对话内质量工具 + 技能自动加载）
 
@@ -169,7 +169,7 @@ IDE 插件提供 AI 对话内的质量工具（`gate-check`、`gate-principles`�
 | `xp-gate phase-transition <phase>` | 执行 Sprint 阶段转换（含证据验证） |
 | `xp-gate retro [--days N] [--json]` | 生成工程复盘报告 |
 | `xp-gate audit [--tail \| --stats \| record]` | 查看/记录 gate 审计日志 |
-| `xp-gate install-skill <name>` | 从 GitHub 下载 Skill |
+| `xp-gate install-skill <name>` | 从 npm 包内技能目录安装（含 references/templates/scripts） |
 | `xp-gate update-hooks` | 更新 Git Hooks 到最新版本 |
 | `xp-gate uninstall [--dry-run]` | 完整卸载 xp-gate |
 | `xp-gate migrate` | v0.4.x → 清理残留配置 |

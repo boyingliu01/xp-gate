@@ -24,11 +24,14 @@ const GLOBAL_MODULES_DIR = path.join(CONFIG_DIR, 'modules');
 
 /**
  * Detect which AI agent platform is currently in use.
- * Mirrors detectPlatform() in detect-deps.js to avoid circular deps.
+ * This is the single implementation; detect-deps.js re-exports it (#424).
  * @returns {'opencode' | 'claude-code' | 'qoder'}
  */
 function detectPlatform() {
-  if (fs.existsSync(path.join(HOME_DIR, '.qoder', 'skills'))) return 'qoder';
+  // Any ~/.qoder content counts as Qoder: a brand-new install has no skills/
+  // subdirectory yet, so a skills-only marker misdetects it as opencode and
+  // configureQoderDelphiAgents deploys zero Delphi agents (#424).
+  if (fs.existsSync(path.join(HOME_DIR, '.qoder'))) return 'qoder';
   if (fs.existsSync(path.join(HOME_DIR, '.claude', 'skills'))) return 'claude-code';
   return 'opencode';
 }

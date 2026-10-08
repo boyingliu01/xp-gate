@@ -1,10 +1,6 @@
 const fs = require('fs');
 const path = require('path');
-const https = require('https');
-const http = require('http');
-const { execSync } = require('child_process');
 const { checkDeps } = require('./detect-deps.js');
-const { downloadFromGitHub } = require('./download-skill.js');
 const { rollback } = require('./rollback.js');
 const { HOME_DIR, CONFIG_DIR, detectPlatform } = require('./shared-paths.js');
 const { copyDirRecursive } = require('./shared-utils');
@@ -20,6 +16,9 @@ function getSkillsDir() {
   return path.join(HOME_DIR, '.config', 'opencode', 'skills');
 }
 
+// The npm package ships the canonical skill content; `files` includes skills/.
+const BUNDLED_SKILLS_DIR = path.join(__dirname, '..', 'skills');
+
 function getCliVersion() {
   try {
     const versionFile = path.join(__dirname, '..', '..', '..', 'VERSION');
@@ -29,24 +28,20 @@ function getCliVersion() {
   }
 }
 
-const SKILLS_REGISTRY = {
-  'admin-template-guidelines': { repo: 'boyingliu01/xp-gate', path: 'skills/admin-template-guidelines' },
-  'batch-grill-me': { repo: 'boyingliu01/xp-gate', path: 'skills/batch-grill-me' },
-  'clipboard-vision': { repo: 'boyingliu01/xp-gate', path: 'skills/clipboard-vision' },
-  'delphi-review': { repo: 'boyingliu01/xp-gate', path: 'skills/delphi-review' },
-  'domain-modeling': { repo: 'boyingliu01/xp-gate', path: 'skills/domain-modeling' },
-  'grill-with-docs': { repo: 'boyingliu01/xp-gate', path: 'skills/grill-with-docs' },
-  'grilling': { repo: 'boyingliu01/xp-gate', path: 'skills/grilling' },
-  'improve-codebase-architecture': { repo: 'boyingliu01/xp-gate', path: 'skills/improve-codebase-architecture' },
-  'ralph-loop': { repo: 'boyingliu01/xp-gate', path: 'skills/ralph-loop' },
-  'sprint-flow': { repo: 'boyingliu01/xp-gate', path: 'skills/sprint-flow' },
-  'test-driven-development': { repo: 'boyingliu01/xp-gate', path: 'skills/test-driven-development' },
-  'test-specification-alignment': { repo: 'boyingliu01/xp-gate', path: 'skills/test-specification-alignment' },
-  'to-issues': { repo: 'boyingliu01/xp-gate', path: 'skills/to-issues' }
-};
+// The table used to be a second, hand-maintained list of installable skills that
+// could only ever lag behind the bundle. The bundle is the contract now: a skill
+// the installed package does not carry is not installable, and must be answered
+// by updating the package rather than by pulling a mismatched copy off GitHub.
+function bundledSkills() {
+  if (!fs.existsSync(BUNDLED_SKILLS_DIR)) return [];
+  return fs
+    .readdirSync(BUNDLED_SKILLS_DIR, { withFileTypes: true })
+    .filter((entry) => entry.isDirectory() && fs.existsSync(path.join(BUNDLED_SKILLS_DIR, entry.name, 'SKILL.md')))
+    .map((entry) => entry.name);
+}
 
 async function installSkill(name, options = {}) {
-  const { offline = false, verbose = false, force = false } = options;
+  const { verbose = false, force = false } = options;
 
   const platform = detectPlatform();
   const depCheck = await checkDeps(platform);
@@ -64,8 +59,18 @@ async function installSkill(name, options = {}) {
     }
   }
 
-  const skillInfo = validateSkillRegistry(name);
-  if (!skillInfo) return 1;
+  // Checked before any destructive step, because backupExisting() rmSyncs the
+  // target directory: a skill this package does not carry must never be
+  // installed by wiping what the user already has.
+  const available = bundledSkills();
+  if (!available.includes(name)) {
+    console.error(`Error: Unknown skill: ${name}`);
+    console.error(
+      `xp-gate ${getCliVersion()} bundles: ${available.join(', ')}. ` +
+      'Update the package (npm install -g @boyingliu01/xp-gate@latest) if you need ' + name + '.'
+    );
+    return 1;
+  }
 
   const targetDir = path.join(getSkillsDir(), name);
   const dupError = checkDuplicateInstall(targetDir, force);
@@ -79,7 +84,7 @@ async function installSkill(name, options = {}) {
   backupExisting(targetDir, installId, backupDir);
 
   try {
-    const result = await performInstall(skillInfo, name, targetDir, offline, verbose);
+    const result = await performInstall(name, targetDir, verbose);
     if (result !== 0) return result;
     return 0;
   } catch (err) {
@@ -87,16 +92,6 @@ async function installSkill(name, options = {}) {
     await rollback(installId);
     return 1;
   }
-}
-
-function validateSkillRegistry(name) {
-  const skillInfo = SKILLS_REGISTRY[name];
-  if (!skillInfo) {
-    console.error(`Error: Unknown skill: ${name}`);
-    console.error('Available skills: ' + Object.keys(SKILLS_REGISTRY).join(', '));
-    return null;
-  }
-  return skillInfo;
 }
 
 function checkDuplicateInstall(targetDir, force) {
@@ -115,38 +110,22 @@ function backupExisting(targetDir, installId, backupDir) {
   }
 }
 
-async function performInstall(skillInfo, name, targetDir, offline, verbose) {
+async function performInstall(name, targetDir, verbose) {
   console.log(`Installing ${name}...`);
 
-  const skillUrl = `https://raw.githubusercontent.com/${skillInfo.repo}/main/${skillInfo.path}/SKILL.md`;
-  const targetFile = path.join(targetDir, 'SKILL.md');
-  fs.mkdirSync(path.dirname(targetFile), { recursive: true });
-
-  let downloaded = false;
-  if (!offline) {
-    try {
-      await downloadFile(skillUrl, targetFile, verbose);
-      downloaded = true;
-    } catch (err) {
-      if (verbose) console.warn(`Download failed: ${err.message}`);
-    }
-  }
-
-  if (!downloaded) {
-    if (offline) {
-      console.error(`Error: --offline specified but ${name} not in cache`);
-      return 2;
-    }
-    console.error(`Error: Failed to download ${name}`);
-    console.error('Check network connection');
-    return 1;
-  }
+  // The package ships skills/<name>/ with its references/, templates/ and
+  // scripts/, and that copy is what doctor compares against. A single SKILL.md
+  // downloaded from `main` used to be the whole install, so 8 of 13 skills
+  // landed without the files their own SKILL.md tells the agent to read,
+  // update-skill wiped complete directories down to that one file, and the
+  // installed content drifted from the CLI version (#416).
+  copyDirRecursive(path.join(BUNDLED_SKILLS_DIR, name), targetDir);
 
   ensureConfigDir();
-  
+
   // Read actual CLI version from VERSION file
   const version = getCliVersion();
-  
+
   updateConfig({
     installedSkills: {
       ...(getConfig().installedSkills || {}),
@@ -157,42 +136,6 @@ async function performInstall(skillInfo, name, targetDir, offline, verbose) {
   if (verbose) console.log(`Installed to ${targetDir}`);
   console.log(`✓ ${name} installed`);
   return 0;
-}
-
-async function downloadFile(url, dest, verbose) {
-  return new Promise((resolve, reject) => {
-    const file = fs.createWriteStream(dest);
-
-    const protocol = url.startsWith('https') ? https : http;
-
-    if (verbose) console.log(`Downloading ${url}...`);
-
-    protocol.get(url, { timeout: 30000 }, (response) => {
-      if (response.statusCode === 301 || response.statusCode === 302) {
-        const redirectUrl = response.headers.location;
-        file.close();
-        fs.unlinkSync(dest);
-        downloadFile(redirectUrl, dest, verbose).then(resolve).catch(reject);
-        return;
-      }
-
-      if (response.statusCode !== 200) {
-        file.close();
-        reject(new Error(`HTTP ${response.statusCode}`));
-        return;
-      }
-
-      response.pipe(file);
-      file.on('finish', () => {
-        file.close();
-        resolve();
-      });
-    }).on('error', (err) => {
-      file.close();
-      if (fs.existsSync(dest)) fs.unlinkSync(dest);
-      reject(err);
-    });
-  });
 }
 
 function ensureConfigDir() {

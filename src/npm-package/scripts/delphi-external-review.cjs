@@ -89,6 +89,28 @@ function parseArgs(argv) {
 }
 
 // ── Config reading ─────────────────────────────────────────────────────
+// Provider fields used to be checked only inside the per-expert loop, so a
+// malformed provider nobody currently points an expert at survived silently and
+// only surfaced at runtime (a bad timeout_ms fell back to the default). The
+// whole profile is checked here instead, at the system boundary, naming the
+// provider so the fix is obvious (#429).
+function validateProviders(providers, profileName) {
+  for (const [name, provider] of Object.entries(providers)) {
+    const providerPath = `profiles.${profileName}.providers.${name}`;
+    const fail = (detail) => {
+      console.error(`[delphi-review] ERROR: ${providerPath} ${detail}`);
+      process.exit(1);
+    };
+
+    if (!isPlainObject(provider)) fail('must be an object.');
+    if (typeof provider.base_url !== 'string' || provider.base_url.trim() === '') fail('must define a non-empty base_url.');
+    if (typeof provider.api_key !== 'string' || provider.api_key.trim() === '') fail('must define a non-empty api_key.');
+    if (provider.timeout_ms !== undefined && !isValidTimeoutMs(provider.timeout_ms)) {
+      fail('timeout_ms must be an integer between 1000 and 600000.');
+    }
+  }
+}
+
 function readConfig(configPath, profileOverride) {
   if (!fs.existsSync(configPath)) {
     console.error(`[delphi-review] ERROR: Config file not found: ${configPath}`);
@@ -115,6 +137,7 @@ function readConfig(configPath, profileOverride) {
 
   // Resolve ${ENV_VAR} references in provider api_key fields
   const providers = profile.providers || {};
+  validateProviders(providers, profileName);
   for (const [name, prov] of Object.entries(providers)) {
     if (prov.api_key && prov.api_key.startsWith('${') && prov.api_key.endsWith('}')) {
       const envName = prov.api_key.slice(2, -1);
@@ -122,7 +145,11 @@ function readConfig(configPath, profileOverride) {
       if (envVal) {
         prov.api_key = envVal;
       } else {
-        console.error(`[delphi-review] WARNING: Environment variable ${envName} not set (provider: ${name}). API calls will fail.`);
+        // A missing variable used to be a WARNING, after which the runner sent the
+        // literal `Bearer ${NAME}` and reported the 401 as "check API key" — the
+        // diagnosis pointed at a wrong key while the real cause was the shell.
+        console.error(`[delphi-review] ERROR: Environment variable ${envName} is not set (profiles.${profileName}.providers.${name}.api_key). Export it or point that provider at a literal key.`);
+        process.exit(1);
       }
     }
   }
@@ -408,7 +435,9 @@ async function callModelAPI(providerConfig, model, systemPrompt, userPrompt, opt
     response_format: { type: 'json_object' },
   };
 
-  const timeoutMs = options.timeoutMs ?? 30000;
+  // Same constant as the runner default: a second literal here silently
+  // diverges whenever the default is retuned (#429).
+  const timeoutMs = options.timeoutMs ?? DEFAULT_TIMEOUT_MS;
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), timeoutMs);
   let responseReceived = false;
@@ -698,6 +727,7 @@ if (require.main !== module) {
     buildUserPrompt,
     resolveInputContent,
     resolveTimeoutMs,
+    DEFAULT_TIMEOUT_MS,
     resolvePromptBudgetBytes,
     checkPromptBudget,
     describePromptBudgetFailure,

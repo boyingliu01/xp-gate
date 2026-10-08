@@ -1,5 +1,6 @@
 #!/usr/bin/env node
-// test-plugins.mjs — Cross-platform Node.js replacement for test-plugins.sh
+// test-plugins.mjs — Cross-platform plugin pipeline integration tests (the .sh twin was
+// deleted: it could only ever report red under Windows Git Bash (#486))
 // Integration tests for plugin build pipeline.
 // Verifies both Claude Code and OpenCode plugins build correctly with valid manifests.
 //

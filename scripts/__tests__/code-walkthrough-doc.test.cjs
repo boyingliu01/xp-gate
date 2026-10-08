@@ -8,6 +8,7 @@ const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
 const { spawnSync } = require('node:child_process');
+const { readMarkdown } = require('../lib/read-markdown.cjs');
 
 const PROJECT_ROOT = path.resolve(__dirname, '..', '..');
 const WALKTHROUGH_DOC = path.join(PROJECT_ROOT, 'skills', 'delphi-review', 'references', 'code-walkthrough.md');
@@ -31,7 +32,7 @@ const ACTIVE_SCOPE_DOCS = [
 
 describe('canonical code walkthrough documentation', () => {
   it('provides an evidence example accepted by the Gate MW validator', () => {
-    const markdown = fs.readFileSync(WALKTHROUGH_DOC, 'utf8');
+    const markdown = readMarkdown(WALKTHROUGH_DOC);
     const example = markdown.match(/\*\*输出文件格式\*\*[^`]*```json\n([\s\S]*?)\n```/);
     expect(example).not.toBeNull();
 
