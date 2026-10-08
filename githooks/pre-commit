@@ -921,7 +921,7 @@ else
     fi
   done
   if [ -z "$TS_PROJECT_DIR" ]; then
-    _TSCONFIG_CAND=$(find . -maxdepth 2 \( -name tsconfig.json -o -name biome.json -o -name biome.jsonc -o -name eslint.config.js \) -not -path './.git/*' -not -path './node_modules/*' 2>/dev/null | head -1)
+    _TSCONFIG_CAND=$(find . -maxdepth 2 \( -name tsconfig.json -o -name biome.json -o -name biome.jsonc -o -name eslint.config.js -o -name .eslintrc.json -o -name .eslintrc.js -o -name .eslintrc.cjs \) -not -path './.git/*' -not -path './node_modules/*' 2>/dev/null | head -1)
     if [ -n "$_TSCONFIG_CAND" ]; then
       TS_PROJECT_DIR=$(dirname "$_TSCONFIG_CAND")
     fi
@@ -932,7 +932,11 @@ else
     # typecheck.sh is cwd-relative: run it from the TS project subdirectory in a
     # subshell so the language loop's next iteration still starts at the root.
     # Exit contract: 0 clean, 1 findings (block), 2 checker unavailable (skip).
-    ( cd "$TS_PROJECT_DIR" && source "${AUDIT_SCRIPT_DIR}/lib/typecheck.sh" && run_typescript_typecheck )
+    # A cd/source infrastructure failure must NOT read as "type errors": map it
+    # to 2 (skip) so 1 stays reserved for real findings (#508 walkthrough).
+    ( cd "$TS_PROJECT_DIR" 2>/dev/null || exit 2 \
+      ; [ -r "${AUDIT_SCRIPT_DIR}/lib/typecheck.sh" ] || exit 2 \
+      ; source "${AUDIT_SCRIPT_DIR}/lib/typecheck.sh" && run_typescript_typecheck )
     TS_CHECK_EXIT=$?
   else
     source "${AUDIT_SCRIPT_DIR}/lib/typecheck.sh"
