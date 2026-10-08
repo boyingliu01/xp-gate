@@ -373,8 +373,8 @@ specification:
             验证），判定语义不变（exit 0=PASS / 1=CRITICAL-HIGH 分级 BLOCK / 其它=SKIP）
           test_type: integration
         - id: AC-490-02
-          criteria: 多文件提交 PASS 行必须可见扫描目标数（files scanned: N），
-            避免「参数错了但看起来像没文件可扫」的静默；输出不得出现 Invalid scanning root
+          criteria: "多文件提交 PASS 行必须可见扫描目标数（files scanned: N），
+            避免「参数错了但看起来像没文件可扫」的静默；输出不得出现 Invalid scanning root"
           test_type: integration
         - id: AC-490-03
           criteria: 反空洞用例：随包分发的全部 gate-10 副本（githooks/gate-10.sh、
@@ -391,7 +391,7 @@ specification:
 
     - id: REQ-494
       description: Gate 5 的 smart selection 只能把根 vitest 项目真正能收集到的路径当目标 ——
-        vitest.config.ts 按 #418 把 src/npm-package/ 下的镜像子树与 plugins/、skills/ 整批排除，
+        vitest.config.ts 按#418 把 src/npm-package/ 下的镜像子树与 plugins/、skills/ 整批排除，
         门禁却照样传给 vitest；目标全部不可收集时 vitest 以 "No test files found" 退出 1，
         Gate 5 把它读成"测试失败"，于是只同步镜像文件的提交被误 BLOCK（#494）
       priority: critical
@@ -533,34 +533,34 @@ specification:
           test_type: unit
 
     - id: REQ-450
-      description: Gate 0 的 [skip-version-check] 提示误导用户——实际 bypass 要求
+      description: 'Gate 0 的 [skip-version-check] 提示误导用户——实际 bypass 要求
         标记位于 commit message 首行开头、后接 chore:/docs:/release: 前缀、且
         diff 仅限构建工具链（adapters/、scripts/、hooks/），提示却只说
-        "include in commit message"，用户照做仍被二次拒绝（#450）
+        "include in commit message"，用户照做仍被二次拒绝（#450）'
       priority: medium
       acceptance_criteria:
         - id: AC-450-01
-          criteria: 提示给出可照抄的完整格式（首行 START + [skip-version-check]
+          criteria: "提示给出可照抄的完整格式（首行 START + [skip-version-check]
             chore: <description>）、列出全部三个允许前缀、并说明 bypass 仅覆盖
-            构建工具链路径
+            构建工具链路径"
           test_type: integration
         - id: AC-450-02
           criteria: 旧的误导文案不再出现在 githooks/pre-commit 与 npm 镜像任一副本；
-          两副本 bypass 提示保持一致
+            两副本 bypass 提示保持一致
           test_type: integration
         - id: AC-450-03
           criteria: 结构断言非空洞——缺少新提示的副本会被匹配器拒绝
           test_type: integration
         - id: AC-450-04
-          criteria: 提示承诺的四条必须被执行层验证，而不是只被文案断言：工具链路径 +
+          criteria: "提示承诺的四条必须被执行层验证，而不是只被文案断言：工具链路径 +
             chore: 前缀的 bypass 放行；同一 bypass 遇生产源码仍 exit 1；未列出的
             commit type 被拒绝；标记只在首行才生效。测试在运行期从随包真实
             pre-commit 中抽出该门禁块求值，块被搬走即抽取为空并报错
-            （Round 2 架构席位 MA-01）
+            （Round 2 架构席位 MA-01）"
           test_type: integration
 
     - id: REQ-431
-      description: sprint-gate.test.bats 的 pre-commit resolution 用例与 #476 后的
+      description: sprint-gate.test.bats 的 pre-commit resolution 用例与#476后的
         真实契约脱节（resolver 已移入 lib/sprint-gate-report.sh、tier 4 指向真实
         $HOME、resolver 未命中时非零退出、Windows 临时目录 EBUSY），15/17 失败且
         无任何 CI 运行 .bats 使其不可见（#431）
@@ -650,7 +650,7 @@ specification:
         - id: AC-416-06
           criteria: 技能命令的参数解析只接受该命令已实现的 flag；--offline 这类已从用法
             中移除的 flag 必须报"Unknown argument(s)"并退出 1，不得静默 no-op
-            （与 #488 给 doctor 的契约同类，Round 1 架构席位 MA-02）。flag 白名单按
+            （与#488 给 doctor 的契约同类，Round 1 架构席位 MA-02）。flag 白名单按
             命令划分，不是全局一张表：install-skill 只吃 --verbose/--force，
             update-skill 只吃 --verbose/--all/--check，uninstall-skill 只吃 --force
             ——被解析但不被消费同样是被忽略的选项（Round 2 架构席位 MI-04）
