@@ -538,29 +538,60 @@ function diagnoseModuleDrift(ctx = {}) {
 
   const repoRoot = ctx.repoRoot || process.env.XP_GATE_REPO_ROOT || process.cwd();
   const repoHooks = ctx.repoHooks || path.join(repoRoot, 'githooks');
-  const installedAdapters = ctx.installedAdapters || GLOBAL_ADAPTERS_DIR;
 
   // Silent without a canonical repo source to compare against: consumer
   // projects have no `githooks/` root of truth, only what was installed.
-  if (!hasCanonicalHooks(repoHooks) || !fs.existsSync(installedAdapters)) {
+  if (!hasCanonicalHooks(repoHooks)) {
     return { checks, issues };
   }
 
-  for (const mod of listExecutedModules(installedAdapters)) {
-    const source = repoModuleSource(repoHooks, mod.name);
-    if (!source) continue;
+  const globalDir = ctx.installedAdapters || GLOBAL_ADAPTERS_DIR;
+  const projectDir = ctx.projectGithooks || repoHooks;
 
-    const label = `Module drift: ${mod.name}`;
-    if (filesAreIdentical(source, mod.file)) {
-      checks.push({ name: label, status: 'PASS', detail: 'Executed copy matches githooks/' });
-      continue;
+  // Two directories can be the executed surface. `setup-global` puts it in the
+  // global adapters dir; project mode resolves ADAPTER_DIR to `<repo>/githooks`
+  // and reads a FLAT copy before the nested source, so installer residue there
+  // shadows the tracked file. Diagnosing only the global dir left the second
+  // tier invisible -- which is how a repo that shipped #493 kept running a
+  // pre-#493 `iac.sh` against itself (#495 Round 2).
+  const tiers = [{ prefix: 'Module drift', dir: globalDir }];
+  if (path.resolve(projectDir) !== path.resolve(globalDir)) {
+    tiers.push({ prefix: 'Module drift (project)', dir: projectDir });
+  }
+
+  for (const tier of tiers) {
+    if (!fs.existsSync(tier.dir)) continue;
+
+    for (const mod of listExecutedModules(tier.dir)) {
+      const source = repoModuleSource(repoHooks, mod.name);
+      if (!source) continue;
+      // The project tier holds the canonical files themselves (gate scripts and
+      // adapter-common.sh live at the githooks/ root) -- comparing a file with
+      // itself would only add noise.
+      if (path.resolve(source) === path.resolve(mod.file)) continue;
+
+      const label = `${tier.prefix}: ${mod.name}`;
+      if (filesAreIdentical(source, mod.file)) {
+        checks.push({ name: label, status: 'PASS', detail: 'Executed copy matches githooks/' });
+        continue;
+      }
+
+      const texts = readPair(source, mod.file);
+      if (!texts) continue;
+      const { repoOnly, installedOnly } = contentDelta(texts.repoText, texts.installedText);
+      // contentDelta folds whitespace and line endings away, so an all-zero delta
+      // means the two copies say the same thing differently. Calling that drift
+      // would report FAIL while claiming zero unique lines (#495 Round 2).
+      if (repoOnly === 0 && installedOnly === 0) {
+        checks.push({ name: label, status: 'PASS', detail: 'Same content as githooks/, differing only in line endings or indentation' });
+        continue;
+      }
+      const hint = tier.prefix === 'Module drift (project)'
+        ? ' -- executed from the project tier, where a flat copy shadows the tracked nested source (#500)'
+        : '';
+      checks.push({ name: label, status: 'FAIL', detail: `${moduleDriftDetail(repoOnly, installedOnly)}${hint}` });
+      issues++;
     }
-
-    const texts = readPair(source, mod.file);
-    if (!texts) continue;
-    const { repoOnly, installedOnly } = contentDelta(texts.repoText, texts.installedText);
-    checks.push({ name: label, status: 'FAIL', detail: moduleDriftDetail(repoOnly, installedOnly) });
-    issues++;
   }
 
   return { checks, issues };
@@ -579,7 +610,7 @@ function moduleDriftDetail(repoOnly, installedOnly) {
       + `the install has ${installedOnly} line(s) githooks/ lacks; sync refuses without an explicit decision`;
   }
   if (repoOnly > 0) {
-    return `installed copy is stale (${repoOnly} line(s) missing from githooks/)`;
+    return `installed copy is stale (${repoOnly} line(s) in githooks/ absent from the install)`;
   }
   return `installed copy is newer than githooks/ (${installedOnly} line(s) absent from the repo)`;
 }
@@ -601,12 +632,19 @@ function syncModulesFromRepo(ctx = {}) {
   const refused = [];
   const errors = [];
 
-  const repoRoot = ctx.repoRoot || process.cwd();
+  // The diagnosis and the repair must agree on which repository they are talking
+  // about, or `XP_GATE_REPO_ROOT doctor --sync-hooks` reports drift it never
+  // clears (#495 Round 2; the same silent-no-op class #488/#416 outlawed).
+  const repoRoot = ctx.repoRoot || process.env.XP_GATE_REPO_ROOT || process.cwd();
   const repoHooks = ctx.repoHooks || path.join(repoRoot, 'githooks');
   const installedAdapters = ctx.installedAdapters || GLOBAL_ADAPTERS_DIR;
 
-  if (!hasCanonicalHooks(repoHooks) || !fs.existsSync(installedAdapters)) {
-    return { synced, skipped, refused, errors, installedAdapters };
+  if (!fs.existsSync(installedAdapters)) {
+    return { synced, skipped, refused, errors, installedAdapters, sourceMissing: false };
+  }
+  if (!hasCanonicalHooks(repoHooks)) {
+    errors.push(`no canonical githooks/ source at ${repoHooks} -- nothing was synced`);
+    return { synced, skipped, refused, errors, installedAdapters, sourceMissing: true };
   }
 
   for (const mod of listExecutedModules(installedAdapters)) {
@@ -620,6 +658,11 @@ function syncModulesFromRepo(ctx = {}) {
     const texts = readPair(source, mod.file);
     if (!texts) continue;
     const { repoOnly, installedOnly } = contentDelta(texts.repoText, texts.installedText);
+    // Formatting-only: nothing to repair, and rewriting the file would churn it.
+    if (repoOnly === 0 && installedOnly === 0) {
+      skipped.push(mod.name);
+      continue;
+    }
     if (installedOnly > 0 && !ctx.force) {
       refused.push({ name: mod.name, repoOnly, installedOnly });
       continue;
@@ -634,7 +677,7 @@ function syncModulesFromRepo(ctx = {}) {
     }
   }
 
-  return { synced, skipped, refused, errors, installedAdapters };
+  return { synced, skipped, refused, errors, installedAdapters, sourceMissing: false };
 }
 
 /**
@@ -721,32 +764,33 @@ function printEffectiveHooks() {
  * directory are left alone.
  *
  * @param {{repoRoot?: string, repoHooks?: string, installedHooks?: string}} [ctx]
- * @returns {{synced: string[], skipped: string[], errors: string[], installedHooks: string}}
+ * @returns {{synced: string[], skipped: string[], refused: Array<{name: string, repoOnly: number, installedOnly: number}>, errors: string[], installedHooks: string}}
  */
 function syncGlobalHooksFromRepo(ctx = {}) {
-  const repoRoot = ctx.repoRoot || process.cwd();
+  const repoRoot = ctx.repoRoot || process.env.XP_GATE_REPO_ROOT || process.cwd();
   const repoHooks = ctx.repoHooks || path.join(repoRoot, 'githooks');
   const installedHooks = ctx.installedHooks || GLOBAL_HOOKS_DIR;
 
   const synced = [];
   const skipped = [];
+  const refused = [];
   const errors = [];
 
   if (!fs.existsSync(repoHooks)) {
     errors.push(`no githooks/ directory at ${repoHooks}`);
-    return { synced, skipped, errors, installedHooks };
+    return { synced, skipped, refused, errors, installedHooks };
   }
 
   if (!hasCanonicalHooks(repoHooks)) {
     errors.push(`no hook files in ${repoHooks} (only adapters?) -- nothing to sync from`);
-    return { synced, skipped, errors, installedHooks };
+    return { synced, skipped, refused, errors, installedHooks };
   }
 
   try {
     fs.mkdirSync(installedHooks, { recursive: true });
   } catch (err) {
     errors.push(`cannot create ${installedHooks}: ${err.message}`);
-    return { synced, skipped, errors, installedHooks };
+    return { synced, skipped, refused, errors, installedHooks };
   }
 
   for (const name of DRIFT_COMPARED_HOOKS) {
@@ -780,14 +824,14 @@ function syncGlobalHooksFromRepo(ctx = {}) {
       fs.mkdirSync(installedLib, { recursive: true });
     } catch (err) {
       errors.push(`cannot create ${installedLib}: ${err.message}`);
-      return { synced, skipped, errors, installedHooks };
+      return { synced, skipped, refused, errors, installedHooks };
     }
     let libEntries = [];
     try {
       libEntries = fs.readdirSync(repoLib, { withFileTypes: true });
     } catch (err) {
       errors.push(`cannot read ${repoLib}: ${err.message}`);
-      return { synced, skipped, errors, installedHooks };
+      return { synced, skipped, refused, errors, installedHooks };
     }
     for (const entry of libEntries) {
       if (!entry.isFile()) continue;
@@ -799,6 +843,20 @@ function syncGlobalHooksFromRepo(ctx = {}) {
           skipped.push(rel);
           continue;
         }
+        // A shared library can carry machine-only hardening just like a gate
+        // module does, so it gets the same refusal instead of an unconditional
+        // overwrite (#488 Round 2 -- the module guard and the lib guard must not
+        // disagree about how destructive a sync is allowed to be).
+        if (fs.existsSync(target) && !ctx.force) {
+          const texts = readPair(source, target);
+          if (texts) {
+            const { repoOnly, installedOnly } = contentDelta(texts.repoText, texts.installedText);
+            if (installedOnly > 0) {
+              refused.push({ name: rel, repoOnly, installedOnly });
+              continue;
+            }
+          }
+        }
         fs.copyFileSync(source, target);
         fs.chmodSync(target, 0o755);
         synced.push(rel);
@@ -808,7 +866,7 @@ function syncGlobalHooksFromRepo(ctx = {}) {
     }
   }
 
-  return { synced, skipped, errors, installedHooks };
+  return { synced, skipped, refused, errors, installedHooks };
 }
 
 /**
@@ -1392,13 +1450,16 @@ function fixIssues(checks, config) {
  * @returns {boolean} whether anything was synced
  */
 function fixHookDriftFromRepo() {
-  const repoHooks = path.join(process.cwd(), 'githooks');
+  const repoHooks = path.join(process.env.XP_GATE_REPO_ROOT || process.cwd(), 'githooks');
   if (!fs.existsSync(repoHooks)) return false;
 
-  const { synced, errors } = syncGlobalHooksFromRepo();
+  const { synced, refused, errors } = syncGlobalHooksFromRepo();
   if (errors.length > 0) {
     for (const err of errors) console.log(`  ✗ ${err}`);
     return false;
+  }
+  for (const r of refused) {
+    console.log(`  ⚠️  ${r.name} NOT synced — install has ${r.installedOnly} unique line(s); judge it, then use --sync-hooks --force`);
   }
   if (synced.length === 0) return false;
 
@@ -1609,7 +1670,7 @@ async function doctor(args) {
   // #488: an unrecognised flag used to be silently ignored — the npm release
   // that predates --sync-hooks made "doctor --sync-hooks" a silent no-op and
   // the user believed a sync had happened. Fail loudly instead.
-  const KNOWN_FLAGS = ['--fix', '--sync-hooks', '--force'];
+  const KNOWN_FLAGS = ['--fix', '--sync-hooks', '--force', '--install-tools'];
   const unknownFlags = args.filter(a => !KNOWN_FLAGS.includes(a));
   if (unknownFlags.length > 0) {
     console.error(`Unknown flag(s) for doctor: ${unknownFlags.join(', ')}`);
@@ -1621,6 +1682,9 @@ async function doctor(args) {
   // #495: overwriting a module whose installed copy holds lines the repo lacks
   // destroys machine-only hardening, so it needs this explicit opt-in.
   const force = args.includes('--force');
+  // Installing a toolchain changes the machine, not the repository, so it is
+  // never a side effect of --fix (#502). --fix reports the missing tools.
+  const installToolsFlag = args.includes('--install-tools');
 
   console.log('XP-Gate Doctor');
   console.log('==============');
@@ -1642,7 +1706,7 @@ async function doctor(args) {
 
   // §4.13 (#451 REQ-2): explicit one-command sync from the repo's githooks/.
   if (syncHooks) {
-    const { synced, skipped, errors, installedHooks } = syncGlobalHooksFromRepo();
+    const { synced, skipped, refused, errors, installedHooks } = syncGlobalHooksFromRepo({ force });
     if (errors.length > 0) {
       for (const err of errors) console.log(`  ✗ ${err}`);
       return 1;
@@ -1652,6 +1716,15 @@ async function doctor(args) {
       console.log('    The updated hooks take effect on the next commit.');
     } else {
       console.log(`  ✓ Global hooks already match githooks/ (${skipped.join(', ') || 'nothing to sync'})`);
+    }
+    if (refused.length > 0) {
+      console.log('');
+      console.log(`  ⚠️  ${refused.length} shared library file(s) NOT synced — the installed copy`);
+      console.log('     carries content githooks/ does not, so overwriting would delete work:');
+      for (const r of refused) {
+        console.log(`     - ${r.name}: install has ${r.installedOnly} unique line(s), githooks/ has ${r.repoOnly}`);
+      }
+      console.log('     Review them, then either fold the hardening into githooks/ or re-run with --force.');
     }
 
     // #495: the gate modules are what the hook sources for Gates 3/4/7/8/9/10,
@@ -1687,11 +1760,22 @@ async function doctor(args) {
   const timeoutPromise = new Promise((resolve) => {
     setTimeout(() => resolve({ checks: [{ name: 'Diagnosis', status: 'WARN', detail: `Timed out after ${GLOBAL_DIAGNOSIS_TIMEOUT_MS / 1000}s — some checks incomplete` }], issues: 0, timedOut: true }), GLOBAL_DIAGNOSIS_TIMEOUT_MS);
   });
-  const { checks, issues: diagnosedIssues } = await Promise.race([
+  const { checks, issues: diagnosedIssues, timedOut } = await Promise.race([
     diagnosisPromise.then(r => ({ ...r, timedOut: false })),
     timeoutPromise,
   ]);
   let issues = diagnosedIssues;
+
+  // A timeout discards every check that had not reported yet, including the
+  // drift surface, so the raced result must never be allowed to read as clean
+  // (#495 Round 2 -- this is the "stale modules, doctor green" outcome itself).
+  if (timedOut) {
+    issues = Math.max(issues, 1);
+    const hookDrift = diagnoseHookDrift();
+    const moduleDrift = diagnoseModuleDrift();
+    checks.push(...hookDrift.checks, ...moduleDrift.checks);
+    issues += hookDrift.issues + moduleDrift.issues;
+  }
 
   printReport(checks);
 
@@ -1708,8 +1792,9 @@ async function doctor(args) {
   const langIssues = diagnoseLanguageTools();
   issues += langIssues;
 
-  // In --fix mode, auto-install missing language tools
-  if (fixMode && langIssues > 0) {
+  // In --fix mode, auto-install missing language tools — only on explicit
+  // --install-tools (#502: a diagnosis command must not run package managers).
+  if (fixMode && installToolsFlag && langIssues > 0) {
     try {
       const { detectProjectLanguages, getToolsForLanguages, installTool, generateProjectConfig, LANGUAGE_REGISTRY } = require('./language-tools.js');
       const projectRoot = process.cwd();
@@ -1734,6 +1819,11 @@ async function doctor(args) {
         }
       }
     } catch { /* non-blocking */ }
+  }
+
+  if (fixMode && !installToolsFlag && langIssues > 0) {
+    console.log(`\n  ${langIssues} language tool(s) are missing. --fix did not install them —`);
+    console.log('  installing a toolchain changes the machine, so opt in with --install-tools (#502).');
   }
 
   if (issues === 0) {
