@@ -77,7 +77,7 @@ XP-Gate 支持 12 种编程语言的质量门禁和静态分析：
 
 **语言适配器位置**: `githooks/adapters/*.sh`
 
-**零容错策略**: 工具不可用时 SKIP 而非阻断（工具可用时必须通过）
+**零容错策略**: 工具不可用时 SKIP 而非阻断（工具可用时必须通过）；例外：Gate 8 密钥扫描 fail-closed（#499），gitleaks 缺失即阻断
 
 ---
 
@@ -281,7 +281,7 @@ XP-Gate 集成的 AI Skills 体系：
 XP-Gate 专注于**提交前质量门禁**和**AI 辅助评审**，可与标准 CI/CD **互补使用**:
 
 ```
-本地开发 ──→ git commit ──→ XP-Gate Gate 0-9 ──→ ✅ 通过
+本地开发 ──→ git commit ──→ XP-Gate Gate 0-11 + Gate 12 ──→ ✅ 通过
                                             └──→ ❌ 阻断修复
                                                   │
                                                   ▼

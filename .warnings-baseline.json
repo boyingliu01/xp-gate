@@ -4,8 +4,8 @@
     "lastAnalyzed": "2026-10-02T12:35:14.851Z"
   },
   "src/build-integrity/__tests__/import-resolver.test.ts": {
-    "totalWarnings": 20,
-    "lastAnalyzed": "2026-10-08T16:33:18.218Z"
+    "totalWarnings": 19,
+    "lastAnalyzed": "2026-10-08T19:22:51.574Z"
   },
   "src/build-integrity/gate-10.ts": {
     "totalWarnings": 6,

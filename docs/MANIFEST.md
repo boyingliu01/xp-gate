@@ -50,7 +50,7 @@ components:
     optional: false
 
   - id: pre-commit
-    name: "Pre-Commit Hook (Gate 0-9, 10 道门禁)"
+    name: "Pre-Commit Hook (Gate 0-11 + Gate 12, 12 道编号门禁)"
     description: "Static analysis, lint, test, coverage, shell check, principles (Clean Code + SOLID), cyclomatic complexity, Boy Scout Rule, architecture quality"
     type: git-hook
     install_command: "bash <(curl -fsSL https://raw.githubusercontent.com/boyingliu01/xp-gate/repo-main/scripts/install-pre-commit.sh) (LEGACY - GHP version only, use npm install -g xp-gate instead)"
