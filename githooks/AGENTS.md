@@ -86,11 +86,13 @@ Code-walkthrough has no hard file-count or LOC threshold. Large diffs must be re
 
 ## CONVENTIONS
 - **3-tier adapter resolution**: `~/.config/xp-gate/adapters/<lang>.sh` (global) → `<project>/githooks/adapters/<lang>.sh` (project) → script dir (fallback).
-- **Tool unavailable → SKIP, not BLOCK.** Adapter degrades the gate to SKIP when the underlying tool isn't installed. Block fires only when the tool exists and the check fails.
+- **Tool unavailable → SKIP, not BLOCK** — *except Gate 8*: since #499 secret scanning is **fail-closed** — gitleaks missing or exiting non-0/1 BLOCKs the commit (a security gate that cannot run must not report success). CI installs gitleaks for the first-commit job accordingly. Adapter degrades other gates to SKIP when the underlying tool isn't installed; block fires only when the tool exists and the check fails.
 - **Code-walkthrough scope**: no hard file-count or LOC threshold; large diffs require complete review or user-directed splitting, never a size-based bypass.
 - **Code-walkthrough skipped on main/master.** Gate M, M2, M3 still run.
 - **Boy Scout Rule (Gate 6)**: new files zero-tolerance; modified files cannot increase warnings; untouched files unchecked.
 - **Adapter plugins** under `adapters/plugins/` extend the base language adapters (P3C/whalecloud for Java, book299 for Python/C/ES5 JS). Opt-in per project.
+- **Project-level coverage exclusions**: a project may ship `.xp-gate-powershell-coverage-ignore` (one glob per line, `#` comments allowed) to exclude scripts that cannot be exercised by Pester (e.g. bootstrap scripts whose `Main` ends in `exit`); the PowerShell adapter drops matching files from coverage accounting instead of counting them as 0%. Python coverage thresholds come from `pyproject.toml [tool.coverage.report] fail_under` — the adapter never hardcodes a threshold.
+- **Python mypy scope is CI-locked**: `adapters/python.sh` runs `mypy src/` + `mypy scripts/` (the CI type job's surface), never a bare `mypy .`; pinned by `__tests__/adapter-mypy-pester-scope.test.bats`.
 - **No CLI invocation in pre-push hook for Delphi.** The hook is a validator only — it reads `.code-walkthrough-result.json`; the actual review must run via the skill before push.
 - **Adapters are duplicated** into `src/npm-package/adapters/`. Source of truth = here; resync via build scripts.
 

@@ -190,17 +190,72 @@ run_coverage() {
       source_files[${#source_files[@]}]="$path"
     done < "$discovery_file"
     rm -f "$discovery_file"
+
+    # Optional project-level exclusions. Some scripts cannot be instrumented or
+    # exercised by a unit-test runner at all (e.g. a bootstrap script whose Main
+    # ends in `exit`, which terminates the Pester host when invoked in-process).
+    # Counting them as 0% coverage permanently caps the achievable percentage and
+    # makes the threshold unsatisfiable no matter how good the suite is.
+    # Format: one glob per line in .xp-gate-powershell-coverage-ignore
+    local ignore_file=".xp-gate-powershell-coverage-ignore"
+    if [ -f "$ignore_file" ]; then
+      local filtered=()
+      local src
+      for src in "${source_files[@]}"; do
+        local skip=0
+        local pat
+        # Discovery yields paths like "./setup.ps1"; match the pattern against the
+        # raw path AND the "./"-stripped form so a plain "setup.ps1" glob works.
+        local src_norm="${src#./}"
+        while IFS= read -r pat; do
+          # skip blanks and comments
+          case "$pat" in ''|'#'*) continue ;; esac
+          local pat_norm="${pat#./}"
+          # shellcheck disable=SC2254
+          case "$src" in $pat|$pat_norm) skip=1; break ;; esac
+          # shellcheck disable=SC2254
+          case "$src_norm" in $pat_norm) skip=1; break ;; esac
+        done < "$ignore_file"
+        if [ "$skip" -eq 0 ]; then
+          filtered[${#filtered[@]}]="$src"
+        else
+          echo "  ℹ️  Coverage exclusion matched: $src"
+        fi
+      done
+      # Assign back unconditionally: when EVERY source file matched an
+      # exclusion, `filtered` is empty and the check below must see 0 to skip
+      # coverage. Only assigning on >0 silently ignored a full exclusion.
+      # (Empty-array guards keep this bash-3.2 / `set -u` safe.)
+      if [ "${#filtered[@]}" -gt 0 ]; then
+        source_files=("${filtered[@]}")
+      else
+        source_files=()
+      fi
+    fi
+
+    if [ "${#source_files[@]}" -eq 0 ]; then
+      echo "No PowerShell source files left after exclusions, skipping coverage"
+      return 0
+    fi
+
     test_paths=$(_powershell_path_array "${test_files[@]}")
     coverage_paths=$(_powershell_path_array "${source_files[@]}")
     echo "Running Pester with code coverage..."
+    # Pester 5 requires the modern configuration object: `-Path ... -CodeCoverage ...`
+    # is the deprecated Pester 4 parameter set and fails outright on Pester 5.x
+    # ("cannot resolve parameter set"). Using it silently produced no coverage.xml,
+    # which the pre-commit hook then reported as an unparseable/zero result.
     _pester_timeout "$PWSH" "${POWERSHELL_ARGS[@]}" "
-      \$results = Invoke-Pester -Path $test_paths -CodeCoverage $coverage_paths -PassThru
+      \$cfg = New-PesterConfiguration
+      \$cfg.Run.Path = $test_paths
+      \$cfg.CodeCoverage.Enabled = \$true
+      \$cfg.CodeCoverage.Path = $coverage_paths
+      \$cfg.CodeCoverage.OutputFormat = 'JaCoCo'
+      \$cfg.CodeCoverage.OutputPath = (Join-Path (Get-Location) 'coverage.xml')
+      \$cfg.Run.PassThru = \$true
+      \$results = Invoke-Pester -Configuration \$cfg
       \$pct = [math]::Round(\$results.CodeCoverage.CoveragePercent, 1)
       Write-Host \"Coverage: \$pct%\"
-      if (\$pct -lt 80) {
-        Write-Host \"WARNING: Coverage \$pct% is below 80% threshold\"
-        exit 0
-      }
       exit 0
     " 2>&1
     local cov_exit=$?

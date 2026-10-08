@@ -106,7 +106,10 @@ describe('readConfig', () => {
 
   function extractDelphiConfigExample(relativePath) {
     const markdown = readMarkdown(path.join(projectRoot, relativePath));
-    const section = markdown.match(/(?:### |\*\*)\.delphi-config\.json[^\n]*\n[\s\S]*?```json\n([\s\S]*?)\n```/);
+    // \r?\n + \r?: on Windows checkouts (core.autocrlf=true) the markdown is
+    // CRLF in the working tree, so a bare \n never matches and the test
+    // reports a missing example that is actually there (#425).
+    const section = markdown.match(/(?:### |\*\*)\.delphi-config\.json[^\n]*\r?\n[\s\S]*?```json\r?\n([\s\S]*?)\r?\n```/);
     if (!section) throw new Error(`${relativePath} must contain a .delphi-config.json JSON example`);
     return section[1];
   }
