@@ -785,12 +785,44 @@ function reportBaselineUpdate(
   console.log(`   preserved:${preserved.length > 0 ? ` ${list(preserved)}` : ' (none)'}`);
 }
 
+/**
+ * Record budget entries for files the gate meets for the first time, then save
+ * and report the write. Split out of `runEnforcement` to keep both under the
+ * long-function threshold; also carries the #452 REQ-2 visibility contract:
+ * the report distinguishes "created" from "updated" and names every entry the
+ * auto-init introduced, never just a count.
+ */
+async function autoInitMissingEntries(
+  baseline: Record<string, BaselineEntry>,
+  missingBaselineEntries: string[],
+  currentWarnings: Record<string, number>,
+  baselinePath: string,
+  baselineExisted: boolean,
+): Promise<void> {
+  recordAutoInitializedEntries(baseline, missingBaselineEntries, currentWarnings);
+  await saveBaseline(baselinePath, baseline);
+  const action = baselineExisted ? 'updated' : 'created';
+  const noun = missingBaselineEntries.length === 1 ? 'entry' : 'entries';
+  console.log(`ℹ️  Baseline ${action}: ${baselinePath}`);
+  console.log(`   auto-initialized ${noun}: ${missingBaselineEntries.join(', ')}`);
+}
+
 async function runEnforcement(newFiles: string[], modifiedFiles: string[], baselinePath: string): Promise<EnforcementResult> {
   const allFiles = [...newFiles.filter(f => f.trim()), ...modifiedFiles.filter(f => f.trim())];
   const currentWarnings = await analyzeWarningsForFiles(allFiles);
-  
+
+  // Distinguishing "created" from "updated" is part of the auto-init contract
+  // (#452 REQ-2): a silently rewritten baseline is how unrelated entries used
+  // to vanish without anyone noticing.
+  let baselineExisted = false;
+  try {
+    await fs.access(baselinePath);
+    baselineExisted = true;
+  } catch {
+    baselineExisted = false;
+  }
   const baseline = await loadBaseline(baselinePath);
-  
+
   // Check for missing baseline entries for modified files
   const missingBaselineEntries: string[] = [];
   for (const file of modifiedFiles) {
@@ -798,13 +830,11 @@ async function runEnforcement(newFiles: string[], modifiedFiles: string[], basel
       missingBaselineEntries.push(file);
     }
   }
-  
+
   // Files being modified for the first time get their current count recorded, so
   // the next modification is compared against a real budget instead of nothing.
   if (missingBaselineEntries.length > 0) {
-    recordAutoInitializedEntries(baseline, missingBaselineEntries, currentWarnings);
-    await saveBaseline(baselinePath, baseline);
-    console.log(`ℹ️  Auto-initialized baseline for ${missingBaselineEntries.length} files`);
+    await autoInitMissingEntries(baseline, missingBaselineEntries, currentWarnings, baselinePath, baselineExisted);
   }
   
   const deltaResults: DeltaResult[] = [];

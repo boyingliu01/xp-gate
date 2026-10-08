@@ -33,7 +33,9 @@ const ACTIVE_SCOPE_DOCS = [
 describe('canonical code walkthrough documentation', () => {
   it('provides an evidence example accepted by the Gate MW validator', () => {
     const markdown = readMarkdown(WALKTHROUGH_DOC);
-    const example = markdown.match(/\*\*输出文件格式\*\*[^`]*```json\n([\s\S]*?)\n```/);
+    // \r?: Windows checkouts hold CRLF in the working tree, so a bare \n
+    // after the ```json fence never matches (#425).
+    const example = markdown.match(/\*\*输出文件格式\*\*[^`]*```json\r?\n([\s\S]*?)\r?\n```/);
     expect(example).not.toBeNull();
 
     const evidence = JSON.parse(example[1]);

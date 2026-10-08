@@ -459,10 +459,25 @@ record_gate_audit "gate-0" "version-consistency" "$GATE_0_STATUS" "0" "$GATE_0_S
 
 echo ""
 
-# Get list of changed files
-CHANGED_FILES=$(git diff --cached --name-only --diff-filter=ACM)
+# Get list of changed files.
+#
+# Byte-identical mirrors (src/npm-package/**) are governed by CI Mirror Parity,
+# not by re-linting. Leaving them in this scan set double-counted every
+# lint/complexity signal and made jscpd report the source-vs-mirror pair as a
+# 100% whole-file clone, which then tripped Gate 6's "<=5 warnings must clear
+# to zero" rule on ANY edit to a mirrored file -- a warning that is
+# structurally impossible to clear. (Gate 6's MIRROR_EXCLUDE and #494's test
+# selection already exclude mirrors for the same reason.)
+#
+# IMPORTANT: the exclusion applies to the LINT SCAN CORPUS only. The early
+# exit below must key on the RAW staged list -- Gate 8 (secret scanning) is
+# unconditional and fail-closed (#499), and gating it behind a path-filtered
+# list would let a mirror-only commit land with zero secret scanning and no
+# CI backstop.
+RAW_CHANGED_FILES=$(git diff --cached --name-only --diff-filter=ACM)
+CHANGED_FILES=$(printf '%s\n' "$RAW_CHANGED_FILES" | grep -v '^src/npm-package/' || true)
 
-if [ -z "$CHANGED_FILES" ]; then
+if [ -z "$RAW_CHANGED_FILES" ]; then
   echo "No files changed. Skipping gates."
   exit 0
 fi
@@ -2726,7 +2741,17 @@ else
           echo "❌ BLOCKED - Boy Scout Rule violations detected ($VIOLATION_COUNT)"
           exit 1
         fi
-        
+
+        # REQ-4 (#452): the auto-init rewrites a committed file, which used to
+        # surface as an unexplained dirty ` M .warnings-baseline.json` after
+        # every commit that touched a first-time-modified file. Stage it so the
+        # budget update travels with the commit that caused it; when the
+        # baseline is unchanged (the common case) this is a no-op.
+        if [ -n "$(git status --porcelain -- .warnings-baseline.json 2>/dev/null)" ]; then
+          git add .warnings-baseline.json 2>/dev/null || true
+          echo "     ℹ️  .warnings-baseline.json auto-updated and staged with this commit."
+        fi
+
         echo "     ✅ PASSED - Boy Scout Rule compliance."
         fi
       else
