@@ -9,7 +9,7 @@
  *             覆盖 hooks/adapters/gate 脚本，而同一次发布里 syncModulesFromRepo 对
  *             同类风险显式拒绝并保留字节 —— 同一命令面内两套销毁标准，且 force 让
  *             update-hooks 的本地改动守卫直接返回 0，无备份地抹掉机器独有内容。
- * @covers AC-502-04, AC-502-05, AC-495-20
+ * @covers AC-502-04, AC-502-05, AC-502-06, AC-495-20
  */
 import { mkdtempSync, mkdirSync, writeFileSync, readFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -63,8 +63,17 @@ describe('doctor machine-mutation boundary (#502/#495 Round 3)', () => {
     expect(DOCTOR).not.toMatch(/noBackup:/);
   });
 
-  it('AC-495-20: planStaleHookSync splits stale files (safe to sync) from diverged ones (must be judged)', () => {
-    const { planStaleHookSync } = require('../doctor');
+  // AC-502-06 (#488 Round 4, feasibility): removing the backup-less forced write
+  // also removed the only recovery the old path had. The judgement is still the
+  // right one — .bak litter is what #428's guard caught — but a user who does run
+  // `--sync-hooks --force` must be told before the bytes are gone that nothing
+  // keeps a copy for them.
+  it('AC-502-06: the path that suggests --force says it overwrites with no backup', () => {
+    expect(DOCTOR).toMatch(/function fixStaleHooks[\s\S]{0,3500}no automatic backup/);
+    expect(DOCTOR).toMatch(/--sync-hooks --force[^\n]*no backup|no backup[^\n]*--sync-hooks --force/);
+  });
+
+  it('AC-495-20: planStaleHookSync splits stale files (safe to sync) from diverged ones (must be judged)', () => {    const { planStaleHookSync } = require('../doctor');
     const root = tempRoot('stale-plan');
     const srcDir = join(root, 'pkg', 'githooks');
     const destDir = join(root, 'installed', 'adapters');
