@@ -321,6 +321,31 @@ describe('runImportCheck', () => {
     expect(result.violations[0].reason).toMatch(/not found|does not exist|missing/i);
   });
 
+  it('passes when projectRoot spelling differs in drive case/slashes (Windows, #508)', async () => {
+    // git rev-parse --show-toplevel reports "D:/repo" while path.resolve of a
+    // repo-relative changed file inherits process.cwd()'s "d:\repo" drive case.
+    // The case-sensitive startsWith judged every import as boundary-escaping,
+    // blocking any TS-bearing push. The same root spelled the other way must
+    // pass on Windows; drive letters do not exist on POSIX so skip there.
+    if (process.platform !== 'win32') return;
+
+    const srcDir = path.join(tmpDir, 'src');
+    await fs.mkdir(srcDir);
+
+    const barFile = path.join(srcDir, 'bar.ts');
+    await fs.writeFile(barFile, 'export const x = 1;');
+
+    const fooFile = path.join(srcDir, 'foo.ts');
+    await fs.writeFile(fooFile, `import { x } from './bar';\nconsole.log(x);\n`);
+
+    const altRoot = tmpDir.replace(/\\/g, '/').replace(/^[a-zA-Z]:/, (m) => m.toLowerCase());
+    expect(altRoot).not.toBe(tmpDir);
+
+    const result = await runImportCheck([fooFile], altRoot, 30000);
+    expect(result.status).toBe('pass');
+    expect(result.violations).toEqual([]);
+  });
+
   it('skips YAML files containing JavaScript-like require text', async () => {
     const workflowDir = path.join(tmpDir, '.github', 'workflows');
     await fs.mkdir(workflowDir, { recursive: true });

@@ -333,8 +333,22 @@ export async function runImportCheck(
       const rawResolved = path.resolve(path.dirname(file), imp.path);
       const normalizedRoot = path.resolve(projectRoot);
 
+      // Windows paths are case-insensitive but the two sides of this comparison
+      // get their case from different sources: path.resolve of a repo-relative
+      // file inherits process.cwd()'s drive-letter case (often lowercase), while
+      // projectRoot comes from `git rev-parse --show-toplevel` (uppercase drive).
+      // A case-sensitive startsWith then judged EVERY import as escaping the
+      // boundary — pre-push Gate 10 blocked any TS-bearing push from a shell
+      // whose drive-letter case disagreed with git's (#508).
+      const normalizeForBoundary = (p: string): string => {
+        const resolved = path.resolve(p);
+        return process.platform === 'win32' ? resolved.toLowerCase() : resolved;
+      };
+      const boundaryRoot = normalizeForBoundary(normalizedRoot);
+      const boundaryTarget = normalizeForBoundary(rawResolved);
+
       const escapesBoundary =
-        !rawResolved.startsWith(normalizedRoot + path.sep) && rawResolved !== normalizedRoot;
+        !boundaryTarget.startsWith(boundaryRoot + path.sep) && boundaryTarget !== boundaryRoot;
 
       if (escapesBoundary) {
         violations.push({
