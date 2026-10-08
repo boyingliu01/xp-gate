@@ -75,10 +75,12 @@ jobs:
       # Gate 8 is fail-closed since #499: a missing gitleaks BLOCKs the commit,
       # so the first-commit fixture commit needs the scanner installed.
       # Version is PINNED (matches the developer-facing docs) so the scan
-      # behavior is reproducible; bump deliberately, not transitively.
+      # behavior is reproducible; the installer script itself only exists on
+      # master (release tags don't ship scripts/), the version ARG is what
+      # actually pins the binary.
       - name: Install gitleaks
         run: |
-          curl -sSfL https://raw.githubusercontent.com/gitleaks/gitleaks/v8.30.1/scripts/install.sh \
+          curl -sSfL https://raw.githubusercontent.com/gitleaks/gitleaks/master/scripts/install.sh \
             | bash -s -- -b /usr/local/bin v8.30.1
           gitleaks version
 
