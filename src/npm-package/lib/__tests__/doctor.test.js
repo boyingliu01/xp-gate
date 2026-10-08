@@ -1118,4 +1118,50 @@ describe('doctor', () => {
     expect(json.ok).toBe(true);
     expect(json.issues).toBe(0);
   });
+
+  // AC-488-08: the flag was advertised in the release notes since the version
+  // that added doctor, and rejected as an unknown flag until now. Asserting the
+  // FORMATTER alone would pass while `doctor --format json` still crashed, so
+  // this runs the command and inspects what a script would actually parse.
+  it('AC-488-08: doctor --format json emits one parseable document and nothing else', async () => {
+    setupLocalInstall();
+    seedVersionCache();
+    mockExecSuccess();
+    const { doctor } = require('../doctor');
+    const seen = [];
+    const logSpy = vi.spyOn(console, 'log').mockImplementation((msg) => { seen.push(String(msg)); });
+
+    let code;
+    try {
+      code = await doctor(['--format', 'json']);
+    } finally {
+      logSpy.mockRestore();
+    }
+
+    expect(seen, `expected exactly one JSON line, got:\n${seen.join('\n')}`).toHaveLength(1);
+    const doc = JSON.parse(seen[0]);
+    expect(doc.ok).toBe(code === 0);
+    expect(Array.isArray(doc.checks)).toBe(true);
+    expect(doc.checks.length).toBeGreaterThan(0);
+    expect(seen[0]).not.toMatch(/XP-Gate Doctor|Diagnosis Report/);
+  });
+
+  it('AC-488-08: a machine-readable doctor run cannot also mutate the machine', async () => {
+    const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+    const { doctor } = require('../doctor');
+
+    expect(await doctor(['--format', 'json', '--fix'])).toBe(1);
+    expect(errorSpy).toHaveBeenCalledWith(expect.stringContaining('--fix'));
+    expect(await doctor(['--json', '--sync-hooks'])).toBe(1);
+    errorSpy.mockRestore();
+  });
+
+  it('AC-488-08: an unknown --format value is rejected instead of silently ignored', async () => {
+    const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+    const { doctor } = require('../doctor');
+
+    expect(await doctor(['--format', 'yaml'])).toBe(1);
+    expect(errorSpy).toHaveBeenCalledWith(expect.stringContaining('--format'));
+    errorSpy.mockRestore();
+  });
 });

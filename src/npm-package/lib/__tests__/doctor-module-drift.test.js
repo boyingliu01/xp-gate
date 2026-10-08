@@ -49,6 +49,18 @@ function fixture(spec) {
   write(join(repoHooks, 'pre-commit'), '#!/bin/bash\necho repo\n');
   write(join(installedHooks, 'pre-commit'), '#!/bin/bash\necho repo\n');
 
+  // Resolution anchors: pre-commit only makes the installed dir the ADAPTER_DIR
+  // when `adapter-common.sh` is in it (:34), and only reads gate modules from it
+  // when `gate-3.sh` is (:80). Without both, the fixture describes a tier the hook
+  // never resolves to, and the comparison silently targets some other directory
+  // (#495 Round 3 -- the tier list is no longer an assumption).
+  const ANCHOR = '#!/bin/bash\nanchor\n';
+  for (const anchor of ['adapter-common.sh', 'gate-3.sh']) {
+    if (spec[anchor]) continue;
+    write(join(repoHooks, anchor), ANCHOR);
+    write(join(installedAdapters, anchor), ANCHOR);
+  }
+
   return { repoHooks, installedHooks, installedAdapters, root, write };
 }
 
@@ -56,6 +68,20 @@ function drift(ctx) {
   const { diagnoseModuleDrift } = require('../doctor');
   expect(typeof diagnoseModuleDrift).toBe('function');
   return diagnoseModuleDrift(ctx);
+}
+
+/**
+ * Name every tier the hook can resolve into, so a test can never end up
+ * comparing against this machine's real `~/.config/xp-gate` (#495 Round 3).
+ */
+function ctxFor(f, extra = {}) {
+  return {
+    repoRoot: f.root,
+    repoHooks: f.repoHooks,
+    installedAdapters: f.installedAdapters,
+    scriptDir: f.installedHooks,
+    ...extra,
+  };
 }
 
 function checkOf(result, needle) {
@@ -69,7 +95,7 @@ describe('doctor module drift (#495)', () => {
     const f = fixture({
       'gate-8.sh': { repo: '#!/bin/bash\n# repo version\n', installed: '#!/bin/bash\n# installed version\n' },
     });
-    const result = drift({ repoHooks: f.repoHooks, installedAdapters: f.installedAdapters });
+    const result = drift(ctxFor(f));
     expect(result.issues).toBeGreaterThanOrEqual(1);
     expect(checkOf(result, 'gate-8.sh').status).toBe('FAIL');
   });
@@ -80,7 +106,7 @@ describe('doctor module drift (#495)', () => {
     const flat = fixture({
       'typescript.sh': { repo: 'run_tests() { echo repo; }\n', installed: 'run_tests() { echo stale; }\n' },
     });
-    const flatResult = drift({ repoHooks: flat.repoHooks, installedAdapters: flat.installedAdapters });
+    const flatResult = drift(ctxFor(flat));
     expect(checkOf(flatResult, 'typescript.sh').status).toBe('FAIL');
 
     // When the flat copy is absent the hook falls back to adapters/<name>.sh,
@@ -88,7 +114,7 @@ describe('doctor module drift (#495)', () => {
     const nested = fixture({
       'python.sh': { repo: 'run_tests() { echo repo; }\n', installed: 'run_tests() { echo stale; }\n', nested: true },
     });
-    expect(checkOf(drift({ repoHooks: nested.repoHooks, installedAdapters: nested.installedAdapters }), 'python.sh').status).toBe('FAIL');
+    expect(checkOf(drift(ctxFor(nested)), 'python.sh').status).toBe('FAIL');
   });
 
   it('AC-495-03: equal content passes and a module missing on either side stays silent', () => {
@@ -100,7 +126,7 @@ describe('doctor module drift (#495)', () => {
       'go.sh': { repo: 'echo repo only\n', installed: null },
       'swift.sh': { repo: null, installed: 'echo installed only\n' },
     });
-    const result = drift({ repoHooks: f.repoHooks, installedAdapters: f.installedAdapters });
+    const result = drift(ctxFor(f));
     expect(result.issues).toBe(0);
     expect(checkOf(result, 'python.sh').status).toBe('PASS');
     expect(result.checks.filter((c) => c.name.includes('go.sh'))).toHaveLength(0);
@@ -108,7 +134,7 @@ describe('doctor module drift (#495)', () => {
 
     // A consumer project has no githooks/ at all -- the whole surface must stay
     // completely quiet there, exactly like the hook drift check does.
-    const absent = drift({ repoHooks: join(f.root, 'nope'), installedAdapters: f.installedAdapters });
+    const absent = drift(ctxFor(f, { repoHooks: join(f.root, 'nope') }));
     expect(absent.checks).toHaveLength(0);
     expect(absent.issues).toBe(0);
   });
@@ -123,7 +149,7 @@ describe('doctor module drift (#495)', () => {
       },
       'gate-4.sh': { repo: '#!/bin/bash\nline_a\nline_b\n', installed: '#!/bin/bash\nline_a\n' },
     });
-    const result = drift({ repoHooks: f.repoHooks, installedAdapters: f.installedAdapters });
+    const result = drift(ctxFor(f));
 
     const diverged = checkOf(result, 'gate-8.sh');
     expect(diverged.status).toBe('FAIL');
@@ -148,7 +174,7 @@ describe('doctor module drift (#495)', () => {
       'gate-4.sh': { repo: '#!/bin/bash\nline_a\nline_b\n', installed: '#!/bin/bash\nline_a\n' },
     });
 
-    const first = syncModulesFromRepo({ repoHooks: f.repoHooks, installedAdapters: f.installedAdapters });
+    const first = syncModulesFromRepo(ctxFor(f));
     expect(first.synced).toContain('gate-4.sh');
     expect(readFileSync(join(f.installedAdapters, 'gate-4.sh'), 'utf8')).toContain('line_b');
     // The guard is the point: the machine-only hardening survives untouched.
@@ -157,11 +183,7 @@ describe('doctor module drift (#495)', () => {
 
     // An explicit decision still wins, because the developer may have judged the
     // repo copy to be the correct one.
-    const forced = syncModulesFromRepo({
-      repoHooks: f.repoHooks,
-      installedAdapters: f.installedAdapters,
-      force: true,
-    });
+    const forced = syncModulesFromRepo(ctxFor(f, { force: true }));
     expect(forced.synced).toContain('gate-8.sh');
     expect(readFileSync(join(f.installedAdapters, 'gate-8.sh'), 'utf8')).toContain('report_artifact_verdict');
     expect(existsSync(join(f.installedAdapters, 'gate-8.sh'))).toBe(true);

@@ -50,7 +50,32 @@ function fixture(spec) {
   write(join(repoHooks, 'pre-commit'), '#!/bin/bash\necho repo\n');
   write(join(installedHooks, 'pre-commit'), '#!/bin/bash\necho repo\n');
 
+  // Resolution anchors: the installed dir only becomes ADAPTER_DIR / GATE_DIR if
+  // adapter-common.sh (githooks/pre-commit:34) and gate-3.sh (:80) live in it.
+  // Without them the fixture describes a tier the hook never resolves to, and the
+  // comparison silently targets a directory outside the test (#495 Round 3).
+  const ANCHOR = '#!/bin/bash\nanchor\n';
+  for (const anchor of ['adapter-common.sh', 'gate-3.sh']) {
+    if (spec[anchor]) continue;
+    write(join(repoHooks, anchor), ANCHOR);
+    write(join(installedAdapters, anchor), ANCHOR);
+  }
+
   return { root, repoHooks, installedHooks, installedAdapters, write };
+}
+
+/**
+ * Name every tier the hook can resolve into so no fixture can reach this
+ * machine's real `~/.config/xp-gate`.
+ */
+function ctxFor(f, extra = {}) {
+  return {
+    repoRoot: f.root,
+    repoHooks: f.repoHooks,
+    installedAdapters: f.installedAdapters,
+    scriptDir: f.installedHooks,
+    ...extra,
+  };
 }
 
 describe('doctor drift Round 2 (#495)', () => {
@@ -61,7 +86,7 @@ describe('doctor drift Round 2 (#495)', () => {
       'gate-4.sh': { repo, installed: repo.replace(/\n/g, '\r\n') },
     });
 
-    const result = diagnoseModuleDrift({ repoHooks: f.repoHooks, installedAdapters: f.installedAdapters });
+    const result = diagnoseModuleDrift(ctxFor(f));
     const check = result.checks.find((c) => c.name === 'Module drift: gate-4.sh');
     expect(check).toBeDefined();
     expect(check.status).not.toBe('FAIL');
@@ -80,12 +105,15 @@ describe('doctor drift Round 2 (#495)', () => {
     const previous = process.env.XP_GATE_REPO_ROOT;
     process.env.XP_GATE_REPO_ROOT = f.root;
     try {
-      const diagnosis = diagnoseModuleDrift({ repoHooks: f.repoHooks, installedAdapters: f.installedAdapters });
+      const diagnosis = diagnoseModuleDrift(ctxFor(f));
       expect(diagnosis.issues).toBe(1);
 
-      const synced = syncModulesFromRepo({ installedAdapters: f.installedAdapters });
+      // Only the install target is named: the repo must come from the same env
+      // the diagnosis used, or the FAIL this produces can never be cleared.
+      const synced = syncModulesFromRepo({ installedAdapters: f.installedAdapters, scriptDir: f.installedHooks });
       expect(synced.synced).toContain('gate-4.sh');
       expect(readFileSync(join(f.installedAdapters, 'gate-4.sh'), 'utf8')).toContain('line_b');
+      expect(diagnoseModuleDrift(ctxFor(f)).issues).toBe(0);
     } finally {
       if (previous === undefined) delete process.env.XP_GATE_REPO_ROOT;
       else process.env.XP_GATE_REPO_ROOT = previous;
@@ -120,28 +148,35 @@ describe('doctor drift Round 2 (#495)', () => {
     expect(source).toMatch(/if \(timedOut\)[\s\S]{0,200}issues\s*(\+\+|\+=|= Math\.max)/);
   });
 
-  it('AC-495-13: a flat copy inside the project githooks/ is diagnosed, because the hook reads flat first', () => {
+  it('AC-495-13: a flat copy inside the project githooks/ is diagnosed when the project tier is what executes', () => {
     const { diagnoseModuleDrift } = require('../doctor');
-    // Project mode: ADAPTER_DIR == <repo>/githooks, and resolve_adapter_path()
-    // tries $ADAPTER_DIR/<lang>.sh before $ADAPTER_DIR/adapters/<lang>.sh. The
-    // installer wrote those flat copies once; a later repo fix only touches the
-    // nested source, so the stale flat file keeps executing and #493-class
-    // repairs are inert in the very repository that shipped them.
+    // Project mode (no global install): pre-commit:36-37 resolves ADAPTER_DIR to
+    // <repo>/githooks, and resolve_adapter_path() then tries $ADAPTER_DIR/<lang>.sh
+    // before the nested source. The installer wrote those flat copies once and
+    // .gitignore:42 keeps them out of the repo, so a later repo fix that only
+    // touches adapters/<lang>.sh leaves the stale flat copy executing -- a
+    // #493-class repair inert in the very repository that shipped it.
     const root = mkdtempSync(join(tmpdir(), 'xp-gate-project-tier-'));
     const repoHooks = join(root, 'githooks');
     mkdirSync(join(repoHooks, 'adapters'), { recursive: true });
     writeFileSync(join(repoHooks, 'pre-commit'), '#!/bin/bash\necho repo\n');
+    writeFileSync(join(repoHooks, 'adapter-common.sh'), '#!/bin/bash\nshared\n');
+    writeFileSync(join(repoHooks, 'gate-3.sh'), '#!/bin/bash\ngate3\n');
     writeFileSync(join(repoHooks, 'adapters', 'iac.sh'), '#!/bin/bash\nfixed_count_guard\n');
     writeFileSync(join(repoHooks, 'iac.sh'), '#!/bin/bash\nstale_echo_zero\n');
 
-    const globalDir = join(root, 'nothing-installed-globally');
-    const result = diagnoseModuleDrift({ repoRoot: root, installedAdapters: globalDir });
+    const result = diagnoseModuleDrift({
+      repoRoot: root,
+      installedAdapters: join(root, 'nothing-installed-globally'),
+      scriptDir: join(root, 'nothing-installed-hooks'),
+    });
 
     const projectCheck = result.checks.find((c) => /Module drift \(project\): iac\.sh/.test(c.name));
     expect(projectCheck, 'the executed project-tier flat copy is invisible to doctor').toBeDefined();
     expect(projectCheck.status).toBe('FAIL');
     // The verdict has to say what to do with a gitignored installer residue.
     expect(projectCheck.detail).toMatch(/flat|shadow/i);
+    expect(result.issues).toBe(1);
   });
 
   it('AC-488-05: lib/ sync refuses an installed library the repo does not have lines for', () => {

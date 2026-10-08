@@ -38,7 +38,7 @@ async function install(args = []) {
   } else {
     // Doctor findings (hook/module drift needing a human judgement, #495) are
     // diagnostics about the environment, not a failed install. Returning its
-    // code made `xp-gate install && next-step` fail on a successful install (#502).
+    // code made `xp-gate install && next-step` fail on a successful install (#503).
     console.log('\n⚠ Installation complete, but doctor reported issues.');
     console.log('  Review them with "xp-gate doctor" — the install itself succeeded.');
   }
