@@ -42,7 +42,7 @@
     "node": ">=18.0.0"
   },
   "scripts": {
-    "version": "0.14.31",
+    "version": "0.20.0",
     "license-check": "node scripts/check-mattpocock-license.cjs",
     "prepack": "node scripts/check-mattpocock-license.cjs && node scripts/sync-package-content.js",
     "test": "echo \"Run tests\" && exit 0"
