@@ -86,6 +86,26 @@ describe('shared-paths', () => {
     expect(detectPlatform()).toBe('claude-code');
   });
 
+  // ── #424: brand-new Qoder installs have no skills/ subdirectory yet ──
+
+  it('detectPlatform returns qoder when only ~/.qoder exists (brand-new install, no skills dir)', () => {
+    fs.mkdirSync(path.join(tmpHome, '.qoder'), { recursive: true });
+    const { detectPlatform } = require('../shared-paths');
+    expect(detectPlatform()).toBe('qoder');
+  });
+
+  it('detectPlatform returns qoder when only ~/.qoder/agents exists (no skills dir)', () => {
+    fs.mkdirSync(path.join(tmpHome, '.qoder', 'agents'), { recursive: true });
+    const { detectPlatform } = require('../shared-paths');
+    expect(detectPlatform()).toBe('qoder');
+  });
+
+  it('detect-deps re-exports the SAME detectPlatform as shared-paths (no divergent copies)', () => {
+    const fromShared = require('../shared-paths').detectPlatform;
+    const fromDetectDeps = require('../detect-deps').detectPlatform;
+    expect(fromDetectDeps).toBe(fromShared);
+  });
+
   it('getTemplateDir returns correct path for each platform', () => {
     const { getTemplateDir } = require('../shared-paths');
 

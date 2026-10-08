@@ -88,21 +88,14 @@ interface StubResult {
 const MEBIBYTE = 1024 * 1024;
 const MAX_BUFFER_BYTES = 32 * MEBIBYTE;
 
-/** How far past the fallback marker to inspect when asserting it is unguarded. */
-const FALLBACK_BLOCK_CHARS = 2500;
-
-/** Minimum number of Gate 5 vitest branches that must route through the helper. */
-const MIN_GUARDED_BRANCHES = 4;
-
 /**
- * How many lines above a hand-rolled BLOCKED site the producing command may be.
+ * Minimum number of Gate 5 vitest branches that must route through the helper.
  *
- * Measured against the real hook: the `run_tests` line sits 3 lines above each
- * fallback's BLOCKED, while the nearest vitest invocation is ~25 lines away and in
- * a sibling branch -- so this bound reaches a site's own command without reaching
- * a neighbouring branch.
+ * 4 branches that call vitest directly, plus the two paths that reach vitest
+ * through adapters/typescript.sh's `run_tests` and were added to the guarded side
+ * in #498.
  */
-const PRODUCING_COMMAND_LOOKBACK_LINES = 12;
+const MIN_GUARDED_BRANCHES = 6;
 
 /** Declared vitest major whose default reporter emits the `Unhandled Error` shape. */
 const ASSUMED_VITEST_MAJOR = 1;
@@ -261,6 +254,12 @@ function readHook(): string {
   }
 }
 
+/** Leading-whitespace width of a hook line (tabs counted as two columns). */
+function indentOf(line: string): number {
+  const lead = /^[ \t]*/.exec(line)?.[0] ?? '';
+  return lead.replace(/\t/g, '  ').length;
+}
+
 /**
  * Which test command produced the BLOCKED at `index`, by walking up to the nearest
  * command that runs tests.
@@ -268,12 +267,28 @@ function readHook(): string {
  * The nearest one wins because that is the branch the message belongs to: a fixed
  * character window reached past the fallback's own `run_tests` line into the
  * vitest branches above it and mislabelled every site.
+ *
+ * The walk is bounded by structure rather than by a line count. A previous version
+ * stopped after a fixed number of lines, which was measured against the hook at the
+ * time (3) and had to be re-measured every time a reason was written between the
+ * command and its block (#498 grew that gap to 13 lines and the assertion silently
+ * relabelled the site as belonging to no branch). The bound is now a
+ * `handle_test_failure` call at a shallower indent: that means this site is nested
+ * inside a branch which already delegated its judgement to the handler, so it
+ * cannot inherit a command from above it. A handler at the SAME indent is a sibling
+ * arm of the very split #498 introduced, and is not a boundary.
  */
 function producingCommand(hook: string, index: number): string {
   const lines = hook.slice(0, index).split('\n');
-  // Bounded so a site cannot inherit a command from an unrelated branch far above.
-  const floor = Math.max(0, lines.length - PRODUCING_COMMAND_LOOKBACK_LINES);
-  for (let i = lines.length - 1; i >= floor; i -= 1) {
+  const blockedIndent = indentOf(lines[lines.length - 1]);
+  for (let i = lines.length - 1; i >= 0; i -= 1) {
+    // A handler call in a SIBLING arm sits at the same indent as this BLOCKED
+    // (#498's split is exactly that: the typescript arm delegates to the handler,
+    // the non-vitest arm hand-rolls the message). Only a handler at a shallower
+    // indent means this site is nested inside a branch that already delegated.
+    if (/handle_test_failure/.test(lines[i]) && indentOf(lines[i]) < blockedIndent) {
+      return 'guarded-branch';
+    }
     if (/run_without_git_context run_tests/.test(lines[i])) return 'run_tests';
     if (/run_without_git_context npx vitest run/.test(lines[i])) return 'vitest';
   }
@@ -313,7 +328,7 @@ describe('Gate 5 distinguishes runner infrastructure errors from real failures (
   it('AC-454-01: every hand-rolled BLOCKED site sits in a generic run_tests fallback', () => {
     // The guard's BLOCKED message lives in the library, so any BLOCKED written
     // directly in the hook belongs to a branch that bypassed the guard. That is
-    // allowed only for the non-vitest `run_tests` fallbacks, whose output shape is
+    // allowed only for the non-vitest `run_tests` fallback, whose output shape is
     // not vitest's (AC-454-06).
     //
     // This is stated as a property of each site rather than as a cap on the count:
@@ -321,8 +336,10 @@ describe('Gate 5 distinguishes runner infrastructure errors from real failures (
     // new fallback and passed on a vitest branch that hand-rolled its own BLOCKED.
     const hook = readHook();
     const sites = [...hook.matchAll(/^(\s*)echo "❌ BLOCKED - Tests FAILED/gm)];
-    // Anti-vacuity: the scan must actually find the two fallback sites.
-    expect(sites.length).toBeGreaterThanOrEqual(2);
+    // Anti-vacuity: the scan must actually find the remaining fallback site.
+    // #498 guarded the typescript adapter's own fallback (that branch runs vitest
+    // by construction), so exactly one hand-rolled BLOCKED is expected here.
+    expect(sites.length).toBeGreaterThanOrEqual(1);
     for (const site of sites) {
       const owner = producingCommand(hook, site.index);
       if (owner !== 'run_tests') {
@@ -359,14 +376,24 @@ describe('Gate 5 distinguishes runner infrastructure errors from real failures (
     expect(readLib()).toContain('vitest: ^1');
   });
 
-  it('AC-454-06: the generic run_tests fallback does NOT consult the guard', () => {
-    // Non-vitest paths have no guaranteed output shape, so guarding them could
-    // let a real failure through. They must keep blocking.
+  it('AC-454-06: the non-vitest run_tests fallback does NOT consult the guard', () => {
+    // Only branches that run vitest may be excused by vitest-shaped patterns. The
+    // per-adapter `run_tests` fallback runs whatever the language adapter picked
+    // (jest, pytest, go test), so guarding it could excuse a real failure with a
+    // marker that means something else in that output. It must keep blocking.
+    //
+    // The typescript fallback used to sit here as well (#498): it is reached from
+    // the typescript branch, where adapters/typescript.sh runs `npx vitest run`, so
+    // its output IS vitest's and it now routes through handle_test_failure like the
+    // other five sites.
     const hook = readHook();
-    const fallbackIndex = hook.indexOf('Fallback: run_tests without coverage');
+    const fallbackIndex = hook.indexOf('Genuinely non-vitest runners');
     expect(fallbackIndex).toBeGreaterThan(-1);
-    // Inspect the ~40 lines of that fallback block.
-    const block = hook.slice(fallbackIndex, fallbackIndex + FALLBACK_BLOCK_CHARS);
+    // Bounded by the end of the enclosing adapter loop, so the slice cannot reach
+    // past this branch into the guarded ones below.
+    const loopEnd = hook.indexOf('done  # end for CURRENT_LANG', fallbackIndex);
+    expect(loopEnd).toBeGreaterThan(fallbackIndex);
+    const block = hook.slice(fallbackIndex, loopEnd);
     expect(block).not.toContain('handle_test_failure');
   });
 

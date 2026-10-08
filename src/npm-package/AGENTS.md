@@ -1,9 +1,9 @@
 # SRC/NPM-PACKAGE KNOWLEDGE BASE
 
-**Generated:** 2026-09-24
-**Commit:** 467174d
-**Branch:** main
-**Version:** 0.19.3.0
+**Generated:** 2026-10-07
+**Commit:** ff55f35b
+**Branch:** fix/batch-defects-20261007
+**Version:** 0.20.0.0
 
 ## OVERVIEW
 npm distribution package — zero-install CLI for xp-gate. Published as `@boyingliu01/xp-gate` on the public npm registry. Bundles hooks + 13 language adapters + 8 skills + 3 platform plugins at `prepack` time. Registers **≥15 CLI subcommands** (was ≥11 before 0.8.9; `check`/`principles`/`arch` added for OpenCode-plugin parity, fixes #208).
@@ -26,7 +26,6 @@ src/npm-package/
 │   ├── audit-log.ts            # gate-audit append-only log writer
 │   ├── gate-audit.ts           # `xp-gate audit [--tail|--stats|record]`
 │   ├── rollback.js             # rollback failed installations
-│   ├── download-skill.js       # GitHub download helper used by install/update-skill
 │   ├── ui-detector.ts          # auto-detects UI framework (Issue #79)
 │   ├── ui-review.ts            # `xp-gate ui-review` — visual review for UI-bearing changes
 │   ├── shared-paths.js         # cross-command path helpers
@@ -53,7 +52,7 @@ src/npm-package/
 | baseline | lib/baseline.js | Boy Scout Rule baseline lifecycle |
 | audit log | lib/audit-log.ts | Append-only journal writer |
 | audit CLI | lib/gate-audit.ts | `xp-gate audit --tail / --stats / record` |
-| skill install/update | lib/install-skill.js, lib/update-skill.js, lib/download-skill.js | GitHub-fetched, per-version cached |
+| skill install/update | lib/install-skill.js, lib/update-skill.js | copied from the bundled skills/<name>/ — no network |
 | UI detection | lib/ui-detector.ts | Auto-pick web/mobile framework |
 | UI review | lib/ui-review.ts | Visual review entry for UI-bearing changes |
 | rollback | lib/rollback.js | Rollback a failed install |
@@ -69,7 +68,7 @@ src/npm-package/
 | `xp-gate doctor [--fix]` | Diagnose hook/adapter/env health; **Check 9: OpenCode TUI panel registration** |
 | `xp-gate migrate` | Clean v0.4.x GitHub-Packages residue from `~/.npmrc` |
 | `xp-gate baseline <create\|show\|reset\|diff>` | Manage lint baseline (Boy Scout track) |
-| `xp-gate install-skill <name>` | Download + install a skill from GitHub |
+| `xp-gate install-skill <name>` | Install a skill from the package bundle (skills/<name>/) |
 | `xp-gate update-skill <name>` | Update an already-installed skill |
 | `xp-gate uninstall-skill <name> --force` | Remove an installed skill |
 | `xp-gate audit [--tail \| --stats \| record]` | Inspect / record gate audit log |

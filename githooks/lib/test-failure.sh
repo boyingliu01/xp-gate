@@ -4,6 +4,14 @@
 # the contract is unit-testable without executing the hook
 # (githooks/__tests__/gate-5-runner-error.test.bats, gate-5-partial-threshold.test.bats).
 
+# The one condition every excuse below shares: a real failure always wins.
+#
+# Kept as a single expression because a marker added for one exit class and
+# forgotten in another re-opens the false BLOCK the excuse exists to close.
+has_real_failure_marker() {
+  printf '%s' "$1" | grep -qE 'Tests +[0-9]+ failed|FAIL |AssertionError'
+}
+
 # Detect a vitest *runner infrastructure* failure as opposed to a real test
 # failure. On Windows, vitest 1.6.x can exit non-zero while reporting zero failed
 # tests, because its temp/ssr module cache hits EPERM (#454). Treating that as
@@ -24,10 +32,7 @@ is_runner_infrastructure_error() {
   local _out="$1"
   [ -n "$_out" ] || return 1
   printf '%s' "$_out" | grep -qE 'Unhandled Error' || return 1
-  # A real failure must still block.
-  if printf '%s' "$_out" | grep -qE 'Tests +[0-9]+ failed|FAIL |AssertionError'; then
-    return 1
-  fi
+  has_real_failure_marker "$_out" && return 1
   return 0
 }
 
@@ -54,13 +59,36 @@ is_partial_threshold_only_exit() {
   [ -n "$_out" ] || return 1
   printf '%s' "$_out" | grep -qE 'does not meet global threshold' || return 1
   # A real failure must still block.
-  if printf '%s' "$_out" | grep -qE 'Tests +[0-9]+ failed|FAIL |AssertionError'; then
-    return 1
-  fi
+  has_real_failure_marker "$_out" && return 1
   return 0
 }
 
-# Judge a non-zero vitest exit and report the outcome (Issues #454, #473).
+# Detect the third non-failure exit: vitest found nothing to run at all (#498).
+#
+# A TypeScript project with no test files, and a partial run whose every target
+# falls outside the suite it is being run from, both make vitest print
+#   No test files found, exiting with code 1
+# and exit non-zero. No test failed; none ran. Reporting that as "Tests FAILED"
+# blocked every commit in such a repo, including the fixtures that were written
+# to prove Gate 5a blocks a *missing test* (githooks/__tests__/gate-5a-block.test.bats
+# died in setup, before any assertion of its own was reached).
+#
+# Matched as vitest's whole sentence including its exit-code clause rather than
+# as the bare phrase: a test that logs the phrase from its own title describes a
+# run that did collect files, and must not be excused.
+#
+# Returns 0 only when both hold:
+#   - the output carries vitest's no-test-files sentence, AND
+#   - no real test failure marker is present.
+is_no_test_files_found() {
+  local _out="$1"
+  [ -n "$_out" ] || return 1
+  printf '%s' "$_out" | grep -qE 'No test files found, exiting with code [0-9]+' || return 1
+  has_real_failure_marker "$_out" && return 1
+  return 0
+}
+
+# Judge a non-zero vitest exit and report the outcome (Issues #454, #473, #498).
 #
 # Before this helper existed, each Gate 5 branch carried its own
 # `echo "❌ BLOCKED - Tests FAILED"`, and only ONE of them consulted
@@ -74,9 +102,10 @@ is_partial_threshold_only_exit() {
 #        branch that forgets to set one fails loudly instead of silently
 #        treating empty output as "no runner error")
 #   $2 = short context label used in the BLOCK message; may be empty
-# Returns 0 when the run should be treated as SKIPPED (runner infrastructure
-# error, or a partial run that only missed the global coverage threshold), 1
-# when it must BLOCK. Callers use `|| exit 1`.
+# Returns 0 when the run should be treated as SKIPPED (a runner infrastructure
+# error, a partial run that only missed the global coverage threshold, or a run
+# that matched no test files at all), 1 when it must BLOCK. Callers use
+# `|| exit 1`.
 #
 # NOTE: only vitest branches may call this. The generic `run_tests` fallbacks
 # (non-TS adapters) are deliberately left unguarded: their output format is not
@@ -105,6 +134,16 @@ handle_test_failure() {
     # TESTS_SKIPPED is deliberately NOT set here, unlike the runner-error path:
     # this run produced real coverage data, and the coverage section downstream
     # carries the new-file coverage block, which must stay live.
+    return 0
+  fi
+  if is_no_test_files_found "$_out"; then
+    echo ""
+    echo "⏭️  SKIPPED - no test files matched, so Gate 5 ran zero tests"
+    echo "    Detected: 'No test files found, exiting with code N' with 0 failed tests."
+    echo "    This is not a pass: nothing executed (#498)."
+    echo "    Test presence is enforced by Gate 5a and by CI, not by this exit."
+    TESTS_SKIPPED=true
+    TESTS_EXIT_CODE=0
     return 0
   fi
   echo ""

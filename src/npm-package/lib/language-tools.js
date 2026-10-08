@@ -407,6 +407,72 @@ const LANGUAGE_REGISTRY = {
 };
 
 /**
+ * Directories that must never drive language detection: dependency trees ship
+ * .sh and .ps1 files of their own, which would label every Node project a Shell
+ * project.
+ */
+const IGNORED_SCAN_DIRS = new Set(['.git', 'node_modules', 'dist', 'build', 'out', 'coverage', '.stryker-tmp', '.next']);
+
+// A bounded scan, not a full walk: detection only needs to know whether an
+// extension occurs at all, and huge monorepos must not pay for every file.
+const EXTENSION_SCAN_LIMIT = 2000;
+
+function extensionsPresentIn(projectRoot) {
+  const extensions = new Set();
+  const pending = [projectRoot];
+  let inspected = 0;
+
+  while (pending.length > 0 && inspected < EXTENSION_SCAN_LIMIT) {
+    const dir = pending.pop();
+    let entries;
+    try {
+      entries = fs.readdirSync(dir, { withFileTypes: true });
+    } catch {
+      continue;
+    }
+    // Sorted: readdir order is filesystem-dependent, and a bounded scan that
+    // stops at an entry count must give the same answer on every machine
+    // (Round 1: feasibility FC-03, architecture MI-01).
+    entries.sort((a, b) => (a.name < b.name ? -1 : a.name > b.name ? 1 : 0));
+    for (const entry of entries) {
+      if (inspected >= EXTENSION_SCAN_LIMIT) break;
+      inspected += 1;
+      if (entry.isDirectory()) {
+        if (!IGNORED_SCAN_DIRS.has(entry.name)) pending.push(path.join(dir, entry.name));
+        continue;
+      }
+      const ext = path.extname(entry.name).slice(1).toLowerCase();
+      if (ext) extensions.add(ext);
+    }
+  }
+
+  return extensions;
+}
+
+/**
+ * Read the --languages selection, in either accepted form.
+ * `--languages=<a,b>` and `--languages <a,b>`; a bare `--languages`, and an
+ * inline `--languages=` with an empty value, both fall back to auto-detection
+ * rather than selecting a language named ''.
+ * @param {string[]} args
+ * @returns {string[]|null}
+ */
+function parseLanguageFlag(args) {
+  const inline = args.find((arg) => arg.startsWith('--languages='));
+  let value;
+  if (inline !== undefined) {
+    value = inline.slice('--languages='.length);
+  } else {
+    const index = args.indexOf('--languages');
+    const following = index === -1 ? undefined : args[index + 1];
+    value = following && !following.startsWith('-') ? following : undefined;
+  }
+  if (value === undefined) return null;
+  const picked = value.split(',').filter(Boolean);
+  return picked.length > 0 ? picked : null;
+}
+
+/**
  * Detect languages used in the current project.
  * @param {string} projectRoot - Project root directory
  * @returns {{detected: string[], configFiles: Object.<string, string[]>}}
@@ -414,6 +480,14 @@ const LANGUAGE_REGISTRY = {
 function detectProjectLanguages(projectRoot) {
   const detected = new Set();
   const configFiles = {};
+
+  // Scanned lazily: the extension fallback is only consulted for languages that
+  // have no config file to look for, and the scan is bounded, not a full walk.
+  let scannedExtensions = null;
+  const extensionSeen = (ext) => {
+    if (scannedExtensions === null) scannedExtensions = extensionsPresentIn(projectRoot);
+    return scannedExtensions.has(ext);
+  };
 
   for (const [lang, def] of Object.entries(LANGUAGE_REGISTRY)) {
     const foundConfigs = [];
@@ -443,6 +517,13 @@ function detectProjectLanguages(projectRoot) {
     if (foundConfigs.length > 0) {
       detected.add(lang);
       configFiles[lang] = foundConfigs;
+    } else if (def.configFiles.length === 0 && def.extensions.some(extensionSeen)) {
+      // Shell and PowerShell have no package-manager manifest to key off, so file
+      // extensions are their only possible signal (#468). Languages that do have
+      // config files keep using them: their extension lists are broad (IaC lists
+      // yaml/yml), and matching on those would make every repo with a CI YAML an
+      // Infrastructure-as-Code project.
+      detected.add(lang);
     }
   }
 
@@ -692,8 +773,7 @@ async function handleDetectLanguages(args) {
 async function handleCheckTools(args) {
   const projectRoot = process.cwd();
   const jsonOutput = args.includes('--json');
-  const langsArg = args.find(a => a.startsWith('--languages='));
-  let languages = langsArg ? langsArg.split('=')[1].split(',') : null;
+  let languages = parseLanguageFlag(args);
 
   // Auto-detect if no languages specified
   if (!languages) {
@@ -761,8 +841,7 @@ async function handleInstallTools(args) {
   const projectRoot = process.cwd();
   const dryRun = args.includes('--dry-run');
   const autoYes = args.includes('--yes') || args.includes('-y');
-  const langsArg = args.find(a => a.startsWith('--languages='));
-  let languages = langsArg ? langsArg.split('=')[1].split(',') : null;
+  let languages = parseLanguageFlag(args);
 
   // Auto-detect if no languages specified
   if (!languages) {

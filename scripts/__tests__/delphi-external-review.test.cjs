@@ -2,6 +2,7 @@
 const path = require('path');
 const fs = require('fs');
 const os = require('os');
+const { readMarkdown } = require('../lib/read-markdown.cjs');
 
 // Helper to load the module fresh for each test
 function loadModule() {
@@ -104,7 +105,7 @@ describe('readConfig', () => {
   let originalBailianApiKey;
 
   function extractDelphiConfigExample(relativePath) {
-    const markdown = fs.readFileSync(path.join(projectRoot, relativePath), 'utf8');
+    const markdown = readMarkdown(path.join(projectRoot, relativePath));
     const section = markdown.match(/(?:### |\*\*)\.delphi-config\.json[^\n]*\n[\s\S]*?```json\n([\s\S]*?)\n```/);
     if (!section) throw new Error(`${relativePath} must contain a .delphi-config.json JSON example`);
     return section[1];
@@ -287,6 +288,104 @@ describe('readConfig', () => {
     expect(() => readConfig(configPath, 'nonexistent')).toThrow('exit');
     mockExit.mockRestore();
     mockError.mockRestore();
+  });
+
+  // AC-429-03 -- an unset api_key variable used to print a WARNING and then send
+  // the literal `Bearer ${NAME}`, so the run died as "Authentication failed
+  // (401/403). Check API key" and pointed the diagnosis at a wrong key instead
+  // of the shell that never exported it.
+  it('fails fast and names the env var when an api_key reference is unset', () => {
+    const configPath = path.join(tmpDir, '.delphi-config.json');
+    fs.writeFileSync(configPath, JSON.stringify({
+      active_profile: 'default',
+      profiles: {
+        default: {
+          providers: { gateway: { base_url: 'https://example.test/v1', api_key: '${DELPHI_TEST_UNSET_KEY}' } },
+          experts: {
+            architecture: { provider: 'gateway', model: 'model-a' },
+            technical: { provider: 'gateway', model: 'model-b' },
+            feasibility: { provider: 'gateway', model: 'model-c' },
+          },
+        },
+      },
+    }));
+    delete process.env.DELPHI_TEST_UNSET_KEY;
+
+    const mockExit = vi.spyOn(process, 'exit').mockImplementation(() => { throw new Error('process.exit'); });
+    const mockError = vi.spyOn(console, 'error').mockImplementation(() => {});
+    expect(() => readConfig(configPath)).toThrow('process.exit');
+    expect(mockExit).toHaveBeenCalledWith(1);
+    const messages = mockError.mock.calls.map(([line]) => line).join('\n');
+    expect(messages).toContain('ERROR');
+    expect(messages).toContain('DELPHI_TEST_UNSET_KEY');
+    expect(messages).toContain('profiles.default.providers.gateway.api_key');
+    expect(messages).not.toContain('WARNING');
+    mockExit.mockRestore();
+    mockError.mockRestore();
+  });
+
+  it('resolves the api_key when the environment does provide it', () => {
+    // Anti-vacuity for the check above: the same config must still load when the
+    // variable exists, otherwise "fail fast" would just mean "always fail".
+    const configPath = path.join(tmpDir, '.delphi-config.json');
+    fs.writeFileSync(configPath, JSON.stringify({
+      active_profile: 'default',
+      profiles: {
+        default: {
+          providers: { gateway: { base_url: 'https://example.test/v1', api_key: '${DELPHI_TEST_SET_KEY}' } },
+          experts: {
+            architecture: { provider: 'gateway', model: 'model-a' },
+            technical: { provider: 'gateway', model: 'model-b' },
+            feasibility: { provider: 'gateway', model: 'model-c' },
+          },
+        },
+      },
+    }));
+    process.env.DELPHI_TEST_SET_KEY = 'resolved-key';
+    try {
+      expect(readConfig(configPath).providers.gateway.api_key).toBe('resolved-key');
+    } finally {
+      delete process.env.DELPHI_TEST_SET_KEY;
+    }
+  });
+
+  // AC-429-04 -- provider fields were only validated inside the per-expert loop,
+  // so a dormant provider with a bad value survived until runtime.
+  it('validates every provider in the profile, including ones no expert uses', () => {
+    const configPath = path.join(tmpDir, '.delphi-config.json');
+    const profile = (dormantBaseUrl) => ({
+      active_profile: 'default',
+      profiles: {
+        default: {
+          providers: {
+            gateway: { base_url: 'https://example.test/v1', api_key: 'key' },
+            dormant: { base_url: dormantBaseUrl, api_key: 'key' },
+          },
+          experts: {
+            architecture: { provider: 'gateway', model: 'model-a' },
+            technical: { provider: 'gateway', model: 'model-b' },
+            feasibility: { provider: 'gateway', model: 'model-c' },
+          },
+        },
+      },
+    });
+    fs.writeFileSync(configPath, JSON.stringify(profile('')));
+
+    const mockExit = vi.spyOn(process, 'exit').mockImplementation(() => { throw new Error('process.exit'); });
+    const mockError = vi.spyOn(console, 'error').mockImplementation(() => {});
+    try {
+      expect(() => readConfig(configPath)).toThrow('process.exit');
+      const messages = mockError.mock.calls.map(([line]) => line).join('\n');
+      expect(messages).toContain('providers.dormant');
+      expect(messages).toContain('base_url');
+
+      // Anti-vacuity: the same profile with the dormant provider repaired loads.
+      fs.writeFileSync(configPath, JSON.stringify(profile('https://dormant.test/v1')));
+      expect(readConfig(configPath).providers.dormant.base_url).toBe('https://dormant.test/v1');
+    } finally {
+      mockExit.mockRestore();
+      mockError.mockRestore();
+    }
   });
 });
 
@@ -997,6 +1096,23 @@ describe('timeout configuration', () => {
         mockError.mockRestore();
       },
     );
+
+    it.each([1000, 600000])(
+      'accepts the exactly-legal --timeout-ms boundary %s',
+      (value) => {
+        // The validator uses >=/<=; a future >/< would reject the only two legal
+        // extremes and every existing case would still pass (#429).
+        const { parseArgs } = loadModule();
+        const result = parseArgs([
+          '--expert', 'architecture',
+          '--round', '1',
+          '--config', 'c.json',
+          '--input', 'x',
+          '--timeout-ms', String(value),
+        ]);
+        expect(result.timeoutMs).toBe(value);
+      },
+    );
   });
 
   describe('validateDistinctModels provider timeout_ms', () => {
@@ -1013,6 +1129,17 @@ describe('timeout configuration', () => {
       };
       expect(validateDistinctModels(experts, providers).valid).toBe(true);
     });
+
+    it.each([1000, 600000])(
+      'accepts the exactly-legal provider timeout_ms boundary %s',
+      (value) => {
+        const { validateDistinctModels } = loadModule();
+        const providers = {
+          gateway: { base_url: 'https://example.test/v1', api_key: 'key', timeout_ms: value },
+        };
+        expect(validateDistinctModels(experts, providers).valid).toBe(true);
+      },
+    );
 
     it('rejects a provider timeout_ms below the minimum, naming provider and timeout_ms', () => {
       const { validateDistinctModels } = loadModule();
@@ -1055,6 +1182,25 @@ describe('timeout configuration', () => {
       const { resolveTimeoutMs } = loadModule();
       expect(resolveTimeoutMs({}, {})).toBe(30000);
       expect(resolveTimeoutMs(undefined, undefined)).toBe(30000);
+    });
+  });
+
+  // AC-429-01/02 -- the default existed twice (DEFAULT_TIMEOUT_MS and a literal
+  // in callModelAPI) and the CLI/provider validators had no test at their legal
+  // extremes.
+  describe('timeout default single source (#429)', () => {
+    const runnerPath = path.resolve(__dirname, '..', 'delphi-external-review.cjs');
+
+    it('routes the API-call fallback through the shared constant', () => {
+      const source = fs.readFileSync(runnerPath, 'utf8');
+      expect(source).toMatch(/const DEFAULT_TIMEOUT_MS = 30000;/);
+      expect(source).toContain('options.timeoutMs ?? DEFAULT_TIMEOUT_MS');
+      expect(source).not.toMatch(/timeoutMs \?\? 30000/);
+    });
+
+    it('reports the same default through resolveTimeoutMs', () => {
+      const { resolveTimeoutMs, DEFAULT_TIMEOUT_MS } = loadModule();
+      expect(resolveTimeoutMs({}, {})).toBe(DEFAULT_TIMEOUT_MS);
     });
   });
 

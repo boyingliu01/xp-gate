@@ -82,22 +82,29 @@ function parseTimeout(options: GateMOptions, args: string[], i: number): void {
 export function filterSourceFiles(files: string[]): string[] {
   return files.filter(file => {
     const ext = path.extname(file);
+    // One separator view for every pattern below: the path arrives from the
+    // adapter layer, which on Windows yields backslash-delimited relative paths.
+    const normalized = file.replace(/\\/g, '/');
     // Skip test files
-    if (file.includes('.test.') || file.includes('_test.')) return false;
-    // Skip whole test trees (#480): helpers, fixtures, and harnesses under a
-    // tests/|test/|__tests__/ segment are test infrastructure, not production
-    // source. They are exercised only by suites the project's mutation config
-    // may exclude, so a production mutation threshold against them is
-    // structurally unreachable (dialog-survey push block, 2026-10-06).
-    if (/(^|\/)(tests|test|__tests__)\//.test(file)) return false;
-    // Skip Java/Kotlin test files: FooTest.java, FooSpec.kt, etc.
-    if (/[A-Z]Test\.(java|kt|kts)$/.test(file)) return false;
-    if (/[A-Z]Tests\.(java|kt|kts)$/.test(file)) return false;
-    if (/[A-Z](IT|Spec)\.(java|kt|kts)$/.test(file)) return false;
+    if (normalized.includes('.test.') || normalized.includes('_test.')) return false;
+    // Skip spec-named test files: the pre-push filter already excludes them, and
+    // a mutant inside a *.spec.ts is scored against a production budget (#480).
+    if (normalized.includes('.spec.')) return false;
+    // Skip test-tree directories: helpers/fixtures/factories there are test
+    // infrastructure judged by the suites that run them, not by mutation
+    // scoring budgeted for production code (#480)
+    if (/(^|\/)(tests?|__tests__)\//.test(normalized)) return false;
+    // Skip Java/Kotlin test files: FooTest.java, FooSpec.kt, etc. Case-sensitive
+    // "Test"/"Spec"/"IT" suffix matching is what the Surefire/Failsafe conventions
+    // actually produce -- `[A-Z]Test\.only` caught MyTest.java but not FooTest.java,
+    // so most test classes stayed in the mutation candidate list.
+    if (/Test\.(java|kt|kts)$/.test(normalized)) return false;
+    if (/Tests\.(java|kt|kts)$/.test(normalized)) return false;
+    if (/(IT|Spec)\.(java|kt|kts)$/.test(normalized)) return false;
     // Skip declaration files
-    if (file.endsWith('.d.ts')) return false;
+    if (normalized.endsWith('.d.ts')) return false;
     // Skip adapter files
-    if (file.includes('/adapters/')) return false;
+    if (normalized.includes('/adapters/')) return false;
     // Skip files with no registered runner
     const runner = resolveRunner(ext);
     return runner !== undefined;

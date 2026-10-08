@@ -7,10 +7,11 @@
 import { describe, it, expect, vi } from 'vitest';
 import fs from 'fs/promises';
 
-// We need to test parseArgs and filterSourceFiles from gate-m
-// Import the module and test its public interface
-import { detectAITestCharacteristics } from '../detect-ai-test';
+// The REAL filter is under test: the previous local duplicate diverged from
+// gate-m.ts (which is multi-language via registered runners) and could not
+// catch #480 for that exact reason.
 import { filterSourceFiles } from '../gate-m';
+import { detectAITestCharacteristics } from '../detect-ai-test';
 
 /* jscpd:disable */
 function parseArgs(args: string[]): {
@@ -117,13 +118,71 @@ describe('gate-m.ts - Mutation Testing Gate', () => {
       expect(result).toEqual(['src/foo.ts']);
     });
 
-    it('should keep files whose language has a registered runner', () => {
-      // Real filter behaviour: routing is by registered runner, not by .ts.
-      // Python has a runner (mutmut), plain JavaScript does not.
+    it('should filter out files with no registered runner', () => {
       const files = ['src/foo.ts', 'src/bar.js', 'src/baz.py'];
       const result = filterSourceFiles(files);
 
+      // .ts (stryker) and .py (mutmut) have registered runners; .js has none.
       expect(result).toEqual(['src/foo.ts', 'src/baz.py']);
+    });
+
+    it('should filter out test-tree helpers not named *.test.* (#480)', () => {
+      const files = [
+        'tests/e2e/helpers/e2e-server.ts',
+        'test/fixtures/setup.py',
+        'src/__tests__/harness.ts',
+        'tests\\e2e\\helpers\\e2e-server.ts',
+      ];
+      const result = filterSourceFiles(files);
+
+      expect(result).toEqual([]);
+
+      // The same exclusion inside a list that also carries production source:
+      // `a/b/tests/` is a tree segment, and src/foo.ts must survive next to it.
+      expect(filterSourceFiles(['src/foo.ts', 'a/b/tests/fixture-factory.ts'])).toEqual(['src/foo.ts']);
+    });
+
+    // Round 2 feasibility FC-03: only the test-tree regex read `normalized`, the
+    // `.test.`/`_test.`, Java/Kotlin and /adapters/ checks read the raw path, so a
+    // backslash-delimited path was judged by two different views of one string.
+    it('should judge every exclusion against one separator view of the path (#480)', () => {
+      for (const files of [
+        ['src\\adapters\\router.ts'],
+        ['src\\FooTest.java'],
+        ['src/FooTest.java'],
+        ['src/PaymentTests.kt'],
+        ['src/BillingSpec.kts'],
+        ['src\\helper_test.go'],
+        ['src\\__tests__\\harness.ts'],
+        ['src\\legacy.d.ts'],
+      ]) {
+        expect(filterSourceFiles(files)).toEqual([]);
+      }
+    });
+
+    // The same class as #480: pre-push excludes *.spec.* from the mutation
+    // candidate list, gate-m.ts did not, so the two definitions of "not
+    // production code" already disagreed on spec-named test files.
+    it('should filter out *.spec.* test files, as pre-push already does (#480)', () => {
+      expect(filterSourceFiles(['src/login.spec.ts'])).toEqual([]);
+      expect(filterSourceFiles(['src\\login.spec.ts'])).toEqual([]);
+    });
+
+    it('should not exclude production paths that merely contain "test" as a substring (#480)', () => {
+      // Round 2 technical MN-02 asked whether the tree segment is anchored: it is,
+      // so only a whole path segment named test/tests/__tests__ excludes.
+      const files = [
+        'src/latest/foo.ts',
+        'src/protest/foo.ts',
+        'src/test-utils/foo.ts',
+        'src/mytests/foo.ts',
+        'testing/reporter.ts',
+        'src/test-data.ts',
+        'tests-helper.ts',
+      ];
+      const result = filterSourceFiles(files);
+
+      expect(result).toEqual(files);
     });
 
     it('should return empty array when no source files', () => {
@@ -131,32 +190,6 @@ describe('gate-m.ts - Mutation Testing Gate', () => {
       const result = filterSourceFiles(files);
 
       expect(result).toEqual([]);
-    });
-
-    // #480: the module header claims "excludes tests", but the implementation
-    // only skipped files *named* like test cases. Test-tree infrastructure
-    // (helpers/fixtures/harnesses under tests/|test/|__tests__/) fell through
-    // and got mutated against the production 60% threshold — structurally
-    // unreachable for files whose only consumers are suites the project's
-    // mutation config deliberately excludes.
-    it('should exclude test-tree helpers, not just *.test.* files (#480)', () => {
-      const files = [
-        'src/foo.ts',
-        'tests/e2e/helpers/e2e-server.ts',
-        'test/util.ts',
-        'src/__tests__/helpers.ts',
-        'a/b/tests/fixture-factory.ts',
-      ];
-      const result = filterSourceFiles(files);
-
-      expect(result).toEqual(['src/foo.ts']);
-    });
-
-    it('should keep production paths that merely resemble test names (#480)', () => {
-      const files = ['testing/reporter.ts', 'src/test-data.ts', 'tests-helper.ts'];
-      const result = filterSourceFiles(files);
-
-      expect(result).toEqual(files);
     });
   });
 

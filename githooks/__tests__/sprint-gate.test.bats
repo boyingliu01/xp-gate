@@ -30,7 +30,22 @@ setup() {
 
 teardown() {
   cd "$BATS_TEST_DIRNAME" || return 1
-  rm -rf "$TEST_DIR"
+  remove_temp_dir "$TEST_DIR"
+}
+
+# Right after a `git commit`, Windows keeps the temp dir briefly locked (Defender /
+# index writers), and a single `rm -rf` then fails with EBUSY, which bats reports as a
+# test failure even though every assertion passed. Retry with a delay; fail loudly only
+# when the directory is STILL there, so a leak can never be mistaken for cleanup.
+remove_temp_dir() {
+  local dir="$1" attempt
+  for attempt in 1 2 3 4 5; do
+    rm -rf "$dir" 2>/dev/null && return 0
+    [ -d "$dir" ] || return 0
+    sleep 1
+  done
+  echo "could not remove temp dir after 5 attempts: $dir" >&2
+  return 1
 }
 
 has_json_parser() {
@@ -244,6 +259,13 @@ has_json_parser() {
 # The resolution block is extracted verbatim so the real logic runs in-test
 # (same pattern as the GIT CONTEXT FALLBACK tests in adapter-common.test.bats).
 
+# The resolver function itself lives in lib/sprint-gate-report.sh (#476); the extracted
+# block only CALLS it, so the harness must source the lib first -- mirroring how
+# pre-commit sources the lib at line 225 before Gate 11 runs.
+load_sprint_gate_lib() {
+  source "$BATS_TEST_DIRNAME/../lib/sprint-gate-report.sh"
+}
+
 extract_sprint_gate_resolution() {
   awk '
 /^# BEGIN SPRINT_GATE_SCRIPT RESOLUTION$/ { capture = 1; next }
@@ -258,6 +280,11 @@ extract_sprint_gate_resolution() {
   SCRIPT_DIR="hooks"
   GATE_DIR="gatedir"
   SPRINT_GATE_SCRIPT=""
+  load_sprint_gate_lib
+  # Tier 4 of the chain is $HOME/.config/xp-gate/hooks -- a REAL directory on any
+  # machine that ran update-hooks. Without isolation the tests would resolve the
+  # developer's own install instead of the fixture tree (#476 tier).
+  export HOME="$TEST_DIR"
   eval "$(extract_sprint_gate_resolution)"
   [ "$SPRINT_GATE_SCRIPT" = "$GATE_DIR/sprint-gate.sh" ]
 }
@@ -268,6 +295,11 @@ extract_sprint_gate_resolution() {
   SCRIPT_DIR="hooks"
   GATE_DIR="gatedir"
   SPRINT_GATE_SCRIPT=""
+  load_sprint_gate_lib
+  # Tier 4 of the chain is $HOME/.config/xp-gate/hooks -- a REAL directory on any
+  # machine that ran update-hooks. Without isolation the tests would resolve the
+  # developer's own install instead of the fixture tree (#476 tier).
+  export HOME="$TEST_DIR"
   eval "$(extract_sprint_gate_resolution)"
   [ "$SPRINT_GATE_SCRIPT" = "$(git rev-parse --show-toplevel)/githooks/sprint-gate.sh" ]
 }
@@ -278,6 +310,11 @@ extract_sprint_gate_resolution() {
   SCRIPT_DIR="hooks"
   GATE_DIR="gatedir"
   SPRINT_GATE_SCRIPT=""
+  load_sprint_gate_lib
+  # Tier 4 of the chain is $HOME/.config/xp-gate/hooks -- a REAL directory on any
+  # machine that ran update-hooks. Without isolation the tests would resolve the
+  # developer's own install instead of the fixture tree (#476 tier).
+  export HOME="$TEST_DIR"
   eval "$(extract_sprint_gate_resolution)"
   [ "$SPRINT_GATE_SCRIPT" = "$SCRIPT_DIR/sprint-gate.sh" ]
 }
@@ -287,10 +324,51 @@ extract_sprint_gate_resolution() {
   SCRIPT_DIR="hooks"
   GATE_DIR="gatedir"
   SPRINT_GATE_SCRIPT=""
-  eval "$(extract_sprint_gate_resolution)"
+  load_sprint_gate_lib
+  # Tier 4 of the chain is $HOME/.config/xp-gate/hooks -- a REAL directory on any
+  # machine that ran update-hooks. Without isolation the tests would resolve the
+  # developer's own install instead of the fixture tree (#476 tier).
+  export HOME="$TEST_DIR"
+  # Anti-vacuity: an empty capture would leave the variable empty for the wrong reason.
+  [ -n "$(extract_sprint_gate_resolution)" ]
+  # The resolver returns non-zero when NO tier matched. The hook's contract is the
+  # empty variable (Gate 11 then prints "not found"), not the exit status, so the
+  # assertion must survive a non-zero eval.
+  eval "$(extract_sprint_gate_resolution)" || true
   [ -z "$SPRINT_GATE_SCRIPT" ]
+}
+
+# Tier 4 is why #476 happened: update-hooks installs sprint-gate.sh beside the other
+# global HOOKS, not in the adapters dir $GATE_DIR points at. HOME is isolated above, so
+# this tier is now reachable from a fixture instead of only on machines that already
+# carry an install.
+@test "pre-commit resolution: falls through to the global hooks dir update-hooks writes to (#476)" {
+  # Export HOME FIRST: the fixture must land under the temp home, never the developer's real one.
+  export HOME="$TEST_DIR"
+  mkdir -p hooks gatedir "$HOME/.config/xp-gate/hooks"
+  touch "$HOME/.config/xp-gate/hooks/sprint-gate.sh"
+  SCRIPT_DIR="hooks"
+  GATE_DIR="gatedir"
+  SPRINT_GATE_SCRIPT=""
+  load_sprint_gate_lib
+  eval "$(extract_sprint_gate_resolution)"
+  [ "$SPRINT_GATE_SCRIPT" = "$HOME/.config/xp-gate/hooks/sprint-gate.sh" ]
 }
 
 @test "npm mirror pre-commit stays byte-identical to the canonical hook" {
   cmp -s "$BATS_TEST_DIRNAME/../pre-commit" "$BATS_TEST_DIRNAME/../../src/npm-package/hooks/pre-commit"
+}
+
+# The resolution tests above eval ONLY the marker block, which calls
+# resolve_sprint_gate_script without defining it. That is legitimate only while
+# pre-commit sources the lib that defines it -- this guard fails the day the
+# sourcing is dropped, so the harness cannot silently outlive the hook's contract.
+@test "pre-commit sources lib/sprint-gate-report.sh, which defines the resolver the block calls" {
+  for hook in "$BATS_TEST_DIRNAME/../pre-commit" "$BATS_TEST_DIRNAME/../../src/npm-package/hooks/pre-commit"; do
+    grep -q "lib/sprint-gate-report.sh" "$hook" || {
+      echo "missing lib sourcing in $hook" >&2
+      return 1
+    }
+  done
+  grep -q "^resolve_sprint_gate_script()" "$BATS_TEST_DIRNAME/../lib/sprint-gate-report.sh"
 }

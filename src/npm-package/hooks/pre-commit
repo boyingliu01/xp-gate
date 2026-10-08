@@ -436,7 +436,11 @@ Before committing:
   2. Add entry to CHANGELOG.md
   3. Run: node scripts/sync-version.cjs
 
-Or use --no-verify (discouraged) or include [skip-version-check] in commit message.
+Or use the bypass prefix — the commit message FIRST LINE must START with:
+  [skip-version-check] chore: <description>
+Allowed types: chore: docs: release:. The bypass only permits build
+tooling changes (adapters/, scripts/, hooks/); production source files
+still require a VERSION/CHANGELOG update.
 
 Staged files: $(echo "$STAGED_FILES" | tr '\n' ', ' | sed 's/,$//')
 "
@@ -462,6 +466,22 @@ if [ -z "$CHANGED_FILES" ]; then
   echo "No files changed. Skipping gates."
   exit 0
 fi
+
+# Gate 5 test selection (#494): vitest.config.ts excludes the bundled mirror
+# subtrees and the skills/plugins source trees, so a path under one of them can
+# never be collected. When such a path is the only target, vitest exits 1 with
+# "No test files found" and Gate 5 reports a failing test run -- a commit that
+# touched nothing but a byte-identical mirror cannot land. Map each mirror path
+# to the canonical twin it copies, drop what has no twin, collapse duplicates.
+select_root_suite_targets() {
+  # Deliberately not `s|...|...|`: the alternation below contains `|`, which sed
+  # would read as the end of its pattern ("unknown option to `s'").
+  printf '%s\n' "$1" \
+    | sed -E 's#^src/npm-package/(principles|mutation|mock-policy|build-integrity)/#src/\1/#' \
+    | grep -vE '^(src/_wip/|plugins/|skills/|src/npm-package/(plugins|skills|principles|mutation|mock-policy|build-integrity)/)' \
+    | sed '/^$/d' \
+    | sort -u
+}
 
 any_changed_files_match() {
   local pattern
@@ -1840,8 +1860,21 @@ else
       # TypeScript: vitest with smart test selection
       if [ "$CURRENT_LANG" = "typescript" ] && { [ -f "package.json" ] || [ -f "$PROJECT_ROOT/package.json" ]; }; then
         if run_without_git_context npx vitest --version >/dev/null 2>&1; then
-          # Count changed test files to decide strategy
-          CHANGED_TEST_FILE_COUNT=$(echo "$CHANGED_TEST_FILES" | grep -c '.' || echo "0")
+          # Count changed test files to decide strategy. `grep -c '.'` prints its
+          # own zero AND exits 1 on an empty list, so `|| echo "0"` used to yield
+          # $'0\n0' -- the same two-value bug that false-blocked Gate 8 (#493).
+          # Bundled mirrors under src/npm-package/ are excluded from the root
+          # vitest project (vitest.config.ts, #418), so selecting them makes
+          # vitest exit 1 with "No test files found" and this gate reads that as
+          # failing tests: a false BLOCK for any commit that only touches mirrors
+          # (#494). Route both lists through the selector and announce it.
+          SELECTED_TEST_FILES=$(select_root_suite_targets "$CHANGED_TEST_FILES")
+          if [ "$SELECTED_TEST_FILES" != "$CHANGED_TEST_FILES" ]; then
+            echo "   ↪ Selection adjusted for bundled mirrors (#494):"
+            echo "     was: $(echo "$CHANGED_TEST_FILES" | tr '\n' ' ')"
+            echo "     now: $(echo "$SELECTED_TEST_FILES" | tr '\n' ' ')"
+          fi
+          CHANGED_TEST_FILE_COUNT=$(echo "$SELECTED_TEST_FILES" | grep -c '.' || true)
           
           # Also get changed source files (non-test) for related-test lookup
           CHANGED_SRC_FILES=$(git diff --cached --name-only --diff-filter=ACM | grep -E '\.(ts|tsx|js|jsx)$' | grep -v '\.test\.' | grep -v '\.spec\.' | grep -v '__tests__' | grep -v '\.d\.ts$' | grep -v '__snapshots__' || true)
@@ -1849,11 +1882,19 @@ else
           # sources must not drive root-vitest related-test lookup either (it
           # would resolve to plugin-local paths vitest cannot collect).
           CHANGED_SRC_FILES=$(echo "$CHANGED_SRC_FILES" | grep -vE '^plugins/[^/]+/' || true)
-          # Strip PROJECT_SUBDIR prefix (same as CHANGED_TEST_FILES fix above)
-          if [ -n "$PROJECT_SUBDIR" ] && [ "$PROJECT_SUBDIR" != "." ] && [ -n "$CHANGED_SRC_FILES" ]; then
-            CHANGED_SRC_FILES=$(echo "$CHANGED_SRC_FILES" | sed "s|^${PROJECT_SUBDIR}/||")
+          # Mirror handling is identical for source files: their test-adjacent
+          # paths must never reach vitest as root-project targets (#494).
+          SELECTED_SRC_FILES=$(select_root_suite_targets "$CHANGED_SRC_FILES")
+          if [ "$SELECTED_SRC_FILES" != "$CHANGED_SRC_FILES" ]; then
+            echo "   ↪ Source selection adjusted for bundled mirrors (#494):"
+            echo "     was: $(echo "$CHANGED_SRC_FILES" | tr '\n' ' ')"
+            echo "     now: $(echo "$SELECTED_SRC_FILES" | tr '\n' ' ')"
           fi
-          CHANGED_SRC_COUNT=$(echo "$CHANGED_SRC_FILES" | grep -c '.' || echo "0")
+          # Strip PROJECT_SUBDIR prefix (same as CHANGED_TEST_FILES fix above)
+          if [ -n "$PROJECT_SUBDIR" ] && [ "$PROJECT_SUBDIR" != "." ] && [ -n "$SELECTED_SRC_FILES" ]; then
+            SELECTED_SRC_FILES=$(echo "$SELECTED_SRC_FILES" | sed "s|^${PROJECT_SUBDIR}/||")
+          fi
+          CHANGED_SRC_COUNT=$(echo "$SELECTED_SRC_FILES" | grep -c '.' || true)
           
           # Decide strategy
           if [ "$CHANGED_TEST_FILE_COUNT" -gt 20 ] 2>/dev/null; then
@@ -1870,9 +1911,9 @@ else
           elif [ "$CHANGED_TEST_FILE_COUNT" -gt 0 ] 2>/dev/null; then
             # Run only changed test files with coverage
             PARTIAL_TEST_RUN=true  # Mark as partial run for coverage check
-            SMART_TARGETS=$(echo "$CHANGED_TEST_FILES" | tr '\n' ' ')
+            SMART_TARGETS=$(echo "$SELECTED_TEST_FILES" | tr '\n' ' ')
             echo "Running ${CHANGED_TEST_FILE_COUNT} changed test file(s) with coverage..."
-            echo "   Target(s): $(echo "$CHANGED_TEST_FILES" | tr '\n' ' ')"
+            echo "   Target(s): $(echo "$SELECTED_TEST_FILES" | tr '\n' ' ')"
             TESTS_OUTPUT=$(run_without_git_context npx vitest run --coverage $SMART_TARGETS 2>&1)
             TESTS_EXIT_CODE=$?
             echo "$TESTS_OUTPUT" | head -60
@@ -1888,7 +1929,7 @@ else
             # Source files changed but no test files → find related tests or run full
             echo "Source file(s) changed, finding related tests..."
             RELATED_TESTS=""
-            for src_file in $CHANGED_SRC_FILES; do
+            for src_file in $SELECTED_SRC_FILES; do
               base="${src_file%.*}"
               filename="${base##*/}"
               dir="$(dirname "$src_file")"
@@ -1950,13 +1991,22 @@ else
           TESTS_EXIT_CODE=$?
           echo "$TESTS_OUTPUT" | head -50
           if [ "$TESTS_EXIT_CODE" -ne 0 ]; then
-            echo ""
-            echo "❌ BLOCKED - Tests FAILED"
-            exit 1
+            # This branch is reached from the typescript adapter, so run_tests ran
+            # vitest (adapters/typescript.sh) and its output is vitest-shaped: the
+            # same three non-failure exits (#454 runner EPERM, #473 partial
+            # threshold, #498 no test files) apply here as in the four branches
+            # above. #454 left it unguarded because its own comment covers the
+            # NON-typescript fallback below, whose runner is pytest/go/jest; this
+            # one is not that branch.
+            handle_test_failure "$TESTS_OUTPUT" "typescript adapter fallback" || exit 1
           fi
         fi
       else
-        # Non-TypeScript: standard adapter test flow
+        # Adapter test flow for everything the TypeScript branch above did not
+        # claim. The label this branch carried (#454) was "Non-TypeScript", which
+        # is not what reaches it: a TypeScript project without a package.json also
+        # lands here, and its adapter runs vitest — which is how a test-less TS
+        # repo got false-blocked on "No test files found" (#498).
         # Skip for Python — tests already run with coverage in the coverage section below.
         # Running them here first without coverage doubles pre-commit time for no benefit.
         if [ "$CURRENT_LANG" = "python" ]; then
@@ -1966,9 +2016,18 @@ else
           TESTS_EXIT_CODE=$?
           echo "$TESTS_OUTPUT" | head -50
           if [ "$TESTS_EXIT_CODE" -ne 0 ]; then
-            echo ""
-            echo "❌ BLOCKED - Tests FAILED"
-            exit 1
+            if [ "$CURRENT_LANG" = "typescript" ]; then
+              # vitest output, so the same three non-failure exits are judged
+              # here as in the branches above (#454, #473, #498).
+              handle_test_failure "$TESTS_OUTPUT" "typescript adapter (no package.json)" || exit 1
+            else
+              # Genuinely non-vitest runners (pytest/go/jest/...): their output
+              # shape is not vitest's, so the guard could excuse a real failure.
+              # They keep blocking on any non-zero exit (#454).
+              echo ""
+              echo "❌ BLOCKED - Tests FAILED"
+              exit 1
+            fi
           else
             echo "✅ PASSED - Unit tests passed."
           fi
@@ -2832,8 +2891,10 @@ generate_quality_report() {
   if [ -n "$TESTS_OUTPUT" ] && echo "$TESTS_OUTPUT" | grep -qi "fail\|error\|FAILED"; then
     # Extract failure lines: "FAIL src/foo.test.ts" or "  ✗ test name"
     local FAIL_LINES
-    FAIL_LINES=$(echo "$TESTS_OUTPUT" | grep -E "^\s*(FAIL|✗|failed|AssertionError)" | head -10 | \
-      sed 's/"/\\"/g' | awk '{ printf "%s%s%s", sep, "\"", $0; sep="," }')
+    # errexit/pipefail-safe: grep returns 1 on zero matches (see #489) and this
+    # function is also sourced by consumer wrappers that may enable errexit
+    FAIL_LINES=$(echo "$TESTS_OUTPUT" | grep -E "^\s*(FAIL|✗|failed|AssertionError)" | sed -n '1,10p' | \
+      sed 's/"/\\"/g' | awk '{ printf "%s%s%s", sep, "\"", $0; sep="," }') || true
     if [ -n "$FAIL_LINES" ]; then
       FAILED_TESTS_JSON="[$FAIL_LINES]"
     fi

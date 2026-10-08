@@ -256,7 +256,8 @@ describe('Qoder Delphi agent templates (#417)', () => {
   });
 
   it('does not state the boundary on a non-Qoder platform', () => {
-    fs.rmSync(path.join(tmpHome, '.qoder', 'skills'), { recursive: true, force: true });
+    // Remove the whole ~/.qoder dir (#424): any ~/.qoder content now means Qoder.
+    fs.rmSync(path.join(tmpHome, '.qoder'), { recursive: true, force: true });
     const dirs = tempAgentPair(
       'delphi-architecture.md',
       agentTemplate('model: "[Qwen3.8-Flash](qfmodel)"', 'delphi-architecture'),
@@ -271,7 +272,7 @@ describe('Qoder Delphi agent templates (#417)', () => {
   });
 
   it('reports the detected platform when skipping agent deployment', () => {
-    fs.rmSync(path.join(tmpHome, '.qoder', 'skills'), { recursive: true, force: true });
+    fs.rmSync(path.join(tmpHome, '.qoder'), { recursive: true, force: true });
     const dirs = tempAgentPair('delphi-technical.md', null, null);
     withDirs(dirs, () => {
       const { configureQoderDelphiAgents } = require('../init');
