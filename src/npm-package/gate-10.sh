@@ -33,15 +33,39 @@ else
     echo "     ⏭️  SKIPPED - SAST (no supported language files changed)"
     GATE_10_STATUS="SKIP"
   else
+    # One path per line into an array. Quoting the newline-joined list would hand
+    # semgrep ONE argument containing newlines -> "Invalid scanning root" once
+    # >=2 files are staged (#490). Same defect class as the Gate 4 --files fix
+    # (#457): an array is the only form that keeps spaces intact AND splits files.
+    #
+    # Each element gets a ./ prefix: a tracked path may legitimately start with
+    # '-' (`git add -- ./-o.ts`), and bare in argv that element reads as an option
+    # and rewrites the scan it was meant to constrain. ./ is a path to every
+    # argument parser.
+    #
+    # The unquoted heredoc below expands $SEMGREP_FILES once, then feeds literal
+    # lines to `read`; bash never rescans the result for separators. Its correct
+    # reading rests on one property of the producer above, not of the loop:
+    # `git diff --cached --name-only` terminates paths with LF and quotes control
+    # characters (a CR in a name arrives as the four bytes \215, never as a bare
+    # CR), so one line is exactly one path. Asserted for spaces and a leading '-'
+    # by AC-490-04.
+    SEMGREP_ARGS=()
+    while IFS= read -r _semgrep_file; do
+      [ -n "$_semgrep_file" ] && SEMGREP_ARGS+=("./$_semgrep_file")
+    done <<EOF
+$SEMGREP_FILES
+EOF
+
     # Run semgrep with JSON output
     # --config=p/security-audit: explicit security ruleset
     # --json: machine-readable output
     # --disable-version-check: skip network call
-    SEMGREP_OUTPUT=$("$SEMGREP_CMD" scan --config=p/security-audit --json --disable-version-check "$SEMGREP_FILES" 2>&1)
+    SEMGREP_OUTPUT=$("$SEMGREP_CMD" scan --config=p/security-audit --json --disable-version-check "${SEMGREP_ARGS[@]}" 2>&1)
     SEMGREP_EXIT=$?
 
     if [ "$SEMGREP_EXIT" -eq 0 ]; then
-      echo "     ✅ PASSED - No security vulnerabilities found."
+      echo "     ✅ PASSED - No security vulnerabilities found (files scanned: ${#SEMGREP_ARGS[@]})."
       GATE_10_STATUS="PASS"
     elif [ "$SEMGREP_EXIT" -eq 1 ]; then
       # Findings detected - parse JSON to categorize
@@ -96,7 +120,16 @@ console.log('  ['+severity+'] '+ruleId);console.log('  '+path+':'+line+' → '+m
       fi
     else
       # semgrep runtime error (timeout, config error, etc.)
+      #
+      # SEMGREP_OUTPUT is captured above and was never shown here, so an intermittent
+      # ruleset-fetch failure looked identical to a broken install: the gate printed
+      # "runtime error" and kept the reason to itself (#475). The verdict stays SKIP --
+      # an operational failure must not block the commit, and must not be called a pass.
       echo "     ⚠️  semgrep exited with code ${SEMGREP_EXIT} — skipping gate"
+      if [ -n "$SEMGREP_OUTPUT" ]; then
+        echo "     ── what semgrep reported ──"
+        printf '%s\n' "$SEMGREP_OUTPUT" | tail -10 | sed 's/^/     /'
+      fi
       echo "     ⏭️  SKIPPED - SAST (semgrep runtime error)"
       GATE_10_STATUS="SKIP"
     fi

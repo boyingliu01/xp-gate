@@ -1,62 +1,20 @@
 /**
  * @test install-skill
- * @intent Verify installSkill() handles deps check, registry lookup, download, config, and errors
+ * @intent Verify installSkill() handles deps check, bundle lookup, config, backup, and errors
+ * @covers AC-416-01, AC-416-05
  */
 const fs = require('fs');
 const path = require('path');
 const os = require('os');
-const https = require('https');
-const { EventEmitter } = require('events');
 
-function mockHttpsGet(optsOrList) {
-  const list = Array.isArray(optsOrList) ? [...optsOrList] : [optsOrList];
-  // Synchronous fake createWriteStream — the real one opens the FD asynchronously
-  // and races against downloadFile's unlinkSync(dest) in 301/302/error branches,
-  // causing ENOENT unhandled errors.
-  vi.spyOn(fs, 'createWriteStream').mockImplementation((dest) => {
-    let buf = '';
-    try {
-      fs.writeFileSync(dest, '');
-    } catch {
-      /* dest dir may not exist; downstream code will surface that */
-    }
-    const stream = new EventEmitter();
-    stream.write = (chunk) => {
-      buf += chunk;
-      return true;
-    };
-    stream.end = () => {
-      try {
-        fs.writeFileSync(dest, buf);
-      } catch {
-        /* file may have been unlinked by source; safe to ignore */
-      }
-      process.nextTick(() => stream.emit('finish'));
-    };
-    stream.close = () => {};
-    return stream;
-  });
+const BUNDLED_SKILLS = path.join(__dirname, '..', '..', 'skills');
 
-  vi.spyOn(https, 'get').mockImplementation((url, options, cb) => {
-    const callback = typeof options === 'function' ? options : cb;
-    const req = new EventEmitter();
-    const config = list.shift() || { statusCode: 200, body: '# Skill' };
-    process.nextTick(() => {
-      if (config.errorAfter) {
-        req.emit('error', new Error('Network error'));
-        return;
-      }
-      const response = new EventEmitter();
-      response.statusCode = config.statusCode != null ? config.statusCode : 200;
-      response.headers = config.redirectTo ? { location: config.redirectTo } : {};
-      response.pipe = (file) => {
-        file.write(config.body != null ? config.body : '# Skill');
-        file.end();
-      };
-      callback(response);
-    });
-    return req;
-  });
+function listDirs(root) {
+  return fs
+    .readdirSync(root, { withFileTypes: true })
+    .filter((entry) => entry.isDirectory())
+    .map((entry) => entry.name)
+    .sort();
 }
 
 describe('install-skill', () => {
@@ -67,11 +25,9 @@ describe('install-skill', () => {
     tmpHome = fs.mkdtempSync(path.join(os.tmpdir(), 'xpgate-in-'));
     process.env.HOME = tmpHome;
     vi.resetModules();
-    delete require.cache[require.resolve('../install-skill')];
-    delete require.cache[require.resolve('../detect-deps')];
-    delete require.cache[require.resolve('../shared-paths')];
-    delete require.cache[require.resolve('../download-skill')];
-    delete require.cache[require.resolve('../rollback')];
+    for (const mod of ['../install-skill', '../detect-deps', '../shared-paths', '../rollback']) {
+      delete require.cache[require.resolve(mod)];
+    }
     vi.spyOn(console, 'log').mockImplementation(() => {});
     vi.spyOn(console, 'error').mockImplementation(() => {});
     vi.spyOn(console, 'warn').mockImplementation(() => {});
@@ -145,7 +101,7 @@ describe('install-skill', () => {
     );
   });
 
-  it('returns 1 + Unknown skill error for unregistered name', async () => {
+  it('returns 1 + Unknown skill error for a name the bundle does not carry', async () => {
     setupValidDeps();
     const { installSkill } = require('../install-skill');
     const result = await installSkill('not-a-real-skill');
@@ -153,23 +109,50 @@ describe('install-skill', () => {
     expect(console.error).toHaveBeenCalledWith('Error: Unknown skill: not-a-real-skill');
   });
 
-  it('returns 0 and writes SKILL.md when install succeeds', async () => {
+  // The old hand-maintained SKILLS_REGISTRY could list a skill the bundle did not
+  // ship (or miss one it did). The error hint must come from the bundle itself.
+  it('names exactly the bundled skills in the unknown-skill hint', async () => {
     setupValidDeps();
-    mockHttpsGet({ statusCode: 200, body: '# Sprint Flow\nskill content' });
+    const { installSkill } = require('../install-skill');
+    await installSkill('not-a-real-skill');
+
+    const hint = console.error.mock.calls
+      .map(([message]) => message)
+      .find((message) => typeof message === 'string' && message.includes('bundles:'));
+    expect(hint).toBeDefined();
+    expect(hint.match(/bundles: ([^.]*)\./)[1].split(', ').sort()).toEqual(listDirs(BUNDLED_SKILLS));
+  });
+
+  it('keeps an existing directory when the skill is not bundled', async () => {
+    // Validation must precede backupExisting(), which rmSyncs the target: a
+    // leftover skill from an older package must never be wiped by a failed install.
+    setupValidDeps();
+    const target = path.join(skillsDir(), 'removed-in-this-version');
+    fs.mkdirSync(target, { recursive: true });
+    fs.writeFileSync(path.join(target, 'SKILL.md'), 'keep me');
+
+    const { installSkill } = require('../install-skill');
+    const result = await installSkill('removed-in-this-version');
+
+    expect(result).toBe(1);
+    expect(fs.readFileSync(path.join(target, 'SKILL.md'), 'utf8')).toBe('keep me');
+  });
+
+  it('returns 0 and installs the bundled skill when install succeeds', async () => {
+    setupValidDeps();
 
     const { installSkill } = require('../install-skill');
     const result = await installSkill('sprint-flow');
 
     expect(result).toBe(0);
     const installedFile = path.join(skillsDir(), 'sprint-flow', 'SKILL.md');
-    expect(fs.existsSync(installedFile)).toBe(true);
-    expect(fs.readFileSync(installedFile, 'utf8')).toContain('Sprint Flow');
+    expect(fs.readFileSync(installedFile, 'utf8'))
+      .toBe(fs.readFileSync(path.join(BUNDLED_SKILLS, 'sprint-flow', 'SKILL.md'), 'utf8'));
     expect(console.log).toHaveBeenCalledWith('✓ sprint-flow installed');
   });
 
   it('updates config with installedSkills metadata after successful install', async () => {
     setupValidDeps();
-    mockHttpsGet({ statusCode: 200, body: '# Content' });
 
     const { installSkill } = require('../install-skill');
     await installSkill('delphi-review');
@@ -202,15 +185,15 @@ describe('install-skill', () => {
     const target = path.join(skillsDir(), 'sprint-flow');
     fs.mkdirSync(target, { recursive: true });
     fs.writeFileSync(path.join(target, 'OLD.md'), 'old-content');
-    mockHttpsGet({ statusCode: 200, body: '# New Content' });
 
     const { installSkill } = require('../install-skill');
     const result = await installSkill('sprint-flow', { force: true });
 
     expect(result).toBe(0);
     const skillMd = path.join(target, 'SKILL.md');
-    expect(fs.existsSync(skillMd)).toBe(true);
-    expect(fs.readFileSync(skillMd, 'utf8')).toContain('New Content');
+    expect(fs.readFileSync(skillMd, 'utf8'))
+      .toBe(fs.readFileSync(path.join(BUNDLED_SKILLS, 'sprint-flow', 'SKILL.md'), 'utf8'));
+    expect(fs.existsSync(path.join(target, 'OLD.md'))).toBe(false);
 
     const backupRoot = path.join(configDir(), 'backup');
     expect(fs.existsSync(backupRoot)).toBe(true);
@@ -221,64 +204,14 @@ describe('install-skill', () => {
     expect(fs.readFileSync(backedUpFile, 'utf8')).toBe('old-content');
   });
 
-  it('returns 1 + Failed to download when network fails (non-offline)', async () => {
+  it('verbose=true prints Installing and Installed-to logs', async () => {
     setupValidDeps();
-    mockHttpsGet({ statusCode: 404 });
-
-    const { installSkill } = require('../install-skill');
-    const result = await installSkill('sprint-flow');
-
-    expect(result).toBe(1);
-    expect(console.error).toHaveBeenCalledWith('Error: Failed to download sprint-flow');
-  });
-
-  it('returns 2 + offline-cache error when offline=true and no cache', async () => {
-    setupValidDeps();
-
-    const { installSkill } = require('../install-skill');
-    const result = await installSkill('sprint-flow', { offline: true });
-
-    expect(result).toBe(2);
-    expect(console.error).toHaveBeenCalledWith(
-      expect.stringContaining('--offline specified but sprint-flow not in cache')
-    );
-  });
-
-  it('verbose=true prints Downloading and Installed-to logs', async () => {
-    setupValidDeps();
-    mockHttpsGet({ statusCode: 200, body: '# X' });
 
     const { installSkill } = require('../install-skill');
     await installSkill('test-driven-development', { verbose: true });
 
-    expect(console.log).toHaveBeenCalledWith(expect.stringContaining('Downloading '));
+    expect(console.log).toHaveBeenCalledWith(expect.stringContaining('Installing '));
     expect(console.log).toHaveBeenCalledWith(expect.stringContaining('Installed to '));
-  });
-
-  it('verbose=true prints download-failure warning when network errors', async () => {
-    setupValidDeps();
-    mockHttpsGet({ statusCode: 500 });
-
-    const { installSkill } = require('../install-skill');
-    const result = await installSkill('ralph-loop', { verbose: true });
-
-    expect(result).toBe(1);
-    expect(console.warn).toHaveBeenCalledWith(expect.stringContaining('Download failed'));
-  });
-
-  it('follows redirect (302) to download successfully', async () => {
-    setupValidDeps();
-    mockHttpsGet([
-      { statusCode: 302, redirectTo: 'https://new.example.com/skill.md' },
-      { statusCode: 200, body: '# Redirected Content' },
-    ]);
-
-    const { installSkill } = require('../install-skill');
-    const result = await installSkill('sprint-flow');
-
-    expect(result).toBe(0);
-    const installedFile = path.join(skillsDir(), 'sprint-flow', 'SKILL.md');
-    expect(fs.readFileSync(installedFile, 'utf8')).toContain('Redirected Content');
   });
 
   it('merges new skill into existing installedSkills config', async () => {
@@ -291,7 +224,6 @@ describe('install-skill', () => {
         otherSetting: true,
       })
     );
-    mockHttpsGet({ statusCode: 200, body: '# X' });
 
     const { installSkill } = require('../install-skill');
     await installSkill('delphi-review');
@@ -308,22 +240,9 @@ describe('install-skill', () => {
     setupValidDeps();
     fs.mkdirSync(configDir(), { recursive: true });
     fs.writeFileSync(path.join(configDir(), 'xp-gate.json'), '{not-valid-json');
-    mockHttpsGet({ statusCode: 200, body: '# X' });
 
     const { installSkill } = require('../install-skill');
     const result = await installSkill('sprint-flow');
     expect(result).toBe(0);
-  });
-
-  it('returns 1 + Failed to download on network error (non-verbose silent)', async () => {
-    setupValidDeps();
-    mockHttpsGet({ errorAfter: true });
-
-    const { installSkill } = require('../install-skill');
-    const result = await installSkill('test-driven-development');
-
-    expect(result).toBe(1);
-    expect(console.warn).not.toHaveBeenCalled();
-    expect(console.error).toHaveBeenCalledWith('Error: Failed to download test-driven-development');
   });
 });

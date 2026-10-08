@@ -126,16 +126,6 @@ setup() {
   [ "$findings" != "0" ]
 }
 
-@test "REQ-SEC-001 an empty JSON report means zero findings" {
-  empty="$BATS_TEST_TMPDIR/empty.json"
-  printf '[]\n' > "$empty"
-  findings=$(grep -c '"RuleID"' "$empty" 2>/dev/null || echo 0)
-  [ "$findings" -eq 0 ]
-}
-
-@test "REQ-SEC-001 a report with a finding counts as non-zero" {
-  found="$BATS_TEST_TMPDIR/found.json"
-  printf '[{"RuleID":"github-pat","Secret":"REDACTED"}]\n' > "$found"
-  findings=$(grep -c '"RuleID"' "$found" 2>/dev/null || echo 0)
-  [ "$findings" -ge 1 ]
-}
+# These two decisions are asserted against the SHIPPED counting expression in
+# issue-493-gate8-clean-report-count.test.bats (AC-493-01/02/03). Transcribing
+# the production line here documented the bug instead of catching it (#493).

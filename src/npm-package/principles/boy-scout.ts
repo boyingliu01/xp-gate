@@ -1,6 +1,11 @@
 import * as fs from 'fs/promises';
 import { analyze, getAdapterForFile } from './analyzer';
 import { getAllRules } from './index';
+import { loadConfig, setActiveConfig } from './config';
+// Imported for the `--prune-baseline` command. The logic lives in its own module
+// because this file is already at the clean-code.many-exports limit; consumers
+// that need it should import from './baseline-prune' directly.
+import { pruneBaselineEntries } from './baseline-prune';
 import { isDirectExecution } from './direct-execution.js';
 
 interface FileClassification {
@@ -123,6 +128,7 @@ export function classifyFiles(gitDiffLines: string[]): FileClassification {
 
   return result;
 }
+
 
 /**
  * Validate one baseline entry.
@@ -540,9 +546,72 @@ export async function runEnforcementCommand(parsed: Record<string, unknown>): Pr
 
 export async function main(): Promise<number> {
   const parsed = parseArgs(process.argv.slice(2));
+  // Install the project's `.principlesrc` before any rule runs. Gate 6 shares
+  // the same rule singletons as Gate 4, so without this the two gates would
+  // disagree about a file's warning count whenever a threshold is overridden
+  // (#457).
+  setActiveConfig(await loadConfig(typeof parsed.configPath === 'string' ? parsed.configPath : undefined));
+  if (parsed.command === 'prune-baseline') {
+    return runPruneBaselineCommand(parsed);
+  }
   return parsed.command === 'init-baseline'
     ? runInitBaselineCommand(parsed)
     : runEnforcementCommand(parsed);
+}
+
+/**
+ * Report, and optionally remove, baseline entries whose files are gone (#452 REQ-3).
+ *
+ * Prints by default so a maintainer can review the list; `--apply` rewrites the
+ * file. Exits 0 either way -- stale entries are housekeeping, and failing a
+ * build over them would tempt people to disable the gate instead.
+ */
+async function runPruneBaselineCommand(parsed: Record<string, unknown>): Promise<number> {
+  const baselinePath = typeof parsed.baselinePath === 'string'
+    ? parsed.baselinePath
+    : '.warnings-baseline.json';
+  const projectRoot = process.cwd();
+
+  let raw: string;
+  try {
+    raw = await fs.readFile(baselinePath, 'utf-8');
+  } catch {
+    console.log(`ℹ️  No baseline at ${baselinePath} — nothing to prune.`);
+    return 0;
+  }
+
+  const result = pruneBaselineEntries(raw, projectRoot);
+  if (result.error) {
+    // Preserve the file: an entry we cannot classify must not be dropped.
+    console.error(`⚠️  ${result.error} — baseline left untouched.`);
+    return 1;
+  }
+
+  if (result.removed.length === 0) {
+    console.log(`✅ No stale baseline entries (${result.kept.length} entries checked).`);
+    return 0;
+  }
+
+  console.log(`Found ${result.removed.length} stale baseline entr(ies):`);
+  for (const file of result.removed) console.log(`  - ${file}`);
+
+  if (parsed.apply !== true) {
+    console.log('Dry run — re-run with --apply to remove them.');
+    return 0;
+  }
+
+  const parsedBaseline = JSON.parse(raw) as Record<string, unknown>;
+  const removedSet = new Set(result.removed);
+  for (const file of result.removed) delete parsedBaseline[file];
+  try {
+    await fs.writeFile(baselinePath, `${JSON.stringify(parsedBaseline, null, 2)}\n`, 'utf-8');
+  } catch (error) {
+    const detail = error instanceof Error ? error.message : String(error);
+    console.error(`❌ Could not write ${baselinePath}: ${detail}`);
+    return 1;
+  }
+  console.log(`✅ Removed ${removedSet.size} stale entr(ies) from ${baselinePath}.`);
+  return 0;
 }
 
 function splitCsvArg(raw: string | undefined): string[] {
@@ -566,6 +635,9 @@ const ARG_HANDLERS: Record<string, (parsed: Record<string, unknown>, next: strin
   '--new-files': (parsed, next) => { const v = takeValue(next); parsed.newFiles = splitCsvArg(v.value); return v.consumed; },
   '--modified-files': (parsed, next) => { const v = takeValue(next); parsed.modifiedFiles = splitCsvArg(v.value); return v.consumed; },
   '--baseline': (parsed, next) => { const v = takeValue(next); parsed.baselinePath = v.value; return v.consumed; },
+  // Lets Gate 6 be pointed at a specific `.principlesrc`, so it agrees with
+  // Gate 4 when the project overrides a threshold (#457).
+  '--config': (parsed, next) => { const v = takeValue(next); parsed.configPath = v.value; return v.consumed; },
   '--init-baseline': (parsed, next) => {
     parsed.command = 'init-baseline';
     // The file list is OPTIONAL and positional: `--init-baseline a.ts,b.ts` works,
@@ -576,6 +648,11 @@ const ARG_HANDLERS: Record<string, (parsed: Record<string, unknown>, next: strin
     parsed.files = splitCsvArg(v.value);
     return v.consumed;
   },
+  // Report (and with --apply, remove) baseline entries for files that are gone
+  // (#452 REQ-3). Dry-run by default: deleting history is not something a gate
+  // should do as a side effect of a normal run.
+  '--prune-baseline': parsed => { parsed.command = 'prune-baseline'; return false; },
+  '--apply': parsed => { parsed.apply = true; return false; },
 };
 
 function parseArgs(args: string[]): Record<string, unknown> {
@@ -584,6 +661,7 @@ function parseArgs(args: string[]): Record<string, unknown> {
     newFiles: [],
     modifiedFiles: [],
     baselinePath: null,
+    configPath: null,
   };
 
   for (let i = 0; i < args.length; i++) {
@@ -609,12 +687,16 @@ Options:
   --modified-files <file1,file2,...>    Specify modified files to analyze  
   --baseline <path>                Path to baseline file (default: .warnings-baseline.json)
   --init-baseline [file1,file2,...]    Initialize baseline with current warning counts
+  --prune-baseline                 Report baseline entries whose files are gone
+  --apply                          With --prune-baseline: actually remove them
+  --config <path>                  Path to .principlesrc (default: git toplevel)
   --help                          Show this help message
   
 Examples:
   npx tsx boy-scout.ts --new-files src/new-file.ts
   npx tsx boy-scout.ts --modified-files src/changed-file.ts --baseline my-baseline.json
   npx tsx boy-scout.ts --init-baseline src/file1.ts,src/file2.ts
+  npx tsx boy-scout.ts --prune-baseline --apply
 `);
 }
 

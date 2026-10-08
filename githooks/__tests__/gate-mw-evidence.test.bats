@@ -30,9 +30,9 @@ write_valid_fixture() {
   "expires": "2026-08-20T13:00:00Z",
   "consensus_ratio": 0.90,
   "experts": [
-    {"role":"architecture","verdict":"APPROVED","result_type":"delphi_expert_result","requested_model":"model-a","resolved_model":"provider-model-a"},
-    {"role":"technical","verdict":"APPROVED","result_type":"delphi_expert_result","requested_model":"model-b","resolved_model":null},
-    {"role":"feasibility","verdict":"APPROVED","result_type":"delphi_expert_result","requested_model":"model-c","resolved_model":"provider-model-c"}
+    {"role":"architecture","verdict":"APPROVED","result_type":"delphi_expert_result","requested_model":"model-a","resolved_model":"provider-model-a","channel":"external"},
+    {"role":"technical","verdict":"APPROVED","result_type":"delphi_expert_result","requested_model":"model-b","resolved_model":"provider-model-b","channel":"external"},
+    {"role":"feasibility","verdict":"APPROVED","result_type":"delphi_expert_result","requested_model":"model-c","resolved_model":"provider-model-c","channel":"external"}
   ]
 }
 JSON
@@ -154,13 +154,40 @@ run_validator() {
   done
 }
 
-@test "blank resolved model fails but null resolved model remains trustworthy" {
+@test "blank and null resolved model both fail (#423)" {
   mutate_fixture 'evidence.experts[0].resolved_model="  "'
   run_validator
   [ "$status" -ne 0 ]
 
+  # Previously null was accepted, so an expert that never resolved a model still
+  # counted as a successful model call. Gate MW now requires a real model (#423).
   write_valid_fixture
   mutate_fixture 'evidence.experts[0].resolved_model=null'
   run_validator
-  [ "$status" -eq 0 ]
+  [ "$status" -ne 0 ]
+}
+
+@test "duplicate resolved model fails (#423)" {
+  # Distinct requested_model used to be enough, so three experts could all
+  # actually run on one model and still pass.
+  write_valid_fixture
+  mutate_fixture 'evidence.experts[1].resolved_model=evidence.experts[0].resolved_model'
+  run_validator
+  [ "$status" -ne 0 ]
+}
+
+@test "missing channel fails (#423)" {
+  # channel is an explicit whitelist: an absent field must not be defaulted,
+  # or omitting one key would be a zero-cost bypass.
+  write_valid_fixture
+  mutate_fixture 'delete evidence.experts[0].channel'
+  run_validator
+  [ "$status" -ne 0 ]
+}
+
+@test "unknown channel fails (#423)" {
+  write_valid_fixture
+  mutate_fixture 'evidence.experts[0].channel="probably-real"'
+  run_validator
+  [ "$status" -ne 0 ]
 }

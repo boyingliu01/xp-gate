@@ -6,7 +6,6 @@ const os = require('os');
 const HOME = process.env.HOME || process.env.USERPROFILE || os.homedir();
 
 const CONFIG_DIR = path.join(HOME, '.config', 'xp-gate');
-const SKILLS_DIR = path.join(HOME, '.config', 'opencode', 'skills');
 
 function handleCheckMode() {
   console.log('Checking for updates...');
@@ -59,12 +58,12 @@ async function updateSkill(name, options = {}) {
 
 async function updateSingleSkill(name, verbose) {
   console.log(`Updating ${name}...`);
-  
-  const targetDir = path.join(SKILLS_DIR, name);
-  if (fs.existsSync(targetDir)) {
-    fs.rmSync(targetDir, { recursive: true });
-  }
-  
+
+  // Everything destructive lives behind installSkill()'s validation: it resolves
+  // the platform skills directory, backs the existing copy up, and only then
+  // replaces it. Deleting here first (#416) wiped the wrong copy on Qoder and
+  // Claude Code, and turned an update of a skill the package no longer carries
+  // into an unrecoverable loss.
   const { installSkill } = require('./install-skill.js');
   const result = await installSkill(name, { force: true, verbose });
   

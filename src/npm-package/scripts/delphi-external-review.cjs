@@ -89,6 +89,28 @@ function parseArgs(argv) {
 }
 
 // ── Config reading ─────────────────────────────────────────────────────
+// Provider fields used to be checked only inside the per-expert loop, so a
+// malformed provider nobody currently points an expert at survived silently and
+// only surfaced at runtime (a bad timeout_ms fell back to the default). The
+// whole profile is checked here instead, at the system boundary, naming the
+// provider so the fix is obvious (#429).
+function validateProviders(providers, profileName) {
+  for (const [name, provider] of Object.entries(providers)) {
+    const providerPath = `profiles.${profileName}.providers.${name}`;
+    const fail = (detail) => {
+      console.error(`[delphi-review] ERROR: ${providerPath} ${detail}`);
+      process.exit(1);
+    };
+
+    if (!isPlainObject(provider)) fail('must be an object.');
+    if (typeof provider.base_url !== 'string' || provider.base_url.trim() === '') fail('must define a non-empty base_url.');
+    if (typeof provider.api_key !== 'string' || provider.api_key.trim() === '') fail('must define a non-empty api_key.');
+    if (provider.timeout_ms !== undefined && !isValidTimeoutMs(provider.timeout_ms)) {
+      fail('timeout_ms must be an integer between 1000 and 600000.');
+    }
+  }
+}
+
 function readConfig(configPath, profileOverride) {
   if (!fs.existsSync(configPath)) {
     console.error(`[delphi-review] ERROR: Config file not found: ${configPath}`);
@@ -115,6 +137,7 @@ function readConfig(configPath, profileOverride) {
 
   // Resolve ${ENV_VAR} references in provider api_key fields
   const providers = profile.providers || {};
+  validateProviders(providers, profileName);
   for (const [name, prov] of Object.entries(providers)) {
     if (prov.api_key && prov.api_key.startsWith('${') && prov.api_key.endsWith('}')) {
       const envName = prov.api_key.slice(2, -1);
@@ -122,7 +145,11 @@ function readConfig(configPath, profileOverride) {
       if (envVal) {
         prov.api_key = envVal;
       } else {
-        console.error(`[delphi-review] WARNING: Environment variable ${envName} not set (provider: ${name}). API calls will fail.`);
+        // A missing variable used to be a WARNING, after which the runner sent the
+        // literal `Bearer ${NAME}` and reported the 401 as "check API key" — the
+        // diagnosis pointed at a wrong key while the real cause was the shell.
+        console.error(`[delphi-review] ERROR: Environment variable ${envName} is not set (profiles.${profileName}.providers.${name}.api_key). Export it or point that provider at a literal key.`);
+        process.exit(1);
       }
     }
   }
@@ -281,7 +308,7 @@ const SYSTEM_PROMPTS = {
 4) 架构演进性 — 是否为未来扩展留有空间
 5) 技术选型合理性 — 技术栈选择是否有充分依据
 
-输出要求：返回结构化 JSON，包含 verdict (APPROVED/REQUEST_CHANGES/REJECTED)、confidence (1-10)、critical_issues、major_concerns、minor_concerns、summary。`,
+输出要求：返回结构化 JSON，包含 verdict (APPROVED/REQUEST_CHANGES/REJECTED)、confidence (1-10，整数，10 为最高)、summary (字符串)。critical_issues、major_concerns、minor_concerns 必须是字符串数组（string[]），每项是一句自包含的完整描述（可加 "CI-01: " 前缀，但整体必须是字符串，不是对象）。不要把问题写成 {id, title, description} 对象。`,
 
   technical: `你是技术实现评审专家（Delphi Method - Technical Expert）。
 
@@ -292,7 +319,7 @@ const SYSTEM_PROMPTS = {
 4) 性能影响 — 是否有性能瓶颈或资源泄漏风险
 5) 可测试性 — 代码是否易于编写单元测试
 
-输出要求：返回结构化 JSON，包含 verdict (APPROVED/REQUEST_CHANGES/REJECTED)、confidence (1-10)、critical_issues、major_concerns、minor_concerns、summary。`,
+输出要求：返回结构化 JSON，包含 verdict (APPROVED/REQUEST_CHANGES/REJECTED)、confidence (1-10，整数，10 为最高)、summary (字符串)。critical_issues、major_concerns、minor_concerns 必须是字符串数组（string[]），每项是一句自包含的完整描述（可加 "MC-01: " 前缀，但整体必须是字符串，不是对象）。不要把问题写成 {id, title, description} 对象。`,
 
   feasibility: `你是可行性分析专家（Delphi Method - Feasibility Expert）。
 
@@ -303,7 +330,7 @@ const SYSTEM_PROMPTS = {
 4) 替代方案 — 是否有更简单或更可靠的替代方案
 5) 回滚策略 — 如果实施失败，是否有退路
 
-输出要求：返回结构化 JSON，包含 verdict (APPROVED/REQUEST_CHANGES/REJECTED)、confidence (1-10)、critical_issues、major_concerns、minor_concerns、summary。`,
+输出要求：返回结构化 JSON，包含 verdict (APPROVED/REQUEST_CHANGES/REJECTED)、confidence (1-10，整数，10 为最高)、summary (字符串)。critical_issues、major_concerns、minor_concerns 必须是字符串数组（string[]），每项是一句自包含的完整描述（可加 "FC-01: " 前缀，但整体必须是字符串，不是对象）。不要把问题写成 {id, title, description} 对象。`,
 };
 
 const MODE_FOCUS_PROMPTS = {
@@ -348,6 +375,52 @@ function resolveTimeoutMs(args, providerConfig) {
   return DEFAULT_TIMEOUT_MS;
 }
 
+// ── Prompt budget ──────────────────────────────────────────────────────
+// Measured on the whalecloud gateway during the #457 walkthrough: a 40 KB prompt
+// answered normally, a 50 KB one killed the seat with no usable error, and a
+// dead expert seat blocks the whole review. The ceiling is therefore checked
+// before the request is made, where the message can say what to narrow.
+const DEFAULT_PROMPT_BUDGET_BYTES = 40000;
+
+// A seat-level override (`max_prompt_bytes` on the expert entry) exists because
+// the ceiling is a property of the model behind the seat, not of the runner.
+// Values that cannot be honoured fall back to the default rather than disabling
+// the guard -- `max_prompt_bytes: 0` reads as "no limit" and is not.
+function resolvePromptBudgetBytes(expertConfig) {
+  const configured = expertConfig && expertConfig.max_prompt_bytes;
+  if (typeof configured === 'number' && Number.isFinite(configured) && configured > 0) {
+    return Math.trunc(configured);
+  }
+  if (configured !== undefined) {
+    // Silently falling back is how a raised ceiling looks like a still-broken
+    // guard: the operator edits the config, the run still refuses, and nothing
+    // says the value never took effect.
+    console.error(
+      `[delphi-review] WARNING: max_prompt_bytes=${JSON.stringify(configured)} cannot be honoured ` +
+      `(needs a finite number > 0); using the ${DEFAULT_PROMPT_BUDGET_BYTES} byte default instead.`
+    );
+  }
+  return DEFAULT_PROMPT_BUDGET_BYTES;
+}
+
+// Bytes, never `String.length`: review content is Chinese prose, and a code-unit
+// count understates what the gateway actually receives by up to 3x.
+function checkPromptBudget({ systemPrompt, userPrompt, maxBytes }) {
+  const bytes = Buffer.byteLength(String(systemPrompt ?? ''), 'utf8')
+    + Buffer.byteLength(String(userPrompt ?? ''), 'utf8');
+  return { ok: bytes <= maxBytes, bytes, maxBytes };
+}
+
+function describePromptBudgetFailure({ bytes, maxBytes, expert }) {
+  return (
+    `Prompt for expert "${expert}" is ${bytes} bytes, over the ${maxBytes} byte budget. ` +
+    'The gateway drops oversized requests without a diagnosable error, so this run ' +
+    'refuses to send it. Narrow the review range (fewer commits or files, or exclude ' +
+    'vendored/lockfile content), or raise the seat\'s `max_prompt_bytes` in ' +
+    '.delphi-config.json if this model is known to accept larger requests.'
+  );
+}
+
 // ── API call ───────────────────────────────────────────────────────────
 async function callModelAPI(providerConfig, model, systemPrompt, userPrompt, options = {}) {
   const url = `${providerConfig.base_url.replace(/\/$/, '')}/chat/completions`;
@@ -362,7 +435,9 @@ async function callModelAPI(providerConfig, model, systemPrompt, userPrompt, opt
     response_format: { type: 'json_object' },
   };
 
-  const timeoutMs = options.timeoutMs ?? 30000;
+  // Same constant as the runner default: a second literal here silently
+  // diverges whenever the default is retuned (#429).
+  const timeoutMs = options.timeoutMs ?? DEFAULT_TIMEOUT_MS;
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), timeoutMs);
   let responseReceived = false;
@@ -384,6 +459,29 @@ async function callModelAPI(providerConfig, model, systemPrompt, userPrompt, opt
     }
 
     if (response.status === 429) {
+      // A 429 is not always a transient rate limit. WhaleCloud returns 429 with
+      // `type: "budget_exceeded"` in two distinct non-retryable cases, which a
+      // blind retry cannot clear and would otherwise burn two round-trips before
+      // failing:
+      //   - `error.param === "category_quota"`: the account has no ECONOMY/STANDARD
+      //     quota configured for the model ("需要专项额度...尚未配置") — needs an
+      //     admin to add it.
+      //   - `error.param === "cost_quota"`: the account's daily spending cap is
+      //     exhausted ("今日额度已耗尽...限额: 100.00元") — resets the next day.
+      // Surface which kind it is so the caller knows whether to wait or to request
+      // an admin change, rather than treating both as a generic rate limit.
+      let quotaType = '';
+      try {
+        const body = await response.json();
+        if (body && body.error && body.error.type === 'budget_exceeded') {
+          quotaType = body.error.param === 'cost_quota' ? 'daily budget exhausted' : 'quota not configured';
+        }
+      } catch {
+        // body is not JSON; fall through to the generic rate-limit handling
+      }
+      if (quotaType) {
+        return { error: true, retryable: false, message: `WhaleCloud budget_exceeded: ${quotaType} for this model.` };
+      }
       return { error: true, retryable: true, message: 'Rate limit exceeded (429).' };
     }
 
@@ -406,10 +504,22 @@ async function callModelAPI(providerConfig, model, systemPrompt, userPrompt, opt
       return { error: true, message: 'Invalid response from model.' };
     }
 
+    // The gateway must echo which model actually served the request. Writing
+    // `null` here used to be tolerated downstream, which let a run that never
+    // resolved a model count as a successful expert call (#423). Fail at the
+    // source instead, so the evidence never records an unverifiable expert.
+    const resolvedModel = typeof data.model === 'string' ? data.model.trim() : '';
+    if (resolvedModel === '') {
+      return {
+        error: true,
+        message: 'Gateway response did not include a resolved model id; cannot prove which model ran.',
+      };
+    }
+
     return {
       success: true,
       content: content.trim(),
-      resolved_model: typeof data.model === 'string' && data.model.trim() !== '' ? data.model.trim() : null,
+      resolved_model: resolvedModel,
     };
   } catch (err) {
     if (err instanceof Error && err.name === 'AbortError') {
@@ -418,6 +528,9 @@ async function callModelAPI(providerConfig, model, systemPrompt, userPrompt, opt
     if (responseReceived) {
       return { error: true, message: 'Invalid response from model.' };
     }
+    // Deliberately do NOT surface the underlying cause here. Provider errors can
+    // carry mutable metadata (tokens, keys, hostnames) that must not leak into the
+    // evidence file; the test suite asserts this redaction. Keep the generic form.
     return { error: true, message: 'Network error.' };
   } finally {
     clearTimeout(timeout);
@@ -464,6 +577,11 @@ function buildReviewOutput(verdict, args, provenance) {
     model_used: `${provenance.provider}/${provenance.requested_model}`,
     requested_model: provenance.requested_model,
     resolved_model: provenance.resolved_model,
+    // Provenance marker required by Gate MW (#423). This script talks to an
+    // external gateway, so every record it emits is `external`. The field is
+    // explicit rather than inferred: the validator rejects a missing value
+    // instead of defaulting it, which is what makes forgery costly.
+    channel: provenance.channel,
     round: args.round,
     mode: args.mode,
   };
@@ -539,6 +657,29 @@ async function main() {
   const systemPrompt = buildSystemPrompt(args.expert, args.mode);
   const userPrompt = buildUserPrompt(reviewContent, otherExpertsContent, args.round);
 
+  // Refuse before the request, not after the gateway kills it.
+  const budget = checkPromptBudget({
+    systemPrompt,
+    userPrompt,
+    maxBytes: resolvePromptBudgetBytes(expertConfig),
+  });
+  if (!budget.ok) {
+    const message = describePromptBudgetFailure({ ...budget, expert: args.expert });
+    console.error(`[delphi-review] ERROR: ${message}`);
+    // Same stdout contract as an API failure: an orchestrator parsing this stream
+    // must be able to tell "we never asked" from "the model answered wrongly".
+    console.log(JSON.stringify({
+      error: true,
+      error_type: 'prompt_budget_exceeded',
+      expert_role: args.expert,
+      message,
+      bytes: budget.bytes,
+      max_bytes: budget.maxBytes,
+      retryable: false,
+    }));
+    process.exit(1);
+  }
+
   // Call API with retry
   const timeoutMs = resolveTimeoutMs(args, provider);
   const result = await callWithRetry(provider, expertConfig.model, systemPrompt, userPrompt, 2, timeoutMs);
@@ -566,6 +707,9 @@ async function main() {
     provider: expertConfig.provider,
     requested_model: expertConfig.model,
     resolved_model: result.resolved_model,
+    // This runner only ever reaches an external provider; local/offline
+    // fallbacks are recorded by a different path (#423).
+    channel: 'external',
   });
 
   console.log(JSON.stringify(output, null, 2));
@@ -583,6 +727,11 @@ if (require.main !== module) {
     buildUserPrompt,
     resolveInputContent,
     resolveTimeoutMs,
+    DEFAULT_TIMEOUT_MS,
+    resolvePromptBudgetBytes,
+    checkPromptBudget,
+    describePromptBudgetFailure,
+    DEFAULT_PROMPT_BUDGET_BYTES,
     checkNodeVersion,
     callModelAPI,
     callWithRetry,

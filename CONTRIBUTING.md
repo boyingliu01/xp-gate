@@ -20,6 +20,25 @@ bash githooks/install.sh --force
 bash githooks/verify.sh
 ```
 
+## Running Tests
+
+```bash
+npm test                  # 全量：137 test files / 2038 tests
+npx vitest run <path>     # 定向跑单个文件
+```
+
+测试只允许写 `os.tmpdir()` 下的副本。vitest 的 globalSetup
+(`scripts/vitest-worktree-guard.cjs`) 会在运行前后对比 `git status --porcelain`，
+把**本次运行新增**的脏文件报出来——你自己未提交的改动不会被算到测试头上。
+确实需要写回仓库的测试（例如验证 sync 真的落盘）用逃生阀降级为告警：
+
+```bash
+XP_GATE_SKIP_WORKTREE_GUARD=1 npm test
+```
+
+Windows 与 ubuntu 现在应当同样全绿。若 Windows 上出现失败，先留下
+`npm test` 的完整输出再定位，不要用定向跑绕过——全量红、定向绿正是 #428 掩盖问题的方式。
+
 ## Delphi Review Setup
 
 The delphi-review skill requires configuration before use. It is **not** plug-and-play out of the box — you must define your own models.

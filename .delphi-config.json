@@ -1,6 +1,35 @@
 {
   "active_profile": "default",
   "profiles": {
+    "whalecloud": {
+      "provider": "whalecloud",
+      "providers": {
+        "whalecloud": {
+          "base_url": "https://lab.iwhalecloud.com/gpt-proxy",
+          "api_key": "${WHALECLOUD_API_KEY}"
+        }
+      },
+      "experts": {
+        "architecture": {
+          "provider": "whalecloud",
+          "model": "s-glm-5.3-flash",
+          "max_tokens": 32000
+        },
+        "technical": {
+          "provider": "whalecloud",
+          "model": "g-qwen3.8-flash"
+        },
+        "feasibility": {
+          "provider": "whalecloud",
+          "model": "g-deepseek-flash"
+        }
+      },
+      "consensus": {
+        "threshold_percent": 90,
+        "max_review_rounds": 5,
+        "distinct_models_required": true
+      }
+    },
     "default": {
       "providers": {
         "dashscope": {
@@ -35,6 +64,6 @@
   "consensus": {
     "threshold_percent": 90,
     "max_review_rounds": 5,
-    "cross_provider_required": true
+    "distinct_models_required": true
   }
 }

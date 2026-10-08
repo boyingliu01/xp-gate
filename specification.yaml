@@ -119,6 +119,598 @@ specification:
           criteria: npm pack 产出含 lib/index.js + cordis.patch.yml + skills/；main 指向 lib/index.js；publishConfig.access=public
           test_type: integration
 
+    # ============================================================
+    # Sprint sprint-20261003-75: P0/P1 质量门禁缺陷修复
+    # 设计来源：docs/plans/2026-10-03-p0-p1-gate-defects.md（Delphi R2，共识 100%）
+    # ============================================================
+    - id: REQ-457
+      description: .principlesrc 配置必须真正生效 —— loadConfig 解析并校验配置文件，规则模块在运行时读取生效配置，而非模块加载时固化内置默认值
+      priority: critical
+      acceptance_criteria:
+        - id: AC-457-01
+          criteria: 传入 --config <path> 时，large-file.threshold 等数值项按该文件生效
+          test_type: unit
+        - id: AC-457-02
+          criteria: 未传 --config 时回退到 git toplevel 的 .principlesrc；该文件不存在才用内置默认值
+          test_type: unit
+        - id: AC-457-03
+          criteria: --config 的取值不得被当作待分析的源文件
+          test_type: unit
+        - id: AC-457-04
+          criteria: 规则项 enabled:false 时该规则不产出任何违规
+          test_type: unit
+        - id: AC-457-05
+          criteria: 类型不匹配的配置项回退内置默认值并告警，不得抛异常
+          test_type: unit
+        - id: AC-457-06
+          criteria: getDefaultConfig() 每次返回全新副本，调用方修改互不影响
+          test_type: unit
+        - id: AC-457-07
+          criteria: main() 退出码由 errorCount 决定，info 级别违规不得让 Gate 4 降级为 SKIPPED
+          test_type: unit
+        - id: AC-457-08
+          criteria: ERROR 级违规退出码为 1、无违规时为 0（经真实子进程验证）
+          test_type: integration
+        - id: AC-457-09
+          criteria: 检查器自身崩溃退出码为 2（区别于 1），Gate 4 据此区分「有发现」与「工具故障」，
+            error 级违规必须 BLOCK 而不得走 SKIP 分支放行
+          test_type: integration
+        - id: AC-457-10
+          criteria: rules 之外的嵌套段（output / performance）同样深合并，
+            用户只写其中一个键时其余默认值不得丢失
+          test_type: unit
+        - id: AC-457-11
+          criteria: severity 必须按 error/warning/info 词表校验；写成 "Error" 等词表外的值时
+            保留默认值并给出明确告警，不得静默生效而使规则悄悄失去阻断能力。
+            checker 的 stderr（配置告警的唯一出口）不得被门禁丢弃
+          test_type: unit
+        - id: AC-457-12
+          criteria: 配置解析路径上的 git 调用（含 gitToplevel）必须带超时上限，
+            git 卡死或不可用时回退到 cwd / 内置默认值，不得挂住 pre-commit hook
+          test_type: unit
+        - id: AC-457-13
+          criteria: rule ID 必须是「单个点」的 group.name 形式且 group 在配置中真实存在，
+            否则 isRuleEnabled 的首个点切分会解析到错误条目并静默沿用内置阈值
+          test_type: unit
+        - id: AC-457-14
+          criteria: 调用方显式传入的 --config 路径不存在时必须失败（加载抛错、CLI 退出码 2），
+            不得回退内置默认值——声明了配置却找不到文件属于配置错误，静默沿用默认值正是「#457」要消除的 fail-open；
+            未显式传入时「项目没有 .principlesrc」仍按正常状态回退默认值
+          test_type: integration
+        - id: AC-457-15
+          criteria: 未先 resetActiveConfig() 就替换已安装的进程级配置必须给出可见告警，
+            并发/多项目约束不得只停留在注释里；正常单次 set 生命周期不得产生告警噪音
+          test_type: unit
+        - id: AC-457-16
+          criteria: getEffectiveConfigFor(ruleId) 返回当前生效配置中该规则的条目（与 check() 读到的同一对象），
+            未知 ID 或非 group.name 形式必须报错而非回退默认值；
+            Rule.threshold / Rule.severity 的过期快照不再是消费方可读取的生效来源
+          test_type: unit
+        - id: AC-457-17
+          criteria: 检查器报告不得写入固定的共享路径——Gate 4 各副本必须用每次调用独立的临时文件，
+            且不得存在任何写向 /tmp/principles-output.json 之类的固定路径
+          test_type: integration
+        - id: AC-457-18
+          criteria: 同机两次 Gate 4 运行互不遮蔽：一次零违规运行不得让另一次带 error 级违规的运行变成 PASS
+          test_type: integration
+        - id: AC-457-19
+          criteria: Delphi runner 在发送前按 UTF-8 字节度量 system+user 提示并拒绝超限请求
+            （默认 40000 字节，席位可用 max_prompt_bytes 覆盖；非法覆盖值回退默认而不是关闭守卫，
+            且「已设置但无法生效」的覆盖值必须发出可见告警，未设置与合法值保持静默）
+          test_type: unit
+        - id: AC-457-20
+          criteria: 超限拒绝必须可执行——报错点明如何缩小范围或提高该席位预算，
+            并在 stdout 以 error_type=prompt_budget_exceeded 告知编排方「未发出请求」，
+            与「模型答错」区分；不得让席位以 "Network error." 形态崩溃
+          test_type: unit
+
+    - id: REQ-452
+      description: Boy Scout baseline 必须可剪枝 —— 已删除文件的条目不得长期滞留并继承旧的警告额度
+      priority: high
+      acceptance_criteria:
+        - id: AC-452-10
+          criteria: pruneBaselineEntries 只删除「磁盘不存在 且 git 未跟踪」的条目（双重确认）
+          test_type: unit
+        - id: AC-452-11
+          criteria: git 不可用时全部条目保留（fail-closed）
+          test_type: unit
+        - id: AC-452-12
+          criteria: 默认 dry-run 不写盘；--apply 才落盘，且只删除过期条目
+          test_type: unit
+        - id: AC-452-13
+          criteria: baseline 格式非法时保留原文件并报错，不得判定为「全部过期」
+          test_type: unit
+        - id: AC-452-14
+          criteria: git 调用必须带超时上限；git 不可用时保留全部条目并显式报告原因，
+            不得静默伪装成「无过期条目」
+          test_type: unit
+        - id: AC-452-15
+          criteria: .warnings-baseline.json 中每条额度都必须对应该文件当前真实存在的告警数——
+            已清零的文件不得留下幽灵额度（幽灵额度等于日后偷偷加回同量告警的许可），
+            条目计数也不得高于当前实测值
+          test_type: unit
+
+    - id: REQ-454
+      description: Gate 5 必须区分 vitest runner 基础设施错误与真实测试失败 —— 同一判定逻辑覆盖全部 vitest 调用点
+      priority: critical
+      acceptance_criteria:
+        - id: AC-454-01
+          criteria: 全部 vitest 调用点经由 handle_test_failure 统一判定，输出显式传入而非读全局
+          test_type: unit
+        - id: AC-454-02
+          criteria: 仅含 Unhandled Error 且 0 个失败测试的输出判为 SKIP（TESTS_SKIPPED=true）
+          test_type: unit
+        - id: AC-454-03
+          criteria: 同时含 runner 噪音与真实失败测试时必须 BLOCK，不得因噪音放行
+          test_type: unit
+        - id: AC-454-04
+          criteria: 非 vitest 的通用兜底分支保持不加守卫（其输出格式无保证）
+          test_type: unit
+        - id: AC-454-05
+          criteria: 全量通过的测试运行判为 PASS（守卫接入不得改变正常路径）
+          test_type: integration
+        - id: AC-454-06
+          criteria: 通用 run_tests 兜底分支不得调用 handle_test_failure，
+            其手写的 BLOCKED 只允许出现在该兜底路径里
+          test_type: unit
+        - id: AC-454-07
+          criteria: runner-error 判别模式所依赖的 vitest 大版本必须写进声明处并被测试钉住：
+            package.json 里 vitest 的声明一旦离开既定大版本，测试立刻失败并说明要重新核对哪些输出形态
+          test_type: unit
+        - id: AC-454-08
+          criteria: pre-commit 只启用 set -o pipefail、不启用 errexit（Gate 4 的状态捕获习语以此为前提），
+            Gate 4 各副本必须以 `|| PRINCIPLES_EXIT=$?` 内联取状态；
+            并含一个真跑 `set -e` 证明两种写法分化的反空洞用例
+          test_type: unit
+
+    - id: REQ-423
+      description: Gate MW 证据必须证明模型来源 —— channel 为显式白名单，resolved_model 必须非空且互异，杜绝伪造
+      priority: critical
+      acceptance_criteria:
+        - id: AC-423-01
+          criteria: 三个互异的真实模型且 channel 为 external/local 时校验通过
+          test_type: unit
+        - id: AC-423-02
+          criteria: channel 缺失、未知、大小写不符、非字符串时一律失败（不得默认取值）
+          test_type: unit
+        - id: AC-423-03
+          criteria: resolved_model 重复或为 null 时失败
+          test_type: unit
+        - id: AC-423-04
+          criteria: resolved_model 比较前 trim 并转小写，大小写变体视为重复
+          test_type: unit
+        - id: AC-423-05
+          criteria: 生产者遇网关未回传 model 时报硬错误，不写入 null
+          test_type: unit
+        - id: AC-423-06
+          criteria: requested_model 去重校验保持有效
+          test_type: unit
+        - id: AC-423-07
+          criteria: 瞬态走查证据 .code-walkthrough-result.json 不被仓库跟踪（.gitignore 规则已存在，跟踪状态才是漏洞）
+          test_type: unit
+        - id: AC-423-08
+          criteria: requested_model 与 resolved_model 的查重大小写敏感性刻意不对称——前者按 AGENTS.md 的
+            「distinct trimmed requested model IDs」只做 trim、区分大小写，后者 trim 后转小写；
+            测试须把这一不对称钉住，而不是把两边统一
+          test_type: unit
+
+    - id: REQ-473
+      description: Gate 5 子集运行不得假阻断，且抽取出的 hook 库必须被安装器完整落地 —— 部分运行的覆盖率阈值缺口只豁免阈值本身，真实断言失败仍然阻断
+      priority: critical
+      acceptance_criteria:
+        - id: AC-473-01
+          criteria: 子集 vitest 运行只报覆盖率阈值不达标时，Gate 5 判定为豁免并继续走下游 PARTIAL_TEST_RUN 的降级告警；
+            同一分支遇到真实断言失败仍必须 BLOCK，且豁免路径不得置 TESTS_SKIPPED（覆盖率门禁保持有效）
+          test_type: integration
+        - id: AC-473-02
+          criteria: 阈值豁免的判定逻辑位于 githooks/lib/test-failure.sh，并由一个真跑 pre-commit 的用例证明端到端接线，
+            而不只是可单测
+          test_type: integration
+        - id: AC-473-03
+          criteria: install.sh 把 githooks/lib 下每个 .sh 逐字节安装到 .git/hooks/lib，缺文件或内容不一致即失败
+          test_type: integration
+        - id: AC-473-04
+          criteria: 已安装的 hook 库不得 source lib/ 之外的路径（../、/scripts/、/src/），
+            否则换台机器就找不到文件；同目录兄弟引用不算违规（反空洞用例分别证伪与证实）
+          test_type: integration
+
+    - id: REQ-478
+      description: Gate 4 必须以调用参数同一基准的目录运行检查器 —— pre-commit 已 cd 进单语言子目录时，
+        仓库根相对的 diff 路径会被检查器读成 web/web/...，可用的门禁静默退化为 SKIPPED（#478）
+      priority: critical
+      acceptance_criteria:
+        - id: AC-478-01
+          criteria: 子项目模式（PROJECT_SUBDIR=web 且 ORIGINAL_DIR 已设置）下检查器的工作目录必须等于
+            PROJECT_ROOT，传给 --files 的路径保持仓库根相对（web/src/api/index.ts，不得出现双重前缀），
+            结果判为 PASS 且不得出现 SKIPPED
+          test_type: integration
+        - id: AC-478-02
+          criteria: 没有子项目布局的仓库（PROJECT_SUBDIR 与 ORIGINAL_DIR 均为空）仍须 PASS，
+            且检查器的工作目录同样是 PROJECT_ROOT
+          test_type: integration
+        - id: AC-478-03
+          criteria: 检查器真的无法启动/读不到文件时判为 SKIP，不得判为 PASS —— 工具失败与「零发现」
+            必须是两种可区分的状态（反假 PASS）
+          test_type: integration
+        - id: AC-478-04
+          criteria: 反空洞用例逐份检查随包分发的 gate-4 副本（githooks/gate-4.sh、
+            githooks/adapters/gate-4.sh），每份都必须以 PROJECT_ROOT 解析检查器基目录，
+            并从该同一基目录调用检查器；任一副本回退到 hook 当前目录即失败
+          test_type: integration
+
+    - id: REQ-489
+      description: 被 source 进 pre-commit 的 gate 模块不得把 errexit 泄漏给钩子进程 ——
+        任何 `set -e` 泄漏都会让 generate_quality_report 里第一条零命中管道
+        （FAIL_LINES 提取）在全部门打印 PASS 之后杀死钩子，提交静默不落（#489）
+      priority: critical
+      acceptance_criteria:
+        - id: AC-489-01
+          criteria: source 任一份随仓/随包分发的 gate-4 副本（githooks/gate-4.sh、
+            githooks/adapters/gate-4.sh、githooks/gates/gate-4-principles.sh）后 errexit
+            必须保持关闭，且紧随其后的零命中 grep 管道（无 || true）不得终止钩子；
+            探针须运行在全新 bash 进程里，避免 bats `run` 自身的 errexit 抑制掩盖泄漏
+          test_type: integration
+        - id: AC-489-02
+          criteria: 每一份随包分发的 pre-commit（githooks/pre-commit、
+            src/npm-package/hooks/pre-commit）中 FAIL_LINES 提取管道必须以 `|| true`
+            收尾（grep 零命中返回 1，被 pipefail 放大为整条管道 1），并按 v0.9.2
+            head→sed 迁移约定以 `sed -n '1,10p'` 取代 `| head -10`
+          test_type: integration
+        - id: AC-489-03
+          criteria: 反空洞用例：同一探针对着历史泄漏写法（`set +e` 包裹后无条件
+            `set -e` 恢复）必须在 FAIL_LINES 赋值处死亡（exit 1、无 SURVIVED），
+            证明回归用例本身能抓住该缺陷
+          test_type: integration
+
+    - id: REQ-490
+      description: Gate 10 必须把暂存文件列表拆成独立参数传给 semgrep —— 引号包裹的
+        换行连接列表会被当成一个扫描目标，暂存 ≥2 个受支持文件时 semgrep 报
+        "Invalid scanning root" 静默掐断整个 pre-commit；单文件恰好无换行才一直没暴露（#490）
+      priority: critical
+      acceptance_criteria:
+        - id: AC-490-01
+          criteria: 暂存 2 个 .ts 文件时，semgrep 收到 2 个独立目标参数（逐行记录 argv
+            验证），判定语义不变（exit 0=PASS / 1=CRITICAL-HIGH 分级 BLOCK / 其它=SKIP）
+          test_type: integration
+        - id: AC-490-02
+          criteria: "多文件提交 PASS 行必须可见扫描目标数（files scanned: N），
+            避免「参数错了但看起来像没文件可扫」的静默；输出不得出现 Invalid scanning root"
+          test_type: integration
+        - id: AC-490-03
+          criteria: 反空洞用例：随包分发的全部 gate-10 副本（githooks/gate-10.sh、
+            src/npm-package/gate-10.sh、src/npm-package/hooks/gate-10.sh）必须以
+            "${SEMGREP_ARGS[@]}" 数组展开调用 semgrep，不得再把引号包裹的
+            SEMGREP_FILES 当单参数传递
+          test_type: integration
+        - id: AC-490-04
+          criteria: 以 - 开头的暂存路径（git add -- ./-o.ts）必须以 ./ 前缀形式
+            进入 argv，使任何参数解析器都无法把它读成选项；含空格的文件名同样作为
+            单个 argv 元素送达，不被拆分；其余目标同样统一为
+            ./relative/path（Round 1 技术席位 MC-01）
+          test_type: integration
+
+    - id: REQ-494
+      description: Gate 5 的 smart selection 只能把根 vitest 项目真正能收集到的路径当目标 ——
+        vitest.config.ts 按#418 把 src/npm-package/ 下的镜像子树与 plugins/、skills/ 整批排除，
+        门禁却照样传给 vitest；目标全部不可收集时 vitest 以 "No test files found" 退出 1，
+        Gate 5 把它读成"测试失败"，于是只同步镜像文件的提交被误 BLOCK（#494）
+      priority: critical
+      acceptance_criteria:
+        - id: AC-494-01
+          criteria: 镜像测试路径映射回 canonical 双生子（src/npm-package/{principles,mutation,
+            mock-policy,build-integrity}/ → src/…），映射结果确实是根项目可收集的路径
+          test_type: integration
+        - id: AC-494-02
+          criteria: canonical 侧不存在的镜像（src/npm-package/lib/ 等）原样保留，
+            映射或删除都不得吞掉真实覆盖
+          test_type: integration
+        - id: AC-494-03
+          criteria: 无 canonical 对应物且不可收集的目标（src/npm-package/{plugins,skills}/、
+            plugins/、skills/、src/_wip/）整行剔除且不残留空行；镜像与 canonical 同时出现时
+            折叠为一个目标
+          test_type: integration
+        - id: AC-494-04
+          criteria: 与 vitest.config.ts 的 test exclude 对账：其中每一棵可提交源码树都不得
+            仍有目标可选出（探测数设下限防伪通过）
+          test_type: integration
+        - id: AC-494-05
+          criteria: 每份随包 pre-commit 都定义该选择器，且 CHANGED_TEST_FILES 与
+            CHANGED_SRC_FILES 两处选择都经过它；剔除发生时打印 was/now，绝不静默改目标
+          test_type: integration
+
+    - id: REQ-493
+      description: Gate 8 从 gitleaks JSON 报告读"发现数"时，零发现必须只得到一个值 ——
+        grep -c 在零匹配时既打印 0 又以 1 退出，`|| echo 0` 于是追加出第二行，
+        判决表三个字符串比较全部落空，干净扫描被当成"有发现"exit 1；只要 gitleaks
+        在钩子 PATH 上，每一次提交都被误 BLOCK（#493）
+      priority: critical
+      acceptance_criteria:
+        - id: AC-493-01
+          criteria: 空报告 [] 经生产计数表达式得到单一值 "0"（无内嵌换行），
+            因而命中 PASS 分支而不是落到 fail-closed 的 else
+          test_type: integration
+        - id: AC-493-02
+          criteria: 计数按出现次数而非匹配行数：同一行上的 N 个 RuleID 计为 N，
+            阻断信息里的数字与真实发现数一致
+          test_type: integration
+        - id: AC-493-03
+          criteria: 真实 gitleaks 干净扫描产物（本机 8.30.1 实测写出 []）计数为 0，
+            不依赖手写 fixture 的形状
+          test_type: integration
+        - id: AC-493-04
+          criteria: 全部随包 gate-8 副本（githooks/gate-8.sh、githooks/adapters/、
+            githooks/gates/、src/npm-package/ 的三份）计数行逐字一致，
+            生产与测试不得漂移（测试抽取生产表达式执行，而非誊写）
+          test_type: integration
+        - id: AC-493-05
+          criteria: 同类写法全库清除：任何随包 shell 不得再出现
+            `grep -c … || echo`（零匹配时产生两个值）
+          test_type: integration
+        - id: AC-493-06
+          criteria: 干净扫描端到端判 PASS，输出不出现 BLOCKED
+          test_type: integration
+        - id: AC-493-07
+          criteria: 有发现的报告仍然 exit 1，信息为 "reported 1 finding(s)" ——
+            修复不得把误 BLOCK 修成不检测
+          test_type: integration
+        - id: AC-493-08
+          criteria: gitleaks exit 0 但无报告工件，或工件不是 JSON 数组形状时保持
+            "?" 语义 → SKIP，绝不宣称 PASS（#449 的 fail-closed-on-the-claim）
+          test_type: integration
+
+    - id: REQ-488
+      description: doctor --sync-hooks 的同步与漂移检查必须覆盖 githooks/lib/ 共享库，
+        且不得静默忽略未知 flag —— lib/ 重构后 pre-commit 运行时 source lib/*.sh，
+        只拷钩子文件的同步产物在机器级目录直接挂掉；未知 flag 静默 no-op 让用户误以为同步已发生（#488）
+      priority: high
+      acceptance_criteria:
+        - id: AC-488-01
+          criteria: syncGlobalHooksFromRepo 把 githooks/lib/ 下每个文件逐字节拷到
+            installed lib/（copyFileSync + 0o755，与钩子同规则），synced 列表包含
+            lib/<name> 条目；仓库没有 lib/ 时行为不变
+          test_type: unit
+        - id: AC-488-02
+          criteria: diagnoseHookDrift 对 repo lib/ 每个文件与 installed lib/ 比较：
+            缺失或内容不一致都报 FAIL（label 含 lib/<name>），一致报 PASS
+          test_type: unit
+        - id: AC-488-03
+          criteria: doctor 收到未实现/拼错的 flag 时以 exit 1 显式报错并列出支持的
+            flag，不再静默忽略（--fix / --sync-hooks 继续按文档生效）
+          test_type: unit
+
+    - id: REQ-480
+      description: Gate M 的变更文件过滤必须排除测试树路径（任意段 tests/、test/、
+        __tests__/）——现过滤器只按文件名排除 *.test.*，tests/ 下不改名的
+        基础设施（helpers/fixtures/factories）被当生产代码送进 Stryker，
+        用生产阈值评出一个结构性不可达的 0% 分数，掐断 push（#480）
+      priority: high
+      acceptance_criteria:
+        - id: AC-480-01
+          criteria: filterSourceFiles（真实实现，已导出供测试）排除位于 tests/、
+            test/、__tests__/ 段下的文件，含 Windows 反斜杠路径；不含 "test"
+            作为整段子串的生产路径（latest/、protest/）不受影响
+          test_type: unit
+        - id: AC-480-02
+          criteria: githooks/pre-push 的 CHANGED_SOURCE_FILES 过滤链同步加入
+            树段排除（grep -v -E '(^|/)(tests?|__tests__)/'），且随包镜像一致
+          test_type: integration
+        - id: AC-480-03
+          criteria: 判定语义不变——过滤器只影响"哪些文件进入变更集"，
+            阈值评估、BLOCK/SKIP 行为一律不动
+          test_type: unit
+        - id: AC-480-04
+          criteria: filterSourceFiles 的每条排除规则读取同一个分隔符视图
+            （normalized），不再出现"树段规则看 normalized、其余看原始路径"的两套
+            口径；与 pre-push 过滤链在同一份"非生产代码"定义上一致——*.spec.* 同样
+            排除，Java/Kotlin 按 Test/Tests/IT/Spec 结尾匹配（不再要求前一个大写字母，
+            FooTest.java 这类主流命名此前漏排）（Round 2 可行性席位 FC-03）
+          test_type: unit
+
+    - id: REQ-424
+      description: detectPlatform 只认 ~/.qoder/skills 作为 Qoder 标记，全新 Qoder
+        安装（skills/ 尚未生成）被误判为 opencode，configureQoderDelphiAgents
+        因此部署零个 Delphi agent；且 detect-deps.js 与 shared-paths.js 各有一份
+        可发散的实现（#424）
+      priority: high
+      acceptance_criteria:
+        - id: AC-424-01
+          criteria: 存在 ~/.qoder（无论 skills/、agents/ 还是任何内容）即判为
+            qoder；brand-new 安装（只有 ~/.qoder 目录本身）也判为 qoder，
+            Delphi agent 才能被部署
+          test_type: unit
+        - id: AC-424-02
+          criteria: detectPlatform 只保留一份实现——detect-deps.js 从 shared-paths.js
+            re-export 同一函数（引用相等），消除双份实现发散的可能
+          test_type: unit
+        - id: AC-424-03
+          criteria: 非 Qoder 平台模拟（无任何 ~/.qoder 内容）仍判为 opencode，
+            agent 部署跳过路径行为不变
+          test_type: unit
+        - id: AC-424-04
+          criteria: 两个标记同时存在时的优先级写入契约：~/.qoder 优先于
+            ~/.claude/skills，二者都无才落 opencode（Round 2 架构席位 MA-01：
+            该行为只有 shared-paths.test.js 钉住、spec 未认领，契约与测试可发散）
+          test_type: unit
+
+    - id: REQ-450
+      description: 'Gate 0 的 [skip-version-check] 提示误导用户——实际 bypass 要求
+        标记位于 commit message 首行开头、后接 chore:/docs:/release: 前缀、且
+        diff 仅限构建工具链（adapters/、scripts/、hooks/），提示却只说
+        "include in commit message"，用户照做仍被二次拒绝（#450）'
+      priority: medium
+      acceptance_criteria:
+        - id: AC-450-01
+          criteria: "提示给出可照抄的完整格式（首行 START + [skip-version-check]
+            chore: <description>）、列出全部三个允许前缀、并说明 bypass 仅覆盖
+            构建工具链路径"
+          test_type: integration
+        - id: AC-450-02
+          criteria: 旧的误导文案不再出现在 githooks/pre-commit 与 npm 镜像任一副本；
+            两副本 bypass 提示保持一致
+          test_type: integration
+        - id: AC-450-03
+          criteria: 结构断言非空洞——缺少新提示的副本会被匹配器拒绝
+          test_type: integration
+        - id: AC-450-04
+          criteria: "提示承诺的四条必须被执行层验证，而不是只被文案断言：工具链路径 +
+            chore: 前缀的 bypass 放行；同一 bypass 遇生产源码仍 exit 1；未列出的
+            commit type 被拒绝；标记只在首行才生效。测试在运行期从随包真实
+            pre-commit 中抽出该门禁块求值，块被搬走即抽取为空并报错
+            （Round 2 架构席位 MA-01）"
+          test_type: integration
+
+    - id: REQ-431
+      description: sprint-gate.test.bats 的 pre-commit resolution 用例与#476后的
+        真实契约脱节（resolver 已移入 lib/sprint-gate-report.sh、tier 4 指向真实
+        $HOME、resolver 未命中时非零退出、Windows 临时目录 EBUSY），15/17 失败且
+        无任何 CI 运行 .bats 使其不可见（#431）
+      priority: medium
+      acceptance_criteria:
+        - id: AC-431-01
+          criteria: resolution 用例在 source 了 lib/sprint-gate-report.sh 之后才
+            eval 标记块；并有守卫断言两份 pre-commit 都 source 该 lib，否则测试
+            harness 会先于契约失效
+          test_type: integration
+        - id: AC-431-02
+          criteria: 每个 resolution 用例先把 HOME 指向临时目录，使 tier 4
+            （$HOME/.config/xp-gate/hooks）既可被断言"不存在则空"，也有命中该层
+            的正例；空值用例同时断言标记块确实被捕获（非空洞）
+          test_type: integration
+        - id: AC-431-03
+          criteria: teardown 对 Windows 短暂目录锁重试后再删，只有目录仍在才判失败；
+            全文件在 Windows 上 0 失败
+          test_type: integration
+
+    - id: REQ-439
+      description: doctor 判已安装技能新鲜度时，frontmatter 正则只认 LF 且退化分支
+        做字节比较；在 core.autocrlf=true 的工作树下 13 个技能里 12 个被假报
+        Outdated 并推荐有破坏性的 update-skill --all，唯一一条真差异被噪声淹没（#439）
+      priority: high
+      acceptance_criteria:
+        - id: AC-439-01
+          criteria: extractSkillVersion 识别 LF、CRLF 与孤立 CR 三种 frontmatter
+            分隔符，sameContentIgnoringLineEndings 同样按三种约定归一（helper 的
+            名字承诺的就是行尾无关），两侧行尾不同但版本相同的技能走 semver 判等，
+            不再落到内容比较
+          test_type: unit
+        - id: AC-439-02
+          criteria: 无 version 字段的技能按"忽略行尾的内容等价"判定，仅行尾差异
+            报 PASS（Up to date），不再产生 Outdated 假告警
+          test_type: unit
+        - id: AC-439-03
+          criteria: 真实内容差异（超出行尾）仍必须报 WARN + Outdated 并计入 issues，
+            证明宽容不是把检查改成永真
+          test_type: unit
+    - id: REQ-486
+      description: scripts/test-plugins.sh 在 Windows/Git Bash 下把 MSYS 的
+        REPO_ROOT 插进 node -e 的路径参数，必然假失败且无任何调用方；与全绿的
+        .mjs 孪生并存等于永久红的守卫，训练团队忽略红色（#486）
+      priority: medium
+      acceptance_criteria:
+        - id: AC-486-01
+          criteria: scripts/test-plugins.sh 不再存在，且 scripts/test-plugins.mjs
+            与 package.json 的 test:plugins 仍指向 .mjs（防把两个半都删掉）
+          test_type: unit
+        - id: AC-486-02
+          criteria: 根 AGENTS.md 与 plugins/AGENTS.md 指向 test-plugins.mjs，
+            不再出现 .sh 字样
+          test_type: unit
+        - id: AC-486-03
+          criteria: 全仓扫描（排除 docs/CHANGELOG/评审证据等历史记录）后，
+            没有任何现役文件仍引用 test-plugins.sh
+          test_type: unit
+    - id: REQ-416
+      description: install-skill/update-skill 只从 GitHub main 分支下载单个
+        SKILL.md，13 个技能中 8 个的 references/templates/scripts 全部缺失，
+        技能运行时引用的路径悬空；update 还会先删空目标目录再只写回 SKILL.md，
+        且始终拉 main 导致已装内容与所用 CLI 版本漂移（#416）
+      priority: high
+      acceptance_criteria:
+        - id: AC-416-01
+          criteria: 安装后的技能目录与包内 skills/<name>/ 逐文件一致（含
+            references/ 等辅助文件），不再只有 SKILL.md
+          test_type: unit
+        - id: AC-416-02
+          criteria: 安装全程不发起网络请求（https.get 不被调用），内容来源是
+            当前安装的 npm 包，因此不存在与 CLI 版本漂移的第二个来源
+          test_type: unit
+        - id: AC-416-03
+          criteria: update-skill 删除并重建"当前平台"的技能目录（Qoder 为
+            ~/.qoder/skills），其他平台的同名副本不受影响；陈旧目录中的多余
+            文件在更新后消失
+          test_type: unit
+        - id: AC-416-04
+          criteria: 技能不在本版本包内时退出码为 1 并给出升级指引，且该判断发生在
+            任何删除动作之前——已装目录必须原样保留（update 不得先删再失败）
+          test_type: unit
+        - id: AC-416-05
+          criteria: 可安装技能清单由包内 skills/ 目录推导，不再有手工维护的
+            SKILLS_REGISTRY；未知技能报错时列出的清单与目录内容完全一致
+          test_type: unit
+        - id: AC-416-06
+          criteria: 技能命令的参数解析只接受该命令已实现的 flag；--offline 这类已从用法
+            中移除的 flag 必须报"Unknown argument(s)"并退出 1，不得静默 no-op
+            （与#488 给 doctor 的契约同类，Round 1 架构席位 MA-02）。flag 白名单按
+            命令划分，不是全局一张表：install-skill 只吃 --verbose/--force，
+            update-skill 只吃 --verbose/--all/--check，uninstall-skill 只吃 --force
+            ——被解析但不被消费同样是被忽略的选项（Round 2 架构席位 MI-04）
+          test_type: unit
+    - id: REQ-429
+      description: delphi-external-review 的三处静默失败：30000 超时默认值在两处
+        重复表达（改一处即分叉）；api_key 引用的环境变量未设置时只 WARNING 并继续
+        发出字面量占位符，最终报成"认证失败，请检查 .delphi-config.json"，把排障
+        方向指错；provider 级字段只在"该 provider 被某个专家用到"时才校验，写错的
+        值静默存活到运行期才回落默认（#429）
+      priority: medium
+      acceptance_criteria:
+        - id: AC-429-01
+          criteria: 超时默认值只有 DEFAULT_TIMEOUT_MS 一个来源，callModelAPI 的
+            兜底必须引用该常量，源码中不得再出现第二个字面量默认值
+          test_type: unit
+        - id: AC-429-02
+          criteria: --timeout-ms 与 provider timeout_ms 在恰好合法的边界值
+            1000 / 600000 上必须通过（>=/<= 被改成 >/< 时要能被测出）
+          test_type: unit
+        - id: AC-429-03
+          criteria: api_key 引用了未设置的环境变量时立即 ERROR 并指名变量名与
+            provider 路径、退出码 1，不发出任何 API 请求；变量已设置时正常展开
+          test_type: unit
+        - id: AC-429-04
+          criteria: readConfig 阶段整体校验 profile 内每个 provider 的
+            base_url / api_key / timeout_ms，包括三个专家都没用到的 provider，
+            错误信息带完整 provider 路径
+          test_type: unit
+    - id: REQ-468
+      description: detectProjectLanguages() 只按 configFiles 判定语言，而 shell 与
+        powershell 两条注册表项的 configFiles 是空数组，extensions 字段存在却从未
+        用于判定——装齐 53/53 工具的本机仍只看见 2 种语言，本仓库 147 个 .sh 与
+        27 个 .ps1 对 doctor/check-tools 完全隐形（#468）
+      priority: medium
+      acceptance_criteria:
+        - id: AC-468-01
+          criteria: 只含 .sh 文件、没有任何 shell 配置文件的最小 fixture 能被
+            检出为 Shell
+          test_type: unit
+        - id: AC-468-02
+          criteria: 含 .ps1 的 fixture 能被检出为 PowerShell
+          test_type: unit
+        - id: AC-468-03
+          criteria: 扫描有边界且不越界误报——没有脚本的项目不得虚报 Shell/PowerShell，
+            node_modules/.git 等依赖与版本库目录不得参与扩展名扫描
+          test_type: unit
+        - id: AC-468-04
+          criteria: 已有语言不退化：configFiles 命中路径与返回的 configFiles 内容不变，
+            扩展名兜底只对"没有配置文件可依"的语言生效（否则任意带 CI YAML 的仓库
+            都会被判成 IaC）
+          test_type: unit
+        - id: AC-468-05
+          criteria: check-tools/install-tools 同时接受 --languages=<lang> 与
+            --languages <lang>，空格形式不得静默回落到自动探测
+          test_type: unit
+        - id: AC-468-06
+          criteria: 空选择（--languages= 或 --languages=,）与裸 --languages 一样
+            回落到自动探测，绝不产生名为 '' 的语言（Round 1 架构席位 MI-02）
+          test_type: unit
   design_decisions:
     - id: DD-001
       decision: 走薄桥（方案 A）在 ctx.tools 注册三工具，而非独立 MCP server 或纯技能
@@ -136,3 +728,4 @@ specification:
       decision: 12 个 skills 随发布包经平台原生 bundledSkillDir（$DSH_BUNDLED_SKILL_DIR）分发，不做 customSkillDirs/cp
       rationale: dsh plugin add 后技能即可被 skill 工具自动发现，AC 不依赖手工操作
       alternatives_considered: ["customSkillDirs/cp（靠用户手工，被 Delphi R1 否决）"]
+

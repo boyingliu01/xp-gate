@@ -1,8 +1,6 @@
-import { Rule, Violation, Adapter } from '../../types';
-import { getDefaultConfig } from '../../config';
+import { Rule, Violation, Adapter, Severity } from '../../types';
+import { getActiveConfig } from '../../config';
 
-const config = getDefaultConfig();
-const severity = config.rules['solid']['lsp'].severity as 'error' | 'warning' | 'info';
 const PRIMITIVE_TYPES = new Set([
   'string', 'number', 'boolean', 'any', 'void', 'null', 'undefined', 'Object', 'Array',
 ]);
@@ -37,12 +35,14 @@ function collectMethodParamTypes(methodSignature: string): string[] {
 }
 
 function buildViolation(file: string, cls: ClassInfo, paramType: string): Violation {
+  // Read the ACTIVE severity here rather than at module load (#457).
+  const settings = getActiveConfig().rules['solid']['lsp'];
   return {
     file,
     line: cls.line ?? 0,
     ruleId: 'solid.lsp',
     message: `Possible LSP violation in "${cls.name}". Parameter type "${paramType}" may not be compatible with base class contract.`,
-    severity,
+    severity: (settings.severity as Severity) ?? 'info',
   };
 }
 
@@ -67,7 +67,7 @@ export const lspRule: Rule = {
   id: 'solid.lsp',
   name: 'Liskov Substitution Principle Rule',
   threshold: 0,
-  severity,
+  severity: 'info',
   check: (file: string, adapter: Adapter): Violation[] => {
     try {
       const classes = (adapter.extractClasses() || []) as ClassInfo[];

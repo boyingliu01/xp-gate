@@ -285,6 +285,22 @@ describe('detect-deps', () => {
       const { detectPlatform } = require('../detect-deps');
       expect(detectPlatform()).toBe('qoder');
     });
+
+    // ── #424: brand-new Qoder installs have no skills/ subdirectory yet, so a
+    // skills-only marker misdetects them as opencode and configureQoderDelphiAgents
+    // deploys zero Delphi agents. Any ~/.qoder content must count as qoder. ──
+
+    it('returns "qoder" when only ~/.qoder exists (brand-new install, no skills dir)', () => {
+      fs.mkdirSync(path.join(tmpHome, '.qoder'), { recursive: true });
+      const { detectPlatform } = require('../detect-deps');
+      expect(detectPlatform()).toBe('qoder');
+    });
+
+    it('returns "qoder" when only ~/.qoder/agents exists (no skills dir)', () => {
+      fs.mkdirSync(path.join(tmpHome, '.qoder', 'agents'), { recursive: true });
+      const { detectPlatform } = require('../detect-deps');
+      expect(detectPlatform()).toBe('qoder');
+    });
   });
 
   // ── getSkillsDirs tests ──

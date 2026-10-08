@@ -12,7 +12,7 @@ fail() {
   exit 1
 }
 
-HOOK_MIRROR_FILES="adapter-common.sh gate-3.sh gate-4.sh gate-7.sh gate-8.sh gate-9.sh gate-10.sh gate-12-file-hygiene.sh post-merge pre-commit pre-push sprint-gate.sh lib/now-ms.sh lib/validate-code-walkthrough.cjs"
+HOOK_MIRROR_FILES="adapter-common.sh gate-3.sh gate-4.sh gate-7.sh gate-8.sh gate-9.sh gate-10.sh gate-12-file-hygiene.sh post-merge pre-commit pre-push sprint-gate.sh lib/now-ms.sh lib/jscpd-run.sh lib/sprint-gate-report.sh lib/test-failure.sh lib/typecheck.sh lib/validate-code-walkthrough.cjs"
 
 in_git_repo() {
   git rev-parse --is-inside-work-tree >/dev/null 2>&1

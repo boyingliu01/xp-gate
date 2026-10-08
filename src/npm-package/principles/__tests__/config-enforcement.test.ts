@@ -1,0 +1,469 @@
+/**
+ * @test REQ-457
+ * @intent `.principlesrc` must actually change what Gate 4 enforces. The rule
+ *         modules used to snapshot config at module load, so a project's
+ *         threshold was silently ignored and the checker enforced the built-in
+ *         default instead -- a fail-open gate.
+ * @covers AC-457-01, AC-457-02, AC-457-03, AC-457-04, AC-457-05, AC-457-06, AC-457-07, AC-457-14, AC-457-15, AC-457-16
+ *
+ * The pre-existing `config.test.ts` asserted only `expect(config).toBeDefined()`
+ * for `loadConfig`, which is why the defect survived: the loader returned the
+ * right object while nothing consumed it.
+ *
+ * These tests assert the *end-to-end* effect (an enforcement threshold changes),
+ * not merely that a function returns a value.
+ */
+
+import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { spawnSync } from 'node:child_process';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import {
+  getActiveConfig,
+  getDefaultConfig,
+  getEffectiveConfigFor,
+  loadConfig,
+  resetActiveConfig,
+  setActiveConfig,
+} from '../config';
+import { getAllRules } from '../index';
+import type { Adapter, Violation } from '../types';
+
+const tempDirs: string[] = [];
+
+/** Built-in default for large-file, per config.ts. */
+const DEFAULT_LARGE_FILE_THRESHOLD = 1150;
+/** A threshold far below the default, so a short stub violates it. */
+const TIGHT_THRESHOLD = 10;
+/** A threshold far above any stub, so nothing violates it. */
+const LOOSE_THRESHOLD = 100000;
+/** The line count our adapter stub reports. */
+const STUB_LINE_COUNT = 50;
+/** A small override for long-function, distinct from its default of 50. */
+const SHORT_THRESHOLD = 12;
+/** Built-in default for solid.srp's methodThreshold. */
+const DEFAULT_SRP_METHOD_THRESHOLD = 15;
+
+function makeTempDir(): string {
+  const dir = mkdtempSync(join(tmpdir(), 'xpgate-457-'));
+  tempDirs.push(dir);
+  return dir;
+}
+
+/** Write a `.principlesrc` fixture into a temp dir and return its path. */
+function writeConfig(dir: string, contents: string, name = '.principlesrc'): string {
+  const configPath = join(dir, name);
+  try {
+    writeFileSync(configPath, contents, 'utf8');
+  } catch (error) {
+    const detail = error instanceof Error ? error.message : String(error);
+    throw new Error(`could not write fixture ${configPath}: ${detail}`);
+  }
+  return configPath;
+}
+
+/**
+ * Run the real CLI in a child process and report both its exit status and its
+ * parsed JSON. The exit code is part of this module's contract -- Gate 4 branches
+ * on it -- so it can only be asserted through an actual process, not by calling
+ * `main()` in-process.
+ */
+function runChecker(args: string[], cwd = process.cwd()): { status: number; summary: Record<string, number> } {
+  const result = spawnSync(
+    process.execPath,
+    [join(process.cwd(), 'node_modules', 'tsx', 'dist', 'cli.mjs'),
+      join(process.cwd(), 'src', 'principles', 'index.ts'), ...args],
+    { encoding: 'utf8', cwd, timeout: 120000 },
+  );
+  const stdout = result.stdout ?? '';
+  let summary: Record<string, number> = {};
+  try {
+    summary = JSON.parse(stdout.slice(stdout.indexOf('{'))).summary;
+  } catch {
+    // A crash emits no parseable report; the caller asserts on `status`.
+  }
+  return { status: result.status ?? -1, summary };
+}
+
+/** A `.principlesrc` that sets one numeric threshold for one rule. */
+function thresholdConfig(ruleId: string, threshold: number): string {
+  const rule = { [ruleId]: { threshold } };
+  return JSON.stringify({ rules: { 'clean-code': rule } });
+}
+
+/** The same threshold, already merged into a config object (no disk involved). */
+function thresholdConfigObject(
+  ruleId: keyof ReturnType<typeof getDefaultConfig>['rules']['clean-code'],
+  threshold: number,
+): ReturnType<typeof getDefaultConfig> {
+  const config = getDefaultConfig();
+  config.rules['clean-code'][ruleId].threshold = threshold;
+  return config;
+}
+
+/** Run `body` with `[principles]` diagnostics captured instead of printed. */
+function capturePrinciplesWarnings(body: () => void): string[] {
+  const captured: string[] = [];
+  const original = process.stderr.write;
+  process.stderr.write = ((chunk: unknown) => {
+    const text = String(chunk);
+    if (text.includes('[principles]')) captured.push(text.trim());
+    return true;
+  }) as typeof process.stderr.write;
+  try {
+    body();
+  } finally {
+    process.stderr.write = original;
+  }
+  return captured;
+}
+
+/** A `.principlesrc` that sets one array-valued key for one rule. */
+function arrayConfig(ruleId: string, key: string, values: number[]): string {
+  const rule = { [ruleId]: { [key]: values } };
+  return JSON.stringify({ rules: { 'clean-code': rule } });
+}
+
+/** Minimal adapter stub: reports a fixed line count so large-file is decidable. */
+function adapterReportingLines(totalLines: number): Adapter {
+  return {
+    detectLanguage: () => 'typescript',
+    parseAST: () => ({}),
+    extractFunctions: () => [],
+    extractClasses: () => [],
+    extractExports: () => [],
+    countLines: () => totalLines,
+  };
+}
+
+/** Run the real large-file rule against a stub reporting `lines` lines. */
+function checkLargeFile(lines: number): Violation[] {
+  const rule = getAllRules().find(candidate => candidate.id === 'clean-code.large-file');
+  if (!rule) throw new Error('clean-code.large-file rule is not registered');
+  return rule.check('sample.ts', adapterReportingLines(lines));
+}
+
+afterEach(() => {
+  resetActiveConfig();
+  for (const dir of tempDirs.splice(0)) {
+    try {
+      rmSync(dir, { recursive: true, force: true });
+    } catch {
+      /* best effort */
+    }
+  }
+});
+
+beforeEach(() => {
+  resetActiveConfig();
+});
+
+describe('#457 .principlesrc actually changes enforcement', () => {
+  it('AC-457-01: getActiveConfig/setActiveConfig expose the effective config', () => {
+    const custom = getDefaultConfig();
+    custom.rules['clean-code']['large-file'].threshold = TIGHT_THRESHOLD;
+    setActiveConfig(custom);
+    expect(getActiveConfig().rules['clean-code']['large-file'].threshold).toBe(TIGHT_THRESHOLD);
+  });
+
+  it('AC-457-01: resetActiveConfig restores the built-in defaults', () => {
+    const custom = getDefaultConfig();
+    custom.rules['clean-code']['large-file'].threshold = TIGHT_THRESHOLD;
+    setActiveConfig(custom);
+    resetActiveConfig();
+    expect(getActiveConfig().rules['clean-code']['large-file'].threshold).toBe(
+      DEFAULT_LARGE_FILE_THRESHOLD
+    );
+  });
+
+  it('AC-457-01: getDefaultConfig returns a fresh copy each call', () => {
+    // Regression guard: hoisting the defaults to module constants made
+    // getDefaultConfig() hand out SHARED objects, so one caller's mutation
+    // corrupted the defaults for every later caller in the process.
+    const first = getDefaultConfig();
+    first.rules['clean-code']['large-file'].threshold = TIGHT_THRESHOLD;
+    first.rules['clean-code']['magic-numbers'].exclude = [0];
+
+    const second = getDefaultConfig();
+    expect(second.rules['clean-code']['large-file'].threshold).toBe(
+      DEFAULT_LARGE_FILE_THRESHOLD
+    );
+    expect(second.rules['clean-code']['magic-numbers'].exclude).toContain(1024);
+  });
+
+  it('AC-457-02: the large-file rule honours the ACTIVE threshold, not the default', () => {
+    // This is the defect's core: the module captured the default at import
+    // time, so a lower project threshold had no effect.
+    const strict = getDefaultConfig();
+    strict.rules['clean-code']['large-file'].threshold = TIGHT_THRESHOLD;
+    setActiveConfig(strict);
+
+    // Below the default (1150) but above the configured 10.
+    const violations = checkLargeFile(STUB_LINE_COUNT);
+    expect(violations.length).toBeGreaterThan(0);
+    expect(violations[0].message).toContain(String(TIGHT_THRESHOLD));
+  });
+
+  it('AC-457-02: raising the threshold suppresses violations the default would report', () => {
+    const relaxed = getDefaultConfig();
+    relaxed.rules['clean-code']['large-file'].threshold = LOOSE_THRESHOLD;
+    setActiveConfig(relaxed);
+
+    expect(checkLargeFile(STUB_LINE_COUNT)).toHaveLength(0);
+  });
+
+  it('AC-457-04: `enabled: false` disables a rule (previously ignored everywhere)', () => {
+    const disabled = getDefaultConfig();
+    disabled.rules['clean-code']['large-file'].enabled = false;
+    setActiveConfig(disabled);
+
+    expect(checkLargeFile(STUB_LINE_COUNT)).toHaveLength(0);
+  });
+
+  it('AC-457-06: loadConfig reads a config from an explicit path', async () => {
+    const configPath = writeConfig(makeTempDir(), thresholdConfig('large-file', 300));
+
+    const config = await loadConfig(configPath);
+    expect(config.rules['clean-code']['large-file'].threshold).toBe(300);
+    // Unspecified fields keep their defaults (deep merge, not replacement).
+    expect(config.rules['clean-code']['large-file'].severity).toBe('warning');
+    expect(config.rules['clean-code']['long-function'].threshold).toBe(50);
+  });
+
+  it('AC-457-05: a partial override preserves the untouched rule group', async () => {
+    // Regression guard: a shallow group-level spread would drop `solid`
+    // entirely when the file only mentions `clean-code`.
+    const raw = thresholdConfig('long-function', SHORT_THRESHOLD);
+    const config = await loadConfig(writeConfig(makeTempDir(), raw));
+
+    expect(config.rules['solid']['srp'].methodThreshold).toBe(DEFAULT_SRP_METHOD_THRESHOLD);
+    expect(config.rules['solid']['dip'].enabled).toBe(true);
+  });
+
+  it('AC-457-10: a partial output block keeps the sibling output defaults', async () => {
+    // `rules` was deep-merged but the other nested sections were not, so naming
+    // one key under `output` discarded its siblings -- the same fail-open shape
+    // #457 was raised to eliminate. Raised by the Delphi walkthrough (MC-02).
+    const config = await loadConfig(
+      writeConfig(makeTempDir(), JSON.stringify({ output: { format: 'json' } }), 'out.json'),
+    );
+
+    expect(config.output?.format).toBe('json');
+    expect(config.output?.['show-score']).toBe(true);
+    expect(config.output?.colorize).toBe(true);
+  });
+
+  it('AC-457-10: a partial performance block keeps the sibling defaults', async () => {
+    const config = await loadConfig(
+      writeConfig(makeTempDir(), JSON.stringify({ performance: { mode: 'all-files' } }), 'perf.json'),
+    );
+
+    expect(config.performance?.mode).toBe('all-files');
+    expect(config.performance?.mediumProjectDefinition).toBeDefined();
+  });
+
+  it('AC-457-05: an array override replaces rather than concatenates', async () => {
+    const raw = arrayConfig('magic-numbers', 'exclude', [0, 1]);
+    const config = await loadConfig(writeConfig(makeTempDir(), raw));
+
+    expect(config.rules['clean-code']['magic-numbers'].exclude).toEqual([0, 1]);
+  });
+
+  it('AC-457-07: a malformed config falls back to defaults without throwing', async () => {
+    const config = await loadConfig(writeConfig(makeTempDir(), '{ this is not json'));
+
+    expect(config.rules['clean-code']['large-file'].threshold).toBe(DEFAULT_LARGE_FILE_THRESHOLD);
+  });
+
+  it('AC-457-02: an absent auto-resolved config falls back to built-in defaults', () => {
+    // No --config was given, so "this project has no .principlesrc" is a normal
+    // state and must not fail. Run from a temp directory: the repo's own
+    // .principlesrc would otherwise answer the question before the code does.
+    const root = makeTempDir();
+    const target = join(root, 'target.ts');
+    writeFileSync(target, 'export const x = 1;\n', 'utf8');
+
+    const clean = runChecker(['--files', target, '--format', 'json'], root);
+
+    expect(clean.status).toBe(0);
+  });
+
+  it('AC-457-14: an explicitly requested config that cannot be read fails loudly', async () => {
+    // Raised by the Delphi walkthrough (feasibility seat, FC-08). The caller
+    // declared this file; silently enforcing built-in defaults instead is the
+    // same fail-open shape #457 exists to remove, just reached from the other
+    // direction -- a typo'd or deleted `.principlesrc` would keep the gate green.
+    const missing = join(makeTempDir(), 'does-not-exist.json');
+
+    await expect(loadConfig(missing)).rejects.toThrow(/config file not found/);
+  });
+
+  it('AC-457-14: the CLI reports that failure as a tool error (exit 2), not as findings', () => {
+    // Exit 1 means "the checker ran and found ERROR-severity violations". A gate
+    // that reads 1 with an empty report announces PASSED. Exit 2 is this repo's
+    // runtime-error convention, which Gate 4 downgrades to SKIP -- loud, visible,
+    // and never mistaken for a clean run.
+    const missing = join(makeTempDir(), 'does-not-exist.json');
+    const target = join(makeTempDir(), 'target.ts');
+    writeFileSync(target, 'export const x = 1;\n', 'utf8');
+
+    const failed = runChecker(['--files', target, '--format', 'json', '--config', missing]);
+
+    expect(failed.status).toBe(2);
+  });
+
+  it('AC-457-07: a type-mismatched value keeps the default instead of poisoning it', async () => {
+    const bad = thresholdConfig('large-file', 'not-a-number' as unknown as number);
+    const config = await loadConfig(writeConfig(makeTempDir(), bad));
+
+    expect(config.rules['clean-code']['large-file'].threshold).toBe(DEFAULT_LARGE_FILE_THRESHOLD);
+  });
+
+  it('AC-457-04: config read from disk is what the rule then enforces', async () => {
+    // The end-to-end contract: load -> activate -> enforce.
+    const configPath = writeConfig(makeTempDir(), thresholdConfig('large-file', 5));
+    setActiveConfig(await loadConfig(configPath));
+
+    expect(checkLargeFile(STUB_LINE_COUNT).length).toBeGreaterThan(0);
+  });
+
+  // AC-457-08/09: the exit code has to separate "violations found" from "the
+  // checker crashed". Gate 4 decides by testing the exit status (`if run_tsx ...`),
+  // so a crash and an error-severity finding that share exit 1 are indistinguishable.
+  // Fixing #457 alone moved the hole rather than closing it: warnings no longer look
+  // like crashes, but ERROR-severity violations now do -- and the gate SKIPs,
+  // releasing exactly the most serious findings. Found by the Delphi walkthrough.
+  it('AC-457-08: exits 1 for an ERROR-severity violation and 0 without one', () => {
+    const root = makeTempDir();
+    const target = join(root, 'target.ts');
+    writeFileSync(target, 'export const x = 1;\n', 'utf8');
+    const strict = writeConfig(root, '{"rules":{"clean-code":{"large-file":{"enabled":true,"threshold":1,"severity":"error"}}}}');
+
+    const blocking = runChecker(['--files', target, '--format', 'json', '--config', strict]);
+    expect(blocking.summary.errorCount).toBeGreaterThan(0);
+    expect(blocking.status).toBe(1);
+
+    const loose = writeConfig(root, '{"rules":{"clean-code":{"large-file":{"enabled":true,"threshold":100000}}}}', 'loose.json');
+    const clean = runChecker(['--files', target, '--format', 'json', '--config', loose]);
+    expect(clean.status).toBe(0);
+  });
+
+  it('AC-457-09: a checker crash exits 2, not 1, so gates can tell it from violations', () => {
+    // Exit 2 is this repo's existing convention for "tool ran into a runtime
+    // error" (see src/gates/gate-8.ts and gate-9.ts, which SKIP on exit >= 2 and
+    // treat 1 as a real finding).
+    const missing = join(makeTempDir(), 'never-written.ts');
+
+    const crashed = runChecker(['--files', missing, '--format', 'json']);
+
+    expect(crashed.status).toBe(2);
+  });
+
+  it('AC-457-09: a usage error also exits 2, never the findings code', () => {
+    // Raised by the Delphi walkthrough (architecture seat, MC-01). Returning 1
+    // here means "I found ERROR-severity violations" under the contract this
+    // change introduces. Gate 4 branches on >=2 for the crash path, so exit 1 plus
+    // an empty report reads as "checked everything, found nothing": the gate would
+    // announce PASSED having examined no files at all.
+    const misused = runChecker(['--format', 'json']);
+
+    expect(misused.status).toBe(2);
+  });
+
+  // Severity override fixture. Hoisted so both cases below read as a loop over
+  // values rather than a loop over nested literals.
+  const severityConfig = (severity: string) => JSON.stringify({
+    rules: { 'clean-code': { 'large-file': { enabled: true, threshold: 1, severity } } },
+  });
+
+  it('AC-457-11: a severity outside the vocabulary is rejected, not silently obeyed', async () => {
+    // Raised by the Delphi walkthrough (architecture seat, MJ-01). `severity` was
+    // validated only as "non-empty string", but both summary.errorCount and Gate 4's
+    // grep match the exact lowercase literal `error`. Measured with severity "Error":
+    // the rule still runs, still reports the violation, yet errorCount is 0, exit is
+    // 0, and the gate passes -- a typo that silently un-blocks a rule with no warning
+    // anywhere. Same fail-open shape #457 exists to remove.
+    const dir = makeTempDir();
+
+    for (const bad of ['Error', 'ERROR', 'errorX', 'fatal']) {
+      const config = await loadConfig(writeConfig(dir, severityConfig(bad)));
+      expect(config.rules['clean-code']['large-file'].severity).toBe('warning');
+    }
+  });
+
+  it('AC-457-11: the three documented severities are all accepted', async () => {
+    const dir = makeTempDir();
+    for (const good of ['error', 'warning', 'info']) {
+      const config = await loadConfig(writeConfig(dir, severityConfig(good)));
+      expect(config.rules['clean-code']['large-file'].severity).toBe(good);
+    }
+  });
+
+  it('AC-457-13: every rule id has exactly one dot, as config lookup requires', () => {
+    // isRuleEnabled splits on the FIRST dot to get group and name. A future id like
+    // `clean-code.sub.rule` would resolve to group "clean-code", name "sub.rule",
+    // find no config entry, and default to enabled with built-in thresholds --
+    // silently ignoring whatever the project configured. The invariant held by
+    // inspection until this test said so (Delphi walkthrough FC-04).
+    const ids = getAllRules().map((rule) => rule.id);
+
+    expect(ids.length).toBeGreaterThan(0);
+    for (const id of ids) {
+      expect(id.split('.')).toHaveLength(2);
+    }
+  });
+
+  it('AC-457-13: every rule id resolves to a real group in the config', () => {
+    const groups = Object.keys(getDefaultConfig().rules);
+    for (const rule of getAllRules()) {
+      expect(groups).toContain(rule.id.slice(0, rule.id.indexOf('.')));
+    }
+  });
+
+  it('AC-457-16: getEffectiveConfigFor reports the config a rule actually enforces', () => {
+    // Promised by the R2 design review (walkthrough MAJ-03 / FC-05) and never
+    // delivered: `Rule.threshold` on the rule object is a deprecated snapshot, so
+    // a consumer that reads it sees a number that may differ from what `check()`
+    // compared against. This is the one accessor that cannot drift.
+    setActiveConfig(thresholdConfigObject('large-file', TIGHT_THRESHOLD));
+
+    expect(getEffectiveConfigFor('clean-code.large-file').threshold).toBe(TIGHT_THRESHOLD);
+    expect(getDefaultConfig().rules['clean-code']['large-file'].threshold).toBe(
+      DEFAULT_LARGE_FILE_THRESHOLD
+    );
+  });
+
+  it('AC-457-16: an unknown or malformed rule id is refused, not answered with defaults', () => {
+    // Silently handing back built-in defaults would recreate the fail-open shape
+    // for the *reporting* path: a caller would believe it read the effective
+    // threshold for a rule that does not exist.
+    expect(() => getEffectiveConfigFor('clean-code.not-a-rule')).toThrow(/no rule/);
+    expect(() => getEffectiveConfigFor('large-file')).toThrow(/group.name/);
+  });
+
+  it('AC-457-15: replacing the active config without resetting it is reported', () => {
+    // The concurrency contract used to live only in a JSDoc comment (walkthrough
+    // FC-02). A caller that evaluates two projects in one process would silently
+    // enforce whichever config happened to be installed last.
+    const warnings = capturePrinciplesWarnings(() => {
+      setActiveConfig(thresholdConfigObject('large-file', TIGHT_THRESHOLD));
+      setActiveConfig(thresholdConfigObject('large-file', LOOSE_THRESHOLD));
+    });
+
+    expect(warnings.join('\n')).toMatch(/replaced without reset/);
+  });
+
+  it('AC-457-15: the documented single-set lifecycle stays quiet', () => {
+    // The guardrail must not turn the normal CLI path (load -> set once -> run)
+    // into warning noise, otherwise Gate 4's stderr becomes unreadable.
+    const warnings = capturePrinciplesWarnings(() => {
+      resetActiveConfig();
+      setActiveConfig(thresholdConfigObject('large-file', TIGHT_THRESHOLD));
+      resetActiveConfig();
+      setActiveConfig(thresholdConfigObject('large-file', LOOSE_THRESHOLD));
+    });
+
+    expect(warnings).toEqual([]);
+  });
+});

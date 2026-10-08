@@ -55,19 +55,21 @@ run_pre_push_with_files() {
 
   # Valid walkthrough evidence so the hook, once it stops classifying the push
   # as documentation-only, reaches the validator and proceeds rather than
-  # failing for an unrelated reason.
+  # failing for an unrelated reason. timestamp and expires share one base: the
+  # validator requires the gap to be exactly one hour (#497).
+  evidence_base="$(date -u +%s)"
   cat > .code-walkthrough-result.json << EOF
 {
   "commit": "$head_sha",
   "verdict": "APPROVED",
-  "timestamp": "$(date -u -d '-1 minute' +%Y-%m-%dT%H:%M:%SZ)",
-  "expires": "$(date -u -d '+1 hour' +%Y-%m-%dT%H:%M:%SZ)",
+  "timestamp": "$(date -u -d "@$((evidence_base - 60))" +%Y-%m-%dT%H:%M:%SZ)",
+  "expires": "$(date -u -d "@$((evidence_base - 60 + 3600))" +%Y-%m-%dT%H:%M:%SZ)",
   "branch": "test-branch",
   "consensus_ratio": 0.95,
   "experts": [
-    {"role":"architecture","verdict":"APPROVED","result_type":"delphi_expert_result","requested_model":"model-a","resolved_model":"model-a"},
-    {"role":"technical","verdict":"APPROVED","result_type":"delphi_expert_result","requested_model":"model-b","resolved_model":null},
-    {"role":"feasibility","verdict":"APPROVED","result_type":"delphi_expert_result","requested_model":"model-c","resolved_model":"model-c"}
+    {"role":"architecture","verdict":"APPROVED","result_type":"delphi_expert_result","requested_model":"model-a","resolved_model":"model-a","channel":"external"},
+    {"role":"technical","verdict":"APPROVED","result_type":"delphi_expert_result","requested_model":"model-b","resolved_model":"provider-model-b","channel":"external"},
+    {"role":"feasibility","verdict":"APPROVED","result_type":"delphi_expert_result","requested_model":"model-c","resolved_model":"model-c","channel":"external"}
   ]
 }
 EOF

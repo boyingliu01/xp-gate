@@ -249,7 +249,7 @@ tools_denied:
 
 1. **Step 0: Input Validation** — Check input contains reviewable content (design doc/code/spec/diff). Empty input → `[DelphiReview:BLOCKED]`.
 2. **Round 1: Anonymous Independent Review** — Invoke architecture, technical, and feasibility independently without exposing their opinions to one another. Every successful result must use `result_type=delphi_expert_result`.
-3. **Execution Verification** — Verify that all three results succeeded and that their `requested_model` values are three distinct trimmed IDs, confirmed against the platform's execution record rather than expert self-report alone (OpenCode: the provider call log; Qoder: the `model` field of `model.request.started` events under `~/.qoder/logs/sessions/<project>/<sessionId>/segments/*.jsonl` — the `--model` argv in `~/.qoder/logs/runs/*/manifest.json` is the session model and proves nothing about subagents). A local fallback (`provider: local`) is not an executed expert and cannot satisfy this check; a local hosted endpoint configured as an ordinary callable provider can. Where the platform pins subagents to the session model (current Qoder Custom Agent dispatch, see the Qoder section below), the check cannot pass on built-in models at all and the external provider path is required.
+3. **Execution Verification** — Verify that all three results succeeded and that their `requested_model` values are three distinct trimmed IDs, confirmed against the platform's execution record rather than expert self-report alone (OpenCode: the provider call log; Qoder: the `model` field of `model.request.started` events under `~/.qoder/logs/sessions/<project>/<sessionId>/segments/*.jsonl` — the `--model` argv in `~/.qoder/logs/runs/*/manifest.json` is the session model and proves nothing about subagents). A local fallback (`provider: local`) is not an executed expert and cannot satisfy this check; a local hosted endpoint configured as an ordinary callable provider can. Each expert record must also carry an explicit `channel` of either `external` or `local`; the value is a whitelist and a missing or unknown value fails the gate (it is never defaulted, since defaulting would let a forged record pass by simply omitting the field). Where the platform pins subagents to the session model (current Qoder Custom Agent dispatch, see the Qoder section below), the check cannot pass on built-in models at all and the external provider path is required.
 4. **Consensus Check** — Aggregate all three successful expert results. Consensus >=90% AND all APPROVED → complete. One expert result is never global approval.
 5. **Rounds 2-5: Exchange and Final Positions** — If needed, expose prior aggregate evidence, re-evaluate, and stop at the first approved consensus or after five rounds.
 6. **Failure Handling** — Any expert failure, missing result, duplicate model ID, or unverifiable execution blocks the review. Do not substitute a local fallback or silently reduce the expert count.
@@ -367,6 +367,71 @@ OpenCode 环境下通过 `opencode.json` 的 agent 配置 + `.delphi-config.json
 - 通过 `scripts/delphi-external-review.cjs` 调用各 provider 的兼容 API（注意：该脚本目前在仓库根 `scripts/` 下，尚未随 skill 目录分发）
 - 需要用户自行配置 API key（环境变量注入）
 
+#### DeepSeek Harness 平台（`delphi-review` 工具 — 推荐）
+
+DSH 里**不要**用 `subagent` 工具派发三个专家。原因和 Qoder 同源：DSH 的 subagent
+继承宿主配置的**单一**模型（`SubagentModelSelectionConfig.enabled` 默认 `false`），
+三个"专家"会是同一模型的三个实例 —— 按本 skill 的规则必须 BLOCK。
+
+DSH 的正确入口是插件提供的 **`delphi-review` 工具**（`@boyingliu01/dsh-plugin-xp-gate`）：
+
+```
+delphi-review(
+  subject:   <待评审材料：diff / 设计 / 规格>,
+  addressed: <可选：上一轮之后改了什么，用于后续轮次>,
+  maxRounds: <可选：覆盖默认 5 轮>
+)
+```
+
+该工具**直连外部 OpenAI 兼容网关**，每个席位绑定一个不同模型，因此不依赖宿主配置即可
+满足不变量。它复用**同一份** `.delphi-config.json`，无需额外配置。
+
+**代码强制的不变量**（不是文档约定，违反即报错）：
+
+| 不变量 | 违反时 |
+|---|---|
+| 恰好 3 位专家 | `DelphiConfigError` |
+| 3 个 `requested_model` 去空白后两两不同 | `DelphiConfigError` |
+| 模型不得为未展开的 `${...}` 占位符 | `DelphiConfigError`（在**任何网络调用之前**） |
+| 缺密钥 / 缺 provider / 专家跨网关 | `DelphiSetupError`，报变量名而非回显配置 |
+| 报告缺 `### VERDICT` 段 | 记为 `INVALID_NO_VERDICT`，**不计入共识** |
+| 退出码 0 但内容为空 | 记为 ERROR（推理模型可能把预算全烧在隐藏 token 上） |
+
+**轮次语义与本 skill 一致**：Round 1 匿名且并发；Round 2+ 回传**汇总票型**与"已修改项"，
+个体报告始终匿名。达到阈值即停，否则到 `max_review_rounds` 为止并如实返回 `NO CONSENSUS`。
+
+**推理模型注意**：`g-glm-5.3-flash` 这类模型会先产出隐藏推理 token。
+实测 `max_tokens=4000` 时 `finish_reason=length` 且 **content 为空**；
+席位需独立预算（该席位配置为 32000）。工具把"空内容"记为 ERROR 而非空评审。
+
+> 备选：若希望 DSH **原生** `subagent` 也能选模型，需同时满足
+> (1) `dsh-tool-subagent` 的 `modelSelectionSettings: true`（仅能力开关），
+> (2) 宿主设置 `SubagentModelSelectionConfig.enabled = true` 且 `allowedModels` ≥3 个不同模型。
+> 该路线依赖宿主配置，CI / 一次性会话不可靠，故不作为默认路径。
+#### WorkBuddy 平台（Expert 团队模式）
+
+WorkBuddy 侧以 Team 型专家团（示例：`delphi-review-team`，安装在 `~/.workbuddy/plugins/marketplaces/my-experts/plugins/`，创建方式见 [docs/platform-workbuddy.md](../../docs/platform-workbuddy.md)）承载评审，触发本技能后按此路由执行：
+
+| 角色 | Agent ID | 绑定模型 | 倍率 |
+|------|----------|---------|------|
+| 主理人（衡定一，会话自身） | delphi-review-team-team-lead | 会话模型，固定用 `local-deepseek-v4-flash` | 零 credits |
+| Architecture (A) | delphi-arch-reviewer | `deepseek-v4.1-flash` | x0.11 |
+| Technical (B) | delphi-tech-reviewer | `glm-5.3-flash` | x0.06 |
+| Feasibility (C) | delphi-feasibility-reviewer | `hy3` | x0.00（免费） |
+
+**执行方式**：
+- 主理人开场自检：会话模型不是 `local-deepseek-v4-flash` 时，先提醒用户切换再开始。
+- 已启用专家团 → 按其团队机制 spawn 3 位成员；未启用 → 用 `Agent` 工具同一消息**并行** spawn 3 个 `general-purpose` 子代理，prompt = 对应专家 MD 全文人设（读专家团 `agents/` 目录）+ 匿名评审模板 + 待评审材料，`model` 参数按上表传。
+- Round 1 三个子代理互不见对方输出（匿名铁律不变）。
+
+**执行验证（适配本平台，2026-09-29 校准）**：
+- 参数层路由 ✅ 已实测：`Agent` 工具 `model` 参数传 `deepseek-v4.1-flash` / `glm-5.3-flash` / `hy3` 三个 ID 均被接受，3 个 general-purpose 子代理并行执行成功。
+- 执行层证据 ⚠️ 平台暂缺：WorkBuddy 审计日志（`~/.workbuddy/audit-log/`）只记 command-safety 事件，无 per-request 模型路由记录，无法像 Qoder/OpenCode 那样从日志取证 distinct models。
+- **WorkBuddy 过渡验证标准**：参数级校准（model ID 被平台接受且子代理成功执行）+ 专家 `requested_model` 自述如实记录；报告中必须注明「执行层验证待平台日志支持」。若 `model` 参数被拒绝（报错/回落会话模型），按本技能 Failure Handling 处理，不得静默降级冒充三模型共识。
+- 契约合规兜底：需要严格证据时，走外部 provider 路径（`.delphi-config.json` + 兼容 API，如 whalecloud 网关 3 个模型 ID）。
+
+**成本**：3 专家合计 x0.17/轮；主理人选 local 会话模型则零 credits。
+
 ### 共识阈值
 
 | 阈值 | 说明 |
@@ -473,9 +538,9 @@ Every Delphi mode MUST use the full JSON schema below. Architecture, technical, 
   "context_file_used": "CONTEXT.md",
   "round": 1,
   "expert_verdicts": [
-    { "role": "architecture", "verdict": "APPROVED", "confidence": 9, "result_type": "delphi_expert_result", "requested_model": "provider/model-a" },
-    { "role": "technical", "verdict": "APPROVED", "confidence": 8, "result_type": "delphi_expert_result", "requested_model": "provider/model-b" },
-    { "role": "feasibility", "verdict": "APPROVED", "confidence": 8, "result_type": "delphi_expert_result", "requested_model": "provider/model-c" }
+    { "role": "architecture", "verdict": "APPROVED", "confidence": 9, "result_type": "delphi_expert_result", "requested_model": "provider/model-a", "resolved_model": "provider/model-a", "channel": "external" },
+    { "role": "technical", "verdict": "APPROVED", "confidence": 8, "result_type": "delphi_expert_result", "requested_model": "provider/model-b", "resolved_model": "provider/model-b", "channel": "external" },
+    { "role": "feasibility", "verdict": "APPROVED", "confidence": 8, "result_type": "delphi_expert_result", "requested_model": "provider/model-c", "resolved_model": "provider/model-c", "channel": "external" }
   ],
   "requirements_statement": "<short summary of what was reviewed>",
   "gaps_found": [],

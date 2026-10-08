@@ -1,9 +1,9 @@
 # PROJECT KNOWLEDGE BASE
 
-**Generated:** 2026-09-24
-**Commit:** 467174d
+**Generated:** 2026-10-08
+**Commit:** 5a431230
 **Branch:** main
-**Version:** 0.19.3.0
+**Version:** 0.20.0.0
 
 ## OVERVIEW
 XP-Gate — deterministic git quality gates + AI-driven multi-expert review (Delphi) + Sprint Flow pipeline (6 phases: PREP, DESIGN, BUILD, VERIFY, SHIP, CLOSE) + npm zero-install distribution + cross-platform plugin system (Claude Code / OpenCode / Qoder). Pre-commit runs **12 numbered gates (Gate 0–11) plus Gate 12 (File Hygiene, warning-only)**. Pre-push runs **8 gates: Gate 10 (Build Integrity), Gate M/M-Python/M-Go/M-Java/M-Kotlin (Mutation), Gate M2 (Mock Density, WARNING), Gate ML (Mock Layering), Gate UI (UI Sprint Gates), Gate MW (Code Walkthrough), and Gate S (Sprint Flow)**. Implements 14 Clean Code/SOLID rules across 9 language adapters (TypeScript engine), 13 shell adapters (gate routing), Boy Scout Rule baseline enforcement, test-specification alignment, mock policy enforcement, and incremental mutation testing.
@@ -22,7 +22,7 @@ XP-Gate — deterministic git quality gates + AI-driven multi-expert review (Del
 │   │   ├── hooks/                      # pre-commit, pre-push, adapter-common.sh (shipped to user repos)
 │   │   ├── lib/                        # init, install/update/uninstall-skill, doctor, migrate,
 │   │   │                               # baseline, audit-log, gate-audit, rollback, ui-detector,
-│   │   │                               # ui-review, download-skill, shared-paths, shared-utils
+│   │   │                               # ui-review, shared-paths, shared-utils
 │   │   ├── skills/                     # 12 skills bundled at publish time (mirror of repo skills/)
 │   │   ├── plugins/                    # claude-code/, opencode/, qoder/ bundled at publish time
 │   │   └── scripts/sync-package-content.js  # prepack hook that copies skills+plugins in
@@ -61,7 +61,7 @@ XP-Gate — deterministic git quality gates + AI-driven multi-expert review (Del
 │   ├── grilling/                       # NEW in 0.18.0 (Matt Pocock); grill engine, dependency of grill-with-docs
 │   └── domain-modeling/                # NEW in 0.18.0 (Matt Pocock); CONTEXT.md/ADR maintenance, with templates
 ├── docs/               # 30+ design plans, incidents, retros, guides + ARCHITECTURE.md, CAPABILITIES.md, MANIFEST.md
-├── scripts/            # build-plugin.sh, copy-skills.sh, sync-version.cjs, test-plugins.sh,
+├── scripts/            # build-plugin.sh, copy-skills.sh, sync-version.cjs, test-plugins.mjs,
 │                       #   install-{hooks,skills,all}.sh, prepack.cjs
 ├── dashboard/          # Quality dashboard (serve.js + dashboard.js → localhost:3333)
 ├── .github/workflows/  # 5 CI pipelines: quality-gates (~948 LOC), npm-publish, cross-platform-ci,
@@ -88,13 +88,13 @@ XP-Gate — deterministic git quality gates + AI-driven multi-expert review (Del
 | Task | Location | Notes |
 |------|----------|-------|
 | npm CLI dispatcher | src/npm-package/bin/xp-gate.js | 11+ subcommands |
-| CLI implementations | src/npm-package/lib/ | init, install/update/uninstall-skill, doctor, migrate, uninstall, baseline, audit-log, gate-audit, rollback, ui-detector, ui-review, download-skill, shared-* |
+| CLI implementations | src/npm-package/lib/ | init, install/update/uninstall-skill, doctor, migrate, uninstall, baseline, audit-log, gate-audit, rollback, ui-detector, ui-review, shared-* |
 | Claude Code plugin | plugins/claude-code/ | Manifest: .claude-plugin/plugin.json; hooks: hooks/hooks.json |
 | OpenCode plugin | plugins/opencode/ | index.ts exposes gate-check, gate-principles, gate-arch |
 | Qoder plugin | plugins/qoder/ | 7 skills + 3 Delphi agents (auto-deployed by `xp-gate init` on Qoder platform) |
 | Plugin builder | scripts/build-plugin.sh | --platform claude-code\|opencode\|qoder |
 | Skill copy | scripts/copy-skills.sh | Preserves references/ and templates/ |
-| Plugin tests | scripts/test-plugins.sh | 28 integration tests |
+| Plugin tests | scripts/test-plugins.mjs | `npm run test:plugins` |
 | Pre-commit gates | githooks/pre-commit | Gate 0–9 (see Gates section) |
 | Pre-push gates | githooks/pre-push | Gate M, M2, M3 + Delphi walkthrough |
 | Language adapters | githooks/adapters/ | 13 .sh files + 5 plugin extensions |
@@ -164,7 +164,7 @@ Subcommands registered in 0.8.8.0 (verified against bin source):
 | `xp-gate doctor` | Diagnose hook/adapter/env health; `--fix` for auto-repair; `--sync-hooks` copies repo `githooks/` over the installed copy and reports which hooks actually execute (#451) |
 | `xp-gate migrate` | Clean v0.4.x GitHub-Packages residue from `~/.npmrc` |
 | `xp-gate baseline <create\|show\|reset\|diff>` | Manage lint baseline (Boy Scout track) |
-| `xp-gate install-skill <name>` | Download + install a skill from GitHub |
+| `xp-gate install-skill <name>` | Install a skill from the package bundle (skills/<name>/) |
 | `xp-gate update-skill <name>` | Update an already-installed skill |
 | `xp-gate uninstall-skill <name> --force` | Remove an installed skill |
 | `xp-gate audit [--tail \| --stats \| record]` | Inspect / record gate audit log |

@@ -1,17 +1,23 @@
 import { describe, it, expect, vi } from 'vitest';
 
-vi.mock('../../../config', () => ({
-  getDefaultConfig: () => ({
-    rules: {
-      'clean-code': {
-        'many-exports': {
-          enabled: true,
-          // threshold intentionally omitted -> exercises ?? 10 fallback branch
-          severity: 'warning',
-        },
+// The rule now reads its settings from `getActiveConfig()` at check time
+// (Issue #457: a module-load snapshot ignored `.principlesrc`), so the mock must
+// expose that accessor. The same fixture is returned by both entry points.
+const mockConfig = {
+  rules: {
+    'clean-code': {
+      'many-exports': {
+        enabled: true,
+        // threshold intentionally omitted -> exercises ?? 10 fallback branch
+        severity: 'warning',
       },
     },
-  }),
+  },
+};
+
+vi.mock('../../../config', () => ({
+  getDefaultConfig: () => mockConfig,
+  getActiveConfig: () => mockConfig,
 }));
 
 import { manyExportsRule } from '../../clean-code/many-exports';

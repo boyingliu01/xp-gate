@@ -135,24 +135,9 @@ if ! declare -F run_tsx >/dev/null 2>&1; then
   }
 fi
 
-# Detect a vitest *runner infrastructure* failure as opposed to a real test
-# failure. On Windows, vitest 1.6.x can exit non-zero while reporting zero failed
-# tests, because its temp/ssr module cache hits EPERM (#454). Treating that as
-# "Tests FAILED" sends developers chasing a bug that does not exist.
-#
-# Returns 0 (true) only when both hold:
-#   - the output mentions "Unhandled Error" (vitest's runner-level failure), AND
-#   - no real test failure marker is present.
-is_runner_infrastructure_error() {
-  local _out="$1"
-  [ -n "$_out" ] || return 1
-  printf '%s' "$_out" | grep -qE 'Unhandled Error' || return 1
-  # A real failure must still block.
-  if printf '%s' "$_out" | grep -qE 'Tests +[0-9]+ failed|FAIL |AssertionError'; then
-    return 1
-  fi
-  return 0
-}
+# Gate 5's vitest exit-code judgement (is_runner_infrastructure_error,
+# is_partial_threshold_only_exit, handle_test_failure) is sourced from
+# lib/test-failure.sh below, next to the other hook libraries.
 
 # Parse LCOV file and return coverage percentage
 # Usage: parse_lcov_coverage <lcov_file>
@@ -228,6 +213,16 @@ PROJECT_ROOT_FOR_AUDIT="$(git rev-parse --show-toplevel 2>/dev/null || echo "$AU
 
 # Issue #370: source cross-platform now_ms() helper (node-preferred, regex-validated)
 source "${AUDIT_SCRIPT_DIR}/lib/now-ms.sh"
+
+# Issue #473 (+ #454): Gate 5's vitest exit-code judgement, sourced as a library
+# so the fail-closed contract is unit-testable without executing this hook.
+source "${AUDIT_SCRIPT_DIR}/lib/test-failure.sh"
+
+# Issue #477: Gate 2's jscpd config probe and outcome classification, same reason.
+source "${AUDIT_SCRIPT_DIR}/lib/jscpd-run.sh"
+
+# Issue #476: Gate 11's sprint-gate.sh resolution chain and decision translation.
+source "${AUDIT_SCRIPT_DIR}/lib/sprint-gate-report.sh"
 
 # Read max_duration_ms from .xp-gate-config.json (default 7200000 = 2 hours)
 _MAX_DURATION_MS=$(node -e "try{const c=JSON.parse(require('fs').readFileSync('${PROJECT_ROOT_FOR_AUDIT}/.xp-gate-config.json','utf8'));console.log((c.audit&&c.audit.max_duration_ms)||7200000);}catch(e){console.log(7200000);}" 2>/dev/null || echo "7200000")
@@ -441,7 +436,11 @@ Before committing:
   2. Add entry to CHANGELOG.md
   3. Run: node scripts/sync-version.cjs
 
-Or use --no-verify (discouraged) or include [skip-version-check] in commit message.
+Or use the bypass prefix — the commit message FIRST LINE must START with:
+  [skip-version-check] chore: <description>
+Allowed types: chore: docs: release:. The bypass only permits build
+tooling changes (adapters/, scripts/, hooks/); production source files
+still require a VERSION/CHANGELOG update.
 
 Staged files: $(echo "$STAGED_FILES" | tr '\n' ', ' | sed 's/,$//')
 "
@@ -467,6 +466,22 @@ if [ -z "$CHANGED_FILES" ]; then
   echo "No files changed. Skipping gates."
   exit 0
 fi
+
+# Gate 5 test selection (#494): vitest.config.ts excludes the bundled mirror
+# subtrees and the skills/plugins source trees, so a path under one of them can
+# never be collected. When such a path is the only target, vitest exits 1 with
+# "No test files found" and Gate 5 reports a failing test run -- a commit that
+# touched nothing but a byte-identical mirror cannot land. Map each mirror path
+# to the canonical twin it copies, drop what has no twin, collapse duplicates.
+select_root_suite_targets() {
+  # Deliberately not `s|...|...|`: the alternation below contains `|`, which sed
+  # would read as the end of its pattern ("unknown option to `s'").
+  printf '%s\n' "$1" \
+    | sed -E 's#^src/npm-package/(principles|mutation|mock-policy|build-integrity)/#src/\1/#' \
+    | grep -vE '^(src/_wip/|plugins/|skills/|src/npm-package/(plugins|skills|principles|mutation|mock-policy|build-integrity)/)' \
+    | sed '/^$/d' \
+    | sort -u
+}
 
 any_changed_files_match() {
   local pattern
@@ -842,11 +857,21 @@ has_project_lang() {
 }
 # Switch to subdirectory if detected (for single-language subdirectory projects).
 # Multi-language projects stay at root — each adapter handles its own path.
+#
+# IN_PROJECT_SUBDIR records whether this cd actually happened. Git reports
+# staged paths relative to the repo root; after cd "$PROJECT_SUBDIR" the [ -f ]
+# probes below need subdirectory-relative paths (hence the PROJECT_SUBDIR
+# prefix strips in Gates 5a/5b/5c), but when the hook stays at the root
+# (multi-language projects) stripping the prefix makes every path-based check
+# resolve against the wrong directory — false BLOCKs in Gate 5a, silent no-ops
+# in 5b/5c. Only strip when we really are inside the subdirectory.
 ORIGINAL_DIR=""
+IN_PROJECT_SUBDIR=0
 _lang_count=$(echo "$PROJECT_LANGS" | wc -w)
 if [ -n "$PROJECT_SUBDIR" ] && [ "$PROJECT_SUBDIR" != "." ] && [ "$PROJECT_LANG" != "documentation-only" ] && [ "$_lang_count" -le 1 ]; then
   ORIGINAL_DIR=$(pwd)
   cd "$PROJECT_SUBDIR"
+  IN_PROJECT_SUBDIR=1
   echo "Working in: $PROJECT_SUBDIR/"
   echo ""
 fi
@@ -872,80 +897,67 @@ else
     echo "   ── Checking $CURRENT_LANG ──"
     case "$CURRENT_LANG" in
       typescript)
-  # TypeScript: static analysis (tsc) + linting (eslint)
-  if ! command -v npx &> /dev/null; then
-    echo "ℹ️  npx not available — skipping TypeScript checks"
-    echo "⏭️  SKIPPED - Code quality (npx not available)"
-  else
-    # Verify tsc is real TypeScript compiler (npx may fetch deprecated tsc@2.0.4 placeholder)
-    TSC_OUTPUT=$(npx tsc --version 2>&1)
-    if echo "$TSC_OUTPUT" | grep -q "Version"; then
-      # Only run tsc if tsconfig.json exists (without it tsc prints help and exits non-zero)
-      if [ -f "tsconfig.json" ]; then
-        # Run TypeScript type checking
-        echo "Running TypeScript static analysis ($TSC_OUTPUT)..."
-        npx tsc --noEmit --skipLibCheck 2>&1 | head -30
-        TSC_EXIT=$?
-        if [ "$TSC_EXIT" -ne 0 ]; then
-          echo ""
-          echo "❌ BLOCKED - TYPE ERRORS detected"
-          echo "Fix the type errors above before committing."
-          exit 1
-        fi
-        echo "✅ PASSED - TypeScript static analysis."
-        
-        # Also check test files if they exist (Issue #293)
-        # Many projects exclude __tests__/ from tsconfig.json, so test file type
-        # errors silently accumulate.
-        if [ -d "src/__tests__" ] || [ -d "src/tests" ] || [ -d "tests" ] || [ -d "__tests__" ]; then
-          HAS_TESTS_IN_TSC=false
-          if npx tsc --noEmit --skipLibCheck --listFiles 2>/dev/null | grep -qE '__tests__/|\.test\.ts|\.spec\.ts'; then
-            HAS_TESTS_IN_TSC=true
-          fi
-          if [ "$HAS_TESTS_IN_TSC" = false ]; then
-            TSC_TEST_EXIT=0
-            if [ -f "tsconfig.tests.json" ]; then
-              echo "Checking test files with tsconfig.tests.json..."
-              npx tsc --noEmit --project tsconfig.tests.json 2>&1 | head -30
-              TSC_TEST_EXIT=$?
-            else
-              echo "Checking test files for type errors..."
-              TEMP_TSCONFIG=".tsconfig.withtests.json"
-              node -e "
-                const cfg = JSON.parse(require('fs').readFileSync('tsconfig.json','utf8'));
-                delete cfg.exclude;
-                cfg.include = cfg.include || ['src/**/*'];
-                cfg.include.push('src/**/__tests__/**','src/**/*.test.ts','src/**/*.spec.ts');
-                require('fs').writeFileSync('$TEMP_TSCONFIG', JSON.stringify(cfg, null, 2));
-              " 2>/dev/null
-              npx tsc --noEmit --project "$TEMP_TSCONFIG" --skipLibCheck 2>&1 | head -30
-              TSC_TEST_EXIT=$?
-              rm -f "$TEMP_TSCONFIG"
-            fi
-            if [ $TSC_TEST_EXIT -ne 0 ]; then
-              echo ""
-              echo "❌ BLOCKED - TYPE ERRORS in test files"
-              echo "Your project's tsconfig.json excludes test files from type checking."
-              echo "Add a tsconfig.tests.json to customise test file checking."
-              exit 1
-            fi
-          fi
-        fi
-      else
-        echo "ℹ️  SKIP - tsconfig.json not found (no TypeScript project config)"
-      fi
-    else
-      echo "ℹ️  SKIP - tsc not properly installed ($TSC_OUTPUT)"
-      echo "Install typescript (npm install typescript --save-dev) for type checking."
+  # TypeScript: static analysis + linting (eslint). The type-check decision lives
+  # in githooks/lib/typecheck.sh so a project's own checker (vue-tsc, svelte-check,
+  # a `typecheck` script) is used instead of a hardcoded tsc that cannot resolve
+  # single-file components (#436).
+  #
+  # Resolve the TS project directory first (#470). The probes below used to run
+  # against the repo root only; in multi-language monorepos (e.g. web/ +
+  # backend/, where the hook stays at the root — see the cd block above)
+  # tsconfig.json / biome.json live in the language subdirectory, so the whole
+  # TS half of Gate 1 silently SKIPped ("tsconfig.json not found") while a
+  # project config existed. Order: repo root first (unchanged behaviour for
+  # plain projects), then the detected language subdirectory, then a shallow
+  # search.
+  TS_PROJECT_DIR=""
+  for _ts_dir in "." "${PROJECT_SUBDIR:-}"; do
+    [ -z "$_ts_dir" ] && continue
+    if [ -f "$_ts_dir/tsconfig.json" ] || [ -f "$_ts_dir/biome.json" ] || [ -f "$_ts_dir/biome.jsonc" ] \
+       || [ -f "$_ts_dir/eslint.config.js" ] || [ -f "$_ts_dir/.eslintrc.json" ] \
+       || [ -f "$_ts_dir/.eslintrc.js" ] || [ -f "$_ts_dir/.eslintrc.cjs" ]; then
+      TS_PROJECT_DIR="$_ts_dir"
+      break
     fi
+  done
+  if [ -z "$TS_PROJECT_DIR" ]; then
+    _TSCONFIG_CAND=$(find . -maxdepth 2 \( -name tsconfig.json -o -name biome.json -o -name biome.jsonc -o -name eslint.config.js \) -not -path './.git/*' -not -path './node_modules/*' 2>/dev/null | head -1)
+    if [ -n "$_TSCONFIG_CAND" ]; then
+      TS_PROJECT_DIR=$(dirname "$_TSCONFIG_CAND")
+    fi
+  fi
+  [ -z "$TS_PROJECT_DIR" ] && TS_PROJECT_DIR="."
+  if [ "$TS_PROJECT_DIR" != "." ]; then
+    echo "   TypeScript project directory: $TS_PROJECT_DIR/"
+    # typecheck.sh is cwd-relative: run it from the TS project subdirectory in a
+    # subshell so the language loop's next iteration still starts at the root.
+    # Exit contract: 0 clean, 1 findings (block), 2 checker unavailable (skip).
+    ( cd "$TS_PROJECT_DIR" && source "${AUDIT_SCRIPT_DIR}/lib/typecheck.sh" && run_typescript_typecheck )
+    TS_CHECK_EXIT=$?
+  else
+    source "${AUDIT_SCRIPT_DIR}/lib/typecheck.sh"
+    run_typescript_typecheck
+    TS_CHECK_EXIT=$?
+  fi
+  if [ "$TS_CHECK_EXIT" -eq 1 ]; then
+    exit 1
+  fi
     
-    # Run ESLint linting if config exists
-    if [ -f ".eslintrc.json" ] || [ -f ".eslintrc.js" ] || [ -f ".eslintrc.cjs" ] || [ -f "eslint.config.js" ]; then
+    # Run ESLint linting if config exists (root or TS project subdirectory)
+    if [ -f "$TS_PROJECT_DIR/.eslintrc.json" ] || [ -f "$TS_PROJECT_DIR/.eslintrc.js" ] || [ -f "$TS_PROJECT_DIR/.eslintrc.cjs" ] || [ -f "$TS_PROJECT_DIR/eslint.config.js" ]; then
       echo "Running ESLint linting..."
       # Filter to only TS/JS files - ESLint config ignores non-matching files
       ESLINT_FILES=$(echo "$CHANGED_FILES" | grep -E '\.(ts|tsx|js|jsx)$' || true)
       if [ -n "$ESLINT_FILES" ]; then
-        ESLINT_OUTPUT=$(npx eslint $ESLINT_FILES -f json --no-warn-ignored 2>&1)
+        # File paths from git are repo-root relative, so they are correct from
+        # the root. Legacy .eslintrc.* configs are discovered by walking up from
+        # each linted file (found in the subdirectory automatically); flat
+        # configs are discovered from the CWD, so point at them explicitly.
+        if [ "$TS_PROJECT_DIR" != "." ] && [ -f "$TS_PROJECT_DIR/eslint.config.js" ]; then
+          ESLINT_OUTPUT=$(npx eslint --config "$TS_PROJECT_DIR/eslint.config.js" $ESLINT_FILES -f json --no-warn-ignored 2>&1)
+        else
+          ESLINT_OUTPUT=$(npx eslint $ESLINT_FILES -f json --no-warn-ignored 2>&1)
+        fi
         ESLINT_EXIT=$?
         if [ "$ESLINT_EXIT" -ne 0 ]; then
           if [ -f ".xp-gate/lint-baseline.json" ] && command -v node &> /dev/null; then
@@ -992,8 +1004,8 @@ else
       fi
     else
       echo "ℹ️  No ESLint configuration found - Skipping"
-      if [ -f "package.json" ] && command -v node &> /dev/null; then
-        HAS_ESLINT=$(node -e "try{const p=JSON.parse(require('fs').readFileSync('package.json','utf8'));const d=p.devDependencies||{};const deps=p.dependencies||{};console.log((d.eslint||deps.eslint)?'yes':'no')}catch{console.log('no')}") && true
+      if [ -f "$TS_PROJECT_DIR/package.json" ] && command -v node &> /dev/null; then
+        HAS_ESLINT=$(node -e "try{const p=JSON.parse(require('fs').readFileSync('$TS_PROJECT_DIR/package.json','utf8'));const d=p.devDependencies||{};const deps=p.dependencies||{};console.log((d.eslint||deps.eslint)?'yes':'no')}catch{console.log('no')}") && true
         if [ "$HAS_ESLINT" = "yes" ]; then
           echo "⚠️  WARNING: eslint is installed in package.json but no eslint config found"
           echo "   Either create .eslintrc.* / eslint.config.* or remove eslint from dependencies"
@@ -1003,9 +1015,17 @@ else
     fi
 
     # ── Biome lint/format check ──
-    if [ -f "biome.json" ] || [ -f "biome.jsonc" ]; then
+    # Default the project dir so this branch stays runnable standalone
+    # (the gate-1-biome-noop suite extracts it verbatim); a no-op inside the
+    # hook, where TS_PROJECT_DIR is resolved above.
+    TS_PROJECT_DIR="${TS_PROJECT_DIR:-.}"
+    if [ -f "$TS_PROJECT_DIR/biome.json" ] || [ -f "$TS_PROJECT_DIR/biome.jsonc" ]; then
       echo "Running Biome lint/format check..."
-      BIOME_OUT=$(npx biome check --staged . 2>&1)
+      # Run from the TS project directory so Biome auto-discovers its config and
+      # scopes --staged to that subdirectory (mirrors the single-language subdir
+      # mode, which executes after cd "$PROJECT_SUBDIR"). Empirically verified:
+      # `biome check --staged .` from the subdir checks the staged files under it.
+      BIOME_OUT=$(cd "$TS_PROJECT_DIR" && npx biome check --staged . 2>&1)
       BIOME_STATUS=$?
       if [ "$BIOME_STATUS" -ne 0 ]; then
         # Biome exits 1 with `internalError/io - No files were processed` when the
@@ -1030,8 +1050,8 @@ else
         echo "✅ PASSED - Biome check."
       fi
     else
-      if [ -f "package.json" ] && command -v node &> /dev/null; then
-        HAS_BIOME=$(node -e "try{const p=JSON.parse(require('fs').readFileSync('package.json','utf8'));const d=p.devDependencies||{};const deps=p.dependencies||{};console.log((d['@biomejs/biome']||deps['@biomejs/biome'])?'yes':'no')}catch{console.log('no')}") && true
+      if [ -f "$TS_PROJECT_DIR/package.json" ] && command -v node &> /dev/null; then
+        HAS_BIOME=$(node -e "try{const p=JSON.parse(require('fs').readFileSync('$TS_PROJECT_DIR/package.json','utf8'));const d=p.devDependencies||{};const deps=p.dependencies||{};console.log((d['@biomejs/biome']||deps['@biomejs/biome'])?'yes':'no')}catch{console.log('no')}") && true
         if [ "$HAS_BIOME" = "yes" ]; then
           echo ""
           echo "⚠️  WARNING: @biomejs/biome is installed in package.json but no biome.json found"
@@ -1055,7 +1075,6 @@ else
         exit 1
       fi
     fi
-  fi
     ;;
     
     python)
@@ -1066,14 +1085,20 @@ else
   else
     # Run Ruff (includes syntax check, linting)
     echo "Running Ruff linting (syntax + lint)..."
-    # Filter to *.py (unquoted) like the format/debug gates below; skip ruff
-    # when no Python files are staged so yaml/.gitignore are never parsed.
-    PY_LINT_FILES=$(echo "$CHANGED_FILES" | grep '\.py$' || true)
-    if [ -z "$PY_LINT_FILES" ]; then
+    # Filter to *.py/*.pyi into a bash array so each staged path is passed as
+    # ONE argument even when it contains whitespace; skip ruff when no Python
+    # files are staged so yaml/.gitignore are never parsed.
+    RUFF_ARGS=()
+    while IFS= read -r staged_file; do
+      case "$staged_file" in
+        *.py|*.pyi) RUFF_ARGS+=("$staged_file") ;;
+      esac
+    done <<< "$CHANGED_FILES"
+    if [ "${#RUFF_ARGS[@]}" -eq 0 ]; then
       RUFF_OUTPUT="[]"
       RUFF_EXIT=0
     else
-      RUFF_OUTPUT=$(ruff check $PY_LINT_FILES --output-format json 2>&1)
+      RUFF_OUTPUT=$(ruff check "${RUFF_ARGS[@]}" --output-format json 2>&1)
       RUFF_EXIT=$?
     fi
     if [ "$RUFF_EXIT" -ne 0 ]; then
@@ -1131,9 +1156,14 @@ else
 
     # Ruff format check (formatting gate)
     if command -v ruff &> /dev/null; then
-      PY_FMT_FILES=$(echo "$CHANGED_FILES" | grep '\.py$' || true)
-      if [ -n "$PY_FMT_FILES" ]; then
-        RUFF_FMT_OUTPUT=$(ruff format --check $PY_FMT_FILES 2>&1)
+      FMT_ARGS=()
+      while IFS= read -r staged_file; do
+        case "$staged_file" in
+          *.py|*.pyi) FMT_ARGS+=("$staged_file") ;;
+        esac
+      done <<< "$CHANGED_FILES"
+      if [ "${#FMT_ARGS[@]}" -gt 0 ]; then
+        RUFF_FMT_OUTPUT=$(ruff format --check "${FMT_ARGS[@]}" 2>&1)
         RUFF_FMT_EXIT=$?
         if [ "$RUFF_FMT_EXIT" -ne 0 ]; then
           echo "$RUFF_FMT_OUTPUT" | head -20
@@ -1147,9 +1177,14 @@ else
     fi
 
     # Debug statement detection (breakpoint/pdb/ipdb)
-    PY_DEBUG_FILES=$(echo "$CHANGED_FILES" | grep '\.py$' || true)
-    if [ -n "$PY_DEBUG_FILES" ]; then
-      DEBUG_HITS=$(grep -n 'breakpoint()\|pdb\.set_trace()\|ipdb\.set_trace()\|import pdb\|import ipdb' $PY_DEBUG_FILES 2>/dev/null || true)
+    DEBUG_ARGS=()
+    while IFS= read -r staged_file; do
+      case "$staged_file" in
+        *.py|*.pyi) DEBUG_ARGS+=("$staged_file") ;;
+      esac
+    done <<< "$CHANGED_FILES"
+    if [ "${#DEBUG_ARGS[@]}" -gt 0 ]; then
+      DEBUG_HITS=$(grep -n 'breakpoint()\|pdb\.set_trace()\|ipdb\.set_trace()\|import pdb\|import ipdb' "${DEBUG_ARGS[@]}" 2>/dev/null || true)
       if [ -n "$DEBUG_HITS" ]; then
         echo ""
         echo "❌ BLOCKED - Debug statements detected in Python files:"
@@ -1162,12 +1197,17 @@ else
     
     # Optional: Type checking with mypy
     if command -v mypy &> /dev/null; then
-      PY_MYPY_FILES=$(echo "$CHANGED_FILES" | grep "\.py$" || true)
-      if [ -z "$PY_MYPY_FILES" ]; then
+      MYPY_ARGS=()
+      while IFS= read -r staged_file; do
+        case "$staged_file" in
+          *.py|*.pyi) MYPY_ARGS+=("$staged_file") ;;
+        esac
+      done <<< "$CHANGED_FILES"
+      if [ "${#MYPY_ARGS[@]}" -eq 0 ]; then
         MYPY_EXIT=0
       else
         echo "Running mypy type checking (optional)..."
-        mypy --ignore-missing-imports $PY_MYPY_FILES 2>&1 | head -20 | tail -10
+        mypy --ignore-missing-imports "${MYPY_ARGS[@]}" 2>&1 | head -20 | tail -10
         MYPY_EXIT=$?
       fi
       if [ "$MYPY_EXIT" -ne 0 ]; then
@@ -1319,6 +1359,7 @@ record_gate_audit "gate-1" "code-quality" "$GATE_1_STATUS" "0" "$GATE_1_START"
  2>&1 echo ""
  2>&1 echo "→ Gate 2: Duplicate code detection..."
 GATE_2_START=$(gate_start_ms)
+GATE_2_STATUS="PASS"
 
 if [ "$PROJECT_LANG" = "documentation-only" ]; then
 echo "⏭️  SKIPPED - Duplicate code (documentation project)."
@@ -1333,13 +1374,34 @@ else
   fi
   
   echo "Running jscpd for duplicate code detection..."
-  jscpd --config jscpd.conf.json $(echo "$CHANGED_FILES" | tr '\n' ' ') 2>&1 | head -30
-  JSCPD_EXIT=$?
-  if [ "$JSCPD_EXIT" -ne 0 ]; then
+  # #477: only pass --config when the file actually exists, and let jscpd's report
+  # decide the message. Before this, a missing config produced "os error 2" and a
+  # non-zero exit that the gate translated into a fabricated "found duplicated
+  # code"; a real clone report that exited 0 was announced as a clean pass.
+  JSCPD_CONFIG=$(resolve_jscpd_config)
+  JSCPD_ARGS=()
+  if [ -n "$JSCPD_CONFIG" ]; then
+    JSCPD_ARGS=(--config "$JSCPD_CONFIG")
+  else
+    echo "ℹ️  No jscpd.conf.json found - using jscpd defaults"
+  fi
+  JSCPD_OUTPUT=$(mktemp)
+  JSCPD_EXIT=0
+  # shellcheck disable=SC2086 # pre-existing splitting of the file list; #477 changes the reporting, not the scan set
+  jscpd ${JSCPD_ARGS[@]+"${JSCPD_ARGS[@]}"} $(echo "$CHANGED_FILES" | tr '\n' ' ') > "$JSCPD_OUTPUT" 2>&1 || JSCPD_EXIT=$?
+  head -30 "$JSCPD_OUTPUT"
+  JSCPD_OUTCOME=$(classify_jscpd_run "$JSCPD_EXIT" "$(cat "$JSCPD_OUTPUT")")
+  rm -f "$JSCPD_OUTPUT"
+  if [ "$JSCPD_OUTCOME" = "duplicates" ]; then
     echo "ℹ️  jscpd found duplicated code (warning, not blocking by default)"
     echo "   Consider refactoring duplicate code blocks."
+  elif [ "$JSCPD_OUTCOME" = "error" ]; then
+    echo "⚠️  jscpd exited with code $JSCPD_EXIT without a report — the output above is its real error"
+    echo "⏭️  SKIPPED - Duplicate code (jscpd run error)"
+    GATE_2_STATUS="SKIP"
+  else
+    echo "✅ PASSED - jscpd duplicate code check completed."
   fi
-  echo "✅ PASSED - jscpd duplicate code check completed."
     ;;
     
     python)
@@ -1397,7 +1459,8 @@ else
     esac
   done
 fi
-GATE_2_STATUS="PASS"
+# Set at the top of this gate; a branch may already have marked it SKIP (#477). The
+# audit must record what happened, not what the gate defaults to.
 record_gate_audit "gate-2" "duplicate-code" "$GATE_2_STATUS" "0" "$GATE_2_START"
 
 # ============================================================================
@@ -1478,11 +1541,15 @@ else
   # --- BLOCK path: New .ts/.tsx files without corresponding tests ---
   NEW_TS_FILES=$(git diff --cached --name-only --diff-filter=A | grep -E '\.(ts|tsx)$' | grep -v '\.d\.ts$' | grep -v '__tests__' | grep -v '\.test\.' | grep -v '\.spec\.' | grep -v '__snapshots__' | grep -v 'node_modules/' | grep -v '\.next/' | grep -v '\.nuxt/' | grep -v 'dist/' | grep -v 'build/' | grep -v '.turbo/' | grep -v '.cache/' | grep -Ev '(^|/)vitest\.config\.' | grep -Ev '(^|/)vite\.config\.' | grep -Ev '(^|/)jest\.config\.' | grep -Ev '(^|/)tsconfig\.' | grep -Ev '(^|/)eslint\.' | grep -Ev '(^|/)prettier\.' | grep -Ev '(^|/)tailwind\.' || true)
 
-  # Strip PROJECT_SUBDIR prefix from new-TS-file paths when running in a subdirectory.
-  # git diff returns repo-root relative paths, but after cd "$PROJECT_SUBDIR"
-  # the test-pairing [ -f ] checks below need subdirectory-relative paths.
+  # Strip PROJECT_SUBDIR prefix from new-TS-file paths ONLY when the hook
+  # actually cd'd into the subdirectory (IN_PROJECT_SUBDIR=1; single-language
+  # subdirectory projects). git diff returns repo-root relative paths; after
+  # cd "$PROJECT_SUBDIR" the test-pairing [ -f ] checks below need
+  # subdirectory-relative paths. When the hook stays at the repo root
+  # (multi-language projects) the paths must KEEP their prefix or every
+  # [ -f ] lookup misses and paired files are falsely BLOCKED.
   # (Mirrors the v0.14.31+ Gate 5b fix at lines 1603-1608; Gate 5a was missing it.)
-  if [ -n "$PROJECT_SUBDIR" ] && [ "$PROJECT_SUBDIR" != "." ] && [ -n "$NEW_TS_FILES" ]; then
+  if [ "$IN_PROJECT_SUBDIR" = "1" ] && [ -n "$NEW_TS_FILES" ]; then
     NEW_TS_FILES=$(echo "$NEW_TS_FILES" | sed "s|^${PROJECT_SUBDIR}/||")
   fi
 
@@ -1693,10 +1760,13 @@ else
   # each plugin directory).
   CHANGED_TEST_FILES=$(echo "$CHANGED_TEST_FILES" | grep -vE '^plugins/[^/]+/' || true)
 
-  # Strip PROJECT_SUBDIR prefix from test file paths when running in subdirectory.
-  # git diff returns repo-root relative paths, but after cd "$PROJECT_SUBDIR" (line 728)
-  # vitest and [ -f ] checks need subdirectory-relative paths. (v0.14.31+ fix)
-  if [ -n "$PROJECT_SUBDIR" ] && [ "$PROJECT_SUBDIR" != "." ] && [ -n "$CHANGED_TEST_FILES" ]; then
+  # Strip PROJECT_SUBDIR prefix from test file paths ONLY when the hook
+  # actually cd'd into the subdirectory (IN_PROJECT_SUBDIR=1). git diff returns
+  # repo-root relative paths; after cd "$PROJECT_SUBDIR" vitest and [ -f ]
+  # checks need subdirectory-relative paths. At the repo root (multi-language
+  # projects) stripping would silently skip the mock-density scan and feed
+  # vitest paths that do not exist. (v0.14.31+ fix, gated on the cd in v0.19.x)
+  if [ "$IN_PROJECT_SUBDIR" = "1" ] && [ -n "$CHANGED_TEST_FILES" ]; then
     CHANGED_TEST_FILES=$(echo "$CHANGED_TEST_FILES" | sed "s|^${PROJECT_SUBDIR}/||")
   fi
 
@@ -1858,8 +1928,21 @@ else
       # TypeScript: vitest with smart test selection
       if [ "$CURRENT_LANG" = "typescript" ] && { [ -f "package.json" ] || [ -f "$PROJECT_ROOT/package.json" ]; }; then
         if run_without_git_context npx vitest --version >/dev/null 2>&1; then
-          # Count changed test files to decide strategy
-          CHANGED_TEST_FILE_COUNT=$(echo "$CHANGED_TEST_FILES" | grep -c '.' || echo "0")
+          # Count changed test files to decide strategy. `grep -c '.'` prints its
+          # own zero AND exits 1 on an empty list, so `|| echo "0"` used to yield
+          # $'0\n0' -- the same two-value bug that false-blocked Gate 8 (#493).
+          # Bundled mirrors under src/npm-package/ are excluded from the root
+          # vitest project (vitest.config.ts, #418), so selecting them makes
+          # vitest exit 1 with "No test files found" and this gate reads that as
+          # failing tests: a false BLOCK for any commit that only touches mirrors
+          # (#494). Route both lists through the selector and announce it.
+          SELECTED_TEST_FILES=$(select_root_suite_targets "$CHANGED_TEST_FILES")
+          if [ "$SELECTED_TEST_FILES" != "$CHANGED_TEST_FILES" ]; then
+            echo "   ↪ Selection adjusted for bundled mirrors (#494):"
+            echo "     was: $(echo "$CHANGED_TEST_FILES" | tr '\n' ' ')"
+            echo "     now: $(echo "$SELECTED_TEST_FILES" | tr '\n' ' ')"
+          fi
+          CHANGED_TEST_FILE_COUNT=$(echo "$SELECTED_TEST_FILES" | grep -c '.' || true)
           
           # Also get changed source files (non-test) for related-test lookup
           CHANGED_SRC_FILES=$(git diff --cached --name-only --diff-filter=ACM | grep -E '\.(ts|tsx|js|jsx)$' | grep -v '\.test\.' | grep -v '\.spec\.' | grep -v '__tests__' | grep -v '\.d\.ts$' | grep -v '__snapshots__' || true)
@@ -1867,11 +1950,25 @@ else
           # sources must not drive root-vitest related-test lookup either (it
           # would resolve to plugin-local paths vitest cannot collect).
           CHANGED_SRC_FILES=$(echo "$CHANGED_SRC_FILES" | grep -vE '^plugins/[^/]+/' || true)
-          # Strip PROJECT_SUBDIR prefix (same as CHANGED_TEST_FILES fix above)
-          if [ -n "$PROJECT_SUBDIR" ] && [ "$PROJECT_SUBDIR" != "." ] && [ -n "$CHANGED_SRC_FILES" ]; then
-            CHANGED_SRC_FILES=$(echo "$CHANGED_SRC_FILES" | sed "s|^${PROJECT_SUBDIR}/||")
+          # Mirror handling is identical for source files: their test-adjacent
+          # paths must never reach vitest as root-project targets (#494).
+          # Selection runs on repo-root relative paths (git diff output), before
+          # any PROJECT_SUBDIR stripping, so the bundled-mirror prefixes match.
+          SELECTED_SRC_FILES=$(select_root_suite_targets "$CHANGED_SRC_FILES")
+          if [ "$SELECTED_SRC_FILES" != "$CHANGED_SRC_FILES" ]; then
+            echo "   ↪ Source selection adjusted for bundled mirrors (#494):"
+            echo "     was: $(echo "$CHANGED_SRC_FILES" | tr '\n' ' ')"
+            echo "     now: $(echo "$SELECTED_SRC_FILES" | tr '\n' ' ')"
           fi
-          CHANGED_SRC_COUNT=$(echo "$CHANGED_SRC_FILES" | grep -c '.' || echo "0")
+          # Strip PROJECT_SUBDIR prefix ONLY when the hook cd'd into the
+          # subdirectory (IN_PROJECT_SUBDIR=1; same gate as the CHANGED_TEST_FILES
+          # fix above — at the repo root the paths must stay root-relative or the
+          # related-test lookup and vitest targets resolve against the wrong dir,
+          # #470)
+          if [ "$IN_PROJECT_SUBDIR" = "1" ] && [ -n "$SELECTED_SRC_FILES" ]; then
+            SELECTED_SRC_FILES=$(echo "$SELECTED_SRC_FILES" | sed "s|^${PROJECT_SUBDIR}/||")
+          fi
+          CHANGED_SRC_COUNT=$(echo "$SELECTED_SRC_FILES" | grep -c '.' || true)
           
           # Decide strategy
           if [ "$CHANGED_TEST_FILE_COUNT" -gt 20 ] 2>/dev/null; then
@@ -1881,40 +1978,24 @@ else
             TESTS_EXIT_CODE=$?
             echo "$TESTS_OUTPUT" | head -60
             if [ "$TESTS_EXIT_CODE" -ne 0 ]; then
-              echo ""
-              echo "❌ BLOCKED - Tests FAILED"
-              exit 1
+              handle_test_failure "$TESTS_OUTPUT" "full test suite" || exit 1
             else
               echo "✅ PASSED - Full test suite passed (with coverage)."
             fi
           elif [ "$CHANGED_TEST_FILE_COUNT" -gt 0 ] 2>/dev/null; then
             # Run only changed test files with coverage
             PARTIAL_TEST_RUN=true  # Mark as partial run for coverage check
-            SMART_TARGETS=$(echo "$CHANGED_TEST_FILES" | tr '\n' ' ')
+            SMART_TARGETS=$(echo "$SELECTED_TEST_FILES" | tr '\n' ' ')
             echo "Running ${CHANGED_TEST_FILE_COUNT} changed test file(s) with coverage..."
-            echo "   Target(s): $(echo "$CHANGED_TEST_FILES" | tr '\n' ' ')"
+            echo "   Target(s): $(echo "$SELECTED_TEST_FILES" | tr '\n' ' ')"
             TESTS_OUTPUT=$(run_without_git_context npx vitest run --coverage $SMART_TARGETS 2>&1)
             TESTS_EXIT_CODE=$?
             echo "$TESTS_OUTPUT" | head -60
             if [ "$TESTS_EXIT_CODE" -ne 0 ]; then
               # Distinguish a real test failure from a runner infrastructure
-              # error. vitest 1.6.x on Windows can exit non-zero with
-              # "Unhandled Errors" (EPERM on its temp/ssr module cache) while
-              # every test passes -- see #454. Mis-reporting that as
-              # "Tests FAILED" sends developers hunting for a nonexistent bug.
-              if is_runner_infrastructure_error "$TESTS_OUTPUT"; then
-                echo ""
-                echo "⏭️  SKIPPED - vitest runner infrastructure error (no test failed)"
-                echo "    Detected: Unhandled Errors with 0 failed tests."
-                echo "    Known Windows issue: EPERM on vitest temp/ssr cache (#454)."
-                echo "    Workaround: npx vitest run --no-file-parallelism <targets>"
-                TESTS_SKIPPED=true
-                TESTS_EXIT_CODE=0
-              else
-                echo ""
-                echo "❌ BLOCKED - Tests FAILED in changed test files"
-                exit 1
-              fi
+              # error -- see #454. handle_test_failure routes both cases and
+              # keeps the message consistent across every Gate 5 branch.
+              handle_test_failure "$TESTS_OUTPUT" "changed test files" || exit 1
             else
               echo "✅ PASSED - Changed test files passed (with coverage)."
             fi
@@ -1922,7 +2003,7 @@ else
             # Source files changed but no test files → find related tests or run full
             echo "Source file(s) changed, finding related tests..."
             RELATED_TESTS=""
-            for src_file in $CHANGED_SRC_FILES; do
+            for src_file in $SELECTED_SRC_FILES; do
               base="${src_file%.*}"
               filename="${base##*/}"
               dir="$(dirname "$src_file")"
@@ -1956,9 +2037,7 @@ else
               TESTS_EXIT_CODE=$?
               echo "$TESTS_OUTPUT" | head -60
               if [ "$TESTS_EXIT_CODE" -ne 0 ]; then
-                echo ""
-                echo "❌ BLOCKED - Tests FAILED in related test files"
-                exit 1
+                handle_test_failure "$TESTS_OUTPUT" "related test files" || exit 1
               else
                 echo "✅ PASSED - Related test files passed (with coverage)."
               fi
@@ -1969,9 +2048,7 @@ else
               TESTS_EXIT_CODE=$?
               echo "$TESTS_OUTPUT" | head -60
               if [ "$TESTS_EXIT_CODE" -ne 0 ]; then
-                echo ""
-                echo "❌ BLOCKED - Tests FAILED"
-                exit 1
+                handle_test_failure "$TESTS_OUTPUT" "full test suite" || exit 1
               else
                 echo "✅ PASSED - Full test suite passed (with coverage)."
               fi
@@ -1988,13 +2065,22 @@ else
           TESTS_EXIT_CODE=$?
           echo "$TESTS_OUTPUT" | head -50
           if [ "$TESTS_EXIT_CODE" -ne 0 ]; then
-            echo ""
-            echo "❌ BLOCKED - Tests FAILED"
-            exit 1
+            # This branch is reached from the typescript adapter, so run_tests ran
+            # vitest (adapters/typescript.sh) and its output is vitest-shaped: the
+            # same three non-failure exits (#454 runner EPERM, #473 partial
+            # threshold, #498 no test files) apply here as in the four branches
+            # above. #454 left it unguarded because its own comment covers the
+            # NON-typescript fallback below, whose runner is pytest/go/jest; this
+            # one is not that branch.
+            handle_test_failure "$TESTS_OUTPUT" "typescript adapter fallback" || exit 1
           fi
         fi
       else
-        # Non-TypeScript: standard adapter test flow
+        # Adapter test flow for everything the TypeScript branch above did not
+        # claim. The label this branch carried (#454) was "Non-TypeScript", which
+        # is not what reaches it: a TypeScript project without a package.json also
+        # lands here, and its adapter runs vitest — which is how a test-less TS
+        # repo got false-blocked on "No test files found" (#498).
         # Skip for Python — tests already run with coverage in the coverage section below.
         # Running them here first without coverage doubles pre-commit time for no benefit.
         if [ "$CURRENT_LANG" = "python" ]; then
@@ -2004,9 +2090,18 @@ else
           TESTS_EXIT_CODE=$?
           echo "$TESTS_OUTPUT" | head -50
           if [ "$TESTS_EXIT_CODE" -ne 0 ]; then
-            echo ""
-            echo "❌ BLOCKED - Tests FAILED"
-            exit 1
+            if [ "$CURRENT_LANG" = "typescript" ]; then
+              # vitest output, so the same three non-failure exits are judged
+              # here as in the branches above (#454, #473, #498).
+              handle_test_failure "$TESTS_OUTPUT" "typescript adapter (no package.json)" || exit 1
+            else
+              # Genuinely non-vitest runners (pytest/go/jest/...): their output
+              # shape is not vitest's, so the guard could excuse a real failure.
+              # They keep blocking on any non-zero exit (#454).
+              echo ""
+              echo "❌ BLOCKED - Tests FAILED"
+              exit 1
+            fi
           else
             echo "✅ PASSED - Unit tests passed."
           fi
@@ -2165,6 +2260,64 @@ else
         fi
       else
         echo "⚠️  coverage.py not available, cannot enforce Python coverage threshold."
+      fi
+      ;;
+    "java")
+      COVERAGE_ENFORCED=true
+      # JaCoCo writes target/site/jacoco/ (Maven) or build/reports/jacoco/test/
+      # (Gradle), i.e. neither path probed by the default branch below, so Java
+      # needs its own branch to be measurable at all.
+      jacoco_csv=""
+      for jacoco_candidate in \
+        "target/site/jacoco/jacoco.csv" \
+        "build/reports/jacoco/test/jacocoTestReport.csv"; do
+        [ -f "$jacoco_candidate" ] && { jacoco_csv="$jacoco_candidate"; break; }
+      done
+
+      if [ -n "$jacoco_csv" ]; then
+        # Aggregate INSTRUCTION_MISSED / INSTRUCTION_COVERED over every class row.
+        # Columns are located by header name because their position is not part of
+        # the CSV's stable contract.
+        COVERAGE_PERCENT=$(awk -F, '
+          NR == 1 {
+            for (i = 1; i <= NF; i++) {
+              if ($i == "INSTRUCTION_MISSED") missed_col = i;
+              if ($i == "INSTRUCTION_COVERED") covered_col = i;
+            }
+            next;
+          }
+          missed_col && covered_col {
+            missed += $missed_col;
+            covered += $covered_col;
+          }
+          END {
+            total = missed + covered;
+            if (total > 0) printf "%.2f", (covered / total) * 100;
+            else print "";
+          }
+        ' "$jacoco_csv" 2>/dev/null) || COVERAGE_PERCENT=""
+
+        if [ -n "$COVERAGE_PERCENT" ]; then
+          # Compare on the unrounded value so 79.5% cannot pass as 80%.
+          COVERAGE_ROUNDED=${COVERAGE_PERCENT%.*}
+          if awk -v pct="$COVERAGE_PERCENT" 'BEGIN { exit !(pct < 80) }'; then
+            if [ "${PARTIAL_TEST_RUN:-false}" = "true" ]; then
+              echo "⚠️  Partial coverage ${COVERAGE_ROUNDED}% (subset test run, not full suite)."
+              echo "    Run the full test suite for a complete Java coverage check."
+            else
+              echo "❌ BLOCKED - Java coverage ${COVERAGE_ROUNDED}% below 80% threshold"
+              exit 1
+            fi
+          else
+            echo "Java coverage: ${COVERAGE_ROUNDED}% ✅ (≥ 80%)"
+          fi
+        else
+          echo "⚠️  Could not parse Java coverage from ${jacoco_csv} (no instruction data)."
+        fi
+      else
+        echo "⚠️  No JaCoCo report found. Run 'mvn verify' or 'gradle jacocoTestReport'"
+        echo "    so that target/site/jacoco/jacoco.csv exists — otherwise Java coverage"
+        echo "    cannot be enforced (see also: JaCoCo detection in adapters/java.sh)."
       fi
       ;;
     "go")
@@ -2694,34 +2847,65 @@ GATE_11_START=$(date +%s)
 GATE_11_STATUS="PASS"
 
 # BEGIN SPRINT_GATE_SCRIPT RESOLUTION
-# Tier order: GATE_DIR (gate scripts dir) -> repo-root githooks/ -> SCRIPT_DIR
-# (hooks dir; update-hooks installs sprint-gate.sh beside pre-commit/pre-push).
-SPRINT_GATE_SCRIPT=""
-if [ -f "$GATE_DIR/sprint-gate.sh" ]; then
-  SPRINT_GATE_SCRIPT="$GATE_DIR/sprint-gate.sh"
-elif [ -f "$(git rev-parse --show-toplevel 2>/dev/null)/githooks/sprint-gate.sh" ]; then
-  SPRINT_GATE_SCRIPT="$(git rev-parse --show-toplevel)/githooks/sprint-gate.sh"
-elif [ -f "$SCRIPT_DIR/sprint-gate.sh" ]; then
-  SPRINT_GATE_SCRIPT="$SCRIPT_DIR/sprint-gate.sh"
-fi
+# Every tier is a *directory*; the resolver returns the first one that actually holds
+# sprint-gate.sh. The chain used to stop at the gate-script directories, but the flat
+# global layout ($GATE_DIR -> ~/.config/xp-gate/adapters) carries gate-3/4/7/8/9/10.sh
+# and never this script: update-hooks installs sprint-gate.sh under
+# ~/.config/xp-gate/hooks, which nothing probed, so a correctly installed machine was
+# told the file was missing (#476).
+SPRINT_GATE_CANDIDATES=(
+  "$GATE_DIR"
+  "$(git rev-parse --show-toplevel 2>/dev/null)/githooks"
+  "$SCRIPT_DIR"
+  "$HOME/.config/xp-gate/hooks"
+)
+SPRINT_GATE_SCRIPT=$(resolve_sprint_gate_script ${SPRINT_GATE_CANDIDATES[@]+"${SPRINT_GATE_CANDIDATES[@]}"})
 # END SPRINT_GATE_SCRIPT RESOLUTION
 
+echo "→ Gate 11: Sprint Flow Enforcement..."
+
 if [ -n "$SPRINT_GATE_SCRIPT" ]; then
-  if ! bash "$SPRINT_GATE_SCRIPT" --pre-commit; then
+  # The decision JSON was piped straight to the terminal with no heading, so it landed
+  # under Gate 10's banner and a legitimate "skip: not a sprint project" looked like a
+  # bare machine object. The exit status stays the authority for blocking; the JSON only
+  # decides which words the user reads.
+  SPRINT_GATE_EXIT=0
+  SPRINT_GATE_OUTPUT=$(bash "$SPRINT_GATE_SCRIPT" --pre-commit 2>&1) || SPRINT_GATE_EXIT=$?
+  SPRINT_GATE_DECISION=$(sprint_gate_decision "$SPRINT_GATE_OUTPUT")
+  SPRINT_GATE_DETAIL=$(sprint_gate_detail "$SPRINT_GATE_OUTPUT")
+
+  if [ "$SPRINT_GATE_EXIT" -ne 0 ]; then
     GATE_11_STATUS="BLOCK"
-    echo "❌ BLOCKED - Gate 11: Sprint Flow Enforcement"
+    echo "❌ BLOCKED - Gate 11: Sprint Flow (${SPRINT_GATE_DETAIL:-sprint gate denied})"
+    printf '%s\n' "$SPRINT_GATE_OUTPUT" | sed 's/^/     /'
     record_gate_audit "gate-11" "sprint-flow" "$GATE_11_STATUS" "1" "$GATE_11_START"
     # Sprint gate failure is a hard block — exit immediately
     exit 1
   fi
+
+  case "$SPRINT_GATE_DECISION" in
+    skip)
+      echo "⏭️  SKIPPED - Gate 11: Sprint Flow (${SPRINT_GATE_DETAIL:-no reason given})"
+      GATE_11_STATUS="SKIP"
+      ;;
+    allow)
+      echo "✅ PASSED - Gate 11: Sprint Flow (${SPRINT_GATE_DETAIL:-sprint state validated})"
+      ;;
+    *)
+      # A run that succeeded but said nothing this gate understands. Pass on the exit
+      # status, but keep the raw output visible rather than inventing a verdict.
+      echo "✅ PASSED - Gate 11: Sprint Flow (no recognisable decision in the gate output)"
+      printf '%s\n' "$SPRINT_GATE_OUTPUT" | sed 's/^/     /'
+      ;;
+  esac
 else
-  echo "⏭️  SKIPPED - Gate 11: Sprint Flow (sprint-gate.sh not found)"
+  echo "⏭️  SKIPPED - Gate 11: Sprint Flow (sprint-gate.sh not found; searched: $(IFS=', '; printf '%s' "${SPRINT_GATE_CANDIDATES[*]}"))"
   GATE_11_STATUS="SKIP"
 fi
 
 GATE_11_END=$(date +%s)
 GATE_11_DURATION=$((GATE_11_END - GATE_11_START))
-echo "✅ Gate 11 completed in ${GATE_11_DURATION}s"
+echo "   Gate 11 ($GATE_11_STATUS) completed in ${GATE_11_DURATION}s"
 record_gate_audit "gate-11" "sprint-flow" "$GATE_11_STATUS" "0" "$GATE_11_START"
 echo ""
 # ============================================================================
@@ -2781,8 +2965,10 @@ generate_quality_report() {
   if [ -n "$TESTS_OUTPUT" ] && echo "$TESTS_OUTPUT" | grep -qi "fail\|error\|FAILED"; then
     # Extract failure lines: "FAIL src/foo.test.ts" or "  ✗ test name"
     local FAIL_LINES
-    FAIL_LINES=$(echo "$TESTS_OUTPUT" | grep -E "^\s*(FAIL|✗|failed|AssertionError)" | head -10 | \
-      sed 's/"/\\"/g' | awk '{ printf "%s%s%s", sep, "\"", $0; sep="," }')
+    # errexit/pipefail-safe: grep returns 1 on zero matches (see #489) and this
+    # function is also sourced by consumer wrappers that may enable errexit
+    FAIL_LINES=$(echo "$TESTS_OUTPUT" | grep -E "^\s*(FAIL|✗|failed|AssertionError)" | sed -n '1,10p' | \
+      sed 's/"/\\"/g' | awk '{ printf "%s%s%s", sep, "\"", $0; sep="," }') || true
     if [ -n "$FAIL_LINES" ]; then
       FAILED_TESTS_JSON="[$FAIL_LINES]"
     fi

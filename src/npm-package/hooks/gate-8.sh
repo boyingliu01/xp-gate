@@ -44,7 +44,17 @@ if [ -n "$GITLEAKS_CMD" ]; then
     # The report exists and is a JSON array of findings; `[]` == clean scan.
     GITLEAKS_FINDINGS="?"
     if [ -f "$GITLEAKS_REPORT" ]; then
-      GITLEAKS_FINDINGS=$(grep -c '"RuleID"' "$GITLEAKS_REPORT" 2>/dev/null || echo 0)
+      # A report that is not shaped like a JSON array is no evidence: leave the
+      # '?' sentinel so the gate reports SKIP, never a PASS it cannot support
+      # (the fail-closed-on-the-claim rule #449 established).
+      if grep -q '^\[' "$GITLEAKS_REPORT" 2>/dev/null; then
+        # Count occurrences, not matching lines: `grep -c` prints its own zero AND
+        # exits 1 on a clean report, so the old `|| echo 0` handed the verdict table
+        # $'0\n0' -- no branch matched and a clean scan was BLOCKED as if it leaked
+        # (#493). wc -l emits exactly one value, and `|| true` keeps the assignment
+        # errexit/pipefail-safe (#489).
+        GITLEAKS_FINDINGS=$(grep -o '"RuleID"' "$GITLEAKS_REPORT" 2>/dev/null | wc -l | tr -d '[:space:]') || true
+      fi
     fi
 
     if [ "$GITLEAKS_FINDINGS" = "0" ]; then
