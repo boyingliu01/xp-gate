@@ -28,7 +28,7 @@ async function install(args = []) {
     return code;
   }
 
-  // Post-install: run doctor --fix to verify and auto-repair
+  // Post-install: run doctor --fix to verify and report
   console.log('\n━━━ Post-Install Health Check ━━━\n');
   const { doctor } = require('./doctor.js');
   const doctorCode = await doctor(['--fix']);
@@ -36,11 +36,14 @@ async function install(args = []) {
   if (doctorCode === 0) {
     console.log('\n✓ Installation complete and verified!');
   } else {
-    console.log('\n⚠ Installation complete, but some issues remain.');
-    console.log('  Run "xp-gate doctor" for details.');
+    // Doctor findings (hook/module drift needing a human judgement, #495) are
+    // diagnostics about the environment, not a failed install. Returning its
+    // code made `xp-gate install && next-step` fail on a successful install (#502).
+    console.log('\n⚠ Installation complete, but doctor reported issues.');
+    console.log('  Review them with "xp-gate doctor" — the install itself succeeded.');
   }
 
-  return doctorCode;
+  return 0;
 }
 
 module.exports = { install };
