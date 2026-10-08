@@ -176,3 +176,9 @@ coverage.xml
 
 .cm.txt
 tsconfig.tsbuildinfo
+
+# WorkBuddy agent workspace data (session memory, never committed)
+.workbuddy/
+
+# xp-gate transient walk/debug work dirs
+.xp-gate/tmp/
