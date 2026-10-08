@@ -12,6 +12,10 @@ import path from 'path';
 import os from 'os';
 import { extractImports, resolveImportPath, runImportCheck } from '../gate-10';
 
+// Named timeout for the runImportCheck calls that assert verdicts; keeps the
+// Boy Scout magic-number count from growing with each new test case.
+const IMPORT_CHECK_TIMEOUT_MS = 30000;
+
 /**
  * ─── extractImports ────────────────────────────────────────────────────────────
  */
@@ -329,21 +333,51 @@ describe('runImportCheck', () => {
     // pass on Windows; drive letters do not exist on POSIX so skip there.
     if (process.platform !== 'win32') return;
 
-    const srcDir = path.join(tmpDir, 'src');
-    await fs.mkdir(srcDir);
+    let fooFile: string;
+    try {
+      const srcDir = path.join(tmpDir, 'src');
+      await fs.mkdir(srcDir);
 
-    const barFile = path.join(srcDir, 'bar.ts');
-    await fs.writeFile(barFile, 'export const x = 1;');
+      const barFile = path.join(srcDir, 'bar.ts');
+      await fs.writeFile(barFile, 'export const x = 1;');
 
-    const fooFile = path.join(srcDir, 'foo.ts');
-    await fs.writeFile(fooFile, `import { x } from './bar';\nconsole.log(x);\n`);
+      fooFile = path.join(srcDir, 'foo.ts');
+      await fs.writeFile(fooFile, `import { x } from './bar';\nconsole.log(x);\n`);
+    } catch (error) {
+      throw new Error(`Fixture setup failed: ${error}`);
+    }
 
     const altRoot = tmpDir.replace(/\\/g, '/').replace(/^[a-zA-Z]:/, (m) => m.toLowerCase());
     expect(altRoot).not.toBe(tmpDir);
 
-    const result = await runImportCheck([fooFile], altRoot, 30000);
+    const result = await runImportCheck([fooFile], altRoot, IMPORT_CHECK_TIMEOUT_MS);
     expect(result.status).toBe('pass');
     expect(result.violations).toEqual([]);
+  });
+
+  it('still fails a true boundary escape after case normalization (#508 follow-up)', async () => {
+    // Normalization must only absorb case/spelling differences, never widen the
+    // boundary: an import that genuinely leaves the project root keeps failing
+    // even when the root is spelled with a different drive-letter case.
+    if (process.platform !== 'win32') return;
+
+    let badFile: string;
+    try {
+      const nestedDir = path.join(tmpDir, 'pkg', 'dist', 'sub');
+      await fs.mkdir(nestedDir, { recursive: true });
+
+      badFile = path.join(nestedDir, 'file.ts');
+      await fs.writeFile(badFile, `import { x } from '../../../../outside';\n`);
+    } catch (error) {
+      throw new Error(`Fixture setup failed: ${error}`);
+    }
+
+    const altRoot = tmpDir.replace(/\\/g, '/').replace(/^[a-zA-Z]:/, (m) => m.toLowerCase());
+
+    const result = await runImportCheck([badFile], altRoot, IMPORT_CHECK_TIMEOUT_MS);
+    expect(result.status).toBe('fail');
+    expect(result.violations.length).toBeGreaterThan(0);
+    expect(result.violations[0].reason).toMatch(/escapes|outside|boundary/i);
   });
 
   it('skips YAML files containing JavaScript-like require text', async () => {
