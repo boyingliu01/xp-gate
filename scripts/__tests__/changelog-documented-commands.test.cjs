@@ -26,17 +26,30 @@ const RUNNER = readFileSync(resolve(REPO, 'scripts', 'delphi-external-review.cjs
 function knownFlags(source) {
   const line = source.match(/const KNOWN_FLAGS\s*=\s*\[([^\]]*)\]/);
   if (!line) throw new Error('doctor.js declares no KNOWN_FLAGS array');
-  return line[1]
+  const flags = line[1]
     .split(',')
     .map((entry) => entry.trim().replace(/^'|'$/g, ''))
     .filter(Boolean);
+  // A mis-read array must fail here, not silently shrink what the entry is
+  // checked against (the guard would otherwise pass against a partial list).
+  for (const flag of flags) {
+    expect(flag, `KNOWN_FLAGS parsed as ${flag}, which is not a flag`).toMatch(/^--[a-z][a-z0-9-]*$/);
+  }
+  expect(flags.length).toBeGreaterThanOrEqual(4);
+  return flags;
 }
 
 function requiredRunnerArgs(source) {
   // The runner's own guard: `if (!args.X) missing.push('--flag')`.
-  const flags = [...source.matchAll(/missing\.push\('(--[a-z-]+)(?: or --[a-z-]+)?'\)/g)].map((m) => m[1]);
-  if (flags.length === 0) throw new Error('could not read the runner required-argument guard');
-  return flags;
+  const guards = [...source.matchAll(/missing\.push\(['"](--[\w-]+)(?: or --[\w-]+)?['"]\)/g)];
+  if (guards.length === 0) throw new Error('could not read the runner required-argument guard');
+  // Counting the pushes and the `missing.push` statements against each other is
+  // what keeps a flag guarded through a different idiom from being dropped
+  // silently -- the alternative would be AC-429-05 passing while a required
+  // argument goes undocumented (#488 Round 3, feasibility FC-03).
+  const statements = (source.match(/missing\.push\(/g) || []).length;
+  expect(guards.length, 'the runner has missing.push statements this parser does not read').toBe(statements);
+  return guards.map((m) => m[1]);
 }
 
 describe('release notes describe the real command contract (#488/#429 Round 3)', () => {
