@@ -545,56 +545,96 @@ function diagnoseModuleDrift(ctx = {}) {
     return { checks, issues };
   }
 
-  const globalDir = ctx.installedAdapters || GLOBAL_ADAPTERS_DIR;
-  const projectDir = ctx.projectGithooks || repoHooks;
+  const dirs = resolveExecutedModuleDirs({
+    globalAdapterDir: ctx.globalAdapterDir || ctx.installedAdapters,
+    projectGithooks: ctx.projectGithooks || repoHooks,
+    scriptDir: ctx.scriptDir,
+  });
 
-  // Two directories can be the executed surface. `setup-global` puts it in the
-  // global adapters dir; project mode resolves ADAPTER_DIR to `<repo>/githooks`
-  // and reads a FLAT copy before the nested source, so installer residue there
-  // shadows the tracked file. Diagnosing only the global dir left the second
-  // tier invisible -- which is how a repo that shipped #493 kept running a
-  // pre-#493 `iac.sh` against itself (#495 Round 2).
-  const tiers = [{ prefix: 'Module drift', dir: globalDir }];
-  if (path.resolve(projectDir) !== path.resolve(globalDir)) {
-    tiers.push({ prefix: 'Module drift (project)', dir: projectDir });
+  // Copies the hook never resolves to, occupying the lookup positions it does
+  // resolve through. They are not drift -- nothing executes them -- but they are
+  // how #500 reproduces: the next install order shift, or a move to project
+  // mode, promotes one silently. Report with the absolute path so the developer
+  // can judge; do not count, because no shipped command removes them (#495 R2).
+  const executedFor = new Map();
+  for (const name of repoModuleNames(repoHooks)) {
+    const source = repoModuleSource(repoHooks, name);
+    if (!source) continue;
+    const executed = executedModulePath(name, dirs);
+    executedFor.set(name, executed);
+
+    if (!executed) continue; // not installed at all: nothing executes, nothing to judge
+    if (pathsEquivalent(executed, source)) continue; // the repo's own copy runs
+
+    const label = `${tierFor(executed, dirs).prefix}: ${name}`;
+    if (filesAreIdentical(source, executed)) {
+      checks.push({ name: label, status: 'PASS', detail: 'Executed copy matches githooks/' });
+      continue;
+    }
+
+    const texts = readPair(source, executed);
+    if (!texts) {
+      checks.push({ name: label, status: 'FAIL', detail: 'executed copy could not be read for comparison' });
+      issues++;
+      continue;
+    }
+    const { repoOnly, installedOnly } = contentDelta(texts.repoText, texts.installedText);
+    // contentDelta folds whitespace and line endings away, so an all-zero delta
+    // means the two copies say the same thing differently. Calling that drift
+    // would report FAIL while claiming zero unique lines (#495 Round 2).
+    if (repoOnly === 0 && installedOnly === 0) {
+      checks.push({ name: label, status: 'PASS', detail: 'Same content as githooks/, differing only in line endings or indentation' });
+      continue;
+    }
+    const hint = TIER_HINTS[tierFor(executed, dirs).tier] || '';
+    checks.push({ name: label, status: 'FAIL', detail: `${moduleDriftDetail(repoOnly, installedOnly)}${hint}` });
+    issues++;
   }
 
-  for (const tier of tiers) {
-    if (!fs.existsSync(tier.dir)) continue;
-
-    for (const mod of listExecutedModules(tier.dir)) {
-      const source = repoModuleSource(repoHooks, mod.name);
-      if (!source) continue;
-      // The project tier holds the canonical files themselves (gate scripts and
-      // adapter-common.sh live at the githooks/ root) -- comparing a file with
-      // itself would only add noise.
-      if (path.resolve(source) === path.resolve(mod.file)) continue;
-
-      const label = `${tier.prefix}: ${mod.name}`;
-      if (filesAreIdentical(source, mod.file)) {
-        checks.push({ name: label, status: 'PASS', detail: 'Executed copy matches githooks/' });
-        continue;
-      }
-
-      const texts = readPair(source, mod.file);
-      if (!texts) continue;
-      const { repoOnly, installedOnly } = contentDelta(texts.repoText, texts.installedText);
-      // contentDelta folds whitespace and line endings away, so an all-zero delta
-      // means the two copies say the same thing differently. Calling that drift
-      // would report FAIL while claiming zero unique lines (#495 Round 2).
-      if (repoOnly === 0 && installedOnly === 0) {
-        checks.push({ name: label, status: 'PASS', detail: 'Same content as githooks/, differing only in line endings or indentation' });
-        continue;
-      }
-      const hint = tier.prefix === 'Module drift (project)'
-        ? ' -- executed from the project tier, where a flat copy shadows the tracked nested source (#500)'
-        : '';
-      checks.push({ name: label, status: 'FAIL', detail: `${moduleDriftDetail(repoOnly, installedOnly)}${hint}` });
-      issues++;
-    }
+  for (const [name, file] of nonExecutedCopies(dirs, executedFor)) {
+    checks.push({
+      name: `Non-executed copy: ${name}`,
+      status: 'WARN',
+      detail: `${file} is not executed (the hook resolves this module elsewhere), so it is installer residue and NOT counted as drift; `
+        + 'it shadows the tracked file the moment ADAPTER_DIR resolves to its tier (#500). Remove it by hand -- no doctor command deletes installed copies.',
+    });
   }
 
   return { checks, issues };
+}
+
+/**
+ * Every `.sh` copy the repository knows about that the resolution did NOT pick.
+ *
+ * @param {ReturnType<typeof resolveExecutedModuleDirs>} dirs
+ * @param {Map<string, string|null>} executedFor
+ * @returns {Array<[string, string]>}
+ */
+function nonExecutedCopies(dirs, executedFor) {
+  const found = [];
+  const seenFiles = new Set();
+  const tiers = [
+    dirs.globalAdapterDir,
+    path.join(dirs.globalAdapterDir, 'adapters'),
+    dirs.adapterDir,
+    path.join(dirs.adapterDir, 'adapters'),
+    dirs.projectGithooks,
+    path.join(dirs.projectGithooks, 'adapters'),
+    dirs.scriptDir,
+    path.join(dirs.scriptDir, 'adapters'),
+  ];
+  for (const dir of tiers) {
+    for (const mod of listExecutedModules(dir)) {
+      if (seenFiles.has(path.resolve(mod.file))) continue;
+      if (!executedFor.has(mod.name)) continue; // not a module the repo ships
+      const executed = executedFor.get(mod.name);
+      if (executed && pathsEquivalent(executed, mod.file)) continue;
+      if (pathsEquivalent(repoModuleSource(dirs.projectGithooks, mod.name) || '', mod.file)) continue;
+      seenFiles.add(path.resolve(mod.file));
+      found.push([mod.name, mod.file]);
+    }
+  }
+  return found;
 }
 
 /**
@@ -637,47 +677,57 @@ function syncModulesFromRepo(ctx = {}) {
   // clears (#495 Round 2; the same silent-no-op class #488/#416 outlawed).
   const repoRoot = ctx.repoRoot || process.env.XP_GATE_REPO_ROOT || process.cwd();
   const repoHooks = ctx.repoHooks || path.join(repoRoot, 'githooks');
-  const installedAdapters = ctx.installedAdapters || GLOBAL_ADAPTERS_DIR;
 
-  if (!fs.existsSync(installedAdapters)) {
-    return { synced, skipped, refused, errors, installedAdapters, sourceMissing: false };
-  }
   if (!hasCanonicalHooks(repoHooks)) {
     errors.push(`no canonical githooks/ source at ${repoHooks} -- nothing was synced`);
-    return { synced, skipped, refused, errors, installedAdapters, sourceMissing: true };
+    return { synced, skipped, refused, errors, installedAdapters: ctx.installedAdapters || ctx.globalAdapterDir || GLOBAL_ADAPTERS_DIR, sourceMissing: true };
   }
 
-  for (const mod of listExecutedModules(installedAdapters)) {
-    const source = repoModuleSource(repoHooks, mod.name);
+  // Same resolution the diagnosis used, so a FAIL the diagnosis can produce is a
+  // FAIL this repair can clear -- in whichever tier it lives (#495 Round 3; the
+  // Round-2 pair diagnosed two tiers and synced one, leaving a permanent exit 1).
+  const dirs = resolveExecutedModuleDirs({
+    globalAdapterDir: ctx.globalAdapterDir || ctx.installedAdapters,
+    projectGithooks: ctx.projectGithooks || repoHooks,
+    scriptDir: ctx.scriptDir,
+  });
+  const installedAdapters = dirs.globalAdapterDir;
+
+  for (const name of repoModuleNames(repoHooks)) {
+    const source = repoModuleSource(repoHooks, name);
     if (!source) continue;
-    if (filesAreIdentical(source, mod.file)) {
-      skipped.push(mod.name);
+    const target = executedModulePath(name, dirs);
+    if (!target) continue; // nothing executes this module; residue is not this command's business
+    if (pathsEquivalent(source, target)) {
+      skipped.push(name);
+      continue;
+    }
+    if (filesAreIdentical(source, target)) {
+      skipped.push(name);
       continue;
     }
 
-    const texts = readPair(source, mod.file);
-    if (!texts) continue;
-    const { repoOnly, installedOnly } = contentDelta(texts.repoText, texts.installedText);
+    const decision = copyGuardDecision(source, target, !!ctx.force);
     // Formatting-only: nothing to repair, and rewriting the file would churn it.
-    if (repoOnly === 0 && installedOnly === 0) {
-      skipped.push(mod.name);
+    if (!decision.refuse && !decision.forced && decision.repoOnly === 0 && decision.installedOnly === 0) {
+      skipped.push(name);
       continue;
     }
-    if (installedOnly > 0 && !ctx.force) {
-      refused.push({ name: mod.name, repoOnly, installedOnly });
+    if (decision.refuse) {
+      refused.push({ name, repoOnly: decision.repoOnly, installedOnly: decision.installedOnly, unknown: decision.unknown, target });
       continue;
     }
 
     try {
-      fs.copyFileSync(source, mod.file);
-      fs.chmodSync(mod.file, 0o755);
-      synced.push(mod.name);
+      fs.copyFileSync(source, target);
+      fs.chmodSync(target, 0o755);
+      synced.push(name);
     } catch (err) {
-      errors.push(`${mod.name}: ${err.message}`);
+      errors.push(`${name}: ${err.message}`);
     }
   }
 
-  return { synced, skipped, refused, errors, installedAdapters, sourceMissing: false };
+  return { synced, skipped, refused, errors, installedAdapters, dirs, sourceMissing: false };
 }
 
 /**
@@ -685,12 +735,20 @@ function syncModulesFromRepo(ctx = {}) {
  * the same 3-tier order as the hook itself (#495). Without this, doctor's output
  * cannot answer "which copy is running".
  *
- * @param {{globalAdapterDir?: string, projectGithooks?: string, scriptDir?: string}} [ctx]
- * @returns {{adapterDir: string, gateDir: string}}
+ * This is the single resolution model the printout, the drift diagnosis and the
+ * repair all read from. Round 2 had a second tier list inside
+ * `diagnoseModuleDrift()` that walked the project directory unconditionally and
+ * labelled whatever it found "executed" -- but the hook only reaches
+ * `$PROJECT_GITHOOKS/adapters/<lang>.sh` (githooks/pre-commit:67-69), never a
+ * flat project copy, so that label asserted a direction that was false and
+ * produced a FAIL no repair path could clear (#495 Round 3).
+ *
+ * @param {{globalAdapterDir?: string, installedAdapters?: string, projectGithooks?: string, scriptDir?: string}} [ctx]
+ * @returns {{adapterDir: string, gateDir: string, globalAdapterDir: string, projectGithooks: string, scriptDir: string}}
  */
 function resolveExecutedModuleDirs(ctx = {}) {
-  const globalAdapterDir = ctx.globalAdapterDir || GLOBAL_ADAPTERS_DIR;
-  const projectGithooks = ctx.projectGithooks || path.join(process.cwd(), 'githooks');
+  const globalAdapterDir = ctx.globalAdapterDir || ctx.installedAdapters || GLOBAL_ADAPTERS_DIR;
+  const projectGithooks = ctx.projectGithooks || defaultProjectGithooks();
   const scriptDir = ctx.scriptDir || GLOBAL_HOOKS_DIR;
 
   const has = (dir, file) => fs.existsSync(path.join(dir, file));
@@ -708,7 +766,167 @@ function resolveExecutedModuleDirs(ctx = {}) {
     else if (has(scriptDir, 'gate-3.sh')) gateDir = scriptDir;
   }
 
-  return { adapterDir, gateDir };
+  return { adapterDir, gateDir, globalAdapterDir, projectGithooks, scriptDir };
+}
+
+/**
+ * The repository's `githooks/` as the hook itself derives it -- `git rev-parse
+ * --show-toplevel` (githooks/pre-commit:31), not the current directory. Run
+ * from a subdirectory, a cwd-based answer finds no `githooks/` and the whole
+ * drift surface goes silent (#495 Round 3).
+ */
+function defaultProjectGithooks() {
+  if (process.env.XP_GATE_REPO_ROOT) {
+    return path.join(process.env.XP_GATE_REPO_ROOT, 'githooks');
+  }
+  try {
+    const toplevel = execSync('git rev-parse --show-toplevel', {
+      encoding: 'utf8',
+      timeout: EXEC_TIMEOUT_MS,
+      stdio: ['pipe', 'pipe', 'pipe'],
+    }).trim();
+    if (toplevel) return path.join(toplevel, 'githooks');
+  } catch {
+    // Not a git repository -- fall back to the directory we were called in.
+  }
+  return path.join(process.cwd(), 'githooks');
+}
+
+/**
+ * Module names the repository carries as source of truth.
+ *
+ * Enumerated from the repo rather than from what happens to be installed: the
+ * question the surface answers is "which copy of the file I changed is running",
+ * and a name nobody installed has no executed copy to judge.
+ *
+ * @param {string} repoHooks
+ * @returns {string[]}
+ */
+function repoModuleNames(repoHooks) {
+  const names = new Set();
+  const collect = (dir) => {
+    let entries;
+    try {
+      entries = fs.readdirSync(dir, { withFileTypes: true });
+    } catch {
+      return;
+    }
+    for (const entry of entries) {
+      if (entry.isFile() && entry.name.endsWith('.sh')) names.add(entry.name);
+    }
+  };
+  collect(repoHooks);
+  collect(path.join(repoHooks, 'adapters'));
+  return [...names].sort();
+}
+
+/**
+ * Gate modules live flat next to `adapter-common.sh`; language adapters are
+ * looked up flat first, then nested (githooks/pre-commit:54-77).
+ */
+function isGateModuleFile(name) {
+  return name === 'adapter-common.sh'
+    || name === 'sprint-gate.sh'
+    || /^gate-.+\.sh$/.test(name);
+}
+
+/**
+ * Which file pre-commit will actually read for one module name (#495 Round 3).
+ *
+ * @param {string} name
+ * @param {ReturnType<typeof resolveExecutedModuleDirs>} dirs
+ * @returns {string|null} null when nothing executes (the module is not installed)
+ */
+function executedModulePath(name, dirs) {
+  // `adapter-common.sh` is sourced from ADAPTER_DIR (githooks/pre-commit:41)
+  // before GATE_DIR is ever resolved, so it does not follow the gate-module chain.
+  if (name === 'adapter-common.sh') {
+    const sourced = path.join(dirs.adapterDir, name);
+    return fs.existsSync(sourced) ? sourced : null;
+  }
+  const candidates = isGateModuleFile(name)
+    ? [path.join(dirs.gateDir, name)]
+    : [
+      path.join(dirs.adapterDir, name),
+      path.join(dirs.adapterDir, 'adapters', name),
+      path.join(dirs.projectGithooks, 'adapters', name),
+      path.join(dirs.scriptDir, 'adapters', name),
+    ];
+  return candidates.find((candidate) => fs.existsSync(candidate)) || null;
+}
+
+/**
+ * Which tier an executed copy came from, so a FAIL says where it ran from.
+ */
+function tierFor(executedPath, dirs) {
+  const under = (dir) => {
+    const base = path.resolve(dir);
+    const file = path.resolve(executedPath, '..');
+    return pathsEquivalent(base, file) || file.startsWith(`${base}${path.sep}`) || file.startsWith(`${base}/`);
+  };
+  if (under(dirs.projectGithooks)) return { prefix: 'Module drift (project)', tier: 'project' };
+  if (under(dirs.scriptDir)) return { prefix: 'Module drift (script dir)', tier: 'script dir' };
+  return { prefix: 'Module drift', tier: 'global' };
+}
+
+const TIER_HINTS = {
+  project: ' -- executed from the project tier: the hook resolves ADAPTER_DIR to <repo>/githooks and reads a flat copy before the nested source (#500)',
+  'script dir': ' -- executed from the installed hooks dir: GATE_DIR fell through to $SCRIPT_DIR (githooks/pre-commit:84-85)',
+};
+
+/**
+ * Decide whether one copy may be overwritten (#495 Round 2/3).
+ *
+ * Refuses when the destination holds lines the source lacks (machine-only
+ * hardening) and ALSO when its content cannot be read: an unreadable
+ * destination is unknown content, and unknown content is exactly what the
+ * refusal exists to protect.
+ *
+ * @param {string} source
+ * @param {string} target
+ * @param {boolean} force
+ * @returns {{refuse: boolean, forced: boolean, unknown: boolean, repoOnly: number, installedOnly: number}}
+ */
+function copyGuardDecision(source, target, force) {
+  if (!fs.existsSync(target)) return { refuse: false, forced: false, unknown: false, repoOnly: 0, installedOnly: 0 };
+  if (force) return { refuse: false, forced: true, unknown: false, repoOnly: 0, installedOnly: 0 };
+  const texts = readPair(source, target);
+  if (!texts) return { refuse: true, forced: false, unknown: true, repoOnly: 0, installedOnly: 0 };
+  const { repoOnly, installedOnly } = contentDelta(texts.repoText, texts.installedText);
+  return { refuse: installedOnly > 0, forced: false, unknown: false, repoOnly, installedOnly };
+}
+
+/**
+ * Split a list of already-installed files into the ones a refresh may overwrite
+ * and the ones a human must judge first (#495 Round 3).
+ *
+ * `fixStaleHooks()` used to hand the whole list to a forced, backup-less
+ * `updateHooks()` call, which destroyed machine-only content inside the same
+ * command whose module path refuses to do it.
+ *
+ * @param {Array<{name: string, source: string, target: string}>} entries
+ * @returns {{safe: Array, diverged: Array, unknown: Array, hasBlocking: boolean}}
+ */
+function planStaleHookSync(entries) {
+  const safe = [];
+  const diverged = [];
+  const unknown = [];
+  for (const entry of entries) {
+    if (!fs.existsSync(entry.target)) {
+      safe.push(entry);
+      continue;
+    }
+    const texts = readPair(entry.source, entry.target);
+    if (!texts) {
+      unknown.push(entry);
+      continue;
+    }
+    const { repoOnly, installedOnly } = contentDelta(texts.repoText, texts.installedText);
+    if (repoOnly === 0 && installedOnly === 0) continue; // same content, different line endings
+    if (installedOnly > 0) diverged.push({ ...entry, repoOnly, installedOnly });
+    else safe.push({ ...entry, repoOnly, installedOnly: 0 });
+  }
+  return { safe, diverged, unknown, hasBlocking: diverged.length > 0 || unknown.length > 0 };
 }
 
 /**
@@ -846,15 +1064,22 @@ function syncGlobalHooksFromRepo(ctx = {}) {
         // A shared library can carry machine-only hardening just like a gate
         // module does, so it gets the same refusal instead of an unconditional
         // overwrite (#488 Round 2 -- the module guard and the lib guard must not
-        // disagree about how destructive a sync is allowed to be).
-        if (fs.existsSync(target) && !ctx.force) {
-          const texts = readPair(source, target);
-          if (texts) {
-            const { repoOnly, installedOnly } = contentDelta(texts.repoText, texts.installedText);
-            if (installedOnly > 0) {
-              refused.push({ name: rel, repoOnly, installedOnly });
-              continue;
-            }
+        // disagree about how destructive a sync is allowed to be). Unreadable
+        // content refuses too: unknown is not the same as safe (#495 Round 3).
+        if (fs.existsSync(target)) {
+          const decision = copyGuardDecision(source, target, !!ctx.force);
+          if (decision.refuse) {
+            refused.push({
+              name: rel,
+              repoOnly: decision.repoOnly,
+              installedOnly: decision.installedOnly,
+              unknown: decision.unknown,
+            });
+            continue;
+          }
+          if (decision.forced === false && decision.repoOnly === 0 && decision.installedOnly === 0) {
+            skipped.push(rel);
+            continue;
           }
         }
         fs.copyFileSync(source, target);
@@ -1416,7 +1641,7 @@ function getAdaptersDirByMode(config) {
  * Attempt to fix known issues.
  * Only operates when mode === 'active' (local or global).
  */
-function fixIssues(checks, config) {
+function fixIssues(checks, config, installToolsFlag = false) {
   console.log('');
   console.log('Attempting fixes...');
   console.log('-------------------');
@@ -1431,7 +1656,14 @@ function fixIssues(checks, config) {
   fixed = fixMissingGateScripts(srcDir, getAdaptersDirByMode(config)) || fixed;
   fixed = fixStaleHooks(config) || fixed;
   fixed = fixHookDriftFromRepo() || fixed;
-  fixed = fixMissingCliTools() || fixed;
+  // Installing a gate CLI (gitleaks/semgrep/lizard) changes the machine the same
+  // way a language toolchain does, so it goes behind the same opt-in: `xp-gate
+  // install` ends by running `doctor --fix`, which made an unguarded call here a
+  // post-install network write nobody asked for (#502 Round 2). Guidance below
+  // stays ungated, because reporting is not a mutation.
+  if (installToolsFlag) {
+    fixed = fixMissingCliTools() || fixed;
+  }
   fixed = fixTuiRegistration() || fixed;
   fixed = printCliToolGuidance() || fixed;
 
@@ -1470,13 +1702,13 @@ function fixHookDriftFromRepo() {
 /**
  * Sync hooks/adapters from the installed package to the project/global dir.
  * Catches cases where xp-gate was upgraded (npm update) but hooks are stale.
- * Uses update-hooks logic with --force to overwrite outdated files.
+ * Refreshes only the files a content judgement has called safe to overwrite.
  *
  * @returns {boolean} Whether any hooks were updated
  */
 function fixStaleHooks(config) {
   try {
-    const { updateHooks, detectLocalModifications, getPackageRoot } = require('./update-hooks.js');
+    const { detectLocalModifications, getPackageRoot } = require('./update-hooks.js');
     const isGlobal = config.mode === 'global';
     const srcDir = getPackageRoot();
 
@@ -1496,12 +1728,76 @@ function fixStaleHooks(config) {
     const modified = detectLocalModifications(srcDir, hooksDestDir, adaptersDestDir);
     if (modified.length === 0) return false;
 
-    console.log(`  Syncing ${modified.length} outdated hook/adapter file(s)...`);
-    updateHooks({ global: isGlobal, force: true, dryRun: false, noBackup: true, scope: 'all' });
-    return true;
+    // Round 2 (architecture) caught the second overwrite standard inside this one
+    // command: it handed every stale label to a forced updateHooks(), destroying
+    // machine-only content the module path of the same release refuses to clobber.
+    // `copyAdapters` writes flat AND nested, so both destinations are judged before
+    // anything is written, and the refresh then copies file by file instead of
+    // running a blanket force -- a backup-less blanket force deletes work, while the
+    // backed-up alternative litters the user's work tree with .bak (#495 Round 3).
+    const plan = planStaleHookSync(
+      modified.flatMap((label) => staleSyncEntries(label, srcDir, hooksDestDir, adaptersDestDir)),
+    );
+
+    if (plan.hasBlocking) {
+      console.log(`  ⚠️  ${plan.diverged.length + plan.unknown.length} hook/adapter file(s) NOT refreshed —`);
+      console.log('     the installed copy carries content the package does not, and overwriting');
+      console.log('     it would delete work that exists nowhere else:');
+      for (const d of plan.diverged) {
+        console.log(`     - ${d.name}: install has ${d.installedOnly} unique line(s), package has ${d.repoOnly}`);
+      }
+      for (const u of plan.unknown) {
+        console.log(`     - ${u.name}: installed copy could not be read`);
+      }
+      console.log('     Judge them (fold the hardening into the package, or move the file aside),');
+      console.log('     then re-run --fix.');
+    }
+
+    if (plan.safe.length === 0) return plan.hasBlocking;
+
+    console.log(`  Refreshing ${plan.safe.length} outdated hook/adapter file(s)...`);
+    let refreshed = 0;
+    for (const entry of plan.safe) {
+      if (!fs.existsSync(entry.source)) continue;
+      try {
+        fs.mkdirSync(path.dirname(entry.target), { recursive: true });
+        fs.copyFileSync(entry.source, entry.target);
+        fs.chmodSync(entry.target, 0o755);
+        refreshed++;
+      } catch (err) {
+        console.log(`  ✗ Could not refresh ${entry.name}: ${err.message}`);
+      }
+    }
+    return refreshed > 0;
   } catch {
     return false;
   }
+}
+
+/**
+ * Where one `detectLocalModifications()` label lives on both sides.
+ *
+ * `adapters/<f>.sh` is listed once but written twice by `copyAdapters` (flat and
+ * nested), so a machine edit to either copy has to block the refresh. The flat
+ * copy is only judged where it already exists -- creating one here would plant
+ * the very installer residue #500 is about (#495 Round 3).
+ */
+function staleSyncEntries(label, srcDir, hooksDestDir, adaptersDestDir) {
+  if (['pre-commit', 'pre-push', 'post-merge', 'sprint-gate.sh'].includes(label)) {
+    const hooksSource = label === 'sprint-gate.sh'
+      ? path.join(srcDir, label)
+      : path.join(srcDir, 'hooks', label);
+    return [{ name: label, source: hooksSource, target: path.join(hooksDestDir, label) }];
+  }
+  if (label.startsWith('adapters/')) {
+    const file = label.slice('adapters/'.length);
+    const source = path.join(srcDir, 'adapters', file);
+    const entries = [{ name: label, source, target: path.join(adaptersDestDir, 'adapters', file) }];
+    const flat = path.join(adaptersDestDir, file);
+    if (fs.existsSync(flat)) entries.push({ name: `${label} (flat)`, source, target: flat });
+    return entries;
+  }
+  return [{ name: label, source: path.join(srcDir, label), target: path.join(adaptersDestDir, label) }];
 }
 
 /**
@@ -1670,8 +1966,13 @@ async function doctor(args) {
   // #488: an unrecognised flag used to be silently ignored — the npm release
   // that predates --sync-hooks made "doctor --sync-hooks" a silent no-op and
   // the user believed a sync had happened. Fail loudly instead.
-  const KNOWN_FLAGS = ['--fix', '--sync-hooks', '--force', '--install-tools'];
-  const unknownFlags = args.filter(a => !KNOWN_FLAGS.includes(a));
+  const KNOWN_FLAGS = ['--fix', '--sync-hooks', '--force', '--install-tools', '--json', '--format'];
+  // `--format json` carries a value; without this the value itself would be
+  // reported as an unknown flag and the documented machine-readable mode could
+  // never be reached (#304 promised it, nothing ever implemented it).
+  const formatValue = args[args.indexOf('--format') + 1] || null;
+  const flagTokens = args.filter((a, i) => !(i > 0 && args[i - 1] === '--format'));
+  const unknownFlags = flagTokens.filter(a => !KNOWN_FLAGS.includes(a));
   if (unknownFlags.length > 0) {
     console.error(`Unknown flag(s) for doctor: ${unknownFlags.join(', ')}`);
     console.error(`Supported flags: ${KNOWN_FLAGS.join(', ')}`);
@@ -1685,20 +1986,37 @@ async function doctor(args) {
   // Installing a toolchain changes the machine, not the repository, so it is
   // never a side effect of --fix (#502). --fix reports the missing tools.
   const installToolsFlag = args.includes('--install-tools');
+  const jsonMode = args.includes('--json') || (args.includes('--format') && formatValue === 'json');
+  if (args.includes('--format') && !['json', 'text'].includes(formatValue)) {
+    console.error(`Unknown --format value: ${formatValue || '(none)'} — expected json or text`);
+    return 1;
+  }
+  if (jsonMode && (fixMode || syncHooks)) {
+    // A JSON report is a read; mixing it with the repair surface would put
+    // progress prose into the stream a script is parsing.
+    console.error('--json/--format json cannot be combined with --fix or --sync-hooks');
+    return 1;
+  }
 
-  console.log('XP-Gate Doctor');
-  console.log('==============');
+  if (!jsonMode) {
+    console.log('XP-Gate Doctor');
+    console.log('==============');
+  }
 
   // §4.13 (#451 REQ-3): state which hook files actually execute, so "I edited
   // githooks/ but nothing changed" is answerable without reading git config.
-  printEffectiveHooks();
+  if (!jsonMode) printEffectiveHooks();
   // #495: the same for the gate modules the hook sources at runtime.
-  printEffectiveModules();
+  if (!jsonMode) printEffectiveModules();
 
   const config = getConfig();
 
   // §4.8: mode === "uninstalled" → print "xp-gate is not installed"
   if (isUninstalledMode(config)) {
+    if (jsonMode) {
+      console.log(JSON.stringify(formatDoctorJson([{ name: 'Install', status: 'SKIP', detail: 'xp-gate is not installed' }], 0)));
+      return 0;
+    }
     console.log('xp-gate is not installed.');
     console.log('Run xp-gate init to install.');
     return 0;
@@ -1751,19 +2069,21 @@ async function doctor(args) {
 
   // §4.13: --fix only when mode === "active"
   if (fixMode && isActiveMode(config)) {
-    fixIssues(null, config);
+    fixIssues(null, config, installToolsFlag);
   }
 
   // Global timeout wrapper — ensures doctor completes within GLOBAL_DIAGNOSIS_TIMEOUT_MS
   // even if network/subprocess checks stack up (fix #348: 43s on Windows).
   const diagnosisPromise = diagnoseAsync();
+  let diagnosisTimer = null;
   const timeoutPromise = new Promise((resolve) => {
-    setTimeout(() => resolve({ checks: [{ name: 'Diagnosis', status: 'WARN', detail: `Timed out after ${GLOBAL_DIAGNOSIS_TIMEOUT_MS / 1000}s — some checks incomplete` }], issues: 0, timedOut: true }), GLOBAL_DIAGNOSIS_TIMEOUT_MS);
+    diagnosisTimer = setTimeout(() => resolve({ checks: [{ name: 'Diagnosis', status: 'WARN', detail: `Timed out after ${GLOBAL_DIAGNOSIS_TIMEOUT_MS / 1000}s — some checks incomplete` }], issues: 0, timedOut: true }), GLOBAL_DIAGNOSIS_TIMEOUT_MS);
   });
   const { checks, issues: diagnosedIssues, timedOut } = await Promise.race([
     diagnosisPromise.then(r => ({ ...r, timedOut: false })),
     timeoutPromise,
   ]);
+  clearTimeout(diagnosisTimer);
   let issues = diagnosedIssues;
 
   // A timeout discards every check that had not reported yet, including the
@@ -1777,20 +2097,38 @@ async function doctor(args) {
     issues += hookDrift.issues + moduleDrift.issues;
   }
 
+  let langIssues = 0;
+  // Upgrade + plugin + language-tool status, kept as one callable because a
+  // --format json run still has to execute all of it (#488).
+  const collectTrailingChecks = async () => {
+    try {
+      const upgradePromise = diagnoseUpgrade();
+      const upgradeTimeout = new Promise((resolve) => setTimeout(() => resolve(), 3000));
+      await Promise.race([upgradePromise, upgradeTimeout]);
+    } catch { /* non-blocking */ }
+    const trailing = diagnoseOpenCodePlugin(checks);
+    langIssues = diagnoseLanguageTools();
+    return trailing + langIssues;
+  };
+
+  if (jsonMode) {
+    // Machine-readable output means EXACTLY one JSON document on stdout, so the
+    // human report and the trailing checks' chatter are silenced while their
+    // results are still collected into `checks`.
+    const say = console.log;
+    console.log = () => {};
+    try {
+      issues += await collectTrailingChecks();
+    } finally {
+      console.log = say;
+    }
+    console.log(JSON.stringify(formatDoctorJson(checks, issues)));
+    return issues > 0 ? 1 : 0;
+  }
+
   printReport(checks);
 
-  // Upgrade check with its own short timeout (3s) — non-blocking
-  try {
-    const upgradePromise = diagnoseUpgrade();
-    const upgradeTimeout = new Promise((resolve) => setTimeout(() => resolve(), 3000));
-    await Promise.race([upgradePromise, upgradeTimeout]);
-  } catch { /* non-blocking */ }
-
-  issues += diagnoseOpenCodePlugin(checks);
-
-  // Language-specific tool status
-  const langIssues = diagnoseLanguageTools();
-  issues += langIssues;
+  issues += await collectTrailingChecks();
 
   // In --fix mode, auto-install missing language tools — only on explicit
   // --install-tools (#502: a diagnosis command must not run package managers).
@@ -1837,10 +2175,24 @@ async function doctor(args) {
   if (fixMode && isActiveMode(config)) {
     console.log('\nRe-running diagnosis after fix...');
     const postDiagPromise = diagnoseAsync();
+    let postTimer = null;
     const postTimeout = new Promise((resolve) => {
-      setTimeout(() => resolve({ checks: [{ name: 'Post-fix diagnosis', status: 'WARN', detail: 'Timed out' }] }), GLOBAL_DIAGNOSIS_TIMEOUT_MS);
+      postTimer = setTimeout(() => resolve({
+        checks: [{ name: 'Post-fix diagnosis', status: 'WARN', detail: `Timed out after ${GLOBAL_DIAGNOSIS_TIMEOUT_MS / 1000}s — the fix result is unconfirmed, not clean` }],
+        issues: 1,
+        timedOut: true,
+      }), GLOBAL_DIAGNOSIS_TIMEOUT_MS);
     });
-    const { checks: postChecks } = await Promise.race([postDiagPromise, postTimeout]);
+    const { checks: postChecks, timedOut: postTimedOut } = await Promise.race([
+      postDiagPromise.then(r => ({ ...r, timedOut: false })),
+      postTimeout,
+    ]);
+    clearTimeout(postTimer);
+    // Symmetry with the pre-fix race above: a timeout here discards the drift
+    // surface too, so the post-fix report must not read as "all clear".
+    if (postTimedOut) {
+      postChecks.push(...diagnoseHookDrift().checks, ...diagnoseModuleDrift().checks);
+    }
     printReport(postChecks);
   }
 
@@ -1876,6 +2228,10 @@ module.exports = {
   diagnoseModuleDrift,
   syncModulesFromRepo,
   resolveExecutedModuleDirs,
+  executedModulePath,
+  repoModuleNames,
+  copyGuardDecision,
+  planStaleHookSync,
   listExecutedModules,
   repoModuleSource,
   contentDelta,
