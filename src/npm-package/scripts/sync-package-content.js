@@ -477,8 +477,11 @@ function main() {
   // tui-plugin removed in v0.13.0 — validation skipped.
 }
 
-if (require.main !== module) {
+if (require.main === module) {
+  main();
+} else {
+  // Requiring this script must not mutate the work tree: a test that only wants
+  // checkDocsDrift/checkAdapterDrift used to trigger a full mirror sync at
+  // require-time, which vitest-worktree-guard rightly reported as pollution.
   module.exports = { checkDocsDrift, checkAdapterDrift };
 }
-
-main();

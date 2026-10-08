@@ -588,3 +588,31 @@ describe('sync-package-content subprocess invocation', () => {
     expect(Object.keys(pkgJsonAfter.dependencies || {}).length).toBe(0, 'dependencies should remain empty');
   }, 10000);
 });
+
+/**
+ * @test REQ-TDD-005 load-time-no-sync
+ * @intent Requiring sync-package-content must not sync the repo — only executing it as a
+ *        script may. The top-level main() used to run on every require(), so a test that
+ *        merely imported checkDocsDrift regenerated the whole npm-package mirror mid-run
+ *        and tripped vitest-worktree-guard on CI (missing mirror of an uncommitted
+ *        canonical file was (re)created as a new untracked path).
+ * @covers AC-TDD-005-04
+ */
+describe('load-time behavior', () => {
+  it('require() performs no filesystem sync; main() runs only when executed directly', () => {
+    const modulePath = require.resolve('../sync-package-content');
+    delete require.cache[modulePath];
+    const copies = [];
+    const originalCopy = fs.copyFileSync;
+    fs.copyFileSync = (...args) => { copies.push(args); };
+    try {
+      require('../sync-package-content');
+    } finally {
+      fs.copyFileSync = originalCopy;
+    }
+    expect(copies, `require() must not copy; got ${copies.length} copies`).toHaveLength(0);
+    const mod = require.cache[modulePath].exports;
+    expect(typeof mod.checkDocsDrift).toBe('function');
+    expect(typeof mod.checkAdapterDrift).toBe('function');
+  });
+});
