@@ -857,11 +857,21 @@ has_project_lang() {
 }
 # Switch to subdirectory if detected (for single-language subdirectory projects).
 # Multi-language projects stay at root — each adapter handles its own path.
+#
+# IN_PROJECT_SUBDIR records whether this cd actually happened. Git reports
+# staged paths relative to the repo root; after cd "$PROJECT_SUBDIR" the [ -f ]
+# probes below need subdirectory-relative paths (hence the PROJECT_SUBDIR
+# prefix strips in Gates 5a/5b/5c), but when the hook stays at the root
+# (multi-language projects) stripping the prefix makes every path-based check
+# resolve against the wrong directory — false BLOCKs in Gate 5a, silent no-ops
+# in 5b/5c. Only strip when we really are inside the subdirectory.
 ORIGINAL_DIR=""
+IN_PROJECT_SUBDIR=0
 _lang_count=$(echo "$PROJECT_LANGS" | wc -w)
 if [ -n "$PROJECT_SUBDIR" ] && [ "$PROJECT_SUBDIR" != "." ] && [ "$PROJECT_LANG" != "documentation-only" ] && [ "$_lang_count" -le 1 ]; then
   ORIGINAL_DIR=$(pwd)
   cd "$PROJECT_SUBDIR"
+  IN_PROJECT_SUBDIR=1
   echo "Working in: $PROJECT_SUBDIR/"
   echo ""
 fi
@@ -891,20 +901,67 @@ else
   # in githooks/lib/typecheck.sh so a project's own checker (vue-tsc, svelte-check,
   # a `typecheck` script) is used instead of a hardcoded tsc that cannot resolve
   # single-file components (#436).
-  source "${AUDIT_SCRIPT_DIR}/lib/typecheck.sh"
-  run_typescript_typecheck
-  TS_CHECK_EXIT=$?
+  #
+  # Resolve the TS project directory first (#470). The probes below used to run
+  # against the repo root only; in multi-language monorepos (e.g. web/ +
+  # backend/, where the hook stays at the root — see the cd block above)
+  # tsconfig.json / biome.json live in the language subdirectory, so the whole
+  # TS half of Gate 1 silently SKIPped ("tsconfig.json not found") while a
+  # project config existed. Order: repo root first (unchanged behaviour for
+  # plain projects), then the detected language subdirectory, then a shallow
+  # search.
+  TS_PROJECT_DIR=""
+  for _ts_dir in "." "${PROJECT_SUBDIR:-}"; do
+    [ -z "$_ts_dir" ] && continue
+    if [ -f "$_ts_dir/tsconfig.json" ] || [ -f "$_ts_dir/biome.json" ] || [ -f "$_ts_dir/biome.jsonc" ] \
+       || [ -f "$_ts_dir/eslint.config.js" ] || [ -f "$_ts_dir/.eslintrc.json" ] \
+       || [ -f "$_ts_dir/.eslintrc.js" ] || [ -f "$_ts_dir/.eslintrc.cjs" ]; then
+      TS_PROJECT_DIR="$_ts_dir"
+      break
+    fi
+  done
+  if [ -z "$TS_PROJECT_DIR" ]; then
+    _TSCONFIG_CAND=$(find . -maxdepth 2 \( -name tsconfig.json -o -name biome.json -o -name biome.jsonc -o -name eslint.config.js -o -name .eslintrc.json -o -name .eslintrc.js -o -name .eslintrc.cjs \) -not -path './.git/*' -not -path './node_modules/*' 2>/dev/null | head -1)
+    if [ -n "$_TSCONFIG_CAND" ]; then
+      TS_PROJECT_DIR=$(dirname "$_TSCONFIG_CAND")
+    fi
+  fi
+  [ -z "$TS_PROJECT_DIR" ] && TS_PROJECT_DIR="."
+  if [ "$TS_PROJECT_DIR" != "." ]; then
+    echo "   TypeScript project directory: $TS_PROJECT_DIR/"
+    # typecheck.sh is cwd-relative: run it from the TS project subdirectory in a
+    # subshell so the language loop's next iteration still starts at the root.
+    # Exit contract: 0 clean, 1 findings (block), 2 checker unavailable (skip).
+    # A cd/source infrastructure failure must NOT read as "type errors": map it
+    # to 2 (skip) so 1 stays reserved for real findings (#508 walkthrough).
+    ( cd "$TS_PROJECT_DIR" 2>/dev/null || exit 2 \
+      ; [ -r "${AUDIT_SCRIPT_DIR}/lib/typecheck.sh" ] || exit 2 \
+      ; source "${AUDIT_SCRIPT_DIR}/lib/typecheck.sh" && run_typescript_typecheck )
+    TS_CHECK_EXIT=$?
+  else
+    source "${AUDIT_SCRIPT_DIR}/lib/typecheck.sh"
+    run_typescript_typecheck
+    TS_CHECK_EXIT=$?
+  fi
   if [ "$TS_CHECK_EXIT" -eq 1 ]; then
     exit 1
   fi
     
-    # Run ESLint linting if config exists
-    if [ -f ".eslintrc.json" ] || [ -f ".eslintrc.js" ] || [ -f ".eslintrc.cjs" ] || [ -f "eslint.config.js" ]; then
+    # Run ESLint linting if config exists (root or TS project subdirectory)
+    if [ -f "$TS_PROJECT_DIR/.eslintrc.json" ] || [ -f "$TS_PROJECT_DIR/.eslintrc.js" ] || [ -f "$TS_PROJECT_DIR/.eslintrc.cjs" ] || [ -f "$TS_PROJECT_DIR/eslint.config.js" ]; then
       echo "Running ESLint linting..."
       # Filter to only TS/JS files - ESLint config ignores non-matching files
       ESLINT_FILES=$(echo "$CHANGED_FILES" | grep -E '\.(ts|tsx|js|jsx)$' || true)
       if [ -n "$ESLINT_FILES" ]; then
-        ESLINT_OUTPUT=$(npx eslint $ESLINT_FILES -f json --no-warn-ignored 2>&1)
+        # File paths from git are repo-root relative, so they are correct from
+        # the root. Legacy .eslintrc.* configs are discovered by walking up from
+        # each linted file (found in the subdirectory automatically); flat
+        # configs are discovered from the CWD, so point at them explicitly.
+        if [ "$TS_PROJECT_DIR" != "." ] && [ -f "$TS_PROJECT_DIR/eslint.config.js" ]; then
+          ESLINT_OUTPUT=$(npx eslint --config "$TS_PROJECT_DIR/eslint.config.js" $ESLINT_FILES -f json --no-warn-ignored 2>&1)
+        else
+          ESLINT_OUTPUT=$(npx eslint $ESLINT_FILES -f json --no-warn-ignored 2>&1)
+        fi
         ESLINT_EXIT=$?
         if [ "$ESLINT_EXIT" -ne 0 ]; then
           if [ -f ".xp-gate/lint-baseline.json" ] && command -v node &> /dev/null; then
@@ -951,8 +1008,8 @@ else
       fi
     else
       echo "ℹ️  No ESLint configuration found - Skipping"
-      if [ -f "package.json" ] && command -v node &> /dev/null; then
-        HAS_ESLINT=$(node -e "try{const p=JSON.parse(require('fs').readFileSync('package.json','utf8'));const d=p.devDependencies||{};const deps=p.dependencies||{};console.log((d.eslint||deps.eslint)?'yes':'no')}catch{console.log('no')}") && true
+      if [ -f "$TS_PROJECT_DIR/package.json" ] && command -v node &> /dev/null; then
+        HAS_ESLINT=$(node -e "try{const p=JSON.parse(require('fs').readFileSync('$TS_PROJECT_DIR/package.json','utf8'));const d=p.devDependencies||{};const deps=p.dependencies||{};console.log((d.eslint||deps.eslint)?'yes':'no')}catch{console.log('no')}") && true
         if [ "$HAS_ESLINT" = "yes" ]; then
           echo "⚠️  WARNING: eslint is installed in package.json but no eslint config found"
           echo "   Either create .eslintrc.* / eslint.config.* or remove eslint from dependencies"
@@ -962,9 +1019,17 @@ else
     fi
 
     # ── Biome lint/format check ──
-    if [ -f "biome.json" ] || [ -f "biome.jsonc" ]; then
+    # Default the project dir so this branch stays runnable standalone
+    # (the gate-1-biome-noop suite extracts it verbatim); a no-op inside the
+    # hook, where TS_PROJECT_DIR is resolved above.
+    TS_PROJECT_DIR="${TS_PROJECT_DIR:-.}"
+    if [ -f "$TS_PROJECT_DIR/biome.json" ] || [ -f "$TS_PROJECT_DIR/biome.jsonc" ]; then
       echo "Running Biome lint/format check..."
-      BIOME_OUT=$(npx biome check --staged . 2>&1)
+      # Run from the TS project directory so Biome auto-discovers its config and
+      # scopes --staged to that subdirectory (mirrors the single-language subdir
+      # mode, which executes after cd "$PROJECT_SUBDIR"). Empirically verified:
+      # `biome check --staged .` from the subdir checks the staged files under it.
+      BIOME_OUT=$(cd "$TS_PROJECT_DIR" && npx biome check --staged . 2>&1)
       BIOME_STATUS=$?
       if [ "$BIOME_STATUS" -ne 0 ]; then
         # Biome exits 1 with `internalError/io - No files were processed` when the
@@ -989,8 +1054,8 @@ else
         echo "✅ PASSED - Biome check."
       fi
     else
-      if [ -f "package.json" ] && command -v node &> /dev/null; then
-        HAS_BIOME=$(node -e "try{const p=JSON.parse(require('fs').readFileSync('package.json','utf8'));const d=p.devDependencies||{};const deps=p.dependencies||{};console.log((d['@biomejs/biome']||deps['@biomejs/biome'])?'yes':'no')}catch{console.log('no')}") && true
+      if [ -f "$TS_PROJECT_DIR/package.json" ] && command -v node &> /dev/null; then
+        HAS_BIOME=$(node -e "try{const p=JSON.parse(require('fs').readFileSync('$TS_PROJECT_DIR/package.json','utf8'));const d=p.devDependencies||{};const deps=p.dependencies||{};console.log((d['@biomejs/biome']||deps['@biomejs/biome'])?'yes':'no')}catch{console.log('no')}") && true
         if [ "$HAS_BIOME" = "yes" ]; then
           echo ""
           echo "⚠️  WARNING: @biomejs/biome is installed in package.json but no biome.json found"
@@ -1480,11 +1545,15 @@ else
   # --- BLOCK path: New .ts/.tsx files without corresponding tests ---
   NEW_TS_FILES=$(git diff --cached --name-only --diff-filter=A | grep -E '\.(ts|tsx)$' | grep -v '\.d\.ts$' | grep -v '__tests__' | grep -v '\.test\.' | grep -v '\.spec\.' | grep -v '__snapshots__' | grep -v 'node_modules/' | grep -v '\.next/' | grep -v '\.nuxt/' | grep -v 'dist/' | grep -v 'build/' | grep -v '.turbo/' | grep -v '.cache/' | grep -Ev '(^|/)vitest\.config\.' | grep -Ev '(^|/)vite\.config\.' | grep -Ev '(^|/)jest\.config\.' | grep -Ev '(^|/)tsconfig\.' | grep -Ev '(^|/)eslint\.' | grep -Ev '(^|/)prettier\.' | grep -Ev '(^|/)tailwind\.' || true)
 
-  # Strip PROJECT_SUBDIR prefix from new-TS-file paths when running in a subdirectory.
-  # git diff returns repo-root relative paths, but after cd "$PROJECT_SUBDIR"
-  # the test-pairing [ -f ] checks below need subdirectory-relative paths.
+  # Strip PROJECT_SUBDIR prefix from new-TS-file paths ONLY when the hook
+  # actually cd'd into the subdirectory (IN_PROJECT_SUBDIR=1; single-language
+  # subdirectory projects). git diff returns repo-root relative paths; after
+  # cd "$PROJECT_SUBDIR" the test-pairing [ -f ] checks below need
+  # subdirectory-relative paths. When the hook stays at the repo root
+  # (multi-language projects) the paths must KEEP their prefix or every
+  # [ -f ] lookup misses and paired files are falsely BLOCKED.
   # (Mirrors the v0.14.31+ Gate 5b fix at lines 1603-1608; Gate 5a was missing it.)
-  if [ -n "$PROJECT_SUBDIR" ] && [ "$PROJECT_SUBDIR" != "." ] && [ -n "$NEW_TS_FILES" ]; then
+  if [ "$IN_PROJECT_SUBDIR" = "1" ] && [ -n "$NEW_TS_FILES" ]; then
     NEW_TS_FILES=$(echo "$NEW_TS_FILES" | sed "s|^${PROJECT_SUBDIR}/||")
   fi
 
@@ -1695,10 +1764,13 @@ else
   # each plugin directory).
   CHANGED_TEST_FILES=$(echo "$CHANGED_TEST_FILES" | grep -vE '^plugins/[^/]+/' || true)
 
-  # Strip PROJECT_SUBDIR prefix from test file paths when running in subdirectory.
-  # git diff returns repo-root relative paths, but after cd "$PROJECT_SUBDIR" (line 728)
-  # vitest and [ -f ] checks need subdirectory-relative paths. (v0.14.31+ fix)
-  if [ -n "$PROJECT_SUBDIR" ] && [ "$PROJECT_SUBDIR" != "." ] && [ -n "$CHANGED_TEST_FILES" ]; then
+  # Strip PROJECT_SUBDIR prefix from test file paths ONLY when the hook
+  # actually cd'd into the subdirectory (IN_PROJECT_SUBDIR=1). git diff returns
+  # repo-root relative paths; after cd "$PROJECT_SUBDIR" vitest and [ -f ]
+  # checks need subdirectory-relative paths. At the repo root (multi-language
+  # projects) stripping would silently skip the mock-density scan and feed
+  # vitest paths that do not exist. (v0.14.31+ fix, gated on the cd in v0.19.x)
+  if [ "$IN_PROJECT_SUBDIR" = "1" ] && [ -n "$CHANGED_TEST_FILES" ]; then
     CHANGED_TEST_FILES=$(echo "$CHANGED_TEST_FILES" | sed "s|^${PROJECT_SUBDIR}/||")
   fi
 
@@ -1884,14 +1956,20 @@ else
           CHANGED_SRC_FILES=$(echo "$CHANGED_SRC_FILES" | grep -vE '^plugins/[^/]+/' || true)
           # Mirror handling is identical for source files: their test-adjacent
           # paths must never reach vitest as root-project targets (#494).
+          # Selection runs on repo-root relative paths (git diff output), before
+          # any PROJECT_SUBDIR stripping, so the bundled-mirror prefixes match.
           SELECTED_SRC_FILES=$(select_root_suite_targets "$CHANGED_SRC_FILES")
           if [ "$SELECTED_SRC_FILES" != "$CHANGED_SRC_FILES" ]; then
             echo "   ↪ Source selection adjusted for bundled mirrors (#494):"
             echo "     was: $(echo "$CHANGED_SRC_FILES" | tr '\n' ' ')"
             echo "     now: $(echo "$SELECTED_SRC_FILES" | tr '\n' ' ')"
           fi
-          # Strip PROJECT_SUBDIR prefix (same as CHANGED_TEST_FILES fix above)
-          if [ -n "$PROJECT_SUBDIR" ] && [ "$PROJECT_SUBDIR" != "." ] && [ -n "$SELECTED_SRC_FILES" ]; then
+          # Strip PROJECT_SUBDIR prefix ONLY when the hook cd'd into the
+          # subdirectory (IN_PROJECT_SUBDIR=1; same gate as the CHANGED_TEST_FILES
+          # fix above — at the repo root the paths must stay root-relative or the
+          # related-test lookup and vitest targets resolve against the wrong dir,
+          # #470)
+          if [ "$IN_PROJECT_SUBDIR" = "1" ] && [ -n "$SELECTED_SRC_FILES" ]; then
             SELECTED_SRC_FILES=$(echo "$SELECTED_SRC_FILES" | sed "s|^${PROJECT_SUBDIR}/||")
           fi
           CHANGED_SRC_COUNT=$(echo "$SELECTED_SRC_FILES" | grep -c '.' || true)
