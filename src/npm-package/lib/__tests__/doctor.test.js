@@ -1164,4 +1164,48 @@ describe('doctor', () => {
     expect(errorSpy).toHaveBeenCalledWith(expect.stringContaining('--format'));
     errorSpy.mockRestore();
   });
+
+  // AC-488-09 (#488 Round 4, feasibility): the same class as the original issue —
+  // a flag that is accepted and then does nothing. `--format` with no value, and
+  // `--force` with no mode that reads it, both looked like they ran.
+  it('AC-488-09: a value-less --format is rejected instead of silently dropping the flag', async () => {
+    const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+    const { doctor } = require('../doctor');
+
+    expect(await doctor(['--format'])).toBe(1);
+    expect(errorSpy).toHaveBeenCalledWith(expect.stringContaining('--format'));
+    errorSpy.mockRestore();
+  });
+
+  it('AC-488-09: --force is refused when no mode consumes it', () => {
+    // Asserted through the pure contract rather than by running the command:
+    // the only mode that reads --force is the one that copies files over the
+    // installed hooks, so a run-based assertion would mutate this machine.
+    const { doctorFlagContract } = require('../doctor');
+
+    const bare = doctorFlagContract(['--force']);
+    expect(bare.errors).toHaveLength(2);
+    expect(bare.errors[0]).toContain('--force');
+    expect(bare.errors[0]).toContain('--sync-hooks');
+    expect(doctorFlagContract(['--fix', '--force']).errors.length, '--fix does not read --force either').toBeGreaterThan(0);
+
+    const synced = doctorFlagContract(['--sync-hooks', '--force']);
+    expect(synced.errors, synced.errors.join('\n')).toHaveLength(0);
+    expect(synced.force).toBe(true);
+    expect(synced.syncHooks).toBe(true);
+  });
+
+  it('AC-488-09: --install-tools is refused unless --fix is the mode that reads it', () => {
+    const { doctorFlagContract } = require('../doctor');
+
+    const bare = doctorFlagContract(['--install-tools']);
+    expect(bare.errors).toHaveLength(2);
+    expect(bare.errors[0]).toContain('--install-tools');
+    expect(bare.errors[0]).toContain('--fix');
+    expect(doctorFlagContract(['--sync-hooks', '--install-tools']).errors.length).toBeGreaterThan(0);
+
+    const fixing = doctorFlagContract(['--fix', '--install-tools']);
+    expect(fixing.errors, fixing.errors.join('\n')).toHaveLength(0);
+    expect(fixing.installToolsFlag).toBe(true);
+  });
 });

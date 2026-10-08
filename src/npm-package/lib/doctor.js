@@ -1691,7 +1691,7 @@ function fixHookDriftFromRepo() {
     return false;
   }
   for (const r of refused) {
-    console.log(`  ⚠️  ${r.name} NOT synced — install has ${r.installedOnly} unique line(s); judge it, then use --sync-hooks --force`);
+    console.log(`  ⚠️  ${r.name} NOT synced — install has ${r.installedOnly} unique line(s); judge it, then use --sync-hooks --force, which overwrites with no backup, so keep a copy of the installed file first`);
   }
   if (synced.length === 0) return false;
 
@@ -1751,6 +1751,8 @@ function fixStaleHooks(config) {
       }
       console.log('     Judge them (fold the hardening into the package, or move the file aside),');
       console.log('     then re-run --fix.');
+      console.log('     There is no automatic backup of an overwritten hook/adapter file and nothing');
+      console.log('     in this tool can undo one — judge against a copy you kept, not against a rollback.');
     }
 
     if (plan.safe.length === 0) return plan.hasBlocking;
@@ -1962,11 +1964,24 @@ function diagnoseLanguageTools() {
   }
 }
 
-async function doctor(args) {
-  // #488: an unrecognised flag used to be silently ignored — the npm release
-  // that predates --sync-hooks made "doctor --sync-hooks" a silent no-op and
-  // the user believed a sync had happened. Fail loudly instead.
-  const KNOWN_FLAGS = ['--fix', '--sync-hooks', '--force', '--install-tools', '--json', '--format'];
+// #488: an unrecognised flag used to be silently ignored — the npm release
+// that predates --sync-hooks made "doctor --sync-hooks" a silent no-op and the
+// user believed a sync had happened. Fail loudly instead.
+const KNOWN_FLAGS = ['--fix', '--sync-hooks', '--force', '--install-tools', '--json', '--format'];
+
+/**
+ * The accepted flag surface of `doctor`, as a pure function.
+ *
+ * The reason this is not inline in `doctor()`: this contract is about which
+ * combinations are accepted, and answering that by running the real command
+ * would exercise the repair surface (`--sync-hooks` copies repo files over the
+ * installed ones). A contract that can only be tested by mutating the machine
+ * is a contract nobody tests.
+ *
+ * @returns {{errors: string[], fixMode: boolean, syncHooks: boolean, force: boolean, installToolsFlag: boolean, jsonMode: boolean}}
+ */
+function doctorFlagContract(args) {
+  const errors = [];
   // `--format json` carries a value; without this the value itself would be
   // reported as an unknown flag and the documented machine-readable mode could
   // never be reached (#304 promised it, nothing ever implemented it).
@@ -1974,9 +1989,8 @@ async function doctor(args) {
   const flagTokens = args.filter((a, i) => !(i > 0 && args[i - 1] === '--format'));
   const unknownFlags = flagTokens.filter(a => !KNOWN_FLAGS.includes(a));
   if (unknownFlags.length > 0) {
-    console.error(`Unknown flag(s) for doctor: ${unknownFlags.join(', ')}`);
-    console.error(`Supported flags: ${KNOWN_FLAGS.join(', ')}`);
-    return 1;
+    errors.push(`Unknown flag(s) for doctor: ${unknownFlags.join(', ')}`);
+    errors.push(`Supported flags: ${KNOWN_FLAGS.join(', ')}`);
   }
   const fixMode = args.includes('--fix');
   const syncHooks = args.includes('--sync-hooks');
@@ -1988,13 +2002,32 @@ async function doctor(args) {
   const installToolsFlag = args.includes('--install-tools');
   const jsonMode = args.includes('--json') || (args.includes('--format') && formatValue === 'json');
   if (args.includes('--format') && !['json', 'text'].includes(formatValue)) {
-    console.error(`Unknown --format value: ${formatValue || '(none)'} — expected json or text`);
-    return 1;
+    errors.push(`Unknown --format value: ${formatValue || '(none)'} — expected json or text`);
   }
   if (jsonMode && (fixMode || syncHooks)) {
     // A JSON report is a read; mixing it with the repair surface would put
     // progress prose into the stream a script is parsing.
-    console.error('--json/--format json cannot be combined with --fix or --sync-hooks');
+    errors.push('--json/--format json cannot be combined with --fix or --sync-hooks');
+  }
+  // Round 4 (feasibility) caught the original #488 defect in a new place:
+  // `--force` is read only by the sync path, so `doctor --force` and
+  // `doctor --fix --force` were accepted, printed nothing and changed nothing.
+  if (force && !syncHooks) {
+    errors.push('--force is only read by --sync-hooks, where it overrides the divergence refusal and overwrites without a backup');
+    errors.push('Pass --sync-hooks --force, or drop --force');
+  }
+  // Same class: --install-tools installs only inside the --fix repair surface.
+  if (installToolsFlag && !fixMode) {
+    errors.push('--install-tools is only read by --fix, and it is the only flag that installs toolchains onto this machine');
+    errors.push('Pass --fix --install-tools, or drop --install-tools');
+  }
+  return { errors, fixMode, syncHooks, force, installToolsFlag, jsonMode };
+}
+
+async function doctor(args) {
+  const { errors, fixMode, syncHooks, force, installToolsFlag, jsonMode } = doctorFlagContract(args);
+  if (errors.length > 0) {
+    for (const error of errors) console.error(error);
     return 1;
   }
 
@@ -2042,7 +2075,8 @@ async function doctor(args) {
       for (const r of refused) {
         console.log(`     - ${r.name}: install has ${r.installedOnly} unique line(s), githooks/ has ${r.repoOnly}`);
       }
-      console.log('     Review them, then either fold the hardening into githooks/ or re-run with --force.');
+      console.log('     Review them, then either fold the hardening into githooks/ or re-run --sync-hooks --force.');
+      console.log('     Forcing overwrites the installed file with no backup: copy it aside first.');
     }
 
     // #495: the gate modules are what the hook sources for Gates 3/4/7/8/9/10,
@@ -2063,7 +2097,8 @@ async function doctor(args) {
       for (const r of moduleSync.refused) {
         console.log(`     - ${r.name}: install has ${r.installedOnly} unique line(s), githooks/ has ${r.repoOnly}`);
       }
-      console.log('     Review them, then either fold the hardening into githooks/ or re-run with --force.');
+      console.log('     Review them, then either fold the hardening into githooks/ or re-run --sync-hooks --force.');
+      console.log('     Forcing overwrites the installed file with no backup: copy it aside first.');
     }
   }
 
@@ -2232,6 +2267,7 @@ module.exports = {
   repoModuleNames,
   copyGuardDecision,
   planStaleHookSync,
+  doctorFlagContract,
   listExecutedModules,
   repoModuleSource,
   contentDelta,
