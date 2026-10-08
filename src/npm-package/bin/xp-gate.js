@@ -140,7 +140,7 @@ const COMMANDS = {
   'doctor': {
     description: 'Diagnose xp-gate installation health',
     run: subargs => doctor(subargs).then(code => process.exit(code)),
-    usage: 'xp-gate doctor [--fix [--install-tools] | --sync-hooks [--force]] | [--json | --format json]'
+    usage: 'xp-gate doctor [--fix [--install-tools] | --sync-hooks [--force]] | --json | --format json  (the two machine-readable modes print one JSON document and refuse --fix/--sync-hooks)'
   },
   'ui-review': {
     description: 'Run UI review for non-sprint developers (generates .ui-gate-result.json)',
