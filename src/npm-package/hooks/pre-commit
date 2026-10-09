@@ -474,8 +474,13 @@ echo ""
 # unconditional and fail-closed (#499), and gating it behind a path-filtered
 # list would let a mirror-only commit land with zero secret scanning and no
 # CI backstop.
+# Single source of truth for the mirror-path filter (#510): every consumer
+# that must ignore the byte-identical npm-package mirrors (lint corpus here,
+# Boy Scout's new/modified split further down) reads this one regex, so the
+# two sites cannot drift apart.
+MIRROR_PATH_FILTER='^src/npm-package/'
 RAW_CHANGED_FILES=$(git diff --cached --name-only --diff-filter=ACM)
-CHANGED_FILES=$(printf '%s\n' "$RAW_CHANGED_FILES" | grep -v '^src/npm-package/' || true)
+CHANGED_FILES=$(printf '%s\n' "$RAW_CHANGED_FILES" | grep -v "$MIRROR_PATH_FILTER" || true)
 
 if [ -z "$RAW_CHANGED_FILES" ]; then
   echo "No files changed. Skipping gates."
@@ -2701,7 +2706,7 @@ else
     # real source path stays unbudgeted. Exclude it and let the mirroring be
     # governed by Mirror Parity in CI, which compares content rather than
     # re-linting it. (See the same exclusion in adapters/powershell.sh.)
-    MIRROR_EXCLUDE='^src/npm-package/'
+    MIRROR_EXCLUDE="$MIRROR_PATH_FILTER"
     NEW_FILES=$(git diff --cached --name-only --diff-filter=A | grep -v "$MIRROR_EXCLUDE" | tr '\n' ' ')
     MODIFIED_FILES=$(git diff --cached --name-only --diff-filter=M | grep -v "$MIRROR_EXCLUDE" | tr '\n' ' ')
     
