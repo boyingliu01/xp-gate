@@ -88,6 +88,16 @@ function sameContentIgnoringLineEndings(a, b) {
 }
 
 /**
+ * Drop the frontmatter `version:` line, if any. Version METADATA is not content:
+ * when one side lacks a version, that line alone would otherwise read as a real
+ * content difference and every pre-#439-format installed copy would be flagged
+ * forever (#439).
+ */
+function withoutVersionLine(content) {
+  return content.replace(/^version:[^\n]*\r?\n/m, '');
+}
+
+/**
  * Compare two semver strings. Returns:
  *   -1 if a < b, 0 if a == b, 1 if a > b, undefined if either is not valid semver.
  * @param {string} a
@@ -185,12 +195,20 @@ function diagnoseInstalledSkills(config, checks) {
       }
     } else {
       // No version in at least one file — compare content, but not byte-for-byte:
-      // line endings alone are not evidence of staleness (#439).
-      if (!sameContentIgnoringLineEndings(bundledContent, userContent)) {
+      // line endings alone are not evidence of staleness (#439). And without a
+      // version we cannot call it "Outdated": update-skill pulls from main,
+      // which may be OLDER than what the user has installed, so the advice is
+      // "compare manually", never the destructive update command (#439). The
+      // version line itself is excluded from the comparison -- metadata, not
+      // content.
+      if (!sameContentIgnoringLineEndings(
+        withoutVersionLine(bundledContent),
+        withoutVersionLine(userContent)
+      )) {
         checks.push({
           name: `Skill: ${name}`,
           status: 'WARN',
-          detail: 'Outdated — run xp-gate update-skill --all',
+          detail: 'Content differs and version cannot be determined (missing version frontmatter) — compare manually before running update-skill (it pulls from main, which may be older than the installed copy)',
         });
         issues++;
       } else {

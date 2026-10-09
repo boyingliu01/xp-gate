@@ -1,5 +1,6 @@
 ---
 name: improve-codebase-architecture
+version: 1.0.0
 description: Find deepening opportunities in a codebase, informed by domain language in CONTEXT.md and decisions in ADRs. Use when user wants to improve architecture, find refactoring opportunities, consolidate tightly-coupled modules, or make a codebase more AI-navigable. Run periodically (weekly or after surges of development).
 ---
 
