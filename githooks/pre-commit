@@ -3017,24 +3017,59 @@ generate_quality_report() {
   local BRANCH
   local PASSED_COUNT=0
   local TOTAL_GATES=12
+  local SKIP_COUNT=0
+  local WARN_COUNT=0
+  local NONPASS_COUNT=0
 
   COMMIT_HASH=$(git rev-parse HEAD 2>/dev/null || echo "unknown")
   BRANCH=$(git rev-parse --abbrev-ref HEAD 2>/dev/null || echo "unknown")
   TIMESTAMP=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
 
+  # Scoring per #507 S3: SKIP removes a gate from the denominator (a missing
+  # tool must not drag the score down -- that was the "honest but punishing"
+  # old behavior), WARN stays in the denominator but never counts as passed,
+  # and FAIL/BLOCK count as non-passing items like before. NONPASS tracks
+  # non-passing gates INSIDE the effective denominator only -- a skipped gate
+  # is out of scope, not a failure.
+  local gate_status
   for gate in 1 2 3 4 5 6 7 8 9 10 11 12; do
     local status_var="GATE_${gate}_STATUS"
-    if [ "${!status_var}" = "PASS" ]; then
-      PASSED_COUNT=$((PASSED_COUNT + 1))
-    fi
+    gate_status="${!status_var:-FAIL}"
+    case "$gate_status" in
+      PASS) PASSED_COUNT=$((PASSED_COUNT + 1)) ;;
+      SKIP) SKIP_COUNT=$((SKIP_COUNT + 1)) ;;
+      WARN) WARN_COUNT=$((WARN_COUNT + 1)); NONPASS_COUNT=$((NONPASS_COUNT + 1)) ;;
+      *) NONPASS_COUNT=$((NONPASS_COUNT + 1)) ;;
+    esac
   done
 
-  local SCORE=0
-  if command -v bc >/dev/null 2>&1; then
-    SCORE=$(echo "scale=1; ($PASSED_COUNT / $TOTAL_GATES) * 10" | bc)
-  else
-    SCORE=$(awk "BEGIN {printf \"%.1f\", ($PASSED_COUNT / $TOTAL_GATES) * 10}")
+  local EFFECTIVE_TOTAL=$((TOTAL_GATES - SKIP_COUNT))
+  local VERDICT="PASS"
+  if [ "$EFFECTIVE_TOTAL" -eq 0 ]; then
+    VERDICT="SKIP-ALL"   # every gate skipped: never report a fake 10/10
+  elif [ "$NONPASS_COUNT" -gt 0 ]; then
+    if [ "$((NONPASS_COUNT - WARN_COUNT))" -gt 0 ]; then
+      VERDICT="FAIL"     # at least one FAIL/BLOCK among the effective gates
+    else
+      VERDICT="WARN"     # all effective gates passed or warned; warns forbid PASS
+    fi
   fi
+
+  local SCORE=0
+  if [ "$EFFECTIVE_TOTAL" -eq 0 ]; then
+    SCORE="N/A"
+  elif command -v bc >/dev/null 2>&1; then
+    SCORE=$(echo "scale=1; ($PASSED_COUNT / $EFFECTIVE_TOTAL) * 10" | bc)
+  else
+    SCORE=$(awk "BEGIN {printf \"%.1f\", ($PASSED_COUNT / $EFFECTIVE_TOTAL) * 10}")
+  fi
+  local EFFECTIVE_PASS_RATE="N/A"
+  if [ "$EFFECTIVE_TOTAL" -gt 0 ]; then
+    EFFECTIVE_PASS_RATE=$(awk "BEGIN {printf \"%.1f\", ($PASSED_COUNT / $EFFECTIVE_TOTAL) * 100}")
+  fi
+  # JSON bodies need a number or null -- a literal N/A breaks every consumer.
+  local SCORE_JSON="$SCORE"
+  [ "$SCORE_JSON" = "N/A" ] && SCORE_JSON="null"
 
   local BS_PASSED=0
   local BS_BLOCKED=0
@@ -3074,8 +3109,11 @@ generate_quality_report() {
   "overall": {
     "gatesPassed": $PASSED_COUNT,
     "gatesTotal": $TOTAL_GATES,
-    "score": $SCORE,
-    "verdict": "$([ "$PASSED_COUNT" -eq "$TOTAL_GATES" ] && echo "PASS" || echo "PARTIAL")"
+    "gatesSkipped": $SKIP_COUNT,
+    "gatesEffective": $EFFECTIVE_TOTAL,
+    "effectivePassRate": "$EFFECTIVE_PASS_RATE",
+    "score": $SCORE_JSON,
+    "verdict": "$VERDICT"
   },
   "gates": {
     "gate1_static_analysis": {
@@ -3170,7 +3208,7 @@ ENDJSON
   GATES_JSON="${GATES_JSON}\"gate11\":{\"status\":\"${GATE_11_STATUS:-PASS}\",\"name\":\"Sprint Flow\"},"
   GATES_JSON="${GATES_JSON}\"gate12\":{\"status\":\"${GATE_12_STATUS:-WARN}\",\"name\":\"File Hygiene\"}}"
 
-  echo "{\"timestamp\":\"$TIMESTAMP\",\"commit\":\"$COMMIT_HASH\",\"branch\":\"$BRANCH\",\"score\":$SCORE,\"passed\":$PASSED_COUNT,\"total\":$TOTAL_GATES,\"gates\":$GATES_JSON,\"coverage\":\"$COV_PCT\",\"complexityWarnings\":${CC_WARNINGS:-0},\"principleWarnings\":${WARNING_COUNT:-0},\"boyScoutBlocked\":${BS_BLOCKED}}" >> "$HISTORY_FILE"
+  echo "{\"timestamp\":\"$TIMESTAMP\",\"commit\":\"$COMMIT_HASH\",\"branch\":\"$BRANCH\",\"score\":$SCORE_JSON,\"passed\":$PASSED_COUNT,\"total\":$TOTAL_GATES,\"effectiveTotal\":$EFFECTIVE_TOTAL,\"effectivePassRate\":\"$EFFECTIVE_PASS_RATE\",\"skipCount\":$SKIP_COUNT,\"verdict\":\"$VERDICT\",\"gates\":$GATES_JSON,\"coverage\":\"$COV_PCT\",\"complexityWarnings\":${CC_WARNINGS:-0},\"principleWarnings\":${WARNING_COUNT:-0},\"boyScoutBlocked\":${BS_BLOCKED}}" >> "$HISTORY_FILE"
 
   # ── Console output ────────────────────────────────────────────────────────
   echo ""
@@ -3191,7 +3229,7 @@ ENDJSON
   printf "  %-45s %s\n" "Gate 11: Sprint Flow" "${GATE_11_STATUS:-PASS}"
   printf "  %-45s %s\n" "Gate 12: File Hygiene" "${GATE_12_STATUS:-WARN}"
   echo ""
-  echo "  Overall Score: $SCORE/10 | $PASSED_COUNT/$TOTAL_GATES gates passed"
+  echo "  Overall Score: $SCORE/10 | $PASSED_COUNT/$TOTAL_GATES gates passed (effective: $PASSED_COUNT/$EFFECTIVE_TOTAL, skipped: $SKIP_COUNT, verdict: $VERDICT)"
   echo "  Branch status: $REPORT_FILE"
   echo "  Run report: $PERSISTED_REPORT_FILE"
   echo "  History saved: $HISTORY_FILE"
