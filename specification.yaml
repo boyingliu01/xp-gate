@@ -598,8 +598,14 @@ specification:
             报 PASS（Up to date），不再产生 Outdated 假告警
           test_type: unit
         - id: AC-439-03
-          criteria: 真实内容差异（超出行尾）仍必须报 WARN + Outdated 并计入 issues，
-            证明宽容不是把检查改成永真
+          criteria: 真实内容差异（超出行尾）仍必须报 WARN 并计入 issues，证明宽容
+            不是把检查改成永真；且版本无法判定时的建议是人工比对，不得引导执行
+            会从 main 覆盖旧文案的 update-skill --all（#439）
+          test_type: unit
+        - id: AC-439-04
+          criteria: 包内 13 个技能的 SKILL.md 全部携带 version frontmatter
+            （11 个原本缺失的补 1.0.0），使 semver 判等成为新鲜度的主判定路径，
+            内容比较退化为防御性回退
           test_type: unit
     - id: REQ-486
       description: scripts/test-plugins.sh 在 Windows/Git Bash 下把 MSYS 的
