@@ -51,7 +51,8 @@ POWERSHELL_ADAPTER="$BATS_TEST_DIRNAME/../adapters/powershell.sh"
   cd "$sandbox" || return 1
   # @intent: a repo with neither src/ nor scripts/ (e.g. skill-cert: engine/ layout)
   #   must not be false-BLOCKed (#513). @covers scope-degradation
-  run bash -c "PATH='$sandbox/stub:\$PATH'; source '$sandbox/githooks/adapters/python.sh'; run_static_analysis"
+  export PATH="$sandbox/stub:$PATH"
+  run bash -c "source '$sandbox/githooks/adapters/python.sh'; run_static_analysis"
   [ "$status" -eq 0 ]
   [ ! -f "$sandbox/mypy.invoked" ]
   rm -rf "$sandbox"
@@ -67,7 +68,8 @@ POWERSHELL_ADAPTER="$BATS_TEST_DIRNAME/../adapters/powershell.sh"
   cd "$sandbox/repo" || return 1
   # @intent: default探测 keeps CI-aligned surface when the dirs exist.
   # @covers scope-degradation
-  run bash -c "PATH='$sandbox/stub:\$PATH'; source '$sandbox/githooks/adapters/python.sh'; run_static_analysis"
+  export PATH="$sandbox/stub:$PATH"
+  run bash -c "source '$sandbox/githooks/adapters/python.sh'; run_static_analysis"
   [ "$status" -eq 0 ]
   grep -q 'src' "$sandbox/mypy.args"
   grep -q 'scripts' "$sandbox/mypy.args"
@@ -84,7 +86,8 @@ POWERSHELL_ADAPTER="$BATS_TEST_DIRNAME/../adapters/powershell.sh"
   cd "$sandbox/repo" || return 1
   # @intent: repo-declared scope is authoritative; src/ must then not be scanned.
   # @covers scope-degradation
-  run bash -c "PATH='$sandbox/stub:\$PATH'; source '$sandbox/githooks/adapters/python.sh'; run_static_analysis"
+  export PATH="$sandbox/stub:$PATH"
+  run bash -c "source '$sandbox/githooks/adapters/python.sh'; run_static_analysis"
   [ "$status" -eq 0 ]
   grep -q 'engine' "$sandbox/mypy.args"
   run grep -q 'src' "$sandbox/mypy.args"
