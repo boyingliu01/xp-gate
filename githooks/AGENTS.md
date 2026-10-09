@@ -1,9 +1,9 @@
 # GITHOOKS KNOWLEDGE BASE
 
-**Generated:** 2026-10-12
+**Generated:** 2026-10-08
 **Commit:** unknown
 **Branch:** unknown
-**Version:** 0.20.2.0
+**Version:** 0.20.1.0
 
 ## OVERVIEW
 Git quality gates: pre-commit runs **12 numbered gates** (Gate 0–11) plus Gate 12 (File Hygiene, warning-only) via 13 language adapters; pre-push runs **8 gates**: Gate 10 (Build Integrity), Gate M (TS mutation), Gate M-Python, M-Go, M-Java, M-Kotlin (multi-lang mutation), Gate M2 (Mock Density, WARNING-only), Gate ML (Mock Layering), Gate UI (UI Sprint Gates), Gate MW (Code Walkthrough), and Gate S (Sprint Flow). Zero-tolerance policy per `QUALITY-GATES-CODE-OF-CONDUCT.md` — `--no-verify` strictly prohibited.
@@ -92,7 +92,7 @@ Code-walkthrough has no hard file-count or LOC threshold. Large diffs must be re
 - **Boy Scout Rule (Gate 6)**: new files zero-tolerance; modified files cannot increase warnings; untouched files unchecked.
 - **Adapter plugins** under `adapters/plugins/` extend the base language adapters (P3C/whalecloud for Java, book299 for Python/C/ES5 JS). Opt-in per project.
 - **Project-level coverage exclusions**: a project may ship `.xp-gate-powershell-coverage-ignore` (one glob per line, `#` comments allowed) to exclude scripts that cannot be exercised by Pester (e.g. bootstrap scripts whose `Main` ends in `exit`); the PowerShell adapter drops matching files from coverage accounting instead of counting them as 0%. Python coverage thresholds come from `pyproject.toml [tool.coverage.report] fail_under` — the adapter never hardcodes a threshold.
-- **Python mypy scope is CI-locked**: `adapters/python.sh` runs `mypy src/` + `mypy scripts/` (the CI type job's surface), never a bare `mypy .`; pinned by `__tests__/adapter-mypy-pester-scope.test.bats`.
+- **Python mypy scope is repo-declared (#513, generalizing #501)**: `adapters/python.sh` uses `.xp-gate-mypy-scope` at the repo root when present (one directory per line, `#` comments allowed); otherwise existence-guarded `src/` + `scripts/` (the CI type job's surface for repos that have them). A repo declaring no type surface SKIPs with a notice instead of false-BLOCKing every `.py` commit. Never a bare `mypy .`. Pinned by `__tests__/adapter-mypy-pester-scope.test.bats`.
 - **PROJECT_SUBDIR derivation is root-aware** (#515, R2 delphi-walkthrough): nested project markers only locate a subdir when the repo ROOT itself declares no project. The root short-circuit marker set is the FULL `_detect_subdir` set (10 markers: tsconfig.json / package.json / pyproject.toml / setup.py / go.mod / pubspec.yaml / pom.xml / build.gradle / build.gradle.kts / CMakeLists.txt) — the two lists must not drift. One exception, checked FIRST (a root tsconfig.json often coexists with it): a root `package.json` carrying a `"workspaces":` key is a JS monorepo, not a single project, so derivation keeps running there. Known limitation (#527, pinned in tests): Gradle multi-module, CMake subdirectory layouts and pnpm (`pnpm-workspace.yaml`) / Lerna (`lerna.json`) workspaces are not disambiguated from single projects — the root marker wins. With a root marker present, a nested marker that is merely a module file must not hijack the cwd — Gates 1-9 would run in the wrong directory and false-BLOCK on root-relative paths. Pinned by `__tests__/subdir-root-shortcircuit.test.bats`.
 - **No CLI invocation in pre-push hook for Delphi.** The hook is a validator only — it reads `.code-walkthrough-result.json`; the actual review must run via the skill before push.
 - **Adapters are duplicated** into `src/npm-package/adapters/`. Source of truth = here; resync via build scripts.

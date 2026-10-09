@@ -28,9 +28,35 @@ run_static_analysis() {
   # 口径一致性由仓库侧 BATS 测试双向锁住：
   # githooks/__tests__/adapter-mypy-pester-scope.test.bats（含"适配器里不得再
   # 出现裸 mypy ."），防止 `mypy .` 被写回来时无人报警。
+  #
+  # #513：上述 `src/`+`scripts/` 是"单一仓库的 CI 声明面"，不能当成所有 Python
+  # 仓库的布局硬编码——无 src/ 的仓库（如 skill-cert 的 engine/ 布局）会得到
+  # `mypy: can't read file 'src'` 而对任何 .py 提交恒 BLOCK，违反本项目
+  # "门禁无法运行 → SKIP 而非 BLOCK" 规范。口径回归"按仓库声明"三级解析：
+  #   ① 仓库根 `.xp-gate-mypy-scope`（每行一个目录）存在则为其权威声明；
+  #   ② 否则仅对存在性通过的默认目录（src/、scripts/）执行——与原 CI 口径
+  #      一致，只是不再对缺失目录开火；
+  #   ③ 两者皆无 → 打印提示并 exit 0，绝不把 mypy 空跑一次。
   echo "Running Python static analysis (mypy)..."
-  mypy src/ || return 1
-  mypy scripts/
+  MYPY_TARGETS=()
+  if [ -f .xp-gate-mypy-scope ]; then
+    while IFS= read -r line || [ -n "$line" ]; do
+      line="${line%%#*}"
+      line="${line#"${line%%[![:space:]]*}"}"
+      line="${line%"${line##*[![:space:]]}"}"
+      [ -z "$line" ] && continue
+      MYPY_TARGETS+=("$line")
+    done < .xp-gate-mypy-scope
+    echo "  scope: .xp-gate-mypy-scope declaration"
+  else
+    [ -d src ] && MYPY_TARGETS+=(src)
+    [ -d scripts ] && MYPY_TARGETS+=(scripts)
+  fi
+  if [ "${#MYPY_TARGETS[@]}" -eq 0 ]; then
+    echo "  ℹ️  mypy: repo declares no type surface (no .xp-gate-mypy-scope, no src/ scripts/) — skipping"
+    return 0
+  fi
+  mypy "${MYPY_TARGETS[@]}"
   return $?
 }
 
