@@ -1,5 +1,6 @@
 ---
 name: admin-template-guidelines
+version: 1.0.0
 description: "6 maintainability rules for AI-generated admin interfaces (Fastify + Nunjucks + HTMX + Alpine.js). Prevents route bloat, test inconsistency, Nunjucks traps, repeated data logic, auth blind spots, and HTMX/Alpine confusion."
 maturity: alpha
 ---

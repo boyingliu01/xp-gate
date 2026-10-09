@@ -72,34 +72,73 @@ describe('doctor-tui skill freshness (#439)', () => {
     expect(check.status).toBe('PASS');
   });
 
-  it('treats a versionless skill as up to date when only line endings differ', () => {
+  /**
+   * AC-439-04: every bundled skill now carries a version, so the versionless
+   * fallback branch is only reachable when the INSTALLED copy lacks one (e.g.
+   * written by an older tool version). Strip the version line to simulate it.
+   */
+  function stripVersion(content) {
+    return content.replace(/^version:[^\n]*\n/m, '');
+  }
+
+  it('treats an installed copy without version as up to date when only line endings differ', () => {
     const bundled = readBundled('grilling');
-    // This is the branch the issue hit for 11 of 12 skills: no version field at all,
-    // so freshness can only be decided by content.
-    expect(bundled).not.toMatch(/^version:/m);
-    installSkill('grilling', flipLineEndings(bundled));
+    // AC-439-04: grilling used to be one of the 11 skills without a version
+    // field; all bundled skills now declare one.
+    expect(bundled).toMatch(/^version:/m);
+    installSkill('grilling', flipLineEndings(stripVersion(bundled)));
     const { check } = runFreshness('grilling');
     expect(check, JSON.stringify(check)).toBeDefined();
     expect(check.status).toBe('PASS');
   });
 
-  // AC-439-02 promises "differences beyond line endings" still report Outdated,
+  // AC-439-02 promises "differences beyond line endings" still report WARN,
   // which means every line-ending convention has to be tolerated, not just CRLF
   // (Round 2 feasibility FC-05: the helper's name already says as much).
   it('treats a lone-CR skill file as up to date too', () => {
     const bundled = readBundled('grilling');
-    installSkill('grilling', bundled.replace(/\r\n/g, '\n').replace(/\n/g, '\r'));
+    installSkill(
+      'grilling',
+      stripVersion(bundled).replace(/\r\n/g, '\n').replace(/\n/g, '\r')
+    );
     const { check } = runFreshness('grilling');
     expect(check, JSON.stringify(check)).toBeDefined();
     expect(check.status).toBe('PASS');
   });
 
-  it('still reports Outdated for a real content difference (anti-vacuity)', () => {
+  it('still reports WARN for a real content difference (anti-vacuity)', () => {
     const bundled = readBundled('grilling');
-    installSkill('grilling', `${flipLineEndings(bundled)}\n## Diverged section\n`);
+    installSkill('grilling', `${flipLineEndings(stripVersion(bundled))}\n## Diverged section\n`);
     const { issues, check } = runFreshness('grilling');
     expect(check.status).toBe('WARN');
-    expect(check.detail).toContain('Outdated');
     expect(issues).toBe(1);
+  });
+
+  // AC-439-03: without a version the doctor cannot claim "Outdated", and the
+  // advice must NOT be the destructive `update-skill --all` -- it pulls from
+  // main, which may be older than the installed copy (#439).
+  it('versionless content diff advises manual comparison, never the destructive update', () => {
+    const bundled = readBundled('grilling');
+    installSkill('grilling', `${flipLineEndings(stripVersion(bundled))}\n## Diverged section\n`);
+    const { check } = runFreshness('grilling');
+    expect(check.status).toBe('WARN');
+    expect(check.detail).toContain('Content differs');
+    expect(check.detail).not.toMatch(/update-skill\s+--all/);
+    expect(check.detail).toContain('update-skill'); // the caveat IS mentioned
+  });
+
+  // AC-439-04: the 11 skills that used to fall into the byte-comparison branch
+  // now declare a version, making semver equality the primary freshness path.
+  it('every bundled skill carries a version frontmatter', () => {
+    const skills = fs
+      .readdirSync(bundledSkillsDir, { withFileTypes: true })
+      .filter((d) => d.isDirectory())
+      .map((d) => d.name);
+    expect(skills.length).toBeGreaterThanOrEqual(13);
+    const missing = skills.filter((name) => {
+      const md = path.join(bundledSkillsDir, name, 'SKILL.md');
+      return !/^version:\s*\d+\.\d+\.\d+/m.test(fs.readFileSync(md, 'utf8'));
+    });
+    expect(missing, `skills missing version frontmatter: ${missing.join(', ')}`).toEqual([]);
   });
 });

@@ -1,5 +1,6 @@
 ---
 name: test-specification-alignment
+version: 1.0.0
 description: "Use when asked to run tests, verify tests, align tests with specification.yaml, before BUILD verification, or before release/ship."
 ---
 
