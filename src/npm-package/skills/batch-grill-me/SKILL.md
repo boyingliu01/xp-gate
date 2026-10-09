@@ -1,5 +1,6 @@
 ---
 name: batch-grill-me
+version: 1.0.0
 description: A relentless interview that asks every frontier question at once, round by round.
 disable-model-invocation: true
 ---
