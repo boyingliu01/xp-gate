@@ -89,6 +89,20 @@ const MEBIBYTE = 1024 * 1024;
 const MAX_BUFFER_BYTES = 32 * MEBIBYTE;
 
 /**
+ * End-to-end budget for one real hook run (#504).
+ *
+ * On an idle machine the hook finishes in seconds, but under a full parallel
+ * `vitest run` (every other spec file competing for CPU) a correct run can
+ * take far longer than the previous 120s ceiling -- the process got killed,
+ * the stub was never reached, and the anti-vacuity assertion misread the
+ * kill as "the stub npx was never invoked". The budget must not be coupled
+ * to machine load, so it is generous enough for a loaded runner; a genuinely
+ * hung hook still fails, and the catch branch reports it as a TIMEOUT, never
+ * as a vacuous pass or a wrong "never invoked" diagnosis.
+ */
+const HOOK_TIMEOUT_MS = 600_000;
+
+/**
  * Minimum number of Gate 5 vitest branches that must route through the helper.
  *
  * 4 branches that call vitest directly, plus the two paths that reach vitest
@@ -193,6 +207,40 @@ function createProjectFixture(sandbox: string): string {
  *
  * The hook is run from a throwaway git repo so no real gate state is touched.
  */
+/**
+ * Classify a spawn failure so none of the three loud failure classes can be
+ * mangled into "the stub npx was never invoked" by the anti-vacuity assertion
+ * (#504): a missing runner (ENOENT), a spawn-level block (EBUSY under
+ * sandboxed/intercepted environments), and a timeout kill. Returns the named
+ * error to throw, or null when the failure carries a real hook verdict.
+ */
+function spawnFailureMessage(
+  err: unknown,
+  e: { stdout?: string; status?: number | null; signal?: NodeJS.Signals | null; killed?: boolean; code?: string }
+): string | null {
+  if (e.code === 'ENOENT') {
+    return (
+      `The hook runner cannot be executed (bashPath()=${bashPath()}): ${String(err)}. ` +
+      'The environment is broken; this is not a hook-behaviour failure.'
+    );
+  }
+  if (e.code && !e.killed && !e.signal) {
+    return (
+      `The hook run failed at the spawn level (code=${e.code}): ${String(err)}. ` +
+      'The environment blocked the runner; re-run outside the sandbox.'
+    );
+  }
+  if (e.killed || e.status === null || e.signal) {
+    return (
+      `The end-to-end hook run was killed after ${HOOK_TIMEOUT_MS}ms ` +
+      `(signal: ${e.signal ?? 'unknown'}). This is a timeout under load, not a ` +
+      'test failure and not "the stub was never invoked" -- re-run this file ' +
+      'in isolation before trusting any red.'
+    );
+  }
+  return null;
+}
+
 function runHookWithVitestOutput(vitestOutput: string, vitestExit: number): StubResult {
   const sandbox = mkdtempSync(join(tmpdir(), 'xpgate-454-'));
   tempDirs.push(sandbox);
@@ -215,13 +263,21 @@ function runHookWithVitestOutput(vitestOutput: string, vitestExit: number): Stub
   try {
     const stdout = execFileSync(bashPath(), ['-c', script], {
       encoding: 'utf8',
-      timeout: 120_000,
+      timeout: HOOK_TIMEOUT_MS,
       maxBuffer: MAX_BUFFER_BYTES,
     });
     const exitMatch = /__HOOK_EXIT=(\d+)/.exec(stdout);
     return { stdout, exitCode: exitMatch ? Number(exitMatch[1]) : 0, callsFile };
   } catch (err) {
-    const e = err as { stdout?: string; status?: number | null };
+    const e = err as {
+      stdout?: string;
+      status?: number | null;
+      signal?: NodeJS.Signals | null;
+      killed?: boolean;
+      code?: string;
+    };
+    const failure = spawnFailureMessage(err, e);
+    if (failure) throw new Error(failure);
     return { stdout: e.stdout ?? '', exitCode: e.status ?? 1, callsFile };
   }
 }
