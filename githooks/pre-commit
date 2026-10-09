@@ -2850,6 +2850,63 @@ fi
 # ============================================================================
 # GATE 9: Build Integrity Check (TypeScript compilation + package + imports)
 # ============================================================================
+
+# Java build-integrity dispatch (#507 S5, DR-003). The old gate only knew
+# TypeScript: a Maven project got a permanent SKIP -- "not a TypeScript
+# project" -- which is exactly the silent-no-coverage path this sprint
+# removes. Verdict codes (mirror of the java.sh G1 contract):
+#   0=PASS 2=BLOCK(compile failed) 3=SKIP+WARN(reason printed)
+resolve_build_integrity_timeout() {
+  local file=".xp-gate/build-integrity-timeout" val=""
+  if [ -f "$file" ]; then
+    val=$(tr -d '[:space:]' < "$file")
+  fi
+  if [ -z "$val" ]; then
+    echo "180"
+    return 0
+  fi
+  case "$val" in
+    ''|*[!0-9]*|0)
+      echo "WARN - invalid $file value '${val}' (expected a positive integer), falling back to 180s" >&2
+      echo "180"
+      ;;
+    *) echo "$val" ;;
+  esac
+}
+
+run_java_build_integrity() {
+  local timeout_s build_bin
+  # Wrapper first: mvnw pins the project's own Maven version.
+  if [ -x "./mvnw" ]; then
+    build_bin="./mvnw"
+  elif command -v mvn >/dev/null 2>&1; then
+    build_bin="mvn"
+  else
+    echo "     ⚠️  Java changes staged but no Maven build tool found (mvnw/mvn)"
+    echo "     ⏭️  SKIPPED - Build integrity Java (no build tool)"
+    return 3
+  fi
+
+  timeout_s=$(resolve_build_integrity_timeout)
+  if command -v timeout >/dev/null 2>&1; then
+    timeout "$timeout_s" "$build_bin" -q -DskipTests compile 2>&1 | tail -20
+  else
+    "$build_bin" -q -DskipTests compile 2>&1 | tail -20
+  fi
+  local rc="${PIPESTATUS[0]}"
+  if [ "$rc" -eq 0 ]; then
+    echo "     ✅ Java build integrity verified (mvn -q -DskipTests compile)."
+    return 0
+  fi
+  if [ "$rc" -eq 124 ]; then
+    echo "     ⏱️  Java build timed out after ${timeout_s}s."
+    echo "     ⏭️  SKIPPED - Build integrity Java (timeout)"
+    return 3
+  fi
+  echo "     ❌ Java build failed (exit $rc)"
+  return 2
+}
+
 2>&1 echo ""
 2>&1 echo "→ Gate 9: Build integrity... "
 GATE_9_START=$(gate_start_ms)
@@ -2894,6 +2951,36 @@ if [ -f "package.json" ] && [ -f "tsconfig.json" ]; then
 else
   echo "     ℹ️  Not a TypeScript project - skipping build integrity check"
   echo "     ⏭️  SKIPPED - Build integrity (not a TypeScript project)"
+fi
+
+# Java dispatch (#507 S5): runs when .java files are staged, regardless of
+# whether the TypeScript half ran. Gradle-only repos SKIP+WARN (gradle
+# support is backlog; DR-003).
+if echo "$CHANGED_FILES" | grep -q '\.java$'; then
+  if [ -f "pom.xml" ]; then
+    JAVA_BI_EXIT=0
+    run_java_build_integrity || JAVA_BI_EXIT=$?
+    case "$JAVA_BI_EXIT" in
+      0)
+        GATE_9_STATUS="PASS"
+        ;;
+      2)
+        GATE_9_STATUS="BLOCK"
+        echo ""
+        echo "❌ BLOCKED - Gate 9: Java build integrity check failed"
+        echo "Fix the compile errors before committing."
+        exit 1
+        ;;
+      *)
+        echo "     ⏭️  SKIPPED - Build integrity Java (see reason above)"
+        ;;
+    esac
+  elif [ -f "build.gradle" ] || [ -f "build.gradle.kts" ]; then
+    echo "     ⚠️  Java changes staged but this is a Gradle project - build integrity for Gradle is not implemented yet"
+    echo "     ⏭️  SKIPPED - Build integrity Java (Gradle backlog, #507 DR-003)"
+  else
+    echo "     ℹ️  Java changes staged but no Maven/Gradle build file - skipping Java build integrity"
+  fi
 fi
 
 GATE_9_END=$(gate_start_ms)
