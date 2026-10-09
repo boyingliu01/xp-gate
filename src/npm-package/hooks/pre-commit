@@ -242,6 +242,9 @@ record_gate_audit() {
   local passed="$3"
   local issues_found="$4"
   local start_ms="$5"
+  # Optional free-form detail (e.g. gate-3's effective CCN threshold, #507).
+  # Additive and omitted when absent, so existing callers stay unchanged.
+  local detail="${6:-}"
   local end_ms
   end_ms=$(now_ms)
   local duration_ms=$((end_ms - start_ms))
@@ -271,6 +274,7 @@ record_gate_audit() {
       --duration-ms "$duration_ms" \
       $duration_anomaly_flag \
       --trigger commit \
+      ${detail:+--detail "$detail"} \
       2>/dev/null
   } &
   disown 2>/dev/null || true
