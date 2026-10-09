@@ -1,3 +1,4 @@
+# shellcheck shell=bash
 # ============================================================================
 # GATE 4: Principles Checker (Clean Code + SOLID)
 # Reuses existing principles checker logic
@@ -22,6 +23,31 @@ if ! declare -F run_tsx >/dev/null 2>&1; then
     fi
   }
 fi
+
+# Java rule coverage annotation (#507 S4, AC-507-04-02). The normative matrix
+# lives in docs/java-principles-coverage.md; these constants mirror it. Before
+# #507 the Java adapter fed rules only {name,type,line,code}, so the 12 rules
+# reading structured metrics silently saw `undefined` and a Java commit got a
+# green "checked" with zero effective coverage. 12/15 now fire; the three
+# inert ones are rule-side gaps documented in the coverage doc -- they must
+# NOT be announced as covered.
+JAVA_COVERAGE_EFFECTIVE=12
+JAVA_COVERAGE_TOTAL=15
+JAVA_COVERAGE_INERT="lsp, many-exports, code-duplication"
+
+# Print the coverage annotation when (and only when) the staged file list
+# contains Java sources. Non-Java commits keep the original output byte for
+# byte. Pure shell builtins: no subprocess per file.
+java_coverage_note() {
+  local _f _has_java=""
+  for _f in "$@"; do
+    case "$_f" in
+      *.java|*.JAVA) _has_java=1; break ;;
+    esac
+  done
+  [ -n "$_has_java" ] || return 0
+  echo "ℹ️  Java rule coverage: $JAVA_COVERAGE_EFFECTIVE/$JAVA_COVERAGE_TOTAL rules effective (inert on Java: $JAVA_COVERAGE_INERT -- see docs/java-principles-coverage.md)"
+}
 
  2>&1 echo ""
  2>&1 echo "→ Gate 4: Principles checker (Clean Code + SOLID)..."
@@ -72,7 +98,12 @@ else
     
     if [ -n "$PRINCIPLES_DIR" ]; then
       echo "Checking Clean Code + SOLID principles..."
-      
+
+      # AC-507-04-02: say what a Java commit is actually covered for, instead
+      # of implying a full 15-rule check (#507). Printed before the run so it
+      # appears on both the PASS and the FAIL path.
+      java_coverage_note ${PRINCIPLES_ARGS[@]+"${PRINCIPLES_ARGS[@]}"}
+
       if command -v npx > /dev/null 2>&1 || [ -f "$PRINCIPLES_BASE/node_modules/tsx/dist/cli.mjs" ]; then
         # Run principles checker and store results.
         #
