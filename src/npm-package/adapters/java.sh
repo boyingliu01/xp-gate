@@ -10,9 +10,9 @@
 #   unusable -> BLOCK; unknown extra fields are tolerated (additive evolution).
 # Escape valves:
 #   XP_GATE_WC_JAVA_LINT=soft   downgrades BLOCK-class outcomes (exit>=2,
-#     timeout, unusable JSON) to SKIP+WARN (exit 3); exit-1 stays FAIL.
-#   XP_GATE_WC_JAVA_LINT=report downgrades exit-1 violations to SKIP+WARN
-#     (rollout/grace mode for legacy repos; #507 Delphi round-1 C-MAJOR-3).
+#     timeout, unusable JSON) to non-blocking WARN (exit 3); exit-1 stays FAIL.
+#   XP_GATE_WC_JAVA_LINT=report downgrades exit-1 violations to non-blocking
+#     WARN (rollout/grace mode for legacy repos; #507 Delphi round-1 C-MAJOR-3).
 #   An exit-0-with-objects response is a lying tool and is NEVER downgraded.
 # A SKIP/WARN reason crosses the subshell boundary as an `XP_G1_REASON: ...`
 # stdout line (export cannot: the caller captures command-substitution output).
@@ -22,7 +22,10 @@
 #
 # Verdict contract with pre-commit's `java)` branch:
 #   0 = PASS, 1 = FAIL(violations -> commit blocked), 2 = BLOCK(fail-closed),
-#   3 = SKIP+WARN(non-blocking, audit records warn)
+#   3 = WARN(non-blocking). pre-commit scores a WARN IN the denominator so it
+#   forbids an overall PASS -- Delphi round-2 A-MAJOR-1: mapping these paths
+#   to SKIP instead let unverified Java (no engine installed, or findings
+#   suppressed in report mode) ride out of the denominator to a fake 10/10.
 # ============================================================================
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -123,8 +126,13 @@ wc_java_json_violation_count() {
   # consumes an entire value string in one go, including any `: "` sequences
   # inside it. Broken JSON masks badly -> counts desynchronize -> BLOCK,
   # which is the correct fail-closed direction.
+  # POSIX ERE via -E: BSD sed (macOS is a supported CI platform) does not
+  # support the GNU BRE `\|` alternation extension -- under BSD sed the GNU
+  # variant either fails to strip values (count desync -> BLOCK, annoying but
+  # safe) or, worst case, errors to empty counts and disarms the lying-tool
+  # BLOCK below (fail-open). Delphi round-2 A-MAJOR-2.
   local structural obj_count file_count rule_count sev_count
-  structural=$(sed 's/:\([[:space:]]*\)"\([^"\\]\|\\.\)*"/:\1""/g' "$json_file" 2>/dev/null)
+  structural=$(sed -E 's/:([[:space:]]*)"([^"\\]|\\.)*"/:\1""/g' "$json_file" 2>/dev/null)
   obj_count=$(grep -o '{' <<< "$structural" | wc -l | tr -d '[:space:]')
   file_count=$(grep -o '"file"' <<< "$structural" | wc -l | tr -d '[:space:]')
   rule_count=$(grep -o '"rule"' <<< "$structural" | wc -l | tr -d '[:space:]')
@@ -201,7 +209,7 @@ run_wc_java_lint() {
           # Unusable output IS an execution-class failure (the tool exists but
           # its response cannot be trusted) -- same class as exit>=2, covered
           # by the escape valve (#507 Delphi round-1 B-MAJOR-5).
-          echo "⚠️  XP_GATE_WC_JAVA_LINT=soft: unusable JSON downgraded to SKIP+WARN"
+          echo "⚠️  XP_GATE_WC_JAVA_LINT=soft: unusable JSON downgraded to WARN (non-blocking, in scoring denominator)"
           echo "XP_G1_REASON: wc-java-lint unusable JSON (soft downgrade)"
           return 3
         fi
@@ -232,9 +240,12 @@ run_wc_java_lint() {
         # Rollout/grace mode (#507 Delphi round-1 C-MAJOR-3): a legacy repo
         # adopting wc-java-lint carries pre-existing violations; hard-blocking
         # every commit gives no migration path. report mode degrades REAL
-        # violations to SKIP+WARN (scored in the denominator, never a PASS)
-        # so teams can burn down findings before switching back to enforcing.
-        echo "⚠️  XP_GATE_WC_JAVA_LINT=report: violations downgraded to SKIP+WARN (rollout mode)"
+        # violations to non-blocking WARN -- pre-commit scores WARN in the
+        # denominator and an overall WARN verdict forbids a PASS (Delphi
+        # round-2 A-MAJOR-1: SKIP would have produced a fake 10/0 for a
+        # repo whose only Java check is suppressed), so teams burn down
+        # findings before switching back to enforcing.
+        echo "⚠️  XP_GATE_WC_JAVA_LINT=report: violations downgraded to WARN (rollout mode)"
         echo "⚠️  Java code quality NOT enforcing - burn down the findings, then unset report mode"
         echo "XP_G1_REASON: wc-java-lint report mode: ${count:-unknown} violation(s) suppressed"
         return 3
@@ -249,14 +260,13 @@ run_wc_java_lint() {
         echo "❌ wc-java-lint failed with exit code $exit_code"
       fi
       if [ "${XP_GATE_WC_JAVA_LINT:-}" = "soft" ]; then
-        echo "⚠️  XP_GATE_WC_JAVA_LINT=soft: execution failure downgraded to SKIP+WARN (#507 DR-001 escape valve)"
-        echo "⚠️  Java static analysis SKIPPED - the engine exists but is broken; do not treat this as a clean run"
+        echo "⚠️  XP_GATE_WC_JAVA_LINT=soft: execution failure downgraded to WARN (non-blocking, #507 DR-001 escape valve)"
+        echo "⚠️  Java static analysis NOT performed - the engine exists but is broken; do not treat this as a clean run"
         # The reason crosses the command-substitution subshell boundary via a
         # prefixed stdout line (export does NOT: the caller captures this
         # function's output, so the subshell env is discarded -- #507 Delphi
         # round-1 B-MAJOR-1). pre-commit parses and strips the line.
         echo "XP_G1_REASON: wc-java-lint broken (soft downgrade)"
-        export XP_GATE_JAVA_G1_REASON="wc-java-lint broken (soft downgrade)"
         return 3
       fi
       return 2
@@ -326,11 +336,10 @@ run_legacy_analysis() {
 
   if [ "$lint_tools" -eq 0 ]; then
     echo "⚠️  No Java static-analysis engine available: wc-java-lint, checkstyle and pmd all missing"
-    echo "⚠️  Java code quality NOT verified - verdict is SKIP+WARN, not PASS (#507 AC-507-01-03)"
+    echo "⚠️  Java code quality NOT verified - verdict is WARN, not PASS (#507 AC-507-01-03)"
     echo "   Install wc-java-lint (preferred) or checkstyle/pmd to restore verification"
     _XP_JAVA_LEGACY_WARN=1
     echo "XP_G1_REASON: legacy tools unavailable (warn)"
-    export XP_GATE_JAVA_G1_REASON="legacy tools unavailable (warn)"
   fi
 
   # p3c-pmd check (Alibaba coding guidelines) — primary Java quality gate
@@ -423,16 +432,17 @@ run_p3c_check() {
   _run_p3c_check "$(_detect_java_build)"
 }
 
-# Legacy maven invocations are network-facing (plugin/rule resolution against
-# remote repositories). Without a guard a cold cache can hang pre-commit for
-# minutes (#507 Delphi round-1 C-MAJOR-2). Same timeout file as the primary
-# engine: .xp-gate/wc-java-lint-timeout. Degrades safely when `timeout` is
-# unavailable (rc 127 must never be mistaken for a tool verdict).
-_legacy_maven_run() {
+# Legacy maven/gradle invocations are network-facing (plugin/rule resolution
+# against remote repositories). Without a guard a cold cache can hang
+# pre-commit for minutes (#507 Delphi round-1 C-MAJOR-2; round-2 extended the
+# same guard to the Gradle legacy lint calls). Same timeout file as the
+# primary engine: .xp-gate/wc-java-lint-timeout. Degrades safely when
+# `timeout` is unavailable (rc 127 must never be mistaken for a tool verdict).
+_legacy_build_run() {
   if command -v timeout >/dev/null 2>&1; then
     timeout "$(resolve_wc_java_lint_timeout)" "$@"
   else
-    echo "     ⚠️  'timeout' command not available - legacy maven call runs unguarded" >&2
+    echo "     ⚠️  'timeout' command not available - legacy build-tool call runs unguarded" >&2
     "$@"
   fi
 }
@@ -447,7 +457,7 @@ _run_p3c_check() {
       # Profile already installed — use it (timeout-guarded: legacy maven
       # resolves plugins/rulesets over the network, a cold cache must not
       # hang pre-commit unbounded -- #507 Delphi round-1 C-MAJOR-2)
-      _legacy_maven_run mvn pmd:check -P xp-gate-p3c -Dpmd.failOnViolation=true 2>&1 | tail -30
+      _legacy_build_run mvn pmd:check -P xp-gate-p3c -Dpmd.failOnViolation=true 2>&1 | tail -30
       return "${PIPESTATUS[0]}"
     else
       # Profile not installed. The inline ruleset paths (/rulesets/java/ali-*)
@@ -457,7 +467,7 @@ _run_p3c_check() {
       # C-MAJOR-1). "Not configured" is an opt-out, not a violation: only run
       # inline when the pom actually declares p3c-pmd.
       if grep -q 'p3c-pmd' pom.xml 2>/dev/null; then
-        _legacy_maven_run mvn pmd:check \
+        _legacy_build_run mvn pmd:check \
           -Dpmd.rulesets="/rulesets/java/ali-comment.xml,/rulesets/java/ali-concurrent.xml,/rulesets/java/ali-constant.xml,/rulesets/java/ali-exception.xml,/rulesets/java/ali-flowcontrol.xml,/rulesets/java/ali-naming.xml,/rulesets/java/ali-oop.xml,/rulesets/java/ali-orm.xml,/rulesets/java/ali-other.xml,/rulesets/java/ali-set.xml" \
           -Dpmd.failOnViolation=true \
           -DprintFailingErrors=true \
@@ -483,7 +493,7 @@ _run_p3c_check() {
   elif [ "$build_system" = "gradle" ]; then
     if grep -q 'xp-gateP3cCheck\|p3c-pmd' build.gradle 2>/dev/null || \
        grep -q 'xp-gateP3cCheck\|p3c-pmd' build.gradle.kts 2>/dev/null; then
-      gradle xp-gateP3cCheck --quiet 2>&1 | tail -20
+      _legacy_build_run gradle xp-gateP3cCheck --quiet 2>&1 | tail -20
       return "${PIPESTATUS[0]}"
     else
       echo "  ℹ️  p3c-pmd not configured in Gradle build"
@@ -508,7 +518,7 @@ _run_whalecloud_check() {
   if [ "$build_system" = "maven" ]; then
     if grep -q '<id>xp-gate-whalecloud-java</id>' pom.xml 2>/dev/null; then
       # timeout-guarded, same rationale as the p3c branch (C-MAJOR-2)
-      _legacy_maven_run mvn pmd:check checkstyle:check spotbugs:check \
+      _legacy_build_run mvn pmd:check checkstyle:check spotbugs:check \
         -P xp-gate-whalecloud-java -Dpmd.failOnViolation=true \
         2>&1 | tail -30
       return "${PIPESTATUS[0]}"
@@ -521,7 +531,7 @@ _run_whalecloud_check() {
   elif [ "$build_system" = "gradle" ]; then
     if grep -q 'xp-gateWhalecloudCheck' build.gradle 2>/dev/null || \
        grep -q 'xp-gateWhalecloudCheck' build.gradle.kts 2>/dev/null; then
-      gradle xp-gateWhalecloudCheck --quiet 2>&1 | tail -20
+      _legacy_build_run gradle xp-gateWhalecloudCheck --quiet 2>&1 | tail -20
       return "${PIPESTATUS[0]}"
     else
       echo "  ⚠️  whalecloud-java not configured in Gradle build"

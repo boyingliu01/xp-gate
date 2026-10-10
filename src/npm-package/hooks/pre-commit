@@ -1351,7 +1351,12 @@ else
     java)
   # GATE 1 Java: wc-java-lint with fail-closed verdicts (#507 S1, DR-001).
   # java.sh run_static_analysis verdict codes:
-  #   0=PASS 1=FAIL(violations) 2=BLOCK(execution error) 3=SKIP+WARN.
+  #   0=PASS 1=FAIL(violations) 2=BLOCK(execution error) 3=WARN(non-blocking).
+  # Every non-0/1/2 outcome is scored as WARN -- IN the denominator, so it
+  # forbids an overall PASS. Delphi round-2 A-MAJOR-1: these paths used to
+  # map to SKIP, which sits OUT of the denominator, letting a repo with no
+  # Java engine (or findings suppressed in report mode) report PASS/10.0
+  # while its Java quality was never verified.
   # The adapter applies the XP_GATE_WC_JAVA_LINT=soft escape valve itself, so
   # a 2 reaching this branch is hard: BLOCK the commit. Captured to a var
   # (not piped) so the verdict code survives regardless of output length --
@@ -1359,9 +1364,8 @@ else
   # real verdict into an accident of line count.
   ADAPTER_FILE=$(resolve_adapter_path "$CURRENT_LANG")
   if [ -z "$ADAPTER_FILE" ] || ! source "$ADAPTER_FILE" 2>/dev/null; then
-    echo "ℹ️  Java adapter not found — SKIPPED"
-    echo "⏭️  SKIPPED - Code quality (no java adapter)"
-    GATE_1_STATUS="SKIP"
+    echo "⚠️  WARN - Java adapter not found (code quality NOT verified)"
+    GATE_1_STATUS="WARN"
     GATE_1_DETAIL="java: adapter missing"
   else
     JAVA_G1_EXIT=0
@@ -1390,13 +1394,13 @@ else
         exit 1
         ;;
       3)
-        echo "⏭️  SKIPPED - Java code quality (engine unavailable or downgraded)"
-        GATE_1_STATUS="SKIP"
-        GATE_1_DETAIL="java: ${JAVA_G1_REASON:-${XP_GATE_JAVA_G1_REASON:-unavailable (warn)}}"
+        echo "⚠️  WARN - Java code quality NOT verified (engine unavailable or downgraded)"
+        GATE_1_STATUS="WARN"
+        GATE_1_DETAIL="java: ${JAVA_G1_REASON:-unavailable (warn)}"
         ;;
       *)
-        echo "⏭️  SKIPPED - Java code quality (unexpected verdict $JAVA_G1_EXIT)"
-        GATE_1_STATUS="SKIP"
+        echo "⚠️  WARN - Java code quality NOT verified (unexpected verdict $JAVA_G1_EXIT)"
+        GATE_1_STATUS="WARN"
         GATE_1_DETAIL="java: unexpected verdict $JAVA_G1_EXIT"
         ;;
     esac
@@ -1439,9 +1443,10 @@ fi
 fi  # End: if ! any_changed_files_match (Issue #312 skip)
 GATE_1_STATUS="${GATE_1_STATUS:-PASS}"
 GATE_1_TOOL="${PROJECT_LANGS}"
-# The java branch may set GATE_1_STATUS=SKIP + a GATE_1_DETAIL warn reason
-# (engine unavailable / soft downgrade); route it into the audit trail via
-# the S2 detail plumbing so a WARN verdict is diagnosable, not silent.
+# The java branch may set GATE_1_STATUS=WARN + a GATE_1_DETAIL warn reason
+# (engine unavailable / soft or report downgrade); route it into the audit
+# trail via the S2 detail plumbing so a WARN verdict is diagnosable, not
+# silent. WARN stays IN the scoring denominator (Delphi round-2 A-MAJOR-1).
 record_gate_audit "gate-1" "code-quality" "$GATE_1_STATUS" "0" "$GATE_1_START" "${GATE_1_DETAIL:-}"
 
 # ============================================================================
