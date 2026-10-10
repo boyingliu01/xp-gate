@@ -659,21 +659,21 @@ if [ -z "$PROJECT_LANGS" ] && [ -z "$_CONFIG_LANGS" ]; then
         PROJECT_LANGS="dart"
       fi
     elif [ -f "pom.xml" ] || [ -f "build.gradle" ] || [ -f "build.gradle.kts" ]; then
-      KOTLIN_FILES=$(find . -name "*.kt" -not -path "./.git/*" 2>/dev/null | wc -l)
+      KOTLIN_FILES=$(find . -name "*.kt" -not -path "./.git/*" -not -path "*/node_modules/*" 2>/dev/null | wc -l)
       if [ "$KOTLIN_FILES" -gt 0 ]; then
         PROJECT_LANGS="kotlin"
       else
         PROJECT_LANGS="java"
       fi
     elif [ -f "CMakeLists.txt" ] || [ -f "Makefile" ]; then
-      CPP_FILES=$(find . -maxdepth 2 \( -name "*.cpp" -o -name "*.cxx" -o -name "*.cc" \) -not -path "./.git/*" 2>/dev/null | head -1)
-      OBJC_FILES=$(find . -maxdepth 2 \( -name "*.m" -o -name "*.mm" \) -not -path "./.git/*" 2>/dev/null | head -1)
+      CPP_FILES=$(find . -maxdepth 2 \( -name "*.cpp" -o -name "*.cxx" -o -name "*.cc" \) -not -path "./.git/*" -not -path "*/node_modules/*" 2>/dev/null | head -1)
+      OBJC_FILES=$(find . -maxdepth 2 \( -name "*.m" -o -name "*.mm" \) -not -path "./.git/*" -not -path "*/node_modules/*" 2>/dev/null | head -1)
       if [ -n "$CPP_FILES" ]; then
         PROJECT_LANGS="cpp"
       elif [ -n "$OBJC_FILES" ]; then
         PROJECT_LANGS="objectivec"
       fi
-    elif [ -n "$(find . -maxdepth 2 -name "*.ps1" -not -path "./.git/*" 2>/dev/null | head -1)" ]; then
+    elif [ -n "$(find . -maxdepth 2 -name "*.ps1" -not -path "./.git/*" -not -path "*/node_modules/*" 2>/dev/null | head -1)" ]; then
       PROJECT_LANGS="powershell"
     fi
   fi
@@ -741,7 +741,7 @@ CHANGEDFILELIST
   # Only used when extension-based detection found nothing
   if [ -z "$PROJECT_LANGS" ]; then
     # Search for TypeScript/JavaScript projects
-    TSCONFIG_SUB=$(find . -maxdepth 2 -name "tsconfig.json" -not -path "./.git/*" -not -path "./node_modules/*" 2>/dev/null | head -1)
+    TSCONFIG_SUB=$(find . -maxdepth 2 -name "tsconfig.json" -not -path "./.git/*" -not -path "*/node_modules/*" -not -path "./node_modules/*" 2>/dev/null | head -1)
     if [ -n "$TSCONFIG_SUB" ]; then
       PROJECT_SUBDIR=$(dirname "$TSCONFIG_SUB")
       if [ -f "$PROJECT_SUBDIR/package.json" ] && grep -q "react-native" "$PROJECT_SUBDIR/package.json" 2>/dev/null; then
@@ -753,7 +753,7 @@ CHANGEDFILELIST
 
     # Search for Python projects
     if [ -z "$PROJECT_LANGS" ]; then
-      PYPROJECT_SUB=$(find . -maxdepth 2 -name "pyproject.toml" -not -path "./.git/*" 2>/dev/null | head -1)
+      PYPROJECT_SUB=$(find . -maxdepth 2 -name "pyproject.toml" -not -path "./.git/*" -not -path "*/node_modules/*" 2>/dev/null | head -1)
       if [ -n "$PYPROJECT_SUB" ]; then
         PROJECT_LANGS="python"
         PROJECT_SUBDIR=$(dirname "$PYPROJECT_SUB")
@@ -762,7 +762,7 @@ CHANGEDFILELIST
 
     # Search for Go projects
     if [ -z "$PROJECT_LANGS" ]; then
-      GOMOD_SUB=$(find . -maxdepth 2 -name "go.mod" -not -path "./.git/*" 2>/dev/null | head -1)
+      GOMOD_SUB=$(find . -maxdepth 2 -name "go.mod" -not -path "./.git/*" -not -path "*/node_modules/*" 2>/dev/null | head -1)
       if [ -n "$GOMOD_SUB" ]; then
         PROJECT_LANGS="go"
         PROJECT_SUBDIR=$(dirname "$GOMOD_SUB")
@@ -771,7 +771,7 @@ CHANGEDFILELIST
 
     # Search for Flutter/Dart projects
     if [ -z "$PROJECT_LANGS" ]; then
-      PUBSPEC_SUB=$(find . -maxdepth 2 -name "pubspec.yaml" -not -path "./.git/*" 2>/dev/null | head -1)
+      PUBSPEC_SUB=$(find . -maxdepth 2 -name "pubspec.yaml" -not -path "./.git/*" -not -path "*/node_modules/*" 2>/dev/null | head -1)
       if [ -n "$PUBSPEC_SUB" ]; then
         if grep -q "flutter:" "$PUBSPEC_SUB" 2>/dev/null || [ -f "$(dirname "$PUBSPEC_SUB")/.metadata" ]; then
           PROJECT_LANGS="flutter"
@@ -784,8 +784,8 @@ CHANGEDFILELIST
 
     # Search for Java/Kotlin projects
     if [ -z "$PROJECT_LANGS" ]; then
-      POM_SUB=$(find . -maxdepth 2 -name "pom.xml" -not -path "./.git/*" 2>/dev/null | head -1)
-      GRADLE_SUB=$(find . -maxdepth 2 -name "build.gradle" -not -path "./.git/*" 2>/dev/null | head -1)
+      POM_SUB=$(find . -maxdepth 2 -name "pom.xml" -not -path "./.git/*" -not -path "*/node_modules/*" 2>/dev/null | head -1)
+      GRADLE_SUB=$(find . -maxdepth 2 -name "build.gradle" -not -path "./.git/*" -not -path "*/node_modules/*" 2>/dev/null | head -1)
       if [ -n "$POM_SUB" ] || [ -n "$GRADLE_SUB" ]; then
         MANIFEST_FILE="${POM_SUB:-$GRADLE_SUB}"
         PROJECT_SUBDIR=$(dirname "$MANIFEST_FILE")
@@ -800,7 +800,7 @@ CHANGEDFILELIST
 
     # Search for C++ projects
     if [ -z "$PROJECT_LANGS" ]; then
-      CMAKE_SUB=$(find . -maxdepth 2 -name "CMakeLists.txt" -not -path "./.git/*" 2>/dev/null | head -1)
+      CMAKE_SUB=$(find . -maxdepth 2 -name "CMakeLists.txt" -not -path "./.git/*" -not -path "*/node_modules/*" 2>/dev/null | head -1)
       if [ -n "$CMAKE_SUB" ]; then
         PROJECT_LANGS="cpp"
         PROJECT_SUBDIR=$(dirname "$CMAKE_SUB")
@@ -809,7 +809,7 @@ CHANGEDFILELIST
 
     # Search for React Native projects (ios/ + android/ directories)
     if [ -z "$PROJECT_LANGS" ]; then
-      RN_SUB=$(find . -maxdepth 2 -type d -name "ios" -not -path "./.git/*" 2>/dev/null | head -1)
+      RN_SUB=$(find . -maxdepth 2 -type d -name "ios" -not -path "./.git/*" -not -path "*/node_modules/*" 2>/dev/null | head -1)
       if [ -n "$RN_SUB" ]; then
         PROJECT_SUBDIR=$(dirname "$RN_SUB")
         if [ -d "$PROJECT_SUBDIR/android" ] || [ -f "$PROJECT_SUBDIR/package.json" ]; then
@@ -820,7 +820,7 @@ CHANGEDFILELIST
 
     # Search for PowerShell projects
     if [ -z "$PROJECT_LANGS" ]; then
-      PS_SUB=$(find . -maxdepth 2 -name "*.ps1" -not -path "./.git/*" 2>/dev/null | head -1)
+      PS_SUB=$(find . -maxdepth 2 -name "*.ps1" -not -path "./.git/*" -not -path "*/node_modules/*" 2>/dev/null | head -1)
       if [ -n "$PS_SUB" ]; then
         PROJECT_LANGS="powershell"
         PROJECT_SUBDIR=$(dirname "$PS_SUB")
@@ -845,7 +845,7 @@ CHANGEDFILELIST
 
   # ---- Documentation-only fallback ----
   if [ -z "$PROJECT_LANGS" ]; then
-    CODE_FILES=$(find . -type f \( -name "*.py" -o -name "*.js" -o -name "*.ts" -o -name "*.tsx" -o -name "*.java" -o -name "*.go" -o -name "*.rs" -o -name "*.cpp" -o -name "*.c" -o -name "*.swift" -o -name "*.kt" -o -name "*.sh" -o -name "*.dart" -o -name "*.ps1" \) -not -path "./.git/*" 2>/dev/null | wc -l)
+    CODE_FILES=$(find . -type f \( -name "*.py" -o -name "*.js" -o -name "*.ts" -o -name "*.tsx" -o -name "*.java" -o -name "*.go" -o -name "*.rs" -o -name "*.cpp" -o -name "*.c" -o -name "*.swift" -o -name "*.kt" -o -name "*.sh" -o -name "*.dart" -o -name "*.ps1" \) -not -path "./.git/*" -not -path "*/node_modules/*" 2>/dev/null | wc -l)
 
     if [ "$CODE_FILES" -eq 0 ]; then
       PROJECT_LANGS="documentation-only"
@@ -3060,7 +3060,7 @@ fi
 # Validates sprint state consistency (delphi-review APPROVED before BUILD)
 # Uses sprint-gate.sh for standalone validation logic
 # ============================================================================
-GATE_11_START=$(date +%s)
+GATE_11_START=$(gate_start_ms)
 GATE_11_STATUS="PASS"
 
 # BEGIN SPRINT_GATE_SCRIPT RESOLUTION
