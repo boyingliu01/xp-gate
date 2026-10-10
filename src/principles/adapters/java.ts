@@ -50,12 +50,17 @@ const JAVA_IO_OPERATIONS = [
 ];
 
 /**
- * Numeric literal scan for the magic-numbers rule. A per-call regex comes
- * from `javaParse.magicNumberRegex()`; `String.prototype.match` with the
- * global flag returns all matches per line and ignores lastIndex, so there
- * is no shared-state bug to worry about.
+ * Numeric literal scan for the magic-numbers rule. Lookahead mirrors the
+ * TypeScript adapter (`(?![\w$])`): digits as call arguments (`foo(2)`) are
+ * the most common magic-number site and must be reported, so `)` is NOT
+ * excluded. A per-call regex comes from `javaParse.magicNumberRegex()`;
+ * `String.prototype.match` with the global flag returns all matches per line
+ * and ignores lastIndex, so there is no shared-state bug to worry about.
+ * Known gaps (documented in docs/java-principles-coverage.md): hex
+ * (0xFF), underscore separators (1_000) and literal suffixes (1000L) are
+ * not matched.
  */
-const MAGIC_NUMBER_SOURCE = '(?<![\\w.])(-?\\d+(?:\\.\\d+)?)(?![\\w.)])';
+const MAGIC_NUMBER_SOURCE = '(?<![\\w$.])(-?\\d+(?:\\.\\d+)?)(?![\\w$])';
 
 const MEMBER_KEYWORDS = new Set([
   'if', 'for', 'while', 'switch', 'catch', 'return', 'synchronized', 'new',
@@ -119,6 +124,21 @@ export const javaParse = {
     return new RegExp(MAGIC_NUMBER_SOURCE, 'g');
   },
 
+  /**
+   * Strip string/char literals and comments (line + block, multi-line)
+   * before any brace/call-site analysis. Contents become empty/space so the
+   * line structure (and thus length/line numbers) is preserved. This is what
+   * keeps a `"{` inside a format string or a javadoc code example from
+   * corrupting nestingDepth/hasTryCatch/methodCount (#507 blind review M3/M4).
+   */
+  maskCode(body: string): string {
+    return body
+      .replace(/"(?:[^"\\]|\\.)*"/g, '""')
+      .replace(/'(?:[^'\\]|\\.)'/g, "''")
+      .replace(/\/\*[\s\S]*?\*\//g, (m) => m.replace(/[^\n]/g, ' '))
+      .replace(/\/\/.*$/gm, '');
+  },
+
   /** Usage detector for an imported simple name (word-boundary, $-escaped). */
   importUsage(simpleName: string): RegExp {
     return new RegExp(`\\b${simpleName.replace(/\$/g, '\\$')}\\b`);
@@ -150,6 +170,10 @@ export class JavaAdapter extends BaseAdapter implements Adapter {
     while ((match = methodRegex.exec(this.fileContent)) !== null) {
       const code = this.extractCodeBlock(match.index) ?? '';
       const line = this.getLineNumber(match.index);
+      // Brace/catch/IO analysis runs on the MASKED body: an unbalanced `{"`
+      // inside a format string or a javadoc example otherwise corrupts
+      // nestingDepth/hasTryCatch and bleeds into the next method -- #507 M4.
+      const masked = javaParse.maskCode(code);
       results.push({
         name: match[2],
         type: 'method',
@@ -158,9 +182,9 @@ export class JavaAdapter extends BaseAdapter implements Adapter {
         startLine: line,
         length: code ? code.split('\n').length : 0,
         paramCount: javaParse.countParams(match[3] ?? ''),
-        nestingDepth: javaParse.braceDepth(code),
-        hasTryCatch: /catch\s*\(/.test(code),
-        ioOperations: JAVA_IO_OPERATIONS.filter(op => code.includes(op)),
+        nestingDepth: javaParse.braceDepth(masked),
+        hasTryCatch: /catch\s*\(/.test(masked),
+        ioOperations: JAVA_IO_OPERATIONS.filter(op => masked.includes(op)),
         code
       });
     }
@@ -170,14 +194,18 @@ export class JavaAdapter extends BaseAdapter implements Adapter {
 
   extractClasses(): unknown[] {
     const classMatches = [];
-    const classRegex = /(public|private|protected)?\s*(abstract|final|static)?\s*class\s+(\w+)\s*(extends\s+\w+)?\s*(implements\s+[\w,\s]+)?\s*{/g;
+    // Generic type parameters -- `class Box<T>`, `class Foo<T> extends Bar<T>` --
+    // are the norm in modern Java; without the optional `<...>` slot the
+    // whole class vanished from extractClasses and srp/god-class/dip went
+    // blind on generic code -- #507 blind review M1.
+    const classRegex = /(public|private|protected)?\s*(abstract|final|static)?\s*class\s+(\w+)\s*(?:<[^<>]*>)?\s*(extends\s+[\w.]+(?:<[^<>]*>)?)?\s*(implements\s+[\w,\s.]+(?:<[^<>]*>)?)?\s*\{/g;
     let match;
 
     while ((match = classRegex.exec(this.fileContent)) !== null) {
       const code = this.extractCodeBlock(match.index) ?? '';
-      // srp reads `cls.methodCount` directly (no code re-scan fallback), so an
-      // adapter omitting it makes SRP structurally dead on Java (#507 S4).
-      const methods = javaParse.countMembers(code);
+      // srp reads `cls.methodCount` directly, with no code re-scan fallback,
+      // so an adapter omitting it makes SRP structurally dead on Java -- #507 S4.
+      const methods = javaParse.countMembers(javaParse.maskCode(code));
       classMatches.push({
         name: match[3],
         type: 'class',
@@ -194,17 +222,17 @@ export class JavaAdapter extends BaseAdapter implements Adapter {
 
   /**
    * Interfaces for the ISP rule, which reads `adapter.extractInterfaces()`.
-   * Java interface methods are signatures (`String render(int x);`), counted
-   * with the same member heuristic as classes minus constructors.
+   * Java interface methods are bare signature lines, counted with the same
+   * member heuristic as classes minus constructors.
    */
   extractInterfaces(): Array<{ name: string; line: number; methods: string[]; methodCount: number; code: string }> {
     const results: Array<{ name: string; line: number; methods: string[]; methodCount: number; code: string }> = [];
-    const ifaceRegex = /(?:public|private|protected)?\s*interface\s+(\w+)\s*\{/g;
+    const ifaceRegex = /(?:public|private|protected)?\s*interface\s+(\w+)\s*(?:<[^<>]*>)?\s*\{/g;
     let match;
 
     while ((match = ifaceRegex.exec(this.fileContent)) !== null) {
       const code = this.extractCodeBlock(match.index) ?? '';
-      const methods = javaParse.countMembers(code);
+      const methods = javaParse.countMembers(javaParse.maskCode(code));
       results.push({
         name: match[1],
         line: this.getLineNumber(match.index),
@@ -220,18 +248,39 @@ export class JavaAdapter extends BaseAdapter implements Adapter {
   /**
    * Numeric literal scan for the magic-numbers rule. Constant declarations
    * (`static final ... = <n>`) are skipped: naming a constant is exactly the
-   * remedy the rule asks for. String/char contents and line comments are
-   * masked before scanning.
+   * remedy the rule asks for. Masking ORDER matters -- #507 blind review M3:
+   * string/char literals first, so `"http://x"` cannot swallow the rest of
+   * the line as a comment), then line comments, then block comments with
+   * cross-line state -- a commented-out code block must not resurrect its
+   * numbers as findings.
    */
   extract(): Array<{ value: number; line: number }> {
     const out: Array<{ value: number; line: number }> = [];
     const lines = this.fileContent.split('\n');
     const numRegex = javaParse.magicNumberRegex();
+    let inBlockComment = false;
     for (let i = 0; i < lines.length; i += 1) {
-      const line = lines[i]
-        .replace(/\/\/.*$/, '')
+      let line = lines[i];
+      if (inBlockComment) {
+        const end = line.indexOf('*/');
+        if (end === -1) continue;
+        line = line.slice(end + 2);
+        inBlockComment = false;
+      }
+      line = line
         .replace(/"(?:[^"\\]|\\.)*"/g, '""')
-        .replace(/'(?:[^'\\]|\\.)'/g, "''");
+        .replace(/'(?:[^'\\]|\\.)'/g, "''")
+        .replace(/\/\/.*$/, '');
+      while (line.includes('/*')) {
+        const start = line.indexOf('/*');
+        const end = line.indexOf('*/', start + 2);
+        if (end === -1) {
+          line = line.slice(0, start);
+          inBlockComment = true;
+          break;
+        }
+        line = line.slice(0, start) + ' ' + line.slice(end + 2);
+      }
       if (/^\s*(?:public|private|protected)?\s*static\s+final\s/.test(line)) continue;
       const matches = line.match(numRegex) ?? [];
       for (const value of matches) out.push({ value: Number(value), line: i + 1 });

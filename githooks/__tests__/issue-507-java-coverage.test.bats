@@ -95,7 +95,7 @@ run_note() {
   local hits
   hits=$(grep -n '\.java' "$REPO_ROOT/githooks/gate-4.sh" \
     | grep -v 'ts|tsx|js|jsx|py|go|java' \
-    | grep -v '\*\.java|\*\.JAVA' \
+    | grep -v '\*\.java|\*\.Java|\*\.JAVA' \
     | grep -v 'inert on Java' || true)
   [ -z "$hits" ] || { echo "$hits"; false; }
 }

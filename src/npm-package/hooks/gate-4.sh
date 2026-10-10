@@ -42,7 +42,7 @@ java_coverage_note() {
   local _f _has_java=""
   for _f in "$@"; do
     case "$_f" in
-      *.java|*.JAVA) _has_java=1; break ;;
+      *.java|*.Java|*.JAVA) _has_java=1; break ;;
     esac
   done
   [ -n "$_has_java" ] || return 0

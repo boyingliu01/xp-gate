@@ -113,4 +113,4 @@ else
     GATE_3_STATUS="WARN"
   fi
 fi
-record_gate_audit "gate-3" "complexity" "$GATE_3_STATUS" "${CC_WARNINGS:-0}" "$GATE_3_START" "ccn_threshold=${CCN_THRESHOLD}"
+record_gate_audit "gate-3" "complexity" "$GATE_3_STATUS" "${CC_WARNINGS:-0}" "$GATE_3_START" "ccn_threshold=${CCN_THRESHOLD:-5}"

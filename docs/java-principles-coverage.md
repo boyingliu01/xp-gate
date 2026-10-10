@@ -51,3 +51,22 @@
 3. 新增 `get imports()`（unused-imports）：import 行集合之外的 simple-name 使用检测。
 4. `extractClasses()` 补 `methodCount`/`methods` —— srp 由此恢复生效。
 5. 新增 `extractInterfaces()` —— isp 由此恢复生效。
+
+## 盲审修复后的已知缺口（#507 盲审登记）
+
+以下为盲审（Phase 3 双专家）修复后**有意保留**的实现边界，属低风险/低价值，
+记入文档而非继续扩大改动面：
+
+- **magic-numbers 不识别 hex / 下划线 / 数值后缀**：`MAGIC_NUMBER_SOURCE`
+  只匹配十进制（含小数/负号）。`0xFF`、`1_000_000`、`100L` 不产生违规。
+  与 TS 适配器口径一致（TS 同样只匹配十进制），如需扩展应 TS/Java 同步改。
+- **srp 的第二子检查（`cls.imports`）在 Java 上恒死**：srp 规则内部还有
+  一条基于 imports 数的判定分支，Java 的 `imports` 是 import 语句而非 TS
+  的依赖注入标记，语义不对应。该分支 Java 上永不触发，属规则引擎设计
+  而非 Java 适配器缺陷；首子检查（`methodCount`）已生效。
+- **`static final` 豁免不认声明顺序变体**：只豁免 `static final Type NAME`
+  顺序，`final static` 顺序及接口常量（隐式 public static final）不豁免，
+  可能对接口常量初始化值误报。实际工程中误报面窄，暂不改。
+- **ioOperations 子串匹配过宽**：如变量名含 `Stream`（`myStream`）会被
+  记为 IO 操作。这是保守方向（宁可多报 hasIo 再被 hasTryCatch 抑制），
+  不产生假 PASS，暂不改。
