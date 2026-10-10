@@ -203,6 +203,48 @@ int x = 12345;
       expect(values).not.toContain(1234);
     });
 
+    it('reports digits used as call arguments (#507 blind review M2)', () => {
+      const content = `
+public class Calls {
+  public int go() {
+    return Math.max(1, 99);
+  }
+}
+`;
+      (readFileSync as Mock).mockReturnValue(content);
+      const adapter = new JavaAdapter('C.java') as unknown as {
+        extract: () => Array<{ value: number; line: number }>;
+      };
+      const values = adapter.extract().map(n => n.value);
+      expect(values).toContain(99);
+      expect(values).toContain(1);
+    });
+
+    it('masks block comments including cross-line ones (#507 blind review M3)', () => {
+      const content = `
+public class Commented {
+  /* int inlineBlock = 555; */
+  // string containing slashes must not swallow the rest: see below
+  String url = "http://x"; int y = 42;
+  /*
+   * int multi = 777;
+   * int line2 = 888;
+   */
+  int live = 11;
+}
+`;
+      (readFileSync as Mock).mockReturnValue(content);
+      const adapter = new JavaAdapter('B.java') as unknown as {
+        extract: () => Array<{ value: number; line: number }>;
+      };
+      const values = adapter.extract().map(n => n.value);
+      expect(values).toContain(42);   // after a string with `//`, same line
+      expect(values).toContain(11);   // after a multi-line block comment
+      expect(values).not.toContain(555);
+      expect(values).not.toContain(777);
+      expect(values).not.toContain(888);
+    });
+
     it('skips static final constant initializers but reports bare literals', () => {
       // The rule's remedy is "use a named constant" -- flagging the constant
       // itself would make violations unfixable (#446 precedent on TS).
@@ -275,6 +317,62 @@ public interface Worker {
       };
       const ifaces = adapter.extractInterfaces();
       expect(ifaces.find(i => i.name === 'Worker')?.methodCount).toBe(2);
+    });
+
+    it('finds generic classes and interfaces (#507 blind review M1)', () => {
+      const content = `
+public class Box<T> {
+  private T value;
+  public T get() { return value; }
+}
+
+public interface Repo<T, ID> {
+  T findById(ID id);
+}
+`;
+      (readFileSync as Mock).mockReturnValue(content);
+      const classes = adapterFor(content).extractClasses() as Array<{ name: string; methodCount: number }>;
+      expect(classes.find(c => c.name === 'Box')?.methodCount).toBe(1);
+      const adapter = adapterFor(content) as unknown as {
+        extractInterfaces: () => Array<{ name: string; methodCount: number }>;
+      };
+      expect(adapter.extractInterfaces().find(i => i.name === 'Repo')?.methodCount).toBe(1);
+    });
+
+    it('does not count masked-out members (strings/comments/inner calls)', () => {
+      const content = `
+public class Noisy {
+  public void real() {
+    String s = "fake(1)";
+    // phantomCall(
+    /* alsoFake(2) */
+    helper(1);
+  }
+  public void second() {}
+}
+`;
+      (readFileSync as Mock).mockReturnValue(content);
+      const classes = adapterFor(content).extractClasses() as Array<{ name: string; methodCount: number }>;
+      // helper( is a real call-site hit (same heuristic as the TS adapter);
+      // the masked-out ones must not appear.
+      const count = classes.find(c => c.name === 'Noisy')?.methodCount ?? 0;
+      expect(count).toBeLessThanOrEqual(2);
+    });
+
+    it('does not leak brace depth from string literals (#507 blind review M4)', () => {
+      const content = `
+public class Formatter {
+  public String weird() {
+    String s = "unbalanced { brace";
+    return s;
+  }
+  public int after() { return 0; }
+}
+`;
+      (readFileSync as Mock).mockReturnValue(content);
+      const fns = adapterFor(content).extractFunctions() as Array<{ name: string; nestingDepth: number }>;
+      // `after` must not inherit inflated depth from the string's `{`.
+      expect(findFn(fns as FnInfo[], 'after').nestingDepth).toBeLessThan(3);
     });
   });
 });

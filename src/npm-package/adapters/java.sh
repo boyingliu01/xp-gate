@@ -138,12 +138,16 @@ run_wc_java_lint() {
   err_file="${out_file}.err"
 
   # Primary contract call: the tool inspects the index itself.
+  # `|| exit_code=$?` keeps a non-zero verdict from killing the host when
+  # this module is sourced into a `set -e` consumer (repo convention,
+  # cf. gate-4.sh's `|| PRINCIPLES_EXIT=$?`).
+  exit_code=0
   if command -v timeout >/dev/null 2>&1; then
-    timeout "$timeout_s" "$bin" check --staged --format json >"$out_file" 2>"$err_file"
+    timeout "$timeout_s" "$bin" check --staged --format json >"$out_file" 2>"$err_file" || exit_code=$?
   else
-    "$bin" check --staged --format json >"$out_file" 2>"$err_file"
+    echo "     ⚠️  'timeout' command not available - running wc-java-lint without a timeout guard" >&2
+    "$bin" check --staged --format json >"$out_file" 2>"$err_file" || exit_code=$?
   fi
-  exit_code=$?
 
   # Usage-error fallback (#507 AC-507-01-06): an older build without --staged
   # answers with a usage message and exit>=2. Retry with the explicit staged
@@ -155,12 +159,12 @@ run_wc_java_lint() {
       [ -n "$jf" ] && staged_args+=("$jf")
     done <<< "$(java_staged_files)"
     if [ "${#staged_args[@]}" -gt 0 ]; then
+      exit_code=0
       if command -v timeout >/dev/null 2>&1; then
-        timeout "$timeout_s" "$bin" check --format json "${staged_args[@]}" >"$out_file" 2>"$err_file"
+        timeout "$timeout_s" "$bin" check --format json "${staged_args[@]}" >"$out_file" 2>"$err_file" || exit_code=$?
       else
-        "$bin" check --format json "${staged_args[@]}" >"$out_file" 2>"$err_file"
+        "$bin" check --format json "${staged_args[@]}" >"$out_file" 2>"$err_file" || exit_code=$?
       fi
-      exit_code=$?
     fi
   fi
 
@@ -204,6 +208,7 @@ run_wc_java_lint() {
       if [ "${XP_GATE_WC_JAVA_LINT:-}" = "soft" ]; then
         echo "⚠️  XP_GATE_WC_JAVA_LINT=soft: execution failure downgraded to SKIP+WARN (#507 DR-001 escape valve)"
         echo "⚠️  Java static analysis SKIPPED - the engine exists but is broken; do not treat this as a clean run"
+        export XP_GATE_JAVA_G1_REASON="wc-java-lint broken (soft downgrade)"
         return 3
       fi
       return 2
@@ -235,7 +240,7 @@ _detect_java_build() {
 # nor pmd is available the verdict must NOT be PASS (exit 3, audit warn).
 # ---------------------------------------------------------------------------
 run_legacy_analysis() {
-  local build_system lint_tools=0
+  local build_system lint_tools=0 worst=0 rc=0
 
   build_system=$(_detect_java_build)
 
@@ -246,31 +251,54 @@ run_legacy_analysis() {
     echo "⚠️  whalecloud-java plugin directory missing: $WHALECLOUD_PLUGIN_DIR"
   fi
 
+  # Every engine's verdict is AGGREGATED (#507 blind review MAJOR-1): a tool
+  # that reports violations must never degrade to a silent PASS -- that was
+  # the exact anti-pattern this sprint exists to remove.
+  local out_file
+  out_file=$(mktemp "${TMPDIR:-/tmp}/java-legacy.XXXXXX")
+
   # CheckStyle with Google style (legacy fallback)
   if command -v checkstyle &>/dev/null; then
     lint_tools=$((lint_tools + 1))
-    checkstyle -c /google_checks.xml . 2>&1 | sed -n '1,20p; 20q'
+    rc=0
+    checkstyle -c /google_checks.xml . >"$out_file" 2>&1 || rc=$?
+    sed -n '1,20p' "$out_file"
+    [ "$rc" -ne 0 ] && worst=1
   fi
 
   # PMD error detection (legacy fallback)
   if command -v pmd &>/dev/null; then
     lint_tools=$((lint_tools + 1))
-    pmd check -d . -R category/java/errorprone.xml 2>&1 | sed -n '1,20p; 20q'
+    rc=0
+    pmd check -d . -R category/java/errorprone.xml >"$out_file" 2>&1 || rc=$?
+    sed -n '1,20p' "$out_file"
+    [ "$rc" -ne 0 ] && worst=1
   fi
+  rm -f "$out_file"
 
   if [ "$lint_tools" -eq 0 ]; then
     echo "⚠️  No Java static-analysis engine available: wc-java-lint, checkstyle and pmd all missing"
     echo "⚠️  Java code quality NOT verified - verdict is SKIP+WARN, not PASS (#507 AC-507-01-03)"
     echo "   Install wc-java-lint (preferred) or checkstyle/pmd to restore verification"
     _XP_JAVA_LEGACY_WARN=1
+    export XP_GATE_JAVA_G1_REASON="legacy tools unavailable (warn)"
   fi
 
   # p3c-pmd check (Alibaba coding guidelines) — primary Java quality gate
-  _run_p3c_check "$build_system"
+  # (`-Dpmd.failOnViolation=true` makes violations exit non-zero).
+  rc=0
+  _run_p3c_check "$build_system" || rc=$?
+  [ "$rc" -ne 0 ] && worst=1
 
   # WhaleCloud Java Coding Standards — overlay on top of p3c-pmd
-  _run_whalecloud_check "$build_system"
+  rc=0
+  _run_whalecloud_check "$build_system" || rc=$?
+  [ "$rc" -ne 0 ] && worst=1
 
+  if [ "$worst" -ne 0 ]; then
+    echo "  ❌ legacy Java analysis found violations"
+    return 1
+  fi
   if [ "${_XP_JAVA_LEGACY_WARN:-0}" = "1" ]; then
     return 3
   fi
@@ -442,13 +470,15 @@ run_whalecloud_check() {
 # miss. The old direct mvn/gradle compile here moved to Build Integrity (S5).
 # ---------------------------------------------------------------------------
 run_static_analysis() {
-  local rc
-  run_wc_java_lint
-  rc=$?
+  local rc=0
+  # `|| rc=$?` (not a bare call): under a set -e consumer a non-zero verdict
+  # would otherwise abort the host hook instead of returning the verdict code.
+  run_wc_java_lint || rc=$?
   if [ "$rc" -eq 9 ]; then
     echo "ℹ️  wc-java-lint not found - falling back to legacy Java analysis"
-    run_legacy_analysis
-    return $?
+    rc=0
+    run_legacy_analysis || rc=$?
+    return "$rc"
   fi
   return "$rc"
 }

@@ -1358,7 +1358,10 @@ else
     GATE_1_STATUS="SKIP"
     GATE_1_DETAIL="java: adapter missing"
   else
-    JAVA_G1_OUTPUT=$(run_static_analysis 2>&1); JAVA_G1_EXIT=$?
+    JAVA_G1_EXIT=0
+    # `|| JAVA_G1_EXIT=$?` (not a bare assignment): under a set -e consumer a
+    # non-zero verdict would abort the host hook before the mapping below.
+    JAVA_G1_OUTPUT=$(run_static_analysis 2>&1) || JAVA_G1_EXIT=$?
     [ -n "$JAVA_G1_OUTPUT" ] && echo "$JAVA_G1_OUTPUT" | head -40
     case "$JAVA_G1_EXIT" in
       0)
@@ -1375,7 +1378,7 @@ else
       3)
         echo "⏭️  SKIPPED - Java code quality (engine unavailable or downgraded)"
         GATE_1_STATUS="SKIP"
-        GATE_1_DETAIL="java: legacy tools unavailable (warn)"
+        GATE_1_DETAIL="java: ${XP_GATE_JAVA_G1_REASON:-unavailable (warn)}"
         ;;
       *)
         echo "⏭️  SKIPPED - Java code quality (unexpected verdict $JAVA_G1_EXIT)"
@@ -2962,7 +2965,9 @@ if echo "$CHANGED_FILES" | grep -q '\.java$'; then
     run_java_build_integrity || JAVA_BI_EXIT=$?
     case "$JAVA_BI_EXIT" in
       0)
-        GATE_9_STATUS="PASS"
+        # A TS-half SKIP stays SKIP: the Java half passing must not resurrect
+        # the skipped half as a pass (#507 blind review MINOR-1).
+        [ "$GATE_9_STATUS" != "SKIP" ] && GATE_9_STATUS="PASS"
         ;;
       2)
         GATE_9_STATUS="BLOCK"
