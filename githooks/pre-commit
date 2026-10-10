@@ -242,6 +242,9 @@ record_gate_audit() {
   local passed="$3"
   local issues_found="$4"
   local start_ms="$5"
+  # Optional free-form detail (e.g. gate-3's effective CCN threshold, #507).
+  # Additive and omitted when absent, so existing callers stay unchanged.
+  local detail="${6:-}"
   local end_ms
   end_ms=$(now_ms)
   local duration_ms=$((end_ms - start_ms))
@@ -271,6 +274,7 @@ record_gate_audit() {
       --duration-ms "$duration_ms" \
       $duration_anomaly_flag \
       --trigger commit \
+      ${detail:+--detail "$detail"} \
       2>/dev/null
   } &
   disown 2>/dev/null || true
@@ -478,9 +482,15 @@ echo ""
 # that must ignore the byte-identical npm-package mirrors (lint corpus here,
 # Boy Scout's new/modified split further down) reads this one regex, so the
 # two sites cannot drift apart.
+# dashboard/ is a standalone browser-only visualization page (document/Chart.js
+# globals, static HTML output). It is not part of the gate engine, never runs
+# in CI or hooks, and its chart-config object literals trip structural rules
+# (deep-nesting/long-function) that carry no signal for this codebase. Same
+# scope rationale as the mirror exclusion (#507 Delphi round-2 follow-up).
 MIRROR_PATH_FILTER='^src/npm-package/'
+DASHBOARD_PATH_FILTER='^dashboard/'
 RAW_CHANGED_FILES=$(git diff --cached --name-only --diff-filter=ACM)
-CHANGED_FILES=$(printf '%s\n' "$RAW_CHANGED_FILES" | grep -v "$MIRROR_PATH_FILTER" || true)
+CHANGED_FILES=$(printf '%s\n' "$RAW_CHANGED_FILES" | grep -v "$MIRROR_PATH_FILTER" | grep -v "$DASHBOARD_PATH_FILTER" || true)
 
 if [ -z "$RAW_CHANGED_FILES" ]; then
   echo "No files changed. Skipping gates."
@@ -649,21 +659,21 @@ if [ -z "$PROJECT_LANGS" ] && [ -z "$_CONFIG_LANGS" ]; then
         PROJECT_LANGS="dart"
       fi
     elif [ -f "pom.xml" ] || [ -f "build.gradle" ] || [ -f "build.gradle.kts" ]; then
-      KOTLIN_FILES=$(find . -name "*.kt" -not -path "./.git/*" 2>/dev/null | wc -l)
+      KOTLIN_FILES=$(find . -name "*.kt" -not -path "./.git/*" -not -path "*/node_modules/*" 2>/dev/null | wc -l)
       if [ "$KOTLIN_FILES" -gt 0 ]; then
         PROJECT_LANGS="kotlin"
       else
         PROJECT_LANGS="java"
       fi
     elif [ -f "CMakeLists.txt" ] || [ -f "Makefile" ]; then
-      CPP_FILES=$(find . -maxdepth 2 \( -name "*.cpp" -o -name "*.cxx" -o -name "*.cc" \) -not -path "./.git/*" 2>/dev/null | head -1)
-      OBJC_FILES=$(find . -maxdepth 2 \( -name "*.m" -o -name "*.mm" \) -not -path "./.git/*" 2>/dev/null | head -1)
+      CPP_FILES=$(find . -maxdepth 2 \( -name "*.cpp" -o -name "*.cxx" -o -name "*.cc" \) -not -path "./.git/*" -not -path "*/node_modules/*" 2>/dev/null | head -1)
+      OBJC_FILES=$(find . -maxdepth 2 \( -name "*.m" -o -name "*.mm" \) -not -path "./.git/*" -not -path "*/node_modules/*" 2>/dev/null | head -1)
       if [ -n "$CPP_FILES" ]; then
         PROJECT_LANGS="cpp"
       elif [ -n "$OBJC_FILES" ]; then
         PROJECT_LANGS="objectivec"
       fi
-    elif [ -n "$(find . -maxdepth 2 -name "*.ps1" -not -path "./.git/*" 2>/dev/null | head -1)" ]; then
+    elif [ -n "$(find . -maxdepth 2 -name "*.ps1" -not -path "./.git/*" -not -path "*/node_modules/*" 2>/dev/null | head -1)" ]; then
       PROJECT_LANGS="powershell"
     fi
   fi
@@ -731,7 +741,7 @@ CHANGEDFILELIST
   # Only used when extension-based detection found nothing
   if [ -z "$PROJECT_LANGS" ]; then
     # Search for TypeScript/JavaScript projects
-    TSCONFIG_SUB=$(find . -maxdepth 2 -name "tsconfig.json" -not -path "./.git/*" -not -path "./node_modules/*" 2>/dev/null | head -1)
+    TSCONFIG_SUB=$(find . -maxdepth 2 -name "tsconfig.json" -not -path "./.git/*" -not -path "*/node_modules/*" -not -path "./node_modules/*" 2>/dev/null | head -1)
     if [ -n "$TSCONFIG_SUB" ]; then
       PROJECT_SUBDIR=$(dirname "$TSCONFIG_SUB")
       if [ -f "$PROJECT_SUBDIR/package.json" ] && grep -q "react-native" "$PROJECT_SUBDIR/package.json" 2>/dev/null; then
@@ -743,7 +753,7 @@ CHANGEDFILELIST
 
     # Search for Python projects
     if [ -z "$PROJECT_LANGS" ]; then
-      PYPROJECT_SUB=$(find . -maxdepth 2 -name "pyproject.toml" -not -path "./.git/*" 2>/dev/null | head -1)
+      PYPROJECT_SUB=$(find . -maxdepth 2 -name "pyproject.toml" -not -path "./.git/*" -not -path "*/node_modules/*" 2>/dev/null | head -1)
       if [ -n "$PYPROJECT_SUB" ]; then
         PROJECT_LANGS="python"
         PROJECT_SUBDIR=$(dirname "$PYPROJECT_SUB")
@@ -752,7 +762,7 @@ CHANGEDFILELIST
 
     # Search for Go projects
     if [ -z "$PROJECT_LANGS" ]; then
-      GOMOD_SUB=$(find . -maxdepth 2 -name "go.mod" -not -path "./.git/*" 2>/dev/null | head -1)
+      GOMOD_SUB=$(find . -maxdepth 2 -name "go.mod" -not -path "./.git/*" -not -path "*/node_modules/*" 2>/dev/null | head -1)
       if [ -n "$GOMOD_SUB" ]; then
         PROJECT_LANGS="go"
         PROJECT_SUBDIR=$(dirname "$GOMOD_SUB")
@@ -761,7 +771,7 @@ CHANGEDFILELIST
 
     # Search for Flutter/Dart projects
     if [ -z "$PROJECT_LANGS" ]; then
-      PUBSPEC_SUB=$(find . -maxdepth 2 -name "pubspec.yaml" -not -path "./.git/*" 2>/dev/null | head -1)
+      PUBSPEC_SUB=$(find . -maxdepth 2 -name "pubspec.yaml" -not -path "./.git/*" -not -path "*/node_modules/*" 2>/dev/null | head -1)
       if [ -n "$PUBSPEC_SUB" ]; then
         if grep -q "flutter:" "$PUBSPEC_SUB" 2>/dev/null || [ -f "$(dirname "$PUBSPEC_SUB")/.metadata" ]; then
           PROJECT_LANGS="flutter"
@@ -774,8 +784,8 @@ CHANGEDFILELIST
 
     # Search for Java/Kotlin projects
     if [ -z "$PROJECT_LANGS" ]; then
-      POM_SUB=$(find . -maxdepth 2 -name "pom.xml" -not -path "./.git/*" 2>/dev/null | head -1)
-      GRADLE_SUB=$(find . -maxdepth 2 -name "build.gradle" -not -path "./.git/*" 2>/dev/null | head -1)
+      POM_SUB=$(find . -maxdepth 2 -name "pom.xml" -not -path "./.git/*" -not -path "*/node_modules/*" 2>/dev/null | head -1)
+      GRADLE_SUB=$(find . -maxdepth 2 -name "build.gradle" -not -path "./.git/*" -not -path "*/node_modules/*" 2>/dev/null | head -1)
       if [ -n "$POM_SUB" ] || [ -n "$GRADLE_SUB" ]; then
         MANIFEST_FILE="${POM_SUB:-$GRADLE_SUB}"
         PROJECT_SUBDIR=$(dirname "$MANIFEST_FILE")
@@ -790,7 +800,7 @@ CHANGEDFILELIST
 
     # Search for C++ projects
     if [ -z "$PROJECT_LANGS" ]; then
-      CMAKE_SUB=$(find . -maxdepth 2 -name "CMakeLists.txt" -not -path "./.git/*" 2>/dev/null | head -1)
+      CMAKE_SUB=$(find . -maxdepth 2 -name "CMakeLists.txt" -not -path "./.git/*" -not -path "*/node_modules/*" 2>/dev/null | head -1)
       if [ -n "$CMAKE_SUB" ]; then
         PROJECT_LANGS="cpp"
         PROJECT_SUBDIR=$(dirname "$CMAKE_SUB")
@@ -799,7 +809,7 @@ CHANGEDFILELIST
 
     # Search for React Native projects (ios/ + android/ directories)
     if [ -z "$PROJECT_LANGS" ]; then
-      RN_SUB=$(find . -maxdepth 2 -type d -name "ios" -not -path "./.git/*" 2>/dev/null | head -1)
+      RN_SUB=$(find . -maxdepth 2 -type d -name "ios" -not -path "./.git/*" -not -path "*/node_modules/*" 2>/dev/null | head -1)
       if [ -n "$RN_SUB" ]; then
         PROJECT_SUBDIR=$(dirname "$RN_SUB")
         if [ -d "$PROJECT_SUBDIR/android" ] || [ -f "$PROJECT_SUBDIR/package.json" ]; then
@@ -810,7 +820,7 @@ CHANGEDFILELIST
 
     # Search for PowerShell projects
     if [ -z "$PROJECT_LANGS" ]; then
-      PS_SUB=$(find . -maxdepth 2 -name "*.ps1" -not -path "./.git/*" 2>/dev/null | head -1)
+      PS_SUB=$(find . -maxdepth 2 -name "*.ps1" -not -path "./.git/*" -not -path "*/node_modules/*" 2>/dev/null | head -1)
       if [ -n "$PS_SUB" ]; then
         PROJECT_LANGS="powershell"
         PROJECT_SUBDIR=$(dirname "$PS_SUB")
@@ -835,7 +845,7 @@ CHANGEDFILELIST
 
   # ---- Documentation-only fallback ----
   if [ -z "$PROJECT_LANGS" ]; then
-    CODE_FILES=$(find . -type f \( -name "*.py" -o -name "*.js" -o -name "*.ts" -o -name "*.tsx" -o -name "*.java" -o -name "*.go" -o -name "*.rs" -o -name "*.cpp" -o -name "*.c" -o -name "*.swift" -o -name "*.kt" -o -name "*.sh" -o -name "*.dart" -o -name "*.ps1" \) -not -path "./.git/*" 2>/dev/null | wc -l)
+    CODE_FILES=$(find . -type f \( -name "*.py" -o -name "*.js" -o -name "*.ts" -o -name "*.tsx" -o -name "*.java" -o -name "*.go" -o -name "*.rs" -o -name "*.cpp" -o -name "*.c" -o -name "*.swift" -o -name "*.kt" -o -name "*.sh" -o -name "*.dart" -o -name "*.ps1" \) -not -path "./.git/*" -not -path "*/node_modules/*" 2>/dev/null | wc -l)
 
     if [ "$CODE_FILES" -eq 0 ]; then
       PROJECT_LANGS="documentation-only"
@@ -1337,7 +1347,66 @@ else
     echo "✅ PASSED - Basic shell script syntax check."
   fi
     ;;
-    
+
+    java)
+  # GATE 1 Java: wc-java-lint with fail-closed verdicts (#507 S1, DR-001).
+  # java.sh run_static_analysis verdict codes:
+  #   0=PASS 1=FAIL(violations) 2=BLOCK(execution error) 3=WARN(non-blocking).
+  # Every non-0/1/2 outcome is scored as WARN -- IN the denominator, so it
+  # forbids an overall PASS. Delphi round-2 A-MAJOR-1: these paths used to
+  # map to SKIP, which sits OUT of the denominator, letting a repo with no
+  # Java engine (or findings suppressed in report mode) report PASS/10.0
+  # while its Java quality was never verified.
+  # The adapter applies the XP_GATE_WC_JAVA_LINT=soft escape valve itself, so
+  # a 2 reaching this branch is hard: BLOCK the commit. Captured to a var
+  # (not piped) so the verdict code survives regardless of output length --
+  # `cmd | head` makes a long report die with SIGPIPE, which would turn a
+  # real verdict into an accident of line count.
+  ADAPTER_FILE=$(resolve_adapter_path "$CURRENT_LANG")
+  if [ -z "$ADAPTER_FILE" ] || ! source "$ADAPTER_FILE" 2>/dev/null; then
+    echo "⚠️  WARN - Java adapter not found (code quality NOT verified)"
+    GATE_1_STATUS="WARN"
+    GATE_1_DETAIL="java: adapter missing"
+  else
+    JAVA_G1_EXIT=0
+    # `|| JAVA_G1_EXIT=$?` (not a bare assignment): under a set -e consumer a
+    # non-zero verdict would abort the host hook before the mapping below.
+    JAVA_G1_OUTPUT=$(run_static_analysis 2>&1) || JAVA_G1_EXIT=$?
+    # SKIP/WARN reasons cross the command-substitution subshell as an
+    # `XP_G1_REASON: ...` stdout line -- an `export` inside the adapter can
+    # NEVER reach this process (#507 Delphi round-1 B-MAJOR-1: verified the
+    # subshell discards the child env). Parse, then strip from display.
+    JAVA_G1_REASON=$(printf '%s\n' "$JAVA_G1_OUTPUT" | sed -n 's/^XP_G1_REASON: //p' | head -1)
+    if [ -n "$JAVA_G1_REASON" ]; then
+      JAVA_G1_OUTPUT=$(printf '%s\n' "$JAVA_G1_OUTPUT" | grep -v '^XP_G1_REASON: ')
+    fi
+    [ -n "$JAVA_G1_OUTPUT" ] && echo "$JAVA_G1_OUTPUT" | head -40
+    case "$JAVA_G1_EXIT" in
+      0)
+        echo "✅ PASSED - Java code quality (wc-java-lint)."
+        ;;
+      1)
+        echo "❌ BLOCKED - Java static analysis violations (fix or add suppressions)"
+        exit 1
+        ;;
+      2)
+        echo "❌ BLOCKED - wc-java-lint unusable (fail-closed; unset XP_GATE_WC_JAVA_LINT=soft only if you accept the risk)"
+        exit 1
+        ;;
+      3)
+        echo "⚠️  WARN - Java code quality NOT verified (engine unavailable or downgraded)"
+        GATE_1_STATUS="WARN"
+        GATE_1_DETAIL="java: ${JAVA_G1_REASON:-unavailable (warn)}"
+        ;;
+      *)
+        echo "⚠️  WARN - Java code quality NOT verified (unexpected verdict $JAVA_G1_EXIT)"
+        GATE_1_STATUS="WARN"
+        GATE_1_DETAIL="java: unexpected verdict $JAVA_G1_EXIT"
+        ;;
+    esac
+  fi
+    ;;
+
     *)
       # Route to appropriate adapter for other languages
       ADAPTER_FILE=$(resolve_adapter_path "$CURRENT_LANG")
@@ -1372,9 +1441,13 @@ else
   done
 fi
 fi  # End: if ! any_changed_files_match (Issue #312 skip)
-GATE_1_STATUS="PASS"
+GATE_1_STATUS="${GATE_1_STATUS:-PASS}"
 GATE_1_TOOL="${PROJECT_LANGS}"
-record_gate_audit "gate-1" "code-quality" "$GATE_1_STATUS" "0" "$GATE_1_START"
+# The java branch may set GATE_1_STATUS=WARN + a GATE_1_DETAIL warn reason
+# (engine unavailable / soft or report downgrade); route it into the audit
+# trail via the S2 detail plumbing so a WARN verdict is diagnosable, not
+# silent. WARN stays IN the scoring denominator (Delphi round-2 A-MAJOR-1).
+record_gate_audit "gate-1" "code-quality" "$GATE_1_STATUS" "0" "$GATE_1_START" "${GATE_1_DETAIL:-}"
 
 # ============================================================================
 # GATE 2: Duplicate Code Detection (NEW gate)
@@ -2707,8 +2780,8 @@ else
     # governed by Mirror Parity in CI, which compares content rather than
     # re-linting it. (See the same exclusion in adapters/powershell.sh.)
     MIRROR_EXCLUDE="$MIRROR_PATH_FILTER"
-    NEW_FILES=$(git diff --cached --name-only --diff-filter=A | grep -v "$MIRROR_EXCLUDE" | tr '\n' ' ')
-    MODIFIED_FILES=$(git diff --cached --name-only --diff-filter=M | grep -v "$MIRROR_EXCLUDE" | tr '\n' ' ')
+    NEW_FILES=$(git diff --cached --name-only --diff-filter=A | grep -v "$MIRROR_EXCLUDE" | grep -v "$DASHBOARD_PATH_FILTER" | tr '\n' ' ')
+    MODIFIED_FILES=$(git diff --cached --name-only --diff-filter=M | grep -v "$MIRROR_EXCLUDE" | grep -v "$DASHBOARD_PATH_FILTER" | tr '\n' ' ')
     
     if [ -z "$NEW_FILES" ] && [ -z "$MODIFIED_FILES" ]; then
       echo "     ✅ No new or modified files to check."
@@ -2799,9 +2872,73 @@ fi
 # ============================================================================
 # GATE 9: Build Integrity Check (TypeScript compilation + package + imports)
 # ============================================================================
+
+# Java build-integrity dispatch (#507 S5, DR-003). The old gate only knew
+# TypeScript: a Maven project got a permanent SKIP -- "not a TypeScript
+# project" -- which is exactly the silent-no-coverage path this sprint
+# removes. Verdict codes (mirror of the java.sh G1 contract):
+#   0=PASS 2=BLOCK(compile failed) 3=SKIP+WARN(reason printed)
+resolve_build_integrity_timeout() {
+  local file=".xp-gate/build-integrity-timeout" val=""
+  if [ -f "$file" ]; then
+    val=$(tr -d '[:space:]' < "$file")
+  fi
+  if [ -z "$val" ]; then
+    echo "180"
+    return 0
+  fi
+  case "$val" in
+    ''|*[!0-9]*|0)
+      echo "WARN - invalid $file value '${val}' (expected a positive integer), falling back to 180s" >&2
+      echo "180"
+      ;;
+    *) echo "$val" ;;
+  esac
+}
+
+run_java_build_integrity() {
+  local timeout_s build_bin
+  # Wrapper first: mvnw pins the project's own Maven version.
+  if [ -x "./mvnw" ]; then
+    build_bin="./mvnw"
+  elif command -v mvn >/dev/null 2>&1; then
+    build_bin="mvn"
+  else
+    echo "     ⚠️  Java changes staged but no Maven build tool found (mvnw/mvn)"
+    echo "     ⏭️  SKIPPED - Build integrity Java (no build tool)"
+    return 3
+  fi
+
+  timeout_s=$(resolve_build_integrity_timeout)
+  if command -v timeout >/dev/null 2>&1; then
+    timeout "$timeout_s" "$build_bin" -q -DskipTests compile 2>&1 | tail -20
+  else
+    "$build_bin" -q -DskipTests compile 2>&1 | tail -20
+  fi
+  local rc="${PIPESTATUS[0]}"
+  if [ "$rc" -eq 0 ]; then
+    echo "     ✅ Java build integrity verified (mvn -q -DskipTests compile)."
+    return 0
+  fi
+  if [ "$rc" -eq 124 ]; then
+    echo "     ⏱️  Java build timed out after ${timeout_s}s."
+    echo "     ⏭️  SKIPPED - Build integrity Java (timeout)"
+    return 3
+  fi
+  echo "     ❌ Java build failed (exit $rc)"
+  return 2
+}
+
 2>&1 echo ""
 2>&1 echo "→ Gate 9: Build integrity... "
 GATE_9_START=$(gate_start_ms)
+# Sub-status aggregation (#507 Delphi round-1 B-MAJOR-4): each half records
+# its own outcome; GATE_9_STATUS is aggregated after both. The previous
+# single-variable design made a Maven-only repo (TS half never runs, Java
+# half passes) record an ETERNAL SKIP -- a real compile verification that
+# never appeared as PASS, contradicting S5's own motivation.
+GATE_9_TS_STATUS="SKIP"
+GATE_9_JAVA_STATUS="SKIP"
 GATE_9_STATUS="SKIP"
 
 if [ -f "package.json" ] && [ -f "tsconfig.json" ]; then
@@ -2818,15 +2955,15 @@ if [ -f "package.json" ] && [ -f "tsconfig.json" ]; then
     CHANGED_FILES_CSV=$(echo "$CHANGED_FILES" | tr ' ' ',')
     GATE_9_OUTPUT=$(mktemp)
     if RUN_TSX_TIMEOUT=120s run_tsx "$GATE_9_SCRIPT" --changed-files "$CHANGED_FILES_CSV" --project-root "$PROJECT_ROOT" --timeout 115000 > "$GATE_9_OUTPUT" 2>&1; then
-      GATE_9_STATUS="PASS"
+      GATE_9_TS_STATUS="PASS"
       echo "     ✅ Build integrity check passed."
     else
       GATE_9_EXIT=$?
       if [ $GATE_9_EXIT -eq 124 ]; then
-        GATE_9_STATUS="SKIP"
+        GATE_9_TS_STATUS="SKIP"
         echo "     ⏱️  Build integrity check timed out (120s). SKIPPED."
       else
-        GATE_9_STATUS="BLOCK"
+        GATE_9_TS_STATUS="BLOCK"
         cat "$GATE_9_OUTPUT"
         echo ""
         echo "❌ BLOCKED - Gate 9: Build integrity check failed"
@@ -2843,6 +2980,52 @@ if [ -f "package.json" ] && [ -f "tsconfig.json" ]; then
 else
   echo "     ℹ️  Not a TypeScript project - skipping build integrity check"
   echo "     ⏭️  SKIPPED - Build integrity (not a TypeScript project)"
+fi
+
+# Java dispatch (#507 S5): runs when .java files are staged, regardless of
+# whether the TypeScript half ran. Gradle-only repos SKIP+WARN (gradle
+# support is backlog; DR-003).
+if echo "$CHANGED_FILES" | grep -q '\.java$'; then
+  if [ -f "pom.xml" ]; then
+    JAVA_BI_EXIT=0
+    run_java_build_integrity || JAVA_BI_EXIT=$?
+    case "$JAVA_BI_EXIT" in
+      0)
+        GATE_9_JAVA_STATUS="PASS"
+        ;;
+      2)
+        GATE_9_JAVA_STATUS="BLOCK"
+        echo ""
+        echo "❌ BLOCKED - Gate 9: Java build integrity check failed"
+        echo "Fix the compile errors before committing."
+        exit 1
+        ;;
+      *)
+        GATE_9_JAVA_STATUS="SKIP"
+        echo "     ⏭️  SKIPPED - Build integrity Java (see reason above)"
+        ;;
+    esac
+  elif [ -f "build.gradle" ] || [ -f "build.gradle.kts" ]; then
+    echo "     ⚠️  Java changes staged but this is a Gradle project - build integrity for Gradle is not implemented yet"
+    echo "     ⏭️  SKIPPED - Build integrity Java (Gradle backlog, #507 DR-003)"
+  else
+    echo "     ℹ️  Java changes staged but no Maven/Gradle build file - skipping Java build integrity"
+  fi
+fi
+
+# Aggregate the two halves (#507 Delphi round-1 B-MAJOR-4): PASS when every
+# half that RAN passed (TS PASS + Java SKIP, or vice versa, both count),
+# SKIP only when NOTHING ran, BLOCK on any failure (normally unreachable --
+# failing halves exit 1 inline). This replaces the blind-review MINOR-1
+# single-variable guard: with explicit sub-statuses a Java PASS no longer
+# "resurrects" a TS SKIP -- each half keeps its own record and the gate
+# reflects the union of what was actually verified.
+GATE_9_STATUS="SKIP"
+if [ "$GATE_9_TS_STATUS" = "PASS" ] || [ "$GATE_9_JAVA_STATUS" = "PASS" ]; then
+  GATE_9_STATUS="PASS"
+fi
+if [ "$GATE_9_TS_STATUS" = "BLOCK" ] || [ "$GATE_9_JAVA_STATUS" = "BLOCK" ]; then
+  GATE_9_STATUS="BLOCK"
 fi
 
 GATE_9_END=$(gate_start_ms)
@@ -2877,7 +3060,7 @@ fi
 # Validates sprint state consistency (delphi-review APPROVED before BUILD)
 # Uses sprint-gate.sh for standalone validation logic
 # ============================================================================
-GATE_11_START=$(date +%s)
+GATE_11_START=$(gate_start_ms)
 GATE_11_STATUS="PASS"
 
 # BEGIN SPRINT_GATE_SCRIPT RESOLUTION
@@ -2966,24 +3149,72 @@ generate_quality_report() {
   local BRANCH
   local PASSED_COUNT=0
   local TOTAL_GATES=12
+  local SKIP_COUNT=0
+  local WARN_COUNT=0
+  local NONPASS_COUNT=0
 
   COMMIT_HASH=$(git rev-parse HEAD 2>/dev/null || echo "unknown")
   BRANCH=$(git rev-parse --abbrev-ref HEAD 2>/dev/null || echo "unknown")
   TIMESTAMP=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
 
+  # Scoring per #507 S3: SKIP removes a gate from the denominator (a missing
+  # tool must not drag the score down -- that was the "honest but punishing"
+  # old behavior), WARN stays in the denominator but never counts as passed,
+  # and FAIL/BLOCK count as non-passing items like before. NONPASS tracks
+  # non-passing gates INSIDE the effective denominator only -- a skipped gate
+  # is out of scope, not a failure.
+  local gate_status gate_default
   for gate in 1 2 3 4 5 6 7 8 9 10 11 12; do
     local status_var="GATE_${gate}_STATUS"
-    if [ "${!status_var}" = "PASS" ]; then
-      PASSED_COUNT=$((PASSED_COUNT + 1))
-    fi
+    # Default mirrors the JSON report rendering below EXACTLY (gates 1-11
+    # PASS, gate 12 WARN): a gate that never assigned a status is "not
+    # applicable" and must render and score identically. A previous scoring
+    # default of FAIL produced self-contradictory reports -- the gate showed
+    # PASS in JSON but scored as FAIL (#507 Delphi round-1 A-MAJOR-2).
+    if [ "$gate" -eq 12 ]; then gate_default="WARN"; else gate_default="PASS"; fi
+    gate_status="${!status_var:-$gate_default}"
+    case "$gate_status" in
+      PASS) PASSED_COUNT=$((PASSED_COUNT + 1)) ;;
+      SKIP) SKIP_COUNT=$((SKIP_COUNT + 1)) ;;
+      WARN) WARN_COUNT=$((WARN_COUNT + 1)); NONPASS_COUNT=$((NONPASS_COUNT + 1)) ;;
+      *) NONPASS_COUNT=$((NONPASS_COUNT + 1)) ;;
+    esac
   done
 
-  local SCORE=0
-  if command -v bc >/dev/null 2>&1; then
-    SCORE=$(echo "scale=1; ($PASSED_COUNT / $TOTAL_GATES) * 10" | bc)
-  else
-    SCORE=$(awk "BEGIN {printf \"%.1f\", ($PASSED_COUNT / $TOTAL_GATES) * 10}")
+  local EFFECTIVE_TOTAL=$((TOTAL_GATES - SKIP_COUNT))
+  local VERDICT="PASS"
+  if [ "$EFFECTIVE_TOTAL" -eq 0 ]; then
+    VERDICT="SKIP-ALL"   # every gate skipped: never report a fake 10/10
+  elif [ "$NONPASS_COUNT" -gt 0 ]; then
+    if [ "$((NONPASS_COUNT - WARN_COUNT))" -gt 0 ]; then
+      VERDICT="FAIL"     # at least one FAIL/BLOCK among the effective gates
+    else
+      VERDICT="WARN"     # all effective gates passed or warned; warns forbid PASS
+    fi
   fi
+
+  local SCORE=0
+  if [ "$EFFECTIVE_TOTAL" -eq 0 ]; then
+    SCORE="N/A"
+  else
+    # Single awk path (#507 Delphi round-1 B-MAJOR-2): bc's scale=1 truncates
+    # the DIVISION before multiplying (8/9 -> 0.8, *10 -> 8.0) while awk
+    # rounds the final result (8.9) -- the same commit scored differently on
+    # machines with and without bc. awk(1) is POSIX-guaranteed: one code path,
+    # one score.
+    SCORE=$(awk "BEGIN {printf \"%.1f\", ($PASSED_COUNT / $EFFECTIVE_TOTAL) * 10}")
+  fi
+  local EFFECTIVE_PASS_RATE="N/A"
+  if [ "$EFFECTIVE_TOTAL" -gt 0 ]; then
+    EFFECTIVE_PASS_RATE=$(awk "BEGIN {printf \"%.1f\", ($PASSED_COUNT / $EFFECTIVE_TOTAL) * 100}")
+  fi
+  # JSON bodies need a number or null -- a literal N/A breaks every consumer.
+  local SCORE_JSON="$SCORE"
+  [ "$SCORE_JSON" = "N/A" ] && SCORE_JSON="null"
+  # Same for the pass rate: numeric like `score`, not a quoted string --
+  # mixed types in one object broke consumers (#507 Delphi round-1 B-minor-6).
+  local EFFECTIVE_PASS_RATE_JSON="$EFFECTIVE_PASS_RATE"
+  [ "$EFFECTIVE_PASS_RATE_JSON" = "N/A" ] && EFFECTIVE_PASS_RATE_JSON="null"
 
   local BS_PASSED=0
   local BS_BLOCKED=0
@@ -3023,8 +3254,11 @@ generate_quality_report() {
   "overall": {
     "gatesPassed": $PASSED_COUNT,
     "gatesTotal": $TOTAL_GATES,
-    "score": $SCORE,
-    "verdict": "$([ "$PASSED_COUNT" -eq "$TOTAL_GATES" ] && echo "PASS" || echo "PARTIAL")"
+    "gatesSkipped": $SKIP_COUNT,
+    "gatesEffective": $EFFECTIVE_TOTAL,
+    "effectivePassRate": $EFFECTIVE_PASS_RATE_JSON,
+    "score": $SCORE_JSON,
+    "verdict": "$VERDICT"
   },
   "gates": {
     "gate1_static_analysis": {
@@ -3119,7 +3353,7 @@ ENDJSON
   GATES_JSON="${GATES_JSON}\"gate11\":{\"status\":\"${GATE_11_STATUS:-PASS}\",\"name\":\"Sprint Flow\"},"
   GATES_JSON="${GATES_JSON}\"gate12\":{\"status\":\"${GATE_12_STATUS:-WARN}\",\"name\":\"File Hygiene\"}}"
 
-  echo "{\"timestamp\":\"$TIMESTAMP\",\"commit\":\"$COMMIT_HASH\",\"branch\":\"$BRANCH\",\"score\":$SCORE,\"passed\":$PASSED_COUNT,\"total\":$TOTAL_GATES,\"gates\":$GATES_JSON,\"coverage\":\"$COV_PCT\",\"complexityWarnings\":${CC_WARNINGS:-0},\"principleWarnings\":${WARNING_COUNT:-0},\"boyScoutBlocked\":${BS_BLOCKED}}" >> "$HISTORY_FILE"
+  echo "{\"timestamp\":\"$TIMESTAMP\",\"commit\":\"$COMMIT_HASH\",\"branch\":\"$BRANCH\",\"score\":$SCORE_JSON,\"passed\":$PASSED_COUNT,\"total\":$TOTAL_GATES,\"effectiveTotal\":$EFFECTIVE_TOTAL,\"effectivePassRate\":$EFFECTIVE_PASS_RATE_JSON,\"skipCount\":$SKIP_COUNT,\"verdict\":\"$VERDICT\",\"gates\":$GATES_JSON,\"coverage\":\"$COV_PCT\",\"complexityWarnings\":${CC_WARNINGS:-0},\"principleWarnings\":${WARNING_COUNT:-0},\"boyScoutBlocked\":${BS_BLOCKED}}" >> "$HISTORY_FILE"
 
   # ── Console output ────────────────────────────────────────────────────────
   echo ""
@@ -3140,7 +3374,7 @@ ENDJSON
   printf "  %-45s %s\n" "Gate 11: Sprint Flow" "${GATE_11_STATUS:-PASS}"
   printf "  %-45s %s\n" "Gate 12: File Hygiene" "${GATE_12_STATUS:-WARN}"
   echo ""
-  echo "  Overall Score: $SCORE/10 | $PASSED_COUNT/$TOTAL_GATES gates passed"
+  echo "  Overall Score: $SCORE/10 | $PASSED_COUNT/$TOTAL_GATES gates passed (effective: $PASSED_COUNT/$EFFECTIVE_TOTAL, skipped: $SKIP_COUNT, verdict: $VERDICT)"
   echo "  Branch status: $REPORT_FILE"
   echo "  Run report: $PERSISTED_REPORT_FILE"
   echo "  History saved: $HISTORY_FILE"

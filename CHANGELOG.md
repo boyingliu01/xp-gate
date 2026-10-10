@@ -2,6 +2,16 @@
 
 All notable changes to this project will be documented in this file.
 
+## [Unreleased] - #507 Java 门禁加固 sprint
+
+### Changed（含破坏性变更）
+
+- **`overall.verdict` 值域变更（破坏性）**: `PASS|PARTIAL` → `PASS|WARN|FAIL|SKIP-ALL`；`score` 分母改为有效分母（SKIP 出分母），全 SKIP 时为 `null`（原来恒为数值）。history.jsonl 行新增 `effectiveTotal`/`effectivePassRate`/`skipCount`/`verdict`，`effectivePassRate` 为数值或 `null`（不再是有引号字符串）。仓内 dashboard.js 已同步；外部消费者需适配 `h.score===null` 与新值域。
+- **Java GATE 1 引擎切换（#507 S1）**: wc-java-lint 为主引擎，fail-closed（exit 0=PASS / 1=FAIL / ≥2=BLOCK）；`XP_GATE_WC_JAVA_LINT=soft` 降级 BLOCK 类（exit≥2/超时/不可用 JSON）为 SKIP+WARN，`report` 模式降级真实违规为 SKIP+WARN（迁移灰度）；exit 0 却报违规对象属"说谎工具"，任何模式都硬 BLOCK。未装工具时回退 legacy checkstyle/pmd；p3c-pmd 内联扫描改为 opt-in（pom 未声明 p3c-pmd 依赖时跳过而非阻塞——修复 Delphi round-1 指出的"新 Java 项目首次提交被挡死"），legacy maven 调用全部套超时。
+- **GATE 9 子状态聚合（#507 S5 + Delphi round-1 B-MAJOR-4）**: TS/Java 两半各自记录 PASS/SKIP/BLOCK，聚合为 PASS（任一半真实通过）/SKIP（全部跳过）/BLOCK；Maven-only 仓库编译通过现在正确记 PASS。
+- **评分单路径化**: 废弃 bc 分支（scale=1 先截断除法，与 awk %.1f 舍入实质分叉），awk 为唯一实现。
+- **镜像守卫扩展**: `scripts/check-hook-mirror.sh` 新增根级 gate 脚本副本与 `src/principles → src/npm-package/principles` 全树 parity 检查（先前无守卫，#507 Delphi round-1 A-MAJOR-4）。
+
 ## [0.20.1.0] - 2026-10-08
 
 ### Fixed
