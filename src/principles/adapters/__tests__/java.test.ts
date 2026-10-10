@@ -352,11 +352,18 @@ public class Noisy {
 }
 `;
       (readFileSync as Mock).mockReturnValue(content);
-      const classes = adapterFor(content).extractClasses() as Array<{ name: string; methodCount: number }>;
-      // helper( is a real call-site hit (same heuristic as the TS adapter);
-      // the masked-out ones must not appear.
-      const count = classes.find(c => c.name === 'Noisy')?.methodCount ?? 0;
-      expect(count).toBeLessThanOrEqual(2);
+      const classes = adapterFor(content).extractClasses() as Array<{ name: string; methodCount: number; methods: string[] }>;
+      const methods = classes.find(c => c.name === 'Noisy')?.methods ?? [];
+      // The Java member heuristic mirrors the TS adapter (pure `name(` scan on
+      // the class body), so `helper(` -- a real, unqualified call statement --
+      // DOES count. What must never surface are the masked-out members:
+      //   fake(        lived inside a string literal
+      //   phantomCall( lived in a line comment
+      //   alsoFake(    lived in a block comment
+      expect(methods).not.toContain('fake');
+      expect(methods).not.toContain('phantomCall');
+      expect(methods).not.toContain('alsoFake');
+      expect(methods).toEqual(expect.arrayContaining(['real', 'second']));
     });
 
     it('does not leak brace depth from string literals (#507 blind review M4)', () => {
