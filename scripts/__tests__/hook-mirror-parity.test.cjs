@@ -37,6 +37,14 @@ describe('hook mirror validation', () => {
     'gate-10.sh', 'gate-12-file-hygiene.sh', 'post-merge', 'pre-commit', 'pre-push',
     'sprint-gate.sh', 'lib/now-ms.sh', 'lib/jscpd-run.sh', 'lib/sprint-gate-report.sh', 'lib/test-failure.sh', 'lib/typecheck.sh', 'lib/validate-code-walkthrough.cjs',
   ];
+  // check-hook-mirror.sh also guards root-level shell copies and the
+  // principles tree (#507 A-MAJOR-4) -- the fixture must carry the same
+  // guarded regions or the byte-identical baseline itself fails. Keep in
+  // sync with ROOT_MIRROR_FILES in scripts/check-hook-mirror.sh.
+  const rootMirrorFiles = [
+    'adapter-common.sh', 'gate-3.sh', 'gate-4.sh', 'gate-7.sh', 'gate-8.sh', 'gate-9.sh',
+    'gate-10.sh', 'gate-12-file-hygiene.sh', 'sprint-gate.sh',
+  ];
 
   function validate(cwd) {
     return spawnSync('bash', [script], { cwd, encoding: 'utf8' });
@@ -55,6 +63,14 @@ describe('hook mirror validation', () => {
     }
     fs.writeFileSync(path.join(fixture, 'githooks/adapters/typescript/adapter.sh'), 'adapter\n');
     fs.writeFileSync(path.join(fixture, 'src/npm-package/adapters/typescript/adapter.sh'), 'adapter\n');
+    for (const rel of rootMirrorFiles) {
+      fs.writeFileSync(path.join(fixture, 'src/npm-package', rel), `${rel}\n`);
+    }
+    // The principles guard requires both tree roots to exist (diff -rq).
+    fs.mkdirSync(path.join(fixture, 'src/principles'), { recursive: true });
+    fs.mkdirSync(path.join(fixture, 'src/npm-package/principles'), { recursive: true });
+    fs.writeFileSync(path.join(fixture, 'src/principles/sample.ts'), 'sample\n');
+    fs.writeFileSync(path.join(fixture, 'src/npm-package/principles/sample.ts'), 'sample\n');
   });
 
   afterEach(() => fs.rmSync(fixture, { recursive: true, force: true }));
@@ -76,6 +92,7 @@ describe('hook mirror validation', () => {
     ['missing hook mirror file', () => fs.rmSync(path.join(fixture, 'src/npm-package/hooks/post-merge'))],
     ['adapter content drift', () => fs.writeFileSync(path.join(fixture, 'src/npm-package/adapters/typescript/adapter.sh'), 'drift\n')],
     ['adapter added only to canonical', () => fs.writeFileSync(path.join(fixture, 'githooks/adapters/typescript/only-canonical.sh'), 'x\n')],
+    ['principles content drift', () => fs.writeFileSync(path.join(fixture, 'src/npm-package/principles/sample.ts'), 'drift\n')],
   ])('rejects %s', (_name, arrange) => {
     arrange();
 
