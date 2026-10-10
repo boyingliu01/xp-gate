@@ -38,6 +38,10 @@ case "${WC_STUB_MODE:-clean}" in
   missing-fields) echo '[{"f":"A.java"}]'; exit 0 ;;
   unknown-fields) echo '[{"file":"A.java","rule":"r","severity":"warning","line":2,"extra":42}]'; exit 1 ;;
   multi)          echo '[{"file":"A.java","rule":"r1","severity":"warning"},{"file":"B.java","rule":"r2","severity":"error"}]'; exit 1 ;;
+  # Delphi round-1 additions (#507): a LYING tool (exit 0 + objects) is never
+  # downgraded; braced messages are valid output (string-safe counting).
+  lying)          echo '[{"file":"A.java","rule":"r","severity":"warning"}]'; exit 0 ;;
+  braced-msg)     echo "[{\"file\":\"A.java\",\"rule\":\"r\",\"severity\":\"warning\",\"message\":\"'{' is not preceded\"}]"; exit 1 ;;
   no-staged)
     case "$*" in
       *--staged*) echo "error: unknown option --staged" >&2; exit 2 ;;
@@ -202,4 +206,66 @@ run_java_adapter() {
 
 @test "AC-507-01-08: gate-2.sh and gate-3.sh never reference wc-java-lint" {
   [ -z "$(grep -l 'wc-java-lint' "$REPO_ROOT/githooks/gate-2.sh" "$REPO_ROOT/githooks/gate-3.sh" 2>/dev/null || true)" ]
+}
+
+# --- Delphi round-1 fixes (#507): escape-valve coverage + string-safe JSON ---
+
+@test "DR2: exit 0 with violation objects (lying tool) is BLOCK even in soft mode" {
+  export WC_STUB_MODE=lying
+  export XP_GATE_WC_JAVA_LINT=soft
+  run run_java_adapter
+  [[ "$output" == *"VERDICT:2"* ]]
+  [[ "$output" == *"inconsistent response"* ]]
+}
+
+@test "DR2: exit 0 with violation objects (lying tool) is BLOCK even in report mode" {
+  export WC_STUB_MODE=lying
+  export XP_GATE_WC_JAVA_LINT=report
+  run run_java_adapter
+  [[ "$output" == *"VERDICT:2"* ]]
+}
+
+@test "DR2: soft downgrades unusable JSON to SKIP+WARN (verdict 3)" {
+  export WC_STUB_MODE=malformed
+  export XP_GATE_WC_JAVA_LINT=soft
+  run run_java_adapter
+  [[ "$output" == *"VERDICT:3"* ]]
+  [[ "$output" == *"XP_G1_REASON: wc-java-lint unusable JSON (soft downgrade)"* ]]
+}
+
+@test "DR2: report mode downgrades real violations to SKIP+WARN" {
+  export WC_STUB_MODE=violations
+  export XP_GATE_WC_JAVA_LINT=report
+  run run_java_adapter
+  [[ "$output" == *"VERDICT:3"* ]]
+  [[ "$output" == *"report mode"* ]]
+}
+
+@test "DR2: violation message containing braces does not break JSON counting" {
+  export WC_STUB_MODE=braced-msg
+  unset XP_GATE_WC_JAVA_LINT
+  run run_java_adapter
+  [[ "$output" == *"VERDICT:1"* ]]
+  [[ "$output" == *"1 violation(s)"* ]]
+}
+
+@test "DR2: p3c inline scan is opt-in -- pom without p3c-pmd never runs mvn" {
+  # Legacy fallback with mvn PRESENT but hostile (any invocation fails hard).
+  # A pom.xml without the p3c-pmd dependency must not trigger the inline
+  # ruleset scan (it would fail and BLOCK every real project, Delphi C-M1).
+  printf '<project><profiles><profile><id>other</id></profile></profiles></project>\n' > "$FIXTURE_REPO/pom.xml"
+  printf '#!/usr/bin/env bash\necho "MVN-INVOKED" >> "${WC_STUB_LOG:-/dev/null}"\nexit 7\n' > "$STUB_BIN/mvn"
+  chmod +x "$STUB_BIN/mvn"
+  run bash -c '
+    set +e
+    cd "$1" || exit 90
+    export PATH="$2:/usr/bin:/bin"
+    source "$3"
+    run_legacy_analysis > /dev/null 2>&1
+    echo "VERDICT:$?"
+  ' _ "$FIXTURE_REPO" "$STUB_BIN" "$REPO_ROOT/githooks/adapters/java.sh"
+  # No wc-java-lint -> verdict must be the legacy WARN (3), not a p3c BLOCK;
+  # and the hostile mvn must never have been invoked.
+  [[ "$output" == *"VERDICT:3"* ]]
+  [[ "$output" != *"MVN-INVOKED"* ]]
 }

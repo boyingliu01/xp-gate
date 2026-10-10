@@ -4,12 +4,18 @@
 #
 # Primary engine: wc-java-lint (`check --staged --format json`), fail-closed:
 #   exit 0        -> PASS (clean)
-#   exit 1        -> FAIL (violations; never downgraded, not even in soft mode)
+#   exit 1        -> FAIL (violations; never downgraded in soft mode)
 #   exit >=2      -> BLOCK (execution error / timeout / unusable JSON)
 #   JSON without the required whitelist fields (file/rule/severity) counts as
 #   unusable -> BLOCK; unknown extra fields are tolerated (additive evolution).
-# Escape valve: XP_GATE_WC_JAVA_LINT=soft downgrades BLOCK-class outcomes to
-#   SKIP+WARN (exit 3); exit-1 violations stay FAIL.
+# Escape valves:
+#   XP_GATE_WC_JAVA_LINT=soft   downgrades BLOCK-class outcomes (exit>=2,
+#     timeout, unusable JSON) to SKIP+WARN (exit 3); exit-1 stays FAIL.
+#   XP_GATE_WC_JAVA_LINT=report downgrades exit-1 violations to SKIP+WARN
+#     (rollout/grace mode for legacy repos; #507 Delphi round-1 C-MAJOR-3).
+#   An exit-0-with-objects response is a lying tool and is NEVER downgraded.
+# A SKIP/WARN reason crosses the subshell boundary as an `XP_G1_REASON: ...`
+# stdout line (export cannot: the caller captures command-substitution output).
 # Fallback: tool not on PATH -> legacy checkstyle/pmd + p3c/whalecloud chain;
 #   checkstyle AND pmd both missing -> explicit WARN and verdict must NOT be
 #   PASS (exit 3, recorded in the gate-1 audit detail).
@@ -86,6 +92,11 @@ java_staged_files() {
 # JSON whitelist validation (#507 AC-507-01-07, DR-002).
 # Contract shape: a JSON array of FLAT violation objects, each carrying
 # file/rule/severity (line optional). Checks are grep-based by design:
+#   - STRING LITERALS ARE STRIPPED BEFORE COUNTING (#507 Delphi round-1
+#     A-MAJOR-1): violation messages routinely contain braces ("'{' is not
+#     preceded...") or the words file/rule/severity -- counting raw text made
+#     perfectly valid output false-BLOCK. After stripping, only structural
+#     braces and structural keys remain.
 #   - unknown extra fields add occurrences of their own keys, never remove
 #     the required ones -> tolerated (additive evolution);
 #   - any object missing a required key desynchronizes the per-key occurrence
@@ -104,11 +115,20 @@ wc_java_json_violation_count() {
   tail=$(tr -d '[:space:]' < "$json_file" | tail -c 1)
   [ "$tail" = "]" ] || return 1
 
-  local obj_count file_count rule_count sev_count
-  obj_count=$(grep -o '{' "$json_file" | wc -l | tr -d '[:space:]')
-  file_count=$(grep -o '"file"' "$json_file" | wc -l | tr -d '[:space:]')
-  rule_count=$(grep -o '"rule"' "$json_file" | wc -l | tr -d '[:space:]')
-  sev_count=$(grep -o '"severity"' "$json_file" | wc -l | tr -d '[:space:]')
+  # Strip string VALUE literals (`: "..."` -> `: ""`). Keys must survive
+  # (they are the tokens being counted); values must vanish (violation
+  # messages routinely contain braces or the words file/rule/severity --
+  # #507 Delphi round-1 A-MAJOR-1). JSON strings cannot contain raw newlines
+  # (they are \n escapes), so line-wise sed is safe. The leftmost-match rule
+  # consumes an entire value string in one go, including any `: "` sequences
+  # inside it. Broken JSON masks badly -> counts desynchronize -> BLOCK,
+  # which is the correct fail-closed direction.
+  local structural obj_count file_count rule_count sev_count
+  structural=$(sed 's/:\([[:space:]]*\)"\([^"\\]\|\\.\)*"/:\1""/g' "$json_file" 2>/dev/null)
+  obj_count=$(grep -o '{' <<< "$structural" | wc -l | tr -d '[:space:]')
+  file_count=$(grep -o '"file"' <<< "$structural" | wc -l | tr -d '[:space:]')
+  rule_count=$(grep -o '"rule"' <<< "$structural" | wc -l | tr -d '[:space:]')
+  sev_count=$(grep -o '"severity"' <<< "$structural" | wc -l | tr -d '[:space:]')
   [ "$obj_count" -eq "$file_count" ] || return 1
   [ "$obj_count" -eq "$rule_count" ] || return 1
   [ "$obj_count" -eq "$sev_count" ] || return 1
@@ -177,14 +197,26 @@ run_wc_java_lint() {
       if ! count=$(wc_java_json_violation_count "$out_file"); then
         echo "❌ wc-java-lint output is not a usable violations JSON (fail-closed, #507 DR-001)"
         rm -f "$out_file" "$err_file"
+        if [ "${XP_GATE_WC_JAVA_LINT:-}" = "soft" ]; then
+          # Unusable output IS an execution-class failure (the tool exists but
+          # its response cannot be trusted) -- same class as exit>=2, covered
+          # by the escape valve (#507 Delphi round-1 B-MAJOR-5).
+          echo "⚠️  XP_GATE_WC_JAVA_LINT=soft: unusable JSON downgraded to SKIP+WARN"
+          echo "XP_G1_REASON: wc-java-lint unusable JSON (soft downgrade)"
+          return 3
+        fi
+        return 2
+      fi
+      if [ "$count" -gt 0 ]; then
+        # Contract says exit 0 means clean; objects + 0 is a LYING tool, not a
+        # broken one. It claims success while reporting violations -- there is
+        # no trustworthy interpretation, so soft/report must NOT downgrade it
+        # (deliberately outside the escape valve; #507 Delphi round-1 B-MAJOR-5).
+        echo "❌ wc-java-lint exited 0 but reported $count violation object(s) - inconsistent response"
+        rm -f "$out_file" "$err_file"
         return 2
       fi
       rm -f "$out_file" "$err_file"
-      if [ "$count" -gt 0 ]; then
-        # Contract says exit 0 means clean; objects + 0 is a broken tool.
-        echo "❌ wc-java-lint exited 0 but reported $count violation object(s) - inconsistent response"
-        return 2
-      fi
       echo "✅ wc-java-lint: clean"
       return 0
       ;;
@@ -196,6 +228,17 @@ run_wc_java_lint() {
         echo "❌ wc-java-lint reported violations but the JSON was unusable"
       fi
       rm -f "$out_file" "$err_file"
+      if [ "${XP_GATE_WC_JAVA_LINT:-}" = "report" ]; then
+        # Rollout/grace mode (#507 Delphi round-1 C-MAJOR-3): a legacy repo
+        # adopting wc-java-lint carries pre-existing violations; hard-blocking
+        # every commit gives no migration path. report mode degrades REAL
+        # violations to SKIP+WARN (scored in the denominator, never a PASS)
+        # so teams can burn down findings before switching back to enforcing.
+        echo "⚠️  XP_GATE_WC_JAVA_LINT=report: violations downgraded to SKIP+WARN (rollout mode)"
+        echo "⚠️  Java code quality NOT enforcing - burn down the findings, then unset report mode"
+        echo "XP_G1_REASON: wc-java-lint report mode: ${count:-unknown} violation(s) suppressed"
+        return 3
+      fi
       return 1
       ;;
     *)
@@ -208,6 +251,11 @@ run_wc_java_lint() {
       if [ "${XP_GATE_WC_JAVA_LINT:-}" = "soft" ]; then
         echo "⚠️  XP_GATE_WC_JAVA_LINT=soft: execution failure downgraded to SKIP+WARN (#507 DR-001 escape valve)"
         echo "⚠️  Java static analysis SKIPPED - the engine exists but is broken; do not treat this as a clean run"
+        # The reason crosses the command-substitution subshell boundary via a
+        # prefixed stdout line (export does NOT: the caller captures this
+        # function's output, so the subshell env is discarded -- #507 Delphi
+        # round-1 B-MAJOR-1). pre-commit parses and strips the line.
+        echo "XP_G1_REASON: wc-java-lint broken (soft downgrade)"
         export XP_GATE_JAVA_G1_REASON="wc-java-lint broken (soft downgrade)"
         return 3
       fi
@@ -281,6 +329,7 @@ run_legacy_analysis() {
     echo "⚠️  Java code quality NOT verified - verdict is SKIP+WARN, not PASS (#507 AC-507-01-03)"
     echo "   Install wc-java-lint (preferred) or checkstyle/pmd to restore verification"
     _XP_JAVA_LEGACY_WARN=1
+    echo "XP_G1_REASON: legacy tools unavailable (warn)"
     export XP_GATE_JAVA_G1_REASON="legacy tools unavailable (warn)"
   fi
 
@@ -374,6 +423,20 @@ run_p3c_check() {
   _run_p3c_check "$(_detect_java_build)"
 }
 
+# Legacy maven invocations are network-facing (plugin/rule resolution against
+# remote repositories). Without a guard a cold cache can hang pre-commit for
+# minutes (#507 Delphi round-1 C-MAJOR-2). Same timeout file as the primary
+# engine: .xp-gate/wc-java-lint-timeout. Degrades safely when `timeout` is
+# unavailable (rc 127 must never be mistaken for a tool verdict).
+_legacy_maven_run() {
+  if command -v timeout >/dev/null 2>&1; then
+    timeout "$(resolve_wc_java_lint_timeout)" "$@"
+  else
+    echo "     ⚠️  'timeout' command not available - legacy maven call runs unguarded" >&2
+    "$@"
+  fi
+}
+
 _run_p3c_check() {
   local build_system="$1"
 
@@ -381,13 +444,20 @@ _run_p3c_check() {
 
   if [ "$build_system" = "maven" ]; then
     if grep -q '<id>xp-gate-p3c</id>' pom.xml 2>/dev/null; then
-      # Profile already installed — use it
-      mvn pmd:check -P xp-gate-p3c -Dpmd.failOnViolation=true 2>&1 | tail -30
+      # Profile already installed — use it (timeout-guarded: legacy maven
+      # resolves plugins/rulesets over the network, a cold cache must not
+      # hang pre-commit unbounded -- #507 Delphi round-1 C-MAJOR-2)
+      _legacy_maven_run mvn pmd:check -P xp-gate-p3c -Dpmd.failOnViolation=true 2>&1 | tail -30
       return "${PIPESTATUS[0]}"
     else
-      # Profile not installed — run inline with p3c-pmd dependency
-      if command -v mvn &>/dev/null; then
-        mvn pmd:check \
+      # Profile not installed. The inline ruleset paths (/rulesets/java/ali-*)
+      # resolve INSIDE the p3c-pmd jar — without that dependency in the pom,
+      # maven cannot resolve them and exits non-zero, which BLOCKed the commit
+      # on every real project without p3c configured (#507 Delphi round-1
+      # C-MAJOR-1). "Not configured" is an opt-out, not a violation: only run
+      # inline when the pom actually declares p3c-pmd.
+      if grep -q 'p3c-pmd' pom.xml 2>/dev/null; then
+        _legacy_maven_run mvn pmd:check \
           -Dpmd.rulesets="/rulesets/java/ali-comment.xml,/rulesets/java/ali-concurrent.xml,/rulesets/java/ali-constant.xml,/rulesets/java/ali-exception.xml,/rulesets/java/ali-flowcontrol.xml,/rulesets/java/ali-naming.xml,/rulesets/java/ali-oop.xml,/rulesets/java/ali-orm.xml,/rulesets/java/ali-other.xml,/rulesets/java/ali-set.xml" \
           -Dpmd.failOnViolation=true \
           -DprintFailingErrors=true \
@@ -404,7 +474,8 @@ _run_p3c_check() {
         echo "  ✅ p3c-pmd check passed"
         return 0
       else
-        echo "  ℹ️  Maven not available — Skipping p3c-pmd"
+        echo "  ℹ️  p3c-pmd not configured in pom.xml — skipping (opt-in, not a violation)"
+        echo "  To enable: bash $PLUGIN_DIR/scripts/install-maven-p3c.sh"
         return 0
       fi
     fi
@@ -436,7 +507,8 @@ _run_whalecloud_check() {
 
   if [ "$build_system" = "maven" ]; then
     if grep -q '<id>xp-gate-whalecloud-java</id>' pom.xml 2>/dev/null; then
-      mvn pmd:check checkstyle:check spotbugs:check \
+      # timeout-guarded, same rationale as the p3c branch (C-MAJOR-2)
+      _legacy_maven_run mvn pmd:check checkstyle:check spotbugs:check \
         -P xp-gate-whalecloud-java -Dpmd.failOnViolation=true \
         2>&1 | tail -30
       return "${PIPESTATUS[0]}"

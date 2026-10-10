@@ -24,11 +24,21 @@ async function loadReport() {
 
 function renderSummary(history) {
   if (!history.length) return;
-  
+
   const latest = history[history.length - 1];
   const totalRuns = history.length;
-  const avgScore = (history.reduce((sum, h) => sum + (h.score || 0), 0) / totalRuns).toFixed(1);
-  
+  // #507 S3 made `score` a number-or-null (SKIP-ALL -> null) and added
+  // `effectiveTotal`/`skipCount`. Average and display over numeric scores
+  // only -- `null || 0` used to drag SKIP-ALL runs in as fake zeros, and a
+  // null latest score rendered as a red "fail" (#507 Delphi round-1 A-MAJOR-3).
+  const scored = history.filter(h => typeof h.score === 'number');
+  const avgScore = scored.length
+    ? (scored.reduce((sum, h) => sum + h.score, 0) / scored.length).toFixed(1)
+    : 'N/A';
+  const latestScore = typeof latest.score === 'number' ? latest.score : null;
+  const latestClass = latestScore === null ? 'skip' : latestScore >= 8 ? 'pass' : latestScore >= 5 ? 'skip' : 'fail';
+  const latestText = latestScore === null ? 'N/A (all gates skipped)' : `${latestScore}/10`;
+
   document.getElementById('summary-cards').innerHTML = `
     <div class="card">
       <h3>Total Runs</h3>
@@ -36,15 +46,15 @@ function renderSummary(history) {
     </div>
     <div class="card">
       <h3>Average Score</h3>
-      <div class="value">${avgScore}/10</div>
+      <div class="value">${avgScore}${typeof avgScore === 'number' || avgScore === 'N/A' ? '' : '/10'}</div>
     </div>
     <div class="card">
       <h3>Latest Score</h3>
-      <div class="value ${latest.score >= 8 ? 'pass' : latest.score >= 5 ? 'skip' : 'fail'}">${latest.score}/10</div>
+      <div class="value ${latestClass}">${latestText}</div>
     </div>
     <div class="card">
       <h3>Gates Passed</h3>
-      <div class="value">${latest.passed}/${latest.total}</div>
+      <div class="value">${latest.passed}/${latest.effectiveTotal ?? latest.total}${latest.skipCount ? ' <small>(' + latest.skipCount + ' skipped)</small>' : ''}</div>
     </div>
   `;
 }
