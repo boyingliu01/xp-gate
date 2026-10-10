@@ -111,12 +111,12 @@ run_java_adapter() {
 
 # --- AC-507-01-04: soft escape valve downgrades BLOCK only ---
 
-@test "AC-507-01-04: soft downgrades execution failure to SKIP+WARN (verdict 3)" {
+@test "AC-507-01-04: soft downgrades execution failure to non-blocking WARN (verdict 3)" {
   export WC_STUB_MODE=exec-error
   export XP_GATE_WC_JAVA_LINT=soft
   run run_java_adapter
   [[ "$output" == *"VERDICT:3"* ]]
-  [[ "$output" == *"SKIP+WARN"* ]]
+  [[ "$output" == *"WARN (non-blocking"* ]]
 }
 
 @test "AC-507-01-04: soft never downgrades exit-1 violations" {
@@ -225,7 +225,7 @@ run_java_adapter() {
   [[ "$output" == *"VERDICT:2"* ]]
 }
 
-@test "DR2: soft downgrades unusable JSON to SKIP+WARN (verdict 3)" {
+@test "DR2: soft downgrades unusable JSON to non-blocking WARN (verdict 3)" {
   export WC_STUB_MODE=malformed
   export XP_GATE_WC_JAVA_LINT=soft
   run run_java_adapter
@@ -233,7 +233,7 @@ run_java_adapter() {
   [[ "$output" == *"XP_G1_REASON: wc-java-lint unusable JSON (soft downgrade)"* ]]
 }
 
-@test "DR2: report mode downgrades real violations to SKIP+WARN" {
+@test "DR2: report mode downgrades real violations to non-blocking WARN" {
   export WC_STUB_MODE=violations
   export XP_GATE_WC_JAVA_LINT=report
   run run_java_adapter
@@ -268,4 +268,16 @@ run_java_adapter() {
   # and the hostile mvn must never have been invoked.
   [[ "$output" == *"VERDICT:3"* ]]
   [[ "$output" != *"MVN-INVOKED"* ]]
+}
+
+@test "DR2-R3: pre-commit scores exit-3 adapter verdicts as WARN, never SKIP" {
+  # Delphi round-2 A-MAJOR-1: SKIP sits OUT of the scoring denominator, so
+  # mapping soft/report/legacy-unavailable to SKIP let unverified Java ride
+  # to a fake PASS/10.0. Every GATE_1_STATUS assignment in the java branch
+  # must be WARN (in the denominator, forbids an overall PASS).
+  local warn_hits skip_hits
+  warn_hits=$(grep -c 'GATE_1_STATUS="WARN"' "$REPO_ROOT/githooks/pre-commit")
+  skip_hits=$(grep -c 'GATE_1_STATUS="SKIP"' "$REPO_ROOT/githooks/pre-commit" || true)
+  [ "$warn_hits" -ge 3 ]
+  [ "$skip_hits" -eq 0 ]
 }

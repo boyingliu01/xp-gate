@@ -206,7 +206,17 @@ async function exportPDF() {
   }
   
   const latest = history[history.length - 1];
-  const avgScore = (history.reduce((sum, h) => sum + (h.score || 0), 0) / history.length).toFixed(1);
+  // Same number-or-null contract as renderSummary (#507 S3): a null score
+  // means SKIP-ALL. Filter to numeric scores for the average (no fake zeros),
+  // render a null latest as N/A, and never call methods on null --
+  // exportPDF previously threw a TypeError on SKIP-ALL histories and dragged
+  // null scores into the average as zeros (#507 Delphi round-2 A-MAJOR-3 residue).
+  const scored = history.filter(h => typeof h.score === 'number');
+  const avgScore = scored.length
+    ? (scored.reduce((sum, h) => sum + h.score, 0) / scored.length).toFixed(1)
+    : 'N/A';
+  const latestScore = typeof latest.score === 'number' ? latest.score : null;
+  const latestText = latestScore === null ? 'N/A' : `${latestScore}/10`;
   
   // Title
   doc.setFontSize(20);
@@ -215,7 +225,7 @@ async function exportPDF() {
   // Summary
   doc.setFontSize(12);
   doc.text(`Generated: ${new Date().toLocaleDateString()}`, 14, 32);
-  doc.text(`Total Runs: ${history.length} | Avg Score: ${avgScore}/10 | Latest: ${latest.score}/10`, 14, 40);
+  doc.text(`Total Runs: ${history.length} | Avg Score: ${avgScore}${avgScore === 'N/A' ? '' : '/10'} | Latest: ${latestText}`, 14, 40);
   
   // Gate table
   const gateNames = ['Gate 1: Code Quality', 'Gate 2: Duplicate Code', 'Gate 3: Complexity',
@@ -246,8 +256,8 @@ async function exportPDF() {
   
   const scoreRows = history.slice(-20).map(h => [
     new Date(h.timestamp).toLocaleDateString(),
-    h.score.toString(),
-    `${h.passed}/${h.total} gates`
+    typeof h.score === 'number' ? String(h.score) : 'N/A',
+    h.passed + '/' + (h.effectiveTotal ?? h.total) + ' gates'
   ]);
   
   autoTable(doc, {

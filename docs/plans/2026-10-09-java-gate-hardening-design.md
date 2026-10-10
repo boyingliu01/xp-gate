@@ -44,7 +44,7 @@ XP-Gate 对 Java 项目的门禁存在五个实战短板：G1 静态分析静默
 2. 命中且 staged 含 .java：调用 `wc-java-lint check --staged --format json`（若 usage error exit≥2 → 回退显式 staged .java 文件列表调用）。
 3. 判定（fail-closed）：exit 0→PASS；exit 1→FAIL（输出违规数/文件）；exit≥2 / JSON 不可解析 / 超时→BLOCK+明确报错；超时默认 180s（`.xp-gate/wc-java-lint-timeout` 覆盖）。
 4. JSON 解析：白名单字段 file/rule/severity/line；未知字段容忍；必需字段缺失→视为不可解析→BLOCK。
-5. 逃生阀：`XP_GATE_WC_JAVA_LINT=soft` 仅把 BLOCK 类降级为 SKIP+WARN（audit 记录）；exit 1 违规 FAIL 绝不降级；soft 下进程退出码非阻断。
+5. 逃生阀：`XP_GATE_WC_JAVA_LINT=soft` 仅把 BLOCK 类降级为 WARN（exit 3，非阻断、入评分分母、audit 记录原因）；exit 1 违规 FAIL 绝不降级；soft 下进程退出码非阻断。
 6. 缺失回退：legacy checkstyle/pmd；两者皆缺→显式 WARN（verdict 不得为 PASS）；p3c-java、whalecloud-java 目录各自缺失分别 WARN。命中 wc-java-lint 时不再跑 p3c/whalecloud 链（避免双跑）。
 7. polyglot：multilang 机制下各适配器并行，wc-java-lint 只收 staged .java。
 
@@ -57,7 +57,12 @@ XP-Gate 对 Java 项目的门禁存在五个实战短板：G1 静态分析静默
   实质分叉，同一提交在不同机器上历史分数不同。
 - WARN/BLOCK 计入分母，不计入分子；BLOCK 等价 FAIL。
 - 有效分母 0 → score=null（JSON）/N/A（控制台）、verdict=SKIP-ALL（绝不 10/10）。
-- verdict=PASS 当且仅当有效分母内全部 PASS（存在 WARN/SKIP 即不得 PASS；score 可为 10.0 而 verdict≠PASS——SKIP 中立但不构成"已验证通过"）。
+- verdict=PASS 当且仅当有效分母内全部 PASS（存在 WARN 即不得 PASS；score 可为
+  10.0 而 verdict≠PASS 只发生在 SKIP-ALL 之外的合法 SKIP 场景，如 TS-only 仓库
+  的 GATE9——SKIP 出分母是 DR-008 的中立语义）。**Delphi round-2 A-MAJOR-1 收口**：
+  Java 适配器 exit 3（soft 降级 / report 灰度 / legacy 工具缺失 / 适配器缺失 /
+  意外 verdict）一律映射 `GATE_1_STATUS=WARN` 而非 SKIP——WARN 入分母且禁 PASS，
+  未验证的 Java 不允许经 SKIP 通道产出假绿 PASS/10.0。
 - quality-status JSON 与 history.jsonl 新增 `effective_pass_rate`、`skip_count`。
 - **破坏性变更（Delphi round-1 A-MAJOR-3 收口）**：`overall.verdict` 值域由
   `PASS|PARTIAL` 变为 `PASS|WARN|FAIL|SKIP-ALL`，`score` 分母口径变为有效分母、
