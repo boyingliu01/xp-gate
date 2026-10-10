@@ -37,6 +37,7 @@ export interface GateAuditEntry {
   repo_path: string;
   commit_hash: string;
   duration_anomaly?: boolean; // Issue #370: set when duration_ms > max_duration_ms
+  detail?: string; // #507: optional gate-specific payload (e.g. effective CCN threshold)
 }
 
 // ── Public API ───────────────────────────────────────────────────────────────
@@ -258,6 +259,8 @@ function runCli(): void {
       commit_hash: getCommitHash(),
       // Issue #370: only set when explicitly flagged (omit field otherwise)
       ...(opts['duration-anomaly'] === 'true' ? { duration_anomaly: true } : {}),
+      // #507: only set when provided (omit field otherwise)
+      ...(opts['detail'] ? { detail: opts['detail'] } : {}),
     };
     appendAuditEntry(entry);
   } else {
