@@ -482,9 +482,15 @@ echo ""
 # that must ignore the byte-identical npm-package mirrors (lint corpus here,
 # Boy Scout's new/modified split further down) reads this one regex, so the
 # two sites cannot drift apart.
+# dashboard/ is a standalone browser-only visualization page (document/Chart.js
+# globals, static HTML output). It is not part of the gate engine, never runs
+# in CI or hooks, and its chart-config object literals trip structural rules
+# (deep-nesting/long-function) that carry no signal for this codebase. Same
+# scope rationale as the mirror exclusion (#507 Delphi round-2 follow-up).
 MIRROR_PATH_FILTER='^src/npm-package/'
+DASHBOARD_PATH_FILTER='^dashboard/'
 RAW_CHANGED_FILES=$(git diff --cached --name-only --diff-filter=ACM)
-CHANGED_FILES=$(printf '%s\n' "$RAW_CHANGED_FILES" | grep -v "$MIRROR_PATH_FILTER" || true)
+CHANGED_FILES=$(printf '%s\n' "$RAW_CHANGED_FILES" | grep -v "$MIRROR_PATH_FILTER" | grep -v "$DASHBOARD_PATH_FILTER" || true)
 
 if [ -z "$RAW_CHANGED_FILES" ]; then
   echo "No files changed. Skipping gates."
@@ -1362,6 +1368,14 @@ else
     # `|| JAVA_G1_EXIT=$?` (not a bare assignment): under a set -e consumer a
     # non-zero verdict would abort the host hook before the mapping below.
     JAVA_G1_OUTPUT=$(run_static_analysis 2>&1) || JAVA_G1_EXIT=$?
+    # SKIP/WARN reasons cross the command-substitution subshell as an
+    # `XP_G1_REASON: ...` stdout line -- an `export` inside the adapter can
+    # NEVER reach this process (#507 Delphi round-1 B-MAJOR-1: verified the
+    # subshell discards the child env). Parse, then strip from display.
+    JAVA_G1_REASON=$(printf '%s\n' "$JAVA_G1_OUTPUT" | sed -n 's/^XP_G1_REASON: //p' | head -1)
+    if [ -n "$JAVA_G1_REASON" ]; then
+      JAVA_G1_OUTPUT=$(printf '%s\n' "$JAVA_G1_OUTPUT" | grep -v '^XP_G1_REASON: ')
+    fi
     [ -n "$JAVA_G1_OUTPUT" ] && echo "$JAVA_G1_OUTPUT" | head -40
     case "$JAVA_G1_EXIT" in
       0)
@@ -1378,7 +1392,7 @@ else
       3)
         echo "⏭️  SKIPPED - Java code quality (engine unavailable or downgraded)"
         GATE_1_STATUS="SKIP"
-        GATE_1_DETAIL="java: ${XP_GATE_JAVA_G1_REASON:-unavailable (warn)}"
+        GATE_1_DETAIL="java: ${JAVA_G1_REASON:-${XP_GATE_JAVA_G1_REASON:-unavailable (warn)}}"
         ;;
       *)
         echo "⏭️  SKIPPED - Java code quality (unexpected verdict $JAVA_G1_EXIT)"
@@ -2761,8 +2775,8 @@ else
     # governed by Mirror Parity in CI, which compares content rather than
     # re-linting it. (See the same exclusion in adapters/powershell.sh.)
     MIRROR_EXCLUDE="$MIRROR_PATH_FILTER"
-    NEW_FILES=$(git diff --cached --name-only --diff-filter=A | grep -v "$MIRROR_EXCLUDE" | tr '\n' ' ')
-    MODIFIED_FILES=$(git diff --cached --name-only --diff-filter=M | grep -v "$MIRROR_EXCLUDE" | tr '\n' ' ')
+    NEW_FILES=$(git diff --cached --name-only --diff-filter=A | grep -v "$MIRROR_EXCLUDE" | grep -v "$DASHBOARD_PATH_FILTER" | tr '\n' ' ')
+    MODIFIED_FILES=$(git diff --cached --name-only --diff-filter=M | grep -v "$MIRROR_EXCLUDE" | grep -v "$DASHBOARD_PATH_FILTER" | tr '\n' ' ')
     
     if [ -z "$NEW_FILES" ] && [ -z "$MODIFIED_FILES" ]; then
       echo "     ✅ No new or modified files to check."
@@ -2913,6 +2927,13 @@ run_java_build_integrity() {
 2>&1 echo ""
 2>&1 echo "→ Gate 9: Build integrity... "
 GATE_9_START=$(gate_start_ms)
+# Sub-status aggregation (#507 Delphi round-1 B-MAJOR-4): each half records
+# its own outcome; GATE_9_STATUS is aggregated after both. The previous
+# single-variable design made a Maven-only repo (TS half never runs, Java
+# half passes) record an ETERNAL SKIP -- a real compile verification that
+# never appeared as PASS, contradicting S5's own motivation.
+GATE_9_TS_STATUS="SKIP"
+GATE_9_JAVA_STATUS="SKIP"
 GATE_9_STATUS="SKIP"
 
 if [ -f "package.json" ] && [ -f "tsconfig.json" ]; then
@@ -2929,15 +2950,15 @@ if [ -f "package.json" ] && [ -f "tsconfig.json" ]; then
     CHANGED_FILES_CSV=$(echo "$CHANGED_FILES" | tr ' ' ',')
     GATE_9_OUTPUT=$(mktemp)
     if RUN_TSX_TIMEOUT=120s run_tsx "$GATE_9_SCRIPT" --changed-files "$CHANGED_FILES_CSV" --project-root "$PROJECT_ROOT" --timeout 115000 > "$GATE_9_OUTPUT" 2>&1; then
-      GATE_9_STATUS="PASS"
+      GATE_9_TS_STATUS="PASS"
       echo "     ✅ Build integrity check passed."
     else
       GATE_9_EXIT=$?
       if [ $GATE_9_EXIT -eq 124 ]; then
-        GATE_9_STATUS="SKIP"
+        GATE_9_TS_STATUS="SKIP"
         echo "     ⏱️  Build integrity check timed out (120s). SKIPPED."
       else
-        GATE_9_STATUS="BLOCK"
+        GATE_9_TS_STATUS="BLOCK"
         cat "$GATE_9_OUTPUT"
         echo ""
         echo "❌ BLOCKED - Gate 9: Build integrity check failed"
@@ -2965,18 +2986,17 @@ if echo "$CHANGED_FILES" | grep -q '\.java$'; then
     run_java_build_integrity || JAVA_BI_EXIT=$?
     case "$JAVA_BI_EXIT" in
       0)
-        # A TS-half SKIP stays SKIP: the Java half passing must not resurrect
-        # the skipped half as a pass (#507 blind review MINOR-1).
-        [ "$GATE_9_STATUS" != "SKIP" ] && GATE_9_STATUS="PASS"
+        GATE_9_JAVA_STATUS="PASS"
         ;;
       2)
-        GATE_9_STATUS="BLOCK"
+        GATE_9_JAVA_STATUS="BLOCK"
         echo ""
         echo "❌ BLOCKED - Gate 9: Java build integrity check failed"
         echo "Fix the compile errors before committing."
         exit 1
         ;;
       *)
+        GATE_9_JAVA_STATUS="SKIP"
         echo "     ⏭️  SKIPPED - Build integrity Java (see reason above)"
         ;;
     esac
@@ -2986,6 +3006,21 @@ if echo "$CHANGED_FILES" | grep -q '\.java$'; then
   else
     echo "     ℹ️  Java changes staged but no Maven/Gradle build file - skipping Java build integrity"
   fi
+fi
+
+# Aggregate the two halves (#507 Delphi round-1 B-MAJOR-4): PASS when every
+# half that RAN passed (TS PASS + Java SKIP, or vice versa, both count),
+# SKIP only when NOTHING ran, BLOCK on any failure (normally unreachable --
+# failing halves exit 1 inline). This replaces the blind-review MINOR-1
+# single-variable guard: with explicit sub-statuses a Java PASS no longer
+# "resurrects" a TS SKIP -- each half keeps its own record and the gate
+# reflects the union of what was actually verified.
+GATE_9_STATUS="SKIP"
+if [ "$GATE_9_TS_STATUS" = "PASS" ] || [ "$GATE_9_JAVA_STATUS" = "PASS" ]; then
+  GATE_9_STATUS="PASS"
+fi
+if [ "$GATE_9_TS_STATUS" = "BLOCK" ] || [ "$GATE_9_JAVA_STATUS" = "BLOCK" ]; then
+  GATE_9_STATUS="BLOCK"
 fi
 
 GATE_9_END=$(gate_start_ms)
@@ -3123,10 +3158,16 @@ generate_quality_report() {
   # and FAIL/BLOCK count as non-passing items like before. NONPASS tracks
   # non-passing gates INSIDE the effective denominator only -- a skipped gate
   # is out of scope, not a failure.
-  local gate_status
+  local gate_status gate_default
   for gate in 1 2 3 4 5 6 7 8 9 10 11 12; do
     local status_var="GATE_${gate}_STATUS"
-    gate_status="${!status_var:-FAIL}"
+    # Default mirrors the JSON report rendering below EXACTLY (gates 1-11
+    # PASS, gate 12 WARN): a gate that never assigned a status is "not
+    # applicable" and must render and score identically. A previous scoring
+    # default of FAIL produced self-contradictory reports -- the gate showed
+    # PASS in JSON but scored as FAIL (#507 Delphi round-1 A-MAJOR-2).
+    if [ "$gate" -eq 12 ]; then gate_default="WARN"; else gate_default="PASS"; fi
+    gate_status="${!status_var:-$gate_default}"
     case "$gate_status" in
       PASS) PASSED_COUNT=$((PASSED_COUNT + 1)) ;;
       SKIP) SKIP_COUNT=$((SKIP_COUNT + 1)) ;;
@@ -3150,9 +3191,12 @@ generate_quality_report() {
   local SCORE=0
   if [ "$EFFECTIVE_TOTAL" -eq 0 ]; then
     SCORE="N/A"
-  elif command -v bc >/dev/null 2>&1; then
-    SCORE=$(echo "scale=1; ($PASSED_COUNT / $EFFECTIVE_TOTAL) * 10" | bc)
   else
+    # Single awk path (#507 Delphi round-1 B-MAJOR-2): bc's scale=1 truncates
+    # the DIVISION before multiplying (8/9 -> 0.8, *10 -> 8.0) while awk
+    # rounds the final result (8.9) -- the same commit scored differently on
+    # machines with and without bc. awk(1) is POSIX-guaranteed: one code path,
+    # one score.
     SCORE=$(awk "BEGIN {printf \"%.1f\", ($PASSED_COUNT / $EFFECTIVE_TOTAL) * 10}")
   fi
   local EFFECTIVE_PASS_RATE="N/A"
@@ -3162,6 +3206,10 @@ generate_quality_report() {
   # JSON bodies need a number or null -- a literal N/A breaks every consumer.
   local SCORE_JSON="$SCORE"
   [ "$SCORE_JSON" = "N/A" ] && SCORE_JSON="null"
+  # Same for the pass rate: numeric like `score`, not a quoted string --
+  # mixed types in one object broke consumers (#507 Delphi round-1 B-minor-6).
+  local EFFECTIVE_PASS_RATE_JSON="$EFFECTIVE_PASS_RATE"
+  [ "$EFFECTIVE_PASS_RATE_JSON" = "N/A" ] && EFFECTIVE_PASS_RATE_JSON="null"
 
   local BS_PASSED=0
   local BS_BLOCKED=0
@@ -3203,7 +3251,7 @@ generate_quality_report() {
     "gatesTotal": $TOTAL_GATES,
     "gatesSkipped": $SKIP_COUNT,
     "gatesEffective": $EFFECTIVE_TOTAL,
-    "effectivePassRate": "$EFFECTIVE_PASS_RATE",
+    "effectivePassRate": $EFFECTIVE_PASS_RATE_JSON,
     "score": $SCORE_JSON,
     "verdict": "$VERDICT"
   },
@@ -3300,7 +3348,7 @@ ENDJSON
   GATES_JSON="${GATES_JSON}\"gate11\":{\"status\":\"${GATE_11_STATUS:-PASS}\",\"name\":\"Sprint Flow\"},"
   GATES_JSON="${GATES_JSON}\"gate12\":{\"status\":\"${GATE_12_STATUS:-WARN}\",\"name\":\"File Hygiene\"}}"
 
-  echo "{\"timestamp\":\"$TIMESTAMP\",\"commit\":\"$COMMIT_HASH\",\"branch\":\"$BRANCH\",\"score\":$SCORE_JSON,\"passed\":$PASSED_COUNT,\"total\":$TOTAL_GATES,\"effectiveTotal\":$EFFECTIVE_TOTAL,\"effectivePassRate\":\"$EFFECTIVE_PASS_RATE\",\"skipCount\":$SKIP_COUNT,\"verdict\":\"$VERDICT\",\"gates\":$GATES_JSON,\"coverage\":\"$COV_PCT\",\"complexityWarnings\":${CC_WARNINGS:-0},\"principleWarnings\":${WARNING_COUNT:-0},\"boyScoutBlocked\":${BS_BLOCKED}}" >> "$HISTORY_FILE"
+  echo "{\"timestamp\":\"$TIMESTAMP\",\"commit\":\"$COMMIT_HASH\",\"branch\":\"$BRANCH\",\"score\":$SCORE_JSON,\"passed\":$PASSED_COUNT,\"total\":$TOTAL_GATES,\"effectiveTotal\":$EFFECTIVE_TOTAL,\"effectivePassRate\":$EFFECTIVE_PASS_RATE_JSON,\"skipCount\":$SKIP_COUNT,\"verdict\":\"$VERDICT\",\"gates\":$GATES_JSON,\"coverage\":\"$COV_PCT\",\"complexityWarnings\":${CC_WARNINGS:-0},\"principleWarnings\":${WARNING_COUNT:-0},\"boyScoutBlocked\":${BS_BLOCKED}}" >> "$HISTORY_FILE"
 
   # ── Console output ────────────────────────────────────────────────────────
   echo ""

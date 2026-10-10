@@ -127,16 +127,57 @@ export const javaParse = {
   /**
    * Strip string/char literals and comments (line + block, multi-line)
    * before any brace/call-site analysis. Contents become empty/space so the
-   * line structure (and thus length/line numbers) is preserved. This is what
-   * keeps a `"{` inside a format string or a javadoc code example from
-   * corrupting nestingDepth/hasTryCatch/methodCount (#507 blind review M3/M4).
+   * LINE structure (and thus line numbers) is preserved -- column positions
+   * shift, so callers must use lineOf() instead of getLineNumber() on masked
+   * content. This is what keeps a `"{` inside a format string or a javadoc
+   * code example from corrupting nestingDepth/hasTryCatch/methodCount
+   * (#507 blind review M3/M4).
+   *
+   * String/char patterns exclude newlines (#507 Delphi round-1 B-MAJOR-3):
+   * a cross-line pairing let one unbalanced quote inside a comment swallow
+   * every line up to the NEXT real string, deleting whole control blocks
+   * from the analysis. Damage is now bounded to the offending line.
    */
   maskCode(body: string): string {
     return body
-      .replace(/"(?:[^"\\]|\\.)*"/g, '""')
-      .replace(/'(?:[^'\\]|\\.)'/g, "''")
+      .replace(/"(?:[^"\\\n]|\\[^\n])*"/g, '""')
+      .replace(/'(?:[^'\\\n]|\\[^\n])'/g, "''")
       .replace(/\/\*[\s\S]*?\*\//g, (m) => m.replace(/[^\n]/g, ' '))
       .replace(/\/\/.*$/gm, '');
+  },
+
+  /**
+   * Line number of `position` within `content`. maskCode preserves line
+   * structure (contents shrink but never add/remove lines), so a line
+   * computed on masked content is exact for the original file.
+   */
+  lineOf(content: string, position: number): number {
+    return content.substring(0, position).split('\n').length;
+  },
+
+  /**
+   * Brace-balanced block starting at the first `{` at/after `startPos`.
+   * Runs on MASKED content only -- on raw text a string-embedded `{`
+   * desynchronizes the depth tracker. Returns null when unbalanced
+   * (callers decide the fallback; base.extractCodeBlock's 100-char
+   * truncation fallback would silently hand back garbage structure).
+   */
+  extractBracedBlock(content: string, startPos: number): string | null {
+    let inBlock = false;
+    let depth = 0;
+    for (let i = startPos; i < content.length; i += 1) {
+      const ch = content[i];
+      if (ch === '{') {
+        inBlock = true;
+        depth += 1;
+      } else if (ch === '}' && inBlock) {
+        depth -= 1;
+        if (depth === 0) {
+          return content.substring(startPos, i + 1);
+        }
+      }
+    }
+    return null;
   },
 
   /** Usage detector for an imported simple name (word-boundary, $-escaped). */
@@ -165,15 +206,19 @@ export class JavaAdapter extends BaseAdapter implements Adapter {
   extractFunctions(): unknown[] {
     const results: JavaFunctionInfo[] = [];
     const methodRegex = /(public|private|protected|static|final|synchronized|native)\s+[\w<>[\],\s]+?\s+(\w+)\s*\(([^)]*)\)\s*(throws\s+[\w,\s.]+)?\s*\{/g;
+    // Signature scan AND block extraction run on the MASKED content
+    // (#507 Delphi round-1 B-MAJOR-6 / A-minor-1): a javadoc example like
+    // `public int foo(int x) {` on raw text produced a ghost function whose
+    // length/nestingDepth fed long-function/deep-nesting, and an unbalanced
+    // string brace stretched the extracted block past the real method end.
+    // Masked content keeps line structure, so lineOf() is exact.
+    const maskedContent = javaParse.maskCode(this.fileContent);
     let match;
 
-    while ((match = methodRegex.exec(this.fileContent)) !== null) {
-      const code = this.extractCodeBlock(match.index) ?? '';
-      const line = this.getLineNumber(match.index);
-      // Brace/catch/IO analysis runs on the MASKED body: an unbalanced `{"`
-      // inside a format string or a javadoc example otherwise corrupts
-      // nestingDepth/hasTryCatch and bleeds into the next method -- #507 M4.
-      const masked = javaParse.maskCode(code);
+    while ((match = methodRegex.exec(maskedContent)) !== null) {
+      const code = javaParse.extractBracedBlock(maskedContent, match.index) ?? '';
+      const line = javaParse.lineOf(maskedContent, match.index);
+      const masked = code; // already masked (extracted from maskedContent)
       results.push({
         name: match[2],
         type: 'method',
@@ -201,16 +246,20 @@ export class JavaAdapter extends BaseAdapter implements Adapter {
     const classRegex = /(public|private|protected)?\s*(abstract|final|static)?\s*class\s+(\w+)\s*(?:<[^<>]*>)?\s*(extends\s+[\w.]+(?:<[^<>]*>)?)?\s*(implements\s+[\w,\s.]+(?:<[^<>]*>)?)?\s*\{/g;
     let match;
 
-    while ((match = classRegex.exec(this.fileContent)) !== null) {
-      const code = this.extractCodeBlock(match.index) ?? '';
+    // Class scan also runs on masked content: a javadoc mention of `class
+    // Foo` no longer yields a ghost class, and string-embedded braces cannot
+    // stretch the extracted body (#507 Delphi round-1 B-MAJOR-6).
+    const maskedContent = javaParse.maskCode(this.fileContent);
+    while ((match = classRegex.exec(maskedContent)) !== null) {
+      const code = javaParse.extractBracedBlock(maskedContent, match.index) ?? '';
       // srp reads `cls.methodCount` directly, with no code re-scan fallback,
       // so an adapter omitting it makes SRP structurally dead on Java -- #507 S4.
-      const methods = javaParse.countMembers(javaParse.maskCode(code));
+      const methods = javaParse.countMembers(code);
       classMatches.push({
         name: match[3],
         type: 'class',
         modifiers: [match[1], match[2]].filter(m => m && m.trim()),
-        line: this.getLineNumber(match.index),
+        line: javaParse.lineOf(maskedContent, match.index),
         methodCount: methods.length,
         methods,
         code
@@ -230,12 +279,15 @@ export class JavaAdapter extends BaseAdapter implements Adapter {
     const ifaceRegex = /(?:public|private|protected)?\s*interface\s+(\w+)\s*(?:<[^<>]*>)?\s*\{/g;
     let match;
 
-    while ((match = ifaceRegex.exec(this.fileContent)) !== null) {
-      const code = this.extractCodeBlock(match.index) ?? '';
-      const methods = javaParse.countMembers(javaParse.maskCode(code));
+    // Masked scan, same rationale as extractClasses (#507 Delphi round-1
+    // B-MAJOR-6): no ghost interfaces from javadoc, no string-brace bleed.
+    const maskedContent = javaParse.maskCode(this.fileContent);
+    while ((match = ifaceRegex.exec(maskedContent)) !== null) {
+      const code = javaParse.extractBracedBlock(maskedContent, match.index) ?? '';
+      const methods = javaParse.countMembers(code);
       results.push({
         name: match[1],
-        line: this.getLineNumber(match.index),
+        line: javaParse.lineOf(maskedContent, match.index),
         methods,
         methodCount: methods.length,
         code

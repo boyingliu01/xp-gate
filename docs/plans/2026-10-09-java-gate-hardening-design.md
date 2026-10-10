@@ -52,11 +52,22 @@ XP-Gate 对 Java 项目的门禁存在五个实战短板：G1 静态分析静默
 解析顺序 `.xp-gate/ccn-threshold`（正整数）> `XP_GATE_CCN_THRESHOLD` > 默认 5；非法值 WARN+回退 5；生效阈值写入 gate-3 审计输出。
 
 ### S3：SKIP-aware 评分（pre-commit 综合分段）
-- `SCORE = PASS / (TOTAL - SKIP) * 10`，沿用 scale=1 舍入。
+- `SCORE = PASS / (TOTAL - SKIP) * 10`，单 awk 路径（%.1f 舍入）。Delphi round-1
+  修复：废弃 bc 分支——bc `scale=1` 先截断除法再乘 10（8/9→8.0），与 awk（8.9）
+  实质分叉，同一提交在不同机器上历史分数不同。
 - WARN/BLOCK 计入分母，不计入分子；BLOCK 等价 FAIL。
-- 有效分母 0 → score=N/A、verdict=SKIP-ALL（绝不 10/10）。
+- 有效分母 0 → score=null（JSON）/N/A（控制台）、verdict=SKIP-ALL（绝不 10/10）。
 - verdict=PASS 当且仅当有效分母内全部 PASS（存在 WARN/SKIP 即不得 PASS；score 可为 10.0 而 verdict≠PASS——SKIP 中立但不构成"已验证通过"）。
-- quality-status JSON 与 history.jsonl 新增 `effective_pass_rate`、`skip_count`；不改旧字段语义。
+- quality-status JSON 与 history.jsonl 新增 `effective_pass_rate`、`skip_count`。
+- **破坏性变更（Delphi round-1 A-MAJOR-3 收口）**：`overall.verdict` 值域由
+  `PASS|PARTIAL` 变为 `PASS|WARN|FAIL|SKIP-ALL`，`score` 分母口径变为有效分母、
+  SKIP-ALL 时为 `null`。仓内消费者 dashboard.js 已同步（null 分数渲染 N/A/
+  skip 色而非 fail，平均分只对数值分数计算，Gates 卡片展示 effectiveTotal）。
+  外部消费者的适配点：`h.score===null` 分支、`effectiveTotal` 替代 `total` 作
+  展示分母、verdict 新值域。
+- 评分默认值与 JSON 渲染默认值同源（gates 1-11 缺省 PASS、gate 12 缺省
+  WARN）——先前的评分缺省 FAIL 与 JSON 缺省 PASS 曾产出"显示 PASS 计分
+  FAIL"的自相矛盾报告（Delphi round-1 A-MAJOR-2）。
 - 回归：无任何 SKIP 时分数与旧口径逐字节一致（快照测试）。
 
 ### S4：G4 Java 覆盖显式化
