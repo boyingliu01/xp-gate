@@ -9,10 +9,26 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # shellcheck source=/dev/null
 source "$SCRIPT_DIR/../adapter-common.sh" 2>/dev/null || true
 
-run_static_analysis() {
-  require_tool mypy "mypy" || return 1
+# A mypy target must exist AND actually contain .py files: a bare directory
+# check lets through TS repos' src/ (mypy exits 2 with "There are no .py[i]
+# files in directory" — #513 R1 expert-B reproduction), and a file check
+# alone would accept empty shell directories. Supports files too, so a
+# scope declaration may name a single .py file.
+_mypy_target_usable() {
+  [ -e "$1" ] || return 1
+  [ -n "$(find "$1" -name '*.py' -print 2>/dev/null | grep .)" ]
+}
 
-  # 口径 = CI type job（.github/workflows/ci.yml:43-45）的两条命令，逐字一致。
+run_static_analysis() {
+  # NOTE: require_tool mypy runs AFTER target resolution, not here (#513 R2
+  # expert-C): a repo with no type surface AND no mypy installed must reach
+  # the SKIP branch (nothing to check) instead of false-BLOCKing on the
+  # missing tool. The tool is only required when there is something to check.
+
+  # 口径 = CI type job（.github/workflows/ci.yml:43-45）的目录集合（src/、
+  # scripts/），并按调用方式对齐：**逐目录单独调用**（#513 R1 专家 B 实测：
+  # 合并为 `mypy src scripts` 一次跑，src/util.py 与 scripts/util.py 同名时
+  # 报 "Duplicate module named" exit 2，而 CI 分开跑各自 exit 0）。
   # 为什么不能写 `mypy .`：`.` 会递归扫到两类文件，而它们在仓库里从未被声明为
   # 门禁面，CI 也从不检查：
   #   ① 根目录一次性调研/演示脚本（fetch_*.py、demo_*.py、validate_*.py 等）——
@@ -28,10 +44,61 @@ run_static_analysis() {
   # 口径一致性由仓库侧 BATS 测试双向锁住：
   # githooks/__tests__/adapter-mypy-pester-scope.test.bats（含"适配器里不得再
   # 出现裸 mypy ."），防止 `mypy .` 被写回来时无人报警。
+  #
+  # #513：上述 `src/`+`scripts/` 是"单一仓库的 CI 声明面"，不能当成所有 Python
+  # 仓库的布局硬编码——无 src/ 的仓库（如 skill-cert 的 engine/ 布局）会得到
+  # `mypy: can't read file 'src'` 而对任何 .py 提交恒 BLOCK，违反本项目
+  # "门禁无法运行 → SKIP 而非 BLOCK" 规范。口径回归"按仓库声明"三级解析：
+  #   ① 仓库根 `.xp-gate-mypy-scope`（每行一个目录；支持整行或行内 # 注释）
+  #      存在则为其权威声明，声明条目同样过 usable 守卫（缺失/无 .py → WARN 跳过）；
+  #   ② 否则仅对 usable 的默认目录（src/、scripts/）执行；
+  #   ③ 两者皆无（或声明为空）→ 打印提示并 exit 0，绝不把 mypy 空跑一次。
   echo "Running Python static analysis (mypy)..."
-  mypy src/ || return 1
-  mypy scripts/
-  return $?
+  local -a MYPY_TARGETS=()
+  local _mypy_declared=0
+  if [ -f .xp-gate-mypy-scope ]; then
+    while IFS= read -r line || [ -n "$line" ]; do
+      line="${line%%#*}"
+      line="${line#"${line%%[![:space:]]*}"}"
+      line="${line%"${line##*[![:space:]]}"}"
+      [ -z "$line" ] && continue
+      _mypy_declared=1
+      if _mypy_target_usable "$line"; then
+        MYPY_TARGETS+=("$line")
+      else
+        echo "  ⚠ mypy scope: declared target '$line' does not exist or contains no .py files — skipped"
+      fi
+    done < .xp-gate-mypy-scope
+    echo "  scope: .xp-gate-mypy-scope declaration"
+    if [ "${#MYPY_TARGETS[@]}" -eq 0 ]; then
+      if [ "$_mypy_declared" -eq 1 ]; then
+        echo "  ⚠ mypy: .xp-gate-mypy-scope has no usable target (all missing or without .py files) — skipping"
+      else
+        echo "  ⚠ mypy: .xp-gate-mypy-scope is present but empty (comments/blank lines only) — skipping"
+      fi
+      return 0
+    fi
+  else
+    if [ -d src ] && _mypy_target_usable src; then
+      MYPY_TARGETS+=(src)
+    fi
+    if [ -d scripts ] && _mypy_target_usable scripts; then
+      MYPY_TARGETS+=(scripts)
+    fi
+    if [ "${#MYPY_TARGETS[@]}" -eq 0 ]; then
+      echo "  ℹ️  mypy: repo declares no type surface (no .xp-gate-mypy-scope; src/ scripts/ absent or without .py files) — skipping"
+      echo "      if this repo does have a type surface, declare it: create .xp-gate-mypy-scope (one directory per line)"
+      return 0
+    fi
+  fi
+  # 逐目标调用并聚合退出码（口径见函数头注释）。
+  require_tool mypy "mypy" || return 1
+  local _mypy_rc=0
+  local _mypy_t
+  for _mypy_t in "${MYPY_TARGETS[@]}"; do
+    mypy "$_mypy_t" || _mypy_rc=1
+  done
+  return $_mypy_rc
 }
 
 run_lint() {

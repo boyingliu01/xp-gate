@@ -437,6 +437,18 @@ rules:
 
 > 配置示例使用一个 provider 和 token plan，但三个 distinct 模型 ID。将 `BAILIAN_API_KEY` 设置为你的 API key；不要把密钥写入配置文件或提交到版本控制。
 
+### .xp-gate-mypy-scope（Python mypy 类型检查面声明，可选）
+
+Python 项目的默认 mypy 范围是存在且含 `.py` 文件的 `src/` 与 `scripts/`；两者皆无时 Gate 1 的类型检查会 SKIP（不会假 BLOCK）。如果仓库的类型检查面是其他布局（如 `engine/`、`lib/`），在项目根目录创建 `.xp-gate-mypy-scope`，每行一个目录：
+
+```
+engine
+tools/generate
+# 以 # 开头的行为注释；行内注释也支持
+```
+
+声明的目录同样要求存在且含 `.py` 文件（缺失或为空会被 WARN 并跳过，不会硬 BLOCK）。
+
 ---
 
 ## 贡献指南
