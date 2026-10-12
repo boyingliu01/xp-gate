@@ -1,6 +1,6 @@
 const fs = require('fs');
 const path = require('path');
-const { execSync } = require('child_process');
+const { execSync, spawnSync } = require('child_process');
 const { exec } = require('child_process');
 const util = require('util');
 const execAsync = util.promisify(exec);
@@ -63,9 +63,46 @@ const EXEC_TIMEOUT_MS = 1500;
 const GLOBAL_DIAGNOSIS_TIMEOUT_MS = 10000;
 
 /**
+ * Fixed attribution text for the WorkBuddy-desktop sandbox restriction (#525).
+ *
+ * In a WorkBuddy desktop session, a node process's *synchronous* child-process
+ * calls (spawnSync/execSync) always fail with EBUSY, while async spawn works;
+ * external terminals, CI and git hook chains are unaffected. The interception
+ * layer belongs to the host application, not to xp-gate or any antivirus, so
+ * the only correct response is to name it and point at the working channels.
+ */
+const EBUSY_ATTRIBUTION = 'sync spawn blocked by host sandbox (EBUSY) -- likely WorkBuddy desktop session; '
+  + 'use async child_process.spawn in-session, verify via CI / external terminal / git hook chain. '
+  + 'NOT a code or antivirus problem.';
+
+/**
  * Execute a command with a hard timeout using async exec.
  * Returns { stdout, stderr } on success, null on failure/timeout.
  */
+/**
+ * Dedup scope: one attribution line per *diagnosis* is a diagnosis; one per
+ * check is noise. `diagnoseAsync` resets this, so a long-lived host process
+ * (or a --fix pre/post double run) still attributes each report round (#525 R1).
+ */
+let ebusyAttributionShown = false;
+
+/**
+ * Shared EBUSY attribution printer for BOTH spawn families (#525 R1).
+ *
+ * Note the asymmetry the platform sandbox exhibits: synchronous child-process
+ * calls (execSync/spawnSync) always fail with EBUSY in a WorkBuddy session,
+ * while async spawn/exec currently pass. The sync call sites below are where
+ * the false reds actually come from; the async branch in execWithTimeout is
+ * kept as a defense-in-depth no-op today -- if the sandbox ever widens its
+ * interception, the attribution is already wired.
+ */
+function noteSandboxAttribution(err) {
+  if (err && err.code === 'EBUSY' && !ebusyAttributionShown) {
+    ebusyAttributionShown = true;
+    console.error(`  ⚠ ${EBUSY_ATTRIBUTION}`);
+  }
+}
+
 async function execWithTimeout(cmd, opts = {}) {
   try {
     const { stdout, stderr } = await execAsync(cmd, {
@@ -73,9 +110,52 @@ async function execWithTimeout(cmd, opts = {}) {
       timeout: opts.timeout || EXEC_TIMEOUT_MS,
     });
     return { stdout: stdout.trim(), stderr: stderr.trim() };
-  } catch {
+  } catch (err) {
+    // #525: a bare null here reads as "tool missing" and has already cost a
+    // misdiagnosis round. Name the sandbox once when it is the sandbox.
+    noteSandboxAttribution(err);
     return null;
   }
+}
+
+/**
+ * Probe whether synchronous child-process creation works in this process (#525).
+ *
+ * @param {Array<{name: string, status: string, detail: string}>} checks — mutated
+ * @returns {number} always 0, for assertion convenience in tests only — callers
+ *   MUST ignore it: a sandbox WARN is environmental, never an issue count.
+ *   (`formatDoctorJson` likewise excludes this check from missing_tools.)
+ */
+function checkSpawnCapability(checks) {
+  let result;
+  try {
+    result = spawnSync(process.execPath, ['--version'], {
+      encoding: 'utf8',
+      timeout: EXEC_TIMEOUT_MS,
+      stdio: ['pipe', 'pipe', 'pipe'],
+    });
+  } catch (err) {
+    checks.push({ name: 'Spawn capability', status: 'SKIP', detail: `probe could not run: ${err.message}` });
+    return 0;
+  }
+  if (!result.error) {
+    checks.push({
+      name: 'Spawn capability',
+      status: 'PASS',
+      detail: `sync spawn OK (node ${(result.stdout || '').trim() || 'unknown'})`,
+    });
+    return 0;
+  }
+  if (result.error.code === 'EBUSY') {
+    checks.push({ name: 'Spawn capability', status: 'WARN', detail: EBUSY_ATTRIBUTION });
+    // Context for the rest of the report (#525 R1): the sandbox hits every
+    // sync spawn, so sibling FAIL entries ("Not found" et al) may share this
+    // cause instead of being real machine problems.
+    console.error('  ⚠ Other FAIL/WARN entries in this report may share this cause (they run sync spawns too).');
+    return 0;
+  }
+  checks.push({ name: 'Spawn capability', status: 'SKIP', detail: `probe error: ${result.error.code || result.error.message}` });
+  return 0;
 }
 
 function isXpGateFile(filePath, signature) {
@@ -121,7 +201,8 @@ function getGitDirSync() {
       timeout: EXEC_TIMEOUT_MS,
       stdio: ['pipe', 'pipe', 'pipe'],
     }).trim();
-  } catch {
+  } catch (err) {
+    noteSandboxAttribution(err); // a sync-spawn EBUSY here reads as "not a git repo" otherwise (#525)
     return null;
   }
 }
@@ -144,7 +225,8 @@ function getCurrentHooksPathSync() {
       timeout: EXEC_TIMEOUT_MS,
       stdio: ['pipe', 'pipe', 'pipe'],
     }).trim();
-  } catch {
+  } catch (err) {
+    noteSandboxAttribution(err); // a sync-spawn EBUSY here reads as "hooksPath not set" otherwise (#525)
     return null;
   }
 }
@@ -786,8 +868,10 @@ function defaultProjectGithooks() {
       stdio: ['pipe', 'pipe', 'pipe'],
     }).trim();
     if (toplevel) return path.join(toplevel, 'githooks');
-  } catch {
+  } catch (err) {
     // Not a git repository -- fall back to the directory we were called in.
+    // But an EBUSY is not "not a repository": name the sandbox instead (#525).
+    noteSandboxAttribution(err);
   }
   return path.join(process.cwd(), 'githooks');
 }
@@ -957,8 +1041,10 @@ function printEffectiveHooks() {
       timeout: EXEC_TIMEOUT_MS,
       stdio: ['pipe', 'pipe', 'pipe'],
     }).trim();
-  } catch {
+  } catch (err) {
     // No explicit core.hooksPath -> git falls back to .git/hooks.
+    // But an EBUSY is not "no hooksPath configured": attribute it (#525).
+    noteSandboxAttribution(err);
     configured = '';
   }
 
@@ -1170,6 +1256,13 @@ async function diagnoseAsync() {
   const checks = [];
   let issues = 0;
 
+  // Spawn capability probe FIRST (sync, no config dependency) — #525: it must
+  // report even when the config early-exits below, and its WARN (environmental,
+  // never an issue count) primes the interpretation of every later FAIL. The
+  // attribution dedup scope is one diagnosis, so reset it here.
+  ebusyAttributionShown = false;
+  checkSpawnCapability(checks);
+
   // --- Phase 1: Config-dependent checks (sequential, data dependencies) ---
   const configResult = checkConfig();
   if (configResult.config === null) {
@@ -1183,6 +1276,7 @@ async function diagnoseAsync() {
   issues += diagnoseVersion(config, getPackageVersion(), checks);
   // TemplateDir check (sync, no I/O)
   issues += diagnoseTemplateDir(config, checks);
+  // (Spawn capability probe already ran at the top of diagnoseAsync — #525.)
 
   // --- Phase 2: Fetch gitDir early (needed by hooks and adapters) ---
   const gitDirPromise = getGitDir();
@@ -1459,7 +1553,10 @@ function printReport(checks) {
   console.log('-----------------');
 
   for (const check of checks) {
-    const statusSymbol = check.status === 'PASS' ? ' ✓' : check.status === 'WARN' ? ' ⚠' : ' ✗';
+    // SKIP is "checked, not applicable" — rendering it as the failure symbol
+    // made a healthy machine look broken (#525 R1 touched this via the
+    // Spawn capability probe's SKIP branch).
+    const statusSymbol = check.status === 'PASS' ? ' ✓' : check.status === 'WARN' ? ' ⚠' : check.status === 'SKIP' ? ' –' : ' ✗';
     console.log(`  ${statusSymbol} ${check.name}: ${check.detail}`);
   }
 }
@@ -2235,8 +2332,11 @@ async function doctor(args) {
 }
 
 function formatDoctorJson(checks, issues) {
+  // missing_tools means "installable CLI tool absent" (#525 R1): the Spawn
+  // capability WARN is environmental (host sandbox) and must not appear here,
+  // or machine consumers would read a healthy machine as needing an install.
   const missing_tools = checks
-    .filter(c => c.status === 'WARN' || c.status === 'FAIL')
+    .filter(c => c.name !== 'Spawn capability' && (c.status === 'WARN' || c.status === 'FAIL'))
     .map(c => ({ name: c.name, detail: c.detail }));
   return {
     ok: issues === 0,
@@ -2272,4 +2372,7 @@ module.exports = {
   repoModuleSource,
   contentDelta,
   pathsEquivalent,
+  checkSpawnCapability,
+  execWithTimeout,
+  EBUSY_ATTRIBUTION,
 };
