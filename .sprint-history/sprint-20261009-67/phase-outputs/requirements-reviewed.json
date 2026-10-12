@@ -1,0 +1,42 @@
+{
+  "mode": "requirements",
+  "verdict": "APPROVED",
+  "timestamp": "2026-10-09T04:45:14Z",
+  "consensus_ratio": 1.0,
+  "requirements_hash": "3b5dc61c9dadcbeafa8b24fb413b074f22c40dfc38491b5055ebcfa753592eda",
+  "head_commit": "7f8f4d3899ec62953a0ec05f042551a62f8d4f2c",
+  "context_file_used": "CONTEXT.md",
+  "round": 3,
+  "expert_verdicts": [
+    {
+      "role": "architecture",
+      "verdict": "APPROVED",
+      "confidence": 8,
+      "result_type": "delphi_expert_result",
+      "requested_model": "deepseek-v4.1-flash"
+    },
+    {
+      "role": "technical",
+      "verdict": "APPROVED",
+      "confidence": 9,
+      "result_type": "delphi_expert_result",
+      "requested_model": "glm-5.3-flash"
+    },
+    {
+      "role": "feasibility",
+      "verdict": "APPROVED",
+      "confidence": 8,
+      "result_type": "delphi_expert_result",
+      "requested_model": "hy3"
+    }
+  ],
+  "requirements_statement": "#507 Java 质量门禁支持强化（AC v3，R3 三专家 APPROVED）：REQ-507-01 G1 接入 wc-java-lint（fail-closed：exit0=PASS/1=FAIL/>=2·JSON不可解析·超时=BLOCK；soft 逃生阀仅降级 BLOCK 类，exit1 绝不降级；发现逻辑兼容 .exe/.cmd 形态；--staged 契约+usage-error 回退显式文件列表；JSON 白名单 file/rule/severity/line + 加性演进容忍、必需字段缺失=BLOCK；超时 180s+.xp-gate/wc-java-lint-timeout；命中=替换 legacy/p3c/whalecloud 链，缺失=旧链回退+插件目录各自 WARN；lizard/simian 仅 G1 上报 G2/G3 零变化；polyglot 并行只收 .java）；REQ-507-02 G3 CCN 阈值三级覆盖（.xp-gate/ccn-threshold > XP_GATE_CCN_THRESHOLD > 默认5；非法值 WARN+回退；生效阈值写入审计）；REQ-507-03 SKIP-aware 评分（SCORE=PASS/(TOTAL-SKIP)*10，scale=1 舍入；WARN/BLOCK 计入分母不计入分子；有效分母0→score=N/A verdict=SKIP-ALL；verdict=PASS 要求有效分母内全部 PASS；新增 effective_pass_rate/skip_count 字段；无 SKIP 时与旧口径逐字节一致）；REQ-507-04 G4 Java 覆盖先审计后显式标注（禁止盲目 SKIP，清单落 docs/java-principles-coverage.md）；REQ-507-05 Build Integrity Java 分派（mvn/mvnw wrapper 优先 -q -DskipTests compile；mvn 缺失 SKIP+WARN；超时 180s 可覆盖；Gradle→SKIP+WARN；gate-9.sh SAST 零改动）；横切 DoD：镜像同步+字节 parity+用例更新+Windows Git Bash 实测+非 Java 回归断言",
+  "gaps_found": [],
+  "rounds_used": 3,
+  "escalation_needed": false,
+  "non_blocking_observations": [
+    "R1: SKIP 中立但不满足 verdict=PASS 的'全部 PASS'条件（score 可为 10.0 而 verdict 非 PASS），设计文档显式澄清",
+    "R2: soft 降级后进程退出码为非阻断，实现时写明",
+    "真实工具 --staged 规格确认 = whaleAudit 侧联调前置条件（设计文档假设清单登记）"
+  ]
+}
