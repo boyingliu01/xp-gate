@@ -61,18 +61,20 @@ POWERSHELL_ADAPTER="$BATS_TEST_DIRNAME/../adapters/powershell.sh"
 @test "python.sh runs guarded mypy over existing dirs only (#513)" {
   sandbox="$(mktemp -d)"
   cp -r "$BATS_TEST_DIRNAME/.." "$sandbox/githooks"
-  mkdir -p "$sandbox/stub" "$sandbox/repo/src" "$sandbox/repo/scripts"
+  mkdir -p "$sandbox/stub" "$sandbox/repo/src"
   echo "x = 1" > "$sandbox/repo/src/a.py"
   printf '#!/usr/bin/env bash\necho "$@" >> "%s/mypy.args"\nexit 0\n' "$sandbox" > "$sandbox/stub/mypy"
   chmod +x "$sandbox/stub/mypy"
   cd "$sandbox/repo" || return 1
-  # @intent: default探测 keeps CI-aligned surface when the dirs exist.
+  # @intent: default探测 keeps the CI-aligned surface, but a missing scripts/
+  #   (or any target without .py files) must not fire `mypy` at it (#513).
   # @covers scope-degradation
   export PATH="$sandbox/stub:$PATH"
   run bash -c "source '$sandbox/githooks/adapters/python.sh'; run_static_analysis"
   [ "$status" -eq 0 ]
-  grep -q 'src' "$sandbox/mypy.args"
-  grep -q 'scripts' "$sandbox/mypy.args"
+  grep -q '^src$' "$sandbox/mypy.args"
+  run grep -q 'scripts' "$sandbox/mypy.args"
+  [ "$status" -eq 1 ]
   rm -rf "$sandbox"
 }
 
@@ -81,6 +83,7 @@ POWERSHELL_ADAPTER="$BATS_TEST_DIRNAME/../adapters/powershell.sh"
   cp -r "$BATS_TEST_DIRNAME/.." "$sandbox/githooks"
   mkdir -p "$sandbox/stub" "$sandbox/repo/src" "$sandbox/repo/engine"
   printf 'engine\n' > "$sandbox/repo/.xp-gate-mypy-scope"
+  echo "x = 1" > "$sandbox/repo/engine/a.py"
   printf '#!/usr/bin/env bash\necho "$@" >> "%s/mypy.args"\nexit 0\n' "$sandbox" > "$sandbox/stub/mypy"
   chmod +x "$sandbox/stub/mypy"
   cd "$sandbox/repo" || return 1
@@ -124,6 +127,118 @@ POWERSHELL_ADAPTER="$BATS_TEST_DIRNAME/../adapters/powershell.sh"
   grep -q 'python3 -m mutmut' "$PYTHON_ADAPTER"
 }
 
+# --- #513 R1 delphi walkthrough hardening -------------------------------------
+
+@test "python.sh mypy runs PER TARGET, one invocation each (#513 R2: duplicate-module guard)" {
+  sandbox="$(mktemp -d)"
+  cp -r "$BATS_TEST_DIRNAME/.." "$sandbox/githooks"
+  mkdir -p "$sandbox/stub" "$sandbox/repo/src" "$sandbox/repo/scripts"
+  echo "x = 1" > "$sandbox/repo/src/a.py"
+  echo "x = 2" > "$sandbox/repo/scripts/a.py"   # same module name in both dirs
+  printf '#!/usr/bin/env bash\necho "$@" >> "%s/mypy.args"\nexit 0\n' "$sandbox" > "$sandbox/stub/mypy"
+  chmod +x "$sandbox/stub/mypy"
+  cd "$sandbox/repo" || return 1
+  # A merged `mypy src scripts` reports "Duplicate module named a" and exits 2;
+  # the CI type job runs one mypy per directory, so must the hook.
+  export PATH="$sandbox/stub:$PATH"
+  run bash -c "source '$sandbox/githooks/adapters/python.sh'; run_static_analysis"
+  [ "$status" -eq 0 ]
+  [ "$(wc -l < "$sandbox/mypy.args")" -eq 2 ]
+  grep -q '^src$' "$sandbox/mypy.args"
+  grep -q '^scripts$' "$sandbox/mypy.args"
+  rm -rf "$sandbox"
+}
+
+@test "python.sh mypy aggregates failures across per-target runs (#513 R2)" {
+  sandbox="$(mktemp -d)"
+  cp -r "$BATS_TEST_DIRNAME/.." "$sandbox/githooks"
+  mkdir -p "$sandbox/stub" "$sandbox/repo/src" "$sandbox/repo/scripts"
+  echo "x = 1" > "$sandbox/repo/src/a.py"
+  echo "x = 1" > "$sandbox/repo/scripts/b.py"
+  printf '#!/usr/bin/env bash\necho "$@" >> "%s/mypy.args"\ncase "$1" in src) exit 1;; esac\nexit 0\n' "$sandbox" > "$sandbox/stub/mypy"
+  chmod +x "$sandbox/stub/mypy"
+  cd "$sandbox/repo" || return 1
+  # A failing src/ run must not prevent scripts/ from being checked; the
+  # overall exit code still reports the failure.
+  export PATH="$sandbox/stub:$PATH"
+  run bash -c "source '$sandbox/githooks/adapters/python.sh'; run_static_analysis"
+  [ "$status" -eq 1 ]
+  grep -q '^scripts$' "$sandbox/mypy.args"
+  rm -rf "$sandbox"
+}
+
+@test "python.sh skips targets without .py files, not just missing dirs (#513 R2: no-py guard)" {
+  sandbox="$(mktemp -d)"
+  cp -r "$BATS_TEST_DIRNAME/.." "$sandbox/githooks"
+  mkdir -p "$sandbox/stub" "$sandbox/repo/src"   # TS-style src/: exists, zero .py
+  printf '#!/usr/bin/env bash\necho invoked > "%s/mypy.invoked"\nexit 0\n' "$sandbox" > "$sandbox/stub/mypy"
+  chmod +x "$sandbox/stub/mypy"
+  cd "$sandbox/repo" || return 1
+  # `mypy src` on a .py-less directory exits 2 ("There are no .py[i] files") —
+  # a TS repo committing any stray .py must not false-BLOCK.
+  export PATH="$sandbox/stub:$PATH"
+  run bash -c "source '$sandbox/githooks/adapters/python.sh'; run_static_analysis"
+  [ "$status" -eq 0 ]
+  [ ! -f "$sandbox/mypy.invoked" ]
+  echo "$output" | grep -q 'no type surface'
+  rm -rf "$sandbox"
+}
+
+@test "python.sh declares-empty .xp-gate-mypy-scope skips with a distinct WARNING (#513 R2)" {
+  sandbox="$(mktemp -d)"
+  cp -r "$BATS_TEST_DIRNAME/.." "$sandbox/githooks"
+  mkdir -p "$sandbox/stub" "$sandbox/repo"
+  printf '# only comments\n\n' > "$sandbox/repo/.xp-gate-mypy-scope"
+  printf '#!/usr/bin/env bash\necho invoked > "%s/mypy.invoked"\nexit 0\n' "$sandbox" > "$sandbox/stub/mypy"
+  chmod +x "$sandbox/stub/mypy"
+  cd "$sandbox/repo" || return 1
+  # An empty declaration must not be indistinguishable from a legit no-type-
+  # surface SKIP: it gets its own WARNING.
+  export PATH="$sandbox/stub:$PATH"
+  run bash -c "source '$sandbox/githooks/adapters/python.sh'; run_static_analysis"
+  [ "$status" -eq 0 ]
+  [ ! -f "$sandbox/mypy.invoked" ]
+  echo "$output" | grep -q 'present but empty'
+  rm -rf "$sandbox"
+}
+
+@test "python.sh WARNs and skips unusable declared targets, keeps usable ones (#513 R2)" {
+  sandbox="$(mktemp -d)"
+  cp -r "$BATS_TEST_DIRNAME/.." "$sandbox/githooks"
+  mkdir -p "$sandbox/stub" "$sandbox/repo/engine" "$sandbox/repo/ghost"
+  printf 'engine\ntypo-dir\nghost\n' > "$sandbox/repo/.xp-gate-mypy-scope"  # ghost: exists, no .py
+  echo "x = 1" > "$sandbox/repo/engine/a.py"
+  printf '#!/usr/bin/env bash\necho "$@" >> "%s/mypy.args"\nexit 0\n' "$sandbox" > "$sandbox/stub/mypy"
+  chmod +x "$sandbox/stub/mypy"
+  cd "$sandbox/repo" || return 1
+  export PATH="$sandbox/stub:$PATH"
+  run bash -c "source '$sandbox/githooks/adapters/python.sh'; run_static_analysis"
+  [ "$status" -eq 0 ]
+  echo "$output" | grep -q "declared target 'typo-dir' does not exist"
+  echo "$output" | grep -q "declared target 'ghost' does not exist"
+  grep -q '^engine$' "$sandbox/mypy.args"
+  run grep -q 'typo-dir' "$sandbox/mypy.args"
+  [ "$status" -eq 1 ]
+  rm -rf "$sandbox"
+}
+
+@test "python.sh inline comments and whitespace in .xp-gate-mypy-scope are tolerated (#513 R2)" {
+  sandbox="$(mktemp -d)"
+  cp -r "$BATS_TEST_DIRNAME/.." "$sandbox/githooks"
+  mkdir -p "$sandbox/stub" "$sandbox/repo/engine"
+  printf '  engine  # main package\n\n# full-line comment\n' > "$sandbox/repo/.xp-gate-mypy-scope"
+  echo "x = 1" > "$sandbox/repo/engine/a.py"
+  printf '#!/usr/bin/env bash\necho "$@" >> "%s/mypy.args"\nexit 0\n' "$sandbox" > "$sandbox/stub/mypy"
+  chmod +x "$sandbox/stub/mypy"
+  cd "$sandbox/repo" || return 1
+  export PATH="$sandbox/stub:$PATH"
+  run bash -c "source '$sandbox/githooks/adapters/python.sh'; run_static_analysis"
+  [ "$status" -eq 0 ]
+  grep -q '^engine$' "$sandbox/mypy.args"
+  [ "$(wc -l < "$sandbox/mypy.args")" -eq 1 ]
+  rm -rf "$sandbox"
+}
+
 # ============================================================================
 # powershell.sh — coverage exclusions + Pester 5 configuration object
 # ============================================================================
@@ -150,6 +265,20 @@ POWERSHELL_ADAPTER="$BATS_TEST_DIRNAME/../adapters/powershell.sh"
   # which reported nothing and blocked nothing — a no-op gate.
   run bash -c "grep -n 'WARNING: Coverage' '$POWERSHELL_ADAPTER'"
   [ "$status" -eq 1 ]
+}
+
+@test "python.sh no-type-surface repo SKIPs even when mypy is not installed (#513 R2)" {
+  sandbox="$(mktemp -d)"
+  cp -r "$BATS_TEST_DIRNAME/.." "$sandbox/githooks"
+  mkdir -p "$sandbox/emptybin" "$sandbox/repo"
+  cd "$sandbox/repo" || return 1
+  # require_tool must run AFTER target resolution: no surface + no mypy on
+  # PATH = nothing to check (SKIP), not a tool-unavailable BLOCK. /usr/bin:/bin
+  # keeps coreutils (dirname/cd) available while excluding any installed mypy.
+  run env PATH="/usr/bin:/bin" bash -c "source '$sandbox/githooks/adapters/python.sh'; run_static_analysis"
+  [ "$status" -eq 0 ]
+  echo "$output" | grep -q 'no type surface'
+  rm -rf "$sandbox"
 }
 
 @test "powershell.sh still parses: bash -n accepts both adapters" {
