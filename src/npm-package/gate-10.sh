@@ -57,74 +57,65 @@ else
 $SEMGREP_FILES
 EOF
 
-    # Run semgrep with JSON output
-    # --config=p/security-audit: explicit security ruleset
-    # --json: machine-readable output
-    # --disable-version-check: skip network call
-    SEMGREP_OUTPUT=$("$SEMGREP_CMD" scan --config=p/security-audit --json --disable-version-check "${SEMGREP_ARGS[@]}" 2>&1)
+    # Run semgrep with JSON output. stdout and stderr are captured SEPARATELY:
+    # --json writes findings to stdout, progress/summary lines to stderr, and the
+    # old `2>&1` merge poisoned the very JSON the verdict now depends on (#518).
+    # SEMGREP_OUTPUT keeps its name and role — what the tool said, printed on the
+    # SKIP path (AC-475-04).
+    #
+    # #518: the exit code does NOT carry the verdict. semgrep exits 0 even with
+    # ERROR-severity findings when --error is not passed, and --error is NOT an
+    # option here: with it, exit 2 is shared by "real findings" and "runtime
+    # failure", colliding with the AC-475-01/02 SKIP contract. The verdict is
+    # therefore read from the JSON; the exit code only tells us whether the tool
+    # itself ran to completion.
+    SEMGREP_STDOUT_FILE=$(mktemp)
+    SEMGREP_OUTPUT=$("$SEMGREP_CMD" scan --config=p/security-audit --json --disable-version-check "${SEMGREP_ARGS[@]}" 2>&1 >"$SEMGREP_STDOUT_FILE")
     SEMGREP_EXIT=$?
 
-    if [ "$SEMGREP_EXIT" -eq 0 ]; then
-      echo "     ✅ PASSED - No security vulnerabilities found (files scanned: ${#SEMGREP_ARGS[@]})."
-      GATE_10_STATUS="PASS"
-    elif [ "$SEMGREP_EXIT" -eq 1 ]; then
-      # Findings detected - parse JSON to categorize
-      CRITICAL_HIGH=$(echo "$SEMGREP_OUTPUT" | node -e "
-let d='';process.stdin.on('data',c=>d+=c);process.stdin.on('end',()=>{
-try{const data=JSON.parse(d);const results=data.results||[];
-const count=results.filter(r=>{const s=(r.extra&&r.extra.severity||'').toUpperCase();return s==='CRITICAL'||s==='HIGH';}).length;
-console.log(count);}catch(e){console.log('0');}
-});" 2>/dev/null || echo "0")
+    # One node pass over the JSON: first line = verdict counts, remaining lines =
+    # finding details. The severity vocabulary is the UNION of the two scales
+    # (#518): semgrep's own ERROR is its most severe tier (it maps to the old
+    # CRITICAL/HIGH → BLOCK intent), its WARNING/INFO align with the old
+    # MEDIUM/LOW → warnings-only tier. Parsing failure degrades to PARSE=FAIL —
+    # a fail-closed SKIP below, never a PASS.
+    SEMGREP_VERDICT=$(node -e '
+let d="";process.stdin.on("data",c=>d+=c);process.stdin.on("end",()=>{
+let data;try{data=JSON.parse(d);}catch(e){console.log("PARSE=FAIL RESULTS=0 ERRORS=0 BLOCKING=0 WARNINGS=0");return;}
+const results=data.results||[];const errors=data.errors||[];
+const sev=r=>((r.extra&&r.extra.severity)||"").toUpperCase();
+const BLOCK=["ERROR","CRITICAL","HIGH"];const WARNV=["WARNING","INFO","MEDIUM","LOW"];
+let b=0,w=0;results.forEach(r=>{const s=sev(r);if(BLOCK.indexOf(s)>=0)b++;else if(WARNV.indexOf(s)>=0)w++;});
+console.log("PARSE=OK RESULTS="+results.length+" ERRORS="+errors.length+" BLOCKING="+b+" WARNINGS="+w);
+results.slice(0,5).forEach(r=>{const extra=r.extra||{};const s=sev(r)||"UNKNOWN";
+console.log("  ["+s+"] "+(r.check_id||"unknown"));
+console.log("  "+(r.path||"unknown")+":"+((r.start&&r.start.line)||"?")+" → "+(extra.message||"").slice(0,80));
+console.log("");});
+});' < "$SEMGREP_STDOUT_FILE") || SEMGREP_VERDICT="PARSE=FAIL RESULTS=0 ERRORS=0 BLOCKING=0 WARNINGS=0"
+    rm -f "$SEMGREP_STDOUT_FILE"
 
-      MEDIUM_LOW=$(echo "$SEMGREP_OUTPUT" | node -e "
-let d='';process.stdin.on('data',c=>d+=c);process.stdin.on('end',()=>{
-try{const data=JSON.parse(d);const results=data.results||[];
-const count=results.filter(r=>{const s=(r.extra&&r.extra.severity||'').toUpperCase();return s==='MEDIUM'||s==='LOW';}).length;
-console.log(count);}catch(e){console.log('0');}
-});" 2>/dev/null || echo "0")
+    PARSE_LINE=$(printf '%s\n' "$SEMGREP_VERDICT" | sed -n '1p')
+    FINDING_DETAILS=$(printf '%s\n' "$SEMGREP_VERDICT" | sed -n '2,$p')
+    V_PARSE=$(printf '%s\n' "$PARSE_LINE" | sed -n 's/^PARSE=\([A-Z]*\) .*/\1/p')
+    V_RESULTS=$(printf '%s\n' "$PARSE_LINE" | sed -n 's/.* RESULTS=\([0-9]*\) .*/\1/p')
+    V_BLOCKING=$(printf '%s\n' "$PARSE_LINE" | sed -n 's/.* BLOCKING=\([0-9]*\) .*/\1/p')
+    V_WARNINGS=$(printf '%s\n' "$PARSE_LINE" | sed -n 's/.* WARNINGS=\([0-9]*\)$/\1/p')
 
-      # Extract top finding details
-      FINDING_DETAILS=$(echo "$SEMGREP_OUTPUT" | node -e "
-let d='';process.stdin.on('data',c=>d+=c);process.stdin.on('end',()=>{
-try{const data=JSON.parse(d);const results=data.results||[];
-results.slice(0,5).forEach(r=>{const extra=r.extra||{};
-const severity=(extra.severity||'UNKNOWN').toUpperCase();
-const ruleId=r.check_id||'unknown';const path=r.path||'unknown';
-const line=(r.start&&r.start.line)||'?';const msg=(extra.message||'').slice(0,80);
-console.log('  ['+severity+'] '+ruleId);console.log('  '+path+':'+line+' → '+msg);console.log();});
-}catch(e){console.log('  (Failed to parse semgrep output)');}
-});" 2>/dev/null || echo "  (Failed to parse semgrep output)")
-
-      if [ "$CRITICAL_HIGH" -gt 0 ]; then
-        echo ""
-        echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-        echo "   GATE 10: Semgrep Security Gate"
-        echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-        echo "  CRITICAL/HIGH: ${CRITICAL_HIGH}  ❌ BLOCKED"
-        echo "  MEDIUM/LOW:    ${MEDIUM_LOW}  ⚠️  warning"
-        echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-        echo "  ❌ BLOCKED — Critical/High vulnerability found"
-        echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-        echo "$FINDING_DETAILS"
-        echo "  Run 'semgrep scan --config=p/security-audit' to review all findings."
-        GATE_10_STATUS="FAIL"
-        exit 1
-      else
-        echo ""
-        echo "     ✅ PASSED - No critical/high vulnerabilities"
-        if [ "$MEDIUM_LOW" -gt 0 ]; then
-          echo "     ⚠️  ${MEDIUM_LOW} medium/low findings (warnings only)"
-          echo "$FINDING_DETAILS"
-        fi
-        GATE_10_STATUS="PASS"
+    # Fail closed: an OK parse with a missing count field means the verdict-line
+    # format drifted — that must SKIP, never silently degrade to PASS (#518).
+    if [ "$V_PARSE" != "OK" ] || [ -z "$V_RESULTS" ] || [ -z "$V_BLOCKING" ] || [ -z "$V_WARNINGS" ]; then
+      # Unparseable output: nothing the exit code claims can be trusted (#518).
+      # Fail closed — SKIP with diagnostics, never a PASS.
+      echo "     ⚠️  semgrep output unparseable or verdict fields missing (exit code ${SEMGREP_EXIT}) — cannot determine verdict"
+      if [ -n "$SEMGREP_OUTPUT" ]; then
+        echo "     ── what semgrep reported ──"
+        printf '%s\n' "$SEMGREP_OUTPUT" | tail -10 | sed 's/^/     /'
       fi
-    else
-      # semgrep runtime error (timeout, config error, etc.)
-      #
-      # SEMGREP_OUTPUT is captured above and was never shown here, so an intermittent
-      # ruleset-fetch failure looked identical to a broken install: the gate printed
-      # "runtime error" and kept the reason to itself (#475). The verdict stays SKIP --
-      # an operational failure must not block the commit, and must not be called a pass.
+      echo "     ⏭️  SKIPPED - SAST (semgrep output unparseable)"
+      GATE_10_STATUS="SKIP"
+    elif [ "$SEMGREP_EXIT" -ne 0 ] && [ "$V_RESULTS" -eq 0 ]; then
+      # Runtime/operational failure with no findings: nothing was scanned to a
+      # verdict, so the run must neither block nor claim a pass (#475 kept).
       echo "     ⚠️  semgrep exited with code ${SEMGREP_EXIT} — skipping gate"
       if [ -n "$SEMGREP_OUTPUT" ]; then
         echo "     ── what semgrep reported ──"
@@ -132,6 +123,28 @@ console.log('  ['+severity+'] '+ruleId);console.log('  '+path+':'+line+' → '+m
       fi
       echo "     ⏭️  SKIPPED - SAST (semgrep runtime error)"
       GATE_10_STATUS="SKIP"
+    elif [ "$V_BLOCKING" -gt 0 ]; then
+      echo ""
+      echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+      echo "   GATE 10: Semgrep Security Gate"
+      echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+      echo "  CRITICAL/HIGH/ERROR:     ${V_BLOCKING}  ❌ BLOCKED"
+      echo "  MEDIUM/LOW/WARNING/INFO: ${V_WARNINGS}  ⚠️  warning"
+      echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+      echo "  ❌ BLOCKED — blocking-severity vulnerability found"
+      echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+      echo "$FINDING_DETAILS"
+      echo "  Run 'semgrep scan --config=p/security-audit' to review all findings."
+      GATE_10_STATUS="FAIL"
+      exit 1
+    else
+      echo ""
+      echo "     ✅ PASSED - No blocking vulnerabilities (files scanned: ${#SEMGREP_ARGS[@]})"
+      if [ "$V_WARNINGS" -gt 0 ]; then
+        echo "     ⚠️  ${V_WARNINGS} non-blocking findings (warnings only)"
+        echo "$FINDING_DETAILS"
+      fi
+      GATE_10_STATUS="PASS"
     fi
   fi
 fi
