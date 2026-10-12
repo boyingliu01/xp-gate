@@ -86,3 +86,20 @@ sprint-flow（v2.1.0）在 DESIGN(R1 需求/R2 设计) 与 VERIFY(code-walkthrou
 - [ ] `hy3` 免费档在高峰期的排队情况对评审时长的影响待观察
 - [ ] xp-gate 重装/升级可能覆盖用户级 SKILL.md 的 WorkBuddy 节（init「已存在不覆盖」语义下的边界情况）
 - [ ] WorkBuddy MCP/插件市场若支持分发专家包，可考虑将 `docs/workbuddy-templates/` 做成可安装产物
+
+## 七、已知平台限制：会话内 node 同步 spawn 被沙箱拦截（EBUSY，#525）
+
+**现象**：WorkBuddy 桌面端会话终端里，node 进程内的**同步**子进程调用（`spawnSync` / `execSync`）一律返回 `EBUSY`；**异步** `child_process.spawn` 完全正常。同一台机器的外部终端、CI（Linux）、git 钩子链均不受影响。
+
+**已排除**：火绒 / Defender / 深信服 aTrust（托盘退出 + 驱动加载状态双重对照）、node 安装路径、目标 exe 身份。拦截主体是 WorkBuddy 自身沙箱（已向平台反馈）。
+
+**对 xp-gate 的影响**：
+
+- 会话内跑依赖 spawnSync 的诊断（doctor 部分检查、部分 gate 的 node 侧探测）会出现**假红**——"Not found / FAIL" 实为沙箱拦截
+- EBUSY 只会**假红不会假绿**：不存在「会话内通过、CI 报错」的风险；CI 是强制门禁
+
+**处置纪律**：
+
+1. 会话内子进程验证改用异步 `child_process.spawn`（实测完全可用）
+2. spawnSync 类测试在会话内红 → 换 CI / 外部终端 / git 钩子链验证，**绝不改产品代码迁就沙箱**
+3. `xp-gate doctor` 的 `Spawn capability` 检查项会在 EBUSY 时给出 WARN + 归因文案（WARN 不计入 issues 总数）

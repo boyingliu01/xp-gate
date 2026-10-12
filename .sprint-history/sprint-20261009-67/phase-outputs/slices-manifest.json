@@ -1,0 +1,52 @@
+{
+  "sprint": "2026-10-09-1",
+  "source_issue": "507",
+  "design_doc": "docs/plans/2026-10-09-java-gate-hardening-design.md",
+  "slices": [
+    {
+      "id": "S2-ccn-threshold",
+      "title": "G3 CCN 阈值三级覆盖",
+      "reqs": ["REQ-507-02"],
+      "acs": ["AC-507-02-01", "AC-507-02-02", "AC-507-02-03", "AC-507-02-04", "AC-507-02-05"],
+      "files": ["githooks/gate-3.sh", "githooks/__tests__/", "src/npm-package/"],
+      "execution_order": 1,
+      "blocked_by": []
+    },
+    {
+      "id": "S4-g4-coverage",
+      "title": "G4 Java 覆盖显式化（先审计后标注）",
+      "reqs": ["REQ-507-04"],
+      "acs": ["AC-507-04-01", "AC-507-04-02", "AC-507-04-03"],
+      "files": ["githooks/gate-4.sh", "docs/java-principles-coverage.md", "githooks/__tests__/"],
+      "execution_order": 2,
+      "blocked_by": []
+    },
+    {
+      "id": "S1-wc-java-lint",
+      "title": "G1 接入 wc-java-lint（fail-closed 引擎 + stub fixture）",
+      "reqs": ["REQ-507-01"],
+      "acs": ["AC-507-01-01", "AC-507-01-02", "AC-507-01-03", "AC-507-01-04", "AC-507-01-05", "AC-507-01-06", "AC-507-01-07", "AC-507-01-08", "AC-507-01-09", "AC-507-01-10"],
+      "files": ["githooks/adapters/java.sh", "githooks/__tests__/", "src/npm-package/"],
+      "execution_order": 3,
+      "blocked_by": []
+    },
+    {
+      "id": "S3-skip-aware-score",
+      "title": "SKIP-aware 评分口径 + 新增报告字段",
+      "reqs": ["REQ-507-03"],
+      "acs": ["AC-507-03-01", "AC-507-03-02", "AC-507-03-03", "AC-507-03-04", "AC-507-03-05"],
+      "files": ["githooks/pre-commit", "githooks/__tests__/", "src/npm-package/"],
+      "execution_order": 4,
+      "blocked_by": ["S1-wc-java-lint"]
+    },
+    {
+      "id": "S5-build-integrity-java",
+      "title": "Build Integrity Java 分派（mvn compile）",
+      "reqs": ["REQ-507-05"],
+      "acs": ["AC-507-05-01", "AC-507-05-02", "AC-507-05-03", "AC-507-05-04", "AC-507-05-05"],
+      "files": ["githooks/pre-commit", "src/build-integrity/", "githooks/__tests__/"],
+      "execution_order": 5,
+      "blocked_by": []
+    }
+  ]
+}

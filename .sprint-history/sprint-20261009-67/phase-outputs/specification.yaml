@@ -1,0 +1,146 @@
+# Sprint #507 specification（AC v3，R1 三专家 3 轮 APPROVED）
+specification:
+  requirements:
+    - id: REQ-507-01
+      description: G1 接入 wc-java-lint 作为 Java 静态分析引擎，fail-closed 判定，兼容多形态发现，
+        替换 legacy/p3c/whalecloud 链，polyglot 只收 staged .java
+      priority: critical
+    - id: REQ-507-02
+      description: G3 CCN 阈值三级覆盖（.xp-gate/ccn-threshold > XP_GATE_CCN_THRESHOLD > 默认 5），
+        非法值 WARN+回退，生效阈值写入审计输出
+      priority: high
+    - id: REQ-507-03
+      description: SKIP-aware 评分：SCORE = PASS/(TOTAL-SKIP)*10（scale=1 舍入），WARN/BLOCK 计入
+        分母不计入分子，有效分母 0 → N/A/SKIP-ALL，verdict=PASS 要求有效分母内全部 PASS，
+        新增 effective_pass_rate/skip_count 字段，无 SKIP 时与旧口径逐字节一致
+      priority: high
+    - id: REQ-507-04
+      description: G4 Java 覆盖先审计后显式标注：产出 docs/java-principles-coverage.md，G4 输出
+        Java 实际执行规则数，禁止盲目 SKIP（仅零覆盖才允许 SKIP+原因）
+      priority: medium
+    - id: REQ-507-05
+      description: Build Integrity Java 分派（pre-commit 内联段 + src/build-integrity/gate-10.ts）：
+        mvn/mvnw wrapper 优先 -q -DskipTests compile；mvn 缺失 SKIP+WARN；超时 180s 可覆盖；
+        Gradle-only SKIP+WARN；githooks/gate-9.sh（SAST）零改动
+      priority: high
+  acceptance_criteria:
+    - id: AC-507-01-01
+      requirement: REQ-507-01
+      criteria: wc-java-lint 在 PATH 且 staged 含 .java → java.sh 调用 wc-java-lint check --staged --format json，
+        不直调 checkstyle/pmd、不跑 p3c/whalecloud 插件链（stub 调用记录断言）
+      test_type: unit
+    - id: AC-507-01-02
+      requirement: REQ-507-01
+      criteria: stub exit 0 → PASS；stub exit 1 + 违规 JSON → FAIL 且输出违规数/文件；stub exit 2 /
+        畸形 JSON / 超时 → BLOCK + 明确报错（fail-closed）
+      test_type: unit
+    - id: AC-507-01-03
+      requirement: REQ-507-01
+      criteria: wc-java-lint 不在 PATH → 回退 legacy checkstyle/pmd；两者皆缺 → 显式 WARN 且 verdict
+        不得为 PASS，audit 记录 warn；p3c-java、whalecloud-java 插件目录各自缺失分别 WARN
+      test_type: unit
+    - id: AC-507-01-04
+      requirement: REQ-507-01
+      criteria: XP_GATE_WC_JAVA_LINT=soft 仅将 BLOCK 类（exit≥2/超时/JSON 不可解析）降级为 SKIP+WARN，
+        exit 1 的违规 FAIL 绝不降级（stub 三态断言）；soft 下进程退出码非阻断
+      test_type: unit
+    - id: AC-507-01-05
+      requirement: REQ-507-01
+      criteria: 发现逻辑显式兼容多形态（command -v wc-java-lint || .exe || .cmd）；Windows Git Bash 下
+        .cmd 形态 stub 实测 java.sh 能发现并执行
+      test_type: integration
+    - id: AC-507-01-06
+      requirement: REQ-507-01
+      criteria: 工具不支持 --staged（usage error, exit≥2）时回退为显式 staged 文件列表调用（stub 模拟两种形态，两态都有断言）
+      test_type: unit
+    - id: AC-507-01-07
+      requirement: REQ-507-01
+      criteria: JSON 含未知字段不失败（加性演进容忍）；缺白名单必需字段（file/rule/severity）→ 视为不可解析 → BLOCK
+      test_type: unit
+    - id: AC-507-01-08
+      requirement: REQ-507-01
+      criteria: wc-java-lint 输出中的 CCN/重复度发现仅计入 G1 上报；gate-2.sh（jscpd）与 gate-3.sh（lizard）行为零变化
+      test_type: unit
+    - id: AC-507-01-09
+      requirement: REQ-507-01
+      criteria: wc-java-lint 执行超时默认 180s，.xp-gate/wc-java-lint-timeout 可覆盖（stub 模拟挂起）
+      test_type: unit
+    - id: AC-507-01-10
+      requirement: REQ-507-01
+      criteria: TS+Java 混合 staged → typescript 与 java 适配器并行执行，wc-java-lint 仅收到 .java 文件集，互不污染
+      test_type: integration
+    - id: AC-507-02-01
+      requirement: REQ-507-02
+      criteria: .xp-gate/ccn-threshold 为正整数 → 生效
+      test_type: unit
+    - id: AC-507-02-02
+      requirement: REQ-507-02
+      criteria: 环境变量 XP_GATE_CCN_THRESHOLD 合法 → 生效；文件优先于环境变量
+      test_type: unit
+    - id: AC-507-02-03
+      requirement: REQ-507-02
+      criteria: 非法值（非数字/0/负数/空）→ WARN + 回退 5
+      test_type: unit
+    - id: AC-507-02-04
+      requirement: REQ-507-02
+      criteria: 实际生效阈值写入 gate-3 审计输出
+      test_type: unit
+    - id: AC-507-02-05
+      requirement: REQ-507-02
+      criteria: 未配置时与旧版行为一致（默认 5）
+      test_type: unit
+    - id: AC-507-03-01
+      requirement: REQ-507-03
+      criteria: SCORE = PASS/(TOTAL-SKIP)*10；给定 12 门禁、3 SKIP、9 PASS → score=10.0（scale=1 舍入），
+        含 SKIP 的文档类提交分数显著高于旧口径的 6.0-6.7
+      test_type: unit
+    - id: AC-507-03-02
+      requirement: REQ-507-03
+      criteria: 无任何 SKIP 时分数与旧口径逐字节一致（快照测试）
+      test_type: unit
+    - id: AC-507-03-03
+      requirement: REQ-507-03
+      criteria: 有效分母 0 → score=N/A、verdict=SKIP-ALL（绝不 10/10）
+      test_type: unit
+    - id: AC-507-03-04
+      requirement: REQ-507-03
+      criteria: WARN 计入分母、不计入分子（显式断言）；BLOCK 等价 FAIL 计入分母（非通过项）
+      test_type: unit
+    - id: AC-507-03-05
+      requirement: REQ-507-03
+      criteria: quality-status JSON 与 history.jsonl 新增 effective_pass_rate、skip_count；有效分母内全部
+        PASS（无 FAIL/BLOCK/SKIP/WARN）→ verdict=PASS；存在 WARN → 有效通过率<100% 且 verdict 不得为 PASS
+      test_type: unit
+    - id: AC-507-04-01
+      requirement: REQ-507-04
+      criteria: 审计 java.ts 对各 principles 规则的适用性并产出覆盖清单文档 docs/java-principles-coverage.md（纳入仓库）
+      test_type: documentation
+    - id: AC-507-04-02
+      requirement: REQ-507-04
+      criteria: G4 对 Java 提交输出实际执行的规则数（显式覆盖标注）
+      test_type: unit
+    - id: AC-507-04-03
+      requirement: REQ-507-04
+      criteria: 仅当审计证实零覆盖才允许 SKIP+原因；否则禁止 SKIP（回归保护）
+      test_type: unit
+    - id: AC-507-05-01
+      requirement: REQ-507-05
+      criteria: staged 含 .java 且 mvn 或 ./mvnw（wrapper 优先）存在且存在 pom.xml → pre-commit Build Integrity
+        段执行 mvn -q -DskipTests compile（或经 wrapper 等价调用）
+      test_type: unit
+    - id: AC-507-05-02
+      requirement: REQ-507-05
+      criteria: mvn 存在但编译失败 → FAIL；mvn 不在 PATH → SKIP+WARN
+      test_type: unit
+    - id: AC-507-05-03
+      requirement: REQ-507-05
+      criteria: 超时默认 180s，.xp-gate/build-integrity-timeout 可覆盖
+      test_type: unit
+    - id: AC-507-05-04
+      requirement: REQ-507-05
+      criteria: TS 项目行为不变；githooks/gate-9.sh（SAST）零改动
+      test_type: unit
+    - id: AC-507-05-05
+      requirement: REQ-507-05
+      criteria: build.gradle 存在而 pom.xml 不存在 → Build Integrity SKIP+WARN（gradle 支持记 backlog）
+      test_type: unit
