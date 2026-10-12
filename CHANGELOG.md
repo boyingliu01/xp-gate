@@ -2,12 +2,6 @@
 
 All notable changes to this project will be documented in this file.
 
-## [0.20.2.0] - 2026-10-12
-
-### Added
-
-- **doctor 环境检查新增 `Spawn capability`（#525）**: 检测宿主环境对 node **同步**子进程调用（spawnSync/execSync）的拦截。命中 EBUSY（实测为 WorkBuddy 桌面会话沙箱行为）时输出 **WARN + 固定归因文案**（WARN 不计入 issues 总数、不改变退出码——环境限制不是仓库缺陷），并指明可用通道：会话内改用异步 `child_process.spawn`、验证走 CI / 外部终端 / git 钩子链。`execWithTimeout` 捕获 EBUSY 时向 stderr 输出一次归因，替代裸 null（裸 null 曾被误读为"工具缺失"并造成一整轮误诊）。探针使用 `process.execPath`，PATH 差异不影响判定。测试全部 mock spawnSync——断言真实 spawn 路径的用例会在沙箱内自己变红，是随终端换判决的伪测试。文档：docs/platform-workbuddy.md 第七节。
-
 ## [Unreleased] - #507 Java 门禁加固 sprint
 
 ### Changed（含破坏性变更）
@@ -17,6 +11,12 @@ All notable changes to this project will be documented in this file.
 - **GATE 9 子状态聚合（#507 S5 + Delphi round-1 B-MAJOR-4）**: TS/Java 两半各自记录 PASS/SKIP/BLOCK，聚合为 PASS（任一半真实通过）/SKIP（全部跳过）/BLOCK；Maven-only 仓库编译通过现在正确记 PASS。
 - **评分单路径化**: 废弃 bc 分支（scale=1 先截断除法，与 awk %.1f 舍入实质分叉），awk 为唯一实现。
 - **镜像守卫扩展**: `scripts/check-hook-mirror.sh` 新增根级 gate 脚本副本与 `src/principles → src/npm-package/principles` 全树 parity 检查（先前无守卫，#507 Delphi round-1 A-MAJOR-4）。
+
+## [0.20.2.0] - 2026-10-12
+
+### Added
+
+- **doctor 环境检查新增 `Spawn capability`（#525）**: 检测宿主环境对 node **同步**子进程调用（spawnSync/execSync）的拦截。命中 EBUSY（实测为 WorkBuddy 桌面会话沙箱行为）时输出 **WARN + 固定归因文案**（WARN 不计入 issues 总数、不改变退出码、不进入 `--format json` 的 `missing_tools`——环境限制不是仓库缺陷），并指明可用通道：会话内改用异步 `child_process.spawn`、验证走 CI / 外部终端 / git 钩子链。doctor 内全部同步 spawn 封装（`getGitDirSync`/`getCurrentHooksPathSync`/`defaultProjectGithooks`/`printEffectiveHooks`/`execWithTimeout`）捕获 EBUSY 时输出归因并去重到单次诊断，替代裸 null（裸 null 曾被误读为"工具缺失"并造成一整轮误诊）；探针 WARN 时额外提示"本报告其他 FAIL/WARN 可能同因"。探针使用 `process.execPath`，PATH 差异不影响判定；`printReport` 的 SKIP 行不再渲染为失败符号。测试全部 mock spawnSync——断言真实 spawn 路径的用例会在沙箱内自己变红，是随终端换判决的伪测试。文档：docs/platform-workbuddy.md 第七节。
 
 ## [0.20.1.0] - 2026-10-08
 
