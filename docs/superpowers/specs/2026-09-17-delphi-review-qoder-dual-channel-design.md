@@ -1,9 +1,24 @@
 # Delphi Review Qoder 双通道适配设计（内置优先 + 外部 API 降级）
 
 **日期**: 2026-09-17
-**状态**: Draft v1（待 delphi-review）
+**状态**: Draft v1（待 delphi-review）——**⚠️ 已被 2026-09-23 实测部分推翻，见下方时效性更正**
 **平台影响**: Qoder（主要）；OpenCode 与 Gate MW 校验器零改动
 **前序设计**: `2026-07-21-delphi-review-qoder-cross-model-design.md`（本文档继承其外部 API 通道设计，并修正其"仅 OpenCode 可用"的分支归属）
+
+---
+
+## ⚠️ 时效性更正（2026-10-13，delphi 三专家走查共识后追加）
+
+本文写于 2026-09-17。其后 **2026-09-23 的排除混杂因素复测**（已固化于 `skills/delphi-review/SKILL.md` Qoder 章节）实证：Qoder `subagent_type` 派发路径**采纳 Custom Agent 的提示词但丢弃其 `model:` 绑定**——三个 subagent 的 `turn.started` / `model.request.started` / `model.response.completed` 全部记录为会话模型，绑定的互异模型 ID 出现 0 次。由此：
+
+1. **native-first 前提失效（覆盖本文 REQ-1 的核心假设与 Phase 0 决策表）**：native 通道永远无法满足「三个 distinct executable model IDs」契约，不是概率性风险而是结构性不可能。
+2. **Gate MW 结构性排除 native**：三专家实际同为会话模型 → `resolved_model` 去重必失败；且本文提议的 `channel: native` 取值不在校验器白名单（`external|local`，见 `githooks/lib/validate-code-walkthrough.cjs`）内。同名 `channel` 字段语义冲突，实现时顶层字段应改名（如 `review_channel`）以避免误用。
+3. **Phase 0 探测对该失效模式失明**：「发 ping、回 OK」式的探测无法发现 model 绑定被丢弃——agent 跑在错误模型上照样正常回 OK。本文的自动降级逻辑在 Qoder 上会退化为「自动假装成功」。
+4. **修正后的定位**：**external 通道是 Qoder 上唯一契约合规路径**；native（Custom Agent 三角色）仅可作同模型自查，不得计入多模型共识、不得作为 Gate MW 凭据。REQ-4（delphi-setup 改写 agent 模型名）对契约合规是 no-op，应改为引导用户配置 external profile。
+5. **仍然有效的部分**：REQ-2（skill 官方安装通道）、REQ-3（doctor 自检）、REQ-5（schema 失败收紧重试）、REQ-6（版本一致性可检测）与平台无关，保留价值，可作为后续实现基线。
+6. **范围声明**：本文仅覆盖 Qoder；issue #443（DSH 平台误用昂贵国外模型）的诉求不在本设计范围内。文档头部「内置优先」的立论按上述第 4 点重新解读。
+
+后续实现应以 `skills/delphi-review/SKILL.md` 现行章节为准；本文其余部分按 2026-09-17 原稿保留，作为设计演进记录。
 
 ---
 
