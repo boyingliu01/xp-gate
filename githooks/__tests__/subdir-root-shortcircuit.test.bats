@@ -5,6 +5,9 @@
 # setuptools root) — Gates 1-9 then ran from the wrong cwd and false-BLOCKed
 # on root-relative paths (#515). covers: root-marker short-circuit.
 #
+# R2 (delphi walkthrough): marker set aligned with _detect_subdir's full set;
+# npm workspaces roots keep deriving; every structural pin fails loudly.
+#
 # The functional tests extract the hook's REAL derivation block (from
 # `PROJECT_SUBDIR=""` up to the subdirectory-fallback comment) and execute it in
 # a sandbox, so they lock the hook's behaviour rather than a re-implementation.
@@ -33,26 +36,38 @@ DRIVE
   mkdir -p "$SBX_REPO"
 }
 
-_teardown_sandbox() {
-  unset SBX_REPO SBX_LANGS SBX_CHANGED SBX_SECTION SBX_DRIVE
-  [ -n "$sandbox" ] && rm -rf "$sandbox"
+teardown() {
+  if [ -n "${sandbox:-}" ]; then
+    rm -rf "$sandbox"
+    sandbox=""
+  fi
+  unset SBX_REPO SBX_LANGS SBX_CHANGED SBX_SECTION SBX_DRIVE sandbox
 }
 
-@test "pre-commit short-circuits subdir derivation when repo root declares the project (#515)" {
-  grep -q "_skip_subdir_derive" "$HOOK"
-}
-
-@test "short-circuit recognizes pyproject/package.json/setup.py/go.mod/pom.xml root markers (#515)" {
-  run grep -B6 "_skip_subdir_derive=1" "$HOOK"
+@test "structural: root short-circuit pins the full _detect_subdir marker set + workspaces exception (#515)" {
+  # Extract from the #515 comment down to the derivation loop entry; the
+  # short-circuit block always sits between those two anchors.
+  run sed -n '/# #515: when the repo ROOT/,/_subdir_set=/p' "$HOOK"
   [ "$status" -eq 0 ]
-  for marker in pyproject.toml package.json setup.py go.mod pom.xml; do
-    echo "$output" | grep -q -- "-f $marker"
+  block="$output"
+  [ -n "$block" ] || fail "short-circuit block anchors moved — extraction empty"
+  # -F is mandatory: without it the [ ] in the pattern is a BRE character class
+  # and matches anything, making every marker check vacuous (#515 R2 review).
+  for marker in tsconfig.json package.json pyproject.toml setup.py go.mod pubspec.yaml pom.xml build.gradle build.gradle.kts CMakeLists.txt; do
+    echo "$block" | grep -qF -- "[ -f $marker ]" || fail "root short-circuit missing marker: $marker"
   done
+  # The JS-monorepo check must run FIRST (before the short-circuit OR-chain),
+  # otherwise a root tsconfig.json alongside package.json{workspaces} bypasses
+  # the exception (#515 R2 critical finding).
+  first_if_line=$(echo "$block" | grep -n '^    if ' | head -1 | cut -d: -f1)
+  [ -n "$first_if_line" ] || fail "no if statement found in short-circuit block"
+  echo "$block" | sed -n "${first_if_line}p" | grep -qF 'workspaces' || fail "workspaces check must be the first branch (order matters)"
+  echo "$block" | grep -qF '"workspaces":' || fail "npm workspaces monorepo exception missing from short-circuit"
 }
 
 @test "functional: root pyproject.toml + nested setup.py leaves PROJECT_SUBDIR empty (#515)" {
   _setup_sandbox
-  _extract_section "$SBX_SECTION"
+  _extract_section "$SBX_SECTION" || fail "derivation block extraction failed (anchors moved?)"
   printf '[project]\n' > "$SBX_REPO/pyproject.toml"
   mkdir -p "$SBX_REPO/pkg" && printf 'x = 1\n' > "$SBX_REPO/pkg/setup.py"
   SBX_CHANGED="pkg/setup.py" run bash "$SBX_DRIVE"
@@ -60,38 +75,83 @@ _teardown_sandbox() {
   [ "$status" -eq 0 ]
   [[ "$output" != *"SUBDIR DETECTED"* ]]
   [[ "$output" == *"SUBDIR=[]"* ]]
-  _teardown_sandbox
 }
 
 @test "functional: root package.json + nested module marker is not hijacked (#515)" {
   _setup_sandbox
-  _extract_section "$SBX_SECTION"
+  _extract_section "$SBX_SECTION" || fail "derivation block extraction failed (anchors moved?)"
   printf '{}\n' > "$SBX_REPO/package.json"
   mkdir -p "$SBX_REPO/tools" && printf '{}\n' > "$SBX_REPO/tools/package.json"
   SBX_LANGS="typescript" SBX_CHANGED="tools/app.ts" run bash "$SBX_DRIVE"
   echo "$output"
+  [ "$status" -eq 0 ]
   [[ "$output" == *"SUBDIR=[]"* ]]
-  _teardown_sandbox
 }
 
-@test "functional: monorepo without root markers still derives subdir (#515 unchanged behavior)" {
+@test "functional: npm workspaces monorepo root keeps deriving subdir (#515 R2 regression lock)" {
   _setup_sandbox
-  _extract_section "$SBX_SECTION"
+  _extract_section "$SBX_SECTION" || fail "derivation block extraction failed (anchors moved?)"
+  printf '{\n  "workspaces": ["packages/*"]\n}\n' > "$SBX_REPO/package.json"
   mkdir -p "$SBX_REPO/packages/front"
   printf '{}\n' > "$SBX_REPO/packages/front/package.json"
   SBX_LANGS="typescript" SBX_CHANGED="packages/front/app.ts" run bash "$SBX_DRIVE"
   echo "$output"
+  [ "$status" -eq 0 ]
   [[ "$output" == *"SUBDIR DETECTED"* ]]
   [[ "$output" == *"SUBDIR=[packages/front]"* ]]
-  _teardown_sandbox
 }
 
-@test "functional: short-circuit is skipped when no changed file is nested (#515 no-op)" {
+@test "functional: workspaces root with shared tsconfig.json still derives (#515 R2 critical regression lock)" {
+  # Most common JS monorepo layout: root package.json{workspaces} + root
+  # tsconfig.json (shared base config inherited by every package). The
+  # workspaces check must win over the tsconfig root marker.
   _setup_sandbox
-  _extract_section "$SBX_SECTION"
+  _extract_section "$SBX_SECTION" || fail "derivation block extraction failed (anchors moved?)"
+  printf '{\n  "workspaces": ["packages/*"]\n}\n' > "$SBX_REPO/package.json"
+  printf '{\n  "compilerOptions": {}\n}\n' > "$SBX_REPO/tsconfig.json"
+  mkdir -p "$SBX_REPO/packages/front"
+  printf '{}\n' > "$SBX_REPO/packages/front/package.json"
+  SBX_LANGS="typescript" SBX_CHANGED="packages/front/app.ts" run bash "$SBX_DRIVE"
+  echo "$output"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"SUBDIR DETECTED"* ]]
+  [[ "$output" == *"SUBDIR=[packages/front]"* ]]
+}
+
+@test "functional: monorepo without root markers still derives subdir (#515 unchanged behavior)" {
+  _setup_sandbox
+  _extract_section "$SBX_SECTION" || fail "derivation block extraction failed (anchors moved?)"
+  mkdir -p "$SBX_REPO/packages/front"
+  printf '{}\n' > "$SBX_REPO/packages/front/package.json"
+  SBX_LANGS="typescript" SBX_CHANGED="packages/front/app.ts" run bash "$SBX_DRIVE"
+  echo "$output"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"SUBDIR DETECTED"* ]]
+  [[ "$output" == *"SUBDIR=[packages/front]"* ]]
+}
+
+@test "functional: root build.gradle short-circuits — pinned known limitation for gradle multi-module (#515 R2)" {
+  _setup_sandbox
+  _extract_section "$SBX_SECTION" || fail "derivation block extraction failed (anchors moved?)"
+  printf 'apply plugin: "java"\n' > "$SBX_REPO/build.gradle"
+  mkdir -p "$SBX_REPO/services/api"
+  printf 'apply plugin: "java"\n' > "$SBX_REPO/services/api/build.gradle"
+  SBX_LANGS="java" SBX_CHANGED="services/api/src/main/java/App.java" run bash "$SBX_DRIVE"
+  echo "$output"
+  [ "$status" -eq 0 ]
+  # Deliberately pinned: root marker wins, nested gradle module is NOT derived.
+  # If this expectation ever changes (per-module disambiguation), update the
+  # hook and this pin together — see the follow-up issue referenced in
+  # pre-commit's short-circuit comment.
+  [[ "$output" == *"SUBDIR=[]"* ]]
+}
+
+@test "functional: no nested marker hit keeps SUBDIR empty on a declaring root (#515 no-op)" {
+  _setup_sandbox
+  _extract_section "$SBX_SECTION" || fail "derivation block extraction failed (anchors moved?)"
   printf '[project]\n' > "$SBX_REPO/pyproject.toml"
   SBX_CHANGED="engine/metrics.py" run bash "$SBX_DRIVE"
   echo "$output"
+  [ "$status" -eq 0 ]
   [[ "$output" == *"SUBDIR=[]"* ]]
-  _teardown_sandbox
 }
