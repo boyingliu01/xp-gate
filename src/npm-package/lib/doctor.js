@@ -1,6 +1,6 @@
 const fs = require('fs');
 const path = require('path');
-const { execSync } = require('child_process');
+const { execSync, spawnSync } = require('child_process');
 const { exec } = require('child_process');
 const util = require('util');
 const execAsync = util.promisify(exec);
@@ -63,9 +63,25 @@ const EXEC_TIMEOUT_MS = 1500;
 const GLOBAL_DIAGNOSIS_TIMEOUT_MS = 10000;
 
 /**
+ * Fixed attribution text for the WorkBuddy-desktop sandbox restriction (#525).
+ *
+ * In a WorkBuddy desktop session, a node process's *synchronous* child-process
+ * calls (spawnSync/execSync) always fail with EBUSY, while async spawn works;
+ * external terminals, CI and git hook chains are unaffected. The interception
+ * layer belongs to the host application, not to xp-gate or any antivirus, so
+ * the only correct response is to name it and point at the working channels.
+ */
+const EBUSY_ATTRIBUTION = 'sync spawn blocked by host sandbox (EBUSY) -- likely WorkBuddy desktop session; '
+  + 'use async child_process.spawn in-session, verify via CI / external terminal / git hook chain. '
+  + 'NOT a code or antivirus problem.';
+
+/**
  * Execute a command with a hard timeout using async exec.
  * Returns { stdout, stderr } on success, null on failure/timeout.
  */
+// One attribution line per doctor run is a diagnosis; one per check is noise.
+let ebusyAttributionShown = false;
+
 async function execWithTimeout(cmd, opts = {}) {
   try {
     const { stdout, stderr } = await execAsync(cmd, {
@@ -73,9 +89,49 @@ async function execWithTimeout(cmd, opts = {}) {
       timeout: opts.timeout || EXEC_TIMEOUT_MS,
     });
     return { stdout: stdout.trim(), stderr: stderr.trim() };
-  } catch {
+  } catch (err) {
+    // #525: a bare null here reads as "tool missing" and has already cost a
+    // misdiagnosis round. Name the sandbox once when it is the sandbox.
+    if (err && err.code === 'EBUSY' && !ebusyAttributionShown) {
+      ebusyAttributionShown = true;
+      console.error(`  ⚠ ${EBUSY_ATTRIBUTION}`);
+    }
     return null;
   }
+}
+
+/**
+ * Probe whether synchronous child-process creation works in this process (#525).
+ *
+ * @param {Array<{name: string, status: string, detail: string}>} checks — mutated
+ * @returns {number} always 0 — a sandbox WARN is environmental, never an issue count
+ */
+function checkSpawnCapability(checks) {
+  let result;
+  try {
+    result = spawnSync(process.execPath, ['--version'], {
+      encoding: 'utf8',
+      timeout: EXEC_TIMEOUT_MS,
+      stdio: ['pipe', 'pipe', 'pipe'],
+    });
+  } catch (err) {
+    checks.push({ name: 'Spawn capability', status: 'SKIP', detail: `probe could not run: ${err.message}` });
+    return 0;
+  }
+  if (!result.error) {
+    checks.push({
+      name: 'Spawn capability',
+      status: 'PASS',
+      detail: `sync spawn OK (node ${(result.stdout || '').trim() || 'unknown'})`,
+    });
+    return 0;
+  }
+  if (result.error.code === 'EBUSY') {
+    checks.push({ name: 'Spawn capability', status: 'WARN', detail: EBUSY_ATTRIBUTION });
+    return 0;
+  }
+  checks.push({ name: 'Spawn capability', status: 'SKIP', detail: `probe error: ${result.error.code || result.error.message}` });
+  return 0;
 }
 
 function isXpGateFile(filePath, signature) {
@@ -1183,6 +1239,9 @@ async function diagnoseAsync() {
   issues += diagnoseVersion(config, getPackageVersion(), checks);
   // TemplateDir check (sync, no I/O)
   issues += diagnoseTemplateDir(config, checks);
+  // Spawn capability probe (sync, no project I/O) — #525: a WARN here is
+  // environmental (host sandbox), so it never enters the issue count.
+  checkSpawnCapability(checks);
 
   // --- Phase 2: Fetch gitDir early (needed by hooks and adapters) ---
   const gitDirPromise = getGitDir();
@@ -2272,4 +2331,7 @@ module.exports = {
   repoModuleSource,
   contentDelta,
   pathsEquivalent,
+  checkSpawnCapability,
+  execWithTimeout,
+  EBUSY_ATTRIBUTION,
 };

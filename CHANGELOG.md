@@ -2,6 +2,12 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.20.2.0] - 2026-10-12
+
+### Added
+
+- **doctor 环境检查新增 `Spawn capability`（#525）**: 检测宿主环境对 node **同步**子进程调用（spawnSync/execSync）的拦截。命中 EBUSY（实测为 WorkBuddy 桌面会话沙箱行为）时输出 **WARN + 固定归因文案**（WARN 不计入 issues 总数、不改变退出码——环境限制不是仓库缺陷），并指明可用通道：会话内改用异步 `child_process.spawn`、验证走 CI / 外部终端 / git 钩子链。`execWithTimeout` 捕获 EBUSY 时向 stderr 输出一次归因，替代裸 null（裸 null 曾被误读为"工具缺失"并造成一整轮误诊）。探针使用 `process.execPath`，PATH 差异不影响判定。测试全部 mock spawnSync——断言真实 spawn 路径的用例会在沙箱内自己变红，是随终端换判决的伪测试。文档：docs/platform-workbuddy.md 第七节。
+
 ## [Unreleased] - #507 Java 门禁加固 sprint
 
 ### Changed（含破坏性变更）
