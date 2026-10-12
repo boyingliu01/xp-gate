@@ -22,7 +22,7 @@ jobs:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
-      - uses: actions/setup-node@11bd347019f93200777d89607b187b9be1fb8e0c # v4.5.1
+      - uses: actions/setup-node@v4
         with:
           node-version: '20'
           cache: 'npm'
