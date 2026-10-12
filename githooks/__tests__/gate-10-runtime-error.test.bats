@@ -75,13 +75,23 @@ STUB
 }
 
 @test "AC-475-03: the verdict for the other exit codes is unchanged" {
-  write_semgrep_stub 0 '{"results":[]}'
+  # The old stub echoed the JSON to stderr and relied on the exit-0 shortcut,
+  # which #518 removed — the fixture must put the JSON on stdout where real
+  # semgrep writes it (#518).
+  cat > "$TEST_DIR/bin/semgrep" << STUB
+#!/bin/sh
+echo '{"results":[]}'
+exit 0
+STUB
+  chmod +x "$TEST_DIR/bin/semgrep"
   run run_gate_with_semgrep
   [[ "$output" == *"STATUS=PASS"* ]]
 }
 
-@test "AC-475-04 anti-vacuity: the error branch prints the captured output, not just its own line" {
+@test "AC-475-04 anti-vacuity: the unparseable-output branch prints the captured stderr, not just its own line" {
   # The defect was that SEMGREP_OUTPUT was captured and never shown on this path.
-  run awk '/semgrep runtime error/,/GATE_10_STATUS="SKIP"/' "$GATE"
+  # #518 restructured the branches; the diagnostic obligation carries over to
+  # the unparseable-output SKIP branch (the first SKIP verdict in the file).
+  run awk '/unparseable/,/GATE_10_STATUS="SKIP"/' "$GATE"
   [[ "$output" == *"SEMGREP_OUTPUT"* ]]
 }
