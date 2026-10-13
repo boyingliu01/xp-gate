@@ -9,7 +9,8 @@ OpenCode plugin exposing xp-gate quality gates and AI workflow skills.
 - **gate-principles** ⇄ `xp-gate principles <path>`: Run Clean Code + SOLID
   principles checker (Gate 4 standalone).
 - **gate-arch** ⇄ `xp-gate arch`: Run architecture validation (Gate 6
-  standalone, layer boundary checks).
+  standalone) with the pinned local @archlinter/cli built-in rules and baseline
+  ratchet; an optional config file opts into archlint's own `--config` path.
 - **session-reload-model**: Reload session model from config. After switching
   provider configs (opencode.json + oh-my-openagent.json via switch-coding-plan.sh),
   updates the session model in OpenCode DB to match the new config, so restarted
@@ -67,7 +68,9 @@ Or via local path (development):
 - One of:
   - `xp-gate` CLI installed globally (`npm install -g @boyingliu01/xp-gate`) — **preferred**, or
   - the xp-gate repo checked out locally with `src/principles/index.ts` reachable — **fallback** (the tool will shell out via `npx -y tsx`)
-- `architecture.yaml` in repo root (for `gate-arch` only)
+- `@archlinter/cli` installed locally or on PATH (for `gate-arch` only; the
+  default built-in-rules path needs no `architecture.yaml` — passing one opts
+  into archlint's own `--config` schema validation, which rejects pre-0.16 files)
 
 ## Graceful Degradation
 

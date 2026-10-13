@@ -319,175 +319,226 @@ function extractTitleFromText(text: string): string {
 
 // ── Plugin definition ──
 
+const SQLITE_TIMEOUT_MS = 5_000
+
+// Boy Scout (#447): XpGatePlugin used to inline five tool({...}) definitions
+// (191 lines, 7-8 brace levels). Each tool now lives in its own factory;
+// XpGatePlugin is pure wiring.
+function gateCheckTool(directory: string) {
+  return tool({
+    description: "Run xp-gate quality gates (Gate 4 + Gate 6) on a file or directory. Prefers global xp-gate CLI; falls back to direct checker source.",
+    args: {
+      path: z.string().describe("File or directory path (absolute or relative to workspace)"),
+      gates: z.array(z.string()).optional().describe("Optional gate subset (e.g. ['principles', 'arch'])"),
+    },
+    async execute(args, ctx) {
+      const cwd = ctx.directory || directory
+      const target = args.path.startsWith("/") ? args.path : `${cwd}/${args.path}`
+      const gatesFlag = args.gates?.length ? ` --gates ${args.gates.join(",")}` : ""
+      const result = await runXpGate(`check "${target}"${gatesFlag}`, cwd)
+      if (result) {
+        const upgrade = await getUpgradeSuggestion(cwd)
+        return upgrade ? `${result}\n${upgrade}` : result
+      }
+      const cmd = `node ${directory}/src/npm-package/bin/xp-gate.js check "${target}"${gatesFlag}`
+      return runCmd(cmd, cwd)
+    },
+  })
+}
+
+function gatePrinciplesTool(directory: string) {
+  return tool({
+    description: "Run Clean Code + SOLID principles checker (Gate 4 standalone) on a file or directory.",
+    args: {
+      path: z.string().describe("Source file or directory path to check"),
+    },
+    async execute(args, ctx) {
+      const cwd = ctx.directory || directory
+      const target = args.path.startsWith("/") ? args.path : `${cwd}/${args.path}`
+      const result = await runXpGate(`principles "${target}"`, cwd)
+      if (result) {
+        const upgrade = await getUpgradeSuggestion(cwd)
+        return upgrade ? `${result}\n${upgrade}` : result
+      }
+      const cmd = `npx -y tsx ${directory}/src/principles/index.ts --files "${target}" --format console`
+      return runCmd(cmd, cwd)
+    },
+  })
+}
+
+function gateArchTool(directory: string) {
+  return tool({
+    description:
+      "Run architecture validation (Gate 6 standalone) on the repository with the pinned local @archlinter/cli built-in rules and baseline ratchet.",
+    args: {
+      config: z
+        .string()
+        .optional()
+        .describe(
+          "Optional architecture config file (opts into archlint --config; pre-0.16 schemas are rejected by archlint itself)",
+        ),
+    },
+    async execute(args, ctx) {
+      const cwd = ctx.directory || directory
+      // #447: default to the built-in-rules path — no --config. Forcing
+      // `--config architecture.yaml` hit the pre-0.16 schema archlint rejects.
+      const archArgs = args.config ? `arch --use-config ${args.config}` : "arch"
+      const result = await runXpGate(archArgs, cwd)
+      if (result) {
+        const upgrade = await getUpgradeSuggestion(cwd)
+        return upgrade ? `${result}\n${upgrade}` : result
+      }
+      const fallback = args.config
+        ? `npx -y @archlinter/cli scan . --config ${args.config}`
+        : `npx -y @archlinter/cli scan .`
+      return runCmd(fallback, cwd)
+    },
+  })
+}
+
+function readCurrentSessionModel(dbPath: string, sessionId: string): string {
+  try {
+    const escapedId = sessionId.replace(/'/g, "''")
+    const currentRaw = execSync(
+      `sqlite3 "${dbPath}" "SELECT model FROM session WHERE id = '${escapedId}'"`,
+      { encoding: "utf8", timeout: SQLITE_TIMEOUT_MS }
+    ).trim()
+    if (!currentRaw) return "unknown"
+    try {
+      const parsed = JSON.parse(currentRaw)
+      return `${parsed.providerID || "?"}/${parsed.id || "?"}`
+    } catch {
+      return currentRaw
+    }
+  } catch {
+    return "unknown"
+  }
+}
+
+function writeSessionModel(dbPath: string, sessionId: string, modelJson: string): void {
+  const escapedId = sessionId.replace(/'/g, "''")
+  const escapedModel = modelJson.replace(/'/g, "''")
+  const sql = `UPDATE session SET model = '${escapedModel}', time_updated = ${Date.now()} WHERE id = '${escapedId}'`
+  try {
+    execSync(`sqlite3 "${dbPath}" "${sql}"`, { timeout: SQLITE_TIMEOUT_MS })
+  } catch (err) {
+    // Contract is to propagate: the caller renders the failure as
+    // "Session reload failed: <message>". Wrapped so the IO sits inside
+    // error handling (Boy Scout), not to swallow anything.
+    throw err
+  }
+}
+
+// Boy Scout (#447): the tool's execute() body inlined 40+ lines at 5 brace
+// levels (tool → execute → try → JSON.stringify options). The logic lives at
+// module scope; execute() is pure wiring.
+function reloadSessionModel(sessionId: string): string {
+  const dbPath = join(homedir(), ".local", "share", "opencode", "opencode.db")
+  const configDir = join(homedir(), ".config", "opencode")
+  const omoConfigPath = join(configDir, "oh-my-openagent.json")
+
+  if (!existsSync(dbPath)) {
+    return "Session reload failed: OpenCode database not found at " + dbPath
+  }
+  if (!existsSync(omoConfigPath)) {
+    return "Session reload failed: oh-my-openagent.json not found at " + omoConfigPath
+  }
+
+  let omoConfig: Record<string, unknown>
+  try {
+    omoConfig = JSON.parse(readFileSync(omoConfigPath, "utf8"))
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err)
+    return "Session reload failed: could not parse oh-my-openagent.json: " + msg
+  }
+
+  const agents = omoConfig?.["agents"] as Record<string, { model?: string }> | undefined
+  const sisyphusModel = agents?.["sisyphus"]?.["model"]
+  if (!sisyphusModel || typeof sisyphusModel !== "string") {
+    return "Session reload failed: could not find sisyphus.model in oh-my-openagent.json"
+  }
+
+  const slashIdx = sisyphusModel.indexOf("/")
+  if (slashIdx === -1) {
+    return `Session reload failed: model "${sisyphusModel}" is not in provider/model format`
+  }
+  const providerID = sisyphusModel.substring(0, slashIdx)
+  const modelID = sisyphusModel.substring(slashIdx + 1)
+
+  const oldModel = readCurrentSessionModel(dbPath, sessionId)
+  try {
+    writeSessionModel(dbPath, sessionId, JSON.stringify({ id: modelID, providerID }))
+    return `Session model reloaded: ${oldModel} → ${providerID}/${modelID}`
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err)
+    return `Session reload failed: ${msg}`
+  }
+}
+
+function sessionReloadModelTool() {
+  return tool({
+    description: "Reload session model from config. After switching provider configs (opencode.json + oh-my-openagent.json via switch-coding-plan.sh), updates the session model in OpenCode DB to match the new config. This ensures restarted sessions use the current provider/model.",
+    args: {
+      sessionId: z.string().optional().describe("Session ID to reload (defaults to current session)"),
+    },
+    async execute(args, ctx) {
+      return reloadSessionModel(args.sessionId || ctx.sessionID)
+    },
+  })
+}
+
+// Boy Scout (#447): same treatment as reloadSessionModel — logic at module
+// scope, execute() is pure wiring.
+function renameSession(sessionId: string, newTitle?: string): string {
+  const dbPath = join(homedir(), ".local", "share", "opencode", "opencode.db")
+
+  if (!existsSync(dbPath)) {
+    return "Session rename failed: OpenCode database not found at " + dbPath
+  }
+
+  // `||` (not `??`): an explicitly empty title falls back to auto-generation,
+  // matching the original if/else.
+  const title = newTitle || generateSessionTitle(dbPath, sessionId)
+  if (!title || title.trim().length === 0) {
+    return "Session rename failed: could not generate a title (no user messages found)"
+  }
+
+  const trimmed = title.trim().substring(0, 120)
+  const escapedTitle = trimmed.replace(/'/g, "''")
+  const escapedId = sessionId.replace(/'/g, "''")
+  const sql = `UPDATE session SET title = '${escapedTitle}', time_updated = ${Date.now()} WHERE id = '${escapedId}'`
+  try {
+    execSync(`sqlite3 "${dbPath}" "${sql}"`, { timeout: SQLITE_TIMEOUT_MS })
+    return `Session renamed to: "${trimmed}"`
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err)
+    return `Session rename failed: ${msg}`
+  }
+}
+
+function sessionRenameTool() {
+  return tool({
+    description: "Rename an OpenCode session. When called without newTitle, analyzes the session's recent conversation and auto-generates a descriptive title based on the work done.",
+    args: {
+      sessionId: z.string().optional().describe("Session ID to rename (defaults to current session)"),
+      newTitle: z.string().optional().describe("New session title. If omitted, auto-generate from conversation content."),
+    },
+    async execute(args, ctx) {
+      return renameSession(args.sessionId || ctx.sessionID, args.newTitle)
+    },
+  })
+}
+
 export const XpGatePlugin = async (input: OpenCodePluginInput) => {
   const { directory } = input
 
   return {
     tool: {
-      "gate-check": tool({
-        description: "Run xp-gate quality gates (Gate 4 + Gate 6) on a file or directory. Prefers global xp-gate CLI; falls back to direct checker source.",
-        args: {
-          path: z.string().describe("File or directory path (absolute or relative to workspace)"),
-          gates: z.array(z.string()).optional().describe("Optional gate subset (e.g. ['principles', 'arch'])"),
-        },
-        async execute(args, ctx) {
-          const cwd = ctx.directory || directory
-          const target = args.path.startsWith("/") ? args.path : `${cwd}/${args.path}`
-          const gatesFlag = args.gates?.length ? ` --gates ${args.gates.join(",")}` : ""
-          const result = await runXpGate(`check "${target}"${gatesFlag}`, cwd)
-          if (result) {
-            const upgrade = await getUpgradeSuggestion(cwd)
-            return upgrade ? `${result}\n${upgrade}` : result
-          }
-          const cmd = `node ${directory}/src/npm-package/bin/xp-gate.js check "${target}"${gatesFlag}`
-          return runCmd(cmd, cwd)
-        },
-      }),
-      "gate-principles": tool({
-        description: "Run Clean Code + SOLID principles checker (Gate 4 standalone) on a file or directory.",
-        args: {
-          path: z.string().describe("Source file or directory path to check"),
-        },
-        async execute(args, ctx) {
-          const cwd = ctx.directory || directory
-          const target = args.path.startsWith("/") ? args.path : `${cwd}/${args.path}`
-          const result = await runXpGate(`principles "${target}"`, cwd)
-          if (result) {
-            const upgrade = await getUpgradeSuggestion(cwd)
-            return upgrade ? `${result}\n${upgrade}` : result
-          }
-          const cmd = `npx -y tsx ${directory}/src/principles/index.ts --files "${target}" --format console`
-          return runCmd(cmd, cwd)
-        },
-      }),
-      "gate-arch": tool({
-        description: "Run architecture validation (Gate 6 standalone, layer boundary checks) on the repository.",
-        args: {
-          config: z.string().describe("Path to architecture config file").default("architecture.yaml"),
-        },
-        async execute(args, ctx) {
-          const cwd = ctx.directory || directory
-          const config = args.config || "architecture.yaml"
-          const result = await runXpGate(`arch --config ${config}`, cwd)
-          if (result) {
-            const upgrade = await getUpgradeSuggestion(cwd)
-            return upgrade ? `${result}\n${upgrade}` : result
-          }
-          const cmd = `npx -y @archlinter/cli scan . --config ${config}`
-          return runCmd(cmd, cwd)
-        },
-      }),
-      "session-reload-model": tool({
-        description: "Reload session model from config. After switching provider configs (opencode.json + oh-my-openagent.json via switch-coding-plan.sh), updates the session model in OpenCode DB to match the new config. This ensures restarted sessions use the current provider/model.",
-        args: {
-          sessionId: z.string().optional().describe("Session ID to reload (defaults to current session)"),
-        },
-        async execute(args, ctx) {
-          const sessionId = args.sessionId || ctx.sessionID
-          const dbPath = join(homedir(), ".local", "share", "opencode", "opencode.db")
-          const configDir = join(homedir(), ".config", "opencode")
-          const omoConfigPath = join(configDir, "oh-my-openagent.json")
-
-          if (!existsSync(dbPath)) {
-            return "Session reload failed: OpenCode database not found at " + dbPath
-          }
-          if (!existsSync(omoConfigPath)) {
-            return "Session reload failed: oh-my-openagent.json not found at " + omoConfigPath
-          }
-
-          let omoConfig: Record<string, unknown>
-          try {
-            omoConfig = JSON.parse(readFileSync(omoConfigPath, "utf8"))
-          } catch (err) {
-            const msg = err instanceof Error ? err.message : String(err)
-            return "Session reload failed: could not parse oh-my-openagent.json: " + msg
-          }
-
-          const agents = omoConfig?.["agents"] as Record<string, { model?: string }> | undefined
-          const sisyphusModel = agents?.["sisyphus"]?.["model"]
-          if (!sisyphusModel || typeof sisyphusModel !== "string") {
-            return "Session reload failed: could not find sisyphus.model in oh-my-openagent.json"
-          }
-
-          const slashIdx = sisyphusModel.indexOf("/")
-          if (slashIdx === -1) {
-            return `Session reload failed: model "${sisyphusModel}" is not in provider/model format`
-          }
-          const providerID = sisyphusModel.substring(0, slashIdx)
-          const modelID = sisyphusModel.substring(slashIdx + 1)
-
-          let oldModel = "unknown"
-          try {
-            const escapedId = sessionId.replace(/'/g, "''")
-            const currentRaw = execSync(
-              `sqlite3 "${dbPath}" "SELECT model FROM session WHERE id = '${escapedId}'"`,
-              { encoding: "utf8", timeout: 5000 }
-            ).trim()
-            if (currentRaw) {
-              try {
-                const parsed = JSON.parse(currentRaw)
-                oldModel = `${parsed.providerID || "?"}/${parsed.id || "?"}`
-              } catch {
-                oldModel = currentRaw
-              }
-            }
-          } catch {
-            oldModel = "unknown"
-          }
-
-          const newModelJson = JSON.stringify({ id: modelID, providerID })
-          const escapedId = sessionId.replace(/'/g, "''")
-          const escapedModel = newModelJson.replace(/'/g, "''")
-          const sql = `UPDATE session SET model = '${escapedModel}', time_updated = ${Date.now()} WHERE id = '${escapedId}'`
-
-          try {
-            execSync(`sqlite3 "${dbPath}" "${sql}"`, { timeout: 5000 })
-            return `Session model reloaded: ${oldModel} → ${providerID}/${modelID}`
-          } catch (err) {
-            const msg = err instanceof Error ? err.message : String(err)
-            return `Session reload failed: ${msg}`
-          }
-        },
-      }),
-      "session-rename": tool({
-        description: "Rename an OpenCode session. When called without newTitle, analyzes the session's recent conversation and auto-generates a descriptive title based on the work done.",
-        args: {
-          sessionId: z.string().optional().describe("Session ID to rename (defaults to current session)"),
-          newTitle: z.string().optional().describe("New session title. If omitted, auto-generates from conversation content."),
-        },
-        async execute(args, ctx) {
-          const sessionId = args.sessionId || ctx.sessionID
-          const dbPath = join(homedir(), ".local", "share", "opencode", "opencode.db")
-
-          if (!existsSync(dbPath)) {
-            return "Session rename failed: OpenCode database not found at " + dbPath
-          }
-
-          let title: string
-          if (args.newTitle) {
-            title = args.newTitle
-          } else {
-            title = generateSessionTitle(dbPath, sessionId)
-          }
-
-          if (!title || title.trim().length === 0) {
-            return "Session rename failed: could not generate a title (no user messages found)"
-          }
-
-          title = title.trim().substring(0, 120)
-
-          const escapedTitle = title.replace(/'/g, "''")
-          const escapedId = sessionId.replace(/'/g, "''")
-          const sql = `UPDATE session SET title = '${escapedTitle}', time_updated = ${Date.now()} WHERE id = '${escapedId}'`
-          try {
-            execSync(`sqlite3 "${dbPath}" "${sql}"`, { timeout: 5000 })
-            return `Session renamed to: "${title}"`
-          } catch (err) {
-            const msg = err instanceof Error ? err.message : String(err)
-            return `Session rename failed: ${msg}`
-          }
-        },
-      }),
+      "gate-check": gateCheckTool(directory),
+      "gate-principles": gatePrinciplesTool(directory),
+      "gate-arch": gateArchTool(directory),
+      "session-reload-model": sessionReloadModelTool(),
+      "session-rename": sessionRenameTool(),
     },
     "chat.message": async (_input: { message: string }) => {
       if (!checked) {

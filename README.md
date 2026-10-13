@@ -163,7 +163,7 @@ IDE 插件提供 AI 对话内的质量工具（`gate-check`、`gate-principles`�
 | `xp-gate check-alignment` | **环 2 核心命令** — 运行需求↔测试对齐检查 |
 | `xp-gate check <path>` | 运行 Gate 4 + Gate 6 |
 | `xp-gate principles <path>` | 运行 Clean Code + SOLID 检查 (Gate 4) |
-| `xp-gate arch` | 运行架构合规检查 (Gate 6) |
+| `xp-gate arch` | 运行架构合规检查 (Gate 6；内置规则 + baseline 棘轮，`--use-config` 可选旧配置路径) |
 | `xp-gate sprint-status [--json] [--watch]` | 查看 Sprint Flow 进度 |
 | `xp-gate sprint-init` | 初始化 Sprint 项目结构 |
 | `xp-gate phase-transition <phase>` | 执行 Sprint 阶段转换（含证据验证） |
@@ -388,23 +388,31 @@ XP-Gate 内置 12 个专业 AI 技能，另在 Sprint Flow 中集成了多个外
 }
 ```
 
-### architecture.yaml（架构规则，共 14 条规则 ARCH-001 至 ARCH-014）
+### 架构检查的规则源（#447 起的口径）
 
-在项目根目录创建，Gate 6 读取此文件。示例：
+`xp-gate arch`（Gate 6 独立运行）与 pre-commit 的 Gate 6 使用**同一套规则源**：本地钉住的
+`@archlinter/cli`（xp-gate 依赖中的 `^0.16.0`）**内置检测器**，不再读取 `architecture.yaml`：
 
-```yaml
-rules:
-  - id: ARCH-001
-    name: 层边界检查
-    description: 禁止跨层直接调用
-    severity: error
-  - id: ARCH-002
-    name: 依赖方向检查
-    description: 禁止反向依赖（内层不依赖外层）
-    severity: error
-```
+- 判定语义：项目根存在 `.architecture-baseline.json` 时走 **baseline 棘轮**（只拦相对基线新增的
+  high/critical 级发现，与 Gate 6 pre-commit 的 `archlint diff .architecture-baseline.json --fail-on high`
+  完全一致）；不存在时走**零容忍**（任何 high/critical 级发现即拦）。
+- 版本纪律：解析顺序为「xp-gate 自身依赖 → 项目本地 node_modules → PATH → `npx --no-install`」，
+  **绝不 `npx -y`**（拉最新版会造成「本机能跑、别人不能跑」的漂移，见 #447 REQ-4）。
+- 反空转：测试套件用真实 archlint 植入一个 high 级违规（大段重复代码）→ 断言非零退出；
+  干净树 → 0。「返回 0」被证明是真实扫描的结果，而非硬编码通过。
 
-完整规则列表见项目根目录的 `architecture.yaml`。
+#### architecture.yaml 与 .archlint.yaml 的分叉
+
+| 文件 | 状态 | 谁在读 |
+|------|------|--------|
+| `architecture.yaml` | **遗留存在性标记**（pre-0.16 schema，14 条 ARCH 规则的 `rules:` 块） | Gate 6 仅检查其**是否存在**以决定启用架构门禁；archlint 0.16 的 `--config` 校验器会拒绝该 schema |
+| `.archlint.yaml` | 现行 archlint 配置（`archlint init` 生成的新 schema，如 `ignore:` 列表） | archlint 自动发现 |
+
+即：`architecture.yaml` 的规则内容**不会**传给 archlint——两条路径的规则源分叉就此固定。
+如确需自带配置，用 opt-in 的 `xp-gate arch --use-config <file>`（`--config` 为 deprecated 别名）：
+文件将原样传给 archlint `--config`，**schema 版本责任由用户自行承担**（archlint 会拒绝 pre-0.16 结构）。
+
+历史规则清单（ARCH-001 至 ARCH-014 的语义说明）仍保留在仓库根目录的 `architecture.yaml` 注释中，仅供参考。
 
 ### .delphi-config.json（Delphi 评审配置）
 
