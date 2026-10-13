@@ -42,7 +42,7 @@ components:
       - "xp-gate retro [--days N] [--all] [--json] [--sprint <id>]"  # added in 0.18.0, #369 — Generates engineering retrospective report with activity summary, rework rate trends, evidence skip exposure, and quality trends
       - "xp-gate check <path> [--gates principles,arch]"      # added in 0.8.9, fixes #208
       - "xp-gate principles <path> [--format console|json|sarif]"  # added in 0.8.9, fixes #208
-      - "xp-gate arch [--config <path>]"                       # added in 0.8.9, fixes #208
+      - "xp-gate arch [--use-config <path>]"                # added in 0.8.9, fixes #208; default built-in rules + baseline ratchet, --use-config opt-in legacy config (#447)
       - "xp-gate --version"
     requires:
       - node (>=18)

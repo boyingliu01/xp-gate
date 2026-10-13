@@ -62,7 +62,14 @@ function buildInner(options: BuildCommandOptions, dialect: ShellDialect): string
     if (target !== undefined) tokens.push(q(target))
     return tokens.join(" ")
   }
-  return ["xp-gate", "arch", "--config", q(config ?? "architecture.yaml")].join(" ")
+  // subcommand === "arch" — the only remaining member of the union.
+  // #447: the default path runs the pinned local @archlinter/cli with its
+  // built-in rules — no config needed. Forcing `--config architecture.yaml`
+  // (the old default) hit the pre-0.16 schema that archlint itself rejects.
+  // Only forward an explicitly provided config, via the opt-in --use-config.
+  const tokens = ["xp-gate", "arch"]
+  if (config !== undefined) tokens.push("--use-config", q(config))
+  return tokens.join(" ")
 }
 
 /**

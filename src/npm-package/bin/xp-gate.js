@@ -168,9 +168,9 @@ const COMMANDS = {
     usage: 'xp-gate principles <file_or_directory> [--format console|json|sarif]'
   },
   'arch': {
-    description: 'Run architecture validation (Gate 6 standalone, uses architecture.yaml)',
+    description: 'Run architecture validation (Gate 6 standalone; built-in rules, baseline ratchet when .architecture-baseline.json exists)',
     run: subargs => arch(subargs).then(code => process.exit(code)),
-    usage: 'xp-gate arch [--config <path>]'
+    usage: 'xp-gate arch [--use-config <path>]  (default: pinned local @archlinter/cli built-in rules; --use-config is the opt-in legacy config path)'
   },
   'check-alignment': {
     description: 'Run test-specification alignment check (deterministic, no LLM)',

@@ -8,34 +8,50 @@ interface CapturedTool {
   execute: (args: unknown, exec: unknown) => Promise<unknown>
 }
 
+// Boy Scout (#447): the inline shell mock pushed makeCtx to 5 brace levels.
+// The spec/result builders keep every function at ≤4.
+function makeSpec(req: ShellExecRequest): ShellExecSpec {
+  return {
+    command: req.command,
+    workdir: req.workdir ?? "/workspace",
+    timeoutMs: req.timeoutMs ?? 1000,
+    stdoutMaxBytes: 1_000_000,
+    signal: req.signal,
+    sandboxPolicy: undefined,
+  }
+}
+
+function makeRunResult(stdoutText: string): ShellRunResult {
+  return {
+    exitCode: 0,
+    signal: null,
+    timedOut: false,
+    aborted: false,
+    timeoutMs: 1000,
+    stdout: { text: stdoutText, truncated: false },
+    stderr: { text: "", truncated: false },
+  }
+}
+
+function makeShell(stdoutText: string, requests: ShellExecRequest[]) {
+  return {
+    resolve(req: ShellExecRequest): ShellExecSpec {
+      requests.push(req)
+      return makeSpec(req)
+    },
+    run(): Promise<ShellRunResult> {
+      return Promise.resolve(makeRunResult(stdoutText))
+    },
+  }
+}
+
 function makeCtx(stdoutText: string) {
   const captured: unknown[] = []
   const requests: ShellExecRequest[] = []
-  const shell = {
-    resolve(req: ShellExecRequest): ShellExecSpec {
-      requests.push(req)
-      return {
-        command: req.command,
-        workdir: req.workdir ?? "/workspace",
-        timeoutMs: req.timeoutMs ?? 1000,
-        stdoutMaxBytes: 1_000_000,
-        signal: req.signal,
-        sandboxPolicy: undefined,
-      }
-    },
-    run(): Promise<ShellRunResult> {
-      return Promise.resolve({
-        exitCode: 0,
-        signal: null,
-        timedOut: false,
-        aborted: false,
-        timeoutMs: 1000,
-        stdout: { text: stdoutText, truncated: false },
-        stderr: { text: "", truncated: false },
-      })
-    },
-  }
-  const ctx = { tools: { register: (def: unknown) => captured.push(def) }, shell } as unknown as Context
+  const ctx = {
+    tools: { register: (def: unknown) => captured.push(def) },
+    shell: makeShell(stdoutText, requests),
+  } as unknown as Context
   return { ctx, captured, requests }
 }
 
@@ -82,16 +98,17 @@ describe("apply", () => {
 
   /**
    * @test REQ-DSH-004
-   * @intent 验证 gate-arch 工具执行生成 `xp-gate arch --config <config>`（缺省 architecture.yaml）
+   * @intent 验证 gate-arch 工具执行生成 `xp-gate arch`（默认不带 --config，#447），显式 config 走 --use-config
    * @covers AC-DSH-004-01
    */
-  it("gate-arch execute builds `xp-gate arch` with default and custom config", async () => {
+  it("gate-arch execute builds `xp-gate arch` with built-in rules by default", async () => {
     const { ctx, captured, requests } = makeCtx("arch report")
     apply(ctx)
     const tool = captured.find((c) => (c as CapturedTool).name === "gate-arch") as CapturedTool
     await tool.execute({}, { signal: new AbortController().signal })
-    expect(requests[0]?.command).toContain("xp-gate arch --config 'architecture.yaml'")
+    expect(requests[0]?.command).toContain("xp-gate arch")
+    expect(requests[0]?.command).not.toContain("--config")
     await tool.execute({ config: "custom.yaml" }, { signal: new AbortController().signal })
-    expect(requests[1]?.command).toContain("xp-gate arch --config 'custom.yaml'")
+    expect(requests[1]?.command).toContain("xp-gate arch --use-config 'custom.yaml'")
   })
 })

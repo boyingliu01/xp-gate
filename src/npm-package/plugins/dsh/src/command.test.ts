@@ -68,8 +68,20 @@ describe("buildCommand", () => {
     )
   })
 
-  it("builds gate-arch with the default config", () => {
-    expect(buildCommand({ subcommand: "arch" })).toContain("xp-gate arch --config 'architecture.yaml'")
+  // #447: the default path uses archlint's built-in rules — no --config.
+  // Forcing the old default (`--config architecture.yaml`) hit the pre-0.16
+  // schema that archlint itself rejects, so the flag is gone from the default.
+  it("builds gate-arch without a config by default", () => {
+    const cmd = buildCommand({ subcommand: "arch" })
+    expect(cmd).toContain("xp-gate arch")
+    expect(cmd).not.toContain("--config")
+    expect(cmd).not.toContain("--use-config")
+  })
+
+  it("forwards an explicit config via the opt-in --use-config flag", () => {
+    expect(buildCommand({ subcommand: "arch", config: "custom.yaml" })).toContain(
+      "xp-gate arch --use-config 'custom.yaml'",
+    )
   })
 
   /**
