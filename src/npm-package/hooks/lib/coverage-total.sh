@@ -15,23 +15,24 @@
 # integer total percentage — or nothing when the input carries no number.
 #
 # coverage.py 7.x --format=total prints a bare number; other tools (and older
-# forms) append a percent sign. Both are accepted: the first number-like token
-# of the first line that has one wins, the optional % is stripped, and a
-# decimal part is truncated (floor — the conservative direction for a threshold
-# gate, the same convention as the Java path's ${VAR%.*}). Inputs without any
-# number (empty, "No data to report.", warnings) produce NO output so the
-# caller takes its cannot-determine path: a wrong number is worse than none.
+# forms) append a percent sign. Only a line that IS a bare number (optionally
+# %-suffixed) is accepted — a line that merely CONTAINS a number ("WARNING: 2
+# files skipped") must not be mistaken for the total, so the whole line is
+# matched, not the first token. A decimal part is truncated (floor — the
+# conservative direction for a threshold gate, the same convention as the Java
+# path's ${VAR%.*}). Inputs without any bare-number line (empty, "No data to
+# report.", warnings) produce NO output so the caller takes its
+# cannot-determine path: a wrong number is worse than none.
 parse_coverage_total() {
   awk '
     {
-      for (i = 1; i <= NF; i++) {
-        tok = $i
-        sub(/%$/, "", tok)
-        if (tok ~ /^[0-9]+(\.[0-9]+)?$/) {
-          sub(/\.[0-9]+$/, "", tok)
-          print tok
-          exit
-        }
+      line = $0
+      sub(/%$/, "", line)
+      gsub(/^[ \t]+|[ \t]+$/, "", line)
+      if (line ~ /^[0-9]+(\.[0-9]+)?$/) {
+        sub(/\.[0-9]+$/, "", line)
+        print line
+        exit
       }
     }
   '

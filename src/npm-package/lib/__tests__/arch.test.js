@@ -21,6 +21,7 @@ const {
   resolveArchlint,
   verdictFromScanJson,
   quoteForShell,
+  stripExtendedPrefix,
 } = archModule.__internals;
 
 const REPO_ROOT = path.resolve(__dirname, '..', '..', '..', '..');
@@ -249,8 +250,15 @@ describe('verdictFromScanJson', () => {
     expect(verdictFromScanJson(json).blocking).toBe(2);
   });
 
-  it('treats a missing smells array as zero findings', () => {
+  it('treats a missing smells array as schema drift — parseError, never a silent clean (FC-12)', () => {
     const verdict = verdictFromScanJson(JSON.stringify({ summary: {} }));
+    expect(verdict.parseError).toBeTruthy();
+    expect(verdict.total).toBe(0);
+    expect(verdict.blocking).toBe(0);
+  });
+
+  it('accepts an explicitly empty smells array as a clean scan', () => {
+    const verdict = verdictFromScanJson(JSON.stringify({ smells: [] }));
     expect(verdict.parseError).toBeNull();
     expect(verdict.total).toBe(0);
     expect(verdict.blocking).toBe(0);
@@ -277,6 +285,30 @@ describe('quoteForShell', () => {
 
   it('quotes arguments containing whitespace for cmd.exe', () => {
     expect(quoteForShell('C:\\my configs\\arch.yaml')).toBe('"C:\\my configs\\arch.yaml"');
+  });
+
+  it('doubles embedded quotes and wraps, so a quote cannot terminate the quoting early (FC-07)', () => {
+    expect(quoteForShell('a"b.yaml')).toBe('"a""b.yaml"');
+    expect(quoteForShell('C:\\my configs\\a"b.yaml')).toBe('"C:\\my configs\\a""b.yaml"');
+  });
+
+  it('wraps a quote-only argument even without whitespace', () => {
+    expect(quoteForShell('a"b')).toBe('"a""b"');
+  });
+});
+
+describe('stripExtendedPrefix', () => {
+  it('strips the plain extended-length prefix', () => {
+    expect(stripExtendedPrefix('\\\\?\\C:\\repo\\src\\x.js')).toBe('C:\\repo\\src\\x.js');
+  });
+
+  it('converts the UNC extended prefix to a plain share path (FC-13)', () => {
+    expect(stripExtendedPrefix('\\\\?\\UNC\\server\\share\\x.js')).toBe('\\\\server\\share\\x.js');
+  });
+
+  it('leaves ordinary paths untouched', () => {
+    expect(stripExtendedPrefix('/repo/src/x.js')).toBe('/repo/src/x.js');
+    expect(stripExtendedPrefix('C:\\repo\\x.js')).toBe('C:\\repo\\x.js');
   });
 });
 
