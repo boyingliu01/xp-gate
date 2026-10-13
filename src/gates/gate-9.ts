@@ -49,85 +49,163 @@ export function runGate9(input: GateInput): GateOutput {
 
   const result = runTool(semgrepCmd, semgrepArgs, { cwd: input.cwd });
 
-  if (result.exitCode === 0) {
-    messages.push('     ✅ PASSED - No security vulnerabilities found.');
-    recordAudit('gate-9', 'sast-security', 'PASS', 0, startMs);
-    return { status: 'PASS', messages, exitCode: 0 };
-  }
+  // #518 (same defect class as the bash gate-10.sh fix): the exit code does NOT
+  // carry the verdict. semgrep exits 0 even with ERROR-severity findings, and
+  // its exit-code semantics drift across versions/platforms. The verdict comes
+  // from the JSON; the exit code only tells whether the tool itself ran.
+  return parseSemgrepResults(result.stdout, result.exitCode, result.stderr, startMs, messages);
+}
 
-  if (result.exitCode === 1) {
-    // Findings detected — parse JSON to categorize
-    return parseSemgrepResults(result.stdout, startMs, messages);
-  }
+// #518: warnings-only vocabulary. Everything OUTSIDE this list — including
+// semgrep's ERROR tier, the legacy CRITICAL/HIGH tiers, and any unknown or
+// missing severity — counts as BLOCKING: a security gate must fail closed on
+// tiers it does not recognize.
+const NONBLOCKING_SEVERITIES = ['WARNING', 'INFO', 'MEDIUM', 'LOW'];
+const MAX_DETAIL_FINDINGS = 5;
+const MAX_FINDING_MESSAGE_LENGTH = 80;
 
-  // Runtime error (timeout, config error, etc.)
-  messages.push(`     ⚠️  semgrep exited with code ${result.exitCode} — skipping gate`);
-  messages.push('     ⏭️  SKIPPED - SAST (semgrep runtime error)');
-  recordAudit('gate-9', 'sast-security', 'SKIP', result.exitCode, startMs);
-  return { status: 'SKIP', messages, exitCode: 0 };
+interface SemgrepFinding {
+  check_id?: string;
+  path?: string;
+  start?: { line?: number };
+  extra?: { severity?: string; message?: string };
+}
+
+function pushStderrDiagnostics(messages: string[], stderr: string): void {
+  if (!stderr) {
+    return;
+  }
+  messages.push('     ── what semgrep reported ──');
+  messages.push(...stderr.split('\n').slice(-10).map(l => `     ${l}`));
+}
+
+function countBySeverity(results: SemgrepFinding[]): { blocking: number; warnings: number } {
+  let blocking = 0;
+  let warnings = 0;
+  results.forEach(r => {
+    const s = (r.extra?.severity || '').toUpperCase();
+    if (NONBLOCKING_SEVERITIES.includes(s)) {
+      warnings++;
+    } else {
+      blocking++;
+    }
+  });
+  return { blocking, warnings };
+}
+
+function findingDetailLines(results: SemgrepFinding[]): string[] {
+  const lines: string[] = [];
+  results.slice(0, MAX_DETAIL_FINDINGS).forEach(r => {
+    const severity = (r.extra?.severity || 'UNKNOWN').toUpperCase();
+    const ruleId = r.check_id || 'unknown';
+    const filePath = r.path || 'unknown';
+    const line = r.start?.line || '?';
+    const msg = (r.extra?.message || '').slice(0, MAX_FINDING_MESSAGE_LENGTH);
+    lines.push(`  [${severity}] ${ruleId}`);
+    lines.push(`  ${filePath}:${line} → ${msg}`);
+    lines.push('');
+  });
+  return lines;
+}
+
+function renderSemgrepBlock(
+  blocking: number,
+  warnings: number,
+  findingLines: string[],
+  startMs: number,
+  messages: string[]
+): GateOutput {
+  messages.push('');
+  messages.push('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
+  messages.push('   GATE 9: Semgrep Security Gate');
+  messages.push('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
+  messages.push(`  CRITICAL/HIGH/ERROR:     ${blocking}  ❌ BLOCKED`);
+  messages.push(`  MEDIUM/LOW/WARNING/INFO: ${warnings}  ⚠️  warning`);
+  messages.push('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
+  messages.push('  ❌ BLOCKED — blocking-severity vulnerability found');
+  messages.push('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
+  messages.push(...findingLines);
+  messages.push("  Run 'semgrep scan --config=p/security-audit' to review all findings.");
+  recordAudit('gate-9', 'sast-security', 'FAIL', blocking, startMs);
+  return { status: 'FAIL', messages, exitCode: 1 };
 }
 
 function parseSemgrepResults(
   jsonOutput: string,
+  exitCode: number,
+  stderr: string,
   startMs: number,
   messages: string[]
 ): GateOutput {
+  let data: { results?: SemgrepFinding[]; errors?: Array<{ message?: string }> };
   try {
-    const data = JSON.parse(jsonOutput);
-    const results: Array<{ extra?: { severity?: string; message?: string }; check_id?: string; path?: string; start?: { line?: number } }> = data.results || [];
-
-    const criticalHigh = results.filter(r => {
-      const s = (r.extra?.severity || '').toUpperCase();
-      return s === 'CRITICAL' || s === 'HIGH';
-    }).length;
-
-    const mediumLow = results.filter(r => {
-      const s = (r.extra?.severity || '').toUpperCase();
-      return s === 'MEDIUM' || s === 'LOW';
-    }).length;
-
-    // Extract top finding details
-    const findingLines: string[] = [];
-    results.slice(0, 5).forEach(r => {
-      const severity = (r.extra?.severity || 'UNKNOWN').toUpperCase();
-      const ruleId = r.check_id || 'unknown';
-      const filePath = r.path || 'unknown';
-      const line = r.start?.line || '?';
-      const msg = (r.extra?.message || '').slice(0, 80);
-      findingLines.push(`  [${severity}] ${ruleId}`);
-      findingLines.push(`  ${filePath}:${line} → ${msg}`);
-      findingLines.push('');
-    });
-
-    if (criticalHigh > 0) {
-      messages.push('');
-      messages.push('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
-      messages.push('   GATE 9: Semgrep Security Gate');
-      messages.push('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
-      messages.push(`  CRITICAL/HIGH: ${criticalHigh}  ❌ BLOCKED`);
-      messages.push(`  MEDIUM/LOW:    ${mediumLow}  ⚠️  warning`);
-      messages.push('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
-      messages.push('  ❌ BLOCKED — Critical/High vulnerability found');
-      messages.push('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
-      messages.push(...findingLines);
-      messages.push("  Run 'semgrep scan --config=p/security-audit' to review all findings.");
-      recordAudit('gate-9', 'sast-security', 'FAIL', criticalHigh, startMs);
-      return { status: 'FAIL', messages, exitCode: 1 };
-    }
-
-    messages.push('');
-    messages.push('     ✅ PASSED - No critical/high vulnerabilities');
-    if (mediumLow > 0) {
-      messages.push(`     ⚠️  ${mediumLow} medium/low findings (warnings only)`);
-      messages.push(...findingLines);
-    }
-    recordAudit('gate-9', 'sast-security', 'PASS', 0, startMs);
-    return { status: 'PASS', messages, exitCode: 0 };
+    data = JSON.parse(jsonOutput);
   } catch {
-    messages.push('     ⚠️  Failed to parse semgrep JSON output');
-    recordAudit('gate-9', 'sast-security', 'WARN', 0, startMs);
-    return { status: 'WARN', messages, exitCode: 0 };
+    // Fail closed (#518): unparseable output cannot be judged — SKIP, never PASS.
+    messages.push('     ⚠️  semgrep output unparseable or verdict fields missing — cannot determine verdict');
+    pushStderrDiagnostics(messages, stderr);
+    messages.push('     ⏭️  SKIPPED - SAST (semgrep output unparseable)');
+    recordAudit('gate-9', 'sast-security', 'SKIP', exitCode, startMs);
+    return { status: 'SKIP', messages, exitCode: 0 };
   }
+
+  const results: SemgrepFinding[] = data.results || [];
+  const scanErrors = data.errors || [];
+
+  // Nothing scanned to a verdict: tool failure (nonzero exit) or scan errors on
+  // every input. Must neither block nor claim a pass (#475 contract, #518 R2:
+  // exit 0 + results:[] + errors:[{...}] used to fall through to PASS).
+  if (results.length === 0 && (scanErrors.length > 0 || exitCode !== 0)) {
+    messages.push(`     ⚠️  semgrep exit=${exitCode}, scan errors=${scanErrors.length}, findings=${results.length} — nothing to judge`);
+    pushStderrDiagnostics(messages, stderr);
+    messages.push('     ⏭️  SKIPPED - SAST (semgrep runtime error)');
+    recordAudit('gate-9', 'sast-security', 'SKIP', exitCode, startMs);
+    return { status: 'SKIP', messages, exitCode: 0 };
+  }
+
+  const { blocking, warnings } = countBySeverity(results);
+  const findingLines = findingDetailLines(results);
+
+  if (blocking > 0) {
+    return renderSemgrepBlock(blocking, warnings, findingLines, startMs, messages);
+  }
+
+  messages.push('');
+  messages.push('     ✅ PASSED - No blocking vulnerabilities');
+  if (warnings > 0) {
+    messages.push(`     ⚠️  ${warnings} non-blocking findings (warnings only)`);
+    messages.push(...findingLines);
+  }
+  recordAudit('gate-9', 'sast-security', 'PASS', 0, startMs);
+  return { status: 'PASS', messages, exitCode: 0 };
+}
+
+const PSSCRIPTANALYZER_SECURITY_RULES = [
+  'PSAvoidUsingInvokeExpression',
+  'PSAvoidUsingConvertToSecureStringWithPlainText',
+  'PSAvoidUsingPlainTextForPassword',
+  'PSAvoidUsingUserNameAndPasswordParams',
+  'PSAvoidUsingWMICmdlet',
+  'PSAvoidUsingWriteHost',
+].join(',');
+
+function buildPSScriptAnalyzerCommand(psFiles: string[]): string {
+  const fileList = psFiles.map(f => `'${f}'`).join(',');
+  return `Invoke-ScriptAnalyzer -Path ${fileList} -IncludeRule ${PSSCRIPTANALYZER_SECURITY_RULES} -ErrorAction SilentlyContinue | ConvertTo-Json`;
+}
+
+function renderPowerShellFindings(
+  findings: Array<{ RuleName?: string; ScriptName?: string; Line?: number; Message?: string }>,
+  startMs: number,
+  messages: string[]
+): GateOutput {
+  messages.push('');
+  messages.push('❌ BLOCKED - PSScriptAnalyzer security findings:');
+  findings.slice(0, MAX_DETAIL_FINDINGS).forEach(f => {
+    messages.push(`  [${f.RuleName || 'UNKNOWN'}] ${f.ScriptName || '?'}:${f.Line || '?'} → ${(f.Message || '').slice(0, MAX_FINDING_MESSAGE_LENGTH)}`);
+  });
+  recordAudit('gate-9', 'sast-security', 'FAIL', findings.length, startMs);
+  return { status: 'FAIL', messages, exitCode: 1 };
 }
 
 /**
@@ -156,19 +234,7 @@ function runPowerShellSAST(
 
   messages.push('     Running PSScriptAnalyzer security rules...');
 
-  const fileList = psFiles.map(f => `'${f}'`).join(',');
-  // Security-focused PSScriptAnalyzer rules
-  const securityRules = [
-    'PSAvoidUsingInvokeExpression',
-    'PSAvoidUsingConvertToSecureStringWithPlainText',
-    'PSAvoidUsingPlainTextForPassword',
-    'PSAvoidUsingUserNameAndPasswordParams',
-    'PSAvoidUsingWMICmdlet',
-    'PSAvoidUsingWriteHost',
-  ].join(',');
-
-  const command = `Invoke-ScriptAnalyzer -Path ${fileList} -IncludeRule ${securityRules} -ErrorAction SilentlyContinue | ConvertTo-Json`;
-  const result = runPowerShellTool(ps, command, { cwd: input.cwd });
+  const result = runPowerShellTool(ps, buildPSScriptAnalyzerCommand(psFiles), { cwd: input.cwd });
 
   if (result.exitCode !== 0) {
     messages.push('     ⚠️  PSScriptAnalyzer security check failed, skipping');
@@ -178,16 +244,9 @@ function runPowerShellSAST(
 
   try {
     const findings = result.stdout.trim() ? JSON.parse(result.stdout.trim()) : [];
-    const count = Array.isArray(findings) ? findings.length : 0;
-    if (count > 0) {
-      messages.push('');
-      messages.push('❌ BLOCKED - PSScriptAnalyzer security findings:');
-      const arr = Array.isArray(findings) ? findings : [findings];
-      arr.slice(0, 5).forEach((f: { RuleName?: string; ScriptName?: string; Line?: number; Message?: string }) => {
-        messages.push(`  [${f.RuleName || 'UNKNOWN'}] ${f.ScriptName || '?'}:${f.Line || '?'} → ${(f.Message || '').slice(0, 80)}`);
-      });
-      recordAudit('gate-9', 'sast-security', 'FAIL', count, startMs);
-      return { status: 'FAIL', messages, exitCode: 1 };
+    const arr = Array.isArray(findings) ? findings : [findings];
+    if (arr.length > 0) {
+      return renderPowerShellFindings(arr, startMs, messages);
     }
   } catch {
     // JSON parse failure
