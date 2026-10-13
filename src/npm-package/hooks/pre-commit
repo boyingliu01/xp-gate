@@ -740,7 +740,14 @@ if [ -z "$PROJECT_LANGS" ] && [ -z "$_CONFIG_LANGS" ]; then
       [ -f "CMakeLists.txt" ] || return 1
       # A nested CMakeLists.txt (depth 2..7 below the root) means the root file
       # is a wiring file, not the whole project.
-      [ -n "$(find . -mindepth 2 -maxdepth 7 -name "CMakeLists.txt" -not -path "./.git/*" -not -path "*/node_modules/*" 2>/dev/null | head -1)" ]
+      # -prune, not -not -path: filters the output AND stops traversal, so
+      # .git/node_modules are never descended into — the old form walked the
+      # whole tree on every commit of a repo that has both a root
+      # CMakeLists.txt and a big node_modules (#532 walkthrough FC-04).
+      # -mindepth is deliberately absent (a global -mindepth suppresses the
+      # depth-1 prune action); the root file is excluded by the awk NF>2
+      # filter instead (./CMakeLists.txt has no directory component).
+      [ -n "$(find . -maxdepth 7 \( -path '*/.git' -o -path '*/node_modules' \) -prune -o -name "CMakeLists.txt" -print 2>/dev/null | awk -F/ 'NF>2' | head -1)" ]
     }
     # #515: when the repo ROOT itself declares the project, a nested marker that
     # is merely a module file (skill_cert/cli/setup.py incident) must not hijack

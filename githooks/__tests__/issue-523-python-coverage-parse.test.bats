@@ -60,9 +60,13 @@ parse_case() {
   parse_case "No data to report." ""
   parse_case "garbage" ""
   parse_case "12abc" ""
-  # Tolerant of decoration, still deterministic: the first number-like token
-  # of the first matching line wins.
-  parse_case "total: 87.3%" "87"
+  # Decoration is NOT tolerated: the whole line must BE the number. A line
+  # that merely contains one ("total: 87.3%") is refused so a numbered
+  # warning line can never be mistaken for the total (#532 walkthrough FC-03);
+  # the caller's cannot-determine path is the safe outcome.
+  parse_case "total: 87.3%" ""
+  # A numbered warning line BEFORE the real total must not win (FC-03).
+  parse_case "$(printf 'WARNING: 2 files skipped\n97')" "97"
   # Multi-line: progress noise before the number does not hide it.
   parse_case "$(printf 'warning: something\n42')" "42"
 }

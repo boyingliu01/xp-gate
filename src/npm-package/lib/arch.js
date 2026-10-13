@@ -24,9 +24,14 @@ const BLOCKING_SEVERITIES = new Set(['high', 'critical']);
 const MAX_OUTPUT_BYTES = 64 * 1024 * 1024;
 const BLOCKING_PREVIEW_LIMIT = 10;
 
-/** Windows extended-length prefix (`\\?\C:\...`) — strip for readable output. */
+/**
+ * Windows extended-length prefixes (`\\?\C:\...`, `\\?\UNC\server\share\...`) —
+ * strip for readable output. UNC first: its prefix also starts with `\\?\`.
+ */
 function stripExtendedPrefix(filePath) {
-  return String(filePath).replace(/^\\\\\?\\/, '');
+  return String(filePath)
+    .replace(/^\\\\\?\\UNC\\/, '\\\\')
+    .replace(/^\\\\\?\\/, '');
 }
 
 /**
@@ -108,9 +113,18 @@ function resolveArchlint(projectRoot, options = {}) {
   return { kind: 'npx', source: 'npx --no-install (local only)' };
 }
 
-/** Quote an argv element for cmd.exe when shell mode is unavoidable. */
+/**
+ * Quote an argv element for cmd.exe when shell mode is unavoidable.
+ * Embedded double quotes are doubled (cmd's in-quote escape) and anything
+ * carrying whitespace OR a quote is wrapped, so `a"b.yaml` cannot terminate
+ * the quoting early and hand the rest to the shell. NOTE: this exists only
+ * for the binary/npx fallback tiers on win32 — the default pinned path
+ * spawns node directly against the JS entry with no shell at all.
+ */
 function quoteForShell(arg) {
-  return /\s/.test(arg) ? `"${arg}"` : arg;
+  const s = String(arg);
+  if (/[\s"]/.test(s)) return `"${s.replace(/"/g, '""')}"`;
+  return s;
 }
 
 /**
@@ -149,7 +163,8 @@ function runArchlint(resolved, args, { cwd, capture = false } = {}) {
   if (result.error) {
     if (result.error.code === 'ENOENT') {
       console.error(`[xp-gate arch] ERROR: archlint not found (${resolved.source}).`);
-      console.error(`  Install it in your project: npm install --save-dev ${ARCHLINT_PACKAGE}`);
+      console.error(`  Fix: npm install --save-dev ${ARCHLINT_PACKAGE} in your project,`);
+      console.error('  or reinstall xp-gate when its own pinned copy is the missing one.');
     } else {
       console.error(`[xp-gate arch] ERROR: failed to run archlint (${resolved.source}): ${result.error.message}`);
     }
@@ -174,7 +189,15 @@ function verdictFromScanJson(jsonText) {
   } catch {
     return { parseError: 'archlint JSON output could not be parsed', total: 0, blocking: 0, blockingDetails: [] };
   }
-  const smells = parsed && Array.isArray(parsed.smells) ? parsed.smells : [];
+  // A payload that parses but carries no `smells` array is schema drift, not a
+  // clean tree: archlint 0.16.0 always emits `smells` on a successful JSON scan
+  // (an empty run reports []). Reading the absence as "zero findings" would
+  // silently PASS a renamed or restructured report — the exact no-op failure
+  // class this rewrite exists to kill. Fail closed instead.
+  if (!parsed || !Array.isArray(parsed.smells)) {
+    return { parseError: 'archlint JSON output has no smells array (schema drift?)', total: 0, blocking: 0, blockingDetails: [] };
+  }
+  const smells = parsed.smells;
   let blocking = 0;
   const blockingDetails = [];
   for (const smell of smells) {
@@ -220,6 +243,12 @@ function runBuiltinScan(projectRoot, resolved) {
     console.log(`[xp-gate arch] Baseline ratchet mode — ${BASELINE_FILE} present; blocking new ${FAIL_ON}+ findings only`);
     const diff = runArchlint(resolved, ['diff', baselinePath, '--fail-on', FAIL_ON], { cwd: projectRoot });
     if (!diff.ok) return 1;
+    // `--fail-on high` makes the exit code itself the verdict contract: 0 = no
+    // new high+ findings, 1 = at least one. This is the exact mechanism Gate
+    // 6's pre-commit has used since before #447 (issue evidence: "Gate 6
+    // actually uses: archlint diff .architecture-baseline.json --fail-on high
+    // ✅ normal"), so parity here is the point, not a shortcut. Anything other
+    // than 0/1 is a tool failure and blocks.
     if (diff.status === 0) {
       console.log(`✅ arch: no new ${FAIL_ON}+ architecture findings (baseline ratchet)`);
       return 0;
@@ -243,7 +272,10 @@ function runBuiltinScan(projectRoot, resolved) {
   // Empirically verified against @archlinter/cli 0.16.0: the JSON scan exits 1
   // exactly when high/critical findings exist (0 findings -> 0, medium-only ->
   // 0, any high -> 1); the table format always exits 0. Any other non-zero
-  // status is a tool failure, never a verdict.
+  // status is a tool failure, never a verdict. The observation is bounded to
+  // the PINNED release (step 1 of resolveArchlint, REQ-4), and
+  // __tests__/arch.test.js re-runs that real binary, so a semantic change
+  // fails tests instead of silently misreading the gate.
   if (scan.status !== 0 && scan.status !== 1) {
     console.error(`❌ ERROR - archlint scan exited ${scan.status}; tool failure is treated as blocking (never a silent pass)`);
     if (scan.stderr) process.stderr.write(scan.stderr);

@@ -124,6 +124,19 @@ extract_section() {
   [[ "$output" == *"SUBDIR=[]"* ]]
 }
 
+@test "AC-A-04-02 regression: CMakeLists.txt inside .git/node_modules is not a nested module (prune, FC-04)" {
+  extract_section || fail "derivation block extraction failed (anchors moved?)"
+  printf 'cmake_minimum_required(VERSION 3.16)\nadd_executable(app main.cpp)\n' > "$SBX_REPO/CMakeLists.txt"
+  # Vendored/vcs copies must not read as "the root file is a wiring file".
+  mkdir -p "$SBX_REPO/.git" "$SBX_REPO/node_modules/pkg/lib"
+  printf 'x\n' > "$SBX_REPO/.git/CMakeLists.txt"
+  printf 'x\n' > "$SBX_REPO/node_modules/pkg/lib/CMakeLists.txt"
+  SBX_LANGS="cpp" SBX_CHANGED="src/main.cpp" run bash "$SBX_DRIVE"
+  echo "$output"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"SUBDIR=[]"* ]]
+}
+
 # ── FC-08 migration escape hatch ─────────────────────────────────────────────
 
 @test "XP_GATE_ROOT_SHORTCIRCUIT=1 restores the old short-circuit for Gradle multi-module" {
