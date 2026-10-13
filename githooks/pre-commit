@@ -716,6 +716,32 @@ if [ -z "$PROJECT_LANGS" ] && [ -z "$_CONFIG_LANGS" ]; then
       done
       return 1
     }
+    # #527: two ecosystems whose MULTI-module layouts normally carry a root
+    # marker, so a root marker alone cannot prove "single project":
+    #   - Gradle: root build.gradle(.kts) + settings.gradle(.kts) with include
+    #   - CMake:  root CMakeLists.txt + a nested */CMakeLists.txt
+    # Both probes are bounded (two file reads for Gradle; one maxdepth-7 find
+    # for CMake — MC-05, no new unbounded scan) and only run once a root marker
+    # is present. A false positive keeps derivation ON — the #515 default —
+    # so the failure direction is never a false BLOCK.
+    _gradle_multi_module_root() {
+      local _sg
+      for _sg in settings.gradle settings.gradle.kts; do
+        # include ':app' (Groovy) / include(":app") (Kotlin DSL). The char
+        # class anchors on the token after `include`, so `includeBuild` and
+        # comment prose cannot false-positive.
+        if [ -f "$_sg" ] && grep -qE "include[[:space:]]*['\"(]" "$_sg" 2>/dev/null; then
+          return 0
+        fi
+      done
+      return 1
+    }
+    _cmake_multi_module_root() {
+      [ -f "CMakeLists.txt" ] || return 1
+      # A nested CMakeLists.txt (depth 2..7 below the root) means the root file
+      # is a wiring file, not the whole project.
+      [ -n "$(find . -mindepth 2 -maxdepth 7 -name "CMakeLists.txt" -not -path "./.git/*" -not -path "*/node_modules/*" 2>/dev/null | head -1)" ]
+    }
     # #515: when the repo ROOT itself declares the project, a nested marker that
     # is merely a module file (skill_cert/cli/setup.py incident) must not hijack
     # PROJECT_SUBDIR — Gates 1-9 would run from the wrong cwd and false-BLOCK on
@@ -725,9 +751,12 @@ if [ -z "$PROJECT_LANGS" ] && [ -z "$_CONFIG_LANGS" ]; then
     # check runs FIRST (#515 R2 delphi walkthrough): a root package.json with a
     # "workspaces" key declares a JS monorepo (often together with a shared
     # tsconfig.json), not a single project, so derivation keeps running there.
-    # Known limitation (#527): Gradle multi-module, CMake subdirectories and
-    # pnpm/Lerna workspaces are not disambiguated from single projects yet —
-    # see the pinned BATS case.
+    # #527 (resolved): Gradle multi-module and CMake subdirectory layouts are
+    # disambiguated by the predicates above; the short-circuit now applies to
+    # genuinely single-project roots. pnpm/Lerna workspaces remain a known
+    # limitation (no probe yet). Migration: repos that depended on the old
+    # short-circuit set XP_GATE_ROOT_SHORTCIRCUIT=1 (or delete the root
+    # marker); see githooks/__tests__/issue-527-subdir-multimodule.test.bats.
     _skip_subdir_derive=0
     if [ -f package.json ] && grep -q '"workspaces":' package.json 2>/dev/null; then
       _skip_subdir_derive=0 # JS monorepo root: subproject derivation stays on
@@ -735,7 +764,16 @@ if [ -z "$PROJECT_LANGS" ] && [ -z "$_CONFIG_LANGS" ]; then
          [ -f setup.py ] || [ -f go.mod ] || [ -f pubspec.yaml ] || \
          [ -f pom.xml ] || [ -f build.gradle ] || \
          [ -f build.gradle.kts ] || [ -f CMakeLists.txt ]; then
-      _skip_subdir_derive=1
+      # #527: before short-circuiting, ask whether the root marker declares
+      # MODULES (Gradle settings include / nested CMakeLists) rather than one
+      # project. The override restores the pre-#527 behavior explicitly.
+      if [ "${XP_GATE_ROOT_SHORTCIRCUIT:-0}" = "1" ]; then
+        _skip_subdir_derive=1
+      elif _gradle_multi_module_root || _cmake_multi_module_root; then
+        _skip_subdir_derive=0 # root marker declares modules — keep deriving
+      else
+        _skip_subdir_derive=1
+      fi
     fi
     _subdir_set=""
     if [ "$_skip_subdir_derive" -eq 0 ]; then

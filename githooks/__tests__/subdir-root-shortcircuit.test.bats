@@ -130,7 +130,7 @@ teardown() {
   [[ "$output" == *"SUBDIR=[packages/front]"* ]]
 }
 
-@test "functional: root build.gradle short-circuits — pinned known limitation for gradle multi-module (#515 R2)" {
+@test "functional: root build.gradle without settings.gradle include keeps the short-circuit (#527 single-project control)" {
   _setup_sandbox
   _extract_section "$SBX_SECTION" || fail "derivation block extraction failed (anchors moved?)"
   printf 'apply plugin: "java"\n' > "$SBX_REPO/build.gradle"
@@ -139,10 +139,11 @@ teardown() {
   SBX_LANGS="java" SBX_CHANGED="services/api/src/main/java/App.java" run bash "$SBX_DRIVE"
   echo "$output"
   [ "$status" -eq 0 ]
-  # Deliberately pinned: root marker wins, nested gradle module is NOT derived.
-  # If this expectation ever changes (per-module disambiguation), update the
-  # hook and this pin together — see the follow-up issue referenced in
-  # pre-commit's short-circuit comment.
+  # Single-project Gradle root (no settings.gradle include): the #515
+  # short-circuit still applies. The multi-module case (settings.gradle with
+  # include) now derives the module instead — see
+  # issue-527-subdir-multimodule.test.bats, which replaced this pin's
+  # known-limitation role.
   [[ "$output" == *"SUBDIR=[]"* ]]
 }
 
