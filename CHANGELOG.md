@@ -2,7 +2,7 @@
 
 All notable changes to this project will be documented in this file.
 
-## [Unreleased] - #507 Java 门禁加固 sprint
+## [0.21.0.0] - 2026-10-13
 
 ### Fixed
 
@@ -15,6 +15,10 @@ All notable changes to this project will be documented in this file.
 - **GATE 9 子状态聚合（#507 S5 + Delphi round-1 B-MAJOR-4）**: TS/Java 两半各自记录 PASS/SKIP/BLOCK，聚合为 PASS（任一半真实通过）/SKIP（全部跳过）/BLOCK；Maven-only 仓库编译通过现在正确记 PASS。
 - **评分单路径化**: 废弃 bc 分支（scale=1 先截断除法，与 awk %.1f 舍入实质分叉），awk 为唯一实现。
 - **镜像守卫扩展**: `scripts/check-hook-mirror.sh` 新增根级 gate 脚本副本与 `src/principles → src/npm-package/principles` 全树 parity 检查（先前无守卫，#507 Delphi round-1 A-MAJOR-4）。
+
+### Fixed (CI)
+
+- **npm-publish 的 GitHub Release notes 提取从未生效（本次发布修复）**: awk 模式 `^## \[<3段版本>\]` 要求 `]` 紧跟在三段版本号后，而 CHANGELOG 标题是 4 段形式（`## [0.20.1.0]`），两者永不相交——v0.20.1/v0.20.2 的 Release 正文实际都是兜底文案「Auto-generated from VERSION bump」。模式放宽为 `^## \[<ver>([.][0-9]+)*\]`，同时兼容 `## [0.21]` 与 `## [0.21.0.0]` 两种标题形态。
 
 ## [0.20.2.0] - 2026-10-12
 

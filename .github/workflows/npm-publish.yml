@@ -221,8 +221,12 @@ jobs:
           NPM_VERSION="${{ steps.version.outputs.npm_version }}"
           NOTES_FILE="$(mktemp)"
           if [ -f CHANGELOG.md ]; then
+            # Match both 3-part ("## [0.21]") and 4-part ("## [0.21.0.0]") headers:
+            # VERSION is MAJOR.MINOR.PATCH.MICRO and CHANGELOG headers carry the
+            # full 4-part form, so the old exact-"]"-after-3-parts pattern never
+            # matched and every release fell back to the stub notes (#534).
             awk -v ver="$NPM_VERSION" '
-              $0 ~ "^## \\[" ver "\\]" { flag=1; next }
+              $0 ~ "^## \\[" ver "([.][0-9]+)*\\]" { flag=1; next }
               flag && /^## \[/ { flag=0 }
               flag { print }
             ' CHANGELOG.md > "$NOTES_FILE"
