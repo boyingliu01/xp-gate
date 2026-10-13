@@ -4,6 +4,10 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased] - #507 Java 门禁加固 sprint
 
+### Fixed
+
+- **Gate 10 SAST 永不拦（#518，P0 安全修复）**: semgrep 不加 `--error` 时有 ERROR 级发现也 exit 0，且旧判红词汇（CRITICAL/HIGH）与 semgrep 实际产出（ERROR/WARNING/INFO）永不相交——两因叠加，任何安全漏洞都拦不住（issue 内含 semgrep 1.168.0 实测复现）。修复：判定改为解析 `results[].extra.severity`（词汇取并集，warnings-only = WARNING|INFO|MEDIUM|LOW，**词表外的未知/缺失 severity 一律 fail-closed 计入 BLOCK**）；退出码降级为"工具是否跑成"（不可解析输出、verdict 字段缺失、results 为空但有 scan errors/非零退出 → SKIP 且带诊断，绝不 PASS）；stdout/stderr 分离捕获（旧 `2>&1` 会污染被解析的 JSON）；node 成为判定硬依赖并在 semgrep 运行前守卫（缺失 = SKIP+安装提示）。**行为变更**：升级后真实发现会开始 FAIL（此前恒绿）。不加 `--error`：其退出码映射随版本/平台漂移且 JSON 判定无需它。同一语义已同步实现到 TS CLI 门禁 `src/gates/gate-9.ts`（`xp-gate gate sast`）；旧 `gate-9*.sh` 回退副本另立 issue 跟进。测试：BATS `gate-10-verdict.test.bats` 13 用例 + `gate-9.test.ts` 新增 4 用例。
+
 ### Changed（含破坏性变更）
 
 - **`overall.verdict` 值域变更（破坏性）**: `PASS|PARTIAL` → `PASS|WARN|FAIL|SKIP-ALL`；`score` 分母改为有效分母（SKIP 出分母），全 SKIP 时为 `null`（原来恒为数值）。history.jsonl 行新增 `effectiveTotal`/`effectivePassRate`/`skipCount`/`verdict`，`effectivePassRate` 为数值或 `null`（不再是有引号字符串）。仓内 dashboard.js 已同步；外部消费者需适配 `h.score===null` 与新值域。
