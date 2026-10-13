@@ -224,6 +224,12 @@ source "${AUDIT_SCRIPT_DIR}/lib/jscpd-run.sh"
 # Issue #476: Gate 11's sprint-gate.sh resolution chain and decision translation.
 source "${AUDIT_SCRIPT_DIR}/lib/sprint-gate-report.sh"
 
+# Issue #523: Gate 5's Python coverage parsing and threshold verdict. The old
+# `grep -o '[0-9]*%'` never matched --format=total's bare number, so the 80%
+# branch never ran; sourced as a library so the fail-closed contract is
+# unit-testable without executing this hook.
+source "${AUDIT_SCRIPT_DIR}/lib/coverage-total.sh"
+
 # Read max_duration_ms from .xp-gate-config.json (default 7200000 = 2 hours)
 _MAX_DURATION_MS=$(node -e "try{const c=JSON.parse(require('fs').readFileSync('${PROJECT_ROOT_FOR_AUDIT}/.xp-gate-config.json','utf8'));console.log((c.audit&&c.audit.max_duration_ms)||7200000);}catch(e){console.log(7200000);}" 2>/dev/null || echo "7200000")
 
@@ -2361,26 +2367,11 @@ else
       ;;
     "python")
       COVERAGE_ENFORCED=true
-      if command -v coverage &> /dev/null; then
-        COVERAGE_PERCENT=""
-        if [ -f ".coverage" ]; then
-          COVERAGE_PERCENT=$(coverage report --format=total 2>/dev/null | grep -o '[0-9]*%' | head -1 | tr -d '%') || true
-        fi
-        if [ -z "$COVERAGE_PERCENT" ] && [ -f "coverage/.coverage" ]; then
-          COVERAGE_PERCENT=$(coverage report --format=total -i coverage 2>/dev/null | grep -o '[0-9]*%' | head -1 | tr -d '%') || true
-        fi
-        if [ -n "$COVERAGE_PERCENT" ]; then
-          if [ "$COVERAGE_PERCENT" -lt 80 ]; then
-            echo "❌ BLOCKED - Python coverage ${COVERAGE_PERCENT}% below 80% threshold"
-            exit 1
-          fi
-          echo "Python coverage: ${COVERAGE_PERCENT}% ✅ (≥ 80%)"
-        else
-          echo "⚠️  Could not determine Python coverage percentage. Ensure pytest-cov or coverage.py data exists."
-        fi
-      else
-        echo "⚠️  coverage.py not available, cannot enforce Python coverage threshold."
-      fi
+      # Issue #523: parsing + threshold verdict live in lib/coverage-total.sh
+      # (the old `grep -o '[0-9]*%'` never matched --format=total's bare
+      # number, so this branch never reached the threshold). Returns 1 on
+      # BLOCK after echoing the verdict.
+      enforce_python_coverage || exit 1
       ;;
     "java")
       COVERAGE_ENFORCED=true
