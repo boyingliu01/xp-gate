@@ -1,0 +1,59 @@
+{
+  "_schema_version": 1,
+  "evidence_schema_version": 2,
+  "id": "sprint-20261003-75",
+  "task_description": "修复 P0/P1 质量门禁缺陷：Gate 5 runner 错误区分(#454)、baseline 静默覆盖(#452)、.principlesrc 配置不生效(#457)、Gate MW 凭据弱校验(#423)",
+  "phase": 4,
+  "status": "in_progress",
+  "started_at": "2026-10-03T05:35:05.737Z",
+  "phase_history": [
+    {
+      "phase": 1,
+      "name": "PREP",
+      "status": "completed",
+      "started_at": "2026-10-03T05:35:05.737Z",
+      "completed_at": "2026-10-03T05:37:23.181Z",
+      "duration_seconds": 137
+    },
+    {
+      "phase": 2,
+      "phase_name": "DESIGN",
+      "status": "completed",
+      "completed_at": "2026-10-03T06:49:15.204Z"
+    },
+    {
+      "phase": 3,
+      "phase_name": "BUILD",
+      "status": "completed",
+      "started_at": "2026-10-03T09:00:21.324Z",
+      "completed_at": "2026-10-03T09:35:01.280Z",
+      "duration_seconds": 2080
+    },
+    {
+      "phase": 4,
+      "phase_name": "VERIFY",
+      "status": "completed",
+      "completed_at": "2026-10-03T09:38:51.960Z"
+    }
+  ],
+  "isolation": {
+    "worktree_path": "D:\\projects\\xp-gate",
+    "branch": "main"
+  },
+  "outputs": {
+    "issues": "#454,#452 REQ-3,#457,#423",
+    "worktree": "main",
+    "scale": "standard",
+    "investigations": 4,
+    "design_doc": "docs/plans/2026-10-03-p0-p1-gate-defects.md",
+    "delphi_rounds": 2,
+    "consensus": "100%",
+    "commits": 6,
+    "new_tests": 20,
+    "regressions": 0,
+    "probes": 29,
+    "probe_failures": 0,
+    "alignment_score": 100
+  },
+  "metrics": {}
+}
