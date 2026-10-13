@@ -9,9 +9,9 @@
 #         subprocess-shell=True finding (severity ERROR) in a staged .py file,
 #         gate verdict PASS. The verdict now comes from the JSON; the exit code
 #         only tells whether the tool itself ran to completion. --error stays
-#         unused: with it, exit 2 is shared by real findings and runtime
-#         failures, colliding with the AC-475-01/02 SKIP contract.
-# @covers AC-518-01..09
+#         unused: its exit-code mapping has drifted across semgrep
+#         versions/platforms and the JSON verdict needs nothing from it.
+# @covers AC-518-01..13
 
 setup() {
   REPO_ROOT="$(cd "$BATS_TEST_DIRNAME/../.." && pwd)"
@@ -113,7 +113,7 @@ JSON
   write_json_stub "$TEST_DIR/finding-mixed.json" 0
   run run_gate_with_json_stub "$TEST_DIR/finding-mixed.json" 0
   [ "$status" -eq 1 ]
-  [[ "$output" == *"CRITICAL/HIGH/ERROR"*"1"* ]]
+  [[ "$output" == *"CRITICAL/HIGH/ERROR:     1  ❌ BLOCKED"* ]]
   [[ "$output" == *"rule.err"* ]]
 }
 
@@ -147,7 +147,7 @@ JSON
     printf 'exit 0\n'
   } > "$TEST_DIR/bin/semgrep"
   chmod +x "$TEST_DIR/bin/semgrep"
-  run run_gate_with_json_stub "$TEST_DIR/garbage.txt" 0
+  run run_gate_with_json_stub
   [ "$status" -eq 0 ]
   [[ "$output" == *"STATUS=SKIP"* ]]
   [[ "$output" != *"STATUS=PASS"* ]]
@@ -163,18 +163,90 @@ JSON
   [[ "$output" == *"BLOCKED"* ]]
 }
 
-@test "AC-518-09 anti-vacuity: all three shipped copies carry the union vocabulary and no --error flag" {
+@test "AC-518-09 anti-vacuity: all three shipped copies carry the warning vocabulary and no --error flag" {
   for f in githooks/gate-10.sh src/npm-package/gate-10.sh src/npm-package/hooks/gate-10.sh; do
-    # Blocking vocabulary must be the union of both severity scales.
-    grep -qF 'ERROR","CRITICAL","HIGH' "$REPO_ROOT/$f" || {
-      echo "$f: missing union blocking vocabulary" >&2
+    # The warnings-only vocabulary must be present verbatim; anything outside it
+    # is counted BLOCKING by the node verdict script (fail-closed on unknown
+    # severities, functionally pinned by AC-518-10).
+    grep -qF 'WARNING","INFO","MEDIUM","LOW' "$REPO_ROOT/$f" || {
+      echo "$f: missing union warning vocabulary" >&2
       return 1
     }
-    # The semgrep invocation must NOT gain --error (exit 2 would then be shared
-    # by real findings and runtime failures, breaking the #475 SKIP contract).
+    # The semgrep invocation must NOT gain --error (exit-code semantics drift
+    # across versions/platforms; the JSON verdict needs nothing from it).
     if grep 'scan --config=p/security-audit' "$REPO_ROOT/$f" | grep -q -- '--error'; then
       echo "$f: semgrep invocation must not use --error" >&2
       return 1
     fi
   done
+}
+
+@test "AC-518-10: an unknown-severity finding BLOCKs (fail-closed on unrecognized tiers)" {
+  cat > "$TEST_DIR/finding-unknown.json" << 'JSON'
+{"results":[{"check_id":"future.rule","path":"src/z.py","start":{"line":7},"extra":{"severity":"COSMIC","message":"unrecognized severity tier"}}],"errors":[]}
+JSON
+  write_json_stub "$TEST_DIR/finding-unknown.json" 0
+  run run_gate_with_json_stub "$TEST_DIR/finding-unknown.json" 0
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"BLOCKED"* ]]
+  [[ "$output" == *"future.rule"* ]]
+}
+
+@test "AC-518-11: exit 0 + zero results + nonzero scan errors does NOT pass — it SKIPs" {
+  # The R1 residue: semgrep can exit 0 with results:[] while every input failed
+  # to parse (errors[] populated). Old behavior: PASS on nothing scanned.
+  cat > "$TEST_DIR/all-errored.json" << 'JSON'
+{"results":[],"errors":[{"message":"could not parse src/vuln.py"}]}
+JSON
+  write_json_stub "$TEST_DIR/all-errored.json" 0 "some stderr noise"
+  run run_gate_with_json_stub "$TEST_DIR/all-errored.json" 0 "some stderr noise"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"STATUS=SKIP"* ]]
+  [[ "$output" != *"STATUS=PASS"* ]]
+}
+
+@test "AC-518-12: a drifted verdict line (missing count fields) fails closed to SKIP" {
+  # Simulates the node verdict script's format drifting: PARSE=OK but the
+  # BLOCKING/WARNINGS fields are gone. The shell must SKIP, not PASS.
+  cat > "$TEST_DIR/clean.json" << 'JSON'
+{"results":[]}
+JSON
+  cat > "$TEST_DIR/bin/node" << STUB
+#!/bin/sh
+cat > /dev/null
+echo "PARSE=OK RESULTS=3"
+exit 0
+STUB
+  chmod +x "$TEST_DIR/bin/node"
+  write_json_stub "$TEST_DIR/clean.json" 0
+  run run_gate_with_json_stub "$TEST_DIR/clean.json" 0
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"STATUS=SKIP"* ]]
+  [[ "$output" != *"STATUS=PASS"* ]]
+}
+
+@test "AC-518-13: node missing from PATH SKIPs up front with an actionable message" {
+  write_json_stub "$TEST_DIR/clean.json" 0
+  run bash -c '
+    cd "$1" || exit 1
+    gate_start_ms() { echo 0; }
+    record_gate_audit() { :; }
+    GATE_10_STATUS=""
+    HOME="$2/no-home"
+    # Keep git on PATH (the gate lists staged files) but drop node: git ships
+    # from its own directory, node from the managed runtime — dir-split works.
+    GIT_DIR="$(dirname "$(command -v git)")"
+    PATH="$1/bin:$GIT_DIR:/usr/bin:/bin"
+    export PATH
+    if command -v node >/dev/null 2>&1; then
+      echo "fixture broken: node still resolvable" >&2
+      exit 99
+    fi
+    source "$3"
+    printf "STATUS=%s" "$GATE_10_STATUS"
+  ' _ "$TEST_DIR" "$TEST_DIR" "$GATE"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"STATUS=SKIP"* ]]
+  [[ "$output" == *"node is not installed"* ]]
+  [[ "$output" != *"STATUS=PASS"* ]]
 }
