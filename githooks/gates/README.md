@@ -64,8 +64,8 @@ All gates require:
 6. ⏳ Update pre-commit to source Gate 3-4-7-8-9 scripts — deferred per design: pre-commit remains monolithic for auditability
 7. ✅ Extract generate_quality_report() — retained inline in pre-commit (monolithic design for auditability; exists at line 2116, called at line 2314)
 8. ⏳ Create shared utilities file for common functions — deferred: common functions remain in adapter-common.sh
-9. ⏳ Add tests for extracted gate scripts — deferred: gate scripts tested via pre-commit integration tests
+9. ⏳ Add tests for extracted gate scripts — deferred: gate scripts tested via pre-commit integration tests. **Exception (#532):** `gate-9-sast-security.sh` now has a dedicated verdict contract suite (`githooks/__tests__/issue-532-gate9-verdict.test.bats`) because it is live-reachable, not reference-only (see Note below).
 
 ---
 
-**Note:** The monolithic pre-commit design (~2084 lines) is intentional — a single bash file keeps the trust boundary auditable. Gate scripts in `gates/` directory exist for reference and potential future use, but pre-commit continues to use inline implementations for simplicity and auditability.
+**Note:** The monolithic pre-commit design (~2084 lines) is intentional — a single bash file keeps the trust boundary auditable. Gate scripts in `gates/` are not merely reference copies: `resolveGateScript(9)` in `src/npm-package/lib/gate-runner.js` hits `gates/gate-9-sast-security.sh` FIRST when the TS gate entry (`src/gates/gate-9.ts`) is unavailable, so this file executes on every `xp-gate gate sast` fallback in a TS-less checkout. The gate-9 verdict semantics therefore mirror `githooks/gate-10.sh` (the #518 fix) byte-for-byte in the verdict block; parity is asserted by `githooks/__tests__/issue-532-gate9-verdict.test.bats` (AC-A-02-04). The `gates/` copies are not shipped in the npm package — only `githooks/gate-*.sh`, `githooks/hooks/`-mirrored copies and `githooks/adapters/gate-*.sh` are, guarded by `scripts/check-hook-mirror.sh` (pre-push Gate MP + CI mirror-parity job).

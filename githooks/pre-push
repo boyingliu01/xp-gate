@@ -49,6 +49,7 @@ report = {
     'verdict': '$verdict',
   },
   'gates': [
+    {'id': 'MP', 'name': 'Gate-Script Mirror Parity', 'status': '${GATE_MP_STATUS:-SKIP}', 'details': {}},
     {'id': '10', 'name': 'Build Integrity', 'status': '${GATE_10_STATUS:-SKIP}', 'details': {}},
     {'id': 'M', 'name': 'Mutation Testing', 'status': '${GATE_M_STATUS:-SKIP}', 'details': {}},
     {'id': 'M-Python', 'name': 'Mutation Testing (Python)', 'status': '${GATE_M_PYTHON_STATUS:-SKIP}', 'details': {}},
@@ -166,6 +167,37 @@ if [ "$DOC_ONLY" = "true" ]; then
   echo "   ✅ No code review required. Proceeding with push..."
   exit 0
 fi
+
+# ============================================================================
+# GATE MP: GATE-SCRIPT MIRROR PARITY (#532 / REQ-A-02 / AC-A-02-04)
+# ============================================================================
+# The npm package ships byte mirrors of every gate script (package root,
+# hooks/, adapters/). A canonical edit without `sync-package-content.js --fix`
+# ships stale copies silently — the #532 SAST verdict fix almost shipped that
+# way (the fix landed on gate-10.sh while three fallback copies kept the
+# #518 defects). Push is the moment code leaves the machine, so the parity
+# guard runs here (fail-closed) and in CI's mirror-parity job. Read-only:
+# compares bytes and git index modes; heals nothing.
+GATE_MP_STATUS="SKIP"
+MP_ROOT="$(git rev-parse --show-toplevel 2>/dev/null || echo .)"
+if [ -f "$MP_ROOT/scripts/check-hook-mirror.sh" ]; then
+  if (cd "$MP_ROOT" && bash scripts/check-hook-mirror.sh); then
+    GATE_MP_STATUS="PASS"
+    echo "✅ Gate MP: gate-script mirror parity OK"
+  else
+    echo ""
+    echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+    echo "   ❌ GATE MP FAILED — PUSH BLOCKED"
+    echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+    echo "A gate script changed without its npm-package mirrors being synced."
+    echo "Fix locally: node src/npm-package/scripts/sync-package-content.js --fix"
+    echo "Then commit the mirrors and push again."
+    exit 1
+  fi
+else
+  echo "⚠️ Gate MP: check-hook-mirror.sh not found. SKIP — Gate MP."
+fi
+echo ""
 
 # Size limits check — REMOVED: AI workflows generate large cumulative pushes; size is not a quality signal
   DIFF_STATS=$(git diff origin/main...HEAD --stat 2>/dev/null || git diff origin/master...HEAD --stat 2>/dev/null)
