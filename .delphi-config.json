@@ -1,5 +1,6 @@
 {
-  "active_profile": "default",
+  "_comment": "active_profile=whalecloud (#465): the DSH delphi-review tool resolves seats through this file with no profile override, and its loader requires all three experts on ONE gateway. The 'default' profile spans dashscope/zhipu/deepseek and is rejected there ('All experts must share one gateway base_url'), so with 'default' active the tool cannot start at all. whalecloud is a single gateway (lab.iwhalecloud.com/gpt-proxy) with three distinct domestic flash models. Key dependency: providers.whalecloud.api_key is ${WHALECLOUD_API_KEY} and must be exported; a missing variable fails fast with a named error, never a silent degradation. Script invocations can still pick another profile explicitly (--profile default) when those providers' keys are set.",
+  "active_profile": "whalecloud",
   "profiles": {
     "whalecloud": {
       "provider": "whalecloud",
