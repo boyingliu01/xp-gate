@@ -1283,6 +1283,165 @@ describe('timeout configuration', () => {
     });
   });
 
+  // #481 — the prompt ceiling is a property of the seat × model route, not of
+  // the runner. The R1-R4 sprint review measured g-glm-5.3-flash dropping
+  // 32-39 KB requests six times with "Network error." while the same gateway
+  // served 36 KB to a differently-routed seat: a systematic ceiling reported as
+  // a transient fault. These contracts make the ceiling calibratable per seat
+  // and force oversized-drop failures to be classified, not misreported.
+  describe('seat prompt calibration (#481)', () => {
+    describe('resolveSeatCalibration', () => {
+      it('an absent record is not a mistake and stays silent', () => {
+        const { resolveSeatCalibration } = loadModule();
+        const errors = vi.spyOn(console, 'error').mockImplementation(() => {});
+        try {
+          expect(resolveSeatCalibration({})).toEqual({ calibration: null });
+          expect(resolveSeatCalibration(undefined)).toEqual({ calibration: null });
+          expect(errors.mock.calls).toHaveLength(0);
+        } finally {
+          errors.mockRestore();
+        }
+      });
+
+      it('a valid record parses with the measured bounds intact', () => {
+        const { resolveSeatCalibration } = loadModule();
+        const { calibration } = resolveSeatCalibration({
+          prompt_calibration: {
+            measured_at: '2026-10-05',
+            model_id: 'g-glm-5.3-flash',
+            gateway: 'whalecloud',
+            last_pass_bytes: 26624,
+            last_fail_bytes: 36897,
+          },
+        });
+        expect(calibration).toEqual({
+          measured_at: '2026-10-05',
+          model_id: 'g-glm-5.3-flash',
+          gateway: 'whalecloud',
+          last_pass_bytes: 26624,
+          last_fail_bytes: 36897,
+        });
+      });
+
+      it('a record without a fail bound is legal (the ceiling may still be unbounded above)', () => {
+        const { resolveSeatCalibration } = loadModule();
+        const { calibration, warning } = resolveSeatCalibration({
+          prompt_calibration: { measured_at: '2026-10-05', last_pass_bytes: 36864 },
+        });
+        expect(warning).toBeUndefined();
+        expect(calibration).toEqual({
+          measured_at: '2026-10-05',
+          last_pass_bytes: 36864,
+          last_fail_bytes: undefined,
+          model_id: undefined,
+          gateway: undefined,
+        });
+      });
+
+      it('a malformed record warns and is ignored, never trusted', () => {
+        const { resolveSeatCalibration } = loadModule();
+        const errors = vi.spyOn(console, 'error').mockImplementation(() => {});
+        try {
+          for (const bad of [
+            '2026-10-05',
+            {},
+            { measured_at: '', last_pass_bytes: 100 },
+            { measured_at: '2026-10-05' },
+            { measured_at: '2026-10-05', last_pass_bytes: 0 },
+            { measured_at: '2026-10-05', last_pass_bytes: -5 },
+            { measured_at: '2026-10-05', last_pass_bytes: 'lots' },
+            { measured_at: '2026-10-05', last_pass_bytes: 100, last_fail_bytes: 50 },
+          ]) {
+            const outcome = resolveSeatCalibration({ prompt_calibration: bad });
+            expect(outcome.calibration).toBeNull();
+            expect(outcome.warning).toMatch(/prompt_calibration/);
+          }
+          const warned = errors.mock.calls.filter((call) => /prompt_calibration/.test(String(call[0])));
+          expect(warned.length).toBe(8);
+        } finally {
+          errors.mockRestore();
+        }
+      });
+    });
+
+    describe('classifySeatFailure', () => {
+      const calibration = { measured_at: '2026-10-05', last_pass_bytes: 26624, last_fail_bytes: 36897 };
+
+      it('a pre-response drop above the calibrated passing size is SIZE_EXCEEDED, not a network fault', () => {
+        const { classifySeatFailure } = loadModule();
+        const classified = classifySeatFailure({
+          result: { error: true, message: 'Network error.' },
+          promptBytes: 32081,
+          calibration,
+        });
+        expect(classified.error_type).toBe('SIZE_EXCEEDED');
+        expect(classified.retryable).toBe(false);
+        expect(classified.bytes).toBe(32081);
+        expect(classified.calibrated_pass_bytes).toBe(26624);
+        expect(classified.message).toMatch(/SIZE_EXCEEDED|calibrated/i);
+        expect(classified.message).toContain('32081');
+        expect(classified.message).toContain('26624');
+      });
+
+      it('the exact calibrated passing size is not classified as oversized (strictly above)', () => {
+        const { classifySeatFailure } = loadModule();
+        const classified = classifySeatFailure({
+          result: { error: true, message: 'Network error.' },
+          promptBytes: 26624,
+          calibration,
+        });
+        expect(classified.error_type).toBe('network_error');
+      });
+
+      it('a drop below the calibrated passing size stays an ordinary network error', () => {
+        const { classifySeatFailure } = loadModule();
+        const classified = classifySeatFailure({
+          result: { error: true, message: 'Network error.' },
+          promptBytes: 8000,
+          calibration,
+        });
+        expect(classified.error_type).toBe('network_error');
+      });
+
+      it('without calibration there is no evidence to reclassify on', () => {
+        const { classifySeatFailure } = loadModule();
+        const classified = classifySeatFailure({
+          result: { error: true, message: 'Network error.' },
+          promptBytes: 32081,
+          calibration: null,
+        });
+        expect(classified.error_type).toBe('network_error');
+      });
+
+      it('a retryable failure is never classified as a size ceiling (a retry can still succeed)', () => {
+        const { classifySeatFailure } = loadModule();
+        const classified = classifySeatFailure({
+          result: { error: true, retryable: true, message: 'Server error (500).' },
+          promptBytes: 32081,
+          calibration,
+        });
+        expect(classified.error_type).toBe('retryable_error');
+      });
+
+      it('a non-network failure (auth) keeps its own class', () => {
+        const { classifySeatFailure } = loadModule();
+        const classified = classifySeatFailure({
+          result: { error: true, message: 'Authentication failed (401). Check API key in .delphi-config.json.' },
+          promptBytes: 32081,
+          calibration,
+        });
+        expect(classified.error_type).toBe('network_error');
+        expect(classified.message).toMatch(/Authentication/);
+      });
+
+      it('a successful call passes through untouched', () => {
+        const { classifySeatFailure } = loadModule();
+        const result = { success: true, content: '{}', resolved_model: 'm' };
+        expect(classifySeatFailure({ result, promptBytes: 32081, calibration })).toBe(result);
+      });
+    });
+  });
+
   describe('callWithRetry timeout passthrough', () => {    afterEach(() => {
       vi.useRealTimers();
       vi.unstubAllGlobals();
