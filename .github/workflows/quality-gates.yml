@@ -507,6 +507,22 @@ jobs:
             echo "✅ Gate 5: Tests passed and coverage threshold met"
           fi
 
+      # Gate 5b: BATS hook behavior contracts (#484)
+      # The .bats suites are the executable contracts of the gate scripts
+      # (exit codes, verdict JSON, anti-bypass properties). Before #484 they
+      # had NO automatic execution path — guards existed but never ran (the
+      # 6ebbd5a failure mode). The bats devDependency ships a working runner
+      # on Linux; a failure here must red the pipeline.
+      - name: 'Gate 5b: BATS hook behavior contracts'
+        run: |
+          if compgen -G "githooks/__tests__/*.bats" > /dev/null; then
+            echo "Running BATS suites (githooks/__tests__)..."
+            npx bats githooks/__tests__/
+            echo "✅ Gate 5b: BATS hook behavior contracts passed"
+          else
+            echo "ℹ️ No .bats suites found — skipping Gate 5b"
+          fi
+
       # Gate 6: Architecture & Boy Scout Rule
       - name: 'Gate 6: Architecture & Boy Scout Rule'
         id: gate6

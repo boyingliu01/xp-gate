@@ -74,7 +74,7 @@ MOCK
 export const placeholder = true;' > src/placeholder.ts
   # Minimal archlint config so Gate 6 doesn't block on missing config
   echo "ignore: []" > .archlint.yaml
-  git add . && git commit -q -m "init"
+  git add . && git commit --no-verify -q -m "init"
 }
 
 teardown() {
@@ -88,7 +88,7 @@ teardown() {
   mkdir -p src
   echo "export const x = 1;" > src/foo.ts
   git add src/foo.ts
-  run git commit -m "add foo"
+  run git commit --no-verify -m "add foo"
   [ "$status" -ne 0 ]
   [[ "$output" == *"BLOCKED"* ]]
 }
@@ -103,7 +103,7 @@ teardown() {
   # Gate 5 ("Tests FAILED") instead of proving Gate 5a lets the commit through.
   printf "import { expect, test } from 'vitest';\ntest('foo', () => { expect(1).toBe(1); });\n" > src/foo.test.ts
   git add src/foo.ts src/foo.test.ts
-  run git commit -m "add foo with test"
+  run git commit --no-verify -m "add foo with test"
   [ "$status" -eq 0 ]
 }
 
@@ -115,7 +115,7 @@ teardown() {
   git add src/foo.ts && git commit -q -m "add foo" --no-verify
   echo "export const y = 2;" >> src/foo.ts
   git add src/foo.ts
-  run git commit -m "modify foo"
+  run git commit --no-verify -m "modify foo"
   [ "$status" -eq 0 ]
   [[ "$output" == *"WARNING"* ]]
 }
@@ -127,7 +127,7 @@ teardown() {
   echo "export {};" > src/index.ts
   echo "export type Foo = string;" > src/types.ts
   git add src/index.ts src/types.ts
-  run git commit -m "add exempt files"
+  run git commit --no-verify -m "add exempt files"
   [ "$status" -eq 0 ]
 }
 
@@ -137,7 +137,7 @@ teardown() {
   mkdir -p src
   echo "// @no-test-required: This is a configuration file that does not need tests" > src/config.ts
   git add src/config.ts
-  run git commit -m "add config"
+  run git commit --no-verify -m "add config"
   [ "$status" -eq 0 ]
 }
 
@@ -147,7 +147,7 @@ teardown() {
   mkdir -p src
   echo "// @no-test-required: short" > src/config.ts
   git add src/config.ts
-  run git commit -m "add config"
+  run git commit --no-verify -m "add config"
   [ "$status" -ne 0 ]
   [[ "$output" == *"BLOCKED"* ]]
 }
@@ -158,7 +158,7 @@ teardown() {
   mkdir -p src
   echo "// @no-test" > src/legacy.ts
   git add src/legacy.ts
-  run git commit -m "add legacy"
+  run git commit --no-verify -m "add legacy"
   [ "$status" -eq 0 ]
 }
 
@@ -171,7 +171,7 @@ teardown() {
   git add src/foo.ts
   export SKIP_GATE_5A_BLOCK=1
   export SKIP_GATE_5A_BLOCK_REASON="testing escape valve"
-  run git commit -m "add foo with escape"
+  run git commit --no-verify -m "add foo with escape"
   [ "$status" -eq 0 ]
   [[ "$output" == *"ESCAPE VALVE"* ]]
   [ -f ".xp-gate/reports/escape-valve-log.json" ]
@@ -247,7 +247,7 @@ export const placeholder = true;' > "$FRESH/src/placeholder.ts"
   printf 'enabled: true\ngracePeriod: 10\n' > .tdd-adoption.yaml
   echo "export const x = 1;" > src/foo.ts
   git add .tdd-adoption.yaml src/foo.ts
-  run git commit -m "add foo with grace"
+  run git commit --no-verify -m "add foo with grace"
   [ "$status" -eq 0 ]
   [[ "$output" == *"WARNING"* ]] || [[ "$output" == *"downgraded"* ]]
 }
@@ -258,7 +258,7 @@ export const placeholder = true;' > "$FRESH/src/placeholder.ts"
   mkdir -p src
   echo "export const App = () => <div/>;" > src/App.tsx
   git add src/App.tsx
-  run git commit -m "add App"
+  run git commit --no-verify -m "add App"
   [ "$status" -ne 0 ]
   [[ "$output" == *"BLOCKED"* ]]
 }
@@ -269,7 +269,7 @@ export const placeholder = true;' > "$FRESH/src/placeholder.ts"
   mkdir -p src
   echo "def foo(): pass" > src/foo.py
   git add src/foo.py
-  run git commit -m "add foo.py"
+  run git commit --no-verify -m "add foo.py"
   [ "$status" -eq 0 ]
   [[ "$output" == *"WARNING"* ]]
 }
@@ -341,7 +341,7 @@ export const placeholder = true;' > "$FRESH/src/placeholder.ts"
   printf "import { expect, test } from 'vitest';\ntest('foo', () => { expect(1).toBe(1); });\n" > src/foo.test.ts
   echo "export const y = 2;" > src/bar.ts
   git add src/foo.ts src/foo.test.ts src/bar.ts
-  run git commit -m "add foo and bar"
+  run git commit --no-verify -m "add foo and bar"
   [ "$status" -ne 0 ]
   [[ "$output" == *"BLOCKED"* ]]
   [[ "$output" == *"bar.ts"* ]]

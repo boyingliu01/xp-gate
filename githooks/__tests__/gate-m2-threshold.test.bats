@@ -48,7 +48,7 @@ MOCK
 
   # Create initial commit (no test files — clean baseline for diff-tree)
   echo "init" > README.md
-  git add . && git commit -q -m "init"
+  git add . && git commit --no-verify -q -m "init"
 
   # Create walkthrough result file so Delphi validator doesn't block
   # This is required by the pre-push hook's code-walkthrough section (lines 516-537)
@@ -136,7 +136,7 @@ EOF
 
 @test "mock density 29% PASSES (below 30% threshold)" {
   create_test_file_with_density "src/foo.test.ts" 29 100
-  git add src/foo.test.ts && git commit -q -m "add test"
+  git add src/foo.test.ts && git commit --no-verify -q -m "add test"
   run_pre_push
   [ "$status" -eq 0 ]
   [[ "$output" == *"within"* ]] || [[ "$output" == *"acceptable"* ]] || [[ "$output" == *"29."* ]]
@@ -146,7 +146,7 @@ EOF
 
 @test "mock density 35% without annotation WARNS in Phase 1" {
   create_test_file_with_density "src/foo.test.ts" 35 100
-  git add src/foo.test.ts && git commit -q -m "add test"
+  git add src/foo.test.ts && git commit --no-verify -q -m "add test"
   run_pre_push
   [ "$status" -eq 0 ]  # Phase 1: WARNING only, no block
   [[ "$output" == *"WARNING"* ]]
@@ -157,7 +157,7 @@ EOF
 @test "mock density 35% with @mock-justified PASSES" {
   create_test_file_with_density "src/foo.test.ts" 35 100
   echo "// @mock-justified: This test requires extensive mocking of external APIs and services" >> "src/foo.test.ts"
-  git add src/foo.test.ts && git commit -q -m "add test"
+  git add src/foo.test.ts && git commit --no-verify -q -m "add test"
   run_pre_push
   [ "$status" -eq 0 ]
   [[ "$output" == *"justified"* ]]
@@ -167,7 +167,7 @@ EOF
 
 @test "mock density 55% without annotation WARNS in Phase 1" {
   create_test_file_with_density "src/foo.test.ts" 55 100
-  git add src/foo.test.ts && git commit -q -m "add test"
+  git add src/foo.test.ts && git commit --no-verify -q -m "add test"
   run_pre_push
   [ "$status" -eq 0 ]  # Phase 1: WARNING only
   [[ "$output" == *"WARNING"* ]]
@@ -178,7 +178,7 @@ EOF
 @test ".mockpolicyrc mock-threshold: 40 changes threshold to 40%" {
   echo '{"mock-threshold": 40}' > .mockpolicyrc
   create_test_file_with_density "src/foo.test.ts" 35 100
-  git add .mockpolicyrc src/foo.test.ts && git commit -q -m "add config and test"
+  git add .mockpolicyrc src/foo.test.ts && git commit --no-verify -q -m "add config and test"
   run_pre_push
   [ "$status" -eq 0 ]
   # 35% is within the custom 40% threshold → should show within/pass
@@ -191,7 +191,7 @@ EOF
   # Only add a non-test source file
   mkdir -p src
   echo "export const x = 1;" > src/foo.ts
-  git add src/foo.ts && git commit -q -m "add source"
+  git add src/foo.ts && git commit --no-verify -q -m "add source"
   run_pre_push
   # Gate M2 should be skipped (no test files)
   [[ "$output" == *"SKIPPED"* ]] || [[ "$output" == *"no test files"* ]]
@@ -203,7 +203,7 @@ EOF
   create_test_file_with_density "src/foo.test.ts" 35 100
   # Reason < 10 chars — does NOT satisfy the min-length requirement
   echo "// @mock-justified: short" >> "src/foo.test.ts"
-  git add src/foo.test.ts && git commit -q -m "add test"
+  git add src/foo.test.ts && git commit --no-verify -q -m "add test"
   run_pre_push
   [ "$status" -eq 0 ]
   [[ "$output" == *"WARNING"* ]]
@@ -213,7 +213,7 @@ EOF
 
 @test "mock density exactly 30% PASSES (threshold is >)" {
   create_test_file_with_density "src/foo.test.ts" 30 100
-  git add src/foo.test.ts && git commit -q -m "add test"
+  git add src/foo.test.ts && git commit --no-verify -q -m "add test"
   run_pre_push
   [ "$status" -eq 0 ]
   # 30% is NOT > 30%, so it passes
@@ -225,7 +225,7 @@ EOF
 @test "multiple test files with one over threshold WARNS for that file" {
   create_test_file_with_density "src/foo.test.ts" 10 100
   create_test_file_with_density "src/bar.test.ts" 40 100
-  git add src/foo.test.ts src/bar.test.ts && git commit -q -m "add tests"
+  git add src/foo.test.ts src/bar.test.ts && git commit --no-verify -q -m "add tests"
   run_pre_push
   [ "$status" -eq 0 ]
   [[ "$output" == *"bar.test.ts"* ]]
@@ -236,7 +236,7 @@ EOF
 
 @test "Phase 1 WARNING mode does NOT block even at 80% density" {
   create_test_file_with_density "src/foo.test.ts" 80 100
-  git add src/foo.test.ts && git commit -q -m "add test"
+  git add src/foo.test.ts && git commit --no-verify -q -m "add test"
   run_pre_push
   [ "$status" -eq 0 ]  # Must NOT block in Phase 1
   [[ "$output" == *"WARNING"* ]]

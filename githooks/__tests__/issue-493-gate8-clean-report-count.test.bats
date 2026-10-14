@@ -58,7 +58,7 @@ count_with_shipped_expression() {
   git config core.hooksPath /dev/null
   git config user.email t@t.t
   git config user.name t
-  git commit -q --allow-empty -m init
+  git commit --no-verify -q --allow-empty -m init
   printf 'const x = 1\n' > ok.ts
   git add ok.ts
 

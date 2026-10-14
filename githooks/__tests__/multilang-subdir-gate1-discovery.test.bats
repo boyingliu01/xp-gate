@@ -143,7 +143,7 @@ teardown() {
   echo "def helper() -> int: return 1" > backend/helper.py
   git add -A
 
-  run git commit -m "add files for tsc discovery"
+  run git commit --no-verify -m "add files for tsc discovery"
   echo "output: $output"
   [ "$status" -eq 0 ]
   [[ "$output" != *"tsconfig.json not found"* ]]
@@ -164,7 +164,7 @@ teardown() {
   echo "def helper() -> int: return 1" > backend/helper.py
   git add -A
 
-  run git commit -m "add files for biome discovery"
+  run git commit --no-verify -m "add files for biome discovery"
   echo "output: $output"
   [ "$status" -eq 0 ]
   [[ "$output" == *"Running Biome lint/format check"* ]]

@@ -19,7 +19,7 @@ setup() {
     git config core.hooksPath .git/hooks
     echo seed > README.md
     git add README.md
-    git commit -q -m seed
+    git commit --no-verify -q -m seed
   )
 }
 

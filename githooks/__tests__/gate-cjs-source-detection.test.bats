@@ -40,7 +40,7 @@ setup_push_fixture() {
   cp "$SOURCE_GITHOOKS/adapter-common.sh" .git/hooks/adapter-common.sh 2>/dev/null || true
 
   echo "init" > README.md
-  git add . && git commit -q -m "init"
+  git add . && git commit --no-verify -q -m "init"
   INIT_SHA="$(git rev-parse HEAD)"
 }
 
@@ -50,7 +50,7 @@ run_pre_push_with_files() {
   mkdir -p "$(dirname "$1")"
   printf '%s\n' "fixture source" > "$1"
   git add -- "$1"
-  git commit -q -m "payload"
+  git commit --no-verify -q -m "payload"
   head_sha="$(git rev-parse HEAD)"
 
   # Valid walkthrough evidence so the hook, once it stops classifying the push
@@ -104,7 +104,7 @@ MOCK
   # Gate 5 resolves vitest from the ambient PATH and blocks the fixture itself.
   echo "init" > README.md
   echo "ignore: []" > .archlint.yaml
-  git add . && git commit -q -m "init"
+  git add . && git commit --no-verify -q -m "init"
 
   # Fresh req-ids list so Gate 5c runs (specification.yaml absent → not stale)
   mkdir -p .sprint-state/phase-outputs
