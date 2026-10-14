@@ -329,6 +329,15 @@ Each round MUST output a structured round marker:
 
 #### Qoder 平台（Custom Agent 模式 — 只能做到同模型三角色）
 
+**通道契约（native-first + external fallback，#414）**：每轮评审开始先探测 native 通道——三个 Custom Agent（`delphi-architecture/technical/feasibility`）是否存在且绑定互异（`xp-gate doctor delphi` 一条命令给出全部判定）。但 **native 通道已被实测证伪**（见下）：subagent 派发采纳 agent 提示词、丢弃 model 绑定，三席永远是会话模型。因此 Qoder 的通道决策表实际收敛为：
+
+| 探测结果 | 通道 | 处置 |
+|---|---|---|
+| 需要 distinct-models 证据的评审 | **external** | `.delphi-config.json` + `scripts/delphi-external-review.cjs`（外部 provider 三模型） |
+| 仅需同模型三角色自查（不计入共识证据） | native | 三 Custom Agent 并行，报告中注明「同模型自查，不构成多模型凭据」 |
+
+降级证据落盘 `delphi-reviewed.json`：`channel`（native/external）、`fallback_reason`（如 `qoder_native_drops_model_binding`）、`probe_evidence`（doctor/日志摘录）。两通道同不变量：三专家齐全、`requested_model` 互异（external）、consensus ≥90%、**无单专家路径**。
+
 Qoder 的内置模型**没有本地推理端点**：推理请求由 Qoder 客户端经服务端代理发出，凭证是一次性 job token。所以不能照搬 OpenCode 的 `base_url + api_key` 直连方式；Qoder 侧内置模型的唯一入口是 **Custom Agent** —— 每个专家一个独立 agent 文件，frontmatter 用 `model` 字段声明模型。
 
 **契约结论（先说结论）**：这条路径**不满足**"三个不同可执行模型 ID"契约。2026-09-23 做过一次排除混杂因素的复测：先把 `~/.qoder/agents/delphi-*.md` 三份文件绑成三个不同的 0.1× 内置模型（`qfmodel` / `dfmodel` / `gfmodel`；架构角与会话模型同名，所以真正有判别力的是技术角与可行性角），**再**新开会话——新 CLI 进程，`session.config.loaded` 记录 `model: "qfmodel"`，注册表加载的必然是已修好的绑定——然后只派发三个 subagent，各回一句话、不调工具。结果：三个独立的 `is_subagent: true` turn，`turn.started` / `model.request.started` / `model.response.completed` 三处的 `model` 全为会话模型 `qfmodel`，`dfmodel` / `gfmodel` 出现 0 次；同时三份回复分别命中架构 / 技术 / 可行性视角，说明角色提示词确实生效、agent 也确实被加载。即 `subagent_type` 派发路径采纳 Custom Agent 的提示词，但**丢弃**它的 `model` 绑定。
@@ -408,6 +417,20 @@ delphi-review(
 > (1) `dsh-tool-subagent` 的 `modelSelectionSettings: true`（仅能力开关），
 > (2) 宿主设置 `SubagentModelSelectionConfig.enabled = true` 且 `allowedModels` ≥3 个不同模型。
 > 该路线依赖宿主配置，CI / 一次性会话不可靠，故不作为默认路径。
+
+**DSH 双通道契约（native-first + external fallback，#443）**：评审开始先探测 native 通道，两层开关缺一不可——
+
+| 探测步骤 | 方法 | 判定 |
+|---|---|---|
+| ① 工具 schema | 当前会话 `subagent` 工具的参数里是否暴露 `provider` / `model` 字段 | 无 → native 不可用（`enabled` 默认 `false`） |
+| ② 模型清单 | `list_subagent_models` 工具是否注册；可用时返回条数是否 ≥3 且互异 | 未注册或 <3 条 → native 不可用 |
+| ③ 运行时兜底 | 上述任一不满足时调用 subagent 会抛 `child model selection is disabled` | 直接判定，不试错 |
+
+- **native 可用**：三个专家并行派发，每个显式传 `model`（取自 `allowedModels` 三个互异条目）；`resolved_model` 以平台日志/回执为准，无日志时按 #437 过渡标准注明「执行层验证待平台支持」。
+- **native 不可用**：降级 **external**（本 skill 的 `delphi-review` 插件工具，或 `.delphi-config.json` + `scripts/delphi-external-review.cjs`）。缺 API key 时必须给出明确指引（导出环境变量），不得静默失败。
+- 降级证据落盘 `delphi-reviewed.json`：`channel`、`fallback_reason`（如 `dsh_subagent_model_selection_disabled`）、`probe_evidence`（①②③ 的实测摘录）。
+- 两通道同不变量：三专家齐全、`requested_model` 互异、consensus ≥90%、**无单专家路径**。
+- 可用性探测可用 `xp-gate doctor delphi` 复核（DSH 环境下含 `subagentModelSelection` 持久化设置检查）。
 #### WorkBuddy 平台（Expert 团队模式）
 
 WorkBuddy 侧以 Team 型专家团（示例：`delphi-review-team`，安装在 `~/.workbuddy/plugins/marketplaces/my-experts/plugins/`，创建方式见 [docs/platform-workbuddy.md](../../docs/platform-workbuddy.md)）承载评审，触发本技能后按此路由执行：

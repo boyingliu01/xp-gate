@@ -2,6 +2,13 @@
 
 > Issues: #429 #481 #414 #443 ｜ 分诊依据: `2026-10-13-open-issues-backlog-plan.md` P3
 > 排序: #429（runner 打底）→ #481（标定协议）→ #414（Qoder 双通道）→ #443（DSH 双通道，复用 #414 契约）
+>
+> **实施状态（2026-10-14）**：
+> - #429 ✅ 第 1-4 项 `08ea988c`（前序），第 5 项 `f0285107`（沙箱 HOME 端到端审计）
+> - #481 ✅ `957386dd`（标定协议落档 + SIZE_EXCEEDED 分类 + 降序裁剪固化）
+> - #414 ✅ 本批：REQ-1 契约入 SKILL.md；REQ-2 install 脚本平台感知；REQ-3 `doctor delphi`（7 检查项含 REQ-6 版本一致性）；REQ-4 `xp-gate delphi-setup`（绑定修复 + 重载强制提醒）；REQ-5 runner schema 重试恰好 1 次（`callExpertWithSchemaRetry`）
+> - #443 ✅ 本批：SKILL.md DSH 双通道契约（两层开关探测决策表）；doctor DSH 检查项（`subagentModelSelection` 持久化设置 + allowedModels ≥3 互异）
+> - 新测试：delphi-setup 8 例、doctor-delphi 6 例、schema-retry 4 例、标定 11 例（TDD RED→GREEN）
 
 ## 1. #429 — runner 小缺口（已完成）
 

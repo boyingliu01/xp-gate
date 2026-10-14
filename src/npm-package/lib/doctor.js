@@ -2643,8 +2643,216 @@ function formatDoctorJson(checks, issues) {
   };
 }
 
+// ── doctor delphi (#414 REQ-3/REQ-6) ───────────────────────────────────
+// Diagnoses the Delphi review chain end to end. Each check exists because a
+// real failure was silent: drifted agent bindings looked like a working setup
+// (B2), a stale skill copy made reinstall = downgrade (B4), and a missing
+// runner script surfaced only as a failed review (B3).
+async function doctorDelphi(options = {}) {
+  const { configPath, npmLatest } = options;
+  const checks = [];
+  const add = (name, status, detail) => checks.push({ name, status, detail });
+
+  // 1. Node >= 18: the runner gates on it and exits 1 mid-review otherwise.
+  const nodeMajor = parseInt(process.versions.node.split('.')[0], 10);
+  add('Node.js >= 18', nodeMajor >= 18 ? 'PASS' : 'FAIL',
+    `current: ${process.versions.node}`);
+
+  // 2. Qoder agent bindings: present, parseable, three distinct ids, matching
+  // what this version ships. A stale binding is a repair, not an error to
+  // retype: the detail names delphi-setup.
+  const { readQoderModelId } = require('./init.js');
+  const agentsDir = path.join(HOME_DIR, '.qoder', 'agents');
+  const roles = ['architecture', 'technical', 'feasibility'];
+  const agentIds = [];
+  let agentsStatus = 'PASS';
+  const agentDetails = [];
+  for (const role of roles) {
+    const agentPath = path.join(agentsDir, `delphi-${role}.md`);
+    if (!fs.existsSync(agentPath)) {
+      agentsStatus = 'FAIL';
+      agentDetails.push(`delphi-${role}.md missing (run: xp-gate init --global)`);
+      continue;
+    }
+    const id = readQoderModelId(agentPath);
+    if (id === null) {
+      agentsStatus = 'FAIL';
+      agentDetails.push(`delphi-${role}.md has no quoted model binding (repair: xp-gate delphi-setup)`);
+      continue;
+    }
+    const bundledId = readQoderModelId(path.join(PKG_DIR, 'plugins', 'qoder', 'agents', `delphi-${role}.md`));
+    if (bundledId !== null && bundledId !== id) {
+      agentDetails.push(`delphi-${role}: ${id} (this version ships ${bundledId} — repair: xp-gate delphi-setup)`);
+    } else {
+      agentDetails.push(`delphi-${role}: ${id}`);
+    }
+    agentIds.push(id);
+  }
+  if (new Set(agentIds).size !== agentIds.length || agentIds.length !== 3) {
+    agentsStatus = 'FAIL';
+    if (agentIds.length !== 3 && !agentDetails.some((d) => /missing|binding/.test(d))) {
+      agentDetails.push('expected three parseable bindings');
+    } else if (new Set(agentIds).size !== agentIds.length) {
+      agentDetails.push('duplicate model binding across experts — three DISTINCT ids are required');
+    }
+  }
+  add('Qoder Delphi agent bindings', agentsStatus, agentDetails.join('; ') || 'all three bound');
+
+  // 3. Skill install parity: a drifted installed copy is how "reinstall from
+  // an old local repo" became a downgrade (#414 B4).
+  const platform = detectPlatform();
+  const installedSkillDir = platform === 'qoder'
+    ? path.join(HOME_DIR, '.qoder', 'skills', 'delphi-review')
+    : platform === 'claude-code'
+      ? path.join(HOME_DIR, '.claude', 'skills', 'delphi-review')
+      : path.join(HOME_DIR, '.config', 'opencode', 'skills', 'delphi-review');
+  const installedSkillMd = path.join(installedSkillDir, 'SKILL.md');
+  const bundledSkillMd = path.join(PKG_DIR, 'skills', 'delphi-review', 'SKILL.md');
+  const sha256 = (p) => require('crypto').createHash('sha256').update(fs.readFileSync(p)).digest('hex');
+  if (!fs.existsSync(installedSkillMd)) {
+    add('Delphi skill install parity', 'FAIL',
+      `not installed at ${installedSkillDir} (install: xp-gate install-skill delphi-review)`);
+  } else if (fs.existsSync(bundledSkillMd) && sha256(installedSkillMd) !== sha256(bundledSkillMd)) {
+    add('Delphi skill install parity', 'FAIL',
+      `installed SKILL.md differs from the ${getCliVersionSafe()} bundle (reinstall: xp-gate install-skill delphi-review --force)`);
+  } else {
+    add('Delphi skill install parity', 'PASS', installedSkillDir);
+  }
+
+  // 4. Runner script locate: the runner must be findable from the places a
+  // review actually starts.
+  const runnerCandidates = [
+    ['package bundle', path.join(PKG_DIR, 'scripts', 'delphi-external-review.cjs')],
+    ['project', path.join(process.cwd(), 'scripts', 'delphi-external-review.cjs')],
+    ['installed skill', path.join(installedSkillDir, 'scripts', 'delphi-external-review.cjs')],
+  ];
+  const foundRunner = runnerCandidates.filter(([, p]) => fs.existsSync(p));
+  add('delphi-external-review runner', foundRunner.length > 0 ? 'PASS' : 'FAIL',
+    foundRunner.length > 0
+      ? foundRunner.map(([label, p]) => `${label}: ${p}`).join('; ')
+      : 'not found in package bundle, project, or installed skill');
+
+  // 5. Config ping: parseable, three distinct callable models. A duplicate
+  // model here is a review that will BLOCK later — say so now.
+  const cfgPath = configPath || path.join(process.cwd(), '.delphi-config.json');
+  if (!fs.existsSync(cfgPath)) {
+    add('Delphi config (.delphi-config.json)', 'FAIL',
+      `${cfgPath} not found (copy .delphi-config.json.example from the skill directory)`);
+  } else {
+    try {
+      const raw = JSON.parse(fs.readFileSync(cfgPath, 'utf8'));
+      const profileName = raw.active_profile || 'default';
+      const profile = raw.profiles && raw.profiles[profileName];
+      if (!profile) {
+        add('Delphi config (.delphi-config.json)', 'FAIL', `profile "${profileName}" not found`);
+      } else {
+        const experts = profile.experts || {};
+        const models = roles.map((r) => experts[r] && experts[r].model);
+        const providers = profile.providers || {};
+        const missingRoles = roles.filter((r, i) => !models[i]);
+        const duplicates = models.filter((m, i) => m && models.indexOf(m) !== i);
+        const badProviders = roles.filter((r) => {
+          const e = experts[r];
+          return !e || !providers[e.provider]
+            || !providers[e.provider].base_url
+            || String(providers[e.provider].base_url).indexOf('http') !== 0;
+        });
+        if (missingRoles.length > 0 || duplicates.length > 0 || badProviders.length > 0) {
+          const problems = [];
+          if (missingRoles.length > 0) problems.push(`missing experts: ${missingRoles.join(', ')}`);
+          if (duplicates.length > 0) problems.push(`duplicate models: ${[...new Set(duplicates)].join(', ')}`);
+          if (badProviders.length > 0) problems.push(`unusable provider binding: ${badProviders.join(', ')}`);
+          add('Delphi config (.delphi-config.json)', 'FAIL', problems.join('; '));
+        } else {
+          add('Delphi config (.delphi-config.json)', 'PASS',
+            `profile "${profileName}": ${models.join(' / ')}`);
+        }
+      }
+    } catch (err) {
+      add('Delphi config (.delphi-config.json)', 'FAIL', `unparseable: ${err.message}`);
+    }
+  }
+
+  // 6. Version consistency (#414 REQ-6): local files first; the npm-latest
+  // probe is injectable so the doctor never requires the network.
+  const localVersion = getCliVersionSafe();
+  let versionStatus = 'PASS';
+  let versionDetail = `xp-gate ${localVersion}`;
+  if (npmLatest === undefined) {
+    try {
+      versionDetail += `; npm latest probe: ${execWithTimeout('npm view @boyingliu01/xp-gate version', 8000).trim()}`;
+    } catch {
+      versionStatus = 'SKIP';
+      versionDetail += '; npm latest probe unavailable (offline?) — skipped';
+    }
+  } else if (typeof npmLatest === 'string' && npmLatest !== localVersion) {
+    versionStatus = 'FAIL';
+    versionDetail += `; npm latest ${npmLatest} — update: npm install -g @boyingliu01/xp-gate@latest`;
+  } else if (npmLatest === null) {
+    versionDetail += '; npm latest probe skipped';
+  }
+  add('Delphi version consistency', versionStatus, versionDetail);
+
+  // 7. DSH native-channel readiness (#443 REQ-6): only meaningful when a DSH
+  // home exists. The two-layer switch (preset capability + host setting)
+  // defaults to disabled, and a review that assumes native will silently run
+  // three same-model seats.
+  const dshHome = path.join(HOME_DIR, '.dsh');
+  if (!fs.existsSync(dshHome)) {
+    add('DSH subagent model selection', 'SKIP', `no ${dshHome} — not a DSH environment`);
+  } else {
+    const settingsCandidates = [
+      path.join(dshHome, 'settings.json'),
+      path.join(dshHome, 'settings', 'settings.json'),
+      path.join(dshHome, 'config.json'),
+    ];
+    const settingsFile = settingsCandidates.find((p) => fs.existsSync(p));
+    if (!settingsFile) {
+      add('DSH subagent model selection', 'FAIL',
+        `${dshHome} exists but no settings file found — subagent model selection defaults to disabled (#443)`);
+    } else {
+      try {
+        const settings = JSON.parse(fs.readFileSync(settingsFile, 'utf8'));
+        const selection = settings.subagentModelSelection;
+        const allowed = selection && Array.isArray(selection.allowedModels) ? selection.allowedModels : [];
+        const ids = allowed.map((m) => (typeof m === 'string' ? m : m && m.id)).filter(Boolean);
+        if (selection && selection.enabled === true && new Set(ids).size >= 3) {
+          add('DSH subagent model selection', 'PASS', `${settingsFile}: enabled, ${new Set(ids).size} distinct allowed models`);
+        } else if (selection && selection.enabled === true) {
+          add('DSH subagent model selection', 'FAIL',
+            `${settingsFile}: enabled but only ${new Set(ids).size} distinct allowedModels (need ≥3) — native channel unusable`);
+        } else {
+          add('DSH subagent model selection', 'FAIL',
+            `${settingsFile}: subagentModelSelection.enabled is not true — native channel disabled, use the external channel (#443)`);
+        }
+      } catch (err) {
+        add('DSH subagent model selection', 'SKIP', `${settingsFile} unparseable: ${err.message}`);
+      }
+    }
+  }
+
+  for (const check of checks) {
+    const mark = check.status === 'PASS' ? '✓' : check.status === 'SKIP' ? '○' : '✗';
+    console.log(`  ${mark} ${check.name}: ${check.status === 'PASS' || check.status === 'SKIP' ? '' : ''}${check.detail || check.status}`);
+  }
+  const failed = checks.filter((c) => c.status === 'FAIL').length;
+  console.log('');
+  console.log(failed === 0
+    ? '  Delphi review chain: healthy.'
+    : `  Delphi review chain: ${failed} check(s) FAILED.`);
+  return failed === 0 ? 0 : 1;
+}
+
+function getCliVersionSafe() {
+  try {
+    return require('../package.json').version || '0.0.0';
+  } catch {
+    return '0.0.0';
+  }
+}
+
 module.exports = {
-  doctor, isXpGateFile, SIGNATURES,
+  doctor, doctorDelphi, isXpGateFile, SIGNATURES,
   fixVersionMismatch,
   fixTemplateDirMismatch,
   fixMissingHooks,

@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 const path = require('path');
 const { init } = require('../lib/init.js');
+const { delphiSetup } = require('../lib/delphi-setup.js');
 const { installSkill } = require('../lib/install-skill.js');
 const { updateSkill } = require('../lib/update-skill.js');
 const { uninstallSkill } = require('../lib/uninstall-skill.js');
@@ -80,6 +81,11 @@ const COMMANDS = {
     run: () => init(['--global']).then(code => process.exit(code)),
     usage: 'xp-gate setup-global'
   },
+  'delphi-setup': {
+    description: 'Rebind the three Qoder Delphi expert agents to distinct built-in models (#414)',
+    run: subargs => delphiSetup(subargs).then(code => process.exit(code)),
+    usage: 'xp-gate delphi-setup --model architecture=<id> --model technical=<id> --model feasibility=<id> [--global|--local --project <dir>]'
+  },
   'install-skill': {
     description: 'Install a xp-gate skill from the package bundle',
     run: subargs => {
@@ -139,7 +145,15 @@ const COMMANDS = {
   },
   'doctor': {
     description: 'Diagnose xp-gate installation health',
-    run: subargs => doctor(subargs).then(code => process.exit(code)),
+    run: subargs => {
+      // `xp-gate doctor delphi` is a dedicated chain diagnosis (#414 REQ-3),
+      // not a flag of the generic doctor run.
+      if (subargs[0] === 'delphi') {
+        const { doctorDelphi } = require('../lib/doctor.js');
+        return doctorDelphi({}).then(code => process.exit(code));
+      }
+      return doctor(subargs).then(code => process.exit(code));
+    },
     usage: 'xp-gate doctor [--fix [--install-tools] | --sync-hooks [--force]] | --json | --format json  (the two machine-readable modes print one JSON document and refuse --fix/--sync-hooks)'
   },
   'ui-review': {

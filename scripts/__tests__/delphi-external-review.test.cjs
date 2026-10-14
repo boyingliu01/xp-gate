@@ -1442,6 +1442,95 @@ describe('timeout configuration', () => {
     });
   });
 
+  // #414 REQ-5 — g-qwen3.8-flash occasionally returns prose or malformed JSON
+  // (measured in the 2026-09-17 Qoder walkthrough). One tightened retry with an
+  // explicit JSON schema restatement recovers those; a blind retry with the
+  // same prompt does not. Exactly one: a model that cannot echo the schema
+  // after being shown it will not improve on a third attempt.
+  describe('schema retry (#414 REQ-5)', () => {
+    const provider = { base_url: 'https://example.test/v1', api_key: 'key' };
+
+    it('retries exactly once with a schema-restating system prompt when the first response is unparseable', async () => {
+      vi.useFakeTimers();
+      const { callExpertWithSchemaRetry } = loadModule();
+      const calls = [];
+      const callFn = async (_provider, model, systemPrompt, userPrompt, _retries, _timeout, tag) => {
+        calls.push({ model, systemPrompt, userPrompt, tag });
+        if (calls.length === 1) {
+          return { success: true, content: 'I cannot produce JSON for this.', resolved_model: 'm-a' };
+        }
+        return {
+          success: true,
+          content: '{"verdict":"APPROVED","confidence":7,"critical_issues":[],"major_concerns":[],"minor_concerns":[],"summary":"ok"}',
+          resolved_model: 'm-a',
+        };
+      };
+
+      try {
+        const outcome = await callExpertWithSchemaRetry({
+          provider, model: 'm-a', systemPrompt: 'BASE', userPrompt: 'REVIEW', timeoutMs: 5000, callFn,
+        });
+        expect(calls).toHaveLength(2);
+        expect(calls[1].systemPrompt).toContain('BASE');
+        expect(calls[1].systemPrompt).toMatch(/json/i);
+        expect(calls[1].systemPrompt.length).toBeGreaterThan('BASE'.length);
+        expect(outcome.retry).toBe(1);
+        expect(outcome.verdict.verdict).toBe('APPROVED');
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+
+    it('a first-try valid verdict makes no second call', async () => {
+      const { callExpertWithSchemaRetry } = loadModule();
+      const calls = [];
+      const outcome = await callExpertWithSchemaRetry({
+        provider, model: 'm-a', systemPrompt: 'BASE', userPrompt: 'REVIEW', timeoutMs: 5000,
+        callFn: async (...args) => {
+          calls.push(args);
+          return {
+            success: true,
+            content: '{"verdict":"REQUEST_CHANGES","confidence":6,"critical_issues":["x"],"major_concerns":[],"minor_concerns":[],"summary":"s"}',
+            resolved_model: 'm-a',
+          };
+        },
+      });
+      expect(calls).toHaveLength(1);
+      expect(outcome.retry).toBeUndefined();
+      expect(outcome.verdict.verdict).toBe('REQUEST_CHANGES');
+    });
+
+    it('a second unparseable response is reported as an expert error, not faked into consensus', async () => {
+      vi.useFakeTimers();
+      const { callExpertWithSchemaRetry } = loadModule();
+      try {
+        const outcome = await callExpertWithSchemaRetry({
+          provider, model: 'm-a', systemPrompt: 'BASE', userPrompt: 'REVIEW', timeoutMs: 5000,
+          callFn: async () => ({ success: true, content: 'still prose', resolved_model: 'm-a' }),
+        });
+        expect(outcome.error).toBe(true);
+        expect(outcome.message).toMatch(/verdict|parse/i);
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+
+    it('an API failure is not retried through the schema path (retryable errors already have their own loop)', async () => {
+      const { callExpertWithSchemaRetry } = loadModule();
+      const calls = [];
+      const outcome = await callExpertWithSchemaRetry({
+        provider, model: 'm-a', systemPrompt: 'BASE', userPrompt: 'REVIEW', timeoutMs: 5000,
+        callFn: async (...args) => {
+          calls.push(args);
+          return { error: true, retryable: false, message: 'Authentication failed (401).' };
+        },
+      });
+      expect(calls).toHaveLength(1);
+      expect(outcome.error).toBe(true);
+      expect(outcome.message).toMatch(/Authentication/);
+    });
+  });
+
   describe('callWithRetry timeout passthrough', () => {    afterEach(() => {
       vi.useRealTimers();
       vi.unstubAllGlobals();
