@@ -2741,24 +2741,31 @@ async function doctorDelphi(options = {}) {
       `not installed at ${installedSkillDir} (install: xp-gate install-skill delphi-review)`);
   } else {
     const bundledFiles = listBundledSkillFiles(bundledSkillDir);
-    const drifted = [];
-    for (const rel of bundledFiles) {
-      const installedPath = path.join(installedSkillDir, rel);
-      const bundledPath = path.join(bundledSkillDir, rel);
-      if (!fs.existsSync(installedPath)) {
-        drifted.push(`${rel}: missing`);
-      } else if (sha256(installedPath) !== sha256(bundledPath)) {
-        drifted.push(`${rel}: differs from bundle`);
-      }
-    }
-    if (drifted.length > 0) {
+    if (bundledFiles.length === 0) {
+      // An installed copy next to an empty bundle is install corruption —
+      // "0 files match" must never read as healthy (#414 R2 MN-R2-01).
       add('Delphi skill install parity', 'FAIL',
-        `${drifted.length} file(s) differ from the ${getCliVersionSafe()} bundle: `
-        + `${drifted.slice(0, 5).join('; ')}${drifted.length > 5 ? '; ...' : ''} `
-        + '(reinstall: xp-gate install-skill delphi-review --force)');
+        `bundled skill directory missing or empty: ${bundledSkillDir} — reinstall xp-gate`);
     } else {
-      add('Delphi skill install parity', 'PASS',
-        `${bundledFiles.length} file(s) match the bundle`);
+      const drifted = [];
+      for (const rel of bundledFiles) {
+        const installedPath = path.join(installedSkillDir, rel);
+        const bundledPath = path.join(bundledSkillDir, rel);
+        if (!fs.existsSync(installedPath)) {
+          drifted.push(`${rel}: missing`);
+        } else if (sha256(installedPath) !== sha256(bundledPath)) {
+          drifted.push(`${rel}: differs from bundle`);
+        }
+      }
+      if (drifted.length > 0) {
+        add('Delphi skill install parity', 'FAIL',
+          `${drifted.length} file(s) differ from the ${getCliVersionSafe()} bundle: `
+          + `${drifted.slice(0, 5).join('; ')}${drifted.length > 5 ? '; ...' : ''} `
+          + '(reinstall: xp-gate install-skill delphi-review --force)');
+      } else {
+        add('Delphi skill install parity', 'PASS',
+          `${bundledFiles.length} file(s) match the bundle`);
+      }
     }
   }
 

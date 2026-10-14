@@ -27,9 +27,21 @@ for arg in "$@"; do
         PLATFORM_OVERRIDE=""
       fi ;;
     --force) ;;
-    *) echo "⚠️  ignoring unknown argument: $arg" ;;
+    *)
+      # A dangling --platform with no value must not silently fall back to
+      # auto-detection — the operator asked for a specific destination (#414 R2 MN-R2-02).
+      if [[ "$PLATFORM_OVERRIDE" == "expected-next" ]]; then
+        echo "ERROR: --platform requires a value (qoder or opencode), got: $arg" >&2
+        exit 1
+      fi
+      echo "⚠️  ignoring unknown argument: $arg" ;;
   esac
 done
+
+if [[ "$PLATFORM_OVERRIDE" == "expected-next" ]]; then
+  echo "ERROR: --platform requires a value (qoder or opencode)." >&2
+  exit 1
+fi
 
 if [[ "$PLATFORM_OVERRIDE" == "qoder" || "$PLATFORM_OVERRIDE" == "opencode" ]]; then
   PLATFORM="$PLATFORM_OVERRIDE"
