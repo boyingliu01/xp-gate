@@ -154,4 +154,18 @@ describe('AC-489-04: sourced modules must not enable errexit for the caller (#52
     expect(offenders.map((o) => o.line)).toContain(3);
     fs.rmSync(tmp, { recursive: true, force: true });
   });
+
+  it('heuristic boundary: an UNCLOSED subshell is a bash syntax error, not a guard concern (FC-01 round-2)', () => {
+    // `(\n  set -e` with no closing paren cannot appear in a working gate
+    // script — bash itself rejects it before any gate logic runs. The guard
+    // records the documented behavior for that input (inner set -e is not
+    // flagged because depth is 1) so a future heuristic change that starts
+    // flagging it is a deliberate choice, not an accident.
+    const tmp = fs.mkdtempSync(path.join(require('os').tmpdir(), 'errexit-guard-'));
+    const p = path.join(tmp, 'unclosed.sh');
+    fs.writeFileSync(p, '#!/usr/bin/env bash\n(\n  set -e\necho never-reaches-here\n');
+    // eslint-disable-next-line no-unused-expressions
+    expect(topLevelErrexitOffenders(p)).toHaveLength(0);
+    fs.rmSync(tmp, { recursive: true, force: true });
+  });
 });

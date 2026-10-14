@@ -33,7 +33,7 @@ const TEST_GLOBS = [
   'githooks/__tests__',
 ];
 const EXTS = new Set(['.ts', '.js', '.cjs', '.mjs', '.bats']);
-const AC_PATTERN = /\bAC-[A-Za-z0-9]+-\d{2}\b/g;
+const AC_PATTERN = /\bAC-[A-Za-z0-9]+-\d{2,}\b/g;
 
 function walkTests(dir, out) {
   if (!fs.existsSync(dir)) return out;
