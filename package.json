@@ -27,7 +27,7 @@
     "principles": "npx tsx src/principles/index.ts",
     "archlint": "npx @archlinter/cli scan . --config architecture.yaml",
     "dashboard": "node dashboard/serve.js",
-    "test:bats": "bats githooks/__tests__/"
+    "test:bats": "node scripts/run-bats.cjs"
   },
   "dependencies": {
     "@ast-grep/cli": "^0.36.2",

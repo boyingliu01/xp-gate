@@ -128,4 +128,30 @@ describe('AC-489-04: sourced modules must not enable errexit for the caller (#52
     expect(topLevelErrexitOffenders(planted)).toHaveLength(0);
     fs.rmSync(tmp, { recursive: true, force: true });
   });
+
+  it('heuristic boundary: MULTI-LINE subshell scoping is respected (FC-01)', () => {
+    // The #489 legal form split across lines: depth carried from the '(' line
+    // must keep the inner `set -e` off the top-level verdict.
+    const tmp = fs.mkdtempSync(path.join(require('os').tmpdir(), 'errexit-guard-'));
+    const p = path.join(tmp, 'multiline.sh');
+    fs.writeFileSync(p, '#!/usr/bin/env bash\n(\n  set -e\n  cmd1\n)\nset +e\necho ok\n');
+    expect(topLevelErrexitOffenders(p)).toHaveLength(0);
+    fs.rmSync(tmp, { recursive: true, force: true });
+  });
+
+  it('heuristic boundary: case-branch closers can only cause FALSE POSITIVES, never false negatives (FC-01)', () => {
+    // A single-line `case ... foo) set -e ;; esac` closes one more paren than
+    // it opens; Math.max(0, ...) clamps, so the planted top-level `set -e` on
+    // such a line is still flagged — the heuristic's failure direction on
+    // case statements is over-reporting (safe), not under-reporting. What the
+    // heuristic may NOT do is miss a genuinely top-level set -e after a line
+    // with unbalanced closers.
+    const tmp = fs.mkdtempSync(path.join(require('os').tmpdir(), 'errexit-guard-'));
+    const p = path.join(tmp, 'case.sh');
+    fs.writeFileSync(p, '#!/usr/bin/env bash\ncase $x in foo) echo a ;; esac\nset -e\necho after\n');
+    const offenders = topLevelErrexitOffenders(p);
+    // Line 3: line 1 is the shebang, line 2 is the case statement.
+    expect(offenders.map((o) => o.line)).toContain(3);
+    fs.rmSync(tmp, { recursive: true, force: true });
+  });
 });

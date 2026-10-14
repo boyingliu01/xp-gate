@@ -180,18 +180,28 @@ fi
 # compares bytes and git index modes; heals nothing.
 GATE_MP_STATUS="SKIP"
 # Duration is audited in MILLISECONDS end-to-end (#521 AC-2; the #524 lesson:
-# never mix a seconds timestamp into a ms budget). %3N is GNU date — present
-# in Git Bash and every CI image this hook targets; on failure the math
-# degrades to 0 rather than a garbage negative.
-MP_START_MS="$(date +%s%3N 2>/dev/null || echo 0)"
+# never mix a seconds timestamp into a ms budget). The output is validated as
+# bare digits before use: BSD/macOS date does not support %3N and prints the
+# literal '...%3N' with exit 0, which would blow up the arithmetic and kill
+# pre-push — a non-numeric read degrades to 0 (walkthrough MJ-01).
+_mp_now_ms() {
+  local _t
+  _t="$(date +%s%3N 2>/dev/null || true)"
+  case "$_t" in
+    ''|*[!0-9]*) echo 0 ;;
+    *) echo "$_t" ;;
+  esac
+}
+MP_START_MS="$(_mp_now_ms)"
 MP_ROOT="$(git rev-parse --show-toplevel 2>/dev/null || echo .)"
 if [ -f "$MP_ROOT/scripts/check-hook-mirror.sh" ]; then
   if (cd "$MP_ROOT" && bash scripts/check-hook-mirror.sh); then
     GATE_MP_STATUS="PASS"
-    MP_DURATION_MS=$(( $(date +%s%3N 2>/dev/null || echo "$MP_START_MS") - MP_START_MS ))
+    MP_DURATION_MS=$(( $(_mp_now_ms) - MP_START_MS ))
     [ "$MP_DURATION_MS" -lt 0 ] 2>/dev/null && MP_DURATION_MS=0
     echo "✅ Gate MP: gate-script mirror parity OK (${MP_DURATION_MS}ms)"
   else
+    MP_DURATION_MS=0
     echo ""
     echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
     echo "   ❌ GATE MP FAILED — PUSH BLOCKED"
