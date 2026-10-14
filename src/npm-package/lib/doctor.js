@@ -2660,18 +2660,28 @@ async function doctorDelphi(options = {}) {
 
   // 2. Qoder agent bindings: present, parseable, three distinct ids, matching
   // what this version ships. A stale binding is a repair, not an error to
-  // retype: the detail names delphi-setup.
+  // retype: the detail names delphi-setup. Project-level agents (from
+  // `delphi-setup --local --project`) take precedence when a complete set
+  // exists there, so the doctor agrees with the repair command (#414 R1 FC-09).
   const { readQoderModelId } = require('./init.js');
-  const agentsDir = path.join(HOME_DIR, '.qoder', 'agents');
   const roles = ['architecture', 'technical', 'feasibility'];
+  const homeAgentsDir = path.join(HOME_DIR, '.qoder', 'agents');
+  // Injectable for tests; defaults to the cwd the doctor runs from.
+  const projectAgentsDir = path.join(options.projectDir || process.cwd(), '.qoder', 'agents');
+  const homeComplete = roles.every((r) => fs.existsSync(path.join(homeAgentsDir, `delphi-${r}.md`)));
+  const projectComplete = roles.every((r) => fs.existsSync(path.join(projectAgentsDir, `delphi-${r}.md`)));
+  const agentsDir = projectComplete ? projectAgentsDir : homeAgentsDir;
+  const agentsSource = projectComplete
+    ? `project-level ${agentsDir}`
+    : `user-level ${agentsDir}`;
   const agentIds = [];
   let agentsStatus = 'PASS';
-  const agentDetails = [];
+  const agentDetails = [agentsSource];
   for (const role of roles) {
     const agentPath = path.join(agentsDir, `delphi-${role}.md`);
     if (!fs.existsSync(agentPath)) {
       agentsStatus = 'FAIL';
-      agentDetails.push(`delphi-${role}.md missing (run: xp-gate init --global)`);
+      agentDetails.push(`delphi-${role}.md missing (run: xp-gate init --global, or delphi-setup --local --project for project scope)`);
       continue;
     }
     const id = readQoderModelId(agentPath);
@@ -2681,42 +2691,75 @@ async function doctorDelphi(options = {}) {
       continue;
     }
     const bundledId = readQoderModelId(path.join(PKG_DIR, 'plugins', 'qoder', 'agents', `delphi-${role}.md`));
-    if (bundledId !== null && bundledId !== id) {
+    if (bundledId === null) {
+      // A bundle without a parseable template is install corruption: skipping
+      // the comparison would hide it behind a healthy-looking id (#414 R1 FC-08).
+      agentsStatus = 'FAIL';
+      agentDetails.push(`delphi-${role}: bundled template missing/unreadable — reinstall xp-gate`);
+      continue;
+    }
+    if (bundledId !== id) {
       agentDetails.push(`delphi-${role}: ${id} (this version ships ${bundledId} — repair: xp-gate delphi-setup)`);
     } else {
       agentDetails.push(`delphi-${role}: ${id}`);
     }
     agentIds.push(id);
   }
-  if (new Set(agentIds).size !== agentIds.length || agentIds.length !== 3) {
+  // Report every problem class independently: missing files, unparseable
+  // bindings and duplicates can coexist, and each has a different remedy
+  // (#414 R1 MI-02).
+  if (agentIds.length !== roles.length) agentsStatus = 'FAIL';
+  if (new Set(agentIds).size !== agentIds.length) {
     agentsStatus = 'FAIL';
-    if (agentIds.length !== 3 && !agentDetails.some((d) => /missing|binding/.test(d))) {
-      agentDetails.push('expected three parseable bindings');
-    } else if (new Set(agentIds).size !== agentIds.length) {
-      agentDetails.push('duplicate model binding across experts — three DISTINCT ids are required');
-    }
+    agentDetails.push('duplicate model binding across experts — three DISTINCT ids are required');
   }
   add('Qoder Delphi agent bindings', agentsStatus, agentDetails.join('; ') || 'all three bound');
 
   // 3. Skill install parity: a drifted installed copy is how "reinstall from
-  // an old local repo" became a downgrade (#414 B4).
+  // an old local repo" became a downgrade (#414 B4). Every bundled file is
+  // compared, not just SKILL.md — the install script copies *.json and
+  // references/ too, and B4-style drift hits those equally (#414 R1 MI-03).
   const platform = detectPlatform();
   const installedSkillDir = platform === 'qoder'
     ? path.join(HOME_DIR, '.qoder', 'skills', 'delphi-review')
     : platform === 'claude-code'
       ? path.join(HOME_DIR, '.claude', 'skills', 'delphi-review')
       : path.join(HOME_DIR, '.config', 'opencode', 'skills', 'delphi-review');
-  const installedSkillMd = path.join(installedSkillDir, 'SKILL.md');
-  const bundledSkillMd = path.join(PKG_DIR, 'skills', 'delphi-review', 'SKILL.md');
+  const bundledSkillDir = path.join(PKG_DIR, 'skills', 'delphi-review');
   const sha256 = (p) => require('crypto').createHash('sha256').update(fs.readFileSync(p)).digest('hex');
-  if (!fs.existsSync(installedSkillMd)) {
+  const listBundledSkillFiles = (dir, base = dir, out = []) => {
+    if (!fs.existsSync(dir)) return out;
+    for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
+      const p = path.join(dir, entry.name);
+      if (entry.isDirectory()) listBundledSkillFiles(p, base, out);
+      else out.push(path.relative(base, p));
+    }
+    return out;
+  };
+  if (!fs.existsSync(path.join(installedSkillDir, 'SKILL.md'))) {
     add('Delphi skill install parity', 'FAIL',
       `not installed at ${installedSkillDir} (install: xp-gate install-skill delphi-review)`);
-  } else if (fs.existsSync(bundledSkillMd) && sha256(installedSkillMd) !== sha256(bundledSkillMd)) {
-    add('Delphi skill install parity', 'FAIL',
-      `installed SKILL.md differs from the ${getCliVersionSafe()} bundle (reinstall: xp-gate install-skill delphi-review --force)`);
   } else {
-    add('Delphi skill install parity', 'PASS', installedSkillDir);
+    const bundledFiles = listBundledSkillFiles(bundledSkillDir);
+    const drifted = [];
+    for (const rel of bundledFiles) {
+      const installedPath = path.join(installedSkillDir, rel);
+      const bundledPath = path.join(bundledSkillDir, rel);
+      if (!fs.existsSync(installedPath)) {
+        drifted.push(`${rel}: missing`);
+      } else if (sha256(installedPath) !== sha256(bundledPath)) {
+        drifted.push(`${rel}: differs from bundle`);
+      }
+    }
+    if (drifted.length > 0) {
+      add('Delphi skill install parity', 'FAIL',
+        `${drifted.length} file(s) differ from the ${getCliVersionSafe()} bundle: `
+        + `${drifted.slice(0, 5).join('; ')}${drifted.length > 5 ? '; ...' : ''} `
+        + '(reinstall: xp-gate install-skill delphi-review --force)');
+    } else {
+      add('Delphi skill install parity', 'PASS',
+        `${bundledFiles.length} file(s) match the bundle`);
+    }
   }
 
   // 4. Runner script locate: the runner must be findable from the places a
@@ -2773,12 +2816,14 @@ async function doctorDelphi(options = {}) {
     }
   }
 
-  // 6. Version consistency (#414 REQ-6): local files first; the npm-latest
-  // probe is injectable so the doctor never requires the network.
+  // 6. Version consistency (#414 REQ-6): local files first. The npm-latest
+  // probe is opt-in (options.probeNpmLatest) or pre-supplied
+  // (options.npmLatest) — the doctor never blocks on the network, which is
+  // what an offline CI or restricted shell would otherwise hit (#414 R1 FC-03).
   const localVersion = getCliVersionSafe();
   let versionStatus = 'PASS';
   let versionDetail = `xp-gate ${localVersion}`;
-  if (npmLatest === undefined) {
+  if (npmLatest === undefined && options.probeNpmLatest === true) {
     try {
       versionDetail += `; npm latest probe: ${execWithTimeout('npm view @boyingliu01/xp-gate version', 8000).trim()}`;
     } catch {
@@ -2787,9 +2832,9 @@ async function doctorDelphi(options = {}) {
     }
   } else if (typeof npmLatest === 'string' && npmLatest !== localVersion) {
     versionStatus = 'FAIL';
-    versionDetail += `; npm latest ${npmLatest} — update: npm install -g @boyingliu01/xp-gate@latest`;
-  } else if (npmLatest === null) {
-    versionDetail += '; npm latest probe skipped';
+    versionDetail += `; npm latest ${npmLatest} differs from local ${localVersion} — update (npm install -g @boyingliu01/xp-gate@latest) or verify which side is stale`;
+  } else if (npmLatest === null || options.probeNpmLatest !== true) {
+    versionDetail += '; npm latest probe skipped (pass --npm-check or options.probeNpmLatest to run it)';
   }
   add('Delphi version consistency', versionStatus, versionDetail);
 
@@ -2822,8 +2867,11 @@ async function doctorDelphi(options = {}) {
           add('DSH subagent model selection', 'FAIL',
             `${settingsFile}: enabled but only ${new Set(ids).size} distinct allowedModels (need ≥3) — native channel unusable`);
         } else {
-          add('DSH subagent model selection', 'FAIL',
-            `${settingsFile}: subagentModelSelection.enabled is not true — native channel disabled, use the external channel (#443)`);
+          // The switch shipping off is the platform default, not a defect:
+          // only an operator who explicitly enables it and under-provisions
+          // allowedModels has a real misconfiguration (#414 R1 FC-07).
+          add('DSH subagent model selection', 'SKIP',
+            `${settingsFile}: native model selection disabled (platform default) — the external channel is the contract path (#443)`);
         }
       } catch (err) {
         add('DSH subagent model selection', 'SKIP', `${settingsFile} unparseable: ${err.message}`);
@@ -2833,7 +2881,7 @@ async function doctorDelphi(options = {}) {
 
   for (const check of checks) {
     const mark = check.status === 'PASS' ? '✓' : check.status === 'SKIP' ? '○' : '✗';
-    console.log(`  ${mark} ${check.name}: ${check.status === 'PASS' || check.status === 'SKIP' ? '' : ''}${check.detail || check.status}`);
+    console.log(`  ${mark} ${check.name}: ${check.detail || check.status}`);
   }
   const failed = checks.filter((c) => c.status === 'FAIL').length;
   console.log('');

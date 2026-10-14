@@ -53,8 +53,16 @@ describe('doctor delphi (#414 REQ-3/REQ-6)', () => {
       );
     }
     for (const f of fs.readdirSync(bundledSkillDir(), { withFileTypes: true })) {
-      if (f.isFile()) {
-        fs.copyFileSync(path.join(bundledSkillDir(), f.name), path.join(tmpHome, '.qoder', 'skills', 'delphi-review', f.name));
+      const dest = path.join(tmpHome, '.qoder', 'skills', 'delphi-review', f.name);
+      if (f.isDirectory()) {
+        fs.mkdirSync(dest, { recursive: true });
+        for (const inner of fs.readdirSync(path.join(bundledSkillDir(), f.name))) {
+          if (fs.statSync(path.join(bundledSkillDir(), f.name, inner)).isFile()) {
+            fs.copyFileSync(path.join(bundledSkillDir(), f.name, inner), path.join(dest, inner));
+          }
+        }
+      } else if (f.isFile()) {
+        fs.copyFileSync(path.join(bundledSkillDir(), f.name), dest);
       }
     }
   }
@@ -83,7 +91,7 @@ describe('doctor delphi (#414 REQ-3/REQ-6)', () => {
     const { doctorDelphi } = require('../doctor');
     const configPath = writeConfig(path.join(tmpDirs['doctor-delphi-home'], '.delphi-config.json'));
     const localVersion = require('../../package.json').version;
-    const code = await doctorDelphi({ configPath, npmLatest: localVersion });
+    const code = await doctorDelphi({ projectDir: tmpHome, configPath, npmLatest: localVersion });
     expect(code).toBe(0);
   });
 
@@ -94,7 +102,7 @@ describe('doctor delphi (#414 REQ-3/REQ-6)', () => {
       '---\nname: delphi-technical\nmodel: "[Retired](retired-id)"\n---\n# body\n',
     );
     const { doctorDelphi } = require('../doctor');
-    const code = await doctorDelphi({ configPath: path.join(tmpHome, 'absent.json'), npmLatest: null });
+    const code = await doctorDelphi({ projectDir: tmpHome, configPath: path.join(tmpHome, 'absent.json'), npmLatest: null });
     expect(code).toBe(1);
   });
 
@@ -105,7 +113,7 @@ describe('doctor delphi (#414 REQ-3/REQ-6)', () => {
     const logs = [];
     const logSpy = vi.spyOn(console, 'log').mockImplementation((...args) => logs.push(args.join(' ')));
     const { doctorDelphi } = require('../doctor');
-    await doctorDelphi({ configPath: path.join(tmpHome, 'absent.json'), npmLatest: null });
+    await doctorDelphi({ projectDir: tmpHome, configPath: path.join(tmpHome, 'absent.json'), npmLatest: null });
     logSpy.mockRestore();
     expect(logs.join('\n')).toMatch(/install-skill|reinstall/i);
   });
@@ -127,7 +135,7 @@ describe('doctor delphi (#414 REQ-3/REQ-6)', () => {
       },
     }));
     const { doctorDelphi } = require('../doctor');
-    const code = await doctorDelphi({ configPath, npmLatest: null });
+    const code = await doctorDelphi({ projectDir: tmpHome, configPath, npmLatest: null });
     expect(code).toBe(1);
   });
 
@@ -136,7 +144,7 @@ describe('doctor delphi (#414 REQ-3/REQ-6)', () => {
     const logs = [];
     const logSpy = vi.spyOn(console, 'log').mockImplementation((...args) => logs.push(args.join(' ')));
     const { doctorDelphi } = require('../doctor');
-    await doctorDelphi({ configPath: path.join(tmpHome, 'absent.json'), npmLatest: null });
+    await doctorDelphi({ projectDir: tmpHome, configPath: path.join(tmpHome, 'absent.json'), npmLatest: null });
     logSpy.mockRestore();
     expect(logs.join('\n')).toMatch(/\.delphi-config\.json/);
   });
@@ -145,7 +153,70 @@ describe('doctor delphi (#414 REQ-3/REQ-6)', () => {
     healthyHome();
     const { doctorDelphi } = require('../doctor');
     const configPath = writeConfig(path.join(tmpHome, '.delphi-config.json'));
-    const code = await doctorDelphi({ configPath, npmLatest: null });
+    const code = await doctorDelphi({ projectDir: tmpHome, configPath, npmLatest: null });
     expect(code).toBe(0);
+  });
+
+  // R1 FC-07: the switch shipping off is the platform default, not a defect —
+  // only enabled-but-underprovisioned is a real FAIL.
+  it('DSH with subagentModelSelection absent is SKIP, not FAIL', async () => {
+    healthyHome();
+    fs.mkdirSync(path.join(tmpHome, '.dsh'), { recursive: true });
+    fs.writeFileSync(path.join(tmpHome, '.dsh', 'settings.json'), JSON.stringify({ other: true }));
+    const { doctorDelphi } = require('../doctor');
+    const configPath = writeConfig(path.join(tmpHome, '.delphi-config.json'));
+    const code = await doctorDelphi({ projectDir: tmpHome, configPath, npmLatest: null });
+    expect(code).toBe(0);
+  });
+
+  // R1 FC-09: a project-level agent set (delphi-setup --local --project) is
+  // what the doctor reads, so the repair loop closes.
+  it('a complete project-level agent set takes precedence over the HOME set', async () => {
+    healthyHome();
+    const projDir = fs.mkdtempSync(path.join(require('os').tmpdir(), 'doctor-delphi-proj-'));
+    try {
+      fs.mkdirSync(path.join(projDir, '.qoder', 'agents'), { recursive: true });
+      for (const role of ['architecture', 'technical', 'feasibility']) {
+        fs.copyFileSync(
+          path.join(repoRoot(), 'plugins', 'qoder', 'agents', `delphi-${role}.md`),
+          path.join(projDir, '.qoder', 'agents', `delphi-${role}.md`),
+        );
+      }
+      // Corrupt the HOME set; the project set must win and the run stays green.
+      fs.writeFileSync(
+        path.join(tmpHome, '.qoder', 'agents', 'delphi-technical.md'),
+        '---\nname: delphi-technical\nmodel: "[Retired](retired-id)"\n---\n# body\n',
+      );
+      const { doctorDelphi } = require('../doctor');
+      const configPath = writeConfig(path.join(tmpHome, '.delphi-config.json'));
+      const code = await doctorDelphi({
+        projectDir: projDir, configPath, npmLatest: null,
+      });
+      expect(code).toBe(0);
+    } finally {
+      fs.rmSync(projDir, { recursive: true, force: true });
+    }
+  });
+
+  // R1 MI-03: parity covers the whole bundled file set, so a stale references/
+  // copy cannot hide behind a matching SKILL.md.
+  it('a drifted references file FAILs parity even when SKILL.md matches', async () => {
+    healthyHome();
+    const refsDir = path.join(bundledSkillDir(), 'references');
+    const refFile = fs.existsSync(refsDir)
+      ? fs.readdirSync(refsDir).find((f) => f.endsWith('.md'))
+      : null;
+    if (!refFile) {
+      // No bundled references to drift — nothing to assert here.
+      return;
+    }
+    fs.mkdirSync(path.join(tmpHome, '.qoder', 'skills', 'delphi-review', 'references'), { recursive: true });
+    fs.appendFileSync(
+      path.join(tmpHome, '.qoder', 'skills', 'delphi-review', 'references', refFile),
+      '\ndrift\n',
+    );
+    const { doctorDelphi } = require('../doctor');
+    const code = await doctorDelphi({ projectDir: tmpHome, configPath: path.join(tmpHome, 'absent.json'), npmLatest: null });
+    expect(code).toBe(1);
   });
 });

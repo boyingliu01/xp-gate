@@ -471,7 +471,10 @@ function classifySeatFailure({ result, promptBytes, calibration }) {
   const threshold = calibration && Number.isFinite(calibration.last_pass_bytes)
     ? calibration.last_pass_bytes
     : null;
-  const isPreResponseDrop = !result.retryable && result.message === 'Network error.';
+  // `error_kind` is the primary signal; the message literal stays as a
+  // backward-compatible fallback for callers that hand-build results.
+  const isPreResponseDrop = !result.retryable
+    && (result.error_kind === 'pre_response_drop' || result.message === 'Network error.');
   if (isPreResponseDrop && threshold !== null && Number.isFinite(promptBytes) && promptBytes > threshold) {
     return {
       ...result,
@@ -481,6 +484,19 @@ function classifySeatFailure({ result, promptBytes, calibration }) {
       calibrated_pass_bytes: threshold,
       message: `Request dropped before any response: ${promptBytes} bytes exceeds this seat's calibrated passing size `
         + `(${threshold} bytes). Classified SIZE_EXCEEDED, not a network fault — trim the payload or recalibrate the seat.`,
+    };
+  }
+  if (isPreResponseDrop && threshold === null && Number.isFinite(promptBytes)
+    && promptBytes >= DEFAULT_PROMPT_BUDGET_BYTES) {
+    // No calibration means no evidence to reclassify on — but an uncalibrated
+    // seat dying on a full-budget payload is exactly how #481 started. Keep the
+    // class honest (network_error) and point the operator at the protocol.
+    return {
+      ...result,
+      error_type: 'network_error',
+      bytes: promptBytes,
+      message: `${result.message} Note: this seat has no prompt_calibration record and the payload is at the `
+        + 'default budget — this pattern matches an uncalibrated size ceiling. Recalibrate per the #481 protocol.',
     };
   }
   return { ...result, error_type: result.retryable ? 'retryable_error' : 'network_error' };
@@ -514,6 +530,10 @@ async function callExpertWithSchemaRetry({ provider, model, systemPrompt, userPr
   if (parsed.valid) return { ...result, verdict: parsed.verdict };
 
   const retryResult = await call(
+    // maxRetries=0 means the transport loop runs exactly one attempt
+    // (callWithRetry iterates `attempt <= maxRetries`) — the schema path adds
+    // one model round, never an extra transport-retry chain. The 7th argument
+    // is a tag consumed by injectable callFn stubs in tests.
     provider, model, systemPrompt + SCHEMA_RESTATEMENT, userPrompt, 0, timeoutMs, 'schema-retry:1',
   );
   if (retryResult.error) return { ...retryResult, retry: 1 };
@@ -636,8 +656,11 @@ async function callModelAPI(providerConfig, model, systemPrompt, userPrompt, opt
     }
     // Deliberately do NOT surface the underlying cause here. Provider errors can
     // carry mutable metadata (tokens, keys, hostnames) that must not leak into the
-    // evidence file; the test suite asserts this redaction. Keep the generic form.
-    return { error: true, message: 'Network error.' };
+    // evidence file; the test suite asserts this redaction. The structured
+    // `error_kind` is what classifySeatFailure keys on — matching the human
+    // message would make every future wording change silently disable the
+    // size-ceiling classification (#414 R1 FC-01).
+    return { error: true, error_kind: 'pre_response_drop', message: 'Network error.' };
   } finally {
     clearTimeout(timeout);
   }
@@ -764,10 +787,9 @@ async function main() {
   const userPrompt = buildUserPrompt(reviewContent, otherExpertsContent, args.round);
 
   // Refuse before the request, not after the gateway kills it.
+  // resolveSeatCalibration already printed its own warning, if any — do not
+  // echo it a second time (#414 R1 MN-03).
   const seatCalibration = resolveSeatCalibration(expertConfig);
-  if (seatCalibration.warning) {
-    console.error(`[delphi-review] WARNING: ${seatCalibration.warning}`);
-  }
   const budget = checkPromptBudget({
     systemPrompt,
     userPrompt,

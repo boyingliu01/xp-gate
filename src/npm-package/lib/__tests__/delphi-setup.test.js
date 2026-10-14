@@ -89,6 +89,56 @@ describe('delphi-setup (#414 REQ-4)', () => {
     expect(readQoderModelId(path.join(agentsDir(), 'delphi-architecture.md'))).toBe('qwen-max');
   });
 
+  // R1 FC-04: a repair without a rollback is a second way to lose a working
+  // binding — existing files are backed up before the first write.
+  it('backs up existing agent files before overwriting them', async () => {
+    const { delphiSetup } = require('../delphi-setup');
+    fs.mkdirSync(agentsDir(), { recursive: true });
+    const staleBody = '---\nname: delphi-architecture\nmodel: "[Retired-Model](dead-model-id)"\n---\n# body\n';
+    fs.writeFileSync(path.join(agentsDir(), 'delphi-architecture.md'), staleBody);
+    const code = await delphiSetup([
+      '--model', 'architecture=qwen-max',
+      '--model', 'technical=deepseek-v3.2',
+      '--model', 'feasibility=glm-5.2',
+    ]);
+    expect(code).toBe(0);
+    // Some backup copy of the stale file must exist somewhere under the
+    // sandbox HOME config dir; the exact timestamped dir is intentional.
+    const backupRoot = path.join(tmpHome, '.config', 'xp-gate', 'backup');
+    const found = (function find(dir) {
+      for (const e of fs.readdirSync(dir, { withFileTypes: true })) {
+        const p = path.join(dir, e.name);
+        if (e.isDirectory()) {
+          const hit = find(p);
+          if (hit) return hit;
+        } else if (e.name === 'delphi-architecture.md') {
+          return p;
+        }
+      }
+      return null;
+    })(backupRoot);
+    expect(found).not.toBeNull();
+    expect(fs.readFileSync(found, 'utf8')).toBe(staleBody);
+  });
+
+  // R1 MN-05: a BOM in front of '---' must not read as a missing frontmatter.
+  it('rebinds a template carrying a UTF-8 BOM', async () => {
+    const { delphiSetup } = require('../delphi-setup');
+    fs.mkdirSync(agentsDir(), { recursive: true });
+    fs.writeFileSync(
+      path.join(agentsDir(), 'delphi-architecture.md'),
+      '\uFEFF---\nname: delphi-architecture\nmodel: "[Old](old-id)"\n---\n# body\n',
+    );
+    const code = await delphiSetup([
+      '--model', 'architecture=qwen-max',
+      '--model', 'technical=deepseek-v3.2',
+      '--model', 'feasibility=glm-5.2',
+    ]);
+    expect(code).toBe(0);
+    const { readQoderModelId } = require('../init');
+    expect(readQoderModelId(path.join(agentsDir(), 'delphi-architecture.md'))).toBe('qwen-max');
+  });
+
   it('rejects duplicate model IDs — three distinct models are the invariant being set up', async () => {
     const { delphiSetup } = require('../delphi-setup');
     const code = await delphiSetup([

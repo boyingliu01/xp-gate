@@ -8,7 +8,7 @@
 
 const fs = require('fs');
 const path = require('path');
-const { HOME_DIR } = require('./shared-paths.js');
+const { HOME_DIR, CONFIG_DIR } = require('./shared-paths.js');
 
 const DELPHI_ROLES = ['architecture', 'technical', 'feasibility'];
 // Mirrors QODER_MODEL_BINDING in init.js: the model id must survive
@@ -65,9 +65,12 @@ function parseSetupArgs(args) {
     console.error('[delphi-setup] ERROR: --local requires --project <dir> (the CLI process may not run inside the project).');
     return { error: true };
   }
-  const duplicates = Object.entries(models)
-    .filter(([role, id]) => Object.entries(models).some(([other, otherId]) => other !== role && otherId === id));
-  if (duplicates.length > 0) {
+  const duplicates = (() => {
+    // Set-based check (#414 R1 FC-16): readable at any future role count.
+    const ids = Object.values(models);
+    return ids.length !== new Set(ids).size;
+  })();
+  if (duplicates) {
     console.error('[delphi-setup] ERROR: the three experts must bind three DISTINCT model ids — a duplicate defeats the multi-model invariant before any review starts.');
     return { error: true };
   }
@@ -77,6 +80,9 @@ function parseSetupArgs(args) {
 // Rebind only the model line; the rest of the bundled template (persona,
 // tools, skills) stays authoritative from this version of xp-gate.
 function rebindTemplate(templateBody, modelId) {
+  // Strip a UTF-8 BOM if present: lines[0] would otherwise be "\uFEFF---" and
+  // the frontmatter would read as missing, producing a misleading error.
+  if (templateBody.charCodeAt(0) === 0xfeff) templateBody = templateBody.slice(1);
   const bindingLine = `model: "[${modelId}](${modelId})"`;
   const lines = templateBody.split(/\r?\n/);
   const start = lines.findIndex((l) => l.trim() === '---');
@@ -114,6 +120,23 @@ async function delphiSetup(args) {
       return 1;
     }
     rebound[role] = body;
+  }
+
+  // Back up existing agents before the first write (#414 R1 FC-04): this is
+  // the repair path, and a repair without a rollback is just a second way to
+  // lose a working binding.
+  const backupDir = path.join(CONFIG_DIR, 'backup', `delphi-setup-${Date.now()}`);
+  const backedUp = [];
+  for (const role of DELPHI_ROLES) {
+    const targetPath = path.join(targetDir, `delphi-${role}.md`);
+    if (fs.existsSync(targetPath)) {
+      fs.mkdirSync(backupDir, { recursive: true });
+      fs.copyFileSync(targetPath, path.join(backupDir, `delphi-${role}.md`));
+      backedUp.push(role);
+    }
+  }
+  if (backedUp.length > 0) {
+    console.log(`  backed up existing agents -> ${backupDir} (${backedUp.join(', ')})`);
   }
 
   fs.mkdirSync(targetDir, { recursive: true });

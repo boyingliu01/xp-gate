@@ -1,10 +1,11 @@
 #!/usr/bin/env bash
 # Delphi Review Skill Installation Script
-# Usage: bash scripts/install-delphi-review.sh [--force]
+# Usage: bash scripts/install-delphi-review.sh [--force] [--platform qoder|opencode]
 #
 # Platform-aware (#414 REQ-2): a ~/.qoder directory means Qoder is the active
 # IDE and the skill belongs in ~/.qoder/skills/. Everything else keeps the
-# historical OpenCode destination. The official npm path
+# historical OpenCode destination. --platform overrides detection for
+# dual-install machines (#414 R1 MN-02). The official npm path
 # (`xp-gate install-skill delphi-review`) remains the preferred installer;
 # this script is the no-CLI fallback and must not drift from it.
 set -e
@@ -13,12 +14,38 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 SKILL_SRC="$PROJECT_ROOT/skills/delphi-review"
 
-if [[ -d "$HOME/.qoder" ]]; then
-  SKILL_DEST="$HOME/.qoder/skills/delphi-review"
+PLATFORM_OVERRIDE=""
+for arg in "$@"; do
+  case "$arg" in
+    --platform)
+      PLATFORM_OVERRIDE="expected-next" ;;
+    qoder|opencode)
+      if [[ "$PLATFORM_OVERRIDE" == "expected-next" ]]; then
+        PLATFORM_OVERRIDE="$arg"
+      else
+        echo "⚠️  ignoring unexpected argument: $arg"
+        PLATFORM_OVERRIDE=""
+      fi ;;
+    --force) ;;
+    *) echo "⚠️  ignoring unknown argument: $arg" ;;
+  esac
+done
+
+if [[ "$PLATFORM_OVERRIDE" == "qoder" || "$PLATFORM_OVERRIDE" == "opencode" ]]; then
+  PLATFORM="$PLATFORM_OVERRIDE"
+elif [[ -d "$HOME/.qoder" ]]; then
   PLATFORM="qoder"
 else
-  SKILL_DEST="$HOME/.config/opencode/skills/delphi-review"
   PLATFORM="opencode"
+fi
+
+if [[ "$PLATFORM" == "qoder" ]]; then
+  SKILL_DEST="$HOME/.qoder/skills/delphi-review"
+else
+  SKILL_DEST="$HOME/.config/opencode/skills/delphi-review"
+fi
+if [[ -z "$PLATFORM_OVERRIDE" && -d "$HOME/.qoder" && -d "$HOME/.config/opencode/skills" ]]; then
+  echo "ℹ️  Both Qoder and OpenCode detected — defaulting to Qoder. Override with: --platform opencode"
 fi
 
 if [[ -d "$SKILL_DEST" ]]; then
