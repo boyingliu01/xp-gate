@@ -220,9 +220,58 @@ detect_mutation_testable() {
   fi
   return 1
 }
-# Detect if a Python project has mutmut installed and configured
+# Echo the pytest-xdist parallel arguments when xdist is importable, or an
+# empty string with a stderr warning when it is not (#516). NEVER fails and
+# never blocks: serial semantics are the safe fallback, the warning only tells
+# the user why Gate 5 is slow. `-n auto` uses every core; `--dist loadfile`
+# groups tests per file to avoid cross-file shared state (module-level
+# fixtures, shared sqlite) racing under parallel workers — measured on a
+# 2555-test project: 30-45min serial -> 2m23s parallel with zero flaky runs.
+# Callers must invoke unquoted and unset: `pytest $(python_xdist_args) ...`
+# (SC2086-intentional: the value is a multi-word argument list).
+python_xdist_args() {
+  if python -c "import xdist" >/dev/null 2>&1; then
+    printf '%s' "-n auto --dist loadfile"
+    return 0
+  fi
+  echo "⚠ pytest-xdist not installed — Gate 5 falls back to SERIAL (may be 10x slower). Install: pip install pytest-xdist" >&2
+  return 0
+}
+# Detect a usable Python mutation engine (#410).
+#
+# Two engines, probed in preference order:
+#   1. pytest-gremlins — mutation switching (no fork), natively cross-platform,
+#      requires Python >= 3.11. Preferred wherever it is installed.
+#   2. mutmut — fork()-based, so on Windows it is ONLY runnable under WSL.
+#
+# The original implementation returned success as soon as `mutmut --version`
+# worked, which on native Windows produced a structural deadlock: `mutmut run`
+# exits 1 with "please use the WSL", so every push was blocked by a check that
+# could never pass — while uninstalling mutmut flipped the gate to SKIP. The
+# platform branch below is what removes that deadlock; it never blocks, it only
+# decides whether Gate M runs or skips.
 detect_python_mutation_testable() {
-  # Check for mutmut installation
+  # Engine 1: pytest-gremlins (cross-platform, no fork).
+  if command -v python >/dev/null 2>&1 && python -c "import pytest_gremlins" >/dev/null 2>&1; then
+    return 0
+  fi
+
+  # Determine whether mutmut can actually RUN here, not merely whether it is
+  # installed — that distinction is the whole point of this function on Windows.
+  local _uname_s
+  _uname_s="$(uname -s 2>/dev/null || echo unknown)"
+  case "$_uname_s" in
+    MINGW*|MSYS*|CYGWIN*)
+      # Native Windows: mutmut is unusable without WSL.
+      if command -v wsl >/dev/null 2>&1 && wsl mutmut --version >/dev/null 2>&1; then
+        return 0
+      fi
+      echo "⚠ Gate M (Python): mutmut cannot run on native Windows (fork()-based) and no WSL mutmut found — SKIP. Install pytest-gremlins instead: pip install pytest-gremlins (needs Python >= 3.11)." >&2
+      return 1
+      ;;
+  esac
+
+  # Unix: mutmut is fine natively.
   if command -v mutmut >/dev/null 2>&1; then
     return 0
   fi

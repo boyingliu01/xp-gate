@@ -2,6 +2,25 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.25.0.0] - 2026-10-14
+
+Sprint D（效能与迁移路径批次）：Python 门禁从「串行 30-45 分钟」压到并行 2.5 分钟、按变更智能选测；Gate M (Python) 在 Windows 原生环境的死锁一次消除；gitleaks 缺失从「升级即被拦」变成安装期可见的迁移路径；phase-transition 的漏执行不再对调用方不可见。
+
+### Added
+
+- **Python 智能测试选择（#399）**: 对齐 TypeScript #286 的三层策略——仅测试文件变更 → 只跑变更测试；源文件变更 → 按路径约定（`tests/foo/test_bar.py` / `bar_test.py` / 同名共置 / `__tests__/`）解析关联测试；>20 测试文件、依赖清单（pyproject/setup/requirements）变更、或找不到关联测试 → 全量兜底。Tier 1/2 **不强制全局覆盖率阈值**（子集覆盖率全局无意义），Stage 2 降级为 WARN 而非 BLOCK；判定逻辑落在 `githooks/lib/python-test-selection.sh`，纯函数可单测。
+- **pytest-gremlins 变异引擎（#410）**: 新增 `GremlinsRunner`（`pytest --gremlins --gremlin-parallel --gremlin-cache`），解析 console 报告的 `Zapped`/`Survived` 行；两行皆缺 → `report=null`（非阻塞，绝不伪造 0% 判决）。注册顺序让 gremlins 在双引擎共存时占先（原生跨平台优先），mutmut 在 Unix 单引擎环境仍可用。
+- **transition 审计日志（#519）**: `transitionPhase` 成功写盘后向 `.sprint-state/transition-audit.jsonl` 追加一条记录（timestamp / phase / phase_name / from_phase / from_status / to_status）；best-effort，写失败只 WARN 不阻断转换——让「命令从未执行」与「执行了没生效」在事后取证中可区分。
+- **gitleaks 迁移提示（#511）**: `scripts/lib/gitleaks-notice.sh` + npm `probeGitleaksNotice()` 在安装期探测 gitleaks，缺失时打印「Gate 8 自 #499 起 fail-closed，下次提交将被 BLOCK」及一键安装命令；`install-all.sh` 支持 `--with-tools` 显式进入安装。
+
+### Changed
+
+- **Gate 5 (Python) 默认并行（#516）**: `python_xdist_args()` 探测 `import xdist`，可用则注入 `-n auto --dist loadfile`（按文件分组规避跨文件共享状态并行冲突），不可用则降级串行并**告警不 BLOCK**；`run_tests`/`run_coverage` 与 pre-commit coverage 分支共用同一 helper；pytest-cov 与 xdist 正常联动，`fail_under` 判定不受影响。
+- **Gate M (Python) Windows 死锁消除（#410）**: `detect_python_mutation_testable` 改为判定「引擎能否真正运行」而非「是否安装」——gremlins 可用即通过；mutmut 在原生 Windows（MINGW/MSYS/CYGWIN）仅当 `wsl mutmut` 可用才通过，否则 SKIP 并提示装 pytest-gremlins。`MutmutRunner.isAvailable()` 同步修复：win32 上不再因本地 `mutmut --version` 成功就误判 route=native（那正是「装了必被拦」的根因）。
+- **gitleaks 安装路径（#511）**: `install-gitleaks.sh` 新增 Windows 分支（`.zip` + `gitleaks.exe`，此前只有 Unix tarball）；`install-pre-commit.sh` / `install-all.sh` 安装完成后探测并提示。Gate 8 的 fail-closed 语义（#499）保持不变。
+- **phase-transition 时序守卫与回显（#519）**: `completed` 到 phase n 时，phase n-1 必须为 completed/skipped，否则拒绝并打印完整 phase history 摘要 + 提示 `--force`；`--force` 显式覆盖并 WARN。每次转换输出 before→after（顶层 phase/status 与目标条目状态），使「命令没跑」与「跑了没生效」在终端即可区分。
+- **phase_history 字段归一（#519）**: `migrateState` 将历史遗留的 phase 1 `name` 字段与 phase 2+ 的 `phase_name` 双向归一（保留原字段以兼容旧读取方），修正此前归一分支落在 legacy-map 覆盖范围外而永不执行的问题。
+
 ## [0.24.0.0] - 2026-10-14
 
 Sprint C（评审链平台适配批次）：Delphi 评审链在 Qoder/DSH 上的结构性断点一次修复——runner 失败可断言、席位上限可标定、平台探测-降级双通道契约成文成工具。整批经四轮外部 Delphi 走查（R1 4C → R2 3/3 APPROVED → R3 1C 测试有效性 → R4 3/3 APPROVED，0 critical）。

@@ -532,12 +532,14 @@ async function handlePhaseTransition(args = []) {
     console.log('  --render           Render ASCII dashboard after transition');
     console.log('  --dir <path>       Project directory (default: cwd)');
     console.log('  --skip-evidence <reason>  Skip evidence validation (requires reason)');
+    console.log('  --force            Override the phase sequence guard (#519)');
     console.log('');
     console.log('Examples:');
     console.log('  xp-gate phase-transition 1 completed');
     console.log('  xp-gate phase-transition 3 completed --render');
     console.log('  xp-gate phase-transition 2 in_progress --outputs \'{"spec":"path.yaml"}\'');
     console.log('  xp-gate phase-transition 4 completed --skip-evidence "Emergency hotfix"');
+    console.log('  xp-gate phase-transition 3 completed --force   # skip-order override');
     return 0;
   }
 
@@ -576,6 +578,9 @@ async function handlePhaseTransition(args = []) {
     }
   }
 
+  // #519: explicit override for the sequence guard below.
+  const forceTransition = args.includes('--force');
+
   // Validate inputs
   if (phase < 1 || phase > 6) {
     console.error(`Error: Phase must be 1-6, got ${phase}`);
@@ -591,6 +596,37 @@ async function handlePhaseTransition(args = []) {
   // Execute transition
   try {
     const manager = new SprintStateManager(projectDir);
+
+    // ── #519 Layer 0: Sequence guard ──
+    // `completed` on phase n requires phase n-1 to be completed/skipped first.
+    // #507 proved that a missed transition is invisible in the state file (the
+    // pointer just looks "not yet advanced"), so out-of-order completion —
+    // skipping a phase, or completing from a stale pointer — must be refused
+    // loudly rather than written silently. `--force` overrides for the rare
+    // legitimate case (e.g. retroactively recording a skipped phase).
+    if (status === 'completed' && phase >= 2) {
+      const seqState = manager.read();
+      if (seqState && Array.isArray(seqState.phase_history)) {
+        const prevPhase = phase - 1;
+        const prevEntry = seqState.phase_history.find(e => e.phase === prevPhase);
+        const prevOk = prevEntry && (prevEntry.status === 'completed' || prevEntry.status === 'skipped');
+        if (!prevOk && !forceTransition) {
+          const summary = seqState.phase_history
+            .map(e => `  ${e.phase}:${e.phase_name || PHASE_NAMES[e.phase] || '?'} = ${e.status}`)
+            .join('\n');
+          console.error(`❌ [sprint-audit] Cannot complete phase ${phase} (${PHASE_NAMES[phase]}):`);
+          console.error(`   phase ${prevPhase} (${PHASE_NAMES[prevPhase]}) is not completed/skipped.`);
+          console.error('   Current phase history:');
+          console.error(summary || '  (empty)');
+          console.error(`   Advance it first: xp-gate phase-transition ${prevPhase} completed`);
+          console.error('   Or override explicitly: --force');
+          return 1;
+        }
+        if (!prevOk && forceTransition) {
+          console.warn(`⚠️  [sprint-audit] Sequence guard overridden (--force): phase ${prevPhase} is not completed/skipped.`);
+        }
+      }
+    }
 
     // ── Layer 1: Pre-transition gate check ──
     // Check BEFORE transitionPhase() to validate previous phase completion.
@@ -640,9 +676,34 @@ async function handlePhaseTransition(args = []) {
       }
     }
 
+    // Capture the before-image for the echo below (#519). Read once here so a
+    // concurrent writer cannot make before/after disagree about their baseline.
+    const beforeSnapshot = (() => {
+      try {
+        const s = manager.read();
+        if (!s) return { phase: undefined, status: undefined, entryStatus: undefined };
+        const e = Array.isArray(s.phase_history) ? s.phase_history.find(x => x.phase === phase) : undefined;
+        return { phase: s.phase, status: s.status, entryStatus: e ? e.status : undefined };
+      } catch {
+        return { phase: undefined, status: undefined, entryStatus: undefined };
+      }
+    })();
+
     const newState = manager.transitionPhase(phase, status, { outputs });
 
+    // #519: before/after echo. The #507 failure mode was "the command either
+    // never ran or ran without effect" — both look identical in a terminal that
+    // prints only a success line. Printing the observed state on both sides
+    // makes those two cases distinguishable in the output itself.
+    const afterEntry = Array.isArray(newState.phase_history)
+      ? newState.phase_history.find(e => e.phase === phase)
+      : undefined;
+    const oldTop = `${beforeSnapshot.phase ?? '-'}/${beforeSnapshot.status ?? '-'}`;
+    const newTop = `${newState.phase ?? '-'}/${newState.status ?? '-'}`;
+    const oldEntry = beforeSnapshot.entryStatus ?? '(none)';
+    const newEntryStatus = afterEntry ? afterEntry.status : '(none)';
     console.log(`✅ Phase ${phase} transitioned to '${status}'`);
+    console.log(`   before→after  phase/status: ${oldTop} → ${newTop}  |  phase ${phase} entry: ${oldEntry} → ${newEntryStatus}`);
 
     // ── Layer 1.5: Auto-trigger Layer 2 reminder on Phase 6 completed ──
     if (phase === 6 && status === 'completed') {

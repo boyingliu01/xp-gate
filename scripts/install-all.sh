@@ -179,4 +179,22 @@ echo ""
 echo "To reinstall: bash scripts/install-all.sh --force"
 echo ""
 
+# #511: Gate 8 (secret scanning) is fail-closed since #499 — probe now so an
+# upgrading user is not surprised by a BLOCK on their next commit. A `--with-tools`
+# flag opts into actually running the gitleaks installer.
+# NOTE: SCRIPT_DIR points at githooks/ (the hooks target), so the scripts
+# directory is resolved separately here.
+_SCRIPTS_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# shellcheck source=/dev/null
+source "$_SCRIPTS_DIR/lib/gitleaks-notice.sh" 2>/dev/null || true
+if ! gitleaks_notice; then
+    if [[ "${1:-}" == "--with-tools" ]] || [[ "${INSTALL_TOOLS:-0}" == "1" ]]; then
+        echo "→ Installing gitleaks (--with-tools)..."
+        bash "$_SCRIPTS_DIR/install-gitleaks.sh" || echo "⚠ gitleaks install failed — install it manually."
+    else
+        echo "   Re-run with --with-tools to install it automatically."
+        echo ""
+    fi
+fi
+
 exit 0

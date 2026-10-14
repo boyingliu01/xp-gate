@@ -29,3 +29,8 @@ echo "6 Gates: Code Quality, Dup Code, Complexity, Principles, Tests, Architectu
 echo ""
 echo "Required runtime: node >=20"
 echo "Recommended: lizard (cyclomatic complexity), archlint (architecture validation)"
+
+# #511: Gate 8 (secret scanning) is fail-closed since #499 — probe now so an
+# upgrading user is not surprised by a BLOCK on their next commit.
+# shellcheck source=/dev/null
+source "$(dirname "${BASH_SOURCE[0]}")/lib/gitleaks-notice.sh" 2>/dev/null && gitleaks_notice || true
