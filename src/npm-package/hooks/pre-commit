@@ -2318,7 +2318,20 @@ else
           ;;
         "python")
           if command -v pytest &> /dev/null && command -v coverage &> /dev/null; then
-            pytest --cov=. --cov-fail-under=80 --tb=short
+            # Issue #45 (merged in #514, replacing a machine-side hotfix that
+            # kept drifting out of the repo — the exact class #514 exists to
+            # kill). The scope must come from the target repo's pyproject.toml
+            # (e.g. source=["src"], fail_under=82): a hardcoded
+            # `--cov=. --cov-fail-under=80` counts tests/ into the denominator
+            # and produced a measured 76.49% false-red BLOCKED. Two-tier read:
+            # tomllib first, grep fallback for older Pythons; default 80 only
+            # when the repo declares nothing.
+            PY_COV_FAIL_UNDER=$(python -c "import tomllib;print(tomllib.load(open('pyproject.toml','rb'))['tool']['coverage']['report']['fail_under'])" 2>/dev/null || echo "")
+            if [ -z "$PY_COV_FAIL_UNDER" ]; then
+              PY_COV_FAIL_UNDER=$(grep -oE 'fail_under *= *[0-9]+' pyproject.toml 2>/dev/null | grep -oE '[0-9]+' | head -1)
+            fi
+            [ -z "$PY_COV_FAIL_UNDER" ] && PY_COV_FAIL_UNDER=80
+            pytest --cov=src --cov-fail-under="$PY_COV_FAIL_UNDER" --tb=short
             COV_EXIT=$?
           else
             echo "pytest/coverage not available, running coverage via adapter..."
