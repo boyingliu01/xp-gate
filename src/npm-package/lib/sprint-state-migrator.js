@@ -57,18 +57,9 @@ function migrateState(state, stateDir) {
   if (!state.phase_history) { state.phase_history = []; }
   if (!state.isolation) { state.isolation = { worktree_path: null, branch: null }; }
 
-  state.phase_history = state.phase_history.map(entry => {
-    const phaseNum = String(entry.phase);
-    const mapped = LEGACY_PHASE_MAP[phaseNum];
-    if (mapped) {
-      warnings.push(`Migrated legacy phase ${entry.phase} → ${mapped.phase} (${mapped.phase_name})`);
-      return { ...entry, phase: mapped.phase, phase_name: mapped.phase_name };
-    }
-    if (!entry.phase_name && entry.phase >= 1 && entry.phase <= 6) {
-      entry.phase_name = PHASE_NAMES[entry.phase - 1];
-    }
-    return entry;
-  });
+  state.phase_history = state.phase_history.map(entry =>
+    normalizePhaseEntry(entry, warnings),
+  );
 
   const currentPhaseNum = String(state.phase);
   const currentMapped = LEGACY_PHASE_MAP[currentPhaseNum];
@@ -89,6 +80,47 @@ function migrateState(state, stateDir) {
   }
 
   return state;
+}
+
+/**
+ * Migrate and normalize a single phase_history entry.
+ *
+ * Two passes, in this order:
+ *   1. legacy numbering → current numbering via LEGACY_PHASE_MAP;
+ *   2. field normalization: phase 1 historically carried `name` while phase 2+
+ *      carried `phase_name` (transitionPhase always writes `phase_name`).
+ *      Normalize to `phase_name` as the single canonical field, in BOTH
+ *      directions so a half-migrated file converges. The legacy `name` is kept
+ *      (not deleted) so any reader still consulting it keeps working.
+ *
+ * Ordering matters: the normalization must run for every entry, including those
+ * the legacy remap just rewrote — LEGACY_PHASE_MAP covers every phase 1-6, so
+ * gating normalization on "not remapped" would skip exactly the legacy files it
+ * exists for. (#507 left such a file: phase 1 with `name: 'PREP'`, phase 2+
+ * with `phase_name`.)
+ *
+ * @param {Object} entry - One phase_history entry (possibly legacy-shaped)
+ * @param {string[]} warnings - Accumulator for human-readable migration notes
+ * @returns {Object} The normalized entry
+ */
+function normalizePhaseEntry(entry, warnings) {
+  const phaseNum = String(entry.phase);
+  const mapped = LEGACY_PHASE_MAP[phaseNum];
+  if (mapped) {
+    warnings.push(`Migrated legacy phase ${entry.phase} → ${mapped.phase} (${mapped.phase_name})`);
+    entry = { ...entry, phase: mapped.phase, phase_name: mapped.phase_name };
+  }
+
+  if (!entry.phase_name && entry.name) {
+    entry.phase_name = entry.name;
+  }
+  if (!entry.phase_name && entry.phase >= 1 && entry.phase <= 6) {
+    entry.phase_name = PHASE_NAMES[entry.phase - 1];
+  }
+  if (!entry.name && entry.phase_name) {
+    entry.name = entry.phase_name;
+  }
+  return entry;
 }
 
 /**
@@ -120,17 +152,23 @@ function createInitialState(projectRoot) {
  * @param {string} stateDir - Path to .sprint-state directory
  */
 function logMigrationWarnings(warnings, stateDir) {
-  if (!fs.existsSync(stateDir)) {
-    fs.mkdirSync(stateDir, { recursive: true });
+  try {
+    if (!fs.existsSync(stateDir)) {
+      fs.mkdirSync(stateDir, { recursive: true });
+    }
+
+    const warningsFile = path.join(stateDir, 'migration-warnings.json');
+    const existing = fs.existsSync(warningsFile)
+      ? JSON.parse(fs.readFileSync(warningsFile, 'utf8'))
+      : [];
+
+    existing.push({ timestamp: new Date().toISOString(), warnings });
+    fs.writeFileSync(warningsFile, JSON.stringify(existing, null, 2), 'utf8');
+  } catch (err) {
+    // Migration must still return the migrated state; a failure to persist the
+    // warning log is reported to stderr and never thrown.
+    console.warn(`[WARN] could not write migration warnings: ${err.message}`);
   }
-
-  const warningsFile = path.join(stateDir, 'migration-warnings.json');
-  const existing = fs.existsSync(warningsFile)
-    ? JSON.parse(fs.readFileSync(warningsFile, 'utf8'))
-    : [];
-
-  existing.push({ timestamp: new Date().toISOString(), warnings });
-  fs.writeFileSync(warningsFile, JSON.stringify(existing, null, 2), 'utf8');
 }
 
 /**

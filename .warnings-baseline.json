@@ -10,5 +10,25 @@
   "src/build-integrity/gate-10.ts": {
     "totalWarnings": 6,
     "lastAnalyzed": "2026-10-08T16:33:18.221Z"
+  },
+  "src/npm-package/lib/sprint-state-manager.js": {
+    "totalWarnings": 3,
+    "lastAnalyzed": "2026-10-14T15:39:45.932Z"
+  },
+  "src/mutation/runners/mutmut-runner.ts": {
+    "totalWarnings": 11,
+    "lastAnalyzed": "2026-10-14T15:41:31.674Z"
+  },
+  "src/npm-package/lib/init.js": {
+    "totalWarnings": 14,
+    "lastAnalyzed": "2026-10-14T15:41:31.676Z"
+  },
+  "src/npm-package/lib/phase-transition.js": {
+    "totalWarnings": 10,
+    "lastAnalyzed": "2026-10-14T15:41:31.676Z"
+  },
+  "src/npm-package/mutation/runners/mutmut-runner.ts": {
+    "totalWarnings": 11,
+    "lastAnalyzed": "2026-10-14T15:41:31.676Z"
   }
 }

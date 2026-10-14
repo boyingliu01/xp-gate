@@ -133,7 +133,12 @@ run_tests() {
 
   echo "Running Python tests..."
   # Skip e2e tests by default in pre-commit (require live API + network)
-  PYTEST_OUTPUT=$(pytest --exitfirst --tb=short -m "not e2e" 2>&1)
+  # #516: pytest-xdist parallel when available, serial fallback otherwise.
+  # Unquoted expansion is intentional (multi-word arg list): the helper
+  # returns `-n auto --dist loadfile` as SEPARATE words, or an empty string
+  # for a serial fallback. Quoting would collapse it into one bogus argument.
+  # shellcheck disable=SC2046
+  PYTEST_OUTPUT=$(pytest $(python_xdist_args) --exitfirst --tb=short -m "not e2e" 2>&1)
   PYTEST_EXIT=$?
 
   # Show the short summary tail — this is where FAILED/assert diagnostics live.
@@ -176,7 +181,10 @@ run_coverage() {
   # 阈值不在此处硬编码：pytest-cov 自动读取 pyproject.toml 的
   # [tool.coverage.report] fail_under（唯一事实源）。此前这里重复写了
   # --cov-fail-under=79.9，改 pyproject 不会让门禁跟着变，属于假配置。
-  PYTEST_OUTPUT=$(pytest --exitfirst --tb=short --cov=src -m "not e2e" 2>&1)
+  # #516: xdist 并行（可用时），pytest-cov 与 xdist 正常联动（worker 各自
+  # 测量、主进程合并），fail_under 判定不受影响。
+  # shellcheck disable=SC2046
+  PYTEST_OUTPUT=$(pytest $(python_xdist_args) --exitfirst --tb=short --cov=src -m "not e2e" 2>&1)
   PYTEST_EXIT=$?
   echo "$PYTEST_OUTPUT" | grep -E "(FAILED|PASSED|passed|failed|error|ERROR|TOTAL|assert)" | tail -10
   echo "$PYTEST_OUTPUT" | tail -5

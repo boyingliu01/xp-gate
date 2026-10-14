@@ -33,24 +33,30 @@ export class MutmutRunner implements MutationRunner {
   constructor(private readonly platform: Platform = process.platform) {}
 
   async isAvailable(): Promise<boolean> {
-    try {
-      execSync('mutmut --version', { stdio: 'pipe', timeout: 5000 });
-      this.route = 'native';
-      return true;
-    } catch {
-      if (this.platform !== 'win32') {
-        this.route = 'unavailable';
-        return false;
-      }
-
+    if (this.platform !== 'win32') {
       try {
-        execSync('wsl mutmut --version', { stdio: 'pipe', timeout: 5000 });
-        this.route = 'wsl';
+        execSync('mutmut --version', { stdio: 'pipe', timeout: 5000 });
+        this.route = 'native';
         return true;
       } catch {
         this.route = 'unavailable';
         return false;
       }
+    }
+
+    // Windows: mutmut 3.x is fork()-based and can ONLY run under WSL. A native
+    // `mutmut --version` succeeding therefore proves nothing about `mutmut run`
+    // — reporting route='native' here is exactly the #410 deadlock: every push
+    // reached `mutmut run`, which exits 1 with "please use the WSL", and the
+    // gate blocked on a structurally unachievable check. The route is decided
+    // by the WSL probe alone so an unavailable WSL yields a clean SKIP.
+    try {
+      execSync('wsl mutmut --version', { stdio: 'pipe', timeout: 10000 });
+      this.route = 'wsl';
+      return true;
+    } catch {
+      this.route = 'unavailable';
+      return false;
     }
   }
 

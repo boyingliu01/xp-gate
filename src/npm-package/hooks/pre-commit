@@ -230,6 +230,11 @@ source "${AUDIT_SCRIPT_DIR}/lib/sprint-gate-report.sh"
 # unit-testable without executing this hook.
 source "${AUDIT_SCRIPT_DIR}/lib/coverage-total.sh"
 
+# Issue #399: Python smart test selection — strategy decision + related-test
+# lookup, kept in a library so the truth table and the path conventions are
+# unit-testable without executing this hook.
+source "${AUDIT_SCRIPT_DIR}/lib/python-test-selection.sh"
+
 # Read max_duration_ms from .xp-gate-config.json (default 7200000 = 2 hours)
 _MAX_DURATION_MS=$(node -e "try{const c=JSON.parse(require('fs').readFileSync('${PROJECT_ROOT_FOR_AUDIT}/.xp-gate-config.json','utf8'));console.log((c.audit&&c.audit.max_duration_ms)||7200000);}catch(e){console.log(7200000);}" 2>/dev/null || echo "7200000")
 
@@ -2334,8 +2339,79 @@ else
             fi
             [ -z "$PY_COV_SOURCE" ] && PY_COV_SOURCE="--cov=."
             [ -z "$PY_COV_FAIL_UNDER" ] && PY_COV_FAIL_UNDER=80
-            pytest $PY_COV_SOURCE --cov-fail-under="$PY_COV_FAIL_UNDER" --tb=short
-            COV_EXIT=$?
+
+            # ── #399: smart test selection, the Python counterpart of #286 ──
+            # Three tiers (lib/python-test-selection.sh holds the pure
+            # decision logic + related-test lookup, unit-tested separately):
+            #   changed-tests / related -> run ONLY those targets, with the
+            #     repo's coverage SOURCE but WITHOUT the global fail_under
+            #     (subset coverage is meaningless globally). The run is marked
+            #     partial so Stage 2 warns instead of falsely blocking.
+            #   full -> unchanged behavior: whole suite + real threshold.
+            #   skip -> nothing test-relevant changed; no pytest at all.
+            PY_CHANGED_TEST_FILES=$(git diff --cached --name-only --diff-filter=ACM 2>/dev/null \
+              | grep -E '(^|/)test_[^/]*\.py$|_test\.py$' || true)
+            PY_CHANGED_SRC_FILES=$(git diff --cached --name-only --diff-filter=ACM 2>/dev/null \
+              | grep -E '\.py$' | grep -vE '(^|/)test_[^/]*\.py$|_test\.py$' || true)
+            PY_CHANGED_ALL=$(git diff --cached --name-only --diff-filter=ACM 2>/dev/null || true)
+            # `grep -c '.'` prints its own zero AND exits 1 on an empty list
+            # (#493), so the count is derived with `|| true` + wc -l instead.
+            PY_TEST_COUNT=$(printf '%s\n' "$PY_CHANGED_TEST_FILES" | grep -c '.' || true)
+            PY_SRC_COUNT=$(printf '%s\n' "$PY_CHANGED_SRC_FILES" | grep -c '.' || true)
+            PY_DEPS_CHANGED=0
+            if python_dependency_changed $PY_CHANGED_ALL; then PY_DEPS_CHANGED=1; fi
+            PY_STRATEGY=$(select_python_test_strategy "$PY_TEST_COUNT" "$PY_SRC_COUNT" "$PY_DEPS_CHANGED")
+
+            # xdist parallel args (#516) — empty + warning when unavailable,
+            # never a BLOCK; unquoted expansion is the multi-word arg list.
+            PY_XDIST_ARGS=$(python_xdist_args 2>/dev/null || true)
+
+            if [ "$PY_STRATEGY" = "skip" ]; then
+              echo "ℹ️  Python: no test/source changes — skipping test run (#399)."
+              COV_EXIT=0
+            elif [ "$PY_STRATEGY" = "full" ]; then
+              if [ "$PY_DEPS_CHANGED" = "1" ]; then
+                echo "ℹ️  Python: dependency manifest changed — running FULL suite (#399)."
+              elif [ "$PY_TEST_COUNT" -gt 20 ] 2>/dev/null; then
+                echo "ℹ️  Python: $PY_TEST_COUNT changed test files (>20) — running FULL suite (#399)."
+              fi
+              # shellcheck disable=SC2086
+              pytest $PY_XDIST_ARGS $PY_COV_SOURCE --cov-fail-under="$PY_COV_FAIL_UNDER" --tb=short
+              COV_EXIT=$?
+            else
+              # changed-tests | related → resolve the exact targets.
+              PY_TARGETS=""
+              if [ "$PY_STRATEGY" = "changed-tests" ]; then
+                PY_TARGETS="$PY_CHANGED_TEST_FILES"
+              else
+                for _py_src in $PY_CHANGED_SRC_FILES; do
+                  _py_related=$(python_related_tests "$_py_src")
+                  if [ -n "$_py_related" ]; then
+                    PY_TARGETS="${PY_TARGETS}${_py_related}
+"
+                  fi
+                done
+                PY_TARGETS=$(printf '%s\n' "$PY_TARGETS" | grep -v '^$' | sort -u)
+              fi
+
+              if [ -z "$PY_TARGETS" ]; then
+                # related lookup found nothing → tier 3 full run is safest.
+                echo "ℹ️  Python: no related tests found for changed sources — running FULL suite (#399)."
+                # shellcheck disable=SC2086
+                pytest $PY_XDIST_ARGS $PY_COV_SOURCE --cov-fail-under="$PY_COV_FAIL_UNDER" --tb=short
+                COV_EXIT=$?
+              else
+                PY_TARGET_COUNT=$(printf '%s\n' "$PY_TARGETS" | grep -c '.' || true)
+                echo "ℹ️  Python: selective run ($PY_STRATEGY) — $PY_TARGET_COUNT target(s):"
+                printf '%s\n' "$PY_TARGETS" | sed 's/^/     /'
+                # Subset run: keep --cov so data is collected, but drop the
+                # global threshold — subset coverage is meaningless globally.
+                PARTIAL_TEST_RUN=true
+                # shellcheck disable=SC2086
+                pytest $PY_XDIST_ARGS $PY_COV_SOURCE --tb=short $PY_TARGETS
+                COV_EXIT=$?
+              fi
+            fi
           else
             echo "pytest/coverage not available, running coverage via adapter..."
             run_coverage_output=$(run_coverage 2>&1)

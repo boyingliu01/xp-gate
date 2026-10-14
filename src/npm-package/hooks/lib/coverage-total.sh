@@ -61,6 +61,16 @@ enforce_python_coverage() {
 
   if [ -n "$COVERAGE_PERCENT" ]; then
     if [ "$COVERAGE_PERCENT" -lt 80 ]; then
+      # #399: a subset run (smart test selection) measures only the tested
+      # files, so its global total is meaningless as a verdict — the full
+      # suite may well be >=80% even when the subset is not. Warn exactly as
+      # the TypeScript branch does (#286) instead of blocking. Full runs keep
+      # the hard BLOCK below.
+      if [ "${PARTIAL_TEST_RUN:-false}" = "true" ]; then
+        echo "⚠️  Partial coverage ${COVERAGE_PERCENT}% (subset test run, not full suite)."
+        echo "    Run the full suite for a real Python coverage check."
+        return 0
+      fi
       echo "❌ BLOCKED - Python coverage ${COVERAGE_PERCENT}% below 80% threshold"
       return 1
     fi

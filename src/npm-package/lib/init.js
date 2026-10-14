@@ -272,6 +272,46 @@ function printCliToolStatus() {
 }
 
 /**
+ * Probe for gitleaks and warn when it is missing (#511).
+ *
+ * Gate 8 became fail-closed in #499: a missing gitleaks BLOCKs the commit
+ * outright (it does NOT skip, unlike the tools reported by
+ * printCliToolStatus). The user-facing installers never provisioned it, so an
+ * existing user upgrading into #499 hits a hard BLOCK on their next commit with
+ * no prior signal — this is the missing migration notice.
+ *
+ * Probe-and-prompt only: nothing is installed here (installing is the user's
+ * explicit choice, via the printed command). The fail-closed semantics of
+ * #499 are untouched.
+ *
+ * @param {(name: string) => {available: boolean, version?: string}} checkTool
+ * @param {(line: string) => void} [log]
+ * @returns {{available: boolean}} the probe result, for callers that branch on it
+ */
+function probeGitleaksNotice(checkTool, log = console.log) {
+  const result = checkTool('gitleaks');
+  if (result.available) {
+    log(`✓ gitleaks present${result.version ? `: ${result.version}` : ''}`);
+    return { available: true };
+  }
+
+  log('');
+  log('⚠  gitleaks is NOT installed.');
+  log('   Gate 8 (secret scanning) is FAIL-CLOSED since #499: your next commit');
+  log('   will be BLOCKED until gitleaks is available.');
+  log('');
+  log('   Install it now:');
+  log('     bash scripts/install-gitleaks.sh');
+  log('');
+  log('   Per-OS alternatives:');
+  log('     macOS:    brew install gitleaks');
+  log('     Linux:    https://github.com/gitleaks/gitleaks/releases');
+  log('     Windows:  winget install gitleaks  (or: scoop install gitleaks)');
+  log('');
+  return { available: false };
+}
+
+/**
  * Ask the user for confirmation via stdin.
  * @param {string} question - The yes/no question to display
  * @returns {Promise<boolean>} true if user answered yes
@@ -351,6 +391,11 @@ async function init(args) {
   // Check CLI tools availability (quality gates will SKIP silently if tools are missing)
   console.log('Checking CLI tools...');
   printCliToolStatus();
+
+  // #511: gitleaks is the one tool whose absence BLOCKS rather than SKIPs
+  // (Gate 8 fail-closed, #499) — surface it separately so an upgrading user
+  // has a migration path before the first blocked commit.
+  probeGitleaksNotice(checkCliTool);
 
   console.log('Checking platform dependencies...');
   // Detect platform and check/auto-install dependencies
@@ -925,4 +970,4 @@ function injectKarpathyPrinciples(projectRoot) {
 // setupGlobal is exported so the global-install wiring (agents deployed to the
 // real HOME) can be audited under a sandboxed HOME, not just asserted to exist
 // — the historical miss was "local deployed, global did not" (#417, #429).
-module.exports = { init, promptBootstrap, installModuleRuntimeDeps, deployQoderDelphiAgents, configureQoderDelphiAgents, readQoderModelId, setupGlobal };
+module.exports = { init, promptBootstrap, installModuleRuntimeDeps, deployQoderDelphiAgents, configureQoderDelphiAgents, readQoderModelId, setupGlobal, probeGitleaksNotice };

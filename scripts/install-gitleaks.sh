@@ -6,9 +6,10 @@ set -euo pipefail
 
 detect_os() {
   case "$(uname -s)" in
-    Darwin*)  echo "darwin" ;;
-    Linux*)   echo "linux" ;;
-    *)        echo "unknown" ;;
+    Darwin*)              echo "darwin" ;;
+    Linux*)               echo "linux" ;;
+    MINGW*|MSYS*|CYGWIN*) echo "windows" ;;
+    *)                    echo "unknown" ;;
   esac
 }
 
@@ -49,6 +50,34 @@ main() {
     | grep -o '"tag_name": "v[^"]*"' | head -1 | grep -o 'v[^"]*')
 
   VERSION="${VERSION:-v8.24.2}"
+
+  # Windows releases are .zip archives containing gitleaks.exe, not .tar.gz
+  # (gitleaks publishes no tarball for the windows asset). Handled before the
+  # Unix path so a native Windows user gets a working binary instead of a
+  # failed tar extraction (#511).
+  if [ "$OS" = "windows" ]; then
+    local WIN_URL="https://github.com/gitleaks/gitleaks/releases/download/${VERSION}/gitleaks_${VERSION#v}_windows_${ARCH}.zip"
+    local WIN_BIN_DIR="$HOME/.local/bin"
+    local WIN_TMP
+    WIN_TMP=$(mktemp -d)
+    mkdir -p "$WIN_BIN_DIR"
+    echo "Downloading $WIN_URL..."
+    if curl -sL "$WIN_URL" -o "$WIN_TMP/gitleaks.zip" && command -v unzip >/dev/null 2>&1; then
+      unzip -o -q "$WIN_TMP/gitleaks.zip" -d "$WIN_TMP"
+      mv "$WIN_TMP/gitleaks.exe" "$WIN_BIN_DIR/gitleaks.exe"
+      rm -rf "$WIN_TMP"
+      echo "Installed: $WIN_BIN_DIR/gitleaks.exe"
+      echo ""
+      echo "Add to your PATH (PowerShell):"
+      echo "  \$env:Path += \";\$HOME\\.local\\bin\""
+      return 0
+    fi
+    rm -rf "$WIN_TMP"
+    echo "⚠ Could not auto-install on Windows (need curl + unzip)."
+    echo "  Download manually: https://github.com/gitleaks/gitleaks/releases"
+    echo "  then put gitleaks.exe on your PATH."
+    return 1
+  fi
 
   local DOWNLOAD_URL="https://github.com/gitleaks/gitleaks/releases/download/${VERSION}/gitleaks_${VERSION#v}_${OS}_${ARCH}.tar.gz"
   local TMP_DIR
