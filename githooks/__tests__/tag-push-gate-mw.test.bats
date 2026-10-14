@@ -45,10 +45,10 @@ MOCK
   # Two commits; the tag will point at the SECOND one so diff-tree against
   # its parent yields src/foo.ts (a root commit would produce no file list).
   echo "init" > README.md
-  git add . && git commit -q -m "init"
+  git add . && git commit --no-verify -q -m "init"
   mkdir -p src
   echo "export const a = 1;" > src/foo.ts
-  git add . && git commit -q -m "add source"
+  git add . && git commit --no-verify -q -m "add source"
 
   # Publish BEFORE installing hooks so setup never triggers the hook itself.
   git remote add origin "$TEST_DIR/remote.git"
@@ -121,7 +121,7 @@ push_tag_ref() {
 @test "tag on a local-only commit without evidence is still blocked" {
   git tag -a v1.0.0 -m "Release v1.0.0"
   echo "export const b = 2;" >> src/foo.ts
-  git add . && git commit -q -m "unreviewed change"
+  git add . && git commit --no-verify -q -m "unreviewed change"
   git tag -a v2.0.0 -m "Release v2.0.0"
   rm -f .code-walkthrough-result.json
   push_tag_ref v2.0.0
@@ -132,7 +132,7 @@ push_tag_ref() {
 @test "mixed push (branch ref plus published tag) without evidence is blocked" {
   git tag -a v1.0.0 -m "Release v1.0.0"
   echo "export const c = 3;" >> src/foo.ts
-  git add . && git commit -q -m "unreviewed change"
+  git add . && git commit --no-verify -q -m "unreviewed change"
   rm -f .code-walkthrough-result.json
   branch_line="refs/heads/main $(git rev-parse HEAD) refs/heads/main $(git rev-parse HEAD^)"
   push_tag_ref v1.0.0 "$branch_line"
@@ -152,7 +152,7 @@ push_tag_ref() {
   git tag -a v1.0.0 -m "Release v1.0.0"
   echo "export const d = 4;" >> src/foo.ts
   echo "const y = 4;" >> src/foo.test.ts
-  git add . && git commit -q -m "unreviewed change"
+  git add . && git commit --no-verify -q -m "unreviewed change"
   rm -f .code-walkthrough-result.json
   local tag_sha head_sha prev_sha stdin_file
   tag_sha="$(git rev-parse v1.0.0)"
@@ -171,7 +171,7 @@ push_tag_ref() {
   git tag -a v1.0.0 -m "Release v1.0.0"
   echo "export const e = 5;" >> src/foo.ts
   echo "const z = 5;" >> src/foo.test.ts
-  git add . && git commit -q -m "side branch work"
+  git add . && git commit --no-verify -q -m "side branch work"
   # --no-verify here only simulates pre-existing remote state for the fixture;
   # the hook under test is invoked explicitly via stdin, not by this push.
   git push -q --no-verify origin HEAD:refs/heads/feature/side

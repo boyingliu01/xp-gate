@@ -25,11 +25,11 @@ setup() {
   git config user.name "Test"
   echo "1.0.0.0" > VERSION
   git add VERSION
-  git commit -qm init
+  git commit --no-verify -qm init
   git update-ref ORIG_HEAD "$(git rev-parse HEAD)"
   echo "1.0.0.1" > VERSION
   git add VERSION
-  git commit -qm bump
+  git commit --no-verify -qm bump
   HOOK="$BATS_TEST_DIRNAME/../post-merge"
 }
 
@@ -98,7 +98,7 @@ check_hook_structure() {
 @test "post-merge: skips when VERSION unchanged in merge" {
   echo "same" > other.txt
   git add other.txt
-  git commit -qm "unrelated"
+  git commit --no-verify -qm "unrelated"
   git update-ref ORIG_HEAD "$(git rev-parse HEAD~1)"
 
   mkdir -p scripts

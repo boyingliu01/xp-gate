@@ -51,7 +51,7 @@ setup() {
   git config core.hooksPath /dev/null
   git config user.email t@t.t
   git config user.name t
-  git commit -q --allow-empty -m init
+  git commit --no-verify -q --allow-empty -m init
 
   # Build the token at runtime so this fixture is not itself a committable
   # secret (the fixed Gate 8 correctly flagged a literal ghp_… here).
@@ -78,7 +78,7 @@ setup() {
   git config core.hooksPath /dev/null
   git config user.email t@t.t
   git config user.name t
-  git commit -q --allow-empty -m init
+  git commit --no-verify -q --allow-empty -m init
 
   printf 'const x = 1\n' > ok.ts
   git add ok.ts

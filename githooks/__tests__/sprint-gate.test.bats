@@ -36,7 +36,7 @@ teardown() {
   remove_temp_dir "$TEST_DIR"
 }
 
-# Right after a `git commit`, Windows keeps the temp dir briefly locked (Defender /
+# Right after a `git commit --no-verify`, Windows keeps the temp dir briefly locked (Defender /
 # index writers), and a single `rm -rf` then fails with EBUSY, which bats reports as a
 # test failure even though every assertion passed. Retry with a delay; fail loudly only
 # when the directory is STILL there, so a leak can never be mistaken for cleanup.

@@ -23,7 +23,7 @@ setup() {
   git config core.hooksPath .git/hooks
   echo "seed" > README.md
   git add README.md
-  git commit -q -m "seed"
+  git commit --no-verify -q -m "seed"
   echo "export const value = 1;" > app.ts
   echo "export const other = 2;" > lib.ts
   git add app.ts lib.ts
