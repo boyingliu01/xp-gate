@@ -1359,6 +1359,11 @@ async function diagnoseAsync(refreshEnv = false) {
  */
 async function probeToolInHookEnv(toolName, bashPath, env) {
   const isWindows = process.platform === 'win32';
+  // Interpolation guard (walkthrough FC-04): toolName goes into a shell
+  // command string verbatim. Callers pass internal constants today, but this
+  // function is exported — anything outside the tool-name character set is
+  // rejected fail-closed rather than executed.
+  if (!/^[A-Za-z0-9._-]+$/.test(toolName)) return null;
   const shell = isWindows ? (bashPath || 'bash') : '/bin/sh';
   const inner = `command -v ${toolName}`;
   const cmd = isWindows ? `"${shell}" -c "${inner}"` : `${shell} -c '${inner}'`;
@@ -1465,16 +1470,21 @@ async function queryRegistryPathValue(key) {
  */
 async function readRegistryPath() {
   if (process.platform !== 'win32') {
-    return { supported: false, user: [], machine: [], error: null };
+    return { supported: false, user: [], machine: [], userError: null, machineError: null, error: null };
   }
   const user = await queryRegistryPathValue('HKCU\\Environment');
   const machine = await queryRegistryPathValue(
     'HKLM\\SYSTEM\\CurrentControlSet\\Control\\Session Manager\\Environment'
   );
+  // `error` is the combined view for callers that need a single boolean
+  // ("could I read everything?"); userError/machineError carry the halves
+  // separately so staleness can use partial evidence (walkthrough FC-07).
   return {
     supported: true,
     user: user.entries,
     machine: machine.entries,
+    userError: user.error,
+    machineError: machine.error,
     error: user.error || machine.error || null,
   };
 }
@@ -1492,27 +1502,46 @@ async function readRegistryPath() {
 async function diagnosePathStaleness(checks, options = {}) {
   if (process.platform !== 'win32') return 0;
   const registry = options.registry || (await readRegistryPath());
-  if (registry.error) {
-    // Fail closed: an unreadable registry is not evidence of freshness.
+  // Per-half fail-closed (walkthrough FC-07): a readable hive is still
+  // evidence — discarding it because the OTHER half failed threw away partial
+  // facts. Each half is compared independently; an unreadable half is
+  // reported as an unknown, never as a PASS.
+  const halves = [
+    { label: 'User', entries: registry.user, error: registry.userError },
+    { label: 'Machine', entries: registry.machine, error: registry.machineError },
+  ];
+  const usable = halves.filter((h) => !h.error);
+  const unreadable = halves.filter((h) => h.error);
+
+  let status = 'PASS';
+  const parts = [];
+  let stale;
+  if (usable.length === 0) {
+    // Fail closed: no readable hive is not evidence of freshness.
     checks.push({
       name: 'PATH freshness',
       status: 'WARN',
-      detail: `Could not read the registry PATH (${registry.error}) — staleness unknown. After installing a tool, open a new terminal before trusting any "not found" verdict.`,
+      detail: `Could not read the registry PATH (${halves.map((h) => `${h.label}: ${h.error}`).join('; ')}) — staleness unknown. After installing a tool, open a new terminal before trusting any "not found" verdict.`,
     });
     return 0;
   }
-  const stale = [
-    ...findStalePathEntries(process.env.PATH || '', registry.machine),
-    ...findStalePathEntries(process.env.PATH || '', registry.user),
+  stale = [
+    ...usable.flatMap((h) => findStalePathEntries(process.env.PATH || '', h.entries)),
   ];
+  if (unreadable.length > 0) {
+    status = 'WARN';
+    parts.push(`${unreadable.map((h) => `${h.label} hive unreadable (${h.error}), staleness unknown there`).join('; ')}`);
+  }
   if (stale.length === 0) {
+    parts.unshift(`process PATH matches the readable registry hive${usable.length === 2 ? 's' : ''} (${usable.map((h) => h.label).join(' + ')})`);
     checks.push({
       name: 'PATH freshness',
-      status: 'PASS',
-      detail: 'process PATH matches the registry (User + Machine)',
+      status,
+      detail: parts.join(' — '),
     });
     return 0;
   }
+  status = 'WARN';
   // Which gate tools does THIS terminal lose to staleness? A tool visible in
   // the hook env only under the registry PATH is "installed but invisible" —
   // never "not installed".
@@ -1534,11 +1563,12 @@ async function diagnosePathStaleness(checks, options = {}) {
   const preview = stale.length <= 3
     ? stale.join(' ; ')
     : `${stale.slice(0, 3).join(' ; ')} ; …+${stale.length - 3} more`;
+  parts.unshift(`PATH is stale — ${stale.length} registry entr${stale.length === 1 ? 'y' : 'ies'} invisible to this process (${preview})`);
   checks.push({
     name: 'PATH freshness',
     status: 'WARN',
-    detail: `PATH is stale — ${stale.length} registry entr${stale.length === 1 ? 'y' : 'ies'} invisible to this process (${preview}). `
-      + 'A tool installed after this terminal opened needs a NEW terminal — or re-run: xp-gate doctor --refresh-env'
+    detail: parts.join(' — ')
+      + '. A tool installed after this terminal opened needs a NEW terminal — or re-run: xp-gate doctor --refresh-env'
       + (invisible.length ? ` — installed-but-invisible gate tools: ${invisible.join(', ')}` : ''),
   });
   return 0;
@@ -1685,7 +1715,11 @@ async function detectCliToolAsync(toolName, isWindows, options = {}) {
 async function getVersionAsync(execPath, isWindows, options = {}) {
   const bashPath = options.bashPath || null;
   const env = options.env || undefined;
-  if (isWindows && bashPath && /^\/(?:[a-z]\/|usr\/|opt\/|home\/|mingw)/i.test(execPath)) {
+  // POSIX path test: a Git Bash-resolved path starts with '/', a Windows path
+  // never does (drive letter or UNC). Enumerating prefixes (usr/, opt/, /c/)
+  // was tried and leaks: /bin, /sbin, and every mount point outside the list
+  // fall through to cmd.exe, which cannot run them (walkthrough FC-05).
+  if (isWindows && bashPath && execPath.startsWith('/')) {
     const result = await execWithTimeout(
       `"${bashPath}" -c "${execPath} --version 2>/dev/null || ${execPath} -v 2>/dev/null"`,
       { stdio: ['ignore', 'pipe', 'pipe'], env }
