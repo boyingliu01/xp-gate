@@ -282,4 +282,35 @@ describe('Qoder Delphi agent templates (#417)', () => {
       expect(warned()).not.toContain('templates not bundled');
     });
   });
+
+  // #429 item 5: the local-install path had direct test coverage, but the
+  // global wiring (`setupGlobal` -> `deployQoderDelphiAgents(srcDir, HOME_DIR)`)
+  // was only audited at "file exists" level — and the historical miss (#417) was
+  // exactly "local deployed, global did not". This test drives the real
+  // `setupGlobal` under a sandboxed HOME and asserts all three agents land in
+  // `~/.qoder/agents/` bound to the models this version ships. The missing-env
+  // regression it guards: someone re-pointing setupGlobal at a literal path, or
+  // dropping the call entirely, fails here instead of shipping silently.
+  it('deploys all three agents to the real HOME with this version\'s bindings after global setup', async () => {
+    // doctor.js/doctor-tui.js derive their HOME-dependent paths at module load;
+    // dropping them from the cache makes ensureTuiRegistration write inside the
+    // sandbox instead of the developer's real ~/.config/opencode/tui.json.
+    for (const name of ['../doctor.js', '../doctor-tui.js']) {
+      delete require.cache[require.resolve(name)];
+    }
+    const { setupGlobal, readQoderModelId } = require('../init');
+    // setupGlobal consumes the CLI argv array (flag checks downstream).
+    await setupGlobal([]);
+
+    const agentsDir = path.join(tmpHome, '.qoder', 'agents');
+    const shipped = path.join(repoRoot(), 'plugins', 'qoder', 'agents');
+    for (const name of ['delphi-architecture', 'delphi-technical', 'delphi-feasibility']) {
+      const deployed = path.join(agentsDir, `${name}.md`);
+      expect(fs.existsSync(deployed)).toBe(true);
+      // Identical to the bundled template's binding, not merely present: a
+      // stale global copy is the exact failure mode this audit exists for.
+      expect(readQoderModelId(deployed))
+        .toBe(readQoderModelId(path.join(shipped, `${name}.md`)));
+    }
+  });
 });

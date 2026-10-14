@@ -922,4 +922,7 @@ function injectKarpathyPrinciples(projectRoot) {
   }
 }
 
-module.exports = { init, promptBootstrap, installModuleRuntimeDeps, deployQoderDelphiAgents, configureQoderDelphiAgents, readQoderModelId };
+// setupGlobal is exported so the global-install wiring (agents deployed to the
+// real HOME) can be audited under a sandboxed HOME, not just asserted to exist
+// — the historical miss was "local deployed, global did not" (#417, #429).
+module.exports = { init, promptBootstrap, installModuleRuntimeDeps, deployQoderDelphiAgents, configureQoderDelphiAgents, readQoderModelId, setupGlobal };
