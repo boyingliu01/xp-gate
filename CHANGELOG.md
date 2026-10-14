@@ -22,6 +22,7 @@ Sprint B（测试基建批次）：消除「守卫存在但从不运行」这一
 ### Fixed
 
 - **sprint-gate bats 套件卡死（#431 尾巴）**: setup 的 `git commit --allow-empty` 仍会跑宿主全局钩子链——`--no-verify` 修复后套件 25/25（测试断言本身的 JSON 契约修复 `1c6b592a` 已在库）。
+- **run-bats 的 Windows 执行路径（走查 round-3）**: win32 上 `spawn('node_modules/.bin/bats')` 直接 exec 无扩展名 POSIX sh wrapper 必然失败（CreateProcess 不解释 sh 脚本）；且 Windows 绝对路径拼进 bash argv 会被搅乱。修复：win32 走 `bash node_modules/.bin/bats githooks/__tests__`（cwd=仓库根，全相对路径），其余平台不变。**回滚顺序（走查 round-4 FC-ROLLBACK-01 落档）**：若需回滚本批，按① 恢复 package.json 的 `test`/`test:bats` 脚本（`test` 回到 `vitest run`）→ ② 删除 `scripts/run-bats.cjs` 与 6 个守卫测试文件 → ③ 还原 quality-gates.yml 的 Gate 5b step → ④ `git revert` 各提交后跑 `node src/npm-package/scripts/sync-package-content.js --fix` 恢复镜像字节 parity（单个 `git revert` 不保证镜像一致，必须补跑 sync 并以 `bash scripts/check-hook-mirror.sh` 验证）。
 
 ## [0.22.0.0] - 2026-10-14
 
