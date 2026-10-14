@@ -1,0 +1,327 @@
+{
+  "_comment": "Frozen #483 debt: AC references in tests that are not in specification.yaml. May only shrink; new debt fails the guard (AC-483-01).",
+  "generated": "2026-10-14",
+  "files": {
+    "scripts/__tests__/ac-reference-guard.test.cjs": [
+      "AC-483-01",
+      "AC-483-02"
+    ],
+    "scripts/__tests__/archlint-config.test.cjs": [
+      "AC-006-01"
+    ],
+    "scripts/__tests__/build-integrity-mirror.test.cjs": [
+      "AC-010-01"
+    ],
+    "scripts/__tests__/changelog-documented-commands.test.cjs": [
+      "AC-429-05",
+      "AC-488-06",
+      "AC-488-07"
+    ],
+    "scripts/__tests__/cross-platform-ci-mirror.test.cjs": [
+      "AC-010-01"
+    ],
+    "scripts/__tests__/delphi-runner-mirror.test.cjs": [
+      "AC-010-01"
+    ],
+    "scripts/__tests__/errexit-leak-guard.test.cjs": [
+      "AC-489-04"
+    ],
+    "scripts/__tests__/gate-1-biome-noop.test.ts": [
+      "AC-458-01",
+      "AC-458-02"
+    ],
+    "scripts/__tests__/hook-lib-mirror.test.cjs": [
+      "AC-010-02"
+    ],
+    "scripts/__tests__/hook-mirror-parity.test.cjs": [
+      "AC-010-03"
+    ],
+    "scripts/__tests__/in-tree-drift-guards.test.cjs": [
+      "AC-433-01",
+      "AC-433-02",
+      "AC-433-03"
+    ],
+    "scripts/__tests__/package-lock-registry.test.cjs": [
+      "AC-010-04"
+    ],
+    "scripts/__tests__/skills-mirror-parity.test.cjs": [
+      "AC-485-01",
+      "AC-485-03"
+    ],
+    "scripts/__tests__/vitest-config.test.ts": [
+      "AC-005-01",
+      "AC-005-02"
+    ],
+    "scripts/__tests__/worktree-pollution-guard.test.cjs": [
+      "AC-428-01",
+      "AC-428-02",
+      "AC-428-03",
+      "AC-428-04",
+      "AC-428-05",
+      "AC-428-06",
+      "AC-428-07",
+      "AC-428-08"
+    ],
+    "src/npm-package/lib/__tests__/arch.test.js": [
+      "AC-A-05"
+    ],
+    "src/npm-package/lib/__tests__/check-version.test.js": [
+      "AC-001-01",
+      "AC-001-02",
+      "AC-001-03",
+      "AC-001-04",
+      "AC-001-05",
+      "AC-001-06",
+      "AC-001-07",
+      "AC-001-08",
+      "AC-003-01",
+      "AC-003-02",
+      "AC-003-03"
+    ],
+    "src/npm-package/lib/__tests__/doctor-469-hook-env.test.js": [
+      "AC-469-01",
+      "AC-469-02",
+      "AC-469-03",
+      "AC-469-04",
+      "AC-469-05",
+      "AC-469-06"
+    ],
+    "src/npm-package/lib/__tests__/doctor-drift-round2.test.js": [
+      "AC-488-05",
+      "AC-495-07",
+      "AC-495-08",
+      "AC-495-09",
+      "AC-495-10",
+      "AC-495-13"
+    ],
+    "src/npm-package/lib/__tests__/doctor-executed-surface.test.js": [
+      "AC-495-05",
+      "AC-495-14",
+      "AC-495-15",
+      "AC-495-16",
+      "AC-495-17",
+      "AC-495-18",
+      "AC-495-19"
+    ],
+    "src/npm-package/lib/__tests__/doctor-hook-drift.test.js": [
+      "AC-451-01",
+      "AC-451-02",
+      "AC-451-03",
+      "AC-451-04"
+    ],
+    "src/npm-package/lib/__tests__/doctor-machine-mutation.test.js": [
+      "AC-495-20",
+      "AC-502-04",
+      "AC-502-05",
+      "AC-502-06"
+    ],
+    "src/npm-package/lib/__tests__/doctor-module-drift.test.js": [
+      "AC-495-01",
+      "AC-495-02",
+      "AC-495-03",
+      "AC-495-04",
+      "AC-495-05",
+      "AC-495-06"
+    ],
+    "src/npm-package/lib/__tests__/doctor-module-resolution-parity.test.js": [
+      "AC-495-11",
+      "AC-495-12",
+      "AC-495-13",
+      "AC-495-21",
+      "AC-495-22"
+    ],
+    "src/npm-package/lib/__tests__/doctor-path-equivalence.test.js": [
+      "AC-496-01",
+      "AC-496-02",
+      "AC-496-03",
+      "AC-496-04"
+    ],
+    "src/npm-package/lib/__tests__/doctor-repair-boundary.test.js": [
+      "AC-502-01",
+      "AC-502-02",
+      "AC-502-03"
+    ],
+    "src/npm-package/lib/__tests__/doctor.test.js": [
+      "AC-004-01",
+      "AC-004-02",
+      "AC-004-03",
+      "AC-488-08",
+      "AC-488-09"
+    ],
+    "src/npm-package/lib/__tests__/phase-transition.test.js": [
+      "AC-338-01",
+      "AC-338-02",
+      "AC-338-03",
+      "AC-338-04"
+    ],
+    "src/npm-package/lib/__tests__/sprint-audit.test.js": [
+      "AC-AUDIT-01",
+      "AC-AUDIT-02",
+      "AC-AUDIT-03",
+      "AC-AUDIT-04",
+      "AC-AUDIT-05",
+      "AC-AUDIT-06",
+      "AC-AUDIT-07"
+    ],
+    "src/npm-package/lib/__tests__/sprint-state-manager.test.js": [
+      "AC-001-01",
+      "AC-001-02",
+      "AC-001-03"
+    ],
+    "src/npm-package/lib/__tests__/test-alignment.test.ts": [
+      "AC-001-01",
+      "AC-001-02",
+      "AC-001-03",
+      "AC-001-04",
+      "AC-002-01",
+      "AC-002-02",
+      "AC-002-03",
+      "AC-002-04",
+      "AC-002-05",
+      "AC-003-01",
+      "AC-003-02",
+      "AC-003-03",
+      "AC-004-01",
+      "AC-004-02",
+      "AC-004-03",
+      "AC-005-01",
+      "AC-005-02",
+      "AC-005-03",
+      "AC-005-04",
+      "AC-005-05",
+      "AC-005-06",
+      "AC-005-07",
+      "AC-006-01",
+      "AC-006-02",
+      "AC-A-01",
+      "AC-B-01",
+      "AC-HAS-01",
+      "AC-X-01",
+      "AC-X-02",
+      "AC-X-03",
+      "AC-Y-01"
+    ],
+    "src/npm-package/lib/__tests__/update-hooks.test.js": [
+      "AC-265-01",
+      "AC-265-02",
+      "AC-265-03",
+      "AC-265-04",
+      "AC-265-05"
+    ],
+    "src/npm-package/lib/__tests__/upgrade-exec.test.js": [
+      "AC-002-01",
+      "AC-002-02",
+      "AC-002-03"
+    ],
+    "src/npm-package/lib/__tests__/upgrade-skill-sync.test.js": [
+      "AC-332-01",
+      "AC-332-02",
+      "AC-332-03",
+      "AC-332-04",
+      "AC-332-05"
+    ],
+    "src/npm-package/lib/__tests__/upgrade.test.js": [
+      "AC-002-01",
+      "AC-002-02",
+      "AC-002-03",
+      "AC-002-04",
+      "AC-002-05",
+      "AC-002-06",
+      "AC-002-07",
+      "AC-002-08"
+    ],
+    "githooks/__tests__/gate-1-typecheck-command.test.bats": [
+      "AC-436-01",
+      "AC-436-02",
+      "AC-436-03",
+      "AC-436-04",
+      "AC-436-05",
+      "AC-436-06",
+      "AC-436-07",
+      "AC-436-08"
+    ],
+    "githooks/__tests__/gate-10-runtime-error.test.bats": [
+      "AC-475-01",
+      "AC-475-02",
+      "AC-475-03",
+      "AC-475-04"
+    ],
+    "githooks/__tests__/gate-10-verdict.test.bats": [
+      "AC-475-03",
+      "AC-518-01",
+      "AC-518-02",
+      "AC-518-03",
+      "AC-518-04",
+      "AC-518-05",
+      "AC-518-06",
+      "AC-518-07",
+      "AC-518-08",
+      "AC-518-09",
+      "AC-518-10",
+      "AC-518-11",
+      "AC-518-12",
+      "AC-518-13"
+    ],
+    "githooks/__tests__/gate-11-sprint-report.test.bats": [
+      "AC-476-01",
+      "AC-476-02",
+      "AC-476-03",
+      "AC-476-04",
+      "AC-476-05",
+      "AC-476-06",
+      "AC-476-07",
+      "AC-476-08"
+    ],
+    "githooks/__tests__/gate-2-jscpd-run.test.bats": [
+      "AC-477-01",
+      "AC-477-02",
+      "AC-477-03",
+      "AC-477-04",
+      "AC-477-05",
+      "AC-477-06",
+      "AC-477-07",
+      "AC-477-08",
+      "AC-477-09",
+      "AC-477-10"
+    ],
+    "githooks/__tests__/gate-5-no-test-files.test.bats": [
+      "AC-498-01",
+      "AC-498-02",
+      "AC-498-03",
+      "AC-498-04",
+      "AC-498-05",
+      "AC-498-06"
+    ],
+    "githooks/__tests__/issue-507-ccn-threshold.test.bats": [
+      "AC-507-02"
+    ],
+    "githooks/__tests__/issue-507-java-coverage.test.bats": [
+      "AC-507-04"
+    ],
+    "githooks/__tests__/issue-507-wc-java-lint.test.bats": [
+      "AC-507-01"
+    ],
+    "githooks/__tests__/issue-510-mirror-invariant.test.bats": [
+      "AC-510-01",
+      "AC-510-02",
+      "AC-510-03",
+      "AC-510-04"
+    ],
+    "githooks/__tests__/issue-523-python-coverage-parse.test.bats": [
+      "AC-A-03"
+    ],
+    "githooks/__tests__/issue-524-gate11-duration-units.test.bats": [
+      "AC-524-01",
+      "AC-524-02",
+      "AC-524-03",
+      "AC-524-04"
+    ],
+    "githooks/__tests__/issue-527-subdir-multimodule.test.bats": [
+      "AC-A-04"
+    ],
+    "githooks/__tests__/issue-532-gate9-verdict.test.bats": [
+      "AC-475-03",
+      "AC-A-02"
+    ]
+  }
+}
