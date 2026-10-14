@@ -2725,7 +2725,9 @@ async function doctorDelphi(options = {}) {
     : platform === 'claude-code'
       ? path.join(HOME_DIR, '.claude', 'skills', 'delphi-review')
       : path.join(HOME_DIR, '.config', 'opencode', 'skills', 'delphi-review');
-  const bundledSkillDir = path.join(PKG_DIR, 'skills', 'delphi-review');
+  // Injectable for tests (#414 R3 FC-01/FC-02): the empty-bundle branch is a
+  // real failure mode and must be drivable without mutating the package.
+  const bundledSkillDir = options.bundledSkillDir || path.join(PKG_DIR, 'skills', 'delphi-review');
   const sha256 = (p) => require('crypto').createHash('sha256').update(fs.readFileSync(p)).digest('hex');
   const listBundledSkillFiles = (dir, base = dir, out = []) => {
     if (!fs.existsSync(dir)) return out;
@@ -2743,7 +2745,10 @@ async function doctorDelphi(options = {}) {
     const bundledFiles = listBundledSkillFiles(bundledSkillDir);
     if (bundledFiles.length === 0) {
       // An installed copy next to an empty bundle is install corruption —
-      // "0 files match" must never read as healthy (#414 R2 MN-R2-01).
+      // "0 files match" must never read as healthy (#414 R2 MN-R2-01). The
+      // bundled dir ships inside the installed package itself, so an
+      // unreachable one is a broken install, not a transient condition
+      // (#414 R3 FC-05): FAILing is the doctor's job here.
       add('Delphi skill install parity', 'FAIL',
         `bundled skill directory missing or empty: ${bundledSkillDir} — reinstall xp-gate`);
     } else {
