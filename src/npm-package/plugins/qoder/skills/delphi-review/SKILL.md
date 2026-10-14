@@ -432,6 +432,26 @@ WorkBuddy 侧以 Team 型专家团（示例：`delphi-review-team`，安装在 `
 
 **成本**：3 专家合计 x0.17/轮；主理人选 local 会话模型则零 credits。
 
+### 席位 prompt 上限与降序裁剪（强制 — #481）
+
+prompt 字节上限是 **席位×模型路由 属性**，不是全局安全值（2026-10-05 实测：同一网关下
+`g-glm-5.3-flash` 席 32-39KB 连续 6 次断连，他席 36KB 一次通过）。编排规则：
+
+1. **发送前硬闸**：runner 按 expert 条目的 `max_prompt_bytes`（默认 40000 字节，UTF-8 计）
+   拒发超限请求，输出 `error_type: "prompt_budget_exceeded"`。
+2. **失败分类**：响应前断连且字节数超过该席位标定的 `last_pass_bytes` →
+   `error_type: "SIZE_EXCEEDED"`（不是网络故障，重试同一 payload 无意义）；
+   其余失败输出 `network_error` / `retryable_error`，编排层按 `error_type` 字段断言，不解析散文。
+3. **超限时按降序裁剪，每步只做一步**：
+   ① 去附录（探针填充、日志附录、非必需长引用）→ ② 去非本轮 AC 原文 →
+   ③ 去测试清单（枚举 → 计数）→ ④ 拆分两次调用（按 diff 对半，同报告合并）→
+   ⑤ 仍失败 → `PROCESS_BLOCK` 交人裁定。**不得以两席结果冒充 3/3 共识。**
+4. **标定**：上限按「固定语义核心 + 确定性填充附录」构造探针，在
+   `[last_pass, last_fail]` 区间二分 3-5 次测得；记录行含
+   `seat_id × model_id × gateway × max_passing_bytes × measured_at`；
+   模型或网关变更即重标。协议全文与种子标定表见
+   [docs/plans/2026-10-14-sprint-c-design.md](../../docs/plans/2026-10-14-sprint-c-design.md) §2。
+
 ### 共识阈值
 
 | 阈值 | 说明 |

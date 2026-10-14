@@ -66,5 +66,28 @@
     "max_review_rounds": 5,
     "distinct_models_required": true,
     "cross_provider_required": true
-  }
+  },
+
+  "$comment_seat_fields": [
+    "Optional per-seat fields (#481). The prompt ceiling is a seat x model route",
+    "property, not a global constant: max_prompt_bytes (UTF-8 bytes, default 40000)",
+    "is the hard pre-send gate; prompt_calibration carries the measured bounds used",
+    "to classify a pre-response drop as SIZE_EXCEEDED instead of a network fault.",
+    "Recalibrate (binary search 3-5 probes in [last_pass, last_fail]) whenever the",
+    "model or gateway changes. See docs/plans/2026-10-14-sprint-c-design.md section 2.",
+    "Example expert entry:",
+    "  \"architecture\": {",
+    "    \"provider\": \"bailian-tp\",",
+    "    \"model\": \"qwen-plus\",",
+    "    \"seat_id\": \"architecture\",",
+    "    \"max_prompt_bytes\": 26624,",
+    "    \"prompt_calibration\": {",
+    "      \"measured_at\": \"2026-10-05\",",
+    "      \"model_id\": \"qwen-plus\",",
+    "      \"gateway\": \"bailian\",",
+    "      \"last_pass_bytes\": 26624,",
+    "      \"last_fail_bytes\": 36897",
+    "    }",
+    "  }"
+  ]
 }
