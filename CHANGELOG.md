@@ -2,6 +2,28 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.24.0.0] - 2026-10-14
+
+Sprint C（评审链平台适配批次）：Delphi 评审链在 Qoder/DSH 上的结构性断点一次修复——runner 失败可断言、席位上限可标定、平台探测-降级双通道契约成文成工具。整批经四轮外部 Delphi 走查（R1 4C → R2 3/3 APPROVED → R3 1C 测试有效性 → R4 3/3 APPROVED，0 critical）。
+
+### Added
+
+- **席位 prompt 上限标定协议（#481）**: 上限是席位×模型路由属性（实测：同网关下 `g-glm-5.3-flash` 席 32-39KB 连续 6 次断连，他席 36KB 一次通过）。runner 支持 expert 条目可选 `prompt_calibration`（measured_at/model_id/gateway/last_pass_bytes/last_fail_bytes）与 `seat_id`，畸形记录告警忽略绝不静默采信；响应前断连且字节超过标定 `last_pass_bytes` → `error_type: "SIZE_EXCEEDED"`（retryable:false，带 bytes 证据）——替代把系统性上限误报为 `Network error.` 的分类；所有失败输出带可断言 `error_type`。降序裁剪顺序（附录→非本轮 AC 原文→测试清单→拆分调用→PROCESS_BLOCK，不得两席冒充 3/3）固化于设计文档 §2.5 与 SKILL.md；种子标定表随文档落档，模型/网关变更即重标。
+- **`xp-gate doctor delphi`（#414 REQ-3/REQ-6）**: 七检查项——Node≥18、Qoder agent 绑定（缺失/不可解析/过期/重复独立报告，修复路径点名 `delphi-setup`；bundled 模板不可读即 FAIL 不被健康 id 掩盖）、skill 安装 parity（**全 bundle 文件集**逐文件 sha256，含 references/ 与 *.json——B4 类降级不只在 SKILL.md）、runner 三级定位、`.delphi-config.json` ping（三模型互异 + provider 可用）、版本一致性（npm 探测 opt-in，离线永不阻塞）、DSH 就绪（`subagentModelSelection` 持久化设置 + allowedModels≥3 互异；平台默认关闭态为 SKIP 非 FAIL）。
+- **`xp-gate delphi-setup`（#414 REQ-4）**: init「已存在不覆盖」的刻意安全默认让漂移绑定永远修不了——本命令是显式重绑修复路径：三模型互异 + 平台字符集校验、写前备份至 `CONFIG_DIR/backup/delphi-setup-<ts>/`、BOM 容错、完成后强制重载提醒（Qoder 注册表仅会话启动加载）。
+- **install-delphi-review bats 契约套件（#414 R3）**: 沙箱 HOME 黑盒驱动真实脚本 5 例——`--platform` 悬挂值 ERROR 而非静默回落、qoder/opencode 各落对目的地、自动探测仍工作。套件首跑即抓到真 bug：`*.json` glob 不匹配 dotfile，`.delphi-config.json.example`（脚本自己指引用户拷贝）从未被安装。
+- **DSH 双通道契约成文（#443）**: SKILL.md DSH 节新增两层开关探测决策表（工具 schema 暴露 provider 参数 / `list_subagent_models` ≥3 互异 / 运行时兜底报错）+ native/external 同不变量（三专家齐全、requested_model 互异、consensus≥90%、无单专家路径）+ 降级证据（channel/fallback_reason/probe_evidence）落盘 `delphi-reviewed.json`。
+
+### Changed
+
+- **Qoder 双通道契约（#414 REQ-1/REQ-2）**: SKILL.md Qoder 节固化通道决策表——native（Custom Agent 同模型三角色自查）经实测证伪为 distinct-model 证据来源（subagent 派发采纳提示词、丢弃 model 绑定），需契约合规时走 external；`install-delphi-review.sh` 平台感知（`~/.qoder` 存在 → qoder 目的地）+ `--platform` 覆盖参数防双装机器误路由。
+- **runner schema 重试（#414 REQ-5）**: verdict 不合 schema（prose/畸形 JSON，实测 g-qwen3.8-flash 偶发）自动收紧重试**恰好一次**（system prompt 追加显式 JSON schema 重申，温度不变，`retry:1` 标记；二次仍坏如实报错绝不冒充 verdict）；API 失败保留自身 transport 重试循环，两语义不混淆（测试锁定 retries=0 + 单次传输尝试）。
+
+### Fixed
+
+- **失败分类按结构化信号（走查 R1 FC-01）**: `classifySeatFailure` 以 callModelAPI 发出的 `error_kind: "pre_response_drop"` 为主信号（message 字面量仅向后兼容回退），措辞变更不再静默禁用尺寸上限分类；无标定席位满预算断连保持 network_error 类别诚实但追加分位标定指引。
+- **doctor 空洞通过（走查 R2 MN-R2-01 → R3 FC-01）**: 空/缺失 bundle 目录由「0 file(s) match」假健康改为 FAIL（bundle 随安装包本体分发，不可达=安装损坏）；对应分支经可注入 `bundledSkillDir` 直驱测试。
+
 ## [0.23.0.0] - 2026-10-14
 
 Sprint B（测试基建批次）：消除「守卫存在但从不运行」这一结构性缺陷——`.bats` 契约测试接入自动执行路径，四类镜像/规范漂移获得 `npm test` 路径上的常驻守卫。整批经两轮外部 Delphi 走查（Round 1 C 席 REQUEST_CHANGES 驱动修复，Round 2 全席 APPROVED）。
