@@ -486,6 +486,47 @@ function classifySeatFailure({ result, promptBytes, calibration }) {
   return { ...result, error_type: result.retryable ? 'retryable_error' : 'network_error' };
 }
 
+// ── Schema retry (#414 REQ-5) ──────────────────────────────────────────
+// g-qwen3.8-flash occasionally answers in prose or malformed JSON (measured
+// during the 2026-09-17 Qoder walkthrough). One retry whose system prompt
+// restates the JSON schema explicitly recovers those; a same-prompt retry
+// does not. Exactly one: a model that cannot echo the schema after being
+// shown it will not improve on a third attempt.
+const SCHEMA_RESTATEMENT = '\n\n【输出格式强制重申 — 上一次回复无法解析为合法评审 JSON】\n'
+  + '你的回复必须且只能是一个 JSON 对象，不得包含任何解释、markdown 代码块或前后缀文字。字段与类型：\n'
+  + '{\n'
+  + '  "verdict": "APPROVED" | "REQUEST_CHANGES" | "REJECTED",\n'
+  + '  "confidence": <1-10 的整数>,\n'
+  + '  "critical_issues": ["字符串", ...],\n'
+  + '  "major_concerns": ["字符串", ...],\n'
+  + '  "minor_concerns": ["字符串", ...],\n'
+  + '  "summary": "字符串"\n'
+  + '}\n'
+  + '三个 concern 数组的每一项都必须是字符串（可含 "CI-01: " 等前缀），绝不能是对象。';
+
+async function callExpertWithSchemaRetry({ provider, model, systemPrompt, userPrompt, timeoutMs, maxRetries = 2, callFn } = {}) {
+  const call = callFn || callWithRetry;
+  const result = await call(provider, model, systemPrompt, userPrompt, maxRetries, timeoutMs);
+  // An API failure keeps its own retry loop (callWithRetry); the schema path
+  // must not turn an exhausted transport into an extra model round.
+  if (result.error) return result;
+  const parsed = parseExpertVerdict(extractJsonFromResponse(result.content));
+  if (parsed.valid) return { ...result, verdict: parsed.verdict };
+
+  const retryResult = await call(
+    provider, model, systemPrompt + SCHEMA_RESTATEMENT, userPrompt, 0, timeoutMs, 'schema-retry:1',
+  );
+  if (retryResult.error) return { ...retryResult, retry: 1 };
+  const retryParsed = parseExpertVerdict(extractJsonFromResponse(retryResult.content));
+  if (retryParsed.valid) return { ...retryResult, verdict: retryParsed.verdict, retry: 1 };
+  return {
+    error: true,
+    message: `Expert response could not be parsed as a valid verdict after one schema retry: ${parsed.message}`,
+    retry: 1,
+    resolved_model: typeof retryResult.resolved_model === 'string' ? retryResult.resolved_model : result.resolved_model,
+  };
+}
+
 // ── API call ───────────────────────────────────────────────────────────
 async function callModelAPI(providerConfig, model, systemPrompt, userPrompt, options = {}) {
   const url = `${providerConfig.base_url.replace(/\/$/, '')}/chat/completions`;
@@ -749,13 +790,20 @@ async function main() {
     process.exit(1);
   }
 
-  // Call API with retry
+  // Call API with retry; one schema-restating retry recovers malformed JSON
+  // without ever faking a verdict (#414 REQ-5).
   const timeoutMs = resolveTimeoutMs(args, provider);
-  const result = await callWithRetry(provider, expertConfig.model, systemPrompt, userPrompt, 2, timeoutMs);
+  const outcome = await callExpertWithSchemaRetry({
+    provider,
+    model: expertConfig.model,
+    systemPrompt,
+    userPrompt,
+    timeoutMs,
+  });
 
-  if (result.error) {
+  if (outcome.error) {
     const classified = classifySeatFailure({
-      result,
+      result: outcome,
       promptBytes: budget.bytes,
       calibration: seatCalibration.calibration,
     });
@@ -774,18 +822,17 @@ async function main() {
     process.exit(1);
   }
 
-  // Extract JSON from response
-  const verdict = extractJsonFromResponse(result.content);
-
-  if (verdict.parse_error) {
-    console.error(`[delphi-review] WARNING: Could not parse model response as JSON.`);
+  // Extract JSON from response (already parsed-and-validated, possibly after
+  // one schema retry — the retry is surfaced so the evidence is never silent).
+  if (outcome.retry === 1) {
+    console.error('[delphi-review] WARNING: first response was not a valid verdict; accepted after one schema retry (retry:1).');
   }
 
   // Enrich output
-  const output = buildReviewOutput(verdict, args, {
+  const output = buildReviewOutput(outcome.verdict, args, {
     provider: expertConfig.provider,
     requested_model: expertConfig.model,
-    resolved_model: result.resolved_model,
+    resolved_model: outcome.resolved_model,
     // This runner only ever reaches an external provider; local/offline
     // fallbacks are recorded by a different path (#423).
     channel: 'external',
@@ -813,6 +860,8 @@ if (require.main !== module) {
     DEFAULT_PROMPT_BUDGET_BYTES,
     resolveSeatCalibration,
     classifySeatFailure,
+    callExpertWithSchemaRetry,
+    SCHEMA_RESTATEMENT,
     checkNodeVersion,
     callModelAPI,
     callWithRetry,
