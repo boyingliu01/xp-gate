@@ -66,7 +66,7 @@ function topLevelErrexitOffenders(modulePath) {
     // for these scripts; the guard is heuristic and errs toward false PASS on
     // exotic quoting, which the anti-vacuity case below bounds.
     const hash = trimmed.indexOf(' #');
-    if (hash >= 0) line = line.slice(0, line.indexOf(' #'));
+    if (hash >= 0) line = trimmed.slice(0, hash);
 
     // Track subshell depth from the ORIGINAL line's parens (case patterns'
     // lone `)` closes nothing it did not open in practice for these scripts;
