@@ -22,8 +22,11 @@ setup() {
   git init -q
   git config user.email "test@test.com"
   git config user.name "Test"
-  # Silence hooks that the host's global core.hooksPath may run on this commit
-  git commit --allow-empty -m "init" -q >/dev/null 2>&1
+  # Silence hooks that the host's global core.hooksPath may run on this commit.
+  # --no-verify is required, not just polite: the host's global pre-commit runs a
+  # 12-gate suite that takes minutes, which used to make every one of these
+  # tests look hung when bats was run on a machine with xp-gate installed.
+  git commit --allow-empty --no-verify -m "init" -q >/dev/null 2>&1
 
   SPRINT_GATE="$BATS_TEST_DIRNAME/../sprint-gate.sh"
 }
