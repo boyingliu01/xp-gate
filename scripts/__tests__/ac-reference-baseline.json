@@ -1,6 +1,7 @@
 {
-  "_comment": "Frozen #483 debt: AC references in tests that are not in specification.yaml. May only shrink; new debt fails the guard (AC-483-01).",
+  "_comment": "Frozen #483 debt: AC references in tests that are not in specification.yaml. May only shrink; new debt fails the guard (AC-483-01). Pattern widened to \\d{2,} in the round-2 walkthrough fix (feasibility MN-04): letter-named ids like AC-DISCOVERY-001 were invisible to the fixed-width scan.",
   "generated": "2026-10-14",
+  "regenerated": "2026-10-14",
   "files": {
     "scripts/__tests__/ac-reference-guard.test.cjs": [
       "AC-483-01",
@@ -163,10 +164,19 @@
       "AC-AUDIT-06",
       "AC-AUDIT-07"
     ],
+    "src/npm-package/lib/__tests__/sprint-discovery.test.ts": [
+      "AC-DISCOVERY-001"
+    ],
     "src/npm-package/lib/__tests__/sprint-state-manager.test.js": [
       "AC-001-01",
       "AC-001-02",
       "AC-001-03"
+    ],
+    "src/npm-package/lib/__tests__/sprint-status.test.js": [
+      "AC-SPRINTSTATUS-001"
+    ],
+    "src/npm-package/lib/__tests__/sprint-status.test.ts": [
+      "AC-SPRINTSTATUS-001"
     ],
     "src/npm-package/lib/__tests__/test-alignment.test.ts": [
       "AC-001-01",
@@ -194,8 +204,29 @@
       "AC-006-01",
       "AC-006-02",
       "AC-A-01",
+      "AC-ALIGN-001",
+      "AC-ALIGN-002",
+      "AC-ALIGN-003",
+      "AC-ALIGN-004",
+      "AC-ALIGN-005",
+      "AC-ALIGN-006",
+      "AC-ASSERT-001",
       "AC-B-01",
+      "AC-EACH-001",
+      "AC-EACH-002",
+      "AC-FULL-001",
       "AC-HAS-01",
+      "AC-LEGACY-001",
+      "AC-ORPHAN-001",
+      "AC-PUNCT-001",
+      "AC-PUNCT-002",
+      "AC-REPORT-001",
+      "AC-SIMPLE-001",
+      "AC-SKIP-001",
+      "AC-TEST-001",
+      "AC-TEST-002",
+      "AC-TMPL-001",
+      "AC-TODO-001",
       "AC-X-01",
       "AC-X-02",
       "AC-X-03",
@@ -284,6 +315,9 @@
       "AC-477-09",
       "AC-477-10"
     ],
+    "githooks/__tests__/gate-4-severity-count.test.bats": [
+      "AC-DSH-013"
+    ],
     "githooks/__tests__/gate-5-no-test-files.test.bats": [
       "AC-498-01",
       "AC-498-02",
@@ -291,6 +325,18 @@
       "AC-498-04",
       "AC-498-05",
       "AC-498-06"
+    ],
+    "githooks/__tests__/gate-5a-block.test.bats": [
+      "AC-TDD-001"
+    ],
+    "githooks/__tests__/gate-8-staged-scan.test.bats": [
+      "AC-SEC-001"
+    ],
+    "githooks/__tests__/gate-cjs-source-detection.test.bats": [
+      "AC-TDD-002"
+    ],
+    "githooks/__tests__/gate-m2-threshold.test.bats": [
+      "AC-TDD-002"
     ],
     "githooks/__tests__/issue-507-ccn-threshold.test.bats": [
       "AC-507-02"
@@ -322,6 +368,12 @@
     "githooks/__tests__/issue-532-gate9-verdict.test.bats": [
       "AC-475-03",
       "AC-A-02"
+    ],
+    "githooks/__tests__/multilang-subdir-gate1-discovery.test.bats": [
+      "AC-TDD-016"
+    ],
+    "githooks/__tests__/multilang-subdir-gate5a.test.bats": [
+      "AC-TDD-015"
     ]
   }
 }

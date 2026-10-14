@@ -27,26 +27,31 @@ const BATS_DIR = path.join(ROOT, 'githooks', '__tests__');
 const BATS_BIN = path.join(ROOT, 'node_modules', '.bin', 'bats');
 
 function bashAvailable() {
-  // Probing bash itself would need a spawn; instead detect the environments
-  // where bash is known-present: any POSIX platform, or Windows under an
-  // MSYS/Git-Bash session (MSYSTEM set) — which is precisely where the bats
-  // npm wrapper is usable at all.
-  if (process.platform !== 'win32') return true;
-  return Boolean(process.env.MSYSTEM || process.env.SHELL);
+  return new Promise((resolve) => {
+    if (process.platform !== 'win32') return resolve(true);
+    // Real probe (round-2 feasibility): MSYSTEM/SHELL heuristics miss
+    // sessions that have bash but neither variable. `bash -c :` is cheap,
+    // and an async spawn is the reliable channel in sandboxed sessions.
+    const probe = spawn('bash', ['-c', ':'], { stdio: 'ignore' });
+    probe.on('error', () => resolve(false));
+    probe.on('exit', (code) => resolve(code === 0));
+  });
 }
 
-if (!fs.existsSync(BATS_BIN) || !fs.existsSync(BATS_DIR) || !bashAvailable()) {
-  console.log('SKIP test:bats — bash or the bats runner is not available in this environment.');
-  console.log('         The BATS hook contracts still run in CI (quality-gates.yml, Gate 5b).');
-  process.exit(0);
-}
+(async () => {
+  if (!fs.existsSync(BATS_BIN) || !fs.existsSync(BATS_DIR) || !(await bashAvailable())) {
+    console.log('SKIP test:bats — bash or the bats runner is not available in this environment.');
+    console.log('         The BATS hook contracts still run in CI (quality-gates.yml, Gate 5b).');
+    process.exit(0);
+  }
 
-const child = spawn(BATS_BIN, [BATS_DIR], { stdio: 'inherit', cwd: ROOT });
-child.on('exit', (code, signal) => {
-  if (signal) process.exit(1);
-  process.exit(code || 0);
-});
-child.on('error', (err) => {
-  console.error('test:bats could not spawn the runner:', err.message);
-  process.exit(1);
-});
+  const child = spawn(BATS_BIN, [BATS_DIR], { stdio: 'inherit', cwd: ROOT });
+  child.on('exit', (code, signal) => {
+    if (signal) process.exit(1);
+    process.exit(code || 0);
+  });
+  child.on('error', (err) => {
+    console.error('test:bats could not spawn the runner:', err.message);
+    process.exit(1);
+  });
+})();

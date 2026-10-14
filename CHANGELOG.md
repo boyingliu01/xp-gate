@@ -2,6 +2,27 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.23.0.0] - 2026-10-14
+
+Sprint B（测试基建批次）：消除「守卫存在但从不运行」这一结构性缺陷——`.bats` 契约测试接入自动执行路径，四类镜像/规范漂移获得 `npm test` 路径上的常驻守卫。整批经两轮外部 Delphi 走查（Round 1 C 席 REQUEST_CHANGES 驱动修复，Round 2 全席 APPROVED）。
+
+### Added
+
+- **BATS 套件接入 npm test 与 CI（#484，6ebbd5a 事故根因消除）**: 29 个 `.bats` 契约套件此前**没有任何自动执行路径**（npm test 只跑 vitest、CI 零 bats 引用），守卫红了永远无人看见。现在 `npm test = vitest run && npm run test:bats`（TAP 汇总进输出），quality-gates.yml 新增 Gate 5b（ubuntu 上 bats 失败即红 CI）。`test:bats` 经 `scripts/run-bats.cjs` 环境守门：bash+runner 齐备时异步 spawn 并原样透传退出码（CI 永不跳过），缺失时打印显式 SKIP 提示（环境缺口不制造代码假红）。另：全部 29 个套件的 fixture `git commit`（53 处）补齐 `--no-verify`——fixture 断言的是 gate 脚本行为而非宿主钩子链，装了 xp-gate 的机器上全局 pre-commit 曾让套件看似挂死（25 测试 12+ 分钟）；该清扫由 `fixture-hygiene.test.cjs` 常驻断言（防未来裸 commit 回流）。
+- **spec↔test AC 引用完整性守卫（#483）**: 首个交付物就是守卫（R4 评审 MJ-02 警告：只开 issue 不加守卫会重演 6ebbd5a）。扫描全部测试语料的 `AC-<x>-<n>` 引用，以 specification.yaml 的 acceptance_criteria id 为准许集（js-yaml）：新引用不在 spec = 立即红；存量欠账（49 文件 223 处——语料含 npm 镜像测试目录，大于 issue 实测的 97）冻结于 `ac-reference-baseline.json` 且**只减不增**；幽灵条目（引用已消失）必须在同一偿付提交中从基线删除。REQ-457/REQ-478 补 MN-01 来源互引。22 个 REQ 的批量补写为后续可见工作。
+- **技能镜像一致性守卫（#485）**: 6 棵镜像树（每棵 74 文件）对 canonical `skills/` 逐文件字节比对，有意分叉必须显式登记 EXEMPT（不允许静默）。落地时实测 2 棵 qoder 树落后 11 个 SKILL.md（PR #438 事故实例仍在）——先同步修齐再上守卫。
+- **in-tree drift guards（#433）**: ① 镜像字节 parity 守卫纯 Node 实现，文件清单**解析自** `check-hook-mirror.sh`（单一事实源，防双清单漂移）；② 4 个 plugin manifest 的 description 必须同口径，已淘汰的计数文案（10 quality gates / Gate 0-9 / 11 phases）进黑名单防回流；③ 两份 pre-commit 的 SPRINT_GATE_SCRIPT RESOLUTION 标记存在且有序（awk 提取契约）。
+- **errexit 泄漏类级守卫（#520）**: 解析 pre-commit 自身的 source 清单（新模块自动纳入 + 存在性断言防清单腐化 + 下限防解析回归），静态拒绝任何被 source 模块**顶层** `set -e`/`set -o errexit`（#489 的根因是类不是实例：门禁全 PASS 后提交静默死亡）；子 shell 内合法（#489 修复形态）。启发式失败方向经边界测试钉死：case 分支行只会导致过报（安全），多行子 shell 作用域被正确尊重。
+
+### Changed
+
+- **Gate 4 三副本定性落档（#482）**: 审计结论由 `gate4-copy-landscape.test.cjs` 固化——canonical（repo 布局）与 adapters 副本（全局安装布局）为**可达**双副本，依赖 principles 工具的 cwd 发现；`gates/gate-4-principles.sh` 为**死副本**（无任何加载路径，仅安装 README 提及）。不变量：活跃副本不得出现未加引号的字符串 `--config`（#457 word-splitting 缺陷类）；死副本存续期间保持数组形态；反复活断言覆盖 pre-commit/pre-push + 4 个安装脚本。
+- **pre-push Gate MP 补 duration_ms 审计（#521）**: Gate MP（含 principles 全树守卫的 check-hook-mirror.sh）在 #532 批次已 fail-closed 接入 pre-push，#521 的剩余验收仅审计行——现以毫秒端到端计时写入 verdict JSON（负值 clamp；`date` 读数经裸数字校验——BSD date 打印字面 `%3N` 且退出码 0，未校验会炸掉算术并杀死 pre-push）。
+
+### Fixed
+
+- **sprint-gate bats 套件卡死（#431 尾巴）**: setup 的 `git commit --allow-empty` 仍会跑宿主全局钩子链——`--no-verify` 修复后套件 25/25（测试断言本身的 JSON 契约修复 `1c6b592a` 已在库）。
+
 ## [0.22.0.0] - 2026-10-14
 
 Sprint A（门禁可信度批次）：本版把「门禁报 PASS 但门禁本身不可信」的一类结构性缺陷一次清算——修掉的每个洞都配有反空转/反假红测试，且整批经过两轮外部 Delphi 走查（Round 1 REQUEST_CHANGES 驱动修复，Round 2 3/3 APPROVED）。
