@@ -45,7 +45,21 @@ function bashAvailable() {
     process.exit(0);
   }
 
-  const child = spawn(BATS_BIN, [BATS_DIR], { stdio: 'inherit', cwd: ROOT });
+  // On Windows, node_modules/.bin/bats is an extensionless POSIX sh wrapper:
+  // spawning it directly fails (CreateProcess cannot exec a sh script —
+  // round-3 feasibility). Git Bash (whose presence the probe just proved)
+  // interprets it; everywhere else the .bin entry runs natively. Both paths
+  // stay RELATIVE: cwd is ROOT and a Windows absolute path pasted into a
+  // bash argv produces mangled concatenations (`D:/...d:\projects\...`).
+  const args = [BATS_DIR];
+  let cmd = BATS_BIN;
+  if (process.platform === 'win32') {
+    cmd = 'bash';
+    args.unshift('node_modules/.bin/bats');
+    args[1] = 'githooks/__tests__';
+  }
+
+  const child = spawn(cmd, args, { stdio: 'inherit', cwd: ROOT });
   child.on('exit', (code, signal) => {
     if (signal) process.exit(1);
     process.exit(code || 0);
