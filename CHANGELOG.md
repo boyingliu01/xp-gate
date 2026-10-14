@@ -2,6 +2,25 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.22.0.0] - 2026-10-14
+
+Sprint A（门禁可信度批次）：本版把「门禁报 PASS 但门禁本身不可信」的一类结构性缺陷一次清算——修掉的每个洞都配有反空转/反假红测试，且整批经过两轮外部 Delphi 走查（Round 1 REQUEST_CHANGES 驱动修复，Round 2 3/3 APPROVED）。
+
+### Fixed
+
+- **`xp-gate arch` 四层钉版解析器重写（#447）**: 旧实现依赖 `npx -y @archlinter/cli`，每次运行都可能拉到最新版，退出码与规则集随上游漂移；在未装 archlint 的仓库里 `xp-gate arch` 恒失败。新解析器按优先级钉版：xp-gate 自带依赖 → 目标项目本地 node_modules → PATH → `npx --no-install`（**`-y` 已移除**，版本漂移源不复存在）。默认路径 = 钉版内置规则 + baseline 棘轮（有 `.architecture-baseline.json` 时走 `diff --fail-on high`，与 Gate 6 同源机制），无 baseline 时零容忍；旧配置路径保留为显式 opt-in `--use-config <file>`。反空转实证：干净沙盒植入 high 级 CodeClone 判 exit 1 BLOCKED；不可解析 JSON、缺 smells 数组（schema 漂移）、spawn 失败全部 fail-closed。**硬约束遵守**：Gate 6 的 pre-commit 路径未动（全局钩子自带 `run_archlint()` 直调 archlint）。测试 29 → 35 用例。
+- **arch.js 走查 Critical 修复（#447 走查批）**: verdict 解析的 fail-open 漏洞（可解析但缺 `smells` 数组的载荷被读作 0 发现静默 PASS → 改为 parseError fail-closed）；shell 引号转义（含空格/双引号参数）；`\\?\UNC\` 前缀剥离顺序；ENOENT 错误信息覆盖两种安装目标；baseline 棘轮与 pin 边界的契约注释强化。
+- **Gate 9 回退副本补齐 #518 SAST 判定语义（#532）**: #518（v0.21.0）只落在 gate-10.sh 与 TS 入口，三份 legacy `gate-9.sh` 回退副本（`resolveGateScript(9)` 仍可达）保留两个根因：semgrep exit 0 被当"无发现"（semgrep 无 `--error` 时有 ERROR 级发现也 exit 0），CRITICAL/HIGH 词表与 semgrep 实际产出（ERROR/WARNING/INFO）永不相交。三份副本统一移植 #518 语义（severity 解析 + 未知词表 fail-closed + 退出码只代表工具是否跑成），并有逐字节 parity 测试锁定三份副本 + 6 份发布副本。
+- **Gate 5 Python 覆盖率阈值从未生效（#523）**: `coverage report --format=total` 输出裸数字（"97"），钩子却用 `grep -o '[0-9]*%'`（要求字面 % 号）解析——COVERAGE_PERCENT 恒空、80% 阈值分支从未执行，永远只答"Could not determine"。解析与阈值判定抽入 `lib/coverage-total.sh`（被 pre-commit source，可独立单测）：整行必须是裸数字（可选 %），`WARNING: 2 files skipped` 不再误判。
+- **Gate 1 Gradle/CMake 多模块根误判（#527）**: #515 的根标记短路假设"有根标记 = 单项目"，对两个生态按惯例不成立——Gradle 多模块必有根 build.gradle + settings.gradle include，CMake 项目常见根 CMakeLists.txt 只做接线。两者被短路钉死 PROJECT_SUBDIR=""，Gates 1-9 从仓库根跑、扫进子项目源码。新增有界探测（Gradle 读两个文件、CMake 一次 maxdepth-7 prune find）消歧；误判方向保持 ON（#515 默认），绝不产生假 BLOCK。#532 走查修复：CMake 探测的 `-prune` 形式（`-mindepth` 是全局选项会抑制 prune；`-not -path` 只滤输出不阻止遍历）。
+- **Gate 11 计时单位配对（#524）**: 秒级时间戳（`date +%s`）被拿去减毫秒级 gate_start_ms，每次 pre-commit 打印约 -1789830788575s 的时长并流入报告 JSON。与 Gate 9 对齐：末尾毫秒时间戳 + 非负 clamp。
+- **doctor 在钩子环境探测 CLI 工具 + registry PATH fail-closed（#469）**: doctor 用 `where`/cmd.exe 探测，而门禁跑在 `bash -c` 里——两个环境可以对同一工具给出相反答案，doctor 的绿灯不构成对钩子运行环境的承诺。现在钩子环境是权威探测层（bash 存在时**无 fall-through**）；Windows 上对比进程 PATH 与注册表 PATH（registry 读不到时 WARN 而非声称新鲜——fail-closed），registry 独有条目即"装了但本终端看不见"，指路新终端或 `--refresh-env`；新增 `--refresh-env` 旗标以 registry 独有条目重探测。`buildRefreshedPath` 保持进程 PATH 在前、registry 独有条目追加在后——registry 优先会重新解析 bash 本身（System32 WSL stub 可能胜出）并杀死整个探测层，实测教训已写入注释。
+- **机器侧 pytest fail_under 热修入库 + 全局钩子原子替换（#514）**: 机器安装副本（`~/.config/xp-gate/hooks/pre-commit`）携带一段从未入库的 #45 重放热修（从目标仓库 pyproject.toml 读 `tool.coverage.report.fail_under`，替代写死 `--cov=. --cov-fail-under=80`——后者把 tests/ 算进分母，实测 76.49% 假红 BLOCKED）。先原样并入 `githooks/pre-commit`（注释记录因果链）再整体替换机器副本，替换后 doctor 验证 pre-commit/pre-push/post-merge 与全部 lib/ 源零漂移，`--fix` 恢复机器侧缺失的 `lib/coverage-total.sh`。
+
+### Changed
+
+- **delphi 配置激活 whalecloud profile（#465）**: `active_profile: "default"` → `"whalecloud"`。default profile 横跨 dashscope/zhipu/deepseek 三网关，被 DSH delphi-review 工具的单网关约束拒绝（`All experts must share one gateway base_url`）——工具在 default 下**根本无法启动**（有 key 报网关不一致，无 key 报缺 key，均实证）。切换后三座位（s-glm-5.3-flash / g-qwen3.8-flash / g-deepseek-flash）经真实编译加载器验证 LOAD-OK，缺失 key 快速失败不静默降级；根级 `_comment` 记录完整因果链与 `WHALECLOUD_API_KEY` 依赖；脚本调用仍可 `--profile default` 显式选其他 profile。
+
 ## [0.21.0.0] - 2026-10-13
 
 ### Fixed
