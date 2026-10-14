@@ -1481,8 +1481,8 @@ describe('timeout configuration', () => {
       vi.useFakeTimers();
       const { callExpertWithSchemaRetry } = loadModule();
       const calls = [];
-      const callFn = async (_provider, model, systemPrompt, userPrompt, _retries, _timeout, tag) => {
-        calls.push({ model, systemPrompt, userPrompt, tag });
+      const callFn = async (_provider, model, systemPrompt, userPrompt, retries, _timeout, tag) => {
+        calls.push({ model, systemPrompt, userPrompt, retries, tag });
         if (calls.length === 1) {
           return { success: true, content: 'I cannot produce JSON for this.', resolved_model: 'm-a' };
         }
@@ -1501,6 +1501,11 @@ describe('timeout configuration', () => {
         expect(calls[1].systemPrompt).toContain('BASE');
         expect(calls[1].systemPrompt).toMatch(/json/i);
         expect(calls[1].systemPrompt.length).toBeGreaterThan('BASE'.length);
+        // R2 MN-R2-06: the schema path adds exactly one model round with the
+        // transport loop disabled — a comment alone could not lock this down
+        // if the callWithRetry loop semantics ever change.
+        expect(calls[1].retries).toBe(0);
+        expect(calls[1].tag).toBe('schema-retry:1');
         expect(outcome.retry).toBe(1);
         expect(outcome.verdict.verdict).toBe('APPROVED');
       } finally {
