@@ -37,17 +37,17 @@ describe('AC-433-01: hook mirror parity (githooks ↔ npm mirrors, byte-level)',
   // green for the right reason everywhere. The script itself remains the
   // exec-bit + parity authority on CI (Mirror Parity workflow + pre-push via
   // #521), which is where the Git index mode is meaningful.
-  const HOOK_FILES = [
-    'adapter-common.sh', 'gate-3.sh', 'gate-4.sh', 'gate-7.sh', 'gate-8.sh',
-    'gate-9.sh', 'gate-10.sh', 'gate-12-file-hygiene.sh', 'post-merge',
-    'pre-commit', 'pre-push', 'sprint-gate.sh',
-    'lib/coverage-total.sh', 'lib/now-ms.sh', 'lib/jscpd-run.sh',
-    'lib/sprint-gate-report.sh', 'lib/test-failure.sh', 'lib/typecheck.sh',
-    'lib/validate-code-walkthrough.cjs',
-  ];
-  // Root-level copies exist only for the flat githooks/*.sh files (no
-  // subdirectory entries like lib/* — those mirror under hooks/lib/).
-  const ROOT_FILES = HOOK_FILES.filter((f) => !f.includes('/') && !['post-merge', 'pre-commit', 'pre-push'].includes(f));
+  // The file list is PARSED from scripts/check-hook-mirror.sh — the single
+  // source of truth — instead of duplicated here (walkthrough FC-08: two
+  // hand-maintained lists silently diverge the day someone adds a gate).
+  function parsedMirrorList(varName) {
+    const script = fs.readFileSync(path.join(ROOT, 'scripts', 'check-hook-mirror.sh'), 'utf8');
+    const m = script.match(new RegExp(`^${varName}="([^"]*)"`, 'm'));
+    if (!m) throw new Error(`check-hook-mirror.sh no longer defines ${varName} — update this guard`);
+    return m[1].trim().split(/\s+/).filter(Boolean);
+  }
+  const HOOK_FILES = parsedMirrorList('HOOK_MIRROR_FILES');
+  const ROOT_FILES = parsedMirrorList('ROOT_MIRROR_FILES');
 
   function assertByteParity(canonRel, mirrorRel) {
     const canon = path.join(ROOT, canonRel);
