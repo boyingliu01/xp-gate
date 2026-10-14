@@ -1252,7 +1252,7 @@ async function checkAdapters(checks, mode, gitDirPromise) {
  *   D) Env + CLI tools — fully independent, run IN PARALLEL
  *   E) TUI + Skills — independent, run IN PARALLEL
  */
-async function diagnoseAsync() {
+async function diagnoseAsync(refreshEnv = false) {
   const checks = [];
   let issues = 0;
 
@@ -1295,7 +1295,12 @@ async function diagnoseAsync() {
 
   // Group C: Environment checks + CLI tools — fully parallel
   const envPromise = checkEnv(checks);
-  const cliToolsPromise = diagnoseCliToolsAsync(checks);
+  // #469: the tool probes run in the hook environment; --refresh-env swaps in
+  // the registry PATH so "installed but invisible" separates from "not
+  // installed". The staleness check runs always: it is what makes a stale
+  // terminal's green verdict honest.
+  const cliToolsPromise = diagnoseCliToolsAsync(checks, { refreshEnv });
+  const stalenessPromise = diagnosePathStaleness(checks);
 
   // Group D: TUI + Skills (independent)
   const tuiPromise = diagnoseTuiRegistration(checks);
@@ -1320,6 +1325,7 @@ async function diagnoseAsync() {
     adaptersPromise,
     envPromise,
     cliToolsPromise,
+    stalenessPromise,
     tuiPromise,
     skillsPromise,
     driftPromise,
@@ -1336,22 +1342,242 @@ async function diagnoseAsync() {
 }
 
 /**
+ * #469 layer 1: the hook environment is the authoritative visibility test.
+ *
+ * git executes hooks through `bash -c` (Git Bash on Windows, /bin/sh on
+ * POSIX), so whether a gate tool is callable is decided by `command -v`
+ * inside THAT shell — not by `where` in the doctor's cmd.exe, and not by the
+ * doctor's own inherited PATH. Probing any other environment answers a
+ * different question than the one the hook asks, which is exactly how
+ * doctor came to report "healthy" on machines where every hook failed with
+ * "command not found" (#469).
+ *
+ * @param {string} toolName
+ * @param {string|null} bashPath — resolved bash (checkBash), null when absent
+ * @param {NodeJS.ProcessEnv} [env] — environment override (--refresh-env)
+ * @returns {Promise<string|null>} resolved path (bash's POSIX form on Windows) or null
+ */
+async function probeToolInHookEnv(toolName, bashPath, env) {
+  const isWindows = process.platform === 'win32';
+  const shell = isWindows ? (bashPath || 'bash') : '/bin/sh';
+  const inner = `command -v ${toolName}`;
+  const cmd = isWindows ? `"${shell}" -c "${inner}"` : `${shell} -c '${inner}'`;
+  const result = await execWithTimeout(cmd, { stdio: ['ignore', 'pipe', 'pipe'], env });
+  if (!result || !result.stdout) return null;
+  const first = result.stdout.split('\n')[0].trim();
+  return first || null;
+}
+
+/**
+ * Split a Windows PATH-style list into entries. Accepts the raw string the
+ * registry stores (`;`-separated) or an already-split array.
+ */
+function splitPathEntries(rawPath) {
+  if (Array.isArray(rawPath)) return rawPath.filter(Boolean);
+  return String(rawPath || '').split(';').map((s) => s.trim()).filter(Boolean);
+}
+
+/** Normalize a directory for set comparison: trailing separators, slashes, case. */
+function normalizeDirEntry(entry) {
+  return String(entry || '')
+    .replace(/[\\/]+$/, '')
+    .replace(/\//g, '\\')
+    .toLowerCase();
+}
+
+/**
+ * Registry PATH entries the current process cannot see (#469 layer 2).
+ *
+ * On Windows the registry value and the process environment block are two
+ * copies of PATH; anything written to the registry after this process
+ * started is invisible to it (and to every hook it spawns). Such an entry
+ * means "installed, but this terminal is too old to see it" — the false-green
+ * class this issue exists to kill.
+ */
+function findStalePathEntries(processPath, registryEntries) {
+  const visible = new Set(splitPathEntries(processPath).map(normalizeDirEntry));
+  const stale = [];
+  for (const entry of splitPathEntries(registryEntries)) {
+    const norm = normalizeDirEntry(entry);
+    if (!norm || visible.has(norm)) continue;
+    if (stale.some((s) => normalizeDirEntry(s) === norm)) continue;
+    stale.push(entry);
+  }
+  return stale;
+}
+
+/**
+ * The process PATH extended with the registry entries it cannot see.
+ *
+ * Process PATH FIRST, registry-only entries appended: the purpose is not to
+ * simulate a new terminal's resolution order but to make freshly-installed
+ * tools VISIBLE to the probes without disturbing the resolution of the
+ * environment this doctor run is diagnosing. Registry-first was tried and is
+ * wrong: it re-resolves `bash` itself (System32's WSL stub can win), and the
+ * probe layer dies with the shell it meant to use. Resolution-order fidelity
+ * is irrelevant here — a stale entry is already reported by the PATH
+ * freshness check, and `command -v` only needs the directory to be present.
+ */
+function buildRefreshedPath(processPath, registry) {
+  const ordered = [
+    ...splitPathEntries(processPath),
+    ...findStalePathEntries(processPath, registry && registry.machine),
+    ...findStalePathEntries(processPath, registry && registry.user),
+  ];
+  const out = [];
+  const seen = new Set();
+  for (const entry of ordered) {
+    const norm = normalizeDirEntry(entry);
+    if (!norm || seen.has(norm)) continue;
+    seen.add(norm);
+    out.push(entry);
+  }
+  return out.join(';');
+}
+
+/**
+ * Extract the Path value from `reg query <key> /v Path` output:
+ *   "    Path    REG_EXPAND_SZ    C:\a;C:\b"
+ * Returns null when the value line is absent (bad key, wrong value name).
+ */
+function parseRegQueryPath(stdout) {
+  const line = String(stdout || '')
+    .split(/\r?\n/)
+    .find((l) => /^\s+Path\s+REG_[A-Z_]+\s+\S/.test(l));
+  if (!line) return null;
+  return line.replace(/^\s+Path\s+REG_[A-Z_]+\s+/, '').trim();
+}
+
+async function queryRegistryPathValue(key) {
+  const result = await execWithTimeout(`reg query "${key}" /v Path`, {
+    stdio: ['ignore', 'pipe', 'pipe'],
+  });
+  if (!result) return { entries: [], error: `reg query failed for ${key}` };
+  const raw = parseRegQueryPath(result.stdout);
+  if (!raw) return { entries: [], error: `no Path value under ${key}` };
+  return { entries: splitPathEntries(raw), error: null };
+}
+
+/**
+ * The persistent PATH from the registry — what a NEW terminal would see.
+ * Fail-closed: an unreadable hive returns `error`, and the caller WARNs
+ * instead of claiming a freshness it cannot know.
+ */
+async function readRegistryPath() {
+  if (process.platform !== 'win32') {
+    return { supported: false, user: [], machine: [], error: null };
+  }
+  const user = await queryRegistryPathValue('HKCU\\Environment');
+  const machine = await queryRegistryPathValue(
+    'HKLM\\SYSTEM\\CurrentControlSet\\Control\\Session Manager\\Environment'
+  );
+  return {
+    supported: true,
+    user: user.entries,
+    machine: machine.entries,
+    error: user.error || machine.error || null,
+  };
+}
+
+/**
+ * #469 layer 2: compare the process PATH against the registry.
+ *
+ * A registry entry the process cannot see means "installed, but this
+ * terminal is too old to see it" — so a "Not found" verdict for a tool that
+ * lives under such an entry is a false claim, and a "✓ All checks passed"
+ * over a stale terminal is a false green. WARN, not FAIL: the machine may
+ * be perfectly healthy; only this terminal is stale, and the remedy is a
+ * new terminal (or `xp-gate doctor --refresh-env`).
+ */
+async function diagnosePathStaleness(checks, options = {}) {
+  if (process.platform !== 'win32') return 0;
+  const registry = options.registry || (await readRegistryPath());
+  if (registry.error) {
+    // Fail closed: an unreadable registry is not evidence of freshness.
+    checks.push({
+      name: 'PATH freshness',
+      status: 'WARN',
+      detail: `Could not read the registry PATH (${registry.error}) — staleness unknown. After installing a tool, open a new terminal before trusting any "not found" verdict.`,
+    });
+    return 0;
+  }
+  const stale = [
+    ...findStalePathEntries(process.env.PATH || '', registry.machine),
+    ...findStalePathEntries(process.env.PATH || '', registry.user),
+  ];
+  if (stale.length === 0) {
+    checks.push({
+      name: 'PATH freshness',
+      status: 'PASS',
+      detail: 'process PATH matches the registry (User + Machine)',
+    });
+    return 0;
+  }
+  // Which gate tools does THIS terminal lose to staleness? A tool visible in
+  // the hook env only under the registry PATH is "installed but invisible" —
+  // never "not installed".
+  const bash = checkBash();
+  const bashPath = bash.ok ? bash.path : null;
+  const refreshedPath = buildRefreshedPath(process.env.PATH || '', registry);
+  const invisible = [];
+  if (bashPath) {
+    await Promise.all(GATE_CLI_TOOLS.map(async (entry) => {
+      const now = await probeToolInHookEnv(entry.tool, bashPath);
+      if (now) return;
+      const refreshed = await probeToolInHookEnv(entry.tool, bashPath, {
+        ...process.env,
+        PATH: refreshedPath,
+      });
+      if (refreshed) invisible.push(`${entry.tool} → ${refreshed}`);
+    }));
+  }
+  const preview = stale.length <= 3
+    ? stale.join(' ; ')
+    : `${stale.slice(0, 3).join(' ; ')} ; …+${stale.length - 3} more`;
+  checks.push({
+    name: 'PATH freshness',
+    status: 'WARN',
+    detail: `PATH is stale — ${stale.length} registry entr${stale.length === 1 ? 'y' : 'ies'} invisible to this process (${preview}). `
+      + 'A tool installed after this terminal opened needs a NEW terminal — or re-run: xp-gate doctor --refresh-env'
+      + (invisible.length ? ` — installed-but-invisible gate tools: ${invisible.join(', ')}` : ''),
+  });
+  return 0;
+}
+
+/**
  * Async CLI tools check — runs each tool detection with a 3-second timeout
  * using async exec. Tools are checked IN PARALLEL via Promise.allSettled.
  * This mirrors checkCliTool logic but uses async exec for parallelization.
  *
+ * #469: the probe environment is the HOOK environment (`bash -c`), and
+ * `options.refreshEnv` re-probes against the registry PATH — what a freshly
+ * opened terminal would see — so "installed but invisible" is distinguishable
+ * from "not installed".
+ *
  * @param {Array} checks
+ * @param {{refreshEnv?: boolean}} [options]
  * @returns {Promise<number>} issue count
  */
-async function diagnoseCliToolsAsync(checks) {
+async function diagnoseCliToolsAsync(checks, options = {}) {
   let issues = 0;
   const platform = process.platform;
   const isWindows = platform === 'win32';
 
+  const bash = checkBash();
+  const bashPath = bash.ok ? bash.path : null;
+
+  let probeEnv;
+  if (options.refreshEnv && isWindows) {
+    const registry = await readRegistryPath();
+    if (!registry.error) {
+      probeEnv = { ...process.env, PATH: buildRefreshedPath(process.env.PATH || '', registry) };
+    }
+  }
+
   // Build parallel checks for each tool
   const toolChecks = GATE_CLI_TOOLS.map(async (entry) => {
     const toolName = entry.tool;
-    const result = await detectCliToolAsync(toolName, isWindows);
+    const result = await detectCliToolAsync(toolName, isWindows, { bashPath, env: probeEnv });
     return { entry, toolName, result };
   });
 
@@ -1388,13 +1614,33 @@ async function diagnoseCliToolsAsync(checks) {
  * Async CLI tool detection — mirrors checkCliTool but uses async exec
  * with a hard 3-second timeout per subprocess call.
  *
+ * #469: when bash is available the hook environment (`bash -c 'command -v'`)
+ * is AUTHORITATIVE and there is no fall-through: a tool the hook cannot see
+ * must not be reported available, however visible it is to `where` or to a
+ * hardcoded local path. The where/which, direct-exec and local-path tiers
+ * remain only for the no-bash case, where hooks cannot run at all
+ * (checkEnv already FAILs Environment: Bash there).
+ *
  * @param {string} toolName
  * @param {boolean} isWindows
+ * @param {{bashPath?: string|null, env?: NodeJS.ProcessEnv}} [options]
  * @returns {Promise<{available: boolean, version?: string, path?: string}>}
  */
-async function detectCliToolAsync(toolName, isWindows) {
+async function detectCliToolAsync(toolName, isWindows, options = {}) {
+  const bashPath = options.bashPath || null;
+  const env = options.env || undefined;
+
+  if (bashPath) {
+    const hookEnvPath = await probeToolInHookEnv(toolName, bashPath, env);
+    if (hookEnvPath) {
+      const version = await getVersionAsync(hookEnvPath, isWindows, { bashPath, env });
+      return { available: true, path: hookEnvPath, version };
+    }
+    return { available: false };
+  }
+
   const shell = isWindows ? 'cmd.exe' : '/bin/sh';
-  const execOpts = { encoding: 'utf8', stdio: ['pipe', 'pipe', 'pipe'], shell, timeout: EXEC_TIMEOUT_MS };
+  const execOpts = { encoding: 'utf8', stdio: ['pipe', 'pipe', 'pipe'], shell, timeout: EXEC_TIMEOUT_MS, env };
 
   // Step 1: Locate tool via which/where (async, 3s timeout)
   const locator = isWindows ? 'where' : 'which';
@@ -1431,12 +1677,25 @@ async function detectCliToolAsync(toolName, isWindows) {
 
 /**
  * Get version string from a tool path using async exec with 3s timeout.
+ *
+ * #469: a path resolved inside Git Bash is a POSIX path (`/c/...`), which
+ * cmd.exe cannot execute — so the version probe stays in the shell that
+ * resolved the path instead of failing with a misleading ENOENT.
  */
-async function getVersionAsync(execPath, isWindows) {
+async function getVersionAsync(execPath, isWindows, options = {}) {
+  const bashPath = options.bashPath || null;
+  const env = options.env || undefined;
+  if (isWindows && bashPath && /^\/(?:[a-z]\/|usr\/|opt\/|home\/|mingw)/i.test(execPath)) {
+    const result = await execWithTimeout(
+      `"${bashPath}" -c "${execPath} --version 2>/dev/null || ${execPath} -v 2>/dev/null"`,
+      { stdio: ['ignore', 'pipe', 'pipe'], env }
+    );
+    return result && result.stdout ? result.stdout.split('\n')[0] : undefined;
+  }
   const fallbackCmd = isWindows
     ? `"${execPath}" --version`
     : `"${execPath}" --version 2>/dev/null || "${execPath}" -v 2>/dev/null`;
-  const result = await execWithTimeout(fallbackCmd);
+  const result = await execWithTimeout(fallbackCmd, { env });
   return result && result.stdout ? result.stdout.split('\n')[0] : undefined;
 }
 
@@ -2064,7 +2323,7 @@ function diagnoseLanguageTools() {
 // #488: an unrecognised flag used to be silently ignored — the npm release
 // that predates --sync-hooks made "doctor --sync-hooks" a silent no-op and the
 // user believed a sync had happened. Fail loudly instead.
-const KNOWN_FLAGS = ['--fix', '--sync-hooks', '--force', '--install-tools', '--json', '--format'];
+const KNOWN_FLAGS = ['--fix', '--sync-hooks', '--force', '--install-tools', '--json', '--format', '--refresh-env'];
 
 /**
  * The accepted flag surface of `doctor`, as a pure function.
@@ -2097,6 +2356,10 @@ function doctorFlagContract(args) {
   // Installing a toolchain changes the machine, not the repository, so it is
   // never a side effect of --fix (#502). --fix reports the missing tools.
   const installToolsFlag = args.includes('--install-tools');
+  // #469: re-probe CLI tools against the registry PATH (what a freshly opened
+  // terminal would see) instead of this process's possibly-stale snapshot.
+  // Read-only: it changes the probe environment, never the machine.
+  const refreshEnv = args.includes('--refresh-env');
   const jsonMode = args.includes('--json') || (args.includes('--format') && formatValue === 'json');
   if (args.includes('--format') && !['json', 'text'].includes(formatValue)) {
     errors.push(`Unknown --format value: ${formatValue || '(none)'} — expected json or text`);
@@ -2118,11 +2381,11 @@ function doctorFlagContract(args) {
     errors.push('--install-tools is only read by --fix, and it is the only flag that installs toolchains onto this machine');
     errors.push('Pass --fix --install-tools, or drop --install-tools');
   }
-  return { errors, fixMode, syncHooks, force, installToolsFlag, jsonMode };
+  return { errors, fixMode, syncHooks, force, installToolsFlag, jsonMode, refreshEnv };
 }
 
 async function doctor(args) {
-  const { errors, fixMode, syncHooks, force, installToolsFlag, jsonMode } = doctorFlagContract(args);
+  const { errors, fixMode, syncHooks, force, installToolsFlag, jsonMode, refreshEnv } = doctorFlagContract(args);
   if (errors.length > 0) {
     for (const error of errors) console.error(error);
     return 1;
@@ -2206,7 +2469,7 @@ async function doctor(args) {
 
   // Global timeout wrapper — ensures doctor completes within GLOBAL_DIAGNOSIS_TIMEOUT_MS
   // even if network/subprocess checks stack up (fix #348: 43s on Windows).
-  const diagnosisPromise = diagnoseAsync();
+  const diagnosisPromise = diagnoseAsync(refreshEnv);
   let diagnosisTimer = null;
   const timeoutPromise = new Promise((resolve) => {
     diagnosisTimer = setTimeout(() => resolve({ checks: [{ name: 'Diagnosis', status: 'WARN', detail: `Timed out after ${GLOBAL_DIAGNOSIS_TIMEOUT_MS / 1000}s — some checks incomplete` }], issues: 0, timedOut: true }), GLOBAL_DIAGNOSIS_TIMEOUT_MS);
@@ -2375,4 +2638,13 @@ module.exports = {
   checkSpawnCapability,
   execWithTimeout,
   EBUSY_ATTRIBUTION,
+  probeToolInHookEnv,
+  detectCliToolAsync,
+  splitPathEntries,
+  normalizeDirEntry,
+  findStalePathEntries,
+  buildRefreshedPath,
+  parseRegQueryPath,
+  readRegistryPath,
+  diagnosePathStaleness,
 };
