@@ -221,27 +221,24 @@ describe('doctor delphi (#414 REQ-3/REQ-6)', () => {
     expect(code).toBe(1);
   });
 
-  // R2 MN-R2-01: an installed copy compared against an empty/missing bundle is
-  // install corruption, not a healthy "0 files match".
-  it('a missing bundle makes parity FAIL instead of passing vacuously', async () => {
+  // R3 FC-01/FC-02: the empty-bundle branch is driven directly through the
+  // injectable bundledSkillDir — the healthy fixture cannot exercise it, and
+  // an indirect output-shape assertion would pass even without the fix.
+  it('an empty bundled skill directory FAILs parity instead of passing vacuously', async () => {
     healthyHome();
-    // Point the parity check at a home whose bundled copy does not exist by
-    // breaking the bundle source: PKG_DIR is the real package, so instead we
-    // assert via a home where the installed SKILL.md exists but nothing else
-    // and the bundle directory is unreachable. The reachable proxy: bundled
-    // files exist, so simulate by checking the doctor handles an empty bundle
-    // through its own code path — remove all bundled files we can reach.
-    // The bundle lives in PKG_DIR, which tests must not mutate, so this case
-    // is covered by asserting the doctor output explicitly.
-    const logs = [];
-    const logSpy = vi.spyOn(console, 'log').mockImplementation((...args) => logs.push(args.join(' ')));
-    const { doctorDelphi } = require('../doctor');
-    const configPath = writeConfig(path.join(tmpHome, '.delphi-config.json'));
-    await doctorDelphi({ projectDir: tmpHome, configPath, npmLatest: null });
-    logSpy.mockRestore();
-    // The healthy fixture must NOT produce a vacuous "0 file(s)" parity line.
-    const parityLine = logs.find((l) => l.includes('Delphi skill install parity'));
-    expect(parityLine).toBeTruthy();
-    expect(parityLine).not.toContain('0 file(s)');
+    const emptyBundle = fs.mkdtempSync(path.join(require('os').tmpdir(), 'doctor-empty-bundle-'));
+    try {
+      const logs = [];
+      const logSpy = vi.spyOn(console, 'log').mockImplementation((...args) => logs.push(args.join(' ')));
+      const { doctorDelphi } = require('../doctor');
+      const configPath = writeConfig(path.join(tmpHome, '.delphi-config.json'));
+      const code = await doctorDelphi({ projectDir: tmpHome, configPath, npmLatest: null, bundledSkillDir: emptyBundle });
+      logSpy.mockRestore();
+      expect(code).toBe(1);
+      const parityLine = logs.find((l) => l.includes('Delphi skill install parity'));
+      expect(parityLine).toContain('missing or empty');
+    } finally {
+      fs.rmSync(emptyBundle, { recursive: true, force: true });
+    }
   });
 });

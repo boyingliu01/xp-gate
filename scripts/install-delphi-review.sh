@@ -68,7 +68,10 @@ fi
 
 mkdir -p "$SKILL_DEST"
 
-for f in "$SKILL_SRC"/SKILL.md "$SKILL_SRC"/*.json "$SKILL_SRC"/references/*.md; do
+# The example config is a dotfile — *.json does not match it, and the "copy
+# .delphi-config.json.example" instruction below needs it installed (found by
+# the #414 R3 bats suite).
+for f in "$SKILL_SRC"/SKILL.md "$SKILL_SRC"/*.json "$SKILL_SRC"/.delphi-config.json.example "$SKILL_SRC"/references/*.md; do
   [[ -f "$f" ]] || continue
   rel="${f#$SKILL_SRC/}"
   mkdir -p "$(dirname "$SKILL_DEST/$rel")"
