@@ -14,12 +14,21 @@
 const isWindows = process.platform === 'win32';
 const describeWin = isWindows ? describe : describe.skip;
 
+// Walkthrough FC-02: a bare `return` inside it() silently reports PASS on a
+// runner without bash — a false-green in the very suite that guards against
+// false greens. Bash-gated tests must SKIP loudly instead.
+const { execSync } = require('child_process');
+const BASH_AVAILABLE = (() => {
+  try { execSync('bash --version', { stdio: 'ignore' }); return true; } catch { return false; }
+})();
+const itWithBash = BASH_AVAILABLE ? it : it.skip;
+
 describe('doctor hook-env probing (#469)', () => {
   function mod() {
     return require('../doctor');
   }
 
-  it('AC-469-01: a tool the hook env sees is reported with its hook-env path', async () => {
+  itWithBash('AC-469-01: a tool the hook env sees is reported with its hook-env path', async () => {
     const { probeToolInHookEnv } = mod();
     const bashPath = isWindows ? 'bash' : '/bin/sh';
     const p = await probeToolInHookEnv(isWindows ? 'node' : 'sh', bashPath);
@@ -27,16 +36,8 @@ describe('doctor hook-env probing (#469)', () => {
     expect(p.length).toBeGreaterThan(0);
   });
 
-  it('AC-469-01: a tool absent from the hook env returns null — no fall-through', async () => {
-    const { detectCliToolAsync, checkSpawnCapability } = mod();
-    // Bash must exist for the authoritative tier to engage at all; skip
-    // silently otherwise (the no-bash environment is covered by checkEnv).
-    const bash = checkSpawnCapability ? null : null; // eslint-disable-line no-unused-expressions
-    const { execSync } = require('child_process');
-    let bashOk = true;
-    try { execSync('bash --version', { stdio: 'ignore' }); } catch { bashOk = false; }
-    if (!bashOk) return;
-
+  itWithBash('AC-469-01: a tool absent from the hook env returns null — no fall-through', async () => {
+    const { detectCliToolAsync } = mod();
     const result = await detectCliToolAsync('definitely-not-a-real-tool-xyz-469', isWindows, {
       bashPath: 'bash',
     });
@@ -45,11 +46,15 @@ describe('doctor hook-env probing (#469)', () => {
     expect(result.available).toBe(false);
   });
 
-  it('AC-469-01: an installed tool is visible through the hook-env tier', async () => {
-    const { execSync } = require('child_process');
-    let bashOk = true;
-    try { execSync('bash --version', { stdio: 'ignore' }); } catch { bashOk = false; }
-    if (!bashOk) return;
+  it('AC-469-01: tool names outside the allowlist are rejected fail-closed (FC-04)', async () => {
+    const { probeToolInHookEnv } = mod();
+    // Injection guard: shell metacharacters never reach a command string.
+    expect(await probeToolInHookEnv('node; rm -rf /', 'bash')).toBeNull();
+    expect(await probeToolInHookEnv('node$(evil)', 'bash')).toBeNull();
+    expect(await probeToolInHookEnv('', 'bash')).toBeNull();
+  });
+
+  itWithBash('AC-469-01: an installed tool is visible through the hook-env tier', async () => {
     const { detectCliToolAsync } = mod();
     const result = await detectCliToolAsync('node', true, { bashPath: 'bash' });
     expect(result.available).toBe(true);
@@ -116,12 +121,29 @@ describeWin('doctor PATH staleness (#469, Windows-only)', () => {
     const { diagnosePathStaleness } = mod();
     const checks = [];
     await diagnosePathStaleness(checks, {
-      registry: { supported: true, user: [], machine: [], error: 'reg query failed for HKCU\\Environment' },
+      registry: { supported: true, user: [], machine: [], userError: 'reg query failed for HKCU\\Environment', machineError: 'reg query failed for HKLM', error: 'combined' },
     });
     expect(checks).toHaveLength(1);
     expect(checks[0].name).toBe('PATH freshness');
     expect(checks[0].status).toBe('WARN');
-    expect(checks[0].detail).toMatch(/staleness unknown|Could not read the registry PATH/);
+    expect(checks[0].detail).toMatch(/staleness unknown|unreadable/);
+  });
+
+  it('AC-469-04: a readable hive still counts when only the other half fails (FC-07)', async () => {
+    const { diagnosePathStaleness } = mod();
+    // Machine hive readable and matching; user hive unreadable. The verdict
+    // must be WARN (the user half is unknown) but the detail must carry the
+    // machine-half evidence instead of discarding it.
+    const processPath = process.env.PATH || '';
+    const matchingMachine = processPath.split(';').slice(0, 2).join(';');
+    const checks = [];
+    await diagnosePathStaleness(checks, {
+      registry: { supported: true, user: [], machine: matchingMachine.split(';'), userError: 'reg query failed for HKCU\\Environment', machineError: null, error: 'reg query failed for HKCU\\Environment' },
+    });
+    expect(checks).toHaveLength(1);
+    expect(checks[0].status).toBe('WARN');
+    expect(checks[0].detail).toMatch(/User hive unreadable/);
+    expect(checks[0].detail).toMatch(/Machine/);
   });
 
   it('AC-469-03: a matching PATH PASSes with no staleness claim', async () => {
