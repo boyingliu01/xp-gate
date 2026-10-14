@@ -887,7 +887,7 @@ describe('provider calls and provenance', () => {
       'user',
     );
 
-    expect(result).toEqual({ error: true, message: 'Network error.' });
+    expect(result).toEqual({ error: true, error_kind: 'pre_response_drop', message: 'Network error.' });
     expect(JSON.stringify(result)).not.toContain('SECRET_ERROR_NAME');
     expect(JSON.stringify(result)).not.toContain('SECRET_ERROR_MESSAGE');
   });
@@ -1411,6 +1411,33 @@ describe('timeout configuration', () => {
           calibration: null,
         });
         expect(classified.error_type).toBe('network_error');
+      });
+
+      // R1 FC-01: the classification keys on the structured error_kind, not on
+      // the human message — a future rewording of 'Network error.' must not
+      // silently disable the size-ceiling classification.
+      it('a structured error_kind pre_response_drop classifies even with a different message', () => {
+        const { classifySeatFailure } = loadModule();
+        const classified = classifySeatFailure({
+          result: { error: true, error_kind: 'pre_response_drop', message: 'Gateway reset the connection.' },
+          promptBytes: 32081,
+          calibration,
+        });
+        expect(classified.error_type).toBe('SIZE_EXCEEDED');
+        expect(classified.bytes).toBe(32081);
+      });
+
+      // R1 FC-05: an uncalibrated seat dying on a full-budget payload is how
+      // #481 started — keep the class honest but point at the protocol.
+      it('an uncalibrated drop at the default budget keeps network_error but hints at calibration', () => {
+        const { classifySeatFailure, DEFAULT_PROMPT_BUDGET_BYTES } = loadModule();
+        const classified = classifySeatFailure({
+          result: { error: true, error_kind: 'pre_response_drop', message: 'Network error.' },
+          promptBytes: DEFAULT_PROMPT_BUDGET_BYTES,
+          calibration: null,
+        });
+        expect(classified.error_type).toBe('network_error');
+        expect(classified.message).toMatch(/calibrat/i);
       });
 
       it('a retryable failure is never classified as a size ceiling (a retry can still succeed)', () => {
