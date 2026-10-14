@@ -1,5 +1,6 @@
 ---
 name: ralph-loop
+version: 1.0.0
 description: Use when executing Sprint-Flow Phase 2 BUILD, processing one REQ, building the next requirement, iterating with clean context, or requiring full regression per requirement.
 maturity: stable
 ---

@@ -1,5 +1,6 @@
 ---
 name: clipboard-vision
+version: 1.0.0
 description: Use when the user explicitly asks to analyze, describe, OCR, or inspect a single image currently stored in the system clipboard.
 ---
 
