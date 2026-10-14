@@ -125,6 +125,9 @@ specification:
     # ============================================================
     - id: REQ-457
       description: .principlesrc 配置必须真正生效 —— loadConfig 解析并校验配置文件，规则模块在运行时读取生效配置，而非模块加载时固化内置默认值
+      # 来源互引（#483 MN-01）：AC-457-17/18 判据由 githooks/__tests__/
+      # gate-4-*.test.bats 用例反推补录（6ebbd5a 事故的守卫），防两处
+      # gate-4 AC 漂移或重复。
       priority: critical
       acceptance_criteria:
         - id: AC-457-01
@@ -317,6 +320,8 @@ specification:
     - id: REQ-478
       description: Gate 4 必须以调用参数同一基准的目录运行检查器 —— pre-commit 已 cd 进单语言子目录时，
         仓库根相对的 diff 路径会被检查器读成 web/web/...，可用的门禁静默退化为 SKIPPED（#478）
+      # 来源互引（#483 MN-01）：AC-478-01..04 判据由 gate-4-subdir-paths.test.bats
+      # 用例反推补录（edec9f3），防与 REQ-457 的 gate-4 AC 漂移或重复。
       priority: critical
       acceptance_criteria:
         - id: AC-478-01
