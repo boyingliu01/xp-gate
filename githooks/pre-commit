@@ -2299,6 +2299,13 @@ else
   else
   echo "Running coverage check..."
 
+  # Major-2 (Delphi): COV_EXIT aggregates coverage-run failures across ALL
+  # languages in Stage 1. It starts at 0 and each language branch ORs its own
+  # result in (`COV_EXIT=$((COV_EXIT || $?))`), so a later language's success
+  # can never mask an earlier language's subset-run failure. Previously every
+  # branch overwrote COV_EXIT and the last language's status won.
+  COV_EXIT=0
+
   for CURRENT_LANG in $PROJECT_LANGS; do
   ADAPTER_FILE=$(resolve_adapter_path "$CURRENT_LANG")
   if [ "${CURRENT_LANG}" != "unknown" ] && [ -n "$ADAPTER_FILE" ]; then
@@ -2312,13 +2319,13 @@ else
           # If no tests were run (TESTS_SKIPPED=true), skip coverage check entirely.
           if [ "${TESTS_SKIPPED:-false}" = "true" ]; then
             echo "ℹ️  Test run was skipped — skipping coverage check."
-            COV_EXIT=0
+            COV_EXIT=$((COV_EXIT || 0))
           elif [ -f "coverage/coverage-summary.json" ]; then
             echo "TypeScript coverage collected during test run."
-            COV_EXIT=0
+            COV_EXIT=$((COV_EXIT || 0))
           else
             echo "ℹ️  No coverage data produced — test run was skipped (no TS changes)."
-            COV_EXIT=0
+            COV_EXIT=$((COV_EXIT || 0))
           fi
           ;;
         "python")
@@ -2368,7 +2375,13 @@ else
 
             if [ "$PY_STRATEGY" = "skip" ]; then
               echo "ℹ️  Python: no test/source changes — skipping test run (#399)."
-              COV_EXIT=0
+              # Critical-1 (#399): mark the run skipped so Stage 2's
+              # enforce_python_coverage refuses to consume a stale .coverage
+              # left by a prior subset run. Without this flag the gate read the
+              # leftover low-% file and BLOCKED a docs-only commit that changed
+              # no Python. Mirrors the TS branch's TESTS_SKIPPED guard.
+              PY_TEST_SKIPPED=true
+              COV_EXIT=$((COV_EXIT || 0))
             elif [ "$PY_STRATEGY" = "full" ]; then
               if [ "$PY_DEPS_CHANGED" = "1" ]; then
                 echo "ℹ️  Python: dependency manifest changed — running FULL suite (#399)."
@@ -2377,7 +2390,7 @@ else
               fi
               # shellcheck disable=SC2086
               pytest $PY_XDIST_ARGS $PY_COV_SOURCE --cov-fail-under="$PY_COV_FAIL_UNDER" --tb=short
-              COV_EXIT=$?
+              COV_EXIT=$((COV_EXIT || $?))
             else
               # changed-tests | related → resolve the exact targets.
               PY_TARGETS=""
@@ -2399,7 +2412,7 @@ else
                 echo "ℹ️  Python: no related tests found for changed sources — running FULL suite (#399)."
                 # shellcheck disable=SC2086
                 pytest $PY_XDIST_ARGS $PY_COV_SOURCE --cov-fail-under="$PY_COV_FAIL_UNDER" --tb=short
-                COV_EXIT=$?
+                COV_EXIT=$((COV_EXIT || $?))
               else
                 PY_TARGET_COUNT=$(printf '%s\n' "$PY_TARGETS" | grep -c '.' || true)
                 echo "ℹ️  Python: selective run ($PY_STRATEGY) — $PY_TARGET_COUNT target(s):"
@@ -2409,13 +2422,13 @@ else
                 PARTIAL_TEST_RUN=true
                 # shellcheck disable=SC2086
                 pytest $PY_XDIST_ARGS $PY_COV_SOURCE --tb=short $PY_TARGETS
-                COV_EXIT=$?
+                COV_EXIT=$((COV_EXIT || $?))
               fi
             fi
           else
             echo "pytest/coverage not available, running coverage via adapter..."
             run_coverage_output=$(run_coverage 2>&1)
-            COV_EXIT=$?
+            COV_EXIT=$((COV_EXIT || $?))
             echo "$run_coverage_output" | head -30
           fi
           ;;
@@ -2428,30 +2441,30 @@ else
               exit 1
             fi
             echo "Go coverage: $TOTAL_COVERAGE%"
-            COV_EXIT=0
+            COV_EXIT=$((COV_EXIT || 0))
           fi
           ;;
         "shell")
           shell_cov_output=$(run_coverage 2>&1)
-          COV_EXIT=$?
+          COV_EXIT=$((COV_EXIT || $?))
           echo "$shell_cov_output" | head -10
           echo "ℹ️  Shell coverage not typically measured"
           ;;
         *)
           default_cov_output=$(run_coverage 2>&1)
-          COV_EXIT=$?
+          COV_EXIT=$((COV_EXIT || $?))
           echo "$default_cov_output" | head -30
           ;;
       esac
     else
       # Adapter source failed — warn and let Stage 2 attempt file-based enforcement
       echo "⚠️  Could not source ${CURRENT_LANG} adapter from ${ADAPTER_FILE}, will check coverage files directly..."
-      COV_EXIT=0
+      COV_EXIT=$((COV_EXIT || 0))
     fi
   else
     # No adapter available — warn and let Stage 2 attempt file-based enforcement
     echo "⚠️  No adapter found for ${CURRENT_LANG} (searched: ${ADAPTER_DIR}/, ${ADAPTER_DIR}/adapters/, ${PROJECT_GITHOOKS}/adapters/, ${SCRIPT_DIR}/adapters/) — will check coverage files directly..."
-    COV_EXIT=0
+    COV_EXIT=$((COV_EXIT || 0))
   fi
   done  # end for CURRENT_LANG (Stage 1 coverage)
 

@@ -7,7 +7,7 @@ export type {
   MutationRunner,
 } from './types';
 
-export { registerRunner, resolveRunner, runnerRegistry } from './types';
+export { registerRunner, resolveRunner, resolveRunners, runnerRegistry } from './types';
 
 export { StrykerRunner } from './stryker-runner';
 export { MutmutRunner } from './mutmut-runner';

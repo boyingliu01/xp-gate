@@ -23,6 +23,34 @@ detect_arch() {
   esac
 }
 
+# #511 / Major-1 (Delphi): the Windows installer drops gitleaks.exe into
+# ~/.local/bin, but that dir is NOT on Git Bash's default PATH. Without
+# persistence the next commit's `command -v gitleaks` still fails-closed
+# (Gate 8), so "--with-tools installed it" never actually made it usable.
+# Appending `export PATH="$HOME/.local/bin:$PATH"` to the user's shell config
+# makes the install stick across shells. Idempotent: never appends twice.
+persist_gitbash_path() {
+  local bin_dir="$HOME/.local/bin"
+  local export_line="export PATH=\"$bin_dir:\$PATH\""
+  local rc="$HOME/.bashrc"
+
+  # Prefer .bash_profile for a login-only Git Bash, but fall back to .bashrc;
+  # appending to whichever exists (or .bashrc if neither) covers both setups.
+  [ -f "$HOME/.bash_profile" ] && rc="$HOME/.bash_profile"
+
+  if grep -qF "$bin_dir" "$rc" 2>/dev/null; then
+    echo "  ✓ PATH entry already present in $rc"
+    return 0
+  fi
+
+  {
+    printf '\n# XP-Gate: gitleaks install (scripts/install-gitleaks.sh)\n'
+    printf '%s\n' "$export_line"
+  } >> "$rc"
+  echo "  ✓ Persisted PATH in $rc"
+  echo "  Run 'source $rc' in current shells, or open a new terminal."
+}
+
 main() {
   if command -v gitleaks >/dev/null 2>&1; then
     echo "Already installed: $(gitleaks --version 2>/dev/null)"
@@ -67,9 +95,11 @@ main() {
       mv "$WIN_TMP/gitleaks.exe" "$WIN_BIN_DIR/gitleaks.exe"
       rm -rf "$WIN_TMP"
       echo "Installed: $WIN_BIN_DIR/gitleaks.exe"
+      # #511 / Major-1: persist the dir on Git Bash's PATH so the very next
+      # commit (Gate 8, `command -v gitleaks`) succeeds — not just this shell.
+      persist_gitbash_path
       echo ""
-      echo "Add to your PATH (PowerShell):"
-      echo "  \$env:Path += \";\$HOME\\.local\\bin\""
+      echo "Next commit will find gitleaks on PATH (Gate 8, fail-closed #499)."
       return 0
     fi
     rm -rf "$WIN_TMP"
@@ -112,4 +142,7 @@ main() {
   rm -rf "$TMP_DIR"
 }
 
-main "$@"
+# Run as a script; sourcing (bats unit tests) only defines the functions.
+if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then
+  main "$@"
+fi

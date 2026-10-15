@@ -187,6 +187,38 @@ run_enforce() {
   [[ "$output" == *"coverage.py not available"* ]]
 }
 
+# Critical-1 (#399): a skipped Python test run must NOT consume a stale
+# .coverage left by an earlier subset run. Without PY_TEST_SKIPPED the gate
+# read the leftover low-% file and BLOCKED a docs-only commit that changed no
+# Python. The flag short-circuits before coverage.py is ever invoked.
+@test "Critical-1: PY_TEST_SKIPPED skips the check even when a stale low .coverage exists" {
+  [ -f "$LIB" ] || { echo "lib missing"; return 1; }
+  touch "$TEST_DIR/.coverage"
+  write_coverage_stub "12"  # a stale low-% subset file that MUST be ignored
+  run bash -c '
+    cd "$1" || exit 1
+    PATH="$2:$PATH"
+    export PATH
+    # shellcheck disable=SC1091
+    source "$3"
+    PY_TEST_SKIPPED=true
+    enforce_python_coverage
+  ' _ "$TEST_DIR" "$TEST_DIR/bin" "$LIB"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"Test run was skipped — skipping Python coverage check."* ]]
+  [[ "$output" != *"BLOCKED"* ]]
+  [[ "$output" != *"Python coverage:"* ]]
+}
+
+@test "Critical-1: PY_TEST_SKIPPED does not mask a real failure when coverage was enforced" {
+  [ -f "$LIB" ] || { echo "lib missing"; return 1; }
+  touch "$TEST_DIR/.coverage"
+  write_coverage_stub "12"
+  run run_enforce
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"❌ BLOCKED - Python coverage 12% below 80% threshold"* ]]
+}
+
 # ── (c) wiring + anti-vacuity regression guards ──────────────────────────────
 
 @test "anti-vacuity: the old percent-only grep cannot parse a bare number (the #523 defect, pinned)" {

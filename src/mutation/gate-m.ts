@@ -12,8 +12,10 @@ import {
 import { detectAITestCharacteristics } from './detect-ai-test';
 import {
   resolveRunner,
+  resolveRunners,
   registerAllRunners,
   MutationRunOutcome,
+  MutationRunner,
 } from './runners';
 
 // ── Pre-run auto-registration of all language runners ──
@@ -440,10 +442,14 @@ async function runAllRunners(
   const fileScores: Record<string, number | null> = {};
 
   for (const [, files] of Array.from(groups.entries())) {
-    const runner = resolveRunner(path.extname(files[0]));
-    if (!runner) continue;
-
-    if (!await runner.isAvailable()) {
+    const ext = path.extname(files[0]);
+    // #410 fallback: walk ALL runners for the extension in priority order and
+    // use the first one that is actually available. A pure-mutmut environment
+    // (no pytest-gremlins) thus still gets mutation testing instead of a
+    // silent SKIP — the design contract "gremlins 可用→GremlinsRunner，否则
+    // MutmutRunner" is honored here, not by registration order alone.
+    const runner = await resolveFirstAvailable(ext);
+    if (!runner) {
       applyNullScores(files, fileScores);
       continue;
     }
@@ -453,6 +459,18 @@ async function runAllRunners(
   }
 
   return fileScores;
+}
+
+/**
+ * Pick the first AVAILABLE runner for an extension, honoring registration
+ * priority. Returns undefined when no registered runner for the extension is
+ * installed on this machine.
+ */
+async function resolveFirstAvailable(ext: string): Promise<MutationRunner | undefined> {
+  for (const candidate of resolveRunners(ext)) {
+    if (await candidate.isAvailable()) return candidate;
+  }
+  return undefined;
 }
 
 function applyNullScores(files: string[], scores: Record<string, number | null>): void {
