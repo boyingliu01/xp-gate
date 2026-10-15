@@ -3,6 +3,16 @@
 # Gate 1 TypeScript static analysis — the single place that decides HOW a project
 # is type-checked (#436).
 #
+# NOT incremental (deliberately, #534): TypeScript type-checking cannot be
+# reduced to "staged files only". `tsc` has no single-file check mode — it must
+# resolve the whole module graph to report a file's real type errors, so
+# type-checking only the changed files would silently miss "changing B.ts breaks
+# an unchanged caller in A.ts". Pre-commit therefore runs the project's full
+# typecheck (`npm run typecheck` / `npx tsc --noEmit`) every commit. This is the
+# CORRECTNESS-preserving exception to xp-gate's incremental rule: lint (ESLint /
+# Biome) IS incremental (staged files / --staged), but type-check stays full
+# because incremental type-checking would be wrong, not just slower.
+#
 # Before this file, `githooks/pre-commit` and `githooks/adapters/typescript.sh` each
 # hardcoded `npx tsc --noEmit`. Plain tsc cannot resolve `.vue` single-file
 # components, so every `import X from './Foo.vue'` became a TS2307 and a Vue project

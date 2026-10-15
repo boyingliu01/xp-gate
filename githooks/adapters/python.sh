@@ -91,12 +91,50 @@ run_static_analysis() {
       return 0
     fi
   fi
-  # 逐目标调用并聚合退出码（口径见函数头注释）。
-  require_tool mypy "mypy" || return 1
+  # #534: engine selection. mypy is ALWAYS the authoritative engine (determinism —
+  # ty is an alpha, ~70% spec conformance, config-incompatible). ty is used ONLY
+  # as an explicit opt-in accelerator when XP_GATE_TY=1 AND `ty` is installed:
+  #   - XP_GATE_TY=1 + ty present  -> `ty check <target>` (ty's CLI is `ty check`,
+  #     not `ty`; exit 1 = type errors -> BLOCK, exit 2 = config/CLI error -> SKIP)
+  #   - XP_GATE_TY=1 + ty missing   -> SKIP (return 0), never BLOCK: the opt-in
+  #     path must not route through require_tool mypy and false-block a repo that
+  #     opted into ty but lacks mypy (Delphi R1 Critical).
+  #   - XP_GATE_TY unset            -> pure mypy (authoritative), unchanged.
+  # Scope semantics (.xp-gate-mypy-scope / src/ scripts/) are engine-independent
+  # and preserved verbatim below.
+  local _engine=mypy
+  if [ "${XP_GATE_TY:-}" = "1" ]; then
+    if command -v ty >/dev/null 2>&1; then
+      _engine=ty
+      echo "  ⚙  engine: ty (Rust, explicit opt-in via XP_GATE_TY=1) — mypy remains the default"
+    else
+      echo "  ⚠ ty opted in via XP_GATE_TY=1 but `ty` is not installed — SKIPPING type check (no BLOCK)"
+      echo "    install: pip install ty (alpha) or unset XP_GATE_TY to use mypy"
+      return 0
+    fi
+  fi
+  # require_tool mypy only on the authoritative (mypy) engine path: when the
+  # user opted into ty, a missing mypy must NOT false-BLOCK (Delphi R1 Critical).
+  if [ "$_engine" = "mypy" ]; then
+    require_tool mypy "mypy" || return 1
+  fi
   local _mypy_rc=0
   local _mypy_t
   for _mypy_t in "${MYPY_TARGETS[@]}"; do
-    mypy "$_mypy_t" || _mypy_rc=1
+    if [ "$_engine" = "ty" ]; then
+      # ty's CLI is `ty check <path>`, not `ty <path>`. Bare `ty`/`ty check .`
+      # without targets would recurse the whole tree (== the anti `mypy .`
+      # guard #501/#513): targets are always explicit here.
+      local _ty_rc=0
+      ty check "$_mypy_t" >/dev/null 2>&1 || _ty_rc=$?
+      if [ "$_ty_rc" -eq 2 ]; then
+        echo "  ⚠ ty exited $_ty_rc on target '$_mypy_t' (config/CLI error) — SKIPPING, not blocking"
+      elif [ "$_ty_rc" -ne 0 ]; then
+        _mypy_rc=1
+      fi
+    else
+      mypy "$_mypy_t" || _mypy_rc=1
+    fi
   done
   return $_mypy_rc
 }
