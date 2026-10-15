@@ -10,6 +10,7 @@ import {
   runnerRegistry,
   registerAllRunners,
   resolveRunner,
+  resolveRunners,
   StrykerRunner,
   MutmutRunner,
   GoMutantRunner,
@@ -32,11 +33,12 @@ describe('runners/index', () => {
     expect(runnerRegistry).toBeInstanceOf(Map);
   });
 
-  it('registerAllRunners() registers all 4 runners', () => {
+  it('registerAllRunners() registers all 5 runners', () => {
     registerAllRunners();
 
-    expect(runnerRegistry.size).toBe(4);
+    expect(runnerRegistry.size).toBe(5);
     expect(runnerRegistry.has('Stryker')).toBe(true);
+    expect(runnerRegistry.has('pytest-gremlins')).toBe(true);
     expect(runnerRegistry.has('mutmut')).toBe(true);
     expect(runnerRegistry.has('gomutants')).toBe(true);
     expect(runnerRegistry.has('pitest')).toBe(true);
@@ -46,6 +48,7 @@ describe('runners/index', () => {
     registerAllRunners();
 
     expect(runnerRegistry.get('Stryker')).toBeInstanceOf(StrykerRunner);
+    expect(runnerRegistry.get('pytest-gremlins')).toBeDefined();
     expect(runnerRegistry.get('mutmut')).toBeInstanceOf(MutmutRunner);
     expect(runnerRegistry.get('gomutants')).toBeInstanceOf(GoMutantRunner);
     expect(runnerRegistry.get('pitest')).toBeInstanceOf(PitestRunner);
@@ -59,7 +62,7 @@ describe('runners/index', () => {
     it.each([
       ['ts', 'Stryker'],
       ['tsx', 'Stryker'],
-      ['py', 'mutmut'],
+      ['py', 'pytest-gremlins'],
       ['go', 'gomutants'],
       ['java', 'pitest'],
       ['kt', 'pitest'],
@@ -80,6 +83,31 @@ describe('runners/index', () => {
       expect(resolveRunner('rb')).toBeUndefined();
       expect(resolveRunner('swift')).toBeUndefined();
       expect(resolveRunner('')).toBeUndefined();
+    });
+  });
+
+  describe('resolveRunners()', () => {
+    beforeEach(() => {
+      registerAllRunners();
+    });
+
+    it('returns the py runners in registration (priority) order for ".py"', () => {
+      const runners = resolveRunners('.py');
+      expect(runners.map(r => r.name)).toEqual(['pytest-gremlins', 'mutmut']);
+    });
+
+    it('returns a single-element list for extensions with one runner', () => {
+      expect(resolveRunners('.go').map(r => r.name)).toEqual(['gomutants']);
+      expect(resolveRunners('.ts').map(r => r.name)).toEqual(['Stryker']);
+    });
+
+    it('returns an empty list for unknown extensions', () => {
+      expect(resolveRunners('.rb')).toEqual([]);
+    });
+
+    it('handles dot-prefixed extensions', () => {
+      const runners = resolveRunners('.py');
+      expect(runners.length).toBeGreaterThan(1);
     });
   });
 

@@ -90,6 +90,11 @@ export function registerRunner(runner: MutationRunner): void {
 /**
  * Resolve the correct runner for a given file extension.
  * Returns undefined if no runner supports this extension.
+ *
+ * Registration order decides the winner when several runners share an
+ * extension. This is a synchronous fast-path (used by file filtering); the
+ * availability-aware fallback that honors "first AVAILABLE runner" lives in
+ * {@link resolveRunners}.
  */
 export function resolveRunner(ext: string): MutationRunner | undefined {
   const normalized = ext.replace(/^\./, '');
@@ -97,4 +102,19 @@ export function resolveRunner(ext: string): MutationRunner | undefined {
     if (runner.extensions.includes(normalized)) return runner;
   }
   return undefined;
+}
+
+/**
+ * Resolve ALL runners supporting an extension, in registration (priority)
+ * order — e.g. for `.py` that is [pytest-gremlins, mutmut] (#410).
+ *
+ * The gate walks this list and uses the first runner whose `isAvailable()`
+ * returns true, so a pure-mutmut environment (no gremlins installed) still
+ * gets mutation testing instead of a silent SKIP. This is the actual
+ * implementation of the design contract "gremlins 可用 → GremlinsRunner，
+ * 否则 MutmutRunner".
+ */
+export function resolveRunners(ext: string): MutationRunner[] {
+  const normalized = ext.replace(/^\./, '');
+  return Array.from(runnerRegistry.values()).filter(r => r.extensions.includes(normalized));
 }

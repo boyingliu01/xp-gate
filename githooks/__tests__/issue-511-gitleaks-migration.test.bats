@@ -87,3 +87,40 @@ EOF
   run grep -c "windows" "$REPO_ROOT/scripts/install-gitleaks.sh"
   [ "$output" -ge 1 ]
 }
+
+# #511 / Major-1 (Delphi): the Windows install writes gitleaks.exe to
+# ~/.local/bin, which Git Bash does NOT put on PATH by default — so without
+# persistence the next commit still fail-closed on `command -v gitleaks`
+# (Gate 8, #499). persist_gitbash_path() must append the export to the user's
+# shell config exactly once (idempotent).
+@test "#511/Major-1: persist_gitbash_path writes the PATH export once, idempotently" {
+  # shellcheck disable=SC1091
+  source "$REPO_ROOT/scripts/install-gitleaks.sh"
+  export HOME="$TEST_DIR/home"
+  mkdir -p "$HOME"
+
+  run persist_gitbash_path
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"Persisted PATH in"* ]]
+  grep -qF '.local/bin:$PATH' "$HOME/.bashrc"
+
+  # Second call must not duplicate the entry.
+  cp "$HOME/.bashrc" "$HOME/.bashrc.before"
+  run persist_gitbash_path
+  cmp "$HOME/.bashrc" "$HOME/.bashrc.before"
+  [ "$status" -eq 0 ]
+}
+
+@test "#511/Major-1: persist_gitbash_path prefers an existing .bash_profile" {
+  # shellcheck disable=SC1091
+  source "$REPO_ROOT/scripts/install-gitleaks.sh"
+  export HOME="$TEST_DIR/home2"
+  mkdir -p "$HOME"
+  printf '# existing\n' > "$HOME/.bash_profile"
+
+  run persist_gitbash_path
+  [ "$status" -eq 0 ]
+  [[ "$output" == *".bash_profile"* ]]
+  grep -qF '.local/bin:$PATH' "$HOME/.bash_profile"
+  [ ! -f "$HOME/.bashrc" ]
+}

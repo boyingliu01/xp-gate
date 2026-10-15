@@ -119,7 +119,7 @@ describe('MutmutRunner', () => {
     it('should return true when mutmut is installed', async () => {
       vi.mocked(execSync).mockReturnValue('mutmut, version 3.0.0\n');
 
-      const runner = new MutmutRunner();
+      const runner = new MutmutRunner('linux');
       const result = await runner.isAvailable();
       expect(result).toBe(true);
       expect(execSync).toHaveBeenCalledWith('mutmut --version', {
@@ -150,9 +150,11 @@ describe('MutmutRunner', () => {
       const result = await runner.isAvailable();
 
       expect(result).toBe(true);
-      expect(execSync).toHaveBeenNthCalledWith(2, 'wsl mutmut --version', {
+      // #410: win32 route is decided by the WSL probe alone (no native probe).
+      expect(execSync).toHaveBeenCalledTimes(1);
+      expect(execSync).toHaveBeenCalledWith('wsl mutmut --version', {
         stdio: 'pipe',
-        timeout: 5000,
+        timeout: 10000,
       });
     });
 
@@ -205,7 +207,7 @@ describe('MutmutRunner', () => {
       // No existing pyproject.toml
       vi.mocked(existsSync).mockReturnValue(false);
 
-      const runner = new MutmutRunner();
+      const runner = new MutmutRunner('linux');
       const promise = runner.run({
         files: ['src/main.py'],
         timeoutMs: 60000,
@@ -235,14 +237,12 @@ describe('MutmutRunner', () => {
       expect(result.report!.nrOfSurvivedMutants).toBe(29);
     });
 
-    it('should execute native mutmut when native detection succeeds on Windows', async () => {
-      let closeCb: ((code: number | null) => void) | null = null;
+    it('should be unavailable on Windows when WSL is absent even if native mutmut is installed', async () => {
       const mockChild = {
         stdout: { on: vi.fn() },
         stderr: { on: vi.fn() },
-        on: vi.fn((event: string, cb: (code: number | null) => void) => {
-          if (event === 'close') closeCb = cb;
-        }),
+        // Unavailable route: `run()` never spawns, so `close` is never subscribed.
+        on: vi.fn(),
         kill: vi.fn(),
         killed: false,
       };
@@ -254,22 +254,17 @@ describe('MutmutRunner', () => {
       vi.mocked(existsSync).mockReturnValue(false);
 
       const runner = new MutmutRunner('win32');
-      expect(await runner.isAvailable()).toBe(true);
-      const promise = runner.run({
+      // #410: native mutmut on Windows proves nothing about `mutmut run`
+      // (fork()-based). The WSL route decides availability; no WSL → SKIP.
+      expect(await runner.isAvailable()).toBe(false);
+      const outcome = await runner.run({
         files: ['src/main.py'],
         timeoutMs: 60000,
         cwd: 'C:\\work\\project',
       });
-      await waitForSpawn();
-      closeCb!(0);
-      await promise;
 
-      expect(execSync).toHaveBeenCalledTimes(1);
-      expect(spawn).toHaveBeenCalledWith(
-        'mutmut',
-        ['run'],
-        expect.objectContaining({ cwd: 'C:\\work\\project' }),
-      );
+      expect(outcome).toEqual({ report: null, timedOut: false });
+      expect(spawn).not.toHaveBeenCalled();
     });
 
     it('should execute selected WSL route with Linux --cd and Windows host cwd', async () => {
@@ -428,7 +423,7 @@ describe('MutmutRunner', () => {
         expect(vi.mocked(spawn).mock.calls[0]?.[0]).toBe('wsl');
     });
 
-    it('should follow repeated WSL to native availability transitions', async () => {
+    it('should keep the WSL route on Windows even when native mutmut becomes available', async () => {
       const mockChild = {
         stdout: { on: vi.fn() },
         stderr: { on: vi.fn() },
@@ -450,10 +445,13 @@ describe('MutmutRunner', () => {
       const runner = new MutmutRunner('win32');
       expect(await runner.isAvailable()).toBe(true);
       nativeAvailable = true;
+      // #410: even when native `mutmut --version` starts succeeding, the win32
+      // route is decided by WSL alone — native success proves nothing about
+      // `mutmut run` (fork()). The route must NOT flip to native.
       expect(await runner.isAvailable()).toBe(true);
       await runner.run({ files: ['src/main.py'], timeoutMs: 60000, cwd: 'C:\\repo' });
 
-      expect(vi.mocked(spawn).mock.calls[0]?.[0]).toBe('mutmut');
+      expect(vi.mocked(spawn).mock.calls[0]?.[0]).toBe('wsl');
     });
 
     it('should stop spawning after availability transitions to unavailable', async () => {

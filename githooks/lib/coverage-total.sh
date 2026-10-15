@@ -46,6 +46,16 @@ parse_coverage_total() {
 # report reads it after the Stage-2 loop (last writer wins across languages),
 # exactly as the inline branch did.
 enforce_python_coverage() {
+  # Critical-1 (#399): when the test run was skipped (PY_STRATEGY=skip, set in
+  # pre-commit before this Stage-2 function), refuse to consume a stale
+  # .coverage left by an earlier subset run — its low % is meaningless for a
+  # commit that changed no Python and must not BLOCK a docs-only change. This
+  # mirrors the TS branch's TESTS_SKIPPED guard.
+  if [ "${PY_TEST_SKIPPED:-false}" = "true" ]; then
+    echo "ℹ️  Test run was skipped — skipping Python coverage check."
+    return 0
+  fi
+
   if ! command -v coverage &> /dev/null; then
     echo "⚠️  coverage.py not available, cannot enforce Python coverage threshold."
     return 0
