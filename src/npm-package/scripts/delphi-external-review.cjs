@@ -421,6 +421,132 @@ function describePromptBudgetFailure({ bytes, maxBytes, expert }) {
   );
 }
 
+// ── Seat prompt calibration (#481) ─────────────────────────────────────
+// The R1-R4 sprint review proved the ceiling is a seat × model route
+// property: g-glm-5.3-flash dropped 32-39 KB requests six times with
+// "Network error." while the same gateway served 36 KB to a differently
+// routed seat, and a ~60 byte smoke probe on the "dead" seat passed in 7s.
+// The optional per-seat `prompt_calibration` record carries the measured
+// bounds so failures can be classified against evidence instead of guessed.
+function resolveSeatCalibration(expertConfig) {
+  const raw = expertConfig && expertConfig.prompt_calibration;
+  if (raw === undefined) return { calibration: null };
+  const warn = (detail) => {
+    console.error(`[delphi-review] WARNING: prompt_calibration ${detail}; ignoring the record.`);
+  };
+  if (!isPlainObject(raw)) {
+    warn('must be an object');
+    return { calibration: null, warning: 'prompt_calibration_malformed' };
+  }
+  const hasPass = Number.isFinite(raw.last_pass_bytes) && raw.last_pass_bytes > 0;
+  const hasFail = raw.last_fail_bytes === undefined
+    || (Number.isFinite(raw.last_fail_bytes) && raw.last_fail_bytes > 0);
+  const ordered = hasPass && hasFail
+    && (raw.last_fail_bytes === undefined || raw.last_fail_bytes > raw.last_pass_bytes);
+  if (!hasPass || !hasFail || typeof raw.measured_at !== 'string' || raw.measured_at.trim() === '' || !ordered) {
+    warn(raw.last_fail_bytes !== undefined && hasPass && raw.last_fail_bytes <= raw.last_pass_bytes
+      ? 'has last_fail_bytes <= last_pass_bytes'
+      : 'needs measured_at and a finite last_pass_bytes > 0 (last_fail_bytes, if present, must be larger)');
+    return { calibration: null, warning: 'prompt_calibration_malformed' };
+  }
+  return {
+    calibration: {
+      measured_at: raw.measured_at,
+      model_id: typeof raw.model_id === 'string' ? raw.model_id : undefined,
+      gateway: typeof raw.gateway === 'string' ? raw.gateway : undefined,
+      last_pass_bytes: Math.trunc(raw.last_pass_bytes),
+      last_fail_bytes: raw.last_fail_bytes !== undefined ? Math.trunc(raw.last_fail_bytes) : undefined,
+    },
+  };
+}
+
+// Classify a failed expert call. A drop before any response on a payload above
+// the seat's calibrated passing size is a size ceiling, not a transient fault:
+// retrying the same payload cannot succeed, and reporting "Network error."
+// sends operators chasing a cause that is not there (#481). Everything else
+// gets a stable error_type so orchestrators can assert on the class instead of
+// parsing prose.
+function classifySeatFailure({ result, promptBytes, calibration }) {
+  if (!result || !result.error) return result;
+  const threshold = calibration && Number.isFinite(calibration.last_pass_bytes)
+    ? calibration.last_pass_bytes
+    : null;
+  // `error_kind` is the primary signal; the message literal stays as a
+  // backward-compatible fallback for callers that hand-build results.
+  const isPreResponseDrop = !result.retryable
+    && (result.error_kind === 'pre_response_drop' || result.message === 'Network error.');
+  if (isPreResponseDrop && threshold !== null && Number.isFinite(promptBytes) && promptBytes > threshold) {
+    return {
+      ...result,
+      error_type: 'SIZE_EXCEEDED',
+      retryable: false,
+      bytes: promptBytes,
+      calibrated_pass_bytes: threshold,
+      message: `Request dropped before any response: ${promptBytes} bytes exceeds this seat's calibrated passing size `
+        + `(${threshold} bytes). Classified SIZE_EXCEEDED, not a network fault — trim the payload or recalibrate the seat.`,
+    };
+  }
+  if (isPreResponseDrop && threshold === null && Number.isFinite(promptBytes)
+    && promptBytes >= DEFAULT_PROMPT_BUDGET_BYTES) {
+    // No calibration means no evidence to reclassify on — but an uncalibrated
+    // seat dying on a full-budget payload is exactly how #481 started. Keep the
+    // class honest (network_error) and point the operator at the protocol.
+    return {
+      ...result,
+      error_type: 'network_error',
+      bytes: promptBytes,
+      message: `${result.message} Note: this seat has no prompt_calibration record and the payload is at the `
+        + 'default budget — this pattern matches an uncalibrated size ceiling. Recalibrate per the #481 protocol.',
+    };
+  }
+  return { ...result, error_type: result.retryable ? 'retryable_error' : 'network_error' };
+}
+
+// ── Schema retry (#414 REQ-5) ──────────────────────────────────────────
+// g-qwen3.8-flash occasionally answers in prose or malformed JSON (measured
+// during the 2026-09-17 Qoder walkthrough). One retry whose system prompt
+// restates the JSON schema explicitly recovers those; a same-prompt retry
+// does not. Exactly one: a model that cannot echo the schema after being
+// shown it will not improve on a third attempt.
+const SCHEMA_RESTATEMENT = '\n\n【输出格式强制重申 — 上一次回复无法解析为合法评审 JSON】\n'
+  + '你的回复必须且只能是一个 JSON 对象，不得包含任何解释、markdown 代码块或前后缀文字。字段与类型：\n'
+  + '{\n'
+  + '  "verdict": "APPROVED" | "REQUEST_CHANGES" | "REJECTED",\n'
+  + '  "confidence": <1-10 的整数>,\n'
+  + '  "critical_issues": ["字符串", ...],\n'
+  + '  "major_concerns": ["字符串", ...],\n'
+  + '  "minor_concerns": ["字符串", ...],\n'
+  + '  "summary": "字符串"\n'
+  + '}\n'
+  + '三个 concern 数组的每一项都必须是字符串（可含 "CI-01: " 等前缀），绝不能是对象。';
+
+async function callExpertWithSchemaRetry({ provider, model, systemPrompt, userPrompt, timeoutMs, maxRetries = 2, callFn } = {}) {
+  const call = callFn || callWithRetry;
+  const result = await call(provider, model, systemPrompt, userPrompt, maxRetries, timeoutMs);
+  // An API failure keeps its own retry loop (callWithRetry); the schema path
+  // must not turn an exhausted transport into an extra model round.
+  if (result.error) return result;
+  const parsed = parseExpertVerdict(extractJsonFromResponse(result.content));
+  if (parsed.valid) return { ...result, verdict: parsed.verdict };
+
+  const retryResult = await call(
+    // maxRetries=0 means the transport loop runs exactly one attempt
+    // (callWithRetry iterates `attempt <= maxRetries`) — the schema path adds
+    // one model round, never an extra transport-retry chain. The 7th argument
+    // is a tag consumed by injectable callFn stubs in tests.
+    provider, model, systemPrompt + SCHEMA_RESTATEMENT, userPrompt, 0, timeoutMs, 'schema-retry:1',
+  );
+  if (retryResult.error) return { ...retryResult, retry: 1 };
+  const retryParsed = parseExpertVerdict(extractJsonFromResponse(retryResult.content));
+  if (retryParsed.valid) return { ...retryResult, verdict: retryParsed.verdict, retry: 1 };
+  return {
+    error: true,
+    message: `Expert response could not be parsed as a valid verdict after one schema retry: ${parsed.message}`,
+    retry: 1,
+    resolved_model: typeof retryResult.resolved_model === 'string' ? retryResult.resolved_model : result.resolved_model,
+  };
+}
+
 // ── API call ───────────────────────────────────────────────────────────
 async function callModelAPI(providerConfig, model, systemPrompt, userPrompt, options = {}) {
   const url = `${providerConfig.base_url.replace(/\/$/, '')}/chat/completions`;
@@ -530,8 +656,11 @@ async function callModelAPI(providerConfig, model, systemPrompt, userPrompt, opt
     }
     // Deliberately do NOT surface the underlying cause here. Provider errors can
     // carry mutable metadata (tokens, keys, hostnames) that must not leak into the
-    // evidence file; the test suite asserts this redaction. Keep the generic form.
-    return { error: true, message: 'Network error.' };
+    // evidence file; the test suite asserts this redaction. The structured
+    // `error_kind` is what classifySeatFailure keys on — matching the human
+    // message would make every future wording change silently disable the
+    // size-ceiling classification (#414 R1 FC-01).
+    return { error: true, error_kind: 'pre_response_drop', message: 'Network error.' };
   } finally {
     clearTimeout(timeout);
   }
@@ -658,6 +787,9 @@ async function main() {
   const userPrompt = buildUserPrompt(reviewContent, otherExpertsContent, args.round);
 
   // Refuse before the request, not after the gateway kills it.
+  // resolveSeatCalibration already printed its own warning, if any — do not
+  // echo it a second time (#414 R1 MN-03).
+  const seatCalibration = resolveSeatCalibration(expertConfig);
   const budget = checkPromptBudget({
     systemPrompt,
     userPrompt,
@@ -680,33 +812,49 @@ async function main() {
     process.exit(1);
   }
 
-  // Call API with retry
+  // Call API with retry; one schema-restating retry recovers malformed JSON
+  // without ever faking a verdict (#414 REQ-5).
   const timeoutMs = resolveTimeoutMs(args, provider);
-  const result = await callWithRetry(provider, expertConfig.model, systemPrompt, userPrompt, 2, timeoutMs);
+  const outcome = await callExpertWithSchemaRetry({
+    provider,
+    model: expertConfig.model,
+    systemPrompt,
+    userPrompt,
+    timeoutMs,
+  });
 
-  if (result.error) {
+  if (outcome.error) {
+    const classified = classifySeatFailure({
+      result: outcome,
+      promptBytes: budget.bytes,
+      calibration: seatCalibration.calibration,
+    });
     const errorOutput = {
       error: true,
+      error_type: classified.error_type,
       expert_role: args.expert,
-      message: result.message,
-      retryable: result.retryable || false,
+      message: classified.message,
+      retryable: classified.retryable || false,
     };
+    if (classified.bytes !== undefined) {
+      errorOutput.bytes = classified.bytes;
+      errorOutput.calibrated_pass_bytes = classified.calibrated_pass_bytes;
+    }
     console.log(JSON.stringify(errorOutput));
     process.exit(1);
   }
 
-  // Extract JSON from response
-  const verdict = extractJsonFromResponse(result.content);
-
-  if (verdict.parse_error) {
-    console.error(`[delphi-review] WARNING: Could not parse model response as JSON.`);
+  // Extract JSON from response (already parsed-and-validated, possibly after
+  // one schema retry — the retry is surfaced so the evidence is never silent).
+  if (outcome.retry === 1) {
+    console.error('[delphi-review] WARNING: first response was not a valid verdict; accepted after one schema retry (retry:1).');
   }
 
   // Enrich output
-  const output = buildReviewOutput(verdict, args, {
+  const output = buildReviewOutput(outcome.verdict, args, {
     provider: expertConfig.provider,
     requested_model: expertConfig.model,
-    resolved_model: result.resolved_model,
+    resolved_model: outcome.resolved_model,
     // This runner only ever reaches an external provider; local/offline
     // fallbacks are recorded by a different path (#423).
     channel: 'external',
@@ -732,6 +880,10 @@ if (require.main !== module) {
     checkPromptBudget,
     describePromptBudgetFailure,
     DEFAULT_PROMPT_BUDGET_BYTES,
+    resolveSeatCalibration,
+    classifySeatFailure,
+    callExpertWithSchemaRetry,
+    SCHEMA_RESTATEMENT,
     checkNodeVersion,
     callModelAPI,
     callWithRetry,
