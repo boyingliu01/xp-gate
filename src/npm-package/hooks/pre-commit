@@ -235,6 +235,11 @@ source "${AUDIT_SCRIPT_DIR}/lib/coverage-total.sh"
 # unit-testable without executing this hook.
 source "${AUDIT_SCRIPT_DIR}/lib/python-test-selection.sh"
 
+# Issue #534: incremental Python type-check for the pre-commit python branch —
+# staged-only mypy (fast) that complements python.sh's CI-aligned full pass.
+# Kept in a library so the exit-code capture and scope handling are unit-testable.
+source "${AUDIT_SCRIPT_DIR}/lib/python-incremental-typecheck.sh"
+
 # Read max_duration_ms from .xp-gate-config.json (default 7200000 = 2 hours)
 _MAX_DURATION_MS=$(node -e "try{const c=JSON.parse(require('fs').readFileSync('${PROJECT_ROOT_FOR_AUDIT}/.xp-gate-config.json','utf8'));console.log((c.audit&&c.audit.max_duration_ms)||7200000);}catch(e){console.log(7200000);}" 2>/dev/null || echo "7200000")
 
@@ -1308,24 +1313,34 @@ else
       fi
     fi
     
-    # Optional: Type checking with mypy
+    # Optional: Type checking with mypy — INCREMENTAL (fast, staged-only).
+    #
+    # Responsibility boundary (#534):
+    #   * This branch (python case, line ~1316) runs mypy ONLY over the staged
+    #     .py/.pyi files via python_typecheck_incremental — seconds, not a full
+    #     inference pass. Uses --follow-imports=silent so a change to A.py that
+    #     references an unchanged B.py does NOT surface B's pre-existing
+    #     diagnostics; only caller-level signature errors still block. Its exit
+    #     code is captured directly (temp file), NOT through a head|tail pipe,
+    #     which used to swallow mypy's real status (false PASS, #534).
+    #   * python.sh run_static_analysis() (routed via the general branch below)
+    #     is the FULL, CI-aligned mypy pass (src/ scripts/ or .xp-gate-mypy-scope)
+    #     that guarantees "change to B.ts/import graph" cannot slip through the
+    #     incremental blind spot. Both coexist; this one is the fast pre-commit
+    #     path, the full pass is the correctness backstop.
     if command -v mypy &> /dev/null; then
+      # Collect staged .py/.pyi into a bash array (whitespace-safe).
       MYPY_ARGS=()
       while IFS= read -r staged_file; do
         case "$staged_file" in
           *.py|*.pyi) MYPY_ARGS+=("$staged_file") ;;
         esac
       done <<< "$CHANGED_FILES"
-      if [ "${#MYPY_ARGS[@]}" -eq 0 ]; then
-        MYPY_EXIT=0
-      else
-        echo "Running mypy type checking (optional)..."
-        mypy --ignore-missing-imports "${MYPY_ARGS[@]}" 2>&1 | head -20 | tail -10
-        MYPY_EXIT=$?
-      fi
+      python_typecheck_incremental "${MYPY_ARGS[@]}"
+      MYPY_EXIT=$?
       if [ "$MYPY_EXIT" -ne 0 ]; then
         echo ""
-        echo "❌ BLOCKED - MYPI TYPE ERRORS detected"
+        echo "❌ BLOCKED - MYPY TYPE ERRORS detected"
         echo "Fix the type errors above before committing."
         exit 1
       fi
@@ -1342,16 +1357,25 @@ else
     echo "ℹ️  golangci-lint not available — skipping Go linting"
     echo "⏭️  SKIPPED - Code quality (golangci-lint not available)"
   else
-    echo "Running golangci-lint (comprehensive static analysis)..."
-    golangci-lint run 2>&1 | head -30
-    GOLANGCI_EXIT=$?
-    if [ "$GOLANGCI_EXIT" -ne 0 ]; then
-      echo ""
-      echo "❌ BLOCKED - GOLANGCI-LINT ERRORS detected"
-      echo "Fix the lint errors above before committing."
-      exit 1
+    # #534: run golangci-lint over ONLY the staged .go files (incremental),
+    # not the whole repo. `golangci-lint run` with no args scans every package
+    # and dominates pre-commit time on large Go repos. golangci-lint accepts
+    # explicit file targets. No staged .go files -> SKIP (nothing to lint).
+    GO_FILES=$(echo "$CHANGED_FILES" | grep '\.go$' || true)
+    if [ -z "$GO_FILES" ]; then
+      echo "✅ PASSED - No staged Go files to lint."
+    else
+      echo "Running golangci-lint (incremental, staged .go)..."
+      golangci-lint run $GO_FILES 2>&1 | head -30
+      GOLANGCI_EXIT=$?
+      if [ "$GOLANGCI_EXIT" -ne 0 ]; then
+        echo ""
+        echo "❌ BLOCKED - GOLANGCI-LINT ERRORS detected"
+        echo "Fix the lint errors above before committing."
+        exit 1
+      fi
+      echo "✅ PASSED - golangci-lint."
     fi
-    echo "✅ PASSED - golangci-lint."
   fi
     ;;
     
