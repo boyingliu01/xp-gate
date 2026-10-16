@@ -2,6 +2,21 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.27.1.0] - 2026-10-16
+
+Windows doctor 假阴性清算：cmd.exe 高并发探测下 `node --version`/`git --version`/`core.hooksPath` 会以"exit 0 + 空 stdout"的形态丢失输出，doctor 曾据此在健康机器上报 "Not found"。同时修正 bash 版本字段语义与 WSL stub 过滤的路径变体盲区。
+
+### Fixed
+
+- **doctor win32 空流重试（execWithTimeout）**: exit 0 但 stdout/stderr 全空的探测（cmd.exe 在并行 fan-out 下的丢流形态）现在静默重试至多 3 次（50ms 间隔）；非零退出是真实失败判定（cmd.exe 报缺工具即如此），不重试。三次仍空 → 返回 null，与各调用点既有的 null 检查语义一致。副作用型调用可用 `{ attempts: 1 }` 显式退出重试。症状：本机 `xp-gate doctor` 稳定误报 Environment: Node.js / Git / core.hooksPath "Not found"。
+- **checkBash version 字段回归真实 bash 版本号**: Windows 分支此前把 `uname -s` 输出（如 MINGW64_NT-10.0）塞进 `version` 字段，doctor 显示变成 "GNU bash, version MINGW64_NT..."；现在同一非登录探测里取回 `bash --version` 的版本元组（无 sed 依赖，解析在 JS 侧），并拆出可注入 spawner 的 `checkBashVersion()` 供测试钉住契约。
+- **WSL stub 过滤的路径变体盲区**: System32/Sysnative/AppData\Local\Microsoft\WindowsApps 匹配统一做分隔符归一 + 大小写不敏感，补上 SysWOW64（32 位进程的 WSL 别名落点）；仅名字里带 WindowsApps 的用户自装 bash 不再被误杀（改由输出探测裁决）。
+
+### Added
+
+- **doctor-exec-retry 行为测试**: 空流重试/有输出不重试/真失败不重试/attempts 退出/选项不外泄共 6 例；stub 未拦截时 afterEach 大声失败，防止未来 Node 内部 promisify 耦合变化导致测试空转。
+- **windows-bash-probe 扩充**: stub 路径分隔符/大小写/bitness 变体不产生任何 spawn；checkBashVersion 版本元组契约 + 静默降级三态。
+
 ## [0.27.0.0] - 2026-10-16
 
 Sprint F 清算收尾（#522/#420/#392）：删除 clipboard-vision 技能、check-alignment 启动器注入防护与 JSON 输出完整性修复，以及一个 Windows 平台级根因——PATH 上的 `bash` 可能是 WSL System32 stub，现在全部改走权威 MSYS bash。
