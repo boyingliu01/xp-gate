@@ -1,7 +1,7 @@
 # SKILLS/DELPHI-REVIEW KNOWLEDGE BASE
 
 **Generated:** 2026-10-16
-**Commit:** e233495e
+**Commit:** d67e40c8
 **Branch:** main
 **Version:** 0.27.0.0
 
