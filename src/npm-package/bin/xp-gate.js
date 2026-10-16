@@ -87,9 +87,13 @@ function handleUIReview() {
   process.exitCode = result.error ? 1 : (result.status === 0 ? 0 : 1);
 }
 
-function runAlignmentInProcess(specPath, testDirs, outputPath, jsonMode) {
-  const { runFullAlignment } = require('../lib/test-alignment.ts');
+function runAlignmentInProcess(specPath, testDirs, outputPath, jsonMode, runFullAlignment) {
   const { execFileSync } = require('child_process');
+  if (!runFullAlignment) {
+    // Loaded lazily by the caller inside the tsx guard; kept optional so an
+    // in-repo direct call still works.
+    ({ runFullAlignment } = require('../lib/test-alignment.ts'));
+  }
   let headCommit = 'unknown';
   try {
     headCommit = execFileSync('git', ['rev-parse', 'HEAD'], { encoding: 'utf8' }).trim() || 'unknown';
@@ -169,18 +173,24 @@ async function runAlignmentCheck(subargs) {
   // ships zero runtime deps per the zero-install contract). npx self-provisions
   // tsx on demand, so the published command stays functional without adding a dep.
   //
-  // The try guards ONLY the module-load step. The engine invocation must sit
+  // The try guards ONLY the tsx loader's module-load step. The engine call sits
   // outside it: an engine-level failure is a real bug that must surface, not be
   // silently swallowed and misattributed to "tsx unavailable" by the fallback.
+  // Delphi walkthrough R2 CI-02: require('../lib/test-alignment.ts') also needs
+  // the loader, so it belongs INSIDE the guard — if the .ts file itself cannot
+  // load, the npx fallback re-attempts it under a provisioned tsx instead of
+  // crashing with an unhandled exception. Engine EXECUTION stays outside.
+  let runFullAlignment;
   try {
     require('tsx/cjs');
+    ({ runFullAlignment } = require('../lib/test-alignment.ts'));
   } catch (err) {
     if (!err || (err.code !== 'MODULE_NOT_FOUND' && !/Cannot find module/.test(String(err && err.message)))) {
       throw err;
     }
     return runAlignmentViaNpx(runnerPath, specPath, testDirs, outputPath, jsonMode);
   }
-  return runAlignmentInProcess(specPath, testDirs, outputPath, jsonMode);
+  return runAlignmentInProcess(specPath, testDirs, outputPath, jsonMode, runFullAlignment);
 }
 
 const COMMANDS = {
@@ -305,6 +315,12 @@ const COMMANDS = {
       // exitCode, not process.exit(): the in-process --json document must flush
       // its buffered stdout before the process ends (#392 review, MJ-01).
       process.exitCode = code;
+    }).catch(err => {
+      // A quality gate must fail with a deterministic exit code and a real
+      // message — never an unhandled rejection whose code depends on Node's
+      // default mode (Delphi walkthrough R2, MJ-02).
+      console.error('check-alignment: unexpected failure:', err instanceof Error ? err.message : String(err));
+      process.exitCode = 1;
     }),
     usage: 'xp-gate check-alignment [--spec <path>] [--tests <dir>] [--json] [--output <path>]'
   },
