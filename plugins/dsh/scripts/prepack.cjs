@@ -10,8 +10,8 @@
  * plugins/opencode/scripts/prepack.cjs).
  *
  * The skill list is DISCOVERED, not hardcoded: a hardcoded list silently drifts
- * from the repo (it previously shipped 12 of 13, omitting clipboard-vision, and
- * would need editing on every new skill) — see #448.
+ * from the repo (a hardcoded set previously omitted one shipped skill, breaking
+ * parity) — see #448.
  */
 
 const fs = require('fs');
