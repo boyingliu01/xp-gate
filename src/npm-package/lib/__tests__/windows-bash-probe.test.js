@@ -39,10 +39,12 @@ function fakeSpawn(behaviors) {
 
 describe('resolveWindowsBashCandidates (win32 authoritative bash)', () => {
   it('AC-WINBASH-01: rejects a WSL stub whose $1 is empty and uname is Linux', () => {
-    const spawn = fakeSpawn({ 'C:\\Windows\\System32\\bash.exe': '[ ]\nLinux\n' });
-    // No MSYS candidate exists in this world (hardcoded fallbacks report no
-    // stdout), so the resolver must find nothing rather than settle for the stub.
-    expect(resolveWindowsBashCandidates(spawn, fakeWhere('C:\\Windows\\System32\\bash.exe\r\n'))).toBeNull();
+    // The resolver must find nothing rather than settle for the stub — and on
+    // current Windows the System32 stub is skipped by name without even being
+    // spawned (cold-launch stall); this world uses a non-System32 stub to keep
+    // testing the output-based rejection path itself.
+    const spawn = fakeSpawn({ 'C:\\wsl-stub\\bash.exe': '[ ]\nLinux\n' });
+    expect(resolveWindowsBashCandidates(spawn, fakeWhere('C:\\wsl-stub\\bash.exe\r\n'))).toBeNull();
   });
 
   it('AC-WINBASH-01: accepts the first candidate with argv round-trip + MINGW uname', () => {
@@ -52,7 +54,24 @@ describe('resolveWindowsBashCandidates (win32 authoritative bash)', () => {
     });
     const result = resolveWindowsBashCandidates(spawn, fakeWhere('C:\\a\\bash.exe\r\nC:\\b\\bash.exe\r\n'));
     expect(result).toBe('C:\\b\\bash.exe');
-    expect(spawn.probed.slice(0, 2)).toEqual(['C:\\a\\bash.exe', 'C:\\b\\bash.exe']);
+    // Known Git paths are probed BEFORE PATH discoveries (cold WSL launches
+    // stall the event loop for seconds), so a/b keep their relative order but
+    // trail the hardcoded fallbacks.
+    expect(spawn.probed.slice(-2)).toEqual(['C:\\a\\bash.exe', 'C:\\b\\bash.exe']);
+  });
+
+  it('AC-WINBASH-01: probes known Git paths before PATH discoveries', () => {
+    // Regression for the doctor fan-out starvation: System32\bash.exe leads
+    // `where bash` on WSL machines and its cold launch blocks ~3.4s. It must
+    // never be spawned at all — neither from where-output nor as any fallback.
+    const spawn = fakeSpawn({
+      'C:\\Program Files\\Git\\bin\\bash.exe': '[XPGATE_ARGV_PROBE]\nMSYS_NT-10.0\n',
+    });
+    const { result } = (() => ({
+      result: resolveWindowsBashCandidates(spawn, fakeWhere('C:\\Windows\\System32\\bash.exe\r\n')),
+    }))();
+    expect(result).toBe('C:\\Program Files\\Git\\bin\\bash.exe');
+    expect(spawn.probed).not.toContain('C:\\Windows\\System32\\bash.exe');
   });
 
   it('AC-WINBASH-01: a Linux uname with intact argv still fails the platform test', () => {
