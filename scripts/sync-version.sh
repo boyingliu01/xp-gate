@@ -17,6 +17,15 @@
 set -eu
 
 ROOT_DIR="$(cd "$(dirname "$0")/.." && pwd)"
+
+# #392-#2: `pwd` in Git Bash/MSYS returns a POSIX path (/d/projects/xp-gate),
+# which Node on Windows cannot resolve (it becomes D:\d\projects\...). Convert
+# to a Windows-style path (D:/projects/xp-gate) so every interpolated path that
+# reaches `node -e` is resolvable. Non-MSYS Bash (macOS/Linux/CI) has no
+# cygpath, so leave ROOT_DIR as-is there.
+if command -v cygpath >/dev/null 2>&1; then
+  ROOT_DIR="$(cygpath -m "$ROOT_DIR")"
+fi
 VERSION_FILE="$ROOT_DIR/VERSION"
 ROOT_PKG="$ROOT_DIR/package.json"
 NPM_PKG="$ROOT_DIR/src/npm-package/package.json"

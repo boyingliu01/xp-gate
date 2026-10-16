@@ -15,23 +15,21 @@ export const largeFileRule: Rule = {
     const settings = getActiveConfig().rules['clean-code']['large-file'];
     const threshold = settings.threshold ?? 500;
 
-    try {
-      interface TypedAdapter {
-        countLines?: (file: string) => number | undefined;
-      }
-      const typedAdapter = adapter as TypedAdapter;
-      const lineCount = typedAdapter.countLines?.(file) ?? 0;
+    interface TypedAdapter {
+      countLines?: (file: string) => number | undefined;
+    }
+    const typedAdapter = adapter as TypedAdapter;
+    const lineCount = typedAdapter.countLines?.(file) ?? 0;
 
-      if (lineCount > threshold) {
-        violations.push({
-          file,
-          line: 1,
-          ruleId: 'clean-code.large-file',
-          message: `File is too large: ${lineCount} lines (maximum: ${threshold})`,
-          severity: (settings.severity as Severity) ?? 'warning'
-        });
-      }
-    } catch { }
+    if (lineCount > threshold) {
+      violations.push({
+        file,
+        line: 1,
+        ruleId: 'clean-code.large-file',
+        message: `File is too large: ${lineCount} lines (maximum: ${threshold})`,
+        severity: (settings.severity as Severity) ?? 'warning'
+      });
+    }
 
     return violations;
   }

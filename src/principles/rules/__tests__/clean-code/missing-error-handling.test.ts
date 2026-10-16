@@ -134,15 +134,13 @@ async function fetchUser(id: string) {
     expect(missingErrorHandlingRule.severity).toBe('warning');
   });
 
-  it('should return empty array when adapter.extractFunctions throws', () => {
+  it('should propagate adapter errors (no empty catch, #392)', () => {
     const mockAdapterThrowing = {
       ...mockAdapter,
       extractFunctions: () => { throw new Error('Parse error'); }
     };
     
-    const violations = missingErrorHandlingRule.check('test.ts', mockAdapterThrowing as never);
-    
-    expect(violations).toEqual([]);
+    expect(() => missingErrorHandlingRule.check('test.ts', mockAdapterThrowing as never)).toThrow('Parse error');
   });
 
   it('should detect multiple IO operations in one function', () => {

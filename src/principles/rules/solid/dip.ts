@@ -31,27 +31,25 @@ export const dipRule: Rule = {
     const settings = getActiveConfig().rules['solid']['dip'];
     const severity = (settings.severity as Severity) ?? 'warning';
 
-    try {
-      for (const cls_any of adapter.extractClasses() || []) {
-        const cls = cls_any as {code?: string; line?: number};
-        const code = cls.code;
-        if (!code) continue;
+    for (const cls_any of adapter.extractClasses() || []) {
+      const cls = cls_any as {code?: string; line?: number};
+      const code = cls.code;
+      if (!code) continue;
 
-        const newMatches = code.match(/new\s+(\w+)\s*\(/g) || [];
-        for (const match of newMatches) {
-          const className = match.replace(/new\s+/, '').replace(/\s*\(/, '');
-          if (shouldSkipInstantiation(className)) continue;
+      const newMatches = code.match(/new\s+(\w+)\s*\(/g) || [];
+      for (const match of newMatches) {
+        const className = match.replace(/new\s+/, '').replace(/\s*\(/, '');
+        if (shouldSkipInstantiation(className)) continue;
 
-          violations.push({
-            file,
-            line: cls.line || 0,
-            ruleId: 'solid.dip',
-            severity,
-            message: `Direct instantiation detected: new ${className}(). Prefer dependency injection for flexibility.`,
-          });
-        }
+        violations.push({
+          file,
+          line: cls.line || 0,
+          ruleId: 'solid.dip',
+          severity,
+          message: `Direct instantiation detected: new ${className}(). Prefer dependency injection for flexibility.`,
+        });
       }
-    } catch { }
+    }
     return violations;
   }
 };

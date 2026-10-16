@@ -15,47 +15,48 @@ export const magicNumbersRule: Rule = {
     // Read the ACTIVE config per invocation; a module-load snapshot was #457.
     const settings = getActiveConfig().rules['clean-code']['magic-numbers'];
     
+    // #392-#4: rules must not swallow their own errors. The outer try/catch was
+    // removed so a genuine rule bug bubbles up to analyzer.runRuleOnFile() and
+    // surfaces as a gate error. The inner try/catch below is kept deliberately:
+    // an adapter that cannot extract AST data is a legitimate "no data" case.
+    interface NumberObject {
+      value: number;
+      line: number;
+    }
+    
+    interface TypedAdapter {
+      parseAST?: () => unknown | undefined;
+      extract?: () => NumberObject[] | undefined;
+    }
+    
+    const typedAdapter = adapter as TypedAdapter;
+    
+    let magicNumbers: NumberObject[] = [];
+    
     try {
-      interface NumberObject {
-        value: number;
-        line: number;
-      }
-      
-      interface TypedAdapter {
-        parseAST?: () => unknown | undefined;
-        extract?: () => NumberObject[] | undefined;
-      }
-      
-      const typedAdapter = adapter as TypedAdapter;
-      
-      let magicNumbers: NumberObject[] = [];
-      
-      try {
-        if (typeof typedAdapter.extract !== 'undefined') {
-          const literals = typedAdapter.extract?.();
-          if (literals && Array.isArray(literals)) {
-            magicNumbers = literals;
-          }
+      if (typeof typedAdapter.extract !== 'undefined') {
+        const literals = typedAdapter.extract?.();
+        if (literals && Array.isArray(literals)) {
+          magicNumbers = literals;
         }
-      } catch { }
-      
-      const excludedNumbers = settings.exclude ?? DEFAULT_EXCLUDED_NUMBERS;
-      const filteredNumbers = magicNumbers.filter(numObj => {
-        const numValue = numObj.value;
-        return !excludedNumbers.includes(numValue);
-      });
-      
-      filteredNumbers.forEach(numObj => {
-        violations.push({
-          file,
-          line: numObj.line,
-          ruleId: 'clean-code.magic-numbers',
-          message: `Potential magic number detected: ${numObj.value}. Consider using a named constant instead.`,
-          severity: (settings.severity as Severity) ?? 'info'
-        });
-      });
-      
+      }
     } catch { }
+    
+    const excludedNumbers = settings.exclude ?? DEFAULT_EXCLUDED_NUMBERS;
+    const filteredNumbers = magicNumbers.filter(numObj => {
+      const numValue = numObj.value;
+      return !excludedNumbers.includes(numValue);
+    });
+    
+    filteredNumbers.forEach(numObj => {
+      violations.push({
+        file,
+        line: numObj.line,
+        ruleId: 'clean-code.magic-numbers',
+        message: `Potential magic number detected: ${numObj.value}. Consider using a named constant instead.`,
+        severity: (settings.severity as Severity) ?? 'info'
+      });
+    });
     
     return violations;
   }

@@ -325,6 +325,43 @@ test('multiple assertions', () => {
     expect(result.tests[0].assertions).toBeGreaterThanOrEqual(4);
     expect(result.totalAssertions).toBeGreaterThanOrEqual(4);
   });
+
+  it('AC-002-06: should count assertions per-test, not per-file (#392)', async () => {
+    // Regression for #392-#1: assertion counting must be scoped to the test
+    // body, otherwise totalAssertions is inflated by fileCount x perFileCount.
+    const testTs = `
+/**
+ * @test REQ-MULTI-001 First test
+ * @intent Assertion counting is per-test
+ * @covers AC-MULTI-001-01
+ */
+test('first test', () => {
+  expect(a()).toBe(1);
+  expect(b()).toBe(2);
+});
+
+/**
+ * @test REQ-MULTI-002 Second test
+ * @intent Assertion counting is per-test
+ * @covers AC-MULTI-002-01
+ */
+test('second test', () => {
+  expect(c()).toBe(3);
+});
+`;
+    const testFile = writeTempFile('multi-assert.test.ts', testTs);
+    const result = parseTestFiles([testFile]);
+
+    expect(result.tests).toHaveLength(2);
+    // countAssertions counts matching *patterns*, so `expect(x).toBe(y)` yields
+    // 2 (one `expect(` + one `toBe(`). First test body has 2 such assertions
+    // => 4; second has 1 => 2. The key regression: each test counts ONLY its own
+    // body (total 6), never the whole file (3 expect + 3 toBe = 6 per test,
+    // which would inflate totalAssertions to 12 under the old per-file bug).
+    expect(result.tests[0].assertions).toBe(4);
+    expect(result.tests[1].assertions).toBe(2);
+    expect(result.totalAssertions).toBe(6);
+  });
 });
 
 // ============================================================================

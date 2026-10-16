@@ -42,32 +42,45 @@ async function runAlignmentCheck(subargs) {
 
   const jsonMode = subargs.includes('--json');
 
-  // Load TS module via tsx
-  const { execSync } = require('child_process');
-  const alignmentPath = path.join(__dirname, '..', 'lib', 'test-alignment.ts');
-
+  // Load the TS module in-process (tsx/cjs registers the TS loader), instead of
+  // shelling out to `npx tsx -e` with unsanitized paths (#392-#6).
   try {
-    execSync(`npx tsx -e "
-      import { runFullAlignment } from '${alignmentPath}';
-      const report = runFullAlignment({
-        specPath: '${specPath}',
-        testDirs: ${JSON.stringify(testDirs || null)},
-        headCommit: require('child_process').execSync('git rev-parse HEAD 2>/dev/null || echo unknown').toString().trim(),
-        outputPath: ${outputPath ? `'${outputPath}'` : 'undefined'},
-      });
-      if (${jsonMode}) {
-        console.log(JSON.stringify(report, null, 2));
-      } else {
-        console.log('Status:', report.alignment_status);
-        console.log('Score:', report.score);
-        console.log('Misaligned:', report.misaligned_tests.length);
-      }
-      process.exit(report.alignment_status === 'PASS' ? 0 : 1);
-    "`, { stdio: 'inherit' });
+    require('tsx/cjs');
   } catch (err) {
+    console.error('check-alignment requires tsx; run `npm install` first.');
     return 1;
   }
-  return 0;
+
+  const { runFullAlignment } = require('../lib/test-alignment.ts');
+  const { execFileSync } = require('child_process');
+  let headCommit = 'unknown';
+  try {
+    headCommit = execFileSync('git', ['rev-parse', 'HEAD'], { encoding: 'utf8' }).trim() || 'unknown';
+  } catch (err) {
+    headCommit = 'unknown';
+  }
+
+  let report;
+  try {
+    report = runFullAlignment({
+      specPath,
+      testDirs: testDirs || undefined,
+      headCommit,
+      outputPath: outputPath || undefined,
+    });
+  } catch (err) {
+    console.error('check-alignment failed:', err instanceof Error ? err.message : String(err));
+    return 1;
+  }
+
+  if (jsonMode) {
+    console.log(JSON.stringify(report, null, 2));
+  } else {
+    console.log('Status:', report.alignment_status);
+    console.log('Score:', report.score);
+    console.log('Misaligned:', report.misaligned_tests.length);
+  }
+  return report.alignment_status === 'PASS' ? 0 : 1;
 }
 
 const COMMANDS = {
