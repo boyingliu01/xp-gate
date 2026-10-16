@@ -56,15 +56,16 @@ describe('code-duplication.ts - Code Duplication Rule', () => {
     expect(violations).toEqual([]);
   });
 
-  it('should return empty array when adapter throws', () => {
-    const mockAdapterThrowing = {
-      ...mockAdapter,
-      duplicationPercentage: () => { throw new Error('jscpd error'); }
-    };
+  it('should propagate adapter errors (no empty catch, #392)', () => {
+    // #392-#4: the rule no longer swallows adapter errors in an empty catch, so
+    // a throwing adapter getter must bubble up to analyzer.runRuleOnFile().
+    const mockAdapterThrowing = Object.defineProperty(
+      { ...mockAdapter },
+      'duplicationPercentage',
+      { get: () => { throw new Error('jscpd error'); } }
+    );
     
-    const violations = codeDuplicationRule.check('test.ts', mockAdapterThrowing as never);
-    
-    expect(violations).toEqual([]);
+    expect(() => codeDuplicationRule.check('test.ts', mockAdapterThrowing as never)).toThrow('jscpd error');
   });
 
   it('should handle multiple files with duplication', () => {
