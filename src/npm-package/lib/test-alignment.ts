@@ -315,8 +315,15 @@ function extractCallbackBody(content: string, callbackStart: number): string {
 /**
  * Extract JSDoc block preceding a test/it/describe declaration, along with the
  * *function body* of the callback (so assertion counting is per-test, not
- * per-file). Handles .each(), .skip(), .todo() variants and backtick template
+ * per-file). Handles .skip(), .todo(), .only() variants and backtick template
  * literals.
+ *
+ * Known limitation (pre-existing, not introduced by #392): `test.each([...])`
+ * parameterised forms are NOT matched, because the argument list is a bracketed
+ * array literal and the name string follows it without a comma. This means such
+ * tests are omitted from assertion counting. Coverage determination itself is
+ * driven by `@covers` tags, so this only affects the avg-assertions data-validity
+ * heuristic, never AC coverage. Tracked separately from #392.
  */
 function extractJSDocBeforeTest(content: string): Array<{ jsdoc: string; testBody: string; testName: string }> {
   const results: Array<{ jsdoc: string; testBody: string; testName: string }> = [];
