@@ -110,15 +110,19 @@ async function execWithTimeout(cmd, opts = {}) {
   // in flight at once (doctor's parallel fan-out), while the same command
   // standalone prints fine in ~300ms. The old code read that empty stream as
   // "Not found" and red-flagged Node/Git/hooksPath. A version/config probe is
-  // idempotent, so one quiet retry distinguishes the lost stream from a tool
-  // that genuinely fails. Contract: every caller here runs an IDEMPOTENT probe
+  // idempotent, so quiet retries distinguish the lost stream from a tool that
+  // genuinely fails. Contract: every caller here runs an IDEMPOTENT probe
   // (`--version`, `config --get`, `rev-parse`) — a future side-effecting call
-  // site must pass { retries: 1 } to opt out of the retry below. The option is
-  // consumed here and never forwarded to exec (it lands before the spread).
-  const maxAttempts = process.platform === 'win32' ? (opts.retries || 3) : 1;
+  // site must pass { attempts: 1 } to opt out of the retry below. The option
+  // is consumed here and never forwarded to exec.
+  // Scope note: only the exit-0-with-empty-stream shape is retried. A probe
+  // that exits non-zero is a REAL failure verdict (cmd.exe reports a missing
+  // tool as exit 1 + "'x' is not recognized"), and re-running it would only
+  // burn time, so that path still returns null immediately.
+  const { attempts, ...execOpts } = opts;
+  const maxAttempts = process.platform === 'win32' ? (attempts || 3) : 1;
   for (let attempt = 0; attempt < maxAttempts; attempt++) {
     try {
-      const { retries, ...execOpts } = opts;
       const { stdout, stderr } = await execAsync(cmd, {
         ...execOpts,
         timeout: execOpts.timeout || EXEC_TIMEOUT_MS,
