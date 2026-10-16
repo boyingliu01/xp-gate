@@ -1,10 +1,11 @@
 #!/usr/bin/env bash
 
 # Incremental Python type-checking helpers for the pre-commit Python branch
-# (#534). These complement python.sh's run_static_analysis() (the CI-aligned
-# FULL mypy pass) with a FAST staged-only pass: pre-commit runs this on just
-# the .py/.pyi files that changed, so a large repo doesn't pay full-inference
-# CPU on every commit.
+# (#534). This is the FAST staged-only pass: pre-commit runs it on just the
+# .py/.pyi files that changed, so a large repo doesn't pay full-inference CPU
+# on every commit. It complements the FULL mypy pass (githooks/adapters/
+# python.sh run_static_analysis, reachable via the adapter CLI / CI), which is
+# where cross-module blind spots get caught.
 #
 # Sourced by githooks/pre-commit (the python) case. Requires CHANGED_FILES
 # (space/newline separated, repo-root relative) to be in scope, matching the
@@ -14,11 +15,14 @@
 # are intentionally not resolved here (adapter-common not needed).
 
 # Extract the staged .py/.pyi files from CHANGED_FILES, one per line.
-# Handles whitespace in paths (echo + grep would split them).
+# Excludes vendored/ignored trees (.venv, venv, node_modules) that a hook
+# should never type-check. Handles whitespace in paths (echo + grep would
+# split them).
 python_staged_py_files() {
   local f
   while IFS= read -r f || [ -n "$f" ]; do
     case "$f" in
+      .venv/*|venv/*|node_modules/*) continue ;;
       *.py|*.pyi) printf '%s\n' "$f" ;;
     esac
   done <<< "$CHANGED_FILES"
@@ -49,6 +53,9 @@ python_typecheck_incremental() {
       line="${line%"${line##*[![:space:]]}"}"
       [ -z "$line" ] && continue
       _declared=1
+      # Normalize trailing slashes (`src/` -> `src`) so the `$target/*` prefix
+      # match below never sees a doubled slash (`src//a.py` would never match).
+      line="${line%/}"
       SCOPE_DIRS+=("$line")
     done < .xp-gate-mypy-scope
   else

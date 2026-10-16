@@ -124,14 +124,22 @@ run_static_analysis() {
     if [ "$_engine" = "ty" ]; then
       # ty's CLI is `ty check <path>`, not `ty <path>`. Bare `ty`/`ty check .`
       # without targets would recurse the whole tree (== the anti `mypy .`
-      # guard #501/#513): targets are always explicit here.
+      # guard #501/#513): targets are always explicit here. Capture ty's own
+      # exit code and diagnostics via a temp file (never discard them): a BLOCK
+      # with no reason is undebuggable, and a pipe `| head` would lose the code.
       local _ty_rc=0
-      ty check "$_mypy_t" >/dev/null 2>&1 || _ty_rc=$?
+      local _ty_tmp
+      _ty_tmp="$(mktemp)"
+      ty check "$_mypy_t" > "$_ty_tmp" 2>&1 || _ty_rc=$?
       if [ "$_ty_rc" -eq 2 ]; then
         echo "  ⚠ ty exited $_ty_rc on target '$_mypy_t' (config/CLI error) — SKIPPING, not blocking"
+        head -30 "$_ty_tmp"
       elif [ "$_ty_rc" -ne 0 ]; then
+        echo "  ty report for '$_mypy_t' (exit $_ty_rc):"
+        head -30 "$_ty_tmp"
         _mypy_rc=1
       fi
+      rm -f "$_ty_tmp"
     else
       mypy "$_mypy_t" || _mypy_rc=1
     fi
