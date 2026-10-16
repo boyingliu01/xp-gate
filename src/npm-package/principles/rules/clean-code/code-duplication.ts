@@ -11,20 +11,18 @@ export const codeDuplicationRule: Rule = {
     // Read the ACTIVE config per invocation; a module-load snapshot was #457.
     const settings = getActiveConfig().rules['clean-code']['code-duplication'];
     
-    try {
-      const typedAdapter = adapter as { duplicationPercentage?: number };
-      const duplicationPercentage = typedAdapter.duplicationPercentage;
-      
-      if (duplicationPercentage && duplicationPercentage > (settings.threshold ?? 0)) {
-        violations.push({
-          file,
-          line: 1,
-          ruleId: 'clean-code.code-duplication',
-          message: `Code duplication detected: ${duplicationPercentage}% (threshold: ${settings.threshold}%). Consider refactoring duplicated code.`,
-          severity: (settings.severity as Severity) ?? 'warning'
-        });
-      }
-    } catch { }
+    const typedAdapter = adapter as { duplicationPercentage?: number };
+    const duplicationPercentage = typedAdapter.duplicationPercentage;
+    
+    if (duplicationPercentage && duplicationPercentage > (settings.threshold ?? 0)) {
+      violations.push({
+        file,
+        line: 1,
+        ruleId: 'clean-code.code-duplication',
+        message: `Code duplication detected: ${duplicationPercentage}% (threshold: ${settings.threshold}%). Consider refactoring duplicated code.`,
+        severity: (settings.severity as Severity) ?? 'warning'
+      });
+    }
     
     return violations;
   }

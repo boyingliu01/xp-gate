@@ -61,14 +61,13 @@ function deeplyNested() {
     expect(deepNestingRule.severity).toBe('warning');
   });
 
-  it('should return empty violations when adapter throws error', () => {
+  it('should propagate adapter errors (no empty catch, #392)', () => {
     const mockAdapterThatThrows = {
       ...mockAdapter,
       extractFunctions: () => { throw new Error('Adapter failed'); }
     };
     
-    const violations = deepNestingRule.check('test.ts', mockAdapterThatThrows as never);
-    
-    expect(violations.length).toBe(0);
+    // Rule errors must bubble up to analyzer.runRuleOnFile(), not be swallowed.
+    expect(() => deepNestingRule.check('test.ts', mockAdapterThatThrows as never)).toThrow('Adapter failed');
   });
 });
