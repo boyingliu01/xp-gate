@@ -32,12 +32,20 @@ describe('doctor-tui skill freshness (#439)', () => {
   // HOME has no platform marker, so detectPlatform() resolves to opencode.
   function installSkill(name, content) {
     const dir = path.join(tmpHome, '.config', 'opencode', 'skills', name);
-    fs.mkdirSync(dir, { recursive: true });
-    fs.writeFileSync(path.join(dir, 'SKILL.md'), content);
+    try {
+      fs.mkdirSync(dir, { recursive: true });
+      fs.writeFileSync(path.join(dir, 'SKILL.md'), content);
+    } catch (err) {
+      throw new Error(`failed to install test skill ${name}: ${err && err.message}`);
+    }
   }
 
   function readBundled(name) {
-    return fs.readFileSync(path.join(bundledSkillsDir, name, 'SKILL.md'), 'utf8');
+    try {
+      return fs.readFileSync(path.join(bundledSkillsDir, name, 'SKILL.md'), 'utf8');
+    } catch (err) {
+      throw new Error(`failed to read bundled skill ${name}: ${err && err.message}`);
+    }
   }
 
   /** Same bytes, opposite line endings — the only difference a fresh install can have. */
@@ -134,7 +142,11 @@ describe('doctor-tui skill freshness (#439)', () => {
       .readdirSync(bundledSkillsDir, { withFileTypes: true })
       .filter((d) => d.isDirectory())
       .map((d) => d.name);
-    expect(skills.length).toBeGreaterThanOrEqual(13);
+    // Sanity floor only: the substantive assertion below is that every bundled
+    // skill declares a version. #522 removed clipboard-vision, dropping the
+    // bundle from 13 to 12 skills, so the floor tracks the current bundle size
+    // instead of a stale magic number (Delphi Round 1, finding A-Critical).
+    expect(skills.length).toBeGreaterThanOrEqual(12);
     const missing = skills.filter((name) => {
       const md = path.join(bundledSkillsDir, name, 'SKILL.md');
       return !/^version:\s*\d+\.\d+\.\d+/m.test(fs.readFileSync(md, 'utf8'));

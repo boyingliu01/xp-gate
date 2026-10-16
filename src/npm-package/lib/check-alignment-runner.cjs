@@ -69,4 +69,6 @@ if (jsonMode) {
   console.log('Score:', report.score);
   console.log('Misaligned:', report.misaligned_tests.length);
 }
-process.exit(report.alignment_status === 'PASS' ? 0 : 1);
+// Set exitCode instead of process.exit() so buffered stdout (notably the
+// --json document) flushes fully before the process terminates (#392 review).
+process.exitCode = report.alignment_status === 'PASS' ? 0 : 1;
