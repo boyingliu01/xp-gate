@@ -138,7 +138,7 @@ PRE_COMMIT="$BATS_TEST_DIRNAME/../pre-commit"
   rm -rf "$sandbox"
 }
 
-@test "#534 XP_GATE_TY=1 but ty missing -> SKIP (no BLOCK), mypy not required" {
+@test "#534 XP_GATE_TY=1 but both ty and mypy missing -> SKIP (no BLOCK)" {
   sandbox="$(mktemp -d)"
   mkdir -p "$sandbox/repo/src"
   echo "x = 1" > "$sandbox/repo/src/a.py"
@@ -148,10 +148,28 @@ PRE_COMMIT="$BATS_TEST_DIRNAME/../pre-commit"
   cd "$sandbox/repo" || return 1
   export PATH="$sandbox/emptystub:$PATH"
   # @intent: opt-in path must not require mypy (Delphi R1 Critical) and must not
-  #   BLOCK on a missing ty — it returns 0 (SKIP).
+  #   BLOCK on missing tools — it returns 0 (SKIP) when NEITHER engine is present.
   run bash -c "export XP_GATE_TY=1; source '$sandbox/githooks/adapters/python.sh'; run_static_analysis"
   [ "$status" -eq 0 ]
   echo "$output" | grep -q 'SKIPPING'
+  rm -rf "$sandbox"
+}
+
+@test "#534 XP_GATE_TY=1, ty missing but mypy present -> fall back to mypy" {
+  sandbox="$(mktemp -d)"
+  mkdir -p "$sandbox/stub" "$sandbox/repo/src"
+  echo "x = 1" > "$sandbox/repo/src/a.py"
+  cp -r "$BATS_TEST_DIRNAME/.." "$sandbox/githooks"
+  # Only mypy stub on PATH (no ty). XP_GATE_TY=1 but ty absent -> must NOT drop
+  # the type gate; it warns and falls back to mypy (R2 arch finding 5).
+  printf '#!/usr/bin/env bash\n echo "$@" >> "%s/mypy.args"\nexit 0\n' "$sandbox" > "$sandbox/stub/mypy"
+  chmod +x "$sandbox/stub/mypy"
+  cd "$sandbox/repo" || return 1
+  export PATH="$sandbox/stub:$PATH"
+  run bash -c "export XP_GATE_TY=1; source '$sandbox/githooks/adapters/python.sh'; run_static_analysis"
+  [ "$status" -eq 0 ]
+  echo "$output" | grep -q 'falling back to mypy'
+  grep -q '^src$' "$sandbox/mypy.args"
   rm -rf "$sandbox"
 }
 

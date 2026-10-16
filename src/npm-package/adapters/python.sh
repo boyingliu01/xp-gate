@@ -107,9 +107,13 @@ run_static_analysis() {
     if command -v ty >/dev/null 2>&1; then
       _engine=ty
       echo "  ⚙  engine: ty (Rust, explicit opt-in via XP_GATE_TY=1) — mypy remains the default"
+    elif command -v mypy >/dev/null 2>&1; then
+      # ty opted in but missing; mypy present -> fall back to the authoritative
+      # engine with a warning (never silently drop the type gate, #534 R2 arch).
+      echo "  ⚠ ty requested (XP_GATE_TY=1) but not installed — falling back to mypy"
     else
-      echo "  ⚠ ty opted in via XP_GATE_TY=1 but `ty` is not installed — SKIPPING type check (no BLOCK)"
-      echo "    install: pip install ty (alpha) or unset XP_GATE_TY to use mypy"
+      echo "  ⚠ ty opted in via XP_GATE_TY=1 but neither ty nor mypy is installed — SKIPPING type check (no BLOCK)"
+      echo "    install: pip install mypy, or pip install ty (alpha)"
       return 0
     fi
   fi
