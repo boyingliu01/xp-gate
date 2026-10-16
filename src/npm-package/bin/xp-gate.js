@@ -28,13 +28,29 @@ const gateRunner = require('../lib/gate-runner.js');
 // argument that carries a cmd metacharacter. Rejection, not escaping, is the
 // safe defense: a path containing a metachar is refused outright rather than
 // risk a quoting mistake. This guard must stay in front of every launcher.
-const CMD_METACHAR_RE = /[&|^<>%!"\n]/;
+// \r joins \n: cmd treats a stray carriage return as a command separator too
+// (Delphi walkthrough R1, MN-01).
+const CMD_METACHAR_RE = /[&|^<>%!"\n\r]/;
+
+// The ONLY place a child process may be launched with an engaged shell.
+// Named so a static grep stays readable, and pinned by check-alignment-cli
+// .test.mjs: no other launcher in this file may enable a shell.
+const SHELL_ON_WINDOWS_ONLY = process.platform === 'win32';
 
 function firstUnsafeArg(argv) {
   for (const arg of argv) {
     if (typeof arg === 'string' && CMD_METACHAR_RE.test(arg)) return arg;
   }
   return undefined;
+}
+
+function quoteForCmdShell(arg) {
+  // With an engaged shell node concatenates file+args into one cmd.exe command
+  // string WITHOUT quoting (DEP0190), so an argument carrying a space would
+  // split into multiple argv elements downstream. Double-quoting is safe here
+  // ONLY because every caller has already run firstUnsafeArg: the character "
+  // that could break out of the quote is on the rejection list.
+  return `"${arg}"`;
 }
 
 function spawnNpx(tsxArgs) {
@@ -48,14 +64,16 @@ function spawnNpx(tsxArgs) {
     return { status: 1 };
   }
   const isWin = process.platform === 'win32';
-  // shell:false is inject-safe on POSIX. On win32 npx.cmd needs cmd.exe, which
-  // is only safe because every user argument above is guaranteed metachar-free.
+  // The shell engages on win32 only, and is only safe because every user
+  // argument above is guaranteed metachar-free; each token additionally gets
+  // cmd quoting so spaces survive (see quoteForCmdShell).
   // Guarded IO: a failed spawn must surface as a result, not crash the CLI.
+  const argv = ['-y', 'tsx', ...tsxArgs];
   let result;
   try {
-    result = spawnSync(isWin ? 'npx.cmd' : 'npx', ['-y', 'tsx', ...tsxArgs], {
+    result = spawnSync(isWin ? 'npx.cmd' : 'npx', isWin ? argv.map(quoteForCmdShell) : argv, {
       stdio: 'inherit',
-      shell: isWin,
+      shell: SHELL_ON_WINDOWS_ONLY,
     });
   } catch (err) {
     return { status: 1, error: err };
@@ -97,6 +115,9 @@ function runAlignmentInProcess(specPath, testDirs, outputPath, jsonMode) {
     console.log('Score:', report.score);
     console.log('Misaligned:', report.misaligned_tests.length);
   }
+  // exitCode-style contract (#392 review): never process.exit() right after a
+  // JSON print — buffered stdout must flush. Returning the code and letting the
+  // dispatcher end the turn naturally is what keeps --json output complete.
   return report.alignment_status === 'PASS' ? 0 : 1;
 }
 
@@ -128,6 +149,17 @@ async function runAlignmentCheck(subargs) {
   const outputPath = outputIdx >= 0 ? subargs[outputIdx + 1] : undefined;
 
   const jsonMode = subargs.includes('--json');
+
+  // Injection guard (#392-#6) runs BEFORE any launcher, including the
+  // in-process fast path: a metachar path must be refused identically on both
+  // platforms (Delphi walkthrough R1, MJ-02 — behavioral, not shape-only).
+  for (const value of [specPath, ...(testDirs || []), outputPath].filter(v => v !== undefined)) {
+    const unsafe = firstUnsafeArg([value]);
+    if (unsafe) {
+      console.error(`check-alignment: refusing path containing a shell metacharacter: ${unsafe}`);
+      return 1;
+    }
+  }
 
   const runnerPath = path.join(__dirname, '..', 'lib', 'check-alignment-runner.cjs');
 
@@ -269,7 +301,11 @@ const COMMANDS = {
   },
   'check-alignment': {
     description: 'Run test-specification alignment check (deterministic, no LLM)',
-    run: subargs => runAlignmentCheck(subargs).then(code => process.exit(code)),
+    run: subargs => runAlignmentCheck(subargs).then(code => {
+      // exitCode, not process.exit(): the in-process --json document must flush
+      // its buffered stdout before the process ends (#392 review, MJ-01).
+      process.exitCode = code;
+    }),
     usage: 'xp-gate check-alignment [--spec <path>] [--tests <dir>] [--json] [--output <path>]'
   },
   'upgrade': {

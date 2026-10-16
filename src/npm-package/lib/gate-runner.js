@@ -27,7 +27,9 @@ function runGateAdapter(scriptPath, cwd = process.cwd()) {
     const bash = checkBash();
     if (!bash.ok) {
       console.log('⚠️  This gate requires bash to run shell scripts.');
-      console.log('   On Windows, install Git for Windows (includes Git Bash) or enable WSL.');
+      // No WSL suggestion: these hooks need Git Bash specifically — the WSL
+      // bash is rejected by the probe above (Linux filesystem view, dropped $1).
+      console.log('   On Windows, install Git for Windows (https://git-scm.com/download/win).');
       console.log('   Alternatively, install the required tool directly and run the gate again.');
       return;
     }

@@ -30,13 +30,28 @@ describe('check-alignment CLI injection surface (#392-#6)', () => {
     // The metachar class must cover the cmd.exe separators/redirection.
     expect(src).toMatch(/CMD_METACHAR_RE\s*=.*[&|^<>%!]/);
     // Any shell a launcher may engage must be gated on the metachar rejection
-    // having run first, and never enabled unconditionally on win32.
-    expect(src).not.toMatch(/shell\s*:\s*true/);
+    // having run first, and never enabled unconditionally on win32. The single
+    // sanctioned engagement is the named SHELL_ON_WINDOWS_ONLY constant.
+    expect(src).not.toMatch(/shell\s*:\s*(?:true|process\.platform)/);
+    expect(src).toMatch(/shell:\s*SHELL_ON_WINDOWS_ONLY/);
     // execSync interpolates argv into a command string via a shell, so it is
     // banned; execFileSync is fine only for hardcoded binaries with non-user
     // argv (git rev-parse HEAD). The launchers below are the user-input path.
     expect(src).not.toMatch(/\bexecSync\s*\(/);
   });
+
+  it('a metacharacter path is refused end to end before any launch (MJ-02)', () => {
+    // Behavioral, not shape: invoke the real CLI with a --spec whose path
+    // carries a cmd metacharacter and assert the documented refusal — exit 1
+    // plus the "refusing" message, never a spawned engine.
+    const evil = join(here, 'evil&echo.spec.yaml');
+    const result = spawnSync(process.execPath, [BIN, 'check-alignment', '--spec', evil, '--json'], {
+      encoding: 'utf8',
+      timeout: 60000,
+    });
+    expect(result.status).toBe(1);
+    expect(`${result.stderr}${result.stdout}`).toMatch(/metacharacter|refus/i);
+  }, 90000);
 });
 
 describe('check-alignment runner output integrity', () => {
