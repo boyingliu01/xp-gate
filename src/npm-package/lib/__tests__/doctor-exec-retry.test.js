@@ -45,18 +45,19 @@ function stubExec(behaviors) {
 
 // Node couples exec to promisify via a custom symbol; if a future runtime drops
 // that coupling the name-based stub above silently stops intercepting and the
-// real cmd.exe child runs. Track whether the stub was ever installed into a
-// doctor load so afterEach can fail loudly instead of passing vacuously.
+// real cmd.exe child runs. Each test flips this to true from inside its own
+// stubbed load (never inherited from an earlier test), so afterEach can fail
+// loudly instead of passing vacuously.
 let stubWasConsumed = false;
 
 describe('execWithTimeout empty-stream retry (#525 follow-up)', () => {
   let stub = null;
   afterEach(() => {
     if (stub) { stub.restore(); stub = null; }
-    // Node couples exec to promisify via a custom symbol. If that coupling ever
-    // disappears, the fn.name === 'exec' stub silently stops intercepting and
-    // tests would pass against real cmd.exe children — fail loudly instead.
-    expect(stubWasConsumed).toBe(true);
+    // Fail loudly if the fn.name === 'exec' stub never intercepted this test's
+    // doctor load — that would mean Node dropped the exec/promisify custom-
+    // symbol coupling and the assertions ran against real cmd.exe children.
+    expect(stubWasConsumed, `stub did not intercept the doctor load in this test`).toBe(true);
     stubWasConsumed = false;
   });
 
@@ -107,18 +108,18 @@ describe('execWithTimeout empty-stream retry (#525 follow-up)', () => {
     expect(result).toBeNull();
   });
 
-  it('AC-DOCTOR-RETRY-01: retries:1 opts a side-effecting call out of the retry', async () => {
+  it('AC-DOCTOR-RETRY-01: attempts:1 opts a side-effecting call out of the retry', async () => {
     stub = stubExec([
       (cb) => cb(null, '', ''),
       (cb) => cb(null, 'unexpected second attempt', ''),
     ]);
     const execWithTimeout = freshDoctor();
-    const result = await execWithTimeout('some-mutating-command', { retries: 1 });
+    const result = await execWithTimeout('some-mutating-command', { attempts: 1 });
     expect(stub.calls.length).toBe(1);
     expect(result).toBeNull();
   });
 
-  it('AC-DOCTOR-RETRY-01: the retries option is consumed, not forwarded to exec', async () => {
+  it('AC-DOCTOR-RETRY-01: the attempts option is consumed, not forwarded to exec', async () => {
     let forwarded = null;
     stub = stubExec([(cb) => { cb(null, 'ok\n', ''); }]);
     // Capture what doctor hands to the promisified exec by re-stubbing with an
@@ -143,9 +144,9 @@ describe('execWithTimeout empty-stream retry (#525 follow-up)', () => {
       util.promisify = originalPromisify;
       return f;
     })();
-    const result = await execWithTimeout('git --version', { retries: 2, timeout: 999 });
+    const result = await execWithTimeout('git --version', { attempts: 2, timeout: 999 });
     expect(result.stdout).toBe('ok');
-    expect(forwarded.retries).toBeUndefined();
+    expect(forwarded.attempts).toBeUndefined();
     expect(forwarded.timeout).toBe(999);
   });
 });

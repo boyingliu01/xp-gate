@@ -358,36 +358,46 @@ function resolveWindowsBashCandidates(spawnProbe, whereExecSync) {
 /**
  * Check if bash is available on the system.
  * XP-Gate hooks are bash scripts — Windows users need Git Bash installed.
- * @returns {{ok: boolean, path?: string, message?: string}}
+ * @returns {{ok: boolean, path?: string, version?: string, message?: string}}
  */
+// Split out for behavior tests: checkBashVersion takes the resolved bash path
+// and a spawner so the version-field contract (a bash VERSION tuple, not the
+// uname string) is assertable without a real interpreter on the host.
+function checkBashVersion(spawnProbe, winBash) {
+  let version = 'unknown';
+  try {
+    // --version through the SAME probe-style argv as the candidate loop:
+    // Git Bash's login startup (`bash --version`) costs ~1.7s, and checkBash
+    // sits on hot paths (doctor fan-out, every gate-runner launch) where a
+    // synchronous stall starves concurrent execs past their timeouts. The
+    // -c form is non-login (~300ms). uname proves the MSYS family AND bash
+    // --version inside it still yields the real bash version number — the
+    // `version` field must stay a bash version, not the uname string. No
+    // sed in the command: the parse lives in JS below, so a stripped MSYS
+    // install without sed cannot silently degrade to "unknown".
+    // NOTE the cp. prefix: this module binds only execSync at file scope,
+    // and checkBash sits outside probeWindowsBash's local spawnSync binding
+    // — a bare spawnSync here is a ReferenceError swallowed by the catch,
+    // which used to pin the detail line at "unknown" forever.
+    const result = spawnProbe(winBash, ['-c', 'uname -s; bash --version', 'sh'], { encoding: 'utf8', timeout: 5000 });
+    const out = String((result && result.stdout) || '').trim();
+    // Keep the field in the same shape checkEnv prints for every other tool
+    // ("GNU bash, version X.Y.Z(...)"): doctor prefixes "GNU bash, version ",
+    // so hand back the bare version tuple, not the whole line.
+    const versionLine = out.split('\n').find(line => /version/.test(line));
+    const match = versionLine && versionLine.match(/version\s+(\S+)/);
+    if (match) version = match[1];
+  } catch { /* keep unknown */ }
+  return version;
+}
+
 function checkBash() {
   // On Windows resolve explicitly: PATH may lead with the WSL System32 stub,
   // which cannot execute these hooks (wrong filesystem view, dropped $1).
   if (process.platform === 'win32') {
     const winBash = probeWindowsBash();
     if (winBash) {
-      let version = 'unknown';
-      try {
-        // --version through the SAME probe-style argv as the candidate loop:
-        // Git Bash's login startup (`bash --version`) costs ~1.7s, and checkBash
-        // sits on hot paths (doctor fan-out, every gate-runner launch) where a
-        // synchronous stall starves concurrent execs past their timeouts. The
-        // -c form is non-login (~300ms); uname proves the MSYS family AND bash
-        // --version inside it still yields the real bash version number — the
-        // `version` field must stay a bash version, not the uname string.
-        // NOTE the cp. prefix: this module binds only execSync at file scope,
-        // and checkBash sits outside probeWindowsBash's local spawnSync binding
-        // — a bare spawnSync here is a ReferenceError swallowed by the catch,
-        // which used to pin the detail line at "unknown" forever.
-        const result = require('child_process').spawnSync(winBash, ['-c', 'uname -s; bash --version | sed -n 1p', 'sh'], { encoding: 'utf8', timeout: 5000 });
-        const out = String(result.stdout || '').trim();
-        // Keep the field in the same shape checkEnv prints for every other
-        // tool ("GNU bash, version X.Y.Z(...)"): doctor prefixes "GNU bash,
-        // version ", so hand back the bare version tuple, not the whole line.
-        const versionLine = out.split('\n').find(line => /version/.test(line));
-        const match = versionLine && versionLine.match(/version\s+(\S+)/);
-        if (match) version = match[1];
-      } catch { /* keep unknown */ }
+      const version = checkBashVersion((...args) => require('child_process').spawnSync(...args), winBash);
       return { ok: true, path: winBash, version };
     }
     return {
@@ -612,6 +622,7 @@ function compareVersions(a, b) {
 module.exports = {
   checkDeps,
   checkBash,
+  checkBashVersion,
   resolveWindowsBashCandidates,
   autoInstallDeps,
   detectPlatform,

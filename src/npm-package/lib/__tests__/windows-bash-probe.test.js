@@ -9,7 +9,7 @@
  * @covers AC-WINBASH-01, AC-WINBASH-02
  */
 const { describe, it, expect } = await import('vitest');
-const { resolveWindowsBashCandidates } = require('../detect-deps.js');
+const { resolveWindowsBashCandidates, checkBashVersion } = require('../detect-deps.js');
 
 // The candidate loop reads `where bash` from the host; tests inject both the
 // discovery runner and the probe spawner, so results are deterministic on any
@@ -104,5 +104,20 @@ describe('resolveWindowsBashCandidates (win32 authoritative bash)', () => {
     const userOwned = fakeSpawn({});
     resolveWindowsBashCandidates(userOwned, fakeWhere('D:\\Tools\\WindowsApps\\bash.exe\r\n'));
     expect(userOwned.probed).toContain('D:\\Tools\\WindowsApps\\bash.exe');
+  });
+
+  it('AC-WINBASH-01: checkBashVersion returns the bash VERSION tuple, not the uname line', () => {
+    // Contract regression (walkthrough R5 MJ-01/FC-02): doctor prints "GNU
+    // bash, version <field>" — the field must be the version number.
+    const spawn = (file, args) => ({
+      stdout: 'MINGW64_NT-10.0-26300\nGNU bash, version 5.3.9(1)-release (x86_64-pc-cygwin)\n',
+    });
+    expect(checkBashVersion(spawn, 'C:\\bash.exe')).toBe('5.3.9(1)-release');
+  });
+
+  it('AC-WINBASH-01: checkBashVersion degrades to unknown, never a crash, on odd output', () => {
+    expect(checkBashVersion(() => ({ stdout: '' }), 'C:\\bash.exe')).toBe('unknown');
+    expect(checkBashVersion(() => ({ stdout: 'MINGW64_NT-10.0\n' }), 'C:\\bash.exe')).toBe('unknown');
+    expect(checkBashVersion(() => { throw new Error('spawn failed'); }, 'C:\\bash.exe')).toBe('unknown');
   });
 });
