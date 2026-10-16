@@ -2,6 +2,22 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.26.0.0] - 2026-10-16
+
+Sprint E（Python 技术栈提速批次，#534）：pre-commit 的 Python 类型检查从「全量 mypy」改为「按暂存变更做增量 mypy」，配合 Go golangci-lint 增量与 ty（Astral Rust）可选加速，目标直指减少每次提交的 CPU 占用、避免系统被拖慢。
+
+### Added
+
+- **增量 mypy 助手（#534）**: 新增 `githooks/lib/python-incremental-typecheck.sh`，`python_staged_py_files()` 从 CHANGED_FILES 抽取暂存的 `.py`/`.pyi`（排除 `.venv/`/`venv/`/`node_modules/`），`python_typecheck_incremental()` 按范围（`.xp-gate-mypy-scope` 优先，否则 `src/`/`scripts/`）对变更文件跑 `mypy --follow-imports=silent --ignore-missing-imports`；退出码经临时文件捕获（确定性、与 pipefail 解耦、无 SIGPIPE 截断），真正 BLOCK 语义不丢失。
+- **ty（Astral Rust）可选加速（#534）**: `adapters/python.sh` 的 `run_static_analysis()` 支持 `XP_GATE_TY=1` + ty 存在时切到 `ty check <path>`；ty 缺失时告警回退 mypy；mypy 仍是权威默认。ty 诊断经临时文件捕获，非零退出时打印 head -30 说明 BLOCK 原因。
+
+### Changed
+
+- **pre-commit Python 分支全内联增量（#534）**: mypy 增量块调用 `python_typecheck_incremental`（bash-3 兼容 while-read 循环收集 MYPY_ARGS，兼容 macOS bash-3.2）；修正责任边界注释——Python case 全内联、永不落入通用 `run_static_analysis` 分支，全量门禁仍在 adapter CLI/CI 侧。盲区（未入暂存但被依赖的模块变更）为接受的取舍，已记录为 CI 全量 mypy 兜底的非阻塞后续项。
+- **Go golangci-lint 增量 + 退出码捕获（#534）**: Go 分支只对变更 `.go` 文件跑 `golangci-lint run $GO_FILES`，临时文件捕获真实退出码（修掉 pipe 后取 head 退出码、误吞门禁的问题）。
+- **TS typecheck 保持全量（文档化例外）（#534）**: `githooks/lib/typecheck.sh` 加注释说明——tsc 无单文件模式，增量会漏跨模块断裂，故 TS 类型检查维持全量，作为增量规则的明确正确性例外。
+- **全增量盘点（#534）**: 设计文档 §1.2.2 固化清单——mypy/ESLint/Biome/shellcheck/jscpd 本就增量，本轮补齐 Go golangci-lint，TS typecheck 为唯一文档化全量例外。实测：全量 `src/`=2707ms vs 增量单文件=2034ms（-25%）。
+
 ## [0.25.0.0] - 2026-10-14
 
 Sprint D（效能与迁移路径批次）：Python 门禁从「串行 30-45 分钟」压到并行 2.5 分钟、按变更智能选测；Gate M (Python) 在 Windows 原生环境的死锁一次消除；gitleaks 缺失从「升级即被拦」变成安装期可见的迁移路径；phase-transition 的漏执行不再对调用方不可见。
