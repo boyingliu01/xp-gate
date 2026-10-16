@@ -285,9 +285,19 @@ function getSkillsDirs(platform) {
  */
 function probeWindowsBash() {
   const { spawnSync } = require('child_process');
+  // `where` runs through the same module so tests can fake discovery + probe.
+  const { execSync: localExecSync } = require('child_process');
+  return resolveWindowsBashCandidates(spawnSync, localExecSync);
+}
+
+// Candidate list + probe loop split out for behavior tests: a fake spawner can
+// simulate the WSL stub (echoes Linux / drops $1) vs an MSYS bash without any
+// real interpreter on PATH (Delphi walkthrough R1, MN-06).
+function resolveWindowsBashCandidates(spawnProbe, whereExecSync) {
+  const _execSync = whereExecSync || execSync;
   const candidates = [];
   try {
-    const found = execSync('where bash', { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] });
+    const found = _execSync('where bash', { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] });
     for (const line of found.split(/\r?\n/)) if (line.trim()) candidates.push(line.trim());
   } catch { /* where unavailable */ }
   candidates.push(
@@ -300,7 +310,7 @@ function probeWindowsBash() {
   );
   for (const candidate of candidates) {
     try {
-      const r = spawnSync(candidate, ['-c', 'echo "[$1]"; uname -s', 'sh', 'XPGATE_ARGV_PROBE'], {
+      const r = spawnProbe(candidate, ['-c', 'echo "[$1]"; uname -s', 'sh', 'XPGATE_ARGV_PROBE'], {
         encoding: 'utf8',
         timeout: 5000,
         windowsHide: true,
@@ -327,11 +337,10 @@ function checkBash() {
     if (winBash) {
       let version = 'unknown';
       try {
-        const result = execSync(`"${winBash}" --version`, {
-          encoding: 'utf8',
-          stdio: ['ignore', 'pipe', 'pipe']
-        });
-        const versionMatch = result.match(/version\s+([^\s]+)/);
+        // spawnSync with discrete argv — never interpolate a discovered path
+        // into a shell string (a PATH dir name may carry cmd metacharacters).
+        const result = spawnSync(winBash, ['--version'], { encoding: 'utf8', timeout: 5000 });
+        const versionMatch = String(result.stdout || '').match(/version\s+([^\s]+)/);
         if (versionMatch) version = versionMatch[1];
       } catch { /* keep unknown */ }
       return { ok: true, path: winBash, version };
@@ -558,6 +567,7 @@ function compareVersions(a, b) {
 module.exports = {
   checkDeps,
   checkBash,
+  resolveWindowsBashCandidates,
   autoInstallDeps,
   detectPlatform,
   getSkillsDirs,
