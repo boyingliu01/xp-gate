@@ -6,7 +6,7 @@
  *         leads with it. Behavior is exercised through an injected fake spawner,
  *         so no real interpreter configuration is assumed on the host (#469
  *         follow-up, Delphi walkthrough R1 MN-06).
- * @covers AC-WINBASH-01
+ * @covers AC-WINBASH-01, AC-WINBASH-02
  */
 const { describe, it, expect } = await import('vitest');
 const { resolveWindowsBashCandidates } = require('../detect-deps.js');
@@ -60,7 +60,7 @@ describe('resolveWindowsBashCandidates (win32 authoritative bash)', () => {
     expect(spawn.probed.slice(-2)).toEqual(['C:\\a\\bash.exe', 'C:\\b\\bash.exe']);
   });
 
-  it('AC-WINBASH-01: probes known Git paths before PATH discoveries', () => {
+  it('AC-WINBASH-02: probes known Git paths before PATH discoveries', () => {
     // Regression for the doctor fan-out starvation: System32\bash.exe leads
     // `where bash` on WSL machines and its cold launch blocks ~3.4s. It must
     // never be spawned at all — neither from where-output nor as any fallback.
