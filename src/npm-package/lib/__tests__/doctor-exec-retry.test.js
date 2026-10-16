@@ -23,6 +23,7 @@ function stubExec(behaviors) {
   const calls = [];
   util.promisify = function (fn) {
     if (fn && fn.name === 'exec') {
+      stubWasConsumed = true;
       return (cmd, opts = {}) => {
         const attempt = calls.length;
         calls.push(cmd);
@@ -42,9 +43,22 @@ function stubExec(behaviors) {
   };
 }
 
+// Node couples exec to promisify via a custom symbol; if a future runtime drops
+// that coupling the name-based stub above silently stops intercepting and the
+// real cmd.exe child runs. Track whether the stub was ever installed into a
+// doctor load so afterEach can fail loudly instead of passing vacuously.
+let stubWasConsumed = false;
+
 describe('execWithTimeout empty-stream retry (#525 follow-up)', () => {
   let stub = null;
-  afterEach(() => { if (stub) { stub.restore(); stub = null; } });
+  afterEach(() => {
+    if (stub) { stub.restore(); stub = null; }
+    // Node couples exec to promisify via a custom symbol. If that coupling ever
+    // disappears, the fn.name === 'exec' stub silently stops intercepting and
+    // tests would pass against real cmd.exe children — fail loudly instead.
+    expect(stubWasConsumed).toBe(true);
+    stubWasConsumed = false;
+  });
 
   function freshDoctor() {
     const doctorPath = require.resolve('../doctor.js');
@@ -63,6 +77,20 @@ describe('execWithTimeout empty-stream retry (#525 follow-up)', () => {
     expect(result).toEqual({ stdout: 'v24.19.0', stderr: '' });
   });
 
+  it('AC-DOCTOR-RETRY-01: returns null after exhausting attempts on a persistently empty probe', async () => {
+    stub = stubExec([
+      (cb) => cb(null, '', ''),
+      (cb) => cb(null, '', ''),
+      (cb) => cb(null, '', ''),
+      (cb) => cb(null, 'unexpected fourth attempt', ''),
+    ]);
+    const execWithTimeout = freshDoctor();
+    const result = await execWithTimeout('node --version', {});
+    // win32: 3 attempts then null; other platforms: single attempt, still null.
+    expect(result).toBeNull();
+    expect(stub.calls.length).toBe(process.platform === 'win32' ? 3 : 1);
+  });
+
   it('AC-DOCTOR-RETRY-01: does not retry when the probe produced output', async () => {
     stub = stubExec([(cb) => cb(null, 'git version 2.54.0\n', '')]);
     const execWithTimeout = freshDoctor();
@@ -77,5 +105,47 @@ describe('execWithTimeout empty-stream retry (#525 follow-up)', () => {
     const result = await execWithTimeout('definitely-not-a-tool --version', {});
     expect(stub.calls.length).toBe(1);
     expect(result).toBeNull();
+  });
+
+  it('AC-DOCTOR-RETRY-01: retries:1 opts a side-effecting call out of the retry', async () => {
+    stub = stubExec([
+      (cb) => cb(null, '', ''),
+      (cb) => cb(null, 'unexpected second attempt', ''),
+    ]);
+    const execWithTimeout = freshDoctor();
+    const result = await execWithTimeout('some-mutating-command', { retries: 1 });
+    expect(stub.calls.length).toBe(1);
+    expect(result).toBeNull();
+  });
+
+  it('AC-DOCTOR-RETRY-01: the retries option is consumed, not forwarded to exec', async () => {
+    let forwarded = null;
+    stub = stubExec([(cb) => { cb(null, 'ok\n', ''); }]);
+    // Capture what doctor hands to the promisified exec by re-stubbing with an
+    // options recorder: stubExec's behaviors receive only the callback, so
+    // assert forwarding through a second fresh module with a capturing wrapper.
+    const util = require('util');
+    const originalPromisify = util.promisify;
+    const execWithTimeout = (() => {
+      util.promisify = function (fn) {
+        if (fn && fn.name === 'exec') {
+          stubWasConsumed = true;
+          return (cmd, opts = {}) => {
+            forwarded = opts;
+            return Promise.resolve({ stdout: 'ok\n', stderr: '' });
+          };
+        }
+        return originalPromisify.call(util, fn);
+      };
+      const doctorPath = require.resolve('../doctor.js');
+      delete require.cache[doctorPath];
+      const f = require(doctorPath).execWithTimeout;
+      util.promisify = originalPromisify;
+      return f;
+    })();
+    const result = await execWithTimeout('git --version', { retries: 2, timeout: 999 });
+    expect(result.stdout).toBe('ok');
+    expect(forwarded.retries).toBeUndefined();
+    expect(forwarded.timeout).toBe(999);
   });
 });

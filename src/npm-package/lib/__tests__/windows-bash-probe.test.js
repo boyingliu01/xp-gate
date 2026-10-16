@@ -89,4 +89,20 @@ describe('resolveWindowsBashCandidates (win32 authoritative bash)', () => {
     const result = resolveWindowsBashCandidates(spawn, fakeWhere(new Error('where unavailable')));
     expect(result).toBe('C:\\msys64\\usr\\bin\\bash.exe');
   });
+
+  it('AC-WINBASH-02: WSL stubs are skipped by name regardless of separators or case', () => {
+    // The filter normalizes slashes and ignores case/drive: forward-slash and
+    // lowercase variants of the same stub must still produce NO spawn call.
+    // The AppX alias lives under <Windows>\SystemApps\Microsoft.WSL_* — a
+    // user's own install merely NAMED ...\WindowsApps\... is NOT the stub and
+    // must still be probed (output-based rejection covers it).
+    const spawn = fakeSpawn({});
+    resolveWindowsBashCandidates(spawn, fakeWhere(
+      'c:/windows/sysnative/bash.exe\r\nC:\\WINDOWS\\System32\\bash.exe\r\nC:\\Windows\\SysWOW64\\bash.exe\r\nC:\\Users\\me\\AppData\\Local\\Microsoft\\WindowsApps\\bash.exe\r\n'
+    ));
+    expect(spawn.probed.filter(p => /system32|sysnative|syswow64|appdata\\local\\microsoft\\windowsapps/i.test(p.replace(/\//g, '\\')))).toEqual([]);
+    const userOwned = fakeSpawn({});
+    resolveWindowsBashCandidates(userOwned, fakeWhere('D:\\Tools\\WindowsApps\\bash.exe\r\n'));
+    expect(userOwned.probed).toContain('D:\\Tools\\WindowsApps\\bash.exe');
+  });
 });

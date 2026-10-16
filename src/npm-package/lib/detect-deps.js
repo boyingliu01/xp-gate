@@ -320,8 +320,22 @@ function resolveWindowsBashCandidates(spawnProbe, whereExecSync) {
       // launch costs seconds (see above). WindowsApps\bash.exe is the same
       // WSL stub family (it just errors differently when WSL is absent).
       if (!p) continue;
-      if (/\\WindowsApps\\bash\.exe$/i.test(p)) continue;
-      if (/^.*\\System32\\bash\.exe$/i.test(p) || /^.*\\Sysnative\\bash\.exe$/i.test(p)) continue;
+      // Match on normalized separators: forward slashes, mixed case, or a
+      // non-C drive would otherwise slip a WSL stub past the filter and back
+      // into the multi-second cold-launch stall.
+      const norm = p.replace(/\//g, '\\');
+      // The WSL launcher appears as System32/Sysnative/SysWOW64\bash.exe, the
+      // AppX alias <Windows>\SystemApps\Microsoft.WSL_*\bash.exe, and the
+      // per-user AppX execution alias ...\AppData\Local\Microsoft\WindowsApps\
+      // bash.exe. A user's own install merely NAMED ...\WindowsApps\... (not
+      // under Microsoft\) is NOT the stub and stays in the list.
+      if (/\\windowsapps\\bash\.exe$/i.test(norm)
+        && (/\\systemapps\\/i.test(norm) || /\\appdata\\local\\microsoft\\windowsapps\\/i.test(norm))) continue;
+      // The WSL stub lives in the matching-arch System32 view: 64-bit
+      // C:\Windows\System32\bash.exe AND the 32-bit emulation redirect target
+      // C:\Windows\SysWOW64\bash.exe (where reports either depending on the
+      // bitness of the caller).
+      if (/\\windows\\system32\\bash\.exe$/i.test(norm) || /\\windows\\sysnative\\bash\.exe$/i.test(norm) || /\\windows\\syswow64\\bash\.exe$/i.test(norm)) continue;
       if (!candidates.includes(p)) candidates.push(p);
     }
   } catch { /* where unavailable */ }
@@ -358,14 +372,21 @@ function checkBash() {
         // Git Bash's login startup (`bash --version`) costs ~1.7s, and checkBash
         // sits on hot paths (doctor fan-out, every gate-runner launch) where a
         // synchronous stall starves concurrent execs past their timeouts. The
-        // -c form is non-login (~90ms); uname carries the version detail line.
+        // -c form is non-login (~300ms); uname proves the MSYS family AND bash
+        // --version inside it still yields the real bash version number — the
+        // `version` field must stay a bash version, not the uname string.
         // NOTE the cp. prefix: this module binds only execSync at file scope,
         // and checkBash sits outside probeWindowsBash's local spawnSync binding
         // — a bare spawnSync here is a ReferenceError swallowed by the catch,
         // which used to pin the detail line at "unknown" forever.
-        const result = require('child_process').spawnSync(winBash, ['-c', 'uname -s', 'sh'], { encoding: 'utf8', timeout: 5000 });
+        const result = require('child_process').spawnSync(winBash, ['-c', 'uname -s; bash --version | sed -n 1p', 'sh'], { encoding: 'utf8', timeout: 5000 });
         const out = String(result.stdout || '').trim();
-        if (out) version = out;
+        // Keep the field in the same shape checkEnv prints for every other
+        // tool ("GNU bash, version X.Y.Z(...)"): doctor prefixes "GNU bash,
+        // version ", so hand back the bare version tuple, not the whole line.
+        const versionLine = out.split('\n').find(line => /version/.test(line));
+        const match = versionLine && versionLine.match(/version\s+(\S+)/);
+        if (match) version = match[1];
       } catch { /* keep unknown */ }
       return { ok: true, path: winBash, version };
     }

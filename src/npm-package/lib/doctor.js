@@ -111,17 +111,28 @@ async function execWithTimeout(cmd, opts = {}) {
   // standalone prints fine in ~300ms. The old code read that empty stream as
   // "Not found" and red-flagged Node/Git/hooksPath. A version/config probe is
   // idempotent, so one quiet retry distinguishes the lost stream from a tool
-  // that genuinely fails.
-  const maxAttempts = process.platform === 'win32' ? 3 : 1;
+  // that genuinely fails. Contract: every caller here runs an IDEMPOTENT probe
+  // (`--version`, `config --get`, `rev-parse`) — a future side-effecting call
+  // site must pass { retries: 1 } to opt out of the retry below. The option is
+  // consumed here and never forwarded to exec (it lands before the spread).
+  const maxAttempts = process.platform === 'win32' ? (opts.retries || 3) : 1;
   for (let attempt = 0; attempt < maxAttempts; attempt++) {
     try {
+      const { retries, ...execOpts } = opts;
       const { stdout, stderr } = await execAsync(cmd, {
-        ...opts,
-        timeout: opts.timeout || EXEC_TIMEOUT_MS,
+        ...execOpts,
+        timeout: execOpts.timeout || EXEC_TIMEOUT_MS,
       });
-      if (!stdout.trim() && !stderr.trim() && attempt + 1 < maxAttempts) {
-        await new Promise(resolve => setTimeout(resolve, 50));
-        continue;
+      if (!stdout.trim() && !stderr.trim()) {
+        // Exit-0-but-empty: nothing usable came back. Retry while attempts
+        // remain; report null once they are exhausted, so every caller's
+        // existing null check ("probe produced nothing") applies — an empty
+        // non-null result would read as a present tool with no version.
+        if (attempt + 1 < maxAttempts) {
+          await new Promise(resolve => setTimeout(resolve, 50));
+          continue;
+        }
+        return null;
       }
       return { stdout: stdout.trim(), stderr: stderr.trim() };
     } catch (err) {
@@ -131,7 +142,10 @@ async function execWithTimeout(cmd, opts = {}) {
       return null;
     }
   }
-  return null; // unreachable: every path above returns
+  // Exhausted all attempts with exit-0-but-empty streams: report null so every
+  // caller's existing null check ("probe produced nothing usable") applies —
+  // an empty non-null result would read as a present tool with no version.
+  return null;
 }
 
 /**
