@@ -4,7 +4,7 @@ All notable changes to this project will be documented in this file.
 
 ## [0.27.1.0] - 2026-10-16
 
-Windows doctor 假阴性清算：cmd.exe 高并发探测下 `node --version`/`git --version`/`core.hooksPath` 会以"exit 0 + 空 stdout"的形态丢失输出，doctor 曾据此在健康机器上报 "Not found"。同时修正 bash 版本字段语义与 WSL stub 过滤的路径变体盲区。
+Windows doctor 假阴性清算：cmd.exe 高并发探测下 `node --version`/`git --version`/`core.hooksPath` 会以"exit 0 + 空 stdout"的形态丢失输出，doctor 曾据此在健康机器上报 "Not found"。同时修正 bash 版本字段语义与 WSL stub 过滤的路径变体盲区。（注：0.27.1 版本号被 npm staging 状态占用无法发布，实际以 0.27.2 发布于 registry；代码内容一致。）
 
 ### Fixed
 
