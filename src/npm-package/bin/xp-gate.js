@@ -19,15 +19,54 @@ const { bootstrap } = require('../lib/bootstrap.js');
 const { updateHooks } = require('../lib/update-hooks.js');
 const gateRunner = require('../lib/gate-runner.js');
 
-function handleUIReview() {
-  const { execSync } = require('child_process');
-  const uiReviewPath = path.join(__dirname, '..', 'lib', 'ui-review.ts');
-  try {
-    execSync(`npx -y tsx "${uiReviewPath}"`, { stdio: 'inherit' });
-    process.exit(0);
-  } catch (err) {
-    process.exit(1);
+// #392-#6: a user-supplied path embedded in a shell command string lets cmd.exe
+// interpret metacharacters (& | ^ < > % ! " and newline) and execute injected
+// commands. On POSIX a bare spawn (shell:false) passes argv as discrete,
+// uninterpreted bytes, so nothing is injectable. On win32 a `.cmd` wrapper such
+// as npx.cmd cannot be launched without a shell (CreateProcess raises EINVAL),
+// so we must shell out through cmd.exe -- and we only do so AFTER rejecting any
+// argument that carries a cmd metacharacter. Rejection, not escaping, is the
+// safe defense: a path containing a metachar is refused outright rather than
+// risk a quoting mistake. This guard must stay in front of every launcher.
+const CMD_METACHAR_RE = /[&|^<>%!"\n]/;
+
+function firstUnsafeArg(argv) {
+  for (const arg of argv) {
+    if (typeof arg === 'string' && CMD_METACHAR_RE.test(arg)) return arg;
   }
+  return undefined;
+}
+
+function spawnNpx(tsxArgs) {
+  const { spawnSync } = require('child_process');
+  // Reject any user-supplied argument that could be interpreted by cmd.exe.
+  // Every element of tsxArgs beyond the fixed tokens (-y tsx <script>) is a
+  // user path; a metachar there is refused, not quoted, per #392-#6.
+  const unsafe = firstUnsafeArg(tsxArgs);
+  if (unsafe) {
+    console.error(`check-alignment: refusing path containing a shell metacharacter: ${unsafe}`);
+    return { status: 1 };
+  }
+  const isWin = process.platform === 'win32';
+  // shell:false is inject-safe on POSIX. On win32 npx.cmd needs cmd.exe, which
+  // is only safe because every user argument above is guaranteed metachar-free.
+  // Guarded IO: a failed spawn must surface as a result, not crash the CLI.
+  let result;
+  try {
+    result = spawnSync(isWin ? 'npx.cmd' : 'npx', ['-y', 'tsx', ...tsxArgs], {
+      stdio: 'inherit',
+      shell: isWin,
+    });
+  } catch (err) {
+    return { status: 1, error: err };
+  }
+  return result || { status: 1 };
+}
+
+function handleUIReview() {
+  const uiReviewPath = path.join(__dirname, '..', 'lib', 'ui-review.ts');
+  const result = spawnNpx([uiReviewPath]);
+  process.exitCode = result.error ? 1 : (result.status === 0 ? 0 : 1);
 }
 
 function runAlignmentInProcess(specPath, testDirs, outputPath, jsonMode) {
@@ -62,22 +101,14 @@ function runAlignmentInProcess(specPath, testDirs, outputPath, jsonMode) {
 }
 
 function runAlignmentViaNpx(runnerPath, specPath, testDirs, outputPath, jsonMode) {
-  const { spawnSync } = require('child_process');
-  // User-supplied paths travel as discrete argv -- never embedded in a shell
-  // command string (preserves the #392-#6 injection fix).
+  // User-supplied paths travel as discrete argv elements routed through
+  // spawnNpx, which refuses any argument carrying a cmd metacharacter before a
+  // shell can see it (#392-#6). The runner script path is a fixed internal path.
   const argv = [runnerPath, '--spec', specPath];
   if (testDirs) argv.push('--tests', testDirs[0]);
   if (outputPath) argv.push('--output', outputPath);
   if (jsonMode) argv.push('--json');
-  // Guarded IO: a failed spawn must surface loudly, not crash the CLI silently.
-  let result;
-  try {
-    result = spawnSync('npx', ['-y', 'tsx', ...argv], { stdio: 'inherit', shell: process.platform === 'win32' });
-  } catch (err) {
-    console.error('check-alignment: unable to launch the alignment engine (tsx unavailable).');
-    console.error(err instanceof Error ? err.message : String(err));
-    return 1;
-  }
+  const result = spawnNpx(argv);
   if (result.error) {
     console.error('check-alignment: unable to load the alignment engine (tsx unavailable).');
     console.error(result.error.message);
@@ -105,12 +136,19 @@ async function runAlignmentCheck(subargs) {
   // resolvable, which happens in the published global install (the package
   // ships zero runtime deps per the zero-install contract). npx self-provisions
   // tsx on demand, so the published command stays functional without adding a dep.
+  //
+  // The try guards ONLY the module-load step. The engine invocation must sit
+  // outside it: an engine-level failure is a real bug that must surface, not be
+  // silently swallowed and misattributed to "tsx unavailable" by the fallback.
   try {
     require('tsx/cjs');
-    return runAlignmentInProcess(specPath, testDirs, outputPath, jsonMode);
   } catch (err) {
+    if (!err || (err.code !== 'MODULE_NOT_FOUND' && !/Cannot find module/.test(String(err && err.message)))) {
+      throw err;
+    }
     return runAlignmentViaNpx(runnerPath, specPath, testDirs, outputPath, jsonMode);
   }
+  return runAlignmentInProcess(specPath, testDirs, outputPath, jsonMode);
 }
 
 const COMMANDS = {
@@ -197,7 +235,7 @@ const COMMANDS = {
       }
       return doctor(subargs).then(code => process.exit(code));
     },
-    usage: 'xp-gate doctor [--fix [--install-tools] | --sync-hooks [--force]] | --json | --format json  (the two machine-readable modes print one JSON document and refuse --fix/--sync-hooks)'
+    usage: 'xp-gate doctor [--fix [--install-tools] | --sync-hooks [--force] | --refresh-env] | --json | --format json  (the two machine-readable modes print one JSON document and refuse --fix/--sync-hooks; --refresh-env is read-only so it combines with them)'
   },
   'ui-review': {
     description: 'Run UI review for non-sprint developers (generates .ui-gate-result.json)',
