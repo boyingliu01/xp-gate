@@ -104,18 +104,34 @@ function noteSandboxAttribution(err) {
 }
 
 async function execWithTimeout(cmd, opts = {}) {
-  try {
-    const { stdout, stderr } = await execAsync(cmd, {
-      ...opts,
-      timeout: opts.timeout || EXEC_TIMEOUT_MS,
-    });
-    return { stdout: stdout.trim(), stderr: stderr.trim() };
-  } catch (err) {
-    // #525: a bare null here reads as "tool missing" and has already cost a
-    // misdiagnosis round. Name the sandbox once when it is the sandbox.
-    noteSandboxAttribution(err);
-    return null;
+  // Win32 false-negative guard. Under cmd.exe (exec's shell), a spawned probe
+  // can exit 0 while its stdout never reaches us — measured on this machine:
+  // `node --version` returns exit 0 with an EMPTY stream when many spawns are
+  // in flight at once (doctor's parallel fan-out), while the same command
+  // standalone prints fine in ~300ms. The old code read that empty stream as
+  // "Not found" and red-flagged Node/Git/hooksPath. A version/config probe is
+  // idempotent, so one quiet retry distinguishes the lost stream from a tool
+  // that genuinely fails.
+  const maxAttempts = process.platform === 'win32' ? 3 : 1;
+  for (let attempt = 0; attempt < maxAttempts; attempt++) {
+    try {
+      const { stdout, stderr } = await execAsync(cmd, {
+        ...opts,
+        timeout: opts.timeout || EXEC_TIMEOUT_MS,
+      });
+      if (!stdout.trim() && !stderr.trim() && attempt + 1 < maxAttempts) {
+        await new Promise(resolve => setTimeout(resolve, 50));
+        continue;
+      }
+      return { stdout: stdout.trim(), stderr: stderr.trim() };
+    } catch (err) {
+      // #525: a bare null here reads as "tool missing" and has already cost a
+      // misdiagnosis round. Name the sandbox once when it is the sandbox.
+      noteSandboxAttribution(err);
+      return null;
+    }
   }
+  return null; // unreachable: every path above returns
 }
 
 /**
