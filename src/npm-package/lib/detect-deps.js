@@ -296,10 +296,14 @@ function probeWindowsBash() {
 function resolveWindowsBashCandidates(spawnProbe, whereExecSync) {
   const _execSync = whereExecSync || execSync;
   const candidates = [];
-  try {
-    const found = _execSync('where bash', { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] });
-    for (const line of found.split(/\r?\n/)) if (line.trim()) candidates.push(line.trim());
-  } catch { /* where unavailable */ }
+  // Well-known interpreters FIRST. Two reasons, both measured on win32:
+  // 1. A cold WSL launch (System32\bash.exe leads `where bash` when WSL is
+  //    installed) blocks its spawnSync for ~3.4s. checkBash runs inside
+  //    doctor's parallel fan-out, and that synchronous stall starves the
+  //    event loop past EXEC_TIMEOUT_MS — node/git then falsely report
+  //    "Not found" while spawning them standalone takes ~300ms.
+  // 2. The known Git paths ARE the answer we are looking for; probing them
+  //    first also skips pointless launches of stubs we would reject anyway.
   candidates.push(
     'C:\\Program Files\\Git\\bin\\bash.exe',
     'C:\\Program Files\\Git\\usr\\bin\\bash.exe',
@@ -308,6 +312,19 @@ function resolveWindowsBashCandidates(spawnProbe, whereExecSync) {
     'C:\\msys64\\usr\\bin\\bash.exe',
     'C:\\cygwin64\\bin\\bash.exe'
   );
+  try {
+    const found = _execSync('where bash', { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] });
+    for (const line of found.split(/\r?\n/)) {
+      const p = line.trim();
+      // Skip the WSL launcher outright: uname would reject it, and a cold
+      // launch costs seconds (see above). WindowsApps\bash.exe is the same
+      // WSL stub family (it just errors differently when WSL is absent).
+      if (!p) continue;
+      if (/\\WindowsApps\\bash\.exe$/i.test(p)) continue;
+      if (/^.*\\System32\\bash\.exe$/i.test(p) || /^.*\\Sysnative\\bash\.exe$/i.test(p)) continue;
+      if (!candidates.includes(p)) candidates.push(p);
+    }
+  } catch { /* where unavailable */ }
   for (const candidate of candidates) {
     try {
       const r = spawnProbe(candidate, ['-c', 'echo "[$1]"; uname -s', 'sh', 'XPGATE_ARGV_PROBE'], {
@@ -337,11 +354,18 @@ function checkBash() {
     if (winBash) {
       let version = 'unknown';
       try {
-        // spawnSync with discrete argv — never interpolate a discovered path
-        // into a shell string (a PATH dir name may carry cmd metacharacters).
-        const result = spawnSync(winBash, ['--version'], { encoding: 'utf8', timeout: 5000 });
-        const versionMatch = String(result.stdout || '').match(/version\s+([^\s]+)/);
-        if (versionMatch) version = versionMatch[1];
+        // --version through the SAME probe-style argv as the candidate loop:
+        // Git Bash's login startup (`bash --version`) costs ~1.7s, and checkBash
+        // sits on hot paths (doctor fan-out, every gate-runner launch) where a
+        // synchronous stall starves concurrent execs past their timeouts. The
+        // -c form is non-login (~90ms); uname carries the version detail line.
+        // NOTE the cp. prefix: this module binds only execSync at file scope,
+        // and checkBash sits outside probeWindowsBash's local spawnSync binding
+        // — a bare spawnSync here is a ReferenceError swallowed by the catch,
+        // which used to pin the detail line at "unknown" forever.
+        const result = require('child_process').spawnSync(winBash, ['-c', 'uname -s', 'sh'], { encoding: 'utf8', timeout: 5000 });
+        const out = String(result.stdout || '').trim();
+        if (out) version = out;
       } catch { /* keep unknown */ }
       return { ok: true, path: winBash, version };
     }
