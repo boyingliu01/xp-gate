@@ -79,15 +79,15 @@ describe('unused-imports.ts - Unused Imports Rule', () => {
     expect(violations).toEqual([]);
   });
 
-  it('should return empty array when adapter throws', () => {
+  it('should propagate adapter errors (no empty catch, #392)', () => {
     const mockAdapterThrowing = {
       ...mockAdapter,
+      // Violate the adapter contract: `imports` must be an array. With the old
+      // empty catch this was swallowed; now it must bubble up to the analyzer.
       imports: () => { throw new Error('Parse error'); }
     };
     
-    const violations = unusedImportsRule.check('test.ts', mockAdapterThrowing as never);
-    
-    expect(violations).toEqual([]);
+    expect(() => unusedImportsRule.check('test.ts', mockAdapterThrowing as never)).toThrow();
   });
 
   it('should handle namespace imports', () => {

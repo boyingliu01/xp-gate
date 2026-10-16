@@ -69,11 +69,9 @@ export const lspRule: Rule = {
   threshold: 0,
   severity: 'info',
   check: (file: string, adapter: Adapter): Violation[] => {
-    try {
-      const classes = (adapter.extractClasses() || []) as ClassInfo[];
-      return classes.flatMap((cls) => checkClass(file, cls));
-    } catch {
-      return [];
-    }
+    // #392-#4: no empty catch — let adapter/rule errors bubble up to
+    // analyzer.runRuleOnFile() so they surface as gate errors, not silent [].
+    const classes = (adapter.extractClasses() || []) as ClassInfo[];
+    return classes.flatMap((cls) => checkClass(file, cls));
   },
 };

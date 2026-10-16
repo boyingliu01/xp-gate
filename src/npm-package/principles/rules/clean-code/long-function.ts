@@ -11,36 +11,34 @@ export const longFunctionRule: Rule = {
     // Read the ACTIVE config per invocation; a module-load snapshot was #457.
     const settings = getActiveConfig().rules['clean-code']['long-function'];
     
-    try {
-      interface FunctionObj {
-        name: string;
-        startLine: number;
-        length: number;
-      }
+    interface FunctionObj {
+      name: string;
+      startLine: number;
+      length: number;
+    }
+    
+    interface TypedAdapter {
+      extractFunctions?: () => FunctionObj[] | undefined;
+    }
+    
+    const typedAdapter = adapter as TypedAdapter;
+    const functions = typedAdapter.extractFunctions?.() || [];
+    
+    for (const func of functions) {
+      const { name, startLine, length } = func;
       
-      interface TypedAdapter {
-        extractFunctions?: () => FunctionObj[] | undefined;
+      if (length > (settings.threshold ?? 0)) {
+        violations.push({
+          file,
+          line: startLine ?? 1,
+          ruleId: 'clean-code.long-function',
+          message: `Function "${name}" is too long: ${length} lines (maximum: ${
+            settings.threshold
+          })`,
+          severity: (settings.severity as Severity) ?? 'warning'
+        });
       }
-      
-      const typedAdapter = adapter as TypedAdapter;
-      const functions = typedAdapter.extractFunctions?.() || [];
-      
-      for (const func of functions) {
-        const { name, startLine, length } = func;
-        
-        if (length > (settings.threshold ?? 0)) {
-          violations.push({
-            file,
-            line: startLine ?? 1,
-            ruleId: 'clean-code.long-function',
-            message: `Function "${name}" is too long: ${length} lines (maximum: ${
-              settings.threshold
-            })`,
-            severity: (settings.severity as Severity) ?? 'warning'
-          });
-        }
-      }
-    } catch { }
+    }
     
     return violations;
   }

@@ -11,22 +11,20 @@ export const missingErrorHandlingRule: Rule = {
     // Read the ACTIVE config per invocation; a module-load snapshot was #457.
     const settings = getActiveConfig().rules['clean-code']['missing-error-handling'];
     
-    try {
-      const typedAdapter = adapter as { extractFunctions?: () => Array<{name?: string; startLine?: number; line?: number; ioOperations?: string[]; hasTryCatch?: boolean;}> | undefined };
-      const functions = typedAdapter.extractFunctions?.() || [];
-      
-      for (const func of functions) {
-        if (func.ioOperations && func.ioOperations.length > 0 && !func.hasTryCatch) {
-          violations.push({
-            file,
-            line: func.startLine ?? func.line ?? 1,
-            ruleId: 'clean-code.missing-error-handling',
-            message: `Function "${func.name}" has IO operations (${func.ioOperations.join(', ')}) without error handling`,
-            severity: (settings.severity as Severity) ?? 'warning'
-          });
-        }
+    const typedAdapter = adapter as { extractFunctions?: () => Array<{name?: string; startLine?: number; line?: number; ioOperations?: string[]; hasTryCatch?: boolean;}> | undefined };
+    const functions = typedAdapter.extractFunctions?.() || [];
+    
+    for (const func of functions) {
+      if (func.ioOperations && func.ioOperations.length > 0 && !func.hasTryCatch) {
+        violations.push({
+          file,
+          line: func.startLine ?? func.line ?? 1,
+          ruleId: 'clean-code.missing-error-handling',
+          message: `Function "${func.name}" has IO operations (${func.ioOperations.join(', ')}) without error handling`,
+          severity: (settings.severity as Severity) ?? 'warning'
+        });
       }
-    } catch { }
+    }
     
     return violations;
   }
