@@ -722,6 +722,24 @@ specification:
           criteria: 空选择（--languages= 或 --languages=,）与裸 --languages 一样
             回落到自动探测，绝不产生名为 '' 的语言（Round 1 架构席位 MI-02）
           test_type: unit
+    # ============================================================
+    # REQ-469: Windows 权威 bash 解析 —— hooks 是 bash 脚本，Windows 上 PATH 里的
+    # "bash" 含义不明（WSL System32 stub 文件系统视图错误且丢 $1），必须由
+    # detect-deps.checkBash() 探测出真正的 MSYS bash，并且探测本身不得拖垮宿主。
+    # 来源：issue #469 + v0.27.0 code walkthrough（doctor 假 "Not found" 根因）。
+    # ============================================================
+    - id: REQ-469
+      description: checkBash/resolveWindowsBashCandidates 在 win32 上只接受 argv 往返成功且 uname 报 MINGW/MSYS/CYGWIN 的 bash；已知 Git 路径先于 PATH 发现被探测，WSL stub 按路径名直接跳过（冷启动阻塞事件循环数秒，会饿死 doctor 并行探测）
+      priority: critical
+      acceptance_criteria:
+        - id: AC-WINBASH-01
+          criteria: 注入式 fake spawner 下，argv 往返失败或 uname 为 Linux 的候选一律拒收；
+            首个往返成功且 uname 命中 MINGW/MSYS/CYGWIN 的候选被选中；探测抛异常的候选被跳过而不中断
+          test_type: unit
+        - id: AC-WINBASH-02
+          criteria: where bash 输出中的 WSL stub（System32/Sysnative/WindowsApps 下的 bash.exe）
+            不产生任何 spawnSync 调用；已知 Git/MSYS 安装路径排在 PATH 发现之前
+          test_type: unit
   design_decisions:
     - id: DD-001
       decision: 走薄桥（方案 A）在 ctx.tools 注册三工具，而非独立 MCP server 或纯技能
