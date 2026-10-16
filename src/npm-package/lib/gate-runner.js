@@ -18,15 +18,20 @@ const path = require('node:path');
  * behaves exactly as it does inside the commit hook.
  */
 function runGateAdapter(scriptPath, cwd = process.cwd()) {
+  let bashCommand = 'bash';
   if (process.platform === 'win32') {
-    try {
-      execSync('bash --version', { stdio: 'pipe', timeout: 5000 });
-    } catch {
+    // PATH may lead with the WSL System32 stub, which cannot run these hooks
+    // (Linux filesystem view, and `-c` scripts receive an empty $1 through it).
+    // checkBash probes for an MSYS/MINGW bash that round-trips argv correctly.
+    const { checkBash } = require('./detect-deps.js');
+    const bash = checkBash();
+    if (!bash.ok) {
       console.log('⚠️  This gate requires bash to run shell scripts.');
       console.log('   On Windows, install Git for Windows (includes Git Bash) or enable WSL.');
       console.log('   Alternatively, install the required tool directly and run the gate again.');
       return;
     }
+    bashCommand = bash.path;
   }
   const scriptDir = path.dirname(scriptPath);
   const commonScript = [
@@ -62,7 +67,7 @@ function runGateAdapter(scriptPath, cwd = process.cwd()) {
   // execFileSync avoids an extra /bin/sh layer, so bash receives the script as a
   // single argv arg (no shell-metacharacter injection through the path).
   execFileSync(
-    'bash',
+    bashCommand,
     ['--noprofile', '--norc', '-c', wrap, 'xp-gate', commonScript, nowMsScript, scriptPath, process.execPath],
     { stdio: 'inherit', cwd }
   );

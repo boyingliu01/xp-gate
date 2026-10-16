@@ -8,6 +8,9 @@ const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
 const { spawnSync } = require('node:child_process');
+// Resolve the authoritative MSYS bash on Windows (PATH 'bash' may be the WSL stub).
+const { checkBash } = require('../../src/npm-package/lib/detect-deps.js');
+const BASH = (() => { const b = checkBash(); return b.ok ? b.path : 'bash'; })();
 
 describe('build-integrity mirror validation', () => {
   let fixture;
@@ -19,7 +22,7 @@ describe('build-integrity mirror validation', () => {
   }
 
   function validate(...args) {
-    return spawnSync('bash', [script, ...args], { cwd: fixture, env: gitEnv, encoding: 'utf8' });
+    return spawnSync(BASH, [script, ...args], { cwd: fixture, env: gitEnv, encoding: 'utf8' });
   }
 
   beforeEach(() => {
@@ -52,24 +55,24 @@ describe('build-integrity mirror validation', () => {
     ['new canonical file', () => fs.writeFileSync(path.join(fixture, 'src/build-integrity/new.ts'), 'new\n')],
   ])('rejects %s', (_name, arrangeDrift) => {
     arrangeDrift();
-    const result = spawnSync('bash', [script], { cwd: fixture, env: gitEnv, encoding: 'utf8' });
+    const result = spawnSync(BASH, [script], { cwd: fixture, env: gitEnv, encoding: 'utf8' });
     expect(result.status).toBe(1);
   });
 
   it('accepts byte-identical trees', () => {
-    const result = spawnSync('bash', [script], { cwd: fixture, env: gitEnv, encoding: 'utf8' });
+    const result = spawnSync(BASH, [script], { cwd: fixture, env: gitEnv, encoding: 'utf8' });
     expect(result.status).toBe(0);
   });
 
   it('accepts a clean committed mirror after sync', () => {
-    const result = spawnSync('bash', [script, '--post-sync'], { cwd: fixture, env: gitEnv, encoding: 'utf8' });
+    const result = spawnSync(BASH, [script, '--post-sync'], { cwd: fixture, env: gitEnv, encoding: 'utf8' });
     expect(result.status).toBe(0);
   });
 
   it('rejects an untracked mirror file after sync creates a new pair', () => {
     fs.writeFileSync(path.join(fixture, 'src/build-integrity/new.ts'), 'new\n');
     fs.writeFileSync(path.join(fixture, 'src/npm-package/build-integrity/new.ts'), 'new\n');
-    const result = spawnSync('bash', [script, '--post-sync'], { cwd: fixture, env: gitEnv, encoding: 'utf8' });
+    const result = spawnSync(BASH, [script, '--post-sync'], { cwd: fixture, env: gitEnv, encoding: 'utf8' });
     expect(result.status).toBe(1);
     expect(result.stderr).toContain('?? src/npm-package/build-integrity/new.ts');
   });

@@ -8,6 +8,11 @@ const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
 const { spawnSync } = require('node:child_process');
+// On Windows a bare PATH 'bash' may resolve to the WSL System32 stub, which
+// cannot run these scripts (Linux filesystem view, dropped argv). Resolve the
+// same authoritative MSYS bash the hooks get.
+const { checkBash } = require('../../src/npm-package/lib/detect-deps.js');
+const BASH = (() => { const b = checkBash(); return b.ok ? b.path : 'bash'; })();
 
 describe('hook mirror validation', () => {
   let fixture;
@@ -35,7 +40,7 @@ describe('hook mirror validation', () => {
   const hookFiles = [
     'adapter-common.sh', 'gate-3.sh', 'gate-4.sh', 'gate-7.sh', 'gate-8.sh', 'gate-9.sh',
     'gate-10.sh', 'gate-12-file-hygiene.sh', 'post-merge', 'pre-commit', 'pre-push',
-    'sprint-gate.sh', 'lib/now-ms.sh', 'lib/jscpd-run.sh', 'lib/sprint-gate-report.sh', 'lib/test-failure.sh', 'lib/typecheck.sh', 'lib/validate-code-walkthrough.cjs',
+    'sprint-gate.sh', 'lib/coverage-total.sh', 'lib/python-test-selection.sh', 'lib/python-incremental-typecheck.sh', 'lib/now-ms.sh', 'lib/jscpd-run.sh', 'lib/sprint-gate-report.sh', 'lib/test-failure.sh', 'lib/typecheck.sh', 'lib/validate-code-walkthrough.cjs',
   ];
   // check-hook-mirror.sh also guards root-level shell copies and the
   // principles tree (#507 A-MAJOR-4) -- the fixture must carry the same
@@ -47,7 +52,7 @@ describe('hook mirror validation', () => {
   ];
 
   function validate(cwd) {
-    return spawnSync('bash', [script], { cwd, encoding: 'utf8' });
+    return spawnSync(BASH, [script], { cwd, encoding: 'utf8' });
   }
 
   beforeEach(() => {

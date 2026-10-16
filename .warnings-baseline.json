@@ -11,10 +11,6 @@
     "totalWarnings": 6,
     "lastAnalyzed": "2026-10-08T16:33:18.221Z"
   },
-  "src/npm-package/lib/sprint-state-manager.js": {
-    "totalWarnings": 3,
-    "lastAnalyzed": "2026-10-14T15:39:45.932Z"
-  },
   "src/mutation/runners/mutmut-runner.ts": {
     "totalWarnings": 11,
     "lastAnalyzed": "2026-10-14T15:41:31.674Z"
@@ -30,13 +26,5 @@
   "src/npm-package/mutation/runners/mutmut-runner.ts": {
     "totalWarnings": 11,
     "lastAnalyzed": "2026-10-14T15:41:31.676Z"
-  },
-  "src/mutation/__tests__/mutmut-runner.test.ts": {
-    "totalWarnings": 1,
-    "lastAnalyzed": "2026-10-15T06:40:19.974Z"
-  },
-  "plugins/dsh/src/skills.test.ts": {
-    "totalWarnings": 2,
-    "lastAnalyzed": "2026-10-16T07:02:30.516Z"
   }
 }

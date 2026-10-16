@@ -271,11 +271,78 @@ function getSkillsDirs(platform) {
 }
 
 /**
+ * Resolve a bash that can actually run the hooks.
+ *
+ * On Windows, `bash` on PATH is ambiguous: WSL installs C:\Windows\System32\
+ * bash.exe (a Linux interpreter whose filesystem view does not contain the
+ * Windows temp dirs the tooling passes to it), and its argv handling silently
+ * drops the positional arguments a `-c` script expects ($1 empty → scripts
+ * source nothing and "succeed" vacuously). Git for Windows ships the MSYS bash
+ * the hooks are written for. Probe candidates with an argv round-trip plus an
+ * uname check — only an MSYS/MINGW/CYGWIN bash counts on win32; a plain
+ * "bash --version" success proves nothing.
+ * @returns {string|null}
+ */
+function probeWindowsBash() {
+  const { spawnSync } = require('child_process');
+  const candidates = [];
+  try {
+    const found = execSync('where bash', { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] });
+    for (const line of found.split(/\r?\n/)) if (line.trim()) candidates.push(line.trim());
+  } catch { /* where unavailable */ }
+  candidates.push(
+    'C:\\Program Files\\Git\\bin\\bash.exe',
+    'C:\\Program Files\\Git\\usr\\bin\\bash.exe',
+    'C:\\Program Files (x86)\\Git\\bin\\bash.exe',
+    'C:\\Program Files (x86)\\Git\\usr\\bin\\bash.exe',
+    'C:\\msys64\\usr\\bin\\bash.exe',
+    'C:\\cygwin64\\bin\\bash.exe'
+  );
+  for (const candidate of candidates) {
+    try {
+      const r = spawnSync(candidate, ['-c', 'echo "[$1]"; uname -s', 'sh', 'XPGATE_ARGV_PROBE'], {
+        encoding: 'utf8',
+        timeout: 5000,
+        windowsHide: true,
+      });
+      const out = String((r && r.stdout) || '');
+      if (out.includes('[XPGATE_ARGV_PROBE]') && /(MINGW|MSYS|CYGWIN)/i.test(out)) {
+        return candidate;
+      }
+    } catch { /* next candidate */ }
+  }
+  return null;
+}
+
+/**
  * Check if bash is available on the system.
  * XP-Gate hooks are bash scripts — Windows users need Git Bash installed.
  * @returns {{ok: boolean, path?: string, message?: string}}
  */
 function checkBash() {
+  // On Windows resolve explicitly: PATH may lead with the WSL System32 stub,
+  // which cannot execute these hooks (wrong filesystem view, dropped $1).
+  if (process.platform === 'win32') {
+    const winBash = probeWindowsBash();
+    if (winBash) {
+      let version = 'unknown';
+      try {
+        const result = execSync(`"${winBash}" --version`, {
+          encoding: 'utf8',
+          stdio: ['ignore', 'pipe', 'pipe']
+        });
+        const versionMatch = result.match(/version\s+([^\s]+)/);
+        if (versionMatch) version = versionMatch[1];
+      } catch { /* keep unknown */ }
+      return { ok: true, path: winBash, version };
+    }
+    return {
+      ok: false,
+      message: 'bash not found. Windows users must install [Git for Windows](https://git-scm.com/download/win).\n' +
+        '   During installation, ensure "Git Bash Here" is checked — this adds bash.exe to PATH.\n' +
+        '   After installation, restart your terminal and run `npm install` again.'
+    };
+  }
   try {
     // Try 'bash' first (works on Linux/macOS and when Git Bash is in PATH)
     const result = execSync('bash --version', {
@@ -289,17 +356,11 @@ function checkBash() {
       version: versionMatch ? versionMatch[1] : 'unknown'
     };
   } catch (e) {
-    // On Windows with Git Bash, try common locations
+    // POSIX fallback: common absolute locations
     const bashPaths = [
-      // Git for Windows
-      'C:\\Program Files\\Git\\bin\\bash.exe',
-      'C:\\Program Files\\Git\\usr\\bin\\bash.exe',
-      'C:\\Program Files (x86)\\Git\\bin\\bash.exe',
-      'C:\\Program Files (x86)\\Git\\usr\\bin\\bash.exe',
-      // MSYS2
-      'C:\\msys64\\usr\\bin\\bash.exe',
-      // Cygwin
-      'C:\\cygwin64\\bin\\bash.exe',
+      '/bin/bash',
+      '/usr/bin/bash',
+      '/usr/local/bin/bash',
     ];
 
     for (const bashPath of bashPaths) {
@@ -319,15 +380,7 @@ function checkBash() {
       }
     }
 
-    // Windows-specific guidance
-    if (process.platform === 'win32') {
-      return {
-        ok: false,
-        message: 'bash not found. Windows users must install [Git for Windows](https://git-scm.com/download/win).\n' +
-          '   During installation, ensure "Git Bash Here" is checked — this adds bash.exe to PATH.\n' +
-          '   After installation, restart your terminal and run `npm install` again.'
-      };
-    }
+    // Windows is handled above; this fallback only runs on POSIX now.
 
     return {
       ok: false,

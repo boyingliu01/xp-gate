@@ -326,14 +326,14 @@ test('multiple assertions', () => {
     expect(result.totalAssertions).toBeGreaterThanOrEqual(4);
   });
 
-  it('AC-002-06: should count assertions per-test, not per-file (#392)', async () => {
+  it('AC-FIXTURE-ASSERT: should count assertions per-test, not per-file (#392)', async () => {
     // Regression for #392-#1: assertion counting must be scoped to the test
     // body, otherwise totalAssertions is inflated by fileCount x perFileCount.
     const testTs = `
 /**
  * @test REQ-MULTI-001 First test
  * @intent Assertion counting is per-test
- * @covers AC-MULTI-001-01
+ * @covers AC-FIXTURE-MULTI-01
  */
 test('first test', () => {
   expect(a()).toBe(1);
@@ -343,7 +343,7 @@ test('first test', () => {
 /**
  * @test REQ-MULTI-002 Second test
  * @intent Assertion counting is per-test
- * @covers AC-MULTI-002-01
+ * @covers AC-FIXTURE-MULTI-02
  */
 test('second test', () => {
   expect(c()).toBe(3);
