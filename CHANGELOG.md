@@ -2,6 +2,29 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.27.0.0] - 2026-10-16
+
+Sprint F 清算收尾（#522/#420/#392）：删除 clipboard-vision 技能、check-alignment 启动器注入防护与 JSON 输出完整性修复，以及一个 Windows 平台级根因——PATH 上的 `bash` 可能是 WSL System32 stub，现在全部改走权威 MSYS bash。
+
+### Added
+
+- **check-alignment CLI 守卫测试（#392-#6）**: 新增 `check-alignment-cli.test.mjs`——钉住注入面（任何 launcher 不得无条件启用 shell、元字符必须先拒绝后启动、`execSync` 字符串插值禁用）与 `--json` 文档完整性（stdout 必须整体可 parse）。
+
+### Changed
+
+- **权威 bash 解析（Windows/WSL 共存机器）**（#469 延伸）: `checkBash()` 在 win32 上不再信任 PATH 上的裸 `bash`——装了 WSL 的机器上 `C:\Windows\System32\bash.exe` 会遮蔽 Git Bash，它是 Linux 解释器：文件系统视图里没有 Windows 临时目录，且 `-c` 调用会静默丢弃位置参数（`$1` 为空 → source 空文件、门禁空跑"成功"）。现在对每个候选 bash 做 argv 往返 + `uname -s` 探测，win32 只接受 MINGW/MSYS/CYGWIN；`gate-runner.js` 与所有 spawn bash 的测试统一走该解析结果。受影响症状：hook-mirror/gate-runner/doctor-469/module-resolution-parity 等测试在本机 EPERM/exit 127/假绿。
+- **check-alignment 启动器加固（#392-#6）**: 所有 npx/tsx 启动统一经 `spawnNpx()`，win32 下 cmd.exe 元字符**拒绝而非转义**；`ui-review` 不再把路径插值进 `execSync` 字符串；zero-install fallback 的 try 收窄到模块加载步，引擎级错误不再被吞掉误报为 "tsx unavailable"。
+- **check-alignment-runner 退出方式**: `process.exit()` → `process.exitCode`，`--json` 文档不再在 flush 完成前被截断。
+- **clipboard-vision 技能下线（#522，含 #420）**: 技能包 13→12；镜像 parity 反空转下限 70→60、skill-freshness 下限 13→12 同步下调并注释原因。
+- **lockfile registry 归一化**: `bats` 条目的 npmmirror resolved 源经 `npm run normalize-lock` 重写回 canonical registry（仓库 artifact 级不变量）。
+- **warnings baseline 清算（AC-452-15）**: 删除 3 个零警告文件的预算条目（未使用的预算 = 未来加警告的许可证）。
+- **CHANGELOG flag 表补全（AC-488-06）**: doctor flag 表点名 `--refresh-env`（只读重探测，可与机器可读模式并用）。
+
+### Fixed
+
+- **hook-mirror fixture 补齐**: fixture 携带 guard 写入后新增的 lib 文件（coverage-total/python-test-selection/python-incremental-typecheck），真实仓库 parity 用例恢复可判定。
+- **test-alignment 夹具 AC 命名（AC-483 守卫）**: 夹具内 `AC-002-06`/`AC-MULTI-00x-01` 与真实 spec AC 形态撞名，改为不会命中扫描模式的夹具专用命名。
+
 ## [0.26.0.0] - 2026-10-16
 
 Sprint E（Python 技术栈提速批次，#534）：pre-commit 的 Python 类型检查从「全量 mypy」改为「按暂存变更做增量 mypy」，配合 Go golangci-lint 增量与 ty（Astral Rust）可选加速，目标直指减少每次提交的 CPU 占用、避免系统被拖慢。
