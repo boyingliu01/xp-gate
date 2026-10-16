@@ -1334,8 +1334,12 @@ else
     #     trade-off here, backstopped by full mypy wherever that surface runs.
     #     Both paths coexist: this one is the fast pre-commit pass.
     if command -v mypy &> /dev/null; then
-      # Collect staged .py/.pyi via the helper (whitespace-safe).
-      mapfile -t MYPY_ARGS < <(python_staged_py_files)
+      # Collect staged .py/.pyi via the helper (whitespace-safe, bash-3
+      # compatible — macOS default bash is 3.2, so avoid mapfile).
+      MYPY_ARGS=()
+      while IFS= read -r staged_file; do
+        MYPY_ARGS+=("$staged_file")
+      done < <(python_staged_py_files)
       python_typecheck_incremental "${MYPY_ARGS[@]}"
       MYPY_EXIT=$?
       if [ "$MYPY_EXIT" -ne 0 ]; then
