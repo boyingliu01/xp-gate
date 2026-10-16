@@ -345,8 +345,11 @@ async function handleSprintStatus(args = []) {
 
   if (dirIdx >= 0 && dirIdx + 1 < args.length) {
     searchDir = path.resolve(args[dirIdx + 1]);
-    // Path traversal protection: must be under cwd
-    if (!searchDir.startsWith(process.cwd())) {
+    // Path traversal protection: must be under cwd. Use path.relative instead
+    // of a prefix match so a sibling like `<cwd>2` cannot bypass the check
+    // (#392-#5).
+    const rel = path.relative(process.cwd(), searchDir);
+    if (rel.startsWith('..') || path.isAbsolute(rel)) {
       console.error('Error: --dir path must be under current working directory');
       return 1;
     }

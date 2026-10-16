@@ -70,14 +70,12 @@ describe('longFunctionRule', () => {
     expect(longFunctionRule.threshold).toEqual(50);
   });
 
-  it('should return empty violations when adapter throws error', () => {
+  it('should propagate adapter errors (no empty catch, #392)', () => {
     const mockAdapterThatThrows = {
       ...mockAdapter,
       extractFunctions: () => { throw new Error('Adapter failed'); }
     };
     
-    const violations = longFunctionRule.check('test.ts', mockAdapterThatThrows as never);
-    
-    expect(violations).toHaveLength(0);
+    expect(() => longFunctionRule.check('test.ts', mockAdapterThatThrows as never)).toThrow('Adapter failed');
   });
 });

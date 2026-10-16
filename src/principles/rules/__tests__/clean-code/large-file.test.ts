@@ -61,14 +61,12 @@ describe('largeFileRule', () => {
     expect(largeFileRule.threshold).toEqual(1150);
   });
 
-  it('should return empty violations when adapter throws error', () => {
+  it('should propagate adapter errors (no empty catch, #392)', () => {
     const mockAdapterThatThrows = {
       ...mockAdapter,
       countLines: () => { throw new Error('Adapter failed'); }
     };
     
-    const violations = largeFileRule.check('test.ts', mockAdapterThatThrows);
-    
-    expect(violations).toHaveLength(0);
+    expect(() => largeFileRule.check('test.ts', mockAdapterThatThrows)).toThrow('Adapter failed');
   });
 });

@@ -230,28 +230,117 @@ function countAssertions(content: string): number {
 }
 
 /**
- * Extract JSDoc block preceding a test/it/describe declaration.
- * Handles .each(), .skip(), .todo() variants and backtick template literals.
+ * Given a content string and the index where the test callback arrow/function
+ * begins (the position of `() =>` or `function() {`), scan forward with brace
+ * matching to return the full callback body (including the outer braces).
+ * Skips single/double quoted strings, backtick template literals, and line/block
+ * comments so braces inside them do not throw off matching.
+ */
+function extractCallbackBody(content: string, callbackStart: number): string {
+  // Find the opening brace of the callback body after `() => {` / `function() {`.
+  let i = callbackStart;
+  let inLineComment = false;
+  let inBlockComment = false;
+  let inSingle = false;
+  let inDouble = false;
+  let inTemplate = false;
+  let depth = 0;
+  let started = false;
+  let openIdx = -1;
+
+  while (i < content.length) {
+    const c = content[i];
+    const n = content[i + 1];
+
+    if (inLineComment) {
+      if (c === '\n') inLineComment = false;
+      i++;
+      continue;
+    }
+    if (inBlockComment) {
+      if (c === '*' && n === '/') { inBlockComment = false; i += 2; continue; }
+      i++;
+      continue;
+    }
+    if (inSingle) {
+      if (c === '\\') { i += 2; continue; }
+      if (c === '\'') inSingle = false;
+      i++;
+      continue;
+    }
+    if (inDouble) {
+      if (c === '\\') { i += 2; continue; }
+      if (c === '"') inDouble = false;
+      i++;
+      continue;
+    }
+    if (inTemplate) {
+      if (c === '\\') { i += 2; continue; }
+      if (c === '`') inTemplate = false;
+      // Template `${}` interpolation can contain braces; treat interpolation
+      // content conservatively by not toggling depth on braces inside it.
+      i++;
+      continue;
+    }
+
+    if (c === '/' && n === '/') { inLineComment = true; i += 2; continue; }
+    if (c === '/' && n === '*') { inBlockComment = true; i += 2; continue; }
+    if (c === '\'') { inSingle = true; i++; continue; }
+    if (c === '"') { inDouble = true; i++; continue; }
+    if (c === '`') { inTemplate = true; i++; continue; }
+
+    if (c === '{') {
+      if (!started) { started = true; openIdx = i; depth = 1; }
+      else depth++;
+      i++;
+      continue;
+    }
+    if (c === '}') {
+      depth--;
+      if (depth === 0) {
+        return content.slice(openIdx, i + 1);
+      }
+      i++;
+      continue;
+    }
+
+    i++;
+  }
+
+  // No balanced body found — the declaration had no callback body (e.g. a
+  // `test.todo('name');` line). Return an empty body so it counts 0 assertions.
+  return '';
+}
+
+/**
+ * Extract JSDoc block preceding a test/it/describe declaration, along with the
+ * *function body* of the callback (so assertion counting is per-test, not
+ * per-file). Handles .each(), .skip(), .todo() variants and backtick template
+ * literals.
  */
 function extractJSDocBeforeTest(content: string): Array<{ jsdoc: string; testBody: string; testName: string }> {
   const results: Array<{ jsdoc: string; testBody: string; testName: string }> = [];
 
-  // Match: /** JSDOC */ (test|it|describe)[.modifier]( [args], )'name', ...
-  // `.each` variants have an extra `()` before the test name string
-  const testPattern = /\/\*\*([\s\S]*?)\*\/(?:[\s\n]*)(?:test|it|describe)(?:\.(?:each|skip|todo|only))?\s*\([^)]*\)\s*,\s*\(\s*(?:['"]([^'"]+)['"]|`([^`]*)`)\s*[,\)]/g;
+  // Match: /** JSDOC */ (test|it|describe)[.modifier]( [args], )'name', ( [params] ) => {
+  // `.each` variants have an extra `()` before the test name string.
+  // Group 4 (bodyStart) points at the callback open paren so we can brace-match
+  // the real function body.
+  const testPattern = /\/\*\*([\s\S]*?)\*\/(?:[\s\n]*)(?:test|it|describe)(?:\.(?:each|skip|todo|only))?\s*\([^)]*\)\s*,\s*\(\s*(?:['"]([^'"]+)['"]|`([^`]*)`)\s*\)?\s*,?\s*(?:\([^)]*\)\s*=>)?\s*/g;
 
   let match: RegExpExecArray | null;
   while ((match = testPattern.exec(content)) !== null) {
     const jsdoc = match[1]!;
     const testName = match[2] || match[3] || '';
     if (testName) {
-      const testBody = content.slice(match.index, match.index + match[0].length);
+      const body = extractCallbackBody(content, match.index + match[0].length);
+      // JSDoc + declaration + function body gives a self-contained test body.
+      const testBody = content.slice(match.index, match.index + match[0].length) + body;
       results.push({ jsdoc, testBody, testName });
     }
   }
 
   // Second pass: match standard test/it/describe without .each
-  const simplePattern = /\/\*\*([\s\S]*?)\*\/(?:[\s\n]*)(?:test|it|describe)(?:\.(?:skip|todo|only))?\s*\(\s*(?:['"]([^'"]+)['"]|`([^`]*)`)\s*[,\)]/g;
+  const simplePattern = /\/\*\*([\s\S]*?)\*\/(?:[\s\n]*)(?:test|it|describe)(?:\.(?:skip|todo|only))?\s*\(\s*(?:['"]([^'"]+)['"]|`([^`]*)`)\s*\)?\s*,?\s*(?:\([^)]*\)\s*=>)?\s*/g;
 
   while ((match = simplePattern.exec(content)) !== null) {
     const jsdoc = match[1]!;
@@ -260,13 +349,35 @@ function extractJSDocBeforeTest(content: string): Array<{ jsdoc: string; testBod
       // Don't duplicate if already found in first pass
       const alreadyFound = results.some(r => r.jsdoc === jsdoc);
       if (!alreadyFound) {
-        const testBody = content.slice(match.index, match.index + match[0].length);
+        const body = extractCallbackBody(content, match.index + match[0].length);
+        const testBody = content.slice(match.index, match.index + match[0].length) + body;
         results.push({ jsdoc, testBody, testName });
       }
     }
   }
 
   return results;
+}
+
+/**
+ * Extract a Python test function body: from the `def test_xxx():` line up to
+ * (but not including) the next top-level `def ` line or end of file. This keeps
+ * assertion counting scoped to the individual test.
+ */
+function extractPythonTestBody(content: string, defIndex: number): string {
+  const nextDef = content.indexOf('\ndef ', defIndex);
+  const endIdx = nextDef === -1 ? content.length : nextDef;
+  return content.slice(defIndex, endIdx);
+}
+
+/**
+ * Extract a Go test function body via brace matching starting at the opening
+ * brace that follows `func Test_xxx()`. Returns the full `{ ... }` block.
+ */
+function extractGoTestBody(content: string, funcIndex: number): string {
+  const braceIdx = content.indexOf('{', funcIndex);
+  if (braceIdx === -1) return '';
+  return extractCallbackBody(content, braceIdx);
 }
 
 function pushTestWithCovers(
@@ -276,6 +387,7 @@ function pushTestWithCovers(
   reqId: string,
   intent: string | undefined,
   fileContent: string,
+  bodyContent: string,
   totalAssertionsRef: { value: number },
 ) {
   const coversRegex = /@covers\s+(.+)/g;
@@ -285,7 +397,9 @@ function pushTestWithCovers(
     covers.push(...coversMatch[1]!.split(',').map(s => s.trim()).filter(c => /^AC-[A-Z0-9]+-\d+-\d+$/.test(c)));
   }
 
-  const assertions = countAssertions(fileContent);
+  // Count assertions against the *per-test body*, not the whole file, so
+  // totalAssertions is not inflated by fileCount x perFileCount (#392-#1).
+  const assertions = countAssertions(bodyContent);
   totalAssertionsRef.value += assertions;
 
   tests.push({
@@ -319,7 +433,7 @@ export function parseTestFiles(testPaths: string[]): TestMap {
         // Filter: only valid AC IDs (AC-XXX-NNN-NN pattern)
         const covers = coversRaw.filter(c => /^AC-[A-Z0-9]+-\d+-\d+$/.test(c));
 
-        const assertions = countAssertions(content);
+        const assertions = countAssertions(m.testBody);
         totalAssertionsObj.value += assertions;
 
         tests.push({
@@ -336,7 +450,8 @@ export function parseTestFiles(testPaths: string[]): TestMap {
       const pyTestPattern = /(# @test\s+(REQ-[A-Z0-9]+-[A-Z0-9]+)[\s\S]*?)(?:# @intent\s+(.+?)\n)?def\s+(test_\w+)/g;
       let m: RegExpExecArray | null;
       while ((m = pyTestPattern.exec(content)) !== null) {
-        pushTestWithCovers(tests, testPath, m[4]!, m[2]!, m[3]?.trim(), content, totalAssertionsObj);
+        const body = extractPythonTestBody(content, m.index + m[0].lastIndexOf('def '));
+        pushTestWithCovers(tests, testPath, m[4]!, m[2]!, m[3]?.trim(), content, body, totalAssertionsObj);
       }
     } else if (ext === '.go') {
       const goTestPattern = /(\/\/ @test\s+(REQ-[A-Z0-9]+-[A-Z0-9]+))\s*[\s\S]*?func\s+(Test_\w+)/g;
@@ -344,7 +459,9 @@ export function parseTestFiles(testPaths: string[]): TestMap {
       while ((m = goTestPattern.exec(content)) !== null) {
         const block = content.slice(Math.max(0, m.index - 500), m.index);
         const intentMatch = block.match(/\/\/ @intent\s+(.+)/);
-        pushTestWithCovers(tests, testPath, m[3]!, m[2]!, intentMatch?.[1]?.trim(), content, totalAssertionsObj);
+        const funcStart = m.index + m[0].lastIndexOf('func ');
+        const body = extractGoTestBody(content, funcStart);
+        pushTestWithCovers(tests, testPath, m[3]!, m[2]!, intentMatch?.[1]?.trim(), content, body, totalAssertionsObj);
       }
     }
   }

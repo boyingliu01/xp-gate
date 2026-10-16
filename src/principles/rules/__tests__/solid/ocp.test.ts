@@ -56,14 +56,12 @@ class DerivedClass extends BaseClass {
     expect(ocpRule.severity).toBe('info');
   });
 
-  it('should return empty violations when adapter throws error', () => {
+  it('should propagate adapter errors (no empty catch, #392)', () => {
     const mockAdapterThatThrows = {
       ...mockAdapter,
       extractClasses: () => { throw new Error('Adapter failed'); }
     };
     
-    const violations = ocpRule.check('test.ts', mockAdapterThatThrows as never);
-    
-    expect(violations.length).toBe(0);
+    expect(() => ocpRule.check('test.ts', mockAdapterThatThrows as never)).toThrow('Adapter failed');
   });
 });

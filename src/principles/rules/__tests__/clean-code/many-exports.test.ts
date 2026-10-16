@@ -111,14 +111,13 @@ describe('manyExportsRule', () => {
     expect(violations).toHaveLength(0);
   });
 
-  it('returns empty violations when adapter throws (catch branch)', () => {
+  it('propagates adapter errors (no empty catch, #392)', () => {
     const adapter: never = {
       ...baseAdapter,
       extractExports: () => {
         throw new Error('boom');
       },
     } as never;
-    const violations = manyExportsRule.check('file.ts', adapter);
-    expect(violations).toHaveLength(0);
+    expect(() => manyExportsRule.check('file.ts', adapter)).toThrow('boom');
   });
 });

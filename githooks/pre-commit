@@ -179,11 +179,15 @@ run_in_subdir() {
   
   if [ -n "$PROJECT_SUBDIR" ] && [ "$PROJECT_SUBDIR" != "." ]; then
     # Run command in subdirectory, then return to original directory
-    pushd "$PROJECT_SUBDIR" > /dev/null 2>&1
-    eval "$cmd"
-    local exit_code=$?
-    popd > /dev/null 2>&1
-    return $exit_code
+    # #392-#10: guard cd/pushd so a missing directory cannot run the gate in
+    # the wrong cwd.
+    if pushd "$PROJECT_SUBDIR" > /dev/null 2>&1; then
+      eval "$cmd"
+      local exit_code=$?
+      popd > /dev/null 2>&1
+      return $exit_code
+    fi
+    return 1
   else
     # Run in current directory
     eval "$cmd"
@@ -984,10 +988,14 @@ IN_PROJECT_SUBDIR=0
 _lang_count=$(echo "$PROJECT_LANGS" | wc -w)
 if [ -n "$PROJECT_SUBDIR" ] && [ "$PROJECT_SUBDIR" != "." ] && [ "$PROJECT_LANG" != "documentation-only" ] && [ "$_lang_count" -le 1 ]; then
   ORIGINAL_DIR=$(pwd)
-  cd "$PROJECT_SUBDIR"
-  IN_PROJECT_SUBDIR=1
-  echo "Working in: $PROJECT_SUBDIR/"
-  echo ""
+  # #392-#10: guard cd so a missing subdir cannot run gates in the wrong cwd.
+  if cd "$PROJECT_SUBDIR" 2>/dev/null; then
+    IN_PROJECT_SUBDIR=1
+    echo "Working in: $PROJECT_SUBDIR/"
+    echo ""
+  else
+    echo "WARN: could not enter $PROJECT_SUBDIR — continuing at repo root" >&2
+  fi
 fi
 
 # ============================================================================
@@ -1639,7 +1647,16 @@ else
   echo "Running jscpd for Go duplicate code detection..."
   FILES_TO_CHECK=$(echo "$CHANGED_FILES" | grep "\.go$" | head -20)
   if [ -n "$FILES_TO_CHECK" ]; then
-    jscpd $FILES_TO_CHECK 2>&1 | head -10
+    # #392-#9: capture jscpd's real exit code via temp file instead of piping
+    # through head (which would swallow the exit status under pipefail analysis).
+    GO_JSCPD_TMP=$(mktemp)
+    jscpd $FILES_TO_CHECK > "$GO_JSCPD_TMP" 2>&1
+    JSCPD_GO_EXIT=$?
+    head -10 "$GO_JSCPD_TMP"
+    rm -f "$GO_JSCPD_TMP"
+    if [ "$JSCPD_GO_EXIT" -ne 0 ]; then
+      echo "⚠️  jscpd (Go) exited with code $JSCPD_GO_EXIT"
+    fi
   fi
   echo "✅ PASSED - Go duplicate code check completed."
     ;;
