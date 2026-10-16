@@ -10,9 +10,12 @@
 # The single most important lock: mypy's REAL exit code must survive. The old
 # inline block did
 #   mypy ... 2>&1 | head -20 | tail -10; MYPY_EXIT=$?
-# which captured the pipe stage's exit code (0) instead of mypy's, so real type
-# errors passed silently. #534 fixes that by redirecting to a temp file and
-# taking mypy's own status.
+# which takes the PIPE STAGE's exit code as $?. In pre-commit (which has
+# `set -o pipefail`) mypy's status does propagate, but outside a pipefail
+# context (e.g. a subshell) the gate would silently pass on real type errors,
+# and the `| head | tail` pattern is fragile and copy-paste hazardous. #534
+# redirects to a temp file and takes mypy's own status — deterministic,
+# pipefail-independent, and it keeps mypy's output intact (no SIGPIPE truncation).
 
 HELPER="$BATS_TEST_DIRNAME/../lib/python-incremental-typecheck.sh"
 PYTHON_ADAPTER="$BATS_TEST_DIRNAME/../adapters/python.sh"

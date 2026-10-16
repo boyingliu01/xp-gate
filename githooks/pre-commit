@@ -1316,26 +1316,26 @@ else
     # Optional: Type checking with mypy — INCREMENTAL (fast, staged-only).
     #
     # Responsibility boundary (#534):
-    #   * This branch (python case, line ~1316) runs mypy ONLY over the staged
-    #     .py/.pyi files via python_typecheck_incremental — seconds, not a full
-    #     inference pass. Uses --follow-imports=silent so a change to A.py that
-    #     references an unchanged B.py does NOT surface B's pre-existing
-    #     diagnostics; only caller-level signature errors still block. Its exit
-    #     code is captured directly (temp file), NOT through a head|tail pipe,
-    #     which used to swallow mypy's real status (false PASS, #534).
-    #   * python.sh run_static_analysis() (routed via the general branch below)
-    #     is the FULL, CI-aligned mypy pass (src/ scripts/ or .xp-gate-mypy-scope)
-    #     that guarantees "change to B.ts/import graph" cannot slip through the
-    #     incremental blind spot. Both coexist; this one is the fast pre-commit
-    #     path, the full pass is the correctness backstop.
+    #   * This branch (python case) runs mypy ONLY over the staged .py/.pyi
+    #     files via python_typecheck_incremental — seconds, not a full inference
+    #     pass. Uses --follow-imports=silent so a change to A.py that references
+    #     an unchanged B.py does NOT surface B's pre-existing diagnostics; only
+    #     caller-level signature errors still block. Its exit code is captured
+    #     directly (temp file), which is deterministic and does not depend on
+    #     set -o pipefail (the old `... | head | tail; rc=$?` worked only under
+    #     pipefail and could drop mypy's status when the pattern is copied into
+    #     a non-pipefail context).
+    #   * The FULL mypy pass lives OUTSIDE this hook: run_static_analysis()
+    #     (githooks/adapters/python.sh) is reachable via the adapter CLI and the
+    #     general adapter route, and CI installs mypy (quality-gates.yml) for
+    #     typed projects. NOTE: the pre-commit python case is fully inline and
+    #     never routes to run_static_analysis — so the incremental blind spot
+    #     (cross-module signature break on an unchanged file) is the accepted
+    #     trade-off here, backstopped by full mypy wherever that surface runs.
+    #     Both paths coexist: this one is the fast pre-commit pass.
     if command -v mypy &> /dev/null; then
-      # Collect staged .py/.pyi into a bash array (whitespace-safe).
-      MYPY_ARGS=()
-      while IFS= read -r staged_file; do
-        case "$staged_file" in
-          *.py|*.pyi) MYPY_ARGS+=("$staged_file") ;;
-        esac
-      done <<< "$CHANGED_FILES"
+      # Collect staged .py/.pyi via the helper (whitespace-safe).
+      mapfile -t MYPY_ARGS < <(python_staged_py_files)
       python_typecheck_incremental "${MYPY_ARGS[@]}"
       MYPY_EXIT=$?
       if [ "$MYPY_EXIT" -ne 0 ]; then
@@ -1366,8 +1366,15 @@ else
       echo "✅ PASSED - No staged Go files to lint."
     else
       echo "Running golangci-lint (incremental, staged .go)..."
-      golangci-lint run $GO_FILES 2>&1 | head -30
+      # #534: capture golangci-lint's REAL exit code via a temp file, not a
+      # pipe stage's (`... | head -30; rc=$?` would take head's status; it only
+      # works because of set -o pipefail, which is fragile and inconsistent with
+      # the python incremental helper's temp-file pattern).
+      GO_TMP=$(mktemp)
+      golangci-lint run $GO_FILES > "$GO_TMP" 2>&1
       GOLANGCI_EXIT=$?
+      head -30 "$GO_TMP"
+      rm -f "$GO_TMP"
       if [ "$GOLANGCI_EXIT" -ne 0 ]; then
         echo ""
         echo "❌ BLOCKED - GOLANGCI-LINT ERRORS detected"
