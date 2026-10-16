@@ -1,7 +1,7 @@
 {
   "_comment": "Frozen #483 debt: AC references in tests that are not in specification.yaml. May only shrink; new debt fails the guard (AC-483-01). Pattern widened to \\d{2,} in the round-2 walkthrough fix (feasibility MN-04): letter-named ids like AC-DISCOVERY-001 were invisible to the fixed-width scan.",
   "generated": "2026-10-14",
-  "regenerated": "2026-10-14",
+  "regenerated": "2026-10-16",
   "files": {
     "scripts/__tests__/ac-reference-guard.test.cjs": [
       "AC-483-01",
@@ -374,6 +374,9 @@
     ],
     "githooks/__tests__/multilang-subdir-gate5a.test.bats": [
       "AC-TDD-015"
+    ],
+    "src/npm-package/lib/__tests__/check-alignment-cli.test.mjs": [
+      "AC-392-06"
     ]
   }
 }

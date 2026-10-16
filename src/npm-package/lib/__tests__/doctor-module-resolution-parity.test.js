@@ -51,13 +51,22 @@ function matchBlock(source, pattern, label) {
 }
 
 function bashBin() {
-  const candidate = process.env.XP_GATE_BASH_BIN || 'bash';
-  const probe = spawnSync(candidate, ['-c', 'echo ok'], { encoding: 'utf8' });
-  // A missing runner must fail loudly, never read as a passing guard.
-  if (probe.status !== 0 || probe.error) {
-    throw new Error(`bash runner unavailable (${candidate}): ${probe.error ? probe.error.message : `exit ${probe.status}`}`);
+  if (process.env.XP_GATE_BASH_BIN) {
+    const probe = spawnSync(process.env.XP_GATE_BASH_BIN, ['-c', 'echo ok'], { encoding: 'utf8' });
+    if (probe.status !== 0 || probe.error) {
+      throw new Error(`bash runner unavailable (${process.env.XP_GATE_BASH_BIN}): ${probe.error ? probe.error.message : `exit ${probe.status}`}`);
+    }
+    return process.env.XP_GATE_BASH_BIN;
   }
-  return candidate;
+  // Resolve the authoritative bash the hooks actually get. On Windows a bare
+  // PATH 'bash' may be the WSL System32 stub, whose `-c` scripts receive an
+  // empty $1 and resolve nothing — a vacuous resolver run, not a passing one.
+  const { checkBash } = require('../detect-deps.js');
+  const b = checkBash();
+  if (!b.ok) {
+    throw new Error(`bash runner unavailable: ${b.message || 'checkBash failed'}`);
+  }
+  return b.path;
 }
 
 /**

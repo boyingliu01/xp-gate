@@ -56,9 +56,10 @@ describe('AC-485: the six skill mirror trees are byte-copies of skills/ (#485)',
   });
 
   it('the canonical tree has the expected baseline size (anti-vacuity)', () => {
-    // 74 files at guard-writing time; a sudden collapse (e.g. wrong cwd or a
-    // deleted tree) must fail loudly instead of comparing empty to empty.
-    expect(Object.keys(canonical).length).toBeGreaterThanOrEqual(70);
+    // 74 files at guard-writing time; #522 removed the clipboard-vision skill
+    // (9 files), leaving 65. A sudden collapse (e.g. wrong cwd or a deleted
+    // tree) must fail loudly instead of comparing empty to empty.
+    expect(Object.keys(canonical).length).toBeGreaterThanOrEqual(60);
   });
 
   for (const mirror of MIRRORS) {

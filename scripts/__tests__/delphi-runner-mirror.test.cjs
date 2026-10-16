@@ -8,6 +8,9 @@ const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
 const { spawnSync } = require('node:child_process');
+// Resolve the authoritative MSYS bash on Windows (PATH 'bash' may be the WSL stub).
+const { checkBash } = require('../../src/npm-package/lib/detect-deps.js');
+const BASH = (() => { const b = checkBash(); return b.ok ? b.path : 'bash'; })();
 
 describe('Delphi runner mirror validation', () => {
   let fixture;
@@ -19,7 +22,7 @@ describe('Delphi runner mirror validation', () => {
   }
 
   function validate(...args) {
-    return spawnSync('bash', [script, ...args], { cwd: fixture, env: gitEnv, encoding: 'utf8' });
+    return spawnSync(BASH, [script, ...args], { cwd: fixture, env: gitEnv, encoding: 'utf8' });
   }
 
   beforeEach(() => {

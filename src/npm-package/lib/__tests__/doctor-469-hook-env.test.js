@@ -17,11 +17,16 @@ const describeWin = isWindows ? describe : describe.skip;
 // Walkthrough FC-02: a bare `return` inside it() silently reports PASS on a
 // runner without bash — a false-green in the very suite that guards against
 // false greens. Bash-gated tests must SKIP loudly instead.
-const { execSync } = require('child_process');
-const BASH_AVAILABLE = (() => {
-  try { execSync('bash --version', { stdio: 'ignore' }); return true; } catch { return false; }
+// On Windows a bare PATH 'bash' may resolve to the WSL System32 stub, whose
+// argv handling drops `-c` positional args — probing through it answers for
+// the wrong environment (the exact #469 failure class). Resolve the same
+// authoritative bash the hooks get: checkBash().
+const { checkBash } = require('../detect-deps.js');
+const BASH_PROBE = (() => {
+  const b = checkBash();
+  return b.ok ? b.path : null;
 })();
-const itWithBash = BASH_AVAILABLE ? it : it.skip;
+const itWithBash = BASH_PROBE ? it : it.skip;
 
 describe('doctor hook-env probing (#469)', () => {
   function mod() {
@@ -30,7 +35,7 @@ describe('doctor hook-env probing (#469)', () => {
 
   itWithBash('AC-469-01: a tool the hook env sees is reported with its hook-env path', async () => {
     const { probeToolInHookEnv } = mod();
-    const bashPath = isWindows ? 'bash' : '/bin/sh';
+    const bashPath = isWindows ? BASH_PROBE : '/bin/sh';
     const p = await probeToolInHookEnv(isWindows ? 'node' : 'sh', bashPath);
     expect(typeof p).toBe('string');
     expect(p.length).toBeGreaterThan(0);
@@ -39,7 +44,7 @@ describe('doctor hook-env probing (#469)', () => {
   itWithBash('AC-469-01: a tool absent from the hook env returns null — no fall-through', async () => {
     const { detectCliToolAsync } = mod();
     const result = await detectCliToolAsync('definitely-not-a-real-tool-xyz-469', isWindows, {
-      bashPath: 'bash',
+      bashPath: BASH_PROBE,
     });
     // With bash present there is NO fall-through: `where` finding nothing is
     // irrelevant here, the hook env verdict is final.
@@ -56,7 +61,7 @@ describe('doctor hook-env probing (#469)', () => {
 
   itWithBash('AC-469-01: an installed tool is visible through the hook-env tier', async () => {
     const { detectCliToolAsync } = mod();
-    const result = await detectCliToolAsync('node', true, { bashPath: 'bash' });
+    const result = await detectCliToolAsync('node', true, { bashPath: BASH_PROBE });
     expect(result.available).toBe(true);
     // The hook-env path is POSIX form on Windows — cmd.exe cannot run it.
     if (isWindows) expect(result.path.startsWith('/')).toBe(true);
