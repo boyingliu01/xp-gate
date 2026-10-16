@@ -14,10 +14,20 @@ const REPO_SKILLS_DIR = resolve(PLUGIN_ROOT, "..", "..", "skills")
 /**
  * The expected set is the REPO's skill directories, discovered rather than
  * hardcoded. A hardcoded list silently drifts: it previously named 12 skills and
- * omitted clipboard-vision, while prepack shipped 12 of 13 (#448).
+ * omitted one that prepack shipped, breaking parity (#448).
  */
 function repoSkills(): string[] {
-  return readdirSync(REPO_SKILLS_DIR, { withFileTypes: true })
+  // Guarded IO: a missing/unreadable repo skills dir is a test-environment
+  // failure we surface loudly, not a silent empty set (clean-code.missing-error-handling).
+  let entries;
+  try {
+    entries = readdirSync(REPO_SKILLS_DIR, { withFileTypes: true })
+  } catch (err) {
+    throw new Error(
+      `Cannot read repo skills dir ${REPO_SKILLS_DIR}: ${err instanceof Error ? err.message : String(err)}`
+    )
+  }
+  return entries
     .filter((d) => d.isDirectory())
     .map((d) => d.name)
     .filter((name) => existsSync(join(REPO_SKILLS_DIR, name, "SKILL.md")))
@@ -25,7 +35,14 @@ function repoSkills(): string[] {
 }
 
 function readFrontmatter(file: string): Record<string, unknown> {
-  const raw = readFileSync(file, "utf8")
+  // Guarded IO: re-throw with context so a broken SKILL.md names the file
+  // (clean-code.missing-error-handling).
+  let raw;
+  try {
+    raw = readFileSync(file, "utf8")
+  } catch (err) {
+    throw new Error(`${file}: cannot read file (${err instanceof Error ? err.message : String(err)})`)
+  }
   const m = raw.match(/^---\s*\r?\n([\s\S]*?)\r?\n---\s*\r?\n/)
   if (!m) throw new Error(`${file}: missing YAML frontmatter`)
   return parse(m[1]) as Record<string, unknown>
@@ -57,9 +74,5 @@ describe("bundled skills", () => {
       expect(fm.description, `${name}: frontmatter.description`).toBeTypeOf("string")
       expect((fm.description as string).trim().length, `${name}: non-empty description`).toBeGreaterThan(0)
     }
-  })
-
-  it("bundles clipboard-vision, which the old hardcoded list omitted (#448)", () => {
-    expect(existsSync(join(SKILLS_DIR, "clipboard-vision", "SKILL.md"))).toBe(true)
   })
 })

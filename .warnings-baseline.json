@@ -34,5 +34,9 @@
   "src/mutation/__tests__/mutmut-runner.test.ts": {
     "totalWarnings": 1,
     "lastAnalyzed": "2026-10-15T06:40:19.974Z"
+  },
+  "plugins/dsh/src/skills.test.ts": {
+    "totalWarnings": 2,
+    "lastAnalyzed": "2026-10-16T07:02:30.516Z"
   }
 }

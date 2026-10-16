@@ -30,27 +30,7 @@ function handleUIReview() {
   }
 }
 
-async function runAlignmentCheck(subargs) {
-  const specIdx = subargs.indexOf('--spec');
-  const specPath = specIdx >= 0 ? subargs[specIdx + 1] : path.join(process.cwd(), 'specification.yaml');
-
-  const testsIdx = subargs.indexOf('--tests');
-  const testDirs = testsIdx >= 0 ? [subargs[testsIdx + 1]] : undefined;
-
-  const outputIdx = subargs.indexOf('--output');
-  const outputPath = outputIdx >= 0 ? subargs[outputIdx + 1] : undefined;
-
-  const jsonMode = subargs.includes('--json');
-
-  // Load the TS module in-process (tsx/cjs registers the TS loader), instead of
-  // shelling out to `npx tsx -e` with unsanitized paths (#392-#6).
-  try {
-    require('tsx/cjs');
-  } catch (err) {
-    console.error('check-alignment requires tsx; run `npm install` first.');
-    return 1;
-  }
-
+function runAlignmentInProcess(specPath, testDirs, outputPath, jsonMode) {
   const { runFullAlignment } = require('../lib/test-alignment.ts');
   const { execFileSync } = require('child_process');
   let headCommit = 'unknown';
@@ -59,7 +39,6 @@ async function runAlignmentCheck(subargs) {
   } catch (err) {
     headCommit = 'unknown';
   }
-
   let report;
   try {
     report = runFullAlignment({
@@ -72,7 +51,6 @@ async function runAlignmentCheck(subargs) {
     console.error('check-alignment failed:', err instanceof Error ? err.message : String(err));
     return 1;
   }
-
   if (jsonMode) {
     console.log(JSON.stringify(report, null, 2));
   } else {
@@ -81,6 +59,58 @@ async function runAlignmentCheck(subargs) {
     console.log('Misaligned:', report.misaligned_tests.length);
   }
   return report.alignment_status === 'PASS' ? 0 : 1;
+}
+
+function runAlignmentViaNpx(runnerPath, specPath, testDirs, outputPath, jsonMode) {
+  const { spawnSync } = require('child_process');
+  // User-supplied paths travel as discrete argv -- never embedded in a shell
+  // command string (preserves the #392-#6 injection fix).
+  const argv = [runnerPath, '--spec', specPath];
+  if (testDirs) argv.push('--tests', testDirs[0]);
+  if (outputPath) argv.push('--output', outputPath);
+  if (jsonMode) argv.push('--json');
+  // Guarded IO: a failed spawn must surface loudly, not crash the CLI silently.
+  let result;
+  try {
+    result = spawnSync('npx', ['-y', 'tsx', ...argv], { stdio: 'inherit', shell: process.platform === 'win32' });
+  } catch (err) {
+    console.error('check-alignment: unable to launch the alignment engine (tsx unavailable).');
+    console.error(err instanceof Error ? err.message : String(err));
+    return 1;
+  }
+  if (result.error) {
+    console.error('check-alignment: unable to load the alignment engine (tsx unavailable).');
+    console.error(result.error.message);
+    return 1;
+  }
+  return result.status === 0 ? 0 : 1;
+}
+
+async function runAlignmentCheck(subargs) {
+  const specIdx = subargs.indexOf('--spec');
+  const specPath = specIdx >= 0 ? subargs[specIdx + 1] : path.join(process.cwd(), 'specification.yaml');
+
+  const testsIdx = subargs.indexOf('--tests');
+  const testDirs = testsIdx >= 0 ? [subargs[testsIdx + 1]] : undefined;
+
+  const outputIdx = subargs.indexOf('--output');
+  const outputPath = outputIdx >= 0 ? subargs[outputIdx + 1] : undefined;
+
+  const jsonMode = subargs.includes('--json');
+
+  const runnerPath = path.join(__dirname, '..', 'lib', 'check-alignment-runner.cjs');
+
+  // Primary: run the engine in-process via tsx/cjs (fast path, works in-repo
+  // where tsx is a devDependency). Fall back to `npx -y tsx` when tsx is not
+  // resolvable, which happens in the published global install (the package
+  // ships zero runtime deps per the zero-install contract). npx self-provisions
+  // tsx on demand, so the published command stays functional without adding a dep.
+  try {
+    require('tsx/cjs');
+    return runAlignmentInProcess(specPath, testDirs, outputPath, jsonMode);
+  } catch (err) {
+    return runAlignmentViaNpx(runnerPath, specPath, testDirs, outputPath, jsonMode);
+  }
 }
 
 const COMMANDS = {

@@ -1,0 +1,72 @@
+#!/usr/bin/env node
+/**
+ * check-alignment-runner.cjs — Thin argv shim for test-alignment.ts
+ *
+ * Bridges the `xp-gate check-alignment` CLI to the TypeScript engine without
+ * shell-command interpolation of user-supplied paths (#392-#6).
+ *
+ * It is designed to be launched EITHER way:
+ *   1. In-repo (fast path): `node` loads this file after xp-gate.js already
+ *      called `require('tsx/cjs')`, so requiring `./test-alignment.ts` works.
+ *   2. Published global install (zero-install path): `npx -y tsx` runs this
+ *      file, and npx self-provisions tsx on demand (never a package dep), so
+ *      `./test-alignment.ts` loads even though the package ships zero deps.
+ *
+ * All user-supplied paths are passed as discrete argv elements, never embedded
+ * into a shell command string, preserving the #392-#6 injection fix.
+ */
+'use strict';
+
+const { execFileSync } = require('child_process');
+
+// --- argv parsing ----------------------------------------------------------
+function argValue(argv, flag) {
+  const idx = argv.indexOf(flag);
+  return idx >= 0 && idx + 1 < argv.length ? argv[idx + 1] : undefined;
+}
+function argFlag(argv, flag) {
+  return argv.includes(flag);
+}
+
+const specPath = argValue(process.argv, '--spec');
+const testDirsArg = argValue(process.argv, '--tests');
+const outputPath = argValue(process.argv, '--output');
+const jsonMode = argFlag(process.argv, '--json');
+
+if (!specPath) {
+  console.error('check-alignment: --spec <path> is required');
+  process.exit(1);
+}
+
+const testDirs = testDirsArg ? [testDirsArg] : undefined;
+
+let headCommit = 'unknown';
+try {
+  headCommit = execFileSync('git', ['rev-parse', 'HEAD'], { encoding: 'utf8' }).trim() || 'unknown';
+} catch (err) {
+  headCommit = 'unknown';
+}
+
+const { runFullAlignment } = require('./test-alignment.ts');
+
+let report;
+try {
+  report = runFullAlignment({
+    specPath,
+    testDirs,
+    headCommit,
+    outputPath: outputPath || undefined,
+  });
+} catch (err) {
+  console.error('check-alignment failed:', err instanceof Error ? err.message : String(err));
+  process.exit(1);
+}
+
+if (jsonMode) {
+  console.log(JSON.stringify(report, null, 2));
+} else {
+  console.log('Status:', report.alignment_status);
+  console.log('Score:', report.score);
+  console.log('Misaligned:', report.misaligned_tests.length);
+}
+process.exit(report.alignment_status === 'PASS' ? 0 : 1);

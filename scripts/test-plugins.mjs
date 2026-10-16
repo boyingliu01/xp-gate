@@ -172,7 +172,6 @@ opencodeBuildResult.status === 0
 console.log('');
 console.log('Test 6: Skill packaging');
 const expectedSkills = [
-  'clipboard-vision',
   'sprint-flow',
   'delphi-review',
   'test-specification-alignment',

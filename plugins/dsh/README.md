@@ -185,6 +185,6 @@ npm run build:dsh-plugin       # = node scripts/build-plugin.mjs --platform dsh
 ## 注意
 
 - `lib/` 与 `skills/` 是**构建产物**（已 gitignore），不提交。
-- `scripts/prepack.cjs` 目前硬编码 12 个 skill，**不含 `clipboard-vision`**（仓库有 13 个）。
+- `scripts/prepack.cjs` 的 skill 列表为**动态发现**（读取仓库 `skills/`），不硬编码。
 - `plugins/dsh/package.json` 的 peerDeps 仍 pin `0.1.1-rc.2`，但实测运行在 `0.2.0-rc.2` 上
   `defineTool` / `TOOL_ABORTED` / `HarnessError` 签名未变，无需改写。
