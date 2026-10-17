@@ -209,18 +209,18 @@ function buildResult(
   }
 }
 
+/** Default global config location; XDG_CONFIG_HOME is an accepted override. */
+function defaultGlobalConfigPath(env: NodeJS.ProcessEnv): string {
+  // r16 MA-01 disposition: the CLI lib pins ~/.config/xp-gate, and on Linux
+  // $HOME/.config IS the XDG default — opt-in escape hatch only.
+  return join(env.XDG_CONFIG_HOME || join(homedir(), ".config"), "xp-gate", ".delphi-config.json")
+}
+
 /** Read and resolve `.delphi-config.json` from a project root. */
 export function loadDelphiConfig(
   cwd: string,
   env: NodeJS.ProcessEnv = process.env,
-  // r16 MA-01 disposition: XDG_CONFIG_HOME is an accepted override. The CLI
-  // lib pins ~/.config/xp-gate, and on Linux $HOME/.config IS the XDG default
-  // — so this only adds an opt-in escape hatch without diverging defaults.
-  globalPath: string = join(
-    env.XDG_CONFIG_HOME || join(homedir(), ".config"),
-    "xp-gate",
-    ".delphi-config.json",
-  ),
+  globalPath: string = defaultGlobalConfigPath(env),
 ): ResolvedDelphiConfig {
   // Global fallback (AC-DSH-016-03): the machine-wide config at
   // ~/.config/xp-gate/.delphi-config.json is the single source of truth for

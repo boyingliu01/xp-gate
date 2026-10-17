@@ -209,11 +209,18 @@ function buildResult(
   }
 }
 
+/** Default global config location; XDG_CONFIG_HOME is an accepted override. */
+function defaultGlobalConfigPath(env: NodeJS.ProcessEnv): string {
+  // r16 MA-01 disposition: the CLI lib pins ~/.config/xp-gate, and on Linux
+  // $HOME/.config IS the XDG default — opt-in escape hatch only.
+  return join(env.XDG_CONFIG_HOME || join(homedir(), ".config"), "xp-gate", ".delphi-config.json")
+}
+
 /** Read and resolve `.delphi-config.json` from a project root. */
 export function loadDelphiConfig(
   cwd: string,
   env: NodeJS.ProcessEnv = process.env,
-  globalPath: string = join(homedir(), ".config", "xp-gate", ".delphi-config.json"),
+  globalPath: string = defaultGlobalConfigPath(env),
 ): ResolvedDelphiConfig {
   // Global fallback (AC-DSH-016-03): the machine-wide config at
   // ~/.config/xp-gate/.delphi-config.json is the single source of truth for
@@ -235,7 +242,13 @@ export function loadDelphiConfig(
     }
     try {
       raw = readFileSync(globalPath, "utf8")
-    } catch {
+    } catch (globalError) {
+      // r16 CI-01: mirror the project-read semantics — a global file that is
+      // absent means "no config anywhere"; any OTHER error (EACCES/EISDIR)
+      // must surface as-is rather than masquerade as a missing file.
+      if ((globalError as NodeJS.ErrnoException)?.code !== "ENOENT") {
+        throw new DelphiSetupError(`Cannot read ${globalPath}: ${(globalError as Error).message}`)
+      }
       throw new DelphiSetupError(
         `No .delphi-config.json found at ${path} or the global location ${globalPath}.`
       )
