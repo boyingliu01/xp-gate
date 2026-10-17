@@ -127,19 +127,6 @@ wc_java_json_violation_count() {
     *) return 1 ;;
   esac
 
-  # Strip string VALUE literals (`: "..."` -> `: ""`). Keys must survive
-  # (they are the tokens being counted); values must vanish (violation
-  # messages routinely contain braces or the words file/rule/severity --
-  # #507 Delphi round-1 A-MAJOR-1). JSON strings cannot contain raw newlines
-  # (they are \n escapes), so line-wise sed is safe. The leftmost-match rule
-  # consumes an entire value string in one go, including any `: "` sequences
-  # inside it. Broken JSON masks badly -> counts desynchronize -> BLOCK,
-  # which is the correct fail-closed direction.
-  # POSIX ERE via -E: BSD sed (macOS is a supported CI platform) does not
-  # support the GNU BRE `\|` alternation extension -- under BSD sed the GNU
-  # variant either fails to strip values (count desync -> BLOCK, annoying but
-  # safe) or, worst case, errors to empty counts and disarms the lying-tool
-  # BLOCK below (fail-open). Delphi round-2 A-MAJOR-2.
   local structural obj_count file_count rule_count sev_count
   # Strip string VALUE literals (`: "..."` -> `: ""`). Keys must survive
   # (they are the tokens being counted); values must vanish (violation
