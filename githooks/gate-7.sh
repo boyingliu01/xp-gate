@@ -14,10 +14,26 @@ if [ -z "$IAC_FILES" ]; then
   echo "✅ PASSED - No IaC files detected in changes."
   GATE_7_STATUS="PASS"
 else
-  # Run IaC adapter
-  if [ -f "githooks/adapters/iac.sh" ]; then
-    # shellcheck source=githooks/adapters/iac.sh
-    source "githooks/adapters/iac.sh"
+  # Run IaC adapter. Resolution follows the documented 3-tier convention
+  # (adapter-common.sh): global ~/.config/xp-gate/adapters -> project
+  # githooks/adapters -> script dir. The old cwd-only test silently SKIPped
+  # IaC security in every consumer repo without an in-repo githooks/ dir,
+  # even with the adapter installed globally (e2e sweep 2026-10-17; pinned
+  # by __tests__/gate-7-adapter-resolution.test.bats).
+  IAC_ADAPTER=""
+  for _candidate in \
+    "$HOME/.config/xp-gate/adapters/iac.sh" \
+    "githooks/adapters/iac.sh" \
+    "${SCRIPT_DIR:-}/adapters/iac.sh" \
+    "${GATE_DIR:-}/adapters/iac.sh"; do
+    if [ -n "$_candidate" ] && [ -f "$_candidate" ]; then
+      IAC_ADAPTER="$_candidate"
+      break
+    fi
+  done
+  if [ -n "$IAC_ADAPTER" ]; then
+    # shellcheck source=/dev/null
+    source "$IAC_ADAPTER"
     
     # Run static analysis for IaC files
     IAC_OUTPUT=$(run_static_analysis "$IAC_FILES" 2>&1)
