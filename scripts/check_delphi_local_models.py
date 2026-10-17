@@ -29,6 +29,10 @@ MODEL_ALLOWLIST: set[str] = set()
 CONFIGS = [
     os.path.expanduser("~/.config/xp-gate/.delphi-config.json"),
     os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), ".delphi-config.json"),
+    # The loader's third resolution tier: a project-local override in the
+    # current directory, when it is neither of the two paths above
+    # (walkthrough R9 MA-02: guard coverage must match loader resolution).
+    os.path.join(os.getcwd(), ".delphi-config.json"),
 ]
 
 
@@ -66,6 +70,50 @@ def check_file(path):
     return ok
 
 
+def probe_one_seat(base, key, role, model):
+    """One chat completion proving the seat resolves. Returns ok."""
+    body = json.dumps({
+        "model": model,
+        "messages": [{"role": "user", "content": "reply OK"}],
+        "max_tokens": 4,
+    }).encode()
+    req = urllib.request.Request(
+        base.rstrip("/") + "/v1/chat/completions",
+        data=body,
+        headers={"Content-Type": "application/json", "Authorization": "Bearer " + key},
+    )
+    try:
+        # timeout is mandatory (R9 FC-02): an unresponsive gateway must
+        # fail the check, never hang a CI pipeline.
+        with urllib.request.urlopen(req, timeout=60) as resp:
+            payload = json.loads(resp.read().decode("utf-8"))
+        # A 200 whose body carries no model id means the seat did not
+        # actually resolve — status alone is not proof (R9 MA-01).
+        resolved = payload.get("model") or payload.get("data", [{}])[0].get("id", "")
+        print(f"PROBE OK   role={role} model={model} -> resolved={resolved or 'NO-MODEL-FIELD'}")
+        return bool(resolved)
+    except urllib.error.HTTPError as exc:
+        # 401/403 = credential problem, not a missing model; report it
+        # distinctly so one misconfigured key does not read as 3 dead
+        # seats (R9 MA-01).
+        kind = "AUTH" if exc.code in (401, 403) else f"HTTP {exc.code}"
+        print(f"PROBE FAIL role={role} model={model} -> {kind}")
+        return False
+    except Exception as exc:  # noqa: BLE001 - report any transport failure
+        print(f"PROBE FAIL role={role} model={model} -> ERR {exc}")
+        return False
+
+
+def active_profile(cfg):
+    """Resolve the active profile exactly like the loaders do. Probing every
+    profile iterated wrong gateways and stale seat lists — a 401 from an
+    inactive profile used to fail the whole guard while its real target never
+    got tested (R9 CI-01 follow-up)."""
+    profiles = cfg.get("profiles", {})
+    active_name = cfg.get("active_profile") or ("default" if "default" in profiles else None)
+    return profiles.get(active_name)
+
+
 def probe(cfg_by_path):
     key = (os.environ.get("WHALECLOUD_API_KEY") or "").strip()
     if not key:
@@ -73,38 +121,29 @@ def probe(cfg_by_path):
         return True
     ok = True
     for path, cfg in cfg_by_path.items():
+        prof = active_profile(cfg)
+        if not prof:
+            print(f"PROBE SKIP {path}: no resolvable active profile (active_profile={cfg.get('active_profile')!r})")
+            continue
         base = None
-        for prof in cfg.get("profiles", {}).values():
-            for prov in prof.get("providers", {}).values():
-                base = prov.get("base_url")
+        for prov in prof.get("providers", {}).values():
+            base = prov.get("base_url")
         if not base:
             continue
-        for _profile, role, seat in iter_seats(cfg):
-            model = str(seat.get("model") or "")
-            body = json.dumps({
-                "model": model,
-                "messages": [{"role": "user", "content": "reply OK"}],
-                "max_tokens": 4,
-            }).encode()
-            req = urllib.request.Request(
-                base.rstrip("/") + "/v1/chat/completions",
-                data=body,
-                headers={"Content-Type": "application/json", "Authorization": "Bearer " + key},
-            )
-            try:
-                with urllib.request.urlopen(req, timeout=60) as resp:
-                    code = resp.status
-            except Exception as exc:  # noqa: BLE001 - report any transport failure
-                code = f"ERR {exc}"
-                ok = False
-            print(f"PROBE {'OK  ' if code == 200 else 'FAIL'} role={role} model={model} -> {code}")
+        experts = prof.get("experts", {})
+        items = experts.items() if isinstance(experts, dict) else [(e.get("role", i), e) for i, e in enumerate(experts)]
+        for role, seat in items:
+            ok = probe_one_seat(base, key, role, str(seat.get("model") or "")) and ok
     return ok
 
 
 def main():
     ok = True
     found = {}
-    for path in CONFIGS:
+    # Dedupe: the cwd config usually IS the repo-root or global file (R9 CI-01
+    # flagged the empty allowlist as making a second rule look permissive — one
+    # read path, one verdict source keeps guard semantics unambiguous).
+    for path in dict.fromkeys(os.path.realpath(p) for p in CONFIGS):
         # Read once, guarded (walkthrough R8 FC-01): a config deleted between
         # check_file's existence test and this load used to crash the guard.
         if not os.path.exists(path):
