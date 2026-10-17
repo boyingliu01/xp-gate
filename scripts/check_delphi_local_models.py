@@ -51,12 +51,7 @@ def iter_seats(cfg):
             yield name, role, seat
 
 
-def check_file(path):
-    if not os.path.exists(path):
-        print(f"SKIP {path} (absent)")
-        return True
-    with open(path, encoding="utf-8") as fh:
-        cfg = json.load(fh)
+def check_file(path, cfg):
     ok = True
     for profile, role, seat in iter_seats(cfg):
         model = str(seat.get("model") or seat.get("requested_model") or "")
@@ -114,6 +109,20 @@ def active_profile(cfg):
     return profiles.get(active_name)
 
 
+def load_json(path):
+    """Parse a config, reporting problems as a clean FAIL instead of a
+    traceback (R10 FC-02/FC-03): the exists()-then-open() dance crashed when
+    a file vanished mid-run, and malformed JSON escaped as JSONDecodeError."""
+    try:
+        with open(path, encoding="utf-8") as fh:
+            return json.load(fh)
+    except FileNotFoundError:
+        return None
+    except (OSError, ValueError) as exc:
+        print(f"FAIL [{path}] invalid config: {exc}")
+        return False
+
+
 def probe(cfg_by_path):
     key = (os.environ.get("WHALECLOUD_API_KEY") or "").strip()
     if not key:
@@ -125,14 +134,18 @@ def probe(cfg_by_path):
         if not prof:
             print(f"PROBE SKIP {path}: no resolvable active profile (active_profile={cfg.get('active_profile')!r})")
             continue
-        base = None
-        for prov in prof.get("providers", {}).values():
-            base = prov.get("base_url")
-        if not base:
-            continue
+        providers = prof.get("providers", {})
         experts = prof.get("experts", {})
         items = experts.items() if isinstance(experts, dict) else [(e.get("role", i), e) for i, e in enumerate(experts)]
         for role, seat in items:
+            # Route each seat through ITS OWN provider (R10 CI-01); only a
+            # seat without one falls back to the profile's single provider.
+            name = seat.get("provider") or prof.get("provider") or ""
+            prov = providers.get(name, {})
+            base = prov.get("base_url") or next((p.get("base_url") for p in providers.values() if p.get("base_url")), None)
+            if not base:
+                print(f"PROBE SKIP role={role}: no base_url for provider {name!r}")
+                continue
             ok = probe_one_seat(base, key, role, str(seat.get("model") or "")) and ok
     return ok
 
@@ -144,13 +157,15 @@ def main():
     # flagged the empty allowlist as making a second rule look permissive — one
     # read path, one verdict source keeps guard semantics unambiguous).
     for path in dict.fromkeys(os.path.realpath(p) for p in CONFIGS):
-        # Read once, guarded (walkthrough R8 FC-01): a config deleted between
-        # check_file's existence test and this load used to crash the guard.
-        if not os.path.exists(path):
+        cfg = load_json(path)
+        if cfg is None:  # absent: nothing to check here
+            print(f"SKIP {path} (absent)")
             continue
-        with open(path, encoding="utf-8") as fh:
-            found[path] = json.load(fh)
-        ok = check_file(path) and ok
+        if cfg is False:  # invalid: loud FAIL, no traceback (R10 FC-03)
+            ok = False
+            continue
+        found[path] = cfg
+        ok = check_file(path, cfg) and ok
     if "--probe" in sys.argv:
         ok = probe(found) and ok
     print("RESULT:", "ALL SEATS LOCAL" if ok else "NON-LOCAL SEAT FOUND")
