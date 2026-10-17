@@ -126,7 +126,13 @@ function readConfig(configPath, profileOverride) {
     try { fs.statSync(configPath); return false; } catch (e) { return e.code === 'ENOENT'; }
   })();
   if (missingHere && !path.isAbsolute(configPath)) {
-    const globalPath = path.join(os.homedir(), '.config', 'xp-gate', '.delphi-config.json');
+    // r16 MA-01 disposition: XDG_CONFIG_HOME is an accepted override for the
+    // global config location. The CLI lib (shared-paths/doctor) intentionally
+    // pins ~/.config/xp-gate — overriding only this loader would make the two
+    // disagree. On Linux, $HOME/.config IS the XDG default, so behaviour there
+    // is identical; the env var only matters for non-default setups.
+    const configHome = process.env.XDG_CONFIG_HOME || path.join(os.homedir(), '.config');
+    const globalPath = path.join(configHome, 'xp-gate', '.delphi-config.json');
     if (fs.existsSync(globalPath)) {
       console.error(`[delphi-review] ${configPath} not found here — using global config ${globalPath}`);
       configPath = globalPath;
