@@ -225,7 +225,14 @@ export function loadDelphiConfig(
   let raw: string
   try {
     raw = readFileSync(path, "utf8")
-  } catch {
+  } catch (projectError) {
+    // Fall back ONLY when the project file is genuinely absent (ENOENT); any
+    // other read error must surface rather than silently route this run to
+    // another config. Same semantics as delphi-external-review.cjs, which
+    // gates the fallback on existsSync (walkthrough R8 MA-01).
+    if ((projectError as NodeJS.ErrnoException)?.code !== "ENOENT") {
+      throw new DelphiSetupError(`Cannot read ${path}: ${(projectError as Error).message}`)
+    }
     try {
       raw = readFileSync(globalPath, "utf8")
     } catch {

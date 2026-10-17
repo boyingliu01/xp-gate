@@ -20,6 +20,12 @@ import urllib.request
 
 LOCAL_PREFIX = "local-"
 
+# Seat models that are NOT local but remain explicitly permitted. The user's
+# standing rule is local-only seats; this allowlist exists so a future hosted
+# seat requires an intentional, reviewable edit here (walkthrough R8 CI-01:
+# the guard and the loaders must agree on what is legal).
+MODEL_ALLOWLIST: set[str] = set()
+
 CONFIGS = [
     os.path.expanduser("~/.config/xp-gate/.delphi-config.json"),
     os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), ".delphi-config.json"),
@@ -51,10 +57,12 @@ def check_file(path):
     for profile, role, seat in iter_seats(cfg):
         model = str(seat.get("model") or seat.get("requested_model") or "")
         local = model.lower().startswith(LOCAL_PREFIX)
-        mark = "OK  " if local else "FAIL"
-        if not local:
+        allowed = local or model in MODEL_ALLOWLIST
+        mark = "OK  " if allowed else "FAIL"
+        if not allowed:
             ok = False
-        print(f"{mark} [{os.path.basename(os.path.dirname(path))}] profile={profile} role={role} model={model}")
+        note = "" if local else (" (allowlisted)" if allowed else "")
+        print(f"{mark} [{os.path.basename(os.path.dirname(path))}] profile={profile} role={role} model={model}{note}")
     return ok
 
 
@@ -97,9 +105,13 @@ def main():
     ok = True
     found = {}
     for path in CONFIGS:
+        # Read once, guarded (walkthrough R8 FC-01): a config deleted between
+        # check_file's existence test and this load used to crash the guard.
+        if not os.path.exists(path):
+            continue
+        with open(path, encoding="utf-8") as fh:
+            found[path] = json.load(fh)
         ok = check_file(path) and ok
-        if os.path.exists(path):
-            found[path] = json.load(open(path, encoding="utf-8"))
     if "--probe" in sys.argv:
         ok = probe(found) and ok
     print("RESULT:", "ALL SEATS LOCAL" if ok else "NON-LOCAL SEAT FOUND")
