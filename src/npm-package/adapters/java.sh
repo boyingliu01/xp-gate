@@ -111,12 +111,21 @@ wc_java_json_violation_count() {
   local json_file="$1"
   [ -s "$json_file" ] || return 1
 
-  # Array-shaped: opens with [ and closes with ]. (A bare [] is valid clean
-  # output; an object wrapper is outside the pinned contract.)
-  [ "$(head -c 1 "$json_file")" = "[" ] || return 1
-  local tail
+  # Two shapes are accepted, each closed by its own bracket:
+  #   - bare array `[ ... ]` — the originally pinned contract ([] = clean);
+  #   - object wrapper `{ ..., "issues": [ ... ] }` — what wc-java-lint 0.4.x
+  #     actually emits ({summary, issues}). Rejecting it fail-closed every
+  #     real Java commit on well-formed JSON (e2e sweep 2026-10-17; pinned by
+  #     __tests__/issue-507-wc-java-object-json.test.bats). A truncated
+  #     response still fails its closing-bracket test -> BLOCK.
+  local head1 tail shape
+  head1=$(head -c 1 "$json_file")
   tail=$(tr -d '[:space:]' < "$json_file" | tail -c 1)
-  [ "$tail" = "]" ] || return 1
+  case "$head1" in
+    "[") shape=array;  [ "$tail" = "]" ] || return 1 ;;
+    "{") shape=object; [ "$tail" = "}" ] || return 1 ;;
+    *) return 1 ;;
+  esac
 
   # Strip string VALUE literals (`: "..."` -> `: ""`). Keys must survive
   # (they are the tokens being counted); values must vanish (violation
@@ -132,7 +141,40 @@ wc_java_json_violation_count() {
   # safe) or, worst case, errors to empty counts and disarms the lying-tool
   # BLOCK below (fail-open). Delphi round-2 A-MAJOR-2.
   local structural obj_count file_count rule_count sev_count
+  # Strip string VALUE literals (`: "..."` -> `: ""`). Keys must survive
+  # (they are the tokens being counted); values must vanish (violation
+  # messages routinely contain braces or the words file/rule/severity --
+  # #507 Delphi round-1 A-MAJOR-1). JSON strings cannot contain raw newlines
+  # (they are \n escapes), so line-wise sed is safe. The leftmost-match rule
+  # consumes an entire value string in one go, including any `: "` sequences
+  # inside it. Broken JSON masks badly -> counts desynchronize -> BLOCK,
+  # which is the correct fail-closed direction.
+  # POSIX ERE via -E: BSD sed (macOS is a supported CI platform) does not
+  # support the GNU BRE `\|` alternation extension -- under BSD sed the GNU
+  # variant either fails to strip values (count desync -> BLOCK, annoying but
+  # safe) or, worst case, errors to empty counts and disarms the lying-tool
+  # BLOCK below (fail-open). Delphi round-2 A-MAJOR-2.
   structural=$(sed -E 's/:([[:space:]]*)"([^"\\]|\\.)*"/:\1""/g' "$json_file" 2>/dev/null)
+
+  if [ "$shape" = "object" ]; then
+    # Object wrapper ({summary, issues}). Nested non-record objects survive
+    # the value-strip with their own keys ("by_severity": {"error": ""}), so
+    # brace counting cannot isolate issue records. Count RECORDS by their
+    # key triple instead and cross-check that every brace we attribute to a
+    # record is real: all three key counters must agree, and the brace count
+    # must be at least that high (wrapper + sub-objects only add). A record
+    # missing any key breaks agreement -> BLOCK.
+    file_count=$(grep -o '"file"' <<< "$structural" | wc -l | tr -d '[:space:]')
+    rule_count=$(grep -o '"rule"' <<< "$structural" | wc -l | tr -d '[:space:]')
+    sev_count=$(grep -o '"severity"' <<< "$structural" | wc -l | tr -d '[:space:]')
+    obj_count=$(grep -o '{' <<< "$structural" | wc -l | tr -d '[:space:]')
+    [ "$file_count" -eq "$rule_count" ] || return 1
+    [ "$file_count" -eq "$sev_count" ] || return 1
+    [ "$obj_count" -ge "$file_count" ] || return 1
+    echo "$file_count"
+    return 0
+  fi
+
   obj_count=$(grep -o '{' <<< "$structural" | wc -l | tr -d '[:space:]')
   file_count=$(grep -o '"file"' <<< "$structural" | wc -l | tr -d '[:space:]')
   rule_count=$(grep -o '"rule"' <<< "$structural" | wc -l | tr -d '[:space:]')
