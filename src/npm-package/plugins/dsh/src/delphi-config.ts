@@ -12,7 +12,8 @@
  */
 
 import { readFileSync } from "node:fs"
-import { resolve } from "node:path"
+import { homedir } from "node:os"
+import { join, resolve } from "node:path"
 import type { ExpertSeat, DelphiOptions } from "./delphi.js"
 import { validateSeats } from "./delphi.js"
 
@@ -99,32 +100,18 @@ function normalizeExperts(experts: RawProfile["experts"]): Array<{ raw: RawExper
   return Object.entries(experts).map(([role, raw]) => ({ raw, role }))
 }
 
-/**
- * Turn raw config into a ready-to-run review setup.
- * Fails loudly and specifically: a missing key or an unexpanded placeholder is
- * the most common way a Delphi run silently degrades.
- */
-export function resolveConfig(
-  cfg: RawDelphiConfig,
-  env: NodeJS.ProcessEnv = process.env,
-): ResolvedDelphiConfig {
-  const profile = selectProfile(cfg)
-  const normalized = normalizeExperts(profile.experts)
-
-  // An expert may name its own provider; otherwise there must be a profile-wide
-  // default. Resolve base_url/api_key per provider so mixed setups work.
-  const providerNames = new Set(
-    normalized.map((e) => e.raw.provider ?? profile.provider).filter((p): p is string => !!p),
-  )
-  if (providerNames.size === 0) {
-    throw new DelphiSetupError(
-      'No provider configured. Set "provider" on the profile or on each expert.',
-    )
+/** Resolve every referenced provider's base_url + api_key, failing loudly. */
+function resolveProviders(
+  profile: RawProfile,
+  needed: Set<string>,
+  env: NodeJS.ProcessEnv,
+): Map<string, { baseUrl: string; apiKey: string }> {
+  if (needed.size === 0) {
+    throw new DelphiSetupError('No provider configured. Set "provider" on the profile or on each expert.')
   }
-
   const providerTable = profile.providers ?? {}
-  const resolvedProviders = new Map<string, { baseUrl: string; apiKey: string }>()
-  for (const name of providerNames) {
+  const resolved = new Map<string, { baseUrl: string; apiKey: string }>()
+  for (const name of needed) {
     const entry = providerTable[name]
     if (!entry) {
       throw new DelphiSetupError(
@@ -148,8 +135,29 @@ export function resolveConfig(
           : `Provider "${name}" has no api_key.`,
       )
     }
-    resolvedProviders.set(name, { baseUrl, apiKey })
+    resolved.set(name, { baseUrl, apiKey })
   }
+  return resolved
+}
+
+/**
+ * Turn raw config into a ready-to-run review setup.
+ * Fails loudly and specifically: a missing key or an unexpanded placeholder is
+ * the most common way a Delphi run silently degrades.
+ */
+export function resolveConfig(
+  cfg: RawDelphiConfig,
+  env: NodeJS.ProcessEnv = process.env,
+): ResolvedDelphiConfig {
+  const profile = selectProfile(cfg)
+  const normalized = normalizeExperts(profile.experts)
+
+  // An expert may name its own provider; otherwise there must be a profile-wide
+  // default. Resolve base_url/api_key per provider so mixed setups work.
+  const providerNames = new Set(
+    normalized.map((e) => e.raw.provider ?? profile.provider).filter((p): p is string => !!p),
+  )
+  const resolvedProviders = resolveProviders(profile, providerNames, env)
 
   const seats = normalized.map((e, i) => seatFromRaw(e.raw, i, e.role))
   // Surface an unexpanded placeholder as a config error, not a provider 404.
@@ -162,6 +170,17 @@ export function resolveConfig(
   }
   validateSeats(seats)
 
+  return buildResult(profile, normalized, resolvedProviders, seats, cfg)
+}
+
+/** Assemble the final result after seats and providers validated. */
+function buildResult(
+  profile: RawProfile,
+  normalized: Array<{ raw: RawExpert; role: string }>,
+  resolvedProviders: Map<string, { baseUrl: string; apiKey: string }>,
+  seats: ExpertSeat[],
+  cfg: RawDelphiConfig,
+): ResolvedDelphiConfig {
   // All seats share one gateway in the supported setup; require agreement so a
   // mixed list cannot silently send one seat's key to another host.
   const chosen = resolvedProviders.get(normalized[0].raw.provider ?? profile.provider ?? "")
@@ -194,13 +213,33 @@ export function resolveConfig(
 export function loadDelphiConfig(
   cwd: string,
   env: NodeJS.ProcessEnv = process.env,
+  globalPath: string = join(homedir(), ".config", "xp-gate", ".delphi-config.json"),
 ): ResolvedDelphiConfig {
+  // Global fallback (AC-DSH-016-03): the machine-wide config at
+  // ~/.config/xp-gate/.delphi-config.json is the single source of truth for
+  // every project. Without it, each repo needed its own copy — and reading a
+  // stale or differently-priced config from another project's directory caused
+  // real money loss (2026-10-03: an expensive overseas model burned the daily
+  // quota). A project-local config still wins, so per-project overrides work.
   const path = resolve(cwd, ".delphi-config.json")
   let raw: string
   try {
     raw = readFileSync(path, "utf8")
-  } catch {
-    throw new DelphiSetupError(`No .delphi-config.json found at ${path}.`)
+  } catch (projectError) {
+    // Fall back ONLY when the project file is genuinely absent (ENOENT); any
+    // other read error must surface rather than silently route this run to
+    // another config. Same semantics as delphi-external-review.cjs, which
+    // gates the fallback on existsSync (walkthrough R8 MA-01).
+    if ((projectError as NodeJS.ErrnoException)?.code !== "ENOENT") {
+      throw new DelphiSetupError(`Cannot read ${path}: ${(projectError as Error).message}`)
+    }
+    try {
+      raw = readFileSync(globalPath, "utf8")
+    } catch {
+      throw new DelphiSetupError(
+        `No .delphi-config.json found at ${path} or the global location ${globalPath}.`
+      )
+    }
   }
   let parsed: RawDelphiConfig
   try {
