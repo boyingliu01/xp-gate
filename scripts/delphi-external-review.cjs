@@ -112,6 +112,19 @@ function validateProviders(providers, profileName) {
 }
 
 function readConfig(configPath, profileOverride) {
+  // Global fallback: a relative --config that this cwd does not have resolves
+  // to the machine-wide ~/.config/xp-gate/.delphi-config.json. This is what
+  // makes `--config .delphi-config.json` work from ANY project without each
+  // repo carrying its own (drifting, differently-priced) copy — reading a
+  // foreign project's config used to route calls to expensive models
+  // (2026-10-03 quota incident). An existing local file always wins.
+  if (!fs.existsSync(configPath) && !path.isAbsolute(configPath)) {
+    const globalPath = path.join(os.homedir(), '.config', 'xp-gate', '.delphi-config.json');
+    if (fs.existsSync(globalPath)) {
+      console.error(`[delphi-review] ${configPath} not found here — using global config ${globalPath}`);
+      configPath = globalPath;
+    }
+  }
   if (!fs.existsSync(configPath)) {
     console.error(`[delphi-review] ERROR: Config file not found: ${configPath}`);
     console.error('[delphi-review] Copy .delphi-config.json.example to .delphi-config.json and fill in your API keys.');

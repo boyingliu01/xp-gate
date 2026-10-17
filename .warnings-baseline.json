@@ -26,5 +26,9 @@
   "src/npm-package/mutation/runners/mutmut-runner.ts": {
     "totalWarnings": 11,
     "lastAnalyzed": "2026-10-14T15:41:31.676Z"
+  },
+  "plugins/dsh/src/delphi-config.ts": {
+    "totalWarnings": 1,
+    "lastAnalyzed": "2026-10-17T03:58:07.232Z"
   }
 }
