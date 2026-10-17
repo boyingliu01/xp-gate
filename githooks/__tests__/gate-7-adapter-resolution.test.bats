@@ -51,7 +51,24 @@ drive() {
   [ "$status" -eq 0 ]
   [[ "$output" == *"fake checkov ran"* ]]
   [[ "$output" != *"IaC adapter not found"* ]]
+  # Resolution audit line (r14 MAJ-02): tier that won must be visible.
+  [[ "$output" == *"IaC adapter resolved from: $sandbox/global-home/.config/xp-gate/adapters/iac.sh"* ]]
   [[ "$output" == *"STATUS=PASS"* ]]
+}
+
+@test "gate-7 prefers the global tier over a project copy (route_to_adapter parity)" {
+  # Both tiers present: order must match route_to_adapter() in
+  # adapter-common.sh — global first (machine-wide single source of truth).
+  mkdir -p githooks/adapters
+  cat > githooks/adapters/iac.sh <<'ADAPTER'
+run_static_analysis() { echo "project adapter ran"; return 0; }
+ADAPTER
+  printf 'resource "x" "y" {}\n' > main.tf
+  git add main.tf
+  run drive
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"fake checkov ran"* ]]
+  [[ "$output" != *"project adapter ran"* ]]
 }
 
 @test "gate-7 falls back to the project adapter when no global install exists" {
@@ -70,6 +87,7 @@ ADAPTER
   [ "$status" -eq 0 ]
   [[ "$output" == *"project adapter ran"* ]]
   [[ "$output" != *"IaC adapter not found"* ]]
+  [[ "$output" == *"STATUS=PASS"* ]]
 }
 
 @test "gate-7 reports not-found only when NO tier carries iac.sh" {

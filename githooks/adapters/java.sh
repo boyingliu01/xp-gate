@@ -144,21 +144,54 @@ wc_java_json_violation_count() {
   structural=$(sed -E 's/:([[:space:]]*)"([^"\\]|\\.)*"/:\1""/g' "$json_file" 2>/dev/null)
 
   if [ "$shape" = "object" ]; then
-    # Object wrapper ({summary, issues}). Nested non-record objects survive
-    # the value-strip with their own keys ("by_severity": {"error": ""}), so
-    # brace counting cannot isolate issue records. Count RECORDS by their
-    # key triple instead and cross-check that every brace we attribute to a
-    # record is real: all three key counters must agree, and the brace count
-    # must be at least that high (wrapper + sub-objects only add). A record
-    # missing any key breaks agreement -> BLOCK.
+    # Object wrapper ({summary, issues}). Parse the ISSUES ARRAY exactly with
+    # brace-depth tracking (issues are JSON objects, so a record ends exactly
+    # where its nesting returns to the array level). For each record: all
+    # three keys must be present exactly once. A key outside any record —
+    # e.g. split triples in sibling objects, the lying-tool shape of r14
+    # CI-02 — makes the per-record key totals disagree with the global
+    # stripped counts -> BLOCK. Values were stripped first so braces inside
+    # messages cannot skew the depth.
     file_count=$(grep -o '"file"' <<< "$structural" | wc -l | tr -d '[:space:]')
     rule_count=$(grep -o '"rule"' <<< "$structural" | wc -l | tr -d '[:space:]')
     sev_count=$(grep -o '"severity"' <<< "$structural" | wc -l | tr -d '[:space:]')
-    obj_count=$(grep -o '{' <<< "$structural" | wc -l | tr -d '[:space:]')
     [ "$file_count" -eq "$rule_count" ] || return 1
     [ "$file_count" -eq "$sev_count" ] || return 1
-    [ "$obj_count" -ge "$file_count" ] || return 1
-    echo "$file_count"
+    # Everything from the "issues" member onward (the tool emits it last; if
+    # a future format moves it, keys before it fall outside record parsing ->
+    # sum mismatch -> BLOCK, fail closed). Flatten to one line first: real
+    # output is pretty-printed across lines.
+    flattened=$(tr '\n' ' ' <<< "$structural")
+    tail_from_issues=$(sed -n 's/.*"issues"[[:space:]]*:[[:space:]]*\[/\n/p' <<< "$flattened")
+    [ -n "$tail_from_issues" ] || return 1
+    records=$(awk '
+      { rest = $0
+        depth = 0; rec = ""
+        for (i = 1; i <= length(rest); i++) {
+          c = substr(rest, i, 1)
+          if (depth == 0 && c == "]") break
+          if (c == "{") { depth++; if (depth == 1) { rec = ""; continue } }
+          if (c == "}") { depth--; if (depth == 0) { print rec; continue } }
+          if (depth >= 1) rec = rec c
+        }
+      }' <<< "$tail_from_issues")
+    rec_count=0
+    rf=0; rr=0; rs=0
+    while IFS= read -r _rec; do
+      [ -n "$_rec" ] || continue
+      cf=$(grep -o '"file"' <<< "$_rec" | wc -l | tr -d '[:space:]')
+      cr=$(grep -o '"rule"' <<< "$_rec" | wc -l | tr -d '[:space:]')
+      cs=$(grep -o '"severity"' <<< "$_rec" | wc -l | tr -d '[:space:]')
+      [ "$cf" -eq 1 ] || return 1
+      [ "$cr" -eq 1 ] || return 1
+      [ "$cs" -eq 1 ] || return 1
+      rf=$((rf + cf)); rr=$((rr + cr)); rs=$((rs + cs))
+      rec_count=$((rec_count + 1))
+    done <<< "$records"
+    [ "$rf" -eq "$file_count" ] || return 1
+    [ "$rr" -eq "$rule_count" ] || return 1
+    [ "$rs" -eq "$sev_count" ] || return 1
+    echo "$rec_count"
     return 0
   fi
 

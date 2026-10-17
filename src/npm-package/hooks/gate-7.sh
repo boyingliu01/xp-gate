@@ -24,7 +24,6 @@ else
   for _candidate in \
     "$HOME/.config/xp-gate/adapters/iac.sh" \
     "githooks/adapters/iac.sh" \
-    "./githooks/adapters/iac.sh" \
     "${SCRIPT_DIR:-}/adapters/iac.sh"; do
     if [ -n "$_candidate" ] && [ -f "$_candidate" ]; then
       IAC_ADAPTER="$_candidate"
@@ -32,6 +31,9 @@ else
     fi
   done
   if [ -n "$IAC_ADAPTER" ]; then
+    # Audit trail: which tier won (r14 walkthrough MAJ-02 — a silent tier-order
+    # regression must be visible in the gate output, not only in test diffs).
+    echo "   IaC adapter resolved from: $IAC_ADAPTER"
     # shellcheck source=/dev/null
     source "$IAC_ADAPTER"
     

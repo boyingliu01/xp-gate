@@ -47,6 +47,16 @@ JSON
   rm -f "$f"
 }
 
+@test "split key triples across objects never count as a record (r14 CI-02)" {
+  # No single object carries all three keys, yet naive per-key counters would
+  # each see 1. The stride check must reject this lying-tool shape.
+  f="$(mktemp)"
+  printf '{ "a": { "file": "A.java" }, "b": { "rule": "R", "severity": "error" } }\n' > "$f"
+  run wc_java_json_violation_count "$f"
+  [ "$status" -ne 0 ]
+  rm -f "$f"
+}
+
 @test "legacy bare-array contract still holds" {
   f="$(mktemp)"
   cat > "$f" <<'JSON'

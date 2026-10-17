@@ -23,7 +23,6 @@ else
   for _candidate in \
     "$HOME/.config/xp-gate/adapters/iac.sh" \
     "githooks/adapters/iac.sh" \
-    "./githooks/adapters/iac.sh" \
     "${SCRIPT_DIR:-}/adapters/iac.sh"; do
     if [ -n "$_candidate" ] && [ -f "$_candidate" ]; then
       IAC_ADAPTER="$_candidate"
