@@ -118,7 +118,14 @@ function readConfig(configPath, profileOverride) {
   // repo carrying its own (drifting, differently-priced) copy — reading a
   // foreign project's config used to route calls to expensive models
   // (2026-10-03 quota incident). An existing local file always wins.
-  if (!fs.existsSync(configPath) && !path.isAbsolute(configPath)) {
+  // Fallback fires ONLY when the project file is genuinely absent: statSync
+  // distinguishes ENOENT from EACCES/EISDIR, and any other error aborts here
+  // rather than silently routing this run to another config — matching the
+  // TS loader's ENOENT-only semantics (walkthrough R10 FC-01).
+  const missingHere = (() => {
+    try { fs.statSync(configPath); return false; } catch (e) { return e.code === 'ENOENT'; }
+  })();
+  if (missingHere && !path.isAbsolute(configPath)) {
     const globalPath = path.join(os.homedir(), '.config', 'xp-gate', '.delphi-config.json');
     if (fs.existsSync(globalPath)) {
       console.error(`[delphi-review] ${configPath} not found here — using global config ${globalPath}`);
