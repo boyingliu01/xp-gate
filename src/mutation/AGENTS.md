@@ -1,7 +1,7 @@
 # SRC/MUTATION KNOWLEDGE BASE
 
 **Generated:** 2026-10-17
-**Commit:** 31127583
+**Commit:** 392198dd
 **Branch:** main
 **Version:** 0.27.2.0
 
