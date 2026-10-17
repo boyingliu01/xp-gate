@@ -13,16 +13,16 @@
       "experts": {
         "architecture": {
           "provider": "whalecloud",
-          "model": "s-glm-5.3-flash",
+          "model": "local-deepseek-v4-flash",
           "max_tokens": 32000
         },
         "technical": {
           "provider": "whalecloud",
-          "model": "g-qwen3.8-flash"
+          "model": "local-qwen3.8-flash"
         },
         "feasibility": {
           "provider": "whalecloud",
-          "model": "g-deepseek-flash"
+          "model": "local-qwen3.8-27b"
         }
       },
       "consensus": {
