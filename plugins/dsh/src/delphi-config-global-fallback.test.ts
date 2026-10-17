@@ -10,7 +10,7 @@ import { DelphiSetupError, loadDelphiConfig } from "./delphi-config.js"
  * @intent 项目目录没有 .delphi-config.json 时，回退读取全局
  *         ~/.config/xp-gate/.delphi-config.json（全局唯一事实源，防止
  *         跨项目漂移）；两处都没有才报错。
- * @covers AC-DSH-016-03
+ * @covers AC-DSH-016-02
  */
 
 const globalStyle = JSON.stringify({
