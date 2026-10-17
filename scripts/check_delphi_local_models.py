@@ -138,14 +138,21 @@ def probe(cfg_by_path):
         experts = prof.get("experts", {})
         items = experts.items() if isinstance(experts, dict) else [(e.get("role", i), e) for i, e in enumerate(experts)]
         for role, seat in items:
-            # Route each seat through ITS OWN provider (R10 CI-01); only a
-            # seat without one falls back to the profile's single provider.
+            # Route each seat through ITS OWN provider (R10 CI-01); only when
+            # the profile declares exactly ONE provider may a seat without an
+            # explicit provider inherit it. With several providers an
+            # unspecified seat is a FAIL — guessing could probe (or ship)
+            # against the wrong gateway (R11 MA-01).
             name = seat.get("provider") or prof.get("provider") or ""
-            prov = providers.get(name, {})
-            base = prov.get("base_url") or next((p.get("base_url") for p in providers.values() if p.get("base_url")), None)
+            base = providers.get(name, {}).get("base_url")
             if not base:
-                print(f"PROBE SKIP role={role}: no base_url for provider {name!r}")
-                continue
+                bases = {p.get("base_url") for p in providers.values() if p.get("base_url")}
+                if len(bases) == 1:
+                    base = bases.pop()
+                else:
+                    print(f"PROBE FAIL role={role}: provider {name!r} unresolved among {len(providers)} providers")
+                    ok = False
+                    continue
             ok = probe_one_seat(base, key, role, str(seat.get("model") or "")) and ok
     return ok
 
