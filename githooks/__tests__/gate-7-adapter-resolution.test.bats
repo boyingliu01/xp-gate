@@ -54,10 +54,11 @@ drive() {
   [[ "$output" == *"STATUS=PASS"* ]]
 }
 
-@test "gate-7 still prefers the project-local adapter when present" {
-  # Project tier wins ONLY when no global install exists — matching
-  # adapter-common.sh, whose first probe is the global dir (global = the
-  # machine-wide single source of truth; a repo copy must not shadow it).
+@test "gate-7 falls back to the project adapter when no global install exists" {
+  # Tier order matches route_to_adapter() in adapter-common.sh: global tier
+  # first (the machine-wide single source of truth), project githooks/adapters
+  # second, script dir third. A repo copy is used only when no global install
+  # carries iac.sh — same semantics as every other language adapter.
   rm "$sandbox/global/adapters/iac.sh"
   mkdir -p githooks/adapters
   cat > githooks/adapters/iac.sh <<'ADAPTER'
