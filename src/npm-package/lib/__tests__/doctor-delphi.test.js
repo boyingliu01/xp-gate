@@ -139,6 +139,55 @@ describe('doctor delphi (#414 REQ-3/REQ-6)', () => {
     expect(code).toBe(1);
   });
 
+  // #541 follow-up: the loaders fall back to the machine-wide global config
+  // ONLY on ENOENT, so a project-local file silently shadows the global one.
+  // When their seats differ, the effective model mix depends on cwd — exactly
+  // the cross-project drift class that burned quota (2026-10-03). Doctor must
+  // warn about the shadow; identical seats are a legitimate override.
+  it('#541 a project config whose seats differ from the global one WARNs as a shadow', async () => {
+    healthyHome();
+    const globalPath = path.join(tmpHome, '.config', 'xp-gate', '.delphi-config.json');
+    fs.mkdirSync(path.dirname(globalPath), { recursive: true });
+    writeConfig(globalPath);
+    const configPath = path.join(tmpHome, '.delphi-config.json');
+    fs.writeFileSync(configPath, JSON.stringify({
+      active_profile: 'default',
+      profiles: {
+        default: {
+          providers: { gw: { base_url: 'https://gw.example/v1', api_key: 'k' } },
+          experts: {
+            architecture: { provider: 'gw', model: 'other-a' },
+            technical: { provider: 'gw', model: 'model-b' },
+            feasibility: { provider: 'gw', model: 'model-c' },
+          },
+        },
+      },
+    }));
+    const logs = [];
+    const logSpy = vi.spyOn(console, 'log').mockImplementation((...args) => logs.push(args.join(' ')));
+    const { doctorDelphi } = require('../doctor');
+    const code = await doctorDelphi({ projectDir: tmpHome, configPath, globalConfigPath: globalPath, npmLatest: null });
+    logSpy.mockRestore();
+    // A warning, not a failure: an intentional per-project override is legal.
+    expect(code).toBe(0);
+    expect(logs.join('\n')).toMatch(/shadow/i);
+  });
+
+  it('#541 a project config with seats identical to the global one does not warn', async () => {
+    healthyHome();
+    const globalPath = path.join(tmpHome, '.config', 'xp-gate', '.delphi-config.json');
+    fs.mkdirSync(path.dirname(globalPath), { recursive: true });
+    writeConfig(globalPath);
+    const configPath = writeConfig(path.join(tmpHome, '.delphi-config.json'));
+    const logs = [];
+    const logSpy = vi.spyOn(console, 'log').mockImplementation((...args) => logs.push(args.join(' ')));
+    const { doctorDelphi } = require('../doctor');
+    const code = await doctorDelphi({ projectDir: tmpHome, configPath, globalConfigPath: globalPath, npmLatest: null });
+    logSpy.mockRestore();
+    expect(code).toBe(0);
+    expect(logs.join('\n')).not.toMatch(/shadow/i);
+  });
+
   it('a missing config FAILs with the copy-the-example hint', async () => {
     healthyHome();
     const logs = [];
