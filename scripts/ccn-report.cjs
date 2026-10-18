@@ -155,9 +155,23 @@ async function run(options = {}) {
       const ccn = parseInt(f[4], 10);
       if (!Number.isFinite(ccn)) continue;
       const nameField = f[7] || '(anon)';
+      // long_name (field 5, "name@start-end@path") is the AUTHORITATIVE name:
+      // field 8 is only trustworthy when it carries no '@'. A C operator
+      // function ("operator,@12-18@f.cpp") would otherwise be keyed as "@12"
+      // and vanish from the baseline — every later change then reads as a new
+      // function. The ratchet lib parses names the same way; keep in sync.
       const loc = f[5] || '';
-      const lineNo = loc.includes('@') ? loc.split('@')[1]?.split('-')[0] : '';
-      functions.push({ file: rel.replace(/\\/g, '/'), bucket, name: nameField.trim(), ccn, nloc: parseInt(f[0], 10) || 0, line: parseInt(lineNo, 10) || 0 });
+      let name = (nameField || '').trim();
+      let lineNo = '';
+      if (loc.includes('@')) {
+        const at = loc.split('@');
+        name = at[0];
+        lineNo = at[1] ? at[1].split('-')[0] : '';
+        if (!name || /@/.test(name)) name = (nameField || '(anon)').trim();
+      } else if (!name) {
+        name = '(anon)';
+      }
+      functions.push({ file: rel.replace(/\\/g, '/'), bucket, name, ccn, nloc: parseInt(f[0], 10) || 0, line: parseInt(lineNo, 10) || 0 });
     }
     if (!dataRows && !sawHeader) {
       // Not a silent-zero risk: lizard emits NO header at all for files with
@@ -197,6 +211,23 @@ async function main() {
   const argv = process.argv.slice(2);
   const get = (flag) => { const i = argv.indexOf(flag); return i >= 0 ? argv[i + 1] : undefined; };
   const report = await run({ root: get('--root') || process.cwd() });
+
+  // Baseline refresh (REQ-D): record every production function's CURRENT CCN
+  // keyed by path::name. Gate 3 then blocks only regressions past these
+  // ceilings. Renames/moves intentionally fall out of the key space and are
+  // treated as new code — moving debt around must not launder it.
+  if (argv.includes('--write-baseline')) {
+    const baseline = {};
+    for (const f of report.functions) {
+      if (f.bucket !== 'production' || f.name === '(no parsable output)') continue;
+      baseline[`${f.file}::${f.name}`] = f.ccn;
+    }
+    const target = path.join(report.root, '.ccn-baseline.json');
+    fs.writeFileSync(target, JSON.stringify(baseline, null, 2) + '\n');
+    console.log(`wrote ${Object.keys(baseline).length} entries -> ${target}`);
+    return;
+  }
+
   const audit = readAuditRows(path.join(report.root, '.xp-gate', 'audit.jsonl'));
   const byGate = {};
   const gatesSeen = new Set(audit.map((r) => r.gate_name).filter(Boolean));

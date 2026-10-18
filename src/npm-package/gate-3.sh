@@ -92,7 +92,37 @@ else
         [ -n "$_cc_file" ] && CC_FILES_ARGS+=("$_cc_file")
       done <<< "$CC_FILES"
       CC_OUTPUT=$("$LIZARD_PATH" -C "$CCN_THRESHOLD" ${CC_FILES_ARGS[@]+"${CC_FILES_ARGS[@]}"} 2>&1 || true)
-      
+
+      # REQ-D (sprint-20261018-quality): baseline ratchet. When
+      # .ccn-baseline.json exists it replaces the flat threshold verdict:
+      # recorded functions may not get WORSE (strictly greater blocks), new
+      # functions face the live thresholds, improvements only hint. The
+      # legacy path below stays byte-for-byte for repos without a baseline.
+      if [ -f ".ccn-baseline.json" ]; then
+        CC_CSV=$("$LIZARD_PATH" --csv ${CC_FILES_ARGS[@]+"${CC_FILES_ARGS[@]}"} 2>/dev/null || true)
+        RATCHET_LIB="$GATE_DIR/lib/ccn-ratchet.sh"
+        [ -f "$RATCHET_LIB" ] || RATCHET_LIB="$(git rev-parse --show-toplevel 2>/dev/null)/githooks/lib/ccn-ratchet.sh"
+        # shellcheck source=/dev/null
+        . "$RATCHET_LIB"
+        CCN_WARN_THRESHOLD="$CCN_THRESHOLD" CCN_BLOCK_THRESHOLD=$((CCN_THRESHOLD * 2)) \
+          RATCHET_VERDICT=$(printf '%s\n' "$CC_CSV" | evaluate_ccn_ratchet ".ccn-baseline.json")
+        CC_WARNINGS=$(printf '%s\n' "$RATCHET_VERDICT" | grep -c '^BLOCK ' || true)
+        CC_LOWER=$(printf '%s\n' "$RATCHET_VERDICT" | grep -c '^LOWER ' || true)
+        printf '%s\n' "$RATCHET_VERDICT" | grep -v '^OK ' || true
+        if [ "${CC_LOWER:-0}" -gt 0 ]; then
+          echo "ℹ️  $CC_LOWER function(s) improved below baseline — refresh with: node scripts/ccn-report.cjs --write-baseline"
+        fi
+        GATE_3_DETAIL="mode=ratchet"
+        if [ "${CC_WARNINGS:-0}" -gt 0 ]; then
+          echo ""
+          echo "❌ BLOCKED - $CC_WARNINGS function(s) violate the complexity ratchet (.ccn-baseline.json)."
+          echo "Revert the increase, or refactor; refresh the baseline only via ccn-baseline-refresh commits."
+          exit 1
+        else
+          echo "✅ PASSED - Complexity within ratchet baseline."
+          GATE_3_STATUS="PASS"
+        fi
+      else
       # Parse warning count from the summary table: "Warning cnt   8"
       # Use anchored grep to avoid matching lizard table headers (e.g. "Rt" column)
       CC_WARNINGS=$(echo "$CC_OUTPUT" | grep "^Warning cnt" | awk '{print $NF}' | tr -d '[:space:]' | sed 's/[^0-9]//g' || true)
@@ -108,6 +138,7 @@ else
         echo "✅ PASSED - All functions within complexity threshold ($CCN_THRESHOLD)."
         GATE_3_STATUS="PASS"
       fi
+      fi
     else
       echo "⏭️  SKIPPED - Complexity (no source files to check)."
       GATE_3_STATUS="SKIP"
@@ -121,4 +152,4 @@ else
     GATE_3_REASON="tool_not_installed"
   fi
 fi
-record_gate_audit "gate-3" "complexity" "$GATE_3_STATUS" "${CC_WARNINGS:-0}" "$GATE_3_START" "ccn_threshold=${CCN_THRESHOLD:-5}"
+record_gate_audit "gate-3" "complexity" "$GATE_3_STATUS" "${CC_WARNINGS:-0}" "$GATE_3_START" "ccn_threshold=${CCN_THRESHOLD:-5}${GATE_3_DETAIL:+ $GATE_3_DETAIL}"
