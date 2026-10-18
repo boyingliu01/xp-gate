@@ -243,6 +243,8 @@ source_gate_lib() {
 
 # Issue #370: source cross-platform now_ms() helper (node-preferred, regex-validated)
 source_gate_lib "${AUDIT_SCRIPT_DIR}/lib/now-ms.sh"
+# REQ-B: duration bookkeeping sanitizer used by record_gate_audit below.
+source_gate_lib "${AUDIT_SCRIPT_DIR}/lib/audit-sanitize.sh"
 
 # Issue #473 (+ #454): Gate 5's vitest exit-code judgement, sourced as a library
 # so the fail-closed contract is unit-testable without executing this hook.
@@ -293,15 +295,32 @@ record_gate_audit() {
   local detail="${6:-}"
   local end_ms
   end_ms=$(now_ms)
-  local duration_ms=$((end_ms - start_ms))
-  if [ "$duration_ms" -lt 0 ] 2>/dev/null; then
-    duration_ms=0
+  # REQ-B: sanitize BEFORE subtracting. A poisoned start (empty -> arithmetic
+  # 0, or a seconds-unit value from an old code path) used to survive as an
+  # epoch-sized duration_ms that only the anomaly flag papered over. Now the
+  # record carries null + reason so every consumer can exclude it honestly.
+  local clean_start duration_reason=""
+  clean_start=$(sanitize_start "$start_ms")
+  local duration_ms
+  if [ "$clean_start" = "null" ]; then
+    duration_ms="null"
+    duration_reason="poisoned_start_ms"
+  else
+    duration_ms=$((end_ms - clean_start))
+    if [ "$duration_ms" -lt 0 ] 2>/dev/null; then
+      duration_ms="null"
+      duration_reason="clock_skew"
+    fi
   fi
 
   # Issue #370: detect anomalous duration (poisoned timestamp arithmetic)
   local duration_anomaly_flag=""
-  if [ "$duration_ms" -gt "$_MAX_DURATION_MS" ] 2>/dev/null; then
+  if [ "$duration_ms" != "null" ] && [ "$duration_ms" -gt "$_MAX_DURATION_MS" ] 2>/dev/null; then
     duration_anomaly_flag="--duration-anomaly true"
+  fi
+  local duration_reason_flag=""
+  if [ -n "$duration_reason" ]; then
+    duration_reason_flag="--duration-reason $duration_reason"
   fi
 
   # Determine gate result: PASS or FAIL based on status variable
@@ -319,6 +338,7 @@ record_gate_audit() {
       --issues-found "$issues_found" \
       --duration-ms "$duration_ms" \
       $duration_anomaly_flag \
+      $duration_reason_flag \
       --trigger commit \
       ${detail:+--detail "$detail"} \
       2>/dev/null
