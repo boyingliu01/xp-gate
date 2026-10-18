@@ -335,7 +335,7 @@ record_gate_audit() {
 
   # Fire-and-forget: audit must never block the commit
   {
-    npx tsx "${PROJECT_ROOT_FOR_AUDIT}/src/npm-package/lib/gate-audit.ts" record \
+    run_tsx "${PROJECT_ROOT_FOR_AUDIT}/src/npm-package/lib/gate-audit.ts" record \
       --gate-id "$gate_id" \
       --gate-name "$gate_name" \
       --passed "$gate_result" \
