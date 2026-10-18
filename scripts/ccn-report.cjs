@@ -249,12 +249,18 @@ async function run(options = {}) {
       // over the real extent and mark the row honest-but-corrected.
       let inflated = false;
       if (srcLines && Number(lineNo) > 0 && endNo > lineNo) {
-        const body = findFunctionBody(srcLines.slice(lineNo - 1, Math.min(endNo + 60, srcLines.length)), name);
+        // Search window: the reported span plus slack — when lizard's parser
+        // broke earlier in the file, its END line is wrong too, and a body
+        // that really extends past the reported end must not be missed.
+        const from = lineNo - 1;
+        const to = Math.min(srcLines.length, endNo + 200);
+        const body = findFunctionBody(srcLines.slice(from, to), name);
         if (body) {
-          const realEnd = lineNo - 1 + body[1];
-          if (realEnd < endNo - 1) {
-            ccn = ccnOfBody(srcLines.slice(lineNo - 1 + body[0], realEnd + 1));
-            inflated = true;
+          const realEnd = from + body[1];
+          const recomputed = ccnOfBody(srcLines.slice(from + body[0], realEnd + 1));
+          if (recomputed !== ccn) {
+            inflated = recomputed < ccn;
+            ccn = recomputed;
           }
         }
       }

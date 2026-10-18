@@ -194,49 +194,51 @@ export async function runTscCheck(
 export function extractImports(content: string): Array<{ path: string; line: number }> {
   const results: Array<{ path: string; line: number }> = [];
   const lines = content.split('\n');
+  const push = (path: string, line: number) => { results.push({ path, line }); };
 
   const staticImportExportRe =
     /(?:import|export)\s+(?:(?:[^'"]*?\s+from\s+)?['"]([^'"]+)['"]|['"]([^'"]+)['"])/g;
   const requireRe = /require\(\s*['"]([^'"]+)['"]\s*\)/g;
   const dynamicImportRe = /(?<!\w)import\(\s*['"]([^'"]+)['"]\s*\)/g;
 
+  // LINE-major order is the contract (import-resolver.test pins it): one pass
+  // over the lines, three patterns per line in static → require → dynamic
+  // order — exactly the inline version's nesting. Do not reorder into
+  // pattern-major passes; a line containing both a require and an import
+  // would then swap positions.
   for (let i = 0; i < lines.length; i++) {
     const line = lines[i];
-    const lineNum = i + 1;
-
     // Skip comment lines (// or leading * in JSDoc blocks)
     const trimmed = line.trim();
     if (trimmed.startsWith('//') || trimmed.startsWith('*') || trimmed.startsWith('/*')) {
       continue;
     }
-
-    let match: RegExpExecArray | null;
-    const staticRe = new RegExp(staticImportExportRe.source, 'g');
-    while ((match = staticRe.exec(line)) !== null) {
-      const importPath = match[1] ?? match[2];
-      if (importPath && isRelativeImport(importPath)) {
-        results.push({ path: importPath, line: lineNum });
-      }
-    }
-
-    const reqRe = new RegExp(requireRe.source, 'g');
-    while ((match = reqRe.exec(line)) !== null) {
-      const importPath = match[1];
-      if (importPath && isRelativeImport(importPath)) {
-        results.push({ path: importPath, line: lineNum });
-      }
-    }
-
-    const dynRe = new RegExp(dynamicImportRe.source, 'g');
-    while ((match = dynRe.exec(line)) !== null) {
-      const importPath = match[1];
-      if (importPath && isRelativeImport(importPath)) {
-        results.push({ path: importPath, line: lineNum });
-      }
-    }
+    scanLine(line, i + 1, staticImportExportRe, (m) => m[1] ?? m[2], push);
+    scanLine(line, i + 1, requireRe, (m) => m[1], push);
+    scanLine(line, i + 1, dynamicImportRe, (m) => m[1], push);
   }
 
   return results;
+}
+
+/** Apply one pattern to a single line; every relative hit is pushed with its line number. */
+function scanLine(
+  line: string,
+  lineNum: number,
+  re: RegExp,
+  pathOf: (m: RegExpExecArray) => string | undefined,
+  push: (path: string, line: number) => void,
+): void {
+  // Fresh lastIndex per call: a shared /g regex would leak state across
+  // lines and silently drop matches at buffer boundaries.
+  const lineRe = new RegExp(re.source, 'g');
+  let match: RegExpExecArray | null;
+  while ((match = lineRe.exec(line)) !== null) {
+    const importPath = pathOf(match);
+    if (importPath && isRelativeImport(importPath)) {
+      push(importPath, lineNum);
+    }
+  }
 }
 
 function isRelativeImport(importPath: string): boolean {
