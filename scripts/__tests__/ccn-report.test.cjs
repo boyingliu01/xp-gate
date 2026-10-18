@@ -70,4 +70,43 @@ describe('ccn-report (per-file trustworthy measurement)', () => {
     expect(stats.p50).toBeGreaterThanOrEqual(100);
     expect(stats.p50).toBeLessThanOrEqual(300);
   });
+
+  it('corrects lizard phantom CCN caused by generic-arrow brace confusion', async () => {
+    // Reproduction of the real bug class: a Record<string, (…) => boolean>
+    // field makes lizard's TS parser lose a brace; from there every function
+    // span swallows its neighbours and CCN is charged across them (measured
+    // in-tree: showHelp reported CCN 77 for a 20-line body with zero branches).
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'ccn-phantom-'));
+    try {
+      fs.writeFileSync(
+        path.join(dir, 'handlers.ts'),
+        [
+          'type Args = Record<string, unknown>;',
+          'const handlers: Record<string, (p: Args, n?: string) => boolean> = {',
+          '  a: () => true,',
+          '};',
+          'export function tiny(): number {',
+          '  return 1;',
+          '}',
+          'export function small(x: number): number {',
+          '  if (x > 1) { return x + 1; }',
+          '  return x;',
+          '}',
+          '',
+        ].join('\n')
+      );
+      const mod = require(reportPath);
+      const report = await mod.run({ root: dir });
+      const prod = report.functions.filter((f) => f.bucket === 'production');
+      expect(prod.length).toBeGreaterThan(0);
+      // Whatever lizard claims, no honest recount may leave these two trivial
+      // functions above the blocking threshold.
+      for (const name of ['tiny', 'small']) {
+        const row = prod.find((f) => f.name === name);
+        if (row) expect(row.ccn).toBeLessThanOrEqual(10);
+      }
+    } finally {
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+  });
 });

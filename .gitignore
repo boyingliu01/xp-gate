@@ -182,3 +182,6 @@ tsconfig.tsbuildinfo
 
 # xp-gate transient walk/debug work dirs
 .xp-gate/tmp/
+
+# Sprint scratch probes (not repo content)
+.delphi-work/
