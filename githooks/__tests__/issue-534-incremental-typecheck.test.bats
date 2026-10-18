@@ -125,7 +125,10 @@ PRE_COMMIT="$BATS_TEST_DIRNAME/../pre-commit"
   mkdir -p "$sandbox/stub" "$sandbox/repo/src"
   echo "x = 1" > "$sandbox/repo/src/a.py"
   cp -r "$BATS_TEST_DIRNAME/.." "$sandbox/githooks"
-  printf '#!/usr/bin/env bash\necho "$@" >> "%s/ty.args"\nexit 0\n' "$sandbox" > "$sandbox/stub/ty"
+  # Record one argv word per line: the assertions below grep for '^check$'
+  # and '^src$'. A joined `echo "$@"` would write a single "check src" line
+  # that can never match those anchors (Windows-visible latent test bug).
+  printf '#!/usr/bin/env bash\nfor _a in "$@"; do printf '"'"'%%s\\n'"'"' "$_a" >> "%s/ty.args"; done\nexit 0\n' "$sandbox" > "$sandbox/stub/ty"
   chmod +x "$sandbox/stub/ty"
   cd "$sandbox/repo" || return 1
   export PATH="$sandbox/stub:$PATH"
@@ -143,10 +146,13 @@ PRE_COMMIT="$BATS_TEST_DIRNAME/../pre-commit"
   mkdir -p "$sandbox/repo/src"
   echo "x = 1" > "$sandbox/repo/src/a.py"
   cp -r "$BATS_TEST_DIRNAME/.." "$sandbox/githooks"
-  # Empty stub PATH: neither ty nor mypy present.
+  # Neither ty nor mypy may be present. Prepending an empty dir is NOT enough:
+  # a developer machine's PATH (e.g. %APPDATA%\Python\...\Scripts with mypy.exe)
+  # still leaks the real mypy through and turns SKIP into a fallback run.
+  # Keep only POSIX coreutils so `command -v ty/mypy` sees nothing.
   mkdir -p "$sandbox/emptystub"
   cd "$sandbox/repo" || return 1
-  export PATH="$sandbox/emptystub:$PATH"
+  export PATH="$sandbox/emptystub:/usr/bin:/bin"
   # @intent: opt-in path must not require mypy (Delphi R1 Critical) and must not
   #   BLOCK on missing tools — it returns 0 (SKIP) when NEITHER engine is present.
   run bash -c "export XP_GATE_TY=1; source '$sandbox/githooks/adapters/python.sh'; run_static_analysis"
