@@ -110,9 +110,11 @@ function runLizardOne(lizardCmd, root, relPath) {
 // EOF every reported function span swallows everything in between, so CCN is
 // charged across neighbours (measured: showHelp body is 687-706 real, lizard
 // reports 687-763 with CCN=77). The scary numbers are exactly the broken ones.
-// Recompute CCN over the brace-balanced body instead: +1 base plus one per
-// branch keyword outside strings/comments/templates.
-const BRANCH_RE = /\b(if|for|while|case|catch)\b|\?\?|&&|\|\||\belse\b/g;
+// Recompute CCN over the brace-balanced body instead. Branch tokens, counted
+// outside strings/comments/templates — deliberately NOT counting `?:`
+// ternaries, which lizard does not count either (mixing the two conventions
+// invented hotspots that exist in no tool).
+const BRANCH_RE = /\b(if|else|for|while|case|catch)\b|\?\?|&&|\|\||\belif\b|\?[^.]/g;
 
 function stripNonCode(line) {
   // Remove string/template/comment content so keywords inside them do not count.
@@ -150,9 +152,28 @@ function ccnOfBody(bodyLines) {
 }
 
 // Locate a function body by name via brace balance. Returns [startIdx, endIdx]
-// inclusive over `lines`, or null when no balanced body matches.
+// inclusive over `lines`, or null when no balanced body matches. Anonymous
+// callbacks — the `(anonymous)` rows lizard emits for arrow/function literals —
+// are located positionally: their row's start line IS the literal's line, so
+// the first balanced `{...}` body at or after it is theirs.
 function findFunctionBody(lines, name) {
   const esc = name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  if (name === '(anonymous)' || name === '(anon)') {
+    // Positional: find the first line that opens a brace and close it.
+    for (let i = 0; i < lines.length; i++) {
+      let d = 0, started = false;
+      for (let j = i; j < lines.length; j++) {
+        const code = stripNonCode(lines[j]);
+        for (const ch of code) {
+          if (ch === '{') { d++; started = true; }
+          else if (ch === '}') d--;
+        }
+        if (started && d === 0) return [i, j];
+      }
+      // No balanced body opening on this line; try the next.
+    }
+    return null;
+  }
   const re = new RegExp(`(function\\s+${esc}\\s*[(<]|\\b${esc}\\s*[:(])`);
   for (let i = 0; i < lines.length; i++) {
     if (!re.test(stripNonCode(lines[i]))) continue;
@@ -244,20 +265,29 @@ async function run(options = {}) {
       } else if (!name) {
         name = '(anon)';
       }
-      // Span verification: when lizard's reported body is longer than the
-      // brace-balanced truth, its CCN charged the neighbours too. Recompute
-      // over the real extent and mark the row honest-but-corrected.
       let inflated = false;
-      if (srcLines && Number(lineNo) > 0 && endNo > lineNo) {
-        // Search window: the reported span plus slack — when lizard's parser
-        // broke earlier in the file, its END line is wrong too, and a body
-        // that really extends past the reported end must not be missed.
+      // Verify lizard's span before trusting its CCN. Lizard's TS parser can
+      // lose brace balance (see the BRANCH_RE comment) and charge a function
+      // its neighbours' branches. Proof of damage: locate the real body from
+      // the reported START line — when it is shorter than the reported END,
+      // lizard swallowed following functions into this span. Recompute over
+      // the balanced extent. Honest rows have no such gap and pass untouched.
+      const reportedSpan = endNo > lineNo ? endNo - lineNo + 1 : 0;
+      if (srcLines && Number(lineNo) > 0 && ccn > 10) {
         const from = lineNo - 1;
-        const to = Math.min(srcLines.length, endNo + 200);
+        const to = Math.min(srcLines.length, from + 400);
         const body = findFunctionBody(srcLines.slice(from, to), name);
         if (body) {
           const realEnd = from + body[1];
           const recomputed = ccnOfBody(srcLines.slice(from + body[0], realEnd + 1));
+          if (recomputed !== ccn) {
+            inflated = recomputed < ccn;
+            ccn = recomputed;
+          }
+        } else if (reportedSpan > 250) {
+          // Unlocatable body AND an implausibly long span: recompute over the
+          // reported window rather than trust a number with a broken span.
+          const recomputed = ccnOfBody(srcLines.slice(from, from + reportedSpan));
           if (recomputed !== ccn) {
             inflated = recomputed < ccn;
             ccn = recomputed;
@@ -350,7 +380,7 @@ async function main() {
   }
 }
 
-module.exports = { run, measureFileArgs, bucketFor, gateTimingStats, findSourceFiles };
+module.exports = { run, measureFileArgs, bucketFor, gateTimingStats, findSourceFiles, findFunctionBody, ccnOfBody };
 
 if (require.main === module) {
   main().catch((e) => { console.error(String(e.message || e)); process.exit(1); });
