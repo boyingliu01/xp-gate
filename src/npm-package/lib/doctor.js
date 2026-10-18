@@ -2684,6 +2684,11 @@ function formatDoctorJson(checks, issues) {
 // runner script surfaced only as a failed review (B3).
 async function doctorDelphi(options = {}) {
   const { configPath, npmLatest } = options;
+  // #541: the shadow check needs the loader's global fallback path. It is
+  // injectable for tests; the default mirrors delphi-config.ts /
+  // delphi-external-review.cjs resolution (XDG_CONFIG_HOME honored).
+  const globalConfigPath = options.globalConfigPath
+    || path.join(process.env.XDG_CONFIG_HOME || path.join(require('os').homedir(), '.config'), 'xp-gate', '.delphi-config.json');
   const checks = [];
   const add = (name, status, detail) => checks.push({ name, status, detail });
 
@@ -2856,6 +2861,27 @@ async function doctorDelphi(options = {}) {
           add('Delphi config (.delphi-config.json)', 'PASS',
             `profile "${profileName}": ${models.join(' / ')}`);
         }
+        // #541 follow-up: shadow detection. Loaders fall back to the global
+        // config ONLY on ENOENT, so this project file always wins here. If the
+        // machine-wide config exists AND seats differ, the effective model mix
+        // depends on cwd — the cross-project drift class behind the 2026-10-03
+        // quota burn. Warn (intentional overrides are legal), never fail.
+        try {
+          if (fs.existsSync(globalConfigPath) && path.resolve(globalConfigPath) !== path.resolve(cfgPath)) {
+            const gRaw = JSON.parse(fs.readFileSync(globalConfigPath, 'utf8'));
+            const gProfileName = gRaw.active_profile || 'default';
+            const gProfile = gRaw.profiles && gRaw.profiles[gProfileName];
+            const gExperts = (gProfile && gProfile.experts) || {};
+            const gModels = roles.map((r) => (gExperts[r] && gExperts[r].model) || null);
+            if (gModels.some(Boolean) && gModels.some((m, i) => m && m !== models[i])) {
+              add('Delphi config shadow (#541)', 'WARN',
+                `project config shadows ${globalConfigPath}; seats differ (global: ${gModels.join(' / ')}) — reviews run from other directories will use different models`);
+            }
+          }
+        } catch {
+          // A broken/unreadable global config is not this check's failure mode;
+          // silence here must not mask it elsewhere, so nothing is claimed.
+        }
       }
     } catch (err) {
       add('Delphi config (.delphi-config.json)', 'FAIL', `unparseable: ${err.message}`);
@@ -2926,7 +2952,7 @@ async function doctorDelphi(options = {}) {
   }
 
   for (const check of checks) {
-    const mark = check.status === 'PASS' ? '✓' : check.status === 'SKIP' ? '○' : '✗';
+    const mark = check.status === 'PASS' ? '✓' : check.status === 'SKIP' ? '○' : check.status === 'WARN' ? '⚠' : '✗';
     console.log(`  ${mark} ${check.name}: ${check.detail || check.status}`);
   }
   const failed = checks.filter((c) => c.status === 'FAIL').length;

@@ -740,6 +740,26 @@ specification:
           criteria: where bash 输出中的 WSL stub（System32/Sysnative/WindowsApps 下的 bash.exe）
             不产生任何 spawnSync 调用；已知 Git/MSYS 安装路径排在 PATH 发现之前
           test_type: unit
+
+    # ============================================================
+    # REQ-541: Delphi 配置全局回退（机器级单一事实源）
+    # ============================================================
+    - id: REQ-541
+      description: 两个 Delphi 入口（dsh 插件 loadDelphiConfig、scripts/delphi-external-review.cjs）按
+        项目 ./.delphi-config.json → ~/.config/xp-gate/.delphi-config.json 顺序解析；
+        项目配置优先，全局配置是机器级默认；回退仅在 ENOENT 时触发，其它读取错误必须显式抛出。
+        scripts/check_delphi_local_models.py 校验全部三档配置中每个席位以 local- 前缀开头
+        （MODEL_ALLOWLIST 是显式审计点）。守护 2026-10-03 跨项目漂移烧配额事故同类回归。
+      priority: critical
+      acceptance_criteria:
+        - id: AC-DSH-016-02
+          criteria: 项目目录无 .delphi-config.json 时读取全局配置且行为与项目配置一致；
+            两处均缺失时报错信息同时点名两个路径；非 ENOENT 读取错误不被回退吞掉
+          test_type: unit
+        - id: AC-DSH-016-03
+          criteria: doctor delphi 在项目配置遮蔽全局配置且席位模型不同时输出 WARN（遮蔽提示），
+            席位相同则静默；WARN 不影响退出码——有意的 per-project 覆盖是合法的
+          test_type: unit
   design_decisions:
     - id: DD-001
       decision: 走薄桥（方案 A）在 ctx.tools 注册三工具，而非独立 MCP server 或纯技能
