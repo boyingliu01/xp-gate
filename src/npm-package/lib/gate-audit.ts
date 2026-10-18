@@ -32,11 +32,12 @@ export interface GateAuditEntry {
   gate_name: string;
   passed: boolean;
   issues_found: number;
-  duration_ms: number;
+  duration_ms: number | null; // REQ-B: null = deliberately unmeasurable (see duration_reason)
   trigger: 'commit' | 'push' | 'manual';
   repo_path: string;
   commit_hash: string;
   duration_anomaly?: boolean; // Issue #370: set when duration_ms > max_duration_ms
+  duration_reason?: 'poisoned_start_ms' | 'clock_skew'; // REQ-B: why duration_ms is null
   detail?: string; // #507: optional gate-specific payload (e.g. effective CCN threshold)
 }
 
@@ -154,10 +155,12 @@ function aggregateByGate(entries: GateAuditEntry[]): Map<string, { total: number
     const b = buckets.get(e.gate_id) ?? { total: 0, passed: 0, ms: 0, issues: 0, anomaly_count: 0 };
     b.total += 1;
     if (e.passed) b.passed += 1;
-    // Issue #370: exclude anomalous durations from ms aggregation
+    // Issue #370: exclude anomalous durations from ms aggregation. REQ-B: a
+    // null duration is the honest sibling of that flag — deliberately not
+    // measurable, so it stays out of the sums (and out of the denominator).
     if (e.duration_anomaly === true) {
       b.anomaly_count += 1;
-    } else {
+    } else if (typeof e.duration_ms === 'number') {
       b.ms += e.duration_ms;
     }
     b.issues += e.issues_found;
@@ -253,12 +256,14 @@ function runCli(): void {
       gate_name: opts['gate-name'] || 'unknown',
       passed: opts['passed'] === 'true',
       issues_found: parseInt(opts['issues-found'] || '0', 10),
-      duration_ms: parseInt(opts['duration-ms'] || '0', 10),
+      duration_ms: opts['duration-ms'] === 'null' ? null : parseInt(opts['duration-ms'] || '0', 10),
       trigger: (opts['trigger'] as 'commit' | 'push' | 'manual') || 'manual',
       repo_path: process.cwd(),
       commit_hash: getCommitHash(),
       // Issue #370: only set when explicitly flagged (omit field otherwise)
       ...(opts['duration-anomaly'] === 'true' ? { duration_anomaly: true } : {}),
+      // REQ-B: why the duration is null — never guess a number for it.
+      ...(opts['duration-reason'] ? { duration_reason: opts['duration-reason'] as 'poisoned_start_ms' | 'clock_skew' } : {}),
       // #507: only set when provided (omit field otherwise)
       ...(opts['detail'] ? { detail: opts['detail'] } : {}),
     };
