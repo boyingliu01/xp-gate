@@ -54,10 +54,14 @@ java_coverage_note() {
 GATE_4_START=$(gate_start_ms)
 
 GATE_4_STATUS=""
+# #537: every non-run records WHY (no files / tool missing / unsupported lang)
+# so the quality report can distinguish "not applicable" from "not covered".
+GATE_4_REASON=""
 
 if [ "$PROJECT_LANG" = "documentation-only" ]; then
   echo "⏭️  SKIPPED - Principles check (documentation project)."
   GATE_4_STATUS="SKIP"
+  GATE_4_REASON="documentation_project"
   
 else
   # Get source files to check against principles
@@ -152,6 +156,7 @@ else
           echo "⚠️  Warning: Principles checker execution failed"
           echo "⏭️  SKIPPED - Principles check (execution issue)"
           GATE_4_STATUS="SKIP"
+          GATE_4_REASON="checker_execution_error"
           rm -f "$PRINCIPLES_JSON"
         else
           # Check severity levels. The reporter emits JSON.stringify(out, null, 2),
@@ -186,15 +191,18 @@ else
         echo "ℹ️  npx/tsx not available - skipping principles check"
         echo "⏭️  SKIPPED - Principles check (no Node.js/tsx)"
         GATE_4_STATUS="SKIP"
+        GATE_4_REASON="tool_not_installed"
       fi
     else
       echo "ℹ️  Principles checker not found in project - skipping"
       echo "⏭️  SKIPPED - Principles check (checker not in project)"
       GATE_4_STATUS="SKIP"
+      GATE_4_REASON="checker_not_found"
     fi
   else
     echo "⏭️  SKIPPED - Principles check (no matching source files changed)"
     GATE_4_STATUS="SKIP"
+    GATE_4_REASON="no_matching_files_changed"
   fi
 fi
 record_gate_audit "gate-4" "principles" "$GATE_4_STATUS" "${WARNING_COUNT:-0}" "$GATE_4_START"
