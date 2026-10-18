@@ -2,6 +2,24 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.27.5.0] - 2026-10-18
+
+发布列车清算 6 个 open issues（#535/#536/#537/#538/#541/#542）+ r19/r20 code-walkthrough 修复。核心主题：**报告诚实性**——凡是"没有真正执行"的门禁，都必须能自证为什么没跑。r20 三席 Delphi walkthrough APPROVED（conf 8/9/9，consensus 100%）。
+
+### Fixed
+
+- **lib source fail-open 守卫（#535, 754425ec）**: pre-commit 的所有 `source lib/*.sh` 统一改走 `source_gate_lib()`——文件缺失或 source 失败以 FATAL 中止。此前被 source 的文件里一个非零 exit 会打印一行 stderr 后继续跑，缺一个 lib 时所有门禁照样报 PASS。trap-based 实现（sourced 文件里的 exit 先杀 sourcing shell，`if ! source` 观测不到），SOURCE_GATE_LIB_COMPLETED 标记避免把 lib 合法收尾 exit 误判为崩溃。
+- **"从未扫描"不再伪装成"扫描干净"（#536, 5b4ff520）**: Gate 10 SAST 的无代码变更路径由 PASS 改为 SKIP+reason；每条非扫描路径记录 `GATE_10_REASON`，扫描路径记录 `GATE_10_SCANNED_FILES`；质量报告 JSON 新增 `overall.gatesDegraded` + `degradedGates[]`（WARN 降级门禁清单）与 per-gate `reason`/`scanned_files` 字段。
+- **Gate 3/4 每个 SKIP/WARN 都带原因码（#537 后端, 2c7049fe）**: documentation_project / no_powershell_tool / no_source_files_changed / tool_not_installed / checker_execution_error / checker_not_found / no_matching_files_changed 全量入报告。issue 收窄为 report 的 per-gate tool/language 标注，保持打开。
+- **PowerShell 文件发现剪除演练目录（#538, b96eafa9）**: `_find_powershell_files` 剪除 `.worktrees/.delphi-work/.workbuddy/.sprint-state/wrc-drill`，防止数百条历史演练告警在 pwsh 上钩子 PATH 后拦下所有提交。
+- **插件镜像 parity 盲区（#542, a718969c）**: check-hook-mirror.sh 增加动态 `plugins/*/src ↔ src/npm-package/plugins/*/src` 对账（内容 + git index mode）。v0.27.3 正是因镜像-only 修复被 prepack sync 静默回滚而带 bug 发布。
+- **walkthrough r19 修复（41792f89）**: degradedGates JSON 改为聚合循环内联构造（BSD sed 无 `\b`，GNU-sed post-pass 在 macOS 上会产出非法 JSON）；gate-7 scanned_files 计数改 `sed -n '/./p' | wc -l`（errexit-safe，单值输出）；doctor.js `fixCoreHooksPath` 从 shell 插值 execSync 字符串改为 execFileSync args 数组——消除引号注入面，同时解决 semgrep 1.171 显式目标扫描不认 `.semgrepignore` 导致的 detect-child-process 误报阻塞。
+
+### Added
+
+- **doctor 配置遮蔽 WARN（#541, 7b7bf0aa + 41792f89）**: 项目 `.delphi-config.json` 与全局配置席位模型不一致时 doctor 输出 WARN；`pickExpert()` 归一化 experts 数组形/对象形，只比较两边都定义的席位，杜绝不完整全局配置引发的误报。specification.yaml 注册 REQ-541。
+- **bats 新套件**: issue-535-lib-source-guard（7例）、issue-536-degraded-report（4例）、issue-537-skip-reasons（2例）、issue-538-powershell-prune（2例）；issue-534 ty stub 两处潜伏断言缺陷修复（argv 逐行记录 + PATH 隔离）。
+
 ## [0.27.1.0] - 2026-10-16
 
 Windows doctor 假阴性清算：cmd.exe 高并发探测下 `node --version`/`git --version`/`core.hooksPath` 会以"exit 0 + 空 stdout"的形态丢失输出，doctor 曾据此在健康机器上报 "Not found"。同时修正 bash 版本字段语义与 WSL stub 过滤的路径变体盲区。（注：0.27.1 版本号被 npm staging 状态占用无法发布，实际以 0.27.2 发布于 registry；代码内容一致。）
