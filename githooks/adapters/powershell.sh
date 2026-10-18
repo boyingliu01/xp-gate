@@ -31,12 +31,20 @@ _detect_pwsh() {
 
 _find_powershell_files() {
   local name_pattern="$1"
+  # #538: gitignored drill/review artifact dirs hold hundreds of non-product
+  # .ps1 files (admin drills, Delphi review copies). Collecting them turned
+  # Gate 1 into an 800+ warning wall and made the pwsh gates unusable.
   find . \
     \( -type d \( \
       -name .git -o \
       -name node_modules -o \
       -name dist -o \
       -name coverage -o \
+      -name .worktrees -o \
+      -name .delphi-work -o \
+      -name .workbuddy -o \
+      -name .sprint-state -o \
+      -name wrc-drill -o \
       -path './plugins/claude-code/skills' -o \
       -path './plugins/opencode/skills' -o \
       -path './plugins/qoder/skills' -o \
