@@ -7,15 +7,21 @@
  2>&1 echo ""
  2>&1 echo "→ Gate 3: Cyclomatic complexity..."
 GATE_3_START=$(gate_start_ms)
+# #537: every non-run records WHY so the report can say why a gate is SKIP.
+GATE_3_REASON=""
 
 if [ "$PROJECT_LANG" = "documentation-only" ]; then
   echo "⏭️  SKIPPED - Complexity (documentation project)."
   GATE_3_STATUS="SKIP"
+  GATE_3_REASON="documentation_project"
 
 elif [ "$PROJECT_LANG" = "powershell" ]; then
   echo "ℹ️  No PowerShell Clean Code / SOLID tool available"
   echo "⏭️  SKIPPED - Complexity (no PowerShell tool)"
   GATE_3_STATUS="SKIP"
+  # #537: a PowerShell-primary repo was invisible to this dimension while the
+  # score implied full coverage — say exactly why nothing ran.
+  GATE_3_REASON="no_powershell_tool"
   
 else
   # S2 (#507): three-level CCN threshold override --
@@ -105,12 +111,14 @@ else
     else
       echo "⏭️  SKIPPED - Complexity (no source files to check)."
       GATE_3_STATUS="SKIP"
+      GATE_3_REASON="no_source_files_changed"
     fi
   else
     echo "⚠️  WARN - lizard not installed, complexity check not performed"
     echo "   Install with: pip install --user lizard"
     echo "   Gate 3: Complexity check (WARN, tool not available)"
     GATE_3_STATUS="WARN"
+    GATE_3_REASON="tool_not_installed"
   fi
 fi
 record_gate_audit "gate-3" "complexity" "$GATE_3_STATUS" "${CC_WARNINGS:-0}" "$GATE_3_START" "ccn_threshold=${CCN_THRESHOLD:-5}"

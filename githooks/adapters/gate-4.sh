@@ -1,17 +1,67 @@
+# shellcheck shell=bash
 # ============================================================================
 # GATE 4: Principles Checker (Clean Code + SOLID)
 # Reuses existing principles checker logic
 # ============================================================================
+
+# Run a TypeScript entrypoint under tsx without routing arguments through the
+# npx shim: Windows cmd.exe caps command lines at 8191 chars and long staged
+# file lists overflow it, turning a healthy run into a false BLOCK. Prefer the
+# repo-local tsx CLI driven by node directly; keep npx as fallback for consumer
+# repos relying on a global install. Defined here as well so this module also
+# works when sourced outside pre-commit.
+if ! declare -F run_tsx >/dev/null 2>&1; then
+  run_tsx() {
+    local _root="${PROJECT_ROOT:-$(pwd)}" _timeout=()
+    if [ -n "${RUN_TSX_TIMEOUT:-}" ]; then
+      _timeout=(timeout "$RUN_TSX_TIMEOUT")
+    fi
+    if [ -f "$_root/node_modules/tsx/dist/cli.mjs" ] && command -v node >/dev/null 2>&1; then
+      "${_timeout[@]}" node "$_root/node_modules/tsx/dist/cli.mjs" "$@"
+    else
+      "${_timeout[@]}" npx tsx "$@"
+    fi
+  }
+fi
+
+# Java rule coverage annotation (#507 S4, AC-507-04-02). The normative matrix
+# lives in docs/java-principles-coverage.md; these constants mirror it. Before
+# #507 the Java adapter fed rules only {name,type,line,code}, so the 12 rules
+# reading structured metrics silently saw `undefined` and a Java commit got a
+# green "checked" with zero effective coverage. 12/15 now fire; the three
+# inert ones are rule-side gaps documented in the coverage doc -- they must
+# NOT be announced as covered.
+JAVA_COVERAGE_EFFECTIVE=12
+JAVA_COVERAGE_TOTAL=15
+JAVA_COVERAGE_INERT="lsp, many-exports, code-duplication"
+
+# Print the coverage annotation when (and only when) the staged file list
+# contains Java sources. Non-Java commits keep the original output byte for
+# byte. Pure shell builtins: no subprocess per file.
+java_coverage_note() {
+  local _f _has_java=""
+  for _f in "$@"; do
+    case "$_f" in
+      *.java|*.Java|*.JAVA) _has_java=1; break ;;
+    esac
+  done
+  [ -n "$_has_java" ] || return 0
+  echo "ℹ️  Java rule coverage: $JAVA_COVERAGE_EFFECTIVE/$JAVA_COVERAGE_TOTAL rules effective (inert on Java: $JAVA_COVERAGE_INERT -- see docs/java-principles-coverage.md)"
+}
 
  2>&1 echo ""
  2>&1 echo "→ Gate 4: Principles checker (Clean Code + SOLID)..."
 GATE_4_START=$(gate_start_ms)
 
 GATE_4_STATUS=""
+# #537: every non-run records WHY (no files / tool missing / unsupported lang)
+# so the quality report can distinguish "not applicable" from "not covered".
+GATE_4_REASON=""
 
 if [ "$PROJECT_LANG" = "documentation-only" ]; then
   echo "⏭️  SKIPPED - Principles check (documentation project)."
   GATE_4_STATUS="SKIP"
+  GATE_4_REASON="documentation_project"
   
 else
   # Get source files to check against principles
@@ -28,10 +78,13 @@ else
   done <<< "$PRINCIPLES_FILES"
   
   if [ -n "$PRINCIPLES_FILES" ]; then
-    # Same anchoring as githooks/gate-4.sh: CHANGED_FILES paths are repo-root relative
-    # and the checker resolves them against its own working directory, so both the
-    # probes and the invocation run from the repo root. Resolving them against the
-    # hook's CWD lost the checker in single-language subdir mode (#478).
+    # The checker resolves every path it is given -- and every path in CHANGED_FILES
+    # comes from `git diff`, so it is repo-root relative -- against its own working
+    # directory. Resolving against the hook's CWD broke in single-language subdir
+    # mode, where pre-commit has already cd'd into $PROJECT_SUBDIR: web/src/a.ts was
+    # looked up as web/web/src/a.ts, the probes below missed the checker that was
+    # installed one level up, and a working gate degraded to SKIPPED (#478).
+    # Everything this gate reads is therefore anchored at the repo root.
     PRINCIPLES_BASE="${PROJECT_ROOT:-$(pwd)}"
 
     PRINCIPLES_DIR=""
@@ -49,8 +102,13 @@ else
     
     if [ -n "$PRINCIPLES_DIR" ]; then
       echo "Checking Clean Code + SOLID principles..."
-      
-      if command -v npx > /dev/null 2>&1; then
+
+      # AC-507-04-02: say what a Java commit is actually covered for, instead
+      # of implying a full 15-rule check (#507). Printed before the run so it
+      # appears on both the PASS and the FAIL path.
+      java_coverage_note ${PRINCIPLES_ARGS[@]+"${PRINCIPLES_ARGS[@]}"}
+
+      if command -v npx > /dev/null 2>&1 || [ -f "$PRINCIPLES_BASE/node_modules/tsx/dist/cli.mjs" ]; then
         # Run principles checker and store results.
         #
         # Do NOT wrap this in `if ...; then`: the checker's exit codes are
@@ -72,6 +130,7 @@ else
         # Sending it to /dev/null made an exit-2 SKIP undiagnosable and hid every
         # .principlesrc typo (Delphi walkthrough MC-03). Captured to a file so a clean
         # run stays quiet, then replayed only when the checker had a problem.
+        #
         # `cd || exit 2`: a base we cannot enter means the checker never ran, which is
         # this module's tool-failure code. Falling through would return the exit status
         # of the failed cd (1), and 1 asserts "I examined files and found errors" -- an
@@ -86,7 +145,7 @@ else
         PRINCIPLES_JSON=$(mktemp)
         export PRINCIPLES_JSON
         ( cd "$PRINCIPLES_BASE" 2>/dev/null || exit 2
-          npx tsx "$PRINCIPLES_DIR/index.ts" --files ${PRINCIPLES_ARGS[@]+"${PRINCIPLES_ARGS[@]}"} --format json ) > "$PRINCIPLES_JSON" 2>"$PRINCIPLES_STDERR" || PRINCIPLES_EXIT=$?
+          run_tsx "$PRINCIPLES_DIR/index.ts" --files ${PRINCIPLES_ARGS[@]+"${PRINCIPLES_ARGS[@]}"} --format json ) > "$PRINCIPLES_JSON" 2>"$PRINCIPLES_STDERR" || PRINCIPLES_EXIT=$?
 
         if [ -s "$PRINCIPLES_STDERR" ]; then
           sed 's/^/     /' "$PRINCIPLES_STDERR"
@@ -97,6 +156,7 @@ else
           echo "⚠️  Warning: Principles checker execution failed"
           echo "⏭️  SKIPPED - Principles check (execution issue)"
           GATE_4_STATUS="SKIP"
+          GATE_4_REASON="checker_execution_error"
           rm -f "$PRINCIPLES_JSON"
         else
           # Check severity levels. The reporter emits JSON.stringify(out, null, 2),
@@ -116,7 +176,7 @@ else
             echo "  - SOLID principle violations"
             echo "  - architectural violations"
             ( cd "$PRINCIPLES_BASE" 2>/dev/null || exit 2
-              npx tsx "$PRINCIPLES_DIR/index.ts" --files ${PRINCIPLES_ARGS[@]+"${PRINCIPLES_ARGS[@]}"} --format console )
+              run_tsx "$PRINCIPLES_DIR/index.ts" --files ${PRINCIPLES_ARGS[@]+"${PRINCIPLES_ARGS[@]}"} --format console )
             GATE_4_STATUS="FAIL"
             exit 1
           fi
@@ -128,18 +188,21 @@ else
           fi
         fi
       else
-        echo "ℹ️  npx not available - skipping principles check"
-        echo "⏭️  SKIPPED - Principles check (no Node.js/npx)"
+        echo "ℹ️  npx/tsx not available - skipping principles check"
+        echo "⏭️  SKIPPED - Principles check (no Node.js/tsx)"
         GATE_4_STATUS="SKIP"
+        GATE_4_REASON="tool_not_installed"
       fi
     else
       echo "ℹ️  Principles checker not found in project - skipping"
       echo "⏭️  SKIPPED - Principles check (checker not in project)"
       GATE_4_STATUS="SKIP"
+      GATE_4_REASON="checker_not_found"
     fi
   else
     echo "⏭️  SKIPPED - Principles check (no matching source files changed)"
     GATE_4_STATUS="SKIP"
+    GATE_4_REASON="no_matching_files_changed"
   fi
 fi
 record_gate_audit "gate-4" "principles" "$GATE_4_STATUS" "${WARNING_COUNT:-0}" "$GATE_4_START"

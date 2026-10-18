@@ -3536,6 +3536,7 @@ generate_quality_report() {
     "gate3_complexity": {
       "name": "Cyclomatic Complexity",
       "status": "${GATE_3_STATUS:-PASS}",
+      "reason": "${GATE_3_REASON:-}",
       "threshold": "${CCN_THRESHOLD:-5}",
       "blockThreshold": "${CCN_THRESHOLD:-5}",
       "warnings": ${CC_WARNINGS:-0}
@@ -3543,6 +3544,7 @@ generate_quality_report() {
     "gate4_principles": {
       "name": "Clean Code + SOLID",
       "status": "${GATE_4_STATUS:-PASS}",
+      "reason": "${GATE_4_REASON:-}",
       "warnings": ${WARNING_COUNT:-0}
     },
     "gate5_tests": {
