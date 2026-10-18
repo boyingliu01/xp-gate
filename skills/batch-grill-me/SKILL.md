@@ -1,9 +1,16 @@
 ---
 name: batch-grill-me
-version: 1.0.0
-description: A relentless interview that asks every frontier question at once, round by round.
+version: 1.1.0
+description: A relentless interview that asks every frontier question at once, round by round. Thin alias of `grilling` (#540) — upstream mattpocock/skills absorbed this protocol into grilling; XP-Gate keeps this name as the sprint-flow Phase 2 entry point so orchestration docs stay stable.
 disable-model-invocation: true
 ---
+
+> **Disposition (#540):** upstream deleted the standalone batch-grill-me skill — its round-based
+> frontier protocol now IS upstream `grilling`. This file is intentionally a thin alias: keep it
+> as the canonical sprint-flow reference name; protocol changes land in `skills/grilling/SKILL.md`
+> (the single source), not here.
+
+The protocol is identical to [`grilling`](../grilling/SKILL.md): read and follow that skill. Summary:
 
 Interview the user relentlessly until you reach a shared understanding. Map this as a **design tree**: every decision branches into the decisions that hang off it.
 
