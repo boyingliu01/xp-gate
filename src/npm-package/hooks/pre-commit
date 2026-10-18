@@ -215,34 +215,60 @@ file_exists_in_subdir() {
 AUDIT_SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT_FOR_AUDIT="$(git rev-parse --show-toplevel 2>/dev/null || echo "$AUDIT_SCRIPT_DIR/../..")"
 
+# Issue #535: a failed `source` used to print one stderr line and keep going,
+# so a missing lib silently removed gate logic from the run while every gate
+# still reported PASS. Fail closed instead: abort with FATAL when the file is
+# absent or its body exits non-zero while being sourced. `exit` inside a
+# sourced file exits the SOURCING shell, so an `if ! source` wrapper cannot
+# catch it — trap EXIT for the duration of the source instead.
+source_gate_lib() {
+  local lib_file="$1"
+  if [ ! -f "$lib_file" ]; then
+    echo "FATAL: cannot load $lib_file (missing)" >&2
+    exit 1
+  fi
+  # Marker the EXIT trap compares against: only a source that never reached
+  # its end counts as a load failure. A lib calling `exit` at top level would
+  # otherwise be misread as a crash after it already did its job.
+  SOURCE_GATE_LIB_COMPLETED=""
+  local prev_trap=""
+  prev_trap="$(trap -p EXIT || true)"
+  # shellcheck disable=SC2064  # expand lib_file NOW: it is the failure target
+  trap "[ -n \"\$SOURCE_GATE_LIB_COMPLETED\" ] || { echo 'FATAL: cannot load $lib_file (source failed)' >&2; exit 1; }" EXIT
+  # shellcheck disable=SC1090  # sourcing the resolved lib is the contract here
+  source "$lib_file"
+  SOURCE_GATE_LIB_COMPLETED=1
+  eval "$prev_trap"
+}
+
 # Issue #370: source cross-platform now_ms() helper (node-preferred, regex-validated)
-source "${AUDIT_SCRIPT_DIR}/lib/now-ms.sh"
+source_gate_lib "${AUDIT_SCRIPT_DIR}/lib/now-ms.sh"
 
 # Issue #473 (+ #454): Gate 5's vitest exit-code judgement, sourced as a library
 # so the fail-closed contract is unit-testable without executing this hook.
-source "${AUDIT_SCRIPT_DIR}/lib/test-failure.sh"
+source_gate_lib "${AUDIT_SCRIPT_DIR}/lib/test-failure.sh"
 
 # Issue #477: Gate 2's jscpd config probe and outcome classification, same reason.
-source "${AUDIT_SCRIPT_DIR}/lib/jscpd-run.sh"
+source_gate_lib "${AUDIT_SCRIPT_DIR}/lib/jscpd-run.sh"
 
 # Issue #476: Gate 11's sprint-gate.sh resolution chain and decision translation.
-source "${AUDIT_SCRIPT_DIR}/lib/sprint-gate-report.sh"
+source_gate_lib "${AUDIT_SCRIPT_DIR}/lib/sprint-gate-report.sh"
 
 # Issue #523: Gate 5's Python coverage parsing and threshold verdict. The old
 # `grep -o '[0-9]*%'` never matched --format=total's bare number, so the 80%
 # branch never ran; sourced as a library so the fail-closed contract is
 # unit-testable without executing this hook.
-source "${AUDIT_SCRIPT_DIR}/lib/coverage-total.sh"
+source_gate_lib "${AUDIT_SCRIPT_DIR}/lib/coverage-total.sh"
 
 # Issue #399: Python smart test selection — strategy decision + related-test
 # lookup, kept in a library so the truth table and the path conventions are
 # unit-testable without executing this hook.
-source "${AUDIT_SCRIPT_DIR}/lib/python-test-selection.sh"
+source_gate_lib "${AUDIT_SCRIPT_DIR}/lib/python-test-selection.sh"
 
 # Issue #534: incremental Python type-check for the pre-commit python branch —
 # staged-only mypy (fast) that complements python.sh's CI-aligned full pass.
 # Kept in a library so the exit-code capture and scope handling are unit-testable.
-source "${AUDIT_SCRIPT_DIR}/lib/python-incremental-typecheck.sh"
+source_gate_lib "${AUDIT_SCRIPT_DIR}/lib/python-incremental-typecheck.sh"
 
 # Read max_duration_ms from .xp-gate-config.json (default 7200000 = 2 hours)
 _MAX_DURATION_MS=$(node -e "try{const c=JSON.parse(require('fs').readFileSync('${PROJECT_ROOT_FOR_AUDIT}/.xp-gate-config.json','utf8'));console.log((c.audit&&c.audit.max_duration_ms)||7200000);}catch(e){console.log(7200000);}" 2>/dev/null || echo "7200000")
@@ -1061,7 +1087,7 @@ else
       ; source "${AUDIT_SCRIPT_DIR}/lib/typecheck.sh" && run_typescript_typecheck )
     TS_CHECK_EXIT=$?
   else
-    source "${AUDIT_SCRIPT_DIR}/lib/typecheck.sh"
+    source_gate_lib "${AUDIT_SCRIPT_DIR}/lib/typecheck.sh"
     run_typescript_typecheck
     TS_CHECK_EXIT=$?
   fi
