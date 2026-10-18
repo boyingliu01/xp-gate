@@ -89,4 +89,28 @@ principles_diff=$(diff -rq src/principles src/npm-package/principles 2>&1 || tru
 [ -z "$principles_diff" ] || fail "principles mirror tree drift:
 $principles_diff"
 
+# Plugin source trees (#542): plugins/<name>/src <-> src/npm-package/plugins/<name>/src.
+# The r16 walkthrough TS fix was applied mirror-only in v0.27.3 and prepack's
+# canonical->mirror sync silently rolled it back -- the published tarball then
+# shipped two divergent implementations of delphi-config.ts inside one package.
+# Any plugin with a canonical src/ must be mirrored byte-for-byte; the loop
+# discovers plugins dynamically so a new plugin cannot dodge the guard.
+if [ -d plugins ]; then
+  for canonical_src in plugins/*/src; do
+    [ -d "$canonical_src" ] || continue
+    mirror_src="src/npm-package/$canonical_src"
+    [ -d "$mirror_src" ] || fail "plugin mirror missing: $mirror_src (canonical: $canonical_src)"
+    plugin_diff=$(diff -rq "$canonical_src" "$mirror_src" 2>&1 || true)
+    [ -z "$plugin_diff" ] || fail "plugin src mirror drift ($canonical_src vs $mirror_src):
+$plugin_diff"
+    if in_git_repo; then
+      # Strip the tree prefix so only MODE <mode> <relpath> lines are compared.
+      plugin_canonical_modes=$(git -c core.quotepath=false ls-files -s -- "$canonical_src" | sed 's|^\([0-9][0-9]*\) [0-9a-f]* [0-9]*\t|MODE \1 |; s|'"$canonical_src"'/||' | LC_ALL=C sort)
+      plugin_mirror_modes=$(git -c core.quotepath=false ls-files -s -- "$mirror_src" | sed 's|^\([0-9][0-9]*\) [0-9a-f]* [0-9]*\t|MODE \1 |; s|'"$mirror_src"'/||' | LC_ALL=C sort)
+      [ "$plugin_canonical_modes" = "$plugin_mirror_modes" ] || fail "plugin src mirror mode drift ($canonical_src vs $mirror_src):
+$(diff <(printf '%s\n' "$plugin_canonical_modes") <(printf '%s\n' "$plugin_mirror_modes") | sed -n '2,12p')"
+    fi
+  done
+fi
+
 printf '%s\n' "PASS: canonical githooks and npm package mirrors are byte- and mode-identical"
