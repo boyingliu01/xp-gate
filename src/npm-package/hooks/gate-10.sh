@@ -10,6 +10,10 @@
 GATE_10_START=$(gate_start_ms)
 
 GATE_10_STATUS=""
+# #536: audit trail for "did this commit actually get scanned?". The report
+# surfaces reason + scanned_files so a non-scan never reads as a clean PASS.
+GATE_10_REASON=""
+GATE_10_SCANNED_FILES=0
 
 # Semgrep availability check
 SEMGREP_CMD=""
@@ -25,6 +29,7 @@ if [ -z "$SEMGREP_CMD" ]; then
   echo "     Pre-cache rules: semgrep --config=p/security-audit"
   echo "     Gate 10: SAST Security (WARN, semgrep not installed)"
   GATE_10_STATUS="WARN"
+  GATE_10_REASON="tool_not_installed"
 else
   # Get staged files filtered to Semgrep-supported languages
   SEMGREP_FILES=$(git diff --cached --name-only --diff-filter=ACM 2>/dev/null | grep -E '\.(ts|tsx|js|jsx|py|go|java|c|cpp|cs|rb|php|scala|swift)$' || true)
@@ -32,6 +37,7 @@ else
   if [ -z "$SEMGREP_FILES" ]; then
     echo "     ⏭️  SKIPPED - SAST (no supported language files changed)"
     GATE_10_STATUS="SKIP"
+    GATE_10_REASON="no_supported_files"
   else
     # One path per line into an array. Quoting the newline-joined list would hand
     # semgrep ONE argument containing newlines -> "Invalid scanning root" once
@@ -66,6 +72,7 @@ EOF
       echo "     Install node (https://nodejs.org); without it SAST findings cannot be classified"
       echo "     ⏭️  SKIPPED - SAST (node not installed)"
       GATE_10_STATUS="SKIP"
+      GATE_10_REASON="tool_not_installed"
     else
 
     # Run semgrep with JSON output. stdout and stderr are captured SEPARATELY:
@@ -138,6 +145,7 @@ console.log("");});
       fi
       echo "     ⏭️  SKIPPED - SAST (semgrep output unparseable)"
       GATE_10_STATUS="SKIP"
+      GATE_10_REASON="output_unparseable"
     elif [ "$V_RESULTS" -eq 0 ] && { [ "$V_ERRORS" -gt 0 ] || [ "$SEMGREP_EXIT" -ne 0 ]; }; then
       # Nothing was scanned to a verdict: semgrep either failed outright
       # (nonzero exit) or completed but reported scan errors for every input
@@ -151,6 +159,7 @@ console.log("");});
       fi
       echo "     ⏭️  SKIPPED - SAST (semgrep runtime error)"
       GATE_10_STATUS="SKIP"
+      GATE_10_REASON="semgrep_runtime_error"
     elif [ "$V_BLOCKING" -gt 0 ]; then
       echo ""
       echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
@@ -164,8 +173,10 @@ console.log("");});
       echo "$FINDING_DETAILS"
       echo "  Run 'semgrep scan --config=p/security-audit' to review all findings."
       GATE_10_STATUS="FAIL"
+      GATE_10_SCANNED_FILES=${#SEMGREP_ARGS[@]}
       exit 1
     else
+      GATE_10_SCANNED_FILES=${#SEMGREP_ARGS[@]}
       echo ""
       echo "     ✅ PASSED - No blocking vulnerabilities (files scanned: ${#SEMGREP_ARGS[@]})"
       if [ "$V_WARNINGS" -gt 0 ]; then
