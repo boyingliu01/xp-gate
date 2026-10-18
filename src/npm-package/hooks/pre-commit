@@ -245,6 +245,10 @@ source_gate_lib() {
 source_gate_lib "${AUDIT_SCRIPT_DIR}/lib/now-ms.sh"
 # REQ-B: duration bookkeeping sanitizer used by record_gate_audit below.
 source_gate_lib "${AUDIT_SCRIPT_DIR}/lib/audit-sanitize.sh"
+# REQ-F2 (sprint-20261018-quality): commit-level docs-only detection used to
+# short-circuit the heavy, code-blind gates below. Distinct from the
+# PROJECT-level documentation_project detection further down.
+source_gate_lib "${AUDIT_SCRIPT_DIR}/lib/docs-only.sh"
 
 # Issue #473 (+ #454): Gate 5's vitest exit-code judgement, sourced as a library
 # so the fail-closed contract is unit-testable without executing this hook.
@@ -557,6 +561,14 @@ MIRROR_PATH_FILTER='^src/npm-package/'
 DASHBOARD_PATH_FILTER='^dashboard/'
 RAW_CHANGED_FILES=$(git diff --cached --name-only --diff-filter=ACM)
 CHANGED_FILES=$(printf '%s\n' "$RAW_CHANGED_FILES" | grep -v "$MIRROR_PATH_FILTER" | grep -v "$DASHBOARD_PATH_FILTER" || true)
+
+# REQ-F2: one commit-level docs-only verdict, computed once and reused by the
+# heavy gates (2/5/9/12). Light gates never consult it — a secret in a README
+# is still a secret.
+DOCS_ONLY_COMMIT=false
+if printf '%s\n' "$CHANGED_FILES" | detect_docs_only_commit | grep -q '^true$'; then
+  DOCS_ONLY_COMMIT=true
+fi
 
 if [ -z "$RAW_CHANGED_FILES" ]; then
   echo "No files changed. Skipping gates."
@@ -1626,8 +1638,10 @@ record_gate_audit "gate-1" "code-quality" "$GATE_1_STATUS" "0" "$GATE_1_START" "
 GATE_2_START=$(gate_start_ms)
 GATE_2_STATUS="PASS"
 
-if [ "$PROJECT_LANG" = "documentation-only" ]; then
-echo "⏭️  SKIPPED - Duplicate code (documentation project)."
+if [ "$PROJECT_LANG" = "documentation-only" ] || [ "$DOCS_ONLY_COMMIT" = true ]; then
+echo "⏭️  SKIPPED - Duplicate code (documentation-only ${DOCS_ONLY_COMMIT:+commit})."
+GATE_2_STATUS="SKIP"
+GATE_2_REASON="docs_only_change"
 
 else
   for CURRENT_LANG in $PROJECT_LANGS; do
@@ -1764,8 +1778,10 @@ source "$GATE_DIR/gate-4.sh"
  2>&1 echo "→ Gate 5: Tests & coverage..."
 GATE_5_START=$(gate_start_ms)
 
-if [ "$PROJECT_LANG" = "documentation-only" ]; then
-  echo "✅ PASSED - Skipped (documentation project)."
+if [ "$PROJECT_LANG" = "documentation-only" ] || [ "$DOCS_ONLY_COMMIT" = true ]; then
+  echo "⏭️  SKIPPED - Tests & coverage (documentation-only commit — no code changed to test)."
+  GATE_5_STATUS="SKIP"
+  GATE_5_REASON="docs_only_change"
 
 else
   # ========================================================================

@@ -40,7 +40,7 @@ describe('hook mirror validation', () => {
   const hookFiles = [
     'adapter-common.sh', 'gate-3.sh', 'gate-4.sh', 'gate-7.sh', 'gate-8.sh', 'gate-9.sh',
     'gate-10.sh', 'gate-12-file-hygiene.sh', 'post-merge', 'pre-commit', 'pre-push',
-    'sprint-gate.sh', 'lib/coverage-total.sh', 'lib/python-test-selection.sh', 'lib/python-incremental-typecheck.sh', 'lib/now-ms.sh', 'lib/jscpd-run.sh', 'lib/sprint-gate-report.sh', 'lib/test-failure.sh', 'lib/typecheck.sh', 'lib/validate-code-walkthrough.cjs',
+    'sprint-gate.sh', 'lib/coverage-total.sh', 'lib/python-test-selection.sh', 'lib/python-incremental-typecheck.sh', 'lib/now-ms.sh', 'lib/audit-sanitize.sh', 'lib/jscpd-run.sh', 'lib/sprint-gate-report.sh', 'lib/test-failure.sh', 'lib/typecheck.sh', 'lib/ccn-ratchet.sh', 'lib/docs-only.sh', 'lib/validate-code-walkthrough.cjs',
   ];
   // check-hook-mirror.sh also guards root-level shell copies and the
   // principles tree (#507 A-MAJOR-4) -- the fixture must carry the same
