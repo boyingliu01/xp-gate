@@ -3423,7 +3423,7 @@ generate_quality_report() {
   # -- degraded coverage, kept in the denominator but flagged separately so a
   # degraded gate is never confused with a real PASS.
   local DEGRADED_COUNT=0
-  local DEGRADED_LIST=""
+  local DEGRADED_JSON=""
   for gate in 1 2 3 4 5 6 7 8 9 10 11 12; do
     local status_var="GATE_${gate}_STATUS"
     # Default mirrors the JSON report rendering below EXACTLY (gates 1-11
@@ -3436,7 +3436,7 @@ generate_quality_report() {
     case "$gate_status" in
       PASS) PASSED_COUNT=$((PASSED_COUNT + 1)) ;;
       SKIP) SKIP_COUNT=$((SKIP_COUNT + 1)) ;;
-      WARN) WARN_COUNT=$((WARN_COUNT + 1)); NONPASS_COUNT=$((NONPASS_COUNT + 1)); DEGRADED_COUNT=$((DEGRADED_COUNT + 1)); DEGRADED_LIST="${DEGRADED_LIST:+$DEGRADED_LIST, }gate${gate}";;
+      WARN) WARN_COUNT=$((WARN_COUNT + 1)); NONPASS_COUNT=$((NONPASS_COUNT + 1)); DEGRADED_COUNT=$((DEGRADED_COUNT + 1)); DEGRADED_JSON="${DEGRADED_JSON:+$DEGRADED_JSON, }\"gate${gate}\"";;
       *) NONPASS_COUNT=$((NONPASS_COUNT + 1)) ;;
     esac
   done
@@ -3516,7 +3516,7 @@ generate_quality_report() {
     "gatesTotal": $TOTAL_GATES,
     "gatesSkipped": $SKIP_COUNT,
     "gatesDegraded": $DEGRADED_COUNT,
-    "degradedGates": [$(printf '%s' "$DEGRADED_LIST" | sed 's/\b\(gate[0-9]*\)/"\1"/g')],
+    "degradedGates": [$DEGRADED_JSON],
     "gatesEffective": $EFFECTIVE_TOTAL,
     "effectivePassRate": $EFFECTIVE_PASS_RATE_JSON,
     "score": $SCORE_JSON,
