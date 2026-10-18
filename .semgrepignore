@@ -23,3 +23,8 @@ src/npm-package/lib/doctor.js
 src/npm-package/lib/upgrade.js
 src/npm-package/mutation/runners/pitest-runner.ts
 src/mutation/runners/pitest-runner.ts
+# src/gates/common-process.ts: same pattern as the detectors above — spawnSync
+# runs a FIXED candidate list ('pwsh', 'powershell.exe', 'powershell') or the
+# `where`/`which` lookup; no user input reaches argv. Split out of common.ts in
+# the Boy Scout module-size refactor, which moved the finding to a new path.
+src/gates/common-process.ts
