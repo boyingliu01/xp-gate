@@ -2,7 +2,7 @@
 
 All notable changes to this project will be documented in this file.
 
-## [0.27.5.0] - 2026-10-18
+## [0.27.6.0] - 2026-10-18
 
 发布列车清算 6 个 open issues（#535/#536/#537/#538/#541/#542）+ r19/r20 code-walkthrough 修复。核心主题：**报告诚实性**——凡是"没有真正执行"的门禁，都必须能自证为什么没跑。r20 三席 Delphi walkthrough APPROVED（conf 8/9/9，consensus 100%）。
 
