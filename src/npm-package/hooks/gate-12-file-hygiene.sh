@@ -25,11 +25,20 @@ if [ -z "$STAGED_FILES" ]; then
   return 0 2>/dev/null || true
 fi
 
+# REQ-F2: a docs-only commit cannot introduce code regressions; conflict
+# markers and YAML/JSON syntax are still checked (diff-scoped below).
+if [ "${DOCS_ONLY_COMMIT:-false}" = true ]; then
+  echo "     ⏭️  SKIPPED - File hygiene heavy checks (documentation-only commit; diff-scoped checks still run)."
+  GATE_12_STATUS="SKIP"
+  GATE_12_DOCS_ONLY=true
+fi
+
 HYGIENE_ISSUES=0
 HYGIENE_FILES=""
 
 # --- Check 1: Trailing whitespace ---
 TRAILING_WS_FILES=""
+if [ "${GATE_12_DOCS_ONLY:-false}" != true ]; then
 while IFS= read -r file; do
   [ -z "$file" ] && continue
   # Skip binary files by checking if file contains null bytes
@@ -43,6 +52,7 @@ while IFS= read -r file; do
 done <<EOF
 $STAGED_FILES
 EOF
+fi
 
 if [ -n "$TRAILING_WS_FILES" ]; then
   echo "     ⚠️  Trailing whitespace detected in:"
@@ -55,6 +65,7 @@ fi
 
 # --- Check 2: Missing EOF newline ---
 NO_EOF_NEWLINE_FILES=""
+if [ "${GATE_12_DOCS_ONLY:-false}" != true ]; then
 while IFS= read -r file; do
   [ -z "$file" ] && continue
   # Skip binary files
@@ -72,6 +83,7 @@ while IFS= read -r file; do
 done <<EOF
 $STAGED_FILES
 EOF
+fi
 
 if [ -n "$NO_EOF_NEWLINE_FILES" ]; then
   echo "     ⚠️  Missing EOF newline in:"
@@ -83,7 +95,16 @@ if [ -n "$NO_EOF_NEWLINE_FILES" ]; then
 fi
 
 # --- Check 3: Merge conflict markers ---
+# Runs in BOTH modes. Docs-only commits read the staged DIFF (hunk cost)
+# instead of every full blob — a marker line must be ADDED to matter, so
+# '^+' minus '+++' headers is the precise scope.
 CONFLICT_MARKER_FILES=""
+if [ "${GATE_12_DOCS_ONLY:-false}" = true ]; then
+  if git diff --cached --no-color --diff-filter=d 2>/dev/null \
+      | grep -E '^\+' | grep -v '^+++' | grep -qE '^\+(<<<<<<<|=======|>>>>>>>)'; then
+    CONFLICT_MARKER_FILES="$STAGED_FILES"
+  fi
+else
 while IFS= read -r file; do
   [ -z "$file" ] && continue
   # Skip binary files
@@ -97,6 +118,7 @@ while IFS= read -r file; do
 done <<EOF
 $STAGED_FILES
 EOF
+fi
 
 if [ -n "$CONFLICT_MARKER_FILES" ]; then
   echo "     ❌ Merge conflict markers detected in:"
@@ -109,6 +131,7 @@ fi
 
 # --- Check 4: Oversized files ---
 OVERSIZED_FILES=""
+if [ "${GATE_12_DOCS_ONLY:-false}" != true ]; then
 while IFS= read -r file; do
   [ -z "$file" ] && continue
   [ ! -f "$file" ] && continue
@@ -120,6 +143,7 @@ while IFS= read -r file; do
 done <<EOF
 $STAGED_FILES
 EOF
+fi
 
 if [ -n "$OVERSIZED_FILES" ]; then
   echo "     ⚠️  Oversized files (>${MAX_FILE_SIZE_BYTES} bytes):"
@@ -149,6 +173,10 @@ if command -v node >/dev/null 2>&1; then
 elif command -v jq >/dev/null 2>&1; then
   JSON_CMD="jq"
 fi
+
+# Check which staged YAML/JSON files actually changed (REQ-F3: a repo with 40
+# YAML configs but one edited file validates ONE blob, not forty).
+CHANGED_YAML_JSON=$(git diff --cached --name-only --diff-filter=d -- '*.yml' '*.yaml' '*.json' 2>/dev/null)
 
 while IFS= read -r file; do
   [ -z "$file" ] && continue
@@ -192,7 +220,7 @@ let d='';process.stdin.on('data',c=>d+=c);process.stdin.on('end',()=>{try{JSON.p
       ;;
   esac
 done <<EOF
-$STAGED_FILES
+$CHANGED_YAML_JSON
 EOF
 
 if [ -n "$YAML_JSON_ERRORS" ]; then
@@ -207,6 +235,12 @@ elif [ "$YAML_JSON_CHECK_COUNT" -gt 0 ]; then
 fi
 
 # --- Result ---
+if [ "${GATE_12_DOCS_ONLY:-false}" = true ] && [ "$HYGIENE_ISSUES" -eq 0 ]; then
+  echo "     ✅ PASSED - File Hygiene (docs-only commit: diff-scoped conflict-marker + YAML/JSON checks clean)."
+  GATE_12_STATUS="PASS"
+  record_gate_audit "gate-12" "file-hygiene" "$GATE_12_STATUS" "0" "$GATE_12_START" "" "docs_only_change"
+  return 0 2>/dev/null || true
+fi
 if [ "$HYGIENE_ISSUES" -eq 0 ]; then
   echo "     ✅ PASSED - No file hygiene issues detected."
   GATE_12_STATUS="PASS"
