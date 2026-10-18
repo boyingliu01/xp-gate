@@ -319,8 +319,10 @@ verdict_block_of() {
       echo "$f: missing node hard-dependency guard"
       return 1
     }
-    # One path per array element with ./ prefix (spaces intact, leading '-' safe).
-    grep -qF 'SEMGREP_ARGS+=("./$_semgrep_file")' "$f" || {
+    # One entry per staged file in the array — never a quoted newline-joined
+    # list. #543 changed the FORM: dir targets + --include basenames (so
+    # semgrep honors .semgrepignore, which explicit file targets bypass).
+    grep -qF 'SEMGREP_ARGS+=("--include=${_semgrep_file##*/}")' "$f" || {
       echo "$f: missing array-based file passing"
       return 1
     }

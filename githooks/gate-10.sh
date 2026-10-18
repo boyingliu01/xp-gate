@@ -53,12 +53,31 @@ else
     # lines to `read`; bash never rescans the result for separators. Its correct
     # reading rests on one property of the producer above, not of the loop:
     # `git diff --cached --name-only` terminates paths with LF and quotes control
-    # characters (a CR in a name arrives as the four bytes \215, never as a bare
-    # CR), so one line is exactly one path. Asserted for spaces and a leading '-'
     # by AC-490-04.
+    #
+    # #543: semgrep 1.171 ignores .semgrepignore ENTIRELY when files are passed
+    # as explicit targets (measured: file target -> an ignored finding survives
+    # every suppression form — ignore patterns, --exclude, --exclude-rule,
+    # --project-root; directory target + --include -> the ignore file is honored,
+    # proven fail-closed by removing it and watching the findings return). The
+    # gate therefore passes each staged file's DIRECTORY as a target plus one
+    # --include per staged basename. Coverage stays exact for the staged set
+    # (verified: scanned == staged); the only widening is same-basename siblings
+    # outside the staged set, which scan too — scanning MORE is the safe side.
     SEMGREP_ARGS=()
+    SEMGREP_FILE_COUNT=0
+    SEMGREP_DIRS_SEEN=$'\n'
     while IFS= read -r _semgrep_file; do
-      [ -n "$_semgrep_file" ] && SEMGREP_ARGS+=("./$_semgrep_file")
+      [ -n "$_semgrep_file" ] || continue
+      SEMGREP_FILE_COUNT=$((SEMGREP_FILE_COUNT + 1))
+      SEMGREP_ARGS+=("--include=${_semgrep_file##*/}")
+      _semgrep_dir="./${_semgrep_file%/*}"
+      # A repo-root file has no directory component ("./x.ts" strips to "./").
+      [ "$_semgrep_dir" = "./" ] && _semgrep_dir="."
+      case "$SEMGREP_DIRS_SEEN" in
+        *"$_semgrep_dir"*) : ;;
+        *) SEMGREP_ARGS+=("$_semgrep_dir"); SEMGREP_DIRS_SEEN="$SEMGREP_DIRS_SEEN$_semgrep_dir"$'\n' ;;
+      esac
     done <<EOF
 $SEMGREP_FILES
 EOF
@@ -173,12 +192,12 @@ console.log("");});
       echo "$FINDING_DETAILS"
       echo "  Run 'semgrep scan --config=p/security-audit' to review all findings."
       GATE_10_STATUS="FAIL"
-      GATE_10_SCANNED_FILES=${#SEMGREP_ARGS[@]}
+      GATE_10_SCANNED_FILES=$SEMGREP_FILE_COUNT
       exit 1
     else
-      GATE_10_SCANNED_FILES=${#SEMGREP_ARGS[@]}
+      GATE_10_SCANNED_FILES=$SEMGREP_FILE_COUNT
       echo ""
-      echo "     ✅ PASSED - No blocking vulnerabilities (files scanned: ${#SEMGREP_ARGS[@]})"
+      echo "     ✅ PASSED - No blocking vulnerabilities (files scanned: $SEMGREP_FILE_COUNT)"
       if [ "$V_WARNINGS" -gt 0 ]; then
         echo "     ⚠️  ${V_WARNINGS} non-blocking findings (warnings only)"
         echo "$FINDING_DETAILS"

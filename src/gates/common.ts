@@ -3,7 +3,6 @@
  * Provides cross-platform tool detection, process execution, audit logging,
  * project language detection, and PowerShell project support.
  */
-import { spawnSync, SpawnSyncReturns } from 'child_process';
 import fs from 'fs';
 import path from 'path';
 import os from 'os';
@@ -22,90 +21,19 @@ export interface GateOutput {
   exitCode: number;
 }
 
-export interface ToolAvailability {
-  available: boolean;
-  path: string;
-  via: 'path' | 'npx' | 'custom' | 'none';
-}
+// ── Process & tool primitives (split to common-process.ts for module size) ──
 
-export interface ToolResult {
-  stdout: string;
-  stderr: string;
-  exitCode: number;
-  timedOut: boolean;
-}
+import { runTool, type PowerShellInfo, type ToolResult } from './common-process';
 
-export interface PowerShellInfo {
-  available: boolean;
-  exe: string;
-  version: string;
-}
-
-// ── Tool Detection ──
-
-/**
- * Cross-platform tool detection with 3-tier fallback:
- * 1. PATH lookup (command -v equivalent)
- * 2. npx fallback (for npm-installed tools)
- * 3. Custom path (~/.local/bin/ on Unix)
- */
-export function isToolAvailable(tool: string, cwd?: string): ToolAvailability {
-  // Tier 1: PATH lookup
-  const whichCmd = process.platform === 'win32' ? 'where' : 'which';
-  const pathCheck = spawnSync(whichCmd, [tool], { encoding: 'utf-8', timeout: 5000 });
-  if (pathCheck.status === 0 && pathCheck.stdout.trim()) {
-    return { available: true, path: pathCheck.stdout.trim().split('\n')[0], via: 'path' };
-  }
-
-  // Tier 2: npx fallback (check if tool is available via npx)
-  const npxCheck = spawnSync('npx', ['--yes', tool, '--version'], {
-    encoding: 'utf-8',
-    timeout: 15000,
-    shell: process.platform === 'win32',
-    cwd,
-  });
-  if (npxCheck.status === 0) {
-    return { available: true, path: `npx ${tool}`, via: 'npx' };
-  }
-
-  // Tier 3: Custom path (~/.local/bin/)
-  if (process.platform !== 'win32') {
-    const customPath = path.join(os.homedir(), '.local', 'bin', tool);
-    if (fs.existsSync(customPath)) {
-      return { available: true, path: customPath, via: 'custom' };
-    }
-  }
-
-  return { available: false, path: '', via: 'none' };
-}
-
-// ── Process Execution ──
-
-/**
- * Cross-platform spawnSync wrapper with timeout and error handling.
- * Uses spawnSync (not execSync) to avoid shell injection.
- */
-export function runTool(
-  cmd: string,
-  args: string[],
-  opts?: { cwd?: string; env?: Record<string, string>; timeoutMs?: number; shell?: boolean }
-): ToolResult {
-  const result: SpawnSyncReturns<string> = spawnSync(cmd, args, {
-    encoding: 'utf-8',
-    cwd: opts?.cwd || process.cwd(),
-    env: { ...process.env, ...opts?.env },
-    timeout: opts?.timeoutMs || 120_000,
-    maxBuffer: 10 * 1024 * 1024,
-    shell: opts?.shell || process.platform === 'win32',
-  });
-
-  return {
-    stdout: result.stdout || '',
-    stderr: result.stderr || '',
-    exitCode: result.status ?? -1,
-    timedOut: result.signal === 'SIGTERM' || (result.error as NodeJS.ErrnoException | undefined)?.code === 'ETIMEDOUT',
-  };
-}
+export {
+  type ToolAvailability,
+  type ToolResult,
+  type PowerShellInfo,
+  isToolAvailable,
+  runTool,
+  getChangedFiles,
+  detectPowerShell,
+} from './common-process';
 
 // ── Audit Logging ──
 
@@ -143,50 +71,43 @@ export function recordAudit(
   }
 }
 
-// ── Git Helpers ──
+// ── Language Detection ──
 
-/**
- * Get list of changed (staged) files via git diff --cached.
- * Equivalent to adapter-common.sh's git diff --cached --name-only.
- */
-export function getChangedFiles(cwd?: string): string[] {
-  const result = spawnSync('git', ['diff', '--cached', '--name-only', '--diff-filter=ACM'], {
-    encoding: 'utf-8',
-    cwd: cwd || process.cwd(),
-    timeout: 10000,
-  });
-  if (result.status !== 0) return [];
-  return result.stdout
-    .split('\n')
-    .map(f => f.trim())
-    .filter(Boolean);
+/** Any file in `dir` (non-recursive) matching one of the extensions. */
+function hasFileWithExtension(dir: string, extensions: string[]): boolean {
+  try {
+    const files = fs.readdirSync(dir);
+    return files.some((f) => extensions.some((ext) => f.endsWith(ext)));
+  } catch { /* unreadable dir counts as absent — same as before */ }
+  return false;
 }
 
-/**
- * Detect project language from marker files.
- * Equivalent to adapter-common.sh's detect_project_lang().
- * Includes PowerShell detection (.psd1/.psm1/.ps1).
- */
+/** Java/Kotlin from Gradle markers: any .kt anywhere tips it to Kotlin. */
+function detectJvmLanguage(dir: string): string {
+  try {
+    const files = fs.readdirSync(dir, { recursive: true }) as string[];
+    if (files.some(f => typeof f === 'string' && f.endsWith('.kt'))) return 'kotlin';
+  } catch { /* ignore */ }
+  return 'java';
+}
+
+/** Marker-file language probes, tried in order; first hit wins. */
+const LANG_MARKERS: Array<{ lang: string; files: string[] }> = [
+  { lang: 'typescript', files: ['tsconfig.json'] },
+  { lang: 'python', files: ['pyproject.toml', 'requirements.txt', 'setup.py'] },
+  { lang: 'go', files: ['go.mod'] },
+];
+
 export function detectProjectLang(cwd?: string): string {
   const dir = cwd || process.cwd();
 
-  if (fs.existsSync(path.join(dir, 'tsconfig.json'))) return 'typescript';
-  if (
-    fs.existsSync(path.join(dir, 'pyproject.toml')) ||
-    fs.existsSync(path.join(dir, 'requirements.txt')) ||
-    fs.existsSync(path.join(dir, 'setup.py'))
-  )
-    return 'python';
-  if (fs.existsSync(path.join(dir, 'go.mod'))) return 'go';
+  for (const marker of LANG_MARKERS) {
+    if (marker.files.some((f) => fs.existsSync(path.join(dir, f)))) return marker.lang;
+  }
 
   // Java / Kotlin
   if (fs.existsSync(path.join(dir, 'build.gradle')) || fs.existsSync(path.join(dir, 'build.gradle.kts'))) {
-    // Check for Kotlin files
-    try {
-      const files = fs.readdirSync(dir, { recursive: true }) as string[];
-      if (files.some(f => typeof f === 'string' && f.endsWith('.kt'))) return 'kotlin';
-    } catch { /* ignore */ }
-    return 'java';
+    return detectJvmLanguage(dir);
   }
   if (fs.existsSync(path.join(dir, 'pom.xml'))) return 'java';
 
@@ -200,18 +121,10 @@ export function detectProjectLang(cwd?: string): string {
   }
 
   // PowerShell — check for .psd1/.psm1 or *.ps1 files
-  try {
-    const files = fs.readdirSync(dir);
-    if (files.some(f => f.endsWith('.psd1') || f.endsWith('.psm1'))) return 'powershell';
-    const ps1Files = files.filter(f => f.endsWith('.ps1'));
-    if (ps1Files.length > 0) return 'powershell';
-  } catch { /* ignore */ }
+  if (hasFileWithExtension(dir, ['.psd1', '.psm1', '.ps1'])) return 'powershell';
 
   // Shell
-  try {
-    const files = fs.readdirSync(dir);
-    if (files.some(f => f.endsWith('.sh') || f.endsWith('.bash'))) return 'shell';
-  } catch { /* ignore */ }
+  if (hasFileWithExtension(dir, ['.sh', '.bash'])) return 'shell';
 
   // IaC
   try {
@@ -226,30 +139,6 @@ export function detectProjectLang(cwd?: string): string {
 
 /**
  * Detect PowerShell executable (prefer pwsh 7+, fallback to powershell.exe 5.1).
- * Mirrors powershell.sh's _detect_pwsh() pattern.
- */
-export function detectPowerShell(): PowerShellInfo {
-  const candidates = ['pwsh', 'powershell.exe', 'powershell'];
-
-  for (const exe of candidates) {
-    const whichCmd = process.platform === 'win32' ? 'where' : 'which';
-    const check = spawnSync(whichCmd, [exe], { encoding: 'utf-8', timeout: 5000 });
-    if (check.status === 0 && check.stdout.trim()) {
-      const exePath = check.stdout.trim().split('\n')[0];
-      // Get version
-      const verResult = spawnSync(exe, ['-Command', '$PSVersionTable.PSVersion.ToString()'], {
-        encoding: 'utf-8',
-        timeout: 10000,
-        shell: process.platform === 'win32',
-      });
-      const version = verResult.status === 0 ? verResult.stdout.trim() : 'unknown';
-      return { available: true, exe: exePath, version };
-    }
-  }
-
-  return { available: false, exe: '', version: '' };
-}
-
 /**
  * Check if the project language is PowerShell.
  */

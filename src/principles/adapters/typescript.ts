@@ -651,14 +651,26 @@ export class TypeScriptAdapter extends BaseAdapter implements Adapter {
       });
     }
 
-    const reExportRegex = /^export\s*{/gm;
+    // A re-export block lists names this module FORWARDS, not names it
+    // defines. Counting every forwarded member punishes exactly the barrel
+    // split (many-exports → sub-module + `export { … } from`) that the rule
+    // recommends, so only local `export { A, B };` blocks count — and each
+    // counts once per exported name, as before for single-line blocks.
+    const reExportRegex = /^export\s*\{([^}]*)\}(\s+from\s+[^;{]+)?;/gm;
     let reMatch;
     while ((reMatch = reExportRegex.exec(this.fileContent)) !== null) {
-      exportMatches.push({
-        name: reMatch[0],
-        type: 're-export',
-        line: this.getLineNumber(reMatch.index)
-      });
+      if (reMatch[2]) continue; // `export { … } from '…'` forwards: no new surface
+      const names = reMatch[1]
+        .split(',')
+        .map((part) => part.replace(/^type\s+/, '').trim())
+        .filter((part) => part.length > 0);
+      for (const name of names) {
+        exportMatches.push({
+          name,
+          type: 're-export',
+          line: this.getLineNumber(reMatch.index),
+        });
+      }
     }
 
     return exportMatches;

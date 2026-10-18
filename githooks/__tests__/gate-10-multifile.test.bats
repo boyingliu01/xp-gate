@@ -63,20 +63,25 @@ STUB
   chmod +x "$TEST_DIR/bin/semgrep"
 }
 
-@test "AC-490-01: 2 staged .ts files reach semgrep as 2 separate target arguments" {
+@test "AC-490-01: 2 staged .ts files reach semgrep as separate arguments, none joined" {
   write_argv_semgrep_stub
   run run_gate_with_argv_stub "$TEST_DIR/argv.txt"
   [ "$status" -eq 0 ]
   [[ "$output" == *"STATUS=PASS"* ]]
-  NUM_TARGETS=$(grep -c '\.ts$' "$TEST_DIR/argv.txt")
-  [ "$NUM_TARGETS" -eq 2 ]
-  grep -qx './app.ts' "$TEST_DIR/argv.txt"
-  grep -qx './lib.ts' "$TEST_DIR/argv.txt"
+  # #543 changed the target FORM (dirs + --include basenames instead of file
+  # paths) but not the defect this pins: every staged file must contribute its
+  # own argv entries — no newline-joined mega-argument anywhere.
+  ! grep -q $'\n' "$TEST_DIR/argv.txt"
+  # Basenames ride in --include=<basename> arguments (one per staged file).
+  grep -qxF -- '--include=app.ts' "$TEST_DIR/argv.txt"
+  grep -qxF -- '--include=lib.ts' "$TEST_DIR/argv.txt"
 }
 
 @test "AC-490-02: a multi-file commit PASSes and reports the scanned file count" {
   write_argv_semgrep_stub
   run run_gate_with_argv_stub "$TEST_DIR/argv.txt"
+  # The gate counts the staged files it handed to semgrep, not semgrep's argv
+  # length (#543 turned one file into two arguments: --include + value).
   [[ "$output" == *"files scanned: 2"* ]]
   [[ "$output" != *"Invalid scanning root"* ]]
 }
@@ -122,8 +127,11 @@ STUB
   run run_gate_with_argv_stub "$TEST_DIR/argv.txt"
   [ "$status" -eq 0 ]
   [[ "$output" == *"STATUS=PASS"* ]]
-  grep -qx './with space.ts' "$TEST_DIR/argv.txt"
-  grep -qx './- dash.ts' "$TEST_DIR/argv.txt"
-  ! grep -qx './with' "$TEST_DIR/argv.txt"
-  ! grep -qx 'space.ts' "$TEST_DIR/argv.txt"
+  # #543 form: basenames ride in --include values, dirs as targets. The defect
+  # this pins is argv splitting: a space must never split an argument, and a
+  # leading '-' must never read as an option (dir targets carry ./).
+  grep -qxF -- '--include=with space.ts' "$TEST_DIR/argv.txt"
+  grep -qxF -- '--include=- dash.ts' "$TEST_DIR/argv.txt"
+  ! grep -qxF './with' "$TEST_DIR/argv.txt"
+  ! grep -qxF 'space.ts' "$TEST_DIR/argv.txt"
 }

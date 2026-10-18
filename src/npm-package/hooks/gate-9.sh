@@ -57,8 +57,19 @@ else
     # CR), so one line is exactly one path. Asserted for spaces and a leading '-'
     # by AC-490-04.
     SEMGREP_ARGS=()
+    SEMGREP_FILE_COUNT=0
+    SEMGREP_DIRS_SEEN=$'\n'
     while IFS= read -r _semgrep_file; do
-      [ -n "$_semgrep_file" ] && SEMGREP_ARGS+=("./$_semgrep_file")
+      [ -n "$_semgrep_file" ] || continue
+      SEMGREP_FILE_COUNT=$((SEMGREP_FILE_COUNT + 1))
+      SEMGREP_ARGS+=("--include=${_semgrep_file##*/}")
+      _semgrep_dir="./${_semgrep_file%/*}"
+      # A repo-root file has no directory component ("./x.ts" strips to "./").
+      [ "$_semgrep_dir" = "./" ] && _semgrep_dir="."
+      case "$SEMGREP_DIRS_SEEN" in
+        *"$_semgrep_dir"*) : ;;
+        *) SEMGREP_ARGS+=("$_semgrep_dir"); SEMGREP_DIRS_SEEN="$SEMGREP_DIRS_SEEN$_semgrep_dir"$'\n' ;;
+      esac
     done <<EOF
 $SEMGREP_FILES
 EOF
@@ -173,7 +184,7 @@ console.log("");});
       exit 1
     else
       echo ""
-      echo "     ✅ PASSED - No blocking vulnerabilities (files scanned: ${#SEMGREP_ARGS[@]})"
+      echo "     ✅ PASSED - No blocking vulnerabilities (files scanned: $SEMGREP_FILE_COUNT)"
       if [ "$V_WARNINGS" -gt 0 ]; then
         echo "     ⚠️  ${V_WARNINGS} non-blocking findings (warnings only)"
         echo "$FINDING_DETAILS"
