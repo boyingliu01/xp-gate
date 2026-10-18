@@ -104,6 +104,71 @@ function runLizardOne(lizardCmd, root, relPath) {
   });
 }
 
+// Lizard's TS parser loses brace balance on generic-arrow fields such as
+// `const handlers: Record<string, (p: X, n?: Y) => boolean> = {` — the `<...>`
+// reads as comparison operators and the `{` goes uncounted. From that line to
+// EOF every reported function span swallows everything in between, so CCN is
+// charged across neighbours (measured: showHelp body is 687-706 real, lizard
+// reports 687-763 with CCN=77). The scary numbers are exactly the broken ones.
+// Recompute CCN over the brace-balanced body instead: +1 base plus one per
+// branch keyword outside strings/comments/templates.
+const BRANCH_RE = /\b(if|for|while|case|catch)\b|\?\?|&&|\|\||\belse\b/g;
+
+function stripNonCode(line) {
+  // Remove string/template/comment content so keywords inside them do not count.
+  let out = '';
+  let i = 0;
+  while (i < line.length) {
+    const ch = line[i], nx = line[i + 1];
+    if (ch === '/' && nx === '/') break;
+    if (ch === '/' && nx === '*') { const end = line.indexOf('*/', i + 2); i = end < 0 ? line.length : end + 2; continue; }
+    if (ch === '"' || ch === "'") {
+      i++;
+      while (i < line.length) { if (line[i] === '\\') { i += 2; continue; } if (line[i] === ch) { i++; break; } i++; }
+      out += ' ';
+      continue;
+    }
+    if (ch === '`') {
+      i++;
+      while (i < line.length) { if (line[i] === '\\') { i += 2; continue; } if (line[i] === '`') { i++; break; } i++; }
+      out += ' ';
+      continue;
+    }
+    out += ch;
+    i++;
+  }
+  return out;
+}
+
+function ccnOfBody(bodyLines) {
+  let ccn = 1;
+  for (const raw of bodyLines) {
+    const hits = stripNonCode(raw).match(BRANCH_RE);
+    if (hits) ccn += hits.length;
+  }
+  return ccn;
+}
+
+// Locate a function body by name via brace balance. Returns [startIdx, endIdx]
+// inclusive over `lines`, or null when no balanced body matches.
+function findFunctionBody(lines, name) {
+  const esc = name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  const re = new RegExp(`(function\\s+${esc}\\s*[(<]|\\b${esc}\\s*[:(])`);
+  for (let i = 0; i < lines.length; i++) {
+    if (!re.test(stripNonCode(lines[i]))) continue;
+    let d = 0, started = false;
+    for (let j = i; j < lines.length; j++) {
+      const code = stripNonCode(lines[j]);
+      for (const ch of code) {
+        if (ch === '{') { d++; started = true; }
+        else if (ch === '}') d--;
+      }
+      if (started && d === 0) return [i, j];
+    }
+  }
+  return null;
+}
+
 async function mapPool(items, size, fn) {
   const results = new Array(items.length);
   let next = 0;
@@ -140,6 +205,11 @@ async function run(options = {}) {
   for (const rel of files) {
     const csv = await runLizardOne(lizard, root, rel);
     const bucket = bucketFor(rel);
+    // Source lines for span verification (REQ-A: trust but verify lizard).
+    let srcLines = null;
+    try {
+      srcLines = fs.readFileSync(path.join(root, rel), 'utf8').split(/\r?\n/);
+    } catch { srcLines = null; }
     let dataRows = 0;
     let sawHeader = false;
     for (const line of csv.split(/\r?\n/)) {
@@ -152,7 +222,7 @@ async function run(options = {}) {
       if (!/^\d+,/.test(line)) continue;
       dataRows++;
       const f = parseCsvLine(line);
-      const ccn = parseInt(f[4], 10);
+      let ccn = parseInt(f[4], 10);
       if (!Number.isFinite(ccn)) continue;
       const nameField = f[7] || '(anon)';
       // long_name (field 5, "name@start-end@path") is the AUTHORITATIVE name:
@@ -163,15 +233,32 @@ async function run(options = {}) {
       const loc = f[5] || '';
       let name = (nameField || '').trim();
       let lineNo = '';
+      let endNo = 0;
       if (loc.includes('@')) {
         const at = loc.split('@');
         name = at[0];
-        lineNo = at[1] ? at[1].split('-')[0] : '';
+        const span = (at[1] || '').split('-');
+        lineNo = span[0];
+        endNo = parseInt(span[1], 10) || 0;
         if (!name || /@/.test(name)) name = (nameField || '(anon)').trim();
       } else if (!name) {
         name = '(anon)';
       }
-      functions.push({ file: rel.replace(/\\/g, '/'), bucket, name, ccn, nloc: parseInt(f[0], 10) || 0, line: parseInt(lineNo, 10) || 0 });
+      // Span verification: when lizard's reported body is longer than the
+      // brace-balanced truth, its CCN charged the neighbours too. Recompute
+      // over the real extent and mark the row honest-but-corrected.
+      let inflated = false;
+      if (srcLines && Number(lineNo) > 0 && endNo > lineNo) {
+        const body = findFunctionBody(srcLines.slice(lineNo - 1, Math.min(endNo + 60, srcLines.length)), name);
+        if (body) {
+          const realEnd = lineNo - 1 + body[1];
+          if (realEnd < endNo - 1) {
+            ccn = ccnOfBody(srcLines.slice(lineNo - 1 + body[0], realEnd + 1));
+            inflated = true;
+          }
+        }
+      }
+      functions.push({ file: rel.replace(/\\/g, '/'), bucket, name, ccn, nloc: parseInt(f[0], 10) || 0, line: parseInt(lineNo, 10) || 0, span_inflated: inflated || undefined });
     }
     if (!dataRows && !sawHeader) {
       // Not a silent-zero risk: lizard emits NO header at all for files with

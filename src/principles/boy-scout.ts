@@ -147,6 +147,11 @@ export function classifyFiles(gitDiffLines: string[]): FileClassification {
  * cannot be trusted is worse than no baseline, because the gate still reports
  * "PASSED" and nobody looks.
  */
+/** True when a stored budget is usable: a real, finite number. */
+function hasFiniteBudget(entry: BaselineEntry): boolean {
+  return typeof entry.totalWarnings === 'number' && Number.isFinite(entry.totalWarnings);
+}
+
 function assertValidEntry(file: string, entry: unknown): asserts entry is BaselineEntry {
   const malformed = (detail: string): never => {
     throw new Error(
@@ -159,8 +164,8 @@ function assertValidEntry(file: string, entry: unknown): asserts entry is Baseli
   if (entry === null || typeof entry !== 'object' || Array.isArray(entry)) {
     malformed(`got ${Array.isArray(entry) ? 'an array' : typeof entry}`);
   }
-  const total = (entry as BaselineEntry).totalWarnings;
-  if (typeof total !== 'number' || !Number.isFinite(total)) {
+  if (!hasFiniteBudget(entry as BaselineEntry)) {
+    const total = (entry as BaselineEntry).totalWarnings;
     malformed(`totalWarnings is ${total === undefined ? 'missing' : String(total)}`);
   }
 }
@@ -190,22 +195,26 @@ export async function loadBaseline(baselinePath: string): Promise<Record<string,
     throw new Error(`Cannot read baseline ${baselinePath}: ${reason}`);
   }
 
+  const parsed = parseBaselineObject(baselineContent, baselinePath);
+  for (const [file, entry] of Object.entries(parsed)) {
+    assertValidEntry(file, entry);
+  }
+  return parsed as Record<string, BaselineEntry>;
+}
+
+/** Parse baseline JSON into an object map, or throw a located error. */
+function parseBaselineObject(content: string, baselinePath: string): Record<string, unknown> {
   let parsed: unknown;
   try {
-    parsed = JSON.parse(baselineContent);
+    parsed = JSON.parse(content);
   } catch (error) {
     const reason = error instanceof Error ? error.message : String(error);
     throw new Error(`Baseline ${baselinePath} is not valid JSON: ${reason}`);
   }
-
   if (parsed === null || typeof parsed !== 'object' || Array.isArray(parsed)) {
     throw new Error(`Baseline ${baselinePath} must be a JSON object mapping paths to entries.`);
   }
-
-  for (const [file, entry] of Object.entries(parsed as Record<string, unknown>)) {
-    assertValidEntry(file, entry);
-  }
-  return parsed as Record<string, BaselineEntry>;
+  return parsed as Record<string, unknown>;
 }
 
 /**
@@ -254,17 +263,13 @@ async function readBaselineText(baselinePath: string): Promise<string | null | {
 
 /** Parse the baseline JSON. Returns the object, or a human-readable failure. */
 function parseBaselineJson(content: string, baselinePath: string): Record<string, unknown> | string {
-  let parsed: unknown;
+  // Same grammar as parseBaselineObject, reported instead of thrown: the
+  // repair path must keep going with an empty set where loadBaseline aborts.
   try {
-    parsed = JSON.parse(content);
+    return parseBaselineObject(content, baselinePath);
   } catch (error) {
-    const reason = error instanceof Error ? error.message : String(error);
-    return `Baseline ${baselinePath} is not valid JSON: ${reason}`;
+    return error instanceof Error ? error.message : String(error);
   }
-  if (parsed === null || typeof parsed !== 'object' || Array.isArray(parsed)) {
-    return `Baseline ${baselinePath} must be a JSON object mapping paths to entries.`;
-  }
-  return parsed as Record<string, unknown>;
 }
 
 /** Split entries into the valid ones and the names of the malformed ones. */
