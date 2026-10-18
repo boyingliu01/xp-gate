@@ -1,6 +1,6 @@
 const fs = require('fs');
 const path = require('path');
-const { execSync, spawnSync } = require('child_process');
+const { execSync, execFileSync, spawnSync } = require('child_process');
 const { exec } = require('child_process');
 const util = require('util');
 const execAsync = util.promisify(exec);
@@ -1959,7 +1959,11 @@ function fixMissingHooks(mode, srcDir, hooksDir) {
  */
 function fixCoreHooksPath(globalHooksDir) {
   try {
-    execSync(`git config --global core.hooksPath "${globalHooksDir}"`, {
+    // Args array instead of shell string interpolation: the value is a path
+    // that must never be re-parsed by a shell. Also keeps semgrep's
+    // detect-child-process rule from flagging this audited-safe call
+    // (same baseline as .semgrepignore).
+    execFileSync('git', ['config', '--global', 'core.hooksPath', globalHooksDir], {
       stdio: ['pipe', 'pipe', 'pipe'],
       timeout: EXEC_TIMEOUT_MS,
     });
@@ -2872,10 +2876,23 @@ async function doctorDelphi(options = {}) {
             const gProfileName = gRaw.active_profile || 'default';
             const gProfile = gRaw.profiles && gRaw.profiles[gProfileName];
             const gExperts = (gProfile && gProfile.experts) || {};
-            const gModels = roles.map((r) => (gExperts[r] && gExperts[r].model) || null);
-            if (gModels.some(Boolean) && gModels.some((m, i) => m && m !== models[i])) {
+            // Seat shape is object-keyed OR array in the wild (delphi-config.ts
+            // accepts both); normalize to a role->model map before comparing.
+            const pickExpert = (experts, role, idx) => {
+              if (!experts) return null;
+              if (Array.isArray(experts)) {
+                const e = experts.find((x) => x && x.role === role) || experts[idx];
+                return (e && e.model) || null;
+              }
+              return (experts[role] && experts[role].model) || null;
+            };
+            const gModels = roles.map((r, i) => pickExpert(gExperts, r, i));
+            // Compare only roles BOTH sides define: a role missing on one side
+            // is an incomplete config (check 5 already FAILs it), not drift.
+            const differing = roles.filter((r, i) => gModels[i] && models[i] && gModels[i] !== models[i]);
+            if (differing.length > 0) {
               add('Delphi config shadow (#541)', 'WARN',
-                `project config shadows ${globalConfigPath}; seats differ (global: ${gModels.join(' / ')}) — reviews run from other directories will use different models`);
+                `project config shadows ${globalConfigPath}; seats differ (${differing.join(', ')}) — reviews run from other directories will use different models`);
             }
           }
         } catch {
