@@ -245,6 +245,9 @@ function csvRows(srcPath, root, opts = {}) {
   };
   const out = [];
   let unverified = 0;
+  // Rows rescued by findFunctionBody after verifyRowCcn could not pin the body.
+  // Reported so "0 unverified" is a measured statement rather than a silent one.
+  let _rescued = 0;
   for (const line of lines) {
     if (/^NLOC\b/.test(line) || !/^\d+,/.test(line)) { out.push(line); continue; }
     const f = parseCsvLine(line);
@@ -266,23 +269,31 @@ function csvRows(srcPath, root, opts = {}) {
     // against the repo root so cached lines match the measured file.
     const rowPath = (f[6] || '').trim() || path.relative(root, srcPath);
     const res = verifyRowCcn({ srcLines: sourceLines(rowPath), name, ccn, lineNo, endNo });
-    if (ccn > 10 && !res.corrected) {
-      const searched = findFunctionBody((sourceLines(rowPath) || []).slice(lineNo - 1, lineNo - 1 + 400), name);
-      // Both conditions must be parenthesised. The original read
-      // `!searched && !(span) > 250`, which JavaScript parses as
-      // `!searched && ((!(span)) > 250)` — comparing a boolean to 250, which is
-      // ALWAYS false, so no row was ever counted as unverified and the guard
-      // below could never fire. A short span is precisely the case where an
-      // unlocatable body is suspicious: there is nothing else it could be.
-      //
-      // A row with ccn > 10 that could not be located is suspicious REGARDLESS
-      // of its reported span. Treating span 0 (a malformed single-line or
-      // same-start-end row) as "not suspicious" was a hole in the same guard:
-      // it let exactly the unlocatable rows through. Only a genuinely huge
-      // reported span (>250) is excused, because then the row is a known
-      // parser artefact rather than a measurement we lost.
+    if (!res.corrected) {
+      // verifyRowCcn could not pin the body. Before falling through with the raw
+      // number, give it one more chance: findFunctionBody locates a declaration
+      // by name over a wider window. The architecture seat caught that this
+      // second search previously only decided whether to count the row as
+      // unverified — if it FOUND the body, the row kept its unvalidated CCN and
+      // passed through as if it had been verified. Finding the body is exactly
+      // the evidence needed to correct it, so correct it.
+      const body = findFunctionBody((sourceLines(rowPath) || []).slice(lineNo - 1, lineNo - 1 + 400), name);
       const reportedSpan = endNo > lineNo ? endNo - lineNo + 1 : 0;
-      if (!searched && reportedSpan <= 250) unverified++;
+      if (body) {
+        _rescued++;
+        res.ccn = ccnOfBody(body);
+        res.corrected = res.ccn !== ccn;
+      } else if (reportedSpan <= 250) {
+        // Both conditions must be parenthesised. The original read
+        // `!searched && !(span) > 250`, which JavaScript parses as
+        // `!searched && ((!(span)) > 250)` — comparing a boolean to 250, which is
+        // ALWAYS false, so no row was ever counted as unverified. A row that
+        // cannot be located is suspicious REGARDLESS of its reported span;
+        // treating span 0 as safe was a second hole in the same guard. Only a
+        // genuinely huge span (>250) is excused, because that is a known parser
+        // artefact rather than a measurement we lost.
+        unverified++;
+      }
     }
     if (!res.corrected) { out.push(line); continue; }
     const cols = parseCsvLine(line);
