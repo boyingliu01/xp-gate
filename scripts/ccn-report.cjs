@@ -97,9 +97,25 @@ function parseCsvLine(line) {
 
 function runLizardOne(lizardCmd, root, relPath) {
   return new Promise((resolve) => {
-    execFile(lizardCmd, measureFileArgs(relPath), { cwd: root, maxBuffer: 32 * 1024 * 1024 }, (err, stdout) => {
-      // lizard exits non-zero when warnings exist; output is still valid.
-      resolve(stdout || '');
+    execFile(lizardCmd, measureFileArgs(relPath), { cwd: root, maxBuffer: 32 * 1024 * 1024 }, (err, stdout, stderr) => {
+      // lizard exits non-zero when warnings exist, and stdout is still valid —
+      // so a non-zero exit alone proves nothing. What DOES prove something is
+      // producing no output at all: a crashed or timed-out run used to resolve
+      // to '' and be silently counted as "this file has zero functions", which
+      // removes it from the baseline and from the ratchet.
+      //
+      // A file with genuinely no functions prints NOTHING at all (verified:
+      // `lizard --csv eslint.config.js` -> empty, exit 0), and that is a
+      // legitimate zero. A crashed run also prints nothing, so the exit code is
+      // the only thing that separates them: empty output + a real failure must
+      // never resolve to "this file has zero functions", which would remove it
+      // from the baseline and the ratchet silently.
+      const out = stdout || '';
+      if (out.trim() === '' && err) {
+        const why = `lizard exited ${err.code || 'with an error'}`;
+        throw new Error(`no measurable output for ${relPath} (${why})${stderr ? `: ${String(stderr).trim().slice(0, 200)}` : ''}`);
+      }
+      resolve(out);
     });
   });
 }
