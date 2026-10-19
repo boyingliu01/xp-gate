@@ -110,6 +110,18 @@ else
         # an unvalidated number.
         CC_CSV=$("$LIZARD_PATH" --csv ${CC_FILES_ARGS[@]+"${CC_FILES_ARGS[@]}"} 2>/dev/null || true)
         CC_REPORT="$(git rev-parse --show-toplevel 2>/dev/null)/scripts/ccn-report.cjs"
+        # Fail closed when the verifier is unavailable. Previously this fell
+        # through and graded the RAW lizard CSV, while CI hard-fails on the same
+        # condition — so the hook and CI could reach opposite verdicts on
+        # identical code, and the hook silently compared baseline numbers
+        # (recorded by ccn-report's brace-verified engine) against an engine it
+        # no longer had. Agreeing with CI is the point of having both.
+        if [ ! -f "$CC_REPORT" ] || ! command -v node >/dev/null 2>&1; then
+          echo "❌ BLOCKED - complexity verifier unavailable (scripts/ccn-report.cjs needs node)."
+          echo "CI fails on this same condition; refusing to grade unverified CCN locally."
+          GATE_3_DETAIL="mode=ratchet verifier=MISSING"
+          exit 1
+        fi
         if [ -f "$CC_REPORT" ] && command -v node >/dev/null 2>&1; then
           _cc_verify_failed=0
           CC_CSV_VERIFIED=$(printf '%s\n' "$CC_CSV" | node "$CC_REPORT" --csv-verified batch --root "$(git rev-parse --show-toplevel 2>/dev/null)") || _cc_verify_failed=1
@@ -133,16 +145,16 @@ else
         CCN_WARN_THRESHOLD="$CCN_THRESHOLD"
         CCN_BLOCK_THRESHOLD=$((CCN_THRESHOLD * 2))
         RATCHET_VERDICT=$(printf '%s\n' "$CC_CSV" | evaluate_ccn_ratchet ".ccn-baseline.json")
-        CC_WARNINGS=$(printf '%s\n' "$RATCHET_VERDICT" | grep -c '^BLOCK ' || true)
+        CC_VIOLATIONS=$(printf '%s\n' "$RATCHET_VERDICT" | grep -c '^BLOCK ' || true)
         CC_LOWER=$(printf '%s\n' "$RATCHET_VERDICT" | grep -c '^LOWER ' || true)
         printf '%s\n' "$RATCHET_VERDICT" | grep -v '^OK ' || true
         if [ "${CC_LOWER:-0}" -gt 0 ]; then
           echo "ℹ️  $CC_LOWER function(s) improved below baseline — refresh with: node scripts/ccn-report.cjs --write-baseline"
         fi
         GATE_3_DETAIL="mode=ratchet"
-        if [ "${CC_WARNINGS:-0}" -gt 0 ]; then
+        if [ "${CC_VIOLATIONS:-0}" -gt 0 ]; then
           echo ""
-          echo "❌ BLOCKED - $CC_WARNINGS function(s) violate the complexity ratchet (.ccn-baseline.json)."
+          echo "❌ BLOCKED - $CC_VIOLATIONS function(s) violate the complexity ratchet (.ccn-baseline.json)."
           echo "Revert the increase, or refactor; refresh the baseline only via ccn-baseline-refresh commits."
           exit 1
         else
@@ -179,4 +191,10 @@ else
     GATE_3_REASON="tool_not_installed"
   fi
 fi
-record_gate_audit "gate-3" "complexity" "$GATE_3_STATUS" "${CC_WARNINGS:-0}" "$GATE_3_START" "ccn_threshold=${CCN_THRESHOLD:-5}${GATE_3_DETAIL:+ $GATE_3_DETAIL}"
+# The audit's issues_found comes from whichever mode actually ran. In ratchet
+# mode the count lives in CC_VIOLATIONS (functions worse than their recorded
+# baseline); the flat-threshold mode parses CC_WARNINGS from lizard's own table.
+# Reading only CC_WARNINGS meant every ratchet block recorded issues_found=0 —
+# the gate failed while the journal claimed nothing was found.
+CC_ISSUES="${CC_VIOLATIONS:-${CC_WARNINGS:-0}}"
+record_gate_audit "gate-3" "complexity" "$GATE_3_STATUS" "$CC_ISSUES" "$GATE_3_START" "ccn_threshold=${CCN_THRESHOLD:-5}${GATE_3_DETAIL:+ $GATE_3_DETAIL}"
