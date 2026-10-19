@@ -101,7 +101,7 @@ evaluate_ccn_ratchet() {
 
   # Only function rows survive the conversion with a numeric CCN, which is what
   # the $2 guard below keys on.
-  printf '%s\n' "$csv_rows" | awk -F"$CSV_FS" -v flat="$flat" -v warn="$warn_threshold" -v block="$block_threshold" '
+  printf '%s\n' "$csv_rows" | awk -F"$CSV_FS" -v flat="$flat" -v warn="$warn_threshold" -v block="$block_threshold" -v anon_marker="(anonymous)" -v anon_short="(anon)" '
     BEGIN {
       n = split(flat, kv, "\n")
       for (i = 1; i <= n; i++) {
@@ -116,8 +116,10 @@ evaluate_ccn_ratchet() {
     # CCN out of the identity column and name/path out of a shifted column, so
     # nothing ever matched its baseline entry and every recorded function was
     # graded as new code against the flat thresholds.
-    # NOTE: this awk program is single-quoted in shell. No apostrophe may
-    # appear anywhere between here and the closing quote.
+    # NOTE: this awk program is single-quoted in shell. The two hazards that
+    # silently broke earlier revisions: an apostrophe anywhere below, and a
+    # bare double-quote pair that the shell re-pairs across the awk text. The
+    # anonymous marker is therefore passed in as a -v value, not written inline.
     $2 ~ /^[0-9]+$/ {
       ccn = $2 + 0
       n2 = split($6, parts, "@")
@@ -126,11 +128,13 @@ evaluate_ccn_ratchet() {
       gsub(/\\/, "/", path)
       # Anonymous callbacks are keyed by position: a file holds many of them and
       # the baseline would otherwise keep only the last one parsed, so every
-      # other callback was graded against a stranger's number.
-      is_anon = (name == "(anonymous)" || name == "(anon)")
+      # other callback was graded against the number of a different function.
+      is_anon = 0
+      if (name == anon_marker) is_anon = 1
+      if (name == anon_short) is_anon = 1
       start = (n2 >= 3) ? parts[2] : $10
       sub(/-.*/, "", start)
-      key = is_anon ? (path "::(anonymous)@" start) : (path "::" name)
+      key = is_anon ? (path "::" anon_marker "@" start) : (path "::" name)
       if (key in base) {
         if (ccn > base[key])      printf "BLOCK %s CCN=%d baseline=%d (ratchet: worse than recorded)\n", name, ccn, base[key]
         else if (ccn < base[key]) printf "LOWER %s CCN=%d baseline=%d (improved — refresh baseline when convenient)\n", name, ccn, base[key]
