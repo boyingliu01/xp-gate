@@ -1,0 +1,49 @@
+{
+  "alignment_status": "PASS",
+  "head_commit": "8bda40620be436021d509c63f5b1f52d9500d79e",
+  "spec_hash": "d114cf18d04017e7ddf6c1a88fa6cda7a393b0ad5a2feed64ced326ad54fa015",
+  "req_test_mapping": {
+    "REQ-A": [
+      "scripts/__tests__/ccn-report.test.cjs",
+      "githooks/__tests__/issue-ccn-ratchet.bats"
+    ],
+    "REQ-B": [
+      "githooks/__tests__/issue-audit-poisoned-start.bats"
+    ],
+    "REQ-C": [
+      "scripts/__tests__/ccn-report.test.cjs"
+    ],
+    "REQ-D": [
+      "githooks/__tests__/issue-ccn-ratchet.bats",
+      "scripts/__tests__/ccn-report.test.cjs"
+    ],
+    "REQ-E": [
+      "scripts/__tests__/ccn-report.test.cjs"
+    ],
+    "REQ-F": [
+      "githooks/__tests__/issue-docs-only-skip.bats"
+    ]
+  },
+  "ac_assertion_mapping": {
+    "AC-COMPLEXITY-001": [
+      "scripts/__tests__/ccn-report.test.cjs"
+    ],
+    "AC-AUDIT-001": [
+      "githooks/__tests__/issue-audit-poisoned-start.bats"
+    ],
+    "AC-RATCHET-001": [
+      "scripts/__tests__/ccn-report.test.cjs"
+    ],
+    "AC-RATCHET-002": [
+      "githooks/__tests__/issue-ccn-ratchet.bats",
+      "scripts/__tests__/ccn-report.test.cjs"
+    ],
+    "AC-PERF-001": [
+      "githooks/__tests__/issue-docs-only-skip.bats"
+    ]
+  },
+  "timestamp": "2026-10-19T12:30:54.914Z",
+  "problems": [],
+  "test_files_added_this_sprint": 11,
+  "annotation_policy": "every test file carries @test REQ-*, @intent, @covers AC-*"
+}

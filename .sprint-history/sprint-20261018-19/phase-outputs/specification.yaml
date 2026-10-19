@@ -1,0 +1,116 @@
+# Sprint A specification（AC，Delphi R2 三专家 3/3 APPROVED）
+specification:
+  requirements:
+    - id: REQ-A-01
+      description: "#524 Gate 11 duration arithmetic uses same-unit ms timestamps (gate_start_ms/gate_end_ms),
+        display divides by 1000; repo-wide audit of date +%s mixing concludes with a docs checklist"
+      priority: high
+    - id: REQ-A-02
+      description: "#532 gate-9 SAST verdict semantics ported to all three live copies (githooks/gate-9.sh,
+        githooks/gates/gate-9-sast-security.sh, githooks/adapters/gate-9.sh): JSON severity parsing,
+        union vocabulary, unknown/missing severity fail-closed BLOCK, stdout/stderr separation,
+        errors[] accounting, unparseable -> SKIP+diagnostics never PASS, node hard dependency guard"
+      priority: critical
+    - id: REQ-A-03
+      description: "#523 Gate 5 Python coverage parsing matches coverage.py 7.x (bare number from
+        --format=total), threshold branch actually executes; parse logic extracted to a unit-testable
+        function; BATS mock-PATH end-to-end asserts BLOCK/PASS/SKIP verdicts"
+      priority: critical
+    - id: REQ-A-04
+      description: "#527 PROJECT_SUBDIR root short-circuit disambiguates Gradle multi-module
+        (settings.gradle with include) and CMake subdirectory layouts (nested CMakeLists.txt);
+        bounded traversal depth; CHANGELOG behavior-change entry"
+      priority: high
+    - id: REQ-A-05
+      description: "#447 xp-gate arch subcommand works again: pinned local @archlinter/cli, no -y,
+        opt-in --use-config; anti-noop verification (planted violation -> non-zero findings); help
+        documents the rule-source divergence from Gate 6"
+      priority: high
+    - id: REQ-A-06
+      description: "#465 .delphi-config.json active_profile -> whalecloud (single-gateway DSH constraint);
+        default profile retained; affected call sites inventoried; key dependency annotated"
+      priority: high
+    - id: REQ-A-07
+      description: "#469 doctor/check-tools probe in hook execution environment (non-interactive bash -c);
+        Windows registry-vs-process PATH staleness detection via reg query with fail-closed WARN"
+      priority: high
+    - id: REQ-A-08
+      description: "#514 doctor drift check extends to installed-copy vs repo-source whole-file byte parity
+        (canonical-only policy + exemption registry); machine-side atomic five-step replacement with
+        rollback script and triggers"
+      priority: critical
+    - id: REQ-A-09
+      description: "#507 verified fully landed (S1/S3/S5 in v0.21.0, S2 in gate-3.sh + BATS, S4 in
+        gate-4.sh java_coverage_note + docs/java-principles-coverage.md) and closed with evidence"
+      priority: medium
+  acceptance_criteria:
+    - id: AC-A-01-01
+      requirement: REQ-A-01
+      criteria: gate 11 duration line prints a non-negative plausible seconds value in a real pre-commit
+        run; no negative duration in .xp-gate/reports/pre-commit/*.json
+      test_type: integration
+    - id: AC-A-02-01
+      requirement: REQ-A-02
+      criteria: semgrep stub emitting ERROR-severity JSON with exit 0 -> FAIL (BLOCK) in all three copies
+      test_type: unit
+    - id: AC-A-02-02
+      requirement: REQ-A-02
+      criteria: finding with unknown/missing severity -> counted as BLOCKING (fail-closed) in all three copies
+      test_type: unit
+    - id: AC-A-02-03
+      requirement: REQ-A-02
+      criteria: unparseable stdout / missing verdict fields -> SKIP with diagnostics, never PASS
+      test_type: unit
+    - id: AC-A-02-04
+      requirement: REQ-A-02
+      criteria: byte parity asserted across the three copies; parity guard wired into pre-push + CI
+      test_type: unit
+    - id: AC-A-03-01
+      requirement: REQ-A-03
+      criteria: mock coverage stub printing bare number 97 -> PASS; printing 12 -> BLOCK (threshold 80)
+      test_type: integration
+    - id: AC-A-03-02
+      requirement: REQ-A-03
+      criteria: parse function unit tests cover bare number, percent form, empty, garbage input
+      test_type: unit
+    - id: AC-A-04-01
+      requirement: REQ-A-04
+      criteria: fixture repo with root build.gradle + settings.gradle include + nested module build.gradle
+        -> PROJECT_SUBDIR resolves to the nested module (no short-circuit)
+      test_type: unit
+    - id: AC-A-04-02
+      requirement: REQ-A-04
+      criteria: fixture repo with root CMakeLists.txt + nested */CMakeLists.txt -> no short-circuit;
+        single-project repos keep current behavior (regression)
+      test_type: unit
+    - id: AC-A-05-01
+      requirement: REQ-A-05
+      criteria: xp-gate arch exits 0 on this repo; planted domain->infrastructure import violation
+        yields non-zero findings (anti-noop)
+      test_type: integration
+    - id: AC-A-05-02
+      requirement: REQ-A-05
+      criteria: --use-config <file> opt-in path works; help text documents rule-source divergence
+      test_type: unit
+    - id: AC-A-06-01
+      requirement: REQ-A-06
+      criteria: active_profile == whalecloud; default profile definition retained; delphi external review
+        runs against whalecloud profile without --profile override
+      test_type: integration
+    - id: AC-A-07-01
+      requirement: REQ-A-07
+      criteria: doctor probes tools via bash -c command -v; registry-unreadable -> fail-closed WARN;
+        non-Windows -> explicit SKIP
+      test_type: unit
+    - id: AC-A-08-01
+      requirement: REQ-A-08
+      criteria: doctor detects whole-file replacement of installed pre-commit vs repo source
+      test_type: unit
+    - id: AC-A-08-02
+      requirement: REQ-A-08
+      criteria: machine-side atomic five-step procedure executed with backup; rollback verified
+        (doctor back to pre-replacement state)
+      test_type: integration
+    - id: AC-A-09-01
+      requirement: REQ-A-09
+      criteria: issue #507 closed with per-subitem evidence links (commits/files)

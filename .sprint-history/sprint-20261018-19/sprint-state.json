@@ -1,0 +1,63 @@
+{
+  "_schema_version": 1,
+  "evidence_schema_version": 2,
+  "id": "sprint-20261018-19",
+  "task_description": "仓库质量自清与门禁提速：ccn-report 逐文件测量工具 + 生产热点 CCN 外科手术(目标>10降至<10) + Gate3 ccn-baseline ratchet + CI全量扫描转blocking去截断 + audit duration anomaly记账修复 + 门禁提速(tsx冷启动/docs-only短路/file-hygiene增量)",
+  "phase": 6,
+  "status": "in_progress",
+  "started_at": "2026-10-18T13:50:49.425Z",
+  "phase_history": [
+    {
+      "phase": 1,
+      "name": "PREP",
+      "status": "completed",
+      "started_at": "2026-10-18T13:50:49.425Z",
+      "completed_at": "2026-10-18T13:51:50.451Z",
+      "duration_seconds": 61
+    },
+    {
+      "phase": 2,
+      "phase_name": "DESIGN",
+      "status": "completed",
+      "completed_at": "2026-10-19T08:36:58.325Z"
+    },
+    {
+      "phase": 3,
+      "phase_name": "BUILD",
+      "status": "completed",
+      "started_at": "2026-10-19T08:37:05.713Z",
+      "completed_at": "2026-10-19T09:17:16.292Z",
+      "duration_seconds": 2411
+    },
+    {
+      "phase": 4,
+      "phase_name": "VERIFY",
+      "status": "completed",
+      "completed_at": "2026-10-19T11:49:36.397Z"
+    },
+    {
+      "phase": 5,
+      "phase_name": "SHIP",
+      "status": "completed",
+      "completed_at": "2026-10-19T12:30:56.452Z"
+    },
+    {
+      "phase": 6,
+      "phase_name": "CLOSE",
+      "status": "completed",
+      "completed_at": "2026-10-19T12:47:12.437Z"
+    }
+  ],
+  "isolation": {
+    "worktree_path": "D:\\projects\\xp-gate",
+    "branch": "main"
+  },
+  "outputs": {
+    "summary": ".sprint-state/phase-outputs/phase-1-summary.md",
+    "worktree": ".worktrees/sprint-20261018-quality",
+    "specification": ".sprint-state/phase-outputs/r1-input.md",
+    "requirements_reviewed": ".sprint-state/phase-outputs/requirements-reviewed.json",
+    "batch_decisions": ".sprint-state/phase-outputs/batch-decisions.md"
+  },
+  "metrics": {}
+}
