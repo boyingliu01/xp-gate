@@ -1650,7 +1650,11 @@ GATE_2_STATUS="PASS"
 if [ "$PROJECT_LANG" = "documentation-only" ] || [ "$DOCS_ONLY_COMMIT" = true ]; then
 echo "⏭️  SKIPPED - Duplicate code (documentation-only ${DOCS_ONLY_COMMIT:+commit})."
 GATE_2_STATUS="SKIP"
-GATE_2_REASON="docs_only_change"
+ # GATE_2_DETAIL feeds record_gate_audit's detail field. The previous
+ # GATE_2_REASON was assigned and never read by anything, which is worse than
+ # useless: it looks like the skip reason reaches the audit journal when it does
+ # not (no set -u, so nothing complained).
+ GATE_2_DETAIL="docs_only_change"
 
 else
   for CURRENT_LANG in $PROJECT_LANGS; do
@@ -1758,7 +1762,7 @@ else
 fi
 # Set at the top of this gate; a branch may already have marked it SKIP (#477). The
 # audit must record what happened, not what the gate defaults to.
-record_gate_audit "gate-2" "duplicate-code" "$GATE_2_STATUS" "0" "$GATE_2_START"
+record_gate_audit "gate-2" "duplicate-code" "$GATE_2_STATUS" "0" "$GATE_2_START" "${GATE_2_DETAIL:-}"
 
 # ============================================================================
 # GATE 3: Cyclomatic Complexity Check
@@ -1790,7 +1794,7 @@ GATE_5_START=$(gate_start_ms)
 if [ "$PROJECT_LANG" = "documentation-only" ] || [ "$DOCS_ONLY_COMMIT" = true ]; then
   echo "⏭️  SKIPPED - Tests & coverage (documentation-only commit — no code changed to test)."
   GATE_5_STATUS="SKIP"
-  GATE_5_REASON="docs_only_change"
+  GATE_5_DETAIL="docs_only_change"
 
 else
   # ========================================================================
@@ -2867,7 +2871,7 @@ else
   fi
 fi
 GATE_5_STATUS="PASS"
-record_gate_audit "gate-5" "tests-coverage" "$GATE_5_STATUS" "0" "$GATE_5_START"
+record_gate_audit "gate-5" "tests-coverage" "$GATE_5_STATUS" "0" "$GATE_5_START" "${GATE_5_DETAIL:-}"
 
 # ============================================================================
 # GATE 6: Architecture & Tech Debt (Combines Old Gate 8 - Boy Scout and Gate 9 - Architecture)
