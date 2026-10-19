@@ -153,8 +153,15 @@ fi
 DOC_ONLY=true
 SOURCE_EXTENSIONS="\.py$|\.js$|\.cjs$|\.mjs$|\.ts$|\.tsx$|\.java$|\.go$|\.rs$|\.cpp$|\.c$|\.swift$|\.kt$|\.sh$|\.dart$|\.ps1$|\.m$|\.mm$|\.h$|\.hpp$"
 
+# Extensionless hook scripts and test files are CODE, not documentation.
+# Measured consequence of the old list: a commit touching githooks/pre-push and
+# its .bats suite was classified "Documentation-only push (no source code
+# files)" and the walkthrough was skipped — the single most safety-critical
+# script in the repo, exempt from review by a filename-shape accident.
+NON_EXT_SOURCE_RE='^(githooks/(pre-commit|pre-push|post-merge|install\.sh|verify\.sh)|[^/]+\.bats)$|/__tests__/'
+
 for file in $PUSHED_FILES; do
-  if echo "$file" | grep -qE "$SOURCE_EXTENSIONS"; then
+  if echo "$file" | grep -qE "$SOURCE_EXTENSIONS" || echo "$file" | grep -qE "$NON_EXT_SOURCE_RE"; then
     DOC_ONLY=false
     break
   fi
