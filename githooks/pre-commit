@@ -3116,6 +3116,7 @@ else
         fi
       fi
     done
+    echo "PROBE langs=[$PROJECT_LANGS] reasons=[$GATE_6_LANG_REASONS] status=[$GATE_6_STATUS]" >&2
     if [ "$_g6_mixed" = "1" ]; then
       GATE_6_REASON="mixed"
     else
