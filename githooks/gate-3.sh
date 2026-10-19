@@ -99,13 +99,40 @@ else
       # functions face the live thresholds, improvements only hint. The
       # legacy path below stays byte-for-byte for repos without a baseline.
       if [ -f ".ccn-baseline.json" ]; then
+        # #544: lizard's raw CCN is not what the baseline was recorded with.
+        # The baseline comes from scripts/ccn-report.cjs, which re-derives every
+        # above-threshold CCN from brace-balanced source (lizard's TS parser
+        # loses braces on generic-arrow fields and charges neighbours). Feeding
+        # the ratchet raw numbers compared two different engines — a function
+        # at its recorded ceiling read as "worse" purely from span inflation.
+        # Route the CSV through the same verifier; on rows it cannot verify the
+        # helper exits non-zero, and this gate fails closed instead of passing
+        # an unvalidated number.
         CC_CSV=$("$LIZARD_PATH" --csv ${CC_FILES_ARGS[@]+"${CC_FILES_ARGS[@]}"} 2>/dev/null || true)
+        CC_REPORT="$(git rev-parse --show-toplevel 2>/dev/null)/scripts/ccn-report.cjs"
+        if [ -f "$CC_REPORT" ] && command -v node >/dev/null 2>&1; then
+          _cc_verify_failed=0
+          CC_CSV_VERIFIED=$(printf '%s\n' "$CC_CSV" | node "$CC_REPORT" --csv-verified batch --root "$(git rev-parse --show-toplevel 2>/dev/null)") || _cc_verify_failed=1
+          if [ "$_cc_verify_failed" -ne 0 ]; then
+            echo "❌ BLOCKED - complexity could not be span-verified; refusing to grade unverified CCN."
+            GATE_3_DETAIL="mode=ratchet verify=FAILED"
+            exit 1
+          fi
+          CC_CSV="$CC_CSV_VERIFIED"
+        fi
         RATCHET_LIB="$GATE_DIR/lib/ccn-ratchet.sh"
         [ -f "$RATCHET_LIB" ] || RATCHET_LIB="$(git rev-parse --show-toplevel 2>/dev/null)/githooks/lib/ccn-ratchet.sh"
         # shellcheck source=/dev/null
         . "$RATCHET_LIB"
-        CCN_WARN_THRESHOLD="$CCN_THRESHOLD" CCN_BLOCK_THRESHOLD=$((CCN_THRESHOLD * 2)) \
-          RATCHET_VERDICT=$(printf '%s\n' "$CC_CSV" | evaluate_ccn_ratchet ".ccn-baseline.json")
+        # NOTE: the thresholds must be plain assignments BEFORE the pipe. As a
+        # prefix to a variable assignment (`T=1 V=$(... | fn)`) they land in the
+        # assignment's subshell, so the function sees no thresholds AND reads an
+        # empty stdin — the verdict comes back empty and Gate 3 passes on zero
+        # rows (measured while wiring #544: same input passed or blocked
+        # depending only on where the prefix sat).
+        CCN_WARN_THRESHOLD="$CCN_THRESHOLD"
+        CCN_BLOCK_THRESHOLD=$((CCN_THRESHOLD * 2))
+        RATCHET_VERDICT=$(printf '%s\n' "$CC_CSV" | evaluate_ccn_ratchet ".ccn-baseline.json")
         CC_WARNINGS=$(printf '%s\n' "$RATCHET_VERDICT" | grep -c '^BLOCK ' || true)
         CC_LOWER=$(printf '%s\n' "$RATCHET_VERDICT" | grep -c '^LOWER ' || true)
         printf '%s\n' "$RATCHET_VERDICT" | grep -v '^OK ' || true

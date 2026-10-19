@@ -151,6 +151,90 @@ function ccnOfBody(bodyLines) {
   return ccn;
 }
 
+// Shared by the report loop and the Gate 3 csv path (#544): lizard's CCN is
+// only trustworthy after the span has been verified against brace-balanced
+// source. Returns { ccn, inflated, corrected }.
+function verifyRowCcn({ srcLines, name, ccn, lineNo, endNo }) {
+  const startLine = Number(lineNo) || 0;
+  const reportedSpan = endNo > startLine ? endNo - startLine + 1 : 0;
+  const out = { ccn, inflated: false, corrected: false };
+  if (!srcLines || startLine <= 0 || !(ccn > 10)) return out;
+  const body = locateBodyAtRow(srcLines, name, startLine);
+  let recomputed;
+  if (body) {
+    recomputed = ccnOfBody(srcLines.slice(body.start, body.end + 1));
+  } else if (reportedSpan > 250) {
+    // Unlocatable body AND an implausibly long span: recompute over the
+    // reported window rather than trust a number with a broken span.
+    recomputed = ccnOfBody(srcLines.slice(startLine - 1, startLine - 1 + reportedSpan));
+  } else {
+    out.unlocatable = true;
+    return out;
+  }
+  if (recomputed !== ccn) {
+    out.inflated = recomputed < ccn;
+    out.ccn = recomputed;
+    out.corrected = true;
+  }
+  return out;
+}
+
+// Read a source file as lines, or null when unreadable (caller keeps lizard's
+// number and says so — an unverified row must never look verified).
+function readSourceLines(root, relPath) {
+  try {
+    return fs.readFileSync(path.join(root, relPath), 'utf8').split(/\r?\n/);
+  } catch {
+    return null;
+  }
+}
+
+// Gate 3 (#544): rewrite `lizard --csv` rows with the VERIFIED CCN so the gate
+// and the ratchet baseline speak the same numbers. Fatal (exit 1) on a row
+// whose span cannot be verified above threshold — Gate 3 is fail-closed, so an
+// unverifiable hotspot must BLOCK instead of passing on an unvalidated count.
+function csvRows(srcPath, root, opts = {}) {
+  const lines = fs.readFileSync(srcPath, 'utf8').split(/\r?\n/);
+  const lineCache = new Map();
+  const sourceLines = (rel) => {
+    if (!lineCache.has(rel)) lineCache.set(rel, readSourceLines(root, rel));
+    return lineCache.get(rel);
+  };
+  const out = [];
+  let unverified = 0;
+  for (const line of lines) {
+    if (/^NLOC\b/.test(line) || !/^\d+,/.test(line)) { out.push(line); continue; }
+    const f = parseCsvLine(line);
+    const ccn = parseInt(f[4], 10);
+    const loc = f[5] || '';
+    if (!Number.isFinite(ccn) || !loc.includes('@')) { out.push(line); continue; }
+    const at = loc.split('@');
+    const span = (at[1] || '').split('-');
+    const name = (at[0] || f[7] || '(anon)').trim() || '(anon)';
+    const lineNo = parseInt(span[0], 10) || 0;
+    const endNo = parseInt(span[1], 10) || 0;
+    // The CSV path field lizard prints is the path it was handed; resolve it
+    // against the repo root so cached lines match the measured file.
+    const rowPath = (f[6] || '').trim() || path.relative(root, srcPath);
+    const res = verifyRowCcn({ srcLines: sourceLines(rowPath), name, ccn, lineNo, endNo });
+    if (ccn > 10 && !res.corrected) {
+      const searched = findFunctionBody((sourceLines(rowPath) || []).slice(lineNo - 1, lineNo - 1 + 400), name);
+      if (!searched && !(endNo > lineNo ? endNo - lineNo + 1 : 0) > 250) unverified++;
+    }
+    if (!res.corrected) { out.push(line); continue; }
+    const cols = parseCsvLine(line);
+    cols[4] = String(res.ccn);
+    out.push(cols.map((c) => (/[",]/.test(c) ? `"${c.replace(/"/g, '""')}"` : c)).join(','));
+  }
+  if (unverified > 0 && !opts.allowUnverified) {
+    console.error(`FAIL - ${unverified} function(s) above CCN 10 could not be span-verified (${srcPath}); refusing to emit unverified complexity`);
+    process.exit(1);
+  }
+  // Only rows were rewritten; the trailing summary table is emitted by lizard
+  // on a separate stream (stderr) when no --csv, so nothing else to fix here.
+  return out.join('\n');
+}
+
 // Locate a function body by name via brace balance. Returns [startIdx, endIdx]
 // inclusive over `lines`, or null when no balanced body matches. Anonymous
 // callbacks — the `(anonymous)` rows lizard emits for arrow/function literals —
@@ -161,31 +245,60 @@ function findFunctionBody(lines, name) {
   if (name === '(anonymous)' || name === '(anon)') {
     // Positional: find the first line that opens a brace and close it.
     for (let i = 0; i < lines.length; i++) {
-      let d = 0, started = false;
-      for (let j = i; j < lines.length; j++) {
-        const code = stripNonCode(lines[j]);
-        for (const ch of code) {
-          if (ch === '{') { d++; started = true; }
-          else if (ch === '}') d--;
-        }
-        if (started && d === 0) return [i, j];
-      }
-      // No balanced body opening on this line; try the next.
+      const span = balancedExtentFrom(lines, i);
+      if (span) return [i, span];
     }
     return null;
   }
-  const re = new RegExp(`(function\\s+${esc}\\s*[(<]|\\b${esc}\\s*[:(])`);
+  // "export const ocpRule: Rule = {" / "const handler = (a) => {" / class
+  // methods: lizard names the row after the binding, so the declaration has to
+  // count as "the function starts here" too. Without this the row was simply
+  // unlocatable and its raw (span-inflated) count survived verification.
+  // NOTE: this comment must never contain a backtick. A stray backtick opens a
+  // template literal for lizard's parser and it emits phantom rows for the rest
+  // of the function (measured: a bogus "=" row at CCN 24 for this very file).
+  // Same for single quotes in the paragraphs around it — keep them paired.
+  const re = new RegExp(
+    '(function\\s+' + esc + '\\s*[(<]' +
+    '|\\b(?:const|let|var)\\s+' + esc + '\\s*[:=]' +
+    '|\\b' + esc + '\\s*[:(])'
+  );
   for (let i = 0; i < lines.length; i++) {
     if (!re.test(stripNonCode(lines[i]))) continue;
-    let d = 0, started = false;
-    for (let j = i; j < lines.length; j++) {
-      const code = stripNonCode(lines[j]);
-      for (const ch of code) {
-        if (ch === '{') { d++; started = true; }
-        else if (ch === '}') d--;
-      }
-      if (started && d === 0) return [i, j];
+    const span = balancedExtentFrom(lines, i);
+    if (span !== null) return [i, span];
+  }
+  return null;
+}
+
+// Close the first brace opened at/after `startIdx`. Returns the index of the
+// balancing `}` (or null) so both the named and positional searches share one
+// definition of "the body".
+function balancedExtentFrom(lines, startIdx) {
+  let depth = 0, started = false;
+  for (let j = startIdx; j < lines.length; j++) {
+    const code = stripNonCode(lines[j]);
+    for (const ch of code) {
+      if (ch === '{') { depth++; started = true; }
+      else if (ch === '}') depth--;
     }
+    if (started && depth === 0) return j;
+  }
+  return null;
+}
+
+// Lizard reports a row's start as the DECLARATION of the parsed entity, so for
+// `export const fn: Rule = { ... }` the CCN-31 row can point at `check:` while
+// the binding it is named after starts a few lines ABOVE. Searching only
+// downward left those rows unverified — and an unverified row keeps lizard's
+// span-inflated number (measured: srpRule 31 vs real 8). Look a few lines up
+// first, then fall back to the original downward search.
+const DECL_LOOKBACK = 6;
+function locateBodyAtRow(lines, name, startLine) {
+  const from = startLine - 1;
+  for (let k = from; k >= 0 && k >= from - DECL_LOOKBACK; k--) {
+    const span = findFunctionBody(lines.slice(k, Math.min(lines.length, k + 400)), name);
+    if (span && (k < from || span[0] === 0)) return { start: k + span[0], end: k + span[1] };
   }
   return null;
 }
@@ -272,28 +385,10 @@ async function run(options = {}) {
       // the reported START line — when it is shorter than the reported END,
       // lizard swallowed following functions into this span. Recompute over
       // the balanced extent. Honest rows have no such gap and pass untouched.
-      const reportedSpan = endNo > lineNo ? endNo - lineNo + 1 : 0;
-      if (srcLines && Number(lineNo) > 0 && ccn > 10) {
-        const from = lineNo - 1;
-        const to = Math.min(srcLines.length, from + 400);
-        const body = findFunctionBody(srcLines.slice(from, to), name);
-        if (body) {
-          const realEnd = from + body[1];
-          const recomputed = ccnOfBody(srcLines.slice(from + body[0], realEnd + 1));
-          if (recomputed !== ccn) {
-            inflated = recomputed < ccn;
-            ccn = recomputed;
-          }
-        } else if (reportedSpan > 250) {
-          // Unlocatable body AND an implausibly long span: recompute over the
-          // reported window rather than trust a number with a broken span.
-          const recomputed = ccnOfBody(srcLines.slice(from, from + reportedSpan));
-          if (recomputed !== ccn) {
-            inflated = recomputed < ccn;
-            ccn = recomputed;
-          }
-        }
-      }
+      // Shared with the Gate 3 csv path so gate and baseline cannot drift.
+      const verified = verifyRowCcn({ srcLines, name, ccn, lineNo, endNo });
+      inflated = verified.inflated;
+      ccn = verified.ccn;
       functions.push({ file: rel.replace(/\\/g, '/'), bucket, name, ccn, nloc: parseInt(f[0], 10) || 0, line: parseInt(lineNo, 10) || 0, span_inflated: inflated || undefined });
     }
     if (!dataRows && !sawHeader) {
@@ -380,8 +475,35 @@ async function main() {
   }
 }
 
-module.exports = { run, measureFileArgs, bucketFor, gateTimingStats, findSourceFiles, findFunctionBody, ccnOfBody };
+module.exports = { run, measureFileArgs, bucketFor, gateTimingStats, findSourceFiles, findFunctionBody, ccnOfBody, verifyRowCcn, readSourceLines };
 
 if (require.main === module) {
+  const argv = process.argv.slice(2);
+  // Gate 3 (#544): stdin = `lizard --csv <file>` output, argv[2] = the file
+  // that was measured, --root = repo root. Prints the same CSV with every
+  // above-threshold CCN replaced by its brace-verified value, so the gate's
+  // ratchet compares the baseline's numbers against the same engine.
+  const csvIdx = argv.indexOf('--csv-verified');
+  if (csvIdx >= 0) {
+    const target = argv[csvIdx + 1];
+    const rootIdx = argv.indexOf('--root');
+    const root = rootIdx >= 0 ? path.resolve(argv[rootIdx + 1]) : process.cwd();
+    if (!target) { console.error('--csv-verified requires the measured file path'); process.exit(1); }
+    let input = '';
+    process.stdin.setEncoding('utf8');
+    process.stdin.on('data', (c) => { input += c; });
+    process.stdin.on('end', () => {
+      // csvRows reads the CSV from srcPath, and the measured source paths are
+      // resolved against `root`, so the temp CSV is only a carrier for stdin.
+      const tmp = path.join(require('os').tmpdir(), `ccn-verified-${process.pid}.csv`);
+      fs.writeFileSync(tmp, input);
+      try {
+        process.stdout.write(csvRows(tmp, root));
+      } finally {
+        try { fs.unlinkSync(tmp); } catch { /* best effort */ }
+      }
+    });
+    return;
+  }
   main().catch((e) => { console.error(String(e.message || e)); process.exit(1); });
 }

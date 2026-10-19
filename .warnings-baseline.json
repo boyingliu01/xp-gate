@@ -30,9 +30,5 @@
   "src/principles/adapters/typescript.ts": {
     "totalWarnings": 7,
     "lastAnalyzed": "2026-10-18T18:33:22.046Z"
-  },
-  "src/gates/common.ts": {
-    "totalWarnings": 1,
-    "lastAnalyzed": "2026-10-18T18:40:13.266Z"
   }
 }
