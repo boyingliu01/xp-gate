@@ -152,4 +152,84 @@ describe('ccn-report (per-file trustworthy measurement)', () => {
     expect(res.corrected).toBe(false);
     expect(res.unlocatable).toBe(true);
   });
+
+  /**
+   * @test REQ-COMPLEXITY-RATCHET
+   * @intent The --check verdict must be the same judgment the pre-commit hook
+   *         makes, and it must be able to fail at all. Before this existed the
+   *         report could only print numbers: nothing in CI consulted the
+   *         baseline, so a function could regress indefinitely.
+   * @covers AC-RATCHET-001, AC-RATCHET-002
+   */
+  describe('ratchetFindings', () => {
+    const row = (over) => ({ file: 'src/a.ts', bucket: 'production', name: 'f', ccn: 5, nloc: 5, line: 10, ...over });
+
+    it('blocks a function that got worse than its recorded baseline', () => {
+      const mod = require(reportPath);
+      const findings = mod.ratchetFindings({ functions: [row({ ccn: 9 })], unverified_rows: [] }, { 'src/a.ts::f': 8 });
+      expect(findings).toHaveLength(1);
+      expect(findings[0]).toContain('BLOCK');
+      expect(findings[0]).toContain('baseline=8');
+    });
+
+    it('passes a function at or below its baseline', () => {
+      const mod = require(reportPath);
+      const at = mod.ratchetFindings({ functions: [row({ ccn: 8 })], unverified_rows: [] }, { 'src/a.ts::f': 8 });
+      const below = mod.ratchetFindings({ functions: [row({ ccn: 6 })], unverified_rows: [] }, { 'src/a.ts::f': 8 });
+      expect(at).toEqual([]);
+      expect(below).toEqual([]);
+    });
+
+    it('grades an unrecorded function against the flat thresholds', () => {
+      const mod = require(reportPath);
+      const over = mod.ratchetFindings({ functions: [row({ ccn: 11 })], unverified_rows: [] }, {});
+      expect(over).toHaveLength(1);
+      expect(over[0]).toContain('BLOCK');
+      const under = mod.ratchetFindings({ functions: [row({ ccn: 10 })], unverified_rows: [] }, {});
+      expect(under).toEqual([]);
+    });
+
+    it('treats an unverifiable row as blocking, not as compliance', () => {
+      const mod = require(reportPath);
+      const findings = mod.ratchetFindings({ functions: [], unverified_rows: ['src/a.ts:10 f CCN=12'] }, {});
+      expect(findings).toHaveLength(1);
+      expect(findings[0]).toContain('could not be span-verified');
+    });
+
+    it('keys two same-named functions by line so they cannot shadow each other', () => {
+      const mod = require(reportPath);
+      const report = {
+        functions: [row({ name: 'walk', ccn: 8, line: 79 }), row({ name: 'walk', ccn: 7, line: 184 })],
+        unverified_rows: [],
+      };
+      // Only the line-79 declaration is recorded. The line-184 one must not
+      // inherit that entry and be reported as an improvement to CCN 8.
+      const findings = mod.ratchetFindings(report, { 'src/a.ts::walk@79': 8 });
+      expect(findings).toEqual([]);
+      // Conversely, a regression on EITHER row is caught.
+      const regressed = mod.ratchetFindings(report, { 'src/a.ts::walk@79': 7 });
+      expect(regressed).toHaveLength(1);
+      expect(regressed[0]).toContain(':79');
+    });
+  });
+
+  /**
+   * @test REQ-COMPLEXITY-RATCHET
+   * @intent A ratchet with no baseline silently grades every function as new
+   *         code; --check must refuse to run rather than report a vacuous OK.
+   * @covers AC-RATCHET-003
+   */
+  it('--check fails closed when the baseline file is missing', () => {
+    const { spawnSync } = require('node:child_process');
+    const dir = makeFixtureTree();
+    try {
+      const res = spawnSync(process.execPath, [reportPath, '--root', dir, '--check', '--baseline', path.join(dir, 'absent.json')], {
+        encoding: 'utf8',
+      });
+      expect(res.status).toBe(1);
+      expect(res.stderr).toContain('baseline not found');
+    } finally {
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+  });
 });
