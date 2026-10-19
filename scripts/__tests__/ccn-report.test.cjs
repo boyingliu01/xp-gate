@@ -215,6 +215,36 @@ describe('ccn-report (per-file trustworthy measurement)', () => {
 
   /**
    * @test REQ-COMPLEXITY-RATCHET
+   * @intent A walkthrough seat claimed findFunctionBody cannot locate arrow
+   *         functions assigned to consts, especially when the assignment spans
+   *         lines, and that it can be fooled by a name appearing inside a string.
+   *         Probed: both arrow forms ARE located, an implicit-return arrow
+   *         correctly has no brace body to measure (its CCN is 1 — it can never
+   *         be a hotspot), and a name inside a string is NOT matched. Pinning
+   *         this so a future "fix" for a non-bug does not regress it.
+   * @covers AC-COMPLEXITY-001
+   */
+  it('locates arrow-function bodies and does not match names inside strings', () => {
+    const mod = require(reportPath);
+    const single = ['const handler = (a) => {', '  if (a) return 1;', '  return 0;', '};'];
+    expect(mod.findFunctionBody(single, 'handler')).toBeTruthy();
+
+    const multi = [
+      'const handler = async (a, b) => {',
+      '  if (a) return 1;',
+      '  for (const x of b) { if (x) return 2; }',
+      '  return 0;',
+      '};',
+    ];
+    expect(mod.findFunctionBody(multi, 'handler')).toBeTruthy();
+
+    // A name that only appears inside a string literal is not a declaration.
+    const strOnly = ['const s = "findMe(a) {";', 'const t = 1;'];
+    expect(mod.findFunctionBody(strOnly, 'findMe')).toBeFalsy();
+  });
+
+  /**
+   * @test REQ-COMPLEXITY-RATCHET
    * @intent verifyRowCcn is the only thing standing between a lizard parser
    *         defect and a phantom CCN in the ratchet. If it silently trusts a
    *         malformed span, the fallback is indistinguishable from no fallback
