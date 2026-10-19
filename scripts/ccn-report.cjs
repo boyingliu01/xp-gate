@@ -468,7 +468,14 @@ function findFunctionBody(lines, name) {
   const re = new RegExp(
     '(function\\s+' + esc + '\\s*[(<]' +
     '|\\b(?:const|let|var)\\s+' + esc + '\\s*[:=]' +
-    '|\\b' + esc + '\\s*[:(])'
+    // TypeScript class properties: `public readonly handler = (a) => {`,
+    // `private _handler: Handler = ...`. Any run of visibility/readonly/static
+    // modifiers may precede the name. Without this the body is unlocatable and
+    // the row keeps its raw count — verified by probe that both forms failed
+    // before this alternative existed.
+    '|\\b(?:(?:public|private|protected|readonly|static|override|declare|abstract)\\s+)*' + esc + '\\s*[:=]' +
+    '|\\b' + esc + '\\s*[:(]' +
+    ')'
   );
   for (let i = 0; i < lines.length; i++) {
     if (!re.test(stripNonCode(lines[i]))) continue;

@@ -261,6 +261,31 @@ describe('ccn-report (per-file trustworthy measurement)', () => {
 
   /**
    * @test REQ-COMPLEXITY-RATCHET
+   * @intent TypeScript class properties carry visibility/readonly/static
+   *         modifiers before the name. Probed: `public readonly handler = ...`
+   *         was unlocatable, so its row kept the raw lizard count. A `private`
+   *         field bound to a typed arrow is NOT covered because lizard files that
+   *         row under `=` rather than the field name — a lizard limitation, not
+   *         a lookup we can fix here.
+   * @covers AC-COMPLEXITY-001
+   */
+  it('locates a class property whose name is preceded by modifiers', () => {
+    const mod = require(reportPath);
+    const lines = [
+      'export class Svc {',
+      '  public readonly handler = async (a: T) => {',
+      '    if (a) return 1;',
+      '    return 0;',
+      '  };',
+      '}',
+    ];
+    expect(mod.findFunctionBody(lines, 'handler')).toBeTruthy();
+    const staticArrow = ['export class Svc {', '  static run = (a) => {', '    if (a) return 1;', '  };', '}'];
+    expect(mod.findFunctionBody(staticArrow, 'run')).toBeTruthy();
+  });
+
+  /**
+   * @test REQ-COMPLEXITY-RATCHET
    * @intent verifyRowCcn is the only thing standing between a lizard parser
    *         defect and a phantom CCN in the ratchet. If it silently trusts a
    *         malformed span, the fallback is indistinguishable from no fallback
