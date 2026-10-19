@@ -170,9 +170,63 @@ function stripNonCode(line) {
   return out;
 }
 
+// Copy `text` through, replacing any block comment with a single space. Returns
+// { kept, open } where `open` reports a comment that runs past end of line.
+function stripBlockCommentOnce(text) {
+  let kept = '';
+  let i = 0;
+  while (i < text.length) {
+    const ch = text[i];
+    if (ch === '"' || ch === "'" || ch === '`') {
+      const next = skipQuoted(text, i, ch);
+      kept += text.slice(i, next);
+      i = next;
+      continue;
+    }
+    if (ch === '/' && text[i + 1] === '*') {
+      const close = text.indexOf('*/', i + 2);
+      if (close < 0) return { kept, open: true };
+      i = close + 2;
+      kept += ' ';
+      continue;
+    }
+    kept += ch;
+    i++;
+  }
+  return { kept, open: false };
+}
+
+// Remove comment bodies across LINES, leaving line count intact so branch
+// counting is unaffected.
+//
+// stripNonCode handles comments within a single line only. A block comment can
+// span several, and its body was therefore counted as code: measured, a body of
+// `return 1` scored CCN 1, and the same body under a
+// `/* ... if (x) { for (y) { while (z) ... */` comment scored 11. This repo has
+// 438 multi-line block comments across 159 files, so the leak inflated real
+// counts. Quoted strings are respected so a `/*` inside one does not open a
+// comment.
+function stripBlockComments(bodyLines) {
+  const out = [];
+  let open = false;
+  for (const line of bodyLines) {
+    let text = line;
+    if (open) {
+      const close = text.indexOf('*/');
+      if (close < 0) { out.push(''); continue; }
+      text = text.slice(close + 2);
+      open = false;
+    }
+    const res = stripBlockCommentOnce(text);
+    open = res.open;
+    out.push(res.kept);
+  }
+  return out;
+}
+
 function ccnOfBody(bodyLines) {
   let ccn = 1;
-  for (const raw of bodyLines) {
+  for (const raw of stripBlockComments(bodyLines)) {
     const hits = stripNonCode(raw).match(BRANCH_RE);
     if (hits) ccn += hits.length;
   }
@@ -248,6 +302,10 @@ function csvRows(srcPath, root, opts = {}) {
   // Rows rescued by findFunctionBody after verifyRowCcn could not pin the body.
   // Reported so "0 unverified" is a measured statement rather than a silent one.
   let _rescued = 0;
+  // Rows that are unlocatable AND carry a >250-line span: the known lizard
+  // brace-loss artefact. Counted separately so they are visible rather than
+  // silently trusted or wrongly blamed on the source code.
+  let _spanArtefacts = 0;
   for (const line of lines) {
     if (/^NLOC\b/.test(line) || !/^\d+,/.test(line)) { out.push(line); continue; }
     const f = parseCsvLine(line);
@@ -282,17 +340,32 @@ function csvRows(srcPath, root, opts = {}) {
       if (body) {
         _rescued++;
         res.ccn = ccnOfBody(body);
-        res.corrected = res.ccn !== ccn;
+        // `corrected` must mean "the number leaving this function was read from
+        // source", not "the number changed". When verification happens to agree
+        // with the linter, the row is still VERIFIED — reporting it as
+        // unverified would be a false accusation, and letting it leave as
+        // uncorrected would hand the caller an unvalidated value under a flag
+        // that says otherwise. The feasibility seat caught that the
+        // `res.ccn !== ccn` test collapsed those two meanings.
+        res.corrected = true;
       } else if (reportedSpan <= 250) {
         // Both conditions must be parenthesised. The original read
         // `!searched && !(span) > 250`, which JavaScript parses as
         // `!searched && ((!(span)) > 250)` — comparing a boolean to 250, which is
         // ALWAYS false, so no row was ever counted as unverified. A row that
         // cannot be located is suspicious REGARDLESS of its reported span;
-        // treating span 0 as safe was a second hole in the same guard. Only a
-        // genuinely huge span (>250) is excused, because that is a known parser
-        // artefact rather than a measurement we lost.
+        // treating span 0 as safe was a second hole in the same guard.
         unverified++;
+      } else {
+        // Unlocatable AND an implausibly long span: the known lizard brace-loss
+        // artefact. verifyRowCcn already tried this window internally; if it
+        // still failed, the row is neither corrected nor provably fine. Counting
+        // it as unverified would blame the code for a parser defect and (with
+        // the default fail-closed behaviour) block on it; discarding it silently
+        // would hide a real number. So it is recorded as a distinct, visible
+        // category and the caller decides — the important part is that it stops
+        // being invisible.
+        _spanArtefacts++;
       }
     }
     if (!res.corrected) { out.push(line); continue; }

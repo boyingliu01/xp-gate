@@ -155,6 +155,41 @@ describe('ccn-report (per-file trustworthy measurement)', () => {
 
   /**
    * @test REQ-COMPLEXITY-RATCHET
+   * @intent A block comment spanning several lines had its prose counted as
+   *         code, because the comment stripper worked one line at a time. A body
+   *         of `return 1` scored CCN 1; the same body under a comment mentioning
+   *         if/for/while scored 11. With 438 such comments in this repo the
+   *         counts were being inflated wherever a comment explained control flow
+   *         — which is exactly where a reader documents branches.
+   * @covers AC-COMPLEXITY-001
+   */
+  it('does not count branch keywords inside a multi-line block comment', () => {
+    const mod = require(reportPath);
+    const clean = ['function f() {', '  return 1;', '}'];
+    const commented = [
+      'function f() {',
+      '  /*',
+      '   * Mentioning if, for, while, case, catch, &&, ||',
+      '   */',
+      '  return 1;',
+      '}',
+    ];
+    expect(mod.ccnOfBody(commented)).toBe(mod.ccnOfBody(clean));
+    // Real branches after the comment must still count.
+    const real = ['function f() {', '  /* if (x) { for (y) {} } */', '  if (a) return 1;', '}'];
+    expect(mod.ccnOfBody(real)).toBeGreaterThan(mod.ccnOfBody(clean));
+  });
+
+  it('does not let a quoted /* open a block comment', () => {
+    const mod = require(reportPath);
+    const lines = ['function f() {', '  const re = "/* not a comment */";', '  if (a) return 1;', '}'];
+    // The if must still be counted: had the quoted /* opened a comment, the
+    // rest of the body would have been swallowed.
+    expect(mod.ccnOfBody(lines)).toBeGreaterThan(1);
+  });
+
+  /**
+   * @test REQ-COMPLEXITY-RATCHET
    * @intent verifyRowCcn is the only thing standing between a lizard parser
    *         defect and a phantom CCN in the ratchet. If it silently trusts a
    *         malformed span, the fallback is indistinguishable from no fallback
