@@ -109,4 +109,47 @@ describe('ccn-report (per-file trustworthy measurement)', () => {
       fs.rmSync(dir, { recursive: true, force: true });
     }
   });
+
+  /**
+   * @test REQ-544
+   * @intent lizard reports a rule object's CCN row starting at the `check:`
+   *         callback (line 9), several lines BELOW the `export const X: Rule =`
+   *         binding the row is named after. The verifier only searched downward
+   *         from the reported line, failed to locate the body, and returned
+   *         lizard's span-inflated number unchallenged — measured in-tree:
+   *         srpRule 31 (real 14), ocpRule 31 (real 11), dipRule 27 (real 11).
+   * @covers AC-544-01, AC-544-02
+   */
+  it('locates a rule body whose own declaration line is ABOVE lizard\'s reported start', () => {
+    const mod = require(reportPath);
+    const lines = [
+      'export const rule: Rule = {',
+      "  id: 'x',",
+      '  check: (file: string, a: A): V[] => {',
+      '    const out: V[] = [];',
+      '    if (!out) return out;',
+      '    for (const r of a) { if (r) out.push(r); }',
+      '    return out;',
+      '  },',
+      '};',
+      '',
+    ];
+    // lizard-style row: named `rule`, starting at the callback line (3).
+    const res = mod.verifyRowCcn({ srcLines: lines, name: 'rule', ccn: 40, lineNo: 3, endNo: 9 });
+    expect(res.corrected).toBe(true);
+    expect(res.ccn).toBeLessThan(40);
+  });
+
+  it('never reports a correction it cannot justify (unlocatable rows stay flagged)', () => {
+    const mod = require(reportPath);
+    const res = mod.verifyRowCcn({
+      srcLines: ['const other = 1;', 'const more = 2;'],
+      name: 'nowhere',
+      ccn: 30,
+      lineNo: 1,
+      endNo: 2,
+    });
+    expect(res.corrected).toBe(false);
+    expect(res.unlocatable).toBe(true);
+  });
 });
