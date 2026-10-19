@@ -265,83 +265,83 @@ function getPhaseDuration(history, phaseNum, isLegacy) {
  * @param {object} state - parsed sprint-state.json
  * @returns {string} rendered ASCII dashboard
  */
-function renderDashboard(state) {
-  const id = state.id || '-';
-  const taskDesc = state.task_description || '-';
-  const branch = (state.isolation && state.isolation.branch) || '-';
-  const overallStatus = state.status || '-';
-  const startedAt = formatTimestamp(state.started_at);
-  // Detect legacy vs new phase model
-  const isLegacy = isLegacyState(state);
-  // Normalize currentPhase
-  const rawPhase = state.phase != null ? state.phase : 1;
-  const currentPhase = normalizePhaseNum(rawPhase, isLegacy);
-  const history = state.phase_history || null;
-  const outputs = state.outputs || {};
+// Box geometry for every dashboard line. Kept at module scope so each section
+// renderer below shares one definition of the width and padding rule.
+const DASHBOARD_WIDTH = 60;
 
-  // Build phase rows
-  const phaseRows = PHASES.map((p) => {
+function padLine(left, right) {
+  const content = `  ${left}`;
+  const rightPart = right ? `  ${right}` : '';
+  const gap = DASHBOARD_WIDTH - content.length - rightPart.length;
+  return '|' + content + ' '.repeat(Math.max(1, gap)) + rightPart + '|';
+}
+
+/** One row per phase, resolved against the sprint history. */
+function buildPhaseRows(state, currentPhase, isLegacy) {
+  const history = state.phase_history || null;
+  return PHASES.map((p) => {
     const status = getPhaseStatus(history, p.num, currentPhase, isLegacy);
     const icon = STATUS_ICONS[status] || STATUS_ICONS.pending;
     const duration = formatDuration(getPhaseDuration(history, p.num, isLegacy));
     return { ...p, status, icon, duration };
   });
+}
 
-  // Progress bar
-  const total = PHASES.length; // 6
+/** Progress bar plus completion percentage. */
+function buildProgress(phaseRows) {
+  const total = PHASES.length;
   const completedCount = phaseRows.filter((r) => r.status === 'completed').length;
-  const pct = Math.round((completedCount / total) * 100);
-  const bar = phaseRows
-    .map((r) => PROGRESS_CHARS[r.status] || PROGRESS_CHARS.pending)
-    .join('');
+  return {
+    pct: Math.round((completedCount / total) * 100),
+    bar: phaseRows.map((r) => PROGRESS_CHARS[r.status] || PROGRESS_CHARS.pending).join(''),
+  };
+}
 
-  // Current phase info
-  const currentDef = PHASES.find((p) => p.num === currentPhase) || PHASES[0];
-  const currentStatus = getPhaseStatus(history, currentPhase, currentPhase, isLegacy);
-
-  // Next action
-  const actionKey = `${currentPhase}:${currentStatus}`;
-  let nextAction, nextDetail;
+/** The next action and its one-line detail for a phase/status pair. */
+function nextActionFor(currentPhase, currentStatus) {
   if (currentStatus === 'failed') {
-    [nextAction, nextDetail] = ['\u5904\u7406\u9519\u8BEF', '\u67E5\u770B\u9519\u8BEF\u4FE1\u606F\uFF0C\u51B3\u5B9A\u4FEE\u590D\u6216\u653E\u5F03'];
-  } else if (NEXT_ACTIONS[actionKey]) {
-    [nextAction, nextDetail] = NEXT_ACTIONS[actionKey];
-  } else {
-    [nextAction, nextDetail] = ['\u7EE7\u7EED\u6267\u884C', '\u51C6\u5907\u8FDB\u5165\u4E0B\u4E00\u9636\u6BB5'];
+    return ['\u5904\u7406\u9519\u8BEF', '\u67E5\u770B\u9519\u8BEF\u4FE1\u606F\uFF0C\u51B3\u5B9A\u4FEE\u590D\u6216\u653E\u5F03'];
   }
+  const known = NEXT_ACTIONS[`${currentPhase}:${currentStatus}`];
+  if (known) return known;
+  return ['\u7EE7\u7EED\u6267\u884C', '\u51C6\u5907\u8FDB\u5165\u4E0B\u4E00\u9636\u6BB5'];
+}
 
-  // Output list
-  const outputKeys = Object.keys(outputs);
-  const outputLines = outputKeys.length > 0
-    ? outputKeys.map((k) => `    ${k}: ${outputs[k]}`).join('\n')
-    : '    (\u65E0)';
+/** Declared outputs of the sprint, one indented line each. */
+function buildOutputLines(outputs) {
+  const keys = Object.keys(outputs);
+  if (keys.length === 0) return ['    (\u65E0)'];
+  return keys.map((k) => `    ${k}: ${outputs[k]}`);
+}
 
-  // Assemble dashboard
-  const W = 60;
-  const border = '+' + '='.repeat(W) + '+';
-  const empty = '|' + ' '.repeat(W) + '|';
+function renderDashboard(state) {
+  const id = state.id || '-';
+  const taskDesc = state.task_description || '-';
+  const branch = (state.isolation && state.isolation.branch) || '-';
+  const isLegacy = isLegacyState(state);
+  const rawPhase = state.phase != null ? state.phase : 1;
+  const currentPhase = normalizePhaseNum(rawPhase, isLegacy);
+  const phaseRows = buildPhaseRows(state, currentPhase, isLegacy);
+  const { pct, bar } = buildProgress(phaseRows);
+  const currentDef = PHASES.find((p) => p.num === currentPhase) || PHASES[0];
+  const currentStatus = getPhaseStatus(state.phase_history || null, currentPhase, currentPhase, isLegacy);
+  const [nextAction, nextDetail] = nextActionFor(currentPhase, currentStatus);
 
-  function padLine(left, right) {
-    const content = `  ${left}`;
-    const rightPart = right ? `  ${right}` : '';
-    const gap = W - content.length - rightPart.length;
-    return '|' + content + ' '.repeat(Math.max(1, gap)) + rightPart + '|';
-  }
-
+  const border = '+' + '='.repeat(DASHBOARD_WIDTH) + '+';
+  const empty = '|' + ' '.repeat(DASHBOARD_WIDTH) + '|';
   const lines = [
     border,
     padLine('SPRINT PROGRESS', id),
     border,
     padLine(`\u9700\u6C42: ${taskDesc}`, ''),
     padLine(`\u5206\u652F: ${branch}`, ''),
-    padLine(`\u72B6\u6001: ${overallStatus}`, `\u542F\u52A8: ${startedAt}`),
+    padLine(`\u72B6\u6001: ${state.status || '-'}`, `\u542F\u52A8: ${formatTimestamp(state.started_at)}`),
     border,
     empty,
   ];
 
   for (const r of phaseRows) {
-    const left = `${r.icon} ${r.label} ${r.name.padEnd(14)}`;
-    lines.push(padLine(left, r.duration));
+    lines.push(padLine(`${r.icon} ${r.label} ${r.name.padEnd(14)}`, r.duration));
   }
 
   lines.push(empty);
@@ -354,7 +354,7 @@ function renderDashboard(state) {
   lines.push(padLine(`  ${nextDetail}`, ''));
   lines.push(border);
   lines.push(padLine('\u8F93\u51FA\u7269:', ''));
-  for (const line of outputLines.split('\n')) {
+  for (const line of buildOutputLines(state.outputs || {})) {
     lines.push(padLine(line, ''));
   }
   lines.push(border);

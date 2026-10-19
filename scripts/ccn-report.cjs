@@ -116,6 +116,19 @@ function runLizardOne(lizardCmd, root, relPath) {
 // invented hotspots that exist in no tool).
 const BRANCH_RE = /\b(if|else|for|while|case|catch)\b|\?\?|&&|\|\||\belif\b|\?[^.]/g;
 
+// Skip a quoted run starting at `i` (which points at the opening quote) and
+// return the index just past the closing quote. Unterminated runs consume the
+// rest of the line, which is what a single-line scanner can honestly do.
+function skipQuoted(line, i, quote) {
+  let k = i + 1;
+  while (k < line.length) {
+    if (line[k] === '\\') { k += 2; continue; }
+    if (line[k] === quote) return k + 1;
+    k++;
+  }
+  return line.length;
+}
+
 function stripNonCode(line) {
   // Remove string/template/comment content so keywords inside them do not count.
   let out = '';
@@ -123,16 +136,13 @@ function stripNonCode(line) {
   while (i < line.length) {
     const ch = line[i], nx = line[i + 1];
     if (ch === '/' && nx === '/') break;
-    if (ch === '/' && nx === '*') { const end = line.indexOf('*/', i + 2); i = end < 0 ? line.length : end + 2; continue; }
-    if (ch === '"' || ch === "'") {
-      i++;
-      while (i < line.length) { if (line[i] === '\\') { i += 2; continue; } if (line[i] === ch) { i++; break; } i++; }
-      out += ' ';
+    if (ch === '/' && nx === '*') {
+      const end = line.indexOf('*/', i + 2);
+      i = end < 0 ? line.length : end + 2;
       continue;
     }
-    if (ch === '`') {
-      i++;
-      while (i < line.length) { if (line[i] === '\\') { i += 2; continue; } if (line[i] === '`') { i++; break; } i++; }
+    if (ch === '"' || ch === "'" || ch === '`') {
+      i = skipQuoted(line, i, ch);
       out += ' ';
       continue;
     }
