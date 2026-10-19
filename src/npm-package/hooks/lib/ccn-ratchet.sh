@@ -90,6 +90,16 @@ evaluate_ccn_ratchet() {
     | grep -oE '"[^"]+"[[:space:]]*:[[:space:]]*[0-9]+' \
     | sed 's/[[:space:]]//g; s/":/=/; s/"//g' || true)
 
+  # An empty or unparseable baseline must not read as "everything is new code,
+  # nothing is protected". `{}` and a truncated file both flatten to zero lines,
+  # and the grader then silently degrades to flat thresholds for a repository
+  # that explicitly opted into the ratchet. Say so on stderr (verdict lines stay
+  # clean for the caller) rather than passing quietly — the caller decides
+  # whether an empty baseline is fatal, but it must be able to tell.
+  if [ -z "$flat" ]; then
+    echo "WARN - complexity baseline '${baseline_file}' is empty or unparseable; grading against flat thresholds only (no function is protected by the ratchet)" >&2
+  fi
+
   # Convert the CSV rows once into position-only fields, then grade them. The
   # CSV quote rules live in csv_to_unit_separated and nowhere else; see the
   # comment there for why parsing in-place inside awk does not work.
