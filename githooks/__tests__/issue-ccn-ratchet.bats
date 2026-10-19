@@ -200,3 +200,18 @@ run_eval() { # baseline-json-file ; csv rows on stdin
   grep -q '^OK solo CCN=8 at baseline' "$FIXTURE_REPO/out"
   grep -q '^OK (anonymous) CCN=8 at baseline' "$FIXTURE_REPO/out"
 }
+
+@test "local gate 3 fails closed when the verifier is unavailable, like CI" {
+  # The hook used to fall through to grading raw lizard CSV when
+  # scripts/ccn-report.cjs was missing, while CI hard-fails on the same
+  # condition. Two gates disagreeing about identical code is worse than either
+  # behaviour alone: a developer sees PASS locally and a red CI. The hook must
+  # block, and it must say why.
+  local gate="$REPO_ROOT/githooks/gate-3.sh"
+  # The exact shape: a guard that exits 1 BEFORE the `if [ -f "$CC_REPORT" ]`
+  # branch that would otherwise grade unverified numbers.
+  grep -q 'verifier unavailable' "$gate"
+  grep -q 'mode=ratchet verifier=MISSING' "$gate"
+  # And the CI workflow must still fail on the same condition, so the two agree.
+  grep -q 'ccn-report.cjs' "$REPO_ROOT/.github/workflows/quality-gates.yml"
+}

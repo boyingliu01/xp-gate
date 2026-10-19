@@ -110,6 +110,18 @@ else
         # an unvalidated number.
         CC_CSV=$("$LIZARD_PATH" --csv ${CC_FILES_ARGS[@]+"${CC_FILES_ARGS[@]}"} 2>/dev/null || true)
         CC_REPORT="$(git rev-parse --show-toplevel 2>/dev/null)/scripts/ccn-report.cjs"
+        # Fail closed when the verifier is unavailable. Previously this fell
+        # through and graded the RAW lizard CSV, while CI hard-fails on the same
+        # condition — so the hook and CI could reach opposite verdicts on
+        # identical code, and the hook silently compared baseline numbers
+        # (recorded by ccn-report's brace-verified engine) against an engine it
+        # no longer had. Agreeing with CI is the point of having both.
+        if [ ! -f "$CC_REPORT" ] || ! command -v node >/dev/null 2>&1; then
+          echo "❌ BLOCKED - complexity verifier unavailable (scripts/ccn-report.cjs needs node)."
+          echo "CI fails on this same condition; refusing to grade unverified CCN locally."
+          GATE_3_DETAIL="mode=ratchet verifier=MISSING"
+          exit 1
+        fi
         if [ -f "$CC_REPORT" ] && command -v node >/dev/null 2>&1; then
           _cc_verify_failed=0
           CC_CSV_VERIFIED=$(printf '%s\n' "$CC_CSV" | node "$CC_REPORT" --csv-verified batch --root "$(git rev-parse --show-toplevel 2>/dev/null)") || _cc_verify_failed=1
