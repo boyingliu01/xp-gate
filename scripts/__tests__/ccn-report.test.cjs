@@ -189,6 +189,34 @@ describe('ccn-report (per-file trustworthy measurement)', () => {
 
   /**
    * @test REQ-COMPLEXITY-RATCHET
+   * @intent Verifying only rows the linter already flags above 10 left the
+   *         ratchet comparing raw UNDER-counts for the vast majority of
+   *         functions. Measured on this repo: of 3449 rows reported at CCN <= 10,
+   *         521 are genuinely higher once the body is read (measured:
+   *         renderGatePassRateChart reports 4 and is really 15). A function could
+   *         therefore climb from an under-reported 4 to a real 15 without the
+   *         ratchet noticing. Every row must be verifiable.
+   * @covers AC-COMPLEXITY-001, AC-RATCHET-001
+   */
+  it('verifies a row reported at or below the threshold, not just above it', () => {
+    const mod = require(reportPath);
+    // A body with three ternaries and two ifs: real CCN is well above the
+    // reported 4. Verification must correct it even though 4 is under 10.
+    const lines = [
+      'function chart(rows) {',
+      '  if (!rows.length) return;',
+      '  const a = rows.map(r => r > 1 ? "hi" : r > 0 ? "mid" : "lo");',
+      '  if (a.length) { return a.filter(x => x ? 1 : 0); }',
+      '  return rows.length ? a : [];',
+      '}',
+    ];
+    const res = mod.verifyRowCcn({ srcLines: lines, name: 'chart', ccn: 4, lineNo: 1, endNo: 6 });
+    expect(res.corrected).toBe(true);
+    expect(res.ccn).toBeGreaterThan(4);
+  });
+
+  /**
+   * @test REQ-COMPLEXITY-RATCHET
    * @intent The --check verdict must be the same judgment the pre-commit hook
    *         makes, and it must be able to fail at all. Before this existed the
    *         report could only print numbers: nothing in CI consulted the
