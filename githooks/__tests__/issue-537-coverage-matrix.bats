@@ -85,10 +85,17 @@ setup() {
 }
 
 @test "Gate 6 keeps the scalar aggregate for the existing JSON field shape" {
-  run grep -q 'GATE_6_REASON=' "$PRE_COMMIT"
+  # The legacy field must survive: consumers read gates.gate6_arch_boyscout.
+  # Structural check only — the value's correctness is proven by the
+  # classification tests above, which execute the real functions.
+  run grep -q 'gate6_arch_boyscout' "$PRE_COMMIT"
   [ "$status" -eq 0 ]
   run grep -q '"reason": "\${GATE_6_REASON' "$PRE_COMMIT"
   [ "$status" -eq 0 ]
+  # And the scalar must be initialised before the language loops, so a config-
+  # missing run cannot inherit a stale value from a previous gate.
+  run bash -c "grep -n 'GATE_6_REASON=\"\"' '$PRE_COMMIT' | sed -n '1p' | cut -d: -f1"
+  [ -n "$output" ]
 }
 
 @test "a language archlint really measured is not labelled tool_missing" {
@@ -134,10 +141,11 @@ setup() {
   # because the lookup inside the report saw an empty array.
   run grep -q 'GATE_6_LANG_REASONS=' "$PRE_COMMIT"
   [ "$status" -eq 0 ]
-  # The report must read the flattened string, never the assoc array.
+  # The report must read the flattened string (via the extracted helper),
+  # never the gate's function-local assoc array.
   run grep -q 'GATE_6_REASON_BY_LANG\[\$_cm_lang\]' "$PRE_COMMIT"
   [ "$status" -ne 0 ]
-  run grep -q '_cm_g6_pairs=' "$PRE_COMMIT"
+  run grep -q 'coverage_g6_reason_for' "$PRE_COMMIT"
   [ "$status" -eq 0 ]
 }
 
@@ -161,35 +169,59 @@ setup() {
 @test "the Gate 6 scalar summary never labels a language it did not measure" {
   # Real run: langs=[typescript iac], reasons=[iac=no_archlint_detector].
   # TypeScript had been measured by archlint and passed, but the scalar
-  # summary read "no_archlint_detector" and the fallback relabelled typescript
-  # tool_missing. A summary must never stand in for a specific language's
-  # verdict when per-language detail exists.
+  # summary read "no_archlint_detector" and the fallback relabelled it
+  # tool_missing — the matrix telling the lie it exists to prevent.
+  #
+  # This test exercises the REAL report-side lookup, extracted from
+  # pre-commit, not a hand-copied reimplementation (the earlier version of
+  # this test was a copy with a vacuous `|| true` that could never fail).
   eval "$(sed -n '/^classify_coverage_reason()/,/^}/p' "$PRE_COMMIT")"
+  eval "$(sed -n '/^coverage_g6_reason_for()/,/^}/p' "$PRE_COMMIT")"
+  [ "$(type -t coverage_g6_reason_for)" = "function" ]
 
   GATE_6_STATUS="PASS"
   GATE_6_REASON="no_archlint_detector"
   GATE_6_LANG_REASONS="iac=no_archlint_detector"
 
-  # typescript: no explicit pair -> no reason -> covered
-  _cm_lang="typescript"
-  _cm_g6_reason=""
-  pairs=",${GATE_6_LANG_REASONS},"
-  case "$pairs" in
-    *",${_cm_lang}="*) _cm_g6_reason="${pairs#*",${_cm_lang}="}"; _cm_g6_reason="${_cm_g6_reason%%,*}" ;;
-  esac
-  [ -z "$GATE_6_LANG_REASONS" ] || true
-  if [ -z "$_cm_g6_reason" ] && [ -z "$GATE_6_LANG_REASONS" ]; then
-    _cm_g6_reason="$GATE_6_REASON"
-  fi
-  [ "$(classify_coverage_reason "$_cm_g6_reason" "$GATE_6_STATUS")" = "covered" ]
+  # typescript has no pair: must NOT inherit iac's reason -> covered.
+  _r=$(coverage_g6_reason_for "typescript")
+  [ -z "$_r" ]
+  [ "$(classify_coverage_reason "$_r" "$GATE_6_STATUS")" = "covered" ]
 
-  # iac: explicit pair wins
-  _cm_lang="iac"
-  _cm_g6_reason=""
-  case "$pairs" in
-    *",${_cm_lang}="*) _cm_g6_reason="${pairs#*",${_cm_lang}="}"; _cm_g6_reason="${_cm_g6_reason%%,*}" ;;
-  esac
-  [ "$(classify_coverage_reason "$_cm_g6_reason" "$GATE_6_STATUS")" = "tool_missing" ]
+  # iac has an explicit pair: wins over the scalar -> tool_missing.
+  _r=$(coverage_g6_reason_for "iac")
+  [ "$_r" = "no_archlint_detector" ]
+  [ "$(classify_coverage_reason "$_r" "$GATE_6_STATUS")" = "tool_missing" ]
+
+  # With NO per-language detail at all, the scalar legitimately speaks for all.
+  GATE_6_LANG_REASONS=""
+  GATE_6_REASON="architecture_skip_exemption"
+  [ "$(coverage_g6_reason_for "typescript")" = "architecture_skip_exemption" ]
+}
+
+@test "a configured-tool branch that skips still records why" {
+  # Review finding (architecture seat, CI-01): the python/go/java branches SKIP
+  # when their config is absent but used to record nothing, so the matrix read
+  # "no reason + PASS" and called an unmeasured dimension `covered`. That is
+  # precisely the false confidence this feature exists to remove.
+  eval "$(sed -n '/^classify_coverage_reason()/,/^}/p' "$PRE_COMMIT")"
+  [ "$(classify_coverage_reason architecture_not_configured SKIP)" = "tool_missing" ]
+  # Each config-missing else-branch must record it.
+  run grep -c 'GATE_6_REASON_BY_LANG\["\$CURRENT_LANG"\]="architecture_not_configured"' "$PRE_COMMIT"
+  [ "$status" -eq 0 ]
+  [ "$output" -eq 3 ]
+}
+
+@test "no language branch can reach the matrix with no reason and no measurement" {
+  # The safety property behind "absent reason + PASS => covered": every named
+  # case either measures (typescript, or python/go/java with config+tool) or
+  # records a reason. Only the bare catch-all assigns no_archlint_detector; the
+  # three config-missing branches assign architecture_not_configured; the two
+  # tool-missing paths exit 1 before the matrix is written.
+  assigns=$(grep -c 'GATE_6_REASON_BY_LANG\[' "$PRE_COMMIT")
+  # 1 declare/init reference + 5 assignments (catch-all + 3 config + typescript
+  # case has none by design)
+  [ "$assigns" -ge 5 ]
 }
 
 @test "pre-commit still parses after the change" {
