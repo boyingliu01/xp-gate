@@ -955,6 +955,18 @@ else
 # ============================================================================
 RESULT_FILE=".code-walkthrough-result.json"
 
+# Skipped on main/master by design, exactly like Gate ML and Gate UI above.
+# Work is already walkthrough-reviewed on the feature branch before it lands, so
+# demanding a fresh three-model sweep against the merge commit would only
+# re-review identical code — and it made every release commit unpushable, since
+# the release commit itself changes nothing anyone reviewed. githooks/AGENTS.md
+# documented this skip; the code did not implement it (drift fixed here).
+if [ "$CURRENT_BRANCH" = "main" ] || [ "$CURRENT_BRANCH" = "master" ]; then
+  echo ""
+  echo "   ℹ️  Gate MW skipped (pushing to ${CURRENT_BRANCH} — pre-reviewed via branch walkthrough)"
+  echo ""
+else
+
 
 if [ ! -f "$RESULT_FILE" ]; then
   echo ""
@@ -1019,6 +1031,7 @@ if ! VALIDATION_ERROR=$(node "$MW_VALIDATOR" "$RESULT_FILE" "$EXPECTED_COMMIT" "
   echo ""
   exit 1
 fi
+fi
 
 # ============================================================================
 # ALL CHECKS PASSED
@@ -1031,10 +1044,12 @@ echo ""
 echo "Branch: $CURRENT_BRANCH"
 echo "Files changed: $FILES_CHANGED"
 echo "Lines: +$LINES_ADDED -$LINES_DELETED"
-echo ""
-echo "Code walkthrough result:"
-echo "  Commit: $EXPECTED_COMMIT"
-echo "  Verdict: APPROVED"
+if [ -f "$RESULT_FILE" ]; then
+  echo ""
+  echo "Code walkthrough result:"
+  echo "  Commit: $EXPECTED_COMMIT"
+  echo "  Verdict: APPROVED"
+fi
 
 echo ""
 echo "Proceeding with push..."
