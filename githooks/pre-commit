@@ -1063,14 +1063,24 @@ fi
 # ============================================================================
  2>&1 echo ""
  2>&1 echo "→ Gate 1: Code Quality (static analysis + linting)..."
+# REQ-B: the start stamp is taken OUTSIDE the branches below. It used to be
+# assigned only on the lint path, so every skipped Gate 1 recorded an empty
+# GATE_1_START -> duration_ms=null with reason=poisoned_start_ms. That null is
+# honest but it answers the wrong question: those commits never ran the gate, so
+# the log should say SKIP, not "measurement failed".
+GATE_1_START=$(gate_start_ms)
+GATE_1_STATUS="PASS"
+GATE_1_DETAIL=""
 if ! any_changed_files_match "\.(ts|tsx|js|jsx|py|go|java|kt|cpp|c|swift|m|mm|dart|sh)$" "\.ya?ml$" "\.json$" "Dockerfile" "\.tf$"; then
   echo "✅ PASSED - No code files changed, skipping lint."
+  GATE_1_STATUS="SKIP"
+  GATE_1_DETAIL="no_matching_files"
 else
-GATE_1_START=$(gate_start_ms)
-
 if [ "$PROJECT_LANG" = "documentation-only" ]; then
   # Documentation-only project - skip static analysis
   echo "⏭️  SKIPPED - Code quality (documentation project)."
+  GATE_1_STATUS="SKIP"
+  GATE_1_DETAIL="documentation_project"
   
 else
   for CURRENT_LANG in $PROJECT_LANGS; do
@@ -1628,7 +1638,6 @@ GATE_1_TOOL="${PROJECT_LANGS}"
 # trail via the S2 detail plumbing so a WARN verdict is diagnosable, not
 # silent. WARN stays IN the scoring denominator (Delphi round-2 A-MAJOR-1).
 record_gate_audit "gate-1" "code-quality" "$GATE_1_STATUS" "0" "$GATE_1_START" "${GATE_1_DETAIL:-}"
-
 # ============================================================================
 # GATE 2: Duplicate Code Detection (NEW gate)
 # Uses jscpd, or similar tools, specific to language
