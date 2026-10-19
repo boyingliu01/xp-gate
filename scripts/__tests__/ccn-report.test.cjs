@@ -215,6 +215,22 @@ describe('ccn-report (per-file trustworthy measurement)', () => {
 
   /**
    * @test REQ-COMPLEXITY-RATCHET
+   * @intent `\?[^.]` must not count ANY link in a chained optional access. One
+   *         `?.` is excluded only because the next character is a dot, so a
+   *         chain like `a?.b?.c?.[d]` is the case most likely to slip through.
+   *         Probed: all forms stay at CCN 1, while a ternary still counts.
+   * @covers AC-COMPLEXITY-001
+   */
+  it('does not count any link of a chained optional access', () => {
+    const mod = require(reportPath);
+    const one = ['function f() {', '  return a?.b;', '}'];
+    const two = ['function f() {', '  return a?.b?.c;', '}'];
+    const three = ['function f() {', '  return a?.[b]?.d;', '}'];
+    for (const body of [one, two, three]) expect(mod.ccnOfBody(body)).toBe(1);
+  });
+
+  /**
+   * @test REQ-COMPLEXITY-RATCHET
    * @intent A walkthrough seat claimed findFunctionBody cannot locate arrow
    *         functions assigned to consts, especially when the assignment spans
    *         lines, and that it can be fooled by a name appearing inside a string.

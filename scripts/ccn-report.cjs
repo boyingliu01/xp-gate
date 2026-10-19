@@ -582,13 +582,41 @@ function findDeclarationLine(lines, name) {
   return null;
 }
 
+// The CSV column positions in this file are that of lizard 1.21.3 (11 fields,
+// CCN at index 1, function locator at 5, path at 6). A different major/minor
+// could reorder them and every number here would be silently wrong — the exact
+// class of bug this sprint fixed. Verify the shape once per run, before trusting
+// any row, rather than assuming.
+const SUPPORTED_LIZARD_MAJOR = 1;
+
+function checkLizardVersion(lizardCmd) {
+  let out;
+  try {
+    out = execFileSync(lizardCmd, ['--version'], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] });
+  } catch {
+    return; // version probe unsupported; the row-shape check below still guards
+  }
+  const m = String(out).match(/(\d+)\.(\d+)(?:\.(\d+))?/);
+  if (!m) return;
+  const major = Number(m[1]);
+  if (major !== SUPPORTED_LIZARD_MAJOR) {
+    throw new Error(
+      `lizard ${m[0]} is not the supported ${SUPPORTED_LIZARD_MAJOR}.x series; the CSV column layout in this file was verified against 1.21.3 and a different major may reorder it`
+    );
+  }
+}
+
 function resolveLizard() {
   try {
     execFileSync('lizard', ['--version'], { stdio: ['ignore', 'pipe', 'pipe'] });
+    checkLizardVersion('lizard');
     return 'lizard';
   } catch { /* fall through */ }
   const local = path.join(process.env.HOME || '', '.local', 'bin', 'lizard');
-  if (fs.existsSync(local)) return local;
+  if (fs.existsSync(local)) {
+    checkLizardVersion(local);
+    return local;
+  }
   throw new Error('lizard not found (pip install lizard)');
 }
 
