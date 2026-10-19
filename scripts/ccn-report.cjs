@@ -95,6 +95,39 @@ function parseCsvLine(line) {
   return fields;
 }
 
+// Decide whether a lizard run's stdout is a measurement to trust. Shared by the
+// execFile callback so the failure rules live in one place instead of nesting
+// four conditions inside it (which the ratchet caught as CCN 9 for a callback
+// that used to be 7).
+function evaluateLizardOutput({ stdout, stderr, err, root, relPath }) {
+  const out = stdout || '';
+  const withStderr = stderr ? `: ${String(stderr).trim().slice(0, 200)}` : '';
+
+  // lizard exits ZERO and prints NOTHING for a path it cannot read — measured:
+  // `lizard --csv /nope/zzz.js` -> exit 0, no stdout, no stderr. So empty output
+  // alone cannot mean "this file has zero functions"; that reading silently
+  // drops an unmeasurable file from the baseline and the ratchet. The exit status
+  // is not a usable signal here, so confirm the file exists and is readable
+  // before believing an empty result.
+  if (out.trim() === '') {
+    if (err) throw new Error(`no measurable output for ${relPath} (lizard exited ${err.code || 'with an error'})${withStderr}`);
+    if (!isReadableFile(path.join(root, relPath))) {
+      throw new Error(`lizard reported nothing for ${relPath}, which is not a readable file — treating as measurement failure, not a zero-function file`);
+    }
+    return out;
+  }
+
+  // Partial output alongside a hard failure (a timeout or a kill mid-write) is a
+  // truncated measurement, not a result. lizard's documented non-zero exits for
+  // warnings come with complete output, so a kill/timeout signal is the signal to
+  // distrust the rows: accepting them would silently drop every function lizard
+  // had not reached yet.
+  if (err && (err.killed || err.signal)) {
+    throw new Error(`lizard was killed while measuring ${relPath} (${err.signal || 'timeout'}); output is truncated`);
+  }
+  return out;
+}
+
 function runLizardOne(lizardCmd, root, relPath) {
   return new Promise((resolve, reject) => {
     execFile(lizardCmd, measureFileArgs(relPath), { cwd: root, maxBuffer: 32 * 1024 * 1024 }, (err, stdout, stderr) => {
@@ -102,33 +135,22 @@ function runLizardOne(lizardCmd, root, relPath) {
       // reject the surrounding promise — the executor has already returned by
       // the time the callback runs, so a throw escapes as an unhandled
       // exception, leaving the promise pending forever (the report would hang
-      // with no error). Reported independently by all three walkthrough seats.
-      // lizard exits non-zero when warnings exist, so a non-zero exit alone
-      // proves nothing. But a crashed or timed-out run ALSO prints nothing, and
-      // treating that as "this file has zero functions" would silently drop it
-      // from the baseline and the ratchet.
-      //
-      // A file with genuinely no functions prints nothing at all with exit 0
-      // (verified: `lizard --csv eslint.config.js`), so the exit status is the
-      // only thing separating a real zero from a failed measurement.
-      const out = stdout || '';
-      if (out.trim() === '' && err) {
-        const why = `lizard exited ${err.code || 'with an error'}`;
-        reject(new Error(`no measurable output for ${relPath} (${why})${stderr ? `: ${String(stderr).trim().slice(0, 200)}` : ''}`));
-        return;
+      // with no error). Reported independently by three walkthrough seats.
+      try {
+        resolve(evaluateLizardOutput({ stdout, stderr, err, root, relPath }));
+      } catch (e) {
+        reject(e);
       }
-      // Partial output alongside a hard failure (a timeout or a kill mid-write)
-      // is a truncated measurement, not a result. lizard's documented non-zero
-      // exits for warnings come with complete output, so a kill/timeout signal
-      // is the signal to distrust the rows: accepting them would silently drop
-      // every function lizard had not reached yet.
-      if (err && (err.killed || err.signal)) {
-        reject(new Error(`lizard was killed while measuring ${relPath} (${err.signal || 'timeout'}); output is truncated`));
-        return;
-      }
-      resolve(out);
     });
   });
+}
+
+function isReadableFile(target) {
+  try {
+    return fs.statSync(target).isFile();
+  } catch {
+    return false;
+  }
 }
 
 // Lizard's TS parser loses brace balance on generic-arrow fields such as

@@ -369,5 +369,30 @@ describe('ccn-report (per-file trustworthy measurement)', () => {
         fs.rmSync(dir, { recursive: true, force: true });
       }
     });
+
+    /**
+     * @test REQ-COMPLEXITY-RATCHET
+     * @intent lizard exits 0 and prints nothing for a path it cannot read
+     *         (measured: `lizard --csv /nope/zzz.js` -> exit 0, no stdout, no
+     *         stderr). That is indistinguishable from "this file has zero
+     *         functions" if you only look at the output, so an unmeasurable file
+     *         silently vanished from the baseline and the ratchet. The exit
+     *         status carries no information here; the file's existence does.
+     * @covers AC-COMPLEXITY-001
+     */
+    it('treats "no output" for an unreadable path as a failure, not a zero', async () => {
+      const mod = require(reportPath);
+      const { spawnSync } = require('node:child_process');
+      const probe = spawnSync('lizard', ['--version'], { encoding: 'utf8' });
+      if (probe.status !== 0) return;
+      const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'ccn-missing-'));
+      try {
+        await expect(mod.runLizardOne('lizard', dir, 'does-not-exist.js')).rejects.toThrow(
+          /not a readable file/
+        );
+      } finally {
+        fs.rmSync(dir, { recursive: true, force: true });
+      }
+    });
   });
 });
