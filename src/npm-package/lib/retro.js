@@ -16,6 +16,14 @@ const path = require('path');
 const { execSync } = require('child_process');
 
 /**
+ * Upper bound for a believable gate runtime. A gate that reports more than two
+ * hours did not take two hours; it took a corrupted clock. Used to exclude
+ * samples from the duration average rather than let one poisoned row dominate
+ * it (the symptom was an "average" of 2.2e12 ms).
+ */
+const MAX_SANE_DURATION_MS = 2 * 60 * 60 * 1000;
+
+/**
  * Get git commit subjects within a date window.
  * @param {string} dir - Repository root
  * @param {number} days - Lookback window in days
@@ -105,16 +113,29 @@ function buildReport(opts) {
   L.push('## Activity Summary');
   const gateEntries = audit.filter(e => e.gate_id);
   const passed = gateEntries.filter(e => e.passed).length;
-  const normal = gateEntries.filter(e => !e.duration_anomaly);
-  const anomalous = gateEntries.length - normal.length;
-  const avgMs = normal.length > 0
-    ? Math.round(normal.reduce((s, e) => s + (e.duration_ms || 0), 0) / normal.length)
+  // REQ-B: a duration is only usable when it is a finite non-negative number.
+  // `e.duration_ms || 0` used to fold null into ZERO, which both dragged the
+  // mean down and hid the fact that the sample was missing — the same class of
+  // lie as the epoch-sized values this sprint removed. The legacy
+  // duration_anomaly flag is no longer the only signal: a poisoned start now
+  // writes null outright, so anything null must be excluded and counted.
+  const measurable = gateEntries.filter(e => Number.isFinite(e.duration_ms) && e.duration_ms >= 0 && e.duration_ms <= MAX_SANE_DURATION_MS);
+  const excluded = gateEntries.length - measurable.length;
+  const nullDurations = gateEntries.filter(e => e.duration_ms === null).length;
+  const avgMs = measurable.length > 0
+    ? Math.round(measurable.reduce((s, e) => s + e.duration_ms, 0) / measurable.length)
     : 0;
   L.push(`- Total commits in window: ${commits.length}`);
   L.push(`- Sprint transitions recorded: ${sprints.length}`);
   L.push(`- Gate pass rate: ${gateEntries.length > 0 ? ((passed / gateEntries.length) * 100).toFixed(1) : '0.0'}% (${gateEntries.length} gates total, ${gateEntries.length - passed} failed)`);
-  if (gateEntries.length > 0) {
-    L.push(`- Avg gate duration: ${avgMs}ms (${anomalous} anomal${anomalous === 1 ? 'y' : 'ies'} excluded)`);
+  if (measurable.length > 0) {
+    // p50 alongside the mean: with a long tail the mean is the least useful
+    // statistic, and "avg gate duration: 2.2e12ms" was the visible symptom.
+    const sorted = measurable.map(e => e.duration_ms).sort((a, b) => a - b);
+    const p50 = sorted[Math.floor(sorted.length / 2)];
+    L.push(`- Avg gate duration: ${avgMs}ms, p50 ${p50}ms over ${measurable.length} measurable gate(s) (${excluded} excluded${nullDurations ? `, ${nullDurations} recorded null` : ''})`);
+  } else if (gateEntries.length > 0) {
+    L.push(`- Avg gate duration: no measurable samples (${excluded} of ${gateEntries.length} excluded as null or anomalous)`);
   }
   L.push('');
 
