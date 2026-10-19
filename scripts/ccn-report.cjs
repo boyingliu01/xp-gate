@@ -96,24 +96,26 @@ function parseCsvLine(line) {
 }
 
 function runLizardOne(lizardCmd, root, relPath) {
-  return new Promise((resolve) => {
+  return new Promise((resolve, reject) => {
     execFile(lizardCmd, measureFileArgs(relPath), { cwd: root, maxBuffer: 32 * 1024 * 1024 }, (err, stdout, stderr) => {
-      // lizard exits non-zero when warnings exist, and stdout is still valid —
-      // so a non-zero exit alone proves nothing. What DOES prove something is
-      // producing no output at all: a crashed or timed-out run used to resolve
-      // to '' and be silently counted as "this file has zero functions", which
-      // removes it from the baseline and from the ratchet.
+      // Accept BOTH resolve and reject. Throwing inside this callback does NOT
+      // reject the surrounding promise — the executor has already returned by
+      // the time the callback runs, so a throw escapes as an unhandled
+      // exception, leaving the promise pending forever (the report would hang
+      // with no error). Reported independently by all three walkthrough seats.
+      // lizard exits non-zero when warnings exist, so a non-zero exit alone
+      // proves nothing. But a crashed or timed-out run ALSO prints nothing, and
+      // treating that as "this file has zero functions" would silently drop it
+      // from the baseline and the ratchet.
       //
-      // A file with genuinely no functions prints NOTHING at all (verified:
-      // `lizard --csv eslint.config.js` -> empty, exit 0), and that is a
-      // legitimate zero. A crashed run also prints nothing, so the exit code is
-      // the only thing that separates them: empty output + a real failure must
-      // never resolve to "this file has zero functions", which would remove it
-      // from the baseline and the ratchet silently.
+      // A file with genuinely no functions prints nothing at all with exit 0
+      // (verified: `lizard --csv eslint.config.js`), so the exit status is the
+      // only thing separating a real zero from a failed measurement.
       const out = stdout || '';
       if (out.trim() === '' && err) {
         const why = `lizard exited ${err.code || 'with an error'}`;
-        throw new Error(`no measurable output for ${relPath} (${why})${stderr ? `: ${String(stderr).trim().slice(0, 200)}` : ''}`);
+        reject(new Error(`no measurable output for ${relPath} (${why})${stderr ? `: ${String(stderr).trim().slice(0, 200)}` : ''}`));
+        return;
       }
       resolve(out);
     });
@@ -257,8 +259,15 @@ function csvRows(srcPath, root, opts = {}) {
       // ALWAYS false, so no row was ever counted as unverified and the guard
       // below could never fire. A short span is precisely the case where an
       // unlocatable body is suspicious: there is nothing else it could be.
+      //
+      // A row with ccn > 10 that could not be located is suspicious REGARDLESS
+      // of its reported span. Treating span 0 (a malformed single-line or
+      // same-start-end row) as "not suspicious" was a hole in the same guard:
+      // it let exactly the unlocatable rows through. Only a genuinely huge
+      // reported span (>250) is excused, because then the row is a known
+      // parser artefact rather than a measurement we lost.
       const reportedSpan = endNo > lineNo ? endNo - lineNo + 1 : 0;
-      if (!searched && reportedSpan > 0 && reportedSpan <= 250) unverified++;
+      if (!searched && reportedSpan <= 250) unverified++;
     }
     if (!res.corrected) { out.push(line); continue; }
     const cols = parseCsvLine(line);
@@ -730,7 +739,7 @@ async function main() {
 // shell ratchet's awk key derivation agrees with the writer's. Two independent
 // implementations of the same rule is the exact shape of the bug this sprint
 // fixed; making them comparable is what keeps them from drifting again.
-module.exports = { run, measureFileArgs, bucketFor, gateTimingStats, findSourceFiles, findFunctionBody, ccnOfBody, verifyRowCcn, readSourceLines, ratchetFindings, baselineKey, countNames };
+module.exports = { run, measureFileArgs, bucketFor, gateTimingStats, findSourceFiles, findFunctionBody, ccnOfBody, verifyRowCcn, readSourceLines, ratchetFindings, baselineKey, countNames, runLizardOne };
 
 if (require.main === module) {
   const argv = process.argv.slice(2);

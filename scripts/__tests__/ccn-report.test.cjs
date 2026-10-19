@@ -266,4 +266,45 @@ describe('ccn-report (per-file trustworthy measurement)', () => {
       fs.rmSync(dir, { recursive: true, force: true });
     }
   });
+
+  /**
+   * @test REQ-COMPLEXITY-RATCHET
+   * @intent A failed measurement must never look like a successful empty one.
+   *         runLizardOne used to resolve to '' on any error, which read as "this
+   *         file has zero functions" and dropped it from the baseline and the
+   *         ratchet without a word. Equally important: the failure path must
+   *         REJECT the promise. Throwing inside an execFile callback does not
+   *         reject the surrounding promise — the executor has already returned,
+   *         so the throw escapes and the promise hangs forever. All three
+   *         walkthrough seats caught that independently.
+   * @covers AC-COMPLEXITY-001
+   */
+  describe('runLizardOne failure handling', () => {
+    it('rejects instead of hanging when the linter cannot run', async () => {
+      const mod = require(reportPath);
+      // A command that does not exist: execFile yields an error and no stdout.
+      await expect(mod.runLizardOne('xp-gate-no-such-linter', process.cwd(), 'src/a.ts')).rejects.toThrow(
+        /no measurable output/
+      );
+    });
+
+    it('accepts an empty result from a file with no functions', async () => {
+      const mod = require(reportPath);
+      // Real lizard, real file with no functions: it prints nothing and exits 0,
+      // which is a legitimate zero rather than a failed measurement. Skipped
+      // when lizard is absent so the suite still runs on a bare box.
+      const { spawnSync } = require('node:child_process');
+      const probe = spawnSync('lizard', ['--version'], { encoding: 'utf8' });
+      if (probe.status !== 0) return;
+      const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'ccn-empty-'));
+      try {
+        fs.writeFileSync(path.join(dir, 'empty.js'), 'const x = 1;\nmodule.exports = { x };\n');
+        const out = await mod.runLizardOne('lizard', dir, 'empty.js');
+        expect(typeof out).toBe('string');
+        expect(out.trim()).toBe('');
+      } finally {
+        fs.rmSync(dir, { recursive: true, force: true });
+      }
+    });
+  });
 });
