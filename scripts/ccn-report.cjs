@@ -117,6 +117,15 @@ function runLizardOne(lizardCmd, root, relPath) {
         reject(new Error(`no measurable output for ${relPath} (${why})${stderr ? `: ${String(stderr).trim().slice(0, 200)}` : ''}`));
         return;
       }
+      // Partial output alongside a hard failure (a timeout or a kill mid-write)
+      // is a truncated measurement, not a result. lizard's documented non-zero
+      // exits for warnings come with complete output, so a kill/timeout signal
+      // is the signal to distrust the rows: accepting them would silently drop
+      // every function lizard had not reached yet.
+      if (err && (err.killed || err.signal)) {
+        reject(new Error(`lizard was killed while measuring ${relPath} (${err.signal || 'timeout'}); output is truncated`));
+        return;
+      }
       resolve(out);
     });
   });
@@ -522,20 +531,6 @@ function findDeclarationLine(lines, name) {
     if (re.test(stripNonCode(lines[i]))) return i;
   }
   return null;
-}
-
-async function mapPool(items, size, fn) {
-  const results = new Array(items.length);
-  let next = 0;
-  const workers = Array.from({ length: Math.min(size, items.length) || 0 }, async () => {
-    while (true) {
-      const i = next++;
-      if (i >= items.length) return;
-      results[i] = await fn(items[i], i);
-    }
-  });
-  await Promise.all(workers);
-  return results.flat();
 }
 
 function resolveLizard() {
