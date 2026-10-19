@@ -120,3 +120,28 @@ run_eval() { # baseline-json-file ; csv rows on stdin
   # The listed one matches its own entry exactly.
   grep -q '^OK (anonymous) CCN=3 at baseline' "$FIXTURE_REPO/out2"
 }
+
+@test "a name declared twice in one file is keyed by line, not shared" {
+  # Two distinct declarations can share a name (a `walk` helper in two nested
+  # scopes), and lizard also files a construct under a name merely CALLED there,
+  # producing a second row for the same name. With a bare path::name key both
+  # rows compared against one entry, so each was reported as a regression
+  # against the other's number — and the baseline only recorded whichever the
+  # parser reached last.
+  #
+  # Both rows must arrive in ONE invocation: the duplicate-name tally is computed
+  # per file from the rows being graded, exactly as ccn-report keys a whole
+  # report at once.
+  printf '{"src/a.ts::walk@79": 8}\n' > "$FIXTURE_REPO/base.json"
+  {
+    row 8 src/a.ts walk 79 92
+    row 7 src/a.ts walk 184 196
+  } | run_eval "$FIXTURE_REPO/base.json" > "$FIXTURE_REPO/out"
+  # The line-79 row matches its own entry.
+  grep -q '^OK walk CCN=8 at baseline' "$FIXTURE_REPO/out"
+  # The line-184 row has no entry of its own. It must NOT be compared against the
+  # line-79 entry (no bogus BLOCK/LOWER on it); at CCN 7 it is above the warn
+  # threshold (5) but under block, so it WARNs as new code.
+  grep -q '^WARN walk CCN=7' "$FIXTURE_REPO/out"
+  ! grep -q 'walk CCN=8 baseline=' "$FIXTURE_REPO/out"
+}

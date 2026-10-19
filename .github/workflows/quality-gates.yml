@@ -327,28 +327,32 @@ jobs:
         run: |
           PROJECT_LANGUAGE=${{ needs.setup.outputs.project_language }}
           echo "Running Gate 3: Cyclomatic complexity check..."
-          
-          # Use lizard for various source file types
-          if command -v lizard >/dev/null 2>&1; then
-            # Find files that can have complexity analyzed
-            SOURCE_FILES=$(find . -type f \( -name "*.ts" -o -name "*.js" -o -name "*.py" -o -name "*.go" -o -name "*.java" -o -name "*.cpp" -o -name "*.c" -o -name "*.hpp" -o -name "*.h" -o -name "*.rs" -o -name "*.php" -o -name "*.dart" -o -name "*.kt" -o -name "*.swift" \) -not -path "*/node_modules/*" -not -path "*/dist/*" -not -path "./plugins/*" -not -path "./src/npm-package/*" 2>/dev/null | head -50 | tr '\n' ' ')
-            
-            if [[ -n "$SOURCE_FILES" ]]; then
-              echo "Analyzing cyclomatic complexity with lizard (threshold 10)..."
-              lizard -C 10 $SOURCE_FILES 2>&1 | head -50
-              LIZARD_STATUS=$?
-              
-              # lizard returns non-zero even when warnings are within range on some versions
-              if [[ $LIZARD_STATUS -ne 0 ]]; then
-                echo "⚠️ lizard found functions with elevated complexity (non-blocking in CI)"
-              else
-                echo "✅ Gate 3: Complexity threshold (10) met"
-              fi
-            else
-              echo "✅ Gate 3: No source files found for complexity analysis"
-            fi
+
+          if ! command -v lizard >/dev/null 2>&1; then
+            echo "❌ lizard is not installed — Gate 3 cannot run."
+            echo "A complexity gate that cannot run must not report success (#499 rationale)."
+            exit 1
+          fi
+          if [[ ! -f scripts/ccn-report.cjs ]]; then
+            echo "❌ scripts/ccn-report.cjs is missing — Gate 3 has no analyzer."
+            exit 1
+          fi
+
+          # The report covers EVERY in-scope file and applies the ratchet in
+          # .ccn-baseline.json. The previous version sampled the first 50 files
+          # found by `find`, never consulted the baseline, and stayed
+          # non-blocking, so it could not fail a build for any reason.
+          #
+          # ccn-report itself exits non-zero when a function is worse than its
+          # recorded baseline, when a new function exceeds the block threshold,
+          # or when a row cannot be span-verified. Do not swallow that status:
+          # every one of those conditions is exactly what this gate exists for.
+          set -o pipefail
+          if node scripts/ccn-report.cjs --check --baseline .ccn-baseline.json; then
+            echo "✅ Gate 3: Complexity ratchet satisfied"
           else
-            echo "ℹ️ lizard not available - skipping complexity check (non-blocking)"
+            echo "❌ Gate 3: Complexity ratchet violation (see BLOCK lines above)"
+            exit 1
           fi
 
       # Gate 4: Principles Checker (Clean Code + SOLID)

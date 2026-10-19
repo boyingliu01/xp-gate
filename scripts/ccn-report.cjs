@@ -495,7 +495,21 @@ async function run(options = {}) {
       }
       inflated = verified.inflated;
       ccn = verified.ccn;
-      functions.push({ file: rel.replace(/\\/g, '/'), bucket, name, ccn, nloc: parseInt(f[0], 10) || 0, line: parseInt(lineNo, 10) || 0, span_inflated: inflated || undefined });
+      // lizard can emit the SAME function twice with different end offsets — an
+      // object-literal arrow member such as `check: (a, b) => {...}` shows up as
+      // both `check@71-76` and `check@71-77` — and the two rows disagree about
+      // CCN. Keeping both makes the baseline record whichever was parsed last
+      // while the ratchet compares every copy, so a function "regresses" against
+      // its own sibling. One row per (file, name, start line) is the identity a
+      // declaration actually has; keep the widest span, which is the row whose
+      // body the verifier measured.
+      const rowKey = `${rel.replace(/\\/g, '/')}::${name}::${lineNo}`;
+      const prior = functions.findIndex((fn) => fn._rowKey === rowKey);
+      if (prior >= 0) {
+        if (functions[prior].ccn < ccn) functions[prior] = { ...functions[prior], ccn, nloc: parseInt(f[0], 10) || 0 };
+        continue;
+      }
+      functions.push({ _rowKey: rowKey, file: rel.replace(/\\/g, '/'), bucket, name, ccn, nloc: parseInt(f[0], 10) || 0, line: parseInt(lineNo, 10) || 0, span_inflated: inflated || undefined });
     }
     if (!dataRows && !sawHeader) {
       // Not a silent-zero risk: lizard emits NO header at all for files with
@@ -505,6 +519,40 @@ async function run(options = {}) {
     }
   }
   return { root, filesScanned: files.length, functions, unverified_rows: unverifiedRows };
+}
+
+/**
+ * Baseline key for one measured function. This is the single source of truth:
+ * the writer, the ratchet check, and the shell gate's awk all have to agree, or
+ * a function is graded against a stranger's number.
+ *
+ * - Anonymous callbacks: keyed by line. A file holds dozens; a bare
+ *   `(anonymous)` key kept only one and blocked every sibling against it.
+ * - A name that occurs more than once in a file: keyed by line. Two distinct
+ *   declarations can share a name (`walk` in two nested helpers), and lizard
+ *   also files a whole construct under a name merely CALLED in it, which yields
+ *   a second row for the same name at the call site. A name-only key collides
+ *   and the ratchet then compares each row against the other's number.
+ * - Otherwise: plain `path::name`, so renames stay visible and a move is
+ *   treated as new code rather than laundering debt.
+ *
+ * `nameCounts` maps `${file}::${name}` to how many rows carried that name.
+ */
+function baselineKey(f, nameCounts) {
+  const isAnon = f.name === '(anonymous)' || f.name === '(anon)';
+  if (isAnon) return `${f.file}::(anonymous)@${f.line}`;
+  const seen = nameCounts ? nameCounts.get(`${f.file}::${f.name}`) || 1 : 1;
+  return seen > 1 ? `${f.file}::${f.name}@${f.line}` : `${f.file}::${f.name}`;
+}
+
+/** Count how many rows carry each `${file}::${name}` pair. */
+function countNames(functions) {
+  const counts = new Map();
+  for (const f of functions) {
+    const k = `${f.file}::${f.name}`;
+    counts.set(k, (counts.get(k) || 0) + 1);
+  }
+  return counts;
 }
 
 function percentile(sorted, p) {
@@ -531,10 +579,76 @@ function readAuditRows(auditPath) {
   return rows;
 }
 
+/**
+ * Compare the measured functions against the recorded baseline and report every
+ * function that got worse. Mirrors githooks/lib/ccn-ratchet.sh, so CI and the
+ * pre-commit hook cannot disagree about what a violation is.
+ *
+ * Rules, in the order they fire:
+ *   - row in baseline and CCN greater  -> BLOCK (regression past its ceiling)
+ *   - row in baseline and CCN equal    -> pass
+ *   - row not in baseline, CCN > block -> BLOCK (new code over the block line)
+ *   - row not in baseline, CCN > warn  -> WARN, non-fatal
+ *
+ * Returns the list of blocking findings. Unverifiable rows block too: a
+ * complexity number the engine could not confirm is not evidence of compliance.
+ */
+function ratchetFindings(report, baseline, warnThreshold = 5, blockThreshold = 10) {
+  const findings = [];
+  const nameCounts = countNames(report.functions);
+  for (const f of report.functions) {
+    if (f.bucket !== 'production' || f.name === '(no parsable output)') continue;
+    const key = baselineKey(f, nameCounts);
+    const recorded = Object.prototype.hasOwnProperty.call(baseline, key) ? baseline[key] : undefined;
+    if (recorded !== undefined) {
+      if (f.ccn > recorded) {
+        findings.push(`BLOCK ${f.file}:${f.line} ${f.name} CCN=${f.ccn} baseline=${recorded} (ratchet: worse than recorded)`);
+      }
+      continue;
+    }
+    if (f.ccn > blockThreshold) {
+      findings.push(`BLOCK ${f.file}:${f.line} ${f.name} CCN=${f.ccn} (new function over block threshold ${blockThreshold})`);
+    }
+  }
+  for (const row of report.unverified_rows) {
+    findings.push(`BLOCK ${row} (CCN could not be span-verified)`);
+  }
+  return findings;
+}
+
 async function main() {
   const argv = process.argv.slice(2);
   const get = (flag) => { const i = argv.indexOf(flag); return i >= 0 ? argv[i + 1] : undefined; };
   const report = await run({ root: get('--root') || process.cwd() });
+
+  // CI / local enforcement mode (slice E). Without this the report only ever
+  // printed numbers; nothing in the pipeline could fail a build for complexity.
+  if (argv.includes('--check')) {
+    const baselinePath = path.resolve(get('--baseline') || path.join(report.root, '.ccn-baseline.json'));
+    if (!fs.existsSync(baselinePath)) {
+      console.error(`FAIL — baseline not found: ${baselinePath}`);
+      console.error('A ratchet with no baseline grades every function as new code. Run --write-baseline first.');
+      process.exit(1);
+    }
+    let baseline;
+    try {
+      baseline = JSON.parse(fs.readFileSync(baselinePath, 'utf8'));
+    } catch (e) {
+      console.error(`FAIL — cannot parse baseline ${baselinePath}: ${String(e.message || e)}`);
+      process.exit(1);
+    }
+    const warnThreshold = parseInt(get('--warn') || '5', 10);
+    const blockThreshold = parseInt(get('--block') || '10', 10);
+    const findings = ratchetFindings(report, baseline, warnThreshold, blockThreshold);
+    const blocked = findings.filter((line) => line.startsWith('BLOCK'));
+    for (const line of findings) console.log(line);
+    if (blocked.length) {
+      console.error(`\nFAIL — ${blocked.length} complexity violation(s) against ${path.basename(baselinePath)}`);
+      process.exit(1);
+    }
+    console.log(`OK — ${report.functions.filter((f) => f.bucket === 'production').length} production function(s) within the ratchet`);
+    return;
+  }
 
   // Baseline refresh (REQ-D): record every production function's CURRENT CCN
   // keyed by path::name. Gate 3 then blocks only regressions past these
@@ -547,17 +661,12 @@ async function main() {
       process.exit(1);
     }
     const baseline = {};
+    const nameCounts = countNames(report.functions);
     for (const f of report.functions) {
       if (f.bucket !== 'production' || f.name === '(no parsable output)') continue;
-      // Named functions get one key per name. Anonymous callbacks do not: a file
-      // routinely holds dozens of them, and keying them all as `(anonymous)`
-      // kept only the LAST one, so the baseline recorded whichever callback
-      // happened to be parsed last and the ratchet then "blocked" every other
-      // callback against it. Position is the only stable identity a callback
-      // has, so anonymous rows are keyed by line.
-      const isAnon = f.name === '(anonymous)' || f.name === '(anon)';
-      const key = isAnon ? `${f.file}::(anonymous)@${f.line}` : `${f.file}::${f.name}`;
-      baseline[key] = f.ccn;
+      // Key identity lives in baselineKey() so the ratchet cannot disagree with
+      // the writer about which entry a row belongs to.
+      baseline[baselineKey(f, nameCounts)] = f.ccn;
     }
     const target = path.join(report.root, '.ccn-baseline.json');
     fs.writeFileSync(target, JSON.stringify(baseline, null, 2) + '\n');
@@ -594,7 +703,7 @@ async function main() {
   }
 }
 
-module.exports = { run, measureFileArgs, bucketFor, gateTimingStats, findSourceFiles, findFunctionBody, ccnOfBody, verifyRowCcn, readSourceLines };
+module.exports = { run, measureFileArgs, bucketFor, gateTimingStats, findSourceFiles, findFunctionBody, ccnOfBody, verifyRowCcn, readSourceLines, ratchetFindings };
 
 if (require.main === module) {
   const argv = process.argv.slice(2);
