@@ -25,66 +25,87 @@ function isValidTimeoutMs(value) {
   return Number.isInteger(value) && value >= 1000 && value <= 600000;
 }
 
-function parseArgs(argv) {
+// Flag -> args key. `null` marks flags that take no value. Keeping this as data
+// means a new flag is one table row instead of one more switch arm (the switch
+// had grown to ten arms plus a special case for --timeout-ms).
+const VALUE_FLAGS = {
+  '--expert': 'expert',
+  '--input': 'input',
+  '--input-file': 'inputFile',
+  '--round': 'round',
+  '--config': 'config',
+  '--mode': 'mode',
+  '--profile': 'profile',
+  '--other-experts-file': 'otherExpertsFile',
+};
+const BOOLEAN_FLAGS = { '--fallback-local': 'fallbackLocal' };
+const INTEGER_FLAGS = { '--round': (v) => parseInt(v) };
+
+function collectRawArgs(argv) {
   const args = {};
   let timeoutMsRaw;
   for (let i = 0; i < argv.length; i++) {
-    switch (argv[i]) {
-      case '--expert': args.expert = argv[++i]; break;
-      case '--input': args.input = argv[++i]; break;
-      case '--input-file': args.inputFile = argv[++i]; break;
-      case '--round': args.round = parseInt(argv[++i]); break;
-      case '--config': args.config = argv[++i]; break;
-      case '--mode': args.mode = argv[++i]; break;
-      case '--profile': args.profile = argv[++i]; break;
-      case '--other-experts-file': args.otherExpertsFile = argv[++i]; break;
-      case '--timeout-ms': timeoutMsRaw = argv[++i]; break;
-      case '--fallback-local': args.fallbackLocal = true; break;
-      default: break;
-    }
+    const flag = argv[i];
+    if (flag === '--timeout-ms') { timeoutMsRaw = argv[++i]; continue; }
+    if (BOOLEAN_FLAGS[flag]) { args[BOOLEAN_FLAGS[flag]] = true; continue; }
+    const key = VALUE_FLAGS[flag];
+    if (!key) continue;
+    const value = argv[++i];
+    args[key] = INTEGER_FLAGS[flag] ? INTEGER_FLAGS[flag](value) : value;
   }
+  return { args, timeoutMsRaw };
+}
 
-  // Validate required args
+function fail(message) {
+  console.error(`[delphi-review] ERROR: ${message}`);
+  process.exit(1);
+}
+
+// Every rejection path used to inline its own console.error + exit. Collected
+// here so the rules read as rules and each message stays verbatim.
+function missingArgumentList(args) {
   const missing = [];
   if (!args.expert) missing.push('--expert');
   if (!args.input && !args.inputFile) missing.push('--input or --input-file');
   if (!args.round) missing.push('--round');
   if (!args.config) missing.push('--config');
+  return missing;
+}
 
-  if (missing.length > 0) {
-    console.error(`[delphi-review] ERROR: Missing required arguments: ${missing.join(', ')}`);
-    process.exit(1);
+function applyTimeoutFlag(args, timeoutMsRaw) {
+  if (timeoutMsRaw === undefined) return;
+  const parsed = /^\d+$/.test(timeoutMsRaw) ? Number(timeoutMsRaw) : NaN;
+  if (!isValidTimeoutMs(parsed)) {
+    fail('--timeout-ms must be an integer between 1000 and 600000.');
   }
+  args.timeoutMs = parsed;
+}
 
-  // Validate expert role
-  if (!VALID_EXPERTS.includes(args.expert)) {
-    console.error(`[delphi-review] ERROR: Invalid expert role "${args.expert}". Must be one of: ${VALID_EXPERTS.join(', ')}`);
-    process.exit(1);
-  }
-
-  // Validate mutual exclusivity of --input and --input-file
-  if (args.input && args.inputFile) {
-    console.error('[delphi-review] ERROR: --input and --input-file are mutually exclusive. Use only one.');
-    process.exit(1);
-  }
-
-  // Validate --timeout-ms: integer within [1000, 600000]
-  if (timeoutMsRaw !== undefined) {
-    const parsed = /^\d+$/.test(timeoutMsRaw) ? Number(timeoutMsRaw) : NaN;
-    if (!isValidTimeoutMs(parsed)) {
-      console.error('[delphi-review] ERROR: --timeout-ms must be an integer between 1000 and 600000.');
-      process.exit(1);
-    }
-    args.timeoutMs = parsed;
-  }
-
-  // Defaults
+function resolveMode(args) {
   if (!args.mode) args.mode = 'design';
   if (!VALID_MODES.includes(args.mode)) {
-    console.error(`[delphi-review] ERROR: Invalid mode "${args.mode}". Must be one of: ${VALID_MODES.join(', ')}`);
-    process.exit(1);
+    fail(`Invalid mode "${args.mode}". Must be one of: ${VALID_MODES.join(', ')}`);
   }
+}
 
+function requireArgs(args, timeoutMsRaw) {
+  const missing = missingArgumentList(args);
+  if (missing.length > 0) {
+    fail(`Missing required arguments: ${missing.join(', ')}`);
+  }
+  if (!VALID_EXPERTS.includes(args.expert)) {
+    fail(`Invalid expert role "${args.expert}". Must be one of: ${VALID_EXPERTS.join(', ')}`);
+  }
+  if (args.input && args.inputFile) {
+    fail('--input and --input-file are mutually exclusive. Use only one.');
+  }
+  applyTimeoutFlag(args, timeoutMsRaw);
+  resolveMode(args);
+}
+
+function parseArgs(argv) {
+  const { args, timeoutMsRaw } = collectRawArgs(argv);
+  requireArgs(args, timeoutMsRaw);
   return args;
 }
 
@@ -223,61 +244,75 @@ function readConfig(configPath, profileOverride) {
 // ── Distinct-model validation ───────────────────────────────────────────
 const REQUIRED_EXPERT_ROLES = ['architecture', 'technical', 'feasibility'];
 
+function isNonEmptyString(value) {
+  return typeof value === 'string' && value.trim() !== '';
+}
+
+// Roles must be EXACTLY the three required ones: a missing role means the
+// review would silently run with two experts, an extra one means the config
+// no longer matches the three-model policy. One pass reports both.
+function collectModelAssignments(expertMap) {
+  const assignments = [];
+  for (const role of REQUIRED_EXPERT_ROLES) {
+    const expert = expertMap[role];
+    if (!expert) return { error: `Missing required expert role: ${role}.` };
+    if (!isNonEmptyString(expert.model)) {
+      return { error: `Expert ${role} must define a non-empty model.` };
+    }
+    assignments.push({ role, model: expert.model.trim() });
+  }
+  const unexpectedRole = Object.keys(expertMap).find(role => !REQUIRED_EXPERT_ROLES.includes(role));
+  if (unexpectedRole) return { error: `Unsupported expert role: ${unexpectedRole}.` };
+  return { assignments };
+}
+
+function findDuplicateModel(assignments) {
+  const seen = new Map();
+  for (const { role, model } of assignments) {
+    const previousRole = seen.get(model);
+    if (previousRole) {
+      return `duplicate model "${model}" assigned to ${previousRole} and ${role}.`;
+    }
+    seen.set(model, role);
+  }
+  return null;
+}
+
+// Everything an expert's provider must carry to be callable. Returns the
+// human-readable reason instead of throwing, so the caller keeps one shape.
+function providerConfigError(role, expert, providerMap) {
+  if (!isNonEmptyString(expert.provider) || expert.provider === 'local') {
+    return `Expert ${role} must define a non-local callable provider.`;
+  }
+  const provider = providerMap[expert.provider];
+  if (!provider || typeof provider !== 'object' || Array.isArray(provider)) {
+    return `Expert ${role} provider configuration must be an object.`;
+  }
+  if (!isNonEmptyString(provider.base_url)) {
+    return `Expert ${role} provider must define a non-empty base_url.`;
+  }
+  if (!isNonEmptyString(provider.api_key)) {
+    return `Expert ${role} provider must define a non-empty api_key.`;
+  }
+  if (provider.timeout_ms !== undefined && !isValidTimeoutMs(provider.timeout_ms)) {
+    return `Expert ${role} provider ${expert.provider} timeout_ms must be an integer between 1000 and 600000.`;
+  }
+  return null;
+}
+
 function validateDistinctModels(experts, providers, consensus = {}) {
   const expertMap = experts && typeof experts === 'object' ? experts : {};
   const providerMap = providers && typeof providers === 'object' ? providers : {};
-  const expertRoles = Object.keys(expertMap);
-  const normalizedModels = [];
+
+  const collected = collectModelAssignments(expertMap);
+  if (collected.error) return { valid: false, reason: collected.error };
+
+  const duplicate = findDuplicateModel(collected.assignments);
+  if (duplicate) return { valid: false, reason: duplicate };
 
   for (const role of REQUIRED_EXPERT_ROLES) {
-    const expert = expertRoles.includes(role) ? expertMap[role] : undefined;
-    if (!expert) {
-      return { valid: false, reason: `Missing required expert role: ${role}.` };
-    }
-    if (typeof expert.model !== 'string' || expert.model.trim() === '') {
-      return { valid: false, reason: `Expert ${role} must define a non-empty model.` };
-    }
-    normalizedModels.push({ role, model: expert.model.trim() });
-  }
-
-  const unexpectedRole = expertRoles.find(role => !REQUIRED_EXPERT_ROLES.includes(role));
-  if (unexpectedRole) {
-    return { valid: false, reason: `Unsupported expert role: ${unexpectedRole}.` };
-  }
-
-  const seen = new Map();
-  for (const assignment of normalizedModels) {
-    const previousRole = seen.get(assignment.model);
-    if (previousRole) {
-      return {
-        valid: false,
-        reason: `duplicate model "${assignment.model}" assigned to ${previousRole} and ${assignment.role}.`,
-      };
-    }
-    seen.set(assignment.model, assignment.role);
-  }
-
-  for (const role of REQUIRED_EXPERT_ROLES) {
-    const expert = expertMap[role];
-    if (typeof expert.provider !== 'string' || expert.provider.trim() === '' || expert.provider === 'local') {
-      return { valid: false, reason: `Expert ${role} must define a non-local callable provider.` };
-    }
-    const provider = providerMap[expert.provider];
-    if (!provider || typeof provider !== 'object' || Array.isArray(provider)) {
-      return { valid: false, reason: `Expert ${role} provider configuration must be an object.` };
-    }
-    if (typeof provider.base_url !== 'string' || provider.base_url.trim() === '') {
-      return { valid: false, reason: `Expert ${role} provider must define a non-empty base_url.` };
-    }
-    if (typeof provider.api_key !== 'string' || provider.api_key.trim() === '') {
-      return { valid: false, reason: `Expert ${role} provider must define a non-empty api_key.` };
-    }
-    if (provider.timeout_ms !== undefined && !isValidTimeoutMs(provider.timeout_ms)) {
-      return {
-        valid: false,
-        reason: `Expert ${role} provider ${expert.provider} timeout_ms must be an integer between 1000 and 600000.`,
-      };
-    }
+    const error = providerConfigError(role, expertMap[role], providerMap);
+    if (error) return { valid: false, reason: error };
   }
 
   if (consensus.cross_provider_required === true) {
@@ -454,25 +489,32 @@ function describePromptBudgetFailure({ bytes, maxBytes, expert }) {
 // routed seat, and a ~60 byte smoke probe on the "dead" seat passed in 7s.
 // The optional per-seat `prompt_calibration` record carries the measured
 // bounds so failures can be classified against evidence instead of guessed.
+// A calibration record is only usable when it carries a measured PASS bound
+// and, if it also carries a FAIL bound, that bound is strictly larger. Each
+// broken shape names itself so the operator knows which field to correct.
+const CALIBRATION_SHAPE_HINT = 'needs measured_at and a finite last_pass_bytes > 0 (last_fail_bytes, if present, must be larger)';
+
+function isPositiveFinite(value) {
+  return Number.isFinite(value) && value > 0;
+}
+
+function calibrationProblem(raw) {
+  if (!isPlainObject(raw)) return 'must be an object';
+  const pass = raw.last_pass_bytes;
+  const fail = raw.last_fail_bytes;
+  const failOk = fail === undefined || isPositiveFinite(fail);
+  if (!isPositiveFinite(pass) || !failOk) return CALIBRATION_SHAPE_HINT;
+  if (fail !== undefined && !(fail > pass)) return 'has last_fail_bytes <= last_pass_bytes';
+  if (!isNonEmptyString(raw.measured_at)) return CALIBRATION_SHAPE_HINT;
+  return null;
+}
+
 function resolveSeatCalibration(expertConfig) {
   const raw = expertConfig && expertConfig.prompt_calibration;
   if (raw === undefined) return { calibration: null };
-  const warn = (detail) => {
-    console.error(`[delphi-review] WARNING: prompt_calibration ${detail}; ignoring the record.`);
-  };
-  if (!isPlainObject(raw)) {
-    warn('must be an object');
-    return { calibration: null, warning: 'prompt_calibration_malformed' };
-  }
-  const hasPass = Number.isFinite(raw.last_pass_bytes) && raw.last_pass_bytes > 0;
-  const hasFail = raw.last_fail_bytes === undefined
-    || (Number.isFinite(raw.last_fail_bytes) && raw.last_fail_bytes > 0);
-  const ordered = hasPass && hasFail
-    && (raw.last_fail_bytes === undefined || raw.last_fail_bytes > raw.last_pass_bytes);
-  if (!hasPass || !hasFail || typeof raw.measured_at !== 'string' || raw.measured_at.trim() === '' || !ordered) {
-    warn(raw.last_fail_bytes !== undefined && hasPass && raw.last_fail_bytes <= raw.last_pass_bytes
-      ? 'has last_fail_bytes <= last_pass_bytes'
-      : 'needs measured_at and a finite last_pass_bytes > 0 (last_fail_bytes, if present, must be larger)');
+  const problem = calibrationProblem(raw);
+  if (problem) {
+    console.error(`[delphi-review] WARNING: prompt_calibration ${problem}; ignoring the record.`);
     return { calibration: null, warning: 'prompt_calibration_malformed' };
   }
   return {
@@ -492,40 +534,61 @@ function resolveSeatCalibration(expertConfig) {
 // sends operators chasing a cause that is not there (#481). Everything else
 // gets a stable error_type so orchestrators can assert on the class instead of
 // parsing prose.
+// The calibrated ceiling for a seat, or null when the seat carries no usable
+// record. Null is meaningful: it is the "no evidence to reclassify on" branch.
+function calibratedCeiling(calibration) {
+  if (calibration && Number.isFinite(calibration.last_pass_bytes)) return calibration.last_pass_bytes;
+  return null;
+}
+
+// `error_kind` is the primary signal; the message literal stays as a
+// backward-compatible fallback for callers that hand-build results.
+function isPreResponseDrop(result) {
+  return !result.retryable
+    && (result.error_kind === 'pre_response_drop' || result.message === 'Network error.');
+}
+
+function sizeExceededResult(result, promptBytes, threshold) {
+  return {
+    ...result,
+    error_type: 'SIZE_EXCEEDED',
+    retryable: false,
+    bytes: promptBytes,
+    calibrated_pass_bytes: threshold,
+    message: `Request dropped before any response: ${promptBytes} bytes exceeds this seat's calibrated passing size `
+      + `(${threshold} bytes). Classified SIZE_EXCEEDED, not a network fault — trim the payload or recalibrate the seat.`,
+  };
+}
+
+// No calibration means no evidence to reclassify on — but an uncalibrated
+// seat dying on a full-budget payload is exactly how #481 started. Keep the
+// class honest (network_error) and point the operator at the protocol.
+function uncalibratedBudgetHint(result, promptBytes) {
+  return {
+    ...result,
+    error_type: 'network_error',
+    bytes: promptBytes,
+    message: `${result.message} Note: this seat has no prompt_calibration record and the payload is at the `
+      + 'default budget — this pattern matches an uncalibrated size ceiling. Recalibrate per the #481 protocol.',
+  };
+}
+
 function classifySeatFailure({ result, promptBytes, calibration }) {
   if (!result || !result.error) return result;
-  const threshold = calibration && Number.isFinite(calibration.last_pass_bytes)
-    ? calibration.last_pass_bytes
-    : null;
-  // `error_kind` is the primary signal; the message literal stays as a
-  // backward-compatible fallback for callers that hand-build results.
-  const isPreResponseDrop = !result.retryable
-    && (result.error_kind === 'pre_response_drop' || result.message === 'Network error.');
-  if (isPreResponseDrop && threshold !== null && Number.isFinite(promptBytes) && promptBytes > threshold) {
-    return {
-      ...result,
-      error_type: 'SIZE_EXCEEDED',
-      retryable: false,
-      bytes: promptBytes,
-      calibrated_pass_bytes: threshold,
-      message: `Request dropped before any response: ${promptBytes} bytes exceeds this seat's calibrated passing size `
-        + `(${threshold} bytes). Classified SIZE_EXCEEDED, not a network fault — trim the payload or recalibrate the seat.`,
-    };
+  if (!isPreResponseDrop(result)) {
+    return { ...result, error_type: result.retryable ? 'retryable_error' : 'network_error' };
   }
-  if (isPreResponseDrop && threshold === null && Number.isFinite(promptBytes)
-    && promptBytes >= DEFAULT_PROMPT_BUDGET_BYTES) {
-    // No calibration means no evidence to reclassify on — but an uncalibrated
-    // seat dying on a full-budget payload is exactly how #481 started. Keep the
-    // class honest (network_error) and point the operator at the protocol.
-    return {
-      ...result,
-      error_type: 'network_error',
-      bytes: promptBytes,
-      message: `${result.message} Note: this seat has no prompt_calibration record and the payload is at the `
-        + 'default budget — this pattern matches an uncalibrated size ceiling. Recalibrate per the #481 protocol.',
-    };
+  const threshold = calibratedCeiling(calibration);
+  if (!Number.isFinite(promptBytes)) {
+    return { ...result, error_type: 'network_error' };
   }
-  return { ...result, error_type: result.retryable ? 'retryable_error' : 'network_error' };
+  if (threshold !== null && promptBytes > threshold) {
+    return sizeExceededResult(result, promptBytes, threshold);
+  }
+  if (threshold === null && promptBytes >= DEFAULT_PROMPT_BUDGET_BYTES) {
+    return uncalibratedBudgetHint(result, promptBytes);
+  }
+  return { ...result, error_type: 'network_error' };
 }
 
 // ── Schema retry (#414 REQ-5) ──────────────────────────────────────────
