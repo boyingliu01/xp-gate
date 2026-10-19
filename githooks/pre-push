@@ -954,6 +954,7 @@ else
 # GATE MW: VALIDATE CODE WALKTHROUGH RESULT FILE
 # ============================================================================
 RESULT_FILE=".code-walkthrough-result.json"
+MW_SKIPPED=0
 
 # Skipped on main/master by design, exactly like Gate ML and Gate UI above.
 # Work is already walkthrough-reviewed on the feature branch before it lands, so
@@ -962,6 +963,7 @@ RESULT_FILE=".code-walkthrough-result.json"
 # the release commit itself changes nothing anyone reviewed. githooks/AGENTS.md
 # documented this skip; the code did not implement it (drift fixed here).
 if [ "$CURRENT_BRANCH" = "main" ] || [ "$CURRENT_BRANCH" = "master" ]; then
+  MW_SKIPPED=1
   echo ""
   echo "   ℹ️  Gate MW skipped (pushing to ${CURRENT_BRANCH} — pre-reviewed via branch walkthrough)"
   echo ""
@@ -1038,13 +1040,20 @@ fi
 # ============================================================================
 echo ""
 echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+# Say what actually happened. Printing "VERIFIED" on a skipped gate would be a
+# claim the hook cannot support — the same dishonesty (evidence asserting an
+# unperformed check) that Gate MW exists to prevent.
+if [ "$MW_SKIPPED" = "1" ]; then
+  echo "   ℹ️  GATE MW: CODE WALKTHROUGH SKIPPED (main-branch push)"
+else
   echo "   ✅ GATE MW: CODE WALKTHROUGH VERIFIED"
+fi
 echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
 echo ""
 echo "Branch: $CURRENT_BRANCH"
 echo "Files changed: $FILES_CHANGED"
 echo "Lines: +$LINES_ADDED -$LINES_DELETED"
-if [ -f "$RESULT_FILE" ]; then
+if [ "$MW_SKIPPED" != "1" ] && [ -f "$RESULT_FILE" ]; then
   echo ""
   echo "Code walkthrough result:"
   echo "  Commit: $EXPECTED_COMMIT"

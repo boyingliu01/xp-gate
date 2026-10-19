@@ -46,3 +46,23 @@ setup() {
   run grep -n 'RESULT_FILE=".code-walkthrough-result.json"' "$PRE_PUSH"
   [ "$status" -eq 0 ]
 }
+
+@test "a skipped gate is not reported as VERIFIED" {
+  # Measured on the real run: the old banner printed "GATE MW: CODE WALKTHROUGH
+  # VERIFIED" and "Verdict: APPROVED" immediately after announcing the skip.
+  # Claiming a check passed when it never ran is the exact dishonesty Gate MW
+  # exists to prevent, so the banner is now driven by an explicit flag.
+  run grep -n 'MW_SKIPPED=1' "$PRE_PUSH"
+  [ "$status" -eq 0 ]
+  run grep -n 'GATE MW: CODE WALKTHROUGH SKIPPED' "$PRE_PUSH"
+  [ "$status" -eq 0 ]
+}
+
+@test "the verified banner is guarded by the skip flag" {
+  local banner_line guard_line
+  guard_line=$(grep -n 'if \[ "$MW_SKIPPED" = "1" \]' "$PRE_PUSH" | cut -d: -f1)
+  banner_line=$(grep -n 'GATE MW: CODE WALKTHROUGH VERIFIED' "$PRE_PUSH" | cut -d: -f1)
+  [ -n "$guard_line" ]
+  [ -n "$banner_line" ]
+  [ "$guard_line" -lt "$banner_line" ]
+}
