@@ -3228,7 +3228,17 @@ GATE_9_TS_STATUS="SKIP"
 GATE_9_JAVA_STATUS="SKIP"
 GATE_9_STATUS="SKIP"
 
-if [ -f "package.json" ] && [ -f "tsconfig.json" ]; then
+if [ "$DOCS_ONLY_COMMIT" = true ]; then
+  # REQ-F2: tsc cannot observe a markdown edit. The commit-level docs-only
+  # verdict was already consulted by Gates 2 and 5 but not here, so a pure docs
+  # commit still paid ~11s for a compile that had nothing new to compile.
+  # Recorded as SKIP (not PASS): nothing was verified.
+  GATE_9_TS_STATUS="SKIP"
+  GATE_9_JAVA_STATUS="SKIP"
+  echo "   ⏭️  SKIPPED - Build integrity (docs-only commit)."
+elif [ "$PROJECT_LANG" = "documentation-only" ]; then
+  echo "   ⏭️  SKIPPED - Build integrity (documentation project)."
+elif [ -f "package.json" ] && [ -f "tsconfig.json" ]; then
   GATE_9_SCRIPT=""
   if [ -f "$PROJECT_ROOT/src/build-integrity/gate-10.ts" ]; then
     GATE_9_SCRIPT="$PROJECT_ROOT/src/build-integrity/gate-10.ts"
