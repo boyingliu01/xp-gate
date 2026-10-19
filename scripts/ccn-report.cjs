@@ -710,7 +710,11 @@ async function main() {
   }
 }
 
-module.exports = { run, measureFileArgs, bucketFor, gateTimingStats, findSourceFiles, findFunctionBody, ccnOfBody, verifyRowCcn, readSourceLines, ratchetFindings };
+// baselineKey/countNames are exported so the bats cross-check can prove the
+// shell ratchet's awk key derivation agrees with the writer's. Two independent
+// implementations of the same rule is the exact shape of the bug this sprint
+// fixed; making them comparable is what keeps them from drifting again.
+module.exports = { run, measureFileArgs, bucketFor, gateTimingStats, findSourceFiles, findFunctionBody, ccnOfBody, verifyRowCcn, readSourceLines, ratchetFindings, baselineKey, countNames };
 
 if (require.main === module) {
   const argv = process.argv.slice(2);
