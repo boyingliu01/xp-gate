@@ -158,6 +158,40 @@ setup() {
   done
 }
 
+@test "the Gate 6 scalar summary never labels a language it did not measure" {
+  # Real run: langs=[typescript iac], reasons=[iac=no_archlint_detector].
+  # TypeScript had been measured by archlint and passed, but the scalar
+  # summary read "no_archlint_detector" and the fallback relabelled typescript
+  # tool_missing. A summary must never stand in for a specific language's
+  # verdict when per-language detail exists.
+  eval "$(sed -n '/^classify_coverage_reason()/,/^}/p' "$PRE_COMMIT")"
+
+  GATE_6_STATUS="PASS"
+  GATE_6_REASON="no_archlint_detector"
+  GATE_6_LANG_REASONS="iac=no_archlint_detector"
+
+  # typescript: no explicit pair -> no reason -> covered
+  _cm_lang="typescript"
+  _cm_g6_reason=""
+  pairs=",${GATE_6_LANG_REASONS},"
+  case "$pairs" in
+    *",${_cm_lang}="*) _cm_g6_reason="${pairs#*",${_cm_lang}="}"; _cm_g6_reason="${_cm_g6_reason%%,*}" ;;
+  esac
+  [ -z "$GATE_6_LANG_REASONS" ] || true
+  if [ -z "$_cm_g6_reason" ] && [ -z "$GATE_6_LANG_REASONS" ]; then
+    _cm_g6_reason="$GATE_6_REASON"
+  fi
+  [ "$(classify_coverage_reason "$_cm_g6_reason" "$GATE_6_STATUS")" = "covered" ]
+
+  # iac: explicit pair wins
+  _cm_lang="iac"
+  _cm_g6_reason=""
+  case "$pairs" in
+    *",${_cm_lang}="*) _cm_g6_reason="${pairs#*",${_cm_lang}="}"; _cm_g6_reason="${_cm_g6_reason%%,*}" ;;
+  esac
+  [ "$(classify_coverage_reason "$_cm_g6_reason" "$GATE_6_STATUS")" = "tool_missing" ]
+}
+
 @test "pre-commit still parses after the change" {
   run bash -n "$PRE_COMMIT"
   [ "$status" -eq 0 ]

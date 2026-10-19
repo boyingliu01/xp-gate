@@ -3116,7 +3116,6 @@ else
         fi
       fi
     done
-    echo "PROBE langs=[$PROJECT_LANGS] reasons=[$GATE_6_LANG_REASONS] status=[$GATE_6_STATUS]" >&2
     if [ "$_g6_mixed" = "1" ]; then
       GATE_6_REASON="mixed"
     else
@@ -3697,9 +3696,17 @@ generate_quality_report() {
     _cm_g3=$(classify_coverage_reason "${GATE_3_REASON:-}" "${GATE_3_STATUS:-PASS}")
     _cm_g4=$(classify_coverage_reason "${GATE_4_REASON:-}" "${GATE_4_STATUS:-PASS}")
     # Gate 6 may be per-language via the flattened global string (the assoc
-    # array itself is function-local to the gate and invisible here), else fall
-    # back to the scalar aggregate.
-    _cm_g6_reason="${GATE_6_REASON:-}"
+    # array itself is function-local to the gate and invisible here).
+    #
+    # The scalar GATE_6_REASON is a SUMMARY across languages and must NOT be
+    # used as a per-language fallback: with langs "typescript iac" where only
+    # iac lacks a detector, the scalar reads no_archlint_detector and would
+    # mislabel typescript — the exact language archlint had just measured.
+    # Real probe run that exposed this:
+    #   langs=[typescript iac] reasons=[iac=no_archlint_detector]
+    # So: an explicit pair wins; otherwise there is no skip reason for this
+    # language, and "no reason" + PASS status is precisely what `covered` means.
+    _cm_g6_reason=""
     _cm_g6_pairs=",${GATE_6_LANG_REASONS:-},"
     case "$_cm_g6_pairs" in
       *",${_cm_lang}="*)
@@ -3707,6 +3714,11 @@ generate_quality_report() {
         _cm_g6_reason="${_cm_g6_reason%%,*}"
         ;;
     esac
+    if [ -z "$GATE_6_LANG_REASONS" ] && [ -n "${GATE_6_REASON:-}" ]; then
+      # No per-language detail at all (config-missing / bash<4 path). Only then
+      # does the scalar legitimately speak for every language.
+      _cm_g6_reason="$GATE_6_REASON"
+    fi
     _cm_g6=$(classify_coverage_reason "$_cm_g6_reason" "${GATE_6_STATUS:-PASS}")
     _cm_entry="\"${_cm_lang}\": {\"gate3_complexity\": \"${_cm_g3}\", \"gate4_principles\": \"${_cm_g4}\", \"gate6_architecture\": \"${_cm_g6}\"}"
     COVERAGE_MATRIX_JSON="${COVERAGE_MATRIX_JSON:+$COVERAGE_MATRIX_JSON, }${_cm_entry}"
