@@ -128,9 +128,17 @@ function evaluateLizardOutput({ stdout, stderr, err, root, relPath }) {
   return out;
 }
 
+// Per-file measurement cap. Without a timeout a wedged lizard process hangs the
+// whole report indefinitely, and the kill/truncation guard in
+// evaluateLizardOutput could never fire because nothing ever killed it — a guard
+// that cannot fire is worse than no guard, because it reads like protection.
+// 120s is far above the worst observed file (well under a second here) while
+// still bounded.
+const LIZARD_TIMEOUT_MS = 120000;
+
 function runLizardOne(lizardCmd, root, relPath) {
   return new Promise((resolve, reject) => {
-    execFile(lizardCmd, measureFileArgs(relPath), { cwd: root, maxBuffer: 32 * 1024 * 1024 }, (err, stdout, stderr) => {
+    execFile(lizardCmd, measureFileArgs(relPath), { cwd: root, maxBuffer: 32 * 1024 * 1024, timeout: LIZARD_TIMEOUT_MS }, (err, stdout, stderr) => {
       // Accept BOTH resolve and reject. Throwing inside this callback does NOT
       // reject the surrounding promise — the executor has already returned by
       // the time the callback runs, so a throw escapes as an unhandled
