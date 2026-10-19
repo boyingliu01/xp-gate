@@ -285,6 +285,60 @@ gate_start_ms() {
   now_ms
 }
 
+# ---------------------------------------------------------------------------
+# #537: per-language coverage classification.
+#
+# A gate that SKIPs tells the reader nothing on its own — "documentation
+# project", "tool not installed" and "nothing changed" are wildly different
+# facts that used to collapse into one word. A PowerShell-primary repo could
+# therefore look fully covered while 3.3k lines were measured by nothing.
+#
+# classify_coverage_reason REASON GATE_STATUS
+#   -> covered | not_applicable | no_changes | tool_missing | unknown
+#
+# FAIL CLOSED: an unrecognised reason is `unknown`, never `covered`. `covered`
+# is reachable ONLY by a gate that actually passed (PASS / WARN /
+# PASS_WITH_WARNINGS) with no skip reason attached.
+# ---------------------------------------------------------------------------
+classify_coverage_reason() {
+  local reason="${1:-}"
+  local gate_status="${2:-}"
+
+  case "$reason" in
+    documentation_project)        echo "not_applicable" ;;
+    architecture_skip_exemption)  echo "not_applicable" ;;
+    no_source_files_changed)      echo "no_changes" ;;
+    tool_missing|tool_not_installed|no_powershell_tool|no_archlint_detector)
+                                  echo "tool_missing" ;;
+    "")
+      case "$gate_status" in
+        PASS|WARN|PASS_WITH_WARNINGS|PASSED) echo "covered" ;;
+        *) echo "unknown" ;;
+      esac
+      ;;
+    *) echo "unknown" ;;
+  esac
+}
+
+# #537: record where the language key set came from. PROJECT_LANGS is derived
+# from the CURRENTLY CHANGED files, not from a static inventory of the repo, so
+# a docs-only commit legitimately yields an empty set. Reporting the matrix
+# without this provenance would repeat the sin the matrix exists to fix.
+resolve_languages_source() {
+  local override_langs="${1:-}"
+  local config_langs="${2:-}"
+  local resolved_langs="${3:-}"
+  if [ -n "$override_langs" ]; then
+    echo "override"
+  elif [ -n "$config_langs" ]; then
+    echo "config"
+  elif [ -n "$resolved_langs" ]; then
+    echo "changed_files"
+  else
+    echo "none"
+  fi
+}
+
 # Audit helper — records gate execution to .xp-gate/audit.jsonl
 # NEVER blocks commit on failure (try/catch around npx tsx).
 # Usage: record_gate_audit <gate_id> <gate_name> <passed> <issues_found> <start_ms>
@@ -2902,6 +2956,14 @@ else
 
   # Check if architecture config exists (use $PROJECT_ROOT — hook may have cd'd to a subdir via ARCH-03)
   if [ -f "$PROJECT_ROOT/architecture.yaml" ] || [ -f "$PROJECT_ROOT/.architecturerc" ] || [ -f "$PROJECT_ROOT/.archlint.yaml" ]; then
+    # #537: per-language reason bookkeeping. Gate 3/4 are single-language gates
+    # and get away with one scalar reason; Gate 6 loops, so a scalar would lose
+    # information ("TS passed, PS has no detector" cannot be one string).
+    # Bash 4 associative array, with a scalar aggregate for the legacy field.
+    GATE_6_REASON=""
+    if [ "${BASH_VERSINFO[0]:-0}" -ge 4 ]; then
+      declare -A GATE_6_REASON_BY_LANG=()
+    fi
     # Different architecture tools per language
     for CURRENT_LANG in $PROJECT_LANGS; do
     case "$CURRENT_LANG" in
@@ -3009,14 +3071,46 @@ else
       *)
         echo "     ℹ️  Architecture validation not configured for $CURRENT_LANG"
         echo "     ⏭️  SKIPPED - Architecture validation (not configured for $CURRENT_LANG)"
+        # #537: archlint ships no detector for this language. Say so in a way
+        # the quality report can read, instead of leaving the dimension silent.
+        if [ "${BASH_VERSINFO[0]:-0}" -ge 4 ]; then
+          GATE_6_REASON_BY_LANG["$CURRENT_LANG"]="no_archlint_detector"
+        fi
         ;;
     esac
     done  # end for CURRENT_LANG (architecture)
+
+    # #537: fold the per-language reasons into the legacy scalar. Homogeneous
+    # reasons survive as-is; a genuine mix becomes the `mixed` sentinel, which
+    # classify_coverage_reason() maps to `unknown` (fail closed) rather than
+    # pretending one language's verdict covers all of them.
+    _g6_seen=""
+    _g6_mixed=0
+    for _g6_lang in $PROJECT_LANGS; do
+      _g6_r=""
+      if [ "${BASH_VERSINFO[0]:-0}" -ge 4 ]; then
+        _g6_r="${GATE_6_REASON_BY_LANG[$_g6_lang]:-}"
+      fi
+      if [ -n "$_g6_r" ]; then
+        if [ -z "$_g6_seen" ]; then
+          _g6_seen="$_g6_r"
+        elif [ "$_g6_seen" != "$_g6_r" ]; then
+          _g6_mixed=1
+        fi
+      fi
+    done
+    if [ "$_g6_mixed" = "1" ]; then
+      GATE_6_REASON="mixed"
+    else
+      GATE_6_REASON="$_g6_seen"
+    fi
   else
     # Architecture config is REQUIRED — BLOCK if missing
     if [ -f "$PROJECT_ROOT/.architecture-skip" ]; then
       echo "     ⚠️  Architecture config missing but .architecture-skip present — allowed to skip"
       echo "     ⏭️  SKIPPED - Architecture validation (.architecture-skip exemption)"
+      # #537: an explicit exemption is "not applicable", not "tool missing".
+      GATE_6_REASON="architecture_skip_exemption"
     else
       echo ""
       echo "❌ ARCHITECTURE CONFIG MISSING - COMMIT BLOCKED"
@@ -3563,6 +3657,40 @@ generate_quality_report() {
   local REPORT_FILE="${STATUS_DIR}/${BRANCH}.json"
   mkdir -p "$(dirname "$REPORT_FILE")"
 
+  # ── #537: per-language coverage matrix ───────────────────────────────────────
+  # Answers "was this dimension actually measured for this language?" instead of
+  # letting every SKIP read as a pass. Built by whitelist splicing (the same
+  # technique as DEGRADED_JSON above) rather than jq, because jq is an OPTIONAL
+  # dependency here (see the `command -v jq` guard earlier in this file) and a
+  # missing jq must not silently cost us the whole matrix.
+  #
+  # Safety: every spliced value is one of the five enum literals below — no
+  # quotes, backslashes or newlines can reach the JSON. Language names are
+  # whitelisted too, and a name that fails the whitelist is reported in
+  # coverageWarnings instead of being silently dropped.
+  local COVERAGE_MATRIX_JSON=""
+  local COVERAGE_WARNINGS_JSON=""
+  local _cm_lang _cm_g3 _cm_g4 _cm_g6 _cm_entry
+  for _cm_lang in $PROJECT_LANGS; do
+    if ! echo "$_cm_lang" | grep -qE '^[a-z][a-z0-9+]*$'; then
+      COVERAGE_WARNINGS_JSON="${COVERAGE_WARNINGS_JSON:+$COVERAGE_WARNINGS_JSON, }\"unsupported_language_name\""
+      continue
+    fi
+    _cm_g3=$(classify_coverage_reason "${GATE_3_REASON:-}" "${GATE_3_STATUS:-PASS}")
+    _cm_g4=$(classify_coverage_reason "${GATE_4_REASON:-}" "${GATE_4_STATUS:-PASS}")
+    # Gate 6 may be per-language via the associative array, else fall back to
+    # the scalar aggregate (bash < 4 path, or config-missing path).
+    _cm_g6_reason="${GATE_6_REASON:-}"
+    if [ "${BASH_VERSINFO[0]:-0}" -ge 4 ] && [ -n "${GATE_6_REASON_BY_LANG[$_cm_lang]:-}" ]; then
+      _cm_g6_reason="${GATE_6_REASON_BY_LANG[$_cm_lang]}"
+    fi
+    _cm_g6=$(classify_coverage_reason "$_cm_g6_reason" "${GATE_6_STATUS:-PASS}")
+    _cm_entry="\"${_cm_lang}\": {\"gate3_complexity\": \"${_cm_g3}\", \"gate4_principles\": \"${_cm_g4}\", \"gate6_architecture\": \"${_cm_g6}\"}"
+    COVERAGE_MATRIX_JSON="${COVERAGE_MATRIX_JSON:+$COVERAGE_MATRIX_JSON, }${_cm_entry}"
+  done
+  local LANGUAGES_SOURCE
+  LANGUAGES_SOURCE=$(resolve_languages_source "${_RESOLVED_LANG_OVERRIDE:-}" "${_CONFIG_LANGS:-}" "${PROJECT_LANGS:-}")
+
   cat > "$REPORT_FILE" << ENDJSON
 {
   "reportVersion": "2.0",
@@ -3581,6 +3709,9 @@ generate_quality_report() {
     "score": $SCORE_JSON,
     "verdict": "$VERDICT"
   },
+  "languagesSource": "${LANGUAGES_SOURCE}",
+  "coverageMatrix": {${COVERAGE_MATRIX_JSON}},
+  "coverageWarnings": [${COVERAGE_WARNINGS_JSON}],
   "gates": {
     "gate1_static_analysis": {
       "name": "Code Quality (Static + Lint + Shell)",
@@ -3616,6 +3747,7 @@ generate_quality_report() {
     "gate6_arch_boyscout": {
       "name": "Architecture + Boy Scout Rule",
       "status": "${GATE_6_STATUS:-PASS}",
+      "reason": "${GATE_6_REASON:-}",
       "boyScoutPassed": $BS_PASSED,
       "boyScoutBlocked": $BS_BLOCKED
     },
