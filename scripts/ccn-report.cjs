@@ -205,7 +205,13 @@ function csvRows(srcPath, root, opts = {}) {
   for (const line of lines) {
     if (/^NLOC\b/.test(line) || !/^\d+,/.test(line)) { out.push(line); continue; }
     const f = parseCsvLine(line);
-    const ccn = parseInt(f[4], 10);
+    // Column order (lizard 1.21.3 --csv, NO header row, 11 fields):
+    //   0 NLOC | 1 CCN | 2 token_len | 3 param_count | 4 location_size
+    //   5 "name@start-end@path" | 6 path | 7 name | 8 signature | 9 start | 10 end
+    // The signature column contains commas, so it must be parsed quote-aware —
+    // parseCsvLine does that. CCN is field 1; field 4 is the span SIZE and
+    // reading it as CCN understates nothing but is simply a different number.
+    const ccn = parseInt(f[1], 10);
     const loc = f[5] || '';
     if (!Number.isFinite(ccn) || !loc.includes('@')) { out.push(line); continue; }
     const at = loc.split('@');
@@ -223,7 +229,9 @@ function csvRows(srcPath, root, opts = {}) {
     }
     if (!res.corrected) { out.push(line); continue; }
     const cols = parseCsvLine(line);
-    cols[4] = String(res.ccn);
+    // Field 1 is the CCN column — writing to field 4 would silently overwrite
+    // location_size and leave the wrong complexity in place.
+    cols[1] = String(res.ccn);
     out.push(cols.map((c) => (/[",]/.test(c) ? `"${c.replace(/"/g, '""')}"` : c)).join(','));
   }
   if (unverified > 0 && !opts.allowUnverified) {
@@ -293,12 +301,84 @@ function balancedExtentFrom(lines, startIdx) {
 // downward left those rows unverified — and an unverified row keeps lizard's
 // span-inflated number (measured: srpRule 31 vs real 8). Look a few lines up
 // first, then fall back to the original downward search.
+//
+// The upward search is only valid when the reported line is part of that
+// entity. A row can also name a function purely because a CALL to it happens
+// inside a different, badly-scoped entity: lizard filed the body of `main()`
+// under `resolvePromptBudgetBytes` (CCN 7 at line 885 of
+// scripts/delphi-external-review.cjs, where the real function is a CCN-6
+// one-liner 400 lines above). Blindly accepting the enclosing function gave two
+// same-named baseline keys and let a bogus count look verified. So an upward hit
+// is only taken when the reported line itself is not a bare mention of the name
+// — i.e. the reported text is a declaration of it, or opens a body.
+function isBareMention(line, name) {
+  const code = stripNonCode(line);
+  // The reported line need not contain the name at all: lizard names a row after
+  // the enclosing binding and can file it under a member, e.g. `check: (a) => {`
+  // for a row named `rule`. Such a line declares a member and is legitimate.
+  const declaresMember = /[A-Za-z_$][\w$]*\s*(:\s*[([{])|\([^()]*\)\s*:\s*[^=]*=>/;
+  if (declaresMember.test(code)) return false;
+  if (!code.includes(name)) return true;
+  // A declaration of `name` — the thing a row SHOULD point at. Two shapes:
+  //   function name(...)  /  const name = ...
+  const esc = name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  const declaration = new RegExp(
+    '(function\\s+' + esc + '\\s*[(<]' +
+    '|\\b(?:const|let|var)\\s+' + esc + '\\s*[:=])'
+  );
+  if (declaration.test(code)) return false;
+  // A call site declares nothing: `maxBytes: name(x),` invokes the name, and the
+  // brace it sits in belongs to the enclosing construct — so an upward hit is
+  // not this row's body.
+  return true;
+}
+
 const DECL_LOOKBACK = 6;
 function locateBodyAtRow(lines, name, startLine) {
   const from = startLine - 1;
+  const reported = lines[from] === undefined ? '' : lines[from];
+  const mentionOnly = isBareMention(reported, name);
+
+  // A row is filed against a line that is often NOT where the function starts:
+  // lizard reports one line late for `export`ed declarations, and it also files
+  // a whole later construct under a name that is merely CALLED near it
+  // (measured: the 60-line `main()` body was reported as
+  // `resolvePromptBudgetBytes`, a 6-line helper 400 lines above). The row's
+  // reported line therefore only decides WHEN there is no declaration to
+  // anchor on. A real declaration always wins — that is the body the row is
+  // about, and its own extent is the only trustworthy span.
+  const declIdx = findDeclarationLine(lines, name);
+  if (declIdx !== null) {
+    const span = balancedExtentFrom(lines, declIdx);
+    if (span !== null) return { start: declIdx, end: span };
+  }
+
+  // No declaration in this file (`(anonymous)` callbacks, class methods named
+  // only in a parent, ...). Fall back to the balanced body at the reported line,
+  // which is exact when the row starts ON a literal and merely approximate for
+  // member rows — either way it beats trusting an unverified span.
   for (let k = from; k >= 0 && k >= from - DECL_LOOKBACK; k--) {
     const span = findFunctionBody(lines.slice(k, Math.min(lines.length, k + 400)), name);
-    if (span && (k < from || span[0] === 0)) return { start: k + span[0], end: k + span[1] };
+    if (!span) continue;
+    const absStart = k + span[0];
+    if (absStart >= from && mentionOnly) continue;
+    return { start: absStart, end: k + span[1] };
+  }
+
+  return null;
+}
+
+// Index of the line that DECLARES `name` (function/const/let/var form), or null.
+// Scan stops at the first match: a file may mention a helper many times, but it
+// declares it once (hoisted duplicates would be a separate bug).
+function findDeclarationLine(lines, name) {
+  const esc = name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  const re = new RegExp(
+    '(function\\s+' + esc + '\\s*[(<]' +
+    '|\\b(?:const|let|var)\\s+' + esc + '\\s*[:=])'
+  );
+  for (let i = 0; i < lines.length; i++) {
+    if (re.test(stripNonCode(lines[i]))) return i;
   }
   return null;
 }
@@ -336,6 +416,7 @@ async function run(options = {}) {
   // pool on Windows). Per-file isolation is the whole point of this tool;
   // speed is secondary to trustworthiness.
   const functions = [];
+  const unverifiedRows = [];
   for (const rel of files) {
     const csv = await runLizardOne(lizard, root, rel);
     const bucket = bucketFor(rel);
@@ -356,7 +437,8 @@ async function run(options = {}) {
       if (!/^\d+,/.test(line)) continue;
       dataRows++;
       const f = parseCsvLine(line);
-      let ccn = parseInt(f[4], 10);
+      // Field 1 is CCN; field 4 is location_size. See the column map in csvRows.
+      let ccn = parseInt(f[1], 10);
       if (!Number.isFinite(ccn)) continue;
       const nameField = f[7] || '(anon)';
       // long_name (field 5, "name@start-end@path") is the AUTHORITATIVE name:
@@ -387,6 +469,20 @@ async function run(options = {}) {
       // the balanced extent. Honest rows have no such gap and pass untouched.
       // Shared with the Gate 3 csv path so gate and baseline cannot drift.
       const verified = verifyRowCcn({ srcLines, name, ccn, lineNo, endNo });
+      // A row that names a real declaration and above threshold must verify.
+      // Rows lizard emits for non-declarations (a `String`/`clearTimeout`/`CCN`
+      // identifier, an anonymous callback) cannot be located by name at all and
+      // are a separate, older problem — flagging them here would block the
+      // baseline on noise. What must never happen is a row that CLAIMS a named
+      // function and carrying an unverified number into the baseline.
+      const namesDeclaration = name && name !== '(anonymous)' && name !== '(anon)';
+      if (verified.unlocatable && bucket === 'production' && namesDeclaration && srcLines) {
+        const declLine = srcLines.slice(Math.max(0, lineNo - 1), Math.max(0, lineNo - 1) + 400).find((l) =>
+          new RegExp('function\\s+' + name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '\\s*[(<]').test(l));
+        if (declLine !== undefined) {
+          unverifiedRows.push(`${rel}:${lineNo} ${name} CCN=${ccn}`);
+        }
+      }
       inflated = verified.inflated;
       ccn = verified.ccn;
       functions.push({ file: rel.replace(/\\/g, '/'), bucket, name, ccn, nloc: parseInt(f[0], 10) || 0, line: parseInt(lineNo, 10) || 0, span_inflated: inflated || undefined });
@@ -398,7 +494,7 @@ async function run(options = {}) {
       functions.push({ file: rel.replace(/\\/g, '/'), bucket, name: '(no parsable output)', ccn: 0, nloc: 0, line: 0 });
     }
   }
-  return { root, filesScanned: files.length, functions };
+  return { root, filesScanned: files.length, functions, unverified_rows: unverifiedRows };
 }
 
 function percentile(sorted, p) {
@@ -435,10 +531,23 @@ async function main() {
   // ceilings. Renames/moves intentionally fall out of the key space and are
   // treated as new code — moving debt around must not launder it.
   if (argv.includes('--write-baseline')) {
+    if (report.unverified_rows.length) {
+      console.error(`FAIL - ${report.unverified_rows.length} function(s) above CCN 10 could not be span-verified; refusing to write a baseline that would record an unverified complexity as its ceiling:`);
+      for (const row of report.unverified_rows.slice(0, 20)) console.error(`  ${row}`);
+      process.exit(1);
+    }
     const baseline = {};
     for (const f of report.functions) {
       if (f.bucket !== 'production' || f.name === '(no parsable output)') continue;
-      baseline[`${f.file}::${f.name}`] = f.ccn;
+      // Named functions get one key per name. Anonymous callbacks do not: a file
+      // routinely holds dozens of them, and keying them all as `(anonymous)`
+      // kept only the LAST one, so the baseline recorded whichever callback
+      // happened to be parsed last and the ratchet then "blocked" every other
+      // callback against it. Position is the only stable identity a callback
+      // has, so anonymous rows are keyed by line.
+      const isAnon = f.name === '(anonymous)' || f.name === '(anon)';
+      const key = isAnon ? `${f.file}::(anonymous)@${f.line}` : `${f.file}::${f.name}`;
+      baseline[key] = f.ccn;
     }
     const target = path.join(report.root, '.ccn-baseline.json');
     fs.writeFileSync(target, JSON.stringify(baseline, null, 2) + '\n');

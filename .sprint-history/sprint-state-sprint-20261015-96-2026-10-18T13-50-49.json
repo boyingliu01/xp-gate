@@ -1,0 +1,25 @@
+{
+  "_schema_version": 1,
+  "evidence_schema_version": 2,
+  "id": "sprint-20261015-96",
+  "task_description": "#534 Python 门禁提速：mypy 换 Rust 实现（ty 优先）+ pre-commit 改增量检查，发布 v0.26.0",
+  "phase": 1,
+  "status": "in_progress",
+  "started_at": "2026-10-15T16:10:22.320Z",
+  "phase_history": [
+    {
+      "phase": 1,
+      "name": "PREP",
+      "status": "completed",
+      "started_at": "2026-10-15T16:10:22.320Z",
+      "completed_at": "2026-10-15T16:49:38.766Z",
+      "duration_seconds": 2356
+    }
+  ],
+  "isolation": {
+    "worktree_path": "D:\\projects\\xp-gate",
+    "branch": "main"
+  },
+  "outputs": {},
+  "metrics": {}
+}

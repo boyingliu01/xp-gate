@@ -45,136 +45,155 @@ function isSupportedModuleFile(file: string): boolean {
 }
 
 /**
- * Gate 10: Build Integrity Check — TypeScript compilation verification.
- * Runs `tsc --noEmit --incremental` to verify the project compiles without errors.
+ * True when `filePath` exists and is readable - the tsc usability test.
  *
- * @param projectRoot - Absolute path to the project root
- * @param timeoutMs - Timeout in milliseconds
- * @returns CheckResult with status 'pass', 'fail', or 'skip'
+ * Declared as a const arrow on purpose. lizard 1.21.3 mis-nests a
+ * `function name(...): T {` declaration that carries a return type annotation
+ * when it appears before another JSDoc block: the parse loses the boundary and
+ * every following function is absorbed into this function's span (measured on
+ * this file - the CCN of five functions collapsed into one row). An arrow
+ * assignment keeps the scope flat and lizard reports each function separately.
  */
-export async function runTscCheck(
-  projectRoot: string,
-  timeoutMs: number
-): Promise<CheckResult> {
-  const startTime = Date.now();
+const isReadableFile = (filePath: string): boolean => {
+  let readable = true;
+  try {
+    fsNative.accessSync(filePath);
+  } catch {
+    readable = false;
+  }
+  return readable;
+};
 
-  // Check if tsconfig.json exists
+/**
+ * Resolve the tsc entry point. Three strategies, most specific first: the
+ * project's own node_modules, then the cwd's, then Node's resolver. Returns
+ * the tsc SCRIPT path (run it through process.execPath) or null, in which case
+ * the caller falls back to the npx shim.
+ */
+const findTscBinary = (projectRoot: string): string | null => {
+  const candidates = [
+    path.join(projectRoot, 'node_modules', 'typescript', 'bin', 'tsc'),
+    path.join(process.cwd(), 'node_modules', 'typescript', 'bin', 'tsc'),
+  ];
+  for (const candidate of candidates) {
+    if (isReadableFile(candidate)) return candidate;
+  }
+  let resolved: string | undefined;
+  try {
+    resolved = require.resolve('typescript/bin/tsc', { paths: [projectRoot, process.cwd()] });
+  } catch {
+    return null; // Not resolvable at all -> caller uses the npx shim.
+  }
+  // Resolvable but not readable also means the caller must use the npx shim.
+  return isReadableFile(resolved) ? resolved : null;
+};
+
+function tscProbeInvocation(projectRoot: string, resolvedTsc: string | null) {
+  return resolvedTsc
+    ? { cmd: process.execPath, args: [resolvedTsc, '--version'], opts: { cwd: projectRoot, timeout: 10000 } }
+    : {
+      cmd: 'npx',
+      args: ['tsc', '--version'],
+      opts: { cwd: projectRoot, timeout: 10000, shell: true, env: { ...process.env, PATH: process.env.PATH } },
+    };
+}
+
+function tscCompileInvocation(projectRoot: string, resolvedTsc: string | null, timeoutMs: number) {
+  return {
+    cmd: resolvedTsc ? process.execPath : 'npx',
+    args: resolvedTsc
+      ? [resolvedTsc, '--noEmit', '--incremental']
+      : ['tsc', '--noEmit', '--incremental'],
+    opts: {
+      cwd: projectRoot,
+      timeout: timeoutMs,
+      shell: !resolvedTsc,
+      maxBuffer: 10 * 1024 * 1024, // 10MB
+    },
+  };
+}
+
+interface ExecFailure {
+  code?: number | null;
+  signal?: string;
+  stdout?: string;
+  stderr?: string;
+  killed?: boolean;
+  message?: string;
+}
+
+function isTimeoutFailure(err: ExecFailure): boolean {
+  return Boolean(err.killed || err.signal === 'SIGTERM' || err.code === null);
+}
+
+function compileFailureMessage(err: ExecFailure): string {
+  const output = (err.stdout || '') + (err.stderr || '');
+  const truncatedOutput = output.slice(0, 2000);
+  const errorMatches = output.match(/error TS\d+:/g);
+  const errorCount = errorMatches ? errorMatches.length : 0;
+  return errorCount > 0
+    ? `TypeScript compilation failed with ${errorCount} error(s):\n${truncatedOutput}`
+    : `TypeScript compilation failed:\n${truncatedOutput}`;
+}
+
+/** Reasons tsc cannot run at all; null means it is usable. */
+const tscSkipReason = async (projectRoot: string): Promise<string | null> => {
   const tsconfigPath = path.join(projectRoot, 'tsconfig.json');
   try {
     await fs.access(tsconfigPath);
   } catch {
-    return {
-      status: 'skip',
-      message: 'No tsconfig.json found in project root',
-      durationMs: Date.now() - startTime,
-    };
+    return 'No tsconfig.json found in project root';
   }
-
-  // Resolve tsc binary: try multiple strategies for cross-platform reliability
-  function findTsc(): string | null {
-    // Strategy 1: projectRoot/node_modules/typescript/bin/tsc
-    const direct = path.join(projectRoot, 'node_modules', 'typescript', 'bin', 'tsc');
-    try { fsNative.accessSync(direct); return direct; } catch { /* continue */ }
-
-    // Strategy 2: resolve from cwd's node_modules (works when test symlinks or in project)
-    const fromCwd = path.join(process.cwd(), 'node_modules', 'typescript', 'bin', 'tsc');
-    try { fsNative.accessSync(fromCwd); return fromCwd; } catch { /* continue */ }
-
-    // Strategy 3: resolve via require.resolve from this file's location
-    try {
-      const resolved = require.resolve('typescript/bin/tsc', { paths: [projectRoot, process.cwd()] });
-      try { fsNative.accessSync(resolved); return resolved; } catch { /* continue */ }
-    } catch { /* continue */ }
-
-    return null;
-  }
-
-  const resolvedTsc = findTsc();
-
-  // Check if tsc is available
+  const resolvedTsc = findTscBinary(projectRoot);
   try {
-    if (resolvedTsc) {
-      await execFileAsync(process.execPath, [resolvedTsc, '--version'], {
-        cwd: projectRoot,
-        timeout: 10000,
-      });
-    } else {
-      await execFileAsync('npx', ['tsc', '--version'], {
-        cwd: projectRoot,
-        timeout: 10000,
-        shell: true,
-        env: { ...process.env, PATH: process.env.PATH },
-      });
-    }
+    const probe = tscProbeInvocation(projectRoot, resolvedTsc);
+    await execFileAsync(probe.cmd, probe.args, probe.opts);
   } catch {
-    return {
-      status: 'skip',
-      message: 'tsc is not available on PATH',
-      durationMs: Date.now() - startTime,
-    };
+    return 'tsc is not available on PATH';
   }
+  return null;
+};
 
-  // Run tsc --noEmit --incremental
+/** Run the compile itself and map its failure modes onto gate statuses. */
+const runTscCompile = async (projectRoot: string, timeoutMs: number): Promise<CheckResult> => {
+  const startTime = Date.now();
+  const resolvedTsc = findTscBinary(projectRoot);
   try {
-    const tscCmd = resolvedTsc ? process.execPath : 'npx';
-    const tscArgs = resolvedTsc
-      ? [resolvedTsc, '--noEmit', '--incremental']
-      : ['tsc', '--noEmit', '--incremental'];
-    const { stdout, stderr } = await execFileAsync(
-      tscCmd,
-      tscArgs,
-      {
-        cwd: projectRoot,
-        timeout: timeoutMs,
-        shell: !resolvedTsc,
-        maxBuffer: 10 * 1024 * 1024, // 10MB
-      }
-    );
-
+    const compile = tscCompileInvocation(projectRoot, resolvedTsc, timeoutMs);
+    const { stdout, stderr } = await execFileAsync(compile.cmd, compile.args, compile.opts);
     const output = stdout + stderr;
-
     return {
       status: 'pass',
       message: output.trim() || 'TypeScript compilation successful',
       durationMs: Date.now() - startTime,
     };
   } catch (error: unknown) {
-    const err = error as {
-      code?: number;
-      signal?: string;
-      stdout?: string;
-      stderr?: string;
-      killed?: boolean;
-      message?: string;
-    };
-
-    // Timeout → SKIP
-    if (err.killed || err.signal === 'SIGTERM' || err.code === null) {
+    const err = error as ExecFailure;
+    if (isTimeoutFailure(err)) {
       return {
         status: 'skip',
         message: `tsc timed out after ${timeoutMs}ms`,
         durationMs: Date.now() - startTime,
       };
     }
-
-    // Non-zero exit → FAIL
-    const output = (err.stdout || '') + (err.stderr || '');
-    const truncatedOutput = output.slice(0, 2000);
-
-    // Count errors in output
-    const errorMatches = output.match(/error TS\d+:/g);
-    const errorCount = errorMatches ? errorMatches.length : 0;
-
-    const message = errorCount > 0
-      ? `TypeScript compilation failed with ${errorCount} error(s):\n${truncatedOutput}`
-      : `TypeScript compilation failed:\n${truncatedOutput}`;
-
     return {
       status: 'fail',
-      message,
+      message: compileFailureMessage(err),
       durationMs: Date.now() - startTime,
     };
   }
+};
+
+export async function runTscCheck(
+  projectRoot: string,
+  timeoutMs: number
+): Promise<CheckResult> {
+  const startTime = Date.now();
+  const skipReason = await tscSkipReason(projectRoot);
+  if (skipReason !== null) {
+    return { status: 'skip', message: skipReason, durationMs: Date.now() - startTime };
+  }
+  return runTscCompile(projectRoot, timeoutMs);
 }
 
 /**
@@ -299,83 +318,79 @@ export function resolveImportPath(importPath: string, fromFile: string): string 
  * - A relative import resolves to a path outside projectRoot
  * - A relative import resolves to a file that doesn't exist on disk
  */
+// Windows paths are case-insensitive but the two sides of the boundary
+// comparison get their case from different sources: path.resolve of a
+// repo-relative file inherits process.cwd()'s drive-letter case (often
+// lowercase), while projectRoot comes from `git rev-parse --show-toplevel`
+// (uppercase drive). A case-sensitive startsWith then judged EVERY import
+// as escaping the boundary — pre-push Gate 10 blocked any TS-bearing push
+// from a shell whose drive-letter case disagreed with git's (#508).
+const normalizeForBoundary = (p: string): string => {
+  const resolved = path.resolve(p);
+  return process.platform === 'win32' ? resolved.toLowerCase() : resolved;
+};
+
+const escapesProjectBoundary = (target: string, boundaryRoot: string): boolean =>
+  !target.startsWith(boundaryRoot + path.sep) && target !== boundaryRoot;
+
+/** Violation for one import of one file, or null when it resolves cleanly. */
+const importViolation = (
+  file: string,
+  imp: { path: string; line: number },
+  boundaryRoot: string
+): ImportViolation | null => {
+  const rawResolved = path.resolve(path.dirname(file), imp.path);
+  if (escapesProjectBoundary(normalizeForBoundary(rawResolved), boundaryRoot)) {
+    return {
+      file,
+      line: imp.line,
+      importPath: imp.path,
+      resolvedPath: rawResolved,
+      reason: 'Import path escapes package boundary (resolves outside project root)',
+    };
+  }
+  if (resolveImportPath(imp.path, file) === null) {
+    return {
+      file,
+      line: imp.line,
+      importPath: imp.path,
+      resolvedPath: rawResolved,
+      reason: 'Import target does not exist on disk',
+    };
+  }
+  return null;
+};
+
+/**
+ * Violations for one file, or [] when the file is skipped (unsupported
+ * extension, test fixture, or unreadable — a missing file cannot have imports).
+ */
+const fileImportViolations = async (file: string, boundaryRoot: string): Promise<ImportViolation[]> => {
+  // Skip test files — they contain intentionally broken imports for unit testing.
+  // The published npm package does not include __tests__ directories.
+  if (!isSupportedModuleFile(file) || file.includes('__tests__')) return [];
+  if (!isReadableFile(file)) return [];
+  let content: string;
+  try {
+    content = await fs.readFile(file, 'utf-8');
+  } catch {
+    return [];
+  }
+  return extractImports(content)
+    .map((imp) => importViolation(file, imp, boundaryRoot))
+    .filter((v): v is ImportViolation => v !== null);
+};
+
 export async function runImportCheck(
   changedFiles: string[],
   projectRoot: string,
   _timeoutMs: number
 ): Promise<ImportCheckResult> {
   const startTime = Date.now();
+  const boundaryRoot = normalizeForBoundary(path.resolve(projectRoot));
   const violations: ImportViolation[] = [];
-
-    const fsSync = fsNative;
-
-  const normalizedRoot = path.resolve(projectRoot);
-
   for (const file of changedFiles) {
-    if (!isSupportedModuleFile(file)) continue;
-
-    // Skip test files — they contain intentionally broken imports for unit testing.
-    // The published npm package does not include __tests__ directories.
-    if (file.includes('__tests__')) continue;
-
-    try {
-      fsSync.accessSync(file);
-    } catch {
-      continue;
-    }
-
-    let content: string;
-    try {
-      content = await fs.readFile(file, 'utf-8');
-    } catch {
-      continue;
-    }
-
-    // Windows paths are case-insensitive but the two sides of the boundary
-    // comparison get their case from different sources: path.resolve of a
-    // repo-relative file inherits process.cwd()'s drive-letter case (often
-    // lowercase), while projectRoot comes from `git rev-parse --show-toplevel`
-    // (uppercase drive). A case-sensitive startsWith then judged EVERY import
-    // as escaping the boundary — pre-push Gate 10 blocked any TS-bearing push
-    // from a shell whose drive-letter case disagreed with git's (#508).
-    const normalizeForBoundary = (p: string): string => {
-      const resolved = path.resolve(p);
-      return process.platform === 'win32' ? resolved.toLowerCase() : resolved;
-    };
-    const boundaryRoot = normalizeForBoundary(normalizedRoot);
-
-    const imports = extractImports(content);
-
-    for (const imp of imports) {
-      const rawResolved = path.resolve(path.dirname(file), imp.path);
-      const boundaryTarget = normalizeForBoundary(rawResolved);
-
-      const escapesBoundary =
-        !boundaryTarget.startsWith(boundaryRoot + path.sep) && boundaryTarget !== boundaryRoot;
-
-      if (escapesBoundary) {
-        violations.push({
-          file,
-          line: imp.line,
-          importPath: imp.path,
-          resolvedPath: rawResolved,
-          reason: `Import path escapes package boundary (resolves outside project root)`,
-        });
-        continue;
-      }
-
-      const resolvedPath = resolveImportPath(imp.path, file);
-
-      if (resolvedPath === null) {
-        violations.push({
-          file,
-          line: imp.line,
-          importPath: imp.path,
-          resolvedPath: rawResolved,
-          reason: `Import target does not exist on disk`,
-        });
-      }
-    }
+    violations.push(...(await fileImportViolations(file, boundaryRoot)));
   }
 
   const durationMs = Date.now() - startTime;
@@ -397,31 +412,80 @@ export async function runImportCheck(
   };
 }
 
+/**
+ * npm pack must ship at least one file besides package.json. Split out of
+ * runPackCheck because the check reads as three separate verdicts (no output,
+ * empty list, manifest-only) and each one has its own operator-facing message.
+ */
+function inspectPackedFiles(
+  packages: Array<{ files?: Array<{ path: string }> }> | null
+): { ok: true; count: number } | { ok: false; message: string } {
+  if (!packages || packages.length === 0) {
+    return { ok: false, message: 'npm pack produced no package output' };
+  }
+  const files = packages[0].files || [];
+  if (files.length === 0) {
+    return { ok: false, message: 'npm pack produced empty file list' };
+  }
+  // Check if only package.json is included (no actual content files)
+  const hasContentFiles = files.some((f) => f.path !== 'package.json');
+  if (!hasContentFiles) {
+    return { ok: false, message: 'npm pack produced no files — only package.json included' };
+  }
+  return { ok: true, count: files.length };
+}
+
+/**
+ * npm pack is only meaningful when package.json declares a `files` allowlist —
+ * without one, npm ships everything and the "which files would publish" check
+ * has no answer to give. Returns the reason to SKIP, or null to proceed.
+ */
+async function packPrecondition(projectRoot: string): Promise<string | null> {
+  const pkgJsonPath = path.join(projectRoot, 'package.json');
+  try {
+    await fs.access(pkgJsonPath);
+  } catch {
+    return 'No package.json found in project root';
+  }
+  const pkgJsonRaw = await fs.readFile(pkgJsonPath, 'utf-8');
+  const pkgJson = JSON.parse(pkgJsonRaw) as { files?: unknown };
+  if (!pkgJson.files || !Array.isArray(pkgJson.files)) {
+    return 'package.json has no files field — skipping pack check';
+  }
+  return null;
+}
+
+interface PackFailure {
+  killed?: boolean;
+  signal?: string;
+  code?: number | null;
+  stderr?: string;
+  stdout?: string;
+  message?: string;
+}
+
+const MAX_PACK_DETAIL = 2000;
+
+/** Map an npm pack rejection onto the gate's SKIP/FAIL contract. */
+const packFailureResult = (error: unknown, timeoutMs: number): CheckResult => {
+  const err = error as PackFailure;
+  const durationMs = 0;
+  if (err.killed || err.signal === 'SIGTERM') {
+    return { status: 'skip', message: `npm pack timeout after ${timeoutMs}ms`, durationMs };
+  }
+  const detail = (err.stderr || err.stdout || err.message || '').slice(0, MAX_PACK_DETAIL);
+  return { status: 'fail', message: `npm pack failed: ${detail}`, durationMs };
+};
+
 export async function runPackCheck(
   projectRoot: string,
   timeoutMs: number
 ): Promise<CheckResult> {
   const startTime = Date.now();
 
-  const pkgJsonPath = path.join(projectRoot, 'package.json');
-  try {
-    await fs.access(pkgJsonPath);
-  } catch {
-    return {
-      status: 'skip',
-      message: 'No package.json found in project root',
-      durationMs: Date.now() - startTime,
-    };
-  }
-
-  const pkgJsonRaw = await fs.readFile(pkgJsonPath, 'utf-8');
-  const pkgJson = JSON.parse(pkgJsonRaw) as { files?: unknown };
-  if (!pkgJson.files || !Array.isArray(pkgJson.files)) {
-    return {
-      status: 'skip',
-      message: 'package.json has no files field — skipping pack check',
-      durationMs: Date.now() - startTime,
-    };
+  const skipReason = await packPrecondition(projectRoot);
+  if (skipReason) {
+    return { status: 'skip', message: skipReason, durationMs: Date.now() - startTime };
   }
 
   try {
@@ -432,63 +496,18 @@ export async function runPackCheck(
       maxBuffer: 10 * 1024 * 1024,
     });
 
-    const packages = JSON.parse(stdout) as Array<{ files?: Array<{ path: string }> }>;
-    if (!packages || packages.length === 0) {
-      return {
-        status: 'fail',
-        message: 'npm pack produced no package output',
-        durationMs: Date.now() - startTime,
-      };
+    const verdict = inspectPackedFiles(JSON.parse(stdout) as Array<{ files?: Array<{ path: string }> }>);
+    if (!verdict.ok) {
+      return { status: 'fail', message: verdict.message, durationMs: Date.now() - startTime };
     }
-
-    const files = packages[0].files || [];
-    if (files.length === 0) {
-      return {
-        status: 'fail',
-        message: 'npm pack produced empty file list',
-        durationMs: Date.now() - startTime,
-      };
-    }
-
-    // Check if only package.json is included (no actual content files)
-    const hasContentFiles = files.some((f) => f.path !== 'package.json');
-    if (!hasContentFiles) {
-      return {
-        status: 'fail',
-        message: 'npm pack produced no files — only package.json included',
-        durationMs: Date.now() - startTime,
-      };
-    }
-
     return {
       status: 'pass',
-      message: `npm pack: ${files.length} file(s) included`,
+      message: `npm pack: ${verdict.count} file(s) included`,
       durationMs: Date.now() - startTime,
     };
   } catch (error: unknown) {
-    const err = error as {
-      killed?: boolean;
-      signal?: string;
-      code?: number | null;
-      stderr?: string;
-      stdout?: string;
-      message?: string;
-    };
-
-    if (err.killed || err.signal === 'SIGTERM') {
-      return {
-        status: 'skip',
-        message: `npm pack timeout after ${timeoutMs}ms`,
-        durationMs: Date.now() - startTime,
-      };
-    }
-
-    const detail = (err.stderr || err.stdout || err.message || '').slice(0, 2000);
-    return {
-      status: 'fail',
-      message: `npm pack failed: ${detail}`,
-      durationMs: Date.now() - startTime,
-    };
+    const result = packFailureResult(error, timeoutMs);
+    return { ...result, durationMs: Date.now() - startTime };
   }
 }
 
@@ -570,6 +589,16 @@ export interface Gate10Args {
  *
  * @returns Parsed args object with changedFiles, projectRoot, timeoutMs, and help flag
  */
+/**
+ * Lizard-and-ratchet-visible shape of the gate's CLI. Split from
+ * parseGate10Args so the flag loop stays a flat scan.
+ */
+function splitChangedFiles(changedFilesStr: string): string[] {
+  return changedFilesStr
+    ? changedFilesStr.split(',').map((f) => f.trim()).filter(Boolean)
+    : [];
+}
+
 export function parseGate10Args(args: string[]): Gate10Args {
   let changedFilesStr = '';
   let projectRoot = process.cwd();
@@ -589,11 +618,7 @@ export function parseGate10Args(args: string[]): Gate10Args {
     }
   }
 
-  const changedFiles = changedFilesStr
-    ? changedFilesStr.split(',').map((f) => f.trim()).filter(Boolean)
-    : [];
-
-  return { changedFiles, projectRoot, timeoutMs, help };
+  return { changedFiles: splitChangedFiles(changedFilesStr), projectRoot, timeoutMs, help };
 }
 
 // ─── CLI Result Formatting ─────────────────────────────────────────────────────
