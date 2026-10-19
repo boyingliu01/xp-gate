@@ -168,9 +168,13 @@ function isReadableFile(target) {
 // charged across neighbours (measured: showHelp body is 687-706 real, lizard
 // reports 687-763 with CCN=77). The scary numbers are exactly the broken ones.
 // Recompute CCN over the brace-balanced body instead. Branch tokens, counted
-// outside strings/comments/templates — deliberately NOT counting `?:`
-// ternaries, which lizard does not count either (mixing the two conventions
-// invented hotspots that exist in no tool).
+// outside strings/comments/templates.
+//
+// `?:` ternaries ARE counted, matching lizard: verified against lizard 1.21.3,
+// `return a ? b : c;` scores 2 and `return a ?? b;` scores 3. An earlier comment
+// here claimed ternaries were deliberately excluded — it was wrong, and the
+// regex was right. `\?[^.]` is what makes it right: it counts `?` unless it
+// begins `?.` (optional chaining, which is not a branch — `a?.b` stays at 1).
 const BRANCH_RE = /\b(if|else|for|while|case|catch)\b|\?\?|&&|\|\||\belif\b|\?[^.]/g;
 
 // Skip a quoted run starting at `i` (which points at the opening quote) and

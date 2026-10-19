@@ -190,6 +190,31 @@ describe('ccn-report (per-file trustworthy measurement)', () => {
 
   /**
    * @test REQ-COMPLEXITY-RATCHET
+   * @intent The CCN recomputation must use the SAME branch conventions as
+   *         lizard, or the two engines disagree and the ratchet compares
+   *         incomparable numbers. Verified against lizard 1.21.3: a ternary
+   *         scores 2, `??` scores 3, plain scores 1. An earlier comment claimed
+   *         ternaries were excluded — the comment was wrong and the code was
+   *         right, so the convention is pinned here rather than left to prose.
+   * @covers AC-COMPLEXITY-001
+   */
+  it('counts ternaries and nullish like lizard, but not optional chaining', () => {
+    const mod = require(reportPath);
+    const plain = ['function f() {', '  return a;', '}'];
+    const ternary = ['function f() {', '  return a ? b : c;', '}'];
+    const nullish = ['function f() {', '  return a ?? b;', '}'];
+    const optional = ['function f() {', '  return a?.b;', '}'];
+    expect(mod.ccnOfBody(plain)).toBe(1);
+    // lizard counts the ternary as one extra branch.
+    expect(mod.ccnOfBody(ternary)).toBe(2);
+    // lizard counts `??` as a branch.
+    expect(mod.ccnOfBody(nullish)).toBe(2);
+    // lizard does NOT count optional chaining.
+    expect(mod.ccnOfBody(optional)).toBe(1);
+  });
+
+  /**
+   * @test REQ-COMPLEXITY-RATCHET
    * @intent verifyRowCcn is the only thing standing between a lizard parser
    *         defect and a phantom CCN in the ratchet. If it silently trusts a
    *         malformed span, the fallback is indistinguishable from no fallback
