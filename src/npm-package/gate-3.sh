@@ -145,16 +145,16 @@ else
         CCN_WARN_THRESHOLD="$CCN_THRESHOLD"
         CCN_BLOCK_THRESHOLD=$((CCN_THRESHOLD * 2))
         RATCHET_VERDICT=$(printf '%s\n' "$CC_CSV" | evaluate_ccn_ratchet ".ccn-baseline.json")
-        CC_WARNINGS=$(printf '%s\n' "$RATCHET_VERDICT" | grep -c '^BLOCK ' || true)
+        CC_VIOLATIONS=$(printf '%s\n' "$RATCHET_VERDICT" | grep -c '^BLOCK ' || true)
         CC_LOWER=$(printf '%s\n' "$RATCHET_VERDICT" | grep -c '^LOWER ' || true)
         printf '%s\n' "$RATCHET_VERDICT" | grep -v '^OK ' || true
         if [ "${CC_LOWER:-0}" -gt 0 ]; then
           echo "ℹ️  $CC_LOWER function(s) improved below baseline — refresh with: node scripts/ccn-report.cjs --write-baseline"
         fi
         GATE_3_DETAIL="mode=ratchet"
-        if [ "${CC_WARNINGS:-0}" -gt 0 ]; then
+        if [ "${CC_VIOLATIONS:-0}" -gt 0 ]; then
           echo ""
-          echo "❌ BLOCKED - $CC_WARNINGS function(s) violate the complexity ratchet (.ccn-baseline.json)."
+          echo "❌ BLOCKED - $CC_VIOLATIONS function(s) violate the complexity ratchet (.ccn-baseline.json)."
           echo "Revert the increase, or refactor; refresh the baseline only via ccn-baseline-refresh commits."
           exit 1
         else
@@ -191,4 +191,10 @@ else
     GATE_3_REASON="tool_not_installed"
   fi
 fi
-record_gate_audit "gate-3" "complexity" "$GATE_3_STATUS" "${CC_WARNINGS:-0}" "$GATE_3_START" "ccn_threshold=${CCN_THRESHOLD:-5}${GATE_3_DETAIL:+ $GATE_3_DETAIL}"
+# The audit's issues_found comes from whichever mode actually ran. In ratchet
+# mode the count lives in CC_VIOLATIONS (functions worse than their recorded
+# baseline); the flat-threshold mode parses CC_WARNINGS from lizard's own table.
+# Reading only CC_WARNINGS meant every ratchet block recorded issues_found=0 —
+# the gate failed while the journal claimed nothing was found.
+CC_ISSUES="${CC_VIOLATIONS:-${CC_WARNINGS:-0}}"
+record_gate_audit "gate-3" "complexity" "$GATE_3_STATUS" "$CC_ISSUES" "$GATE_3_START" "ccn_threshold=${CCN_THRESHOLD:-5}${GATE_3_DETAIL:+ $GATE_3_DETAIL}"
