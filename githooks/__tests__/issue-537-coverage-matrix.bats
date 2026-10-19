@@ -38,6 +38,17 @@ setup() {
   [ "$(classify_coverage_reason architecture_skip_exemption SKIP)" = "not_applicable" ]
 }
 
+@test "classify_coverage_reason understands Gate 4's own reason vocabulary" {
+  # Learned by running the hook for real: Gate 4 emits these three, none of
+  # which were in the original mapping, so every principles cell came out
+  # `unknown` on a normal commit.
+  eval "$(sed -n '/^classify_coverage_reason()/,/^}/p' "$PRE_COMMIT")"
+  [ "$(classify_coverage_reason no_matching_files_changed SKIP)" = "no_changes" ]
+  [ "$(classify_coverage_reason checker_not_found SKIP)" = "tool_missing" ]
+  # A checker that ran and crashed measured nothing — unknown, not covered.
+  [ "$(classify_coverage_reason checker_execution_error SKIP)" = "unknown" ]
+}
+
 @test "classify_coverage_reason never defaults an unknown reason to covered" {
   eval "$(sed -n '/^classify_coverage_reason()/,/^}/p' "$PRE_COMMIT")"
   # The whole point: an unrecognised reason must FAIL CLOSED.
@@ -78,6 +89,20 @@ setup() {
   [ "$status" -eq 0 ]
   run grep -q '"reason": "\${GATE_6_REASON' "$PRE_COMMIT"
   [ "$status" -eq 0 ]
+}
+
+@test "a language archlint really measured is not labelled tool_missing" {
+  # Learned by running the hook: the TypeScript branch runs archlint, but the
+  # catch-all's reason leaked into the matrix for typescript too, so a covered
+  # dimension was reported as tool_missing. The TS branch must set no reason at
+  # all (absent reason + PASS status => covered).
+  eval "$(sed -n '/^classify_coverage_reason()/,/^}/p' "$PRE_COMMIT")"
+  [ "$(classify_coverage_reason "" PASS)" = "covered" ]
+  # And the ASSIGNMENT must exist exactly once (in the catch-all), never in the
+  # typescript case. The mapping table legitimately mentions the token too.
+  run grep -c 'GATE_6_REASON_BY_LANG\["\$CURRENT_LANG"\]="no_archlint_detector"' "$PRE_COMMIT"
+  [ "$status" -eq 0 ]
+  [ "$output" -eq 1 ]
 }
 
 # ── REQ-C: matrix key set ─────────────────────────────────────────────────────

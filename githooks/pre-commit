@@ -308,8 +308,14 @@ classify_coverage_reason() {
     documentation_project)        echo "not_applicable" ;;
     architecture_skip_exemption)  echo "not_applicable" ;;
     no_source_files_changed)      echo "no_changes" ;;
-    tool_missing|tool_not_installed|no_powershell_tool|no_archlint_detector)
+    # Gate 4 names the same concept "no_matching_files_changed"; Gate 3/6 use
+    # the shorter form. Both mean "the tool exists, nothing to look at".
+    no_matching_files_changed)    echo "no_changes" ;;
+    tool_missing|tool_not_installed|no_powershell_tool|no_archlint_detector|checker_not_found)
                                   echo "tool_missing" ;;
+    # Gate 4's checker ran but crashed. Not covered, not "tool missing" — the
+    # measurement was attempted and failed, so the honest answer is unknown.
+    checker_execution_error)      echo "unknown" ;;
     "")
       case "$gate_status" in
         PASS|WARN|PASS_WITH_WARNINGS|PASSED) echo "covered" ;;
@@ -3009,6 +3015,8 @@ else
          else
            echo "     ✅ TypeScript architecture validation completed (zero-tolerance mode). no baseline found."
          fi
+         # #537: archlint actually ran here, so there is no skip reason. The
+         # matrix reads an absent reason + PASS status as `covered`.
          ;;
       "python")
         # detect any import-linter carrier (incl. pyproject.toml [tool.importlinter])
