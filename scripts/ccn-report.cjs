@@ -557,6 +557,10 @@ async function run(options = {}) {
   // pool on Windows). Per-file isolation is the whole point of this tool;
   // speed is secondary to trustworthiness.
   const functions = [];
+  // Index into `functions` by row key so dedup is O(1). A linear findIndex per
+  // row made a full scan O(rows x functions), which on this repo's ~770
+  // production functions is invisible but grows quadratically in a monorepo.
+  const byRowKey = new Map();
   const unverifiedRows = [];
   for (const rel of files) {
     const csv = await runLizardOne(lizard, root, rel);
@@ -635,11 +639,12 @@ async function run(options = {}) {
       // declaration actually has; keep the widest span, which is the row whose
       // body the verifier measured.
       const rowKey = `${rel.replace(/\\/g, '/')}::${name}::${lineNo}`;
-      const prior = functions.findIndex((fn) => fn._rowKey === rowKey);
-      if (prior >= 0) {
+      const prior = byRowKey.get(rowKey);
+      if (prior !== undefined) {
         if (functions[prior].ccn < ccn) functions[prior] = { ...functions[prior], ccn, nloc: parseInt(f[0], 10) || 0 };
         continue;
       }
+      byRowKey.set(rowKey, functions.length);
       functions.push({ _rowKey: rowKey, file: rel.replace(/\\/g, '/'), bucket, name, ccn, nloc: parseInt(f[0], 10) || 0, line: parseInt(lineNo, 10) || 0, span_inflated: inflated || undefined });
     }
     if (!dataRows && !sawHeader) {
