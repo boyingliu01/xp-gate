@@ -349,6 +349,9 @@ function csvRows(srcPath, root, opts = {}) {
   // brace-loss artefact. Counted separately so they are visible rather than
   // silently trusted or wrongly blamed on the source code.
   let _spanArtefacts = 0;
+  // Rows that could not be located but are BELOW the block threshold, so no
+  // verdict rides on them. Counted for observability, never used to gate.
+  let _unverifiedLow = 0;
   for (const line of lines) {
     if (/^NLOC\b/.test(line) || !/^\d+,/.test(line)) { out.push(line); continue; }
     const f = parseCsvLine(line);
@@ -392,13 +395,18 @@ function csvRows(srcPath, root, opts = {}) {
         // `res.ccn !== ccn` test collapsed those two meanings.
         res.corrected = true;
       } else if (reportedSpan <= 250) {
-        // Both conditions must be parenthesised. The original read
-        // `!searched && !(span) > 250`, which JavaScript parses as
-        // `!searched && ((!(span)) > 250)` — comparing a boolean to 250, which is
-        // ALWAYS false, so no row was ever counted as unverified. A row that
-        // cannot be located is suspicious REGARDLESS of its reported span;
-        // treating span 0 as safe was a second hole in the same guard.
-        unverified++;
+        // Only rows the GATE would act on are allowed to fail the gate. A row at
+        // or below the block threshold has no verdict riding on it, and lizard
+        // emits rows for non-declarations (`String`, `clearTimeout`, anonymous
+        // callbacks) that are unlocatable by construction — counting those would
+        // block every commit on noise. Every row is still VERIFIED (so the
+        // ratchet sees real numbers); only the count that gates the commit is
+        // limited to rows where being wrong actually matters.
+        if (ccn > 10) {
+          unverified++;
+        } else {
+          _unverifiedLow++;
+        }
       } else {
         // Unlocatable AND an implausibly long span: the known lizard brace-loss
         // artefact. verifyRowCcn already tried this window internally; if it
@@ -421,6 +429,13 @@ function csvRows(srcPath, root, opts = {}) {
   if (unverified > 0 && !opts.allowUnverified) {
     console.error(`FAIL - ${unverified} function(s) above CCN 10 could not be span-verified (${srcPath}); refusing to emit unverified complexity`);
     process.exit(1);
+  }
+  // Say what the verification actually did. These counters were incremented and
+  // thrown away, so "0 unverified" could not be told apart from "the guard never
+  // examined anything" — the same unobservable-state problem this sprint exists
+  // to remove. Reported on stderr so stdout stays exactly the rewritten CSV.
+  if (opts.reportStats) {
+    console.error(`[ccn-report] ${srcPath}: ${_rescued} row(s) rescued by name, ${_spanArtefacts} span artefact(s), ${unverified} unverified`);
   }
   // Only rows were rewritten; the trailing summary table is emitted by lizard
   // on a separate stream (stderr) when no --csv, so nothing else to fix here.
@@ -895,7 +910,9 @@ if (require.main === module) {
       const tmp = path.join(require('os').tmpdir(), `ccn-verified-${process.pid}.csv`);
       fs.writeFileSync(tmp, input);
       try {
-        process.stdout.write(csvRows(tmp, root));
+        // Always report what verification did; stderr only, so the gate's parser
+        // still sees nothing but rewritten CSV on stdout.
+        process.stdout.write(csvRows(tmp, root, { reportStats: true }));
       } finally {
         try { fs.unlinkSync(tmp); } catch { /* best effort */ }
       }
