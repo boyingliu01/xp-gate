@@ -235,7 +235,14 @@ function csvRows(srcPath, root, opts = {}) {
     const res = verifyRowCcn({ srcLines: sourceLines(rowPath), name, ccn, lineNo, endNo });
     if (ccn > 10 && !res.corrected) {
       const searched = findFunctionBody((sourceLines(rowPath) || []).slice(lineNo - 1, lineNo - 1 + 400), name);
-      if (!searched && !(endNo > lineNo ? endNo - lineNo + 1 : 0) > 250) unverified++;
+      // Both conditions must be parenthesised. The original read
+      // `!searched && !(span) > 250`, which JavaScript parses as
+      // `!searched && ((!(span)) > 250)` — comparing a boolean to 250, which is
+      // ALWAYS false, so no row was ever counted as unverified and the guard
+      // below could never fire. A short span is precisely the case where an
+      // unlocatable body is suspicious: there is nothing else it could be.
+      const reportedSpan = endNo > lineNo ? endNo - lineNo + 1 : 0;
+      if (!searched && reportedSpan > 0 && reportedSpan <= 250) unverified++;
     }
     if (!res.corrected) { out.push(line); continue; }
     const cols = parseCsvLine(line);
