@@ -49,6 +49,51 @@ function sha256File(filePath) {
  * @param {boolean} verify - Whether to verify SHA-256 after copy
  * @returns {number} Number of skills copied
  */
+/** Copy one skill directory wholesale. Returns false when it is not a skill. */
+function copyOneSkill(entry, sourceDir, destDir) {
+  if (!entry.isDirectory()) return false;
+  const skillDir = path.join(sourceDir, entry.name);
+  if (!fs.existsSync(path.join(skillDir, 'SKILL.md'))) return false;
+
+  const destSkillDir = path.join(destDir, entry.name);
+  // Remove existing directory if present (idempotent)
+  if (fs.existsSync(destSkillDir)) {
+    fs.rmSync(destSkillDir, { recursive: true, force: true });
+  }
+  // Copy entire skill directory (preserves references/, templates/, etc.)
+  fs.cpSync(skillDir, destSkillDir, { recursive: true });
+  console.log(`Copied: ${entry.name}`);
+  return true;
+}
+
+/**
+ * SHA-256 comparison for one skill. Returns the number of files that are
+ * missing or differ; a skill without a SKILL.md or without a destination is
+ * not a verify candidate and counts as zero errors.
+ */
+function verifyOneSkill(entry, sourceDir, destDir) {
+  const skillDir = path.join(sourceDir, entry.name);
+  const destSkillDir = path.join(destDir, entry.name);
+  if (!entry.isDirectory()) return 0;
+  if (!fs.existsSync(path.join(skillDir, 'SKILL.md')) || !fs.existsSync(destSkillDir)) return 0;
+
+  let errors = 0;
+  for (const srcFile of walkFiles(skillDir)) {
+    const relPath = path.relative(skillDir, srcFile);
+    const destFile = path.join(destSkillDir, relPath);
+    if (!fs.existsSync(destFile)) {
+      console.error(`[verify] ERROR: ${entry.name}/${relPath} — missing in destination`);
+      errors++;
+      continue;
+    }
+    if (sha256File(srcFile) !== sha256File(destFile)) {
+      console.error(`[verify] ERROR: ${entry.name}/${relPath} — SHA-256 mismatch`);
+      errors++;
+    }
+  }
+  return errors;
+}
+
 export function copySkills(sourceDir, destDir, verify = false) {
   if (!fs.existsSync(sourceDir) || !fs.statSync(sourceDir).isDirectory()) {
     console.error(`Error: Source directory not found: ${sourceDir}`);
@@ -56,75 +101,28 @@ export function copySkills(sourceDir, destDir, verify = false) {
   }
 
   fs.mkdirSync(destDir, { recursive: true });
-
-  let count = 0;
   const entries = fs.readdirSync(sourceDir, { withFileTypes: true });
 
+  let count = 0;
   for (const entry of entries) {
-    if (!entry.isDirectory()) continue;
-
-    const skillDir = path.join(sourceDir, entry.name);
-    const skillMd = path.join(skillDir, 'SKILL.md');
-
-    if (fs.existsSync(skillMd)) {
-      const destSkillDir = path.join(destDir, entry.name);
-      // Remove existing directory if present (idempotent)
-      if (fs.existsSync(destSkillDir)) {
-        fs.rmSync(destSkillDir, { recursive: true, force: true });
-      }
-      // Copy entire skill directory (preserves references/, templates/, etc.)
-      fs.cpSync(skillDir, destSkillDir, { recursive: true });
-      console.log(`Copied: ${entry.name}`);
-      count++;
-    }
+    if (copyOneSkill(entry, sourceDir, destDir)) count++;
   }
-
   console.log(`Total skills copied: ${count}`);
 
   // --verify: post-copy integrity check via SHA-256 comparison
-  if (verify) {
-    console.log('');
-    console.log('[verify] Checking SHA-256 integrity of copied skills...');
-    let errors = 0;
+  if (!verify) return count;
 
-    for (const entry of entries) {
-      if (!entry.isDirectory()) continue;
+  console.log('');
+  console.log('[verify] Checking SHA-256 integrity of copied skills...');
+  let errors = 0;
+  for (const entry of entries) errors += verifyOneSkill(entry, sourceDir, destDir);
 
-      const skillDir = path.join(sourceDir, entry.name);
-      const skillMd = path.join(skillDir, 'SKILL.md');
-      const destSkillDir = path.join(destDir, entry.name);
-
-      if (!fs.existsSync(skillMd) || !fs.existsSync(destSkillDir)) continue;
-
-      const srcFiles = walkFiles(skillDir);
-      for (const srcFile of srcFiles) {
-        const relPath = path.relative(skillDir, srcFile);
-        const destFile = path.join(destSkillDir, relPath);
-
-        if (!fs.existsSync(destFile)) {
-          console.error(`[verify] ERROR: ${entry.name}/${relPath} — missing in destination`);
-          errors++;
-          continue;
-        }
-
-        const srcHash = sha256File(srcFile);
-        const destHash = sha256File(destFile);
-
-        if (srcHash !== destHash) {
-          console.error(`[verify] ERROR: ${entry.name}/${relPath} — SHA-256 mismatch`);
-          errors++;
-        }
-      }
-    }
-
-    if (errors === 0) {
-      console.log(`[verify] OK: all ${count} skill(s) verified (SHA-256 match)`);
-    } else {
-      console.error(`[verify] FAIL: ${errors} checksum error(s) found`);
-      process.exit(1);
-    }
+  if (errors === 0) {
+    console.log(`[verify] OK: all ${count} skill(s) verified (SHA-256 match)`);
+  } else {
+    console.error(`[verify] FAIL: ${errors} checksum error(s) found`);
+    process.exit(1);
   }
-
   return count;
 }
 

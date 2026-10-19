@@ -36,49 +36,68 @@ const CONTROL_KEYWORDS = new Set([
   'case', 'break', 'continue', 'const', 'let', 'var', 'as', 'satisfies', 'keyof',
 ]);
 
-/**
- * Find the index of the `{` that opens a declaration body for the parameter
- * list starting at `parenIndex`.
- *
- * Everything between the closing `)` and the body is scanned with a small depth
- * tracker so that a `{` belonging to a type literal in the return annotation
- * (`extract(): Array<{value: number}> {`) is not mistaken for the body. The
- * body brace is the first `{` seen at depth 0.
- */
+// ---------------------------------------------------------------------------
+// Lizard parse note: these two helpers are laid out so that no declaration
+// carrying a return type annotation is immediately followed by a JSDoc block.
+// lizard 1.21.3 mis-scopes that combination and reports the pairing as one row
+// spanning every following function (measured here: findBodyBrace swallowed the
+// rest of the file at CCN 69). Keep the plain comment style above them.
+// ---------------------------------------------------------------------------
+
+// Advance one scan character against the type-literal depth. Returns the new
+// depth plus the index to resume from, so parenthesised groups are skipped whole.
+// The inline typed-return form is avoided deliberately: lizard 1.21.3 loses the
+// function boundary when a return annotation contains a brace literal.
+type ScanStep = { depth: number; resume: number };
+
+const stepDepth = (masked: string, c: string, i: number, depth: number): ScanStep => {
+  if (c === '(') {
+    const { end } = readParenGroup(masked, i);
+    return { depth, resume: end - 1 };
+  }
+  if (c === '<' || c === '[') return { depth: depth + 1, resume: i };
+  if (c === '>' || c === ']') return { depth: Math.max(0, depth - 1), resume: i };
+  if (c === '}') return { depth: Math.max(0, depth - 1), resume: i };
+  return { depth, resume: i };
+};
+
 function findBodyBrace(masked: string, parenIndex: number): number {
   if (masked[parenIndex] !== '(') return -1;
   const { end } = readParenGroup(masked, parenIndex);
   let depth = 0;
-  for (let i = end; i < masked.length; i++) {
+  let i = end;
+  while (i < masked.length) {
     const c = masked[i];
-    if (c === '(') { const g = readParenGroup(masked, i); i = g.end - 1; continue; }
-    if (c === '<' || c === '[') { depth++; continue; }
-    if (c === '>' || c === ']') { if (depth > 0) depth--; continue; }
     if (c === '{') {
       if (depth === 0) return i;
       depth++;
+      i++;
       continue;
     }
-    if (c === '}') { if (depth > 0) depth--; continue; }
-    if (c === ';' || c === '\n') {
-      // A line break before any `{` means this header has no braced body
-      // (e.g. an interface member or an overload signature).
-      if (depth === 0) return -1;
-    }
+    // A line break or semicolon before any brace means this header has no
+    // braced body (an interface member or an overload signature).
+    if ((c === ';' || c === '\n') && depth === 0) return -1;
+    const stepped = stepDepth(masked, c, i, depth);
+    depth = stepped.depth;
+    i = stepped.resume + 1;
   }
   return -1;
 }
 
-/** Index just past the matching `}` for the block opened at `open`. */
+// Index just past the matching closing brace for the block opened at open.
+// Written with explicit braces throughout: an unbraced else-if chain here made
+// lizard 1.21.3 extend the PREVIOUS function's span over this whole region.
 function findBlockEnd(masked: string, open: number): number {
   let depth = 0;
   for (let i = open; i < masked.length; i++) {
     const c = masked[i];
-    if (c === '{') depth++;
-    else if (c === '}') {
-      depth--;
-      if (depth === 0) return i + 1;
+    if (c === '{') {
+      depth++;
+      continue;
     }
+    if (c !== '}') continue;
+    depth--;
+    if (depth === 0) return i + 1;
   }
   return masked.length;
 }

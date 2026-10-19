@@ -98,6 +98,35 @@ const LANG_MARKERS: Array<{ lang: string; files: string[] }> = [
   { lang: 'go', files: ['go.mod'] },
 ];
 
+/** Dart vs Flutter, or null when there is no pubspec.yaml. */
+function detectDartFlutter(dir: string): string | null {
+  const pubspec = path.join(dir, 'pubspec.yaml');
+  if (!fs.existsSync(pubspec)) return null;
+  try {
+    const content = fs.readFileSync(pubspec, 'utf-8');
+    if (content.includes('flutter:') || fs.existsSync(path.join(dir, '.metadata'))) return 'flutter';
+  } catch { /* A pubspec we cannot read is still a Dart project. */ }
+  return 'dart';
+}
+
+/** JVM build files: Gradle wins over Maven, matching the original order. */
+function detectJvm(dir: string): string | null {
+  const hasGradle = fs.existsSync(path.join(dir, 'build.gradle'))
+    || fs.existsSync(path.join(dir, 'build.gradle.kts'));
+  if (hasGradle) return detectJvmLanguage(dir);
+  if (fs.existsSync(path.join(dir, 'pom.xml'))) return 'java';
+  return null;
+}
+
+/** Infrastructure-as-code by file extension, or null. */
+function detectIac(dir: string): string | null {
+  try {
+    const files = fs.readdirSync(dir);
+    if (files.some((f) => f.endsWith('.tf') || f === 'Dockerfile')) return 'iac';
+  } catch { /* An unreadable directory proves nothing. */ }
+  return null;
+}
+
 export function detectProjectLang(cwd?: string): string {
   const dir = cwd || process.cwd();
 
@@ -105,34 +134,14 @@ export function detectProjectLang(cwd?: string): string {
     if (marker.files.some((f) => fs.existsSync(path.join(dir, f)))) return marker.lang;
   }
 
-  // Java / Kotlin
-  if (fs.existsSync(path.join(dir, 'build.gradle')) || fs.existsSync(path.join(dir, 'build.gradle.kts'))) {
-    return detectJvmLanguage(dir);
-  }
-  if (fs.existsSync(path.join(dir, 'pom.xml'))) return 'java';
-
-  // Dart / Flutter
-  if (fs.existsSync(path.join(dir, 'pubspec.yaml'))) {
-    try {
-      const content = fs.readFileSync(path.join(dir, 'pubspec.yaml'), 'utf-8');
-      if (content.includes('flutter:') || fs.existsSync(path.join(dir, '.metadata'))) return 'flutter';
-    } catch { /* ignore */ }
-    return 'dart';
-  }
-
-  // PowerShell — check for .psd1/.psm1 or *.ps1 files
-  if (hasFileWithExtension(dir, ['.psd1', '.psm1', '.ps1'])) return 'powershell';
-
-  // Shell
-  if (hasFileWithExtension(dir, ['.sh', '.bash'])) return 'shell';
-
-  // IaC
-  try {
-    const files = fs.readdirSync(dir);
-    if (files.some(f => f.endsWith('.tf') || f === 'Dockerfile')) return 'iac';
-  } catch { /* ignore */ }
-
-  return 'unknown';
+  const candidates = [
+    detectJvm(dir),
+    detectDartFlutter(dir),
+    hasFileWithExtension(dir, ['.psd1', '.psm1', '.ps1']) ? 'powershell' : null,
+    hasFileWithExtension(dir, ['.sh', '.bash']) ? 'shell' : null,
+    detectIac(dir),
+  ];
+  return candidates.find((lang) => lang !== null) ?? 'unknown';
 }
 
 // ── PowerShell Support ──

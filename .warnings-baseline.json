@@ -7,10 +7,6 @@
     "totalWarnings": 19,
     "lastAnalyzed": "2026-10-08T19:22:51.574Z"
   },
-  "src/build-integrity/gate-10.ts": {
-    "totalWarnings": 5,
-    "lastAnalyzed": "2026-10-18T18:39:07.886Z"
-  },
   "src/mutation/runners/mutmut-runner.ts": {
     "totalWarnings": 11,
     "lastAnalyzed": "2026-10-14T15:41:31.674Z"
