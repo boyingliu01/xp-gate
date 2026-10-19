@@ -2,6 +2,39 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.29.0.0] - 2026-10-19
+
+**#537 per-language 覆盖矩阵**——关闭「非 TS 主语言门禁零覆盖但报告看起来全绿」这个盲区。核心主题：**SKIP 必须能自证是"不适用"、"工具缺失"还是"无变更"**，而不再是同一个字。
+
+### Added
+
+- **per-language 覆盖矩阵（#537, 9803eec5）**: quality-status JSON 新增 `coverageMatrix`、`languagesSource`、`coverageWarnings`。矩阵按 语言 × gate(3/4/6) 给出 `covered` / `not_applicable` / `no_changes` / `tool_missing` / `unknown`，由 `classify_coverage_reason()` 经由固定映射表决定。**fail-closed**：未识别的 reason 归为 `unknown`，绝不默认 `covered`；`covered` 只能由真正执行并通过（PASS/WARN）且无 skip reason 的门禁得到。
+- **`languagesSource` 字段**: 因为 `PROJECT_LANGS` 来自**本次变更文件的扩展名**而非仓库静态语言清单，只改 `.md` 时语言集合为空。矩阵必须连同来源一起报告，否则是在新地方重复同一个误导。取值 `override` / `config` / `changed_files` / `none`。
+- **Gate 6 记录 per-language reason（#537, 74f16bea + ad7b4cc5）**: archlint 无该语言 detector 时记 `no_archlint_detector`；`import-linter` / `arch-go` / Java 架构测试**配置缺失**时记 `architecture_not_configured`（此前静默 SKIP，矩阵会把它读成 covered——正是本功能要防止的假信心）。因 `declare -A` 在 bash 中是函数局部作用域，Gate 6 把结果拍平为全局 `GATE_6_LANG_REASONS`，报告侧经 `coverage_g6_reason_for()` 解析。
+
+### Fixed
+
+- **标量汇总不得给未测量的语言贴标签（#537, 94232261）**: 真实运行探针发现 `langs=[typescript iac] reasons=[iac=no_archlint_detector]` 时，**archlint 刚测过的 typescript 被标成 `tool_missing`**——矩阵输出了它存在的意义所要防止的那个谎。修法：标量是跨语言汇总，仅在完全没有 per-language 明细时才可代表所有语言。
+- **Gate 4 的 reason 词表补全（#537, 74f16bea）**: `no_matching_files_changed` → `no_changes`；`checker_not_found` → `tool_missing`；`checker_execution_error` → `unknown`（checker 跑了但崩了 = 什么都没测到，算 covered 就是原罪）。
+- **走查发现的三条 fail-open（#537, 88bfe6a6）**: python/go/java 分支配置缺失时 SKIP 但不记 reason，落成 covered——修好；`[ ... ] || true` 造成的恒真测试断言删除；手抄生产逻辑的测试改为直接对抽出的 `coverage_g6_reason_for()` 断言。
+
+### 验证
+
+- bats `issue-537-coverage-matrix.bats` **17/17**；6 个套件 **58/58**，0 失败。
+- `npx tsc --noEmit` OK。
+- vitest 10 failed / 2376 passed，与 sprint 前基线 `dd5aaed4` **完全相同**（既有失败，非本次引入）。
+- 4 次真实提交端到端验证，最终矩阵 `typescript.gate6=covered`、`iac.gate6=tool_missing`。
+- Delphi：R1 需求评审与 R2 设计评审各 3/3 APPROVED；code-walkthrough R1 抓 1 critical + 3 major（全真），修复后 R2 3/3 APPROVED。
+
+## [0.28.1.0] - 2026-10-19
+
+0.28.0 的 tag 打在 `f96b46be`，但两个真实修复落在其后（`a2f1b7a3` + `8bda4062`），因此**发布出去的 0.28.0 包里没有它们**。经解包核验：`grep -c "Gate MW skipped"` = 1 而两个修复均为 0。0.28.1 只做版本号推进，代码已在 main 上且已测试。
+
+### Fixed
+
+- **被跳过的 walkthrough 不再谎报 VERIFIED（a2f1b7a3）**: main 分支推送时 Gate MW 跳过，旧钩子仍打印 `✅ GATE MW: CODE WALKTHROUGH VERIFIED / Verdict: APPROVED`——一个什么都没校验的绿勾。
+- **扩展名缺失的钩子与 `.bats` 不再被当成文档（8bda4062）**: `githooks/pre-push` 与全部 `.bats` 曾被归为 documentation，于是「审查门禁」把自己排除在审查之外。
+
 ## [0.27.6.0] - 2026-10-18
 
 发布列车清算 6 个 open issues（#535/#536/#537/#538/#541/#542）+ r19/r20 code-walkthrough 修复。核心主题：**报告诚实性**——凡是"没有真正执行"的门禁，都必须能自证为什么没跑。r20 三席 Delphi walkthrough APPROVED（conf 8/9/9，consensus 100%）。
