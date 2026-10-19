@@ -186,7 +186,15 @@ function verifyRowCcn({ srcLines, name, ccn, lineNo, endNo }) {
   const startLine = Number(lineNo) || 0;
   const reportedSpan = endNo > startLine ? endNo - startLine + 1 : 0;
   const out = { ccn, inflated: false, corrected: false };
-  if (!srcLines || startLine <= 0 || !(ccn > 10)) return out;
+  // Verify EVERY row, not just ccn > 10. Measured on this repo: of 3449 functions
+  // lizard reports at CCN <= 10, 521 are actually higher once the body is read
+  // properly — renderGatePassRateChart is reported at 4 and is really 15. Gating
+  // verification on ccn > 10 therefore meant the ratchet compared raw
+  // UNDER-counts for the overwhelming majority of functions, and a function could
+  // rise from an under-reported 4 to a genuine 15 without the ratchet noticing.
+  // The cost is one extra body lookup per row, which is what makes the numbers
+  // mean anything.
+  if (!srcLines || startLine <= 0 || ccn <= 0) return out;
   const body = locateBodyAtRow(srcLines, name, startLine);
   let recomputed;
   if (body) {
@@ -210,8 +218,15 @@ function verifyRowCcn({ srcLines, name, ccn, lineNo, endNo }) {
 // Read a source file as lines, or null when unreadable (caller keeps lizard's
 // number and says so — an unverified row must never look verified).
 function readSourceLines(root, relPath) {
+  // lizard echoes back whatever path it was handed in the CSV path column, so an
+  // absolute target produces an absolute path here. Joining that onto root would
+  // seek <root>/<absolute>, which never exists — every row then reads as
+  // unlocatable, which is either a hard failure or (with allowUnverified) a pass
+  // on unverified numbers. Resolve absolute paths as themselves and confirm a
+  // relative one still lives under root.
+  const target = path.isAbsolute(relPath) ? relPath : path.join(root, relPath);
   try {
-    return fs.readFileSync(path.join(root, relPath), 'utf8').split(/\r?\n/);
+    return fs.readFileSync(target, 'utf8').split(/\r?\n/);
   } catch {
     return null;
   }
