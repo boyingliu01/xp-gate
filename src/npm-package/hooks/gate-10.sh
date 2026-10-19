@@ -53,9 +53,17 @@ else
     # lines to `read`; bash never rescans the result for separators. Its correct
     # reading rests on one property of the producer above, not of the loop:
     # `git diff --cached --name-only` terminates paths with LF and quotes control
-    # characters (a CR in a name arrives as the four bytes \215, never as a bare
-    # CR), so one line is exactly one path. Asserted for spaces and a leading '-'
     # by AC-490-04.
+    #
+    # #543: semgrep 1.171 ignores .semgrepignore ENTIRELY when files are passed
+    # as explicit targets (measured: file target -> an ignored finding survives
+    # every suppression form — ignore patterns, --exclude, --exclude-rule,
+    # --project-root; directory target + --include -> the ignore file is honored,
+    # proven fail-closed by removing it and watching the findings return). The
+    # gate therefore passes each staged file's DIRECTORY as a target plus one
+    # --include per staged basename. Coverage stays exact for the staged set
+    # (verified: scanned == staged); the only widening is same-basename siblings
+    # outside the staged set, which scan too — scanning MORE is the safe side.
     SEMGREP_ARGS=()
     SEMGREP_FILE_COUNT=0
     SEMGREP_DIRS_SEEN=$'\n'

@@ -101,13 +101,35 @@ evaluate_ccn_ratchet() {
 
   # Only function rows survive the conversion with a numeric CCN, which is what
   # the $2 guard below keys on.
-  printf '%s\n' "$csv_rows" | awk -F"$CSV_FS" -v flat="$flat" -v warn="$warn_threshold" -v block="$block_threshold" -v anon_marker="(anonymous)" -v anon_short="(anon)" '
+  #
+  # Duplicate-name tally: baselineKey() in scripts/ccn-report.cjs keys a name by
+  # line when it occurs more than once in a file, because two rows can otherwise
+  # share one entry and each regresses against the other. The rule is mirrored
+  # here so the hook and CI cannot disagree; the count is computed in shell
+  # because awk cannot see the whole file before grading its first row.
+  local dup_names
+  dup_names=$(printf '%s\n' "$csv_rows" | awk -F"$CSV_FS" '
+    $2 ~ /^[0-9]+$/ {
+      n = split($6, p, "@")
+      name = p[1]
+      path = (n >= 3) ? p[n] : $7
+      gsub(/\\/, "/", path)
+      count[path "::" name]++
+    }
+    END {
+      for (k in count) if (count[k] > 1) print k
+    }
+  ' || true)
+
+  printf '%s\n' "$csv_rows" | awk -F"$CSV_FS" -v flat="$flat" -v warn="$warn_threshold" -v block="$block_threshold" -v dups="$dup_names" -v anon_marker="(anonymous)" -v anon_short="(anon)" '
     BEGIN {
       n = split(flat, kv, "\n")
       for (i = 1; i <= n; i++) {
         eq = index(kv[i], "=")
         if (eq > 0) base[substr(kv[i], 1, eq - 1)] = substr(kv[i], eq + 1) + 0
       }
+      m = split(dups, duprow, "\n")
+      for (i = 1; i <= m; i++) if (length(duprow[i]) > 0) dup[duprow[i]] = 1
     }
     # FIELD INDEXING: $1 NLOC, $2 CCN, $3 token_len, $4 param_count,
     # $5 location size, $6 fn@start-end@path, $7 path, $8 name,
@@ -134,7 +156,9 @@ evaluate_ccn_ratchet() {
       if (name == anon_short) is_anon = 1
       start = (n2 >= 3) ? parts[2] : $10
       sub(/-.*/, "", start)
-      key = is_anon ? (path "::" anon_marker "@" start) : (path "::" name)
+      key = path "::" name
+      if (is_anon) key = path "::" anon_marker "@" start
+      else if ((path "::" name) in dup) key = path "::" name "@" start
       if (key in base) {
         if (ccn > base[key])      printf "BLOCK %s CCN=%d baseline=%d (ratchet: worse than recorded)\n", name, ccn, base[key]
         else if (ccn < base[key]) printf "LOWER %s CCN=%d baseline=%d (improved — refresh baseline when convenient)\n", name, ccn, base[key]
