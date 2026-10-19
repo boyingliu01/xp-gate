@@ -20,10 +20,61 @@
 # prints "OK|WARN|BLOCK|LOWER <fn> ..." verdict lines for every function row.
 # ============================================================================
 
+# Convert lizard CSV rows to unit-separator-delimited fields.
+#
+# The CSV is only ever parsed once, here, with the quote rules written out in
+# one place; downstream code then reads positional fields with no quoting to
+# worry about. gawk arrays are pass-by-value, so a helper function CANNOT fill
+# a caller-visible array, and `split($0, F, ",")` tears apart lizard's quoted
+# signature column (signatures contain commas). Both of those were live bugs:
+# every lookup fell through to the "new function" branch, so recorded
+# functions were graded against the flat threshold instead of their baseline.
+#
+# Output columns (this is real lizard 1.21.3 --csv output, 11 columns):
+#   1 NLOC, 2 CCN, 3 token_len, 4 param_count, 5 48 (location size),
+#   6 fn@start-end@path, 7 path, 8 name, 9 signature, 10 start, 11 end
+#
+# The separator is ASCII Unit Separator written via sprintf so the byte never
+# has to survive a shell/awk escape round trip: -F'\001' is NOT a reliable way
+# to name a control character (gawk treats the argument as a regex, and the
+# literal backslash path silently yields a separator that matches nothing, so
+# every row is read as a single field).
+CSV_FS=$'\x1f'
+
+csv_to_unit_separated() {
+  awk '
+    function emit(line,   cur, i, ch, q, nf) {
+      nf = 1; cur = ""; q = 0
+      for (i = 1; i <= length(line); i++) {
+        ch = substr(line, i, 1)
+        if (q) {
+          if (ch == "\"") { if (substr(line, i + 1, 1) == "\"") { cur = cur "\""; i++ } else q = 0 }
+          else cur = cur ch
+        } else if (ch == "\"") q = 1
+        else if (ch == ",") { f[nf++] = cur; cur = "" }
+        else cur = cur ch
+      }
+      f[nf] = cur
+      out = f[1]
+      for (i = 2; i <= nf; i++) out = out FS_OUT f[i]
+      print out
+    }
+    # Build the 0x1F byte from its numeric code: shell escapes into awk strings
+    # are fragile across gawk/mawk/Windows builds, but printf to an awk variable
+    # is unambiguous.
+    BEGIN { FS_OUT = sprintf("%c", 0x1F) }
+    { emit($0) }
+  '
+}
+
 evaluate_ccn_ratchet() {
   local baseline_file="$1"
   local warn_threshold="${CCN_WARN_THRESHOLD:-5}"
   local block_threshold="${CCN_BLOCK_THRESHOLD:-10}"
+
+  # Capture stdin up front: it is consumed twice (baseline rows and verdicts).
+  local awk_input
+  awk_input=$(cat)
 
   local baseline_json=""
   if [ -f "$baseline_file" ]; then
@@ -39,37 +90,47 @@ evaluate_ccn_ratchet() {
     | grep -oE '"[^"]+"[[:space:]]*:[[:space:]]*[0-9]+' \
     | sed 's/[[:space:]]//g; s/":/=/; s/"//g' || true)
 
-  awk -v flat="$flat" -v warn="$warn_threshold" -v block="$block_threshold" '
-    function fields(line, F,   cur, i, ch, q, cnt) {
-      cnt = 0; cur = ""; q = 0
-      for (i = 1; i <= length(line); i++) {
-        ch = substr(line, i, 1)
-        if (q) {
-          if (ch == "\"") { if (substr(line, i + 1, 1) == "\"") { cur = cur "\""; i++ } else q = 0 }
-          else cur = cur ch
-        } else if (ch == "\"") q = 1
-        else if (ch == ",") { F[++cnt] = cur; cur = "" }
-        else cur = cur ch
-      }
-      F[++cnt] = cur
-      return cnt
-    }
+  # Convert the CSV rows once into position-only fields, then grade them. The
+  # CSV quote rules live in csv_to_unit_separated and nowhere else; see the
+  # comment there for why parsing in-place inside awk does not work.
+  # Columns: $1 NLOC, $2 CCN, $3 token_len, $4 param_count, $5 location size,
+  #          $6 fn@start-end@path, $7 path, $8 name, $9 signature,
+  #          $10 start, $11 end
+  local csv_rows
+  csv_rows=$(printf '%s\n' "$awk_input" | csv_to_unit_separated || true)
+
+  # Only function rows survive the conversion with a numeric CCN, which is what
+  # the $2 guard below keys on.
+  printf '%s\n' "$csv_rows" | awk -F"$CSV_FS" -v flat="$flat" -v warn="$warn_threshold" -v block="$block_threshold" '
     BEGIN {
       n = split(flat, kv, "\n")
-      for (i = 1; i <= n; i++) { eq = index(kv[i], "="); if (eq > 0) base[substr(kv[i], 1, eq - 1)] = substr(kv[i], eq + 1) + 0 }
+      for (i = 1; i <= n; i++) {
+        eq = index(kv[i], "=")
+        if (eq > 0) base[substr(kv[i], 1, eq - 1)] = substr(kv[i], eq + 1) + 0
+      }
     }
-    /^[0-9]+,/ {
-      cnt = fields($0, F)
-      # Column order VERIFIED against lizard 1.21.3 --csv output:
-      #   NLOC, CCN, length, param_count, "fn@start-end@path", "path", name, ...
-      # (An earlier draft assumed CCN was field 5 and silently compared token
-      # counts — the bats fixture now pins this order with a real capture.)
-      ccn = F[2] + 0
-      n2 = split(F[5], parts, "@")
+    # FIELD INDEXING: $1 NLOC, $2 CCN, $3 token_len, $4 param_count,
+    # $5 location size, $6 fn@start-end@path, $7 path, $8 name,
+    # $9 signature, $10 start, $11 end.
+    # Those two lines are the entire column contract. Earlier revisions read
+    # CCN out of the identity column and name/path out of a shifted column, so
+    # nothing ever matched its baseline entry and every recorded function was
+    # graded as new code against the flat thresholds.
+    # NOTE: this awk program is single-quoted in shell. No apostrophe may
+    # appear anywhere between here and the closing quote.
+    $2 ~ /^[0-9]+$/ {
+      ccn = $2 + 0
+      n2 = split($6, parts, "@")
       name = parts[1]
-      path = (n2 >= 3) ? parts[n2] : F[6]
+      path = (n2 >= 3) ? parts[n2] : $7
       gsub(/\\/, "/", path)
-      key = path "::" name
+      # Anonymous callbacks are keyed by position: a file holds many of them and
+      # the baseline would otherwise keep only the last one parsed, so every
+      # other callback was graded against a stranger's number.
+      is_anon = (name == "(anonymous)" || name == "(anon)")
+      start = (n2 >= 3) ? parts[2] : $10
+      sub(/-.*/, "", start)
+      key = is_anon ? (path "::(anonymous)@" start) : (path "::" name)
       if (key in base) {
         if (ccn > base[key])      printf "BLOCK %s CCN=%d baseline=%d (ratchet: worse than recorded)\n", name, ccn, base[key]
         else if (ccn < base[key]) printf "LOWER %s CCN=%d baseline=%d (improved — refresh baseline when convenient)\n", name, ccn, base[key]
