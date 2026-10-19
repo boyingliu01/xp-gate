@@ -126,6 +126,38 @@ setup() {
   [ "$(classify_coverage_reason no_archlint_detector SKIP)" = "tool_missing" ]
 }
 
+@test "Gate 6 per-language reasons survive into the report function" {
+  # `declare -A` inside a function is function-local in bash, and the report is
+  # written by generate_quality_report() — a different function. So the gate
+  # must flatten its per-language reasons into a GLOBAL string. Found by
+  # running the hook for real: the matrix said tool_missing for typescript
+  # because the lookup inside the report saw an empty array.
+  run grep -q 'GATE_6_LANG_REASONS=' "$PRE_COMMIT"
+  [ "$status" -eq 0 ]
+  # The report must read the flattened string, never the assoc array.
+  run grep -q 'GATE_6_REASON_BY_LANG\[\$_cm_lang\]' "$PRE_COMMIT"
+  [ "$status" -ne 0 ]
+  run grep -q '_cm_g6_pairs=' "$PRE_COMMIT"
+  [ "$status" -eq 0 ]
+}
+
+@test "flattened lang=reason pairs parse back to the right language" {
+  # Same parsing shape the report uses, exercised directly.
+  GATE_6_LANG_REASONS="powershell=no_archlint_detector,typescript=tool_missing"
+  for lang in powershell typescript iac; do
+    pairs=",${GATE_6_LANG_REASONS},"
+    got=""
+    case "$pairs" in
+      *",${lang}="*) got="${pairs#*",${lang}="}"; got="${got%%,*}" ;;
+    esac
+    case "$lang" in
+      powershell) [ "$got" = "no_archlint_detector" ] ;;
+      typescript) [ "$got" = "tool_missing" ] ;;
+      iac)        [ -z "$got" ] ;;
+    esac
+  done
+}
+
 @test "pre-commit still parses after the change" {
   run bash -n "$PRE_COMMIT"
   [ "$status" -eq 0 ]
