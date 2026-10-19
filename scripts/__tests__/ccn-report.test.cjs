@@ -155,6 +155,40 @@ describe('ccn-report (per-file trustworthy measurement)', () => {
 
   /**
    * @test REQ-COMPLEXITY-RATCHET
+   * @intent verifyRowCcn is the only thing standing between a lizard parser
+   *         defect and a phantom CCN in the ratchet. If it silently trusts a
+   *         malformed span, the fallback is indistinguishable from no fallback
+   *         at all — the exact failure mode this sprint exists to remove.
+   * @covers AC-COMPLEXITY-001
+   */
+  it('keeps a malformed span that closes early out of the correction path', () => {
+    const mod = require(reportPath);
+    // The linter reports a span starting on the opening brace and ending far
+    // past the function. Whatever the numbers, the row must either be corrected
+    // to a defensible value or be reported as unlocatable — never passed through
+    // as if the original number were trustworthy.
+    const lines = ['function f() {', '  if (a) { return 1; }', '}', 'const tail = 2;', 'const more = 3;'];
+    const res = mod.verifyRowCcn({ srcLines: lines, name: 'f', ccn: 99, lineNo: 1, endNo: 5 });
+    const trustworthy = res.corrected === true || res.unlocatable === true;
+    expect(trustworthy).toBe(true);
+    if (res.corrected) {
+      expect(res.ccn).toBeLessThan(99);
+    }
+  });
+
+  it('is idempotent: verifying an already-correct count does not invent a change', () => {
+    const mod = require(reportPath);
+    const lines = ['function g() {', '  if (a) { return 1; }', '}', ''];
+    const first = mod.verifyRowCcn({ srcLines: lines, name: 'g', ccn: 99, lineNo: 1, endNo: 3 });
+    expect(first.corrected).toBe(true);
+    const again = mod.verifyRowCcn({ srcLines: lines, name: 'g', ccn: first.ccn, lineNo: 1, endNo: 3 });
+    // Re-verifying the corrected value must agree with itself.
+    expect(again.unlocatable).not.toBe(true);
+    expect(again.ccn).toBe(first.ccn);
+  });
+
+  /**
+   * @test REQ-COMPLEXITY-RATCHET
    * @intent The --check verdict must be the same judgment the pre-commit hook
    *         makes, and it must be able to fail at all. Before this existed the
    *         report could only print numbers: nothing in CI consulted the
