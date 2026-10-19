@@ -11,7 +11,6 @@ setup() {
   FIXTURE_REPO="$(mktemp -d)"
   export RATCHET_LIB="$REPO_ROOT/githooks/lib/ccn-ratchet.sh"
 }
-
 teardown() {
   rm -rf "$FIXTURE_REPO" 2>/dev/null || true
 }
@@ -144,4 +143,60 @@ run_eval() { # baseline-json-file ; csv rows on stdin
   # threshold (5) but under block, so it WARNs as new code.
   grep -q '^WARN walk CCN=7' "$FIXTURE_REPO/out"
   ! grep -q 'walk CCN=8 baseline=' "$FIXTURE_REPO/out"
+}
+
+@test "shell key derivation matches ccn-report's baselineKey for the same rows" {
+  # baselineKey() exists twice: once in scripts/ccn-report.cjs (the writer) and
+  # once in awk here (the reader). If they disagree, every recorded function is
+  # graded as new code and the ratchet silently degrades to flat thresholds —
+  # which is exactly the bug this sprint started from. This test derives the
+  # shell key for a row by reading the "at baseline" verdict it produces against
+  # a baseline containing only the key the CJS writer would emit, so a drift in
+  # either implementation fails here rather than in production.
+  local cjs
+  cjs="$REPO_ROOT/scripts/ccn-report.cjs"
+  [ -f "$cjs" ] || skip "ccn-report.cjs not present"
+
+  # Ask the real writer what keys it derives, for the exact shapes we grade.
+  local keys
+  keys=$(node -e '
+    const mod = require(process.argv[1]);
+    // baselineKey is exported for exactly this cross-check.
+    if (typeof mod.baselineKey !== "function") { process.exit(2); }
+    const nameCounts = new Map([["src/a.ts::walk", 2]]);
+    const cases = [
+      { file: "src/a.ts", name: "walk", line: 79 },
+      { file: "src/a.ts", name: "walk", line: 184 },
+      { file: "src/b.ts", name: "solo", line: 12 },
+      { file: "src/c.ts", name: "(anonymous)", line: 30 },
+    ];
+    for (const f of cases) console.log(JSON.stringify([f, mod.baselineKey(f, nameCounts)]));
+  ' "$cjs") || skip "baselineKey is not exported; cross-check not available"
+
+  # Build a baseline from the CJS-derived keys, then confirm the shell reader
+  # matches each one (an "at baseline" verdict means the key resolved).
+  local base="$FIXTURE_REPO/xbase.json"
+  printf '%s\n' "$keys" | node -e '
+    let s = "";
+    process.stdin.on("data", c => s += c).on("end", () => {
+      const out = {};
+      for (const line of s.split("\n").filter(Boolean)) {
+        const [, key] = JSON.parse(line);
+        out[key] = 8;
+      }
+      require("fs").writeFileSync(process.argv[1], JSON.stringify(out));
+    });
+  ' "$base"
+
+  # walk@79 (duplicated name -> line-suffixed key), solo (unique -> bare key),
+  # and the anonymous row must all resolve against the CJS-written baseline.
+  {
+    row 8 src/a.ts walk 79 92
+    row 8 src/a.ts walk 184 196
+    row 8 src/b.ts solo 12 20
+    row 8 src/c.ts '(anonymous)' 30 40
+  } | run_eval "$base" > "$FIXTURE_REPO/out"
+  grep -q '^OK walk CCN=8 at baseline' "$FIXTURE_REPO/out"
+  grep -q '^OK solo CCN=8 at baseline' "$FIXTURE_REPO/out"
+  grep -q '^OK (anonymous) CCN=8 at baseline' "$FIXTURE_REPO/out"
 }
