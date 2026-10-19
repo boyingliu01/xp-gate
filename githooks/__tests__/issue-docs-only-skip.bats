@@ -61,3 +61,20 @@ run_detect() { # file list on stdin -> "true"|"false"
   grep -q 'docs-only.sh' "$REPO_ROOT/githooks/pre-commit"
   grep -q 'docs_only_change' "$REPO_ROOT/githooks/pre-commit"
 }
+
+@test "every code-blind gate consults the docs-only verdict" {
+  # The short-circuit is worthless if a heavy gate forgets to read it. Gate 9
+  # (build-integrity) originally did: a markdown-only commit still paid ~11s for
+  # tsc against nothing new. Count the consult sites instead of anchoring on
+  # prose that sits far above the condition it guards.
+  consults=$(grep -c 'DOCS_ONLY_COMMIT" = true' "$REPO_ROOT/githooks/pre-commit")
+  # Gate 2, Gate 5, Gate 9 = three gates that must all read it.
+  [ "$consults" -ge 3 ] || { echo "only $consults gate(s) consult DOCS_ONLY_COMMIT, expected >= 3"; return 1; }
+}
+
+@test "the docs-only skip records SKIP, never PASS" {
+  # A gate that did not run must not be recorded as a pass. The Gate 9 branch
+  # sets both sub-statuses to SKIP explicitly for this reason.
+  grep -A6 'DOCS_ONLY_COMMIT" = true ]; then' "$REPO_ROOT/githooks/pre-commit" \
+    | grep -q 'GATE_9_TS_STATUS="SKIP"'
+}
