@@ -188,6 +188,22 @@ wc_java_json_violation_count() {
     flattened=$(tr '\n' ' ' <<< "$structural")
     tail_from_issues=$(sed -n 's/.*"issues"[[:space:]]*:[[:space:]]*\[/\n/p' <<< "$flattened")
     if [ -z "$tail_from_issues" ]; then
+      # `"issues": null` is a legitimate zero-violation report, not a broken one
+      # (#545). The Go producer's nil slice marshals to null, and it does so
+      # whenever the scan hid at least one info-level finding -- so a file whose
+      # only problems are info-level gets null while a fully clean file gets [].
+      # Whichever branch produced it, null means "no visible violations".
+      if sed -n 's/.*"issues"[[:space:]]*:[[:space:]]*null.*/found/p' <<< "$flattened" | grep -q found; then
+        # null is only trustworthy when the summary agrees there is nothing to
+        # report. A nonzero total_issues with null is the lying-tool shape.
+        null_total=$(sed -n 's/.*"total_issues"[[:space:]]*:[[:space:]]*\([0-9][0-9]*\).*/\1/p' <<< "$flattened")
+        if [ -n "$null_total" ] && [ "$null_total" -gt 0 ]; then
+          wc_java_diag "issues is null but total_issues=$null_total — the tool claims violations it did not report"
+          return 1
+        fi
+        echo 0
+        return 0
+      fi
       wc_java_diag 'no "issues" array found after the summary object — the response is not the {summary, issues} contract'
       return 1
     fi
