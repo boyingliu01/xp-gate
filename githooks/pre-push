@@ -945,11 +945,51 @@ if [[ "$XP_GATE_SKIP_UI_GATES" == "1" ]]; then
   AUDIT_ENTRY="{\"timestamp\":\"$(date -u +%Y-%m-%dT%H:%M:%SZ)\",\"branch\":\"$CURRENT_BRANCH\",\"commit\":\"$(git rev-parse HEAD)\",\"user\":\"$(git config user.name || echo 'unknown')\",\"reason\":\"$XP_GATE_BYPASS_REASON\",\"bypass_type\":\"ui-gates\"}"
   echo "$AUDIT_ENTRY" >> .audit-log.jsonl
 else
-    # Detect UI changes in pushed files
-    UI_DETECTION=$(echo "$PUSHED_FILES" | npx -y tsx src/npm-package/lib/ui-detector.ts --push-mode --from-stdin 2>/dev/null) || true
-    
-    IS_UI_SPRINT=$(echo "$UI_DETECTION" | jq -r '.isUiSprint' 2>/dev/null || echo "false")
-    
+    # Detect UI changes in pushed files.
+    #
+    # stderr is kept out of the captured value but its ABSENCE is no longer
+    # treated as a clean "no UI here" answer (#553). jq -r prints the empty
+    # string and exits 0 on empty input, so the old `|| echo "false"` fallback
+    # was unreachable; an empty verdict became "", which is not "true", which
+    # silently took the "No UI changes detected — skipping" branch. A push whose
+    # only change was src/ui/streamlit_app.py was therefore told there was
+    # nothing to review — the failure Gate UI exists to prevent, inverted.
+    UI_DETECTION=$(echo "$PUSHED_FILES" | npx -y tsx src/npm-package/lib/ui-detector.ts --push-mode --from-stdin 2>/dev/null)
+    UI_DETECT_EXIT=$?
+
+    if [ "$UI_DETECT_EXIT" -eq 0 ] && [ -n "$UI_DETECTION" ]; then
+      IS_UI_SPRINT=$(echo "$UI_DETECTION" | jq -r 'if type == "object" then (.isUiSprint | tostring) else "unknown" end' 2>/dev/null)
+    else
+      IS_UI_SPRINT=""
+    fi
+    # Three answers, not two. "" (detector missing, crashed, or emitted nothing)
+    # is "unknown", and unknown must never read as "no UI".
+    if [ -z "$IS_UI_SPRINT" ] || [ "$IS_UI_SPRINT" = "null" ]; then
+      IS_UI_SPRINT="unknown"
+    fi
+
+    if [ "$IS_UI_SPRINT" = "unknown" ]; then
+      # A missing detector must not disable UI review. Fall back to a path
+      # check over the same file list: a cheap, conservative substitute for a
+      # verdict we do not have.
+      UI_PATH_HITS=$(echo "$PUSHED_FILES" | grep -Ei '(^|/)(src/ui|ui|components|pages|views|screens)/|[.](tsx|jsx|vue|svelte|css|scss|sass|less)$' || true)
+      if [ -n "$UI_PATH_HITS" ]; then
+        echo ""
+        echo "❌ Gate UI: could not evaluate the UI verdict (detector unavailable or produced no verdict, exit ${UI_DETECT_EXIT})."
+        echo "   This push touches UI-looking paths:"
+        echo "$UI_PATH_HITS" | sed 's/^/     /'
+        echo ""
+        echo "   The gate cannot claim there is nothing to review when it never got an answer."
+        echo "   Fix: install the detector (npx -y tsx must be able to load src/npm-package/lib/ui-detector.ts),"
+        echo "   or run the review explicitly: xp-gate ui-review"
+        echo "   To accept the risk for this push: XP_GATE_SKIP_UI_GATES=1 XP_GATE_BYPASS_REASON=\"<why>\""
+        echo ""
+        exit 1
+      fi
+      echo "ℹ️  Gate UI: detector unavailable (exit ${UI_DETECT_EXIT}) and no UI-looking paths in this push — nothing to review."
+      IS_UI_SPRINT="false"
+    fi
+
     if [[ "$IS_UI_SPRINT" == "true" ]]; then
       UI_RESULT_FILE=".ui-gate-result.json"
       MISSING_RESULTS=()
