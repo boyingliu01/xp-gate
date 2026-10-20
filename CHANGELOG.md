@@ -2,6 +2,30 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.30.0.0] - 2026-10-20
+
+**把「两侧各写一份、靠测试保持一致」换成「一份数据、编译期就一致」**——#505 的模块查找顺序、#404 的变异测试证据，以及过程中挖出的 Gate 3 假拦截与「未运行记为 PASS」两个真实缺陷。
+
+### Added
+
+- **钩子模块查找顺序成为单一数据源（#505, 98e107dd）**: 查找顺序不再是 shell 和 JS 各写一份靠 parity 测试互相盯着，而是作为数据放在 `src/npm-package/lib/hook-module-resolution.js`，`doctor.js` 直接 `require()`。钩子在提交路径上不能 require JS，所以 `scripts/generate-hook-resolution.cjs` 把它生成为 shell 投影 `githooks/hook-module-resolution.sh`，钩子在任何 tier 决策之前先 source。`--check` 在生成文件过期时退出 1，并有测试钉住。覆盖 adapter tiers、gate tiers（产出**目录**而非 probe 文件），以及 `ADAPTER_DIR` 级联本身——那是后续所有查找所依赖的上游决策。
+- **`doctor --sync-hooks` 新增 `HOOK_SUPPORT_FILES`**: 生成的 shell 数据文件不是 Git 入口点，原本不在同步范围内，升级后的安装会在 source 行直接死掉（FATAL）。现在跟 hook 一起装。
+
+### Fixed
+
+- **Gate 3 假拦截（独立缺陷，98e107dd）**: `ccn-report.cjs --write-baseline` 只记录 `bucket === 'production'` 的行，而 `bucketFor()` 把 `src/npm-package/**`、`plugins/*/src/**` 归为 `mirror`、把 `__tests__/`、`*.test.*` 归为 `test`；但 `gate-3.sh` 评分时不过滤任何一类。结果是**任何触碰这些目录的提交都被 BLOCKED，且在未修改的 HEAD 上同样 BLOCKED**（`doctorDelphi` CCN=106，基线里永远是 0 条记录）——一个无法通过改代码清除的假拦截。现在评分范围与基线写入器对齐；镜像树仍通过其 canonical 源受保护，因此不可被用来规避检查。
+- **未分配状态的 gate 被记为 PASS（81dd7464）**: 已安装副本被手工改过 9 处而 `githooks/` 从未收到，两份文件持续不一致。规则是：PASS 意味着「检查跑了且没发现问题」。`GATE_6_STATUS` 在两个刚打印「SKIPPED - not configured/available」的分支之后被无条件赋成 `PASS`，把「什么都没检查」变成计分的成功；reporting 循环对除 12 之外的所有 gate 默认 PASS；JSON 与覆盖矩阵发射器也有同样的默认。这些改动不改变任何 gate 的**判断**，只改变「缺席的判断」被报告成什么。
+- **Gate M 的 journal 丢弃全部证据（#404, c97d9929）**: 68 份 journal 里，Gate M 那行的 `details` 是硬编码空对象，`GATE_M_STATUS` 从未被赋值——所以无论实际跑成什么，永远记成 SKIP。实测 62 份跳过原因为空 `{}`，「Stryker 没装」和「本次推送没有可变异文件」这两种性质相反的结论事后完全一样。现在记录 `skip_reason` / `duration_ms` / `mutation_score`，5 个跳过点各自写入具体原因，TIMEOUT 与意外退出码也记录状态。
+- **行尾符 CRLF 破坏钩子（81dd7464）**: 已安装副本混入 CRLF，导致跨行的 `$()` 在 token 中间被截断。两份副本现在都是 LF 且与 `githooks/` 逐字节一致。
+
+### Changed
+
+- **`.xp-gate/full-audit/` 加入 .gitignore（6e4c0359）**: 其余 `.xp-gate/` 是按文件逐个忽略的，这个目录漏了，审计跑完就变成 untracked 条目。1.2MB 的 gitleaks 历史与 semgrep JSON 是产出物，不是源码。
+
+### Also
+
+本轮还修复了 #537 sprint 遗留的四个「门禁无法履职」问题：`errexit-leak-guard` 只匹配 `source <path>` 而完全看不见 10 处 `source_gate_lib` 调用；`dead-plugin` 扫描 gitignore 的暂存目录；`retro` 的 `duration_anomaly` 过滤被回滚导致均值 33433ms（应为 150ms）；`skills-mirror-parity` 的 qoder 副本落后于 canonical。全部修复后 vitest 从 10 个失败转为全绿。
+
 ## [0.29.0.0] - 2026-10-19
 
 **#537 per-language 覆盖矩阵**——关闭「非 TS 主语言门禁零覆盖但报告看起来全绿」这个盲区。核心主题：**SKIP 必须能自证是"不适用"、"工具缺失"还是"无变更"**，而不再是同一个字。
