@@ -46,8 +46,11 @@ if [ -z "$SEMGREP_CMD" ]; then
   # shellcheck disable=SC2034
   GATE_10_REASON="tool_not_installed"
 else
-  # Get staged files filtered to Semgrep-supported languages
-  SEMGREP_FILES=$(git diff --cached --name-only --diff-filter=ACM 2>/dev/null | grep -E '\.(ts|tsx|js|jsx|py|go|java|c|cpp|cs|rb|php|scala|swift)$' || true)
+  # Get staged files filtered to Semgrep-supported languages.
+  # #547 finding 3: ps1|psm1 were missing, so a PowerShell-only commit never
+  # reached semgrep even when Gate 10 ran -- the SAST gate was simply absent
+  # for that language.
+  SEMGREP_FILES=$(git diff --cached --name-only --diff-filter=ACM 2>/dev/null | grep -E '\.(ts|tsx|js|jsx|py|go|java|c|cpp|cs|rb|php|scala|swift|ps1|psm1)$' || true)
 
   if [ -z "$SEMGREP_FILES" ]; then
     echo "     ⏭️  SKIPPED - SAST (no supported language files changed)"

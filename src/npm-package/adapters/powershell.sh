@@ -17,16 +17,46 @@
 #     SKIP for now.
 
 # Detect PowerShell executable (prefer pwsh 7+, fallback to powershell.exe 5.1)
+#
+# #547 finding 4: `command -v pwsh` alone is not enough. Under git-bash with a
+# stripped PATH, the standard Windows installs are invisible even though the
+# user can run pwsh from any terminal: pwsh 7 installs to
+# %LOCALAPPDATA%\Microsoft\WindowsApps (a PATH alias that git-bash does not
+# always inherit) and PS 5.1 lives at System32\WindowsPowerShell\v1.0. Probing
+# those absolute paths converts a silent degrade into a working gate.
+#
+# The order is unchanged: whatever is on PATH wins, absolute paths are a
+# fallback, and an empty result still means "not available" -- this widens
+# detection, it does not invent an interpreter.
 _detect_pwsh() {
   if command -v pwsh &>/dev/null 2>&1; then
     echo "pwsh"
-  elif command -v powershell.exe &>/dev/null 2>&1; then
-    echo "powershell.exe"
-  elif command -v powershell &>/dev/null 2>&1; then
-    echo "powershell"
-  else
-    echo ""
+    return 0
   fi
+  if command -v powershell.exe &>/dev/null 2>&1; then
+    echo "powershell.exe"
+    return 0
+  fi
+  if command -v powershell &>/dev/null 2>&1; then
+    echo "powershell"
+    return 0
+  fi
+  # Windows absolute-path fallbacks.
+  local candidate
+  for candidate in \
+    "${LOCALAPPDATA:-$HOME/AppData/Local}/Microsoft/WindowsApps/pwsh.exe" \
+    "/c/Program Files/PowerShell/7/pwsh.exe" \
+    "/c/Program Files/PowerShell/6/pwsh.exe" \
+    "/c/Windows/System32/WindowsPowerShell/v1.0/powershell.exe" \
+    "/mnt/c/Program Files/PowerShell/7/pwsh.exe" \
+    "/mnt/c/Windows/System32/WindowsPowerShell/v1.0/powershell.exe"; do
+    if [ -n "$candidate" ] && [ -x "$candidate" ]; then
+      echo "$candidate"
+      return 0
+    fi
+  done
+  echo ""
+  return 1
 }
 
 _find_powershell_files() {
@@ -87,18 +117,49 @@ run_static_analysis() {
     echo "Running PSScriptAnalyzer static analysis on PowerShell scripts..."
     # Recursively analyze all .ps1 files from repo root
     # Exit with non-zero if Error or Warning severity issues found
-    "$PWSH" "${POWERSHELL_ARGS[@]}" "
+    local PSSA_RC=0
+    local PSSA_OUT
+    PSSA_OUT=$("$PWSH" "${POWERSHELL_ARGS[@]}" "
+      if (-not (Get-Module -ListAvailable -Name PSScriptAnalyzer)) {
+        Write-Output 'PSSA_MODULE_MISSING'
+        exit 0
+      }
       \$results = Invoke-ScriptAnalyzer -Path . -Recurse -Severity Error,Warning
       if (\$results) {
         \$results | Format-Table -AutoSize
         exit 1
       }
       exit 0
-    "
-    return $?
+    " 2>&1) || PSSA_RC=$?
+    printf '%s\n' "$PSSA_OUT"
+    case "$PSSA_RC" in
+      0)
+        if printf '%s\n' "$PSSA_OUT" | grep -q 'PSSA_MODULE_MISSING'; then
+          # #547 finding 2: the engine exists but its module does not. That is
+          # NOT a pass -- nothing was analysed. The XP_G1_REASON protocol (the
+          # one the java branch uses) turns this into a WARN that stays in the
+          # scoring denominator instead of vanishing.
+          echo "XP_G1_REASON: PSScriptAnalyzer module not installed (Install-Module PSScriptAnalyzer)"
+          return 3
+        fi
+        return 0
+        ;;
+      1)
+        return 1   # real findings -> BLOCK upstream
+        ;;
+      *)
+        echo "XP_G1_REASON: PSScriptAnalyzer run failed (exit $PSSA_RC)"
+        return 2   # unusable -> fail closed upstream
+        ;;
+    esac
   else
-    echo "PowerShell not available, skipping PowerShell static analysis"
-    return 0
+    # #547 finding 4: previously `return 0`, i.e. "no PowerShell available"
+    # was indistinguishable from "PowerShell is clean" -- a silent false pass on
+    # a PowerShell commit. Return the not-available verdict so the caller can
+    # WARN and record a reason.
+    echo "PowerShell executable not found (probe: pwsh, powershell.exe, and the standard Windows install paths)"
+    echo "XP_G1_REASON: pwsh not available (install PowerShell 7: https://aka.ms/powershell)"
+    return 3
   fi
 }
 
