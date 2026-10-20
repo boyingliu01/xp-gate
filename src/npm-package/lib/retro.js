@@ -117,12 +117,132 @@ function readSprintHistory(dir, sprintFilter) {
 }
 
 /**
+ * Read Gate M rows out of the pre-push journals (#404 P1-3).
+ *
+ * Gate M lives in `.xp-gate/reports/pre-push/*.json`, not in the audit log: the
+ * audit log only sees the 12 pre-commit gates. Reading it here is the only way
+ * a retrospective can say anything about mutation testing at all.
+ *
+ * @param {string} dir - Repository root
+ * @returns {object[]} One entry per journal that carried a Gate M row
+ */
+function readGateMRuns(dir) {
+  const journalDir = path.join(dir, '.xp-gate', 'reports', 'pre-push');
+  if (!fs.existsSync(journalDir)) return [];
+
+  const runs = [];
+  for (const f of fs.readdirSync(journalDir).filter(n => n.endsWith('.json'))) {
+    let journal;
+    try {
+      journal = JSON.parse(fs.readFileSync(path.join(journalDir, f), 'utf8'));
+    } catch {
+      continue;
+    }
+    const rows = Array.isArray(journal.gates) ? journal.gates : [];
+    // The TS gate is "M"; the per-language variants are M-Python/M-Go/... and
+    // are counted separately by the caller when it wants them.
+    const row = rows.find(r => r && r.id === 'M');
+    if (!row) continue;
+    const details = row.details && typeof row.details === 'object' ? row.details : {};
+    runs.push({
+      timestamp: journal.timestamp || '',
+      status: row.status || 'UNKNOWN',
+      skipReason: details.skip_reason || '',
+      durationMs: details.duration_ms != null && details.duration_ms !== '' ? Number(details.duration_ms) : null,
+      score: details.mutation_score != null && details.mutation_score !== '' ? Number(details.mutation_score) : null,
+    });
+  }
+  return runs;
+}
+
+/**
+ * Summarise Gate M runs for the report.
+ * @param {object[]} runs - Output of readGateMRuns
+ * @returns {object} Counts plus measured score/duration samples
+ */
+function summariseGateM(runs) {
+  const total = runs.length;
+  const skipped = runs.filter(r => r.status === 'SKIP').length;
+  const timedOut = runs.filter(r => r.status === 'TIMEOUT').length;
+  // The journals write "BLOCKED" (pre-push's literal), not "BLOCK". Matching
+  // only one spelling silently reported 5 real mutation blocks as zero, which
+  // is the exact failure mode this whole issue is about.
+  const blocked = runs.filter(r => r.status === 'BLOCK' || r.status === 'BLOCKED').length;
+  const passed = runs.filter(r => r.status === 'PASS').length;
+  // A journal row that predates the #404 fix has an empty details object; that
+  // is "this run told us nothing", not "this run scored zero".
+  const measured = runs.filter(r => Number.isFinite(r.score));
+  const durations = runs.filter(r => Number.isFinite(r.durationMs)).map(r => r.durationMs);
+  const reasons = {};
+  for (const r of runs) {
+    if (r.status !== 'SKIP' && r.status !== 'TIMEOUT') continue;
+    const key = r.skipReason || '(no reason recorded)';
+    reasons[key] = (reasons[key] || 0) + 1;
+  }
+  return { total, skipped, timedOut, blocked, passed, measured, durations, reasons };
+}
+
+/**
+ * Build the Gate M retrospective section.
+ * @param {object[]} runs - Output of readGateMRuns
+ * @returns {string[]} Markdown lines
+ */
+function buildGateMSection(runs) {
+  const L = [];
+  L.push('## Gate M (Mutation Testing) (#404)');
+
+  if (runs.length === 0) {
+    L.push('No pre-push journals found — Gate M has never been measured here.');
+    L.push('');
+    return L;
+  }
+
+  const s = summariseGateM(runs);
+  const pct = n => `${((n / s.total) * 100).toFixed(1)}%`;
+
+  L.push(`- Runs recorded: ${s.total} (PASS ${s.passed}, BLOCK ${s.blocked}, TIMEOUT ${s.timedOut}, SKIP ${s.skipped})`);
+  L.push(`- Skip rate: ${pct(s.skipped)}; timeout rate: ${pct(s.timedOut)}`);
+
+  if (s.measured.length > 0) {
+    const scores = s.measured.map(r => r.score).sort((a, b) => a - b);
+    const median = scores[Math.floor(scores.length / 2)];
+    const p10 = scores[Math.floor(scores.length * 0.1)];
+    const p90 = scores[Math.min(scores.length - 1, Math.floor(scores.length * 0.9))];
+    L.push(`- Mutation score over ${scores.length} measured run(s): median ${median.toFixed(1)}%, p10 ${p10.toFixed(1)}%, p90 ${p90.toFixed(1)}%`);
+  } else {
+    // Printing "median 0%" or omitting the line would both read as a healthy
+    // result. There is no sample, and the report must say exactly that.
+    L.push('- Mutation score: no measured runs — the score has never been recorded in this window.');
+  }
+
+  if (s.durations.length > 0) {
+    const sorted = [...s.durations].sort((a, b) => a - b);
+    const p50 = sorted[Math.floor(sorted.length / 2)];
+    const max = sorted[sorted.length - 1];
+    L.push(`- Duration over ${sorted.length} measured run(s): p50 ${p50}ms, max ${max}ms`);
+  } else {
+    L.push('- Duration: no measured runs.');
+  }
+
+  const reasonKeys = Object.keys(s.reasons);
+  if (reasonKeys.length > 0) {
+    L.push('- Why it did not run:');
+    for (const key of reasonKeys.sort((a, b) => s.reasons[b] - s.reasons[a])) {
+      L.push(`  - ${key}: ${s.reasons[key]}`);
+    }
+  }
+
+  L.push('');
+  return L;
+}
+
+/**
  * Build the Markdown retrospective report.
  * @param {object} opts - Report data
  * @returns {string} Markdown report
  */
 function buildReport(opts) {
-  const { days, commits, audit, quality, sprints } = opts;
+  const { days, commits, audit, quality, sprints, gateMRuns = [] } = opts;
   const now = new Date();
   const start = new Date(now.getTime() - days * 86400000);
   const L = [];
@@ -201,6 +321,9 @@ function buildReport(opts) {
   }
   L.push('');
 
+  // Gate M (Mutation Testing) — #404 P1-3
+  L.push(...buildGateMSection(gateMRuns));
+
   // Quality Trend
   L.push('## Quality Trend');
   if (quality.length === 0) {
@@ -238,6 +361,7 @@ async function handleRetro(args = []) {
   const audit = readAuditEntries(dir);
   const quality = readQualityHistory(dir);
   const sprints = readSprintHistory(dir, sprintFilter);
+  const gateMRuns = readGateMRuns(dir);
 
   if (jsonFlag) {
     const gateEntries = audit.filter(e => e.gate_id);
@@ -249,11 +373,24 @@ async function handleRetro(args = []) {
       rework_rates: sprints.filter(s => s.metrics?.rework_rate != null).map(s => ({ id: s.id, rate: s.metrics.rework_rate })),
       evidence_skipped: audit.filter(e => e.event === 'evidence_skipped'),
       quality: quality.map(q => ({ timestamp: q.timestamp, score: q.score })),
+      gate_m: (() => {
+        const s = summariseGateM(gateMRuns);
+        return {
+          runs: s.total,
+          passed: s.passed,
+          blocked: s.blocked,
+          timed_out: s.timedOut,
+          skipped: s.skipped,
+          skip_reasons: s.reasons,
+          measured_scores: s.measured.map(r => r.score),
+          measured_durations_ms: s.durations,
+        };
+      })(),
     }, null, 2));
     return 0;
   }
 
-  console.log(buildReport({ days, commits, audit, quality, sprints }));
+  console.log(buildReport({ days, commits, audit, quality, sprints, gateMRuns }));
   return 0;
 }
 
