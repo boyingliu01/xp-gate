@@ -12,7 +12,12 @@ GATE_10_START=$(gate_start_ms)
 GATE_10_STATUS=""
 # #536: audit trail for "did this commit actually get scanned?". The report
 # surfaces reason + scanned_files so a non-scan never reads as a clean PASS.
+# These are consumed by the SOURCING parent (pre-commit reads them after
+# `source gate-10.sh`); shellcheck's single-file view cannot see that, hence
+# the SC2034 disable.
+# shellcheck disable=SC2034
 GATE_10_REASON=""
+# shellcheck disable=SC2034
 GATE_10_SCANNED_FILES=0
 
 # Semgrep availability check
@@ -21,6 +26,17 @@ if command -v semgrep >/dev/null 2>&1; then
   SEMGREP_CMD="semgrep"
 elif [ -f "$HOME/.local/bin/semgrep" ]; then
   SEMGREP_CMD="$HOME/.local/bin/semgrep"
+else
+  # Windows pip --user installs live under %APPDATA%\Python\<ver>\Scripts,
+  # which is NOT on git-bash's PATH. Probe the glob by exit code, never by
+  # stdout (v2026-10-16 batch-3 hardening; restored after upstream update
+  # 2026-10-20 dropped it).
+  for candidate in "$HOME"/AppData/Roaming/Python/*/Scripts/semgrep.exe; do
+    if [ -f "$candidate" ]; then
+      SEMGREP_CMD="$candidate"
+      break
+    fi
+  done
 fi
 
 if [ -z "$SEMGREP_CMD" ]; then
@@ -32,7 +48,9 @@ if [ -z "$SEMGREP_CMD" ]; then
   GATE_10_REASON="tool_not_installed"
 else
   # Get staged files filtered to Semgrep-supported languages
-  SEMGREP_FILES=$(git diff --cached --name-only --diff-filter=ACM 2>/dev/null | grep -E '\.(ts|tsx|js|jsx|py|go|java|c|cpp|cs|rb|php|scala|swift)$' || true)
+  # ps1/psm1: semgrep's generic-text rules do scan PowerShell (v2026-10-16
+  # batch-3 hardening; restored after upstream update 2026-10-20 dropped it).
+  SEMGREP_FILES=$(git diff --cached --name-only --diff-filter=ACM 2>/dev/null | grep -E '\.(ts|tsx|js|jsx|py|go|java|c|cpp|cs|rb|php|scala|swift|ps1|psm1)$' || true)
 
   if [ -z "$SEMGREP_FILES" ]; then
     echo "     ⏭️  SKIPPED - SAST (no supported language files changed)"
@@ -178,6 +196,8 @@ console.log("");});
       fi
       echo "     ⏭️  SKIPPED - SAST (semgrep runtime error)"
       GATE_10_STATUS="SKIP"
+      # Consumed by the sourcing parent (pre-commit report JSON), not here.
+      # shellcheck disable=SC2034
       GATE_10_REASON="semgrep_runtime_error"
     elif [ "$V_BLOCKING" -gt 0 ]; then
       echo ""
@@ -192,9 +212,13 @@ console.log("");});
       echo "$FINDING_DETAILS"
       echo "  Run 'semgrep scan --config=p/security-audit' to review all findings."
       GATE_10_STATUS="FAIL"
+      # Consumed by the sourcing parent (pre-commit report JSON), not here.
+      # shellcheck disable=SC2034
       GATE_10_SCANNED_FILES=$SEMGREP_FILE_COUNT
       exit 1
     else
+      # Consumed by the sourcing parent (pre-commit report JSON), not here.
+      # shellcheck disable=SC2034
       GATE_10_SCANNED_FILES=$SEMGREP_FILE_COUNT
       echo ""
       echo "     ✅ PASSED - No blocking vulnerabilities (files scanned: $SEMGREP_FILE_COUNT)"
