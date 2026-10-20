@@ -481,6 +481,9 @@
       "AC-002-06",
       "AC-002-07",
       "AC-002-08"
+    ],
+    "githooks/__tests__/issue-558-semgrep-dir-dedup.test.bats": [
+      "AC-558-01"
     ]
   }
 }
