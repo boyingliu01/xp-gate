@@ -181,6 +181,65 @@ read_verdict() {
   json_extract "$APPROVED_FILE" '.verdict // ""' || echo ""
 }
 
+# --- Helper: sprint age in days, or empty if unknown ---
+# Reads status + started_at from sprint-state.json. #551: the gate judged only
+# `phase` and the delphi verdict, so a state file left at status=in_progress
+# reported "sprint phase 6 validated" on unrelated commits for as long as
+# nobody fixed it. An advancing sprint and an abandoned one were
+# indistinguishable -- worse than SKIP, because SKIP is honest and PASS lies.
+read_sprint_status() {
+  if [ ! -f "$SPRINT_STATE_JSON" ] || [ "$JSON_PARSER" = "none" ]; then
+    echo ""
+    return
+  fi
+  json_validate "$SPRINT_STATE_JSON" || { echo ""; return; }
+  json_extract "$SPRINT_STATE_JSON" '.status // ""' 2>/dev/null || echo ""
+}
+
+read_sprint_age_days() {
+  if [ ! -f "$SPRINT_STATE_JSON" ] || [ "$JSON_PARSER" = "none" ]; then
+    echo ""
+    return
+  fi
+  json_validate "$SPRINT_STATE_JSON" || { echo ""; return; }
+  local started
+  started=$(json_extract "$SPRINT_STATE_JSON" '.started_at // ""' 2>/dev/null || echo "")
+  # Older state files may carry updated_at only; either is the last sign of life.
+  if [ -z "$started" ] || [ "$started" = "null" ]; then
+    started=$(json_extract "$SPRINT_STATE_JSON" '.updated_at // ""' 2>/dev/null || echo "")
+  fi
+  if [ -z "$started" ] || [ "$started" = "null" ]; then
+    echo ""
+    return
+  fi
+  # Portable ISO-8601 -> epoch. GNU date first, BSD date second, node last; if
+  # all fail the age is unknown and the caller must not invent one.
+  local epoch=""
+  epoch=$(date -u -d "$started" +%s 2>/dev/null || true)
+  if [ -z "$epoch" ]; then
+    epoch=$(date -u -j -f "%Y-%m-%dT%H:%M:%SZ" "$started" +%s 2>/dev/null || true)
+  fi
+  if [ -z "$epoch" ] && command -v node >/dev/null 2>&1; then
+    epoch=$(node -e "const t=Date.parse(process.argv[1]);if(Number.isFinite(t))process.stdout.write(String(Math.floor(t/1000)))" "$started" 2>/dev/null || true)
+  fi
+  if [ -z "$epoch" ]; then
+    echo ""
+    return
+  fi
+  local now
+  now=$(date -u +%s)
+  local age=$(( (now - epoch) / 86400 ))
+  [ "$age" -lt 0 ] && age=0
+  echo "$age"
+}
+
+# Threshold in days beyond which an in_progress sprint is considered abandoned.
+# Configurable because the right number is project-specific: a weekly cadence
+# wants 14, a monthly one wants more. Default 14 = two full weeks without
+# progress: enough that a sprint paused over a holiday is not called dead, tight
+# enough that the reported 12-day case is caught within two days of it firing.
+SPRINT_STALE_DAYS="${SPRINT_STALE_DAYS:-14}"
+
 # --- Pre-commit mode ---
 if [ "$MODE" = "pre-commit" ]; then
   PHASE=$(read_phase)
@@ -222,8 +281,28 @@ if [ "$MODE" = "pre-commit" ]; then
       exit 1
     fi
 
-    # All checks passed
-    echo "{\"decision\":\"allow\",\"message\":\"delphi-review APPROVED, sprint phase ${PHASE} validated\"}"
+    # #551: staleness. A sprint left at status=in_progress past the threshold is
+    # abandoned, not validated -- reporting PASS for it means the gate cannot
+    # distinguish an advancing sprint from a forgotten one, and it injects
+    # ancient phase_history into every unrelated commit's audit trail. SKIP is
+    # the honest answer: the gate declines to certify a sprint nobody is
+    # driving, without blocking work that has nothing to do with it.
+    SPRINT_STATUS=$(read_sprint_status)
+    SPRINT_AGE_DAYS=$(read_sprint_age_days)
+    if [ "$SPRINT_STATUS" = "in_progress" ] && [ -n "$SPRINT_AGE_DAYS" ] \
+       && [ "$SPRINT_AGE_DAYS" -ge "$SPRINT_STALE_DAYS" ] 2>/dev/null; then
+      echo "{\"decision\":\"skip\",\"reason\":\"STALE SPRINT: status=in_progress for ${SPRINT_AGE_DAYS} days (threshold ${SPRINT_STALE_DAYS}) — not certifying it. Finish it (sprint-flow close) or clear .sprint-state/sprint-state.json\"}"
+      exit 0
+    fi
+
+    # All checks passed. Name the age so "validated" is not an unconditional
+    # claim: a 29-day-old sprint under a 30-day threshold is a very different
+    # situation from one opened today, and the log should say which it is.
+    if [ -n "$SPRINT_AGE_DAYS" ]; then
+      echo "{\"decision\":\"allow\",\"message\":\"delphi-review APPROVED, sprint phase ${PHASE} validated (sprint open ${SPRINT_AGE_DAYS} day(s), staleness threshold ${SPRINT_STALE_DAYS})\"}"
+    else
+      echo "{\"decision\":\"allow\",\"message\":\"delphi-review APPROVED, sprint phase ${PHASE} validated (sprint age unknown — started_at unreadable)\"}"
+    fi
     exit 0
   fi
 
