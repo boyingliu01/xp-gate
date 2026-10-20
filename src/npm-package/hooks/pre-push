@@ -236,6 +236,10 @@ if [ -f "$MP_ROOT/scripts/check-hook-mirror.sh" ]; then
   fi
 else
   echo "⚠️ Gate MP: check-hook-mirror.sh not found. SKIP — Gate MP."
+  echo "   Gate MP did not run; this push was not checked for mirror drift."
+  GATE_MP_STATUS="SKIP"
+  GATE_MP_SKIP_REASON="mirror_script_not_found"
+  GATES_SKIPPED="${GATES_SKIPPED:-}Gate MP (mirror parity: script not found)|"
   MP_DURATION_MS=0
 fi
 echo ""
@@ -507,6 +511,13 @@ PY_SOURCE_FILES=$(echo "$PY_FILES" | grep -v '/venv/' | grep -v '/\.venv/' || tr
 
 if [ -z "$PY_SOURCE_FILES" ]; then
   echo "📚 No changed Python source files. SKIP — Gate M (Python)."
+  # #557: this outermost branch was the only Gate M (Python) path that assigned
+  # no status, while Gate M (TypeScript) records a reason on every path. Without
+  # it, "no Python in this push" and "the tool is missing" look identical in the
+  # journals, which is the gap #404 P0 spent effort closing for the TS gate.
+  GATE_M_PY_STATUS="SKIP"
+  GATE_M_PY_SKIP_REASON="no_python_source_files"
+  GATES_SKIPPED="${GATES_SKIPPED:-}Gate M Python (no changed Python source files)|"
 else
   PYTHON_FILE_LIST=$(echo "$PY_SOURCE_FILES" | tr '\n' ',' | sed 's/,$//')
   echo "🐍 Changed Python files: $PYTHON_FILE_LIST"
@@ -520,6 +531,7 @@ else
       case $MUTATION_EXIT in
         0)
           echo "✅ Gate M (Python): PASS"
+          GATE_M_PY_STATUS="PASS"
           ;;
         1)
           echo ""
@@ -535,16 +547,28 @@ else
         124)
           cat "$MUTATION_OUTPUT"
           echo "⏱ Gate M (Python): TIMEOUT (120s). Allowing push with warning."
+          # A timeout means the mutation score was never measured. Saying
+          # nothing here let the closing banner claim success for a gate that
+          # started work and could not finish (#557).
+          GATE_M_PY_STATUS="TIMEOUT"
+          GATE_M_PY_SKIP_REASON="timeout_120s"
+          GATES_SKIPPED="${GATES_SKIPPED:-}Gate M Python (TIMEOUT — score never measured)|"
           ;;
         *)
           cat "$MUTATION_OUTPUT"
           echo "⚠ Gate M (Python): Unexpected exit code $MUTATION_EXIT. Allowing push with warning."
+          GATE_M_PY_STATUS="ERROR"
+          GATE_M_PY_SKIP_REASON="unexpected_exit_${MUTATION_EXIT}"
+          GATES_SKIPPED="${GATES_SKIPPED:-}Gate M Python (error, exit ${MUTATION_EXIT} — score never measured)|"
           ;;
       esac
 
       rm -f "$MUTATION_OUTPUT"
     else
       echo "⚠ Gate M script not found. SKIP — Gate M (Python)."
+      GATE_M_PY_STATUS="SKIP"
+      GATE_M_PY_SKIP_REASON="gate_m_script_not_found"
+      GATES_SKIPPED="${GATES_SKIPPED:-}Gate M Python (gate-m.ts not found)|"
     fi
   else
     echo "⚠ mutmut not installed. SKIP — Gate M (Python)."
@@ -1123,10 +1147,21 @@ fi
 fi
 
 # ============================================================================
-# ALL CHECKS PASSED
+# Closing banner. States what actually happened (#557): a gate that skipped is
+# named. The heading used to read "ALL CHECKS PASSED" unconditionally while Gate
+# MP and Gate M (Python) skipped on a typical push without recording why, so a
+# reviewer skimming the log had no signal that mutation testing never ran.
 # ============================================================================
 echo ""
 echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+# Trim the trailing separator and turn it into a displayable list.
+SKIPPED_DISPLAY=$(printf '%s' "${GATES_SKIPPED:-}" | sed 's/|$//' | sed 's/|/ , /g')
+if [ -n "$SKIPPED_DISPLAY" ]; then
+  echo "   ⚠️  NO BLOCKING FAILURES — but not every gate ran:"
+  echo "$SKIPPED_DISPLAY" | tr ',' '\n' | sed '/^[[:space:]]*$/d' | sed 's/^[[:space:]]*/     - /'
+else
+  echo "   ✅ ALL CHECKS PASSED"
+fi
 # Say what actually happened. Printing "VERIFIED" on a skipped gate would be a
 # claim the hook cannot support — the same dishonesty (evidence asserting an
 # unperformed check) that Gate MW exists to prevent.
