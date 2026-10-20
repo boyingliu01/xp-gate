@@ -51,7 +51,7 @@ report = {
   'gates': [
     {'id': 'MP', 'name': 'Gate-Script Mirror Parity', 'status': '${GATE_MP_STATUS:-SKIP}', 'details': {'duration_ms': '${MP_DURATION_MS:-0}'}},
     {'id': '10', 'name': 'Build Integrity', 'status': '${GATE_10_STATUS:-SKIP}', 'details': {}},
-    {'id': 'M', 'name': 'Mutation Testing', 'status': '${GATE_M_STATUS:-SKIP}', 'details': {}},
+    {'id': 'M', 'name': 'Mutation Testing', 'status': '${GATE_M_STATUS:-SKIP}', 'details': {'skip_reason': '${GATE_M_SKIP_REASON:-}', 'duration_ms': '${M_DURATION_MS:-0}', 'mutation_score': '${M_SCORE:-}'}},
     {'id': 'M-Python', 'name': 'Mutation Testing (Python)', 'status': '${GATE_M_PYTHON_STATUS:-SKIP}', 'details': {}},
     {'id': 'M-Go', 'name': 'Mutation Testing (Go)', 'status': '${GATE_M_GO_STATUS:-SKIP}', 'details': {}},
     {'id': 'M-Java', 'name': 'Mutation Testing (Java)', 'status': '${GATE_M_JAVA_STATUS:-SKIP}', 'details': {}},
@@ -373,16 +373,22 @@ fi
 # shellcheck source=githooks/adapter-common.sh
 source "$ADAPTER_COMMON" 2>/dev/null || {
   echo "⚠️ Could not source adapter-common.sh. SKIP — Gate M."
+  GATE_M_SKIP_REASON="adapter-common.sh could not be sourced"
 }
 
-# Only run for TypeScript projects
+# #404 P0: every Gate M skip records WHY. Without this the journals carried
+# `details: {}` on 62 of 68 runs, so the RFC's "SKIP rate" question was
+# unanswerable — a missing tool and "no mutable file in this push" are opposite
+# findings that looked identical after the fact.
 if [[ ! -f "package.json" ]] || [[ ! -f "tsconfig.json" ]]; then
   echo "📚 Not a TypeScript project. SKIP — Gate M."
+  GATE_M_SKIP_REASON="not a TypeScript project (package.json+tsconfig.json required)"
 else
   # Check if mutation testing is configured
   if ! detect_mutation_testable 2>/dev/null; then
     echo "⚠️ Stryker config not found or @stryker-mutator not installed."
     echo "   SKIP — Gate M mutation testing."
+    GATE_M_SKIP_REASON="stryker config missing or @stryker-mutator not installed"
   else
     # Filter to source files (exclude tests). The tree-segment grep excludes
     # test infrastructure (helpers/fixtures under tests/, test/, __tests__/)
@@ -392,6 +398,7 @@ else
 
     if [ -z "$CHANGED_SOURCE_FILES" ]; then
       echo "📚 No changed TypeScript source files. SKIP — Gate M."
+      GATE_M_SKIP_REASON="no changed TypeScript source files in this push"
     else
       echo "🧬 Running mutation tests on changed files..."
       echo "$CHANGED_SOURCE_FILES"
@@ -408,15 +415,28 @@ else
 
       if [[ -z "$MUTATION_SCRIPT" ]]; then
         echo "⚠️ Gate M script not found. SKIP — Gate M."
+        GATE_M_SKIP_REASON="gate-m.ts not found in .xp-gate/modules, src/mutation, or global modules"
       else
         # Run mutation gate with timeout matching stryker.conf.json (timeoutMS: 600000 = 10min)
         MUTATION_OUTPUT=$(mktemp)
+        M_START_MS=$(date +%s%3N 2>/dev/null || python -c 'import time;print(int(time.time()*1000))' 2>/dev/null || echo 0)
         RUN_TSX_TIMEOUT=600s run_tsx $MUTATION_SCRIPT --changed-files "$CHANGED_SOURCE_FILES" > "$MUTATION_OUTPUT" 2>&1
         MUTATION_EXIT=$?
+        M_END_MS=$(date +%s%3N 2>/dev/null || python -c 'import time;print(int(time.time()*1000))' 2>/dev/null || echo 0)
+        if [ "$M_START_MS" != "0" ] && [ "$M_END_MS" != "0" ]; then
+          M_DURATION_MS=$((M_END_MS - M_START_MS))
+          [ "$M_DURATION_MS" -ge 0 ] || M_DURATION_MS=0
+        else
+          M_DURATION_MS=0
+        fi
+        # #404: the mutation score is the number the RFC wants a distribution for.
+        # It is printed by gate-m.ts; take the last percentage it reported.
+        M_SCORE=$(sed -n 's/.*[Mm]utation score[: ]*\([0-9][0-9]*\(\.[0-9][0-9]*\)\?\)%.*/\1/p' "$MUTATION_OUTPUT" 2>/dev/null | tail -1)
 
         case $MUTATION_EXIT in
           0)
             echo "✅ Gate M: PASS"
+            GATE_M_STATUS="PASS"
             # Update baseline after successful mutation test
             if [ -f ".stryker-baseline.json" ]; then
               echo "📝 Updating mutation baseline..."
@@ -437,11 +457,15 @@ else
           124)
             echo "⏱️ Gate M: TIMEOUT (120s). Mutation testing incomplete."
             echo "   Allowing push with warning — review mutation coverage manually."
+            GATE_M_STATUS="TIMEOUT"
+            GATE_M_SKIP_REASON="mutation run exceeded the 600s timeout; score is unknown"
             ;;
           *)
             echo "⚠️ Gate M: Unexpected exit code $MUTATION_EXIT"
             cat "$MUTATION_OUTPUT"
             echo "   Allowing push with warning."
+            GATE_M_STATUS="WARN"
+            GATE_M_SKIP_REASON="gate-m.ts exited $MUTATION_EXIT (unexpected); score is unknown"
             ;;
         esac
 
