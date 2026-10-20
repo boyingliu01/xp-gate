@@ -10,7 +10,7 @@ bats_require_minimum_version 1.5.0
 #         `null` is a legitimate, well-formed "zero visible violations" report --
 #         exactly as clean as []. Treating it as a broken response fail-closed
 #         every commit touching such a file, whatever the operator did.
-# @covers AC-507-01-02
+# @covers AC-507-01
 
 setup() {
   source "$BATS_TEST_DIRNAME/../adapters/java.sh"

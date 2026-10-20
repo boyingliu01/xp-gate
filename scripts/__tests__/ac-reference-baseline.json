@@ -151,6 +151,15 @@
       "AC-538-01",
       "AC-538-02"
     ],
+    "githooks/__tests__/issue-545-null-issues.test.bats": [
+      "AC-507-01"
+    ],
+    "githooks/__tests__/issue-545-wc-java-diagnostics.test.bats": [
+      "AC-507-01"
+    ],
+    "githooks/__tests__/issue-546-line-endings.test.bats": [
+      "AC-507-01"
+    ],
     "githooks/__tests__/issue-audit-poisoned-start.bats": [
       "AC-AUDIT-001",
       "AC-AUDIT-002"

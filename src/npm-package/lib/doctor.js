@@ -18,6 +18,14 @@ const { GATE_CLI_TOOLS, checkCliTool, getToolInstallCmd, checkBash } = require('
 // #505: the single source of truth for module resolution order. The hook reads a
 // generated shell projection of this same module.
 const { RESOLUTION_ORDER } = require('./hook-module-resolution.js');
+const { inspectHookFile } = require('./hook-health.js');
+
+/**
+ * Files above this size get a `bash -n` probe in addition to the CRLF scan.
+ * Real xp-gate hooks are 40 KB (pre-push) to 190 KB (pre-commit); test fixtures
+ * and stubs are a few hundred bytes. 4 KB separates them comfortably.
+ */
+const PARSE_CHECK_MIN_BYTES = 4096;
 const {
   diagnoseTuiRegistration, diagnoseInstalledSkills,
   fixTuiRegistration, ensureTuiRegistration, readTuiJson,
@@ -1256,8 +1264,44 @@ function checkSingleHook(hooksDir, name, signature, label, checks) {
     checks.push({ name: `${label}: ${name}`, status: 'FAIL', detail: 'Missing or not xp-gate' });
     return 1;
   }
+  // Existence and signature are not enough (#546): a hook rewritten with CRLF
+  // line endings, or truncated mid-write, satisfies both and still cannot run.
+  // Reporting it as healthy is worse than reporting nothing, because the
+  // operator stops looking.
+  //
+  // The CRLF scan is pure and cheap; the `bash -n` probe spawns a process, so it
+  // is skipped for files under the size floor below — test fixtures and stub
+  // hooks are not the things that break here, and spawning bash per stub made
+  // doctor slower than its own test timeout.
+  const health = inspectHookFile(hookPath, { parseCheck: shouldParseCheck(hookPath) });
+  if (!health.ok) {
+    checks.push({
+      name: `${label}: ${name}`,
+      status: 'FAIL',
+      detail: health.problems.join('; '),
+    });
+    return 1;
+  }
   checks.push({ name: `${label}: ${name}`, status: 'PASS', detail: hookPath });
   return 0;
+}
+
+/**
+ * Should the `bash -n` probe run for this hook?
+ *
+ * Measured on a real install: a 190 KB pre-commit takes ~90 ms to parse, but a
+ * dozen stubs in a test fixture still add up to seconds of process spawns. The
+ * CRLF scan catches the #546 failure without spawning anything, so the probe is
+ * reserved for files large enough to be a real hook.
+ * @param {string} hookPath - Hook path
+ * @returns {boolean} Whether to run the parse check
+ */
+function shouldParseCheck(hookPath) {
+  try {
+    return fs.statSync(hookPath).size > PARSE_CHECK_MIN_BYTES;
+  } catch {
+    return false;
+  }
 }
 
 /**

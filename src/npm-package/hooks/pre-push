@@ -1,4 +1,20 @@
 #!/bin/bash
+# Line-ending self-check (#546). Must stay on the first executable line: if this
+# file is ever rewritten with CRLF, bash needs to reach this check before the
+# parser chokes somewhere far away and blames an innocent line. `tr` also
+# strips the \r from this very line, so the check runs even when everything
+# around it is broken.
+if tr -d '\r' < "$0" | sed -n '2p' | tr -d '\r' | grep -q 'Line-ending self-check'; then
+  if [ "$(tr -cd '\r' < "$0" | wc -c | tr -d '[:space:]')" -gt 0 ]; then
+    echo "======================================================================" >&2
+    echo "FATAL: hook has CRLF line endings — bash cannot parse it (#546)." >&2
+    echo "  file: $0" >&2
+    echo "  fix : tr -d '\\r' < \"$0\" > \"$0.tmp\" && mv \"$0.tmp\" \"$0\" && chmod +x \"$0\"" >&2
+    echo "Or re-sync the installed copy: xp-gate doctor --sync-hooks" >&2
+    echo "======================================================================" >&2
+    exit 1
+  fi
+fi
 # Pre-push Hook — 8 gates: Gate 10 (Build Integrity) + M/M-Python/M-Go/M-Java/M-Kotlin (Mutation)
 # + M2 (Mock Density, WARNING) + ML (Mock Layering) + UI (UI Sprint Gates) + MW (Code Walkthrough) + S (Sprint Flow)
 #

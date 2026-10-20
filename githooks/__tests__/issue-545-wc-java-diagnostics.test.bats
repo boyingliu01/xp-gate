@@ -7,7 +7,7 @@ bats_require_minimum_version 1.5.0
 #         broken tool, a stripped banner line, and a desynchronized key count.
 #         Diagnostics go to stderr so the stdout contract (a bare number) and
 #         every existing caller's $(...) capture stay unchanged.
-# @covers AC-507-01-02
+# @covers AC-507-01
 
 setup() {
   source "$BATS_TEST_DIRNAME/../adapters/java.sh"
