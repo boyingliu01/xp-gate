@@ -106,10 +106,23 @@ java_staged_files() {
 #     counts from the object count -> unusable -> BLOCK;
 #   - a truncated response (no closing bracket) is unusable -> BLOCK.
 # Prints the violation (object) count on success; returns 1 if unusable.
+#
+# On rejection, a one-line reason goes to STDERR naming the invariant that
+# failed plus the measured counts (#545). Before this, every rejection looked
+# identical to the operator as "not a usable violations JSON", which is why
+# #545 was filed against a code path that was never involved. The number the
+# callers capture comes from stdout, so diagnostics on stderr change nothing
+# for `count=$(wc_java_json_violation_count ...)`.
+wc_java_diag() {
+  echo "     wc-java JSON rejected: $*" >&2
+}
 # ---------------------------------------------------------------------------
 wc_java_json_violation_count() {
   local json_file="$1"
-  [ -s "$json_file" ] || return 1
+  if [ ! -s "$json_file" ]; then
+    wc_java_diag "empty or missing response file ($json_file)"
+    return 1
+  fi
 
   # Two shapes are accepted, each closed by its own bracket:
   #   - bare array `[ ... ]` — the originally pinned contract ([] = clean);
@@ -122,9 +135,18 @@ wc_java_json_violation_count() {
   head1=$(head -c 1 "$json_file")
   tail=$(tr -d '[:space:]' < "$json_file" | tail -c 1)
   case "$head1" in
-    "[") shape=array;  [ "$tail" = "]" ] || return 1 ;;
-    "{") shape=object; [ "$tail" = "}" ] || return 1 ;;
-    *) return 1 ;;
+    "[") shape=array
+         if [ "$tail" != "]" ]; then
+           wc_java_diag "array response is unterminated (first char '[', tail '$tail' not ']') — truncated output?"
+           return 1
+         fi ;;
+    "{") shape=object
+         if [ "$tail" != "}" ]; then
+           wc_java_diag "object response is unterminated (first char '{', tail '$tail' not '}') — truncated output?"
+           return 1
+         fi ;;
+    *) wc_java_diag "response does not start with a JSON bracket (entry char '$head1') — a banner/log line on stdout would cause this"
+       return 1 ;;
   esac
 
   local structural obj_count file_count rule_count sev_count
@@ -155,15 +177,20 @@ wc_java_json_violation_count() {
     file_count=$(grep -o '"file"' <<< "$structural" | wc -l | tr -d '[:space:]')
     rule_count=$(grep -o '"rule"' <<< "$structural" | wc -l | tr -d '[:space:]')
     sev_count=$(grep -o '"severity"' <<< "$structural" | wc -l | tr -d '[:space:]')
-    [ "$file_count" -eq "$rule_count" ] || return 1
-    [ "$file_count" -eq "$sev_count" ] || return 1
+    if [ "$file_count" -ne "$rule_count" ] || [ "$file_count" -ne "$sev_count" ]; then
+      wc_java_diag "issue keys are out of sync (file=$file_count rule=$rule_count severity=$sev_count) — an issue record is missing a required key"
+      return 1
+    fi
     # Everything from the "issues" member onward (the tool emits it last; if
     # a future format moves it, keys before it fall outside record parsing ->
     # sum mismatch -> BLOCK, fail closed). Flatten to one line first: real
     # output is pretty-printed across lines.
     flattened=$(tr '\n' ' ' <<< "$structural")
     tail_from_issues=$(sed -n 's/.*"issues"[[:space:]]*:[[:space:]]*\[/\n/p' <<< "$flattened")
-    [ -n "$tail_from_issues" ] || return 1
+    if [ -z "$tail_from_issues" ]; then
+      wc_java_diag 'no "issues" array found after the summary object — the response is not the {summary, issues} contract'
+      return 1
+    fi
     records=$(awk '
       { rest = $0
         depth = 0; rec = ""
@@ -182,15 +209,17 @@ wc_java_json_violation_count() {
       cf=$(grep -o '"file"' <<< "$_rec" | wc -l | tr -d '[:space:]')
       cr=$(grep -o '"rule"' <<< "$_rec" | wc -l | tr -d '[:space:]')
       cs=$(grep -o '"severity"' <<< "$_rec" | wc -l | tr -d '[:space:]')
-      [ "$cf" -eq 1 ] || return 1
-      [ "$cr" -eq 1 ] || return 1
-      [ "$cs" -eq 1 ] || return 1
+      if [ "$cf" -ne 1 ] || [ "$cr" -ne 1 ] || [ "$cs" -ne 1 ]; then
+        wc_java_diag "issue record ${rec_count} has the wrong key multiplicity (file=$cf rule=$cr severity=$cs, each must be 1)"
+        return 1
+      fi
       rf=$((rf + cf)); rr=$((rr + cr)); rs=$((rs + cs))
       rec_count=$((rec_count + 1))
     done <<< "$records"
-    [ "$rf" -eq "$file_count" ] || return 1
-    [ "$rr" -eq "$rule_count" ] || return 1
-    [ "$rs" -eq "$sev_count" ] || return 1
+    if [ "$rf" -ne "$file_count" ] || [ "$rr" -ne "$rule_count" ] || [ "$rs" -ne "$sev_count" ]; then
+      wc_java_diag "per-record key totals do not match the document (records rf=$rf rr=$rr rs=$rs vs document file=$file_count rule=$rule_count severity=$sev_count) — a required key appears outside an issue record"
+      return 1
+    fi
     echo "$rec_count"
     return 0
   fi
@@ -199,9 +228,10 @@ wc_java_json_violation_count() {
   file_count=$(grep -o '"file"' <<< "$structural" | wc -l | tr -d '[:space:]')
   rule_count=$(grep -o '"rule"' <<< "$structural" | wc -l | tr -d '[:space:]')
   sev_count=$(grep -o '"severity"' <<< "$structural" | wc -l | tr -d '[:space:]')
-  [ "$obj_count" -eq "$file_count" ] || return 1
-  [ "$obj_count" -eq "$rule_count" ] || return 1
-  [ "$obj_count" -eq "$sev_count" ] || return 1
+  if [ "$obj_count" -ne "$file_count" ] || [ "$obj_count" -ne "$rule_count" ] || [ "$obj_count" -ne "$sev_count" ]; then
+    wc_java_diag "array elements and keys are out of sync (objects=$obj_count file=$file_count rule=$rule_count severity=$sev_count)"
+    return 1
+  fi
 
   echo "$obj_count"
 }
