@@ -269,6 +269,26 @@ run_wc_java_lint() {
     return 9  # not installed -> caller falls back to the legacy chain
   fi
 
+  # #550: --staged means "only the Java files in the index", and wc-java-lint
+  # 0.4.1 honours that for checkstyle, PMD, lizard and simian -- but spotbugs
+  # scans the whole target/classes tree regardless. Measured with only
+  # docs/_tmp_probe.md staged: three tools reported "skipped: no Java files"
+  # while spotbugs reported "checked 1 .class file, found 3 issues" from a class
+  # compiled earlier. The verdict then blocks a docs commit over a warning that
+  # predates it and that its author never touched.
+  #
+  # The adapter cannot fix the tool, but it can refuse to relay a verdict the
+  # tool had no basis to produce. With no staged Java file there is nothing this
+  # gate is entitled to say, so it says nothing -- out loud, not silently.
+  local staged_java
+  staged_java=$(java_staged_files 2>/dev/null | grep -c '.' || true)
+  if [ "${staged_java:-0}" -eq 0 ]; then
+    echo "⏭️  SKIPPED - Java static analysis: no staged .java files (wc-java-lint --staged)"
+    echo "     (spotbugs scans all of target/classes regardless of --staged, so its"
+    echo "      verdict is withheld here - upstream defect, see xp-gate #550)"
+    return 0
+  fi
+
   timeout_s=$(resolve_wc_java_lint_timeout)
   out_file=$(mktemp "${TMPDIR:-/tmp}/wc-java-lint.XXXXXX")
   err_file="${out_file}.err"
