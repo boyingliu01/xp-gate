@@ -2,6 +2,26 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.30.2.0] - 2026-10-20
+
+处理 #543 与 #404 剩余项。这一轮的主题仍然是**报告诚实性**——包括我自己写出的两处新的假报告。
+
+### Fixed
+
+- **Gate 3 在默认阈值下从不阻断（#543, 26d97158）**: 解析器用 `grep '^Warning cnt'` 找一个汇总行，但 `Warning cnt` 只是行中间的列名，且 lizard 在收到显式文件参数时**根本不输出**那个汇总块——而这正是 gate 的调用方式。`CC_WARNINGS` 因此恒为 0，阻断分支是死代码，CCN 14 的函数对阈值 5 永远放行。只有带 `.ccn-baseline.json` 的仓库因为走 ratchet 分支才幸免。改为从 `--csv`（列序稳定）计数；并在 lizard 无任何可解析行时 fail-closed 为 WARN，而不是"零警告 = 通过"。同时补上阻断路径缺失的 `GATE_3_REASON`。
+- **两个同名 gate-3.sh，其中一个是没人执行的副本**: `githooks/gate-3.sh`（11KB，pre-commit 通过 `$GATE_DIR` 实际执行）与 `githooks/adapters/gate-3.sh`（6KB 遗留）。第一版测试指向了后者，于是对着一个没有任何提交会执行的文件报绿。已改为指向真实文件，并在测试里写明原因。
+- **retro 把 5 次变异测试阻断报成 0（9fab5b3）**: journal 写的是 `BLOCKED`，代码查的是 `BLOCK`。**为揭露"静默成功"而写的代码，自己在静默成功。** 已用实测拼写钉住。
+
+### Added
+
+- **`xp-gate crap`（#404 P1-2, d5fd4511）**: 按 CRAP = CCN² × (1 − coverage) + CCN 排序热点函数。**永远是 advisory，退出码恒为 0**——它测不到本仓 21.8% 的源文件（17/78 从未被任何测试加载），一个测不到自己五分之一总体的排行不能用来拦构建。未测量函数单独计入 `unmeasured`，既不按 0% 也不按 100% 计分；镜像树 `src/npm-package/**` 默认排除，因为对着它重构等于改一个发布时会被覆盖的副本。实施中发现旧的 `coverage-final.json` 是中断运行的残留（3.9% 覆盖率），据此算出的热点偏差达 4.6 倍且方向是"低覆盖看起来更糟"。
+- **retro 的 Gate M 段（#404 P1-3, 9fab5b3）**: 从 pre-push journal 读 Gate M，报告状态计数、SKIP/超时率、得分中位数/p10/p90、时长 p50/max 以及未运行原因分布。无测量样本时明写"从未记录"，不写空行也不写"中位数 0%"。本仓实测 68 = PASS 1 + BLOCKED 5 + SKIP 62，SKIP 率 91.2%——而 62/68 条记录的 `details` 是空对象，这个数字测的是 logger 不是 Stryker。
+
+### Also
+
+- #404 P1-1（放宽圈复杂度阈值到 6~10）经 6090 个函数实测后**建议不做**：本仓 p95=6、p99=12，提到 10 会放行 249 个当前被拦的函数，等于不设防。且本仓走 ratchet 路径，该阈值只影响无基线的消费方。
+- #544 记录了 RFC 里唯一做不到的一项：Gate M 不产出模块级存活变异体明细，"哪些模块最该重构"因此无法在 retro 侧回答。
+
 ## [0.30.1.0] - 2026-10-20
 
 修 0.30.0 的发布失败：workflow 报 success，npm 上什么都没有。
