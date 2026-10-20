@@ -47,11 +47,28 @@ write_pre_push_report() {
   commit_hash=$(git rev-parse HEAD 2>/dev/null || echo "unknown")
   verdict=$([ "$exit_code" -eq 0 ] && echo "PASS" || echo "BLOCKED")
   mkdir -p "$reports_dir"
+  # #544: the survivor detail is a JSON document, so it cannot be interpolated
+  # into this heredoc — a single quote in a path would break the Python source.
+  # Hand it to the child through the environment and let Python parse it, then
+  # store it serialised back into the `details` string domain (every value there
+  # is a string; the journal has broken before over mixed types).
+  export XP_GATE_M_SURVIVORS_JSON="${M_SURVIVORS_JSON:-}"
   python3 - <<PY 2>/dev/null || true
 import json
+import os
 from pathlib import Path
 pushed_files = '''${PUSHED_FILES:-}'''.splitlines()
 passed = 1 if '$verdict' == 'PASS' else 0
+# Absent stays absent: no key at all when nothing was measured, so a reader can
+# tell "not measured" from "measured: zero survivors" (#544).
+try:
+    _survivors_raw = os.environ.get('XP_GATE_M_SURVIVORS_JSON', '').strip()
+    survivors_detail = json.loads(_survivors_raw) if _survivors_raw else None
+except (ValueError, TypeError):
+    survivors_detail = None
+_m_details = {'skip_reason': '${GATE_M_SKIP_REASON:-}', 'duration_ms': '${M_DURATION_MS:-0}', 'mutation_score': '${M_SCORE:-}'}
+if survivors_detail is not None:
+    _m_details['survivors'] = json.dumps(survivors_detail, sort_keys=True)
 report = {
   'timestamp': '$timestamp',
   'trigger': 'pre-push',
@@ -67,15 +84,20 @@ report = {
   'gates': [
     {'id': 'MP', 'name': 'Gate-Script Mirror Parity', 'status': '${GATE_MP_STATUS:-SKIP}', 'details': {'duration_ms': '${MP_DURATION_MS:-0}'}},
     {'id': '10', 'name': 'Build Integrity', 'status': '${GATE_10_STATUS:-SKIP}', 'details': {}},
-    {'id': 'M', 'name': 'Mutation Testing', 'status': '${GATE_M_STATUS:-SKIP}', 'details': {'skip_reason': '${GATE_M_SKIP_REASON:-}', 'duration_ms': '${M_DURATION_MS:-0}', 'mutation_score': '${M_SCORE:-}'}},
-    {'id': 'M-Python', 'name': 'Mutation Testing (Python)', 'status': '${GATE_M_PYTHON_STATUS:-SKIP}', 'details': {}},
+    {'id': 'M', 'name': 'Mutation Testing', 'status': '${GATE_M_STATUS:-SKIP}', 'details': _m_details},
+    # #557 follow-up: this line read GATE_M_PYTHON_STATUS while the code assigns
+    # GATE_M_PY_STATUS, so the field always fell back to its SKIP default -- the
+    # "never write the real state" bug #557 set out to fix, still present for
+    # this one gate. The skip reason now travels with it, so a retro reader can
+    # tell "no Python here" from "timed out" from "mutmut missing".
+    {'id': 'M-Python', 'name': 'Mutation Testing (Python)', 'status': '${GATE_M_PY_STATUS:-SKIP}', 'details': {'skip_reason': '${GATE_M_PY_SKIP_REASON:-}'}},
     {'id': 'M-Go', 'name': 'Mutation Testing (Go)', 'status': '${GATE_M_GO_STATUS:-SKIP}', 'details': {}},
     {'id': 'M-Java', 'name': 'Mutation Testing (Java)', 'status': '${GATE_M_JAVA_STATUS:-SKIP}', 'details': {}},
     {'id': 'M-Kotlin', 'name': 'Mutation Testing (Kotlin)', 'status': '${GATE_M_KOTLIN_STATUS:-SKIP}', 'details': {}},
     {'id': 'M2', 'name': 'Mock Density (WARNING only)', 'status': '${GATE_M2_STATUS:-SKIP}', 'details': {}},
     {'id': 'ML', 'name': 'Mock Layering', 'status': '${GATE_M3_STATUS:-SKIP}', 'details': {}},
     {'id': 'UI', 'name': 'UI Sprint Gates', 'status': '${GATE_UI_STATUS:-SKIP}', 'details': {}},
-    {'id': 'MW', 'name': 'Code Walkthrough', 'status': '${GATE_DELPHI_STATUS:-SKIP}', 'details': {'remote': '$REMOTE', 'url': '$URL'}},
+    {'id': 'MW', 'name': 'Code Walkthrough', 'status': '${GATE_DELPHI_STATUS:-SKIP}', 'details': {'remote': '$REMOTE', 'url': '$URL', 'skip_reason': '${GATE_DELPHI_SKIP_REASON:-}'}},
     {'id': 'S', 'name': 'Sprint Flow Enforcement', 'status': '${GATE_S_STATUS:-SKIP}', 'details': {}}
   ],
   'warnings': [],
@@ -452,6 +474,15 @@ else
         # #404: the mutation score is the number the RFC wants a distribution for.
         # It is printed by gate-m.ts; take the last percentage it reported.
         M_SCORE=$(sed -n 's/.*[Mm]utation score[: ]*\([0-9][0-9]*\(\.[0-9][0-9]*\)\?\)%.*/\1/p' "$MUTATION_OUTPUT" 2>/dev/null | tail -1)
+
+        # #544: per-file survivor detail, so retro can answer "which module has
+        # the most surviving mutants". gate-m.ts emits one
+        # GATE_M_SURVIVORS_JSON= line; it is ABSENT when no report was produced,
+        # and absent must stay absent. An empty value means "not measured"; a
+        # written zero would mean "measured, no survivors". Only the former is
+        # ever true when the line is missing -- conflating the two is the whole
+        # of #544.
+        M_SURVIVORS_JSON=$(printf '%s\n' "$MUTATION_OUTPUT" | sed -n 's/^GATE_M_SURVIVORS_JSON=//p' | tail -1)
 
         case $MUTATION_EXIT in
           0)
@@ -1066,6 +1097,15 @@ else
 # ============================================================================
 RESULT_FILE=".code-walkthrough-result.json"
 MW_SKIPPED=0
+# Journal status (#557 follow-up). The journal already read GATE_DELPHI_STATUS
+# but nothing ever assigned it, so Gate MW reported its SKIP default in every
+# report -- including pushes where the walkthrough was in fact verified. The
+# closing banner told the truth while the machine-readable journal did not, which
+# is the half-fix #557 was about.
+GATE_DELPHI_STATUS="SKIP"
+# Consumed by the journal heredoc (sourced/inherited boundary).
+# shellcheck disable=SC2034
+GATE_DELPHI_SKIP_REASON="not_run"
 
 # Skipped on main/master by design, exactly like Gate ML and Gate UI above.
 # Work is already walkthrough-reviewed on the feature branch before it lands, so
@@ -1075,6 +1115,9 @@ MW_SKIPPED=0
 # documented this skip; the code did not implement it (drift fixed here).
 if [ "$CURRENT_BRANCH" = "main" ] || [ "$CURRENT_BRANCH" = "master" ]; then
   MW_SKIPPED=1
+  # Consumed by the journal heredoc (sourced/inherited boundary).
+  # shellcheck disable=SC2034
+  GATE_DELPHI_SKIP_REASON="main_branch_push"
   echo ""
   echo "   ℹ️  Gate MW skipped (pushing to ${CURRENT_BRANCH} — pre-reviewed via branch walkthrough)"
   echo ""
@@ -1144,6 +1187,13 @@ if ! VALIDATION_ERROR=$(node "$MW_VALIDATOR" "$RESULT_FILE" "$EXPECTED_COMMIT" "
   echo ""
   exit 1
 fi
+
+# The validator passed: record that the walkthrough was actually verified.
+# Consumed by the journal heredoc (sourced/inherited boundary).
+# shellcheck disable=SC2034
+GATE_DELPHI_STATUS="PASS"
+# shellcheck disable=SC2034
+GATE_DELPHI_SKIP_REASON=""
 fi
 
 # ============================================================================
