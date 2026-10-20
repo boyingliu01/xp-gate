@@ -179,16 +179,40 @@ else
           GATE_3_STATUS="PASS"
         fi
       else
-      # Parse warning count from the summary table: "Warning cnt   8"
-      # Use anchored grep to avoid matching lizard table headers (e.g. "Rt" column)
-      CC_WARNINGS=$(echo "$CC_OUTPUT" | grep "^Warning cnt" | awk '{print $NF}' | tr -d '[:space:]' | sed 's/[^0-9]//g' || true)
-      CC_WARNINGS=${CC_WARNINGS:-0}
-      
-      if [ "$CC_WARNINGS" -gt 0 ]; then
+      # #543: count from lizard's machine-readable CSV, never its tables.
+      #
+      # The previous parser grepped '^Warning cnt' for a summary row. Two things
+      # made that never match: "Warning cnt" is a column header in the MIDDLE of
+      # a line ("Total nloc  Avg.NLOC  ...  Warning cnt  Fun Rt  nloc Rt"), and
+      # lizard omits the summary block entirely when given explicit file
+      # arguments -- which is how this gate always invokes it. CC_WARNINGS was
+      # therefore always 0 and the flat-threshold path could not block anything.
+      #
+      # --csv has a stable column order (NLOC,CCN,token,PARAM,length,location,
+      # file,name,signature,...), so the verdict comes from the same numbers
+      # lizard uses, independent of version and table formatting. --csv here is
+      # the flat-threshold run; the ratchet branch above builds its own.
+      CC_CSV_FLAT=$("$LIZARD_PATH" --csv -C "$CCN_THRESHOLD" ${CC_FILES_ARGS[@]+"${CC_FILES_ARGS[@]}"} 2>/dev/null || true)
+      CC_WARNINGS=$(printf '%s\n' "$CC_CSV_FLAT" | awk -F, -v t="$CCN_THRESHOLD" '
+        NF > 1 && $2 + 0 > t + 0 { c++ }
+        END { print c + 0 }
+      ')
+      # A lizard that produced no parsable row must not read as "clean". Without
+      # this, a crashing or mis-invoked lizard yields 0 warnings and the gate
+      # reports PASSED on zero analysed functions -- the same silent-success
+      # failure this issue is about.
+      if ! printf '%s\n' "$CC_CSV_FLAT" | awk -F, 'NF > 1 && $2 ~ /^[0-9]+$/ { found = 1; exit }
+                                                 END { exit(found ? 0 : 1) }'; then
+        echo "⚠️  WARN - lizard produced no parsable results; complexity not verified"
+        GATE_3_STATUS="WARN"
+        GATE_3_REASON="lizard_output_unparsable"
+      elif [ "$CC_WARNINGS" -gt 0 ]; then
         echo "$CC_OUTPUT"
         echo ""
         echo "❌ BLOCKED - $CC_WARNINGS functions with CCN > $CCN_THRESHOLD found."
         echo "Refactor high-complexity functions to keep below $CCN_THRESHOLD complexity."
+        GATE_3_STATUS="BLOCK"
+        GATE_3_REASON="ccn_over_threshold"
         exit 1
       else
         echo "✅ PASSED - All functions within complexity threshold ($CCN_THRESHOLD)."
