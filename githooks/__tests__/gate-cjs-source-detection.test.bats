@@ -97,6 +97,7 @@ MOCK
   cp "$SOURCE_GITHOOKS/pre-commit" .git/hooks/pre-commit
   chmod +x .git/hooks/pre-commit
   cp "$SOURCE_GITHOOKS/adapter-common.sh" .git/hooks/adapter-common.sh 2>/dev/null || true
+  cp "$SOURCE_GITHOOKS/hook-module-resolution.sh" .git/hooks/hook-module-resolution.sh 2>/dev/null || true
   mkdir -p .git/hooks/lib
   cp "$SOURCE_GITHOOKS/lib/now-ms.sh" .git/hooks/lib/now-ms.sh 2>/dev/null || true
 

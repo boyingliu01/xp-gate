@@ -522,6 +522,86 @@ function buildMutationScores(fileScores: Record<string, number>): Record<string,
   return scores;
 }
 
+/**
+ * The subset of a runner report that survivor summarisation needs. Declared
+ * structurally rather than as a concrete Stryker type because every runner
+ * (Stryker, mutmut, gremlins, go-mutant) normalises to `MutationRunResult`,
+ * which carries the same field names -- the summary must work for all of them,
+ * not just the TS one.
+ */
+export interface StrykerReportLike {
+  mutationScore: number;
+  nrOfMutants: number;
+  nrOfKilledMutants: number;
+  nrOfSurvivedMutants: number;
+  files?: Record<string, {
+    mutationScore: number;
+    nrOfMutants: number;
+    nrOfKilledMutants: number;
+    nrOfSurvivedMutants: number;
+  }>;
+}
+
+/** Per-file mutant outcome detail for the pre-push journal (#544). */
+export interface SurvivorSummary {
+  /** Files with at least one surviving mutant, worst first, capped by `limit`. */
+  survivedByFile: Record<string, number>;
+  /**
+   * How many files actually had survivors. Present so a capped map can be told
+   * apart from a complete one -- a truncated list that looks exhaustive is how
+   * "top 20" gets read as "all files".
+   */
+  filesWithSurvivors: number;
+  /** True when `survivedByFile` dropped entries to stay under `limit`. */
+  truncated: boolean;
+  mutants: number;
+  killed: number;
+  survived: number;
+}
+
+/**
+ * Condense a Stryker report into survivor detail (#544).
+ *
+ * Returns `null` -- never a summary of zeros -- when the report is missing or
+ * carries no per-file section. A timed-out or failed run has no measurements,
+ * and writing `survived: 0` next to a real-looking score would report
+ * "measured: no survivors" for a run that measured nothing. That is the exact
+ * shape of false success this project keeps finding, so unknown stays `null`.
+ */
+export function summarizeSurvivors(
+  report: StrykerReportLike | null | undefined,
+  options: { limit?: number } = {},
+): SurvivorSummary | null {
+  if (!report || !report.files) return null;
+
+  const limit = options.limit ?? 20;
+  const survivors: Array<[string, number]> = [];
+  let mutants = 0;
+  let killed = 0;
+  let survived = 0;
+
+  for (const [file, entry] of Object.entries(report.files)) {
+    const fileSurvived = entry.nrOfSurvivedMutants ?? 0;
+    mutants += entry.nrOfMutants ?? 0;
+    killed += entry.nrOfKilledMutants ?? 0;
+    survived += fileSurvived;
+    if (fileSurvived > 0) survivors.push([file, fileSurvived]);
+  }
+
+  // Worst first, then by path so equal counts order deterministically.
+  survivors.sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]));
+  const kept = survivors.slice(0, limit);
+
+  return {
+    survivedByFile: Object.fromEntries(kept),
+    filesWithSurvivors: survivors.length,
+    truncated: survivors.length > kept.length,
+    mutants,
+    killed,
+    survived,
+  };
+}
+
 export async function runGateM(options: GateMOptions): Promise<GateMResult> {
   const warnings: string[] = [];
   const errors: string[] = [];
@@ -595,6 +675,22 @@ async function collectTestIntentWarnings(sourceFiles: string[], warnings: string
   }
 }
 
+/**
+ * Read the mutation report the runner left on disk and summarise it (#544).
+ * Returns null when there is no readable report -- the caller then prints
+ * nothing, and the journal field stays absent. Every failure here is silent by
+ * design: #544 explicitly requires that missing detail must not turn Gate M
+ * itself into a failure.
+ */
+async function readSurvivorSummary(): Promise<SurvivorSummary | null> {
+  try {
+    const raw = await fs.readFile('.stryker-report.json', 'utf-8');
+    return summarizeSurvivors(JSON.parse(raw) as StrykerReportLike);
+  } catch {
+    return null;
+  }
+}
+
 export async function main(args: string[]): Promise<number> {
   const options = parseArgs(args);
 
@@ -611,19 +707,14 @@ export async function main(args: string[]): Promise<number> {
 
   const result = await runGateM(options);
 
-  if (result.warnings.length > 0) {
-    console.log('\nWarnings:');
-    for (const warning of result.warnings) {
-      console.log(`  ⚠ ${warning}`);
-    }
+  // #544: survivor detail on a machine-readable line. Printed only when a report
+  // exists -- absent means "not measured", never "measured: zero survivors".
+  const survivors = await readSurvivorSummary();
+  if (survivors) {
+    console.log(`GATE_M_SURVIVORS_JSON=${JSON.stringify(survivors)}`);
   }
 
-  if (result.errors.length > 0) {
-    console.log('\nErrors:');
-    for (const error of result.errors) {
-      console.error(`  ✗ ${error}`);
-    }
-  }
+  logDiagnostics(result.warnings, result.errors);
 
   const statusIcon = result.status === 'pass' ? '✓' :
     result.status === 'skip' ? '⊘' :
@@ -632,6 +723,18 @@ export async function main(args: string[]): Promise<number> {
   console.log(`\n${statusIcon} Gate M ${result.status.toUpperCase()} (${result.filesChecked} files checked)`);
 
   return result.exitCode;
+}
+
+/** Print Gate M's warnings and errors. Errors go to stderr. */
+function logDiagnostics(warnings: string[], errors: string[]): void {
+  if (warnings.length > 0) {
+    console.log('\nWarnings:');
+    for (const warning of warnings) console.log(`  ⚠ ${warning}`);
+  }
+  if (errors.length > 0) {
+    console.log('\nErrors:');
+    for (const error of errors) console.error(`  ✗ ${error}`);
+  }
 }
 
 const cliArgs = process.argv.slice(2);

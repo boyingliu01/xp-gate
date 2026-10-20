@@ -59,6 +59,7 @@ MOCK
   chmod +x .git/hooks/pre-push
   cp "$SOURCE_GITHOOKS/lib/validate-code-walkthrough.cjs" .git/hooks/lib/validate-code-walkthrough.cjs
   cp "$SOURCE_GITHOOKS/adapter-common.sh" .git/hooks/adapter-common.sh 2>/dev/null || true
+  cp "$SOURCE_GITHOOKS/hook-module-resolution.sh" .git/hooks/hook-module-resolution.sh 2>/dev/null || true
   git config core.hooksPath .git/hooks
 }
 

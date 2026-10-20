@@ -188,6 +188,7 @@ teardown() {
   cp "$SOURCE_GITHOOKS/pre-commit" "$FRESH/.git/hooks/pre-commit"
   chmod +x "$FRESH/.git/hooks/pre-commit"
   cp "$SOURCE_GITHOOKS/adapter-common.sh" "$FRESH/.git/hooks/adapter-common.sh" 2>/dev/null || true
+  cp "$SOURCE_GITHOOKS/hook-module-resolution.sh" "$FRESH/.git/hooks/hook-module-resolution.sh" 2>/dev/null || true
   mkdir -p "$FRESH/.git/hooks/lib"
   cp -R "$SOURCE_GITHOOKS/lib/." "$FRESH/.git/hooks/lib/" 2>/dev/null || true
   git -C "$FRESH" config core.hooksPath "$FRESH/.git/hooks"
