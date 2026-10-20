@@ -147,9 +147,41 @@ EOF
     # code is demoted to "did the tool itself run". --error stays OFF: it would
     # add nothing the JSON does not already provide, and keeping it off leaves
     # failure exit codes unambiguous for the #475 diagnostics path.
-    SEMGREP_STDOUT_FILE=$(mktemp)
-    SEMGREP_OUTPUT=$("$SEMGREP_CMD" scan --config=p/security-audit --json --disable-version-check "${SEMGREP_ARGS[@]}" 2>&1 >"$SEMGREP_STDOUT_FILE")
-    SEMGREP_EXIT=$?
+    # #559: bound the run. Without a timeout, a wedged semgrep blocks the
+    # invocation for as long as its process lives; the fail-closed verdict logic
+    # below is correct but unreachable, so the hook hangs instead of judging.
+    # A gate that can wedge an interactive `git commit` gets bypassed with
+    # --no-verify, which is worse than any verdict it could have produced.
+    # `-k` after the primary signal: pysemgrep spinning in a syscall ignores
+    # SIGTERM, and the shipped 0.29 code used the same `-k 10` shape.
+    SEMGREP_TIMEOUT_S="${XP_GATE_SEMGREP_TIMEOUT:-180}"
+    SEMGREP_TIMED_OUT=false
+    if command -v timeout >/dev/null 2>&1; then
+      SEMGREP_STDOUT_FILE=$(mktemp)
+      SEMGREP_OUTPUT=$(timeout -k 10 "$SEMGREP_TIMEOUT_S" \
+        "$SEMGREP_CMD" scan --config=p/security-audit --json --disable-version-check \
+        "${SEMGREP_ARGS[@]}" 2>&1 >"$SEMGREP_STDOUT_FILE")
+      SEMGREP_EXIT=$?
+      # 124 = timeout's own "I gave up" code. 137 = 128+SIGKILL, which is what
+      # `timeout -k` returns when the child ignored SIGTERM and had to be
+      # killed -- measured with a semgrep stand-in that traps TERM. Both mean
+      # "bounded, no verdict", so both must be reported as a timeout; checking
+      # only 124 told the user their semgrep was unparseable when in fact the
+      # scan had been cut off.
+      case "$SEMGREP_EXIT" in
+        124|137) SEMGREP_TIMED_OUT=true ;;
+      esac
+    else
+      # No `timeout` on this platform (stock macOS). Say so: an unbounded run
+      # nobody mentioned is exactly how #559 stayed invisible for a whole
+      # release. The scan still runs -- refusing to scan would be a worse
+      # trade -- but the unbounded window is now stated.
+      echo "     ⚠️  'timeout' command not available — semgrep runs UNBOUNDED (install coreutils or set up gtimeout)"
+      SEMGREP_STDOUT_FILE=$(mktemp)
+      SEMGREP_OUTPUT=$("$SEMGREP_CMD" scan --config=p/security-audit --json --disable-version-check \
+        "${SEMGREP_ARGS[@]}" 2>&1 >"$SEMGREP_STDOUT_FILE")
+      SEMGREP_EXIT=$?
+    fi
 
     # One node pass over the JSON: first line = verdict counts, remaining lines =
     # finding details. The severity vocabulary is the UNION of the two scales
@@ -191,7 +223,18 @@ console.log("");});
     if [ "$V_PARSE" != "OK" ] || [ -z "$V_RESULTS" ] || [ -z "$V_ERRORS" ] || [ -z "$V_BLOCKING" ] || [ -z "$V_WARNINGS" ]; then
       # Unparseable output: nothing the exit code claims can be trusted (#518).
       # Fail closed — SKIP with diagnostics, never a PASS.
-      echo "     ⚠️  semgrep output unparseable or verdict fields missing (exit code ${SEMGREP_EXIT}) — cannot determine verdict"
+      #
+      # #559: name a timeout as a timeout. The generic "unparseable" message
+      # would be true but useless here -- it points at the JSON parser when the
+      # real problem is that the scan was cut off. Same verdict (SKIP), but a
+      # diagnosis the reader can act on.
+      if [ "$SEMGREP_TIMED_OUT" = true ]; then
+        echo "     ⏱️  semgrep exceeded ${SEMGREP_TIMEOUT_S}s and was killed — no verdict is possible"
+        echo "     This is NOT a finding and NOT a clean scan. Raise XP_GATE_SEMGREP_TIMEOUT"
+        echo "     if the repo legitimately takes longer; investigate if semgrep itself is wedged."
+      else
+        echo "     ⚠️  semgrep output unparseable or verdict fields missing (exit code ${SEMGREP_EXIT}) — cannot determine verdict"
+      fi
       if [ -n "$SEMGREP_OUTPUT" ]; then
         echo "     ── what semgrep reported on stderr ──"
         printf '%s\n' "$SEMGREP_OUTPUT" | tail -10 | sed 's/^/     /'
@@ -200,11 +243,19 @@ console.log("");});
         echo "     ── what semgrep wrote to stdout (tail) ──"
         printf '%s\n' "$SEMGREP_STDOUT_TAIL" | sed 's/^/     /'
       fi
-      echo "     ⏭️  SKIPPED - SAST (semgrep output unparseable)"
-      GATE_10_STATUS="SKIP"
-      # Consumed by the sourcing parent (pre-commit report JSON), not here.
-      # shellcheck disable=SC2034
-      GATE_10_REASON="output_unparseable"
+      if [ "$SEMGREP_TIMED_OUT" = true ]; then
+        echo "     ⏭️  SKIPPED - SAST (semgrep timed out after ${SEMGREP_TIMEOUT_S}s)"
+        GATE_10_STATUS="SKIP"
+        # Consumed by the sourcing parent (pre-commit report JSON), not here.
+        # shellcheck disable=SC2034
+        GATE_10_REASON="semgrep_timeout"
+      else
+        echo "     ⏭️  SKIPPED - SAST (semgrep output unparseable)"
+        GATE_10_STATUS="SKIP"
+        # Consumed by the sourcing parent (pre-commit report JSON), not here.
+        # shellcheck disable=SC2034
+        GATE_10_REASON="output_unparseable"
+      fi
     elif [ "$V_RESULTS" -eq 0 ] && { [ "$V_ERRORS" -gt 0 ] || [ "$SEMGREP_EXIT" -ne 0 ]; }; then
       # Nothing was scanned to a verdict: semgrep either failed outright
       # (nonzero exit) or completed but reported scan errors for every input

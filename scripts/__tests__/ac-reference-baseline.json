@@ -193,6 +193,12 @@
     "githooks/__tests__/issue-557-banner-honesty.test.bats": [
       "AC-557-01"
     ],
+    "githooks/__tests__/issue-558-semgrep-dir-dedup.test.bats": [
+      "AC-558-01"
+    ],
+    "githooks/__tests__/issue-559-semgrep-timeout.test.bats": [
+      "AC-559-01"
+    ],
     "githooks/__tests__/issue-audit-poisoned-start.bats": [
       "AC-AUDIT-001",
       "AC-AUDIT-002"
@@ -481,9 +487,6 @@
       "AC-002-06",
       "AC-002-07",
       "AC-002-08"
-    ],
-    "githooks/__tests__/issue-558-semgrep-dir-dedup.test.bats": [
-      "AC-558-01"
     ]
   }
 }
