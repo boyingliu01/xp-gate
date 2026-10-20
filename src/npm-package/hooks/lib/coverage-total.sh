@@ -70,7 +70,7 @@ enforce_python_coverage() {
   fi
 
   if [ -n "$COVERAGE_PERCENT" ]; then
-    if [ "$COVERAGE_PERCENT" -lt 80 ]; then
+    if [ "$COVERAGE_PERCENT" -lt "${COVERAGE_THRESHOLD:-80}" ]; then
       # #399: a subset run (smart test selection) measures only the tested
       # files, so its global total is meaningless as a verdict — the full
       # suite may well be >=80% even when the subset is not. Warn exactly as
