@@ -17,7 +17,7 @@ fail() {
   exit 1
 }
 
-HOOK_MIRROR_FILES="adapter-common.sh gate-3.sh gate-4.sh gate-7.sh gate-8.sh gate-9.sh gate-10.sh gate-12-file-hygiene.sh post-merge pre-commit pre-push sprint-gate.sh lib/coverage-total.sh lib/python-test-selection.sh lib/python-incremental-typecheck.sh lib/now-ms.sh lib/audit-sanitize.sh lib/jscpd-run.sh lib/sprint-gate-report.sh lib/test-failure.sh lib/typecheck.sh lib/ccn-ratchet.sh lib/docs-only.sh lib/validate-code-walkthrough.cjs"
+HOOK_MIRROR_FILES="adapter-common.sh hook-module-resolution.sh gate-3.sh gate-4.sh gate-7.sh gate-8.sh gate-9.sh gate-10.sh gate-12-file-hygiene.sh post-merge pre-commit pre-push sprint-gate.sh lib/coverage-total.sh lib/python-test-selection.sh lib/python-incremental-typecheck.sh lib/now-ms.sh lib/audit-sanitize.sh lib/jscpd-run.sh lib/sprint-gate-report.sh lib/test-failure.sh lib/typecheck.sh lib/ccn-ratchet.sh lib/docs-only.sh lib/validate-code-walkthrough.cjs"
 
 # Root-level shell copies (githooks/<f> -> src/npm-package/<f>). Same set as
 # the hooks/ copies minus hook-only entry points (post-merge/pre-commit/

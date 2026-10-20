@@ -9,7 +9,13 @@ const path = require('path');
 
 const repoRoot = path.resolve(__dirname, '..', '..');
 const TEXT_EXTENSIONS = new Set(['.js', '.cjs', '.mjs', '.json', '.md', '.yml', '.yaml', '.sh']);
-const SKIPPED_DIRS = new Set(['node_modules', '.stryker-tmp', 'dist', '.git', '.sprint-state', '.xp-gate']);
+// gitignored scratch dirs: their contents are never part of the repo, so a note
+// a developer left in one is not a live reference. `.delphi-work` holds review
+// inputs and diffs during a sprint and was the actual cause of a spurious hit.
+const SKIPPED_DIRS = new Set([
+  'node_modules', '.stryker-tmp', 'dist', '.git',
+  '.sprint-state', '.xp-gate', '.delphi-work', '.worktrees', '.sprint-history',
+]);
 
 // docs/plans/*, CHANGELOG and evidence artifacts record what happened; they are
 // not live references and must not fail this guard.
