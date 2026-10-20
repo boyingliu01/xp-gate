@@ -57,6 +57,41 @@ fi
 # shellcheck source=/dev/null
 . "$HOOK_RESOLUTION_SH"
 
+# --- Coverage threshold: ONE resolver, one number (#555) --------------------
+# The threshold used to exist three times with two different values: the report
+# printed a literal 80, coverage-total.sh compared against a literal 80, and the
+# generic block branch echoed "below 80% threshold" — while the repo's own
+# pyproject declared fail_under. CI honours the declared value, so a commit at
+# 81% passed the hook (judged against 80) and failed CI (82). The report was the
+# worst of the three: it quoted a threshold as though it were the enforced one,
+# and a plausible wrong number is harder to notice than a visible gap.
+#
+# Resolve from the repo's own declaration, in the order the tools themselves
+# use: pyproject [tool.coverage.report] fail_under, then .coveragerc. A repo
+# declaring neither keeps the historical 80.
+_resolve_coverage_threshold() {
+  _rct_value=""
+  _rct_src="default"
+  if [ -f pyproject.toml ]; then
+    _rct_value=$(python -c "import tomllib;print(tomllib.load(open('pyproject.toml','rb'))['tool']['coverage']['report']['fail_under'])" 2>/dev/null || true)
+    [ -n "$_rct_value" ] && _rct_src="pyproject.toml [tool.coverage.report] fail_under"
+    if [ -z "$_rct_value" ]; then
+      _rct_value=$(grep -oE '^[[:space:]]*fail_under[[:space:]]*=[[:space:]]*[0-9]+' pyproject.toml 2>/dev/null | grep -oE '[0-9]+' | head -1 || true)
+      [ -n "$_rct_value" ] && _rct_src="pyproject.toml fail_under (text scan)"
+    fi
+  fi
+  if [ -z "$_rct_value" ] && [ -f .coveragerc ]; then
+    _rct_value=$(grep -oE '^[[:space:]]*fail_under[[:space:]]*=[[:space:]]*[0-9]+' .coveragerc 2>/dev/null | grep -oE '[0-9]+' | head -1 || true)
+    [ -n "$_rct_value" ] && _rct_src=".coveragerc fail_under"
+  fi
+  case "$_rct_value" in
+    ''|*[!0-9]*) _rct_value="80"; _rct_src="default (no fail_under declared)" ;;
+  esac
+  COVERAGE_THRESHOLD_SOURCE="$_rct_src"
+  printf '%s' "$_rct_value"
+}
+COVERAGE_THRESHOLD="$(_resolve_coverage_threshold)"
+
 # Look up one tier's directory variable by name without eval-ing arbitrary input:
 # the base names are a closed set baked into the generated file.
 _hook_tier_base() {
@@ -2727,11 +2762,18 @@ else
                 PY_TARGET_COUNT=$(printf '%s\n' "$PY_TARGETS" | grep -c '.' || true)
                 echo "ℹ️  Python: selective run ($PY_STRATEGY) — $PY_TARGET_COUNT target(s):"
                 printf '%s\n' "$PY_TARGETS" | sed 's/^/     /'
-                # Subset run: keep --cov so data is collected, but drop the
-                # global threshold — subset coverage is meaningless globally.
+                # Subset run: keep --cov so data is collected, but the global
+                # threshold must be actively DISABLED, not merely omitted.
+                # Omitting --cov-fail-under does not work (#556): pytest-cov
+                # reads fail_under from pyproject on its own, so the floor
+                # stayed in force, a selective run at 23% exited 1, and the
+                # exit was escalated to a hard BLOCK -- printing "Partial
+                # coverage ... not full suite" immediately above "BLOCKED -
+                # Coverage check FAILED". --cov-fail-under=0 is the documented
+                # way to switch it off for one invocation.
                 PARTIAL_TEST_RUN=true
                 # shellcheck disable=SC2086
-                pytest $PY_XDIST_ARGS $PY_COV_SOURCE --tb=short $PY_TARGETS
+                pytest $PY_XDIST_ARGS $PY_COV_SOURCE --cov-fail-under=0 --tb=short $PY_TARGETS
                 COV_EXIT=$((COV_EXIT || $?))
               fi
             fi
@@ -2747,7 +2789,7 @@ else
             go test -coverprofile=coverage.out ./... 2>/dev/null
             TOTAL_COVERAGE=$(go tool cover -func=coverage.out 2>/dev/null | grep "^total:" | awk '{print substr($3, 1, length($3)-1)}')
             if [ -n "$TOTAL_COVERAGE" ] && (( $(echo "$TOTAL_COVERAGE < 80" | bc -l 2>/dev/null || echo "0") )); then
-              echo "❌ BLOCKED - Go coverage $TOTAL_COVERAGE% below 80% threshold"
+              echo "❌ BLOCKED - Go coverage $TOTAL_COVERAGE% below ${COVERAGE_THRESHOLD}% threshold"
               exit 1
             fi
             echo "Go coverage: $TOTAL_COVERAGE%"
@@ -2805,14 +2847,14 @@ else
           } catch(e) { console.log('parse_error'); }
         " 2>/dev/null)
         if [ "$COVERAGE_PERCENT" != "parse_error" ] && [ -n "$COVERAGE_PERCENT" ]; then
-          if [ "$COVERAGE_PERCENT" -lt 80 ]; then
+          if [ "$COVERAGE_PERCENT" -lt "$COVERAGE_THRESHOLD" ]; then
             # Only a subset test run (smart selection) leaves partial coverage data;
             # a full suite run must block on <80% even when many test files changed.
             if [ "${PARTIAL_TEST_RUN:-false}" = "true" ]; then
               echo "⚠️  Partial coverage ${COVERAGE_PERCENT}% (subset test run, not full suite)."
               echo "    Run 'npx vitest run --coverage' for full coverage check."
             else
-              echo "❌ BLOCKED - TypeScript coverage ${COVERAGE_PERCENT}% below 80% threshold"
+              echo "❌ BLOCKED - TypeScript coverage ${COVERAGE_PERCENT}% below ${COVERAGE_THRESHOLD}% threshold"
               exit 1
             fi
           else
@@ -2876,7 +2918,7 @@ else
               echo "⚠️  Partial coverage ${COVERAGE_ROUNDED}% (subset test run, not full suite)."
               echo "    Run the full test suite for a complete Java coverage check."
             else
-              echo "❌ BLOCKED - Java coverage ${COVERAGE_ROUNDED}% below 80% threshold"
+              echo "❌ BLOCKED - Java coverage ${COVERAGE_ROUNDED}% below ${COVERAGE_THRESHOLD}% threshold"
               exit 1
             fi
           else
@@ -2902,8 +2944,8 @@ else
       if [ -f "coverage/lcov.info" ]; then
         COVERAGE_PERCENT=$(parse_lcov_coverage "coverage/lcov.info" 2>/dev/null) || COVERAGE_PERCENT="0"
         if [ "$COVERAGE_PERCENT" != "0" ] && [ -n "$COVERAGE_PERCENT" ]; then
-          if [ "$COVERAGE_PERCENT" -lt 80 ]; then
-            echo "❌ BLOCKED - Flutter/Dart coverage ${COVERAGE_PERCENT}% below 80% threshold"
+          if [ "$COVERAGE_PERCENT" -lt "$COVERAGE_THRESHOLD" ]; then
+            echo "❌ BLOCKED - Flutter/Dart coverage ${COVERAGE_PERCENT}% below ${COVERAGE_THRESHOLD}% threshold"
             exit 1
           fi
           echo "Flutter/Dart coverage: ${COVERAGE_PERCENT}% ✅ (≥ 80%)"
@@ -2942,7 +2984,7 @@ else
           COVERAGE_STATUS=${COVERAGE_RESULT%%|*}
           COVERAGE_PERCENT=${COVERAGE_RESULT#*|}
           if [ "$COVERAGE_STATUS" = "below" ]; then
-            echo "❌ BLOCKED - PowerShell coverage ${COVERAGE_PERCENT}% below 80% threshold"
+            echo "❌ BLOCKED - PowerShell coverage ${COVERAGE_PERCENT}% below ${COVERAGE_THRESHOLD}% threshold"
             exit 1
           fi
           echo "PowerShell coverage: ${COVERAGE_PERCENT}% ✅ (≥ 80%)"
@@ -2979,14 +3021,14 @@ else
         fi
       fi
       if [ -n "$COVERAGE_PERCENT" ] && [ "$COVERAGE_PERCENT" != "parse_error" ] && [ "$COVERAGE_PERCENT" -gt 0 ]; then
-        if [ "$COVERAGE_PERCENT" -lt 80 ]; then
+        if [ "$COVERAGE_PERCENT" -lt "$COVERAGE_THRESHOLD" ]; then
           # Only a subset test run (smart selection) warns — the full suite may
           # still reach ≥80%; a full suite run must block.
           if [ "${PARTIAL_TEST_RUN:-false}" = "true" ]; then
             echo "⚠️  Partial coverage ${COVERAGE_PERCENT}% (subset test run, not full suite)."
             echo "    Run the full test suite for a complete ${CURRENT_LANG} coverage check."
           else
-            echo "❌ BLOCKED - ${CURRENT_LANG} coverage ${COVERAGE_PERCENT}% below 80% threshold"
+            echo "❌ BLOCKED - ${CURRENT_LANG} coverage ${COVERAGE_PERCENT}% below ${COVERAGE_THRESHOLD}% threshold"
             exit 1
           fi
         else
@@ -3035,10 +3077,15 @@ else
             }
           } catch(e) { console.log('parse_error'); }
         " 2>/dev/null)
+        # NOTE (#555): the 80 below is deliberately NOT $COVERAGE_THRESHOLD.
+        # That one is the project-level floor a repo declares in fail_under;
+        # this is the bar a single NEW file must clear to justify existing at
+        # all. Tying them would mean a repo with fail_under=82 could not add a
+        # file at 81% even while the project sits well above its floor.
         if [ "$FILE_COV" = "no_data" ] || [ "$FILE_COV" = "parse_error" ]; then
           echo "     ⚠️  $new_file — no coverage data (file may be excluded or not exercised)"
         elif [ "$FILE_COV" -lt 80 ]; then
-          echo "     ❌ $new_file — ${FILE_COV}% coverage (below 80% threshold)"
+          echo "     ❌ $new_file — ${FILE_COV}% coverage (below 80% per-new-file threshold)"
           NEW_FILE_COV_FAIL=true
         else
           echo "     ✅ $new_file — ${FILE_COV}% coverage"
@@ -3906,7 +3953,8 @@ generate_quality_report() {
     "gate5_tests": {
       "name": "Tests + Coverage",
       "status": "${GATE_5_STATUS:-PASS}",
-      "thresholds": { "lines": 80, "functions": 80, "branches": 70, "statements": 80 },
+      "thresholds": { "lines": ${COVERAGE_THRESHOLD}, "functions": null, "branches": null, "statements": null },
+      "threshold_source": "${COVERAGE_THRESHOLD_SOURCE}",
       "actual": { "coverage": "${COV_PCT}" },
       "failedTests": $FAILED_TESTS_JSON
     },
