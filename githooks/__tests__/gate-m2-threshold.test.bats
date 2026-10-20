@@ -45,6 +45,7 @@ MOCK
   cp "$SOURCE_GITHOOKS/lib/validate-code-walkthrough.cjs" .git/hooks/lib/validate-code-walkthrough.cjs
   # adapter-common.sh is sourced by pre-push at Gate M
   cp "$SOURCE_GITHOOKS/adapter-common.sh" .git/hooks/adapter-common.sh 2>/dev/null || true
+  cp "$SOURCE_GITHOOKS/hook-module-resolution.sh" .git/hooks/hook-module-resolution.sh 2>/dev/null || true
 
   # Create initial commit (no test files — clean baseline for diff-tree)
   echo "init" > README.md

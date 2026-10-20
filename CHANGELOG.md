@@ -2,6 +2,24 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.30.4.0] - 2026-10-21
+
+处理 0.30.3 发布后新报的 gate-10 缺陷与 #544。这一轮的主题仍是**"门禁在不该沉默的地方沉默"**——前两轮修的是门禁说了假话，这一轮是门禁什么都不说：扫描器漏掉的文件、被遗忘的超时、以及写进 journal 却永远推进不进去的状态。
+
+### Fixed
+
+- **Gate 10 目录去重按子串匹配，暂存文件被静默漏扫（#558, 5cbe962a）**: target 去重写的是 `case "$SEEN" in *"$dir"*)`，没有分隔符锚定。先记录 `./fastdl/tests` 之后，父目录 `./fastdl` 被它当作子串命中，于是不再作为 target 加入——暂存的 `fastdl/a.py` 只剩一个 `--include=a.py`，没有可扫描的目录。同理 `./src/api` 会吞掉 `./src/app`。**没有任何报错，文件只是没被分析**：对安全门禁而言这是最坏的失败形态，一次静默的净损失看起来和一次干净的扫描完全一样。改为按整行锚定。
+  同一代码块里还发现**第二个 issue 未报告的缺陷**：`${x%/*}` 对不含 `/` 的字符串原样返回，所以根级 `x.ts` 的 target 变成 `./x.ts`——把一个文件路径当作目录交给 semgrep。原注释声称"`./x.ts` 会被 strip 成 `./`"，这个假设从来就不成立。改为只在存在 `/` 时 strip，否则 target 为 `.`。实测两种顺序（tests 先 / 父目录先）产生相同的 target 集合，且父目录始终存在。
+- **Gate 10 的 semgrep 调用没有任何超时（#559, 06b7fd23）**: 0.29 时代的 `timeout -k 10 180` 在 0.30 的改写中丢失。报告者机器上 `semgrep --version` 本身就会永久挂起（pysemgrep 空转 700+ CPU 秒），`git commit` 十分钟不返回，只能 taskkill。**这个 gate 的 fail-closed 逻辑一直是对的，只是永远执行不到**——一个调用会永久挂起的门禁不是安全失败，而是逼用户去用 `--no-verify`。已恢复超时并加 `-k`（pysemgrep 卡在系统调用里会忽略 SIGTERM，SIGKILL 才是结束它的东西），边界可用 `XP_GATE_SEMGREP_TIMEOUT` 调整。
+  实测发现 `timeout -k` 返回的是 **137**（128+SIGKILL）而不是 124：只判断 124 会把被截断的扫描报成"输出无法解析"——消息为真但误导，指向 JSON 解析器而真实原因是超时。两个码现在都映射到 `SEMGREP_TIMED_OUT`，有独立消息和独立的 `GATE_10_REASON=semgrep_timeout`。没有 `timeout` 的平台（原生 macOS）仍会无界运行，但现在**会说出来**。端到端验证：16 秒返回（此前永不返回）。
+- **Gate M 不产出模块级存活变异体明细（#544, 54318594）**: retro 无法回答"哪些模块最该重构"。数据在源头从没缺过——Stryker 的 JSON reporter 本就有 `files[].nrOfSurvivedMutants`，`stryker-types.ts` 也已声明——但 `runAllRunners` 只取了 `mutationScore`，随后 `buildMutationScores` 给每个文件写入 `{mutants: 0, killed: 0, survived: 0}`。**三个零写在真实分数旁边，读起来就是"已测量：无存活变异体"**。新增 `summarizeSurvivors()`，无报告时返回 `null` 而非全零摘要，journal 随即整个省略该字段（absent = 未测量，与"测量了，零存活"是两件事）。按 20 条封顶并带显式 `truncated` 标记。明细通过环境变量进入 journal，不插值进 Python heredoc（路径里一个引号就会产生语法错误）。
+  接线时又发现两个同一类缺陷：journal 读 `GATE_M_PYTHON_STATUS` 而代码赋的是 `GATE_M_PY_STATUS`，导致 **M-Python 在任何情况下都报 SKIP 默认值**——正是 #557 要修的 bug，在该 gate 上仍然存在；以及 journal 读 `GATE_DELPHI_STATUS` 但从来没有地方赋值，导致 **Gate MW 即便走查已通过也报 SKIP**——收尾横幅说了真话而机器可读的 journal 没有。两者都已修正，并新增测试断言"journal 读的每个状态变量都确实被钩子赋值"。
+
+### 说明
+
+- #544 建议里的 `baseline_delta` 本次未实现：它需要可与 `.mutation-baseline.*` 比较的分数序列，而 issue 自己指出历史样本为 0（68 份 journal 全部无分数）。先有真实样本才有意义——现在写 `baseline_delta: 0` 只会是又一个把未测量伪装成测量的字段。存活明细（retro 排名的直接输入）已完整可用。
+- 全量验证：vitest 178 文件 / 2428 通过 / 2 skip / 0 失败（降并发运行）；tsc 干净；钩子镜像 parity PASS；pre-push shellcheck 警告 9 → 7。
+
 ## [0.30.3.0] - 2026-10-21
 
 处理 `whale-sql-audit` 报告的一批 gate 缺陷（#545–#557，#539 暂缓）。这一轮的共同点不是"某个 gate 有 bug"，而是**门禁在不该给结论的时候给了结论**：工具崩了报"发现安全问题"、门禁跳了报"通过"、sprint 烂尾了报"已验证"、覆盖率门槛不是仓库声明的那个数。每一种都比直接失败更糟，因为失败会被查，假的成功不会。

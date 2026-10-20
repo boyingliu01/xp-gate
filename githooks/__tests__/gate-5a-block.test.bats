@@ -59,6 +59,11 @@ MOCK
   chmod +x .git/hooks/pre-commit
   # adapter-common.sh is sourced by pre-commit at startup
   cp "$SOURCE_GITHOOKS/adapter-common.sh" .git/hooks/adapter-common.sh 2>/dev/null || true
+  # #548 added a second startup file beside adapter-common.sh. A fixture that
+  # copies only the first one dies at that FATAL and every assertion in the suite
+  # then tests a crashed hook instead of Gate 5a -- #497's failure mode, one
+  # file later.
+  cp "$SOURCE_GITHOOKS/hook-module-resolution.sh" .git/hooks/hook-module-resolution.sh 2>/dev/null || true
   # pre-commit sources lib/*.sh at runtime (#449), so a fixture that installs
   # only the hook file dies at the source line and every assertion in this suite
   # then tests a crashed hook (#497).
@@ -88,7 +93,7 @@ teardown() {
   mkdir -p src
   echo "export const x = 1;" > src/foo.ts
   git add src/foo.ts
-  run git commit --no-verify -m "add foo"
+  run git commit -m "add foo"
   [ "$status" -ne 0 ]
   [[ "$output" == *"BLOCKED"* ]]
 }
@@ -103,7 +108,7 @@ teardown() {
   # Gate 5 ("Tests FAILED") instead of proving Gate 5a lets the commit through.
   printf "import { expect, test } from 'vitest';\ntest('foo', () => { expect(1).toBe(1); });\n" > src/foo.test.ts
   git add src/foo.ts src/foo.test.ts
-  run git commit --no-verify -m "add foo with test"
+  run git commit -m "add foo with test"
   [ "$status" -eq 0 ]
 }
 
@@ -115,7 +120,7 @@ teardown() {
   git add src/foo.ts && git commit -q -m "add foo" --no-verify
   echo "export const y = 2;" >> src/foo.ts
   git add src/foo.ts
-  run git commit --no-verify -m "modify foo"
+  run git commit -m "modify foo"
   [ "$status" -eq 0 ]
   [[ "$output" == *"WARNING"* ]]
 }
@@ -127,7 +132,7 @@ teardown() {
   echo "export {};" > src/index.ts
   echo "export type Foo = string;" > src/types.ts
   git add src/index.ts src/types.ts
-  run git commit --no-verify -m "add exempt files"
+  run git commit -m "add exempt files"
   [ "$status" -eq 0 ]
 }
 
@@ -137,7 +142,7 @@ teardown() {
   mkdir -p src
   echo "// @no-test-required: This is a configuration file that does not need tests" > src/config.ts
   git add src/config.ts
-  run git commit --no-verify -m "add config"
+  run git commit -m "add config"
   [ "$status" -eq 0 ]
 }
 
@@ -147,7 +152,7 @@ teardown() {
   mkdir -p src
   echo "// @no-test-required: short" > src/config.ts
   git add src/config.ts
-  run git commit --no-verify -m "add config"
+  run git commit -m "add config"
   [ "$status" -ne 0 ]
   [[ "$output" == *"BLOCKED"* ]]
 }
@@ -158,7 +163,7 @@ teardown() {
   mkdir -p src
   echo "// @no-test" > src/legacy.ts
   git add src/legacy.ts
-  run git commit --no-verify -m "add legacy"
+  run git commit -m "add legacy"
   [ "$status" -eq 0 ]
 }
 
@@ -171,7 +176,7 @@ teardown() {
   git add src/foo.ts
   export SKIP_GATE_5A_BLOCK=1
   export SKIP_GATE_5A_BLOCK_REASON="testing escape valve"
-  run git commit --no-verify -m "add foo with escape"
+  run git commit -m "add foo with escape"
   [ "$status" -eq 0 ]
   [[ "$output" == *"ESCAPE VALVE"* ]]
   [ -f ".xp-gate/reports/escape-valve-log.json" ]
@@ -193,6 +198,13 @@ teardown() {
   cp "$SOURCE_GITHOOKS/pre-commit" "$FRESH/.git/hooks/pre-commit"
   chmod +x "$FRESH/.git/hooks/pre-commit"
   cp "$SOURCE_GITHOOKS/adapter-common.sh" "$FRESH/.git/hooks/adapter-common.sh" 2>/dev/null || true
+  cp "$SOURCE_GITHOOKS/hook-module-resolution.sh" "$FRESH/.git/hooks/hook-module-resolution.sh" 2>/dev/null || true
+  # lib/*.sh are sourced at runtime too (#449), and this fixture's hook exits at
+  # the first missing one -- so every assertion below would test a crashed hook.
+  mkdir -p "$FRESH/.git/hooks/lib"
+  for lib_file in "$SOURCE_GITHOOKS"/lib/*.sh; do
+    [ -f "$lib_file" ] && cp "$lib_file" "$FRESH/.git/hooks/lib/"
+  done
   # Use absolute path — relative ".git/hooks" resolves relative to .git/ dir, not working tree
   git -C "$FRESH" config core.hooksPath "$FRESH/.git/hooks"
 
@@ -247,7 +259,7 @@ export const placeholder = true;' > "$FRESH/src/placeholder.ts"
   printf 'enabled: true\ngracePeriod: 10\n' > .tdd-adoption.yaml
   echo "export const x = 1;" > src/foo.ts
   git add .tdd-adoption.yaml src/foo.ts
-  run git commit --no-verify -m "add foo with grace"
+  run git commit -m "add foo with grace"
   [ "$status" -eq 0 ]
   [[ "$output" == *"WARNING"* ]] || [[ "$output" == *"downgraded"* ]]
 }
@@ -258,7 +270,7 @@ export const placeholder = true;' > "$FRESH/src/placeholder.ts"
   mkdir -p src
   echo "export const App = () => <div/>;" > src/App.tsx
   git add src/App.tsx
-  run git commit --no-verify -m "add App"
+  run git commit -m "add App"
   [ "$status" -ne 0 ]
   [[ "$output" == *"BLOCKED"* ]]
 }
@@ -267,9 +279,19 @@ export const placeholder = true;' > "$FRESH/src/placeholder.ts"
 
 @test "new Python file without test only WARNS" {
   mkdir -p src
-  echo "def foo(): pass" > src/foo.py
+  # Staging a .py routes Gates 1/5 at the Python toolchain, and `def foo(): pass`
+  # on one line fails `ruff format --check` -- Gate 1 then blocks the commit and
+  # Gate 5a is never reached, so the test asserted Gate 5a behaviour it never
+  # exercised. Format-clean source plus stub formatters keep the assertion on
+  # Gate 5a, which is what this test names.
+  printf 'def foo():\n    pass\n' > src/foo.py
+  cat > bin/ruff << 'MOCK'
+#!/bin/bash
+exit 0
+MOCK
+  chmod +x bin/ruff
   git add src/foo.py
-  run git commit --no-verify -m "add foo.py"
+  run git commit -m "add foo.py"
   [ "$status" -eq 0 ]
   [[ "$output" == *"WARNING"* ]]
 }
@@ -290,6 +312,13 @@ export const placeholder = true;' > "$FRESH/src/placeholder.ts"
   cp "$SOURCE_GITHOOKS/pre-commit" "$FRESH/.git/hooks/pre-commit"
   chmod +x "$FRESH/.git/hooks/pre-commit"
   cp "$SOURCE_GITHOOKS/adapter-common.sh" "$FRESH/.git/hooks/adapter-common.sh" 2>/dev/null || true
+  cp "$SOURCE_GITHOOKS/hook-module-resolution.sh" "$FRESH/.git/hooks/hook-module-resolution.sh" 2>/dev/null || true
+  # lib/*.sh are sourced at runtime too (#449); without them this hook exits
+  # before reaching Gate 5a and the assertion below tests a crash.
+  mkdir -p "$FRESH/.git/hooks/lib"
+  for lib_file in "$SOURCE_GITHOOKS"/lib/*.sh; do
+    [ -f "$lib_file" ] && cp "$lib_file" "$FRESH/.git/hooks/lib/"
+  done
   # Use absolute path — relative ".git/hooks" resolves relative to .git/ dir, not working tree
   git -C "$FRESH" config core.hooksPath "$FRESH/.git/hooks"
 
@@ -341,7 +370,7 @@ export const placeholder = true;' > "$FRESH/src/placeholder.ts"
   printf "import { expect, test } from 'vitest';\ntest('foo', () => { expect(1).toBe(1); });\n" > src/foo.test.ts
   echo "export const y = 2;" > src/bar.ts
   git add src/foo.ts src/foo.test.ts src/bar.ts
-  run git commit --no-verify -m "add foo and bar"
+  run git commit -m "add foo and bar"
   [ "$status" -ne 0 ]
   [[ "$output" == *"BLOCKED"* ]]
   [[ "$output" == *"bar.ts"* ]]

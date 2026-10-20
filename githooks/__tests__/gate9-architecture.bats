@@ -9,6 +9,7 @@ setup() {
   mkdir -p "$HOME" "$TEST_DIR/lib" "$TEST_DIR/adapters" "$TEST_DIR/bin"
   cp "${BATS_TEST_DIRNAME}/../pre-commit" "${TEST_DIR}/pre-commit"
   cp "${BATS_TEST_DIRNAME}/../adapter-common.sh" "${TEST_DIR}/adapter-common.sh"
+  cp "${BATS_TEST_DIRNAME}/../hook-module-resolution.sh" "${TEST_DIR}/hook-module-resolution.sh"
   cp "${BATS_TEST_DIRNAME}/../lib/now-ms.sh" "${TEST_DIR}/lib/now-ms.sh"
   cp "${BATS_TEST_DIRNAME}/../adapters/typescript.sh" "${TEST_DIR}/adapters/typescript.sh"
   chmod +x "${TEST_DIR}/pre-commit"
