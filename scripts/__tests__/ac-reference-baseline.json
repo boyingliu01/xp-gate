@@ -84,6 +84,13 @@
     "githooks/__tests__/gate-m2-threshold.test.bats": [
       "AC-TDD-002"
     ],
+    "githooks/__tests__/issue-404-gate-m-journal.test.bats": [
+      "AC-404-01",
+      "AC-404-02",
+      "AC-404-03",
+      "AC-404-04",
+      "AC-404-05"
+    ],
     "githooks/__tests__/issue-507-ccn-threshold.test.bats": [
       "AC-507-02"
     ],

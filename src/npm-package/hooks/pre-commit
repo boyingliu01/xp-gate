@@ -3365,7 +3365,14 @@ else
     echo "     ⏭️  SKIPPED - Boy Scout Rule (not available in project)"
   fi
 fi
-GATE_6_STATUS="PASS"
+# A PASS here must mean 'the checks ran and found nothing'. The two
+# branches above print 'SKIPPED - not configured/available'; stamping PASS
+# after them turned 'nothing was checked' into a scored success.
+if [ -n "${GATE_6_STATUS:-}" ]; then
+  : # a branch that really ran already decided the verdict
+else
+  GATE_6_STATUS="SKIP"
+fi
 record_gate_audit "gate-6" "architecture-boy-scout" "$GATE_6_STATUS" "${BS_BLOCKED:-0}" "$GATE_6_START"
 
 # ============================================================================
@@ -3722,7 +3729,10 @@ generate_quality_report() {
     # applicable" and must render and score identically. A previous scoring
     # default of FAIL produced self-contradictory reports -- the gate showed
     # PASS in JSON but scored as FAIL (#507 Delphi round-1 A-MAJOR-2).
-    if [ "$gate" -eq 12 ]; then gate_default="WARN"; else gate_default="PASS"; fi
+    # Default direction is "did not run", never "passed": an unassigned status
+    # is a gate that never reached a verdict, and scoring it PASS both claims a
+    # success that did not happen and hides the gap in the effective rate.
+    if [ "$gate" -eq 12 ]; then gate_default="WARN"; else gate_default="SKIP"; fi
     gate_status="${!status_var:-$gate_default}"
     case "$gate_status" in
       PASS) PASSED_COUNT=$((PASSED_COUNT + 1)) ;;
@@ -3819,7 +3829,7 @@ generate_quality_report() {
     # Gate 6 reason for this language — extracted so the rule is testable
     # rather than inlined (see coverage_g6_reason_for below).
     _cm_g6_reason=$(coverage_g6_reason_for "$_cm_lang")
-    _cm_g6=$(classify_coverage_reason "$_cm_g6_reason" "${GATE_6_STATUS:-PASS}")
+    _cm_g6=$(classify_coverage_reason "$_cm_g6_reason" "${GATE_6_STATUS:-SKIP}")
     _cm_entry="\"${_cm_lang}\": {\"gate3_complexity\": \"${_cm_g3}\", \"gate4_principles\": \"${_cm_g4}\", \"gate6_architecture\": \"${_cm_g6}\"}"
     COVERAGE_MATRIX_JSON="${COVERAGE_MATRIX_JSON:+$COVERAGE_MATRIX_JSON, }${_cm_entry}"
   done
@@ -3855,7 +3865,7 @@ generate_quality_report() {
     },
     "gate2_dup_code": {
       "name": "Duplicate Code",
-      "status": "${GATE_2_STATUS:-PASS}",
+      "status": "${GATE_2_STATUS:-SKIP}",
       "metric": "similarity <= 5%"
     },
     "gate3_complexity": {
@@ -3881,7 +3891,7 @@ generate_quality_report() {
     },
     "gate6_arch_boyscout": {
       "name": "Architecture + Boy Scout Rule",
-      "status": "${GATE_6_STATUS:-PASS}",
+      "status": "${GATE_6_STATUS:-SKIP}",
       "reason": "${GATE_6_REASON:-}",
       "boyScoutPassed": $BS_PASSED,
       "boyScoutBlocked": $BS_BLOCKED
@@ -3934,11 +3944,11 @@ ENDJSON
   # ── History append (unchanged — append-only for trend) ────────────────────────────
   local GATES_JSON="{"
   GATES_JSON="${GATES_JSON}\"gate1\":{\"status\":\"${GATE_1_STATUS:-PASS}\",\"name\":\"Code Quality\"},"
-  GATES_JSON="${GATES_JSON}\"gate2\":{\"status\":\"${GATE_2_STATUS:-PASS}\",\"name\":\"Duplicate Code\"},"
+  GATES_JSON="${GATES_JSON}\"gate2\":{\"status\":\"${GATE_2_STATUS:-SKIP}\",\"name\":\"Duplicate Code\"},"
   GATES_JSON="${GATES_JSON}\"gate3\":{\"status\":\"${GATE_3_STATUS:-PASS}\",\"name\":\"Complexity\",\"warnings\":${CC_WARNINGS:-0}},"
   GATES_JSON="${GATES_JSON}\"gate4\":{\"status\":\"${GATE_4_STATUS:-PASS}\",\"name\":\"Principles\",\"warnings\":${WARNING_COUNT:-0}},"
   GATES_JSON="${GATES_JSON}\"gate5\":{\"status\":\"${GATE_5_STATUS:-PASS}\",\"name\":\"Tests+Coverage\",\"coverage\":\"${COV_PCT}\"},"
-  GATES_JSON="${GATES_JSON}\"gate6\":{\"status\":\"${GATE_6_STATUS:-PASS}\",\"name\":\"Architecture+BoyScout\",\"bsBlocked\":${BS_BLOCKED}},"
+  GATES_JSON="${GATES_JSON}\"gate6\":{\"status\":\"${GATE_6_STATUS:-SKIP}\",\"name\":\"Architecture+BoyScout\",\"bsBlocked\":${BS_BLOCKED}},"
   GATES_JSON="${GATES_JSON}\"gate7\":{\"status\":\"${GATE_7_STATUS:-PASS}\",\"name\":\"IaC Security\"},"
   GATES_JSON="${GATES_JSON}\"gate8\":{\"status\":\"${GATE_8_STATUS:-PASS}\",\"name\":\"Secret Scanning\"},"
   GATES_JSON="${GATES_JSON}\"gate9\":{\"status\":\"${GATE_9_STATUS:-PASS}\",\"name\":\"Build Integrity\"},"
@@ -3955,11 +3965,11 @@ ENDJSON
   echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
   echo ""
   printf "  %-45s %s\n" "Gate 1: Code Quality" "${GATE_1_STATUS:-PASS}"
-  printf "  %-45s %s\n" "Gate 2: Duplicate Code" "${GATE_2_STATUS:-PASS}"
+  printf "  %-45s %s\n" "Gate 2: Duplicate Code" "${GATE_2_STATUS:-SKIP}"
   printf "  %-45s %s (warnings: ${CC_WARNINGS:-0})\n" "Gate 3: Complexity" "${GATE_3_STATUS:-PASS}"
   printf "  %-45s %s (warnings: ${WARNING_COUNT:-0})\n" "Gate 4: Principles" "${GATE_4_STATUS:-PASS}"
   printf "  %-45s %s (coverage: ${COV_PCT}%%)\n" "Gate 5: Tests + Coverage" "${GATE_5_STATUS:-PASS}"
-  printf "  %-45s %s\n" "Gate 6: Architecture + Boy Scout" "${GATE_6_STATUS:-PASS}"
+  printf "  %-45s %s\n" "Gate 6: Architecture + Boy Scout" "${GATE_6_STATUS:-SKIP}"
   printf "  %-45s %s\n" "Gate 7: IaC Security" "${GATE_7_STATUS:-PASS}"
   printf "  %-45s %s\n" "Gate 8: Secret Scanning" "${GATE_8_STATUS:-PASS}"
   printf "  %-45s %s\n" "Gate 9: Build Integrity" "${GATE_9_STATUS:-PASS}"
