@@ -3,7 +3,7 @@
   "version": "0.30.0",
   "description": "AI-driven development workflow: 6 quality gates + Delphi review + Sprint Flow",
   "bin": {
-    "xp-gate": "./bin/xp-gate.js"
+    "xp-gate": "bin/xp-gate.js"
   },
   "files": [
     "bin/",
@@ -32,7 +32,7 @@
   },
   "repository": {
     "type": "git",
-    "url": "https://github.com/boyingliu01/xp-gate"
+    "url": "git+https://github.com/boyingliu01/xp-gate.git"
   },
   "publishConfig": {
     "registry": "https://registry.npmjs.org",
