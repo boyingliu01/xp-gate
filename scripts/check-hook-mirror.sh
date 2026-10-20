@@ -113,4 +113,24 @@ $(diff <(printf '%s\n' "$plugin_canonical_modes") <(printf '%s\n' "$plugin_mirro
   done
 fi
 
+# Sibling-mirrored scripts: scripts/<f> <-> src/npm-package/scripts/<f>.
+# sync-package-content.js regenerates these at prepack time, but a mirror-only
+# edit (or a canonical edit made after the last sync) survives until someone
+# runs the sync — and the published tarball then carries a different script than
+# the repo. `delphi-external-review.cjs` drifted by 327 lines this way and was
+# only caught by Gate MP at push time, after the release commit was authored.
+# The loop discovers pairs dynamically, so a newly-mirrored script cannot dodge
+# the guard.
+if [ -d src/npm-package/scripts ]; then
+  for canonical_script in scripts/*.cjs scripts/*.js; do
+    [ -f "$canonical_script" ] || continue
+    mirror_script="src/npm-package/$canonical_script"
+    [ -f "$mirror_script" ] || continue
+    script_diff=$(diff -q "$canonical_script" "$mirror_script" 2>&1 || true)
+    [ -z "$script_diff" ] || fail "script mirror drift ($canonical_script vs $mirror_script):
+$script_diff
+Fix: node src/npm-package/scripts/sync-package-content.js --fix"
+  done
+fi
+
 printf '%s\n' "PASS: canonical githooks and npm package mirrors are byte- and mode-identical"

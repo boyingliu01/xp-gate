@@ -30,16 +30,24 @@ function applyHistoryEntry(state, phase, phaseName, status) {
   }
 
   entry.status = status;
-  if (status === 'in_progress' && !entry.started_at) {
+  // Stamp started_at on FIRST sight of any status, not only on `in_progress`.
+  // Phases are routinely moved straight from pending to completed (the `--render`
+  // path, and any sprint where the agent does not explicitly mark in_progress),
+  // so gating this on `in_progress` left started_at unset and duration_seconds
+  // permanently null — the empty-duration column on the status panel.
+  if (!entry.started_at) {
     entry.started_at = new Date().toISOString();
   }
   if (status === 'completed' || status === 'skipped') {
     entry.completed_at = new Date().toISOString();
-    if (entry.started_at) {
-      const startMs = new Date(entry.started_at).getTime();
-      const endMs = new Date(entry.completed_at).getTime();
-      entry.duration_seconds = Math.round((endMs - startMs) / 1000);
-    }
+    const startMs = new Date(entry.started_at).getTime();
+    const endMs = new Date(entry.completed_at).getTime();
+    // Never emit NaN/negative: a bad or future started_at degrades to 0, which
+    // the audit treats as "unknown" rather than inventing a number.
+    const elapsed = endMs - startMs;
+    entry.duration_seconds = Number.isFinite(elapsed) && elapsed >= 0
+      ? Math.round(elapsed / 1000)
+      : 0;
   }
   return entry;
 }

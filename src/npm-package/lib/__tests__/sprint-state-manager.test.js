@@ -143,6 +143,37 @@ describe('SprintStateManager', () => {
       expect(result.phase_history[0].duration_seconds).toBeGreaterThanOrEqual(0);
     });
 
+    it('stamps a duration when a phase goes straight from pending to completed', () => {
+      // Regression: `xp-gate phase-transition N completed --render` never emits
+      // an in_progress step, so gating started_at on in_progress left
+      // duration_seconds permanently null — the blank duration column on the
+      // status panel. Observed on sprint-20261019-47 phases 2-6.
+      const initialState = createInitialState(tmpDir);
+      manager.write(initialState);
+
+      const result = manager.transitionPhase(2, 'completed');
+
+      expect(result.phase_history[0].status).toBe('completed');
+      expect(result.phase_history[0].started_at).toBeDefined();
+      expect(result.phase_history[0].completed_at).toBeDefined();
+      expect(result.phase_history[0].duration_seconds).not.toBeNull();
+      expect(result.phase_history[0].duration_seconds).toBeGreaterThanOrEqual(0);
+      expect(Number.isNaN(result.phase_history[0].duration_seconds)).toBe(false);
+    });
+
+    it('never writes a NaN duration, even for an unparseable started_at', () => {
+      const state = createInitialState(tmpDir);
+      state.phase_history = [
+        { phase: 2, phase_name: 'DESIGN', status: 'pending', started_at: 'not-a-date' },
+      ];
+      manager.write(state);
+
+      const result = manager.transitionPhase(2, 'completed');
+
+      expect(Number.isNaN(result.phase_history[0].duration_seconds)).toBe(false);
+      expect(result.phase_history[0].duration_seconds).toBe(0);
+    });
+
     it('calls onTransition callback', () => {
       const initialState = createInitialState(tmpDir);
       manager.write(initialState);

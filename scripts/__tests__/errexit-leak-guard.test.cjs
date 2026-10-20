@@ -21,20 +21,44 @@ const path = require('path');
 const GITHOOKS = path.resolve(__dirname, '..', '..', 'githooks');
 const PRE_COMMIT = path.join(GITHOOKS, 'pre-commit');
 
-// The hook sources at least this many modules on the main path (gates +
-// adapter-common + lib/*.sh). A lower bound here turns a parsing regression
-// (zero modules extracted = guard vacuously green) into a loud failure.
-const MIN_SOURCED_MODULES = 10;
+// The hook sources many modules on the main path: adapter-common, the gate-N.sh
+// files, and lib/*.sh. A lower bound turns a parsing regression (zero modules
+// extracted = guard vacuously green) into a loud failure.
+//
+// 17 = 7 `source "$X_DIR/..."` lines + 10 `source_gate_lib "..."` calls (#535
+// routed every lib through that wrapper). Keep this a LOWER bound with headroom
+// below the real count so adding a module does not require touching the test,
+// while silently losing a whole family of them still fails loudly.
+const MIN_SOURCED_MODULES = 15;
+
+// Variables that are resolved at parse time to the hook's own directories, so a
+// `source "$GATE_DIR/gate-3.sh"` line names a real, checkable file in githooks/.
+const RESOLVABLE_PREFIX = /^\$\{?(?:SCRIPT_DIR|GATE_DIR|ADAPTER_DIR|LIB_DIR|HOOK_DIR|AUDIT_SCRIPT_DIR)\}?\//;
+
+// #535 wrapped every lib in a fail-closed `source_gate_lib <path>` helper. The
+// guard must see those calls too: a lib that runs `set -e` at top level re-enables
+// errexit for the whole hook exactly like a bare `source` does, and for 10 libs
+// this guard was completely blind because it only matched `source <path>`.
+const SOURCE_LINE = /^\s*(?:(?:source|\.)\s+|source_gate_lib\s+)("([^"]+)"|'([^']+)'|(\S+))/;
 
 function extractSourcedModules(hookPath) {
   const text = fs.readFileSync(hookPath, 'utf8');
   const modules = [];
   for (const raw of text.split('\n')) {
-    // Match `source <path>` / `. <path>` at statement position; ignore comments.
-    const m = raw.match(/^\s*(?:source|\.)\s+("([^"]+)"|'([^']+)'|(\S+))/);
+    // Match `source <path>`, `. <path>` and `source_gate_lib <path>` at
+    // statement position; comments cannot match because of the ^\s* anchor.
+    const m = raw.match(SOURCE_LINE);
     if (!m) continue;
     const target = m[2] || m[3] || m[4];
-    if (!target || target.includes('$(')) continue; // dynamic sources resolved at runtime
+    if (!target) continue;
+    // `$(...)` command substitutions are resolved at runtime.
+    if (target.includes('$(')) continue;
+    // A target whose variable is NOT one of the hook's own directory variables is
+    // a RUNTIME value, not a static module reference: `source "$lib_file"` inside
+    // source_gate_lib() itself loads whatever its caller passed in. Treating the
+    // literal "$lib_file" as a path made this guard look for githooks/$lib_file
+    // on disk and fail with a bogus "list is not stale" error.
+    if (target.includes('$') && !RESOLVABLE_PREFIX.test(target)) continue;
     modules.push(target);
   }
   return modules;
