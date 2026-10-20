@@ -40,6 +40,7 @@ components:
       - "xp-gate ui-review"
       - "xp-gate sprint-status [--json] [--watch] [--dir <path>] [--rework-check]"  # added in 0.8.16, #214; --rework-check (0.18.0, #369) calculates rework rate by counting fix commits after sprint completion
       - "xp-gate retro [--days N] [--all] [--json] [--sprint <id>]"  # added in 0.18.0, #369 — Generates engineering retrospective report with activity summary, rework rate trends, evidence skip exposure, and quality trends
+      - "xp-gate crap [--top N] [--threshold N] [--json] [--paths <p...>] [--include-mirrors]"  # added in 0.30.2, #404 — Ranks functions by CRAP = CCN^2 * (1 - coverage) + CCN. ADVISORY ONLY, always exits 0. Unmeasured functions (their file was never loaded by any test) are counted, not scored
       - "xp-gate check <path> [--gates principles,arch]"      # added in 0.8.9, fixes #208
       - "xp-gate principles <path> [--format console|json|sarif]"  # added in 0.8.9, fixes #208
       - "xp-gate arch [--use-config <path>]"                # added in 0.8.9, fixes #208; default built-in rules + baseline ratchet, --use-config opt-in legacy config (#447)
