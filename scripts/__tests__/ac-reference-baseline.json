@@ -160,6 +160,39 @@
     "githooks/__tests__/issue-546-line-endings.test.bats": [
       "AC-507-01"
     ],
+    "githooks/__tests__/issue-547-powershell-dispatch.test.bats": [
+      "AC-547-01"
+    ],
+    "githooks/__tests__/issue-548-gate10-shellcheck.test.bats": [
+      "AC-548-01"
+    ],
+    "githooks/__tests__/issue-548-vendored-hook-modules-shellcheck.test.bats": [
+      "AC-548-02"
+    ],
+    "githooks/__tests__/issue-550-staged-semantics.test.bats": [
+      "AC-550-01"
+    ],
+    "githooks/__tests__/issue-551-stale-sprint.test.bats": [
+      "AC-551-01"
+    ],
+    "githooks/__tests__/issue-552-iac-checkov-crash.test.bats": [
+      "AC-552-01"
+    ],
+    "githooks/__tests__/issue-553-gate-ui-verdict.test.bats": [
+      "AC-553-01"
+    ],
+    "githooks/__tests__/issue-554-gate-status-integrity.test.bats": [
+      "AC-554-01"
+    ],
+    "githooks/__tests__/issue-555-coverage-threshold.test.bats": [
+      "AC-555-01"
+    ],
+    "githooks/__tests__/issue-556-subset-coverage-floor.test.bats": [
+      "AC-556-01"
+    ],
+    "githooks/__tests__/issue-557-banner-honesty.test.bats": [
+      "AC-557-01"
+    ],
     "githooks/__tests__/issue-audit-poisoned-start.bats": [
       "AC-AUDIT-001",
       "AC-AUDIT-002"
