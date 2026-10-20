@@ -2,6 +2,30 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.30.3.0] - 2026-10-21
+
+处理 `whale-sql-audit` 报告的一批 gate 缺陷（#545–#557，#539 暂缓）。这一轮的共同点不是"某个 gate 有 bug"，而是**门禁在不该给结论的时候给了结论**：工具崩了报"发现安全问题"、门禁跳了报"通过"、sprint 烂尾了报"已验证"、覆盖率门槛不是仓库声明的那个数。每一种都比直接失败更糟，因为失败会被查，假的成功不会。
+
+### Fixed
+
+- **Java 主引擎把 `issues: null` 当成解析失败（#545, b09376d7）**: wc-java-lint 只在**全部**问题都是 info 级（spotbugs 会把它们藏起来）时把 `issues` 序列化成 `null`（Go 的 nil slice 语义）。解析器当成"找不到 issues 数组"，fail-closed 报 `rc=1`，一个干净的提交被卡住。在真实仓库 `SQL质量治理` 的 `GovernanceController.java` 上验证：修复前 `count=0 rc=1`，修复后 `count=0 rc=0`。issue 里给的另一套根因分析也是错的，一并说明。
+- **CRLF 污染的钩子不再报错在无辜的行号（#546, b6a91a35）**: 被改成 CRLF 的 hook 每次提交都失败，而 bash 报的是多行构造**起始处**的行号，那一行本身完全合法——诊断指向错误位置。三处修复：钩子首行自检并给出修复命令；`xp-gate doctor` 从"找到钩子文件"变成"确认钩子能被 bash 解析"；`hook-health.js` 区分 CRLF 与不可解析两种失败。另记录两处实测：CRLF 并非对所有 bash 都致命（本机 Cygwin bash 5.3.9 能解析，报告者那边不能），所以"我复现不出来"从不构成反证；每钩子一次 `bash -n` 让 doctor 超时，改为只对 >4KB 的文件探测。
+- **IaC gate 把 checkov 崩溃当成"发现安全问题"（#552, 84f199f4)**: checkov 因 detect_secrets 版本不兼容 exit 2 并抛 traceback，适配器丢弃退出码后 `grep -c "FAILED for resource"` 数 traceback，报 `❌ 1 security issue(s) found by checkov. Blocking commit.` —— 什么都没扫，却给出了安全结论。两个方向都错（traceback 含标记＝编造发现，不含＝报干净通过）。改为每次调用记录退出码，崩溃在解析之前短路为"工具不可用"（exit 2），并给出 `pip install -U checkov detect-secrets`。
+- **Gate UI 永远不生效（#553, 40c2acd4）**: `jq -r` 对空输入打印空串并 exit 0，所以 `|| echo "false"` 兜底是死代码，`IS_UI_SPRINT=""` 不等于 `"true"`，每次 push 都走"No UI changes detected — skipping"——包括只改 `src/ui/streamlit_app.py` 的 push。这正是 Gate UI 存在的目的被倒过来执行，且伪装成一次成功的检查。改为三态判定，`unknown` 时回落到路径匹配并阻断。
+- **Gate 5 把自己写的 SKIP 覆盖成 PASS（#554, 1aeb7ea7）**: `GATE_5_STATUS="PASS"` 在 if/else 之外，几百行后无条件覆盖 docs-only 分支设的 SKIP。只改 README 的提交先打印"SKIPPED - Tests & coverage"，然后在审计日志和报告里记成 PASS，覆盖率 `N/A`。两者之间是 SKIP 被提升为 PASS——报错会被查，假通过不会。顺手核对了 Gate 1/2/11 的同类形状，它们都是先设默认值再让分支覆盖，顺序正确。
+- **pre-push 收尾横幅无条件宣称 ALL CHECKS PASSED（#557, e936bd24）**: Gate MP 与 Gate M (Python) 在典型 push 里都会跳过且不记录原因，横幅照样宣称全部通过。`MW_SKIPPED` 一行下面的注释早已写明"跳过却印 VERIFIED 是 hook 无法支持的断言"，但那个修复只覆盖了一个 gate，而标题对**所有** gate 下了断言。改为：只有什么都没跳过时才显示 `ALL CHECKS PASSED`，否则列出跳过的门禁；Gate M (Python) 的每条路径都记录状态（TIMEOUT 现在说明"分数从未测得"）。
+- **sourced 钩子模块的 shellcheck 误报（#548, 1a0438bb）**: 变量由 sourcing 父进程消费（pre-commit 从 `${GATE_N_REASON}` 生成报告 JSON），单文件 linter 看不见这个边界，每个赋值都被判 SC2034，任何 vendoring 这些模块的仓库其 Gate 1 会被自己的 lint 卡住。issue 只报了 gate-10.sh，实为 5 个模块的系统性问题。每个变量都先验证确有外部消费者才加指令；`hook-module-resolution.sh` 是生成文件，指令改进生成器。顺带发现它的 npm 镜像整体缺失（pre-commit 第 45 行要解析它）。
+- **Gate 11 给僵尸 sprint 盖 PASS（#551, 8888d3d5）**: sprint-gate.sh 只看 `phase` 和 delphi verdict，一个 `status=in_progress` 停了 12 天的 state 会让每次无关提交都打印"sprint phase 6 validated"。现在：allow 消息带上 sprint 存活天数（本仓实测输出 `sprint open 1 day(s), staleness threshold 14`）；`in_progress` 且超过 `SPRINT_STALE_DAYS`（默认 14，可覆盖）降级为 skip 并提示如何收尾。
+- **覆盖率阈值有三个真相源（#555, 46d7993c）**: 报告打印写死的 80，`coverage-total.sh` 比 80，阻断消息说"below 80%"，而仓库 pyproject 声明 `fail_under = 82`、CI 也按 82 执行——81% 的提交过 hook 挂 CI。最糟的是报告，它把未执行的阈值当已执行的引用。改为 hook 顶部解析一次（pyproject → .coveragerc → 历史默认 80），四处读取，报告新增 `threshold_source`；报告里 `{functions: 80, branches: 70}` 这种"看着像测过的假数字"改为 `null`。
+- **子集 pytest 关不掉覆盖率门槛（#556, 46d7993c）**: 省略 `--cov-fail-under` 并不会关闭门槛，pytest-cov 自己从 pyproject 读 `fail_under`。于是 8 个测试的子集跑在 23% 上退出 1，被升级成硬 BLOCK，就在"Partial coverage 23% (subset test run)"下面直接打印"❌ BLOCKED - Coverage check FAILED"。改为显式 `--cov-fail-under=0`；真实 pytest-cov 验证：省略＝1，加 0＝0，全量按 90 仍判 1（无回归）。
+- **`--staged` 下 spotbugs 无视文件过滤（#550, 4f6091e7）**: checkstyle/PMD/lizard/simian 都遵守"只查暂存文件"，spotbugs 始终扫全库 `target/classes`。实测只暂存 `docs/_tmp_probe.md` 时三个工具报"已跳过"，spotbugs 报"检查了 1 个 .class，发现 3 个问题"，退出码 1，把一份纯文档提交拦住。上游修复属于 wc-java-lint（issue 保留）；xp-gate 侧在调用前检查暂存 Java 文件数，为 0 时明确 SKIP 并说明原因，而不是转述一个工具没有依据给出的结论。
+- **PowerShell 的 skip-as-pass（#547, 03f6d10a）**: 四个缺陷叠加——Gate 1 的跳过谓词没有 `ps1|psm1`（纯 PS 提交整个跳过 Gate 1）；Gate 1 没有 `powershell)` 分派臂，落到泛型分支把非零结论印成"可能不阻断"且状态留 PASS；Gate 10 两侧的扩展名列表都没有 PS，SAST 对该语言形同不存在；`_detect_pwsh` 只靠 `command -v pwsh`，git-bash PATH 被剥离时找不到标准安装路径，然后 `return 0`（"没有引擎"被报成"干净"）。现补上分派臂（复用 java 的 `XP_G1_REASON` 协议）、扩展名列表，以及 Windows 绝对路径探测——实测 PATH 只剩 coreutils 时仍能定位 `%LOCALAPPDATA%\Microsoft\WindowsApps\pwsh.exe`。
+
+### 说明
+
+- #539 按用户决定整条跳过，只在 issue 上留言说明阻塞原因。
+- 全量验证：vitest 177 文件 / 2420 通过 / 2 skip / 0 失败（降并发运行；默认并发下 doctor 的 `--fix` 用例偶发失败，单跑 3 次均 48/48，属既有的并行资源竞争类 flaky）；bats 705 通过 / 0 失败。
+
 ## [0.30.2.0] - 2026-10-20
 
 处理 #543 与 #404 剩余项。这一轮的主题仍然是**报告诚实性**——包括我自己写出的两处新的假报告。
