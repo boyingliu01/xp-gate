@@ -1289,7 +1289,7 @@ fi
 GATE_1_START=$(gate_start_ms)
 GATE_1_STATUS="PASS"
 GATE_1_DETAIL=""
-if ! any_changed_files_match "\.(ts|tsx|js|jsx|py|go|java|kt|cpp|c|swift|m|mm|dart|sh)$" "\.ya?ml$" "\.json$" "Dockerfile" "\.tf$"; then
+if ! any_changed_files_match "\.(ts|tsx|js|jsx|py|go|java|kt|cpp|c|swift|m|mm|dart|sh|ps1|psm1)$" "\.ya?ml$" "\.json$" "Dockerfile" "\.tf$"; then
   echo "✅ PASSED - No code files changed, skipping lint."
   GATE_1_STATUS="SKIP"
   GATE_1_DETAIL="no_matching_files"
@@ -1814,6 +1814,58 @@ else
     esac
   fi
     ;;
+
+    powershell)
+      # #547 finding 2: PowerShell had no arm here, so it fell into the generic
+      # `*)` branch, where a non-zero analysis verdict printed a non-blocking
+      # line and GATE_1_STATUS stayed PASS. The java arm's XP_G1_REASON
+      # protocol applies verbatim: 0 = pass, 1 = block, 2 = unusable
+      # (fail-closed), 3 = WARN with a reason that STAYS in the scoring
+      # denominator so a skip is visible in retro instead of vanishing.
+      POWERSHELL_ADAPTER=$(resolve_adapter_path "powershell")
+      if [ -z "$POWERSHELL_ADAPTER" ]; then
+        echo "⚠️  WARN - PowerShell adapter not found (code quality NOT verified)"
+        GATE_1_STATUS="WARN"
+        GATE_1_DETAIL="powershell: adapter missing"
+      else
+        PS_G1_EXIT=0
+        # Subshell: reasons cross as `XP_G1_REASON: ...` stdout lines, exactly
+        # as in the java arm — an export inside the adapter cannot reach us.
+        PS_G1_OUTPUT=$(source "$POWERSHELL_ADAPTER" 2>/dev/null; run_static_analysis 2>&1) || PS_G1_EXIT=$?
+        PS_G1_REASON=$(printf '%s\n' "$PS_G1_OUTPUT" | sed -n 's/^XP_G1_REASON: //p' | head -1)
+        if [ -n "$PS_G1_REASON" ]; then
+          PS_G1_OUTPUT=$(printf '%s\n' "$PS_G1_OUTPUT" | grep -v '^XP_G1_REASON: ')
+        fi
+        [ -n "$PS_G1_OUTPUT" ] && printf '%s\n' "$PS_G1_OUTPUT" | head -40
+        case "$PS_G1_EXIT" in
+          0)
+            echo "✅ PASSED - PowerShell code quality (PSScriptAnalyzer)."
+            ;;
+          1)
+            echo "❌ BLOCKED - PSScriptAnalyzer violations (fix or add suppressions)"
+            GATE_1_STATUS="BLOCK"
+            GATE_1_DETAIL="powershell: PSScriptAnalyzer findings"
+            exit 1
+            ;;
+          2)
+            echo "❌ BLOCKED - PowerShell static analysis unusable (fail-closed): ${PS_G1_REASON:-unknown}"
+            GATE_1_STATUS="BLOCK"
+            GATE_1_DETAIL="powershell: ${PS_G1_REASON:-unusable}"
+            exit 1
+            ;;
+          3)
+            echo "⚠️  WARN - PowerShell code quality NOT verified: ${PS_G1_REASON:-engine unavailable}"
+            GATE_1_STATUS="WARN"
+            GATE_1_DETAIL="powershell: ${PS_G1_REASON:-engine unavailable}"
+            ;;
+          *)
+            echo "⚠️  WARN - PowerShell code quality NOT verified (unexpected verdict $PS_G1_EXIT)"
+            GATE_1_STATUS="WARN"
+            GATE_1_DETAIL="powershell: unexpected verdict $PS_G1_EXIT"
+            ;;
+        esac
+      fi
+      ;;
 
     *)
       # Route to appropriate adapter for other languages
@@ -3650,7 +3702,7 @@ echo ""
 # v0.14.3+ (Issue #312): Skip if no code files changed
 # v0.18.5 (Issue #397): Fix gate status variable collision — SAST now sets GATE_10_STATUS
 # ============================================================================
-if any_changed_files_match "\.(ts|tsx|js|jsx|py|go|java|kt|cpp|c|swift|m|dart|sh)$"; then
+if any_changed_files_match "\.(ts|tsx|js|jsx|py|go|java|kt|cpp|c|swift|m|dart|sh|ps1|psm1)$"; then
   if [ -f "$GATE_DIR/gate-10.sh" ]; then
     source "$GATE_DIR/gate-10.sh"
   else
