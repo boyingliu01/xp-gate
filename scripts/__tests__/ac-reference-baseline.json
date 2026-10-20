@@ -151,6 +151,9 @@
       "AC-538-01",
       "AC-538-02"
     ],
+    "githooks/__tests__/issue-544-survivor-journal.test.bats": [
+      "AC-544-02"
+    ],
     "githooks/__tests__/issue-545-null-issues.test.bats": [
       "AC-507-01"
     ],
