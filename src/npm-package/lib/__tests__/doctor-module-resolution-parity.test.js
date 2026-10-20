@@ -16,10 +16,20 @@
 import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, existsSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
-import { spawnSync } from 'node:child_process';
+import { spawnSync, execFileSync } from 'node:child_process';
 import { describe, expect, it } from 'vitest';
 
 const PRE_COMMIT = readFileSync(resolve(__dirname, '..', '..', '..', '..', 'githooks', 'pre-commit'), 'utf8');
+// #505 replaced the two hand-written shell chains with one data file generated
+// from lib/hook-module-resolution.js — the same module doctor.js requires. The
+// parity test therefore verifies the NEW contract: the generated data is current,
+// and the hook + doctor both honour it. The scenarios below still drive the hook's
+// real text through bash, so agreement is measured, not asserted.
+const RESOLUTION_DATA = readFileSync(
+  resolve(__dirname, '..', '..', '..', '..', 'githooks', 'hook-module-resolution.sh'),
+  'utf8',
+);
+const { RESOLUTION_ORDER, GATE_RESOLUTION_ORDER, ADAPTER_DIR_ORDER } = require('../hook-module-resolution.js');
 
 /**
  * Extract one bash function's full text, brace-balanced from the declaration.
@@ -149,13 +159,28 @@ function hookResolvesAll(blocks, resolverText, t, lang, gateModule) {
     `GLOBAL_ADAPTER_DIR='${t.globalAdapters}'`,
     `PROJECT_GITHOOKS='${t.projectGithooks}'`,
     `SCRIPT_DIR='${t.scriptDir}'`,
-    blocks.adapterDir,
+    `ADAPTER_DIR=''`,
+    resolverText,
     blocks.gateDir,
+    // The real chains, driven by the same data the hook loads.
+    '_hook_adapter_dir() {',
+    '  local entry base suffix base_dir',
+    '  eval "set -- \\"\\${HOOK_ADAPTER_DIR_TIERS[@]}\\""',
+    '  for entry in "$@"; do',
+    '    entry="${entry#*|}"; base="${entry%%|*}"; suffix="${entry#*|}"',
+    '    base_dir="$(_hook_tier_base "$base")"',
+    '    [ -n "$base_dir" ] || continue',
+    '    if [ -f "$base_dir/$suffix" ]; then printf "%s" "$base_dir"; return 0; fi',
+    '  done',
+    '  return 1',
+    '}',
+    'ADAPTER_DIR="$(_hook_adapter_dir)" || ADAPTER_DIR="$SCRIPT_DIR"',
+    'GATE_DIR="$(_hook_resolve_dir "$HOOK_GATE_PROBE" HOOK_GATE_TIERS)" || GATE_DIR=""',
+    'if [ -z "$GATE_DIR" ]; then GATE_DIR="$ADAPTER_DIR"; fi',
     'echo "ADAPTER=$ADAPTER_DIR"',
     'echo "GATE=$GATE_DIR"',
     `if [ -f "$ADAPTER_DIR/adapter-common.sh" ]; then echo "COMMON=$ADAPTER_DIR/adapter-common.sh"; else echo "COMMON="; fi`,
     `if [ -f "$GATE_DIR/${gateModule}" ]; then echo "MODULE=$GATE_DIR/${gateModule}"; else echo "MODULE="; fi`,
-    resolverText,
     // Captured by substitution rather than read off the last stdout line: the
     // script ends with a newline, so "last line" is always the empty one.
     `echo "LANG=$(resolve_adapter_path ${lang} || true)"`,
@@ -194,14 +219,53 @@ function hookResolves(fnText, tree, lang) {
 }
 
 describe('doctor module resolution parity with pre-commit (#495)', () => {
-  const resolverText = extractFunction(PRE_COMMIT, 'resolve_adapter_path() {');
-  // The two tier chains the hook runs before it ever calls the resolver. Read
-  // from the hook's text, not restated here: #495 Round 2's project-tier label
-  // was wrong precisely because doctor carried a second, hand-written tier list.
+  // #505: the resolver helpers come from the hook, the tier DATA from the
+  // generated file. Concatenating them is what the hook itself does, so the
+  // bash side here is the production code path, not a paraphrase of it.
+  const helpers = [
+    extractFunction(PRE_COMMIT, '_hook_tier_base() {'),
+    extractFunction(PRE_COMMIT, '_hook_resolve() {'),
+    extractFunction(PRE_COMMIT, '_hook_resolve_dir() {'),
+    extractFunction(PRE_COMMIT, 'resolve_adapter_path() {'),
+  ].join('\n');
+  // `blocks` keeps the names the scenarios use: the data file supplies the
+  // ADAPTER_DIR/GATE_DIR chains that used to be matched out of the hook text.
   const blocks = {
-    adapterDir: matchBlock(PRE_COMMIT, /if \[ -f "\$GLOBAL_ADAPTER_DIR\/adapter-common\.sh" \]; then[\s\S]*?\nfi/, 'the ADAPTER_DIR tier chain'),
-    gateDir: matchBlock(PRE_COMMIT, /if \[ -f "\$ADAPTER_DIR\/gate-3\.sh" \]; then[\s\S]*?\nfi/, 'the GATE_DIR tier chain'),
+    adapterDir: '',
+    gateDir: '',
   };
+  const resolverText = `${RESOLUTION_DATA}\n${helpers}`;
+
+  it('AC-505-01: the generated shell data is current with its JS source', () => {
+    // Stale data would silently run a different order than doctor reports — the
+    // exact failure mode #505 exists to make impossible.
+    expect(() => execFileSync(
+      process.execPath,
+      [resolve(__dirname, '..', '..', '..', '..', 'scripts', 'generate-hook-resolution.cjs'), '--check'],
+      { stdio: 'pipe' },
+    )).not.toThrow();
+  });
+
+  it('AC-505-02: the hook loads the generated data instead of carrying its own order', () => {
+    // Anti-vacuity for the whole feature: if the hook re-grew a literal cascade,
+    // the single-source-of-truth claim would be false even while scenarios pass.
+    expect(PRE_COMMIT).toContain('hook-module-resolution.sh');
+    expect(PRE_COMMIT).toContain('HOOK_ADAPTER_TIERS');
+    expect(PRE_COMMIT).toContain('HOOK_GATE_TIERS');
+    // The old hand-written chains must be gone.
+    expect(PRE_COMMIT).not.toContain('$ADAPTER_DIR/${lang}.sh');
+    expect(PRE_COMMIT).not.toMatch(/if \[ -f "\$ADAPTER_DIR\/gate-3\.sh" \]; then/);
+    // And every tier the JS declares must appear in the emitted shell data.
+    for (const t of RESOLUTION_ORDER) {
+      expect(RESOLUTION_DATA).toContain(`${t.tier_id}|${t.base}|${t.template}`);
+    }
+    for (const t of GATE_RESOLUTION_ORDER) {
+      expect(RESOLUTION_DATA).toContain(`'${t.tier_id}|${t.base}|'`);
+    }
+    for (const t of ADAPTER_DIR_ORDER) {
+      expect(RESOLUTION_DATA).toContain(`${t.tier_id}|${t.base}|${t.probe}`);
+    }
+  });
 
   it('AC-495-11: flat and nested present -> both languages pick the flat copy', () => {
     const { listExecutedModules } = require('../doctor');
@@ -241,8 +305,12 @@ describe('doctor module resolution parity with pre-commit (#495)', () => {
     }
 
     // Anti-vacuity: the guard executed the hook's real text, not a paraphrase.
-    expect(resolverText).toMatch(/\$ADAPTER_DIR\/\$\{lang\}\.sh/);
-    expect(resolverText).toMatch(/\$ADAPTER_DIR\/adapters\/\$\{lang\}\.sh/);
+    // #505 moved the literal paths out of the hook, so assert that the tiers it
+    // now reads still describe the two layouts those paths used to spell out.
+    expect(resolverText).toContain('HOOK_ADAPTER_TIERS');
+    const adapterTemplates = RESOLUTION_ORDER.map((t) => t.template);
+    expect(adapterTemplates).toContain('{name}.sh');
+    expect(adapterTemplates).toContain('adapters/{name}.sh');
   });
 
   // The scenarios below put a copy of the same module in EVERY tier the hook can

@@ -3,6 +3,163 @@
   "generated": "2026-10-14",
   "regenerated": "2026-10-16",
   "files": {
+    "githooks/__tests__/gate-1-typecheck-command.test.bats": [
+      "AC-436-01",
+      "AC-436-02",
+      "AC-436-03",
+      "AC-436-04",
+      "AC-436-05",
+      "AC-436-06",
+      "AC-436-07",
+      "AC-436-08"
+    ],
+    "githooks/__tests__/gate-10-runtime-error.test.bats": [
+      "AC-475-01",
+      "AC-475-02",
+      "AC-475-03",
+      "AC-475-04"
+    ],
+    "githooks/__tests__/gate-10-semgrepignore.test.bats": [
+      "AC-543-01",
+      "AC-543-02"
+    ],
+    "githooks/__tests__/gate-10-verdict.test.bats": [
+      "AC-475-03",
+      "AC-518-01",
+      "AC-518-02",
+      "AC-518-03",
+      "AC-518-04",
+      "AC-518-05",
+      "AC-518-06",
+      "AC-518-07",
+      "AC-518-08",
+      "AC-518-09",
+      "AC-518-10",
+      "AC-518-11",
+      "AC-518-12",
+      "AC-518-13"
+    ],
+    "githooks/__tests__/gate-11-sprint-report.test.bats": [
+      "AC-476-01",
+      "AC-476-02",
+      "AC-476-03",
+      "AC-476-04",
+      "AC-476-05",
+      "AC-476-06",
+      "AC-476-07",
+      "AC-476-08"
+    ],
+    "githooks/__tests__/gate-2-jscpd-run.test.bats": [
+      "AC-477-01",
+      "AC-477-02",
+      "AC-477-03",
+      "AC-477-04",
+      "AC-477-05",
+      "AC-477-06",
+      "AC-477-07",
+      "AC-477-08",
+      "AC-477-09",
+      "AC-477-10"
+    ],
+    "githooks/__tests__/gate-4-severity-count.test.bats": [
+      "AC-DSH-013"
+    ],
+    "githooks/__tests__/gate-5-no-test-files.test.bats": [
+      "AC-498-01",
+      "AC-498-02",
+      "AC-498-03",
+      "AC-498-04",
+      "AC-498-05",
+      "AC-498-06"
+    ],
+    "githooks/__tests__/gate-5a-block.test.bats": [
+      "AC-TDD-001"
+    ],
+    "githooks/__tests__/gate-8-staged-scan.test.bats": [
+      "AC-SEC-001"
+    ],
+    "githooks/__tests__/gate-cjs-source-detection.test.bats": [
+      "AC-TDD-002"
+    ],
+    "githooks/__tests__/gate-m2-threshold.test.bats": [
+      "AC-TDD-002"
+    ],
+    "githooks/__tests__/issue-507-ccn-threshold.test.bats": [
+      "AC-507-02"
+    ],
+    "githooks/__tests__/issue-507-java-coverage.test.bats": [
+      "AC-507-04"
+    ],
+    "githooks/__tests__/issue-507-wc-java-lint.test.bats": [
+      "AC-507-01"
+    ],
+    "githooks/__tests__/issue-507-wc-java-object-json.test.bats": [
+      "AC-507-01"
+    ],
+    "githooks/__tests__/issue-510-mirror-invariant.test.bats": [
+      "AC-510-01",
+      "AC-510-02",
+      "AC-510-03",
+      "AC-510-04"
+    ],
+    "githooks/__tests__/issue-523-python-coverage-parse.test.bats": [
+      "AC-A-03"
+    ],
+    "githooks/__tests__/issue-524-gate11-duration-units.test.bats": [
+      "AC-524-01",
+      "AC-524-02",
+      "AC-524-03",
+      "AC-524-04"
+    ],
+    "githooks/__tests__/issue-527-subdir-multimodule.test.bats": [
+      "AC-A-04"
+    ],
+    "githooks/__tests__/issue-532-gate9-verdict.test.bats": [
+      "AC-475-03",
+      "AC-A-02"
+    ],
+    "githooks/__tests__/issue-536-degraded-report.test.bats": [
+      "AC-536-01",
+      "AC-536-02",
+      "AC-536-03",
+      "AC-536-04"
+    ],
+    "githooks/__tests__/issue-537-coverage-matrix.bats": [
+      "AC-A-01",
+      "AC-A-02",
+      "AC-A2-01",
+      "AC-A2-02",
+      "AC-B-01",
+      "AC-B-02",
+      "AC-C-01",
+      "AC-C-02",
+      "AC-D-02",
+      "AC-E-01"
+    ],
+    "githooks/__tests__/issue-537-skip-reasons.test.bats": [
+      "AC-537-01",
+      "AC-537-02"
+    ],
+    "githooks/__tests__/issue-538-powershell-prune.test.bats": [
+      "AC-538-01",
+      "AC-538-02"
+    ],
+    "githooks/__tests__/issue-audit-poisoned-start.bats": [
+      "AC-AUDIT-001",
+      "AC-AUDIT-002"
+    ],
+    "githooks/__tests__/issue-ccn-ratchet.bats": [
+      "AC-CCNRATCHET-001"
+    ],
+    "githooks/__tests__/issue-docs-only-skip.bats": [
+      "AC-DOCSSKIP-001"
+    ],
+    "githooks/__tests__/multilang-subdir-gate1-discovery.test.bats": [
+      "AC-TDD-016"
+    ],
+    "githooks/__tests__/multilang-subdir-gate5a.test.bats": [
+      "AC-TDD-015"
+    ],
     "scripts/__tests__/ac-reference-guard.test.cjs": [
       "AC-483-01",
       "AC-483-02"
@@ -12,6 +169,16 @@
     ],
     "scripts/__tests__/build-integrity-mirror.test.cjs": [
       "AC-010-01"
+    ],
+    "scripts/__tests__/ccn-report.test.cjs": [
+      "AC-544-01",
+      "AC-544-02",
+      "AC-CCNRPT-001",
+      "AC-CCNRPT-002",
+      "AC-COMPLEXITY-001",
+      "AC-RATCHET-001",
+      "AC-RATCHET-002",
+      "AC-RATCHET-003"
     ],
     "scripts/__tests__/changelog-documented-commands.test.cjs": [
       "AC-429-05",
@@ -65,6 +232,9 @@
     ],
     "src/npm-package/lib/__tests__/arch.test.js": [
       "AC-A-05"
+    ],
+    "src/npm-package/lib/__tests__/check-alignment-cli.test.mjs": [
+      "AC-392-06"
     ],
     "src/npm-package/lib/__tests__/check-version.test.js": [
       "AC-001-01",
@@ -129,7 +299,9 @@
       "AC-495-12",
       "AC-495-13",
       "AC-495-21",
-      "AC-495-22"
+      "AC-495-22",
+      "AC-505-01",
+      "AC-505-02"
     ],
     "src/npm-package/lib/__tests__/doctor-path-equivalence.test.js": [
       "AC-496-01",
@@ -260,123 +432,6 @@
       "AC-002-06",
       "AC-002-07",
       "AC-002-08"
-    ],
-    "githooks/__tests__/gate-1-typecheck-command.test.bats": [
-      "AC-436-01",
-      "AC-436-02",
-      "AC-436-03",
-      "AC-436-04",
-      "AC-436-05",
-      "AC-436-06",
-      "AC-436-07",
-      "AC-436-08"
-    ],
-    "githooks/__tests__/gate-10-runtime-error.test.bats": [
-      "AC-475-01",
-      "AC-475-02",
-      "AC-475-03",
-      "AC-475-04"
-    ],
-    "githooks/__tests__/gate-10-verdict.test.bats": [
-      "AC-475-03",
-      "AC-518-01",
-      "AC-518-02",
-      "AC-518-03",
-      "AC-518-04",
-      "AC-518-05",
-      "AC-518-06",
-      "AC-518-07",
-      "AC-518-08",
-      "AC-518-09",
-      "AC-518-10",
-      "AC-518-11",
-      "AC-518-12",
-      "AC-518-13"
-    ],
-    "githooks/__tests__/gate-11-sprint-report.test.bats": [
-      "AC-476-01",
-      "AC-476-02",
-      "AC-476-03",
-      "AC-476-04",
-      "AC-476-05",
-      "AC-476-06",
-      "AC-476-07",
-      "AC-476-08"
-    ],
-    "githooks/__tests__/gate-2-jscpd-run.test.bats": [
-      "AC-477-01",
-      "AC-477-02",
-      "AC-477-03",
-      "AC-477-04",
-      "AC-477-05",
-      "AC-477-06",
-      "AC-477-07",
-      "AC-477-08",
-      "AC-477-09",
-      "AC-477-10"
-    ],
-    "githooks/__tests__/gate-4-severity-count.test.bats": [
-      "AC-DSH-013"
-    ],
-    "githooks/__tests__/gate-5-no-test-files.test.bats": [
-      "AC-498-01",
-      "AC-498-02",
-      "AC-498-03",
-      "AC-498-04",
-      "AC-498-05",
-      "AC-498-06"
-    ],
-    "githooks/__tests__/gate-5a-block.test.bats": [
-      "AC-TDD-001"
-    ],
-    "githooks/__tests__/gate-8-staged-scan.test.bats": [
-      "AC-SEC-001"
-    ],
-    "githooks/__tests__/gate-cjs-source-detection.test.bats": [
-      "AC-TDD-002"
-    ],
-    "githooks/__tests__/gate-m2-threshold.test.bats": [
-      "AC-TDD-002"
-    ],
-    "githooks/__tests__/issue-507-ccn-threshold.test.bats": [
-      "AC-507-02"
-    ],
-    "githooks/__tests__/issue-507-java-coverage.test.bats": [
-      "AC-507-04"
-    ],
-    "githooks/__tests__/issue-507-wc-java-lint.test.bats": [
-      "AC-507-01"
-    ],
-    "githooks/__tests__/issue-510-mirror-invariant.test.bats": [
-      "AC-510-01",
-      "AC-510-02",
-      "AC-510-03",
-      "AC-510-04"
-    ],
-    "githooks/__tests__/issue-523-python-coverage-parse.test.bats": [
-      "AC-A-03"
-    ],
-    "githooks/__tests__/issue-524-gate11-duration-units.test.bats": [
-      "AC-524-01",
-      "AC-524-02",
-      "AC-524-03",
-      "AC-524-04"
-    ],
-    "githooks/__tests__/issue-527-subdir-multimodule.test.bats": [
-      "AC-A-04"
-    ],
-    "githooks/__tests__/issue-532-gate9-verdict.test.bats": [
-      "AC-475-03",
-      "AC-A-02"
-    ],
-    "githooks/__tests__/multilang-subdir-gate1-discovery.test.bats": [
-      "AC-TDD-016"
-    ],
-    "githooks/__tests__/multilang-subdir-gate5a.test.bats": [
-      "AC-TDD-015"
-    ],
-    "src/npm-package/lib/__tests__/check-alignment-cli.test.mjs": [
-      "AC-392-06"
     ]
   }
 }

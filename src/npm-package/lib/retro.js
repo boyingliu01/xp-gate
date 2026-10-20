@@ -24,6 +24,29 @@ const { execSync } = require('child_process');
 const MAX_SANE_DURATION_MS = 2 * 60 * 60 * 1000;
 
 /**
+ * Whether an audit entry's duration_ms is a trustworthy sample.
+ *
+ * `e.duration_ms || 0` used to fold null into ZERO, which both dragged the mean
+ * down and hid that the sample was missing — the same class of lie as the
+ * epoch-sized values that started this line of work.
+ *
+ * BOTH signals must be honoured, not just one:
+ *   - duration_anomaly: entries written before #475 carry an explicit flag.
+ *     Dropping this check silently re-admitted every legacy poisoned sample, and
+ *     the fixture average came out 33433ms instead of 150ms.
+ *   - non-finite / out-of-range: a poisoned start now writes null or a
+ *     nonsensical value outright, so those are excluded too.
+ *
+ * @param {{duration_ms?: number|null, duration_anomaly?: boolean}} entry
+ * @returns {boolean}
+ */
+function isUsableDuration(entry) {
+  if (entry.duration_anomaly) return false;
+  const ms = entry.duration_ms;
+  return Number.isFinite(ms) && ms >= 0 && ms <= MAX_SANE_DURATION_MS;
+}
+
+/**
  * Get git commit subjects within a date window.
  * @param {string} dir - Repository root
  * @param {number} days - Lookback window in days
@@ -113,13 +136,7 @@ function buildReport(opts) {
   L.push('## Activity Summary');
   const gateEntries = audit.filter(e => e.gate_id);
   const passed = gateEntries.filter(e => e.passed).length;
-  // REQ-B: a duration is only usable when it is a finite non-negative number.
-  // `e.duration_ms || 0` used to fold null into ZERO, which both dragged the
-  // mean down and hid the fact that the sample was missing — the same class of
-  // lie as the epoch-sized values this sprint removed. The legacy
-  // duration_anomaly flag is no longer the only signal: a poisoned start now
-  // writes null outright, so anything null must be excluded and counted.
-  const measurable = gateEntries.filter(e => Number.isFinite(e.duration_ms) && e.duration_ms >= 0 && e.duration_ms <= MAX_SANE_DURATION_MS);
+  const measurable = gateEntries.filter(isUsableDuration);
   const excluded = gateEntries.length - measurable.length;
   const nullDurations = gateEntries.filter(e => e.duration_ms === null).length;
   const avgMs = measurable.length > 0

@@ -366,7 +366,11 @@ describe('Gate 5 distinguishes runner infrastructure errors from real failures (
     // unit-tested without executing the hook. The hook must still load that library;
     // a hook that ships without lib/ beside it fails closed on every commit.
     expect(readLib()).toContain('is_runner_infrastructure_error()');
-    expect(readHook()).toContain('source "${AUDIT_SCRIPT_DIR}/lib/test-failure.sh"');
+    // #535 routed every lib through the fail-closed `source_gate_lib` wrapper, so
+    // the old bare `source "..."` line no longer exists. The hook must still LOAD
+    // this exact library; only the helper name used to load it changed. Asserting
+    // just the path keeps the test honest without pinning either helper spelling.
+    expect(readHook()).toContain('"${AUDIT_SCRIPT_DIR}/lib/test-failure.sh"');
   });
 
   it('AC-454-01: the guard is consulted at every vitest Gate 5 block site', () => {

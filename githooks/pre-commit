@@ -15,6 +15,89 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ADAPTER_DIR=""
 GLOBAL_ADAPTER_DIR="$HOME/.config/xp-gate/adapters"
 
+# #505: load the resolution-order data BEFORE any tier decision runs. The file is
+# generated from src/npm-package/lib/hook-module-resolution.js, which doctor.js
+# also reads, so the hook and the diagnostic share one order instead of two
+# hand-written copies that a parity test had to keep honest.
+#
+# It is looked up beside the hook (SCRIPT_DIR — always present, since this file
+# IS the hook) and beside adapter-common.sh (ADAPTER_DIR — where `xp-gate init`
+# and setup-global install the supporting modules). Either location works; the
+# hook-dir copy is what `doctor --sync-hooks` and sync-package-content maintain.
+# Note this runs BEFORE ADAPTER_DIR is resolved, which is why the script dir is
+# the primary location: reading the order cannot depend on the order.
+HOOK_RESOLUTION_SH="${SCRIPT_DIR}/hook-module-resolution.sh"
+if [ ! -f "$HOOK_RESOLUTION_SH" ] && [ -f "$GLOBAL_ADAPTER_DIR/hook-module-resolution.sh" ]; then
+  HOOK_RESOLUTION_SH="$GLOBAL_ADAPTER_DIR/hook-module-resolution.sh"
+fi
+if [ ! -f "$HOOK_RESOLUTION_SH" ]; then
+  # Fail closed: a hook that cannot load its resolution order must not fall back
+  # to an invented one — that would silently resurrect the duplication removed
+  # here, and doctor would report a different surface than the hook executes.
+  echo "FATAL: cannot load hook-module-resolution.sh (module resolution order is unavailable)" >&2
+  echo "Fix: reinstall the hooks (xp-gate init, or xp-gate doctor --sync-hooks in the xp-gate repo)." >&2
+  exit 1
+fi
+# shellcheck source=/dev/null
+. "$HOOK_RESOLUTION_SH"
+
+# Look up one tier's directory variable by name without eval-ing arbitrary input:
+# the base names are a closed set baked into the generated file.
+_hook_tier_base() {
+  case "$1" in
+    ADAPTER_DIR)      printf '%s' "$ADAPTER_DIR" ;;
+    GLOBAL_ADAPTER_DIR) printf '%s' "$GLOBAL_ADAPTER_DIR" ;;
+    PROJECT_GITHOOKS) printf '%s' "$PROJECT_GITHOOKS" ;;
+    SCRIPT_DIR)       printf '%s' "$SCRIPT_DIR" ;;
+    *)                printf '%s' "" ;;
+  esac
+}
+
+# Walk a "tier_id|base|suffix" table in order and print the first existing match.
+# Usage: _hook_resolve <module_filename> <tiers_array_name>
+_hook_resolve() {
+  local module_name="$1"
+  local tiers_var="$2"
+  local entry base suffix base_dir candidate
+  eval "set -- \"\${${tiers_var}[@]}\""
+  for entry in "$@"; do
+    entry="${entry#*|}"
+    base="${entry%%|*}"
+    suffix="${entry#*|}"
+    base_dir="$(_hook_tier_base "$base")"
+    [ -n "$base_dir" ] || continue
+    candidate="$base_dir/${suffix/\{name\}/$module_name}"
+    if [ -f "$candidate" ]; then
+      printf '%s' "$candidate"
+      return 0
+    fi
+  done
+  return 1
+}
+
+# Walk a gate tier table and print the first DIRECTORY that contains the probe.
+# The adapter table yields a file; this one yields the directory the gate suite
+# lives in (GATE_DIR), which is why it probes rather than substitutes.
+# Usage: _hook_resolve_dir <probe_filename> <tiers_array_name>
+_hook_resolve_dir() {
+  local probe="$1"
+  local tiers_var="$2"
+  local entry base suffix base_dir
+  eval "set -- \"\${${tiers_var}[@]}\""
+  for entry in "$@"; do
+    entry="${entry#*|}"
+    base="${entry%%|*}"
+    suffix="${entry#*|}"
+    base_dir="$(_hook_tier_base "$base")"
+    [ -n "$base_dir" ] || continue
+    if [ -f "$base_dir${suffix}/$probe" ]; then
+      printf '%s' "$base_dir${suffix}"
+      return 0
+    fi
+  done
+  return 1
+}
+
 # BEGIN GIT CONTEXT FALLBACK
 if ! declare -F run_without_git_context >/dev/null 2>&1; then
   run_without_git_context() (
@@ -51,39 +134,25 @@ source "$ADAPTER_DIR/adapter-common.sh" 2>/dev/null || {
 # ADAPTER_DIR points to the base directory that contains either
 # adapter-common.sh directly (global) or adapter-common.sh in a flat layout.
 # Gate scripts live alongside adapter-common.sh.
+#
+# #505: the ORDER is not written here. HOOK_ADAPTER_TIERS is generated from
+# src/npm-package/lib/hook-module-resolution.js, which doctor.js reads directly,
+# so the hook and the diagnostic cannot disagree about which file wins.
 resolve_adapter_path() {
-  local lang="$1"
-  # Try flat layout first (global: typescript.sh next to adapter-common.sh)
-  if [ -f "$ADAPTER_DIR/${lang}.sh" ]; then
-    echo "$ADAPTER_DIR/${lang}.sh"
-    return 0
-  fi
-  # Try nested layout (project: adapters/typescript.sh)
-  if [ -f "$ADAPTER_DIR/adapters/${lang}.sh" ]; then
-    echo "$ADAPTER_DIR/adapters/${lang}.sh"
-    return 0
-  fi
-  # Try project githooks as fallback
-  if [ -f "$PROJECT_GITHOOKS/adapters/${lang}.sh" ]; then
-    echo "$PROJECT_GITHOOKS/adapters/${lang}.sh"
-    return 0
-  fi
-  # Try script dir as last resort
-  if [ -f "$SCRIPT_DIR/adapters/${lang}.sh" ]; then
-    echo "$SCRIPT_DIR/adapters/${lang}.sh"
-    return 0
-  fi
-  return 1
+  # ADAPTER templates carry the extension ("{name}.sh"), so pass the bare language
+  # name here. GATE templates are "{name}", so their call passes the full filename.
+  _hook_resolve "${1}" HOOK_ADAPTER_TIERS
 }
 
-# Gate scripts directory — falls back to project githooks if ADAPTER_DIR doesn't have them
-if [ -f "$ADAPTER_DIR/gate-3.sh" ]; then
-  GATE_DIR="$ADAPTER_DIR"
-elif [ -f "$PROJECT_GITHOOKS/gate-3.sh" ]; then
-  GATE_DIR="$PROJECT_GITHOOKS"
-elif [ -f "$SCRIPT_DIR/gate-3.sh" ]; then
-  GATE_DIR="$SCRIPT_DIR"
-else
+# Gate scripts directory — falls back to project githooks if ADAPTER_DIR doesn't have them.
+# #505: the probe file and the tier order come from the generated data file, so
+# this cascade cannot drift from what doctor.js reports.
+GATE_DIR="$(_hook_resolve_dir "$HOOK_GATE_PROBE" HOOK_GATE_TIERS)" || GATE_DIR=""
+# Deliberate last resort: when no tier carries the gate suite, point at
+# ADAPTER_DIR anyway rather than leaving GATE_DIR empty. The gate-N.sh sources
+# further down check for the file before sourcing, so an absent suite still
+# degrades to a reported skip instead of a path built from an empty string.
+if [ -z "$GATE_DIR" ]; then
   GATE_DIR="$ADAPTER_DIR"
 fi
 

@@ -15,6 +15,9 @@ const {
 } = require('./shared-paths.js');
 const { checkUpgrade, formatUpgradeMsg } = require('./check-version.js');
 const { GATE_CLI_TOOLS, checkCliTool, getToolInstallCmd, checkBash } = require('./detect-deps.js');
+// #505: the single source of truth for module resolution order. The hook reads a
+// generated shell projection of this same module.
+const { RESOLUTION_ORDER } = require('./hook-module-resolution.js');
 const {
   diagnoseTuiRegistration, diagnoseInstalledSkills,
   fixTuiRegistration, ensureTuiRegistration, readTuiJson,
@@ -399,6 +402,16 @@ function pathsEquivalent(a, b) {
 const DRIFT_COMPARED_HOOKS = ['pre-commit', 'pre-push', 'post-merge'];
 
 /**
+ * Non-hook files that must sit beside the installed hooks.
+ *
+ * These are not Git entry points, so they are not in DRIFT_COMPARED_HOOKS, but
+ * the hooks source them and die without them:
+ *   - hook-module-resolution.sh (#505): pre-commit aborts FATAL when the module
+ *     resolution order is missing. It is generated from lib/hook-module-resolution.js.
+ */
+const HOOK_SUPPORT_FILES = ['hook-module-resolution.sh'];
+
+/**
  * Compare the hooks that actually execute (the installed copy under
  * core.hooksPath) against the repository's source-of-truth `githooks/` (#451).
  *
@@ -546,35 +559,35 @@ function listExecutedModules(installedAdapterDir) {
   const found = [];
   const seen = new Set();
 
-  let entries;
-  try {
-    entries = fs.readdirSync(installedAdapterDir, { withFileTypes: true });
-  } catch {
-    return found;
-  }
+  // #505: the tier order is DATA, not a second implementation. The hook reads a
+  // generated shell projection of the same module; both reference
+  // RESOLUTION_ORDER, so "which copy executes" has one answer. Previously this
+  // function re-derived the order by hand and a parity test was the only thing
+  // keeping it honest.
+  //
+  // Tiers are walked in order; a name is reported once, from the first tier that
+  // resolves it — matching the hook, which stops at the first existing file.
+  for (const tier of RESOLUTION_ORDER) {
+    // Only the two ADAPTER_DIR-rooted tiers describe the installed adapter dir.
+    if (tier.base !== 'ADAPTER_DIR') continue;
+    // `{name}.sh` (flat) -> the dir itself; `adapters/{name}.sh` -> <dir>/adapters.
+    const dir = tier.template.includes('/')
+      ? path.join(installedAdapterDir, tier.template.split('/{name}.sh')[0])
+      : installedAdapterDir;
 
-  for (const entry of entries) {
-    if (!entry.isFile() || !entry.name.endsWith('.sh')) continue;
-    const file = path.join(installedAdapterDir, entry.name);
-    if (seen.has(entry.name)) continue;
-    seen.add(entry.name);
-    found.push({ name: entry.name, file });
-  }
+    let entries;
+    try {
+      entries = fs.readdirSync(dir, { withFileTypes: true });
+    } catch {
+      continue;
+    }
 
-  // Nested copies only count for names with no flat counterpart, because that
-  // is exactly the fallback resolve_adapter_path() takes.
-  const nestedDir = path.join(installedAdapterDir, 'adapters');
-  let nestedEntries = [];
-  try {
-    nestedEntries = fs.readdirSync(nestedDir, { withFileTypes: true });
-  } catch {
-    nestedEntries = [];
-  }
-  for (const entry of nestedEntries) {
-    if (!entry.isFile() || !entry.name.endsWith('.sh')) continue;
-    if (seen.has(entry.name)) continue;
-    seen.add(entry.name);
-    found.push({ name: entry.name, file: path.join(nestedDir, entry.name) });
+    for (const entry of entries) {
+      if (!entry.isFile() || !entry.name.endsWith('.sh')) continue;
+      if (seen.has(entry.name)) continue;
+      seen.add(entry.name);
+      found.push({ name: entry.name, file: path.join(dir, entry.name) });
+    }
   }
 
   return found;
@@ -1147,6 +1160,26 @@ function syncGlobalHooksFromRepo(ctx = {}) {
       // because a copied hook that is not executable silently never runs.
       fs.copyFileSync(source, target);
       fs.chmodSync(target, 0o755);
+      synced.push(name);
+    } catch (err) {
+      errors.push(`${name}: ${err.message}`);
+    }
+  }
+
+  // Hook support files (#505): sourced by the hooks but not Git entry points, so
+  // they need the same copy treatment or an upgraded install dies at the source
+  // line. Treated like the hooks themselves (always refreshed, no refusal) —
+  // they hold no machine-local content.
+  for (const name of HOOK_SUPPORT_FILES) {
+    const source = path.join(repoHooks, name);
+    if (!fs.existsSync(source)) continue;
+    const target = path.join(installedHooks, name);
+    try {
+      if (fs.existsSync(target) && filesAreIdentical(source, target)) {
+        skipped.push(name);
+        continue;
+      }
+      fs.copyFileSync(source, target);
       synced.push(name);
     } catch (err) {
       errors.push(`${name}: ${err.message}`);
