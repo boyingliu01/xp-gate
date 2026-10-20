@@ -91,11 +91,27 @@ else
       [ -n "$_semgrep_file" ] || continue
       SEMGREP_FILE_COUNT=$((SEMGREP_FILE_COUNT + 1))
       SEMGREP_ARGS+=("--include=${_semgrep_file##*/}")
-      _semgrep_dir="./${_semgrep_file%/*}"
-      # A repo-root file has no directory component ("./x.ts" strips to "./").
-      [ "$_semgrep_dir" = "./" ] && _semgrep_dir="."
+      # A repo-root file has no slash at all, so "%/*" returns it unchanged and
+      # the old comment's assumption (`"./x.ts" strips to "./"`) never held:
+      # the target became the FILE path dressed as a directory ("./x.ts").
+      # Strip only when a slash is present; otherwise the target is the repo
+      # root, spelled ".". Scanning "." widens the scan to the whole tree, which
+      # is the safe side (see the note above) and is what a root-level staged
+      # file requires in order to be analysed at all.
+      case "$_semgrep_file" in
+        */*) _semgrep_dir="./${_semgrep_file%/*}" ;;
+        *)   _semgrep_dir="." ;;
+      esac
+      # #558: dedup must match WHOLE lines. The previous `case "$SEEN" in
+      # *"$_semgrep_dir"*)` was an unanchored substring test: once
+      # ./fastdl/tests was recorded, the parent ./fastdl matched it and was
+      # never added as a target, so a staged fastdl/a.py contributed an
+      # --include= with no directory to scan it in. Nothing errored and nothing
+      # was reported -- the file was simply not analysed, which for a security
+      # gate is the worst outcome: a silent net loss that looks like a pass.
+      # Sibling prefixes (src/api vs src/app) collapsed the same way.
       case "$SEMGREP_DIRS_SEEN" in
-        *"$_semgrep_dir"*) : ;;
+        *$'\n'"$_semgrep_dir"$'\n'*) : ;;
         *) SEMGREP_ARGS+=("$_semgrep_dir"); SEMGREP_DIRS_SEEN="$SEMGREP_DIRS_SEEN$_semgrep_dir"$'\n' ;;
       esac
     done <<EOF
