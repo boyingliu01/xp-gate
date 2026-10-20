@@ -350,6 +350,14 @@ const COMMANDS = {
     },
     usage: 'xp-gate retro [--days N] [--all] [--json] [--sprint <id>]'
   },
+  'crap': {
+    description: 'Rank functions by CRAP score (complexity x weak coverage) — advisory, never blocks (#404)',
+    run: subargs => {
+      const { handleCrap } = require('../lib/crap-cli.js');
+      handleCrap(subargs).then(code => process.exit(code));
+    },
+    usage: 'xp-gate crap [--top N] [--threshold N] [--json] [--paths <p...>] [--include-mirrors]'
+  },
   'sprint-init': {
     description: 'Initialize sprint state (single entry point for sprint creation, resolves #366)',
     run: subargs => {

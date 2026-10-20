@@ -168,6 +168,7 @@ IDE 插件提供 AI 对话内的质量工具（`gate-check`、`gate-principles`�
 | `xp-gate sprint-init` | 初始化 Sprint 项目结构 |
 | `xp-gate phase-transition <phase>` | 执行 Sprint 阶段转换（含证据验证） |
 | `xp-gate retro [--days N] [--json]` | 生成工程复盘报告 |
+| `xp-gate crap [--top N] [--threshold N]` | 按 CRAP 分数（复杂度 × 覆盖缺口）排序热点函数 — **仅建议，永不阻断** |
 | `xp-gate audit [--tail \| --stats \| record]` | 查看/记录 gate 审计日志 |
 | `xp-gate install-skill <name>` | 从 npm 包内技能目录安装（含 references/templates/scripts） |
 | `xp-gate update-hooks` | 更新 Git Hooks 到最新版本 |
