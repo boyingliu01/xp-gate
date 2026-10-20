@@ -2,6 +2,14 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.30.1.0] - 2026-10-20
+
+修 0.30.0 的发布失败：workflow 报 success，npm 上什么都没有。
+
+### Fixed
+
+- **`bin` 路径被新版 npm 判为非法，导致包被静默丢弃（70160987）**: CLI job 打好了 931 个文件的 tarball，然后**在上传前退出，且没有任何错误行**。唯一的线索是一行容易被跳过的 warning：`npm warn publish "bin[xp-gate]" script name bin/xp-gate.js was invalid and removed`。`bin` 条目写的是 `"xp-gate": "./bin/xp-gate.js"`，当前 npm 把 `./` 前缀判为非法 **script NAME**，于是删除该条目而不是报错——留下一个没有可执行入口的 CLI 包，自然发不出去。0.29.0 是在容忍该写法的 npm 版本下发的，所以一直没暴露。`npm pkg fix` 给出同样两处修正：去掉 `./`，并把 repository URL 改为 `git+https://...git` 形式。
+
 ## [0.30.0.0] - 2026-10-20
 
 **把「两侧各写一份、靠测试保持一致」换成「一份数据、编译期就一致」**——#505 的模块查找顺序、#404 的变异测试证据，以及过程中挖出的 Gate 3 假拦截与「未运行记为 PASS」两个真实缺陷。
