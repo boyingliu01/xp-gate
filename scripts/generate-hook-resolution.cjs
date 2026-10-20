@@ -35,12 +35,22 @@ function render() {
   lines.push('# is its shell projection. Editing it by hand makes the hook disagree with');
   lines.push('# doctor.js, which reads the JS module directly — the exact divergence');
   lines.push('# #495/#500 were about.');
+  lines.push('#');
+  lines.push('# Every HOOK_* constant below is read by the sourcing parent, not by this');
+  lines.push('# file. A linter checking this file alone cannot see that consumer, so each');
+  lines.push('# declaration carries a scoped directive with the reason stated at the site');
+  lines.push('# (#548 -- the same false SC2034 used to block consumer repos that vendor');
+  lines.push('# these hook modules). The directives are generated, not hand-added.');
   lines.push('');
   lines.push('# Probe file used to pick the gate tier.');
+  lines.push('# Consumed by the sourcing parent, not here.');
+  lines.push('# shellcheck disable=SC2034');
   lines.push(`HOOK_GATE_PROBE="${GATE_PROBE}"`);
   lines.push('');
   lines.push('# ADAPTER_DIR cascade, highest priority first.');
   lines.push('# Each entry is "tier_id|base_var|probe_file".');
+  lines.push('# Consumed by the sourcing parent, not here.');
+  lines.push('# shellcheck disable=SC2034');
   lines.push('HOOK_ADAPTER_DIR_TIERS=(');
   for (const t of ADAPTER_DIR_ORDER) {
     lines.push(`  '${t.tier_id}|${t.base}|${t.probe}'`);
@@ -49,6 +59,8 @@ function render() {
   lines.push('');
   lines.push('# Adapter resolution tiers, highest priority first.');
   lines.push('# Each entry is "tier_id|base_var|template" with {name} as the basename.');
+  lines.push('# Consumed by the sourcing parent, not here.');
+  lines.push('# shellcheck disable=SC2034');
   lines.push('HOOK_ADAPTER_TIERS=(');
   for (const t of RESOLUTION_ORDER) {
     lines.push(`  '${t.tier_id}|${t.base}|${t.template}'`);
@@ -59,6 +71,8 @@ function render() {
   lines.push('# Semantics differ from adapter tiers: each entry names the DIRECTORY that');
   lines.push('# would hold the gate probe, so a match yields the directory (GATE_DIR), not');
   lines.push('# the probe file itself. Entry format: "tier_id|base_var|(empty suffix)".');
+  lines.push('# Consumed by the sourcing parent, not here.');
+  lines.push('# shellcheck disable=SC2034');
   lines.push('HOOK_GATE_TIERS=(');
   for (const t of GATE_RESOLUTION_ORDER) {
     lines.push(`  '${t.tier_id}|${t.base}|'`);

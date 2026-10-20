@@ -56,11 +56,15 @@ GATE_4_START=$(gate_start_ms)
 GATE_4_STATUS=""
 # #537: every non-run records WHY (no files / tool missing / unsupported lang)
 # so the quality report can distinguish "not applicable" from "not covered".
+# Consumed by the sourcing parent, not here (see #548).
+# shellcheck disable=SC2034
 GATE_4_REASON=""
 
 if [ "$PROJECT_LANG" = "documentation-only" ]; then
   echo "⏭️  SKIPPED - Principles check (documentation project)."
   GATE_4_STATUS="SKIP"
+  # Consumed by the sourcing parent, not here (see #548).
+  # shellcheck disable=SC2034
   GATE_4_REASON="documentation_project"
   
 else
@@ -156,6 +160,8 @@ else
           echo "⚠️  Warning: Principles checker execution failed"
           echo "⏭️  SKIPPED - Principles check (execution issue)"
           GATE_4_STATUS="SKIP"
+          # Consumed by the sourcing parent, not here (see #548).
+          # shellcheck disable=SC2034
           GATE_4_REASON="checker_execution_error"
           rm -f "$PRINCIPLES_JSON"
         else
@@ -191,17 +197,23 @@ else
         echo "ℹ️  npx/tsx not available - skipping principles check"
         echo "⏭️  SKIPPED - Principles check (no Node.js/tsx)"
         GATE_4_STATUS="SKIP"
+        # Consumed by the sourcing parent, not here (see #548).
+        # shellcheck disable=SC2034
         GATE_4_REASON="tool_not_installed"
       fi
     else
       echo "ℹ️  Principles checker not found in project - skipping"
       echo "⏭️  SKIPPED - Principles check (checker not in project)"
       GATE_4_STATUS="SKIP"
+      # Consumed by the sourcing parent, not here (see #548).
+      # shellcheck disable=SC2034
       GATE_4_REASON="checker_not_found"
     fi
   else
     echo "⏭️  SKIPPED - Principles check (no matching source files changed)"
     GATE_4_STATUS="SKIP"
+    # Consumed by the sourcing parent, not here (see #548).
+    # shellcheck disable=SC2034
     GATE_4_REASON="no_matching_files_changed"
   fi
 fi

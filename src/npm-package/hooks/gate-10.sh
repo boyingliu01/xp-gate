@@ -12,7 +12,20 @@ GATE_10_START=$(gate_start_ms)
 GATE_10_STATUS=""
 # #536: audit trail for "did this commit actually get scanned?". The report
 # surfaces reason + scanned_files so a non-scan never reads as a clean PASS.
+#
+# GATE_10_REASON and GATE_10_SCANNED_FILES are consumed by the sourcing parent
+# (pre-commit builds its report JSON from them after `source gate-10.sh`), not
+# inside this file. The linter checks one file at a time and cannot see the
+# consumer, so each assignment is flagged SC2034 "appears unused" -- which
+# blocks Gate 1 for any repo that vendors this adapter, because that repo's own
+# lint pass runs over the vendored copy (#548). Each assignment carries a
+# scoped directive with that reason stated at the site.
+#
+# Consumed by the sourcing parent (pre-commit report JSON), not here.
+# shellcheck disable=SC2034
 GATE_10_REASON=""
+# Consumed by the sourcing parent (pre-commit report JSON), not here.
+# shellcheck disable=SC2034
 GATE_10_SCANNED_FILES=0
 
 # Semgrep availability check
@@ -29,6 +42,8 @@ if [ -z "$SEMGREP_CMD" ]; then
   echo "     Pre-cache rules: semgrep --config=p/security-audit"
   echo "     Gate 10: SAST Security (WARN, semgrep not installed)"
   GATE_10_STATUS="WARN"
+  # Consumed by the sourcing parent (pre-commit report JSON), not here.
+  # shellcheck disable=SC2034
   GATE_10_REASON="tool_not_installed"
 else
   # Get staged files filtered to Semgrep-supported languages
@@ -37,6 +52,8 @@ else
   if [ -z "$SEMGREP_FILES" ]; then
     echo "     ⏭️  SKIPPED - SAST (no supported language files changed)"
     GATE_10_STATUS="SKIP"
+    # Consumed by the sourcing parent (pre-commit report JSON), not here.
+    # shellcheck disable=SC2034
     GATE_10_REASON="no_supported_files"
   else
     # One path per line into an array. Quoting the newline-joined list would hand
@@ -91,6 +108,8 @@ EOF
       echo "     Install node (https://nodejs.org); without it SAST findings cannot be classified"
       echo "     ⏭️  SKIPPED - SAST (node not installed)"
       GATE_10_STATUS="SKIP"
+      # Consumed by the sourcing parent (pre-commit report JSON), not here.
+      # shellcheck disable=SC2034
       GATE_10_REASON="tool_not_installed"
     else
 
@@ -164,6 +183,8 @@ console.log("");});
       fi
       echo "     ⏭️  SKIPPED - SAST (semgrep output unparseable)"
       GATE_10_STATUS="SKIP"
+      # Consumed by the sourcing parent (pre-commit report JSON), not here.
+      # shellcheck disable=SC2034
       GATE_10_REASON="output_unparseable"
     elif [ "$V_RESULTS" -eq 0 ] && { [ "$V_ERRORS" -gt 0 ] || [ "$SEMGREP_EXIT" -ne 0 ]; }; then
       # Nothing was scanned to a verdict: semgrep either failed outright
@@ -178,6 +199,8 @@ console.log("");});
       fi
       echo "     ⏭️  SKIPPED - SAST (semgrep runtime error)"
       GATE_10_STATUS="SKIP"
+      # Consumed by the sourcing parent (pre-commit report JSON), not here.
+      # shellcheck disable=SC2034
       GATE_10_REASON="semgrep_runtime_error"
     elif [ "$V_BLOCKING" -gt 0 ]; then
       echo ""
@@ -192,9 +215,13 @@ console.log("");});
       echo "$FINDING_DETAILS"
       echo "  Run 'semgrep scan --config=p/security-audit' to review all findings."
       GATE_10_STATUS="FAIL"
+      # Consumed by the sourcing parent (pre-commit report JSON), not here.
+      # shellcheck disable=SC2034
       GATE_10_SCANNED_FILES=$SEMGREP_FILE_COUNT
       exit 1
     else
+      # Consumed by the sourcing parent (pre-commit report JSON), not here.
+      # shellcheck disable=SC2034
       GATE_10_SCANNED_FILES=$SEMGREP_FILE_COUNT
       echo ""
       echo "     ✅ PASSED - No blocking vulnerabilities (files scanned: $SEMGREP_FILE_COUNT)"
