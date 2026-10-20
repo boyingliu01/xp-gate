@@ -8,11 +8,15 @@
  2>&1 echo "→ Gate 3: Cyclomatic complexity..."
 GATE_3_START=$(gate_start_ms)
 # #537: every non-run records WHY so the report can say why a gate is SKIP.
+# Consumed by the sourcing parent (pre-commit report JSON), not here.
+# shellcheck disable=SC2034
 GATE_3_REASON=""
 
 if [ "$PROJECT_LANG" = "documentation-only" ]; then
   echo "⏭️  SKIPPED - Complexity (documentation project)."
   GATE_3_STATUS="SKIP"
+  # Consumed by the sourcing parent (pre-commit report JSON), not here.
+  # shellcheck disable=SC2034
   GATE_3_REASON="documentation_project"
 
 elif [ "$PROJECT_LANG" = "powershell" ]; then
@@ -21,6 +25,8 @@ elif [ "$PROJECT_LANG" = "powershell" ]; then
   GATE_3_STATUS="SKIP"
   # #537: a PowerShell-primary repo was invisible to this dimension while the
   # score implied full coverage — say exactly why nothing ran.
+  # Consumed by the sourcing parent (pre-commit report JSON), not here.
+  # shellcheck disable=SC2034
   GATE_3_REASON="no_powershell_tool"
   
 else
@@ -159,7 +165,10 @@ else
         # empty stdin — the verdict comes back empty and Gate 3 passes on zero
         # rows (measured while wiring #544: same input passed or blocked
         # depending only on where the prefix sat).
+        # Consumed by evaluate_ccn_ratchet in the sourced lib, not here.
+        # shellcheck disable=SC2034
         CCN_WARN_THRESHOLD="$CCN_THRESHOLD"
+        # shellcheck disable=SC2034
         CCN_BLOCK_THRESHOLD=$((CCN_THRESHOLD * 2))
         RATCHET_VERDICT=$(printf '%s\n' "$CC_CSV" | evaluate_ccn_ratchet ".ccn-baseline.json")
         CC_VIOLATIONS=$(printf '%s\n' "$RATCHET_VERDICT" | grep -c '^BLOCK ' || true)
@@ -205,6 +214,8 @@ else
                                                  END { exit(found ? 0 : 1) }'; then
         echo "⚠️  WARN - lizard produced no parsable results; complexity not verified"
         GATE_3_STATUS="WARN"
+        # Consumed by the sourcing parent (pre-commit report JSON), not here.
+        # shellcheck disable=SC2034
         GATE_3_REASON="lizard_output_unparsable"
       elif [ "$CC_WARNINGS" -gt 0 ]; then
         echo "$CC_OUTPUT"
@@ -212,6 +223,8 @@ else
         echo "❌ BLOCKED - $CC_WARNINGS functions with CCN > $CCN_THRESHOLD found."
         echo "Refactor high-complexity functions to keep below $CCN_THRESHOLD complexity."
         GATE_3_STATUS="BLOCK"
+        # Consumed by the sourcing parent (pre-commit report JSON), not here.
+        # shellcheck disable=SC2034
         GATE_3_REASON="ccn_over_threshold"
         exit 1
       else
@@ -222,6 +235,8 @@ else
     else
       echo "⏭️  SKIPPED - Complexity (no source files to check)."
       GATE_3_STATUS="SKIP"
+      # Consumed by the sourcing parent (pre-commit report JSON), not here.
+      # shellcheck disable=SC2034
       GATE_3_REASON="no_source_files_changed"
     fi
   else
@@ -229,6 +244,8 @@ else
     echo "   Install with: pip install --user lizard"
     echo "   Gate 3: Complexity check (WARN, tool not available)"
     GATE_3_STATUS="WARN"
+    # Consumed by the sourcing parent (pre-commit report JSON), not here.
+    # shellcheck disable=SC2034
     GATE_3_REASON="tool_not_installed"
   fi
 fi
