@@ -112,6 +112,7 @@ fi
 # END GIT CONTEXT FALLBACK
 
 PROJECT_GITHOOKS="$(run_without_git_context git rev-parse --show-toplevel 2>/dev/null)/githooks"
+# shellcheck disable=SC2034  # consumed by adapter-common.sh when that layout is installed
 GATES_DIR="$SCRIPT_DIR/gates"
 
 if [ -f "$GLOBAL_ADAPTER_DIR/adapter-common.sh" ]; then
@@ -121,6 +122,10 @@ elif [ -f "$PROJECT_GITHOOKS/adapter-common.sh" ]; then
 else
   ADAPTER_DIR="$SCRIPT_DIR"
 fi
+# The sourced lib is resolved at runtime (global/project/script-dir layouts);
+# it may legitimately be absent until `xp-gate init` runs - the || block is
+# the designed fallback, not a bug.
+# shellcheck disable=SC1091
 source "$ADAPTER_DIR/adapter-common.sh" 2>/dev/null || {
   echo "Error: Cannot source adapter-common.sh from $ADAPTER_DIR"
   echo "Run: xp-gate init (per-project) or xp-gate setup-global (all projects)"
@@ -160,15 +165,16 @@ fi
 # Using a guard prevents recursion when 'exit' is called from inside the trap.
 # IMPORTANT: Captures exit status FIRST so generate_quality_report cannot override it.
 _QUALITY_REPORT_DONE=0
+# (Invoked indirectly via the `trap ... EXIT` below; SC2329 cannot see that.)
 _quality_report_on_exit() {
   local _saved_exit=$?
   if [ "$_QUALITY_REPORT_DONE" = "1" ]; then
-    exit $_saved_exit
+    exit "$_saved_exit"
     return
   fi
   _QUALITY_REPORT_DONE=1
   command -v generate_quality_report >/dev/null 2>&1 && generate_quality_report 2>/dev/null || true
-  exit $_saved_exit
+  exit "$_saved_exit"
 }
 trap '_quality_report_on_exit' EXIT
 
@@ -1238,7 +1244,7 @@ fi
 GATE_1_START=$(gate_start_ms)
 GATE_1_STATUS="PASS"
 GATE_1_DETAIL=""
-if ! any_changed_files_match "\.(ts|tsx|js|jsx|py|go|java|kt|cpp|c|swift|m|mm|dart|sh)$" "\.ya?ml$" "\.json$" "Dockerfile" "\.tf$"; then
+if ! any_changed_files_match "\.(ts|tsx|js|jsx|py|go|java|kt|cpp|c|swift|m|mm|dart|sh)$" "\.ps1$" "\.psm1$" "\.ya?ml$" "\.json$" "Dockerfile" "\.tf$"; then
   echo "✅ PASSED - No code files changed, skipping lint."
   GATE_1_STATUS="SKIP"
   GATE_1_DETAIL="no_matching_files"
@@ -1759,6 +1765,66 @@ else
         echo "⚠️  WARN - Java code quality NOT verified (unexpected verdict $JAVA_G1_EXIT)"
         GATE_1_STATUS="WARN"
         GATE_1_DETAIL="java: unexpected verdict $JAVA_G1_EXIT"
+        ;;
+    esac
+  fi
+    ;;
+
+    powershell)
+  # GATE 1 PowerShell: fail-closed branch (mirrors the java branch above).
+  # powershell.sh run_static_analysis contract:
+  #   exit 0 + "XP_G1_REASON: ..." stdout line -> WARN (IN the denominator)
+  #   exit 0, no reason                        -> PASS (real analysis ran clean)
+  #   exit 1 (findings)                        -> BLOCK the commit
+  # The reason crosses the command-substitution subshell as an stdout line
+  # (an export inside the adapter can NEVER reach this process); parse, then
+  # strip from display. ALL reason lines are aggregated (several scope
+  # entries may be missing at once) and the grep -v carries `|| true`
+  # because grep exits 1 when every line matched - a set -e consumer would
+  # otherwise abort on the assignment.
+  # Without this branch PowerShell commits fall into the generic *) branch
+  # below, where a missing engine or findings map to non-blocking "SKIPPED"
+  # text (skip-as-pass; observed live 2026-10-17 and 2026-10-20, see the
+  # windows-residual-cleaner gate audit).
+  ADAPTER_FILE=$(resolve_adapter_path "$CURRENT_LANG")
+  # Adapter path is resolved at runtime (global/project/script-dir tiers).
+  # shellcheck disable=SC1090
+  if [ -z "$ADAPTER_FILE" ] || ! source "$ADAPTER_FILE" 2>/dev/null; then
+    echo "⚠️  WARN - PowerShell adapter not found (code quality NOT verified)"
+    GATE_1_STATUS="WARN"
+    GATE_1_DETAIL="powershell: adapter missing"
+  else
+    PS_G1_EXIT=0
+    # `|| PS_G1_EXIT=$?` (not a bare assignment): under a set -e consumer
+    # a non-zero verdict would abort the host hook before the mapping.
+    PS_G1_OUTPUT=$(run_static_analysis 2>&1) || PS_G1_EXIT=$?
+    # Collect ALL reason lines (head -1 truncated diagnostics when several
+    # scope entries were missing at once); joined into one detail.
+    PS_G1_REASON=$(printf '%s\n' "$PS_G1_OUTPUT" | sed -n 's/^XP_G1_REASON: //p' | paste -sd ';' -)
+    if [ -n "$PS_G1_REASON" ]; then
+      # `|| true`: when every line matched, grep exits 1 and the assignment
+      # would abort a set -e consumer.
+      PS_G1_OUTPUT=$(printf '%s\n' "$PS_G1_OUTPUT" | grep -v '^XP_G1_REASON: ' || true)
+    fi
+    [ -n "$PS_G1_OUTPUT" ] && echo "$PS_G1_OUTPUT" | head -40
+    case "$PS_G1_EXIT" in
+      0)
+        if [ -n "$PS_G1_REASON" ]; then
+          echo "⚠️  WARN - PowerShell code quality NOT verified ($PS_G1_REASON)"
+          GATE_1_STATUS="WARN"
+          GATE_1_DETAIL="powershell: $PS_G1_REASON"
+        else
+          echo "✅ PASSED - PowerShell code quality (PSScriptAnalyzer, product scope)."
+        fi
+        ;;
+      1)
+        echo "❌ BLOCKED - PowerShell static analysis violations (fix or add suppressions)"
+        exit 1
+        ;;
+      *)
+        echo "⚠️  WARN - PowerShell code quality NOT verified (unexpected verdict $PS_G1_EXIT)"
+        GATE_1_STATUS="WARN"
+        GATE_1_DETAIL="powershell: ${PS_G1_REASON:-unexpected verdict $PS_G1_EXIT}"
         ;;
     esac
   fi
@@ -3582,7 +3648,7 @@ echo ""
 # v0.14.3+ (Issue #312): Skip if no code files changed
 # v0.18.5 (Issue #397): Fix gate status variable collision — SAST now sets GATE_10_STATUS
 # ============================================================================
-if any_changed_files_match "\.(ts|tsx|js|jsx|py|go|java|kt|cpp|c|swift|m|dart|sh)$"; then
+if any_changed_files_match "\.(ts|tsx|js|jsx|py|go|java|kt|cpp|c|swift|m|dart|sh|ps1|psm1)$"; then
   if [ -f "$GATE_DIR/gate-10.sh" ]; then
     source "$GATE_DIR/gate-10.sh"
   else
