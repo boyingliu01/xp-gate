@@ -3052,8 +3052,13 @@ else
       fi
     fi
   fi
+  # Only reached on the non-docs-only path. Assigning PASS outside the if/else
+  # overwrote the docs-only SKIP a few hundred lines above and reported
+  # "Tests + Coverage: PASS (coverage: N/A)" for a commit where no test ran
+  # (#554) -- a SKIP promoted to PASS inflates the pass rate and hides that the
+  # gate never executed.
+  GATE_5_STATUS="PASS"
 fi
-GATE_5_STATUS="PASS"
 record_gate_audit "gate-5" "tests-coverage" "$GATE_5_STATUS" "0" "$GATE_5_START" "${GATE_5_DETAIL:-}"
 
 # ============================================================================
