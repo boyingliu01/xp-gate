@@ -360,8 +360,15 @@ async function runGate(gateId, targetPath) {
       if (result && typeof result.then === 'function') {
         return await result;
       }
-      return 0;
+      // A synchronous handler's verdict MUST be propagated (#563). Gates 3, 7,
+      // 8 and 9 reach runTsGate(), which returns a plain number; reporting a
+      // manufactured 0 for them made `xp-gate check` unable to distinguish a
+      // failing gate from a passing one. Handlers that return nothing at all
+      // (gate 2, whose execFileSync throws on a non-zero exit instead) are
+      // still treated as pass, because their failure signal is the throw below.
+      return typeof result === 'number' ? result : 0;
     } catch (err) {
+      // Covers a synchronous throw AND a rejection from the awaited handler.
       console.error(` Gate ${gateId} FAILED: ${err.message}`);
       return 1;
     }

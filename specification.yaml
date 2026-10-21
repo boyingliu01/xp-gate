@@ -787,6 +787,32 @@ specification:
             静默 exit 0；两者唯一变量是配置形状，故缺陷可归因于形状本身而非其它因素
           test_type: unit
 
+    # ============================================================
+    # REQ-563: standalone 门禁的判定必须原样传播 —— 派生一个 0 等于没有门禁。
+    # runGate() 只在 run() 返回 Promise 时 await 并返回，同步返回数字的分支
+    # 一律 return 0。Gate 3/7/8/9 经 runTsGate() 返回的正是数字，于是子进程
+    # exit 1 在 xp-gate check 里被报告为 0 —— checkAllGates 忠实地统计它拿到
+    # 的返回值，而那个返回值是被伪造的。Gate 4/6 因恰好返回
+    # Promise.resolve() 而幸免，Gate 2 因 execFileSync 非零即抛而幸免，两者都是
+    # 写法上的偶然而非契约，所以修复必须在 runner 里而不是在各 handler 里。
+    # 来源：v0.30.5 自审（报告阶段 0 动作 0.1）。
+    # ============================================================
+    - id: REQ-563
+      description: "runGate 必须把同步 handler 的数值判定当作真实结果返回；只有未返回数值（失败信号为抛异常）的 handler 才视为通过"
+      priority: critical
+      acceptance_criteria:
+        - id: AC-563-01
+          criteria: 同步返回非零（如 1）的 gate handler，runGate 必须返回该非零值，
+            不得返回伪造的 0；否则 checkAllGates 无法区分通过与失败
+          test_type: unit
+        - id: AC-563-02
+          criteria: 同步返回 0 的 handler 仍判定为通过——防止「一律返回失败」式的伪修复
+          test_type: unit
+        - id: AC-563-03
+          criteria: 返回 Promise 的 handler、同步抛异常的 handler、以及 Promise reject 的
+            handler 判定不变（分别为返回值、1、1），不得因本次修复而回归或产生未捕获拒绝
+          test_type: unit
+
 
     - id: DD-001
       decision: 走薄桥（方案 A）在 ctx.tools 注册三工具，而非独立 MCP server 或纯技能
