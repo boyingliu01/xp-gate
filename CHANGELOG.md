@@ -2,6 +2,29 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.30.5.0] - 2026-10-21
+
+0.30.4 关闭了 #544，但只交付了 retro 需要的存活明细，**根因的三处实例还留在原地**。这一版把它们修完，并补上让这类"修一半"无法再次发生的守卫。
+
+### Fixed
+
+- **Gate M 仍在把未测量的变异体计数写成零（#544 后续）**: `applyMutationResult` 把每个文件的报告压成一个分数，丢掉 `nrOfMutants` / `nrOfKilledMutants` / `nrOfSurvivedMutants`；随后 `buildMutationScores` 给每个文件写入 `{mutants: 0, killed: 0, survived: 0}`。**三个零写在真实分数旁边，读起来就是"已测量：无存活变异体"**——一个测试不足的模块就这样被记成干净的。现已携带真实计数，且 `MutationScore` 的计数字段改为可选，"未测量"保持缺席而非变成有误导性的零；真正的零存活仍然保留。
+- **`update-baseline` 用同样的三个零填充新基线条目**: 该路径只有分数、完全没有计数，写任何数字都是编造的。改为只写分数。
+- **`saveBaseline` 写文件无错误处理**: 权限或磁盘错误会从顶层 await 抛出一个没有文件名的裸拒绝，而运行看起来是完成的——基线实际没保存。现在报告路径与原因并明确失败。
+- **发布产物里的 mutation 模块没有镜像守卫**: `src/npm-package/mutation/` 会发布到 npm（`mutation/` 在 `files` 列表里），且一直手工维持与 `src/mutation/` 逐字节一致，但**没有任何检查**。修复落在源码树后，包内副本仍带着写零的旧代码——只改源码的修复会发布陈旧行为给所有使用者，正是 v0.27.3 (#542) 的形态。三个文件已同步，`check-hook-mirror.sh` 增加了递归 diff（不列文件清单，未来新增文件自动覆盖），并向镜像注入漂移验证过它会失败。
+- **安装目录里的陈旧备份文件**: 移除 `~/.config/xp-gate/hooks/` 下的 3 个 `.bak` / `.crlf-bak` 残留，它们不被任何东西读取，却让 `ls` 误报生效的钩子集合。
+
+### 测试
+
+- 新增 `mutation-mirror.test.ts`：断言六个模块文件在两个树中逐字节一致，并锚定缺陷本身（包内副本不得再出现 `mutants: 0, killed: 0, survived: 0`）。
+- `update-baseline.test.ts` 中原有的 "should add new file entries with **zeroed metadata**" **断言了错误行为**——它把零值固定成预期。已改为断言字段缺席且为 `undefined`。
+- 13 个 bats fixture 补装 #548 新增的 `hook-module-resolution.sh`，并让 `gate-5a-block` 直接调用 fixture 自己的钩子（既不触碰宿主机 gate 链，又让被测钩子真正执行）。该套件此前 12 处断言提交都写着 `--no-verify`，禁用的正是被测钩子，**14 个测试不可能通过、Gate 5a 从未被试过**；现为 14/14。
+- 全量验证：179 文件 / 2439 通过 / 2 skip / 0 失败；`tsc --noEmit` 干净；钩子镜像 parity PASS；所有 githooks shellcheck **零 error 级**发现（其余为 warning/info：未使用变量、引号风格）。
+
+### 说明
+
+- Gate M 建议里的 `baseline_delta` 仍未实现：它需要可与 `.mutation-baseline.*` 比较的历史分数序列，而 issue 自己指出样本为 0。先有真实样本才有意义。
+
 ## [0.30.4.0] - 2026-10-21
 
 处理 0.30.3 发布后新报的 gate-10 缺陷与 #544。这一轮的主题仍是**"门禁在不该沉默的地方沉默"**——前两轮修的是门禁说了假话，这一轮是门禁什么都不说：扫描器漏掉的文件、被遗忘的超时、以及写进 journal 却永远推进不进去的状态。
