@@ -3,9 +3,14 @@ import path from 'path';
 
 interface MutationScoreEntry {
   score: number;
-  mutants: number;
-  killed: number;
-  survived: number;
+  /**
+   * Optional (#544): a baseline entry built from a score alone has no mutant
+   * counts, and inventing zeros would record a clean file that was never
+   * measured.
+   */
+  mutants?: number;
+  killed?: number;
+  survived?: number;
 }
 
 interface MutationBaseline {
@@ -92,11 +97,13 @@ function updateBaseline(
           score: parseFloat(score.toFixed(1))
         };
       } else {
+        // #544: do not seed the baseline with zeros. This path only has a score
+        // from the hand-edited/CLI score list and no mutant counts at all, so
+        // writing mutants/killed/survived = 0 would record "measured, no
+        // survivors" for a file nobody measured. Absent means unknown, and the
+        // fields are optional on MutationScoreEntry for exactly this reason.
         updatedScores[filePath] = {
           score: parseFloat(score.toFixed(1)),
-          mutants: 0,
-          killed: 0,
-          survived: 0
         };
       }
     }
@@ -127,7 +134,17 @@ async function removeDeletedFiles(baseline: MutationBaseline): Promise<MutationB
 }
 
 async function saveBaseline(baseline: MutationBaseline, baselinePath: string): Promise<void> {
-  await fs.writeFile(baselinePath, JSON.stringify(baseline, null, 2));
+  // A failed write used to propagate as a bare rejection from deep inside the
+  // CLI's top-level await, producing an unhandled-rejection stack with no
+  // indication of WHICH file could not be written -- and on a permission or
+  // disk-full error the baseline silently stayed stale while the run looked
+  // complete. Report the path and the reason, then fail loudly.
+  try {
+    await fs.writeFile(baselinePath, JSON.stringify(baseline, null, 2));
+  } catch (err) {
+    const reason = err instanceof Error ? err.message : String(err);
+    throw new Error(`Failed to write mutation baseline to ${baselinePath}: ${reason}`);
+  }
 }
 
 async function main(): Promise<void> {

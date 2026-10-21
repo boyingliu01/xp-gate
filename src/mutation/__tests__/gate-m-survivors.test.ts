@@ -17,6 +17,7 @@
 import { describe, it, expect } from 'vitest';
 import {
   summarizeSurvivors,
+  buildMutationScores,
   type StrykerReportLike,
   type SurvivorSummary,
 } from '../gate-m';
@@ -129,5 +130,38 @@ describe('AC-544: Gate M survivor detail', () => {
       nrOfKilledMutants: 8,
       nrOfSurvivedMutants: 2,
     })).toBeNull();
+  });
+});
+
+describe('buildMutationScores carries the real counts (#544)', () => {
+  it('reports measured mutant counts instead of hardcoded zeros', () => {
+    // The original defect: the score was real and the three counts beside it
+    // were literal zeros, which reads as "measured, no survivors". A consumer
+    // that trusts `survived: 0` concludes the module is adequately tested.
+    const scores = buildMutationScores({ 'a.ts': 78.4 }, {
+      'a.ts': { mutants: 30, killed: 25, survived: 5 },
+    });
+
+    expect(scores['a.ts']).toEqual({ score: 78.4, mutants: 30, killed: 25, survived: 5 });
+  });
+
+  it('leaves counts absent when they were never measured', () => {
+    // Absent must stay absent -- not fabricated as zero.
+    const scores = buildMutationScores({ 'a.ts': 50 }, {});
+
+    expect(scores['a.ts'].score).toBe(50);
+    expect(scores['a.ts'].mutants).toBeUndefined();
+    expect(scores['a.ts'].survived).toBeUndefined();
+  });
+
+  it('keeps a genuinely zero-survivor file at zero', () => {
+    // The distinction this whole change is about: measured zero is a real,
+    // meaningful value and must survive the trip.
+    const scores = buildMutationScores({ 'clean.ts': 100 }, {
+      'clean.ts': { mutants: 12, killed: 12, survived: 0 },
+    });
+
+    expect(scores['clean.ts'].survived).toBe(0);
+    expect(scores['clean.ts'].mutants).toBe(12);
   });
 });
