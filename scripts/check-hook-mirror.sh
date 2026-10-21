@@ -89,6 +89,18 @@ principles_diff=$(diff -rq src/principles src/npm-package/principles 2>&1 || tru
 [ -z "$principles_diff" ] || fail "principles mirror tree drift:
 $principles_diff"
 
+# Mutation module (#544 follow-up). src/npm-package/mutation/ is published
+# ("mutation/" is in the package files list) and is maintained as a byte-identical
+# copy of src/mutation/, but nothing checked it: after the #544 fix landed in the
+# source tree the package copy still contained the zero-filling code, so the fix
+# would have shipped only to this repo and not to consumers -- the same shape as
+# the v0.27.3 plugin drift above.
+[ -d src/mutation ] || fail "missing canonical mutation directory: src/mutation"
+[ -d src/npm-package/mutation ] || fail "missing mirror mutation directory: src/npm-package/mutation"
+mutation_diff=$(diff -rq src/mutation src/npm-package/mutation 2>&1 || true)
+[ -z "$mutation_diff" ] || fail "mutation mirror tree drift:
+$mutation_diff"
+
 # Plugin source trees (#542): plugins/<name>/src <-> src/npm-package/plugins/<name>/src.
 # The r16 walkthrough TS fix was applied mirror-only in v0.27.3 and prepack's
 # canonical->mirror sync silently rolled it back -- the published tarball then
