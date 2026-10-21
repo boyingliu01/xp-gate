@@ -1,8 +1,14 @@
 export interface MutationScore {
   score: number;
-  mutants: number;
-  killed: number;
-  survived: number;
+  /**
+   * Mutant outcome counts. Optional on purpose (#544): a runner that did not
+   * report them must leave them absent, so a consumer can tell "not measured"
+   * from "measured zero". They used to be hardcoded to 0, which made every
+   * unmeasured file read as a clean one.
+   */
+  mutants?: number;
+  killed?: number;
+  survived?: number;
 }
 
 export interface MutationBaseline {

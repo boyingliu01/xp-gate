@@ -438,8 +438,9 @@ async function runAllRunners(
   groups: Map<string, string[]>,
   timeoutMs: number,
   cwd: string
-): Promise<Record<string, number | null>> {
+): Promise<{ scores: Record<string, number | null>; counts: Record<string, MutantCounts> }> {
   const fileScores: Record<string, number | null> = {};
+  const counts: Record<string, MutantCounts> = {};
 
   for (const [, files] of Array.from(groups.entries())) {
     const ext = path.extname(files[0]);
@@ -455,10 +456,10 @@ async function runAllRunners(
     }
 
     const result = await runner.run({ files, timeoutMs, cwd });
-    applyMutationResult(result, files, fileScores);
+    applyMutationResult(result, files, fileScores, counts);
   }
 
-  return fileScores;
+  return { scores: fileScores, counts };
 }
 
 /**
@@ -481,6 +482,7 @@ function applyMutationResult(
   outcome: MutationRunOutcome,
   files: string[],
   scores: Record<string, number | null>,
+  counts: Record<string, MutantCounts>,
 ): void {
   if (outcome.timedOut || outcome.error || !outcome.report) {
     for (const f of files) scores[f] = null;
@@ -490,11 +492,26 @@ function applyMutationResult(
   if (outcome.report.files) {
     for (const [fileKey, fileReport] of Object.entries(outcome.report.files)) {
       scores[fileKey] = fileReport.mutationScore;
+      // #544: keep the outcome counts the reporter already gave us. Dropping
+      // them here is what forced buildMutationScores to invent zeros later.
+      counts[fileKey] = {
+        mutants: fileReport.nrOfMutants,
+        killed: fileReport.nrOfKilledMutants,
+        survived: fileReport.nrOfSurvivedMutants,
+      };
     }
     return;
   }
 
-  for (const f of files) scores[f] = outcome.report.mutationScore;
+  const totals: MutantCounts = {
+    mutants: outcome.report.nrOfMutants,
+    killed: outcome.report.nrOfKilledMutants,
+    survived: outcome.report.nrOfSurvivedMutants,
+  };
+  for (const f of files) {
+    scores[f] = outcome.report.mutationScore;
+    counts[f] = totals;
+  }
 }
 
 // ── Main gateway ──
@@ -514,10 +531,33 @@ function logThresholdDetails(thresholds: FileThreshold[], baseline: MutationBase
   }
 }
 
-function buildMutationScores(fileScores: Record<string, number>): Record<string, MutationScore> {
+/**
+ * Per-file mutant outcome counts, as reported by the runner. Absent fields mean
+ * "the runner did not say", which is different from a measured zero -- the whole
+ * point of #544 is that those two must not collapse into each other.
+ */
+export interface MutantCounts {
+  mutants?: number;
+  killed?: number;
+  survived?: number;
+}
+
+export function buildMutationScores(
+  fileScores: Record<string, number>,
+  counts: Record<string, MutantCounts> = {},
+): Record<string, MutationScore> {
   const scores: Record<string, MutationScore> = {};
   for (const [file, score] of Object.entries(fileScores)) {
-    scores[file] = { score, mutants: 0, killed: 0, survived: 0 };
+    const c = counts[file];
+    const entry: MutationScore = { score } as MutationScore;
+    // Only attach what the runner actually reported. Writing `survived: 0` for
+    // an unmeasured file is what made a skipped run look like a clean one.
+    if (c) {
+      if (c.mutants !== undefined) entry.mutants = c.mutants;
+      if (c.killed !== undefined) entry.killed = c.killed;
+      if (c.survived !== undefined) entry.survived = c.survived;
+    }
+    scores[file] = entry;
   }
   return scores;
 }
@@ -619,7 +659,8 @@ export async function runGateM(options: GateMOptions): Promise<GateMResult> {
   logThresholdDetails(thresholds, baseline);
 
   const groups = groupByRunner(sourceFiles);
-  const fileScoresNullable = await runAllRunners(groups, options.timeoutMs, process.cwd());
+  const { scores: fileScoresNullable, counts: mutantCounts } =
+    await runAllRunners(groups, options.timeoutMs, process.cwd());
 
   const { fileScores, timeoutFiles } = partitionScores(fileScoresNullable);
   if (timeoutFiles.length > 0) {
@@ -637,12 +678,12 @@ export async function runGateM(options: GateMOptions): Promise<GateMResult> {
   }
 
   if (evalResult.blocked) {
-    return buildResult('block', evaluableThresholds.length, buildMutationScores(fileScores), warnings, errors);
+    return buildResult('block', evaluableThresholds.length, buildMutationScores(fileScores, mutantCounts), warnings, errors);
   }
   if (evaluableThresholds.length === 0) {
     return buildResult('skip', 0, {}, warnings, errors);
   }
-  return buildResult('pass', evaluableThresholds.length, buildMutationScores(fileScores), warnings, errors);
+  return buildResult('pass', evaluableThresholds.length, buildMutationScores(fileScores, mutantCounts), warnings, errors);
 }
 
 interface PartitionedScores {

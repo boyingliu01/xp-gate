@@ -225,12 +225,16 @@ describe('update-baseline.ts - Mutation Baseline Update CLI', () => {
       const written = JSON.parse(
         (mockFs.default.writeFile as ReturnType<typeof vi.fn>).mock.calls[0][1] as string
       );
+      // #544: a new entry built from a score alone must NOT be seeded with
+      // mutants/killed/survived = 0. This assertion previously pinned those
+      // zeros as the expected behaviour, which made "nobody measured this file"
+      // indistinguishable from "measured, zero survivors" in every baseline
+      // written from the CLI. The fields are omitted instead.
       expect(written.scores['src/new.ts']).toEqual({
         score: 72.0,
-        mutants: 0,
-        killed: 0,
-        survived: 0
       });
+      expect(written.scores['src/new.ts'].mutants).toBeUndefined();
+      expect(written.scores['src/new.ts'].survived).toBeUndefined();
       // Old entry should still be present
       expect(written.scores['src/old.ts'].score).toBe(60.0);
     });
