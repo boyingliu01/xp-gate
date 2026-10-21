@@ -76,6 +76,11 @@ describe('hook mirror validation', () => {
     fs.mkdirSync(path.join(fixture, 'src/npm-package/principles'), { recursive: true });
     fs.writeFileSync(path.join(fixture, 'src/principles/sample.ts'), 'sample\n');
     fs.writeFileSync(path.join(fixture, 'src/npm-package/principles/sample.ts'), 'sample\n');
+    // Same for the published mutation module guard (#544 follow-up).
+    fs.mkdirSync(path.join(fixture, 'src/mutation'), { recursive: true });
+    fs.mkdirSync(path.join(fixture, 'src/npm-package/mutation'), { recursive: true });
+    fs.writeFileSync(path.join(fixture, 'src/mutation/gate-m.ts'), 'export const x = 1;\n');
+    fs.writeFileSync(path.join(fixture, 'src/npm-package/mutation/gate-m.ts'), 'export const x = 1;\n');
   });
 
   afterEach(() => fs.rmSync(fixture, { recursive: true, force: true }));
@@ -98,6 +103,9 @@ describe('hook mirror validation', () => {
     ['adapter content drift', () => fs.writeFileSync(path.join(fixture, 'src/npm-package/adapters/typescript/adapter.sh'), 'drift\n')],
     ['adapter added only to canonical', () => fs.writeFileSync(path.join(fixture, 'githooks/adapters/typescript/only-canonical.sh'), 'x\n')],
     ['principles content drift', () => fs.writeFileSync(path.join(fixture, 'src/npm-package/principles/sample.ts'), 'drift\n')],
+    // #544 follow-up: the published mutation module is guarded the same way.
+    ['mutation content drift', () => fs.writeFileSync(path.join(fixture, 'src/npm-package/mutation/gate-m.ts'), 'drift\n')],
+    ['mutation file added only to canonical', () => fs.writeFileSync(path.join(fixture, 'src/mutation/extra.ts'), 'x\n')],
   ])('rejects %s', (_name, arrange) => {
     arrange();
 
