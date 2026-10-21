@@ -102,7 +102,16 @@ STUB
 # Round 1 review (technical MC-01): an array element that begins with '-' is a
 # valid repo path (`git add -- ./-o.ts`) but semgrep reads it as an option, so a
 # single hostile or misnamed file could rewrite the scan it was supposed to run.
-# './' is the form no argument parser can misread.
+#
+# #543/#558 changed the SHAPE the security property is delivered in, not the
+# property itself: semgrep now gets a DIRECTORY target plus one
+# `--include=<basename>` per staged file. A root-level staged file has no
+# directory of its own, so #558 targets "." and the leading-dash name rides
+# purely as an `--include=` VALUE, where no argument parser can mistake it for
+# an option. This test previously asserted './-o.ts' appeared as a bare argv
+# entry, which #543/#558 made impossible to satisfy (#560) — it was red while
+# the gate was safe. It now pins the shipped form, still fail-closed: any
+# refactor that lets a filename reach argv as its own entry turns this red.
 @test "AC-490-04: a staged path starting with '-' reaches semgrep as a path, not an option" {
   write_argv_semgrep_stub
   echo "export const negative = 1;" > ./-o.ts
@@ -111,8 +120,15 @@ STUB
   run run_gate_with_argv_stub "$TEST_DIR/argv.txt"
   [ "$status" -eq 0 ]
   [[ "$output" == *"STATUS=PASS"* ]]
-  grep -qx './-o.ts' "$TEST_DIR/argv.txt"
+  # The leading-dash basename is delivered as an --include= VALUE ...
+  grep -qxF -- '--include=-o.ts' "$TEST_DIR/argv.txt"
+  # ... and a root-level file contributes the repo root as its target (#558).
+  grep -qxF -- '.' "$TEST_DIR/argv.txt"
+  # The security property: the hostile name is NEVER a standalone argv entry,
+  # in either spelling. This is the line that fails if the gate regresses to
+  # passing file paths directly.
   ! grep -qx -- '-o.ts' "$TEST_DIR/argv.txt"
+  ! grep -qx -- './-o.ts' "$TEST_DIR/argv.txt"
 }
 
 # git prints both of these names unquoted, so an unquoted array expansion would

@@ -52,13 +52,24 @@ export default defineConfig({
         'coverage/**',
         'compat/**',
       ],
+      // FLAT, not nested (#561). vitest 1.6.1 types this field as
+      // `Partial<Record<Threshold, number>>` — the `thresholds: { global: {...} }`
+      // shape is vitest 2.x. An unknown nested key is dropped WITHOUT a warning,
+      // so the previous shape turned this whole gate into a no-op: the repo sat
+      // at 60.08% lines against a declared 80% and every commit exited 0.
+      //
+      // The numbers are the measured floor, not the 80% target. Flipping the
+      // shape while still at 60% would have blocked every commit outright, which
+      // is why the enforcement was restored in this order: pin the behaviour
+      // (AC-COV-01/02), set a floor the tree actually clears, then ratchet up.
+      // Raise these — never lower them — as REQ-COV work lands. Values are
+      // whole numbers below the measured figure so ordinary fluctuation in a
+      // single run cannot produce a spurious block.
       thresholds: {
-        global: {
-          branches: 80,
-          functions: 80,
-          lines: 80,
-          statements: 80,
-        },
+        lines: 60,
+        statements: 60,
+        functions: 83,
+        branches: 79,
       },
     },
   },

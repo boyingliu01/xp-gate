@@ -760,7 +760,34 @@ specification:
           criteria: doctor delphi 在项目配置遮蔽全局配置且席位模型不同时输出 WARN（遮蔽提示），
             席位相同则静默；WARN 不影响退出码——有意的 per-project 覆盖是合法的
           test_type: unit
-  design_decisions:
+    # ============================================================
+    # REQ-562: 覆盖率门槛必须真正生效 —— 声明了阈值不等于执行了阈值。
+    # vitest.config.ts 曾以 vitest 2.x 的嵌套形状 thresholds.global 声明 80%，
+    # 而仓库锁定 vitest 1.6.1（其 coverage.d.ts 类型是扁平的
+    # Partial<Record<Threshold, number>>），未知嵌套键被静默忽略，于是
+    # 60.08% 的实测覆盖率对 80% 门槛长期 exit 0 —— AGENTS.md 宣称的
+    # "coverage <80% BLOCK" 从未触发过一次。来源：issue #561。
+    # ============================================================
+    - id: REQ-562
+      description: "覆盖率阈值的声明形状必须是被当前锁定 vitest 版本真正读取的形状；低于阈值的 --coverage 运行必须以非零退出码失败，不得静默放行"
+      priority: critical
+      acceptance_criteria:
+        - id: AC-COV-01
+          criteria: 不可达的行覆盖率阈值（如 --coverage.thresholds.lines=100）使 vitest run --coverage
+            以非零退出码失败，并输出 "does not meet ... threshold"；该用例是对照组——它证明
+            强制管道本身可用，从而使配置层失效可以被单独定位
+          test_type: unit
+        - id: AC-COV-02
+          criteria: vitest.config.ts 的 thresholds 块以扁平形状（lines/statements/functions/branches
+            直接为键）声明，不含被 vitest 1.6.1 静默忽略的嵌套 global 键
+          test_type: unit
+        - id: AC-COV-03
+          criteria: 受控对照——同一 fixture、同一组不可达阈值、同一实测覆盖率下，扁平形状的
+            --coverage 运行必须非零退出并被判定为 threshold violation，而嵌套 global 形状在同一条件下
+            静默 exit 0；两者唯一变量是配置形状，故缺陷可归因于形状本身而非其它因素
+          test_type: unit
+
+
     - id: DD-001
       decision: 走薄桥（方案 A）在 ctx.tools 注册三工具，而非独立 MCP server 或纯技能
       rationale: 与 opencode 插件 1:1 映射、DSH 原生 API 直接支持、工作量最小；符合 RFC「薄桥而非重写」结论
