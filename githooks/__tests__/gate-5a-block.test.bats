@@ -87,13 +87,37 @@ teardown() {
   rm -rf "$TEST_DIR"
 }
 
+# Run the fixture's own pre-commit hook and capture its exit status + output.
+#
+# Two constraints collide here:
+#   - fixture-hygiene FC-04: a fixture's `git commit` must not run the HOST hook
+#     chain (that is ~12 gates per commit on a machine with xp-gate installed,
+#     and makes suites look hung).
+#   - this suite's purpose: Gate 5a must actually execute and be observed.
+# `git commit --no-verify` satisfied the first and silently broke the second: it
+# disables the very hook under test, so every assertion failed no matter what
+# Gate 5a did. Invoking the fixture's hook directly satisfies both -- the host
+# chain is never reached, and the hook really runs.
+run_fixture_hook() {
+  # The hook reads `git diff --cached`, so it must run with the fixture repo as
+  # cwd -- invoking it from the wrong directory makes a staging check silently
+  # observe an empty index. Default arg is the main fixture, whose cwd already is
+  # that repo; the $FRESH fixtures pass their hook path and repo root explicitly.
+  local hook_path="${1:-.git/hooks/pre-commit}"
+  local repo_root="${2:-$PWD}"
+  local out
+  status=0
+  out=$(cd "$repo_root" && "$repo_root/$hook_path" 2>&1) || status=$?
+  output="$out"
+}
+
 # ── AC-TDD-001-01: New .ts file without test → BLOCK ─────────────────
 
 @test "new .ts file without test is BLOCKED" {
   mkdir -p src
   echo "export const x = 1;" > src/foo.ts
   git add src/foo.ts
-  run git commit -m "add foo"
+  run_fixture_hook
   [ "$status" -ne 0 ]
   [[ "$output" == *"BLOCKED"* ]]
 }
@@ -108,7 +132,7 @@ teardown() {
   # Gate 5 ("Tests FAILED") instead of proving Gate 5a lets the commit through.
   printf "import { expect, test } from 'vitest';\ntest('foo', () => { expect(1).toBe(1); });\n" > src/foo.test.ts
   git add src/foo.ts src/foo.test.ts
-  run git commit -m "add foo with test"
+  run_fixture_hook
   [ "$status" -eq 0 ]
 }
 
@@ -120,7 +144,7 @@ teardown() {
   git add src/foo.ts && git commit -q -m "add foo" --no-verify
   echo "export const y = 2;" >> src/foo.ts
   git add src/foo.ts
-  run git commit -m "modify foo"
+  run_fixture_hook
   [ "$status" -eq 0 ]
   [[ "$output" == *"WARNING"* ]]
 }
@@ -132,7 +156,7 @@ teardown() {
   echo "export {};" > src/index.ts
   echo "export type Foo = string;" > src/types.ts
   git add src/index.ts src/types.ts
-  run git commit -m "add exempt files"
+  run_fixture_hook
   [ "$status" -eq 0 ]
 }
 
@@ -142,7 +166,7 @@ teardown() {
   mkdir -p src
   echo "// @no-test-required: This is a configuration file that does not need tests" > src/config.ts
   git add src/config.ts
-  run git commit -m "add config"
+  run_fixture_hook
   [ "$status" -eq 0 ]
 }
 
@@ -152,7 +176,7 @@ teardown() {
   mkdir -p src
   echo "// @no-test-required: short" > src/config.ts
   git add src/config.ts
-  run git commit -m "add config"
+  run_fixture_hook
   [ "$status" -ne 0 ]
   [[ "$output" == *"BLOCKED"* ]]
 }
@@ -163,7 +187,7 @@ teardown() {
   mkdir -p src
   echo "// @no-test" > src/legacy.ts
   git add src/legacy.ts
-  run git commit -m "add legacy"
+  run_fixture_hook
   [ "$status" -eq 0 ]
 }
 
@@ -176,7 +200,7 @@ teardown() {
   git add src/foo.ts
   export SKIP_GATE_5A_BLOCK=1
   export SKIP_GATE_5A_BLOCK_REASON="testing escape valve"
-  run git commit -m "add foo with escape"
+  run_fixture_hook
   [ "$status" -eq 0 ]
   [[ "$output" == *"ESCAPE VALVE"* ]]
   [ -f ".xp-gate/reports/escape-valve-log.json" ]
@@ -244,7 +268,7 @@ export const placeholder = true;' > "$FRESH/src/placeholder.ts"
   export SKIP_GATE_5A_BLOCK=1
   export SKIP_VERSION_CHECK=1
   export PATH="$FRESH/bin:$PATH"
-  run git -C "$FRESH" commit -m "add foo"
+  run_fixture_hook .git/hooks/pre-commit "$FRESH"
   [ "$status" -ne 0 ]
   [[ "$output" == *"ESCAPE VALVE BLOCKED"* ]]
 
@@ -259,7 +283,7 @@ export const placeholder = true;' > "$FRESH/src/placeholder.ts"
   printf 'enabled: true\ngracePeriod: 10\n' > .tdd-adoption.yaml
   echo "export const x = 1;" > src/foo.ts
   git add .tdd-adoption.yaml src/foo.ts
-  run git commit -m "add foo with grace"
+  run_fixture_hook
   [ "$status" -eq 0 ]
   [[ "$output" == *"WARNING"* ]] || [[ "$output" == *"downgraded"* ]]
 }
@@ -270,7 +294,7 @@ export const placeholder = true;' > "$FRESH/src/placeholder.ts"
   mkdir -p src
   echo "export const App = () => <div/>;" > src/App.tsx
   git add src/App.tsx
-  run git commit -m "add App"
+  run_fixture_hook
   [ "$status" -ne 0 ]
   [[ "$output" == *"BLOCKED"* ]]
 }
@@ -291,7 +315,7 @@ exit 0
 MOCK
   chmod +x bin/ruff
   git add src/foo.py
-  run git commit -m "add foo.py"
+  run_fixture_hook
   [ "$status" -eq 0 ]
   [[ "$output" == *"WARNING"* ]]
 }
@@ -356,7 +380,7 @@ export const placeholder = true;' > "$FRESH/src/placeholder.ts"
   echo "declare module 'foo' {}" > "$FRESH/src/foo.d.ts"
   git -C "$FRESH" add src/foo.d.ts
   export PATH="$FRESH/bin:$PATH"
-  run git -C "$FRESH" commit -m "add declaration"
+  run_fixture_hook .git/hooks/pre-commit "$FRESH"
   [ "$status" -eq 0 ]
 
   rm -rf "$FRESH"
@@ -370,7 +394,7 @@ export const placeholder = true;' > "$FRESH/src/placeholder.ts"
   printf "import { expect, test } from 'vitest';\ntest('foo', () => { expect(1).toBe(1); });\n" > src/foo.test.ts
   echo "export const y = 2;" > src/bar.ts
   git add src/foo.ts src/foo.test.ts src/bar.ts
-  run git commit -m "add foo and bar"
+  run_fixture_hook
   [ "$status" -ne 0 ]
   [[ "$output" == *"BLOCKED"* ]]
   [[ "$output" == *"bar.ts"* ]]
