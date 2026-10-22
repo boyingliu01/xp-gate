@@ -1223,6 +1223,30 @@ specification:
           criteria: 存在真实失败时仍必须给出真实的低分（如 1 PASS 3 FAIL 为 2.5/10），不得因本次修复而掩盖失败
           test_type: unit
 
+    # ============================================================
+    # REQ-581: ESLint 必须与 .gitignore 对「生成物非源码」的判断保持一致。
+    # Stryker 会把 src/ 的副本放进 .stryker-tmp/sandbox-*/，而 ESLint 未忽略它。
+    # 实测（跑过变异测试的机器上）：
+    #     npx eslint . --max-warnings 0
+    #     ✖ 73 problems (64 errors, 9 warnings)
+    # 同一 commit 在 CI 只有 8 个 warning。64 个 error 全在 .stryker-tmp/sandbox-*/ 里，
+    # 而 .gitignore 已经排除了它（第 119 行），ESLint 配置没有。
+    # 后果比噪声更糟：一个只在跑过 Stryker 的机器上复现的 lint 失败，要么让人
+    # 去追不存在的错误，要么（更可能）教会大家「npm run lint 红了不算数」——
+    # 真实失败正是这样被放过去的。
+    # 同时清理掉 8 个既存 warning（两条失效的 eslint-disable、测试桩空方法注释）。
+    # ============================================================
+    - id: REQ-581
+      description: "ESLint 必须忽略 .stryker-tmp/.delphi-work 等 gitignored 生成目录，保证本地与 CI 的 lint 结果一致"
+      priority: high
+      acceptance_criteria:
+        - id: AC-581-01
+          criteria: .stryker-tmp/ 已被 .gitignore 排除时，也必须出现在 ESLint 的 ignores 列表中
+          test_type: unit
+        - id: AC-581-02
+          criteria: 新增忽略项不得导致既有忽略项（node_modules、dist、coverage）消失
+          test_type: unit
+
 
     # ============================================================
     # REQ-574: Gate MW 校验证据必须与 .delphi-config.json 的席位绑定。

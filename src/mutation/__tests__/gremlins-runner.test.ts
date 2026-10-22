@@ -106,7 +106,7 @@ describe('GremlinsRunner', () => {
 
   it('returns report=null (never throws) when the report lines are absent', async () => {
     let closeCb: ((code: number | null) => void) | undefined;
-    vi.mocked(spawn).mockReturnValue(mockChild({ stdout: () => {}, close: cb => { closeCb = cb; } }));
+    vi.mocked(spawn).mockReturnValue(mockChild({ stdout: () => { /* no output: the stub emits nothing on stdout */ }, close: cb => { closeCb = cb; } }));
 
     const runner = new GremlinsRunner();
     const promise = runner.run({ files: ['src/foo.py'], timeoutMs: 5000, cwd: '/tmp' });
@@ -136,7 +136,7 @@ describe('GremlinsRunner', () => {
 
   it('passes --gremlin-targets derived from the changed file directories', async () => {
     let closeCb: ((code: number | null) => void) | undefined;
-    vi.mocked(spawn).mockReturnValue(mockChild({ stdout: () => {}, close: cb => { closeCb = cb; } }));
+    vi.mocked(spawn).mockReturnValue(mockChild({ stdout: () => { /* no output: the stub emits nothing on stdout */ }, close: cb => { closeCb = cb; } }));
 
     const runner = new GremlinsRunner();
     const promise = runner.run({ files: ['src/foo/bar.py', 'src/baz.py'], timeoutMs: 5000, cwd: '/tmp' });
@@ -152,7 +152,7 @@ describe('GremlinsRunner', () => {
 
   it('reports timedOut when the child exceeds the deadline', async () => {
     let closeCb: ((code: number | null) => void) | undefined;
-    const child = mockChild({ stdout: () => {}, close: cb => { closeCb = cb; } });
+    const child = mockChild({ stdout: () => { /* no output: the stub emits nothing on stdout */ }, close: cb => { closeCb = cb; } });
     vi.mocked(spawn).mockReturnValue(child);
 
     const runner = new GremlinsRunner();

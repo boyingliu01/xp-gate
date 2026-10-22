@@ -31,6 +31,25 @@ export default [
     },
   },
   {
-    ignores: ["node_modules/", "dist/", "coverage/", "src/npm-package/coverage/", "eslint.config.js", "githooks/", ".github/"],
+    // #581: `.stryker-tmp/` holds Stryker's sandbox copies of `src/`. It is
+    // already gitignored (.gitignore:119) but was not ignored here, so any
+    // machine that had run mutation testing linted the copies too: 73 problems
+    // locally (64 errors, all inside the sandbox) versus 8 warnings in CI for
+    // the same commit. A lint result that depends on whether you ran Stryker is
+    // a result nobody can trust.
+    ignores: [
+      "node_modules/",
+      "dist/",
+      "coverage/",
+      "src/npm-package/coverage/",
+      ".stryker-tmp/",
+      // #581, same reasoning: Delphi review artifacts under `.delphi-work/` are
+      // gitignored working copies, not source. Leaving them in scope let a stray
+      // probe script add warnings that exist on one machine only.
+      ".delphi-work/",
+      "eslint.config.js",
+      "githooks/",
+      ".github/",
+    ],
   },
 ];
