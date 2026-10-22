@@ -275,9 +275,37 @@ run_java_adapter() {
   # mapping soft/report/legacy-unavailable to SKIP let unverified Java ride
   # to a fake PASS/10.0. Every GATE_1_STATUS assignment in the java branch
   # must be WARN (in the denominator, forbids an overall PASS).
-  local warn_hits skip_hits
-  warn_hits=$(grep -c 'GATE_1_STATUS="WARN"' "$REPO_ROOT/githooks/pre-commit")
-  skip_hits=$(grep -c 'GATE_1_STATUS="SKIP"' "$REPO_ROOT/githooks/pre-commit" || true)
-  [ "$warn_hits" -ge 3 ]
-  [ "$skip_hits" -eq 0 ]
+  #
+  # Scope: the JAVA branch only. The old form counted assignments across the
+  # WHOLE hook and demanded zero SKIPs, which is wrong on its own terms — Gate 1
+  # legitimately SKIPs for "no code files changed" and for a documentation-only
+  # project (both outside the java case arm, both correct). The invariant is
+  # about how the java adapter's exit codes are SCORED, so the check is confined
+  # to the text between the java case arm and the next case arm.
+  local block warn_hits skip_hits
+  block=$(awk '
+    /^[[:space:]]*java\)[[:space:]]*$/ { inside = 1; next }
+    inside && /^[[:space:]]*(kotlin|go|python|typescript|cpp|swift|dart|flutter|shell|powershell|objectivec|iac)\)[[:space:]]*$/ { exit }
+    inside { print }
+  ' "$REPO_ROOT/githooks/pre-commit")
+
+  [ -n "$block" ] || {
+    echo "could not locate the java case arm in pre-commit (extraction empty)"
+    return 1
+  }
+
+  warn_hits=$(printf '%s\n' "$block" | grep -c 'GATE_1_STATUS="WARN"' || true)
+  skip_hits=$(printf '%s\n' "$block" | grep -c 'GATE_1_STATUS="SKIP"' || true)
+  echo "java branch: WARN=$warn_hits SKIP=$skip_hits"
+
+  # At least the soft/report/legacy-unavailable paths must be WARN.
+  [ "$warn_hits" -ge 3 ] || {
+    echo "expected >= 3 WARN scorings in the java branch, got $warn_hits"
+    return 1
+  }
+  [ "$skip_hits" -eq 0 ] || {
+    echo "the java branch scores $skip_hits verdict(s) as SKIP; SKIP is outside"
+    echo "the scoring denominator, so unverified Java would read as a clean PASS"
+    return 1
+  }
 }
