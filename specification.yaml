@@ -1554,6 +1554,26 @@ specification:
           criteria: 断言 Java 工具行为的用例必须 stage 至少一个真实 .java 源文件
           test_type: unit
 
+    # ============================================================
+    # REQ-594: 执行真实 hook 的 CI job 必须安装 fail-closed 门禁所需的工具。
+    # Gate 8（密钥扫描）自 #499 起是 fail-closed：gitleaks 缺失即 BLOCK 并退出——
+    # 这是正确行为（跑不起来的安全门禁不能报成功）。但几乎所有 .bats 套件都会在临时
+    # git 仓库里运行真实 hook，于是它们停在 Gate 8，Gate 9–12 的断言永远不成立。
+    # Gate 5b 首次执行的 CI 日志里，changed-file-matcher 用例 1 的输出终止于：
+    #     ❌ BLOCKED - gitleaks not installed (fail-closed, #499).
+    # 而断言要的那行 SAST 从未打印。把 gitleaks 从 PATH 移除后在本地复现：
+    #     有 gitleaks：3/3 通过
+    #     无 gitleaks：1/3 通过 —— 恰好就是 CI 失败的那两个用例
+    # 结论：断言本身没错，是 runner 执行不到被断言的代码路径。
+    # ============================================================
+    - id: REQ-594
+      description: "运行真实 hook 的 CI job 必须安装 fail-closed 门禁的工具，否则 BATS 只会测到先 BLOCK 的那道门禁"
+      priority: high
+      acceptance_criteria:
+        - id: AC-594-01
+          criteria: 运行 npx bats 的 job 必须在同一个 job 内、且在 BATS 之前安装 gitleaks
+          test_type: unit
+
 
     # ============================================================
     # REQ-574: Gate MW 校验证据必须与 .delphi-config.json 的席位绑定。
