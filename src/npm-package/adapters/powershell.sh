@@ -81,6 +81,11 @@ _find_powershell_files() {
     local entry
     while IFS= read -r entry; do
       entry="${entry%$'\r'}"
+      # #578: strip a UTF-8 BOM before anything else. PowerShell 5.1's
+      # `Set-Content -Encoding UTF8` writes one, and it glues itself to the first
+      # line -- so the first directory name would silently never match, and a
+      # leading '#' comment would stop looking like a comment.
+      entry="${entry#$'\xEF\xBB\xBF'}"
       # Strip surrounding whitespace, then the ./ prefix and trailing / a repo
       # may reasonably write; -name matches a bare directory name.
       entry="${entry#"${entry%%[![:space:]]*}"}"
@@ -204,6 +209,12 @@ run_static_analysis() {
       local declared=0
       while IFS= read -r target_line; do
         target_line="${target_line%$'\r'}"
+        # #578: a UTF-8 BOM (PowerShell 5.1's `Set-Content -Encoding UTF8` writes
+        # one) glues itself to the FIRST line. On a path that manufactures a
+        # nonexistent entry -- and since #576 that returns 3, so a perfectly valid
+        # scope file would fail closed on every commit. On the '#' header it turns
+        # a comment into a phantom path. Strip it before classifying.
+        target_line="${target_line#$'\xEF\xBB\xBF'}"
         # Strip surrounding whitespace before classifying: a line of spaces is
         # not a path, and `case` alone would treat it as one — measured, a
         # whitespace-only line became an "analysis path not found" entry.
