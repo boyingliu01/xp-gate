@@ -596,6 +596,23 @@ jobs:
             echo "✅ Gate 5: Tests passed and coverage threshold met"
           fi
 
+      # Gate 8 is fail-closed since #499: when gitleaks is absent the pre-commit
+      # hook BLOCKS the commit. Most .bats suites run the REAL hook against a
+      # throwaway git repo, so without gitleaks they never get past Gate 8 and
+      # every later-gate assertion fails for a reason unrelated to the code under
+      # test. Measured on the first Gate 5b run:
+      #     ❌ BLOCKED - gitleaks not installed (fail-closed, #499).
+      # followed by no Gate 9/10/11/12 output at all.
+      #
+      # The release tarball is fetched directly with the version PINNED (same
+      # rationale as cross-platform-ci.yml: reproducible scans; gitleaks' own
+      # install script is gone).
+      - name: 'Install gitleaks (Gate 8 is fail-closed)'
+        run: |
+          curl -sSfL https://github.com/gitleaks/gitleaks/releases/download/v8.30.1/gitleaks_8.30.1_linux_x64.tar.gz \
+            | tar -xz -C /usr/local/bin gitleaks
+          gitleaks version
+
       # Gate 5b: BATS hook behavior contracts (#484)
       # The .bats suites are the executable contracts of the gate scripts
       # (exit codes, verdict JSON, anti-bypass properties). Before #484 they
