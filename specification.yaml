@@ -1152,6 +1152,29 @@ specification:
           criteria: 既有 #538 条目（wrc-drill、.delphi-work、node_modules 等）仍被剪除，新增条目不得导致回退
           test_type: unit
 
+    # ============================================================
+    # REQ-578: 两个声明文件必须剥离 UTF-8 BOM。
+    # 本项目的声明文件在 Windows 上编辑，而 PowerShell 5.1 的
+    # `Set-Content -Encoding UTF8` 会写 BOM。首行于是以 EF BB BF 开头——编辑器里
+    # 看不见，字节比较里到处都在。
+    # 对 .xp-gate-powershell-analysis-paths 这不是美观问题：BOM 粘在第一个条目上，
+    #   <BOM>src/product 变成一个不存在的路径 -> 报告 analysis-path-missing
+    #   -> 且自 #576 起返回 3 -> 一个完全合法的作用域声明让它之后每次 PowerShell
+    #   提交都 fail-closed。用户看到"产品代码可能逃出了门禁"，而这个文件唯一的
+    #   罪过是它的字节序标记。
+    # '#' 头注释同理：BOM 在 '#' 前面，字节比较就不再认为它是注释，注释变成幽灵路径。
+    # ============================================================
+    - id: REQ-578
+      description: "作用域与剪枝声明文件必须剥离 UTF-8 BOM，避免首行条目被当成不存在的路径"
+      priority: high
+      acceptance_criteria:
+        - id: AC-578-01
+          criteria: 首行带 BOM 的作用域条目仍被正确识别，不得被报成 analysis-path-missing，也不得因此返回 3
+          test_type: unit
+        - id: AC-578-02
+          criteria: BOM 位于 '#' 头注释前时，该行仍被当作注释，不得变成幽灵路径
+          test_type: unit
+
 
     # ============================================================
     # REQ-574: Gate MW 校验证据必须与 .delphi-config.json 的席位绑定。
