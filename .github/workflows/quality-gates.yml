@@ -238,6 +238,21 @@ jobs:
             npm --prefix plugins/dsh install --no-audit --no-fund
           fi
 
+          # #586: `plugins/dsh/skills/` is a PREPACK artifact — gitignored
+          # (.gitignore:150) and populated from the repo's `skills/` by
+          # plugins/dsh/scripts/prepack.cjs on `npm pack`/`npm publish`. A fresh
+          # checkout has no such directory, so the plugin's bundled-skill tests
+          # failed in CI with:
+          #     plugins/dsh/skills/admin-template-guidelines/SKILL.md: cannot read
+          #     file (ENOENT ...)
+          # Generate it here so the tests verify the same artifact that ships,
+          # instead of asserting over a directory that only exists on machines
+          # where someone happened to pack the plugin.
+          if [[ -f "plugins/dsh/scripts/prepack.cjs" ]]; then
+            echo "Bundling plugins/dsh skills (prepack artifact, gitignored)..."
+            node plugins/dsh/scripts/prepack.cjs
+          fi
+
       # Gate 1: Code Quality (Static Analysis + Linting)
       - name: 'Gate 1: Code Quality (Static Analysis + Linting)'
         run: |
