@@ -218,6 +218,26 @@ jobs:
             npm ci
           fi
 
+          # #585: `plugins/dsh/` is a SEPARATE npm package with its own dependency
+          # tree (@deepseek-ai/dsh-tools, cordis, dsh-shell, dsh-llm). The root
+          # package.json declares no `workspaces`, so `npm ci` at the root never
+          # descends into it. But `vitest.config.ts` deliberately keeps
+          # `plugins/dsh/` in the collected set (#569) — those 10 test files are
+          # the plugin's only protection — and they import those packages.
+          #
+          # A developer who once ran `npm install` inside `plugins/dsh` has its
+          # node_modules and sees green; CI only ever ran root `npm ci` and got:
+          #     Error: Failed to load url @deepseek-ai/dsh-tools
+          #     Test Files  7 failed | 188 passed
+          #
+          # `npm install`, not `npm ci`: plugins/dsh/package-lock.json is gitignored
+          # (.gitignore:152), so it does not exist in a fresh checkout and `npm ci`
+          # would abort with "can only install with an existing package-lock.json".
+          if [[ -f "plugins/dsh/package.json" ]]; then
+            echo "Installing plugins/dsh dependencies (sub-package, not covered by root npm ci)..."
+            npm --prefix plugins/dsh install --no-audit --no-fund
+          fi
+
       # Gate 1: Code Quality (Static Analysis + Linting)
       - name: 'Gate 1: Code Quality (Static Analysis + Linting)'
         run: |

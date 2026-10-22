@@ -1321,6 +1321,31 @@ specification:
           criteria: 运行 Gate 3 的 job 必须安装该固定版本（字面量或引用 .lizard-version 变量），不得使用未钉版本的 pip install lizard
           test_type: unit
 
+    # ============================================================
+    # REQ-585: vitest 收集的子包，CI 必须安装它的依赖。
+    # vitest.config.ts 有意保留 plugins/dsh/（#569）：它是 DSH 插件的规范源，10 个测试文件
+    # 是它唯一的保护（镜像侧被排除）。但 plugins/dsh 是**独立 npm 包**，有自己的
+    # package.json 与依赖树（@deepseek-ai/dsh-tools、cordis、dsh-shell、dsh-llm）。
+    # 根 package.json 没有 workspaces，所以根部 npm ci 永远不会进入它、也不会装这些包。
+    # 曾在 plugins/dsh 里跑过 npm install 的开发者有 node_modules 看到全绿；CI 只跑根部
+    # npm ci，于是：
+    #     FAIL plugins/dsh/src/gate-runner.test.ts
+    #     Error: Failed to load url @deepseek-ai/dsh-tools ... Does the file exist?
+    #     Test Files 7 failed | 188 passed
+    # 这正是「在我机器上是好的」：测试在装了依赖的机器上过、在没装的机器上失败，而决定
+    # 代码能否发布的正是失败的那一边。
+    # ============================================================
+    - id: REQ-585
+      description: "根 vitest 收集的独立子包 plugins/dsh，CI 必须一并安装其依赖"
+      priority: high
+      acceptance_criteria:
+        - id: AC-585-01
+          criteria: plugins/dsh 作为独立包拥有 @deepseek-ai/* 依赖，且根 vitest 确实收集该目录（两者同时成立才构成缺陷前提）
+          test_type: unit
+        - id: AC-585-02
+          criteria: 根 package.json 未声明 workspaces 时，CI workflow 必须包含安装 plugins/dsh 依赖的步骤
+          test_type: unit
+
 
     # ============================================================
     # REQ-574: Gate MW 校验证据必须与 .delphi-config.json 的席位绑定。
