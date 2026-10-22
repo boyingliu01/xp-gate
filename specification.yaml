@@ -1645,6 +1645,29 @@ specification:
           criteria: python 发射器不得被 `|| true` 整体包裹，失败必须告警
           test_type: unit
 
+    # ============================================================
+    # REQ-598: tag-push 的 fixture 必须同时具备「非受保护分支」和「远程 main 基线」。
+    # tag-push-gate-mw.test.bats 需要两个前提才能建模它自己的主题，却一个都没有，
+    # 于是 7 个用例里 3 个因 fixture 原因通过、4 个因 fixture 原因失败（ok=3/7）：
+    #   - fixture 用 `git init -b main`，而 Gate MW 在 main/master 上整体跳过：
+    #         ℹ️  Gate MW skipped (pushing to main — pre-reviewed via branch walkthrough)
+    #     那 4 个「应拦截」用例断言的是一条 hook 从未进入的代码路径。
+    #   - 把分支改名为 feature 后那 4 个通过了，但另外 3 个挂了，因为「已发布」由
+    #         git merge-base --is-ancestor <tag-commit> origin/main
+    #     判定，只有 feature 的远程没有 origin/main（ok=4/7）。
+    # 两半都是承重的。fixture 现在保持 feature 分支名，并显式把基线发布到 refs/heads/main。
+    # ============================================================
+    - id: REQ-598
+      description: "tag-push 测试的 fixture 必须同时避开受保护分支名并提供 origin/main 基线"
+      priority: high
+      acceptance_criteria:
+        - id: AC-598-01
+          criteria: fixture 不得用 main/master 初始化（否则 Gate MW 被整体跳过）
+          test_type: unit
+        - id: AC-598-02
+          criteria: fixture 必须创建 refs/heads/main 远程基线（「已发布」判定依赖它）
+          test_type: unit
+
 
     # ============================================================
     # REQ-574: Gate MW 校验证据必须与 .delphi-config.json 的席位绑定。
