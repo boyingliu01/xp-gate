@@ -1574,6 +1574,25 @@ specification:
           criteria: 运行 npx bats 的 job 必须在同一个 job 内、且在 BATS 之前安装 gitleaks
           test_type: unit
 
+    # ============================================================
+    # REQ-595: 测试必须断言不变量，而不是断言实现的具体写法。
+    # gate-9-timing-unit.bats 里 Issue #462 的用例硬性要求 Gate 11 两端都是 `date +%s`：
+    #     [[ "$start_line" == *'date +%s'* ]]
+    #     [[ "$end_line"   == *'date +%s'* ]]
+    # 而 Gate 11 早已改用毫秒时钟（gate_start_ms / now_ms），于是断言在当前正确实现上
+    # 失败（CI 用例 246）。更讽刺的是同一文件上方的用例注释就写着：
+    #     "The invariant is *pairing*, not 'never use date +%s'"
+    # 钉住旧写法的用例与自己正上方的说明互相矛盾。
+    # #462 真正的不变量是「两端使用同一时钟单位」——混用秒/毫秒正是它修掉的负数时长 bug。
+    # ============================================================
+    - id: REQ-595
+      description: "计时门禁测试必须断言两端同单位的配对不变量，而非某个具体时钟表达式"
+      priority: high
+      acceptance_criteria:
+        - id: AC-595-01
+          criteria: Gate 11 计时用例必须断言两端同属毫秒时钟，且不得硬性要求 date +%s
+          test_type: unit
+
 
     # ============================================================
     # REQ-574: Gate MW 校验证据必须与 .delphi-config.json 的席位绑定。

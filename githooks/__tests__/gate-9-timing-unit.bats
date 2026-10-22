@@ -87,12 +87,43 @@ PRE_COMMIT="$BATS_TEST_DIRNAME/../pre-commit"
   [ "$end_unit" = "gate_start_ms" ]
 }
 
-@test "Issue #462: Gate 11 keeps using date +%s on both ends (internal consistency)" {
-  # Documents that a seconds-based gate is fine as long as units pair up.
-  local start_line end_line
+@test "Issue #462: Gate 11's two ends use the same clock unit" {
+  # #595: this case used to hard-require `date +%s` on both ends:
+  #     [[ "$start_line" == *'date +%s'* ]]
+  #     [[ "$end_line"   == *'date +%s'* ]]
+  # Gate 11 has since moved to the millisecond helpers (gate_start_ms / now_ms),
+  # so the assertion failed on the CURRENT correct implementation — CI case 246.
+  #
+  # The #462 invariant was never "use date +%s". The sibling case above says so
+  # explicitly: "The invariant is *pairing*, not 'never use date +%s'". The test
+  # that pinned the old spelling contradicted the comment right above it.
+  #
+  # So assert the invariant: both ends resolve through the SAME clock.
+  local start_line end_line start_unit end_unit
   start_line=$(grep -n 'GATE_11_START=' "$PRE_COMMIT" | head -n1)
   end_line=$(grep -n 'GATE_11_END=' "$PRE_COMMIT" | head -n1)
 
-  [[ "$start_line" == *'date +%s'* ]]
-  [[ "$end_line" == *'date +%s'* ]]
+  # Both ends must exist — a missing pair is the bug class, not a pass.
+  [ -n "$start_line" ]
+  [ -n "$end_line" ]
+
+  start_unit=$(printf '%s\n' "$start_line" | grep -oE 'gate_start_ms|now_ms|date \+%s' | head -n1)
+  end_unit=$(printf '%s\n' "$end_line" | grep -oE 'gate_start_ms|now_ms|date \+%s' | head -n1)
+
+  echo "start_unit=$start_unit end_unit=$end_unit"
+
+  # Neither may be seconds: a seconds end subtracted from a ms start is exactly
+  # the negative-delta bug #462 fixed.
+  [ "$start_unit" != "date +%s" ]
+  [ "$end_unit" != "date +%s" ]
+
+  # And both must come from the millisecond clock — pairing in the SAME unit.
+  case "$start_unit" in
+    gate_start_ms|now_ms) : ;;
+    *) echo "unexpected GATE_11 start clock: $start_unit"; return 1 ;;
+  esac
+  case "$end_unit" in
+    gate_start_ms|now_ms) : ;;
+    *) echo "unexpected GATE_11 end clock: $end_unit"; return 1 ;;
+  esac
 }
