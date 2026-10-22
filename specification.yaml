@@ -1616,6 +1616,35 @@ specification:
           criteria: hook fixture 必须复制 hook-module-resolution.sh 与 adapters/ 目录
           test_type: unit
 
+    # ============================================================
+    # REQ-597: pre-push 的 JSON 审计日志必须真的被写出来。
+    # 它从来没写成功过（任何平台），而负责写它的代码静默失败。两个独立缺陷，互相掩盖：
+    #   1. Python 发射器是 `<<PY` heredoc，却由 EXIT trap 调用；而 trap 运行时，
+    #      上面的 `while read ...` 循环早已把 stdin 消费完。heredoc 从 stdin 读，
+    #      于是 `python - <<PY` 什么也没收到，bash 把脚本体当命令执行：
+    #          .git/hooks/pre-push: line 92: None: command not found
+    #          .git/hooks/pre-push: line 92: verdict: command not found
+    #   2. `python3 - <<PY 2>/dev/null || true` 把一切吞掉。Windows Git Bash 上
+    #      python3 是 Microsoft Store 存根（退出码 49、无输出），python 才是真的 3.12；
+    #      于是命令失败、stderr 进 /dev/null、`|| true` 返回成功，日志永远没有内容。
+    # 净效果：推送留下的唯一审计记录缺失，而门禁看起来「健康」，因为 `|| true` 保证了 0 退出。
+    # 修复：探测真正能回答 --version 的解释器（python3 → python → py）；把脚本写到临时
+    # 文件使 stdin 无关；失败时明确告警而不是掩盖。
+    # ============================================================
+    - id: REQ-597
+      description: "pre-push 必须写出可解析的 JSON 审计日志，且解释器缺失或失败必须可见"
+      priority: critical
+      acceptance_criteria:
+        - id: AC-597-01
+          criteria: 真实推送必须生成可解析的 .xp-gate/reports/pre-push/*.json
+          test_type: unit
+        - id: AC-597-02
+          criteria: EXIT trap 中不得用 heredoc 喂 python（stdin 已被消费），必须写临时文件
+          test_type: unit
+        - id: AC-597-03
+          criteria: python 发射器不得被 `|| true` 整体包裹，失败必须告警
+          test_type: unit
+
 
     # ============================================================
     # REQ-574: Gate MW 校验证据必须与 .delphi-config.json 的席位绑定。
