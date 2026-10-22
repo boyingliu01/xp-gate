@@ -34,6 +34,22 @@ if command -v semgrep >/dev/null 2>&1; then
   SEMGREP_CMD="semgrep"
 elif [ -f "$HOME/.local/bin/semgrep" ]; then
   SEMGREP_CMD="$HOME/.local/bin/semgrep"
+else
+  # #572: Windows pip --user installs land in
+  # %APPDATA%\Python\<ver>\Scripts\semgrep.exe, which git-bash does NOT inherit
+  # on PATH -- so a working, installed semgrep read as "not installed" and this
+  # SAST gate degraded to WARN on the platform the project is developed on.
+  # The glob is expanded by the shell (one candidate per Python version) and
+  # probed by EXIT CODE, never by parsing `semgrep --version` output: a broken
+  # install can still print a plausible version string, and the probe must
+  # distinguish "runnable" from "present".
+  for candidate in "$HOME"/AppData/Roaming/Python/*/Scripts/semgrep.exe; do
+    [ -f "$candidate" ] || continue
+    if "$candidate" --version >/dev/null 2>&1; then
+      SEMGREP_CMD="$candidate"
+      break
+    fi
+  done
 fi
 
 if [ -z "$SEMGREP_CMD" ]; then

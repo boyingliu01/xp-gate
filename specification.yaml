@@ -1023,6 +1023,30 @@ specification:
           criteria: 引擎存在但运行失败时必须发出 XP_G1_REASON（断言协议本身，不断言具体文案），确保作用域改造没有让失败退化成静默通过
           test_type: unit
 
+    # ============================================================
+    # REQ-572: Gate 10 必须能找到 Windows pip --user 安装的 semgrep。
+    # gate-10.sh 只用 `command -v semgrep` 加一个 Unix 专用回退
+    # ($HOME/.local/bin/semgrep)。Windows 上 `pip install --user semgrep` 落在
+    # %APPDATA%\Python\<ver>\Scripts\semgrep.exe，git-bash 不继承该 PATH 项，
+    # 于是装好且可用的 semgrep 被判为"未安装"，Gate 10 降级为 WARN——而这正是
+    # 本项目的开发平台。Gate 10 是 SAST 门禁：WARN 虽好过假 PASS，但永不阻断，
+    # 所以"找不到工具"就是 #499 那个洞的轻一档版本。该探测只存在于未合并分支
+    # fix/powershell-gates-fail-closed。
+    # ============================================================
+    - id: REQ-572
+      description: "Gate 10 检测 semgrep 时必须覆盖 Windows pip --user 的 APPDATA 安装路径，且以可执行为准"
+      priority: high
+      acceptance_criteria:
+        - id: AC-572-01
+          criteria: 仅当 APPDATA/Roaming/Python/<ver>/Scripts/semgrep.exe 存在且可执行时，必须被检测为 semgrep 命令
+          test_type: unit
+        - id: AC-572-02
+          criteria: 该路径存在但执行返回非零时不得被采纳为可用 semgrep（探测按退出码，不按是否存在）
+          test_type: unit
+        - id: AC-572-03
+          criteria: 任何位置都没有 semgrep 时检测结果保持为空，Gate 10 仍降级为 WARN 而非 PASS
+          test_type: unit
+
 
     - id: DD-001
       decision: 走薄桥（方案 A）在 ctx.tools 注册三工具，而非独立 MCP server 或纯技能
