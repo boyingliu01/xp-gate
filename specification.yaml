@@ -1296,6 +1296,31 @@ specification:
           criteria: lizard 必须安装在「运行 Gate 3 的那个 job」内；装在其它 job 等于没装，因为 GitHub Actions 的 job 之间不共享文件系统
           test_type: unit
 
+    # ============================================================
+    # REQ-584: Gate 3 的分析器版本必须固定。
+    # .ccn-baseline.json 以 `file::function` 为键、CCN 为值，所以「检查基线的分析器」
+    # 必须就是「生成基线的分析器」。此前没有钉版本，CI 与开发者静默跑了不同版本。
+    # 同一文件、同一 commit 实测差异：
+    #     lizard 1.21.3: findBodyBrace@64-191 CCN=69       （一个大函数）
+    #     lizard 1.24.2: findBodyBrace@64-90 CCN=8
+    #                    findDeclarationBrace@110-139 CCN=18  ← 1.21.3 看不见
+    #                    maskLiterals@242-329 CCN=36          ← 1.21.3 看不见
+    # 1.24.2 能单独识别 1.21.3 会吞进父函数的嵌套函数。两者都不算错，但「什么是一个函数」
+    # 的判断不同。于是拿 1.21.3 生成的基线去验收 1.24.2，所有新出现的函数都被报成
+    # 「new function over block threshold」，门禁吐出 40+ 条 BLOCK 描述的是分析器而不是代码。
+    # 未钉版本的分析器把复杂度棘轮变成了随机数生成器——每次 pip 解析到新版本就重新掷一次。
+    # ============================================================
+    - id: REQ-584
+      description: "Gate 3 的 lizard 版本必须固定，且必须与生成 .ccn-baseline.json 的版本一致"
+      priority: critical
+      acceptance_criteria:
+        - id: AC-584-01
+          criteria: 仓库必须以 .lizard-version 记录生成基线所用的 lizard 精确版本号
+          test_type: unit
+        - id: AC-584-02
+          criteria: 运行 Gate 3 的 job 必须安装该固定版本（字面量或引用 .lizard-version 变量），不得使用未钉版本的 pip install lizard
+          test_type: unit
+
 
     # ============================================================
     # REQ-574: Gate MW 校验证据必须与 .delphi-config.json 的席位绑定。

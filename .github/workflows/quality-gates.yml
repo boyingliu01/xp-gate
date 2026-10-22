@@ -328,14 +328,33 @@ jobs:
 
       # #583: lizard must be installed HERE, in the job that runs Gate 3.
       # Installing it in `setup` does nothing for this job — GitHub Actions jobs
-      # get separate filesystems, so `pip install lizard` in setup reported
-      # "Successfully installed lizard-1.24.2" while Gate 3 in this job still hit
-      # "❌ lizard is not installed". The install has to live next to the check.
+      # get separate filesystems.
+      #
+      # #584: the version is PINNED to .lizard-version. `.ccn-baseline.json` is
+      # keyed by `file::function` and valued by CCN, so the analyzer that checks it
+      # must be the analyzer that built it. Different lizard releases disagree about
+      # what a "function" is: on src/principles/adapters/typescript.ts, 1.21.3 sees
+      # one `findBodyBrace@64-191 CCN=69`, while 1.24.2 sees `findBodyBrace@64-90
+      # CCN=8` plus `findDeclarationBrace`, `maskLiterals@242-329 CCN=36` and others
+      # that 1.21.3 swallows into their parent. Against a 1.21.3 baseline, 1.24.2
+      # reports 40+ BLOCKs for functions the ratchet has never heard of.
       - name: 'Install Gate 3 analyzer (lizard)'
         run: |
-          echo "Installing lizard for Gate 3 (cyclomatic complexity)..."
-          pip install lizard
-          lizard --version
+          PINNED=$(tr -d ' \t\r\n' < .lizard-version)
+          if [ -z "$PINNED" ]; then
+            echo "❌ .lizard-version is missing or empty — Gate 3's baseline has no declared analyzer version."
+            echo "An unpinned analyzer re-rolls every complexity verdict whenever pip resolves a new release."
+            exit 1
+          fi
+          echo "Installing lizard==$PINNED for Gate 3 (pinned by .lizard-version)..."
+          pip install "lizard==$PINNED"
+          INSTALLED=$(lizard --version)
+          echo "lizard --version -> $INSTALLED"
+          if [ "$INSTALLED" != "$PINNED" ]; then
+            echo "❌ installed lizard $INSTALLED does not match the pinned $PINNED."
+            echo "Gate 3 would grade code against a baseline built by a different analyzer."
+            exit 1
+          fi
 
       # Gate 3: Cyclomatic Complexity
       - name: 'Gate 3: Cyclomatic Complexity Check'
