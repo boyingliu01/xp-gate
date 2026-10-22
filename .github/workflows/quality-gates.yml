@@ -606,7 +606,20 @@ jobs:
         run: |
           if compgen -G "githooks/__tests__/*.bats" > /dev/null; then
             echo "Running BATS suites (githooks/__tests__)..."
-            npx bats githooks/__tests__/
+            # #591: `--print-output-on-failure` is not a convenience.
+            #
+            # This gate first executed on 2026-10-22 (203 commits after #484 wired
+            # it in) and reported 67 failures. Without this flag a failing case
+            # shows only the line that failed, e.g.
+            #     `[[ "$output" =~ "No code files changed, skipping SAST scan" ]]' failed
+            # with no output to say WHAT the hook actually printed — and those cases
+            # pass locally, so the evidence existed only inside the CI runner and
+            # was thrown away. The result is an unfalsifiable failure: you cannot
+            # tell "the hook changed" from "this runner differs".
+            #
+            # The same applies to a passing-then-flaky case: the printed output is
+            # the only artifact.
+            npx bats --print-output-on-failure githooks/__tests__/
             echo "✅ Gate 5b: BATS hook behavior contracts passed"
           else
             echo "ℹ️ No .bats suites found — skipping Gate 5b"
