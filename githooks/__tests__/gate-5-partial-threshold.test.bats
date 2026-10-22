@@ -182,9 +182,26 @@ AssertionError: expected 1 to be 2' 'changed test files'
   # A library nobody sources leaves the hook with `handle_test_failure: command
   # not found`, which the `|| exit 1` callers would turn into a block on every
   # commit -- fail-closed, but not a working gate.
-  run grep -c 'source "${AUDIT_SCRIPT_DIR}/lib/test-failure.sh"' "$HOOK"
-  [ "$status" -eq 0 ]
-  [ "$output" -eq 1 ]
+  #
+  # The load goes through the guarded `source_gate_lib` wrapper, so matching the
+  # literal `source "${AUDIT_SCRIPT_DIR}/lib/test-failure.sh"` made this red on
+  # correct code. What matters is that the hook loads lib/test-failure.sh from
+  # AUDIT_SCRIPT_DIR, and that the handler it defines is really in that library
+  # (otherwise the grep could pass on an unrelated mention).
+  run grep -cE '^[[:space:]]*source_gate_lib "\$\{AUDIT_SCRIPT_DIR\}/lib/test-failure\.sh"' "$HOOK"
+  [ "$status" -eq 0 ] || {
+    echo "pre-commit no longer loads lib/test-failure.sh from AUDIT_SCRIPT_DIR"
+    return 1
+  }
+  [ "$output" -eq 1 ] || {
+    echo "expected exactly one load of lib/test-failure.sh, got $output"
+    return 1
+  }
+  run grep -c '^handle_test_failure()' "$LIB"
+  [ "$status" -eq 0 ] || {
+    echo "handle_test_failure is not defined in $LIB"
+    return 1
+  }
 }
 
 @test "#473 anti-vacuity: every vitest Gate 5 branch still funnels through the handler" {
