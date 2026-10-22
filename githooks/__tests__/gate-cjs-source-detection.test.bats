@@ -99,12 +99,26 @@ MOCK
   cp "$SOURCE_GITHOOKS/adapter-common.sh" .git/hooks/adapter-common.sh 2>/dev/null || true
   cp "$SOURCE_GITHOOKS/hook-module-resolution.sh" .git/hooks/hook-module-resolution.sh 2>/dev/null || true
   mkdir -p .git/hooks/lib
-  cp "$SOURCE_GITHOOKS/lib/now-ms.sh" .git/hooks/lib/now-ms.sh 2>/dev/null || true
+  # The ENTIRE lib/ tree: pre-commit sources ten helpers from it (#599). With
+  # only now-ms.sh copied, the hook died before reaching Gate 5c:
+  #     FATAL: cannot load .../lib/audit-sanitize.sh (missing)
+  # which surfaced as `[[ "$output" =~ "Gate 5c" ]]` failing — the gate looked
+  # broken when the fixture simply could not start the hook.
+  cp -R "$SOURCE_GITHOOKS/lib/." .git/hooks/lib/ 2>/dev/null || true
+  mkdir -p .git/hooks/adapters
+  cp -R "$SOURCE_GITHOOKS/adapters/." .git/hooks/adapters/ 2>/dev/null || true
 
   # Docs/config only: the setup commit must not look like a code change, otherwise
   # Gate 5 resolves vitest from the ambient PATH and blocks the fixture itself.
   echo "init" > README.md
   echo "ignore: []" > .archlint.yaml
+  # #599: a project marker, or `detect_project_lang` reports an unknown language
+  # and the hook takes the documentation-only path:
+  #     if [ "$PROJECT_LANG" = "documentation-only" ] || [ "$DOCS_ONLY_COMMIT" = true ]; then
+  # That guard wraps ALL of Gate 5, including Gate 5c, so the annotation check
+  # never ran and these cases failed on a hook that was behaving correctly.
+  # tsconfig.json is the TypeScript marker the Gate 5c fixtures need.
+  printf '{\n  "compilerOptions": { "strict": true, "noEmit": true }\n}\n' > tsconfig.json
   git add . && git commit --no-verify -q -m "init"
 
   # Fresh req-ids list so Gate 5c runs (specification.yaml absent → not stale)

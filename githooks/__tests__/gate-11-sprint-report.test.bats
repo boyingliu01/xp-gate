@@ -126,9 +126,41 @@ prepare_repo() {
 }
 
 @test "AC-476-07 anti-vacuity: the hook uses the resolver instead of hand-rolled tiers" {
-  grep -q 'resolve_sprint_gate_script' "$HOOK"
-  grep -q 'source "${AUDIT_SCRIPT_DIR}/lib/sprint-gate-report.sh"' "$HOOK"
-  grep -q 'sprint_gate_decision' "$HOOK"
+  # The three wiring facts, each asserted on the thing that matters rather than
+  # on one exact spelling.
+  #
+  # The library is loaded through `source_gate_lib` (a guarded wrapper) rather
+  # than a bare `source`, so matching the literal
+  #     source "${AUDIT_SCRIPT_DIR}/lib/sprint-gate-report.sh"
+  # made this case red on correct code once the wrapper was introduced. What the
+  # invariant needs is: the report library is loaded, from a path under
+  # $AUDIT_SCRIPT_DIR — how it is loaded is an implementation detail.
+  awk '/^[[:space:]]*#/ {next} /sprint-gate-report\.sh/ && /AUDIT_SCRIPT_DIR/ {found=1} END {exit !found}' "$HOOK" || {
+    echo "pre-commit no longer loads lib/sprint-gate-report.sh from AUDIT_SCRIPT_DIR"
+    return 1
+  }
+
+  # The resolver must be used, not re-implemented inline.
+  grep -q 'resolve_sprint_gate_script' "$HOOK" || {
+    echo "pre-commit does not call resolve_sprint_gate_script"
+    return 1
+  }
+  # ...and the decision must go through the shared translator.
+  grep -q 'sprint_gate_decision' "$HOOK" || {
+    echo "pre-commit does not call sprint_gate_decision"
+    return 1
+  }
+
+  # Anti-vacuity: the resolver really lives in the sourced library, so these
+  # greps are not passing on a commented-out or unrelated mention.
+  grep -q '^resolve_sprint_gate_script()' "$LIB" || {
+    echo "resolve_sprint_gate_script is not defined in $LIB"
+    return 1
+  }
+  grep -q '^sprint_gate_decision()' "$LIB" || {
+    echo "sprint_gate_decision is not defined in $LIB"
+    return 1
+  }
 }
 
 @test "AC-476-08: pre-push's sprint gate chain probes the same canonical directory" {
