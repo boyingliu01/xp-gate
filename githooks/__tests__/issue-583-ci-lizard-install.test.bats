@@ -49,6 +49,51 @@ setup() {
   }
 }
 
+@test "AC-583-03: lizard is installed in the JOB that runs Gate 3" {
+  # The bug that made the first attempt useless: `pip install lizard` in the
+  # `setup` job reported "Successfully installed lizard-1.24.2", and Gate 3 in
+  # `gate-check` still printed "❌ lizard is not installed". Different jobs,
+  # different filesystems.
+  #
+  # Parsed with a YAML loader rather than matched as text: a line-range scan
+  # cannot tell a job key from an `on:` trigger entry (`push:` also sits at two
+  # spaces), and my first version of THIS test passed even with the install moved
+  # back into `setup` — it could not see the bug it exists for.
+  run node - "$WF" << 'JS'
+const fs = require('fs');
+const yaml = require('js-yaml');
+const wf = yaml.load(fs.readFileSync(process.argv[2], 'utf8'));
+const INSTALL = /(?:pip|pip3|uv)\s+install[^#]*\blizard\b/;
+const GATE3 = /Gate 3: Cyclomatic Complexity/i;
+
+let gateJob = null;
+let installedInGateJob = false;
+const jobsWithInstall = [];
+
+for (const [name, job] of Object.entries(wf.jobs || {})) {
+  const steps = Array.isArray(job.steps) ? job.steps : [];
+  const runsGate3 = steps.some((s) => GATE3.test(s.name || '') || GATE3.test(s.run || ''));
+  if (runsGate3) gateJob = name;
+  if (steps.some((s) => INSTALL.test(s.run || ''))) {
+    jobsWithInstall.push(name);
+    if (runsGate3) installedInGateJob = true;
+  }
+}
+
+if (!gateJob) {
+  console.error('could not locate the Gate 3 step in any job');
+  process.exit(1);
+}
+if (!installedInGateJob) {
+  console.error(`Gate 3 runs in job '${gateJob}', but lizard is installed in: ${jobsWithInstall.join(', ') || '(nowhere)'}`);
+  console.error('GitHub Actions jobs have separate filesystems: an install in another job cannot help Gate 3');
+  process.exit(1);
+}
+console.log(`ok: lizard installed in '${gateJob}', the job that runs Gate 3`);
+JS
+  [ "$status" -eq 0 ] || return 1
+}
+
 @test "AC-583-02: the other fail-closed tool prerequisites are installed too" {
   # Same failure mode, different tool: ruff/mypy/pylint are installed already for
   # Gate 1. Asserting they stay installed prevents the same bug reappearing when

@@ -1292,6 +1292,9 @@ specification:
         - id: AC-583-02
           criteria: 其余 fail-closed 工具前置（ruff、mypy、pylint）必须保持被安装，防止同类缺陷复发
           test_type: unit
+        - id: AC-583-03
+          criteria: lizard 必须安装在「运行 Gate 3 的那个 job」内；装在其它 job 等于没装，因为 GitHub Actions 的 job 之间不共享文件系统
+          test_type: unit
 
 
     # ============================================================

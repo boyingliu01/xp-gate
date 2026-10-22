@@ -163,13 +163,9 @@ jobs:
             pip install ruff mypy pylint
           fi
 
-          # Gate 3 (cyclomatic complexity) hard-requires lizard and fails CLOSED
-          # when it is missing (#499 rationale). Installing it only for Python
-          # projects would be wrong: Gate 3 runs regardless of language, and a
-          # missing analyzer blocked every single run with "lizard is not
-          # installed" (#583). A fail-closed gate whose prerequisite is never
-          # provisioned is a gate that is guaranteed to fail.
-          pip install lizard
+          # NOTE (#583): lizard is NOT installed here. It belongs to the
+          # `gate-checks` job, which has its own filesystem — an install in this
+          # setup job is invisible to it. See the 'Install Gate 3 analyzer' step.
 
           # Go quality tools
           if [[ "$(< project_language.txt)" == "go" ]] || [[ -f "go.mod" ]]; then
@@ -329,6 +325,17 @@ jobs:
           elif [[ "$PROJECT_LANGUAGE" != "unknown" ]]; then
             echo "ℹ️ Duplicate code check available for $PROJECT_LANGUAGE but specific tools not configured"
           fi
+
+      # #583: lizard must be installed HERE, in the job that runs Gate 3.
+      # Installing it in `setup` does nothing for this job — GitHub Actions jobs
+      # get separate filesystems, so `pip install lizard` in setup reported
+      # "Successfully installed lizard-1.24.2" while Gate 3 in this job still hit
+      # "❌ lizard is not installed". The install has to live next to the check.
+      - name: 'Install Gate 3 analyzer (lizard)'
+        run: |
+          echo "Installing lizard for Gate 3 (cyclomatic complexity)..."
+          pip install lizard
+          lizard --version
 
       # Gate 3: Cyclomatic Complexity
       - name: 'Gate 3: Cyclomatic Complexity Check'
