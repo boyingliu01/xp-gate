@@ -20,6 +20,7 @@
 setup() {
   GITHOOKS_HOOK="$BATS_TEST_DIRNAME/../pre-commit"
   NPM_HOOK="$BATS_TEST_DIRNAME/../../src/npm-package/hooks/pre-commit"
+  MYPY_LIB="$BATS_TEST_DIRNAME/../lib/python-incremental-typecheck.sh"
 }
 
 check_hook() {
@@ -37,7 +38,19 @@ check_hook() {
   run grep -F 'mypy --ignore-missing-imports $PY_MYPY_FILES' "$hook"
   [ "$status" -ne 0 ]
   # --- mypy gate: array-based quoted expansion must be PRESENT -----------
-  run grep -F 'mypy --ignore-missing-imports "${MYPY_ARGS[@]}"' "$hook"
+  #
+  # The incremental type-check moved into
+  # githooks/lib/python-incremental-typecheck.sh (#534), which receives the list
+  # as function ARGUMENTS ("$@") and re-expands it quoted to mypy:
+  #     mypy --follow-imports=silent --ignore-missing-imports "${TYPECHECK_FILES[@]}"
+  # Asserting the old inline form `mypy ... "${MYPY_ARGS[@]}"` here went red on
+  # correct code. What this case is about is whitespace safety, so assert that
+  # property on the code that still calls mypy:
+  #   - the hook passes the array quoted to the helper, and
+  #   - the helper expands its file list quoted.
+  run grep -F 'python_typecheck_incremental "${MYPY_ARGS[@]}"' "$hook"
+  [ "$status" -eq 0 ]
+  run grep -F 'mypy --follow-imports=silent --ignore-missing-imports "${TYPECHECK_FILES[@]}"' "$MYPY_LIB"
   [ "$status" -eq 0 ]
 
   # --- both gates accept .pyi stubs ---------------------------------------
