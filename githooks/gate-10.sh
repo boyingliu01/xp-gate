@@ -34,6 +34,19 @@ if command -v semgrep >/dev/null 2>&1; then
   SEMGREP_CMD="semgrep"
 elif [ -f "$HOME/.local/bin/semgrep" ]; then
   SEMGREP_CMD="$HOME/.local/bin/semgrep"
+else
+  # #549: `pip install --user semgrep` on Windows lands in
+  # %APPDATA%\Python\PythonXY\Scripts\semgrep.exe, which is on the interactive
+  # PATH but not necessarily in the PATH inherited by git-bash hooks. Probing
+  # the standard per-user script dirs turns a silent "SAST unavailable" into a
+  # working gate. Newest interpreter wins (last match), and an empty result
+  # still means "not installed" -- this widens detection, it does not invent
+  # a binary.
+  _semgrep_candidates=$(ls -1 "${APPDATA:-$HOME/AppData/Roaming}"/Python/Python*/Scripts/semgrep.exe 2>/dev/null | sort -V | tail -1)
+  if [ -n "$_semgrep_candidates" ] && [ -x "$_semgrep_candidates" ]; then
+    SEMGREP_CMD="$_semgrep_candidates"
+  fi
+  unset _semgrep_candidates
 fi
 
 if [ -z "$SEMGREP_CMD" ]; then
