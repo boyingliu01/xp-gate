@@ -14,10 +14,56 @@ setup() {
 }
 
 # Rewrite a copy of the hook with CRLF endings, keeping it executable.
+#
+# Portable CR injection: `sed 's/$/\r/'` is not portable — POSIX sed does not
+# require `\r` in a replacement to mean carriage return, and GNU sed only honours
+# it because of a GNU extension. On the CI runner the result was a file with NO
+# carriage returns at all, so `bash` parsed it cleanly, ran the hook, and the
+# hook's own CRLF self-check never fired:
+#     pre-commit: line 72: syntax error near unexpected token `$'{\r''
+# To inject a byte reliably, split the file into lines and re-emit each one with
+# an explicit "print without newline, then a carriage-return + newline".
 crlf_copy() {
   local src="$1" dest="$2"
-  tr -d '\r' < "$src" | sed 's/$/\r/' > "$dest"
+  : > "$dest"
+  # Read line by line; text already stripped of any pre-existing CR.
+  while IFS= read -r line || [ -n "$line" ]; do
+    # printf's \r is a REQUIRED POSIX escape in the format string (unlike in sed).
+    printf '%s\r\n' "$line" >> "$dest"
+  done < <(tr -d '\r' < "$src")
   chmod +x "$dest"
+}
+
+# Guard: the fixture must really contain carriage returns. Without this, a
+# future rewrite of crlf_copy could silently produce clean LF input and the
+# three CRLF cases below would assert the diagnostic on a file that does not
+# need one.
+#
+# The count is taken BYTE-WISE. `grep -c $'\r'` is unreliable through the
+# Git-Bash/MSYS layer — it reports 0 matches even on files that demonstrably
+# carry CR bytes — so counting via `tr` is the only stable check.
+@test "the CRLF fixture really contains carriage returns" {
+  local hook="$WORK/pre-commit"
+  crlf_copy "$BATS_TEST_DIRNAME/../pre-commit" "$hook"
+
+  run bash -c "tr -cd '\r' < '$hook' | wc -c"
+  [ "$status" -eq 0 ]
+  cr_count="$(printf '%s' "$output" | tr -d '[:space:]')"
+  echo "carriage returns in fixture: $cr_count"
+  [ "${cr_count:-0}" -gt 0 ] || {
+    echo "the CRLF fixture has no carriage returns; every case below is vacuous"
+    return 1
+  }
+
+  # And the fixture must differ from its source in exactly that way: same line
+  # count, one CR per line.
+  run bash -c "wc -l < '$hook'"
+  lines="$(printf '%s' "$output" | tr -d '[:space:]')"
+  echo "fixture lines: $lines"
+  [ "${cr_count:-0}" -eq "${lines:-1}" ] || {
+    echo "expected one carriage return per line ($lines lines, $cr_count CRs)"
+    return 1
+  }
 }
 
 @test "pre-commit with CRLF exits 1 with a line-ending diagnosis, not a syntax error" {

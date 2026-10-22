@@ -161,149 +161,85 @@ EOF
 }
 
 # -----------------------------------------------------------------------------
-# Test: CheckStyle error message shown when tool not configured
+# Test: the Java static-analysis verdict is reported for a Maven project
+#
+# #599: the three cases that used to live here ("CheckStyle mentioned", "PMD
+# mentioned", "SpotBugs mentioned") wrote a pom.xml declaring that specific
+# Maven plugin and then asserted the PLUGIN NAME appeared in the hook output.
+# That never tested the adapter: the adapter does not invoke Maven lint plugins
+# at all. It prefers `wc-java-lint check --staged --format json`, and only when
+# that engine is absent does it fall back to bare `checkstyle` / `pmd`
+# executables (githooks/adapters/java.sh run_legacy_analysis). SpotBugs is not
+# an engine the adapter knows about, so "SpotBugs mentioned" could only pass by
+# accident — it did locally (wc-java-lint installed, its summary text mentions
+# it) and could not on a runner without it.
+#
+# What actually matters, and what is asserted here instead:
+#   - a Maven Java project with a staged .java file reaches the Java adapter;
+#   - the adapter reports a VERDICT for Java static analysis, whichever engine
+#     it found; and
+#   - when no engine is available it says so explicitly (WARN/ENVIRONMENT
+#     ERROR) rather than silently passing.
+# That holds identically whether or not wc-java-lint, checkstyle, pmd, or Maven
+# are installed, so the case is no longer a lottery on the runner's toolset.
 # -----------------------------------------------------------------------------
-@test "CheckStyle mentioned in Maven Java project" {
-  # Skip if mvn not installed
-  if ! command -v mvn &> /dev/null; then
-    skip "Maven not installed"
-  fi
-  
-  # Create a Maven project with CheckStyle
+@test "Maven Java project gets a Java static-analysis verdict" {
   cat > pom.xml << 'EOF'
 <?xml version="1.0" encoding="UTF-8"?>
 <project xmlns="http://maven.apache.org/POM/4.0.0"
          xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
-         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0
          http://maven.apache.org/xsd/maven-4.0.0.xsd">
     <modelVersion>4.0.0</modelVersion>
     <groupId>com.test</groupId>
     <artifactId>test-project</artifactId>
     <version>1.0.0</version>
-    <build>
-        <plugins>
-            <plugin>
-                <groupId>org.apache.maven.plugins</groupId>
-                <artifactId>maven-checkstyle-plugin</artifactId>
-                <version>3.3.1</version>
-            </plugin>
-        </plugins>
-    </build>
 </project>
 EOF
 
   # #593: stage a real .java file so Gate 1 routes to the Java adapter.
   add_java_source
   git add .
-  
-  # Run pre-commit - may fail but should mention CheckStyle
+
   run ./pre-commit
-  
-  # Should mention CheckStyle
-  [[ "$output" == *"checkstyle"* ]] || [[ "$output" == *"CheckStyle"* ]] || [[ "$output" == *"CHECKSTYLE"* ]]
+  echo "$output"
+
+  # The adapter must reach a Java static-analysis VERDICT. Assert the verdict
+  # vocabulary, not the engine name: any of "clean"/PASS, a violation report, an
+  # explicit no-engine WARN, or an ENVIRONMENT ERROR is a real judgment. A
+  # bare mention of an engine name proves nothing — the hook prints engine
+  # names in its banners too, which is exactly how a "silently PASS with no
+  # engine" regression could still light up an engine-name assertion.
+  local got_verdict=false
+  [[ "$output" == *"wc-java-lint: clean"* ]] && got_verdict=true
+  [[ "$output" == *"wc-java-lint:"*"violation"* ]] && got_verdict=true
+  [[ "$output" == *"No Java static-analysis engine available"* ]] && got_verdict=true
+  # wc-java-lint found on PATH but not usable (broken install, wrong arch, a
+  # shadowing stub) is fail-closed by design (#507): BLOCK, not a silent pass.
+  [[ "$output" == *"wc-java-lint failed with exit code"* ]] && got_verdict=true
+  [[ "$output" == *"wc-java-lint unusable"* ]] && got_verdict=true
+  [[ "$output" == *"ENVIRONMENT ERROR"* ]] && got_verdict=true
+  [[ "$output" == *"XP_G1_REASON"* ]] && got_verdict=true
+  [ "$got_verdict" = true ] || {
+    echo "the Java adapter produced no static-analysis verdict at all"
+    return 1
+  }
+
+  # A verdict must never be a silent clean pass while nothing was measured.
+  [[ "$output" != *"✅ PASSED - no Java engine available"* ]] || {
+    echo "the adapter reported a clean pass while no Java engine ran"
+    return 1
+  }
 }
 
-# -----------------------------------------------------------------------------
-# Test: PMD mentioned in Maven Java project
-# -----------------------------------------------------------------------------
-@test "PMD mentioned in Maven Java project" {
-  # Skip if mvn not installed
-  if ! command -v mvn &> /dev/null; then
-    skip "Maven not installed"
-  fi
-  
-  # Create a Maven project with PMD
+@test "Maven Java project with a lint engine configured still reaches the adapter" {
+  # A pom.xml naming Maven lint plugins must not break, or short-circuit, the
+  # adapter's own engine selection.
   cat > pom.xml << 'EOF'
 <?xml version="1.0" encoding="UTF-8"?>
 <project xmlns="http://maven.apache.org/POM/4.0.0"
          xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
-         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 
-         http://maven.apache.org/xsd/maven-4.0.0.xsd">
-    <modelVersion>4.0.0</modelVersion>
-    <groupId>com.test</groupId>
-    <artifactId>test-project</artifactId>
-    <version>1.0.0</version>
-    <build>
-        <plugins>
-            <plugin>
-                <groupId>org.apache.maven.plugins</groupId>
-                <artifactId>maven-pmd-plugin</artifactId>
-                <version>3.21.2</version>
-            </plugin>
-        </plugins>
-    </build>
-</project>
-EOF
-
-  # #593: stage a real .java file so Gate 1 routes to the Java adapter.
-  add_java_source
-  git add .
-  
-  # Run pre-commit
-  run ./pre-commit
-  
-  # Should mention PMD
-  [[ "$output" == *"pmd"* ]] || [[ "$output" == *"PMD"* ]]
-}
-
-# -----------------------------------------------------------------------------
-# Test: SpotBugs mentioned in Maven Java project
-# -----------------------------------------------------------------------------
-@test "SpotBugs mentioned in Maven Java project" {
-  # Skip if mvn not installed
-  if ! command -v mvn &> /dev/null; then
-    skip "Maven not installed"
-  fi
-  
-  # Create a Maven project with SpotBugs
-  cat > pom.xml << 'EOF'
-<?xml version="1.0" encoding="UTF-8"?>
-<project xmlns="http://maven.apache.org/POM/4.0.0"
-         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
-         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 
-         http://maven.apache.org/xsd/maven-4.0.0.xsd">
-    <modelVersion>4.0.0</modelVersion>
-    <groupId>com.test</groupId>
-    <artifactId>test-project</artifactId>
-    <version>1.0.0</version>
-    <build>
-        <plugins>
-            <plugin>
-                <groupId>com.github.spotbugs</groupId>
-                <artifactId>spotbugs-maven-plugin</artifactId>
-                <version>4.8.3.1</version>
-            </plugin>
-        </plugins>
-    </build>
-</project>
-EOF
-
-  # #593: stage a real .java file so Gate 1 routes to the Java adapter.
-  add_java_source
-  git add .
-  
-  # Run pre-commit
-  run ./pre-commit
-  
-  # Should mention SpotBugs
-  [[ "$output" == *"spotbugs"* ]] || [[ "$output" == *"SpotBugs"* ]] || [[ "$output" == *"SPOTBUGS"* ]]
-}
-
-# -----------------------------------------------------------------------------
-# Test: All three tools work together (CheckStyle + PMD + SpotBugs)
-# -----------------------------------------------------------------------------
-@test "All three tools work together - CheckStyle PMD SpotBugs" {
-  # Skip if mvn not installed
-  if ! command -v mvn &> /dev/null; then
-    skip "Maven not installed"
-  fi
-  
-  # Create a Maven project with all three tools
-  cat > pom.xml << 'EOF'
-<?xml version="1.0" encoding="UTF-8"?>
-<project xmlns="http://maven.apache.org/POM/4.0.0"
-         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
-         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0
          http://maven.apache.org/xsd/maven-4.0.0.xsd">
     <modelVersion>4.0.0</modelVersion>
     <groupId>com.test</groupId>
@@ -321,26 +257,37 @@ EOF
                 <artifactId>maven-pmd-plugin</artifactId>
                 <version>3.21.2</version>
             </plugin>
-            <plugin>
-                <groupId>com.github.spotbugs</groupId>
-                <artifactId>spotbugs-maven-plugin</artifactId>
-                <version>4.8.3.1</version>
-            </plugin>
         </plugins>
     </build>
 </project>
 EOF
 
-  # #593: stage a real .java file so Gate 1 routes to the Java adapter.
   add_java_source
   git add .
-  
-  # Run pre-commit
+
   run ./pre-commit
-  
-  # All tools should run or ENVIRONMENT ERROR if not available
-  [[ "$output" == *"CheckStyle"* ]] || [[ "$output" == *"checkstyle"* ]] || [[ "$output" == *"PMD"* ]] || [[ "$output" == *"pmd"* ]] || [[ "$output" == *"SpotBugs"* ]] || [[ "$output" == *"spotbugs"* ]] || [[ "$output" == *"ENVIRONMENT ERROR"* ]]
+  echo "$output"
+
+  # Same verdict-vocabulary assertion as the case above: naming the plugins in
+  # pom.xml must neither break engine selection nor substitute for it.
+  local got_verdict=false
+  [[ "$output" == *"wc-java-lint: clean"* ]] && got_verdict=true
+  [[ "$output" == *"wc-java-lint:"*"violation"* ]] && got_verdict=true
+  [[ "$output" == *"No Java static-analysis engine available"* ]] && got_verdict=true
+  [[ "$output" == *"wc-java-lint failed with exit code"* ]] && got_verdict=true
+  [[ "$output" == *"wc-java-lint unusable"* ]] && got_verdict=true
+  [[ "$output" == *"ENVIRONMENT ERROR"* ]] && got_verdict=true
+  [[ "$output" == *"XP_G1_REASON"* ]] && got_verdict=true
+  [ "$got_verdict" = true ] || {
+    echo "the Java adapter produced no static-analysis verdict at all"
+    return 1
+  }
 }
+
+# -----------------------------------------------------------------------------
+# Test: Gradle and Maven project detection still picks a build system
+# (kept separate from engine availability: detection is adapter-local)
+# -----------------------------------------------------------------------------
 
 # -----------------------------------------------------------------------------
 # Test: Tests run via Maven
