@@ -1346,6 +1346,40 @@ specification:
           criteria: 根 package.json 未声明 workspaces 时，CI workflow 必须包含安装 plugins/dsh 依赖的步骤
           test_type: unit
 
+    # ============================================================
+    # REQ-586: 测试必须说实话——平台限定要 skip，加载方式要与生产一致。
+    # Gate 5 首次真正运行（此前 Gate 1 每次都红，Gate 5 从未执行过）露出 4 个失败，
+    # 全部是「测试本身不诚实」而非产品缺陷：
+    #   1. hook-health-path AC-566-02 断言路径含 '\'——这本身就是 Windows 前提，
+    #      Linux 上 path.join 产出 '/tmp/...'，必然失败。
+    #   2. doctor-exec-retry AC-DOCTOR-RETRY-01 断言发生重试。重试只为补偿 cmd.exe
+    #      返回 exit-0 但流为空这一 Windows 行为；其它平台上首次空探测即终局，
+    #      result 为 null，无重试可言。
+    #   3. check-alignment-cli 用裸 node spawn 一个 require('.ts') 的 runner。
+    #      裸 node 只在 22.6+ 支持类型剥离，CI 钉 Node 20.x 会抛错、stdout 为空，
+    #      而空串的报错恰好是「Unexpected end of JSON input」——与它要防的截断一模一样。
+    #      产品路径 bin/xp-gate.js 一直通过 tsx 加载，只有这个测试绕过了。
+    #   4. coverage-threshold-enforced 用日志行 'Coverage enabled with v8' 做反空虚守卫，
+    #      而该行是否输出取决于 reporter 与平台；健康运行因此被判失败。
+    # 诚实 skip 会在汇总里显示 skipped，缺口可见；永远红的测试只会训练大家忽略红。
+    # ============================================================
+    - id: REQ-586
+      description: "平台限定测试必须显式 skip，依赖 .ts 引擎的测试必须用与生产一致的 tsx 加载"
+      priority: high
+      acceptance_criteria:
+        - id: AC-586-01
+          criteria: hook-health-path 的 Windows 路径断言必须带平台守卫，非 Windows 上 skip 而非失败
+          test_type: unit
+        - id: AC-586-02
+          criteria: doctor-exec-retry 的整条重试用例必须带 win32 守卫，非 Windows 上 skip
+          test_type: unit
+        - id: AC-586-03
+          criteria: check-alignment-cli 必须通过 tsx 加载 runner，不得用裸 node 加载需要类型剥离的 .ts 引擎
+          test_type: unit
+        - id: AC-586-04
+          criteria: coverage-threshold-enforced 的反空虚守卫必须基于覆盖率产物文件，不得依赖 reporter 相关的日志行
+          test_type: unit
+
 
     # ============================================================
     # REQ-574: Gate MW 校验证据必须与 .delphi-config.json 的席位绑定。

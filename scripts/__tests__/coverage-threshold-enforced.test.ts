@@ -260,11 +260,26 @@ describe('coverage threshold enforcement', () => {
     const { status, output } = runFixtureCoverage(dir);
 
     // Anti-vacuity: a config that failed to load would also "not block".
+    //
+    // Check the ARTIFACT, not a log line. `--reporter=dot` does not reliably print
+    // "Coverage enabled with v8" — under vitest 1.6.1 on Linux CI it is absent even
+    // though coverage was measured, which turned this anti-vacuity guard into a
+    // failure with "Unexpected end of JSON input"/no-match while the run itself was
+    // fine (#586). The coverage summary the run produces is the actual evidence
+    // that measurement happened, and it is written regardless of reporter.
+    const summaryPath = path.join(dir, 'coverage', 'coverage-summary.json');
     expect(
-      output,
+      fs.existsSync(summaryPath),
       'the fixture must have actually measured coverage; a config-load failure ' +
-        'would make this assertion meaningless'
-    ).toMatch(/Coverage enabled with v8/);
+        'would make this assertion meaningless (no coverage summary was written)'
+    ).toBe(true);
+    const summary = JSON.parse(fs.readFileSync(summaryPath, 'utf8')) as {
+      total?: { lines?: { pct?: number } };
+    };
+    expect(
+      typeof summary.total?.lines?.pct,
+      'the coverage summary must carry a real measured percentage'
+    ).toBe('number');
 
     expect(
       status,

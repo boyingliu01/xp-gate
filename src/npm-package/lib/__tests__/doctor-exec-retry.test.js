@@ -67,16 +67,26 @@ describe('execWithTimeout empty-stream retry (#525 follow-up)', () => {
     return require(doctorPath).execWithTimeout;
   }
 
-  it('AC-DOCTOR-RETRY-01: retries an exit-0 empty-stdout probe and keeps its own timeout', async () => {
-    stub = stubExec([
-      (cb) => cb(null, '', ''),            // the lost-stream failure mode
-      (cb) => cb(null, 'v24.19.0\n', ''),  // the same probe, stream intact
-    ]);
-    const execWithTimeout = freshDoctor();
-    const result = await execWithTimeout('node --version', { stdio: ['ignore', 'pipe', 'pipe'] });
-    expect(stub.calls.length).toBe(2);
-    expect(result).toEqual({ stdout: 'v24.19.0', stderr: '' });
-  });
+  // Windows-only by construction, as a whole: the RETRY it asserts does not exist
+  // off win32. The retry compensates for cmd.exe returning exit 0 with an EMPTY
+  // stream; elsewhere the first empty probe is final, so `result` comes back null
+  // and there is nothing to retry. Asserting the attempt count alone is not enough
+  // — measured under a faked `process.platform = 'linux'`, the count assertion
+  // passed while `result` failed with "expected null to deeply equal { stdout:
+  // 'v24.19.0' }". The premise of the whole case is win32 (#586).
+  it.skipIf(process.platform !== 'win32')(
+    'AC-DOCTOR-RETRY-01: retries an exit-0 empty-stdout probe and keeps its own timeout',
+    async () => {
+      stub = stubExec([
+        (cb) => cb(null, '', ''),            // the lost-stream failure mode
+        (cb) => cb(null, 'v24.19.0\n', ''),  // the same probe, stream intact
+      ]);
+      const execWithTimeout = freshDoctor();
+      const result = await execWithTimeout('node --version', { stdio: ['ignore', 'pipe', 'pipe'] });
+      expect(stub.calls.length).toBe(2);
+      expect(result).toEqual({ stdout: 'v24.19.0', stderr: '' });
+    }
+  );
 
   it('AC-DOCTOR-RETRY-01: returns null after exhausting attempts on a persistently empty probe', async () => {
     stub = stubExec([
