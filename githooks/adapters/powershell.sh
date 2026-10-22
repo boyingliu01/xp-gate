@@ -179,6 +179,7 @@ run_static_analysis() {
     local PSSA_OUT
     local scope_file=".xp-gate-powershell-analysis-paths"
     local analysis_targets=()
+    local scope_missing=0
 
     # #571: repo-local analysis scope. Pester test files legitimately trip
     # dozens of rule warnings under the Pester execution model, so a whole-repo
@@ -210,6 +211,7 @@ run_static_analysis() {
           # shellcheck disable=SC2004  # explicit index arithmetic on an array
           analysis_targets[${#analysis_targets[@]}]="$target_line"
         else
+          scope_missing=$((scope_missing + 1))
           echo "  ℹ️  analysis path not found (skipped): $target_line"
           echo "XP_G1_REASON: analysis-path-missing:$target_line"
         fi
@@ -242,13 +244,18 @@ run_static_analysis() {
         try { Import-Module PSScriptAnalyzer -ErrorAction Stop | Out-Null } catch { exit 3 }
         \$settings = Join-Path (Get-Location) 'PSScriptAnalyzerSettings.psd1'
         \$all = @()
-        foreach (\$p in $target_array) {
-          \$recurse = [System.IO.Directory]::Exists(\$p)
-          if (Test-Path -LiteralPath \$settings) {
-            \$all += @(Invoke-ScriptAnalyzer -Path \$p -Recurse:\$recurse -Severity Error,Warning -Settings \$settings -ErrorAction Stop)
-          } else {
-            \$all += @(Invoke-ScriptAnalyzer -Path \$p -Recurse:\$recurse -Severity Error,Warning -ErrorAction Stop)
+        try {
+          foreach (\$p in $target_array) {
+            \$recurse = [System.IO.Directory]::Exists(\$p)
+            if (Test-Path -LiteralPath \$settings) {
+              \$all += @(Invoke-ScriptAnalyzer -Path \$p -Recurse:\$recurse -Severity Error,Warning -Settings \$settings -ErrorAction Stop)
+            } else {
+              \$all += @(Invoke-ScriptAnalyzer -Path \$p -Recurse:\$recurse -Severity Error,Warning -ErrorAction Stop)
+            }
           }
+        } catch {
+          Write-Output ('PSSA_RUN_ERROR: ' + \$_.Exception.Message)
+          exit 3
         }
         if (\$all) {
           \$all | Format-Table -AutoSize
@@ -282,10 +289,31 @@ run_static_analysis() {
           echo "XP_G1_REASON: PSScriptAnalyzer module not installed (Install-Module PSScriptAnalyzer)"
           return 3
         fi
+        # #576: a scope entry that vanished means product code may have ESCAPED
+        # the gate. The reason line was emitted above, but pre-commit switches on
+        # the RETURN CODE and only uses the reason for the message text -- so
+        # returning 0 here made the reason dead weight and Gate 1 printed
+        # PASSED. Measured before this fix: "RETURN CODE = 0". The scan being
+        # clean does not make an incomplete scope a pass.
+        if [ "$scope_missing" -gt 0 ]; then
+          echo "  ⚠️  $scope_missing scope entry(ies) did not exist - product code may have escaped the gate"
+          return 3
+        fi
         return 0
         ;;
       1)
         return 1   # real findings -> BLOCK upstream
+        ;;
+      3)
+        # #576: the PowerShell fragment exits 3 when the scan itself raised. That
+        # is "could not verify", not "found violations" -- pwsh would exit 1 for
+        # findings, so mapping this to 1 would report an analysis crash as lint
+        # errors. Surface the actual exception where the fragment captured one.
+        echo "XP_G1_REASON: PSScriptAnalyzer raised an error during the run"
+        printf '%s\n' "$PSSA_OUT" | grep '^PSSA_RUN_ERROR: ' | sed 's/^PSSA_RUN_ERROR: //' | head -3 | while IFS= read -r _ps_err; do
+          echo "  ⚠️  $_ps_err"
+        done
+        return 2   # unusable -> fail closed upstream
         ;;
       *)
         echo "XP_G1_REASON: PSScriptAnalyzer run failed (exit $PSSA_RC)"
