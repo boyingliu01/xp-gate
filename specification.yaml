@@ -1073,6 +1073,84 @@ specification:
           criteria: 没有排除文件时内置 #538 列表（含 wrc-drill、node_modules、.delphi-work）必须仍然生效
           test_type: unit
 
+    # ============================================================
+    # REQ-575: prune 文件条目必须校验，非法条目要报告并忽略。
+    # .xp-gate-powershell-prune-dirs 同时喂三个分母：测试发现、覆盖率、
+    # 静态分析作用域，都由 _find_powershell_files 供数。所以一个坏条目不是"没剪掉"
+    # 那么简单——它会静默缩小这三个分母，而配置文件看起来仍然合理：
+    #   -name '*'      匹配每一个目录 -> 整棵树被剪掉 -> 门禁什么都没分析却仍 exit 0
+    #   -name 'a/b'    什么都匹配不到（目录名不含分隔符）-> 静默空操作，看着像生效了
+    # 规则：只有裸目录名被采纳；含分隔符、glob 元字符、或裸 . / .. 的条目
+    # 在 stderr 上报告后忽略。必须报告而非静默丢弃——被忽略的条目是操作者
+    # 需要看到的配置错误。
+    # 该逻辑最先出现在"已安装副本"（~/.config/xp-gate/adapters/powershell.sh），
+    # 领先于仓库且从未有过任何测试；此处连同测试一并收编。
+    # ============================================================
+    - id: REQ-575
+      description: "PowerShell prune 文件只采纳裸目录名；glob、含分隔符、. 与 .. 的条目必须报告并忽略"
+      priority: high
+      acceptance_criteria:
+        - id: AC-575-01
+          criteria: glob 条目（如 *）不得剪掉整棵树；产品脚本仍被发现，且该条目在 stderr 被报告
+          test_type: unit
+        - id: AC-575-02
+          criteria: 含路径分隔符的条目（如 src/generated）被报告并忽略，不得当作静默空操作
+          test_type: unit
+        - id: AC-575-03
+          criteria: 裸 . 与 .. 条目被拒绝，且不妨碍其余发现
+          test_type: unit
+        - id: AC-575-04
+          criteria: 合法的裸目录名仍被采纳并剪除，且在 stderr 上宣告（防止校验过度拒绝）
+          test_type: unit
+
+
+    # ============================================================
+    # REQ-574: Gate MW 校验证据必须与 .delphi-config.json 的席位绑定。
+    # #423 让 Gate MW 校验 provenance 的“内部自洽性”：三角色、三个互异的
+    # requested_model、三个互异的 resolved_model、channel 显式。但从未把证据
+    # 与实际配置的席位比对，于是“内部完美、外部错误”的证据照样通过。
+    #
+    # 2026-10-22 实测事故：某次 code-walkthrough 跑在
+    # s-deepseek-v4.1-flash / g-deepseek-v4-pro / doubao-seed-2.0-pro 上——
+    # 三者都不是 .delphi-config.json 声明的席位（配置写的是三个 local-*）——
+    # 而证据如实记录了该事实（channel: "external"），Gate MW 仍判 APPROVED。
+    # 根因一：派发走 workflow 的 agent() 扇出，脚本硬编码模型，16 次运行
+    # 读取配置 0 次；根因二：不变量是“互异”而非“就是那三个”，从网关上百个
+    # 模型里任挑三个互异即合法。
+    #
+    # 绑定方向固定为 requested_model -> 配置，且只认 active_profile：
+    # 反查或跨 profile 比对都会为操作者未选择的席位背书。
+    # 无配置文件的项目保持原有（未绑定）行为，避免阻断通过其他平台通道评审的仓库。
+    # ============================================================
+    - id: REQ-574
+      description: "Gate MW 必须把 walkthrough 证据的席位绑定到 .delphi-config.json 的 active profile"
+      priority: high
+      acceptance_criteria:
+        - id: AC-574-01
+          criteria: 三席位与配置逐一相符时 PASS；项目无 .delphi-config.json 时保持原有未绑定行为
+          test_type: unit
+        - id: AC-574-02
+          criteria: 复现 2026-10-22 事故（s-deepseek-v4.1-flash/g-deepseek-v4-pro/doubao-seed-2.0-pro 对上三个 local-* 席位）时必须 BLOCK 且报错点名 requested_model
+          test_type: unit
+        - id: AC-574-03
+          criteria: 三席位中仅一个偏离配置也必须 BLOCK，且报错点名该角色
+          test_type: unit
+        - id: AC-574-04
+          criteria: 两个已配置席位互换角色时必须 BLOCK（按角色身份绑定，而非集合成员资格）
+          test_type: unit
+        - id: AC-574-05
+          criteria: 仅 active_profile 具备绑定力，命中非激活 profile 席位的证据必须 BLOCK
+          test_type: unit
+        - id: AC-574-06
+          criteria: 命名了 profiles 但 active_profile 无法解析的配置必须 fail closed，不得退化为未绑定
+          test_type: unit
+        - id: AC-574-07
+          criteria: 绑定作用域由调用方显式传入的项目根决定，不得由 process.cwd() 推断
+          test_type: unit
+        - id: AC-574-08
+          criteria: xp-gate doctor delphi 必须报告本地模型守卫结论（非 local-* 席位为 WARN，不全为本地时不失败），使 check_delphi_local_models.py 的规则获得调用方
+          test_type: unit
+
 
     - id: DD-001
       decision: 走薄桥（方案 A）在 ctx.tools 注册三工具，而非独立 MCP server 或纯技能
