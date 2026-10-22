@@ -898,6 +898,40 @@ specification:
             路径处理不得把探针变成永不失败的摆设
           test_type: unit
 
+    # ============================================================
+    # REQ-568: check --all 不得把"从未执行的 gate"算作通过。
+    # 门禁状态本来有四种（PASS/WARN/SKIP/FAIL），而 check --all 只折叠成两种：
+    # code !== 0 算失败，其余全算通过。preCommitOnly 的 entry 打印
+    #   ⏭️  SKIPPED - <reason>
+    # 之后 return 0，这个 0 就被计成"通过"。注册表实测：
+    #   total gates      : 15
+    #   preCommitOnly    : 5   (id 0, 1, 5, 10, 11)
+    #   check --all runs : 10
+    # 于是 15 道门禁报成 "10/10 gate(s) passed" 且 exit 0：这句话对它真正跑过的
+    # 10 道是真的，对没跑的 5 道则完全沉默。hook 自己的报告里已有 verdict:
+    # PARTIAL 表达同一件事，CLI 一侧没有对应概念。
+    # ============================================================
+    - id: REQ-568
+      description: "check --all 的汇总必须区分 passed/failed/skipped 并点名未执行的 gate，跳过不得抬高通过数"
+      priority: high
+      acceptance_criteria:
+        - id: AC-568-01
+          criteria: preCommitOnly 的 gate 在汇总里记为 skipped 而非 passed；
+            全部可执行 gate 通过时 exit 0（跳过不算失败）
+          test_type: unit
+        - id: AC-568-02
+          criteria: 当没有任何 gate 真正执行时，汇总不得出现 N/N 形式，
+            必须报 0 passed 与对应的 skipped 数
+          test_type: unit
+        - id: AC-568-03
+          criteria: 存在失败 gate 时仍 exit 1，且 passed/failed/skipped 三个数
+            各自独立计数、互不吞并
+          test_type: unit
+        - id: AC-568-04
+          criteria: formatGateTally 对四种状态渲染无损，零值状态省略，
+            全量总数始终在末位
+          test_type: unit
+
 
     - id: DD-001
       decision: 走薄桥（方案 A）在 ctx.tools 注册三工具，而非独立 MCP server 或纯技能
