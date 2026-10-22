@@ -1453,6 +1453,31 @@ specification:
           criteria: 阈值块必须恰有四个数值型百分比指标，缺一即失败
           test_type: unit
 
+    # ============================================================
+    # REQ-590: 会 shell out 到构建工具的 fixture，必须用仓库自己钉住的版本。
+    # gate-1-tsc-test-files.test.bats 原先在临时目录里执行
+    #     npm install --silent typescript vitest @types/node
+    # 让一个 BATS 套件依赖网络；CI 上三个用例全部失败于该安装命令。
+    # 但仅仅删掉安装还不够——实测：
+    #     链接仓库 node_modules -> "Running TypeScript static analysis (Version 5.9.3)"
+    #     node_modules 为空     -> "Running TypeScript static analysis (Version 7.0.2)"
+    # 两次都「绿」。也就是说该套件其实是在用机器上碰巧存在的全局 tsc 跑，
+    # 结果与仓库无关；干净 CI runner 上什么都没有，install 正是在掩盖这一点。
+    # 现改为链接仓库 node_modules，精确解析仓库钉住的版本，不联网、不依赖全局工具链。
+    # 另外 teardown 必须用 unlinkSync 断开链接：实测在 Git Bash 上 `rm -f <junction>`
+    # 报 "Is a directory" 且链接残留，会破坏该文件里的后续用例。
+    # ============================================================
+    - id: REQ-590
+      description: "依赖外部工具的测试 fixture 必须使用仓库钉住的版本，不得联网安装或依赖 PATH 中的全局版本"
+      priority: high
+      acceptance_criteria:
+        - id: AC-590-01
+          criteria: tsc fixture 不得执行任何包安装命令（npm install/ci/add）
+          test_type: unit
+        - id: AC-590-02
+          criteria: fixture 必须链接仓库 node_modules，且 teardown 必须用 unlinkSync 断开链接
+          test_type: unit
+
 
     # ============================================================
     # REQ-574: Gate MW 校验证据必须与 .delphi-config.json 的席位绑定。
