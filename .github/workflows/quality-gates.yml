@@ -485,9 +485,25 @@ jobs:
                   # project's coverage script) already executes the full suite AND
                   # validates coverage, so running `npm test` separately would run
                   # the suite a second time — a redundant full regression pass.
-                  if grep -q "\"test:cover\|test:coverage\|cover\|coverage\"" package.json; then
-                    echo "Running tests with coverage (single pass)..."
-                    npm run test:coverage || npm run test:cover
+                  # #588: pick the script that actually exists, and never chain a
+                  # fallback with `||`. The old line was
+                  #     npm run test:coverage || npm run test:cover
+                  # where `test:cover` does not exist in this repo. Whenever
+                  # `test:coverage` legitimately failed, npm ran the fallback, which
+                  # died with `npm error Missing script: "test:cover"` and REPLACED
+                  # the real failure in the log. Gate 5 then reported a missing
+                  # script instead of the failing tests, sending the reader to the
+                  # wrong place entirely.
+                  COVERAGE_SCRIPT=""
+                  if node -e "process.exit(require('./package.json').scripts?.['test:coverage']?0:1)" 2>/dev/null; then
+                    COVERAGE_SCRIPT="test:coverage"
+                  elif node -e "process.exit(require('./package.json').scripts?.['test:cover']?0:1)" 2>/dev/null; then
+                    COVERAGE_SCRIPT="test:cover"
+                  fi
+
+                  if [ -n "$COVERAGE_SCRIPT" ]; then
+                    echo "Running tests with coverage via 'npm run $COVERAGE_SCRIPT' (single pass)..."
+                    npm run "$COVERAGE_SCRIPT"
                     NPM_TEST_STATUS=$?
 
                     if [[ $NPM_TEST_STATUS -ne 0 ]]; then

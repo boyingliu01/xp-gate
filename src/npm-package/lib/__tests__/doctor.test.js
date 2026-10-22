@@ -951,7 +951,13 @@ describe('doctor', () => {
 
   // === --fix TUI registration ===
 
-  it('--fix: diagnoses TUI not registered then re-diagnoses after fix', async () => {
+  // 15s, not vitest's 5s default (#588). This case runs the full `doctor(['--fix'])`
+  // pipeline over a real temp install: it writes hooks, adapters and tui.json and
+  // re-diagnoses. Measured in isolation it takes ~3.8s, which is already 76% of the
+  // default budget — so under the full suite (where 200 files share the machine) it
+  // crossed 5s and failed with "Test timed out in 5000ms". The work is legitimate;
+  // the budget was simply too tight for it. Similar cases in this file take 2-4s.
+  it('--fix: diagnoses TUI not registered then re-diagnoses after fix', { timeout: 15000 }, async () => {
     setupLocalInstall();
     seedVersionCache();
     mockExecSuccess();

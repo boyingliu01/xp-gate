@@ -1401,6 +1401,31 @@ specification:
           criteria: 运行测试的 CI job 必须执行 plugins/dsh/scripts/prepack.cjs 生成该产物
           test_type: unit
 
+    # ============================================================
+    # REQ-588: 回退链不得吞掉主错误；耗时用例需要显式预算。
+    # Gate 5 原先写的是：
+    #     npm run test:coverage || npm run test:cover
+    # 本仓库没有 test:cover。于是每当 test:coverage 真实失败，npm 就去跑回退脚本，
+    # 后者以 `npm error Missing script: "test:cover"` 死掉，并**覆盖**了日志里的真实
+    # 错误。Gate 5 报的是「脚本缺失」而不是「哪个用例失败」，把排查引到了错误方向
+    # 好几轮。吞掉主错误的回退链比没有回退更糟。
+    # 被它盖住的真实失败是：
+    #     FAIL .../doctor.test.js > --fix: diagnoses TUI not registered ...
+    #     Error: Test timed out in 5000ms.
+    # 该用例单独跑约 3.8s（占 vitest 默认 5s 预算的 76%），全量 200 个文件共享机器时
+    # 就超过 5s。它做的是完整的 doctor --fix 流水线，工作量是真实的，只是预算太小。
+    # ============================================================
+    - id: REQ-588
+      description: "CI 不得用 || 回退链掩盖主命令失败；耗时超过默认预算的用例必须声明显式超时"
+      priority: high
+      acceptance_criteria:
+        - id: AC-588-01
+          criteria: Gate 5 不得使用会覆盖主失败的 npm run A || npm run B 形式，且引用的每个 npm 脚本必须存在于 package.json
+          test_type: unit
+        - id: AC-588-02
+          criteria: doctor --fix 的 TUI 注册用例必须声明显式超时预算，不得依赖 vitest 的 5s 默认值
+          test_type: unit
+
 
     # ============================================================
     # REQ-574: Gate MW 校验证据必须与 .delphi-config.json 的席位绑定。
