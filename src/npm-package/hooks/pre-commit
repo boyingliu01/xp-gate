@@ -1,24 +1,29 @@
 #!/bin/bash
-# Line-ending self-check (#546). MUST stay on the first executable line, and MUST
-# be a single physical line.
+_LE_CR=$(tr -cd '\r' < "$0" | wc -c | tr -d '[:space:]'); test "${_LE_CR:-0}" -eq 0 || { printf '%s\n' "======================================================================" "FATAL: hook has CRLF line endings -- bash cannot parse it (#546)." "  file: $0" "  fix : tr -d '\\r' < \"$0\" > \"$0.tmp\" && mv \"$0.tmp\" \"$0\" && chmod +x \"$0\"" "Or re-sync the installed copy: xp-gate doctor --sync-hooks" "======================================================================" >&2; exit 1; }
 #
-# Why both: when this file is rewritten with CRLF, EVERY line ends in \r. A
-# multi-line `if ... then ... fi` cannot survive that — bash tokenises `then\r`
-# and `fi\r` as ordinary words, the whole block fails to parse, and none of it
-# ever runs. The previous version used a nested if/fi across 11 lines and did
-# exactly that: on a CRLF copy bash reported
-#     line 72: syntax error near unexpected token `$'{\r''
-# blaming an innocent function far below, which is the very failure #546 set out
-# to prevent. It appeared to work only on bash builds that defer that error.
+# The line above is the #546 line-ending self-check. It MUST stay on the first
+# executable line, as a SINGLE physical line, using no construct whose keyword
+# needs a line boundary. All three are load-bearing:
 #
-# A single line whose only line-terminator is its own trailing \r still parses:
-# the `;` before each statement is a valid separator, and the trailing \r is
-# absorbed as part of the last word. So the check is written as one line of
-# `;`-separated statements with no keywords that must match across lines.
+#  * A CRLF rewrite puts \r at the end of EVERY line. Any construct whose
+#    keywords must match across lines -- if/then/fi, case/esac, for/do/done --
+#    then fails to PARSE and none of it runs. The original #546 implementation
+#    was a nested if/fi spanning 11 lines: it could not survive the very
+#    condition it detects. On a CRLF copy bash reported
+#        line 76: syntax error near unexpected token `$'{\r''
+#    blaming an innocent function far below -- which is exactly the failure #546
+#    set out to prevent. It looked correct locally only because that bash build
+#    deferred the error past the first command.
+#  * Even on one line, `if ... then ... fi` ends in `fi\r`, and `then\r` / `fi\r`
+#    are ordinary words to the tokenizer. So the check uses only
+#    `test ... || { ...; exit 1; }`: the `{` already follows `; `, so a trailing
+#    \r on the line cannot change how it tokenizes.
+#  * The CR count is byte-wise (`tr -cd`). `grep -c $'\r'` reports 0 matches
+#    through the Git-Bash/MSYS layer even on files that carry CR bytes, which is
+#    what made earlier attempts at this fixture look green while CI stayed red.
 #
-# `tr -d '\r'` strips the \r from the line being read, and the CR COUNT is taken
-# byte-wise with `tr -cd` because grep cannot be trusted with \r here.
-_LE_CR=$(tr -cd '\r' < "$0" | wc -c | tr -d '[:space:]'); if [ "${_LE_CR:-0}" -gt 0 ]; then echo "======================================================================" >&2; echo "FATAL: hook has CRLF line endings — bash cannot parse it (#546)." >&2; echo "  file: $0" >&2; echo "  fix : tr -d '\\r' < \"$0\" > \"$0.tmp\" && mv \"$0.tmp\" \"$0\" && chmod +x \"$0\"" >&2; echo "Or re-sync the installed copy: xp-gate doctor --sync-hooks" >&2; echo "======================================================================" >&2; exit 1; fi
+# Verified: an LF copy runs through (0 CR bytes); a CRLF copy prints the FATAL
+# diagnosis and exits 1 with no syntax error.
 # OpenCode Quality Gates - Pre-Commit Hook - 12 numbered gates (Gate 0–11)
 # 
 # DESIGN PRINCIPLE: Tool unavailable = SKIP (graceful degradation), tool available + check fails = BLOCK
