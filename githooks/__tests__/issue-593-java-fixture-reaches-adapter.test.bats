@@ -117,14 +117,22 @@ has_line() {
     return 1
   }
   # ...and the cases that assert on Java tooling must call it.
+  #
+  # #599: this used to require >= 4 call sites, because there were four
+  # Java-tool cases (CheckStyle / PMD / SpotBugs / all-three). Those were
+  # consolidated into two verdict cases after it turned out they were asserting
+  # on Maven plugin NAMES the adapter never invokes. A hard floor of 4 encoded
+  # that now-deleted shape. The invariant is "every case that asserts on Java
+  # tooling stages a .java file" — stated as a floor of 2, and kept as a floor
+  # (not an exact count) so adding a case does not break it.
   run bash -c "grep -cE '^  add_java_source\$' '$F'"
   [ "$status" -eq 0 ] || {
     echo "no case calls add_java_source:"
     echo "$output"
     return 1
   }
-  [ "${output//[[:space:]]/}" -ge 4 ] || {
-    echo "only ${output} case(s) call add_java_source; the four Java-tool cases need it"
+  [ "${output//[[:space:]]/}" -ge 2 ] || {
+    echo "only ${output} case(s) call add_java_source; the Java-tool cases need it"
     return 1
   }
 }
