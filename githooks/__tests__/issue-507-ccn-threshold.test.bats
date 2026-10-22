@@ -109,7 +109,35 @@ resolver_warn_log() {
 
 # --- AC-507-02-04: effective threshold reaches the gate-3 audit output ---
 @test "AC-507-02-04: gate-3 audit record carries the effective threshold" {
-  grep -q 'record_gate_audit "gate-3" "complexity" "$GATE_3_STATUS" "${CC_WARNINGS:-0}" "$GATE_3_START" "ccn_threshold=' "$REPO_ROOT/githooks/gate-3.sh"
+  # The invariant: the record_gate_audit call for gate-3 must carry
+  # `ccn_threshold=<effective value>` in its detail argument, using the RESOLVED
+  # threshold variable. It previously also pinned the issue-count argument to the
+  # exact spelling "${CC_WARNINGS:-0}", which broke when that argument became
+  # "$CC_ISSUES" and a trailing "$GATE_3_DETAIL" was appended — both correct
+  # changes. Assert the audit line's SHAPE, not its exact text.
+  local line
+  line=$(grep -E '^record_gate_audit "gate-3" "complexity"' "$REPO_ROOT/githooks/gate-3.sh")
+  [ -n "$line" ] || {
+    echo "gate-3.sh no longer writes a record_gate_audit line for gate-3/complexity"
+    return 1
+  }
+  case "$line" in
+    *'ccn_threshold='*) : ;;
+    *)
+      echo "the gate-3 audit detail does not carry the effective threshold"
+      echo "$line"
+      return 1
+      ;;
+  esac
+  # The value must come from the RESOLVED variable, not a hardcoded literal.
+  case "$line" in
+    *'CCN_THRESHOLD'*) : ;;
+    *)
+      echo "the audit detail does not reference CCN_THRESHOLD (hardcoded threshold?)"
+      echo "$line"
+      return 1
+      ;;
+  esac
 }
 
 @test "AC-507-02-04: record_gate_audit forwards an optional detail argument" {
