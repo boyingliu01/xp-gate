@@ -1527,6 +1527,33 @@ specification:
           criteria: fixture 必须在非受保护分支上，避免 Gate 0 提前退出
           test_type: unit
 
+    # ============================================================
+    # REQ-593: Java 门禁 fixture 必须让 Gate 1 真正路由到 Java 适配器。
+    # java-gate.test.bats 14 个用例中 12 个失败（CI 与本地一致），症状都是 hook 无输出。
+    # 三层同族缺陷叠加，任一层都足以让断言完全落空：
+    #   1. setup 只复制了 pre-commit，hook 立刻报
+    #      "FATAL: cannot load hook-module-resolution.sh" 并退出；
+    #   2. 即使补齐依赖，Gate 6 又会因缺 .archlint.yaml / architecture.yaml 而
+    #      "ARCHITECTURE CONFIG MISSING - COMMIT BLOCKED"（用 hook 自带的
+    #      .architecture-skip 豁免解决，把用例限定在被测门禁上）；
+    #   3. 用例只 stage 了 pom.xml / build.gradle，没有 .java 文件，于是 Gate 1
+    #      判定「no code files changed」直接 SKIP，Java 适配器根本没被路由。
+    # 修好后 2/14 -> 14/14。
+    # ============================================================
+    - id: REQ-593
+      description: "Java 门禁 fixture 必须携带被测语言源码，且不被其他门禁提前阻断"
+      priority: high
+      acceptance_criteria:
+        - id: AC-593-01
+          criteria: fixture setup 必须复制 hook-module-resolution.sh、adapter-common.sh 及 lib/、adapters/ 目录
+          test_type: unit
+        - id: AC-593-02
+          criteria: fixture 必须用 .architecture-skip 豁免 Gate 6，使断言的门禁不被架构配置缺失阻断
+          test_type: unit
+        - id: AC-593-03
+          criteria: 断言 Java 工具行为的用例必须 stage 至少一个真实 .java 源文件
+          test_type: unit
+
 
     # ============================================================
     # REQ-574: Gate MW 校验证据必须与 .delphi-config.json 的席位绑定。

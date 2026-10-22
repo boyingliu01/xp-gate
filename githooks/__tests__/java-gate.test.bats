@@ -6,22 +6,83 @@ setup() {
   # Create temporary directory for test projects
   TEST_DIR="$(mktemp -d)"
   export TEST_DIR
-  
-  # Copy pre-commit hook to test directory
+
+  # #593: copy the hook's WHOLE supporting tree, not just pre-commit.
+  #
+  # The fixture used to copy only `pre-commit`, so every case died in the first
+  # lines of the hook:
+  #     FATAL: cannot load hook-module-resolution.sh (module resolution order is unavailable)
+  # and produced no gate output at all. All 12 assertion cases failed — in CI and
+  # locally alike — while asserting nothing about the Java adapter.
+  #
+  # Copied as directories (`-R`) rather than file by file: pre-commit sources ten
+  # helpers from lib/, and a hand-listed subset goes stale the next time one is
+  # added — which is exactly how this fixture drifted.
   cp "${BATS_TEST_DIRNAME}/../pre-commit" "${TEST_DIR}/pre-commit"
+  cp "${BATS_TEST_DIRNAME}/../adapter-common.sh" "${TEST_DIR}/adapter-common.sh"
+  cp "${BATS_TEST_DIRNAME}/../hook-module-resolution.sh" "${TEST_DIR}/hook-module-resolution.sh"
+  mkdir -p "${TEST_DIR}/lib" "${TEST_DIR}/adapters"
+  cp -R "${BATS_TEST_DIRNAME}/../lib/." "${TEST_DIR}/lib/"
+  cp -R "${BATS_TEST_DIRNAME}/../adapters/." "${TEST_DIR}/adapters/"
   chmod +x "${TEST_DIR}/pre-commit"
-  
+
   # Initialize git repo
   cd "$TEST_DIR"
   git init --quiet
   git config user.email "test@test.com"
   git config user.name "Test User"
+  # #593: `git init` leaves the repo on master/main, which Gate 0 treats as
+  # PROTECTED and exits on:
+  #     ERROR: Committing to a protected branch without VERSION/CHANGELOG update.
+  # A feature branch is what a real user commits on anyway.
+  git checkout --quiet -b feature/java-gate-fixture
+  # #593: Gate 6 BLOCKS when neither .archlint.yaml nor architecture.yaml exists:
+  #     ❌ ARCHITECTURE CONFIG MISSING - COMMIT BLOCKED
+  # These fixtures exercise the JAVA adapter, which runs in Gate 1 — but Gate 6
+  # would abort the hook first, so the Java tools the cases assert on were never
+  # consulted. `.architecture-skip` is the hook's own documented exemption:
+  #     ⏭️  SKIPPED - Architecture validation (.architecture-skip exemption)
+  # Adding it scopes each case to the gate it is actually about.
+  : > .architecture-skip
+  # Keep the injected hook support tree out of the staged set, so the adapter
+  # only ever sees the fixture's own project files.
+  cat >> .git/info/exclude <<'EOF'
+pre-commit
+adapter-common.sh
+hook-module-resolution.sh
+.architecture-skip
+lib/
+adapters/
+EOF
 }
 
 teardown() {
   # Clean up temporary directory
   cd "$BATS_TEST_DIRNAME" || return 1
   rm -rf "$TEST_DIR"
+}
+
+# #593: materialise a real .java source file in the fixture.
+#
+# `git add .` of a pom.xml alone stages NO .java file, so Gate 1 sees "no code
+# files changed" and SKIPs before the Java adapter is ever routed:
+#     Gate 1: Code Quality                          SKIP
+# Cases that assert on Java tooling therefore could not pass no matter what the
+# adapter did. With a .java file staged the adapter runs and prints the tool
+# output these cases are looking for.
+add_java_source() {
+  mkdir -p src/main/java/com/test
+  cat > src/main/java/com/test/App.java <<'EOF'
+package com.test;
+
+/** Fixture entry point. */
+public class App {
+    /** Main method. */
+    public static void main(String[] args) {
+        System.out.println("fixture");
+    }
+}
+EOF
 }
 
 # -----------------------------------------------------------------------------
@@ -131,6 +192,8 @@ EOF
 </project>
 EOF
 
+  # #593: stage a real .java file so Gate 1 routes to the Java adapter.
+  add_java_source
   git add .
   
   # Run pre-commit - may fail but should mention CheckStyle
@@ -172,6 +235,8 @@ EOF
 </project>
 EOF
 
+  # #593: stage a real .java file so Gate 1 routes to the Java adapter.
+  add_java_source
   git add .
   
   # Run pre-commit
@@ -213,6 +278,8 @@ EOF
 </project>
 EOF
 
+  # #593: stage a real .java file so Gate 1 routes to the Java adapter.
+  add_java_source
   git add .
   
   # Run pre-commit
@@ -264,6 +331,8 @@ EOF
 </project>
 EOF
 
+  # #593: stage a real .java file so Gate 1 routes to the Java adapter.
+  add_java_source
   git add .
   
   # Run pre-commit
