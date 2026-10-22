@@ -61,17 +61,32 @@ recorded_ccn() {
   }
 }
 
-@test "AC-582-02: the whole Gate 3 ratchet passes on this tree" {
+@test "AC-582-02: the whole Gate 3 ratchet passes on the COMMITTED tree" {
   command -v lizard >/dev/null 2>&1 || skip "lizard not installed"
   cd "$REPO_ROOT" || return 1
-  run node scripts/ccn-report.cjs --check --baseline .ccn-baseline.json
+
+  # Run against HEAD, not the working tree. This test asserts what CI will see,
+  # and CI sees the commit — not somebody's uncommitted work in progress. Measured
+  # cost of not doing this: a colleague's in-progress edit to
+  # githooks/lib/validate-code-walkthrough.cjs added three BLOCK lines and turned
+  # this red, which reads as "the ratchet is broken" when the ratchet was doing
+  # exactly its job on code that had not been committed yet.
+  local work="$BATS_TEST_TMPDIR/head-tree"
+  mkdir -p "$work" || return 1
+  git archive HEAD | tar -x -C "$work" || {
+    echo "could not materialize HEAD"
+    return 1
+  }
+
+  cd "$work" || return 1
+  run node "$REPO_ROOT/scripts/ccn-report.cjs" --check --baseline "$work/.ccn-baseline.json"
   [[ "$output" != *"BLOCK"* ]] || {
-    echo "the complexity ratchet reports violations:"
+    echo "the complexity ratchet reports violations against HEAD:"
     echo "$output" | grep BLOCK
     return 1
   }
   [ "$status" -eq 0 ] || {
-    echo "ccn-report --check exited $status"
+    echo "ccn-report --check exited $status on HEAD"
     return 1
   }
 }
