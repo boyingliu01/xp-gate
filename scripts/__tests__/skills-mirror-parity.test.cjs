@@ -41,7 +41,6 @@ function walkFiles(dir, base = dir, out = []) {
 }
 
 function digest(p) {
-  // eslint-disable-next-line no-bitwise
   const crypto = require('crypto');
   return crypto.createHash('sha256').update(fs.readFileSync(p)).digest('hex');
 }

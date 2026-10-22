@@ -188,7 +188,6 @@ describe('AC-489-04: sourced modules must not enable errexit for the caller (#52
     const tmp = fs.mkdtempSync(path.join(require('os').tmpdir(), 'errexit-guard-'));
     const p = path.join(tmp, 'unclosed.sh');
     fs.writeFileSync(p, '#!/usr/bin/env bash\n(\n  set -e\necho never-reaches-here\n');
-    // eslint-disable-next-line no-unused-expressions
     expect(topLevelErrexitOffenders(p)).toHaveLength(0);
     fs.rmSync(tmp, { recursive: true, force: true });
   });
