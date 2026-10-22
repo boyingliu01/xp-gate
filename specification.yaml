@@ -993,6 +993,36 @@ specification:
             hook 文件（`bash -n` 成功）；这是 doctor 探针能工作的前提
           test_type: unit
 
+    # ============================================================
+    # REQ-571: PowerShell 静态分析支持仓库本地作用域，且作用域失效必须 fail-closed。
+    # 未合并分支 fix/powershell-gates-fail-closed 里唯一 main 缺失的功能：仓库可用
+    # .xp-gate-powershell-analysis-paths 声明"产品作用域"。理由：Pester 测试文件
+    # 按 Pester 执行模型会合理触发大量规则告警，全仓扫描要么挡住每次 PowerShell
+    # 提交，要么逼着把规则集打开——两条路都等于不再门禁 PowerShell。
+    #
+    # 真正承重的是"作用域失效"：文件里列了但磁盘上不存在的路径，意味着产品代码
+    # 逃出了门禁（改名/搬走/新增脚本却没更新作用域）。那必须 fail-closed 地发出
+    # 原因，让 pre-commit 映射成计入分母的 WARN，而不是少分析一点还报 PASS。
+    # 声明为空（只有注释/空行）同理：静默分析零个路径会 exit 0 读成干净通过。
+    # 没有作用域文件时保留原有全仓行为，存量仓库不受影响。
+    # ============================================================
+    - id: REQ-571
+      description: "PowerShell 适配器支持仓库本地分析作用域；作用域条目缺失或声明为空必须 fail-closed"
+      priority: high
+      acceptance_criteria:
+        - id: AC-571-01
+          criteria: 作用域文件里列出但磁盘上不存在的路径，必须发出 XP_G1_REASON analysis-path-missing 原因；存在的路径照常分析
+          test_type: unit
+        - id: AC-571-02
+          criteria: 作用域文件存在但只含注释与空行（含纯空白行）时必须发出 analysis-paths-empty 原因，不得静默分析零个路径后 exit 0
+          test_type: unit
+        - id: AC-571-03
+          criteria: 没有作用域文件时必须仍走全仓分析（引擎确实被调用），且不得发出任何作用域相关的原因
+          test_type: unit
+        - id: AC-571-04
+          criteria: 引擎存在但运行失败时必须发出 XP_G1_REASON（断言协议本身，不断言具体文案），确保作用域改造没有让失败退化成静默通过
+          test_type: unit
+
 
     - id: DD-001
       decision: 走薄桥（方案 A）在 ctx.tools 注册三工具，而非独立 MCP server 或纯技能

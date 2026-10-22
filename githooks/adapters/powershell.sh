@@ -115,22 +115,103 @@ run_static_analysis() {
     local POWERSHELL_ARGS
     _powershell_invocation "$PWSH"
     echo "Running PSScriptAnalyzer static analysis on PowerShell scripts..."
-    # Recursively analyze all .ps1 files from repo root
     # Exit with non-zero if Error or Warning severity issues found
     local PSSA_RC=0
     local PSSA_OUT
-    PSSA_OUT=$("$PWSH" "${POWERSHELL_ARGS[@]}" "
-      if (-not (Get-Module -ListAvailable -Name PSScriptAnalyzer)) {
-        Write-Output 'PSSA_MODULE_MISSING'
+    local scope_file=".xp-gate-powershell-analysis-paths"
+    local analysis_targets=()
+
+    # #571: repo-local analysis scope. Pester test files legitimately trip
+    # dozens of rule warnings under the Pester execution model, so a whole-repo
+    # scan either blocks every PowerShell commit or forces the rule set open —
+    # both end in PowerShell not being gated at all. A repo may list its PRODUCT
+    # scope (directories and/or single files, one per line, `#` comments) and
+    # the SAME rules then apply to just that code.
+    #
+    # The load-bearing half is staleness: a listed path that no longer exists
+    # means product code ESCAPED the gate (renamed, moved, or a new script added
+    # without updating the file). That emits a reason so the pre-commit arm maps
+    # it to WARN inside the scoring denominator, instead of silently analysing
+    # less and reporting PASS. Same for a scope file with no usable entries.
+    # Without the file the legacy whole-repo behavior is kept, so existing repos
+    # are unaffected.
+    if [ -f "$scope_file" ]; then
+      local target_line
+      local declared=0
+      while IFS= read -r target_line; do
+        target_line="${target_line%$'\r'}"
+        # Strip surrounding whitespace before classifying: a line of spaces is
+        # not a path, and `case` alone would treat it as one — measured, a
+        # whitespace-only line became an "analysis path not found" entry.
+        target_line="${target_line#"${target_line%%[![:space:]]*}"}"
+        target_line="${target_line%"${target_line##*[![:space:]]}"}"
+        case "$target_line" in ''|'#'*) continue ;; esac
+        declared=$((declared + 1))
+        if [ -e "$target_line" ]; then
+          # shellcheck disable=SC2004  # explicit index arithmetic on an array
+          analysis_targets[${#analysis_targets[@]}]="$target_line"
+        else
+          echo "  ℹ️  analysis path not found (skipped): $target_line"
+          echo "XP_G1_REASON: analysis-path-missing:$target_line"
+        fi
+      done < "$scope_file"
+      if [ "$declared" -eq 0 ]; then
+        # The file exists but declares nothing: analysing zero paths would exit 0
+        # and read as a clean PASS. A file whose entries are all MISSING takes
+        # the per-entry branch above instead, so the two causes stay distinct.
+        echo "XP_G1_REASON: analysis-paths-empty"
+        echo "  ℹ️  $scope_file present but declares no paths - skipping analysis"
+        return 3
+      fi
+    fi
+
+    if [ "${#analysis_targets[@]}" -gt 0 ]; then
+      # Scoped per-path run. -Path binds ONE string only (an array argument
+      # throws "Cannot convert 'System.Object[]'..."), so each target is
+      # analyzed separately and findings are aggregated.
+      local target_array
+      target_array=$(_powershell_path_array "${analysis_targets[@]}")
+      PSSA_OUT=$("$PWSH" "${POWERSHELL_ARGS[@]}" "
+        if (-not (Get-Module -ListAvailable -Name PSScriptAnalyzer)) {
+          Write-Output 'PSSA_MODULE_MISSING'
+          exit 0
+        }
+        # Non-terminating errors must become terminating: otherwise a broken
+        # settings file or unreadable path yields an empty result set that LOOKS
+        # like a clean pass.
+        \$ErrorActionPreference = 'Stop'
+        try { Import-Module PSScriptAnalyzer -ErrorAction Stop | Out-Null } catch { exit 3 }
+        \$settings = Join-Path (Get-Location) 'PSScriptAnalyzerSettings.psd1'
+        \$all = @()
+        foreach (\$p in $target_array) {
+          \$recurse = [System.IO.Directory]::Exists(\$p)
+          if (Test-Path -LiteralPath \$settings) {
+            \$all += @(Invoke-ScriptAnalyzer -Path \$p -Recurse:\$recurse -Severity Error,Warning -Settings \$settings -ErrorAction Stop)
+          } else {
+            \$all += @(Invoke-ScriptAnalyzer -Path \$p -Recurse:\$recurse -Severity Error,Warning -ErrorAction Stop)
+          }
+        }
+        if (\$all) {
+          \$all | Format-Table -AutoSize
+          exit 1
+        }
         exit 0
-      }
-      \$results = Invoke-ScriptAnalyzer -Path . -Recurse -Severity Error,Warning
-      if (\$results) {
-        \$results | Format-Table -AutoSize
-        exit 1
-      }
-      exit 0
-    " 2>&1) || PSSA_RC=$?
+      " 2>&1) || PSSA_RC=$?
+    else
+      PSSA_OUT=$("$PWSH" "${POWERSHELL_ARGS[@]}" "
+        if (-not (Get-Module -ListAvailable -Name PSScriptAnalyzer)) {
+          Write-Output 'PSSA_MODULE_MISSING'
+          exit 0
+        }
+        \$results = Invoke-ScriptAnalyzer -Path . -Recurse -Severity Error,Warning
+        if (\$results) {
+          \$results | Format-Table -AutoSize
+          exit 1
+        }
+        exit 0
+      " 2>&1) || PSSA_RC=$?
+    fi
+
     printf '%s\n' "$PSSA_OUT"
     case "$PSSA_RC" in
       0)
