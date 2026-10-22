@@ -59,6 +59,25 @@ function countCrlfLines(text) {
 }
 
 /**
+ * Convert a native filesystem path to the form Git bash can open.
+ *
+ * A backslash inside an argument to MSYS bash is an ESCAPE character, so
+ * `C:\Users\think\.config\xp-gate\hooks\pre-push` reaches bash as
+ * `C:Usersthink.configxp-gatehookspre-push` and every candidate path looks
+ * missing. Forward slashes are accepted by Windows APIs too, so this is the one
+ * form that works on both sides.
+ *
+ * Exported because the transform is the thing being tested: asserting only
+ * through `inspectHookFile` would leave the conversion itself unexamined.
+ *
+ * @param {string} p - native path
+ * @returns {string} path with forward slashes
+ */
+function toPosixPath(p) {
+  return String(p).replace(/\\/g, '/');
+}
+
+/**
  * Ask bash whether it can parse the file (`bash -n`).
  * @param {string} filePath - Hook to check
  * @param {string} bashBin - Resolved bash binary
@@ -66,7 +85,13 @@ function countCrlfLines(text) {
  */
 function checkParseable(filePath, bashBin) {
   if (!bashBin) return { checked: false, ok: true, detail: 'bash not found; parse check skipped' };
-  const res = spawnSync(bashBin, ['-n', filePath], { encoding: 'utf8', timeout: 30000 });
+  // Pass a POSIX path (#566). Git bash treats a backslash in its argv as an
+  // escape, which silently collapsed every native Windows path into a
+  // nonexistent one and reported healthy hooks as unparseable.
+  const res = spawnSync(bashBin, ['-n', toPosixPath(filePath)], {
+    encoding: 'utf8',
+    timeout: 30000,
+  });
   if (res.error) return { checked: false, ok: true, detail: `bash -n could not run: ${res.error.message}` };
   if (res.status === 0) return { checked: true, ok: true, detail: 'parses' };
   // bash reports the first syntax error it hits. Under CRLF that line number is
@@ -118,4 +143,4 @@ function inspectHookFile(filePath, options = {}) {
   return { ok: problems.length === 0, crlfLines, parseable: parsed.ok, problems };
 }
 
-module.exports = { inspectHookFile, findBash, countCrlfLines };
+module.exports = { inspectHookFile, findBash, countCrlfLines, toPosixPath };
