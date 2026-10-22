@@ -1103,6 +1103,34 @@ specification:
           criteria: 合法的裸目录名仍被采纳并剪除，且在 stderr 上宣告（防止校验过度拒绝）
           test_type: unit
 
+    # ============================================================
+    # REQ-576: fail-closed 必须同时体现为「非零返回码」与 XP_G1_REASON 行。
+    # pre-commit 的 powershell 分支是先按返回码 switch、reason 只用作文案：
+    #     PS_G1_OUTPUT=$(...; run_static_analysis 2>&1) || PS_G1_EXIT=$?
+    #     case "$PS_G1_EXIT" in
+    #       0) echo "✅ PASSED - PowerShell code quality ..."
+    # 所以带 reason 却 return 0 的 reason 会被丢弃，门禁打印 PASSED。
+    # 实测（本需求修复前，作用域文件列了一条存在、一条缺失，扫描干净）：
+    #     run_static_analysis -> RETURN CODE = 0
+    # 即「产品代码可能逃出了门禁」被打印后丢弃，Gate 1 判通过。#571 引入了这个
+    # 缺陷（发了 reason 但返回成功）。已安装副本此前已察觉，改为返回 3。
+    # 另外：扫描中途抛异常时 pwsh 退出 1，而本适配器里 1 表示「有 findings」，
+    # 于是分析崩溃被报成 lint 违规。必须区分开，走 fail-closed 的「无法验证」。
+    # ============================================================
+    - id: REQ-576
+      description: "PowerShell 适配器在作用域条目缺失/扫描异常时必须返回非零码，且崩溃不得被报成 findings"
+      priority: critical
+      acceptance_criteria:
+        - id: AC-576-01
+          criteria: 作用域文件里的条目缺失但扫描干净时，run_static_analysis 必须返回非零码（不得为 0），且仍发出 analysis-path-missing 原因
+          test_type: unit
+        - id: AC-576-02
+          criteria: 作用域文件存在但未声明任何路径时返回非零码（不得为 0）
+          test_type: unit
+        - id: AC-576-03
+          criteria: 扫描抛出异常（片段 exit 3）必须映射为「无法验证」（exit 2）并回显捕获到的异常文本，不得落入 findings 的 exit 1
+          test_type: unit
+
 
     # ============================================================
     # REQ-574: Gate MW 校验证据必须与 .delphi-config.json 的席位绑定。
