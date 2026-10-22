@@ -53,74 +53,120 @@ write_pre_push_report() {
   # store it serialised back into the `details` string domain (every value there
   # is a string; the journal has broken before over mixed types).
   export XP_GATE_M_SURVIVORS_JSON="${M_SURVIVORS_JSON:-}"
-  python3 - <<PY 2>/dev/null || true
-import json
-import os
-from pathlib import Path
-pushed_files = '''${PUSHED_FILES:-}'''.splitlines()
-passed = 1 if '$verdict' == 'PASS' else 0
-# Absent stays absent: no key at all when nothing was measured, so a reader can
-# tell "not measured" from "measured: zero survivors" (#544).
-try:
-    _survivors_raw = os.environ.get('XP_GATE_M_SURVIVORS_JSON', '').strip()
-    survivors_detail = json.loads(_survivors_raw) if _survivors_raw else None
-except (ValueError, TypeError):
-    survivors_detail = None
-_m_details = {'skip_reason': '${GATE_M_SKIP_REASON:-}', 'duration_ms': '${M_DURATION_MS:-0}', 'mutation_score': '${M_SCORE:-}'}
-if survivors_detail is not None:
-    _m_details['survivors'] = json.dumps(survivors_detail, sort_keys=True)
-report = {
-  'timestamp': '$timestamp',
-  'trigger': 'pre-push',
-  'branch': '$CURRENT_BRANCH',
-  'commit': '$commit_hash',
-  'changed_files': [f for f in pushed_files if f],
-  'overall': {
-    'score': None,   # filled in below, once the gate list exists
-    'gates_passed': passed,
-    'gates_total': 8,
-    'verdict': '$verdict',
-  },
-  'gates': [
-    {'id': 'MP', 'name': 'Gate-Script Mirror Parity', 'status': '${GATE_MP_STATUS:-SKIP}', 'details': {'duration_ms': '${MP_DURATION_MS:-0}'}},
-    {'id': '10', 'name': 'Build Integrity', 'status': '${GATE_10_STATUS:-SKIP}', 'details': {}},
-    {'id': 'M', 'name': 'Mutation Testing', 'status': '${GATE_M_STATUS:-SKIP}', 'details': _m_details},
-    # #557 follow-up: this line read GATE_M_PYTHON_STATUS while the code assigns
-    # GATE_M_PY_STATUS, so the field always fell back to its SKIP default -- the
-    # "never write the real state" bug #557 set out to fix, still present for
-    # this one gate. The skip reason now travels with it, so a retro reader can
-    # tell "no Python here" from "timed out" from "mutmut missing".
-    {'id': 'M-Python', 'name': 'Mutation Testing (Python)', 'status': '${GATE_M_PY_STATUS:-SKIP}', 'details': {'skip_reason': '${GATE_M_PY_SKIP_REASON:-}'}},
-    {'id': 'M-Go', 'name': 'Mutation Testing (Go)', 'status': '${GATE_M_GO_STATUS:-SKIP}', 'details': {}},
-    {'id': 'M-Java', 'name': 'Mutation Testing (Java)', 'status': '${GATE_M_JAVA_STATUS:-SKIP}', 'details': {}},
-    {'id': 'M-Kotlin', 'name': 'Mutation Testing (Kotlin)', 'status': '${GATE_M_KOTLIN_STATUS:-SKIP}', 'details': {}},
-    {'id': 'M2', 'name': 'Mock Density (WARNING only)', 'status': '${GATE_M2_STATUS:-SKIP}', 'details': {}},
-    {'id': 'ML', 'name': 'Mock Layering', 'status': '${GATE_M3_STATUS:-SKIP}', 'details': {}},
-    {'id': 'UI', 'name': 'UI Sprint Gates', 'status': '${GATE_UI_STATUS:-SKIP}', 'details': {}},
-    {'id': 'MW', 'name': 'Code Walkthrough', 'status': '${GATE_DELPHI_STATUS:-SKIP}', 'details': {'remote': '$REMOTE', 'url': '$URL', 'skip_reason': '${GATE_DELPHI_SKIP_REASON:-}'}},
-    {'id': 'S', 'name': 'Sprint Flow Enforcement', 'status': '${GATE_S_STATUS:-SKIP}', 'details': {}}
-  ],
-  'warnings': [],
-  'errors': [] if '$verdict' == 'PASS' else ['pre-push hook exited with code $exit_code'],
-}
-# #580: the score is a MEASUREMENT over the gates that actually ran, not a
-# restatement of the verdict. It used to be
-#     '10.0/10' if verdict == 'PASS' else '0.0/10'
-# which told a reader nothing about the gate list and, on an all-SKIP run
-# (docs-only push, no supported language, tools missing), journaled 0.0/10 --
-# read as "every gate failed", a claim never tested. `None` is deliberate: 0.0
-# would be a wrong claim, and the honest statement is "not measured". A reader
-# distinguishes the two via `verdict` and the per-gate statuses.
-_ran = [g for g in report['gates'] if g['status'] != 'SKIP']
-report['overall']['score'] = (
-    '%.1f/10' % (10.0 * sum(1 for g in _ran if g['status'] == 'PASS') / len(_ran))
-    if _ran else None
-)
-report['overall']['gates_run'] = len(_ran)
-report['overall']['gates_skipped'] = len(report['gates']) - len(_ran)
+  # #597: resolve a WORKING interpreter instead of assuming `python3`.
+  #
+  # Measured on Windows Git Bash: `python3` resolves to the Microsoft Store
+  # execution-alias stub at
+  #     /c/Users/think/AppData/Local/Microsoft/WindowsApps/python3
+  # which exits non-zero and prints nothing (`python3 --version` is empty). The
+  # old `python3 - <<PY 2>/dev/null || true` then swallowed the failure, so:
+  #   - the JSON journal was never written;
+  #   - bash went on to execute the heredoc BODY as shell commands, producing
+  #       python3: line 56: None: command not found
+  #       python3: line 56: verdict: command not found
+  # A `|| true` around a whole script body cannot distinguish "python missing"
+  # from "script failed", and the journal is the only audit trail a push leaves.
+  #
+  # `python` is the real interpreter on Windows (3.12.x) while `python3` is the
+  # stub; on Linux `python3` is real and `python` may be absent. Probe both and
+  # require the candidate to actually report a version.
+  local py_bin=""
+  for _candidate in python3 python py; do
+    if command -v "$_candidate" >/dev/null 2>&1 && \
+       "$_candidate" --version >/dev/null 2>&1; then
+      py_bin="$_candidate"
+      break
+    fi
+  done
+  if [ -z "$py_bin" ]; then
+    echo "⚠️  Gate M journal: no working Python interpreter found (tried python3, python, py) — report NOT written for $report_file." >&2
+    return 0
+  fi
+  # No blanket `|| true`: a failing interpreter must be visible. The journal is
+  # advisory, so still return 0, but say so instead of dying silently.
+  #
+  # #597: the Python body goes to a TEMP FILE, not a `<<PY` heredoc.
+  #
+  # This function runs from the EXIT trap, i.e. AFTER the main body's
+  #     while read local_ref local_sha remote_ref remote_sha; do ...
+  # loop has consumed the hook's stdin. A heredoc is read from stdin, so by then
+  # `python - <<PY` receives NOTHING — bash discards the body and executes its
+  # lines as commands instead:
+  #     .git/hooks/pre-push: line 92: None: command not found
+  #     .git/hooks/pre-push: line 92: verdict: command not found
+  # The old form (`python3 - <<PY 2>/dev/null || true`) hid all of it, so the
+  # JSON journal was silently never written on any platform. Writing the script
+  # to a file removes the stdin dependency entirely.
+  local py_script py_rc
+  py_script="$(mktemp)" || {
+    echo "⚠️  Gate M journal: could not create a temp file — report NOT written for $report_file." >&2
+    return 0
+  }
+  # Values are injected here (they are expanded by bash before Python parses the
+  # file), exactly as the heredoc did.
+  {
+    printf '%s\n' \
+      'import json' \
+      'import os' \
+      'from pathlib import Path'
+    printf '%s\n' "pushed_files = '''${PUSHED_FILES:-}'''.splitlines()"
+    printf '%s\n' "passed = 1 if '$verdict' == 'PASS' else 0"
+    printf '%s\n' 'try:'
+    printf '%s\n' "    _survivors_raw = os.environ.get('XP_GATE_M_SURVIVORS_JSON', '').strip()"
+    printf '%s\n' '    survivors_detail = json.loads(_survivors_raw) if _survivors_raw else None'
+    printf '%s\n' 'except (ValueError, TypeError):'
+    printf '%s\n' '    survivors_detail = None'
+    printf '%s\n' "_m_details = {'skip_reason': '${GATE_M_SKIP_REASON:-}', 'duration_ms': '${M_DURATION_MS:-0}', 'mutation_score': '${M_SCORE:-}'}"
+    printf '%s\n' 'if survivors_detail is not None:'
+    printf '%s\n' "    _m_details['survivors'] = json.dumps(survivors_detail, sort_keys=True)"
+    printf '%s\n' 'report = {'
+    printf '%s\n' "  'timestamp': '$timestamp',"
+    printf '%s\n' "  'trigger': 'pre-push',"
+    printf '%s\n' "  'branch': '$CURRENT_BRANCH',"
+    printf '%s\n' "  'commit': '$commit_hash',"
+    printf '%s\n' "  'changed_files': [f for f in pushed_files if f],"
+    printf '%s\n' "  'overall': {"
+    printf '%s\n' "    'score': None,"
+    printf '%s\n' "    'gates_passed': passed,"
+    printf '%s\n' "    'gates_total': 8,"
+    printf '%s\n' "    'verdict': '$verdict',"
+    printf '%s\n' "  },"
+    printf '%s\n' "  'gates': ["
+    printf '%s\n' "    {'id': 'MP', 'name': 'Gate-Script Mirror Parity', 'status': '${GATE_MP_STATUS:-SKIP}', 'details': {'duration_ms': '${MP_DURATION_MS:-0}'}},"
+    printf '%s\n' "    {'id': '10', 'name': 'Build Integrity', 'status': '${GATE_10_STATUS:-SKIP}', 'details': {}},"
+    printf '%s\n' "    {'id': 'M', 'name': 'Mutation Testing', 'status': '${GATE_M_STATUS:-SKIP}', 'details': _m_details},"
+    printf '%s\n' "    {'id': 'M-Python', 'name': 'Mutation Testing (Python)', 'status': '${GATE_M_PY_STATUS:-SKIP}', 'details': {'skip_reason': '${GATE_M_PY_SKIP_REASON:-}'}},"
+    printf '%s\n' "    {'id': 'M-Go', 'name': 'Mutation Testing (Go)', 'status': '${GATE_M_GO_STATUS:-SKIP}', 'details': {}},"
+    printf '%s\n' "    {'id': 'M-Java', 'name': 'Mutation Testing (Java)', 'status': '${GATE_M_JAVA_STATUS:-SKIP}', 'details': {}},"
+    printf '%s\n' "    {'id': 'M-Kotlin', 'name': 'Mutation Testing (Kotlin)', 'status': '${GATE_M_KOTLIN_STATUS:-SKIP}', 'details': {}},"
+    printf '%s\n' "    {'id': 'M2', 'name': 'Mock Density (WARNING only)', 'status': '${GATE_M2_STATUS:-SKIP}', 'details': {}},"
+    printf '%s\n' "    {'id': 'ML', 'name': 'Mock Layering', 'status': '${GATE_M3_STATUS:-SKIP}', 'details': {}},"
+    printf '%s\n' "    {'id': 'UI', 'name': 'UI Sprint Gates', 'status': '${GATE_UI_STATUS:-SKIP}', 'details': {}},"
+    printf '%s\n' "    {'id': 'MW', 'name': 'Code Walkthrough', 'status': '${GATE_DELPHI_STATUS:-SKIP}', 'details': {'remote': '$REMOTE', 'url': '$URL', 'skip_reason': '${GATE_DELPHI_SKIP_REASON:-}'}},"
+    printf '%s\n' "    {'id': 'S', 'name': 'Sprint Flow Enforcement', 'status': '${GATE_S_STATUS:-SKIP}', 'details': {}}"
+    printf '%s\n' "  ],"
+    printf '%s\n' "  'warnings': [],"
+    printf '%s\n' "  'errors': [] if '$verdict' == 'PASS' else ['pre-push hook exited with code $exit_code'],"
+    printf '%s\n' '}'
+    printf '%s\n' "# #580: the score is a MEASUREMENT over the gates that actually ran, not a"
+    printf '%s\n' '# restatement of the verdict.` None` is deliberate: 0.0 would be a wrong'
+    printf '%s\n' '# claim, and the honest statement is "not measured".'
+    printf '%s\n' "_ran = [g for g in report['gates'] if g['status'] != 'SKIP']"
+    printf '%s\n' "report['overall']['score'] = ("
+    printf '%s\n' "    '%.1f/10' % (10.0 * sum(1 for g in _ran if g['status'] == 'PASS') / len(_ran))"
+    printf '%s\n' "    if _ran else None"
+    printf '%s\n' ")"
+    printf '%s\n' "report['overall']['gates_run'] = len(_ran)"
+    printf '%s\n' "report['overall']['gates_skipped'] = len(report['gates']) - len(_ran)"
+    printf '%s\n' "Path('$report_file').write_text(json.dumps(report, indent=2) + '\n')"
+  } > "$py_script"
 
-Path('$report_file').write_text(json.dumps(report, indent=2) + '\n')
-PY
+  "$py_bin" "$py_script"
+  py_rc=$?
+  rm -f "$py_script"
+  if [ "$py_rc" -ne 0 ]; then
+    echo "⚠️  Gate M journal: $py_bin exited $py_rc — the push's audit record at $report_file is missing." >&2
+  fi
 }
 
 _pre_push_report_on_exit() {
