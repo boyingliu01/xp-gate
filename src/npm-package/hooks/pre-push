@@ -76,7 +76,7 @@ report = {
   'commit': '$commit_hash',
   'changed_files': [f for f in pushed_files if f],
   'overall': {
-    'score': '10.0/10' if '$verdict' == 'PASS' else '0.0/10',
+    'score': None,   # filled in below, once the gate list exists
     'gates_passed': passed,
     'gates_total': 8,
     'verdict': '$verdict',
@@ -103,6 +103,22 @@ report = {
   'warnings': [],
   'errors': [] if '$verdict' == 'PASS' else ['pre-push hook exited with code $exit_code'],
 }
+# #580: the score is a MEASUREMENT over the gates that actually ran, not a
+# restatement of the verdict. It used to be
+#     '10.0/10' if verdict == 'PASS' else '0.0/10'
+# which told a reader nothing about the gate list and, on an all-SKIP run
+# (docs-only push, no supported language, tools missing), journaled 0.0/10 --
+# read as "every gate failed", a claim never tested. `None` is deliberate: 0.0
+# would be a wrong claim, and the honest statement is "not measured". A reader
+# distinguishes the two via `verdict` and the per-gate statuses.
+_ran = [g for g in report['gates'] if g['status'] != 'SKIP']
+report['overall']['score'] = (
+    '%.1f/10' % (10.0 * sum(1 for g in _ran if g['status'] == 'PASS') / len(_ran))
+    if _ran else None
+)
+report['overall']['gates_run'] = len(_ran)
+report['overall']['gates_skipped'] = len(report['gates']) - len(_ran)
+
 Path('$report_file').write_text(json.dumps(report, indent=2) + '\n')
 PY
 }

@@ -1198,6 +1198,31 @@ specification:
           criteria: 空值、parse_error 与非数字值仍必须落入「无法判定」的 WARN 分支，不得被当成已测量
           test_type: unit
 
+    # ============================================================
+    # REQ-580: pre-push 日志的 score 必须是「实际跑过的门」的度量，而非 verdict 的复述。
+    # 原来写的是 '10.0/10' if verdict == 'PASS' else '0.0/10'。当所有门都 SKIP
+    # （只改文档的推送、无受支持语言、工具缺失），日志记 0.0/10——读者会读成
+    # 「所有门都挂了」，而这是关于代码的、从未被检验过的断言。诚实的表述是「没有测量」。
+    # 两种状态被折叠进一个数字：
+    #   - 有门跑过、部分失败 -> 低分是真实的，有用
+    #   - 所有门都 SKIP      -> 没有分数，日志必须如此声明
+    # 因此取 None 而非 0：字段为 null，迫读者去看 verdict 与各门状态。
+    # 同时补记 gates_run / gates_skipped 供分辨。
+    # ============================================================
+    - id: REQ-580
+      description: "pre-push 日志 score 必须按实际执行的门计算，无门执行时为 null 而非 0.0/10"
+      priority: high
+      acceptance_criteria:
+        - id: AC-580-01
+          criteria: 所有门都 SKIP 时 score 必须为 null，不得记 0.0/10
+          test_type: unit
+        - id: AC-580-02
+          criteria: 实际执行的门全 PASS、其余 SKIP 时 score 必须为 10.0/10（分母只计已执行的门）
+          test_type: unit
+        - id: AC-580-03
+          criteria: 存在真实失败时仍必须给出真实的低分（如 1 PASS 3 FAIL 为 2.5/10），不得因本次修复而掩盖失败
+          test_type: unit
+
 
     # ============================================================
     # REQ-574: Gate MW 校验证据必须与 .delphi-config.json 的席位绑定。
