@@ -1478,6 +1478,25 @@ specification:
           criteria: fixture 必须链接仓库 node_modules，且 teardown 必须用 unlinkSync 断开链接
           test_type: unit
 
+    # ============================================================
+    # REQ-591: 门禁失败时必须留下可诊断的证据。
+    # Gate 5b 用 `npx bats githooks/__tests__/`，默认不打印失败用例的输出，只报断言行：
+    #     #   `[[ "$output" =~ "No code files changed, skipping SAST scan" ]]' failed
+    # 看不出 hook 实际打印了什么。两点让这个缺陷致命：
+    #   1. Gate 5b 于 2026-10-22 首次执行（距 #484 接入已过 203 个提交），报出 67 个
+    #      从未有人见过的失败；
+    #   2. 其中多数失败在本地是绿的——证据只存在于 CI runner 内，不开这个开关就被丢弃，
+    #      无法区分「hook 变了」与「这台 runner 不一样」。
+    # 无法诊断的门禁不会被修好，只会被忽略，最后被删掉。保留失败输出，红构建才是可行动的。
+    # ============================================================
+    - id: REQ-591
+      description: "CI 运行 BATS 时必须保留失败用例的输出，使失败可诊断"
+      priority: high
+      acceptance_criteria:
+        - id: AC-591-01
+          criteria: Gate 5b 的 npx bats 调用必须带 --print-output-on-failure
+          test_type: unit
+
 
     # ============================================================
     # REQ-574: Gate MW 校验证据必须与 .delphi-config.json 的席位绑定。
