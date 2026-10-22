@@ -162,7 +162,15 @@ jobs:
           if [[ "$(< project_language.txt)" == "python" ]] || [[ -f "requirements.txt" ]]; then
             pip install ruff mypy pylint
           fi
-          
+
+          # Gate 3 (cyclomatic complexity) hard-requires lizard and fails CLOSED
+          # when it is missing (#499 rationale). Installing it only for Python
+          # projects would be wrong: Gate 3 runs regardless of language, and a
+          # missing analyzer blocked every single run with "lizard is not
+          # installed" (#583). A fail-closed gate whose prerequisite is never
+          # provisioned is a gate that is guaranteed to fail.
+          pip install lizard
+
           # Go quality tools
           if [[ "$(< project_language.txt)" == "go" ]] || [[ -f "go.mod" ]]; then
             go install github.com/golangci/golangci-lint/cmd/golangci-lint@latest

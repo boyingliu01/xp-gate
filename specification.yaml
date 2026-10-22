@@ -1271,6 +1271,28 @@ specification:
           criteria: 本仓库上 ccn-report --check 不得报告任何 BLOCK，且必须以 0 退出
           test_type: unit
 
+    # ============================================================
+    # REQ-583: fail-closed 的门禁必须同时把它的工具装进 CI。
+    # Gate 3 在分析器缺失时阻断（#499 的理由：跑不了的安全/质量门不得报通过）。这是
+    # 对的——但也意味着 lizard 是硬前置依赖，CI 必须安装它。
+    # quality-gates.yml 装了 ruff/mypy/pylint，唯独没装 lizard，于是 Gate 3 每次
+    # 都撞上自己的守卫：
+    #     ❌ lizard is not installed — Gate 3 cannot run.
+    # 一道永远红的门比没有门更糟：它无法区分「代码变复杂了」与「分析器缺失」，
+    # 信号就丢了；而管道长期红会教会所有人忽略它。此前这个问题被 Gate 1 的
+    # ESLint 警告先挡住（#581），修完才露出下一堵墙。
+    # ============================================================
+    - id: REQ-583
+      description: "CI 必须安装 Gate 3 硬依赖的 lizard，使 fail-closed 门禁有可用前置条件"
+      priority: critical
+      acceptance_criteria:
+        - id: AC-583-01
+          criteria: quality-gates.yml 在因 lizard 缺失而 fail-closed 的同时，必须包含安装 lizard 的步骤
+          test_type: unit
+        - id: AC-583-02
+          criteria: 其余 fail-closed 工具前置（ruff、mypy、pylint）必须保持被安装，防止同类缺陷复发
+          test_type: unit
+
 
     # ============================================================
     # REQ-574: Gate MW 校验证据必须与 .delphi-config.json 的席位绑定。
