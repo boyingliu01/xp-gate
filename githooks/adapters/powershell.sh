@@ -89,6 +89,30 @@ _find_powershell_files() {
       entry="${entry#./}"
       entry="${entry%/}"
       [ -n "$entry" ] || continue
+
+      # #574: discovery feeds THREE denominators at once (test discovery,
+      # coverage, static-analysis scope), so a bad entry does not merely fail to
+      # prune -- it silently shrinks all three while the file still looks
+      # reasonable.
+      #   -name '*'     matches EVERY directory -> prunes the whole tree -> the
+      #                 gate analyses nothing and still exits 0.
+      #   -name 'a/b'   matches nothing (names have no separators) -> a silent
+      #                 no-op that reads as working config.
+      # Only bare directory NAMES are honoured; anything else is reported and
+      # ignored. Reported, not silently dropped: an ignored entry is a config
+      # error the operator has to see.
+      case "$entry" in
+        */*|*\\*|*'*'*|*'?'*|*'['*)
+          echo "  ⚠️  $prune_file: ignoring invalid entry '$entry' (must be a bare directory name, no separators or glob metacharacters)" >&2
+          continue
+          ;;
+        .|..)
+          echo "  ⚠️  $prune_file: ignoring invalid entry '$entry'" >&2
+          continue
+          ;;
+      esac
+
+      echo "  ℹ️  pruning directory name '$entry' (from $prune_file)" >&2
       prune_args[${#prune_args[@]}]=-o
       prune_args[${#prune_args[@]}]=-name
       prune_args[${#prune_args[@]}]="$entry"
