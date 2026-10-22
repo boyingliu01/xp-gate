@@ -813,6 +813,31 @@ specification:
             handler 判定不变（分别为返回值、1、1），不得因本次修复而回归或产生未捕获拒绝
           test_type: unit
 
+    # ============================================================
+    # REQ-565: xp-gate principles <目录> 必须真的检查目录里的文件。
+    # principles() 把目标原样透传给 principles-checker --files，而后者只接受
+    # 文件路径：目录不匹配任何 adapter 扩展名并被静默丢弃，于是输出
+    # "✓ No violations found / Files checked: 0" 且 exit 0 —— 与"目录确实干净"
+    # 完全无法区分。CLI 自己的 usage 串写着 <file_or_directory>，所以目录形式
+    # 不是未支持的附加项，而是被文档承诺却在静默空转的那一种。
+    # 与 #561/#563 同类：为未执行的工作报告成功。
+    # ============================================================
+    - id: REQ-565
+      description: "目录目标必须先展开为引擎可分析的文件清单；空展开必须显式失败而非报告通过"
+      priority: high
+      acceptance_criteria:
+        - id: AC-565-01
+          criteria: 目录目标展开为其内部的受支持源文件（含子目录，跳过 node_modules/.git/dist
+            等目录与 *.test.*/*.spec.* 测试文件），不再把目录本身交给检查器
+          test_type: unit
+        - id: AC-565-02
+          criteria: 文件目标原样透传——本次修复不得改变已经工作的文件形式
+          test_type: unit
+        - id: AC-565-03
+          criteria: 不含受支持源文件的目录展开为空列表（而非返回目录本身），调用方据此显式报错；
+            "无可分析文件"绝不以 exit 0 呈现
+          test_type: unit
+
 
     - id: DD-001
       decision: 走薄桥（方案 A）在 ctx.tools 注册三工具，而非独立 MCP server 或纯技能
