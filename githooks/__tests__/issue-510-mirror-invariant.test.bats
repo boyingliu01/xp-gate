@@ -39,8 +39,19 @@ teardown() {
 # The real list-computation block, taken out of the live hook at run time.
 # A restructure that moves or renames it makes the extraction empty, which
 # fails here rather than quietly testing nothing.
+#
+# The range END must be the early-exit guard's own `fi`, not just any `fi`:
+# `awk '/START/,/^fi$/'` stops at the FIRST `fi` in the file, and the
+# DOCS_ONLY_COMMIT block (#REQ-F2) introduced one that comes earlier. The old
+# form silently truncated the block before the early exit, so AC-510-02/03 were
+# asserting against a fragment that could not contain what they test.
 changed_lists_block() {
-  awk '/^MIRROR_PATH_FILTER=/,/^fi$/ {print}' "$PRE_COMMIT_COPY"
+  awk '
+    /^MIRROR_PATH_FILTER=/ { capturing = 1 }
+    capturing { print }
+    capturing && /No files changed\. Skipping gates\./ { seen_skip = 1 }
+    capturing && seen_skip && /^fi$/ { exit }
+  ' "$PRE_COMMIT_COPY"
 }
 
 #   $1 = optional sed transform to simulate a bad refactor
@@ -84,9 +95,21 @@ run_changed_lists() {
   # exit on the filtered corpus. With a mirror-only index this MUST hit
   # "No files changed. Skipping gates." -- proving the fixture is genuinely
   # mirror-only and that our passing test above would flip red on the bug.
-  run run_changed_lists 's/if \[ -z "\$RAW_CHANGED_FILES" \]/if [ -z "$CHANGED_FILES" ]/'
+  #
+  # The extraction stops at the first `fi`, so the early-exit guard is the only
+  # one in the block. The substitution below targets the GUARD EXPRESSION, not a
+  # whole line: the line was previously matched as
+  #     s/if \[ -z "$RAW_CHANGED_FILES" \]/...
+  # which broke as soon as anything else on that line changed.
+  run run_changed_lists 's/\[ -z "\$RAW_CHANGED_FILES" \]/[ -z "$CHANGED_FILES" ]/'
+  echo "$output"
   [ "$status" -eq 0 ]
-  [[ "$output" == *"No files changed. Skipping gates."* ]]
+  [[ "$output" == *"No files changed. Skipping gates."* ]] || {
+    echo "re-keying the early exit on CHANGED_FILES did NOT fire the skip."
+    echo "Either the substitution missed (the guard was renamed/reshaped) or the"
+    echo "fixture is not mirror-only. Either way this mutation check is vacuous."
+    return 1
+  }
   [[ "$output" != *"EARLY-EXIT-DID-NOT-FIRE"* ]]
 }
 
