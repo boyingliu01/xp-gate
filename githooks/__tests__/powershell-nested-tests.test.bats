@@ -105,11 +105,48 @@ assert_test_array() {
   [ "$status" -eq 0 ]
   [[ "$output" == *"Running Pester with code coverage"* ]]
   [ -f "$CAPTURE_FILE" ]
-  command=$(captured_pester_command)
-  assert_test_array "$command"
-  [[ "$command" == *"-CodeCoverage @("* ]]
-  coverage_array=${command#* -CodeCoverage }
-  coverage_array=${coverage_array% -PassThru*}
+
+  # #599: run_coverage now builds a Pester 5 configuration object instead of the
+  # deprecated Pester 4 parameter set, because `-Path ... -CodeCoverage ...`
+  # fails outright on Pester 5 ("cannot resolve parameter set") and silently
+  # produced no coverage.xml. The captured command is therefore
+  #     $results = Invoke-Pester -Configuration $cfg
+  # and the arrays live in the preceding assignments. Assert the ARRAYS, which is
+  # what this case is about (safe quoting + correct exclusion), not the shape of
+  # the Invoke-Pester line.
+  captured=$(cat "$CAPTURE_FILE")
+
+  [[ "$captured" == *'Invoke-Pester'* ]]
+
+  # The test-file array feeds Run.Path.
+  test_array=$(printf '%s\n' "$captured" | sed -n 's/.*\$cfg\.Run\.Path = \(@([^)]*)\).*/\1/p')
+  [ -n "$test_array" ] || {
+    echo "could not find the Run.Path array in the captured command:"
+    printf '%s\n' "$captured"
+    return 1
+  }
+  [[ "$test_array" == "@("* ]]
+  [[ "$test_array" == *"'./tests/top-level.Tests.ps1'"* ]]
+  [[ "$test_array" == *"'./test/legacy.Tests.ps1'"* ]]
+  [[ "$test_array" == *"'./skills/clipboard-vision/__tests__/clipboard-vision.Tests.ps1'"* ]]
+  [[ "$test_array" == *"'./skills/clip board''s vision/__tests__/quoted.Tests.ps1'"* ]]
+  [[ "$test_array" != *"/.git/"* ]]
+  [[ "$test_array" != *"/node_modules/"* ]]
+  [[ "$test_array" != *"/dist/"* ]]
+  [[ "$test_array" != *"/coverage/"* ]]
+  [[ "$test_array" != *"/plugins/claude-code/skills/"* ]]
+  [[ "$test_array" != *"/plugins/opencode/skills/"* ]]
+  [[ "$test_array" != *"/plugins/qoder/skills/"* ]]
+  [[ "$test_array" != *"/src/npm-package/skills/"* ]]
+  [[ "$test_array" != *"/src/npm-package/plugins/"* ]]
+
+  # The coverage array feeds CodeCoverage.Path and must hold SOURCE only.
+  coverage_array=$(printf '%s\n' "$captured" | sed -n 's/.*\$cfg\.CodeCoverage\.Path = \(@([^)]*)\).*/\1/p')
+  [ -n "$coverage_array" ] || {
+    echo "could not find the CodeCoverage.Path array in the captured command:"
+    printf '%s\n' "$captured"
+    return 1
+  }
   [[ "$coverage_array" == "@("* ]]
   [[ "$coverage_array" == *"'./src/module.ps1'"* ]]
   [[ "$coverage_array" != *".Tests.ps1"* ]]
@@ -117,6 +154,10 @@ assert_test_array() {
   [[ "$coverage_array" != *"/node_modules/"* ]]
   [[ "$coverage_array" != *"/dist/"* ]]
   [[ "$coverage_array" != *"/coverage/"* ]]
+
+  # Coverage must actually be enabled, and emitted as JaCoCo for the hook to parse.
+  [[ "$captured" == *'$cfg.CodeCoverage.Enabled = $true'* ]]
+  [[ "$captured" == *"OutputFormat = 'JaCoCo'"* ]]
 }
 
 @test "run_tests skips without invoking PowerShell when unavailable" {
