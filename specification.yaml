@@ -814,6 +814,35 @@ specification:
           test_type: unit
 
     # ============================================================
+    # REQ-564: 质量分不能因为门禁被跳过而升高。
+    # score = PASSED_COUNT / EFFECTIVE_TOTAL，而 EFFECTIVE_TOTAL = TOTAL - SKIPPED，
+    # 于是 SKIP 从分母里消失而不是计入扣分。按已发布公式算：
+    #   1 过 11 跳 -> 有效 1 -> 10.0   |   3 过 9 跳 -> 有效 3 -> 10.0
+    #   10 过 2 跳 -> 有效 10 -> 10.0
+    # 只跑 12 道里 1 道，与跑 10 道报同一个 10.0/10。这不是假设：
+    # .quality-history.jsonl 最近 100 次里 Gate 3 只跑了 7%、Gate 4 只跑了 8%，
+    # 而这些运行全部记录了 score 10 / effectivePassRate 100 —— 跳过反而加分。
+    # verdict 已有 SKIP-ALL 保护，缺口只在 score/effectivePassRate 这两个没带
+    # 任何限定语、却被当作可跨运行比较的数字上。
+    # ============================================================
+    - id: REQ-564
+      description: "质量报告必须同时给出跳过计入分母的全量分与真正执行的门禁数，使跳过无法抬高分数"
+      priority: high
+      acceptance_criteria:
+        - id: AC-564-01
+          criteria: 报告 overall 里存在数值型的 scoreAllGates（pass/total*10）与 gatesRan，
+            且 gatesRan == gatesTotal - gatesSkipped
+          test_type: unit
+        - id: AC-564-02
+          criteria: 同一批门禁，执行得越多 scoreAllGates 越高；且 scoreAllGates 严格小于
+            有效分（只要存在跳过），从而无法被跳过抬高
+          test_type: unit
+        - id: AC-564-03
+          criteria: 全部门禁 SKIP 时 verdict 为 SKIP-ALL、有效分为 null（沿用 issue 507 的
+            number-or-null 契约）、gatesRan 为 0，绝不呈现伪造的满分
+          test_type: unit
+
+    # ============================================================
     # REQ-565: xp-gate principles <目录> 必须真的检查目录里的文件。
     # principles() 把目标原样透传给 principles-checker --files，而后者只接受
     # 文件路径：目录不匹配任何 adapter 扩展名并被静默丢弃，于是输出
@@ -836,6 +865,37 @@ specification:
         - id: AC-565-03
           criteria: 不含受支持源文件的目录展开为空列表（而非返回目录本身），调用方据此显式报错；
             "无可分析文件"绝不以 exit 0 呈现
+          test_type: unit
+
+    # ============================================================
+    # REQ-566: hook 语法探针必须能吃 Windows 原生路径。
+    # checkParseable() 直接把 path.join 产生的 C:\Users\...\pre-push 传给
+    # spawnSync(bashBin, ['-n', filePath])；Git bash 把 argv 里的反斜杠当转义符，
+    # 路径因此塌成 C:Usersthink.configxp-gatehookspre-push，任何候选都"不存在"，
+    # 于是每个超过体积阈值的 hook 都被判 not parseable —— doctor 对完全健康的
+    # hook 报 FAIL，且错误信息里点名的路径根本不存在，把人引去找丢失的文件。
+    # 实测（本机真实安装的 pre-push，同一文件从 Git bash 里 bash -n 报 PARSE_OK）：
+    #   path.join -> "C:\\Users\\think\\.config\\xp-gate\\hooks\\pre-push"
+    #   verdict   -> "/bin/bash: C:Usersthink.configxp-gatehookspre-push:
+    #                 No such file or directory"
+    # 注：这与 REQ-469 的 WSL 桩问题是两回事——那是"选错 bash"，这是"bash 选对了
+    # 但路径喂错了"。审计报告 §2.2 把两者混为一谈，见 issue #563 的更正。
+    # ============================================================
+    - id: REQ-566
+      description: "bash -n 探针必须把原生路径转成 bash 能打开的 POSIX 形式；转换本身与转换后的判定都要可断言"
+      priority: high
+      acceptance_criteria:
+        - id: AC-566-01
+          criteria: toPosixPath 把 Windows 路径的反斜杠全部换成正斜杠且不丢字符（盘符保留），
+            对本来就是 POSIX 的路径幂等
+          test_type: unit
+        - id: AC-566-02
+          criteria: 一个语法正确、体积超过探针阈值的 hook，在 path.join 产生的原生 Windows
+            路径下必须被判为 parseable 且 ok——不得出现 "No such file or directory"
+          test_type: unit
+        - id: AC-566-03
+          criteria: 语法确实损坏的 hook（未闭合的 if）仍必须被判为不可解析；
+            路径处理不得把探针变成永不失败的摆设
           test_type: unit
 
 

@@ -3889,6 +3889,28 @@ generate_quality_report() {
   if [ "$EFFECTIVE_TOTAL" -gt 0 ]; then
     EFFECTIVE_PASS_RATE=$(awk "BEGIN {printf \"%.1f\", ($PASSED_COUNT / $EFFECTIVE_TOTAL) * 100}")
   fi
+
+  # #564: `score` above divides by the EFFECTIVE total, so a SKIPped gate leaves
+  # the denominator instead of counting against it. Arithmetic on that formula:
+  # 1 passed / 11 skipped is 1/1 -> 10.0, identical to 10 passed / 2 skipped.
+  # .quality-history.jsonl shows Gate 3 running in 7% of runs and Gate 4 in 8%,
+  # every one of them recording score 10 -- skipping work raised the score.
+  #
+  # The effective view answers a real question ("of the gates that could run,
+  # how many passed?"), so it stays. What was missing is the denominator being
+  # visible, and a score that counts skips against the run. `scoreAllGates`
+  # divides by TOTAL_GATES, so a skipped gate costs exactly what a failed one
+  # costs in that view; `gatesRan` says how much of the suite was exercised.
+  # `score` keeps its current value and meaning so dashboard/ and
+  # .quality-history.jsonl consumers do not break (#507 already made it
+  # number-or-null; this stays within that contract).
+  local GATES_RAN=$EFFECTIVE_TOTAL
+  local SCORE_ALL="N/A"
+  if [ "$TOTAL_GATES" -gt 0 ]; then
+    SCORE_ALL=$(awk "BEGIN {printf \"%.1f\", ($PASSED_COUNT / $TOTAL_GATES) * 10}")
+  fi
+  local SCORE_ALL_JSON="$SCORE_ALL"
+  [ "$SCORE_ALL_JSON" = "N/A" ] && SCORE_ALL_JSON="null"
   # JSON bodies need a number or null -- a literal N/A breaks every consumer.
   local SCORE_JSON="$SCORE"
   [ "$SCORE_JSON" = "N/A" ] && SCORE_JSON="null"
@@ -3971,6 +3993,8 @@ generate_quality_report() {
     "degradedGates": [$DEGRADED_JSON],
     "gatesEffective": $EFFECTIVE_TOTAL,
     "effectivePassRate": $EFFECTIVE_PASS_RATE_JSON,
+    "gatesRan": $GATES_RAN,
+    "scoreAllGates": $SCORE_ALL_JSON,
     "score": $SCORE_JSON,
     "verdict": "$VERDICT"
   },
@@ -4098,7 +4122,10 @@ ENDJSON
   printf "  %-45s %s\n" "Gate 11: Sprint Flow" "${GATE_11_STATUS:-PASS}"
   printf "  %-45s %s\n" "Gate 12: File Hygiene" "${GATE_12_STATUS:-WARN}"
   echo ""
-  echo "  Overall Score: $SCORE/10 | $PASSED_COUNT/$TOTAL_GATES gates passed (effective: $PASSED_COUNT/$EFFECTIVE_TOTAL, skipped: $SKIP_COUNT, verdict: $VERDICT)"
+  # #564: both views in one line. The effective score answers "of the gates that
+  # could run, how many passed"; the all-gates score counts a skip against the
+  # run. Printing only the first let a 1-of-12 run read as 10.0/10.
+  echo "  Overall Score: $SCORE/10 effective | $SCORE_ALL/10 of all gates ($GATES_RAN/$TOTAL_GATES ran, $SKIP_COUNT skipped, verdict: $VERDICT)"
   echo "  Branch status: $REPORT_FILE"
   echo "  Run report: $PERSISTED_REPORT_FILE"
   echo "  History saved: $HISTORY_FILE"

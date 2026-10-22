@@ -33,8 +33,18 @@ set -u
 # supply the same defaults for the isolated harness.
 : "${BOY_SCOUT_OUTPUT:=}" "${CC_WARNINGS:=0}" "${WARNING_COUNT:=0}" \
      "${COVERAGE_PERCENT:=}" "${CHANGED_FILES:=}" "${PROJECT_LANG:=test}" \
-     "${TESTS_OUTPUT:=}" "${BS_BLOCKED:=0}" \
+     "${PROJECT_LANGS:=}" "${TESTS_OUTPUT:=}" "${BS_BLOCKED:=0}" \
      "${GATE_1_TOOL:=test-harness}"
+# generate_quality_report() reads symbols defined elsewhere in the hook
+# (resolve_languages_source, _resolve_coverage_threshold, and the
+# COVERAGE_THRESHOLD / COVERAGE_THRESHOLD_SOURCE pair it sets). The extraction
+# above covers only the report function itself, so those are stubbed here.
+# Without them the report aborted with "unbound variable" and EVERY assertion
+# in this file failed for a reason unrelated to the report: the suite read as
+# "testing the quality JSON" while testing nothing at all.
+resolve_languages_source() { printf '%s' "harness"; }
+COVERAGE_THRESHOLD=80
+COVERAGE_THRESHOLD_SOURCE="harness"
 source "$1"
 generate_quality_report
 RUNNER
