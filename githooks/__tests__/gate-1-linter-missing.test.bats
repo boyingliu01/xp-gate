@@ -71,15 +71,52 @@ EOF
 }
 
 @test "run_lint passes when eslint config exists" {
-  cat > .eslintrc.json <<'EOF'
-{"rules":{"no-unused-vars":"warn"}}
+  # ESLint v9 dropped .eslintrc.* as the default; v10 removed it outright. This
+  # fixture wrote .eslintrc.json, so the adapter correctly detected "eslint config
+  # exists" and then ESLint itself refused to run:
+  #     Oops! Something went wrong!
+  #     ESLint: 10.7.0
+  #     ESLint couldn't find an eslint.config.(js|mjs|cjs) file.
+  # The case was therefore red whenever a modern ESLint was on PATH, and passing
+  # only where the installed ESLint still honoured the legacy format.
+  #
+  # The behaviour under test is unchanged: with an eslint config present, the
+  # adapter runs ESLint and the run succeeds. Use the format ESLint actually
+  # reads, and give it a TypeScript parser — the fixture repo stages src/index.ts
+  # (created in setup), so a JS-only config reports
+  #     1:27  error  Parsing error: Unexpected token :
+  # which is a fixture problem, not an adapter problem.
+  #
+  # The parser import must resolve from the fixture ($BATS_TMPDIR), whose
+  # node_modules is empty — a bare specifier fails with ERR_MODULE_NOT_FOUND.
+  # Link the repo's node_modules into the fixture instead of rewriting the
+  # specifier, so the config reads exactly like a real project's.
+  [ -d "$BATS_TEST_DIRNAME/../../node_modules/@typescript-eslint/parser" ] || {
+    skip "@typescript-eslint/parser not installed in the repo; cannot configure a TS-capable eslint"
+  }
+  ln -s "$BATS_TEST_DIRNAME/../../node_modules" node_modules 2>/dev/null || \
+    cp -R "$BATS_TEST_DIRNAME/../../node_modules" node_modules 2>/dev/null || true
+
+  cat > eslint.config.js <<'EOF'
+import tsParser from '@typescript-eslint/parser';
+
+export default [
+  {
+    files: ['**/*.ts'],
+    languageOptions: { parser: tsParser },
+    rules: {},
+  },
+];
 EOF
-  git add .eslintrc.json
+  git add eslint.config.js
 
   source "$BATS_TEST_DIRNAME/../adapters/typescript.sh"
   run run_lint 2>&1
   echo "run_lint output: $output"
-  [ "$status" -eq 0 ]
+  [ "$status" -eq 0 ] || {
+    echo "run_lint did not pass with an eslint.config.js present"
+    return 1
+  }
 }
 
 @test "run_lint passes when npx not available (graceful skip)" {
