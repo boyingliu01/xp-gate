@@ -79,7 +79,13 @@ Found 0 clones.'
 @test "AC-477-08 anti-vacuity: the Gate 2 typescript branch uses both helpers" {
   grep -q 'resolve_jscpd_config' "$HOOK"
   grep -q 'classify_jscpd_run' "$HOOK"
-  grep -q 'source "${AUDIT_SCRIPT_DIR}/lib/jscpd-run.sh"' "$HOOK"
+  # #535 replaced a bare `source` with source_gate_lib(), which aborts the hook
+  # when the lib is missing or its body exits mid-source. The lib must still be
+  # loaded — the assertion follows the shipped form rather than pinning the old
+  # one, and additionally requires the hardened wrapper, so a regression back to
+  # a silent bare `source` fails here.
+  grep -q 'source_gate_lib "${AUDIT_SCRIPT_DIR}/lib/jscpd-run.sh"' "$HOOK"
+  ! grep -q '^[[:space:]]*source "${AUDIT_SCRIPT_DIR}/lib/jscpd-run.sh"' "$HOOK"
 }
 
 @test "AC-477-08 anti-vacuity: no unconditional --config jscpd.conf.json remains anywhere" {
