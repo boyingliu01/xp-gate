@@ -72,7 +72,15 @@ describe('bash -n path handling', () => {
     );
   });
 
-  test('AC-566-02: a healthy hook under a native Windows path is parseable', () => {
+  // Windows-only by construction: the assertion below requires path.join to
+  // produce a backslash path (`C:\...`), which only happens on win32. On Linux
+  // path.join yields `/tmp/...` and the test fails with
+  //   expected '/tmp/hook-posix-XiaI9b/pre-push' to contain '\'
+  // That is a platform premise, not a regression (#586). Skipping keeps the gap
+  // visible in the run summary instead of painting CI red on every build.
+  const onWindows = process.platform === 'win32';
+
+  test.skipIf(!onWindows)('AC-566-02: a healthy hook under a native Windows path is parseable', () => {
     // The defect, end to end. The path MUST come from path.join, not from a
     // string literal: path.join produces the single-backslash form that Node
     // hands to spawnSync, and that is the form bash mangles. A hand-written

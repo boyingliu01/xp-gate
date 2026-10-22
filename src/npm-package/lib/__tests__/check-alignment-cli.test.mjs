@@ -57,10 +57,27 @@ describe('check-alignment CLI injection surface (#392-#6)', () => {
 describe('check-alignment runner output integrity', () => {
   it('emits a complete parseable JSON document with --json', () => {
     const spec = join(here, 'test-alignment.test.ts');
-    const result = spawnSync(process.execPath, [RUNNER, '--spec', spec, '--json'], {
-      encoding: 'utf8',
-    });
+    // Run the runner under the SAME loader the CLI uses. `check-alignment-runner.cjs`
+    // does `require('./test-alignment.ts')`, and plain `node` only tolerates that
+    // from Node 22.6+ (type stripping). CI pins Node 20.x, where it throws
+    // "Unknown file extension" — the runner printed nothing, and the empty string
+    // surfaced as "Unexpected end of JSON input", which reads exactly like the
+    // truncation this test guards against (#586). bin/xp-gate.js has always loaded
+    // this file through tsx; the test was the only caller that did not.
+    const result = spawnSync(
+      process.execPath,
+      [join(here, '..', '..', '..', '..', 'node_modules', 'tsx', 'dist', 'cli.mjs'), RUNNER, '--spec', spec, '--json'],
+      { encoding: 'utf8' }
+    );
     expect(result.error).toBeUndefined();
+    // An EMPTY stdout also parses to "Unexpected end of JSON input", which is
+    // indistinguishable from the truncation this test exists for. Report what the
+    // runner actually did first, so a crash is not mistaken for a truncation.
+    expect(
+      result.stdout,
+      `runner produced no stdout at all (status=${result.status}, ` +
+        `stderr=${JSON.stringify(result.stderr)}) — that is a crash, not a truncation`
+    ).not.toBe('');
     // The whole stdout stream must be one valid JSON document. A process.exit()
     // immediately after console.log would truncate it on some platforms.
     const parsed = JSON.parse(result.stdout);
