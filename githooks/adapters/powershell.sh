@@ -61,6 +61,40 @@ _detect_pwsh() {
 
 _find_powershell_files() {
   local name_pattern="$1"
+
+  # #573: repo-local extra prune entries. The list below covers the artifact
+  # directories xp-gate itself produces, but a consuming repo can have its own
+  # (a generated obj/, a vendored third_party/, a samples/ tree of
+  # intentionally broken scripts) and had no way to exclude them -- so its Gate 1
+  # stayed the warning wall #538 fixed for xp-gate's own layout.
+  #
+  # Entries are appended to the built-in list, never replace it: `wrc-drill` is
+  # pinned here for xp-gate's own admin drills. Matched by -name, so a listed
+  # directory is pruned at any depth.
+  #
+  # Built as an ARRAY, not a string spliced into an eval: the entries come from
+  # a file in the checked-out repo, and a directory name is not something to
+  # hand to a shell parser.
+  local -a prune_args=()
+  local prune_file=".xp-gate-powershell-prune-dirs"
+  if [ -f "$prune_file" ]; then
+    local entry
+    while IFS= read -r entry; do
+      entry="${entry%$'\r'}"
+      # Strip surrounding whitespace, then the ./ prefix and trailing / a repo
+      # may reasonably write; -name matches a bare directory name.
+      entry="${entry#"${entry%%[![:space:]]*}"}"
+      entry="${entry%"${entry##*[![:space:]]}"}"
+      case "$entry" in ''|'#'*) continue ;; esac
+      entry="${entry#./}"
+      entry="${entry%/}"
+      [ -n "$entry" ] || continue
+      prune_args[${#prune_args[@]}]=-o
+      prune_args[${#prune_args[@]}]=-name
+      prune_args[${#prune_args[@]}]="$entry"
+    done < "$prune_file"
+  fi
+
   # #538: gitignored drill/review artifact dirs hold hundreds of non-product
   # .ps1 files (admin drills, Delphi review copies). Collecting them turned
   # Gate 1 into an 800+ warning wall and made the pwsh gates unusable.
@@ -80,6 +114,7 @@ _find_powershell_files() {
       -path './plugins/qoder/skills' -o \
       -path './src/npm-package/skills' -o \
       -path './src/npm-package/plugins' \
+      "${prune_args[@]+"${prune_args[@]}"}" \
     \) -prune \) -o \
     \( -type f -name "$name_pattern" -print \) 2>/dev/null
 }
