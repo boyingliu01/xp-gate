@@ -554,7 +554,7 @@
   "src/mutation/update-baseline.ts::fileExists": 2,
   "src/mutation/update-baseline.ts::parseFloat": 2,
   "src/mutation/update-baseline.ts::removeDeletedFiles": 4,
-  "src/mutation/update-baseline.ts::saveBaseline": 1,
+  "src/mutation/update-baseline.ts::saveBaseline": 3,
   "src/mutation/update-baseline.ts::main": 2,
   "src/mutation/update-baseline.ts::(anonymous)@156": 3,
   "src/principles/adapters/base.ts::constructor": 1,

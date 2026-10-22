@@ -1247,6 +1247,30 @@ specification:
           criteria: 新增忽略项不得导致既有忽略项（node_modules、dist、coverage）消失
           test_type: unit
 
+    # ============================================================
+    # REQ-582: 复杂度棘轮的记录值必须与分析器一致。
+    # .ccn-baseline.json 记录每个函数的圈复杂度，CI 在函数比记录更差时阻断。
+    # 棘轮只有在记录的数值为真时才起作用。
+    # src/mutation/update-baseline.ts::saveBaseline 被记为 CCN=1，而该函数有三条
+    # 决策路径（try/catch、Error 判型三元）。实测：
+    #     lizard ... -> CCN=3
+    #     node scripts/ccn-report.cjs --check --baseline .ccn-baseline.json
+    #     BLOCK src/mutation/update-baseline.ts:136 saveBaseline CCN=3 baseline=1
+    # 函数并没有变差——是基线记录取自更早的函数体，补上错误处理后没刷新。
+    # 后果是 Gate 3 永久红，看起来像代码问题：读者无从分辨「真有回归」与「记录过期」，
+    # 而其余所有真实回归都藏在这条假警报后面。棘轮从此不再有信号。
+    # ============================================================
+    - id: REQ-582
+      description: "复杂度棘轮基线记录值必须与分析器一致，过期记录不得伪装成回归"
+      priority: high
+      acceptance_criteria:
+        - id: AC-582-01
+          criteria: saveBaseline 在 .ccn-baseline.json 中记录的值必须等于分析器报出的 CCN
+          test_type: unit
+        - id: AC-582-02
+          criteria: 本仓库上 ccn-report --check 不得报告任何 BLOCK，且必须以 0 退出
+          test_type: unit
+
 
     # ============================================================
     # REQ-574: Gate MW 校验证据必须与 .delphi-config.json 的席位绑定。
