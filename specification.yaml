@@ -1131,6 +1131,27 @@ specification:
           criteria: 扫描抛出异常（片段 exit 3）必须映射为「无法验证」（exit 2）并回显捕获到的异常文本，不得落入 findings 的 exit 1
           test_type: unit
 
+    # ============================================================
+    # REQ-577: PowerShell 发现流程必须剪掉 AI/IDE 生成目录。
+    # 内置剪枝列表（#538 起）覆盖 xp-gate 自身的产物目录，但不覆盖 AI 编码代理
+    # 与 IDE 产生的目录：.xp-gate/（xp-gate 的报告/日志）、.vscode/、.idea/、
+    # .qoder/。这些装的是工具生成的脚本而非产品代码，扫进去就同样污染
+    # 测试发现/覆盖率/静态分析三个分母；否则每个消费仓库都得自己在
+    # .xp-gate-powershell-prune-dirs 里列一遍。
+    # 来自已安装副本（有这四项，仓库没有）。新增条目不得删除任何既有条目——
+    # wrc-drill 等 #538 条目由各自套件继续固化。
+    # ============================================================
+    - id: REQ-577
+      description: "PowerShell 发现流程剪掉 .xp-gate/.vscode/.idea/.qoder 等 AI 与 IDE 生成目录"
+      priority: medium
+      acceptance_criteria:
+        - id: AC-577-01
+          criteria: .xp-gate、.vscode、.idea、.qoder 下的 .ps1 不被发现，而同级的 src 产品脚本照常发现
+          test_type: unit
+        - id: AC-577-02
+          criteria: 既有 #538 条目（wrc-drill、.delphi-work、node_modules 等）仍被剪除，新增条目不得导致回退
+          test_type: unit
+
 
     # ============================================================
     # REQ-574: Gate MW 校验证据必须与 .delphi-config.json 的席位绑定。

@@ -133,6 +133,10 @@ _find_powershell_files() {
       -name .workbuddy -o \
       -name .sprint-state -o \
       -name wrc-drill -o \
+      -name .xp-gate -o \
+      -name .vscode -o \
+      -name .idea -o \
+      -name .qoder -o \
       -path './plugins/claude-code/skills' -o \
       -path './plugins/opencode/skills' -o \
       -path './plugins/qoder/skills' -o \
