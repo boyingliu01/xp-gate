@@ -26,14 +26,23 @@ describe('FC-04: bats fixture commits never run the host hook chain', () => {
     if (!f.endsWith('.bats')) continue;
     const rel = `githooks/__tests__/${f}`;
     const lines = fs.readFileSync(path.join(BATS_DIR, f), 'utf8').split('\n');
+    // A `core.hooksPath` note is only an acceptable exemption when setup really
+    // pins it — otherwise the annotation is a magic word that silences the
+    // guard while the fixture does touch the host chain.
+    const pinsHooksPath = lines.some(
+      (l) => !l.trim().startsWith('#') && /git\s+config\s+core\.hooksPath/.test(l)
+    );
     lines.forEach((line, i) => {
       // A real git commit invocation: `git commit` or `git -c … commit`,
       // NOT a path like .git/hooks/pre-commit (the word boundary on its own
       // would match the `git` inside `.git` and the `commit` in `pre-commit`).
       if (/(^|[^\w./-])git(\s+-\S+)*\s+commit\b/.test(line) && !line.trim().startsWith('#')) {
-        if (!line.includes('--no-verify') && !line.includes('core.hooksPath')) {
-          offenders.push(`${rel}:${i + 1}: ${line.trim()}`);
-        }
+        if (line.includes('--no-verify')) return;
+        if (line.includes('core.hooksPath') && pinsHooksPath) return;
+        offenders.push(
+          `${rel}:${i + 1}: ${line.trim()}` +
+            (line.includes('core.hooksPath') ? '  <-- core.hooksPath claimed but never pinned in setup' : '')
+        );
       }
     });
   }
