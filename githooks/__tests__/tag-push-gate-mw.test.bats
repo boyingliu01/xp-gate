@@ -23,7 +23,14 @@ setup() {
   git init -q --bare "$TEST_DIR/remote.git"
   mkdir -p "$TEST_DIR/work"
   cd "$TEST_DIR/work" || exit 1
-  git init -q -b main
+  # #598: branch name must NOT be main/master. Gate MW is skipped on
+  # protected-branch pushes by design
+  #     ℹ️  Gate MW skipped (pushing to main — pre-reviewed via branch walkthrough)
+  # so every BLOCK case below was asserting on a code path the hook never
+  # entered. Those cases are about tags pointing at UNREVIEWED local commits, a
+  # situation that only exists off the protected branch — feature commits are
+  # reviewed by the branch walkthrough, release commits on main are not.
+  git init -q -b feature/tag-fixture
   git config user.email "test@test.com"
   git config user.name "Test"
   # Isolate from machine-global hooks IMMEDIATELY (xp-gate installs a global
@@ -52,7 +59,7 @@ MOCK
 
   # Publish BEFORE installing hooks so setup never triggers the hook itself.
   git remote add origin "$TEST_DIR/remote.git"
-  git push -q origin main
+  git push -q origin HEAD:refs/heads/main
 
   mkdir -p .git/hooks/lib
   cp "$SOURCE_GITHOOKS/pre-push" .git/hooks/pre-push
@@ -75,7 +82,7 @@ write_stale_evidence() {
   "verdict": "APPROVED",
   "timestamp": "2026-01-01T00:00:00Z",
   "expires": "2099-01-01T00:00:00Z",
-  "branch": "main",
+  "branch": "feature/tag-fixture",
   "consensus_ratio": 0.95,
   "experts": [
     {"role":"architecture","verdict":"APPROVED","result_type":"delphi_expert_result","requested_model":"model-a","resolved_model":"model-a","channel":"external"},
@@ -135,7 +142,7 @@ push_tag_ref() {
   echo "export const c = 3;" >> src/foo.ts
   git add . && git commit --no-verify -q -m "unreviewed change"
   rm -f .code-walkthrough-result.json
-  branch_line="refs/heads/main $(git rev-parse HEAD) refs/heads/main $(git rev-parse HEAD^)"
+  branch_line="refs/heads/feature/tag-fixture $(git rev-parse HEAD) refs/heads/feature/tag-fixture $(git rev-parse HEAD^)"
   push_tag_ref v1.0.0 "$branch_line"
   [ "$status" -ne 0 ]
   [[ "$output" == *"WALKTHROUGH"* ]]
@@ -162,7 +169,7 @@ push_tag_ref() {
   stdin_file="$BATS_TEST_TMPDIR/push-stdin.txt"
   printf '%s\n%s\n' \
     "refs/tags/v1.0.0 ${tag_sha} refs/tags/v1.0.0 ${ZEROS}" \
-    "refs/heads/main ${head_sha} refs/heads/main ${prev_sha}" > "$stdin_file"
+    "refs/heads/feature/tag-fixture ${head_sha} refs/heads/feature/tag-fixture ${prev_sha}" > "$stdin_file"
   run .git/hooks/pre-push origin https://example.com < "$stdin_file"
   [ "$status" -ne 0 ]
   [[ "$output" == *"WALKTHROUGH"* ]]
