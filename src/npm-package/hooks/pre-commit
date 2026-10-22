@@ -3072,7 +3072,12 @@ else
           COVERAGE_PERCENT=$(grep -oP 'coverage: \K[0-9]+%' coverage/lcov.info 2>/dev/null | head -1 | tr -d '%') || COVERAGE_PERCENT=""
         fi
       fi
-      if [ -n "$COVERAGE_PERCENT" ] && [ "$COVERAGE_PERCENT" != "parse_error" ] && [ "$COVERAGE_PERCENT" -gt 0 ]; then
+      # #579: `-ge 0`, not `-gt 0`. A measured 0% is DATA -- coverage.py ran and
+      # covered nothing -- not a missing value. Folding it into the
+      # "could not determine" branch let a suite that tested nothing pass the
+      # coverage gate with a WARNING. The two claims are different: 0% is
+      # "executed, proved nothing"; undetermined is "no evidence produced".
+      if [ -n "$COVERAGE_PERCENT" ] && [ "$COVERAGE_PERCENT" != "parse_error" ] && [ "$COVERAGE_PERCENT" -ge 0 ]; then
         if [ "$COVERAGE_PERCENT" -lt "$COVERAGE_THRESHOLD" ]; then
           # Only a subset test run (smart selection) warns — the full suite may
           # still reach ≥80%; a full suite run must block.
