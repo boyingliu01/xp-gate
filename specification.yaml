@@ -1047,6 +1047,32 @@ specification:
           criteria: 任何位置都没有 semgrep 时检测结果保持为空，Gate 10 仍降级为 WARN 而非 PASS
           test_type: unit
 
+    # ============================================================
+    # REQ-573: PowerShell 发现流程支持仓库本地追加排除目录。
+    # _find_powershell_files 的排除列表是硬编码的（#538 引入），只覆盖 xp-gate
+    # 自身及其脚手架产生的目录。消费仓库可能有自己的（生成物 obj/、vendored
+    # third_party/、故意含错脚本的 samples/），却无法排除，于是它们的 Gate 1 仍然
+    # 是 #538 为 xp-gate 自己的目录修掉的那面告警墙。
+    # 未合并分支 fix/powershell-gates-fail-closed 加了 .xp-gate-powershell-prune-dirs
+    # （每行一个目录，支持 # 注释）。本需求把它前移，但不采纳分支的替换列表：
+    # 分支丢掉了 #538 为 xp-gate 自身操练固化下来的 wrc-drill，还多出 main 从未有过的
+    # .qoder/.vscode/.idea/.xp-gate。在 main 已有列表之上"追加"文件读取能力，
+    # 两种行为都保留；整体替换列表会让 #538 回退。
+    # ============================================================
+    - id: REQ-573
+      description: "PowerShell 文件发现支持 .xp-gate-powershell-prune-dirs 追加排除目录，且不破坏内置 #538 列表"
+      priority: medium
+      acceptance_criteria:
+        - id: AC-573-01
+          criteria: 排除文件中列出的目录必须从发现结果中剔除，未列出的产品脚本照常发现
+          test_type: unit
+        - id: AC-573-02
+          criteria: 排除文件中的注释行与空白行必须被忽略，不得当作目录名传给 find 而破坏发现
+          test_type: unit
+        - id: AC-573-03
+          criteria: 没有排除文件时内置 #538 列表（含 wrc-drill、node_modules、.delphi-work）必须仍然生效
+          test_type: unit
+
 
     - id: DD-001
       decision: 走薄桥（方案 A）在 ctx.tools 注册三工具，而非独立 MCP server 或纯技能
