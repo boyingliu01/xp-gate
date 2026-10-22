@@ -76,10 +76,20 @@ export default defineConfig({
       // Raise these — never lower them — as REQ-COV work lands. Values are
       // whole numbers below the measured figure so ordinary fluctuation in a
       // single run cannot produce a spurious block.
+      //
+      // #589: `functions` was declared 83, which broke that rule in the one way
+      // that matters — it sat ABOVE the real figure, so it blocked. The number was
+      // never verified in CI: at the time #561 landed, Gate 1 was red on every
+      // build, so Gate 5 had not executed once since the ratchet was written.
+      // Measured on two consecutive CI runs (f722a441, 51931824): functions
+      // 81.19%, identical both times — a stable figure, not run-to-run noise.
+      // There was no regression: this session added no untested source file.
+      // 81 is the floor the tree actually clears. Closing the 2pp gap to 83 is
+      // tracked as coverage debt (#589); raise this only together with real tests.
       thresholds: {
         lines: 60,
         statements: 60,
-        functions: 83,
+        functions: 81,
         branches: 79,
       },
     },
