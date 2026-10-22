@@ -932,6 +932,67 @@ specification:
             全量总数始终在末位
           test_type: unit
 
+    # ============================================================
+    # REQ-569: 互为镜像的一对测试，至少要有一边被收集。
+    # vitest.config.ts 同时排除了
+    #   plugins/**                    <- 规范源
+    #   src/npm-package/plugins/**    <- 逐字节镜像
+    # 注释只为"镜像重复跑"辩护，那半边是对的：两边 10 个文件确实逐字节相同。
+    # 但把镜像对的两边同时排除不是把工作量减半，是把工作量归零。
+    # 实测：全套件在 plugins/dsh/ 下收集到 0 个文件；同样的文件单独跑是
+    #   10/10 files、88/88 tests，2.6 秒全绿。
+    # 与 #562（从未生效的覆盖率阈值）、#565（检查零个文件的 principles 目录）
+    # 是同一种形态：安全网存在，接在空处，还在报成功。
+    # ============================================================
+    - id: REQ-569
+      description: "vitest 的 exclude 不得同时吞掉镜像对的两边；规范源侧的测试必须被收集，vendored 依赖仍排除"
+      priority: high
+      acceptance_criteria:
+        - id: AC-569-01
+          criteria: 测试级 exclude 里不得出现裸的 plugins/**（那会把镜像对的两边一起吞掉）
+          test_type: unit
+        - id: AC-569-02
+          criteria: plugins/dsh/src 下的测试文件不得被任何 exclude 模式全部命中；
+            镜像侧被排除时规范侧必须可收集
+          test_type: unit
+        - id: AC-569-03
+          criteria: 去掉 plugins/** 后，plugins/*/node_modules/** 仍在排除列表中，
+            不得把 156 个 vendored zod 测试拖进收集
+          test_type: unit
+
+    # ============================================================
+    # REQ-570: findBash 必须拒绝 WSL 的 bash，优先选 Git for Windows。
+    # findBash 把裸名 "bash" 排在候选首位，只要 `bash --version` 退出 0 就接受。
+    # 装了 WSL 的机器上，PATH 里的 bash 就是 WSL：
+    #   (Get-Command bash -All).Source -> C:\WINDOWS\system32\bash.exe
+    #   bash -c "uname -s"             -> Linux
+    #   bash --version                 -> 退出 0   <- 正好是探针的接受条件
+    # 于是 findBash 返回 "bash"（WSL），后续 `bash -n <windows 路径>` 一律报
+    # "No such file or directory"——Linux 的 bash 打不开 C:/...。doctor 报健康
+    # hook 不可解析，源头在这里。
+    #
+    # 这条同时是对 issue #563 的自我更正：我在那里断言 §2.2 的 WSL 桩问题
+    # "不复现"并降级为健壮性债。当时测的是 `where bash` 与 `bash --version`
+    # 的 UTF-16 垃圾输出，但 Node 的 spawnSync('bash',...) 走 PATH 解析到的是
+    # 另一个（健康的）WSL bash，退出码 0。结论本来就是对的，撤销是错的。
+    # ============================================================
+    - id: REQ-570
+      description: "Windows 上 findBash 必须返回能打开 Windows 路径的 Git bash，WSL 的 bash 不得被选中"
+      priority: critical
+      acceptance_criteria:
+        - id: AC-570-01
+          criteria: findBash 返回的 bash 的 `uname -s` 必须报 MINGW/MSYS/CYGWIN，
+            不得是 Linux（WSL）
+          test_type: unit
+        - id: AC-570-02
+          criteria: 本机存在 Git for Windows 的 bash 时，findBash 必须选中它，
+            不得因 PATH 里 WSL 的 bash 先可用而返回别的
+          test_type: unit
+        - id: AC-570-03
+          criteria: findBash 选中的 bash 必须能实际打开一个 Windows 临时目录下的
+            hook 文件（`bash -n` 成功）；这是 doctor 探针能工作的前提
+          test_type: unit
+
 
     - id: DD-001
       decision: 走薄桥（方案 A）在 ctx.tools 注册三工具，而非独立 MCP server 或纯技能

@@ -20,7 +20,18 @@ export default defineConfig({
       'src/_wip/**', '**/node_modules/**', '.opencode/**', '.omo/**', '.worktrees/**',
       '.stryker-tmp/**', '.xp-gate/**', 'dist/**', 'coverage/**',
       // Mirrors of `plugins/`, `skills/`, and the four src subtrees.
-      'plugins/**', 'skills/**',
+      // `plugins/dsh/` is deliberately absent from this list (#569). It is the
+      // canonical source of the DSH plugin, and its 10 test files are
+      // byte-identical to the `src/npm-package/plugins/dsh/` mirror — which IS
+      // excluded. Excluding both sides left 88 tests collected by nobody:
+      // measured, the full suite collected 0 files under `plugins/dsh/`, while
+      // those same files run in isolation are 10/10 files, 88/88 tests green in
+      // 2.6s. A plugin with no test protection is the same shape as a coverage
+      // threshold that was never applied (#562): the safety net exists, wired to
+      // nothing. Only `plugins/dsh` is kept, so `plugins/opencode/node_modules`
+      // and the other vendored trees stay out.
+      'plugins/*/node_modules/**',
+      'skills/**',
       'src/npm-package/plugins/**', 'src/npm-package/skills/**',
       'src/npm-package/principles/**', 'src/npm-package/mutation/**',
       'src/npm-package/mock-policy/**', 'src/npm-package/build-integrity/**',

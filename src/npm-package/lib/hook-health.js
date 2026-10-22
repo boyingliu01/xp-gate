@@ -22,13 +22,42 @@ const path = require('path');
 const { spawnSync } = require('child_process');
 
 /**
+ * Ask a bash binary whether it is a Windows bash rather than WSL.
+ *
+ * `bash --version` is not enough: a healthy WSL bash exits 0 for it. The
+ * discriminator is the kernel it reports — Git for Windows builds report a
+ * MINGW / MSYS / CYGWIN kernel name, WSL reports Linux. A Linux bash cannot
+ * open `C:/...`, so selecting one turns every hook-health probe into "No such
+ * file or directory" regardless of how the path is spelled.
+ *
+ * @param {string} bin - candidate binary
+ * @returns {boolean} true when it is a Windows bash
+ */
+function isWindowsBash(bin) {
+  const probe = spawnSync(bin, ['-c', 'uname -s'], { encoding: 'utf8', timeout: 10000 });
+  if (probe.error || probe.status !== 0) return false;
+  return /MINGW|MSYS|CYGWIN/i.test(String(probe.stdout || ''));
+}
+
+/**
  * Locate a bash binary without assuming it is on PATH under that exact name.
+ *
+ * On Windows the Git for Windows installs are probed FIRST and the bare name
+ * `bash` is the last resort (#570). The previous order put `bash` first and
+ * accepted any binary whose `--version` exited 0 — which is every healthy WSL
+ * install. Measured on this machine: `bash` on PATH resolves to
+ * `C:\WINDOWS\system32\bash.exe`, `uname -s` answers `Linux`, and the probe
+ * `bash -n <windows path>` fails with "No such file or directory" no matter how
+ * the path is spelled. `xp-gate doctor` then reported healthy hooks as
+ * unparseable.
+ *
  * @returns {string|null} Path or bare command name, null when none found
  */
 function findBash() {
-  const candidates = ['bash'];
+  const candidates = [];
   if (process.platform === 'win32') {
-    // Git for Windows ships bash outside PATH far more often than inside it.
+    // Git for Windows ships bash outside PATH far more often than inside it,
+    // and PATH's `bash` is usually WSL.
     const pf = process.env.ProgramFiles || 'C:\\Program Files';
     const pf86 = process.env['ProgramFiles(x86)'] || 'C:\\Program Files (x86)';
     const local = process.env.LOCALAPPDATA;
@@ -37,13 +66,19 @@ function findBash() {
     candidates.push(path.join(pf86, 'Git', 'bin', 'bash.exe'));
     candidates.push(path.join(pf, 'Git', 'usr', 'bin', 'bash.exe'));
   }
+  // Last resort: whatever PATH offers. On Windows it is only accepted when it
+  // reports a Windows kernel, so a WSL stub can never be returned.
+  candidates.push('bash');
+
   for (const c of candidates) {
     if (path.isAbsolute(c)) {
       if (fs.existsSync(c)) return c;
       continue;
     }
     const probe = spawnSync(c, ['--version'], { encoding: 'utf8', timeout: 10000 });
-    if (!probe.error && probe.status === 0) return c;
+    if (probe.error || probe.status !== 0) continue;
+    if (process.platform === 'win32' && !isWindowsBash(c)) continue;
+    return c;
   }
   return null;
 }

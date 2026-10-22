@@ -4,6 +4,9 @@
     "**/__snapshots__/**",
     "**/__fixtures__/**",
     "**/node_modules/**",
-    "**/dist/**"
+    "**/dist/**",
+    "**/.stryker-tmp/**",
+    "**/coverage/**",
+    "**/.worktrees/**"
   ]
 }
