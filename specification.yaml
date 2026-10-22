@@ -1380,6 +1380,27 @@ specification:
           criteria: coverage-threshold-enforced 的反空虚守卫必须基于覆盖率产物文件，不得依赖 reporter 相关的日志行
           test_type: unit
 
+    # ============================================================
+    # REQ-587: 被测试的 prepack 产物，CI 必须先构建出来。
+    # plugins/dsh/skills/ 是 prepack 产物：gitignore（.gitignore:150），由
+    # plugins/dsh/scripts/prepack.cjs 在 npm pack/publish 时从仓库 skills/ 生成。
+    # 全新检出没有这个目录，于是插件的 bundled-skill 测试在 CI 上失败：
+    #     plugins/dsh/skills/admin-template-guidelines/SKILL.md: cannot read file (ENOENT)
+    # 本地能过，只是因为有人在本地打过包。
+    # 修法是让 CI 生成该产物（与发布路径一致），而不是放宽测试——测试校验的应当是
+    # 真正会发布出去的那份产物。
+    # ============================================================
+    - id: REQ-587
+      description: "被 vitest 校验的 prepack 产物（plugins/dsh/skills）必须由 CI 先行构建"
+      priority: high
+      acceptance_criteria:
+        - id: AC-587-01
+          criteria: plugins/dsh/skills 为 gitignored 的 prepack 产物，且其测试以仓库 skills/ 为期望集合
+          test_type: unit
+        - id: AC-587-02
+          criteria: 运行测试的 CI job 必须执行 plugins/dsh/scripts/prepack.cjs 生成该产物
+          test_type: unit
+
 
     # ============================================================
     # REQ-574: Gate MW 校验证据必须与 .delphi-config.json 的席位绑定。
