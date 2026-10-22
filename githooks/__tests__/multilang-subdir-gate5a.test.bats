@@ -155,7 +155,7 @@ teardown() {
   echo "def helper() -> int: return 1" > backend/helper.py
   git add -A
 
-  run git commit --no-verify -m "add paired files"
+  run git commit -m "add paired files"
   echo "output: $output"
   [ "$status" -eq 0 ]
   [[ "$output" == *"MULTILANGUAGE"* ]]
@@ -174,7 +174,7 @@ teardown() {
   echo "def helper() -> int: return 2" > backend/helper.py
   git add -A
 
-  run git commit --no-verify -m "add unpaired file"
+  run git commit -m "add unpaired file"
   echo "output: $output"
   [ "$status" -ne 0 ]
   [[ "$output" == *"BLOCKED: web/src/modules/training/api.ts"* ]]
@@ -192,7 +192,7 @@ teardown() {
   echo "def helper() -> int: return 3" > backend/helper.py
   git add -A
 
-  run git commit --no-verify -m "add annotated file"
+  run git commit -m "add annotated file"
   echo "output: $output"
   [ "$status" -eq 0 ]
   [[ "$output" != *"BLOCKED: web/src/modules/training/annotated.ts"* ]]
@@ -213,7 +213,7 @@ teardown() {
   echo "def helper() -> int: return 4" > backend/helper.py
   git add -A
 
-  run git commit --no-verify -m "add mock-heavy test"
+  run git commit -m "add mock-heavy test"
   echo "output: $output"
   [[ "$output" == *"MOCK DENSITY"* ]]
   [[ "$output" == *"web/src/modules/training/session.test.ts"* ]]
@@ -231,7 +231,7 @@ teardown() {
   echo "test('session', () => {});" > web/src/modules/training/session.test.ts
   git add -A
 
-  run git commit --no-verify -m "add paired file in single-language subdir"
+  run git commit -m "add paired file in single-language subdir"
   echo "output: $output"
   [ "$status" -eq 0 ]
   [[ "$output" == *"Working in: web/"* ]]

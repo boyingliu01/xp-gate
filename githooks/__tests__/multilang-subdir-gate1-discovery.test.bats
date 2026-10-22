@@ -90,10 +90,20 @@ MOCK
   cp "$SOURCE_GITHOOKS/pre-commit" .git/hooks/pre-commit
   chmod +x .git/hooks/pre-commit
   cp "$SOURCE_GITHOOKS/adapter-common.sh" .git/hooks/adapter-common.sh 2>/dev/null || true
+  # #596: ship hook-module-resolution.sh too. Without it the hook dies on its
+  # first lines:
+  #     FATAL: cannot load hook-module-resolution.sh (module resolution order is unavailable)
+  # This went unnoticed because the assertion cases committed with `--no-verify`,
+  # which skips the hook entirely (see the note above those cases).
+  cp "$SOURCE_GITHOOKS/hook-module-resolution.sh" .git/hooks/hook-module-resolution.sh 2>/dev/null || true
   # The hook sources lib/typecheck.sh in Gate 1 (#436): ship the whole lib/
   # directory, exactly like a real `xp-gate init` installation does.
   mkdir -p .git/hooks/lib
   cp -R "$SOURCE_GITHOOKS/lib/." .git/hooks/lib/ 2>/dev/null || true
+  # Gate 1 routes through the language adapters; a real install ships them
+  # alongside the hook.
+  mkdir -p .git/hooks/adapters
+  cp -R "$SOURCE_GITHOOKS/adapters/." .git/hooks/adapters/ 2>/dev/null || true
 
   mkdir -p web/src/modules/training backend
   cat > web/tsconfig.json <<'EOF'
@@ -143,7 +153,7 @@ teardown() {
   echo "def helper() -> int: return 1" > backend/helper.py
   git add -A
 
-  run git commit --no-verify -m "add files for tsc discovery"
+  run git commit -m "add files for tsc discovery"
   echo "output: $output"
   [ "$status" -eq 0 ]
   [[ "$output" != *"tsconfig.json not found"* ]]
@@ -164,7 +174,7 @@ teardown() {
   echo "def helper() -> int: return 1" > backend/helper.py
   git add -A
 
-  run git commit --no-verify -m "add files for biome discovery"
+  run git commit -m "add files for biome discovery"
   echo "output: $output"
   [ "$status" -eq 0 ]
   [[ "$output" == *"Running Biome lint/format check"* ]]
