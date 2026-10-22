@@ -1497,6 +1497,36 @@ specification:
           criteria: Gate 5b 的 npx bats 调用必须带 --print-output-on-failure
           test_type: unit
 
+    # ============================================================
+    # REQ-592: 门禁 fixture 必须同步实现的演进。
+    # gate9-architecture.bats 在 CI 上 18 个用例失败、本地也几乎全红，原因全部是
+    # fixture 停留在旧实现的状态上，而不是 Gate 9 本身有问题：
+    #   1. PATH 被写死成 "$TEST_DIR/bin:/usr/bin:/bin"（替换而非前置），
+    #      而 git/node 都不在这两个目录里（Linux CI 的 node 在 /usr/local/bin，
+    #      Windows Git Bash 的 git 在 /c/Program Files/Git/...），setup 直接
+    #      以 "git: command not found" 死掉，18 个用例全部未真正断言任何东西。
+    #   2. pre-commit 现在 source 10 个 lib/*.sh，fixture 只复制了 now-ms.sh，
+    #      hook 报 "FATAL: cannot load .../lib/audit-sanitize.sh (missing)" 后退出。
+    #   3. `git init` 落在 master/main 上，而 Gate 0 视其为受保护分支并直接 exit，
+    #      连 Gate 1 都不会执行。
+    #   4. Go fixture 用 `touch` 造空 .go 文件，golangci-lint 报
+    #      "expected 'package', found 'EOF'"，Gate 1 BLOCK 后 Gate 9 无输出。
+    # 结论：一个 fixture 只要能 setup 失败，它守护的门禁就等于没有守护。
+    # ============================================================
+    - id: REQ-592
+      description: "门禁 fixture 必须能真正执行到被测门禁，且不依赖机器的工具布局"
+      priority: high
+      acceptance_criteria:
+        - id: AC-592-01
+          criteria: fixture 的 PATH 必须前置 stub 而保留原始 PATH，使 git/node 仍可解析
+          test_type: unit
+        - id: AC-592-02
+          criteria: fixture 必须复制完整的 githooks/lib/ 目录，不得逐个列举依赖文件
+          test_type: unit
+        - id: AC-592-03
+          criteria: fixture 必须在非受保护分支上，避免 Gate 0 提前退出
+          test_type: unit
+
 
     # ============================================================
     # REQ-574: Gate MW 校验证据必须与 .delphi-config.json 的席位绑定。

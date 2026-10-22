@@ -10,7 +10,18 @@ setup() {
   cp "${BATS_TEST_DIRNAME}/../pre-commit" "${TEST_DIR}/pre-commit"
   cp "${BATS_TEST_DIRNAME}/../adapter-common.sh" "${TEST_DIR}/adapter-common.sh"
   cp "${BATS_TEST_DIRNAME}/../hook-module-resolution.sh" "${TEST_DIR}/hook-module-resolution.sh"
-  cp "${BATS_TEST_DIRNAME}/../lib/now-ms.sh" "${TEST_DIR}/lib/now-ms.sh"
+  # #592: copy the WHOLE lib/ directory, not just now-ms.sh.
+  #
+  # `pre-commit` sources ten helpers from lib/ (audit-sanitize, coverage-total,
+  # docs-only, jscpd-run, now-ms, python-incremental-typecheck,
+  # python-test-selection, sprint-gate-report, test-failure, typecheck). This
+  # fixture copied only now-ms.sh, so the hook died before Gate 9 with
+  #     FATAL: cannot load .../lib/audit-sanitize.sh (missing)
+  # produced no gate output at all, and every verdict assertion failed.
+  #
+  # Copying the directory keeps the fixture working when a helper is added —
+  # listing files by name is what let it drift nine helpers behind.
+  cp -R "${BATS_TEST_DIRNAME}/../lib/." "${TEST_DIR}/lib/"
   cp "${BATS_TEST_DIRNAME}/../adapters/typescript.sh" "${TEST_DIR}/adapters/typescript.sh"
   chmod +x "${TEST_DIR}/pre-commit"
   cat > "$TEST_DIR/bin/npx" <<'EOF'
@@ -23,12 +34,35 @@ esac
 exit 1
 EOF
   chmod +x "$TEST_DIR/bin/npx"
-  export PATH="$TEST_DIR/bin:/usr/bin:/bin"
+  # #592: PREPEND the stub dir; keep the real PATH behind it.
+  #
+  # The old line REPLACED PATH with a fixed three-entry list:
+  #     export PATH="$TEST_DIR/bin:/usr/bin:/bin"
+  # Neither `git` nor `node` lives there on the machines that run this suite:
+  #   - Linux CI runner: node is /usr/local/bin
+  #   - Windows Git Bash: git is "/c/Program Files/Git/..."
+  # so setup() died immediately with
+  #     `git init --quiet' failed with status 127
+  #     line 29: git: command not found
+  # and all 18 cases failed — in CI on the verdict assertions, locally on the
+  # very first `git init`. Either way the suite asserted nothing about Gate 9.
+  #
+  # Prepending keeps the stub `npx` in front (which is the point of the stub)
+  # while letting the hook find the real git/node behind it. Every other
+  # stub-based suite in this directory already does `"$stub:$PATH"`.
+  export PATH="$TEST_DIR/bin:$PATH"
   
   cd "$TEST_DIR"
   git init --quiet
   git config user.email "test@test.com"
   git config user.name "Test User"
+  # #592: move off the default branch. `git init` creates master/main, both of
+  # which Gate 0 treats as PROTECTED: on a protected branch the hook stops with
+  #     ERROR: Committing to a protected branch without VERSION/CHANGELOG update.
+  # and exits before any gate runs. Measured: the fixture produced no gate output
+  # at all, so every "the hook must print X" assertion failed no matter what the
+  # architecture gate did. A feature branch is also what a real user commits on.
+  git checkout --quiet -b feature/gate9-fixture
   cat >> .git/info/exclude <<'EOF'
 pre-commit
 adapter-common.sh
@@ -164,12 +198,21 @@ go 1.21
 EOF
 
   mkdir -p domain
-  touch domain/entity.go
-  
+  # #592: write a real Go file, not `touch` an empty one. An empty .go file is
+  # "expected 'package', found 'EOF'" to golangci-lint, so Gate 1 BLOCKED and
+  # exited before Gate 9 ran — the architecture assertion could never pass.
+  cat > domain/entity.go << 'EOF'
+// Package domain holds the fixture's domain layer.
+package domain
+
+// Entity is the fixture's domain entity.
+type Entity struct{}
+EOF
+
   git add .
-  
+
   run ./pre-commit
-  
+
   [[ "$output" == *"goarchtest"* ]] || [[ "$output" == *"Architecture"* ]] || [[ "$output" == *"go test"* ]] || [[ "$output" == *"Gate 9"* ]] || [[ "$output" == *"ENVIRONMENT ERROR"* ]]
 }
 
