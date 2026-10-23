@@ -4,15 +4,22 @@ const { execSync, execFileSync, spawnSync } = require('child_process');
 const { exec } = require('child_process');
 const util = require('util');
 const execAsync = util.promisify(exec);
-const {
-  HOME_DIR,
-  CONFIG_DIR,
-  CONFIG_FILE,
-  GLOBAL_HOOKS_DIR,
-  GLOBAL_ADAPTERS_DIR,
-  detectPlatform,
-  getTemplateDir,
-} = require('./shared-paths.js');
+const sharedPaths = require('./shared-paths.js');
+const { detectPlatform, getTemplateDir } = sharedPaths;
+
+// #599: the filesystem roots below are DERIVED FROM process.env.HOME, so they
+// must not be captured at require() time. doctor.js is routinely loaded by a
+// test run BEFORE that run sets HOME -- doctor.test.js loads detect-deps.js
+// (which loads shared-paths.js) in beforeAll, before any test assigns HOME --
+// and a require-time capture froze CONFIG_FILE to the REAL home directory. That
+// made `doctor` report `Config file: Not found` for fixtures that had in fact
+// written the config, and `--fix` returned 1 on a healthy installation.
+//
+// These are therefore read through the module at each use, not destructured.
+const HOME_DIR = () => sharedPaths.HOME_DIR;
+const CONFIG_FILE = () => sharedPaths.CONFIG_FILE;
+const GLOBAL_HOOKS_DIR = () => sharedPaths.GLOBAL_HOOKS_DIR;
+const GLOBAL_ADAPTERS_DIR = () => sharedPaths.GLOBAL_ADAPTERS_DIR;
 const { checkUpgrade, formatUpgradeMsg } = require('./check-version.js');
 const { GATE_CLI_TOOLS, checkCliTool, getToolInstallCmd, checkBash } = require('./detect-deps.js');
 // #505: the single source of truth for module resolution order. The hook reads a
@@ -214,16 +221,16 @@ function isXpGateFile(filePath, signature) {
 }
 
 function getConfig() {
-  if (!fs.existsSync(CONFIG_FILE)) return null;
+  if (!fs.existsSync(CONFIG_FILE())) return null;
   try {
-    return JSON.parse(fs.readFileSync(CONFIG_FILE, 'utf8'));
+    return JSON.parse(fs.readFileSync(CONFIG_FILE(), 'utf8'));
   } catch {
     return 'corrupt';
   }
 }
 
 function saveConfig(config) {
-  fs.writeFileSync(CONFIG_FILE, JSON.stringify(config, null, 2));
+  fs.writeFileSync(CONFIG_FILE(), JSON.stringify(config, null, 2));
 }
 
 async function getGitDir() {
@@ -339,12 +346,12 @@ function checkConfig() {
   }
   if (config.mode !== 'local' && config.mode !== 'global') {
     return { config: null, checks: [
-      { name: 'Config file', status: 'PASS', detail: CONFIG_FILE },
+      { name: 'Config file', status: 'PASS', detail: CONFIG_FILE() },
       { name: 'Install mode', status: 'FAIL', detail: `Unknown: ${config.mode}` }
     ], issues: 1 };
   }
   return { config, checks: [
-    { name: 'Config file', status: 'PASS', detail: CONFIG_FILE },
+    { name: 'Config file', status: 'PASS', detail: CONFIG_FILE() },
     { name: 'Install mode', status: 'PASS', detail: config.mode }
   ], issues: 0 };
 }
@@ -365,19 +372,19 @@ async function checkLocalHooks(checks) {
 
 async function checkGlobalHooks(checks) {
   let issues = 0;
-  issues += checkSingleHook(GLOBAL_HOOKS_DIR, 'pre-commit', SIGNATURES['pre-commit'], 'Global hooks', checks);
-  issues += checkSingleHook(GLOBAL_HOOKS_DIR, 'pre-push', SIGNATURES['pre-push'], 'Global hooks', checks);
-  issues += checkSingleHook(GLOBAL_HOOKS_DIR, 'post-merge', SIGNATURES['post-merge'], 'Global hooks', checks);
+  issues += checkSingleHook(GLOBAL_HOOKS_DIR(), 'pre-commit', SIGNATURES['pre-commit'], 'Global hooks', checks);
+  issues += checkSingleHook(GLOBAL_HOOKS_DIR(), 'pre-push', SIGNATURES['pre-push'], 'Global hooks', checks);
+  issues += checkSingleHook(GLOBAL_HOOKS_DIR(), 'post-merge', SIGNATURES['post-merge'], 'Global hooks', checks);
 
   const hooksPath = await getCurrentHooksPath();
   if (hooksPath === null || hooksPath === '') {
     checks.push({ name: 'Git core.hooksPath', status: 'FAIL', detail: 'Not set' });
     issues++;
-  } else if (!pathsEquivalent(hooksPath, GLOBAL_HOOKS_DIR)) {
-    checks.push({ name: 'Git core.hooksPath', status: 'FAIL', detail: `Expected ${GLOBAL_HOOKS_DIR}, got ${hooksPath}` });
+  } else if (!pathsEquivalent(hooksPath, GLOBAL_HOOKS_DIR())) {
+    checks.push({ name: 'Git core.hooksPath', status: 'FAIL', detail: `Expected ${GLOBAL_HOOKS_DIR()}, got ${hooksPath}` });
     issues++;
   } else {
-    checks.push({ name: 'Git core.hooksPath', status: 'PASS', detail: GLOBAL_HOOKS_DIR });
+    checks.push({ name: 'Git core.hooksPath', status: 'PASS', detail: GLOBAL_HOOKS_DIR() });
   }
   return issues;
 }
@@ -443,7 +450,7 @@ function diagnoseHookDrift(ctx = {}) {
   // explicitly instead of inferring it from the process cwd.
   const repoRoot = ctx.repoRoot || process.env.XP_GATE_REPO_ROOT || process.cwd();
   const repoHooks = ctx.repoHooks || path.join(repoRoot, 'githooks');
-  const installedHooks = ctx.installedHooks || GLOBAL_HOOKS_DIR;
+  const installedHooks = ctx.installedHooks || GLOBAL_HOOKS_DIR();
 
   // Nothing to compare when the project carries no canonical *hook* source, or
   // when no global copy exists at all. Both must stay completely silent.
@@ -817,7 +824,7 @@ function syncModulesFromRepo(ctx = {}) {
 
   if (!hasCanonicalHooks(repoHooks)) {
     errors.push(`no canonical githooks/ source at ${repoHooks} -- nothing was synced`);
-    return { synced, skipped, refused, errors, installedAdapters: ctx.installedAdapters || ctx.globalAdapterDir || GLOBAL_ADAPTERS_DIR, sourceMissing: true };
+    return { synced, skipped, refused, errors, installedAdapters: ctx.installedAdapters || ctx.globalAdapterDir || GLOBAL_ADAPTERS_DIR(), sourceMissing: true };
   }
 
   // Same resolution the diagnosis used, so a FAIL the diagnosis can produce is a
@@ -884,9 +891,9 @@ function syncModulesFromRepo(ctx = {}) {
  * @returns {{adapterDir: string, gateDir: string, globalAdapterDir: string, projectGithooks: string, scriptDir: string}}
  */
 function resolveExecutedModuleDirs(ctx = {}) {
-  const globalAdapterDir = ctx.globalAdapterDir || ctx.installedAdapters || GLOBAL_ADAPTERS_DIR;
+  const globalAdapterDir = ctx.globalAdapterDir || ctx.installedAdapters || GLOBAL_ADAPTERS_DIR();
   const projectGithooks = ctx.projectGithooks || defaultProjectGithooks();
-  const scriptDir = ctx.scriptDir || GLOBAL_HOOKS_DIR;
+  const scriptDir = ctx.scriptDir || GLOBAL_HOOKS_DIR();
 
   const has = (dir, file) => fs.existsSync(path.join(dir, file));
 
@@ -1128,7 +1135,7 @@ function printEffectiveHooks() {
 function syncGlobalHooksFromRepo(ctx = {}) {
   const repoRoot = ctx.repoRoot || process.env.XP_GATE_REPO_ROOT || process.cwd();
   const repoHooks = ctx.repoHooks || path.join(repoRoot, 'githooks');
-  const installedHooks = ctx.installedHooks || GLOBAL_HOOKS_DIR;
+  const installedHooks = ctx.installedHooks || GLOBAL_HOOKS_DIR();
 
   const synced = [];
   const skipped = [];
@@ -1322,7 +1329,7 @@ async function checkAdapters(checks, mode, gitDirPromise) {
   let issues = 0;
   const adaptersDir = mode === 'local'
     ? path.join(path.dirname(gitDir || ''), 'githooks', 'adapters')
-    : GLOBAL_ADAPTERS_DIR;
+    : GLOBAL_ADAPTERS_DIR();
 
   if (!adaptersDir || !fs.existsSync(adaptersDir)) {
     checks.push({ name: 'Adapters directory', status: 'FAIL', detail: 'Missing' });
@@ -2122,7 +2129,7 @@ function fixHooksByMode(config, srcDir) {
       fixed = fixMissingHooks('local', srcDir, hooksDir) || fixed;
     }
   } else {
-    fixed = fixMissingHooks('global', srcDir, GLOBAL_HOOKS_DIR) || fixed;
+    fixed = fixMissingHooks('global', srcDir, GLOBAL_HOOKS_DIR()) || fixed;
   }
   return fixed;
 }
@@ -2130,8 +2137,8 @@ function fixHooksByMode(config, srcDir) {
 function fixGlobalHooksPath(config) {
   if (config.mode !== 'global') return false;
   const hooksPath = getCurrentHooksPathSync();
-  if (!pathsEquivalent(hooksPath, GLOBAL_HOOKS_DIR)) {
-    return fixCoreHooksPath(GLOBAL_HOOKS_DIR);
+  if (!pathsEquivalent(hooksPath, GLOBAL_HOOKS_DIR())) {
+    return fixCoreHooksPath(GLOBAL_HOOKS_DIR());
   }
   return false;
 }
@@ -2139,7 +2146,7 @@ function fixGlobalHooksPath(config) {
 function getAdaptersDirByMode(config) {
   return config.mode === 'local'
     ? path.join(path.dirname(getGitDirSync() || ''), 'githooks', 'adapters')
-    : GLOBAL_ADAPTERS_DIR;
+    : GLOBAL_ADAPTERS_DIR();
 }
 
 /**
@@ -2200,7 +2207,7 @@ function fixHookDriftFromRepo() {
   }
   if (synced.length === 0) return false;
 
-  console.log(`  ✓ Synced ${synced.join(', ')} from githooks/ to ${GLOBAL_HOOKS_DIR}`);
+  console.log(`  ✓ Synced ${synced.join(', ')} from githooks/ to ${GLOBAL_HOOKS_DIR()}`);
   return true;
 }
 
@@ -2219,8 +2226,8 @@ function fixStaleHooks(config) {
 
     let hooksDestDir, adaptersDestDir;
     if (isGlobal) {
-      hooksDestDir = GLOBAL_HOOKS_DIR;
-      adaptersDestDir = GLOBAL_ADAPTERS_DIR;
+      hooksDestDir = GLOBAL_HOOKS_DIR();
+      adaptersDestDir = GLOBAL_ADAPTERS_DIR();
     } else {
       const gitDir = getGitDirSync();
       if (!gitDir) return false;
@@ -2397,7 +2404,7 @@ async function diagnoseUpgrade() {
  * @returns {number} issue count
  */
 function diagnoseOpenCodePlugin(checks) {
-  const pluginPath = path.join(HOME_DIR, '.config', 'opencode', 'node_modules', '@boyingliu01', 'opencode-plugin', 'package.json');
+  const pluginPath = path.join(HOME_DIR(), '.config', 'opencode', 'node_modules', '@boyingliu01', 'opencode-plugin', 'package.json');
   if (fs.existsSync(pluginPath)) {
     try {
       const pluginPkg = JSON.parse(fs.readFileSync(pluginPath, 'utf8'));
@@ -2785,7 +2792,7 @@ async function doctorDelphi(options = {}) {
   // exists there, so the doctor agrees with the repair command (#414 R1 FC-09).
   const { readQoderModelId } = require('./init.js');
   const roles = ['architecture', 'technical', 'feasibility'];
-  const homeAgentsDir = path.join(HOME_DIR, '.qoder', 'agents');
+  const homeAgentsDir = path.join(HOME_DIR(), '.qoder', 'agents');
   // Injectable for tests; defaults to the cwd the doctor runs from.
   const projectAgentsDir = path.join(options.projectDir || process.cwd(), '.qoder', 'agents');
   const homeComplete = roles.every((r) => fs.existsSync(path.join(homeAgentsDir, `delphi-${r}.md`)));
@@ -2841,10 +2848,10 @@ async function doctorDelphi(options = {}) {
   // references/ too, and B4-style drift hits those equally (#414 R1 MI-03).
   const platform = detectPlatform();
   const installedSkillDir = platform === 'qoder'
-    ? path.join(HOME_DIR, '.qoder', 'skills', 'delphi-review')
+    ? path.join(HOME_DIR(), '.qoder', 'skills', 'delphi-review')
     : platform === 'claude-code'
-      ? path.join(HOME_DIR, '.claude', 'skills', 'delphi-review')
-      : path.join(HOME_DIR, '.config', 'opencode', 'skills', 'delphi-review');
+      ? path.join(HOME_DIR(), '.claude', 'skills', 'delphi-review')
+      : path.join(HOME_DIR(), '.config', 'opencode', 'skills', 'delphi-review');
   // Injectable for tests (#414 R3 FC-01/FC-02): the empty-bundle branch is a
   // real failure mode and must be drivable without mutating the package.
   const bundledSkillDir = options.bundledSkillDir || path.join(PKG_DIR, 'skills', 'delphi-review');
@@ -2941,6 +2948,26 @@ async function doctorDelphi(options = {}) {
         } else {
           add('Delphi config (.delphi-config.json)', 'PASS',
             `profile "${profileName}": ${models.join(' / ')}`);
+          // #574: non-local seats are reported, not blocked. The local-only rule
+          // is an operator preference (the 2026-10-03 quota burn), so doctor
+          // surfaces the cost exposure without failing a deliberately hosted
+          // seat. The HARD enforcement lives in Gate MW, which binds evidence to
+          // whatever this file declares rather than to a local- prefix.
+          // `scripts/check_delphi_local_models.py` holds the same rule with the
+          // same allowlist and exit code; doctor reports it here so the guard
+          // finally has a caller (`xp-gate doctor delphi`) instead of existing
+          // only in its own docstring.
+          const hostedSeats = roles.filter((r) => {
+            const m = models[roles.indexOf(r)];
+            return m && !String(m).toLowerCase().startsWith('local-');
+          });
+          if (hostedSeats.length > 0) {
+            add('Delphi local-model guard (#574)', 'WARN',
+              `hosted (non local-*) seats: ${hostedSeats.map((r) => `${r}=${models[roles.indexOf(r)]}`).join(', ')} — `
+                + 'local-only review is the standing rule; run: python scripts/check_delphi_local_models.py --probe');
+          } else {
+            add('Delphi local-model guard (#574)', 'PASS', `all ${roles.length} seats are local-*`);
+          }
         }
         // #541 follow-up: shadow detection. Loaders fall back to the global
         // config ONLY on ENOENT, so this project file always wins here. If the
@@ -3008,7 +3035,7 @@ async function doctorDelphi(options = {}) {
   // home exists. The two-layer switch (preset capability + host setting)
   // defaults to disabled, and a review that assumes native will silently run
   // three same-model seats.
-  const dshHome = path.join(HOME_DIR, '.dsh');
+  const dshHome = path.join(HOME_DIR(), '.dsh');
   if (!fs.existsSync(dshHome)) {
     add('DSH subagent model selection', 'SKIP', `no ${dshHome} — not a DSH environment`);
   } else {

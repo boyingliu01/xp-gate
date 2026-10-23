@@ -24,7 +24,7 @@ _LE_CR=$(tr -cd '\r' < "$0" | wc -c | tr -d '[:space:]'); test "${_LE_CR:-0}" -e
 #
 # Verified: an LF copy runs through (0 CR bytes); a CRLF copy prints the FATAL
 # diagnosis and exits 1 with no syntax error.
-# Pre-push Hook: Gate 10 (Build Integrity) + M/M-Python/M-Go/M-Java/M-Kotlin (Mutation)
+# Pre-push Hook — 8 gates: Gate 10 (Build Integrity) + M/M-Python/M-Go/M-Java/M-Kotlin (Mutation)
 # + M2 (Mock Density, WARNING) + ML (Mock Layering) + UI (UI Sprint Gates) + MW (Code Walkthrough) + S (Sprint Flow)
 #
 # DESIGN: Hook validates result/executes checks, Skill executes AI review
