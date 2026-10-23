@@ -392,6 +392,11 @@ delphi-review(
 )
 ```
 
+> **先确认该工具真的存在（#574）**：不是所有 DSH profile 都装了它。若当前会话的工具列表里
+> 没有 `delphi-review`，说明插件未安装 —— 此时**不要**推断"那就用 subagent / workflow 吧"。
+> 按下方【通道白名单】处理：要么装插件（`dsh plugin add @boyingliu01/dsh-plugin-xp-gate`），
+> 要么走 external 脚本路径，要么 BLOCK。
+
 该工具**直连外部 OpenAI 兼容网关**，每个席位绑定一个不同模型，因此不依赖宿主配置即可
 满足不变量。它复用**同一份** `.delphi-config.json`，无需额外配置。
 
@@ -431,6 +436,51 @@ delphi-review(
 - 降级证据落盘 `delphi-reviewed.json`：`channel`、`fallback_reason`（如 `dsh_subagent_model_selection_disabled`）、`probe_evidence`（①②③ 的实测摘录）。
 - 两通道同不变量：三专家齐全、`requested_model` 互异、consensus ≥90%、**无单专家路径**。
 - 可用性探测可用 `xp-gate doctor delphi` 复核（DSH 环境下含 `subagentModelSelection` 持久化设置检查）。
+
+##### 通道白名单（default-deny，#574）
+
+上面的双通道契约是**允许清单**，不是"除 subagent 外都能用"。**只有这两条通道合法**：
+`subagent`（native，需通过 ①②③）与 external（插件工具 / `delphi-external-review.cjs`）。
+
+**其余一切扇出机制一律禁止**，包括但不限于：
+
+| 禁止的通道 | 为什么禁止 |
+|---|---|
+| `workflow` 工具的 `agent()` 扇出 | `agent()` 的 `provider`/`model` **不受** `allowedModels` 约束（`dsh-workflow-ptc` 里没有任何白名单校验，直达 `subagents.start`）。脚本里写什么模型就真的跑什么模型。 |
+| 手写脚本 / 循环里逐个调 `subagent` 但省略 `model` | 缺 `model` 时子代理**静默继承宿主会话模型**，三席变一席。 |
+| Agent Teams / `spawn_teammate` | 团队成员模型不可逐条指定，且 `TeamMemberView.model` 是输出字段、可能是继承值。 |
+| 任何"从网关模型清单里挑三个"的做法 | 网关可能注册上百个模型，任意三个互异都满足旧不变量 —— 这正是 #574 的事故形态。 |
+
+**推荐通道不可用时，必须 BLOCK 并如实报告，不得自行选一条"看起来能跑"的路径。**
+判定句：*如果我正在用的派发机制不在上面两条之内，立即停止，输出 BLOCK 并说明缺什么。*
+
+##### 席位解析（派发前强制步骤，#574）
+
+模型 ID **只能来自 `.delphi-config.json`**，不得来自会话默认模型、网关模型清单、
+记忆、或上一次评审的残留。派发前依次执行：
+
+1. 读取 `<项目根>/.delphi-config.json`，取 `active_profile` 指向的 profile。
+   （查找顺序：项目根 → `~/.config/xp-gate/.delphi-config.json`；多份存在时以项目根为准。）
+2. 解出 `architecture` / `technical` / `feasibility` 三个席位的 `model`，**去空白**。
+3. **原样打印**这三个 ID 与 `active_profile`，作为本轮派发的凭据。
+4. 只用这三个字面量派发；脚本里**不得出现配置中不存在的模型 ID**。
+5. 三席位必须互异 —— 若配置本身有重复，这是配置错误，BLOCK，不要去"挑一个换掉"。
+
+> 反例（2026-10-22 实测事故）：某次 code-walkthrough 的 workflow 脚本硬编码了
+> `s-deepseek-v4.1-flash` / `g-deepseek-v4-pro` / `doubao-seed-2.0-pro`，
+> 而配置写的是三个 `local-*` 免费席位。三者互异、评审"成功"、Gate MW 判 APPROVED，
+> 但付费模型被真实调用，而 `local-*` 只落了 1/3。16 次 workflow 运行中读取配置的次数为 **0**。
+
+##### 执行后核验（#574）
+
+评审结束后必须逐席位核对**实际解析到的模型**，不能只看请求值：
+
+- 证据来源：子会话的 `request/header`（平台日志）或 external 脚本的回执 `resolved_model`。
+- 三席 `requested_model` 必须**逐一等于**配置中同角色的席位（按角色对应，不是"三者在集合里"）。
+- 任一不匹配 → 本次评审**作废**，不得写入 `.code-walkthrough-result.json`，按 BLOCK 处理。
+- Gate MW 会独立复核这一点（#574）：存在 `.delphi-config.json` 时，
+  证据里每个 `requested_model` 必须等于该角色的配置席位，否则 pre-push 直接 BLOCK。
+
 #### WorkBuddy 平台（Expert 团队模式）
 
 WorkBuddy 侧以 Team 型专家团（示例：`delphi-review-team`，安装在 `~/.workbuddy/plugins/marketplaces/my-experts/plugins/`，创建方式见 [docs/platform-workbuddy.md](../../docs/platform-workbuddy.md)）承载评审，触发本技能后按此路由执行：
