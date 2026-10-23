@@ -50,10 +50,21 @@ describe('doctor path equivalence (#496)', () => {
     );
     // The two comparison sites that made the Windows call fail must both route
     // through the equivalence check rather than a byte comparison.
+    //
+    // #599: this used to match the literal `pathsEquivalent(hooksPath,
+    // GLOBAL_HOOKS_DIR)`. GLOBAL_HOOKS_DIR became a function when the path
+    // constants stopped being captured at require() time (they follow
+    // process.env.HOME now), so the call site reads `GLOBAL_HOOKS_DIR()`. A
+    // literal match made that a test failure instead of a grammar change.
+    // The invariant is "the hooksPath comparison goes through pathsEquivalent
+    // and passes the global hooks dir to it" — match that, not its spelling.
     const callSites = source
       .split('\n')
       .filter((line) => /hooksPath\s*!==\s*GLOBAL_HOOKS_DIR/.test(line));
     expect(callSites).toHaveProperty('length', 0);
-    expect(source).toMatch(/pathsEquivalent\(hooksPath, GLOBAL_HOOKS_DIR\)/);
+
+    expect(source).toMatch(
+      /pathsEquivalent\(\s*hooksPath\s*,\s*GLOBAL_HOOKS_DIR(?:\(\))?\s*\)/
+    );
   });
 });
