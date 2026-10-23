@@ -206,6 +206,52 @@ describe('doctor delphi (#414 REQ-3/REQ-6)', () => {
     expect(code).toBe(0);
   });
 
+  // #574: `scripts/check_delphi_local_models.py` encoded the local-only seat
+  // rule but nothing ever called it, so the guard existed only in its own
+  // docstring. The doctor now reports the same verdict, which is what gives the
+  // rule a caller. The rule stays a WARN: a deliberately hosted seat is legal,
+  // and the HARD enforcement is Gate MW's evidence-to-config binding.
+  it('#574 hosted (non local-*) seats are reported as a WARN, not a failure', async () => {
+    healthyHome();
+    const configPath = writeConfig(path.join(tmpHome, '.delphi-config.json'));
+    const logs = [];
+    const logSpy = vi.spyOn(console, 'log').mockImplementation((...args) => logs.push(args.join(' ')));
+    const { doctorDelphi } = require('../doctor');
+    const code = await doctorDelphi({ projectDir: tmpHome, configPath, npmLatest: null });
+    logSpy.mockRestore();
+    const output = logs.join('\n');
+    expect(code).toBe(0);
+    expect(output).toMatch(/local-model guard/i);
+    expect(output).toMatch(/model-a|model-b|model-c/);
+  });
+
+  it('#574 three local-* seats PASS the local-model guard', async () => {
+    healthyHome();
+    const configPath = path.join(tmpHome, '.delphi-config.json');
+    fs.writeFileSync(configPath, JSON.stringify({
+      active_profile: 'local',
+      profiles: {
+        local: {
+          providers: { gw: { base_url: 'https://gw.example/v1', api_key: 'k' } },
+          experts: {
+            architecture: { provider: 'gw', model: 'local-deepseek-v4-flash' },
+            technical: { provider: 'gw', model: 'local-qwen3.8-flash' },
+            feasibility: { provider: 'gw', model: 'local-qwen3.8-27b' },
+          },
+        },
+      },
+    }));
+    const logs = [];
+    const logSpy = vi.spyOn(console, 'log').mockImplementation((...args) => logs.push(args.join(' ')));
+    const { doctorDelphi } = require('../doctor');
+    const code = await doctorDelphi({ projectDir: tmpHome, configPath, npmLatest: null });
+    logSpy.mockRestore();
+    const output = logs.join('\n');
+    expect(code).toBe(0);
+    expect(output).toMatch(/local-model guard/i);
+    expect(output).toMatch(/all 3 seats are local-\*/i);
+  });
+
   // R1 FC-07: the switch shipping off is the platform default, not a defect —
   // only enabled-but-underprovisioned is a real FAIL.
   it('DSH with subagentModelSelection absent is SKIP, not FAIL', async () => {

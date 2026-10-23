@@ -1246,7 +1246,12 @@ if [ ! -f "$MW_VALIDATOR" ]; then
 fi
 
 CURRENT_TIME=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
-if ! VALIDATION_ERROR=$(node "$MW_VALIDATOR" "$RESULT_FILE" "$EXPECTED_COMMIT" "$CURRENT_BRANCH" "$CURRENT_TIME" 2>&1); then
+# The 5th argument names the repository whose `.delphi-config.json` BINDS the
+# evidence (#574). It is passed explicitly instead of letting the validator
+# infer it from cwd: the gate's subject is the repo being pushed, and a cwd-
+# derived lookup would bind xp-gate's own config whenever the suite runs here.
+MW_PROJECT_ROOT=$(git rev-parse --show-toplevel 2>/dev/null || echo "")
+if ! VALIDATION_ERROR=$(node "$MW_VALIDATOR" "$RESULT_FILE" "$EXPECTED_COMMIT" "$CURRENT_BRANCH" "$CURRENT_TIME" "$MW_PROJECT_ROOT" 2>&1); then
   echo ""
   echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
   echo "   ❌ RESULT FILE OUTDATED - PUSH BLOCKED"
