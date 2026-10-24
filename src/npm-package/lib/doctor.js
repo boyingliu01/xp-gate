@@ -1166,6 +1166,51 @@ function backupBeforeOverwrite(target, backupsDir) {
 }
 
 /**
+ * Read a VERSION file, returning '' when it is missing or empty.
+ *
+ * Kept local and silent: the deploy log's version field must never be the reason
+ * a sync fails, and "unknown" is a truthful value.
+ *
+ * @param {string} versionPath
+ * @returns {string}
+ */
+function readVersionFile(versionPath) {
+  try {
+    return fs.readFileSync(versionPath, 'utf8').trim();
+  } catch {
+    return '';
+  }
+}
+
+/**
+ * Append one line to the deploy log beside the installed hooks (#583).
+ *
+ * The backup (#566) makes a damaged file recoverable; it does not answer the
+ * question a downstream actually has — "was my patch eaten, and by which
+ * version?". A directory of timestamped `.bak` files is readable only by someone
+ * who already suspects an overwrite. #583 records three silent overwrites in one
+ * day, one of which reverted a fail-open fix that had already been filed, fixed
+ * and tested.
+ *
+ * One line per overwritten file, appended — never rewritten, because "three times
+ * today" is exactly what the log exists to show.
+ *
+ * @param {string} logPath deploy log path
+ * @param {{file: string, version: string, backup: string|null}} entry
+ */
+function appendDeployLogEntry(logPath, entry) {
+  const stamp = new Date().toISOString();
+  const backup = entry.backup ? path.basename(entry.backup) : '(no previous content)';
+  const line = `${stamp} overwrote ${entry.file} from xp-gate ${entry.version} (previous saved as ${backup})\n`;
+  try {
+    fs.appendFileSync(logPath, line);
+  } catch {
+    // Same rule as the backup itself: a log that cannot be written must not
+    // abort the sync. The overwrite still happens and still reports its name.
+  }
+}
+
+/**
  * Copy the repository's `githooks/` over the installed global hooks (#451 REQ-2).
  *
  * This is the one-command escape from "I edited githooks/ and nothing changed".
@@ -1182,6 +1227,12 @@ function syncGlobalHooksFromRepo(ctx = {}) {
   const repoRoot = ctx.repoRoot || process.env.XP_GATE_REPO_ROOT || process.cwd();
   const repoHooks = ctx.repoHooks || path.join(repoRoot, 'githooks');
   const installedHooks = ctx.installedHooks || GLOBAL_HOOKS_DIR();
+  // #583: the version that performs the overwrite is part of the record. Read the
+  // repo's VERSION beside the hooks, so the log answers "which release did this"
+  // without the caller having to remember to pass it.
+  const version = ctx.version
+    || readVersionFile(path.join(repoRoot, 'VERSION'))
+    || 'unknown';
 
   const synced = [];
   const skipped = [];
@@ -1189,6 +1240,7 @@ function syncGlobalHooksFromRepo(ctx = {}) {
   const errors = [];
   const backups = [];
   const backupsDir = path.join(installedHooks, 'backups');
+  const deployLog = path.join(installedHooks, 'deploy.log');
 
   if (!fs.existsSync(repoHooks)) {
     errors.push(`no githooks/ directory at ${repoHooks}`);
@@ -1227,6 +1279,9 @@ function syncGlobalHooksFromRepo(ctx = {}) {
       // because a copied hook that is not executable silently never runs.
       fs.copyFileSync(source, target);
       fs.chmodSync(target, 0o755);
+      // #583: record it, so a downstream can tell an overwrite from a fresh
+      // install without having to diff checksums first.
+      appendDeployLogEntry(deployLog, { file: name, version, backup });
       synced.push(name);
     } catch (err) {
       errors.push(`${name}: ${err.message}`);
@@ -1249,6 +1304,7 @@ function syncGlobalHooksFromRepo(ctx = {}) {
       const backup = backupBeforeOverwrite(target, backupsDir);
       if (backup) backups.push(backup);
       fs.copyFileSync(source, target);
+      appendDeployLogEntry(deployLog, { file: name, version, backup });
       synced.push(name);
     } catch (err) {
       errors.push(`${name}: ${err.message}`);
@@ -1308,6 +1364,7 @@ function syncGlobalHooksFromRepo(ctx = {}) {
         if (backup) backups.push(backup);
         fs.copyFileSync(source, target);
         fs.chmodSync(target, 0o755);
+        appendDeployLogEntry(deployLog, { file: rel, version, backup });
         synced.push(rel);
       } catch (err) {
         errors.push(`${rel}: ${err.message}`);
