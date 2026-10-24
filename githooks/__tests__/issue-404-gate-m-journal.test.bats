@@ -32,6 +32,11 @@ setup() {
   cp "$REPO_ROOT/githooks/pre-push" .git/hooks/pre-push
   chmod +x .git/hooks/pre-push
   cp "$REPO_ROOT/githooks/lib/validate-code-walkthrough.cjs" .git/hooks/lib/ 2>/dev/null || true
+  # The scorer is a real install artefact (install.sh copies lib/*.py beside the
+  # hook), and pre-push fails closed without it (#580-04), so the fixture installs
+  # it like a real install does. Local runs used to pass only because the hook's
+  # last-resort lookup found ../githooks/lib/ by luck of the checkout layout.
+  cp "$REPO_ROOT/githooks/lib/prepush-score.py" .git/hooks/lib/ 2>/dev/null || true
   cp "$REPO_ROOT/githooks/adapter-common.sh" .git/hooks/ 2>/dev/null || true
   cp "$REPO_ROOT/githooks/hook-module-resolution.sh" .git/hooks/ 2>/dev/null || true
   git config core.hooksPath .git/hooks
