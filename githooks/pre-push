@@ -1063,8 +1063,16 @@ echo "   GATE UI: UI SPRINT QUALITY GATES"
 echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
 
 if [[ "$XP_GATE_SKIP_UI_GATES" == "1" ]]; then
-  if [[ -z "$XP_GATE_BYPASS_REASON" || ${#XP_GATE_BYPASS_REASON// /} -lt 10 ]]; then
+  # #578: this guard used `${#XP_GATE_BYPASS_REASON// /}`, which stacks "length"
+  # and "substitution" — bash rejects it with `bad substitution` for the whole
+  # condition line, so NEITHER branch ran. The bypass therefore skipped Gate UI
+  # with an empty or one-character reason, and the audit entry below was lost
+  # too. Strip the whitespace into a variable first, then take its length: two
+  # ordinary expansions, each of them valid on its own.
+  XP_GATE_BYPASS_REASON_COMPACT="${XP_GATE_BYPASS_REASON//[[:space:]]/}"
+  if [[ -z "$XP_GATE_BYPASS_REASON" || ${#XP_GATE_BYPASS_REASON_COMPACT} -lt 10 ]]; then
     echo "❌ XP_GATE_BYPASS_REASON required (min 10 non-whitespace chars)"
+    echo "   got: ${#XP_GATE_BYPASS_REASON_COMPACT} non-whitespace character(s)"
     exit 1
   fi
   echo "⚠️  UI Gate BYPASSED — reason: $XP_GATE_BYPASS_REASON"
