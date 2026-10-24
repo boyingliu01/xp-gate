@@ -95,7 +95,12 @@ run_install() {
   echo seed > README.md
   git add README.md
 
-  run git commit -m "seed" --allow-empty 2>&1
+  # core.hooksPath is passed on the commit line itself rather than relying on the
+  # earlier `git config`: this case intentionally runs the hook, so it must run
+  # THIS fixture's freshly installed hook and never the host's global chain. The
+  # pinned value also satisfies scripts/__tests__/fixture-hygiene.test.cjs, which
+  # rejects a fixture commit that could reach a developer machine's xp-gate install.
+  run git -c core.hooksPath=.git/hooks commit -m "seed" --allow-empty 2>&1
   [[ "$output" != *"cannot load hook-module-resolution.sh"* ]] || {
     echo "the freshly installed hook still cannot load its module resolution order"
     return 1
