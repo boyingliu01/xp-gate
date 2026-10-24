@@ -56,6 +56,11 @@ exit 0
 MOCK
   cat > "$TEST_DIR/bin/coverage" <<'MOCK'
 #!/bin/bash
+# #570: the coverage gate BLOCKS when it cannot determine a percentage, so a
+# silent stub models a failing gate rather than this fixture's subject (Gate 5a
+# per-new-file coverage). Report a passing total so Gate 5's project-level floor
+# stays out of the way.
+echo 97
 exit 0
 MOCK
   cat > "$TEST_DIR/bin/ruff" <<'MOCK'
@@ -134,6 +139,15 @@ EOF
   # Minimal archlint config so Gate 6 doesn't block on missing config
   echo "ignore: []" > .archlint.yaml
   echo "ignore: []" > web/.archlint.yaml
+  # #570: the coverage arms block when they cannot measure anything, so a fixture
+  # that omits coverage data would fail on Gate 5's project-level floor while
+  # claiming to test Gate 5a's per-new-file rule. Supply passing data for both
+  # languages the fixture declares.
+  mkdir -p coverage
+  cat > coverage/coverage-summary.json <<'EOF'
+{ "total": { "lines": { "pct": 97 } } }
+EOF
+  : > .coverage
   git add -A
   git commit -q --no-verify -m "init"
 }
