@@ -1876,6 +1876,40 @@ specification:
           criteria: .delphi-config.json 的 experts 两种形态（按角色键的对象、携带 role 的数组）必须解析出同一组席位；席位条目用 model 或 requested_model 携带模型 id 都算有效
           test_type: unit
 
+    # ============================================================
+    # REQ-602: hook 引擎的每个 shell 文件都必须能被 bash 解析。
+    #
+    # #579：pre-commit 的 Gate 5 逐文件覆盖率块混进了一个反引号。
+    # bash 把它当成命令替换的开始，于是文件剩余部分整体解析失败：
+    #     pre-commit: line 3208: syntax error near unexpected token `('
+    # hook 在打印完「✅ PASSED - Gate 5」后直接死掉，Gate 6/7/8/9/10/11/12
+    # 与最终质量报告从未执行，退出码取自最后一条成功的命令，于是提交被放行，
+    # 且输出里没有任何迹象说明七道门禁没跑。
+    #
+    # 现有防线都没拦住它：
+    #   - BATS 套件执行的是单道门禁，没有任何一条解析整个 hook 文件；
+    #   - scripts/verify-xp-gate-patches.cjs 只核对 mutation runner 的三处与
+    #     pre-push 的 --timeout，hook 可解析性不在范围内；
+    #   - scripts/check-hook-mirror.sh 比字节，字节相同的坏文件照样通过。
+    #
+    # 不变量因此是：引擎会执行的每个 shell 文件都必须能解析。它便宜（bash -n，
+    # 不执行）、与平台无关，并且在缺陷仍然无害的那一刻就大声失败。
+    # ============================================================
+    - id: REQ-602
+      description: "hook 引擎执行的每个 shell 文件都必须能被 bash -n 解析，含 npm 分发的副本"
+      priority: critical
+      acceptance_criteria:
+        - id: AC-602-01
+          criteria: githooks/ 下 pre-commit、pre-push、adapter-common.sh、
+            hook-module-resolution.sh、sprint-gate.sh、install.sh、lib/*.sh、
+            adapters/*.sh 必须全部通过 bash -n；任一失败必须红，且必须点出文件名与
+            真实报错；遍历结果不得为空（否则守卫是空转）
+          test_type: unit
+        - id: AC-602-02
+          criteria: src/npm-package/hooks/ 下会随包发布的副本也必须通过 bash -n，
+            不得出现仓库内可解析而分发副本不可解析的不一致
+          test_type: unit
+
 
     - id: DD-001
       decision: 走薄桥（方案 A）在 ctx.tools 注册三工具，而非独立 MCP server 或纯技能
