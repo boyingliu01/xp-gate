@@ -1744,6 +1744,11 @@ specification:
             lib/ 下各库文件与生成的 hook-module-resolution.sh；安装完成后的一次提交不得因
             「cannot load hook-module-resolution.sh」中止，且必须真正执行到门禁
           test_type: unit
+        - id: AC-599-13
+          criteria: xp-gate doctor --sync-hooks 在覆盖已存在的钩子/支撑文件/共享库之前，必须把旧版本
+            复制到已安装钩子目录旁的 backups/ 下（带时间戳，不得覆盖更早的备份）；不得在用户工作区
+            留下备份文件；安装到空目录时不得凭空创建备份；内容完全一致而不复制的文件不产生备份
+          test_type: unit
 
 
     # ============================================================
