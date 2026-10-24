@@ -87,79 +87,94 @@ XML
   [[ "$output" =~ "BLOCKED - PowerShell coverage 80% below 80% threshold" ]]
 }
 
-@test "PowerShell Stage 2 warns for a zero-total LINE counter without borrowing TypeScript coverage" {
+@test "PowerShell Stage 2 BLOCKS on a zero-total LINE counter and never borrows TypeScript coverage" {
   write_pester_report 0 0
   harness=$(extract_stage2_harness)
 
   run bash "$harness"
 
-  [ "$status" -eq 0 ]
+  # #570: an unusable report is no evidence, so the gate must not exit 0.
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"BLOCKED"* ]]
   [[ "$output" == *"Could not parse PowerShell coverage from coverage.xml"* ]]
   [[ ! "$output" =~ "1% below 80%" ]]
 }
 
-@test "PowerShell Stage 2 warns for a negative missed counter without borrowing TypeScript coverage" {
+@test "PowerShell Stage 2 BLOCKS on a negative missed counter and never borrows TypeScript coverage" {
   write_pester_report -1 5
   harness=$(extract_stage2_harness)
 
   run bash "$harness"
 
-  [ "$status" -eq 0 ]
+  # #570: an unusable report is no evidence, so the gate must not exit 0.
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"BLOCKED"* ]]
   [[ "$output" == *"Could not parse PowerShell coverage from coverage.xml"* ]]
   [[ ! "$output" =~ "PowerShell coverage: 125%" ]]
   [[ ! "$output" =~ "1% below 80%" ]]
 }
 
-@test "PowerShell Stage 2 warns for a negative covered counter without borrowing TypeScript coverage" {
+@test "PowerShell Stage 2 BLOCKS on a negative covered counter and never borrows TypeScript coverage" {
   write_pester_report 5 -1
   harness=$(extract_stage2_harness)
 
   run bash "$harness"
 
-  [ "$status" -eq 0 ]
+  # #570: an unusable report is no evidence, so the gate must not exit 0.
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"BLOCKED"* ]]
   [[ "$output" == *"Could not parse PowerShell coverage from coverage.xml"* ]]
   [[ ! "$output" =~ "1% below 80%" ]]
 }
 
-@test "PowerShell Stage 2 warns for a non-finite missed counter without borrowing TypeScript coverage" {
+@test "PowerShell Stage 2 BLOCKS on a non-finite missed counter and never borrows TypeScript coverage" {
   write_pester_report Infinity 5
   harness=$(extract_stage2_harness)
 
   run bash "$harness"
 
-  [ "$status" -eq 0 ]
+  # #570: an unusable report is no evidence, so the gate must not exit 0.
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"BLOCKED"* ]]
   [[ "$output" == *"Could not parse PowerShell coverage from coverage.xml"* ]]
   [[ ! "$output" =~ "1% below 80%" ]]
 }
 
-@test "PowerShell Stage 2 warns for a non-finite covered counter without borrowing TypeScript coverage" {
+@test "PowerShell Stage 2 BLOCKS on a non-finite covered counter and never borrows TypeScript coverage" {
   write_pester_report 5 Infinity
   harness=$(extract_stage2_harness)
 
   run bash "$harness"
 
-  [ "$status" -eq 0 ]
+  # #570: an unusable report is no evidence, so the gate must not exit 0.
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"BLOCKED"* ]]
   [[ "$output" == *"Could not parse PowerShell coverage from coverage.xml"* ]]
   [[ ! "$output" =~ "1% below 80%" ]]
 }
 
-@test "PowerShell Stage 2 warns for malformed Pester coverage without borrowing TypeScript coverage" {
+@test "PowerShell Stage 2 BLOCKS on malformed Pester coverage and never borrows TypeScript coverage" {
   printf '%s\n' '<report><counter type="BRANCH" missed="0" covered="10" /></report>' > coverage.xml
   harness=$(extract_stage2_harness)
 
   run bash "$harness"
 
-  [ "$status" -eq 0 ]
+  # #570: an unusable report is no evidence, so the gate must not exit 0.
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"BLOCKED"* ]]
   [[ "$output" == *"Could not parse PowerShell coverage from coverage.xml"* ]]
   [[ ! "$output" =~ "1% below 80%" ]]
 }
 
-@test "PowerShell Stage 2 warns when Pester coverage is missing without borrowing TypeScript coverage" {
+@test "PowerShell Stage 2 BLOCKS when Pester coverage is missing and never borrows TypeScript coverage" {
   harness=$(extract_stage2_harness)
 
   run bash "$harness"
 
-  [ "$status" -eq 0 ]
+  # #570: no coverage.xml means Pester coverage never ran, so the gate has no
+  # evidence to answer with. That is a BLOCK, not a note.
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"BLOCKED"* ]]
   [[ "$output" == *"coverage.xml not found"* ]]
   [[ ! "$output" =~ "1% below 80%" ]]
 }

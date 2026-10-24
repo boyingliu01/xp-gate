@@ -2850,7 +2850,7 @@ else
             go test -coverprofile=coverage.out ./... 2>/dev/null
             TOTAL_COVERAGE=$(go tool cover -func=coverage.out 2>/dev/null | grep "^total:" | awk '{print substr($3, 1, length($3)-1)}')
             if [ -n "$TOTAL_COVERAGE" ] && (( $(echo "$TOTAL_COVERAGE < 80" | bc -l 2>/dev/null || echo "0") )); then
-              echo "❌ BLOCKED - Go coverage $TOTAL_COVERAGE% below ${COVERAGE_THRESHOLD}% threshold"
+              echo "❌ BLOCKED - Go coverage $TOTAL_COVERAGE% below ${COVERAGE_THRESHOLD:-80}% threshold"
               exit 1
             fi
             echo "Go coverage: $TOTAL_COVERAGE%"
@@ -2894,6 +2894,19 @@ else
   COVERAGE_ENFORCED=false
 
   for CURRENT_LANG in $PROJECT_LANGS; do
+  # #570: every comparison below reads $COVERAGE_THRESHOLD, and the messages
+  # quote it. If it ever arrives empty (a helper called outside the hook, a test
+  # harness that sources only the case block), `[ "$pct" -lt "" ]` is false and
+  # `awk 'pct < thr'` with an empty thr is false too — the gate would PASS every
+  # value, i.e. exactly the fail-open this issue is about. Fall back to the
+  # historical default so an unset variable can never widen the gate.
+  #
+  # Kept INSIDE the loop (immediately before the case) so a harness that extracts
+  # only `case ... esac` still gets the guarantee it depends on.
+  if ! [[ "${COVERAGE_THRESHOLD:-}" =~ ^[0-9]+$ ]]; then
+    COVERAGE_THRESHOLD=80
+    COVERAGE_THRESHOLD_SOURCE="default (threshold was unset at Stage 2)"
+  fi
   case "$CURRENT_LANG" in
     "typescript")
       COVERAGE_ENFORCED=true
@@ -2908,18 +2921,21 @@ else
           } catch(e) { console.log('parse_error'); }
         " 2>/dev/null)
         if [ "$COVERAGE_PERCENT" != "parse_error" ] && [ -n "$COVERAGE_PERCENT" ]; then
-          if [ "$COVERAGE_PERCENT" -lt "$COVERAGE_THRESHOLD" ]; then
+          # #570: default the threshold at the comparison site too — an empty
+          # value makes test(1) fail, the branch is skipped, and low coverage is
+          # reported as a pass.
+          if [ "$COVERAGE_PERCENT" -lt "${COVERAGE_THRESHOLD:-80}" ]; then
             # Only a subset test run (smart selection) leaves partial coverage data;
             # a full suite run must block on <80% even when many test files changed.
             if [ "${PARTIAL_TEST_RUN:-false}" = "true" ]; then
               echo "⚠️  Partial coverage ${COVERAGE_PERCENT}% (subset test run, not full suite)."
               echo "    Run 'npx vitest run --coverage' for full coverage check."
             else
-              echo "❌ BLOCKED - TypeScript coverage ${COVERAGE_PERCENT}% below ${COVERAGE_THRESHOLD}% threshold"
+              echo "❌ BLOCKED - TypeScript coverage ${COVERAGE_PERCENT}% below ${COVERAGE_THRESHOLD:-80}% threshold"
               exit 1
             fi
           else
-            echo "TypeScript coverage: ${COVERAGE_PERCENT}% ✅ (≥ 80%)"
+            echo "TypeScript coverage: ${COVERAGE_PERCENT}% ✅ (≥ ${COVERAGE_THRESHOLD:-80}%)"
           fi
         else
           echo "⚠️  Could not parse TypeScript coverage from coverage/coverage-summary.json"
@@ -2974,24 +2990,39 @@ else
         if [ -n "$COVERAGE_PERCENT" ]; then
           # Compare on the unrounded value so 79.5% cannot pass as 80%.
           COVERAGE_ROUNDED=${COVERAGE_PERCENT%.*}
-          if awk -v pct="$COVERAGE_PERCENT" 'BEGIN { exit !(pct < 80) }'; then
+          if awk -v pct="$COVERAGE_PERCENT" -v thr="${COVERAGE_THRESHOLD:-80}" 'BEGIN { exit !(pct < thr) }'; then
             if [ "${PARTIAL_TEST_RUN:-false}" = "true" ]; then
               echo "⚠️  Partial coverage ${COVERAGE_ROUNDED}% (subset test run, not full suite)."
               echo "    Run the full test suite for a complete Java coverage check."
             else
-              echo "❌ BLOCKED - Java coverage ${COVERAGE_ROUNDED}% below ${COVERAGE_THRESHOLD}% threshold"
+              echo "❌ BLOCKED - Java coverage ${COVERAGE_ROUNDED}% below ${COVERAGE_THRESHOLD:-80}% threshold"
               exit 1
             fi
           else
-            echo "Java coverage: ${COVERAGE_ROUNDED}% ✅ (≥ 80%)"
+            echo "Java coverage: ${COVERAGE_ROUNDED}% ✅ (≥ ${COVERAGE_THRESHOLD:-80}%)"
           fi
         else
-          echo "⚠️  Could not parse Java coverage from ${jacoco_csv} (no instruction data)."
+          # #570: a JaCoCo report that yields no instruction data measured
+          # nothing. Warning and continuing let the gate pass on no evidence.
+          if [ "${PARTIAL_TEST_RUN:-false}" = "true" ]; then
+            echo "⚠️  Could not parse Java coverage from ${jacoco_csv} (subset test run) — not blocking."
+          else
+            echo "❌ BLOCKED - Could not parse Java coverage from ${jacoco_csv} (no instruction data),"
+            echo "   so the ${COVERAGE_THRESHOLD:-80}% floor cannot be verified."
+            exit 1
+          fi
         fi
       else
-        echo "⚠️  No JaCoCo report found. Run 'mvn verify' or 'gradle jacocoTestReport'"
-        echo "    so that target/site/jacoco/jacoco.csv exists — otherwise Java coverage"
-        echo "    cannot be enforced (see also: JaCoCo detection in adapters/java.sh)."
+        # #570: no report at all is the fail-open path this issue was filed for.
+        if [ "${PARTIAL_TEST_RUN:-false}" = "true" ]; then
+          echo "⚠️  No JaCoCo report found (subset test run) — not blocking."
+        else
+          echo "❌ BLOCKED - No JaCoCo report found, so the ${COVERAGE_THRESHOLD:-80}% Java coverage"
+          echo "   floor cannot be verified. Run 'mvn verify' or 'gradle jacocoTestReport'"
+          echo "   so that target/site/jacoco/jacoco.csv exists (see also: JaCoCo detection"
+          echo "   in adapters/java.sh)."
+          exit 1
+        fi
       fi
       ;;
     "go")
@@ -3004,23 +3035,52 @@ else
       COVERAGE_ENFORCED=true
       if [ -f "coverage/lcov.info" ]; then
         COVERAGE_PERCENT=$(parse_lcov_coverage "coverage/lcov.info" 2>/dev/null) || COVERAGE_PERCENT="0"
-        if [ "$COVERAGE_PERCENT" != "0" ] && [ -n "$COVERAGE_PERCENT" ]; then
-          if [ "$COVERAGE_PERCENT" -lt "$COVERAGE_THRESHOLD" ]; then
-            echo "❌ BLOCKED - Flutter/Dart coverage ${COVERAGE_PERCENT}% below ${COVERAGE_THRESHOLD}% threshold"
+        # #570: `-ge 0`, not `!= "0"`. A measured 0% is DATA — the tool ran and
+        # covered nothing — so it must reach the threshold comparison instead of
+        # being folded into "could not determine".
+        if [ -n "$COVERAGE_PERCENT" ] && [ "$COVERAGE_PERCENT" -ge 0 ] 2>/dev/null; then
+          # #570: default at the comparison site; an empty threshold makes
+          # test(1) fail and silently skips the BLOCK.
+          if [ "$COVERAGE_PERCENT" -lt "${COVERAGE_THRESHOLD:-80}" ]; then
+            if [ "${PARTIAL_TEST_RUN:-false}" = "true" ]; then
+              echo "⚠️  Partial coverage ${COVERAGE_PERCENT}% (subset test run, not full suite)."
+              echo "    Run the full test suite for a complete Flutter/Dart coverage check."
+            else
+              echo "❌ BLOCKED - Flutter/Dart coverage ${COVERAGE_PERCENT}% below ${COVERAGE_THRESHOLD:-80}% threshold"
+              exit 1
+            fi
+          else
+            echo "Flutter/Dart coverage: ${COVERAGE_PERCENT}% ✅ (≥ ${COVERAGE_THRESHOLD:-80}%)"
+          fi
+        else
+          # #570: lcov.info exists but carries no usable hit/found pair.
+          if [ "${PARTIAL_TEST_RUN:-false}" = "true" ]; then
+            echo "⚠️  Could not determine Flutter/Dart coverage (subset test run) — not blocking."
+          else
+            echo "❌ BLOCKED - Could not determine Flutter/Dart coverage from coverage/lcov.info,"
+            echo "   so the ${COVERAGE_THRESHOLD:-80}% floor cannot be verified."
             exit 1
           fi
-          echo "Flutter/Dart coverage: ${COVERAGE_PERCENT}% ✅ (≥ 80%)"
-        else
-          echo "⚠️  Could not determine Flutter/Dart coverage percentage from lcov.info."
         fi
       else
-        echo "⚠️  coverage/lcov.info not found. Ensure dart test --coverage was run."
+        # #570: the fail-open path. `dart test --coverage` not run means the gate
+        # has no evidence, and no evidence is not a pass.
+        if [ "${PARTIAL_TEST_RUN:-false}" = "true" ]; then
+          echo "⚠️  coverage/lcov.info not found (subset test run) — not blocking."
+        else
+          echo "❌ BLOCKED - coverage/lcov.info not found, so the ${COVERAGE_THRESHOLD:-80}% Flutter/Dart"
+          echo "   coverage floor cannot be verified. Ensure 'dart test --coverage' was run."
+          exit 1
+        fi
       fi
       ;;
     "powershell")
       COVERAGE_ENFORCED=true
       if [ -f "coverage.xml" ]; then
-        COVERAGE_RESULT=$(node -e "
+        # The threshold is passed INTO node: the verdict used to be computed
+        # against a hard-coded 80 inside the script, so a project that configured
+        # a different floor got a verdict about a number it never set (#570).
+        COVERAGE_RESULT=$(THRESHOLD="${COVERAGE_THRESHOLD:-80}" node -e "
           try {
             const fs = require('fs');
             const xml = fs.readFileSync('coverage.xml', 'utf8');
@@ -3037,23 +3097,49 @@ else
             if (!Number.isFinite(missed) || !Number.isFinite(covered) || missed < 0 || covered < 0 || total <= 0) {
               throw new Error('invalid LINE counter');
             }
+            const threshold = Number(process.env.THRESHOLD);
+            // Number("") is 0, which would make every percentage "pass" — the
+            // exact fail-open shape this fix is about. Refuse an unusable floor.
+            if (!Number.isFinite(threshold) || threshold <= 0) {
+              throw new Error('unusable THRESHOLD');
+            }
             const percentage = (covered / total) * 100;
-            console.log((percentage < 80 ? 'below' : 'pass') + '|' + Math.round(percentage));
+            console.log((percentage < threshold ? 'below' : 'pass') + '|' + Math.round(percentage));
           } catch (error) { console.log('parse_error'); }
         " 2>/dev/null) || COVERAGE_RESULT="parse_error"
         if [ "$COVERAGE_RESULT" != "parse_error" ] && [ -n "$COVERAGE_RESULT" ]; then
           COVERAGE_STATUS=${COVERAGE_RESULT%%|*}
           COVERAGE_PERCENT=${COVERAGE_RESULT#*|}
           if [ "$COVERAGE_STATUS" = "below" ]; then
-            echo "❌ BLOCKED - PowerShell coverage ${COVERAGE_PERCENT}% below ${COVERAGE_THRESHOLD}% threshold"
+            if [ "${PARTIAL_TEST_RUN:-false}" = "true" ]; then
+              echo "⚠️  Partial coverage ${COVERAGE_PERCENT}% (subset test run, not full suite)."
+              echo "    Run the full Pester suite for a complete PowerShell coverage check."
+            else
+              echo "❌ BLOCKED - PowerShell coverage ${COVERAGE_PERCENT}% below ${COVERAGE_THRESHOLD:-80}% threshold"
+              exit 1
+            fi
+          else
+            echo "PowerShell coverage: ${COVERAGE_PERCENT}% ✅ (≥ ${COVERAGE_THRESHOLD:-80}%)"
+          fi
+        else
+          # #570: an unparseable coverage.xml is no evidence, not a pass.
+          if [ "${PARTIAL_TEST_RUN:-false}" = "true" ]; then
+            echo "⚠️  Could not parse PowerShell coverage from coverage.xml (subset test run) - not blocking."
+          else
+            echo "❌ BLOCKED - Could not parse PowerShell coverage from coverage.xml,"
+            echo "   so the ${COVERAGE_THRESHOLD:-80}% floor cannot be verified."
             exit 1
           fi
-          echo "PowerShell coverage: ${COVERAGE_PERCENT}% ✅ (≥ 80%)"
-        else
-          echo "⚠️  Could not parse PowerShell coverage from coverage.xml"
         fi
       else
-        echo "⚠️  coverage.xml not found. Ensure Pester coverage was run."
+        # #570: Pester coverage not run means the gate has nothing to answer with.
+        if [ "${PARTIAL_TEST_RUN:-false}" = "true" ]; then
+          echo "⚠️  coverage.xml not found (subset test run) - not blocking."
+        else
+          echo "❌ BLOCKED - coverage.xml not found, so the ${COVERAGE_THRESHOLD:-80}% PowerShell"
+          echo "   coverage floor cannot be verified. Ensure Pester coverage was run."
+          exit 1
+        fi
       fi
       ;;
     "iac")
@@ -3086,19 +3172,27 @@ else
       # "could not determine" branch let a suite that tested nothing pass the
       # coverage gate with a WARNING. The two claims are different: 0% is
       # "executed, proved nothing"; undetermined is "no evidence produced".
-      if [ -n "$COVERAGE_PERCENT" ] && [ "$COVERAGE_PERCENT" != "parse_error" ] && [ "$COVERAGE_PERCENT" -ge 0 ]; then
-        if [ "$COVERAGE_PERCENT" -lt "$COVERAGE_THRESHOLD" ]; then
+      # #570: the threshold is defaulted HERE as well as quoted in the message.
+      # A bare `[ "$COVERAGE_PERCENT" -lt "$COVERAGE_THRESHOLD" ]` with an empty
+      # threshold makes test(1) fail with "integer expected", the condition is
+      # false, and 16% coverage was reported as ✅ (the same fail-open shape this
+      # issue is about, one line further down). `2>/dev/null` on the numeric test
+      # keeps a non-numeric report on the "cannot determine" path instead of
+      # dying.
+      if [ -n "$COVERAGE_PERCENT" ] && [ "$COVERAGE_PERCENT" != "parse_error" ] \
+         && [ "$COVERAGE_PERCENT" -ge 0 ] 2>/dev/null; then
+        if [ "$COVERAGE_PERCENT" -lt "${COVERAGE_THRESHOLD:-80}" ]; then
           # Only a subset test run (smart selection) warns — the full suite may
           # still reach ≥80%; a full suite run must block.
           if [ "${PARTIAL_TEST_RUN:-false}" = "true" ]; then
             echo "⚠️  Partial coverage ${COVERAGE_PERCENT}% (subset test run, not full suite)."
             echo "    Run the full test suite for a complete ${CURRENT_LANG} coverage check."
           else
-            echo "❌ BLOCKED - ${CURRENT_LANG} coverage ${COVERAGE_PERCENT}% below ${COVERAGE_THRESHOLD}% threshold"
+            echo "❌ BLOCKED - ${CURRENT_LANG} coverage ${COVERAGE_PERCENT}% below ${COVERAGE_THRESHOLD:-80}% threshold"
             exit 1
           fi
         else
-          echo "${CURRENT_LANG} coverage: ${COVERAGE_PERCENT}% ✅ (≥ 80%)"
+          echo "${CURRENT_LANG} coverage: ${COVERAGE_PERCENT}% ✅ (≥ ${COVERAGE_THRESHOLD:-80}%)"
         fi
       else
         echo "⚠️  Could not determine ${CURRENT_LANG} coverage percentage. No standard coverage report files found."

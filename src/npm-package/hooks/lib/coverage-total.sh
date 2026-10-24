@@ -81,12 +81,27 @@ enforce_python_coverage() {
         echo "    Run the full suite for a real Python coverage check."
         return 0
       fi
-      echo "❌ BLOCKED - Python coverage ${COVERAGE_PERCENT}% below 80% threshold"
+      echo "❌ BLOCKED - Python coverage ${COVERAGE_PERCENT}% below ${COVERAGE_THRESHOLD:-80}% threshold"
       return 1
     fi
-    echo "Python coverage: ${COVERAGE_PERCENT}% ✅ (≥ 80%)"
-  else
-    echo "⚠️  Could not determine Python coverage percentage. Ensure pytest-cov or coverage.py data exists."
+    echo "Python coverage: ${COVERAGE_PERCENT}% ✅ (≥ ${COVERAGE_THRESHOLD:-80}%)"
+    return 0
   fi
-  return 0
+
+  # #570: reaching here means the gate produced NO measurement. That is a FAILED
+  # answer to "is coverage at or above the floor?", not a lenient one — the gate
+  # exists to answer that question and answered nothing. Warning and returning 0
+  # made the gate fail-open: deleting .coverage (or a pytest run that died before
+  # writing it) disabled the coverage check while the summary still looked clean.
+  #
+  # The one legitimate exception is a subset run: nothing was measured because
+  # only part of the suite was run, so there is no total to compare.
+  if [ "${PARTIAL_TEST_RUN:-false}" = "true" ]; then
+    echo "⚠️  Could not determine Python coverage percentage (subset test run) — not blocking."
+    return 0
+  fi
+  echo "❌ BLOCKED - Could not determine Python coverage percentage."
+  echo "   No .coverage / coverage report was produced, so the ${COVERAGE_THRESHOLD:-80}% floor"
+  echo "   cannot be verified. Run the suite with coverage (pytest --cov) and commit again."
+  return 1
 }
