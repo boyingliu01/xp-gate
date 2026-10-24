@@ -70,6 +70,22 @@ function parseTimestamp(value, field) {
 }
 
 /**
+ * Record one seat into `seats` if the entry carries a usable model id.
+ * Shared by both `experts` shapes so the acceptance rule lives in exactly one
+ * place (#599: the two branches were byte-for-byte copies, which is what pushed
+ * this function over the complexity block threshold).
+ *
+ * @param {Map<string, string>} seats role -> trimmed model id, mutated
+ * @param {string} role configured role name
+ * @param {unknown} entry candidate expert record
+ */
+function addSeat(seats, role, entry) {
+  if (!isPlainObject(entry)) return;
+  const model = entry.model ?? entry.requested_model;
+  if (typeof model === 'string' && model.trim() !== '') seats.set(role, model.trim());
+}
+
+/**
  * Normalise the two `experts` shapes `.delphi-config.json` appears in — an
  * object keyed by role (what xp-gate writes) and an array carrying `role` —
  * into a plain role -> model map. Mirrors `normalizeExperts()` in
@@ -83,17 +99,13 @@ function seatsFromExperts(experts) {
   const seats = new Map();
   if (Array.isArray(experts)) {
     for (const entry of experts) {
-      if (!isPlainObject(entry) || typeof entry.role !== 'string') continue;
-      const model = entry.model ?? entry.requested_model;
-      if (typeof model === 'string' && model.trim() !== '') seats.set(entry.role, model.trim());
+      if (isPlainObject(entry) && typeof entry.role === 'string') {
+        addSeat(seats, entry.role, entry);
+      }
     }
-    return seats;
-  }
-  if (isPlainObject(experts)) {
+  } else if (isPlainObject(experts)) {
     for (const [role, entry] of Object.entries(experts)) {
-      if (!isPlainObject(entry)) continue;
-      const model = entry.model ?? entry.requested_model;
-      if (typeof model === 'string' && model.trim() !== '') seats.set(role, model.trim());
+      addSeat(seats, role, entry);
     }
   }
   return seats;
@@ -167,7 +179,16 @@ function loadBindingSeats(projectRoot) {
   return seats;
 }
 
-function validateExpert(expert, index, roles, models, resolvedModels, bindingSeats) {
+/**
+ * Validate an expert's identity fields: shape, role, approval status, and
+ * channel provenance. Split out of `validateExpert`, which exceeded the
+ * complexity block threshold (#599).
+ *
+ * @param {object} expert expert record
+ * @param {number} index position in the experts array
+ * @param {Set<string>} roles roles seen so far; the role is added
+ */
+function validateExpertIdentity(expert, index, roles) {
   if (!isPlainObject(expert)) fail(`experts[${index}] must be a plain object.`);
   if (!REQUIRED_ROLES.includes(expert.role)) fail(`experts[${index}].role is invalid.`);
   if (roles.has(expert.role)) fail(`expert role ${expert.role} is duplicated.`);
@@ -189,14 +210,33 @@ function validateExpert(expert, index, roles, models, resolvedModels, bindingSea
       `expert ${expert.role} channel must be one of: ${VALID_CHANNELS.join(', ')}.`
     );
   }
+}
 
-  // requested_model is compared EXACTLY (after trimming); resolved_model below is
-  // compared case-INSENSITIVELY. The asymmetry is intentional, not an oversight:
-  // a requested ID is a case-sensitive gateway identifier and AGENTS.md requires
-  // "three distinct trimmed requested model IDs", whereas resolved_model answers
-  // "did these actually run on one model?" -- and gateways do report the same model
-  // with different casing per call, which is how #423 slipped through. Pinned by
-  // scripts/__tests__/gate-mw-provenance.test.cjs (AC-423-08).
+/**
+ * Validate the requested model: non-empty, distinct across experts, and — when
+ * the project binds seats — exactly the model configured for this role.
+ *
+ * requested_model is compared EXACTLY (after trimming) while resolved_model is
+ * compared case-INSENSITIVELY. The asymmetry is intentional, not an oversight: a
+ * requested ID is a case-sensitive gateway identifier and AGENTS.md requires
+ * "three distinct trimmed requested model IDs", whereas resolved_model answers
+ * "did these actually run on one model?" -- and gateways do report the same model
+ * with different casing per call, which is how #423 slipped through. Pinned by
+ * scripts/__tests__/gate-mw-provenance.test.cjs (AC-423-08).
+ *
+ * #574: when the project ships a `.delphi-config.json`, the seat this role was
+ * configured with is the ONLY model allowed to report for it. Distinctness alone
+ * was satisfiable by any three of the gateway's ~138 models -- measured
+ * 2026-10-22, a walkthrough ran on s-deepseek-v4.1-flash / g-deepseek-v4-pro /
+ * doubao-seed-2.0-pro while the config named three local-* seats, and this
+ * validator passed it. Membership is checked per ROLE (not as a set) so a swapped
+ * pair is rejected too: the role attribution would otherwise be a lie.
+ *
+ * @param {object} expert expert record
+ * @param {Set<string>} models requested models seen so far; this one is added
+ * @param {Map<string, string>|null} bindingSeats configured seats, or null
+ */
+function validateRequestedModel(expert, models, bindingSeats) {
   if (typeof expert.requested_model !== 'string' || expert.requested_model.trim() === '') {
     fail(`expert ${expert.role} requested_model must be non-empty.`);
   }
@@ -204,13 +244,6 @@ function validateExpert(expert, index, roles, models, resolvedModels, bindingSea
   if (models.has(model)) fail(`requested_model ${model} is duplicated.`);
   models.add(model);
 
-  // #574: when the project ships a `.delphi-config.json`, the seat this role was
-  // configured with is the ONLY model allowed to report for it. Distinctness
-  // alone was satisfiable by any three of the gateway's ~138 models -- measured
-  // 2026-10-22, a walkthrough ran on s-deepseek-v4.1-flash / g-deepseek-v4-pro /
-  // doubao-seed-2.0-pro while the config named three local-* seats, and this
-  // validator passed it. Membership is checked per ROLE (not as a set) so a
-  // swapped pair is rejected too: the role attribution would otherwise be a lie.
   if (bindingSeats !== null) {
     const configured = bindingSeats.get(expert.role);
     if (model !== configured) {
@@ -220,11 +253,19 @@ function validateExpert(expert, index, roles, models, resolvedModels, bindingSea
       );
     }
   }
+}
 
-  // `resolved_model` must be a real, DISTINCT model. Previously null was allowed,
-  // so an expert that never resolved a model still counted as successful; and
-  // nothing compared resolved models, so all three could report the same one
-  // while `requested_model` differed.
+/**
+ * Validate the resolved model: a non-empty string, distinct ignoring case.
+ *
+ * Previously null was allowed, so an expert that never resolved a model still
+ * counted as successful; and nothing compared resolved models, so all three could
+ * report the same one while `requested_model` differed.
+ *
+ * @param {object} expert expert record
+ * @param {Set<string>} resolvedModels resolved models seen so far; added here
+ */
+function validateResolvedModel(expert, resolvedModels) {
   if (typeof expert.resolved_model !== 'string' || expert.resolved_model.trim() === '') {
     fail(`expert ${expert.role} resolved_model must be a non-empty string.`);
   }
@@ -233,6 +274,12 @@ function validateExpert(expert, index, roles, models, resolvedModels, bindingSea
     fail(`expert ${expert.role} resolved_model ${expert.resolved_model.trim()} is duplicated.`);
   }
   resolvedModels.add(resolved);
+}
+
+function validateExpert(expert, index, roles, models, resolvedModels, bindingSeats) {
+  validateExpertIdentity(expert, index, roles);
+  validateRequestedModel(expert, models, bindingSeats);
+  validateResolvedModel(expert, resolvedModels);
 }
 
 function validateEvidence(evidence, expectedCommit, expectedBranch, now, bindingSeats) {
@@ -270,23 +317,46 @@ function validateEvidence(evidence, expectedCommit, expectedBranch, now, binding
   if (roles.size !== REQUIRED_ROLES.length) fail('all required expert roles must be present.');
 }
 
+/**
+ * Read and parse the evidence document, failing with a readable message rather
+ * than letting a raw ENOENT/JSON.parse error escape.
+ *
+ * @param {string} file path to the evidence JSON
+ * @returns {unknown} parsed document
+ */
+function readEvidence(file) {
+  try {
+    return JSON.parse(fs.readFileSync(file, 'utf8'));
+  } catch {
+    return fail('file must exist and contain valid JSON.');
+  }
+}
+
+/**
+ * Resolve the project root the caller named, if any.
+ *
+ * #574: the seats that bind are the ones configured in the repository being
+ * pushed. The caller names that root; a missing argument means "no project
+ * context", which keeps evidence unbound rather than guessing from cwd.
+ *
+ * @param {string|undefined} projectRoot raw argv value
+ * @returns {string|null} absolute root, or null for "no project context"
+ */
+function resolveProjectRoot(projectRoot) {
+  if (projectRoot === undefined || projectRoot === '') return null;
+  return path.resolve(projectRoot);
+}
+
 function main() {
   const [file, expectedCommit, expectedBranch, nowValue, projectRoot] = process.argv.slice(2);
   if (!file || !expectedCommit || !expectedBranch) {
     fail(`usage: validate-code-walkthrough.cjs <file> <commit> <branch> [now] [project-root].`);
   }
 
-  let evidence;
-  try {
-    evidence = JSON.parse(fs.readFileSync(file, 'utf8'));
-  } catch {
-    fail('file must exist and contain valid JSON.');
-  }
+  const evidence = readEvidence(file);
   const now = nowValue === undefined ? Date.now() : parseTimestamp(nowValue, 'current time');
-  // #574: the seats that bind are the ones configured in the repository being
-  // pushed. The caller names that root; a missing argument means "no project
-  // context", which keeps evidence unbound rather than guessing from cwd.
-  const root = projectRoot === undefined || projectRoot === '' ? null : path.resolve(projectRoot);
+
+  const root = resolveProjectRoot(projectRoot);
   const bindingSeats = root === null ? null : loadBindingSeats(root);
   validateEvidence(evidence, expectedCommit, expectedBranch, now, bindingSeats);
 }
