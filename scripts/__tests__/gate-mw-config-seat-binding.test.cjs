@@ -286,4 +286,102 @@ describe('#574 Gate MW binds evidence to the configured Delphi seats', () => {
     expect(bound.exitCode).toBe(1);
     expect(bound.output).toMatch(/requested_model/);
   });
+
+  // Two shapes, one reading. `.delphi-config.json`'s `experts` is documented as
+  // either an object keyed by role (what xp-gate writes) or an array of records
+  // carrying `role`. Only the OBJECT shape was ever exercised, so a mutation that
+  // silently dropped every array-shape seat passed the whole suite (#599
+  // mutation test: M1 survived). seatsFromExperts() is the one function that
+  // reads both, and it was refactored in the same commit — these cases are what
+  // makes that refactor safe.
+  it('AC-574-08: the ARRAY experts shape binds seats too, not just the object shape', () => {
+    const config = delphiConfig(LOCAL_SEATS, 'local');
+    // Rewrite the active profile's experts from { role: {model} } to
+    // [{ role, model }] -- the other documented shape.
+    config.profiles.local.experts = Object.entries(LOCAL_SEATS).map(([role, model]) => ({
+      provider: 'whalecloud',
+      role,
+      model,
+    }));
+
+    // Matching evidence passes...
+    const passing = run(evidenceFor(LOCAL_SEATS), config);
+    expect(passing.exitCode).toBe(0);
+
+    // ...and drift is still caught, proving the seats were actually READ rather
+    // than the array branch quietly resolving to "no seats configured".
+    const drifted = {
+      architecture: 's-deepseek-v4.1-flash',
+      technical: 'g-deepseek-v4-pro',
+      feasibility: 'doubao-seed-2.0-pro',
+    };
+    const blocked = run(evidenceFor(drifted), config);
+    expect(blocked.exitCode).toBe(1);
+    expect(blocked.output).toMatch(/requested_model/);
+  });
+
+  it('AC-574-08: a seat entry using requested_model instead of model is honoured', () => {
+    // The two shapes also differ in the key that carries the model id: xp-gate's
+    // own configs use `model`, but a record captured from an actual expert run
+    // carries `requested_model`. Both must resolve to the same seat.
+    const config = delphiConfig(LOCAL_SEATS, 'local');
+    config.profiles.local.experts = Object.entries(LOCAL_SEATS).map(([role, requested_model]) => ({
+      role,
+      requested_model,
+    }));
+
+    const result = run(evidenceFor(LOCAL_SEATS), config);
+
+    expect(result.exitCode).toBe(0);
+  });
+
+  // A validator that cannot read its input must never conclude "nothing to
+  // object to". `readEvidence()` used to be inline in main() and was split out in
+  // #599; the mutation test on that split (M4: make the catch return `{}`) was
+  // NOT caught by any test, because the message had never been asserted.
+  it('AC-574-09: an unreadable evidence file FAILS closed instead of being treated as empty', () => {
+    const dir = makeTempDir();
+    const projectRoot = join(dir, 'project');
+    mkdirSync(projectRoot, { recursive: true });
+    const missing = join(dir, 'does-not-exist.json');
+
+    let outcome;
+    try {
+      const out = execFileSync('node', [VALIDATOR, missing, COMMIT, BRANCH, NOW, projectRoot], {
+        cwd: projectRoot,
+        encoding: 'utf8',
+        stdio: ['ignore', 'pipe', 'pipe'],
+      });
+      outcome = { exitCode: 0, output: out };
+    } catch (error) {
+      outcome = { exitCode: error.status ?? 1, output: `${error.stdout ?? ''}${error.stderr ?? ''}` };
+    }
+
+    expect(outcome.exitCode).toBe(1);
+    expect(outcome.output).toMatch(/must exist and contain valid JSON/);
+  });
+
+  it('AC-574-09: a syntactically invalid evidence file FAILS closed with the same message', () => {
+    const dir = makeTempDir();
+    const projectRoot = join(dir, 'project');
+    mkdirSync(projectRoot, { recursive: true });
+    const broken = join(dir, 'broken.json');
+    // Truncated JSON: the shape a half-written artifact actually takes.
+    writeFileSync(broken, '{"commit": "aaaa", "verdict": ', 'utf8');
+
+    let outcome;
+    try {
+      const out = execFileSync('node', [VALIDATOR, broken, COMMIT, BRANCH, NOW, projectRoot], {
+        cwd: projectRoot,
+        encoding: 'utf8',
+        stdio: ['ignore', 'pipe', 'pipe'],
+      });
+      outcome = { exitCode: 0, output: out };
+    } catch (error) {
+      outcome = { exitCode: error.status ?? 1, output: `${error.stdout ?? ''}${error.stderr ?? ''}` };
+    }
+
+    expect(outcome.exitCode).toBe(1);
+    expect(outcome.output).toMatch(/must exist and contain valid JSON/);
+  });
 });
