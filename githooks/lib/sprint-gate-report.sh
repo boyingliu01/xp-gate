@@ -56,3 +56,26 @@ sprint_gate_detail() {
   done
   return 0
 }
+
+# Echo WHY sprint-gate.sh allowed the commit (#584).
+#
+# `allow` on its own is ambiguous: it certifies a validated sprint, but it also
+# covers "the sprint has not reached this gate's phase" and "no JSON parser, so
+# nothing could be read". pre-commit mapped every one of those to Gate 11 PASS,
+# so a gate that examined nothing raised the score and left the verdict alone.
+#
+# Only `checks-passed` licenses a PASS. Anything else -- including an `allow`
+# from an older sprint-gate.sh that carries no reason at all -- means "not
+# evaluated", and the caller must report SKIP. Defaulting the other way would
+# reinstate the defect for every consumer who has not re-installed.
+sprint_gate_allow_reason() {
+  local _out="${1:-}" _reason
+  _reason=$(printf '%s' "$_out" | sed -n 's/.*"allow_reason"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' | tail -1)
+  if [ -n "$_reason" ]; then
+    printf '%s\n' "$_reason"
+    return 0
+  fi
+  # No reason given. The decision may still be an `allow`; the caller decides.
+  printf 'unspecified\n'
+  return 0
+}

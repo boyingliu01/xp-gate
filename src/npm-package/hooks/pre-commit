@@ -3911,7 +3911,17 @@ if [ -n "$SPRINT_GATE_SCRIPT" ]; then
       GATE_11_STATUS="SKIP"
       ;;
     allow)
-      echo "✅ PASSED - Gate 11: Sprint Flow (${SPRINT_GATE_DETAIL:-sprint state validated})"
+      # #584: `allow` covered three different outcomes and all of them became
+      # PASS, so a sprint that was never examined raised PASSED_COUNT and the
+      # score. Only a genuinely validated sprint certifies this gate; the rest
+      # declined to evaluate and must read as SKIP with the real reason shown.
+      SPRINT_GATE_ALLOW_REASON=$(sprint_gate_allow_reason "$SPRINT_GATE_OUTPUT")
+      if [ "$SPRINT_GATE_ALLOW_REASON" = "checks-passed" ]; then
+        echo "✅ PASSED - Gate 11: Sprint Flow (${SPRINT_GATE_DETAIL:-sprint state validated})"
+      else
+        echo "⏭️  SKIPPED - Gate 11: Sprint Flow (${SPRINT_GATE_ALLOW_REASON}: ${SPRINT_GATE_DETAIL:-not evaluated})"
+        GATE_11_STATUS="SKIP"
+      fi
       ;;
     *)
       # A run that succeeded but said nothing this gate understands. Pass on the exit

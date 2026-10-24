@@ -35,6 +35,17 @@
 #   - JSON parser fallback chain: jq → Node.js → explicit degradation message
 #
 # OUTPUT: JSON to stdout — {"decision":"allow|deny|skip",...}
+#
+# #584: every `allow` also carries `"allow_reason"`, because `allow` alone was
+# ambiguous. It meant three different things and pre-commit mapped all of them to
+# Gate 11 PASS:
+#
+#   checks-passed      the sprint was actually validated      -> PASS is honest
+#   phase-not-reached  the sprint has not reached this gate's phase
+#   no-json-parser     nothing could be read at all
+#
+# The last two examine nothing, so reporting them as PASS inflated the score.
+# `checks-passed` is the only reason that licenses a PASS.
 # EXIT: 0 = pass/skip, 1 = block
 
 set -euo pipefail
@@ -264,7 +275,7 @@ if [ "$MODE" = "pre-commit" ]; then
 
     # If no JSON parser available, warn but allow (graceful degradation)
     if [ "$JSON_PARSER" = "none" ]; then
-      echo '{"decision":"allow","warning":"neither jq nor node available, cannot verify delphi-review verdict. Install jq or node for full protection."}'
+      echo '{"decision":"allow","allow_reason":"no-json-parser","warning":"neither jq nor node available, cannot verify delphi-review verdict. Install jq or node for full protection."}'
       exit 0
     fi
 
@@ -299,7 +310,7 @@ if [ "$MODE" = "pre-commit" ]; then
     # claim: a 29-day-old sprint under a 30-day threshold is a very different
     # situation from one opened today, and the log should say which it is.
     if [ -n "$SPRINT_AGE_DAYS" ]; then
-      echo "{\"decision\":\"allow\",\"message\":\"delphi-review APPROVED, sprint phase ${PHASE} validated (sprint open ${SPRINT_AGE_DAYS} day(s), staleness threshold ${SPRINT_STALE_DAYS})\"}"
+      echo "{\"decision\":\"allow\",\"allow_reason\":\"checks-passed\",\"message\":\"delphi-review APPROVED, sprint phase ${PHASE} validated (sprint open ${SPRINT_AGE_DAYS} day(s), staleness threshold ${SPRINT_STALE_DAYS})\"}"
     else
       echo "{\"decision\":\"allow\",\"message\":\"delphi-review APPROVED, sprint phase ${PHASE} validated (sprint age unknown — started_at unreadable)\"}"
     fi
@@ -307,7 +318,7 @@ if [ "$MODE" = "pre-commit" ]; then
   fi
 
   # Phase < 1 (pre-PLAN) — no delphi enforcement needed
-  echo "{\"decision\":\"allow\",\"reason\":\"sprint phase ${PHASE} (pre-PLAN), no delphi enforcement required\"}"
+  echo "{\"decision\":\"allow\",\"allow_reason\":\"phase-not-reached\",\"reason\":\"sprint phase ${PHASE} (pre-PLAN), no delphi enforcement required\"}"
   exit 0
 fi
 
