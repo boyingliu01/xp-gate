@@ -1123,6 +1123,41 @@ function printEffectiveHooks() {
 }
 
 /**
+ * Keep a copy of an installed file before `--sync-hooks` overwrites it (#566).
+ *
+ * #566 was a hook that existed on exactly one machine and in no commit: a local
+ * edit to the installed `pre-push` that `--sync-hooks` replaced silently. The
+ * repo side then looked correct and the work was gone -- unrecoverable, because
+ * nothing had recorded that the installed copy held anything more.
+ *
+ * The refusal path already protects files whose content diverges. This covers the
+ * remaining cases, where the overwrite is legitimate but still destroys the
+ * previous version: `--force`, and files that differ only in whitespace.
+ *
+ * Copies land in a sibling `backups/` directory with a timestamp, so repeated
+ * syncs never overwrite an older backup. The target's own directory is used
+ * rather than the user's work tree, so this never litters a repository.
+ *
+ * @param {string} target existing file about to be overwritten
+ * @param {string} backupsDir directory to place the copy in
+ * @returns {string|null} path of the backup, or null when there was nothing to back up
+ */
+function backupBeforeOverwrite(target, backupsDir) {
+  if (!fs.existsSync(target)) return null;
+  const stamp = new Date().toISOString().replace(/[:.]/g, '-');
+  try {
+    fs.mkdirSync(backupsDir, { recursive: true });
+    const backup = path.join(backupsDir, `${path.basename(target)}.${stamp}.bak`);
+    fs.copyFileSync(target, backup);
+    return backup;
+  } catch {
+    // A backup that cannot be written must not abort the sync; the caller
+    // reports the file it overwrote either way.
+    return null;
+  }
+}
+
+/**
  * Copy the repository's `githooks/` over the installed global hooks (#451 REQ-2).
  *
  * This is the one-command escape from "I edited githooks/ and nothing changed".
@@ -1130,7 +1165,10 @@ function printEffectiveHooks() {
  * directory are left alone.
  *
  * @param {{repoRoot?: string, repoHooks?: string, installedHooks?: string}} [ctx]
- * @returns {{synced: string[], skipped: string[], refused: Array<{name: string, repoOnly: number, installedOnly: number}>, errors: string[], installedHooks: string}}
+ * Every overwrite is preceded by a backup (#566): the previous version is copied
+ * to `backups/` beside the installed hooks before it is replaced.
+ *
+ * @returns {{synced: string[], skipped: string[], refused: Array<{name: string, repoOnly: number, installedOnly: number}>, errors: string[], installedHooks: string, backups: string[]}}
  */
 function syncGlobalHooksFromRepo(ctx = {}) {
   const repoRoot = ctx.repoRoot || process.env.XP_GATE_REPO_ROOT || process.cwd();
@@ -1141,22 +1179,24 @@ function syncGlobalHooksFromRepo(ctx = {}) {
   const skipped = [];
   const refused = [];
   const errors = [];
+  const backups = [];
+  const backupsDir = path.join(installedHooks, 'backups');
 
   if (!fs.existsSync(repoHooks)) {
     errors.push(`no githooks/ directory at ${repoHooks}`);
-    return { synced, skipped, refused, errors, installedHooks };
+    return { synced, skipped, refused, errors, installedHooks, backups };
   }
 
   if (!hasCanonicalHooks(repoHooks)) {
     errors.push(`no hook files in ${repoHooks} (only adapters?) -- nothing to sync from`);
-    return { synced, skipped, refused, errors, installedHooks };
+    return { synced, skipped, refused, errors, installedHooks, backups };
   }
 
   try {
     fs.mkdirSync(installedHooks, { recursive: true });
   } catch (err) {
     errors.push(`cannot create ${installedHooks}: ${err.message}`);
-    return { synced, skipped, refused, errors, installedHooks };
+    return { synced, skipped, refused, errors, installedHooks, backups };
   }
 
   for (const name of DRIFT_COMPARED_HOOKS) {
@@ -1171,6 +1211,10 @@ function syncGlobalHooksFromRepo(ctx = {}) {
         skipped.push(name);
         continue;
       }
+      // #566: the previous version is kept, because this overwrite is the moment
+      // machine-only work is lost.
+      const backup = backupBeforeOverwrite(target, backupsDir);
+      if (backup) backups.push(backup);
       // copyFileSync preserves content; the exec bit is re-applied explicitly
       // because a copied hook that is not executable silently never runs.
       fs.copyFileSync(source, target);
@@ -1194,6 +1238,8 @@ function syncGlobalHooksFromRepo(ctx = {}) {
         skipped.push(name);
         continue;
       }
+      const backup = backupBeforeOverwrite(target, backupsDir);
+      if (backup) backups.push(backup);
       fs.copyFileSync(source, target);
       synced.push(name);
     } catch (err) {
@@ -1210,14 +1256,14 @@ function syncGlobalHooksFromRepo(ctx = {}) {
       fs.mkdirSync(installedLib, { recursive: true });
     } catch (err) {
       errors.push(`cannot create ${installedLib}: ${err.message}`);
-      return { synced, skipped, refused, errors, installedHooks };
+      return { synced, skipped, refused, errors, installedHooks, backups };
     }
     let libEntries = [];
     try {
       libEntries = fs.readdirSync(repoLib, { withFileTypes: true });
     } catch (err) {
       errors.push(`cannot read ${repoLib}: ${err.message}`);
-      return { synced, skipped, refused, errors, installedHooks };
+      return { synced, skipped, refused, errors, installedHooks, backups };
     }
     for (const entry of libEntries) {
       if (!entry.isFile()) continue;
@@ -1250,6 +1296,8 @@ function syncGlobalHooksFromRepo(ctx = {}) {
             continue;
           }
         }
+        const backup = backupBeforeOverwrite(target, backupsDir);
+        if (backup) backups.push(backup);
         fs.copyFileSync(source, target);
         fs.chmodSync(target, 0o755);
         synced.push(rel);
@@ -1259,7 +1307,7 @@ function syncGlobalHooksFromRepo(ctx = {}) {
     }
   }
 
-  return { synced, skipped, refused, errors, installedHooks };
+  return { synced, skipped, refused, errors, installedHooks, backups };
 }
 
 /**
@@ -2573,7 +2621,7 @@ async function doctor(args) {
 
   // §4.13 (#451 REQ-2): explicit one-command sync from the repo's githooks/.
   if (syncHooks) {
-    const { synced, skipped, refused, errors, installedHooks } = syncGlobalHooksFromRepo({ force });
+    const { synced, skipped, refused, errors, installedHooks, backups } = syncGlobalHooksFromRepo({ force });
     if (errors.length > 0) {
       for (const err of errors) console.log(`  ✗ ${err}`);
       return 1;
@@ -2584,6 +2632,11 @@ async function doctor(args) {
     } else {
       console.log(`  ✓ Global hooks already match githooks/ (${skipped.join(', ') || 'nothing to sync'})`);
     }
+    // #566: replacing an installed hook discards whatever was in it. Say where
+    // the previous version went, so a machine-only fix stays recoverable.
+    if (backups.length > 0) {
+      console.log(`    Previous version(s) saved under ${path.join(installedHooks, 'backups')}/ (${backups.length} file(s)).`);
+    }
     if (refused.length > 0) {
       console.log('');
       console.log(`  ⚠️  ${refused.length} shared library file(s) NOT synced — the installed copy`);
@@ -2592,7 +2645,7 @@ async function doctor(args) {
         console.log(`     - ${r.name}: install has ${r.installedOnly} unique line(s), githooks/ has ${r.repoOnly}`);
       }
       console.log('     Review them, then either fold the hardening into githooks/ or re-run --sync-hooks --force.');
-      console.log('     Forcing overwrites the installed file with no backup: copy it aside first.');
+      console.log('     Forcing overwrites the installed file, whose previous version is saved under backups/.');
     }
 
     // #495: the gate modules are what the hook sources for Gates 3/4/7/8/9/10,
@@ -2614,7 +2667,7 @@ async function doctor(args) {
         console.log(`     - ${r.name}: install has ${r.installedOnly} unique line(s), githooks/ has ${r.repoOnly}`);
       }
       console.log('     Review them, then either fold the hardening into githooks/ or re-run --sync-hooks --force.');
-      console.log('     Forcing overwrites the installed file with no backup: copy it aside first.');
+      console.log('     Forcing overwrites the installed file, whose previous version is saved under backups/.');
     }
   }
 
