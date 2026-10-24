@@ -1783,6 +1783,47 @@ specification:
 
 
     # ============================================================
+    # REQ-601: Gate 5 的覆盖率判定不得把「算不出数字」当成「达标」。
+    #
+    # #594 实测：TypeScript 分支用
+    #     console.log(Math.round(data.total.lines.pct))
+    # 读取报告，用 `!= "parse_error"` 和 `-n` 两个守卫拦截失败。两个都拦不住
+    # NaN——Math.round() 对非数字输入不抛异常，它返回 NaN 并正常打印：
+    #     $ node -e 'console.log(Math.round("Unknown"))'
+    #     NaN
+    # istanbul 对「没有可执行行」的文件就输出 "Unknown"，子集跑也可能让 total
+    # 不可用，所以这条路径真实可达。
+    #
+    # 第二半是 bash：`[ "NaN" -lt 80 ]` 不是 false，是 ERROR（退出码 2，打印
+    # "integer expression expected"）。`if` 只区分 0 与非 0，于是错误进了 else
+    # ——也就是通过分支。现场症状：
+    #     TypeScript coverage: NaN% ✅ (≥ 80%)
+    #     pre-commit: line 3041: [: NaN: integer expression expected
+    # ✅ 和 bash 报错相邻，而裁决取的是 ✅。
+    #
+    # 这与项目在 #449 / #499 / #570 立下的原则是同一条：拿不到证据不得声称
+    # 通过。Gate 8 在 gitleaks 无报告时就是这么做的。
+    - id: REQ-601
+      description: "Gate 5 的覆盖率百分比必须先在源头拒绝 NaN，再在判定处校验其为整数；
+        无法测量时必须 BLOCK，不得 PASS"
+      priority: critical
+      acceptance_criteria:
+        - id: AC-601-01
+          criteria: 覆盖率为 NaN（含 istanbul 输出的 Unknown）时，输出中不得出现
+            TypeScript coverage NaN 通过 字样，也不得出现 bash 的
+            integer expression expected；解析阶段必须把非有限数值折叠为
+            no_data 而非打印 NaN
+          test_type: unit
+        - id: AC-601-02
+          criteria: 覆盖率无法测量（NaN / Unknown / 报告形状不可用）时必须 BLOCK 且
+            退出码非 0，与 #570 的「无法测量不得放过」一致
+          test_type: unit
+        - id: AC-601-03
+          criteria: 真实数字的判定不被破坏——低于 80% 必须 BLOCK，达到 80% 必须 PASS，
+            且报告里出现的是实测值而非占位符
+          test_type: unit
+
+    # ============================================================
     # REQ-574: Gate MW 校验证据必须与 .delphi-config.json 的席位绑定。
     # #423 让 Gate MW 校验 provenance 的“内部自洽性”：三角色、三个互异的
     # requested_model、三个互异的 resolved_model、channel 显式。但从未把证据

@@ -2913,14 +2913,24 @@ else
       if [ "${TESTS_SKIPPED:-false}" = "true" ]; then
         echo "✅ PASSED - Coverage check skipped (no test/source files changed)."
       elif [ -f "coverage/coverage-summary.json" ]; then
+        # #594: reject NaN at the SOURCE, not after the fact. Math.round() does
+        # not fail on a non-numeric input -- it returns NaN and console.log prints
+        # "NaN" -- so istanbul's "Unknown" (a file with no executable lines) sailed
+        # past both the `!= "parse_error"` and `-n` guards. Emit `no_data`, which
+        # the guard below already treats as "could not measure".
         COVERAGE_PERCENT=$(node -e "
           try {
             const fs = require('fs');
             const data = JSON.parse(fs.readFileSync('coverage/coverage-summary.json', 'utf8'));
-            console.log(Math.round(data.total.lines.pct));
+            const pct = data && data.total && data.total.lines && data.total.lines.pct;
+            console.log(Number.isFinite(pct) ? Math.round(pct) : 'no_data');
           } catch(e) { console.log('parse_error'); }
         " 2>/dev/null)
-        if [ "$COVERAGE_PERCENT" != "parse_error" ] && [ -n "$COVERAGE_PERCENT" ]; then
+        # #594: `-n` was not enough. `[ "NaN" -lt 80 ]` is not false in bash -- it
+        # is an ERROR (exit 2, "integer expression expected"), and an `if` only
+        # tells zero from non-zero, so the error took the else branch: the PASS
+        # branch. Require an actual integer before comparing anything.
+        if [[ "$COVERAGE_PERCENT" =~ ^[0-9]+$ ]]; then
           # #570: default the threshold at the comparison site too — an empty
           # value makes test(1) fail, the branch is skipped, and low coverage is
           # reported as a pass.
