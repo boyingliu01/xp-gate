@@ -760,6 +760,12 @@ specification:
           criteria: doctor delphi 在项目配置遮蔽全局配置且席位模型不同时输出 WARN（遮蔽提示），
             席位相同则静默；WARN 不影响退出码——有意的 per-project 覆盖是合法的
           test_type: unit
+        - id: AC-DSH-016-04
+          criteria: 环境变量占位符展开必须区分"未设置"与"已设置为空串"；api_key 无法展开时
+            报错不得断言变量未设置（除非确实未设置），必须点名变量与配置中的占位符写法，
+            并在存在大小写不同的同名变量时指出它；诊断过程任何错误都必须降级为
+            DelphiSetupError 而非成为新的失败点，且不得回显 key 的值
+          test_type: unit
     # ============================================================
     # REQ-562: 覆盖率门槛必须真正生效 —— 声明了阈值不等于执行了阈值。
     # vitest.config.ts 曾以 vitest 2.x 的嵌套形状 thresholds.global 声明 80%，
