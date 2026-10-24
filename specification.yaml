@@ -1141,6 +1141,11 @@ specification:
         - id: AC-576-03
           criteria: 扫描抛出异常（片段 exit 3）必须映射为「无法验证」（exit 2）并回显捕获到的异常文本，不得落入 findings 的 exit 1
           test_type: unit
+        - id: AC-576-04
+          criteria: 作用域分析必须在 PSScriptAnalyzerSettings.psd1 确实存在时才传入 -Settings，缺失时改走不带 -Settings 的等价调用；
+            不得对分析器调用使用 -ErrorAction SilentlyContinue；非终止错误必须提升为终止错误，
+            并以区别于 findings 的 fail-closed 退出码报告，不得让空结果集读成干净通过
+          test_type: unit
 
     # ============================================================
     # REQ-577: PowerShell 发现流程必须剪掉 AI/IDE 生成目录。
