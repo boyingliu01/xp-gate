@@ -1233,10 +1233,15 @@ specification:
           criteria: 所有门都 SKIP 时 score 必须为 null，不得记 0.0/10
           test_type: unit
         - id: AC-580-02
-          criteria: 实际执行的门全 PASS、其余 SKIP 时 score 必须为 10.0/10（分母只计已执行的门）
+          criteria: 实际执行的门全 PASS、且执行数达到总数的一半以上时，score 必须为 10.0/10（分母只计已执行的门）；
+            执行数未过半时不得给出分数，必须写 null 并在 score_scope 说明「门数太少无法概括」
           test_type: unit
         - id: AC-580-03
-          criteria: 存在真实失败时仍必须给出真实的低分（如 1 PASS 3 FAIL 为 2.5/10），不得因本次修复而掩盖失败
+          criteria: 存在真实失败时仍必须给出真实的低分（如 1 PASS 6 FAIL 必须是低于 10.0/10 的真实数字），不得因本次修复而掩盖失败
+          test_type: unit
+        - id: AC-580-04
+          criteria: prepush-score.py 缺席时 pre-push 必须 fail-closed 报错并给出修复方式，不得只发警告后继续；
+            不得写出一个看起来已生成、却什么都不含的 journal（score/gates_run 为 null）冒充测量结果
           test_type: unit
 
     # ============================================================
