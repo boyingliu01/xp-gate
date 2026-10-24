@@ -3980,6 +3980,14 @@ generate_quality_report() {
     else
       VERDICT="WARN"     # all effective gates passed or warned; warns forbid PASS
     fi
+  elif [ "$SKIP_COUNT" -gt 0 ]; then
+    # #575: PARTIAL. Something passed, but not everything ran, and "PASS" reads
+    # as a statement about the commit — not about the fraction of the pipeline
+    # that happened to execute. A docs-only commit runs 3 of 12 gates and used
+    # to report `verdict: PASS`, which is a claim the run did not support.
+    # This is deliberately NOT FAIL: nothing failed. It is also not SKIP-ALL,
+    # which means no gate ran at all. Naming the gap is the whole point.
+    VERDICT="PARTIAL"
   fi
 
   local SCORE=0
