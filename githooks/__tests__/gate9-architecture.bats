@@ -22,7 +22,13 @@ setup() {
   # Copying the directory keeps the fixture working when a helper is added —
   # listing files by name is what let it drift nine helpers behind.
   cp -R "${BATS_TEST_DIRNAME}/../lib/." "${TEST_DIR}/lib/"
-  cp "${BATS_TEST_DIRNAME}/../adapters/typescript.sh" "${TEST_DIR}/adapters/typescript.sh"
+  # Same lesson as lib/ above, one directory later: copying only typescript.sh
+  # left the Java fixture with no java adapter, so Gate 9 reported
+  #     ⚠️  WARN - Java adapter not found (code quality NOT verified)
+  # and the ArchUnit case found none of the words it asserts. Locally the hook's
+  # fallback lookup found ../githooks/adapters/ by luck of the checkout layout;
+  # on a CI runner it does not, so the case failed only there.
+  cp -R "${BATS_TEST_DIRNAME}/../adapters/." "${TEST_DIR}/adapters/"
   chmod +x "${TEST_DIR}/pre-commit"
   cat > "$TEST_DIR/bin/npx" <<'EOF'
 #!/usr/bin/env bash
@@ -34,6 +40,35 @@ esac
 exit 1
 EOF
   chmod +x "$TEST_DIR/bin/npx"
+  # Gate 5 is fail-closed per language since #570/#523, so a fixture that reaches
+  # Gate 5 without a coverage artefact BLOCKS and Gate 9 never runs:
+  #     ❌ BLOCKED - Could not determine Python coverage percentage.
+  #     ❌ BLOCKED - Go coverage 0.0% below 80% threshold
+  # Each case below is about Gate 9, so these stubs state the coverage those
+  # branches read. Same convention as the npx stub above: stub the tool, do not
+  # assume the host has run a coverage pass.
+  cat > "$TEST_DIR/bin/coverage" <<'EOF'
+#!/usr/bin/env bash
+# coverage.py 7.x `report --format=total` prints a bare number.
+echo "90"
+exit 0
+EOF
+  chmod +x "$TEST_DIR/bin/coverage"
+  cat > "$TEST_DIR/bin/go" <<'EOF'
+#!/usr/bin/env bash
+# `go test -coverprofile=coverage.out ./...` then `go tool cover -func=...`.
+# Write the profile the hook expects and report a passing total.
+case "$*" in
+  *"-coverprofile"*)
+    : > coverage.out
+    exit 0 ;;
+  *"tool cover"*)
+    echo "total:	(statements)	90.0%"
+    exit 0 ;;
+esac
+exit 0
+EOF
+  chmod +x "$TEST_DIR/bin/go"
   # #592: PREPEND the stub dir; keep the real PATH behind it.
   #
   # The old line REPLACED PATH with a fixed three-entry list:
@@ -180,12 +215,25 @@ EOF
 ruff>=0.1.0
 EOF
 
+  # A real Python toolchain on the host shadows the fixture's `coverage` stub: on
+  # Windows `coverage` resolves to .../Python312/Scripts/coverage, which chokes on
+  # the fake .coverage and exits non-zero, so Gate 5 BLOCKED and Gate 9 never ran.
+  # The `env PATH=...` below forces the fixture's bin first for this run.
+  cat > "$TEST_DIR/bin/pytest" <<'EOF'
+#!/usr/bin/env bash
+exit 0
+EOF
+  chmod +x "$TEST_DIR/bin/pytest"
+
   mkdir -p src/domain
   touch src/domain/entity.py
+  # The hook only consults `coverage report` when a .coverage database is present
+  # (coverage-total.sh), so the stub needs this marker to be reached at all.
+  echo "stub" > .coverage
   
   git add .
   
-  run ./pre-commit
+  run env "PATH=$TEST_DIR/bin:$PATH" ./pre-commit
   
   [[ "$output" == *"deply"* ]] || [[ "$output" == *"Deply"* ]] || [[ "$output" == *"Architecture"* ]] || [[ "$output" == *"Gate 9"* ]] || [[ "$output" == *"ENVIRONMENT ERROR"* ]]
 }
@@ -237,8 +285,18 @@ EOF
 
   mkdir -p src/main/java/com/test/domain
   touch src/main/java/com/test/domain/Entity.java
+  # Gate 5's Java branch is fail-closed since #570: with no JaCoCo report it BLOCKS
+  # ("No JaCoCo report found, so the 80% Java coverage...") and Gate 9 never runs,
+  # so the ArchUnit words this case asserts never appear in the output. The case is
+  # about Gate 9, so it supplies the coverage artefact it needs rather than relying
+  # on a JaCoCo run that a clean checkout has not performed.
+  mkdir -p target/site/jacoco
+  cat > target/site/jacoco/jacoco.csv << 'JACOCO'
+GROUP,PACKAGE,CLASS,INSTRUCTION_MISSED,INSTRUCTION_COVERED,BRANCH_MISSED,BRANCH_COVERED,LINE_MISSED,LINE_COVERED,COMPLEXITY_MISSED,COMPLEXITY_COVERED,METHOD_MISSED,METHOD_COVERED
+test-project,com.test.domain,Entity,0,10,0,0,0,10,0,1,0,1
+JACOCO
   
-  git add .
+  git add . -A
   
   run ./pre-commit
   
