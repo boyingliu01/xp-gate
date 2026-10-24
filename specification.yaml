@@ -1723,6 +1723,12 @@ specification:
             report.errors）；PASS 时不得输出理由块；非 PASS 却没有任何理由时必须明确报告为
             产出方缺陷，不得静默打印空列表
           test_type: unit
+        - id: AC-599-10
+          criteria: 评分循环必须识别 DEGRADED 状态并将其判为降级（WARN 而非 FAIL），不得落入
+            兜底失败分支；WARN、DEGRADED、FAIL、SKIP 必须各自独立计数，任何一方都不得被另一方
+            顶替；报告必须输出 gatesWarned/gatesFailed 与 failedGates，且这些数字必须取自计数器
+            而非字面量
+          test_type: unit
 
 
     # ============================================================
