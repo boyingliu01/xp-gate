@@ -1752,6 +1752,32 @@ specification:
 
 
     # ============================================================
+    # REQ-600: Gate 11 只能为「真正校验过的 sprint」判 PASS。
+    # #584：sprint-gate.sh 的 `allow` 同时表示三种完全不同的结论——
+    #   checks-passed（真校验过）、phase-not-reached（还没到该门要求的相位）、
+    #   no-json-parser（根本读不出来）。pre-commit 的 `case allow) PASS` 把三者
+    #   一律映射成 PASS，于是本仓库 sprint 已过期 21 天、.sprint-state/ 被 gitignore
+    #   且 phase=0 时，Gate 11 仍报 PASS：PASSED_COUNT +1、质量分变好、VERDICT 不受影响。
+    # 「不适用」是合法结果，把它写成 PASS 不是。
+    # 注：编号避开 REQ-584（已被 lizard 版本固定占用）、REQ-599（本轮 fail-open 批次）。
+    # ============================================================
+    - id: REQ-600
+      description: "Gate 11 必须区分「校验通过」与「未校验」，后者不得判 PASS"
+      priority: critical
+      acceptance_criteria:
+        - id: AC-600-01
+          criteria: sprint-gate.sh 的每个 allow 必须携带 allow_reason，区分 checks-passed（真正校验通过）、
+            phase-not-reached（未到该门要求的相位）与 no-json-parser（无法读取状态）；
+            未到相位不得声称 checks-passed；过期 sprint 必须 skip 而非 allow
+          test_type: unit
+        - id: AC-600-02
+          criteria: pre-commit 的 Gate 11 只有在 allow_reason 为 checks-passed 时才可判 PASS；
+            其余 allow（含未携带理由的旧版输出）必须判 SKIP 并打印真实理由，不得计入 PASSED_COUNT，
+            不得提高质量分；checks-passed 必须仍然判 PASS
+          test_type: unit
+
+
+    # ============================================================
     # REQ-574: Gate MW 校验证据必须与 .delphi-config.json 的席位绑定。
     # #423 让 Gate MW 校验 provenance 的“内部自洽性”：三角色、三个互异的
     # requested_model、三个互异的 resolved_model、channel 显式。但从未把证据
