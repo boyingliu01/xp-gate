@@ -31,8 +31,27 @@ for hook in $HOOKS_LIST; do
   fi
 done
 
-# Install gate-*.sh scripts required by pre-commit (referenced via $GATE_DIR)
-for gate in $GATE_SCRIPTS; do
+# #505: hook-module-resolution.sh is GENERATED from
+# src/npm-package/lib/hook-module-resolution.js, so a clean checkout has no copy.
+# pre-commit aborts with "FATAL: cannot load hook-module-resolution.sh" when it is
+# missing -- deliberately, because running without the module resolution order
+# means the hook cannot find its own dependencies. That made a fresh clone
+# unusable until someone knew to run the generator, which is what CI's
+# First Commit Gates job reported.
+#
+# Generate it here when it is absent AND the generator is available (a consumer
+# project installed via `xp-gate init` gets the generated file shipped, not the
+# generator, so the absence of the generator is normal there and not an error).
+if [ ! -f "$HOOKS_DIR/hook-module-resolution.sh" ]; then
+  if [ -f "$PROJECT_ROOT/scripts/generate-hook-resolution.cjs" ] && command -v node >/dev/null 2>&1; then
+    ( cd "$PROJECT_ROOT" && node scripts/generate-hook-resolution.cjs >/dev/null 2>&1 ) || true
+    [ -f "$HOOKS_DIR/hook-module-resolution.sh" ] \
+      && echo "  + generated hook-module-resolution.sh"
+  fi
+fi
+
+# Install gate-*.sh scripts and the generated resolution order pre-commit needs.
+for gate in $GATE_SCRIPTS hook-module-resolution.sh; do
   src="$HOOKS_DIR/$gate"
   if [ -f "$src" ]; then
     cp "$src" "$TARGET_HOOKS/$gate"

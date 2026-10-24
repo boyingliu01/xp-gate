@@ -1739,6 +1739,11 @@ specification:
             gates_passed 必须是实际通过的门禁计数（不得由 verdict 压成 0/1）；通过/失败/告警/跳过
             四类必须各自可区分，且失败门禁必须按 id 点名
           test_type: unit
+        - id: AC-599-12
+          criteria: githooks/install.sh 必须在全新仓库上成功完成，并安装 pre-commit、pre-push、
+            lib/ 下各库文件与生成的 hook-module-resolution.sh；安装完成后的一次提交不得因
+            「cannot load hook-module-resolution.sh」中止，且必须真正执行到门禁
+          test_type: unit
 
 
     # ============================================================
