@@ -75,10 +75,41 @@ if [ "$GITLEAKS_EXIT" -eq 0 ]; then
     echo "     ✅ PASSED - No secrets detected."
     GATE_8_STATUS="PASS"
   elif [ "$GITLEAKS_FINDINGS" = "?" ]; then
-    # Exit 0 but no readable report: we have no evidence the scan happened.
-    # Fail closed on the *claim*: report SKIP, never PASS.
-    echo "     ⚠️  gitleaks exited 0 but produced no readable report"
-    echo "     ⏭️  SKIPPED - secret scanning produced no evidence (not a pass)"
+    # #592: exit 0 with no usable report has TWO very different causes, and the
+    # operator can only act if we tell them which one happened:
+    #
+    #   (a) the scan never ran — config unreadable, FTL, bad --report-path.
+    #       Nothing was checked, so this must fail closed with the tool's own
+    #       words, not be filed as "no evidence about the code".
+    #   (b) the scan ran and found nothing, but the tool wrote no file (reported
+    #       for gitleaks 8.30.1 on WSL; measured NOT to happen in git-bash with
+    #       the same version, so the code must handle both). Only stdout is left,
+    #       and stdout is weaker evidence than an artifact, so it still may not
+    #       produce a PASS.
+    #
+    # The order matters and is the point: artifact first, tool failure second,
+    # tool output last (#449 established the principle; #592 re-opens it).
+    if printf '%s\n' "$GITLEAKS_OUTPUT" | grep -qiE '(^|[[:space:]])(FTL|fatal error)[[:space:]:]|unable to load'; then
+      echo "     ❌ BLOCKED - ENVIRONMENT: gitleaks exited 0 but reported a failure, so"
+      echo "        NO secret scan took place. This is a tooling problem, not a verdict"
+      echo "        about the staged code."
+      printf '%s\n' "$GITLEAKS_OUTPUT" | grep -iE 'FTL|fatal|unable' | head -3 | sed 's/^/        /'
+      echo "   Fix the gitleaks config/invocation above and commit again."
+      exit 1
+    fi
+
+    if printf '%s\n' "$GITLEAKS_OUTPUT" | grep -q 'no leaks found'; then
+      # The scan demonstrably ran and found nothing, but there is no artifact to
+      # prove it beyond this line. Reporting PASS from log wording is exactly what
+      # #449 forbade, so this stays SKIP — and says WHY, which the old message did
+      # not: without that, SKIP is indistinguishable from "tool missing".
+      echo "     ⚠️  gitleaks scanned and reported no leaks, but wrote no report file"
+      echo "        (${GITLEAKS_REPORT} missing). No artifact means no PASS (#449)."
+      echo "     ⏭️  SKIPPED - secret scanning produced no artifact (scan reported clean)."
+    else
+      echo "     ⚠️  gitleaks exited 0 but produced no readable report and no scan summary"
+      echo "     ⏭️  SKIPPED - secret scanning produced no evidence (not a pass)"
+    fi
     GATE_8_STATUS="SKIP"
   else
     echo "     ❌ BLOCKED - gitleaks reported $GITLEAKS_FINDINGS finding(s)"
