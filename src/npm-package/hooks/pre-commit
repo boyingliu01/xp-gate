@@ -3992,6 +3992,11 @@ generate_quality_report() {
   # -- degraded coverage, kept in the denominator but flagged separately so a
   # degraded gate is never confused with a real PASS.
   local DEGRADED_COUNT=0
+  # The report's gatesDegraded is a superset: DEGRADED plus WARN (#536), because
+  # both mean "this gate could not fully verify what it was asked to". Kept
+  # separate from the scoring loop's DEGRADED_COUNT above so the two statuses stay
+  # distinct where that distinction is load-bearing (#599-10).
+  local REPORT_DEGRADED_COUNT=0
   local DEGRADED_JSON=""
   local FAIL_COUNT=0
   local FAILED_JSON=""
@@ -4010,13 +4015,13 @@ generate_quality_report() {
     case "$gate_status" in
       PASS) PASSED_COUNT=$((PASSED_COUNT + 1)) ;;
       SKIP) SKIP_COUNT=$((SKIP_COUNT + 1)) ;;
-      # #536: a WARN gate ran but could not fully do its job, which is exactly
-      # what "degraded" means -- so it counts in BOTH totals. gatesWarned answers
-      # "how many were not clean" and gatesDegraded answers "how many could not
-      # verify what they were asked to"; a WARN gate is a member of both. Counting
-      # it only as warned made gatesDegraded read 0 on a run where every gate had
-      # degraded, which the report used to describe the run's trustworthiness.
-      WARN) DEGRADED_COUNT=$((DEGRADED_COUNT + 1)); WARN_COUNT=$((WARN_COUNT + 1)); NONPASS_COUNT=$((NONPASS_COUNT + 1)) ;;
+      # #536: a WARN gate ran but could not fully do its job, so the REPORT's
+      # gatesDegraded must include it -- that field answers "how much of this run
+      # could actually verify what it was asked to". The scoring loop's
+      # DEGRADED_COUNT deliberately does NOT include it: a plain WARN must stay
+      # distinguishable from a gate that reported DEGRADED (#599-10), or the two
+      # statuses become one and neither is worth anything.
+      WARN) REPORT_DEGRADED_COUNT=$((REPORT_DEGRADED_COUNT + 1)); WARN_COUNT=$((WARN_COUNT + 1)); NONPASS_COUNT=$((NONPASS_COUNT + 1)) ;;
       # #574: DEGRADED is a status a gate really produces -- Gate 5 reports it
       # when coverage could not be measured honestly instead of claiming PASS.
       # It had no arm here, so it fell into the catch-all below and counted as a
@@ -4024,7 +4029,7 @@ generate_quality_report() {
       # It must also feed WARN_COUNT, because the FAIL predicate is
       # (NONPASS_COUNT - WARN_COUNT) > 0; adding only NONPASS_COUNT would turn
       # every honest DEGRADED run into FAIL.
-      DEGRADED) DEGRADED_COUNT=$((DEGRADED_COUNT + 1)); WARN_COUNT=$((WARN_COUNT + 1)); NONPASS_COUNT=$((NONPASS_COUNT + 1)); DEGRADED_JSON="${DEGRADED_JSON:+$DEGRADED_JSON, }\"gate${gate}\"" ;;
+      DEGRADED) DEGRADED_COUNT=$((DEGRADED_COUNT + 1)); REPORT_DEGRADED_COUNT=$((REPORT_DEGRADED_COUNT + 1)); WARN_COUNT=$((WARN_COUNT + 1)); NONPASS_COUNT=$((NONPASS_COUNT + 1)); DEGRADED_JSON="${DEGRADED_JSON:+$DEGRADED_JSON, }\"gate${gate}\"" ;;
       *) FAIL_COUNT=$((FAIL_COUNT + 1)); NONPASS_COUNT=$((NONPASS_COUNT + 1)); FAILED_JSON="${FAILED_JSON:+$FAILED_JSON, }\"gate${gate}\"" ;;
     esac
   done
@@ -4167,7 +4172,7 @@ generate_quality_report() {
     "gatesWarned": $WARN_COUNT,
     "gatesFailed": $FAIL_COUNT,
     "failedGates": [$FAILED_JSON],
-    "gatesDegraded": $DEGRADED_COUNT,
+    "gatesDegraded": $REPORT_DEGRADED_COUNT,
     "degradedGates": [$DEGRADED_JSON],
     "gatesEffective": $EFFECTIVE_TOTAL,
     "effectivePassRate": $EFFECTIVE_PASS_RATE_JSON,
