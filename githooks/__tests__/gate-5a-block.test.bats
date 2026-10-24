@@ -79,6 +79,38 @@ MOCK
 export const placeholder = true;' > src/placeholder.ts
   # Minimal archlint config so Gate 6 doesn't block on missing config
   echo "ignore: []" > .archlint.yaml
+  # Gate 5 BLOCKS when coverage/coverage-summary.json is absent ("not found" is
+  # not "clean"). Whether that file exists in the fixture used to depend on
+  # whether the HOST checkout happened to have run vitest: green locally with a
+  # stale coverage/ dir, red on every CI runner (#497's failure mode, one gate
+  # later). The suite is about Gate 5a, so it supplies the coverage artefact it
+  # needs instead of inheriting one.
+  mkdir -p coverage
+  cat > coverage/coverage-summary.json << 'COVERAGE'
+{
+  "total": {
+    "lines":      { "pct": 90 },
+    "statements": { "pct": 90 },
+    "functions":  { "pct": 90 },
+    "branches":   { "pct": 90 }
+  }
+}
+COVERAGE
+  # The Python branch of Gate 5 does not read coverage.xml: it runs
+  # `coverage report --format=total` against a .coverage database, and since #570
+  # an unreadable one BLOCKS instead of warning. Staging a .py file routes Gate 5
+  # there, so the fixture stubs `coverage` the same way it already stubs jscpd,
+  # pytest and ruff — the tool is stubbed, not assumed (#497).
+  cat > "$TEST_DIR/bin/coverage" << 'MOCK'
+#!/bin/bash
+# Only `report --format=total` is needed: it prints a bare number (coverage.py
+# 7.x), which is exactly the shape parse_coverage_total expects.
+echo "90"
+exit 0
+MOCK
+  chmod +x "$TEST_DIR/bin/coverage"
+  # A present .coverage is what makes the hook consult the stub at all.
+  echo "stub" > .coverage
   git add . && git commit --no-verify -q -m "init"
 }
 
@@ -316,7 +348,11 @@ MOCK
   chmod +x bin/ruff
   git add src/foo.py
   run_fixture_hook
-  [ "$status" -eq 0 ]
+  [ "$status" -eq 0 ] || {
+    echo "Gate 5a/5 blocked the commit instead of warning: exit=$status"
+    printf '%s\n' "$output" | grep -E 'BLOCK|❌|Gate [0-9]+:' | head -20
+    return 1
+  }
   [[ "$output" == *"WARNING"* ]]
 }
 
