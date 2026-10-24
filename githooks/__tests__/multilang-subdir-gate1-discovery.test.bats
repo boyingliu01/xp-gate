@@ -229,6 +229,21 @@ EOF
   echo '{ "name": "root-fixture", "private": true }' > "$FRESH/package.json"
   echo "ignore: []" > "$FRESH/.archlint.yaml"
   mkdir -p "$FRESH/src"
+  # The main fixture above already states its coverage (#570 makes a missing
+  # coverage-summary.json a BLOCK, not a warning). This $FRESH repo had none, so
+  # Gate 5 blocked before Gate 1's tsc discovery could be observed — the case
+  # asserted tsc behaviour it never reached. Same artefact, same reason.
+  mkdir -p "$FRESH/coverage"
+  cat > "$FRESH/coverage/coverage-summary.json" <<'EOF'
+{
+  "total": {
+    "lines":      { "pct": 90 },
+    "statements": { "pct": 90 },
+    "functions":  { "pct": 90 },
+    "branches":   { "pct": 90 }
+  }
+}
+EOF
   echo "export const x = 1;" > "$FRESH/src/foo.ts"
   echo "test('foo', () => {});" > "$FRESH/src/foo.test.ts"
   git -C "$FRESH" add .
