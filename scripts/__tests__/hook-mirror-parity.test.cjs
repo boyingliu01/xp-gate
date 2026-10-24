@@ -37,19 +37,48 @@ describe('hook mirror validation', () => {
   }
 
   const runsInRealWorktree = isGitTopLevel(repoRoot);
-  const hookFiles = [
-    'adapter-common.sh', 'hook-module-resolution.sh', 'gate-3.sh', 'gate-4.sh', 'gate-7.sh', 'gate-8.sh', 'gate-9.sh',
-    'gate-10.sh', 'gate-12-file-hygiene.sh', 'post-merge', 'pre-commit', 'pre-push',
-    'sprint-gate.sh', 'lib/coverage-total.sh', 'lib/python-test-selection.sh', 'lib/python-incremental-typecheck.sh', 'lib/now-ms.sh', 'lib/audit-sanitize.sh', 'lib/jscpd-run.sh', 'lib/sprint-gate-report.sh', 'lib/test-failure.sh', 'lib/typecheck.sh', 'lib/ccn-ratchet.sh', 'lib/docs-only.sh', 'lib/validate-code-walkthrough.cjs',
-  ];
+
+  // #577 follow-up: the guarded file set is READ from the script, not restated.
+  //
+  // It used to be a hand-kept copy with a "Keep in sync with HOOK_MIRROR_FILES"
+  // comment and no mechanism to enforce that. Adding githooks/lib/prepush-score.py
+  // to the guard without also editing this list made every case fail at setup —
+  // not because mirror parity broke, but because the fixture no longer described
+  // the guarded set. A second copy of a whitelist is a latent failure; the test
+  // reads the single source of truth instead.
+  function hookMirrorFiles() {
+    const src = fs.readFileSync(script, 'utf8');
+    const match = /^HOOK_MIRROR_FILES="([^"]*)"/m.exec(src);
+    if (!match) throw new Error('HOOK_MIRROR_FILES not found in ' + script);
+    const files = match[1].trim().split(/\s+/).filter(Boolean);
+    if (files.length === 0) throw new Error('HOOK_MIRROR_FILES is empty');
+    return files;
+  }
+
+  // Same for the root-level copies.
+  function rootMirrorFiles() {
+    const src = fs.readFileSync(script, 'utf8');
+    const match = /^ROOT_MIRROR_FILES="([^"]*)"/m.exec(src);
+    if (!match) throw new Error('ROOT_MIRROR_FILES not found in ' + script);
+    const files = match[1].trim().split(/\s+/).filter(Boolean);
+    if (files.length === 0) throw new Error('ROOT_MIRROR_FILES is empty');
+    return files;
+  }
+
+  const hookFiles = hookMirrorFiles();
   // check-hook-mirror.sh also guards root-level shell copies and the
   // principles tree (#507 A-MAJOR-4) -- the fixture must carry the same
-  // guarded regions or the byte-identical baseline itself fails. Keep in
-  // sync with ROOT_MIRROR_FILES in scripts/check-hook-mirror.sh.
-  const rootMirrorFiles = [
-    'adapter-common.sh', 'gate-3.sh', 'gate-4.sh', 'gate-7.sh', 'gate-8.sh', 'gate-9.sh',
-    'gate-10.sh', 'gate-12-file-hygiene.sh', 'sprint-gate.sh',
-  ];
+  // guarded regions or the byte-identical baseline itself fails.
+  const rootMirrorFileList = rootMirrorFiles();
+
+  it('the guarded file set is non-trivial (anti-vacuity)', () => {
+    // If the extraction above ever returned a stub, the fixture would be empty
+    // and every "passes" case below would pass for the wrong reason.
+    expect(hookFiles.length).toBeGreaterThan(10);
+    expect(hookFiles).toContain('pre-commit');
+    expect(hookFiles).toContain('pre-push');
+    expect(rootMirrorFileList.length).toBeGreaterThan(3);
+  });
 
   function validate(cwd) {
     return spawnSync(BASH, [script], { cwd, encoding: 'utf8' });
@@ -68,7 +97,7 @@ describe('hook mirror validation', () => {
     }
     fs.writeFileSync(path.join(fixture, 'githooks/adapters/typescript/adapter.sh'), 'adapter\n');
     fs.writeFileSync(path.join(fixture, 'src/npm-package/adapters/typescript/adapter.sh'), 'adapter\n');
-    for (const rel of rootMirrorFiles) {
+    for (const rel of rootMirrorFileList) {
       fs.writeFileSync(path.join(fixture, 'src/npm-package', rel), `${rel}\n`);
     }
     // The principles guard requires both tree roots to exist (diff -rq).
