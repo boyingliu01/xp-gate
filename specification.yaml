@@ -1708,6 +1708,11 @@ specification:
         - id: AC-599-07
           criteria: 部分门禁未运行（既非全部通过也非全部跳过）的运行不得报告为 PASS；它必须与 SKIP-ALL（全部未运行）可区分，且不得被判为 FAIL（没有任何门禁失败）；全部运行且通过仍须为 PASS
           test_type: unit
+        - id: AC-599-08
+          criteria: pre-push 报告的 overall.score 只有在实际运行的门禁占门禁总数多数时才给出数值，
+            否则必须为 null（"未测定"）；无论是否给出数值，score_scope 都必须说明该数值覆盖了哪些门禁；
+            评分规则必须由独立可执行模块实现并被 hook 调用，不得在 hook 内重复实现
+          test_type: unit
 
 
     # ============================================================

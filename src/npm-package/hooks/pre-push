@@ -91,6 +91,22 @@ write_pre_push_report() {
     echo "⚠️  Gate M journal: no working Python interpreter found (tried python3, python, py) — report NOT written for $report_file." >&2
     return 0
   fi
+  # #577: the scoring rule lives in its own module so it can be tested directly.
+  # Install layout: <hooks dir>/lib/prepush-score.py, with the deprecated copy
+  # under <hooks dir>/hooks/lib/ for older installs.
+  local score_lib=""
+  for _cand in \
+    "$(dirname "${BASH_SOURCE[0]}")/lib/prepush-score.py" \
+    "$(dirname "${BASH_SOURCE[0]}")/hooks/lib/prepush-score.py" \
+    ../githooks/lib/prepush-score.py; do
+    if [ -f "$_cand" ]; then
+      score_lib="$_cand"
+      break
+    fi
+  done
+  if [ -z "$score_lib" ]; then
+    echo "⚠️  Gate M journal: prepush-score.py not found — the report at $report_file will carry no score." >&2
+  fi
   # No blanket `|| true`: a failing interpreter must be visible. The journal is
   # advisory, so still return 0, but say so instead of dying silently.
   #
@@ -136,6 +152,7 @@ write_pre_push_report() {
     printf '%s\n' "  'changed_files': [f for f in pushed_files if f],"
     printf '%s\n' "  'overall': {"
     printf '%s\n' "    'score': None,"
+    printf '%s\n' "    'score_scope': None,"
     printf '%s\n' "    'gates_passed': passed,"
     printf '%s\n' "    'gates_total': 8,"
     printf '%s\n' "    'verdict': '$verdict',"
@@ -157,16 +174,6 @@ write_pre_push_report() {
     printf '%s\n' "  'warnings': [],"
     printf '%s\n' "  'errors': [] if '$verdict' == 'PASS' else ['pre-push hook exited with code $exit_code'],"
     printf '%s\n' '}'
-    printf '%s\n' "# #580: the score is a MEASUREMENT over the gates that actually ran, not a"
-    printf '%s\n' '# restatement of the verdict.` None` is deliberate: 0.0 would be a wrong'
-    printf '%s\n' '# claim, and the honest statement is "not measured".'
-    printf '%s\n' "_ran = [g for g in report['gates'] if g['status'] != 'SKIP']"
-    printf '%s\n' "report['overall']['score'] = ("
-    printf '%s\n' "    '%.1f/10' % (10.0 * sum(1 for g in _ran if g['status'] == 'PASS') / len(_ran))"
-    printf '%s\n' "    if _ran else None"
-    printf '%s\n' ")"
-    printf '%s\n' "report['overall']['gates_run'] = len(_ran)"
-    printf '%s\n' "report['overall']['gates_skipped'] = len(report['gates']) - len(_ran)"
     printf '%s\n' "Path('$report_file').write_text(json.dumps(report, indent=2) + '\n')"
   } > "$py_script"
 
@@ -175,6 +182,16 @@ write_pre_push_report() {
   rm -f "$py_script"
   if [ "$py_rc" -ne 0 ]; then
     echo "⚠️  Gate M journal: $py_bin exited $py_rc — the push's audit record at $report_file is missing." >&2
+    return 0
+  fi
+
+  # #577: the score rule is NOT re-derived here. It lives in
+  # githooks/lib/prepush-score.py as a real module with a real interface, so the
+  # rule can be exercised directly by tests instead of being asserted through a
+  # copied-and-pasted implementation. It refuses to emit a number when the gates
+  # that ran cannot summarise the report (none ran, or fewer than half did).
+  if ! "$py_bin" "$score_lib" --report "$report_file"; then
+    echo "⚠️  Gate M journal: could not score $report_file — score left unset." >&2
   fi
 }
 
