@@ -92,7 +92,13 @@ resolved() { # cwd = WORK; prints "threshold=NN source=..."
 
 @test "the block message quotes the resolved threshold" {
   # A message that says 80 while the comparison uses 82 is worse than either.
-  grep -q 'below ${COVERAGE_THRESHOLD}% threshold' "$HOOK"
+  #
+  # The expansion may carry a default (`${COVERAGE_THRESHOLD:-80}`) so a harness
+  # that sources only the case block still compares against a real number (#570);
+  # what matters is that the message interpolates the VARIABLE, not a literal.
+  local live_block
+  live_block=$(grep -E 'below \$\{COVERAGE_THRESHOLD(:-[0-9]+)?\}% threshold' "$HOOK" | grep -v '^[[:space:]]*#' | wc -l)
+  [ "$live_block" -gt 0 ]
   # Comments may quote the old wording when explaining the fix; live output
   # must not. Count only non-comment lines.
   local live

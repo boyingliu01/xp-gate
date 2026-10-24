@@ -38,7 +38,7 @@ parse_case() {
   fi
 }
 
-@test "AC-A-03-02: parse_coverage_total table — bare number, percent, decimal, empty, garbage" {
+@test "AC-A-03-02: parse_coverage_total table - bare number, percent, decimal, empty, garbage" {
   [ -f "$LIB" ] || { echo "lib missing: $LIB"; return 1; }
   # shellcheck disable=SC1091
   source "$LIB"
@@ -144,27 +144,50 @@ run_enforce() {
   [[ "$output" == *"Python coverage: 91% ✅ (≥ 80%)"* ]]
 }
 
-@test "no coverage data anywhere → cannot-determine WARN, neither block nor pass" {
+@test "no coverage data anywhere: cannot-determine BLOCKS, neither pass nor silent" {
   [ -f "$LIB" ] || { echo "lib missing"; return 1; }
   write_coverage_stub "97"
   run run_enforce
-  [ "$status" -eq 0 ]
+  # #570: "could not measure" is a FAILED answer to the gate's only question.
+  # Warning and returning 0 made the gate fail-open — deleting .coverage turned
+  # the coverage check off while the summary still looked clean.
+  [ "$status" -eq 1 ]
   [[ "$output" == *"Could not determine Python coverage percentage"* ]]
-  [[ "$output" != *"BLOCKED"* ]]
+  [[ "$output" == *"BLOCKED"* ]]
   [[ "$output" != *"✅ (≥ 80%)"* ]]
 }
 
-@test "unparseable stub output → cannot-determine WARN, never a silent PASS" {
+@test "unparseable stub output: cannot-determine BLOCKS, never a silent PASS" {
   [ -f "$LIB" ] || { echo "lib missing"; return 1; }
   touch "$TEST_DIR/.coverage"
   write_coverage_stub "No data to report."
   run run_enforce
-  [ "$status" -eq 0 ]
+  [ "$status" -eq 1 ]
   [[ "$output" == *"Could not determine"* ]]
+  [[ "$output" == *"BLOCKED"* ]]
   [[ "$output" != *"✅"* ]]
 }
 
-@test "coverage tool absent from PATH → actionable WARN, exit 0" {
+@test "a subset run that measured nothing warns instead of blocking (the one exception)" {
+  [ -f "$LIB" ] || { echo "lib missing"; return 1; }
+  write_coverage_stub "97"
+  # PARTIAL_TEST_RUN means Stage 1 deliberately ran a subset, so there is no
+  # global total to compare against — blocking would punish the optimisation the
+  # hook itself made.
+  run env PARTIAL_TEST_RUN=true bash -c '
+    cd "$1" || exit 1
+    PARTIAL_TEST_RUN=true
+    export PARTIAL_TEST_RUN
+    # shellcheck disable=SC1091
+    source "$2"
+    enforce_python_coverage
+  ' _ "$TEST_DIR" "$LIB"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"subset test run"* ]]
+  [[ "$output" != *"BLOCKED"* ]]
+}
+
+@test "coverage tool absent from PATH: actionable WARN, exit 0" {
   [ -f "$LIB" ] || { echo "lib missing"; return 1; }
   touch "$TEST_DIR/.coverage"
   # Dir-split PATH: drop every directory that could carry coverage.py (this

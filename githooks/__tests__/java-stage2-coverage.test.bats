@@ -135,16 +135,18 @@ CSV
   [[ "$output" =~ "BLOCKED - Java coverage 0% below 80% threshold" ]]
 }
 
-@test "Java Stage 2 warns instead of blocking when no JaCoCo report exists" {
+@test "Java Stage 2 BLOCKS when no JaCoCo report exists" {
   harness=$(extract_stage2_harness)
 
   run bash "$harness"
 
-  [ "$status" -eq 0 ]
+  # #570: no report means nothing was measured, so the 80% floor is unverifiable.
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"BLOCKED"* ]]
   [[ "$output" == *"No JaCoCo report found"* ]]
 }
 
-@test "Java Stage 2 does not borrow TypeScript coverage data" {
+@test "Java Stage 2 does not borrow TypeScript coverage data (and blocks on none)" {
   # A stale Node report must never satisfy the Java check.
   mkdir -p coverage
   printf '%s\n' '{"total":{"lines":{"pct":95}}}' > coverage/coverage-summary.json
@@ -152,18 +154,22 @@ CSV
 
   run bash "$harness"
 
-  [ "$status" -eq 0 ]
+  # The gate must not satisfy itself from a stale Node report (#570 keeps that
+  # intent) AND must not exit 0 on no evidence.
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"BLOCKED"* ]]
   [[ "$output" == *"No JaCoCo report found"* ]]
   [[ ! "$output" =~ "Java coverage: 95%" ]]
 }
 
-@test "Java Stage 2 warns on a zero-total report instead of passing it" {
+@test "Java Stage 2 BLOCKS on a zero-total report instead of passing it" {
   write_jacoco_csv 0 0
   harness=$(extract_stage2_harness)
 
   run bash "$harness"
 
-  [ "$status" -eq 0 ]
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"BLOCKED"* ]]
   [[ "$output" == *"no instruction data"* ]]
 }
 
