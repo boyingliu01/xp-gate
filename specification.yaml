@@ -1715,6 +1715,12 @@ specification:
         - id: AC-574-08
           criteria: xp-gate doctor delphi 必须报告本地模型守卫结论（非 local-* 席位为 WARN，不全为本地时不失败），使 check_delphi_local_models.py 的规则获得调用方
           test_type: unit
+        - id: AC-574-09
+          criteria: 证据文件不存在或不是合法 JSON 时必须 fail closed（退出码非 0 且报文 "must exist and contain valid JSON"），不得把读不出的输入当作空证据放行
+          test_type: unit
+        - id: AC-574-10
+          criteria: .delphi-config.json 的 experts 两种形态（按角色键的对象、携带 role 的数组）必须解析出同一组席位；席位条目用 model 或 requested_model 携带模型 id 都算有效
+          test_type: unit
 
 
     - id: DD-001
