@@ -294,7 +294,7 @@ describe('#574 Gate MW binds evidence to the configured Delphi seats', () => {
   // mutation test: M1 survived). seatsFromExperts() is the one function that
   // reads both, and it was refactored in the same commit — these cases are what
   // makes that refactor safe.
-  it('AC-574-08: the ARRAY experts shape binds seats too, not just the object shape', () => {
+  it('AC-574-10: the ARRAY experts shape binds seats too, not just the object shape', () => {
     const config = delphiConfig(LOCAL_SEATS, 'local');
     // Rewrite the active profile's experts from { role: {model} } to
     // [{ role, model }] -- the other documented shape.
@@ -320,7 +320,7 @@ describe('#574 Gate MW binds evidence to the configured Delphi seats', () => {
     expect(blocked.output).toMatch(/requested_model/);
   });
 
-  it('AC-574-08: a seat entry using requested_model instead of model is honoured', () => {
+  it('AC-574-10: a seat entry using requested_model instead of model is honoured', () => {
     // The two shapes also differ in the key that carries the model id: xp-gate's
     // own configs use `model`, but a record captured from an actual expert run
     // carries `requested_model`. Both must resolve to the same seat.
