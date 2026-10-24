@@ -1147,7 +1147,15 @@ function backupBeforeOverwrite(target, backupsDir) {
   const stamp = new Date().toISOString().replace(/[:.]/g, '-');
   try {
     fs.mkdirSync(backupsDir, { recursive: true });
-    const backup = path.join(backupsDir, `${path.basename(target)}.${stamp}.bak`);
+    // The stamp has millisecond resolution, so two syncs inside the same
+    // millisecond produce the same name and the second copy destroys the first —
+    // the backup is worth nothing exactly when it is needed most (a rapid
+    // "edit, sync, edit, sync" repair loop). Disambiguate instead of overwriting:
+    // the first backup of a burst must survive the rest.
+    let backup = path.join(backupsDir, `${path.basename(target)}.${stamp}.bak`);
+    for (let n = 1; fs.existsSync(backup); n += 1) {
+      backup = path.join(backupsDir, `${path.basename(target)}.${stamp}-${n}.bak`);
+    }
     fs.copyFileSync(target, backup);
     return backup;
   } catch {

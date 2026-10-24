@@ -166,4 +166,56 @@ describe('doctor --sync-hooks keeps the previous version (#566)', () => {
     expect(backup).toBeTruthy();
     expect(fs.readFileSync(backup, 'utf8')).toContain('LOCAL-LIB-EDIT');
   });
+
+  it('AC-599-13: two syncs inside the same millisecond both keep their version', () => {
+    // The CI failure that motivated this case: "two successive overwrites keep
+    // both previous versions" passed locally and failed on a fast runner with
+    // `expected 1 to be 2`. The stamp has millisecond resolution, so when two
+    // syncs land in the SAME millisecond they compute the SAME backup name and
+    // the second copy silently destroys the first. Local runs usually straddled
+    // a millisecond boundary and never saw it.
+    //
+    // Pin Date so the collision is guaranteed rather than hoped for: asserting a
+    // bug that only appears under a timing race is how the suite went green while
+    // the defect shipped.
+    const { repoHooks, installedHooks } = makeLayout({
+      installedPrePush: '#!/usr/bin/env bash\n# XP-Gate Pre-Push Hook\n# SAME-MS-ONE\n',
+    });
+    const { syncGlobalHooksFromRepo } = loadDoctor();
+
+    // Freeze ONLY the clock the stamp reads. Nothing else is replaced: an earlier
+    // draft overrode Date.prototype.toISOString, which made the backup helper
+    // recurse into itself and threw "Maximum call stack size exceeded" -- the
+    // case then appeared to fail for a reason that had nothing to do with backups.
+    const RealDate = Date;
+    const frozen = 1767225600123; // any instant; only that it never advances
+    global.Date = class extends RealDate {
+      constructor(...args) {
+        if (args.length === 0) super(frozen);
+        else super(...args);
+      }
+      static now() {
+        return frozen;
+      }
+    };
+    try {
+      syncGlobalHooksFromRepo({ repoHooks, installedHooks, force: true });
+
+      fs.writeFileSync(
+        path.join(installedHooks, 'pre-push'),
+        '#!/usr/bin/env bash\n# XP-Gate Pre-Push Hook\n# SAME-MS-TWO\n',
+      );
+      syncGlobalHooksFromRepo({ repoHooks, installedHooks, force: true });
+    } finally {
+      global.Date = RealDate;
+    }
+
+    const backupsDir = path.join(installedHooks, 'backups');
+    const files = fs.readdirSync(backupsDir).filter((f) => f.startsWith('pre-push.'));
+    expect(files.length).toBe(2);
+
+    const contents = files.map((f) => fs.readFileSync(path.join(backupsDir, f), 'utf8'));
+    expect(contents.some((c) => c.includes('SAME-MS-ONE'))).toBe(true);
+    expect(contents.some((c) => c.includes('SAME-MS-TWO'))).toBe(true);
+  });
 });
