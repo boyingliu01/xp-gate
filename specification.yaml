@@ -1910,6 +1910,45 @@ specification:
             不得出现仓库内可解析而分发副本不可解析的不一致
           test_type: unit
 
+    # ============================================================
+    # REQ-603: Gate 8「exit 0 但没有报告」必须区分「工具没跑成」与「跑了但没写文件」。
+    #
+    # #592 报告 gitleaks 8.30.1 在干净扫描时不创建 --report-path 文件，于是
+    # 每次干净提交都打印
+    #     ⚠️  gitleaks exited 0 but produced no readable report
+    #     ⏭️  SKIPPED - secret scanning produced no evidence (not a pass)
+    # 一次正常通过的密钥扫描被永久记成 SKIP。
+    #
+    # 本机（git-bash，同为 8.30.1）实测干净扫描**会**写出 []，
+    # issue-493-gate8-clean-report-count.test.bats 的 AC-493-03 用真实二进制
+    # 钉住了这一点，因此该症状在本仓库不可复现。本需求不去"修"一个观察不到的
+    # 缺陷，而是钉住另一件在所有平台都成立、且此前缺失的事：该分支只有一种回应，
+    # 而它把两个完全不同的事实写成了同一句话——
+    #   (a) 扫描根本没跑成（配置读不到、FTL、--report-path 非法）：什么都没检查，
+    #       必须 fail-closed 并复述工具自己的话；
+    #   (b) 扫描跑了、没有发现、但工具没写文件：只剩 stdout，而 stdout 是比工件
+    #       更弱的证据，仍不得判 PASS，但必须说明"是扫描干净而不是没扫"。
+    # 顺序即要点：工件优先、工具故障次之、工具输出最后（#449 立的原则，
+    # #592 从另一面重新打开它）。
+    # ============================================================
+    - id: REQ-603
+      description: "Gate 8 在 exit 0 且无报告时必须区分工具故障与「扫描干净但无工件」，后者不得判 PASS 但必须说明原因"
+      priority: high
+      acceptance_criteria:
+        - id: AC-603-01
+          criteria: 存在干净的 [] 报告工件时仍必须判 PASS——工件是最强证据，放宽无工件路径不得削弱它
+          test_type: unit
+        - id: AC-603-02
+          criteria: gitleaks exit 0 但输出含 FTL / unable to load 等工具故障时必须
+            fail-closed 并报 ENVIRONMENT（退出码非 0），复述工具报错，且不得声称扫描干净；
+            不得归入「无证据」
+          test_type: unit
+        - id: AC-603-03
+          criteria: exit 0 且既无报告工件也无工具故障时不得判 PASS；若 stdout 表明扫描确实
+            执行过（no leaks found），SKIP 文案必须说明「扫过但无工件」而非「无证据」；
+            工件含 findings 时必须仍然拦阻
+          test_type: unit
+
 
     - id: DD-001
       decision: 走薄桥（方案 A）在 ctx.tools 注册三工具，而非独立 MCP server 或纯技能
