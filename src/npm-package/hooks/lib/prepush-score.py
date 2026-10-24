@@ -32,11 +32,19 @@ def compute(gates: Sequence[Dict[str, Any]]) -> Dict[str, Any]:
     """Return the score fields for a gate list.
 
     Keys: score (str | None), score_scope (str), gates_run, gates_skipped,
-    gates_total. The rule lives here and nowhere else.
+    gates_total, gates_passed, gates_failed, gates_warned, gates_degraded.
+    The rule lives here and nowhere else.
+
+    `gates_total` and `gates_passed` are counted from the list rather than taken
+    from the caller: they used to be a hardcoded 8 and a 1/0 squashed out of the
+    verdict, so a report could claim eight gates while listing twelve (#569).
     """
     total = len(gates)
     ran: List[Dict[str, Any]] = [g for g in gates if g.get("status") != "SKIP"]
-    passed = sum(1 for g in ran if g.get("status") == "PASS")
+    passed = [g for g in ran if g.get("status") == "PASS"]
+    failed = [g for g in ran if g.get("status") in ("FAIL", "BLOCK")]
+    warned = [g for g in ran if g.get("status") == "WARN"]
+    degraded = [g for g in ran if g.get("status") in ("DEGRADED", "WARN")]
 
     if not ran:
         scope = "not measured"
@@ -47,7 +55,7 @@ def compute(gates: Sequence[Dict[str, Any]]) -> Dict[str, Any]:
         score = None
     else:
         scope = "%d of %d gates" % (len(ran), total)
-        score = "%.1f/10" % (10.0 * passed / len(ran))
+        score = "%.1f/10" % (10.0 * len(passed) / len(ran))
 
     return {
         "score": score,
@@ -55,6 +63,12 @@ def compute(gates: Sequence[Dict[str, Any]]) -> Dict[str, Any]:
         "gates_run": len(ran),
         "gates_skipped": total - len(ran),
         "gates_total": total,
+        "gates_passed": len(passed),
+        "gates_failed": len(failed),
+        "gates_warned": len(warned),
+        "gates_degraded": len(degraded),
+        "failed_gates": [g.get("id") for g in failed],
+        "skipped_gates": [g.get("id") for g in gates if g.get("status") == "SKIP"],
     }
 
 

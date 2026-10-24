@@ -1729,6 +1729,11 @@ specification:
             顶替；报告必须输出 gatesWarned/gatesFailed 与 failedGates，且这些数字必须取自计数器
             而非字面量
           test_type: unit
+        - id: AC-599-11
+          criteria: pre-push 报告的 gates_total 必须等于报告中实际列出的门禁条目数（不得为字面量）；
+            gates_passed 必须是实际通过的门禁计数（不得由 verdict 压成 0/1）；通过/失败/告警/跳过
+            四类必须各自可区分，且失败门禁必须按 id 点名
+          test_type: unit
 
 
     # ============================================================
