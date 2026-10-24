@@ -1288,11 +1288,21 @@ fi
 # ============================================================================
 echo ""
 echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-# Trim the trailing separator and turn it into a displayable list.
-SKIPPED_DISPLAY=$(printf '%s' "${GATES_SKIPPED:-}" | sed 's/|$//' | sed 's/|/ , /g')
-if [ -n "$SKIPPED_DISPLAY" ]; then
+# Turn the recorded skips into a displayable list.
+#
+# Split on the SEPARATOR (`|`), never on anything that can occur inside a reason.
+# The previous form replaced `|` with " , " and then split on `,`, so a reason
+# that merely contained a comma was torn in two and its second half printed as
+# its own gate:
+#     Gate MP: script not found, parity NOT verified
+#       - Gate MP: script not found
+#       - parity NOT verified      <-- invented gate, and the real entry lost
+#                                      the half that said what was verified (#572)
+# A trailing separator is dropped, and blank segments are skipped.
+SKIPPED_LIST=$(printf '%s' "${GATES_SKIPPED:-}" | tr '|' '\n' | sed '/^[[:space:]]*$/d')
+if [ -n "$SKIPPED_LIST" ]; then
   echo "   ⚠️  NO BLOCKING FAILURES — but not every gate ran:"
-  echo "$SKIPPED_DISPLAY" | tr ',' '\n' | sed '/^[[:space:]]*$/d' | sed 's/^[[:space:]]*/     - /'
+  printf '%s\n' "$SKIPPED_LIST" | sed 's/^[[:space:]]*/     - /'
 else
   echo "   ✅ ALL CHECKS PASSED"
 fi
