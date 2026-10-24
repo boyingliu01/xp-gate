@@ -174,7 +174,13 @@ run_enforce() {
   # PARTIAL_TEST_RUN means Stage 1 deliberately ran a subset, so there is no
   # global total to compare against — blocking would punish the optimisation the
   # hook itself made.
-  run env PARTIAL_TEST_RUN=true bash -c '
+  #
+  # PATH must carry the stub: enforce_python_coverage() probes for coverage.py
+  # BEFORE it measures anything, so on a machine without it (CI images) the
+  # function returned at that probe and the subset-run message was never
+  # reached. The case then failed on an absent tool rather than on the
+  # behaviour it names — a test asserting the machine, not the code.
+  run env PARTIAL_TEST_RUN=true PATH="$TEST_DIR/bin:$PATH" bash -c '
     cd "$1" || exit 1
     PARTIAL_TEST_RUN=true
     export PARTIAL_TEST_RUN

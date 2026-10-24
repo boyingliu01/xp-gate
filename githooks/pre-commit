@@ -2938,10 +2938,30 @@ else
             echo "TypeScript coverage: ${COVERAGE_PERCENT}% ✅ (≥ ${COVERAGE_THRESHOLD:-80}%)"
           fi
         else
-          echo "⚠️  Could not parse TypeScript coverage from coverage/coverage-summary.json"
+          # #570: an unparseable report is not a pass. Silently continuing here
+          # meant a corrupt or unexpected-shape coverage-summary.json disabled the
+          # TypeScript coverage gate while the run still looked clean.
+          if [ "${PARTIAL_TEST_RUN:-false}" = "true" ]; then
+            echo "⚠️  Could not parse TypeScript coverage from coverage/coverage-summary.json (subset test run) — not blocking."
+          else
+            echo "❌ BLOCKED - Could not parse TypeScript coverage from coverage/coverage-summary.json."
+            echo "   The report exists but carries no usable total.lines.pct, so the"
+            echo "   ${COVERAGE_THRESHOLD:-80}% floor could not be checked."
+            exit 1
+          fi
         fi
       else
-        echo "⚠️  coverage/coverage-summary.json not found. If vitest --coverage was used, check vitest.config.ts coverageDirectory."
+        # #570: the report file is absent, so nothing was measured. Warning and
+        # continuing made "delete coverage/coverage-summary.json" an effective way
+        # to switch this gate off.
+        if [ "${PARTIAL_TEST_RUN:-false}" = "true" ]; then
+          echo "⚠️  coverage/coverage-summary.json not found (subset test run) — not blocking."
+        else
+          echo "❌ BLOCKED - coverage/coverage-summary.json not found."
+          echo "   No coverage could be measured, so the ${COVERAGE_THRESHOLD:-80}% floor could not be"
+          echo "   checked. Run 'npx vitest run --coverage' before committing."
+          exit 1
+        fi
       fi
       ;;
     "python")
@@ -3195,7 +3215,20 @@ else
           echo "${CURRENT_LANG} coverage: ${COVERAGE_PERCENT}% ✅ (≥ ${COVERAGE_THRESHOLD:-80}%)"
         fi
       else
-        echo "⚠️  Could not determine ${CURRENT_LANG} coverage percentage. No standard coverage report files found."
+        # #570: "could not determine" is a FAILED answer to the gate's question
+        # ("is coverage at or above the floor?"), not a lenient one. Warning and
+        # falling through made the generic branch fail-open: a language that
+        # produced no standard report file passed the coverage gate while the
+        # summary still looked clean. The ONE exception is a subset run, where
+        # the global percentage is meaningless by construction.
+        if [ "${PARTIAL_TEST_RUN:-false}" = "true" ]; then
+          echo "⚠️  Could not determine ${CURRENT_LANG} coverage percentage (subset test run) — not blocking."
+        else
+          echo "❌ BLOCKED - Could not determine ${CURRENT_LANG} coverage percentage."
+          echo "   No standard coverage report file was found, so the ${COVERAGE_THRESHOLD:-80}% floor"
+          echo "   could not be checked. Produce coverage data or run a subset test run."
+          exit 1
+        fi
       fi
       ;;
   esac

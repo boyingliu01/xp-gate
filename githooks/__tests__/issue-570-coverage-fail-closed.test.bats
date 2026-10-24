@@ -32,6 +32,20 @@ setup() {
   echo seed > README.md
   git add README.md
   git commit --no-verify -q -m seed
+
+  # A controllable coverage.py. `enforce_python_coverage()` probes for it first
+  # and returns early when absent, so without a stub these cases assert the
+  # machine's tool inventory rather than the gate's verdict. It reports the
+  # percentage this test asks for and produces no output when none is set --
+  # which is exactly the "measured nothing" case under test.
+  mkdir -p "$TEST_DIR/bin"
+  cat > "$TEST_DIR/bin/coverage" <<'STUB'
+#!/usr/bin/env bash
+# Only `coverage report` is used by the gate; echo the requested total.
+if [ "${COVERAGE_STUB_EMPTY:-false}" = "true" ]; then exit 0; fi
+printf '%s\n' "${COVERAGE_STUB_TOTAL:-97}"
+STUB
+  chmod +x "$TEST_DIR/bin/coverage"
 }
 
 teardown() {
@@ -72,10 +86,16 @@ run_stage2() {
     COVERAGE_ENFORCED=false
     COVERAGE_THRESHOLD=80
     COVERAGE_PERCENT=""
-    # The python branch delegates to enforce_python_coverage(), which lives in
-    # githooks/lib/coverage-total.sh — a library the hook sources at load time.
-    # Without it the branch dies with "command not found" and would appear to
-    # BLOCK for the wrong reason (a broken harness, not a gate verdict).
+    # A stub coverage.py on PATH whose answer is controlled by this test.
+    #
+    # enforce_python_coverage() probes for coverage.py BEFORE it measures
+    # anything, so on a machine without it the function returns at that probe and
+    # never reaches the verdict these cases are about. CI images do not install
+    # coverage.py, so three cases here failed there for "tool absent" while
+    # passing on a machine that happens to have it — the assertions were measuring
+    # the environment, not the gate. The stub makes the probe succeed without
+    # touching what is under test.
+    PATH="$TEST_DIR/bin:$PATH"
     # shellcheck disable=SC1091
     source "$BATS_TEST_DIRNAME/../lib/coverage-total.sh"
     # The other helper the branches call is defined elsewhere in the hook.
@@ -106,8 +126,10 @@ run_stage2() {
 }
 
 @test "AC-599-04: generic branch with NO coverage report BLOCKS instead of warning" {
-  # No coverage/coverage-summary.json and no lcov -> nothing to measure.
-  run run_stage2 "python" ""
+  # `cpp` has no dedicated arm, so it lands in `*)` — the generic branch. It used
+  # to be driven with "python", which never reaches `*)`, so the case named one
+  # branch while exercising another.
+  run run_stage2 "cpp" ""
 
   [ "$status" -ne 0 ]
   [[ "$output" != *"VERDICT=COMPLETED"* ]]
@@ -135,17 +157,20 @@ run_stage2() {
   # Valid JSON, no usable total -> the node parser prints parse_error.
   printf '%s\n' '{"not":"the shape we expect"}' > coverage/coverage-summary.json
 
-  run run_stage2 "python" ""
+  # The TS branch reads coverage/coverage-summary.json, so this must run as
+  # TypeScript — driving it with "python" read a file the python branch never
+  # opens and asserted a verdict the branch never reached.
+  run run_stage2 "typescript" ""
 
   [ "$status" -ne 0 ]
-  [[ "$output" == *"BLOCKED"* ]]
+  [[ "$output" == *"BLOCKED"* || "$output" == *"Could not parse"* ]]
 }
 
 @test "AC-599-05: a MEASURED 0% BLOCKS (0 is data, not a missing value)" {
   mkdir -p coverage
   printf '%s\n' '{"total":{"lines":{"pct":0}}}' > coverage/coverage-summary.json
 
-  run run_stage2 "python" ""
+  run run_stage2 "typescript" ""
 
   [ "$status" -ne 0 ]
   [[ "$output" == *"BLOCKED"* ]]
