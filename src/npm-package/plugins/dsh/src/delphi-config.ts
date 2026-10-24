@@ -58,14 +58,67 @@ export interface ResolvedDelphiConfig {
 /** Raised when config on disk cannot be turned into a usable review setup. */
 export class DelphiSetupError extends Error {}
 
+/** Placeholder spellings xp-gate configs already use. Named so the error text can
+ *  quote the exact form the user wrote — a typo in the spelling is
+ *  indistinguishable from an unset variable otherwise (#576). */
+const PLACEHOLDER_PATTERNS = [
+  { form: "shell", re: /\$\{([A-Za-z_][A-Za-z0-9_]*)\}/g },
+  { form: "env", re: /\{env:([A-Za-z_][A-Za-z0-9_]*)\}/g },
+] as const
+
+/**
+ * The result of expanding a config value: the expanded text plus what could not
+ * be resolved, kept apart by REASON.
+ *
+ * `missing` and `empty` are different problems with different remedies, so they
+ * are separate lists rather than one "did not expand" bucket (#576):
+ *   missing — nobody set it: fix the environment (and, on a long-lived host,
+ *             restart the process that needs to inherit it)
+ *   empty   — someone set it to "": fix the configuration
+ */
+export interface ExpandedEnv {
+  readonly value: string
+  readonly missing: readonly string[]
+  readonly empty: readonly string[]
+}
+
+/**
+ * Expand `${VAR}` / `{env:VAR}` without collapsing "unset" into "empty".
+ * Supports the two spellings already present in xp-gate config files.
+ */
+export function expandEnvDetailed(
+  value: string,
+  env: NodeJS.ProcessEnv = process.env,
+): ExpandedEnv {
+  const missing: string[] = []
+  const empty: string[] = []
+  let out = value
+  for (const { re } of PLACEHOLDER_PATTERNS) {
+    out = out.replace(re, (_m, name: string) => {
+      const found = env[name]
+      if (found === undefined) {
+        if (!missing.includes(name)) missing.push(name)
+        return ""
+      }
+      if (found === "") {
+        if (!empty.includes(name)) empty.push(name)
+        return ""
+      }
+      return found
+    })
+  }
+  return { value: out, missing, empty }
+}
+
 /**
  * Expand `${VAR}` and `{env:VAR}` placeholders from the environment.
  * Supports the two spellings already present in xp-gate config files.
+ *
+ * Kept for callers that only need the text; use {@link expandEnvDetailed} when
+ * the difference between "unset" and "set to empty" matters.
  */
 export function expandEnv(value: string, env: NodeJS.ProcessEnv = process.env): string {
-  return value
-    .replace(/\$\{([A-Za-z_][A-Za-z0-9_]*)\}/g, (_m, name: string) => env[name] ?? "")
-    .replace(/\{env:([A-Za-z_][A-Za-z0-9_]*)\}/g, (_m, name: string) => env[name] ?? "")
+  return expandEnvDetailed(value, env).value
 }
 
 /** Pick the active profile, falling back to the top level. */
@@ -123,21 +176,110 @@ function resolveProviders(
     if (!baseUrl) throw new DelphiSetupError(`Provider "${name}" has no base_url.`)
 
     const rawKey = entry.api_key ?? entry.apiKey ?? ""
-    const apiKey = expandEnv(rawKey, env)
+    // Find the placeholder BEFORE touching `env`: the spelling lives in the
+    // config, not the environment, so a broken `env` must not hide it.
+    const placeholder = findPlaceholder(rawKey)
+    // Every read of `env` may fail — a caller can pass a proxy, a frozen object,
+    // or an environment that throws on access. Diagnostics must never become the
+    // reason the run dies: on any error fall back to the plainest possible
+    // message, which is still a DelphiSetupError (#576).
+    let expanded: ExpandedEnv
+    try {
+      expanded = expandEnvDetailed(rawKey, env)
+    } catch {
+      expanded = { value: "", missing: placeholder ? [placeholder.name] : [], empty: [] }
+    }
+    const apiKey = expanded.value
     if (!apiKey) {
       // Name the variable rather than echoing config, which may hold a literal key.
-      const varName =
-        /\$\{([A-Za-z_][A-Za-z0-9_]*)\}/.exec(rawKey)?.[1] ??
-        /\{env:([A-Za-z_][A-Za-z0-9_]*)\}/.exec(rawKey)?.[1]
       throw new DelphiSetupError(
-        varName
-          ? `API key variable ${varName} is not set in the environment.`
+        placeholder
+          ? describeUnusableKey(name, rawKey, placeholder, expanded, env)
           : `Provider "${name}" has no api_key.`,
       )
     }
     resolved.set(name, { baseUrl, apiKey })
   }
   return resolved
+}
+
+/** Locate the first placeholder in a config value, keeping both name and spelling. */
+function findPlaceholder(rawKey: string): { name: string; spelling: string } | null {
+  for (const { re } of PLACEHOLDER_PATTERNS) {
+    // Fresh lastIndex each call: the shared regexes are global.
+    re.lastIndex = 0
+    const match = re.exec(rawKey)
+    if (match) return { name: match[1], spelling: match[0] }
+  }
+  return null
+}
+
+/** Env keys whose name matches case-insensitively. Never throws: a hostile or
+ *  partially-broken `env` must not turn diagnostics into the failure (#576). */
+function caseVariantsOf(name: string, env: NodeJS.ProcessEnv): string[] {
+  try {
+    const lower = name.toLowerCase()
+    return Object.keys(env).filter((k) => k !== name && k.toLowerCase() === lower)
+  } catch {
+    return []
+  }
+}
+
+/**
+ * Build the message for a provider whose api_key did not expand to anything.
+ *
+ * The old text asserted "is not set in the environment" for every failure. That
+ * is a factual claim the caller cannot make from an expanded string alone: an
+ * empty result also happens when the variable IS set — to "", or set in a
+ * place this process never inherited (a long-lived host whose parent started
+ * before the variable was written; a shell that never reloaded; a systemd unit
+ * without restart; a container created without `-e`). The reader was sent to
+ * check the key, the config, and the gateway — everything except the parent
+ * process environment (#576).
+ */
+function describeUnusableKey(
+  providerName: string,
+  rawKey: string,
+  placeholder: { name: string; spelling: string },
+  expanded: ExpandedEnv,
+  env: NodeJS.ProcessEnv,
+): string {
+  const { name, spelling } = placeholder
+  const lines: string[] = []
+
+  if (expanded.empty.includes(name)) {
+    lines.push(
+      `API key variable ${name} is empty in the environment.`,
+      `Provider "${providerName}" uses ${spelling} in its api_key.`,
+      "The variable is defined but has no value — this is usually a configuration error.",
+      `Set ${name} to a non-empty value.`,
+    )
+  } else {
+    lines.push(
+      `API key variable ${name} is not set in the environment.`,
+      `Provider "${providerName}" uses ${spelling} in its api_key.`,
+    )
+    const variants = caseVariantsOf(name, env)
+    if (variants.length > 0) {
+      lines.push(
+        `Note: the environment has a variable whose name differs only in case: ` +
+          `${variants.join(", ")}. Environment variable names are case-sensitive on ` +
+          "POSIX systems, so ${name} does not match it.",
+      )
+    }
+    lines.push(
+      `Set ${name} and restart the process that reads it. If you already set it, ` +
+        "a long-running parent may still be holding the environment it started " +
+        "with — the variable is inherited once at process start and not refreshed.",
+    )
+  }
+
+  if (!rawKey.includes("${") && !rawKey.includes("{env:")) {
+    // Reached only when the value expanded to "" from a literal; say so instead
+    // of naming a variable that is not referenced.
+    lines.push(`The configured api_key is a literal value and expands to an empty string.`)
+  }
+  return lines.join(" ")
 }
 
 /**
