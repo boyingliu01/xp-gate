@@ -3950,6 +3950,8 @@ generate_quality_report() {
   # degraded gate is never confused with a real PASS.
   local DEGRADED_COUNT=0
   local DEGRADED_JSON=""
+  local FAIL_COUNT=0
+  local FAILED_JSON=""
   for gate in 1 2 3 4 5 6 7 8 9 10 11 12; do
     local status_var="GATE_${gate}_STATUS"
     # Default mirrors the JSON report rendering below EXACTLY (gates 1-11
@@ -3965,8 +3967,16 @@ generate_quality_report() {
     case "$gate_status" in
       PASS) PASSED_COUNT=$((PASSED_COUNT + 1)) ;;
       SKIP) SKIP_COUNT=$((SKIP_COUNT + 1)) ;;
-      WARN) WARN_COUNT=$((WARN_COUNT + 1)); NONPASS_COUNT=$((NONPASS_COUNT + 1)); DEGRADED_COUNT=$((DEGRADED_COUNT + 1)); DEGRADED_JSON="${DEGRADED_JSON:+$DEGRADED_JSON, }\"gate${gate}\"";;
-      *) NONPASS_COUNT=$((NONPASS_COUNT + 1)) ;;
+      WARN) WARN_COUNT=$((WARN_COUNT + 1)); NONPASS_COUNT=$((NONPASS_COUNT + 1)) ;;
+      # #574: DEGRADED is a status a gate really produces -- Gate 5 reports it
+      # when coverage could not be measured honestly instead of claiming PASS.
+      # It had no arm here, so it fell into the catch-all below and counted as a
+      # HARD FAILURE: the gate was punished for telling the truth about itself.
+      # It must also feed WARN_COUNT, because the FAIL predicate is
+      # (NONPASS_COUNT - WARN_COUNT) > 0; adding only NONPASS_COUNT would turn
+      # every honest DEGRADED run into FAIL.
+      DEGRADED) DEGRADED_COUNT=$((DEGRADED_COUNT + 1)); WARN_COUNT=$((WARN_COUNT + 1)); NONPASS_COUNT=$((NONPASS_COUNT + 1)); DEGRADED_JSON="${DEGRADED_JSON:+$DEGRADED_JSON, }\"gate${gate}\"" ;;
+      *) FAIL_COUNT=$((FAIL_COUNT + 1)); NONPASS_COUNT=$((NONPASS_COUNT + 1)); FAILED_JSON="${FAILED_JSON:+$FAILED_JSON, }\"gate${gate}\"" ;;
     esac
   done
 
@@ -4105,6 +4115,9 @@ generate_quality_report() {
     "gatesPassed": $PASSED_COUNT,
     "gatesTotal": $TOTAL_GATES,
     "gatesSkipped": $SKIP_COUNT,
+    "gatesWarned": $WARN_COUNT,
+    "gatesFailed": $FAIL_COUNT,
+    "failedGates": [$FAILED_JSON],
     "gatesDegraded": $DEGRADED_COUNT,
     "degradedGates": [$DEGRADED_JSON],
     "gatesEffective": $EFFECTIVE_TOTAL,
