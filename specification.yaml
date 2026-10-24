@@ -766,6 +766,11 @@ specification:
             并在存在大小写不同的同名变量时指出它；诊断过程任何错误都必须降级为
             DelphiSetupError 而非成为新的失败点，且不得回显 key 的值
           test_type: unit
+        - id: AC-DSH-016-05
+          criteria: check-alignment 在判定非 PASS 时必须输出 report.errors 中的每一条理由；
+            PASS 时不得输出理由块；非 PASS 却没有任何理由时必须明确报告为产出方缺陷，
+            不得静默打印空列表
+          test_type: unit
     # ============================================================
     # REQ-562: 覆盖率门槛必须真正生效 —— 声明了阈值不等于执行了阈值。
     # vitest.config.ts 曾以 vitest 2.x 的嵌套形状 thresholds.global 声明 80%，
@@ -1712,6 +1717,11 @@ specification:
           criteria: pre-push 报告的 overall.score 只有在实际运行的门禁占门禁总数多数时才给出数值，
             否则必须为 null（"未测定"）；无论是否给出数值，score_scope 都必须说明该数值覆盖了哪些门禁；
             评分规则必须由独立可执行模块实现并被 hook 调用，不得在 hook 内重复实现
+          test_type: unit
+        - id: AC-599-09
+          criteria: 任何门禁判定非 PASS 时必须输出可行动的理由（check-alignment 须逐条打印
+            report.errors）；PASS 时不得输出理由块；非 PASS 却没有任何理由时必须明确报告为
+            产出方缺陷，不得静默打印空列表
           test_type: unit
 
 

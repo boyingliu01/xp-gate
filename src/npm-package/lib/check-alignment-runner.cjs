@@ -68,6 +68,29 @@ if (jsonMode) {
   console.log('Status:', report.alignment_status);
   console.log('Score:', report.score);
   console.log('Misaligned:', report.misaligned_tests.length);
+
+  // #573 (recurrence of #57): a non-PASS verdict used to print only the status
+  // and counters. On a real run that read:
+  //     Status: BLOCKED
+  //     Score: 0
+  //     Misaligned: 0
+  // which contradicts itself — zero misaligned tests, yet blocked — while the
+  // actual reason sat in report.errors that nothing ever printed. A gate that
+  // blocks without saying why is not actionable, and the usual response to an
+  // unactionable red is to bypass it, which is how dead gates are made.
+  if (report.alignment_status !== 'PASS') {
+    const reasons = Array.isArray(report.errors) ? report.errors : [];
+    if (reasons.length > 0) {
+      console.error('Reasons:');
+      for (const reason of reasons) console.error('  -', reason);
+    } else {
+      // Saying so is the point: a blocked verdict with no recorded reason is a
+      // defect in whoever produced the report, not something the reader can fix
+      // by editing their own files.
+      console.error('Reasons: (none recorded) — this is a bug in the report producer:');
+      console.error('  a non-PASS alignment verdict must carry at least one entry in report.errors.');
+    }
+  }
 }
 // Set exitCode instead of process.exit() so buffered stdout (notably the
 // --json document) flushes fully before the process terminates (#392 review).
