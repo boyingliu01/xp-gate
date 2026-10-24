@@ -405,6 +405,20 @@ MOCK
   echo '// @no-test-required: test infrastructure placeholder
 export const placeholder = true;' > "$FRESH/src/placeholder.ts"
   echo "ignore: []" > "$FRESH/.archlint.yaml"
+  # Gate 5 BLOCKS when coverage/coverage-summary.json is absent (#570: "not found"
+  # is not "clean"). A $FRESH repo carries no coverage pass, so it states the
+  # coverage it needs — same as the main fixture in setup().
+  mkdir -p "$FRESH/coverage"
+  cat > "$FRESH/coverage/coverage-summary.json" << 'COVERAGE'
+{
+  "total": {
+    "lines":      { "pct": 90 },
+    "statements": { "pct": 90 },
+    "functions":  { "pct": 90 },
+    "branches":   { "pct": 90 }
+  }
+}
+COVERAGE
   git -C "$FRESH" add .
   git -C "$FRESH" commit --no-verify -q -m "init"
 

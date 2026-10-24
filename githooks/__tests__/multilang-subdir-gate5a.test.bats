@@ -241,6 +241,15 @@ teardown() {
 @test "single-language subdir project still passes (cd + strip intact)" {
   git rm -q --cached backend/main.py
   rm -rf backend
+  # Removing the second language turns this into a single-project repo, so Gate 5
+  # descends into web/ and looks for coverage THERE. The fixture only had
+  # coverage at the repo root, which the multi-language path used; Gate 5 then
+  # blocked with "coverage/coverage-summary.json not found" and the case never
+  # reached the subdir assertions it exists for (#570 makes absence a BLOCK).
+  mkdir -p web/coverage
+  cat > web/coverage/coverage-summary.json <<'EOF'
+{ "total": { "lines": { "pct": 97 } } }
+EOF
   echo "export const session = () => 1;" > web/src/modules/training/session.ts
   echo "test('session', () => {});" > web/src/modules/training/session.test.ts
   git add -A
