@@ -1910,7 +1910,7 @@ else
   done
 fi
 fi  # End: if ! any_changed_files_match (Issue #312 skip)
-GATE_1_STATUS="${GATE_1_STATUS:-PASS}"
+GATE_1_STATUS="${GATE_1_STATUS:-SKIP}"
 GATE_1_TOOL="${PROJECT_LANGS}"
 # The java branch may set GATE_1_STATUS=WARN + a GATE_1_DETAIL warn reason
 # (engine unavailable / soft or report downgrade); route it into the audit
@@ -3980,8 +3980,8 @@ generate_quality_report() {
       COVERAGE_WARNINGS_JSON="${COVERAGE_WARNINGS_JSON:+$COVERAGE_WARNINGS_JSON, }\"unsupported_language_name\""
       continue
     fi
-    _cm_g3=$(classify_coverage_reason "${GATE_3_REASON:-}" "${GATE_3_STATUS:-PASS}")
-    _cm_g4=$(classify_coverage_reason "${GATE_4_REASON:-}" "${GATE_4_STATUS:-PASS}")
+    _cm_g3=$(classify_coverage_reason "${GATE_3_REASON:-}" "${GATE_3_STATUS:-SKIP}")
+    _cm_g4=$(classify_coverage_reason "${GATE_4_REASON:-}" "${GATE_4_STATUS:-SKIP}")
     # Gate 6 reason for this language — extracted so the rule is testable
     # rather than inlined (see coverage_g6_reason_for below).
     _cm_g6_reason=$(coverage_g6_reason_for "$_cm_lang")
@@ -4018,7 +4018,7 @@ generate_quality_report() {
   "gates": {
     "gate1_static_analysis": {
       "name": "Code Quality (Static + Lint + Shell)",
-      "status": "${GATE_1_STATUS:-PASS}",
+      "status": "${GATE_1_STATUS:-SKIP}",
       "tool": "${GATE_1_TOOL:-auto}"
     },
     "gate2_dup_code": {
@@ -4028,7 +4028,7 @@ generate_quality_report() {
     },
     "gate3_complexity": {
       "name": "Cyclomatic Complexity",
-      "status": "${GATE_3_STATUS:-PASS}",
+      "status": "${GATE_3_STATUS:-SKIP}",
       "reason": "${GATE_3_REASON:-}",
       "threshold": "${CCN_THRESHOLD:-5}",
       "blockThreshold": "${CCN_THRESHOLD:-5}",
@@ -4036,13 +4036,13 @@ generate_quality_report() {
     },
     "gate4_principles": {
       "name": "Clean Code + SOLID",
-      "status": "${GATE_4_STATUS:-PASS}",
+      "status": "${GATE_4_STATUS:-SKIP}",
       "reason": "${GATE_4_REASON:-}",
       "warnings": ${WARNING_COUNT:-0}
     },
     "gate5_tests": {
       "name": "Tests + Coverage",
-      "status": "${GATE_5_STATUS:-PASS}",
+      "status": "${GATE_5_STATUS:-SKIP}",
       "thresholds": { "lines": ${COVERAGE_THRESHOLD}, "functions": null, "branches": null, "statements": null },
       "threshold_source": "${COVERAGE_THRESHOLD_SOURCE}",
       "actual": { "coverage": "${COV_PCT}" },
@@ -4057,30 +4057,30 @@ generate_quality_report() {
     },
     "gate7_iac_security": {
       "name": "IaC Security Scanning",
-      "status": "${GATE_7_STATUS:-PASS}",
+      "status": "${GATE_7_STATUS:-SKIP}",
       "scanned_files": ${GATE_7_SCANNED_FILES:-0},
       "tools": "checkov, hadolint, kube-score, tflint"
     },
     "gate8_secret_scanning": {
       "name": "Secret Scanning",
-      "status": "${GATE_8_STATUS:-PASS}",
+      "status": "${GATE_8_STATUS:-SKIP}",
       "tool": "gitleaks"
     },
     "gate9_build_integrity": {
       "name": "Build Integrity",
-      "status": "${GATE_9_STATUS:-PASS}",
+      "status": "${GATE_9_STATUS:-SKIP}",
       "tool": "tsc + npm pack + import check"
     },
     "gate10_sast": {
       "name": "SAST Security Scan",
-      "status": "${GATE_10_STATUS:-PASS}",
+      "status": "${GATE_10_STATUS:-SKIP}",
       "reason": "${GATE_10_REASON:-}",
       "scanned_files": ${GATE_10_SCANNED_FILES:-0},
       "tool": "semgrep"
     },
     "gate11_sprint_flow": {
       "name": "Sprint Flow Enforcement",
-      "status": "${GATE_11_STATUS:-PASS}",
+      "status": "${GATE_11_STATUS:-SKIP}",
       "tool": "sprint-gate.sh"
     },
     "gate12_file_hygiene": {
@@ -4102,17 +4102,17 @@ ENDJSON
 
   # ── History append (unchanged — append-only for trend) ────────────────────────────
   local GATES_JSON="{"
-  GATES_JSON="${GATES_JSON}\"gate1\":{\"status\":\"${GATE_1_STATUS:-PASS}\",\"name\":\"Code Quality\"},"
+  GATES_JSON="${GATES_JSON}\"gate1\":{\"status\":\"${GATE_1_STATUS:-SKIP}\",\"name\":\"Code Quality\"},"
   GATES_JSON="${GATES_JSON}\"gate2\":{\"status\":\"${GATE_2_STATUS:-SKIP}\",\"name\":\"Duplicate Code\"},"
-  GATES_JSON="${GATES_JSON}\"gate3\":{\"status\":\"${GATE_3_STATUS:-PASS}\",\"name\":\"Complexity\",\"warnings\":${CC_WARNINGS:-0}},"
-  GATES_JSON="${GATES_JSON}\"gate4\":{\"status\":\"${GATE_4_STATUS:-PASS}\",\"name\":\"Principles\",\"warnings\":${WARNING_COUNT:-0}},"
-  GATES_JSON="${GATES_JSON}\"gate5\":{\"status\":\"${GATE_5_STATUS:-PASS}\",\"name\":\"Tests+Coverage\",\"coverage\":\"${COV_PCT}\"},"
+  GATES_JSON="${GATES_JSON}\"gate3\":{\"status\":\"${GATE_3_STATUS:-SKIP}\",\"name\":\"Complexity\",\"warnings\":${CC_WARNINGS:-0}},"
+  GATES_JSON="${GATES_JSON}\"gate4\":{\"status\":\"${GATE_4_STATUS:-SKIP}\",\"name\":\"Principles\",\"warnings\":${WARNING_COUNT:-0}},"
+  GATES_JSON="${GATES_JSON}\"gate5\":{\"status\":\"${GATE_5_STATUS:-SKIP}\",\"name\":\"Tests+Coverage\",\"coverage\":\"${COV_PCT}\"},"
   GATES_JSON="${GATES_JSON}\"gate6\":{\"status\":\"${GATE_6_STATUS:-SKIP}\",\"name\":\"Architecture+BoyScout\",\"bsBlocked\":${BS_BLOCKED}},"
-  GATES_JSON="${GATES_JSON}\"gate7\":{\"status\":\"${GATE_7_STATUS:-PASS}\",\"name\":\"IaC Security\"},"
-  GATES_JSON="${GATES_JSON}\"gate8\":{\"status\":\"${GATE_8_STATUS:-PASS}\",\"name\":\"Secret Scanning\"},"
-  GATES_JSON="${GATES_JSON}\"gate9\":{\"status\":\"${GATE_9_STATUS:-PASS}\",\"name\":\"Build Integrity\"},"
-  GATES_JSON="${GATES_JSON}\"gate10\":{\"status\":\"${GATE_10_STATUS:-PASS}\",\"name\":\"SAST Security\"},"
-  GATES_JSON="${GATES_JSON}\"gate11\":{\"status\":\"${GATE_11_STATUS:-PASS}\",\"name\":\"Sprint Flow\"},"
+  GATES_JSON="${GATES_JSON}\"gate7\":{\"status\":\"${GATE_7_STATUS:-SKIP}\",\"name\":\"IaC Security\"},"
+  GATES_JSON="${GATES_JSON}\"gate8\":{\"status\":\"${GATE_8_STATUS:-SKIP}\",\"name\":\"Secret Scanning\"},"
+  GATES_JSON="${GATES_JSON}\"gate9\":{\"status\":\"${GATE_9_STATUS:-SKIP}\",\"name\":\"Build Integrity\"},"
+  GATES_JSON="${GATES_JSON}\"gate10\":{\"status\":\"${GATE_10_STATUS:-SKIP}\",\"name\":\"SAST Security\"},"
+  GATES_JSON="${GATES_JSON}\"gate11\":{\"status\":\"${GATE_11_STATUS:-SKIP}\",\"name\":\"Sprint Flow\"},"
   GATES_JSON="${GATES_JSON}\"gate12\":{\"status\":\"${GATE_12_STATUS:-WARN}\",\"name\":\"File Hygiene\"}}"
 
   echo "{\"timestamp\":\"$TIMESTAMP\",\"commit\":\"$COMMIT_HASH\",\"branch\":\"$BRANCH\",\"score\":$SCORE_JSON,\"passed\":$PASSED_COUNT,\"total\":$TOTAL_GATES,\"effectiveTotal\":$EFFECTIVE_TOTAL,\"effectivePassRate\":$EFFECTIVE_PASS_RATE_JSON,\"skipCount\":$SKIP_COUNT,\"verdict\":\"$VERDICT\",\"gates\":$GATES_JSON,\"coverage\":\"$COV_PCT\",\"complexityWarnings\":${CC_WARNINGS:-0},\"principleWarnings\":${WARNING_COUNT:-0},\"boyScoutBlocked\":${BS_BLOCKED}}" >> "$HISTORY_FILE"
@@ -4123,17 +4123,17 @@ ENDJSON
   echo "  📊 Quality Report — $TIMESTAMP"
   echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
   echo ""
-  printf "  %-45s %s\n" "Gate 1: Code Quality" "${GATE_1_STATUS:-PASS}"
+  printf "  %-45s %s\n" "Gate 1: Code Quality" "${GATE_1_STATUS:-SKIP}"
   printf "  %-45s %s\n" "Gate 2: Duplicate Code" "${GATE_2_STATUS:-SKIP}"
-  printf "  %-45s %s (warnings: ${CC_WARNINGS:-0})\n" "Gate 3: Complexity" "${GATE_3_STATUS:-PASS}"
-  printf "  %-45s %s (warnings: ${WARNING_COUNT:-0})\n" "Gate 4: Principles" "${GATE_4_STATUS:-PASS}"
-  printf "  %-45s %s (coverage: ${COV_PCT}%%)\n" "Gate 5: Tests + Coverage" "${GATE_5_STATUS:-PASS}"
+  printf "  %-45s %s (warnings: ${CC_WARNINGS:-0})\n" "Gate 3: Complexity" "${GATE_3_STATUS:-SKIP}"
+  printf "  %-45s %s (warnings: ${WARNING_COUNT:-0})\n" "Gate 4: Principles" "${GATE_4_STATUS:-SKIP}"
+  printf "  %-45s %s (coverage: ${COV_PCT}%%)\n" "Gate 5: Tests + Coverage" "${GATE_5_STATUS:-SKIP}"
   printf "  %-45s %s\n" "Gate 6: Architecture + Boy Scout" "${GATE_6_STATUS:-SKIP}"
-  printf "  %-45s %s\n" "Gate 7: IaC Security" "${GATE_7_STATUS:-PASS}"
-  printf "  %-45s %s\n" "Gate 8: Secret Scanning" "${GATE_8_STATUS:-PASS}"
-  printf "  %-45s %s\n" "Gate 9: Build Integrity" "${GATE_9_STATUS:-PASS}"
-  printf "  %-45s %s\n" "Gate 10: SAST Security" "${GATE_10_STATUS:-PASS}"
-  printf "  %-45s %s\n" "Gate 11: Sprint Flow" "${GATE_11_STATUS:-PASS}"
+  printf "  %-45s %s\n" "Gate 7: IaC Security" "${GATE_7_STATUS:-SKIP}"
+  printf "  %-45s %s\n" "Gate 8: Secret Scanning" "${GATE_8_STATUS:-SKIP}"
+  printf "  %-45s %s\n" "Gate 9: Build Integrity" "${GATE_9_STATUS:-SKIP}"
+  printf "  %-45s %s\n" "Gate 10: SAST Security" "${GATE_10_STATUS:-SKIP}"
+  printf "  %-45s %s\n" "Gate 11: Sprint Flow" "${GATE_11_STATUS:-SKIP}"
   printf "  %-45s %s\n" "Gate 12: File Hygiene" "${GATE_12_STATUS:-WARN}"
   echo ""
   # #564: both views in one line. The effective score answers "of the gates that
