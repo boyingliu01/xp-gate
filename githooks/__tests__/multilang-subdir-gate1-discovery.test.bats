@@ -50,6 +50,11 @@ exit 0
 MOCK
   cat > "$TEST_DIR/bin/coverage" <<'MOCK'
 #!/bin/bash
+# #570: the coverage gate now BLOCKS when it cannot determine a percentage, so a
+# stub that exits 0 with no output models "the tool ran but produced nothing" —
+# a failing gate, not this fixture's subject. Report the project well above the
+# floor so Gate 5 is a non-issue here and these cases measure Gate 1 discovery.
+echo 97
 exit 0
 MOCK
   cat > "$TEST_DIR/bin/ruff" <<'MOCK'
@@ -134,6 +139,18 @@ def main() -> None:
 EOF
   echo "ignore: []" > .archlint.yaml
   echo "ignore: []" > web/.archlint.yaml
+  # #570: the TypeScript coverage arm now BLOCKS when coverage-summary.json is
+  # absent, because "delete the report" was a way to switch the gate off. This
+  # fixture is about Gate 1 discovery, so it supplies a passing report instead of
+  # testing the coverage gate by accident.
+  mkdir -p coverage
+  cat > coverage/coverage-summary.json <<'EOF'
+{ "total": { "lines": { "pct": 97 } } }
+EOF
+  # The python arm only consults the coverage stub when a .coverage file exists,
+  # and then blocks if no percentage comes back. Touch the data file so the stub
+  # has something to report — again keeping the coverage gate out of the way.
+  : > .coverage
   git add -A
   git commit -q --no-verify -m "init"
 }
