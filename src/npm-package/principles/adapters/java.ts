@@ -67,6 +67,125 @@ const MEMBER_KEYWORDS = new Set([
   'super', 'this', 'throw', 'assert', 'try'
 ]);
 
+/** Java modifiers that may precede a member declaration, in any order. */
+const JAVA_MODIFIERS = new Set([
+  'public', 'private', 'protected', 'static', 'final', 'abstract', 'synchronized',
+  'native', 'default', 'strictfp', 'transient', 'volatile', 'sealed', 'non'
+]);
+
+/**
+ * One Java method or constructor declaration, as a whole line.
+ *
+ * #587: the old matcher was `(?<![\w$.])(\w+)\s*\(`, i.e. "an identifier followed by an
+ * open paren" — which in Java is overwhelmingly a CALL SITE. Every
+ * `builder.append(x)`, `Objects.requireNonNull(o)` and `new SQLException(...)` became a
+ * phantom member. The reporter measured `WhaleAuditFilter` at 127 against 42 real
+ * methods, and a normal 24-method class at 41. `clean-code.god-class` and `solid.srp`
+ * both threshold at 30, so on Java they stopped discriminating — a class had to be
+ * genuinely enormous before it out-shouted the noise.
+ *
+ * The discriminator is the LINE shape: a declaration starts at line start (after
+ * optional modifiers, annotations, generics and a return type), and its parameter list
+ * is followed by `{` (method) or `;` (abstract/interface method). A call site is
+ * followed by `.` or `;` or an operator, and is indented inside a body rather than
+ * opening a new one.
+ *
+ * Groups: 1 = name, 2 = the terminator (`{` or `;`).
+ */
+const JAVA_MEMBER_DECL_SOURCE = [
+  // Line start, then any annotations on the same line (`@Override public void run()`).
+  '^[ \\t]*',
+  '(?:@[\\w$.]+(?:\\([^)]*\\))?[ \\t]*)*',
+  // Modifiers, including `non-sealed`.
+  '(?:(?:public|private|protected|static|final|abstract|synchronized|native|default|strictfp|sealed|non-sealed)[ \\t]+)*',
+  // Optional generic type parameters: `<T extends Comparable<T>>`.
+  '(?:<[^<>]*(?:<[^<>]*>[^<>]*)*>[ \\t]+)?',
+  // Return type, or a constructor name with no return type. Allows generics
+  // (`Map<String, List<Item>>`), arrays (`byte[]`) and qualified names.
+  '([\\w$][\\w$.]*(?:[ \\t]*<[^<>]*(?:<[^<>]*>[^<>]*)*>[ \\t]*)?(?:\\[\\][ \\t]*)*)',
+  '[ \\t]+',
+  // The name immediately before the parameter list.
+  '(\\w+)[ \\t]*\\(',
+  // Parameter list: no `;` and no `=` at depth 0 (a `=` means an initializer, i.e. a
+  // field or a lambda, not a declaration header). Newlines ARE allowed here — a real
+  // declaration wraps its parameters across lines, and a matcher that stopped at the
+  // first newline silently dropped every wrapped method (`doFilter` in the #587
+  // fixture wraps, and losing it would under-count exactly the long methods that watch
+  // out for god classes).
+  '[^;{}=]*',
+  '\\)',
+  // Optional throws clause. `\s` rather than `[ \t]` because a real declaration wraps
+  // `throws` onto its own line — a space-only class here dropped `doFilter`, the
+  // long-method case a god-class check most needs to see.
+  '(?:\\s*throws[^{;]+)?',
+  '\\s*([{;])',
+].join('');
+
+/**
+ * Is this line-initial token sequence a member declaration rather than a control
+ * statement that happens to start at line start (`if (x) {`)?
+ *
+ * `MEMBER_KEYWORDS` covers the statement keywords; constructors and methods are decided
+ * by the regex shape. Kept as a function so the two callers share one answer.
+ */
+function isStatementKeyword(name: string): boolean {
+  return MEMBER_KEYWORDS.has(name);
+}
+
+/**
+ * Parse method declarations out of a masked class or interface body.
+ *
+ * Returns one entry per DECLARATION — overloads are distinct members, because a class
+ * with three `find` overloads is doing three things and is exactly the case
+ * god-class/SRP should see. (The old code deduplicated by name, which both hid overload
+ * growth and let a single phantom name survive.)
+ *
+ * **Depth matters as much as line shape.** A class body contains nested and anonymous
+ * classes, and their methods are not the outer class's members. Measuring the real
+ * `WhaleAuditFilter` this way still produced 53 against 38 real methods, and the extra
+ * 15 were exactly the anonymous `ConnectionEventHandler` implementations —
+ * `connection_prepareStatement` eight times over. So declarations are only accepted at
+ * depth 1, which is the class body itself.
+ *
+ * @param body masked (comment/string-free) class or interface body, starting at `{`
+ * @returns declared member names, including constructors
+ */
+function parseMemberDeclarations(body: string): string[] {
+  const declRe = new RegExp(JAVA_MEMBER_DECL_SOURCE, 'gm');
+  // Brace depth at each character offset, computed once. NaN marks "not yet seen".
+  const depthAt: number[] = new Array(body.length);
+  let depth = 0;
+  for (let i = 0; i < body.length; i += 1) {
+    const ch = body[i];
+    if (ch === '{') {
+      depth += 1;
+      depthAt[i] = depth;
+    } else if (ch === '}') {
+      depthAt[i] = depth;
+      depth -= 1;
+    } else {
+      depthAt[i] = depth;
+    }
+  }
+
+  const members: string[] = [];
+  let m: RegExpExecArray | null;
+  while ((m = declRe.exec(body)) !== null) {
+    const returnType = m[1];
+    const name = m[2];
+    // A statement keyword in either the type or the name position means the regex
+    // latched onto a control statement or an expression; never a member.
+    if (isStatementKeyword(name) || isStatementKeyword(returnType)) continue;
+    if (JAVA_MODIFIERS.has(name)) continue;
+    // Only the class body itself. At depth 0 we are outside the class; at depth 2+ the
+    // declaration belongs to a nested or anonymous class.
+    const declarationDepth = depthAt[m.index] ?? 0;
+    if (declarationDepth !== 1) continue;
+    members.push(name);
+  }
+  return members;
+}
+
 /**
  * Pure parse helpers, kept OUTSIDE the adapter class and called through this
  * namespace object. Two reasons, both from the gate dogfooding itself (#507
@@ -105,19 +224,16 @@ export const javaParse = {
   },
 
   /**
-   * Method-like members inside a class/interface body: `name(` occurrences
-   * minus control keywords and constructor calls. Mirrors the TypeScript
-   * adapter's member heuristic so SRP/god-class see the same signal shape.
+   * Method-like members inside a class/interface body.
+   *
+   * #587: this counted "identifier followed by `(`", which in Java is a call site, not a
+   * declaration — `WhaleAuditFilter` measured 127 against 42 real methods, a normal
+   * 24-method class reported 41, and god-class/SRP threshold at 30. Now anchored on
+   * declaration shape (see JAVA_MEMBER_DECL_SOURCE). The returned array has one entry
+   * per declaration, so overloads count separately.
    */
   countMembers(body: string): string[] {
-    const memberRe = /(?<![\w$.])(\w+)\s*\(/g;
-    const methods: string[] = [];
-    let m: RegExpExecArray | null;
-    while ((m = memberRe.exec(body)) !== null) {
-      const name = m[1];
-      if (!MEMBER_KEYWORDS.has(name) && !methods.includes(name)) methods.push(name);
-    }
-    return methods;
+    return parseMemberDeclarations(body);
   },
 
   magicNumberRegex(): RegExp {
