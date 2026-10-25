@@ -2030,6 +2030,46 @@ specification:
           test_type: integration
 
 
+    # ============================================================
+    # REQ-606: Gate 2（重复代码）必须对「什么不该被扫描」给出默认答案，并让这个
+    #          默认基线可被审计。
+    #
+    # #591：`resolve_jscpd_config` 在项目没有 jscpd.conf.json 时返回空，
+    # pre-commit 于是用 jscpd 自身的默认值跑——而 jscpd 默认把 .yaml/.txt/.log
+    # 都当作可扫描格式。结果是豁免清单（exemptions.yaml）、金标准快照
+    # （rule-behavior-golden.txt）和构建日志（*.log）都被拿去查「重复代码」。
+    # 本仓库实测：一份 13 行 exemptions.yaml 的两份拷贝 + 两份 build-run.log，
+    # 报出「Found 1 exact clones with 38 (48.72%) duplicated lines in 2 files」，
+    # 其中没有一行是「应该重构的重复」——重复正是豁免清单的数据形态，日志则是
+    # 本来就要留档的产物。
+    #
+    # 这个数字比噪声更糟：读者无法区分「必须重复的 yaml 数据」与「真被复制粘贴的
+    # 两段 Java」，于是诚实的反应是整体不再阅读 Gate 2，连带放过真重复。
+    # 报告人自己的统计：176 个 clone，真正可重构的 6 个。
+    #
+    # 本需求只钉 issue 的建议 1 与 3（默认忽略集 + 打印实际生效的基线）。
+    # 建议 2（按「生产源码/测试源码/数据文档」分组报告）是新增特性，不在范围内。
+    # ============================================================
+    - id: REQ-606
+      description: "Gate 2 在项目未提供 jscpd.conf.json 时必须使用一份窄化的默认忽略集，并打印该基线使其可审计"
+      priority: high
+      acceptance_criteria:
+        - id: AC-606-01
+          criteria: 无项目配置时，数据与证据类文件（*.log、*.txt、*.yaml/*.yml、*golden*、
+            *baseline.json、*evidence*）与构建产物目录（node_modules、dist、build、target、
+            coverage、out、vendor）必须被默认排除；但真实源码扩展名（.ts/.java/.py/.go 等）
+            必须仍被扫描——扩大忽略集不得成为掩盖债务的手段
+          test_type: integration
+        - id: AC-606-02
+          criteria: 项目自带的 jscpd.conf.json 必须优先于默认忽略集；同时须提供
+            XP_GATE_JSCPD_DEFAULT_IGNORE=0 关闭默认忽略集的逃生舱，否则该默认值会让
+            某些真实重复不可达
+          test_type: integration
+        - id: AC-606-03
+          criteria: 默认忽略集必须以人类可读形式可打印，使「到底扫描了什么」无需阅读正则即可核对
+          test_type: integration
+
+
     - id: DD-001
       decision: 走薄桥（方案 A）在 ctx.tools 注册三工具，而非独立 MCP server 或纯技能
       rationale: 与 opencode 插件 1:1 映射、DSH 原生 API 直接支持、工作量最小；符合 RFC「薄桥而非重写」结论
