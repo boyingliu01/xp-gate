@@ -1960,13 +1960,30 @@ else
   if [ -n "$JSCPD_CONFIG" ]; then
     JSCPD_ARGS=(--config "$JSCPD_CONFIG")
   else
-    echo "ℹ️  No jscpd.conf.json found - using jscpd defaults"
+    # #591: with no project config, jscpd's own defaults treat .yaml/.txt/.log as
+    # scannable source, so an exemptions manifest, a golden snapshot and two build
+    # logs were reported as "duplicated code" (measured: 48.72% on a fixture with
+    # no source in it). Print the baseline that is actually in force, or the user
+    # cannot tell what was scanned.
+    echo "ℹ️  No jscpd.conf.json found - using the xp-gate default ignore set"
+    echo "   $(jscpd_default_ignore_patterns)"
   fi
+  # #591: drop data/evidence/build-output paths before the scan. Real source
+  # extensions are untouched, so this narrows the noise, not the gate.
+  JSCPD_SCAN_FILES=""
+  while IFS= read -r _jf; do
+    [ -n "$_jf" ] || continue
+    if ! jscpd_is_default_ignored "$_jf"; then
+      JSCPD_SCAN_FILES="$JSCPD_SCAN_FILES $_jf"
+    fi
+  done <<EOF_CHANGED
+$CHANGED_FILES
+EOF_CHANGED
   JSCPD_OUTPUT=$(mktemp)
   JSCPD_EXIT=0
-  # shellcheck disable=SC2086 # pre-existing splitting of the file list; #477 changes the reporting, not the scan set
-  jscpd ${JSCPD_ARGS[@]+"${JSCPD_ARGS[@]}"} $(echo "$CHANGED_FILES" | tr '\n' ' ') > "$JSCPD_OUTPUT" 2>&1 || JSCPD_EXIT=$?
-  head -30 "$JSCPD_OUTPUT"
+  # shellcheck disable=SC2086 # pre-existing splitting of the file list; #477/#591 change the scan set, not the splitting
+  jscpd ${JSCPD_ARGS[@]+"${JSCPD_ARGS[@]}"} $JSCPD_SCAN_FILES > "$JSCPD_OUTPUT" 2>&1 || JSCPD_EXIT=$?
+  head -30 "$JSCPD_OUTPUT" || true
   JSCPD_OUTCOME=$(classify_jscpd_run "$JSCPD_EXIT" "$(cat "$JSCPD_OUTPUT")")
   rm -f "$JSCPD_OUTPUT"
   if [ "$JSCPD_OUTCOME" = "duplicates" ]; then
@@ -2030,13 +2047,35 @@ else
     ;;
     
     *)
-  SOURCE_FILES=$(echo "$CHANGED_FILES" | grep -E '\.(ts|tsx|js|jsx|py|go|java|scala|kt|cpp|c|h|rs|php|dart|swift)$')
+  SOURCE_FILES=$(echo "$CHANGED_FILES" | grep -E '\.(ts|tsx|js|jsx|py|go|java|scala|kt|cpp|c|h|rs|php|dart|swift)$' || true)
   if [ -n "$SOURCE_FILES" ]; then
     if ! require_tool "jscpd" "Gate 2" "npm install -D jscpd"; then
       exit 1
     fi
     echo "Running jscpd for duplicate code detection..."
-    jscpd $SOURCE_FILES 2>&1 | head -15
+    # #591 point 4: this branch piped straight into `head`, so jscpd's exit status
+    # was replaced by head's (and SIGPIPE under pipefail) — inconsistent with the
+    # temp-file treatment the typescript branch already had from #477/#392. The
+    # #591 default ignore set applies here too.
+    GENERIC_JSCPD_FILES=""
+    while IFS= read -r _gf; do
+      [ -n "$_gf" ] || continue
+      if ! jscpd_is_default_ignored "$_gf"; then
+        GENERIC_JSCPD_FILES="$GENERIC_JSCPD_FILES $_gf"
+      fi
+    done <<EOF_GENERIC
+$SOURCE_FILES
+EOF_GENERIC
+    if [ -n "$GENERIC_JSCPD_FILES" ]; then
+      GENERIC_JSCPD_TMP=$(mktemp)
+      # shellcheck disable=SC2086
+      jscpd $GENERIC_JSCPD_FILES > "$GENERIC_JSCPD_TMP" 2>&1 || GENERIC_JSCPD_EXIT=$?
+      head -15 "$GENERIC_JSCPD_TMP" || true
+      rm -f "$GENERIC_JSCPD_TMP"
+      if [ "${GENERIC_JSCPD_EXIT:-0}" -ne 0 ]; then
+        echo "⚠️  jscpd exited with code $GENERIC_JSCPD_EXIT (see output above)"
+      fi
+    fi
     echo "✅ PASSED - jscpd check completed."
   else
     echo "✅ PASSED - No source files detected for duplicate checking."
