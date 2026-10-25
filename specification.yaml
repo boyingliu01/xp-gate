@@ -2453,6 +2453,44 @@ specification:
           test_type: unit
 
 
+    # ============================================================
+    # REQ-618: solid.lsp 在无法判定时须保持沉默，不得把「解析失败」当「违规」。
+    #
+    # #588：Java 项目上 solid.lsp 对**每一个有 extends 的类**都报违规，参数类型是垃圾
+    # （int / String / Engine / false / public / m / i……）。这不是门禁，是常量。
+    #
+    # 两个独立缺陷：
+    #   1. extractParamType 只认 TypeScript 的 `name: Type`；Java 是 `Type name`，
+    #      于是绝大多数参数解析为 null，偶尔含冒号时解析出垃圾类型；
+    #   2. isCompatibleParamType 以 `return false` 收尾，于是**「解析不出类型」被当成
+    #      「不兼容」**。这是 fail-open 的反面、同样错误：在不认识的语言上，每个方法
+    #      都成了违规。
+    #
+    # 另外 `\w+\s*\(([^)]+)\)` 匹配的是调用点，`foo(a, b)` 被逗号切分后 a/b 成了参数。
+    #
+    # 采纳 issue 建议 3 作为承载点：「无法判定」必须意味着「不报」，而不是「报」。
+    # LSP 判定需要基类，单文件正则分析没有基类，所以诚实的行为是保持安静。
+    #
+    # 教训记录：本 issue 的第一次修复通过了自测，但反向验证 AV2/AV3 打不动——因为
+    # 「解析了并判定无法确定」与「根本没解析」在规则输出上完全一致。因此解析层单独导出
+    # 并直接断言，而不是只断言规则的最终判定。
+    # ============================================================
+    - id: REQ-618
+      description: "solid.lsp 无可判定依据时须不报；Java/TS 参数语法须各自正确解析"
+      priority: high
+      acceptance_criteria:
+        - id: AC-618-01
+          criteria: 普通 Java 子类与其方法体中的调用点均不得产生 LSP 违规
+          test_type: unit
+        - id: AC-618-02
+          criteria: 无法判定的参数类型须沉默而非判违规；Java 的 `Type name` 须解析出类型而非参数名；
+            声明与调用点须可区分
+          test_type: unit
+        - id: AC-618-03
+          criteria: 可判定为不兼容的情形须仍可报告；违规消息不得出现非类型的 token
+          test_type: unit
+
+
     - id: DD-001
       decision: 走薄桥（方案 A）在 ctx.tools 注册三工具，而非独立 MCP server 或纯技能
       rationale: 与 opencode 插件 1:1 映射、DSH 原生 API 直接支持、工作量最小；符合 RFC「薄桥而非重写」结论
