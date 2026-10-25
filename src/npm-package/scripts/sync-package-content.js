@@ -36,7 +36,12 @@ function rmrf(target) {
   fs.rmSync(target, { recursive: true, force: true });
 }
 
-const SKIP_DIRS = new Set(['node_modules', '.git', 'dist', 'coverage', '.opencode']);
+// `.opencode` is a tool state directory; `__pycache__` is Python bytecode, created the
+// moment anything imports a `.py` in the tree. It is gitignored, so it is not part of the
+// package — but `find -type f` in scripts/check-hook-mirror.sh saw it in the mirror and
+// reported "hook mirror file set drifted", which blocks the push with no fix the operator
+// can apply from their own code (#587/#588).
+const SKIP_DIRS = new Set(['node_modules', '.git', 'dist', 'coverage', '.opencode', '__pycache__']);
 const SKIP_FILES = new Set(['package-lock.json']);
 const SKIP_FILE_SUFFIXES = ['.lock', '.js.map'];
 
