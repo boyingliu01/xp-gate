@@ -2521,6 +2521,35 @@ specification:
           criteria: checkov 经 npx 解析时须以 npx 调用；项目存在 .checkov.yaml 时须传给 checkov
           test_type: unit
 
+    # ============================================================
+    # REQ-554 Gate 5（测试与覆盖率）的状态必须等于它实际得出的结论
+    #
+    # Gate 5 有两条「没跑测试就结束」的路径：docs-only 提交（#554 已修，记 SKIP），
+    # 以及「不含任何源码扩展名但仍不是 docs-only」的提交——一次版本号提升同时改
+    # VERSION/package.json/CHANGELOG/AGENTS.md 就是这种形状。后者设置
+    # TESTS_SKIPPED=true 后，收尾的赋值又把状态写成 PASS，于是在本仓自己的
+    # v0.31.2.0 发布提交上实测到：
+    #
+    #     Gate 5: Tests + Coverage    PASS (coverage: N/A%)
+    #
+    # 一个什么都没测的门禁被计入通过率和总分，与「测了、干净」不可区分。#554 修的是
+    # 一条分支，它诊断出的「SKIP 被提升为 PASS」在同一个 else 块的下一层仍然存在。
+    #
+    # 同时受 AC-599-03 约束：任何 `GATE_N_STATUS:-DEFAULT` 展开都不得以 PASS 作默认，
+    # 因为那正是「未赋值的门禁渲染成 passed」的成因（#571）。两处修复以显式空值判定
+    # 共存，而不是用 `:-PASS` 展开。
+    # ============================================================
+    - id: REQ-554
+      description: "Gate 5 记录的状态须是它实际得出的结论：「没跑测试」不得记成 PASS"
+      priority: high
+      acceptance_criteria:
+        - id: AC-554-01
+          criteria: 提交未改动任何源码文件时，Gate 5 须记 SKIP 而非 PASS，且汇总行与 journal 都不得出现 PASS
+          test_type: integration
+        - id: AC-554-02
+          criteria: 该跳过路径须在 journal 中记录可读的原因；仅控制台出现 "skipped" 不算——覆盖率阶段在每条无代码路径上都会这么写
+          test_type: integration
+
 
     - id: DD-001
       decision: 走薄桥（方案 A）在 ctx.tools 注册三工具，而非独立 MCP server 或纯技能
