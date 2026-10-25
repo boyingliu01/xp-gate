@@ -2113,6 +2113,42 @@ specification:
           test_type: integration
 
 
+    # ============================================================
+    # REQ-608: `xp-gate check . --all` 必须是「全量检查」——依赖 CHANGED_FILES
+    #          的门禁在 --all 下必须扫描整个工作树，而不是本次 diff。
+    #
+    # #589：文档说 --all 是全量检查，但 Gate 3 仍从 `git diff` 取文件清单，于是
+    # 工作树干净时（提交之后的常态，也是 CI 跑 --all 的状态）它收到空清单并打印
+    #
+    #     ⏭️  SKIPPED - Complexity (no source files to check)
+    #
+    # `--all` 因此比一次普通提交检查得更少，却读起来像通过。Gate 4 不依赖
+    # CHANGED_FILES，在同一份 preamble 下工作正常——这正证明了缺陷出在「文件来源」。
+    #
+    # 并且文案把「diff 为空」说成了「项目没有源文件」，而它的自然读法是「这道门
+    # 通过了」；报告人因此改为手工跑 lizard 绕过。空清单必须点名真实原因。
+    #
+    # 若某门禁确实只能按 diff 工作，它必须显式标为 SKIP 并写清理由，且 SKIP 须
+    # 参与 verdict（#575），不得静默计入通过。
+    # ============================================================
+    - id: REQ-608
+      description: "check --all 须以仓库全部被跟踪源文件作为待检集合，并区分「diff 为空」与「树里没有源文件」"
+      priority: high
+      acceptance_criteria:
+        - id: AC-608-01
+          criteria: --all 下 CHANGED_FILES 必须解析为仓库内全部被跟踪的源文件；数据与文档类文件
+            （.md/.csv/.txt）不得被当作源文件；须覆盖 .ts/.tsx/.js/.py/.go/.java/.kt/.rs/.sh 等扩展名
+          test_type: unit
+        - id: AC-608-02
+          criteria: 空清单的说明必须点明真实原因——diff 作用域下须说明「本次无改动文件」并指向 --all，
+            且不得声称项目没有源文件；--all 作用域下须说明「仓库内无被跟踪源文件」
+          test_type: unit
+        - id: AC-608-03
+          criteria: 实际使用的扫描作用域必须可被报告；且 checkAllGates 必须把 all 作用域
+            真正传递给每个可调用门禁——解析器全对而调用链没接线是同一个缺陷
+          test_type: unit
+
+
     - id: DD-001
       decision: 走薄桥（方案 A）在 ctx.tools 注册三工具，而非独立 MCP server 或纯技能
       rationale: 与 opencode 插件 1:1 映射、DSH 原生 API 直接支持、工作量最小；符合 RFC「薄桥而非重写」结论

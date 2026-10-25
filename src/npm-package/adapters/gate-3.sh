@@ -109,7 +109,14 @@ else
         GATE_3_STATUS="PASS"
       fi
     else
-      echo "⏭️  SKIPPED - Complexity (no source files to check)."
+      # #589: "no source files to check" described an empty PROJECT when the real
+      # cause is an empty CHANGED_FILES. The old wording read like a pass.
+      if [ -n "${GATE_SCOPE:-}" ] && [ "$GATE_SCOPE" = "all" ]; then
+        echo "⏭️  SKIPPED - Complexity: no tracked source files in this repository (scope: --all, whole tree)."
+      else
+        echo "⏭️  SKIPPED - Complexity: no changed source files in this run (scope: diff)."
+        echo "   Run 'xp-gate check . --all' to scan the whole tree."
+      fi
       GATE_3_STATUS="SKIP"
       GATE_3_REASON="no_source_files_changed"
     fi
