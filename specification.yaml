@@ -2282,6 +2282,42 @@ specification:
           test_type: integration
 
 
+    # ============================================================
+    # REQ-613: Gate 4 在 Windows 上的命令行不得触及 cmd.exe 的 8191 字符上限。
+    #
+    # #586：`xp-gate check . --all` 下 Gate 4 在 Windows 上一律报
+    #     Failed to run principles check: The command line is too long.
+    # 两个原因叠加在 lib/principles.js 的同一次 spawnSync 里：
+    #   1. `shell: process.platform === 'win32'` 走 cmd.exe，其命令行上限 8191 字符
+    #      （CreateProcess 是 32767）；
+    #   2. 全部路径被 join 进同一个 argv 元素（`files.join(' ')`）。135 个 .java 实测
+    #      12944 字符，加上 npx 前缀后必然越线。
+    # 这不是「偶尔的超大项目」，是中等规模项目在 Windows 上的必然结果。
+    #
+    # 把 join 拆成多个 argv 元素无效（瓶颈是总字符数而非引号），且 npx 在 Windows
+    # 上仍需 shell:true 才能被找到 —— 所以正确方向是绕开 npx 与 cmd：用项目自带的
+    # tsx 经 process.execPath（node.exe 绝对路径，无 shim、无 shell）执行，超长清单
+    # 改为按引用（@文件）传递。
+    #
+    # 另一半是失败该叫什么。「Failed to run principles check」读起来像原则违规，但
+    # 什么都没被分析——那是环境故障。#596 在 shell 工具链里修了同一处混淆。
+    # ============================================================
+    - id: REQ-613
+      description: "Gate 4 调用须避开 cmd.exe 命令行上限，并将启动失败与真实违规区分开"
+      priority: high
+      acceptance_criteria:
+        - id: AC-613-01
+          criteria: 中等规模项目（135 个文件的实测字符量）的命令行须低于 8191 字符；超长清单须按引用传递
+            而非按值；能装下的清单仍直接传递
+          test_type: unit
+        - id: AC-613-02
+          criteria: 调用不得启用 shell，且可执行程序不得是裸 npx；调用点须真正使用调用计划
+          test_type: unit
+        - id: AC-613-03
+          criteria: 命令行过长等启动失败须归类为 TOOLCHAIN 而非 FINDING；真实违规仍须归为 FINDING
+          test_type: unit
+
+
     - id: DD-001
       decision: 走薄桥（方案 A）在 ctx.tools 注册三工具，而非独立 MCP server 或纯技能
       rationale: 与 opencode 插件 1:1 映射、DSH 原生 API 直接支持、工作量最小；符合 RFC「薄桥而非重写」结论
