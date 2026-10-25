@@ -1,9 +1,9 @@
 # PRINCIPLES CHECKER MODULE
 
-**Generated:** 2026-10-22
-**Commit:** 0678b903
+**Generated:** 2026-10-25
+**Commit:** 1ab53eff
 **Branch:** main
-**Version:** 0.31.1.0
+**Version:** 0.31.2.0
 
 ## OVERVIEW
 Clean Code & SOLID principles checker — **Gate 4** of pre-commit. 14 rules × 9 language adapters, SARIF 2.1.0 output. Houses the **Boy Scout Rule** enforcement engine (Gate 6) and warning-baseline storage.
