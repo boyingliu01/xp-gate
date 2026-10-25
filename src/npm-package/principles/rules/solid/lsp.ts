@@ -78,24 +78,75 @@ function isPrimitive(paramType: string): boolean {
 }
 
 /**
+ * Parameter type names declared by the base class in the same file, keyed by method name.
+ *
+ * #588's core problem is that LSP cannot be judged without the base contract. A
+ * single-file analysis usually lacks it — but when the base class IS in the file (the
+ * common shape for these projects, and the only shape a per-file rule can honestly
+ * address), the contract is right there. Extracting it is what lets the rule keep a
+ * discriminating power instead of degenerating into unconditional silence.
+ *
+ * Returns an empty map when the base class is not analysable, which the caller reads as
+ * "cannot determine" rather than "no violations".
+ *
+ * @param code the derived class body, which names its base in the `extends` clause
+ * @param allClasses every class the adapter found in this file
+ * @returns method name -> parameter type names, for the base class only
+ */
+function baseContract(
+  code: string,
+  allClasses: ClassInfo[],
+  isJava: boolean,
+): Map<string, string[]> {
+  const contract = new Map<string, string[]>();
+  const extendsMatch = code.match(/\bextends\s+([\w$.]+)/);
+  if (!extendsMatch) return contract;
+  const baseName = extendsMatch[1].split('.').pop() ?? extendsMatch[1];
+  const base = allClasses.find((c) => c.name === baseName && typeof c.code === 'string');
+  if (!base || !base.code) return contract;
+  const declRe = new RegExp(METHOD_DECL_RE.source, 'g');
+  let m: RegExpExecArray | null;
+  while ((m = declRe.exec(base.code)) !== null) {
+    contract.set(m[1], extractParamTypes(m[2], isJava));
+  }
+  return contract;
+}
+
+/**
  * Can this parameter type be declared incompatible with the base class contract?
  *
  * Tri-state, and that is the whole point: `true` = compatible, `false` = incompatible,
- * `null` = **cannot tell**. A single-file regex analysis does not have the base class, so
- * it usually cannot tell — and the honest answer to "cannot tell" is silence.
+ * `null` = **cannot tell**. A single-file regex analysis does not always have the base
+ * class, so it often cannot tell — and the honest answer to "cannot tell" is silence.
  *
  * #588: the previous version was `return false` for anything it did not recognise, which
  * turned a parse failure into a verdict. On Java the parse failed for nearly every
  * parameter, so every class with `extends` was reported.
+ *
+ * When the base method IS known, a parameter type that the base also declares is
+ * compatible and one it does not is reported. That is a real comparison, not a guess:
+ * both sides come from declarations in the same file.
+ *
+ * @param paramType the derived method's parameter type
+ * @param className the derived class name
+ * @param baseParamTypes the base method's parameter types, or undefined when unavailable
+ * @returns true/false when decidable, null when not
  */
 function compatibilityVerdict(
   paramType: string,
   className: string | undefined,
+  baseParamTypes?: string[],
 ): boolean | null {
   if (isPrimitive(paramType)) return true;
   if (className && paramType.startsWith(className)) return true;
-  // An unresolved generic, a lambda's inferred type, or a type we simply could not
-  // parse: not enough information to judge.
+  if (baseParamTypes && baseParamTypes.length > 0) {
+    // A type the base method also accepts is compatible; one it does not is the LSP
+    // violation this rule exists to find. Compared by simple name with generics erased,
+    // which is the precision a regex analysis can honestly claim.
+    return baseParamTypes.includes(paramType);
+  }
+  // An unresolved generic, a lambda's inferred type, or a base we could not find: not
+  // enough information to judge.
   return null;
 }
 
@@ -198,16 +249,64 @@ function methodParamTypes(code: string, isJava: boolean): string[] {
   return types;
 }
 
-function checkClass(file: string, cls: ClassInfo, isJava: boolean): Violation[] {
+/**
+ * Check one derived class against its base class contract.
+ *
+ * The rule reports a parameter type only when the base method is visible in the SAME file
+ * and does not accept that type. Every other case is silence, because a single-file
+ * analysis cannot know the base contract otherwise (#588).
+ *
+ * `allClasses` is passed in so the base class can be located by name; the rule does not
+ * enumerate classes itself, keeping class discovery the adapter's job.
+ *
+ * @param file path reported in violations
+ * @param cls the derived class
+ * @param allClasses every class the adapter found in this file
+ * @param isJava true for Java/Kotlin parameter syntax
+ * @returns violations, possibly none
+ */
+function checkClass(
+  file: string,
+  cls: ClassInfo,
+  allClasses: ClassInfo[],
+  isJava: boolean,
+): Violation[] {
   if (!cls.code || !cls.code.includes('extends')) return undetermined();
 
+  const contract = baseContract(cls.code, allClasses, isJava);
+  if (contract.size === 0) return undetermined();
+
   const violations: Violation[] = [];
-  for (const paramType of methodParamTypes(cls.code, isJava)) {
-    if (compatibilityVerdict(paramType, cls.name) === false) {
-      violations.push(buildViolation(file, cls, paramType));
+  for (const [methodName, paramTypes] of declaredDeclarations(cls.code, isJava)) {
+    const baseParamTypes = contract.get(methodName);
+    if (!baseParamTypes) continue;
+    for (const paramType of paramTypes) {
+      if (compatibilityVerdict(paramType, cls.name, baseParamTypes) === false) {
+        violations.push(buildViolation(file, cls, paramType));
+      }
     }
   }
   return violations;
+}
+
+/**
+ * Method name -> parameter types, for the declarations in a class body.
+ *
+ * Unlike `methodParamTypes` this keeps the method name, which is what makes the base
+ * lookup possible.
+ *
+ * @param code a class body
+ * @param isJava true for Java/Kotlin parameter syntax
+ * @returns declarations, in source order
+ */
+function declaredDeclarations(code: string, isJava: boolean): Array<[string, string[]]> {
+  const declarations: Array<[string, string[]]> = [];
+  const declRe = new RegExp(METHOD_DECL_RE.source, 'g');
+  let m: RegExpExecArray | null;
+  while ((m = declRe.exec(code)) !== null) {
+    declarations.push([m[1], extractParamTypes(m[2], isJava)]);
+  }
+  return declarations;
 }
 
 /**
@@ -269,6 +368,6 @@ export const lspRule: Rule = {
     // The adapter decides which parameter syntax applies; the rule holds no language
     // knowledge of its own (#588 suggestion 2, taken as far as a single file allows).
     const isJava = usesTypeFirstName(adapter);
-    return classes.flatMap((cls) => checkClass(file, cls, isJava));
+    return classes.flatMap((cls) => checkClass(file, cls, classes, isJava));
   },
 };
