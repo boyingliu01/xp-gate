@@ -97,6 +97,14 @@ run_adapter_analysis() {
   # engine must actually have been invoked.
   install_stub_engine
   [ ! -f .xp-gate-powershell-analysis-paths ]
+  # #595: the unscoped path now analyses the adapter's pruned discovery instead of
+  # recursing the root, so a repo must actually CONTAIN a .ps1 for there to be
+  # anything to analyse. The earlier fixture had none and still expected the engine
+  # to run -- that expectation only held while the path was "-Path . -Recurse",
+  # which is the behaviour #595 removed. Adding the file keeps this case testing
+  # exactly what its name says (no scope file => analysis still happens), and
+  # makes it fail if the unscoped path ever silently analyses nothing.
+  printf 'Write-Output "project"\n' > project-script.ps1
 
   cat > "$WORK/bin/pwsh" << 'STUB'
 #!/bin/bash
