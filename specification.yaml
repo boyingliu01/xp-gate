@@ -2497,6 +2497,30 @@ specification:
           criteria: 基类不在同文件、或基类未声明该方法时须沉默；基类以限定名引用时须正确解析
           test_type: unit
 
+    # ============================================================
+    # REQ-619 Gate 7（IaC 安全扫描）三种判定必须各有受控用例
+    #
+    # Gate 7 的结论由三个环境相关的输入决定：改动的文件是否为 IaC、IaC adapter 是否存
+    # 在、checkov 是否可用。三个分支之前一条测试都没有（函数覆盖率 0%），意味着这条门
+    # 禁的真实行为从未被观察过——它改为放行时不会有任何东西变红。
+    #
+    # 其中「无 adapter」必须判 SKIP 而不是 PASS：扫描根本没有发生，报 PASS 等于宣称一
+    # 个没跑过的检查通过了。
+    # ============================================================
+    - id: REQ-619
+      description: "Gate 7 须对「无 IaC 文件 / 无 adapter / checkov 有无」三条路径给出受控且诚实的结论"
+      priority: high
+      acceptance_criteria:
+        - id: AC-619-01
+          criteria: 无 IaC 文件改动时须 PASS 且不调用任何外部工具；有 IaC 文件但无 adapter 时须 SKIP 而非 PASS
+          test_type: unit
+        - id: AC-619-02
+          criteria: checkov 不可用时须回退到 bash adapter，回退结果的通过/失败须如实反映
+          test_type: unit
+        - id: AC-619-03
+          criteria: checkov 经 npx 解析时须以 npx 调用；项目存在 .checkov.yaml 时须传给 checkov
+          test_type: unit
+
 
     - id: DD-001
       decision: 走薄桥（方案 A）在 ctx.tools 注册三工具，而非独立 MCP server 或纯技能
