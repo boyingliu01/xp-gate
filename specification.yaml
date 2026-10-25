@@ -1987,6 +1987,49 @@ specification:
           test_type: unit
 
 
+    # ============================================================
+    # REQ-605: Gate 5c（spec/test 语义对齐）不得以「什么都不打印」表示「没检查」，
+    #          且测试文件发现必须覆盖各语言约定。
+    #
+    # #585：整个检查体包在
+    #     if [ -f "$REQ_IDS_FILE" ] && command -v jq >/dev/null 2>&1; then
+    # 里面。req-ids.json 由 `xp-gate check-alignment` 生成到 .sprint-state/，
+    # 而这个目录被 gitignore、在新克隆上永远不存在——因此在这份「正常状态」下，
+    # Gate 5c 输出零字节：不是 PASS，不是 FAIL，也不是 SKIP，
+    # generate_quality_report() 里也没有它的位置。一个项目的语义对齐从未被检查过
+    # 一次，而所有报告都是绿的。这与 #449/#499/#570/#575/#594 是同一缺陷类：
+    # 把沉默读成成功。
+    #
+    # 第二个缺陷：即使检查跑起来，文件发现只认 JS/TS
+    #     grep -E '\.(test|spec)\.(ts|tsx|js|jsx|cjs|mjs)$'
+    # Pester 的 *.Tests.ps1、pytest 的 test_*.py、Go 的 *_test.go、Java 的
+    # *Test.java、Kotlin 的 *Tests.kt 一个都匹配不上，于是这些语言的仓库上
+    # 这道门报「0 个注解、0 个未覆盖」——一个空转的绿。
+    #
+    # GATE_5C_STATUS 现在恒为 PASS / SKIP / BLOCK 之一，不再是空串。
+    # ============================================================
+    - id: REQ-605
+      description: "Gate 5c 必须显式区分「对齐通过」「未检查（SKIP）」「阻断（BLOCK）」，并按各语言测试文件约定发现测试"
+      priority: high
+      acceptance_criteria:
+        - id: AC-605-01
+          criteria: req-ids.json 缺席时 Gate 5c 必须打印明示的未检查状态并给出可执行的修复命令，
+            不得输出零字节；该状态须区别于 PASS
+          test_type: integration
+        - id: AC-605-02
+          criteria: 测试文件发现必须覆盖 Pester（*.Tests.ps1）、pytest（test_*.py、*_test.py）、
+            Go（*_test.go）、Java（*Test.java）、Kotlin（*Tests.kt）与原有 JS/TS 约定；
+            同时普通源文件不得被误判为测试文件
+          test_type: integration
+        - id: AC-605-03
+          criteria: 扩宽发现范围后，指向不存在 REQ 的 @test 注解仍必须阻断提交，合法注解必须放行
+          test_type: integration
+        - id: AC-605-04
+          criteria: 本次改动不含测试文件时，Gate 5c 必须显式说明「无可对齐的测试」，
+            而不是保持沉默——沉默让运维无法区分「无事可做」与「门禁坏了」
+          test_type: integration
+
+
     - id: DD-001
       decision: 走薄桥（方案 A）在 ctx.tools 注册三工具，而非独立 MCP server 或纯技能
       rationale: 与 opencode 插件 1:1 映射、DSH 原生 API 直接支持、工作量最小；符合 RFC「薄桥而非重写」结论

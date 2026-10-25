@@ -395,6 +395,12 @@ source_gate_lib "${AUDIT_SCRIPT_DIR}/lib/sprint-gate-report.sh"
 # unit-testable without executing this hook.
 source_gate_lib "${AUDIT_SCRIPT_DIR}/lib/coverage-total.sh"
 
+# Issue #585: Gate 5c's spec/test alignment check. It used to sit inside
+# `if [ -f req-ids.json ] && command -v jq`, so a fresh clone (where .sprint-state/
+# does not exist) printed nothing at all; and its test discovery only matched
+# JS/TS. Sourced as a library so both contracts are unit-testable.
+source_gate_lib "${AUDIT_SCRIPT_DIR}/lib/gate-5c-alignment.sh"
+
 # Issue #399: Python smart test selection — strategy decision + related-test
 # lookup, kept in a library so the truth table and the path conventions are
 # unit-testable without executing this hook.
@@ -2402,80 +2408,24 @@ else
   fi
 
   # ============================================================================
-  # Gate 5c: Semantic Annotation Check (v0.19.0+)
-  # Validates @test REQ-XXX annotations against specification.yaml.
-  #
-  # Strategy: Reads pre-compiled req-ids.json (produced by xp-gate check-alignment).
-  # If req-ids.json is absent or stale, degrades to SKIP.
-  # If present: greps staged tests for @test REQ-XXX, cross-references against
-  # the pre-compiled REQ ID list. BLOCKs if any REQ ID doesn't exist in spec.
-  # If any REQ in spec has no annotated test, emits visible [FAIL] message
-  # (exit 0, appears in hook summary) — full alignment check runs at CLI time.
   # ============================================================================
-  REQ_IDS_FILE=".sprint-state/phase-outputs/req-ids.json"
-  if [ -f "$REQ_IDS_FILE" ] && command -v jq >/dev/null 2>&1; then
-    # Check staleness: req-ids.json must be newer than specification.yaml
-    SPEC_FILE="specification.yaml"
-    REQ_IDS_STALE=false
-    if [ -f "$SPEC_FILE" ]; then
-      if [ "$REQ_IDS_FILE" -ot "$SPEC_FILE" ]; then
-        REQ_IDS_STALE=true
-      fi
-    fi
-
-    if [ "$REQ_IDS_STALE" = true ]; then
-      echo "⚠️  Gate 5c: req-ids.json is stale (specification.yaml updated since last check-alignment)"
-      echo "   Run 'xp-gate check-alignment' to regenerate before next commit."
-    else
-      CHANGED_TEST_FILES_ANNOTATED=$(echo "$CHANGED_FILES" | grep -E '\.(test|spec)\.(ts|tsx|js|jsx|cjs|mjs)$' || true)
-      if [ -n "$CHANGED_TEST_FILES_ANNOTATED" ]; then
-        echo "  → Checking @test REQ-XXX annotations..."
-        ANNOTATION_ERRORS=0
-        for tf in $CHANGED_TEST_FILES_ANNOTATED; do
-          if [ -f "$tf" ]; then
-            # Extract @test REQ-XXX annotations from staged test file (word-bounded)
-            ANNOTATED_REQS=$(grep -oE '@test\s+REQ-[A-Z0-9-]+' "$tf" 2>/dev/null | sed 's/@test\s*//' | sort -u || true)
-            for req_id in $ANNOTATED_REQS; do
-              # Cross-reference against pre-compiled REQ ID list
-              FOUND=$(jq -r --arg rid "$req_id" '.[] | select(. == $rid)' "$REQ_IDS_FILE" 2>/dev/null || true)
-              if [ -z "$FOUND" ]; then
-                echo "❌ Gate 5c: $tf — @test $req_id: REQ ID not found in specification.yaml"
-                ANNOTATION_ERRORS=$((ANNOTATION_ERRORS + 1))
-              fi
-            done
-          fi
-        done
-
-        if [ "$ANNOTATION_ERRORS" -gt 0 ]; then
-          echo ""
-          echo "❌ $ANNOTATION_ERRORS test annotation(s) reference non-existent REQ IDs — commit BLOCKED"
-          echo "   Fix: Verify REQ IDs against specification.yaml, or run 'xp-gate check-alignment'"
-          exit 1
-        fi
-
-        # Check reverse: any REQ in spec with no annotated test → visible FAIL (non-blocking)
-        ALL_SPEC_REQS=$(jq -r '.[]' "$REQ_IDS_FILE" 2>/dev/null)
-        ANNOTATED_ALL=""
-        for tf in $(echo "$CHANGED_FILES" | grep -E '\.(test|spec)\.(ts|tsx|js|jsx|cjs|mjs)$' || true); do
-          if [ -f "$tf" ]; then
-            ANNOTATED_ALL="$ANNOTATED_ALL $(grep -oE '@test\s+REQ-[A-Z0-9-]+' "$tf" 2>/dev/null | sed 's/@test\s*//' || true)"
-          fi
-        done
-        UNTESTED_COUNT=0
-        for spec_req in $ALL_SPEC_REQS; do
-          if ! echo "$ANNOTATED_ALL" | grep -qF "$spec_req"; then
-            UNTESTED_COUNT=$((UNTESTED_COUNT + 1))
-          fi
-        done
-        if [ "$UNTESTED_COUNT" -gt 0 ]; then
-          echo "⚠️  [FAIL] Gate 5c: $UNTESTED_COUNT REQ(s) in specification.yaml have no annotated tests"
-          echo "   This is non-blocking. Run 'xp-gate check-alignment' for full alignment report."
-        fi
-
-        echo "  ✅ @test annotation check complete."
-      fi
-    fi
-  fi
+  # Gate 5c: Semantic Annotation Check (#585)
+  #
+  # The check itself lives in lib/gate-5c-alignment.sh so its contract is
+  # unit-testable without executing the hook. Two defects it fixes, both of which
+  # made this gate a decoration:
+  #   1. The whole body sat inside `if [ -f req-ids.json ] && command -v jq`.
+  #      .sprint-state/ is gitignored, so on a fresh clone the gate printed
+  #      NOTHING — not PASS, not FAIL, not SKIP — and the report had no slot for
+  #      it. Silence read as success, the same defect as #449/#499/#570.
+  #   2. Test discovery matched only JS/TS, so Pester's *.Tests.ps1, pytest's
+  #      test_*.py, Go's *_test.go, Java's *Test.java and Kotlin's *Tests.kt found
+  #      nothing and the gate reported a vacuous "0 annotated, 0 uncovered".
+  #
+  # GATE_5C_STATUS is now always PASS, SKIP or BLOCK — never empty.
+  # ============================================================================
+  GATE_5C_STATUS=""
+  gate_5c_alignment || exit 1
 
   # ============================================================================
   # v0.14.3+ (Issue #312): Early skip when no code files changed.
