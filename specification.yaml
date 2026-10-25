@@ -2318,6 +2318,41 @@ specification:
           test_type: unit
 
 
+    # ============================================================
+    # REQ-614: Gate 8 不得把「扫描器起不来」报告成「发现密钥」。
+    #
+    # #582：WSL 上 Gate 8 对一个不含任何密钥的仓库报「Secrets detected in staged
+    # files」，并让用户去轮换密钥。实际上什么都没扫描。两个独立缺陷：
+    #
+    # 1. WSL 没有 `cygpath`（那是 Git-for-Windows/MSYS 的工具，对应物是 `wslpath`），
+    #    于是 gate-8.sh 走 fallback，把 POSIX 路径 `/mnt/d/.../.gitleaks.toml` 交给
+    #    原生 gitleaks.exe，它打不开：
+    #        FTL unable to load gitleaks config, err: open /mnt/d/...:
+    #          The system cannot find the path specified.
+    # 2. gitleaks 以退出码 1 结束，而 gate-8 的 `elif [ "$GITLEAKS_EXIT" -eq 1 ]`
+    #    分支词条就是「Secrets found」。
+    #
+    # 退出码 1 既表示 findings 也表示 config/IO 错误。#592 已为「exit 0 + FTL」建立
+    # 了这条区分；这里是同一区分在 exit 1 上的缺失，而它的错误答案最响：一道 fail-closed
+    # 的安全门禁，对一份它从未读过的仓库给出了最高危的结论。能且只能说「你泄漏了密钥」
+    # 的门禁，会把人训练成关掉它。#596 在 shell 工具链里修了同一类混淆。
+    # ============================================================
+    - id: REQ-614
+      description: "Gate 8 须在 WSL 上正确转换配置路径，并区分扫描器启动失败与真实密钥发现"
+      priority: critical
+      acceptance_criteria:
+        - id: AC-614-01
+          criteria: gitleaks 退出码 1 且带 FTL/配置加载失败特征时须报为 ENVIRONMENT 而非「发现密钥」，
+            且不得给出轮换密钥的建议；真实泄漏仍须报为发现密钥
+          test_type: integration
+        - id: AC-614-02
+          criteria: 除 cygpath 外须支持 wslpath 转换，且转换须先于未转换的兜底路径尝试
+          test_type: integration
+        - id: AC-614-03
+          criteria: gate-8.sh 改动后语法有效
+          test_type: integration
+
+
     - id: DD-001
       decision: 走薄桥（方案 A）在 ctx.tools 注册三工具，而非独立 MCP server 或纯技能
       rationale: 与 opencode 插件 1:1 映射、DSH 原生 API 直接支持、工作量最小；符合 RFC「薄桥而非重写」结论
