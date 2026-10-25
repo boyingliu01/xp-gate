@@ -51,7 +51,13 @@ compare_pair() {
 
 # shellcheck disable=SC2086  # word splitting IS the intent: one file per line
 expected_hook_mirrors=$(printf '%s\n' $HOOK_MIRROR_FILES | LC_ALL=C sort)
-actual_hook_mirrors=$([ -d src/npm-package/hooks ] && find src/npm-package/hooks -type f | sed 's|^src/npm-package/hooks/||' | LC_ALL=C sort || true)
+# #587/#588: `-type f` also catches build artefacts that live in the tree without being
+# part of it. `__pycache__` appears the moment anything imports prepush-score.py, and the
+# hook mirror then reports "file set drifted" for a file nobody added — a push-blocking
+# failure with no fix available to the operator except deleting a cache directory by hand.
+# VCS-ignored artefacts are filtered by their directory, not by name.
+actual_hook_mirrors=$([ -d src/npm-package/hooks ] && find src/npm-package/hooks -type f \
+  -not -path '*/__pycache__/*' | sed 's|^src/npm-package/hooks/||' | LC_ALL=C sort || true)
 [ "$expected_hook_mirrors" = "$actual_hook_mirrors" ] || fail "hook mirror file set drifted (expected exactly: $(printf '%s' "$HOOK_MIRROR_FILES" | tr '\n' ' '))"
 
 for rel in $HOOK_MIRROR_FILES; do

@@ -314,7 +314,16 @@ describe('syncHooks', () => {
   it('syncHooks keeps every hook library as a regular byte-identical mirror', () => {
     expect(syncOk, 'sync script must exit 0').toBe(true);
     const canonicalDir = path.join(WORKTREE_PATH, 'githooks', 'lib');
-    for (const name of fs.readdirSync(canonicalDir)) {
+    // #587/#588: `readdirSync` also returns directories, and `__pycache__` appears the
+    // moment anything imports prepush-score.py. The sync script deliberately does not
+    // mirror build artefacts into the package, so demanding a mirror for every entry made
+    // this case assert the OPPOSITE of the behaviour it exists to protect — and fail on a
+    // cache directory that is not a hook library at all.
+    const libraryNames = fs
+      .readdirSync(canonicalDir)
+      .filter((name) => fs.statSync(path.join(canonicalDir, name)).isFile());
+    expect(libraryNames.length, 'no hook libraries found to compare').toBeGreaterThan(0);
+    for (const name of libraryNames) {
       const canonical = path.join(canonicalDir, name);
       const mirror = path.join(HOOKS_DIR, 'lib', name);
       expect(fs.lstatSync(canonical).isSymbolicLink(), `${canonical} must not be a symlink`).toBe(false);
@@ -323,6 +332,28 @@ describe('syncHooks', () => {
       expect(fs.statSync(mirror).isFile(), `${mirror} must be a regular file`).toBe(true);
       expect(fs.readFileSync(mirror).equals(fs.readFileSync(canonical)), `${mirror} must match ${canonical}`).toBe(true);
     }
+  });
+
+  it('syncHooks does not mirror Python bytecode caches into the package', () => {
+    // The positive half of the case above. Asserting only "the run did not fail" would
+    // pass on a clean checkout where no cache was ever created — which is exactly the
+    // state CI starts from, so it would prove nothing. Creating the cache first makes the
+    // assertion bite.
+    const canonicalCache = path.join(WORKTREE_PATH, 'githooks', 'lib', '__pycache__');
+    fs.mkdirSync(canonicalCache, { recursive: true });
+    fs.writeFileSync(path.join(canonicalCache, 'probe.cpython-312.pyc'), 'bytecode');
+
+    const result = spawnSync(nodeExe, [syncScript], {
+      cwd: WORKTREE_PATH,
+      stdio: 'pipe',
+      timeout: 15000,
+    });
+
+    expect(result.status, 'sync script must exit 0').toBe(0);
+    expect(
+      fs.existsSync(path.join(HOOKS_DIR, 'lib', '__pycache__')),
+      'a Python bytecode cache was mirrored into the shipped package',
+    ).toBe(false);
   });
 
   it('syncHooks removes stale generated hook libraries', () => {
