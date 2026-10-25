@@ -2070,6 +2070,49 @@ specification:
           test_type: integration
 
 
+    # ============================================================
+    # REQ-607: Windows 上 hook 必须能看到「已安装」的工具链，且工具链故障不得
+    #          被报成代码缺陷。
+    #
+    # #593：hook 在 git-bash 下运行，而 git-bash 看不到调用方在 Windows 侧加的
+    # PATH，且本仓库门禁依赖的工具链标准安装位置都不在 git-bash 的默认 PATH 上：
+    #   npm 全局 CLI        %APPDATA%\npm
+    #   node 解释器         C:\Program Files\nodejs
+    #   pip --user 脚本      %APPDATA%\Python\PythonNNN\Scripts
+    #   手工放置的工具       ~/bin、~/.local/bin
+    # 每个门禁只用 command -v / npx --no-install / ~/.local/bin 探测，于是
+    # 「不在这条 shell 的 PATH 上」被报成「没装」。四个门禁对已安装的工具都这样报，
+    # 其中两个是假绿：一个从未运行的门禁被报成「可选工具缺失」的 WARN。
+    #
+    # 最严重的是 exit 127：npm 的 POSIX shim 被解析到后死于
+    # `exec: node: not found`，Gate 6 于是打印「❌ BLOCKED - Architecture
+    # violations detected」——把坏掉的工具链报成代码缺陷，把读者指向本来没问题的代码。
+    #
+    # 修法落在共享层而不是各门禁里：一个 PATH bootstrap，追加而非前置，所以调用方的
+    # PATH 顺序仍是权威；加上 command -v 看不见的形态的专用探测。
+    # ============================================================
+    - id: REQ-607
+      description: "hook 启动时须引导工具链 PATH，并支持子项目 node_modules、Python Scripts 通配与包装器同目录解析，同时区分工具链故障与真实缺陷"
+      priority: high
+      acceptance_criteria:
+        - id: AC-607-01
+          criteria: 引导函数必须把标准工具链位置追加到 PATH 末尾（不得前置，调用方顺序优先），
+            须通配 Python Scripts 目录而非猜测版本，且重复调用必须幂等
+          test_type: integration
+        - id: AC-607-02
+          criteria: 必须能解析 command -v 看不见的形态：子项目 node_modules/.bin 中的工具；
+            解析包装器时必须把其自身目录放入调用方 shell 的 PATH（否则包装器 exec 兄弟二进制会失败）
+          test_type: integration
+        - id: AC-607-03
+          criteria: 工具无法解析时必须列出所有搜索过的位置，使「没装」与「装了但找不到」可区分
+          test_type: integration
+        - id: AC-607-04
+          criteria: 工具自身 shim 的 exit 127 / exec not found 必须分类为工具链故障，
+            而真实违规（非工具链故障）必须仍分类为 FINDING——不得把一切归为工具链问题，
+            否则门禁再也无法就真实违规阻断
+          test_type: integration
+
+
     - id: DD-001
       decision: 走薄桥（方案 A）在 ctx.tools 注册三工具，而非独立 MCP server 或纯技能
       rationale: 与 opencode 插件 1:1 映射、DSH 原生 API 直接支持、工作量最小；符合 RFC「薄桥而非重写」结论
