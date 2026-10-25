@@ -2130,6 +2130,13 @@ source "$GATE_DIR/gate-4.sh"
  2>&1 echo ""
  2>&1 echo "→ Gate 5: Tests & coverage..."
 GATE_5_START=$(gate_start_ms)
+# #554 follow-up: explicit "nothing decided yet" sentinel. A branch inside the
+# else-block may record its own verdict (the no-code early skip records SKIP);
+# the epilogue must not overwrite it with PASS. Using "" rather than leaving the
+# variable unset keeps the epilogue's decision readable, and keeps every render
+# site's own default (`${GATE_5_STATUS:-SKIP}`) honest for the paths that never
+# assign at all.
+GATE_5_STATUS=""
 
 if [ "$PROJECT_LANG" = "documentation-only" ] || [ "$DOCS_ONLY_COMMIT" = true ]; then
   echo "⏭️  SKIPPED - Tests & coverage (documentation-only commit — no code changed to test)."
@@ -2491,10 +2498,19 @@ else
   CODE_EXTENSIONS="\.(ts|tsx|js|jsx|py|go|java|kt|kts|cpp|cc|cxx|c|swift|m|mm|dart|sh|ps1)$"
   CHANGED_CODE_FILES=$(echo "$CHANGED_FILES" | grep -E "$CODE_EXTENSIONS" || true)
   if [ -z "$CHANGED_CODE_FILES" ]; then
-    echo "✅ PASSED - No code files changed (only docs/config/VERSION), skipping test run."
+    # #554: this branch DID stand down deliberately, but "PASS" is a claim that
+    # a check ran and found nothing. Nothing ran here: no test executed, no
+    # coverage number exists. Recording PASS inflated the pass rate and made an
+    # unmeasured gate indistinguishable from a measured clean one -- the same
+    # defect #554 fixed on the docs-only branch, on the branch that fix did not
+    # cover (measured on the v0.31.2.0 release commit: journal said
+    # gate5_tests.status=PASS while the summary printed "coverage: N/A%").
+    echo "⏭️  SKIPPED - No code files changed (only docs/config/VERSION) — test run not needed."
     echo "   Changed files: $(echo "$CHANGED_FILES" | tr '\n' ' ')"
     TESTS_EXIT_CODE=0
     TESTS_SKIPPED=true
+    GATE_5_STATUS="SKIP"
+    GATE_5_DETAIL="no_code_files_changed"
     GATE_5_END=$(gate_start_ms)
     GATE_5_ELAPSED=$((GATE_5_END - GATE_5_START))
     echo "   ⏱️  Gate 5: ${GATE_5_ELAPSED}ms (skipped — no code changes)"
@@ -3312,7 +3328,20 @@ else
   # "Tests + Coverage: PASS (coverage: N/A)" for a commit where no test ran
   # (#554) -- a SKIP promoted to PASS inflates the pass rate and hides that the
   # gate never executed.
-  GATE_5_STATUS="PASS"
+  #
+  # #554 follow-up: the same promotion was still happening ONE LEVEL IN. The
+  # early-skip branch above (no source extension among the changed files, e.g. a
+  # version bump) sets GATE_5_STATUS="SKIP", and this unguarded assignment
+  # overwrote it on the way out of the same else-block. A branch that records
+  # its own verdict must not be re-decided by the block epilogue: default to
+  # PASS only when the sentinel is still untouched.
+  #
+  # Not written as a `:-PASS` expansion: AC-599-03 forbids a PASS default in
+  # any `GATE_N_STATUS:-DEFAULT` expansion, because that is how an unassigned
+  # gate came to render as "passed". An explicit comparison keeps both rules.
+  if [ -z "$GATE_5_STATUS" ]; then
+    GATE_5_STATUS="PASS"
+  fi
 fi
 record_gate_audit "gate-5" "tests-coverage" "$GATE_5_STATUS" "0" "$GATE_5_START" "${GATE_5_DETAIL:-}"
 
@@ -4237,6 +4266,7 @@ generate_quality_report() {
     "gate5_tests": {
       "name": "Tests + Coverage",
       "status": "${GATE_5_STATUS:-SKIP}",
+      "reason": "${GATE_5_DETAIL:-}",
       "thresholds": { "lines": ${COVERAGE_THRESHOLD}, "functions": null, "branches": null, "statements": null },
       "threshold_source": "${COVERAGE_THRESHOLD_SOURCE}",
       "actual": { "coverage": "${COV_PCT}" },
