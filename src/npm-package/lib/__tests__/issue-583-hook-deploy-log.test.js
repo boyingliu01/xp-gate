@@ -36,8 +36,14 @@ const { syncGlobalHooksFromRepo } = require('../doctor.js');
 
 function writeHook(dir, name, body) {
   const p = path.join(dir, name);
-  fs.mkdirSync(dir, { recursive: true });
-  fs.writeFileSync(p, body, { mode: 0o755 });
+  try {
+    fs.mkdirSync(dir, { recursive: true });
+    fs.writeFileSync(p, body, { mode: 0o755 });
+  } catch (err) {
+    // A fixture that cannot create its file must fail the case loudly, not leave
+    // a partially-built directory for the assertions to interpret (#583).
+    throw new Error(`fixture setup failed writing ${p}: ${err.message}`);
+  }
   return p;
 }
 
