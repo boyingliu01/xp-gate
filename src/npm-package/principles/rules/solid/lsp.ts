@@ -104,7 +104,7 @@ function baseContract(
   const baseName = extendsMatch[1].split('.').pop() ?? extendsMatch[1];
   const base = allClasses.find((c) => c.name === baseName && typeof c.code === 'string');
   if (!base || !base.code) return contract;
-  const declRe = new RegExp(METHOD_DECL_RE.source, 'g');
+  const declRe = new RegExp(declarationMatcher(isJava).source, 'g');
   let m: RegExpExecArray | null;
   while ((m = declRe.exec(base.code)) !== null) {
     contract.set(m[1], extractParamTypes(m[2], isJava));
@@ -239,11 +239,40 @@ const METHOD_DECL_RE = new RegExp(
   'g',
 );
 
+/**
+ * Declaration matcher for `name(params): ReturnType` (TypeScript, and where a language
+ * puts the return type AFTER the parameter list).
+ *
+ * The Java matcher above requires a return type BEFORE the name, so it never matches a
+ * TypeScript method. Without this second shape the base-contract lookup silently found no
+ * methods in TypeScript and every TypeScript override degraded to silence — the exact
+ * failure mode #588 is about, reached from the other side.
+ *
+ * The trailing `:` return-type annotation is what distinguishes a declaration from a call:
+ * a call is followed by `;`/`,`/`)`, not by `: Type`.
+ */
+const TS_METHOD_DECL_RE = new RegExp(
+  '(?:^|[\\n{};])[ \\t]*(?:public|private|protected|static|readonly|abstract|async|override|declare)?[ \\t]*' +
+    '(\\w+)[ \\t]*\\(([^;{}=]*)\\)[ \\t]*:[ \\t]*[\\w$][\\w$<>[\\].| ]*' +
+    '\\s*[{;]',
+  'g',
+);
+
+/**
+ * The declaration matcher for a language.
+ *
+ * @param isJava true for Java/Kotlin (`Type name`), false for TypeScript (`name: Type`)
+ * @returns the regex to scan declarations with
+ */
+function declarationMatcher(isJava: boolean): RegExp {
+  return isJava ? METHOD_DECL_RE : TS_METHOD_DECL_RE;
+}
+
 function methodParamTypes(code: string, isJava: boolean): string[] {
   const types: string[] = [];
+  const matcher = new RegExp(declarationMatcher(isJava).source, 'g');
   let m: RegExpExecArray | null;
-  METHOD_DECL_RE.lastIndex = 0;
-  while ((m = METHOD_DECL_RE.exec(code)) !== null) {
+  while ((m = matcher.exec(code)) !== null) {
     types.push(...extractParamTypes(m[2], isJava));
   }
   return types;
@@ -301,7 +330,7 @@ function checkClass(
  */
 function declaredDeclarations(code: string, isJava: boolean): Array<[string, string[]]> {
   const declarations: Array<[string, string[]]> = [];
-  const declRe = new RegExp(METHOD_DECL_RE.source, 'g');
+  const declRe = new RegExp(declarationMatcher(isJava).source, 'g');
   let m: RegExpExecArray | null;
   while ((m = declRe.exec(code)) !== null) {
     declarations.push([m[1], extractParamTypes(m[2], isJava)]);

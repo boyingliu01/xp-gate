@@ -35,6 +35,9 @@ class BaseHandler {
 /** Line where the derived class starts in the two-class fixtures below. */
 const DERIVED_CLASS_LINE = 4;
 
+/** Line where the derived TypeScript class starts in the two-line-header fixtures. */
+const TS_DERIVED_CLASS_LINE = 3;
+
 describe('solid.lsp detects a violation when the base contract IS available', () => {
   it('reports a derived parameter type the base method does not accept', () => {
     const violations = lspRule.check('Handlers.java', adapterFor([
@@ -120,5 +123,87 @@ describe('solid.lsp detects a violation when the base contract IS available', ()
     ]) as never);
 
     expect(violations.length).toBeGreaterThan(0);
+  });
+
+  it('treats a parameter type the base method also declares as compatible', () => {
+    // The positive half of the base comparison: this is the branch that returns `true`,
+    // i.e. "I have a base contract AND it accepts this type". Without it the only
+    // observable outcome of the base path would be a violation, and a rule that reported
+    // every override with a resolvable base would still pass every other case here.
+    const base = `class BaseHandler { public void handle(DataSource ds) { } }`;
+    const violations = lspRule.check('Handlers.java', adapterFor([
+      { name: 'BaseHandler', line: 1, code: base },
+      {
+        name: 'CsvHandler',
+        line: 2,
+        code: `class CsvHandler extends BaseHandler {
+  public void handle(DataSource ds) { }
+}`,
+      },
+    ]) as never);
+
+    expect(violations).toHaveLength(0);
+  });
+
+  it('handles a generic and an array parameter type without crashing', () => {
+    // Exercises `normaliseTypeName`'s stripping of `<...>`, `[]` and `?`. Those suffixes
+    // are the reason `Map<String, Item>` does not get compared as the literal string
+    // "Map<String, Item>", and the array/optional forms are ordinary in both languages.
+    const base = `class BaseHandler { public void handle(Map<String, Item> index) { } }`;
+    const violations = lspRule.check('Handlers.java', adapterFor([
+      { name: 'BaseHandler', line: 1, code: base },
+      {
+        name: 'CsvHandler',
+        line: 2,
+        code: `class CsvHandler extends BaseHandler {
+  public void handle(Map<String, Item> index) { }
+}`,
+      },
+    ]) as never);
+
+    expect(violations).toHaveLength(0);
+  });
+
+  it('reads TypeScript `name: Type` parameters, not Java ones', () => {
+    // Every other case here runs the Java path. The rule is shared by both languages, and
+    // #588's whole lesson is that a parser which only works for one of them silently
+    // mangles the other — so the TypeScript path needs its own case, exercising
+    // `extractTsParamType` rather than `extractJavaParamType`.
+    const tsAdapter = { ...adapterFor([]), detectLanguage: () => 'typescript' };
+    const base = `class BaseHandler {
+  handle(ds: DataSource): void {}
+}`;
+    const derived = `class CsvHandler extends BaseHandler {
+  handle(channel: FileChannel): void {}
+}`;
+    const violations = lspRule.check('handlers.ts', {
+      ...tsAdapter,
+      extractClasses: () => [
+        { name: 'BaseHandler', line: 1, code: base },
+        { name: 'CsvHandler', line: TS_DERIVED_CLASS_LINE, code: derived },
+      ],
+    } as never);
+
+    expect(violations.length).toBeGreaterThan(0);
+    expect(violations[0].message).toContain('FileChannel');
+  });
+
+  it('stays silent for a TypeScript override that matches the base', () => {
+    const tsAdapter = { ...adapterFor([]), detectLanguage: () => 'typescript' };
+    const base = `class BaseHandler {
+  handle(ds: DataSource): void {}
+}`;
+    const derived = `class CsvHandler extends BaseHandler {
+  handle(ds: DataSource): void {}
+}`;
+    const violations = lspRule.check('handlers.ts', {
+      ...tsAdapter,
+      extractClasses: () => [
+        { name: 'BaseHandler', line: 1, code: base },
+        { name: 'CsvHandler', line: 2, code: derived },
+      ],
+    } as never);
+
+    expect(violations).toHaveLength(0);
   });
 });
