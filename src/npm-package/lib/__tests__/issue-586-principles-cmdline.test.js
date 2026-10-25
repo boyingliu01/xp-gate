@@ -34,11 +34,22 @@ const path = require('path');
 
 const principles = require('../principles.js');
 
+// cmd.exe's command-line ceiling. Named rather than repeated: it is the number the
+// whole issue is about, and a bare 8191 in several places reads as unrelated facts.
+const CMD_EXE_LIMIT = 8191;
+
+// The measured case from the issue: 135 Java files => 12944 characters, which blocked
+// every `--all` run on Windows.
+const ISSUE_FILE_COUNT = 135;
+
+// Comfortably past the limit, used where the exact count does not matter — only that
+// the list is too long to inline.
+const LARGE_FILE_COUNT = 400;
+
 /** A path-only string of roughly `len` characters (the join() payload). */
 function longFileList(count) {
   // Paths must be long enough that `count` of them realistically exceeds the
-  // Windows limit; the issue's own measurement was 135 files => 12944 chars,
-  // i.e. ~90 chars per path.
+  // Windows limit; the issue's own measurement was ~90 chars per path.
   return Array.from(
     { length: count },
     (_, i) =>
@@ -47,29 +58,29 @@ function longFileList(count) {
 }
 
 describe('REQ-613: Gate 4 must not blow the Windows command-line limit', () => {
-  it('AC-613-01: the command line for a mid-sized Java project stays under cmd.exe\u2019s 8191 limit', () => {
+  it('AC-613-01: the command line for a mid-sized Java project stays under cmd.exe\\u2019s character limit', () => {
     // The measured case from the issue: 135 files, 12944 characters, blocked.
-    const files = longFileList(135);
+    const files = longFileList(ISSUE_FILE_COUNT);
     const joined = files.join(' ');
-    expect(joined.length).toBeGreaterThan(8191);
+    expect(joined.length).toBeGreaterThan(CMD_EXE_LIMIT);
 
     const plan = principles.buildPrinciplesInvocation(files, 'json');
     // The contract: whatever is handed to the OS is a single argument list, and the
     // total of that list's characters is what must fit. A plan that still carries the
     // whole list in one argument has not solved anything.
     const longest = Math.max(...plan.args.map((a) => String(a).length));
-    expect(longest, `longest single argument is ${longest} chars`).toBeLessThan(8191);
+    expect(longest, `longest single argument is ${longest} chars`).toBeLessThan(CMD_EXE_LIMIT);
   });
 
   it('AC-613-01: a large file list is passed by reference, not by value', () => {
     // The fix that the issue recommends first: use the project's own tsx through
     // node.exe (an absolute path, no shim, no shell) and keep the argv bounded. If a
     // future change puts every path back on the command line, this fails.
-    const files = longFileList(400);
+    const files = longFileList(LARGE_FILE_COUNT);
     const plan = principles.buildPrinciplesInvocation(files, 'json');
 
     const argvChars = plan.args.reduce((n, a) => n + String(a).length + 1, 0);
-    expect(argvChars, `argv carries ${argvChars} chars`).toBeLessThan(8191);
+    expect(argvChars, `argv carries ${argvChars} chars`).toBeLessThan(CMD_EXE_LIMIT);
   });
 
   it('AC-613-02: the invocation never opts into a shell on any platform', () => {
@@ -119,7 +130,7 @@ describe('REQ-613: Gate 4 must not blow the Windows command-line limit', () => {
   it('AC-613-01: the by-reference handoff writes the list somewhere the child can read', () => {
     // Sanity on the mechanism itself: if the plan says "by reference", the reference
     // has to be a real file path the child will be given, not a placeholder.
-    const files = longFileList(400);
+    const files = longFileList(LARGE_FILE_COUNT);
     const plan = principles.buildPrinciplesInvocation(files, 'json');
     const refArg = plan.args.find((a) => String(a).startsWith('@'));
     expect(refArg, 'no @file argument in the plan').toBeTruthy();

@@ -58,8 +58,32 @@ function buildPrinciplesInvocation(files, format) {
   }
 
   // By reference: one short argument instead of thousands of characters.
+  return buildByReferenceInvocation(prefix, files, format, command);
+}
+
+/**
+ * The `@file` form, used when the list is too long to inline.
+ *
+ * Split out for two reasons: it keeps `buildPrinciplesInvocation` inside the
+ * long-function limit, and it gives the temp-file IO a place to fail with a message
+ * that names the actual cause. An unwritable temp dir would otherwise surface as an
+ * unhandled throw from deep inside a spawn helper.
+ *
+ * @param {string[]} prefix executable-adjacent arguments (tsx cli + entry)
+ * @param {string[]} files source files to analyse
+ * @param {string} format 'json' or 'text'
+ * @param {string} command executable to run
+ * @returns {{command: string, args: string[], useShell: boolean, cleanup: string|null}}
+ */
+function buildByReferenceInvocation(prefix, files, format, command) {
   const listFile = path.join(os.tmpdir(), `xp-gate-principles-${process.pid}-${Date.now()}.txt`);
-  fs.writeFileSync(listFile, files.join('\n'));
+  try {
+    fs.writeFileSync(listFile, files.join('\n'));
+  } catch (err) {
+    // No list file means no run. Throw with the cause named, rather than letting the
+    // spawn fail later on a path that never existed.
+    throw new Error(`xp-gate principles: cannot write the file list to ${listFile}: ${err.message}`);
+  }
   return {
     command,
     // The @ prefix is the engine's own "read the list from this file" form.
@@ -70,6 +94,14 @@ function buildPrinciplesInvocation(files, format) {
 }
 
 /**
+ * How far up from the working directory to look for a project-local tsx.
+ *
+ * Enough for a hoisted monorepo `node_modules` (a package three or four levels deep),
+ * bounded so a filesystem with a cycle cannot loop.
+ */
+const TSDX_SEARCH_DEPTH = 8;
+
+/**
  * Path to the project's own tsx CLI, or null.
  *
  * Walks up from the working directory so a monorepo's hoisted node_modules is found.
@@ -78,7 +110,7 @@ function buildPrinciplesInvocation(files, format) {
  */
 function findLocalTsxCli() {
   let dir = process.cwd();
-  for (let depth = 0; depth < 8; depth += 1) {
+  for (let depth = 0; depth < TSDX_SEARCH_DEPTH; depth += 1) {
     const candidate = path.join(dir, 'node_modules', 'tsx', 'dist', 'cli.mjs');
     if (fs.existsSync(candidate)) return candidate;
     const parent = path.dirname(dir);
@@ -254,36 +286,86 @@ function principles(args) {
 
   // #586: build before spawning so the Windows command-line limit is a planning
   // concern, not a runtime explosion. See buildPrinciplesInvocation().
-  const plan = buildPrinciplesInvocation(files, format);
-  const result = spawnSync(plan.command, plan.args, {
-    stdio: 'inherit',
-    // Never a shell: `shell: true` is what reached cmd.exe's 8191-character ceiling.
-    shell: plan.useShell,
-  });
+  return Promise.resolve(runPrinciplesPlan(buildPrinciplesInvocation(files, format)));
+}
 
-  if (plan.cleanup) {
-    try {
-      fs.unlinkSync(plan.cleanup);
-    } catch {
-      // A leftover temp file is not worth failing a gate over.
-    }
+/**
+ * Execute a plan and return the exit code.
+ *
+ * Split from `principles` so that function stays inside the long-function limit, and
+ * so the launch-failure handling lives in one place with a comment saying what it is
+ * worth. `spawnSync` normally reports failures via `result.error`; a throw here means
+ * the call itself was malformed. Either way nothing was analysed, which is the fact
+ * worth stating rather than letting a stack trace imply the code was judged.
+ *
+ * @param {{command: string, args: string[], useShell: boolean, cleanup: string|null}} plan
+ * @returns {number} process exit code
+ */
+function runPrinciplesPlan(plan) {
+  let result;
+  try {
+    result = spawnSync(plan.command, plan.args, {
+      stdio: 'inherit',
+      // Never a shell: `shell: true` is what reached cmd.exe's 8191-character ceiling.
+      shell: plan.useShell,
+    });
+  } catch (err) {
+    removeListFile(plan.cleanup);
+    console.error(`[xp-gate principles] TOOLCHAIN: could not launch the checker: ${err.message}`);
+    console.error('  This is an environment problem, not a principles violation - nothing was analysed.');
+    return 1;
   }
 
-  if (result.error || result.status === null) {
-    // #586's last request: say which kind of failure this is. "Failed to run
-    // principles check" read like a principles verdict on a run where nothing was
-    // analysed. Same confusion #596 fixed in the shell toolchain.
-    const kind = classifyPrinciplesFailure(result);
-    const detail = result.error ? result.error.message : 'no exit status';
-    if (kind === 'TOOLCHAIN') {
-      console.error(`[xp-gate principles] TOOLCHAIN: the checker could not be run: ${detail}`);
-      console.error('  This is an environment problem, not a principles violation - nothing was analysed.');
-    } else {
-      console.error(`[xp-gate principles] checker failed: ${detail}`);
+  removeListFile(plan.cleanup);
+  return reportPrinciplesResult(result);
+}
+
+/**
+ * Delete the by-reference list file, if one was written.
+ *
+ * Best effort: a leftover temp file is not worth failing a gate over, but swallowing
+ * the error silently is how temp directories fill up unnoticed, so it is named.
+ *
+ * @param {string|null} listFile path to remove, or null
+ */
+function removeListFile(listFile) {
+  if (!listFile) return;
+  try {
+    fs.unlinkSync(listFile);
+  } catch (err) {
+    // Expected when the child already consumed/removed it; only surprising otherwise.
+    if (err.code !== 'ENOENT') {
+      console.error(`[xp-gate principles] could not remove ${listFile}: ${err.message}`);
     }
-    return Promise.resolve(1);
   }
-  return Promise.resolve(result.status);
+}
+
+/**
+ * Turn a spawn result into the exit code to return, printing which kind of failure it
+ * was when there is one.
+ *
+ * Split out of `principles` to keep that function inside the long-function limit, and
+ * because this is the one place that decides whether the caller is looking at a code
+ * verdict or an environment problem — worth being able to point at directly.
+ *
+ * @param {{error?: Error, status?: number|null}} result spawnSync result
+ * @returns {number} process exit code
+ */
+function reportPrinciplesResult(result) {
+  if (!result.error && result.status !== null) return result.status;
+
+  // #586's last request: say which kind of failure this is. "Failed to run principles
+  // check" read like a principles verdict on a run where nothing was analysed. Same
+  // confusion #596 fixed in the shell toolchain.
+  const kind = classifyPrinciplesFailure(result);
+  const detail = result.error ? result.error.message : 'no exit status';
+  if (kind === 'TOOLCHAIN') {
+    console.error(`[xp-gate principles] TOOLCHAIN: the checker could not be run: ${detail}`);
+    console.error('  This is an environment problem, not a principles violation - nothing was analysed.');
+  } else {
+    console.error(`[xp-gate principles] checker failed: ${detail}`);
+  }
+  return 1;
 }
 
 module.exports = {
