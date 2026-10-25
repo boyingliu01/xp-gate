@@ -184,9 +184,6 @@
     "githooks/__tests__/issue-553-gate-ui-verdict.test.bats": [
       "AC-553-01"
     ],
-    "githooks/__tests__/issue-554-gate-status-integrity.test.bats": [
-      "AC-554-01"
-    ],
     "githooks/__tests__/issue-555-coverage-threshold.test.bats": [
       "AC-555-01"
     ],
