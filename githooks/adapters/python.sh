@@ -4,10 +4,24 @@
 # Tools: mypy, ruff/flake8, pytest, import-linter (architecture)
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-# SC1091：adapter-common.sh 由调用方按查找顺序提供，路径靠变量拼接，shellcheck 无法静态跟随。
-# `source … || true` 是既有容错口径（仓库存档时该文件可能不在），不要改成硬依赖。
-# shellcheck source=/dev/null
-source "$SCRIPT_DIR/../adapter-common.sh" 2>/dev/null || true
+# #597: the library can be beside the adapters or one level up, depending on how
+# the package was installed:
+#   global install   ~/.config/xp-gate/adapters/adapter-common.sh   (inside)
+#   npm package      src/npm-package/adapters/../adapter-common.sh  (above)
+# The old single "$SCRIPT_DIR/../adapter-common.sh" only ever matched the second,
+# so in the global layout the library never loaded - and "2>/dev/null || true"
+# made that indistinguishable from success, leaving every shared function
+# undefined with no warning.
+for _ac_candidate in \
+  "$SCRIPT_DIR/adapter-common.sh" \
+  "$SCRIPT_DIR/../adapter-common.sh"; do
+  if [ -f "$_ac_candidate" ]; then
+    # shellcheck source=/dev/null
+    source "$_ac_candidate"
+    break
+  fi
+done
+unset _ac_candidate
 
 # A mypy target must exist AND actually contain .py files: a bare directory
 # check lets through TS repos' src/ (mypy exits 2 with "There are no .py[i]

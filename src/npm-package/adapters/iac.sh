@@ -5,7 +5,24 @@
 # Tools: checkov (primary), hadolint (Docker), kube-score (K8s)
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-source "$SCRIPT_DIR/../adapter-common.sh" 2>/dev/null || true
+# #597: the library can be beside the adapters or one level up, depending on how
+# the package was installed:
+#   global install   ~/.config/xp-gate/adapters/adapter-common.sh   (inside)
+#   npm package      src/npm-package/adapters/../adapter-common.sh  (above)
+# The old single "$SCRIPT_DIR/../adapter-common.sh" only ever matched the second,
+# so in the global layout the library never loaded - and "2>/dev/null || true"
+# made that indistinguishable from success, leaving every shared function
+# undefined with no warning.
+for _ac_candidate in \
+  "$SCRIPT_DIR/adapter-common.sh" \
+  "$SCRIPT_DIR/../adapter-common.sh"; do
+  if [ -f "$_ac_candidate" ]; then
+    # shellcheck source=/dev/null
+    source "$_ac_candidate"
+    break
+  fi
+done
+unset _ac_candidate
 
 # Detect IaC files in changed files
 detect_iac_files() {
