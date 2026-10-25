@@ -44,17 +44,25 @@ function makeCleanRepo(files, afterCommit) {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'xp-gate-589-'));
   const git = (/** @type {string[]} */ args) =>
     execFileSync('git', args, { cwd: dir, stdio: 'pipe' });
-  git(['init', '-q', '-b', 'main']);
-  git(['config', 'user.email', 't@t.t']);
-  git(['config', 'user.name', 't']);
-  git(['config', 'core.hooksPath', process.platform === 'win32' ? 'NUL' : '/dev/null']);
-  for (const f of files) {
-    const full = path.join(dir, f);
-    fs.mkdirSync(path.dirname(full), { recursive: true });
-    fs.writeFileSync(full, `// ${f}\nexport const x = 1;\n`);
+  // Every fixture step is IO that can fail for environment reasons (no git, a
+  // read-only tmp, a path already taken). Failing with the operation and the path
+  // named turns "the test broke" into a diagnosable message instead of a bare
+  // exception from inside a helper.
+  try {
+    git(['init', '-q', '-b', 'main']);
+    git(['config', 'user.email', 't@t.t']);
+    git(['config', 'user.name', 't']);
+    git(['config', 'core.hooksPath', process.platform === 'win32' ? 'NUL' : '/dev/null']);
+    for (const f of files) {
+      const full = path.join(dir, f);
+      fs.mkdirSync(path.dirname(full), { recursive: true });
+      fs.writeFileSync(full, `// ${f}\nexport const x = 1;\n`);
+    }
+    git(['add', '-A']);
+    git(['commit', '-q', '-m', 'clean tree']);
+  } catch (err) {
+    throw new Error(`makeCleanRepo failed while preparing ${dir}: ${err.message}`);
   }
-  git(['add', '-A']);
-  git(['commit', '-q', '-m', 'clean tree']);
   if (afterCommit) afterCommit(dir);
   return dir;
 }
@@ -141,9 +149,14 @@ describe('REQ-608: check --all scans the tree, not the diff', () => {
   it('AC-608-03: the resolved mode is reported so the scan scope is visible', () => {
     // #589 point 1's second half: the user must be able to see which scope was
     // used. A silent switch between diff and tree is the same defect one level up.
-    expect(gateRunner.describeChangedFilesScope('all', 3)).toContain('3');
-    expect(gateRunner.describeChangedFilesScope('all', 3).toLowerCase()).toContain('all');
-    expect(gateRunner.describeChangedFilesScope('diff', 1)).toContain('1');
+    const fileCount = 3;
+    const allScope = gateRunner.describeChangedFilesScope('all', fileCount);
+    expect(allScope).toContain(String(fileCount));
+    expect(allScope.toLowerCase()).toContain('all');
+
+    const diffScope = gateRunner.describeChangedFilesScope('diff', 1);
+    expect(diffScope).toContain('1');
+    expect(diffScope).not.toContain('all');
   });
 
   it('AC-608-03: checkAllGates actually passes the all scope through to every gate', () => {
