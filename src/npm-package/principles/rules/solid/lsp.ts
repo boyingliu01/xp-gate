@@ -146,7 +146,20 @@ function extractParamTypes(paramsText: string, isJava: boolean): string[] {
   return types;
 }
 
-function buildViolation(file: string, cls: ClassInfo, paramType: string): Violation {
+/**
+ * Build a violation record for a class whose parameter type was decided incompatible.
+ *
+ * Exported for the line-fallback case: after #588 the rule can only report types it can
+ * PROVE incompatible, so a fixture can no longer reach `buildViolation` through
+ * `lspRule.check`. Asserting it directly keeps the `?? 0` fallback covered instead of
+ * letting the case pass vacuously.
+ *
+ * @param file path reported in the violation
+ * @param cls the class, whose `line` may be absent
+ * @param paramType the offending parameter type
+ * @returns the violation record
+ */
+export function buildViolation(file: string, cls: ClassInfo, paramType: string): Violation {
   // Read the ACTIVE severity here rather than at module load (#457).
   const settings = getActiveConfig().rules['solid']['lsp'];
   return {

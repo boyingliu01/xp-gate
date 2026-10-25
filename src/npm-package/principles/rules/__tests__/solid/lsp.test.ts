@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { lspRule } from '../../solid/lsp';
+import { lspRule, buildViolation } from '../../solid/lsp';
 
 const mockAdapter = {
   detectLanguage: () => 'typescript',
@@ -10,7 +10,12 @@ const mockAdapter = {
 };
 
 describe('lsp.ts - Liskov Substitution Principle Rule', () => {
-  it('should detect parameter type changes in override', () => {
+  it('stays silent on a parameter type it cannot resolve against the base contract', () => {
+    // #588 changed what this rule is allowed to claim. `UserId` is neither a primitive nor
+    // a prefix of the class name, so a single-file analysis has no way to know what the
+    // BASE class declares — and "cannot determine" must not be reported as a violation.
+    // The previous expectation here asserted the defect: it read an unknown type as proof
+    // of incompatibility, which on Java flagged every class that has `extends`.
     const mockAdapterWithViolation = {
       ...mockAdapter,
       extractClasses: () => [{
@@ -19,11 +24,10 @@ describe('lsp.ts - Liskov Substitution Principle Rule', () => {
         code: `class DerivedRepo extends BaseRepo { findById(id: UserId): Entity {} }`
       }]
     };
-    
+
     const violations = lspRule.check('test.ts', mockAdapterWithViolation as never);
-    
-    expect(violations.length).toBeGreaterThan(0);
-    expect(violations[0].ruleId).toBe('solid.lsp');
+
+    expect(violations).toHaveLength(0);
   });
 
   it('should pass for proper override', () => {
@@ -152,8 +156,10 @@ class DerivedRepo extends BaseRepo {
     expect(violations).toHaveLength(0);
   });
 
-  it('reports violation with className undefined (className && ... false branch)', () => {
-    // cls.name undefined → className && ... short-circuits to false → incompatible
+  it('stays silent even when the class name is missing (no name is not evidence)', () => {
+    // This used to report, on the reasoning that `className && ...` short-circuits to
+    // false. Under #588 that is precisely the defect: an ABSENT name is one more thing the
+    // analysis does not know, so it cannot justify a verdict.
     const adapter = {
       ...mockAdapter,
       extractClasses: () => [{
@@ -162,21 +168,19 @@ class DerivedRepo extends BaseRepo {
       }],
     };
     const violations = lspRule.check('test.ts', adapter as never);
-    expect(violations.length).toBeGreaterThan(0);
-    expect(violations[0].ruleId).toBe('solid.lsp');
+    expect(violations).toHaveLength(0);
   });
 
-  it('falls back to line 0 when cls.line is missing', () => {
-    const adapter = {
-      ...mockAdapter,
-      extractClasses: () => [{
-        name: 'D',
-        // no line
-        code: `class D extends B { foo(id: CustomId) {} }`,
-      }],
-    };
-    const violations = lspRule.check('test.ts', adapter as never);
-    expect(violations.length).toBeGreaterThan(0);
-    expect(violations[0].line).toBe(0);
+  it('falls back to line 0 when a violation is built for a class with no line', () => {
+    // Asserted on the builder directly. After #588 `lspRule.check` can no longer reach
+    // this code path for an unknown type — that is the fix — so a case going through
+    // `check` would pass without exercising the `?? 0` fallback at all. A control that
+    // cannot fail proves nothing, which is why the import is explicit.
+    const violation = buildViolation('test.ts', { name: 'D' }, 'CustomId');
+    expect(violation.line).toBe(0);
+    expect(violation.ruleId).toBe('solid.lsp');
+    // And the line is honoured when present, so the fallback is not always taken.
+    const withLine = buildViolation('test.ts', { name: 'D', line: 42 }, 'CustomId');
+    expect(withLine.line).toBe(42);
   });
 });
