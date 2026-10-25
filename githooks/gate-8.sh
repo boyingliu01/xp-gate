@@ -33,10 +33,18 @@ fi
 
 GITLEAKS_CONFIG=""
 if [ -f ".gitleaks.toml" ]; then
-  # gitleaks is a native binary and may not understand MSYS paths, so pass an
+  # gitleaks is a native binary and may not understand MSYS/WSL paths, so pass an
   # absolute path in the host's own format when we can derive one (#449).
+  #
+  # #582: `cygpath` exists only in Git-for-Windows/MSYS. On WSL the equivalent is
+  # `wslpath`, and its absence meant the fallback handed
+  # `/mnt/d/projects/<repo>/.gitleaks.toml` to the native gitleaks.exe, which could
+  # not open it and exited 1 -- reported as "Secrets detected". So both converters
+  # are tried, in that order, before falling back to the raw path.
   if command -v cygpath >/dev/null 2>&1; then
     GITLEAKS_CONFIG="--config=$(cygpath -w "$(pwd)/.gitleaks.toml")"
+  elif command -v wslpath >/dev/null 2>&1; then
+    GITLEAKS_CONFIG="--config=$(wslpath -w "$(pwd)/.gitleaks.toml")"
   else
     GITLEAKS_CONFIG="--config=$(pwd)/.gitleaks.toml"
   fi
@@ -119,6 +127,23 @@ if [ "$GITLEAKS_EXIT" -eq 0 ]; then
     exit 1
   fi
 elif [ "$GITLEAKS_EXIT" -eq 1 ]; then
+  # #582: gitleaks exits 1 for BOTH "leaks found" and "I could not start" (unreadable
+  # config, bad path, IO error). Treating every exit 1 as a finding produced the
+  # loudest possible wrong answer: "Secrets detected in staged files", plus
+  # instructions to rotate a key, on a repository where nothing had been scanned --
+  # because WSL handed a POSIX path to the native binary (#582's own case).
+  #
+  # #592 established this distinction for exit 0 + FTL. The same test applies here,
+  # and the order matters as much: a scanner that could not start must never be
+  # reported as having found something, or the gate teaches people to disable it.
+  if printf '%s\n' "$GITLEAKS_OUTPUT" | grep -qiE '(^|[[:space:]])(FTL|fatal error)[[:space:]:]|unable to load|cannot find the path'; then
+    echo "     ❌ BLOCKED - ENVIRONMENT: gitleaks exited 1 because it could not start, so"
+    echo "        NO secret scan took place. This is a tooling problem, not a verdict"
+    echo "        about the staged code."
+    printf '%s\n' "$GITLEAKS_OUTPUT" | grep -iE 'FTL|fatal|unable|cannot find' | head -3 | sed 's/^/        /'
+    echo "   Fix the gitleaks config/invocation above and commit again."
+    exit 1
+  fi
   # Secrets found — output details
   echo "$GITLEAKS_OUTPUT"
   echo ""
