@@ -4,6 +4,97 @@ const os = require('node:os');
 const path = require('node:path');
 
 /**
+ * Source-file extensions the gate fragments know how to analyse.
+ *
+ * Shared by the `--all` scope resolver so a full-tree check and the adapters agree
+ * on what a "source file" is. Data and documentation formats are deliberately
+ * absent: handing a markdown file to lizard is not a check, it is noise.
+ */
+const SOURCE_FILE_EXTENSIONS = [
+  'ts', 'tsx', 'js', 'jsx', 'mjs', 'cjs',
+  'py', 'go', 'java', 'kt', 'kts', 'scala',
+  'c', 'cc', 'cpp', 'cxx', 'h', 'hpp',
+  'rs', 'php', 'dart', 'swift', 'm', 'mm',
+  'sh', 'bash', 'ps1', 'psm1', 'rb',
+];
+
+/**
+ * Every tracked source file in the repository, one per line.
+ *
+ * This is what `--all` must hand the gates that read CHANGED_FILES.
+ *
+ * #589: `check --all` was documented as a full-tree check but still built
+ * CHANGED_FILES from `git diff`, so on a clean tree — the normal state after a
+ * commit, and the state CI runs in — Gate 3 received an empty list and printed
+ *
+ *     ⏭️  SKIPPED - Complexity (no source files to check)
+ *
+ * `--all` therefore checked LESS than an ordinary commit, while reading like a
+ * pass. Gate 4 does not depend on CHANGED_FILES and worked fine under the same
+ * preamble, which is what proves the file SOURCE was the defect.
+ *
+ * @param {string} [cwd] repository directory
+ * @returns {string} newline-separated repo-relative paths, empty on any failure
+ */
+function resolveAllModeChangedFiles(cwd = process.cwd()) {
+  const pathspecs = SOURCE_FILE_EXTENSIONS.map((ext) => `*.${ext}`);
+  try {
+    const out = execFileSync('git', ['ls-files', ...pathspecs], {
+      cwd,
+      encoding: 'utf8',
+      stdio: ['ignore', 'pipe', 'ignore'],
+    });
+    return out.split('\n').filter(Boolean).join('\n');
+  } catch {
+    // Not a git repo, or git missing: an empty list is honest, and the caller's
+    // message distinguishes "empty diff" from "empty tree".
+    return '';
+  }
+}
+
+/**
+ * Explain an empty CHANGED_FILES honestly, given which scope produced it.
+ *
+ * The old wording ("no source files to check") described an empty PROJECT when
+ * the actual cause was an empty DIFF — and the natural reading of the old message
+ * is "this gate passed". #589's reporter worked around it by running lizard by
+ * hand, which is the cost of an ambiguous skip.
+ *
+ * @param {'diff'|'all'} scope which scope was used
+ * @param {number} count number of files in the list
+ * @returns {string} one line, no trailing newline
+ */
+function describeEmptyChangedFiles(scope, count) {
+  if (count > 0) {
+    return scope === 'all'
+      ? `${count} tracked source file(s) in scope (--all: whole tree)`
+      : `${count} changed source file(s) in scope`;
+  }
+  if (scope === 'all') {
+    return 'no tracked source files in this repository (--all already scanned the whole tree)';
+  }
+  // Name the real cause and the action that fixes it. Deliberately does NOT say
+  // "no source files": that describes the project, which is not what happened.
+  return 'no changed files in this run (0 staged, 0 vs HEAD) — run with `--all` to scan the whole tree';
+}
+
+/**
+ * Report which scope a gate actually used.
+ *
+ * A silent switch between diff and tree is the same defect one level up: the
+ * reader cannot tell what was inspected. Printed once per standalone run so
+ * "full check" cannot quietly mean "diff check".
+ *
+ * @param {'diff'|'all'} scope
+ * @param {number} count
+ * @returns {string}
+ */
+function describeChangedFilesScope(scope, count) {
+  const label = scope === 'all' ? 'all' : 'diff';
+  return `scope: ${label} (${count} file(s))`;
+}
+
+/**
  * Run a gate adapter fragment standalone.
  *
  * The gate fragments in githooks/adapters/gate-*.sh are designed to be *sourced*
@@ -16,8 +107,13 @@ const path = require('node:path');
  * the fragments fail with "command not found". This wrapper reconstructs the
  * same preamble the pre-commit hook sets up, then *sources* the fragment so it
  * behaves exactly as it does inside the commit hook.
+ *
+ * @param {string} scriptPath gate fragment to source
+ * @param {string} [cwd] project directory
+ * @param {{scope?: 'diff'|'all'}} [opts] `all` resolves CHANGED_FILES from the
+ *   tracked tree instead of the diff (#589)
  */
-function runGateAdapter(scriptPath, cwd = process.cwd()) {
+function runGateAdapter(scriptPath, cwd = process.cwd(), opts = {}) {
   let bashCommand = 'bash';
   if (process.platform === 'win32') {
     // PATH may lead with the WSL System32 stub, which cannot run these hooks
@@ -47,6 +143,19 @@ function runGateAdapter(scriptPath, cwd = process.cwd()) {
     path.resolve(__dirname, '..', 'hooks', 'lib', 'now-ms.sh'),
   ].find(candidate => fs.existsSync(candidate)) || '';
   const changedFilesParameter = ['$', '{CHANGED_FILES}'].join('');
+  // #589: the scope determines the file SOURCE. Under `--all` the gates that read
+  // CHANGED_FILES must see the whole tree, not the diff — otherwise a full check
+  // scans less than an ordinary commit and reads like a pass.
+  const allMode = opts.scope === 'all';
+  const allModeFiles = allMode ? resolveAllModeChangedFiles(cwd) : '';
+  const fileSourceLines = allMode
+    ? ['#589: --all scans the tracked tree, not the diff', `CHANGED_FILES=${JSON.stringify(allModeFiles)}`]
+    : [
+      'CHANGED_FILES="$(git diff --cached --name-only --diff-filter=ACM 2>/dev/null || true)"',
+      `if [ -z "${changedFilesParameter}" ] && [ -n "$(git rev-parse HEAD 2>/dev/null)" ]; then`,
+      '  CHANGED_FILES="$(git diff HEAD --name-only --diff-filter=ACM 2>/dev/null || true)"',
+      'fi',
+    ];
 
   // Build the shell preamble the pre-commit hook would otherwise inject before
   // sourcing the gate fragment, then source that fragment. Deliberately NOT
@@ -59,10 +168,10 @@ function runGateAdapter(scriptPath, cwd = process.cwd()) {
     'gate_start_ms() { now_ms; }',
     'record_gate_audit() { :; }',
     'PROJECT_LANG="$(detect_project_lang 2>/dev/null || echo unknown)"',
-    'CHANGED_FILES="$(git diff --cached --name-only --diff-filter=ACM 2>/dev/null || true)"',
-    `if [ -z "${changedFilesParameter}" ] && [ -n "$(git rev-parse HEAD 2>/dev/null)" ]; then`,
-    '  CHANGED_FILES="$(git diff HEAD --name-only --diff-filter=ACM 2>/dev/null || true)"',
-    'fi',
+    // #589: fragments need to know which scope produced the file list, so an empty
+    // list can say "empty diff" instead of "empty project".
+    `GATE_SCOPE=${JSON.stringify(opts.scope === 'all' ? 'all' : 'diff')}`,
+    ...fileSourceLines,
     'source "$3"',
   ].join('\n');
 
@@ -84,7 +193,7 @@ function runGateAdapter(scriptPath, cwd = process.cwd()) {
  * Finds the .ts entry point, spawns tsx with --run flag.
  * Falls back to bash script if TypeScript module not found.
  */
-function runTsGate(gateModule, targetPath) {
+function runTsGate(gateModule, targetPath, opts = {}) {
   const targetCwd = targetPath ? path.resolve(targetPath) : process.cwd();
   const entry = findTsGateEntry(gateModule);
   if (!entry) {
@@ -92,7 +201,7 @@ function runTsGate(gateModule, targetPath) {
     const gateNum = gateModule.replace('gate-', '');
     const script = resolveGateScript(gateNum, targetCwd);
     if (script) {
-      runGateAdapter(script, targetCwd);
+      runGateAdapter(script, targetCwd, opts);
     } else {
       console.log(`Gate ${gateModule}: TypeScript module not found and no bash fallback available.`);
     }
@@ -159,8 +268,8 @@ const GATE_REGISTRY = {
     name: 'Cyclomatic Complexity',
     description: 'lizard cyclomatic complexity analysis',
     aliases: ['complexity', 'ccn', '3'],
-    run: (targetPath) => {
-      return runTsGate('gate-3', targetPath);
+    run: (targetPath, opts) => {
+      return runTsGate('gate-3', targetPath, opts);
     },
   },
   '4': {
@@ -337,7 +446,7 @@ function getAllGates() {
   }));
 }
 
-async function runGate(gateId, targetPath) {
+async function runGate(gateId, targetPath, opts = {}) {
   const gate = GATE_REGISTRY[String(gateId)];
   if (!gate) {
     console.error(`Unknown gate: ${gateId}`);
@@ -356,7 +465,10 @@ async function runGate(gateId, targetPath) {
   if (gate.run) {
     console.log(`━━━ Gate ${gateId}: ${gate.name} ━━━`);
     try {
-      const result = gate.run(targetPath);
+      // #589: pass the scope through so a handler that shells out to a fragment
+      // can resolve its file list from the tree under --all. Handlers that ignore
+      // the second argument are unaffected.
+      const result = gate.run(targetPath, opts);
       if (result && typeof result.then === 'function') {
         return await result;
       }
@@ -378,4 +490,4 @@ async function runGate(gateId, targetPath) {
   return 1;
 }
 
-module.exports = { GATE_REGISTRY, getGateInfo, getAllGates, runGate, resolveAlias, getAliases, runGateAdapter, findTsGateEntry, resolveGateScript };
+module.exports = { GATE_REGISTRY, getGateInfo, getAllGates, runGate, resolveAlias, getAliases, runGateAdapter, findTsGateEntry, resolveGateScript, SOURCE_FILE_EXTENSIONS, resolveAllModeChangedFiles, describeEmptyChangedFiles, describeChangedFilesScope };

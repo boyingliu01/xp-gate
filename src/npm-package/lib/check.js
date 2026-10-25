@@ -147,7 +147,10 @@ async function checkAllGates(target) {
   }
 
   for (const gate of invokableGates) {
-    const code = await runGate(gate.id, target);
+    // #589: `--all` means the whole tree. Passing the scope keeps the gates that
+    // read CHANGED_FILES from scanning an empty diff and reporting SKIP — which
+    // read like a pass while checking LESS than an ordinary commit.
+    const code = await runGate(gate.id, target, { scope: 'all' });
     if (code === 0) tally.passed += 1;
     else tally.failed += 1;
     console.log('');

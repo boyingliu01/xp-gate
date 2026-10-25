@@ -233,7 +233,16 @@ else
       fi
       fi
     else
-      echo "⏭️  SKIPPED - Complexity (no source files to check)."
+      # #589: "no source files to check" described an empty PROJECT when the real
+      # cause is an empty CHANGED_FILES — an empty DIFF, or a `--all` run whose
+      # tree genuinely has no sources. The old wording read like a pass, which is
+      # why the reporter worked around the gate by running lizard by hand.
+      if [ -n "${GATE_SCOPE:-}" ] && [ "$GATE_SCOPE" = "all" ]; then
+        echo "⏭️  SKIPPED - Complexity: no tracked source files in this repository (scope: --all, whole tree)."
+      else
+        echo "⏭️  SKIPPED - Complexity: no changed source files in this run (scope: diff)."
+        echo "   Run 'xp-gate check . --all' to scan the whole tree."
+      fi
       GATE_3_STATUS="SKIP"
       # Consumed by the sourcing parent (pre-commit report JSON), not here.
       # shellcheck disable=SC2034
