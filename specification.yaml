@@ -2489,6 +2489,13 @@ specification:
         - id: AC-618-03
           criteria: 可判定为不兼容的情形须仍可报告；违规消息不得出现非类型的 token
           test_type: unit
+        - id: AC-618-04
+          criteria: 基类契约在同文件内可见时须据其判定——重写方法的参数类型若基类不接受则报违规，
+            接受则不报
+          test_type: unit
+        - id: AC-618-05
+          criteria: 基类不在同文件、或基类未声明该方法时须沉默；基类以限定名引用时须正确解析
+          test_type: unit
 
 
     - id: DD-001
