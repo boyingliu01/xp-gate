@@ -78,25 +78,86 @@ EOF_TOOLCHAIN
   return 0
 }
 
+# Environment variable that names a tool binary directly, in priority order.
+#
+# #580's first suggestion: a user whose toolchain lives somewhere unusual has no
+# way to say so today, and "put it on PATH" is not available to everyone — WSL with
+# appendWindowsPath=false has no Windows PATH at all.
+tool_env_override() {
+  case "$1" in
+    node) printf '%s\n' "${XP_GATE_NODE_BIN:-}" ;;
+    npx) printf '%s\n' "${XP_GATE_NPX_BIN:-}" ;;
+    npm) printf '%s\n' "${XP_GATE_NPM_BIN:-}" ;;
+    *) printf '%s\n' "" ;;
+  esac
+}
+
+# Is a tool available, counting the Windows `.exe` suffix and an env override?
+#
+# `command -v node` returns 1 on WSL and in git-bash even when
+# /mnt/c/Program Files/nodejs/node.exe exists and runs, because bash does not
+# append a suffix the way Windows does (#580). That single fact gave one gate a
+# silent SKIP and another a false BLOCK on the same machine:
+#
+#   Gate 1  "SKIP - npx not available"           fail-OPEN, reads like "nothing
+#                                                to check here"
+#   Gate 1  "BLOCKED - Biome check failed"       fail-CLOSED, wrong cause
+#   Gate 8  "BLOCKED - gitleaks not installed"   a security gate blocked by its
+#                                                own environment
+#
+# Both described an environment problem as a code problem.
+tool_is_available() {
+  local _tool="$1" _override
+  _override=$(tool_env_override "$_tool")
+  if [ -n "$_override" ] && [ -x "$_override" ]; then
+    return 0
+  fi
+  command -v "$_tool" >/dev/null 2>&1 && return 0
+  # Harmless on Linux/macOS: no such file exists there.
+  command -v "${_tool}.exe" >/dev/null 2>&1 && return 0
+  return 1
+}
+
 # Resolve a tool to an absolute path, or return 1.
 #
+# Priority order, matching #580's suggestion:
+#   1. XP_GATE_<TOOL>_BIN override
+#   2. command -v <tool>
+#   3. command -v <tool>.exe            (a Windows binary seen from a *NIX* shell)
+#   4. npx --no-install
+#   5. subproject node_modules/.bin
+#
 # Covers the shapes `command -v` cannot see:
+#   * the `.exe` suffix (#580)
 #   * subproject node_modules/.bin (monorepos: jscpd is a devDependency of ui/)
 #   * the standard Windows toolchain locations, via the bootstrap
 #
 # Echoes the path on success.
 resolve_tool_path() {
-  local _tool="$1" _hit _d
+  local _tool="$1" _hit _d _override
   local _base="${PROJECT_ROOT:-$(pwd)}"
 
+  # #580: an explicit override wins over every probe.
+  _override=$(tool_env_override "$_tool")
+  if [ -n "$_override" ] && [ -x "$_override" ]; then
+    printf '%s\n' "$_override"
+    return 0
+  fi
+
   _hit=$(command -v "$_tool" 2>/dev/null || true)
+  if [ -z "$_hit" ]; then
+    # #580: the .exe suffix. bash does not append it the way Windows does, so a
+    # bootstrapped Windows toolchain stays invisible without this second probe —
+    # and every gate keeps reporting an installed tool as missing.
+    _hit=$(command -v "${_tool}.exe" 2>/dev/null || true)
+  fi
   if [ -n "$_hit" ]; then
     printf '%s\n' "$_hit"
     return 0
   fi
 
   # npx knows about the project's own node_modules.
-  if command -v npx >/dev/null 2>&1; then
+  if tool_is_available npx; then
     if npx --no-install "$_tool" --version >/dev/null 2>&1; then
       printf '%s\n' "$_tool"
       return 0

@@ -2149,6 +2149,40 @@ specification:
           test_type: unit
 
 
+    # ============================================================
+    # REQ-609: 工具探测必须认得 Windows 的 .exe 后缀，且环境故障不得被报成代码判定。
+    #
+    # #580：`command -v node` 在 WSL 和 git-bash 下返回 1，即使
+    # /mnt/c/Program Files/nodejs/node.exe 就在那里且能运行——bash 不会像 Windows
+    # 那样补后缀。这一个事实在同一台机器上给出三种不同的错误结论：
+    #   Gate 1  "SKIP - npx not available"           fail-OPEN，读起来像「无可检查」
+    #   Gate 1  "BLOCKED - Biome check failed"       fail-CLOSED，但归因错误
+    #   Gate 8  "BLOCKED - gitleaks not installed"   安全门禁被自己的环境拦住
+    # 三条都在把环境问题描述成代码问题。
+    #
+    # 这是 #593 未覆盖的另一半：#593 已把 Windows 侧工具链目录引导进 PATH，但那是
+    # 必要不充分的——引导之后 `command -v node` 仍是 1，因为文件名是 node.exe。
+    #
+    # 诚实标注的限制：在 git-bash 上无法用行为断言隔离 .exe 分支（该宿主 PATHEXT
+    # 过于宽松，连带点的基名都被解析）。因此该分支以结构断言锁定，并在测试里写明
+    # 这是「此处最强为真的陈述」，而不是假装有行为覆盖。
+    # ============================================================
+    - id: REQ-609
+      description: "工具探测须支持 .exe 后缀与环境变量覆盖，使 WSL/git-bash 上已装工具不被报成缺失"
+      priority: high
+      acceptance_criteria:
+        - id: AC-609-01
+          criteria: tool_is_available 必须认得只有 *.exe 形态的可执行文件；真正缺席的工具仍须判为缺席
+            （不得为了修「找不到」而让探测对所有名字回答是）；XP_GATE_<TOOL>_BIN 覆盖必须优先于一切探测
+          test_type: integration
+        - id: AC-609-02
+          criteria: resolve_tool_path 返回的路径必须真的可执行——「找到文件」与「能运行它」不是同一件事
+          test_type: integration
+        - id: AC-609-03
+          criteria: 工具缺失/命令不存在必须分类为工具链故障，且提示中须点明这是 PATH 问题而非代码问题
+          test_type: integration
+
+
     - id: DD-001
       decision: 走薄桥（方案 A）在 ctx.tools 注册三工具，而非独立 MCP server 或纯技能
       rationale: 与 opencode 插件 1:1 映射、DSH 原生 API 直接支持、工作量最小；符合 RFC「薄桥而非重写」结论

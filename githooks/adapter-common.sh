@@ -166,7 +166,21 @@ require_tool() {
     bootstrap_toolchain_path
   fi
 
+  # #580: on WSL (appendWindowsPath=false) and in git-bash, `command -v node`
+  # returns 1 while node.exe sits in the same directory and runs. One root cause
+  # gave Gate 1 a silent SKIP, Gate 1 a false "Biome check failed" and Gate 8 a
+  # false "gitleaks not installed" — an environment fault reported as a code
+  # verdict in all three. tool_is_available also counts the .exe suffix and the
+  # XP_GATE_<TOOL>_BIN override.
+  if command -v tool_is_available >/dev/null 2>&1 && tool_is_available "$tool_name"; then
+    return 0
+  fi
+
   if command -v "$tool_name" >/dev/null 2>&1; then
+    return 0
+  fi
+
+  if command -v "${tool_name}.exe" >/dev/null 2>&1; then
     return 0
   fi
 
