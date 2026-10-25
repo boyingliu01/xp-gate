@@ -279,12 +279,48 @@ run_static_analysis() {
         exit 0
       " 2>&1) || PSSA_RC=$?
     else
+      # #595: the unscoped path used to be a bare `-Path . -Recurse`, which walks
+      # node_modules. In a repo with Playwright installed that analyses
+      # playwright-core/bin/*.ps1 -- vendored files that use Write-Host and WMI
+      # cmdlets by design, that `npm ci` overwrites, and that the author cannot
+      # edit. Gate 1 then blocked EVERY commit, permanently. A gate that can never
+      # pass is not strict; it is one people learn to bypass.
+      #
+      # The adapter already had the right discovery: _find_powershell_files prunes
+      # .git, node_modules, dist, coverage and the rest. The two paths disagreed
+      # only because this one never called it. Now both use it, so "what this
+      # adapter refuses to analyse" has one definition.
+      local legacy_files
+      legacy_files=$(_find_powershell_files '*.ps1')
+      if [ -z "$legacy_files" ]; then
+        # Nothing to analyse is NOT a pass: say so via the reason protocol the
+        # module-missing branch uses, so it stays visible in the gate output.
+        echo "XP_G1_REASON: no PowerShell files found outside the pruned directories"
+        return 3
+      fi
+      local legacy_array
+      legacy_array=$(_powershell_path_array $legacy_files)
       PSSA_OUT=$("$PWSH" "${POWERSHELL_ARGS[@]}" "
         if (-not (Get-Module -ListAvailable -Name PSScriptAnalyzer)) {
           Write-Output 'PSSA_MODULE_MISSING'
           exit 0
         }
-        \$results = Invoke-ScriptAnalyzer -Path . -Recurse -Severity Error,Warning
+        \$ErrorActionPreference = 'Stop'
+        try { Import-Module PSScriptAnalyzer -ErrorAction Stop | Out-Null } catch { exit 3 }
+        \$settings = Join-Path (Get-Location) 'PSScriptAnalyzerSettings.psd1'
+        \$results = @()
+        try {
+          foreach (\$p in $legacy_array) {
+            if (Test-Path -LiteralPath \$settings) {
+              \$results += @(Invoke-ScriptAnalyzer -Path \$p -Severity Error,Warning -Settings \$settings -ErrorAction Stop)
+            } else {
+              \$results += @(Invoke-ScriptAnalyzer -Path \$p -Severity Error,Warning -ErrorAction Stop)
+            }
+          }
+        } catch {
+          Write-Output ('PSSA_RUN_ERROR: ' + \$_.Exception.Message)
+          exit 3
+        }
         if (\$results) {
           \$results | Format-Table -AutoSize
           exit 1

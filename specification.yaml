@@ -2250,6 +2250,38 @@ specification:
           test_type: integration
 
 
+    # ============================================================
+    # REQ-612: Gate 1 的 PowerShell 分支不得扫描被剪枝目录（node_modules 等）。
+    #
+    # #595：有作用域文件时按声明路径逐条分析；没有时——即所有未 opt-in 仓库的默认
+    # 路径——退化为
+    #     Invoke-ScriptAnalyzer -Path . -Recurse -Severity Error,Warning
+    # 从仓库根递归且无任何排除。装了 Playwright 的仓库因此会分析
+    # node_modules/playwright-core/bin/*.ps1：那些文件按设计使用 Write-Host 与 WMI
+    # cmdlet，会被 `npm ci` 覆盖，作者也无法修改。Gate 1 于是永久阻断每一次提交，
+    # 并让作者去修他们改不了的文件。
+    #
+    # 同一份适配器里的 _find_powershell_files 是正确排除 .git / node_modules /
+    # dist / coverage 等目录的。两条路径只因为后者从未调用它而结论不同。
+    # 永远无法通过的门禁不是严格，是会被学会绕过的门禁。
+    # ============================================================
+    - id: REQ-612
+      description: "PowerShell 静态分析默认路径须使用已剪枝的文件发现，不得递归整个仓库"
+      priority: high
+      acceptance_criteria:
+        - id: AC-612-01
+          criteria: 未作用域化的默认分析路径不得使用裸的 -Path . -Recurse；且仍须分析项目自身的脚本
+            （不得以删除分析换取消噪）
+          test_type: integration
+        - id: AC-612-02
+          criteria: 剪枝列表须包含 .git / node_modules / dist / coverage；Playwright 形态的
+            node_modules 脚本不得进入分析集合，而项目自身脚本必须进入
+          test_type: integration
+        - id: AC-612-03
+          criteria: 适配器改动后语法有效
+          test_type: integration
+
+
     - id: DD-001
       decision: 走薄桥（方案 A）在 ctx.tools 注册三工具，而非独立 MCP server 或纯技能
       rationale: 与 opencode 插件 1:1 映射、DSH 原生 API 直接支持、工作量最小；符合 RFC「薄桥而非重写」结论
