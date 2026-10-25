@@ -227,6 +227,23 @@ export function parseJavaParamTypes(paramsText: string): string[] {
   return extractParamTypes(paramsText, true);
 }
 
+/**
+ * Does this adapter's language declare parameters as `Type name` (Java/Kotlin) rather
+ * than `name: Type` (TypeScript and friends)?
+ *
+ * Split out of `lspRule.check` to keep that function's cyclomatic complexity where it was:
+ * #588 pushed it from 2 to 4, and Gate 3's ratchet blocks a worsening. It also gives the
+ * one piece of language knowledge a name, which is where a future adapter should look.
+ *
+ * @param adapter the adapter under inspection
+ * @returns true for Java/Kotlin parameter syntax
+ */
+function usesTypeFirstName(adapter: Adapter): boolean {
+  if (typeof adapter.detectLanguage !== 'function') return false;
+  const language = adapter.detectLanguage();
+  return language === 'java' || language === 'kotlin';
+}
+
 export const lspRule: Rule = {
   id: 'solid.lsp',
   name: 'Liskov Substitution Principle Rule',
@@ -238,8 +255,7 @@ export const lspRule: Rule = {
     const classes = (adapter.extractClasses() || []) as ClassInfo[];
     // The adapter decides which parameter syntax applies; the rule holds no language
     // knowledge of its own (#588 suggestion 2, taken as far as a single file allows).
-    const language = typeof adapter.detectLanguage === 'function' ? adapter.detectLanguage() : '';
-    const isJava = language === 'java' || language === 'kotlin';
+    const isJava = usesTypeFirstName(adapter);
     return classes.flatMap((cls) => checkClass(file, cls, isJava));
   },
 };
