@@ -200,10 +200,53 @@ describe('solid.lsp detects a violation when the base contract IS available', ()
       ...tsAdapter,
       extractClasses: () => [
         { name: 'BaseHandler', line: 1, code: base },
-        { name: 'CsvHandler', line: 2, code: derived },
+        { name: 'CsvHandler', line: TS_DERIVED_CLASS_LINE, code: derived },
       ],
     } as never);
 
     expect(violations).toHaveLength(0);
+  });
+
+  it('treats an adapter without detectLanguage as non-Java rather than crashing', () => {
+    // Older or third-party adapters may not implement `detectLanguage`. The rule must
+    // fall back to the `name: Type` reading instead of throwing on an absent method —
+    // a crash here would surface as a Gate 4 rule error, not as silence.
+    const adapterWithoutLanguage = {
+      parseAST: () => undefined,
+      extractFunctions: () => [],
+      countLines: () => 0,
+      extractClasses: () => [
+        { name: 'BaseHandler', line: 1, code: `class BaseHandler {\n  handle(ds: DataSource): void {}\n}` },
+        {
+          name: 'CsvHandler',
+          line: TS_DERIVED_CLASS_LINE,
+          code: `class CsvHandler extends BaseHandler {\n  handle(channel: FileChannel): void {}\n}`,
+        },
+      ],
+    };
+
+    const violations = lspRule.check('handlers.ts', adapterWithoutLanguage as never);
+
+    expect(violations.length).toBeGreaterThan(0);
+  });
+
+  it('ignores a TypeScript parameter with no type annotation', () => {
+    // `handle(id)` has no `: Type`, so `extractTsParamType` returns null and the parameter
+    // contributes nothing. Without this the missing-annotation path is untested after the
+    // #588 rewrite, and a regex change could start inventing types out of parameter names.
+    const tsAdapter = {
+      ...adapterFor([]),
+      detectLanguage: () => 'typescript',
+      extractClasses: () => [
+        { name: 'BaseHandler', line: 1, code: `class BaseHandler {\n  handle(id): void {}\n}` },
+        {
+          name: 'CsvHandler',
+          line: TS_DERIVED_CLASS_LINE,
+          code: `class CsvHandler extends BaseHandler {\n  handle(id): void {}\n}`,
+        },
+      ],
+    };
+
+    expect(lspRule.check('handlers.ts', tsAdapter as never)).toHaveLength(0);
   });
 });
