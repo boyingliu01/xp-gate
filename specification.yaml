@@ -2421,6 +2421,38 @@ specification:
           test_type: unit
 
 
+    # ============================================================
+    # REQ-617: Java 成员计数须数「声明」而不是「调用点」。
+    #
+    # #587：countMembers 的正则是「标识符后跟 `(`」，在 Java 里那绝大多数是**调用点**。
+    # 方法体里的一切都被算成成员：builder.append(x)、Objects.requireNonNull(o)、
+    # new SQLException(...)、lambda 里的 foo(x)。去重只按名字，于是观测到两个现象：
+    # 偏高但有界，且虚增幅度与类的调用密度强相关。
+    # 实测 WhaleAuditFilter 127 vs 42，一个正常的 24 方法类被报成 41。
+    #
+    # clean-code.god-class 与 solid.srp 默认阈值都是 30，在 Java 上因此基本失去区分力。
+    # 用户唯一合规解法是调高阈值，而调高之后对真正的大类也失效了——与 #507 S4 同一处的
+    # 后续问题：计数有了，但语义错了，同样让规则失效，只是从「永远不报」变成「总是报」。
+    #
+    # 判据是行的形状（行首 + 修饰符 + 返回类型 + 名字 + 参数表 + `{`|`;`）以及**花括号深度**
+    # （只有类体自身深度 1 的声明才算，嵌套类/匿名类的方法不算）。
+    # ============================================================
+    - id: REQ-617
+      description: "Java 成员计数须只数声明，须区分重载，须排除嵌套类方法"
+      priority: high
+      acceptance_criteria:
+        - id: AC-617-01
+          criteria: 只统计方法声明，方法体内的方法调用、对象构造与 lambda 调用不得计入
+          test_type: unit
+        - id: AC-617-02
+          criteria: 重载须各自计数（不按名字去重）；构造器计入；嵌套类与匿名类的方法不计入外层类
+          test_type: unit
+        - id: AC-617-03
+          criteria: 接口的抽象方法（以分号结尾）须计入；泛型/数组返回类型与跨行 throws 不得导致漏计；
+            注解不得成为成员
+          test_type: unit
+
+
     - id: DD-001
       decision: 走薄桥（方案 A）在 ctx.tools 注册三工具，而非独立 MCP server 或纯技能
       rationale: 与 opencode 插件 1:1 映射、DSH 原生 API 直接支持、工作量最小；符合 RFC「薄桥而非重写」结论
