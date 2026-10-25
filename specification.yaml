@@ -2386,6 +2386,41 @@ specification:
           test_type: integration
 
 
+    # ============================================================
+    # REQ-616: 未覆盖项目的扫描不得报满分。
+    #
+    # #590：Java 项目上 Gate 6 恒定满分：
+    #     architecture_grade: { density: "0.00", level: "Excellent", score: "10.0" }
+    #     files_analyzed: 1
+    # 而该项目有 140 个 .java 文件。archlint 的检测器基于 JS/TS 扩展名的导入图，
+    # .java 不在其中，于是它只分析了 1 个文件（很可能是根目录 pom.xml），没在其中
+    # 发现 smell，评分逻辑就把「没有 smell」直接映射成「10.0 / Excellent」。
+    #
+    # Gate 6 本该拦住的一切（循环依赖、God Module、死代码、Shotgun Surgery）在 Java
+    # 上全部无法检出，而报告声称架构优秀。
+    #
+    # 这与 #589（Gate 3 恒定 SKIP）、#594（NaN 覆盖率判 PASS）同一形态：**「没去看」
+    # 与「看了没问题」必须可区分**，且工具没看的时候不能把它自己的信心照搬过来。
+    #
+    # 范围说明：architecture.yaml 从未被消费这一点不在本次修复内（那属于新增特性），
+    # 作为已知缺口记录，而不是顺手「修好」。
+    # ============================================================
+    - id: REQ-616
+      description: "架构扫描未覆盖项目时须退回评分并说明原因；已覆盖时评分不变"
+      priority: high
+      acceptance_criteria:
+        - id: AC-616-01
+          criteria: 分析文件数远低于项目源文件数时须退回评分并给出覆盖缺口；已覆盖时评分照常；
+            项目规模未知时不得凭猜测退回
+          test_type: unit
+        - id: AC-616-02
+          criteria: 缺口说明须点明未被分析的语言，并给出实际数字（分析数/总数）
+          test_type: unit
+        - id: AC-616-03
+          criteria: JS/TS 项目的真实评分与发现数不得改变；不可解析的报告仍须 fail closed
+          test_type: unit
+
+
     - id: DD-001
       decision: 走薄桥（方案 A）在 ctx.tools 注册三工具，而非独立 MCP server 或纯技能
       rationale: 与 opencode 插件 1:1 映射、DSH 原生 API 直接支持、工作量最小；符合 RFC「薄桥而非重写」结论
