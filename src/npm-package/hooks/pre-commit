@@ -401,6 +401,14 @@ source_gate_lib "${AUDIT_SCRIPT_DIR}/lib/coverage-total.sh"
 # JS/TS. Sourced as a library so both contracts are unit-testable.
 source_gate_lib "${AUDIT_SCRIPT_DIR}/lib/gate-5c-alignment.sh"
 
+# Issue #593: on Windows git-bash does not see the toolchains installed on the
+# Windows side (%APPDATA%\npm, the node install dir, pip --user's Scripts, ~/bin),
+# so four gates reported installed tools as missing and two of those reports were
+# false GREENS. One bootstrap, appended (never prepended) so the caller's PATH
+# order stays authoritative.
+source_gate_lib "${AUDIT_SCRIPT_DIR}/lib/toolchain-path.sh"
+bootstrap_toolchain_path
+
 # Issue #399: Python smart test selection — strategy decision + related-test
 # lookup, kept in a library so the truth table and the path conventions are
 # unit-testable without executing this hook.

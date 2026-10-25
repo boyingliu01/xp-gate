@@ -1,0 +1,212 @@
+#!/bin/bash
+# Toolchain PATH bootstrap and tool resolution (#593).
+#
+# On Windows the hook runs under git-bash, which does NOT inherit the PATH entries
+# the caller added on the Windows side, and none of the standard install locations
+# for the toolchains these gates need are on git-bash's default PATH:
+#
+#   npm global CLIs      %APPDATA%\npm
+#   the node binary      C:\Program Files\nodejs
+#   pip --user scripts   %APPDATA%\Python\PythonNNN\Scripts
+#   hand-placed tools    ~/bin, ~/.local/bin
+#
+# Every gate that needs one of those probed only `command -v` / `npx --no-install`
+# / `~/.local/bin`, so "not on this shell's PATH" was reported as "not installed".
+# Four gates did that for tools that were installed, and two of the reports were
+# false GREENS (a gate that never ran, reported as a WARN that reads like an
+# optional tool missing).
+#
+# The fix belongs here, once, rather than in each gate: one bootstrap that appends
+# — never prepends — so the caller's PATH order stays authoritative.
+
+# Directories to append, one per line. Empty when nothing applies.
+#
+# Globbing the Python Scripts dirs instead of guessing a version is deliberate:
+# the version in the path is the interpreter's, not the tool's, and a repo may
+# have several.
+toolchain_path_candidates() {
+  local _home="${HOME:-}"
+  local _appdata="${APPDATA:-}"
+  local _node="${XP_GATE_NODE_DIR:-}"
+  local _d
+
+  # npm global CLIs. APPDATA is the Windows default; the unix-shaped locations are
+  # harmless on Linux/macOS because the loop below skips anything not a directory.
+  [ -n "$_appdata" ] && [ -d "$_appdata/npm" ] && printf '%s\n' "$_appdata/npm"
+  [ -n "$_home" ] && [ -d "$_home/.npm-global/bin" ] && printf '%s\n' "$_home/.npm-global/bin"
+
+  # The node install dir. Needed not only to run node CLIs but to run the npm POSIX
+  # shims, which exec `node` by name (#593 symptom 2).
+  if [ -n "$_node" ] && [ -d "$_node" ]; then
+    printf '%s\n' "$_node"
+  fi
+  if [ -n "$_appdata" ] && [ -d "$_appdata/npm/node_modules/.bin" ]; then
+    printf '%s\n' "$_appdata/npm/node_modules/.bin"
+  fi
+
+  # pip --user Scripts dirs, one per Python version found.
+  if [ -n "$_appdata" ] && [ -d "$_appdata/Python" ]; then
+    for _d in "$_appdata"/Python/Python*/Scripts; do
+      [ -d "$_d" ] && printf '%s\n' "$_d"
+    done
+  fi
+  # Unix-side pip --user and hand-placed tools.
+  [ -n "$_home" ] && [ -d "$_home/.local/bin" ] && printf '%s\n' "$_home/.local/bin"
+  [ -n "$_home" ] && [ -d "$_home/bin" ] && printf '%s\n' "$_home/bin"
+
+  return 0
+}
+
+# Append the toolchain locations to PATH. Idempotent: a second call is a no-op.
+#
+# APPENDS rather than prepends. A project that pins its own tool version must keep
+# winning; putting a global CLI in front would silently override it.
+bootstrap_toolchain_path() {
+  local _dir _added=0
+  while IFS= read -r _dir; do
+    [ -n "$_dir" ] || continue
+    case ":${PATH}:" in
+      *":${_dir}:"*) continue ;;
+    esac
+    PATH="${PATH}:${_dir}"
+    _added=$((_added + 1))
+  done <<EOF_TOOLCHAIN
+$(toolchain_path_candidates)
+EOF_TOOLCHAIN
+  export PATH
+  _XP_GATE_TOOLCHAIN_BOOTSTRAPPED=1
+  return 0
+}
+
+# Resolve a tool to an absolute path, or return 1.
+#
+# Covers the shapes `command -v` cannot see:
+#   * subproject node_modules/.bin (monorepos: jscpd is a devDependency of ui/)
+#   * the standard Windows toolchain locations, via the bootstrap
+#
+# Echoes the path on success.
+resolve_tool_path() {
+  local _tool="$1" _hit _d
+  local _base="${PROJECT_ROOT:-$(pwd)}"
+
+  _hit=$(command -v "$_tool" 2>/dev/null || true)
+  if [ -n "$_hit" ]; then
+    printf '%s\n' "$_hit"
+    return 0
+  fi
+
+  # npx knows about the project's own node_modules.
+  if command -v npx >/dev/null 2>&1; then
+    if npx --no-install "$_tool" --version >/dev/null 2>&1; then
+      printf '%s\n' "$_tool"
+      return 0
+    fi
+  fi
+
+  # Subproject node_modules/.bin, shallow then one level deep. A monorepo's ui/ or
+  # server/ package is the normal case; deeper nesting is rare enough that a full
+  # find would cost more than it returns.
+  for _d in "$_base/node_modules/.bin/$_tool" "$_base"/*/node_modules/.bin/"$_tool"; do
+    if [ -x "$_d" ]; then
+      printf '%s\n' "$_d"
+      return 0
+    fi
+  done
+
+  return 1
+}
+
+# Put the directory of a resolved tool on PATH, so the tool's own siblings are
+# reachable, and print that directory.
+#
+# semgrep(.exe) is a zipapp wrapper that execs the sibling `pysemgrep`. Resolving
+# the wrapper is not enough: if its directory is not on PATH the wrapper dies with
+# `executing pysemgrep failed: No such file or directory`, which Gate 10 then
+# reported as "tool not installed" (#593 symptom 4).
+#
+# WARNING: call this directly, never as `$(resolve_tool_dir x)`. A command
+# substitution runs in a subshell, so the PATH change would be discarded and the
+# caller would get the directory name while the tool stayed broken — which is
+# exactly how this bit its own first test. Read the directory from
+# `$(resolve_tool_dir ...)` only if you do not need the PATH side effect; otherwise
+# call it and capture with a plain assignment from a file or use
+# `ensure_tool_dir_on_path`.
+resolve_tool_dir() {
+  local _tool="$1" _path _dir
+  bootstrap_toolchain_path
+  _path=$(resolve_tool_path "$_tool") || return 1
+  if [ -f "$_path" ]; then
+    _dir=$(cd "$(dirname "$_path")" && pwd)
+  else
+    _dir=$(pwd)
+  fi
+  case ":${PATH}:" in
+    *":${_dir}:"*) ;;
+    *) PATH="${_dir}:${PATH}"; export PATH ;;
+  esac
+  printf '%s\n' "$_dir"
+  return 0
+}
+
+# Side-effect-only variant: put the tool's directory on PATH in the CALLER's
+# shell. Returns 0 on success, 1 when the tool cannot be resolved.
+#
+# This is the one to call from a gate that is about to run the tool.
+ensure_tool_dir_on_path() {
+  local _tool="$1" _dir
+  bootstrap_toolchain_path
+  _dir=$(resolve_tool_path "$_tool") || return 1
+  if [ -f "$_dir" ]; then
+    _dir=$(cd "$(dirname "$_dir")" && pwd)
+  else
+    _dir=$(pwd)
+  fi
+  case ":${PATH}:" in
+    *":${_dir}:"*) ;;
+    *) PATH="${_dir}:${PATH}"; export PATH ;;
+  esac
+  return 0
+}
+
+# Human-readable list of everywhere a tool is looked for, for the "not available"
+# message.
+#
+# "not installed" and "installed but not found" need different fixes, and the old
+# message could only say the first (#593 point 3).
+describe_tool_search() {
+  local _tool="$1" _base="${PROJECT_ROOT:-$(pwd)}"
+  printf '   Searched: PATH entries'
+  printf ', %s' "$_base/node_modules/.bin/$_tool" "$_base"/*/node_modules/.bin/"$_tool"
+  local _extra
+  _extra=$(toolchain_path_candidates | tr '\n' ',' | sed 's/,$//')
+  if [ -n "$_extra" ]; then
+    printf ', toolchain dirs (%s)' "$_extra"
+  fi
+  printf '\n'
+  printf '   If the tool IS installed, this is a PATH problem, not a missing install.\n'
+}
+
+# Classify a non-zero exit from a tool: TOOLCHAIN or FINDING.
+#
+#   $1 -- the tool's exit status
+#   $2 -- everything it printed
+#
+# Exit 127 plus an exec/"not found" line means the shim resolved but its
+# interpreter did not. Gate 6 printed
+#     ❌ BLOCKED - Architecture violations detected
+# for exactly that, pointing the reader at code that was fine (#593 symptom 2).
+#
+# The FINDING default matters as much: if everything looked like a toolchain
+# problem, no gate could ever block on a real violation.
+classify_tool_failure() {
+  local _exit="$1" _out="$2"
+  if [ "$_exit" -eq 127 ] 2>/dev/null; then
+    printf 'TOOLCHAIN\n'
+    return 0
+  fi
+  if printf '%s' "$_out" | grep -qiE 'exec: [^ ]+: not found|command not found|No such file or directory.*exec|pysemgrep failed'; then
+    printf 'TOOLCHAIN\n'
+    return 0
+  fi
+  printf 'FINDING\n'
+}
