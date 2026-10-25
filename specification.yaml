@@ -2183,6 +2183,39 @@ specification:
           test_type: integration
 
 
+    # ============================================================
+    # REQ-610: 适配器加载共享库时必须覆盖所有发行布局，且加载失败不得静默。
+    #
+    # #597：三个适配器用
+    #     source "$SCRIPT_DIR/../adapter-common.sh" 2>/dev/null || true
+    # `$SCRIPT_DIR` 已经是 `.../adapters`，于是 `../adapter-common.sh` 是
+    # `.../adapter-common.sh`。仓库布局下这个文件恰好存在（npm 包在那里留了一份
+    # 副本），但全局安装布局 `~/.config/xp-gate/adapters/` 下不存在：
+    #     test -f ~/.config/xp-gate/adapter-common.sh           -> 不存在
+    #     test -f ~/.config/xp-gate/adapters/adapter-common.sh  -> 存在
+    # 即在该门禁实际运行于大多数消费方机器的那种布局里，共享库从未加载，它提供的
+    # 每个函数都是未定义的。
+    #
+    # `2>/dev/null || true` 是让它不可见的原因：加载失败与加载成功无法区分，适配器
+    # 于是退化成各自碰巧有的兜底，或在稍后以无关的 "command not found" 失败。
+    # 用正确路径的适配器：0 个。这不是一个笔误，是一整类。
+    # ============================================================
+    - id: REQ-610
+      description: "适配器须按候选列表加载 adapter-common.sh，覆盖全局安装与 npm 包两种布局"
+      priority: high
+      acceptance_criteria:
+        - id: AC-610-01
+          criteria: 不得再有适配器通过不存在的父级路径加载 adapter-common.sh
+          test_type: integration
+        - id: AC-610-02
+          criteria: 全局安装布局（库在 adapters/ 内）与 npm 包布局（库在 adapters/ 上一级）
+            都必须真正加载成功——以库定义的函数可见为判据，而非「source 没报错」
+          test_type: integration
+        - id: AC-610-03
+          criteria: 原先受影响的 go.sh / iac.sh / python.sh 三个适配器须全部修复且语法有效
+          test_type: integration
+
+
     - id: DD-001
       decision: 走薄桥（方案 A）在 ctx.tools 注册三工具，而非独立 MCP server 或纯技能
       rationale: 与 opencode 插件 1:1 映射、DSH 原生 API 直接支持、工作量最小；符合 RFC「薄桥而非重写」结论
