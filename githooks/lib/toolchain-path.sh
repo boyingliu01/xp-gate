@@ -73,6 +73,24 @@ bootstrap_toolchain_path() {
   done <<EOF_TOOLCHAIN
 $(toolchain_path_candidates)
 EOF_TOOLCHAIN
+
+  # #596 point 2: the authoritative source is the ORIGINAL Windows PATH, not a list
+  # of guessed standard locations. A hook shell can run with a shrunken PATH while
+  # ORIGINAL_PATH still carries everything, and a custom prefix (D:\npm) shows up
+  # only there. Appended after the standard candidates, so an explicitly pinned
+  # project toolchain still wins.
+  while IFS= read -r _dir; do
+    [ -n "$_dir" ] || continue
+    case ":${PATH}:" in
+      *":${_dir}:"*) continue ;;
+    esac
+    [ -d "$_dir" ] || continue
+    PATH="${PATH}:${_dir}"
+    _added=$((_added + 1))
+  done <<EOF_ORIGINAL
+$(original_path_dirs)
+EOF_ORIGINAL
+
   export PATH
   _XP_GATE_TOOLCHAIN_BOOTSTRAPPED=1
   return 0
@@ -106,16 +124,95 @@ tool_env_override() {
 #                                                own environment
 #
 # Both described an environment problem as a code problem.
+#
+# #596 adds the third and costliest variant: PRESENCE IS NOT EXECUTABILITY.
+# `command -v checkov` succeeds on a POSIX shim whose shebang execs `python`, on a
+# shell where `python` is not resolvable. The file is there, it is executable, and
+# running it dies at the `exec` with 127. Gate 7 counted zero usable scanners and
+# BLOCKED a commit under "no scanning tools available" — on a repo where checkov
+# 3.3.30 worked. So the probe now proves it can run.
 tool_is_available() {
-  local _tool="$1" _override
+  local _tool="$1" _override _hit
   _override=$(tool_env_override "$_tool")
   if [ -n "$_override" ] && [ -x "$_override" ]; then
-    return 0
+    tool_can_execute "$_override"
+    return $?
   fi
-  command -v "$_tool" >/dev/null 2>&1 && return 0
-  # Harmless on Linux/macOS: no such file exists there.
-  command -v "${_tool}.exe" >/dev/null 2>&1 && return 0
-  return 1
+
+  _hit=$(command -v "$_tool" 2>/dev/null || true)
+  if [ -z "$_hit" ]; then
+    # Harmless on Linux/macOS: no such file exists there.
+    _hit=$(command -v "${_tool}.exe" 2>/dev/null || true)
+  fi
+  if [ -z "$_hit" ]; then
+    # #596: a tool reachable only through the un-shrunk PATH still counts. Callers
+    # may probe before bootstrapping, so this cannot rely on the bootstrap having
+    # run.
+    _hit=$(find_tool_in_original_path "$_tool")
+  fi
+  [ -n "$_hit" ] || return 1
+
+  # Found — now prove it is not a shim pointing at an unreachable interpreter.
+  # A tool that exists but cannot run is NOT available; the caller reports it as a
+  # toolchain failure, which is a different and true statement from "not installed".
+  tool_can_execute "$_hit"
+}
+
+# The path of a tool found in ORIGINAL_PATH, or the empty string.
+#
+# @param {string} tool tool name
+# @returns {string}
+find_tool_in_original_path() {
+  local _tool="$1" _dir
+  while IFS= read -r _dir; do
+    [ -n "$_dir" ] || continue
+    if [ -x "$_dir/$_tool" ]; then
+      printf '%s' "$_dir/$_tool"
+      return 0
+    fi
+    if [ -x "$_dir/${_tool}.exe" ]; then
+      printf '%s' "$_dir/${_tool}.exe"
+      return 0
+    fi
+  done <<EOF_ORIGINAL_TOOL
+$(original_path_dirs)
+EOF_ORIGINAL_TOOL
+  return 0
+}
+
+# Can this resolved tool be executed?
+#
+# Runs `<tool> --version` under a timeout. Exit 127 is the shell's own "interpreter
+# not found" and is the precise signal for the broken-shim case. Any other non-zero
+# exit still counts as executable: a tool that runs and rejects `--version` exists
+# and works, and calling it missing would be the same defect in the other direction.
+#
+# @param {string} path resolved tool path
+# @returns 0 when the tool can be executed
+tool_can_execute() {
+  local _path="$1" _status=0
+  [ -n "$_path" ] && [ -x "$_path" ] || return 1
+  if command -v timeout >/dev/null 2>&1; then
+    timeout 20 "$_path" --version >/dev/null 2>&1 || _status=$?
+  else
+    "$_path" --version >/dev/null 2>&1 || _status=$?
+  fi
+  [ "$_status" -ne 127 ]
+}
+
+# Directories listed in ORIGINAL_PATH, one per line.
+#
+# #596 point 2: inside a hook shell $PATH can be a handful of entries (measured: 7)
+# while ORIGINAL_PATH still carries the full Windows PATH (measured: 3002 chars), and
+# a tool installed to a custom prefix appears only in the latter. Guessing standard
+# install locations — all #593's bootstrap does — cannot find a custom prefix.
+#
+# Normally unset on Linux/macOS, which yields nothing and is correct: there is no
+# shrunken-PATH problem there.
+original_path_dirs() {
+  local _raw="${ORIGINAL_PATH:-}"
+  [ -n "$_raw" ] || return 0
+  printf '%s' "$_raw" | tr ':' '\n' | sed -n '/./p'
 }
 
 # Resolve a tool to an absolute path, or return 1.

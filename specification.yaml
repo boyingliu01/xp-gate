@@ -2216,6 +2216,40 @@ specification:
           test_type: integration
 
 
+    # ============================================================
+    # REQ-611: 「工具存在」不等于「工具能运行」，且 ORIGINAL_PATH 才是可靠来源。
+    #
+    # #596：`command -v checkov` 在 POSIX shim 上成功——shim 内容为
+    #     #!/bin/sh
+    #     exec python ".../Scripts/checkov" "$@"
+    # 而该 shell 里 `python` 不可解析，于是 `command -v` 看到「有工具」，执行时在
+    # `exec` 处以 127 死掉。检测层与执行层判据不一致。
+    #
+    # 后果对一道安全门禁是最坏的一种：Gate 7 数出「可用扫描器 = 0」并无条件 BLOCK，
+    # 而机器上 checkov 3.3.30 既能装也能用。文案写的是「没有可用的扫描工具」——
+    # 一个环境故障穿上了代码判定的外衣。这是同一类的第三次（#536、#593）。
+    #
+    # 另一点：hook shell 里 $PATH 可能只剩 7 条，而 ORIGINAL_PATH 仍携带完整
+    # Windows PATH（3002 字符），自定义前缀（D:\npm）只出现在后者里。任何「猜标准
+    # 安装目录」的探测（#593 的 bootstrap 正是如此）都找不到自定义前缀。
+    # ============================================================
+    - id: REQ-611
+      description: "工具可用性须以可执行性验证，并支持 ORIGINAL_PATH 来源；环境故障不得产出代码判定"
+      priority: high
+      acceptance_criteria:
+        - id: AC-611-01
+          criteria: 存在但无法执行的 shim（解释器缺失，退出 127）不得被报为可用；能正常运行的工具仍须报为可用；
+            且「存在但跑不起来」须与「未安装」区分为不同状态
+          test_type: integration
+        - id: AC-611-02
+          criteria: 扫描器不可用不得产出「发现问题」的判定——「扫描没跑起来」与「扫描发现了问题」必须可区分，
+            且真实发现不得因此被豁免
+          test_type: integration
+        - id: AC-611-03
+          criteria: 仅通过 ORIGINAL_PATH 可达的工具必须仍能被找到
+          test_type: integration
+
+
     - id: DD-001
       decision: 走薄桥（方案 A）在 ctx.tools 注册三工具，而非独立 MCP server 或纯技能
       rationale: 与 opencode 插件 1:1 映射、DSH 原生 API 直接支持、工作量最小；符合 RFC「薄桥而非重写」结论
