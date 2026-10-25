@@ -36,12 +36,17 @@ if [ -f ".gitleaks.toml" ]; then
   # gitleaks is a native binary and may not understand MSYS/WSL paths, so pass an
   # absolute path in the host's own format when we can derive one (#449).
   #
-  # #582: `cygpath` exists only in Git-for-Windows/MSYS. On WSL the equivalent is
-  # `wslpath`, and its absence meant the fallback handed
-  # `/mnt/d/projects/<repo>/.gitleaks.toml` to the native gitleaks.exe, which could
-  # not open it and exited 1 -- reported as "Secrets detected". So both converters
-  # are tried, in that order, before falling back to the raw path.
-  if command -v cygpath >/dev/null 2>&1; then
+  # #582 found this the hard way: `cygpath` exists only in Git-for-Windows/MSYS, and on
+  # WSL its absence meant the fallback handed `/mnt/d/projects/<repo>/.gitleaks.toml`
+  # to the native gitleaks.exe. It could not open the file, exited 1, and Gate 8
+  # reported "Secrets detected". The conversion now lives in a shared library so the
+  # next gate handing a path to a native binary does not re-derive it (#581).
+  #
+  # This script may also run standalone (archived/copied hook) without the library, so
+  # the converter is used when present and the inline branch kept as the fallback.
+  if declare -F to_native_path >/dev/null 2>&1; then
+    GITLEAKS_CONFIG="--config=$(to_native_path "$(pwd)/.gitleaks.toml")"
+  elif command -v cygpath >/dev/null 2>&1; then
     GITLEAKS_CONFIG="--config=$(cygpath -w "$(pwd)/.gitleaks.toml")"
   elif command -v wslpath >/dev/null 2>&1; then
     GITLEAKS_CONFIG="--config=$(wslpath -w "$(pwd)/.gitleaks.toml")"

@@ -409,6 +409,14 @@ source_gate_lib "${AUDIT_SCRIPT_DIR}/lib/gate-5c-alignment.sh"
 source_gate_lib "${AUDIT_SCRIPT_DIR}/lib/toolchain-path.sh"
 bootstrap_toolchain_path
 
+# Issue #581: POSIX -> native path conversion for the absolute paths handed to node.exe
+# and tsx. On WSL a leading `/` resolves to `<current drive>:\` inside node, so
+# `$HOME/.config/...` became `D:\home\...` and Gate 9 reported the module-not-found as
+# "Build integrity check failed" -- advice to fix the user's type errors. Kept in a
+# library because Gate 8 needed the same conversion for gitleaks (#582) and both were
+# solved inline otherwise.
+source_gate_lib "${AUDIT_SCRIPT_DIR}/lib/native-path.sh"
+
 # Issue #399: Python smart test selection — strategy decision + related-test
 # lookup, kept in a library so the truth table and the path conventions are
 # unit-testable without executing this hook.
@@ -3759,10 +3767,20 @@ elif [ -f "package.json" ] && [ -f "tsconfig.json" ]; then
     GATE_9_SCRIPT="$HOME/.config/xp-gate/modules/build-integrity/gate-10.ts"
   fi
 
+  # #581: the script path goes to node.exe. On WSL $HOME is /home/<user>, which node.exe
+  # resolves to <current drive>:\home\<user>\... -- module not found -- and Gate 9 then
+  # reported "Build integrity check failed" with advice to fix type errors in the USER'S
+  # code. Convert the path first so the failure, if any, is a real one.
+  if [ -n "$GATE_9_SCRIPT" ]; then
+    GATE_9_SCRIPT=$(to_native_path "$GATE_9_SCRIPT")
+  fi
+  # Same for the project root, which reaches both node and tsx as an absolute path.
+  GATE_9_PROJECT_ROOT=$(to_native_path "$PROJECT_ROOT")
+
   if [ -n "$GATE_9_SCRIPT" ]; then
     CHANGED_FILES_CSV=$(echo "$CHANGED_FILES" | tr ' ' ',')
     GATE_9_OUTPUT=$(mktemp)
-    if RUN_TSX_TIMEOUT=120s run_tsx "$GATE_9_SCRIPT" --changed-files "$CHANGED_FILES_CSV" --project-root "$PROJECT_ROOT" --timeout 115000 > "$GATE_9_OUTPUT" 2>&1; then
+    if RUN_TSX_TIMEOUT=120s run_tsx "$GATE_9_SCRIPT" --changed-files "$CHANGED_FILES_CSV" --project-root "$GATE_9_PROJECT_ROOT" --timeout 115000 > "$GATE_9_OUTPUT" 2>&1; then
       GATE_9_TS_STATUS="PASS"
       echo "     ✅ Build integrity check passed."
     else

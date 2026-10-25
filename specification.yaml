@@ -2353,6 +2353,39 @@ specification:
           test_type: integration
 
 
+    # ============================================================
+    # REQ-615: 交给原生二进制的绝对路径必须先转换成宿主格式。
+    #
+    # #581：WSL 上两道门禁把「工具自身的路径问题」报成「用户仓库的缺陷」：
+    #   Gate 9  ❌ BLOCKED - Build integrity check failed
+    #           Fix type errors, broken imports, or package manifest issues
+    #   Gate 8  ❌ BLOCKED - Secrets detected in staged files
+    # 两者的原因都是 POSIX 绝对路径被交给原生 Windows 二进制。node.exe 把开头的 `/`
+    # 解析成 `<当前盘符>:\`，于是 `/c/Users/x/.config/xp-gate/modules/build-integrity/gate-10.ts`
+    # 变成 `D:\c\Users\...`，模块「找不到」。
+    #
+    # 关键区分（issue 原文）：相对路径一直是好的——node 用自己的 cwd 正确翻译了它。
+    # 所以缺陷不是「WSL 不支持」，而是「绝对路径没有翻译」。
+    #
+    # 这是 #582、#596 同一类的第四次。正因如此，修复落在一个共享库上而不是又一处
+    # 内联分支：同一份转换知识此前被 gate-8 内联重写了一次，而 Gate 9 从来没有。
+    # ============================================================
+    - id: REQ-615
+      description: "POSIX 绝对路径交给原生二进制前须转换；相对路径不动；转换能力须按宿主判定"
+      priority: high
+      acceptance_criteria:
+        - id: AC-615-01
+          criteria: 绝对 POSIX 路径须转换为原生形式；相对路径与空路径须原样返回；无转换器时不得丢失路径
+          test_type: integration
+        - id: AC-615-02
+          criteria: 是否需要转换须由宿主（WSL / MSYS / 转换器存在）明确判定
+          test_type: integration
+        - id: AC-615-03
+          criteria: pre-commit 须加载转换库并实际转换 Gate 9 的模块路径与项目根，
+            使其不再以 POSIX 绝对形式交给 node
+          test_type: integration
+
+
     - id: DD-001
       decision: 走薄桥（方案 A）在 ctx.tools 注册三工具，而非独立 MCP server 或纯技能
       rationale: 与 opencode 插件 1:1 映射、DSH 原生 API 直接支持、工作量最小；符合 RFC「薄桥而非重写」结论
