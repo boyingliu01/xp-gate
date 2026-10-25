@@ -6,8 +6,36 @@
 const path = require('path');
 const fs = require('fs');
 const os = require('os');
+const { spawnSync } = require('child_process');
 
 const reportPath = path.resolve(__dirname, '..', 'ccn-report.cjs');
+
+/**
+ * Is `lizard` actually runnable here?
+ *
+ * The cases below measure real CCN values and therefore need the analyzer. Per the
+ * project's own convention (tool missing => SKIP, not BLOCK), a host without lizard must
+ * skip them rather than fail — otherwise the suite reports "the code is broken" when the
+ * environment is.
+
+ * This mattered in practice: the Mutation Testing workflow runs the initial test run
+ * inside a Stryker sandbox on an image without lizard, so one FAILing case aborted the
+ * ENTIRE mutation run ("There were failed tests in the initial test run") before a single
+ * mutant was evaluated — a tooling gap presenting as a red build for every change that
+ * happened to touch a mutated file.
+ */
+function lizardAvailable() {
+  // `--version` is read-only and cheap; a spawn failure (ENOENT) also means "absent".
+  const probe = spawnSync('lizard', ['--version'], { encoding: 'utf8' });
+  return probe.status === 0 && !probe.error;
+}
+
+const LIZARD_PRESENT = lizardAvailable();
+// A visible record of the skip decision, so a green run on a lizard-less image cannot be
+// mistaken for "these cases passed".
+if (!LIZARD_PRESENT) {
+  console.warn('[ccn-report] lizard not found — CCN measurement cases will SKIP, not pass');
+}
 
 function makeFixtureTree() {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'ccn-report-'));
@@ -41,7 +69,9 @@ describe('ccn-report (per-file trustworthy measurement)', () => {
     expect(mod.bucketFor('scripts/x.test.cjs')).toBe('test');
   });
 
-  it('produces a report over a real fixture tree without inflating spans', async () => {
+  // Skips when lizard is absent rather than failing: the analyzer is the subject of the
+  // measurement, and an image without it cannot answer the question. See lizardAvailable.
+  (LIZARD_PRESENT ? it : it.skip)('produces a report over a real fixture tree without inflating spans', async () => {
     const dir = makeFixtureTree();
     try {
       const mod = require(reportPath);
@@ -71,7 +101,7 @@ describe('ccn-report (per-file trustworthy measurement)', () => {
     expect(stats.p50).toBeLessThanOrEqual(300);
   });
 
-  it('corrects lizard phantom CCN caused by generic-arrow brace confusion', async () => {
+  (LIZARD_PRESENT ? it : it.skip)('corrects lizard phantom CCN caused by generic-arrow brace confusion', async () => {
     // Reproduction of the real bug class: a Record<string, (…) => boolean>
     // field makes lizard's TS parser lose a brace; from there every function
     // span swallows its neighbours and CCN is charged across them (measured
@@ -412,7 +442,7 @@ describe('ccn-report (per-file trustworthy measurement)', () => {
    *         code; --check must refuse to run rather than report a vacuous OK.
    * @covers AC-RATCHET-003
    */
-  it('--check fails closed when the baseline file is missing', () => {
+  (LIZARD_PRESENT ? it : it.skip)('--check fails closed when the baseline file is missing', () => {
     const { spawnSync } = require('node:child_process');
     const dir = makeFixtureTree();
     try {
