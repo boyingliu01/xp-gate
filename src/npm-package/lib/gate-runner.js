@@ -245,6 +245,15 @@ function buildPreamble(allMode, fileSourceLines) {
 // Pre-commit-only gates (<gate-id>: { preCommitOnly: true }) run only in git commit context.
 
 /**
+ * Wall-clock budget for one TypeScript gate run.
+ *
+ * Generous on purpose: `gate-5-runner-error.test.ts` alone takes ~400s on CI, and a
+ * gate killed for being slow must be reported as "did not report a verdict", never
+ * silently counted as a pass.
+ */
+const TS_GATE_TIMEOUT_MS = 120000;
+
+/**
  * Run a TypeScript gate module via npx tsx.
  * Finds the .ts entry point, spawns tsx with --run flag.
  * Falls back to bash script if TypeScript module not found.
@@ -267,14 +276,26 @@ function runTsGate(gateModule, targetPath, opts = {}) {
   const args = ['-y', 'tsx', entry, '--run'];
   if (targetPath) args.push('--cwd', targetPath);
 
-  const result = spawnSync('npx', args, {
-    stdio: 'inherit',
-    shell: process.platform === 'win32',
-    cwd: targetCwd,
-    timeout: 120000,
-  });
-
-  return result.status === null ? 1 : result.status;
+  // spawnSync reports a spawn failure (npx missing) on `error`, throws only on a
+  // malformed argv, and reports a killed child (timeout, signal) as a null status.
+  // All three mean "the gate did not report a verdict", which must not be read as
+  // success: a gate that never ran is not a gate that passed.
+  try {
+    const result = spawnSync('npx', args, {
+      stdio: 'inherit',
+      shell: process.platform === 'win32',
+      cwd: targetCwd,
+      timeout: TS_GATE_TIMEOUT_MS,
+    });
+    if (result.error) {
+      console.error(`Gate ${gateModule}: failed to run npx tsx: ${result.error.message}`);
+      return 1;
+    }
+    return result.status === null ? 1 : result.status;
+  } catch (err) {
+    console.error(`Gate ${gateModule}: could not spawn npx tsx: ${err.message}`);
+    return 1;
+  }
 }
 
 function findTsGateEntry(gateModule) {
@@ -460,6 +481,26 @@ function findConfig(basePath, fileName) {
   return null;
 }
 
+/**
+ * The basename of the first `gate-<num>-*.sh` in a directory, or null.
+ *
+ * A missing directory is the normal case (most projects have no `githooks/gates/`),
+ * so it returns null rather than throwing; a read error is also treated as "no
+ * match" because the caller falls through to the next candidate either way.
+ *
+ * @param {string} dir directory to list
+ * @param {string} gateNum gate number as a string
+ * @returns {string|null}
+ */
+function matchGateFileIn(dir, gateNum) {
+  try {
+    if (!fs.existsSync(dir)) return null;
+    return fs.readdirSync(dir).find(f => f.startsWith(`gate-${gateNum}-`) && f.endsWith('.sh')) || null;
+  } catch {
+    return null;
+  }
+}
+
 function resolveGateScript(gateNum, cwd = process.cwd()) {
   const candidates = [
     path.join(cwd, 'githooks', 'gates', `gate-${gateNum}-*.sh`),
@@ -470,10 +511,8 @@ function resolveGateScript(gateNum, cwd = process.cwd()) {
   for (const pattern of candidates) {
     if (pattern.includes('*')) {
       const dir = path.dirname(pattern);
-      if (fs.existsSync(dir)) {
-        const match = fs.readdirSync(dir).find(f => f.startsWith(`gate-${gateNum}-`) && f.endsWith('.sh'));
-        if (match) return path.join(dir, match);
-      }
+      const match = matchGateFileIn(dir, gateNum);
+      if (match) return path.join(dir, match);
     } else if (fs.existsSync(pattern)) {
       return pattern;
     }
