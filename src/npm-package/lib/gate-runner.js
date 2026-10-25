@@ -95,6 +95,68 @@ function describeChangedFilesScope(scope, count) {
 }
 
 /**
+ * Which bash can run the gate fragments.
+ *
+ * On Windows, PATH may lead with the WSL System32 stub, which cannot run these
+ * hooks (Linux filesystem view, and `-c` scripts receive an empty $1 through it).
+ * checkBash probes for an MSYS/MINGW bash that round-trips argv correctly.
+ *
+ * @returns {string|null} the bash command, or null when only an unusable one exists
+ */
+function resolveBashForGates() {
+  if (process.platform !== 'win32') return 'bash';
+  const { checkBash } = require('./detect-deps.js');
+  const bash = checkBash();
+  return bash.ok ? bash.path : null;
+}
+
+/**
+ * The first candidate that exists on disk, or the empty string.
+ *
+ * The empty string (not a throw) is deliberate: the preamble tolerates a missing
+ * helper script and the fragment then fails the same way it does in the commit
+ * hook.
+ *
+ * @param {string[]} candidates paths to try in order
+ * @returns {string}
+ */
+function firstExisting(candidates) {
+  try {
+    return candidates.find(candidate => fs.existsSync(candidate)) || '';
+  } catch {
+    // existsSync only throws on a malformed path; treat that as "none".
+    return '';
+  }
+}
+
+/**
+ * The shell lines that populate CHANGED_FILES, chosen by scan scope.
+ *
+ * Extracted so `runGateAdapter` stays readable: the diff form is three lines of
+ * git plumbing and the tree form is a single assignment, and mixing them inline
+ * made the wrapper harder to follow than the thing it wraps.
+ *
+ * @param {boolean} allMode true for `--all` (whole tree)
+ * @param {string} allModeFiles pre-resolved file list for all mode
+ * @returns {string[]} shell lines
+ */
+function buildFileSourceLines(allMode, allModeFiles) {
+  if (allMode) {
+    return ['#589: --all scans the tracked tree, not the diff', `CHANGED_FILES=${JSON.stringify(allModeFiles)}`];
+  }
+  // The historical diff form, unchanged: staged first, then anything vs HEAD.
+  // Interpolating the literal `${CHANGED_FILES}` brace-by-brace would be torn apart
+  // by this file's own template literals, hence the split below.
+  const changedFilesParameter = ['$', '{CHANGED_FILES}'].join('');
+  return [
+    'CHANGED_FILES="$(git diff --cached --name-only --diff-filter=ACM 2>/dev/null || true)"',
+    `if [ -z "${changedFilesParameter}" ] && [ -n "$(git rev-parse HEAD 2>/dev/null)" ]; then`,
+    '  CHANGED_FILES="$(git diff HEAD --name-only --diff-filter=ACM 2>/dev/null || true)"',
+    'fi',
+  ];
+}
+
+/**
  * Run a gate adapter fragment standalone.
  *
  * The gate fragments in githooks/adapters/gate-*.sh are designed to be *sourced*
@@ -114,66 +176,32 @@ function describeChangedFilesScope(scope, count) {
  *   tracked tree instead of the diff (#589)
  */
 function runGateAdapter(scriptPath, cwd = process.cwd(), opts = {}) {
-  let bashCommand = 'bash';
-  if (process.platform === 'win32') {
-    // PATH may lead with the WSL System32 stub, which cannot run these hooks
-    // (Linux filesystem view, and `-c` scripts receive an empty $1 through it).
-    // checkBash probes for an MSYS/MINGW bash that round-trips argv correctly.
-    const { checkBash } = require('./detect-deps.js');
-    const bash = checkBash();
-    if (!bash.ok) {
-      console.log('⚠️  This gate requires bash to run shell scripts.');
-      // No WSL suggestion: these hooks need Git Bash specifically — the WSL
-      // bash is rejected by the probe above (Linux filesystem view, dropped $1).
-      console.log('   On Windows, install Git for Windows (https://git-scm.com/download/win).');
-      console.log('   Alternatively, install the required tool directly and run the gate again.');
-      return;
-    }
-    bashCommand = bash.path;
+  const bashCommand = resolveBashForGates();
+  if (!bashCommand) {
+    console.log('⚠️  This gate requires bash to run shell scripts.');
+    // No WSL suggestion: these hooks need Git Bash specifically — the WSL bash is
+    // rejected by the probe (Linux filesystem view, dropped $1).
+    console.log('   On Windows, install Git for Windows (https://git-scm.com/download/win).');
+    console.log('   Alternatively, install the required tool directly and run the gate again.');
+    return;
   }
   const scriptDir = path.dirname(scriptPath);
-  const commonScript = [
+  const commonScript = firstExisting([
     path.join(scriptDir, 'adapter-common.sh'),
     path.join(scriptDir, '..', 'adapter-common.sh'),
     path.join(cwd, 'githooks', 'adapter-common.sh'),
-  ].find(candidate => fs.existsSync(candidate)) || '';
-  const nowMsScript = [
+  ]);
+  const nowMsScript = firstExisting([
     path.join(scriptDir, 'lib', 'now-ms.sh'),
     path.join(scriptDir, '..', 'lib', 'now-ms.sh'),
     path.resolve(__dirname, '..', 'hooks', 'lib', 'now-ms.sh'),
-  ].find(candidate => fs.existsSync(candidate)) || '';
-  const changedFilesParameter = ['$', '{CHANGED_FILES}'].join('');
+  ]);
   // #589: the scope determines the file SOURCE. Under `--all` the gates that read
   // CHANGED_FILES must see the whole tree, not the diff — otherwise a full check
   // scans less than an ordinary commit and reads like a pass.
   const allMode = opts.scope === 'all';
-  const allModeFiles = allMode ? resolveAllModeChangedFiles(cwd) : '';
-  const fileSourceLines = allMode
-    ? ['#589: --all scans the tracked tree, not the diff', `CHANGED_FILES=${JSON.stringify(allModeFiles)}`]
-    : [
-      'CHANGED_FILES="$(git diff --cached --name-only --diff-filter=ACM 2>/dev/null || true)"',
-      `if [ -z "${changedFilesParameter}" ] && [ -n "$(git rev-parse HEAD 2>/dev/null)" ]; then`,
-      '  CHANGED_FILES="$(git diff HEAD --name-only --diff-filter=ACM 2>/dev/null || true)"',
-      'fi',
-    ];
-
-  // Build the shell preamble the pre-commit hook would otherwise inject before
-  // sourcing the gate fragment, then source that fragment. Deliberately NOT
-  // set -u (the pre-commit hook does not use it), so fragments that reference
-  // a not-yet-defined variable fail the same way inside the commit hook.
-  const wrap = [
-    'if [ -n "$1" ] && [ -f "$1" ]; then source "$1"; fi',
-    'if [ -n "$2" ] && [ -f "$2" ]; then source "$2"; fi',
-    'if ! command -v now_ms >/dev/null 2>&1; then now_ms() { "$4" -e "console.log(Date.now())"; }; fi',
-    'gate_start_ms() { now_ms; }',
-    'record_gate_audit() { :; }',
-    'PROJECT_LANG="$(detect_project_lang 2>/dev/null || echo unknown)"',
-    // #589: fragments need to know which scope produced the file list, so an empty
-    // list can say "empty diff" instead of "empty project".
-    `GATE_SCOPE=${JSON.stringify(opts.scope === 'all' ? 'all' : 'diff')}`,
-    ...fileSourceLines,
-    'source "$3"',
-  ].join('\n');
+  const fileSourceLines = buildFileSourceLines(allMode, allMode ? resolveAllModeChangedFiles(cwd) : '');
+  const wrap = buildPreamble(allMode, fileSourceLines);
 
   // execFileSync avoids an extra /bin/sh layer, so bash receives the script as a
   // single argv arg (no shell-metacharacter injection through the path).
@@ -182,6 +210,34 @@ function runGateAdapter(scriptPath, cwd = process.cwd(), opts = {}) {
     ['--noprofile', '--norc', '-c', wrap, 'xp-gate', commonScript, nowMsScript, scriptPath, process.execPath],
     { stdio: 'inherit', cwd }
   );
+}
+
+/**
+ * The shell preamble the pre-commit hook would otherwise inject before sourcing a
+ * gate fragment.
+ *
+ * Deliberately NOT `set -u` (the pre-commit hook does not use it), so fragments
+ * that reference a not-yet-defined variable fail the same way inside the commit
+ * hook.
+ *
+ * @param {boolean} allMode whether the run scope is the whole tree
+ * @param {string[]} fileSourceLines lines that populate CHANGED_FILES
+ * @returns {string} the script to hand bash with -c
+ */
+function buildPreamble(allMode, fileSourceLines) {
+  return [
+    'if [ -n "$1" ] && [ -f "$1" ]; then source "$1"; fi',
+    'if [ -n "$2" ] && [ -f "$2" ]; then source "$2"; fi',
+    'if ! command -v now_ms >/dev/null 2>&1; then now_ms() { "$4" -e "console.log(Date.now())"; }; fi',
+    'gate_start_ms() { now_ms; }',
+    'record_gate_audit() { :; }',
+    'PROJECT_LANG="$(detect_project_lang 2>/dev/null || echo unknown)"',
+    // #589: fragments need to know which scope produced the file list, so an empty
+    // list can say "empty diff" instead of "empty project".
+    `GATE_SCOPE=${JSON.stringify(allMode ? 'all' : 'diff')}`,
+    ...fileSourceLines,
+    'source "$3"',
+  ].join('\n');
 }
 
 // Gate metadata registry — maps gate IDs to names, descriptions, and how to run them.
