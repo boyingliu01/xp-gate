@@ -20,7 +20,7 @@
 #         that the pre-commit change is a TAIL APPEND after Gate 12, touching no
 #         existing gate line.
 #
-# @covers AC-005-01, AC-005-02, AC-008-01, AC-008-03
+# @covers AC-005-01, AC-005-02, AC-006-01, AC-006-02, AC-008-01, AC-008-03
 
 setup() {
   REPO_ROOT="$(cd "$BATS_TEST_DIRNAME/../.." && pwd)"
