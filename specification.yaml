@@ -1690,6 +1690,46 @@ specification:
           test_type: unit
 
     # ============================================================
+    # REQ-537 / REQ-598（PowerShell 侧）：Gate 3 必须能测量 PowerShell 复杂度
+    #
+    # Gate 3 的 PowerShell 分支原本是硬 SKIP「no PowerShell tool」。这对 lizard 成立
+    # （它解析不了 .ps1），对平台不成立：PowerShell 自己的 AST 给出精确的判定点计数，
+    # 与 lizard 为其他语言测量的量完全一致。于是 PowerShell 为主的仓库有一个永久未测
+    # 的维度，而分数仍暗示覆盖率完整（#537）。
+    #
+    # 补这个缺口的天真做法——把 AST 输出接进 lizard 那套 ratchet——会制造相反的缺陷：
+    # 用 `-Threshold 1` 时每个 CCN >= 2 的函数都打印 OVER，于是一个全新的、写得很
+    # 好的函数（CCN 2-4，低于真实阈值）被拿去和一份永远不可能包含它的基线比较，报成
+    # "regression"。门禁于是恰好拦掉它本应鼓励的形态（#598）。
+    #
+    # 本组 AC 同时钉住两半：测量存在且报出真实数字；ratchet 用配置阈值而非 1 比较。
+    #
+    # 编号说明：AC-598-01/02 已被上面的 tag-push fixture（REQ-598）占用，两者同名
+    # 不同题。本组用 AC-598-10 起的区间以免与既有引用冲突。
+    # ============================================================
+    - id: REQ-537
+      description: "Gate 3 须能测量 PowerShell 的圈复杂度，而不是在它面前整体退场"
+      priority: high
+      acceptance_criteria:
+        - id: AC-537-01
+          criteria: 测量脚本须按 AST 判定点计数（if/elseif、循环、catch、三元、-and/-or），
+            而不是按行数——一个只有 5 个 if 的函数与一个无分支的函数必须得到不同 CCN
+          test_type: unit
+        - id: AC-598-10
+          criteria: ratchet 分支须把解析后的阈值传给测量脚本；`-Threshold 1` 不得再出现在
+            任何调用点，否则低于真实阈值的良好函数会被误判为 regression
+          test_type: unit
+        - id: AC-598-11
+          criteria: 交给原生 pwsh 的脚本路径须先转成原生形式（否则前导 `/` 被解析成
+            `<盘符>:\`，静默测到零个文件并把环境故障报成对仓库的结论）；引擎缺失时须 WARN
+            而非静默 SKIP
+          test_type: unit
+        - id: AC-598-12
+          criteria: 无新增 PowerShell 文件、或有改动但无 ratchet 基线时，须报出各自的原因，
+            不得静默放行
+          test_type: unit
+
+    # ============================================================
     # REQ-599: 门禁的"跳过/通过"判定与审计必须真实生效。
     # 一组独立的 fail-open 缺陷（#570/#571/#574/#575/#577/#578）共享同一个后果：
     # 一道门禁没有真正检查，却汇报成通过。它们的共同点是"守卫本身失效但没人知道"——
