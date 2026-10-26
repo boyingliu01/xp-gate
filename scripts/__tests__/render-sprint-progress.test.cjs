@@ -309,6 +309,41 @@ describe('renderDashboard', () => {
     expect(output).toContain('\u4E0B\u4E00\u6B65'); // "下一步"
   });
 
+  /**
+   * @test REQ-633
+   * @intent renderDashboard was one long sequence of lines.push calls. It now
+   *         delegates the "current phase" block to pushCurrentPhase, and the
+   *         blank separator line between the status and next-action lines went
+   *         with it. No existing case asserted that separator, so dropping it
+   *         left the suite green even though it changes the rendered dashboard.
+   *         The blank row is part of the visual grouping — status above,
+   *         next action below — so it is pinned here.
+   * @covers AC-633-01
+   */
+  it('AC-633-01: the current-phase block keeps a blank separator before next action', () => {
+    const state = { id: 's1', phase_model: 'compact', phase: 3, status: 'running' };
+    const rows = renderDashboard(state).split('\n');
+
+    const nextAt = rows.findIndex((r) => r.includes('\u4E0B\u4E00\u6B65')); // "下一步"
+    expect(nextAt).toBeGreaterThan(-1);
+
+    // The status line belonging to the current-phase block is the LAST one
+    // before the next-action line (the header block has its own 状态 row).
+    let statusAt = -1;
+    for (let i = nextAt - 1; i >= 0; i--) {
+      if (rows[i].includes('\u72B6\u6001:')) { // "状态:"
+        statusAt = i;
+        break;
+      }
+    }
+    expect(statusAt).toBeGreaterThan(-1);
+
+    // Exactly one blank row sits directly between them.
+    const between = rows.slice(statusAt + 1, nextAt);
+    expect(between.length).toBe(1);
+    expect(between[0].replace(/^\|/, '').replace(/\|$/, '').trim()).toBe('');
+  });
+
   it('shows "处理错误" for failed status', () => {
     const state = {
       id: 's1',
