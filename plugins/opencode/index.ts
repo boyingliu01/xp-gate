@@ -98,51 +98,101 @@ function getLocalXpGateVersion(): string | null {
   }
 }
 
-async function checkXpGateUpdate(): Promise<UpgradeResult> {
-  const cached = readCache(XP_GATE_CACHE_FILE)
-  const localVersion = getLocalXpGateVersion()
+/**
+ * Decide whether an upgrade is worth attempting, without performing one.
+ *
+ * Split out of `checkXpGateUpdate` (CCN 14). That function interleaved five
+ * "return noop for this reason" branches with the install itself, so the
+ * conditions that STOP an upgrade and the act of upgrading were one readable
+ * blob. Separating them means the decision can be read (and tested) on its own.
+ */
+type UpgradeDecision =
+  | { kind: "noop"; localVersion: string | null; remoteVersion: string | null }
+  | { kind: "install"; localVersion: string; remoteVersion: string }
 
-  // If cache exists and local version hasn't changed AND status is "current",
-  // the cache is still valid — skip network check
-  if (cached?.status === "current" && cached.remoteVersion && localVersion && cached.localVersion === localVersion) {
-    return { action: "noop", localVersion, remoteVersion: cached.remoteVersion }
+/**
+ * Is the cached answer still a truthful description of this install?
+ *
+ * A cache records the version it was computed FOR. After a manual upgrade the
+ * local version differs, so the cache describes a different install and must be
+ * re-derived -- otherwise a user who upgrades by hand is never checked again.
+ */
+function cacheStillDescribes(
+  cached: { remoteVersion: string; localVersion?: string; status?: string } | null,
+  localVersion: string | null,
+): cached is { remoteVersion: string; localVersion: string; status: "current" } {
+  if (!cached) return false
+  if (cached.status !== "current") return false
+  if (!cached.remoteVersion || !localVersion) return false
+  return cached.localVersion === localVersion
+}
+
+async function decideUpgrade(): Promise<UpgradeDecision> {
+  const localVersion = getLocalXpGateVersion()
+  const cached = readCache(XP_GATE_CACHE_FILE)
+
+  if (cacheStillDescribes(cached, localVersion)) {
+    return { kind: "noop", localVersion, remoteVersion: cached.remoteVersion }
   }
 
-  // If we have a valid cache but local version changed (e.g., manual upgrade)
-  // or cache has no "current" status, we need to re-check remote
-  if (!localVersion) return { action: "noop", localVersion: null, remoteVersion: null }
+  if (!localVersion) return { kind: "noop", localVersion: null, remoteVersion: null }
 
   const remoteVersion = await fetchNpmLatestVersion(XP_GATE_REGISTRY_URL)
-  if (!remoteVersion) return { action: "noop", localVersion, remoteVersion: null }
+  if (!remoteVersion) return { kind: "noop", localVersion, remoteVersion: null }
 
-  if (!semverLt(localVersion, remoteVersion)) {
+  const upToDate = !semverLt(localVersion, remoteVersion)
+  // The opt-out is checked AFTER the version comparison so that recording
+  // "current" is still correct for an opted-out user; skipping it would make the
+  // next run re-query the registry every time.
+  const optedOut = readXpGateConfig()?.autoUpgrade === false
+  if (upToDate || optedOut) {
     writeCache(XP_GATE_CACHE_FILE, { ts: Date.now(), localVersion, remoteVersion, status: "current" })
-    return { action: "noop", localVersion, remoteVersion }
+    return { kind: "noop", localVersion, remoteVersion }
   }
 
-  // Check opt-out config
-  const config = readXpGateConfig()
-  if (config?.autoUpgrade === false) {
-    writeCache(XP_GATE_CACHE_FILE, { ts: Date.now(), localVersion, remoteVersion, status: "current" })
-    return { action: "noop", localVersion, remoteVersion }
+  return { kind: "install", localVersion, remoteVersion }
+}
+
+/**
+ * Run `npm install -g` for one version.
+ *
+ * Resolves with the exit code rather than throwing on a non-zero exit: a failed
+ * install is a reported condition ("error"), not an exception the caller has to
+ * guess the meaning of.
+ */
+function installGlobally(version: string): Promise<number | null> {
+  return new Promise<number | null>((resolve, reject) => {
+    const child = spawn("npm", ["install", "-g", `${XP_GATE_NPM_PKG}@${version}`], {
+      stdio: "pipe",
+      shell: true,  // Required on Windows: npm is a .cmd file
+      timeout: 120_000,
+    })
+    child.on("close", (code) => resolve(code))
+    child.on("error", (err) => reject(err))
+  })
+}
+
+async function checkXpGateUpdate(): Promise<UpgradeResult> {
+  const decision = await decideUpgrade()
+  if (decision.kind === "noop") {
+    return {
+      action: "noop",
+      localVersion: decision.localVersion,
+      remoteVersion: decision.remoteVersion,
+    }
   }
 
+  const { localVersion, remoteVersion } = decision
   writeCache(XP_GATE_CACHE_FILE, { ts: Date.now(), localVersion, remoteVersion })
   try {
-    const exitCode = await new Promise<number | null>((resolve, reject) => {
-      const child = spawn("npm", ["install", "-g", `${XP_GATE_NPM_PKG}@${remoteVersion}`], {
-        stdio: "pipe",
-        shell: true,  // Required on Windows: npm is a .cmd file
-        timeout: 120_000,
-      })
-      child.on("close", (code) => resolve(code))
-      child.on("error", (err) => reject(err))
-    })
-    if (exitCode === 0) {
-      writeCache(XP_GATE_CACHE_FILE, { ts: Date.now(), localVersion: remoteVersion, remoteVersion, status: "current" })
-      return { action: "upgraded", localVersion, remoteVersion }
+    const exitCode = await installGlobally(remoteVersion)
+    if (exitCode !== 0) {
+      return { action: "error", localVersion, remoteVersion, error: `npm install exited with code ${exitCode}` }
     }
-    return { action: "error", localVersion, remoteVersion, error: `npm install exited with code ${exitCode}` }
+    // Record the NEW version as local: the install succeeded, so the next run
+    // must not offer the same upgrade again.
+    writeCache(XP_GATE_CACHE_FILE, { ts: Date.now(), localVersion: remoteVersion, remoteVersion, status: "current" })
+    return { action: "upgraded", localVersion, remoteVersion }
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err)
     return { action: "error", localVersion, remoteVersion, error: msg }
@@ -160,26 +210,36 @@ function readXpGateConfig(): { autoUpgrade?: boolean } | null {
 }
 // ── OpenCode plugin version check (notification only) ──
 
+/** The plugin's own installed version, or null when it cannot be read. */
+function readInstalledPluginVersion(pluginDir: string): string | null {
+  try {
+    const pkg = JSON.parse(readFileSync(join(pluginDir, "package.json"), "utf8"))
+    return pkg.version || null
+  } catch {
+    return null
+  }
+}
+
 async function checkPluginUpdate(pluginDir: string): Promise<void> {
   const cached = readCache(OPENCODE_CACHE_FILE)
   if (cached?.status === "current" && cached.remoteVersion) return
 
-  let localVersion = ""
-  try {
-    const pkg = JSON.parse(readFileSync(join(pluginDir, "package.json"), "utf8"))
-    localVersion = pkg.version || ""
-  } catch {
-    return
-  }
+  const localVersion = readInstalledPluginVersion(pluginDir)
+  if (!localVersion) return
 
   const remoteVersion = await fetchNpmLatestVersion(OPENCODE_PLUGIN_REGISTRY)
   if (!remoteVersion) return
 
-  if (remoteVersion && localVersion && semverLt(localVersion, remoteVersion)) {
-    writeCache(OPENCODE_CACHE_FILE, { ts: Date.now(), localVersion, remoteVersion })
-  } else if (remoteVersion && localVersion) {
-    writeCache(OPENCODE_CACHE_FILE, { ts: Date.now(), localVersion, remoteVersion, status: "current" })
+  // The presence or absence of `status: "current"` is the whole message: with it
+  // the caller stays quiet, without it a notice is owed. It used to be expressed
+  // as an if/else-if that re-tested `remoteVersion && localVersion` in both arms,
+  // even though both were already known non-empty by this point.
+  const upToDate = !semverLt(localVersion, remoteVersion)
+  const entry: { ts: number; localVersion: string; remoteVersion: string; status?: string } = {
+    ts: Date.now(), localVersion, remoteVersion,
   }
+  if (upToDate) entry.status = "current"
+  writeCache(OPENCODE_CACHE_FILE, entry)
 }
 
 // ── TUI upgrade notice ──
@@ -432,39 +492,75 @@ function writeSessionModel(dbPath: string, sessionId: string, modelJson: string)
 // Boy Scout (#447): the tool's execute() body inlined 40+ lines at 5 brace
 // levels (tool → execute → try → JSON.stringify options). The logic lives at
 // module scope; execute() is pure wiring.
-function reloadSessionModel(sessionId: string): string {
+/**
+ * The config a session-model reload needs, or the reason it cannot proceed.
+ *
+ * Split out of `reloadSessionModel` (CCN 14): the function was six preconditions
+ * plus one action, and each precondition owns a distinct diagnostic. Keeping them
+ * as one linear chain made the failure paths hard to read and impossible to test
+ * individually; returning a discriminated result lets the caller stay flat.
+ */
+type ReloadInputs =
+  | { ok: true; dbPath: string; providerID: string; modelID: string }
+  | { ok: false; reason: string }
+
+function readReloadInputs(): ReloadInputs {
   const dbPath = join(homedir(), ".local", "share", "opencode", "opencode.db")
-  const configDir = join(homedir(), ".config", "opencode")
-  const omoConfigPath = join(configDir, "oh-my-openagent.json")
-
   if (!existsSync(dbPath)) {
-    return "Session reload failed: OpenCode database not found at " + dbPath
-  }
-  if (!existsSync(omoConfigPath)) {
-    return "Session reload failed: oh-my-openagent.json not found at " + omoConfigPath
+    return { ok: false, reason: "Session reload failed: OpenCode database not found at " + dbPath }
   }
 
-  let omoConfig: Record<string, unknown>
+  const omoConfigPath = join(homedir(), ".config", "opencode", "oh-my-openagent.json")
+  if (!existsSync(omoConfigPath)) {
+    return { ok: false, reason: "Session reload failed: oh-my-openagent.json not found at " + omoConfigPath }
+  }
+
+  const parsed = parseOmoConfig(omoConfigPath)
+  if (typeof parsed === "string") return { ok: false, reason: parsed }
+
+  const model = readSisyphusModel(parsed)
+  if (typeof model === "string" && model.startsWith("Session reload failed")) {
+    return { ok: false, reason: model }
+  }
+
+  const slashIdx = (model as string).indexOf("/")
+  if (slashIdx === -1) {
+    return { ok: false, reason: `Session reload failed: model "${model}" is not in provider/model format` }
+  }
+
+  return {
+    ok: true,
+    dbPath,
+    providerID: (model as string).substring(0, slashIdx),
+    modelID: (model as string).substring(slashIdx + 1),
+  }
+}
+
+/** The parsed config object, or the failure message. */
+function parseOmoConfig(path: string): Record<string, unknown> | string {
   try {
-    omoConfig = JSON.parse(readFileSync(omoConfigPath, "utf8"))
+    return JSON.parse(readFileSync(path, "utf8"))
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err)
     return "Session reload failed: could not parse oh-my-openagent.json: " + msg
   }
+}
 
-  const agents = omoConfig?.["agents"] as Record<string, { model?: string }> | undefined
-  const sisyphusModel = agents?.["sisyphus"]?.["model"]
-  if (!sisyphusModel || typeof sisyphusModel !== "string") {
+/** The configured sisyphus model id, or the failure message. */
+function readSisyphusModel(config: Record<string, unknown>): string {
+  const agents = config?.["agents"] as Record<string, { model?: string }> | undefined
+  const model = agents?.["sisyphus"]?.["model"]
+  if (!model || typeof model !== "string") {
     return "Session reload failed: could not find sisyphus.model in oh-my-openagent.json"
   }
+  return model
+}
 
-  const slashIdx = sisyphusModel.indexOf("/")
-  if (slashIdx === -1) {
-    return `Session reload failed: model "${sisyphusModel}" is not in provider/model format`
-  }
-  const providerID = sisyphusModel.substring(0, slashIdx)
-  const modelID = sisyphusModel.substring(slashIdx + 1)
+function reloadSessionModel(sessionId: string): string {
+  const inputs = readReloadInputs()
+  if (!inputs.ok) return inputs.reason
 
+  const { dbPath, providerID, modelID } = inputs
   const oldModel = readCurrentSessionModel(dbPath, sessionId)
   try {
     writeSessionModel(dbPath, sessionId, JSON.stringify({ id: modelID, providerID }))
@@ -555,6 +651,32 @@ export const XpGatePlugin = async (input: OpenCodePluginInput) => {
 const pluginModule = {
   id: "xp-gate",
   server: XpGatePlugin,
+}
+
+/**
+ * Internals exposed for the test suite.
+ *
+ * This module had 560 lines and 27 functions with no tests at all, so nothing
+ * could be changed safely -- including the CCN=48 update callback. The pure
+ * helpers are re-exported here so their behaviour can be pinned (REQ-625)
+ * before and after the refactor that brings the complexity down.
+ *
+ * Not part of the plugin's public surface: the host loads `default`, and nothing
+ * here is a tool or a hook.
+ */
+export const __test = {
+  semverLt,
+  readCache,
+  writeCache,
+  extractTitleFromText,
+  getLocalXpGateVersion,
+  checkXpGateUpdate,
+  checkPluginUpdate,
+  runBackgroundUpdates,
+  reloadSessionModel,
+  renameSession,
+  XP_GATE_CACHE_FILE,
+  OPENCODE_CACHE_FILE,
 }
 
 export default pluginModule
