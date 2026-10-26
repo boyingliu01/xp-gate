@@ -3001,3 +3001,17 @@ specification:
         - id: AC-634-01
           criteria: timestamp 与 expires 仍相差一小时但整体晚于 now 时，校验必须以 future 为由失败
           test_type: unit
+
+    # ============================================================
+    # REQ-635: 旧版 lockfile 依赖树的条目必须以完整路径报告。
+    #
+    # 既有用例只断言 changed === 2（数量），用裸名 b 代替 a/b 整套测试仍然全绿，
+    # 而诊断信息已经丢掉嵌套层级——同名包被复制多份时无从分辨是哪一份。
+    # ============================================================
+    - id: REQ-635
+      description: "normalize-lock-registry 遍历旧版 dependencies 树时，须以完整嵌套路径（a/b）而非裸名报告条目"
+      priority: low
+      acceptance_criteria:
+        - id: AC-635-01
+          criteria: 嵌套依赖条目在诊断输出中必须显示为 a/b；不得退化为裸名 b
+          test_type: unit
