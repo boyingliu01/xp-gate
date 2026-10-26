@@ -102,6 +102,56 @@ function findBlockEnd(masked: string, open: number): number {
   return masked.length;
 }
 
+/** Keywords that begin a new top-level declaration. */
+const DECLARATION_KEYWORDS = /^(?:export|import|interface|class|const|let|var|function|type|declare|@)/;
+
+/**
+ * True when a newline at `index` ends a declaration that has no body: the next
+ * line starts another declaration (or a decorator). Without this the scan runs
+ * into the following declaration and reports ITS brace as this one's body.
+ */
+function startsNewDeclaration(masked: string, index: number): boolean {
+  const rest = masked.substring(index + 1).replace(/^[ \t]*/, '');
+  return DECLARATION_KEYWORDS.test(rest);
+}
+
+/** What the declaration scan should do with the character it just read. */
+type ScanAction =
+  | { kind: 'advance' }
+  | { kind: 'jump'; to: number }
+  | { kind: 'depth'; delta: 1 | -1 }
+  | { kind: 'body'; at: number }
+  | { kind: 'no-body' };
+
+/** Characters that open a generic/bracket group in a declaration header. */
+const HEADER_OPENERS = new Set(['<', '[']);
+/** Characters that close one. */
+const HEADER_CLOSERS = new Set(['>', ']']);
+
+/**
+ * Decide what the declaration scan does at `i`.
+ *
+ * Table-driven rather than an `if` ladder (#620): the interesting cases are
+ * "this character means something", and a per-character decision keeps that list
+ * readable and each rule independently testable.
+ */
+function declarationScanAction(masked: string, i: number, depth: number): ScanAction {
+  const c = masked[i];
+
+  // A parenthesised group is skipped whole: parens only ever appear inside a
+  // header (`class X extends Y<() => void>`), never as body structure.
+  if (c === '(') return { kind: 'jump', to: readParenGroup(masked, i).end - 1 };
+  if (HEADER_OPENERS.has(c)) return { kind: 'depth', delta: 1 };
+  if (HEADER_CLOSERS.has(c)) return { kind: 'depth', delta: -1 };
+
+  if (c === '{') return depth === 0 ? { kind: 'body', at: i } : { kind: 'depth', delta: 1 };
+  if (c === '}') return { kind: 'depth', delta: -1 };
+
+  if (c === ';' && depth === 0) return { kind: 'no-body' };
+  if (c === '\n' && depth === 0 && startsNewDeclaration(masked, i)) return { kind: 'no-body' };
+  return { kind: 'advance' };
+}
+
 /**
  * Body brace for declarations that have no parameter list (`class`, `interface`).
  * Scans forward from the end of the declaration header; the first `{` at generic
@@ -110,27 +160,17 @@ function findBlockEnd(masked: string, open: number): number {
 function findDeclarationBrace(masked: string, from: number): number {
   let depth = 0;
   for (let i = from; i < masked.length; i++) {
-    const c = masked[i];
-    if (c === '<' || c === '[' || c === '(') {
-      if (c === '(') { const g = readParenGroup(masked, i); i = g.end - 1; continue; }
-      depth++;
-      continue;
-    }
-    if (c === '>' || c === ']') { if (depth > 0) depth--; continue; }
-    if (c === '{') {
-      if (depth === 0) return i;
-      depth++;
-      continue;
-    }
-    if (c === '}') { if (depth > 0) depth--; continue; }
-    if (c === ';' && depth === 0) return -1;
-    // Stop at a blank line / a new top-level keyword so we do not run into the
-    // next declaration when this one has no body.
-    if (c === '\n') {
-      const rest = masked.substring(i + 1).replace(/^[ \t]*/, '');
-      if (/^(?:export|import|interface|class|const|let|var|function|type|declare|@)/.test(rest) && depth === 0) {
-        return -1;
-      }
+    const action = declarationScanAction(masked, i, depth);
+    switch (action.kind) {
+      case 'body': return action.at;
+      case 'no-body': return -1;
+      case 'jump': i = action.to; break;
+      case 'depth':
+        // Depth never goes negative: a stray closing bracket in a header must
+        // not look like the start of a new group.
+        depth = Math.max(0, depth + action.delta);
+        break;
+      case 'advance': break;
     }
   }
   return -1;
