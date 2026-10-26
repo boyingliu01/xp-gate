@@ -31,7 +31,10 @@ describe('test-path filter parity between pre-push and gate-m (#480)', () => {
   it('both sides exclude declaration files and spec-named tests', () => {
     expect(prePushFilter).toContain(String.raw`\.d\.ts$`);
     expect(prePushFilter).toContain(String.raw`\.spec\.`);
-    expect(gateM).toContain("endsWith('.d.ts')");
-    expect(gateM).toContain("includes('.spec.')");
+    // gate-m states each exclusion as an entry in EXCLUDED_PATH_PATTERNS rather
+    // than as an endsWith/includes call, so the parity assertion follows the
+    // regex. What it pins is unchanged: the TS side still excludes both.
+    expect(gateM).toContain(String.raw`pattern: /\.d\.ts$/`);
+    expect(gateM).toContain(String.raw`pattern: /\.spec\./`);
   });
 });
