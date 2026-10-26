@@ -33,20 +33,42 @@ describe('resolveImportPath (build-integrity)', () => {
 
   const from = (): string => path.join(dir, 'importer.ts');
 
+  /**
+   * Create a fixture file. The write is wrapped so a failure is reported with
+   * the file name instead of surfacing as a bare fs error somewhere later — a
+   * test whose fixture silently failed to materialise asserts nothing useful.
+   */
+  function writeSource(name: string, content: string): void {
+    try {
+      fss.writeFileSync(path.join(dir, name), content);
+    } catch (error) {
+      throw new Error(`could not create fixture ${name}: ${String(error)}`);
+    }
+  }
+
+  /** Create a fixture subdirectory, for the index-file fallback case. */
+  function makeDir(name: string): void {
+    try {
+      fss.mkdirSync(path.join(dir, name));
+    } catch (error) {
+      throw new Error(`could not create fixture dir ${name}: ${String(error)}`);
+    }
+  }
+
   it('AC-627-01: resolves an explicit .js specifier to the sibling .ts source', async () => {
-    fss.writeFileSync(path.join(dir, 'target.ts'), 'export const x = 1;\n');
+    writeSource('target.ts', 'export const x = 1;\n');
     // The specifier says .js; only target.ts exists. ESM output depends on this.
     expect(resolveImportPath('./target.js', from())).toBe(path.join(dir, 'target.ts'));
   });
 
   it('AC-627-01: prefers an existing .js file over the .ts fallback', async () => {
-    fss.writeFileSync(path.join(dir, 'both.js'), 'module.exports = {};\n');
-    fss.writeFileSync(path.join(dir, 'both.ts'), 'export const x = 1;\n');
+    writeSource('both.js', 'module.exports = {};\n');
+    writeSource('both.ts', 'export const x = 1;\n');
     expect(resolveImportPath('./both.js', from())).toBe(path.join(dir, 'both.js'));
   });
 
   it('AC-627-02: an explicit non-.js extension must match exactly (no fallback)', async () => {
-    fss.writeFileSync(path.join(dir, 'mod.mjs'), 'export {};\n');
+    writeSource('mod.mjs', 'export {};\n');
     // .mjs exists, resolves directly
     expect(resolveImportPath('./mod.mjs', from())).toBe(path.join(dir, 'mod.mjs'));
     // .cjs does NOT exist, and there is no .cjs -> .ts fallback
@@ -54,13 +76,12 @@ describe('resolveImportPath (build-integrity)', () => {
   });
 
   it('AC-627-03: an extensionless import tries known extensions, then index files', async () => {
-    fss.writeFileSync(path.join(dir, 'plain.ts'), 'export const y = 2;\n');
+    writeSource('plain.ts', 'export const y = 2;\n');
     expect(resolveImportPath('./plain', from())).toBe(path.join(dir, 'plain.ts'));
 
-    const sub = path.join(dir, 'pkg');
-    fss.mkdirSync(sub);
-    fss.writeFileSync(path.join(sub, 'index.ts'), 'export {};\n');
-    expect(resolveImportPath('./pkg', from())).toBe(path.join(sub, 'index.ts'));
+    makeDir('pkg');
+    writeSource('pkg/index.ts', 'export {};\n');
+    expect(resolveImportPath('./pkg', from())).toBe(path.join(dir, 'pkg', 'index.ts'));
   });
 
   it('AC-627-03: a non-relative specifier is not resolved at all', () => {
