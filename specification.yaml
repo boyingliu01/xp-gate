@@ -2742,5 +2742,31 @@ specification:
             全部文件可读时 errors 必须为空
           test_type: unit
 
+    # ============================================================
+    # REQ-624: 构建脚本必须能在所有平台上真正执行 npm 子步骤。
+    #
+    # spawnSync('npm', ...) 不带 shell 在 POSIX 上可用（npm 是可执行文件），
+    # 在 Windows 上必然失败（npm 是 npm.cmd，CreateProcess 无法直接启动）。
+    # 更糟的是包装层把任何非零状态都报成「dsh build (tsc) failed」，
+    # 于是 spawn 失败被说成编译器失败——而手工执行同一条 npm run build 是 0。
+    #
+    # 这不止是本地不便：plugins/dsh/skills/ 是构建产物（.gitignore 第 150 行），
+    # 而测试套件断言它存在。这正是 CI 的 Mutation Testing 在 dry run 就失败的原因：
+    # 那棵树从来没被构建过。
+    # ============================================================
+    - id: REQ-624
+      description: "构建脚本必须通过 shell 启动 npm，并在失败时点名真正失败的子步骤"
+      priority: high
+      acceptance_criteria:
+        - id: AC-624-01
+          criteria: 构建脚本中每一处启动 npm 的调用都必须带 shell，使 Windows（npm.cmd）
+            也能执行；dsh 插件的两个子步骤（build、prepare-skills）都必须经由该调用执行
+          test_type: unit
+        - id: AC-624-02
+          criteria: 子步骤失败时必须报出真正失败的 npm script 名称并附上 spawn 的原始错误，
+            不得把非零状态一律归因为 tsc 失败
+          test_type: unit
+
+
 
 
