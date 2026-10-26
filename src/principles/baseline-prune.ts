@@ -108,6 +108,19 @@ export function pruneBaselineEntries(
 }
 
 /**
+ * A non-null, non-array object — the only shape a baseline map or a nested
+ * `files` wrapper can legally take.
+ *
+ * The three checks in `parseBaselineFiles` were the same predicate written out
+ * three times (once positively for the wrapper, once negated for the root, once
+ * positively per entry), which is most of its CCN. Naming it once removes the
+ * repetition and makes the intent legible.
+ */
+function isJsonObject(value: unknown): value is Record<string, unknown> {
+  return value !== null && typeof value === 'object' && !Array.isArray(value);
+}
+
+/**
  * Extract the path -> entry map, or a string describing why it is unusable.
  *
  * The on-disk format is a FLAT map (`{"src/a.ts": {totalWarnings, lastAnalyzed}}`),
@@ -125,22 +138,21 @@ function parseBaselineFiles(baselineJson: string): Record<string, unknown> | str
     return `could not parse baseline: ${detail}`;
   }
 
-  if (parsed === null || typeof parsed !== 'object' || Array.isArray(parsed)) {
+  if (!isJsonObject(parsed)) {
     return 'baseline is not a JSON object';
   }
 
-  const record = parsed as Record<string, unknown>;
-  const nested = record.files;
-  if (nested !== null && typeof nested === 'object' && !Array.isArray(nested)) {
-    return nested as Record<string, unknown>;
+  // A `files` wrapper is unwrapped rather than merged, matching the old shape.
+  if (isJsonObject(parsed.files)) {
+    return parsed.files;
   }
 
   // Keep only object-valued keys: scalars at the top level are metadata, not
   // path entries, and a path whose entry is a bare number is the malformed shape
   // that assertValidEntry rejects elsewhere (#455).
   const entries: Record<string, unknown> = {};
-  for (const [key, value] of Object.entries(record)) {
-    if (value !== null && typeof value === 'object' && !Array.isArray(value)) {
+  for (const [key, value] of Object.entries(parsed)) {
+    if (isJsonObject(value)) {
       entries[key] = value;
     }
   }

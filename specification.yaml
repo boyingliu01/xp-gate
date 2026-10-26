@@ -2832,8 +2832,52 @@ specification:
             但同步只复制不删除，镜像中已有的测试文件必须保持原样
           test_type: unit
 
+    # ============================================================
+    # REQ-627: Gate 10 的导入解析必须有直接测试。
+    #
+    # `resolveImportPath` 决定「改动代码里的 import 是否指向真实文件」。
+    # 它在本次重构前**没有任何直接测试**：把 `.js` 说明符回退到 `.ts` 源码
+    # 的那条分支删掉，整个测试套件仍然全绿。而 TypeScript 的 ESM 输出会把
+    # `./x.ts` 重写成 `./x.js`，所以源码树里必然存在「说明符写 .js、实体是 .ts」
+    # 的情形——这正是构建完整性门禁要判定的核心，静默失效会让 Gate 10 在导入
+    # 已经断裂时照常放行。
+    # ============================================================
+    - id: REQ-627
+      description: "Gate 10 的 resolveImportPath 必须覆盖显式扩展名、.js→.ts 回退、无扩展名探测与相对/裸说明符四类情形"
+      priority: high
+      acceptance_criteria:
+        - id: AC-627-01
+          criteria: 说明符为 .js 而实体为 .ts 时必须解析到 .ts 源码；
+            若同名 .js 真实存在则优先取 .js，不得越权回退
+          test_type: unit
+        - id: AC-627-02
+          criteria: 显式非 .js 扩展名（如 .mjs/.cjs）必须精确匹配，不存在时返回未解析，
+            不得套用 .js→.ts 回退
+          test_type: unit
+        - id: AC-627-03
+          criteria: 无扩展名说明符按已知扩展名依次探测并回退到目录 index 文件；
+            裸模块说明符与解析失败的相对路径均返回未解析
+          test_type: unit
 
-
-
-
-
+    # ============================================================
+    # REQ-628: 基线的两种形状都必须被读取。
+    #
+    # `parseBaselineFiles` 接受扁平映射（saveBaseline 实际写入的形状）与
+    # 旧的 `{files: {...}}` 包装。包装分支原本没有测试，删掉它套件仍然全绿。
+    # 而一旦失去该分支，唯一的顶层键 `files` 会被当成一条名为 "files" 的条目，
+    # 真正的路径全部丢失——基线看起来是空的，所有配额被静默作废。
+    # ============================================================
+    - id: REQ-628
+      description: "pruneBaselineEntries 必须正确解析扁平映射与 {files} 包装两种基线形状，并丢弃顶层标量元数据"
+      priority: medium
+      acceptance_criteria:
+        - id: AC-628-01
+          criteria: 扁平映射按路径逐条读取，陈旧项（盘上缺失且未被 git 跟踪）进入移除列表
+          test_type: unit
+        - id: AC-628-02
+          criteria: 花括号 files 包装必须被解包为内部路径表，
+            真正的路径必须出现，且不得出现名为 files 的伪条目
+          test_type: unit
+        - id: AC-628-03
+          criteria: 顶层标量键视为元数据被丢弃，不得作为路径条目保留
+          test_type: unit

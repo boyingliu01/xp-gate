@@ -25,6 +25,133 @@ export interface StartSpanOptions {
 }
 
 /**
+ * All mutable tracer state, threaded explicitly.
+ *
+ * The five operations used to be nested closures over two arrays, which Gate 3
+ * counts as a single CCN-16 function: the tool measures branches reachable within
+ * one function body and does not split on closure boundaries. Passing the state
+ * in lets each operation sit at module scope where it is small and directly
+ * testable.
+ */
+interface TracerState {
+  readonly projectRoot: string;
+  readonly maxDepth: number;
+  readonly traceId: string;
+  readonly sprintId: string;
+  activeSpans: Span[];
+  completedSpans: Span[];
+}
+
+/** The span a child should point at: the most recently started, still-open one. */
+function currentParentId(state: TracerState): string | undefined {
+  if (state.activeSpans.length === 0) return undefined;
+  return state.activeSpans[state.activeSpans.length - 1].context.span_id;
+}
+
+/**
+ * A span for a call that exceeded maxDepth. It is ended immediately and recorded
+ * as an error, so the overflow is visible in the trace rather than lost.
+ */
+function overflowSpan(state: TracerState, opts: StartSpanOptions): Span {
+  const span = createSpan({
+    name: opts.name,
+    kind: opts.kind,
+    trace_id: state.traceId,
+    attributes: opts.attributes,
+  });
+  span.status = SpanStatus.ERROR;
+  span.error_message = `Max span depth (${state.maxDepth}) exceeded`;
+  span.end_time_ms = Date.now();
+  state.completedSpans.push(span);
+  return span;
+}
+
+function startSpan(state: TracerState, opts: StartSpanOptions): Span {
+  if (state.activeSpans.length >= state.maxDepth) {
+    return overflowSpan(state, opts);
+  }
+
+  const span = createSpan({
+    name: opts.name,
+    kind: opts.kind,
+    trace_id: state.traceId,
+    parent_span_id: currentParentId(state),
+    attributes: opts.attributes,
+  });
+  state.activeSpans.push(span);
+  return span;
+}
+
+function endSpan(
+  state: TracerState,
+  span: Span,
+  status?: SpanStatus,
+  errorMessage?: string,
+): void {
+  span.end_time_ms = Date.now();
+  span.status = status ?? SpanStatus.OK;
+  if (errorMessage) {
+    span.error_message = errorMessage;
+  }
+
+  // Remove from active, add to completed.
+  const idx = state.activeSpans.findIndex((s) => s.context.span_id === span.context.span_id);
+  if (idx !== -1) {
+    state.activeSpans.splice(idx, 1);
+  }
+  state.completedSpans.push(span);
+}
+
+/** Attach each span to its parent node, collecting the parentless as roots. */
+function buildSpanTree(spans: Span[]): SpanTreeNode[] {
+  const spanMap = new Map<string, SpanTreeNode>();
+  const roots: SpanTreeNode[] = [];
+
+  for (const span of spans) {
+    spanMap.set(span.context.span_id, { span, children: [] });
+  }
+
+  for (const span of spans) {
+    const node = spanMap.get(span.context.span_id)!;
+    const parentId = span.context.parent_span_id;
+    const parent = parentId ? spanMap.get(parentId) : undefined;
+    if (parent) {
+      parent.children.push(node);
+    } else {
+      roots.push(node);
+    }
+  }
+
+  return roots;
+}
+
+/**
+ * Append completed spans to `spans.jsonl`.
+ *
+ * The buffer is cleared only after the write succeeds. It used to be cleared
+ * unconditionally, so a failed write (full disk, read-only worktree) silently
+ * discarded every span collected so far — the tracer would look like it worked
+ * while losing the data it exists to record.
+ */
+function flushSpans(state: TracerState): void {
+  if (state.completedSpans.length === 0) return;
+
+  const spansDir = path.join(state.projectRoot, '.sprint-state');
+  try {
+    fs.mkdirSync(spansDir, { recursive: true });
+    const lines = state.completedSpans.map((s) => JSON.stringify(s)).join('\n') + '\n';
+    fs.appendFileSync(path.join(spansDir, 'spans.jsonl'), lines, 'utf8');
+  } catch (err) {
+    const detail = err instanceof Error ? err.message : String(err);
+    process.stderr.write(`[span-tracer] flush failed, keeping ${state.completedSpans.length} span(s): ${detail}\n`);
+    return;
+  }
+
+  // Clear only what was actually written.
+  state.completedSpans.length = 0;
+}
+
+/**
  * Create a span tracer for the current sprint.
  *
  * @test REQ-003 Span 调用链追踪器
@@ -32,126 +159,24 @@ export interface StartSpanOptions {
  * @covers AC-003-01, AC-003-02, AC-003-03
  */
 export function createSpanTracer(options: SpanTracerOptions) {
-  const maxDepth = options.maxDepth ?? 10;
-  const state = readSprintState(options.projectRoot);
-  const sprintId = state?.id ?? `trace-${Date.now()}`;
-  const traceId = generateTraceId();
-
-  const activeSpans: Span[] = [];
-  const completedSpans: Span[] = [];
-
-  /**
-   * Start a new span. If there's an active span, it becomes the parent.
-   */
-  function startSpan(opts: StartSpanOptions): Span {
-    // Check depth limit
-    const currentDepth = activeSpans.length;
-    if (currentDepth >= maxDepth) {
-      // Return a dummy span that's immediately ended
-      const dummySpan = createSpan({
-        name: opts.name,
-        kind: opts.kind,
-        trace_id: traceId,
-        attributes: opts.attributes,
-      });
-      dummySpan.status = SpanStatus.ERROR;
-      dummySpan.error_message = `Max span depth (${maxDepth}) exceeded`;
-      dummySpan.end_time_ms = Date.now();
-      completedSpans.push(dummySpan);
-      return dummySpan;
-    }
-
-    const parentSpanId = activeSpans.length > 0
-      ? activeSpans[activeSpans.length - 1].context.span_id
-      : undefined;
-
-    const span = createSpan({
-      name: opts.name,
-      kind: opts.kind,
-      trace_id: traceId,
-      parent_span_id: parentSpanId,
-      attributes: opts.attributes,
-    });
-
-    activeSpans.push(span);
-    return span;
-  }
-
-  /**
-   * End the most recently started span.
-   */
-  function endSpan(span: Span, status?: SpanStatus, errorMessage?: string): void {
-    span.end_time_ms = Date.now();
-    span.status = status ?? SpanStatus.OK;
-    if (errorMessage) {
-      span.error_message = errorMessage;
-    }
-
-    // Remove from active, add to completed
-    const idx = activeSpans.findIndex(s => s.context.span_id === span.context.span_id);
-    if (idx !== -1) {
-      activeSpans.splice(idx, 1);
-    }
-    completedSpans.push(span);
-  }
-
-  /**
-   * Get all completed spans.
-   */
-  function getSpans(): Span[] {
-    return [...completedSpans];
-  }
-
-  /**
-   * Build a span tree from completed spans.
-   */
-  function getSpanTree(): SpanTreeNode[] {
-    const spanMap = new Map<string, SpanTreeNode>();
-    const roots: SpanTreeNode[] = [];
-
-    // Create nodes
-    for (const span of completedSpans) {
-      spanMap.set(span.context.span_id, { span, children: [] });
-    }
-
-    // Build tree
-    for (const span of completedSpans) {
-      const node = spanMap.get(span.context.span_id)!;
-      const parentId = span.context.parent_span_id;
-      if (parentId && spanMap.has(parentId)) {
-        spanMap.get(parentId)!.children.push(node);
-      } else {
-        roots.push(node);
-      }
-    }
-
-    return roots;
-  }
-
-  /**
-   * Flush spans to disk (append to spans.jsonl).
-   */
-  function flush(): void {
-    if (completedSpans.length === 0) return;
-
-    const spansDir = path.join(options.projectRoot, '.sprint-state');
-    fs.mkdirSync(spansDir, { recursive: true });
-
-    const spansFile = path.join(spansDir, 'spans.jsonl');
-    const lines = completedSpans.map(s => JSON.stringify(s)).join('\n') + '\n';
-    fs.appendFileSync(spansFile, lines, 'utf8');
-
-    // Clear completed spans after flush
-    completedSpans.length = 0;
-  }
+  const sprintState = readSprintState(options.projectRoot);
+  const state: TracerState = {
+    projectRoot: options.projectRoot,
+    maxDepth: options.maxDepth ?? 10,
+    traceId: generateTraceId(),
+    sprintId: sprintState?.id ?? `trace-${Date.now()}`,
+    activeSpans: [],
+    completedSpans: [],
+  };
 
   return {
-    startSpan,
-    endSpan,
-    getSpans,
-    getSpanTree,
-    flush,
-    traceId,
-    sprintId,
+    startSpan: (opts: StartSpanOptions): Span => startSpan(state, opts),
+    endSpan: (span: Span, status?: SpanStatus, errorMessage?: string): void =>
+      endSpan(state, span, status, errorMessage),
+    getSpans: (): Span[] => [...state.completedSpans],
+    getSpanTree: (): SpanTreeNode[] => buildSpanTree(state.completedSpans),
+    flush: (): void => flushSpans(state),
+    traceId: state.traceId,
+    sprintId: state.sprintId,
   };
 }
