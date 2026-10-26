@@ -61,29 +61,39 @@ have_pssa() {
 }
 
 # Call the adapter's discovery directly. Going through the whole pre-commit
-# pipeline would make the assertion depend on every other gate's prerequisites.
-list_discovered() {
-  local audit_dir="$REPO_ROOT/githooks/adapters"
+# pipeline would make the assertion depend on every other gate's prerequisites,
+# and would resolve ADAPTER_DIR through the tier probe -- on a machine with a
+# global install that points at ~/.config/xp-gate/adapters, so the test would
+# grade a different file than the one it is testing.
+adapter_dir_posix() {
+  local d="$REPO_ROOT/githooks/adapters"
   if command -v cygpath >/dev/null 2>&1; then
-    audit_dir=$(cygpath -u "$audit_dir")
+    d=$(cygpath -u "$d")
   fi
-  cat > "$WORK/_discover.sh" <<'DRIVER'
+  printf '%s\n' "$d"
+}
+
+# Source the adapter with the helpers its parent hook normally provides.
+write_adapter_driver() {
+  local target="$1"
+  cat > "$target" <<'DRIVER'
 #!/usr/bin/env bash
 set -uo pipefail
-# The adapter expects the helpers its parent hook normally provides.
-if [ -f "$ADAPTER_DIR/../hooks/lib/toolchain-path.sh" ]; then
-  # shellcheck source=/dev/null
-  source "$ADAPTER_DIR/../hooks/lib/toolchain-path.sh"
-fi
-if [ -f "$ADAPTER_DIR/../hooks/lib/native-path.sh" ]; then
-  # shellcheck source=/dev/null
-  source "$ADAPTER_DIR/../hooks/lib/native-path.sh"
-fi
+for lib in toolchain-path native-path; do
+  if [ -f "$ADAPTER_DIR/../hooks/lib/$lib.sh" ]; then
+    # shellcheck source=/dev/null
+    source "$ADAPTER_DIR/../hooks/lib/$lib.sh"
+  fi
+done
 # shellcheck source=/dev/null
 source "$ADAPTER_DIR/powershell.sh"
-_find_powershell_files
 DRIVER
-  ( cd "$WORK" && ADAPTER_DIR="$audit_dir" bash "$WORK/_discover.sh" 2>/dev/null )
+}
+
+list_discovered() {
+  write_adapter_driver "$WORK/_discover.sh"
+  printf '%s\n' '_find_powershell_files' >> "$WORK/_discover.sh"
+  ( cd "$WORK" && ADAPTER_DIR="$(adapter_dir_posix)" bash "$WORK/_discover.sh" 2>/dev/null )
 }
 
 @test "AC-620-01: discovery returns .psm1 modules, not only .ps1 scripts" {
@@ -124,35 +134,21 @@ DRIVER
 
   # The end-to-end consequence: identical offending code in a module must be
   # able to block. Pre-fix this reported WARN/not-verified instead.
-  #
-  # Drive the adapter from THIS checkout rather than the global install: a
-  # machine with a global hooksPath resolves ADAPTER_DIR to
-  # ~/.config/xp-gate/adapters, so running pre-commit would grade a different
-  # file than the one this suite is testing (the same trap #598's suite hit).
   printf 'function Bad { $unused = 1; Write-Host %s }\n' "'x'" > src/Mod.psm1
   echo 1.0.1 > VERSION
   printf '# C\n## [1.0.1]\n- add\n' > CHANGELOG.md
   git add -A
 
-  local audit_dir="$REPO_ROOT/githooks/adapters"
-  if command -v cygpath >/dev/null 2>&1; then
-    audit_dir=$(cygpath -u "$audit_dir")
-  fi
-  cat > "$WORK/_analyze.sh" <<'DRIVER'
-#!/usr/bin/env bash
-set -uo pipefail
-for lib in toolchain-path native-path; do
-  if [ -f "$ADAPTER_DIR/../hooks/lib/$lib.sh" ]; then
-    # shellcheck source=/dev/null
-    source "$ADAPTER_DIR/../hooks/lib/$lib.sh"
-  fi
-done
-# shellcheck source=/dev/null
-source "$ADAPTER_DIR/powershell.sh"
-run_static_analysis
-DRIVER
+  write_adapter_driver "$WORK/_analyze.sh"
+  printf '%s\n' 'run_static_analysis' >> "$WORK/_analyze.sh"
 
-  run bash -c "cd '$WORK' && ADAPTER_DIR='$audit_dir' bash '$WORK/_analyze.sh' 2>&1"
-  [[ "$output" == *"PSAvoidUsingWriteHost"* || "$output" == *"PSUseDeclaredVarsMoreThanAssignments"* ]]
+  run bash -c "cd '$WORK' && ADAPTER_DIR='$(adapter_dir_posix)' bash '$WORK/_analyze.sh' 2>&1"
+
+  # Assert on "the module was actually analysed", not on specific rule names: a
+  # rule id can be renamed or renamed-away between PSScriptAnalyzer releases, and
+  # pinning one would make this test fail for a reason unrelated to discovery.
+  # Any non-empty PSSA verdict proves the file reached the analyser.
   [[ "$output" != *"no PowerShell files found outside the pruned directories"* ]]
+  [[ "$output" == *"Mod.psm1"* ]] || [[ "$output" == *"PSAvoidUsingWriteHost"* ]] \
+    || [[ "$output" == *"PSUseDeclaredVarsMoreThanAssignments"* ]] || [[ "$output" == *"Warning"* ]]
 }

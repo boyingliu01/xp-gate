@@ -72,7 +72,7 @@ _detect_pwsh() {
 # The extension set is owned here rather than at each call site: one definition,
 # so Gate 1 and Gate 3 cannot drift apart again. Callers that want a narrower
 # population (e.g. only *.Tests.ps1) still pass an explicit pattern.
-_PS_SOURCE_PATTERNS=('*.ps1' '*.psm1')
+_POWERSHELL_SOURCE_PATTERNS=('*.ps1' '*.psm1')
 
 _find_powershell_files() {
   local name_pattern="${1:-}"
@@ -82,7 +82,7 @@ _find_powershell_files() {
   local -a name_test=()
   if [ -z "$name_pattern" ]; then
     local p
-    for p in "${_PS_SOURCE_PATTERNS[@]}"; do
+    for p in "${_POWERSHELL_SOURCE_PATTERNS[@]}"; do
       if [ "${#name_test[@]}" -gt 0 ]; then name_test+=('-o'); fi
       name_test+=('-name' "$p")
     done
@@ -321,20 +321,24 @@ run_static_analysis() {
       # #620: no pattern means "every PowerShell source file", so .psm1 modules
       # are analysed too. This used to pass '*.ps1', which made a module-only repo
       # look empty and reported the emptiness as a pruning problem.
-      local legacy_files
-      legacy_files=$(_find_powershell_files)
-      if [ -z "$legacy_files" ]; then
+      #
+      # Read into an ARRAY, one path per line. The previous shape captured the
+      # list into a string and let word splitting expand it again, which silently
+      # split any path containing a space. Reading line by line keeps the paths
+      # intact; `mapfile` would do the same but is not guaranteed by the bash
+      # versions this hook supports.
+      local -a legacy_files=()
+      while IFS= read -r _ps_file; do
+        [ -n "$_ps_file" ] && legacy_files+=("$_ps_file")
+      done < <(_find_powershell_files)
+      if [ "${#legacy_files[@]}" -eq 0 ]; then
         # Nothing to analyse is NOT a pass: say so via the reason protocol the
         # module-missing branch uses, so it stays visible in the gate output.
         echo "XP_G1_REASON: no PowerShell files found outside the pruned directories"
         return 3
       fi
       local legacy_array
-      # Word-splitting is intended here: _find_powershell_files emits one path
-      # per line and _powershell_path_array takes the paths as separate
-      # arguments. Annotated rather than quoted so the intent is explicit.
-      # shellcheck disable=SC2086
-      legacy_array=$(_powershell_path_array $legacy_files)
+      legacy_array=$(_powershell_path_array "${legacy_files[@]}")
       PSSA_OUT=$("$PWSH" "${POWERSHELL_ARGS[@]}" "
         if (-not (Get-Module -ListAvailable -Name PSScriptAnalyzer)) {
           Write-Output 'PSSA_MODULE_MISSING'
