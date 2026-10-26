@@ -195,6 +195,13 @@ function inQuotedState(state: QuoteState): boolean {
   return state.inSingle || state.inDouble || state.inTemplate;
 }
 
+/** The three quote kinds tracked by QuoteState, with the flag that marks each. */
+const QUOTE_KINDS: ReadonlyArray<{ quote: string; flag: 'inSingle' | 'inDouble' | 'inTemplate' }> = [
+  { quote: "'", flag: 'inSingle' },
+  { quote: '"', flag: 'inDouble' },
+  { quote: '`', flag: 'inTemplate' },
+];
+
 /**
  * Advance one character of quote tracking.
  *
@@ -202,28 +209,25 @@ function inQuotedState(state: QuoteState): boolean {
  * six-branch block verbatim (#602): both must ignore delimiters that appear
  * inside a string, and neither may treat an escape as a closing quote.
  *
+ * Table-driven (#620): all three quote kinds behave identically -- an escape
+ * skips two characters, the matching quote closes the literal -- so they are one
+ * rule applied to a list rather than three copies of it.
+ *
  * @returns the number of characters consumed (2 when the next char is escaped).
  */
 function advanceQuoteState(src: string, i: number, state: QuoteState): number {
   const c = src[i];
-  if (state.inSingle) {
+
+  for (const kind of QUOTE_KINDS) {
+    if (!state[kind.flag]) continue;
     if (c === '\\') return 2;
-    if (c === "'") state.inSingle = false;
+    if (c === kind.quote) state[kind.flag] = false;
     return 1;
   }
-  if (state.inDouble) {
-    if (c === '\\') return 2;
-    if (c === '"') state.inDouble = false;
-    return 1;
-  }
-  if (state.inTemplate) {
-    if (c === '\\') return 2;
-    if (c === '`') state.inTemplate = false;
-    return 1;
-  }
-  if (c === "'") state.inSingle = true;
-  else if (c === '"') state.inDouble = true;
-  else if (c === '`') state.inTemplate = true;
+
+  // Not inside any literal: open the one this character starts, if any.
+  const opener = QUOTE_KINDS.find(kind => kind.quote === c);
+  if (opener) state[opener.flag] = true;
   return 1;
 }
 
