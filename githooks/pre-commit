@@ -3357,10 +3357,14 @@ GATE_6_START=$(gate_start_ms)
 
 if [ "$PROJECT_LANG" = "documentation-only" ]; then
   echo "     ✅ Skipped (documentation project)."
+  GATE_6_STATUS="SKIP"
+  GATE_6_REASON="documentation_only"
 
 elif has_project_lang "powershell" 2>/dev/null || [ "$PROJECT_LANG" = "powershell" ]; then
   echo "     ℹ️  No PowerShell architecture tooling available"
      echo "     ⏭️  SKIPPED - Architecture validation (no tool for PowerShell)"
+  GATE_6_STATUS="SKIP"
+  GATE_6_REASON="no_powershell_architecture_tool"
 
 else
   run_archlint() (
@@ -3428,8 +3432,11 @@ else
          else
            echo "     ✅ TypeScript architecture validation completed (zero-tolerance mode). no baseline found."
          fi
-         # #537: archlint actually ran here, so there is no skip reason. The
-         # matrix reads an absent reason + PASS status as `covered`.
+         # #619: archlint actually ran and returned 0 above — that is a PASS
+         # verdict, not a skip. The epilogue at the end of Gate 6 defaults an
+         # untouched sentinel to SKIP, so this branch has to claim PASS or the
+         # report and coverage matrix lose the fact that archlint ran.
+         GATE_6_STATUS="PASS"
          ;;
       "python")
         # detect any import-linter carrier (incl. pyproject.toml [tool.importlinter])
@@ -3447,6 +3454,7 @@ else
               exit 1
             fi
             echo "     ✅ Python architecture validation completed."
+            GATE_6_STATUS="PASS"
           else
             echo "     ❌ BLOCKED - import-linter not installed"
             echo "     Install with: pip install import-linter"
@@ -3467,8 +3475,15 @@ else
         if [ -f "arch-go.yaml" ] || [ -f "arch-go.yml" ]; then
           if require_tool "arch-go" "Gate 6" "go install github.com/arch-go/arch-go@latest"; then
             echo "     Running arch-go for Go..."
-            arch-go check 2>&1 | head -20
-            echo "     ✅ Go architecture validation completed."
+            if arch-go check 2>&1 | head -20; then
+              echo "     ✅ Go architecture validation completed."
+              GATE_6_STATUS="PASS"
+            else
+              echo ""
+              echo "❌ BLOCKED - Go architecture contract violations (arch-go)"
+              echo "Fix the broken architecture rules above before committing."
+              exit 1
+            fi
           else
             echo "     ❌ BLOCKED - arch-go not installed"
             echo "     Install with: go install github.com/arch-go/arch-go@latest"
@@ -3486,14 +3501,32 @@ else
       "java")
         if [ -f "src/test/java/architecture" ] || [ -d "src/test/java/architecture" ]; then
           echo "     Running Java architecture tests..."
+          JAVA_ARCH_RAN=false
+          JAVA_ARCH_EXIT=0
           if [ -f "pom.xml" ]; then
-            mvn test -Dtest=architecture.* 2>&1 | head -20 || mvn test -Dtest=**Architecture** 2>&1 | head -20 || echo "⚠️  Java architecture tests completed"
-          elif [ -f "build.gradle" ]; then
-            if [ -f "./gradlew" ]; then
-              ./gradlew test --tests "*Architecture*" 2>&1 | head -20 || echo "⚠️  Java architecture tests completed"
+            JAVA_ARCH_RAN=true
+            if ! mvn test -Dtest=architecture.* 2>&1 | head -20; then
+              mvn test -Dtest='**Architecture**' 2>&1 | head -20 || JAVA_ARCH_EXIT=$?
+            fi
+          elif [ -f "build.gradle" ] && [ -f "./gradlew" ]; then
+            JAVA_ARCH_RAN=true
+            ./gradlew test --tests "*Architecture*" 2>&1 | head -20 || JAVA_ARCH_EXIT=$?
+          fi
+          if [ "$JAVA_ARCH_RAN" = "true" ] && [ "$JAVA_ARCH_EXIT" -ne 0 ]; then
+            echo ""
+            echo "❌ BLOCKED - Java architecture tests failed"
+            echo "Fix the failing architecture tests before committing."
+            exit 1
+          fi
+          if [ "$JAVA_ARCH_RAN" = "true" ]; then
+            echo "     ✅ Java architecture validation completed."
+            GATE_6_STATUS="PASS"
+          else
+            echo "     ⏭️  SKIPPED - Java architecture validation (no Maven/Gradle runner)"
+            if [ "${BASH_VERSINFO[0]:-0}" -ge 4 ]; then
+              GATE_6_REASON_BY_LANG["$CURRENT_LANG"]="architecture_not_configured"
             fi
           fi
-          echo "     ✅ Java architecture validation completed."
         else
           echo "     ℹ️  No architecture test files found - skipping"
           echo "     ⏭️  SKIPPED - Architecture validation (no tests)"
@@ -3554,6 +3587,7 @@ else
       echo "     ⏭️  SKIPPED - Architecture validation (.architecture-skip exemption)"
       # #537: an explicit exemption is "not applicable", not "tool missing".
       GATE_6_REASON="architecture_skip_exemption"
+      GATE_6_STATUS="SKIP"
     else
       echo ""
       echo "❌ ARCHITECTURE CONFIG MISSING - COMMIT BLOCKED"
@@ -3670,12 +3704,11 @@ else
     echo "     ⏭️  SKIPPED - Boy Scout Rule (not available in project)"
   fi
 fi
-# A PASS here must mean 'the checks ran and found nothing'. The two
-# branches above print 'SKIPPED - not configured/available'; stamping PASS
-# after them turned 'nothing was checked' into a scored success.
-if [ -n "${GATE_6_STATUS:-}" ]; then
-  : # a branch that really ran already decided the verdict
-else
+# A PASS here must mean 'the checks ran and found nothing'. Every branch that
+# actually ran a checker assigns PASS above; branches that could not run assign
+# SKIP (or a per-language reason). An untouched sentinel therefore means no
+# architecture check ran — never promote it to PASS (#619).
+if [ -z "${GATE_6_STATUS:-}" ]; then
   GATE_6_STATUS="SKIP"
 fi
 record_gate_audit "gate-6" "architecture-boy-scout" "$GATE_6_STATUS" "${BS_BLOCKED:-0}" "$GATE_6_START"

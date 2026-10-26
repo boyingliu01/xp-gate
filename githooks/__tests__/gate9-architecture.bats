@@ -564,3 +564,30 @@ EOF
   
   [[ "$output" == *"Gate 8"* ]] || [[ "$output" == *"Boy Scout"* ]] || [[ "$output" == *"Gate 9"* ]] || [[ "$output" == *"Architecture"* ]] || [[ "$output" == *"PASSED"* ]] || [[ "$output" == *"ENVIRONMENT ERROR"* ]]
 }
+
+@test "successful TypeScript archlint assigns Gate 6 PASS (#619)" {
+  run awk '/^      "typescript"\)/ { in_ts=1 } in_ts && /GATE_6_STATUS="PASS"/ { found=1 } in_ts && /;;/ { exit } END { exit found ? 0 : 1 }' "$BATS_TEST_DIRNAME/../pre-commit"
+  [ "$status" -eq 0 ]
+}
+
+@test "Gate 6 epilogue only defaults an unassigned verdict to SKIP (#619)" {
+  run grep -F 'if [ -z "${GATE_6_STATUS:-}" ]; then' "$BATS_TEST_DIRNAME/../pre-commit"
+  [ "$status" -eq 0 ]
+}
+
+@test "archlint success is reported as Gate 6 PASS (#619)" {
+  mkdir -p "$TEST_DIR/node_modules/.bin" src
+  cat > "$TEST_DIR/node_modules/.bin/archlint" <<'ARCH'
+#!/usr/bin/env bash
+exit 0
+ARCH
+  chmod +x "$TEST_DIR/node_modules/.bin/archlint"
+  echo '{}' > "$TEST_DIR/.archlint.yaml"
+  cat > "$TEST_DIR/package.json" <<'PKG'
+{"name":"g6-fixture","version":"1.0.0"}
+PKG
+  echo '// @no-test-required: gate6 fixture' > "$TEST_DIR/src/index.ts"
+  git add .
+  run ./pre-commit
+  [[ "$output" == *"Gate 6: Architecture + Boy Scout"*"PASS"* ]]
+}
