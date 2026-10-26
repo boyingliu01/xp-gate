@@ -494,41 +494,25 @@ function findConfig(basePath, fileName) {
 }
 
 /**
- * The basename of the first `gate-<num>-*.sh` in a directory, or null.
+ * Locate the bash script that implements a gate, for the TS-less fallback path.
  *
- * A missing directory is the normal case (most projects have no `githooks/gates/`),
- * so it returns null rather than throwing; a read error is also treated as "no
- * match" because the caller falls through to the next candidate either way.
+ * Candidate order is the reachability order: a project-local githooks/ copy
+ * (what `xp-gate init` and repo checkouts provide) first, then the global
+ * install (~/.config/xp-gate/adapters, the npm deployment layout).
  *
- * @param {string} dir directory to list
+ * There was a third, higher-priority candidate: `<cwd>/githooks/gates/gate-N-*.sh`.
+ * It could never match outside this repository -- the npm package's files[] has
+ * no gates/ entry and lib/init.js never creates one -- so it shadowed the
+ * canonical copy with a drifted duplicate for nobody's benefit. Removed along
+ * with the directory; AC-A-02-05 guards against re-adding either half alone.
+ *
  * @param {string} gateNum gate number as a string
+ * @param {string} cwd project root to search
  * @returns {string|null}
  */
-function matchGateFileIn(dir, gateNum) {
-  try {
-    if (!fs.existsSync(dir)) return null;
-    return fs.readdirSync(dir).find(f => f.startsWith(`gate-${gateNum}-`) && f.endsWith('.sh')) || null;
-  } catch {
-    return null;
-  }
-}
-
 function resolveGateScript(gateNum, cwd = process.cwd()) {
-  const candidates = [
-    path.join(cwd, 'githooks', 'gates', `gate-${gateNum}-*.sh`),
-    path.join(cwd, 'githooks', `gate-${gateNum}.sh`),
-  ];
-
-  // Try glob patterns
-  for (const pattern of candidates) {
-    if (pattern.includes('*')) {
-      const dir = path.dirname(pattern);
-      const match = matchGateFileIn(dir, gateNum);
-      if (match) return path.join(dir, match);
-    } else if (fs.existsSync(pattern)) {
-      return pattern;
-    }
-  }
+  const projectScript = path.join(cwd, 'githooks', `gate-${gateNum}.sh`);
+  if (fs.existsSync(projectScript)) return projectScript;
 
   // Check global install
   const globalDir = path.join(os.homedir(), '.config', 'xp-gate', 'adapters');

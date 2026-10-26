@@ -106,7 +106,7 @@ gate_status_with() {
 }
 
 @test "AC-457-17: no gate-4 copy writes the checker report to a fixed shared path" {
-  for f in githooks/gate-4.sh githooks/adapters/gate-4.sh githooks/gates/gate-4-principles.sh; do
+  for f in githooks/gate-4.sh githooks/adapters/gate-4.sh; do
     # Match the REDIRECTION, not the prose: the modules name the shared path in a
     # comment explaining why it was removed, and a comment must stay allowed to.
     if grep -Eq '> *"*/tmp/principles-output' "$REPO_ROOT/$f"; then

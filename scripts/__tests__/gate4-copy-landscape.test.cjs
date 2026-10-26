@@ -52,12 +52,14 @@ describe('AC-482: gate-4 copy landscape stays qualified (#482)', () => {
     }
   });
 
-  it('the DEAD copy keeps its array-form --config while it exists', () => {
+  it('the unreachable gates/ copy stays deleted (anti-resurrection)', () => {
+    // This used to assert the DEAD copy's array-form --config "while it exists".
+    // The directory is gone (nothing ever installed it: not in the npm package's
+    // files[], never created by xp-gate init), so the old body silently skipped
+    // itself -- a test that passes by not running is not a guard. Asserting the
+    // ABSENCE is what actually holds the line.
     const p = path.join(ROOT, 'githooks/gates/gate-4-principles.sh');
-    if (!fs.existsSync(p)) return; // deleted by the Sprint E cleanup — fine
-    const text = fs.readFileSync(p, 'utf8');
-    expect(text).toMatch(/PRINCIPLES_CONFIG=\(/);
-    expect(text).toMatch(/PRINCIPLES_CONFIG=\(--config "\$PRINCIPLES_ROOT\/\.principlesrc"\)/);
+    expect(fs.existsSync(p)).toBe(false);
   });
 
   it('gate-4-principles.sh stays dead unless this guard is updated (anti-resurrection)', () => {

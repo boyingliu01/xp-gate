@@ -1,29 +1,32 @@
 #!/usr/bin/env bats
 # @test REQ-A-02
 # @intent #532: the #518 SAST fix (v0.21.0) landed on gate-10.sh and the TS entry
-#         (src/gates/gate-9.ts), but the three legacy gate-9.sh fallback copies
-#         still carry both root causes: (1) semgrep exit 0 is treated as "no
+#         (src/gates/gate-9.ts), but the legacy gate-9.sh fallback copies
+#         still carried both root causes: (1) semgrep exit 0 is treated as "no
 #         findings" although semgrep exits 0 even with ERROR-severity findings
 #         unless --error is passed; (2) the CRITICAL/HIGH-only vocabulary never
-#         intersects semgrep's own ERROR/WARNING/INFO scale. They stay reachable:
-#         resolveGateScript(9) hits githooks/gates/gate-9-sast-security.sh first
-#         in a TS-less repo checkout, githooks/gate-9.sh second, and the globally
-#         installed ~/.config/xp-gate/adapters/gate-9.sh third (npm deployments).
-#         gates/gate-9-sast-security.sh additionally carries a copy-paste
-#         artifact: it sets GATE_10_STATUS, so a caller reading GATE_9_STATUS
-#         after sourcing it sees an empty verdict. These tests pin gate-10.sh's
+#         intersects semgrep's own ERROR/WARNING/INFO scale. Two copies are
+#         reachable: resolveGateScript(9) hits githooks/gate-9.sh in a TS-less
+#         repo checkout, and the globally installed
+#         ~/.config/xp-gate/adapters/gate-9.sh for npm deployments. (This file
+#         used to list a third, githooks/gates/gate-9-sast-security.sh, as
+#         "hit FIRST". That was wrong: the npm package ships no gates/
+#         directory and `xp-gate init` never installs one, so the candidate
+#         could only ever match inside this repo. It was removed -- see
+#         AC-A-02-05.) That removed copy additionally carried a copy-paste
+#         artifact: it set GATE_10_STATUS, so a caller reading GATE_9_STATUS
+#         after sourcing it saw an empty verdict. These tests pin gate-10.sh's
 #         verdict semantics (JSON verdict, union vocabulary, fail-closed on
 #         unknown/missing severity, stdout/stderr separation, node guard,
-#         errors[] accounting, unparseable -> SKIP never PASS) on ALL THREE
-#         copies, plus byte parity of the verdict block across them and the
-#         invariant markers across all six shipped copies (3 repo + 3 npm
-#         mirrors).
-# @covers AC-A-02-01, AC-A-02-02, AC-A-02-03, AC-A-02-04
+#         errors[] accounting, unparseable -> SKIP never PASS) on every
+#         reachable copy, plus byte parity of the verdict block across the repo
+#         copies and the invariant markers across all five shipped copies
+#         (2 repo + 3 npm mirrors).
+# @covers AC-A-02-01, AC-A-02-02, AC-A-02-03, AC-A-02-04, AC-A-02-05
 
 setup() {
   REPO_ROOT="$(cd "$BATS_TEST_DIRNAME/../.." && pwd)"
   GATE="$REPO_ROOT/githooks/gate-9.sh"
-  GATE_GATES="$REPO_ROOT/githooks/gates/gate-9-sast-security.sh"
   GATE_ADAPTERS="$REPO_ROOT/githooks/adapters/gate-9.sh"
   TEST_DIR="$(mktemp -d)"
 
@@ -47,9 +50,9 @@ teardown() {
   rm -rf "$TEST_DIR"
 }
 
-# The three live fallback copies, in resolveGateScript(9) reach order.
+# The two live fallback copies, in resolveGateScript(9) reach order.
 all_gate_copies() {
-  printf '%s\n' "$GATE" "$GATE_GATES" "$GATE_ADAPTERS"
+  printf '%s\n' "$GATE" "$GATE_ADAPTERS"
 }
 
 # Sources the given gate copy with the stub semgrep on PATH and reports both
@@ -270,13 +273,13 @@ verdict_block_of() {
   sed -n "${s},${e}p" "$f"
 }
 
-@test "AC-A-02-04a: the verdict block is byte-identical across the three repo copies" {
+@test "AC-A-02-04a: the verdict block is byte-identical across the two reachable repo copies" {
   verdict_block_of "$GATE" > "$TEST_DIR/vb-canonical" || {
     echo "githooks/gate-9.sh: verdict block markers missing"
     return 1
   }
   [ -s "$TEST_DIR/vb-canonical" ] || { echo "empty verdict block"; return 1; }
-  for f in "$GATE_GATES" "$GATE_ADAPTERS"; do
+  for f in "$GATE_ADAPTERS"; do
     if ! verdict_block_of "$f" > "$TEST_DIR/vb-other"; then
       echo "$f: verdict block markers missing"
       return 1
@@ -288,13 +291,21 @@ verdict_block_of() {
   done
 }
 
-@test "AC-A-02-04b: all six shipped copies carry the invariant markers and no --error flag" {
-  # The three repo sources plus the three npm mirrors (sync-package-content.js
+@test "AC-A-02-04b: all five shipped copies carry the invariant markers and no --error flag" {
+  # The two reachable repo sources plus the three npm mirrors (sync-package-content.js
   # copies githooks/gate-9.sh to package root AND hooks/, and
   # githooks/adapters/gate-9.sh to adapters/).
+  #
+  # githooks/gates/gate-9-sast-security.sh used to be a sixth entry. It was
+  # REMOVED, and the count corrected from six to five, because it was never
+  # shipped and never reachable: the npm package's files[] has no gates/
+  # entry, `xp-gate init` never installs one, and resolveGateScript()'s first
+  # candidate (cwd/githooks/gates/gate-N-*.sh) therefore only ever matches
+  # inside this repository. It had also drifted 36 lines from the canonical
+  # copy and still carried the GATE_10_STATUS copy-paste artifact this test
+  # file documents. See AC-A-02-05 for the guard against its return.
   local copies=(
     "$REPO_ROOT/githooks/gate-9.sh"
-    "$REPO_ROOT/githooks/gates/gate-9-sast-security.sh"
     "$REPO_ROOT/githooks/adapters/gate-9.sh"
     "$REPO_ROOT/src/npm-package/gate-9.sh"
     "$REPO_ROOT/src/npm-package/hooks/gate-9.sh"
@@ -338,4 +349,33 @@ verdict_block_of() {
       return 1
     fi
   done
+}
+
+# @test REQ-A-02
+# @intent Guard the removal of githooks/gates/. That directory held five scripts
+#         (647 lines) that resolveGateScript() named as its FIRST candidate but
+#         which no install could ever reach:
+#           - src/npm-package/package.json files[] lists no gates/ entry, so the
+#             published tarball has no such directory (verified against the
+#             installed 0.31.3 global package);
+#           - lib/init.js has zero references to gates/, so `xp-gate init` never
+#             creates one in a consumer repo.
+#         The candidate therefore only ever matched inside this repository,
+#         where it shadowed the canonical githooks/gate-N.sh it had drifted from
+#         (36 lines apart at removal, carrying the GATE_10_STATUS copy-paste
+#         artifact). Keeping it meant maintaining a second copy of every gate
+#         that no user executes -- pure drift surface.
+#         If a future change wants that fallback back, it must ALSO ship the
+#         directory and install it; this test forces that decision to be
+#         deliberate instead of a silent re-add.
+# @covers AC-A-02-05
+@test "AC-A-02-05: the unreachable githooks/gates/ fallback directory stays deleted" {
+  [ ! -d "$REPO_ROOT/githooks/gates" ] || {
+    echo "githooks/gates/ is back. It is unreachable from any install (not in"
+    echo "package.json files[], never created by xp-gate init), so re-adding it"
+    echo "only creates a second copy of the gate scripts to drift out of sync."
+    echo "If the fallback is genuinely wanted, ship AND install it, then update"
+    echo "this test and the resolveGateScript() candidates together."
+    return 1
+  }
 }

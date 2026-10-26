@@ -92,7 +92,7 @@ JSON
 
 @test "REQ-DSH-013 gate-4 copies are syntactically valid" {
   cd "$REPO_ROOT" || return 1
-  for f in githooks/gate-4.sh githooks/adapters/gate-4.sh githooks/gates/gate-4-principles.sh; do
+  for f in githooks/gate-4.sh githooks/adapters/gate-4.sh; do
     if [ -f "$f" ]; then
       run bash -n "$f"
       [ "$status" -eq 0 ] || { echo "syntax error in $f" >&2; return 1; }
