@@ -14,7 +14,12 @@ interface PkgShape {
 }
 
 function readPkg(): PkgShape {
-  return JSON.parse(readFileSync(join(PKG_ROOT, "package.json"), "utf8")) as PkgShape
+  const path = join(PKG_ROOT, "package.json")
+  try {
+    return JSON.parse(readFileSync(path, "utf8")) as PkgShape
+  } catch (error) {
+    throw new Error(`cannot read ${path}: ${error instanceof Error ? error.message : String(error)}`)
+  }
 }
 
 describe("packaging contract", () => {
@@ -60,6 +65,7 @@ describe("packaging contract", () => {
       "delphi.test.ts",
       "delphi-config.test.ts",
       "delphi-run.test.ts",
+      "compat.test.ts",
     ]
     for (const f of files) {
       const content = readFileSync(join(PKG_ROOT, "src", f), "utf8")

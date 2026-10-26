@@ -125,7 +125,30 @@ function syncPlugins() {
       console.error(`[sync] plugins/${name}`);
     }
   }
+  assertDshBundleEntry();
   return copied;
+}
+
+/**
+ * Fail loudly if the dsh plugin's compiled entry is missing.
+ *
+ * The npm main package declares `exports["./dsh"]` -> plugins/dsh/lib/index.js
+ * so that `dsh plugin add @boyingliu01/xp-gate` can mount the tool directly.
+ * `lib/` is a gitignored tsc artifact, and this sync only COPIES what already
+ * exists — it does not build. Publishing without a prior build therefore
+ * produces a tarball whose exports target does not exist, which fails at plugin
+ * load time on the user's machine and is invisible to every unit test here.
+ * Checking it at pack time turns that into an immediate, named error.
+ */
+function assertDshBundleEntry() {
+  const entry = path.join(PKG_ROOT, 'plugins', 'dsh', 'lib', 'index.js');
+  if (fs.existsSync(entry)) return;
+  console.error(
+    '[sync] ERROR: plugins/dsh/lib/index.js is missing. The npm main package ' +
+      'exports "./dsh" from that path, so the published bundle would not load. ' +
+      'Build it first: (cd plugins/dsh && npm run build)',
+  );
+  process.exit(1);
 }
 
 function syncScripts() {

@@ -1,0 +1,15 @@
+# XP-Gate DSH bundle patch (npm main package).
+#
+# Mounts the xp-gate tool plugin so that
+#   dsh plugin add @boyingliu01/xp-gate
+# is sufficient on its own — no separate install of
+# @boyingliu01/dsh-plugin-xp-gate is required.
+#
+# The entry point is the package-internal subpath "./dsh", which resolves via
+# this package.json's `exports` map to plugins/dsh/lib/index.js (ESM). Shipping
+# the code inside the same tarball keeps `dependencies` empty, preserving the
+# zero-install distribution contract.
+
+- insert:
+    - id: tool-xp-gate
+      name: '@boyingliu01/xp-gate/dsh'
