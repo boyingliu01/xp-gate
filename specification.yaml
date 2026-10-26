@@ -2706,4 +2706,41 @@ specification:
             也不因为找到了某个模块而掩盖其它模块缺失报告的事实；两条路径都必须有断言
           test_type: unit
 
+    # ============================================================
+    # REQ-623: 无法读取的文件不得被当作「检查过且干净」。
+    #
+    # CI 的 SARIF 步骤把 `find | head -50` 的多行结果带引号传给
+    # `--files "$SRC_FILES"`，于是整个 blob 作为一个参数到达检查器：
+    #   - parseArgs 只按空格切分，blob 成了单个不存在的路径；
+    #   - analyze 把读取失败收进 result.errors，而 main() 从不看这个数组；
+    #   - 结果以 exit 0 输出「干净的」报告，被归档成 principles.sarif。
+    # 日志里那句 `Analysis failed: Could not read file:` 是唯一的痕迹，
+    # 而它没有影响任何退出码——一份比被要求检查的文件更少的报告，
+    # 被当成了对全部文件的报告。
+    # ============================================================
+    - id: REQ-623
+      description: "--files 必须接受 shell 实际产生的分隔形态，且任何无法读取的文件都必须使检查失败而非静默通过"
+      priority: critical
+      acceptance_criteria:
+        - id: AC-623-01
+          criteria: --files 的取值须按任意空白（空格、换行、制表符）切分为多个路径，
+            并丢弃空项；单个路径必须原样保留
+          test_type: unit
+        - id: AC-623-02
+          criteria: 位于 --files 之前或之后的 --format 都必须被解析，多行 --files 值不得吞掉后续选项
+          test_type: unit
+        - id: AC-623-03
+          criteria: 不带 --files 的位置参数仍须累积为待检查文件，且可与 --files 并用
+          test_type: unit
+        - id: AC-623-04
+          criteria: 无法读取的文件（目录、缺失路径、解析即失败的路径）必须记录进 errors，
+            每个文件恰好一条，并点出该文件；不得计为「已检查且无违规」
+          test_type: unit
+        - id: AC-623-05
+          criteria: 检查器的退出码必须区分「检查并发现 ERROR」与「无法完成检查」：
+            存在未读取文件时须以退出码 2 失败并列出这些文件，
+            全部文件可读时 errors 必须为空
+          test_type: unit
+
+
 

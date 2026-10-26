@@ -758,31 +758,77 @@ jobs:
         if: ${{ needs.setup.outputs.project_language != 'unknown' }}
         run: |
           PROJECT_LANGUAGE=${{ needs.setup.outputs.project_language }}
-          
+
           echo "Generating SARIF reports..."
-          
+
           mkdir -p sarif-reports
-          
+
+          # ALLOWLIST, not a blocklist. Enumerating every directory to skip is a
+          # losing game -- the first version of this step pruned only the root
+          # node_modules, so plugins/dsh/node_modules/ stayed in scope and
+          # `head -50` filled with third-party .d.ts; the next attempt still
+          # picked up .delphi-work/ and .qoder/. Scanning the directories that
+          # actually hold source is both shorter and correct by construction.
+          SCAN_DIRS=()
+          for d in src plugins scripts dashboard githooks; do
+            [ -d "$d" ] && SCAN_DIRS+=("$d")
+          done
+          # Fall back to the whole tree only when no known source dir exists.
+          [ ${#SCAN_DIRS[@]} -eq 0 ] && SCAN_DIRS=(".")
+
+          # Vendored and generated trees are excluded even inside a source dir.
+          PRUNE=(-not -path "*/node_modules/*" -not -path "*/dist/*" -not -path "*/build/*"
+                 -not -path "*/coverage/*" -not -path "*/__pycache__/*")
+
           # If using principles checker that supports SARIF output
           if [[ -f "src/principles/index.ts" ]] && command -v npx >/dev/null 2>&1; then
             # Find source files for principles check
             case $PROJECT_LANGUAGE in
-              typescript) 
-                SRC_FILES=$(find . \( -name "*.ts" -o -name "*.tsx" \) -not -path "./node_modules/*" -not -path "./dist/*" | head -50)
+              typescript)
+                SRC_FILES=$(find "${SCAN_DIRS[@]}" \( -name "*.ts" -o -name "*.tsx" \) "${PRUNE[@]}" | head -50)
                 ;;
-              python) 
-                SRC_FILES=$(find . \( -name "*.py" \) -not -path "./venv/*" -not -path "./.venv/*" | head -50)
+              python)
+                SRC_FILES=$(find "${SCAN_DIRS[@]}" -name "*.py" "${PRUNE[@]}" | head -50)
                 ;;
               *)
-                SRC_FILES=$(find . \( -name "*.ts" -o -name "*.tsx" -o -name "*.js" -o -name "*.py" -o -name "*.go" \) -not -path "./node_modules/*" -not -path "./dist/*" | head -50)
+                SRC_FILES=$(find "${SCAN_DIRS[@]}" \( -name "*.ts" -o -name "*.tsx" -o -name "*.js" -o -name "*.py" -o -name "*.go" \) "${PRUNE[@]}" | head -50)
                 ;;
             esac
-            
+
+            # Refuse to emit an empty report: a head -50 that selected only
+            # vendored files must be visible, not a zero-finding SARIF.
+            case "$SRC_FILES" in
+              *node_modules*)
+                echo "::error::SARIF file selection picked vendored files; the prune list is wrong"
+                exit 1
+                ;;
+            esac
+
             if [[ -n "$SRC_FILES" ]]; then
-              npx tsx src/principles/index.ts --files "$SRC_FILES" --format sarif > sarif-reports/principles.sarif
+              # Word-split on purpose: the checker takes one --files value, and
+              # passing a quoted multi-line blob means the whole blob reaches it
+              # as a single path. #623 taught the checker to split on any
+              # whitespace, but handing it a list it does not have to re-parse is
+              # still the clearer call site.
+              # shellcheck disable=SC2086
+              npx tsx src/principles/index.ts --files $SRC_FILES --format sarif > sarif-reports/principles.sarif
+              # The write above exited 0 but that only means tsx ran. Prove the
+              # REPORT is usable: non-empty, parses, and has at least one run.
+              # Without this, a truncated or empty file still archives cleanly.
+              node -e '
+                const fs = require("fs");
+                const p = "sarif-reports/principles.sarif";
+                const raw = fs.readFileSync(p, "utf8").replace(/^\uFEFF/, "");
+                if (!raw.trim()) { console.error("::error::principles.sarif is empty"); process.exit(1); }
+                const runs = (JSON.parse(raw).runs || []);
+                if (runs.length === 0) { console.error("::error::principles.sarif has no runs"); process.exit(1); }
+                console.log(`SARIF OK: runs=${runs.length} bytes=${raw.length}`);
+              '
+            else
+              echo "No source files selected for the SARIF report"
             fi
           fi
-          
+
           # Save SARIF reports for upload
           tar -cJf sarif-reports.tar.xz sarif-reports/ || echo "No SARIF reports generated"
 

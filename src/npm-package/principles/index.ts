@@ -27,7 +27,13 @@ export function parseArgs(args: string[]): CLIOptions {
     switch (args[i]) {
       case '--files':
         const next = args[++i];
-        if (next) options.files = next.split(' ').filter(f => f.trim());
+        // Split on ANY whitespace, not just spaces. `find ... | head -50`
+        // produces a newline-separated list, and CI passed it quoted, so the
+        // whole blob arrived as one argument. `.split(' ')` kept it whole, the
+        // path could never resolve, nothing was analysed, and the run fell
+        // through to the console/empty path -- writing "✓ No violations found"
+        // into a file the workflow called principles.sarif (#623).
+        if (next) options.files = next.split(/\s+/).filter(f => f.trim());
         break;
       case '--format':
         const fmt = args[++i];
@@ -85,7 +91,24 @@ export async function main(args: string[]): Promise<number> {
     console: formatConsole,
   };
   console.log(formatters[options.format](result));
-  
+
+  // A file the checker could not read is not a file it found clean. Before this,
+  // `analyze` filed read failures in `result.errors` and nothing ever read that
+  // array: the run exited 0 and printed a clean report, which CI's SARIF step
+  // then archived. That is how `Analysis failed: Could not read file: ...`
+  // appeared in the log while the step still produced a report (#623).
+  //
+  // Exit 2, matching this module's contract: 1 = "examined, found ERRORs";
+  // 2 = "could not examine". A gate that treats 2 as a tool failure and 1 as a
+  // finding must be able to tell them apart, and a partial examination is the
+  // former. Naming the paths matters as much as the status -- an operator needs
+  // to know WHICH files were never looked at.
+  if (result.errors.length > 0) {
+    console.error(`Analysis incomplete: ${result.errors.length} file(s) could not be examined`);
+    for (const err of result.errors) console.error(`  ${err}`);
+    return 2;
+  }
+
   // Exit 1 only for ERROR-severity violations. Returning 1 for any violation
   // made info/warning noise (e.g. magic-numbers `info`) look like a tool
   // failure: Gate 4 treats a non-zero exit as "checker execution failed" and
