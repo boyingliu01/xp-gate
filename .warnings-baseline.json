@@ -32,7 +32,7 @@
     "lastAnalyzed": "2026-10-26T10:58:03.514Z"
   },
   "src/build-integrity/__tests__/gate-10.test.ts": {
-    "totalWarnings": 11,
+    "totalWarnings": 7,
     "lastAnalyzed": "2026-10-26T18:46:18.357Z"
   }
 }
