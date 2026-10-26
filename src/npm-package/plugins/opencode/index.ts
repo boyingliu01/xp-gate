@@ -158,15 +158,27 @@ async function decideUpgrade(): Promise<UpgradeDecision> {
  *
  * Resolves with the exit code rather than throwing on a non-zero exit: a failed
  * install is a reported condition ("error"), not an exception the caller has to
- * guess the meaning of.
+ * guess the meaning of. A spawn that could not start at all still rejects -- that
+ * is a different failure (no npm on PATH) and the caller must see it.
+ *
+ * The spawn call is guarded as well as listening for the 'error' event: both are
+ * reachable (the event covers an async ENOENT, the guard covers a synchronous
+ * throw such as an invalid argument), and an unhandled one here would escape into
+ * the host's chat loop.
  */
 function installGlobally(version: string): Promise<number | null> {
   return new Promise<number | null>((resolve, reject) => {
-    const child = spawn("npm", ["install", "-g", `${XP_GATE_NPM_PKG}@${version}`], {
-      stdio: "pipe",
-      shell: true,  // Required on Windows: npm is a .cmd file
-      timeout: 120_000,
-    })
+    let child;
+    try {
+      child = spawn("npm", ["install", "-g", `${XP_GATE_NPM_PKG}@${version}`], {
+        stdio: "pipe",
+        shell: true,  // Required on Windows: npm is a .cmd file
+        timeout: 120_000,
+      })
+    } catch (err) {
+      reject(err)
+      return
+    }
     child.on("close", (code) => resolve(code))
     child.on("error", (err) => reject(err))
   })
