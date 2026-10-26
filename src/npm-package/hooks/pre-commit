@@ -3008,19 +3008,53 @@ else
       # JaCoCo writes target/site/jacoco/ (Maven) or build/reports/jacoco/test/
       # (Gradle), i.e. neither path probed by the default branch below, so Java
       # needs its own branch to be measurable at all.
+      #
+      # #603: a MULTI-MODULE Maven repo writes one report per module --
+      # whaleaudit-core/target/site/jacoco/jacoco.csv, whaleaudit-demo/... --
+      # and nothing at the repo root. Probing only the root paths therefore
+      # concluded "No JaCoCo report found, so the 80% floor cannot be verified"
+      # and BLOCKED every Java commit of a project that had a complete report
+      # sitting one directory down. A gate that cannot see the report is not
+      # enforcing a floor, it is enforcing an accident of build layout.
+      # Fix: probe the root paths first (single-module projects, and the
+      # historical behaviour), then fall back to the module reports and
+      # aggregate across them, so the floor covers every class that was built.
       jacoco_csv=""
+      jacoco_all=""
       for jacoco_candidate in \
         "target/site/jacoco/jacoco.csv" \
         "build/reports/jacoco/test/jacocoTestReport.csv"; do
         [ -f "$jacoco_candidate" ] && { jacoco_csv="$jacoco_candidate"; break; }
       done
+      if [ -z "$jacoco_csv" ]; then
+        # Module reports. -mindepth-free walk so ./module/... is found; sorted
+        # for a stable, reproducible aggregate order.
+        jacoco_all=$(find . -path ./target -prune -o \
+          -type f \( -name 'jacoco.csv' -path '*/target/site/jacoco/*' \) -print 2>/dev/null \
+          | sort | tr '\n' ' ')
+        # First module report doubles as the "report exists" witness for the
+        # messages below; the aggregate sums over every one of them.
+        jacoco_csv=$(echo "$jacoco_all" | awk '{print $1}')
+      fi
+      if [ -n "$jacoco_csv" ] && [ -n "$jacoco_all" ]; then
+        _jc_n=$(echo "$jacoco_all" | awk '{print NF}')
+        echo "   ℹ️  Multi-module JaCoCo: aggregating $_jc_n module report(s)."
+      fi
 
       if [ -n "$jacoco_csv" ]; then
         # Aggregate INSTRUCTION_MISSED / INSTRUCTION_COVERED over every class row.
         # Columns are located by header name because their position is not part of
         # the CSV's stable contract.
+        #
+        # #603: with module reports, each file repeats the header row, so the
+        # header detection is per-file (FNR == 1) rather than per-stream
+        # (NR == 1). Otherwise module 2's header is summed as data, or worse,
+        # the single header found in module 1 leaves the columns unset for it.
+        _jc_inputs="$jacoco_csv"
+        [ -n "$jacoco_all" ] && _jc_inputs="$jacoco_all"
         COVERAGE_PERCENT=$(awk -F, '
-          NR == 1 {
+          FNR == 1 {
+            missed_col = 0; covered_col = 0;
             for (i = 1; i <= NF; i++) {
               if ($i == "INSTRUCTION_MISSED") missed_col = i;
               if ($i == "INSTRUCTION_COVERED") covered_col = i;
@@ -3036,7 +3070,7 @@ else
             if (total > 0) printf "%.2f", (covered / total) * 100;
             else print "";
           }
-        ' "$jacoco_csv" 2>/dev/null) || COVERAGE_PERCENT=""
+        ' $_jc_inputs 2>/dev/null) || COVERAGE_PERCENT=""
 
         if [ -n "$COVERAGE_PERCENT" ]; then
           # Compare on the unrounded value so 79.5% cannot pass as 80%.
@@ -3484,18 +3518,77 @@ else
         fi
         ;;
       "java")
-        if [ -f "src/test/java/architecture" ] || [ -d "src/test/java/architecture" ]; then
-          echo "     Running Java architecture tests..."
-          if [ -f "pom.xml" ]; then
-            mvn test -Dtest=architecture.* 2>&1 | head -20 || mvn test -Dtest=**Architecture** 2>&1 | head -20 || echo "⚠️  Java architecture tests completed"
-          elif [ -f "build.gradle" ]; then
-            if [ -f "./gradlew" ]; then
-              ./gradlew test --tests "*Architecture*" 2>&1 | head -20 || echo "⚠️  Java architecture tests completed"
-            fi
+        # #602: this branch used to be a guaranteed PASS no matter what happened.
+        #   1) The test-dir probe hardcoded `src/test/java/architecture` at the
+        #      repo root. A multi-module Maven repo (core/ + demo/) puts the arch
+        #      tests under <module>/src/test/java/..., so the probe missed them
+        #      and the gate took the SKIP path -- reporting architecture as
+        #      "not configured" for a repo that HAS such tests.
+        #   2) Even when it did run, `mvn ... | head -20` yields head's exit
+        #      status (0) as the pipeline result, so the `||` fallback never
+        #      fired and `echo "✅ ... completed"` printed unconditionally. A
+        #      failing architecture test was reported as success. Verified:
+        #      `false | head -20` exits 0; with `set -o pipefail` it exits 1.
+        # Fix: discover the test source roots instead of guessing one path, and
+        # judge the build by PIPESTATUS[0] (the pattern run_java_build_integrity
+        # already uses), so the verdict comes from the build, not from `head`.
+        _java_arch_roots=""
+        if [ -f "pom.xml" ] || [ -x "./mvnw" ]; then
+          # Any */src/test/java dir (module-relative root), including the repo
+          # root itself, which find prints as ./src/test/java -> root ".".
+          while IFS= read -r _root; do
+            [ -n "$_root" ] && _java_arch_roots="${_java_arch_roots} ${_root}"
+          done <<JAVAARCHROOTS
+$(find . -path ./target -prune -o -type d -path '*/src/test/java' -print 2>/dev/null \
+  | sed 's|^\./||; s|/src/test/java$||; s|^src/test/java$|.|')
+JAVAARCHROOTS
+        elif [ -f "build.gradle" ] || [ -f "build.gradle.kts" ]; then
+          _java_arch_roots="."
+        fi
+
+        # Only the roots that actually contain an *Architecture* test count.
+        _java_arch_hit=""
+        for _r in $_java_arch_roots; do
+          _probe_dir="$_r/src/test/java"
+          [ "$_r" = "." ] && _probe_dir="src/test/java"
+          if find "$_probe_dir" -name '*Architecture*' -type f 2>/dev/null | head -1 | grep -q .; then
+            _java_arch_hit="${_java_arch_hit} ${_r}"
+          fi
+        done
+
+        if [ -n "$_java_arch_hit" ]; then
+          echo "     Running Java architecture tests (roots:$_java_arch_hit)..."
+          _java_arch_rc=0
+          if [ -f "pom.xml" ] || [ -x "./mvnw" ]; then
+            _mvn_bin="mvn"
+            [ -x "./mvnw" ] && _mvn_bin="./mvnw"
+            # -pl <module> -am runs only the module that holds the tests (plus
+            # what it needs); quoting the whole root list into one -Dtest works
+            # for Surefire because it accepts comma-separated patterns.
+            for _r in $_java_arch_hit; do
+              if [ "$_r" = "." ]; then
+                "$_mvn_bin" -q test -Dtest='*Architecture*' 2>&1 | tail -20
+              else
+                "$_mvn_bin" -q -pl "$_r" -am test -Dtest='*Architecture*' 2>&1 | tail -20
+              fi
+              _rc="${PIPESTATUS[0]}"
+              [ "$_rc" -ne 0 ] && _java_arch_rc="$_rc"
+            done
+          elif [ -x "./gradlew" ]; then
+            ./gradlew test --tests '*Architecture*' 2>&1 | tail -20
+            _java_arch_rc="${PIPESTATUS[0]}"
+          fi
+
+          if [ "$_java_arch_rc" -ne 0 ]; then
+            echo ""
+            echo "❌ BLOCKED - Java architecture test(s) failed (exit $_java_arch_rc)"
+            echo "Fix the layering violation(s) above before committing."
+            GATE_6_REASON_BY_LANG["$CURRENT_LANG"]="architecture_tests_failed"
+            exit 1
           fi
           echo "     ✅ Java architecture validation completed."
         else
-          echo "     ℹ️  No architecture test files found - skipping"
+          echo "     ℹ️  No *Architecture* test sources found under */src/test/java - skipping"
           echo "     ⏭️  SKIPPED - Architecture validation (no tests)"
           # #537: no test files means Java architecture was NOT measured.
           if [ "${BASH_VERSINFO[0]:-0}" -ge 4 ]; then
@@ -3546,6 +3639,22 @@ else
       GATE_6_REASON="mixed"
     else
       GATE_6_REASON="$_g6_seen"
+    fi
+
+    # #602 (status): a language that was really measured and passed leaves NO skip
+    # reason behind (see the #537 comment in the typescript arm: "archlint
+    # actually ran here, so there is no skip reason"). The verdict was never
+    # upgraded to match, so Gate 6 reported SKIP even when every language in
+    # the project had been validated and passed -- a measured dimension
+    # rendered as unmeasured. That is the mirror image of the bug #537 fixed,
+    # and the report could not tell the two apart.
+    #
+    # Upgrade to PASS only when the measurement actually happened for EVERY
+    # language: no language may carry a skip reason. A single skipped language
+    # keeps the gate non-PASS, so "some languages measured" cannot be scored
+    # as a full success.
+    if [ -z "$GATE_6_LANG_REASONS" ] && [ -n "$PROJECT_LANGS" ]; then
+      GATE_6_STATUS="PASS"
     fi
   else
     # Architecture config is REQUIRED — BLOCK if missing

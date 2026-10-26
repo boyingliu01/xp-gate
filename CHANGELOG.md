@@ -2,6 +2,36 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.31.4.0] - 2026-10-26
+
+两道门禁在 Java 上从未真正测量过任何东西，却一直报出"通过"。二者都是在真实项目的提交上实测发现的，且都是**结构上必然**的空转，不是偶发。
+
+- Gate 5 对一个多模块 Maven 仓库永远报 `❌ BLOCKED - No JaCoCo report found`，因为报告按模块生成；
+- Gate 6 的 Java 分支既找不到架构测试，又会把失败的架构测试报成成功。
+
+这两条合起来意味着：一个 Java 项目的覆盖率下限与架构约束，两道门禁都没有在执行——只是它们的输出看起来像在执行。
+
+### Fixed
+
+- **Gate 5 看不见多模块的 JaCoCo 报告（#603）**: `jacoco_csv` 只探测仓库根的 `target/site/jacoco/jacoco.csv` 与 `build/reports/jacoco/test/jacocoTestReport.csv`。一个多模块 Maven 仓库把报告写在 `whaleaudit-core/target/site/jacoco/jacoco.csv`、`whaleaudit-demo/target/site/jacoco/jacoco.csv`，根目录什么都没有——于是门禁认为"覆盖率下限无法验证"并**阻断每一次 Java 提交**，尽管一份完整的报告就在下一级目录里躺着。一道看不见报告的门禁不是在执行下限，是在执行构建布局的偶然性。
+  改为：先探根路径（单模块仓库与既有行为不变），找不到时再用 `find` 发现各模块报告，并对**全部**模块求和。聚合口径必须覆盖所有被构建的类，否则"第一个文件说了算"会让一个模块 100%、另一个 0% 的项目算出 100% 并放行。实测该仓库：`ℹ️ Multi-module JaCoCo: aggregating 2 module report(s).` → `Java coverage: 91% ✅ (≥ 80%)`。
+  因为每个模块 CSV 都重复表头，表头识别从 `NR == 1`（按流）改为 `FNR == 1`（按文件），否则第二个模块的表头会被当数据求和。
+
+- **Gate 6 的 Java 分支是一个必然的 PASS（#602）**: 两个独立原因。
+  1. 测试目录探测把 `src/test/java/architecture` 写死在仓库根。多模块仓库把架构测试放在 `<module>/src/test/java/...`，探测落空后走 SKIP 分支，把一个**确实有**架构测试的仓库报成 `architecture_not_configured`。实测该仓库的架构测试在 `whaleaudit-core/src/test/java/.../gate/ArchitectureConstraintTest.java`，6 个用例真实执行并通过，但门禁从未看过它们一眼。
+  2. 即使跑起来，`mvn ... | head -20` 的管道退出码是 `head` 的（0），所以 `||` 回退分支永不触发、`echo "✅ ... completed"` 无条件打印——**失败的架构测试被报成成功**。实测：`false | head -20` 退出 0；`set -o pipefail` 下退出 1。
+  改为：用 `find` 发现所有 `*/src/test/java` 根并按模块名过滤出真正含有 `*Architecture*` 的那些，再按 `PIPESTATUS[0]` 判定（即 `run_java_build_integrity` 已在用的写法），失败时 `❌ BLOCKED - Java architecture test(s) failed` 并 `exit 1`。
+
+- **完全被测量的 Gate 6 仍渲染成 SKIP（#602）**: 一个真正跑过并通过的语言不留下 skip reason（typescript 分支的 `#537` 注释正是这个约定），但判定从未跟着升级，于是 `GATE_6_STATUS` 落到兜底的 `SKIP`。这与 `#537` 修的"SKIP 装扮成 PASS"是同一枚硬币的背面，报告无法区分二者。改为：仅当**每一个**语言都不带 skip reason 且至少有一个语言时才升为 PASS；有任一语言跳过则保持非 PASS，"部分被测"不得计为全功。
+
+### 说明
+
+- **这两处都不是"绕过"，而是把度量接上**: 修完后在同一仓库用真实提交验证——Gate 5 从 `❌ BLOCKED` 变为 `Java coverage: 91% ✅`、Gate 6 从 `SKIP` 变为 `PASS`，报告里跑到的门禁由 10/12 变为 11/12。用 `--no-verify` 或加豁免文件可以让提交过去，但那只是让空转更安静。
+- **反向验证（两次都红在缺陷本身）**: 把 Gate 6 的 Java 分支退回旧实现，`AC-602-01/02/03` 三例同时变红，报 "still hardcodes src/test/java/architecture"、"never reads PIPESTATUS[0]"、"never exits non-zero"；把 Gate 5 的模块发现块删掉，`AC-603-01` 变红，报 "never searches for nested module jacoco.csv reports"。恢复后各自转绿。
+- **测试只认代码，不认注释**: 首版断言直接 grep 整个分支，结果被分支自己解释"旧探针是什么"的注释命中而假红。断言先剔除注释行再匹配；跨两物理行的 `find` 调用则在把换行压平后匹配。
+- **一个容易写错的聚合**: 只取第一个报告会让 `a=100%`、`b=0%` 的两模块仓库算出 100%。`AC-603-03` 用这个 fixture 钉住"真实聚合值 50%"，正是这条断言让"第一个文件说了算"的写法无法通过。
+- **`#599` 编号被占用**: 工作区里 PowerShell 覆盖率预算那组改动已使用 `#599`（含 `issue-599-powershell-coverage-budget.test.bats`），本次两道门禁改用 `#602`/`#603`，测试文件名与 `AC-60x-xx` 一并重编，避免两个不相干的修复共用一个号。
+
 ## [0.31.3.0] - 2026-10-26
 
 两处缺陷，同一个主题：**一道维度没被测量的门禁，和一个没跑测试却记 PASS 的门禁**。
