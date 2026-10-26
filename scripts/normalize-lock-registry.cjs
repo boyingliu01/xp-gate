@@ -70,24 +70,24 @@ function eachResolved(lock) {
   // A present-but-non-string value is corruption, not absence: collect it so the
   // classifier reports it instead of certifying the entry clean.
   const isPresent = (meta) => meta !== undefined && meta !== null;
+
+  // Both lockfile shapes collect entries the same way; only the naming differs,
+  // so the "is this a resolved entry worth reporting" rule is stated once.
+  const collect = (name, meta) => {
+    if (isPresent(meta.resolved)) entries.push({ name, resolved: meta.resolved });
+  };
+
   for (const [name, meta] of Object.entries(lock.packages || {})) {
-    if (meta && isPresent(meta.resolved)) {
-      entries.push({ name, resolved: meta.resolved });
-    }
+    if (meta) collect(name, meta);
   }
+
   // lockfileVersion 1/2 keep a legacy tree with the same field.
   const walk = (deps, prefix) => {
     for (const [name, meta] of Object.entries(deps || {})) {
       const full = prefix ? `${prefix}/${name}` : name;
-      if (!meta || typeof meta !== 'object') {
-        continue;
-      }
-      if (isPresent(meta.resolved)) {
-        entries.push({ name: full, resolved: meta.resolved });
-      }
-      if (meta.dependencies) {
-        walk(meta.dependencies, full);
-      }
+      if (!meta || typeof meta !== 'object') continue;
+      collect(full, meta);
+      if (meta.dependencies) walk(meta.dependencies, full);
     }
   };
   walk(lock.dependencies, '');
