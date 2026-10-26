@@ -1,8 +1,8 @@
 # DOCUMENTATION KNOWLEDGE BASE
 
 **Generated:** 2026-10-26
-**Commit:** 037b258f
-**Branch:** fix/598-599-powershell-gate3-and-coverage-budget
+**Commit:** 7a6d9971
+**Branch:** main
 **Version:** 0.31.3.0
 
 ## OVERVIEW
