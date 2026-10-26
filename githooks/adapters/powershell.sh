@@ -59,8 +59,36 @@ _detect_pwsh() {
   return 1
 }
 
+# List PowerShell SOURCE files under the current directory, without walking the
+# pruned artifact directories.
+#
+# #620: the caller used to pass '*.ps1', so a .psm1 module file was invisible --
+# a repo whose code lives in modules (the normal layout for anything that ships
+# one) got "no PowerShell files found outside the pruned directories" on every
+# commit, and the message blamed node_modules/dist instead of the glob. Our own
+# complexity path (gate-3.sh) already treated '.ps(m)?1$' as PowerShell, so the
+# two gates disagreed about what a PowerShell file is.
+#
+# The extension set is owned here rather than at each call site: one definition,
+# so Gate 1 and Gate 3 cannot drift apart again. Callers that want a narrower
+# population (e.g. only *.Tests.ps1) still pass an explicit pattern.
+_PS_SOURCE_PATTERNS=('*.ps1' '*.psm1')
+
 _find_powershell_files() {
-  local name_pattern="$1"
+  local name_pattern="${1:-}"
+
+  # Default to every PowerShell source file. A bare name_pattern keeps the old
+  # single-extension behaviour for callers that pass one deliberately.
+  local -a name_test=()
+  if [ -z "$name_pattern" ]; then
+    local p
+    for p in "${_PS_SOURCE_PATTERNS[@]}"; do
+      if [ "${#name_test[@]}" -gt 0 ]; then name_test+=('-o'); fi
+      name_test+=('-name' "$p")
+    done
+  else
+    name_test=('-name' "$name_pattern")
+  fi
 
   # #573: repo-local extra prune entries. The list below covers the artifact
   # directories xp-gate itself produces, but a consuming repo can have its own
@@ -149,7 +177,7 @@ _find_powershell_files() {
       -path './src/npm-package/plugins' \
       "${prune_args[@]+"${prune_args[@]}"}" \
     \) -prune \) -o \
-    \( -type f -name "$name_pattern" -print \) 2>/dev/null
+    \( -type f \( "${name_test[@]}" \) -print \) 2>/dev/null
 }
 
 _powershell_invocation() {
@@ -290,8 +318,11 @@ run_static_analysis() {
       # .git, node_modules, dist, coverage and the rest. The two paths disagreed
       # only because this one never called it. Now both use it, so "what this
       # adapter refuses to analyse" has one definition.
+      # #620: no pattern means "every PowerShell source file", so .psm1 modules
+      # are analysed too. This used to pass '*.ps1', which made a module-only repo
+      # look empty and reported the emptiness as a pruning problem.
       local legacy_files
-      legacy_files=$(_find_powershell_files '*.ps1')
+      legacy_files=$(_find_powershell_files)
       if [ -z "$legacy_files" ]; then
         # Nothing to analyse is NOT a pass: say so via the reason protocol the
         # module-missing branch uses, so it stays visible in the gate output.
@@ -299,6 +330,10 @@ run_static_analysis() {
         return 3
       fi
       local legacy_array
+      # Word-splitting is intended here: _find_powershell_files emits one path
+      # per line and _powershell_path_array takes the paths as separate
+      # arguments. Annotated rather than quoted so the intent is explicit.
+      # shellcheck disable=SC2086
       legacy_array=$(_powershell_path_array $legacy_files)
       PSSA_OUT=$("$PWSH" "${POWERSHELL_ARGS[@]}" "
         if (-not (Get-Module -ListAvailable -Name PSScriptAnalyzer)) {
