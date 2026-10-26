@@ -38,6 +38,22 @@ jobs:
           cache: 'npm'
       - run: npm ci
 
+      # Stryker's initial dry run executes the test suite, and that suite includes
+      # plugins/dsh/src/skills.test.ts, which asserts plugins/dsh/skills/ exists
+      # and matches the repo's skills/. That directory is a BUILD ARTIFACT --
+      # .gitignore lists it (line 150) -- so on a clean checkout the assertion
+      # fails before any mutant is even generated:
+      #
+      #   ERROR DryRunExecutor One or more tests failed in the initial test run:
+      #     bundled skills ships every repo skill as a directory
+      #     expected false to be true
+      #
+      # The plugin build is what produces those directories; no workflow ran it.
+      # Building here is the fix, not skipping the test: the test is right, it
+      # was simply being asked a question about a tree nobody had built.
+      - name: Build plugin bundles (skills are build artifacts)
+        run: node scripts/build-plugin.mjs --platform dsh
+
       - name: Determine changed principles files
         id: changed
         run: |

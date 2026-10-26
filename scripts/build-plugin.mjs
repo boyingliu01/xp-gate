@@ -28,6 +28,28 @@ const EXPECTED_SKILLS = [
 ];
 
 /**
+ * Run one of the dsh plugin's own npm scripts, or exit naming that script.
+ *
+ * `shell: true` is required, not optional. On POSIX npm is an executable, so the
+ * plain spawn works; on Windows npm is `npm.cmd`, a batch file that
+ * CreateProcess cannot launch directly, so spawnSync returns a null status and
+ * the build reported failure with no diagnostic. That failure then read as
+ * "tsc failed" while running `npm run build` by hand exited 0 (#624).
+ *
+ * The plugin's skills/ directory is a build artifact (.gitignore line 150) and
+ * the test suite asserts it exists, so a silently-broken build here breaks CI's
+ * mutation dry run on a clean checkout.
+ */
+function runNpmScript(dshDir, script) {
+  const result = spawnSync('npm', ['run', script], { stdio: 'inherit', cwd: dshDir, shell: true });
+  if (result.status !== 0) {
+    const detail = result.error ? `: ${result.error.message}` : '';
+    console.error(`Error: \`npm run ${script}\` failed in ${dshDir}${detail}`);
+    process.exit(1);
+  }
+}
+
+/**
  * Build the dsh plugin (tsc → lib/ + skills prepack).
  *
  * The dsh plugin compiles TypeScript and populates its gitignored skills/ via
@@ -40,17 +62,9 @@ function buildDshPlugin() {
     console.error(`Error: Plugin directory not found: ${dshDir}`);
     process.exit(1);
   }
-  console.log('Building dsh plugin (tsc -> lib + skills)...');
-  const build = spawnSync('npm', ['run', 'build'], { stdio: 'inherit', cwd: dshDir });
-  if (build.status !== 0) {
-    console.error('Error: dsh build (tsc) failed');
-    process.exit(1);
-  }
-  const skills = spawnSync('npm', ['run', 'prepare-skills'], { stdio: 'inherit', cwd: dshDir });
-  if (skills.status !== 0) {
-    console.error('Error: dsh prepare-skills failed');
-    process.exit(1);
-  }
+  console.log('Building dsh plugin (npm run build -> lib, then skills prepack)...');
+  runNpmScript(dshDir, 'build');
+  runNpmScript(dshDir, 'prepare-skills');
   console.log('Build complete: dsh plugin compiled + skills packaged');
   console.log(`Plugin location: ${dshDir}`);
 }
