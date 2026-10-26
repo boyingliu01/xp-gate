@@ -140,26 +140,95 @@ function lineOf(src: string, index: number): number {
   return src.substring(0, index).split('\n').length;
 }
 
+/** The three quoted states shared by the parameter/paren scanners. */
+interface QuoteState {
+  inSingle: boolean;
+  inDouble: boolean;
+  inTemplate: boolean;
+}
+
+function newQuoteState(): QuoteState {
+  return { inSingle: false, inDouble: false, inTemplate: false };
+}
+
+function inQuotedState(state: QuoteState): boolean {
+  return state.inSingle || state.inDouble || state.inTemplate;
+}
+
+/**
+ * Advance one character of quote tracking.
+ *
+ * Extracted because `countParams` and `readParenGroup` carried the same
+ * six-branch block verbatim (#602): both must ignore delimiters that appear
+ * inside a string, and neither may treat an escape as a closing quote.
+ *
+ * @returns the number of characters consumed (2 when the next char is escaped).
+ */
+function advanceQuoteState(src: string, i: number, state: QuoteState): number {
+  const c = src[i];
+  if (state.inSingle) {
+    if (c === '\\') return 2;
+    if (c === "'") state.inSingle = false;
+    return 1;
+  }
+  if (state.inDouble) {
+    if (c === '\\') return 2;
+    if (c === '"') state.inDouble = false;
+    return 1;
+  }
+  if (state.inTemplate) {
+    if (c === '\\') return 2;
+    if (c === '`') state.inTemplate = false;
+    return 1;
+  }
+  if (c === "'") state.inSingle = true;
+  else if (c === '"') state.inDouble = true;
+  else if (c === '`') state.inTemplate = true;
+  return 1;
+}
+
+/** Opening delimiters that raise the generic/bracket depth in a param list. */
+const DEPTH_OPENERS = new Set(['(', '[', '{', '<']);
+/** Closing delimiters that lower it. */
+const DEPTH_CLOSERS = new Set([')', ']', '}', '>']);
+
+/**
+ * Adjust `depth` for one delimiter.
+ * @returns true when the character was a delimiter (so it cannot also be a
+ *          separator), false otherwise.
+ */
+function applyDelimiter(c: string, depth: { value: number }): boolean {
+  if (DEPTH_OPENERS.has(c)) { depth.value++; return true; }
+  if (DEPTH_CLOSERS.has(c)) { depth.value--; return true; }
+  return false;
+}
+
+/** True when the character opens a quote/template the scanners must skip. */
+function isQuote(c: string): boolean {
+  return c === "'" || c === '"' || c === '`';
+}
+
 /** Count top-level, comma-separated parameters in a raw parameter list. */
 function countParams(rawList: string): number {
   const trimmed = rawList.trim();
   if (trimmed === '') return 0;
-  let depth = 0;
+
+  const depth = { value: 0 };
   let count = 1;
-  let inSingle = false;
-  let inDouble = false;
-  let inTemplate = false;
-  for (let i = 0; i < trimmed.length; i++) {
+  const state = newQuoteState();
+
+  for (let i = 0; i < trimmed.length;) {
+    if (inQuotedState(state)) {
+      i += advanceQuoteState(trimmed, i, state);
+      continue;
+    }
     const c = trimmed[i];
-    if (inSingle) { if (c === '\\') i++; else if (c === "'") inSingle = false; continue; }
-    if (inDouble) { if (c === '\\') i++; else if (c === '"') inDouble = false; continue; }
-    if (inTemplate) { if (c === '\\') i++; else if (c === '`') inTemplate = false; continue; }
-    if (c === "'") { inSingle = true; continue; }
-    if (c === '"') { inDouble = true; continue; }
-    if (c === '`') { inTemplate = true; continue; }
-    if (c === '(' || c === '[' || c === '{' || c === '<') depth++;
-    else if (c === ')' || c === ']' || c === '}' || c === '>') depth--;
-    else if (c === ',' && depth === 0) count++;
+    if (isQuote(c)) {
+      advanceQuoteState(trimmed, i, state);
+    } else if (!applyDelimiter(c, depth) && c === ',' && depth.value === 0) {
+      count++;
+    }
+    i++;
   }
   return count;
 }
@@ -170,50 +239,152 @@ function countParams(rawList: string): number {
  */
 function readParenGroup(src: string, open: number): { inner: string; end: number } {
   let depth = 0;
-  let inSingle = false;
-  let inDouble = false;
-  let inTemplate = false;
-  for (let i = open; i < src.length; i++) {
+  const state = newQuoteState();
+
+  for (let i = open; i < src.length;) {
+    if (inQuotedState(state)) {
+      i += advanceQuoteState(src, i, state);
+      continue;
+    }
     const c = src[i];
-    if (inSingle) { if (c === '\\') i++; else if (c === "'") inSingle = false; continue; }
-    if (inDouble) { if (c === '\\') i++; else if (c === '"') inDouble = false; continue; }
-    if (inTemplate) { if (c === '\\') i++; else if (c === '`') inTemplate = false; continue; }
-    if (c === "'") { inSingle = true; continue; }
-    if (c === '"') { inDouble = true; continue; }
-    if (c === '`') { inTemplate = true; continue; }
-    if (c === '(') depth++;
-    else if (c === ')') {
+    if (c === "'" || c === '"' || c === '`') {
+      advanceQuoteState(src, i, state);
+    } else if (c === '(') {
+      depth++;
+    } else if (c === ')') {
       depth--;
       if (depth === 0) return { inner: src.substring(open + 1, i), end: i + 1 };
     }
+    i++;
   }
   return { inner: src.substring(open + 1), end: src.length };
+}
+
+/**
+ * The lexical states `maxNesting` tracks while counting braces. Braces inside
+ * any of these are data, not structure, so they must not change the count.
+ */
+interface NestingScanState {
+  inSingle: boolean;
+  inDouble: boolean;
+  inTemplate: boolean;
+  inLineComment: boolean;
+  inBlockComment: boolean;
+}
+
+/**
+ * One handler per lexical state. Each returns how many characters were
+ * consumed, and mutates `state` only when the construct actually ends.
+ *
+ * Split out of a single 22-CCN dispatcher (#602): every state's exit condition
+ * is independent, so keeping them in one body bought nothing but branch count.
+ */
+type StateAdvance = (body: string, i: number, state: NestingScanState) => number;
+
+const advanceLineComment: StateAdvance = (body, i, state) => {
+  if (body[i] === '\n') state.inLineComment = false;
+  return 1;
+};
+
+const advanceBlockComment: StateAdvance = (body, i, state) => {
+  if (body[i] === '*' && body[i + 1] === '/') {
+    state.inBlockComment = false;
+    return 2;
+  }
+  return 1;
+};
+
+/** Shared shape of the three quoted states: honour `\`, close on the delimiter. */
+const advanceSingleQuote: StateAdvance = (body, i, state) => {
+  if (body[i] === '\\') return 2;
+  if (body[i] === "'") state.inSingle = false;
+  return 1;
+};
+
+const advanceDoubleQuote: StateAdvance = (body, i, state) => {
+  if (body[i] === '\\') return 2;
+  if (body[i] === '"') state.inDouble = false;
+  return 1;
+};
+
+const advanceTemplate: StateAdvance = (body, i, state) => {
+  if (body[i] === '\\') return 2;
+  if (body[i] === '`') state.inTemplate = false;
+  return 1;
+};
+
+/**
+ * Enter a construct when the current character opens one.
+ * @returns characters consumed, or 0 when nothing was opened.
+ */
+function openConstruct(body: string, i: number, state: NestingScanState): number {
+  const c = body[i];
+  const next = body[i + 1];
+  if (c === '/' && next === '/') { state.inLineComment = true; return 2; }
+  if (c === '/' && next === '*') { state.inBlockComment = true; return 2; }
+  if (c === "'") { state.inSingle = true; return 1; }
+  if (c === '"') { state.inDouble = true; return 1; }
+  if (c === '`') { state.inTemplate = true; return 1; }
+  return 0;
+}
+
+/**
+ * Advance the quoting/commenting state machine by one character.
+ *
+ * Pure with respect to depth: it only updates `state` and reports how many
+ * characters were consumed. Extracted from `maxNesting` (#602) so the brace
+ * counting and the lexing can be reasoned about separately -- the combined body
+ * carried every branch of both.
+ *
+ * @returns the number of characters consumed (1, or 2 for the escape/close
+ *          pairs that swallow the next character).
+ */
+function advanceNestingState(
+  body: string,
+  i: number,
+  state: NestingScanState,
+): number {
+  if (state.inLineComment) return advanceLineComment(body, i, state);
+  if (state.inBlockComment) return advanceBlockComment(body, i, state);
+  if (state.inSingle) return advanceSingleQuote(body, i, state);
+  if (state.inDouble) return advanceDoubleQuote(body, i, state);
+  if (state.inTemplate) return advanceTemplate(body, i, state);
+  const opened = openConstruct(body, i, state);
+  return opened === 0 ? 1 : opened;
+}
+
+/** True when the character at `i` is structural (not inside a literal/comment). */
+function isStructuralAt(state: NestingScanState): boolean {
+  return !state.inSingle && !state.inDouble && !state.inTemplate &&
+    !state.inLineComment && !state.inBlockComment;
 }
 
 /** Max brace nesting depth inside a function body (1 = body itself). */
 function maxNesting(body: string): number {
   let depth = 0;
   let max = 0;
-  let inSingle = false;
-  let inDouble = false;
-  let inTemplate = false;
-  let inLineComment = false;
-  let inBlockComment = false;
-  for (let i = 0; i < body.length; i++) {
-    const c = body[i];
-    const next = body[i + 1];
-    if (inLineComment) { if (c === '\n') inLineComment = false; continue; }
-    if (inBlockComment) { if (c === '*' && next === '/') { inBlockComment = false; i++; } continue; }
-    if (inSingle) { if (c === '\\') i++; else if (c === "'") inSingle = false; continue; }
-    if (inDouble) { if (c === '\\') i++; else if (c === '"') inDouble = false; continue; }
-    if (inTemplate) { if (c === '\\') i++; else if (c === '`') inTemplate = false; continue; }
-    if (c === '/' && next === '/') { inLineComment = true; i++; continue; }
-    if (c === '/' && next === '*') { inBlockComment = true; i++; continue; }
-    if (c === "'") { inSingle = true; continue; }
-    if (c === '"') { inDouble = true; continue; }
-    if (c === '`') { inTemplate = true; continue; }
-    if (c === '{') { depth++; if (depth > max) max = depth; }
-    else if (c === '}') depth--;
+  const state: NestingScanState = {
+    inSingle: false,
+    inDouble: false,
+    inTemplate: false,
+    inLineComment: false,
+    inBlockComment: false,
+  };
+
+  for (let i = 0; i < body.length;) {
+    const consumed = advanceNestingState(body, i, state);
+    if (consumed === 2) {
+      // The pair (escape, comment close, comment open) is consumed whole. A
+      // comment opener must not also be read as a brace-less character below.
+      i += 2;
+      continue;
+    }
+    if (isStructuralAt(state)) {
+      const c = body[i];
+      if (c === '{') { depth++; if (depth > max) max = depth; }
+      else if (c === '}') depth--;
+    }
+    i += 1;
   }
   return max;
 }
@@ -233,11 +404,120 @@ function ioOperationsIn(body: string): string[] {
 }
 
 /**
+ * Blank a `//` line comment starting at `start`.
+ * Stops AT the newline so line numbering survives (the newline is the caller's
+ * to consume as an ordinary character).
+ * @returns the index to resume scanning from.
+ */
+function maskLineComment(src: string, out: string[], start: number): number {
+  let i = start;
+  while (i < src.length && src[i] !== '\n') { out[i] = ' '; i++; }
+  return i;
+}
+
+/**
+ * Blank a block comment starting at `start` (which holds `/`).
+ *
+ * #602: newlines inside the comment must survive. Blanking them shifts every
+ * subsequent line number, so `lineOf()` and every line-numbered violation after
+ * a multi-line comment would point at the wrong line -- exactly the defect the
+ * line-comment branch never had, because it stops AT the newline.
+ *
+ * @returns the index to resume scanning from.
+ */
+function maskBlockComment(src: string, out: string[], start: number): number {
+  let i = start;
+  out[i] = ' '; out[i + 1] = ' '; i += 2;
+  while (i < src.length && !(src[i] === '*' && src[i + 1] === '/')) {
+    if (src[i] !== '\n') out[i] = ' ';
+    i++;
+  }
+  if (i < src.length) { out[i] = ' '; out[i + 1] = ' '; i += 2; }
+  return i;
+}
+
+/**
+ * Decide whether the `/` at `index` opens a regex literal rather than being
+ * division. A regex may only start where an expression may start: at the very
+ * beginning, after an operator/punctuation, or after a keyword that expects an
+ * expression (`return /re/`, `typeof /re/`, ...).
+ */
+function opensRegexLiteral(src: string, index: number): boolean {
+  const before = src.substring(0, index).replace(/\s+$/, '');
+  const prev = before[before.length - 1];
+  if (prev === undefined) return true;
+  if (/[=(,:[!&|?{};+\-*%^~<>]/.test(prev)) return true;
+  return /(?:^|[^\w$])(return|typeof|case|in|of|new|delete|void|instanceof)$/.test(before);
+}
+
+/**
+ * Find where a regex literal starting at `start` closes, honouring `\` escapes
+ * and character classes (`[/]` must not close the literal).
+ * @returns the index of the closing `/`, or -1 when the line ends first (so the
+ *          slash really was division).
+ */
+function findRegexClose(src: string, start: number): number {
+  let inClass = false;
+  for (let j = start + 1; j < src.length; j++) {
+    const d = src[j];
+    if (d === '\\') { j++; continue; }
+    if (d === '\n') return -1;
+    if (d === '[') { inClass = true; continue; }
+    if (d === ']') { inClass = false; continue; }
+    if (d === '/' && !inClass) return j;
+  }
+  return -1;
+}
+
+/**
+ * Blank a regex literal (and its trailing flags) starting at `start`.
+ * @returns the index to resume scanning from.
+ */
+function maskRegexLiteral(src: string, out: string[], start: number): number {
+  const close = findRegexClose(src, start);
+  if (close < 0) return start;
+  for (let k = start; k <= close; k++) out[k] = ' ';
+  let i = close + 1;
+  while (i < src.length && /[a-z]/i.test(src[i])) { out[i] = ' '; i++; }
+  return i;
+}
+
+/**
+ * Blank a quoted or template literal starting at `start`.
+ * A backtick runs to its closing backtick (interpolations included); a single
+ * or double quote stops at an unescaped newline, matching a syntax error.
+ * @returns the index to resume scanning from.
+ */
+function maskStringLiteral(src: string, out: string[], start: number): number {
+  const quote = src[start];
+  out[start] = ' ';
+  let i = start + 1;
+  while (i < src.length) {
+    const d = src[i];
+    if (d === '\\') {
+      out[i] = ' ';
+      if (i + 1 < src.length) out[i + 1] = ' ';
+      i += 2;
+      continue;
+    }
+    if (d === quote) { out[i] = ' '; i++; break; }
+    if (d === '\n' && quote !== '`') break;
+    out[i] = ' ';
+    i++;
+  }
+  return i;
+}
+
+/**
  * Blank out comments and string/template literals, preserving offsets.
  * A single left-to-right scan is used rather than chained `.replace()` calls:
  * sequential regex replacement re-scans text that earlier passes produced and
  * can pair a quote inside a regex literal with a quote in a later comment,
  * swallowing hundreds of lines (observed as a 302-line phantom function).
+ *
+ * The scan dispatches to one masking routine per construct and otherwise copies
+ * the character through, so the loop's own branching stays flat (#602: split
+ * from a single 36-CCN body into five routines the tests can pin separately).
  */
 function maskLiterals(src: string): string {
   const out = src.split('');
@@ -247,56 +527,20 @@ function maskLiterals(src: string): string {
     const next = src[i + 1];
 
     if (c === '/' && next === '/') {
-      while (i < src.length && src[i] !== '\n') { out[i] = ' '; i++; }
+      i = maskLineComment(src, out, i);
       continue;
     }
     if (c === '/' && next === '*') {
-      out[i] = ' '; out[i + 1] = ' '; i += 2;
-      while (i < src.length && !(src[i] === '*' && src[i + 1] === '/')) { out[i] = ' '; i++; }
-      if (i < src.length) { out[i] = ' '; out[i + 1] = ' '; i += 2; }
+      i = maskBlockComment(src, out, i);
       continue;
     }
-
-    // Regex literals: `/.../flags`. Only treat `/` as a regex start when the
-    // previous significant character cannot end an expression.
-    if (c === '/') {
-      const before = src.substring(0, i).replace(/\s+$/, '');
-      const prev = before[before.length - 1];
-      const prevWord = /(?:^|[^\w$])(return|typeof|case|in|of|new|delete|void|instanceof)$/.test(before);
-      if (prev === undefined || /[=(,:[!&|?{};+\-*%^~<>]/.test(prev) || prevWord) {
-        let j = i + 1;
-        let inClass = false;
-        let closed = false;
-        while (j < src.length) {
-          const d = src[j];
-          if (d === '\\') { j += 2; continue; }
-          if (d === '\n') break;
-          if (d === '[') inClass = true;
-          else if (d === ']') inClass = false;
-          else if (d === '/' && !inClass) { closed = true; break; }
-          j++;
-        }
-        if (closed) {
-          for (let k = i; k <= j; k++) out[k] = ' ';
-          i = j + 1;
-          while (i < src.length && /[a-z]/i.test(src[i])) { out[i] = ' '; i++; }
-          continue;
-        }
-      }
+    if (c === '/' && opensRegexLiteral(src, i)) {
+      const resumed = maskRegexLiteral(src, out, i);
+      // -1/findRegexClose failure keeps start, so `i` only advances on a match.
+      if (resumed !== i) { i = resumed; continue; }
     }
-
     if (c === "'" || c === '"' || c === '`') {
-      const quote = c;
-      out[i] = ' ';
-      i++;
-      while (i < src.length) {
-        const d = src[i];
-        if (d === '\\') { out[i] = ' '; if (i + 1 < src.length) out[i + 1] = ' '; i += 2; continue; }
-        if (d === quote) { out[i] = ' '; i++; break; }
-        if (d === '\n' && quote !== '`') break;
-        out[i] = ' ';
-        i++;
-      }
+      i = maskStringLiteral(src, out, i);
       continue;
     }
 
