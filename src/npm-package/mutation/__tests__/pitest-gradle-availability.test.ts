@@ -16,17 +16,17 @@
  */
 
 import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { PitestRunner } from '../runners/pitest-runner';
 
-vi.mock('child_process', () => ({ execSync: vi.fn(), spawn: vi.fn() }));
+// `fs` is mocked module-wide; each case sets the answers it needs.
 vi.mock('fs', () => ({
   existsSync: vi.fn(),
   readFileSync: vi.fn(),
   readdirSync: vi.fn(),
 }));
-
-import { execSync } from 'child_process';
-import { existsSync, readFileSync } from 'fs';
-import { PitestRunner } from '../runners/pitest-runner';
+// `execSync` decides whether a launcher runs; `spawn` is unused by isAvailable
+// but is imported by the runner module.
+vi.mock('child_process', () => ({ execSync: vi.fn(), spawn: vi.fn() }));
 
 describe('PitestRunner.isAvailable — Gradle launcher requirement', () => {
   beforeEach(() => {
@@ -35,6 +35,7 @@ describe('PitestRunner.isAvailable — Gradle launcher requirement', () => {
 
   it('AC-630-01: no ./gradlew and gradle not runnable -> unavailable despite a pitest build file', async () => {
     const { existsSync, readFileSync } = await import('fs');
+    const { execSync } = await import('child_process');
     // Maven throws; the gradle launcher also throws (not installed).
     vi.mocked(execSync).mockImplementation(() => {
       throw new Error('not found');
@@ -53,6 +54,7 @@ describe('PitestRunner.isAvailable — Gradle launcher requirement', () => {
 
   it('AC-630-02: ./gradlew present -> the gradle launcher is not required on PATH', async () => {
     const { existsSync, readFileSync } = await import('fs');
+    const { execSync } = await import('child_process');
     // Every launcher probe throws, but ./gradlew exists, so a wrapper-based
     // build must still count as available.
     vi.mocked(execSync).mockImplementation(() => {
