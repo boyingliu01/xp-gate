@@ -698,6 +698,104 @@ EOF
   return "$GATE13_WARN"
 }
 
+# ============================================================================
+# `-fanalyzer` PATH (REQ-005) — C files only, opt-in.
+#
+# Path-sensitive analysis that finds use-after-free / double-free / NULL
+# dereference no warning flag reaches. OFF by default for three measured reasons:
+#   * speed      — seconds per translation unit, not milliseconds
+#   * portability— GCC-only; clang errors on the flag
+#   * semantics  — it emits NOTHING under -fsyntax-only (measured), because the
+#                  analysis hangs off real optimisation passes. It therefore has
+#                  to compile for real, which is why artifacts go to a temp dir
+#                  with -c (never a linked binary, never the work tree).
+# Requirement round 2 (feasibility FC-04) restricted it to .c files: C++ TUs
+# through -fanalyzer are dramatically slower and noisier.
+# ============================================================================
+
+gate13_analyzer_enabled() {
+  [ "${XP_GATE_COMPILER_ANALYZER:-}" = "1" ]
+}
+
+# Print the staged C (not C++) files eligible for analysis.
+gate13_analyzer_files() {
+  git diff --cached --name-only --diff-filter=d -- '*.c' 2>/dev/null
+}
+
+# Can this compiler do -fanalyzer at all?
+gate13_analyzer_supported() {
+  local cc="$1" out tu
+  [ -n "$cc" ] || return 1
+  command -v "$cc" >/dev/null 2>&1 || return 1
+
+  tu="${GATE13_ANALYZER_TU:-}"
+  if [ -z "$tu" ] || [ ! -f "$tu" ]; then
+    tu="${TMPDIR:-/tmp}/gate13_analyzer_probe_$$.c"
+    printf 'int main(void) { return 0; }\n' > "$tu"
+    GATE13_ANALYZER_TU="$tu"
+  fi
+
+  out=$("$cc" -fanalyzer -fsyntax-only "$tu" 2>&1) && return 0
+  case "$out" in
+    *"unknown argument"*|*"unrecognized command-line option"*|*"unknown option"*|*"not supported"*)
+      return 1
+      ;;
+  esac
+  # It failed for another reason (e.g. no C frontend): treat as unsupported
+  # rather than silently claiming the analysis ran.
+  return 1
+}
+
+gate13_run_analyzer() {
+  local cc files=f f cnt total=0 blocking=0
+  local workdir
+
+  gate13_analyzer_enabled || return 0
+
+  cc=$(gate13_select_cc)
+  [ -n "$cc" ] || {
+    echo "     ⚠️  -fanalyzer requested but no C compiler is usable; analyzer stage skipped"
+    return 0
+  }
+
+  if ! gate13_analyzer_supported "$cc"; then
+    echo "     ℹ️  $(gate13_compiler_id "$cc") has no -fanalyzer support; analyzer stage skipped"
+    return 0
+  fi
+
+  files=$(gate13_analyzer_files)
+  if [ -z "$files" ]; then
+    echo "     ℹ️  -fanalyzer: no staged .c files"
+    return 0
+  fi
+
+  workdir="${TMPDIR:-/tmp}/gate13_analyzer_$$"
+  mkdir -p "$workdir"
+
+  while IFS= read -r f; do
+    [ -n "$f" ] || continue
+    cnt=$("$cc" -fanalyzer -c -o "$workdir/$(basename -- "$f").o" "$f" 2>&1 \
+          | grep -cE 'warning:|\[-Wanalyzer' || true)
+    cnt=${cnt:-0}
+    if [ "$cnt" -gt 0 ]; then
+      total=$((total + cnt))
+      echo "     ⚠️  ${f}: ${cnt} -fanalyzer finding(s)"
+      blocking=$((blocking + 1))
+    fi
+  done <<EOF
+$files
+EOF
+
+  rm -rf "$workdir"
+
+  if [ "$total" -gt 0 ]; then
+    echo "     ℹ️  -fanalyzer: ${total} finding(s) across ${blocking} file(s) (advisory, opt-in stage)"
+  else
+    echo "     ✅ -fanalyzer: clean"
+  fi
+  return 0
+}
+
 # ---------------------------------------------------------------------------
 # AC-003-01/02/03/05 — the C/C++ analysis stage.
 #
@@ -814,5 +912,9 @@ EOF
   fi
 
   echo "     ✅ PASSED - C/C++ compiler strictness (${tier} tier)"
+
+  # REQ-005: the opt-in -fanalyzer stage is advisory and runs after the warning
+  # verdict is settled, so it can never change a PASS into a FAIL.
+  gate13_run_analyzer
   return "$GATE13_PASS"
 }
