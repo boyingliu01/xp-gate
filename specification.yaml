@@ -2987,3 +2987,17 @@ specification:
         - id: AC-633-01
           criteria: 当前阶段区块的「状态」与「下一步」之间必须恰好有一行空白分隔
           test_type: unit
+
+    # ============================================================
+    # REQ-634: Code-walkthrough 证据的「未来时间戳」判定必须能被独立触发。
+    #
+    # 既有用例把 timestamp 改到 14:00 却留着 expires 13:00，一小时有效期检查先失败，
+    # 未来检查从未成为拒绝理由；删掉该检查整套 Bats 仍然全绿。
+    # ============================================================
+    - id: REQ-634
+      description: "Code-walkthrough 证据的整体时间窗位于当前时刻之后时，必须以「future」为由拒绝"
+      priority: medium
+      acceptance_criteria:
+        - id: AC-634-01
+          criteria: timestamp 与 expires 仍相差一小时但整体晚于 now 时，校验必须以 future 为由失败
+          test_type: unit

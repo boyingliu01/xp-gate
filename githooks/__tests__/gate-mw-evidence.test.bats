@@ -140,6 +140,23 @@ run_validator() {
   done
 }
 
+# @test REQ-634
+# @intent The "future" case above moves timestamp to 14:00 but leaves expires at
+#         13:00, so the one-hour window check fails FIRST and the future check is
+#         never the reason. Deleting `if (timestamp > now) fail(...)` therefore
+#         left this suite green. Here the whole window is shifted an hour later,
+#         keeping timestamp/expires exactly one hour apart while putting the
+#         timestamp in the future of NOW — so only the future check can reject it.
+# @covers AC-634-01
+@test "AC-634-01: evidence whose whole window is in the future fails" {
+  write_valid_fixture
+  mutate_fixture 'evidence.timestamp="2026-08-20T13:00:00Z"; evidence.expires="2026-08-20T14:00:00Z"'
+  run_validator
+  [ "$status" -ne 0 ]
+  # It must fail for being early, not merely for being inconsistent.
+  [[ "$output" == *"future"* ]]
+}
+
 @test "non-canonical UTC timestamp representations fail" {
   for mutation in \
     'evidence.timestamp="2026-08-20"' \
