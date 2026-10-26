@@ -2647,3 +2647,63 @@ specification:
       rationale: dsh plugin add 后技能即可被 skill 工具自动发现，AC 不依赖手工操作
       alternatives_considered: ["customSkillDirs/cp（靠用户手工，被 Delphi R1 否决）"]
 
+    # ============================================================
+    # REQ-621: Gate 6 的 Java 维度必须真正度量架构测试结果。
+    #
+    # #602 报告 Gate 6 的 Java 分支有两个同源缺陷：
+    #   1. 架构测试失败时仍无条件打印 `echo "✅ ... completed"`，
+    #      失败被报告成成功；
+    #   2. 该维度其实什么都没度量（没有可执行路径）却记为通过。
+    # 两者都是「没有人度量的维度，被当成度量过」。
+    #
+    # 注意：这件事与 REQ-602（每个 shell 文件都能被 bash -n 解析）无关，
+    # 属于独立的验收域，因此单列一个 REQ 而不是塞进 REQ-602。
+    # ============================================================
+    - id: REQ-621
+      description: "Gate 6 的 Java 架构维度必须真实执行并把失败报告为失败，不得把未度量记为通过"
+      priority: critical
+      acceptance_criteria:
+        - id: AC-621-01
+          criteria: Gate 6 的 Java 分支在架构测试通过时才允许输出成功文案；测试失败时必须
+            输出失败结论，不得出现「失败却打印 completed」
+          test_type: unit
+        - id: AC-621-02
+          criteria: Java 分支必须实际调用架构检查器；若检查器不存在则该维度必须判为
+            未度量（SKIP/BLOCK），不得以空跑冒充通过
+          test_type: unit
+        - id: AC-621-03
+          criteria: 该分支在架构测试失败时必须以非零状态结束，从而真正拒绝提交；
+            以 silencing 该维度来「修复」是明确禁止的错误方向
+          test_type: unit
+
+    # ============================================================
+    # REQ-622: Gate 5 的 Java 覆盖率必须聚合多模块 Maven 报告。
+    #
+    # #603 报告多模块 Maven 仓库把 JaCoCo 报告写在每个模块下
+    # （core/target/site/jacoco/jacoco.csv、demo/…），仓库根目录没有。
+    # Gate 5 只探测根路径，于是判定「找不到 JaCoCo 报告，无法核对 80% Java
+    # 覆盖率底线」并阻断**每一次** Java 提交——而完整报告就在下一层目录里。
+    # 看不见报告的门禁不是在执行底线，是在执行「构建布局的偶然」。
+    # ============================================================
+    - id: REQ-622
+      description: "Gate 5 的 Java 覆盖率必须聚合各模块的 JaCoCo 报告，而非只探测仓库根路径"
+      priority: high
+      acceptance_criteria:
+        - id: AC-622-01
+          criteria: 报告位于某个子模块（core/target/site/jacoco/jacoco.csv）而根目录无报告时，
+            Gate 5 必须能找到并据此计算覆盖率，不得因「根目录无报告」而阻断
+          test_type: unit
+        - id: AC-622-02
+          criteria: 多个模块各自产出报告时，覆盖率必须按全部模块的合计行数计算（汇总），
+            不得只取第一份报告
+          test_type: unit
+        - id: AC-622-03
+          criteria: 真正的「整仓没有任何报告」仍必须 fail-closed 为 BLOCK——
+            放宽多模块查找不得让无证据变成静默通过
+          test_type: unit
+        - id: AC-622-04
+          criteria: 多模块查找必须给出确定的最终结论：既不因为没有根目录报告而误阻断，
+            也不因为找到了某个模块而掩盖其它模块缺失报告的事实；两条路径都必须有断言
+          test_type: unit
+
+

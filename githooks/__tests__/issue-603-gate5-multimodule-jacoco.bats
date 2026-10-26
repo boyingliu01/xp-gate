@@ -1,5 +1,5 @@
 #!/usr/bin/env bats
-# @test REQ-603
+# @test REQ-622
 # @intent A multi-module Maven repo writes one JaCoCo report per module
 #         (core/target/site/jacoco/jacoco.csv, demo/...) and nothing at the repo
 #         root. Gate 5 probed only the root paths, so it concluded "No JaCoCo
@@ -8,7 +8,9 @@
 #         sitting one directory down. A gate that cannot see the report is not
 #         enforcing a floor; it is enforcing an accident of build layout.
 #         The floor must aggregate every module report, not just the first.
-# @covers AC-603-01, AC-603-02, AC-603-03
+#         The last test pins the opposite direction: widening the search must not
+#         turn a repo with NO report anywhere into a silent pass.
+# @covers AC-622-01, AC-622-02, AC-622-03, AC-622-04
 
 setup() {
   REPO_ROOT="$(cd "$BATS_TEST_DIRNAME/../.." && pwd)"
@@ -34,7 +36,7 @@ _jacoco_csv() {
   printf 'g,p,%s,%s,%s,0,0,0,0,0,0,0,0\n' "$name" "$missed" "$covered"
 }
 
-@test "#603 AC-603-01: the java arm probes module reports, not only the root" {
+@test "#603 AC-622-01: the java arm probes module reports, not only the root" {
   run _java_cov_arm
   [ "$status" -eq 0 ]
   _code="$(printf '%s\n' "$output" | grep -vE '^[[:space:]]*#')"
@@ -53,7 +55,7 @@ _jacoco_csv() {
     echo "java arm dropped the root-path probe"; return 1; }
 }
 
-@test "#603 AC-603-02: a multi-module repo is measured, not blocked" {
+@test "#603 AC-622-02: a multi-module repo is measured, not blocked" {
   mkdir -p "$TEST_DIR/repo/core/target/site/jacoco" "$TEST_DIR/repo/demo/target/site/jacoco"
   cd "$TEST_DIR/repo" || return 1
   : > pom.xml
@@ -76,7 +78,7 @@ _jacoco_csv() {
   esac
 }
 
-@test "#603 AC-603-03: the floor aggregates all modules, not just the first" {
+@test "#603 AC-622-03: the floor aggregates all modules, not just the first" {
   mkdir -p "$TEST_DIR/repo/a/target/site/jacoco" "$TEST_DIR/repo/b/target/site/jacoco"
   cd "$TEST_DIR/repo" || return 1
   # Module a: 100% covered. Module b: 0% covered. The TRUE aggregate is 50%.
@@ -106,7 +108,7 @@ _jacoco_csv() {
   [ "$pct" = "50.00" ] || { echo "expected 50.00 across both modules, got $pct"; return 1; }
 }
 
-@test "#603 AC-603-04: a repo with no report at all still blocks" {
+@test "#603 AC-622-04: a repo with no report at all still blocks" {
   mkdir -p "$TEST_DIR/repo2/src/main/java"
   cd "$TEST_DIR/repo2" || return 1
   : > pom.xml
