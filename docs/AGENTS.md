@@ -1,9 +1,9 @@
 # DOCUMENTATION KNOWLEDGE BASE
 
-**Generated:** 2026-10-25
-**Commit:** 1ab53eff
-**Branch:** main
-**Version:** 0.31.2.0
+**Generated:** 2026-10-26
+**Commit:** 037b258f
+**Branch:** fix/598-599-powershell-gate3-and-coverage-budget
+**Version:** 0.31.3.0
 
 ## OVERVIEW
 Reference guides, design history, postmortems, and weekly retros. **30+ chronologically-archived design plans** under `plans/`. Plan docs follow `YYYY-MM-DD-topic.md` and each typically corresponds to a Delphi consensus report or implementation plan.
