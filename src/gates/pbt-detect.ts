@@ -40,22 +40,29 @@ const PBT_API_PATTERNS = [
 
 // ── Scanner ──
 
+/** Directories that never hold test sources worth scanning. */
+const SKIPPED_DIRS = new Set(['node_modules', '.git', 'dist']);
+
+/** Test-file suffixes recognised by the PBT scanner. */
+const TEST_SUFFIXES = ['.test.ts', '.test.js', '.spec.ts', '.spec.js'];
+
+function isTestFileName(name: string): boolean {
+  return TEST_SUFFIXES.some(suffix => name.endsWith(suffix));
+}
+
+/** Collect test files under `dir`, descending into subdirectories. */
 function scanDirectory(dir: string, basePath?: string): string[] {
+  if (!fs.existsSync(dir)) return [];
+
   const results: string[] = [];
-  const base = basePath || dir;
-  if (!fs.existsSync(dir)) return results;
-
-  const entries = fs.readdirSync(dir, { withFileTypes: true });
-  for (const entry of entries) {
-    const fullPath = path.join(dir, entry.name);
-
+  for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
     if (entry.isDirectory()) {
-      if (entry.name === 'node_modules' || entry.name === '.git' || entry.name === 'dist') continue;
-      results.push(...scanDirectory(fullPath, base));
-    } else if (entry.name.endsWith('.test.ts') || entry.name.endsWith('.test.js') ||
-               entry.name.endsWith('.spec.ts') || entry.name.endsWith('.spec.js')) {
-      results.push(fullPath);
+      if (!SKIPPED_DIRS.has(entry.name)) {
+        results.push(...scanDirectory(path.join(dir, entry.name), basePath ?? dir));
+      }
+      continue;
     }
+    if (isTestFileName(entry.name)) results.push(path.join(dir, entry.name));
   }
   return results;
 }
