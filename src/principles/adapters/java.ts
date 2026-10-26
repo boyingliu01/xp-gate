@@ -2,6 +2,19 @@ import { BaseAdapter } from './base';
 import { Adapter } from '../types';
 
 /**
+ * Depth change per nesting delimiter in a Java parameter list.
+ *
+ * Angular and square brackets nest exactly like parentheses here: the only thing
+ * that matters is whether a comma sits at depth 0, because that is the only
+ * place it separates parameters.
+ */
+const PARAM_NESTING: Record<string, number> = {
+  '(': 1, ')': -1,
+  '<': 1, '>': -1,
+  '[': 1, ']': -1,
+};
+
+/**
  * Structural fields the clean-code rules consume (mirror of the TypeScript
  * adapter's function shape). Before #507 this adapter returned only
  * `{ name, type, modifiers, line, code }`, so every rule reading
@@ -213,12 +226,18 @@ export const javaParse = {
   countParams(paramList: string): number {
     const trimmed = paramList.trim();
     if (!trimmed) return 0;
+    // Generic and array brackets nest too: `Map<String, List<Integer>>` is ONE
+    // parameter, so the commas inside its arguments must not be counted.
+    // Which characters change depth and which separate is data, not control
+    // flow -- table lookups keep the scan to a single conditional.
     let depth = 0;
     let count = 1;
     for (const ch of trimmed) {
-      if (ch === '(' || ch === '<' || ch === '[') depth += 1;
-      else if (ch === ')' || ch === '>' || ch === ']') depth -= 1;
-      else if (ch === ',' && depth === 0) count += 1;
+      if (ch === ',') {
+        if (depth === 0) count += 1;
+        continue;
+      }
+      depth += PARAM_NESTING[ch] ?? 0;
     }
     return count;
   },

@@ -170,13 +170,28 @@ function undetermined(): Violation[] {
  * @param paramsText parameter list without surrounding parens
  * @returns parameter fragments
  */
+/** Delimiters that nest inside a parameter list (generics included). */
+const PARAM_OPENERS = '<([{';
+const PARAM_CLOSERS = '>)]}';
+
+/**
+ * Depth delta contributed by one character.
+ *
+ * Kept separate from the splitter so the nesting rule is stated once instead of
+ * being folded into the loop's condition (#620).
+ */
+function paramDepthDelta(ch: string): number {
+  if (PARAM_OPENERS.includes(ch)) return 1;
+  if (PARAM_CLOSERS.includes(ch)) return -1;
+  return 0;
+}
+
 function splitParams(paramsText: string): string[] {
   const parts: string[] = [];
   let depth = 0;
   let current = '';
   for (const ch of paramsText) {
-    if (ch === '<' || ch === '(' || ch === '[' || ch === '{') depth += 1;
-    else if (ch === '>' || ch === ')' || ch === ']' || ch === '}') depth -= 1;
+    depth += paramDepthDelta(ch);
     if (ch === ',' && depth <= 0) {
       parts.push(current);
       current = '';
