@@ -157,7 +157,7 @@
   "scripts/normalize-lock-registry.cjs::urlIdentity": 7,
   "scripts/normalize-lock-registry.cjs::isPresent": 6,
   "scripts/normalize-lock-registry.cjs::walk@79": 8,
-  "scripts/normalize-lock-registry.cjs::eachResolved": 13,
+  "scripts/normalize-lock-registry.cjs::eachResolved": 12,
   "scripts/normalize-lock-registry.cjs::isClean": 4,
   "scripts/normalize-lock-registry.cjs::collectOffenders": 7,
   "scripts/normalize-lock-registry.cjs::findRegistryOffenders": 1,

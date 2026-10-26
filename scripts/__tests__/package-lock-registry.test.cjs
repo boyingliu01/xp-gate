@@ -183,6 +183,34 @@ describe('normalizeLockRegistry', () => {
     expect(offenderLines(result.text)).toEqual([]);
   });
 
+  /**
+   * @test REQ-635
+   * @intent The legacy tree walk reports each entry under its full path
+   *         (`a/b`), not its bare name (`b`). That prefix is what lets a reader
+   *         tell which copy of a duplicated package was normalized. The existing
+   *         case only asserted `changed === 2` — a count — so reporting the bare
+   *         name left the suite green while the diagnostics silently lost the
+   *         nesting information.
+   * @covers AC-635-01
+   */
+  it('AC-635-01: legacy tree entries are reported under their full path', () => {
+    const legacy = `${JSON.stringify({
+      lockfileVersion: 1,
+      dependencies: {
+        a: {
+          resolved: 'https://mirror.example.com/a/-/a-1.tgz',
+          dependencies: { b: { resolved: 'https://mirror.example.com/b/-/b-2.tgz' } },
+        },
+      },
+    })}\n`;
+
+    // "mirror.example.com" is not a host the tool can vouch for, so both entries
+    // are reported as offenders — and the report must name them a and a/b.
+    const reported = offenderLines(legacy).join('\n');
+    expect(reported).toContain('a/b');
+    expect(reported).not.toMatch(/(^|[^/])\bb\b/);
+  });
+
   it('survives a malformed legacy tree entry instead of crashing', () => {
     const malformed = '{"lockfileVersion":1,"dependencies":{"a":null,"b":{"dependencies":null}}}\n';
 
