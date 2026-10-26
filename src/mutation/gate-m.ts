@@ -80,37 +80,43 @@ function parseTimeout(options: GateMOptions, args: string[], i: number): void {
 
 // ── File filtering: excludes tests, declarations, adapters ──
 // Delegate per-language filtering to a helper.
-
+//
+// Every exclusion is a "does this normalized path look like X?" question, so
+// they are stated as data rather than as a chain of early returns. Keeping the
+// list declarative is what makes the rules reviewable: a new convention is one
+// line, and the reasons stay attached to the pattern they justify.
 export function filterSourceFiles(files: string[]): string[] {
   return files.filter(file => {
-    const ext = path.extname(file);
     // One separator view for every pattern below: the path arrives from the
     // adapter layer, which on Windows yields backslash-delimited relative paths.
     const normalized = file.replace(/\\/g, '/');
-    // Skip test files
-    if (normalized.includes('.test.') || normalized.includes('_test.')) return false;
-    // Skip spec-named test files: the pre-push filter already excludes them, and
-    // a mutant inside a *.spec.ts is scored against a production budget (#480).
-    if (normalized.includes('.spec.')) return false;
-    // Skip test-tree directories: helpers/fixtures/factories there are test
-    // infrastructure judged by the suites that run them, not by mutation
-    // scoring budgeted for production code (#480)
-    if (/(^|\/)(tests?|__tests__)\//.test(normalized)) return false;
-    // Skip Java/Kotlin test files: FooTest.java, FooSpec.kt, etc. Case-sensitive
-    // "Test"/"Spec"/"IT" suffix matching is what the Surefire/Failsafe conventions
-    // actually produce -- `[A-Z]Test\.only` caught MyTest.java but not FooTest.java,
-    // so most test classes stayed in the mutation candidate list.
-    if (/Test\.(java|kt|kts)$/.test(normalized)) return false;
-    if (/Tests\.(java|kt|kts)$/.test(normalized)) return false;
-    if (/(IT|Spec)\.(java|kt|kts)$/.test(normalized)) return false;
-    // Skip declaration files
-    if (normalized.endsWith('.d.ts')) return false;
-    // Skip adapter files
-    if (normalized.includes('/adapters/')) return false;
+    if (isExcludedPath(normalized)) return false;
     // Skip files with no registered runner
-    const runner = resolveRunner(ext);
-    return runner !== undefined;
+    return resolveRunner(path.extname(file)) !== undefined;
   });
+}
+
+const EXCLUDED_PATH_PATTERNS: readonly { pattern: RegExp; reason: string }[] = [
+  { pattern: /\.test\.|_test\./, reason: 'test files' },
+  // Spec-named test files: the pre-push filter already excludes them, and a
+  // mutant inside a *.spec.ts is scored against a production budget (#480).
+  { pattern: /\.spec\./, reason: 'spec files' },
+  // Test-tree directories: helpers/fixtures/factories there are test
+  // infrastructure judged by the suites that run them, not by mutation
+  // scoring budgeted for production code (#480)
+  { pattern: /(^|\/)(tests?|__tests__)\//, reason: 'test trees' },
+  // Java/Kotlin test files: FooTest.java, FooSpec.kt, etc. Case-sensitive
+  // "Test"/"Spec"/"IT" suffix matching is what the Surefire/Failsafe
+  // conventions actually produce -- `[A-Z]Test\.only` caught MyTest.java but
+  // not FooTest.java, so most test classes stayed in the candidate list.
+  { pattern: /(Test|Tests|IT|Spec)\.(java|kt|kts)$/, reason: 'JVM test classes' },
+  { pattern: /\.d\.ts$/, reason: 'declaration files' },
+  { pattern: /\/adapters\//, reason: 'adapter files' },
+];
+
+/** True when `normalized` matches any exclusion rule. */
+function isExcludedPath(normalized: string): boolean {
+  return EXCLUDED_PATH_PATTERNS.some(({ pattern }) => pattern.test(normalized));
 }
 
 async function fileExists(filePath: string): Promise<boolean> {
