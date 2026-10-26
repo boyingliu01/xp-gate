@@ -4552,7 +4552,8 @@ ENDJSON
 
   # ── Console output ────────────────────────────────────────────────────────
   echo ""
-  echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"  echo "  📊 Quality Report — $TIMESTAMP"
+  echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+  echo "  📊 Quality Report — $TIMESTAMP"
   echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
   echo ""
   printf "  %-45s %s\n" "Gate 1: Code Quality" "${GATE_1_STATUS:-SKIP}"
