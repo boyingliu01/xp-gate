@@ -172,7 +172,7 @@
   "scripts/normalize-lock-registry.cjs::collectOffenders.map": 1,
   "scripts/normalize-lock-registry.cjs::normalizeFile": 2,
   "scripts/normalize-lock-registry.cjs::main": 8,
-  "scripts/render-sprint-progress.cjs::isLegacyState": 11,
+  "scripts/render-sprint-progress.cjs::isLegacyState": 5,
   "scripts/render-sprint-progress.cjs::normalizePhaseNum": 4,
   "scripts/render-sprint-progress.cjs::normalizeHistoryPhase": 3,
   "scripts/render-sprint-progress.cjs::formatDuration": 6,

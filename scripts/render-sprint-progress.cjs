@@ -56,23 +56,38 @@ function isLegacyState(state) {
   if (state.schema_version === 2 || state.phase_model === 'compact') {
     return false;
   }
-  // Check currentPhase for unambiguous legacy numbers
-  const cp = state.phase;
-  if (cp !== undefined && cp !== null) {
-    const key = String(cp);
-    if (['-1', '-0.5', '0', '7', '8'].includes(key)) return true;
-  }
+  if (isLegacyPhaseValue(state.phase)) return true;
   // Check phase_history for legacy markers
   const history = state.phase_history;
-  if (history) {
-    for (const h of history) {
-      const key = String(h.phase);
-      if (['-1', '-0.5', '0', '7', '8'].includes(key)) return true;
-      // Also check phase_name for legacy names that don't exist in new model
-      if (h.phase_name && LEGACY_ONLY_NAMES[h.phase_name]) return true;
-    }
-  }
-  return false;
+  if (!history) return false;
+  return history.some((h) => isLegacyHistoryEntry(h));
+}
+
+// Phase numbers that do not exist in the current 6-phase model. Negative values
+// came from the pre-compact model; 0 and 7/8 were sentinels for "not started"
+// and post-close bookkeeping.
+const LEGACY_PHASE_NUMBERS = ['-1', '-0.5', '0', '7', '8'];
+
+/**
+ * True when `phase` is an unambiguous legacy phase number.
+ * `undefined` and `null` mean "never recorded", which is not legacy.
+ * @param {unknown} phase
+ * @returns {boolean}
+ */
+function isLegacyPhaseValue(phase) {
+  if (phase === undefined || phase === null) return false;
+  return LEGACY_PHASE_NUMBERS.includes(String(phase));
+}
+
+/**
+ * True when a phase_history entry carries a legacy number or a name the current
+ * model does not have.
+ * @param {{ phase?: unknown, phase_name?: string }} entry
+ * @returns {boolean}
+ */
+function isLegacyHistoryEntry(entry) {
+  if (isLegacyPhaseValue(entry.phase)) return true;
+  return Boolean(entry.phase_name && LEGACY_ONLY_NAMES[entry.phase_name]);
 }
 
 // Phase names that only exist in legacy model (not in new 6-phase)
