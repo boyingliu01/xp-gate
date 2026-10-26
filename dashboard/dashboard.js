@@ -250,16 +250,11 @@ async function exportPDF() {
   doc.text(`Generated: ${new Date().toLocaleDateString()}`, 14, 32);
   doc.text(`Total Runs: ${history.length} | Avg Score: ${avgScore}${avgScore === 'N/A' ? '' : '/10'} | Latest: ${latestText}`, 14, 40);
   
-  // Gate table
-  const gateNames = ['Gate 1: Code Quality', 'Gate 2: Duplicate Code', 'Gate 3: Complexity',
-    'Gate 4: Principles', 'Gate 5: Tests+Coverage', 'Gate 6: Architecture',
-    'Gate 7: IaC Security', 'Gate 8: Secret Scanning', 'Gate 9: SAST Security'];
-  
-  const rows = gateNames.map(name => {
-    const gateKey = Object.keys(latest.gates || {}).find(k => {
-      const g = latest.gates[k];
-      return g && g.name && name.includes(g.name.split('+')[0]);
-    });
+  // Gate table — same labels and the same "which report key matches this
+  // label" question as the pass-rate chart, so both reuse the shared table and
+  // findGateKey instead of keeping their own copies that can drift apart.
+  const rows = GATE_CHART_LABELS.map(name => {
+    const gateKey = findGateKey(latest.gates, name);
     const status = gateKey ? (latest.gates[gateKey]?.status || 'N/A') : 'N/A';
     return [name, status];
   });
