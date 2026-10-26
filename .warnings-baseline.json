@@ -26,5 +26,9 @@
   "src/principles/adapters/typescript.ts": {
     "totalWarnings": 4,
     "lastAnalyzed": "2026-10-18T18:33:22.046Z"
+  },
+  "src/gates/test-layers.ts": {
+    "totalWarnings": 2,
+    "lastAnalyzed": "2026-10-26T10:58:03.514Z"
   }
 }
