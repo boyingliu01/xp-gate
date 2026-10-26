@@ -1,9 +1,9 @@
 # SKILLS/SPRINT-FLOW KNOWLEDGE BASE
 
-**Generated:** 2026-10-25
-**Commit:** 1ab53eff
-**Branch:** main
-**Version:** 0.31.2.0
+**Generated:** 2026-10-26
+**Commit:** 037b258f
+**Branch:** fix/598-599-powershell-gate3-and-coverage-budget
+**Version:** 0.31.3.0
 
 ## OVERVIEW
 **6-phase** development pipeline (v2.0 compact redesign, Issue #290): PREP → DESIGN → BUILD → VERIFY → SHIP → CLOSE. Phase 3/6 BUILD default build mode is **ralph-loop** (REQ-level iteration, 40-67% token savings vs parallel). HARD-GATE between DESIGN (2/6) and BUILD (3/6): design must pass Delphi review (≥90% consensus) before any coding.

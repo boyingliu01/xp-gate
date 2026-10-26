@@ -1,9 +1,9 @@
 # SRC/NPM-PACKAGE KNOWLEDGE BASE
 
-**Generated:** 2026-10-25
-**Commit:** 1ab53eff
-**Branch:** main
-**Version:** 0.31.2.0
+**Generated:** 2026-10-26
+**Commit:** 037b258f
+**Branch:** fix/598-599-powershell-gate3-and-coverage-budget
+**Version:** 0.31.3.0
 
 ## OVERVIEW
 npm distribution package — zero-install CLI for xp-gate. Published as `@boyingliu01/xp-gate` on the public npm registry. Bundles hooks + 13 language adapters + 8 skills + 3 platform plugins at `prepack` time. Registers **≥15 CLI subcommands** (was ≥11 before 0.8.9; `check`/`principles`/`arch` added for OpenCode-plugin parity, fixes #208).

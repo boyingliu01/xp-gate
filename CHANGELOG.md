@@ -2,6 +2,34 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.31.3.0] - 2026-10-26
+
+两处缺陷，同一个主题：**一道维度没被测量的门禁，和一个没跑测试却记 PASS 的门禁**。
+
+第一处是本仓自己的发布提交上实测到的——`Gate 5: Tests + Coverage PASS (coverage: N/A%)`。
+
+### Added
+
+- **Gate 3 现在能测量 PowerShell 的圈复杂度（#537, #598）**: PowerShell 分支原本是硬 SKIP「no PowerShell Clean Code / SOLID tool available」。这对 lizard 成立（它解析不了 `.ps1`），对平台不成立：PowerShell 自己的 AST 给出精确的判定点计数，与 lizard 为其他语言测量的量完全一致。于是 PowerShell 为主的仓库有一个永久未测的质量维度，而总分仍暗示该维度已覆盖。
+  测量（`githooks/lib/Measure-PowerShellComplexity.ps1`）与判定（`gate-3.sh`）刻意分离：门禁不必知道项目的重构历史，脚本不必知道基线。CCN = 1 + 判定点数，判定点为 `if`/`elseif`、循环关键字、`catch`、三元与空值合并运算符、以及每个 `-and`/`-or`——与 lizard 同一口径。`-List` 输出完整函数集合，使 ratchet 能比较两侧都低于阈值的函数。
+
+### Fixed
+
+- **没跑测试的 Gate 5 被记成 PASS（#554 后续）**: Gate 5 有两条"没跑测试就结束"的路径。docs-only 提交这一条 #554 已修（记 SKIP）；另一条是**不改任何源码文件、但也不是 docs-only** 的提交——一次版本号提升同时改 `VERSION`/`package.json`/`CHANGELOG`/`AGENTS.md` 正是这个形状（`package.json` 不是 `.md`，所以不算 docs-only）。它设置 `TESTS_SKIPPED=true` 并打印 `✅ PASSED - No code files changed`，随后收尾的赋值把状态写成 `PASS`，journal 记为 `{"gate5_tests": {"status": "PASS"}}`。一个什么都没测的门禁就这样计入通过率与总分，与"测了、干净"不可区分。**这是 #554 诊断出的"SKIP 被提升为 PASS"在同一个 `else` 块下一层的残留**：`#554` 的测试只驱动 docs-only 路径，其结构断言只禁止分支外（列 0）的 PASS 赋值，而这一处在分支内部。
+  修法两处：无源码分支改为记 `SKIP` + detail `no_code_files_changed`；收尾只在"尚未决定"时才默认 PASS。
+- **`-Threshold 1` 让每个新低 CCN 函数变成假 regression（#598）**: 把 AST 输出接进 lizard 那套 ratchet 时，`-Threshold 1` 使每个 CCN >= 2 的函数都打印 OVER。于是一个全新的、写得很好的函数（CCN 2-4，低于真实阈值）被拿去和一份永远不可能包含它的基线比较，报成 "regression"——门禁恰好拦掉它本应鼓励的形态。改为把解析后的阈值（`.xp-gate/ccn-threshold` > `XP_GATE_CCN_THRESHOLD` > 5）传给测量脚本。
+- **`gate5_tests` 增加 `reason` 字段**: 与 `gate4` 对齐。一个只存在于控制台输出里的跳过原因，事后无法审计。
+
+### 说明
+
+- **显而易见的那种修法是错的，且被已有测试拦住**: 把 Gate 5 收尾写成 `${GATE_5_STATUS:-PASS}` 会让 `AC-599-03` 变红——它禁止任何 `GATE_N_STATUS:-DEFAULT` 展开以 PASS 作默认，因为那正是 #571 修过的"未赋值的门禁渲染成 passed"。最终在 Gate 5 起点显式初始化 `GATE_5_STATUS=""` 作哨兵，收尾用显式空值判定。
+- **PowerShell 分支继承了 #581 的教训**: 交给原生 `pwsh` 的脚本路径须先转原生形式。POSIX 路径到达原生二进制时前导 `/` 被解析成 `<盘符>:\`，测量静默看到零个文件，门禁报 "no functions"——环境故障被报成对仓库的结论。同理，引擎缺失记 WARN 而非 SKIP：「我们没法看」与「没有东西可看」是两件事。
+- **一处 TDD 缺口在本版被补上**: Gate 3 的 PowerShell 实现在进入版本库时**没有任何测试**。本版新增 `githooks/__tests__/issue-598-powershell-complexity.test.bats`（5 例）后合入，而不是留作后续。
+- **反向验证**: Gate 5 撤销收尾的哨兵判断后，第 2 例变红且红在缺陷自身的指纹 `PASS (coverage: N/A%)`；Gate 3 撤销路径转换后，`AC-598-11` 变红且报 "the PowerShell arm does not convert the script path to native form"。两次都红在缺陷本身，不是无关错误。
+- **端到端**: 一个新增 CCN 10 函数的 `.psm1` 被 `❌ BLOCKED - 1 newly added function(s) with CCN > 5` 拦下；CCN 2 的文件通过。
+- **编号冲突**: `AC-598-01/02` 已被 tag-push fixture（同号不同题）占用，本次 PowerShell 的 AC 改用 `AC-598-10` 起的区间。
+- **相关套件全绿**: Gate 5 侧 `issue-554`（5）+ `issue-571`（5）+ `docs-only` 两套（17）+ `gate-5a`/`gate-5-*`/`hook-syntax`（41）；Gate 3 侧 `gate-3`（6）+ `issue-598`（5）+ `issue-537-skip-reasons`（2）。AC 引用守卫 3/3，shellcheck 无 error，hook 镜像逐字节且权限一致。
+
 ## [0.31.2.0] - 2026-10-25
 
 0.31.0 与 0.31.1 都只发了版本号：CHANGELOG 断在 0.30.5，而 GitHub Release 的正文写着 "See CHANGELOG.md for details"，那里并没有对应条目。这一版把两段缺口一起补上，并交付其后累积的 100 个提交。
