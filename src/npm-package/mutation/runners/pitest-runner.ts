@@ -38,48 +38,7 @@ export class PitestRunner implements MutationRunner {
   readonly extensions = ['java', 'kt', 'kts'];
 
   async isAvailable(): Promise<boolean> {
-    // Check Maven availability: mvn exists + pom.xml with pitest-maven plugin
-    try {
-      execSync('mvn --version', { stdio: 'pipe', timeout: 5000 });
-      if (existsSync('pom.xml')) {
-        const pom = readFileSync('pom.xml', 'utf-8');
-        if (
-          pom.includes('pitest-maven') ||
-          pom.includes('org.pitest')
-        ) {
-          return true;
-        }
-      }
-    } catch {
-      // Maven not available
-    }
-
-    // Check Gradle availability: gradle/gradlew exists + build.gradle(.kts) with pitest plugin
-    const gradlewPath = './gradlew';
-    const hasGradlew = existsSync(gradlewPath);
-    try {
-      if (!hasGradlew) {
-        execSync('gradle --version', { stdio: 'pipe', timeout: 5000 });
-      }
-      const buildGradle = existsSync('build.gradle.kts')
-        ? 'build.gradle.kts'
-        : existsSync('build.gradle')
-          ? 'build.gradle'
-          : null;
-      if (buildGradle) {
-        const content = readFileSync(buildGradle, 'utf-8');
-        if (
-          content.includes('info.solidsoft.pitest') ||
-          content.includes('info.solidsoft.gradle.pitest')
-        ) {
-          return true;
-        }
-      }
-    } catch {
-      return false;
-    }
-
-    return false;
+    return mavenPitestConfigured() || gradlePitestConfigured();
   }
 
   async run(options: RunMutationOptions): Promise<MutationRunOutcome> {
@@ -287,4 +246,63 @@ export class PitestRunner implements MutationRunner {
       return null;
     }
   }
+}
+
+/**
+ * True when `command` can be executed at all.
+ *
+ * `execSync` with a short timeout is the cheapest cross-platform probe: the
+ * command either resolves and runs, or throws (missing / not executable). Only
+ * the throw matters here — the output is irrelevant.
+ */
+function commandRuns(command: string): boolean {
+  try {
+    execSync(command, { stdio: 'pipe', timeout: 5000 });
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * True when `file` exists and contains any of `markers`.
+ *
+ * The read is guarded: a file can exist and still be unreadable (permissions,
+ * a directory named like a build file, a transient IO error). Treating that as
+ * "does not mention" keeps the caller's answer honest — an unreadable build file
+ * does not configure pitest — instead of throwing out of `isAvailable`.
+ */
+function fileMentions(file: string, markers: readonly string[]): boolean {
+  if (!existsSync(file)) return false;
+  try {
+    const content = readFileSync(file, 'utf-8');
+    return markers.some((marker) => content.includes(marker));
+  } catch {
+    return false;
+  }
+}
+
+/** Maven is usable when `mvn` runs and the POM configures the pitest plugin. */
+function mavenPitestConfigured(): boolean {
+  if (!commandRuns('mvn --version')) return false;
+  return fileMentions('pom.xml', ['pitest-maven', 'org.pitest']);
+}
+
+/**
+ * The Gradle build file PITest would read, preferring the Kotlin DSL.
+ * @returns the file name, or null when neither exists.
+ */
+function gradleBuildFile(): string | null {
+  if (existsSync('build.gradle.kts')) return 'build.gradle.kts';
+  if (existsSync('build.gradle')) return 'build.gradle';
+  return null;
+}
+
+/** Gradle is usable when a launcher runs and the build file configures pitest. */
+function gradlePitestConfigured(): boolean {
+  const hasWrapper = existsSync('./gradlew');
+  if (!hasWrapper && !commandRuns('gradle --version')) return false;
+  const buildFile = gradleBuildFile();
+  if (buildFile === null) return false;
+  return fileMentions(buildFile, ['info.solidsoft.pitest', 'info.solidsoft.gradle.pitest']);
 }

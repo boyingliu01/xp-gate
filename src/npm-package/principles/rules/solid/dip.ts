@@ -21,34 +21,44 @@ function shouldSkipInstantiation(className: string): boolean {
   return false;
 }
 
+/** `new Foo(` -> `Foo`. */
+function classNameFromNewMatch(match: string): string {
+  return match.replace(/new\s+/, '').replace(/\s*\(/, '');
+}
+
+/** Violations for one class body: each `new X(` that is not exempt. */
+function instantiationViolations(
+  code: string, line: number, file: string, severity: Severity,
+): Violation[] {
+  const violations: Violation[] = [];
+  for (const match of code.match(/new\s+(\w+)\s*\(/g) || []) {
+    const className = classNameFromNewMatch(match);
+    if (shouldSkipInstantiation(className)) continue;
+    violations.push({
+      file,
+      line,
+      ruleId: 'solid.dip',
+      severity,
+      message: `Direct instantiation detected: new ${className}(). Prefer dependency injection for flexibility.`,
+    });
+  }
+  return violations;
+}
+
 export const dipRule: Rule = {
   id: 'solid.dip',
   name: 'Dependency Inversion Principle Rule',
   threshold: 0,
   severity: 'warning',
   check: (file: string, adapter: import('../../types').Adapter): Violation[] => {
-    const violations: Violation[] = [];
     const settings = getActiveConfig().rules['solid']['dip'];
     const severity = (settings.severity as Severity) ?? 'warning';
 
-    for (const cls_any of adapter.extractClasses() || []) {
-      const cls = cls_any as {code?: string; line?: number};
-      const code = cls.code;
-      if (!code) continue;
-
-      const newMatches = code.match(/new\s+(\w+)\s*\(/g) || [];
-      for (const match of newMatches) {
-        const className = match.replace(/new\s+/, '').replace(/\s*\(/, '');
-        if (shouldSkipInstantiation(className)) continue;
-
-        violations.push({
-          file,
-          line: cls.line || 0,
-          ruleId: 'solid.dip',
-          severity,
-          message: `Direct instantiation detected: new ${className}(). Prefer dependency injection for flexibility.`,
-        });
-      }
+    const violations: Violation[] = [];
+    for (const clsAny of adapter.extractClasses() || []) {
+      const cls = clsAny as { code?: string; line?: number };
+      if (!cls.code) continue;
+      violations.push(...instantiationViolations(cls.code, cls.line || 0, file, severity));
     }
     return violations;
   }

@@ -2911,3 +2911,46 @@ specification:
         - id: AC-629-03
           criteria: .lizard-version 缺失或为空时必须显式失败（非零退出），不得静默继续
           test_type: unit
+
+    # ============================================================
+    # REQ-630: PITest 可用性必须在缺少 Gradle 启动器时如实为「不可用」。
+    #
+    # PITest 是通过 ./gradlew 或 PATH 上的 gradle 启动的。原有测试把每一个
+    # existsSync 都 mock 成 true、并让 gradle 探测成功，因此「build.gradle 配了
+    # pitest 但没有任何启动器」这条路径从未被走过——删掉启动器判断，整个套件仍然全绿。
+    # 在一台没有 gradle、也没有 pom 的 Gradle 项目上，isAvailable() 会谎称可用，
+    # 随后 Gate M 以一句令人费解的「gradle not found」失败。
+    # ============================================================
+    - id: REQ-630
+      description: "PITest 可用性须同时要求构建文件配置了 pitest 与可用的启动器（./gradlew 或 PATH 上的 gradle）"
+      priority: high
+      acceptance_criteria:
+        - id: AC-630-01
+          criteria: 存在配置了 pitest 的 build.gradle 但既无 ./gradlew 且 gradle 不可执行时，
+            isAvailable 必须为 false
+          test_type: unit
+        - id: AC-630-02
+          criteria: 存在 ./gradlew 时不得再要求 PATH 上有 gradle，wrapper 形态必须可用
+          test_type: unit
+
+    # ============================================================
+    # REQ-631: buildPlugin 的判定助手必须由行为测试钉住。
+    #
+    # buildPlugin 原本是单个 CCN 14 的函数：两道平台守卫、两道目录守卫、清理循环、
+    # 复制、缺项统计全在一个函数体里。拆分出的 isDirectory / missingSkills 决定最终
+    # 结论，而既有测试只读取脚本源码形状（REQ-624 的 spawn 不变量），任一助手悄悄
+    # 改变答案它都会保持绿色。
+    # ============================================================
+    - id: REQ-631
+      description: "buildPlugin 拆分出的 isDirectory 与 missingSkills 必须有行为测试，且 CLI 对非法平台须在不做任何工作前退出"
+      priority: medium
+      acceptance_criteria:
+        - id: AC-631-01
+          criteria: isDirectory 仅对真实目录为真；对文件与不存在的路径必须为假
+          test_type: unit
+        - id: AC-631-02
+          criteria: missingSkills 必须精确列出缺失 SKILL.md 的技能；某技能补齐后必须从列表中消失
+          test_type: unit
+        - id: AC-631-03
+          criteria: 非法或缺失的 --platform 必须以非零状态退出并说明期望值，且不得开始构建
+          test_type: unit
