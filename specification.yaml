@@ -2954,3 +2954,21 @@ specification:
         - id: AC-631-03
           criteria: 非法或缺失的 --platform 必须以非零状态退出并说明期望值，且不得开始构建
           test_type: unit
+
+    # ============================================================
+    # REQ-632: Sprint 状态的 legacy 判定必须区分「未记录」与「legacy」。
+    #
+    # phase 为 null/undefined 表示「从未记录」，不是 legacy。既有用例把 legacy 数字
+    # 与 legacy 名称塞进同一条历史记录，所以两条分支从未各自独立生效，也没有任何
+    # 用例断言 null 的结果。
+    # ============================================================
+    - id: REQ-632
+      description: "Sprint 状态渲染须把未记录的 phase 与 legacy phase 区分开，并对历史记录中的 legacy 名称独立判定"
+      priority: medium
+      acceptance_criteria:
+        - id: AC-632-01
+          criteria: phase 为 null、undefined 或缺省时不得判为 legacy，即使历史记录已是新模型
+          test_type: unit
+        - id: AC-632-02
+          criteria: 历史记录仅凭 legacy 名称（无 legacy 编号）也必须判为 legacy
+          test_type: unit

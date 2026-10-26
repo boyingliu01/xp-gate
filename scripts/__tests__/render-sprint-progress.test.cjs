@@ -98,6 +98,32 @@ describe('isLegacyState', () => {
     expect(isLegacyState({ phase: 3, phase_history: [{ phase: 0, phase_name: 'THINK' }] })).toBe(true);
   });
 
+  /**
+   * @test REQ-632
+   * @intent A phase of null/undefined means "never recorded", not "legacy". The
+   *         existing history case combined a legacy NUMBER with a legacy NAME in
+   *         one entry, so the name branch was never the only reason an entry
+   *         counted — and no case asserted what null does. Without the null
+   *         guard, String(null) === 'null' silently falls through today, but any
+   *         future marker list containing a nullish rendering would start
+   *         classifying fresh sprints as legacy.
+   * @covers AC-632-01, AC-632-02
+   */
+  it('AC-632-01: null/undefined phase is not legacy', () => {
+    expect(isLegacyState({ phase: null })).toBe(false);
+    expect(isLegacyState({ phase: undefined })).toBe(false);
+    expect(isLegacyState({})).toBe(false);
+    // A state that is otherwise fresh must not be dragged into legacy by a
+    // nullish current phase while its history is already in the new model.
+    expect(isLegacyState({ phase: null, phase_history: [{ phase: 1, phase_name: 'PREP' }] })).toBe(false);
+  });
+
+  it('AC-632-02: a legacy-only phase_name in history is legacy on its own', () => {
+    // No legacy number anywhere — the name alone must trigger it.
+    expect(isLegacyState({ phase: 3, phase_history: [{ phase: 3, phase_name: 'THINK' }] })).toBe(true);
+    expect(isLegacyState({ phase: 3, phase_history: [{ phase: 3, phase_name: 'REVIEW' }] })).toBe(true);
+  });
+
   it('returns false for new model states', () => {
     expect(isLegacyState({ phase: 3, phase_model: 'compact' })).toBe(false);
     expect(isLegacyState({ phase: 3, schema_version: 2 })).toBe(false);
