@@ -99,38 +99,90 @@ export class MutmutRunner implements MutationRunner {
     }
   }
 
+  /**
+   * Build the terminal-outcome handler for one `mutmut run`.
+   *
+   * Three separate events (close / error / timeout) can end a run, and each one
+   * has to cancel both timers, mark the promise settled exactly once, and hand
+   * back the right shape. Factoring that into a single small object keeps
+   * `runMutmut` down to spawning and wiring, which is all it should express.
+   */
+  private settleTracker(
+    resolve: (outcome: MutationRunOutcome) => void,
+    cancelTimers: () => void,
+  ): {
+    didTimeOut: () => boolean;
+    markTimedOut: () => void;
+    settle: (outcome: MutationRunOutcome) => void;
+    isSettled: () => boolean;
+  } {
+    let settled = false;
+    let timedOut = false;
+    return {
+      didTimeOut: () => timedOut,
+      markTimedOut: () => {
+        timedOut = true;
+      },
+      isSettled: () => settled,
+      settle: (outcome) => {
+        if (settled) return;
+        settled = true;
+        cancelTimers();
+        resolve(outcome);
+      },
+    };
+  }
+
+  /**
+   * How to invoke `mutmut run` for the current route, or null when a WSL path
+   * could not be derived (in which case the run must be skipped, not attempted).
+   */
+  private buildInvocation(cwd: string): { command: string; args: string[] } | null {
+    if (this.route !== 'wsl') {
+      return { command: 'mutmut', args: ['run'] };
+    }
+    const wslPath = this.toWslPath(cwd);
+    if (wslPath === null) return null;
+    return { command: 'wsl', args: ['--cd', wslPath, 'mutmut', 'run'] };
+  }
+
   private async runMutmut(options: RunMutationOptions): Promise<MutationRunOutcome> {
     return new Promise((resolve) => {
-      const command = this.route === 'wsl' ? 'wsl' : 'mutmut';
-      const wslPath = this.route === 'wsl' ? this.toWslPath(options.cwd) : options.cwd;
-      if (wslPath === null) {
+      const invocation = this.buildInvocation(options.cwd);
+      if (invocation === null) {
         resolve({ report: null, timedOut: false });
         return;
       }
-      const args = this.route === 'wsl' ? ['--cd', wslPath, 'mutmut', 'run'] : ['run'];
-      const child = spawn(command, args, { stdio: 'pipe', cwd: options.cwd });
 
-      let stderr = '';
+      const child = spawn(invocation.command, invocation.args, {
+        stdio: 'pipe',
+        cwd: options.cwd,
+      });
+
       let stdout = '';
-      let didTimeOut = false;
-      let settled = false;
-      const timeoutId = setTimeout(() => {
-        didTimeOut = true;
-        child.kill('SIGTERM');
-        if (settled) return;
-        escalationId = setTimeout(() => {
-          if (!settled) child.kill('SIGKILL');
-        }, 5000);
-      }, options.timeoutMs);
+      let stderr = '';
       let escalationId: NodeJS.Timeout | undefined;
 
-      const settle = (outcome: MutationRunOutcome): void => {
-        if (settled) return;
-        settled = true;
-        if (timeoutId) clearTimeout(timeoutId);
+      // Both timers must be cancelled from three different terminal events
+      // (close, error, timeout). Keeping the pair in one place is what stops the
+      // settle path from drifting out of step with the timeout path.
+      const cancelTimers = (): void => {
+        clearTimeout(timeoutId);
         if (escalationId) clearTimeout(escalationId);
-        resolve(outcome);
       };
+
+      const tracker = this.settleTracker(resolve, cancelTimers);
+
+      const timeoutId = setTimeout(() => {
+        tracker.markTimedOut();
+        child.kill('SIGTERM');
+        if (tracker.isSettled()) return;
+        // SIGTERM may be ignored; escalate once, and let the retry live in a
+        // variable so `cancelTimers` can reach it.
+        escalationId = setTimeout(() => {
+          if (!tracker.isSettled()) child.kill('SIGKILL');
+        }, 5000);
+      }, options.timeoutMs);
 
       child.stdout?.on('data', (data: Buffer) => {
         stdout += data.toString();
@@ -141,25 +193,23 @@ export class MutmutRunner implements MutationRunner {
       });
 
       child.on('close', (code) => {
-        clearTimeout(timeoutId);
-
+        // A null exit code means the process was killed ("timed out" when we did
+        // it, "unknown" otherwise); there is no report to parse either way.
         if (code === null) {
-          settle({ report: null, timedOut: didTimeOut });
+          tracker.settle({ report: null, timedOut: tracker.didTimeOut() });
           return;
         }
 
-        // Parse results from mutmut run stdout (v3.x emoji progress)
-        const report = this.parseEmojiProgress(stdout);
-        settle({
-          report,
-          timedOut: didTimeOut,
+        tracker.settle({
+          // Parse results from mutmut run stdout (v3.x emoji progress)
+          report: this.parseEmojiProgress(stdout),
+          timedOut: tracker.didTimeOut(),
           error: code !== 0 ? stderr || stdout : undefined,
         });
       });
 
       child.on('error', (err) => {
-        clearTimeout(timeoutId);
-        settle({ report: null, timedOut: didTimeOut, error: err.message });
+        tracker.settle({ report: null, timedOut: tracker.didTimeOut(), error: err.message });
       });
     });
   }

@@ -336,3 +336,64 @@ describe('#452 REQ-3 stale baseline entries are pruned', () => {
     }
   });
 });
+
+/**
+ * @test REQ-628
+ * @intent `parseBaselineFiles` accepts two shapes: the FLAT map that
+ *         `saveBaseline` writes, and a legacy `{files: {...}}` wrapper kept for
+ *         forwards compatibility. The wrapper branch had no test, so deleting it
+ *         left the whole suite green — a silent regression that would make every
+ *         real baseline look empty (all entries filtered out as non-objects,
+ *         since the only top-level key is `files`). These cases pin both shapes
+ *         plus the scalar-filtering rule that follows from them.
+ * @covers AC-628-01, AC-628-02, AC-628-03
+ */
+describe('#628 REQ-3 parseBaselineFiles shape handling', () => {
+  it('AC-628-01: a flat map is read entry-for-entry', () => {
+    const { root } = makeRepoWithCommit();
+    const flat = JSON.stringify({
+      'src/a.ts': { totalWarnings: 2, lastAnalyzed: '2026-01-01T00:00:00Z' },
+      'src/gone.ts': { totalWarnings: 1, lastAnalyzed: '2026-01-01T00:00:00Z' },
+    });
+    stageIndexOnly(root, ['src/a.ts']);
+
+    const result = pruneBaselineEntries(flat, root);
+    expect(result.kept).toContain('src/a.ts');
+    expect(result.removed).toContain('src/gone.ts');
+    expect(result.error).toBeUndefined();
+  });
+
+  it('AC-628-02: a {files:{...}} wrapper is unwrapped, not treated as one entry', () => {
+    const { root } = makeRepoWithCommit();
+    // Without the unwrap, the sole top-level key `files` is an object, so the
+    // flat path would yield ONE entry called "files" and silently lose every
+    // real path. Assert the real paths surface.
+    const wrapped = JSON.stringify({
+      files: {
+        'src/a.ts': { totalWarnings: 2, lastAnalyzed: '2026-01-01T00:00:00Z' },
+        'src/gone.ts': { totalWarnings: 1, lastAnalyzed: '2026-01-01T00:00:00Z' },
+      },
+    });
+    stageIndexOnly(root, ['src/a.ts']);
+
+    const result = pruneBaselineEntries(wrapped, root);
+    expect(result.kept).toContain('src/a.ts');
+    expect(result.removed).toContain('src/gone.ts');
+    expect(result.kept).not.toContain('files');
+  });
+
+  it('AC-628-03: scalar top-level keys are metadata and are dropped, not kept as entries', () => {
+    const { root } = makeRepoWithCommit();
+    const withMeta = JSON.stringify({
+      version: 2,
+      generatedAt: '2026-01-01T00:00:00Z',
+      'src/a.ts': { totalWarnings: 2, lastAnalyzed: '2026-01-01T00:00:00Z' },
+    });
+    stageIndexOnly(root, ['src/a.ts']);
+
+    const result = pruneBaselineEntries(withMeta, root);
+    expect(result.kept).toEqual(['src/a.ts']);
+    expect(result.kept).not.toContain('version');
+    expect(result.kept).not.toContain('generatedAt');
+  });
+});

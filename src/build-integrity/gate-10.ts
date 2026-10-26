@@ -301,32 +301,47 @@ const INDEX_FILES = ['index.ts', 'index.js'];
  */
 const JS_TO_SOURCE_EXTENSIONS = ['.ts', '.tsx'];
 
+/**
+ * Resolve an import that already names an extension.
+ *
+ * A `.js` specifier may point at TypeScript source (ESM output rewrites `.ts` to
+ * `.js`), so it gets one extra look at the sibling source extensions. Every other
+ * extension must match the file on disk exactly.
+ */
+function resolveExplicitExtension(resolved: string, ext: string): string | null {
+  if (tryAccess(resolved)) return resolved;
+  if (ext !== '.js') return null;
+  const stem = resolved.slice(0, -'.js'.length);
+  for (const sourceExt of JS_TO_SOURCE_EXTENSIONS) {
+    if (tryAccess(stem + sourceExt)) return stem + sourceExt;
+  }
+  return null;
+}
+
+/**
+ * Resolve an extensionless import: try the known extensions in order, then the
+ * directory-index names.
+ */
+function resolveBareImport(resolved: string): string | null {
+  for (const tryExt of IMPORT_EXTENSIONS) {
+    if (tryAccess(resolved + tryExt)) return resolved + tryExt;
+  }
+  for (const idxName of INDEX_FILES) {
+    const candidate = path.join(resolved, idxName);
+    if (tryAccess(candidate)) return candidate;
+  }
+  return null;
+}
+
 export function resolveImportPath(importPath: string, fromFile: string): string | null {
   if (!isRelativeImport(importPath)) return null;
 
   const resolved = path.resolve(path.dirname(fromFile), importPath);
   const ext = path.extname(importPath);
 
-  if (ext) {
-    if (tryAccess(resolved)) return resolved;
-    if (ext !== '.js') return null;
-    const stem = resolved.slice(0, -'.js'.length);
-    for (const sourceExt of JS_TO_SOURCE_EXTENSIONS) {
-      if (tryAccess(stem + sourceExt)) return stem + sourceExt;
-    }
-    return null;
-  }
-
-  for (const tryExt of IMPORT_EXTENSIONS) {
-    if (tryAccess(resolved + tryExt)) return resolved + tryExt;
-  }
-
-  for (const idxName of INDEX_FILES) {
-    const candidate = path.join(resolved, idxName);
-    if (tryAccess(candidate)) return candidate;
-  }
-
-  return null;
+  return ext
+    ? resolveExplicitExtension(resolved, ext)
+    : resolveBareImport(resolved);
 }
 
 /**

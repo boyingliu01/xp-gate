@@ -1,11 +1,77 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import fs from 'fs/promises';
+import fss from 'node:fs';
 import path from 'path';
 import os from 'os';
-import { runTscCheck, runPackCheck } from '../gate-10';
+import { runTscCheck, runPackCheck, resolveImportPath } from '../gate-10';
 
 // Increase test timeout for subprocess calls (tsc, npm pack)
 vi.setConfig({ testTimeout: 30000 });
+
+/**
+ * @test REQ-627
+ * @intent `resolveImportPath` had ZERO direct tests before this file gained them.
+ *         It decides whether an import in changed code points at a real file, so
+ *         a silent regression here makes Gate 10 pass while imports are broken.
+ *         The `.js -> .ts` fallback is the subtle part: TypeScript's ESM output
+ *         rewrites `./x.ts` to `./x.js`, so a source tree has `x.js` specifiers
+ *         that must resolve to `x.ts`. Removing that arm left every existing test
+ *         green, which is exactly why these cases are needed.
+ * @covers AC-627-01, AC-627-02, AC-627-03
+ */
+
+describe('resolveImportPath (build-integrity)', () => {
+  let dir: string;
+
+  beforeEach(async () => {
+    dir = await fs.mkdtemp(path.join(os.tmpdir(), 'gate10-resolve-'));
+  });
+
+  afterEach(async () => {
+    await fs.rm(dir, { recursive: true, force: true });
+  });
+
+  const from = (): string => path.join(dir, 'importer.ts');
+
+  it('AC-627-01: resolves an explicit .js specifier to the sibling .ts source', async () => {
+    fss.writeFileSync(path.join(dir, 'target.ts'), 'export const x = 1;\n');
+    // The specifier says .js; only target.ts exists. ESM output depends on this.
+    expect(resolveImportPath('./target.js', from())).toBe(path.join(dir, 'target.ts'));
+  });
+
+  it('AC-627-01: prefers an existing .js file over the .ts fallback', async () => {
+    fss.writeFileSync(path.join(dir, 'both.js'), 'module.exports = {};\n');
+    fss.writeFileSync(path.join(dir, 'both.ts'), 'export const x = 1;\n');
+    expect(resolveImportPath('./both.js', from())).toBe(path.join(dir, 'both.js'));
+  });
+
+  it('AC-627-02: an explicit non-.js extension must match exactly (no fallback)', async () => {
+    fss.writeFileSync(path.join(dir, 'mod.mjs'), 'export {};\n');
+    // .mjs exists, resolves directly
+    expect(resolveImportPath('./mod.mjs', from())).toBe(path.join(dir, 'mod.mjs'));
+    // .cjs does NOT exist, and there is no .cjs -> .ts fallback
+    expect(resolveImportPath('./missing.cjs', from())).toBeNull();
+  });
+
+  it('AC-627-03: an extensionless import tries known extensions, then index files', async () => {
+    fss.writeFileSync(path.join(dir, 'plain.ts'), 'export const y = 2;\n');
+    expect(resolveImportPath('./plain', from())).toBe(path.join(dir, 'plain.ts'));
+
+    const sub = path.join(dir, 'pkg');
+    fss.mkdirSync(sub);
+    fss.writeFileSync(path.join(sub, 'index.ts'), 'export {};\n');
+    expect(resolveImportPath('./pkg', from())).toBe(path.join(sub, 'index.ts'));
+  });
+
+  it('AC-627-03: a non-relative specifier is not resolved at all', () => {
+    expect(resolveImportPath('lodash', from())).toBeNull();
+    expect(resolveImportPath('@scope/pkg', from())).toBeNull();
+  });
+
+  it('AC-627-03: a relative import to nothing returns null', async () => {
+    expect(resolveImportPath('./nope', from())).toBeNull();
+  });
+});
 
 /**
  * @test Gate 10 runTscCheck
