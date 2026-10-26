@@ -19,6 +19,41 @@ interface BaselineStorageConfig {
 
 type ToolValidator = (entry: BaselineEntry, file: string) => void;
 
+/** The per-tool counters a baseline entry can carry, in report order. */
+const TOOL_KEYS = ['eslint', 'principles', 'ccn', 'ruff', 'golangci', 'shellcheck'] as const;
+type ToolKey = typeof TOOL_KEYS[number];
+
+/**
+ * Build one baseline entry from a file's per-tool counts.
+ *
+ * `createFromFiles` and `initializeWithAnalyzer` each carried this six-`if`
+ * accumulator plus its six-spread object literal verbatim (#620). Beyond the
+ * duplication, the copy-paste is what made both methods read as CCN 15-18: the
+ * complexity was not in what they did, it was in how many tools they listed.
+ *
+ * The two copies differed in ONE way, and this function keeps the stricter
+ * reading: an explicit `totalWarnings` wins when it is a number (including 0).
+ * `createFromFiles` tested truthiness, so a deliberate `totalWarnings: 0` was
+ * silently replaced by the sum -- the one case where the caller was trying to
+ * override a stale per-tool count.
+ */
+function buildEntry(counts: Partial<BaselineEntry>): BaselineEntry {
+  const entry: Partial<Record<ToolKey, unknown>> = {};
+  let summed = 0;
+  for (const key of TOOL_KEYS) {
+    const tool = counts[key];
+    if (!tool) continue;
+    entry[key] = tool;
+    summed += tool.warnings;
+  }
+  const totalWarnings = typeof counts.totalWarnings === 'number' ? counts.totalWarnings : summed;
+  return {
+    ...entry,
+    totalWarnings,
+    lastAnalyzed: new Date().toISOString(),
+  } as BaselineEntry;
+}
+
 function computeSummaryStats(baseline: Record<string, BaselineEntry>) {
   let totalFiles = 0;
   let totalWarnings = 0;
@@ -48,18 +83,27 @@ function computeSummaryStats(baseline: Record<string, BaselineEntry>) {
   };
 }
 
-function aggregateTool(stats: Record<string, { totalWarnings: number; totalErrors: number }>, entry: BaselineEntry) {
-  const tools: Array<{ key: string; warnings: number; errors: number }> = [
-    { key: 'eslint', warnings: entry.eslint?.warnings ?? 0, errors: entry.eslint?.errors ?? 0 },
-    { key: 'principles', warnings: entry.principles?.warnings ?? 0, errors: entry.principles?.errors ?? 0 },
-    { key: 'ruff', warnings: entry.ruff?.warnings ?? 0, errors: entry.ruff?.errors ?? 0 },
-    { key: 'golangci', warnings: entry.golangci?.warnings ?? 0, errors: entry.golangci?.errors ?? 0 },
-    { key: 'shellcheck', warnings: entry.shellcheck?.warnings ?? 0, errors: entry.shellcheck?.errors ?? 0 },
-  ];
-  for (const t of tools) {
-    if (t.warnings > 0 || t.errors > 0) {
-      stats[t.key] = { totalWarnings: (stats[t.key]?.totalWarnings || 0) + t.warnings, totalErrors: (stats[t.key]?.totalErrors || 0) + t.errors };
-    }
+/** Tools whose counts are summed, and which shape their counter has. */
+const AGGREGATED_TOOLS = ['eslint', 'principles', 'ruff', 'golangci', 'shellcheck'] as const;
+
+function toolCounters(entry: BaselineEntry, key: typeof AGGREGATED_TOOLS[number]): { warnings: number; errors: number } {
+  const tool = entry[key];
+  if (!tool) return { warnings: 0, errors: 0 };
+  return { warnings: tool.warnings, errors: tool.errors };
+}
+
+function aggregateTool(
+  stats: Record<string, { totalWarnings: number; totalErrors: number }>,
+  entry: BaselineEntry,
+): void {
+  for (const key of AGGREGATED_TOOLS) {
+    const { warnings, errors } = toolCounters(entry, key);
+    if (warnings <= 0 && errors <= 0) continue;
+    const running = stats[key] ?? { totalWarnings: 0, totalErrors: 0 };
+    stats[key] = {
+      totalWarnings: running.totalWarnings + warnings,
+      totalErrors: running.totalErrors + errors,
+    };
   }
 }
 
@@ -148,44 +192,9 @@ class BaselineStorage {
 
   async createFromFiles(warningData: Array<{ file: string; counts: Partial<BaselineEntry> }>): Promise<Record<string, BaselineEntry>> {
     const baseline: Record<string, BaselineEntry> = {};
-    
     for (const item of warningData) {
-      let totalWarnings = 0;
-      
-      if (item.counts.eslint?.warnings) {
-        totalWarnings += item.counts.eslint.warnings;
-      }
-      if (item.counts.principles?.warnings) {
-        totalWarnings += item.counts.principles.warnings;
-      }
-      if (item.counts.ccn?.warnings) {
-        totalWarnings += item.counts.ccn.warnings;
-      }
-      if (item.counts.ruff?.warnings) {
-        totalWarnings += item.counts.ruff.warnings;
-      }
-      if (item.counts.golangci?.warnings) {
-        totalWarnings += item.counts.golangci.warnings;
-      }
-      if (item.counts.shellcheck?.warnings) {
-        totalWarnings += item.counts.shellcheck.warnings;
-      }
-      if (item.counts.totalWarnings) {
-        totalWarnings = item.counts.totalWarnings;
-      }
-      
-      baseline[item.file] = {
-        ...(item.counts.eslint && { eslint: item.counts.eslint }),
-        ...(item.counts.principles && { principles: item.counts.principles }),
-        ...(item.counts.ccn && { ccn: item.counts.ccn }),
-        ...(item.counts.ruff && { ruff: item.counts.ruff }),
-        ...(item.counts.golangci && { golangci: item.counts.golangci }),
-        ...(item.counts.shellcheck && { shellcheck: item.counts.shellcheck }),
-        totalWarnings,
-        lastAnalyzed: new Date().toISOString()
-      };
+      baseline[item.file] = buildEntry(item.counts);
     }
-    
     return baseline;
   }
 
@@ -217,28 +226,7 @@ class BaselineStorage {
         const promiseResults = await Promise.allSettled(
           batch.map(async (file) => {
             const counts = await warningCountFunction(file);
-            
-            let totalWarnings = 0;
-            if (counts.eslint?.warnings) totalWarnings += counts.eslint.warnings;
-            if (counts.principles?.warnings) totalWarnings += counts.principles.warnings;
-            if (counts.ccn?.warnings) totalWarnings += counts.ccn.warnings;
-            if (counts.ruff?.warnings) totalWarnings += counts.ruff.warnings;
-            if (counts.golangci?.warnings) totalWarnings += counts.golangci.warnings;
-            if (counts.shellcheck?.warnings) totalWarnings += counts.shellcheck.warnings;
-            if (counts.totalWarnings !== undefined) totalWarnings = counts.totalWarnings;
-
-            const baselineEntry: BaselineEntry = {
-              ...(counts.eslint && { eslint: counts.eslint }),
-              ...(counts.principles && { principles: counts.principles }),
-              ...(counts.ccn && { ccn: counts.ccn }),
-              ...(counts.ruff && { ruff: counts.ruff }),
-              ...(counts.golangci && { golangci: counts.golangci }),
-              ...(counts.shellcheck && { shellcheck: counts.shellcheck }),
-              totalWarnings,
-              lastAnalyzed: new Date().toISOString()
-            };
-
-            baseline[file] = baselineEntry;
+            baseline[file] = buildEntry(counts);
             completed.push(file);
 
             if (onProgress) {
