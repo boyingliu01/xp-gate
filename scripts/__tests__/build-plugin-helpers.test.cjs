@@ -10,25 +10,23 @@
  *         stay green if either helper silently changed its answer.
  *
  *         The helpers live in an ESM `.mjs` module, which this vitest config
- *         evaluates as CommonJS and cannot `import` directly. They are therefore
+ *         evaluates as CommonJS and cannot `require` directly. They are therefore
  *         exercised through `node --input-type=module` in a child process —
  *         which also proves the module loads cleanly as ESM, as `npm pack` will.
  * @covers AC-631-01, AC-631-02, AC-631-03
  */
 
-import { describe, it, expect } from 'vitest';
-import fs from 'node:fs';
-import os from 'node:os';
-import path from 'node:path';
-import { spawnSync } from 'node:child_process';
-import { fileURLToPath } from 'node:url';
+const fs = require('node:fs');
+const os = require('node:os');
+const path = require('node:path');
+const { spawnSync } = require('node:child_process');
 
-const REPO_ROOT = path.resolve(fileURLToPath(new URL('../..', import.meta.url)));
+const REPO_ROOT = path.resolve(__dirname, '../..');
 const SCRIPT = path.join(REPO_ROOT, 'scripts', 'build-plugin.mjs');
 
 /** Run an ESM snippet in a child node process rooted at the repo. */
 function runEsm(body) {
-  const modUrl = new URL(`file://${SCRIPT.replace(/\\/g, '/')}`).href;
+  const modUrl = 'file://' + SCRIPT.replace(/\\/g, '/');
   const source = `import { isDirectory, missingSkills } from ${JSON.stringify(modUrl)};\n${body}`;
   const r = spawnSync(process.execPath, ['--input-type=module', '-e', source], {
     encoding: 'utf8',
