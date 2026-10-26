@@ -12,6 +12,7 @@
     "lib/",
     "skills/",
     "plugins/",
+    "dsh.bundle.patch.yml",
     "adapter-common.sh",
     "principles/",
     "mutation/",
@@ -27,8 +28,18 @@
     "gate-12-file-hygiene.sh",
     "sprint-gate.sh"
   ],
+  "dsh": {
+    "bundle": {
+      "patch": "./dsh.bundle.patch.yml"
+    }
+  },
   "exports": {
-    "./tui": "./plugins/opencode/tui-plugin.ts"
+    "./tui": "./plugins/opencode/tui-plugin.ts",
+    "./dsh": {
+      "import": "./plugins/dsh/lib/index.js",
+      "default": "./plugins/dsh/lib/index.js"
+    },
+    "./package.json": "./package.json"
   },
   "repository": {
     "type": "git",

@@ -148,6 +148,93 @@ DSH 的 `evaluatePluginCompatibility` 以 `{ includePrerelease: true }` 调用 `
 
 ---
 
+### P0-1b　主包自身成为合法 DSH bundle（2026-10-27 追加）
+
+**问题**：上面 P0-1 只修了独立包 `@boyingliu01/dsh-plugin-xp-gate` 的 peerDeps。
+但用户实际是通过主包 `@boyingliu01/xp-gate` 使用的，而**主包根本不是 DSH 插件包**——
+它的 `package.json` 没有 `dsh.bundle` 字段，`plugins/dsh` 只是被 `sync-package-content.js`
+当作静态文件塞进 tarball。`dsh plugin add @boyingliu01/xp-gate` 因此无 bundle 可挂载。
+
+**实测复现**（npm 上的 0.31.4，未修复版）：
+
+```
+dsh: installation rejected: Plugin @boyingliu01/dsh-plugin-xp-gate@0.31.4
+is incompatible with dsh 0.2.0-rc.2: peerDependencies {"@deepseek-ai/dsh-llm":"^0.1.1-rc.2",...}
+dsh: nothing was installed.
+```
+
+**关键调查结论（决定方案）**：
+
+| 事实 | 证据 |
+|---|---|
+| DSH 只解析**包级**依赖，不支持子目录模块作为 bundle | `resolveBundleDir` 走 `packageDirFromAnchor` |
+| 主包是 **CommonJS**，插件是 **ESM** | 主包无 `type`，插件 `"type":"module"` |
+| 但 CJS 包可用 `exports` 暴露 ESM 子路径并被 import | 实测输出 `SELF-REFERENCE SUBPATH RESOLVED: name=fake-plugin` |
+| `src/npm-package` **不得有运行时依赖** | AGENTS.md 硬约定，零安装分发 |
+
+**方案（user 选定）**：主包通过 `exports` 子路径自包含，**不引入任何依赖**：
+
+```json
+"dsh": { "bundle": { "patch": "./dsh.bundle.patch.yml" } },
+"exports": {
+  "./dsh": { "import": "./plugins/dsh/lib/index.js", "default": "./plugins/dsh/lib/index.js" },
+  "./package.json": "./package.json"
+}
+```
+
+patch 文件 `src/npm-package/dsh.bundle.patch.yml`：
+
+```yaml
+- insert:
+    - id: tool-xp-gate
+      name: '@boyingliu01/xp-gate/dsh'
+```
+
+**为什么不用 `dependencies: {"@boyingliu01/dsh-plugin-xp-gate": "..."}`**：
+那会打破零依赖约定，且要求用户额外联网拉一个包，而代码本来就在同一个 tarball 里。
+`exports` 子路径把"包内文件"提升为"可寻址条目"，是 Node 原生机制，零成本。
+
+#### 一个必须堵住的发布漏洞
+
+`exports["./dsh"]` 指向 `plugins/dsh/lib/index.js`，而 **`lib/` 是 gitignored 的 tsc 产物**。
+`sync-package-content.js` 只**复制**已存在的 `lib/`，不会构建；主包发布 job
+（`.github/workflows/npm-publish.yml`）也只 `sync` 不 `build`。
+于是"发布机没预构建"会产出一个 **exports 指向不存在文件**的 tarball——
+用户端加载时才炸，而所有单测都是绿的。
+
+**修复**：`sync-package-content.js` 增加 `assertDshBundleEntry()`，在 pack 时校验
+`plugins/dsh/lib/index.js` 存在，缺失则 `exit(1)` 并给出构建指引。
+
+实测守卫生效（隔离骨架中移除 lib 后）：
+
+```
+[sync] ERROR: plugins/dsh/lib/index.js is missing. The npm main package exports "./dsh"
+from that path, so the published bundle would not load. Build it first: (cd plugins/dsh && npm run build)
+exit=1
+```
+
+#### 端到端验证（隔离 DSH_HOME，未触碰用户 ~/.dsh）
+
+| 步骤 | 结果 |
+|---|---|
+| `npm pack` 真实 tarball | 996 文件 / 1.21MB |
+| tarball 内含 `dsh.bundle.patch.yml` + `plugins/dsh/lib/index.js` | ✅ |
+| `dsh plugin add <tarball>` | **exit 0，无 incompatible/rejected** |
+| profile `dsh.profile.bundles` | 含 `@boyingliu01/xp-gate` |
+| `--dump-config` | exit 0，树含 `id: tool-xp-gate` |
+| `--dump-config-schema` | exit 0，schema 含 `@boyingliu01/xp-gate/dsh`（证明模块被真实 import） |
+
+`--dump-config-schema` 是最强证据：生成 schema 必须实际 import 并执行插件模块，
+所以它同时证明了模块解析与类型加载都正常。**这一条替代了"手工 import 判断可用性"
+的错误做法**——脱离 DSH 运行时手工 import 会因 peer 不可达而假失败。
+
+**新增测试**：`scripts/__tests__/dsh-bundle-contract.test.cjs`（5 条，vitest 风格）。
+注意该目录的惯例是 vitest（`describe/it`），初版误写成纯 node 脚本会被 `npm test`
+静默漏收——已改正。
+
+
+---
+
 ### P0-2　bundled skill provider
 
 **现状**：`files` 含 `skills/`（65 个文件确在 tarball 里），但 DSH 的发现根里没有任何一项指向插件目录。实测 `DSH_BUNDLED_SKILL_DIR` **只有读、没有写**，全仓无一处设置它。
