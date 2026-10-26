@@ -341,10 +341,14 @@ gate13_flag_supported() {
   local cc="$1" flag="$2" probe_tu out
   local key="${cc}|${flag}"
 
+  # Two separate caches, checked separately. A single "seen this key" cache was
+  # wrong (walkthrough MA-02): once any flag was dropped, every cached key
+  # returned "supported", re-enabling flags the compiler had already rejected.
+  case " ${GATE13_PROBE_DROPPED:-} " in
+    *" ${key} "*) return 1 ;;
+  esac
   case " ${GATE13_PROBE_CACHE:-} " in
-    *" ${key} "*)
-      [ "${GATE13_PROBE_DROPPED:-}" = "" ] && return 0
-      ;;
+    *" ${key} "*) return 0 ;;
   esac
 
   probe_tu="${GATE13_PROBE_TU:-}"
@@ -552,14 +556,30 @@ gate13_maven_injection_reliable() {
 # reports [rawtypes].
 # ---------------------------------------------------------------------------
 gate13_javac_warning_count() {
-  local file="$1" out tmpd
+  local file="$1" out tmpd rc=0 budget
   command -v javac >/dev/null 2>&1 || { printf '0\n'; return 0; }
 
   tmpd="${TMPDIR:-/tmp}/gate13_javac_$$"
   mkdir -p "$tmpd"
+  budget=$(gate13_timeout_budget)
 
-  out=$(javac -Xlint:all,-processing -d "$tmpd" "$file" 2>&1)
+  # Timeout-bounded (walkthrough MC-03): a pathological file can hang javac, and
+  # a pre-commit hook must never hang with it. `timeout` may be absent on some
+  # systems, in which case we run unbounded rather than skipping the check.
+  if command -v timeout >/dev/null 2>&1; then
+    out=$(timeout "$budget" javac -Xlint:all,-processing -d "$tmpd" "$file" 2>&1)
+    rc=$?
+  else
+    out=$(javac -Xlint:all,-processing -d "$tmpd" "$file" 2>&1)
+    rc=$?
+  fi
   rm -rf "$tmpd"
+
+  # timeout(1) reports 124 when it fired; there is no diagnostic to count.
+  if [ "$rc" -eq 124 ]; then
+    printf '0\n'
+    return 0
+  fi
 
   # javac prefixes each warning with "warning:" (localised builds may differ), so
   # also count the "[category]" marker lines that every -Xlint diagnostic emits.
@@ -607,17 +627,26 @@ gate13_run_java_analysis() {
         degraded=1
       fi
 
-      local args budget rc
+      local args budget rc mvn_out mvn_log mvn_findings
       args=$(gate13_maven_args)
       budget=$(gate13_timeout_budget)
+      mvn_log="${TMPDIR:-/tmp}/gate13_mvn_$$.log"
+
+      # Capture BOTH streams. This is the whole point of REQ-004: `mvn compile`
+      # EXITS 0 even when javac emitted warnings, so a verdict derived from the
+      # exit code alone can never see a -Xlint finding. (Walkthrough review CI-01
+      # caught exactly that: the first implementation redirected to /dev/null and
+      # printed PASSED no matter what javac said.)
       if command -v timeout >/dev/null 2>&1; then
         # shellcheck disable=SC2086
-        timeout "$budget" "$mvn_bin" $args >/dev/null 2>&1
+        timeout "$budget" "$mvn_bin" $args >"$mvn_log" 2>&1
       else
         # shellcheck disable=SC2086
-        "$mvn_bin" $args >/dev/null 2>&1
+        "$mvn_bin" $args >"$mvn_log" 2>&1
       fi
       rc=$?
+      mvn_out=$(cat "$mvn_log" 2>/dev/null)
+      rm -f "$mvn_log"
 
       if [ "$rc" -eq 124 ]; then
         gate13_classify_timeout
@@ -632,15 +661,33 @@ gate13_run_java_analysis() {
           echo "     ⚠️  Java build failed (mvn exit ${rc}) in degraded mode — not attributed to Gate 13"
           return "$GATE13_WARN"
         fi
+        # A non-zero exit in a run where the lint flags WERE applied means javac
+        # found something (with -Werror in a project config) or the code does not
+        # compile. Either way it is a real finding, not an environment problem.
         echo "     ❌ Java compilation failed (mvn exit ${rc})"
+        printf '%s\n' "$mvn_out" | grep -E 'ERROR|WARNING' | head -10 | sed 's/^/        /'
         return "$GATE13_FAIL"
       fi
 
       if [ "$degraded" -eq 1 ]; then
-        echo "     ✅ PASSED - Java compiled (lint enforcement skipped in degraded mode)"
+        echo "     ⚠️  DEGRADED - Java compiled but lint enforcement was NOT applied; no conclusion drawn"
         return "$GATE13_WARN"
       fi
-      echo "     ✅ PASSED - Java compiled with -Xlint:all,-processing"
+
+      # Count javac's lint output. Maven prefixes it with "[WARNING] ".
+      mvn_findings=$(printf '%s\n' "$mvn_out" \
+        | grep -cE '\[WARNING\].*\[(rawtypes|unchecked|deprecation|fallthrough|finally|cast|static|try|overrides|overloads|serial|synchronization|varargs|divzero|empty|exports|module|opens|options|path|processing|removal|requires|text-blocks|this-escape)\]' \
+        | tr -d '[:space:]')
+      mvn_findings=${mvn_findings:-0}
+
+      if [ "$mvn_findings" -gt 0 ]; then
+        printf '%s\n' "$mvn_out" \
+          | grep -E '\[WARNING\].*\[[a-z-]+\]' | head -10 | sed 's/^/        /'
+        echo "     ❌ ${mvn_findings} javac -Xlint finding(s)"
+        return "$GATE13_FAIL"
+      fi
+
+      echo "     ✅ PASSED - Java compiled with -Xlint:all,-processing (no findings)"
       return "$GATE13_PASS"
     fi
   fi
@@ -650,23 +697,43 @@ gate13_run_java_analysis() {
     if [ -x "./gradlew" ] || command -v gradle >/dev/null 2>&1; then
       local g_bin="gradle"
       [ -x "./gradlew" ] && g_bin="./gradlew"
-      local budget
+      local budget g_log grc g_out g_findings
       budget=$(gate13_timeout_budget)
+      g_log="${TMPDIR:-/tmp}/gate13_gradle_$$.log"
+
+      # Same reasoning as the Maven path: capture the output, because a
+      # successful `compileJava` still carries the javac warnings.
+      # NOTE: no -q here — it suppresses exactly the diagnostics we want, the
+      # same trap that made -q wrong for Maven.
       if command -v timeout >/dev/null 2>&1; then
-        timeout "$budget" "$g_bin" compileJava -q --offline --warning-mode all >/dev/null 2>&1
+        timeout "$budget" "$g_bin" compileJava --offline --warning-mode all >"$g_log" 2>&1
       else
-        "$g_bin" compileJava -q --offline --warning-mode all >/dev/null 2>&1
+        "$g_bin" compileJava --offline --warning-mode all >"$g_log" 2>&1
       fi
-      local grc=$?
+      grc=$?
+      g_out=$(cat "$g_log" 2>/dev/null)
+      rm -f "$g_log"
+
       if [ "$grc" -eq 124 ]; then
         gate13_classify_timeout
         return "$GATE13_WARN"
       fi
       if [ "$grc" -ne 0 ]; then
         echo "     ❌ Java compilation failed (gradle exit ${grc})"
+        printf '%s\n' "$g_out" | grep -E 'error|warning' | head -10 | sed 's/^/        /'
         return "$GATE13_FAIL"
       fi
-      echo "     ✅ PASSED - Java compiled (gradle compileJava)"
+
+      g_findings=$(printf '%s\n' "$g_out" \
+        | grep -cE '\[(rawtypes|unchecked|deprecation|fallthrough|cast|static|overrides|serial|synchronization)\]' \
+        | tr -d '[:space:]')
+      g_findings=${g_findings:-0}
+      if [ "$g_findings" -gt 0 ]; then
+        printf '%s\n' "$g_out" | grep -E 'warning:' | head -10 | sed 's/^/        /'
+        echo "     ❌ ${g_findings} javac lint finding(s) (gradle compileJava)"
+        return "$GATE13_FAIL"
+      fi
+      echo "     ✅ PASSED - Java compiled (gradle compileJava, no findings)"
       return "$GATE13_PASS"
     fi
   fi
@@ -913,8 +980,9 @@ EOF
 
   echo "     ✅ PASSED - C/C++ compiler strictness (${tier} tier)"
 
-  # REQ-005: the opt-in -fanalyzer stage is advisory and runs after the warning
-  # verdict is settled, so it can never change a PASS into a FAIL.
-  gate13_run_analyzer
+  # NOTE: gate13_run_analyzer is deliberately NOT called here. pre-commit drives
+  # the three stages separately and reduces their verdicts itself; calling it in
+  # both places ran -fanalyzer twice (walkthrough MC-01), doubling the slowest
+  # stage for no benefit.
   return "$GATE13_PASS"
 }
