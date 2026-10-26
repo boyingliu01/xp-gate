@@ -93,36 +93,59 @@ function renderScoreChart(history) {
   });
 }
 
+/** The chart's gate labels, in display order. */
+const GATE_CHART_LABELS = ['Gate 1: Code Quality', 'Gate 2: Duplicate Code', 'Gate 3: Complexity',
+  'Gate 4: Principles', 'Gate 5: Tests+Coverage', 'Gate 6: Architecture',
+  'Gate 7: IaC Security', 'Gate 8: Secret Scanning', 'Gate 9: SAST Security'];
+
+/**
+ * Find the report key whose gate name best matches a chart label.
+ *
+ * The label and the reported name are both human text and differ slightly
+ * ("Tests+Coverage" vs "Tests & Coverage"), so the match is "one contains the
+ * other with '+' removed" rather than equality.
+ *
+ * @param {object} gates the gates object from the newest report
+ * @param {string} label chart label
+ * @returns {string|undefined} matching key, if any
+ */
+function findGateKey(gates, label) {
+  return Object.keys(gates || {}).find((key) => {
+    const gate = gates[key];
+    return gate && gate.name && label.includes(gate.name.replace('+', ''));
+  });
+}
+
+/**
+ * Percentage of reports in which `gateKey` passed or was skipped.
+ * A skipped gate is not a failure, so it counts as a pass here.
+ *
+ * @param {Array<object>} history reports, newest first
+ * @param {string} gateKey gate key
+ * @returns {number} 0-100
+ */
+function passRateFor(history, gateKey) {
+  const passes = history.filter((report) => {
+    const gate = (report.gates || {})[gateKey];
+    return gate && (gate.status === 'PASS' || gate.status === 'SKIP');
+  }).length;
+  return Math.round((passes / history.length) * 100);
+}
+
 function renderGatePassRateChart(history) {
   if (!history.length) return;
-  
-  // Extract all gate names
-  const gateNames = ['Gate 1: Code Quality', 'Gate 2: Duplicate Code', 'Gate 3: Complexity',
-    'Gate 4: Principles', 'Gate 5: Tests+Coverage', 'Gate 6: Architecture',
-    'Gate 7: IaC Security', 'Gate 8: Secret Scanning', 'Gate 9: SAST Security'];
-  
+
   // Calculate pass rate per gate
-  const passRates = gateNames.map(name => {
-    // Try to find the gate key from history
-    const gateKey = Object.keys(history[0].gates || {}).find(k => {
-      const g = history[0].gates[k];
-      return g && g.name && name.includes(g.name.replace('+', ''));
-    });
-    if (!gateKey) return 0;
-    
-    let passCount = 0;
-    for (const h of history) {
-      const g = (h.gates || {})[gateKey];
-      if (g && (g.status === 'PASS' || g.status === 'SKIP')) passCount++;
-    }
-    return Math.round((passCount / history.length) * 100);
+  const passRates = GATE_CHART_LABELS.map(label => {
+    const gateKey = findGateKey(history[0].gates, label);
+    return gateKey ? passRateFor(history, gateKey) : 0;
   });
-  
+
   const ctx = document.getElementById('gate-pass-chart').getContext('2d');
   new Chart(ctx, {
     type: 'bar',
     data: {
-      labels: gateNames.map(n => n.split(': ')[0]),
+      labels: GATE_CHART_LABELS.map(n => n.split(': ')[0]),
       datasets: [{
         label: 'Pass Rate (%)',
         data: passRates,
