@@ -757,15 +757,31 @@ export class TypeScriptAdapter extends BaseAdapter implements Adapter {
   }
 
   extractFunctions(): unknown[] {
-    const src = this.fileContent;
     // Match declarations against the masked source so identifiers that appear
     // only in comments or strings are never mistaken for functions, while
     // bodies/positions still come from the original text (same offsets).
-    const masked = this.maskedSource;
-    const found: FunctionMetrics[] = [];
     const seen = new Set<string>();
+    const found: FunctionMetrics[] = [];
+    // Three independent syntactic shapes, one collector each. Splitting them out
+    // of the single CCN-20 body also keeps each shape's quirks (see the comments
+    // on the collectors) next to the code they explain.
+    this.collectFunctionDecls(seen, found);
+    this.collectClassMethods(seen, found);
+    this.collectArrowFunctions(seen, found);
+    return found;
+  }
 
-    // 1. `function name(...)` declarations (incl. export / async / generators).
+  /** Claim a `name@offset` key once, so overlapping shapes cannot double-count. */
+  private claim(seen: Set<string>, name: string, nameIndex: number): boolean {
+    const key = `${name}@${nameIndex}`;
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  }
+
+  /** `function name(...)` declarations, including export / async / generators. */
+  private collectFunctionDecls(seen: Set<string>, found: FunctionMetrics[]): void {
+    const masked = this.maskedSource;
     const declRe = /(?:^|[^\w$.])(?:export\s+)?(?:default\s+)?(?:async\s+)?function\s*\*?\s*(\w+)\s*/g;
     let m: RegExpExecArray | null;
     while ((m = declRe.exec(masked)) !== null) {
@@ -774,16 +790,20 @@ export class TypeScriptAdapter extends BaseAdapter implements Adapter {
       if (parenIndex === -1) continue;
       const bodyOpen = findBodyBrace(masked, parenIndex);
       if (bodyOpen === -1) continue;
-      const key = `${m[1]}@${nameIndex}`;
-      if (seen.has(key)) continue;
-      seen.add(key);
+      if (!this.claim(seen, m[1], nameIndex)) continue;
       found.push(this.buildFunction(m[1], 'function', nameIndex, parenIndex, bodyOpen));
     }
+  }
 
-    // 2. Class methods: `name(...) {`. Not anchored to line start so minified
-    //    single-line bodies count too. Control-flow keywords are excluded -- a
-    //    bare `if (a > 0) {` matches the shape but is not a method.
+  /**
+   * Class methods: `name(...) {`. Not anchored to line start so minified
+   * single-line bodies count too. Control-flow keywords are excluded -- a bare
+   * `if (a > 0) {` matches the shape but is not a method.
+   */
+  private collectClassMethods(seen: Set<string>, found: FunctionMetrics[]): void {
+    const masked = this.maskedSource;
     const memberRe = /(?<![\w$.])(?:public\s+|private\s+|protected\s+|static\s+|async\s+|readonly\s+|get\s+|set\s+|\*\s*)*(\w+)\s*\(/g;
+    let m: RegExpExecArray | null;
     while ((m = memberRe.exec(masked)) !== null) {
       if (CONTROL_KEYWORDS.has(m[1])) continue;
       // The pattern ends with `\(`, so the match's last character IS the opening
@@ -794,73 +814,98 @@ export class TypeScriptAdapter extends BaseAdapter implements Adapter {
       // Only treat as a method when a body brace follows the parameter list.
       const bodyOpen = findBodyBrace(masked, parenIndex);
       if (bodyOpen === -1) continue;
-      const key = `${m[1]}@${nameIndex}`;
-      if (seen.has(key)) continue;
-      seen.add(key);
+      if (!this.claim(seen, m[1], nameIndex)) continue;
       found.push(this.buildFunction(m[1], 'method', nameIndex, parenIndex, bodyOpen));
     }
+  }
 
-    // 3. Arrow consts / assignments: `const name = (...) =>` / `name = x =>`.
+  /** Arrow consts / assignments: `const name = (...) =>` / `name = x =>`. */
+  private collectArrowFunctions(seen: Set<string>, found: FunctionMetrics[]): void {
+    const masked = this.maskedSource;
     const arrowRe = /(?:const|let|var)\s+(\w+)\s*(?::[^=]+)?=\s*(?:async\s*)?/g;
+    let m: RegExpExecArray | null;
     while ((m = arrowRe.exec(masked)) !== null) {
-      const rest = masked.substring(arrowRe.lastIndex);
-      const parenOffset = /^\s*\(/.test(rest) ? rest.indexOf('(') : -1;
-      let parenIndex: number;
-      if (parenOffset !== -1) {
-        parenIndex = arrowRe.lastIndex + parenOffset;
-      } else {
-        // Single-identifier param: `x => ...`
-        const simple = /^\s*(\w+)\s*=>/.exec(rest);
-        if (!simple) continue;
-        parenIndex = -1;
-      }
-      const afterParams = parenIndex === -1
-        ? arrowRe.lastIndex + (/^\s*(\w+)/.exec(rest) as RegExpExecArray)[0].length
-        : readParenGroup(src, parenIndex).end;
-      if (!/^\s*(?::[^=]+)?=>/.test(masked.substring(afterParams))) continue;
-
+      const arrow = this.parseArrowAt(m, arrowRe.lastIndex);
+      if (!arrow) continue;
       const nameIndex = m.index + m[0].length - m[1].length;
-      const braceAfter = masked.indexOf('{', afterParams);
-      const arrowBodyStart = braceAfter !== -1 && /^\s*(?::[^=]+)?=>\s*\{/.test(masked.substring(afterParams, braceAfter + 1))
-        ? braceAfter
-        : -1;
+      if (!this.claim(seen, m[1], nameIndex)) continue;
+      found.push(this.buildArrowMetrics(m[1], nameIndex, arrow));
+    }
+  }
 
-      let length = 1;
-      let nestingDepth = 0;
-      let hasTryCatch = false;
-      let ioOperations: string[] = [];
-      let code = '';
-      if (arrowBodyStart !== -1) {
-        const bodyEnd = findBlockEnd(masked, arrowBodyStart);
-        code = src.substring(arrowBodyStart, bodyEnd);
-        const startLine = lineOf(src, nameIndex);
-        const endLine = lineOf(src, bodyEnd);
-        length = Math.max(1, endLine - startLine + 1);
-        nestingDepth = maxNesting(code);
-        hasTryCatch = /\btry\s*\{/.test(code);
-        ioOperations = ioOperationsIn(code);
-      }
+  /**
+   * Resolve an arrow assignment's parameter list and body brace.
+   * @returns null when the text after the assignment is not an arrow function.
+   */
+  private parseArrowAt(
+    m: RegExpExecArray,
+    scanFrom: number,
+  ): { parenIndex: number; afterParams: number; bodyOpen: number } | null {
+    const masked = this.maskedSource;
+    const rest = masked.substring(scanFrom);
+    const parenOffset = /^\s*\(/.test(rest) ? rest.indexOf('(') : -1;
+    let parenIndex: number;
+    if (parenOffset !== -1) {
+      parenIndex = scanFrom + parenOffset;
+    } else {
+      // Single-identifier param: `x => ...`
+      if (!/^\s*(\w+)\s*=>/.test(rest)) return null;
+      parenIndex = -1;
+    }
+    const afterParams = parenIndex === -1
+      ? scanFrom + (/^\s*(\w+)/.exec(rest) as RegExpExecArray)[0].length
+      : readParenGroup(this.fileContent, parenIndex).end;
+    if (!/^\s*(?::[^=]+)?=>/.test(masked.substring(afterParams))) return null;
 
-      const startLine = lineOf(src, nameIndex);
-      const key = `${m[1]}@${nameIndex}`;
-      if (seen.has(key)) continue;
-      seen.add(key);
-      found.push({
-        name: m[1],
+    const braceAfter = masked.indexOf('{', afterParams);
+    const isBlockBody = braceAfter !== -1 &&
+      /^\s*(?::[^=]+)?=>\s*\{/.test(masked.substring(afterParams, braceAfter + 1));
+    return { parenIndex, afterParams, bodyOpen: isBlockBody ? braceAfter : -1 };
+  }
+
+  /** Derive the metrics for one arrow function, whether or not it has a block body. */
+  private buildArrowMetrics(
+    name: string,
+    nameIndex: number,
+    arrow: { parenIndex: number; afterParams: number; bodyOpen: number },
+  ): FunctionMetrics {
+    const src = this.fileContent;
+    const startLine = lineOf(src, nameIndex);
+
+    // A concise body (`() => x + 1`) has no block, so it carries no measurable
+    // span: length 1, no nesting, no io. Only a block body is inspected.
+    if (arrow.bodyOpen === -1) {
+      return {
+        name,
         type: 'arrow',
         line: startLine,
         startLine,
         endLine: startLine,
-        length,
-        paramCount: parenIndex === -1 ? 1 : countParams(readParenGroup(src, parenIndex).inner),
-        nestingDepth,
-        hasTryCatch,
-        ioOperations,
-        code,
-      });
+        length: 1,
+        paramCount: arrow.parenIndex === -1 ? 1 : countParams(readParenGroup(src, arrow.parenIndex).inner),
+        nestingDepth: 0,
+        hasTryCatch: false,
+        ioOperations: [],
+        code: '',
+      };
     }
 
-    return found;
+    const bodyEnd = findBlockEnd(this.maskedSource, arrow.bodyOpen);
+    const code = src.substring(arrow.bodyOpen, bodyEnd);
+    const endLine = lineOf(src, bodyEnd);
+    return {
+      name,
+      type: 'arrow',
+      line: startLine,
+      startLine,
+      endLine: startLine,
+      length: Math.max(1, endLine - startLine + 1),
+      paramCount: arrow.parenIndex === -1 ? 1 : countParams(readParenGroup(src, arrow.parenIndex).inner),
+      nestingDepth: maxNesting(code),
+      hasTryCatch: /\btry\s*\{/.test(code),
+      ioOperations: ioOperationsIn(code),
+      code,
+    };
   }
 
   extractClasses(): unknown[] {
