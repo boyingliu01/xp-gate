@@ -283,6 +283,43 @@ function mergeGroup<T extends Record<string, RuleConfig>>(
   return result;
 }
 
+/**
+ * How each key category is type-checked, and what the warning says when it is not.
+ *
+ * Every category follows the same shape -- skip when undefined, assign when the
+ * value passes its guard, warn otherwise (#620). Stating the guard and the
+ * expectation once per category lets one loop enforce all of them, instead of
+ * four near-identical loops that each have to be kept in step by hand.
+ */
+type ValueGuard = {
+  accepts: (value: unknown) => boolean;
+  expectation: string;
+  /** Coerce the accepted value before assignment (arrays are copied to detach). */
+  coerce?: (value: unknown) => unknown;
+};
+
+const NUMERIC_GUARD: ValueGuard = {
+  accepts: value => typeof value === 'number' && Number.isFinite(value),
+  expectation: 'a finite number',
+};
+
+const ARRAY_GUARD: ValueGuard = {
+  // Arrays REPLACE rather than concatenate, matching how .principlesrc is
+  // written today (an exclude list is the project's complete list).
+  accepts: value => Array.isArray(value),
+  expectation: 'an array',
+  coerce: value => [...(value as unknown[])],
+};
+
+function enumGuard(allowed: readonly string[]): ValueGuard {
+  return {
+    accepts: value => typeof value === 'string' && allowed.includes(value),
+    // Loud on purpose: silently keeping the default would let a project believe
+    // it raised a rule to blocking when it did not.
+    expectation: `one of ${allowed.join(', ')}`,
+  };
+}
+
 /** Merge one rule, keeping the default for any key whose override is mistyped. */
 function mergeRule(
   base: RuleConfig,
@@ -290,46 +327,30 @@ function mergeRule(
   ruleId: string
 ): RuleConfig {
   const merged: RuleConfig = { ...base };
+  const guarded: Array<[string, ValueGuard]> = [
+    ...NUMERIC_KEYS.map((key): [string, ValueGuard] => [key, NUMERIC_GUARD]),
+    ...ARRAY_KEYS.map((key): [string, ValueGuard] => [key, ARRAY_GUARD]),
+    ...Object.entries(ENUM_KEYS).map(([key, allowed]): [string, ValueGuard] => [
+      key,
+      enumGuard(allowed as readonly string[]),
+    ]),
+  ];
 
+  for (const [key, guard] of guarded) {
+    const value = override[key as keyof RuleConfig];
+    if (value === undefined) continue;
+    if (!guard.accepts(value)) {
+      warn(`rules.${ruleId}.${key} must be ${guard.expectation} — keeping default`);
+      continue;
+    }
+    merged[key as keyof RuleConfig] = (guard.coerce ? guard.coerce(value) : value) as never;
+  }
+
+  // `enabled` is a bare boolean, not one of the value categories above.
   if (typeof override.enabled === 'boolean') {
     merged.enabled = override.enabled;
   } else if (override.enabled !== undefined) {
     warn(`rules.${ruleId}.enabled must be a boolean — keeping default`);
-  }
-
-  for (const key of NUMERIC_KEYS) {
-    const value = override[key];
-    if (value === undefined) continue;
-    if (typeof value === 'number' && Number.isFinite(value)) {
-      merged[key] = value;
-    } else {
-      warn(`rules.${ruleId}.${key} must be a finite number — keeping default`);
-    }
-  }
-
-  for (const key of ARRAY_KEYS) {
-    const value = override[key];
-    if (value === undefined) continue;
-    // Arrays REPLACE rather than concatenate, matching how .principlesrc is
-    // written today (an exclude list is the project's complete list).
-    if (Array.isArray(value)) {
-      merged[key] = [...value] as RuleConfig[typeof key];
-    } else {
-      warn(`rules.${ruleId}.${key} must be an array — keeping default`);
-    }
-  }
-
-  for (const key of Object.keys(ENUM_KEYS) as (keyof typeof ENUM_KEYS)[]) {
-    const allowed: readonly string[] = ENUM_KEYS[key];
-    const value = override[key];
-    if (value === undefined) continue;
-    if (typeof value === 'string' && allowed.includes(value)) {
-      merged[key] = value;
-    } else {
-      // Loud on purpose: silently keeping the default would let a project believe
-      // it raised a rule to blocking when it did not.
-      warn(`rules.${ruleId}.${key} must be one of ${allowed.join(', ')} — keeping default`);
-    }
   }
 
   return merged;
