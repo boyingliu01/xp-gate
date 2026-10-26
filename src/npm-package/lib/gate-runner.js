@@ -494,23 +494,53 @@ function findConfig(basePath, fileName) {
 }
 
 /**
+ * The basename of the first `gate-<num>-*.sh` in a directory, or null.
+ *
+ * A missing directory is the normal case -- most projects have no
+ * `githooks/gates/` -- so it returns null rather than throwing.
+ *
+ * @param {string} dir directory to list
+ * @param {string} gateNum gate number as a string
+ * @returns {string|null}
+ */
+function matchGateFileIn(dir, gateNum) {
+  try {
+    if (!fs.existsSync(dir)) return null;
+    return fs.readdirSync(dir).find(f => f.startsWith(`gate-${gateNum}-`) && f.endsWith('.sh')) || null;
+  } catch {
+    return null;
+  }
+}
+
+/**
  * Locate the bash script that implements a gate, for the TS-less fallback path.
  *
- * Candidate order is the reachability order: a project-local githooks/ copy
- * (what `xp-gate init` and repo checkouts provide) first, then the global
- * install (~/.config/xp-gate/adapters, the npm deployment layout).
+ * Candidate order:
+ *   1. `<cwd>/githooks/gates/gate-<n>-*.sh` -- a consumer's OWN gate scripts. The
+ *      hyphenated name is what lets a project keep several variants of one gate
+ *      (`gate-9-public-fallback.sh`), which the flat `gate-<n>.sh` name cannot
+ *      express. `xp-gate init` does not create this directory and the npm package
+ *      does not ship it, so in a stock project it simply never matches. It is
+ *      still a supported extension point, pinned by the REQ-standalone-gates-05
+ *      and -06 tests in lib/__tests__/gate-runner.test.js.
+ *   2. `<cwd>/githooks/gate-<n>.sh` -- the flat copy `xp-gate init` installs.
+ *   3. `~/.config/xp-gate/adapters/gate-<n>.sh` -- the global install.
  *
- * There was a third, higher-priority candidate: `<cwd>/githooks/gates/gate-N-*.sh`.
- * It could never match outside this repository -- the npm package's files[] has
- * no gates/ entry and lib/init.js never creates one -- so it shadowed the
- * canonical copy with a drifted duplicate for nobody's benefit. Removed along
- * with the directory; AC-A-02-05 guards against re-adding either half alone.
+ * NOTE: this repository's own `githooks/gates/` was a different thing entirely --
+ * five drifted copies of the canonical gates that only ever matched inside this
+ * checkout, shadowing `githooks/gate-N.sh` (36 lines apart for gate-9, still
+ * carrying the GATE_10_STATUS artifact from #532). Those were deleted; the
+ * lookup path above was not, because consumer projects legitimately use it.
  *
  * @param {string} gateNum gate number as a string
  * @param {string} cwd project root to search
  * @returns {string|null}
  */
 function resolveGateScript(gateNum, cwd = process.cwd()) {
+  const gatesDir = path.join(cwd, 'githooks', 'gates');
+  const flexible = matchGateFileIn(gatesDir, gateNum);
+  if (flexible) return path.join(gatesDir, flexible);
+
   const projectScript = path.join(cwd, 'githooks', `gate-${gateNum}.sh`);
   if (fs.existsSync(projectScript)) return projectScript;
 

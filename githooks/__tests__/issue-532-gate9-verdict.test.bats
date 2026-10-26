@@ -352,30 +352,40 @@ verdict_block_of() {
 }
 
 # @test REQ-A-02
-# @intent Guard the removal of githooks/gates/. That directory held five scripts
-#         (647 lines) that resolveGateScript() named as its FIRST candidate but
-#         which no install could ever reach:
-#           - src/npm-package/package.json files[] lists no gates/ entry, so the
-#             published tarball has no such directory (verified against the
-#             installed 0.31.3 global package);
-#           - lib/init.js has zero references to gates/, so `xp-gate init` never
-#             creates one in a consumer repo.
-#         The candidate therefore only ever matched inside this repository,
-#         where it shadowed the canonical githooks/gate-N.sh it had drifted from
-#         (36 lines apart at removal, carrying the GATE_10_STATUS copy-paste
-#         artifact). Keeping it meant maintaining a second copy of every gate
-#         that no user executes -- pure drift surface.
-#         If a future change wants that fallback back, it must ALSO ship the
-#         directory and install it; this test forces that decision to be
-#         deliberate instead of a silent re-add.
+# @intent Guard the removal of this repository's own copies of the gate scripts
+#         under githooks/gates/. That directory held five scripts (647 lines) --
+#         second copies of the canonical githooks/gate-N.sh -- which had drifted
+#         (36 lines apart for gate-9, still carrying the GATE_10_STATUS
+#         copy-paste artifact this file documents). They only ever matched inside
+#         this checkout, where they SHADOWED the canonical copy.
+#
+#         What is NOT being deleted is the lookup path itself. resolveGateScript()
+#         still probes <cwd>/githooks/gates/gate-<n>-*.sh FIRST, because a
+#         consumer project may put its own hyphenated gate variants there and
+#         the flat gate-<n>.sh name cannot express that. See REQ-standalone-gates-05
+#         and -06 in src/npm-package/lib/__tests__/gate-runner.test.js.
+#
+#         So the guard is per-NAME, not per-directory: the repository must not
+#         re-add a second copy of a canonical gate, but may keep the directory
+#         for scripts that are NOT duplicates of githooks/gate-N.sh.
 # @covers AC-A-02-05
-@test "AC-A-02-05: the unreachable githooks/gates/ fallback directory stays deleted" {
-  [ ! -d "$REPO_ROOT/githooks/gates" ] || {
-    echo "githooks/gates/ is back. It is unreachable from any install (not in"
-    echo "package.json files[], never created by xp-gate init), so re-adding it"
-    echo "only creates a second copy of the gate scripts to drift out of sync."
-    echo "If the fallback is genuinely wanted, ship AND install it, then update"
-    echo "this test and the resolveGateScript() candidates together."
+@test "AC-A-02-05: this repo keeps no duplicate gate copies under githooks/gates/" {
+  local dir="$REPO_ROOT/githooks/gates"
+  # Absent is the current, expected state.
+  [ -d "$dir" ] || return 0
+
+  # If the directory exists, nothing in it may duplicate a canonical gate.
+  local offending=""
+  local n
+  for n in 3 4 7 8 9; do
+    if compgen -G "$dir/gate-${n}-*.sh" >/dev/null; then
+      offending="$offending gate-${n}-*.sh"
+    fi
+  done
+  if [ -n "$offending" ]; then
+    echo "githooks/gates/ again holds a duplicate of a canonical gate:$offending"
+    echo "Those copies shadow githooks/gate-N.sh and drift out of sync with it."
+    echo "Keep consumer-project gate variants, not second copies of ours."
     return 1
-  }
+  fi
 }
