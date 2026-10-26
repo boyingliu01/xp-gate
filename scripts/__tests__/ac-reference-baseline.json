@@ -144,7 +144,6 @@
       "AC-E-01"
     ],
     "githooks/__tests__/issue-537-skip-reasons.test.bats": [
-      "AC-537-01",
       "AC-537-02"
     ],
     "githooks/__tests__/issue-538-powershell-prune.test.bats": [
