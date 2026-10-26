@@ -467,8 +467,239 @@ gate13_count_warnings() {
   printf '%s\n' "$out" | grep -E 'warning:' | grep -vcE '^\s*$' || true
 }
 
+# ============================================================================
+# JAVA PATH (REQ-004)
+#
+# Measured motivation: `List raw = l;` in a Java file produces ZERO diagnostics
+# from bare javac, `[rawtypes]` under -Xlint:all, and a hard error under
+# -Xlint:all -Werror. Gate 9's `mvn -q -DskipTests compile` suppresses the very
+# warnings a strict gate exists to read.
+# ============================================================================
+
 # ---------------------------------------------------------------------------
-# AC-003-01/02/03/05 — the C/C++ analysis stage, replacing SLICE-1's endpoint.
+# AC-004-01 — Maven arguments.
+#
+# `-B` (batch mode) NOT `-q`: -q suppresses non-error diagnostics, so "run mvn
+# quietly" and "parse the warning lines" are mutually exclusive — a real
+# self-contradiction caught in requirement round 2 (architecture CI-02).
+# `-o` keeps a hook from reaching the network (REQ-007).
+# `compilerArgument` is a SINGLE appended argument; -Xlint:all,-processing is
+# one token precisely because of that (technical MC-01).
+# ---------------------------------------------------------------------------
+gate13_maven_args() {
+  printf '%s\n' "-B -o -DskipTests compile -Dmaven.compiler.showWarnings=true -Dmaven.compiler.showDeprecation=true -Dmaven.compiler.compilerArgument=-Xlint:all,-processing"
+}
+
+gate13_javac_args() {
+  printf '%s\n' "-Xlint:all,-processing -d"
+}
+
+gate13_java_sources() {
+  git diff --cached --name-only --diff-filter=d -- '*.java' 2>/dev/null
+}
+
+# ---------------------------------------------------------------------------
+# AC-004-02 — is the command-line Maven injection likely to take effect?
+#
+# Returns 0 = reliable, 1 = unreliable. Three known failure modes, each of which
+# silently drops the lint flags rather than failing loudly:
+#   1. the pom already declares <compilerArgs> — a CLI single-arg append is
+#      overridden by the explicit configuration (technical MC-01)
+#   2. maven-compiler-plugin < 3.1 — compilerArgument semantics were not stable
+#      (feasibility FC-02)
+#   3. no plugin version declared at all — the effective version is inherited or
+#      defaulted and cannot be verified, so do not assume it works
+#
+# On "unreliable" the gate degrades to warn-only with a loud banner. It never
+# fakes a PASS and never emits an unpredictable BLOCK.
+# ---------------------------------------------------------------------------
+gate13_maven_injection_reliable() {
+  local pom="${1:-pom.xml}" ver
+
+  [ -f "$pom" ] || return 1
+
+  if grep -q '<compilerArgs>' "$pom" 2>/dev/null; then
+    printf 'pom already declares <compilerArgs>; a command-line -Dmaven.compiler.compilerArgument may be overridden\n' >&2
+    return 1
+  fi
+
+  # Extract the plugin block's own <version>. The `#` delimiter avoids clashing
+  # with the `/` in the closing tag.
+  ver=$(awk '/maven-compiler-plugin/,/<\/plugin>/' "$pom" 2>/dev/null \
+        | sed -nE 's|.*<version>([0-9]+(\.[0-9]+)+)</version>.*|\1|p' | head -1)
+
+  if [ -z "$ver" ]; then
+    printf 'maven-compiler-plugin version is not declared; injection cannot be verified\n' >&2
+    return 1
+  fi
+
+  local major minor
+  major=${ver%%.*}
+  minor=${ver#*.}
+  minor=${minor%%.*}
+
+  if [ "$major" -lt 3 ] || { [ "$major" -eq 3 ] && [ "$minor" -lt 1 ]; }; then
+    printf 'maven-compiler-plugin %s predates stable compilerArgument support (needs >= 3.1)\n' "$ver" >&2
+    return 1
+  fi
+
+  return 0
+}
+
+# ---------------------------------------------------------------------------
+# AC-004-03 — count javac diagnostics for a file under the strict lint set.
+# Verified by measurement: bare javac reports nothing for a raw type, this
+# reports [rawtypes].
+# ---------------------------------------------------------------------------
+gate13_javac_warning_count() {
+  local file="$1" out tmpd
+  command -v javac >/dev/null 2>&1 || { printf '0\n'; return 0; }
+
+  tmpd="${TMPDIR:-/tmp}/gate13_javac_$$"
+  mkdir -p "$tmpd"
+
+  out=$(javac -Xlint:all,-processing -d "$tmpd" "$file" 2>&1)
+  rm -rf "$tmpd"
+
+  # javac prefixes each warning with "warning:" (localised builds may differ), so
+  # also count the "[category]" marker lines that every -Xlint diagnostic emits.
+  printf '%s\n' "$out" | grep -cE 'warning:|\[(rawtypes|unchecked|deprecation|fallthrough|finally|cast|static|try|overrides|overloads|serial|synchronization)\]' || true
+}
+
+# ---------------------------------------------------------------------------
+# Java analysis stage. Verdict semantics mirror the C/C++ stage:
+#   0 PASS, 1 FAIL, 2 BLOCK(untrustworthy), 3 WARN (no toolchain / degraded).
+# ---------------------------------------------------------------------------
+gate13_run_java_analysis() {
+  local srcs had_tool=0 degraded=0 files f cnt total=0
+
+  if gate13_is_disabled; then
+    gate13_reason "Gate 13 disabled via XP_GATE_DISABLE_13=1"
+    echo "SKIPPED - compiler strictness check (XP_GATE_DISABLE_13=1)"
+    return "$GATE13_WARN"
+  fi
+
+  srcs=$(gate13_java_sources)
+  if [ -z "$srcs" ]; then
+    return "$GATE13_PASS"
+  fi
+
+  if [ "${GATE13_FORCE_NO_JAVA_TOOLCHAIN:-}" = "1" ]; then
+    echo "WARN - no usable Java toolchain (mvn / gradle / javac); Java compiler checks NOT performed."
+    return "$GATE13_WARN"
+  fi
+
+  # ── Maven path ────────────────────────────────────────────────────────────
+  if [ -f "pom.xml" ]; then
+    if [ -x "./mvnw" ]; then
+      had_tool=1
+    elif command -v mvn >/dev/null 2>&1; then
+      had_tool=1
+    fi
+
+    if [ "$had_tool" -eq 1 ]; then
+      local mvn_bin="mvn"
+      [ -x "./mvnw" ] && mvn_bin="./mvnw"
+
+      if ! gate13_maven_injection_reliable "pom.xml" 2>/dev/null; then
+        echo "     ⚠️  DEGRADED - Maven compiler-arg injection unreliable (see reasons below);"
+        echo "         Java lint findings are REPORT-ONLY for this run (this is a degraded mode, not a normal warn-only run)."
+        degraded=1
+      fi
+
+      local args budget rc
+      args=$(gate13_maven_args)
+      budget=$(gate13_timeout_budget)
+      if command -v timeout >/dev/null 2>&1; then
+        # shellcheck disable=SC2086
+        timeout "$budget" "$mvn_bin" $args >/dev/null 2>&1
+      else
+        # shellcheck disable=SC2086
+        "$mvn_bin" $args >/dev/null 2>&1
+      fi
+      rc=$?
+
+      if [ "$rc" -eq 124 ]; then
+        gate13_classify_timeout
+        return "$GATE13_WARN"
+      fi
+      if [ "$rc" -ne 0 ]; then
+        if [ "$degraded" -eq 1 ]; then
+          # We already know the lint flags were not applied, so a build failure
+          # here says nothing about compiler strictness — it is usually missing
+          # offline dependencies. Reporting it as FAIL would blame this gate for
+          # a build-environment problem (and would be a lie: nothing was linted).
+          echo "     ⚠️  Java build failed (mvn exit ${rc}) in degraded mode — not attributed to Gate 13"
+          return "$GATE13_WARN"
+        fi
+        echo "     ❌ Java compilation failed (mvn exit ${rc})"
+        return "$GATE13_FAIL"
+      fi
+
+      if [ "$degraded" -eq 1 ]; then
+        echo "     ✅ PASSED - Java compiled (lint enforcement skipped in degraded mode)"
+        return "$GATE13_WARN"
+      fi
+      echo "     ✅ PASSED - Java compiled with -Xlint:all,-processing"
+      return "$GATE13_PASS"
+    fi
+  fi
+
+  # ── Gradle path ───────────────────────────────────────────────────────────
+  if [ -f "build.gradle" ] || [ -f "build.gradle.kts" ]; then
+    if [ -x "./gradlew" ] || command -v gradle >/dev/null 2>&1; then
+      local g_bin="gradle"
+      [ -x "./gradlew" ] && g_bin="./gradlew"
+      local budget
+      budget=$(gate13_timeout_budget)
+      if command -v timeout >/dev/null 2>&1; then
+        timeout "$budget" "$g_bin" compileJava -q --offline --warning-mode all >/dev/null 2>&1
+      else
+        "$g_bin" compileJava -q --offline --warning-mode all >/dev/null 2>&1
+      fi
+      local grc=$?
+      if [ "$grc" -eq 124 ]; then
+        gate13_classify_timeout
+        return "$GATE13_WARN"
+      fi
+      if [ "$grc" -ne 0 ]; then
+        echo "     ❌ Java compilation failed (gradle exit ${grc})"
+        return "$GATE13_FAIL"
+      fi
+      echo "     ✅ PASSED - Java compiled (gradle compileJava)"
+      return "$GATE13_PASS"
+    fi
+  fi
+
+  # ── Bare javac path ───────────────────────────────────────────────────────
+  if command -v javac >/dev/null 2>&1; then
+    local blocking=0
+    while IFS= read -r f; do
+      [ -n "$f" ] || continue
+      cnt=$(gate13_javac_warning_count "$f")
+      cnt=${cnt:-0}
+      if [ "$cnt" -gt 0 ]; then
+        total=$((total + cnt))
+        echo "     ❌ ${f}: ${cnt} javac -Xlint finding(s)"
+        blocking=$((blocking + 1))
+      fi
+    done <<EOF
+$srcs
+EOF
+    if [ "$blocking" -gt 0 ]; then
+      echo "     ❌ BLOCKED - ${blocking} Java file(s) with -Xlint findings (${total} total)"
+      return "$GATE13_FAIL"
+    fi
+    echo "     ✅ PASSED - Java compiler strictness (javac -Xlint:all,-processing)"
+    return "$GATE13_PASS"
+  fi
+
+  echo "WARN - no usable Java toolchain (mvn / gradle / javac); Java compiler checks NOT performed."
+  return "$GATE13_WARN"
+}
+
+# ---------------------------------------------------------------------------
+# AC-003-01/02/03/05 — the C/C++ analysis stage.
 #
 # Policy:
 #   added file     -> -Werror: ANY warning in the active tier blocks
