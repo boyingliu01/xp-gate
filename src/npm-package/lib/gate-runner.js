@@ -254,6 +254,16 @@ function buildPreamble(allMode, fileSourceLines) {
 const TS_GATE_TIMEOUT_MS = 120000;
 
 /**
+ * #618: sentinel for "this gate ran nothing at all" -- no TypeScript module and
+ * no bash fallback. It must never be conflated with 0 ("ran, found nothing").
+ * Returned up through runGate() so the --all summary counts it as skipped
+ * rather than passed: three advertised gates were analysing nothing and sitting
+ * inside the passed count, which is the same defect class as a vacuous pass
+ * elsewhere -- a dimension nobody measured, scored as if measured.
+ */
+const GATE_NOT_RUN = 'NOT_RUN';
+
+/**
  * Run a TypeScript gate module via npx tsx.
  * Finds the .ts entry point, spawns tsx with --run flag.
  * Falls back to bash script if TypeScript module not found.
@@ -266,11 +276,13 @@ function runTsGate(gateModule, targetPath, opts = {}) {
     const gateNum = gateModule.replace('gate-', '');
     const script = resolveGateScript(gateNum, targetCwd);
     if (script) {
-      runGateAdapter(script, targetCwd, opts);
-    } else {
-      console.log(`Gate ${gateModule}: TypeScript module not found and no bash fallback available.`);
+      return runGateAdapter(script, targetCwd, opts);
     }
-    return 0;
+    // #618: nothing ran. Before this, the function fell through to `return 0`
+    // and the --all summary counted the gate as passed.
+    console.log(`Gate ${gateModule}: TypeScript module not found and no bash fallback available.`);
+    console.log(`⏭️  SKIPPED - Gate ${gateModule} did not run (no module, no bash fallback)`);
+    return GATE_NOT_RUN;
   }
 
   const args = ['-y', 'tsx', entry, '--run'];
@@ -573,6 +585,7 @@ async function runGate(gateId, targetPath, opts = {}) {
       // failing gate from a passing one. Handlers that return nothing at all
       // (gate 2, whose execFileSync throws on a non-zero exit instead) are
       // still treated as pass, because their failure signal is the throw below.
+      if (result === GATE_NOT_RUN) return GATE_NOT_RUN;
       return typeof result === 'number' ? result : 0;
     } catch (err) {
       // Covers a synchronous throw AND a rejection from the awaited handler.
@@ -585,4 +598,4 @@ async function runGate(gateId, targetPath, opts = {}) {
   return 1;
 }
 
-module.exports = { GATE_REGISTRY, getGateInfo, getAllGates, runGate, resolveAlias, getAliases, runGateAdapter, findTsGateEntry, resolveGateScript, SOURCE_FILE_EXTENSIONS, resolveAllModeChangedFiles, describeEmptyChangedFiles, describeChangedFilesScope };
+module.exports = { GATE_REGISTRY, GATE_NOT_RUN, getGateInfo, getAllGates, runGate, resolveAlias, getAliases, runGateAdapter, findTsGateEntry, resolveGateScript, SOURCE_FILE_EXTENSIONS, resolveAllModeChangedFiles, describeEmptyChangedFiles, describeChangedFilesScope };

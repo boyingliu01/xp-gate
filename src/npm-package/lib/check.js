@@ -2,7 +2,7 @@
 
 const { principles } = require('./principles.js');
 const { arch } = require('./arch.js');
-const { getGateInfo, runGate, resolveAlias, getAliases } = require('./gate-runner.js');
+const { getGateInfo, runGate, resolveAlias, getAliases, GATE_NOT_RUN } = require('./gate-runner.js');
 
 /**
  * Resolve a token (gate ID or alias) to a canonical gate ID.
@@ -151,7 +151,11 @@ async function checkAllGates(target) {
     // read CHANGED_FILES from scanning an empty diff and reporting SKIP — which
     // read like a pass while checking LESS than an ordinary commit.
     const code = await runGate(gate.id, target, { scope: 'all' });
-    if (code === 0) tally.passed += 1;
+    // #618: a gate that ran nothing (no TS module, no bash fallback) returns the
+    // GATE_NOT_RUN sentinel. Counting it as passed put three gates that analysed
+    // nothing inside "8 passed"; it is a skip, and the summary must say so.
+    if (code === GATE_NOT_RUN) tally.skipped += 1;
+    else if (code === 0) tally.passed += 1;
     else tally.failed += 1;
     console.log('');
   }
