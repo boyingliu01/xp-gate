@@ -40,19 +40,24 @@ jobs:
 
       # Stryker's initial dry run executes the test suite, and that suite includes
       # plugins/dsh/src/skills.test.ts, which asserts plugins/dsh/skills/ exists
-      # and matches the repo's skills/. That directory is a BUILD ARTIFACT --
-      # .gitignore lists it (line 150) -- so on a clean checkout the assertion
-      # fails before any mutant is even generated:
+      # and matches the repo's skills/. That directory is a PREPACK ARTIFACT --
+      # .gitignore:150 lists it -- so on a clean checkout the assertion failed
+      # before any mutant was generated:
       #
       #   ERROR DryRunExecutor One or more tests failed in the initial test run:
       #     bundled skills ships every repo skill as a directory
       #     expected false to be true
       #
-      # The plugin build is what produces those directories; no workflow ran it.
-      # Building here is the fix, not skipping the test: the test is right, it
-      # was simply being asked a question about a tree nobody had built.
-      - name: Build plugin bundles (skills are build artifacts)
-        run: node scripts/build-plugin.mjs --platform dsh
+      # Run the prepack script itself, exactly as quality-gates.yml does for #586.
+      # Deliberately NOT `npm run build`: the skills come from prepack.cjs, which
+      # only copies directories, whereas `build` also runs tsc and needs the
+      # plugin's own sub-package dependencies (plugins/dsh is not a workspace, and
+      # its package-lock.json is gitignored, so root `npm ci` does not install
+      # them). Compiling is not necessary to answer this question, so this job
+      # does not pay for it.
+      - name: Bundle plugin skills (prepack artifact, gitignored)
+        if: hashFiles('plugins/dsh/scripts/prepack.cjs') != ''
+        run: node plugins/dsh/scripts/prepack.cjs
 
       - name: Determine changed principles files
         id: changed
