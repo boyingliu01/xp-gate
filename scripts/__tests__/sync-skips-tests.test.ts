@@ -16,9 +16,8 @@
  */
 
 import { describe, it, expect } from 'vitest';
-import { readFileSync, existsSync, mkdtempSync, mkdirSync, writeFileSync, readdirSync, rmSync } from 'node:fs';
+import { readFileSync, existsSync, readdirSync } from 'node:fs';
 import { join, resolve } from 'node:path';
-import { tmpdir } from 'node:os';
 import { fileURLToPath } from 'node:url';
 import { spawnSync } from 'node:child_process';
 
@@ -73,12 +72,26 @@ describe('AC-626-02: a sync does not copy a plugin test directory', () => {
   });
 });
 
-/** Directories named __tests__ anywhere under `dir`. */
+/**
+ * Directories named __tests__ anywhere under `dir`.
+ *
+ * IO is guarded so an unreadable subtree surfaces as a named error rather than a
+ * silently shorter list -- a walk that quietly skips a directory would make this
+ * whole assertion vacuous, which is the one failure mode it must not have.
+ */
 function collectTestDirs(dir: string): string[] {
   const found: string[] = [];
   const walk = (current: string): void => {
     if (!existsSync(current)) return;
-    for (const entry of readdirSync(current, { withFileTypes: true })) {
+    let entries;
+    try {
+      entries = readdirSync(current, { withFileTypes: true });
+    } catch (err) {
+      throw new Error(
+        `cannot read ${current}: ${err instanceof Error ? err.message : String(err)}`
+      );
+    }
+    for (const entry of entries) {
       if (!entry.isDirectory()) continue;
       const full = join(current, entry.name);
       if (entry.name === '__tests__') found.push(full);
