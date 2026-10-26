@@ -124,97 +124,127 @@ function scanDirectory(dir: string, basePath?: string): string[] {
 
 // ── Main Analysis ──
 
+/** How many unpaired sources are listed individually before summarising. */
+const UNPAIRED_DISPLAY_LIMIT = 10;
+
+/** The per-layer counts one scan produces, before formatting. */
+interface LayerCounts {
+  sourceFiles: string[];
+  testFiles: string[];
+  unitTests: string[];
+  integrationTests: string[];
+  e2eTests: string[];
+  unpairedSources: string[];
+  pairedCount: number;
+}
+
+/**
+ * Append the Layer 1 block: pairing rate plus the unpaired list, truncated once
+ * it gets long enough that printing every path would bury the summary (#620).
+ */
+function appendPairingLines(messages: string[], counts: LayerCounts, totalNeedingTests: number): void {
+  const pairRate = totalNeedingTests > 0
+    ? Math.round((counts.pairedCount / totalNeedingTests) * 100)
+    : 100;
+  messages.push('  Layer 1 (Unit Pairing):');
+  messages.push(`    Paired:    ${counts.pairedCount}/${totalNeedingTests} (${pairRate}%)`);
+
+  const unpaired = counts.unpairedSources;
+  if (unpaired.length === 0 || unpaired.length > UNPAIRED_DISPLAY_LIMIT) {
+    if (unpaired.length > 0) {
+      messages.push(`    Unpaired:  ${unpaired.length} files (showing first 10)`);
+      unpaired.slice(0, UNPAIRED_DISPLAY_LIMIT).forEach(f => messages.push(`      - ${f}`));
+    }
+    return;
+  }
+  messages.push(`    Unpaired:  ${unpaired.join(', ')}`);
+}
+
+/** Format the console block for one analysis. */
+function buildLayerMessages(counts: LayerCounts, totalNeedingTests: number): string[] {
+  const messages: string[] = [
+    '',
+    '━━━ Test Layer Analytics ━━━',
+    '',
+    `  Sources:     ${counts.sourceFiles.length} files`,
+    `  Tests:       ${counts.testFiles.length} total`,
+    `    Unit:      ${counts.unitTests.length}`,
+    `    Integra:   ${counts.integrationTests.length}`,
+    `    E2E:       ${counts.e2eTests.length}`,
+    '',
+  ];
+
+  appendPairingLines(messages, counts, totalNeedingTests);
+
+  // Layers 2 and 3 only earn a section when they have content.
+  if (counts.integrationTests.length > 0) {
+    messages.push('', `  Layer 2 (Integration): ${counts.integrationTests.length} files`);
+  }
+  if (counts.e2eTests.length > 0) {
+    messages.push('', `  Layer 3 (E2E): ${counts.e2eTests.length} files`);
+  }
+  messages.push('');
+
+  return messages;
+}
+
 /**
  * Analyze test layer distribution for a project.
  */
 export function analyzeTestLayers(cwd?: string): TestLayerReport {
   const dir = cwd || process.cwd();
-  const srcDir = path.join(dir, 'src');
-  const messages: string[] = [];
+  const allFiles = scanDirectory(path.join(dir, 'src'));
 
-  // Scan all files under src/
-  const allFiles = scanDirectory(srcDir);
-
-  // Classify files
   const sourceFiles = allFiles.filter(f => !isExcluded(f) && !isTestFile(f));
   const testFiles = allFiles.filter(f => isTestFile(f));
+  const byLayer = (layer: string): string[] => testFiles.filter(f => classifyTestLayer(f) === layer);
 
-  const unitTests = testFiles.filter(f => classifyTestLayer(f) === 'unit');
-  const integrationTests = testFiles.filter(f => classifyTestLayer(f) === 'integration');
-  const e2eTests = testFiles.filter(f => classifyTestLayer(f) === 'e2e');
-
-  // Layer 1: Source-test pairing
+  // Layer 1: source-test pairing. findExpectedTest works on src-relative paths.
+  const allSourceRelative = allFiles.map(f => path.join('src', f));
   const unpairedSources: string[] = [];
   let pairedCount = 0;
 
   for (const source of sourceFiles) {
-    const filename = path.basename(source);
-    if (isExempt(filename)) continue;
-
-    const fullSourcePath = path.join('src', source);
-    const testMatch = findExpectedTest(fullSourcePath, allFiles.map(f => path.join('src', f)));
-    if (testMatch) {
+    if (isExempt(path.basename(source))) continue;
+    if (findExpectedTest(path.join('src', source), allSourceRelative)) {
       pairedCount++;
     } else {
       unpairedSources.push(source);
     }
   }
 
+  const counts: LayerCounts = {
+    sourceFiles,
+    testFiles,
+    unitTests: byLayer('unit'),
+    integrationTests: byLayer('integration'),
+    e2eTests: byLayer('e2e'),
+    unpairedSources,
+    pairedCount,
+  };
   const totalNeedingTests = sourceFiles.filter(f => !isExempt(path.basename(f))).length;
-  const pairRate = totalNeedingTests > 0 ? Math.round((pairedCount / totalNeedingTests) * 100) : 100;
-
-  // Build messages
-  messages.push('');
-  messages.push('━━━ Test Layer Analytics ━━━');
-  messages.push('');
-  messages.push(`  Sources:     ${sourceFiles.length} files`);
-  messages.push(`  Tests:       ${testFiles.length} total`);
-  messages.push(`    Unit:      ${unitTests.length}`);
-  messages.push(`    Integra:   ${integrationTests.length}`);
-  messages.push(`    E2E:       ${e2eTests.length}`);
-  messages.push('');
-  messages.push(`  Layer 1 (Unit Pairing):`);
-  messages.push(`    Paired:    ${pairedCount}/${totalNeedingTests} (${pairRate}%)`);
-  if (unpairedSources.length > 0 && unpairedSources.length <= 10) {
-    messages.push(`    Unpaired:  ${unpairedSources.join(', ')}`);
-  } else if (unpairedSources.length > 10) {
-    messages.push(`    Unpaired:  ${unpairedSources.length} files (showing first 10)`);
-    unpairedSources.slice(0, 10).forEach(f => messages.push(`      - ${f}`));
-  }
-
-  if (integrationTests.length > 0) {
-    messages.push('');
-    messages.push(`  Layer 2 (Integration): ${integrationTests.length} files`);
-  }
-
-  if (e2eTests.length > 0) {
-    messages.push('');
-    messages.push(`  Layer 3 (E2E): ${e2eTests.length} files`);
-  }
-
-  messages.push('');
 
   return {
     summary: {
       totalSources: sourceFiles.length,
       totalTests: testFiles.length,
-      unitTests: unitTests.length,
-      integrationTests: integrationTests.length,
-      e2eTests: e2eTests.length,
+      unitTests: counts.unitTests.length,
+      integrationTests: counts.integrationTests.length,
+      e2eTests: counts.e2eTests.length,
     },
     layer1: {
       pairedSources: pairedCount,
       unpairedSources,
-      pairRate,
+      pairRate: totalNeedingTests > 0 ? Math.round((pairedCount / totalNeedingTests) * 100) : 100,
     },
     layer2: {
-      integrationFiles: integrationTests.length,
+      integrationFiles: counts.integrationTests.length,
     },
     layer3: {
-      e2eFiles: e2eTests.length,
+      e2eFiles: counts.e2eTests.length,
     },
     verdict: 'INFO',
-    messages,
+    messages: buildLayerMessages(counts, totalNeedingTests),
   };
 }
 

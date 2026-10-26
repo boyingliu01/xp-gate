@@ -281,27 +281,47 @@ function tryAccess(filePath: string): boolean {
   }
 }
 
+/**
+ * Extensions tried when an import has none, in precedence order.
+ *
+ * `.js` first because a TS source that imports `./x` is compiled to `x.js`, so
+ * the emitted name is the most likely intent in a mixed tree.
+ */
+const IMPORT_EXTENSIONS = ['.ts', '.tsx', '.js', '.jsx', '.mjs', '.cjs'];
+
+/** Directory-index filenames tried last, when no sibling file matched. */
+const INDEX_FILES = ['index.ts', 'index.js'];
+
+/**
+ * Source extensions an explicit `.js` import may actually refer to.
+ *
+ * TypeScript's ESM output rewrites `./x.ts` to `./x.js`, so an import that names
+ * a `.js` file legitimately resolves to the TypeScript source beside it. Checked
+ * in order, and only for `.js` -- an explicit `.ts` or `.mjs` must match exactly.
+ */
+const JS_TO_SOURCE_EXTENSIONS = ['.ts', '.tsx'];
+
 export function resolveImportPath(importPath: string, fromFile: string): string | null {
   if (!isRelativeImport(importPath)) return null;
 
-  const fromDir = path.dirname(fromFile);
-  const resolved = path.resolve(fromDir, importPath);
-
+  const resolved = path.resolve(path.dirname(fromFile), importPath);
   const ext = path.extname(importPath);
+
   if (ext) {
     if (tryAccess(resolved)) return resolved;
-    if (ext === '.js') {
-      if (tryAccess(resolved.slice(0, -3) + '.ts')) return resolved.slice(0, -3) + '.ts';
-      if (tryAccess(resolved.slice(0, -3) + '.tsx')) return resolved.slice(0, -3) + '.tsx';
+    if (ext !== '.js') return null;
+    const stem = resolved.slice(0, -'.js'.length);
+    for (const sourceExt of JS_TO_SOURCE_EXTENSIONS) {
+      if (tryAccess(stem + sourceExt)) return stem + sourceExt;
     }
     return null;
   }
 
-  for (const tryExt of ['.ts', '.tsx', '.js', '.jsx', '.mjs', '.cjs']) {
+  for (const tryExt of IMPORT_EXTENSIONS) {
     if (tryAccess(resolved + tryExt)) return resolved + tryExt;
   }
 
-  for (const idxName of ['index.ts', 'index.js']) {
+  for (const idxName of INDEX_FILES) {
     const candidate = path.join(resolved, idxName);
     if (tryAccess(candidate)) return candidate;
   }
