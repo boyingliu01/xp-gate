@@ -41,7 +41,11 @@ function rmrf(target) {
 // package — but `find -type f` in scripts/check-hook-mirror.sh saw it in the mirror and
 // reported "hook mirror file set drifted", which blocks the push with no fix the operator
 // can apply from their own code (#587/#588).
-const SKIP_DIRS = new Set(['node_modules', '.git', 'dist', 'coverage', '.opencode', '__pycache__']);
+// `__tests__` is here for the same reason as `dist` and `coverage`: it is not
+// distribution content. The package declares no `files` allowlist, so anything
+// copied reaches users -- and plugins/opencode/__tests__/ would have shipped a
+// vitest suite to consumers who have no vitest installed (#625/#626).
+const SKIP_DIRS = new Set(['node_modules', '.git', 'dist', 'coverage', '.opencode', '__pycache__', '__tests__']);
 const SKIP_FILES = new Set(['package-lock.json']);
 const SKIP_FILE_SUFFIXES = ['.lock', '.js.map'];
 
