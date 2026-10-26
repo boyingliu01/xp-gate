@@ -131,7 +131,11 @@ function runRuleOnFile(ctx: RunRuleContext): void {
     }
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
-    errors.push(`Rule ${rule.id} failed on ${file}: ${msg}`);
+    // A file that cannot be READ failed for every rule that touched it, so the
+    // same message would arrive once per rule. Dedupe to one entry per file: the
+    // caller acts on "this file was not examined", not on how many rules noticed.
+    const entry = `Rule ${rule.id} failed on ${file}: ${msg}`;
+    if (!errors.includes(entry)) errors.push(entry);
   }
 }
 
@@ -180,8 +184,20 @@ export async function analyze(
   }
 
   for (const file of files) {
-    const adapter = resolveAdapter(file, adapterOrFactory);
-    if (!adapter || adapter.detectLanguage() === 'unknown') continue;
+    // Resolving and probing an adapter can itself READ the file (adapters parse
+    // on construction), so an unreadable path throws HERE, before any rule runs
+    // and outside runRuleOnFile's guard. Recorded as an error rather than
+    // allowed to abort the whole run: one bad path must not hide the findings
+    // for the good ones, but it must never be invisible either (#623).
+    let adapter: Adapter | null;
+    try {
+      adapter = resolveAdapter(file, adapterOrFactory);
+      if (!adapter || adapter.detectLanguage() === 'unknown') continue;
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      if (!errors.includes(msg)) errors.push(msg);
+      continue;
+    }
 
     const fileResult: FileResult = { violations: [], ruleIds: [] };
     fileResults[file] = fileResult;
