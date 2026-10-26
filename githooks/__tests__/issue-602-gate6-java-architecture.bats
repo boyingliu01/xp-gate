@@ -1,5 +1,5 @@
 #!/usr/bin/env bats
-# @test REQ-602
+# @test REQ-621
 # @intent Gate 6's Java arm was a guaranteed PASS for two independent reasons.
 #         (1) The test-dir probe hardcoded `src/test/java/architecture` at the
 #             repo root, so a multi-module Maven repo (core/ + demo/), whose
@@ -11,7 +11,7 @@
 #             `echo "✅ ... completed"` printed unconditionally: a failing
 #             architecture test was reported as success.
 #         Both are "a dimension nobody measured, scored as if measured".
-# @covers AC-602-01, AC-602-02, AC-602-03
+# @covers AC-621-01, AC-621-02, AC-621-03
 
 setup() {
   REPO_ROOT="$(cd "$BATS_TEST_DIRNAME/../.." && pwd)"
@@ -30,7 +30,7 @@ _java_arm() {
   sed -n '/^      "java")$/,/^        ;;$/p' "$PRE_COMMIT"
 }
 
-@test "#602 AC-602-01: the java arm does not hardcode the repo-root test dir" {
+@test "#602 AC-621-01: the java arm does not hardcode the repo-root test dir" {
   run _java_arm
   [ "$status" -eq 0 ]
   # Strip comment lines first: the arm's own explanatory comment quotes the old
@@ -49,7 +49,7 @@ _java_arm() {
     echo "java arm does not discover module roots via find"; return 1; }
 }
 
-@test "#602 AC-602-02: the java arm judges by PIPESTATUS, not by head" {
+@test "#602 AC-621-02: the java arm judges by PIPESTATUS, not by head" {
   run _java_arm
   [ "$status" -eq 0 ]
   _code="$(printf '%s\n' "$output" | grep -vE '^[[:space:]]*#')"
@@ -69,7 +69,7 @@ _java_arm() {
     echo "java arm has no blocking path for a failing build"; return 1; }
 }
 
-@test "#602 AC-602-03: --no-verify is not the answer; the gate itself blocks" {
+@test "#602 AC-621-03: --no-verify is not the answer; the gate itself blocks" {
   # Regression guard for the tempting wrong fix: silencing Gate 6. The arm must
   # exit non-zero on failure so the commit is refused.
   run _java_arm
