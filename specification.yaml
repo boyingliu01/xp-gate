@@ -2881,3 +2881,33 @@ specification:
         - id: AC-628-03
           criteria: 顶层标量键视为元数据被丢弃，不得作为路径条目保留
           test_type: unit
+
+    # ============================================================
+    # REQ-629: Mutation Testing 作业必须安装它实际依赖的分析器。
+    #
+    # Stryker 的 initial dry run 会执行整个 vitest 套件，其中
+    # src/npm-package/lib/__tests__/crap-cli.test.js 会调用 lizard。机器上没有
+    # lizard 时，CLI 打出的是「Could not run lizard」而不是「No coverage artifact」，
+    # 断言失败，dry run 在产生第一个 mutant 之前就中止：
+    #     ERROR DryRunExecutor One or more tests failed in the initial test run
+    # 而这个 workflow 的触发路径正是 src/principles/**，恰好总是把该测试带进来，
+    # 于是这道门禁失败在「缺工具」上，而不是失败在被测的改动上。
+    #
+    # quality-gates.yml 早已按 #583/#584 为 Gate 3 安装钉版 lizard；mutation-test.yml
+    # 从未安装。修法与之保持一致：同一个 .lizard-version 源、同一个钉版、同样读回校验，
+    # 且必须在 stryker 之前完成（GitHub Actions 步骤串行）。
+    # ============================================================
+    - id: REQ-629
+      description: "Mutation Testing 作业必须在运行 Stryker 前安装 .lizard-version 钉定的 lizard 并校验版本"
+      priority: high
+      acceptance_criteria:
+        - id: AC-629-01
+          criteria: 必须在 mutation 运行之前安装 lizard，版本来自 .lizard-version（不得在 workflow 里硬编码），
+            且安装步骤须位于 stryker 之前
+          test_type: unit
+        - id: AC-629-02
+          criteria: 安装后必须读回 lizard --version 并与钉定值比较，不一致须失败
+          test_type: unit
+        - id: AC-629-03
+          criteria: .lizard-version 缺失或为空时必须显式失败（非零退出），不得静默继续
+          test_type: unit

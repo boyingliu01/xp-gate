@@ -38,6 +38,39 @@ jobs:
           cache: 'npm'
       - run: npm ci
 
+      # Stryker's initial dry run executes the WHOLE vitest suite. That suite
+      # includes src/npm-package/lib/__tests__/crap-cli.test.js, which shells out
+      # to `lizard`. Without lizard installed the CLI prints
+      #   ✗ Could not run lizard. Install it with: pip install --user lizard
+      # instead of "No coverage artifact", so the assertion fails and the dry run
+      # aborts before a single mutant is generated:
+      #   ERROR DryRunExecutor One or more tests failed in the initial test run
+      # This workflow only triggers on src/principles/** changes — exactly the
+      # scope that pulls the lizard-dependent test in — so the gate was failing on
+      # a missing tool rather than on the mutation result.
+      #
+      # Install it the same way quality-gates.yml installs Gate 3's analyzer:
+      # pinned to .lizard-version (#584 — an unpinned lizard re-rolls complexity
+      # verdicts), read back and compared (#583 — installing elsewhere in a
+      # multi-job workflow does nothing, each job is its own filesystem).
+      - name: 'Install analyzer (lizard, pinned to .lizard-version)'
+        run: |
+          PINNED=$(tr -d ' \t\r\n' < .lizard-version)
+          if [ -z "$PINNED" ]; then
+            echo "❌ .lizard-version is missing or empty — the test suite's lizard-dependent checks cannot be pinned."
+            echo "Failing closed: an unpinned analyzer re-rolls every complexity verdict."
+            exit 1
+          fi
+          echo "Installing lizard==$PINNED (pinned by .lizard-version)..."
+          pip install "lizard==$PINNED"
+          INSTALLED=$(lizard --version)
+          echo "lizard --version -> $INSTALLED"
+          if [ "$INSTALLED" != "$PINNED" ]; then
+            echo "❌ installed lizard $INSTALLED does not match the pinned $PINNED."
+            echo "The dry run would then exercise a different analyzer than the baseline was built with."
+            exit 1
+          fi
+
       # Stryker's initial dry run executes the test suite, and that suite includes
       # plugins/dsh/src/skills.test.ts, which asserts plugins/dsh/skills/ exists
       # and matches the repo's skills/. That directory is a PREPACK ARTIFACT --
