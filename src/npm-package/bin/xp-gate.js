@@ -460,7 +460,11 @@ for (let i = 0; i <= 11; i++) {
   const gateInfo = gateRunner.GATE_REGISTRY[gateId];
   COMMANDS[`gate-${gateId}`] = {
     description: `Run Gate ${gateId}: ${gateInfo?.name || 'Unknown'}`,
-    run: subargs => gateRunner.runGate(gateId, subargs[0]).then(code => process.exit(code)),
+    // #618: a gate that ran nothing yields GATE_NOT_RUN. process.exit() would
+    // coerce that string to 0 (a pass), so map it to 2 -- "did not run" must not
+    // exit the same way as "ran clean".
+    run: subargs => gateRunner.runGate(gateId, subargs[0])
+      .then(code => process.exit(code === gateRunner.GATE_NOT_RUN ? 2 : code)),
     usage: `xp-gate gate-${gateId} [<path>]`
   };
 }
@@ -471,7 +475,9 @@ for (const gateId of ['python-health', 'test-layers', 'pbt']) {
   if (gateInfo) {
     COMMANDS[gateId] = {
       description: gateInfo.description,
-      run: subargs => gateRunner.runGate(gateId, subargs[0]).then(code => process.exit(code)),
+      // #618: same coercion guard as the numbered gates above.
+      run: subargs => gateRunner.runGate(gateId, subargs[0])
+        .then(code => process.exit(code === gateRunner.GATE_NOT_RUN ? 2 : code)),
       usage: `xp-gate ${gateId} [<path>]`
     };
   }
