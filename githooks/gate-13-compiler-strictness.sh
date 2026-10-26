@@ -338,8 +338,11 @@ gate13_cpp_flags() {
 # on stderr.
 # ---------------------------------------------------------------------------
 gate13_flag_supported() {
-  local cc="$1" flag="$2" probe_tu out
-  local key="${cc}|${flag}"
+  local cc="$1" flag="$2" lang="${3:-cpp}" probe_tu out
+  # The cache key carries the language (walkthrough R2 MA-05): gcc accepts
+  # -Wold-style-cast for C++ and rejects it for C, so a key without the language
+  # would let a C probe inherit the C++ answer.
+  local key="${cc}|${lang}|${flag}"
 
   # Two separate caches, checked separately. A single "seen this key" cache was
   # wrong (walkthrough MA-02): once any flag was dropped, every cached key
@@ -383,7 +386,7 @@ gate13_probe_flags() {
   local flag accepted="" dropped=""
 
   for flag in "$@"; do
-    if gate13_flag_supported "$cc" "$flag"; then
+    if gate13_flag_supported "$cc" "$flag" "$lang"; then
       accepted="$accepted $flag"
     else
       dropped="$dropped $flag"
@@ -517,6 +520,7 @@ gate13_java_sources() {
 # On "unreliable" the gate degrades to warn-only with a loud banner. It never
 # fakes a PASS and never emits an unpredictable BLOCK.
 # ---------------------------------------------------------------------------
+# shellcheck disable=SC2016  # this function matches LITERAL ${...} in a pom, not expansions
 gate13_maven_injection_reliable() {
   local pom="${1:-pom.xml}" ver
 
@@ -527,15 +531,38 @@ gate13_maven_injection_reliable() {
     return 1
   fi
 
-  # Extract the plugin block's own <version>. The `#` delimiter avoids clashing
-  # with the `/` in the closing tag.
-  ver=$(awk '/maven-compiler-plugin/,/<\/plugin>/' "$pom" 2>/dev/null \
-        | sed -nE 's|.*<version>([0-9]+(\.[0-9]+)+)</version>.*|\1|p' | head -1)
+  # Extract the version belonging to the maven-compiler-plugin block.
+  # Walkthrough R2 MA-04: a range match to the first </plugin> could pick up a
+  # neighbouring plugin's version, and a strict numeric pattern missed
+  # `3.13.0-SNAPSHOT`. Anchor on the plugin's own artifactId, then take the FIRST
+  # <version> that follows it, and accept a qualifier suffix.
+  ver=$(awk '
+    /<artifactId>[[:space:]]*maven-compiler-plugin[[:space:]]*<\/artifactId>/ { found=1 }
+    found && /<version>/ {
+      line=$0
+      sub(/.*<version>[[:space:]]*/, "", line)
+      sub(/[[:space:]]*<\/version>.*/, "", line)
+      print line
+      exit
+    }
+  ' "$pom" 2>/dev/null)
 
   if [ -z "$ver" ]; then
     printf 'maven-compiler-plugin version is not declared; injection cannot be verified\n' >&2
     return 1
   fi
+
+  # A property placeholder cannot be resolved statically — treat as unverified
+  # rather than guessing (walkthrough R2 MA-04).
+  case "$ver" in
+    *'${'*)
+      printf 'maven-compiler-plugin version is a property reference (%s); cannot be verified statically\n' "$ver" >&2
+      return 1
+      ;;
+  esac
+
+  # Drop a qualifier suffix (3.13.0-SNAPSHOT -> 3.13.0) before comparing.
+  ver=${ver%%-*}
 
   local major minor
   major=${ver%%.*}
@@ -575,9 +602,11 @@ gate13_javac_warning_count() {
   fi
   rm -rf "$tmpd"
 
-  # timeout(1) reports 124 when it fired; there is no diagnostic to count.
+  # timeout(1) reports 124 when it fired. Returning 0 here would be
+  # indistinguishable from "compiled clean" (walkthrough round 2, CI-02), so
+  # signal incompleteness with a dedicated non-numeric marker the caller checks.
   if [ "$rc" -eq 124 ]; then
-    printf '0\n'
+    printf 'TIMEOUT\n'
     return 0
   fi
 
@@ -740,10 +769,18 @@ gate13_run_java_analysis() {
 
   # ── Bare javac path ───────────────────────────────────────────────────────
   if command -v javac >/dev/null 2>&1; then
-    local blocking=0
+    local blocking=0 timed_out=0
     while IFS= read -r f; do
       [ -n "$f" ] || continue
       cnt=$(gate13_javac_warning_count "$f")
+      # A timed-out file was NOT checked. Treating it as 0 warnings would report
+      # a pass for code nobody looked at (walkthrough R2 CI-02).
+      if [ "$cnt" = "TIMEOUT" ]; then
+        gate13_classify_timeout
+        echo "     ⚠️  ${f}: javac timed out — not analysed"
+        timed_out=$((timed_out + 1))
+        continue
+      fi
       cnt=${cnt:-0}
       if [ "$cnt" -gt 0 ]; then
         total=$((total + cnt))
@@ -756,6 +793,10 @@ EOF
     if [ "$blocking" -gt 0 ]; then
       echo "     ❌ BLOCKED - ${blocking} Java file(s) with -Xlint findings (${total} total)"
       return "$GATE13_FAIL"
+    fi
+    if [ "$timed_out" -gt 0 ]; then
+      echo "     ⚠️  WARN - ${timed_out} Java file(s) were not analysed (timeout); coverage incomplete"
+      return "$GATE13_WARN"
     fi
     echo "     ✅ PASSED - Java compiler strictness (javac -Xlint:all,-processing)"
     return "$GATE13_PASS"
@@ -814,7 +855,9 @@ gate13_analyzer_supported() {
 }
 
 gate13_run_analyzer() {
-  local cc files=f f cnt total=0 blocking=0
+  local cc
+  local files=""
+  local f cnt total=0 blocking=0
   local workdir
 
   gate13_analyzer_enabled || return 0
