@@ -164,6 +164,35 @@ interface RunRuleContext {
   errors: string[];
 }
 
+/**
+ * Resolve the adapter for one path, reporting rather than throwing on failure.
+ *
+ * Resolving and probing an adapter can itself READ the file (adapters parse on
+ * construction), so an unreadable path throws here -- before any rule runs and
+ * outside runRuleOnFile's guard. Recorded as an error rather than allowed to
+ * abort the whole run: one bad path must not hide the findings for the good
+ * ones, but it must never be invisible either (#623).
+ *
+ * @returns the adapter, or null when the file cannot be examined at all
+ */
+function resolveAdapterReporting(
+  file: string,
+  adapterOrFactory: Adapter | AdapterFactory,
+  errors: string[],
+): Adapter | null {
+  try {
+    const adapter = resolveAdapter(file, adapterOrFactory);
+    if (!adapter || adapter.detectLanguage() === 'unknown') return null;
+    return adapter;
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    // One entry per file: the failure belongs to the file, not to however many
+    // rules happened to touch it.
+    if (!errors.includes(msg)) errors.push(msg);
+    return null;
+  }
+}
+
 export async function analyze(
   files: string[],
   rules: Rule[],
@@ -184,20 +213,8 @@ export async function analyze(
   }
 
   for (const file of files) {
-    // Resolving and probing an adapter can itself READ the file (adapters parse
-    // on construction), so an unreadable path throws HERE, before any rule runs
-    // and outside runRuleOnFile's guard. Recorded as an error rather than
-    // allowed to abort the whole run: one bad path must not hide the findings
-    // for the good ones, but it must never be invisible either (#623).
-    let adapter: Adapter | null;
-    try {
-      adapter = resolveAdapter(file, adapterOrFactory);
-      if (!adapter || adapter.detectLanguage() === 'unknown') continue;
-    } catch (err) {
-      const msg = err instanceof Error ? err.message : String(err);
-      if (!errors.includes(msg)) errors.push(msg);
-      continue;
-    }
+    const adapter = resolveAdapterReporting(file, adapterOrFactory, errors);
+    if (!adapter) continue;
 
     const fileResult: FileResult = { violations: [], ruleIds: [] };
     fileResults[file] = fileResult;
