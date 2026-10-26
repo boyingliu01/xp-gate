@@ -70,6 +70,49 @@ function buildDshPlugin() {
 }
 
 /**
+ * Exit with `message` on stderr when `problem` is truthy. Centralises the
+ * "validate then abort" steps so `buildPlugin` reads as a sequence rather than a
+ * ladder of ifs.
+ */
+function failWhen(problem, message) {
+  if (!problem) return;
+  console.error(message);
+  process.exit(1);
+}
+
+/** True when `p` exists and is a directory. */
+export function isDirectory(p) {
+  return fs.existsSync(p) && fs.statSync(p).isDirectory();
+}
+
+/** Reject a missing or unknown platform before touching the filesystem. */
+function validatePlatform(platform) {
+  failWhen(!platform, 'Usage: build-plugin.mjs --platform claude-code|opencode|dsh');
+  failWhen(
+    !['claude-code', 'opencode', 'dsh'].includes(platform),
+    `Error: --platform must be 'claude-code', 'opencode', or 'dsh' (got: ${platform})`,
+  );
+}
+
+/** Remove every existing skill directory so the rebuild is idempotent. */
+function cleanSkillsTarget(skillsTarget) {
+  if (!fs.existsSync(skillsTarget)) return;
+  const entries = fs.readdirSync(skillsTarget, { withFileTypes: true });
+  for (const entry of entries) {
+    if (entry.isDirectory()) {
+      fs.rmSync(path.join(skillsTarget, entry.name), { recursive: true, force: true });
+    }
+  }
+}
+
+/** Every expected skill whose SKILL.md is absent from the built plugin. */
+export function missingSkills(pluginDir) {
+  return EXPECTED_SKILLS.filter(
+    (skill) => !fs.existsSync(path.join(pluginDir, 'skills', skill, 'SKILL.md')),
+  );
+}
+
+/**
  * Build a plugin package for a target platform.
  * Copies all skills from the canonical skills/ directory into the plugin's skills/ directory,
  * then verifies that all expected skills are present.
@@ -77,15 +120,7 @@ function buildDshPlugin() {
  * @param {string} platform - 'claude-code', 'opencode', or 'dsh'
  */
 export function buildPlugin(platform) {
-  if (!platform) {
-    console.error('Usage: build-plugin.mjs --platform claude-code|opencode|dsh');
-    process.exit(1);
-  }
-
-  if (!['claude-code', 'opencode', 'dsh'].includes(platform)) {
-    console.error(`Error: --platform must be 'claude-code', 'opencode', or 'dsh' (got: ${platform})`);
-    process.exit(1);
-  }
+  validatePlatform(platform);
 
   if (platform === 'dsh') {
     buildDshPlugin();
@@ -95,49 +130,29 @@ export function buildPlugin(platform) {
   const pluginDir = path.join(REPO_ROOT, 'plugins', platform);
   const skillsSource = path.join(REPO_ROOT, 'skills');
 
-  if (!fs.existsSync(skillsSource) || !fs.statSync(skillsSource).isDirectory()) {
-    console.error(`Error: Skills directory not found: ${skillsSource}`);
-    process.exit(1);
-  }
-
-  if (!fs.existsSync(pluginDir) || !fs.statSync(pluginDir).isDirectory()) {
-    console.error(`Error: Plugin directory not found: ${pluginDir}`);
-    console.error('Run Task 1 first to create directory structure');
-    process.exit(1);
-  }
+  failWhen(!isDirectory(skillsSource), `Error: Skills directory not found: ${skillsSource}`);
+  failWhen(
+    !isDirectory(pluginDir),
+    `Error: Plugin directory not found: ${pluginDir}\nRun Task 1 first to create directory structure`,
+  );
 
   console.log(`Building ${platform} plugin...`);
   console.log(`Source: ${skillsSource}`);
   console.log(`Target: ${pluginDir}/skills`);
 
-  // Clean existing skills before rebuild (idempotent)
   const skillsTarget = path.join(pluginDir, 'skills');
-  if (fs.existsSync(skillsTarget)) {
-    const entries = fs.readdirSync(skillsTarget, { withFileTypes: true });
-    for (const entry of entries) {
-      if (entry.isDirectory()) {
-        fs.rmSync(path.join(skillsTarget, entry.name), { recursive: true, force: true });
-      }
-    }
-  }
+  cleanSkillsTarget(skillsTarget);
 
-  // Copy all skills
   copySkills(skillsSource, skillsTarget);
 
-  // Verify all expected skills are present
-  let missing = 0;
-  for (const skill of EXPECTED_SKILLS) {
-    const skillMd = path.join(pluginDir, 'skills', skill, 'SKILL.md');
-    if (!fs.existsSync(skillMd)) {
-      console.error(`Missing: ${skill}/SKILL.md`);
-      missing++;
-    }
+  const missing = missingSkills(pluginDir);
+  for (const skill of missing) {
+    console.error(`Missing: ${skill}/SKILL.md`);
   }
-
-  if (missing > 0) {
-    console.error(`Error: ${missing} skills missing from ${platform} plugin`);
-    process.exit(1);
-  }
+  failWhen(
+    missing.length > 0,
+    `Error: ${missing.length} skills missing from ${platform} plugin`,
+  );
 
   console.log('');
   console.log(`Build complete: ${EXPECTED_SKILLS.length} skills packaged for ${platform}`);
