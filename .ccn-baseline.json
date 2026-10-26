@@ -35,7 +35,7 @@
   "githooks/lib/validate-code-walkthrough.cjs::isPlainObject": 5,
   "githooks/lib/validate-code-walkthrough.cjs::validateExpert": 15,
   "githooks/lib/validate-code-walkthrough.cjs::(anonymous)@141": 1,
-  "githooks/lib/validate-code-walkthrough.cjs::validateEvidence": 15,
+  "githooks/lib/validate-code-walkthrough.cjs::validateEvidence": 2,
   "githooks/lib/validate-code-walkthrough.cjs::fail@157": 1,
   "githooks/lib/validate-code-walkthrough.cjs::main": 6,
   "plugins/dsh/scripts/prepack.cjs::(anonymous)@35": 1,

@@ -45,25 +45,31 @@ function parseTimestamp(value, field) {
     : null;
   if (!match) fail(`${field} must be a canonical UTC ISO-8601 timestamp.`);
 
-  const [, yearText, monthText, dayText, hourText, minuteText, secondText, fractionText] = match;
-  const year = Number(yearText);
-  const month = Number(monthText);
-  const day = Number(dayText);
-  const hour = Number(hourText);
-  const minute = Number(minuteText);
-  const second = Number(secondText);
-  const milliseconds = Number((fractionText || '').padEnd(3, '0') || 0);
+  // Groups 1..6 are year, month, day, hour, minute, second; group 7 is the
+  // optional millisecond fraction. Keeping them as arrays means the "build the
+  // date" and "verify round-trip" steps share one ordered definition instead of
+  // repeating seven hand-numbered comparisons.
+  const parts = match.slice(1, 7).map(Number);
+  const [year, month, day, hour, minute, second] = parts;
+  const milliseconds = Number((match[7] || '').padEnd(3, '0') || 0);
   const date = new Date(0);
   date.setUTCFullYear(year, month - 1, day);
   date.setUTCHours(hour, minute, second, milliseconds);
 
-  if (date.getUTCFullYear() !== year
-      || date.getUTCMonth() !== month - 1
-      || date.getUTCDate() !== day
-      || date.getUTCHours() !== hour
-      || date.getUTCMinutes() !== minute
-      || date.getUTCSeconds() !== second
-      || date.getUTCMilliseconds() !== milliseconds) {
+  // A date silently rolls over ("2026-02-30" becomes March 2), so the only way
+  // to know the input was a real calendar instant is to read it back and compare
+  // every field.
+  const expected = [...parts, milliseconds];
+  const readBack = [
+    date.getUTCFullYear(),
+    date.getUTCMonth() + 1,
+    date.getUTCDate(),
+    date.getUTCHours(),
+    date.getUTCMinutes(),
+    date.getUTCSeconds(),
+    date.getUTCMilliseconds(),
+  ];
+  if (!readBack.every((actual, i) => actual === expected[i])) {
     fail(`${field} must contain a valid UTC calendar date and time.`);
   }
   return date.getTime();
@@ -284,10 +290,24 @@ function validateExpert(expert, index, roles, models, resolvedModels, bindingSea
 
 function validateEvidence(evidence, expectedCommit, expectedBranch, now, bindingSeats) {
   if (!isPlainObject(evidence)) fail('top level must be a plain object.');
+  validateEvidenceIdentity(evidence, expectedCommit, expectedBranch);
+  validateEvidenceTimestamps(evidence, now);
+  validateConsensusRatio(evidence.consensus_ratio);
+  validateExperts(evidence.experts, bindingSeats);
+}
+
+/** The document must describe this exact push, and must approve it. */
+function validateEvidenceIdentity(evidence, expectedCommit, expectedBranch) {
   if (evidence.commit !== expectedCommit) fail('commit does not match HEAD.');
   if (evidence.branch !== expectedBranch) fail('branch does not match the current branch.');
   if (evidence.verdict !== 'APPROVED') fail('top-level verdict must be APPROVED.');
+}
 
+/**
+ * The evidence must be recent and self-consistent: not from the future, not
+ * expired, and valid for exactly one hour from its own timestamp.
+ */
+function validateEvidenceTimestamps(evidence, now) {
   const timestamp = parseTimestamp(evidence.timestamp, 'timestamp');
   const expires = parseTimestamp(evidence.expires, 'expires');
   if (timestamp > now) fail('timestamp is in the future.');
@@ -295,15 +315,22 @@ function validateEvidence(evidence, expectedCommit, expectedBranch, now, binding
   if (expires - timestamp !== VALIDITY_MS) {
     fail('expires must be exactly one hour after timestamp.');
   }
+}
 
-  if (typeof evidence.consensus_ratio !== 'number'
-      || !Number.isFinite(evidence.consensus_ratio)
-      || evidence.consensus_ratio < 0.90
-      || evidence.consensus_ratio > 1) {
+/** The three experts must have agreed at 90% or better. */
+function validateConsensusRatio(ratio) {
+  if (typeof ratio !== 'number' || !Number.isFinite(ratio) || ratio < 0.90 || ratio > 1) {
     fail('consensus_ratio must be a finite number from 0.90 through 1.');
   }
+}
 
-  if (!Array.isArray(evidence.experts) || evidence.experts.length !== 3) {
+/**
+ * Validate each of the three expert records, then confirm every required role
+ * appeared. `roles` accumulates across the records, so it is checked once after
+ * the loop rather than per expert.
+ */
+function validateExperts(experts, bindingSeats) {
+  if (!Array.isArray(experts) || experts.length !== 3) {
     fail('experts must contain exactly three records.');
   }
   const roles = new Set();
@@ -311,7 +338,7 @@ function validateEvidence(evidence, expectedCommit, expectedBranch, now, binding
   // Scoped to this validation run, so one document's models cannot leak into the
   // next (a long-lived process validating several pushes).
   const resolvedModels = new Set();
-  evidence.experts.forEach((expert, index) => {
+  experts.forEach((expert, index) => {
     validateExpert(expert, index, roles, models, resolvedModels, bindingSeats);
   });
   if (roles.size !== REQUIRED_ROLES.length) fail('all required expert roles must be present.');
