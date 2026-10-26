@@ -117,14 +117,15 @@ const ASSUMED_VITEST_MAJOR = 1;
 /**
  * Every copy of the Gate 4 module that branches on the checker's exit status.
  *
- * `githooks/gates/gate-4-principles.sh` is sourced by nothing today; it is listed
- * because the comment under test was copied into it too, and a claim that names
- * this file must hold for it.
+ * `githooks/gates/gate-4-principles.sh` used to be listed here because that
+ * comment had been copied into it too. The directory is gone: nothing ever
+ * installed it (not in the npm package's `files[]`, never created by
+ * `xp-gate init`), so the entry only asserted a property over a file no user
+ * could run.
  */
 const GATE_4_COPIES = [
   'githooks/gate-4.sh',
   'githooks/adapters/gate-4.sh',
-  'githooks/gates/gate-4-principles.sh',
 ];
 
 /** `set -e` in any spelling: bare, bundled (`set -euo pipefail`), or long-form. */

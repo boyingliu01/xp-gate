@@ -43,7 +43,7 @@ probe_gate4_source() {
 }
 
 @test "AC-489-01: sourcing every shipped gate-4 copy leaves errexit off and survives the zero-match pipeline" {
-  for f in githooks/gate-4.sh githooks/adapters/gate-4.sh githooks/gates/gate-4-principles.sh; do
+  for f in githooks/gate-4.sh githooks/adapters/gate-4.sh; do
     COPY_PATH="$REPO_ROOT/$f" run bash -c "$(declare -f probe_gate4_source); probe_gate4_source \"\$COPY_PATH\""
     [ "$status" -eq 0 ]
     [[ "$output" == *"ERREXIT-OFF"* ]]

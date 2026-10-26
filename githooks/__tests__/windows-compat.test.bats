@@ -19,7 +19,12 @@ HOOKS_DIR="$BATS_TEST_DIRNAME/.."
 @test "Issue #187: lizard install message uses pip (not pip3) for cross-platform compat" {
   # Lizard install guidance lives in the Gate 3 adapters, not pre-commit
   # The message should say "pip install" not "pip3 install"
-  run grep -n "pip.*install.*lizard" "$HOOKS_DIR/gate-3.sh" "$HOOKS_DIR/gates/gate-3-complexity.sh"
+  #
+  # This used to also grep githooks/gates/gate-3-complexity.sh. That directory is
+  # unreachable from any install and was deleted (see
+  # issue-532-gate9-verdict.test.bats AC-A-02-05); the tree-wide pip3 scan at
+  # line 25 already covers every file that actually ships.
+  run grep -n "pip.*install.*lizard" "$HOOKS_DIR/gate-3.sh"
   echo "Lizard install lines: $output"
 
   # Must NOT contain pip3 (Windows-incompatible) anywhere in the hooks tree
@@ -28,7 +33,7 @@ HOOKS_DIR="$BATS_TEST_DIRNAME/.."
   [ "$status" -ne 0 ]
 
   # Must contain pip (cross-platform)
-  run grep -n "pip.*install.*lizard" "$HOOKS_DIR/gate-3.sh" "$HOOKS_DIR/gates/gate-3-complexity.sh"
+  run grep -n "pip.*install.*lizard" "$HOOKS_DIR/gate-3.sh"
   echo "pip lines found: $output"
   [ "$status" -eq 0 ]
 }

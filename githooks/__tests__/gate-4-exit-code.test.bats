@@ -72,7 +72,7 @@ PAYLOAD_CLEAN='{
 }
 
 @test "AC-457-09: every shipped gate-4 copy branches on exit >= 2" {
-  for f in githooks/gate-4.sh githooks/adapters/gate-4.sh githooks/gates/gate-4-principles.sh; do
+  for f in githooks/gate-4.sh githooks/adapters/gate-4.sh; do
     grep -q 'PRINCIPLES_EXIT.*-ge 2' "$REPO_ROOT/$f" || {
       echo "missing crash/violation split in $f" >&2
       return 1
@@ -81,7 +81,7 @@ PAYLOAD_CLEAN='{
 }
 
 @test "AC-457-09: no shipped gate-4 copy still wraps the checker in if-run-then" {
-  for f in githooks/gate-4.sh githooks/adapters/gate-4.sh githooks/gates/gate-4-principles.sh; do
+  for f in githooks/gate-4.sh githooks/adapters/gate-4.sh; do
     if grep -Eq '^\s*if (run_tsx|npx tsx) .*index\.ts.*; then' "$REPO_ROOT/$f"; then
       echo "$f still conflates exit 1 with exit 2" >&2
       return 1
