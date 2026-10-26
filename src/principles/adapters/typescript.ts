@@ -277,29 +277,66 @@ function countParams(rawList: string): number {
   return count;
 }
 
+/** What one step of the paren-group scan did, so the caller can react. */
+type ParenStep =
+  | { kind: 'consumed'; next: number }
+  | { kind: 'closed'; end: number };
+
+/**
+ * Advance one step through a paren group.
+ *
+ * Extracted from `readParenGroup` (#620) so the three-way decision -- inside a
+ * literal, opening a literal, or structural bracket -- reads as one rule instead
+ * of being folded into the loop that also owns depth and substring slicing.
+ *
+ * A literal is entered through `advanceQuoteState` at the SAME index rather than
+ * consumed: that call flips the state on the opening quote and reports one
+ * character consumed, so re-scans resume one past the quote with the state set.
+ *
+ * @param depth running paren depth, updated in place for structural brackets
+ * @returns the next index to read, or the offset just past the closing paren
+ */
+function stepParenGroup(
+  src: string,
+  i: number,
+  state: QuoteState,
+  depth: { value: number },
+): ParenStep {
+  if (inQuotedState(state)) {
+    return { kind: 'consumed', next: i + advanceQuoteState(src, i, state) };
+  }
+
+  const c = src[i];
+  if (isQuote(c)) {
+    // Entering a literal: flip state here, resume at the next character.
+    advanceQuoteState(src, i, state);
+    return { kind: 'consumed', next: i + 1 };
+  }
+  if (c === '(') {
+    depth.value++;
+    return { kind: 'consumed', next: i + 1 };
+  }
+  if (c === ')') {
+    depth.value--;
+    if (depth.value === 0) return { kind: 'closed', end: i + 1 };
+  }
+  return { kind: 'consumed', next: i + 1 };
+}
+
 /**
  * Extract the balanced `( ... )` group that starts at `open`.
  * Returns the inner text and the index just past the closing paren.
  */
 function readParenGroup(src: string, open: number): { inner: string; end: number } {
-  let depth = 0;
   const state = newQuoteState();
+  const depth = { value: 0 };
 
   for (let i = open; i < src.length;) {
-    if (inQuotedState(state)) {
-      i += advanceQuoteState(src, i, state);
-      continue;
+    const step = stepParenGroup(src, i, state, depth);
+    if (step.kind === 'closed') {
+      return { inner: src.substring(open + 1, step.end - 1), end: step.end };
     }
-    const c = src[i];
-    if (c === "'" || c === '"' || c === '`') {
-      advanceQuoteState(src, i, state);
-    } else if (c === '(') {
-      depth++;
-    } else if (c === ')') {
-      depth--;
-      if (depth === 0) return { inner: src.substring(open + 1, i), end: i + 1 };
-    }
-    i++;
+    i = step.next;
   }
   return { inner: src.substring(open + 1), end: src.length };
 }
