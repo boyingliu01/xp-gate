@@ -344,6 +344,8 @@ function renderDashboard(state) {
 
   const border = '+' + '='.repeat(DASHBOARD_WIDTH) + '+';
   const empty = '|' + ' '.repeat(DASHBOARD_WIDTH) + '|';
+  const outputs = state.outputs || {};
+
   const lines = [
     border,
     padLine('SPRINT PROGRESS', id),
@@ -355,26 +357,40 @@ function renderDashboard(state) {
     empty,
   ];
 
-  for (const r of phaseRows) {
-    lines.push(padLine(`${r.icon} ${r.label} ${r.name.padEnd(14)}`, r.duration));
-  }
-
+  pushPhaseRows(lines, phaseRows);
   lines.push(empty);
   lines.push(padLine(`[${bar}] ${pct}%`, ''));
   lines.push(border);
+  pushCurrentPhase(lines, empty, currentPhase, currentDef, currentStatus, nextAction, nextDetail);
+  lines.push(border);
+  pushOutputLines(lines, outputs);
+  lines.push(border);
+
+  return lines.join('\n');
+}
+
+/** Append one padded row per phase. */
+function pushPhaseRows(lines, phaseRows) {
+  for (const r of phaseRows) {
+    lines.push(padLine(`${r.icon} ${r.label} ${r.name.padEnd(14)}`, r.duration));
+  }
+}
+
+/** Append the "where are we now / what next" block. */
+function pushCurrentPhase(lines, empty, currentPhase, currentDef, currentStatus, nextAction, nextDetail) {
   lines.push(padLine(`> \u5F53\u524D: Phase ${currentPhase} ${currentDef.name}`, ''));
   lines.push(padLine(`  \u72B6\u6001: ${currentStatus}`, ''));
   lines.push(empty);
   lines.push(padLine(`\u4E0B\u4E00\u6B65: ${nextAction}`, ''));
   lines.push(padLine(`  ${nextDetail}`, ''));
-  lines.push(border);
+}
+
+/** Append the deliverables block. */
+function pushOutputLines(lines, outputs) {
   lines.push(padLine('\u8F93\u51FA\u7269:', ''));
-  for (const line of buildOutputLines(state.outputs || {})) {
+  for (const line of buildOutputLines(outputs)) {
     lines.push(padLine(line, ''));
   }
-  lines.push(border);
-
-  return lines.join('\n');
 }
 
 // ── CLI entry ───────────────────────────────────────────────────────────

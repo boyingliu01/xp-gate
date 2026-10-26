@@ -2972,3 +2972,18 @@ specification:
         - id: AC-632-02
           criteria: 历史记录仅凭 legacy 名称（无 legacy 编号）也必须判为 legacy
           test_type: unit
+
+    # ============================================================
+    # REQ-633: Sprint 仪表盘的当前阶段区块必须保留视觉分组用的空行。
+    #
+    # renderDashboard 原本是一长串 lines.push 调用。拆分出 pushCurrentPhase 后，
+    # 「状态」与「下一步」之间的空行随之迁移，而没有任何用例断言过这个分隔行——
+    # 删掉它整套测试仍然是绿的，但渲染结果已经变了。
+    # ============================================================
+    - id: REQ-633
+      description: "Sprint 仪表盘的当前阶段区块须在状态行与下一步行之间保留且仅保留一行空白分隔"
+      priority: low
+      acceptance_criteria:
+        - id: AC-633-01
+          criteria: 当前阶段区块的「状态」与「下一步」之间必须恰好有一行空白分隔
+          test_type: unit

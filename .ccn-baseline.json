@@ -191,7 +191,7 @@
   "scripts/render-sprint-progress.cjs::(anonymous)@314": 2,
   "scripts/render-sprint-progress.cjs::buildOutputLines": 2,
   "scripts/render-sprint-progress.cjs::(anonymous)@326": 1,
-  "scripts/render-sprint-progress.cjs::renderDashboard": 11,
+  "scripts/render-sprint-progress.cjs::renderDashboard": 9,
   "scripts/render-sprint-progress.cjs::main": 5,
   "scripts/run-bats.cjs::(anonymous)@36": 1,
   "scripts/run-bats.cjs::(anonymous)@37": 4,
