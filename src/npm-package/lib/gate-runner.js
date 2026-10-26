@@ -130,19 +130,62 @@ function firstExisting(candidates) {
 }
 
 /**
+ * Write the `--all` file list to a temporary file and return its path.
+ *
+ * The list is one line per tracked file (thousands on a real repository), so it
+ * cannot travel as a `bash -c` argument: on Windows the whole script is a single
+ * command-line string capped at 32,767 characters, and exceeding it surfaced as
+ * `spawnSync bash ENAMETOOLONG` — Gate 3 could not run at all under `--all`.
+ *
+ * Inlining was also semantically broken: `JSON.stringify` escapes the separators
+ * to a literal `\n`, and bash does not interpret escape sequences inside double
+ * quotes, so the gates received one long non-existent path instead of a list.
+ *
+ * @param {string} contents newline-separated file list
+ * @returns {string} path to the temp file
+ */
+function writeAllModeFileList(contents) {
+  const listFile = path.join(os.tmpdir(), `xp-gate-all-files-${process.pid}-${Date.now()}.txt`);
+  try {
+    fs.writeFileSync(listFile, contents, 'utf8');
+  } catch (err) {
+    throw new Error(`xp-gate: cannot write the --all file list to ${listFile}: ${err.message}`);
+  }
+  return listFile;
+}
+
+/**
+ * Remove the temporary file list, if one was written.
+ *
+ * Best effort: a leftover file in the temp directory is not worth failing a gate
+ * over, but a failure other than ENOENT is named so it does not go unnoticed.
+ *
+ * @param {string} listFile path to remove, or the empty string
+ */
+function removeFileList(listFile) {
+  if (!listFile) return;
+  try {
+    fs.unlinkSync(listFile);
+  } catch (err) {
+    if (err.code !== 'ENOENT') {
+      console.error(`[xp-gate] could not remove ${listFile}: ${err.message}`);
+    }
+  }
+}
+
+/**
  * The shell lines that populate CHANGED_FILES, chosen by scan scope.
  *
  * Extracted so `runGateAdapter` stays readable: the diff form is three lines of
- * git plumbing and the tree form is a single assignment, and mixing them inline
- * made the wrapper harder to follow than the thing it wraps.
+ * git plumbing and the tree form is a single read, and mixing them inline made
+ * the wrapper harder to follow than the thing it wraps.
  *
  * @param {boolean} allMode true for `--all` (whole tree)
- * @param {string} allModeFiles pre-resolved file list for all mode
  * @returns {string[]} shell lines
  */
-function buildFileSourceLines(allMode, allModeFiles) {
+function buildFileSourceLines(allMode) {
   if (allMode) {
-    return ['#589: --all scans the tracked tree, not the diff', `CHANGED_FILES=${JSON.stringify(allModeFiles)}`];
+    return ['#589: --all scans the tracked tree, not the diff ($5 = file list)', 'CHANGED_FILES="$(cat "$5" 2>/dev/null || true)"'];
   }
   // The historical diff form, unchanged: staged first, then anything vs HEAD.
   // Interpolating the literal `${CHANGED_FILES}` brace-by-brace would be torn apart
@@ -200,16 +243,20 @@ function runGateAdapter(scriptPath, cwd = process.cwd(), opts = {}) {
   // CHANGED_FILES must see the whole tree, not the diff — otherwise a full check
   // scans less than an ordinary commit and reads like a pass.
   const allMode = opts.scope === 'all';
-  const fileSourceLines = buildFileSourceLines(allMode, allMode ? resolveAllModeChangedFiles(cwd) : '');
-  const wrap = buildPreamble(allMode, fileSourceLines);
+  const listFile = allMode ? writeAllModeFileList(resolveAllModeChangedFiles(cwd)) : '';
+  try {
+    const wrap = buildPreamble(allMode, buildFileSourceLines(allMode));
 
-  // execFileSync avoids an extra /bin/sh layer, so bash receives the script as a
-  // single argv arg (no shell-metacharacter injection through the path).
-  execFileSync(
-    bashCommand,
-    ['--noprofile', '--norc', '-c', wrap, 'xp-gate', commonScript, nowMsScript, scriptPath, process.execPath],
-    { stdio: 'inherit', cwd }
-  );
+    // execFileSync avoids an extra /bin/sh layer, so bash receives the script as a
+    // single argv arg (no shell-metacharacter injection through the path).
+    execFileSync(
+      bashCommand,
+      ['--noprofile', '--norc', '-c', wrap, 'xp-gate', commonScript, nowMsScript, scriptPath, process.execPath, listFile],
+      { stdio: 'inherit', cwd }
+    );
+  } finally {
+    removeFileList(listFile);
+  }
 }
 
 /**

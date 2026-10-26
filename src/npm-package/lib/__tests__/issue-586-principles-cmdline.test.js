@@ -140,6 +140,41 @@ describe('REQ-613: Gate 4 must not blow the Windows command-line limit', () => {
     expect(fs.existsSync(refPath) && plan.cleanup === false).toBe(false);
   });
 
+  it('AC-613-02: without a local tsx, npm\u2019s own npx entry runs under node.exe', () => {
+    // `spawnSync('npx', ..., { shell: false })` is ENOENT on Windows: CreateProcess
+    // resolves only `.exe`, while the installed entry point is `npx.cmd`. Running
+    // npm's JS entry with the current node binary is the same program, without a shim
+    // — and without handing the file list to cmd.exe.
+    const existsSpy = vi.spyOn(fs, 'existsSync').mockImplementation((candidate) =>
+      String(candidate).endsWith(path.join('npm', 'bin', 'npx-cli.js'))
+    );
+    try {
+      const plan = principles.buildPrinciplesInvocation(['a.ts'], 'json');
+      expect(plan.command).toBe(process.execPath);
+      expect(plan.args[0]).toMatch(/npx-cli\.js$/);
+      expect(plan.useShell).toBe(false);
+    } finally {
+      existsSpy.mockRestore();
+    }
+  });
+
+  it('AC-613-02: the bare-npx fallback asks for a shell exactly where the shim needs one', () => {
+    // Last resort when neither tsx nor npm's entry can be found. The shell flag must
+    // still travel with the plan: hard-coding false is what produced ENOENT on
+    // Windows, hard-coding true is what produced the 8191-character limit.
+    const existsSpy = vi.spyOn(fs, 'existsSync').mockReturnValue(false);
+    try {
+      const direct = principles.buildPrinciplesInvocation(['a.ts'], 'json');
+      expect(direct.command).toBe('npx');
+      expect(direct.useShell).toBe(process.platform === 'win32');
+
+      const byReference = principles.buildPrinciplesInvocation(longFileList(LARGE_FILE_COUNT), 'json');
+      expect(byReference.useShell).toBe(process.platform === 'win32');
+    } finally {
+      existsSpy.mockRestore();
+    }
+  });
+
   it('AC-613-02: the WIRE test \u2014 the call site actually uses the plan it builds', () => {
     // This case exists because the first version of this suite had a hole: every
     // other case asserts on `buildPrinciplesInvocation`'s OUTPUT, and reverting the
