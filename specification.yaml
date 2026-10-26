@@ -2811,6 +2811,28 @@ specification:
             「有可用更新」的区别：无法读取包或注册表不可达时不得写入缓存
           test_type: unit
 
+    # ============================================================
+    # REQ-626: 测试源码不是分发内容。
+    #
+    # 包声明没有 files 白名单，因此 src/npm-package/ 下的一切都会发布给用户。
+    # prepack 同步把 plugins/ 复制进包时，plugins/opencode/__tests__/ 也被复制，
+    # 于是一个 vitest 测试套件被装进了 npm tarball——而插件的使用者并没有装 vitest。
+    # 同步脚本的 SKIP_DIRS 早已排除 node_modules 与 dist，理由完全相同，只是漏了 __tests__。
+    # ============================================================
+    - id: REQ-626
+      description: "prepack 同步不得把测试目录复制进发布包，同时不得改动镜像中已有的文件"
+      priority: medium
+      acceptance_criteria:
+        - id: AC-626-01
+          criteria: 同步脚本的非分发目录排除表必须包含 __tests__，
+            且不得因此丢失原有的排除项（node_modules、dist、coverage 等）
+          test_type: unit
+        - id: AC-626-02
+          criteria: 一次同步不得向镜像新增任何测试目录；
+            但同步只复制不删除，镜像中已有的测试文件必须保持原样
+          test_type: unit
+
+
 
 
 
