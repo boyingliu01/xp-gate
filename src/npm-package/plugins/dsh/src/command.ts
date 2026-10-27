@@ -5,10 +5,6 @@ import { type ShellDialect, shellQuote } from "./dialect.js"
 // primitives themselves live in ./dialect.ts.
 export { type ShellDialect, detectDialect, shellQuote, shq } from "./dialect.js"
 
-/** Shown when the global `xp-gate` CLI is not on PATH. */
-export const FALLBACK_MESSAGE =
-  "[XP-Gate] xp-gate CLI not installed. Install it with: npm install -g @boyingliu01/xp-gate"
-
 /**
  * Allowlist of xp-gate gate aliases that are safe to invoke standalone
  * (non-preCommitOnly gates + common aliases). Anything outside this set is
@@ -73,29 +69,31 @@ function buildInner(options: BuildCommandOptions, dialect: ShellDialect): string
 }
 
 /**
- * Build a single guarded shell command: runs `xp-gate …` when the global CLI
- * is present, otherwise prints the graceful-degradation hint. A single
- * presence check avoids a separate probe/run race.
+ * Build a single unconditional shell command.
+ *
+ * There is deliberately no presence probe. An earlier version wrapped the call
+ * in `if command -v xp-gate …; then …; else print hint; fi`, which left the exit
+ * code at 0 on the else branch — so a CLI that resolved but then failed produced
+ * empty stdout with exit 0, and the model read that as a pass.
+ *
+ * Running unconditionally turns "not installed" into an ordinary command-not-found
+ * (nonzero exit, empty output), which renderGateResult classifies as
+ * INDETERMINATE and pairs with an install hint. It also removes the branch that
+ * could not distinguish "absent" from "present but broken".
  */
 export function buildCommand(options: BuildCommandOptions): string {
   const dialect = options.dialect ?? "posix"
   const inner = buildInner(options, dialect)
   if (dialect === "posix") {
-    return `if command -v xp-gate >/dev/null 2>&1; then ${inner}; else printf '%s\\n' ${shellQuote(
-      FALLBACK_MESSAGE,
-      dialect,
-    )}; fi`
+    // Merge stderr into stdout so a failure that only writes to stderr still
+    // reaches the renderer, then echo the status so the exit code survives the
+    // pipeline.
+    return `${inner} 2>&1; printf '\\n[XP-Gate] exit:%s\\n' "$?"`
   }
-  // PowerShell: `Get-Command` resolves the .cmd/.ps1 shims npm writes to
-  // %APPDATA%\npm. Those shims are invisible to a Git-Bash PATH lookup, so this
-  // branch is more reliable than `command -v` on Windows.
-  //
-  // The hint branch leaves $LASTEXITCODE untouched at 0, matching the POSIX
-  // branch's `printf` behaviour.
-  return `if (Get-Command xp-gate -ErrorAction SilentlyContinue) { ${inner} } else { Write-Output ${shellQuote(
-    FALLBACK_MESSAGE,
-    dialect,
-  )} }`
+  // PowerShell: merge streams and report $LASTEXITCODE explicitly. The
+  // .cmd/.ps1 shims npm writes under %APPDATA%\npm are visible here but not to a
+  // Git-Bash PATH lookup, which is why Windows uses this dialect.
+  return `${inner} 2>&1; Write-Output "[XP-Gate] exit:$LASTEXITCODE"`
 }
 
 /** Resolve a model-supplied path against the session cwd; absolutes pass through. */

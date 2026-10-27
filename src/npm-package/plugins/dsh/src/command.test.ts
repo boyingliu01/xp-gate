@@ -1,7 +1,6 @@
 import { describe, it, expect } from "vitest"
 import { resolve } from "node:path"
 import {
-  FALLBACK_MESSAGE,
   GATE_WHITELIST,
   buildCommand,
   isGateAllowed,
@@ -44,11 +43,12 @@ describe("isGateAllowed (enum whitelist)", () => {
 })
 
 describe("buildCommand", () => {
-  it("builds a guarded gate-check command with target + gates", () => {
+  it("builds an unconditional gate-check command with target + gates", () => {
     const cmd = buildCommand({ subcommand: "check", target: "src", gates: ["principles", "arch"] })
-    expect(cmd).toContain("command -v xp-gate")
+    // No presence probe: the command runs regardless and reports its own status.
     expect(cmd).toContain("xp-gate check 'src' --gates 'principles,arch'")
-    expect(cmd).toContain(shq(FALLBACK_MESSAGE))
+    expect(cmd).toContain("[XP-Gate] exit:")
+    expect(cmd).not.toContain("command -v")
   })
 
   it("drops non-whitelisted gates before building the command", () => {
@@ -86,13 +86,16 @@ describe("buildCommand", () => {
 
   /**
    * @test REQ-DSH-005
-   * @intent 验证 xp-gate CLI 缺失时 buildCommand 走 else 分支输出优雅降级安装提示，而非抛错或返回门禁失败
+   * @intent 验证 xp-gate CLI 缺失时不再走 else 分支伪装成功：命令无条件执行并回显退出码，
+   *         由渲染层把 command-not-found 判为 INDETERMINATE 并附安装提示。
+   *         优雅降级保留（不抛错、不崩），但不再静默返回 exit 0。
    * @covers AC-DSH-005-01
    */
-  it("emits the graceful-degradation fallback when xp-gate is absent", () => {
+  it("degrades through the exit code instead of a fake success branch", () => {
     const cmd = buildCommand({ subcommand: "check", target: "src" })
-    expect(cmd).toContain("else printf")
-    expect(cmd).toContain(FALLBACK_MESSAGE)
+    // No else branch: absence becomes a real nonzero exit the renderer can see.
+    expect(cmd).not.toContain("else printf")
+    expect(cmd).toContain("[XP-Gate] exit:")
   })
 })
 
@@ -122,32 +125,32 @@ describe("GATE_WHITELIST", () => {
 
 /**
  * @test REQ-DSH-010
- * @intent 验证 PowerShell 方言下生成的命令使用 Get-Command/Write-Output 而非 POSIX 的
- *         command -v/printf，避免 DSH 在 win32（pwsh executor）下因语法错误导致三个工具全部不可用
+ * @intent 验证 PowerShell 方言下生成的命令使用 Write-Output/$LASTEXITCODE 而非 POSIX 的
+ *         printf/$?，避免 DSH 在 win32（pwsh executor）下因语法错误导致三个工具全部不可用
  * @covers AC-DSH-010-01
  */
 describe("PowerShell dialect (regression: DSH win32 uses the pwsh executor)", () => {
-  it("uses Get-Command instead of command -v", () => {
+  it("reports the exit code with $LASTEXITCODE instead of POSIX $?", () => {
     const cmd = buildCommand({ subcommand: "principles", target: "src/x.ts", dialect: "powershell" })
-    expect(cmd).toContain("Get-Command xp-gate -ErrorAction SilentlyContinue")
+    expect(cmd).toContain("$LASTEXITCODE")
     expect(cmd).not.toContain("command -v")
+    expect(cmd).not.toContain("Get-Command")
   })
 
-  it("uses Write-Output instead of printf for the fallback hint", () => {
+  it("uses Write-Output instead of printf for the exit report", () => {
     const cmd = buildCommand({ subcommand: "check", target: "src", dialect: "powershell" })
     expect(cmd).toContain("Write-Output")
     expect(cmd).not.toContain("printf")
-    expect(cmd).toContain(FALLBACK_MESSAGE)
   })
 
   it("never emits POSIX shell syntax that PowerShell cannot parse", () => {
     const cmd = buildCommand({ subcommand: "check", target: "src", gates: ["principles"], dialect: "powershell" })
     // `/dev/null` and `; then … ; fi` are the constructs that produced
-    // "if语句中的'if'后缺少\"(\"" under the pwsh executor.
+    // "if语句中的'if'后缺少\"(\"" under the pwsh executor. `2>&1` IS valid in
+    // PowerShell and is used deliberately to merge stderr into the report.
     expect(cmd).not.toContain("/dev/null")
     expect(cmd).not.toContain("then ")
     expect(cmd).not.toContain("; fi")
-    expect(cmd).not.toContain("2>&1")
   })
 
   it("preserves the xp-gate invocation and gate subset", () => {
@@ -173,6 +176,7 @@ describe("PowerShell dialect (regression: DSH win32 uses the pwsh executor)", ()
 
   it("defaults to the POSIX dialect when none is given (backwards compatible)", () => {
     const cmd = buildCommand({ subcommand: "arch" })
-    expect(cmd).toContain("command -v xp-gate")
+    expect(cmd).toContain("printf")
+    expect(cmd).not.toContain("Write-Output")
   })
 })

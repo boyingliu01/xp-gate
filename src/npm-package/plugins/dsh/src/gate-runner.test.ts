@@ -24,21 +24,26 @@ function makeShell(finalResult: ShellRunResult): { shell: XpGateShell; requests:
         command: req.command,
         workdir: req.workdir ?? "/workspace",
         timeoutMs: req.timeoutMs ?? 1000,
+        // 0.2.0-rc.2 requires the resolved expiry policy even though the request
+        // leaves it optional ("kill" is the executor default).
+        onExpiry: "kill",
         stdoutMaxBytes: 1_000_000,
         signal: req.signal,
         sandboxPolicy: undefined,
       }
     },
-    run() {
-      return Promise.resolve(finalResult)
+    execute() {
+      return Promise.resolve({ result: () => Promise.resolve(finalResult) })
     },
   }
   return { shell, requests }
 }
 
 describe("renderGateResult", () => {
-  it("renders stdout text", () => {
-    expect(renderGateResult(result())).toBe("ok")
+  it("renders stdout text under an explicit PASS verdict", () => {
+    // A bare body would let the model mistake silence for success, so every
+    // render now leads with one of the three verdicts.
+    expect(renderGateResult(result())).toBe("[XP-Gate] PASS\nok")
   })
 
   it("appends [exit code: N] on non-zero exit", () => {
