@@ -253,6 +253,16 @@ jobs:
             node plugins/dsh/scripts/prepack.cjs
           fi
 
+          # plugins/dsh/lib/ is likewise a gitignored tsc artifact. Tests in
+          # src/npm-package/scripts/__tests__/sync-package-content.test.js spawn
+          # sync-package-content.js, which refuses to run without it (correctly —
+          # without the build the published bundle's "./dsh" export dangles).
+          # Build it so the tests exercise the same artifact that ships.
+          if [[ -f "plugins/dsh/tsconfig.build.json" ]]; then
+            echo "Building plugins/dsh/lib (tsc artifact, gitignored)..."
+            npm --prefix plugins/dsh run build
+          fi
+
       # Gate 1: Code Quality (Static Analysis + Linting)
       - name: 'Gate 1: Code Quality (Static Analysis + Linting)'
         run: |

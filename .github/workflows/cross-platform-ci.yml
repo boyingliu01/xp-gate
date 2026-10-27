@@ -171,6 +171,14 @@ jobs:
         with:
           node-version: '20'
 
+      # npm pack runs prepack -> sync-package-content.js, which copies
+      # plugins/dsh/lib/ and refuses to continue when it is absent. That
+      # directory is a gitignored tsc artifact, so it must be built here too —
+      # otherwise npm pack fails before it ever prints a size.
+      - name: Build the dsh plugin bundle
+        run: |
+          (cd plugins/dsh && npm install --no-audit --no-fund && npm run build)
+
       - name: Verify tarball size < 2MB
         working-directory: src/npm-package
         run: |
