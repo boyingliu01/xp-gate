@@ -39,11 +39,18 @@ async function validateFile(
   const imports = collectImports(content);
   const violations: ImportViolation[] = [];
 
+  // Kept in step with gate-m3.ts validateImport: a lenient unit layer only
+  // recommends mocking, so it must not report a test that injects a fake
+  // instead. This copy is why the rule has to be duplicated here — the
+  // runGateM3 tests below exercise the production path directly.
+  const lenientUnit = defaultConfig.layers.unit.mockPolicy === 'lenient';
+  const skipStrategyCheck = lenientUnit && (layer === 'unit' || layer === 'unknown');
+
   for (const importPath of imports) {
     const decision = engine.decide(importPath, layer);
     const actualStrategy = detectMockUsage(content, importPath);
 
-    if (decision.strategy !== actualStrategy) {
+    if (!skipStrategyCheck && decision.strategy !== actualStrategy) {
       violations.push({
         file: testFile,
         line: 0,
@@ -413,6 +420,33 @@ describe('Full pipeline: scanProjectScope → MockDecisionEngine → validateFil
     // Unit lenient → always mock allowed → no violations
     expect(violations).toHaveLength(0);
   });
+
+  /**
+   * A lenient unit test that does NOT mock is equally acceptable.
+   *
+   * The engine answers "mock" for every dependency under a lenient unit layer
+   * because that is the recommended strategy — a recommendation, not a
+   * requirement. A test that injects a hand-written fake is a normal way to
+   * unit-test, and reporting it makes the gate cry wolf on tests that are
+   * already isolated. SRC/MOCK-POLICY/AGENTS.md states the intended contract:
+   * "unit tests with lenient policy are not checked".
+   */
+  it('unit test file with lenient policy and no mocks → no violations', async () => {
+    const violations = await runPipeline(
+      'src/__tests__/helper.test.ts',
+      [
+        "import { greet } from 'src/utils/helper';",
+        '',
+        "describe('helper', () => {",
+        "  it('should call the real greet', () => {",
+        "    expect(greet()).toBe('hello');",
+        '  });',
+        '});',
+      ].join('\n'),
+    );
+
+    expect(violations).toHaveLength(0);
+  });
 });
 
 // ===========================================================================
@@ -491,6 +525,30 @@ describe('runGateM3 — end-to-end gate runner', () => {
 
     expect(result.status).toBe('pass');
     expect(result.scores.totalTests).toBe(1);
+    expect(result.violations).toHaveLength(0);
+  });
+
+  /**
+   * The production path, not just the local copy of the rule.
+   *
+   * This is the case that produced a warning on every push for a suite that
+   * injects its dependency: a lenient unit test must not be reported for not
+   * mocking, and only runGateM3 exercises the code that used to do it.
+   */
+  it('runGateM3 does not report an unmocked lenient unit test', async () => {
+    const testFile = join(tmpDir, 'src/__tests__/unit-no-mocks.test.ts');
+    writeFileSync(testFile, [
+      "import { getUser } from '../services/user';",
+      '',
+      "describe('user', () => {",
+      "  it('uses the real implementation', () => {",
+      '    expect(getUser().id).toBe(1);',
+      '  });',
+      '});',
+    ].join('\n'));
+
+    const result = await runGateM3([testFile], tmpDir);
+
     expect(result.violations).toHaveLength(0);
   });
 
