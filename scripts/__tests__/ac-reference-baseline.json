@@ -1,7 +1,7 @@
 {
   "_comment": "Frozen #483 debt: AC references in tests that are not in specification.yaml. May only shrink; new debt fails the guard (AC-483-01). Pattern widened to \\d{2,} in the round-2 walkthrough fix (feasibility MN-04): letter-named ids like AC-DISCOVERY-001 were invisible to the fixed-width scan.",
   "generated": "2026-10-14",
-  "regenerated": "2026-10-16",
+  "regenerated": "2026-10-27",
   "files": {
     "githooks/__tests__/gate-1-typecheck-command.test.bats": [
       "AC-436-01",
@@ -48,6 +48,53 @@
       "AC-476-06",
       "AC-476-07",
       "AC-476-08"
+    ],
+    "githooks/__tests__/gate-13-compiler-strictness.test.bats": [
+      "AC-001-01",
+      "AC-001-02",
+      "AC-001-03",
+      "AC-001-04",
+      "AC-006-03",
+      "AC-007-01",
+      "AC-007-02",
+      "AC-008-02"
+    ],
+    "githooks/__tests__/gate-13-slice-2.test.bats": [
+      "AC-002-01",
+      "AC-002-02",
+      "AC-002-03",
+      "AC-003-01",
+      "AC-003-02",
+      "AC-003-03",
+      "AC-003-04",
+      "AC-003-05"
+    ],
+    "githooks/__tests__/gate-13-slice-3.test.bats": [
+      "AC-004-01",
+      "AC-004-02",
+      "AC-004-03"
+    ],
+    "githooks/__tests__/gate-13-slice-4-5.test.bats": [
+      "AC-005-01",
+      "AC-005-02",
+      "AC-006-01",
+      "AC-006-02",
+      "AC-008-01",
+      "AC-008-03"
+    ],
+    "githooks/__tests__/gate-13-walkthrough-fixes.test.bats": [
+      "AC-002-02",
+      "AC-004-01",
+      "AC-004-02",
+      "AC-004-03",
+      "AC-005-02"
+    ],
+    "githooks/__tests__/gate-13-walkthrough-round2.test.bats": [
+      "AC-002-02",
+      "AC-004-02",
+      "AC-004-03",
+      "AC-005-01",
+      "AC-005-02"
     ],
     "githooks/__tests__/gate-2-jscpd-run.test.bats": [
       "AC-477-01",
@@ -303,6 +350,10 @@
       "AC-003-02",
       "AC-003-03"
     ],
+    "src/npm-package/lib/__tests__/detect-deps-dsh-profile.test.js": [
+      "AC-635-04",
+      "AC-635-05"
+    ],
     "src/npm-package/lib/__tests__/doctor-469-hook-env.test.js": [
       "AC-469-01",
       "AC-469-02",
@@ -367,6 +418,10 @@
       "AC-502-01",
       "AC-502-02",
       "AC-502-03"
+    ],
+    "src/npm-package/lib/__tests__/doctor-tui-skill-freshness.test.js": [
+      "AC-635-02",
+      "AC-635-03"
     ],
     "src/npm-package/lib/__tests__/doctor.test.js": [
       "AC-004-01",
