@@ -5,6 +5,7 @@ import { fileURLToPath } from "node:url"
 import type { CredentialProvider } from "@deepseek-ai/dsh-credentials"
 import { defineTool } from "@deepseek-ai/dsh-tools"
 import type { PostToolDecision, ToolExecution, ToolExecutionResult } from "@deepseek-ai/dsh-tools"
+import z from "@deepseek-ai/schemastery"
 import type { Context } from "@deepseek-ai/cordis"
 import type { ShellDialect } from "./command.js"
 import { GATE_WHITELIST, buildCommand, detectDialect, resolveTarget } from "./command.js"
@@ -330,16 +331,38 @@ function sprintTool(shell: Context["shell"], dialect: ShellDialect) {
   })
 }
 
-/** Plugin configuration, mirroring the design's documented keys. */
+/** Plugin configuration. */
 interface XpGatePluginConfig {
-  /** Save-time principles check: auto = per extension allowlist and dedupe; off = no hook. */
-  readonly principlesCheck?: "auto" | "off"
-  /** Sprint guard: auto = keyed on .sprint-state; off = no hook. */
-  readonly delphiGuard?: "auto" | "off"
+  /** Save-time principles check: auto = source files, once each; off = no hook. */
+  readonly principlesCheck: "auto" | "off"
+  /** Sprint write guard: auto = deny until APPROVED; off = no hook. */
+  readonly delphiGuard: "auto" | "off"
 }
 
+/**
+ * Runtime schema for the keys above.
+ *
+ * Exported as a schema, not just a type: DSH validates against it and surfaces the
+ * keys in the profile schema, so a user can discover and set them. A bare interface
+ * is invisible to the harness.
+ */
+export const Config = z.object({
+  principlesCheck: z
+    .union([z.const("auto"), z.const("off")])
+    .default("auto")
+    .description(
+      "Save-time principles check: auto = on for source files, once per file; off = do not register the hook.",
+    ),
+  delphiGuard: z
+    .union([z.const("auto"), z.const("off")])
+    .default("auto")
+    .description(
+      "Sprint write guard: auto = deny edits until delphi-review is APPROVED; off = do not register the hook.",
+    ),
+})
+
 export function apply(ctx: Context, config: unknown = {}): void {
-  const cfg = config as XpGatePluginConfig
+  const cfg = config as Partial<XpGatePluginConfig>
   // DSH runs a POSIX shell off-Windows and PowerShell on Windows; generating the
   // wrong dialect makes every tool fail to parse rather than degrade gracefully.
   const dialect = detectDialect()
@@ -409,7 +432,7 @@ function registerHooks(
   ctx: Context,
   shell: Context["shell"],
   dialect: ShellDialect,
-  cfg: XpGatePluginConfig,
+  cfg: Partial<XpGatePluginConfig>,
 ): void {
   if (cfg.delphiGuard !== "off") {
     ctx.on("tools/pre-execute", async (exec, next) => {
