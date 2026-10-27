@@ -173,8 +173,31 @@ specification:
           test_type: unit
 
     # ============================================================
-    # REQ-DSH-012: delphi-review 可产出 Gate MW 证据
+    # REQ-DSH-015: DSH 原生 hooks（delphi 守卫 + 保存即检）
     # ============================================================
+    - id: REQ-DSH-015
+      description: >-
+        用 DSH 原生 tools/pre-execute 与 tools/post-execute seam 复刻 Claude Code 插件已有能力：
+        编辑类工具在 sprint 未获 delphi-review APPROVED 前被拒绝；写入后对源文件跑 principles
+        并以附加上下文告知模型。降级语义沿用已验证的 Claude Code 守卫：无 .sprint-state 即放行。
+      priority: high
+      acceptance_criteria:
+        - id: AC-DSH-015-01
+          criteria: 无 .sprint-state 放行；有目录无 verdict 拒绝；verdict≠APPROVED 拒绝且 reason 含实际 verdict；APPROVED 放行
+          test_type: unit
+        - id: AC-DSH-015-02
+          criteria: 只拦 write/edit/str_replace_editor；损坏的 verdict 文件按"未评审"处理且不抛错
+          test_type: unit
+        - id: AC-DSH-015-03
+          criteria: 保存即检只对 principles 覆盖的源码扩展名触发，.md/.json/.yaml 直接跳过
+          test_type: unit
+        - id: AC-DSH-015-04
+          criteria: 同一文件每进程只检一次；任何异常静默放行，绝不让 hook 抛错导致工具调用失败
+          test_type: unit
+        - id: AC-DSH-015-05
+          criteria: 插件 config 提供 principlesCheck/delphiGuard 开关，off 时对应 hook 不注册
+          test_type: unit
+
     - id: REQ-DSH-012
       description: >-
         delphi-review 增加可选 writeEvidence（默认 false，避免默认产生文件副作用），
