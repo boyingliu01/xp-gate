@@ -24,6 +24,21 @@ All notable changes to this project will be documented in this file.
 
 - **完全被测量的 Gate 6 仍渲染成 SKIP（#602）**: 一个真正跑过并通过的语言不留下 skip reason（typescript 分支的 `#537` 注释正是这个约定），但判定从未跟着升级，于是 `GATE_6_STATUS` 落到兜底的 `SKIP`。这与 `#537` 修的"SKIP 装扮成 PASS"是同一枚硬币的背面，报告无法区分二者。改为：仅当**每一个**语言都不带 skip reason 且至少有一个语言时才升为 PASS；有任一语言跳过则保持非 PASS，"部分被测"不得计为全功。
 
+- **Gate 1 看不见 `.psm1` 模块文件（#620）**: `run_static_analysis` 用硬编码的 `'*.ps1'` 通配符发现分析目标，于是 `.psm1` 模块文件对 PSScriptAnalyzer 完全不可见。把 PowerShell 代码放在模块里的仓库（凡是"发布一个模块"的正常形态）每次提交都得到：
+
+  ```
+  ⚠️  WARN - PowerShell code quality NOT verified:
+      no PowerShell files found outside the pruned directories
+  ```
+
+  而那些模块里的任何违规都无法拦截。
+
+  消息是更刻薄的那一半。`_find_powershell_files` 返回空，适配器也正确地拒绝把空当作通过（#537），但它把"空"归因于**裁剪**——`node_modules`、`dist`、`plugins/*/skills`。在模块-only 的仓库里，被点名的原因永远不是真原因，而且再怎么调整 `.xp-gate-powershell-prune-dirs` 都修不好。
+
+  修法：扩展集归 `_find_powershell_files` 自己所有，调用点不传模式即表示"所有 PowerShell 源文件"（`*.ps1` + `*.psm1`），显式传模式的调用（如 `*.Tests.ps1`）行为不变。这样 Gate 1 和 Gate 3 无法再对"什么是一个 PowerShell 文件"产生分歧——`gate-3.sh` 一直用的是 `'\.ps(m)?1$'`，两个门禁对同一概念各有一份定义，正是这个缺陷的形状。
+
+  测试 `AC-620-03` 用结构断言钉住"Gate 3 的谓词必须覆盖适配器发现的扩展集"，防止再次漂移。
+
 ### 说明
 
 - **这两处都不是"绕过"，而是把度量接上**: 修完后在同一仓库用真实提交验证——Gate 5 从 `❌ BLOCKED` 变为 `Java coverage: 91% ✅`、Gate 6 从 `SKIP` 变为 `PASS`，报告里跑到的门禁由 10/12 变为 11/12。用 `--no-verify` 或加豁免文件可以让提交过去，但那只是让空转更安静。
