@@ -86,10 +86,28 @@ interface ValidateImportInput {
   engine: MockDecisionEngine;
   layer: ReturnType<typeof detectTestLayer>;
   severity: 'warning' | 'error';
+  lenientUnit: boolean;
+}
+
+/**
+ * Is this file exempt from the strategy check?
+ *
+ * A lenient unit layer only RECOMMENDS mocking every dependency. Reporting a test
+ * that injects a hand-written fake instead would flag tests that are already
+ * isolated, which is how a gate teaches people to ignore it.
+ */
+function isLenientUnitFile(
+  lenientUnit: boolean,
+  layer: ReturnType<typeof detectTestLayer>,
+): boolean {
+  if (!lenientUnit) return false;
+  return layer === 'unit' || layer === 'unknown';
 }
 
 function validateImport(input: ValidateImportInput): MockPolicyViolation[] {
-  const { testFile, content, importPath, engine, layer, severity } = input;
+  const { testFile, content, importPath, engine, layer, severity, lenientUnit } = input;
+  if (isLenientUnitFile(lenientUnit, layer)) return [];
+
   const decision = engine.decide(importPath, layer);
   const actualStrategy = detectMockUsage(content, importPath);
   const violations: MockPolicyViolation[] = [];
@@ -117,9 +135,22 @@ async function validateFile(
   engine: MockDecisionEngine,
   projectRoot: string,
   severity: 'warning' | 'error',
+  lenientUnit: boolean,
 ): Promise<MockPolicyViolation[]> {
   const fullPath = isAbsolute(testFile) ? testFile : join(projectRoot, testFile);
-  const content = await readFile(fullPath, 'utf-8');
+  // A changed-file list naming a file that cannot be read is broken input, and
+  // gate-m3.test.ts pins the rejection. Reporting "no violations" for a file nobody
+  // could read is the one failure a gate must never have, so the error is caught
+  // only to add the path and then rethrown.
+  let content: string;
+  try {
+    content = await readFile(fullPath, 'utf-8');
+  } catch (error) {
+    // String(error) rather than (error as Error).message: a thrower is free to
+    // reject with a non-Error, and that cast would render the cause as
+    // "undefined" — losing the only diagnostic this rethrow exists to add.
+    throw new Error(`cannot read test file ${testFile}: ${String(error)}`);
+  }
   const layer = detectTestLayer(testFile);
   const imports = collectImports(content);
 
@@ -130,7 +161,23 @@ async function validateFile(
     engine,
     layer,
     severity,
+    lenientUnit,
   }));
+}
+
+/** Every import mentioned across the given test files, deduplicated. */
+async function collectAllImports(testFiles: string[], projectRoot: string): Promise<string[]> {
+  const all: string[] = [];
+  for (const testFile of testFiles) {
+    try {
+      const fullPath = isAbsolute(testFile) ? testFile : join(projectRoot, testFile);
+      const content = await readFile(fullPath, 'utf-8');
+      all.push(...collectImports(content));
+    } catch {
+      // Unreadable file — the per-file pass reports nothing for it either.
+    }
+  }
+  return [...new Set(all)];
 }
 
 export async function runGateM3(
@@ -151,38 +198,25 @@ export async function runGateM3(
   const config = await loadMockPolicyConfig(projectRoot);
   const severity: 'warning' | 'error' = config.severity;
 
-  // Collect all imports from all test files
-  const allImports: string[] = [];
-  for (const testFile of testFiles) {
-    try {
-      const fullPath = isAbsolute(testFile) ? testFile : join(projectRoot, testFile);
-      const content = await readFile(fullPath, 'utf-8');
-      allImports.push(...collectImports(content));
-    } catch {
-      // File not readable — skip
-    }
-  }
-
   const scope = await scanProjectScope({
     projectRoot,
-    imports: [...new Set(allImports)],
+    imports: await collectAllImports(testFiles, projectRoot),
     boundary: config.projectBoundary,
   });
 
   const engine = new MockDecisionEngine(scope, config, projectRoot);
-  const allViolations: MockPolicyViolation[] = [];
+  // Resolved once from config: a lenient unit layer is advisory, so its files skip
+  // strategy comparison entirely.
+  const lenientUnit = config.layers.unit.mockPolicy === 'lenient';
 
+  const allViolations: MockPolicyViolation[] = [];
   let integrationCount = 0;
   for (const testFile of testFiles) {
-    const layer = detectTestLayer(testFile);
-    if (layer === 'integration') integrationCount++;
-
-    const violations = await validateFile(testFile, engine, projectRoot, severity);
-    allViolations.push(...violations);
+    if (detectTestLayer(testFile) === 'integration') integrationCount++;
+    allViolations.push(...await validateFile(testFile, engine, projectRoot, severity, lenientUnit));
   }
 
-  const hasBlockableViolations = allViolations.some(v => v.severity === 'error');
-  const blocked = severity === 'error' && hasBlockableViolations;
+  const blocked = severity === 'error' && allViolations.some(v => v.severity === 'error');
 
   return {
     exitCode: blocked ? 1 : 0,

@@ -107,6 +107,21 @@ mutation_diff=$(diff -rq src/mutation src/npm-package/mutation 2>&1 || true)
 [ -z "$mutation_diff" ] || fail "mutation mirror tree drift:
 $mutation_diff"
 
+# Mock policy module. Same failure shape as #544 above, and it already happened:
+# the three mock-policy fixes on origin/main (9eb8fb7c, 65295439, b6938a1f) each
+# edited only src/mock-policy/, so src/npm-package/mock-policy/gate-m3.ts kept the
+# old lenient-layer and unreadable-file behaviour. Nothing compared the two trees,
+# so the published tarball would have carried the bug the fixes exist to remove.
+#
+# __tests__ is excluded because sync-package-content.js lists it in SKIP_DIRS:
+# it deliberately does not mirror tests, so demanding equality there would fail on
+# a difference the sync step is designed to keep.
+[ -d src/mock-policy ] || fail "missing canonical mock-policy directory: src/mock-policy"
+[ -d src/npm-package/mock-policy ] || fail "missing mirror mock-policy directory: src/npm-package/mock-policy"
+mock_policy_diff=$(diff -rq -x '__tests__' src/mock-policy src/npm-package/mock-policy 2>&1 || true)
+[ -z "$mock_policy_diff" ] || fail "mock-policy mirror tree drift:
+$mock_policy_diff"
+
 # Plugin source trees (#542): plugins/<name>/src <-> src/npm-package/plugins/<name>/src.
 # The r16 walkthrough TS fix was applied mirror-only in v0.27.3 and prepack's
 # canonical->mirror sync silently rolled it back -- the published tarball then
