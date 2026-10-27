@@ -36,7 +36,16 @@ const require_ = createRequire(import.meta.url);
 /** Load the gate's CJS path helper without executing its CLI main(). */
 function loadGatePathHelper(): (env?: NodeJS.ProcessEnv) => string {
   const file = resolve(process.cwd(), 'githooks/lib/validate-code-walkthrough.cjs');
-  const source = require_('node:fs').readFileSync(file, 'utf8');
+  let source: string;
+  try {
+    source = require_('node:fs').readFileSync(file, 'utf8');
+  } catch (error) {
+    // Without this the suite fails with a bare ENOENT that says nothing about
+    // what the test was trying to prove.
+    throw new Error(
+      `cannot read the Gate MW validator at ${file}: ${error instanceof Error ? error.message : String(error)}`
+    );
+  }
   // The file ends with a bare `main();`, which parses argv and calls
   // process.exit on a usage error. Neutralise exactly that call and expose the
   // helper instead, so importing it here cannot terminate the test runner.
