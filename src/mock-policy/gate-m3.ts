@@ -86,10 +86,28 @@ interface ValidateImportInput {
   engine: MockDecisionEngine;
   layer: ReturnType<typeof detectTestLayer>;
   severity: 'warning' | 'error';
+  lenientUnit: boolean;
+}
+
+/**
+ * Is this file exempt from the strategy check?
+ *
+ * A lenient unit layer only RECOMMENDS mocking every dependency. Reporting a test
+ * that injects a hand-written fake instead would flag tests that are already
+ * isolated, which is how a gate teaches people to ignore it.
+ */
+function isLenientUnitFile(
+  lenientUnit: boolean,
+  layer: ReturnType<typeof detectTestLayer>,
+): boolean {
+  if (!lenientUnit) return false;
+  return layer === 'unit' || layer === 'unknown';
 }
 
 function validateImport(input: ValidateImportInput): MockPolicyViolation[] {
-  const { testFile, content, importPath, engine, layer, severity } = input;
+  const { testFile, content, importPath, engine, layer, severity, lenientUnit } = input;
+  if (isLenientUnitFile(lenientUnit, layer)) return [];
+
   const decision = engine.decide(importPath, layer);
   const actualStrategy = detectMockUsage(content, importPath);
   const violations: MockPolicyViolation[] = [];
@@ -117,6 +135,7 @@ async function validateFile(
   engine: MockDecisionEngine,
   projectRoot: string,
   severity: 'warning' | 'error',
+  lenientUnit: boolean,
 ): Promise<MockPolicyViolation[]> {
   const fullPath = isAbsolute(testFile) ? testFile : join(projectRoot, testFile);
   const content = await readFile(fullPath, 'utf-8');
@@ -130,6 +149,7 @@ async function validateFile(
     engine,
     layer,
     severity,
+    lenientUnit,
   }));
 }
 
@@ -171,13 +191,16 @@ export async function runGateM3(
 
   const engine = new MockDecisionEngine(scope, config, projectRoot);
   const allViolations: MockPolicyViolation[] = [];
+  // Resolved once from config: a lenient unit layer is advisory, so its files skip
+  // strategy comparison entirely.
+  const lenientUnit = config.layers.unit.mockPolicy === 'lenient';
 
   let integrationCount = 0;
   for (const testFile of testFiles) {
     const layer = detectTestLayer(testFile);
     if (layer === 'integration') integrationCount++;
 
-    const violations = await validateFile(testFile, engine, projectRoot, severity);
+    const violations = await validateFile(testFile, engine, projectRoot, severity, lenientUnit);
     allViolations.push(...violations);
   }
 
