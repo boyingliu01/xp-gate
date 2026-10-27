@@ -597,19 +597,36 @@ EOF
 
   # Build manifests are checked across ALL changed paths (a pom.xml change is
   # not a .java file but invalidates every test).
-  # shellcheck disable=SC2086
-  if java_dependency_changed $(printf '%s' "$_JAVA_CHANGED_FILES" | tr ':' ' '); then
-    deps_changed=1
-  fi
+  # Build manifests are checked across ALL changed paths (a pom.xml change is
+  # not a .java file but invalidates every test). Newline-delimited and passed
+  # through a here-string rather than unquoted word splitting: a path with a
+  # space would otherwise arrive as two fragments, and on Windows a fragment
+  # containing a drive colon is indistinguishable from a separator.
+  while IFS= read -r path; do
+    [ -n "$path" ] || continue
+    if java_dependency_changed "$path"; then
+      deps_changed=1
+      break
+    fi
+  done <<EOF
+$(printf '%s' "$_JAVA_CHANGED_FILES" | tr ':' '\n')
+EOF
 
   select_java_test_strategy "$test_count" "$src_count" "$deps_changed"
 }
 
 # Resolve the concrete test files to run for `related`, by mapping every changed
-# non-test Java source through the path convention. Echoes one path per line;
-# empty output means "no related tests found" and the caller falls back to full.
+# non-test Java source through the path convention. Echoes one path per line.
+#
+# Exit code distinguishes the two outcomes that both produce empty stdout:
+#   0 — lookup completed; no related test exists (caller escalates to full)
+#   1 — the lookup itself broke (helper function missing). The caller must ALSO
+#       escalate to full, but must not silently treat a broken lookup as
+#       "nothing related" — that is the difference between a slow commit and a
+#       commit that never ran the tests it should have.
 _java_related_test_files() {
-  local path seen=""
+  command -v java_related_tests >/dev/null 2>&1 || return 1
+  local path seen="" rc=0
   local _java_files
   _java_files=$(printf '%s' "$_JAVA_CHANGED_FILES" | tr ':' '\n')
   while IFS= read -r path; do
@@ -630,6 +647,7 @@ EOF
   done <<EOF
 $_java_files
 EOF
+  return "$rc"
 }
 
 # Run the Maven suite. With a non-empty target list, runs only those classes;
@@ -690,18 +708,44 @@ run_coverage() {
       strategy=$(_java_select_strategy)
       case "$strategy" in
         changed-tests)
+          # Feed ONLY actual test files to the selector. The strategy said
+          # "test files changed", but the raw list also carries every staged
+          # path; passing a production class here would have surefire report
+          # "No tests were executed" — and because of the failIfNoSpecifiedTests
+          # flag this run deliberately sets, that would exit 0 and count as a
+          # PASS while nothing ran. Filtering by java_is_test_file keeps the
+          # selector list and the strategy decision consistent.
+          local _ct_files=""
+          local _ct_path
+          while IFS= read -r _ct_path; do
+            [ -n "$_ct_path" ] || continue
+            case "$_ct_path" in *.java) ;; *) continue ;; esac
+            java_is_test_file "$_ct_path" || continue
+            _ct_files="$_ct_files$_ct_path"$'\n'
+          done <<EOF
+$(printf '%s' "$_JAVA_CHANGED_FILES" | tr ':' '\n')
+EOF
           # shellcheck disable=SC2046
-          targets=$(java_maven_test_selector $(printf '%s' "$_JAVA_CHANGED_FILES" | tr ':' '\n' \
-            | grep -E '\.java$' || true))
-          # shellcheck disable=SC2046
-          if [ -z "$targets" ]; then
+          targets=$(java_maven_test_selector $(printf '%s' "$_ct_files"))
+          # shellcheck disable=SC2207
+          gradle_filters=($(java_gradle_test_filters $(printf '%s' "$_ct_files")))
+          if [ -z "$targets" ] && [ "${#gradle_filters[@]}" -eq 0 ]; then
+            # Strategy said test files changed but none survived classification.
+            # Never run an empty inline list: widen to full rather than pass on
+            # a command that executes nothing.
             strategy="full"
           fi
           ;;
         related)
           local related_files
           related_files=$(_java_related_test_files)
-          if [ -n "$related_files" ]; then
+          local _rel_rc=$?
+          if [ "$_rel_rc" -ne 0 ]; then
+            # The lookup itself failed (helper missing). Escalate instead of
+            # pretending "nothing related" — an empty answer from a broken
+            # lookup and an empty answer from a real miss are different things.
+            strategy="full"
+          elif [ -n "$related_files" ]; then
             # shellcheck disable=SC2046
             targets=$(java_maven_test_selector $related_files)
             # shellcheck disable=SC2207
