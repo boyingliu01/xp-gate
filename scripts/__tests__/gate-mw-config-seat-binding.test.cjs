@@ -330,6 +330,47 @@ describe('#574 Gate MW binds evidence to the configured Delphi seats', () => {
     expect(`${result.stdout ?? ''}${result.stderr ?? ''}`).toMatch(/cannot read \.delphi-config\.json/);
   });
 
+  it('AC-636-05: no project root stays UNBOUND even when a machine-wide config exists', () => {
+    // Raised in review (2026-10-27, technical seat F-1): with fail-closed now
+    // in place, "no project context" and "no config found" must not collapse
+    // into one outcome, or #423's unbound contract quietly becomes a rejection.
+    // main() short-circuits on a null root BEFORE loadBindingSeats, so the
+    // machine-wide file is never consulted. Pinned here because the difference
+    // is invisible on the pass path — with the drift evidence below, a bug that
+    // DID consult the machine config would surface as a `requested_model`
+    // mismatch, not as a load.
+    const drifted = {
+      architecture: 's-deepseek-v4.1-flash',
+      technical: 'g-deepseek-v4-pro',
+      feasibility: 'doubao-seed-2.0-pro',
+    };
+    const dir = makeTempDir();
+    const evidencePath = join(dir, 'evidence.json');
+    writeFileSync(evidencePath, JSON.stringify(evidenceFor(drifted)), 'utf8');
+    const fakeHome = join(dir, 'home');
+    const globalDir = join(fakeHome, '.config', 'xp-gate');
+    mkdirSync(globalDir, { recursive: true });
+    writeFileSync(
+      join(globalDir, '.delphi-config.json'),
+      JSON.stringify(delphiConfig(LOCAL_SEATS)),
+      'utf8'
+    );
+    const env = { ...process.env, HOME: fakeHome, USERPROFILE: fakeHome };
+    delete env.XDG_CONFIG_HOME;
+
+    // Empty 5th argument == "no project context".
+    const result = spawnSync('node', [VALIDATOR, evidencePath, COMMIT, BRANCH, NOW, ''], {
+      encoding: 'utf8',
+      stdio: ['ignore', 'pipe', 'pipe'],
+      env,
+    });
+    const output = `${result.stdout ?? ''}${result.stderr ?? ''}`;
+
+    expect(result.status).toBe(0);
+    expect(output).not.toMatch(/no \.delphi-config\.json found/);
+    expect(output).not.toMatch(/requested_model/);
+  });
+
   it('AC-636-01: no project config falls back to the machine-wide config', () => {
     // The consolidation setup: one config at ~/.config/xp-gate/, no per-repo
     // copy. Before this fallback the seat check silently disappeared for that
