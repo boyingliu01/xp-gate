@@ -51,6 +51,12 @@ jobs:
           echo "skip=false" >> $GITHUB_OUTPUT
           echo "Version $NPM_VERSION is available on npm for @boyingliu01/xp-gate"
 
+      # plugins/dsh/lib/ is a gitignored tsc artifact that the sync copies into
+      # the bundle; without this build the sync aborts on a clean checkout.
+      - name: Build the dsh plugin bundle
+        run: |
+          (cd plugins/dsh && npm install --no-audit --no-fund && npm run build)
+
       - name: Sync package content
         working-directory: src/npm-package
         run: node scripts/sync-package-content.js
@@ -58,7 +64,7 @@ jobs:
       - name: Verify tarball size
         working-directory: src/npm-package
         run: |
-          SIZE=$(npm pack --dry-run --json 2>/dev/null | jq '.[0].size')
+          SIZE=$(npm pack --dry-run --json 2>/dev/null | jq 'if type == "array" then .[0].size else .size end')
           echo "Tarball size: $SIZE bytes"
           if [ "$SIZE" -ge 2097152 ]; then
             echo "FAIL: tarball >= 2MB (limit is 2097152 bytes)"
@@ -122,7 +128,7 @@ jobs:
       - name: Verify tarball size
         working-directory: plugins/opencode
         run: |
-          SIZE=$(npm pack --dry-run --json 2>/dev/null | jq '.[0].size')
+          SIZE=$(npm pack --dry-run --json 2>/dev/null | jq 'if type == "array" then .[0].size else .size end')
           echo "Tarball size: $SIZE bytes"
           if [ "$SIZE" -ge 2097152 ]; then
             echo "FAIL: tarball >= 2MB (limit is 2097152 bytes)"
@@ -180,7 +186,7 @@ jobs:
       - name: Verify tarball size
         working-directory: plugins/dsh
         run: |
-          SIZE=$(npm pack --dry-run --json 2>/dev/null | jq '.[0].size')
+          SIZE=$(npm pack --dry-run --json 2>/dev/null | jq 'if type == "array" then .[0].size else .size end')
           echo "Tarball size: $SIZE bytes"
           if [ "$SIZE" -ge 2097152 ]; then
             echo "FAIL: tarball >= 2MB (limit is 2097152 bytes)"
