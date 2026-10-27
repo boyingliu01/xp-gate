@@ -33,6 +33,15 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PLUGIN_DIR="$SCRIPT_DIR/plugins/p3c-java"
 WHALECLOUD_PLUGIN_DIR="$SCRIPT_DIR/plugins/whalecloud-java"
 
+# #640: smart test selection helpers (strategy truth table + path-convention
+# lookup). Sourced from lib/ so the logic stays unit-testable in isolation;
+# `|| true` keeps a stale install (adapter present, lib missing) from breaking
+# static analysis, which does not depend on it. run_coverage degrades to the
+# full suite when the functions are absent.
+_JAVA_SELECTION_LIB="$SCRIPT_DIR/../lib/java-test-selection.sh"
+# shellcheck source=/dev/null
+[ -f "$_JAVA_SELECTION_LIB" ] && . "$_JAVA_SELECTION_LIB"
+
 WC_JAVA_LINT_DEFAULT_TIMEOUT=180
 
 # ---------------------------------------------------------------------------
@@ -528,14 +537,257 @@ _detect_jacoco_configured() {
   return 1
 }
 
+# ── #640: Java smart test selection ─────────────────────────────────────────
+# The Java arm ran the FULL suite on every commit (measured: `mvn test
+# jacoco:report` = 77.8s for 1079 tests whether one file or a hundred changed).
+# TS (#286) and Python (#399) already had three-tier selection; Java did not,
+# and PARTIAL_TEST_RUN was therefore never set on this path — the downgrade
+# channel in Stage 2 was dead code for Java.
+#
+# This mirrors the Python selector exactly:
+#   1. changed-tests — only test files changed: run exactly those.
+#   2. related      — sources changed, no tests: run what the path convention maps.
+#   3. full         — >20 changed tests, a build manifest changed, or no related
+#                     tests found.
+# Tiers 1/2 set PARTIAL_TEST_RUN so Stage 2 WARNS about subset coverage instead
+# of blocking on it (subset coverage is meaningless as a global floor).
+#
+# Escape valve: XP_GATE_JAVA_TEST_SELECTION=off forces the full suite — for
+# anyone who would rather pay the time than risk a missed transitive impact.
+# Selection can only narrow the run, never widen it: every non-selected case
+# falls back to `full`.
+
+# Colon-separated list of changed paths, as handed in by pre-commit. Empty when
+# the caller does not provide one (older pre-commit, direct adapter use), in
+# which case we must NOT silently narrow the run — see _java_selection_enabled.
+_JAVA_CHANGED_FILES="${GATE_CHANGED_FILES:-}"
+
+# True when selection is usable: the escape valve is off AND the caller told us
+# what changed. Without changed files we cannot select, and guessing "nothing
+# changed" would run zero tests and report PASS — the exact failure mode the
+# fail-closed contract forbids.
+_java_selection_enabled() {
+  [ "${XP_GATE_JAVA_TEST_SELECTION:-on}" != "off" ] || return 1
+  [ -n "$_JAVA_CHANGED_FILES" ] || return 1
+  return 0
+}
+
+# Split the changed-file list into (test_count, src_count, deps_changed) and
+# echo the strategy. Pure delegation to the lib so the truth table lives in one
+# testable place.
+_java_select_strategy() {
+  local test_count=0 src_count=0 deps_changed=0 path
+  local _java_files
+  # Newline-delimited, either from a colon list or a pre-split newline list.
+  _java_files=$(printf '%s' "$_JAVA_CHANGED_FILES" | tr ':' '\n')
+
+  while IFS= read -r path; do
+    [ -n "$path" ] || continue
+    case "$path" in
+      *.java) ;;                # only Java sources influence the Java counts
+      *) continue ;;
+    esac
+    if java_is_test_file "$path"; then
+      test_count=$((test_count + 1))
+    else
+      src_count=$((src_count + 1))
+    fi
+  done <<EOF
+$_java_files
+EOF
+
+  # Build manifests are checked across ALL changed paths (a pom.xml change is
+  # not a .java file but invalidates every test).
+  # Build manifests are checked across ALL changed paths (a pom.xml change is
+  # not a .java file but invalidates every test). Newline-delimited and passed
+  # through a here-string rather than unquoted word splitting: a path with a
+  # space would otherwise arrive as two fragments, and on Windows a fragment
+  # containing a drive colon is indistinguishable from a separator.
+  while IFS= read -r path; do
+    [ -n "$path" ] || continue
+    if java_dependency_changed "$path"; then
+      deps_changed=1
+      break
+    fi
+  done <<EOF
+$(printf '%s' "$_JAVA_CHANGED_FILES" | tr ':' '\n')
+EOF
+
+  select_java_test_strategy "$test_count" "$src_count" "$deps_changed"
+}
+
+# Resolve the concrete test files to run for `related`, by mapping every changed
+# non-test Java source through the path convention. Echoes one path per line.
+#
+# Exit code distinguishes the two outcomes that both produce empty stdout:
+#   0 — lookup completed; no related test exists (caller escalates to full)
+#   1 — the lookup itself broke (helper function missing). The caller must ALSO
+#       escalate to full, but must not silently treat a broken lookup as
+#       "nothing related" — that is the difference between a slow commit and a
+#       commit that never ran the tests it should have.
+_java_related_test_files() {
+  command -v java_related_tests >/dev/null 2>&1 || return 1
+  local path seen="" rc=0
+  local _java_files
+  _java_files=$(printf '%s' "$_JAVA_CHANGED_FILES" | tr ':' '\n')
+  while IFS= read -r path; do
+    [ -n "$path" ] || continue
+    case "$path" in *.java) ;; *) continue ;; esac
+    java_is_test_file "$path" && continue
+    local related
+    while IFS= read -r related; do
+      [ -n "$related" ] || continue
+      case "$seen" in
+        *"|$related|"*) continue ;;
+      esac
+      seen="$seen|$related|"
+      printf '%s\n' "$related"
+    done <<EOF
+$(java_related_tests "$path")
+EOF
+  done <<EOF
+$_java_files
+EOF
+  return "$rc"
+}
+
+# Run the Maven suite. With a non-empty target list, runs only those classes;
+# otherwise runs everything.
+#
+#   $1 target list (comma-separated simple class names), may be empty
+#
+# Both fail-if-no-tests switches are required and they are NOT the same flag:
+#   -Dsurefire.failIfNoSpecifiedTests=false — a module with NO class matching
+#     -Dtest otherwise fails the build. In a multi-module repo the changed
+#     class lives in one module and every other module holds zero matches;
+#     without this the selective run is WORSE than the full one (measured:
+#     BUILD FAILURE on a 2-module project vs. a clean full-suite pass).
+#   -DfailIfNoTests=false — the older property some surefire versions read;
+#     kept for plugins predating the renamed key.
+_run_maven_tests() {
+  local targets="$1"
+  if [ -n "$targets" ]; then
+    echo "     ℹ️  Java selective run — $targets"
+    mvn test jacoco:report -q -Dtest="$targets" \
+      -Dsurefire.failIfNoSpecifiedTests=false \
+      -DfailIfNoTests=false 2>&1 | tail -10
+  else
+    mvn test jacoco:report -q 2>&1 | tail -10
+  fi
+  return "${PIPESTATUS[0]}"
+}
+
+# Run the Gradle suite, optionally filtered with repeated --tests flags.
+#
+#   $1..$N simple class names, may be empty
+_run_gradle_tests() {
+  if [ "$#" -gt 0 ] && [ -n "$1" ]; then
+    local filters=()
+    local name
+    for name in "$@"; do
+      [ -n "$name" ] || continue
+      filters+=("--tests" "$name")
+    done
+    echo "     ℹ️  Java selective run — ${*}"
+    gradle test jacocoTestReport --quiet "${filters[@]}" 2>&1 | tail -10
+  else
+    gradle test jacocoTestReport --quiet 2>&1 | tail -10
+  fi
+  return "${PIPESTATUS[0]}"
+}
+
 run_coverage() {
   local build_system
   build_system=$(_detect_java_build)
 
+  # Decide the selection once; every branch below honours it the same way.
+  local strategy="full" targets="" gradle_filters=()
+  if _java_selection_enabled; then
+    # lib/java-test-selection.sh is sourced by run_static_analysis's caller
+    # chain; guard so a direct invocation still works.
+    if command -v select_java_test_strategy >/dev/null 2>&1; then
+      strategy=$(_java_select_strategy)
+      case "$strategy" in
+        changed-tests)
+          # Feed ONLY actual test files to the selector. The strategy said
+          # "test files changed", but the raw list also carries every staged
+          # path; passing a production class here would have surefire report
+          # "No tests were executed" — and because of the failIfNoSpecifiedTests
+          # flag this run deliberately sets, that would exit 0 and count as a
+          # PASS while nothing ran. Filtering by java_is_test_file keeps the
+          # selector list and the strategy decision consistent.
+          local _ct_files=""
+          local _ct_path
+          while IFS= read -r _ct_path; do
+            [ -n "$_ct_path" ] || continue
+            case "$_ct_path" in *.java) ;; *) continue ;; esac
+            java_is_test_file "$_ct_path" || continue
+            _ct_files="$_ct_files$_ct_path"$'\n'
+          done <<EOF
+$(printf '%s' "$_JAVA_CHANGED_FILES" | tr ':' '\n')
+EOF
+          # shellcheck disable=SC2046
+          targets=$(java_maven_test_selector $(printf '%s' "$_ct_files"))
+          # shellcheck disable=SC2046,SC2207
+          gradle_filters=($(java_gradle_test_filters $(printf '%s' "$_ct_files")))
+          if [ -z "$targets" ] && [ "${#gradle_filters[@]}" -eq 0 ]; then
+            # Strategy said test files changed but none survived classification.
+            # Never run an empty inline list: widen to full rather than pass on
+            # a command that executes nothing.
+            strategy="full"
+          fi
+          ;;
+        related)
+          local related_files
+          related_files=$(_java_related_test_files)
+          local _rel_rc=$?
+          if [ "$_rel_rc" -ne 0 ]; then
+            # The lookup itself failed (helper missing). Escalate instead of
+            # pretending "nothing related" — an empty answer from a broken
+            # lookup and an empty answer from a real miss are different things.
+            strategy="full"
+          elif [ -n "$related_files" ]; then
+            # Word splitting IS the intent on both lines: $related_files is a
+            # space-separated path list and both helpers take it as $@.
+            # shellcheck disable=SC2046,SC2086
+            targets=$(java_maven_test_selector $related_files)
+            # shellcheck disable=SC2207,SC2086
+            gradle_filters=($(java_gradle_test_filters $related_files))
+          fi
+          if [ -z "$targets" ] && [ "${#gradle_filters[@]}" -eq 0 ]; then
+            # No related tests found -> tier 3, never "run nothing".
+            strategy="full"
+          fi
+          ;;
+      esac
+    fi
+  fi
+
+  case "$strategy" in
+    changed-tests|related)
+      # Subset run: the global coverage floor cannot be verified from it, so
+      # mark the run partial and let Stage 2 WARN (same contract as #399/#556).
+      #
+      # A plain `PARTIAL_TEST_RUN=true` does NOT work here: pre-commit calls
+      # `run_coverage` inside `$(...)`, so this function runs in a subshell and
+      # the assignment dies with it. Python's selective path gets away with the
+      # bare assignment only because it sets the flag at the call site, in the
+      # caller's own shell. Publish the decision through the file the caller
+      # named instead; the caller turns it into the flag.
+      if [ -n "${XP_GATE_PARTIAL_RUN_FILE:-}" ]; then
+        printf '%s\n' "$strategy" > "$XP_GATE_PARTIAL_RUN_FILE" 2>/dev/null || true
+      fi
+      echo "     ℹ️  Java: selective run ($strategy)"
+      ;;
+    *)
+      echo "     ℹ️  Java: full suite"
+      ;;
+  esac
+
   if [ "$build_system" = "maven" ]; then
     if _detect_jacoco_configured "$build_system"; then
-      mvn test jacoco:report -q 2>&1 | tail -10
-      return "${PIPESTATUS[0]}"
+      _run_maven_tests "$targets"
+      return $?
     else
       echo "ℹ️  JaCoCo not configured in pom.xml — SKIP coverage check"
       echo "   To enable: add jacoco-maven-plugin to your pom.xml"
@@ -543,8 +795,8 @@ run_coverage() {
     fi
   elif [ "$build_system" = "gradle" ]; then
     if _detect_jacoco_configured "$build_system"; then
-      gradle jacocoTestReport --quiet 2>&1 | tail -10
-      return "${PIPESTATUS[0]}"
+      _run_gradle_tests "${gradle_filters[@]}"
+      return $?
     else
       echo "ℹ️  JaCoCo not configured in Gradle build — SKIP coverage check"
       echo "   To enable: add 'id \"jacoco\"' to your build.gradle plugins block"
