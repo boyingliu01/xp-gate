@@ -94,7 +94,13 @@ describe("apply", () => {
     const create = providers[0]
     expect(create).toBeDefined()
     if (!create) return
-    const provider = create({ signal: new AbortController().signal, invalidate: () => {} })
+    // Recording invalidations rather than no-oping: listing must not invalidate, and
+    // an empty stub would hide it if it started to.
+    const invalidations: string[] = []
+    const provider = create({
+      signal: new AbortController().signal,
+      invalidate: (name: string) => void invalidations.push(name),
+    })
     expect(provider.name).toBe("xp-gate")
 
     const listed = await provider.list({})
@@ -104,6 +110,7 @@ describe("apply", () => {
       ? listed
       : ((listed as SkillProviderObservation).candidates ?? [])
     expect(candidates).toHaveLength(EXPECTED_SKILL_COUNT)
+    expect(invalidations).toHaveLength(0)
   })
 
   /**
