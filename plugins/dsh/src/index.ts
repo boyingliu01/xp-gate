@@ -4,6 +4,7 @@ import { fileURLToPath } from "node:url"
 
 import type { CredentialProvider } from "@deepseek-ai/dsh-credentials"
 import { defineTool } from "@deepseek-ai/dsh-tools"
+import type { PostToolDecision, ToolExecution, ToolExecutionResult } from "@deepseek-ai/dsh-tools"
 import type { Context } from "@deepseek-ai/cordis"
 import type { ShellDialect } from "./command.js"
 import { GATE_WHITELIST, buildCommand, detectDialect, resolveTarget } from "./command.js"
@@ -14,6 +15,7 @@ import type { ReviewOutcome } from "./delphi-run.js"
 import { formatOutcome, runReview } from "./delphi-run.js"
 import { buildEvidence } from "./evidence.js"
 import { readGitContext } from "./git-context.js"
+import { delphiGuardDecision, isCheckablePath, isEditTool } from "./hooks.js"
 import { PHASE_STATUSES, SPRINT_SUBCOMMANDS, buildSprintCommand } from "./sprint.js"
 import { createSkillProvider } from "./skill-provider.js"
 import type { ApiKeyResolver } from "./credentials.js"
@@ -43,6 +45,15 @@ const DELPHI_TIMEOUT_MS = 900_000
 
 /** The document Gate MW reads at push time. */
 const EVIDENCE_FILE = ".code-walkthrough-result.json"
+
+/**
+ * Files already reported on in this process.
+ *
+ * Server-lifetime rather than session-lifetime on purpose: the addon outlives any
+ * one session, and re-reporting the same unchanged file to a second session would
+ * spend a subprocess to repeat something already said.
+ */
+const checkedThisSession = new Set<string>()
 
 // Boy Scout (#447): gate-check's `gates` parameter nests one level too deep
 // inline (parameters → gates → items), so the schema lives at module scope.
@@ -319,7 +330,17 @@ function sprintTool(shell: Context["shell"], dialect: ShellDialect) {
   })
 }
 
-export function apply(ctx: Context, _config: unknown = {}): void {  // DSH runs a POSIX shell off-Windows and PowerShell on Windows; generating the
+/** Plugin configuration, mirroring the design's documented keys. */
+interface XpGatePluginConfig {
+  /** Save-time principles check: auto = per extension allowlist and dedupe; off = no hook. */
+  readonly principlesCheck?: "auto" | "off"
+  /** Sprint guard: auto = keyed on .sprint-state; off = no hook. */
+  readonly delphiGuard?: "auto" | "off"
+}
+
+export function apply(ctx: Context, config: unknown = {}): void {
+  const cfg = config as XpGatePluginConfig
+  // DSH runs a POSIX shell off-Windows and PowerShell on Windows; generating the
   // wrong dialect makes every tool fail to parse rather than degrade gracefully.
   const dialect = detectDialect()
   const shell = ctx.shell
@@ -344,4 +365,126 @@ export function apply(ctx: Context, _config: unknown = {}): void {  // DSH runs 
   // root points at the plugin directory and the model never sees them — the v1
   // bug this provider exists to fix.
   ctx.skills.registerProvider(() => createSkillProvider(bundledSkillsRoot()))
+
+  registerHooks(ctx, shell, dialect, cfg)
+}
+
+/**
+ * Attach the advisory principles result to an accepted tool result.
+ *
+ * Best effort by contract: a throwing post-execute fails the tool call, which is a
+ * much worse outcome than skipping one advisory check, so nothing here propagates.
+ */
+async function enrichWithPrinciples(
+  shell: Context["shell"],
+  dialect: ShellDialect,
+  exec: ToolExecution,
+  result: Readonly<ToolExecutionResult>,
+  next: () => Promise<PostToolDecision>,
+): Promise<PostToolDecision> {
+  try {
+    const note = await principlesNote(shell, dialect, exec, result)
+    if (note === undefined) return next()
+    const accepted = await next()
+    if (accepted.kind !== "accept" || accepted.value !== undefined) return accepted
+    // Appended to the tool's own output rather than as a separate message: the model
+    // reads it immediately, with no dependency on message identity.
+    return {
+      ...accepted,
+      content: [...(accepted.content ?? []), { type: "text" as const, text: note }],
+    }
+  } catch {
+    return next()
+  }
+}
+
+/**
+ * Register the pre/post-execute hooks.
+ *
+ * Both default to on and are individually switchable, because each is a policy a
+ * repository may reasonably reject: the guard blocks writes, and the save check
+ * costs a subprocess per file.
+ */
+function registerHooks(
+  ctx: Context,
+  shell: Context["shell"],
+  dialect: ShellDialect,
+  cfg: XpGatePluginConfig,
+): void {
+  if (cfg.delphiGuard !== "off") {
+    ctx.on("tools/pre-execute", async (exec, next) => {
+      const cwd = sessionCwd(exec) ?? process.cwd()
+      // Deny before dispatch so the edit never reaches the filesystem.
+      return delphiGuardDecision(cwd, exec.name) ?? next()
+    })
+  }
+  if (cfg.principlesCheck !== "off") {
+    ctx.on("tools/post-execute", (exec, result, next) =>
+      enrichWithPrinciples(shell, dialect, exec, result, next),
+    )
+  }
+}
+
+/** The session cwd, if the execution carries one. */
+function sessionCwd(exec: { agent?: { session?: { header?: { cwd?: string } } } }): string | undefined {
+  return exec.agent?.session?.header?.cwd
+}
+
+/**
+ * Advisory principles result for a just-written file, or undefined to stay silent.
+ *
+ * Cost is the whole design here. `xp-gate principles` is a Node CLI with a
+ * 200-400ms cold start, and an editing session makes dozens of edits, so two
+ * filters cut nearly all of the calls:
+ *
+ *  - extension allowlist: the engine covers source files, not .md/.json/.yaml,
+ *    which are a large share of the edits in repositories that use xp-gate
+ *  - per-process dedupe: the model often edits the same file ten times in a row, and
+ *    those later edits are it fixing what the first check reported
+ *
+ * Anything unexpected returns undefined. Blocking the tool call to report an
+ * advisory violation would be far worse than missing the report.
+ */
+async function principlesNote(
+  shell: Context["shell"],
+  dialect: ShellDialect,
+  exec: ToolExecution,
+  result: Readonly<ToolExecutionResult>,
+): Promise<string | undefined> {
+  if (!isEditTool(exec.name) || result.isError) return undefined
+  const path = writtenPath(exec.arguments)
+  if (path === undefined || !isCheckablePath(path)) return undefined
+
+  const cwd = sessionCwd(exec) ?? process.cwd()
+  const absolute = resolveTarget(path, cwd)
+  if (checkedThisSession.has(absolute)) return undefined
+  checkedThisSession.add(absolute)
+
+  try {
+    // No caller signal reaches a post-execute hook; the hook's own ceiling is enough,
+    // and it is the shell that enforces it.
+    const report = await runXpGate(
+      shell,
+      AbortSignal.timeout(DEFAULT_TIMEOUT_MS),
+      buildCommand({ subcommand: "principles", target: absolute, dialect }),
+      cwd,
+      DEFAULT_TIMEOUT_MS,
+    )
+    return `[XP-Gate] principles for ${path}:\n${report}`
+  } catch {
+    return undefined
+  }
+}
+
+/**
+ * The file a write/edit touched.
+ *
+ * Both shapes appear across DSH's file tools, so both are read rather than assuming
+ * one: `file_path` from the fs tools, `path` from str-replace-editor.
+ */
+function writtenPath(args: unknown): string | undefined {
+  if (typeof args !== "object" || args === null) return undefined
+  const record = args as { file_path?: unknown; path?: unknown }
+  const candidate = record.file_path ?? record.path
+  return typeof candidate === "string" && candidate.length > 0 ? candidate : undefined
 }

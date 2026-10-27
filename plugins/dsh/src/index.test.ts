@@ -51,16 +51,23 @@ function makeShell(stdoutText: string, requests: ShellExecRequest[]) {
   }
 }
 
+/** The repository ships this many skills; the count is part of the delivery promise. */
+const EXPECTED_SKILL_COUNT = 12;
+
 function makeCtx(stdoutText: string) {
   const captured: unknown[] = []
   const requests: ShellExecRequest[] = []
   const providers: ProviderFactory[] = []
+  const hooks: string[] = []
   const ctx = {
     tools: { register: (def: unknown) => captured.push(def) },
     skills: { registerProvider: (create: ProviderFactory) => providers.push(create) },
     shell: makeShell(stdoutText, requests),
+    // The plugin registers pre/post-execute hooks; recording the names is enough to
+    // prove registration without standing up the real waterfall.
+    on: (name: string) => hooks.push(name),
   } as unknown as Context
-  return { ctx, captured, requests, providers }
+  return { ctx, captured, requests, providers, hooks }
 }
 
 describe("apply", () => {
@@ -96,7 +103,7 @@ describe("apply", () => {
     const candidates = Array.isArray(listed)
       ? listed
       : ((listed as SkillProviderObservation).candidates ?? [])
-    expect(candidates).toHaveLength(12)
+    expect(candidates).toHaveLength(EXPECTED_SKILL_COUNT)
   })
 
   /**
