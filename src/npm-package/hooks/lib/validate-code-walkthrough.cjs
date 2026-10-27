@@ -3,6 +3,7 @@
 
 const fs = require('node:fs');
 const path = require('node:path');
+const os = require('node:os');
 
 const REQUIRED_ROLES = ['architecture', 'technical', 'feasibility'];
 const VALIDITY_MS = 60 * 60 * 1000;
@@ -149,6 +150,19 @@ function resolveBindingSeats(config) {
 }
 
 /**
+ * Machine-wide Delphi config path: `$XDG_CONFIG_HOME/xp-gate/` or
+ * `~/.config/xp-gate/`. Mirrors `defaultGlobalConfigPath()` in
+ * `plugins/dsh/src/delphi-config.ts` so the gate and the tool that produces the
+ * evidence agree on where seats come from. XDG_CONFIG_HOME is honoured because
+ * the plugin honours it — a gate reading a different file than the reviewer
+ * used would bind against seats nobody actually ran.
+ */
+function globalConfigPath(env = process.env) {
+  const base = env.XDG_CONFIG_HOME || path.join(os.homedir(), '.config');
+  return path.join(base, 'xp-gate', DELPHI_CONFIG_FILE);
+}
+
+/**
  * Read the binding seats for the project rooted at `projectRoot`.
  *
  * The root is passed EXPLICITLY by the caller, never derived from
@@ -158,23 +172,63 @@ function resolveBindingSeats(config) {
  * fixture to xp-gate's seats. The gate's subject is the repository being
  * pushed, so that is what must be named.
  *
+ * ## Global fallback (2026-10-27)
+ *
+ * A project file still WINS, so a repo can override seats deliberately. When
+ * the project has none, the machine-wide config is used instead of returning
+ * null — and this is load-bearing, not a convenience:
+ *
+ * Before this fallback existed, DELETING a project-level config silently
+ * disabled the entire #574 seat check, because `bindingSeats === null`
+ * short-circuits `validateRequestedModel`. The gate kept reporting PASS while
+ * any three distinct gateway models — including the expensive overseas ones
+ * #574 exists to catch — could satisfy it, with no message anywhere. A user
+ * consolidating onto one global config to stop maintaining a copy per repo
+ * would have unknowingly traded that protection away.
+ *
+ * Only ENOENT triggers the fallback: an unreadable project config
+ * (EACCES/EISDIR) must surface rather than silently routing this run to a
+ * different file. Same semantics as `loadDelphiConfig()` in the DSH plugin.
+ *
  * @param {string} projectRoot repository root whose config binds the evidence
- * @returns {Map<string, string> | null} seats, or null when no config exists
+ * @param {NodeJS.ProcessEnv} env environment for the global-path lookup
+ * @returns {Map<string, string> | null} seats, or null when NO config exists
+ *          anywhere (evidence then stays unbound, the #423 behaviour)
  */
-function loadBindingSeats(projectRoot) {
-  const configPath = path.join(projectRoot, DELPHI_CONFIG_FILE);
+function loadBindingSeats(projectRoot, env = process.env) {
+  const projectPath = path.join(projectRoot, DELPHI_CONFIG_FILE);
+  const fallbackPath = globalConfigPath(env);
+
   let raw;
+  let source = projectPath;
   try {
-    raw = fs.readFileSync(configPath, 'utf8');
-  } catch (error) {
-    if (error && error.code === 'ENOENT') return null;
-    fail(`cannot read ${DELPHI_CONFIG_FILE}: ${error && error.message ? error.message : String(error)}`);
+    raw = fs.readFileSync(projectPath, 'utf8');
+  } catch (projectError) {
+    if (projectError && projectError.code === 'ENOENT') {
+      try {
+        raw = fs.readFileSync(fallbackPath, 'utf8');
+        source = fallbackPath;
+      } catch (globalError) {
+        if (globalError && globalError.code === 'ENOENT') return null;
+        fail(
+          `cannot read ${DELPHI_CONFIG_FILE}: ${globalError && globalError.message
+            ? globalError.message
+            : String(globalError)}`
+        );
+      }
+    } else {
+      fail(
+        `cannot read ${DELPHI_CONFIG_FILE}: ${projectError && projectError.message
+          ? projectError.message
+          : String(projectError)}`
+      );
+    }
   }
   let parsed;
   try {
     parsed = JSON.parse(raw);
   } catch (error) {
-    fail(`${DELPHI_CONFIG_FILE} is not valid JSON: ${error.message}`);
+    fail(`${source} is not valid JSON: ${error.message}`);
   }
   const seats = resolveBindingSeats(parsed);
   for (const role of REQUIRED_ROLES) {
