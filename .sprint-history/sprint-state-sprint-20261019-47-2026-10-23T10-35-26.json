@@ -1,0 +1,57 @@
+{
+  "_schema_version": 1,
+  "evidence_schema_version": 2,
+  "id": "sprint-20261019-47",
+  "task_description": "#537: Gate 3/4/6 非 TS 主语言覆盖盲区 — quality 报告增加 per-language 覆盖矩阵，Gate 6 archlint 说明为何只跑 TS",
+  "phase": 6,
+  "status": "in_progress",
+  "started_at": "2026-10-19T15:06:21.405Z",
+  "phase_history": [
+    {
+      "phase": 1,
+      "name": "PREP",
+      "status": "completed",
+      "started_at": "2026-10-19T15:06:21.405Z",
+      "completed_at": "2026-10-19T15:07:40.789Z",
+      "duration_seconds": 79
+    },
+    {
+      "phase": 2,
+      "phase_name": "DESIGN",
+      "status": "completed",
+      "completed_at": "2026-10-19T15:13:20.561Z"
+    },
+    {
+      "phase": 3,
+      "phase_name": "BUILD",
+      "status": "completed",
+      "completed_at": "2026-10-19T16:01:30.678Z"
+    },
+    {
+      "phase": 4,
+      "phase_name": "VERIFY",
+      "status": "completed",
+      "completed_at": "2026-10-19T16:12:03.003Z"
+    },
+    {
+      "phase": 5,
+      "phase_name": "SHIP",
+      "status": "completed",
+      "completed_at": "2026-10-19T16:20:00.403Z"
+    },
+    {
+      "phase": 6,
+      "phase_name": "CLOSE",
+      "status": "completed",
+      "completed_at": "2026-10-23T10:35:05.067Z",
+      "started_at": "2026-10-23T10:35:05.066Z",
+      "duration_seconds": 0
+    }
+  ],
+  "isolation": {
+    "worktree_path": "D:\\projects\\xp-gate",
+    "branch": "main"
+  },
+  "outputs": {},
+  "metrics": {}
+}
