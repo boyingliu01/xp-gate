@@ -16,13 +16,15 @@
  *
  *         The binding is therefore: when a `.delphi-config.json` exists, each
  *         expert's requested_model must be THAT role's configured seat.
- * @covers AC-574-01, AC-574-02, AC-574-03, AC-574-04, AC-574-05, AC-574-06, AC-574-07
+ * @covers AC-574-01, AC-574-02, AC-574-03, AC-574-04, AC-574-05, AC-574-06, AC-574-07,
+ *         AC-636-01, AC-636-02, AC-636-03
  *
  * DESIGN NOTE (why the binding is opt-in on config presence, and why the
  * direction is requested_model -> config and never the reverse):
- *   - Projects without a `.delphi-config.json` keep working unchanged. Making
- *     the config mandatory would block every repo that reviews through another
- *     platform's channel, which is not what this defect is about.
+ *   - A project WITHOUT a config of its own now falls back to the machine-wide
+ *     config (#636). Projects that review through another platform's channel
+ *     are still unaffected: they ship no walkthrough evidence, so the validator
+ *     is never invoked for them at all.
  *   - The check reads the config's ACTIVE profile only, exactly like
  *     `plugins/dsh/src/delphi-config.ts` and `scripts/check_delphi_local_models.py`
  *     do. Comparing against a non-active profile would bless seats the operator
@@ -33,7 +35,7 @@
  */
 
 // vitest globals: true - no import needed
-const { execFileSync } = require('node:child_process');
+const { execFileSync, spawnSync } = require('node:child_process');
 const { mkdirSync, mkdtempSync, rmSync, writeFileSync } = require('node:fs');
 const { tmpdir } = require('node:os');
 const { join } = require('node:path');
@@ -154,17 +156,20 @@ function run(document, config, options = {}) {
   const env = { ...process.env, HOME: fakeHome, USERPROFILE: fakeHome };
   delete env.XDG_CONFIG_HOME;
   const args = [VALIDATOR, evidencePath, COMMIT, BRANCH, NOW, projectRoot];
-  try {
-    const out = execFileSync('node', args, {
-      cwd: options.cwd ?? projectRoot,
-      encoding: 'utf8',
-      stdio: ['ignore', 'pipe', 'pipe'],
-      env,
-    });
-    return { exitCode: 0, output: out };
-  } catch (error) {
-    return { exitCode: error.status ?? 1, output: `${error.stdout ?? ''}${error.stderr ?? ''}` };
-  }
+  // spawnSync rather than execFileSync: the seat-drift warning goes to stderr
+  // on purpose (it must not affect the verdict), so a success-path assertion
+  // that only looked at stdout would never see it. spawnSync returns both
+  // streams regardless of exit status.
+  const result = spawnSync('node', args, {
+    cwd: options.cwd ?? projectRoot,
+    encoding: 'utf8',
+    stdio: ['ignore', 'pipe', 'pipe'],
+    env,
+  });
+  return {
+    exitCode: result.status ?? 1,
+    output: `${result.stdout ?? ''}${result.stderr ?? ''}`,
+  };
 }
 
 afterEach(() => {
@@ -184,7 +189,16 @@ describe('#574 Gate MW binds evidence to the configured Delphi seats', () => {
     expect(result.exitCode).toBe(0);
   });
 
-  it('AC-574-01: no `.delphi-config.json` keeps the previous behaviour (unbound)', () => {
+  it('AC-636-02: no config anywhere FAILS closed instead of leaving evidence unbound', () => {
+    // SUPERSEDES the original AC-574-01 ("unbound when no config").
+    //
+    // Measured 2026-10-27: with no config anywhere the validator accepted
+    // b-claude-4.8-opus / gpt-5.5 / gemini-3-pro — the exact class #574 exists
+    // to stop. Leaving that open was survivable while every repo shipped a
+    // config; once the machine-wide file became the single source of truth,
+    // "no config" is the normal state of a fresh machine or a bare CI runner,
+    // so the bypass became the default path. Refusing is the honest answer:
+    // the seats cannot be verified, therefore the evidence is not verified.
     const drifted = {
       architecture: 's-deepseek-v4.1-flash',
       technical: 'g-deepseek-v4-pro',
@@ -193,7 +207,21 @@ describe('#574 Gate MW binds evidence to the configured Delphi seats', () => {
 
     const result = run(evidenceFor(drifted), null);
 
-    expect(result.exitCode).toBe(0);
+    expect(result.exitCode).toBe(1);
+    expect(result.output).toMatch(/no \.delphi-config\.json found/);
+  });
+
+  it('AC-636-02: the expensive trio is blocked when no config exists', () => {
+    // The concretely dangerous case, not just "some drift".
+    const expensive = {
+      architecture: 'b-claude-4.8-opus',
+      technical: 'gpt-5.5',
+      feasibility: 'gemini-3-pro',
+    };
+
+    const result = run(evidenceFor(expensive), null);
+
+    expect(result.exitCode).toBe(1);
   });
 
   it('AC-574-02: the measured 2026-10-22 drift is BLOCKED when a config exists', () => {
@@ -271,7 +299,38 @@ describe('#574 Gate MW binds evidence to the configured Delphi seats', () => {
     expect(inactiveMatch.exitCode).toBe(1);
   });
 
-  it('AC-574-08: no project config falls back to the machine-wide config', () => {
+  it('AC-636-04: an unreadable project config surfaces instead of silently reading the machine one', () => {
+    // EACCES/EISDIR must NOT be treated as "absent". Falling back on any read
+    // error would silently route a run to a different seat than the repo names.
+    // A directory standing in for the config file produces EISDIR portably.
+    const dir = makeTempDir();
+    const projectRoot = join(dir, 'project');
+    mkdirSync(join(projectRoot, '.delphi-config.json'), { recursive: true });
+    const evidencePath = join(dir, 'evidence.json');
+    writeFileSync(evidencePath, JSON.stringify(evidenceFor(LOCAL_SEATS)), 'utf8');
+    const fakeHome = join(dir, 'home');
+    const globalDir = join(fakeHome, '.config', 'xp-gate');
+    mkdirSync(globalDir, { recursive: true });
+    // A perfectly valid machine-wide config that must NOT be used as a fallback.
+    writeFileSync(
+      join(globalDir, '.delphi-config.json'),
+      JSON.stringify(delphiConfig(LOCAL_SEATS)),
+      'utf8'
+    );
+    const env = { ...process.env, HOME: fakeHome, USERPROFILE: fakeHome };
+    delete env.XDG_CONFIG_HOME;
+
+    const result = spawnSync('node', [VALIDATOR, evidencePath, COMMIT, BRANCH, NOW, projectRoot], {
+      encoding: 'utf8',
+      stdio: ['ignore', 'pipe', 'pipe'],
+      env,
+    });
+
+    expect(result.status).toBe(1);
+    expect(`${result.stdout ?? ''}${result.stderr ?? ''}`).toMatch(/cannot read \.delphi-config\.json/);
+  });
+
+  it('AC-636-01: no project config falls back to the machine-wide config', () => {
     // The consolidation setup: one config at ~/.config/xp-gate/, no per-repo
     // copy. Before this fallback the seat check silently disappeared for that
     // setup, so the drift below passed while the gate reported PASS.
@@ -289,7 +348,7 @@ describe('#574 Gate MW binds evidence to the configured Delphi seats', () => {
     expect(accepted.exitCode).toBe(0);
   });
 
-  it('AC-574-09: a project config still WINS over the machine-wide one', () => {
+  it('AC-636-01: a project config still WINS over the machine-wide one', () => {
     // Overrides stay possible: the fallback must not shadow a deliberate
     // per-repo choice.
     const projectSeats = {
@@ -312,6 +371,47 @@ describe('#574 Gate MW binds evidence to the configured Delphi seats', () => {
       globalConfig: delphiConfig(machineSeats),
     });
     expect(rejectsMachine.exitCode).toBe(1);
+  });
+
+  it('AC-636-03: a repo copy that overrides the machine-wide seats WARNS', () => {
+    // The 2026-10-27 incident: the machine-wide config retired a flaky seat, an
+    // older repo copy survived, the repo copy won, and the review kept calling
+    // the retired seat with nothing anywhere saying so. Overriding stays legal;
+    // being silent about it does not.
+    const projectSeats = {
+      architecture: 'stale-a',
+      technical: 'stale-b',
+      feasibility: 'stale-c',
+    };
+    const machineSeats = {
+      architecture: 'fresh-a',
+      technical: 'fresh-b',
+      feasibility: 'fresh-c',
+    };
+
+    const result = run(evidenceFor(projectSeats), delphiConfig(projectSeats), {
+      globalConfig: delphiConfig(machineSeats),
+    });
+
+    // Still a pass: a deliberate override is allowed.
+    expect(result.exitCode).toBe(0);
+    expect(result.output).toMatch(/overrides the machine-wide seats/);
+    expect(result.output).toMatch(/technical: repo=stale-b machine=fresh-b/);
+  });
+
+  it('AC-636-03: matching repo and machine configs stay quiet', () => {
+    const seats = {
+      architecture: 'same-a',
+      technical: 'same-b',
+      feasibility: 'same-c',
+    };
+
+    const result = run(evidenceFor(seats), delphiConfig(seats), {
+      globalConfig: delphiConfig(seats),
+    });
+
+    expect(result.exitCode).toBe(0);
+    expect(result.output).not.toMatch(/overrides the machine-wide seats/);
   });
 
   it('AC-574-06: a config with an unresolvable active_profile FAILS closed', () => {
@@ -342,9 +442,14 @@ describe('#574 Gate MW binds evidence to the configured Delphi seats', () => {
       feasibility: 'doubao-seed-2.0-pro',
     };
 
-    // No config in the named project root => unbound, even though cwd has one.
+    // No config in the named project root => the cwd config is NOT consulted.
+    // Since 2026-10-27 that means fail-closed rather than unbound, and the
+    // message must be the "looked in these two places" one — proving the decoy
+    // was never one of them.
     const unbound = run(evidenceFor(drifted), null, { cwd: decoy });
-    expect(unbound.exitCode).toBe(0);
+    expect(unbound.exitCode).toBe(1);
+    expect(unbound.output).toMatch(/no \.delphi-config\.json found/);
+    expect(unbound.output).not.toMatch(/does not match the configured seat/);
 
     // And the reverse: named root binds even when cwd has no config at all.
     const bound = run(evidenceFor(drifted), delphiConfig(), { cwd: decoy });
