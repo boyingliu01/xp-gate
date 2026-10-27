@@ -142,17 +142,20 @@ interface ChatResponse {
   choices?: Array<{ finish_reason?: string; message?: { content?: string } }>
 }
 
+/** Cleanup for a case where no listener was attached, so there is nothing to undo. */
+const NO_CLEANUP = (): void => undefined;
+
 /**
  * Bridge caller cancellation into the controller that also owns the timeout.
  * Bridging rather than racing two signals means one abort path, so the reason a
  * request stopped is never ambiguous.
  */
 function linkAbort(controller: AbortController, callerSignal: AbortSignal | undefined): () => void {
-  if (!callerSignal) return () => {}
+  if (!callerSignal) return NO_CLEANUP
   const forwardAbort = () => controller.abort()
   if (callerSignal.aborted) {
     controller.abort()
-    return () => {}
+    return NO_CLEANUP
   }
   callerSignal.addEventListener("abort", forwardAbort, { once: true })
   return () => callerSignal.removeEventListener("abort", forwardAbort)

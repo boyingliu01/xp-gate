@@ -15,6 +15,12 @@ import { describe, it, expect } from "vitest"
 import type { ShellRunResult } from "@deepseek-ai/dsh-shell"
 import { renderGateResult } from "./gate-runner.js"
 
+/** The shell's convention for "command not found" — no verdict, no reason. */
+const COMMAND_NOT_FOUND = 127;
+
+/** A non-zero count a real gate prints when it finds violations. */
+const VIOLATIONS_FOUND = 3;
+
 function makeResult(over: Partial<ShellRunResult> = {}): ShellRunResult {
   return {
     exitCode: 0,
@@ -48,13 +54,13 @@ describe("renderGateResult tri-state", () => {
   it("reports GATE FAILED on nonzero exit with output", () => {
     const out = renderGateResult(
       makeResult({
-        exitCode: 3,
-        stdout: { text: "3 violations found", truncated: false },
+        exitCode: VIOLATIONS_FOUND,
+        stdout: { text: `${VIOLATIONS_FOUND} violations found`, truncated: false },
       }),
     )
     expect(out).toContain("GATE FAILED")
-    expect(out).toContain("exit code: 3")
-    expect(out).toContain("3 violations found")
+    expect(out).toContain(`exit code: ${VIOLATIONS_FOUND}`)
+    expect(out).toContain(`${VIOLATIONS_FOUND} violations found`)
     expect(out).not.toContain("INDETERMINATE")
   })
 
@@ -71,7 +77,7 @@ describe("renderGateResult tri-state", () => {
 
   it("reports INDETERMINATE on nonzero exit with no output at all", () => {
     // Typical command-not-found: neither a verdict nor a reason.
-    const out = renderGateResult(makeResult({ exitCode: 127 }))
+    const out = renderGateResult(makeResult({ exitCode: COMMAND_NOT_FOUND }))
     expect(out).toContain("INDETERMINATE")
     expect(out).not.toContain("GATE FAILED")
     expect(out).not.toContain("[XP-Gate] PASS")
@@ -104,7 +110,7 @@ describe("renderGateResult tri-state", () => {
   it("never emits PASS anywhere in an ambiguous result", () => {
     const ambiguous = [
       makeResult({ exitCode: 0 }),
-      makeResult({ exitCode: 127 }),
+      makeResult({ exitCode: COMMAND_NOT_FOUND }),
       makeResult({ timedOut: true, exitCode: 0 }),
       makeResult({ stdout: { text: "", truncated: true } }),
     ]

@@ -196,9 +196,20 @@ async function loadSkill(
     return undefined
   }
   const parsed = parseSkill(raw, target)
-  // `rank` and `locator` describe the catalog entry, not the loaded definition.
-  const { rank: _rank, locator: _locator, ...summary } = candidate
-  return { ...summary, content: parsed.content }
+  // Built field by field rather than by spreading and dropping the extras: `rank`
+  // and `locator` describe the catalog entry and are not part of a definition, and
+  // naming what belongs here keeps that boundary visible.
+  return {
+    name: candidate.name,
+    description: candidate.description,
+    invocation: candidate.invocation,
+    source: candidate.source,
+    provider: candidate.provider,
+    path: candidate.path,
+    resourceBase: candidate.resourceBase,
+    whenToUse: candidate.whenToUse,
+    content: parsed.content,
+  }
 }
 
 /**

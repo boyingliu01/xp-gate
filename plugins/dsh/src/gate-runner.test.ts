@@ -2,6 +2,9 @@ import { describe, it, expect } from "vitest"
 import type { ShellExecRequest, ShellRunResult } from "@deepseek-ai/dsh-shell"
 import { renderGateResult, runXpGate, type XpGateShell } from "./gate-runner.js"
 
+/** A timeout distinct from the fixture default, so a passing assertion proves it was forwarded. */
+const FORWARDED_TIMEOUT_MS = 5000;
+
 function result(over: Partial<ShellRunResult> = {}): ShellRunResult {
   return {
     exitCode: 0,
@@ -78,10 +81,10 @@ describe("runXpGate", () => {
   it("passes command/workdir/timeoutMs/signal to the shell", async () => {
     const signal = new AbortController().signal
     const { shell, requests } = makeShell(result())
-    await runXpGate(shell, signal, "xp-gate check 'src'", "/workspace", 5000)
+    await runXpGate(shell, signal, "xp-gate check 'src'", "/workspace", FORWARDED_TIMEOUT_MS)
     expect(requests[0]?.command).toBe("xp-gate check 'src'")
     expect(requests[0]?.workdir).toBe("/workspace")
-    expect(requests[0]?.timeoutMs).toBe(5000)
+    expect(requests[0]?.timeoutMs).toBe(FORWARDED_TIMEOUT_MS)
     expect(requests[0]?.signal).toBe(signal)
   })
 
