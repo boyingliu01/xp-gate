@@ -380,8 +380,17 @@ function buildResult(
   }
 }
 
-/** Default global config location; XDG_CONFIG_HOME is an accepted override. */
-function defaultGlobalConfigPath(env: NodeJS.ProcessEnv): string {
+/**
+ * Default global config location; XDG_CONFIG_HOME is an accepted override.
+ *
+ * Exported so the Gate MW validator's parity test can import THIS definition
+ * rather than restating it (2026-10-27 review, technical seat CRITICAL): the
+ * gate (`githooks/lib/validate-code-walkthrough.cjs`) needs the same path, and
+ * a second hand-written copy can drift silently. Drift here is not cosmetic —
+ * the gate would validate seats from one file while the reviewer used another,
+ * which is exactly the class of bug #574 exists to catch.
+ */
+export function defaultGlobalConfigPath(env: NodeJS.ProcessEnv): string {
   // r16 MA-01 disposition: the CLI lib pins ~/.config/xp-gate, and on Linux
   // $HOME/.config IS the XDG default — opt-in escape hatch only.
   return join(env.XDG_CONFIG_HOME || join(homedir(), ".config"), "xp-gate", ".delphi-config.json")
