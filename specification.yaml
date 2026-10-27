@@ -173,8 +173,29 @@ specification:
           test_type: unit
 
     # ============================================================
-    # REQ-DSH-014: Delphi 凭证走 DSH 凭据 seam
+    # REQ-DSH-013: sprint-flow 子命令可达
     # ============================================================
+    - id: REQ-DSH-013
+      description: >-
+        sprint-flow skill 指示模型调用 sprint-status / phase-transition / retro / ui-review /
+        sprint-init / sprint-audit / next-sprint，但插件此前完全没有暴露任何入口，模型读完指令无法执行。
+        新增 sprint 工具：子命令与 phase-transition 的 status 均以 enum 约束，路径经 shellQuote 转义。
+        刻意不做万能透传——那会把一个工具放大成整个 CLI 的注入面。
+      priority: high
+      acceptance_criteria:
+        - id: AC-DSH-013-01
+          criteria: sprint 工具暴露 skill 引用的全部 7 个子命令
+          test_type: unit
+        - id: AC-DSH-013-02
+          criteria: 非白名单子命令被拒绝（含注入尝试、空串、近似名），不构造命令
+          test_type: unit
+        - id: AC-DSH-013-03
+          criteria: phase-transition 的 phase 限 1-6、status 限五值；非枚举值抛错而非拼接
+          test_type: unit
+        - id: AC-DSH-013-04
+          criteria: 含 shell 元字符的目录路径保持单参数，不产生额外命令
+          test_type: unit
+
     - id: REQ-DSH-014
       description: >-
         Delphi 的 api_key 从 DSH 凭据服务解析，而非只读 process.env。实测 DSH 宿主进程继承的环境里没有

@@ -8,6 +8,7 @@ import { GATE_WHITELIST, buildCommand, detectDialect, resolveTarget } from "./co
 import { runXpGate } from "./gate-runner.js"
 import { DelphiSetupError, listCredentialReferences, loadDelphiConfig, toDelphiOptions } from "./delphi-config.js"
 import { formatOutcome, runReview } from "./delphi-run.js"
+import { PHASE_STATUSES, SPRINT_SUBCOMMANDS, buildSprintCommand } from "./sprint.js"
 import { createSkillProvider } from "./skill-provider.js"
 import type { ApiKeyResolver } from "./credentials.js"
 import { createCredentialResolver } from "./credentials.js"
@@ -214,8 +215,53 @@ function delphiReviewTool(resolveApiKey: ApiKeyResolver) {
   })
 }
 
-export function apply(ctx: Context, _config: unknown = {}): void {
-  // DSH runs a POSIX shell off-Windows and PowerShell on Windows; generating the
+/**
+ * Sprint-flow state commands.
+ *
+ * The sprint-flow skill tells the model to run these by name; without a tool the
+ * instruction was unfollowable. Deliberately narrow: the subcommand and the
+ * phase-transition status are enumerated, and paths are quoted, so this does not
+ * become a passthrough to the whole CLI.
+ */
+function sprintTool(shell: Context["shell"], dialect: ShellDialect) {
+  return defineTool({
+    name: "sprint",
+    description:
+      "Inspect and advance XP-Gate Sprint Flow state: sprint-status, phase-transition, retro, ui-review, sprint-init, sprint-audit, next-sprint.",
+    parameters: {
+      subcommand: {
+        type: "string",
+        required: true,
+        description: `One of: ${SPRINT_SUBCOMMANDS.join(", ")}.`,
+        // Enumerated rather than free text: the schema rejects anything else before
+        // the value could ever reach a shell.
+        enum: SPRINT_SUBCOMMANDS.slice(),
+      },
+      phase: { type: "string", description: "phase-transition only: phase number, 1-6." },
+      status: {
+        type: "string",
+        description: "phase-transition only: phase status.",
+        enum: PHASE_STATUSES.slice(),
+      },
+      dir: { type: "string", description: "Project directory (absolute or relative)." },
+      json: { type: "boolean", description: "Request JSON output where supported." },
+      days: { type: "number", description: "retro only: days to look back." },
+      all: { type: "boolean", description: "retro only: cover every sprint." },
+    },
+    output: {
+      schema: { type: "string" },
+      render: (_args, value) => [{ type: "text", text: value }],
+    },
+    timeoutMs: DEFAULT_TIMEOUT_MS,
+    async execute(args, exec) {
+      const cwd = exec.agent?.session?.header?.cwd ?? process.cwd()
+      const command = buildSprintCommand(args.subcommand, args, dialect)
+      return runXpGate(shell, exec.signal, command, cwd, DEFAULT_TIMEOUT_MS)
+    },
+  })
+}
+
+export function apply(ctx: Context, _config: unknown = {}): void {  // DSH runs a POSIX shell off-Windows and PowerShell on Windows; generating the
   // wrong dialect makes every tool fail to parse rather than degrade gracefully.
   const dialect = detectDialect()
   const shell = ctx.shell
@@ -233,6 +279,7 @@ export function apply(ctx: Context, _config: unknown = {}): void {
   ctx.tools.register(gatePrinciplesTool(shell, dialect))
   ctx.tools.register(gateArchTool(shell, dialect))
   ctx.tools.register(delphiReviewTool(resolveApiKey))
+  ctx.tools.register(sprintTool(shell, dialect))
 
   // Publishing the 12 bundled skills is what makes them visible to the model.
   // They ship in the tarball either way, but without a provider no discovery
