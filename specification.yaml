@@ -98,6 +98,11 @@ specification:
         - id: AC-DSH-007-01
           criteria: result.aborted 时 execute throw 的错误 code === "ABORTED"（不悬挂）；result.timedOut 不抛、render 含超时标记
           test_type: unit
+        - id: AC-DSH-007-02
+          criteria: >-
+            delphi-review 透传 exec.signal 至 runReview；signal 已中止或中途中止时抛 TOOL_ABORTED，
+            且不再发起后续轮次（单次审查上限 3 席 × 5 轮），使 GUI 停止按钮真正生效
+          test_type: unit
 
     # ============================================================
     # REQ-DSH-008: 单测覆盖 + TDD

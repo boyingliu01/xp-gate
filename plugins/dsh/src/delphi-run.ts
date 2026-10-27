@@ -8,12 +8,28 @@
  * @covers AC-DSH-016-03
  */
 
+import { TOOL_ABORTED } from "@deepseek-ai/dsh-tools"
+import { HarnessError } from "@deepseek-ai/dsh-llm"
+
 import type { DelphiOptions, ExpertSeat, RoundResult } from "./delphi.js"
 import { runRound } from "./delphi.js"
 
+/**
+ * Raise TOOL_ABORTED once the caller's signal has fired.
+ *
+ * Deliverance matches the gate tools exactly, so a cancelled review reads as a
+ * cancellation in the UI rather than as a provider outage.
+ */
+function assertNotAborted(signal: AbortSignal | undefined): void {
+  if (!signal?.aborted) return
+  const error = new HarnessError("tool call aborted", TOOL_ABORTED)
+  error.name = "AbortError"
+  throw error
+}
+
 /** Mirrors delphi.ts; declared here so orchestrators need not import internals. */
-const DEFAULT_THRESHOLD_PERCENT = 90
-const DEFAULT_MAX_ROUNDS = 5
+const DEFAULT_THRESHOLD_PERCENT = 90;
+const DEFAULT_MAX_ROUNDS = 5;
 
 export interface ReviewOutcome {
   readonly rounds: readonly RoundResult[]
@@ -70,21 +86,28 @@ export async function runReview(
   opts: DelphiOptions,
   subject: string,
   addressed = "",
+  signal?: AbortSignal,
 ): Promise<ReviewOutcome> {
   const threshold = opts.thresholdPercent ?? DEFAULT_THRESHOLD_PERCENT
   const maxRounds = opts.maxRounds ?? DEFAULT_MAX_ROUNDS
   const rounds: RoundResult[] = []
+  // A round swallows per-seat failures into ERROR verdicts, so cancellation has to
+  // be checked around them: otherwise an abort would surface as three ERROR seats and
+  // the review would grind on through every remaining round.
+  const effective: DelphiOptions = { ...opts, signal }
+  assertNotAborted(signal)
 
   for (let n = 1; n <= maxRounds; n++) {
     const previous = rounds[rounds.length - 1]
     const result = previous
-      ? await runRound(opts, n, "You are a rigorous senior code reviewer.", (seat) =>
+      ? await runRound(effective, n, "You are a rigorous senior code reviewer.", (seat) =>
           laterRoundPrompt(seat, subject, previous, addressed),
         )
-      : await runRound(opts, 1, "You are a rigorous senior code reviewer.", (seat) =>
+      : await runRound(effective, 1, "You are a rigorous senior code reviewer.", (seat) =>
           roundOnePrompt(seat, subject),
         )
 
+    assertNotAborted(signal)
     rounds.push(result)
 
     // Threshold is a percentage of the whole panel, so a round with a malformed
