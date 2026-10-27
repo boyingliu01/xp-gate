@@ -43,20 +43,12 @@
     "totalWarnings": 4,
     "lastAnalyzed": "2026-10-26T20:03:53.041Z"
   },
-  "plugins/dsh/src/contract.test.ts": {
-    "totalWarnings": 1,
-    "lastAnalyzed": "2026-10-26T20:05:00.274Z"
-  },
   "src/npm-package/mutation/__tests__/pitest-runner.test.ts": {
     "totalWarnings": 4,
     "lastAnalyzed": "2026-10-26T20:05:00.275Z"
   },
   "src/npm-package/mutation/runners/pitest-runner.ts": {
     "totalWarnings": 8,
-    "lastAnalyzed": "2026-10-26T20:05:00.275Z"
-  },
-  "src/npm-package/plugins/dsh/src/contract.test.ts": {
-    "totalWarnings": 1,
     "lastAnalyzed": "2026-10-26T20:05:00.275Z"
   },
   "src/npm-package/scripts/sync-package-content.js": {
