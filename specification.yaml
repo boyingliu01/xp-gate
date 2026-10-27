@@ -3225,7 +3225,7 @@ specification:
     # 允许覆盖机器级配置，但覆盖必须留痕。
     # ============================================================
     - id: REQ-636
-      description: "Delphi 席位配置须支持机器级回退，且在无法定位任何配置时 fail-closed；项目级副本覆盖机器级席位时必须告警"
+      description: "Gate MW 校验器（githooks/lib/validate-code-walkthrough.cjs）须与 #541 / AC-DSH-016-02 已实现的插件侧行为对齐：支持机器级回退、无法定位任何配置时 fail-closed、项目级副本覆盖机器级席位时告警。REQ-541 只覆盖 DSH 插件与 delphi-external-review.cjs 两个解析点，Gate MW 校验器是遗漏的第三个——它此前只读项目级配置，于是评审实际调用的席位与校验所依据的席位可能来自不同文件，且该状态下任何三模型组合都能通过"
       priority: high
       acceptance_criteria:
         - id: AC-636-01
@@ -3238,7 +3238,7 @@ specification:
           criteria: 项目级席位与机器级不一致时必须在 stderr 打出告警（含 role 与两侧模型 id），但不得改变退出码；两侧一致或仅一侧存在时不得告警
           test_type: unit
         - id: AC-636-04
-          criteria: 归还一个配置无法读取（非 ENOENT，如 EACCES/EISDIR）时必须原样报错，不得静默改读另一份配置
+          criteria: 配置存在但无法读取（非 ENOENT，如 EACCES/EISDIR）时必须原样报错，不得静默改读另一份配置
           test_type: unit
         - id: AC-636-05
           criteria: 调用方未传入项目根（无项目上下文）时必须保持 #423 的 unbound 行为，不得因此读取机器级配置，也不得因 fail-closed 而拒绝
