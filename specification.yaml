@@ -3204,3 +3204,42 @@ specification:
         - id: AC-635-01
           criteria: 嵌套依赖条目在诊断输出中必须显示为 a/b；不得退化为裸名 b
           test_type: unit
+
+    # ============================================================
+    # REQ-636: Delphi 配置收敛到机器级单一事实源，且席位绑定必须 fail-closed。
+    #
+    # 2026-10-27：用户要求删除各仓库里的 .delphi-config.json 副本，只保留
+    # ~/.config/xp-gate/ 这一份（每仓库各维护一份太累）。但 xp-gate 仓库根目录
+    # 留着一份 10/22 的旧副本，而查找顺序是「项目根优先」，于是用户改了全局配置
+    # 却完全不生效——评审一直在用已退役的 local-qwen3.8-flash 席位（网关间歇
+    # HTTP 500），且没有任何提示。
+    #
+    # 直接删掉项目级配置会静默关闭 #574 的席位校验：loadBindingSeats 找不到文件
+    # 返回 null，validateRequestedModel 里 if (bindingSeats !== null) 整段跳过，
+    # 任何三个互异模型都能过。实测两处都无配置时 b-claude-4.8-opus / gpt-5.5 /
+    # gemini-3-pro 可以过校验，正是 #574 要拦的东西。在「每个仓库都带配置」的
+    # 年代这还算「显式退出」；一旦机器级配置成为唯一事实源，「无配置」就变成新
+    # 机器和裸 CI runner 的常态，绕过面反而成了默认路径。
+    #
+    # 不变量因此是：evidence 存在时必须能定位到席位，定位不到就拒绝；项目级副本
+    # 允许覆盖机器级配置，但覆盖必须留痕。
+    # ============================================================
+    - id: REQ-636
+      description: "Gate MW 校验器（githooks/lib/validate-code-walkthrough.cjs）须与 #541 / AC-DSH-016-02 已实现的插件侧行为对齐：支持机器级回退、无法定位任何配置时 fail-closed、项目级副本覆盖机器级席位时告警。REQ-541 只覆盖 DSH 插件与 delphi-external-review.cjs 两个解析点，Gate MW 校验器是遗漏的第三个——它此前只读项目级配置，于是评审实际调用的席位与校验所依据的席位可能来自不同文件，且该状态下任何三模型组合都能通过"
+      priority: high
+      acceptance_criteria:
+        - id: AC-636-01
+          criteria: 项目根无 .delphi-config.json 时回退到 XDG_CONFIG_HOME 指定目录（缺省 ~/.config）下的 xp-gate/.delphi-config.json；项目级文件仍优先，保留 per-repo 覆盖能力
+          test_type: unit
+        - id: AC-636-02
+          criteria: 项目级与机器级配置都不存在时必须 fail closed（退出码非 0，报文含 "no .delphi-config.json found" 并列出两个查找位置），不得退回到不绑定席位的 #423 行为
+          test_type: unit
+        - id: AC-636-03
+          criteria: 项目级席位与机器级不一致时必须在 stderr 打出告警（含 role 与两侧模型 id），但不得改变退出码；两侧一致或仅一侧存在时不得告警
+          test_type: unit
+        - id: AC-636-04
+          criteria: 配置存在但无法读取（非 ENOENT，如 EACCES/EISDIR）时必须原样报错，不得静默改读另一份配置
+          test_type: unit
+        - id: AC-636-05
+          criteria: 调用方未传入项目根（无项目上下文）时必须保持 #423 的 unbound 行为，不得因此读取机器级配置，也不得因 fail-closed 而拒绝
+          test_type: unit
