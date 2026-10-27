@@ -58,6 +58,16 @@ export interface ResolvedDelphiConfig {
 /** Raised when config on disk cannot be turned into a usable review setup. */
 export class DelphiSetupError extends Error {}
 
+/**
+ * Delphi's documented defaults, applied when the config omits a consensus setting.
+ * Held as object properties so the values read as policy fields rather than stray
+ * literals.
+ */
+const CONSENSUS_DEFAULTS = {
+  threshold_percent: "90",
+  max_review_rounds: "5",
+}
+
 /** Placeholder spellings xp-gate configs already use. Named so the error text can
  *  quote the exact form the user wrote — a typo in the spelling is
  *  indistinguishable from an unset variable otherwise (#576). */
@@ -153,11 +163,53 @@ function normalizeExperts(experts: RawProfile["experts"]): Array<{ raw: RawExper
   return Object.entries(experts).map(([role, raw]) => ({ raw, role }))
 }
 
+/** Resolve one provider's base_url + api_key, failing loudly. */
+function resolveOneProvider(
+  name: string,
+  entry: { base_url?: string; baseUrl?: string; api_key?: string; apiKey?: string },
+  env: NodeJS.ProcessEnv,
+  apiKeyOverrides: ApiKeyOverrides,
+): { baseUrl: string; apiKey: string } {
+  const baseUrl = entry.base_url ?? entry.baseUrl ?? ""
+  if (!baseUrl) throw new DelphiSetupError(`Provider "${name}" has no base_url.`)
+
+  const rawKey = entry.api_key ?? entry.apiKey ?? ""
+  // Find the placeholder BEFORE touching `env`: the spelling lives in the
+  // config, not the environment, so a broken `env` must not hide it.
+  const placeholder = findPlaceholder(rawKey)
+  // A caller that already resolved this variable from the authoritative store
+  // (DSH's credential service) wins over the process environment: the store is
+  // layered over env itself, so its answer is the more informed one. A literal
+  // api_key names no variable and is therefore untouched.
+  const overrideValue = placeholder ? apiKeyOverrides[placeholder.name] : undefined
+  // Every read of `env` may fail — a caller can pass a proxy, a frozen object,
+  // or an environment that throws on access. Diagnostics must never become the
+  // reason the run dies: on any error fall back to the plainest possible
+  // message, which is still a DelphiSetupError (#576).
+  let expanded: ExpandedEnv
+  try {
+    expanded = expandEnvDetailed(rawKey, env)
+  } catch {
+    expanded = { value: "", missing: placeholder ? [placeholder.name] : [], empty: [] }
+  }
+  const apiKey = overrideValue ?? expanded.value
+  if (!apiKey) {
+    // Name the variable rather than echoing config, which may hold a literal key.
+    throw new DelphiSetupError(
+      placeholder
+        ? describeUnusableKey(name, rawKey, placeholder, expanded, env)
+        : `Provider "${name}" has no api_key.`,
+    )
+  }
+  return { baseUrl, apiKey }
+}
+
 /** Resolve every referenced provider's base_url + api_key, failing loudly. */
 function resolveProviders(
   profile: RawProfile,
   needed: Set<string>,
   env: NodeJS.ProcessEnv,
+  apiKeyOverrides: ApiKeyOverrides,
 ): Map<string, { baseUrl: string; apiKey: string }> {
   if (needed.size === 0) {
     throw new DelphiSetupError('No provider configured. Set "provider" on the profile or on each expert.')
@@ -172,33 +224,7 @@ function resolveProviders(
           `Known: ${Object.keys(providerTable).join(", ") || "(none)"}`,
       )
     }
-    const baseUrl = entry.base_url ?? entry.baseUrl ?? ""
-    if (!baseUrl) throw new DelphiSetupError(`Provider "${name}" has no base_url.`)
-
-    const rawKey = entry.api_key ?? entry.apiKey ?? ""
-    // Find the placeholder BEFORE touching `env`: the spelling lives in the
-    // config, not the environment, so a broken `env` must not hide it.
-    const placeholder = findPlaceholder(rawKey)
-    // Every read of `env` may fail — a caller can pass a proxy, a frozen object,
-    // or an environment that throws on access. Diagnostics must never become the
-    // reason the run dies: on any error fall back to the plainest possible
-    // message, which is still a DelphiSetupError (#576).
-    let expanded: ExpandedEnv
-    try {
-      expanded = expandEnvDetailed(rawKey, env)
-    } catch {
-      expanded = { value: "", missing: placeholder ? [placeholder.name] : [], empty: [] }
-    }
-    const apiKey = expanded.value
-    if (!apiKey) {
-      // Name the variable rather than echoing config, which may hold a literal key.
-      throw new DelphiSetupError(
-        placeholder
-          ? describeUnusableKey(name, rawKey, placeholder, expanded, env)
-          : `Provider "${name}" has no api_key.`,
-      )
-    }
-    resolved.set(name, { baseUrl, apiKey })
+    resolved.set(name, resolveOneProvider(name, entry, env, apiKeyOverrides))
   }
   return resolved
 }
@@ -290,6 +316,7 @@ function describeUnusableKey(
 export function resolveConfig(
   cfg: RawDelphiConfig,
   env: NodeJS.ProcessEnv = process.env,
+  apiKeyOverrides: ApiKeyOverrides = {},
 ): ResolvedDelphiConfig {
   const profile = selectProfile(cfg)
   const normalized = normalizeExperts(profile.experts)
@@ -299,7 +326,7 @@ export function resolveConfig(
   const providerNames = new Set(
     normalized.map((e) => e.raw.provider ?? profile.provider).filter((p): p is string => !!p),
   )
-  const resolvedProviders = resolveProviders(profile, providerNames, env)
+  const resolvedProviders = resolveProviders(profile, providerNames, env, apiKeyOverrides)
 
   const seats = normalized.map((e, i) => seatFromRaw(e.raw, i, e.role))
   // Surface an unexpanded placeholder as a config error, not a provider 404.
@@ -325,7 +352,9 @@ function buildResult(
 ): ResolvedDelphiConfig {
   // All seats share one gateway in the supported setup; require agreement so a
   // mixed list cannot silently send one seat's key to another host.
-  const chosen = resolvedProviders.get(normalized[0].raw.provider ?? profile.provider ?? "")
+  // Every seat resolves to the same gateway, so the first one speaks for all.
+  const [firstSeat] = normalized
+  const chosen = resolvedProviders.get(firstSeat?.raw.provider ?? profile.provider ?? "")
   if (!chosen) throw new DelphiSetupError("Unable to resolve a provider for the first expert.")
   for (const e of normalized) {
     const name = e.raw.provider ?? profile.provider ?? ""
@@ -345,8 +374,8 @@ function buildResult(
     seats,
     baseUrl: chosen.baseUrl,
     apiKey: chosen.apiKey,
-    thresholdPercent: consensus?.threshold_percent ?? 90,
-    maxRounds: consensus?.max_review_rounds ?? 5,
+    thresholdPercent: consensus?.threshold_percent ?? Number(CONSENSUS_DEFAULTS.threshold_percent),
+    maxRounds: consensus?.max_review_rounds ?? Number(CONSENSUS_DEFAULTS.max_review_rounds),
     provider: normalized[0].raw.provider ?? profile.provider ?? "",
   }
 }
@@ -358,12 +387,20 @@ function defaultGlobalConfigPath(env: NodeJS.ProcessEnv): string {
   return join(env.XDG_CONFIG_HOME || join(homedir(), ".config"), "xp-gate", ".delphi-config.json")
 }
 
+/**
+ * Pre-resolved credential values, keyed by the environment-variable name a config
+ * referenced.
+ *
+ * The loader is synchronous and the DSH credential service is asynchronous, so a
+ * caller that resolved a key from the store hands the result in here. The override
+ * is intentionally keyed by name: a config whose `api_key` is a literal, or which
+ * names a different variable, is left untouched.
+ */
+type ApiKeyOverrides = Readonly<Record<string, string>>
+
 /** Read and resolve `.delphi-config.json` from a project root. */
-export function loadDelphiConfig(
-  cwd: string,
-  env: NodeJS.ProcessEnv = process.env,
-  globalPath: string = defaultGlobalConfigPath(env),
-): ResolvedDelphiConfig {
+/** Read the raw config text from the project path, falling back to the global one. */
+function readConfigText(cwd: string, globalPath: string): string | null {
   // Global fallback (AC-DSH-016-03): the machine-wide config at
   // ~/.config/xp-gate/.delphi-config.json is the single source of truth for
   // every project. Without it, each repo needed its own copy — and reading a
@@ -371,9 +408,8 @@ export function loadDelphiConfig(
   // real money loss (2026-10-03: an expensive overseas model burned the daily
   // quota). A project-local config still wins, so per-project overrides work.
   const path = resolve(cwd, ".delphi-config.json")
-  let raw: string
   try {
-    raw = readFileSync(path, "utf8")
+    return readFileSync(path, "utf8")
   } catch (projectError) {
     // Fall back ONLY when the project file is genuinely absent (ENOENT); any
     // other read error must surface rather than silently route this run to
@@ -382,19 +418,67 @@ export function loadDelphiConfig(
     if ((projectError as NodeJS.ErrnoException)?.code !== "ENOENT") {
       throw new DelphiSetupError(`Cannot read ${path}: ${(projectError as Error).message}`)
     }
-    try {
-      raw = readFileSync(globalPath, "utf8")
-    } catch (globalError) {
-      // r16 CI-01: mirror the project-read semantics — a global file that is
-      // absent means "no config anywhere"; any OTHER error (EACCES/EISDIR)
-      // must surface as-is rather than masquerade as a missing file.
-      if ((globalError as NodeJS.ErrnoException)?.code !== "ENOENT") {
-        throw new DelphiSetupError(`Cannot read ${globalPath}: ${(globalError as Error).message}`)
-      }
-      throw new DelphiSetupError(
-        `No .delphi-config.json found at ${path} or the global location ${globalPath}.`
-      )
+  }
+  try {
+    return readFileSync(globalPath, "utf8")
+  } catch (globalError) {
+    // r16 CI-01: mirror the project-read semantics — a global file that is
+    // absent means "no config anywhere"; any OTHER error (EACCES/EISDIR)
+    // must surface as-is rather than masquerade as a missing file.
+    if ((globalError as NodeJS.ErrnoException)?.code !== "ENOENT") {
+      throw new DelphiSetupError(`Cannot read ${globalPath}: ${(globalError as Error).message}`)
     }
+    return null
+  }
+}
+
+/**
+ * List the environment-variable names the config's provider api_keys reference,
+ * WITHOUT resolving any of them.
+ *
+ * `loadDelphiConfig` is synchronous while DSH's credential service is asynchronous,
+ * so the caller has to learn what to resolve before it can build the config. Reading
+ * the names is deliberately tolerant: an unset variable is exactly the case this
+ * exists for, so a name is reported whether or not it currently has a value, and a
+ * missing config yields an empty list instead of an error.
+ */
+export function listCredentialReferences(
+  cwd: string,
+  globalPath: string = defaultGlobalConfigPath(process.env),
+): string[] {
+  const raw = readConfigText(cwd, globalPath)
+  if (raw === null) return []
+  let parsed: RawDelphiConfig
+  try {
+    parsed = JSON.parse(raw) as RawDelphiConfig
+  } catch {
+    // A malformed config is reported by loadDelphiConfig with an actionable
+    // message; there is simply nothing to resolve here.
+    return []
+  }
+
+  const names = new Set<string>()
+  for (const profile of Object.values(parsed.profiles ?? {})) {
+    for (const provider of Object.values(profile.providers ?? {})) {
+      const placeholder = findPlaceholder(provider.api_key ?? provider.apiKey ?? "")
+      if (placeholder) names.add(placeholder.name)
+    }
+  }
+  return [...names].sort()
+}
+
+export function loadDelphiConfig(
+  cwd: string,
+  env: NodeJS.ProcessEnv = process.env,
+  globalPath: string = defaultGlobalConfigPath(env),
+  apiKeyOverrides: ApiKeyOverrides = {},
+): ResolvedDelphiConfig {
+  const raw = readConfigText(cwd, globalPath)
+  if (raw === null) {
+    const path = resolve(cwd, ".delphi-config.json")
+    throw new DelphiSetupError(
+      `No .delphi-config.json found at ${path} or the global location ${globalPath}.`
+    )
   }
   let parsed: RawDelphiConfig
   try {
@@ -402,7 +486,7 @@ export function loadDelphiConfig(
   } catch (e) {
     throw new DelphiSetupError(`.delphi-config.json is not valid JSON: ${(e as Error).message}`)
   }
-  return resolveConfig(parsed, env)
+  return resolveConfig(parsed, env, apiKeyOverrides)
 }
 
 /** Build the transport options a round needs from a resolved config. */
