@@ -1,0 +1,17 @@
+# Files that must never ship in the published tarball.
+#
+# The `files` allowlist in package.json already covers the intended surface,
+# but npm still packs some dot-entries and generated artifacts that live under
+# an allowlisted directory. .archlint-cache/ is archlint's own cache: it is
+# regenerated on every run, it grows without bound, and its two files
+# (git-history.redb, cache.bin) accounted for 2.16 MB of a 2.88 MB tarball —
+# enough to trip the 2 MB size guard in Cross-Platform CI.
+.archlint-cache/
+*.redb
+*.bin
+
+# Editor and OS scratch files.
+.DS_Store
+Thumbs.db
+*.swp
+*~
