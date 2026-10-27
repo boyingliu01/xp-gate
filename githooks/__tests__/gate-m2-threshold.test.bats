@@ -27,6 +27,16 @@ setup() {
   git config user.name "Test"
   git config core.hooksPath .git/hooks
 
+  # Isolate HOME/XDG_CONFIG_HOME (#636). Gate MW falls back to the machine-wide
+  # ~/.config/xp-gate/.delphi-config.json when the fixture has no project config,
+  # so the model-a/b/c evidence built below would otherwise be checked against
+  # whatever seats the developer has installed — the suite would pass or fail by
+  # machine. The project config further down names those same models.
+  export HOME="$TEST_DIR/home"
+  export USERPROFILE="$TEST_DIR/home"
+  unset XDG_CONFIG_HOME
+  mkdir -p "$HOME"
+
   # Create mock jscpd so Gate 2 doesn't block on missing tool
   mkdir -p "$TEST_DIR/bin"
   cat > "$TEST_DIR/bin/jscpd" << 'MOCK'
@@ -46,6 +56,23 @@ MOCK
   # adapter-common.sh is sourced by pre-push at Gate M
   cp "$SOURCE_GITHOOKS/adapter-common.sh" .git/hooks/adapter-common.sh 2>/dev/null || true
   cp "$SOURCE_GITHOOKS/hook-module-resolution.sh" .git/hooks/hook-module-resolution.sh 2>/dev/null || true
+
+  # The seats the evidence below claims. Declaring them keeps the fixture
+  # independent of any machine-wide config (#636).
+  cat > .delphi-config.json << 'CFG'
+{
+  "active_profile": "fixture",
+  "profiles": {
+    "fixture": {
+      "experts": {
+        "architecture": { "provider": "fixture", "model": "model-a" },
+        "technical": { "provider": "fixture", "model": "model-b" },
+        "feasibility": { "provider": "fixture", "model": "model-c" }
+      }
+    }
+  }
+}
+CFG
 
   # Create initial commit (no test files — clean baseline for diff-tree)
   echo "init" > README.md
