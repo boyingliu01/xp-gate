@@ -1,28 +1,30 @@
 /**
- * Parity between the two definitions of "machine-wide Delphi config path".
+ * Parity between the three definitions of "machine-wide Delphi config path".
  *
  * @test REQ-636
- * @intent Prove the Gate MW validator and the DSH plugin resolve the SAME
- *         machine-wide `.delphi-config.json`, so a review cannot be bound
- *         against seats from a different file than the one the reviewer used.
+ * @intent Prove the Gate MW validator, the DSH plugin and the external review
+ *         loader resolve the SAME machine-wide `.delphi-config.json`, so a
+ *         review cannot be bound against seats from a different file than the
+ *         one the reviewer actually used.
  *
  * WHY THIS EXISTS (2026-10-27 review, technical seat CRITICAL):
- *   #636 added a machine-wide fallback in two places — `defaultGlobalConfigPath()`
- *   in `plugins/dsh/src/delphi-config.ts` (ESM/TypeScript) and `globalConfigPath()`
- *   in `githooks/lib/validate-code-walkthrough.cjs` (CJS, shipped as a hook). They
- *   cannot share an import: the hook is plain CJS copied into `.git/hooks`, the
- *   plugin is ESM built to `lib/`. Restating the rule was the only option, and a
- *   restated rule drifts.
+ *   #636 added a machine-wide fallback in `globalConfigPath()` in
+ *   `githooks/lib/validate-code-walkthrough.cjs` (CJS, shipped as a hook) and
+ *   `defaultGlobalConfigPath()` in `plugins/dsh/src/delphi-config.ts`
+ *   (ESM/TypeScript). `scripts/delphi-external-review.cjs` already had the rule
+ *   from #541. They cannot share an import: the hook is plain CJS copied into
+ *   `.git/hooks`, the plugin is ESM built to `lib/`. Restating the rule was the
+ *   only option, and a restated rule drifts.
  *
- *   The failure mode is silent and severe: if the plugin starts honouring a
- *   different XDG_CONFIG_HOME than the gate, the gate validates the seats from
- *   file A while the reviewer ran on the seats from file B. Every seat check
- *   still PASSES — it just passes against the wrong file, which is the exact
- *   class of defect #574 was written to catch.
+ *   The failure mode is silent and severe: if one of the three starts honouring
+ *   a different XDG_CONFIG_HOME, the gate validates the seats from file A while
+ *   the reviewer ran on the seats from file B. Every seat check still PASSES —
+ *   it just passes against the wrong file, which is the exact class of defect
+ *   #574 was written to catch.
  *
- *   So this test does not restate the path either. It imports the plugin's
- *   definition and compares it against the gate's, over the env shapes that
- *   actually differ in practice.
+ *   So this test does not restate the path either. It imports all three
+ *   definitions and compares them, over the env shapes that actually differ in
+ *   practice.
  */
 
 import { describe, it, expect } from 'vitest';
@@ -32,6 +34,10 @@ import { homedir } from 'node:os';
 import { defaultGlobalConfigPath } from '../../plugins/dsh/src/delphi-config.js';
 
 const require_ = createRequire(import.meta.url);
+
+/** The external review loader's definition; it exports itself under require. */
+const externalReview = require_(resolve(process.cwd(), 'scripts/delphi-external-review.cjs'));
+const reviewPath: (env: NodeJS.ProcessEnv) => string = externalReview.globalConfigPath;
 
 /** Load the gate's CJS path helper without executing its CLI main(). */
 function loadGatePathHelper(): (env?: NodeJS.ProcessEnv) => string {
@@ -61,8 +67,15 @@ function loadGatePathHelper(): (env?: NodeJS.ProcessEnv) => string {
   return m.exports.__globalConfigPath;
 }
 
-describe('REQ-636: machine-wide config path parity (gate <-> DSH plugin)', () => {
+describe('REQ-636: machine-wide config path parity (gate <-> DSH plugin <-> review loader)', () => {
   const gatePath = loadGatePathHelper();
+
+  /** All three independent definitions, in the order they were written. */
+  const definitions: Array<[string, (env: NodeJS.ProcessEnv) => string]> = [
+    ['Gate MW validator', gatePath],
+    ['DSH plugin', defaultGlobalConfigPath],
+    ['external review loader', reviewPath],
+  ];
 
   const cases: Array<[string, NodeJS.ProcessEnv]> = [
     ['XDG_CONFIG_HOME set', { XDG_CONFIG_HOME: '/custom/xdg' } as NodeJS.ProcessEnv],
@@ -71,18 +84,28 @@ describe('REQ-636: machine-wide config path parity (gate <-> DSH plugin)', () =>
   ];
 
   for (const [label, env] of cases) {
-    it(`resolves the same file when ${label}`, () => {
-      expect(gatePath(env)).toBe(defaultGlobalConfigPath(env));
+    it(`all three resolve the same file when ${label}`, () => {
+      const resolved = definitions.map(([name, fn]) => [name, fn(env)] as const);
+      const reference = resolved[0][1];
+      for (const [name, value] of resolved) {
+        expect(`${name}=${value}`).toBe(`${name}=${reference}`);
+      }
     });
   }
 
-  it('both point at <base>/xp-gate/.delphi-config.json', () => {
-    const resolvedPath = gatePath({ XDG_CONFIG_HOME: '/custom/xdg' } as NodeJS.ProcessEnv);
-    expect(resolvedPath).toBe(join('/custom/xdg', 'xp-gate', '.delphi-config.json'));
+  it('all three point at <base>/xp-gate/.delphi-config.json', () => {
+    const expected = join('/custom/xdg', 'xp-gate', '.delphi-config.json');
+    for (const [name, fn] of definitions) {
+      expect(`${name}=${fn({ XDG_CONFIG_HOME: '/custom/xdg' } as NodeJS.ProcessEnv)}`).toBe(
+        `${name}=${expected}`
+      );
+    }
   });
 
-  it('both fall back to ~/.config when XDG_CONFIG_HOME is unset', () => {
-    const resolvedPath = gatePath({} as NodeJS.ProcessEnv);
-    expect(resolvedPath).toBe(join(homedir(), '.config', 'xp-gate', '.delphi-config.json'));
+  it('all three fall back to ~/.config when XDG_CONFIG_HOME is unset', () => {
+    const expected = join(homedir(), '.config', 'xp-gate', '.delphi-config.json');
+    for (const [name, fn] of definitions) {
+      expect(`${name}=${fn({} as NodeJS.ProcessEnv)}`).toBe(`${name}=${expected}`);
+    }
   });
 });

@@ -132,6 +132,21 @@ function validateProviders(providers, profileName) {
   }
 }
 
+/**
+ * Machine-wide `.delphi-config.json` path: `$XDG_CONFIG_HOME/xp-gate/`, or
+ * `~/.config/xp-gate/` when the variable is unset.
+ *
+ * Exported so the path-parity test can hold this loader, the Gate MW validator
+ * and the DSH plugin to one definition instead of three restatements.
+ *
+ * @param {NodeJS.ProcessEnv} env
+ * @returns {string}
+ */
+function globalConfigPath(env) {
+  const configHome = env.XDG_CONFIG_HOME || path.join(os.homedir(), '.config');
+  return path.join(configHome, 'xp-gate', '.delphi-config.json');
+}
+
 function readConfig(configPath, profileOverride) {
   // Global fallback: a relative --config that this cwd does not have resolves
   // to the machine-wide ~/.config/xp-gate/.delphi-config.json. This is what
@@ -152,8 +167,12 @@ function readConfig(configPath, profileOverride) {
     // pins ~/.config/xp-gate — overriding only this loader would make the two
     // disagree. On Linux, $HOME/.config IS the XDG default, so behaviour there
     // is identical; the env var only matters for non-default setups.
-    const configHome = process.env.XDG_CONFIG_HOME || path.join(os.homedir(), '.config');
-    const globalPath = path.join(configHome, 'xp-gate', '.delphi-config.json');
+    //
+    // Extracted so the Gate MW validator and the DSH plugin can be held to the
+    // SAME path by test (req-636-config-path-parity). Three hand-written copies
+    // of this rule existed; a drift between them is silent and severe — the
+    // review would run on one file's seats while the gate validated another's.
+    const globalPath = globalConfigPath(process.env);
     if (fs.existsSync(globalPath)) {
       console.error(`[delphi-review] ${configPath} not found here — using global config ${globalPath}`);
       configPath = globalPath;
@@ -958,6 +977,7 @@ if (require.main !== module) {
   module.exports = {
     parseArgs,
     readConfig,
+    globalConfigPath,
     validateDistinctModels,
     extractJsonFromResponse,
     buildSystemPrompt,
