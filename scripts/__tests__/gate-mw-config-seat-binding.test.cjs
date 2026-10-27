@@ -118,9 +118,20 @@ function evidenceFor(seats) {
  * from `process.cwd()`, which made this very suite bind to xp-gate's own
  * `.delphi-config.json` when run from the repo root and broke the #423 tests.
  *
+ * HOME/XDG_CONFIG_HOME are redirected at an empty temp dir for the same reason
+ * (2026-10-27). The validator now falls back to the machine-wide config when the
+ * project has none, so an unisolated run would read the DEVELOPER's real
+ * `~/.config/xp-gate/.delphi-config.json` — making "no config => unbound"
+ * pass or fail depending on whose machine the suite runs on. Options:
+ *   - `globalConfig: {...}` writes that config into the isolated HOME and
+ *     exercises the fallback deliberately;
+ *   - omitting it leaves HOME truly empty, so `null` project config really
+ *     means "no config anywhere".
+ *
  * @param document evidence document
  * @param config `.delphi-config.json` contents, or null to omit the file
  * @param options.cwd directory to launch the validator from
+ * @param options.globalConfig machine-wide config to place in an isolated HOME
  * @returns {exitCode, output}
  */
 function run(document, config, options = {}) {
@@ -132,12 +143,23 @@ function run(document, config, options = {}) {
   if (config !== null) {
     writeFileSync(join(projectRoot, '.delphi-config.json'), JSON.stringify(config), 'utf8');
   }
+  // Isolated HOME: $HOME/.config/xp-gate/.delphi-config.json holds the
+  // machine-wide config the validator falls back to.
+  const fakeHome = join(dir, 'home');
+  const globalDir = join(fakeHome, '.config', 'xp-gate');
+  mkdirSync(globalDir, { recursive: true });
+  if (options.globalConfig) {
+    writeFileSync(join(globalDir, '.delphi-config.json'), JSON.stringify(options.globalConfig), 'utf8');
+  }
+  const env = { ...process.env, HOME: fakeHome, USERPROFILE: fakeHome };
+  delete env.XDG_CONFIG_HOME;
   const args = [VALIDATOR, evidencePath, COMMIT, BRANCH, NOW, projectRoot];
   try {
     const out = execFileSync('node', args, {
       cwd: options.cwd ?? projectRoot,
       encoding: 'utf8',
       stdio: ['ignore', 'pipe', 'pipe'],
+      env,
     });
     return { exitCode: 0, output: out };
   } catch (error) {
@@ -247,6 +269,49 @@ describe('#574 Gate MW binds evidence to the configured Delphi seats', () => {
       config
     );
     expect(inactiveMatch.exitCode).toBe(1);
+  });
+
+  it('AC-574-08: no project config falls back to the machine-wide config', () => {
+    // The consolidation setup: one config at ~/.config/xp-gate/, no per-repo
+    // copy. Before this fallback the seat check silently disappeared for that
+    // setup, so the drift below passed while the gate reported PASS.
+    const drifted = {
+      architecture: 's-deepseek-v4.1-flash',
+      technical: 'g-deepseek-v4-pro',
+      feasibility: 'doubao-seed-2.0-pro',
+    };
+
+    const blocked = run(evidenceFor(drifted), null, { globalConfig: delphiConfig(LOCAL_SEATS) });
+    expect(blocked.exitCode).toBe(1);
+    expect(blocked.output).toMatch(/requested_model/);
+
+    const accepted = run(evidenceFor(LOCAL_SEATS), null, { globalConfig: delphiConfig(LOCAL_SEATS) });
+    expect(accepted.exitCode).toBe(0);
+  });
+
+  it('AC-574-09: a project config still WINS over the machine-wide one', () => {
+    // Overrides stay possible: the fallback must not shadow a deliberate
+    // per-repo choice.
+    const projectSeats = {
+      architecture: 'repo-a',
+      technical: 'repo-b',
+      feasibility: 'repo-c',
+    };
+    const machineSeats = {
+      architecture: 'machine-a',
+      technical: 'machine-b',
+      feasibility: 'machine-c',
+    };
+
+    const usesProject = run(evidenceFor(projectSeats), delphiConfig(projectSeats), {
+      globalConfig: delphiConfig(machineSeats),
+    });
+    expect(usesProject.exitCode).toBe(0);
+
+    const rejectsMachine = run(evidenceFor(machineSeats), delphiConfig(projectSeats), {
+      globalConfig: delphiConfig(machineSeats),
+    });
+    expect(rejectsMachine.exitCode).toBe(1);
   });
 
   it('AC-574-06: a config with an unresolvable active_profile FAILS closed', () => {
