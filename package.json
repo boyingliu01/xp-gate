@@ -25,7 +25,7 @@
     "normalize-lock": "node scripts/normalize-lock-registry.cjs",
     "lint": "eslint src --ext .ts",
     "principles": "npx tsx src/principles/index.ts",
-    "archlint": "npx @archlinter/cli scan . --config architecture.yaml",
+    "archlint": "npx @archlinter/cli scan .",
     "dashboard": "node dashboard/serve.js",
     "test:bats": "node scripts/run-bats.cjs"
   },
