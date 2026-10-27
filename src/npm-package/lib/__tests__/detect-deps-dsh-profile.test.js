@@ -42,7 +42,7 @@ describe('PLATFORM_PROFILES covers dsh (#635)', () => {
   // AC-635-05: the profile is a real entry, so a caller enumerating platforms
   // sees dsh alongside the three that were already there.
   it('dsh is an enumerable platform profile with skillsDirs and requiredDeps', () => {
-    const { PLATFORM_PROFILES } = require('../detect-deps');
+    const { PLATFORM_PROFILES, getSkillsDirs } = require('../detect-deps');
 
     expect(Object.keys(PLATFORM_PROFILES)).toContain('dsh');
     expect(Object.keys(PLATFORM_PROFILES)).toEqual(
@@ -51,20 +51,41 @@ describe('PLATFORM_PROFILES covers dsh (#635)', () => {
 
     const profile = PLATFORM_PROFILES.dsh;
     expect(Array.isArray(profile.skillsDirs)).toBe(true);
-    expect(profile.skillsDirs[0]).toBe(path.join(tmpHome, '.dsh', 'skills'));
     expect(profile.requiredDeps).toBeDefined();
+    // Profiles store home-relative segments; getSkillsDirs resolves them.
+    expect(profile.skillsDirs[0]).toEqual(['.dsh', 'skills']);
+    expect(getSkillsDirs('dsh')[0]).toBe(path.join(tmpHome, '.dsh', 'skills'));
   });
 
-  // The dsh entry must follow process.env.HOME rather than pinning the home
-  // directory at require() time — the trap doctor.js documents at its top.
-  it('dsh paths follow a HOME change after require', () => {
+  // Every profile must be plain data — no getters mixed in with values, which
+  // would break Object.keys()/JSON round-trips and made the object's contract
+  // depend on which key you touched (Delphi R1 CI-01).
+  it('every profile is plain enumerable data, with no accessor properties', () => {
     const { PLATFORM_PROFILES } = require('../detect-deps');
-    // Loaded above with the first tmpHome; move HOME and re-read the getter.
+
+    for (const name of Object.keys(PLATFORM_PROFILES)) {
+      const descriptor = Object.getOwnPropertyDescriptor(PLATFORM_PROFILES, name);
+      expect(descriptor.get, `${name} must not be an accessor`).toBeUndefined();
+      // A plain value also survives a JSON round-trip unchanged.
+      expect(JSON.parse(JSON.stringify(PLATFORM_PROFILES[name]))).toEqual(
+        PLATFORM_PROFILES[name]
+      );
+    }
+  });
+
+  // Paths must follow process.env.HOME rather than pinning the home directory
+  // at require() time — the trap doctor.js documents at its top.
+  it('resolved paths follow a HOME change after require', () => {
+    const { getSkillsDirs } = require('../detect-deps');
+    // Loaded above with the first tmpHome; move HOME and resolve again.
     const secondHome = fs.mkdtempSync(path.join(os.tmpdir(), 'xpgate-dsh2-'));
     try {
       process.env.HOME = secondHome;
-      expect(PLATFORM_PROFILES.dsh.skillsDirs[0]).toBe(
-        path.join(secondHome, '.dsh', 'skills')
+      expect(getSkillsDirs('dsh')[0]).toBe(path.join(secondHome, '.dsh', 'skills'));
+      // The pre-existing profiles must follow too — they used to be frozen at
+      // require() time from a destructured HOME_DIR.
+      expect(getSkillsDirs('opencode')[0]).toBe(
+        path.join(secondHome, '.config', 'opencode', 'skills')
       );
     } finally {
       fs.rmSync(secondHome, { recursive: true, force: true });
