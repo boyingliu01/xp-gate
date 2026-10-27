@@ -146,7 +146,10 @@ async function validateFile(
   try {
     content = await readFile(fullPath, 'utf-8');
   } catch (error) {
-    throw new Error(`cannot read test file ${testFile}: ${(error as Error).message}`);
+    // String(error) rather than (error as Error).message: a thrower is free to
+    // reject with a non-Error, and that cast would render the cause as
+    // "undefined" — losing the only diagnostic this rethrow exists to add.
+    throw new Error(`cannot read test file ${testFile}: ${String(error)}`);
   }
   const layer = detectTestLayer(testFile);
   const imports = collectImports(content);
