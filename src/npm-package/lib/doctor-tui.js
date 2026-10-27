@@ -118,36 +118,117 @@ function compareSemver(a, b) {
 }
 
 /**
+ * Every skills directory `xp-gate init` deploys to, in priority order.
+ *
+ * init deploys to all of these at once, so doctor has to verify all of them —
+ * resolving a single "current" platform silently left the other two unchecked
+ * (#635). `.dsh` is included because the package ships
+ * `plugins/dsh` and `sync-package-content.js` treats `dsh` as a first-class
+ * platform, even though `detectPlatform()` never returns it.
+ *
+ * HOME_DIR is read through the module at each call (it is a lazy getter, and
+ * tests reassign process.env.HOME), never captured at require() time.
+ *
+ * @returns {Array<{platform: string, dir: string}>}
+ */
+function skillsDeployTargets() {
+  const home = require('./shared-paths.js').HOME_DIR;
+  return [
+    { platform: 'opencode', dir: path.join(home, '.config', 'opencode', 'skills') },
+    { platform: 'dsh', dir: path.join(home, '.dsh', 'skills') },
+    { platform: 'qoder', dir: path.join(home, '.qoder', 'skills') },
+    { platform: 'claude-code', dir: path.join(home, '.claude', 'skills') },
+  ];
+}
+
+/**
+ * List the skill names actually present in a skills directory.
+ *
+ * A skill counts as installed when `<dir>/<name>/SKILL.md` exists — the same
+ * shape `install-skill` writes. Returns [] when the directory is missing or
+ * unreadable; a missing directory is "not deployed here", not an error.
+ *
+ * @param {string} dir
+ * @returns {string[]}
+ */
+function listInstalledSkillNames(dir) {
+  let entries;
+  try {
+    entries = fs.readdirSync(dir, { withFileTypes: true });
+  } catch {
+    return [];
+  }
+  return entries
+    .filter((e) => e.isDirectory() && fs.existsSync(path.join(dir, e.name, 'SKILL.md')))
+    .map((e) => e.name)
+    .sort();
+}
+
+/**
  * Check 9: Installed skills vs package-bundled skills (#332).
  * Uses semver version comparison on SKILL.md frontmatter when available;
  * falls back to byte-for-byte content comparison for skills without version field.
+ *
+ * The skill list comes from the filesystem, not from `config.installedSkills`:
+ * `xp-gate init` never writes that field, so keying off it made this check
+ * report "No skills installed" on a fully deployed machine and return before
+ * touching disk (#635). An explicit `config.installedSkills` is still honoured
+ * when present, so callers and older tests keep their behaviour.
+ *
  * @param {object} config
  * @param {Array} checks
  * @returns {number} issue count
  */
 function diagnoseInstalledSkills(config, checks) {
-  const installedSkills = config.installedSkills || {};
-  const skillNames = Object.keys(installedSkills);
-  if (skillNames.length === 0) {
-    checks.push({ name: 'Installed skills', status: 'SKIP', detail: 'No skills installed' });
-    return 0;
-  }
-
   const bundledSkillsDir = path.join(PKG_DIR, 'skills');
   if (!fs.existsSync(bundledSkillsDir)) {
     checks.push({ name: 'Installed skills', status: 'SKIP', detail: 'Package skills dir not found' });
     return 0;
   }
 
+  const explicit = config && config.installedSkills ? Object.keys(config.installedSkills) : [];
+  const targets = skillsDeployTargets();
+
+  // Which platform did the caller (or the environment) intend? When an explicit
+  // list is supplied we keep single-target behaviour for that platform.
   const platform = detectPlatform();
-  let userSkillsDir;
-  if (platform === 'qoder') {
-    userSkillsDir = path.join(HOME_DIR, '.qoder', 'skills');
-  } else if (platform === 'claude-code') {
-    userSkillsDir = path.join(HOME_DIR, '.claude', 'skills');
-  } else {
-    userSkillsDir = path.join(HOME_DIR, '.config', 'opencode', 'skills');
+  if (explicit.length > 0) {
+    const match = targets.find((t) => t.platform === platform) || targets[0];
+    return diagnoseSkillsInDir(explicit, match.dir, bundledSkillsDir, checks, null);
   }
+
+  // No explicit list: verify every directory that actually has skills deployed.
+  const deployed = targets.filter((t) => listInstalledSkillNames(t.dir).length > 0);
+  if (deployed.length === 0) {
+    checks.push({
+      name: 'Installed skills',
+      status: 'SKIP',
+      detail: `No skills deployed in any known location (${targets.map((t) => t.platform).join(', ')})`,
+    });
+    return 0;
+  }
+
+  let issues = 0;
+  for (const target of deployed) {
+    const names = listInstalledSkillNames(target.dir);
+    issues += diagnoseSkillsInDir(names, target.dir, bundledSkillsDir, checks, target.platform);
+  }
+  return issues;
+}
+
+/**
+ * Compare one deployed skills directory against the bundled copy.
+ *
+ * @param {string[]} skillNames
+ * @param {string} userSkillsDir
+ * @param {string} bundledSkillsDir
+ * @param {Array} checks
+ * @param {string|null} platformLabel - prefix for check names, or null for the
+ *   legacy unprefixed names (explicit-installedSkills callers).
+ * @returns {number} issue count
+ */
+function diagnoseSkillsInDir(skillNames, userSkillsDir, bundledSkillsDir, checks, platformLabel) {
+  const label = (name) => (platformLabel ? `Skill [${platformLabel}]: ${name}` : `Skill: ${name}`);
 
   let issues = 0;
   for (const name of skillNames) {
@@ -156,7 +237,7 @@ function diagnoseInstalledSkills(config, checks) {
 
     if (!fs.existsSync(bundledSkillMd)) continue;
     if (!fs.existsSync(userSkillMd)) {
-      checks.push({ name: `Skill: ${name}`, status: 'FAIL', detail: 'Installed SKILL.md missing' });
+      checks.push({ name: label(name), status: 'FAIL', detail: 'Installed SKILL.md missing' });
       issues++;
       continue;
     }
@@ -174,24 +255,24 @@ function diagnoseInstalledSkills(config, checks) {
         // Version strings not valid semver — fall back to content comparison
         if (!sameContentIgnoringLineEndings(bundledContent, userContent)) {
           checks.push({
-            name: `Skill: ${name}`,
+            name: label(name),
             status: 'WARN',
             detail: `Outdated — run xp-gate update-skill --all (installed: ${userVersion}, bundled: ${bundledVersion})`,
           });
           issues++;
         } else {
-          checks.push({ name: `Skill: ${name}`, status: 'PASS', detail: 'Up to date' });
+          checks.push({ name: label(name), status: 'PASS', detail: 'Up to date' });
         }
       } else if (cmp < 0) {
         checks.push({
-          name: `Skill: ${name}`,
+          name: label(name),
           status: 'WARN',
           detail: `Outdated — run xp-gate update-skill --all (installed: ${userVersion}, bundled: ${bundledVersion})`,
         });
         issues++;
       } else {
         // cmp >= 0: installed version is same or newer than bundled
-        checks.push({ name: `Skill: ${name}`, status: 'PASS', detail: 'Up to date' });
+        checks.push({ name: label(name), status: 'PASS', detail: 'Up to date' });
       }
     } else {
       // No version in at least one file — compare content, but not byte-for-byte:
@@ -206,13 +287,13 @@ function diagnoseInstalledSkills(config, checks) {
         withoutVersionLine(userContent)
       )) {
         checks.push({
-          name: `Skill: ${name}`,
+          name: label(name),
           status: 'WARN',
           detail: 'Content differs and version cannot be determined (missing version frontmatter) — compare manually before running update-skill (it pulls from main, which may be older than the installed copy)',
         });
         issues++;
       } else {
-        checks.push({ name: `Skill: ${name}`, status: 'PASS', detail: 'Up to date' });
+        checks.push({ name: label(name), status: 'PASS', detail: 'Up to date' });
       }
     }
   }
