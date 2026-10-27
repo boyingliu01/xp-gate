@@ -2885,9 +2885,18 @@ else
           echo "ℹ️  Shell coverage not typically measured"
           ;;
         *)
+          # #640: hand the staged set to the adapter. Java's run_coverage uses it
+          # for three-tier smart selection (changed-tests -> related -> full);
+          # without it the adapter deliberately runs the full suite rather than
+          # guessing, so this export failing closed is safe.
+          # Colon-separated: newlines do not survive every adapter's word
+          # splitting, and paths with spaces stay intact inside the value.
+          GATE_CHANGED_FILES=$(printf '%s' "$CHANGED_FILES" | tr '\n' ':')
+          export GATE_CHANGED_FILES
           default_cov_output=$(run_coverage 2>&1)
           COV_EXIT=$((COV_EXIT || $?))
           echo "$default_cov_output" | head -30
+          unset GATE_CHANGED_FILES
           ;;
       esac
     else
