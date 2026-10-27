@@ -132,21 +132,6 @@ function validateProviders(providers, profileName) {
   }
 }
 
-/**
- * Machine-wide `.delphi-config.json` path: `$XDG_CONFIG_HOME/xp-gate/`, or
- * `~/.config/xp-gate/` when the variable is unset.
- *
- * Exported so the path-parity test can hold this loader, the Gate MW validator
- * and the DSH plugin to one definition instead of three restatements.
- *
- * @param {NodeJS.ProcessEnv} env
- * @returns {string}
- */
-function globalConfigPath(env) {
-  const configHome = env.XDG_CONFIG_HOME || path.join(os.homedir(), '.config');
-  return path.join(configHome, 'xp-gate', '.delphi-config.json');
-}
-
 function readConfig(configPath, profileOverride) {
   // Global fallback: a relative --config that this cwd does not have resolves
   // to the machine-wide ~/.config/xp-gate/.delphi-config.json. This is what
@@ -167,11 +152,7 @@ function readConfig(configPath, profileOverride) {
     // pins ~/.config/xp-gate — overriding only this loader would make the two
     // disagree. On Linux, $HOME/.config IS the XDG default, so behaviour there
     // is identical; the env var only matters for non-default setups.
-    //
-    // Extracted so the Gate MW validator and the DSH plugin can be held to the
-    // SAME path by test (req-636-config-path-parity). Three hand-written copies
-    // of this rule existed; a drift between them is silent and severe — the
-    // review would run on one file's seats while the gate validated another's.
+    // Extracted so all three resolution points share one definition (REQ-636).
     const globalPath = globalConfigPath(process.env);
     if (fs.existsSync(globalPath)) {
       console.error(`[delphi-review] ${configPath} not found here — using global config ${globalPath}`);
@@ -1004,4 +985,26 @@ if (require.main !== module) {
     console.error(`[delphi-review] FATAL: ${err.message}`);
     process.exit(1);
   });
+}
+
+/**
+ * Machine-wide `.delphi-config.json` path: `$XDG_CONFIG_HOME/xp-gate/`, or
+ * `~/.config/xp-gate/` when the variable is unset.
+ *
+ * Exported so the path-parity test can hold this loader, the Gate MW validator
+ * and the DSH plugin to one definition instead of three restatements.
+ *
+ * Deliberately declared at the END of the file. Function declarations hoist, so
+ * readConfig above can call it, but placing it here keeps every line before the
+ * old EOF byte-identical — which matters because `.ccn-baseline.json` anchors
+ * anonymous functions by line number (`file::(anonymous)@657`). Adding these
+ * lines near the top shifted that anchor to 676 and Gate 3 then read a
+ * pre-existing CCN=24 function as a brand-new violation.
+ *
+ * @param {NodeJS.ProcessEnv} env
+ * @returns {string}
+ */
+function globalConfigPath(env) {
+  const configHome = env.XDG_CONFIG_HOME || path.join(os.homedir(), '.config');
+  return path.join(configHome, 'xp-gate', '.delphi-config.json');
 }
