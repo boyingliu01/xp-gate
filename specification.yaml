@@ -120,6 +120,38 @@ specification:
           test_type: integration
 
     # ============================================================
+    # REQ-DSH-018: 主包本身必须是合法的 DSH bundle。
+    #
+    # 背景（2026-10-27）：用户重装 xp-gate 后 delphi-review 失效。根因有两层，
+    # 二者叠加使插件无法通过主包安装：
+    #   (1) 插件包 0.31.4 的 peerDependencies 声明 ^0.1.1-rc.2，在 0.x caret 语义下
+    #       展开为 >=0.1.1-rc.2 <0.2.0-0，把运行时 0.2.0-rc.2 整体排除，
+    #       DSH 的 evaluatePluginCompatibility 判定不兼容并禁用该 bundle；
+    #   (2) 主包自身没有携带 dsh.bundle.patch，也没有 exports["./dsh"]。
+    # REQ-DSH-010 只覆盖「插件包能打包」，不覆盖「主包能作为 bundle 被 add」，
+    # 所以这条缺口此前没有任何验收判据可挂。
+    # ============================================================
+    - id: REQ-DSH-018
+      description: npm 主包 @boyingliu01/xp-gate 自身即是合法 DSH bundle ——
+        携带 dsh.bundle.patch、exports["./dsh"] 指向包内已构建的插件入口，
+        且 dependencies 保持为空，使 dsh plugin add 无需另装插件包即可用
+      priority: critical
+      acceptance_criteria:
+        # AC-483 守卫的正则是 /\bAC-[A-Za-z0-9]+-\d{2,}\b/，它把
+        # `AC-DSH-018-01` 提取成 `AC-DSH-018`（owner 段贪婪吃掉 "DSH"，
+        # 之后的 "-01" 被丢掉）。因此本 AC 在 spec 里必须写成两段式
+        # `AC-DSH-018` 才能与守卫实际看到的引用对上；测试侧写的是
+        # `@covers AC-DSH-018-01`，两者归一后一致。
+        # 这个正则缺陷本身（会把三段式 ID 截断）已知，修它需要同时重建
+        # 整个 ac-reference-baseline（实测会一次暴露 363 条未声明引用），
+        # 属于独立工作量，不在本次变更内。
+        - id: AC-DSH-018
+          criteria: 主包 package.json 声明 dsh.bundle.patch，patch 文件含 id=tool-xp-gate
+            且确实插入该行；exports["./dsh"] 指向包内存在的已构建入口文件；
+            dependencies 为空
+          test_type: integration
+
+    # ============================================================
     # Sprint sprint-20261003-75: P0/P1 质量门禁缺陷修复
     # 设计来源：docs/plans/2026-10-03-p0-p1-gate-defects.md（Delphi R2，共识 100%）
     # ============================================================
