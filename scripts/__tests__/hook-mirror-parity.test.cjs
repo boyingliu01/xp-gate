@@ -110,6 +110,13 @@ describe('hook mirror validation', () => {
     fs.mkdirSync(path.join(fixture, 'src/npm-package/mutation'), { recursive: true });
     fs.writeFileSync(path.join(fixture, 'src/mutation/gate-m.ts'), 'export const x = 1;\n');
     fs.writeFileSync(path.join(fixture, 'src/npm-package/mutation/gate-m.ts'), 'export const x = 1;\n');
+    // Same for the published mock-policy module guard: the three mock-policy
+    // fixes on main edited only src/mock-policy/, so the mirror kept the old
+    // behaviour and nothing compared the trees.
+    fs.mkdirSync(path.join(fixture, 'src/mock-policy'), { recursive: true });
+    fs.mkdirSync(path.join(fixture, 'src/npm-package/mock-policy'), { recursive: true });
+    fs.writeFileSync(path.join(fixture, 'src/mock-policy/gate-m3.ts'), 'export const x = 1;\n');
+    fs.writeFileSync(path.join(fixture, 'src/npm-package/mock-policy/gate-m3.ts'), 'export const x = 1;\n');
   });
 
   afterEach(() => fs.rmSync(fixture, { recursive: true, force: true }));

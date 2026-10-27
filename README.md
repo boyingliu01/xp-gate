@@ -76,6 +76,7 @@ AI 辅助编程把这个问题彻底改变了。AI 写完一段代码的速度�
 - **Gate 10**: SAST 安全扫描 — 代码层安全漏洞
 - **Gate 11**: Sprint Flow — 流程合规
 - **Gate 12**: 文件卫生 — 冲突标记、语法检查（警告级）
+- **Gate 13**: 编译器严格检查 — C/C++/Java 开启更严格的编译告警（仅改动文件）
 
 这个环闭合了约 90%。目标：100%。
 
@@ -233,9 +234,9 @@ xp-gate sprint-status --watch
 
 ## 质量门禁详解
 
-每次 `git commit` 自动执行 12 道门禁 (Gate 0-11)，每次 `git push` 自动执行 8 道门禁：
+每次 `git commit` 自动执行 13 道门禁 (Gate 0-12)，每次 `git push` 自动执行 8 道门禁：
 
-### Pre-commit（12 道门禁）
+### Pre-commit（13 道门禁）
 
 | 门禁 | 检查内容 | 失败行为 |
 |------|---------|---------|
@@ -252,6 +253,7 @@ xp-gate sprint-status --watch
 | Gate 10 | SAST 安全扫描 (semgrep) | 阻断 |
 | Gate 11 | Sprint Flow 执行 | 阻断 |
 | Gate 12 | 文件卫生 (conflict markers, YAML/JSON 语法) — **警告，不阻断** | 警告 |
+| Gate 13 | 编译器严格检查 (gcc/g++ -Wall -Wextra、javac -Xlint、Maven/Gradle) — 仅改动文件 | 阻断 |
 
 > Gate 12 (File Hygiene) 仅对冲突标记和 YAML/JSON 语法错误阻断提交；其他问题（trailing whitespace, 缺少 EOF 换行）仅警告，不阻断。
 
