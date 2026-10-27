@@ -68,12 +68,25 @@ specification:
     # REQ-DSH-006: 12 技能随包集成
     # ============================================================
     - id: REQ-DSH-006
-      description: 12 个 SKILL.md 技能随包经平台原生 bundledSkillDir（$DSH_BUNDLED_SKILL_DIR）集成，skill 工具可发现/加载
+      description: >-
+        12 个 SKILL.md 技能随包集成，并经插件自身注册的 DSH SkillProvider 对模型可见/可加载。
+        注：v0.31.4 之前的表述假定存在平台原生 bundledSkillDir（$DSH_BUNDLED_SKILL_DIR）发现根，
+        实测该机制不存在——插件无法为自己设置发现根，65 个技能文件随包发出但模型一个也看不到。
+        已改为在 apply() 中调用 ctx.skills.registerProvider()，inject 同时声明 "skills" 能力。
       priority: high
       acceptance_criteria:
         - id: AC-DSH-006-01
           criteria: 12 个 skills/*/SKILL.md frontmatter 满足 DSH 契约（name kebab-case + description 非空）
           test_type: unit
+        - id: AC-DSH-006-02
+          criteria: apply(ctx) 通过 ctx.skills.registerProvider 注册 bundled provider，inject 声明 "skills"
+          test_type: unit
+        - id: AC-DSH-006-03
+          criteria: provider.list() 返回 12 个候选，metadata 满足 SkillCandidate 契约（provider/source/rank/resourceBase=directory）
+          test_type: unit
+        - id: AC-DSH-006-04
+          criteria: 以 DSH 真实 SkillRegistry 为消费方，12 个技能全部可 get() 加载且正文非空（INV-2 端到端）
+          test_type: integration
 
     # ============================================================
     # REQ-DSH-007: 超时与协作式取消分离
@@ -118,6 +131,74 @@ specification:
         - id: AC-DSH-010-01
           criteria: npm pack 产出含 lib/index.js + cordis.patch.yml + skills/；main 指向 lib/index.js；publishConfig.access=public
           test_type: integration
+
+    # ============================================================
+    # REQ-DSH-011: 门禁三态判定与单一命令形态
+    # ============================================================
+    - id: REQ-DSH-011
+      description: >-
+        门禁输出归一为 PASS / GATE FAILED / INDETERMINATE 三态，判据从「能否解析 CLI」改为「执行结果」。
+        原实现的 else 分支只打印安装提示却保持 exit 0，使「装了但坏了」表现为通过；命令构造改为无条件执行
+        并显式回显退出码，让 CLI 缺失自然变成 command-not-found。
+      priority: critical
+      acceptance_criteria:
+        - id: AC-DSH-011-01
+          criteria: exit 0 且 stdout 非空 → PASS
+          test_type: unit
+        - id: AC-DSH-011-02
+          criteria: exit 0 但 stdout 为空 → INDETERMINATE（不得判为通过）
+          test_type: unit
+        - id: AC-DSH-011-03
+          criteria: 非零退出且有 stdout 或 stderr → GATE FAILED，附完整输出与退出码
+          test_type: unit
+        - id: AC-DSH-011-04
+          criteria: 非零退出且无任何输出（如 command-not-found）→ INDETERMINATE
+          test_type: unit
+        - id: AC-DSH-011-05
+          criteria: 超时 → INDETERMINATE，且判定顺序先于 exit code（被杀的进程可能仍报 0）
+          test_type: unit
+        - id: AC-DSH-011-06
+          criteria: stdout 被截断 → INDETERMINATE（未取得完整结论）
+          test_type: unit
+        - id: AC-DSH-011-07
+          criteria: buildCommand 两种方言均不含 presence 探测分支，且回显退出码（POSIX $? / PowerShell $LASTEXITCODE）
+          test_type: unit
+        - id: AC-DSH-011-08
+          criteria: 模型可控参数与 gates 白名单过滤在两种方言下均保持转义
+          test_type: unit
+
+    # ============================================================
+    # REQ-DSH-014: Delphi 凭证走 DSH 凭据 seam
+    # ============================================================
+    - id: REQ-DSH-014
+      description: >-
+        Delphi 的 api_key 从 DSH 凭据服务解析，而非只读 process.env。实测 DSH 宿主进程继承的环境里没有
+        WHALECLOUD_API_KEY，该 key 只存在于用户级环境变量与 ~/.dsh/.credentials.yaml，导致 delphi-review
+        在插件装好后仍无法启动。解析为单层语义：服务可用时不回看 process.env（服务内部已按
+        env → store → .env 层序解析，二次回看会让 GUI 会话与终端会话走不同层序）。
+      priority: critical
+      acceptance_criteria:
+        - id: AC-DSH-014-01
+          criteria: ctx.credentials 可用时经其 resolve 取值；返回 undefined 时不回看 process.env
+          test_type: unit
+        - id: AC-DSH-014-02
+          criteria: 无凭据服务时回退读注入的 env，值缺失或空串视为未设置
+          test_type: unit
+        - id: AC-DSH-014-03
+          criteria: 非法的变量名不进入凭据服务；服务抛错时降级为 undefined 而非中断
+          test_type: unit
+        - id: AC-DSH-014-04
+          criteria: loadDelphiConfig 接受按变量名索引的已解析覆盖值，环境缺该变量时仍能加载
+          test_type: unit
+        - id: AC-DSH-014-05
+          criteria: 覆盖值优先于环境值；字面量 api_key 不被覆盖影响
+          test_type: unit
+        - id: AC-DSH-014-06
+          criteria: 可枚举配置引用的凭据变量名而不解析其值（未设置的变量也返回名字）
+          test_type: unit
+        - id: AC-DSH-014-07
+          criteria: 使用真实 CredentialRef 契约（credentialRef/isCredentialRefName）传参
+          test_type: unit
 
     # ============================================================
     # REQ-DSH-018: 主包本身必须是合法的 DSH bundle。
