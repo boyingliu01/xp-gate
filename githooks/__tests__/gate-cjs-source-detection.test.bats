@@ -32,12 +32,40 @@ setup_push_fixture() {
   git config user.name "Test"
   git config core.hooksPath .git/hooks
 
+  # Isolate HOME/XDG_CONFIG_HOME (#636). Gate MW now falls back to the
+  # machine-wide ~/.config/xp-gate/.delphi-config.json when the fixture has no
+  # project config, so without this the evidence below (models model-a/b/c) is
+  # validated against whatever seats the developer happens to have installed —
+  # passing or failing by machine rather than by behaviour. The project config
+  # written further down names these same models, so the fixture is self-contained.
+  export HOME="$TEST_DIR/home"
+  export USERPROFILE="$TEST_DIR/home"
+  unset XDG_CONFIG_HOME
+  mkdir -p "$HOME"
+
   mkdir -p .git/hooks
   cp "$SOURCE_GITHOOKS/pre-push" .git/hooks/pre-push
   chmod +x .git/hooks/pre-push
   mkdir -p .git/hooks/lib
   cp "$SOURCE_GITHOOKS/lib/validate-code-walkthrough.cjs" .git/hooks/lib/
   cp "$SOURCE_GITHOOKS/adapter-common.sh" .git/hooks/adapter-common.sh 2>/dev/null || true
+
+  # The seats the evidence below claims. Declaring them here keeps the fixture
+  # independent of any machine-wide config (#636).
+  cat > .delphi-config.json << 'CFG'
+{
+  "active_profile": "fixture",
+  "profiles": {
+    "fixture": {
+      "experts": {
+        "architecture": { "provider": "fixture", "model": "model-a" },
+        "technical": { "provider": "fixture", "model": "model-b" },
+        "feasibility": { "provider": "fixture", "model": "model-c" }
+      }
+    }
+  }
+}
+CFG
 
   echo "init" > README.md
   git add . && git commit --no-verify -q -m "init"
