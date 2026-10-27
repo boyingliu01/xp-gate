@@ -190,10 +190,25 @@ function globalConfigPath(env = process.env) {
  * (EACCES/EISDIR) must surface rather than silently routing this run to a
  * different file. Same semantics as `loadDelphiConfig()` in the DSH plugin.
  *
+ * ## No config anywhere is now FAIL-CLOSED (2026-10-27)
+ *
+ * Returning null when both locations are absent re-opened the exact hole #574
+ * closed: measured, `b-claude-4.8-opus` / `gpt-5.5` / `gemini-3-pro` pass the
+ * validator when no config exists. That was tolerable while a config shipped
+ * inside every repo (deleting one looked like opting out); once the machine-wide
+ * file is the single source of truth, "no config" becomes the normal state of a
+ * fresh machine or a bare CI runner — i.e. the bypass is the default path.
+ *
+ * The caller distinguishes two cases it already knows:
+ *   - no project context at all (no root argument) -> unbound, #423 behaviour;
+ *   - a real repo with evidence but no config anywhere -> refuse.
+ * This function therefore throws rather than returning null for the second
+ * case; `main()` only reaches it when a project root was named.
+ *
  * @param {string} projectRoot repository root whose config binds the evidence
  * @param {NodeJS.ProcessEnv} env environment for the global-path lookup
- * @returns {Map<string, string> | null} seats, or null when NO config exists
- *          anywhere (evidence then stays unbound, the #423 behaviour)
+ * @returns {Map<string, string>} seats; never null
+ * @throws exits via fail() when neither location has a config
  */
 function loadBindingSeats(projectRoot, env = process.env) {
   const projectPath = path.join(projectRoot, DELPHI_CONFIG_FILE);
@@ -201,15 +216,25 @@ function loadBindingSeats(projectRoot, env = process.env) {
 
   let raw;
   let source = projectPath;
+  let projectMissing = false;
   try {
     raw = fs.readFileSync(projectPath, 'utf8');
   } catch (projectError) {
     if (projectError && projectError.code === 'ENOENT') {
+      projectMissing = true;
       try {
         raw = fs.readFileSync(fallbackPath, 'utf8');
         source = fallbackPath;
       } catch (globalError) {
-        if (globalError && globalError.code === 'ENOENT') return null;
+        if (globalError && globalError.code === 'ENOENT') {
+          // Both absent: this repo has walkthrough evidence but nothing binds
+          // it to seats. Fail closed and say exactly where we looked.
+          fail(
+            `no ${DELPHI_CONFIG_FILE} found, so the reviewer seats cannot be verified. `
+              + `Looked in: ${projectPath}, ${fallbackPath}. `
+              + `Create the machine-wide config or add one to the repository.`
+          );
+        }
         fail(
           `cannot read ${DELPHI_CONFIG_FILE}: ${globalError && globalError.message
             ? globalError.message
@@ -236,7 +261,58 @@ function loadBindingSeats(projectRoot, env = process.env) {
       fail(`${DELPHI_CONFIG_FILE} declares no seat for the ${role} role; all three roles must be configured.`);
     }
   }
+  // A repo-local copy that disagrees with the machine-wide one is exactly how
+  // the 2026-10-27 incident happened: a stale per-repo file silently won and the
+  // review kept using a seat that had been retired. Winning is still allowed
+  // (deliberate overrides exist), but it must never be silent.
+  if (!projectMissing) {
+    warnOnSeatDrift(projectPath, fallbackPath, seats);
+  }
   return seats;
+}
+
+/**
+ * Warn (never block) when a repository-local config disagrees with the
+ * machine-wide one.
+ *
+ * 2026-10-27 incident: the machine-wide config had been updated to replace a
+ * flaky seat, but an older copy survived in the repo root. The project file
+ * won, the review kept calling the retired seat, and nothing anywhere said so —
+ * the only symptom was intermittent HTTP 500s that looked like a gateway
+ * problem. Silence is what made it expensive.
+ *
+ * Deliberate per-repo overrides are legitimate, so this is a WARN on stderr and
+ * never changes the exit code. Absence of either file is not drift.
+ *
+ * @param {string} projectPath repository config path
+ * @param {string} fallbackPath machine-wide config path
+ * @param {Map<string, string>} projectSeats seats actually in effect
+ */
+function warnOnSeatDrift(projectPath, fallbackPath, projectSeats) {
+  let machineRaw;
+  try {
+    machineRaw = fs.readFileSync(fallbackPath, 'utf8');
+  } catch {
+    return; // no machine-wide config -> nothing to disagree with
+  }
+  let machineSeats;
+  try {
+    machineSeats = resolveBindingSeats(JSON.parse(machineRaw));
+  } catch {
+    return; // a malformed machine config is reported by its own path when used
+  }
+  const drift = REQUIRED_ROLES.filter(
+    (role) => machineSeats.has(role) && projectSeats.get(role) !== machineSeats.get(role)
+  );
+  if (drift.length === 0) return;
+  const detail = drift
+    .map((role) => `${role}: repo=${projectSeats.get(role)} machine=${machineSeats.get(role)}`)
+    .join('; ');
+  process.stderr.write(
+    `⚠️  ${DELPHI_CONFIG_FILE} in this repository overrides the machine-wide seats `
+      + `(${detail}). The repository copy wins. If the machine-wide config was updated `
+      + `to retire a seat, this repo is still calling the old one.\n`
+  );
 }
 
 /**
