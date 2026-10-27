@@ -135,14 +135,18 @@ EOF
   [ "$status" -eq 0 ]
 }
 
-@test "AC-008-01: check-hook-mirror.sh does NOT demand a mirror yet (SHIP-phase work)" {
-  # Mirroring into src/npm-package/** is deliberately OUT of this sprint's scope:
-  # writing there collides with the parallel refactor branch, and the mirror must
-  # be created byte-identically by the sync step at SHIP time. Listing gate-13 in
-  # check-hook-mirror.sh now would make the checker fail on a missing mirror, so
-  # the registration is intentionally deferred and pinned by this test.
+@test "AC-008-01: check-hook-mirror.sh registers the gate-13 mirror (SHIP-phase work, done)" {
+  # Mirroring into src/npm-package/** was deliberately deferred out of the BUILD
+  # phase: writing there collided with the parallel refactor branch. The mirror
+  # now exists and is guarded, so the gate must appear in BOTH lists the checker
+  # iterates -- HOOK_MIRROR_FILES (hooks/ copy) and ROOT_MIRROR_FILES (root copy).
+  # One occurrence would leave whichever list is missing silently unguarded.
   run grep -c 'gate-13-compiler-strictness' "$REPO_ROOT/scripts/check-hook-mirror.sh"
-  [ "$output" -eq 0 ]
+  [ "$output" -eq 2 ]
+
+  # And the mirror files themselves must exist, or the checker fails on them.
+  [ -f "$REPO_ROOT/src/npm-package/hooks/gate-13-compiler-strictness.sh" ]
+  [ -f "$REPO_ROOT/src/npm-package/gate-13-compiler-strictness.sh" ]
 }
 
 # ------------------------------------------ AC-008-03 no mirror writes

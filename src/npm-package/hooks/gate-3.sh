@@ -339,17 +339,38 @@ else
     if [ -n "$CC_FILES" ]; then
       echo "Checking complexity for source files..."
       
-      # Run lizard with CCN threshold
-      # One path per line, into an array. Unquoted $CC_FILES relied on word
-      # splitting, which also splits any path containing a space -- handing
-      # lizard two bogus paths and checking neither (#457 defect class, same
-      # fix as gate-4's PRINCIPLES_ARGS). Quoting the scalar would instead
-      # collapse the list into one argument. An array does both.
-      CC_FILES_ARGS=()
-      while IFS= read -r _cc_file; do
-        [ -n "$_cc_file" ] && CC_FILES_ARGS+=("$_cc_file")
-      done <<< "$CC_FILES"
-      CC_OUTPUT=$("$LIZARD_PATH" -C "$CCN_THRESHOLD" ${CC_FILES_ARGS[@]+"${CC_FILES_ARGS[@]}"} 2>&1 || true)
+      # Run lizard in chunks. Two reasons, both load-bearing:
+      #  - One path per line, into an array. Unquoted $CC_FILES relied on word
+      #    splitting, which also splits any path containing a space -- handing
+      #    lizard two bogus paths and checking neither (#457 defect class, same
+      #    fix as gate-4's PRINCIPLES_ARGS). Quoting the scalar would instead
+      #    collapse the list into one argument. An array does both.
+      #  - Chunked instead of one argv. Windows caps a single command line at
+      #    32,767 characters, and under `--all` the population is the whole tree
+      #    (1,000+ sources on a mid-sized repo). The oversized argv never reached
+      #    lizard, nothing was printed, and the gate graded an empty CSV as if the
+      #    tree were clean. XP_GATE_LIZARD_ARGV_BUDGET lets a probe force a split
+      #    without needing a huge fixture.
+      LIZARD_ARGV_BUDGET="${XP_GATE_LIZARD_ARGV_BUDGET:-8000}"
+      lizard_batches() {
+        # stdin: one path per line. stdout: lizard output, batches concatenated.
+        local _batch=() _size=0 _path
+        while IFS= read -r _path; do
+          [ -n "$_path" ] || continue
+          if [ "${#_batch[@]}" -gt 0 ] && [ $((_size + ${#_path} + 1)) -gt "$LIZARD_ARGV_BUDGET" ]; then
+            "$LIZARD_PATH" "$@" "${_batch[@]}" 2>/dev/null || true
+            _batch=()
+            _size=0
+          fi
+          _batch+=("$_path")
+          _size=$((_size + ${#_path} + 1))
+        done
+        if [ "${#_batch[@]}" -gt 0 ]; then
+          "$LIZARD_PATH" "$@" "${_batch[@]}" 2>/dev/null || true
+        fi
+        return 0
+      }
+      CC_OUTPUT=$(printf '%s\n' "$CC_FILES" | lizard_batches -C "$CCN_THRESHOLD" 2>&1)
 
       # REQ-D (sprint-20261018-quality): baseline ratchet. When
       # .ccn-baseline.json exists it replaces the flat threshold verdict:
@@ -366,7 +387,7 @@ else
         # Route the CSV through the same verifier; on rows it cannot verify the
         # helper exits non-zero, and this gate fails closed instead of passing
         # an unvalidated number.
-        CC_CSV=$("$LIZARD_PATH" --csv ${CC_FILES_ARGS[@]+"${CC_FILES_ARGS[@]}"} 2>/dev/null || true)
+        CC_CSV=$(printf '%s\n' "$CC_FILES" | lizard_batches --csv)
         CC_REPORT="$(git rev-parse --show-toplevel 2>/dev/null)/scripts/ccn-report.cjs"
         # Fail closed when the verifier is unavailable. Previously this fell
         # through and graded the RAW lizard CSV, while CI hard-fails on the same
@@ -392,6 +413,20 @@ else
         fi
         RATCHET_LIB="$GATE_DIR/lib/ccn-ratchet.sh"
         [ -f "$RATCHET_LIB" ] || RATCHET_LIB="$(git rev-parse --show-toplevel 2>/dev/null)/githooks/lib/ccn-ratchet.sh"
+        # Fail closed when the ratchet library is missing. Sourcing a nonexistent
+        # file only prints "No such file or directory" and leaves
+        # evaluate_ccn_ratchet undefined; the verdict then came back empty, every
+        # counter read 0 and the gate printed "✅ PASSED" — a CCN regression graded
+        # green with nothing compared. The installer never created this path
+        # (copyAdapters skipped hooks/lib), so this was the normal state after a
+        # global install, not an exotic one.
+        if [ ! -f "$RATCHET_LIB" ]; then
+          echo "❌ BLOCKED - complexity ratchet library unavailable (ccn-ratchet.sh)."
+          echo "Expected at \$GATE_DIR/lib/ccn-ratchet.sh or <repo>/githooks/lib/ccn-ratchet.sh."
+          echo "Reinstall with 'xp-gate init --global' (or 'xp-gate update-hooks') to restore it."
+          GATE_3_DETAIL="mode=ratchet ratchet=MISSING"
+          exit 1
+        fi
         # shellcheck source=/dev/null
         . "$RATCHET_LIB"
         # NOTE: the thresholds must be plain assignments BEFORE the pipe. As a
@@ -436,7 +471,7 @@ else
       # file,name,signature,...), so the verdict comes from the same numbers
       # lizard uses, independent of version and table formatting. --csv here is
       # the flat-threshold run; the ratchet branch above builds its own.
-      CC_CSV_FLAT=$("$LIZARD_PATH" --csv -C "$CCN_THRESHOLD" ${CC_FILES_ARGS[@]+"${CC_FILES_ARGS[@]}"} 2>/dev/null || true)
+      CC_CSV_FLAT=$(printf '%s\n' "$CC_FILES" | lizard_batches --csv -C "$CCN_THRESHOLD")
       CC_WARNINGS=$(printf '%s\n' "$CC_CSV_FLAT" | awk -F, -v t="$CCN_THRESHOLD" '
         NF > 1 && $2 + 0 > t + 0 { c++ }
         END { print c + 0 }
