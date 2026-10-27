@@ -1,0 +1,48 @@
+fix(gates): repair the archlint script and the mock-policy lenient false alarm
+
+Two long-standing defects surfaced while running the full gate set over the
+DSH plugin work. Both are in shared tooling, not in the plugin.
+
+1. `npm run archlint` never ran.
+
+The script passed `--config architecture.yaml`, the pre-0.16 archlint
+schema. archlint 0.16 rejects that file outright — "data did not match any
+variant of untagged enum RuleConfig" — so the script failed on its own
+configuration before scanning anything. The plugin code had already
+learned this (#447) and stopped passing the flag, and CI never passed it
+either; only this one script was left behind. It now runs `scan .`, which
+picks up the valid .archlint.yaml at the repo root.
+
+Worth noting what the failure mode was: it looked like a config typo, and
+the fix is a deletion, so it went unnoticed for a while. `architecture.yaml`
+is XP-Gate's own rule catalogue (ARCH-001..014), not an archlint config, and
+was never the right file to hand archlint.
+
+2. Gate ML warned on every push about a test that was already isolated.
+
+SRC/MOCK-POLICY/AGENTS.md states the contract: "unit tests with lenient
+policy are not checked — all mocks allowed". The decision engine honours
+that when answering, but validateImport compared the recommendation against
+what the test actually did and reported a mismatch. So any lenient unit test
+that injects a hand-written fake — real code passed as an argument, not a
+module mock — was flagged with "all dependencies should be mocked", on
+every push, for a test that has no dependencies left to mock.
+
+That is the shape of warning people learn to scroll past, which is worse
+than no warning: it trains the reader to ignore the gate. validateImport now
+returns early for a lenient unit layer.
+
+The regression test calls runGateM3 rather than the file's own copy of the
+rule, because the copy is exactly what hid this — the suite had a local
+validateFile mirroring production, so a change in production could not fail
+it. Both paths are now covered, and the copy carries a comment saying why it
+has to be kept in step.
+
+Verified in a clean worktree on main: eslint 0 problems, tsc clean,
+mock-policy 149/149, and Gate M3 now prints "PASS" for the file that used to
+warn. `npm run archlint` scans 227 smells instead of failing on config.
+
+Note: 11 sync-package-content failures and 15 plugin-test load failures
+appear in that worktree. They reproduce on unmodified main and are caused by
+running from a worktree without plugins/dsh/node_modules, not by these
+changes.
