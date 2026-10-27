@@ -3,7 +3,10 @@ const path = require('path');
 const os = require('os');
 const { execSync } = require('child_process');
 
-const { HOME_DIR, detectPlatform } = require('./shared-paths.js');
+// HOME_DIR is deliberately NOT destructured here: the platform profiles keep
+// home-relative path segments and resolve them through getSkillsDirs() instead,
+// so nothing in this module freezes the home directory at require() time.
+const { detectPlatform } = require('./shared-paths.js');
 
 const REQUIRED_DEPS = [
   { name: 'superpowers', repo: 'obra/superpowers', minVersion: '1.0.0' },
@@ -231,27 +234,51 @@ function getToolInstallCmd(toolEntry, platform) {
  * Platform profiles — each AI agent platform has its own skills directory.
  * All platforms require the same dependencies (superpowers, gstack).
  *
+ * `skillsDirs` is a list of path SEGMENTS relative to the home directory, not
+ * an absolute path. It used to hold `path.join(HOME_DIR, ...)` evaluated at
+ * require() time, which pinned every profile to whatever HOME was when
+ * detect-deps was first loaded — the same trap doctor.js documents at its top.
+ * Keeping segments here and resolving them in getSkillsDirs() makes the
+ * profiles plain, uniform data (no mix of getters and values) that follows
+ * process.env.HOME, and gives the platform-to-directory mapping one source of
+ * truth (Delphi R1 CI-01 / MA-01 on #635).
+ *
  * @covers Issue #128 Bug 1 — Qoder platform was excluded from dependency checks
+ * @covers Issue #635 — dsh was missing entirely
  */
 const PLATFORM_PROFILES = {
   opencode: {
     skillsDirs: [
-      path.join(HOME_DIR, '.config', 'opencode', 'skills'),
-      path.join(HOME_DIR, '.config', 'opencode'),
+      ['.config', 'opencode', 'skills'],
+      ['.config', 'opencode'],
     ],
     requiredDeps: REQUIRED_DEPS,
   },
   'claude-code': {
     skillsDirs: [
-      path.join(HOME_DIR, '.claude', 'skills'),
-      path.join(HOME_DIR, '.claude'),
+      ['.claude', 'skills'],
+      ['.claude'],
     ],
     requiredDeps: REQUIRED_DEPS,
   },
   qoder: {
     skillsDirs: [
-      path.join(HOME_DIR, '.qoder', 'skills'),
-      path.join(HOME_DIR, '.qoder'),
+      ['.qoder', 'skills'],
+      ['.qoder'],
+    ],
+    requiredDeps: REQUIRED_DEPS,
+  },
+  // #635: `xp-gate init` deploys skills to ~/.dsh/skills, the npm package ships
+  // plugins/dsh (`@boyingliu01/dsh-plugin-xp-gate`), and
+  // scripts/sync-package-content.js lists `dsh` among PLUGINS — but this entry
+  // was missing, so getSkillsDirs('dsh') fell through to the opencode paths and
+  // DSH skills were never resolved. detectPlatform() still never returns 'dsh'
+  // (there is no marker it could key on that opencode's would not also match),
+  // so callers that must cover DSH ask for it by name.
+  dsh: {
+    skillsDirs: [
+      ['.dsh', 'skills'],
+      ['.dsh'],
     ],
     requiredDeps: REQUIRED_DEPS,
   },
@@ -262,12 +289,17 @@ const PLATFORM_PROFILES = {
 
 /**
  * Get the skills directories for a given platform.
- * @param {string} platform - 'opencode' | 'claude-code' | 'qoder'
- * @returns {string[]}
+ *
+ * Resolves the home directory at call time so the result follows
+ * process.env.HOME, and so every profile is a plain data entry.
+ *
+ * @param {string} platform - 'opencode' | 'claude-code' | 'qoder' | 'dsh'
+ * @returns {string[]} absolute paths; skillsDirs[0] is the skills directory
  */
 function getSkillsDirs(platform) {
   const profile = PLATFORM_PROFILES[platform] || PLATFORM_PROFILES.opencode;
-  return profile.skillsDirs;
+  const home = require('./shared-paths.js').HOME_DIR;
+  return profile.skillsDirs.map((segments) => path.join(home, ...segments));
 }
 
 /**
