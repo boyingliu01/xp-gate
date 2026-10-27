@@ -255,6 +255,27 @@ const PLATFORM_PROFILES = {
     ],
     requiredDeps: REQUIRED_DEPS,
   },
+  // #635: `xp-gate init` deploys skills to ~/.dsh/skills and the npm package
+  // ships plugins/dsh (`@boyingliu01/dsh-plugin-xp-gate`), and
+  // scripts/sync-package-content.js lists `dsh` among PLUGINS — but the profile
+  // was missing, so getSkillsDirs('dsh') fell through to the opencode paths and
+  // DSH skills were never resolved. detectPlatform() still never returns 'dsh'
+  // (there is no marker it could key on that opencode's would not also match),
+  // so callers that must cover DSH ask for it by name.
+  //
+  // Declared as a getter because the sibling entries above are frozen at
+  // require() time from a destructured HOME_DIR. The dsh paths are read lazily
+  // so they follow process.env.HOME instead of pinning the real home dir.
+  get dsh() {
+    const home = require('./shared-paths.js').HOME_DIR;
+    return {
+      skillsDirs: [
+        path.join(home, '.dsh', 'skills'),
+        path.join(home, '.dsh'),
+      ],
+      requiredDeps: REQUIRED_DEPS,
+    };
+  },
 };
 
 // detectPlatform() is re-exported from shared-paths.js — the single

@@ -154,3 +154,143 @@ describe('doctor-tui skill freshness (#439)', () => {
     expect(missing, `skills missing version frontmatter: ${missing.join(', ')}`).toEqual([]);
   });
 });
+
+/**
+ * @test REQ-635
+ * @intent doctor 的 "Installed skills" 检查从 config.installedSkills 取清单，
+ *         而 xp-gate init 从不写该字段，导致全新安装的机器（12/12 技能已部署）
+ *         稳定报 "No skills installed" 并在读盘前就返回；同时只解析单一平台，
+ *         init 实际部署的另外两个平台（含 .dsh）从不校验（#635）
+ * @covers AC-635-01, AC-635-02, AC-635-03
+ */
+describe('doctor-tui installed skills enumerate the filesystem (#635)', () => {
+  let tmpHome;
+  let originalHome;
+
+  // Same dir doctor-tui resolves as PKG_DIR (path.dirname of lib/). Re-declared
+  // here because the outer describe's copy is scoped to that callback.
+  const bundledSkillsDir = path.join(__dirname, '..', '..', 'skills');
+
+  // Every directory init deploys to. `.dsh` is the one detectPlatform() cannot
+  // report, and the one that went unverified entirely.
+  const DEPLOY_DIRS = [
+    ['opencode', ['.config', 'opencode', 'skills']],
+    ['dsh', ['.dsh', 'skills']],
+    ['qoder', ['.qoder', 'skills']],
+  ];
+
+  beforeEach(() => {
+    originalHome = process.env.HOME;
+    tmpHome = fs.mkdtempSync(path.join(os.tmpdir(), 'xpgate-635-'));
+    process.env.HOME = tmpHome;
+    vi.resetModules();
+    delete require.cache[require.resolve('../doctor-tui')];
+    delete require.cache[require.resolve('../shared-paths')];
+  });
+
+  afterEach(() => {
+    process.env.HOME = originalHome;
+    fs.rmSync(tmpHome, { recursive: true, force: true });
+  });
+
+  /** Deploy a real bundled skill into one platform's skills dir. */
+  function deploy(platformDirs, name) {
+    const dir = path.join(tmpHome, ...platformDirs, name);
+    fs.mkdirSync(dir, { recursive: true });
+    const bundled = fs.readFileSync(path.join(bundledSkillsDir, name, 'SKILL.md'), 'utf8');
+    fs.writeFileSync(path.join(dir, 'SKILL.md'), bundled);
+  }
+
+  // AC-635-01: a machine with skills deployed and NO installedSkills config key
+  // must be verified, not reported as "No skills installed".
+  it('verifies deployed skills even when config.installedSkills is absent', () => {
+    deploy(['.config', 'opencode', 'skills'], 'grilling');
+    const { diagnoseInstalledSkills } = require('../doctor-tui');
+    const checks = [];
+    // init writes exactly this shape: no installedSkills key at all.
+    const issues = diagnoseInstalledSkills({ mode: 'global', templateDir: '/x' }, checks);
+
+    expect(issues).toBe(0);
+    const skills = checks.filter(c => c.name.startsWith('Skill '));
+    expect(skills.length).toBeGreaterThan(0);
+    expect(skills.every(c => c.status === 'PASS')).toBe(true);
+    // The old behaviour: a single SKIP row and zero skills examined.
+    expect(checks.find(c => c.name === 'Installed skills')).toBeUndefined();
+  });
+
+  // AC-635-02: `.dsh` is a first-class deploy target and must be checked, even
+  // though detectPlatform() never returns 'dsh'.
+  it('checks the .dsh platform, which detectPlatform() cannot report', () => {
+    deploy(['.dsh', 'skills'], 'grilling');
+    const { diagnoseInstalledSkills } = require('../doctor-tui');
+    const checks = [];
+    diagnoseInstalledSkills({ mode: 'global' }, checks);
+
+    const dshRows = checks.filter(c => c.name.startsWith('Skill [dsh]'));
+    expect(dshRows.length).toBeGreaterThan(0);
+    expect(dshRows[0].status).toBe('PASS');
+  });
+
+  // AC-635-03: all deployed platforms are verified in one run, not just the
+  // one detectPlatform() happens to pick.
+  it('verifies every deployed platform, not only the detected one', () => {
+    for (const [, dirs] of DEPLOY_DIRS) deploy(dirs, 'grilling');
+    const { diagnoseInstalledSkills } = require('../doctor-tui');
+    const checks = [];
+    diagnoseInstalledSkills({ mode: 'global' }, checks);
+
+    for (const [platform] of DEPLOY_DIRS) {
+      const rows = checks.filter(c => c.name.startsWith(`Skill [${platform}]`));
+      expect(rows.length, `no checks emitted for platform ${platform}`).toBeGreaterThan(0);
+    }
+  });
+
+  // Anti-vacuity: enumeration must still surface real drift. A stale copy in
+  // .dsh specifically must WARN — proving the new rows are not decorative.
+  it('reports drift found in a non-detected platform (anti-vacuity)', () => {
+    deploy(['.config', 'opencode', 'skills'], 'grilling');
+    const staleDir = path.join(tmpHome, '.dsh', 'skills', 'grilling');
+    fs.mkdirSync(staleDir, { recursive: true });
+    fs.writeFileSync(
+      path.join(staleDir, 'SKILL.md'),
+      '---\nname: grilling\nversion: 0.0.1\n---\n\nstale body\n'
+    );
+
+    const { diagnoseInstalledSkills } = require('../doctor-tui');
+    const checks = [];
+    const issues = diagnoseInstalledSkills({ mode: 'global' }, checks);
+
+    expect(issues).toBeGreaterThan(0);
+    const stale = checks.find(c => c.name === 'Skill [dsh]: grilling');
+    expect(stale).toBeDefined();
+    expect(stale.status).toBe('WARN');
+    expect(stale.detail).toContain('Outdated');
+  });
+
+  // Honest SKIP: nothing deployed anywhere must say so, and name the locations
+  // it looked at — the old message could not be told apart from "not wired up".
+  it('reports SKIP naming every searched location when nothing is deployed', () => {
+    const { diagnoseInstalledSkills } = require('../doctor-tui');
+    const checks = [];
+    const issues = diagnoseInstalledSkills({ mode: 'global' }, checks);
+
+    expect(issues).toBe(0);
+    const row = checks.find(c => c.name === 'Installed skills');
+    expect(row).toBeDefined();
+    expect(row.status).toBe('SKIP');
+    expect(row.detail).toContain('dsh');
+  });
+
+  // Backwards compatibility: an explicit list keeps the legacy single-target
+  // contract and the unprefixed check names existing callers rely on.
+  it('honours an explicit installedSkills list without the platform prefix', () => {
+    deploy(['.config', 'opencode', 'skills'], 'grilling');
+    const { diagnoseInstalledSkills } = require('../doctor-tui');
+    const checks = [];
+    diagnoseInstalledSkills({ installedSkills: { grilling: {} } }, checks);
+
+    const row = checks.find(c => c.name === 'Skill: grilling');
+    expect(row).toBeDefined();
+    expect(row.status).toBe('PASS');
+  });
+});
