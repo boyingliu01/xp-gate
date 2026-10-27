@@ -118,27 +118,29 @@ function compareSemver(a, b) {
 }
 
 /**
- * Every skills directory `xp-gate init` deploys to, in priority order.
+ * Every skills directory `xp-gate init` deploys to, derived from
+ * PLATFORM_PROFILES so the platform-to-directory mapping has one source of
+ * truth. A hardcoded copy here would drift the moment a platform is added
+ * (Delphi R1 MA-01).
  *
  * init deploys to all of these at once, so doctor has to verify all of them —
- * resolving a single "current" platform silently left the other two unchecked
- * (#635). `.dsh` is included because the package ships
- * `plugins/dsh` and `sync-package-content.js` treats `dsh` as a first-class
- * platform, even though `detectPlatform()` never returns it.
+ * resolving a single "current" platform silently left the others unchecked
+ * (#635). `.dsh` is included because the package ships `plugins/dsh` and
+ * `sync-package-content.js` treats `dsh` as a first-class platform, even
+ * though `detectPlatform()` never returns it.
  *
- * HOME_DIR is read through the module at each call (it is a lazy getter, and
- * tests reassign process.env.HOME), never captured at require() time.
+ * Resolved through getSkillsDirs() at call time: the home directory and the
+ * profile list are read lazily, and tests reassign process.env.HOME.
  *
  * @returns {Array<{platform: string, dir: string}>}
  */
 function skillsDeployTargets() {
-  const home = require('./shared-paths.js').HOME_DIR;
-  return [
-    { platform: 'opencode', dir: path.join(home, '.config', 'opencode', 'skills') },
-    { platform: 'dsh', dir: path.join(home, '.dsh', 'skills') },
-    { platform: 'qoder', dir: path.join(home, '.qoder', 'skills') },
-    { platform: 'claude-code', dir: path.join(home, '.claude', 'skills') },
-  ];
+  const { PLATFORM_PROFILES, getSkillsDirs } = require('./detect-deps.js');
+  return Object.keys(PLATFORM_PROFILES).map((platform) => ({
+    platform,
+    // skillsDirs[0] is the skills directory; [1] is the broader platform dir.
+    dir: getSkillsDirs(platform)[0],
+  }));
 }
 
 /**
@@ -189,8 +191,15 @@ function diagnoseInstalledSkills(config, checks) {
   const explicit = config && config.installedSkills ? Object.keys(config.installedSkills) : [];
   const targets = skillsDeployTargets();
 
-  // Which platform did the caller (or the environment) intend? When an explicit
-  // list is supplied we keep single-target behaviour for that platform.
+  // An explicit `installedSkills` list is a caller saying "check THIS list, for
+  // THIS platform" — legacy single-target behaviour, kept so existing callers
+  // and their tests retain an unchanged contract (Delphi R1 MA-02).
+  //
+  // The asymmetry with the default path below is deliberate and load-bearing:
+  // the explicit list names no directory, so a platform still has to be
+  // inferred, and silently checking a different platform's directory than the
+  // caller meant would be worse than checking one. `xp-gate init` never writes
+  // this field, so in practice doctor takes the filesystem path below.
   const platform = detectPlatform();
   if (explicit.length > 0) {
     const match = targets.find((t) => t.platform === platform) || targets[0];
