@@ -174,7 +174,17 @@ jobs:
       - name: Verify tarball size < 2MB
         working-directory: src/npm-package
         run: |
-          SIZE=$(npm pack --dry-run --json 2>/dev/null | jq '.[0].size')
+          # npm 9/10 emit `pack --json` as a single OBJECT; npm 11 emits an ARRAY.
+          # The runner's npm is decided by the node version, so hard-coding
+          # '.[0].size' failed with "Cannot index object with number" on npm 10
+          # (jq exit 5) — the guard reported a broken guard, not a fat tarball.
+          # `.size // .[0].size` reads the object shape first and falls back to
+          # the array shape, so the guard works on every npm this repo builds with.
+          SIZE=$(npm pack --dry-run --json 2>/dev/null | jq 'if type == "array" then .[0].size else .size end')
+          if [ -z "$SIZE" ] || [ "$SIZE" = "null" ]; then
+            echo "FAIL: could not read a size from npm pack --json"
+            exit 1
+          fi
           echo "Tarball size: $SIZE bytes"
           if [ "$SIZE" -ge 2097152 ]; then
             echo "FAIL: tarball >= 2MB ($SIZE bytes)"
@@ -267,6 +277,15 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: '20'
+
+      # sync-package-content.js copies plugins/dsh/lib/ into the bundle, and that
+      # directory is a gitignored tsc artifact (prepack builds it). On a clean
+      # checkout it does not exist, so the sync aborts with
+      # "plugins/dsh/lib/index.js is missing" — the guard is right to refuse a
+      # bundle whose "./dsh" export would not resolve, but CI has to build first.
+      - name: Build the dsh plugin bundle
+        run: |
+          (cd plugins/dsh && npm install --no-audit --no-fund && npm run build)
 
       - name: Run sync and verify no diff
         run: |
