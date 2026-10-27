@@ -26,6 +26,7 @@
     "gate-9.sh",
     "gate-10.sh",
     "gate-12-file-hygiene.sh",
+    "gate-13-compiler-strictness.sh",
     "sprint-gate.sh"
   ],
   "dsh": {
