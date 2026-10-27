@@ -30,51 +30,62 @@ interface ImportViolation {
   severity: string;
 }
 
+/** Strategy mismatch between what the layer wants and what the test does. */
+function strategyViolation(
+  testFile: string,
+  importPath: string,
+  actualStrategy: string,
+  decision: { strategy: string; reason: string },
+): ImportViolation {
+  return {
+    file: testFile,
+    line: 0,
+    dependency: importPath,
+    actualStrategy,
+    expectedStrategy: decision.strategy,
+    reason: decision.reason,
+    severity: 'warning',
+  };
+}
+
+/** A pending dependency mocked without the required removal plan. */
+function pendingViolation(testFile: string, importPath: string): ImportViolation {
+  return {
+    file: testFile,
+    line: 0,
+    dependency: importPath,
+    actualStrategy: 'mock',
+    expectedStrategy: 'mock',
+    reason: `Pending dependency "${importPath}" requires @mock-justified annotation with removal plan`,
+    severity: 'warning',
+  };
+}
+
 async function validateFile(
   testFile: string,
   engine: MockDecisionEngine,
 ): Promise<ImportViolation[]> {
   const content = await readFile(testFile, 'utf-8');
   const layer = detectTestLayer(testFile);
-  const imports = collectImports(content);
   const violations: ImportViolation[] = [];
 
   // Kept in step with gate-m3.ts validateImport: a lenient unit layer only
-  // recommends mocking, so it must not report a test that injects a fake
-  // instead. This copy is why the rule has to be duplicated here — the
-  // runGateM3 tests below exercise the production path directly.
-  const lenientUnit = defaultConfig.layers.unit.mockPolicy === 'lenient';
-  const skipStrategyCheck = lenientUnit && (layer === 'unit' || layer === 'unknown');
+  // recommends mocking, so it must not report a test that injects a fake. This
+  // copy exists because the rule lives in a private function; the runGateM3 tests
+  // below cover the production path.
+  const skipStrategyCheck =
+    defaultConfig.layers.unit.mockPolicy === 'lenient' &&
+    (layer === 'unit' || layer === 'unknown');
 
-  for (const importPath of imports) {
+  for (const importPath of collectImports(content)) {
     const decision = engine.decide(importPath, layer);
     const actualStrategy = detectMockUsage(content, importPath);
 
     if (!skipStrategyCheck && decision.strategy !== actualStrategy) {
-      violations.push({
-        file: testFile,
-        line: 0,
-        dependency: importPath,
-        actualStrategy,
-        expectedStrategy: decision.strategy,
-        reason: decision.reason,
-        severity: 'warning',
-      });
+      violations.push(strategyViolation(testFile, importPath, actualStrategy, decision));
     }
-
-    if (decision.pendingRemoval && actualStrategy === 'mock') {
-      const hasRemovalAnnotation = content.includes('@mock-justified');
-      if (!hasRemovalAnnotation) {
-        violations.push({
-          file: testFile,
-          line: 0,
-          dependency: importPath,
-          actualStrategy: 'mock',
-          expectedStrategy: 'mock',
-          reason: `Pending dependency "${importPath}" requires @mock-justified annotation with removal plan`,
-          severity: 'warning',
-        });
-      }
+    if (decision.pendingRemoval && actualStrategy === 'mock' && !content.includes('@mock-justified')) {
+      violations.push(pendingViolation(testFile, importPath));
     }
   }
 
