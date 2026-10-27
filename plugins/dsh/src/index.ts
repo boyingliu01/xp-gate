@@ -1,3 +1,5 @@
+import { writeFile } from "node:fs/promises"
+import { join } from "node:path"
 import { fileURLToPath } from "node:url"
 
 import type { CredentialProvider } from "@deepseek-ai/dsh-credentials"
@@ -6,8 +8,12 @@ import type { Context } from "@deepseek-ai/cordis"
 import type { ShellDialect } from "./command.js"
 import { GATE_WHITELIST, buildCommand, detectDialect, resolveTarget } from "./command.js"
 import { runXpGate } from "./gate-runner.js"
+import type { ResolvedDelphiConfig } from "./delphi-config.js"
 import { DelphiSetupError, listCredentialReferences, loadDelphiConfig, toDelphiOptions } from "./delphi-config.js"
+import type { ReviewOutcome } from "./delphi-run.js"
 import { formatOutcome, runReview } from "./delphi-run.js"
+import { buildEvidence } from "./evidence.js"
+import { readGitContext } from "./git-context.js"
 import { PHASE_STATUSES, SPRINT_SUBCOMMANDS, buildSprintCommand } from "./sprint.js"
 import { createSkillProvider } from "./skill-provider.js"
 import type { ApiKeyResolver } from "./credentials.js"
@@ -34,6 +40,9 @@ const DEFAULT_TIMEOUT_MS = 120_000
 // Multi-round reviews over large inputs are slow; the transport applies its
 // own per-request timeout on top of this ceiling.
 const DELPHI_TIMEOUT_MS = 900_000
+
+/** The document Gate MW reads at push time. */
+const EVIDENCE_FILE = ".code-walkthrough-result.json"
 
 // Boy Scout (#447): gate-check's `gates` parameter nests one level too deep
 // inline (parameters → gates → items), so the schema lives at module scope.
@@ -134,14 +143,55 @@ function gateArchTool(shell: Context["shell"], dialect: ShellDialect) {
 // Boy Scout (#447): the review body used to sit inline in execute() at 5 brace
 // levels (defineTool → execute → try → runReview options). Module scope keeps
 // the try/catch semantics identical while dropping two levels.
-async function runDelphiReview(
-  subject: string,
-  addressed: string,
-  maxRounds: number | undefined,
+/**
+ * Write .code-walkthrough-result.json for Gate MW, or explain why it cannot.
+ *
+ * Returns a suffix for the tool's output rather than throwing: the review itself
+ * succeeded, and losing its text because evidence could not be written would be a
+ * worse outcome than a clear note that the push gate will not be satisfied.
+ */
+async function writeWalkthroughEvidence(
   cwd: string,
-  resolveApiKey: ApiKeyResolver,
-  signal: AbortSignal | undefined,
+  cfg: ResolvedDelphiConfig,
+  outcome: ReviewOutcome,
 ): Promise<string> {
+  try {
+    const lastRound = outcome.rounds[outcome.rounds.length - 1]
+    const seats = lastRound.verdicts.map((v) => ({
+      role: v.role,
+      model: v.requestedModel,
+      resolved: v.resolvedModel ?? "",
+    }))
+    const git = readGitContext(cwd)
+    const evidence = buildEvidence({
+      head: git.head,
+      branch: git.branch,
+      seats,
+      verdict: outcome.consensus ? "APPROVED" : "REQUEST_CHANGES",
+      now: new Date(),
+      baseUrl: cfg.baseUrl,
+      consensusRatio: outcome.finalRatio,
+    })
+    const target = join(cwd, EVIDENCE_FILE)
+    await writeFile(target, `${JSON.stringify(evidence, null, 2)}\n`, "utf8")
+    return `\nEvidence: ${EVIDENCE_FILE} written for ${evidence.commit.slice(0, 8)}.`
+  } catch (error) {
+    return `\nEvidence: not written — ${(error as Error).message}`
+  }
+}
+
+/** Everything a review needs from the tool call, minus the material under review. */
+interface ReviewRequest {
+  readonly addressed: string
+  readonly maxRounds: number | undefined
+  readonly cwd: string
+  readonly resolveApiKey: ApiKeyResolver
+  readonly signal: AbortSignal | undefined
+  readonly writeEvidence: boolean
+}
+
+async function runDelphiReview(subject: string, request: ReviewRequest): Promise<string> {
+  const { addressed, maxRounds, cwd, resolveApiKey, signal, writeEvidence } = request
   try {
     // Resolve credentials BEFORE loading the config: the loader is synchronous and
     // throws as soon as a referenced variable has no value. Reading the reference
@@ -161,7 +211,10 @@ async function runDelphiReview(
       signal,
     )
     const seats = cfg.seats.map((s) => s.model).join(", ")
-    return `${formatOutcome(outcome)}\n\nProvider: ${cfg.provider}\nSeats: ${seats}`
+    const suffix = writeEvidence
+      ? await writeWalkthroughEvidence(cwd, cfg, outcome)
+      : ""
+    return `${formatOutcome(outcome)}\n\nProvider: ${cfg.provider}\nSeats: ${seats}${suffix}`
   } catch (e) {
     // Config problems are the common failure; report them as guidance
     // rather than a stack trace.
@@ -195,6 +248,11 @@ function delphiReviewTool(resolveApiKey: ApiKeyResolver) {
         type: "string",
         description: "Project root containing .delphi-config.json (defaults to the session cwd).",
       },
+      writeEvidence: {
+        type: "boolean",
+        description:
+          "Write .code-walkthrough-result.json for the Gate MW pre-push check. Off by default because it is a file side effect; requires an APPROVED review.",
+      },
     },
     output: {
       schema: { type: "string" },
@@ -203,14 +261,14 @@ function delphiReviewTool(resolveApiKey: ApiKeyResolver) {
     timeoutMs: DELPHI_TIMEOUT_MS,
     async execute(args, exec) {
       const cwd = args.cwd ?? exec.agent?.session?.header?.cwd ?? process.cwd()
-      return runDelphiReview(
-        args.subject,
-        args.addressed ?? "",
-        args.maxRounds,
+      return runDelphiReview(args.subject, {
+        addressed: args.addressed ?? "",
+        maxRounds: args.maxRounds,
         cwd,
         resolveApiKey,
-        exec.signal,
-      )
+        signal: exec.signal,
+        writeEvidence: args.writeEvidence ?? false,
+      })
     },
   })
 }

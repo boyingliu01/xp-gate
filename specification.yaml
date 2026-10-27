@@ -173,8 +173,35 @@ specification:
           test_type: unit
 
     # ============================================================
-    # REQ-DSH-013: sprint-flow 子命令可达
+    # REQ-DSH-012: delphi-review 可产出 Gate MW 证据
     # ============================================================
+    - id: REQ-DSH-012
+      description: >-
+        delphi-review 增加可选 writeEvidence（默认 false，避免默认产生文件副作用），
+        产出 .code-walkthrough-result.json 供 pre-push Gate MW 校验。字段须逐条满足
+        githooks/lib/validate-code-walkthrough.cjs：result_type 属 expert 级而非顶层；
+        requested_model 取配置席位而非网关响应（网关回 Qwen3_8-flash-next，配置是 local-qwen3.8-flash）。
+      priority: high
+      acceptance_criteria:
+        - id: AC-DSH-012-01
+          criteria: result_type 位于每个 expert 记录内，顶层无此字段
+          test_type: unit
+        - id: AC-DSH-012-02
+          criteria: requested_model 取配置席位，resolved_model 取网关响应，两者分别写入且各自互不相同
+          test_type: unit
+        - id: AC-DSH-012-03
+          criteria: timestamp/expires 为规范 UTC ISO-8601 且恰好相差 3600000ms；consensus_ratio ∈ [0.90, 1]
+          test_type: unit
+        - id: AC-DSH-012-04
+          criteria: 非 APPROVED 结论或有席位未解析出模型时拒绝产出（抛错而非写出无效文件）
+          test_type: unit
+        - id: AC-DSH-012-05
+          criteria: channel 按 base_url 判定，仅 loopback 记 local，其余记 external
+          test_type: unit
+        - id: AC-DSH-012-06
+          criteria: 产出文档通过真实 githooks/lib/validate-code-walkthrough.cjs 校验（exit 0）
+          test_type: integration
+
     - id: REQ-DSH-013
       description: >-
         sprint-flow skill 指示模型调用 sprint-status / phase-transition / retro / ui-review /
