@@ -57,6 +57,14 @@ function copyAdapters(srcDir, destDir) {
   if (fs.existsSync(adapterCommon)) {
     fs.copyFileSync(adapterCommon, path.join(destDir, 'adapter-common.sh'));
   }
+  // Shared shell helpers the fragments `source` at runtime (ccn-ratchet.sh and
+  // friends). Without this, gate-3.sh resolves $GATE_DIR/lib/ccn-ratchet.sh to a
+  // path that no installer ever created, and `.` failing there silently disabled
+  // the complexity ratchet: a CCN regression was graded PASS.
+  const libSrc = path.join(srcDir, 'hooks', 'lib');
+  if (fs.existsSync(libSrc)) {
+    copyDirRecursive(libSrc, path.join(destDir, 'lib'));
+  }
   if (fs.existsSync(adaptersDir)) {
     fs.readdirSync(adaptersDir).forEach(f => {
       if (f.endsWith('.sh')) {

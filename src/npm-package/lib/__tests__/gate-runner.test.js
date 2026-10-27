@@ -67,10 +67,11 @@ function initializeGitProject() {
 
 // Runs runGateAdapter in a child node process (worker threads forbid process
 // chdir, and runGateAdapter execs bash), capturing stdout/exit status.
-function runChildAdapter(gateRunnerAbsPath, fragmentPath, cwd = tmpProject) {
+function runChildAdapter(gateRunnerAbsPath, fragmentPath, cwd = tmpProject, opts = null) {
+  const optsArgument = opts ? `, ${JSON.stringify(opts)}` : '';
   const script = [
     `const { runGateAdapter } = require(${JSON.stringify(gateRunnerAbsPath)});`,
-    `runGateAdapter(${JSON.stringify(fragmentPath)}, ${JSON.stringify(cwd)});`,
+    `runGateAdapter(${JSON.stringify(fragmentPath)}, ${JSON.stringify(cwd)}${optsArgument});`,
     "console.log('__ADAPTER_DONE__');",
   ].join('\n');
   try {
@@ -141,6 +142,32 @@ describe('gate-runner.js — runGateAdapter', () => {
 
     const fragPath = path.join(tmpAdapters, 'gate-9.sh');
     const { status, stdout } = runChildAdapter(runnerAbsPath, fragPath);
+
+    expect(status).toBe(0);
+    expect(stdout).toContain('__ADAPTER_DONE__');
+  }, 30000);
+
+  it('propagates the whole tracked tree under scope=all, one file per line (#589/#<new>)', () => {
+    const runnerAbsPath = path.resolve(__dirname, '../gate-runner.js');
+    writeAdapterCommon();
+    initializeGitProject();
+    fs.writeFileSync(path.join(tmpProject, 'untracked.ts'), 'const value = 3;\n');
+    // Two tracked files so a one-line join (the old JSON.stringify form) would fail
+    // the equality check even though the list was non-empty.
+    fs.writeFileSync(path.join(tmpProject, 'second.ts'), 'const value = 4;\n');
+    execFileSync('git', ['add', 'second.ts'], { cwd: tmpProject });
+    execFileSync('git', ['-c', 'core.hooksPath=/dev/null', 'commit', '-qm', 'second'], {
+      cwd: tmpProject,
+    });
+    writeGateFragment([
+      `printf '%s\\n' "${shellParameter('CHANGED_FILES')}" | grep -qx 'tracked.ts' || exit 87`,
+      `printf '%s\\n' "${shellParameter('CHANGED_FILES')}" | grep -qx 'second.ts' || exit 86`,
+      `[ "$(printf '%s\\n' "${shellParameter('CHANGED_FILES')}" | wc -l)" -eq 2 ] || exit 85`,
+      `if [ "${shellParameter('GATE_SCOPE')}" != "all" ]; then exit 84; fi`,
+    ]);
+
+    const fragPath = path.join(tmpAdapters, 'gate-9.sh');
+    const { status, stdout } = runChildAdapter(runnerAbsPath, fragPath, tmpProject, { scope: 'all' });
 
     expect(status).toBe(0);
     expect(stdout).toContain('__ADAPTER_DONE__');
