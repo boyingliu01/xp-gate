@@ -62,5 +62,9 @@
   "src/npm-package/scripts/sync-package-content.js": {
     "totalWarnings": 14,
     "lastAnalyzed": "2026-10-26T20:05:00.275Z"
+  },
+  "dashboard/dashboard.js": {
+    "totalWarnings": 5,
+    "lastAnalyzed": "2026-10-26T23:41:20.059Z"
   }
 }

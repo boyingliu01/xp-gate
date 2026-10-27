@@ -13,7 +13,7 @@
   "dashboard/dashboard.js::labels": 1,
   "dashboard/dashboard.js::backgroundColor": 3,
   "dashboard/dashboard.js::callback": 1,
-  "dashboard/dashboard.js::renderGatePassRateChart": 7,
+  "dashboard/dashboard.js::renderGatePassRateChart": 3,
   "dashboard/dashboard.js::(anonymous)@148": 3,
   "dashboard/dashboard.js::(anonymous)@149": 3,
   "dashboard/dashboard.js::(anonymous)@156": 1,

@@ -59,13 +59,26 @@ function renderSummary(history) {
   `;
 }
 
+/**
+ * Chart.js options for the dashboard's simple charts: responsive, one y scale,
+ * no legend. Factored out because every chart here repeats it, and inlining it
+ * is what pushed each renderer's nesting past the limit.
+ */
+function chartOptions(yAxis) {
+  return {
+    responsive: true,
+    scales: { y: yAxis },
+    plugins: { legend: { display: false } },
+  };
+}
+
 function renderScoreChart(history) {
   const ctx = document.getElementById('score-chart').getContext('2d');
   const labels = history.map(h => {
     const d = new Date(h.timestamp);
     return `${d.getMonth()+1}/${d.getDate()}`;
   });
-  
+
   new Chart(ctx, {
     type: 'line',
     data: {
@@ -81,15 +94,7 @@ function renderScoreChart(history) {
         pointHoverRadius: 6
       }]
     },
-    options: {
-      responsive: true,
-      scales: {
-        y: { min: 0, max: 10, ticks: { stepSize: 2 } }
-      },
-      plugins: {
-        legend: { display: false }
-      }
-    }
+    options: chartOptions({ min: 0, max: 10, ticks: { stepSize: 2 } }),
   });
 }
 
@@ -132,6 +137,43 @@ function passRateFor(history, gateKey) {
   return Math.round((passes / history.length) * 100);
 }
 
+/** Colour tiers for a pass rate: green at 90%+, amber at 50%+, red below. */
+const PASS_RATE_TIERS = [
+  { min: 90, fill: 'rgba(34,197,94,0.7)', stroke: '#22c55e' },
+  { min: 50, fill: 'rgba(234,179,8,0.7)', stroke: '#eab308' },
+  { min: -Infinity, fill: 'rgba(239,68,68,0.7)', stroke: '#ef4444' },
+];
+
+/** The tier a pass rate falls into. */
+function passRateTier(rate) {
+  return PASS_RATE_TIERS.find((tier) => rate >= tier.min);
+}
+
+/**
+ * Chart.js config for the gate pass-rate bars.
+ *
+ * Kept separate from the render call so the config literal is not nested inside
+ * a function that also does lookups and DOM work — that combination is what made
+ * the renderer hard to scan.
+ */
+function gatePassRateChartConfig(passRates) {
+  return {
+    type: 'bar',
+    data: {
+      labels: GATE_CHART_LABELS.map(n => n.split(': ')[0]),
+      datasets: [{
+        label: 'Pass Rate (%)',
+        data: passRates,
+        backgroundColor: passRates.map(r => passRateTier(r).fill),
+        borderColor: passRates.map(r => passRateTier(r).stroke),
+        borderWidth: 1,
+        borderRadius: 4
+      }]
+    },
+    options: chartOptions({ min: 0, max: 100, ticks: { callback: v => v + '%' } }),
+  };
+}
+
 function renderGatePassRateChart(history) {
   if (!history.length) return;
 
@@ -142,151 +184,161 @@ function renderGatePassRateChart(history) {
   });
 
   const ctx = document.getElementById('gate-pass-chart').getContext('2d');
-  new Chart(ctx, {
-    type: 'bar',
-    data: {
-      labels: GATE_CHART_LABELS.map(n => n.split(': ')[0]),
-      datasets: [{
-        label: 'Pass Rate (%)',
-        data: passRates,
-        backgroundColor: passRates.map(r => r >= 90 ? 'rgba(34,197,94,0.7)' : r >= 50 ? 'rgba(234,179,8,0.7)' : 'rgba(239,68,68,0.7)'),
-        borderColor: passRates.map(r => r >= 90 ? '#22c55e' : r >= 50 ? '#eab308' : '#ef4444'),
-        borderWidth: 1,
-        borderRadius: 4
-      }]
-    },
-    options: {
-      responsive: true,
-      scales: {
-        y: { min: 0, max: 100, ticks: { callback: v => v + '%' } }
-      },
-      plugins: { legend: { display: false } }
-    }
-  });
+  new Chart(ctx, gatePassRateChartConfig(passRates));
+}
+
+/** One line dataset for the metrics chart. */
+function metricsDataset(label, color, values) {
+  return {
+    label,
+    data: values,
+    borderColor: color,
+    backgroundColor: `${color}1a`,
+    fill: false,
+    tension: 0.3,
+    yAxisID: 'y',
+  };
+}
+
+/**
+ * Chart.js options for a multi-dataset chart: responsive, zero-based y,
+ * top legend. Split from the config so neither object nests five levels deep.
+ */
+function metricsChartOptions() {
+  const legend = { position: 'top' };
+  return {
+    responsive: true,
+    scales: { y: { beginAtZero: true } },
+    plugins: { legend },
+  };
+}
+
+/** Chart.js config for the metrics chart. */
+function metricsChartConfig(labels, datasets) {
+  return {
+    type: 'line',
+    data: { labels, datasets },
+    options: metricsChartOptions(),
+  };
 }
 
 function renderMetricsChart(history) {
   if (!history.length) return;
-  
+
   const hasComplexity = history.some(h => h.complexityWarnings > 0);
   const hasBoyScout = history.some(h => h.boyScoutBlocked > 0);
-  
+
   if (!hasComplexity && !hasBoyScout) {
     document.getElementById('metrics-section').style.display = 'none';
     return;
   }
-  
+
   const labels = history.map(h => {
     const d = new Date(h.timestamp);
     return `${d.getMonth()+1}/${d.getDate()}`;
   });
-  
+
   const datasets = [];
   if (hasComplexity) {
-    datasets.push({
-      label: 'Complexity Warnings',
-      data: history.map(h => h.complexityWarnings || 0),
-      borderColor: '#f97316',
-      backgroundColor: 'rgba(249,115,22,0.1)',
-      fill: false,
-      tension: 0.3,
-      yAxisID: 'y'
-    });
+    datasets.push(metricsDataset('Complexity Warnings', '#f97316',
+      history.map(h => h.complexityWarnings || 0)));
   }
   if (hasBoyScout) {
-    datasets.push({
-      label: 'Boy Scout Blocked',
-      data: history.map(h => h.boyScoutBlocked || 0),
-      borderColor: '#ef4444',
-      backgroundColor: 'rgba(239,68,68,0.1)',
-      fill: false,
-      tension: 0.3,
-      yAxisID: 'y'
-    });
+    datasets.push(metricsDataset('Boy Scout Blocked', '#ef4444',
+      history.map(h => h.boyScoutBlocked || 0)));
   }
-  
+
   const ctx = document.getElementById('metrics-chart').getContext('2d');
-  new Chart(ctx, {
-    type: 'line',
-    data: { labels, datasets },
-    options: {
-      responsive: true,
-      scales: { y: { beginAtZero: true } },
-      plugins: { legend: { position: 'top' } }
-    }
+  new Chart(ctx, metricsChartConfig(labels, datasets));
+}
+
+/**
+ * Average and latest score for the PDF header.
+ *
+ * Same number-or-null contract as renderSummary (#507 S3): a null score means
+ * SKIP-ALL. Only numeric scores enter the average (no fake zeros), a null latest
+ * renders as N/A, and nothing calls a method on null.
+ */
+function pdfScoreSummary(history) {
+  const scored = history.filter(h => typeof h.score === 'number');
+  const avg = scored.length
+    ? (scored.reduce((sum, h) => sum + h.score, 0) / scored.length).toFixed(1)
+    : 'N/A';
+  const latestScore = typeof history[history.length - 1].score === 'number'
+    ? history[history.length - 1].score
+    : null;
+  return {
+    avgText: avg === 'N/A' ? 'N/A' : `${avg}/10`,
+    latestText: latestScore === null ? 'N/A' : `${latestScore}/10`,
+  };
+}
+
+/** The [{ gate, status }] rows for the PDF gate table. */
+function pdfGateRows(latest) {
+  return GATE_CHART_LABELS.map(name => {
+    const gateKey = findGateKey(latest.gates, name);
+    const status = gateKey ? (latest.gates[gateKey]?.status || 'N/A') : 'N/A';
+    return [name, status];
   });
+}
+
+/** The last 20 score rows for the PDF score-history table. */
+function pdfScoreRows(history) {
+  return history.slice(-20).map(h => [
+    new Date(h.timestamp).toLocaleDateString(),
+    typeof h.score === 'number' ? String(h.score) : 'N/A',
+    h.passed + '/' + (h.effectiveTotal ?? h.total) + ' gates'
+  ]);
+}
+
+/** Shared table styling for both PDF tables. */
+function pdfTableStyles() {
+  return {
+    theme: 'grid',
+    headStyles: { fillColor: [59, 130, 246] },
+    styles: { fontSize: 9 },
+  };
 }
 
 async function exportPDF() {
   const { jsPDF } = window.jspdf;
   const autoTable = window.jspdfAutoTable;
-  
   const doc = new jsPDF();
   const history = await loadHistory();
   if (!history.length) {
     alert('No data to export.');
     return;
   }
-  
+
   const latest = history[history.length - 1];
-  // Same number-or-null contract as renderSummary (#507 S3): a null score
-  // means SKIP-ALL. Filter to numeric scores for the average (no fake zeros),
-  // render a null latest as N/A, and never call methods on null --
-  // exportPDF previously threw a TypeError on SKIP-ALL histories and dragged
-  // null scores into the average as zeros (#507 Delphi round-2 A-MAJOR-3 residue).
-  const scored = history.filter(h => typeof h.score === 'number');
-  const avgScore = scored.length
-    ? (scored.reduce((sum, h) => sum + h.score, 0) / scored.length).toFixed(1)
-    : 'N/A';
-  const latestScore = typeof latest.score === 'number' ? latest.score : null;
-  const latestText = latestScore === null ? 'N/A' : `${latestScore}/10`;
-  
-  // Title
+  const { avgText, latestText } = pdfScoreSummary(history);
+
   doc.setFontSize(20);
   doc.text('XP-Gate Quality Report', 14, 22);
-  
-  // Summary
+
   doc.setFontSize(12);
   doc.text(`Generated: ${new Date().toLocaleDateString()}`, 14, 32);
-  doc.text(`Total Runs: ${history.length} | Avg Score: ${avgScore}${avgScore === 'N/A' ? '' : '/10'} | Latest: ${latestText}`, 14, 40);
-  
-  // Gate table — same labels and the same "which report key matches this
-  // label" question as the pass-rate chart, so both reuse the shared table and
-  // findGateKey instead of keeping their own copies that can drift apart.
-  const rows = GATE_CHART_LABELS.map(name => {
-    const gateKey = findGateKey(latest.gates, name);
-    const status = gateKey ? (latest.gates[gateKey]?.status || 'N/A') : 'N/A';
-    return [name, status];
-  });
-  
+  doc.text(`Total Runs: ${history.length} | Avg Score: ${avgText} | Latest: ${latestText}`, 14, 40);
+
+  // Same labels and same "which report key matches this label" lookup as the
+  // pass-rate chart, so both reuse the shared table and findGateKey.
   autoTable(doc, {
     startY: 50,
     head: [['Gate', 'Status']],
-    body: rows,
-    theme: 'grid',
-    headStyles: { fillColor: [59, 130, 246] },
-    styles: { fontSize: 9 }
+    body: pdfGateRows(latest),
+    ...pdfTableStyles(),
   });
-  
-  // Score history
+
   const finalY = doc.lastAutoTable.finalY + 10;
   doc.text('Score History', 14, finalY);
-  
-  const scoreRows = history.slice(-20).map(h => [
-    new Date(h.timestamp).toLocaleDateString(),
-    typeof h.score === 'number' ? String(h.score) : 'N/A',
-    h.passed + '/' + (h.effectiveTotal ?? h.total) + ' gates'
-  ]);
-  
+
   autoTable(doc, {
     startY: finalY + 5,
     head: [['Date', 'Score', 'Gates']],
-    body: scoreRows,
-    theme: 'grid',
-    headStyles: { fillColor: [59, 130, 246] },
-    styles: { fontSize: 9 }
+    body: pdfScoreRows(history),
+    ...pdfTableStyles(),
   });
-  
+
   doc.save(`xp-gate-quality-${latest.commit.slice(0,7)}.pdf`);
 }
 
