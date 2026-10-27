@@ -1,7 +1,10 @@
 import { describe, it, expect } from "vitest"
 import type { Context } from "@deepseek-ai/cordis"
 import type { ShellExecRequest, ShellExecSpec, ShellRunResult } from "@deepseek-ai/dsh-shell"
-import { apply } from "./index.js"
+import type { SkillProvider, SkillProviderControl, SkillProviderObservation } from "@deepseek-ai/dsh-skill"
+import { apply, inject } from "./index.js"
+
+type ProviderFactory = (control: SkillProviderControl) => SkillProvider
 
 interface CapturedTool {
   name: string
@@ -15,6 +18,8 @@ function makeSpec(req: ShellExecRequest): ShellExecSpec {
     command: req.command,
     workdir: req.workdir ?? "/workspace",
     timeoutMs: req.timeoutMs ?? 1000,
+    // Resolved specs require the expiry policy; the request may omit it.
+    onExpiry: "kill",
     stdoutMaxBytes: 1_000_000,
     signal: req.signal,
     sandboxPolicy: undefined,
@@ -39,8 +44,9 @@ function makeShell(stdoutText: string, requests: ShellExecRequest[]) {
       requests.push(req)
       return makeSpec(req)
     },
-    run(): Promise<ShellRunResult> {
-      return Promise.resolve(makeRunResult(stdoutText))
+    // 0.2.0-rc.2 seam: execute() returns a handle whose result() settles.
+    execute(): Promise<{ result(): Promise<ShellRunResult> }> {
+      return Promise.resolve({ result: () => Promise.resolve(makeRunResult(stdoutText)) })
     },
   }
 }
@@ -48,11 +54,13 @@ function makeShell(stdoutText: string, requests: ShellExecRequest[]) {
 function makeCtx(stdoutText: string) {
   const captured: unknown[] = []
   const requests: ShellExecRequest[] = []
+  const providers: ProviderFactory[] = []
   const ctx = {
     tools: { register: (def: unknown) => captured.push(def) },
+    skills: { registerProvider: (create: ProviderFactory) => providers.push(create) },
     shell: makeShell(stdoutText, requests),
   } as unknown as Context
-  return { ctx, captured, requests }
+  return { ctx, captured, requests, providers }
 }
 
 describe("apply", () => {
@@ -63,6 +71,41 @@ describe("apply", () => {
     expect(names).toContain("gate-check")
     expect(names).toContain("gate-principles")
     expect(names).toContain("gate-arch")
+  })
+
+  /**
+   * @test REQ-DSH-006
+   * @intent 验证 apply(ctx) 通过 ctx.skills.registerProvider 注册了 bundled skill provider，
+   *         且该 provider 能列出 12 个 skill —— 这是 skill 对模型可见的唯一通路
+   * @covers AC-DSH-006-02
+   */
+  it("registers the bundled skill provider that publishes all 12 skills", async () => {
+    const { ctx, providers } = makeCtx("ok")
+    apply(ctx)
+    expect(providers).toHaveLength(1)
+
+    const create = providers[0]
+    expect(create).toBeDefined()
+    if (!create) return
+    const provider = create({ signal: new AbortController().signal, invalidate: () => {} })
+    expect(provider.name).toBe("xp-gate")
+
+    const listed = await provider.list({})
+    // DSH permits either a bare array or an observation object; this provider
+    // answers with the array form.
+    const candidates = Array.isArray(listed)
+      ? listed
+      : ((listed as SkillProviderObservation).candidates ?? [])
+    expect(candidates).toHaveLength(12)
+  })
+
+  /**
+   * @test REQ-DSH-006
+   * @intent 验证 inject 声明了 "skills"，否则 ctx.skills 在该插件 apply 时可能尚未就绪
+   * @covers AC-DSH-006-02
+   */
+  it("declares the skills capability in inject", () => {
+    expect(inject).toContain("skills")
   })
 
   /**
@@ -78,7 +121,7 @@ describe("apply", () => {
       { path: "/repo/src", gates: ["principles"] },
       { signal: new AbortController().signal },
     )
-    expect(out).toBe("gate report")
+    expect(out).toBe("[XP-Gate] PASS\ngate report")
     expect(requests[0]?.command).toContain("xp-gate check '/repo/src' --gates 'principles'")
   })
 
@@ -92,7 +135,7 @@ describe("apply", () => {
     apply(ctx)
     const tool = captured.find((c) => (c as CapturedTool).name === "gate-principles") as CapturedTool
     const out = await tool.execute({ path: "/repo/src/app.ts" }, { signal: new AbortController().signal })
-    expect(out).toBe("principles report")
+    expect(out).toBe("[XP-Gate] PASS\nprinciples report")
     expect(requests[0]?.command).toContain("xp-gate principles '/repo/src/app.ts'")
   })
 

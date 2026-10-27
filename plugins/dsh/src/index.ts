@@ -1,13 +1,33 @@
+import { fileURLToPath } from "node:url"
+
+import type { CredentialProvider } from "@deepseek-ai/dsh-credentials"
 import { defineTool } from "@deepseek-ai/dsh-tools"
 import type { Context } from "@deepseek-ai/cordis"
 import type { ShellDialect } from "./command.js"
 import { GATE_WHITELIST, buildCommand, detectDialect, resolveTarget } from "./command.js"
 import { runXpGate } from "./gate-runner.js"
-import { DelphiSetupError, loadDelphiConfig, toDelphiOptions } from "./delphi-config.js"
+import { DelphiSetupError, listCredentialReferences, loadDelphiConfig, toDelphiOptions } from "./delphi-config.js"
 import { formatOutcome, runReview } from "./delphi-run.js"
+import { createSkillProvider } from "./skill-provider.js"
+import type { ApiKeyResolver } from "./credentials.js"
+import { createCredentialResolver } from "./credentials.js"
 
 export const name = "tool-xp-gate"
-export const inject = ["tools", "shell"]
+// "skills" is required: the bundled skill provider registers during apply(), and
+// without it ctx.skills may not be mounted yet when this plugin starts.
+export const inject = ["tools", "shell", "skills"]
+
+/**
+ * Absolute path to the skills directory shipped alongside this module.
+ *
+ * Resolved from `import.meta.url` rather than `process.cwd()`: after an npm
+ * install the plugin lives in the profile's node_modules, so the working
+ * directory says nothing about where its assets are. This is the same
+ * resolution the official `@deepseek-ai/dsh-skill-office` uses.
+ */
+function bundledSkillsRoot(): string {
+  return fileURLToPath(new URL("../skills/", import.meta.url))
+}
 
 const DEFAULT_TIMEOUT_MS = 120_000
 // Multi-round reviews over large inputs are slow; the transport applies its
@@ -118,11 +138,22 @@ async function runDelphiReview(
   addressed: string,
   maxRounds: number | undefined,
   cwd: string,
+  resolveApiKey: ApiKeyResolver,
 ): Promise<string> {
   try {
-    const cfg = loadDelphiConfig(cwd)
+    // Resolve credentials BEFORE loading the config: the loader is synchronous and
+    // throws as soon as a referenced variable has no value. Reading the reference
+    // names first turns "the DSH process never inherited WHALECLOUD_API_KEY" from a
+    // hard failure into a lookup in the credential store.
+    const apiKeyOverrides: Record<string, string> = {}
+    for (const name of listCredentialReferences(cwd)) {
+      const value = await resolveApiKey(name)
+      if (value !== undefined && value.length > 0) apiKeyOverrides[name] = value
+    }
+    const cfg = loadDelphiConfig(cwd, process.env, undefined, apiKeyOverrides)
+    const options = toDelphiOptions(cfg)
     const outcome = await runReview(
-      { ...toDelphiOptions(cfg), maxRounds: maxRounds ?? cfg.maxRounds },
+      { ...options, maxRounds: maxRounds ?? cfg.maxRounds },
       subject,
       addressed,
     )
@@ -136,7 +167,7 @@ async function runDelphiReview(
   }
 }
 
-function delphiReviewTool() {
+function delphiReviewTool(resolveApiKey: ApiKeyResolver) {
   return defineTool({
     name: "delphi-review",
     description:
@@ -169,7 +200,7 @@ function delphiReviewTool() {
     timeoutMs: DELPHI_TIMEOUT_MS,
     async execute(args, exec) {
       const cwd = args.cwd ?? exec.agent?.session?.header?.cwd ?? process.cwd()
-      return runDelphiReview(args.subject, args.addressed ?? "", args.maxRounds, cwd)
+      return runDelphiReview(args.subject, args.addressed ?? "", args.maxRounds, cwd, resolveApiKey)
     },
   })
 }
@@ -179,8 +210,24 @@ export function apply(ctx: Context, _config: unknown = {}): void {
   // wrong dialect makes every tool fail to parse rather than degrade gracefully.
   const dialect = detectDialect()
   const shell = ctx.shell
+  // ctx.credentials is optional: outside DSH there is no store, and the resolver
+  // then reads the process environment directly. Inside DSH this is what makes
+  // delphi-review work on a machine whose key lives in the credential store rather
+  // than in the host process's inherited environment.
+  //
+  // The cast is needed because the service is attached by a peer package's module
+  // augmentation, which only applies when that package is in the compilation; a
+  // consumer may install this plugin without it.
+  const credentials = (ctx as unknown as { credentials?: CredentialProvider }).credentials
+  const resolveApiKey = createCredentialResolver(credentials, process.env)
   ctx.tools.register(gateCheckTool(shell, dialect))
   ctx.tools.register(gatePrinciplesTool(shell, dialect))
   ctx.tools.register(gateArchTool(shell, dialect))
-  ctx.tools.register(delphiReviewTool())
+  ctx.tools.register(delphiReviewTool(resolveApiKey))
+
+  // Publishing the 12 bundled skills is what makes them visible to the model.
+  // They ship in the tarball either way, but without a provider no discovery
+  // root points at the plugin directory and the model never sees them — the v1
+  // bug this provider exists to fix.
+  ctx.skills.registerProvider(() => createSkillProvider(bundledSkillsRoot()))
 }
