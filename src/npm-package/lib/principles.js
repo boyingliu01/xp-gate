@@ -44,21 +44,41 @@ function buildPrinciplesInvocation(files, format) {
   const tsxCli = [findLocalTsxCli(), path.resolve(__dirname, '..', 'node_modules', 'tsx', 'dist', 'cli.mjs')].find(
     (candidate) => candidate && fs.existsSync(candidate)
   );
+  // Second-best shape: run npm's own npx entry with node.exe. A bare `npx` cannot be
+  // spawned without a shell on Windows (CreateProcess only resolves `.exe`, and the
+  // installed shim is `npx.cmd`), which surfaced as spawnSync ENOENT (#<new>).
+  const npxCli = tsxCli ? null : findNpxCli();
 
-  const command = tsxCli ? process.execPath : 'npx';
-  const prefix = tsxCli ? [tsxCli, entry] : ['-y', 'tsx', entry];
+  let command;
+  let prefix;
+  let useShell;
+  if (tsxCli) {
+    command = process.execPath;
+    prefix = [tsxCli, entry];
+    useShell = false;
+  } else if (npxCli) {
+    command = process.execPath;
+    prefix = [npxCli, '-y', 'tsx', entry];
+    useShell = false;
+  } else {
+    // Last resort: a bare npx on PATH. Only a shell can resolve it on Windows, so the
+    // flag has to travel with the plan instead of being hard-coded false.
+    command = 'npx';
+    prefix = ['-y', 'tsx', entry];
+    useShell = process.platform === 'win32';
+  }
 
   if (listChars <= ARGV_CHAR_BUDGET) {
     return {
       command,
       args: [...prefix, '--files', files.join(' '), '--format', format],
-      useShell: false,
+      useShell,
       cleanup: null,
     };
   }
 
   // By reference: one short argument instead of thousands of characters.
-  return buildByReferenceInvocation(prefix, files, format, command);
+  return buildByReferenceInvocation(prefix, files, format, command, useShell);
 }
 
 /**
@@ -73,9 +93,10 @@ function buildPrinciplesInvocation(files, format) {
  * @param {string[]} files source files to analyse
  * @param {string} format 'json' or 'text'
  * @param {string} command executable to run
+ * @param {boolean} useShell whether the spawn needs a shell to resolve the command
  * @returns {{command: string, args: string[], useShell: boolean, cleanup: string|null}}
  */
-function buildByReferenceInvocation(prefix, files, format, command) {
+function buildByReferenceInvocation(prefix, files, format, command, useShell) {
   const listFile = path.join(os.tmpdir(), `xp-gate-principles-${process.pid}-${Date.now()}.txt`);
   try {
     fs.writeFileSync(listFile, files.join('\n'));
@@ -88,7 +109,7 @@ function buildByReferenceInvocation(prefix, files, format, command) {
     command,
     // The @ prefix is the engine's own "read the list from this file" form.
     args: [...prefix, '--files', `@${listFile}`, '--format', format],
-    useShell: false,
+    useShell,
     cleanup: listFile,
   };
 }
@@ -118,6 +139,27 @@ function findLocalTsxCli() {
     dir = parent;
   }
   return null;
+}
+
+/**
+ * Path to npm's own npx CLI entry (`npx-cli.js`), or null.
+ *
+ * `spawnSync('npx', ...)` without a shell works on POSIX (npx is a symlinked JS
+ * script) but fails on Windows with ENOENT: CreateProcess resolves only `.exe`
+ * names, and the installed entry point is `npx.cmd`. Running npm's JS entry with
+ * the current node binary is equivalent and platform-independent.
+ *
+ * @returns {string|null}
+ */
+function findNpxCli() {
+  const execDir = path.dirname(process.execPath);
+  const candidates = [
+    // Windows/self-contained Node: <nodeDir>/node_modules/npm/bin/npx-cli.js
+    path.join(execDir, 'node_modules', 'npm', 'bin', 'npx-cli.js'),
+    // POSIX layout: <prefix>/bin/node → <prefix>/lib/node_modules/npm/bin/npx-cli.js
+    path.resolve(execDir, '..', 'lib', 'node_modules', 'npm', 'bin', 'npx-cli.js'),
+  ];
+  return candidates.find((candidate) => fs.existsSync(candidate)) || null;
 }
 
 /**

@@ -65,5 +65,26 @@ describe('shared-utils', () => {
       expect(fs.existsSync(path.join(destDir, 'verify.sh'))).toBe(false);
       expect(fs.existsSync(path.join(destDir, 'VERSION'))).toBe(false);
     });
+    it('copies hooks/lib so gate-3 can source the complexity ratchet library', () => {
+      // gate-3.sh resolves $GATE_DIR/lib/ccn-ratchet.sh, and GATE_DIR is this same
+      // adapters directory (init.js: copyAdapters(srcDir, GLOBAL_ADAPTERS_DIR)). The
+      // installer used to skip hooks/lib entirely, so the source failed with "No such
+      // file or directory", evaluate_ccn_ratchet stayed undefined and the ratchet
+      // graded every CCN regression as PASS.
+      const pkgRoot = path.join(tmpRoot, 'pkg');
+      fs.mkdirSync(path.join(pkgRoot, 'hooks', 'lib'), { recursive: true });
+      fs.writeFileSync(path.join(pkgRoot, 'gate-3.sh'), '# gate-3');
+      fs.writeFileSync(path.join(pkgRoot, 'hooks', 'lib', 'ccn-ratchet.sh'), '# ratchet');
+      fs.writeFileSync(path.join(pkgRoot, 'hooks', 'lib', 'now-ms.sh'), '# now-ms');
+
+      const destDir = path.join(tmpRoot, 'adapters');
+      fs.mkdirSync(destDir, { recursive: true });
+
+      const { copyAdapters } = require('../shared-utils');
+      copyAdapters(pkgRoot, destDir);
+
+      expect(fs.existsSync(path.join(destDir, 'lib', 'ccn-ratchet.sh'))).toBe(true);
+      expect(fs.existsSync(path.join(destDir, 'lib', 'now-ms.sh'))).toBe(true);
+    });
   });
 });
