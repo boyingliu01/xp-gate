@@ -139,6 +139,7 @@ async function runDelphiReview(
   maxRounds: number | undefined,
   cwd: string,
   resolveApiKey: ApiKeyResolver,
+  signal: AbortSignal | undefined,
 ): Promise<string> {
   try {
     // Resolve credentials BEFORE loading the config: the loader is synchronous and
@@ -156,6 +157,7 @@ async function runDelphiReview(
       { ...options, maxRounds: maxRounds ?? cfg.maxRounds },
       subject,
       addressed,
+      signal,
     )
     const seats = cfg.seats.map((s) => s.model).join(", ")
     return `${formatOutcome(outcome)}\n\nProvider: ${cfg.provider}\nSeats: ${seats}`
@@ -200,7 +202,14 @@ function delphiReviewTool(resolveApiKey: ApiKeyResolver) {
     timeoutMs: DELPHI_TIMEOUT_MS,
     async execute(args, exec) {
       const cwd = args.cwd ?? exec.agent?.session?.header?.cwd ?? process.cwd()
-      return runDelphiReview(args.subject, args.addressed ?? "", args.maxRounds, cwd, resolveApiKey)
+      return runDelphiReview(
+        args.subject,
+        args.addressed ?? "",
+        args.maxRounds,
+        cwd,
+        resolveApiKey,
+        exec.signal,
+      )
     },
   })
 }
