@@ -56,9 +56,25 @@ enforce_python_coverage() {
     return 0
   fi
 
+  # #636: this probe is the SAME fail-open #570 closed, only earlier. Returning 0
+  # here means "no coverage.py on PATH" silently disables the Python coverage
+  # floor — and unlike a deleted .coverage file, a missing tool is a steady state,
+  # not an accident: every consumer repo / CI image / colleague machine without
+  # coverage.py had this gate switched off behind a ⚠️ that reads as informational.
+  # The #570 suite could not see it because its setup installs a coverage stub
+  # precisely so this probe succeeds.
+  #
+  # A subset run stays the one exception: nothing was measured because only part
+  # of the suite ran, so there is no total to compare.
   if ! command -v coverage &> /dev/null; then
-    echo "⚠️  coverage.py not available, cannot enforce Python coverage threshold."
-    return 0
+    if [ "${PARTIAL_TEST_RUN:-false}" = "true" ]; then
+      echo "⚠️  coverage.py not available (subset test run) — not blocking."
+      return 0
+    fi
+    echo "❌ BLOCKED - Python coverage could not be measured: coverage.py is not on PATH,"
+    echo "   so the ${COVERAGE_THRESHOLD:-80}% floor cannot be verified."
+    echo "   Install it (pip install coverage) and commit again."
+    return 1
   fi
 
   COVERAGE_PERCENT=""

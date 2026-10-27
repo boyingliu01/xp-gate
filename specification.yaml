@@ -3243,3 +3243,49 @@ specification:
         - id: AC-636-05
           criteria: 调用方未传入项目根（无项目上下文）时必须保持 #423 的 unbound 行为，不得因此读取机器级配置，也不得因 fail-closed 而拒绝
           test_type: unit
+
+    # ============================================================
+    # REQ-637: Python 覆盖率门禁在 coverage.py 缺失时必须 BLOCK。
+    #
+    # #570 修的是"跑了但没有产出 .coverage"这条路径（函数末尾 fail-closed），
+    # 但更靠前的 `command -v coverage` 探针仍然 return 0 —— 同一个 fail-open
+    # 出现在更早的位置，而且更危险：删掉 .coverage 是偶发事故，工具不在 PATH
+    # 却是稳态。任何没装 coverage.py 的消费仓库/CI 镜像/同事机器，Python 覆盖
+    # 率地板都是静默失效的，只留一行看起来像提示的警告。
+    #
+    # 既有 issue-570 测试套件看不见它：其 setup 专门装了 coverage stub 让探针
+    # 成功，因此没有任何用例在工具缺失的路径上跑过。
+    # ============================================================
+    - id: REQ-637
+      description: "Python 覆盖率门禁在 coverage.py 不在 PATH 时必须 BLOCK 而非警告放行；只有 subset run 可以降级为警告"
+      priority: high
+      acceptance_criteria:
+        - id: AC-637-01
+          criteria: coverage 命令不可用且非 subset run 时，enforce_python_coverage 打印 BLOCKED 并返回非 0
+          test_type: unit
+        - id: AC-637-02
+          criteria: coverage 命令不可用但 PARTIAL_TEST_RUN=true 时，只警告并返回 0（subset run 无全局总数可比）
+          test_type: unit
+
+    # ============================================================
+    # REQ-638: test-layers 的源文件扫描必须跳过构建产物目录。
+    #
+    # scanDirectory 只排除了 node_modules / .git / dist，漏掉 coverage。
+    # 而 src/npm-package/coverage/ 是 istanbul 覆盖率产物目录——未被 git 跟踪、
+    # .gitignore 明确忽略——却塞满 .js 文件。于是 block-navigation.js /
+    # prettify.js / sorter.js 被当成"源文件"计入总数，并伪造出 3 条"未配对"，
+    # 使配对率这个指标在测量一个构建产物。
+    #
+    # 修复采用精确名匹配而非子串匹配，避免误伤名字形似的真实源码目录
+    # （例如 coverage-rules/）。
+    # ============================================================
+    - id: REQ-638
+      description: "test-layers 扫描源文件时跳过构建产物目录（coverage/dist/build/out 等），且不误伤名字形似的真实源码目录"
+      priority: medium
+      acceptance_criteria:
+        - id: AC-638-01
+          criteria: 构建产物目录（coverage/dist 等）中的 .js 文件不计入源文件总数，也不出现在未配对列表
+          test_type: unit
+        - id: AC-638-02
+          criteria: 名字以被跳过目录名开头的真实源码目录（如 coverage-rules/）仍被正常扫描（精确名匹配，非子串）
+          test_type: unit

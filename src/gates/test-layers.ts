@@ -100,19 +100,59 @@ function findExpectedTest(sourcePath: string, allFiles: string[]): string | null
 
 // ── Directory Scanner ──
 
+/**
+ * Directories that never hold hand-written source, so scanning them inflates
+ * the source count and fabricates "unpaired" entries (#636 follow-up).
+ *
+ * `coverage` matters most: `src/npm-package/coverage/` is a gitignored istanbul
+ * output directory (`.gitignore:99`), so it is untracked yet full of `.js`
+ * files. Counting `block-navigation.js` / `prettify.js` / `sorter.js` as sources
+ * understated the pairing rate and pushed three phantom files into the unpaired
+ * list — the metric was measuring a build artifact.
+ *
+ * Kept as a Set for O(1) lookup; names are matched exactly, not by substring,
+ * so a real source directory called e.g. `coverage-rules/` stays scanned.
+ */
+const SKIPPED_DIRECTORIES = new Set([
+  'node_modules',
+  '.git',
+  'dist',
+  'coverage',
+  '__pycache__',
+  '.next',
+  '.turbo',
+  'build',
+  'out',
+]);
+
+/**
+ * Read a directory, tolerating the ways it can be unreadable.
+ *
+ * An unreadable directory (EACCES, ENOENT from a racing delete, a broken
+ * symlink) must not abort the whole scan: this runs inside gate reporting, where
+ * a partial answer beats a crash. Returning an empty list skips the subtree
+ * instead of throwing.
+ */
+function readDirectoryEntries(dir: string): fs.Dirent[] {
+  try {
+    return fs.readdirSync(dir, { withFileTypes: true });
+  } catch {
+    return [];
+  }
+}
+
 function scanDirectory(dir: string, basePath?: string): string[] {
   const results: string[] = [];
   const base = basePath || dir;
 
   if (!fs.existsSync(dir)) return results;
 
-  const entries = fs.readdirSync(dir, { withFileTypes: true });
-  for (const entry of entries) {
+  for (const entry of readDirectoryEntries(dir)) {
     const fullPath = path.join(dir, entry.name);
     const relativePath = path.relative(base, fullPath).replace(/\\/g, '/');
 
     if (entry.isDirectory()) {
-      if (entry.name === 'node_modules' || entry.name === '.git' || entry.name === 'dist') continue;
+      if (SKIPPED_DIRECTORIES.has(entry.name)) continue;
       results.push(...scanDirectory(fullPath, base));
     } else if (entry.name.endsWith('.ts') || entry.name.endsWith('.js')) {
       results.push(relativePath);
@@ -189,17 +229,14 @@ function buildLayerMessages(counts: LayerCounts, totalNeedingTests: number): str
 }
 
 /**
- * Analyze test layer distribution for a project.
+ * Layer 1 pairing: split sources into paired and unpaired against the sibling
+ * test that should cover each one. Works on src-relative paths because
+ * findExpectedTest resolves a source path against that root.
  */
-export function analyzeTestLayers(cwd?: string): TestLayerReport {
-  const dir = cwd || process.cwd();
-  const allFiles = scanDirectory(path.join(dir, 'src'));
-
-  const sourceFiles = allFiles.filter(f => !isExcluded(f) && !isTestFile(f));
-  const testFiles = allFiles.filter(f => isTestFile(f));
-  const byLayer = (layer: string): string[] => testFiles.filter(f => classifyTestLayer(f) === layer);
-
-  // Layer 1: source-test pairing. findExpectedTest works on src-relative paths.
+function computePairing(
+  sourceFiles: string[],
+  allFiles: string[],
+): { unpairedSources: string[]; pairedCount: number } {
   const allSourceRelative = allFiles.map(f => path.join('src', f));
   const unpairedSources: string[] = [];
   let pairedCount = 0;
@@ -212,6 +249,22 @@ export function analyzeTestLayers(cwd?: string): TestLayerReport {
       unpairedSources.push(source);
     }
   }
+
+  return { unpairedSources, pairedCount };
+}
+
+/**
+ * Analyze test layer distribution for a project.
+ */
+export function analyzeTestLayers(cwd?: string): TestLayerReport {
+  const dir = cwd || process.cwd();
+  const allFiles = scanDirectory(path.join(dir, 'src'));
+
+  const sourceFiles = allFiles.filter(f => !isExcluded(f) && !isTestFile(f));
+  const testFiles = allFiles.filter(f => isTestFile(f));
+  const byLayer = (layer: string): string[] => testFiles.filter(f => classifyTestLayer(f) === layer);
+
+  const { unpairedSources, pairedCount } = computePairing(sourceFiles, allFiles);
 
   const counts: LayerCounts = {
     sourceFiles,
