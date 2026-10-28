@@ -193,13 +193,21 @@ run_enforce() {
   [[ "$output" != *"BLOCKED"* ]]
 }
 
-@test "coverage tool absent from PATH: actionable WARN, exit 0" {
+@test "coverage tool absent from PATH: BLOCKS, never a silent pass" {
   [ -f "$LIB" ] || { echo "lib missing"; return 1; }
   touch "$TEST_DIR/.coverage"
   # Dir-split PATH: drop every directory that could carry coverage.py (this
   # machine has one under Python312/Scripts; CI images may too). The gate must
   # behave identically on a machine without coverage.py at all. Only shell
   # builtins are needed before the early return, so /usr/bin:/bin suffices.
+  #
+  # REQ-637 changed the expected outcome here. This case used to assert
+  # "actionable WARN, exit 0" -- which WAS the bug: a repo whose PATH lacks
+  # coverage.py had its Python coverage floor switched off behind a warning
+  # glyph, and a steady-state missing tool is far more dangerous than a deleted
+  # .coverage. The non-subset path now BLOCKS. The subset-run exception (where
+  # there is no global total to compare) keeps the WARN and lives in
+  # issue-637-coverage-tool-missing.test.bats, AC-637-02.
   run bash -c '
     cd "$1" || exit 1
     PATH="/usr/bin:/bin"
@@ -212,8 +220,9 @@ run_enforce() {
     source "$2"
     enforce_python_coverage
   ' _ "$TEST_DIR" "$LIB"
-  [ "$status" -eq 0 ]
-  [[ "$output" == *"coverage.py not available"* ]]
+  [ "$status" -ne 0 ]
+  [ "$status" -ne 99 ]
+  [[ "$output" == *"BLOCKED"* ]]
 }
 
 # Critical-1 (#399): a skipped Python test run must NOT consume a stale
