@@ -38,6 +38,15 @@ jscpd_default_ignore_patterns() {
 # XP_GATE_JSCPD_DEFAULT_IGNORE=0 disables the set entirely: a project that
 # genuinely wants YAML compared must be able to say so, or the default would make
 # some real duplicates unreachable.
+#
+# SCOPE CHANGED IN #648: Gate 1's debugger check now calls this too, so the
+# switch governs "what counts as our code" for BOTH gates — not just jscpd.
+# Setting it to 0 makes Gate 1 scan dependencies and build output for debugger
+# statements as well, which is rarely what someone disabling duplicate detection
+# intends. Kept as one switch deliberately: two gates disagreeing about what a
+# build artifact is would be its own defect, and a project that vendors code
+# wants it treated consistently everywhere. Override per-run rather than
+# permanently if you only meant to widen Gate 2's scan.
 jscpd_is_default_ignored() {
   local _path="$1"
   if [ "${XP_GATE_JSCPD_DEFAULT_IGNORE:-1}" = "0" ]; then
