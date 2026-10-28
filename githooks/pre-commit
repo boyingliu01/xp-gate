@@ -1506,9 +1506,32 @@ else
     fi
 
     # Debug statement detection (debugger statement in JS/TS)
-    TS_DEBUG_FILES=$(echo "$CHANGED_FILES" | grep -E '\.(ts|tsx|js|jsx)$' || true)
+    #
+    # Dependencies and build output are filtered out first (#648). The list
+    # comes from `git diff --cached`, so a project (or a CI fixture) that
+    # vendors or commits its dependencies gets the dependency's OWN source
+    # scanned as if it were project code. TypeScript 7.x ships a bare
+    # `debugger;` in dist/internal/utils.js, which blocked commits that changed
+    # nothing of their own:
+    #     ❌ BLOCKED - 'debugger' statements detected:
+    #     node_modules/typescript/dist/internal/utils.js:18:    debugger;
+    # Pinning the dependency's version only postpones that: any package may
+    # carry a debugger statement, and which one lands changes with every
+    # install. The rule the gate actually wants is "no debugger in OUR code",
+    # so the ignore set Gate 2 already uses decides what counts as ours — one
+    # notion of build output across the gates, overridable through the same
+    # XP_GATE_JSCPD_DEFAULT_IGNORE switch.
+    TS_DEBUG_FILES=$(echo "$CHANGED_FILES" | grep -E '\.(ts|tsx|js|jsx)$' | {
+      while IFS= read -r _df; do
+        [ -n "$_df" ] || continue
+        if ! jscpd_is_default_ignored "$_df"; then
+          printf '%s\n' "$_df"
+        fi
+      done
+    } || true)
     if [ -n "$TS_DEBUG_FILES" ]; then
-      DEBUGGER_HITS=$(grep -n '^\s*debugger\s*;\?\s*$' $TS_DEBUG_FILES 2>/dev/null || true)
+      # NUL-separated so paths with spaces survive; a bare $VAR would word-split.
+      DEBUGGER_HITS=$(printf '%s\n' "$TS_DEBUG_FILES" | tr '\n' '\0' | xargs -0 grep -n '^\s*debugger\s*;\?\s*$' 2>/dev/null || true)
       if [ -n "$DEBUGGER_HITS" ]; then
         echo ""
         echo "❌ BLOCKED - 'debugger' statements detected:"
