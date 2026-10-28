@@ -3289,3 +3289,44 @@ specification:
         - id: AC-638-02
           criteria: 名字以被跳过目录名开头的真实源码目录（如 coverage-rules/）仍被正常扫描（精确名匹配，非子串）
           test_type: unit
+
+    # ============================================================
+    # REQ-648: Gate 1 的 debugger 检测必须只扫描"我们自己的代码"。
+    #
+    # 检测直接对 $CHANGED_FILES 里所有 .ts/.tsx/.js/.jsx 做 grep，不排除依赖
+    # 目录。而 $CHANGED_FILES 来自 `git diff --cached`，所以一个提交了依赖的
+    # 项目（vendoring、CI fixture 用 `git add -A`、或误提交）会把自己依赖包
+    # 的源码当成项目代码扫描。TypeScript 7.x 的
+    # node_modules/typescript/dist/internal/utils.js:18 有一句裸 `debugger;`，
+    # 于是提交者一行代码没改却被阻断。
+    #
+    # 修法是复用 Gate 2 已有的默认忽略集（jscpd-run.sh），而不是新造规则：
+    # 所有门禁对"构建产物"因此只有一个定义，且同一个
+    # XP_GATE_JSCPD_DEFAULT_IGNORE 开关统一覆盖。
+    #
+    # 关键约束：过滤不得削弱门禁。项目自己的 debugger 必须仍然拦截，
+    # 否则这个修复会把检测关掉而不改变任何可见输出——CI 一样变绿，门禁
+    # 却不再工作。AC-648-02 就是钉这一点的反空洞断言。
+    # ============================================================
+    - id: REQ-648
+      description: "Gate 1 的 debugger 检测只扫描项目自身代码，过滤依赖目录与构建产物；项目代码中的 debugger 仍必须拦截"
+      priority: high
+      acceptance_criteria:
+        - id: AC-648-01
+          criteria: 依赖目录（node_modules）中的 debugger 语句被过滤，不进入扫描
+          test_type: unit
+        - id: AC-648-02
+          criteria: 项目自身源码仍被扫描，不被过滤（反空洞：过滤器不得吞掉一切）
+          test_type: unit
+        - id: AC-648-03
+          criteria: 混合列表保留项目文件、只丢弃依赖文件
+          test_type: unit
+        - id: AC-648-04
+          criteria: 构建产物目录（dist/build/coverage/out/target 等）同样被过滤
+          test_type: unit
+        - id: AC-648-05
+          criteria: XP_GATE_JSCPD_DEFAULT_IGNORE=0 恢复旧的全树扫描行为（逃生开关仍有效）
+          test_type: unit
+        - id: AC-648-06
+          criteria: 含空格的路径在过滤后仍完整保留（不因词拆分而损坏）
+          test_type: unit
