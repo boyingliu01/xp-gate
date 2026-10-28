@@ -2,6 +2,34 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.32.0.0] - 2026-10-29
+
+编译器是编译型语言的第一道静态检查工具，而 xp-gate 此前只把编译器当成"能不能编过"的开关：C/C++/Java 的严格告警一个都没开。本版新增 Gate 13 把这块补上——用编译器自己已经具备的能力发现错误，而不是另起一套规则。
+
+同时修复了一批"门禁看起来在执行、实际什么都没测"的缺陷，以及 4 个只在合流时才暴露的镜像/文档漂移。
+
+### Added
+
+- **Gate 13：编译器严格检查（C/C++/Java）**: 新增 `githooks/gate-13-compiler-strictness.sh`（1031 行），在 pre-commit 注册为第 14 道门禁。C/C++ 走 `-Wall -Wextra -Wpedantic -Wshadow -Wconversion -Wsign-conversion -Wold-style-cast -Wnull-dereference -Wswitch-enum` 等分级告警并做能力探测（编译器不支持的选项不会被当成失败），Java 走 `javac -Xlint:all` 并向 Maven `compilerArgument` / Gradle 注入等价参数。**只检查改动文件**，超时一律记 WARN(3)，绝不记 BLOCK(2)——"没跑完"和"查出了问题"是两件事。
+  Maven 路径有实测验证：`mvn compile` 在 javac 报告告警时**照样返回 0**，早期实现把输出丢进 `/dev/null` 只看退出码，这条路径会恒过、等于白装。评审发现后改为解析告警输出。
+  设计经 Delphi 三模型评审 3 轮达成 1.0 共识。其中 3 项评审主张被实测证伪（例如"告警计数会多算"实测为 2 == `g++ | grep -c 'warning:'`），未采纳并写了测试钉住。
+- **Java 智能测试选择（#640）**: Gate 5 对 Java 复用 TS/Python 已用的三档策略，按改动范围选择测试子集，选择性运行不再被当作全量通过。
+
+### Fixed
+
+- **mock-policy 的 npm 镜像落后于源码（发布阻塞级）**: `src/mock-policy/` 上的三个修复只改了源目录，`src/npm-package/mock-policy/gate-m3.ts` 一直是旧的宽松层处理与易崩的 `readFile`。下一次发布会把这三个提交正要移除的行为原样发出去——v0.27.3 已经用同样方式发过一次插件镜像的旧代码。已同步，并把 `check-hook-mirror.sh` 的守护范围从 `principles`/`mutation` 扩到 `mock-policy`（反向验证过：改一行即报错）。
+- **Gate 5 的 Java 选择性运行标志是死通道（#640）**: adapter 在 `run_coverage` 内部设 `PARTIAL_TEST_RUN=true`，而 pre-commit 用 `$(run_coverage 2>&1)` 调用它——子 shell 里的赋值当场消失。后果是 Java 子集运行覆盖率低于 80% 时走硬阻断而非警告，与 #556 给 Python 修过的是同一个坑。改为经 `XP_GATE_PARTIAL_RUN_FILE` 传递，调用方读文件后提升标志。
+- **Gate 5 在 coverage.py 缺失时静默放行（#637）**: 稳态缺一个工具比丢一份 `.coverage` 更危险——路径上没有 coverage.py 的仓库，Python 覆盖率下限实际上被关掉了，只留下一个警告符号。改为 BLOCK；只有子集运行（没有全局总数可比）保留警告。#523 里钉住旧行为的用例随之更新并注明原因。
+- **Gate 1 的 debugger 检测把依赖当成项目代码（#648）**: 检测对 `git diff --cached` 的全部 `.ts/.js` 做 grep，不排除依赖目录。TypeScript 7.x 的 `node_modules/typescript/dist/internal/utils.js:18` 有一句裸 `debugger;`，于是 `npm install typescript` 加 `git add -A` 就足以让一个什么都没改的提交被阻断。改为复用 Gate 2 已有的默认忽略集，所有门禁对"构建产物"从此只有一个定义；同时把 grep 入参改为 NUL 分隔，含空格的路径不再被词拆分。
+- **Gate MW 的机器级配置回退引发 CI 回归（#636）**: 两个 bats fixture 搭的是假席位证据却从不写项目配置，于是同一份 fixture 的成败取决于跑测试那台机器。改为隔离 `HOME`/`XDG_CONFIG_HOME` 并显式写出与本 fixture 证据一致的配置——不是放宽校验，而是让 fixture 自洽。
+- **Gate 6 的 Gate 6 PASS 在"部分被测"时被算作全功（#636）**: 仅当每一个语言都不带 skip reason 且至少有一个语言时才升为 PASS；有任一语言跳过则保持非 PASS。
+
+### 说明
+
+- **Gate 13 的 spec 缺口**: Gate 13 的验收标准写在对 `specification.yaml` 里不存在的 REQ 引用上（设计文档在 `docs/plans/`，未转成正式需求）。这 39 条引用已登记进 AC 引用基线，属于记账而非解决；把 8 个 REQ 正式写进 spec 仍是独立工作。
+- **Gate 13 的 Phase 4 证据门被跳过**: `xp-gate phase-transition` 把 `specification.yaml` 硬编码在项目根，而本次 sprint 的 spec 在 `.sprint-state/phase-outputs/` 下。跳过经审计留痕，未伪造任何哈希；对齐本身实测 25/25 AC 全部有引用、0 缺失。
+- **Gate 13 目前是 `balanced` 档（`-Wall -Wextra`）+ 仅改动文件**: 全程只在 fixture 上验证过，尚未在真实的大体量 C++/Java 仓库上校准告警基线与超时。
+
 ## [0.31.4.0] - 2026-10-26
 
 两道门禁在 Java 上从未真正测量过任何东西，却一直报出"通过"。二者都是在真实项目的提交上实测发现的，且都是**结构上必然**的空转，不是偶发。
