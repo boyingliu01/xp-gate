@@ -329,12 +329,26 @@ else
     #              is reverted at the next publish, so grading it cannot be acted
     #              on (doctorDelphi CCN=106 blocked every src/npm-package commit,
     #              on HEAD too — no baseline entry could ever exist for it).
-    #   test       __tests__/, *.test.*, *_test.{py,go}, *Test(s).java — recorded
-    #              in the report's test bucket, never in the baseline.
+    #   test       test dirs (tests/, test/, __tests__/), *.test.*, test_*.py,
+    #              *_test.{py,go}, *Test(s).java — recorded in the report's test
+    #              bucket, never in the baseline.
     # Both prefixes and the test pattern mirror ccn-report.cjs so the gate and
     # the writer cannot drift apart again (pinned by __tests__/gate-3-*.bats).
+    #
+    # #634: pytest's default is `python_files = test_*.py` under a `tests/`
+    # root. The previous pattern only knew the SUFFIX form `_test.{py,go}` and
+    # `*.test.*`, so a pytest-laid-out project had every test module graded as
+    # production source: test-helper complexity was reported as source debt and
+    # the ratchet could block on files the baseline deliberately never records
+    # (bucket === 'test').
+    #   `(^|/)(tests?)/`   — a tests/ or test/ directory anywhere in the tree
+    #   `(^|/)test_[^/]*\.py$` — pytest default filenames at any depth
+    # Both are anchored with (^|/) so `latest/`, `contest/`, `attest/` and
+    # `my_test_dir/` are NOT caught (a leading `_?test_.*\.py$` would have
+    # swallowed `src/my_test_dir/bar.py`).
+    # Must stay equivalent to TEST_PATH in scripts/ccn-report.cjs.
     CC_FILES=$(echo "$CC_FILES" | grep -vE \
-      '^"?src/npm-package/|^"?plugins/[^/]+/src/|(^|/)__tests__?/|\.test\.[cm]?[jt]sx?$|_test\.(py|go)$|Test(s)?\.java$' || true)
+      '^"?src/npm-package/|^"?plugins/[^/]+/src/|(^|/)__tests?__/|(^|/)(tests?)/|\.test\.[cm]?[jt]sx?$|(^|/)test_[^/]*\.py$|_test\.(py|go)$|Test(s)?\.java$' || true)
 
     if [ -n "$CC_FILES" ]; then
       echo "Checking complexity for source files..."

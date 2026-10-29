@@ -19,7 +19,18 @@ const path = require('path');
 const fs = require('fs');
 
 const SOURCE_EXT = /\.(ts|tsx|js|jsx|mjs|cjs|py|go|java|kt|swift|cpp|cc|c|h|hpp|m|mm|dart)$/i;
-const TEST_PATH = /(^|[\\/])__tests__?[\\/]|\.test\.[cm]?[jt]sx?$|_test\.(py|go)$|Test\.java$|Tests\.java$/i;
+// Test-file classification. Keep equivalent to the exclusion regex in
+// githooks/gate-3.sh: the gate grades exactly the population this writer
+// records, so a divergence makes the ratchet report pre-existing code as new
+// (a false BLOCK that no repair can clear).
+//
+// #634: pytest's default is `python_files = test_*.py` under a `tests/` root.
+// Without the tests/-dir and test_ prefix arms every pytest module was bucketed
+// 'production', so test-helper complexity entered the baseline as source debt.
+// The (^|[\\/]) anchors keep `latest/`, `contest/`, `attest/` and
+// `my_test_dir/` out of the test bucket.
+const TEST_PATH =
+  /(^|[\\/])__tests?__[\\/]|(^|[\\/])(tests?)[\\/]|\.test\.[cm]?[jt]sx?$|(^|[\\/])test_[^\\/]*\.py$|_test\.(py|go)$|Test\.java$|Tests\.java$/i;
 // src/npm-package/** is a prepack-generated mirror of githooks/, skills/ and
 // src/** (and plugins/*/src likewise). Measuring mirrors double-counts the
 // same code and would make every refactor look like two hotspots; the

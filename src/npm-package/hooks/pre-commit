@@ -710,48 +710,37 @@ if [ "$is_protected" = "true" ]; then
       esac
     done
 
-    # Doc-only changes: no source code files
+    # Doc-only / build-tooling-only changes need no VERSION bump.
+    #
+    # #624 defect 2: the split used to test ONLY `has_source`, which is true for
+    # any .py/.ts/... path INCLUDING `scripts/*`. So a commit that touched
+    # nothing but build tooling still fell into the version-check branch and was
+    # blocked. `has_real_source` is exactly "production source that needs a bump"
+    # — it was computed a few lines up but never consulted here. It must decide.
     if [ "$has_source" = "false" ]; then
       echo "✅ PASSED - Gate 0: Version Consistency Check (doc-only changes)"
+    elif [ "$has_real_source" = "false" ]; then
+      echo "✅ PASSED - Gate 0: Version Consistency Check (build-tooling-only changes)"
     else
-      # Check for bypass: commit message prefix (read from COMMIT_EDITMSG during pre-commit hook)
-      COMMIT_MSG=$(cat "$(git rev-parse --git-dir)/COMMIT_EDITMSG" 2>/dev/null | head -1 || echo "")
-      if echo "$COMMIT_MSG" | grep -qE '^\[skip-version-check\]'; then
-        if echo "$COMMIT_MSG" | grep -qE '^\[skip-version-check\].*(chore:|docs:|release:)'; then
-          if [ "$has_real_source" = "false" ]; then
-            echo "✅ PASSED - Gate 0: Version Consistency Check (bypass: chore/docs/release)"
-          else
-            echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+      # Production source on a protected branch without VERSION/CHANGELOG.
+      #
+      # #624 defect 1: this branch used to offer a `[skip-version-check]` message
+      # prefix as a bypass, read from `.git/COMMIT_EDITMSG`. That cannot work:
+      # git runs pre-commit BEFORE it builds the message, so the file does not
+      # exist yet (`-m`, `-F` and the interactive editor path all measured on
+      # git 2.54), and the hook gets no arguments. What the old code read was the
+      # PREVIOUS commit's message, so the prefix never matched — the documented
+      # recipe silently could not clear the gate, and --no-verify was the only
+      # way through. Rather than keep a bypass whose input this hook structurally
+      # cannot see, the escape hatch is the one that actually works and is
+      # already documented in CHANGELOG: the SKIP_VERSION_CHECK=1 environment
+      # variable (handled earlier in this Gate 0 block).
+      echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
   VERSION CONSISTENCY CHECK (Gate 0)
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 Branch: $CURRENT_BRANCH
-ERROR: [skip-version-check] bypass used but production source files detected.
-
-Bypass only allows build-tooling changes (adapters/, scripts/, hooks/).
-Production source files require VERSION/CHANGELOG update.
-
-Files: $(echo "$STAGED_FILES" | tr '\n' ', ' | sed 's/,$//')
-"
-            exit 1
-          fi
-        else
-          echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-  VERSION CONSISTENCY CHECK (Gate 0)
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-Branch: $CURRENT_BRANCH
-ERROR: [skip-version-check] bypass prefix invalid.
-
-Allowed prefixes: chore:, docs:, release:
-Example: [skip-version-check] chore: update dependencies
-"
-          exit 1
-        fi
-      else
-        echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-  VERSION CONSISTENCY CHECK (Gate 0)
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-Branch: $CURRENT_BRANCH
-ERROR: Committing to a protected branch without VERSION/CHANGELOG update.
+ERROR: Committing production source to a protected branch without a
+VERSION/CHANGELOG update.
 
 This bypasses the ship workflow and causes version drift.
 Before committing:
@@ -759,18 +748,19 @@ Before committing:
   2. Add entry to CHANGELOG.md
   3. Run: node scripts/sync-version.cjs
 
-Or use the bypass prefix — the commit message FIRST LINE must START with:
-  [skip-version-check] chore: <description>
-Allowed types: chore: docs: release:. The bypass only permits build
-tooling changes (adapters/, scripts/, hooks/); production source files
-still require a VERSION/CHANGELOG update.
+Build-tooling-only changes (adapters/, scripts/, hooks/) need NO version bump
+and pass this gate automatically — no marker required.
+
+If you genuinely must land production source without a version bump, the
+supported escape hatch is the env var (a message prefix cannot work here
+because pre-commit runs before git builds the message):
+  SKIP_VERSION_CHECK=1 git commit ...
 
 Staged files: $(echo "$STAGED_FILES" | tr '\n' ', ' | sed 's/,$//')
 "
-        GATE_0_STATUS="BLOCK"
-        record_gate_audit "gate-0" "version-consistency" "$GATE_0_STATUS" "1" "$GATE_0_START"
-        exit 1
-      fi
+      GATE_0_STATUS="BLOCK"
+      record_gate_audit "gate-0" "version-consistency" "$GATE_0_STATUS" "1" "$GATE_0_START"
+      exit 1
     fi
   fi
   fi  # closes SKIP_VERSION_CHECK if/else
