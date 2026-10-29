@@ -2,6 +2,22 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.32.1.0] - 2026-10-29
+
+两处"门禁看着在跑、实际判错了对象"的缺陷。都是被反复 `--no-verify` 绕过之后才追到源头，且都不是偶发，而是结构性必然。
+
+### Fixed
+
+- **Gate 0 的 `[skip-version-check]` bypass 永远不可能生效（#624）**: pre-commit 从 `.git/COMMIT_EDITMSG` 读提交消息，但 git 是在 pre-commit **返回之后**才生成该文件的——`-m`、`-F`、交互式编辑器三条路径实测（git 2.54）在钩子运行时文件都还不存在，且钩子不带任何参数。读到的只能是**上一次**提交的消息，所以前缀永远匹配不上，文档承诺的逃生口事实上不可用。同一分支还有第二个缺陷：`has_real_source`（第 700-711 行算出的"是否只有构建工具改动"）在分叉判断里**根本没被使用**，分支只看 `has_source`，于是只改 `scripts/` 的提交必然被拦。
+  处理：`has_real_source=false` 时直接 PASS（只改构建工具链无需升版本），移除那个结构性不可能成立的消息前缀读取，把逃生口明确指向真正可用且 CHANGELOG 早已记载的 `SKIP_VERSION_CHECK=1`。没有引入 `commit-msg` 钩子——推演过：bypass 的放行条件是 `has_real_source=false`，而该情况修好缺陷 2 后本就直通，让消息可读也改变不了任何结果，只会多一个不生效的钩子。
+- **Gate 3 的测试文件排除认不出 `tests/test_*.py`（#634）**: 排除规则只认后缀式命名（`_test.{py,go}`、`*.test.*`、`*Test(s).java`），而 pytest 的默认约定是 `tests/` 根下的**前缀式** `test_<name>.py`。后果是整套测试被按生产代码判 CCN，测试辅助函数的复杂度算进源码债，棘轮还会对基线本就不记录的 `bucket === 'test'` 文件报 BLOCK。已补 `(^|/)(tests?)/` 目录锚点与 `(^|/)test_[^/]*\.py$` 文件名锚点；两者都用 `(^|/)` 收口，`latest/`、`contest/`、`attest/`、`my_test_dir/` 不会被误吞（一个更贪的 `_?test_.*\.py$` 会把 `src/my_test_dir/bar.py` 错判成测试）。
+  同步修了 `scripts/ccn-report.cjs` 的 `TEST_PATH`——同一套正则的第二份副本，两处不一致会让基线写入面与门禁判定面漂移（#495 Round 3 记过的同一类）。新增的 bats 用真实路径集合双向断言，并专设一条 drift guard 要求两份正则对同一批路径给出同一答案。
+
+### 说明
+
+- 两份 bats（`issue-450-gate0-bypass-*.test.bats`）按新口径重写：旧版把 bypass 代码块 awk 抽出来、**预写** `COMMIT_EDITMSG` 再求值——那恰恰是 git 永远不会提供的状态，所以它们一直是绿的而线上绕过是死的。新版直接跑真实 `git commit` 断言退出码。
+- 随包镜像 `src/npm-package/hooks/{pre-commit,gate-3.sh}` 与根 `src/npm-package/gate-3.sh` 已同步，`check-hook-mirror.sh` 通过。
+
 ## [0.32.0.0] - 2026-10-29
 
 编译器是编译型语言的第一道静态检查工具，而 xp-gate 此前只把编译器当成"能不能编过"的开关：C/C++/Java 的严格告警一个都没开。本版新增 Gate 13 把这块补上——用编译器自己已经具备的能力发现错误，而不是另起一套规则。
