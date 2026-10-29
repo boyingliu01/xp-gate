@@ -95,6 +95,43 @@ jobs:
           bash .githooks-ref/install.sh
           rm -rf .githooks-ref
 
+          # Lint baseline for the hook scripts just installed.
+          #
+          # install.sh copies 19 adapter scripts into this fixture, so Gate 1's
+          # shell arm scans them. They are xp-gate's own shipped code and carry
+          # ~33 pre-existing shellcheck findings that no commit here introduced;
+          # without a baseline every one of them counts as NEW and the fixture
+          # commit can never land. The repo's own .xp-gate/lint-baseline.json
+          # cannot be reused -- this fixture is a fresh git init, and the
+          # installed files live at githooks/*.sh rather than wherever the
+          # developer's checkout put them.
+          #
+          # Recorded with the same counting the gate uses (total shellcheck
+          # entries per file), so the numbers agree byte for byte. Enumerated
+          # from the working tree, not `git diff --cached`: the fixture does not
+          # run `git add -A` until later, so the index is still empty here.
+          node -e '
+            const {execSync} = require("child_process");
+            const fs = require("fs");
+            const all = execSync("git ls-files --others --exclude-standard --cached", {encoding: "utf8"})
+              .trim().split("\n").filter(Boolean);
+            const files = all.filter(f => f.endsWith(".sh"));
+            const baseline = {};
+            for (const f of files) {
+              let n = 0;
+              try { execSync(`shellcheck -f json "${f}"`, {encoding: "utf8"}); }
+              catch (err) { try { n = JSON.parse(err.stdout || "[]").length; } catch (_) {} }
+              if (n) baseline[f] = {
+                shellcheck: {warnings: n, errors: 0},
+                totalWarnings: n,
+                lastAnalyzed: new Date().toISOString(),
+              };
+            }
+            fs.mkdirSync(".xp-gate", {recursive: true});
+            fs.writeFileSync(".xp-gate/lint-baseline.json", JSON.stringify(baseline, null, 2));
+            console.log(`lint baseline: ${Object.keys(baseline).length} files`);
+          '
+
           # Gate 6: Architecture skip file
           touch .architecture-skip
 

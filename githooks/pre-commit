@@ -881,7 +881,22 @@ any_changed_files_match() {
   local pattern
 
   for pattern in "$@"; do
-    if printf '%s\n' "$CHANGED_FILES" | grep -qE -- "$pattern"; then
+    # Here-string, not `printf | grep -q`. Under the `set -o pipefail` above,
+    # `grep -q` exits the moment it matches, the writer takes SIGPIPE, and the
+    # pipeline reports 141 -- so the `if` reads "no match" even though grep DID
+    # match. Whether that happens depends on whether the list fits in the pipe
+    # buffer, which is why it showed up as a size-dependent, flaky SKIP.
+    #
+    # It was not theoretical: in the Cross-Platform CI first-commit fixture the
+    # staged list is long enough to trip it, and Gate 1 announced "No code files
+    # changed, skipping lint" for a commit that had staged 19 shell scripts --
+    # while Gate 2, reading the same variable, happily scanned them and reported
+    # duplicates. The hook log carried the fingerprint the whole time:
+    # `line 847: printf: Broken pipe`.
+    #
+    # A here-string has no writer process to be killed, so the match cannot be
+    # lost. Same reason `run_tsx` and the coverage probes avoid `| head`.
+    if grep -qE -- "$pattern" <<< "$CHANGED_FILES"; then
       return 0
     fi
   done
