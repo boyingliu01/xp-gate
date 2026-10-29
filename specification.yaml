@@ -3391,3 +3391,12 @@ specification:
         - id: AC-649-07
           criteria: 缓存与字节码目录（__pycache__、.pytest_cache、.mypy_cache、.tox、.turbo 等）同样按构建产物排除；bin/obj/.venv 等语义模糊的目录不得误伤
           test_type: unit
+        - id: AC-649-08
+          criteria: set -o pipefail 下 any_changed_files_match 对超长文件列表仍须正确返回匹配（不得因 printf 吃 SIGPIPE 把命中读成未命中）
+          test_type: unit
+        - id: AC-649-09
+          criteria: 上述谓词在确实不匹配时仍须返回未匹配（反空洞，防止恒真使所有门禁误开）
+          test_type: unit
+        - id: AC-649-10
+          criteria: pre-commit 中该谓词不得回退到 `printf ... | grep -q` 管道写法
+          test_type: unit
