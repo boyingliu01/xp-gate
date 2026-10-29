@@ -26,6 +26,55 @@
 # than before the fix.
 JSCPD_DEFAULT_IGNORE_PATTERNS='(^|/)(node_modules|dist|build|target|coverage|out|\.next|\.nuxt|vendor)/|\.log$|\.txt$|\.(ya?ml)$|golden|baseline\.json$|evidence'
 
+# The BUILD-OUTPUT half of the set above, alone (#649).
+#
+# The combined set answers "is this worth comparing for duplication", which is a
+# question only Gate 2 asks. Filtering file list inputs with the whole set also
+# drops *.yaml, *.yml, *.txt and *.log -- and those are perfectly real project
+# files everywhere else. Doing that broke a live test on the first attempt:
+# `YAML staged files activate lint and IaC but skip SAST` expects a staged
+# infra/deployment.yaml to count as a code change, and whole-set filtering made
+# the hook announce "No code files changed, skipping lint" for a commit that
+# added a deployment manifest.
+#
+# So the two notions are separated here rather than shared:
+#
+#   BUILD OUTPUT (this)  - a directory tree that is generated or vendored:
+#                          not our code for ANY gate. Used to filter file lists.
+#   NON-REFACTORABLE (the combined set) - files whose duplication is data shape:
+#                          still project files, just not duplication candidates.
+#                          Gate 2 only.
+#
+# Same directory names, one definition; a directory added to the build-output
+# list reaches every gate at once, which is the point of #649.
+# Directory names that are generated or vendored in any mainstream toolchain.
+#
+# The second group (caches, virtualenvs, Python bytecode) is here because the
+# first version of this list did not have it and the same class of bug was one
+# `git add -A` away: __pycache__ is written by CPython itself and .pytest_cache
+# by pytest, so a Python project that commits its workspace stages .pyc-adjacent
+# artefacts and every scanner would read them as source. None of these can hold
+# hand-written project code.
+#
+# NOT included on purpose: bin/ and obj/ (real source trees in plenty of
+# projects -- e.g. cmd/bin layout, C# projects where obj/ IS output but bin/ is
+# often committed scripts) and .venv/venv (genuinely ambiguous: some projects
+# keep a small committed venv for reproducibility). Adding a name here removes
+# it from EVERY gate at once, so the list stays the names that are unambiguous.
+JSCPD_BUILD_OUTPUT_PATTERNS='(^|/)(node_modules|dist|build|target|coverage|out|\.next|\.nuxt|vendor|__pycache__|\.pytest_cache|\.mypy_cache|\.ruff_cache|\.tox|\.turbo|\.cache)/'
+
+# Is this path inside a dependency tree or a build-output directory?
+#
+# XP_GATE_JSCPD_DEFAULT_IGNORE=0 still disables it, so the escape hatch keeps
+# covering "some project really does want its vendor/ tree linted".
+jscpd_is_build_output() {
+  local _path="$1"
+  if [ "${XP_GATE_JSCPD_DEFAULT_IGNORE:-1}" = "0" ]; then
+    return 1
+  fi
+  printf '%s\n' "$_path" | grep -qE "$JSCPD_BUILD_OUTPUT_PATTERNS"
+}
+
 # Human-readable form, printed by the gate so the baseline is auditable (#591
 # point 3). Silence about the default is the same defect as silence about a
 # skipped gate: the user cannot answer "what did it scan".
@@ -53,6 +102,49 @@ jscpd_is_default_ignored() {
     return 1
   fi
   printf '%s\n' "$_path" | grep -qE "$JSCPD_DEFAULT_IGNORE_PATTERNS"
+}
+
+# Drop dependency and build-output paths from a newline-separated file list on
+# stdin, echoing what remains (#649).
+#
+# Every scanner that builds its own list from `git diff --cached` used to
+# re-derive the exclusions by hand, and they drifted. The test-pairing check
+# excluded node_modules/.next/.nuxt/dist/build/.turbo/.cache but not vendor,
+# target, coverage or out -- so a staged `vendor/x.ts` was reported as a new
+# source file with no test. Six more sites had no exclusions at all. The one
+# place that got a shared ignore set (Gate 2) is the one that stopped having
+# this bug.
+#
+# This is the shared answer: callers pipe their staged list through it and stop
+# maintaining their own list. It reads stdin and writes stdout so it composes
+# with whatever selection the caller already did:
+#
+#     NEW_TS_FILES=$(git diff --cached --name-only --diff-filter=A \
+#       | filter_project_paths | grep -E '\.(ts|tsx)$' || true)
+#
+# Deliberately a filter, not a generator: a caller that needs a different git
+# query (only-added, only-modified) keeps it, and only the exclusion rule is
+# shared. Fail-open on empty input so `|| true` pipelines stay quiet.
+#
+# ON THE COUPLING (Delphi round 1, MC-01/FC-01): yes, this makes Gate 2's
+# ignore set load-bearing for every gate. Widening it now widens what every
+# scanner skips. That risk is accepted deliberately, and the alternative is
+# worse: the bug this fixes WAS a set of per-scanner definitions that drifted
+# apart, so N independent sets would reproduce it N times. The guard against
+# silent widening is that every change to the set lands in one reviewable
+# place, and #649's tests pin the boundary cases (vendor/target/coverage/out
+# ignored; src/lib/docs kept). If a gate ever needs a genuinely different
+# notion of "our code", introduce a second named set HERE rather than letting a
+# caller edit this one.
+filter_project_paths() {
+  local _fp
+  while IFS= read -r _fp || [ -n "$_fp" ]; do
+    [ -n "$_fp" ] || continue
+    if ! jscpd_is_build_output "$_fp"; then
+      printf '%s\n' "$_fp"
+    fi
+  done
+  return 0
 }
 
 # Echo the jscpd config the gate should pass, or nothing when the project has
