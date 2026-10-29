@@ -3330,3 +3330,64 @@ specification:
         - id: AC-648-06
           criteria: 含空格的路径在过滤后仍完整保留（不因词拆分而损坏）
           test_type: unit
+
+    # ============================================================
+    # REQ-649: 依赖与构建产物不得被当作项目代码扫描。
+    #
+    # `git diff --cached` 不认 .gitignore：进了暂存区就列出来。所以提交了依赖
+    # 的项目（vendoring、CI fixture 先 `npm install` 再 `git add -A`、误提交、
+    # monorepo 的 packages/*/node_modules）会把第三方源码交给每一个下游扫描器，
+    # 而它们都当成项目自己的代码来判。
+    #
+    # 同一个根因已经独立爆了两次，每次只修了恰好失败的那一个分支：
+    #   #595 — Gate 1 的 PowerShell 分支扫 node_modules 里的 Playwright，
+    #          因 Write-Host 违规永久 BLOCKED
+    #   #648 — Gate 1 的 JS/TS 分支扫到 node_modules/typescript 里的
+    #          裸 `debugger;`
+    # 各分支还各自维护排除列表，于是漂移：测试配对检查排了
+    # node_modules/.next/.nuxt/dist/build/.turbo/.cache，却没有
+    # vendor/target/coverage/out —— 一个暂存的 vendor/x.ts 会被报成"新增源码
+    # 缺测试"。另有六处完全没有排除。
+    #
+    # 修法是把排除放到**文件列表生成的唯一入口**，让明天新增的扫描器默认安全，
+    # 而不是靠记得；并给直接调 git 的站点一个共享函数
+    # filter_project_paths，替代各自手写的 grep -v 链。
+    #
+    # 关键约束：过滤不得削弱门禁。项目自身文件必须完整存活——一个吞掉一切的
+    # 过滤器会让"依赖被过滤"和"门禁被关掉"从外部看完全一样（CI 都会变绿），
+    # AC-649-03 就是钉这一点的反空洞断言。
+    # ============================================================
+    - id: REQ-649
+      description: "依赖目录与构建产物不得进入任何门禁的扫描范围；项目自身文件必须完整保留"
+      priority: high
+      acceptance_criteria:
+        - id: AC-649-01
+          criteria: 依赖目录（node_modules、vendor）中的文件不被当作项目代码扫描
+          test_type: unit
+        - id: AC-649-02
+          criteria: 构建产物目录（dist/build/target/coverage/out）同样被排除
+          test_type: unit
+        - id: AC-649-03
+          criteria: 项目自身源码与配置完整保留（反空洞：过滤器不得吞掉一切）
+          test_type: unit
+        - id: AC-649-04
+          criteria: CHANGED_FILES 在生成入口处即应用过滤，且 RAW_CHANGED_FILES 保持未过滤
+          test_type: unit
+        - id: AC-649-03b
+          criteria: 混合/空/全依赖三类输入的过滤结果一致；全依赖提交不得因过滤变为空列表而跳过门禁
+          test_type: unit
+        - id: AC-649-03c
+          criteria: 过滤器在空输入与下游提前关闭管道时不产生非零退出（不得污染所在管道）
+          test_type: unit
+        - id: AC-649-05
+          criteria: 所有直接调用 git diff 的扫描点都经由 filter_project_paths，无未过滤遗漏
+          test_type: unit
+        - id: AC-649-05b
+          criteria: 三处有意豁免（RAW_CHANGED_FILES、PY_CHANGED_ALL、STAGED_FILES）不得被加上过滤
+          test_type: unit
+        - id: AC-649-06
+          criteria: YAML/TXT/日志等文件类型属于项目文件，不得被文件列表过滤排除（区分"构建产物目录"与"不可重构文件类型"）
+          test_type: unit
+        - id: AC-649-07
+          criteria: 缓存与字节码目录（__pycache__、.pytest_cache、.mypy_cache、.tox、.turbo 等）同样按构建产物排除；bin/obj/.venv 等语义模糊的目录不得误伤
+          test_type: unit

@@ -809,7 +809,44 @@ echo ""
 MIRROR_PATH_FILTER='^src/npm-package/'
 DASHBOARD_PATH_FILTER='^dashboard/'
 RAW_CHANGED_FILES=$(git diff --cached --name-only --diff-filter=ACM)
-CHANGED_FILES=$(printf '%s\n' "$RAW_CHANGED_FILES" | grep -v "$MIRROR_PATH_FILTER" | grep -v "$DASHBOARD_PATH_FILTER" || true)
+
+# Dependencies and build output are not project code (#649).
+#
+# `git diff --cached` knows nothing about .gitignore: anything that reaches the
+# index is listed. A project that vendors its dependencies, a CI fixture that
+# commits after `npm install`, an accidental `git add -A`, or a monorepo's
+# nested `packages/*/node_modules` therefore hands every downstream scanner a
+# list containing third-party source, and each scanner judges it as the
+# project's own.
+#
+# This has already cost two outages, one language branch at a time: #595 (Gate 1
+# PowerShell arm blocked every commit once Playwright's node_modules was
+# scanned for Write-Host) and #648 (Gate 1 JS/TS arm blocked on the bare
+# `debugger;` in node_modules/typescript/dist/internal/utils.js). Both were
+# fixed at the single site that happened to fail, so the next branch re-broke
+# the same way. The filter belongs HERE, at the one place the list is built, so
+# a scanner added tomorrow is safe by default instead of by memory.
+#
+# The exclusion itself is the shared build-output list from jscpd-run.sh
+# (jscpd_is_build_output), so the directory names have one definition across the
+# gates. Deliberately NOT the full Gate 2 ignore set: that one also drops
+# *.yaml/*.yml/*.txt/*.log because repetition there is data shape rather than a
+# refactoring target, and using it here would make a commit that only adds
+# infra/deployment.yaml look like "No code files changed" -- skipping the IaC
+# and lint gates that exist to scan exactly that file. The XP_GATE_JSCPD_DEFAULT_IGNORE=0
+# escape hatch still applies.
+#
+# RAW_CHANGED_FILES stays unfiltered on purpose: it is the only truthful answer
+# to "did the user stage anything at all", and a future "you accidentally
+# committed dependencies" warning needs to see what this filter removed.
+CHANGED_FILES=$(printf '%s\n' "$RAW_CHANGED_FILES" \
+  | grep -v "$MIRROR_PATH_FILTER" | grep -v "$DASHBOARD_PATH_FILTER" \
+  | {
+      while IFS= read -r _cf; do
+        [ -n "$_cf" ] || continue
+        jscpd_is_build_output "$_cf" || printf '%s\n' "$_cf"
+      done
+    } || true)
 
 # REQ-F2: one commit-level docs-only verdict, computed once and reused by the
 # heavy gates (2/5/9/12). Light gates never consult it — a secret in a README
@@ -1524,7 +1561,7 @@ else
     TS_DEBUG_FILES=$(echo "$CHANGED_FILES" | grep -E '\.(ts|tsx|js|jsx)$' | {
       while IFS= read -r _df; do
         [ -n "$_df" ] || continue
-        if ! jscpd_is_default_ignored "$_df"; then
+        if ! jscpd_is_build_output "$_df"; then
           printf '%s\n' "$_df"
         fi
       done
@@ -2212,7 +2249,10 @@ else
   fi
 
   # --- BLOCK path: New .ts/.tsx files without corresponding tests ---
-  NEW_TS_FILES=$(git diff --cached --name-only --diff-filter=A | grep -E '\.(ts|tsx)$' | grep -v '\.d\.ts$' | grep -v '__tests__' | grep -v '\.test\.' | grep -v '\.spec\.' | grep -v '__snapshots__' | grep -v 'node_modules/' | grep -v '\.next/' | grep -v '\.nuxt/' | grep -v 'dist/' | grep -v 'build/' | grep -v '.turbo/' | grep -v '.cache/' | grep -Ev '(^|/)vitest\.config\.' | grep -Ev '(^|/)vite\.config\.' | grep -Ev '(^|/)jest\.config\.' | grep -Ev '(^|/)tsconfig\.' | grep -Ev '(^|/)eslint\.' | grep -Ev '(^|/)prettier\.' | grep -Ev '(^|/)tailwind\.' || true)
+  # Exclusions come from filter_project_paths (#649). The hand-maintained list
+  # this replaced omitted vendor/target/coverage/out, so a staged vendor/x.ts
+  # was reported as new source with no test.
+  NEW_TS_FILES=$(git diff --cached --name-only --diff-filter=A | filter_project_paths | grep -E '\.(ts|tsx)$' | grep -v '\.d\.ts$' | grep -v '__tests__' | grep -v '\.test\.' | grep -v '\.spec\.' | grep -v '__snapshots__' | grep -Ev '(^|/)vitest\.config\.' | grep -Ev '(^|/)vite\.config\.' | grep -Ev '(^|/)jest\.config\.' | grep -Ev '(^|/)tsconfig\.' | grep -Ev '(^|/)eslint\.' | grep -Ev '(^|/)prettier\.' | grep -Ev '(^|/)tailwind\.' || true)
 
   # Strip PROJECT_SUBDIR prefix from new-TS-file paths ONLY when the hook
   # actually cd'd into the subdirectory (IN_PROJECT_SUBDIR=1; single-language
@@ -2297,10 +2337,12 @@ else
   fi
 
   # --- WARNING path: Modified files (any lang) + New non-TS files ---
+  # filter_project_paths strips dependencies and build output (#649); without
+  # it a staged vendor/ or target/ module is reported as source needing a test.
   WARNING_SOURCE_FILES=$(
     {
-      git diff --cached --name-only --diff-filter=M | grep -E '\.(ts|tsx|py|go|java|kt|kts|cpp|cc|cxx|c|swift|dart|rb|rs)$' | grep -v '__tests__' | grep -v '\.test\.' | grep -v '\.spec\.' | grep -v '__snapshots__'
-      git diff --cached --name-only --diff-filter=A | grep -E '\.(py|go|java|kt|kts|cpp|cc|cxx|c|swift|dart|rb|rs)$' | grep -v '__tests__' | grep -v '\.test\.' | grep -v '\.spec\.' | grep -v '__snapshots__'
+      git diff --cached --name-only --diff-filter=M | filter_project_paths | grep -E '\.(ts|tsx|py|go|java|kt|kts|cpp|cc|cxx|c|swift|dart|rb|rs)$' | grep -v '__tests__' | grep -v '\.test\.' | grep -v '\.spec\.' | grep -v '__snapshots__'
+      git diff --cached --name-only --diff-filter=A | filter_project_paths | grep -E '\.(py|go|java|kt|kts|cpp|cc|cxx|c|swift|dart|rb|rs)$' | grep -v '__tests__' | grep -v '\.test\.' | grep -v '\.spec\.' | grep -v '__snapshots__'
     } | sort -u || true
   )
 
@@ -2423,7 +2465,7 @@ else
   # Gate 5b: Mock Density ADVISORY Scan (pure bash — no npx tsx overhead)
   # 30% = ADVISORY, 50% = suggests @mock-justified. Does NOT block commit.
   # ========================================================================
-  CHANGED_TEST_FILES=$(git diff --cached --name-only --diff-filter=ACM | grep -E '\.(test|spec)\.(ts|tsx|js|jsx|cjs|mjs|py|go)$' || true)
+  CHANGED_TEST_FILES=$(git diff --cached --name-only --diff-filter=ACM | filter_project_paths | grep -E '\.(test|spec)\.(ts|tsx|js|jsx|cjs|mjs|py|go)$' || true)
 
   # Nested plugin sub-projects (plugins/<name>/) own their own vitest config and
   # are excluded from the root suite (`vitest.config.ts` excludes `plugins/**`,
@@ -2571,7 +2613,7 @@ else
           CHANGED_TEST_FILE_COUNT=$(echo "$SELECTED_TEST_FILES" | grep -c '.' || true)
           
           # Also get changed source files (non-test) for related-test lookup
-          CHANGED_SRC_FILES=$(git diff --cached --name-only --diff-filter=ACM | grep -E '\.(ts|tsx|js|jsx)$' | grep -v '\.test\.' | grep -v '\.spec\.' | grep -v '__tests__' | grep -v '\.d\.ts$' | grep -v '__snapshots__' || true)
+          CHANGED_SRC_FILES=$(git diff --cached --name-only --diff-filter=ACM | filter_project_paths | grep -E '\.(ts|tsx|js|jsx)$' | grep -v '\.test\.' | grep -v '\.spec\.' | grep -v '__tests__' | grep -v '\.d\.ts$' | grep -v '__snapshots__' || true)
           # Nested plugin sub-projects are excluded from the root suite; their
           # sources must not drive root-vitest related-test lookup either (it
           # would resolve to plugin-local paths vitest cannot collect).
@@ -2807,9 +2849,14 @@ else
             #   full -> unchanged behavior: whole suite + real threshold.
             #   skip -> nothing test-relevant changed; no pytest at all.
             PY_CHANGED_TEST_FILES=$(git diff --cached --name-only --diff-filter=ACM 2>/dev/null \
+              | filter_project_paths \
               | grep -E '(^|/)test_[^/]*\.py$|_test\.py$' || true)
             PY_CHANGED_SRC_FILES=$(git diff --cached --name-only --diff-filter=ACM 2>/dev/null \
+              | filter_project_paths \
               | grep -E '\.py$' | grep -vE '(^|/)test_[^/]*\.py$|_test\.py$' || true)
+            # NOT filtered on purpose: this list answers "did a requirements
+            # file change", which is a property of the whole commit including
+            # paths under a vendor/ tree that filter_project_paths removes.
             PY_CHANGED_ALL=$(git diff --cached --name-only --diff-filter=ACM 2>/dev/null || true)
             # `grep -c '.'` prints its own zero AND exits 1 on an empty list
             # (#493), so the count is derived with `|| true` + wc -l instead.
@@ -3363,7 +3410,7 @@ else
   # New files must have ≥80% coverage individually.
   # ============================================================================
   if has_project_lang "typescript" && [ -f "coverage/coverage-summary.json" ]; then
-    NEW_SOURCE_FILES=$(git diff --cached --name-only --diff-filter=A | grep -E '\.(ts|tsx)$' | grep -v '__tests__' | grep -v '\.test\.' | grep -v '\.spec\.' | grep -v '__snapshots__' | grep -v '\.d\.ts$' || true)
+    NEW_SOURCE_FILES=$(git diff --cached --name-only --diff-filter=A | filter_project_paths | grep -E '\.(ts|tsx)$' | grep -v '__tests__' | grep -v '\.test\.' | grep -v '\.spec\.' | grep -v '__snapshots__' | grep -v '\.d\.ts$' || true)
     if [ -n "$NEW_SOURCE_FILES" ]; then
       echo ""
       echo "   └─ Per-file coverage check for new files:"
@@ -3764,8 +3811,11 @@ else
     # governed by Mirror Parity in CI, which compares content rather than
     # re-linting it. (See the same exclusion in adapters/powershell.sh.)
     MIRROR_EXCLUDE="$MIRROR_PATH_FILTER"
-    NEW_FILES=$(git diff --cached --name-only --diff-filter=A | grep -v "$MIRROR_EXCLUDE" | grep -v "$DASHBOARD_PATH_FILTER" | tr '\n' ' ')
-    MODIFIED_FILES=$(git diff --cached --name-only --diff-filter=M | grep -v "$MIRROR_EXCLUDE" | grep -v "$DASHBOARD_PATH_FILTER" | tr '\n' ' ')
+    # filter_project_paths also removes dependencies and build output (#649):
+    # a staged node_modules/ or dist/ file is not budgetable project code, and
+    # entering it in the Boy Scout baseline would budget a path nobody edits.
+    NEW_FILES=$(git diff --cached --name-only --diff-filter=A | filter_project_paths | grep -v "$MIRROR_EXCLUDE" | grep -v "$DASHBOARD_PATH_FILTER" | tr '\n' ' ')
+    MODIFIED_FILES=$(git diff --cached --name-only --diff-filter=M | filter_project_paths | grep -v "$MIRROR_EXCLUDE" | grep -v "$DASHBOARD_PATH_FILTER" | tr '\n' ' ')
     
     if [ -z "$NEW_FILES" ] && [ -z "$MODIFIED_FILES" ]; then
       echo "     ✅ No new or modified files to check."
