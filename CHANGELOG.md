@@ -2,6 +2,31 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.32.3.0] - 2026-10-30
+
+本版是"开发效率"专项的第一批落地（P0 遥测 + P2 纪律），起因是一份全量诊断：正确计入的 251.7 h 里工具延迟占 146.0 h（58%），而每提交一次门禁电池 median 228 s。要优化就得先相信数据，但审计账本本身在两个地方系统性撒谎——本版先把"尺子"校准，再把纪律写进 AGENTS.md / BUILD skill。
+
+### Fixed
+
+- **门禁审计归因错位一格（commit_hash off-by-one）**: pre-commit 在任何提交对象存在之前运行，`git rev-parse HEAD` 拿到的是**父提交**，于是每个 gate 的审计记录都被挂到上一个 commit 名下——最新提交看起来"一个门禁都没跑"，而任何按 commit 聚合的电池统计都在把两个提交的耗时混在一起。改为：`trigger=commit` 的记录先**暂存**到 `.xp-gate/audit.pending.jsonl`（`commit_hash` 留空），由 post-commit 在 HEAD 前进后用新的 `flush-pending` 命令打上真实哈希；pre-commit 开头还会用 `git log -1` 兜底冲一次上一轮遗留，确保 post-commit 万一没跑也不丢、且不误记到当前提交。post-commit 用有界重试（最多 6 轮、连续两轮为空即止）吸收最后一个门禁 `& disown` 记录的竞态。新增 `resolveCommitHash()`（显式 `--commit-hash` 优先，否则回落 HEAD，注入式 headResolver 便于测试）。
+- **`post-commit` 从未被发布/安装**: 它既不在 `sync-package-content.js` 的 `HOOK_FILES`，也不在 `copyHooks` 的安装列表，`check-hook-mirror.sh` 的期望集合里也没有——于是上面那条 flush 和早就存在的 `--no-verify` 旁路检测，对所有安装用户**都是死代码**。三处补全并加回归测试。
+- **`duration_ms` 的写入侧兜底（REQ-B 收尾）**: shell 侧 `audit-sanitize.sh` 已挡住被污染的 start_ms，本版在 `gate-audit.ts` 的 `record` 再加一道写入侧闸：任何 >6h 或负数（epoch 级 `end-0`、单位错误）的时长一律记 `null` + `duration_reason=poisoned_start_ms`，绝不把天文数字写进账本。调用方显式给的 reason 优先。
+- **`xp-gate audit --stats` 遇到畸形行会崩**: 账本里有 54 条历史行 `gate_id`/`issues_found` 为 `null`，聚合时 `undefined.localeCompare` 直接抛异常、`NaN` 污染均值。改为 `unknown` 归桶且非有限 issues 计 0。
+
+### Added
+
+- **`xp-gate audit --check`**: 审计账本健康闸，`implausible_duration` 或 `missing_commit` 任一条即为异常，退出码 1。默认按 `AUDIT_ANOMALY_SINCE`（修 bug 的日期）只看**新增**异常——历史行无法重测，一律免责；否则闸门永远红。`--stats` 也会打印这份 anomaly 汇总。
+- **`xp-gate doctor` 的 "Audit ledger" 检查**: CI 里账本被 gitignore、干净 checkout 扫到 0 行，所以本地可见性靠 doctor；新增异常报 WARN（不阻断、不计入 FAIL 数），并指向 `audit --check`。
+- **CI Gate 5c「Audit ledger health」**: 在 Gate 5b 之后增加一步，账本存在就跑 `audit --check`；干净 checkout 时为绿色 no-op。把"两个遥测 bug 不许复发"变成流水线不变量。
+- **`AGENTS.md` 新增「AGENT RUNTIME DISCIPLINE」**: 四条硬规则——读/搜一律用 `read`/`grep`/`glob` 而非 shell、≥2 个独立调用必须同一步并发、后台任务用完成通知禁止 `wait:true` 轮询、发布流水线类改动先写契约测试。附当前基线（纯读取 shell 32.7%、calls/step 1.03、job_output 66.5 h）与目标。同一张自检表进 `skills/sprint-flow/references/phase-3-build.md`。
+
+### 诊断基线（`docs/plans/2026-10-30-dev-speed-diagnosis.md`）
+
+- 正确计入 251.7 h = 模型 105.7 h（42%）+ 工具 146.0 h（58%）；门禁电池占 87.5 h ≈ 34.8%。
+- 每提交门禁电池：median 228 s、mean 518 s、p90 1227 s、max 27342 s，平均 13.5 个门禁/提交。
+- 返工率 323/679 = 47.6% 的提交是 fix/revert——这才是真正的乘数。
+- calls/step 仅 1.03（2.7% 的步骤做了批量）；32.7% 的 shell 调用是纯读/搜；`job_output` 1851 次/66.5 h（p90 600 s）。
+
 ## [0.32.2.0] - 2026-10-30
 
 本版是并行任务线的收口：两条 sprint 分支（`sprint/2026-10-26-01`、`sprint/2026-10-27-01`）的成果此前都已以 squash 形式落到 `main`，但本地还留着未提交的 DSH 插件改动和两个 stash，主干因此长期处于"代码已合、工作未收"的状态。本版把剩下的散落工作全部落地，并修掉三个因此暴露出来的门禁缺陷。

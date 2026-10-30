@@ -545,15 +545,55 @@ function handleAuditTail(args, auditPath) {
 
 function handleAuditStats(auditPath) {
   try {
-    const { computeStats } = require(auditPath);
+    const { computeStats, computeAnomalies } = require(auditPath);
     const stats = computeStats();
     if (stats.length === 0) {
       console.log('No audit data found.');
       return;
     }
     printStatsTable(stats);
+    printAnomalies(computeAnomalies());
   } catch (err) {
     console.error('Error computing stats:', err.message);
+    process.exit(1);
+  }
+}
+
+/**
+ * Print the audit-health summary. `total` is the ledger-integrity number CI
+ * gates on (xp-gate audit --check); the components explain where it comes from.
+ */
+function printAnomalies(a, since) {
+  console.log('');
+  console.log('Audit health (anomalies):');
+  if (since) console.log(`  scope                : entries since ${since}`);
+  console.log(`  entries scanned      : ${a.scanned}`);
+  console.log(`  implausible duration : ${a.implausible_duration}  (epoch/negative — the REQ-B bug)`);
+  console.log(`  missing commit       : ${a.missing_commit}  (blank/unknown attribution — the off-by-one bug)`);
+  console.log(`  duration_anomaly flag: ${a.flagged}`);
+  console.log(`  null + reason        : ${a.null_with_reason}  (honest unmeasurable, NOT counted as anomaly)`);
+  console.log(`  ── total anomalies   : ${a.total}`);
+}
+
+/**
+ * CI gate: exit 1 when the audit ledger carries anomalies (implausible
+ * durations or unattributed commits). This turns both telemetry bugs into a
+ * build failure instead of something a human has to notice in a chart.
+ */
+function handleAuditCheck(auditPath) {
+  try {
+    const { computeAnomalies, AUDIT_ANOMALY_SINCE } = require(auditPath);
+    // Scope to entries after the fix: historical anomalies are grandfathered
+    // (they cannot be re-measured). A future epoch/blank row fails the build.
+    const a = computeAnomalies(process.cwd(), AUDIT_ANOMALY_SINCE);
+    printAnomalies(a, AUDIT_ANOMALY_SINCE);
+    if (a.total > 0) {
+      console.error(`FAIL: ${a.total} audit anomal${a.total === 1 ? 'y' : 'ies'} found since ${AUDIT_ANOMALY_SINCE} (must be 0).`);
+      process.exit(1);
+    }
+    console.log('OK: no new audit anomalies.');
+  } catch (err) {
+    console.error('Error checking audit health:', err.message);
     process.exit(1);
   }
 }
@@ -600,6 +640,11 @@ function handleAudit(args) {
     return;
   }
 
+  if (args.includes('--check')) {
+    handleAuditCheck(auditPath);
+    return;
+  }
+
   if (args[0] === 'record') {
     handleAuditRecord(args, auditPath);
     return;
@@ -609,7 +654,8 @@ function handleAudit(args) {
   console.error('Usage:');
   console.error('  xp-gate audit record --gate-id X --gate-name Y --passed true/false --issues-found N --duration-ms N --trigger commit');
   console.error('  xp-gate audit --tail [N]     (default: 20)');
-  console.error('  xp-gate audit --stats');
+  console.error('  xp-gate audit --stats        (per-gate stats + anomaly summary)');
+  console.error('  xp-gate audit --check        (exit 1 if the ledger has anomalies)');
   process.exit(1);
 }
 
