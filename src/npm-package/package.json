@@ -10,6 +10,7 @@
     "hooks/",
     "adapters/",
     "lib/",
+    "gates/",
     "skills/",
     "plugins/",
     "dsh.bundle.patch.yml",

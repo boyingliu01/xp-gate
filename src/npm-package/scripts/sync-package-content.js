@@ -504,7 +504,12 @@ function main() {
   const mutation = syncModules('mutation');
   const mockPolicy = syncModules('mock-policy');
   const buildIntegrity = syncModules('build-integrity');
-  console.error(`[sync] done: ${skills} skill(s), ${plugins} plugin(s), ${scripts} script(s), ${adapters} adapter entries, ${hooks} hook entries, ${principles + mutation + mockPolicy + buildIntegrity} module(s)`);
+  // #658: test-layers / pbt / python-health gate modules live in src/gates/ and
+  // were never bundled, so `xp-gate check test-layers` found no module in an npm
+  // install and silently skipped. Ship them (they import only ./common* which
+  // ship alongside).
+  const gates = syncModules('gates');
+  console.error(`[sync] done: ${skills} skill(s), ${plugins} plugin(s), ${scripts} script(s), ${adapters} adapter entries, ${hooks} hook entries, ${principles + mutation + mockPolicy + buildIntegrity + gates} module(s)`);
   if (skills !== CORE_SKILLS.length) {
     console.error(`[sync] ERROR: expected ${CORE_SKILLS.length} skills, copied ${skills}`);
     process.exit(1);

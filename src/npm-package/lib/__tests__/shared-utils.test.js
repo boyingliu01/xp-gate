@@ -109,4 +109,25 @@ describe('shared-utils', () => {
     });
   });
 
+  describe('copyHooks ships hook-module-resolution.sh (#655/#631)', () => {
+    it('@covers gate-script deployment: copyHooks installs hook-module-resolution.sh so pre-commit does not FATAL', () => {
+      // pre-commit loads hook-module-resolution.sh before any tier decision and
+      // fails closed. It was absent from copyHooks, so every fresh `init` /
+      // `setup-global` produced hooks that FATAL'd on every commit.
+      const pkgRoot = path.join(tmpRoot, 'node_modules', '@boyingliu01', 'xp-gate');
+      const hooksSrc = path.join(pkgRoot, 'hooks');
+      fs.mkdirSync(hooksSrc, { recursive: true });
+      for (const h of ['pre-commit', 'pre-push', 'post-commit', 'post-merge', 'hook-module-resolution.sh']) {
+        fs.writeFileSync(path.join(hooksSrc, h), `# ${h}`);
+      }
+      const destDir = path.join(tmpRoot, 'dest-hooks');
+      fs.mkdirSync(destDir, { recursive: true });
+
+      const { copyHooks } = require('../shared-utils');
+      copyHooks(pkgRoot, destDir);
+
+      expect(fs.existsSync(path.join(destDir, 'hook-module-resolution.sh'))).toBe(true);
+    });
+  });
+
 });

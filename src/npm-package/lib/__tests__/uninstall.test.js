@@ -309,6 +309,24 @@ describe('uninstall', () => {
     expect(cfg.uninstalled).toBeDefined();
   });
 
+  it('AC-02: uninstall in global mode unsets even when git returns a forward-slash path (#656)', async () => {
+    // Windows: git returns "C:/Users/.../hooks" while expectedPath uses
+    // backslashes. A raw === skipped the unset, leaving a dangling hooksPath.
+    setupGlobalInstall();
+    const expectedHooksPath = globalHooksDir();
+    mockExecGlobalHooksPath(expectedHooksPath.replace(/\\/g, '/'));
+    const { uninstall } = require('../uninstall');
+
+    const result = await uninstall([]);
+
+    expect(result).toBe(0);
+    expect(execSpy).toHaveBeenCalledWith(
+      expect.stringContaining('git config --global --unset core.hooksPath'),
+      expect.any(Object)
+    );
+    expect(warnSpy).not.toHaveBeenCalledWith(expect.stringContaining('does not match'));
+  });
+
   it('AC-02: uninstall in global mode skips unset when hooksPath does not match', async () => {
     setupGlobalInstall();
     mockExecGlobalHooksPath('/some/other/path');

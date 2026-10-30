@@ -252,7 +252,12 @@ function runGateAdapter(scriptPath, cwd = process.cwd(), opts = {}) {
     execFileSync(
       bashCommand,
       ['--noprofile', '--norc', '-c', wrap, 'xp-gate', commonScript, nowMsScript, scriptPath, process.execPath, listFile],
-      { stdio: 'inherit', cwd }
+      // #660: the pre-commit hook exports GATE_DIR before sourcing a fragment, but
+      // the CLI path never did, so gate-3.sh looked for $GATE_DIR/lib/ccn-ratchet.sh
+      // (empty), fell back to <repo>/githooks/lib, and falsely BLOCKED on any
+      // project without vendored gates. The fragment lives beside its lib/, so
+      // point GATE_DIR at its own directory.
+      { stdio: 'inherit', cwd, env: { ...process.env, GATE_DIR: scriptDir } }
     );
   } finally {
     removeFileList(listFile);

@@ -107,8 +107,7 @@ mutation_diff=$(diff -rq src/mutation src/npm-package/mutation 2>&1 || true)
 [ -z "$mutation_diff" ] || fail "mutation mirror tree drift:
 $mutation_diff"
 
-# Mock policy module. Same failure shape as #544 above, and it already happened:
-# the three mock-policy fixes on origin/main (9eb8fb7c, 65295439, b6938a1f) each
+# Mock policy module. Same failure shape as #544 above, and it already happened:# the three mock-policy fixes on origin/main (9eb8fb7c, 65295439, b6938a1f) each
 # edited only src/mock-policy/, so src/npm-package/mock-policy/gate-m3.ts kept the
 # old lenient-layer and unreadable-file behaviour. Nothing compared the two trees,
 # so the published tarball would have carried the bug the fixes exist to remove.
