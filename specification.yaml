@@ -3571,3 +3571,21 @@ specification:
         - id: AC-670-36
           criteria: Gate 4 的 Java 覆盖提示在用户项目中不引用未随包发布的 docs/ 路径
           test_type: unit
+        - id: AC-670-37
+          criteria: uninstall --global 的卸载计划包含 modules/、node_modules/、package.json、package-lock.json、xp-gate.json
+          test_type: unit
+        - id: AC-670-38
+          criteria: 用户配置（.delphi-config.json）不出现在任何删除步骤中，且在计划里以 retain 步骤登记以便汇总输出
+          test_type: unit
+        - id: AC-670-39
+          criteria: 仅当已安装 skill 目录与随包副本内容一致时才安排删除；用户修改过的目录一律保留
+          test_type: unit
+        - id: AC-670-40
+          criteria: classifyHooksDir 区分 xp-gate 自有钩子 / 支撑文件 / 外来文件，外来文件不被静默忽略
+          test_type: unit
+        - id: AC-670-41
+          criteria: 按内容识别 git-lfs 钩子并标注来源；无法证明来源的文件仍报告但不臆测来源
+          test_type: unit
+        - id: AC-670-42
+          criteria: hooks 目录含外来文件时 uninstall 不整目录递归删除，只删 xp-gate 自有条目
+          test_type: unit

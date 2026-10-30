@@ -106,25 +106,40 @@ function instantiationViolations(
   return violations;
 }
 
+/** Rule severity from the active config, defaulting to warning. */
+function configuredSeverity(): Severity {
+  const settings = getActiveConfig().rules['solid']['dip'];
+  return (settings.severity as Severity) ?? 'warning';
+}
+
+/**
+ * Violations contributed by ONE extracted class.
+ *
+ * Split out of `dipRule.check` to keep that function inside the CCN ratchet: the
+ * #627 composition-root test and the #626 line arithmetic each added a branch, and
+ * the ratchet is there to force exactly this trade rather than a baseline refresh.
+ */
+function classViolations(
+  clsAny: unknown, file: string, severity: Severity,
+): Violation[] {
+  const cls = clsAny as { code?: string; line?: number; name?: string };
+  if (!cls.code) return [];
+  // #627: a composition root's `new` is the inversion working, not bypassed.
+  // Skipping the whole class body is right here: when the class IS the wiring
+  // point, every instantiation in it is wiring.
+  if (isCompositionRoot(cls.code, cls.name)) return [];
+  return instantiationViolations(cls.code, cls.line || 0, file, severity);
+}
+
 export const dipRule: Rule = {
   id: 'solid.dip',
   name: 'Dependency Inversion Principle Rule',
   threshold: 0,
   severity: 'warning',
   check: (file: string, adapter: import('../../types').Adapter): Violation[] => {
-    const settings = getActiveConfig().rules['solid']['dip'];
-    const severity = (settings.severity as Severity) ?? 'warning';
-
-    const violations: Violation[] = [];
-    for (const clsAny of adapter.extractClasses() || []) {
-      const cls = clsAny as { code?: string; line?: number; name?: string };
-      if (!cls.code) continue;
-      // #627: a composition root's `new` is the inversion working, not bypassed.
-      // Skipping the whole class body is right here: when the class IS the wiring
-      // point, every instantiation in it is wiring.
-      if (isCompositionRoot(cls.code, cls.name)) continue;
-      violations.push(...instantiationViolations(cls.code, cls.line || 0, file, severity));
-    }
-    return violations;
+    const severity = configuredSeverity();
+    return (adapter.extractClasses() || []).flatMap((clsAny) =>
+      classViolations(clsAny, file, severity),
+    );
   }
 };
