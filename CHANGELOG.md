@@ -2,6 +2,50 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.35.0.0] - 2026-10-30
+
+本版主题是"门禁评级的范围"。三处修复指向同一个问题：门禁声称检查了什么、它以什么人口
+为分母，以及当工具本身坏掉时它还能不能诚实地说话。
+
+### Added
+
+- **#617 CCN 基线声明自身 population**：基线写入器现在输出
+  `{ population: { roots, extensions }, entries }`，Gate 3 只评级声明覆盖的文件。
+  在此之前那条 "Grade exactly the population the baseline was written from" 只存在于
+  注释里；基线由更窄扫描产生的仓库，vendored 压缩 JS 照样被评级，`--csv-verified` 在
+  单行压缩代码上与 lizard 不一致后 fail-closed，而那个 BLOCK **无法修复**——文件在
+  基线里没有条目可棘轮，用户没有任何东西可以加进去把它清掉。读取器同时接受旧的扁平
+  形状，所以升级不需要一次性迁移；缺失元数据一律解读为"不限制"而非"空集合"（后者会让
+  棘轮在比较 0 个函数的情况下报干净运行，比误报更糟）。
+
+### Fixed
+
+- **#661 Gate 4 崩溃仍报 PASSED**：检查器加载失败（`$HOME` 的 POSIX 路径喂给原生
+  node，`/c/Users/...` 被解析成 `C:\c\Users\...`），退出码 ≥2 落进 "execution issue"
+  分支被降级成 SKIP，而 pre-commit 把 SKIP 当不阻塞——于是崩溃栈上面两行就印着
+  `PASSED - Principles checker (no errors found)`。路径转换早已接入 `to_native_path`，
+  但 fail-open 那一半还在。现在保持清晰区分：工具**未安装** → SKIP 是诚实的（什么都没
+  被声称）；工具**存在但崩溃** → WARN（不是通过，因为什么都没检查；也不是静默跳过，
+  因为用户必须知道代码未被审计）。选 WARN 而非 FAIL 是有意的：坏的是工具而不是提交，
+  用环境故障阻断每一次提交等于让改动替环境背锅——但绿灯绝不能出。
+- **#662 pre-push 审计日志永远写不出**：两处 POSIX 路径喂给原生 `python.exe`（同一类）：
+  `mktemp` 产生的临时脚本体，和 `lib/prepush-score.py` 模块路径。只修第一处会引出第二
+  处告警——这正是 issue 里记录的顺序。两者现在都在调用前转换，并由 AC-670-49/50 钉住
+  转换必须发生在使用**之前**（写在之后就是死代码）。
+- **#629 doctor 超时丢弃已完成检查**：对同一个健康安装，`doctor` 一次报
+  "All checks passed"、两次报 "Timed out after 10s"。超时本身是刻意的安全网（#348），
+  缺陷在触发**之后**：`Promise.race` 丢掉整个结果替换成一条占位检查。后果是 doctor
+  **跑得越久报告越少**，且超时让 skills 段落整段消失，抓 `Skill:.*Up to date` 的工具有
+  读到 `0/12`。现在保留所有已完成检查，并**指名**哪些 surface 未及时报告。
+- **#626 / #627 / #628 / #659 / #663 / #664**：DIP 行号与组合根误报、Gate 4 失效文档
+  路径、Gate 13 Maven 静默放行、卸载残留、第三方钩子保护——详见 0.34.1.0。
+
+### Notes
+
+- 本仓库 `.ccn-baseline.json` 已按新格式重新生成（976 条 / 21 个 root / 5 种扩展名）。
+- 路径分隔符归一化用 `sed` 而非 `tr '\' '/'`：单个反斜杠在 `tr` 的 SET 参数里是可移植性
+  陷阱（GNU tr 报 "unescaped backslash at end of string"，MSYS 行为还不一致）。
+
 ## [0.34.1.0] - 2026-10-30
 
 本版修的是"门禁说对了什么"与"它实际看到了什么"之间的差距：一个位置报错的 DIP 告警、一类
