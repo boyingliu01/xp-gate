@@ -3652,3 +3652,12 @@ specification:
         - id: AC-670-63
           criteria: 对齐报告写盘失败时记入 errors 而非抛出，已完成的分析结果不得丢失
           test_type: unit
+        - id: AC-670-64
+          criteria: 仅因折行或空白不同的模块副本判定为格式差异而非漂移，不得 FAIL
+          test_type: unit
+        - id: AC-670-65
+          criteria: 安装副本存有仓库所缺内容时仍判为双向分叉并拒绝静默同步
+          test_type: unit
+        - id: AC-670-66
+          criteria: 无法读取的副本对比必须如实报告不可比较，不得当作一致
+          test_type: unit

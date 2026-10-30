@@ -885,7 +885,14 @@ function diagnoseModuleDrift(ctx = {}) {
       continue;
     }
     const hint = TIER_HINTS[tierFor(executed, dirs).tier] || '';
-    checks.push({ name: label, status: 'FAIL', detail: `${moduleDriftDetail(repoOnly, installedOnly)}${hint}` });
+    const driftDetail = moduleDriftDetail(texts.repoText, texts.installedText);
+    // A re-wrap is not drift: both copies say the same thing, so FAILing (and
+    // refusing to sync) over it teaches the reader to distrust the check.
+    if (/differ only in formatting/.test(driftDetail)) {
+      checks.push({ name: label, status: 'PASS', detail: driftDetail });
+      continue;
+    }
+    checks.push({ name: label, status: 'FAIL', detail: `${driftDetail}${hint}` });
     issues++;
   }
 
@@ -936,21 +943,86 @@ function nonExecutedCopies(dirs, executedFor) {
 }
 
 /**
+ * Split source into comparable tokens, discarding formatting.
+ *
+ * Whitespace, line breaks and blank lines are dropped so a re-wrapped statement
+ * and its one-line original compare equal. Crucially this keeps `x &&` + `y` on
+ * two lines equal to `x && y` on one: a line-level set difference reports BOTH
+ * of those lines as unique to their side, which is what made every re-wrap look
+ * like two-sided drift (#667).
+ *
+ * @param {string} text
+ * @returns {string[]}
+ */
+function tokenizeForDrift(text) {
+  return String(text).split(/\s+/).filter((t) => t.length > 0);
+}
+
+/**
+ * Token-level delta between two copies: how many tokens each side holds that
+ * the other does not.
+ *
+ * @param {string} repoText
+ * @param {string} installedText
+ * @returns {{repoOnly: number, installedOnly: number}}
+ */
+function tokenDelta(repoText, installedText) {
+  const repo = tokenizeForDrift(repoText);
+  const installed = tokenizeForDrift(installedText);
+  const repoSet = new Set(repo);
+  const installedSet = new Set(installed);
+  let repoOnly = 0;
+  let installedOnly = 0;
+  for (const t of repoSet) if (!installedSet.has(t)) repoOnly++;
+  for (const t of installedSet) if (!repoSet.has(t)) installedOnly++;
+  return { repoOnly, installedOnly };
+}
+
+/**
+ * NO tolerance: any installed-only token blocks the silent sync.
+ *
+ * A threshold looked tempting (a re-wrap can leave a stray token), but it gets
+ * the risk backwards. The case the refusal exists for is precisely a ONE-token
+ * hardening -- `return 0` -> `return 1`, the difference between a gate that
+ * fails open and one that fails closed. Measured on the real gate modules, a
+ * pure re-wrap produces ZERO unique tokens on either side, so the tolerance
+ * would have bought nothing and could have destroyed the exact fix it is meant
+ * to protect.
+ */
+const FORMATTING_NOISE_TOKENS = 0;
+
+/**
  * Describe one drifted module by the direction of its drift.
  *
  * Only a module the *repo* is ahead of is safe to overwrite; anything where the
- * installed copy holds its own lines needs an explicit decision, because syncing
+ * installed copy holds its own work needs an explicit decision, because syncing
  * would delete work that exists nowhere else.
+ *
+ * The question is NOT "are both line counts non-zero" -- every re-wrapped
+ * statement satisfies that. It is "does the installed copy hold anything the
+ * repo genuinely lacks", which is a token question (#667).
+ *
+ * @param {string|null} repoText
+ * @param {string|null} installedText
+ * @returns {string}
  */
-function moduleDriftDetail(repoOnly, installedOnly) {
-  if (repoOnly > 0 && installedOnly > 0) {
-    return `diverged both ways — githooks/ has ${repoOnly} line(s) the install lacks, `
-      + `the install has ${installedOnly} line(s) githooks/ lacks; sync refuses without an explicit decision`;
+function moduleDriftDetail(repoText, installedText) {
+  if (typeof repoText !== 'string' || typeof installedText !== 'string') {
+    return 'executed copy could not be read for comparison';
+  }
+  const { repoOnly, installedOnly } = tokenDelta(repoText, installedText);
+  if (repoOnly > 0 && installedOnly > FORMATTING_NOISE_TOKENS) {
+    return `diverged both ways — githooks/ has ${repoOnly} token(s) the install lacks, `
+      + `the install has ${installedOnly} token(s) githooks/ lacks; sync refuses without an explicit decision`;
   }
   if (repoOnly > 0) {
-    return `installed copy is stale (${repoOnly} line(s) in githooks/ absent from the install)`;
+    return `installed copy is stale (${repoOnly} token(s) in githooks/ absent from the install); `
+      + 'sync will fast-forward it from githooks/';
   }
-  return `installed copy is newer than githooks/ (${installedOnly} line(s) absent from the repo)`;
+  if (installedOnly > 0) {
+    return `installed copy is newer than githooks/ (${installedOnly} token(s) absent from the repo)`;
+  }
+  return 'copies differ only in formatting; content is equivalent';
 }
 
 /**
@@ -3409,6 +3481,8 @@ module.exports = {
   classifyHooksDir,
   syncGlobalHooksFromRepo,
   diagnoseModuleDrift,
+  moduleDriftDetail,
+  tokenDelta,
   diagnoseAuditLedger,
   syncModulesFromRepo,
   resolveExecutedModuleDirs,
