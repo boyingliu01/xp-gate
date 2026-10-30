@@ -309,6 +309,21 @@ specification:
           test_type: integration
 
     # ============================================================
+    - id: REQ-DSH-019
+      description: 插件的 prepack 脚本必须让 stdout 只承载 npm 的 JSON 契约，
+        否则发布流水线的 tarball 体积校验会失败，进而让整个发版静默停摆
+      priority: critical
+      acceptance_criteria:
+        # 同一正则截断问题（见 REQ-DSH-018 注释）：这里写两段式 AC-DSH-019。
+        # 0.32.2 实发：copy-client.cjs 的 console.log 混进 `npm pack --json`，
+        # jq 报 Invalid numeric literal，dsh 插件没发出去，create-release 因
+        # 上游 job 失败被 skip，tag 与 GitHub Release 一起丢失。
+        - id: AC-DSH-019
+          criteria: plugins/dsh/scripts/*.cjs 中的任何脚本都不得写 stdout（console.log）；
+            日志一律走 stderr，使 `npm pack --dry-run --json | jq` 能解析出体积
+          test_type: unit
+
+    # ============================================================
     # Sprint sprint-20261003-75: P0/P1 质量门禁缺陷修复
     # 设计来源：docs/plans/2026-10-03-p0-p1-gate-defects.md（Delphi R2，共识 100%）
     # ============================================================

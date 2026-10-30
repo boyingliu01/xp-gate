@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest"
-import { readFileSync } from "node:fs"
+import { readFileSync, readdirSync } from "node:fs"
 import { join, resolve } from "node:path"
 import { fileURLToPath } from "node:url"
 
@@ -94,5 +94,29 @@ describe("packaging contract", () => {
     expect(core).toMatch(/distinct/)
     // A report with no explicit verdict must not be counted toward consensus.
     expect(core).toContain("INVALID_NO_VERDICT")
+  })
+
+  /**
+   * @test REQ-DSH-019 prepack scripts keep stdout clean for `npm pack --json`
+   * @intent 发布流水线用 `npm pack --dry-run --json | jq ...` 量 tarball 大小。
+   *         `prepack` 里任何一句 console.log 都会混进那个 JSON 流，jq 报
+   *         "Invalid numeric literal" 并以 exit 5 结束——0.32.2 的 dsh 插件正是
+   *         因此没发出去，而 create-release 依赖三个 publish job，于是 tag 与
+   *         release 一起被跳过。日志一律走 stderr。
+   * @covers AC-DSH-019-01
+   */
+  it("prepack-time scripts log to stderr, never stdout", () => {
+    const scriptsDir = join(PKG_ROOT, "scripts")
+    const files = readdirSync(scriptsDir).filter((f) => f.endsWith(".cjs"))
+    expect(files.length, "no prepack scripts found").toBeGreaterThan(0)
+
+    for (const f of files) {
+      const source = readFileSync(join(scriptsDir, f), "utf8")
+      // Strip comments so an explanatory "console.log" in prose does not fail it.
+      const code = source.replace(/\/\*[\s\S]*?\*\//g, "").replace(/\/\/.*$/gm, "")
+      expect(code, `${f} writes to stdout and would corrupt npm pack --json`).not.toMatch(
+        /console\.log\s*\(/,
+      )
+    }
   })
 })
