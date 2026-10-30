@@ -2323,6 +2323,12 @@ specification:
       description: "Gate 2 在项目未提供 jscpd.conf.json 时必须使用一份窄化的默认忽略集，并打印该基线使其可审计"
       priority: high
       acceptance_criteria:
+        - id: AC-605-05
+          criteria: 覆盖率阈值从项目自身声明解析（pyproject / .coveragerc / vitest thresholds.lines），未声明时回落 80
+          test_type: integration
+        - id: AC-605-06
+          criteria: 阈值来源变量经真实赋值传到审计记录，不经命令替换在子 shell 中丢失
+          test_type: integration
         - id: AC-606-01
           criteria: 无项目配置时，数据与证据类文件（*.log、*.txt、*.yaml/*.yml、*golden*、
             *baseline.json、*evidence*）与构建产物目录（node_modules、dist、build、target、
