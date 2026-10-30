@@ -676,6 +676,59 @@ function readPair(repoFile, installedFile) {
  * @param {{repoRoot?: string, repoHooks?: string, installedAdapters?: string}} [ctx]
  * @returns {{checks: Array<{name: string, status: string, detail: string}>, issues: number}}
  */
+/**
+ * Audit ledger health (P0): surface gate-telemetry anomalies so `doctor` warns
+ * before they silently poison per-commit analysis. Mirrors gate-audit.ts's
+ * computeAnomalies (kept in sync deliberately — doctor is CommonJS and cannot
+ * import the .ts module). Grandfathers everything before AUDIT_LEDGER_SINCE;
+ * only NEW implausible durations or unattributed commits count as issues.
+ */
+const AUDIT_LEDGER_SINCE = '2026-10-30T00:00:00.000Z';
+const AUDIT_MAX_PLAUSIBLE_MS = 6 * 60 * 60 * 1000;
+
+function diagnoseAuditLedger(ctx = {}) {
+  const checks = [];
+  let issues = 0;
+  const repoRoot = ctx.repoRoot || process.cwd();
+  const logPath = path.join(repoRoot, '.xp-gate', 'audit.jsonl');
+  if (!fs.existsSync(logPath)) {
+    checks.push({ name: 'Audit ledger', status: 'SKIP', detail: 'no .xp-gate/audit.jsonl' });
+    return { checks, issues };
+  }
+  let entries;
+  try {
+    entries = fs.readFileSync(logPath, 'utf8').split(/\r?\n/).filter((l) => l.trim()).map((l) => JSON.parse(l));
+  } catch (err) {
+    checks.push({ name: 'Audit ledger', status: 'WARN', detail: `unreadable: ${err.message}` });
+    return { checks, issues };
+  }
+  let implausible = 0;
+  let missingCommit = 0;
+  let considered = 0;
+  for (const e of entries) {
+    if (typeof e.timestamp === 'string' && e.timestamp < AUDIT_LEDGER_SINCE) continue;
+    considered += 1;
+    if (typeof e.duration_ms === 'number'
+      && (!Number.isFinite(e.duration_ms) || e.duration_ms < 0 || e.duration_ms > AUDIT_MAX_PLAUSIBLE_MS)) {
+      implausible += 1;
+    }
+    if (!e.commit_hash || e.commit_hash === 'unknown') missingCommit += 1;
+  }
+  const total = implausible + missingCommit;
+  if (total > 0) {
+    checks.push({
+      name: 'Audit ledger',
+      status: 'WARN',
+      detail: `${total} anomal${total === 1 ? 'y' : 'ies'} since ${AUDIT_LEDGER_SINCE} (${implausible} implausible duration, ${missingCommit} unattributed) — run: xp-gate audit --check`,
+    });
+    // WARN, not FAIL: telemetry integrity is not a blocking gate, but it must
+    // be visible. Kept at 0 issues so it never inflates the FAIL count.
+  } else {
+    checks.push({ name: 'Audit ledger', status: 'PASS', detail: `${considered} entr${considered === 1 ? 'y' : 'ies'} clean since ${AUDIT_LEDGER_SINCE}` });
+  }
+  return { checks, issues };
+}
+
 function diagnoseModuleDrift(ctx = {}) {
   const checks = [];
   let issues = 0;
@@ -1547,7 +1600,11 @@ async function diagnoseAsync(refreshEnv = false) {
     // hook files and live in a different directory (#495).
     const moduleDrift = diagnoseModuleDrift();
     checks.push(...moduleDrift.checks);
-    return drift.issues + moduleDrift.issues;
+    // Audit-ledger health (P0): telemetry anomalies are not hook drift, but
+    // they ride the same repo-scoped group and must be surfaced by doctor.
+    const ledger = diagnoseAuditLedger();
+    checks.push(...ledger.checks);
+    return drift.issues + moduleDrift.issues + ledger.issues;
   });
 
   // Wait for ALL parallel groups
@@ -3225,6 +3282,7 @@ module.exports = {
   diagnoseHookDrift,
   syncGlobalHooksFromRepo,
   diagnoseModuleDrift,
+  diagnoseAuditLedger,
   syncModulesFromRepo,
   resolveExecutedModuleDirs,
   executedModulePath,

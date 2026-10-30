@@ -236,6 +236,27 @@ Without these events, the Harness can only infer changes from file diffs and has
 
 ---
 
+## 工具调用效率自检（P2 硬性 — 2026-10-30 诊断）
+
+> BUILD 阶段是工具调用最密集的阶段，也是"等待时间长"的主要来源。依据
+> `docs/plans/2026-10-30-dev-speed-diagnosis.md`：工具延迟占总耗时 58%，其中 32.7% 的
+> shell 调用是纯读取/搜索、calls/step 仅 1.03、`job_output` 阻塞 66.5 h。以下四条在 BUILD
+> 期间是硬性自检项，不满足不得宣称 REQ 完成。
+
+| ❌ 低效做法 | ✅ 正确做法 |
+|------------|------------|
+| `cat` / `Get-Content` / `sed -n` / `head` 读文件 | 用 `read` 原生工具（毫秒级，可并发） |
+| `grep` / `rg` / `Select-String` / `findstr` 搜内容 | 用 `grep` 原生工具 |
+| `find` / `ls` / `Get-ChildItem` 找文件 | 用 `glob` 原生工具 |
+| 一个一个发独立调用（改完再想下一个） | 多个互不依赖的调用放进**同一步**并发发出 |
+| 用 `job_output wait:true` / `sleep` 反复阻塞等长任务 | `run_in_background` + 完成通知，需要时短超时取一次 |
+| 打包/发布/插件改动只靠 CI 发现契约破坏 | 先写契约测试（`plugins/dsh/src/contract.test.ts` 范式），本地先红 |
+
+**验收目标**：纯读取 shell 占比 <5%（现 32.7%）；calls/step ≥2.0（现 1.03）；`job_output`
+调用数下降 ≥50%。这三项在 `xp-gate retro` 的 activity 统计里可复查。
+
+---
+
 ## Blind Review — Read-Only Subagent Convention (v0.18.0+, 证据型标准步骤)
 
 **Purpose**: Code review by an isolated subagent with read-only tool access. Replaces the former `freeze/unfreeze` mechanism.

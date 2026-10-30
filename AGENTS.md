@@ -1,9 +1,9 @@
 # PROJECT KNOWLEDGE BASE
 
 **Generated:** 2026-10-30
-**Commit:** 78786c3f
+**Commit:** e5ca7d9d
 **Branch:** main
-**Version:** 0.32.2.0
+**Version:** 0.32.3.0
 
 ## OVERVIEW
 XP-Gate — deterministic git quality gates + AI-driven multi-expert review (Delphi) + Sprint Flow pipeline (6 phases: PREP, DESIGN, BUILD, VERIFY, SHIP, CLOSE) + npm zero-install distribution + cross-platform plugin system (Claude Code / OpenCode / Qoder). Pre-commit runs **12 numbered gates (Gate 0–11) plus Gate 12 (File Hygiene, warning-only)**. Pre-push runs **8 gates: Gate 10 (Build Integrity), Gate M/M-Python/M-Go/M-Java/M-Kotlin (Mutation), Gate M2 (Mock Density, WARNING), Gate ML (Mock Layering), Gate UI (UI Sprint Gates), Gate MW (Code Walkthrough), and Gate S (Sprint Flow)**. Implements 14 Clean Code/SOLID rules across 9 language adapters (TypeScript engine), 13 shell adapters (gate routing), Boy Scout Rule baseline enforcement, test-specification alignment, mock policy enforcement, and incremental mutation testing.
@@ -248,3 +248,31 @@ All 10 documented drift items (Gate count, pre-push gates, Delphi threshold, Spr
   - "重构 X" → "确保重构前后测试都通过"
 - 多步骤任务列出验证点
 - 改完任何代码后必须运行测试确认无 regression
+
+## AGENT RUNTIME DISCIPLINE — 工具调用效率（P2, 2026-10-30 诊断）
+
+> 依据 `docs/plans/2026-10-30-dev-speed-diagnosis.md`：正确计入的 251.7 h 中，工具延迟占
+> 146.0 h（58%），远高于模型延迟 105.7 h（42%）。三条规则直接压的是这块。
+
+**规则 1 — 读/搜一律用原生工具，shell 只用于“执行”**
+- 读文件用 `read`，按路径找文件用 `glob`，搜内容用 `grep`。**禁止** `cat`/`Get-Content`/
+  `type`/`head`/`tail`/`sed -n`/`Select-String`/`findstr`/`grep`/`rg`/`Get-ChildItem`/
+  `find`/`ls` 去读取或搜索内容——这些会各起一个 pwsh/bash 进程，单次往返 10–30 s，
+  而原生工具是毫秒级且可并行。shell 只留给真正的执行（构建、测试、git、脚本）。
+- 现状：32.7% 的 shell 调用是纯读取/搜索。目标 <5%。
+
+**规则 2 — 独立调用必须同一步并发**
+- 任何 ≥2 个**互不依赖**的调用，必须放进同一个 assistant 消息里并发发出，不得一个一个发。
+  工具契约已支持同一 block 内多个 `invoke`。串行只在有数据依赖时才允许。
+- 现状：calls/step=1.03，仅 2.7% 的步骤做到批量。目标 calls/step ≥2.0。
+
+**规则 3 — 后台任务用完成通知，禁止阻塞轮询**
+- 长任务用 `run_in_background` 起 job，收到完成通知再取结果；**禁止** `job_output`
+  设 `wait:true` 反复阻塞等待，也禁止 `sleep` 轮询。需要结果时再用短超时取一次。
+- 现状：`job_output` 1851 次 / 66.5 h，p90 单次 600 s，仅 14.5% 真在“still running”。
+  目标调用数下降 ≥50%。
+
+**规则 4 — 契约先测（发布流水线类改动）**
+- 触及打包/发布/插件产物的改动，先写集成/契约测试（范式见 `plugins/dsh/src/contract.test.ts`），
+  让“`npm pack --json` 被 stdout 污染”这类问题在本地就红，而不是等发布 CI 用 `jq` 语法错误才发现
+  （0.32.2 的 dsh 插件正是这样漏发的）。

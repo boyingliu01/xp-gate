@@ -24,6 +24,7 @@ const AUDIT_DIR = '.xp-gate';
 const AUDIT_FILE = 'audit.jsonl';
 const MAX_FILE_BYTES = 10 * 1024 * 1024; // 10 MB
 const MAX_ARCHIVES = 3;
+const MAX_PLAUSIBLE_DURATION_MS = 6 * 60 * 60 * 1000; // 6h — no single gate runs longer
 
 // ── Types ────────────────────────────────────────────────────────────────────
 
@@ -222,7 +223,10 @@ function aggregateByGate(entries: GateAuditEntry[]): Map<string, { total: number
   const buckets = new Map<string, { total: number; passed: number; ms: number; issues: number; anomaly_count: number }>();
 
   for (const e of entries) {
-    const b = buckets.get(e.gate_id) ?? { total: 0, passed: 0, ms: 0, issues: 0, anomaly_count: 0 };
+    // Tolerate malformed/legacy rows: a missing gate_id would otherwise create
+    // an `undefined` bucket key (and crash the sort comparing it to a string).
+    const gateId = typeof e.gate_id === 'string' && e.gate_id ? e.gate_id : 'unknown';
+    const b = buckets.get(gateId) ?? { total: 0, passed: 0, ms: 0, issues: 0, anomaly_count: 0 };
     b.total += 1;
     if (e.passed) b.passed += 1;
     // Issue #370: exclude anomalous durations from ms aggregation. REQ-B: a
@@ -233,8 +237,10 @@ function aggregateByGate(entries: GateAuditEntry[]): Map<string, { total: number
     } else if (typeof e.duration_ms === 'number') {
       b.ms += e.duration_ms;
     }
-    b.issues += e.issues_found;
-    buckets.set(e.gate_id, b);
+    // A malformed/legacy row with a non-numeric issues_found must not turn
+    // the whole gate's average into NaN.
+    b.issues += Number.isFinite(e.issues_found) ? e.issues_found : 0;
+    buckets.set(gateId, b);
   }
 
   return buckets;
@@ -271,6 +277,70 @@ export function computeStats(
   results.sort((a, b) => a.gate_id.localeCompare(b.gate_id));
   return results;
 }
+
+export interface AuditAnomalies {
+  /** Entries with an explicit duration_anomaly flag (Issue #370). */
+  flagged: number;
+  /** Entries with a null duration + reason (REQ-B unmeasurable). */
+  null_with_reason: number;
+  /** Entries persisting a provably-impossible duration (>6h / negative). */
+  implausible_duration: number;
+  /** Entries with no commit attribution (the off-by-one bug's fingerprints). */
+  missing_commit: number;
+  /** Sum of the above — the number CI should treat as "must be 0". */
+  total: number;
+  /** Running counter of entries scanned. */
+  scanned: number;
+}
+
+/**
+ * Count audit-health problems so CI can fail when the ledger is untrustworthy.
+ *
+ * These are exactly the artefacts of the two telemetry bugs we fixed: epoch
+ * durations (implausible_duration) and misattributed/blank commits
+ * (missing_commit). A clean ledger returns total=0.
+ *
+ * `since` (ISO-8601) scopes the check to entries at/after that instant. Both
+ * bugs predate the fix and left ~900 historical rows in the ledger; a CI gate
+ * that counted them would be permanently red. Scoping by the fix date turns
+ * the gate into "no NEW anomalies", which is exactly what we can enforce.
+ */
+export function computeAnomalies(repoRoot: string = process.cwd(), since?: string): AuditAnomalies {
+  const logPath = join(repoRoot, AUDIT_DIR, AUDIT_FILE);
+  const entries = parseAuditEntries(logPath);
+  let flagged = 0;
+  let null_with_reason = 0;
+  let implausible = 0;
+  let missingCommit = 0;
+  let considered = 0;
+  for (const e of entries) {
+    if (since && typeof e.timestamp === 'string' && e.timestamp < since) continue;
+    considered += 1;
+    if (e.duration_anomaly === true) flagged += 1;
+    if (e.duration_ms === null && e.duration_reason) null_with_reason += 1;
+    if (typeof e.duration_ms === 'number'
+      && (!Number.isFinite(e.duration_ms) || e.duration_ms < 0 || e.duration_ms > MAX_PLAUSIBLE_DURATION_MS)) {
+      implausible += 1;
+    }
+    if (!e.commit_hash || e.commit_hash === 'unknown') missingCommit += 1;
+  }
+  return {
+    flagged,
+    null_with_reason,
+    implausible_duration: implausible,
+    missing_commit: missingCommit,
+    total: implausible + missingCommit,
+    scanned: considered,
+  };
+}
+
+/**
+ * Entries at/after this instant are expected to be clean. It is the date the
+ * two telemetry bugs were fixed; anything older is grandfathered because it
+ * cannot be re-measured. Keep in sync with the fix commit if you regenerate.
+ */
+export const AUDIT_ANOMALY_SINCE = '2026-10-30T00:00:00.000Z';
+
 
 /**
  * Rotate the audit log if it exceeds MAX_FILE_BYTES.
@@ -320,13 +390,19 @@ function runCli(): void {
 
   if (command === 'record') {
     const opts = parseCliOptions(args.slice(1));
+    // Writer-side backstop: never persist an implausible duration (epoch-sized
+    // `end - 0`, unit error). Any caller-supplied reason wins; otherwise a
+    // rejected number is recorded as null + poisoned_start_ms.
+    const rawDuration = opts['duration-ms'] === 'null' ? null : parseInt(opts['duration-ms'] || '0', 10);
+    const durationCheck = sanitizeDurationMs(rawDuration);
+    const durationReason = opts['duration-reason'] || durationCheck.duration_reason;
     const entry: GateAuditEntry = {
       timestamp: new Date().toISOString(),
       gate_id: opts['gate-id'] || 'unknown',
       gate_name: opts['gate-name'] || 'unknown',
       passed: opts['passed'] === 'true',
       issues_found: parseInt(opts['issues-found'] || '0', 10),
-      duration_ms: opts['duration-ms'] === 'null' ? null : parseInt(opts['duration-ms'] || '0', 10),
+      duration_ms: durationCheck.duration_ms,
       trigger: (opts['trigger'] as 'commit' | 'push' | 'manual') || 'manual',
       repo_path: process.cwd(),
       // Pre-commit runs BEFORE the commit object exists, so `git rev-parse HEAD`
@@ -336,7 +412,7 @@ function runCli(): void {
       // Issue #370: only set when explicitly flagged (omit field otherwise)
       ...(opts['duration-anomaly'] === 'true' ? { duration_anomaly: true } : {}),
       // REQ-B: why the duration is null — never guess a number for it.
-      ...(opts['duration-reason'] ? { duration_reason: opts['duration-reason'] as 'poisoned_start_ms' | 'clock_skew' } : {}),
+      ...(durationReason ? { duration_reason: durationReason as 'poisoned_start_ms' | 'clock_skew' } : {}),
       // #507: only set when provided (omit field otherwise)
       ...(opts['detail'] ? { detail: opts['detail'] } : {}),
     };
@@ -406,4 +482,26 @@ export function resolveCommitHash(
   const explicit = (opts['commit-hash'] || '').trim();
   if (explicit) return explicit;
   return headResolver();
+}
+
+// ── Duration sanity (last line of defence) ───────────────────────────────────
+// The shell side sanitizes start_ms before computing the delta
+// (githooks/lib/audit-sanitize.sh, REQ-B). This is the writer-side backstop:
+// if any caller path ever hands us a duration that is provably not a real
+// gate runtime, refuse to persist it as a number. An epoch-sized value (the
+// old bug produced `end - 0 = now`, ~1.7e12) or anything absurdly large would
+// otherwise poison every average and p90 downstream and looks exactly like a
+// "78-hour gate". Precision matters less than honesty: a rejected duration is
+// null with a reason, never a fabricated number.
+
+export function sanitizeDurationMs(
+  raw: number | null,
+): { duration_ms: number | null; duration_reason?: 'poisoned_start_ms' } {
+  if (raw === null) return { duration_ms: null };
+  if (!Number.isFinite(raw) || raw < 0 || raw > MAX_PLAUSIBLE_DURATION_MS) {
+    // >6h or negative can only come from a poisoned start_ms (epoch-sized
+    // value, unit error) — mark it, don't guess a number.
+    return { duration_ms: null, duration_reason: 'poisoned_start_ms' };
+  }
+  return { duration_ms: raw };
 }

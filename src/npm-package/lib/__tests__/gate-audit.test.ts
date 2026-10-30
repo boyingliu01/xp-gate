@@ -16,6 +16,9 @@ import {
   resolveCommitHash,
   stageAuditEntry,
   flushPendingAudit,
+  sanitizeDurationMs,
+  computeAnomalies,
+  AUDIT_ANOMALY_SINCE,
   type GateAuditEntry,
 } from '../gate-audit';
 
@@ -351,6 +354,86 @@ describe('gate-audit', () => {
       expect(flushPendingAudit(r, 'SHA')).toBe(1);
       const entries = readFileSync(join(r, '.xp-gate', 'audit.jsonl'), 'utf8').trim().split(NL);
       expect(entries.length).toBe(1);
+    });
+  });
+
+  describe('sanitizeDurationMs (writer-side epoch guard, REQ-B backstop)', () => {
+    it('@covers AUDIT-001-09 keeps a plausible duration untouched', () => {
+      expect(sanitizeDurationMs(1234)).toEqual({ duration_ms: 1234 });
+      expect(sanitizeDurationMs(0)).toEqual({ duration_ms: 0 });
+    });
+
+    it('@covers AUDIT-001-09 null stays null with no reason', () => {
+      expect(sanitizeDurationMs(null)).toEqual({ duration_ms: null });
+    });
+
+    it('@covers AUDIT-001-09 an epoch-sized duration is rejected, not stored as a number', () => {
+      // end - 0 == Date.now() ~= 1.7e12 — the classic poisoned-start bug.
+      const r = sanitizeDurationMs(1750000000000);
+      expect(r.duration_ms).toBeNull();
+      expect(r.duration_reason).toBe('poisoned_start_ms');
+    });
+
+    it('@covers AUDIT-001-09 negative or NaN durations are rejected', () => {
+      expect(sanitizeDurationMs(-5).duration_reason).toBe('poisoned_start_ms');
+      expect(sanitizeDurationMs(Number.NaN).duration_reason).toBe('poisoned_start_ms');
+    });
+  });
+
+  describe('computeAnomalies (CI ledger gate, P0-2)', () => {
+    const NL = String.fromCharCode(10);
+    const repo = () => {
+      const r = join(TEST_DIR, 'anom');
+      mkdirSync(r, { recursive: true });
+      return r;
+    };
+    const write = (r: string, rows: Partial<GateAuditEntry>[]) => {
+      mkdirSync(join(r, '.xp-gate'), { recursive: true });
+      const lines = rows.map((x) => JSON.stringify(makeEntry({ repo_path: r, ...x }))).join(NL);
+      writeFileSync(join(r, '.xp-gate', 'audit.jsonl'), lines + NL, 'utf8');
+    };
+
+    it('@covers AUDIT-001-10 a clean ledger has zero anomalies', () => {
+      const r = repo();
+      write(r, [{ gate_id: 'gate-1', commit_hash: 'abc', duration_ms: 100 }]);
+      const a = computeAnomalies(r);
+      expect(a.total).toBe(0);
+      expect(a.scanned).toBe(1);
+    });
+
+    it('@covers AUDIT-001-10 epoch duration + blank commit are both counted', () => {
+      const r = repo();
+      write(r, [
+        { gate_id: 'gate-1', commit_hash: 'abc', duration_ms: 1750000000000 },
+        { gate_id: 'gate-2', commit_hash: '', duration_ms: 100 },
+        { gate_id: 'gate-3', commit_hash: 'unknown', duration_ms: 100 },
+        { gate_id: 'gate-4', commit_hash: 'def', duration_ms: 50 },
+      ]);
+      const a = computeAnomalies(r);
+      expect(a.implausible_duration).toBe(1);
+      expect(a.missing_commit).toBe(2);
+      expect(a.total).toBe(3);
+    });
+
+    it('@covers AUDIT-001-10 null+reason is honest, not an anomaly', () => {
+      const r = repo();
+      write(r, [{ gate_id: 'gate-1', commit_hash: 'abc', duration_ms: null, duration_reason: 'poisoned_start_ms' }]);
+      const a = computeAnomalies(r);
+      expect(a.null_with_reason).toBe(1);
+      expect(a.total).toBe(0);
+    });
+
+    it('@covers AUDIT-001-10 since-scope ignores grandfathered anomalies', () => {
+      const r = repo();
+      write(r, [
+        { gate_id: 'gate-1', commit_hash: '', duration_ms: 1750000000000, timestamp: '2020-01-01T00:00:00.000Z' },
+        { gate_id: 'gate-2', commit_hash: 'abc', duration_ms: 100, timestamp: '2030-01-01T00:00:00.000Z' },
+      ]);
+      const all = computeAnomalies(r);
+      expect(all.total).toBe(2); // old row: 1 implausible + 1 missing commit
+      const scoped = computeAnomalies(r, AUDIT_ANOMALY_SINCE);
+      expect(scoped.total).toBe(0);
+      expect(scoped.scanned).toBe(1);
     });
   });
 

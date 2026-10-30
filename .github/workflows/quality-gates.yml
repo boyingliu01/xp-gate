@@ -652,6 +652,20 @@ jobs:
             echo "ℹ️ No .bats suites found — skipping Gate 5b"
           fi
 
+      # Gate 5c: audit ledger health (P0). Fails the build if any gate-timing
+      # or attribution anomaly appears at/after the fix date. The ledger is
+      # gitignored, so on a clean checkout this scans 0 entries (green no-op) —
+      # it bites once a ledger is committed or CI uploads one, and it documents
+      # the invariant "no NEW epochs, no unattributed commits" in one place.
+      - name: 'Gate 5c: Audit ledger health'
+        run: |
+          echo "Checking audit ledger for telemetry anomalies..."
+          if [ -f .xp-gate/audit.jsonl ]; then
+            xp-gate audit --check || npx tsx src/npm-package/bin/xp-gate.js audit --check
+          else
+            echo "ℹ️ No .xp-gate/audit.jsonl in checkout — nothing to check (gitignored)."
+          fi
+
       # Gate 6: Architecture & Boy Scout Rule
       - name: 'Gate 6: Architecture & Boy Scout Rule'
         id: gate6
