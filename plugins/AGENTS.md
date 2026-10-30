@@ -1,9 +1,9 @@
 # PLUGINS KNOWLEDGE BASE
 
-**Generated:** 2026-10-29
-**Commit:** 101a0ff3
+**Generated:** 2026-10-30
+**Commit:** 78786c3f
 **Branch:** main
-**Version:** 0.32.1.0
+**Version:** 0.32.2.0
 
 ## OVERVIEW
 Cross-platform plugin system for Claude Code, OpenCode, and Qoder. Shared skills + platform-specific hooks/tooling. **All three platforms ship 8 skills each as of v0.9.1+.**

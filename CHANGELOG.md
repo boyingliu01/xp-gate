@@ -2,6 +2,33 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.32.2.0] - 2026-10-30
+
+本版是并行任务线的收口：两条 sprint 分支（`sprint/2026-10-26-01`、`sprint/2026-10-27-01`）的成果此前都已以 squash 形式落到 `main`，但本地还留着未提交的 DSH 插件改动和两个 stash，主干因此长期处于"代码已合、工作未收"的状态。本版把剩下的散落工作全部落地，并修掉三个因此暴露出来的门禁缺陷。
+
+### Added
+
+- **DSH 插件的 Delphi 配置页**: 此前改 Delphi 三个席位只能手写 `.delphi-config.json`，而 DSH 用户的入口是 Plugins 页。新增 `plugins/dsh/client/client.js`（手写 CommonJS bundle，按 `window.__ModuleLoader__.load({ id, factory })` 注册，只占 `plugins.row.config`——`plugins.item` 归官方设置页）与 `src/delphi-settings.ts`。设置写入用 `{ op: 'set', path: [name], value }`：已发布的三方插件就是在这里写成 `{ type, key, value }`，于是每次保存都静默失败。
+  席位来源优先级为「设置页有席位就用设置页，否则退回 `.delphi-config.json`」，既有项目不需要打开页面。页面与 Host 用同一条不变量（三个席位必须互不相同，`seatsFromSettings` 在每次评审前重算），两侧不一致也漏不出钱。设置里的 `api_key` **只接受** `${VAR}` / `{env:VAR}` 引用，字面量令牌被拒绝——令牌不落 profile 文件。
+
+### Fixed
+
+- **sprint 写守卫可以被 `bash` 绕过**: DSH 插件的 HARD-GATE 用「已知写工具黑名单」判定（`write`/`edit`/`str_replace_editor`），漏掉了 `bash`——一条 shell 命令就能改文件。改为「只读工具白名单」，未识别的工具一律按可写处理；失效方向从"静默放行"变成"多拦一次"。
+- **PowerShell 覆盖率与普通测试共用一个超时预算（#599）**: `run_tests` 与 `run_coverage` 共用 `_pester_timeout`，默认值也同为 300s。覆盖率要开 `CodeCoverage`，插桩本身就慢，所以同一个数字对两者不是同一个余量：普通跑 285s 通过，插桩跑超时被杀，然后打印 `Pester coverage TIMED OUT after 300s (may be hanging)`——预算不够被说成测试挂住，把人引到错的方向，且每次代码提交都被拦。0.31.1 修过一次，0.31.2 统一 helper 时把默认值也合并了，补丁被覆盖。改为「一个 helper，两个预算」：`XP_GATE_POWERSHELL_TEST_TIMEOUT_S`(300) 与 `XP_GATE_POWERSHELL_COVERAGE_TIMEOUT_S`(900)，超时消息点名真正生效的那个变量。
+- **PowerShell 声明了 scope 却用另一套规则集**: scope file 生效但 `PSScriptAnalyzerSettings.psd1` 缺失时，`-Settings` 绑定会静默退回默认规则集——颁了执照却用另一套法律判。改为 return 3（fail closed，与缺模块同一语义）。
+- **CCN 棘轮的路径归一化在 Windows 上是恒等函数（#633）**: `gate-3.sh` 里 `norm()` 写作 `.replace(/\\\\/g, "/")`，这段 JS 嵌在单引号 bash 字符串里，四个反斜杠原样到达 JS，被解析成"匹配两个连续反斜杠"的正则，单个 `\` 永不替换。而 PowerShell 测量器输出绝对路径、基线存仓库相对路径，于是每个既有函数都被当成新函数——真实回归被报成 "new function"，结论对、理由错。改为 split/join 归一（不走 `-replace`：正则转义在多层引号里会掉一层，那正是本缺陷的成因），再去盘符与首斜杠，键未命中时回退到唯一后缀匹配，歧义时按新函数处理而不是猜。
+- **PowerShell CCN 判定与基线用了不同阈值（#598）**: 两次调用测量脚本的 `-Threshold` 不一致——基线按真实阈值（5）收集，判定用 1，于是 CCN 2-4 的函数必然印 OVER，必然与永远不含该条目的基线不符。越是拆得干净的函数越必然被拦。
+- **Delphi 席位守卫不认 2026-10-27 那次用户裁定（#636）**: `scripts/check_delphi_local_models.py` 的 `MODEL_ALLOWLIST` 一直是空集，而机器级配置的 technical 席位已按用户裁定换成云端 `s-qwen3.8-flash`（`local-qwen3.8-flash` 实测偶发失败，其余两个保持本地）。守卫于是把一份它自己没被告知过的合法配置判成违规。白名单的用途正是让每个云端席位都必须是一次显式、可评审的编辑，否则它会退回成"文件里写什么都放行"的空壳；本次只加那一个名字，并写清另外两个为什么没动。
+
+### Changed
+
+- **`plugins/dsh/client/client.js` 的复杂度**: 首版被 Gate 3 拦下（5 个函数超 CCN 10 的阻断线，最差 `baseUrl` 18）。没有放宽阈值，也没有把文件挪到 `plugins/*/src/` 下——那个前缀是 gate-3 的 mirror 桶（重新生成、不参与评级），挪过去等于把门禁绕过去。改为按行为不变地拆：`CatalogPicker`/`CatalogGroup`/`draftFrom`/`activeLocale`/`draftSeat`/`configScope`/`catalogSession`/`healthyCatalogGroups`/`pageSections`/`seatsSection`/`gatewaySection`/`consensusSection`/`saveAction`/`usePageState`/`pageFacts`/`pageActions`/`saveRefused`/`commitDraft`。终态 0 个函数超阻断线，最高 CCN 7。
+
+### 归档
+
+- 两条 sprint 分支已确认为 squash-merged（`git log main..branch` 为空），对应 worktree 与分支已删除，本地不再有"看起来没合"的残留。两个本地 stash（PowerShell 硬化、Delphi 席位守卫）已逐条审查后落地为正式提交。
+- 新增四份纯分析文档至 `docs/plans/`：规范该进提示词还是进门禁（#652 的依据）、ArchUnit 33 条规则核对、对应 issue 清单、全语言架构工具版图。
+
 ## [0.32.1.0] - 2026-10-29
 
 两处"门禁看着在跑、实际判错了对象"的缺陷。都是被反复 `--no-verify` 绕过之后才追到源头，且都不是偶发，而是结构性必然。
