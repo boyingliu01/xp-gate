@@ -18,7 +18,7 @@
 #         the threshold was reported as a brand-new function -- a ratchet that can
 #         never pass. The reader must accept both spellings: it is a READER, and
 #         the writer's vocabulary is not ours to change from here.
-# @covers AC-666-01, AC-666-02, AC-632-01, AC-632-02
+# @covers AC-670-01, AC-670-01, AC-632-01, AC-632-02
 
 setup() {
   REPO_ROOT="$(cd "$BATS_TEST_DIRNAME/../.." && pwd)"
@@ -29,11 +29,11 @@ teardown() {
   cd "$BATS_TEST_DIRNAME" || return 1
 }
 
-# AC-666-01: the "zero rows" verdict must name which of the two causes it is.
+# AC-670-01: the "zero rows" verdict must name which of the two causes it is.
 # The gate distinguishes them by asking its own lizard to describe a file it
 # definitely can parse: if that yields rows, lizard works and the input simply
 # contained no functions.
-@test "AC-666-01: gate-3 distinguishes 'no functions in input' from a broken lizard" {
+@test "AC-670-01: gate-3 distinguishes 'no functions in input' from a broken lizard" {
   run grep -c 'no_functions_in_input\|lizard_healthy_no_functions' "$GATE3"
   [ "$output" -ge 1 ]
 
@@ -43,9 +43,9 @@ teardown() {
   [ "$status" -eq 0 ]
 }
 
-# AC-666-02: the SKIP reason for the empty-but-healthy case is its own token, so a
+# AC-670-01: the SKIP reason for the empty-but-healthy case is its own token, so a
 # report reader can tell it from the genuine parse failure.
-@test "AC-666-02: the healthy-empty case reports no_functions_in_input, not lizard_output_unparsable" {
+@test "AC-670-01: the healthy-empty case reports no_functions_in_input, not lizard_output_unparsable" {
   run grep -q 'GATE_3_REASON="no_functions_in_input"' "$GATE3"
   [ "$status" -eq 0 ]
 

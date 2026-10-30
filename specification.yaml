@@ -3440,3 +3440,77 @@ specification:
         - id: AC-649-10
           criteria: pre-commit 中该谓词不得回退到 `printf ... | grep -q` 管道写法
           test_type: unit
+
+    # ============================================================
+    # REQ-670: 门禁必须在「什么都没测到」与「测了且没问题」之间做出区分。
+    # v0.33.2.0 修复的六个缺陷是同一种失效形状的六个实例：缺席被渲染成通过。
+    # #616 #630 #632 #650 #665 #666
+    # ============================================================
+    - id: REQ-670
+      description: 门禁报告必须区分「未测得」与「测了且通过」；子集口径、空结果集
+        与工具故障各有独立可读的结论，不得互相冒充
+      priority: critical
+      acceptance_criteria:
+        - id: AC-670-01
+          criteria: Gate 3 区分「输入无函数」与「lizard 损坏」——以正向探针（对已知
+            含函数的 fixture 跑一次）为判据，分别产出 no_functions_in_input 与
+            lizard_output_unparsable
+          test_type: unit
+        - id: AC-670-02
+          criteria: Gate 3 的 PowerShell 棘轮读取器同时接受 e.name 与 e.function，
+            使 docs 中声明的写入器产出的基线能够真正匹配（不再把已有函数判为新函数）
+          test_type: unit
+        - id: AC-670-03
+          criteria: Gate 8 与 Gate 9 读取 GATE_SCOPE；all 模式下扫描文件系统/已跟踪树，
+            默认模式下的 staged diff 路径保持不变
+          test_type: unit
+        - id: AC-670-04
+          criteria: Gate 6 的 Go 分支以 PIPESTATUS[0] 判定，非零即 BLOCKED 并 exit 1，
+            不再无条件打印成功
+          test_type: unit
+        - id: AC-670-05
+          criteria: Gate 7 先尝试首选引擎 checkov，bash adapter 仅在 checkov 不可用时
+            作为兜底；缺少 adapter 不再使可运行的门禁 SKIP
+          test_type: unit
+        - id: AC-670-06
+          criteria: Gate 5 在子集运行下豁免全局覆盖率下限时，报告必须同时携带非空
+            reason 与口径标记（actual.applies_to），使「被放行的低覆盖率」与
+            「下限不适用」不可混淆
+          test_type: unit
+        - id: AC-670-07
+          criteria: 上述每一条都有对应的回归测试，且测试断言的是行为而非注释文字
+            （反空洞：删除修复必须让测试变红）
+          test_type: unit
+        - id: AC-670-08
+          criteria: Gate 5d 的阻断级检测器（恒真断言、测试体内空 catch）与警告级检测器（仅弱断言）均已定义
+          test_type: unit
+        - id: AC-670-09
+          criteria: 恒真断言在真实写法下命中，真实断言不误报
+          test_type: unit
+        - id: AC-670-10
+          criteria: 空 catch 命中，但含断言或 rethrow 的 catch 不误报
+          test_type: unit
+        - id: AC-670-11
+          criteria: 「仅弱断言」的测试块告警，弱断言与强断言并存时不告警
+          test_type: unit
+        - id: AC-670-12
+          criteria: "@assertion-justified 需理由（≥10 字符），语义与 @mock-justified 一致"
+          test_type: unit
+        - id: AC-670-13
+          criteria: pre-commit 接线 Gate 5d，只扫描 staged 的测试文件，且消息可追溯到 testing-anti-patterns.md
+          test_type: unit
+        - id: AC-670-14
+          criteria: assertion-quality.sh 定义 focus / skip / deleted 三类检测器
+          test_type: unit
+        - id: AC-670-15
+          criteria: .only / fit / fdescribe 命中，普通 it() 不误报
+          test_type: unit
+        - id: AC-670-16
+          criteria: .skip / xit / xdescribe / todo 与 @pytest.mark.skip、t.Skip、@Disabled 均被识别
+          test_type: unit
+        - id: AC-670-17
+          criteria: 删除测试文件被报告，但只要存在同名替代（重命名）就不报告
+          test_type: unit
+        - id: AC-670-18
+          criteria: pre-commit 引用检测库并阻断 .only；随包镜像携带同一库
+          test_type: unit

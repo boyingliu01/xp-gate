@@ -13,7 +13,7 @@
 #         The fix mirrors the Python arm: capture the tool's own status and block
 #         on it. The pipeline still needs `head` to bound the log, so the status
 #         has to come from PIPESTATUS[0], not from `$?`.
-# @covers AC-630-01, AC-630-02, AC-630-03
+# @covers AC-630-01, AC-630-02, AC-670-04
 
 setup() {
   REPO_ROOT="$(cd "$BATS_TEST_DIRNAME/../.." && pwd)"
@@ -36,9 +36,9 @@ setup() {
   printf '%s\n' "$arm" | grep -q 'exit 1'
 }
 
-# AC-630-03: the unconditional success line must be gone from the Go arm. This is
+# AC-670-04: the unconditional success line must be gone from the Go arm. This is
 # the actual defect: the "completed" echo ran whether the checker passed or not.
-@test "AC-630-03: the Go arm only prints success after a passing status check" {
+@test "AC-670-04: the Go arm only prints success after a passing status check" {
   local arm
   arm=$(awk '/"go"\)/{f=1} f&&/^      "java"\)/{exit} f' "$HOOK")
   # Structural proof: the success echo must be preceded, in the same arm, by a
