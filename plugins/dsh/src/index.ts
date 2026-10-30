@@ -32,6 +32,16 @@ import { createSkillProvider } from "./skill-provider.js"
 import type { ApiKeyResolver } from "./credentials.js"
 import { createCredentialResolver } from "./credentials.js"
 
+/**
+ * Renders a tool's string result as plain text.
+ *
+ * Extracted because five tools had written this identical closure inline, which
+ * left five separate uncovered functions in the coverage report for one line of
+ * behaviour (#562). One definition can be tested once and reads as what it is: a
+ * shared output convention, not five coincidences.
+ */
+export const renderText = (_args: unknown, value: string) => [{ type: "text", text: value }]
+
 export const name = "tool-xp-gate"
 // "skills" is required: the bundled skill provider registers during apply(), and
 // without it ctx.skills may not be mounted yet when this plugin starts.
@@ -92,7 +102,7 @@ function gateCheckTool(shell: Context["shell"], dialect: ShellDialect) {
     },
     output: {
       schema: { type: "string" },
-      render: (_args, value) => [{ type: "text", text: value }],
+      render: renderText,
     },
     timeoutMs: DEFAULT_TIMEOUT_MS,
     async execute(args, exec) {
@@ -118,7 +128,7 @@ function gatePrinciplesTool(shell: Context["shell"], dialect: ShellDialect) {
     },
     output: {
       schema: { type: "string" },
-      render: (_args, value) => [{ type: "text", text: value }],
+      render: renderText,
     },
     timeoutMs: DEFAULT_TIMEOUT_MS,
     async execute(args, exec) {
@@ -144,7 +154,7 @@ function gateArchTool(shell: Context["shell"], dialect: ShellDialect) {
     },
     output: {
       schema: { type: "string" },
-      render: (_args, value) => [{ type: "text", text: value }],
+      render: renderText,
     },
     timeoutMs: DEFAULT_TIMEOUT_MS,
     async execute(args, exec) {
@@ -352,7 +362,7 @@ function delphiReviewTool(resolveApiKey: ApiKeyResolver, settings: DelphiSetting
     },
     output: {
       schema: { type: "string" },
-      render: (_args, value) => [{ type: "text", text: value }],
+      render: renderText,
     },
     timeoutMs: DELPHI_TIMEOUT_MS,
     async execute(args, exec) {
@@ -405,7 +415,7 @@ function sprintTool(shell: Context["shell"], dialect: ShellDialect) {
     },
     output: {
       schema: { type: "string" },
-      render: (_args, value) => [{ type: "text", text: value }],
+      render: renderText,
     },
     timeoutMs: DEFAULT_TIMEOUT_MS,
     async execute(args, exec) {
