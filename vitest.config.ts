@@ -54,6 +54,18 @@ export default defineConfig({
         'src/npm-package/scripts/**',
         'src/npm-package/adapters/**',
         'src/npm-package/hooks/**',
+        // #562 (follow-up): the mirror subtrees the TEST exclude above already names.
+        // `src/npm-package/<sub>/` is a byte-identical copy of `src/<sub>/`, and the
+        // COPY can never be covered: the tests import the canonical path, so v8 sees
+        // the mirror as 0%. Measured, those copies are 11688 lines at 0.00% -- they
+        // dragged the reported total from 82.77% down to 62.19%. That is not a
+        // coverage problem to be fixed by writing tests; no test can ever touch these
+        // files. Two lists describing the same mirror must not drift.
+        'src/npm-package/principles/**',
+        'src/npm-package/gates/**',
+        'src/npm-package/build-integrity/**',
+        'src/npm-package/architecture/**',
+        'src/npm-package/mock-policy/**',
         '**/*.test.ts',
         '**/*.test.js',
         '**/__tests__/**',
