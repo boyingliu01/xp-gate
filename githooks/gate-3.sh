@@ -176,7 +176,42 @@ elif [ "$PROJECT_LANG" = "powershell" ]; then
                       known.set(norm(e.file) + "::" + e.name, Number(e.ccn) || 0);
                     }
                   }
-                  function norm(p) { return String(p).replace(/\\\\/g, "/").replace(/^\.\//, ""); }
+                  // The measurement emits ABSOLUTE paths (pwsh resolved them), while
+                  // a baseline recorded by a repo-side generator holds paths relative
+                  // to the repo root. Normalising alone cannot bridge that, so a key
+                  // miss falls back to a suffix match on the file path: exactly one
+                  // known entry whose normalised path ends with "<sep>measured" is the
+                  // same file. Without this every existing function looked brand new,
+                  // and a real regression was reported as "new function" -- the right
+                  // verdict for the wrong reason.
+                  //
+                  // Backslashes are normalised with split/join, NOT -replace: this JS
+                  // is embedded in a double-quoted bash command, where a regex escape
+                  // loses a level and silently matches the wrong number of
+                  // backslashes. Measured: /\\\\/g arrived as /\\/g, matched only
+                  // doubled separators, and every Windows path kept its backslashes.
+                  function norm(p) {
+                    return String(p)
+                      .split("\\").join("/")
+                      .replace(/^[A-Za-z]:\//, "")
+                      .replace(/^\.\//, "")
+                      .replace(/^\//, "");
+                  }
+                  function lookup(path, name) {
+                    const key = norm(path) + "::" + name;
+                    if (known.has(key)) return known.get(key);
+                    const target = norm(path);
+                    let hit = null;
+                    for (const [k, v] of known) {
+                      const [kp, kn] = k.split("::");
+                      if (kn !== name) continue;
+                      if (target.endsWith("/" + kp) || kp.endsWith("/" + target) || kp === target) {
+                        if (hit !== null && hit !== v) return null;  // ambiguous: treat as new
+                        hit = v;
+                      }
+                    }
+                    return hit;
+                  }
                   const seen = new Set();
                   const regressions = [];
                   const improved = [];
@@ -186,7 +221,7 @@ elif [ "$PROJECT_LANG" = "powershell" ]; then
                     const key = norm(m[1]) + "::" + m[3];
                     const now = Number(m[4]);
                     seen.add(key);
-                    const was = known.has(key) ? known.get(key) : null;
+                    const was = lookup(m[1], m[3]);
                     if (was === null) {
                       if (now > threshold) {
                         regressions.push(m[1] + ":" + m[2] + "  " + m[3] + "  new function at ccn=" + now);

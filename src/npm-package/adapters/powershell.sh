@@ -268,6 +268,19 @@ run_static_analysis() {
         return 3
       fi
     fi
+    # Downstream hardening (ported): a scope file narrows the gate to product
+    # code, but it must be analysed under a DECLARED rule set. With no
+    # PSScriptAnalyzerSettings.psd1 the -Settings binding falls back to defaults,
+    # so a repo that declared its scope silently swapped rule sets. Refuse the
+    # run rather than grade against an unknown rule set.
+    #
+    # Mirrors the missing-module semantics (return 3 = fail closed upstream).
+    if [ "${#analysis_targets[@]}" -gt 0 ] && [ ! -f "PSScriptAnalyzerSettings.psd1" ]; then
+      echo "XP_G1_REASON: analysis-settings-missing:PSScriptAnalyzerSettings.psd1"
+      echo "  ⚠️  $scope_file is in use but PSScriptAnalyzerSettings.psd1 is absent - refusing to analyse with an unknown rule set"
+      return 3
+    fi
+
 
     if [ "${#analysis_targets[@]}" -gt 0 ]; then
       # Scoped per-path run. -Path binds ONE string only (an array argument
@@ -430,14 +443,27 @@ run_lint() {
 # A hanging Pester test (e.g. a test that dot-sources a script whose body performs
 # WMI/registry/scheduled-task scans) would otherwise block `git commit` forever.
 # Default 300s, override via XP_GATE_POWERSHELL_TEST_TIMEOUT_S.
+# #599: ONE helper, TWO budgets. The instrumented coverage run enables
+# CodeCoverage, so instrumentation alone costs more than a plain run: a shared
+# 300s budget is not the same headroom for both. The caller passes its default
+# explicitly and the timeout message names the variable that actually governs it,
+# otherwise a budget shortfall gets reported as "a test is hanging" and the
+# reader is sent to the wrong place.
 _pester_timeout() {
-  local default_s="${XP_GATE_POWERSHELL_TEST_TIMEOUT_S:-300}"
+  local budget_var="$1"
+  local default_s="${2:-300}"
+  local effective_s
+  if [ "$budget_var" = "XP_GATE_POWERSHELL_COVERAGE_TIMEOUT_S" ]; then
+    effective_s="${XP_GATE_POWERSHELL_COVERAGE_TIMEOUT_S:-$default_s}"
+  else
+    effective_s="${XP_GATE_POWERSHELL_TEST_TIMEOUT_S:-$default_s}"
+  fi
   # Prefer GNU timeout (Git Bash / Linux). On Windows where `timeout` resolves to
   # the native timeout.exe, fall back to running without a hard timeout.
   if command -v timeout >/dev/null 2>&1 && timeout --version 2>/dev/null | grep -qi "coreutils"; then
-    timeout "${default_s}s" "$@"
+    timeout "${effective_s}s" "${@:3}"
   else
-    "$@"
+    "${@:3}"
   fi
 }
 
@@ -465,7 +491,7 @@ run_tests() {
   if [ "${#test_files[@]}" -gt 0 ]; then
     test_paths=$(_powershell_path_array "${test_files[@]}")
     echo "Running Pester tests..."
-    _pester_timeout "$PWSH" "${POWERSHELL_ARGS[@]}" "
+_pester_timeout "XP_GATE_POWERSHELL_TEST_TIMEOUT_S" "${XP_GATE_POWERSHELL_TEST_TIMEOUT_S:-300}" "$PWSH" "${POWERSHELL_ARGS[@]}" "
       \$results = Invoke-Pester -Path $test_paths -PassThru
       if (\$results.FailedCount -gt 0) {
         Write-Host \"FAILED: \$(\$results.FailedCount) test(s)\"
@@ -476,7 +502,7 @@ run_tests() {
     "
     local run_exit=$?
     if [ "$run_exit" = "124" ]; then
-      echo "⚠️  Pester tests TIMED OUT after ${XP_GATE_POWERSHELL_TEST_TIMEOUT_S:-300}s (may be hanging)."
+  echo "⚠️  Pester tests TIMED OUT after ${XP_GATE_POWERSHELL_TEST_TIMEOUT_S:-300}s (XP_GATE_POWERSHELL_TEST_TIMEOUT_S; may be hanging)."
       echo "    A test may be blocking on a system call (WMI/registry/scheduled-task)."
       echo "    Fix the hanging test, or set XP_GATE_POWERSHELL_TEST_TIMEOUT_S to a higher value."
       return 1
@@ -572,7 +598,7 @@ run_coverage() {
     # is the deprecated Pester 4 parameter set and fails outright on Pester 5.x
     # ("cannot resolve parameter set"). Using it silently produced no coverage.xml,
     # which the pre-commit hook then reported as an unparseable/zero result.
-    _pester_timeout "$PWSH" "${POWERSHELL_ARGS[@]}" "
+_pester_timeout "XP_GATE_POWERSHELL_COVERAGE_TIMEOUT_S" "${XP_GATE_POWERSHELL_COVERAGE_TIMEOUT_S:-900}" "$PWSH" "${POWERSHELL_ARGS[@]}" "
       \$cfg = New-PesterConfiguration
       \$cfg.Run.Path = $test_paths
       \$cfg.CodeCoverage.Enabled = \$true
@@ -587,7 +613,7 @@ run_coverage() {
     " 2>&1
     local cov_exit=$?
     if [ "$cov_exit" = "124" ]; then
-      echo "⚠️  Pester coverage TIMED OUT after ${XP_GATE_POWERSHELL_TEST_TIMEOUT_S:-300}s (may be hanging)."
+  echo "⚠️  Pester coverage TIMED OUT after ${XP_GATE_POWERSHELL_COVERAGE_TIMEOUT_S:-900}s (XP_GATE_POWERSHELL_COVERAGE_TIMEOUT_S; instrumentation costs more than a plain run - raise this rather than suspecting a hang)."
       return 1
     fi
     return $cov_exit
