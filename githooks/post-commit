@@ -1,20 +1,25 @@
 #!/usr/bin/env bash
 # ============================================================================
-# XP-Gate Post-Commit Hook — Bypass Detection (D8 Layer 2)
+# XP-Gate Post-Commit Hook
 #
-# Detects when pre-commit was bypassed via git commit --no-verify.
+# Two jobs, both only possible AFTER the commit object exists:
 #
-# Mechanism:
-#   - pre-commit writes .git/xp-gate-precommit-marker on successful run
-#   - post-commit checks if the marker exists
-#   - If marker is absent → --no-verify was used (or pre-commit crashed)
-#   - Bypass events are logged to .xp-gate/bypass-audit.jsonl
-#   - Phase transition (Phase 4 impl) will check this audit file and block
-#     sprint progression if any bypassed commits exist on the branch
+# 1. Audit flush (#audit-attribution). Pre-commit cannot know the commit it is
+#    about to create — `git rev-parse HEAD` there is the PARENT, so per-gate
+#    audit entries used to be filed under the previous commit (the newest
+#    commit looked like it "ran no gates", and per-commit battery stats mixed
+#    two commits' timings). Pre-commit now STAGES entries in
+#    .xp-gate/audit.pending.jsonl; this hook flushes them stamped with the real
+#    HEAD. Pre-commit also flushes leftovers at its own start as a safety net,
+#    so a missed post-commit never loses data.
 #
-# Git semantics: post-commit cannot block the commit (git limitation).
-# It creates an audit trail for later enforcement.
-# ============================================================================
+# 2. Bypass detection (D8 Layer 2). Detects `git commit --no-verify`:
+#    - pre-commit writes .git/xp-gate-precommit-marker on a successful run
+#    - if the marker is absent here, pre-commit was bypassed (or crashed)
+#    - bypass events go to .xp-gate/bypass-audit.jsonl for later enforcement
+#
+# Git semantics: post-commit cannot block the commit (git limitation). It only
+# records. ============================================================================
 
 set -e
 
@@ -23,14 +28,52 @@ if [ -z "$git_dir" ]; then
   exit 0
 fi
 
+toplevel="$(git rev-parse --show-toplevel 2>/dev/null || true)"
+head_commit="$(git rev-parse HEAD 2>/dev/null || true)"
+
+# ── 1. Flush staged audit entries with the real commit hash ──────────────────
+# Only when this repo actually carries the audit module (the xp-gate checkout).
+# A consumer repo has no src/npm-package; there pre-commit's record call is a
+# no-op, so nothing is ever staged and there is nothing to flush.
+if [ -n "$toplevel" ] && [ -n "$head_commit" ] \
+   && [ -f "$toplevel/src/npm-package/lib/gate-audit.ts" ]; then
+  _pending="$toplevel/.xp-gate/audit.pending.jsonl"
+  if [ -f "$toplevel/node_modules/tsx/dist/cli.mjs" ] && command -v node >/dev/null 2>&1; then
+    _flush() {
+      node "$toplevel/node_modules/tsx/dist/cli.mjs" \
+        "$toplevel/src/npm-package/lib/gate-audit.ts" flush-pending \
+        --commit-hash "$head_commit" --report true 2>/dev/null || echo 0
+    }
+  elif command -v npx >/dev/null 2>&1; then
+    _flush() {
+      ( cd "$toplevel" && npx --no-install tsx src/npm-package/lib/gate-audit.ts \
+          flush-pending --commit-hash "$head_commit" --report true 2>/dev/null ) || echo 0
+    }
+  fi
+  # Bounded drain: the last gate's recorder is fire-and-forget (`& disown` in
+  # pre-commit), so post-commit can start before it has written its line. Keep
+  # flushing until two consecutive passes find nothing, capped so a slow node
+  # start never stalls the commit. Usually the first pass suffices.
+  _passes=0
+  _empty=0
+  while [ "$_passes" -lt 6 ] && [ "$_empty" -lt 2 ]; do
+    _n="$(_flush)"
+    _passes=$((_passes + 1))
+    case "$_n" in ''|*[!0-9]*) _n=0 ;; esac
+    if [ "$_n" -gt 0 ]; then _empty=0; else _empty=$((_empty + 1)); fi
+    [ "$_empty" -lt 2 ] && sleep 0.05
+  done
+fi
+
+# ── 2. Bypass detection ─────────────────────────────────────────────────────
 marker="$git_dir/xp-gate-precommit-marker"
 
 if [ ! -f "$marker" ]; then
-  commit="$(git rev-parse HEAD 2>/dev/null)"
-  if [ -n "$commit" ]; then
-    bypass_dir=".xp-gate"
-    mkdir -p "$bypass_dir"
-    echo "{\"commit\":\"$commit\",\"timestamp\":\"$(date -Iseconds)\",\"type\":\"precommit_bypass\",\"branch\":\"$(git rev-parse --abbrev-ref HEAD 2>/dev/null)\"}" >> "$bypass_dir/bypass-audit.jsonl"
+  if [ -n "$head_commit" ]; then
+    mkdir -p .xp-gate
+    printf '{"commit":"%s","timestamp":"%s","type":"precommit_bypass","branch":"%s"}\n' \
+      "$head_commit" "$(date -Iseconds)" \
+      "$(git rev-parse --abbrev-ref HEAD 2>/dev/null)" >> .xp-gate/bypass-audit.jsonl
   fi
 else
   rm -f "$marker"
