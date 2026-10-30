@@ -2,6 +2,23 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.33.2.0] - 2026-10-30
+
+本版收「把缺席当判决」这一类缺陷：六个门禁在**什么都没测到**的时候，把"没测到"渲染成了"没问题"。这是同一种失效形状的六个实例，逐个修掉。
+
+### Fixed
+
+- **#666 Gate 3 纯数据模块被误报为工具故障**: 纯常量模块没有函数，lizard 对它不输出任何 CSV 行（实测 `lizard pure_data.py --csv` 无输出、exit 0），于是"无行"守卫报 `lizard_output_unparsable` /WARN——那是**lizard 坏掉**时的消息，健康运行与工具故障因此无法区分。改为**正向探针**：拿一个已知含函数的 fixture 让 lizard 跑一次；有行 = 输入本身没有函数（SKIP，`no_functions_in_input`），无行 = 工具真的坏了（WARN）。
+- **#632 Gate 3 PowerShell 棘轮读不到基线**: 读取器要求 `e.name`，而本门禁自己的修复提示所指向的写入器（`tools/Update-ComplexityBaseline.ps1`）输出的是 `e.function`。每条基线都被丢弃、`known` 恒空，于是超过阈值的函数一律被判为"新函数"，棘轮**永远无法通过**。现在两种拼写都读。
+- **#616 Gate 8/9 忽略 `GATE_SCOPE=all`**: 两者都写死 staged diff，在干净索引上 `xp-gate check . --all` **什么都没扫**却报告全树干净（Gate 8 记 PASSED）。现在 `all` 走文件系统扫描（`gitleaks dir --no-git`）与已跟踪树（`git ls-files`），普通提交的 diff 路径字节不变。
+- **#630 Gate 6 Go 分支必然通过**: `arch-go check | head -20` 的退出码是 `head` 的，任何结果（含契约违规）都会打印 "completed"。#602 修了 Java 分支、没修 Go。Go 分支改读 `PIPESTATUS[0]`，非零即 `❌ BLOCKED` + `exit 1`，与 Python/Java 分支一致。
+- **#650 Gate 7 优先探测 adapter 而非 checkov**: `findIaCAdapter()` 排在 checkov 之前，任何没有 vendored `githooks/adapters/iac.sh` 的消费项目都会 SKIP 一个**扫描器已安装且在 PATH 上**的门禁。checkov 是首选引擎，改为先试它；bash adapter 退居兜底（拆出 `runBashAdapter` 以守住长函数上限）。端到端实测：staged 的 Dockerfile 现在真的跑起 checkov 并报出 2 条 finding。
+- **#665 Gate 5 报告自相矛盾**: 子集运行按 #473 豁免全局覆盖率下限，但落盘记录写成 `actual.coverage=29` 挨着 `thresholds.lines=82`、`status=PASS`、`reason=""`，于是"29% 被放行"与"子集运行，下限不适用"在报告里长得一模一样。豁免现在从一个地方（`PARTIAL_TEST_RUN`）推导，落为 `reason=partial_test_run_coverage_not_applicable` 与 `actual.applies_to=subset`，摘要行明说 "subset run -- global floor not checked"。
+
+### Verified already-fixed (closed with this release)
+
+下列 issue 经核验此前已修复，本版复核后关闭：#611（仅覆盖率阈值的非零退出已豁免，`lib/test-failure.sh`）、#613（`--all` 文件列表走临时文件 + lizard 分块 argv）、#614（`npx` 经 node + `npx-cli.js` 调用，不再 ENOENT）、#615（`copyAdapters` 已随装 `hooks/lib`，缺 ratchet 库时 fail-closed）、#622（Java 分支多模块探根 + `PIPESTATUS`）、#633（`norm()` 改用 split/join，Windows 下真正生效）。
+
 ## [0.33.1.0] - 2026-10-30
 
 本版是批 1「安装 + CLI 门禁调用」健壮性修复，收的是最伤用户的一组：全新安装的 hooks 100% FATAL、Windows 卸载残留 core.hooksPath、`xp-gate check` 在缺模块时直接崩、三个 gate 模块永远没被打包、以及 CLI 调用 Gate 3 时 `GATE_DIR` 为空导致误判 BLOCK。全部 6 个 issue 均按 RED→GREEN 补了回归测试。
