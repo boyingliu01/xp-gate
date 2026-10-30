@@ -107,6 +107,14 @@ else
     if [ -n "$PRINCIPLES_DIR" ]; then
       echo "Checking Clean Code + SOLID principles..."
 
+      # #581/#582 class: run_tsx drives a NATIVE node/tsx binary. A POSIX
+      # path like $HOME/.config/... reaches it as the wrong drive prefix and
+      # the checker is "not found", which the exit>=2 branch then reported
+      # as SKIPPED. Convert once here so both invocations agree.
+      if declare -F to_native_path >/dev/null 2>&1; then
+        PRINCIPLES_DIR="$(to_native_path "$PRINCIPLES_DIR")"
+      fi
+
       # AC-507-04-02: say what a Java commit is actually covered for, instead
       # of implying a full 15-rule check (#507). Printed before the run so it
       # appears on both the PASS and the FAIL path.

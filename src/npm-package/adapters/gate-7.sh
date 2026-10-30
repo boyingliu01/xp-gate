@@ -12,11 +12,15 @@ GATE_7_START=$(gate_start_ms)
 IAC_FILES=$(git diff --cached --name-only --diff-filter=ACM 2>/dev/null | grep -E "\.(tf|yaml|yml)$|Dockerfile" || true)
 # #536: scanned_files makes a trivial PASS (nothing to scan) auditable in the
 # quality report instead of reading like a covered security check.
+# Consumed by the sourcing parent, not here (see #548).
+# shellcheck disable=SC2034
 GATE_7_SCANNED_FILES=0
 if [ -z "$IAC_FILES" ]; then
   echo "✅ PASSED - No IaC files detected in changes."
   GATE_7_STATUS="PASS"
 else
+  # Consumed by the sourcing parent, not here (see #548).
+  # shellcheck disable=SC2034
   GATE_7_SCANNED_FILES=$(printf '%s\n' "$IAC_FILES" | sed -n '/./p' | wc -l | tr -d '[:space:]')
   # Run IaC adapter. Resolution follows the documented 3-tier convention
   # (adapter-common.sh): global ~/.config/xp-gate/adapters -> project
