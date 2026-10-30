@@ -2,6 +2,37 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.35.3.0] - 2026-10-30
+
+### Fixed
+
+两个假绿修复。两者根源相同：**工具或命令自身出问题时，结论被静默降级成「通过」。**
+
+- **#669 DSH 插件 gate 判定恒错**。两个缺陷叠加，任意一个单独存在都会让所有 gate 结论失真。
+  - **方言按 `process.platform` 猜。** 「win32 ⇒ PowerShell」这个假设在 #442 时代成立，但
+    Windows 现在可以挂 Git Bash executor。于是 PowerShell 命令串丢进 bash，`Write-Output`
+    不存在 → 退出码 127 → **通过的 gate 报 GATE FAILED**。判断依据改为实际挂载的 executor
+    （结构化检测：显式方言声明 > `bashPath` > 平台回落，不按类名判断）。
+  - **退出码被尾部后缀吃掉。** 两个分支都用 `printf`/`Write-Output` 收尾且都不 `exit`，
+    复合命令的退出码等于最后一条命令的退出码 → 恒为 0。而 `classifyGateRun()` 只读
+    `result.exitCode`，从不看 stdout 里的 `exit:N`。于是**失败的 gate 被判 PASS**。
+    这个缺陷更危险：前一个至少让人怀疑，这一个让人相信。而且**不是 Windows 专属**——
+    POSIX 分支同样中招，此前只是被 127 掩盖了。
+  - 兜底：`classifyGateRun()` 现在交叉校验退出码与文本标记，不一致报 **INDETERMINATE**。
+    事实记了两遍，对不上就说明有一遍被弄坏了，此时「无法判定」是唯一诚实的结论。
+  - 取证：测试起真实 bash 断言**进程退出码**，修复前是 `expected +0 to be 7`——正是假绿本身。
+    **194 条既有 dsh 测试没有一条能发现它**，因为全都只断言命令串「包含 `printf`」。
+- **#661 Gate 4 检查器崩溃被吸收成绿灯。** `gate-4.sh` 有意区分退出码（0 干净 / 1 有
+  ERROR 违规 / ≥2 工具故障），但 ≥2 分支 settle 在 `SKIP`，而 pre-commit 把 SKIP 当不阻塞。
+  于是检查器因路径错误起不来时（`Cannot find module` 指向 `C:\c\Users\...`），门禁仍印
+  `✅ PASSED - Principles checker (no errors found).`。路径本身早在 `gate-4.sh:114` 修过，
+  但那只治了一个起因；任何其它让检查器起不来的原因（缺 tsx、模块损坏、OOM）都得到同一个
+  绿灯。改为 fail-closed（与 Gate 8 #499 同规则）：**一个跑不起来的门禁不能报成功。**
+  SKIP 的语义收窄回「语言不适用 / 工具未安装」。保留 `PRINCIPLES_SKIP_TOOL_FAULT=1`
+  紧急通道，但 main/master 不允许（与 Gate 5a 同样的不对称约束）。
+
+---
+
 ## [0.35.2.0] - 2026-10-30
 
 ### Added
