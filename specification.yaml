@@ -3769,3 +3769,12 @@ specification:
         - id: AC-654-03
           criteria: 未登记检测器在合成树上确实能触发，防止检测器本身静默失效
           test_type: unit
+        - id: AC-638-01
+          criteria: INFO 级规则不计入需要修的债务
+          test_type: unit
+        - id: AC-638-02
+          criteria: 可修类别各自独立计数以反映不同修法
+          test_type: unit
+        - id: AC-638-03
+          criteria: 未知规则默认算作可修而非噪音
+          test_type: unit
