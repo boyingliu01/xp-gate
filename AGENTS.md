@@ -171,6 +171,7 @@ Subcommands registered in 0.8.8.0 (verified against bin source):
 | `xp-gate ui-review` | Visual review for UI-bearing changes (delegates to ui-review.ts) |
 | `xp-gate sprint-status [--json] [--watch] [--dir <path>] [--rework-check]` | Show Sprint Flow progress (reads `.sprint-state/sprint-state.json`); `--rework-check` calculates rework rate by counting fix commits after sprint completion (#369) |
 | `xp-gate retro [--days N] [--all] [--json] [--sprint <id>]` | Generate engineering retrospective report (activity summary, rework rate trends, evidence skip exposure, quality trends) (#369) |
+| `xp-gate rework [--top N] [--dir <path>] [--json]` | Rework report from the gate journal: first-pass rate (**NOT MEASURABLE** rather than 100% when the journal holds no failures), rounds before a landing (median/mean/worst), and top-N blocking reasons grouped by `failure_reason`. Excludes implausible `duration_ms` values whether or not they carry `duration_anomaly` (#651). Advisory only — always exits 0 |
 | `xp-gate crap [--top N] [--threshold N] [--json] [--paths <p...>] [--include-mirrors]` | Rank functions by CRAP = CCN² × (1 − coverage) + CCN, worst first (#404). **Advisory only — always exits 0.** Needs `coverage/coverage-final.json`; functions whose file no test ever loaded are counted as `unmeasured`, never scored as 0% or 100% |
 | `xp-gate --version` | Print version (from VERSION file) |
 
