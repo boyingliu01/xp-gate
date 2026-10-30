@@ -2,6 +2,44 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.35.2.0] - 2026-10-30
+
+### Added
+
+- **`xp-gate gate-coverage [--json] [--debt] [--strict] [--branch <name>]`**（#636）：一条
+  命令看清项目对所有门禁的符合度。此前需要六条命令加心算（`gate-list`、`check --all`、
+  `doctor`、`ccn-report`、手算 `.warnings-baseline.json`、`gh run list`）。
+
+  **四种状态，不是三种。** `passed / skipped / failed` 把「没跑」并进了「跑了且没事」，
+  而这正是技术债藏身的地方——一个从未执行的门禁，渲染出来和干净通过长得一模一样。
+  这是这套工具能产出的最危险输出。所以 SKIP 必带原因
+  （`hook-only — runs via git commit` / `not-applicable` / `no result recorded`），
+  汇总行还会主动提示"N 个门禁没有运行，读成健康之前先看 Reason 列"。
+
+  两个数据陷阱：制品用 `gate9_build_integrity` / `gate10_sast`，而 CLI 是 Gate 10 =
+  Build Integrity、Gate 9 = SAST——**正好互换**，直接渲染会显示错门禁名，比不显示更糟；
+  制品记录生成时的 `commit`，与 HEAD 不符时标注 **STALE** 并说明"下面的数字描述的是
+  那个 commit"，绝不冒充当前状态。Gate 6 的债务不在门禁状态里（它报 PASS 因为"没有
+  变多"，136 条告警躺在 baseline），所以单独读 baseline 汇总成 DEBT。
+
+  退出码：默认不因 DEBT 失败（否则当不了 CI 看板），`--strict` 用于债清零里程碑，
+  FAIL 始终失败。
+
+### Fixed
+
+- **#667 doctor 把「安装副本落后」误报成「双向分叉」**：判据问的是"两侧行数是否都非零"，
+  而折行天然是双向的——同一份逻辑把 `&&` 挪到下一行，就会在两边的行级 diff 里各留一行。
+  逐个核对 5 个 gate 模块的"安装副本独有行"，**全是旧版本的行**，没有一行是仓库缺失的
+  修复。这个措辞的代价不是多敲命令：`diverged both ways` + `refuses without an explicit
+  decision` 让人以为同步会丢东西，于是**不敢同步**——而不敢同步正是 #451（改了
+  `githooks/` 却不生效）。改判据为 token 级比较（格式不是工作成果），阈值定为 0 无容忍：
+  实测纯折行产生 0 个两侧独有 token，而拒绝同步存在的理由恰恰是一个 token 的加固
+  （`return 0` → `return 1`，fail-open 与 fail-closed 之差）。
+- **#641** `test-alignment.ts` 的 `writeReport()` 补错误处理（Boy Scout 预算 14 → 13，
+  现 0 项超预算）。它是 `runFullAlignment()` 的最后一步，裸 throw 会丢掉前面全部工作。
+
+---
+
 ## [0.35.1.0] - 2026-10-30
 
 ### Added
