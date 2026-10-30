@@ -28,3 +28,42 @@ src/mutation/runners/pitest-runner.ts
 # `where`/`which` lookup; no user input reaches argv. Split out of common.ts in
 # the Boy Scout module-size refactor, which moved the finding to a new path.
 src/gates/common-process.ts
+
+# ── #671: full-repo scan surfaced 14 more, all the same shape ────────────
+#
+# These were never seen before because pre-commit's Gate 9 scans the DIFF: a
+# vulnerability is only flagged when someone happens to edit near it. Now that
+# CI runs semgrep over the whole tree, the existing surface shows up at once.
+# Every entry below is `detect-child-process` in code whose job IS to spawn
+# tools (eslint / lizard / stryker / archlint / sqlite3), with argv passed as
+# arrays and no shell. The one genuine sink found this way (a joined shell
+# string with an unescaped dbPath) was already fixed in 4b8c1788 -- it is not
+# in this list because it no longer exists.
+
+# Plugin bundling / build scripts: spawn packaging tools at build time only.
+plugins/claude-code/.claude-plugin/plugin.js
+plugins/dsh/package.js
+plugins/opencode/package.js
+plugins/qoder/plugin.js
+src/npm-package/plugins/
+src/npm-package/package.js
+
+# CLI subcommands whose entire purpose is to invoke an external tool.
+src/npm-package/lib/arch.js
+src/npm-package/lib/hook-health.js
+src/npm-package/lib/language-tools.js
+src/npm-package/lib/principles.js
+src/npm-package/lib/retro.js
+
+# Mutation runners: spawn stryker / mutmut against the repo's own test config.
+src/mutation/runners/mutmut-runner.ts
+src/npm-package/mutation/runners/mutmut-runner.ts
+
+# Test fixtures: the subprocess call is the object under test, not product code.
+src/npm-package/lib/__tests__/find-bash-wsl.test.js
+src/npm-package/lib/__tests__/sprint-status-rework.test.js
+scripts/test-plugins.mjs
+
+# dynamic-urllib-use: reads a config URL the operator passes in explicitly; this
+# script runs manually, never in CI or on a product path.
+scripts/check_delphi_local_models.py
