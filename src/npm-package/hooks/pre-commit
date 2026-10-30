@@ -100,8 +100,16 @@ fi
 # and a plausible wrong number is harder to notice than a visible gap.
 #
 # Resolve from the repo's own declaration, in the order the tools themselves
-# use: pyproject [tool.coverage.report] fail_under, then .coveragerc. A repo
-# declaring neither keeps the historical 80.
+# use: pyproject [tool.coverage.report] fail_under, then .coveragerc, then the
+# JS/TS runner's own threshold block. A repo declaring none keeps the historical 80.
+#
+# #605: the JS/TS branch below enforces THIS number, but the resolver only ever
+# read Python declarations -- so a vitest project declaring `thresholds.lines: 60`
+# was silently judged against 80. The result was the worst possible split:
+# `npx vitest run` goes green, the commit is then rejected, and the two numbers
+# are read from different files with nothing pointing at the disagreement.
+# Same defect shape as #554/#609: a declaration exists, an enforcement exists,
+# and nothing connected them.
 _resolve_coverage_threshold() {
   _rct_value=""
   _rct_src="default"
@@ -117,13 +125,36 @@ _resolve_coverage_threshold() {
     _rct_value=$(grep -oE '^[[:space:]]*fail_under[[:space:]]*=[[:space:]]*[0-9]+' .coveragerc 2>/dev/null | grep -oE '[0-9]+' | head -1 || true)
     [ -n "$_rct_value" ] && _rct_src=".coveragerc fail_under"
   fi
+  # #605: JS/TS. Read the runner's own threshold rather than assuming 80, so the
+  # hook enforces the number the project actually declares. `lines` specifically:
+  # it is the metric the JS branch below compares, and it is the one vitest docs
+  # lead with. Only the FLAT shape is read -- the nested `thresholds: { global }`
+  # form is vitest 2.x and was proven silently dropped by the 1.6.x config parser
+  # (#561), so honouring it here would enforce a number that never takes effect.
+  if [ -z "$_rct_value" ]; then
+    for _rct_cfg in vitest.config.ts vitest.config.js vitest.config.mts; do
+      [ -f "$_rct_cfg" ] || continue
+      _rct_value=$(sed -n '/thresholds[[:space:]]*:[[:space:]]*{/,/}/p' "$_rct_cfg" 2>/dev/null \
+        | grep -oE 'lines[[:space:]]*:[[:space:]]*[0-9]+' | grep -oE '[0-9]+' | head -1 || true)
+      if [ -n "$_rct_value" ]; then
+        _rct_src="$_rct_cfg coverage.thresholds.lines"
+        break
+      fi
+    done
+  fi
   case "$_rct_value" in
-    ''|*[!0-9]*) _rct_value="80"; _rct_src="default (no fail_under declared)" ;;
+    ''|*[!0-9]*) _rct_value="80"; _rct_src="default (no coverage threshold declared)" ;;
   esac
   COVERAGE_THRESHOLD_SOURCE="$_rct_src"
   printf '%s' "$_rct_value"
 }
-COVERAGE_THRESHOLD="$(_resolve_coverage_threshold)"
+# NOT `COVERAGE_THRESHOLD="$(_resolve_coverage_threshold)"`: command substitution
+# runs in a subshell, so `COVERAGE_THRESHOLD_SOURCE` set inside the function was
+# discarded and the audit record's `threshold_source` field was empty on every
+# single commit. A field that is always blank is worse than a missing one -- it
+# looks populated and says nothing. Call the function in this shell instead.
+_resolve_coverage_threshold >/dev/null
+COVERAGE_THRESHOLD="$_rct_value"
 
 # Look up one tier's directory variable by name without eval-ing arbitrary input:
 # the base names are a closed set baked into the generated file.
