@@ -172,9 +172,26 @@ else
         rm -f "$PRINCIPLES_STDERR"
 
         if [ "$PRINCIPLES_EXIT" -ge 2 ]; then
-          echo "⚠️  Warning: Principles checker execution failed"
-          echo "⏭️  SKIPPED - Principles check (execution issue)"
-          GATE_4_STATUS="SKIP"
+          # #661: exit>=2 means the checker did not RUN (crash, module not found,
+          # bad invocation). This used to record SKIP, and pre-commit treats SKIP
+          # as non-blocking, so a tool failure was absorbed into the green light --
+          # the reproduction printed a module-not-found stack trace and then
+          # "✅ PASSED - Principles checker (no errors found)".
+          #
+          # The distinction the gate must keep:
+          #   - tool NOT INSTALLED  -> SKIP is honest; nothing is being claimed.
+          #   - tool PRESENT, CRASH -> WARN. Not a pass (nothing was checked) and
+          #     not a silent skip (the user must know their code went unaudited).
+          #
+          # WARN rather than FAIL on purpose: the commit itself is not necessarily
+          # bad, the TOOL is broken, and blocking every commit until node/tsx is
+          # repaired would blame the change for an environment fault. What must
+          # never happen is the green light.
+          echo "⚠️  Principles checker did not run (exit ${PRINCIPLES_EXIT}) — this code is NOT verified."
+          echo "     Gate 4 cannot claim a pass for a check that never executed."
+          echo "     Fix the checker invocation above (or run 'npx xp-gate check principles .')."
+          echo "⏭️  WARN - Principles check (checker execution error)"
+          GATE_4_STATUS="WARN"
           # Consumed by the sourcing parent, not here (see #548).
           # shellcheck disable=SC2034
           GATE_4_REASON="checker_execution_error"

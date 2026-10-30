@@ -3598,3 +3598,18 @@ specification:
         - id: AC-670-45
           criteria: 超时不重置已发现的 issue 计数，且已完成检查一条都不丢
           test_type: unit
+        - id: AC-670-46
+          criteria: Gate 4 在调用原生 tsx 之前把 PRINCIPLES_DIR 转成原生路径
+          test_type: unit
+        - id: AC-670-47
+          criteria: principles 检查器崩溃（退出码 ≥2）不产出 PASS，也不降级为不阻塞的 SKIP，而是 WARN
+          test_type: unit
+        - id: AC-670-48
+          criteria: 检查器崩溃时记录 GATE_4_REASON 并明确告知用户本次未验证
+          test_type: unit
+        - id: AC-670-49
+          criteria: pre-push 把 mktemp 产生的临时 Python 脚本体转成原生路径后再交给 python
+          test_type: unit
+        - id: AC-670-50
+          criteria: pre-push 把 scoring 模块路径转成原生路径后再交给 python
+          test_type: unit
