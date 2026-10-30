@@ -344,6 +344,25 @@ file_exists_in_subdir() {
 AUDIT_SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT_FOR_AUDIT="$(git rev-parse --show-toplevel 2>/dev/null || echo "$AUDIT_SCRIPT_DIR/../..")"
 
+# Audit attribution safety net: if a previous commit's post-commit never fired
+# (hooks skipped, crash, or an earlier --no-verify), its staged entries are
+# still in .xp-gate/audit.pending.jsonl. Flush them now, stamped with the commit
+# they actually belong to (`git log -1`), so they land under a real commit
+# instead of accumulating or being stamped with THIS run's hash later. Runs
+# before any gate so the flush is never counted in this commit's timings.
+# Best-effort and silent: audit must never affect the commit's outcome.
+if [ -f "$PROJECT_ROOT_FOR_AUDIT/.xp-gate/audit.pending.jsonl" ] \
+   && [ -f "$PROJECT_ROOT_FOR_AUDIT/src/npm-package/lib/gate-audit.ts" ]; then
+  _audit_prev_hash="$(git log -1 --format=%H 2>/dev/null || true)"
+  if [ -n "$_audit_prev_hash" ] && [ -f "$PROJECT_ROOT_FOR_AUDIT/node_modules/tsx/dist/cli.mjs" ] \
+     && command -v node >/dev/null 2>&1; then
+    node "$PROJECT_ROOT_FOR_AUDIT/node_modules/tsx/dist/cli.mjs" \
+      "$PROJECT_ROOT_FOR_AUDIT/src/npm-package/lib/gate-audit.ts" flush-pending \
+      --commit-hash "$_audit_prev_hash" >/dev/null 2>&1 || true
+  fi
+  unset _audit_prev_hash
+fi
+
 # Issue #535: a failed `source` used to print one stderr line and keep going,
 # so a missing lib silently removed gate logic from the run while every gate
 # still reported PASS. Fail closed instead: abort with FATAL when the file is

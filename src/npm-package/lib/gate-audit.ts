@@ -14,6 +14,7 @@ import {
   renameSync,
   statSync,
   chmodSync,
+  rmSync,
 } from 'fs';
 import { join } from 'path';
 
@@ -82,6 +83,75 @@ export function appendAuditEntry(
   } catch (err) {
     // Fail-safe: never propagate errors to caller
     console.error('[xp-gate audit] Failed to append entry:', (err as Error).message);
+  }
+}
+
+// ── Pre-commit staging ───────────────────────────────────────────────────────
+// Pre-commit cannot know the commit it is about to create (HEAD is still the
+// parent there), so per-gate entries are staged to a sidecar and stamped with
+// the real commit by post-commit. Fallback safety: `flushPendingAudit` also
+// runs at the START of the next pre-commit, so if post-commit never fired
+// (hooks skipped, exception) the entries still land, attributed by `git log -1`
+// at that later point — slightly late but never lost, never misattributed to
+// the wrong commit when post-commit does run.
+
+const PENDING_SUFFIX = 'audit.pending.jsonl';
+
+function pendingPath(repoRoot: string): string {
+  return join(repoRoot, AUDIT_DIR, PENDING_SUFFIX);
+}
+
+/** Stage one entry for the not-yet-created commit. Never throws. */
+export function stageAuditEntry(entry: GateAuditEntry, repoRoot: string = process.cwd()): void {
+  try {
+    const dir = join(repoRoot, AUDIT_DIR);
+    if (!existsSync(dir)) mkdirSync(dir, { recursive: true });
+    appendFileSync(pendingPath(repoRoot), JSON.stringify(entry) + '\n', 'utf8');
+  } catch (err) {
+    console.error('[xp-gate audit] Failed to stage entry:', (err as Error).message);
+  }
+}
+
+/**
+ * Move staged entries into audit.jsonl, stamped with the real commit hash.
+ * Idempotent and safe to call when nothing is staged. A blank/absent hash
+ * leaves `commit_hash` exactly as staged so a wrong commit is never invented.
+ */
+export function flushPendingAudit(
+  repoRoot: string = process.cwd(),
+  commitHash: string = '',
+): number {
+  const p = pendingPath(repoRoot);
+  if (!existsSync(p)) return 0;
+  let flushed = 0;
+  try {
+    const raw = readFileSync(p, 'utf8');
+    const lines = raw.split('\n').filter((l) => l.trim());
+    for (const line of lines) {
+      let entry: GateAuditEntry;
+      try {
+        entry = JSON.parse(line) as GateAuditEntry;
+      } catch {
+        // A torn line (interrupted mid-write) is dropped rather than crashing
+        // the hook that is trying to flush a previous run's leftovers.
+        continue;
+      }
+      if (commitHash) entry.commit_hash = commitHash;
+      appendAuditEntry(entry, repoRoot);
+      flushed++;
+    }
+    rmSyncSafe(p);
+  } catch (err) {
+    console.error('[xp-gate audit] Failed to flush pending entries:', (err as Error).message);
+  }
+  return flushed;
+}
+
+function rmSyncSafe(p: string): void {
+  try {
+    rmSync(p, { force: true });
+  } catch {
+    /* best effort */
   }
 }
 
@@ -259,7 +329,10 @@ function runCli(): void {
       duration_ms: opts['duration-ms'] === 'null' ? null : parseInt(opts['duration-ms'] || '0', 10),
       trigger: (opts['trigger'] as 'commit' | 'push' | 'manual') || 'manual',
       repo_path: process.cwd(),
-      commit_hash: getCommitHash(),
+      // Pre-commit runs BEFORE the commit object exists, so `git rev-parse HEAD`
+      // here resolves the PARENT. resolveCommitHash lets an explicit
+      // --commit-hash win and falls back to HEAD otherwise.
+      commit_hash: resolveCommitHash(opts),
       // Issue #370: only set when explicitly flagged (omit field otherwise)
       ...(opts['duration-anomaly'] === 'true' ? { duration_anomaly: true } : {}),
       // REQ-B: why the duration is null — never guess a number for it.
@@ -267,7 +340,22 @@ function runCli(): void {
       // #507: only set when provided (omit field otherwise)
       ...(opts['detail'] ? { detail: opts['detail'] } : {}),
     };
-    appendAuditEntry(entry);
+    // Pre-commit (trigger=commit) is staging for a commit that does not exist
+    // yet: park it in the pending sidecar so post-commit can stamp the real
+    // hash. Its commit_hash is deliberately blank until then — stamping the
+    // parent here is exactly the off-by-one we are removing.
+    if (entry.trigger === 'commit' && !opts['commit-hash']) {
+      entry.commit_hash = '';
+      stageAuditEntry(entry);
+    } else {
+      appendAuditEntry(entry);
+    }
+  } else if (command === 'flush-pending') {
+    // Called by post-commit with the now-real HEAD.
+    const opts = parseCliOptions(args.slice(1));
+    const n = flushPendingAudit(process.cwd(), opts['commit-hash'] || '');
+    // Quiet by default (hooks are noisy enough); --report prints the count.
+    if (opts['report'] === 'true') console.log(`flushed ${n}`);
   } else {
     console.error(`Unknown audit command: ${command}`);
     process.exit(1);
@@ -296,4 +384,26 @@ export function getCommitHash(): string {
   } catch {
     return 'unknown';
   }
+}
+
+/**
+ * Which commit a gate entry belongs to.
+ *
+ * Pre-commit fires BEFORE the commit object exists, so `git rev-parse HEAD`
+ * there returns the PARENT. If the hook let that stand, every gate entry would
+ * be filed under the previous commit — the newest commit would look like it
+ * "ran no gates", and any per-commit battery analysis silently mixes one
+ * commit's timings into another's. An explicit `--commit-hash` (from a caller
+ * that knows the subject, e.g. post-commit) always wins; otherwise HEAD is the
+ * subject (push/manual) and the resolver is used.
+ *
+ * `headResolver` is injectable so the precedence can be tested without a repo.
+ */
+export function resolveCommitHash(
+  opts: Record<string, string>,
+  headResolver: () => string = getCommitHash,
+): string {
+  const explicit = (opts['commit-hash'] || '').trim();
+  if (explicit) return explicit;
+  return headResolver();
 }

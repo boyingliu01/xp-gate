@@ -87,4 +87,26 @@ describe('shared-utils', () => {
       expect(fs.existsSync(path.join(destDir, 'lib', 'now-ms.sh'))).toBe(true);
     });
   });
+  describe('copyHooks ships post-commit (audit flush + bypass detection)', () => {
+    it('@covers gate-script deployment: copyHooks installs post-commit, not just pre-commit/pre-push/post-merge', () => {
+      // Regression: post-commit was absent from both the ship list and copyHooks,
+      // so the audit-attribution flush and --no-verify bypass detection that live
+      // in post-commit never executed for any installed user.
+      const pkgRoot = path.join(tmpRoot, 'node_modules', '@boyingliu01', 'xp-gate');
+      const hooksSrc = path.join(pkgRoot, 'hooks');
+      fs.mkdirSync(hooksSrc, { recursive: true });
+      for (const h of ['pre-commit', 'pre-push', 'post-commit', 'post-merge']) {
+        fs.writeFileSync(path.join(hooksSrc, h), `# ${h}`);
+      }
+      const destDir = path.join(tmpRoot, 'dest-hooks');
+      fs.mkdirSync(destDir, { recursive: true });
+
+      const { copyHooks } = require('../shared-utils');
+      copyHooks(pkgRoot, destDir);
+
+      expect(fs.existsSync(path.join(destDir, 'post-commit'))).toBe(true);
+      expect(fs.existsSync(path.join(destDir, 'pre-commit'))).toBe(true);
+    });
+  });
+
 });

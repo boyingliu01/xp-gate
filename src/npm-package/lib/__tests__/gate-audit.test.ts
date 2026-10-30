@@ -13,6 +13,9 @@ import {
   rotateIfNeeded,
   parseCliOptions,
   getCommitHash,
+  resolveCommitHash,
+  stageAuditEntry,
+  flushPendingAudit,
   type GateAuditEntry,
 } from '../gate-audit';
 
@@ -293,4 +296,62 @@ describe('gate-audit', () => {
       expect(existsSync(`${logPath}.4`)).toBe(false);
     });
   });
+  describe('pre-commit staging + post-commit flush (commit attribution)', () => {
+    const NL = String.fromCharCode(10);
+    const repo = () => {
+      const r = join(TEST_DIR, 'attr');
+      mkdirSync(r, { recursive: true });
+      return r;
+    };
+
+    it('@covers AUDIT-001-07 resolveCommitHash prefers an explicit --commit-hash', () => {
+      expect(resolveCommitHash({ 'commit-hash': 'deadbeef' }, () => 'PARENT')).toBe('deadbeef');
+    });
+
+    it('@covers AUDIT-001-07 resolveCommitHash falls back to HEAD when no explicit hash', () => {
+      expect(resolveCommitHash({}, () => 'HEADHASH')).toBe('HEADHASH');
+    });
+
+    it('@covers AUDIT-001-08 flushPendingAudit stamps staged entries with the real commit', () => {
+      const r = repo();
+      stageAuditEntry(makeEntry({ repo_path: r, gate_id: 'gate-1', commit_hash: '' }), r);
+      stageAuditEntry(makeEntry({ repo_path: r, gate_id: 'gate-2', commit_hash: '' }), r);
+      const logPath = join(r, '.xp-gate', 'audit.jsonl');
+      expect(existsSync(logPath)).toBe(false);
+
+      const n = flushPendingAudit(r, 'REAL_COMMIT_SHA');
+      expect(n).toBe(2);
+
+      const entries = readFileSync(logPath, 'utf8').trim().split(NL).map((l) => JSON.parse(l));
+      expect(entries.map((e) => e.gate_id)).toEqual(['gate-1', 'gate-2']);
+      expect(entries.every((e) => e.commit_hash === 'REAL_COMMIT_SHA')).toBe(true);
+      expect(existsSync(join(r, '.xp-gate', 'audit.pending.jsonl'))).toBe(false);
+    });
+
+    it('@covers AUDIT-001-08 flush is idempotent and a no-op with nothing staged', () => {
+      const r = repo();
+      expect(flushPendingAudit(r, 'X')).toBe(0);
+      expect(existsSync(join(r, '.xp-gate', 'audit.jsonl'))).toBe(false);
+    });
+
+    it('@covers AUDIT-001-08 a blank commit hash never invents one', () => {
+      const r = repo();
+      stageAuditEntry(makeEntry({ repo_path: r, gate_id: 'gate-9', commit_hash: '' }), r);
+      expect(flushPendingAudit(r, '')).toBe(1);
+      const e = JSON.parse(readFileSync(join(r, '.xp-gate', 'audit.jsonl'), 'utf8').trim());
+      expect(e.commit_hash).toBe('');
+    });
+
+    it('@covers AUDIT-001-08 a torn pending line is dropped, not fatal', () => {
+      const r = repo();
+      mkdirSync(join(r, '.xp-gate'), { recursive: true });
+      const pp = join(r, '.xp-gate', 'audit.pending.jsonl');
+      const good = JSON.stringify(makeEntry({ repo_path: r, gate_id: 'gate-3', commit_hash: '' }));
+      writeFileSync(pp, good + NL + '{ broken' + NL, 'utf8');
+      expect(flushPendingAudit(r, 'SHA')).toBe(1);
+      const entries = readFileSync(join(r, '.xp-gate', 'audit.jsonl'), 'utf8').trim().split(NL);
+      expect(entries.length).toBe(1);
+    });
+  });
+
 });

@@ -34,7 +34,10 @@ function readXpGateConfig() {
 }
 
 function copyHooks(srcDir, destDir) {
-  ['pre-commit', 'pre-push', 'post-merge'].forEach(hook => {
+  // post-commit carries the audit-attribution flush and --no-verify detection.
+  // It was absent here, so neither ever ran for installed users (the source
+  // existed but no installer copied it).
+  ['pre-commit', 'pre-push', 'post-commit', 'post-merge'].forEach(hook => {
     const src = path.join(srcDir, 'hooks', hook);
     const dest = path.join(destDir, hook);
     if (fs.existsSync(src)) {

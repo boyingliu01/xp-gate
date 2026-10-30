@@ -221,7 +221,7 @@ function syncHooks() {
 
   // #505: hook-module-resolution.sh is GENERATED, but it must still ship beside
   // pre-commit — the hook aborts with FATAL when it is missing, by design.
-  const HOOK_FILES = ['pre-commit', 'pre-push', 'post-merge', 'adapter-common.sh', 'hook-module-resolution.sh'];
+  const HOOK_FILES = ['pre-commit', 'pre-push', 'post-commit', 'post-merge', 'adapter-common.sh', 'hook-module-resolution.sh'];
   let copied = 0;
 
   for (const name of HOOK_FILES) {
