@@ -39,8 +39,17 @@ import { createCredentialResolver } from "./credentials.js"
  * left five separate uncovered functions in the coverage report for one line of
  * behaviour (#562). One definition can be tested once and reads as what it is: a
  * shared output convention, not five coincidences.
+ *
+ * Generic in the argument type on purpose. `defineTool` types `render` as
+ * `(args: <this tool's parameters>, value: string) => ContentBlock[]`, so a
+ * `(_args: unknown, ...)` implementation is NOT assignable to it -- `unknown` is
+ * the wrong direction for a parameter. Declaring it as `A` lets every call site
+ * infer its own argument shape while the return type stays a plain text block.
+ *
+ * This mismatch was caught by `tsc` in the publish job, not by the test suite:
+ * vitest transpiles without type-checking. A green test run is not a green build.
  */
-export const renderText = (_args: unknown, value: string) => [{ type: "text", text: value }]
+export const renderText = <A>(_args: A, value: string) => [{ type: "text" as const, text: value }]
 
 export const name = "tool-xp-gate"
 // "skills" is required: the bundled skill provider registers during apply(), and
