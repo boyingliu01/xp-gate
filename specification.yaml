@@ -3760,3 +3760,12 @@ specification:
         - id: AC-652-03
           criteria: 每条规则带出处指针且严重度归一化
           test_type: unit
+        - id: AC-654-01
+          criteria: 镜像漂移在 pre-commit 阶段被拦截且 scope 限于本次提交文件
+          test_type: integration
+        - id: AC-654-02
+          criteria: 镜像清单漏登记的规范源文件被报出且阻断消息给出修复命令
+          test_type: integration
+        - id: AC-654-03
+          criteria: 未登记检测器在合成树上确实能触发，防止检测器本身静默失效
+          test_type: unit

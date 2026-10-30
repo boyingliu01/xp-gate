@@ -4606,7 +4606,56 @@ fi
 # ============================================================================
 
 # ============================================================================
-# GATE 13: Compiler Strictness Check
+# GATE 12b: Mirror Parity (#654)
+#
+# `githooks/**` and `plugins/*/src/**` are canonical; `src/npm-package/**` holds
+# byte-identical mirrors that get published. Editing only the mirror means the next
+# prepack silently regenerates it over the change -- v0.27.3 shipped exactly that
+# bug, and mirror/sync rework accounts for 58 failures in the session logs.
+#
+# The check used to run only at pre-push, which turns a two-second fix into a
+# five-minute wait. It runs here now, but ONLY over files in this commit: a
+# full-tree scan on every commit is the cost that pushed it to pre-push in the
+# first place.
+# ============================================================================
+MIRROR_STAGED=$(git diff --cached --name-only --diff-filter=ACMR 2>/dev/null || true)
+if [ -n "$MIRROR_STAGED" ] && printf '%s\n' "$MIRROR_STAGED" | grep -qE '^(githooks/|plugins/[^/]+/src/)'; then
+  if [ -f "$(git rev-parse --show-toplevel 2>/dev/null)/scripts/check-hook-mirror.sh" ]; then
+    MIRROR_REPO_ROOT=$(git rev-parse --show-toplevel 2>/dev/null)
+    # Scope to the touched families only: a mirror pair is clean or dirty
+    # independently, and checking untouched families is the slow path this gate
+    # exists to avoid.
+    MIRROR_FAIL=0
+    while IFS= read -r _mf; do
+      [ -n "$_mf" ] || continue
+      case "$_mf" in
+        githooks/*) _mm="src/npm-package/hooks/${_mf#githooks/}" ;;
+        plugins/*/src/*) _mm=$(printf '%s' "$_mf" | sed 's|^plugins/\([^/]*\)/src/|src/npm-package/plugins/\1/src/|') ;;
+        *) continue ;;
+      esac
+      if [ ! -f "$MIRROR_REPO_ROOT/$_mm" ]; then
+        echo "❌ BLOCKED - Gate 12b: $_mf has no mirror at $_mm"
+        echo "     Run: node src/npm-package/scripts/sync-package-content.js --fix"
+        MIRROR_FAIL=$((MIRROR_FAIL + 1))
+      elif ! cmp -s "$MIRROR_REPO_ROOT/$_mf" "$MIRROR_REPO_ROOT/$_mm"; then
+        echo "❌ BLOCKED - Gate 12b: $_mm differs from canonical $_mf"
+        echo "     Run: node src/npm-package/scripts/sync-package-content.js --fix"
+        MIRROR_FAIL=$((MIRROR_FAIL + 1))
+      fi
+    done <<< "$MIRROR_STAGED"
+    if [ "$MIRROR_FAIL" -gt 0 ]; then
+      echo ""
+      echo "❌ BLOCKED - Gate 12b: $MIRROR_FAIL mirror parity violation(s)."
+      echo "   The mirror is what gets published; a mirror-only fix is silently"
+      echo "   reverted by the next prepack (v0.27.3 shipped that bug)."
+      GATE_FAILED=1
+    else
+      echo "✅ PASSED - Gate 12b: mirror parity (touched files)"
+    fi
+  fi
+fi
+# ============================================================================
+
 # The compiler is the first and cheapest static analyser for a compiled language
 # and XP-Gate never used it as one: cpp.sh only runs clang-tidy/cppcheck over the
 # first 20 files, and Gate 9's build-integrity half is TypeScript-and-Maven only.
