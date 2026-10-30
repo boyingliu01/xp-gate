@@ -312,8 +312,16 @@ async function resolveExpressionKey(expression: string, resolveApiKey: ApiKeyRes
   )
 }
 
-/** The first `${VAR}` / `{env:VAR}` name in a config value, or undefined. */
-function findPlaceholderName(value: string): string | undefined {
+/**
+ * The first `${VAR}` / `{env:VAR}` name in a config value, or undefined.
+ *
+ * Exported for tests (#562). This one-line function is on the SECURITY path:
+ * `resolveExpressionKey` treats "no placeholder found" as "the user typed a literal
+ * token", and rejects it outright so the credential never lands in a profile file.
+ * So a regex mistake here is not cosmetic -- a false positive on a literal key would
+ * let it through, and a false negative would reject a perfectly valid reference.
+ */
+export function findPlaceholderName(value: string): string | undefined {
   const shell = /\$\{([A-Za-z_][A-Za-z0-9_]*)\}/.exec(value)
   if (shell) return shell[1]
   const envStyle = /\{env:([A-Za-z_][A-Za-z0-9_]*)\}/.exec(value)

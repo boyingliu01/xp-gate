@@ -2,7 +2,7 @@ import { describe, it, expect } from "vitest"
 import type { Context } from "@deepseek-ai/cordis"
 import type { ShellExecRequest, ShellExecSpec, ShellRunResult } from "@deepseek-ai/dsh-shell"
 import type { SkillProvider, SkillProviderControl, SkillProviderObservation } from "@deepseek-ai/dsh-skill"
-import { apply, inject, renderText } from "./index.js"
+import { apply, findPlaceholderName, inject, renderText } from "./index.js"
 
 type ProviderFactory = (control: SkillProviderControl) => SkillProvider
 
@@ -185,5 +185,47 @@ describe("apply", () => {
     // A tool that legitimately produced nothing must still render one part; returning
     // [] would look to the host like the tool never answered.
     expect(renderText({ path: "x" }, "")).toEqual([{ type: "text", text: "" }])
+  })
+
+  /**
+   * @test REQ-562
+   * @intent `findPlaceholderName` 处在**安全路径**上：`resolveExpressionKey` 把"没找到占位符"
+   *         解释为"用户直接写了一个明文 token"，并据此拒绝。所以这里正则错一下不是美观问题——
+   *         对明文 key 误判为占位符会**直接放行**，对合法引用漏判会拒绝正确配置。
+   * @covers AC-562-05
+   */
+  describe("findPlaceholderName", () => {
+    it("AC-562-05: recognizes the ${VAR} spelling", () => {
+      expect(findPlaceholderName("${WHALECLOUD_API_KEY}")).toBe("WHALECLOUD_API_KEY")
+    })
+
+    it("AC-562-05: recognizes the {env:VAR} spelling", () => {
+      expect(findPlaceholderName("{env:OPENAI_API_KEY}")).toBe("OPENAI_API_KEY")
+    })
+
+    it("AC-562-05: ${VAR} wins when a value carries both spellings", () => {
+      // Order matters: the shell form is checked first, so a value mixing both
+      // resolves deterministically rather than depending on regex engine order.
+      expect(findPlaceholderName("{env:A}${B}")).toBe("B")
+    })
+
+    it("AC-562-05: a literal token yields undefined -- this is what triggers the reject", () => {
+      // The security-relevant case: a real key must NOT look like a placeholder.
+      expect(findPlaceholderName("sk-live-abcdef123456")).toBeUndefined()
+      expect(findPlaceholderName("")).toBeUndefined()
+    })
+
+    it("AC-562-05: near-misses that must not count as placeholders", () => {
+      // A lowercase-first name, a digit-first name, and an empty ${} are all invalid
+      // identifiers; treating any of them as a reference would bypass the guard.
+      expect(findPlaceholderName("${1BAD}")).toBeUndefined()
+      expect(findPlaceholderName("${}")).toBeUndefined()
+      expect(findPlaceholderName("$VAR")).toBeUndefined()
+      expect(findPlaceholderName("{env:}")).toBeUndefined()
+    })
+
+    it("AC-562-05: a placeholder embedded in surrounding text is still found", () => {
+      expect(findPlaceholderName("Bearer ${TOKEN}")).toBe("TOKEN")
+    })
   })
 })
