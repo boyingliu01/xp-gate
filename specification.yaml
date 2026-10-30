@@ -3514,3 +3514,30 @@ specification:
         - id: AC-670-18
           criteria: pre-commit 引用检测库并阻断 .only；随包镜像携带同一库
           test_type: unit
+        - id: AC-670-19
+          criteria: 变更行覆盖率达到阈值时通过，且只对变更的行区间计分（不是整文件、更不是整仓库平均）
+          test_type: unit
+        - id: AC-670-19b
+          criteria: 门槛缺省 90/85，可由 .xp-gate/test-profile.yaml 覆盖；畸形取值回退到缺省而非 0
+          test_type: unit
+        - id: AC-670-20
+          criteria: 变更行覆盖率低于门槛时 BLOCK，并逐行列出未被覆盖的变更行
+          test_type: unit
+        - id: AC-670-21
+          criteria: 只有落入变更区间的语句参与计分
+          test_type: unit
+        - id: AC-670-22
+          criteria: 无覆盖率文件、JSON 不可解析、变更文件在报告中缺失均 fail-closed；无可执行语句的文件报 n/a 而非 0%
+          test_type: unit
+        - id: AC-670-23
+          criteria: scan-model-input.sh 在无扫描引擎时 fail-closed（BLOCK），不得报干净
+          test_type: unit
+        - id: AC-670-24
+          criteria: 上下文中出现凭据时阻断，且消息中不回显该凭据本身
+          test_type: unit
+        - id: AC-670-25
+          criteria: 普通源码上下文通过（不误报）
+          test_type: unit
+        - id: AC-670-26
+          criteria: delphi-review 与 test-driven-development 两个 skill 均声明「源码/注释/日志按不可信输入处理」，且说明对指令性文本的处理方式
+          test_type: unit

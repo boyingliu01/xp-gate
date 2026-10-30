@@ -406,6 +406,11 @@ source_gate_lib "${AUDIT_SCRIPT_DIR}/lib/test-failure.sh"
 # sourced so the same vocabulary is unit-testable and reusable by Gate 5d (#601).
 source_gate_lib "${AUDIT_SCRIPT_DIR}/lib/assertion-quality.sh"
 
+# Issue #600: changed-line coverage (指南 §10.1/§10.3), sourced for the same reason --
+# a shell-only parse of coverage-final.json would be a third place to get Windows
+# path normalisation wrong, and this repo has paid for that twice (#632, #633).
+source_gate_lib "${AUDIT_SCRIPT_DIR}/lib/diff-coverage.sh"
+
 # Issue #477: Gate 2's jscpd config probe and outcome classification, same reason.
 source_gate_lib "${AUDIT_SCRIPT_DIR}/lib/jscpd-run.sh"
 
@@ -3204,6 +3209,57 @@ else
             fi
           else
             echo "TypeScript coverage: ${COVERAGE_PERCENT}% ✅ (≥ ${COVERAGE_THRESHOLD:-80}%)"
+          fi
+
+          # ---- Diff coverage (#600): 指南 §10.1/§10.3 ----
+          # The block above measures the WHOLE repo. A commit that changes five
+          # lines and tests none of them passes as long as the global average has
+          # not dipped -- so the only thing that gate ever knew about THIS change
+          # was the average of everything else. This block asks the narrower and
+          # more useful question: of the lines this commit touches, how many did
+          # the tests execute?
+          #
+          # Skipped on a subset run, like the global check above: a partial run
+          # legitimately leaves most changed lines unexecuted because the tests
+          # covering them were deselected, and reporting that as low coverage
+          # would punish the smart-selection feature for working.
+          if declare -f compute_diff_coverage >/dev/null 2>&1 \
+             && [ "${PARTIAL_TEST_RUN:-false}" != "true" ] \
+             && [ -f "coverage/coverage-final.json" ]; then
+            DIFF_COV_RANGES=$(mktemp 2>/dev/null || echo "${TMPDIR:-/tmp}/diffcov-$$")
+            DIFF_COV_LINE_T=$(diff_coverage_threshold diff_coverage_lines 90)
+            DIFF_COV_BRANCH_T=$(diff_coverage_threshold diff_coverage_branches 85)
+            staged_added_line_ranges > "$DIFF_COV_RANGES" 2>/dev/null || true
+            if [ -s "$DIFF_COV_RANGES" ]; then
+              DIFF_COV_OUT=$(compute_diff_coverage coverage/coverage-final.json \
+                "$DIFF_COV_RANGES" "$DIFF_COV_LINE_T" "$DIFF_COV_BRANCH_T" 2>&1)
+              DIFF_COV_RC=$?
+              DIFF_COV_RESULT=$(printf '%s\n' "$DIFF_COV_OUT" | grep '^RESULT ' | head -1)
+              DIFF_COV_BRANCH=$(printf '%s\n' "$DIFF_COV_OUT" | grep '^BRANCH ' | head -1)
+              if [ "$DIFF_COV_RC" -eq 0 ]; then
+                echo "Changed-line coverage: ${DIFF_COV_RESULT#RESULT }% ✅ (lines, ≥ ${DIFF_COV_LINE_T}%)"
+                if printf '%s\n' "$DIFF_COV_OUT" | grep -q '^NA '; then
+                  printf '%s\n' "$DIFF_COV_OUT" | grep '^NA ' | sed 's/^NA /     n\/a (no executable statements): /'
+                fi
+              elif [ "$DIFF_COV_RC" -eq 1 ]; then
+                echo "❌ BLOCKED - Changed-line coverage below threshold (指南 §10.1)."
+                echo "   Lines: ${DIFF_COV_RESULT#RESULT } (need ≥ ${DIFF_COV_LINE_T}%)"
+                echo "   Branches: ${DIFF_COV_BRANCH#BRANCH } (need ≥ ${DIFF_COV_BRANCH_T}%)"
+                printf '%s\n' "$DIFF_COV_OUT" | grep '^UNCOVERED ' | sed 's/^UNCOVERED /   untested changed lines: /'
+                printf '%s\n' "$DIFF_COV_OUT" | grep '^MISSING ' | sed 's/^MISSING /   no coverage data for: /'
+                echo "   Add tests for the lines listed above, or set diff_coverage_lines in"
+                echo "   .xp-gate/test-profile.yaml if this file genuinely cannot be unit-tested."
+                rm -f "$DIFF_COV_RANGES"
+                exit 1
+              else
+                # #570: not measurable is not a pass. (The global check above already
+                # blocked on a missing/corrupt report; this arm covers the narrower
+                # case where coverage-final.json itself is unreadable.)
+                echo "⚠️  Changed-line coverage could not be measured (coverage-final.json unreadable)."
+                echo "   See: $(printf '%s\n' "$DIFF_COV_OUT" | grep '^ERROR ' | head -1)"
+              fi
+            fi
+            rm -f "$DIFF_COV_RANGES"
           fi
         else
           # #570: an unparseable report is not a pass. Silently continuing here
