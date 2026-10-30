@@ -3679,3 +3679,15 @@ specification:
         - id: AC-636-06
           criteria: 每一行都携带指向判定依据的证据路径
           test_type: unit
+        - id: AC-669-01
+          criteria: POSIX 命令后缀把内层退出码原样传出，失败的 gate 不会被判为 PASS
+          test_type: integration
+        - id: AC-669-02
+          criteria: POSIX 命令后缀在成功时仍返回 0，不会把成功反判为失败
+          test_type: integration
+        - id: AC-669-03
+          criteria: 方言由实际 executor 决定而非 process.platform，无法识别时回落平台默认
+          test_type: unit
+        - id: AC-669-04
+          criteria: 退出码与文本标记不一致的 run 判为 INDETERMINATE 而非静默采信其一
+          test_type: unit
