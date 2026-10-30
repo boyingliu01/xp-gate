@@ -2,6 +2,43 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.35.1.0] - 2026-10-30
+
+### Added
+
+- **`xp-gate rework [--top N] [--dir <path>] [--json]`**（#651）：把门禁 journal 变成
+  三个可据以行动的返工指标——首次通过率、返工轮次分布（中位/均值/最坏）、按
+  `failure_reason` 聚合的阻塞原因 top-N。没有第三项，"为什么开发慢"只能回答
+  "再努力一点"；有了它，答案变成一份排序清单。
+
+### Fixed
+
+- **#651 失败不入审计**：两个"质量历史"文件都只记成功——`audit.jsonl` 8,258 条记录里
+  门禁 FAIL 近乎为零，`quality-history.jsonl` 559 条一条没有。原因是形状问题：
+  pre-commit 有 76 处 `exit 1`，而 `record_gate_audit()` 只有门禁 settle **之后**才被
+  调用，门禁一 FAIL 并退出，那条本该说"失败了"的记录永远不会落盘。于是 `retro` 与
+  `sprint-status --rework-check` 的分母里没有失败，返工率天然趋零。修法是 EXIT trap
+  在退出路上捕获，而不是给 76 个分支各补一条记录（那样第 77 个分支就失效）：
+
+  - 扫描 `GATE_*_STATUS` 找出**最后** FAIL/BLOCK 的门禁（即真正调用 exit 的那个），
+    写入 `gate_id` / `gate_name` / `passed=false` / 真实 `duration_ms` / `failure_reason`；
+  - `failure_reason` 优先取门禁自己的 detail（带规则名与阈值），否则退回
+    `gate_exit_<rc>`。没有 reason，journal 只能回答"失败了多少"，永远回答不了
+    "哪条规则最容易失败"——而后者才是驱动修复的问题；
+  - **幂等闩锁**：每次运行最多一条。少了它，一个已记过账再非零退出的门禁会被数两遍，
+    把首次通过率直接砍半。
+
+- **#651 时长脏值（读取侧）**：实测 391 条记录带 `duration_anomaly` 标记，**另有 6 条
+  epoch 级脏值没带**（最大 1.78e12）。只信标记的话均值仍是 1.3e9 ms——"平均 4.3 亿秒"
+  从后门回来了。`rework` 的时长统计因此同时按标记**和**量级合理性（1 小时上限）两重
+  判断；本仓库均值由 1.3e9 ms 降到 10.1 s。
+
+### Notes
+
+- `rework` 在 journal 无失败记录时报告 **NOT MEASURABLE** 而不是 100%。从空失败集算出的
+  "首次通过率 100%"比没有这个命令更糟——它制造信心。同理，无法归因的失败进
+  `unattributed` 桶而非被丢弃：丢掉会降低失败数、抬高通过率，而偏乐观的方向正是危险方向。
+
 ## [0.35.0.0] - 2026-10-30
 
 本版主题是"门禁评级的范围"。三处修复指向同一个问题：门禁声称检查了什么、它以什么人口
