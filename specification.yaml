@@ -3691,3 +3691,9 @@ specification:
         - id: AC-669-04
           criteria: 退出码与文本标记不一致的 run 判为 INDETERMINATE 而非静默采信其一
           test_type: unit
+        - id: AC-661-01
+          criteria: Gate 4 检查器执行故障时 fail-closed 阻断，不得报 PASSED
+          test_type: integration
+        - id: AC-661-02
+          criteria: 工具故障分支的 fail-closed 理由必须写在代码处
+          test_type: integration

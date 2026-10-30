@@ -8,7 +8,7 @@ import type { PostToolDecision, ToolExecution, ToolExecutionResult } from "@deep
 import z from "@deepseek-ai/schemastery"
 import type { Context } from "@deepseek-ai/cordis"
 import type { ShellDialect } from "./command.js"
-import { GATE_WHITELIST, buildCommand, detectDialect, resolveTarget } from "./command.js"
+import { GATE_WHITELIST, buildCommand, detectDialectForShell, resolveTarget } from "./command.js"
 import { runXpGate } from "./gate-runner.js"
 import type { ResolvedDelphiConfig } from "./delphi-config.js"
 import {
@@ -485,10 +485,13 @@ export const Config = z.object({
 
 export function apply(ctx: Context, config: unknown = {}): void {
   const cfg = config as Partial<XpGatePluginConfig>
-  // DSH runs a POSIX shell off-Windows and PowerShell on Windows; generating the
-  // wrong dialect makes every tool fail to parse rather than degrade gracefully.
-  const dialect = detectDialect()
   const shell = ctx.shell
+  // The EXECUTOR decides the dialect, not the platform (#669). "win32 implies
+  // PowerShell" stopped being true once Windows could mount a Git Bash executor:
+  // a PowerShell command string handed to bash exits 127 on a line that does not
+  // parse, so every gate was reported as failed. Falls back to the platform
+  // default when the executor does not reveal itself.
+  const dialect = detectDialectForShell(shell)
   // ctx.credentials is optional: outside DSH there is no store, and the resolver
   // then reads the process environment directly. Inside DSH this is what makes
   // delphi-review work on a machine whose key lives in the credential store rather

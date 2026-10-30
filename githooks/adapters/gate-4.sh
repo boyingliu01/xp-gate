@@ -165,13 +165,42 @@ else
         rm -f "$PRINCIPLES_STDERR"
 
         if [ "$PRINCIPLES_EXIT" -ge 2 ]; then
-          echo "⚠️  Warning: Principles checker execution failed"
-          echo "⏭️  SKIPPED - Principles check (execution issue)"
-          GATE_4_STATUS="SKIP"
-          # Consumed by the sourcing parent, not here (see #548).
+          # Fail-closed (#661), same rule as Gate 8 (#499): a gate that cannot run
+          # must not report success.
+          #
+          # This branch used to settle on SKIP, which the caller reads as
+          # non-blocking -- so a checker that crashed on startup
+          # (`Cannot find module 'C:\c\Users\...'`, the POSIX-path-to-native-node
+          # bug) still printed "PASSED - Principles checker (no errors found)".
+          # The path conversion fixed that one cause; any other way of breaking
+          # the launch (missing tsx, corrupt module, OOM) lands here too, and all
+          # of them would have been absorbed into a green light.
+          #
+          # SKIP stays reserved for "language not applicable / tool not
+          # installed", which is not what this is: the checker exists and failed.
+          echo ""
+          echo "❌ BLOCKED - Principles checker failed to execute (exit $PRINCIPLES_EXIT)"
+          echo "This is a tool fault, NOT a clean result. A gate that cannot run must not pass."
+          echo "  Fix the checker, or set PRINCIPLES_SKIP_TOOL_FAULT=1 to downgrade to a warning."
+          echo "  (downgrade is audit-logged and never allowed on main/master)"
+          GATE_4_STATUS="FAIL"
           # shellcheck disable=SC2034
           GATE_4_REASON="checker_execution_error"
           rm -f "$PRINCIPLES_JSON"
+          if [ "${PRINCIPLES_SKIP_TOOL_FAULT:-0}" = "1" ]; then
+            echo "⚠️  ESCAPE VALVE: PRINCIPLES_SKIP_TOOL_FAULT=1 — downgrading to SKIP"
+            # Same asymmetry as Gate 5a: a downgrade is tolerable on a feature
+            # branch, never on main/master, where it would green-light the trunk.
+            _g4_branch="$(git rev-parse --abbrev-ref HEAD 2>/dev/null || echo unknown)"
+            if [ "$_g4_branch" = "main" ] || [ "$_g4_branch" = "master" ]; then
+              echo "❌ ESCAPE VALVE BLOCKED: PRINCIPLES_SKIP_TOOL_FAULT not allowed on $_g4_branch"
+              GATE_4_STATUS="FAIL"
+              exit 1
+            fi
+            GATE_4_STATUS="SKIP"
+          else
+            exit 1
+          fi
         else
           # Check severity levels. The reporter emits JSON.stringify(out, null, 2),
           # i.e. `"severity": "warning"` WITH a space; tolerate any whitespace so a
