@@ -1,18 +1,23 @@
 name: Security Audit (CSO)
 on:
+  # CKV_GHA_7: a workflow_dispatch input must not steer the build. The old `mode`
+  # input was one of three labels ('daily' / 'comprehensive' / 'diff') that no step
+  # ever read -- it changed a printed string and nothing else. Deleting it removes a
+  # knob that promised a choice it could not make. The job now always runs full-repo.
   workflow_dispatch:
-    inputs:
-      mode:
-        description: 'Audit mode'
-        required: true
-        type: choice
-        default: 'daily'
-        options:
-          - daily
-          - comprehensive
-          - diff
   schedule:
     - cron: '0 8 * * 1'  # Weekly safety net
+  # Run on changes to the scan surface itself: a scanner rule or workflow edit can
+  # only be validated by running it (#671).
+  push:
+    paths:
+      - '.github/workflows/security-audit.yml'
+      - '.gitleaks.toml'
+
+# CKV2_GHA_1: least privilege. This job only reads the repo; without this block the
+# default token is write-capable for every scope.
+permissions:
+  contents: read
 
 jobs:
   cso-audit:
@@ -45,4 +50,34 @@ jobs:
           echo "Phase 8: Skill Supply Chain"
           echo "  Local skills: $(ls .claude/skills/ 2>/dev/null | wc -l || echo 0)"
           echo ""
-          echo "CSO audit complete. Full audit requires interactive /cso skill invocation."
+
+      # #671: this job used to print promise-shaped text and scan nothing -- 48 lines,
+      # 17 of them echo, ZERO invocations of any scanner. It ran weekly under the name
+      # "Security Audit (CSO)" while a live command-injection reachable from a user
+      # path sat in plugins/opencode/index.ts. A weekly gate that only prints is
+      # indistinguishable from no gate, and worse: it makes the absence of findings
+      # look like evidence of safety.
+      #
+      # The pre-commit and pre-push hooks scan the DIFF, so a vulnerability is only
+      # surfaced when someone happens to edit near it. This job is the full-repo
+      # counterpart, which is the only thing that can find pre-existing debt.
+      - name: SAST (full repo)
+        run: |
+          python -m pip install --quiet semgrep
+          semgrep scan --config=p/security-audit --error --quiet .
+        # Fail closed: a scan that could not run must not report a clean repo
+        # (same rule as Gate 8 since #499).
+        continue-on-error: false
+
+      - name: Secret scan (full repo)
+        run: |
+          curl -sSfL https://github.com/gitleaks/gitleaks/releases/download/v8.21.2/gitleaks_8.21.2_linux_x64.tar.gz             | tar -xz gitleaks
+          ./gitleaks detect --source . --config .gitleaks.toml --no-git --redact --verbose
+
+      - name: Assert the audit actually scanned something
+        run: |
+          # A scanner that found no files and a scanner that found no problems print
+          # the same thing. Assert a non-zero scan surface so "clean" means scanned.
+          COUNT=$(find . -path ./node_modules -prune -o             \( -name '*.ts' -o -name '*.js' -o -name '*.sh' \) -print | wc -l)
+          echo "scanned source files: $COUNT"
+          test "$COUNT" -gt 100
