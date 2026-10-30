@@ -3649,3 +3649,6 @@ specification:
         - id: AC-670-62
           criteria: 无 failure_reason 的失败被归入 unattributed 桶而非被丢弃
           test_type: unit
+        - id: AC-670-63
+          criteria: 对齐报告写盘失败时记入 errors 而非抛出，已完成的分析结果不得丢失
+          test_type: unit

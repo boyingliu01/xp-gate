@@ -670,13 +670,32 @@ export function calculateScore(
 // Step 5: writeReport()
 // ============================================================================
 
-export function writeReport(report: TestAlignmentReportFile, outputPath: string): void {
-  const dir = path.dirname(outputPath);
-  if (!fs.existsSync(dir)) {
-    fs.mkdirSync(dir, { recursive: true });
+/**
+ * Write the alignment report, recording (not throwing) a write failure.
+ *
+ * This is the LAST step of runFullAlignment — after the spec is parsed and every
+ * test file is scanned. Letting a write error escape discards all of that work
+ * and turns a reportable condition (disk full, read-only mount, permission
+ * denied) into a crashed command with no report at all. The report schema
+ * already carries an `errors` array for exactly this kind of condition.
+ *
+ * @returns true when the file was written, false when the failure was recorded.
+ */
+export function writeReport(report: TestAlignmentReportFile, outputPath: string): boolean {
+  try {
+    const dir = path.dirname(outputPath);
+    if (!fs.existsSync(dir)) {
+      fs.mkdirSync(dir, { recursive: true });
+    }
+    fs.writeFileSync(outputPath, JSON.stringify(report, null, 2), 'utf8');
+    return true;
+  } catch (error) {
+    const reason = error instanceof Error ? error.message : String(error);
+    report.errors.push(`Failed to write report to ${outputPath}: ${reason}`);
+    process.stderr.write(`⚠️  Failed to write alignment report to ${outputPath}: ${reason}
+`);
+    return false;
   }
-
-  fs.writeFileSync(outputPath, JSON.stringify(report, null, 2), 'utf8');
 }
 
 // ============================================================================
@@ -756,7 +775,8 @@ export function runFullAlignment(options: AlignmentOptions): TestAlignmentReport
     errors: [],
   };
 
-  // Step 5: Write output
+  // Step 5: Write output. A failure is recorded on `report.errors` by writeReport
+  // rather than thrown — the caller still gets the analysis it just paid for.
   if (outputPath) {
     writeReport(report, outputPath);
   }
