@@ -3739,3 +3739,15 @@ specification:
         - id: AC-653-05
           criteria: 单文件自检在 2 秒内给出结论
           test_type: integration
+        - id: AC-668-01
+          criteria: audit assertions 列出全仓存量断言债务并按文件分组
+          test_type: integration
+        - id: AC-668-02
+          criteria: 因文件被带进范围而阻断时输出明确标注 pre-existing 并区分新增
+          test_type: integration
+        - id: AC-668-03
+          criteria: 摘要给出按类别可批次清零的数量
+          test_type: unit
+        - id: AC-668-04
+          criteria: fixture 中的断言样例不被计为债务，裸断言仍被报告
+          test_type: unit

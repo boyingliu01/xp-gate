@@ -673,13 +673,58 @@ function handleAudit(args) {
     return;
   }
 
+  // #668: pre-existing assertion debt, so it can be cleared in batches instead of
+  // being discovered one unrelated commit at a time.
+  if (args[0] === 'assertions') {
+    handleAuditAssertions(args);
+    return;
+  }
+
   console.error('Error: Unknown audit subcommand or missing flag');
   console.error('Usage:');
   console.error('  xp-gate audit record --gate-id X --gate-name Y --passed true/false --issues-found N --duration-ms N --trigger commit');
   console.error('  xp-gate audit --tail [N]     (default: 20)');
   console.error('  xp-gate audit --stats        (per-gate stats + anomaly summary)');
   console.error('  xp-gate audit --check        (exit 1 if the ledger has anomalies)');
+  console.error('  xp-gate audit assertions     (list pre-existing assertion debt across the repo; --json)');
   process.exit(1);
+}
+
+/**
+ * `xp-gate audit assertions` (#668) — list pre-existing vacuous assertions.
+ *
+ * Gate 5d only inspects files in the diff, so standing debt surfaces during
+ * unrelated commits and reads as if that change introduced it. This makes the debt
+ * a work queue instead of a series of false accusations.
+ *
+ * Advisory: always exits 0. A debt list that fails builds becomes a number people
+ * learn to ignore.
+ */
+function handleAuditAssertions(args) {
+  const { scanForAssertionDebt, summarizeDebt } = require(path.join(__dirname, '..', 'lib', 'assertion-debt.js'));
+  const results = scanForAssertionDebt({ cwd: process.cwd() });
+  const summary = summarizeDebt(results);
+  if (args.includes('--json')) {
+    process.stdout.write(`${JSON.stringify({ summary, files: results }, null, 2)}\n`);
+    return;
+  }
+  if (summary.total === 0) {
+    console.log('✅ No pre-existing assertion debt found.');
+    return;
+  }
+  console.log(`Found ${summary.total} pre-existing assertion issue(s) in ${summary.files} file(s):`);
+  console.log(`  tautological   ${summary.byKind.tautological}`);
+  console.log(`  swallowed-error ${summary.byKind['swallowed-error']}`);
+  console.log('');
+  for (const entry of results) {
+    console.log(`${entry.file}  (${entry.findings.length})`);
+    for (const finding of entry.findings) {
+      console.log(`  ${finding.line}: [${finding.kind}] ${finding.text}`);
+    }
+  }
+  console.log('');
+  console.log('These predate the current diff and would be reported as "introduced by this change"');
+  console.log('if the file is touched. See skills/test-driven-development/testing-anti-patterns.md');
 }
 
 function printAuditTable(entries) {

@@ -178,6 +178,53 @@ classify_swallowed_errors() {
   grep -nE 'catch([[:space:]]*\([^)]*\))?[[:space:]]*\{[[:space:]]*\}' || true
 }
 
+# #668: is the flagged line part of THIS change, or merely carried in by the file?
+#
+# Gate 5d runs over whole files, so a file that was edited anywhere gets all of its
+# assertions re-examined. Pre-existing debt then blocks an unrelated commit and
+# reads as "this change introduced it". The author who fixed `writeReport()`'s error
+# handling was stopped by four `expect(true).toBe(true)` lines that had been there
+# for months.
+#
+# The cost is not the one false block. It is that the noise teaches people to add
+# `@assertion-justified` rather than fix the test -- a gate that trains people to
+# annotate past it is worse than no gate.
+#
+# Args: $1 = file path, $2 = line number, $3 = added-line ranges ("start-end start-end")
+# Returns 0 when the line is inside an added hunk (i.e. genuinely introduced here).
+assertion_line_is_new() {
+  local _aq_file="$1" _aq_line="$2" _aq_ranges="$3"
+  local _aq_range _aq_start _aq_end
+  for _aq_range in $_aq_ranges; do
+    _aq_start="${_aq_range%%-*}"
+    _aq_end="${_aq_range##*-}"
+    if [ "$_aq_line" -ge "$_aq_start" ] 2>/dev/null && [ "$_aq_line" -le "$_aq_end" ] 2>/dev/null; then
+      return 0
+    fi
+  done
+  return 1
+}
+
+# Emit "start-end" for each added hunk in the staged diff of $1.
+# Empty output means the file has no added lines at all, in which case every finding
+# is pre-existing by construction.
+staged_added_line_ranges() {
+  local _aq_file="$1"
+  git diff --cached -U0 -- "$_aq_file" 2>/dev/null \
+    | awk '
+        /^@@/ {
+          # @@ -a,b +c,d @@ -- the +side is the new-file line numbering.
+          if (match($0, /\+[0-9]+(,[0-9]+)?/)) {
+            spec = substr($0, RSTART + 1, RLENGTH - 1)
+            n = split(spec, parts, ",")
+            start = parts[1] + 0
+            count = (n > 1) ? parts[2] + 0 : 1
+            if (count > 0) printf "%d-%d ", start, start + count - 1
+          }
+        }
+      ' || true
+}
+
 # Anti-patterns 3-5 (WARNING tier): weak-only assertions, mock-echo assertions, and
 # call-order over-verification. These can be legitimate, so each is reported but
 # never blocks.
