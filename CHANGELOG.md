@@ -2,6 +2,24 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.33.1.0] - 2026-10-30
+
+本版是批 1「安装 + CLI 门禁调用」健壮性修复，收的是最伤用户的一组：全新安装的 hooks 100% FATAL、Windows 卸载残留 core.hooksPath、`xp-gate check` 在缺模块时直接崩、三个 gate 模块永远没被打包、以及 CLI 调用 Gate 3 时 `GATE_DIR` 为空导致误判 BLOCK。全部 6 个 issue 均按 RED→GREEN 补了回归测试。
+
+### Fixed
+
+- **#655/#631 (P0) 全新安装的 hooks 100% FATAL**: `copyHooks` 从未安装 `hook-module-resolution.sh`，而 `pre-commit` 在做出任何 tier 决策前就要 source 它、且 fail-closed。于是 `init` / `setup-global` 之后的每一次提交都 FATAL。补进 copy 列表并加回归测试（`shared-utils.test.js`）。
+- **#656 Windows 卸载残留 `core.hooksPath`**: uninstall 用 `===` 比较 git 返回的正斜杠路径与 `path.join` 的反斜杠 `expectedPath`，在 Windows 上恒为 false，于是 unset 被静默跳过、留下悬空的 `core.hooksPath`。改为两侧都规范化（`path.resolve` + `realpathSync.native` + win32 转小写）后再比；补混合斜杠用例（`uninstall.test.js`）。
+- **#657 `xp-gate check <gate>` 崩溃**: 模块缺失时 gate 返回 `GATE_NOT_RUN` 字符串哨兵，被直接喂给 `process.exit()`，抛 `ERR_INVALID_ARG_TYPE`。新增 `normalizeGateExit()`：只有哨兵一律归 0（诚实的 SKIP），真实数值失败码原样透传；`--gates` 汇总把 NOT_RUN 计为 skipped 而非 passed。补单测（`check-normalize-exit.test.js`）。
+- **#658 三个 gate 模块永远没被打包**: `test-layers` / `pbt` / `python-health` 在 `src/gates/`，而 npm 包从未同步它。`files[]` 补 `gates/`，`sync-package-content.js` 在 prepack 生成 `src/gates → package gates/` 镜像（镜像被 gitignore——tracked 的逐字节重复测试会触发 archlint CodeClone）；契约测试断言每个模块都随包发出。
+- **#660 CLI 调 Gate 3 从不设 `GATE_DIR`**: `gate-3.sh` 于是去 `$GATE_DIR/lib/ccn-ratchet.sh`（空）找依赖，在没有 vendored `githooks/lib/` 的项目上误判 BLOCK。`runGateAdapter` 现向片段传 `GATE_DIR=scriptDir`。
+
+### Changed
+
+- `.gitignore` 补 `audit.pending.jsonl` / `bypass-audit.jsonl`（post-commit 落盘消费的运行时态，非源码）。
+
+> #661（Gate 4 原生路径）与 #662（pre-push cygpath）经核验已在回溯提交 `6d2df34e` 中修复，本版不再重复实现。
+
 ## [0.33.0.0] - 2026-10-30
 
 本版是"开发效率"专项的 P1（削返工，最大单项）。诊断显示 47.6% 的提交是 fix/revert，多数返工是"提交时才被门禁打回"——阻断阈值只活在 `githooks/` 里，AI 在 BUILD 期间看不到。本版把红线前移进 BUILD skill，并给出一条 <5 s 的"本次 diff 会踩哪些闸"命令，让第一次提交就过。
