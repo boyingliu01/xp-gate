@@ -3495,6 +3495,29 @@ else
     GATE_5_STATUS="PASS"
   fi
 fi
+
+# #665: a subset run is exempt from the GLOBAL coverage floor by design (#473),
+# but the exemption was never published, so the persisted report showed
+# `actual.coverage = 29` beside `thresholds.lines = 82` with `status = PASS` and
+# `reason = ""`. The verdict was correct; the RECORD was unreadable, and a record
+# is all `xp-gate audit` and the tech-debt trackers (#636, #638) ever see. Two
+# opposite situations -- "coverage really was 29% and the gate passed it" and
+# "a subset run, global floor not applicable" -- rendered identically.
+#
+# Derived from PARTIAL_TEST_RUN at ONE place instead of being set by hand at each
+# of the six branches that mark a partial run: a reason written at one call site
+# and forgotten at another is the drift that produced the empty reason here.
+if [ "${PARTIAL_TEST_RUN:-false}" = "true" ]; then
+  GATE_5_COVERAGE_APPLIES_TO="subset"
+  # Never overwrite a reason the branch itself recorded (docs_only_change,
+  # no_code_files_changed, ...) -- those explain a different verdict.
+  if [ -z "${GATE_5_DETAIL:-}" ] && [ "$GATE_5_STATUS" = "PASS" ]; then
+    GATE_5_DETAIL="partial_test_run_coverage_not_applicable"
+  fi
+else
+  GATE_5_COVERAGE_APPLIES_TO="project"
+fi
+
 record_gate_audit "gate-5" "tests-coverage" "$GATE_5_STATUS" "0" "$GATE_5_START" "${GATE_5_DETAIL:-}"
 
 # ============================================================================
@@ -3619,7 +3642,26 @@ else
         if [ -f "arch-go.yaml" ] || [ -f "arch-go.yml" ]; then
           if require_tool "arch-go" "Gate 6" "go install github.com/arch-go/arch-go@latest"; then
             echo "     Running arch-go for Go..."
+            # #630: #602 replaced the vacuous Java arm with a status-based verdict,
+            # but the Go arm kept the identical fail-open shape: it piped arch-go
+            # output into `head` and then printed "Go architecture validation
+            # completed" unconditionally. A pipeline's status is `head`'s -- 0 for
+            # ANY non-empty output -- so every arch-go result, contract violations
+            # included, printed "completed" and the commit landed. A gate that
+            # cannot fail is not a gate. Capture the checker's own status and
+            # block on it, as the Python arm above and run_java_build_integrity do.
             arch-go check 2>&1 | head -20
+            # The pipeline's own status is head's, so the checker's verdict has
+            # to come from PIPESTATUS[0] (#630). This is the same reading #602
+            # installed for Java via run_java_build_integrity.
+            _go_arch_rc="${PIPESTATUS[0]}"
+            if [ "$_go_arch_rc" -ne 0 ]; then
+              echo ""
+              echo "❌ BLOCKED - Go architecture contract violations (arch-go, exit $_go_arch_rc)"
+              echo "Fix the layering violation(s) above before committing."
+              GATE_6_REASON_BY_LANG["$CURRENT_LANG"]="architecture_tests_failed"
+              exit 1
+            fi
             echo "     ✅ Go architecture validation completed."
           else
             echo "     ❌ BLOCKED - arch-go not installed"
@@ -4583,7 +4625,7 @@ generate_quality_report() {
       "reason": "${GATE_5_DETAIL:-}",
       "thresholds": { "lines": ${COVERAGE_THRESHOLD}, "functions": null, "branches": null, "statements": null },
       "threshold_source": "${COVERAGE_THRESHOLD_SOURCE}",
-      "actual": { "coverage": "${COV_PCT}" },
+      "actual": { "coverage": "${COV_PCT}", "applies_to": "${GATE_5_COVERAGE_APPLIES_TO:-project}" },
       "failedTests": $FAILED_TESTS_JSON
     },
     "gate6_arch_boyscout": {
@@ -4681,7 +4723,14 @@ ENDJSON
   printf "  %-45s %s\n" "Gate 2: Duplicate Code" "${GATE_2_STATUS:-SKIP}"
   printf "  %-45s %s (warnings: ${CC_WARNINGS:-0})\n" "Gate 3: Complexity" "${GATE_3_STATUS:-SKIP}"
   printf "  %-45s %s (warnings: ${WARNING_COUNT:-0})\n" "Gate 4: Principles" "${GATE_4_STATUS:-SKIP}"
-  printf "  %-45s %s (coverage: ${COV_PCT}%%)\n" "Gate 5: Tests + Coverage" "${GATE_5_STATUS:-SKIP}"
+  # #665: a subset run's percentage describes a SUBSET, not the project, and the
+  # global floor was not applied. Printing the bare number next to a PASS reads as
+  # "29% passed an 82% floor". Say which population the number came from.
+  if [ "${GATE_5_COVERAGE_APPLIES_TO:-project}" = "subset" ]; then
+    printf "  %-45s %s (coverage: ${COV_PCT}%%, subset run -- global floor not checked)\n" "Gate 5: Tests + Coverage" "${GATE_5_STATUS:-SKIP}"
+  else
+    printf "  %-45s %s (coverage: ${COV_PCT}%%)\n" "Gate 5: Tests + Coverage" "${GATE_5_STATUS:-SKIP}"
+  fi
   printf "  %-45s %s\n" "Gate 6: Architecture + Boy Scout" "${GATE_6_STATUS:-SKIP}"
   printf "  %-45s %s\n" "Gate 7: IaC Security" "${GATE_7_STATUS:-SKIP}"
   printf "  %-45s %s\n" "Gate 8: Secret Scanning" "${GATE_8_STATUS:-SKIP}"
