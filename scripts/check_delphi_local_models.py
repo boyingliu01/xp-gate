@@ -24,7 +24,12 @@ LOCAL_PREFIX = "local-"
 # standing rule is local-only seats; this allowlist exists so a future hosted
 # seat requires an intentional, reviewable edit here (walkthrough R8 CI-01:
 # the guard and the loaders must agree on what is legal).
-MODEL_ALLOWLIST: set[str] = set()
+#
+# 2026-10-27: the technical seat was moved to the hosted Qwen 3.8 Flash because
+# the local build of that model failed intermittently; the other two seats stay
+# local. Recorded here so the guard does not read the pinned assignment as a
+# violation (the machine-wide .delphi-config.json names this exact model).
+MODEL_ALLOWLIST: set[str] = {"s-qwen3.8-flash"}
 
 CONFIGS = [
     os.path.expanduser("~/.config/xp-gate/.delphi-config.json"),
@@ -175,7 +180,7 @@ def main():
         ok = check_file(path, cfg) and ok
     if "--probe" in sys.argv:
         ok = probe(found) and ok
-    print("RESULT:", "ALL SEATS LOCAL" if ok else "NON-LOCAL SEAT FOUND")
+    print("RESULT:", "ALL SEATS ALLOWED" if ok else "SEAT VIOLATION FOUND")
     return 0 if ok else 1
 
 
