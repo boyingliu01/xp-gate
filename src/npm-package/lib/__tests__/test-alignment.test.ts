@@ -263,7 +263,7 @@ test.each([['hello', 5], ['world', 5]])('%s has length %i', (str, len) => {
  * @covers AC-SKIP-001-01
  */
 it.skip('should parse skipped tests', () => {
-  expect(true).toBe(true);
+  expect(subject).toBe('fixture');
 });
 
 /**
@@ -292,7 +292,7 @@ test.todo('should parse todo tests');
  */
 const featureName = 'Login';
 it(\`should authenticate \${featureName} user\`, () => {
-  expect(true).toBe(true);
+  expect(subject).toBe('fixture');
 });
 `;
 
@@ -665,7 +665,7 @@ specification:
  * @covers AC-PUNCT-001-01
  */
 test('punctuation handling', () => {
-  expect(true).toBe(true);
+  expect(subject).toBe('fixture');
 });
 
 /**
@@ -674,7 +674,7 @@ test('punctuation handling', () => {
  * @covers AC-PUNCT-002-01
  */
 test('comma handling', () => {
-  expect(true).toBe(true);
+  expect(subject).toBe('fixture');
 });
 `;
 
@@ -794,5 +794,46 @@ specification:
     expect(fs.existsSync(outputPath)).toBe(true);
     const report = JSON.parse(fs.readFileSync(outputPath, 'utf8'));
     expect(report.alignment_status).toBe('FAIL');
+  });
+});
+
+describe('writeReport error handling (Boy Scout debt, #641)', () => {
+  it('AC-670-63: surfaces a write failure instead of throwing out of the run', () => {
+    // writeReport() runs as the LAST step of runFullAlignment — after the spec is
+    // parsed and every test file is scanned. An unguarded throw here discards all
+    // of that work and turns a reportable condition (disk full, read-only mount,
+    // permission denied) into a crashed command with no report at all. The report
+    // schema already carries an `errors` array for exactly this.
+    const fs = require('node:fs');
+    const path = require('node:path');
+    const os = require('node:os');
+    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'xp-gate-wr-'));
+    // A path whose PARENT is a regular file cannot be created as a directory.
+    const blocker = path.join(tmp, 'blocker');
+    fs.writeFileSync(blocker, 'not a directory');
+    const outputPath = path.join(blocker, 'nested', 'report.json');
+
+    const report = {
+      alignment_status: 'FAIL' as const,
+      phase: 1,
+      score: 0,
+      head_commit: 'abc123',
+      spec_hash: sha256('x'),
+      timestamp: new Date().toISOString(),
+      misaligned_tests: [],
+      anti_pattern_detected: false,
+      errors: [] as string[],
+    };
+
+    try {
+      // Assert the OBSERVABLE outcome, not merely "did not throw": the contract is
+      // that the failure is reported through the report object the caller holds.
+      const written = writeReport(report, outputPath);
+      expect(written).toBe(false);
+      expect(report.errors.length).toBe(1);
+      expect(report.errors[0]).toContain('Failed to write report');
+    } finally {
+      fs.rmSync(tmp, { recursive: true, force: true });
+    }
   });
 });
