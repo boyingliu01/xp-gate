@@ -1917,6 +1917,17 @@ specification:
           criteria: 无新增 PowerShell 文件、或有改动但无 ratchet 基线时，须报出各自的原因，
             不得静默放行
           test_type: unit
+        # AC-598-03/04 已被上面的 tag-push fixture 占用（同 AC-598-01/02 的成因）。
+        # PowerShell ratchet 这一组用 AC-598-13 起的区间，理由同上：编号撞车会让
+        # 引用无法区分「哪个 REQ 的哪条标准」。
+        - id: AC-598-13
+          criteria: 路径归一化须把测量器输出的绝对路径映射回基线的仓库相对路径；真实回归
+            （既有函数 CCN 上升）须报出 "ccn <旧> -> <新>" 而非 "new function"
+          test_type: unit
+        - id: AC-598-14
+          criteria: 测量脚本须能输出 ratchet 所需的完整总体（-List 列出全部函数，而非仅
+            超阈值者），否则低于阈值的既有函数缺席基线、被当成新函数
+          test_type: unit
 
     # ============================================================
     # REQ-599: 门禁的"跳过/通过"判定与审计必须真实生效。
@@ -1931,6 +1942,20 @@ specification:
       description: "门禁的通过/跳过判定、评分与审计必须由真实执行结果决定，守卫失效必须可被发现"
       priority: critical
       acceptance_criteria:
+        # AC-599-01..03 属于上面那组 fail-open 缺陷。PowerShell 覆盖率超时预算
+        # （同号 issue #599，不同题）从 AC-599-14 起编号，避免与既有引用冲突。
+        - id: AC-599-14
+          criteria: run_coverage 不得复用普通测试的超时预算变量（CodeCoverage 插桩
+            天然更慢，同一数字对两者不是同一余量），二者须各自可配且覆盖率默认值更大
+          test_type: unit
+        - id: AC-599-15
+          criteria: 超时消息须点名真正生效的那个环境变量；把预算不足描述成"测试挂住"
+            会把排查引向错误方向
+          test_type: unit
+        - id: AC-599-16
+          criteria: 一个 helper 承载两个预算时，helper 须按传入的预算变量名解析出两个
+            互不相同的值（"一个 helper、两个默认值"，而不是合并成同一个）
+          test_type: unit
         - id: AC-599-01
           criteria: 绕过理由为空或非空白字符不足 10 个时必须拦阻且不产生审计条目；理由充分时必须放行并写入含理由与 bypass_type 的审计条目；两种情形都不得出现 bash 展开错误
           test_type: unit

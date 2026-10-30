@@ -17,7 +17,7 @@
 #              repo-side baseline stores repo-relative ones, so every EXISTING
 #              function also looked new (a real regression was reported as a
 #              "new function" -- right verdict, wrong reason).
-# @covers AC-598-01 AC-598-02 AC-598-03
+# @covers AC-598-01 AC-598-02 AC-598-13 AC-598-14
 
 REPO_ROOT="$(cd "$BATS_TEST_DIRNAME/../.." && pwd)"
 GATE3="$REPO_ROOT/githooks/gate-3.sh"
@@ -200,7 +200,7 @@ PS
   [[ "$GATE3_OUTPUT" != *"increased cyclomatic complexity"* ]]
 }
 
-@test "AC-598-03: a real regression names the old and new CCN" {
+@test "AC-598-13: a real regression names the old and new CCN" {
   have_pwsh || skip "no PowerShell engine"
 
   # Get-A goes from ccn=2 (baseline) to ccn=6. This MUST block, and the message
@@ -224,7 +224,7 @@ PS
   [[ "$GATE3_OUTPUT" == *"increased cyclomatic complexity"* ]]
 }
 
-@test "AC-598-04: the measurement script emits the population a ratchet needs" {
+@test "AC-598-14: the measurement script emits the population a ratchet needs" {
   have_pwsh || skip "no PowerShell engine"
 
   cat > "$BATS_TEST_TMPDIR/sample.psm1" <<'PS'

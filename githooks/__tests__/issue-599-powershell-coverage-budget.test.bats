@@ -14,7 +14,7 @@
 #         helpers, so the regression is a re-introduction, not a new defect.
 #         The unified helper is the right shape -- the defect was merging the
 #         DEFAULTS too. This pins "one helper, two budgets".
-# @covers AC-599-01 AC-599-02 AC-599-03
+# @covers AC-599-14 AC-599-15 AC-599-16
 
 REPO_ROOT="$(cd "$BATS_TEST_DIRNAME/../.." && pwd)"
 PS_ADAPTER="$REPO_ROOT/githooks/adapters/powershell.sh"
@@ -27,7 +27,7 @@ teardown() {
   cd "$BATS_TEST_DIRNAME" || return 1
 }
 
-@test "AC-599-01: run_coverage does not use the plain-test budget variable" {
+@test "AC-599-14: run_coverage does not use the plain-test budget variable" {
   # Structural: the coverage call site must reference its own variable.
   run grep -n '_pester_timeout' "$PS_ADAPTER"
   [ "$status" -eq 0 ]
@@ -46,7 +46,7 @@ teardown() {
   [ "$cov_default" -gt "$test_default" ]
 }
 
-@test "AC-599-02: each timeout message names the variable that governs it" {
+@test "AC-599-15: each timeout message names the variable that governs it" {
   # A reader who sees "TIMED OUT" must be told WHICH knob to turn. Before the
   # fix both messages interpolated XP_GATE_POWERSHELL_TEST_TIMEOUT_S, so raising
   # the coverage budget had no visible effect on the text.
@@ -60,7 +60,7 @@ teardown() {
   [[ "$cov_msg" == *"XP_GATE_POWERSHELL_COVERAGE_TIMEOUT_S"* ]]
 }
 
-@test "AC-599-03: the helper resolves two distinct budgets" {
+@test "AC-599-16: the helper resolves two distinct budgets" {
   command -v bash >/dev/null 2>&1 || skip "no bash"
 
   # Exercise the real helper by sourcing its definition from the adapter and
