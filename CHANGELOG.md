@@ -2,6 +2,27 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.35.8.0] - 2026-10-30
+
+### Changed
+
+- **pre-commit 固定开销 -22%（#640）**。文档类提交 27.5s → **21.5s**。
+  - Gate 6 的 archlint 全树扫描（单次 7.9s）改为按需：staged 文件不含任何源码扩展名时
+    SKIP。架构违规不可能由一次不碰源文件的提交引入——这不是放宽检查，是消除一个
+    **逻辑上不可能触发告警**的扫描。
+  - `git diff --cached --name-only --diff-filter=ACM`（9 处重复调用）缓存进
+    `XP_STAGED_ACM`；`git rev-parse --show-toplevel`（11 处）复用已算好的 `PROJECT_ROOT`。
+
+### Corrected
+
+- **#640 的归因与实际数据不符**。issue 称「7.3 分钟里约 6 分钟花在工具冷启动与全量重跑」，
+  但实测各门禁累计**仅 63.7s/提交**。真正的瓶颈是 **fork 数量**：每次 fork 约 90ms
+  （实测 100 次 `git rev-parse` = 9456ms），pre-commit 有 ~309 次外部命令调用，
+  309 × 90ms ≈ 28s，与端到端耗时吻合。**这改变了 P3 的优先级**——原计划「并行化门禁组」
+  收益有限，因为大部分时间不在门禁内部，而在门禁之间。
+
+---
+
 ## [0.35.7.0] - 2026-10-30
 
 ### Added
