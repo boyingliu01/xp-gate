@@ -40,6 +40,7 @@ components:
       - "xp-gate ui-review"
       - "xp-gate sprint-status [--json] [--watch] [--dir <path>] [--rework-check]"  # added in 0.8.16, #214; --rework-check (0.18.0, #369) calculates rework rate by counting fix commits after sprint completion
       - "xp-gate retro [--days N] [--all] [--json] [--sprint <id>]"  # added in 0.18.0, #369 — Generates engineering retrospective report with activity summary, rework rate trends, evidence skip exposure, and quality trends
+      - ".flaky-quarantine.yaml"  # added in 0.35.4.0, #603 — Flaky-test quarantine ledger with mandatory owner/expiry; doctor warns on expired entries, retro reports first-pass rate
       - "xp-gate gate-coverage [--json] [--debt] [--strict] [--branch <name>]"  # added in 0.35.2.0, #636 — Four-state compliance view (PASS/DEBT/SKIP/FAIL); SKIP always carries a reason, DEBT is quantified with an evidence path, and a stale artifact is marked STALE instead of presented as current
       - "xp-gate rework [--top N] [--dir <path>] [--json]"  # added in 0.35.1.0, #651 — Rework report from the gate journal: first-pass rate, rounds before landing, top blocking reasons; reports NOT MEASURABLE instead of 100% on journals with no failures
       - "xp-gate crap [--top N] [--threshold N] [--json] [--paths <p...>] [--include-mirrors]"  # added in 0.30.2, #404 — Ranks functions by CRAP = CCN^2 * (1 - coverage) + CCN. ADVISORY ONLY, always exits 0. Unmeasured functions (their file was never loaded by any test) are counted, not scored

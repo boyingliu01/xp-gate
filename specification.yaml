@@ -3697,3 +3697,15 @@ specification:
         - id: AC-661-02
           criteria: 工具故障分支的 fail-closed 理由必须写在代码处
           test_type: integration
+        - id: AC-603-01
+          criteria: 重跑后通过不计入首过率，被单独计为 flaky recovery
+          test_type: unit
+        - id: AC-603-02
+          criteria: 无重跑记录时 flakyRate 报 null 而非 0，并说明不可测量
+          test_type: unit
+        - id: AC-603-03
+          criteria: 重试次数有硬上限且默认为 1，配置只能调低不能调高
+          test_type: unit
+        - id: AC-603-04
+          criteria: 隔离台账逾期项必须被查出，核心链路不得长期隔离
+          test_type: unit

@@ -26,6 +26,7 @@ const { GATE_CLI_TOOLS, checkCliTool, getToolInstallCmd, checkBash } = require('
 // generated shell projection of this same module.
 const { RESOLUTION_ORDER } = require('./hook-module-resolution.js');
 const { inspectHookFile } = require('./hook-health.js');
+const { parseQuarantine, findPolicyViolations } = require('./flaky.js');
 
 /**
  * Files above this size get a `bash -n` probe in addition to the CRLF scan.
@@ -827,6 +828,48 @@ function diagnoseAuditLedger(ctx = {}) {
   } else {
     checks.push({ name: 'Audit ledger', status: 'PASS', detail: `${considered} entr${considered === 1 ? 'y' : 'ies'} clean since ${AUDIT_LEDGER_SINCE}` });
   }
+  return { checks, issues };
+}
+
+/**
+ * Check the flaky-test quarantine ledger for expired entries (#603).
+ *
+ * This lives in doctor rather than in the gate path on purpose: an expired
+ * quarantine is not a code defect, it is a decision that was never revisited.
+ * Nothing fails, everything keeps running, and a test meant to be fixed within
+ * two weeks quietly stays disabled for a year. That is exactly the class of drift
+ * doctor exists to surface, and exactly the class no gate can block.
+ */
+function diagnoseFlakyQuarantine(ctx = {}) {
+  const checks = [];
+  let issues = 0;
+  const root = ctx.repoRoot || process.cwd();
+  let entries = [];
+  try {
+    entries = parseQuarantine(path.join(root, '.flaky-quarantine.yaml'));
+  } catch {
+    return { checks, issues };
+  }
+  // No ledger is PASS, not SKIP: a project that quarantines nothing is genuinely
+  // in good shape, and SKIP would imply the check had not been performed.
+  if (entries.length === 0) {
+    checks.push({ name: 'Flaky quarantine', status: 'PASS', detail: 'no quarantined tests' });
+    return { checks, issues };
+  }
+  const violations = findPolicyViolations(entries, new Date());
+  if (violations.length === 0) {
+    checks.push({
+      name: 'Flaky quarantine',
+      status: 'PASS',
+      detail: `${entries.length} quarantined test(s), all within expiry`,
+    });
+    return { checks, issues };
+  }
+  issues += violations.length;
+  const detail = violations
+    .map((v) => `${v.rule}: ${v.entry.test} (owner ${v.entry.owner || 'unassigned'}, expiry ${v.entry.expiry || 'none'})`)
+    .join('; ');
+  checks.push({ name: 'Flaky quarantine', status: 'WARN', detail });
   return { checks, issues };
 }
 
@@ -3018,6 +3061,19 @@ async function doctor(args) {
     const moduleDrift = diagnoseModuleDrift();
     checks.push(...hookDrift.checks, ...moduleDrift.checks);
     issues += hookDrift.issues + moduleDrift.issues;
+  }
+
+  // Flaky-test quarantine expiry (#603). A WARN, not a FAIL: an overdue ledger
+  // breaks nothing at runtime, it only means an intentional gap outlived its
+  // intent -- doctor's business, not a gate's.
+  try {
+    const flaky = diagnoseFlakyQuarantine({ repoRoot: process.cwd() });
+    checks.push(...flaky.checks);
+    issues += flaky.issues;
+  } catch (err) {
+    // Surface the cause: a bare "could not be read" hid the real error and made
+    // this look like a missing file rather than a bug in the check itself.
+    checks.push({ name: 'Flaky quarantine', status: 'SKIP', detail: `ledger check failed: ${err && err.message ? err.message : String(err)}` });
   }
 
   let langIssues = 0;

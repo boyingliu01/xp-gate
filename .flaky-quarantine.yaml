@@ -1,0 +1,17 @@
+# Flaky-test quarantine ledger (#603)
+#
+# A test listed here is skipped, not fixed. That is sometimes the right trade --
+# a flaky test in the gate path blocks everyone -- but it is only right for a
+# bounded time. Every entry therefore requires `owner` and `expiry`.
+#
+# `xp-gate doctor` warns about expired entries. An entry with no expiry counts as
+# already expired: quarantine without an end date is a permanent deletion that
+# merely still looks present.
+#
+# `critical_path: true` is reported even before expiry. A critical path that has
+# been flaky for months means the team has stopped trusting its own safety net,
+# and that is a decision to make rather than a line to leave standing.
+#
+# Fields: test (required), owner (required), expiry YYYY-MM-DD (required),
+#         issue, reason, critical_path.
+quarantined: []

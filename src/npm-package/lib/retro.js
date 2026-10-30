@@ -14,6 +14,7 @@
 const fs = require('fs');
 const path = require('path');
 const { execSync } = require('child_process');
+const { computeFlakyStats, parseQuarantine, findPolicyViolations } = require('./flaky');
 
 /**
  * Upper bound for a believable gate runtime. A gate that reports more than two
@@ -273,6 +274,31 @@ function buildReport(opts) {
     L.push(`- Avg gate duration: ${avgMs}ms, p50 ${p50}ms over ${measurable.length} measurable gate(s) (${excluded} excluded${nullDurations ? `, ${nullDurations} recorded null` : ''})`);
   } else if (gateEntries.length > 0) {
     L.push(`- Avg gate duration: no measurable samples (${excluded} of ${gateEntries.length} excluded as null or anomalous)`);
+  }
+  L.push('');
+
+  // Flaky-test governance (#603)
+  L.push('## Test Stability (#603)');
+  const flaky = computeFlakyStats(gateEntries);
+  if (!flaky.measurable) {
+    // Say "not measured" rather than "0%". A journal with no re-runs cannot
+    // distinguish a stable suite from an unmeasured one, and printing 0% would
+    // claim the former.
+    L.push(`⚠️  NOT MEASURABLE — ${flaky.reason}`);
+  } else {
+    L.push(`- First-pass rate: ${flaky.firstPassRate}% (${flaky.firstPasses}/${flaky.firstAttempts} first attempts)`);
+    L.push(`- Flaky recoveries: ${flaky.flakyRecoveries} of ${flaky.totalRuns} run(s) passed only on re-run (${flaky.flakyRate}%)`);
+    // The pass rate above counts re-run successes, so state the gap explicitly.
+    L.push(`- Note: the gate pass rate above counts re-run successes; first-pass rate is the honest number.`);
+  }
+  const quarantineEntries = parseQuarantine(path.join(process.cwd(), '.flaky-quarantine.yaml'));
+  if (quarantineEntries.length > 0) {
+    const violations = findPolicyViolations(quarantineEntries, now);
+    L.push(`- Quarantined tests: ${quarantineEntries.length} (${violations.length} policy violation(s))`);
+    for (const v of violations) {
+      // An expired entry is a permanent deletion wearing a quarantine badge.
+      L.push(`  - ${v.rule}: ${v.entry.test} (owner ${v.entry.owner || 'unassigned'}, expiry ${v.entry.expiry || 'none'})`);
+    }
   }
   L.push('');
 
