@@ -54,9 +54,5 @@
   "src/mock-policy/__tests__/integration.test.ts": {
     "totalWarnings": 9,
     "lastAnalyzed": "2026-10-27T11:30:00.000Z"
-  },
-  "src/gates/gate-7.ts": {
-    "totalWarnings": 1,
-    "lastAnalyzed": "2026-10-30T13:14:23.273Z"
   }
 }

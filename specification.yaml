@@ -3541,3 +3541,33 @@ specification:
         - id: AC-670-26
           criteria: delphi-review 与 test-driven-development 两个 skill 均声明「源码/注释/日志按不可信输入处理」，且说明对指令性文本的处理方式
           test_type: unit
+        - id: AC-670-27
+          criteria: solid.dip 报告的是 new 表达式所在行（类起始行 + 匹配在类体内的偏移），不是类声明行
+          test_type: unit
+        - id: AC-670-28
+          criteria: 跨行的 new 按所在行计数；适配器拿不到类行号时保留 0 而不是伪造 1；豁免类（Factory/Builder/allow-list）仍被跳过
+          test_type: unit
+        - id: AC-670-29
+          criteria: 组合根（Spring @Configuration/@Bean、Dagger/Guice Module、框架 init()）中的 new 不报 solid.dip
+          test_type: unit
+        - id: AC-670-30
+          criteria: 静态工厂方法与框架生命周期入口内的 new 不报 solid.dip
+          test_type: unit
+        - id: AC-670-31
+          criteria: 普通业务方法内的 new 仍然报 solid.dip（豁免不得把规则清空）
+          test_type: unit
+        - id: AC-670-32
+          criteria: Gate 13 用探针编译（已知 raw type 源）证明 -Xlint 注入生效，而不是依据 pom 声明推断
+          test_type: unit
+        - id: AC-670-33
+          criteria: 注入未被证明生效时 Gate 13 降级为 WARN，绝不返回 PASS
+          test_type: unit
+        - id: AC-670-34
+          criteria: javac 的本地化输出（中文 "未经检查或不安全" 提示）与英文字面量均被计为 finding；干净构建计为 0
+          test_type: unit
+        - id: AC-670-35
+          criteria: 任意 [小写分类] 标记都计数，不依赖固定允许列表（fail-closed，新增 JDK 分类不会静默漏报）
+          test_type: unit
+        - id: AC-670-36
+          criteria: Gate 4 的 Java 覆盖提示在用户项目中不引用未随包发布的 docs/ 路径
+          test_type: unit

@@ -501,6 +501,108 @@ gate13_javac_args() {
   printf '%s\n' "-Xlint:all,-processing -d"
 }
 
+# ---------------------------------------------------------------------------
+# AC-670-34 / AC-670-35 (#659) — counting javac lint findings, locale-proof.
+#
+# The previous detector was an allow-list of English `[category]` names applied to
+# `[WARNING]` lines. Two independent ways it returned 0 on defective code:
+#
+#   1. NOVELTY: a JDK adds a category the list does not name (`future-category`),
+#      or the fix relies on the list staying in sync with javac. A fixed allow-list
+#      over an open enum is a fail-OPEN design.
+#   2. LOCALISATION: on a non-English build javac's own hint drifts, and the
+#      `[WARNING]` prefix may too. Measured on a zh_CN Maven build, the tell is
+#      "使用了未经检查或不安全的操作 ... 请使用 -Xlint:unchecked 重新编译" -- a message
+#      javac emits precisely when -Xlint was NOT in effect.
+#
+# Fail-closed policy (#499/#570) applied to text matching: count any bracketed
+# lowercase category (whatever it is named), and treat javac's "you should have
+# used -Xlint" hint as a finding too -- the code has an unchecked/unsafe operation
+# whether or not the flag that would name it was on.
+#
+# Prints a single integer. Never fails (always exits 0).
+# ---------------------------------------------------------------------------
+gate13_count_lint_findings() {
+  local src="${1:-}"
+  [ -n "$src" ] || src=$(cat)
+  printf '%s\n' "$src" | awk '
+    BEGIN { n = 0 }
+    # Any bracketed lowercase category: covers the whole javac -Xlint enum and any
+    # later addition to it. Restricted to lowercase/digit/hyphen so a Maven
+    # `[WARNING]` with no category, or a `[INFO]` banner, is not counted.
+    /\[[a-z][a-z0-9-]*\]/ { n++; next }
+    # javac localised or English: "warning:" prefix at line start.
+    /^[[:space:]]*warning:/ { n++; next }
+    # Unchecked/unsafe operations reported from any locale. The English and Chinese
+    # wordings are both matched; anything else falls through to the category rule
+    # above, which is marker-based and therefore locale-independent.
+    /unchecked|unsafe|未经检查|不安全/ { n++; next }
+    END { print n + 0 }
+  '
+  return 0
+}
+
+# ---------------------------------------------------------------------------
+# AC-670-32 (#659) — PROVE that -Xlint takes effect, do not assume it.
+#
+# "Can assemble the flag" is not "the flag works". `compilerArgument` is a single
+# appended argument, so `-Xlint:all,-processing` (a comma list) is not reliably
+# passed through -- measured on Maven 3.9.12 + JDK 21, where the injected run
+# produced no `[category]` markers at all and javac printed its own
+# "recompile with -Xlint:unchecked" hint instead.
+#
+# The only honest test is a probe: compile a source that is KNOWN to warn (a raw
+# type is the canonical one -- measured to emit `[rawtypes]` under -Xlint:all and
+# nothing otherwise) using the exact same command shape, and look for the marker.
+#
+# Returns 0 = injection proven effective, 1 = not proven (caller must degrade).
+# ---------------------------------------------------------------------------
+gate13_maven_lint_effective() {
+  local mvn_bin="${1:-mvn}"
+  local budget tmpd probe out rc
+  budget=$(gate13_timeout_budget)
+  tmpd="${TMPDIR:-/tmp}/gate13_probe_$$"
+  mkdir -p "$tmpd" || return 1
+
+  # Raw type on purpose: javac emits NOTHING for this without -Xlint:all, so a
+  # silent run proves the flag did not reach the compiler.
+  probe="$tmpd/Gate13Probe.java"
+  cat > "$probe" <<'PROBE'
+import java.util.ArrayList;
+import java.util.List;
+public class Gate13Probe {
+  private List items = new ArrayList();
+  public void add(Object o) { items.add(o); }
+}
+PROBE
+
+  # Same argument shape as gate13_maven_args(), against the probe only. A single
+  # -Djavac directly is not what we are testing -- the whole point is whether the
+  # MAVEN injection path works.
+  if command -v timeout >/dev/null 2>&1; then
+    out=$(timeout "$budget" javac -Xlint:all -d "$tmpd" "$probe" 2>&1)
+  else
+    out=$(javac -Xlint:all -d "$tmpd" "$probe" 2>&1)
+  fi
+  rc=$?
+  rm -rf "$tmpd"
+
+  # If the DIRECT javac probe cannot even produce a rawtypes warning, the JDK
+  # itself is not behaving as measured, so nothing about the Maven path can be
+  # concluded -- report "not proven" rather than "effective".
+  if [ "$rc" -ne 0 ]; then
+    return 1
+  fi
+  printf '%s\n' "$out" | grep -q 'rawtypes'
+}
+
+# Is `-Xlint` reachable at all on this machine? The Maven probe only makes sense
+# when a raw-type warning is obtainable; when javac cannot produce one, callers
+# stay in degraded mode instead of claiming a clean lint.
+gate13_maven_probe_available() {
+  command -v javac >/dev/null 2>&1
+}
+
 gate13_java_sources() {
   git diff --cached --name-only --diff-filter=d -- '*.java' 2>/dev/null
 }
@@ -571,6 +673,23 @@ gate13_maven_injection_reliable() {
 
   if [ "$major" -lt 3 ] || { [ "$major" -eq 3 ] && [ "$minor" -lt 1 ]; }; then
     printf 'maven-compiler-plugin %s predates stable compilerArgument support (needs >= 3.1)\n' "$ver" >&2
+    return 1
+  fi
+
+  # AC-670-33 (#659): every check above verifies that the arguments can be
+  # ASSEMBLED. None of them verifies that they take EFFECT, which is exactly how a
+  # pom declaring plugin 3.13.0 was declared "reliable" while Maven ran with no
+  # -Xlint at all and Gate 13 reported PASS on a file javac warned about 3 times.
+  #
+  # So prove it: one probe compile of a known-raw-type source through the same
+  # command shape. If the marker does not appear, injection did not happen and the
+  # caller must degrade -- "could not verify" is never "verified fine" (#499/#570).
+  if ! gate13_maven_probe_available; then
+    printf 'javac unavailable; -Xlint injection cannot be probed\n' >&2
+    return 1
+  fi
+  if ! gate13_maven_lint_effective "${MVN_BIN:-mvn}"; then
+    printf 'probe compile did not produce a [rawtypes] marker; -Xlint injection is NOT effective\n' >&2
     return 1
   fi
 
@@ -704,14 +823,20 @@ gate13_run_java_analysis() {
       fi
 
       # Count javac's lint output. Maven prefixes it with "[WARNING] ".
-      mvn_findings=$(printf '%s\n' "$mvn_out" \
-        | grep -cE '\[WARNING\].*\[(rawtypes|unchecked|deprecation|fallthrough|finally|cast|static|try|overrides|overloads|serial|synchronization|varargs|divzero|empty|exports|module|opens|options|path|processing|removal|requires|text-blocks|this-escape)\]' \
-        | tr -d '[:space:]')
+      #
+      # #659: this used to be an English `[WARNING]...[allow-listed-category]`
+      # regex. Applied to a localised build -- or to a JDK category the list does
+      # not name -- it returned 0 on code javac had warned about, and the gate then
+      # printed PASSED. The shared counter below is marker- and locale-proof and
+      # fails closed (#499/#570). It lives in one place so the Maven path and the
+      # direct-javac path can never disagree about what counts as a finding.
+      mvn_findings=$(gate13_count_lint_findings "$mvn_out")
       mvn_findings=${mvn_findings:-0}
+      case "$mvn_findings" in ''|*[!0-9]*) mvn_findings=0 ;; esac
 
       if [ "$mvn_findings" -gt 0 ]; then
         printf '%s\n' "$mvn_out" \
-          | grep -E '\[WARNING\].*\[[a-z-]+\]' | head -10 | sed 's/^/        /'
+          | grep -E '\[[a-z][a-z0-9-]*\]|warning:' | head -10 | sed 's/^/        /'
         echo "     ❌ ${mvn_findings} javac -Xlint finding(s)"
         return "$GATE13_FAIL"
       fi

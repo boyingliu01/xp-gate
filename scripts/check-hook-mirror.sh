@@ -91,7 +91,11 @@ done
 # covers future files automatically; no file list to drift.
 [ -d src/principles ] || fail "missing canonical principles directory: src/principles"
 [ -d src/npm-package/principles ] || fail "missing mirror principles directory: src/npm-package/principles"
-principles_diff=$(diff -rq src/principles src/npm-package/principles 2>&1 || true)
+# __tests__ is excluded for the same reason as the mock-policy tree below:
+# sync-package-content.js lists it in SKIP_DIRS, so demanding equality over tests
+# would fail on a difference the sync step is designed to keep. (Reproduced: adding
+# src/principles/__tests__/dip-line.test.ts made this check fail on a correct repo.)
+principles_diff=$(diff -rq -x '__tests__' src/principles src/npm-package/principles 2>&1 || true)
 [ -z "$principles_diff" ] || fail "principles mirror tree drift:
 $principles_diff"
 
