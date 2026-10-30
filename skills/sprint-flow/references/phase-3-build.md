@@ -34,11 +34,24 @@
 |---|------|------------------------------|----------|
 | 1 | **Gate 3 CCN** | 单函数圈复杂度 **>10 BLOCK**、**>5 WARN** | 拆函数 / 早返回 / 抽策略表；`xp-gate check 3 <file>` |
 | 2 | **Gate 6 Boy Scout** | **新文件 0 warning**；修改文件 warning 数不得高于 `.warnings-baseline.json`；**单函数 ≤50 行**；**嵌套 ≤4 层** | 新文件当"零容忍"写；改动前 `xp-gate check 6` 看基线 |
-| 3 | **Gate 2 重复代码** | jscpd 相似度 **>5% BLOCK** | 抽公共函数，别复制粘贴；`xp-gate check 2 <dir>` |
+| 3 | **Gate 2 重复代码** | jscpd 报告重复**仅提示，不阻断** | 抽公共函数，别复制粘贴；`xp-gate check 2 <dir>` |
 | 4 | **Gate 4 Principles** | 14 条 Clean Code/SOLID 规则，任一 error/warning 即拦（按 `.principlesrc`） | `xp-gate check 4 <file>`；避免超长参数表、空 catch、`as any` |
 | 5 | **Gate 1 Lint** | 适配器 lint 任一 error | 提交前跑一次项目 lint；不要留未用变量/导入 |
 | 6 | **Gate 5 测试** | 测试全绿 + 覆盖率 ≥80%（新 .ts/.tsx 无测试直接 BLOCK） | 新代码先写测试（TDD）；`npx vitest run <file>` |
 | 7 | **mirror/sync 纪律** | 改 `githooks/` 或 `skills/` 后必须 `node src/npm-package/scripts/sync-package-content.js --fix` 且 `bash scripts/check-hook-mirror.sh` 报 PASS | 忘了同步会在 pre-push 的 mirror 校验被打回 |
+
+**权威清单用 `xp-gate gate-rules` 现取，不要背上面这张表。** 上表是手抄的,阈值真正定义在
+`.principlesrc`、`jscpd.conf.json` 和 `githooks/pre-commit` 里。`xp-gate gate-rules` 从那些
+文件生成一份带**出处**的清单:
+
+```bash
+xp-gate gate-rules          # markdown 表:规则 / 严重度 / 阈值 / 出处
+xp-gate gate-rules --json   # 机器可读
+```
+
+为什么必须生成而不是手写:这张表原本写"jscpd 相似度 >5% BLOCK",而 Gate 2 实际只是提示、
+从不阻断——有人会去为一个永不触发的裁定重构代码。**一个说谎的自检清单比没有清单更糟**,
+它会让人按错误规则写,然后在提交时被告知另一套。改阈值时只需改配置,清单自动跟上。
 
 **一条命令抢先看**：`xp-gate check . --changed --brief` 只跑"本次 diff 会触发的门禁"，
 一屏出 PASS/SKIP/BLOCK，目标 <5 s。把它放在 ralph-loop 每个 REQ 的 step 0，先看红不红，
