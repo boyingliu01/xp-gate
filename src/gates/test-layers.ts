@@ -20,7 +20,22 @@ export interface TestLayerReport {
   layer1: {
     pairedSources: number;
     unpairedSources: string[];
+    /**
+     * Sources the pairing convention does not describe (#642).
+     *
+     * Reported apart from `unpairedSources` because the two call for opposite
+     * responses: an unpaired source needs a test, whereas an out-of-scope source
+     * (a shell script covered by BATS) needs the convention widened. Counting it
+     * as "unpaired" would ask the reader to write a .test.ts for `pre-commit`.
+     */
+    outOfScopeSources: string[];
     pairRate: number;
+  };
+  /** Test suites that live outside src/ -- BATS and other shell-level suites (#642). */
+  shellSuites: {
+    total: number;
+    bats: number;
+    files: string[];
   };
   layer2: {
     integrationFiles: number;
@@ -175,6 +190,8 @@ interface LayerCounts {
   integrationTests: string[];
   e2eTests: string[];
   unpairedSources: string[];
+  outOfScopeSources: string[];
+  shellSuites: string[];
   pairedCount: number;
 }
 
@@ -189,15 +206,24 @@ function appendPairingLines(messages: string[], counts: LayerCounts, totalNeedin
   messages.push('  Layer 1 (Unit Pairing):');
   messages.push(`    Paired:    ${counts.pairedCount}/${totalNeedingTests} (${pairRate}%)`);
 
-  const unpaired = counts.unpairedSources;
-  if (unpaired.length === 0 || unpaired.length > UNPAIRED_DISPLAY_LIMIT) {
-    if (unpaired.length > 0) {
-      messages.push(`    Unpaired:  ${unpaired.length} files (showing first 10)`);
-      unpaired.slice(0, UNPAIRED_DISPLAY_LIMIT).forEach(f => messages.push(`      - ${f}`));
-    }
+  appendUnpairedLines(messages, counts.unpairedSources);
+
+  // Out-of-scope sources get their own line: folding them into the unpaired list
+  // would ask the reader to write a module test for a shell script (#642).
+  if (counts.outOfScopeSources.length > 0) {
+    messages.push(`    Not pair-able (shell/other): ${counts.outOfScopeSources.length}`);
+  }
+}
+
+/** Unpaired list, kept short enough not to bury the summary above it (#620). */
+function appendUnpairedLines(messages: string[], unpaired: string[]): void {
+  if (unpaired.length === 0) return;
+  if (unpaired.length <= UNPAIRED_DISPLAY_LIMIT) {
+    messages.push(`    Unpaired:  ${unpaired.join(', ')}`);
     return;
   }
-  messages.push(`    Unpaired:  ${unpaired.join(', ')}`);
+  messages.push(`    Unpaired:  ${unpaired.length} files (showing first 10)`);
+  unpaired.slice(0, UNPAIRED_DISPLAY_LIMIT).forEach(f => messages.push(`      - ${f}`));
 }
 
 /** Format the console block for one analysis. */
@@ -207,10 +233,14 @@ function buildLayerMessages(counts: LayerCounts, totalNeedingTests: number): str
     '━━━ Test Layer Analytics ━━━',
     '',
     `  Sources:     ${counts.sourceFiles.length} files`,
-    `  Tests:       ${counts.testFiles.length} total`,
+    `  Tests:       ${counts.testFiles.length + counts.shellSuites.length} total`,
     `    Unit:      ${counts.unitTests.length}`,
-    `    Integra:   ${counts.integrationTests.length}`,
+    `    Integra:   ${counts.integrationTests.length + counts.shellSuites.length}`,
     `    E2E:       ${counts.e2eTests.length}`,
+    // Printed separately rather than folded into "Integra": whether a suite is
+    // BATS or a TS integration test is a fact about the repo that the reader is
+    // here to learn, and a shell suite is never counted as a unit test (#642).
+    `    Shell:     ${counts.shellSuites.length}`,
     '',
   ];
 
@@ -236,13 +266,21 @@ function buildLayerMessages(counts: LayerCounts, totalNeedingTests: number): str
 function computePairing(
   sourceFiles: string[],
   allFiles: string[],
-): { unpairedSources: string[]; pairedCount: number } {
+): { unpairedSources: string[]; outOfScopeSources: string[]; pairedCount: number } {
   const allSourceRelative = allFiles.map(f => path.join('src', f));
   const unpairedSources: string[] = [];
+  const outOfScopeSources: string[] = [];
   let pairedCount = 0;
 
   for (const source of sourceFiles) {
     if (isExempt(path.basename(source))) continue;
+    // A source the convention does not describe is not "unpaired" -- nobody was
+    // ever asked to pair it. Reporting it as unpaired would send the reader to
+    // write a module test for a shell script (#642).
+    if (isPairingOutOfScope(source)) {
+      outOfScopeSources.push(source);
+      continue;
+    }
     if (findExpectedTest(path.join('src', source), allSourceRelative)) {
       pairedCount++;
     } else {
@@ -250,7 +288,95 @@ function computePairing(
     }
   }
 
-  return { unpairedSources, pairedCount };
+  return { unpairedSources, outOfScopeSources, pairedCount };
+}
+
+/**
+ * Directories that hold test suites but are not under `src/` (#642).
+ *
+ * `test-layers` used to scan only `<repo>/src`, so this repository's 166 BATS
+ * suites were invisible: the report said "Integration: 0" about a repo whose
+ * hook tests spawn real git, real shell adapters and real processes. A metric
+ * that omits 37% of the suites cannot be used to judge the test strategy.
+ */
+const SHELL_SUITE_DIRS = [
+  'githooks/__tests__',
+  'scripts/__tests__',
+  'tests',
+  'test',
+];
+
+/** A shell-level test suite: BATS or a bare .test.cjs/.test.mjs. */
+function isShellSuite(normalized: string): boolean {
+  return /\.test\.bats$/.test(normalized)
+    || /\.test\.(cjs|mjs)$/.test(normalized)
+    || /\/__tests__\/[^/]+\.bats$/.test(normalized);
+}
+
+/**
+ * Find test suites outside `src/` (#642).
+ *
+ * Bounded to the conventional test directories rather than walking the whole
+ * repo: node_modules and build output would otherwise dominate, and a suite that
+ * is not under one of these roots is not discoverable by the runner either.
+ */
+function listDirNames(abs: string): string[] {
+  try {
+    // Explicit encoding: without it readdirSync may hand back Buffer entries.
+    // The array check covers stubbed/mocked fs implementations too -- a suite
+    // that exercises the "directory missing" path must not crash the scanner.
+    const listing = fs.readdirSync(abs, { encoding: 'utf8' });
+    return Array.isArray(listing) ? listing : [];
+  } catch {
+    return [];
+  }
+}
+
+/** Suites under one shell-test root, as repo-relative forward-slash paths. */
+function suitesInDir(root: string, rel: string): string[] {
+  const prefix = rel.split(path.sep).join('/');
+  return listDirNames(path.join(root, rel))
+    .map(name => `${prefix}/${name}`)
+    .filter(isShellSuite);
+}
+
+export function discoverShellSuites(cwd?: string): string[] {
+  const root = cwd || process.cwd();
+  const found = SHELL_SUITE_DIRS.flatMap(rel => suitesInDir(root, rel));
+  // Sorted so the report is stable across filesystems with differing readdir order.
+  return found.sort();
+}
+
+/**
+ * Files the `.test.ts` pairing convention does not apply to (#642).
+ *
+ * Shell scripts are exercised by BATS suites, not by a neighbouring module
+ * test. Listing them separately keeps the pair rate about the language whose
+ * convention it actually describes.
+ */
+function isPairingOutOfScope(filePath: string): boolean {
+  return /\.(sh|bash|bats)$/.test(filePath) || !/\.(ts|tsx|js|jsx|mjs|cjs|py|go|java|kt)$/.test(filePath);
+}
+
+/** The summary block; shell suites are added to the test total (#642). */
+function buildSummary(counts: LayerCounts, shellOutsideSrc: string[]): TestLayerReport['summary'] {
+  return {
+    totalSources: counts.sourceFiles.length,
+    totalTests: counts.testFiles.length + shellOutsideSrc.length,
+    unitTests: counts.unitTests.length,
+    integrationTests: counts.integrationTests.length,
+    e2eTests: counts.e2eTests.length,
+  };
+}
+
+/**
+ * Shell-level suites that the src/ scan did not already pick up (#642).
+ *
+ * Keeping these out of the count made "Integration: 0" a statement about the
+ * scanner rather than about the repository.
+ */
+function shellSuitesOutside(testFiles: string[], dir: string): string[] {
+  return discoverShellSuites(dir).filter(f => !testFiles.includes(f));
 }
 
 /**
@@ -264,7 +390,8 @@ export function analyzeTestLayers(cwd?: string): TestLayerReport {
   const testFiles = allFiles.filter(f => isTestFile(f));
   const byLayer = (layer: string): string[] => testFiles.filter(f => classifyTestLayer(f) === layer);
 
-  const { unpairedSources, pairedCount } = computePairing(sourceFiles, allFiles);
+  const { unpairedSources, outOfScopeSources, pairedCount } = computePairing(sourceFiles, allFiles);
+  const shellOutsideSrc = shellSuitesOutside(testFiles, dir);
 
   const counts: LayerCounts = {
     sourceFiles,
@@ -273,22 +400,24 @@ export function analyzeTestLayers(cwd?: string): TestLayerReport {
     integrationTests: byLayer('integration'),
     e2eTests: byLayer('e2e'),
     unpairedSources,
+    outOfScopeSources,
+    shellSuites: shellOutsideSrc,
     pairedCount,
   };
-  const totalNeedingTests = sourceFiles.filter(f => !isExempt(path.basename(f))).length;
+  const totalNeedingTests = sourceFiles.filter(f => !isExempt(path.basename(f)) && !isPairingOutOfScope(f)).length;
 
   return {
-    summary: {
-      totalSources: sourceFiles.length,
-      totalTests: testFiles.length,
-      unitTests: counts.unitTests.length,
-      integrationTests: counts.integrationTests.length,
-      e2eTests: counts.e2eTests.length,
-    },
+    summary: buildSummary(counts, shellOutsideSrc),
     layer1: {
       pairedSources: pairedCount,
       unpairedSources,
+      outOfScopeSources,
       pairRate: totalNeedingTests > 0 ? Math.round((pairedCount / totalNeedingTests) * 100) : 100,
+    },
+    shellSuites: {
+      total: shellOutsideSrc.length,
+      bats: shellOutsideSrc.filter(f => f.endsWith('.test.bats') || f.endsWith('.bats')).length,
+      files: shellOutsideSrc,
     },
     layer2: {
       integrationFiles: counts.integrationTests.length,
