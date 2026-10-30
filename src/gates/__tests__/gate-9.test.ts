@@ -217,4 +217,38 @@ describe('gate-9.ts', () => {
     expect(result.status).toBe('SKIP');
     expect(result.messages.some(m => m.includes('unparseable'))).toBe(true);
   });
+
+  /**
+   * @test REQ-640
+   * @intent Semgrep's metrics upload is pure overhead for a gate: it sends usage
+   *         statistics to the registry and contributes nothing to the verdict.
+   *         Measured on this machine, one file: 11.7s with metrics, 6.8s with
+   *         `--metrics=off` -- a 42% cut on a gate whose actual scan work is a
+   *         fraction of a second (#640 measured 0.45s of work in 30.8s wall).
+   *
+   *         The assertion is on the ARGUMENT VECTOR, not on timing: a timing
+   *         assertion would be flaky, and the thing that can regress is the flag
+   *         silently disappearing in a refactor.
+   * @covers AC-640-01
+   */
+  it('AC-640-01: passes --metrics=off so the gate does not pay for telemetry', () => {
+    mockSpawnSync.mockReturnValueOnce({
+      status: 0, stdout: '/usr/bin/semgrep\n', stderr: '', pid: 1, output: ['', '/usr/bin/semgrep\n', ''], signal: null,
+    } as any);
+    mockSpawnSync.mockReturnValueOnce({
+      status: 0, stdout: '{"results":[],"errors":[]}', stderr: '', pid: 1, output: ['', '', ''], signal: null,
+    } as any);
+
+    runGate9({ changedFiles: ['src/app.ts'], projectLang: 'typescript' });
+
+    const scanCall = mockSpawnSync.mock.calls.find(
+      (call) => Array.isArray(call[1]) && (call[1] as string[]).includes('scan'),
+    );
+    expect(scanCall).toBeDefined();
+    const argv = scanCall?.[1] as string[];
+    expect(argv).toContain('--metrics=off');
+    // The flag must not come at the cost of the verdict-carrying output format.
+    expect(argv).toContain('--json');
+    expect(argv).toContain('--config=p/security-audit');
+  });
 });

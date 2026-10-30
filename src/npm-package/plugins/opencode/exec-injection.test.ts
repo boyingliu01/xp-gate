@@ -25,11 +25,19 @@ const SOURCE = path.join(PLUGIN_DIR, "index.ts")
 
 /** sqlite3 spawn deadline. Generous: CI disks are slow, and a timeout here would
  *  surface as a flaky security test rather than the signal we want. */
-const SQLITE_TIMEOUT_MS = 20000
+const SQLITE_TIMEOUT_MS = 20_000
 
 /** Read a function body out of source; the module's TS runtime is not loadable here. */
 function readFunctionBody(name: string): string {
-  const source = fs.readFileSync(SOURCE, "utf8")
+  // A throw here means the source shape moved. That is a real failure worth seeing,
+  // so it is re-thrown with the reason rather than swallowed into an empty string --
+  // an unreadable source must not read as "the function has no execSync".
+  let source: string
+  try {
+    source = fs.readFileSync(SOURCE, "utf8")
+  } catch (error) {
+    throw new Error(`cannot read ${SOURCE}: ${(error as Error).message}`)
+  }
   const start = source.indexOf(`function ${name}`)
   expect(start).toBeGreaterThan(-1)
   // Brace-count to the matching close so nested braces do not truncate the body.

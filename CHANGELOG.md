@@ -11,11 +11,33 @@
 - 补齐 `coverage.exclude` 的五条镜像（`principles` / `gates` / `build-integrity` /
   `architecture` / `mock-policy`）。
 
+- **OpenCode v2 插件不加载（#639）**：v2 的默认导出校验要求 `id` + `effect|setup`，
+  v1 的 `{ id, server }` 被直接拒绝，导致 `gate-check` / `gate-principles` / `gate-arch`
+  在 v2 会话里全部消失，且每次启动刷一遍 load error。现在同时导出 `server` 与
+  `setup`，一个版本服务两代运行时。
+- **`@boyingliu01/opencode-plugin/tui` 每次启动都安装失败（#639）**：
+  `exports["./tui"]` 指向 `./tui-plugin.tsx`，而该文件自 v0.13.0 起就不存在
+  （TUI 面板做废）。悬空导出比缺导出更糟——manifest 合法，resolver 无果，
+  失败点在消费者启动时且无线索指回声明处。已移除该导出与 `files` 里的残留条目。
+- **`readCurrentSessionModel` 的 shell 注入（#639）**：`sessionId` 来自调用方参数
+  却被插进 shell 字符串，`escapedId` 只转义了 SQL 单引号（SQL 的关注点，不是 shell 的），
+  双引号、命令替换、反引号继续生效。改用 `execFileSync` 传 argv。
+
 ### Added
 - `scripts/__tests__/coverage-mirror-consistency.test.cjs`：从**磁盘**枚举真正有
   canonical 兄弟的镜像目录，逐个核对两份排除清单，而不是硬编码列表——
   新增镜像目录会被守卫抓到，而不是等下一个人踩同一个坑。
   变异验证：删掉任一镜像排除后守卫立即变红。
+- `plugins/opencode/contract-v2.test.ts`：把 v2 的校验规则复述成谓词再断言，
+  失败信息是可读的原因而不是 schema dump；同时核对 `exports`/`files` 不悬空。
+- `plugins/opencode/exec-injection.test.ts`：真调用 sqlite3 验证带元字符的
+  session id 作为数据到达，而不是被执行。改回 `execSync` 后立即变红。
+
+### Changed
+- **覆盖率门槛棘轮 60% → 70%（#562）**：第一次由**测量修正**而非新增测试推动的棘轮。
+  实测 lines/statements **78.80%**、functions **84.37%**、branches **81.80%**，
+  四档阈值分别设 70 / 70 / 83 / 81，均留有余量。
+  70 足以让「重新加入一条镜像树」这种回退立即阻断，而不是被平均值吸收。
 
 
 ## [0.35.14.0] - 2026-10-30

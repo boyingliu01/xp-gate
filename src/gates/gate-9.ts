@@ -10,6 +10,27 @@ import {
   getChangedFiles, detectProjectLang,
 } from './common';
 
+// The semgrep ruleset, in ONE place (#640). It appears in the scan invocation and in
+// two messages that tell the user which command to re-run by hand; three copies of a
+// string that decides what gets scanned is a drift waiting to happen.
+export const SEMGREP_RULESET = 'p/security-audit';
+
+/**
+ * Fixed flags every Gate 9 semgrep run carries (#640).
+ *
+ * `--metrics=off` is the important one. Semgrep's usage upload is pure overhead for
+ * a gate: it reports statistics to the registry and contributes nothing to the
+ * verdict. Measured on one file on this machine, twice each way: 11.7s / 17.2s with
+ * metrics, 4.7s / 4.9s without -- a 58-72% cut on a gate whose actual scan work is
+ * a fraction of a second (#640 measured 0.45s of work inside 30.8s of wall time).
+ * The privacy answer is the same shape: a quality gate should not phone home about
+ * the files it just read.
+ *
+ * `--disable-version-check` removes the second network round trip. Neither flag
+ * touches the JSON on stdout, which is what carries the verdict (#518).
+ */
+export const SEMGREP_EXTRA_ARGS = ['--disable-version-check', '--metrics=off'] as const;
+
 export function runGate9(input: GateInput): GateOutput {
   const startMs = Date.now();
   const messages: string[] = [];
@@ -27,7 +48,7 @@ export function runGate9(input: GateInput): GateOutput {
   if (!tool.available) {
     messages.push('     ⚠️  WARN - semgrep not installed — SAST scanning unavailable');
     messages.push('     Install: brew install semgrep (macOS) | pip install semgrep (Linux/Windows)');
-    messages.push('     Pre-cache rules: semgrep --config=p/security-audit');
+    messages.push('     Pre-cache rules: semgrep --config=' + SEMGREP_RULESET);
     messages.push('     Gate 9: SAST Security (WARN, semgrep not installed)');
     recordAudit('gate-9', 'sast-security', 'WARN', 0, startMs);
     return { status: 'WARN', messages, exitCode: 0 };
@@ -44,8 +65,9 @@ export function runGate9(input: GateInput): GateOutput {
     return { status: 'SKIP', messages, exitCode: 0 };
   }
 
-  // Run semgrep with JSON output
-  semgrepArgs.push('scan', '--config=p/security-audit', '--json', '--disable-version-check', ...semgrepFiles);
+  // Run semgrep with JSON output. Fixed overhead per run is the point of #640 --
+  // see SEMGREP_EXTRA_ARGS.
+  semgrepArgs.push('scan', `--config=${SEMGREP_RULESET}`, '--json', ...SEMGREP_EXTRA_ARGS, ...semgrepFiles);
 
   const result = runTool(semgrepCmd, semgrepArgs, { cwd: input.cwd });
 
@@ -125,7 +147,7 @@ function renderSemgrepBlock(
   messages.push('  ❌ BLOCKED — blocking-severity vulnerability found');
   messages.push('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
   messages.push(...findingLines);
-  messages.push("  Run 'semgrep scan --config=p/security-audit' to review all findings.");
+  messages.push(`  Run 'semgrep scan --config=${SEMGREP_RULESET}' to review all findings.`);
   recordAudit('gate-9', 'sast-security', 'FAIL', blocking, startMs);
   return { status: 'FAIL', messages, exitCode: 1 };
 }
