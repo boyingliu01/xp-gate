@@ -470,11 +470,24 @@ function gateArchTool(directory: string) {
 
 function readCurrentSessionModel(dbPath: string, sessionId: string): string {
   try {
+    // execFileSync, NOT execSync (#639). `sessionId` comes from the caller's
+    // argument, and the previous form interpolated it into a shell string:
+    //
+    //   `sqlite3 "${dbPath}" "SELECT model FROM session WHERE id = '${escapedId}'"`
+    //
+    // Escaping only the SQL single quote left every SHELL metacharacter live --
+    // a session id containing `"`, `$( )` or a backtick escaped the quoting and
+    // executed. Passing argv as an array removes the shell from the path
+    // entirely, so no escaping is needed or possible to get wrong.
+    //
+    // The SQL single quote is still escaped: that is a SQL concern, not a shell
+    // one, and it survives the move to argv unchanged.
     const escapedId = sessionId.replace(/'/g, "''")
-    const currentRaw = execSync(
-      `sqlite3 "${dbPath}" "SELECT model FROM session WHERE id = '${escapedId}'"`,
-      { encoding: "utf8", timeout: SQLITE_TIMEOUT_MS }
-    ).trim()
+    const sql = `SELECT model FROM session WHERE id = '${escapedId}'`
+    const currentRaw = execFileSync("sqlite3", [dbPath, sql], {
+      encoding: "utf8",
+      timeout: SQLITE_TIMEOUT_MS,
+    }).trim()
     if (!currentRaw) return "unknown"
     try {
       const parsed = JSON.parse(currentRaw)
@@ -664,9 +677,31 @@ export const XpGatePlugin = async (input: OpenCodePluginInput) => {
   }
 }
 
+/**
+ * The plugin module, shaped for BOTH OpenCode generations (#639).
+ *
+ * v1 read `server`. v2 validates the default export against a schema that
+ * requires `id` plus exactly one of `effect` / `setup`, and rejects anything
+ * else outright:
+ *
+ *   PluginModule.LoadError: Plugin must export a default definition with an id
+ *   and an effect or setup function.
+ *   (cause: SchemaError(Missing key at ["default"]["effect"] / ["default"]["setup"]))
+ *
+ * The failure mode is total, not partial: the plugin does not load at all, so
+ * `gate-check` / `gate-principles` / `gate-arch` simply vanish from v2 sessions
+ * and every startup prints a load error.
+ *
+ * `setup` and the v1 `server` take the same input and return the same shape, so
+ * the same function serves both keys. Both are exported deliberately: dropping
+ * `server` would break every v1 user on upgrade, which is a migration nobody
+ * asked for. `pluginModule` is not frozen, so this stays a plain object literal
+ * that both runtimes can read.
+ */
 const pluginModule = {
   id: "xp-gate",
   server: XpGatePlugin,
+  setup: XpGatePlugin,
 }
 
 /**

@@ -2300,6 +2300,27 @@ specification:
           criteria: 卸载并设置偏好后，nativeAgentDeploymentIsWanted 返回 false，init 不再部署
           test_type: integration
 
+    - id: REQ-639
+      title: OpenCode v2 插件模块契约与打包完整性
+      description: >
+        OpenCode v2（2.1.4+）更换了插件模块契约：默认导出必须是带 id 且带
+        effect 或 setup 的模块，v1 的 { id, server } 会被直接拒绝并导致整个插件
+        不加载。同时打包声明必须只引用真实存在的文件——一个指向不存在文件的
+        子路径导出会让 v2 的 npm 安装器在每次启动时失败。
+      acceptance_criteria:
+        - id: AC-639-01
+          criteria: 默认导出同时带 id 与 setup，满足 v2 模块校验规则
+          test_type: unit
+        - id: AC-639-02
+          criteria: 保留 v1 的 server 导出，升级不破坏既有 v1 用户
+          test_type: unit
+        - id: AC-639-03
+          criteria: package.json 的 exports 与 files 中每个路径都指向真实存在的文件
+          test_type: unit
+        - id: AC-639-04
+          criteria: session 模型读取不经过 shell，带元字符的 session id 作为数据到达 sqlite 而不被执行
+          test_type: unit
+
     - id: REQ-605
       description: "Gate 5c 必须显式区分「对齐通过」「未检查（SKIP）」「阻断（BLOCK）」，并按各语言测试文件约定发现测试"
       priority: high

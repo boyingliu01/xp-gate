@@ -62,9 +62,30 @@ Or via local path (development):
 }
 ```
 
+### OpenCode v2
+
+v2 validates the plugin's default export against a schema requiring `id` plus
+`effect` or `setup`. This package ships both keys from 0.35.15 onwards, so the
+same published version loads under v1 and v2 — no separate build, no manifest
+change on your side.
+
+Register it the same way (v2 reads the same `plugin` array):
+
+```json
+{
+  "plugin": ["@boyingliu01/opencode-plugin"]
+}
+```
+
+Do **not** register `@boyingliu01/opencode-plugin/tui`. The TUI panel was
+abandoned in v0.13.0 and there is no `/tui` entry; v2's npm installer treats the
+whole string as a package name, so it fails on every startup with
+`NpmInstallFailedError`. The subpath export was removed in 0.35.15 for exactly
+that reason.
+
 ## Requirements
 
-- OpenCode v0.11+
+- OpenCode v0.11+ (v2.1.4+ supported)
 - One of:
   - `xp-gate` CLI installed globally (`npm install -g @boyingliu01/xp-gate`) — **preferred**, or
   - the xp-gate repo checked out locally with `src/principles/index.ts` reachable — **fallback** (the tool will shell out via `npx -y tsx`)

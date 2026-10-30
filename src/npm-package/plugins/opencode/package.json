@@ -3,7 +3,7 @@
   "version": "0.35.15",
   "type": "module",
   "main": "index.ts",
-  "description": "XP-Gate quality gates + AI workflow skills + Sprint Flow TUI sidebar for OpenCode",
+  "description": "XP-Gate quality gates + AI workflow skills for OpenCode",
   "repository": {
     "type": "git",
     "url": "https://github.com/boyingliu01/xp-gate",
@@ -17,15 +17,10 @@
     ".": {
       "import": "./index.ts",
       "types": "./index.ts"
-    },
-    "./tui": {
-      "import": "./tui-plugin.tsx",
-      "types": "./tui-plugin.tsx"
     }
   },
   "files": [
     "index.ts",
-    "tui-plugin.ts",
     "skills/",
     "tsconfig.json",
     "README.md"
