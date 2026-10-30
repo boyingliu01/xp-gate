@@ -365,6 +365,21 @@ const COMMANDS = {
     },
     usage: 'xp-gate gate-coverage [--json] [--debt] [--strict] [--branch <name>]'
   },
+  'gate-rules': {
+    description: 'Print the gate limits that can block a commit, generated from the files that define them (#652)',
+    run: subargs => {
+      const { collectGateRules, renderGateRules } = require('../lib/gate-rules.js');
+      const rules = collectGateRules({ cwd: process.cwd() });
+      if (subargs.includes('--json')) {
+        process.stdout.write(`${JSON.stringify(rules, null, 2)}\n`);
+        return;
+      }
+      // Generated, never hand-copied: a checklist that drifts from the config it
+      // describes teaches the wrong rule and then contradicts it at commit time.
+      process.stdout.write(`${renderGateRules(rules)}\n`);
+    },
+    usage: 'xp-gate gate-rules [--json]'
+  },
   'rework': {
     description: 'Report rework: first-pass rate, rounds before landing, top blocking reasons (#651)',
     run: subargs => {

@@ -3751,3 +3751,12 @@ specification:
         - id: AC-668-04
           criteria: fixture 中的断言样例不被计为债务，裸断言仍被报告
           test_type: unit
+        - id: AC-652-01
+          criteria: 门禁清单阈值从 .principlesrc 等真相源生成而非硬编码
+          test_type: unit
+        - id: AC-652-02
+          criteria: 清单覆盖 principles/ccn/jscpd/boy-scout 四类规则
+          test_type: unit
+        - id: AC-652-03
+          criteria: 每条规则带出处指针且严重度归一化
+          test_type: unit
