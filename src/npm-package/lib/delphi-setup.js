@@ -20,8 +20,11 @@ function parseSetupArgs(args) {
   const models = {};
   let scope = 'global';
   let projectDir;
+  let uninstall = false;
   for (let i = 0; i < args.length; i++) {
-    if (args[i] === '--model') {
+    if (args[i] === '--uninstall') {
+      uninstall = true;
+    } else if (args[i] === '--model') {
       const spec = args[++i];
       const eq = typeof spec === 'string' ? spec.indexOf('=') : -1;
       if (eq === -1) {
@@ -53,6 +56,20 @@ function parseSetupArgs(args) {
       console.error(`[delphi-setup] ERROR: unknown argument "${args[i]}".`);
       return { error: true };
     }
+  }
+
+  // #646: --uninstall is a different verb, not a modifier -- it removes the native
+  // agents instead of rebinding them, so it must not demand --model.
+  if (uninstall) {
+    if (Object.keys(models).length > 0) {
+      console.error('[delphi-setup] ERROR: --uninstall cannot be combined with --model (remove or rebind, not both).');
+      return { error: true };
+    }
+    if (scope === 'local' && projectDir === undefined) {
+      console.error('[delphi-setup] ERROR: --uninstall --local requires --project <dir>.');
+      return { error: true };
+    }
+    return { models, scope, projectDir, uninstall };
   }
 
   const missing = DELPHI_ROLES.filter((role) => !models[role]);
@@ -95,9 +112,57 @@ function rebindTemplate(templateBody, modelId) {
   return lines.join('\n');
 }
 
+/**
+ * Remove the native Delphi agent files for one scope (#646).
+ *
+ * Idempotent by design: the point is to let a user stop the native path and KEEP it
+ * stopped across upgrades. A command that errors "nothing to remove" the second time
+ * is a command you cannot put in a bootstrap script.
+ *
+ * Reports what it actually removed rather than a bare "done" -- after this, `doctor`
+ * flips the binding check to SKIP, and the user needs to see that the state changed
+ * because of them, not because something broke.
+ *
+ * @param {'global'|'local'} scope
+ * @param {string|undefined} projectDir
+ * @returns {number} exit code
+ */
+function uninstallDelphiAgents(scope, projectDir) {
+  const targetDir = scope === 'local'
+    ? path.join(projectDir, '.qoder', 'agents')
+    : path.join(HOME_DIR, '.qoder', 'agents');
+
+  const removed = [];
+  const absent = [];
+  for (const role of DELPHI_ROLES) {
+    const targetPath = path.join(targetDir, `delphi-${role}.md`);
+    if (fs.existsSync(targetPath)) {
+      fs.unlinkSync(targetPath);
+      removed.push(`delphi-${role}.md`);
+    } else {
+      absent.push(`delphi-${role}.md`);
+    }
+  }
+
+  console.log(`  scope: ${scope === 'local' ? `project-level ${targetDir}` : `user-level ${targetDir}`}`);
+  if (removed.length > 0) console.log(`  removed: ${removed.join(', ')}`);
+  if (absent.length > 0) console.log(`  already absent: ${absent.join(', ')}`);
+  console.log('');
+  console.log('✓ Native Delphi agents are gone. The native channel is a same-model');
+  console.log('  three-persona self-check and never satisfied the three-distinct-model');
+  console.log('  contract, so this loses no review evidence.');
+  console.log('');
+  console.log('  To stop `xp-gate init` from reinstalling them, set the machine-level channel');
+  console.log('  preference once:');
+  console.log(`    ${path.join(CONFIG_DIR, '.delphi-config.json')}`);
+  console.log('    { "channels": ["external"] }');
+  return 0;
+}
+
 async function delphiSetup(args) {
   const parsed = parseSetupArgs(args || []);
   if (parsed.error) return 1;
+  if (parsed.uninstall) return uninstallDelphiAgents(parsed.scope, parsed.projectDir);
   const { models, scope, projectDir } = parsed;
 
   const templatesDir = path.join(__dirname, '..', 'plugins', 'qoder', 'agents');

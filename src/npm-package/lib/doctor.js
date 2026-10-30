@@ -3238,6 +3238,21 @@ async function doctorDelphi(options = {}) {
   // retype: the detail names delphi-setup. Project-level agents (from
   // `delphi-setup --local --project`) take precedence when a complete set
   // exists there, so the doctor agrees with the repair command (#414 R1 FC-09).
+  //
+  // #646: when the machine is configured for the external channel only, the native
+  // path is DISABLED BY CHOICE, not broken. Reporting FAIL here is what told external
+  // users their working setup was broken and pointed them at a repair command that
+  // reinstalls the thing they just removed. SKIP carries the reason so the line can
+  // never be read as green either -- the same rule every other gate follows.
+  const delphiChannel = require('./delphi-channel.js');
+  // Pass the directory that CONTAINS `.config`, not the `.config` dir itself:
+  // resolveChannels() appends `<home>/.config/xp-gate/...`, so handing it `.config`
+  // would look in `.config/.config/xp-gate` and never find the file.
+  const channelHome = process.env.XDG_CONFIG_HOME
+    ? path.dirname(process.env.XDG_CONFIG_HOME)
+    : undefined;
+  const channelResolution = delphiChannel.resolveChannels({ home: channelHome });
+  const nativeDisabled = !channelResolution.nativeEnabled;
   const { readQoderModelId } = require('./init.js');
   const roles = ['architecture', 'technical', 'feasibility'];
   const homeAgentsDir = path.join(HOME_DIR(), '.qoder', 'agents');
@@ -3252,7 +3267,16 @@ async function doctorDelphi(options = {}) {
   const agentIds = [];
   let agentsStatus = 'PASS';
   const agentDetails = [agentsSource];
-  for (const role of roles) {
+  // #646: skip the whole native binding check when the machine is external-only.
+  // The check exists to keep the native path healthy; when that path is switched off
+  // by configuration there is nothing to keep healthy, and reporting its absence as
+  // FAIL told users their working setup was broken.
+  if (nativeDisabled) {
+    add('Qoder Delphi agent bindings', 'SKIP',
+      `native channel disabled (channels=${channelResolution.channels.join(',')} via ${channelResolution.source}) — `
+      + 'Delphi review runs through the external provider');
+  }
+  for (const role of nativeDisabled ? [] : roles) {
     const agentPath = path.join(agentsDir, `delphi-${role}.md`);
     if (!fs.existsSync(agentPath)) {
       agentsStatus = 'FAIL';
@@ -3283,12 +3307,18 @@ async function doctorDelphi(options = {}) {
   // Report every problem class independently: missing files, unparseable
   // bindings and duplicates can coexist, and each has a different remedy
   // (#414 R1 MI-02).
-  if (agentIds.length !== roles.length) agentsStatus = 'FAIL';
-  if (new Set(agentIds).size !== agentIds.length) {
-    agentsStatus = 'FAIL';
-    agentDetails.push('duplicate model binding across experts — three DISTINCT ids are required');
+  //
+  // #646: only when the native channel is actually enabled. Running this over an
+  // empty agentIds (the disabled path) would compute `0 !== 3` and re-report the very
+  // FAIL the SKIP above just replaced.
+  if (!nativeDisabled) {
+    if (agentIds.length !== roles.length) agentsStatus = 'FAIL';
+    if (new Set(agentIds).size !== agentIds.length) {
+      agentsStatus = 'FAIL';
+      agentDetails.push('duplicate model binding across experts — three DISTINCT ids are required');
+    }
+    add('Qoder Delphi agent bindings', agentsStatus, agentDetails.join('; ') || 'all three bound');
   }
-  add('Qoder Delphi agent bindings', agentsStatus, agentDetails.join('; ') || 'all three bound');
 
   // 3. Skill install parity: a drifted installed copy is how "reinstall from
   // an old local repo" became a downgrade (#414 B4). Every bundled file is

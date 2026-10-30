@@ -2277,6 +2277,29 @@ specification:
     #
     # GATE_5C_STATUS 现在恒为 PASS / SKIP / BLOCK 之一，不再是空串。
     # ============================================================
+    - id: REQ-646
+      title: Delphi 通道偏好与 native 卸载
+      description: >
+        Qoder 的 native Delphi 通道已被实测证伪（subagent 派发采纳 agent 提示词但丢弃
+        model 绑定，三席永远是会话模型），不构成多模型交叉验证证据。因此必须允许用户在
+        机器级关掉 native 通道，且该选择在升级后仍然生效。
+      acceptance_criteria:
+        - id: AC-646-01
+          criteria: 机器级配置 channels 字段或 XP_GATE_DELPHI_CHANNEL 环境变量决定启用通道，环境变量优先，非法值回落默认并给出警告
+          test_type: unit
+        - id: AC-646-02
+          criteria: external-only 时 doctor 的 native 检查报 SKIP 并注明来源，不再 FAIL；未配置时仍按缺失报 FAIL
+          test_type: integration
+        - id: AC-646-03
+          criteria: delphi-setup --uninstall 幂等移除用户级与项目级三个 agent，且不允许与 --model 同时使用
+          test_type: integration
+        - id: AC-646-04
+          criteria: 通道守卫不是永久跳过——未配置偏好或无 agent 时该检查照旧失败
+          test_type: integration
+        - id: AC-646-05
+          criteria: 卸载并设置偏好后，nativeAgentDeploymentIsWanted 返回 false，init 不再部署
+          test_type: integration
+
     - id: REQ-605
       description: "Gate 5c 必须显式区分「对齐通过」「未检查（SKIP）」「阻断（BLOCK）」，并按各语言测试文件约定发现测试"
       priority: high

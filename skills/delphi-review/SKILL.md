@@ -384,6 +384,38 @@ Qoder 的内置模型**没有本地推理端点**：推理请求由 Qoder 客户
 - 项目级：`<project>/.qoder/agents/`（`xp-gate init`）
 - 用户级：`~/.qoder/agents/`（`xp-gate init --global`）
 
+#### 推荐路径：external-only（#646）
+
+上面整条 native 通道在本机**实测不可用**。所以推荐配置是**关掉它**，只走外部 provider —— 这是唯一能满足三模型契约的路径，也是这份文档的默认建议。
+
+**开启方式**（改一次机器级偏好，对所有仓库生效）：
+
+```bash
+# 1. 移除已部署的 native agent（幂等，重复执行不报错）
+xp-gate delphi-setup --uninstall --global
+# 或项目级：xp-gate delphi-setup --uninstall --local --project <dir>
+
+# 2. 写通道偏好，阻止 `xp-gate init` 再装回来
+#    ~/.config/xp-gate/.delphi-config.json
+#    { "channels": ["external"] }
+```
+
+临时覆盖（CI、一次性运行）：`XP_GATE_DELPHI_CHANNEL=external`。
+
+**生效范围**：
+
+| 位置 | external-only 时的行为 |
+|---|---|
+| `xp-gate init` / `init --global` | 不部署 `delphi-*.md`，打印 `SKIP (channels=external via config)` |
+| `xp-gate doctor delphi` | native 检查报 **SKIP** 并注明来源，**不再 FAIL**；外部链路（config / runner / 三席互异）照常逐项校验 |
+| 本技能的通道决策表 | 直接走 external，不再探测 native |
+
+**为什么偏好放在机器级**：通道选择是"这台机器上 Delphi 怎么跑"，与具体仓库无关。放进项目文件会让每个仓库各写一遍。
+
+**为什么不默认 external-only**：那会悄悄改掉所有没提要求的人的行为。默认保持两条通道都可用，由用户显式关闭。
+
+**doctor 的 SKIP 不等于绿灯**：它带着理由（`channels=external via config`），和"没装"、"坏了"能区分开。这是本项目所有门禁的统一规则——跳过必须说明为什么跳。
+
 **model 字段格式**：仍须写成 `"[DisplayName](modelId)"`。裸名字或已下线 ID 不会报错，会被平台静默忽略。`xp-gate init` 会审计已部署的 `delphi-*.md`，格式非法或 modelId 与本版本模板不一致时点名文件并给出"删除 → 重跑 `init` → 重启会话"提示；因为部署语义是"已存在不覆盖"，从 #417 之前的版本升级必须手工删旧文件再重跑 `init`。注意：修好绑定也只是让角色声明规范，并不改变上表的执行模型结论。
 
 **执行方式**：用 Agent tool 并行派发 3 个 subagent，`subagent_type` 分别取 `delphi-architecture`、`delphi-technical`、`delphi-feasibility`。**新建或修改 agent 文件后必须重开会话**——注册表只在会话启动时加载，否则报 `Unknown agent type`。
