@@ -74,6 +74,7 @@ src/npm-package/
 | `xp-gate audit [--tail \| --stats \| record]` | Inspect / record gate audit log |
 | `xp-gate ui-review` | Visual review for UI-bearing changes |
 | `xp-gate sprint-status [--json] [--watch] [--dir <path>]` | Show Sprint Flow progress (reads `.sprint-state/sprint-state.json`) |
+| `xp-gate gate-coverage [--json] [--debt] [--strict]` | Compliance view across every gate with four states (PASS/DEBT/SKIP/FAIL), debt quantification, evidence pointers, STALE detection (#636) |
 | `xp-gate --version` | Print version (sourced from VERSION file) |
 
 ## CONVENTIONS

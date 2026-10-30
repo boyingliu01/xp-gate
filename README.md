@@ -170,6 +170,8 @@ IDE 插件提供 AI 对话内的质量工具（`gate-check`、`gate-principles`�
 | `xp-gate phase-transition <phase>` | 执行 Sprint 阶段转换（含证据验证） |
 | `xp-gate retro [--days N] [--json]` | 生成工程复盘报告 |
 | `xp-gate crap [--top N] [--threshold N]` | 按 CRAP 分数（复杂度 × 覆盖缺口）排序热点函数 — **仅建议，永不阻断** |
+| `xp-gate gate-coverage [--json] [--debt] [--strict]` | 一条命令看清对所有门禁的符合度，输出**四种**状态 PASS / **DEBT** / **SKIP** / **FAIL**。SKIP 必带原因（`hook-only` / `not-applicable`），所以「没跑」永远不会被读成「绿的」；DEBT 给出可量化数字 + 证据路径。制品与 HEAD 不符时标注 **STALE**，绝不把旧提交的结果冒充当前状态 (#636) |
+| `xp-gate rework [--top N] [--json]` | 从门禁 journal 汇总返工：首次通过率、返工轮次分布、按规则聚合的阻塞原因 top-N。journal 里没有失败记录时报告 **NOT MEASURABLE** 而非 100% (#651) |
 | `xp-gate audit [--tail \| --stats \| record]` | 查看/记录 gate 审计日志 |
 | `xp-gate install-skill <name>` | 从 npm 包内技能目录安装（含 references/templates/scripts） |
 | `xp-gate update-hooks` | 更新 Git Hooks 到最新版本 |

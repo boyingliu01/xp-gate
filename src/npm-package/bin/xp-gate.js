@@ -350,6 +350,21 @@ const COMMANDS = {
     },
     usage: 'xp-gate retro [--days N] [--all] [--json] [--sprint <id>]'
   },
+  'gate-coverage': {
+    description: 'One view of compliance against every gate: PASS / DEBT / SKIP / FAIL, with debt and evidence (#636)',
+    run: subargs => {
+      const { main } = require('../lib/gate-coverage.js');
+      const { execFileSync } = require('node:child_process');
+      let headCommit;
+      try {
+        headCommit = execFileSync('git', ['rev-parse', 'HEAD'], { encoding: 'utf8' }).trim();
+      } catch {
+        headCommit = undefined;
+      }
+      process.exit(main(subargs, { headCommit }));
+    },
+    usage: 'xp-gate gate-coverage [--json] [--debt] [--strict] [--branch <name>]'
+  },
   'rework': {
     description: 'Report rework: first-pass rate, rounds before landing, top blocking reasons (#651)',
     run: subargs => {
