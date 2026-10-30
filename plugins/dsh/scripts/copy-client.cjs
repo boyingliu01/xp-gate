@@ -29,4 +29,9 @@ fs.mkdirSync(path.dirname(OUT), { recursive: true });
 fs.copyFileSync(SRC, OUT);
 
 const rel = (p) => path.relative(PLUGIN_ROOT, p).split(path.sep).join('/');
-console.log(`[client] ${rel(SRC)} -> ${rel(OUT)}`);
+// stderr, not stdout: this runs from `prepack`, and npm's `pack --json` contract
+// is that stdout carries the JSON blob and nothing else. A single console.log here
+// made `npm pack --dry-run --json | jq ...` fail with "Invalid numeric literal"
+// and took the whole publish job down. `prepack.cjs` already logs to stderr for
+// the same reason; match it.
+console.error(`[client] ${rel(SRC)} -> ${rel(OUT)}`);
