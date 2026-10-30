@@ -36,6 +36,26 @@ _LE_CR=$(tr -cd '\r' < "$0" | wc -c | tr -d '[:space:]'); test "${_LE_CR:-0}" -e
 # 1. Global: ~/.config/xp-gate/adapters (for core.hooksPath global setup)
 # 2. Project-local: <repo>/githooks/ (for per-project init)
 # 3. Script dir: hooks directory containing this script (fallback)
+# ── #640: wall-clock start, written into the per-run report ──────────────────
+# The gate journal records every gate's verdict but no timing, so a slow commit
+# could not be attributed: the #640 measurement found ~11s per commit outside any
+# gate and had no instrument to say where it went. One timestamp at entry and one
+# subtraction at report-write time turns "it feels slow" into a number.
+#
+# Milliseconds come from /proc/uptime when readable (bash's %3N is not portable to
+# the bash 3.2 / MSYS builds this hook supports); otherwise whole seconds, which
+# is coarse but still separates "gates are slow" from "the hook around them is".
+_XP_HOOK_START_MS=""
+if [ -r /proc/uptime ]; then
+  _xp_up=$(cut -d' ' -f1 /proc/uptime 2>/dev/null || echo "")
+  case "$_xp_up" in
+    *.*) _XP_HOOK_START_MS=$(printf '%s%s' "${_xp_up%%.*}" "$(printf '%s' "${_xp_up#*.}" | cut -c1-3)") ;;
+  esac
+fi
+case "$_XP_HOOK_START_MS" in
+  ''|*[!0-9]*) _XP_HOOK_START_MS=$(( $(date +%s) * 1000 )) ;;
+esac
+export _XP_HOOK_START_MS
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ADAPTER_DIR=""
 GLOBAL_ADAPTER_DIR="$HOME/.config/xp-gate/adapters"
@@ -5071,7 +5091,11 @@ ENDJSON
   REPORT_TS=$(date -u +"%Y-%m-%d-%H%M%S")
   local PERSISTED_REPORT_FILE="${REPORTS_DIR}/${REPORT_TS}.json"
   mkdir -p "$REPORTS_DIR"
-  _XP_RF="$REPORT_FILE" _XP_PRF="$PERSISTED_REPORT_FILE" _XP_TS="$TIMESTAMP" _XP_BR="$BRANCH" _XP_CH="$COMMIT_HASH" _XP_CF="${CHANGED_FILES:-}" node -e "const fs=require('fs');const e=process.env;const br=JSON.parse(fs.readFileSync(e._XP_RF,'utf8'));const cf=(e._XP_CF||'').split('\n').filter(f=>f);const r={timestamp:e._XP_TS,trigger:'pre-commit',branch:e._XP_BR,commit:e._XP_CH,changed_files:cf,overall:br.overall||{},gates:br.gates||{},warnings:[],errors:[]};fs.writeFileSync(e._XP_PRF,JSON.stringify(r,null,2)+'\n');" 2>/dev/null || cp "$REPORT_FILE" "$PERSISTED_REPORT_FILE"
+  # #640: `duration_ms` is wall-clock time from hook entry to report write. It is
+  # the number the issue could not get: gate verdicts were journaled but durations
+  # were not, so the ~11s observed outside any gate had no instrument pointing at
+  # it. Emitted only when measurable -- an absent field is honest, a 0 is not.
+  _XP_RF="$REPORT_FILE" _XP_PRF="$PERSISTED_REPORT_FILE" _XP_TS="$TIMESTAMP" _XP_BR="$BRANCH" _XP_CH="$COMMIT_HASH" _XP_CF="${CHANGED_FILES:-}" _XP_START="$_XP_HOOK_START_MS" node -e "const fs=require('fs');const e=process.env;const br=JSON.parse(fs.readFileSync(e._XP_RF,'utf8'));const cf=(e._XP_CF||'').split('\n').filter(f=>f);const r={timestamp:e._XP_TS,trigger:'pre-commit',branch:e._XP_BR,commit:e._XP_CH,changed_files:cf,overall:br.overall||{},gates:br.gates||{},warnings:[],errors:[]};try{const st=Number(e._XP_START);const up=Math.round(Number(fs.readFileSync('/proc/uptime','utf8').trim().split(' ')[0])*1000);if(Number.isFinite(st)&&st>0&&Number.isFinite(up)&&up>st){r.duration_ms=up-st;}}catch(_e){}fs.writeFileSync(e._XP_PRF,JSON.stringify(r,null,2)+'\n');" 2>/dev/null || cp "$REPORT_FILE" "$PERSISTED_REPORT_FILE"
 
   # ── History append (unchanged — append-only for trend) ────────────────────────────
   local GATES_JSON="{"

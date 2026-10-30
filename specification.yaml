@@ -3793,3 +3793,9 @@ specification:
         - id: AC-562-02
           criteria: 被测试覆盖的产品源码目录不能出现在 coverage 排除列表中，且该检测器在合成输入上确实触发
           test_type: unit
+        - id: AC-640-01
+          criteria: pre-commit 在入口记录毫秒起点时间戳并带整数兜底，且不破坏 #546 首行自检
+          test_type: integration
+        - id: AC-640-02
+          criteria: 每次运行的报告写入 duration_ms，不可测量时字段缺席而非写 0
+          test_type: integration
