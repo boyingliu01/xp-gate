@@ -1,9 +1,9 @@
 # SRC/MUTATION KNOWLEDGE BASE
 
 **Generated:** 2026-10-30
-**Commit:** e713c2d1
+**Commit:** b45021b6
 **Branch:** main
-**Version:** 0.33.1.0
+**Version:** 0.33.2.0
 
 ## OVERVIEW
 **Gate M** (incremental mutation testing) + **Gate M2** helpers (test-layer detection used by `src/mock-policy/`). Pre-push quality gate. TypeScript-only; uses Stryker.
