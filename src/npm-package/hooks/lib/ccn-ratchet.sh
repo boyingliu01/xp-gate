@@ -11,6 +11,23 @@
 # improves we say so and suggest refreshing the baseline, because a stale
 # ceiling invites nobody to finish the job.
 #
+# ── Population (#617) ───────────────────────────────────────────────────────
+# A ratchet is only meaningful over the population it was recorded from. Gate 3
+# grades every extension it recognises; a repo whose baseline came from a
+# narrower scan then reports pre-existing code as "new", which is a false BLOCK
+# no repair can clear — the file has no baseline entry to fix.
+#
+# The baseline may therefore DECLARE its population:
+#
+#   { "population": { "roots": ["src/main/java"], "extensions": [".java"] },
+#     "entries": { "src/main/java/A.java::f": 4 } }
+#
+# A baseline without that key is LEGACY and is treated as unrestricted, which is
+# exactly the historical behaviour: every baseline already in the field has the
+# flat `{ "path::fn": ccn }` shape, and refusing to load it would break every
+# install on upgrade. Absent metadata must never be read as an empty population
+# -- that would silently grade nothing at all, the opposite failure.
+#
 # Key = "<relative/path>::<functionName>". Rename or move = new key = treated
 # as a new function. That is deliberate: fuzzy matching would hide debt moves.
 # `node scripts/ccn-report.cjs --write-baseline` regenerates the file after a
@@ -40,6 +57,96 @@
 # literal backslash path silently yields a separator that matches nothing, so
 # every row is read as a single field).
 CSV_FS=$'\x1f'
+
+# ---------------------------------------------------------------------------
+# #617: baseline population.
+#
+# Prints the declared population as `<root>|<ext>|<ext>...` on one line, or
+# NOTHING when the baseline carries no `population` key (legacy => unrestricted).
+# Printing nothing is deliberate: "no declaration" and "empty population" are
+# opposite meanings, and a caller that cannot tell them apart would either grade
+# everything (wrong for a Java-only repo) or nothing (catastrophic -- the ratchet
+# would report a clean run while comparing zero functions).
+# ---------------------------------------------------------------------------
+ccn_baseline_population() {
+  local _bl="${1:-.ccn-baseline.json}"
+  [ -f "$_bl" ] || return 0
+  command -v node >/dev/null 2>&1 || return 0
+  node -e '
+    const fs = require("fs");
+    let data;
+    try { data = JSON.parse(fs.readFileSync(process.argv[1], "utf8")); }
+    catch { process.exit(0); }
+    // Legacy shape: a flat map of "path::fn" -> ccn. No declaration.
+    if (!data || typeof data !== "object" || !data.population) process.exit(0);
+    const pop = data.population || {};
+    const roots = Array.isArray(pop.roots) ? pop.roots : [];
+    const exts = Array.isArray(pop.extensions) ? pop.extensions : [];
+    // A declared-but-empty population is not a legitimate declaration: it would
+    // excuse every file. Treat it as no declaration so the gate keeps grading.
+    if (roots.length === 0 && exts.length === 0) process.exit(0);
+    // One line: "<roots csv>|<exts csv>". Callers split on the single pipe.
+    process.stdout.write(roots.join(",") + "|" + exts.join(","));
+  ' "$_bl" 2>/dev/null
+  return 0
+}
+
+# ---------------------------------------------------------------------------
+# #617: is this file inside the baseline's declared population?
+#
+# Returns 0 when the file may be graded, 1 when it is outside the population.
+# A legacy baseline (no declaration) permits everything, preserving the
+# behaviour every existing install already relies on.
+#
+# Both axes are ANDed only when both are declared; a baseline declaring just
+# roots (or just extensions) narrows on that axis alone.
+# ---------------------------------------------------------------------------
+ccn_file_in_population() {
+  local _bl="${1:-.ccn-baseline.json}"
+  local _file="${2:-}"
+  [ -n "$_file" ] || return 1
+
+  local _pop
+  _pop=$(ccn_baseline_population "$_bl")
+  # No declaration => unrestricted (legacy baseline).
+  [ -n "$_pop" ] || return 0
+
+  local _roots="${_pop%%|*}"
+  local _exts="${_pop#*|}"
+  # Normalise separators so a Windows path and a POSIX path compare the same way.
+  local _norm
+  _norm=$(printf '%s' "$_file" | tr '\' '/')
+
+  if [ -n "$_roots" ]; then
+    local _hit=0 _r
+    local _oldifs="$IFS"
+    IFS=','
+    for _r in $_roots; do
+      IFS="$_oldifs"
+      case "$_norm" in
+        "$_r"|"$_r"/*) _hit=1; break ;;
+      esac
+    done
+    IFS="$_oldifs"
+    [ "$_hit" -eq 1 ] || return 1
+  fi
+
+  if [ -n "$_exts" ]; then
+    local _match=0 _e
+    local _oldifs2="$IFS"
+    IFS=','
+    for _e in $_exts; do
+      IFS="$_oldifs2"
+      case "$_norm" in
+        *"$_e") _match=1; break ;;
+      esac
+    done
+    IFS="$_oldifs2"
+    [ "$_match" -eq 1 ] || return 1
+  fi
+
+  return 0
+}
 
 csv_to_unit_separated() {
   awk '
