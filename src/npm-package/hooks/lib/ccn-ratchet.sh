@@ -114,8 +114,10 @@ ccn_file_in_population() {
   local _roots="${_pop%%|*}"
   local _exts="${_pop#*|}"
   # Normalise separators so a Windows path and a POSIX path compare the same way.
-  local _norm
-  _norm=$(printf '%s' "$_file" | tr '\' '/')
+  # sed, not `tr '\' '/'`: a lone backslash is a portability trap in tr's SET
+  # argument (GNU tr warns "unescaped backslash at end of string" and MSYS tr
+  # behaviour differs), while the sed regex below is unambiguous everywhere.
+  _norm=$(printf '%s' "$_file" | sed 's|\\|/|g')
 
   if [ -n "$_roots" ]; then
     local _hit=0 _r
