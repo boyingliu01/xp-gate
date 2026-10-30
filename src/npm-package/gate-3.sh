@@ -172,8 +172,19 @@ elif [ "$PROJECT_LANG" = "powershell" ]; then
                   const entries = baseline.functions || baseline.entries || baseline;
                   if (Array.isArray(entries)) {
                     for (const e of entries) {
-                      if (!e || !e.file || !e.name) continue;
-                      known.set(norm(e.file) + "::" + e.name, Number(e.ccn) || 0);
+                      // #632: accept the key the baseline WRITER actually emits.
+                      // tools/Update-ComplexityBaseline.ps1 (the tool this gate
+                      // points at in its own fix-it message) writes "function",
+                      // while this reader only knew "name" -- so every entry was
+                      // dropped, "known" stayed empty, and every function above
+                      // the threshold became a brand-new function. The ratchet
+                      // could never pass. Both spellings are read: this is a
+                      // reader, and the writer vocabulary is not ours to
+                      // redefine from here.
+                      if (!e || !e.file) continue;
+                      const fnName = e.name || e.function;
+                      if (!fnName) continue;
+                      known.set(norm(e.file) + "::" + fnName, Number(e.ccn) || 0);
                     }
                   }
                   // The measurement emits ABSOLUTE paths (pwsh resolved them), while
@@ -529,13 +540,43 @@ else
       # this, a crashing or mis-invoked lizard yields 0 warnings and the gate
       # reports PASSED on zero analysed functions -- the same silent-success
       # failure this issue is about.
+      #
+      # #666: "no rows" has TWO causes and they must not share a verdict. A
+      # module of pure constants legitimately has zero functions, and lizard
+      # emits no row for it at all (measured: `lizard pure_data.py --csv` prints
+      # nothing and exits 0). That was reported as `lizard_output_unparsable`
+      # /WARN, which is the message for a BROKEN lizard -- so a healthy run on a
+      # data-only diff was indistinguishable from a tooling fault. The two are
+      # separated by a POSITIVE probe: ask lizard to describe a fixture known to
+      # contain a function. If it produces rows, lizard works and the input
+      # simply had no functions (SKIP, `no_functions_in_input`); if it does not,
+      # the tool really is broken (WARN, `lizard_output_unparsable`).
       if ! printf '%s\n' "$CC_CSV_FLAT" | awk -F, 'NF > 1 && $2 ~ /^[0-9]+$/ { found = 1; exit }
                                                  END { exit(found ? 0 : 1) }'; then
-        echo "⚠️  WARN - lizard produced no parsable results; complexity not verified"
-        GATE_3_STATUS="WARN"
-        # Consumed by the sourcing parent (pre-commit report JSON), not here.
-        # shellcheck disable=SC2034
-        GATE_3_REASON="lizard_output_unparsable"
+        _lizard_probe_dir=$(mktemp -d 2>/dev/null || echo "${TMPDIR:-/tmp}")
+        _lizard_probe_file="$_lizard_probe_dir/xp-gate-lizard-probe.py"
+        printf 'def _xp_gate_probe(x):\n    if x:\n        return 1\n    return 0\n' > "$_lizard_probe_file" 2>/dev/null
+        _lizard_probe_rows=0
+        if [ -f "$_lizard_probe_file" ]; then
+          _lizard_probe_rows=$(printf '%s\n' "$_lizard_probe_file" \
+            | lizard_batches --csv 2>/dev/null \
+            | awk -F, 'NF > 1 && $2 ~ /^[0-9]+$/ { c++ } END { print c + 0 }')
+        fi
+        rm -rf "$_lizard_probe_dir" 2>/dev/null || true
+        if [ "${_lizard_probe_rows:-0}" -gt 0 ]; then
+          echo "⏭️  SKIPPED - Complexity: the changed source files define no functions (pure data module)."
+          echo "   Verified: lizard parsed a probe fixture normally, so this is an empty result set, not a broken tool."
+          GATE_3_STATUS="SKIP"
+          # Consumed by the sourcing parent (pre-commit report JSON), not here.
+          # shellcheck disable=SC2034
+          GATE_3_REASON="no_functions_in_input"
+        else
+          echo "⚠️  WARN - lizard produced no parsable results; complexity not verified"
+          GATE_3_STATUS="WARN"
+          # Consumed by the sourcing parent (pre-commit report JSON), not here.
+          # shellcheck disable=SC2034
+          GATE_3_REASON="lizard_output_unparsable"
+        fi
       elif [ "$CC_WARNINGS" -gt 0 ]; then
         echo "$CC_OUTPUT"
         echo ""

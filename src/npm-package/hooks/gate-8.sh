@@ -59,10 +59,24 @@ fi
 # revisions and reports "0 commits scanned" on a pre-commit run -- so a staged
 # secret was never seen and Gate 8 always passed. `git --staged` scans
 # `git diff --cached`, which is exactly the pre-commit payload (#449).
+#
+# #616: `--all` is a different question, and the index is the wrong place to ask
+# it. Under `xp-gate check . --all` the user asked "is the whole tree clean", the
+# index is usually empty, `git --staged` legitimately found nothing, and that
+# nothing was counted as PASSED -- a secret sitting in a tracked file was
+# invisible to the one command meant to find it. The runner already exports
+# GATE_SCOPE (#589); this fragment just has to read it. `dir --no-git` scans the
+# filesystem so tracked-but-unmodified files are covered.
 GITLEAKS_REPORT="${TMPDIR:-/tmp}/gitleaks-report.json"
 rm -f "$GITLEAKS_REPORT"
-GITLEAKS_OUTPUT=$($GITLEAKS_CMD git --staged --redact --no-banner $GITLEAKS_CONFIG --report-format=json --report-path="$GITLEAKS_REPORT" 2>&1)
-GITLEAKS_EXIT=$?
+if [ "${GATE_SCOPE:-diff}" = "all" ]; then
+  echo "     Scope: --all (scanning the working tree, not the index)"
+  GITLEAKS_OUTPUT=$($GITLEAKS_CMD dir --no-git --redact --no-banner $GITLEAKS_CONFIG --report-format=json --report-path="$GITLEAKS_REPORT" 2>&1)
+  GITLEAKS_EXIT=$?
+else
+  GITLEAKS_OUTPUT=$($GITLEAKS_CMD git --staged --redact --no-banner $GITLEAKS_CONFIG --report-format=json --report-path="$GITLEAKS_REPORT" 2>&1)
+  GITLEAKS_EXIT=$?
+fi
 
 if [ "$GITLEAKS_EXIT" -eq 0 ]; then
   # Decide SKIP from the REPORT ARTIFACT, not from log wording. Parsing stdout
@@ -183,7 +197,22 @@ fi
 # if-condition (errexit-exempt); a non-zero hook exit lands in the else branch.
 if command -v detect-secrets-hook >/dev/null 2>&1 && [ -f ".secrets.baseline" ]; then
   DS_TMP="$(dirname "$(mktemp -u)")/ds-output.$$"
-  if git diff --cached --name-only --diff-filter=ACM -z \
+  # #616: same scope split as the gitleaks call above. Under `--all` the index is
+  # usually empty, so piping `git diff --cached -z` into xargs fed the hook zero
+  # files and it reported success without reading anything.
+  if [ "${GATE_SCOPE:-diff}" = "all" ]; then
+    if git ls-files -z | xargs -0 detect-secrets-hook --baseline .secrets.baseline > "$DS_TMP" 2>&1; then
+      echo "     ✅ detect-secrets PASSED - no new secrets beyond baseline (scope: --all)."
+    else
+      cat "$DS_TMP"
+      echo ""
+      echo "     ❌ BLOCKED - detect-secrets found secrets not in .secrets.baseline."
+      echo "   If these are false positives, regenerate the baseline (cross-platform):"
+      echo "     detect-secrets scan --update .secrets.baseline && git add .secrets.baseline"
+      rm -f "$DS_TMP"
+      exit 1
+    fi
+  elif git diff --cached --name-only --diff-filter=ACM -z \
       | xargs -0 detect-secrets-hook --baseline .secrets.baseline > "$DS_TMP" 2>&1; then
     echo "     ✅ detect-secrets PASSED - no new secrets beyond baseline."
   else

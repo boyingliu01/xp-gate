@@ -27,16 +27,13 @@ export function runGate7(input: GateInput): GateOutput {
     return { status: 'PASS', messages, exitCode: 0 };
   }
 
-  // Check for IaC adapter script (bash path for pre-commit context)
-  const adapterPath = findIaCAdapter(cwd);
-  if (!adapterPath) {
-    messages.push('ℹ️  SKIP - IaC adapter not found');
-    messages.push('⏭️  SKIPPED - IaC security (no IaC adapter found)');
-    recordAudit('gate-7', 'iac-security', 'SKIP', 0, startMs);
-    return { status: 'SKIP', messages, exitCode: 0 };
-  }
-
-  // Run checkov if available (preferred tool)
+  // checkov is the PREFERRED engine (see the module header and the fallback
+  // message below), so it is tried FIRST. #650: the adapter lookup used to run
+  // before this and SKIP the gate whenever a consumer project had no vendored
+  // `githooks/adapters/iac.sh` -- even with checkov installed and on PATH. A
+  // security gate that skips because an optional helper script is absent, while
+  // the real scanner is available, reports "nothing to check" about code that was
+  // never checked. The bash adapter is the FALLBACK, so it is consulted after.
   const checkov = isToolAvailable('checkov', cwd);
   if (checkov.available) {
     return runCheckov(checkov.path, checkov.via, iacFiles, cwd, startMs, messages);
@@ -45,6 +42,30 @@ export function runGate7(input: GateInput): GateOutput {
   // Fallback: run the bash IaC adapter via bash
   messages.push('⚠️  checkov not installed — falling back to bash IaC adapter');
   messages.push('   Install: pip install checkov');
+
+  return runBashAdapter(iacFiles, cwd, startMs, messages);
+}
+
+/**
+ * Fallback path: hand the IaC files to the project's bash adapter.
+ *
+ * Extracted from `runGate7` so the primary (checkov) path stays readable and the
+ * entry point stays inside the long-function limit. A missing adapter is a SKIP,
+ * never a PASS: no scan ran, so there is no evidence to report as clean.
+ */
+function runBashAdapter(
+  iacFiles: string[],
+  cwd: string,
+  startMs: number,
+  messages: string[]
+): GateOutput {
+  const adapterPath = findIaCAdapter(cwd);
+  if (!adapterPath) {
+    messages.push('ℹ️  SKIP - IaC adapter not found');
+    messages.push('⏭️  SKIPPED - IaC security (no IaC adapter found)');
+    recordAudit('gate-7', 'iac-security', 'SKIP', 0, startMs);
+    return { status: 'SKIP', messages, exitCode: 0 };
+  }
 
   const result = runTool('bash', [adapterPath, ...iacFiles], { cwd });
   const combinedOutput = result.stdout + result.stderr;

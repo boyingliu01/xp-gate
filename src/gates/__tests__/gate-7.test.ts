@@ -67,8 +67,12 @@ describe('Gate 7 — IaC security verdicts', () => {
     expect(recordAudit).toHaveBeenCalledWith('gate-7', 'iac-security', 'PASS', 0, expect.any(Number));
   });
 
-  it('skips when an IaC file changed but no adapter is installed', async () => {
+  it('skips when an IaC file changed but neither checkov nor an adapter is available', async () => {
     const cwd = await tmpCwd(false);
+    // #650: checkov is consulted FIRST, so "no adapter" only means SKIP once the
+    // preferred engine has also been ruled out. Without this the gate would skip
+    // a scan it could have run.
+    isToolAvailable.mockReturnValue({ available: false });
     const result = runGate7({ changedFiles: [IAC_FILE], projectLang: 'typescript', cwd });
 
     // SKIP, not PASS: no adapter means the scan did not happen, and reporting PASS would
