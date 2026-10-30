@@ -47,6 +47,17 @@ export interface GateAuditEntry {
    * one that drives fixes. Only meaningful when passed=false.
    */
   failure_reason?: string;
+  /**
+   * Which attempt this record represents, 1-based (#603).
+   *
+   * Absent means 1 — older records predate re-run tracking. This field is what
+   * makes first-pass rate computable: without it, "passed" cannot distinguish a
+   * clean run from one that only passed after a re-run, and a metric that cannot
+   * tell those apart is always 100%.
+   */
+  attempt?: number;
+  /** True when this row describes a test that is quarantined as flaky (#603). */
+  quarantined?: boolean;
 }
 
 // ── Public API ───────────────────────────────────────────────────────────────
@@ -423,6 +434,10 @@ function runCli(): void {
       ...(opts['detail'] ? { detail: opts['detail'] } : {}),
       // #651: only set when provided, so successful records stay byte-identical.
       ...(opts['failure-reason'] ? { failure_reason: String(opts['failure-reason']).slice(0, 300) } : {}),
+      // #603: only set when provided, so single-attempt records stay byte-identical
+      // to what earlier versions wrote.
+      ...(opts['attempt'] ? { attempt: Number.parseInt(String(opts['attempt']), 10) || 1 } : {}),
+      ...(opts['quarantined'] === 'true' ? { quarantined: true } : {}),
     };
     // Pre-commit (trigger=commit) is staging for a commit that does not exist
     // yet: park it in the pending sidecar so post-commit can stamp the real
