@@ -81,6 +81,38 @@ const EXEC_TIMEOUT_MS = 1500;
 const GLOBAL_DIAGNOSIS_TIMEOUT_MS = 10000;
 
 /**
+ * Merge a timed-out partial diagnosis into one honest verdict (#629).
+ *
+ * `doctor`'s global timeout (#348) exists so the command never hangs, but the
+ * original handler threw away the entire `diagnoseAsync()` result and substituted
+ * a single placeholder check. Against an identical healthy install that made the
+ * SAME command print "All checks passed" or "Timed out after 10s" depending on
+ * machine load, and a timed-out run reported 0 installed skills — doctor giving
+ * LESS information the LONGER it runs is the opposite of a diagnostic.
+ *
+ * Keeps every completed check, adds ONE Diagnosis notice naming what did not
+ * report, and never lets a partial run read as clean (#495).
+ *
+ * @param {{checks?: Array, issues?: number}} partial checks finished before the deadline
+ * @param {string[]} pending names of surfaces that did not report in time
+ */
+function mergeTimedOutDiagnosis(partial, pending) {
+  const completed = (partial && Array.isArray(partial.checks)) ? partial.checks : [];
+  const inherited = (partial && Number.isFinite(partial.issues)) ? partial.issues : 0;
+  const pendingNames = Array.isArray(pending) ? pending.filter(Boolean) : [];
+  const detail = pendingNames.length > 0
+    ? `Timed out after ${GLOBAL_DIAGNOSIS_TIMEOUT_MS / 1000}s — did not report in time: ${pendingNames.join(', ')}`
+    : `Timed out after ${GLOBAL_DIAGNOSIS_TIMEOUT_MS / 1000}s — some checks incomplete`;
+  return {
+    checks: [...completed, { name: 'Diagnosis', status: 'WARN', detail }],
+    // A partial run is never clean, and a real issue count is never reset.
+    issues: Math.max(inherited, 1),
+    timedOut: true,
+    completedCheckCount: completed.length,
+  };
+}
+
+/**
  * Fixed attribution text for the WorkBuddy-desktop sandbox restriction (#525).
  *
  * In a WorkBuddy desktop session, a node process's *synchronous* child-process
@@ -1605,9 +1637,17 @@ async function checkAdapters(checks, mode, gitDirPromise) {
  *   D) Env + CLI tools — fully independent, run IN PARALLEL
  *   E) TUI + Skills — independent, run IN PARALLEL
  */
-async function diagnoseAsync(refreshEnv = false) {
+async function diagnoseAsync(refreshEnv = false, progress = null) {
+  // #629: `progress` is a live view of the checks completed so far. The global
+  // timeout used to discard everything diagnoseAsync had already produced; with a
+  // shared sink, a deadline can report "these finished, those did not" instead of
+  // replacing the whole diagnosis with a placeholder.
   const checks = [];
   let issues = 0;
+  if (progress) {
+    progress.checks = checks;
+    progress.getIssues = () => issues;
+  }
 
   // Spawn capability probe FIRST (sync, no config dependency) — #525: it must
   // report even when the config early-exits below, and its WARN (environmental,
@@ -2869,10 +2909,26 @@ async function doctor(args) {
 
   // Global timeout wrapper — ensures doctor completes within GLOBAL_DIAGNOSIS_TIMEOUT_MS
   // even if network/subprocess checks stack up (fix #348: 43s on Windows).
-  const diagnosisPromise = diagnoseAsync(refreshEnv);
+  // #629: give diagnoseAsync a live sink so a deadline can keep what finished.
+  // Without it, `Promise.race` discarded the entire diagnosis -- so the SAME
+  // healthy install reported different results run to run, and a timed-out run
+  // lost the skills section entirely (scrapers read 0/12 installed skills).
+  const progress = { checks: [], getIssues: () => 0 };
+  const diagnosisPromise = diagnoseAsync(refreshEnv, progress);
   let diagnosisTimer = null;
   const timeoutPromise = new Promise((resolve) => {
-    diagnosisTimer = setTimeout(() => resolve({ checks: [{ name: 'Diagnosis', status: 'WARN', detail: `Timed out after ${GLOBAL_DIAGNOSIS_TIMEOUT_MS / 1000}s — some checks incomplete` }], issues: 0, timedOut: true }), GLOBAL_DIAGNOSIS_TIMEOUT_MS);
+    diagnosisTimer = setTimeout(() => {
+      const completed = Array.isArray(progress.checks) ? progress.checks : [];
+      const reported = new Set(completed.map((c) => c && c.name));
+      // Name the surfaces that did NOT report, so the reader knows exactly which
+      // conclusions are missing rather than just "something timed out".
+      const pending = ['Hooks', 'Adapters', 'Skills', 'Gate env', 'OpenCode TUI']
+        .filter((name) => !reported.has(name));
+      resolve(mergeTimedOutDiagnosis(
+        { checks: completed, issues: progress.getIssues() },
+        pending,
+      ));
+    }, GLOBAL_DIAGNOSIS_TIMEOUT_MS);
   });
   const { checks, issues: diagnosedIssues, timedOut } = await Promise.race([
     diagnosisPromise.then(r => ({ ...r, timedOut: false })),
@@ -3349,6 +3405,7 @@ module.exports = {
   readTuiJson,
   formatDoctorJson,
   diagnoseHookDrift,
+  mergeTimedOutDiagnosis,
   classifyHooksDir,
   syncGlobalHooksFromRepo,
   diagnoseModuleDrift,

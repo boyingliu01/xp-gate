@@ -3589,3 +3589,12 @@ specification:
         - id: AC-670-42
           criteria: hooks 目录含外来文件时 uninstall 不整目录递归删除，只删 xp-gate 自有条目
           test_type: unit
+        - id: AC-670-43
+          criteria: doctor 全局超时触发时保留已完成的检查，并额外附加一条 Diagnosis 提示，指名哪些检查未及时报告
+          test_type: unit
+        - id: AC-670-44
+          criteria: 超时且无任何检查完成时仍输出诚实的超时提示（不得报通过）
+          test_type: unit
+        - id: AC-670-45
+          criteria: 超时不重置已发现的 issue 计数，且已完成检查一条都不丢
+          test_type: unit
