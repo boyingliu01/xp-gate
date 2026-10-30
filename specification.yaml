@@ -3718,3 +3718,9 @@ specification:
         - id: AC-642-03
           criteria: 无 shell 套件时报 0 而非崩溃
           test_type: unit
+        - id: AC-670-66
+          criteria: 最终轮评审的专家意见正文必须出现在 formatOutcome 输出中
+          test_type: unit
+        - id: AC-670-67
+          criteria: 中间轮次只给票型不重复正文，避免输出膨胀
+          test_type: unit
