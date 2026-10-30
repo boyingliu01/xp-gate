@@ -184,7 +184,20 @@ write_pre_push_report() {
     printf '%s\n' "Path('$report_file').write_text(json.dumps(report, indent=2) + '\n')"
   } > "$py_script"
 
-  "$py_bin" "$py_script"
+  # Native Python cannot open mktemp's POSIX path (/tmp/...) on Windows: it
+  # resolves the leading slash against the current drive and reports a file
+  # that "does not exist", which the caller then billed as "Gate M journal
+  # missing" on every push. Convert when a converter is available.
+  local py_script_native="$py_script"
+  if command -v cygpath >/dev/null 2>&1; then
+    # MSYS/Git-Bash: mktemp hands back /tmp/..., which is a MOUNT, not /<drive>/.
+    # Native python.exe resolves the leading slash against the current drive and
+    # reports "can't open file", which the caller then billed as "Gate M journal
+    # missing" on every push. cygpath knows the mount table; the helper library
+    # is not sourced yet at this point, so it cannot be used here.
+    py_script_native="$(cygpath -w "$py_script" 2>/dev/null || printf '%s' "$py_script")"
+  fi
+  "$py_bin" "$py_script_native"
   py_rc=$?
   rm -f "$py_script"
   if [ "$py_rc" -ne 0 ]; then
@@ -197,7 +210,13 @@ write_pre_push_report() {
   # rule can be exercised directly by tests instead of being asserted through a
   # copied-and-pasted implementation. It refuses to emit a number when the gates
   # that ran cannot summarise the report (none ran, or fewer than half did).
-  if ! "$py_bin" "$score_lib" --report "$report_file"; then
+  # Same MSYS/native-path boundary as the journal body above: $score_lib is a
+  # POSIX path ($HOME/.config/...) and native python.exe cannot open it.
+  local score_lib_native="$score_lib"
+  if command -v cygpath >/dev/null 2>&1; then
+    score_lib_native="$(cygpath -w "$score_lib" 2>/dev/null || printf '%s' "$score_lib")"
+  fi
+  if ! "$py_bin" "$score_lib_native" --report "$report_file"; then
     echo "⚠️  Gate M journal: could not score $report_file — score left unset." >&2
   fi
 }
