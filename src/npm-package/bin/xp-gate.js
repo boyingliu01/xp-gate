@@ -277,7 +277,7 @@ const COMMANDS = {
       }
       return doctor(subargs).then(code => process.exit(code));
     },
-    usage: 'xp-gate doctor [--fix [--install-tools] | --sync-hooks [--force] | --refresh-env] | --json | --format json  (the two machine-readable modes print one JSON document and refuse --fix/--sync-hooks; --refresh-env is read-only so it combines with them)'
+    usage: 'xp-gate doctor [--fix [--install-tools] | --sync-hooks [--force] | --refresh-env | --brief] | --json | --format json  (--brief is a read-only one-shot fact dump and refuses --fix/--sync-hooks/--install-tools/--force; the two machine-readable modes print one JSON document and refuse --fix/--sync-hooks; --refresh-env is read-only so it combines with them)'
   },
   'ui-review': {
     description: 'Run UI review for non-sprint developers (generates .ui-gate-result.json)',

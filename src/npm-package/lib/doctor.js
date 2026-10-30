@@ -2873,7 +2873,7 @@ function diagnoseLanguageTools() {
 // #488: an unrecognised flag used to be silently ignored — the npm release
 // that predates --sync-hooks made "doctor --sync-hooks" a silent no-op and the
 // user believed a sync had happened. Fail loudly instead.
-const KNOWN_FLAGS = ['--fix', '--sync-hooks', '--force', '--install-tools', '--json', '--format', '--refresh-env'];
+const KNOWN_FLAGS = ['--fix', '--sync-hooks', '--force', '--install-tools', '--json', '--format', '--refresh-env', '--brief'];
 
 /**
  * The accepted flag surface of `doctor`, as a pure function.
@@ -2931,11 +2931,31 @@ function doctorFlagContract(args) {
     errors.push('--install-tools is only read by --fix, and it is the only flag that installs toolchains onto this machine');
     errors.push('Pass --fix --install-tools, or drop --install-tools');
   }
-  return { errors, fixMode, syncHooks, force, installToolsFlag, jsonMode, refreshEnv };
+  // #653: --brief exists to collapse a class of exploratory probes (`where gcc`,
+  // Test-Path, per-file reads) into one cheap read. It is read-only by contract:
+  // users call it often precisely because it is cheap, so a write smuggled in
+  // would compound state changes instead of only latency.
+  const briefFlag = args.includes('--brief');
+  if (briefFlag && (fixMode || syncHooks || installToolsFlag || force)) {
+    errors.push('--brief is a read-only fact dump and cannot be combined with --fix, --sync-hooks, --install-tools or --force');
+  }
+  return { errors, fixMode, syncHooks, force, installToolsFlag, jsonMode, refreshEnv, briefFlag };
 }
 
 async function doctor(args) {
-  const { errors, fixMode, syncHooks, force, installToolsFlag, jsonMode, refreshEnv } = doctorFlagContract(args);
+  const { errors, fixMode, syncHooks, force, installToolsFlag, jsonMode, refreshEnv, briefFlag } = doctorFlagContract(args);
+  if (briefFlag && errors.length === 0) {
+    // Answers the whole "what is this machine set up like" question in one shot.
+    const { buildBriefReport } = require('./doctor-brief');
+    const report = buildBriefReport({ cwd: process.cwd() });
+    if (jsonMode) {
+      process.stdout.write(`${JSON.stringify(report, null, 2)}\n`);
+    } else {
+      process.stdout.write(`${report.summary}\n`);
+    }
+    process.exitCode = 0;
+    return;
+  }
   if (errors.length > 0) {
     for (const error of errors) console.error(error);
     return 1;
