@@ -124,6 +124,48 @@ Delphi 方法的价值**完全建立在「评审者是不同模型」之上**。
 `{ ok: true }` 是**无条件**返回的常量，"把退出码契约换成了一个常量，而不是真正的结果信号"。
 机制**拒绝**给出共识，而不是盖章通过 —— 这正是它该有的行为。
 
+## 配置界面（Plugins 页）
+
+插件声明了 `dsh.client`（`platform: web`），在 Web GUI 里注册一个**行配置页**：
+
+**侧边栏 Plugins → `@boyingliu01/dsh-plugin-xp-gate` → 组件 `tool-xp-gate` → 配置**
+
+该页面可以编辑 Delphi 三席（角色 / 模型）、网关、密钥引用与共识参数；模型可从
+**宿主已配置的 provider 目录**下拉选择，也可手填。
+
+### 来源优先级
+
+| 优先级 | 来源 | 说明 |
+|---|---|---|
+| 1 | 本插件配置里的 `delphi` 段（本页写入） | 一旦保存了席位，评审就用它 |
+| 2 | 项目根 `.delphi-config.json` | 席位为空时自动回落，老项目**无需改动** |
+
+页面上如果 `seats` 为空，评审继续走 `.delphi-config.json`，所以**打开页面不会静默改变行为**。
+
+### 宿主强制的不变量（不是表单装饰）
+
+表单只是方便，**宿主是权威**。每次评审前 `seatsFromSettings` 重新校验：
+
+- 恰好 3 席
+- 3 个 model 去空白后两两不同
+- 模型不得为空或未展开的 `${...}` 占位符
+- 配了席位就必须有 `base_url`
+- `api_key` 必须是**凭据引用**（`${VAR}` / `{env:VAR}`）；写入明文 token 会被拒绝，
+  因为那会把密钥落到 profile 文件里
+
+> 为什么不在表单里就拦死：DSH 的 settings 表单只能编辑 `.volatile()` 字段，
+> 而 volatile 意味着**保存即热生效**。对"每次运行都花钱"的配置来说，前端校验不够，
+> 所以校验放在宿主、在发出任何请求之前。
+
+### 关于 `bash` 守卫
+
+`delphiGuard` 用**只读工具白名单**判定：只有 `read` / `grep` / `glob` / `read_image` /
+XP-Gate 自己的报告类工具算只读，**其余一律视为可写**（包括 `bash`、`pwsh` 和将来新增的工具）。
+
+早期版本用"已知写工具黑名单"（`write` / `edit` / `str_replace_editor`），
+`bash` 一条命令就能改文件，等于这道 HARD-GATE 可绕过。白名单的代价是可能**误拦**新加的
+只读工具——那会表现为"拦得太狠"，而不是"悄悄放行"。
+
 ## Skills
 
 本包在 publish 时通过 `scripts/prepack.cjs` 捆绑仓库 `skills/`（当前 12 个）。
@@ -171,7 +213,7 @@ subagent model selection:
 
 ```bash
 npm install --ignore-scripts   # --ignore-scripts 绕过 esbuild postinstall（受限环境会 EBUSY）
-npm run build                  # tsc -> lib/
+npm run build                  # tsc -> lib/，并把 client/client.js 复制成 lib/client.js
 npm run prepare-skills         # 从仓库 skills/ 复制
 npm test                       # vitest
 ```
@@ -182,9 +224,16 @@ npm test                       # vitest
 npm run build:dsh-plugin       # = node scripts/build-plugin.mjs --platform dsh
 ```
 
+> `client/client.js` 是**手写**的浏览器 bundle，不走 tsc：它以 DSH 的客户端模块格式
+> (`window.__ModuleLoader__.load`) 编写，引用了浏览器全局，不是 TypeScript 模块。
+> `npm run build` 的第二步（`scripts/copy-client.cjs`）负责把它放进 `lib/`。
+
 ## 注意
 
-- `lib/` 与 `skills/` 是**构建产物**（已 gitignore），不提交。
+- `lib/` 与 `skills/` 是**构建产物**（已 gitignore），不提交；`client/client.js` 是**源文件**，要提交。
 - `scripts/prepack.cjs` 的 skill 列表为**动态发现**（读取仓库 `skills/`），不硬编码。
 - `plugins/dsh/package.json` 的 peerDeps 仍 pin `0.1.1-rc.2`，但实测运行在 `0.2.0-rc.2` 上
   `defineTool` / `TOOL_ABORTED` / `HarnessError` 签名未变，无需改写。
+- **配置项只有在导出 `Config` 之后才会显示。** 0.31.4 及更早的构建没有导出
+  `Config`，所以 `dsh --profile <name> --dump-config-schema` 里该行落在
+  `unknownConfig`，Plugins 页也就没有可编辑的字段。安装 0.32.x 后这一项自愈。

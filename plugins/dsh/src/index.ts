@@ -11,7 +11,17 @@ import type { ShellDialect } from "./command.js"
 import { GATE_WHITELIST, buildCommand, detectDialect, resolveTarget } from "./command.js"
 import { runXpGate } from "./gate-runner.js"
 import type { ResolvedDelphiConfig } from "./delphi-config.js"
-import { DelphiSetupError, listCredentialReferences, loadDelphiConfig, toDelphiOptions } from "./delphi-config.js"
+import {
+  DelphiSetupError,
+  expandEnvDetailed,
+  listCredentialReferences,
+  loadDelphiConfig,
+  toDelphiOptions,
+} from "./delphi-config.js"
+import type { DelphiOptions } from "./delphi.js"
+import { DelphiConfigError } from "./delphi.js"
+import type { DelphiSettingsLayer } from "./delphi-settings.js"
+import { seatsFromSettings } from "./delphi-settings.js"
 import type { ReviewOutcome } from "./delphi-run.js"
 import { formatOutcome, runReview } from "./delphi-run.js"
 import { buildEvidence } from "./evidence.js"
@@ -200,46 +210,120 @@ interface ReviewRequest {
   readonly resolveApiKey: ApiKeyResolver
   readonly signal: AbortSignal | undefined
   readonly writeEvidence: boolean
+  /** Seats from the settings page; empty means "read .delphi-config.json". */
+  readonly settings: DelphiSettingsLayer | undefined
+}
+
+/**
+ * Build the review options from whichever source is configured.
+ *
+ * The settings page wins when it holds seats: it is the more recent edit, and a
+ * user who just saved three models expects the next run to use them. When it holds
+ * none, `.delphi-config.json` applies exactly as before — which is what keeps every
+ * existing project working without opening the page.
+ *
+ * Both paths end in the same `validateSeats`, so neither can produce a panel the
+ * skill would reject.
+ */
+async function reviewOptions(
+  request: ReviewRequest,
+  resolveApiKey: ApiKeyResolver,
+): Promise<{ options: DelphiOptions; provider: string; described: string; cfg?: ResolvedDelphiConfig }> {
+  const fromSettings = seatsFromSettings(request.settings)
+  if (fromSettings) {
+    // The seat list is already validated; only the key still has to be resolved,
+    // and only the credential store (not this process's environment) knows it.
+    const key = await resolveExpressionKey(fromSettings.apiKeyExpression, resolveApiKey)
+    return {
+      options: {
+        baseUrl: fromSettings.baseUrl,
+        apiKey: key,
+        seats: fromSettings.seats,
+        thresholdPercent: fromSettings.thresholdPercent,
+        maxRounds: request.maxRounds ?? fromSettings.maxRounds,
+      },
+      provider: "settings",
+      described: fromSettings.seats.map((s) => s.model).join(", "),
+    }
+  }
+
+  // Resolve credentials BEFORE loading the config: the loader is synchronous and
+  // throws as soon as a referenced variable has no value. Reading the reference
+  // names first turns "the DSH process never inherited WHALECLOUD_API_KEY" from a
+  // hard failure into a lookup in the credential store.
+  const apiKeyOverrides: Record<string, string> = {}
+  for (const name of listCredentialReferences(request.cwd)) {
+    const value = await resolveApiKey(name)
+    if (value !== undefined && value.length > 0) apiKeyOverrides[name] = value
+  }
+  const cfg = loadDelphiConfig(request.cwd, process.env, undefined, apiKeyOverrides)
+  const options = toDelphiOptions(cfg)
+  return {
+    options: { ...options, maxRounds: request.maxRounds ?? cfg.maxRounds },
+    provider: cfg.provider,
+    described: cfg.seats.map((s) => s.model).join(", "),
+    cfg,
+  }
+}
+
+/**
+ * Resolve a settings-supplied `api_key` expression to a usable token.
+ *
+ * Accepts the same two placeholder spellings the JSON loader accepts. A literal
+ * value is rejected rather than used: a bearer token typed into a settings field is
+ * a credential written to a profile file in plain text.
+ */
+async function resolveExpressionKey(expression: string, resolveApiKey: ApiKeyResolver): Promise<string> {
+  const placeholder = findPlaceholderName(expression)
+  if (placeholder === undefined) {
+    if (expression.trim() !== "") {
+      throw new DelphiSetupError(
+        "The Delphi settings hold a literal api key. Use a credential reference instead, " +
+          'e.g. "${WHALECLOUD_API_KEY}", so the token never lands in the profile file.',
+      )
+    }
+    throw new DelphiSetupError('The Delphi settings have no api key. Set it to "${YOUR_KEY_VAR}".')
+  }
+  const fromStore = await resolveApiKey(placeholder)
+  if (fromStore !== undefined && fromStore.length > 0) return fromStore
+  const fromEnv = expandEnvDetailed(expression, process.env)
+  if (fromEnv.value.trim() !== "") return fromEnv.value
+  throw new DelphiSetupError(
+    `API key variable ${placeholder} has no value. Set it, or store it in DSH's credential store.`,
+  )
+}
+
+/** The first `${VAR}` / `{env:VAR}` name in a config value, or undefined. */
+function findPlaceholderName(value: string): string | undefined {
+  const shell = /\$\{([A-Za-z_][A-Za-z0-9_]*)\}/.exec(value)
+  if (shell) return shell[1]
+  const envStyle = /\{env:([A-Za-z_][A-Za-z0-9_]*)\}/.exec(value)
+  return envStyle ? envStyle[1] : undefined
 }
 
 async function runDelphiReview(subject: string, request: ReviewRequest): Promise<string> {
-  const { addressed, maxRounds, cwd, resolveApiKey, signal, writeEvidence } = request
+  const { addressed, cwd, resolveApiKey, signal, writeEvidence } = request
   try {
-    // Resolve credentials BEFORE loading the config: the loader is synchronous and
-    // throws as soon as a referenced variable has no value. Reading the reference
-    // names first turns "the DSH process never inherited WHALECLOUD_API_KEY" from a
-    // hard failure into a lookup in the credential store.
-    const apiKeyOverrides: Record<string, string> = {}
-    for (const name of listCredentialReferences(cwd)) {
-      const value = await resolveApiKey(name)
-      if (value !== undefined && value.length > 0) apiKeyOverrides[name] = value
-    }
-    const cfg = loadDelphiConfig(cwd, process.env, undefined, apiKeyOverrides)
-    const options = toDelphiOptions(cfg)
-    const outcome = await runReview(
-      { ...options, maxRounds: maxRounds ?? cfg.maxRounds },
-      subject,
-      addressed,
-      signal,
-    )
-    const seats = cfg.seats.map((s) => s.model).join(", ")
-    const suffix = writeEvidence
+    const { options, provider, described, cfg } = await reviewOptions(request, resolveApiKey)
+    const outcome = await runReview(options, subject, addressed, signal)
+    const suffix = writeEvidence && cfg !== undefined
       ? await writeWalkthroughEvidence(cwd, cfg, outcome)
       : ""
-    return `${formatOutcome(outcome)}\n\nProvider: ${cfg.provider}\nSeats: ${seats}${suffix}`
+    return `${formatOutcome(outcome)}\n\nProvider: ${provider}\nSeats: ${described}${suffix}`
   } catch (e) {
     // Config problems are the common failure; report them as guidance
     // rather than a stack trace.
     if (e instanceof DelphiSetupError) return `Delphi review not started: ${e.message}`
+    if (e instanceof DelphiConfigError) return `Delphi review not started: ${e.message}`
     throw e
   }
 }
 
-function delphiReviewTool(resolveApiKey: ApiKeyResolver) {
+function delphiReviewTool(resolveApiKey: ApiKeyResolver, settings: DelphiSettingsLayer | undefined) {
   return defineTool({
     name: "delphi-review",
     description:
-      "Run a Delphi cross-review of a subject (a diff, a design, a spec) using three DISTINCT models from an external OpenAI-compatible provider configured in .delphi-config.json. Round 1 is anonymous and concurrent; later rounds feed back the aggregate until the approval ratio reaches the configured threshold (default 90%) or the round cap (default 5). Use this whenever a change needs independent multi-model review rather than a single model's opinion.",
+      "Run a Delphi cross-review of a subject (a diff, a design, a spec) using three DISTINCT models from an external OpenAI-compatible provider. The seats come from the plugin's settings page (Plugins -> xp-gate -> Configure) when it holds any, otherwise from .delphi-config.json. Round 1 is anonymous and concurrent; later rounds feed back the aggregate until the approval ratio reaches the configured threshold (default 90%) or the round cap (default 5). Use this whenever a change needs independent multi-model review rather than a single model's opinion.",
     parameters: {
       subject: {
         type: "string",
@@ -280,6 +364,7 @@ function delphiReviewTool(resolveApiKey: ApiKeyResolver) {
         resolveApiKey,
         signal: exec.signal,
         writeEvidence: args.writeEvidence ?? false,
+        settings,
       })
     },
   })
@@ -337,7 +422,24 @@ interface XpGatePluginConfig {
   readonly principlesCheck: "auto" | "off"
   /** Sprint write guard: auto = deny until APPROVED; off = no hook. */
   readonly delphiGuard: "auto" | "off"
+  /** Delphi seats edited on the Plugins page; empty means "use .delphi-config.json". */
+  readonly delphi: DelphiSettingsLayer | undefined
 }
+
+/**
+ * One Delphi seat, as the settings page stores it.
+ *
+ * `model` is a free string rather than an enum: the catalog the page offers comes
+ * from the Host's configured providers, which this schema cannot enumerate, and a
+ * model id that is not in the catalog yet must still be accepted so an operator can
+ * pin a gateway alias. The invariants that matter are checked by
+ * `seatsFromSettings` on every run, not by the schema.
+ */
+const DelphiSeatSchema = z.object({
+  role: z.string().default(""),
+  model: z.string().default("").description("Model id sent to the gateway, e.g. g-glm-5.3-flash."),
+  maxTokens: z.number().min(0).description("Per-seat token budget; raise it for reasoning models."),
+})
 
 /**
  * Runtime schema for the keys above.
@@ -345,6 +447,11 @@ interface XpGatePluginConfig {
  * Exported as a schema, not just a type: DSH validates against it and surfaces the
  * keys in the profile schema, so a user can discover and set them. A bare interface
  * is invisible to the harness.
+ *
+ * The `delphi` block is `.volatile()`: the settings page edits it live, and DSH
+ * refuses to write a path that is not beneath a volatile node. The two hook
+ * switches stay ordinary fields — they are read at mount and remounting a hook is
+ * what "off" is supposed to require.
  */
 export const Config = z.object({
   principlesCheck: z
@@ -358,6 +465,21 @@ export const Config = z.object({
     .default("auto")
     .description(
       "Sprint write guard: auto = deny edits until delphi-review is APPROVED; off = do not register the hook.",
+    ),
+  delphi: z
+    .object({
+      baseUrl: z.string().default("").description("OpenAI-compatible gateway, e.g. https://host/gpt-proxy."),
+      apiKey: z
+        .string()
+        .default("")
+        .description("Credential reference such as ${WHALECLOUD_API_KEY}; never a literal key."),
+      seats: z.array(DelphiSeatSchema).default([]).description("The three Delphi reviewers."),
+      thresholdPercent: z.number().min(0).max(100).description("Approval bar; 3 seats at 90% means 3/3."),
+      maxRounds: z.number().min(1).max(20).description("Round cap before the review reports NO CONSENSUS."),
+    })
+    .volatile()
+    .description(
+      "Delphi seats edited on the Plugins page. Leave seats empty to use .delphi-config.json.",
     ),
 })
 
@@ -380,7 +502,7 @@ export function apply(ctx: Context, config: unknown = {}): void {
   ctx.tools.register(gateCheckTool(shell, dialect))
   ctx.tools.register(gatePrinciplesTool(shell, dialect))
   ctx.tools.register(gateArchTool(shell, dialect))
-  ctx.tools.register(delphiReviewTool(resolveApiKey))
+  ctx.tools.register(delphiReviewTool(resolveApiKey, cfg.delphi))
   ctx.tools.register(sprintTool(shell, dialect))
 
   // Publishing the 12 bundled skills is what makes them visible to the model.
