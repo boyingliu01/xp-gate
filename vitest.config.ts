@@ -86,6 +86,12 @@ export default defineConfig({
       // There was no regression: this session added no untested source file.
       // 81 is the floor the tree actually clears. Closing the 2pp gap to 83 is
       // tracked as coverage debt (#589); raise this only together with real tests.
+      // #605: these numbers DISAGREE with the pre-commit gate, and the ordering is
+      // the bad one -- pre-commit blocks below 80% lines (COVERAGE_THRESHOLD in
+      // githooks/pre-commit), while this block passes at 60%. So `npx vitest run`
+      // goes green and the commit is then rejected. Until the two are reconciled,
+      // `xp-gate gate-coverage` prints the conflict rather than leaving it to be
+      // discovered at commit time.
       thresholds: {
         lines: 60,
         statements: 60,

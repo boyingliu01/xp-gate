@@ -200,6 +200,65 @@ function missingGateReason(spec) {
 }
 
 /**
+ * Resolve the coverage floor from both gates and report disagreement (#605).
+ *
+ * Read from source rather than cached: both files are small, and a stale threshold
+ * report is worse than none -- it would assert the gates agree when they need not.
+ * Either side absent degrades to "unknown", never to "no conflict".
+ */
+function readCoverageThresholdConflict(repoRoot) {
+  try {
+    const { resolveCoverageThreshold } = require('./coverage-threshold.js');
+    const sources = {};
+    const vitest = readVitestThresholds(repoRoot);
+    if (vitest) sources.vitest = vitest;
+    const hookFloor = readHookCoverageFloor(repoRoot);
+    if (hookFloor !== null) sources.preCommit = hookFloor;
+    const resolved = resolveCoverageThreshold(sources);
+    if (!vitest && hookFloor === null) return { ...resolved, sources: 'none readable' };
+    return resolved;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * `thresholds: { lines: N, ... }` from vitest.config.ts, or null when absent.
+ *
+ * Comments are stripped first. The file documents the #561 failure by quoting the
+ * old bad shape (`thresholds: { global: {...} }`) in prose, and a naive match reads
+ * that quote as the live config -- reporting a threshold the repo does not use,
+ * which is exactly the class of error #605 exists to stop.
+ */
+function readVitestThresholds(repoRoot) {
+  try {
+    const raw = fs.readFileSync(path.join(repoRoot, 'vitest.config.ts'), 'utf8');
+    const code = raw.replace(/\/\*[\s\S]*?\*\//g, '').replace(/^\s*\/\/.*$/gm, '');
+    const block = code.match(/thresholds:\s*\{([\s\S]*?)\}/);
+    if (!block) return null;
+    const out = {};
+    for (const m of block[1].matchAll(/(lines|statements|functions|branches)\s*:\s*(\d+)/g)) {
+      out[m[1]] = Number(m[2]);
+    }
+    return Object.keys(out).length > 0 ? out : null;
+  } catch {
+    return null;
+  }
+}
+
+/** The flat floor the pre-commit hook applies, or null when it applies none. */
+function readHookCoverageFloor(repoRoot) {
+  try {
+    const raw = fs.readFileSync(path.join(repoRoot, 'githooks', 'pre-commit'), 'utf8');
+    if (!/COVERAGE_THRESHOLD/.test(raw)) return null;
+    const m = raw.match(/COVERAGE_THRESHOLD:-?(\d+)/) || raw.match(/COVERAGE_THRESHOLD=(\d+)/);
+    return m ? Number(m[1]) : null;
+  } catch {
+    return null;
+  }
+}
+
+/**
  * Describe Boy Scout debt by how much of it is worth fixing (#638).
  *
  * `magic-numbers` is severity=info and accounts for roughly half the raw count, so a
@@ -231,6 +290,16 @@ function renderGateCoverage(rows, opts) {
     lines.push(`  ⚠️  STALE — artifact was generated for ${options.artifactCommit || 'a different commit'}, `
       + `HEAD is ${options.headCommit || 'unknown'}`);
     lines.push('     Numbers below describe that commit, NOT the working tree.');
+  }
+
+  if (options.coverageThreshold && options.coverageThreshold.conflict) {
+    // #605: two live gates enforcing different numbers for the same thing. Reported
+    // here rather than resolved silently -- picking one side is how a repo ends up
+    // documented at 80% and enforced at 60%.
+    lines.push('');
+    lines.push(`  ⚠️  COVERAGE THRESHOLD CONFLICT — ${options.coverageThreshold.conflict.detail}`);
+    lines.push('     Both gates read the same number and disagree. Fix the declarations,');
+    lines.push('     not the reporting.');
   }
 
   lines.push('');
@@ -352,6 +421,7 @@ function main(argv, deps) {
     headCommit,
     boyScout: readBoyScoutDebt(repoRoot),
   });
+  const coverageThreshold = readCoverageThresholdConflict(repoRoot);
 
   if (args.includes('--json')) {
     process.stdout.write(`${JSON.stringify({
@@ -361,6 +431,7 @@ function main(argv, deps) {
       headCommit: headCommit || null,
       artifactFile: file,
       summary: rows.reduce((acc, r) => { acc[r.status] = (acc[r.status] || 0) + 1; return acc; }, {}),
+      coverageThreshold,
       gates: rows,
     }, null, 2)}\n`);
     return exitCodeFor(rows, { strict: args.includes('--strict') });
@@ -373,6 +444,7 @@ function main(argv, deps) {
     stale,
     headCommit,
     artifactCommit: artifact ? artifact.commit : null,
+    coverageThreshold,
   })}\n`);
   return exitCodeFor(rows, { strict: args.includes('--strict') });
 }
