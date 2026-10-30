@@ -100,3 +100,17 @@ JSON
   run ccn_baseline_population "$TMP/legacy.json"
   [ -z "$output" ] || { echo "reader invented population for a legacy baseline"; return 1; }
 }
+
+# AC-670-52 (continued): a Windows-style path matches the same population entry.
+@test "AC-670-52: a backslash path is normalised before population matching" {
+  load_ratchet
+  cat > "$TMP/b2.json" <<'JSON'
+{ "population": { "roots": ["src/main/java"], "extensions": [".java"] } }
+JSON
+  # Git on Windows hands paths with backslashes; the population declares them with
+  # forward slashes. Without normalisation the root match fails and a file that IS
+  # in the population gets silently excluded -- the ratchet would then grade
+  # nothing for that file while reporting a clean run.
+  run ccn_file_in_population "$TMP/b2.json" 'src\main\java\com\e\Box.java'
+  [ "$status" -eq 0 ] || { echo "backslash path not normalised"; return 1; }
+}

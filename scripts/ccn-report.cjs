@@ -895,8 +895,34 @@ async function main() {
       baseline[baselineKey(f, nameCounts)] = f.ccn;
     }
     const target = path.join(report.root, '.ccn-baseline.json');
-    fs.writeFileSync(target, JSON.stringify(baseline, null, 2) + '\n');
+    // #617: declare the population this baseline was actually written from, so the
+    // gate can grade the same set instead of assuming one. Without this, a repo that
+    // scans fewer roots/extensions than Gate 3 recognises gets pre-existing code
+    // graded as "new" -- a false BLOCK with no repair, because the file has no
+    // baseline entry to ratchet.
+    //
+    // Sorted + de-duplicated so a re-run on unchanged inputs produces a
+    // byte-identical file; an unordered declaration would churn the diff on every
+    // refresh and make "did the population change?" unreadable.
+    //
+    // Both axes are derived from f.file, NOT from the baseline KEY: keys embed
+    // `::` and `@line` (baselineKey), so path.extname() on a key would read the
+    // suffix of a symbol name as an extension.
+    const population = {
+      roots: [...new Set(report.functions
+        .filter((f) => f.bucket === 'production' && f.name !== '(no parsable output)')
+        .map((f) => path.dirname(f.file).replace(/\\/g, '/'))
+        .filter((d) => d && d !== '.'))].sort(),
+      extensions: [...new Set(report.functions
+        .filter((f) => f.bucket === 'production' && f.name !== '(no parsable output)')
+        .map((f) => path.extname(f.file).toLowerCase())
+        .filter(Boolean))].sort(),
+    };
+    const document = { population, entries: baseline };
+    fs.writeFileSync(target, JSON.stringify(document, null, 2) + '\n');
     console.log(`wrote ${Object.keys(baseline).length} entries -> ${target}`);
+    // The reader accepts both shapes (see ccn-ratchet.sh), so an older gate can
+    // still load this file: a flat map and {population, entries} both parse.
     return;
   }
 
