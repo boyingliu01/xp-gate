@@ -3,7 +3,7 @@ import { type ShellDialect, shellQuote } from "./dialect.js"
 
 // Re-exported so existing importers of this module keep working; the dialect
 // primitives themselves live in ./dialect.ts.
-export { type ShellDialect, detectDialect, shellQuote, shq } from "./dialect.js"
+export { type ShellDialect, detectDialect, detectDialectForShell, shellQuote, shq } from "./dialect.js"
 
 /**
  * Allowlist of xp-gate gate aliases that are safe to invoke standalone
@@ -88,12 +88,18 @@ export function buildCommand(options: BuildCommandOptions): string {
     // Merge stderr into stdout so a failure that only writes to stderr still
     // reaches the renderer, then echo the status so the exit code survives the
     // pipeline.
-    return `${inner} 2>&1; printf '\\n[XP-Gate] exit:%s\\n' "$?"`
+    // Capture the status BEFORE printing it, then `exit` with it. Without the
+    // explicit `exit`, the compound command's status is printf's -- always 0 --
+    // so classifyGateRun() would read a failed gate as PASS (#669).
+    return `${inner} 2>&1; __rc=$?; printf '\\n[XP-Gate] exit:%s\\n' "$__rc"; exit $__rc`
   }
   // PowerShell: merge streams and report $LASTEXITCODE explicitly. The
   // .cmd/.ps1 shims npm writes under %APPDATA%\npm are visible here but not to a
   // Git-Bash PATH lookup, which is why Windows uses this dialect.
-  return `${inner} 2>&1; Write-Output "[XP-Gate] exit:$LASTEXITCODE"`
+  //
+  // Same defect as the POSIX branch (#669): Write-Output resets the status, so
+  // the failing gate's code must be captured and re-exited explicitly.
+  return `${inner} 2>&1; $__rc=$LASTEXITCODE; Write-Output "[XP-Gate] exit:$__rc"; exit $__rc`
 }
 
 /** Resolve a model-supplied path against the session cwd; absolutes pass through. */

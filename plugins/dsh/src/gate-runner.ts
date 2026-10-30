@@ -39,11 +39,34 @@ export function classifyGateRun(result: ShellRunResult): GateVerdict {
 
   if (result.timedOut) return "INDETERMINATE"
   if (result.stdout.truncated) return "INDETERMINATE"
+
+  // Cross-check the reported exit code against the marker our own command
+  // suffix wrote into stdout (#669).
+  //
+  // The exit code travels a fragile chain: shell -> harness -> classify. The
+  // marker is the same fact recorded twice by independent paths, so a
+  // disagreement means one of them was mangled, and a run whose outcome cannot
+  // be established must not be reported as a pass. This is the backstop for the
+  // case where the exit code is lost outside our control -- the suffix fix makes
+  // the two agree, but only an explicit check proves they do.
+  const marker = parseExitMarker(stdout)
+  if (marker !== null && result.exitCode !== null && marker !== result.exitCode) return "INDETERMINATE"
+
   if (result.exitCode === 0) return stdout.length > 0 ? "PASS" : "INDETERMINATE"
 
   // Nonzero: a verdict exists only when the run produced something to show.
   const stderr = result.stderr.text.trim()
   return stdout.length > 0 || stderr.length > 0 ? "GATE FAILED" : "INDETERMINATE"
+}
+
+/** Read the `[XP-Gate] exit:<n>` marker the command suffix appends, if present. */
+function parseExitMarker(stdout: string): number | null {
+  const matches = [...stdout.matchAll(/\[XP-Gate\] exit:(-?\d+)/g)]
+  if (matches.length === 0) return null
+  // Take the LAST marker: a run whose output happens to contain an earlier one
+  // must be judged by the status our suffix wrote at the end.
+  const value = Number.parseInt(matches[matches.length - 1][1], 10)
+  return Number.isNaN(value) ? null : value
 }
 
 /** Detailed diagnostics appended after the verdict line, when present. */
