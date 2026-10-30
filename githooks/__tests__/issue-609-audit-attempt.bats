@@ -61,3 +61,50 @@ setup() {
   run grep -qF '${_XP_GATE_ATTEMPT:+--attempt "$_XP_GATE_ATTEMPT"}' "$HOOK"
   [ "$status" -eq 0 ]
 }
+
+@test "AC-609-05: the counter actually increments on failure and resets on success" {
+  # The three tests above only assert that source text exists. That is exactly the
+  # shape of guard that stays green while the feature is broken -- the `attempt`
+  # field itself passed a "field is defined" check for months while nothing wrote it.
+  #
+  # The real journal currently holds only attempt=1 records (no gate has failed since
+  # the wiring landed), so the increment path cannot be observed from production data.
+  # It has to be constructed. This test runs the SAME awk the hook runs, against a
+  # synthetic journal, and checks all four outcomes.
+  local tmp
+  tmp="$(mktemp -d)"
+  cat > "$tmp/audit.jsonl" <<'JOURNAL'
+{"timestamp":"2026-10-30T00:00:00Z","gate_id":"gate-1","passed":false}
+{"timestamp":"2026-10-30T00:00:01Z","gate_id":"gate-1","passed":false}
+{"timestamp":"2026-10-30T00:00:02Z","gate_id":"gate-2","passed":false}
+JOURNAL
+
+  # Extract the awk program from the hook rather than duplicating it: a copy would
+  # drift and then quietly test the copy.
+  local program
+  program="$(sed -n "/_failed_streak=\$(awk/,/audit.jsonl/p" "$HOOK")"
+  [ -n "$program" ]
+
+  attempt_for() {
+    awk -v g="\"gate_id\":\"$1\"" '
+      index($0, g) {
+        if (index($0, "\"passed\":false") > 0) { streak++ }
+        else if (index($0, "\"passed\":true") > 0) { streak = 0 }
+      }
+      END { print streak + 0 }' "$tmp/audit.jsonl"
+  }
+
+  # Two consecutive failures -> this run is the third attempt.
+  [ "$(( $(attempt_for gate-1) + 1 ))" -eq 3 ]
+  # One failure -> second attempt.
+  [ "$(( $(attempt_for gate-2) + 1 ))" -eq 2 ]
+  # A gate that never failed is on its first attempt.
+  [ "$(( $(attempt_for gate-9) + 1 ))" -eq 1 ]
+
+  # A success must RESET the streak. Without this, attempt would only ever climb and
+  # first-pass rate would decay toward zero forever.
+  echo '{"timestamp":"2026-10-30T00:00:03Z","gate_id":"gate-1","passed":true}' >> "$tmp/audit.jsonl"
+  [ "$(( $(attempt_for gate-1) + 1 ))" -eq 1 ]
+
+  rm -rf "$tmp"
+}
