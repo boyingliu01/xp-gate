@@ -2300,6 +2300,17 @@ specification:
           criteria: 卸载并设置偏好后，nativeAgentDeploymentIsWanted 返回 false，init 不再部署
           test_type: integration
 
+    - id: REQ-640
+      title: pre-commit 性能：削减固定开销
+      description: >
+        一次 6 文件 Java 提交的 pre-commit 耗时 7.3 分钟，其中真正的检查工作约
+        1 分钟，其余是进程冷启动、规则集拉取与全量重跑。Gate 9（semgrep）实测
+        扫描本身仅 0.45 秒却消耗 30.8 秒墙钟。应先消除这些与检查结果无关的固定开销。
+      acceptance_criteria:
+        - id: AC-640-01
+          criteria: Gate 9 调用 semgrep 时关闭遥测上传，且不改变携带判定结果的 JSON 输出
+          test_type: unit
+
     - id: REQ-639
       title: OpenCode v2 插件模块契约与打包完整性
       description: >

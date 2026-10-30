@@ -29,12 +29,25 @@ const CONFIG = join(REPO_ROOT, 'vitest.config.ts');
  * which cannot live inside a unit test. `measuredOn` names the commits it came
  * from so a stale record is visible rather than silently authoritative.
  */
+// Named so the Boy Scout rule has no magic number to flag, and so the values read
+// as what they are -- a recorded measurement, not a tunable knob.
+const MEASURED_LINES = 78.8;
+const MEASURED_STATEMENTS = 78.8;
+const MEASURED_FUNCTIONS = 84.37;
+const MEASURED_BRANCHES = 81.8;
+
 const MEASURED = {
-  lines: 61.37,
-  statements: 61.37,
-  functions: 81.19,
-  branches: 79.52,
-  measuredOn: 'CI runs f722a441 and 51931824 (identical figures both times)',
+  // Superseded the 61.37 / 81.19 / 79.52 record (CI runs f722a441, 51931824).
+  // Those figures were measured while 11688 lines of byte-identical mirror copies
+  // were counted at 0.00% (#562): the tests import the canonical path, so the
+  // copies could never be covered. Excluding them is a MEASUREMENT fix, not a
+  // coverage gain -- the tree did not get better, the denominator got honest.
+  // Re-measured after that fix on a clean tree, full suite, two consecutive runs.
+  lines: MEASURED_LINES,
+  statements: MEASURED_STATEMENTS,
+  functions: MEASURED_FUNCTIONS,
+  branches: MEASURED_BRANCHES,
+  measuredOn: 'local full-suite runs after the #562 mirror-exclusion fix (exit 0)',
 };
 
 type Thresholds = Record<string, number | undefined>;
@@ -76,7 +89,15 @@ function stripLineComments(src: string): string {
  * @returns the braces' inner text as written
  */
 function thresholdsBlockSource(): string {
-  const src = stripLineComments(readFileSync(CONFIG, 'utf8'));
+  // A missing config must fail as "cannot read the file", not as the misleading
+  // "no flat block" below -- the two need different fixes.
+  let raw: string;
+  try {
+    raw = readFileSync(CONFIG, 'utf8');
+  } catch (error) {
+    throw new Error(`cannot read ${CONFIG}: ${(error as Error).message}`);
+  }
+  const src = stripLineComments(raw);
   const block = src.match(/thresholds:\s*\{([\s\S]*?)\n\s{0,8}\},/);
   if (!block) throw new Error('vitest.config.ts has no flat `thresholds: { ... }` block');
   return block[1];

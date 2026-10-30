@@ -111,11 +111,24 @@ export default defineConfig({
       // goes green and the commit is then rejected. Until the two are reconciled,
       // `xp-gate gate-coverage` prints the conflict rather than leaving it to be
       // discovered at commit time.
+      // #562 (ratchet): lines/statements 60 -> 70.
+      //
+      // This is the first ratchet that reflects a MEASUREMENT FIX rather than new
+      // tests. The old 62% was never the tree's real coverage: 11688 lines of
+      // byte-identical mirror copies were counted at 0.00% because the tests import
+      // the canonical path and can never touch the copies. Excluding them moved the
+      // figure to 82.77%; with the 0.35.15.0 additions it now measures 78.80%.
+      //
+      // 70 leaves ~8.8pp of headroom below the measurement, so ordinary run-to-run
+      // fluctuation cannot produce a spurious block, while still being high enough
+      // that re-adding a mirror subtree (the failure this ratchet guards) fails
+      // immediately instead of being absorbed. The remaining gap to the 80% target
+      // is real coverage debt, tracked in #562.
       thresholds: {
-        lines: 60,
-        statements: 60,
-        functions: 81,
-        branches: 79,
+        lines: 70,
+        statements: 70,
+        functions: 83,
+        branches: 81,
       },
     },
   },
