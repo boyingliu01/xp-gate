@@ -1,5 +1,23 @@
 # Changelog
 
+## [0.35.15.0] - 2026-10-30
+
+### Fixed
+- **覆盖率报告被镜像副本严重低估（#562）**：`src/npm-package/<sub>/` 是 `src/<sub>/` 的
+  字节级镜像，测试 import 的是 canonical 路径，所以镜像副本的覆盖率恒为 0。
+  `coverage.exclude` 漏掉了四条这样的镜像树，11688 行**永远无法被覆盖**的副本
+  被计入分母，把报告值从 **82.77%** 拖到 **62.19%**。
+  之前追的「62% → 80% 目标」并不存在：真实覆盖率一直在 80 之上。
+- 补齐 `coverage.exclude` 的五条镜像（`principles` / `gates` / `build-integrity` /
+  `architecture` / `mock-policy`）。
+
+### Added
+- `scripts/__tests__/coverage-mirror-consistency.test.cjs`：从**磁盘**枚举真正有
+  canonical 兄弟的镜像目录，逐个核对两份排除清单，而不是硬编码列表——
+  新增镜像目录会被守卫抓到，而不是等下一个人踩同一个坑。
+  变异验证：删掉任一镜像排除后守卫立即变红。
+
+
 ## [0.35.14.0] - 2026-10-30
 
 ### Added

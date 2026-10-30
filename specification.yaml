@@ -3831,6 +3831,9 @@ specification:
         - id: AC-562-05
           criteria: 凭证占位符识别只接受合法标识符，明文 token 与近似写法均判为无占位符
           test_type: unit
+        - id: AC-562-06
+          criteria: 覆盖率排除清单与测试排除清单对同一镜像树保持一致，新增镜像目录会被守卫发现
+          test_type: unit
         - id: AC-640-01
           criteria: pre-commit 在入口记录毫秒起点时间戳并带整数兜底，且不破坏 #546 首行自检
           test_type: integration
