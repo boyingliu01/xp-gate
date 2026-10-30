@@ -56,6 +56,10 @@ case "$_XP_HOOK_START_MS" in
   ''|*[!0-9]*) _XP_HOOK_START_MS=$(( $(date +%s) * 1000 )) ;;
 esac
 export _XP_HOOK_START_MS
+# #609: 1-based attempt index for this hook run. One hook invocation is one attempt,
+# so every gate recorded during it shares the same index. Left empty by default so a
+# caller that genuinely does not know the index omits the field instead of guessing.
+_XP_GATE_ATTEMPT=""
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ADAPTER_DIR=""
 GLOBAL_ADAPTER_DIR="$HOME/.config/xp-gate/adapters"
@@ -598,6 +602,26 @@ record_gate_audit() {
   local detail="${6:-}"
   local end_ms
   end_ms=$(now_ms)
+  # #609: attempt index = 1 + how many times this gate was already recorded for this
+  # HEAD commit in the journal. Scoping to the commit is what makes the number mean
+  # "retry of this change": a developer who fixes a failure and re-commits produces
+  # attempt 2, which is exactly the retry that first-pass rate needs to see, while
+  # unrelated later commits restart at 1. Counting globally instead would grow the
+  # index without bound and turn every gate into a re-run.
+  # Read failure leaves it empty -> the field is omitted rather than guessed.
+  if [ -z "${_XP_GATE_ATTEMPT:-}" ]; then
+    local _head _prev_attempts
+    _head=$(git rev-parse HEAD 2>/dev/null || echo "")
+    if [ -n "$_head" ]; then
+      _prev_attempts=$(grep -c "\"commit_hash\":\"${_head}\".*\"gate_id\":\"${gate_id}\"" .xp-gate/audit.jsonl 2>/dev/null || echo 0)
+      case "$_prev_attempts" in
+        ''|*[!0-9]*) _prev_attempts="" ;;
+      esac
+      if [ -n "$_prev_attempts" ]; then
+        _XP_GATE_ATTEMPT=$(( _prev_attempts + 1 ))
+      fi
+    fi
+  fi
   # REQ-B: sanitize BEFORE subtracting. A poisoned start (empty -> arithmetic
   # 0, or a seconds-unit value from an old code path) used to survive as an
   # epoch-sized duration_ms that only the anomaly flag papered over. Now the
@@ -633,6 +657,13 @@ record_gate_audit() {
   fi
 
   # Fire-and-forget: audit must never block the commit
+  #
+  # #609: `--attempt` was implemented in gate-audit.ts (#603) but never passed by
+  # this hook -- verified against 9212 real journal entries, none carried `attempt`.
+  # The 1-based attempt index makes the first-build / final-build / first-test SLOs
+  # computable; without it "passed" cannot separate a clean run from one that only
+  # passed after a re-run, and every such metric is defined to be 100%. Callers that
+  # do not know the index stay absent (== 1) rather than being stamped with a guess.
   {
     run_tsx "${PROJECT_ROOT_FOR_AUDIT}/src/npm-package/lib/gate-audit.ts" record \
       --gate-id "$gate_id" \
@@ -643,6 +674,7 @@ record_gate_audit() {
       $duration_anomaly_flag \
       $duration_reason_flag \
       --trigger commit \
+      ${_XP_GATE_ATTEMPT:+--attempt "$_XP_GATE_ATTEMPT"} \
       ${detail:+--detail "$detail"} \
       2>/dev/null
   } &

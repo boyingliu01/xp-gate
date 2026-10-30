@@ -15,6 +15,7 @@ const fs = require('fs');
 const path = require('path');
 const { execSync } = require('child_process');
 const { computeFlakyStats, parseQuarantine, findPolicyViolations } = require('./flaky');
+const { evaluateAll, summariseStates } = require('./slo');
 
 /**
  * Upper bound for a believable gate runtime. A gate that reports more than two
@@ -242,6 +243,59 @@ function buildGateMSection(runs) {
  * @param {object} opts - Report data
  * @returns {string} Markdown report
  */
+/**
+ * Derive the six SLO measurements from the journal (#609, guide §15).
+ *
+ * Every branch that cannot produce a number returns `null`, never 0. The SLO
+ * evaluator turns nulls into UNKNOWN, which is displayed as "not measured" --
+ * distinct from "measured zero". A dashboard that prints 0% for an unmeasured
+ * window teaches people to ignore it.
+ */
+function deriveSloMeasurements(audit, flaky) {
+  const gateEntries = audit.filter((e) => e.gate_id);
+  // The journal key is `commit_hash`, not `commit`, and there is no `attempt`
+  // field at all (verified against 9212 real entries). Without attempts, a single
+  // gate list cannot separate "passed first time" from "passed after a retry", so
+  // the three attempt-derived SLOs stay UNKNOWN rather than being approximated
+  // from a flat pass rate -- which would report ~100% and be believed.
+  const withAttempt = gateEntries.filter((e) => Number.isFinite(e.attempt));
+  const firsts = withAttempt.filter((e) => e.attempt === 1);
+  const firstPass = firsts.filter((e) => e.passed).length;
+
+  // "Final" = the last attempt recorded per gate within each commit.
+  const finals = new Map();
+  for (const e of withAttempt) {
+    const key = `${e.commit_hash || ''}:${e.gate_id}`;
+    const prev = finals.get(key);
+    if (!prev || e.attempt > prev.attempt) finals.set(key, e);
+  }
+  const finalList = [...finals.values()];
+
+  // Gate 5 is the test gate; its first attempt is the first-test signal.
+  const gate5First = firsts.filter((e) => /gate.?5|test/i.test(String(e.gate_id)));
+
+  return {
+    first_build_pass: firsts.length > 0 ? (firstPass / firsts.length) * 100 : null,
+    final_build_pass: finalList.length > 0
+      ? (finalList.filter((e) => e.passed).length / finalList.length) * 100
+      : null,
+    first_test_pass: gate5First.length > 0
+      ? (gate5First.filter((e) => e.passed).length / gate5First.length) * 100
+      : null,
+    flaky_rate: flaky && flaky.measurable && flaky.flakyRate !== null
+      ? parseFloat(flaky.flakyRate)
+      : null,
+    // No workflow-run source is wired in yet: a number here would be invented.
+    ci_wasted_trigger: null,
+    file_loss: { value: 0, samples: countGuardRuns(audit) },
+  };
+}
+
+/** How many guard runs the journal actually observed (file-loss denominator). */
+function countGuardRuns(audit) {
+  return audit.filter((e) => /worktree.?guard|file.?loss/i.test(String(e.event || e.gate_id || ''))).length;
+}
+
 function buildReport(opts) {
   const { days, commits, audit, quality, sprints, gateMRuns = [] } = opts;
   const now = new Date();
@@ -274,6 +328,27 @@ function buildReport(opts) {
     L.push(`- Avg gate duration: ${avgMs}ms, p50 ${p50}ms over ${measurable.length} measurable gate(s) (${excluded} excluded${nullDurations ? `, ${nullDurations} recorded null` : ''})`);
   } else if (gateEntries.length > 0) {
     L.push(`- Avg gate duration: no measurable samples (${excluded} of ${gateEntries.length} excluded as null or anomalous)`);
+  }
+  L.push('');
+
+  // SLO panel (#609, guide §15)
+  L.push('## SLO Dashboard (#609)');
+  const sloRows = evaluateAll(deriveSloMeasurements(audit, computeFlakyStats(gateEntries)));
+  const sloCounts = summariseStates(sloRows);
+  L.push(`- ${sloCounts.PASS} PASS / ${sloCounts.MISS} MISS / ${sloCounts.UNKNOWN} UNKNOWN of ${sloCounts.total}`);
+  if (sloCounts.UNKNOWN === sloCounts.total) {
+    // Print the distinction explicitly. An all-UNKNOWN panel is the normal state
+    // for a journal that never recorded attempts, and calling that "0% healthy"
+    // would be the same defect the panel exists to prevent.
+    L.push('- All six UNKNOWN: the journal holds no attempt-level records for this window.');
+    L.push('  That is "not measured", not "nothing wrong" -- see each row source.');
+  }
+  for (const r of sloRows) {
+    const shown = r.value === null ? '--' : `${r.value}${r.unit}`;
+    const goal = `${r.direction === 'min' ? '>=' : '<='} ${r.target}${r.unit}`;
+    L.push(`- [${r.state}] ${r.label}: ${shown} (goal ${goal})`);
+    if (r.state === 'UNKNOWN') L.push(`    reason: ${r.reason}`);
+    if (r.state === 'MISS') L.push(`    ${r.reason}`);
   }
   L.push('');
 
@@ -392,10 +467,19 @@ async function handleRetro(args = []) {
   if (jsonFlag) {
     const gateEntries = audit.filter(e => e.gate_id);
     const passed = gateEntries.filter(e => e.passed).length;
+    const sloRows = evaluateAll(deriveSloMeasurements(audit, computeFlakyStats(gateEntries)));
     console.log(JSON.stringify({
       period: { days, from: new Date(Date.now() - days * 86400000).toISOString(), to: new Date().toISOString() },
       total_commits: commits.length,
       gate_pass_rate: gateEntries.length > 0 ? passed / gateEntries.length : null,
+      slo: {
+        states: summariseStates(sloRows),
+        metrics: sloRows.map(r => ({
+          id: r.id, label: r.label, target: r.target, unit: r.unit,
+          direction: r.direction, value: r.value, state: r.state,
+          reason: r.reason, source: r.source,
+        })),
+      },
       rework_rates: sprints.filter(s => s.metrics?.rework_rate != null).map(s => ({ id: s.id, rate: s.metrics.rework_rate })),
       evidence_skipped: audit.filter(e => e.event === 'evidence_skipped'),
       quality: quality.map(q => ({ timestamp: q.timestamp, score: q.score })),
