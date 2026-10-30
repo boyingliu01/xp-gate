@@ -2,6 +2,53 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.34.1.0] - 2026-10-30
+
+本版修的是"门禁说对了什么"与"它实际看到了什么"之间的差距：一个位置报错的 DIP 告警、一类
+被误报成违规的正确装配代码、一道从未真正执行严格 lint 的编译门禁，以及两个"名义上完成、
+实际上没完成"的卸载/体检路径。
+
+### Fixed
+
+- **#626 `solid.dip` 行号**: 每条违规都带**类声明行**——适配器只报类从哪里开始，匹配本身
+  不带位置。一个 200 行的类在第 187 行有唯一一处 `new`，却把开发者指到第 1 行：文件对、
+  位置错，这是最没用的一种组合，看起来可操作、实际不可操作。现在按匹配在类体内的偏移
+  （含换行）计算真实行号；适配器报不出类行号时保留 0 而非伪造 1。
+- **#627 `solid.dip` 组合根误报**: 组合根的职责就是 `new` 出实现并装配，那正是依赖注入在
+  正常工作。实测 178 个 Java 文件，29 条告警**全部**落在 9 个装配点。现在识别 Spring
+  `@Configuration`/`@Bean`、Dagger/Guice Module、框架 `init()`、静态工厂方法，以及类名以
+  Factory/Assembler/Module/Config/Provider 结尾的类型。刻意**不**豁免普通业务方法里的
+  `new`——若所有"可能算装配点"的都被放过，规则就永不触发，那和删掉它无法区分。
+- **#659 Gate 13 Maven 路径静默放行**: 含 `javac` 明确警告的代码被判 `PASSED`，而同一文件
+  用 Gate 13 自己的直调函数得到 3。三个独立原因：逗号分隔的 `compilerArgument` 注入不生效
+  （Maven 自己输出"请使用 -Xlint:unchecked 重新编译"正是证据）、判定正则只认英文
+  `[WARNING][category]`、`gate13_maven_injection_reliable()` 只验证"参数能拼出来"就判可靠。
+  修复按 issue 建议：加探针编译**证明**注入生效，不生效即降级 WARN 且绝不 PASS；判定逻辑
+  抽成共享的 `gate13_count_lint_findings()`，匹配任意 `[小写分类]`（JDK 新增分类不会漏报）
+  并识别本地化提示，fail-closed。
+- **#628 Gate 4 失效文档路径**: Java 覆盖提示指向 `docs/java-principles-coverage.md`，但
+  `docs/` 不在 npm 包的 `files` 列表里，于是每个已安装项目里这条提示都指向不存在的文件。
+  现在只有文档真的存在时才引用本地路径，否则引用上游 URL。
+- **#663 卸载残留**: `uninstall` 只拆 `hooks/` + `adapters/`，留下 `modules/`、
+  `node_modules/`、`package.json`、`package-lock.json`、`xp-gate.json` 与已装 skills。残留
+  有实际后果：留下的 `node_modules/` 让下次 `setup-global` 跳过安装、复用旧依赖树；留下的
+  `xp-gate.json` 带着上一版 manifest，被 `doctor` 当作当前安装判断。现在全部纳入卸载计划；
+  用户配置（`.delphi-config.json`）不删但以 retain 步骤**明确报告**；skill 只在内容与随包
+  副本逐字节一致时才删除，用户改过的一律保留。
+- **#664 全局 hooksPath 里的第三方钩子**: `setup-global` 把 `core.hooksPath` 指向全局共享
+  目录，`git lfs install` 会往里写自己的钩子。`doctor` 不报告这些文件，`uninstall` 则
+  `rmSync(recursive)` 整目录删除——删掉别人能用的文件比留下可见残留严重得多。现在
+  `classifyHooksDir()` 按**内容**识别外来钩子（`git lfs` 调用是签名，按文件名列表会漏掉
+  lfs 新版本装的钩子），`planHooksDirRemoval()` 在有外来文件时只删 xp-gate 自有条目并打印
+  保留了哪些。
+
+### Notes
+
+- `scripts/check-hook-mirror.sh` 的 principles 树比对补上 `-x '__tests__'`：sync 明确不镜像
+  测试，缺这个排除项会让检查在正确的仓库上误报。
+- 移除 `.warnings-baseline.json` 中 `src/gates/gate-7.ts` 的过期预算条目——0.33.2.0 的重构
+  已让该文件零告警，而未使用的预算正是给以后新增告警的许可。
+
 ## [0.34.0.0] - 2026-10-30
 
 本版补齐指南 §9 与 §10 里 XP-Gate 一直缺的两类度量：**测试套件本身能否被静默降级**，
