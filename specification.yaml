@@ -3709,3 +3709,12 @@ specification:
         - id: AC-603-04
           criteria: 隔离台账逾期项必须被查出，核心链路不得长期隔离
           test_type: unit
+        - id: AC-642-01
+          criteria: src/ 之外的 BATS 与 shell 套件必须被计入，不再报 0
+          test_type: unit
+        - id: AC-642-02
+          criteria: 未配对与不参与配对必须分开报，不得混为一谈
+          test_type: unit
+        - id: AC-642-03
+          criteria: 无 shell 套件时报 0 而非崩溃
+          test_type: unit
