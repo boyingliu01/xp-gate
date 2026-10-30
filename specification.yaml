@@ -3661,3 +3661,21 @@ specification:
         - id: AC-670-66
           criteria: 无法读取的副本对比必须如实报告不可比较，不得当作一致
           test_type: unit
+        - id: AC-636-01
+          criteria: 从未运行的门禁渲染为 SKIP 并附原因，绝不并入 PASS
+          test_type: unit
+        - id: AC-636-02
+          criteria: 制品中 gate9/gate10 编号互换不影响展示的门禁名与编号
+          test_type: unit
+        - id: AC-636-03
+          criteria: 制品 commit 与 HEAD 不符时报告标注 STALE，不冒充当前状态
+          test_type: unit
+        - id: AC-636-04
+          criteria: Boy Scout 债务量化为 DEBT 并带证据路径，不渲染为干净的 PASS
+          test_type: unit
+        - id: AC-636-05
+          criteria: 默认退出码不因 DEBT 失败，--strict 时失败，FAIL 始终失败
+          test_type: unit
+        - id: AC-636-06
+          criteria: 每一行都携带指向判定依据的证据路径
+          test_type: unit
