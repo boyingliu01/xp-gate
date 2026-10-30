@@ -1,9 +1,9 @@
 # GITHOOKS KNOWLEDGE BASE
 
 **Generated:** 2026-10-30
-**Commit:** 3978d361
+**Commit:** 879f845e
 **Branch:** main
-**Version:** 0.35.13.0
+**Version:** 0.35.14.0
 
 ## OVERVIEW
 Git quality gates: pre-commit runs **12 numbered gates** (Gate 0–11) plus Gate 12 (File Hygiene, warning-only) via 13 language adapters; pre-push runs **8 gates**: Gate 10 (Build Integrity), Gate M (TS mutation), Gate M-Python, M-Go, M-Java, M-Kotlin (multi-lang mutation), Gate M2 (Mock Density, WARNING-only), Gate ML (Mock Layering), Gate UI (UI Sprint Gates), Gate MW (Code Walkthrough), and Gate S (Sprint Flow). Zero-tolerance policy per `QUALITY-GATES-CODE-OF-CONDUCT.md` — `--no-verify` strictly prohibited.
