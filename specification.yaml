@@ -3799,3 +3799,18 @@ specification:
         - id: AC-640-02
           criteria: 每次运行的报告写入 duration_ms，不可测量时字段缺席而非写 0
           test_type: integration
+        - id: AC-609-01
+          criteria: SLO 六项指标在无数据时判定为 UNKNOWN，既不是 PASS 也不是 MISS，且每项声明数据来源
+          test_type: unit
+        - id: AC-609-02
+          criteria: SLO 有数据且越界为 MISS、达标为 PASS，未知 id 抛错而非静默返回
+          test_type: unit
+        - id: AC-609-03
+          criteria: 目标为 0 的 SLO 在无观测样本时判为 UNKNOWN，不得因 0<=0 恒真而报 PASS
+          test_type: unit
+        - id: AC-609-04
+          criteria: gate-audit 接受 attempt 序号写入审计日志
+          test_type: integration
+        - id: AC-609-05
+          criteria: pre-commit 真正传入 --attempt，序号按 HEAD commit 作用域计算，日志不可读时字段缺席而非猜测
+          test_type: integration
