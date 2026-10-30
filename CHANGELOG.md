@@ -2,6 +2,24 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.35.9.0] - 2026-10-30
+
+### Changed
+
+- **`gate-coverage` 的 Boy Scout 债务按可修性分级（#638）**。Gate 6 现在报
+  `138 actionable / 123 informational`，而非单一的 `139 warning(s)`。
+  - `magic-numbers` 占 123 条，是 INFO 级、按设计从不阻断；把它算进"债务"会制造一个
+    永远清不完的数字。
+  - 关键在于**一个无法表达进展的数字无法指导行动**：修掉全部 79 条
+    `missing-error-handling` 后，总数只从 139 掉到 60，看起来像完成 57%，而实际上
+    最值得清的那一类已经空了。
+  - 未知规则默认算作 actionable——多报工作量可以纠正，少报债务会让真问题藏在绿色
+    仪表盘后面。
+  - 分级结果按 baseline 的 mtime+size 缓存（实时算需扫 17 文件约 90 秒；过期分级比
+    没有分级更糟，因为它会报告没发生过的进展）。
+
+---
+
 ## [0.35.8.0] - 2026-10-30
 
 ### Changed
