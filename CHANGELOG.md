@@ -2,6 +2,15 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.33.0.0] - 2026-10-30
+
+本版是"开发效率"专项的 P1（削返工，最大单项）。诊断显示 47.6% 的提交是 fix/revert，多数返工是"提交时才被门禁打回"——阻断阈值只活在 `githooks/` 里，AI 在 BUILD 期间看不到。本版把红线前移进 BUILD skill，并给出一条 <5 s 的"本次 diff 会踩哪些闸"命令，让第一次提交就过。
+
+### Added
+
+- **`xp-gate check . --changed --brief`**: 只跑"本次 diff 会触发"的门禁，输出一屏 `gate → PASS/SKIP/BLOCK` 摘要，本仓库实测 ~3.5 s（对比 `check . --all` 的整树电池要数分钟）。范围与 pre-commit 一致（先 staged、再 vs HEAD），只对源文件生效；对纯文档/配置改动明确说"无阻断源门禁适用"而不是假装跑过。刻意**不**纳入 Gate 2（jscpd 扫全树、耗时 ~65 s，且重复代码本就是代码库级问题、非单次 diff 能回答）。Gate 4 传**真实改动文件列表**而非 `.`——`principles(['.'])` 曾检查 0 个文件却打印 "No violations found"，正是本项目明令禁止的"空过"。新增 6 条单测锁定 SKIP≠PASS 的诚实性。
+- **BUILD 提交前自检清单（P1 红线前移，解 #652）**: `skills/sprint-flow/references/phase-3-build.md` 新增一页表，把会**阻断提交**的硬阈值提前到编码时自检，按被拦频率排序：Gate 3 CCN（>10 block / >5 warn）、Gate 6 Boy Scout（新文件 0 warning、函数 ≤50 行、嵌套 ≤4）、Gate 2 jscpd（>5%）、Gate 4 十四规则、Gate 1 lint、Gate 5 测试+覆盖率、mirror/sync 纪律。并指明把 `xp-gate check . --changed --brief` 放进 ralph-loop 每个 REQ 的 step 0：先看红不红，再决定继续写，而不是写到一半才被 `git commit` 拦下。根因提醒：Gate 3/6 是"返工双雄"。
+
 ## [0.32.3.0] - 2026-10-30
 
 本版是"开发效率"专项的第一批落地（P0 遥测 + P2 纪律），起因是一份全量诊断：正确计入的 251.7 h 里工具延迟占 146.0 h（58%），而每提交一次门禁电池 median 228 s。要优化就得先相信数据，但审计账本本身在两个地方系统性撒谎——本版先把"尺子"校准，再把纪律写进 AGENTS.md / BUILD skill。

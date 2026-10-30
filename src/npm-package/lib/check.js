@@ -13,13 +13,15 @@ function resolveGateToken(token) {
 }
 
 function parseCheckArgs(args) {
-  const flags = { all: false, list: false, gateIds: null };
+  const flags = { all: false, list: false, gateIds: null, changed: false, brief: false };
   const posArgs = [];
   let i = 0;
   while (i < args.length) {
     const arg = args[i];
     if (arg === '--all') { flags.all = true; i++; }
     else if (arg === '--list') { flags.list = true; i++; }
+    else if (arg === '--changed') { flags.changed = true; i++; }
+    else if (arg === '--brief') { flags.brief = true; i++; }
     else if (arg === '--gates' && i + 1 < args.length) {
       flags.gateIds = args[i + 1].split(',').map(s => s.trim()).filter(Boolean);
       i += 2;
@@ -45,6 +47,7 @@ async function check(args) {
   const opts = parseCheckArgs(args);
 
   if (opts.list) return listGates();
+  if (opts.changed) return runChangedBrief();
   if (opts.gateNumber && !opts.all && !opts.gateIds) return runGate(opts.gateNumber, opts.pathArg);
   if (opts.all) return checkAllGates(opts.pathArg);
   if (opts.gateIds && opts.gateIds.length > 0) return runGatesByIds(opts.gateIds, opts.pathArg);
@@ -55,6 +58,7 @@ async function check(args) {
     console.error('Options:');
     console.error('  --gates <ids>    Run specific gates (comma-separated IDs or aliases, e.g. "version,4,secrets")');
     console.error('  --all             Run all invokable gates');
+    console.error('  --changed --brief Fast: run only the gates the current diff can trip, one-screen summary');
     console.error('  --list            List all available gates');
     console.error('');
     console.error('Available Gates:');
@@ -68,6 +72,7 @@ async function check(args) {
     console.error('  xp-gate check secrets                           # Run Gate 8 via alias');
     console.error('  xp-gate check . --gates version,4,secrets       # Run gates 0, 4, and 8');
     console.error('  xp-gate check . --all                           # Run all invokable gates');
+    console.error('  xp-gate check . --changed --brief               # Fast: only what this diff trips');
     console.error('  xp-gate check --list                            # List available gates');
     return 1;
   }
@@ -212,6 +217,113 @@ async function runGatesByIds(gateIds, target) {
   return failures === 0 ? 0 : 1;
 }
 
+/**
+ * Fast "what will this commit trip?" view (P1-4, diagnosis 2026-10-30).
+ *
+ * `check . --all` runs the whole tree (minutes). During BUILD the developer only
+ * needs to know which blocking rules the CURRENT diff touches, in one screen and
+ * in seconds. This maps the diff to the gates that read changed files and runs
+ * only those, so the common case (docs / a couple of sources) returns fast.
+ *
+ * Honest by construction: prints only gate->verdict, never implying a gate ran
+ * when it was skipped. Gates not modelled here are listed as "commit-time".
+ */
+
+/** Extension of a path, lowercased, without the dot ('' when none). */
+function fileExtension(file) {
+  const m = /\.([a-z0-9]+)$/i.exec(file);
+  return m ? m[1].toLowerCase() : '';
+}
+
+/** Wall-clock budget for one `git diff` used by the --changed resolver. */
+const GIT_DIFF_TIMEOUT_MS = 10000;
+
+/**
+ * Run one git diff and split its stdout into file names. Returns null ONLY for a
+ * failed diff (not a git repo); any git error is caught and mapped to null so the
+ * caller can report "not a repository" instead of crashing on a null status.
+ */
+function gitChangedNames(spawnSync, args) {
+  try {
+    const res = spawnSync('git', args, { encoding: 'utf-8', timeout: GIT_DIFF_TIMEOUT_MS });
+    if (res.status !== 0 || typeof res.stdout !== 'string') return null;
+    return res.stdout.split('\n').map((f) => f.trim()).filter(Boolean);
+  } catch {
+    return null;
+  }
+}
+
+/** Diff scope mirrors pre-commit: staged first, then anything vs HEAD. */
+function readChangedFiles() {
+  const { spawnSync } = require('child_process');
+  const staged = gitChangedNames(spawnSync, ['diff', '--cached', '--name-only', '--diff-filter=ACM']);
+  if (staged === null) return null;
+  if (staged.length > 0) return staged;
+  const vsHead = gitChangedNames(spawnSync, ['diff', 'HEAD', '--name-only', '--diff-filter=ACM']);
+  return vsHead === null ? staged : vsHead;
+}
+
+/**
+ * Run the gates a diff can trip that are both diff-scoped and fast. Gate 2
+ * (jscpd) is excluded on purpose: it scans the whole tree and duplicate
+ * detection is a codebase-wide question, not a per-diff one. Gate 4 is handed the
+ * actual files — calling it with '.' examined 0 files and printed a vacuous
+ * "No violations found", the exact anti-pattern this project forbids.
+ */
+async function runBriefGates(sourceFiles) {
+  const results = [];
+  if (sourceFiles.length === 0) return results;
+  results.push({ id: '3', code: await runGate('3', '.', {}) });
+  const { principles } = require('./principles.js');
+  results.push({ id: '4', code: await principles(sourceFiles) });
+  return results;
+}
+
+const BRIEF_GATE_NAMES = { '2': 'Duplicates', '3': 'Complexity', '4': 'Principles' };
+const COMMIT_TIME_GATES = ['1 lint', '5 tests', '6 Boy Scout', '7 IaC', '8 secrets', '9 sast', '10 build', '11 sprint'];
+
+/** Print the one-screen summary; returns the number of blocking gates. */
+function printBriefSummary(changed, sourceFiles, results, ms) {
+  console.log('');
+  console.log(`━━━ xp-gate check --changed (${changed.length} file(s), ${sourceFiles.length} source) ━━━`);
+  if (sourceFiles.length === 0) {
+    console.log('  No source files changed — no blocking source gate applies (docs/config only).');
+  }
+  let failures = 0;
+  for (const r of results) {
+    let verdict;
+    if (r.code === 0) verdict = 'PASS';
+    else if (r.code === 'NOT_RUN') verdict = 'SKIP';
+    else { verdict = 'BLOCK'; failures += 1; }
+    console.log(`  Gate ${r.id} ${(BRIEF_GATE_NAMES[r.id] || r.id).padEnd(12)} ${verdict}`);
+  }
+  const rest = sourceFiles.length > 0 ? COMMIT_TIME_GATES.filter((g) => !/^(1 |5 |6 )/.test(g)) : COMMIT_TIME_GATES;
+  console.log(`  commit-time (not run here): ${rest.join(', ')}`);
+  console.log(`  ${failures === 0 ? '✅ clear' : `❌ ${failures} blocking`} — ${ms} ms`);
+  return failures;
+}
+
+async function runChangedBrief() {
+  const { SOURCE_FILE_EXTENSIONS } = require('./gate-runner.js');
+  const t0 = Date.now();
+
+  const changed = readChangedFiles();
+  if (changed === null) {
+    console.error('[xp-gate check --changed] not a git repository');
+    return 1;
+  }
+  if (changed.length === 0) {
+    console.log('[xp-gate check --changed] no staged/tracked changes — nothing to gate (0 files).');
+    return 0;
+  }
+
+  const srcExt = new Set(SOURCE_FILE_EXTENSIONS);
+  const sourceFiles = changed.filter((f) => srcExt.has(fileExtension(f)));
+  const results = await runBriefGates(sourceFiles);
+  const failures = printBriefSummary(changed, sourceFiles, results, Date.now() - t0);
+  return failures === 0 ? 0 : 1;
+}
+
 function listGates() {
   const { getAllGates } = require('./gate-runner.js');
   const allGates = getAllGates();
@@ -244,4 +356,4 @@ function listGates() {
   return 0;
 }
 
-module.exports = { check, checkAllGates, formatGateTally };
+module.exports = { check, checkAllGates, formatGateTally, runChangedBrief, fileExtension, printBriefSummary };

@@ -22,6 +22,32 @@
 
 ---
 
+## 提交前自检清单（P1 红线前移 — 2026-10-30，直接解 #652）
+
+> 背景：47.6% 的提交是 fix/revert（323/679）。多数返工是"提交时才被门禁打回"——
+> 红线原本只活在 `githooks/` 里，AI 在 BUILD 期间看不到。这一页把会**阻断提交**的
+> 阈值提前到编码时自检，目标是"第一次提交就过"，而不是"提交→被打回→改→再提交"。
+
+**每次准备 `git commit` 前，逐条自检（按被拦频率排序）：**
+
+| # | 门禁 | 红线（会被 BLOCK/WARN 的硬阈值） | 自查方法 |
+|---|------|------------------------------|----------|
+| 1 | **Gate 3 CCN** | 单函数圈复杂度 **>10 BLOCK**、**>5 WARN** | 拆函数 / 早返回 / 抽策略表；`xp-gate check 3 <file>` |
+| 2 | **Gate 6 Boy Scout** | **新文件 0 warning**；修改文件 warning 数不得高于 `.warnings-baseline.json`；**单函数 ≤50 行**；**嵌套 ≤4 层** | 新文件当"零容忍"写；改动前 `xp-gate check 6` 看基线 |
+| 3 | **Gate 2 重复代码** | jscpd 相似度 **>5% BLOCK** | 抽公共函数，别复制粘贴；`xp-gate check 2 <dir>` |
+| 4 | **Gate 4 Principles** | 14 条 Clean Code/SOLID 规则，任一 error/warning 即拦（按 `.principlesrc`） | `xp-gate check 4 <file>`；避免超长参数表、空 catch、`as any` |
+| 5 | **Gate 1 Lint** | 适配器 lint 任一 error | 提交前跑一次项目 lint；不要留未用变量/导入 |
+| 6 | **Gate 5 测试** | 测试全绿 + 覆盖率 ≥80%（新 .ts/.tsx 无测试直接 BLOCK） | 新代码先写测试（TDD）；`npx vitest run <file>` |
+| 7 | **mirror/sync 纪律** | 改 `githooks/` 或 `skills/` 后必须 `node src/npm-package/scripts/sync-package-content.js --fix` 且 `bash scripts/check-hook-mirror.sh` 报 PASS | 忘了同步会在 pre-push 的 mirror 校验被打回 |
+
+**一条命令抢先看**：`xp-gate check . --changed --brief` 只跑"本次 diff 会触发的门禁"，
+一屏出 PASS/SKIP/BLOCK，目标 <5 s。把它放在 ralph-loop 每个 REQ 的 step 0，先看红不红，
+再决定是否继续写——而不是写到一半才被 `git commit` 拦下。
+
+**根因提醒**：Gate 3/6 是"返工双雄"。写完一个函数先扫一眼长度和嵌套，比提交后返工快得多。
+
+---
+
 ## BUILD Entry Contract Check (MANDATORY — v0.18.0+, 程序化)
 
 **Purpose**: Validate `slices-manifest.json` schema and slice↔REQ cross-artifact consistency before entering BUILD.
