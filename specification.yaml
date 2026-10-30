@@ -3778,3 +3778,12 @@ specification:
         - id: AC-638-03
           criteria: 未知规则默认算作可修而非噪音
           test_type: unit
+        - id: AC-605-01
+          criteria: 覆盖率阈值未声明时标注 implicit 并给出实际生效值
+          test_type: unit
+        - id: AC-605-02
+          criteria: 显式声明为同一值时仍能与未声明区分
+          test_type: unit
+        - id: AC-605-03
+          criteria: 两条闸门阈值矛盾时报告冲突而非静默取一
+          test_type: unit
