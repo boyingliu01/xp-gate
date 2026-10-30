@@ -627,6 +627,98 @@ record_gate_audit() {
   disown 2>/dev/null || true
 }
 
+# ── #651: journal a blocking exit ──────────────────────────────────────────
+#
+# Failure was invisible in this repo's own history: audit.jsonl had 8,258 records
+# and essentially zero gate FAILs, because pre-commit has ~76 `exit 1` blocking
+# paths and record_gate_audit() is only reached AFTER a gate settles. The moment a
+# gate FAILs and exits, the record that would have said so is never written — so
+# `xp-gate retro` and `sprint-status --rework-check` computed rework over a
+# denominator with no failures in it, and rework trended to zero by construction.
+#
+# The trap catches the failure on its way OUT rather than adding a record call to
+# all 76 branches, which would rot the first time someone adds branch 77.
+_BLOCKING_RECORDED=""
+_record_blocking_exit() {
+  local rc=$?
+  # 0 = success, nothing to journal.
+  [ "$rc" -eq 0 ] && return 0
+  # One record per run. Without the latch, a gate that already recorded and then
+  # exited non-zero would be counted twice, halving the reported first-pass rate.
+  [ -n "$_BLOCKING_RECORDED" ] && return 0
+  _BLOCKING_RECORDED="1"
+
+  # Identify the gate that was running. Status vars are NO*-gradeable: any of
+  # FAIL/BLOCK means this gate is the reason. Latest failing gate wins, which is
+  # the one that actually called exit.
+  local _bg_id="" _bg_name="" _bg_status="" _bg_detail=""
+  local _i _st_var _st
+  for _i in 0 1 2 3 4 5 6 7 8 9 10 11 12 13; do
+    _st_var="GATE_${_i}_STATUS"
+    _st="${!_st_var:-}"
+    case "$_st" in
+      FAIL|BLOCK)
+        # Latest failing gate wins: it is the one that actually called exit.
+        _bg_id="$_i"
+        _bg_status="$_st"
+        ;;
+    esac
+  done
+  local _bg_detail_var="GATE_${_bg_id}_DETAIL"
+  _bg_detail="${!_bg_detail_var:-}"
+
+  # Gate names for the journal. Deliberately short: this runs during shutdown.
+  case "$_bg_id" in
+    0)  _bg_name="Version Consistency" ;;
+    1)  _bg_name="Code Quality" ;;
+    2)  _bg_name="Duplicate Code" ;;
+    3)  _bg_name="Cyclomatic Complexity" ;;
+    4)  _bg_name="Principles" ;;
+    5)  _bg_name="Tests + Coverage" ;;
+    6)  _bg_name="Architecture + Boy Scout" ;;
+    7)  _bg_name="IaC Security" ;;
+    8)  _bg_name="Secret Scanning" ;;
+    9)  _bg_name="Build Integrity" ;;
+    10) _bg_name="SAST Security" ;;
+    11) _bg_name="Sprint Flow" ;;
+    12) _bg_name="File Hygiene" ;;
+    13) _bg_name="Compiler Strictness" ;;
+    *)  _bg_name="unknown" ;;
+  esac
+  [ -n "$_bg_id" ] || _bg_id="unknown"
+
+  # The reason must reach the journal or "top-N failing rules" cannot exist.
+  # Prefer the gate's own detail (it carries the rule/threshold), else the status.
+  local _bg_reason="${_bg_detail:-gate_exit_${rc}}"
+
+  local _bg_start_var="GATE_${_bg_id}_START"
+  local _bg_start="${!_bg_start_var:-}"
+  local _bg_dur="null"
+  if [ -n "$_bg_start" ]; then
+    local _bg_end
+    _bg_end=$(now_ms 2>/dev/null || echo "")
+    if [ -n "$_bg_end" ]; then
+      _bg_dur=$((_bg_end - _bg_start))
+      [ "$_bg_dur" -ge 0 ] 2>/dev/null || _bg_dur="null"
+    fi
+  fi
+
+  # Fire-and-forget, and never let journaling change the exit code.
+  {
+    run_tsx "${PROJECT_ROOT_FOR_AUDIT}/src/npm-package/lib/gate-audit.ts" record \
+      --gate-id "$_bg_id" \
+      --gate-name "$_bg_name" \
+      --passed false \
+      --issues-found 1 \
+      --duration-ms "$_bg_dur" \
+      --trigger commit \
+      --failure-reason "$_bg_reason" \
+      2>/dev/null
+  } >/dev/null 2>&1 || true
+  return 0
+}
+trap _record_blocking_exit EXIT
+
 echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
 echo "   QUALITY GATES - PRE-COMMIT CHECK"
 echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"

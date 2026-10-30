@@ -41,6 +41,12 @@ export interface GateAuditEntry {
   duration_anomaly?: boolean; // Issue #370: set when duration_ms > max_duration_ms
   duration_reason?: 'poisoned_start_ms' | 'clock_skew'; // REQ-B: why duration_ms is null
   detail?: string; // #507: optional gate-specific payload (e.g. effective CCN threshold)
+  /**
+   * #651: WHY the gate blocked. Without this the journal can only answer "how
+   * many failed", never "which rule fails most" — and the second question is the
+   * one that drives fixes. Only meaningful when passed=false.
+   */
+  failure_reason?: string;
 }
 
 // ── Public API ───────────────────────────────────────────────────────────────
@@ -415,6 +421,8 @@ function runCli(): void {
       ...(durationReason ? { duration_reason: durationReason as 'poisoned_start_ms' | 'clock_skew' } : {}),
       // #507: only set when provided (omit field otherwise)
       ...(opts['detail'] ? { detail: opts['detail'] } : {}),
+      // #651: only set when provided, so successful records stay byte-identical.
+      ...(opts['failure-reason'] ? { failure_reason: String(opts['failure-reason']).slice(0, 300) } : {}),
     };
     // Pre-commit (trigger=commit) is staging for a commit that does not exist
     // yet: park it in the pending sidecar so post-commit can stamp the real
