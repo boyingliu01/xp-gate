@@ -58,5 +58,13 @@
   "src/gates/test-layers.ts": {
     "totalWarnings": 1,
     "lastAnalyzed": "2026-10-30T17:40:15.459Z"
+  },
+  "plugins/dsh/src/delphi-run.test.ts": {
+    "totalWarnings": 1,
+    "lastAnalyzed": "2026-10-30T17:51:07.340Z"
+  },
+  "plugins/dsh/src/delphi-run.ts": {
+    "totalWarnings": 1,
+    "lastAnalyzed": "2026-10-30T17:51:07.341Z"
   }
 }

@@ -11,7 +11,7 @@
 import { TOOL_ABORTED } from "@deepseek-ai/dsh-tools"
 import { HarnessError } from "@deepseek-ai/dsh-llm"
 
-import type { DelphiOptions, ExpertSeat, RoundResult } from "./delphi.js"
+import type { DelphiOptions, ExpertSeat, ExpertVerdict, RoundResult } from "./delphi.js"
 import { runRound } from "./delphi.js"
 
 /**
@@ -132,15 +132,62 @@ export async function runReview(
 }
 
 /** Human-readable transcript for the tool result. */
+/**
+ * Reduce a seat's raw report to the part worth reading (#670).
+ *
+ * The seat was asked for `### Findings` / `### VERDICT` / `### CONFIDENCE`; the
+ * verdict and confidence are already on the tally line above, so repeating them
+ * here only makes the block longer. What the caller cannot get anywhere else is
+ * the Findings table, which is why the report is trimmed down to it.
+ */
+function findingsExcerpt(report: string): string {
+  const text = report.trim()
+  if (text === "") return ""
+  // Split on the section headings the prompt asks for; no regex escaping needed,
+  // which keeps this readable and avoids a silently-mangled character class.
+  const lines = text.split(/\r?\n/)
+  const start = lines.findIndex((line) => /^#{1,3}\s*Findings\s*$/i.test(line))
+  if (start === -1) {
+    // No Findings heading: keep everything before VERDICT rather than returning
+    // nothing on an unexpected format.
+    const stop = lines.findIndex((line) => /^#{1,3}\s*VERDICT/i.test(line))
+    return (stop === -1 ? lines : lines.slice(0, stop)).join("\n").trim()
+  }
+  let end = lines.length
+  for (let i = start + 1; i < lines.length; i += 1) {
+    if (/^#{1,3}\s*[A-Z]/i.test(lines[i])) {
+      end = i
+      break
+    }
+  }
+  return lines.slice(start + 1, end).join("\n").trim()
+}
+
+/**
+ * One seat's tally line, plus its findings when this is the final round (#670).
+ *
+ * Only the final round expands: printing every round's full report would bury the
+ * conclusion under five historical copies, and what the caller needs is "what is
+ * still wrong", not a transcript.
+ */
+function verdictLines(v: ExpertVerdict, expand: boolean): string[] {
+  const model = v.resolvedModel ? `${v.requestedModel} -> ${v.resolvedModel}` : v.requestedModel
+  const note = v.error ? ` (${v.error})` : ""
+  const lines = [`- [${v.role}] ${v.id} (${model}): ${v.verdict} confidence=${v.confidence}${note}`]
+  if (!expand) return lines
+  const excerpt = findingsExcerpt(v.report)
+  if (excerpt === "") return lines
+  for (const line of excerpt.split(/\r?\n/)) lines.push(`    ${line}`)
+  return lines
+}
+
 export function formatOutcome(outcome: ReviewOutcome): string {
   const lines: string[] = []
+  const lastRound = outcome.rounds.length
   for (const r of outcome.rounds) {
     lines.push(`## Round ${r.round} — approvals ${r.approvals}/${r.validCount} valid`)
-    for (const v of r.verdicts) {
-      const model = v.resolvedModel ? `${v.requestedModel} -> ${v.resolvedModel}` : v.requestedModel
-      const note = v.error ? ` (${v.error})` : ""
-      lines.push(`- [${v.role}] ${v.id} (${model}): ${v.verdict} confidence=${v.confidence}${note}`)
-    }
+    const expand = r.round === lastRound
+    for (const v of r.verdicts) lines.push(...verdictLines(v, expand))
     lines.push("")
   }
   lines.push(
