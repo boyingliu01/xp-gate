@@ -8,9 +8,40 @@ const {
   TEMPLATE_DIR,
   GLOBAL_HOOKS_DIR,
   GLOBAL_ADAPTERS_DIR,
+  GLOBAL_MODULES_DIR,
 } = require('./shared-paths.js');
 
 const BACKUP_DIR = path.join(CONFIG_DIR, '.uninstall-backup');
+
+/**
+ * Skill directory roots the CLI installs into, per platform (mirror of the
+ * installers in install-skill.js). Read at call time so a test can point HOME at a
+ * throwaway tree.
+ */
+function globalSkillRoots() {
+  return [
+    path.join(HOME_DIR(), '.qoder', 'skills'),
+    path.join(HOME_DIR(), '.config', 'opencode', 'skills'),
+    path.join(HOME_DIR(), '.claude', 'skills'),
+  ];
+}
+
+/**
+ * Directories inside ~/.config/xp-gate/ that `setup-global` creates and that
+ * `uninstall` used to leave behind (#663).
+ */
+const GLOBAL_INSTALL_RESIDUE = [
+  { key: 'modules', label: 'modules/' },
+  { key: 'node_modules', label: 'node_modules/' },
+  { key: 'package.json', label: 'package.json' },
+  { key: 'package-lock.json', label: 'package-lock.json' },
+  { key: 'xp-gate.json', label: 'xp-gate.json' },
+];
+
+/** User DATA that must survive an uninstall, and must be reported as retained. */
+const GLOBAL_USER_DATA = [
+  { key: '.delphi-config.json', label: '.delphi-config.json (your Delphi expert config)' },
+];
 
 /**
  * Signature strings used to verify file ownership.
@@ -276,6 +307,44 @@ function buildPlan(mode) {
         critical: true
       });
     }
+
+    // #663: `setup-global` also writes modules/, a node_modules/ tree, a
+    // package.json + package-lock.json and the xp-gate.json manifest. None of them
+    // were in the plan, so uninstall printed "Uninstall complete" over an
+    // installation that was still ~1000 files on disk. The residue is not
+    // cosmetic: a leftover node_modules/ makes the NEXT setup-global skip its own
+    // install and reuse a stale dependency tree, and a leftover xp-gate.json
+    // carries the previous version's manifest/lastInit into `doctor`, which then
+    // reports it as the current installation.
+    const configDir = CONFIG_DIR;
+    for (const item of GLOBAL_INSTALL_RESIDUE) {
+      const target = path.join(configDir, item.key);
+      if (fs.existsSync(target)) {
+        const isDir = fs.statSync(target).isDirectory();
+        plan.push({
+          type: isDir ? 'dir' : 'file',
+          path: target,
+          label: `~/.config/xp-gate/${item.label}`,
+          critical: false
+        });
+      }
+    }
+
+    // User data is deliberately NOT deleted. Reporting it is the second half of
+    // the fix: leaving it behind silently is how a user ends up with a stray
+    // config they cannot attribute.
+    for (const item of GLOBAL_USER_DATA) {
+      const target = path.join(configDir, item.key);
+      if (fs.existsSync(target)) {
+        plan.push({
+          type: 'retain',
+          retain: true,
+          path: target,
+          label: item.label,
+          critical: false
+        });
+      }
+    }
   }
 
   // Template dir is common to both modes
@@ -318,6 +387,30 @@ function removeFile(item, config) {
  */
 function removeDir(item) {
   if (!fs.existsSync(item.path)) return false;
+
+  // #664: the global `core.hooksPath` is a SHARED directory -- `git lfs install`
+  // writes its own hooks into it -- so a blind recursive delete of a hooks dir
+  // removes another tool's working files. Classify first; when foreign content is
+  // present, delete only xp-gate's own entries and say what was kept.
+  //
+  // Restricted to directories that ARE a hooks dir. The template dir and the
+  // adapters dir are wholly xp-gate-owned (the template legitimately contains an
+  // `adapters/` subdir, which would otherwise be read as foreign), so only a path
+  // that looks like a hooks root gets the conservative treatment.
+  const isHooksDir = /(^|[\/])hooks$/.test(item.path) || item.label.includes('hooks/');
+  const removal = isHooksDir ? planHooksDirRemoval(item.path) : { action: 'remove-all' };
+  if (removal.action === 'remove-owned-only') {
+    for (const name of removal.owned) {
+      fs.rmSync(path.join(item.path, name), { recursive: true, force: true });
+    }
+    try { fs.rmdirSync(item.path); } catch { /* non-empty: foreign files remain */ }
+    const sources = removal.foreign.map((f) => (f.source ? `${f.name} (${f.source})` : f.name));
+    console.log(`  Removed xp-gate hooks from ${item.label}`);
+    console.log(`  ⚠️  Kept ${removal.foreign.length} file(s) that are not xp-gate's: ${sources.join(', ')}`);
+    console.log('     The global core.hooksPath is a shared directory; other tools (e.g. git lfs) install here.');
+    return true;
+  }
+
   fs.rmSync(item.path, { recursive: true, force: true });
   console.log(`  Removed ${item.label}`);
   return true;
@@ -528,4 +621,135 @@ async function uninstall(args) {
   return 0;
 }
 
-module.exports = { uninstall, isXpGateFile, SIGNATURES };
+/**
+ * Decide which installed skill directories an uninstall may remove (#663).
+ *
+ * `uninstall` never touched skills at all, so 12 of them stayed in
+ * ~/.qoder/skills/ and ~/.config/opencode/skills/ after `uninstall --global`, and
+ * the next `init` treated them as already installed.
+ *
+ * Safety rule from the issue: only remove a directory whose content still matches
+ * the bundled copy. A user's edits are not residue, and deleting them is a far
+ * worse outcome than leaving a stale skill behind -- the user can always delete a
+ * leftover, but cannot recover an edit we removed.
+ *
+ * Returns [{ path, label }] for the directories that are safe to delete.
+ */
+function planSkillRemovals(skillNames, installedRoot, bundledRoot) {
+  const removals = [];
+  if (!Array.isArray(skillNames)) return removals;
+
+  for (const name of skillNames) {
+    if (typeof name !== 'string' || !name) continue;
+    const installedDir = path.join(installedRoot, name);
+    const bundledDir = path.join(bundledRoot, name);
+    if (!fs.existsSync(installedDir)) continue;
+    // No bundled copy to compare against -> cannot prove it is untouched, so keep it.
+    if (!fs.existsSync(bundledDir)) continue;
+    if (directoryContentMatches(installedDir, bundledDir)) {
+      removals.push({ path: installedDir, label: `${installedRoot}/${name}/` });
+    }
+  }
+  return removals;
+}
+
+/**
+ * True when two directory trees hold the same files with the same bytes.
+ * Skips `.git` and node_modules, which are never part of a skill bundle.
+ */
+function directoryContentMatches(a, b) {
+  const filesA = listFilesRelative(a);
+  const filesB = listFilesRelative(b);
+  if (filesA.length !== filesB.length) return false;
+  for (let i = 0; i < filesA.length; i++) {
+    if (filesA[i] !== filesB[i]) return false;
+    try {
+      if (!fs.readFileSync(path.join(a, filesA[i])).equals(fs.readFileSync(path.join(b, filesB[i])))) {
+        return false;
+      }
+    } catch {
+      return false;
+    }
+  }
+  return true;
+}
+
+/** Sorted relative file paths under a directory. */
+function listFilesRelative(root) {
+  const out = [];
+  const walk = (dir, prefix) => {
+    let entries;
+    try {
+      entries = fs.readdirSync(dir, { withFileTypes: true });
+    } catch {
+      return;
+    }
+    for (const entry of entries) {
+      if (entry.name === '.git' || entry.name === 'node_modules') continue;
+      const rel = prefix ? `${prefix}/${entry.name}` : entry.name;
+      if (entry.isDirectory()) {
+        walk(path.join(dir, entry.name), rel);
+      } else {
+        out.push(rel);
+      }
+    }
+  };
+  walk(root, '');
+  return out.sort();
+}
+
+/**
+ * Decide how a hooks directory may be removed (#664).
+ *
+ * `uninstall` did `rmSync(GLOBAL_HOOKS_DIR, {recursive: true})`. The global
+ * `core.hooksPath` is a SHARED directory: `git lfs install` writes its own hooks
+ * there, and a recursive delete took them with it. The user then had a broken
+ * git-lfs setup and no idea which command caused it — deleting another tool's
+ * working files is a worse outcome than leaving residue the user can see.
+ *
+ * Returns:
+ *   { action: 'remove-all', foreign: [] }        — only xp-gate content, safe
+ *   { action: 'remove-owned-only', foreign }     — foreign files present, keep them
+ *   { action: 'absent', foreign: [] }            — nothing to do
+ */
+function planHooksDirRemoval(hooksDir) {
+  if (!fs.existsSync(hooksDir)) return { action: 'absent', foreign: [] };
+
+  const foreign = [];
+  const owned = [];
+  let entries;
+  try {
+    entries = fs.readdirSync(hooksDir, { withFileTypes: true });
+  } catch {
+    // Unreadable is not "empty": report it as foreign so nothing is deleted blind.
+    return { action: 'remove-owned-only', foreign: [{ name: hooksDir, source: null }] };
+  }
+
+  for (const entry of entries) {
+    const name = entry.name;
+    // xp-gate's own hook entry points and support files.
+    if (OWNED_HOOK_NAMES.includes(name) || name.endsWith('.sh') || name === 'lib') {
+      owned.push(name);
+    } else {
+      foreign.push({ name, source: foreignHookSource(path.join(hooksDir, name)) });
+    }
+  }
+
+  return foreign.length > 0
+    ? { action: 'remove-owned-only', foreign, owned }
+    : { action: 'remove-all', foreign: [], owned };
+}
+
+/** Hook entry points xp-gate installs. */
+const OWNED_HOOK_NAMES = ['pre-commit', 'pre-push', 'post-merge'];
+
+/** 'git-lfs' when the file proves it, else null. Content-based: see doctor.js. */
+function foreignHookSource(filePath) {
+  try {
+    return /\bgit\s+lfs\b/.test(fs.readFileSync(filePath, 'utf8')) ? 'git-lfs' : null;
+  } catch {
+    return null;
+  }
+}
+
+module.exports = { uninstall, isXpGateFile, SIGNATURES, buildPlan, planSkillRemovals, planHooksDirRemoval };

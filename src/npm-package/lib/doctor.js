@@ -417,6 +417,75 @@ function pathsEquivalent(a, b) {
 const DRIFT_COMPARED_HOOKS = ['pre-commit', 'pre-push', 'post-merge'];
 
 /**
+ * Classify the contents of an installed hooks directory (#664).
+ *
+ * `setup-global` sets `core.hooksPath` GLOBALLY, so this directory governs every
+ * repository on the machine — and any tool that installs hooks by asking git where
+ * hooks live writes into it. `git lfs install` is the one that actually does this;
+ * the measured result was four entries xp-gate never installs appearing beside its
+ * own hooks. Nothing reported them, so the user had no way to learn their global
+ * install had acquired foreign hooks.
+ *
+ * Returns:
+ *   owned   — hook names xp-gate installs (the drift-compared set)
+ *   support — xp-gate's own non-hook support entries (lib/, generated scripts)
+ *   foreign — [{ name, source }] for everything else; `source` is 'git-lfs' when
+ *             the file's content proves it, otherwise null. Guessing a source we
+ *             cannot prove would send the user to the wrong tool.
+ */
+function classifyHooksDir(hooksDir) {
+  const result = { owned: [], support: [], foreign: [] };
+  let entries;
+  try {
+    entries = fs.readdirSync(hooksDir, { withFileTypes: true });
+  } catch {
+    return result;
+  }
+
+  for (const entry of entries) {
+    const name = entry.name;
+    if (entry.isDirectory()) {
+      // lib/ is xp-gate's shared-library directory; any other subdirectory belongs
+      // to somebody else and is reported as foreign for the same reason a file is.
+      if (name === 'lib') {
+        result.support.push(name);
+      } else {
+        result.foreign.push({ name, source: null });
+      }
+      continue;
+    }
+    if (DRIFT_COMPARED_HOOKS.includes(name)) {
+      result.owned.push(name);
+      continue;
+    }
+    if (name.endsWith('.sh')) {
+      // Generated support scripts shipped beside the hooks (#505).
+      result.support.push(name);
+      continue;
+    }
+    result.foreign.push({ name, source: gitLfsHookSource(path.join(hooksDir, name)) });
+  }
+  return result;
+}
+
+/**
+ * 'git-lfs' when the file is a git-lfs hook, else null.
+ *
+ * Detected from content rather than filename: git-lfs installs several hook names
+ * and which ones depends on its version, so a name list would silently miss newer
+ * ones. The `git lfs <hook>` invocation is the signature.
+ */
+function gitLfsHookSource(filePath) {
+  let body;
+  try {
+    body = fs.readFileSync(filePath, 'utf8');
+  } catch {
+    return null;
+  }
+  return /\bgit\s+lfs\b/.test(body) ? 'git-lfs' : null;
+}
+
+/**
  * Non-hook files that must sit beside the installed hooks.
  *
  * These are not Git entry points, so they are not in DRIFT_COMPARED_HOOKS, but
@@ -3280,6 +3349,7 @@ module.exports = {
   readTuiJson,
   formatDoctorJson,
   diagnoseHookDrift,
+  classifyHooksDir,
   syncGlobalHooksFromRepo,
   diagnoseModuleDrift,
   diagnoseAuditLedger,
