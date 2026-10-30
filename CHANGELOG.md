@@ -2,6 +2,39 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.35.6.0] - 2026-10-30
+
+### Added
+
+- **`xp-gate doctor --brief`（#653）**。一条命令给出 hooks / 语言 / adapter / 覆盖率 /
+  门禁状态五类事实。动机：32.7% 的 shell 调用是纯探测（`where gcc`、`Test-Path`、
+  逐文件读），每次 ~16s，而这些答案几乎不变。它是**纯读取**——与 `--fix`/`--sync-hooks`/
+  `--install-tools`/`--force` 互斥（解析期报错，不是文档约定），因为用户会为"快"而
+  频繁调用它，顺手写状态的话代价就从延迟变成状态变更。
+
+### Fixed
+
+- **`xp-gate check <file> --gates ...` 从未真正跑通（#653）**。两个 bug 都是
+  「工具没跑起来，却被报成你的代码有问题」：
+  - `targetPath` 文档写"文件或目录"（`check <file>` 正是传文件），但 `spawnSync` 的
+    `cwd` 必须是目录。指向文件时返回裸 ENOENT，上层打印 `Gate 3: failed to run
+    npx tsx` 并计作 **FAIL**。现在文件路径解析为它的所在目录。
+  - Windows 上用 `shell: true` 解析 npx.cmd，node 会把 argv 拼成一整条未转义的命令行
+    （DEP0190），路径含反斜杠/空格即变形；改调 `npx.cmd` 又撞 CVE-2024-27980 的
+    EINVAL 加固。现在用当前 node 二进制跑 npx 自己的 `cli.js`：纯 argv、无 shell。
+  - 实测修复后 **1.88s / 2 passed**，满足 #653 的「提交前自检 <2s」验收标准。
+  - `gate-runner.test.js` 的 10 个用例都没发现，因为它们断言的是「命令字符串里含某个
+    词」；新测试断言「真的 passed 了、真的在 2 秒内」。
+
+### Changed
+
+- **更正耗时的归因（#653）**。`docs/plans/2026-10-30-dev-speed-diagnosis.md` 原称门禁
+  占 34.8%（87.5 h）——该数字**无法复现**。复算为 21.5 h（8351 次执行），相对
+  251.7 h 清洁总量 = **8.5%**；把门禁提速一倍只省 4.3%。而 `job_output` 66.5 h +
+  `pwsh` 69.4 h = 135.9 h 已占 54%。**调优排序据此重排：调用次数优先，门禁时长靠后。**
+
+---
+
 ## [0.35.5.0] - 2026-10-30
 
 ### Fixed
