@@ -2,7 +2,7 @@ import { describe, it, expect } from "vitest"
 import type { Context } from "@deepseek-ai/cordis"
 import type { ShellExecRequest, ShellExecSpec, ShellRunResult } from "@deepseek-ai/dsh-shell"
 import type { SkillProvider, SkillProviderControl, SkillProviderObservation } from "@deepseek-ai/dsh-skill"
-import { apply, inject } from "./index.js"
+import { apply, inject, renderText } from "./index.js"
 
 type ProviderFactory = (control: SkillProviderControl) => SkillProvider
 
@@ -168,5 +168,22 @@ describe("apply", () => {
     expect(requests[0]?.command).not.toContain("--config")
     await tool.execute({ config: "custom.yaml" }, { signal: new AbortController().signal })
     expect(requests[1]?.command).toContain("xp-gate arch --use-config 'custom.yaml'")
+  })
+
+  /**
+   * @test REQ-562
+   * @intent 5 个工具曾各自内联一份完全相同的 render 闭包，在覆盖率报告里表现为 5 个
+   *         未覆盖函数，而实际只有一行行为（#562）。提取为共享常量后只需测一次，
+   *         也让"共享的输出约定"这件事在代码里显形，而不是 5 个巧合。
+   * @covers AC-562-04
+   */
+  it("renderText wraps a tool result as a single text part", () => {
+    expect(renderText(undefined, "hello")).toEqual([{ type: "text", text: "hello" }])
+  })
+
+  it("renderText keeps empty output as an empty text part, not a dropped one", () => {
+    // A tool that legitimately produced nothing must still render one part; returning
+    // [] would look to the host like the tool never answered.
+    expect(renderText({ path: "x" }, "")).toEqual([{ type: "text", text: "" }])
   })
 })

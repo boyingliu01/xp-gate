@@ -1,6 +1,6 @@
 import { tool } from "@opencode-ai/plugin"
 import { z } from "zod"
-import { exec, execSync, spawn } from "node:child_process"
+import { exec, execFileSync, execSync, spawn } from "node:child_process"
 import { promisify } from "node:util"
 import { readFileSync, writeFileSync, existsSync, mkdirSync, rmSync } from "node:fs"
 import { join } from "node:path"
@@ -345,7 +345,7 @@ function generateSessionTitle(dbPath: string, sessionId: string): string {
       ORDER BY m.time_created DESC
       LIMIT 10
     `
-    const raw = execSync(`sqlite3 "${dbPath}" "${sql}"`, {
+    const raw = execFileSync("sqlite3", [dbPath, sql], {
       encoding: "utf8",
       timeout: 5000,
     })
@@ -492,7 +492,11 @@ function writeSessionModel(dbPath: string, sessionId: string, modelJson: string)
   const escapedModel = modelJson.replace(/'/g, "''")
   const sql = `UPDATE session SET model = '${escapedModel}', time_updated = ${Date.now()} WHERE id = '${escapedId}'`
   try {
-    execSync(`sqlite3 "${dbPath}" "${sql}"`, { timeout: SQLITE_TIMEOUT_MS })
+    // execFileSync, NOT execSync: `dbPath` was interpolated into a shell string with
+    // only double quotes for protection, so a path containing `"` or `$()` broke out
+    // into shell (semgrep security-audit flagged it as a command-injection sink).
+    // Passing the arguments as an array removes the shell from the picture entirely.
+    execFileSync("sqlite3", [dbPath, sql], { timeout: SQLITE_TIMEOUT_MS })
   } catch (err) {
     // Contract is to propagate: the caller renders the failure as
     // "Session reload failed: <message>". Wrapped so the IO sits inside
@@ -616,7 +620,7 @@ function renameSession(sessionId: string, newTitle?: string): string {
   const escapedId = sessionId.replace(/'/g, "''")
   const sql = `UPDATE session SET title = '${escapedTitle}', time_updated = ${Date.now()} WHERE id = '${escapedId}'`
   try {
-    execSync(`sqlite3 "${dbPath}" "${sql}"`, { timeout: SQLITE_TIMEOUT_MS })
+    execFileSync("sqlite3", [dbPath, sql], { timeout: SQLITE_TIMEOUT_MS })
     return `Session renamed to: "${trimmed}"`
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err)

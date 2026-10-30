@@ -3796,6 +3796,9 @@ specification:
         - id: AC-562-03
           criteria: 插件版本比较函数在多位数段、前导 v、缺失段与相等版本上行为正确
           test_type: unit
+        - id: AC-562-04
+          criteria: 工具结果渲染为共享常量，空输出渲染为空 text 片而非丢弃
+          test_type: unit
         - id: AC-640-01
           criteria: pre-commit 在入口记录毫秒起点时间戳并带整数兜底，且不破坏 #546 首行自检
           test_type: integration
