@@ -27,6 +27,37 @@ function writeDoc(filePath, content) {
   fs.writeFileSync(filePath, content, 'utf8');
 }
 
+/**
+ * Copy the canonical source trees a sync run READS into `destRoot` (#645).
+ *
+ * The sync script mirrors githooks/, skills/, plugins/ and every src/ module into
+ * the package. Seeding the whole of `src/` except the package itself keeps this
+ * list from rotting: syncModules() gains a module, this helper needs no edit.
+ * Only reads from the real checkout -- nothing is ever written back to it.
+ */
+function seedCanonicalSources(realRoot, destRoot) {
+  const real = realRoot || path.resolve(__dirname, '..', '..', '..', '..');
+  const dest = destRoot;
+  for (const tree of ['githooks', 'skills', 'plugins']) {
+    const from = path.join(real, tree);
+    if (fs.existsSync(from)) fs.cpSync(from, path.join(dest, tree), { recursive: true });
+  }
+  const srcRoot = path.join(real, 'src');
+  for (const name of fs.readdirSync(srcRoot)) {
+    // The package itself is the DESTINATION of the sync, not a canonical source;
+    // copying it would let the test compare a mirror against a stale mirror.
+    if (name === 'npm-package') continue;
+    const from = path.join(srcRoot, name);
+    if (fs.statSync(from).isDirectory()) {
+      fs.cpSync(from, path.join(dest, 'src', name), { recursive: true });
+    }
+  }
+  fs.mkdirSync(path.join(dest, 'src', 'npm-package', 'scripts'), { recursive: true });
+  for (const rel of ['scripts/sync-package-content.js', 'package.json']) {
+    fs.copyFileSync(path.join(srcRoot, 'npm-package', rel), path.join(dest, 'src', 'npm-package', rel));
+  }
+}
+
 describe('checkDocsDrift', () => {
   let tempDir;
   let preCommitPath;
@@ -269,11 +300,55 @@ describe('syncGateScripts', () => {
  * @covers AC-450-01, AC-450-02, AC-450-03, AC-450-04
  */
 describe('syncHooks', () => {
-  const WORKTREE_PATH = path.resolve(__dirname, '..', '..', '..', '..');
+  // #645: run the sync against a THROWAWAY worktree, never the checkout.
+  //
+  // This block used to spawn the real sync script with
+  //     cwd: path.resolve(__dirname, '..', '..', '..', '..')
+  // -- four levels up from src/npm-package/scripts/__tests__ is the REPOSITORY
+  // ROOT, not a temp dir -- so the script's writes landed in the repo and CI's
+  // Gate 5 failed at vitest-worktree-guard with
+  //     Work tree polluted by the test run: M src/npm-package/mock-policy/gate-m3.ts
+  //
+  // The pollution was CONDITIONAL (the writes are idempotent, so it only dirties
+  // the tree when the checked-out commit carries a stale mirror), which made it
+  // look flaky and encouraged "just re-run it" -- hiding the cause. The guard
+  // catches the consequence; a temp cwd removes the cause.
+  const REAL_REPO_ROOT = path.resolve(__dirname, '..', '..', '..', '..');
+  const TMP_WORKTREE = fs.mkdtempSync(path.join(os.tmpdir(), 'xp-gate-sync-hooks-'));
+  const WORKTREE_PATH = TMP_WORKTREE;
   const PKG_ROOT = path.join(WORKTREE_PATH, 'src', 'npm-package');
   const HOOKS_DIR = path.join(PKG_ROOT, 'hooks');
   const syncScript = path.join(WORKTREE_PATH, 'src', 'npm-package', 'scripts', 'sync-package-content.js');
   const nodeExe = process.execPath;
+
+  /**
+   * Lay out just enough of the repo shape inside the temp root for the sync script
+   * to read its canonical sources and write its mirrors. Copies only the trees the
+   * script touches: githooks/ (the hook source of truth) and the packages it
+   * mirrors into. The REAL checkout is only ever READ.
+   */
+  function seedTempWorktree() {
+    seedCanonicalSources(REAL_REPO_ROOT, WORKTREE_PATH);
+    fs.mkdirSync(path.join(PKG_ROOT, 'scripts'), { recursive: true });
+    fs.copyFileSync(
+      path.join(REAL_REPO_ROOT, 'src', 'npm-package', 'scripts', 'sync-package-content.js'),
+      syncScript,
+    );
+    // The script resolves its package root relative to its own location, so it
+    // must sit at <temp>/src/npm-package/scripts/ exactly as in the real tree.
+    fs.copyFileSync(
+      path.join(REAL_REPO_ROOT, 'src', 'npm-package', 'package.json'),
+      path.join(PKG_ROOT, 'package.json'),
+    );
+  }
+
+  beforeAll(() => {
+    seedTempWorktree();
+  });
+
+  afterAll(() => {
+    fs.rmSync(TMP_WORKTREE, { recursive: true, force: true });
+  });
 
   // Ensure hooks are re-synced once before tests run; share the result.
   let syncOk = false;
@@ -473,9 +548,41 @@ describe('checkAdapterDrift', () => {
 const { spawnSync } = require('child_process');
 
 describe('sync-package-content subprocess invocation', () => {
-  const WORKTREE_PATH = path.resolve(__dirname, '..', '..', '..', '..');
+  // #645: same rule as the syncHooks block above -- a test may not write into the
+  // repository. `path.resolve(__dirname, '..', '..', '..', '..')` IS the repo root,
+  // so spawning the sync script with it as cwd copied mirrors over the checkout and
+  // CI's Gate 5 failed at vitest-worktree-guard.
+  //
+  // This block additionally DELETES package directories to prove the sync
+  // recreates them, which is precisely the operation that must never touch a real
+  // checkout. Everything therefore runs inside a throwaway tree seeded from the
+  // real sources (read-only).
+  const REAL_REPO_ROOT = path.resolve(__dirname, '..', '..', '..', '..');
+  const TMP_WORKTREE = fs.mkdtempSync(path.join(os.tmpdir(), 'xp-gate-sync-sub-'));
+  const WORKTREE_PATH = TMP_WORKTREE;
   const PKG_ROOT = path.join(WORKTREE_PATH, 'src', 'npm-package');
   const REPO_ROOT = path.join(WORKTREE_PATH);
+
+  function seedTempWorktree() {
+    seedCanonicalSources(REAL_REPO_ROOT, WORKTREE_PATH);
+    fs.mkdirSync(path.join(PKG_ROOT, 'scripts'), { recursive: true });
+    fs.copyFileSync(
+      path.join(REAL_REPO_ROOT, 'src', 'npm-package', 'scripts', 'sync-package-content.js'),
+      path.join(PKG_ROOT, 'scripts', 'sync-package-content.js'),
+    );
+    fs.copyFileSync(
+      path.join(REAL_REPO_ROOT, 'src', 'npm-package', 'package.json'),
+      path.join(PKG_ROOT, 'package.json'),
+    );
+  }
+
+  beforeAll(() => {
+    seedTempWorktree();
+  });
+
+  afterAll(() => {
+    fs.rmSync(TMP_WORKTREE, { recursive: true, force: true });
+  });
   const CORE_SKILLS = [
     'admin-template-guidelines',
     'delphi-review',

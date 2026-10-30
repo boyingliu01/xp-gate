@@ -3622,3 +3622,9 @@ specification:
         - id: AC-670-53
           criteria: 无 population 元数据的旧基线保持不限域的历史行为，且读取器不得凭空构造声明
           test_type: unit
+        - id: AC-670-54
+          criteria: sync-package-content 测试不以真实仓库根作为 spawn cwd
+          test_type: unit
+        - id: AC-670-55
+          criteria: sync-package-content 测试在 mkdtemp 出来的临时工作树上运行，写操作不落入检出目录
+          test_type: unit
