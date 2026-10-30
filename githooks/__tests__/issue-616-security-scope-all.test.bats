@@ -16,7 +16,7 @@
 #         GATE_SCOPE, and Gate 3 already branches on it. These tests pin that both
 #         security fragments read the same signal and pick the whole-tree
 #         invocation, while leaving the diff path byte-identical.
-# @covers AC-616-01, AC-616-02, AC-616-03, AC-616-04
+# @covers AC-616-01, AC-616-02, AC-616-03, AC-670-03
 
 setup() {
   REPO_ROOT="$(cd "$BATS_TEST_DIRNAME/../.." && pwd)"
@@ -52,11 +52,11 @@ setup() {
   [ "$status" -eq 0 ]
 }
 
-# AC-616-04: end-to-end, an --all run must hand the security gates a non-empty
+# AC-670-03: end-to-end, an --all run must hand the security gates a non-empty
 # file population even when the index is clean. This drives the real runner
 # preamble builder rather than grepping it: the file-source lines for all-mode
 # must come from the list file, and the scope variable must say "all".
-@test "AC-616-04: the --all preamble exposes GATE_SCOPE=all and a whole-tree file list" {
+@test "AC-670-03: the --all preamble exposes GATE_SCOPE=all and a whole-tree file list" {
   local out
   out=$(node -e '
     const m = require(process.argv[1]);

@@ -402,6 +402,10 @@ source_gate_lib "${AUDIT_SCRIPT_DIR}/lib/docs-only.sh"
 # so the fail-closed contract is unit-testable without executing this hook.
 source_gate_lib "${AUDIT_SCRIPT_DIR}/lib/test-failure.sh"
 
+# Issue #602: test-suite hygiene detectors (.only / .skip / deleted test files),
+# sourced so the same vocabulary is unit-testable and reusable by Gate 5d (#601).
+source_gate_lib "${AUDIT_SCRIPT_DIR}/lib/assertion-quality.sh"
+
 # Issue #477: Gate 2's jscpd config probe and outcome classification, same reason.
 source_gate_lib "${AUDIT_SCRIPT_DIR}/lib/jscpd-run.sh"
 
@@ -2228,6 +2232,121 @@ if [ "$PROJECT_LANG" = "documentation-only" ] || [ "$DOCS_ONLY_COMMIT" = true ];
   GATE_5_DETAIL="docs_only_change"
 
 else
+  # ========================================================================
+  # Gate 5-FOCUS / Gate 5-DELETE (#602): the two quietest ways to "fix" a red
+  # build are to commit a `.only` (CI then runs one case and reports green) and
+  # to delete a test file with no replacement (the safety net vanishes with no
+  # signal). 指南 §9.5/§12 forbid both. Gate 5a guards the ADD side -- "a new
+  # source file must have a test" -- so guarding only that side left the
+  # constraint asymmetric: tests could be silently removed but never silently
+  # added, which is backwards from what protects the codebase.
+  #
+  # Runs before the expensive Gate 5a machinery so a `.only` commit fails in
+  # milliseconds instead of after a full test run.
+  # ========================================================================
+  GATE_5_FOCUS_BLOCKED=0
+  GATE_5_SKIP_COUNT=0
+  GATE_5_DELETED_TESTS=""
+  if declare -f classify_test_focus >/dev/null 2>&1; then
+    STAGED_TEST_FILES=$(git diff --cached --name-only --diff-filter=ACM 2>/dev/null \
+      | grep -E '\.(test|spec)\.(ts|tsx|js|jsx|mjs|cjs|py|go|java|kt|cs|scala|ps1)$|(^|/)(test_[^/]*\.py|[^/]*_test\.(py|go))$' || true)
+    if [ -n "$STAGED_TEST_FILES" ]; then
+      while IFS= read -r _tf; do
+        [ -n "$_tf" ] || continue
+        _tf_content=$(git show ":$tf" 2>/dev/null) || _tf_content=$(cat "$_tf" 2>/dev/null || true)
+        [ -n "$_tf_content" ] || continue
+
+        # --- focus markers: BLOCK ---
+        _focus_hits=$(printf '%s\n' "$_tf_content" | classify_test_focus || true)
+        if [ -n "$_focus_hits" ]; then
+          # XP_GATE_ALLOW_ONLY=1 is an explicit, audited override for the one
+          # legitimate case (debugging an unrelated failure mid-bisect). It is
+          # opt-in per run and printed, never silent.
+          if [ "${XP_GATE_ALLOW_ONLY:-0}" = "1" ]; then
+            echo "⚠️  WARN - focus marker in $_tf (allowed by XP_GATE_ALLOW_ONLY=1)"
+            record_gate_audit "gate-5-focus-override" "focus-override" "WARN" 1 "$GATE_5_START" "file=$_tf"
+          else
+            echo "❌ BLOCKED - focus marker(s) in $_tf:"
+            printf '%s\n' "$_focus_hits" | sed 's/^/     /'
+            GATE_5_FOCUS_BLOCKED=$((GATE_5_FOCUS_BLOCKED + 1))
+          fi
+        fi
+
+        # --- skip markers: WARN unless justified ---
+        _skip_hits=$(printf '%s\n' "$_tf_content" | classify_test_skip || true)
+        if [ -n "$_skip_hits" ]; then
+          if is_skip_justified "$_tf_content"; then
+            echo "ℹ️  Skipped case(s) in $_tf are justified via @skip-justified."
+          else
+            _skip_n=$(printf '%s\n' "$_skip_hits" | wc -l | tr -d ' ')
+            GATE_5_SKIP_COUNT=$((GATE_5_SKIP_COUNT + _skip_n))
+            echo "⚠️  WARN - $_skip_n skipped case(s) in $_tf without @skip-justified: <reason>"
+          fi
+        fi
+        # --- Gate 5d (#601): assertion quality ---
+        # 指南 §9.2 forbids six assertion anti-patterns, and until now nothing in
+        # XP-Gate looked at assertions at all: Gate M2/M3 examine how test doubles
+        # are built, never whether the test asserts anything. Tautologies and
+        # empty catches are BLOCK (certainly vacuous); weak-only / mock-echo /
+        # call-order shapes WARN, because each can be legitimate and blocking a
+        # legal style trains people to add justification annotations until the
+        # annotation stops meaning anything.
+        if declare -f classify_tautological_assertions >/dev/null 2>&1; then
+          if is_assertion_justified "$_tf_content"; then
+            echo "ℹ️  Assertion style in $_tf is justified via @assertion-justified."
+          else
+            _tauto=$(printf '%s\n' "$_tf_content" | classify_tautological_assertions || true)
+            _swallow=$(printf '%s\n' "$_tf_content" | classify_swallowed_errors || true)
+            _weak=$(printf '%s\n' "$_tf_content" | classify_weak_assertions || true)
+            if [ -n "$_tauto" ]; then
+              echo "❌ BLOCKED - tautological assertion(s) in $_tf (cannot fail):"
+              printf '%s\n' "$_tauto" | sed 's/^/     /'
+              echo "     See skills/test-driven-development/testing-anti-patterns.md"
+              GATE_5_FOCUS_BLOCKED=$((GATE_5_FOCUS_BLOCKED + 1))
+            fi
+            if [ -n "$_swallow" ]; then
+              echo "❌ BLOCKED - empty catch in $_tf swallows the failure it guards:"
+              printf '%s\n' "$_swallow" | sed 's/^/     /'
+              echo "     See skills/test-driven-development/testing-anti-patterns.md"
+              GATE_5_FOCUS_BLOCKED=$((GATE_5_FOCUS_BLOCKED + 1))
+            fi
+            if [ -n "$_weak" ]; then
+              echo "⚠️  WARN - test block(s) in $_tf assert only weak properties:"
+              printf '%s\n' "$_weak" | sed 's/^/     /'
+              echo "     toBeDefined/toBeTruthy alone cannot detect a wrong value."
+              GATE_5_SKIP_COUNT=$((GATE_5_SKIP_COUNT + $(printf '%s\n' "$_weak" | wc -l | tr -d ' ')))
+            fi
+          fi
+        fi
+      done <<< "$STAGED_TEST_FILES"
+
+      # --- deleted test files: WARN ---
+      DELETED_LIST=$(mktemp 2>/dev/null || echo "${TMPDIR:-/tmp}/xp-deleted-$$")
+      ADDED_LIST=$(mktemp 2>/dev/null || echo "${TMPDIR:-/tmp}/xp-added-$$")
+      git diff --cached --name-only --diff-filter=D > "$DELETED_LIST" 2>/dev/null || true
+      git diff --cached --name-only --diff-filter=A > "$ADDED_LIST" 2>/dev/null || true
+      GATE_5_DELETED_TESTS=$(classify_deleted_tests "$DELETED_LIST" "$ADDED_LIST" || true)
+      rm -f "$DELETED_LIST" "$ADDED_LIST"
+      if [ -n "$GATE_5_DELETED_TESTS" ]; then
+        echo "⚠️  WARN - test file(s) deleted with no same-named replacement:"
+        printf '%s\n' "$GATE_5_DELETED_TESTS" | sed 's/^/     /'
+        echo "     Deleting a test removes the safety net (指南 §9.5). If the code is"
+        echo "     genuinely gone, say so in the commit body; otherwise restore it."
+      fi
+    fi
+  fi
+
+  if [ "$GATE_5_FOCUS_BLOCKED" -gt 0 ]; then
+    echo ""
+    echo "❌ BLOCKED - Gate 5: $GATE_5_FOCUS_BLOCKED test-hygiene violation(s) (see above)."
+    echo "   Focus markers (.only/fit/fdescribe) make CI run one case and report green;"
+    echo "   tautological assertions and empty catches verify nothing at all."
+    echo "   See skills/test-driven-development/testing-anti-patterns.md"
+    echo "   Remove them, or add '@assertion-justified: <reason>' for a reviewed exception."
+    record_gate_audit "gate-5-focus" "test-focus" "FAIL" "$GATE_5_FOCUS_BLOCKED" "$GATE_5_START" "blocked=1"
+    exit 1
+  fi
+
   # ========================================================================
   # Gate 5a: Test-Source File Pairing Check
   # New .ts/.tsx files: BLOCK (no corresponding test → commit rejected)

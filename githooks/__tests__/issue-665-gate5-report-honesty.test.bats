@@ -14,30 +14,30 @@
 #         Both render identically. The exemption has to travel to the report layer;
 #         the fix is to publish it as a reason and to say which population the
 #         number describes.
-# @covers AC-665-01, AC-665-02, AC-665-03
+# @covers AC-670-06, AC-670-06, AC-670-07
 
 setup() {
   REPO_ROOT="$(cd "$BATS_TEST_DIRNAME/../.." && pwd)"
   HOOK="$REPO_ROOT/githooks/pre-commit"
 }
 
-# AC-665-01: the subset-run exemption is recorded as a reason, not left empty.
-@test "AC-665-01: Gate 5's report carries a reason when coverage was exempted by a subset run" {
+# AC-670-06: the subset-run exemption is recorded as a reason, not left empty.
+@test "AC-670-06: Gate 5's report carries a reason when coverage was exempted by a subset run" {
   run grep -q 'partial_test_run' "$HOOK"
   [ "$status" -eq 0 ]
 }
 
-# AC-665-02: the recorded population says which one the number describes, so
+# AC-670-06: the recorded population says which one the number describes, so
 # 29%-against-an-82%-floor cannot read as a violation that was allowed.
-@test "AC-665-02: the report distinguishes the subset population from the full one" {
+@test "AC-670-06: the report distinguishes the subset population from the full one" {
   run grep -qE 'coverage_applies_to|"applies_to"|subset' "$HOOK"
   [ "$status" -eq 0 ]
 }
 
-# AC-665-03: the exemption is set at the SAME place that exempts the threshold, so
+# AC-670-07: the exemption is set at the SAME place that exempts the threshold, so
 # the record cannot drift from the verdict. A reason set at one call site and not
 # another is exactly the drift that produced an empty reason next to a PASS.
-@test "AC-665-03: the exemption reason is derived from the same flag that excuses the threshold" {
+@test "AC-670-07: the exemption reason is derived from the same flag that excuses the threshold" {
   # Every site that marks a partial run must also be able to explain it: the flag
   # is PARTIAL_TEST_RUN, so the report reason is derived from it rather than set
   # by hand at each branch (six branches set the flag).

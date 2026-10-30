@@ -281,6 +281,37 @@ TDD cycle:
 | Tests as afterthought | TDD - tests first |
 | Over-complex mocks | Consider integration tests |
 
+## Which of these does XP-Gate enforce? (Gate 5d, #601)
+
+Most of this document is judgement that no linter can make. Six shapes, however,
+are mechanically detectable, and `githooks/lib/assertion-quality.sh` now does it on
+**changed test files only** (未改文件不回溯):
+
+| Detector | Shape | Verdict | What to do |
+|----------|-------|---------|------------|
+| `classify_tautological_assertions` | `expect(true).toBe(true)`, `expect(x).toBe(x)\u2011style` literals, `expect(1).toBe(1)`; and a literal tested for the truthiness it already has (`expect(false).toBeFalsy()`) | **BLOCK** | Assert the real value |
+| `classify_swallowed_errors` | `catch {}` / `catch (e) {}` inside a test body | **BLOCK** | Assert the error, or rethrow |
+| `classify_weak_assertions` | A test whose only assertion is `toBeDefined`/`toBeTruthy`/`toBeFalsy`/`toBeNull`/`toBeUndefined`/bare `toHaveBeenCalled()` | WARN | Add a value assertion |
+| `classify_test_focus` | `.only`, `fit`, `fdescribe` | **BLOCK** | Remove it (see below) |
+| `classify_test_skip` | `.skip`, `xit`, `xdescribe`, `test.todo`, `@pytest.mark.skip`, `t.Skip`, `@Disabled`, `@Ignore` | WARN | Justify or un-skip |
+| `classify_deleted_tests` | A test file deleted with no same-named replacement | WARN | Restore it, or say why in the commit body |
+
+Why the split: a tautology or an empty catch is **certainly** a test that verifies
+nothing, so it blocks. A `toBeDefined()` alone can be a legitimate structural
+probe, and over-verifying call order can be a real contract, so those warn —
+blocking a legal style just trains people to sprinkle justification annotations
+until the annotations stop meaning anything.
+
+**Justification annotations** (all require a reason of at least 10 characters; an
+annotation without a reason is not an exemption):
+
+- `// @assertion-justified: <reason>` — exempts one file from Gate 5d.
+- `// @skip-justified: <reason>` — exempts the skipped cases in one file.
+- `XP_GATE_ALLOW_ONLY=1` — per-run override for a focus marker (audited).
+
+Every block message names this file, so a reviewer can trace the rule back to the
+anti-pattern it enforces.
+
 ## Red Flags
 
 - Assertion checks for `*-mock` test IDs
