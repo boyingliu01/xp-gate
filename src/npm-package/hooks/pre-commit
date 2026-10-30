@@ -2395,17 +2395,63 @@ else
             _tauto=$(printf '%s\n' "$_tf_content" | classify_tautological_assertions || true)
             _swallow=$(printf '%s\n' "$_tf_content" | classify_swallowed_errors || true)
             _weak=$(printf '%s\n' "$_tf_content" | classify_weak_assertions || true)
+            # #668: split the findings into "added by this change" and
+            # "pre-existing". Gate 5d examines whole files, so editing a file
+            # anywhere re-examines all of its assertions; presenting standing debt
+            # under an unrelated commit is a false attribution, and false
+            # attribution is what drives people to @assertion-justified instead of
+            # a real fix.
+            _new_ranges=$(staged_added_line_ranges "$_tf" 2>/dev/null || true)
             if [ -n "$_tauto" ]; then
-              echo "❌ BLOCKED - tautological assertion(s) in $_tf (cannot fail):"
-              printf '%s\n' "$_tauto" | sed 's/^/     /'
-              echo "     See skills/test-driven-development/testing-anti-patterns.md"
-              GATE_5_FOCUS_BLOCKED=$((GATE_5_FOCUS_BLOCKED + 1))
+              _tauto_new=""
+              _tauto_old=""
+              while IFS= read -r _tline; do
+                [ -n "$_tline" ] || continue
+                _tnum="${_tline%%:*}"
+                if assertion_line_is_new "$_tf" "$_tnum" "$_new_ranges"; then
+                  _tauto_new="${_tauto_new}${_tline}"$'\n'
+                else
+                  _tauto_old="${_tauto_old}${_tline}"$'\n'
+                fi
+              done <<< "$_tauto"
+              if [ -n "$_tauto_new" ]; then
+                echo "❌ BLOCKED - tautological assertion(s) added by this change in $_tf (cannot fail):"
+                printf '%s' "$_tauto_new" | sed 's/^/     /'
+                echo "     See skills/test-driven-development/testing-anti-patterns.md"
+                GATE_5_FOCUS_BLOCKED=$((GATE_5_FOCUS_BLOCKED + 1))
+              fi
+              if [ -n "$_tauto_old" ]; then
+                echo "⚠️  WARN - PRE-EXISTING tautological assertion(s) in $_tf (NOT introduced by this change):"
+                printf '%s' "$_tauto_old" | sed 's/^/     /'
+                echo "     These predate this commit. Two options:"
+                echo "       fix them now (see 'xp-gate audit assertions'), or"
+                echo "       leave them - they are not blocking you."
+              fi
             fi
             if [ -n "$_swallow" ]; then
-              echo "❌ BLOCKED - empty catch in $_tf swallows the failure it guards:"
-              printf '%s\n' "$_swallow" | sed 's/^/     /'
-              echo "     See skills/test-driven-development/testing-anti-patterns.md"
-              GATE_5_FOCUS_BLOCKED=$((GATE_5_FOCUS_BLOCKED + 1))
+              # Same #668 split as the tautology branch above.
+              _sw_new=""
+              _sw_old=""
+              while IFS= read -r _sline; do
+                [ -n "$_sline" ] || continue
+                _snum="${_sline%%:*}"
+                if assertion_line_is_new "$_tf" "$_snum" "$_new_ranges"; then
+                  _sw_new="${_sw_new}${_sline}"$'\n'
+                else
+                  _sw_old="${_sw_old}${_sline}"$'\n'
+                fi
+              done <<< "$_swallow"
+              if [ -n "$_sw_new" ]; then
+                echo "❌ BLOCKED - empty catch added by this change in $_tf swallows the failure it guards:"
+                printf '%s' "$_sw_new" | sed 's/^/     /'
+                echo "     See skills/test-driven-development/testing-anti-patterns.md"
+                GATE_5_FOCUS_BLOCKED=$((GATE_5_FOCUS_BLOCKED + 1))
+              fi
+              if [ -n "$_sw_old" ]; then
+                echo "⚠️  WARN - PRE-EXISTING empty catch(es) in $_tf (NOT introduced by this change):"
+                printf '%s' "$_sw_old" | sed 's/^/     /'
+                echo "     These predate this commit; see 'xp-gate audit assertions'."
+              fi
             fi
             if [ -n "$_weak" ]; then
               echo "⚠️  WARN - test block(s) in $_tf assert only weak properties:"
