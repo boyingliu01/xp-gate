@@ -3628,3 +3628,12 @@ specification:
         - id: AC-670-55
           criteria: sync-package-content 测试在 mkdtemp 出来的临时工作树上运行，写操作不落入检出目录
           test_type: unit
+        - id: AC-670-56
+          criteria: pre-commit 安装 EXIT trap，阻断退出时也写入门禁审计记录
+          test_type: unit
+        - id: AC-670-57
+          criteria: 阻断记录携带 gate 标识与 failure_reason，且 passed 为 false
+          test_type: unit
+        - id: AC-670-58
+          criteria: 阻断记录每次运行最多写一条（幂等闩锁），不得重复计数
+          test_type: unit
