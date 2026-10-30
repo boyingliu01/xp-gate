@@ -295,9 +295,9 @@ const COMMANDS = {
     usage: 'xp-gate baseline <create|show|reset|diff>'
   },
   'check': {
-    description: 'Run quality gates (--list, --all, --gates <ids>, or <gate-id>)',
+    description: 'Run quality gates (--list, --all, --gates <ids>, --changed --brief, or <gate-id>)',
     run: subargs => check(subargs).then(code => process.exit(code)),
-    usage: 'xp-gate check <file_or_directory|gate_number> [--gates gates] [--all] [--list]'
+    usage: 'xp-gate check <file_or_directory|gate_number> [--gates gates] [--all] [--changed --brief] [--list]'
   },
   'principles': {
     description: 'Run Clean Code + SOLID principles checker (Gate 4 standalone)',
