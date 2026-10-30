@@ -2,6 +2,31 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.35.5.0] - 2026-10-30
+
+### Fixed
+
+- **delphi 评审只回传票型，丢光专家意见（#670）**。`formatOutcome` 不读
+  `ExpertVerdict.report`——而那份原文一直都在。于是两次评审消耗 30 次真实模型调用、
+  约 90 秒，产出 0 条可据以修改方案的具体问题。这不是「信息不足」，是「攒了信息然后
+  扔掉」，比前者更难发现，因为 prompt、HTTP、解析、类型定义每一层看起来都是对的。
+  现在最终轮展开 Findings 段（只裁该段：verdict 与 confidence 已在票型行上），
+  中间轮次仍只给票型；无 Findings 标题时退化为全文，不返回空——意外格式下丢掉全部
+  正文正是这个 issue 的原始症状。
+- **`test-layers` 看不见 src/ 之外的套件（#642）**。166+ 个 BATS 套件完全不参与统计，
+  报告说 `Integra: 0`。本仓库实测修复后 `Tests 281 → 524`、`Integra 0 → 224`。
+  这一行原本读起来像「关于仓库的事实」，修复后暴露出它是「关于扫描器的 bug」。
+  同时把「未配对」（该写测试）与「不参与配对」（该放宽约定）分成两个桶——两件事对应
+  的动作相反，混在一起会让人去给 `pre-commit` 写一个 .test.ts。
+
+### Verified (already fixed in an earlier batch, closed here)
+
+- #645（`sync-package-content` 测试污染真实工作树）、#598（PowerShell 棘轮 `-Threshold 1`）、
+  #599（覆盖率与测试共用超时预算）、#623（多模块 Maven JaCoCo 看不见）——四个 issue
+  的回归测试在 HEAD 上全部通过，但 issue 一直未关闭。
+
+---
+
 ## [0.35.4.0] - 2026-10-30
 
 ### Added
