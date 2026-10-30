@@ -1,5 +1,46 @@
 # Changelog
 
+## [0.35.12.0] - 2026-10-30
+
+### Security
+- **修复 opencode 插件的命令注入面**：3 处 `sqlite3` 调用用 `execSync` 拼接 shell 字符串，
+  `dbPath` 只有一对双引号保护，路径含 `"` 或 `$(...)` 即可执行任意命令。改为
+  `execFileSync("sqlite3", [dbPath, sql])`，参数以数组传入，shell 不参与。
+  由 Gate 9（semgrep SAST）在 #562 的改动中被拦下——**这是真实发现，不是误报**。
+- **`security-audit.yml` 此前从未运行过任何扫描器**（#671）：48 行代码、17 行 `echo`、
+  0 次调用 semgrep / gitleaks / trivy / codeql。它以 "Security Audit (CSO)" 的名字
+  **每周定时运行**，还提供一个 `daily/comprehensive/diff` 三选一参数——**没有任何一步
+  读过它**。一个只打印的周度门禁与没有门禁无法区分，而且更糟：它让"没有发现"看起来
+  像"证明安全"。现在全仓 `semgrep --error` + 全仓 `gitleaks`，并**断言扫描面非空**
+  （源文件 > 100）——扫描器"没找到文件"和"没找到问题"输出一样。首次真跑扫出 742 个
+  源文件、14 条发现，逐条核验后写入 `.semgrepignore` 并附理由。
+
+### Fixed
+- **覆盖率阈值终于来自项目自己的声明**（#605）：`_resolve_coverage_threshold` 只认得
+  Python 的 `fail_under` / `.coveragerc`，对 JS/TS 项目直接回落默认 80。于是
+  `npx vitest run` 按 60% 判绿，同一棵树的 commit 按 80% 判红，两个数字读自不同文件
+  且没有任何东西指向这个分歧。现在也读 `vitest.config.ts` 的 `thresholds.lines`
+  （只读扁平形状——嵌套的 `thresholds: { global }` 是 vitest 2.x 语法，已实测会被
+  1.6.x 静默丢弃）。
+- **`threshold_source` 审计字段从有记录以来一直是空的**：`COVERAGE_THRESHOLD_SOURCE`
+  在 `COVERAGE_THRESHOLD="$(_resolve_coverage_threshold)"` 的子 shell 里被赋值，出来就丢。
+  一个永远为空的字段比没有这个字段更糟——它看起来被填过，却什么都没说。
+- **`attempt` 字段接通后的行为得到证明**（#609）：新增 bats 用例调用与 hook 相同的 awk，
+  对合成日志验证四种情形（连挂 2 次 → attempt 3、挂 1 次 → 2、没跑过 → 1、
+  失败后成功 → 重置为 1）。必须构造——接线落地后没有门禁挂过，真实日志 82 条全是
+  `attempt=1`，递增路径根本观察不到。并做了变异验证：删掉"成功重置"那一行，测试转红。
+- **插件版本比较补测试**（#562）：`plugins/opencode/index.ts` 函数覆盖率 50%、
+  **没有任何测试文件**，而它的 `semverLt` 决定"要不要提示用户升级"。一个错的 `semverLt`
+  不会崩溃，只会让提示永远说"已是最新"或永远提示升级——两种都是"看起来在工作"。
+  项目其实早已导出 `__test` 钩子，只是没人写过测试。
+
+### Changed
+- `plugins/dsh/src/index.ts`：5 个完全相同的 `render` 闭包提取为共享常量 `renderText`。
+  它们在覆盖率报告里表现为 5 个独立的未覆盖函数，而实际只有**一行行为**。
+- `security-audit.yml`：删掉没有消费者的 `mode` 输入（`CKV_GHA_7`），加
+  `permissions: contents: read`（`CKV2_GHA_1`）。checkov 2 failed -> **0 failed**。
+
+
 ## [0.35.11.0] - 2026-10-30
 
 ### Added
