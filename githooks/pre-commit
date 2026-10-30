@@ -602,23 +602,38 @@ record_gate_audit() {
   local detail="${6:-}"
   local end_ms
   end_ms=$(now_ms)
-  # #609: attempt index = 1 + how many times this gate was already recorded for this
-  # HEAD commit in the journal. Scoping to the commit is what makes the number mean
-  # "retry of this change": a developer who fixes a failure and re-commits produces
-  # attempt 2, which is exactly the retry that first-pass rate needs to see, while
-  # unrelated later commits restart at 1. Counting globally instead would grow the
-  # index without bound and turn every gate into a re-run.
-  # Read failure leaves it empty -> the field is omitted rather than guessed.
+  # #609: attempt index for this gate.
+  #
+  # Two failed designs are recorded here so they are not retried:
+  #
+  #   1. Keying on commit_hash -- the pre-commit record is STAGED with an empty
+  #      commit_hash (the commit does not exist yet, see stageAuditEntry), so the
+  #      lookup always matched zero and every gate stayed at attempt 1.
+  #   2. Counting every record in a time window -- measured attempt=63 for gate-1
+  #      over one working session, because unrelated SUCCESSFUL commits accumulate.
+  #      A retry index that counts successes is not a retry index.
+  #
+  # What actually defines a retry: the previous record for this gate FAILED. So the
+  # index is (consecutive failures immediately before this run) + 1. A clean history
+  # is attempt 1; fail, fix, re-commit gives 2; three failures in a row gives 4.
+  #
+  # Read failure leaves the value empty -> the writer omits the field rather than
+  # recording a fabricated 1, which would inflate the first-pass denominator.
   if [ -z "${_XP_GATE_ATTEMPT:-}" ]; then
-    local _head _prev_attempts
-    _head=$(git rev-parse HEAD 2>/dev/null || echo "")
-    if [ -n "$_head" ]; then
-      _prev_attempts=$(grep -c "\"commit_hash\":\"${_head}\".*\"gate_id\":\"${gate_id}\"" .xp-gate/audit.jsonl 2>/dev/null || echo 0)
-      case "$_prev_attempts" in
-        ''|*[!0-9]*) _prev_attempts="" ;;
+    local _failed_streak
+    if [ -f .xp-gate/audit.jsonl ]; then
+      _failed_streak=$(awk -v g="\"gate_id\":\"${gate_id}\"" '
+        index($0, g) {
+          # passed is a JSON boolean; "false" is the only failure spelling.
+          if (index($0, "\"passed\":false") > 0) { streak++ }
+          else if (index($0, "\"passed\":true") > 0) { streak = 0 }
+        }
+        END { print streak + 0 }' .xp-gate/audit.jsonl 2>/dev/null | tr -d ' ')
+      case "$_failed_streak" in
+        ''|*[!0-9]*) _failed_streak="" ;;
       esac
-      if [ -n "$_prev_attempts" ]; then
-        _XP_GATE_ATTEMPT=$(( _prev_attempts + 1 ))
+      if [ -n "$_failed_streak" ]; then
+        _XP_GATE_ATTEMPT=$(( _failed_streak + 1 ))
       fi
     fi
   fi

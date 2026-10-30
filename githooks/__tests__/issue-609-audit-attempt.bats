@@ -35,11 +35,20 @@ setup() {
   [ "$status" -eq 0 ]
 }
 
-@test "AC-609-05: attempt is scoped to the HEAD commit, not global" {
-  # A global counter would climb forever; the index must restart per change.
-  run grep -q 'git rev-parse HEAD' "$HOOK"
+@test "AC-609-05: attempt counts consecutive failures of this gate, not successes" {
+  # Two designs were measured and rejected before this one:
+  #   - keying on commit_hash: always 0, because pre-commit records are staged with
+  #     an EMPTY commit_hash (the commit does not exist yet) -> every gate attempt 1
+  #   - counting a time window: measured attempt=63 for gate-1, because unrelated
+  #     SUCCESSFUL commits accumulate. A retry index that counts successes is not a
+  #     retry index.
+  # A retry is defined by the previous record FAILING, so the counter must read
+  # `passed:false` and reset on `passed:true`.
+  run grep -qF 'passed\":false' "$HOOK"
   [ "$status" -eq 0 ]
-  run grep -q '_head' "$HOOK"
+  run grep -qF 'passed\":true' "$HOOK"
+  [ "$status" -eq 0 ]
+  run grep -q 'streak' "$HOOK"
   [ "$status" -eq 0 ]
 }
 
