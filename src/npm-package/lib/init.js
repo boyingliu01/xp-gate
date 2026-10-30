@@ -844,6 +844,21 @@ function configureQoderDelphiAgents(srcDir, targetRoot) {
     return; // Not Qoder — OpenCode uses .delphi-config.json instead
   }
 
+  // #646: honour the machine-level channel preference BEFORE looking at anything
+  // else. The native path is measurably disproved (Qoder's subagent dispatch adopts
+  // the persona but drops the model binding — recorded in skills/delphi-review), so
+  // a user who configured "external only" must not have it silently reinstalled on
+  // every upgrade. Say which file the decision came from: an unexplained SKIP is
+  // indistinguishable from a broken install.
+  const channel = require('./delphi-channel.js');
+  const resolved = channel.resolveChannels();
+  if (resolved.warning) console.warn(`  ⚠ Delphi channel: ${resolved.warning}`);
+  if (!resolved.nativeEnabled) {
+    console.log(`  Qoder Delphi agents: SKIP (channels=${resolved.channels.join(',')} via ${resolved.source})`);
+    console.log('    Delphi review runs through the external provider (see .delphi-config.json).');
+    return;
+  }
+
   const agentSrcDir = path.join(srcDir, 'plugins', 'qoder', 'agents');
   const agentsDestDir = path.join(targetRoot, '.qoder', 'agents');
 
