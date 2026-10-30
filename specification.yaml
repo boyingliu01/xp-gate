@@ -2300,6 +2300,18 @@ specification:
           criteria: 卸载并设置偏好后，nativeAgentDeploymentIsWanted 返回 false，init 不再部署
           test_type: integration
 
+    - id: REQ-672
+      title: 门禁实现不应由被检项目决定
+      description: >
+        `findTsGateEntry` 曾把 `process.cwd()/src/gates/<gate>.ts` 列为候选。在开发者
+        布局下它永远轮不到（前三个候选先命中），所以本仓的测试全绿；而在 npm 安装布局
+        下前三个都不存在，它就成了门禁实现——一个恰好自带该路径的项目可以让门禁执行
+        任意代码并报告通过。
+      acceptance_criteria:
+        - id: AC-672-01
+          criteria: 门禁 TypeScript 实现只从包自身位置解析，不采用被检项目目录下的同名文件
+          test_type: unit
+
     - id: REQ-640
       title: pre-commit 性能：削减固定开销
       description: >

@@ -33,6 +33,12 @@
 - `plugins/opencode/exec-injection.test.ts`：真调用 sqlite3 验证带元字符的
   session id 作为数据到达，而不是被执行。改回 `execSync` 后立即变红。
 
+- **`gate-coverage` 误报阈值冲突（#605）**：报告一直在本仓宣告「pre-commit 要求 80%
+  而 `vitest.config.ts` 要求 70%」，但 hook 实际执行的就是 70（运行期从 config 解析）。
+  报告读的是 hook 源码，抓到的是 `${COVERAGE_THRESHOLD:-80}` —— 日志消息里的
+  **显示兜底**，只有变量为空时才会渲染，而守卫恰好保证它不空。
+  误报的冲突比不报更糟：它让人去改一个本来就正确的声明。现已只认真正的赋值形。
+
 ### Changed
 - **覆盖率门槛棘轮 60% → 70%（#562）**：第一次由**测量修正**而非新增测试推动的棘轮。
   实测 lines/statements **78.80%**、functions **84.37%**、branches **81.80%**，
