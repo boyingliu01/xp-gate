@@ -3637,3 +3637,15 @@ specification:
         - id: AC-670-58
           criteria: 阻断记录每次运行最多写一条（幂等闩锁），不得重复计数
           test_type: unit
+        - id: AC-670-59
+          criteria: 审计日志中无失败记录时，rework 报告首次通过率为"不可测量"而非 100%
+          test_type: unit
+        - id: AC-670-60
+          criteria: rework 按 failure_reason 聚合失败并按次数排名，首次通过率由失败数正确推导
+          test_type: unit
+        - id: AC-670-61
+          criteria: rework 的时长统计排除异常记录，包括未打 anomaly 标记的 epoch 级脏值
+          test_type: unit
+        - id: AC-670-62
+          criteria: 无 failure_reason 的失败被归入 unattributed 桶而非被丢弃
+          test_type: unit

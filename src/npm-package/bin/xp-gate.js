@@ -350,6 +350,14 @@ const COMMANDS = {
     },
     usage: 'xp-gate retro [--days N] [--all] [--json] [--sprint <id>]'
   },
+  'rework': {
+    description: 'Report rework: first-pass rate, rounds before landing, top blocking reasons (#651)',
+    run: subargs => {
+      const { main } = require('../lib/rework.js');
+      process.exit(main(subargs));
+    },
+    usage: 'xp-gate rework [--top N] [--dir <path>] [--json]'
+  },
   'crap': {
     description: 'Rank functions by CRAP score (complexity x weak coverage) — advisory, never blocks (#404)',
     run: subargs => {
