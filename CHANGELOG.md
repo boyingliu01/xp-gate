@@ -2,6 +2,28 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.35.10.0] - 2026-10-30
+
+### Added
+
+- **`gate-coverage` 报告覆盖率阈值冲突（#605）**。`--json` 新增 `coverageThreshold`
+  字段（值 / 来源 / 是否声明 / 冲突两端数值）。
+  - 实测状态：`githooks/pre-commit` 强制 80%，`vitest.config.ts` 在 60% 就通过。
+    两边各自是本地合理决定，合起来让"这个仓库要求多少覆盖率"没有唯一答案。
+  - **顺序最糟**：`npx vitest run` 先绿，提交时才红。先绿后红比一直红更难处理——
+    它把一次误判变成一次已经开始的提交。
+  - `declared` 标志解决 #561 的形状：`:-80` 让"没人声明"与"声明为默认"行为相同，
+    于是文档说 80%、实际 60% 时没有任何东西会报警。
+
+### Fixed
+
+- `.warnings-baseline.json` 中 2 个已无警告的文件仍挂着预算（#452 / AC-452-15）——
+  未使用的预算就是以后加警告的许可。
+- qoder 技能镜像漏同步 `sprint-flow/references/phase-3-build.md`。
+- CHANGELOG 补提 `doctor --brief`（#653 新增 flag，`changelog-documented-commands` 要求）。
+
+---
+
 ## [0.35.9.0] - 2026-10-30
 
 ### Changed
