@@ -333,13 +333,33 @@ function unsetGitConfigIfMatch(item) {
     console.log(`  ${item.label} — not set`);
     return true;
   }
-  if (currentPath === item.expectedPath) {
+  // #656: git returns a forward-slash path ("C:/Users/.../hooks"), while
+  // item.expectedPath is built with path.join (backslashes on Windows). A raw
+  // === compares these as different and the unset is silently skipped, leaving
+  // a dangling core.hooksPath. Normalize both sides to an absolute, real path.
+  if (sameHooksPath(currentPath, item.expectedPath)) {
     unsetHooksPath();
     console.log(`  Unset ${item.label}`);
     return true;
   }
   console.warn(`  Warning: core.hooksPath (${currentPath}) does not match xp-gate path — skipping unset`);
   return false;
+}
+
+/**
+ * True when two hook-directory paths refer to the same location (#656), tolerant
+ * of forward/back slashes, trailing separators, and case differences on Windows.
+ * @param {string} a
+ * @param {string} b
+ * @returns {boolean}
+ */
+function sameHooksPath(a, b) {
+  const norm = (p) => {
+    let r = path.resolve(p);
+    try { r = fs.realpathSync.native(r); } catch { /* path need not exist */ }
+    return process.platform === 'win32' ? r.toLowerCase() : r;
+  };
+  return norm(a) === norm(b);
 }
 
 /**

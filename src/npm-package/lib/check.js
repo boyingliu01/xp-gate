@@ -43,12 +43,31 @@ function parseCheckArgs(args) {
   };
 }
 
+/**
+ * Coerce a runGate() verdict into a valid process exit code (#657). The only
+ * non-numeric verdict is GATE_NOT_RUN (a string sentinel meaning "did not run");
+ * it must become 0, because a gate that honestly reported nothing to analyse is
+ * not a failure — and passing the string to process.exit() crashes Node.
+ * @param {number|string} verdict
+ * @returns {number}
+ */
+function normalizeGateExit(verdict) {
+  return typeof verdict === 'number' ? verdict : 0;
+}
+
 async function check(args) {
   const opts = parseCheckArgs(args);
 
   if (opts.list) return listGates();
   if (opts.changed) return runChangedBrief();
-  if (opts.gateNumber && !opts.all && !opts.gateIds) return runGate(opts.gateNumber, opts.pathArg);
+  // #657: runGate() can return the GATE_NOT_RUN sentinel (a string) when a gate
+  // has no module/fallback. Returning it straight to the caller let it reach
+  // process.exit(), which throws ERR_INVALID_ARG_TYPE and dumps a stack trace.
+  // Map it to exit 0 here (the gate honestly reported "did not run"); a real
+  // failure code passes through unchanged.
+  if (opts.gateNumber && !opts.all && !opts.gateIds) {
+    return normalizeGateExit(await runGate(opts.gateNumber, opts.pathArg));
+  }
   if (opts.all) return checkAllGates(opts.pathArg);
   if (opts.gateIds && opts.gateIds.length > 0) return runGatesByIds(opts.gateIds, opts.pathArg);
 
@@ -179,6 +198,7 @@ async function checkAllGates(target) {
 
 async function runGatesByIds(gateIds, target) {
   let failures = 0;
+  let skipped = 0;
   let ran = 0;
   const resolvedGates = [];
   const unknown = [];
@@ -201,8 +221,10 @@ async function runGatesByIds(gateIds, target) {
   }
 
   for (const resolvedId of resolvedGates) {
+    // #618/#657: a NOT_RUN sentinel is a skip, not a pass and not a failure.
     const code = await runGate(resolvedId, target);
-    if (code !== 0) failures += 1;
+    if (code === GATE_NOT_RUN) skipped += 1;
+    else if (code !== 0) failures += 1;
     ran += 1;
     console.log('');
   }
@@ -213,7 +235,8 @@ async function runGatesByIds(gateIds, target) {
     return 1;
   }
 
-  console.log(`[xp-gate check] ${ran - failures}/${ran} gate(s) passed`);
+  const tally = { passed: ran - failures - skipped, failed: failures, warned: 0, skipped, total: ran };
+  console.log(`[xp-gate check] ${formatGateTally(tally)}`);
   return failures === 0 ? 0 : 1;
 }
 
@@ -356,4 +379,4 @@ function listGates() {
   return 0;
 }
 
-module.exports = { check, checkAllGates, formatGateTally, runChangedBrief, fileExtension, printBriefSummary };
+module.exports = { check, checkAllGates, formatGateTally, runChangedBrief, fileExtension, printBriefSummary, normalizeGateExit };

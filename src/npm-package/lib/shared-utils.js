@@ -37,7 +37,12 @@ function copyHooks(srcDir, destDir) {
   // post-commit carries the audit-attribution flush and --no-verify detection.
   // It was absent here, so neither ever ran for installed users (the source
   // existed but no installer copied it).
-  ['pre-commit', 'pre-push', 'post-commit', 'post-merge'].forEach(hook => {
+  //
+  // hook-module-resolution.sh (#655/#631) is loaded by pre-commit BEFORE any tier
+  // decision and fails closed — omitting it made every commit FATAL on a fresh
+  // install. It is generated, but it must still ship beside the hooks.
+  const hookFiles = ['pre-commit', 'pre-push', 'post-commit', 'post-merge', 'hook-module-resolution.sh'];
+  hookFiles.forEach(hook => {
     const src = path.join(srcDir, 'hooks', hook);
     const dest = path.join(destDir, hook);
     if (fs.existsSync(src)) {
