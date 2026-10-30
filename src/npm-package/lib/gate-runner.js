@@ -416,9 +416,17 @@ function findTsGateEntry(gateModule) {
     path.resolve(__dirname, '..', 'gates', `${gateModule}.ts`),
     // node_modules install
     path.resolve(__dirname, '..', '..', 'src', 'gates', `${gateModule}.ts`),
-    // Repo root
-    path.resolve(process.cwd(), 'src', 'gates', `${gateModule}.ts`),
   ];
+  // #672: there used to be a fourth candidate, `process.cwd()/src/gates/<gate>.ts`.
+  // It never won in this repo -- the developer layouts above always matched first --
+  // so every test here stayed green while the candidate was live. In an npm INSTALL
+  // the first three do not exist, and it became the gate implementation: a project
+  // that happened to have `src/gates/gate-9.ts` could ship `process.exit(0)` and
+  // pass every gate, security ones included. A gate whose implementation is chosen
+  // by the party being checked is not a gate.
+  //
+  // The implementation travels with the package. When none of the three are present
+  // the gate falls back to the bash adapter (or SKIPs), which is the designed path.
   for (const c of candidates) {
     if (fs.existsSync(c)) return c;
   }
