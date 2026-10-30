@@ -320,8 +320,49 @@ const GATE_NOT_RUN = 'NOT_RUN';
  * Finds the .ts entry point, spawns tsx with --run flag.
  * Falls back to bash script if TypeScript module not found.
  */
+/**
+ * Resolve the working directory for a gate run.
+ *
+ * `targetPath` is documented as "file or directory" (that is what
+ * `xp-gate check <file>` passes), but spawnSync's `cwd` must be a directory.
+ * Resolving a FILE path into cwd made spawnSync fail with a bare ENOENT that read
+ * as "Gate 3 failed to run npx tsx" — a tool failure reported under the label of a
+ * code verdict. The file's own directory is the meaningful cwd in that case.
+ */
+function resolveGateCwd(targetPath) {
+  if (!targetPath) return process.cwd();
+  const resolved = path.resolve(targetPath);
+  try {
+    if (fs.statSync(resolved).isFile()) return path.dirname(resolved);
+  } catch {
+    // Nonexistent path: leave it for the gate itself to report.
+  }
+  return resolved;
+}
+
+/**
+ * Resolve how to invoke npx without a shell.
+ *
+ * `shell: true` on Windows looked like the right fix for resolving npx.cmd, but
+ * node passes the argv to CreateProcess as one concatenated string without
+ * escaping (DEP0190) — so any entry path with a backslash or space produced a
+ * malformed command line and spawnSync failed with a bare ENOENT. The gate then
+ * reported FAIL while nothing had actually run: a tool failure wearing the verdict
+ * "your code is broken".
+ *
+ * Calling npx.cmd directly is not the fix either: since the CVE-2024-27980
+ * hardening, node refuses .cmd/.bat from spawnSync without a shell and returns
+ * EINVAL. Running npx's own cli.js with the current node binary sidesteps both —
+ * plain argv, no shell, no batch wrapper.
+ */
+function resolveNpxInvocation(args) {
+  const npxCli = path.join(path.dirname(process.execPath), 'node_modules', 'npm', 'bin', 'npx-cli.js');
+  if (fs.existsSync(npxCli)) return [process.execPath, [npxCli, ...args]];
+  return ['npx', args];
+}
+
 function runTsGate(gateModule, targetPath, opts = {}) {
-  const targetCwd = targetPath ? path.resolve(targetPath) : process.cwd();
+  const targetCwd = resolveGateCwd(targetPath);
   const entry = findTsGateEntry(gateModule);
   if (!entry) {
     // Fallback to bash script
@@ -344,10 +385,15 @@ function runTsGate(gateModule, targetPath, opts = {}) {
   // malformed argv, and reports a killed child (timeout, signal) as a null status.
   // All three mean "the gate did not report a verdict", which must not be read as
   // success: a gate that never ran is not a gate that passed.
+  //
+  // spawnSync reports a spawn failure (npx missing) on `error`, throws only on a
+  // malformed argv, and reports a killed child (timeout, signal) as a null status.
+  // All three mean "the gate did not report a verdict", which must not be read as
+  // success: a gate that never ran is not a gate that passed.
+  const [command, commandArgs] = resolveNpxInvocation(args);
   try {
-    const result = spawnSync('npx', args, {
+    const result = spawnSync(command, commandArgs, {
       stdio: 'inherit',
-      shell: process.platform === 'win32',
       cwd: targetCwd,
       timeout: TS_GATE_TIMEOUT_MS,
     });

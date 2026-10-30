@@ -3724,3 +3724,18 @@ specification:
         - id: AC-670-67
           criteria: 中间轮次只给票型不重复正文，避免输出膨胀
           test_type: unit
+        - id: AC-653-01
+          criteria: doctor --brief 覆盖 hooks/语言/adapter/覆盖率/门禁状态五类事实
+          test_type: unit
+        - id: AC-653-02
+          criteria: doctor --brief 输出结构化 facts 且摘要不超过 3 行
+          test_type: unit
+        - id: AC-653-03
+          criteria: doctor --brief 纯读取，不修改任何状态
+          test_type: unit
+        - id: AC-653-04
+          criteria: check --gates 传文件路径时 gate 真正执行而非报 spawn 失败
+          test_type: integration
+        - id: AC-653-05
+          criteria: 单文件自检在 2 秒内给出结论
+          test_type: integration
