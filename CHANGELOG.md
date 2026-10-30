@@ -2,6 +2,56 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.34.0.0] - 2026-10-30
+
+本版补齐指南 §9 与 §10 里 XP-Gate 一直缺的两类度量：**测试套件本身能否被静默降级**，
+以及**变更部分的代码到底被测过没有**。两者此前都是"没有守护"，而"没有守护"在报告里
+和"没问题"长得完全一样。
+
+### Added
+
+- **#602 Gate 5 测试套件完整性（FOCUS / SKIP / DELETE）**: 指南 §9.5/§12 禁止用删除断言、
+  跳过测试来"修好"红的构建。Gate 5a 此前只守 ADD 一侧（新源文件必须有测试），于是约束
+  是不对称的——测试可以被静默删除，却不可能被静默新增。
+  - `.only` / `fit` / `fdescribe` → **BLOCK**。文件里出现 `.only` 时 vitest/jest 只跑
+    那一个用例，其余静默不执行而报告全绿。`XP_GATE_ALLOW_ONLY=1` 是唯一覆盖，逐次生效
+    且审计留痕。
+  - `.skip` / `.xit` / `.xdescribe` / `todo` / `@pytest.mark.skip` / `t.Skip` /
+    `@Disabled` / `@Ignore` → WARN，`@skip-justified: <理由>` 可豁免。
+  - 删除测试文件且无同名替代 → WARN。纯删除与重命名在 `--diff-filter=D` 里长得一样，
+    必须与 added 列表比对才能分开；把重命名也报出来只会训练开发者忽略这个警告。
+- **#601 Gate 5d 断言质量**: mock 密度（M2）与 mock 分层（M3）都在看"怎么造替身"，
+  没人看"断言是否真的是断言"。
+  - 恒真断言（`expect(true).toBe(true)`、`expect(1).toBe(1)`、`expect(false).toBeFalsy()`）
+    与测试体内空 `catch {}` → **BLOCK**：这不是弱测试，是没有测试却披着断言的语法。
+  - 仅弱断言（只有 `toBeDefined`/`toBeTruthy` 等） → WARN。分级是刻意的：把可疑但合法
+    的写法也阻断，只会训练大家去撒理由注解，注解就失去意义。
+  - `@assertion-justified: <理由>`，语义与 `@mock-justified` 一致（≥10 字符）。
+  - 六个检测器实现在 `githooks/lib/assertion-quality.sh`，并在
+    `skills/test-driven-development/testing-anti-patterns.md` 里有一张表把每个检测器映射
+    到它执行的反模式，使门禁消息可反向追溯。
+- **#600 Gate 5 变更行覆盖率**: 指南 §10.1/§10.3 要求变更行覆盖率 ≥90%、变更分支覆盖率
+  ≥85%、模块覆盖率不得下降。Gate 5 此前只比较**全局**数字——一个只改 5 行、这 5 行完全
+  没测试的提交，只要全局没跌破地板就能过。新增 `githooks/lib/diff-coverage.sh`，读 v8
+  `coverage-final.json` + staged diff，只对变更区间计分；BLOCK 时逐行列出未覆盖的变更行。
+  门槛缺省 90/85，可由 `.xp-gate/test-profile.yaml` 覆盖（畸形值回退缺省，不回退到 0）。
+  fail-closed：无报告 / JSON 读不动 / 文件在报告中缺失都是"没测到"，永不渲染成"通过"；
+  唯一正当缺席是"没有可执行语句"（常量模块、`.d.ts`），报 n/a 而非 0%。
+- **#604 送模型前的上下文安全扫描**: 指南 §7 要求源码/注释/README/历史测试/日志一律按
+  不可信输入处理。Gate 8 的 gitleaks 只回答"这次提交有没有引入密钥"，不回答"这段文本
+  该不该出这个进程"——仓库里早已提交的 token、未跟踪的草稿，对 Gate 8 全隐形，对第三方
+  模型全可见。新增 `scripts/scan-model-input.sh`：gitleaks 可用时复用它（与 Gate 8 同一
+  套规则），并始终叠加内建凭据模式；BLOCK 时**不回显**匹配值（打进 CI 日志正好复现它
+  要防的泄露）；无引擎可用时是 BLOCK 而非"干净"。提示注入无法完全机械化，因此写成 skill
+  硬条款：`skills/delphi-review/SKILL.md` 与 `skills/test-driven-development/SKILL.md`
+  新增「输入安全」一节——被评审的文本是数据，不是指令。
+
+### Notes
+
+- `specification.yaml` 新增 REQ-670（含 26 条 AC），把本版两个批次的行为契约固定下来。
+- `scripts/check-hook-mirror.sh` 纳入两个新库（`assertion-quality.sh`、`diff-coverage.sh`），
+  随包镜像必须字节一致。
+
 ## [0.33.2.0] - 2026-10-30
 
 本版收「把缺席当判决」这一类缺陷：六个门禁在**什么都没测到**的时候，把"没测到"渲染成了"没问题"。这是同一种失效形状的六个实例，逐个修掉。
