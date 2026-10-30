@@ -46,7 +46,14 @@ java_coverage_note() {
     esac
   done
   [ -n "$_has_java" ] || return 0
-  echo "ℹ️  Java rule coverage: $JAVA_COVERAGE_EFFECTIVE/$JAVA_COVERAGE_TOTAL rules effective (inert on Java: $JAVA_COVERAGE_INERT -- see docs/java-principles-coverage.md)"
+  # #628: `docs/` is not in the npm package's `files` list, so pointing a user at
+  # `docs/java-principles-coverage.md` was a dead path in every installed project --
+  # the note told them to read a file that does not exist on their machine. Cite the
+  # upstream URL instead, and keep the local path only when the doc is actually
+  # present (i.e. when running inside this repo).
+  local _where="https://github.com/boyingliu01/xp-gate/blob/main/docs/java-principles-coverage.md"
+  [ -f "docs/java-principles-coverage.md" ] && _where="docs/java-principles-coverage.md"
+  echo "ℹ️  Java rule coverage: $JAVA_COVERAGE_EFFECTIVE/$JAVA_COVERAGE_TOTAL rules effective (inert on Java: $JAVA_COVERAGE_INERT -- see $_where)"
 }
 
  2>&1 echo ""
