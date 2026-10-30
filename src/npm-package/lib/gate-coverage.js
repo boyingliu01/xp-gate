@@ -246,13 +246,55 @@ function readVitestThresholds(repoRoot) {
   }
 }
 
-/** The flat floor the pre-commit hook applies, or null when it applies none. */
+/**
+ * The floor the pre-commit hook applies, or null when the hook applies none.
+ *
+ * The hook RESOLVES its floor at runtime (`_resolve_coverage_threshold`) from the
+ * project's own declaration -- pyproject / .coveragerc / vitest.config.ts -- and
+ * only falls back to a literal in the defensive guard. So a literal found in the
+ * file is usually NOT the enforced number:
+ *
+ *   - `${COVERAGE_THRESHOLD:-80}` is the default inside *log messages*; it renders
+ *     only if the variable is empty, which the guard above prevents.
+ *   - `COVERAGE_THRESHOLD=80` is the guard itself, reached only when nothing was
+ *     declared.
+ *
+ * Matching either one as "the hook's floor" is how this report used to announce a
+ * 80-vs-70 CONFLICT that did not exist: the hook was enforcing 70 (read from
+ * vitest.config.ts) while the reporter read a message literal and compared the two.
+ * A false conflict is worse than no conflict -- it sends someone to change a
+ * declaration that was already correct (#605).
+ *
+ * Both literals are therefore treated as "no declared floor": the reporter then
+ * defers to the declaration, which is exactly what the hook does.
+ */
 function readHookCoverageFloor(repoRoot) {
   try {
     const raw = fs.readFileSync(path.join(repoRoot, 'githooks', 'pre-commit'), 'utf8');
     if (!/COVERAGE_THRESHOLD/.test(raw)) return null;
-    const m = raw.match(/COVERAGE_THRESHOLD:-?(\d+)/) || raw.match(/COVERAGE_THRESHOLD=(\d+)/);
-    return m ? Number(m[1]) : null;
+
+    // Strip shell message templates (`${VAR:-NN}`) before scanning: those are
+    // display defaults, not enforcement.
+    const withoutTemplates = raw.replace(/\$\{COVERAGE_THRESHOLD:-?\d+\}/g, '');
+
+    // Assignment forms only, and only outside the defensive guard. The guard is
+    // recognisable by its comment-free shape: `COVERAGE_THRESHOLD=NN` sitting
+    // directly after the `-z`/regex test that precedes it in every version.
+    const matches = [...withoutTemplates.matchAll(
+      /(?:^[ \t]*(?:export[ \t]+)?COVERAGE_THRESHOLD=(\d+)[ \t]*$)/gm,
+    )].map((m) => Number(m[1]));
+    if (matches.length === 0) return null;
+
+    // The runtime resolver writes `COVERAGE_THRESHOLD="$_rct_value"`, which the
+    // numeric pattern above deliberately does not match. Any remaining numeric
+    // assignment other than the documented 80 fallback is the real floor.
+    const nonFallback = matches.filter((value) => value !== 80);
+    if (nonFallback.length > 0) return nonFallback[nonFallback.length - 1];
+
+    // Only the guard's fallback remains. The guard exists for a variable that
+    // arrived empty; when a project declares a threshold it never fires. Report
+    // "no declared floor" so the reporter uses the declaration, as the hook does.
+    return null;
   } catch {
     return null;
   }
@@ -457,5 +499,6 @@ module.exports = {
   exitCodeFor,
   readQualityStatus,
   readBoyScoutDebt,
+  readHookCoverageFloor,
   main,
 };

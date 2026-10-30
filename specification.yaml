@@ -2384,6 +2384,9 @@ specification:
         - id: AC-605-06
           criteria: 阈值来源变量经真实赋值传到审计记录，不经命令替换在子 shell 中丢失
           test_type: integration
+        - id: AC-605-07
+          criteria: 报告不把 hook 日志模板里的显示兜底值当作实际生效阈值，避免误报阈值冲突
+          test_type: unit
         - id: AC-606-01
           criteria: 无项目配置时，数据与证据类文件（*.log、*.txt、*.yaml/*.yml、*golden*、
             *baseline.json、*evidence*）与构建产物目录（node_modules、dist、build、target、
