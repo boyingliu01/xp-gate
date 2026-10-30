@@ -2,6 +2,35 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.35.7.0] - 2026-10-30
+
+### Added
+
+- **`xp-gate audit assertions [--json]`（#668）**。扫全仓列出存量 tautology / empty-catch
+  债务，按文件分组、按类别计数，**永远 exit 0**（会挂构建的债务清单会变成人们学会忽略的
+  数字）。Gate 5d 只检查 diff 范围内的**文件**，所以存量债务会在无关改动时突然阻断——
+  实测本仓库 7 处 / 5 文件。
+- **`xp-gate gate-rules [--json]`（#652）**。从 `.principlesrc` / `jscpd.conf.json` /
+  `githooks/pre-commit` 生成 18 条门禁规则，每条带严重度、阈值与**出处**。BUILD 阶段
+  的自检清单不再手抄，因此不会在有人调参后开始说谎。
+
+### Fixed
+
+- **Gate 5d 阻断消息区分「本次引入」与「存量」（#668）**。`staged_added_line_ranges`
+  从 `git diff --cached -U0` 取出每个 hunk 的 +side 行范围，落在其中的 BLOCK，落在
+  外面的 WARN 并明说 `PRE-EXISTING ... NOT introduced by this change`，同时指向
+  `audit assertions`。**误归因最贵的代价不是那一次误阻断，而是它教人加
+  `@assertion-justified` 而不是真修掉——一个让人更愿意豁免的门禁比没有门禁更糟。**
+
+### Corrected
+
+- **BUILD 文档的 jscpd 阈值是错的**。原文写「jscpd 相似度 >5% BLOCK」，而
+  `githooks/pre-commit:2191` 实际打印 `warning, not blocking by default`——Gate 2
+  **从不阻断**。按旧文档写代码的人会为一个永不触发的裁定去重构。现已改为
+  「仅提示，不阻断」。这是「手抄阈值会漂移」的现场证据，而非假设风险。
+
+---
+
 ## [0.35.6.0] - 2026-10-30
 
 ### Added
