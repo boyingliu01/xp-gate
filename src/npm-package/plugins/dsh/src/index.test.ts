@@ -95,11 +95,12 @@ describe("apply", () => {
     expect(create).toBeDefined()
     if (!create) return
     // Recording invalidations rather than no-oping: listing must not invalidate, and
-    // an empty stub would hide it if it started to.
+    // an empty stub would hide it if it started to. DSH's `invalidate` takes no
+    // arguments, so the count is the whole signal.
     const invalidations: string[] = []
     const provider = create({
       signal: new AbortController().signal,
-      invalidate: (name: string) => void invalidations.push(name),
+      invalidate: () => void invalidations.push("invalidated"),
     })
     expect(provider.name).toBe("xp-gate")
 

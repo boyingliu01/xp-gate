@@ -85,3 +85,51 @@ describe("delphiGuardDecision", () => {
     expect(delphiGuardDecision(root, "edit")).toBeDefined()
   })
 })
+
+/**
+ * @test REQ-DSH-015 sprint-phase writes are gated the way the IDE plugin gates them
+ * @intent 验证守卫用「只读工具白名单」判定，而不是「已知写工具黑名单」：
+ *         黑名单漏掉了 bash，而 shell 一条命令就能改文件，等于这道 HARD-GATE 可绕过。
+ * @covers AC-DSH-015-01
+ *
+ * The listed names are the tools a DSH session actually exposes; `bash` is the
+ * one that made the old blacklist bypassable, and the unlisted future tool is
+ * the case a blacklist loses by construction.
+ */
+describe("delphiGuardDecision tool classification", () => {
+  /** Read-only: none of these can modify a file, so none may be gated. */
+  const READ_ONLY = ["read", "grep", "glob", "read_image", "list_agents"]
+
+  /** Anything that can reach a shell or a file write, plus an unknown future tool. */
+  const CAN_WRITE = ["write", "edit", "bash", "pwsh", "str_replace_editor", "some_future_tool"]
+
+  it("never gates the read-only tools", () => {
+    const root = project("rejected")
+    for (const tool of READ_ONLY) {
+      expect(delphiGuardDecision(root, tool), `${tool} must not be gated`).toBeUndefined()
+    }
+  })
+
+  it("gates every tool that can modify code, including bash", () => {
+    const root = project("rejected")
+    for (const tool of CAN_WRITE) {
+      expect(delphiGuardDecision(root, tool), `${tool} must be gated`).toBeDefined()
+    }
+  })
+
+  it("still allows everything once the review is APPROVED", () => {
+    const root = project("approved")
+    for (const tool of CAN_WRITE) {
+      expect(delphiGuardDecision(root, tool), `${tool} must pass`).toBeUndefined()
+    }
+  })
+
+  it("still allows an ordinary repository that has no sprint state", () => {
+    const root = project("none")
+    // Unknown tools stay ungated outside a sprint: the guard protects the sprint
+    // phase, not every repository that installed the plugin.
+    for (const tool of [...CAN_WRITE, "some_future_tool"]) {
+      expect(delphiGuardDecision(root, tool), `${tool} must pass`).toBeUndefined()
+    }
+  })
+})

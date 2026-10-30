@@ -22,8 +22,32 @@
 import { existsSync, readFileSync } from "node:fs"
 import { join } from "node:path"
 
-/** Tools that modify files. Read-only tools are never gated. */
-const EDIT_TOOLS: ReadonlySet<string> = new Set(["write", "edit", "str_replace_editor"])
+/**
+ * Tools that provably cannot modify a file. Everything else is gated.
+ *
+ * This is an ALLOWLIST on purpose. The guard used to name the write tools
+ * instead (`write`, `edit`, `str_replace_editor`), which let `bash` through —
+ * one shell command writes a file, so the guard was bypassable by the very tool
+ * a model reaches for first. A write-blacklist loses again on every new
+ * file-touching tool; a read-only allowlist loses only by being too strict,
+ * which surfaces as an over-eager denial rather than a silent hole.
+ */
+const READ_ONLY_TOOLS: ReadonlySet<string> = new Set([
+  "read",
+  "read_image",
+  "grep",
+  "glob",
+  "todo_write",
+  "ask_user_question",
+  "list_agents",
+  "present",
+  // XP-Gate's report tools only read: `xp-gate check/principles/arch` report to
+  // stdout, and the one file they ever write is a temp file list under the OS
+  // temp directory (gate-runner's --all path), never the workspace.
+  "gate-check",
+  "gate-principles",
+  "gate-arch",
+])
 
 /** Where Sprint Flow records the review verdict. */
 const SPRINT_STATE_DIR = ".sprint-state"
@@ -55,9 +79,25 @@ const CHECKABLE_EXTENSIONS: ReadonlySet<string> = new Set([
   ".ps1",
 ])
 
-/** Does this tool modify files? */
+/**
+ * Can this tool modify the workspace? Anything not proven read-only can.
+ *
+ * Used by the save-time principles check, which must fire only for the tools that
+ * actually write a source file — `bash` is excluded here even though the guard
+ * gates it, because the check needs a `file_path` argument to inspect.
+ */
 export function isEditTool(name: string): boolean {
-  return EDIT_TOOLS.has(name)
+  return name === "write" || name === "edit" || name === "str_replace_editor"
+}
+
+/**
+ * Must this tool be gated by the sprint review guard?
+ *
+ * The inverse of {@link READ_ONLY_TOOLS}: an unrecognised tool is treated as
+ * capable of writing, which is what closes the `bash` hole.
+ */
+export function mayModifyFiles(name: string): boolean {
+  return !READ_ONLY_TOOLS.has(name)
 }
 
 /**
@@ -94,7 +134,7 @@ function readVerdict(root: string): { verdict?: string; unreadable?: string } {
  * Returns undefined to mean "allow" so the caller can `if (denial) return denial`.
  */
 export function delphiGuardDecision(root: string, toolName: string): GuardDenial | undefined {
-  if (!isEditTool(toolName)) return undefined
+  if (!mayModifyFiles(toolName)) return undefined
   if (!existsSync(join(root, SPRINT_STATE_DIR))) return undefined
 
   const verdictFile = join(root, SPRINT_STATE_DIR, VERDICT_FILE)
