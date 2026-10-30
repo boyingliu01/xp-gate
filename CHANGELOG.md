@@ -1,5 +1,31 @@
 # Changelog
 
+## [0.35.14.0] - 2026-10-30
+
+### Added
+- **Delphi 通道偏好（#646）**：机器级 `~/.config/xp-gate/.delphi-config.json` 的
+  `channels` 字段（`XP_GATE_DELPHI_CHANNEL` 环境变量优先）决定启用哪些通道。
+  Qoder 的 native 通道已被实测证伪——subagent 派发采纳 agent 提示词却丢弃 model 绑定，
+  三席永远是会话模型，不构成多模型交叉验证证据。但此前安装路径无条件部署它、
+  doctor 强制要求它存在，于是只用外部通道的用户删掉三个 agent 后得到的是一盏红灯
+  + 一条会把机制重新装回来的修复提示。
+- `xp-gate delphi-setup --uninstall [--global|--local --project <dir>]`：幂等移除三个
+  native agent，且不允许与 `--model` 同时使用。
+
+### Changed
+- `xp-gate init` 在 external-only 时打印 `SKIP (channels=external via config)` 并注明来源，
+  不再部署 native agent。
+- `xp-gate doctor delphi` 在 external-only 时把 native 检查判为 **SKIP** 而非 FAIL，
+  外部链路（config / runner / 三席互异）照常逐项校验。
+- `skills/delphi-review/SKILL.md` 把 external-only 写成推荐路径，给出开关与生效范围。
+
+### Fixed
+- `plugins/dsh` 的 `findPlaceholderName` 未导出导致无法测试；它处在**安全路径**上
+  （判断失败会放行明文 token 或拒绝合法引用），现导出并补齐 6 个用例。
+- **覆盖率 functions 指标回到阈值之上**：80.85% → **81.36%**（阈值 81）。
+  此前每次提交都可能被这 0.15pp 挡住。
+
+
 ## [0.35.13.0] - 2026-10-30
 
 ### Fixed
