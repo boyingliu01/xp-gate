@@ -461,6 +461,52 @@ else
           GATE_3_DETAIL="mode=ratchet verifier=MISSING"
           exit 1
         fi
+        RATCHET_LIB="$GATE_DIR/lib/ccn-ratchet.sh"
+        [ -f "$RATCHET_LIB" ] || RATCHET_LIB="$(git rev-parse --show-toplevel 2>/dev/null)/githooks/lib/ccn-ratchet.sh"
+        # #617: grade exactly the population the baseline was written from.
+        #
+        # The comment below has always said so, but only as a comment: a repo whose
+        # baseline came from a narrower scan (a Java-only ccn-report, say) had its
+        # vendored minified JS graded anyway, and --csv-verified then disagreed with
+        # lizard on single-line code and fail-closed with "could not be
+        # span-verified". That BLOCK has no repair: the file has no baseline entry
+        # to ratchet, so there is nothing the user could add to clear it.
+        #
+        # The population filter runs BEFORE verification on purpose. Domain
+        # restriction is decidable from the path alone, so asking the expensive
+        # span re-derivation about a file that will not be graded anyway only
+        # manufactures failures for code the ratchet never claims to cover.
+        if [ -f "$RATCHET_LIB" ]; then
+          # shellcheck source=/dev/null
+          . "$RATCHET_LIB" 2>/dev/null || true
+          if declare -F ccn_file_in_population >/dev/null 2>&1; then
+            _cc_pop_kept=""
+            _cc_pop_skipped=""
+            while IFS= read -r _cc_row; do
+              [ -n "$_cc_row" ] || continue
+              _cc_row_path=$(printf '%s' "$_cc_row" | awk -F, '{print $1}')
+              if ccn_file_in_population ".ccn-baseline.json" "$_cc_row_path"; then
+                _cc_pop_kept="${_cc_pop_kept}${_cc_row}
+"
+              else
+                _cc_pop_skipped="${_cc_pop_skipped}${_cc_row_path}
+"
+              fi
+            done <<CC_POP_EOF
+$CC_CSV
+CC_POP_EOF
+            CC_CSV=$(printf '%s' "$_cc_pop_kept")
+            if [ -n "$_cc_pop_skipped" ]; then
+              _cc_pop_skip_n=$(printf '%s' "$_cc_pop_skipped" | grep -c . || true)
+              echo "ℹ️  Gate 3: ${_cc_pop_skip_n:-0} file(s) outside the baseline population — not graded, not ratcheted:"
+              printf '%s' "$_cc_pop_skipped" | sed 's/^/     /' | sed -n '1,5p'
+              if [ "${_cc_pop_skip_n:-0}" -gt 5 ]; then
+                echo "     ... and $((_cc_pop_skip_n - 5)) more"
+              fi
+              echo "     (declare or widen the population in .ccn-baseline.json to grade them)"
+            fi
+          fi
+        fi
         if [ -f "$CC_REPORT" ] && command -v node >/dev/null 2>&1; then
           _cc_verify_failed=0
           CC_CSV_VERIFIED=$(printf '%s\n' "$CC_CSV" | node "$CC_REPORT" --csv-verified batch --root "$(git rev-parse --show-toplevel 2>/dev/null)") || _cc_verify_failed=1
@@ -471,8 +517,6 @@ else
           fi
           CC_CSV="$CC_CSV_VERIFIED"
         fi
-        RATCHET_LIB="$GATE_DIR/lib/ccn-ratchet.sh"
-        [ -f "$RATCHET_LIB" ] || RATCHET_LIB="$(git rev-parse --show-toplevel 2>/dev/null)/githooks/lib/ccn-ratchet.sh"
         # Fail closed when the ratchet library is missing. Sourcing a nonexistent
         # file only prints "No such file or directory" and leaves
         # evaluate_ccn_ratchet undefined; the verdict then came back empty, every

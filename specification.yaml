@@ -3613,3 +3613,12 @@ specification:
         - id: AC-670-50
           criteria: pre-push 把 scoring 模块路径转成原生路径后再交给 python
           test_type: unit
+        - id: AC-670-51
+          criteria: CCN 基线可声明自身 population（roots/extensions），读取器能返回该声明
+          test_type: unit
+        - id: AC-670-52
+          criteria: 落在基线已声明 population 之外的文件不被 CCN 棘轮评级（如 vendored 压缩 JS）
+          test_type: unit
+        - id: AC-670-53
+          criteria: 无 population 元数据的旧基线保持不限域的历史行为，且读取器不得凭空构造声明
+          test_type: unit
