@@ -1,9 +1,9 @@
 # PROJECT KNOWLEDGE BASE
 
 **Generated:** 2026-10-30
-**Commit:** 35df3831
+**Commit:** 9f8b24d8
 **Branch:** main
-**Version:** 0.35.6.0
+**Version:** 0.35.7.0
 
 ## OVERVIEW
 XP-Gate — deterministic git quality gates + AI-driven multi-expert review (Delphi) + Sprint Flow pipeline (6 phases: PREP, DESIGN, BUILD, VERIFY, SHIP, CLOSE) + npm zero-install distribution + cross-platform plugin system (Claude Code / OpenCode / Qoder). Pre-commit runs **12 numbered gates (Gate 0–11) plus Gate 12 (File Hygiene, warning-only)**. Pre-push runs **8 gates: Gate 10 (Build Integrity), Gate M/M-Python/M-Go/M-Java/M-Kotlin (Mutation), Gate M2 (Mock Density, WARNING), Gate ML (Mock Layering), Gate UI (UI Sprint Gates), Gate MW (Code Walkthrough), and Gate S (Sprint Flow)**. Implements 14 Clean Code/SOLID rules across 9 language adapters (TypeScript engine), 13 shell adapters (gate routing), Boy Scout Rule baseline enforcement, test-specification alignment, mock policy enforcement, and incremental mutation testing.
@@ -167,7 +167,8 @@ Subcommands registered in 0.8.8.0 (verified against bin source):
 | `xp-gate install-skill <name>` | Install a skill from the package bundle (skills/<name>/) |
 | `xp-gate update-skill <name>` | Update an already-installed skill |
 | `xp-gate uninstall-skill <name> --force` | Remove an installed skill |
-| `xp-gate audit [--tail \| --stats \| record]` | Inspect / record gate audit log |
+| `xp-gate audit [--tail \| --stats \| record \| assertions]` | Inspect / record gate audit log; `audit assertions [--json]` lists pre-existing tautology / empty-catch debt across the repo (#668) — Gate 5d only inspects diff files, so this is the batch work queue, and it always exits 0 |
+| `xp-gate gate-rules [--json]` | The gate limits that can block a commit, generated from `.principlesrc` / `jscpd.conf.json` / the hook itself, each with an evidence pointer (#652). Generated rather than hand-copied: a checklist that drifts from its config teaches the wrong rule |
 | `xp-gate ui-review` | Visual review for UI-bearing changes (delegates to ui-review.ts) |
 | `xp-gate sprint-status [--json] [--watch] [--dir <path>] [--rework-check]` | Show Sprint Flow progress (reads `.sprint-state/sprint-state.json`); `--rework-check` calculates rework rate by counting fix commits after sprint completion (#369) |
 | `xp-gate retro [--days N] [--all] [--json] [--sprint <id>]` | Generate engineering retrospective report (activity summary, rework rate trends, evidence skip exposure, quality trends) (#369) |
