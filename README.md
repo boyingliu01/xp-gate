@@ -254,7 +254,7 @@ xp-gate sprint-status --watch
 | Gate 9 | 构建完整性 (tsc + npm pack + import check) | 阻断 |
 | Gate 10 | SAST 安全扫描 (semgrep) | 阻断 |
 | Gate 11 | Sprint Flow 执行 | 阻断 |
-| Gate 12 | 文件卫生 (conflict markers, YAML/JSON 语法) — **警告，不阻断** | 警告 |
+| Gate 12 | 文件卫生 (conflict markers, YAML/JSON 语法) — 前者阻断，其余仅警告（见下方说明） | 冲突/语法错误阻断 |
 | Gate 13 | 编译器严格检查 (gcc/g++ -Wall -Wextra、javac -Xlint、Maven/Gradle) — 仅改动文件 | 阻断 |
 
 > Gate 12 (File Hygiene) 仅对冲突标记和 YAML/JSON 语法错误阻断提交；其他问题（trailing whitespace, 缺少 EOF 换行）仅警告，不阻断。
