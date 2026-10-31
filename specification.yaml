@@ -4228,3 +4228,25 @@ specification:
         - id: AC-688-02
           criteria: 真正缺键的状态文件仍被拒绝（不变成"什么都接受"）
           test_type: integration
+
+    # ============================================================
+    # REQ-689: Gate 13 的 javac 告警计数必须只统计真正的 javac 诊断。
+    #
+    # #659 为了对 javac 的开放类别集 fail-closed，把规则改成「任意小写方括号类别」，
+    # 但没有限定在 javac 诊断行上。Maven 3.9.7+ 的 reactor summary 会为每个模块追加
+    # 打包类型标记（`[INFO] whaleaudit-core    [jar]`），`[pom]`/`[jar]` 完全匹配该
+    # 规则——于是编译零告警的 3 模块工程稳定报 4 个"发现"，模块越多报得越多（#673）。
+    # ============================================================
+    - id: REQ-689
+      description: Maven reactor summary 的打包类型不得被计为 javac 告警，且真实告警仍须计数
+      priority: high
+      acceptance_criteria:
+        - id: AC-689-01
+          criteria: 3 模块 reactor summary（零 [WARNING]）计为 0 个发现
+          test_type: unit
+        - id: AC-689-02
+          criteria: 真实 javac 诊断仍被计数（fail-closed 未被削弱）
+          test_type: unit
+        - id: AC-689-03
+          criteria: "方括号 WARNING 行上的类别即使与打包类型同名也不被吞掉"
+          test_type: unit
