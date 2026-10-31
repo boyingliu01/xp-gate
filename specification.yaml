@@ -3932,3 +3932,130 @@ specification:
         - id: AC-673-03
           criteria: --ledger <path> 使 --check 判定该文件而非 <cwd>/.xp-gate/audit.jsonl
           test_type: integration
+
+    # ============================================================
+    # REQ-674: 函数提取只认声明，不认调用。
+    #
+    # \`existsSync(p)\` 在方法体内是**调用**，但提取器的前瞻断言只排除了紧邻的
+    # 词字符，于是 \`if (existsSync(p)) {\` 里的 \`(\` 被放行，它借用了外层块的
+    # 大括号当"函数体"，报出一个名为 existsSync、有 I/O、无 try/catch 的幻影函数。
+    # 这条告警无论怎么改真实代码都消不掉——它不是债务，是解析缺陷。
+    # ============================================================
+    - id: REQ-674
+      description: TypeScript 适配器只把真正的声明识别为函数；调用位置上的标识符
+        不得成为函数，否则会产生无法通过修改真实代码消除的幻影告警
+      priority: high
+      acceptance_criteria:
+        - id: AC-674-01
+          criteria: 方法体内的 \`existsSync(...)\` / \`readFileSync(...)\` 等调用
+            不得被提取为函数；真实方法与函数仍须被提取（反空转）
+          test_type: unit
+        - id: AC-674-02
+          criteria: 修正后基线预算同步下降，且「预算不得高于实测」的守卫仍成立
+          test_type: unit
+        - id: AC-674-03
+          criteria: 引号/分隔符状态与位置判定这两个扫描原语被拆成独立模块后，
+            行为与原实现一致（引号三种各自独立计数、转义吞两字符、分隔符调整深度）
+          test_type: unit
+
+    # ============================================================
+    # REQ-675: 字节镜像不是新源码，不该被要求自带测试。
+    #
+    # \`src/npm-package/**\` 是规范源码的字节副本，每次 resync 都会整体覆盖，
+    # 所以它无法携带自己的测试——这个要求在结构上不可满足。lint (#494) 和
+    # Boy Scout (#649) 都已排除该路径，只有 Gate 5a 的新文件扫描没排除，
+    # 于是任何往镜像模块加文件的提交都会被永久拦住。
+    # ============================================================
+    - id: REQ-675
+      description: Gate 5a 的新 TypeScript 文件配对检查必须跳过字节镜像路径，
+        对规范源码的配对要求保持不变
+      priority: high
+      acceptance_criteria:
+        - id: AC-675-01
+          criteria: 新增 \`src/npm-package/**\` 下的 .ts 文件不再被判定为缺测试
+          test_type: integration
+        - id: AC-675-02
+          criteria: 新增的规范源码文件缺测试仍必须 BLOCK（反空转），
+            且报告中不得出现被豁免的镜像路径
+          test_type: integration
+
+    # ============================================================
+    # REQ-676: `solid.dip` 只针对协作者，不针对值对象。
+    #
+    # `new RegExp(pattern)` 用运行期字符串构造一个值，没有可注入的替代品——
+    # 就像没人会为"传不了 Date 工厂"而抱怨。默认排除列表本来就收着
+    # Date/Map/Set/Object/Promise，唯独漏了 RegExp。更糟的是配置里写了
+    # `exclude` 就**整体替换**默认列表，于是项目加一个排除项就静默丢失全部
+    # 内置豁免（本仓库的 .principlesrc 正是这样，7 项覆盖掉 15 项）。
+    # ============================================================
+    - id: REQ-676
+      description: solid.dip 必须把值对象构造与协作者构造区分开，且项目配置的
+        exclude 是在内置列表上追加，而不是替换
+      priority: medium
+      acceptance_criteria:
+        - id: AC-676-01
+          criteria: 由运行期字符串构造的 RegExp 不再被报为违反依赖倒置
+          test_type: unit
+        - id: AC-676-02
+          criteria: 真正的协作者实例化仍被报出（反空转）
+          test_type: unit
+
+    # ============================================================
+    # REQ-677: import 子句解析独立可测。
+    #
+    # unused-imports 规则依赖 adapter.imports——每个 import 语句绑定的符号必须
+    # 恰好上报一次，且用**本地名**（`import { Foo as Bar }` 后作用域里只有 Bar）。
+    # 解析逻辑原本埋在 getter 里，与用量统计循环挤在一起，把函数顶到 52 行、
+    # 5 层嵌套；拆出来后四种 import 形态各自可测。
+    # ============================================================
+    - id: REQ-677
+      description: import 子句解析必须正确还原 default / named（含 as 重命名）/
+        namespace / import type 四种形态，并丢弃非标识符名字
+      priority: medium
+      acceptance_criteria:
+        - id: AC-677-01
+          criteria: default、named、as 重命名、namespace 四种形态都解析出正确的本地名
+          test_type: unit
+        - id: AC-677-02
+          criteria: import type 与逐成员 type 修饰符正确标记；非标识符名字不得
+            产生符号（否则会报出无法消除的"未使用"幻影）
+          test_type: unit
+
+    # ============================================================
+    # REQ-679: "有没有错误处理"不等于"有没有 try/catch"。
+    #
+    # Node 通过 'error' 事件上报 spawn 失败——在 spawn() 外面套 try 根本看不到它，
+    # 事件监听器才是唯一正确的处理方式。只认 try/catch，就会给一个管着子进程的
+    # 函数报"有 I/O 无错误处理"，而它的监听器正是唯一能接住该失败的地方。
+    # 一条任何正确改法都消不掉的告警，会让整条规则失去意义。
+    # ============================================================
+    - id: REQ-679
+      description: missing-error-handling 规则必须把事件驱动的错误处理
+        （on('error') 监听器）与 try/catch 同等对待
+      priority: medium
+      acceptance_criteria:
+        - id: AC-679-01
+          criteria: 注册了 'error' 事件监听器的函数不计为缺少错误处理
+          test_type: unit
+        - id: AC-679-02
+          criteria: 既无 try/catch 也无监听器时仍然报出；仅出现 "error" 字样不算
+            （反空转）
+          test_type: unit
+
+    # ============================================================
+    # REQ-680: 类成员计数必须按花括号深度判定。
+    #
+    # `{ helper(1); }` 是调用，`{ async run() { ... }` 是成员——**从左边看一模一样**。
+    # 按"名字前一个字符"判定，会把方法体内每个调用都算成成员，本仓库适配器因此
+    # 报出 66 个方法（实际 16）。这个数字直接喂给 solid.srp 和 god-class 做阈值判断。
+    # ============================================================
+    - id: REQ-680
+      description: 类成员计数必须只统计类体顶层的声明，调用点与控制关键字不得计入
+      priority: high
+      acceptance_criteria:
+        - id: AC-680-01
+          criteria: 方法体内的调用与控制关键字（if/for/while...）不被计为成员
+          test_type: unit
+        - id: AC-680-02
+          criteria: 修饰符与 get/set 访问器正确还原为成员名；空类计零（反空转）
+          test_type: unit

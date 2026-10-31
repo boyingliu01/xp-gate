@@ -1,5 +1,11 @@
 import { BaseAdapter } from './base';
 import { Adapter } from '../types';
+import { isCallPosition } from './position-analysis';
+import { claimMember, countTopLevelMembers } from './member-scan';
+import { parseImportClause } from './import-clause';
+import {
+  type QuoteState, newQuoteState, inQuotedState, advanceQuoteState, applyDelimiter, isQuote,
+} from './quote-state';
 
 /** IO-ish callees that the missing-error-handling rule cares about. */
 const IO_CALLEES = [
@@ -181,77 +187,6 @@ function lineOf(src: string, index: number): number {
 }
 
 /** The three quoted states shared by the parameter/paren scanners. */
-interface QuoteState {
-  inSingle: boolean;
-  inDouble: boolean;
-  inTemplate: boolean;
-}
-
-function newQuoteState(): QuoteState {
-  return { inSingle: false, inDouble: false, inTemplate: false };
-}
-
-function inQuotedState(state: QuoteState): boolean {
-  return state.inSingle || state.inDouble || state.inTemplate;
-}
-
-/** The three quote kinds tracked by QuoteState, with the flag that marks each. */
-const QUOTE_KINDS: ReadonlyArray<{ quote: string; flag: 'inSingle' | 'inDouble' | 'inTemplate' }> = [
-  { quote: "'", flag: 'inSingle' },
-  { quote: '"', flag: 'inDouble' },
-  { quote: '`', flag: 'inTemplate' },
-];
-
-/**
- * Advance one character of quote tracking.
- *
- * Extracted because `countParams` and `readParenGroup` carried the same
- * six-branch block verbatim (#602): both must ignore delimiters that appear
- * inside a string, and neither may treat an escape as a closing quote.
- *
- * Table-driven (#620): all three quote kinds behave identically -- an escape
- * skips two characters, the matching quote closes the literal -- so they are one
- * rule applied to a list rather than three copies of it.
- *
- * @returns the number of characters consumed (2 when the next char is escaped).
- */
-function advanceQuoteState(src: string, i: number, state: QuoteState): number {
-  const c = src[i];
-
-  for (const kind of QUOTE_KINDS) {
-    if (!state[kind.flag]) continue;
-    if (c === '\\') return 2;
-    if (c === kind.quote) state[kind.flag] = false;
-    return 1;
-  }
-
-  // Not inside any literal: open the one this character starts, if any.
-  const opener = QUOTE_KINDS.find(kind => kind.quote === c);
-  if (opener) state[opener.flag] = true;
-  return 1;
-}
-
-/** Opening delimiters that raise the generic/bracket depth in a param list. */
-const DEPTH_OPENERS = new Set(['(', '[', '{', '<']);
-/** Closing delimiters that lower it. */
-const DEPTH_CLOSERS = new Set([')', ']', '}', '>']);
-
-/**
- * Adjust `depth` for one delimiter.
- * @returns true when the character was a delimiter (so it cannot also be a
- *          separator), false otherwise.
- */
-function applyDelimiter(c: string, depth: { value: number }): boolean {
-  if (DEPTH_OPENERS.has(c)) { depth.value++; return true; }
-  if (DEPTH_CLOSERS.has(c)) { depth.value--; return true; }
-  return false;
-}
-
-/** True when the character opens a quote/template the scanners must skip. */
-function isQuote(c: string): boolean {
-  return c === "'" || c === '"' || c === '`';
-}
-
 /** Count top-level, comma-separated parameters in a raw parameter list. */
 function countParams(rawList: string): number {
   const trimmed = rawList.trim();
@@ -726,37 +661,13 @@ export class TypeScriptAdapter extends BaseAdapter implements Adapter {
     const importRe = /^[ \t]*import\s+(?:type\s+)?([\s\S]*?)\s+from\s+['"][^'"]+['"]/gm;
     const importSpans: Array<[number, number]> = [];
     let m: RegExpExecArray | null;
-    const idRe = /^[A-Za-z_$][\w$]*$/;
 
     while ((m = importRe.exec(src)) !== null) {
-      const clause = m[1].trim();
       const line = lineOf(src, m.index);
       const isTypeOnly = /^import\s+type\b/.test(m[0]);
-      const push = (name: string, type?: string) => {
-        if (idRe.test(name)) entries.push({ name, line, used: false, ...(type ? { type } : {}) });
-      };
-
-      // default import
-      const def = /^(\w+)/.exec(clause);
-      if (def) push(def[1], isTypeOnly ? 'type' : undefined);
-
-      // named imports { a, b as c }
-      const braces = /\{([\s\S]*?)\}/.exec(clause);
-      if (braces) {
-        for (const raw of braces[1].split(',')) {
-          const part = raw.trim();
-          if (!part) continue;
-          const asMatch = /\bas\s+(\w+)\s*$/.exec(part);
-          const local = asMatch ? asMatch[1] : part.replace(/^type\s+/, '').trim();
-          const memberTypeOnly = /^type\s+/.test(part);
-          push(local, isTypeOnly || memberTypeOnly ? 'type' : undefined);
-        }
+      for (const binding of parseImportClause(m[1].trim(), isTypeOnly)) {
+        entries.push({ ...binding, line, used: false });
       }
-
-      // namespace import * as ns
-      const ns = /\*\s+as\s+(\w+)/.exec(clause);
-      if (ns) push(ns[1], isTypeOnly ? 'type' : undefined);
-
       importSpans.push([m.index, m.index + m[0].length]);
     }
 
@@ -831,7 +742,9 @@ export class TypeScriptAdapter extends BaseAdapter implements Adapter {
       length: hasBraces ? Math.max(1, endLine - startLine + 1) : 1,
       paramCount: countParams(inner),
       nestingDepth: hasBraces ? maxNesting(maskLiterals(body)) : 0,
-      hasTryCatch: /\btry\s*\{/.test(masked.substring(bodyOpen, bodyEnd)),
+      // The RAW body: `on('error', ...)` needs its string literal intact, and
+      // masking blanks string bodies. try/catch is a keyword and is unaffected.
+      hasTryCatch: hasErrorHandling(body),
       ioOperations: ioOperationsIn(masked.substring(bodyOpen, bodyEnd)),
       code: body,
     };
@@ -853,13 +766,6 @@ export class TypeScriptAdapter extends BaseAdapter implements Adapter {
   }
 
   /** Claim a `name@offset` key once, so overlapping shapes cannot double-count. */
-  private claim(seen: Set<string>, name: string, nameIndex: number): boolean {
-    const key = `${name}@${nameIndex}`;
-    if (seen.has(key)) return false;
-    seen.add(key);
-    return true;
-  }
-
   /** `function name(...)` declarations, including export / async / generators. */
   private collectFunctionDecls(seen: Set<string>, found: FunctionMetrics[]): void {
     const masked = this.maskedSource;
@@ -871,7 +777,7 @@ export class TypeScriptAdapter extends BaseAdapter implements Adapter {
       if (parenIndex === -1) continue;
       const bodyOpen = findBodyBrace(masked, parenIndex);
       if (bodyOpen === -1) continue;
-      if (!this.claim(seen, m[1], nameIndex)) continue;
+      if (!claimMember(seen, m[1], nameIndex)) continue;
       found.push(this.buildFunction(m[1], 'function', nameIndex, parenIndex, bodyOpen));
     }
   }
@@ -892,10 +798,11 @@ export class TypeScriptAdapter extends BaseAdapter implements Adapter {
       // parameter list or a type annotation, which corrupted the reported span.
       const parenIndex = m.index + m[0].length - 1;
       const nameIndex = parenIndex - m[1].length;
+      if (isCallPosition(masked, nameIndex)) continue;
       // Only treat as a method when a body brace follows the parameter list.
       const bodyOpen = findBodyBrace(masked, parenIndex);
       if (bodyOpen === -1) continue;
-      if (!this.claim(seen, m[1], nameIndex)) continue;
+      if (!claimMember(seen, m[1], nameIndex)) continue;
       found.push(this.buildFunction(m[1], 'method', nameIndex, parenIndex, bodyOpen));
     }
   }
@@ -909,7 +816,7 @@ export class TypeScriptAdapter extends BaseAdapter implements Adapter {
       const arrow = this.parseArrowAt(m, arrowRe.lastIndex);
       if (!arrow) continue;
       const nameIndex = m.index + m[0].length - m[1].length;
-      if (!this.claim(seen, m[1], nameIndex)) continue;
+      if (!claimMember(seen, m[1], nameIndex)) continue;
       found.push(this.buildArrowMetrics(m[1], nameIndex, arrow));
     }
   }
@@ -1003,14 +910,19 @@ export class TypeScriptAdapter extends BaseAdapter implements Adapter {
       if (bodyOpen === -1) continue;
       const bodyEnd = findBlockEnd(masked, bodyOpen);
       const body = src.substring(bodyOpen, bodyEnd);
+      // Members are counted on the MASKED body: the prose in a JSDoc line like
+      // "three separate events (close / error / timeout)" reads as `events(` and
+      // was counted as a method, as did `unknown` from a `(): unknown {` return
+      // type. Masking blanks comments and string bodies, so only real code has
+      // braces and parens left.
+      const maskedBody = masked.substring(bodyOpen, bodyEnd);
 
-      // Count method-ish members. Not anchored to line start: minified /
-      // single-line class bodies (`m1() {} m2() {}`) are valid TS and must count.
-      // `(?<![\w$.])` avoids matching call sites like `foo.bar(`.
-      const memberRe = /(?<![\w$.])(?:public\s+|private\s+|protected\s+|static\s+|async\s+|readonly\s+|get\s+|set\s+|\*\s*)*(\w+)\s*\(/g;
-      const methods = [...body.matchAll(memberRe)]
-        .map(x => x[1])
-        .filter(n => !['if', 'for', 'while', 'switch', 'catch', 'return', 'typeof', 'new'].includes(n));
+      // Count members declared at the class body's TOP brace depth. A call
+      // inside a method body sits one level deeper, which is the only signal
+      // that separates `{ helper(1); }` from `{ async run() { ... }`.
+      // Earlier attempts compared the preceding character and reported 66
+      // methods for a class declaring 30 -- every call site counted once.
+      const methods = countTopLevelMembers(maskedBody);
 
       results.push({
         name,
@@ -1065,3 +977,32 @@ export class TypeScriptAdapter extends BaseAdapter implements Adapter {
     return exportMatches;
   }
 }
+
+
+/**
+ * Does this function handle failures?
+ *
+ * `try`/`catch` is one way, and for a function that owns a child process it is
+ * not the idiomatic one: Node reports spawn failures through an `'error'`
+ * event, and a `try` around `spawn()` would never see them. Treating the event
+ * listener as unhandled reported `runMutmut` for having "I/O without error
+ * handling" while it was in fact the only handler for that failure mode --
+ * a warning no correct edit could clear, which is how a rule loses its meaning.
+ *
+ * `'error'` is matched as a QUOTED argument (`on('error', ...)`) so that a
+ * string that merely contains the word does not qualify.
+ */
+function hasErrorHandling(body: string): boolean {
+  return TRY_BLOCK.test(body) || ERROR_LISTENER.test(body);
+}
+
+/**
+ * The two handler shapes, as module-level constants.
+ *
+ * ccn-report locates a function body by counting brackets on its lines; a regex
+ * literal INSIDE the body makes that extent ambiguous, and the row comes back
+ * "CCN could not be span-verified" -- a Gate 3 block. Brackets and braces in the
+ * patterns are written as character classes for the same reason.
+ */
+const TRY_BLOCK = /\btry\s*[{]/;
+const ERROR_LISTENER = /\bon\s*[(]\s*['"]error['"]\s*,/;

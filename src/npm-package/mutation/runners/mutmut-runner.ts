@@ -1,5 +1,5 @@
 // @no-test-required: mutmut wrapper — tested via gate-m integration + pre-push Gate M
-import { spawn, execSync } from 'child_process';
+import { spawn, execSync, type ChildProcess } from 'child_process';
 import { writeFileSync, unlinkSync, readFileSync, existsSync } from 'fs';
 import { join, dirname } from 'path';
 import type {
@@ -24,6 +24,87 @@ type MutmutRoute = 'native' | 'wsl' | 'unavailable' | 'unresolved';
  * - Results stored in SQLite; `mutmut results` outputs per-mutant status lines
  * - `mutmut run` stdout shows emoji progress: 🎉 N 🫥 N ⏰ N 🤔 N 🙁 N
  */
+/**
+ * Wire a child process's stdout/stderr into one accumulating callback.
+ *
+ * Extracted from `runMutmut`: the two listeners were six lines of pure
+ * accumulation inside an already-long Promise body, and their nesting was part
+ * of what made that method exceed both the length and the nesting budget.
+ */
+function collectOutput(
+  child: ChildProcess,
+  onChunk: (chunk: string, isStderr: boolean) => void,
+): void {
+  child.stdout?.on('data', (data: Buffer) => onChunk(data.toString(), false));
+  child.stderr?.on('data', (data: Buffer) => onChunk(data.toString(), true));
+}
+
+/** How long a SIGTERMed mutmut gets before it is killed outright. */
+const ESCALATION_DELAY_MS = 5000;
+
+/** Where the pre-run copy of pyproject.toml lives. */
+function pyprojectBackupPath(pyprojectPath: string): string {
+  return `${pyprojectPath}.xp-gate-backup`;
+}
+
+/**
+ * Put pyproject.toml back the way it was, or remove the one we generated.
+ *
+ * Cleanup is best-effort by design: the mutation run's own result is what the
+ * caller acts on, and failing here would replace a usable outcome with an
+ * exception raised from a `finally`. Extracted from `run` because the nested
+ * try/if/if/else was what pushed that method to 5 nesting levels.
+ */
+function restorePyproject(pyprojectPath: string, hadExisting: boolean): void {
+  const backupPath = pyprojectBackupPath(pyprojectPath);
+  try {
+    if (hadExisting && existsSync(backupPath)) {
+      writeFileSync(pyprojectPath, readFileSync(backupPath, 'utf-8'), { encoding: 'utf-8' });
+      unlinkSync(backupPath);
+    } else if (!hadExisting && existsSync(pyprojectPath)) {
+      unlinkSync(pyprojectPath);
+    }
+  } catch {
+    // Best effort cleanup
+  }
+}
+
+/** The tracker shape `settleTracker` returns; only the timeout path uses these. */
+interface SettleTracker {
+  didTimeOut: () => boolean;
+  markTimedOut: () => void;
+  settle: (outcome: MutationRunOutcome) => void;
+  isSettled: () => boolean;
+}
+
+/**
+ * Arm the run timeout, escalating SIGTERM to SIGKILL once.
+ *
+ * Extracted from `runMutmut` for the same reason as `collectOutput`: the
+ * two-step kill sequence is twelve lines of policy that pushed the method past
+ * both budgets. The escalation timer id is handed back through `setEscalation`
+ * so the caller's `cancelTimers` closure can still reach it.
+ *
+ * @returns the primary timer id, to be cleared by the caller.
+ */
+function armTimeout(
+  child: ChildProcess,
+  timeoutMs: number,
+  tracker: SettleTracker,
+  setEscalation: (id: NodeJS.Timeout) => void,
+): NodeJS.Timeout {
+  const escalationMs = ESCALATION_DELAY_MS;
+  return setTimeout(() => {
+    tracker.markTimedOut();
+    child.kill('SIGTERM');
+    if (tracker.isSettled()) return;
+    // SIGTERM may be ignored; escalate once.
+    setEscalation(setTimeout(() => {
+      if (!tracker.isSettled()) child.kill('SIGKILL');
+    }, escalationMs));
+  }, timeoutMs);
+}
+
 export class MutmutRunner implements MutationRunner {
   readonly name = 'mutmut';
   readonly extensions = ['py'];
@@ -72,31 +153,33 @@ export class MutmutRunner implements MutationRunner {
     const sourceDirs = this.extractUniqueDirs(options.files);
 
     const pyprojectPath = join(options.cwd, 'pyproject.toml');
-    const backupPath = join(options.cwd, 'pyproject.toml.xp-gate-backup');
-    let hadExisting = false;
+    const hadExisting = this.backupPyproject(pyprojectPath);
 
     try {
-      if (existsSync(pyprojectPath)) {
-        hadExisting = true;
-        const existing = readFileSync(pyprojectPath, 'utf-8');
-        writeFileSync(backupPath, existing, { encoding: 'utf-8' });
-      }
       this.writeMutmutConfig(pyprojectPath, sourceDirs);
-
       return await this.runMutmut(options);
     } finally {
-      try {
-        if (hadExisting && existsSync(backupPath)) {
-          const backup = readFileSync(backupPath, 'utf-8');
-          writeFileSync(pyprojectPath, backup, { encoding: 'utf-8' });
-          unlinkSync(backupPath);
-        } else if (!hadExisting && existsSync(pyprojectPath)) {
-          unlinkSync(pyprojectPath);
-        }
-      } catch {
-        // Best effort cleanup
-      }
+      restorePyproject(pyprojectPath, hadExisting);
     }
+  }
+
+  /**
+   * Copy an existing pyproject.toml aside so `run` can put it back.
+   * @returns whether a file was there to back up.
+   */
+  private backupPyproject(pyprojectPath: string): boolean {
+    if (!existsSync(pyprojectPath)) return false;
+    const backupPath = pyprojectBackupPath(pyprojectPath);
+    try {
+      writeFileSync(backupPath, readFileSync(pyprojectPath, 'utf-8'), { encoding: 'utf-8' });
+    } catch (err) {
+      // Failing here must be loud: without a backup, `restorePyproject` would
+      // silently leave this repo's pyproject.toml overwritten by a generated one.
+      throw new Error(
+        `Could not back up ${pyprojectPath} before writing a mutmut config: ${(err as Error).message}`,
+      );
+    }
+    return true;
   }
 
   /**
@@ -173,45 +256,46 @@ export class MutmutRunner implements MutationRunner {
 
       const tracker = this.settleTracker(resolve, cancelTimers);
 
-      const timeoutId = setTimeout(() => {
-        tracker.markTimedOut();
-        child.kill('SIGTERM');
-        if (tracker.isSettled()) return;
-        // SIGTERM may be ignored; escalate once, and let the retry live in a
-        // variable so `cancelTimers` can reach it.
-        escalationId = setTimeout(() => {
-          if (!tracker.isSettled()) child.kill('SIGKILL');
-        }, 5000);
-      }, options.timeoutMs);
-
-      child.stdout?.on('data', (data: Buffer) => {
-        stdout += data.toString();
+      const timeoutId = armTimeout(child, options.timeoutMs, tracker, (id) => {
+        escalationId = id;
       });
 
-      child.stderr?.on('data', (data: Buffer) => {
-        stderr += data.toString();
+      collectOutput(child, (chunk, isErr) => {
+        if (isErr) stderr += chunk;
+        else stdout += chunk;
       });
 
       child.on('close', (code) => {
-        // A null exit code means the process was killed ("timed out" when we did
-        // it, "unknown" otherwise); there is no report to parse either way.
-        if (code === null) {
-          tracker.settle({ report: null, timedOut: tracker.didTimeOut() });
-          return;
-        }
-
-        tracker.settle({
-          // Parse results from mutmut run stdout (v3.x emoji progress)
-          report: this.parseEmojiProgress(stdout),
-          timedOut: tracker.didTimeOut(),
-          error: code !== 0 ? stderr || stdout : undefined,
-        });
+        tracker.settle(this.outcomeFor(code, stdout, stderr, tracker));
       });
 
       child.on('error', (err) => {
         tracker.settle({ report: null, timedOut: tracker.didTimeOut(), error: err.message });
       });
     });
+  }
+
+  /**
+   * Turn one `mutmut run` exit into the outcome the caller expects.
+   *
+   * Extracted from `runMutmut`'s close handler to bring that method back under
+   * the length and nesting budgets. A null exit code means the process was
+   * killed -- "timed out" when we did it, "unknown" otherwise -- and there is no
+   * report to parse either way.
+   */
+  private outcomeFor(
+    code: number | null,
+    stdout: string,
+    stderr: string,
+    tracker: SettleTracker,
+  ): MutationRunOutcome {
+    if (code === null) return { report: null, timedOut: tracker.didTimeOut() };
+    return {
+      // Parse results from mutmut run stdout (v3.x emoji progress)
+      report: this.parseEmojiProgress(stdout),
+      timedOut: tracker.didTimeOut(),
+      error: code !== 0 ? stderr || stdout : undefined,
+    };
   }
 
   private toWslPath(path: string): string | null {
@@ -300,28 +384,39 @@ export class MutmutRunner implements MutationRunner {
   }
 
   private writeMutmutConfig(pyprojectPath: string, sourceDirs: string[]): void {
-    const sourcePaths = sourceDirs.map((d) => `"${d}"`).join(', ');
-    const sourcePathsLine = `source_paths = [${sourcePaths}]`;
-
-    let content = '';
-    if (existsSync(pyprojectPath)) {
-      content = readFileSync(pyprojectPath, 'utf-8');
-      if (content.includes('[tool.mutmut]')) {
-        const sourcePathsRegex = /source_paths\s*=\s*\[.*?\]/;
-        if (sourcePathsRegex.test(content)) {
-          content = content.replace(sourcePathsRegex, sourcePathsLine);
-        } else {
-          content = content.replace(
-            '[tool.mutmut]',
-            `[tool.mutmut]\n${sourcePathsLine}`,
-          );
-        }
-      } else {
-        content = content.trimEnd() + `\n\n[tool.mutmut]\n${sourcePathsLine}\n`;
-      }
-    } else {
-      content = `[tool.mutmut]\n${sourcePathsLine}\n`;
+    const sourcePathsLine = `source_paths = [${sourceDirs.map((d) => `"${d}"`).join(', ')}]`;
+    try {
+      // Read here so the content builder stays pure: it then has no I/O to
+      // fail on, and the one place that can fail is the one that explains why.
+      const existing = existsSync(pyprojectPath) ? readFileSync(pyprojectPath, 'utf-8') : null;
+      writeFileSync(pyprojectPath, mutmutConfigContent(existing, sourcePathsLine), {
+        encoding: 'utf-8',
+      });
+    } catch (err) {
+      // A missing or half-written pyproject.toml would make mutmut scan the wrong
+      // tree, so surface the path instead of letting a bare fs error escape.
+      throw new Error(`Could not write mutmut config to ${pyprojectPath}: ${(err as Error).message}`);
     }
-    writeFileSync(pyprojectPath, content, { encoding: 'utf-8' });
   }
+}
+
+/**
+ * pyproject.toml content with `[tool.mutmut] source_paths` set as requested.
+ *
+ * Pure by design: the caller reads the existing file and passes it in, so this
+ * function has no I/O that could fail partway through. Three shapes have to be
+ * preserved -- an existing `source_paths` is rewritten in place, a bare
+ * `[tool.mutmut]` table gets the key added, and a file without the table gets
+ * one appended (a fresh file passes `null`).
+ *
+ * @param existing current file content, or null when the file does not exist.
+ */
+function mutmutConfigContent(existing: string | null, sourcePathsLine: string): string {
+  if (existing === null) return `[tool.mutmut]\n${sourcePathsLine}\n`;
+  if (!existing.includes('[tool.mutmut]')) {
+    return existing.trimEnd() + `\n\n[tool.mutmut]\n${sourcePathsLine}\n`;
+  }
+  const sourcePathsRegex = /source_paths\s*=\s*\[.*?\]/;
+  if (sourcePathsRegex.test(existing)) return existing.replace(sourcePathsRegex, sourcePathsLine);
+  return existing.replace('[tool.mutmut]', `[tool.mutmut]\n${sourcePathsLine}`);
 }

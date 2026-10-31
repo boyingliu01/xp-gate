@@ -456,3 +456,38 @@ COVERAGE
   [[ "$output" == *"BLOCKED"* ]]
   [[ "$output" == *"bar.ts"* ]]
 }
+
+# ── REQ-675 / AC-675-01: byte-identical mirrors are not new sources ───
+#
+# `src/npm-package/**` is a byte-identical MIRROR of a canonical source that
+# already has its test. Demanding a second test for the copy asks for something
+# structurally impossible to satisfy: the mirror cannot carry its own test file
+# because the next resync would overwrite/duplicate it. The hook excluded this
+# path from lint and Boy Scout (#494, #649) but NOT from the Gate 5a new-file
+# scan, so adding a file to a mirrored module blocked every commit.
+
+@test "AC-675-01: a new file under src/npm-package/ is not treated as unpaired source" {
+  mkdir -p src/npm-package/lib src/lib
+  # The canonical file has its test; the mirror must not need its own.
+  echo "export const helper = (): number => 1;" > src/lib/helper.ts
+  printf "import { expect, test } from 'vitest';\ntest('helper', () => { expect(1 + 1).toBe(2); });\n" > src/lib/helper.test.ts
+  echo "export const helper = (): number => 1;" > src/npm-package/lib/helper.ts
+
+  git add src/lib/helper.ts src/lib/helper.test.ts src/npm-package/lib/helper.ts
+  run_fixture_hook
+  [ "$status" -eq 0 ]
+}
+
+@test "AC-675-02: an unpaired CANONICAL new file still blocks (anti-vacuity)" {
+  mkdir -p src/npm-package/lib src/lib
+  echo "export const helper = (): number => 1;" > src/npm-package/lib/helper.ts
+  echo "export const other = (): number => 2;" > src/lib/other.ts
+
+  git add src/npm-package/lib/helper.ts src/lib/other.ts
+  run_fixture_hook
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"BLOCKED"* ]]
+  # The mirror is exempt; the canonical file is the reason for the block.
+  [[ "$output" == *"other.ts"* ]]
+  [[ "$output" != *"npm-package/lib/helper.ts"* ]]
+}

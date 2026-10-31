@@ -2,7 +2,7 @@
  * @test REQ-452
  * @intent 验证 .warnings-baseline.json 里每一条基线都仍对应"该文件当前确有告警"，
  *         否则它就是一份幽灵额度（Gate 6 允许告警数上升而无人报警）
- * @covers AC-452-15
+ * @covers AC-452-15, AC-674-02
  *
  * Why this is a property and not a snapshot: an entry is the Boy Scout Rule's
  * budget for one file. `pruneBaselineEntries` (#452) drops entries whose FILE has

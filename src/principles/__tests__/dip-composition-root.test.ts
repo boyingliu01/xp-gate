@@ -90,3 +90,41 @@ describe('solid.dip recognises composition roots (#627)', () => {
     expect(violations[0].message).toContain('new StripeGateway()');
   });
 });
+
+/**
+ * @test REQ-676
+ * @intent `new RegExp(pattern)` constructs a VALUE, not a collaborator. The
+ *         default exclusion list already carries Date/Map/Set/Object/Promise --
+ *         every other value type built with `new` in ordinary code -- but RegExp
+ *         was missing, so building a dynamic pattern inside a method was reported
+ *         as "bypassing dependency injection". There is no injectable alternative:
+ *         the pattern is computed from a runtime string.
+ * @covers AC-676-01, AC-676-02
+ */
+describe('solid.dip does not flag value-object construction (REQ-676)', () => {
+  it('AC-676-01: a dynamic RegExp built from a runtime name is not a violation', () => {
+    const body = [
+      'class NameMatcher {',
+      '  score(body: string, name: string): boolean {',
+      '    const re = new RegExp(`\\b${name}\\b`, "g");',
+      '    return re.test(body);',
+      '  }',
+      '}',
+    ].join('\n');
+
+    expect(dipRule.check('src/NameMatcher.ts', adapterWith(body))).toHaveLength(0);
+  });
+
+  it('AC-676-02: a genuine collaborator is still reported (anti-vacuity)', () => {
+    const body = [
+      'class OrderService {',
+      '  total(): number {',
+      '    const repo = new OrderRepository();',
+      '    return repo.sum();',
+      '  }',
+      '}',
+    ].join('\n');
+
+    expect(dipRule.check('src/OrderService.ts', adapterWith(body))).toHaveLength(1);
+  });
+});
