@@ -3906,3 +3906,29 @@ specification:
         - id: AC-609-05
           criteria: pre-commit 真正传入 --attempt，序号按 HEAD commit 作用域计算，日志不可读时字段缺席而非猜测
           test_type: integration
+
+    # ============================================================
+    # REQ-673: 审计台账体检命令必须真的能运行。
+    #
+    # `xp-gate audit --check/--tail/--stats/record` 全部以
+    # `require(\<repo\>/lib/gate-audit.ts)` 加载实现——Node 无法 require .ts，
+    # 于是四个子命令都直接抛错。它一直没被发现，是因为 CI 的 Gate 5c 写的是
+    # `xp-gate audit --check || npx tsx ... audit --check`：回退分支才是真正
+    # 执行的那条，坏路径从未被走到。
+    # ============================================================
+    - id: REQ-673
+      description: audit 子命令须按包内约定以 tsx 加载 .ts 实现，不得直接 require .ts；
+        台账体检须能对被指定的台账文件判定，而不是被迫读当前工作目录
+      priority: critical
+      acceptance_criteria:
+        - id: AC-673-01
+          criteria: audit --check 在 .ts 实现上执行成功（不出现 require 相关错误），
+            并在台账干净时返回 0
+          test_type: integration
+        - id: AC-673-02
+          criteria: 台账含未归属 commit 的条目时 --check 返回非 0；仅靠「命令能跑」
+            不算通过，必须仍能真正拦住异常
+          test_type: integration
+        - id: AC-673-03
+          criteria: --ledger <path> 使 --check 判定该文件而非 <cwd>/.xp-gate/audit.jsonl
+          test_type: integration

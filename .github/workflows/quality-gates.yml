@@ -654,14 +654,51 @@ jobs:
 
       # Gate 5c: audit ledger health (P0). Fails the build if any gate-timing
       # or attribution anomaly appears at/after the fix date. The ledger is
-      # gitignored, so on a clean checkout this scans 0 entries (green no-op) —
+      # gitignored, so on a CLEAN checkout this scans 0 entries (green no-op) —
       # it bites once a ledger is committed or CI uploads one, and it documents
       # the invariant "no NEW epochs, no unattributed commits" in one place.
+      #
+      # That "clean checkout" premise has to be enforced, not assumed. Gate 5b
+      # runs 1300+ BATS cases that execute the real hook from the repo root, so
+      # by this step the ledger holds whatever those fixtures wrote. Fixture
+      # entries are never flushed with a commit hash (a fixture does not commit
+      # through the real post-commit path), so every one of them reads as an
+      # "unattributed commit" and reds the pipeline — the gate correctly
+      # reporting a file the tests polluted, not a telemetry bug.
+      #
+      # So grade the ledger this gate is actually about: snapshot it, drop rows
+      # that appeared during this run AND carry no commit attribution, then check
+      # the snapshot with --ledger. Anything a real commit wrote keeps its hash
+      # and survives.
       - name: 'Gate 5c: Audit ledger health'
         run: |
           echo "Checking audit ledger for telemetry anomalies..."
           if [ -f .xp-gate/audit.jsonl ]; then
-            xp-gate audit --check || npx tsx src/npm-package/bin/xp-gate.js audit --check
+            LEDGER_SNAPSHOT="$(mktemp)"
+            cp .xp-gate/audit.jsonl "$LEDGER_SNAPSHOT"
+            CHECKOUT_EPOCH="$(stat -c %Y .git/HEAD 2>/dev/null || echo 0)"
+            node -e "
+              const fs = require('fs');
+              const [file, epoch] = process.argv.slice(1);
+              // File mtimes are second-resolution; subtract a minute of slack so a
+              // ledger written moments before checkout is not mistaken for test output.
+              const cutoff = new Date((Number(epoch) - 60) * 1000).toISOString();
+              let dropped = 0;
+              const kept = fs.readFileSync(file, 'utf8').split('\n').filter((line) => {
+                if (!line.trim()) return false;
+                try {
+                  const e = JSON.parse(line);
+                  const testGenerated = typeof e.timestamp === 'string' && e.timestamp >= cutoff && !e.commit_hash;
+                  if (testGenerated) dropped += 1;
+                  return !testGenerated;
+                } catch {
+                  return false; // torn line, same rule the ledger writer uses
+                }
+              });
+              fs.writeFileSync(file, kept.length ? kept.join('\n') + '\n' : '');
+              console.log('dropped ' + dropped + ' test-generated entr(ies); checking ' + kept.length);
+            " "$LEDGER_SNAPSHOT" "$CHECKOUT_EPOCH"
+            npx tsx src/npm-package/bin/xp-gate.js audit --check --ledger "$LEDGER_SNAPSHOT"
           else
             echo "ℹ️ No .xp-gate/audit.jsonl in checkout — nothing to check (gitignored)."
           fi

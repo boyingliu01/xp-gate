@@ -617,16 +617,38 @@ function printAnomalies(a, since) {
  * CI gate: exit 1 when the audit ledger carries anomalies (implausible
  * durations or unattributed commits). This turns both telemetry bugs into a
  * build failure instead of something a human has to notice in a chart.
+ *
+ * `--ledger <path>` grades that file instead of `<cwd>/.xp-gate/audit.jsonl`.
+ * CI needs it: the BATS suites run before this check and execute the real hook
+ * from the repo root, so the live ledger contains fixture rows that were never
+ * given a commit hash. Grading them as "unattributed commits" reports a
+ * test-isolation problem as a telemetry bug -- and the CI step's job is the
+ * committed ledger, not the scratch one the tests left behind.
  */
-function handleAuditCheck(auditPath) {
+function handleAuditCheck(args = []) {
   try {
-    const { computeAnomalies, AUDIT_ANOMALY_SINCE } = require(auditPath);
+    const ledgerIdx = args.indexOf('--ledger');
+    let repoRoot = process.cwd();
+    if (ledgerIdx !== -1 && args[ledgerIdx + 1]) {
+      // computeAnomalies() reads <repoRoot>/.xp-gate/audit.jsonl, so point it at
+      // a directory whose .xp-gate/audit.jsonl is the file we were asked about.
+      // A temp dir keeps the caller's tree untouched.
+      const ledgerPath = path.resolve(args[ledgerIdx + 1]);
+      if (!require('node:fs').existsSync(ledgerPath)) {
+        console.error(`Error: --ledger file not found: ${ledgerPath}`);
+        process.exit(1);
+      }
+      repoRoot = require('node:fs').mkdtempSync(path.join(require('node:os').tmpdir(), 'xpg-ledger-'));
+      require('node:fs').mkdirSync(path.join(repoRoot, '.xp-gate'), { recursive: true });
+      require('node:fs').copyFileSync(ledgerPath, path.join(repoRoot, '.xp-gate', 'audit.jsonl'));
+    }
     // Scope to entries after the fix: historical anomalies are grandfathered
     // (they cannot be re-measured). A future epoch/blank row fails the build.
-    const a = computeAnomalies(process.cwd(), AUDIT_ANOMALY_SINCE);
-    printAnomalies(a, AUDIT_ANOMALY_SINCE);
+    const since = evalGateAuditModule('m.AUDIT_ANOMALY_SINCE');
+    const a = evalGateAuditModule(`m.computeAnomalies(${JSON.stringify(repoRoot)}, ${JSON.stringify(since)})`);
+    printAnomalies(a, since);
     if (a.total > 0) {
-      console.error(`FAIL: ${a.total} audit anomal${a.total === 1 ? 'y' : 'ies'} found since ${AUDIT_ANOMALY_SINCE} (must be 0).`);
+      console.error(`FAIL: ${a.total} audit anomal${a.total === 1 ? 'y' : 'ies'} found since ${since} (must be 0).`);
       process.exit(1);
     }
     console.log('OK: no new audit anomalies.');
@@ -665,6 +687,45 @@ function handleAuditRecord(args, auditPath) {
   }
 }
 
+/**
+ * Evaluate `lib/gate-audit.ts` under tsx and return whatever the little script
+ * writes to stdout, JSON-decoded.
+ *
+ * `gate-audit.ts` is TypeScript, and Node cannot `require()` a `.ts` file -- so
+ * every `xp-gate audit` subcommand used to die on
+ *
+ *     Error checking audit health: require is not defined in ES module scope
+ *
+ * (that message is Node trying to interpret the .ts file as ESM). `--tail`,
+ * `--stats`, `--check` and `record` were ALL unusable, and it stayed invisible
+ * because nothing automated called them: CI's Gate 5c runs
+ * `xp-gate audit --check || npx tsx ... audit --check`, so the npx fallback is
+ * what actually ran and the broken path was never exercised.
+ *
+ * Per this package's own convention (AGENTS.md: these `.ts` lib files are
+ * "loaded via npx tsx on demand", never compiled at install time), evaluate the
+ * module in a child process under tsx. The caller supplies the expression, and
+ * all values travel as JSON so nothing is ever interpolated into code.
+ *
+ * @param {string} expr an expression evaluated with `m` bound to the module
+ * @returns {*} the JSON-decoded result
+ */
+function evalGateAuditModule(expr) {
+  const { execFileSync } = require('node:child_process');
+  const modulePath = path.join(__dirname, '..', 'lib', 'gate-audit.ts');
+  const tsxCli = path.join(__dirname, '..', '..', '..', 'node_modules', 'tsx', 'dist', 'cli.mjs');
+  const script = [
+    `import * as m from ${JSON.stringify(modulePath)};`,
+    `process.stdout.write(JSON.stringify(${expr}));`,
+  ].join('\n');
+  const raw = execFileSync(process.execPath, [tsxCli, '--eval', script], {
+    cwd: process.cwd(),
+    encoding: 'utf8',
+    timeout: 120000,
+  });
+  return JSON.parse(raw);
+}
+
 function handleAudit(args) {
   const auditPath = path.join(__dirname, '..', 'lib', 'gate-audit.ts');
 
@@ -679,7 +740,7 @@ function handleAudit(args) {
   }
 
   if (args.includes('--check')) {
-    handleAuditCheck(auditPath);
+    handleAuditCheck(args);
     return;
   }
 
