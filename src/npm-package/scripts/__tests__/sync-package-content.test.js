@@ -9,6 +9,16 @@ const fs = require('fs');
 const path = require('path');
 const os = require('os');
 
+// Budget for every subprocess this file spawns, and for the vitest test that
+// wraps it. It is deliberately far above the measured cost (the sync takes
+// ~1.4 s here) because Stryker's dry run starts four vitest workers at once
+// with perTest coverage: under that contention a 15 s budget made these tests
+// fail intermittently on CI while passing locally, and the failure surfaced as
+// "sync script must exit 0" -- which reads like a sync defect rather than a
+// starved machine. A sync that genuinely fails still fails fast; only a starved
+// one waits.
+const SYNC_BUDGET_MS = 120000;
+
 const { checkDocsDrift, checkAdapterDrift } = require('../sync-package-content');
 
 function createTempDir() {
@@ -356,14 +366,20 @@ describe('syncHooks', () => {
     const result = spawnSync(nodeExe, [syncScript], {
       cwd: WORKTREE_PATH,
       stdio: 'pipe',
-      timeout: 15000,
+      timeout: SYNC_BUDGET_MS,
     });
     syncOk = result.status === 0;
     if (!syncOk) {
+      // Distinguish "ran and failed" from "never got to run": the latter is an
+      // infrastructure problem and reporting it as a plain non-zero exit hides
+      // that, exactly as it did while this was misdiagnosed as a sync defect.
+      if (result.signal) console.error('sync killed by signal:', result.signal);
+      if (result.error) console.error('sync spawn error:', result.error.message);
+      console.error('sync status:', result.status);
       console.error('sync stderr:', result.stderr?.toString() || '(empty)');
       console.error('sync stdout:', result.stdout?.toString() || '(empty)');
     }
-  }, 15000);
+  }, SYNC_BUDGET_MS);
 
   it('syncHooks copies pre-commit to hooks dir', () => {
     expect(syncOk, 'sync script must exit 0').toBe(true);
@@ -421,7 +437,7 @@ describe('syncHooks', () => {
     const result = spawnSync(nodeExe, [syncScript], {
       cwd: WORKTREE_PATH,
       stdio: 'pipe',
-      timeout: 15000,
+      timeout: SYNC_BUDGET_MS,
     });
 
     expect(result.status, 'sync script must exit 0').toBe(0);
@@ -439,7 +455,7 @@ describe('syncHooks', () => {
     const result = spawnSync(nodeExe, [syncScript], {
       cwd: WORKTREE_PATH,
       stdio: 'pipe',
-      timeout: 15000,
+      timeout: SYNC_BUDGET_MS,
     });
 
     expect(result.status).toBe(0, 'sync script must exit 0');
@@ -615,7 +631,7 @@ describe('sync-package-content subprocess invocation', () => {
     const result = spawnSync(nodeExe, [syncScript], {
       cwd: WORKTREE_PATH,
       stdio: 'pipe',
-      timeout: 15000,
+      timeout: SYNC_BUDGET_MS,
     });
 
     if (result.status !== 0) {
@@ -650,7 +666,7 @@ describe('sync-package-content subprocess invocation', () => {
     const result = spawnSync(nodeExe, [syncScript], {
       cwd: WORKTREE_PATH,
       stdio: 'pipe',
-      timeout: 15000,
+      timeout: SYNC_BUDGET_MS,
     });
 
     if (result.status !== 0) {
@@ -678,7 +694,7 @@ describe('sync-package-content subprocess invocation', () => {
     const result = spawnSync(nodeExe, [syncScript], {
       cwd: WORKTREE_PATH,
       stdio: 'pipe',
-      timeout: 15000,
+      timeout: SYNC_BUDGET_MS,
     });
 
     if (result.status !== 0) {
@@ -710,7 +726,7 @@ describe('sync-package-content subprocess invocation', () => {
     const result = spawnSync(nodeExe, [syncScript], {
       cwd: WORKTREE_PATH,
       stdio: 'pipe',
-      timeout: 15000,
+      timeout: SYNC_BUDGET_MS,
     });
 
     if (result.status !== 0) {
