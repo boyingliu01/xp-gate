@@ -527,6 +527,18 @@ gate13_count_lint_findings() {
   [ -n "$src" ] || src=$(cat)
   printf '%s\n' "$src" | awk '
     BEGIN { n = 0 }
+    # (#673) Maven 3.9.7+ reactor summary appends the packaging type per module:
+    #     [INFO] whaleaudit-core  [jar]
+    # `[pom]`/`[jar]` match the open-category rule below, so a 3-module reactor
+    # reported 4 javac findings on code with ZERO warnings -- and got worse with
+    # every module added. The marker set is closed (packaging types are an enum in
+    # Maven itself), so excluding it does not reopen the #659 fail-open hole that
+    # the open-category rule was introduced to close.
+    #
+    # Scoped to `[INFO]` lines: a javac diagnostic is never prefixed with the
+    # Maven [INFO] banner, so this cannot mask a real finding even when a category
+    # name collides with a packaging type.
+    /^\[INFO\].*\[(pom|jar|war|ear|rar|ejb|maven-plugin|par|test-jar|java-source|javadoc|zip|tar\.gz|tar\.bz2)\][[:space:]]*$/ { next }
     # Any bracketed lowercase category: covers the whole javac -Xlint enum and any
     # later addition to it. Restricted to lowercase/digit/hyphen so a Maven
     # `[WARNING]` with no category, or a `[INFO]` banner, is not counted.
