@@ -36,13 +36,35 @@ fi
 HYGIENE_ISSUES=0
 HYGIENE_FILES=""
 
+# Is this staged file binary (so line-based checks do not apply)?
+#
+# This replaces `grep -q $'\x00'`, which was a no-op guard: bash strips NUL from
+# `$'\x00'`, so the pattern was the EMPTY string and `grep -q ""` matches any
+# non-empty input. Every staged file was therefore judged binary and `continue`d,
+# silently disabling Check 1 (trailing whitespace), Check 2 (missing EOF newline)
+# and -- worst -- Check 3 (merge conflict markers, a BLOCK-level check). Checks 4
+# and 5 lacked the guard, which is why the gate looked half-working.
+#
+# Ask git instead of guessing: `--numstat` reports a binary entry as `-\t-\t<path>`
+# because git already made that determination. A byte-level NUL test cannot be
+# written with a shell pattern at all (variables and command substitution both drop
+# NUL), and `grep -I` only suppresses output on a binary input -- it does not make
+# `grep -q` fail, which is why that shortcut still reported text.
+is_binary_staged_file() {
+  local _file="$1"
+  case "$(git diff --cached --numstat -- "$_file" 2>/dev/null)" in
+    -[[:space:]]-*) return 0 ;;   # binary: git could not count lines
+    *) return 1 ;;                # text (or empty -- nothing for the line checks)
+  esac
+}
+
 # --- Check 1: Trailing whitespace ---
 TRAILING_WS_FILES=""
 if [ "${GATE_12_DOCS_ONLY:-false}" != true ]; then
 while IFS= read -r file; do
   [ -z "$file" ] && continue
-  # Skip binary files by checking if file contains null bytes
-  if git diff --cached --no-color -- "$file" 2>/dev/null | grep -q $'\x00'; then
+  # Skip binary files : they have no lines to check
+  if is_binary_staged_file "$file"; then
     continue
   fi
   # Check staged content for trailing whitespace (spaces/tabs at end of lines)
@@ -69,7 +91,7 @@ if [ "${GATE_12_DOCS_ONLY:-false}" != true ]; then
 while IFS= read -r file; do
   [ -z "$file" ] && continue
   # Skip binary files
-  if git diff --cached --no-color -- "$file" 2>/dev/null | grep -q $'\x00'; then
+  if is_binary_staged_file "$file"; then
     continue
   fi
   # Check if file content ends with newline
@@ -108,7 +130,7 @@ else
 while IFS= read -r file; do
   [ -z "$file" ] && continue
   # Skip binary files
-  if git diff --cached --no-color -- "$file" 2>/dev/null | grep -q $'\x00'; then
+  if is_binary_staged_file "$file"; then
     continue
   fi
   # Check for conflict markers in staged content
