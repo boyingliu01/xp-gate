@@ -4186,3 +4186,26 @@ specification:
         - id: AC-686-03
           criteria: 别名解析到用户所指的门；12/13 号门已注册（不再报 Unknown）
           test_type: unit
+
+    # ============================================================
+    # REQ-687: 所有门的判决必须进入同一套汇总口径。
+    #
+    # Gate 13 在 v0.35.x 事后追加，只补了执行与 JSON 写入，三处旧常量仍是 12：
+    # `TOTAL_GATES=12`、评分循环 `for gate in 1..12`、控制台表格止于 Gate 12。
+    # 于是在没有 C/C++ 编译器的机器上，`overall.gatesWarned` 为 0、表格看不到
+    # Gate 13，而 JSON 的 gates 对象里有 13 个键——"编译器严格度从未检查"与
+    # "编译器零告警"在人眼里完全一样（#680，与 #561/#570/#585 同一模式）。
+    # ============================================================
+    - id: REQ-687
+      description: 门禁列表必须是单一来源，门数、评分循环与汇总表均由其派生
+      priority: high
+      acceptance_criteria:
+        - id: AC-687-01
+          criteria: 存在唯一的门号列表常量且包含 13
+          test_type: unit
+        - id: AC-687-02
+          criteria: 评分路径中不再残留硬编码的 12 门字面量
+          test_type: unit
+        - id: AC-687-03
+          criteria: 控制台表格含 Gate 13 行，评分循环从该列表取范围
+          test_type: unit
