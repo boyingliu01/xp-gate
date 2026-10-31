@@ -81,7 +81,7 @@ teardown() {
   # The doc contract moved: a message prefix is gone; the env var is the
   # supported escape hatch. If a future edit reintroduces the prefix promise
   # without reintroducing a mechanism, this fails.
-  run grep -q 'SKIP_VERSION_CHECK=1 '"'g'"'it commit' "$PRE_COMMIT_COPY"
+  run grep -q 'SKIP_VERSION_CHECK=1 git commit' "$PRE_COMMIT_COPY"
   [ "$status" -eq 0 ]
   # And it must NOT advertise the dead COMMIT_EDITMSG-derived prefix as working.
   run grep -q '\[skip-version-check\] chore: <description>' "$PRE_COMMIT_COPY"
