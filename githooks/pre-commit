@@ -319,6 +319,32 @@ if ! declare -F run_tsx >/dev/null 2>&1; then
   }
 fi
 
+# Run a repo-local Node CLI (eslint, vitest, biome, ...) without npx when the
+# binary is already in this repo's node_modules.
+#
+# `npx <tool>` costs ~1.4-1.5 s more than the tool itself on this machine
+# (measured: eslint --version 1654 ms via npx vs 348 ms direct; vitest 1799 ms vs
+# 250 ms). That is npm resolving the package before it ever runs: on a cold
+# cache it may reach the network, which a quality gate must never depend on.
+# pre-commit invokes these tools a handful of times per commit, so the wrapper
+# was paying several seconds to start processes that were already installed.
+#
+# `run_node_bin <tool> <node-entry> [args...]`. Falls back to npx when the local
+# entry is absent (a globally-installed toolchain is still a valid setup).
+if ! declare -F run_node_bin >/dev/null 2>&1; then
+  run_node_bin() {
+    local _tool="$1" _entry="$2"
+    shift 2
+    local _root="${PROJECT_ROOT:-$(pwd)}"
+    local _local="$_root/node_modules/$_entry"
+    if [ -f "$_local" ] && command -v node >/dev/null 2>&1; then
+      node "$_local" "$@"
+    else
+      npx "$_tool" "$@"
+    fi
+  }
+fi
+
 # Gate 5's vitest exit-code judgement (is_runner_infrastructure_error,
 # is_partial_threshold_only_exit, handle_test_failure) is sourced from
 # lib/test-failure.sh below, next to the other hook libraries.
@@ -1677,9 +1703,9 @@ else
         # each linted file (found in the subdirectory automatically); flat
         # configs are discovered from the CWD, so point at them explicitly.
         if [ "$TS_PROJECT_DIR" != "." ] && [ -f "$TS_PROJECT_DIR/eslint.config.js" ]; then
-          ESLINT_OUTPUT=$(npx eslint --config "$TS_PROJECT_DIR/eslint.config.js" $ESLINT_FILES -f json --no-warn-ignored 2>&1)
+          ESLINT_OUTPUT=$(run_node_bin eslint eslint/bin/eslint.js --config "$TS_PROJECT_DIR/eslint.config.js" $ESLINT_FILES -f json --no-warn-ignored 2>&1)
         else
-          ESLINT_OUTPUT=$(npx eslint $ESLINT_FILES -f json --no-warn-ignored 2>&1)
+          ESLINT_OUTPUT=$(run_node_bin eslint eslint/bin/eslint.js $ESLINT_FILES -f json --no-warn-ignored 2>&1)
         fi
         ESLINT_EXIT=$?
         if [ "$ESLINT_EXIT" -ne 0 ]; then
@@ -3008,7 +3034,7 @@ else
     if source "$ADAPTER_FILE" 2>/dev/null; then
       # TypeScript: vitest with smart test selection
       if [ "$CURRENT_LANG" = "typescript" ] && { [ -f "package.json" ] || [ -f "$PROJECT_ROOT/package.json" ]; }; then
-        if run_without_git_context npx vitest --version >/dev/null 2>&1; then
+        if run_without_git_context run_node_bin vitest vitest/vitest.mjs --version >/dev/null 2>&1; then
           # Count changed test files to decide strategy. `grep -c '.'` prints its
           # own zero AND exits 1 on an empty list, so `|| echo "0"` used to yield
           # $'0\n0' -- the same two-value bug that false-blocked Gate 8 (#493).
@@ -3055,7 +3081,7 @@ else
           if [ "$CHANGED_TEST_FILE_COUNT" -gt 20 ] 2>/dev/null; then
             # Too many test files changed → full run
             echo "Too many test files changed ($CHANGED_TEST_FILE_COUNT), running full test suite..."
-            TESTS_OUTPUT=$(run_without_git_context npx vitest run --coverage 2>&1)
+            TESTS_OUTPUT=$(run_without_git_context run_node_bin vitest vitest/vitest.mjs run --coverage 2>&1)
             TESTS_EXIT_CODE=$?
             echo "$TESTS_OUTPUT" | head -60
             if [ "$TESTS_EXIT_CODE" -ne 0 ]; then
@@ -3069,7 +3095,7 @@ else
             SMART_TARGETS=$(echo "$SELECTED_TEST_FILES" | tr '\n' ' ')
             echo "Running ${CHANGED_TEST_FILE_COUNT} changed test file(s) with coverage..."
             echo "   Target(s): $(echo "$SELECTED_TEST_FILES" | tr '\n' ' ')"
-            TESTS_OUTPUT=$(run_without_git_context npx vitest run --coverage $SMART_TARGETS 2>&1)
+            TESTS_OUTPUT=$(run_without_git_context run_node_bin vitest vitest/vitest.mjs run --coverage $SMART_TARGETS 2>&1)
             TESTS_EXIT_CODE=$?
             echo "$TESTS_OUTPUT" | head -60
             if [ "$TESTS_EXIT_CODE" -ne 0 ]; then
@@ -3114,7 +3140,7 @@ else
             if [ -n "$RELATED_TESTS" ]; then
               echo "   Found related test(s): $(echo "$RELATED_TESTS" | tr '\n' ' ')"
               PARTIAL_TEST_RUN=true  # Mark as partial run for coverage check
-              TESTS_OUTPUT=$(run_without_git_context npx vitest run --coverage $RELATED_TESTS 2>&1)
+              TESTS_OUTPUT=$(run_without_git_context run_node_bin vitest vitest/vitest.mjs run --coverage $RELATED_TESTS 2>&1)
               TESTS_EXIT_CODE=$?
               echo "$TESTS_OUTPUT" | head -60
               if [ "$TESTS_EXIT_CODE" -ne 0 ]; then
@@ -3125,7 +3151,7 @@ else
             else
               # No related tests found → full run is safest
               echo "   No related test files found, running full test suite..."
-              TESTS_OUTPUT=$(run_without_git_context npx vitest run --coverage 2>&1)
+              TESTS_OUTPUT=$(run_without_git_context run_node_bin vitest vitest/vitest.mjs run --coverage 2>&1)
               TESTS_EXIT_CODE=$?
               echo "$TESTS_OUTPUT" | head -60
               if [ "$TESTS_EXIT_CODE" -ne 0 ]; then
@@ -3982,6 +4008,8 @@ else
     cd "$PROJECT_ROOT" || exit 1
     if [ "$ARCHLINT_KIND" = "npx" ]; then
       npx @archlinter/cli "$@"
+    elif [ "${ARCHLINT_NODE:-0}" = "1" ]; then
+      node "$ARCHLINT_BIN" "$@"
     else
       "$ARCHLINT_BIN" "$@"
     fi
@@ -4002,8 +4030,17 @@ else
     for CURRENT_LANG in $PROJECT_LANGS; do
     case "$CURRENT_LANG" in
       "typescript")
-        # Try local npx install first (devDependencies), fall back to global
-        if [ -x "$PROJECT_ROOT/node_modules/.bin/archlint" ]; then
+        # Prefer node on the package's own entry over the .bin shim: the shim's
+        # exec bit and extension vary by platform and package manager (npm writes
+        # archlint, archlint.cmd and archlint.ps1 on Windows), so `-x .bin/...`
+        # is true here while the no-extension shim is what Git Bash would run.
+        # `node <entry>` sidesteps all of that and also avoids npx's ~1.6 s
+        # package resolution (measured: 1909 ms via npx vs 319 ms direct).
+        if [ -f "$PROJECT_ROOT/node_modules/@archlinter/cli/bin/archlint.js" ] && command -v node >/dev/null 2>&1; then
+          ARCHLINT_KIND="binary"
+          ARCHLINT_BIN="$PROJECT_ROOT/node_modules/@archlinter/cli/bin/archlint.js"
+          ARCHLINT_NODE=1
+        elif [ -x "$PROJECT_ROOT/node_modules/.bin/archlint" ]; then
           ARCHLINT_KIND="binary"
           ARCHLINT_BIN="$PROJECT_ROOT/node_modules/.bin/archlint"
         elif command -v archlint >/dev/null 2>&1; then
