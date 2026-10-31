@@ -36,7 +36,15 @@ setup() {
     cp "$REPO_ROOT/githooks/sprint-gate.sh" .git/hooks/ 2>/dev/null || true
     cp -r "$REPO_ROOT/githooks/lib" .git/hooks/ 2>/dev/null || true
     cp -r "$REPO_ROOT/githooks/adapters" .git/hooks/ 2>/dev/null || true
-    cp "${XP_GATE_MODULE_RESOLUTION:-$HOME/.config/xp-gate/hooks/hook-module-resolution.sh}" .git/hooks/ 2>/dev/null || true
+    # The module-resolution shim must come from THIS repo, not from a global
+    # install. It used to be copied from $HOME/.config/xp-gate/hooks/ behind a
+    # `|| true`, so on any machine without `xp-gate setup-global` (i.e. CI) the
+    # file simply was not there, no error was raised, and every commit in the
+    # fixture died on `FATAL: cannot load hook-module-resolution.sh` -- which the
+    # tests then reported as "the hint text is wrong". The fallback below is the
+    # same file the shipped hook loads, and the guard makes a genuinely missing
+    # source a loud failure instead of a silent skip.
+    cp "$REPO_ROOT/githooks/hook-module-resolution.sh" .git/hooks/hook-module-resolution.sh
     # Strip CRLF so bash can parse the copied hook (the #546 guard rejects CRLF).
     for h in .git/hooks/*.sh .git/hooks/pre-commit; do
       [ -f "$h" ] || continue
