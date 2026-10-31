@@ -4801,7 +4801,12 @@ if [ -n "$MIRROR_STAGED" ] && printf '%s\n' "$MIRROR_STAGED" | grep -qE '^(githo
     MIRROR_FAIL=0
     while IFS= read -r _mf; do
       [ -n "$_mf" ] || continue
+      # `__tests__/` has no mirror BY DESIGN: sync-package-content.js lists it in
+      # SKIP_DIRS so test suites never ship to consumers. Demanding a mirror for
+      # them makes every new BATS file un-committable -- the two rules contradicted
+      # each other, and the only way past was to edit a generated file by hand.
       case "$_mf" in
+        */__tests__/*) continue ;;
         githooks/*) _mm="src/npm-package/hooks/${_mf#githooks/}" ;;
         plugins/*/src/*) _mm=$(printf '%s' "$_mf" | sed 's|^plugins/\([^/]*\)/src/|src/npm-package/plugins/\1/src/|') ;;
         *) continue ;;
