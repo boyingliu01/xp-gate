@@ -130,4 +130,51 @@ describe('shared-utils', () => {
     });
   });
 
+  describe('copyDirRecursive (#640 concurrency)', () => {
+    // The mirrored trees this walks are rewritten in place by
+    // scripts/sync-package-content.js. A concurrent init enumerates the
+    // directory, then finds an entry gone -- ENOENT on a file that reappears
+    // microseconds later. That must not abort the install.
+    it('skips a file that disappears between enumeration and copy', () => {
+      const src = path.join(tmpRoot, 'src');
+      const dest = path.join(tmpRoot, 'dest');
+      fs.mkdirSync(src, { recursive: true });
+      fs.writeFileSync(path.join(src, 'stable.sh'), 'stable');
+      fs.writeFileSync(path.join(src, 'vanishing.sh'), 'vanishing');
+
+      const realReadFileSync = fs.readFileSync;
+      vi.spyOn(fs, 'readFileSync').mockImplementation((p, ...rest) => {
+        if (String(p).endsWith('vanishing.sh')) {
+          const err = new Error('ENOENT: no such file or directory');
+          err.code = 'ENOENT';
+          throw err;
+        }
+        return realReadFileSync(p, ...rest);
+      });
+
+      const { copyDirRecursive } = require('../shared-utils');
+      expect(() => copyDirRecursive(src, dest)).not.toThrow();
+      expect(fs.existsSync(path.join(dest, 'stable.sh'))).toBe(true);
+      expect(fs.existsSync(path.join(dest, 'vanishing.sh'))).toBe(false);
+    });
+
+    it('still surfaces a real read error instead of silently skipping', () => {
+      // Only ENOENT means "being replaced". A permission or disk error is a real
+      // failure, and swallowing it would ship a half-installed hook set.
+      const src = path.join(tmpRoot, 'src2');
+      const dest = path.join(tmpRoot, 'dest2');
+      fs.mkdirSync(src, { recursive: true });
+      fs.writeFileSync(path.join(src, 'locked.sh'), 'locked');
+
+      vi.spyOn(fs, 'readFileSync').mockImplementation(() => {
+        const err = new Error('EACCES: permission denied');
+        err.code = 'EACCES';
+        throw err;
+      });
+
+      const { copyDirRecursive } = require('../shared-utils');
+      expect(() => copyDirRecursive(src, dest)).toThrow(/EACCES/);
+    });
+  });
+
 });
