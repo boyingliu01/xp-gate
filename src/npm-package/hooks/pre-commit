@@ -4922,7 +4922,22 @@ generate_quality_report() {
   local TIMESTAMP
   local BRANCH
   local PASSED_COUNT=0
-  local TOTAL_GATES=12
+  # #680: the gate list is the single source of truth. TOTAL_GATES, the scoring
+  # loop, the console table and the JSON `overall` block all derive from it.
+  #
+  # Gate 13 was added in v0.35.x with only its execution and JSON write -- these
+  # three sites kept saying "12". A machine with no C/C++ compiler therefore saw
+  # `10.0/10 effective`, `gatesWarned: 0` and a table that stopped at Gate 12,
+  # while the JSON `gates` object held 13 keys. "Compiler strictness was never
+  # checked" and "compiler reported zero warnings" rendered identically, which is
+  # the same silent-success pattern as #561/#570/#585.
+  #
+  # Adding a gate now means editing ALL_GATE_NUMBERS + ONE table row. Nothing
+  # else carries a count.
+  local ALL_GATE_NUMBERS="1 2 3 4 5 6 7 8 9 10 11 12 13"
+  local TOTAL_GATES=0
+  local _g
+  for _g in $ALL_GATE_NUMBERS; do TOTAL_GATES=$((TOTAL_GATES + 1)); done
   local SKIP_COUNT=0
   local WARN_COUNT=0
   local NONPASS_COUNT=0
@@ -4950,7 +4965,7 @@ generate_quality_report() {
   local DEGRADED_JSON=""
   local FAIL_COUNT=0
   local FAILED_JSON=""
-  for gate in 1 2 3 4 5 6 7 8 9 10 11 12; do
+  for gate in $ALL_GATE_NUMBERS; do
     local status_var="GATE_${gate}_STATUS"
     # Default mirrors the JSON report rendering below EXACTLY (gates 1-11
     # PASS, gate 12 WARN): a gate that never assigned a status is "not
@@ -4960,6 +4975,10 @@ generate_quality_report() {
     # Default direction is "did not run", never "passed": an unassigned status
     # is a gate that never reached a verdict, and scoring it PASS both claims a
     # success that did not happen and hides the gap in the effective rate.
+    #
+    # Gate 13 defaults to SKIP like the rest: it is only WARN when the toolchain
+    # is missing and the gate explicitly says so, and Gate 12 is the one gate
+    # whose "no verdict" is still a warning rather than "not applicable".
     if [ "$gate" -eq 12 ]; then gate_default="WARN"; else gate_default="SKIP"; fi
     gate_status="${!status_var:-$gate_default}"
     case "$gate_status" in
@@ -5306,6 +5325,9 @@ ENDJSON
   printf "  %-45s %s\n" "Gate 10: SAST Security" "${GATE_10_STATUS:-SKIP}"
   printf "  %-45s %s\n" "Gate 11: Sprint Flow" "${GATE_11_STATUS:-SKIP}"
   printf "  %-45s %s\n" "Gate 12: File Hygiene" "${GATE_12_STATUS:-WARN}"
+  # #680: Gate 13 ran and could block, but had no row here -- the table is what a
+  # human reads, so a gate missing from it reads as a gate that does not exist.
+  printf "  %-45s %s\n" "Gate 13: Compiler Strictness" "${GATE_13_STATUS:-SKIP}"
   echo ""
   # #564: both views in one line. The effective score answers "of the gates that
   # could run, how many passed"; the all-gates score counts a skip against the
