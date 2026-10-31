@@ -61,8 +61,13 @@ PAYLOAD_CLEAN='{
 @test "AC-457-09: exit 2 means the tool failed and SKIPs without claiming PASS" {
   run run_gate_with_exit 2 '{"violations":[],"summary":{}}'
   [ "$status" -eq 0 ]
-  [[ "$output" == *"SKIPPED"* ]]
-  [[ "$output" != *"✅ PASSED"* ]]
+  # #661 sharpened this: a checker that crashed is NOT "not applicable". The gate
+  # now reports WARN ("this code is NOT verified") instead of SKIP, because the
+  # two situations send the reader to different fixes -- an uninstalled tool vs a
+  # broken invocation. What must never change is the last line: a check that did
+  # not execute cannot report PASS.
+  [[ "$output" == *"WARN"* || "$output" == *"SKIP"* ]]
+  [[ "$output" != *"PASS"* ]]
 }
 
 @test "AC-457-08: exit 0 with no findings PASSES" {
