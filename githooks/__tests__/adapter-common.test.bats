@@ -79,7 +79,13 @@ EOF
   run grep -F 'if run_without_git_context npx vitest --version' "$BATS_TEST_DIRNAME/../adapters/typescript.sh"
   [ "$status" -eq 0 ]
 
-  run grep -F 'if run_without_git_context npx vitest --version' "$BATS_TEST_DIRNAME/../pre-commit"
+  # The invariant is that the version probe runs WITHOUT the hook's Git context
+  # (a stale GIT_DIR makes vitest resolve the wrong project). Which binary
+  # performs it is an implementation detail: #640 moved pre-commit off npx onto
+  # the repo-local entry, so pinning the literal `npx vitest` here would freeze
+  # the slower path instead of the invariant. Either form satisfies the contract;
+  # an unguarded probe does not.
+  run grep -E 'if run_without_git_context (npx vitest|run_node_bin vitest)' "$BATS_TEST_DIRNAME/../pre-commit"
   [ "$status" -eq 0 ]
 }
 
