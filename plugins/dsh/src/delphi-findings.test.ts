@@ -39,13 +39,39 @@ function verdict(id: string, role: string, report: string, verdictValue: string,
   }
 }
 
+/**
+ * Build a ReviewOutcome from per-round verdicts.
+ *
+ * `consensusRatio` / `reachedConsensus` are computed the same way `runRound`
+ * does rather than stubbed: `RoundResult` declares them as required, and a
+ * fixture that hard-codes 0/false would be asserting against values the real
+ * code can never produce for these inputs. `formatOutcome` does not read them
+ * today (it takes consensus from the top-level fields), but a fixture that
+ * disagrees with the producer is exactly how a later change gets "verified"
+ * against something impossible.
+ *
+ * Delphi's seat/threshold constants are module-private in delphi.ts; they are
+ * restated here on purpose so this fixture does not force the producer to widen
+ * its public API just to be testable.
+ */
+const DELPHI_EXPERTS = 3
+const DELPHI_THRESHOLD_PERCENT = 90
+
 function outcomeOf(rounds: Array<{ round: number; verdicts: ReturnType<typeof verdict>[] }>): ReviewOutcome {
-  const mapped = rounds.map((r) => ({
-    round: r.round,
-    approvals: r.verdicts.filter((v) => v.verdict === "APPROVED").length,
-    validCount: r.verdicts.length,
-    verdicts: r.verdicts,
-  }))
+  const mapped = rounds.map((r) => {
+    const counted = r.verdicts.filter((v) => v.counted)
+    const approvals = counted.filter((v) => v.verdict === "APPROVED").length
+    // Mirrors runRound: consensus is measured over VALID responses only.
+    const consensusRatio = counted.length === 0 ? 0 : approvals / counted.length
+    return {
+      round: r.round,
+      approvals,
+      validCount: counted.length,
+      verdicts: r.verdicts,
+      consensusRatio,
+      reachedConsensus: counted.length === DELPHI_EXPERTS && consensusRatio * 100 >= DELPHI_THRESHOLD_PERCENT,
+    }
+  })
   return {
     rounds: mapped,
     consensus: false,
