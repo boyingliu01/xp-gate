@@ -33,10 +33,24 @@ describe('FC-04: bats fixture commits never run the host hook chain', () => {
       (l) => !l.trim().startsWith('#') && /git\s+config\s+core\.hooksPath/.test(l)
     );
     lines.forEach((line, i) => {
+      // Strip quoted string CONTENTS before matching. A fixture that grep-checks
+      // for a literal like 'SKIP_VERSION_CHECK=1 git commit' is asserting on text,
+      // not invoking git -- but the bare pattern below cannot tell the two apart.
+      // The workaround had become writing the literal as `g'it commit` so the
+      // pattern would miss it, and that "exemption" was itself a spelling bug: the
+      // unclosed quote made bats unable to parse the file at all, so the three
+      // tests carrying it never ran (f59f0562). Removing the guesswork here lets
+      // fixtures write literals normally.
+      //
+      // Quote contents are replaced with a placeholder rather than deleted so the
+      // rest of the line keeps its shape. Both quote styles are handled.
+      const unquoted = line
+        .replace(/'(?:[^'\\]|\\.)*'/g, "''")
+        .replace(/"(?:[^"\\]|\\.)*"/g, '""');
       // A real git commit invocation: `git commit` or `git -c … commit`,
       // NOT a path like .git/hooks/pre-commit (the word boundary on its own
       // would match the `git` inside `.git` and the `commit` in `pre-commit`).
-      if (/(^|[^\w./-])git(\s+-\S+)*\s+commit\b/.test(line) && !line.trim().startsWith('#')) {
+      if (/(^|[^\w./-])git(\s+-\S+)*\s+commit\b/.test(unquoted) && !line.trim().startsWith('#')) {
         if (line.includes('--no-verify')) return;
         if (line.includes('core.hooksPath') && pinsHooksPath) return;
         offenders.push(
