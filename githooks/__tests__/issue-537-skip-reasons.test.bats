@@ -61,6 +61,13 @@ teardown() {
       !skip && in_fn { print }
       !skip && in_fn && /^\}$/ { in_fn = 0 }
     ' "$PRE_COMMIT"
+    # #605 turned the threshold into `COVERAGE_THRESHOLD="$_rct_value"`, with the
+    # value produced by calling _resolve_coverage_threshold in this shell a few
+    # lines earlier. Copying only the assignment (which is what this sed did)
+    # leaves `_rct_value` undefined, so `set -u` kills the fixture at that line
+    # and every assertion below never runs. Reproduce the hook's own sequence:
+    # the resolver is already in the awk output above, so call it here.
+    printf '_resolve_coverage_threshold >/dev/null\n'
     sed -n '/^COVERAGE_THRESHOLD=/p' "$PRE_COMMIT"
     # The function under test, terminated by its own here-doc marker.
     sed -n '/^generate_quality_report()/,/^ENDJSON$/p' "$PRE_COMMIT"
