@@ -37,6 +37,12 @@ exit 0
 STUB
   chmod +x "$WORK/bin/pwsh"
   export PATH="$WORK/bin:$PATH"
+  # Since #599 the adapter refuses to analyse when a scope file is declared but
+  # PSScriptAnalyzerSettings.psd1 is absent: analysing with an unknown rule set is
+  # fail-closed WARN, so it returns 3. This suite is about BOM handling in the
+  # scope file, so it supplies the settings file the adapter now requires --
+  # otherwise the BOM assertion is answered by a different gate's verdict (#497).
+  echo '@{ Rules = @{} }' > PSScriptAnalyzerSettings.psd1
 }
 
 teardown() {

@@ -68,6 +68,12 @@ build_report_fn() {
       !skip && in_fn { print }
       !skip && in_fn && /^\}$/ { in_fn = 0 }
     ' "$PRE_COMMIT"
+    # #605 made the threshold `COVERAGE_THRESHOLD="$_rct_value"`, with the value
+    # produced by an earlier in-shell call to _resolve_coverage_threshold. Copying
+    # the assignment alone leaves `_rct_value` undefined and `set -u` aborts the
+    # fixture before the report runs. The resolver is already in the awk output,
+    # so replay the hook's own call sequence here.
+    printf '_resolve_coverage_threshold >/dev/null\n'
     sed -n '/^COVERAGE_THRESHOLD=/p' "$PRE_COMMIT"
     sed -n '/^generate_quality_report()/,/^ENDJSON$/p' "$PRE_COMMIT"
     printf '}\n'
