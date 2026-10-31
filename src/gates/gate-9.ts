@@ -1,5 +1,5 @@
 /**
- * Gate 9: Semgrep SAST Security Scan
+ * Gate 10: Semgrep SAST Security Scan (file name predates the #677 renumber)
  * Detects security vulnerabilities in staged files.
  * For PowerShell projects: uses PSScriptAnalyzer security rules as alternative.
  * TypeScript rewrite of githooks/adapters/gate-9.sh for cross-platform Node.js CLI.
@@ -36,7 +36,7 @@ export function runGate9(input: GateInput): GateOutput {
   const messages: string[] = [];
 
   messages.push('');
-  messages.push('→ Gate 9: Semgrep SAST Security Scan...');
+  messages.push('→ Gate 10: Semgrep SAST Security Scan...');
 
   // PowerShell project: use PSScriptAnalyzer security rules
   if (isPowerShellProject(input.projectLang)) {
@@ -49,7 +49,7 @@ export function runGate9(input: GateInput): GateOutput {
     messages.push('     ⚠️  WARN - semgrep not installed — SAST scanning unavailable');
     messages.push('     Install: brew install semgrep (macOS) | pip install semgrep (Linux/Windows)');
     messages.push('     Pre-cache rules: semgrep --config=' + SEMGREP_RULESET);
-    messages.push('     Gate 9: SAST Security (WARN, semgrep not installed)');
+    messages.push('     Gate 10: SAST Security (WARN, semgrep not installed)');
     recordAudit('gate-9', 'sast-security', 'WARN', 0, startMs);
     return { status: 'WARN', messages, exitCode: 0 };
   }
@@ -242,7 +242,7 @@ function runPowerShellSAST(
   const ps = detectPowerShell();
   if (!ps.available) {
     messages.push('     ⚠️  WARN - PowerShell not available — SAST scanning unavailable');
-    messages.push('     Gate 9: SAST Security (WARN, PowerShell not installed)');
+    messages.push('     Gate 10: SAST Security (WARN, PowerShell not installed)');
     recordAudit('gate-9', 'sast-security', 'WARN', 0, startMs);
     return { status: 'WARN', messages, exitCode: 0 };
   }

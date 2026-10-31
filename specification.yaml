@@ -4164,3 +4164,25 @@ specification:
         - id: AC-685-02
           criteria: 脚本在 ~/.config/xp-gate/hooks/ 下时仍能发现（不破坏既有路径）
           test_type: unit
+
+    # ============================================================
+    # REQ-686: CLI 的门禁编号必须与钩子一致。
+    #
+    # 钩子把 9 号门叫 Build integrity、10 号门叫 Semgrep SAST；CLI 注册表把两者
+    # 对调，于是用户在提交输出里看到 "BLOCKED - Gate 9: Build integrity" 后运行
+    # `xp-gate check --gates 9`，跑的是 semgrep 并报告另一道门的结果。12/13 号门
+    # 在钩子里会阻断提交，CLI 却回答 "Unknown gate(s)"（#677）。
+    # ============================================================
+    - id: REQ-686
+      description: CLI 的门禁编号、别名与可运行性必须与钩子的实际编号一致
+      priority: high
+      acceptance_criteria:
+        - id: AC-686-01
+          criteria: 9 号为 Build Integrity，10 号为 SAST Security
+          test_type: unit
+        - id: AC-686-02
+          criteria: 钩子输出中的 9 号门确为 Build integrity、10 号为 Semgrep SAST（两侧对得上）
+          test_type: integration
+        - id: AC-686-03
+          criteria: 别名解析到用户所指的门；12/13 号门已注册（不再报 Unknown）
+          test_type: unit
