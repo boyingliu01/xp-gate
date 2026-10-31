@@ -41,7 +41,12 @@ actual_ccn() {
 }
 
 recorded_ccn() {
-  node -e "const b=require(process.argv[1]);process.stdout.write(String(b['src/mutation/update-baseline.ts::' + process.argv[2]] ?? ''))" "$BASELINE" "$1"
+  # #617 changed the file shape to `{ population, entries }`. Reading the top
+  # level directly (as this did) yields undefined for every function and reports
+  # it as "the record is empty" -- the same misread that made the real ratchet
+  # call recorded functions "new code" (see scripts/ccn-report.cjs). Accept both
+  # shapes so the assertion tests the record, not the reader's assumption.
+  node -e "const raw=require(process.argv[1]);const b=(raw&&raw.entries)||raw;process.stdout.write(String(b['src/mutation/update-baseline.ts::' + process.argv[2]] ?? ''))" "$BASELINE" "$1"
 }
 
 @test "AC-582-01: the recorded CCN for saveBaseline matches the analyzer" {

@@ -124,7 +124,19 @@ dist/c.js')"
   # RAW_CHANGED_FILES is deliberately untouched: "did the user stage anything"
   # and "is there a vendored dependency worth warning about" both need the
   # unedited list.
-  grep -qE '^RAW_CHANGED_FILES=\$\(git diff --cached' "$HOOK"
+  #
+  # Match the git-diff source anywhere on the assignment line rather than at its
+  # very start: #640's staged-file reuse turned this into
+  #   RAW_CHANGED_FILES="${XP_STAGED_ACM:-$(git diff --cached ...)}"
+  # so a column-0 anchor stopped matching. What this assertion protects is that
+  # the RAW list still comes straight from git's diff and is not routed through
+  # the jscpd filter -- not one particular shell spelling of the assignment.
+  grep -qE '^RAW_CHANGED_FILES=.*git diff --cached' "$HOOK"
+  # And the RAW line must not be the filtered one.
+  if grep -E '^RAW_CHANGED_FILES=.*jscpd_is_build_output' "$HOOK" >/dev/null; then
+    echo "RAW_CHANGED_FILES is routed through the jscpd filter" >&2
+    return 1
+  fi
 }
 
 @test "AC-649-05: every direct git-diff scanner routes through the helper" {
@@ -177,11 +189,15 @@ dist/c.js')"
       *STAGED_FILES=*) continue ;;
       *PY_CHANGED_ALL=*) continue ;;
       *RAW_CHANGED_FILES=*) continue ;;
+      # MIRROR_STAGED asks "did this commit touch a mirror pair". It narrows to
+      # `^(githooks/|plugins/<name>/src/)` itself, which already excludes every
+      # dependency and build-output prefix the helper removes -- running the
+      # helper as well would be a second filter over an already-narrow set.
+      *MIRROR_STAGED=*) continue ;;
     esac
 
     printf '%s' "$stmt" | grep -q 'filter_project_paths' || offenders+=("$stmt")
   done < "$HOOK"
-
   if [ "${#offenders[@]}" -gt 0 ]; then
     for stmt in "${offenders[@]}"; do
       echo "unfiltered git-diff scan: $stmt" >&2

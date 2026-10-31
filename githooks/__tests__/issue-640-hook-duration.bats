@@ -44,14 +44,20 @@ setup() {
 @test "AC-640-02: the per-run report carries duration_ms" {
   grep -q 'duration_ms' "$HOOK"
   # It must be computed from the start we recorded, not from a constant.
-  grep -q '_XP_START' "$HOOK"
+  grep -q '_XP_HOOK_START_MS' "$HOOK"
 }
 
 @test "AC-640-02: duration_ms is absent, not zero, when unmeasurable" {
-  # The ternary must only assign when the measurement is positive. Asserting the
-  # guard expression keeps a future refactor from replacing it with `|| 0`.
-  run grep -c 'up>st' "$HOOK"
-  [ "$output" -ge 1 ]
+  # The guard must only assign when both endpoints are known and the clock moved
+  # forward. Asserting the comparison itself keeps a future refactor from
+  # replacing it with `|| 0`, which would turn "cannot measure" into a confident
+  # zero -- the exact answer this issue was filed about.
+  #
+  # (This assertion used to grep for `up>st`, a fragment that no longer exists in
+  # the hook. It was matching nothing and passing only because grep -c returns 0
+  # on no match, which the `-ge 1` then caught -- so the test was red, not green,
+  # and had been reported as a hook regression rather than a stale assertion.)
+  grep -q '\$_XP_NOW_MS.*-gt.*\$_XP_HOOK_START_MS' "$HOOK"
 }
 
 @test "AC-640-01: the CRLF self-check is still the first executable line" {
