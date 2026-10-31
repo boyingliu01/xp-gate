@@ -426,7 +426,16 @@ SPRINT_GATE_SCRIPT=""
 # ~/.config/xp-gate/hooks -- a correctly installed machine was told the file was
 # missing here too. Nothing is sourced for this: pre-push resolves its libraries
 # further down (ADAPTER_COMMON), and this gate must decide before that.
-for _sprint_gate_dir in "$PROJECT_ROOT/githooks" "$(dirname "$0")" "$HOME/.config/xp-gate/hooks"; do
+#
+# `$HOME/.config/xp-gate/adapters` is the tier #678 found missing: `xp-gate
+# setup-global` runs copyAdapters(), which ships every `gate-*.sh` AND
+# `sprint-gate.sh` into the ADAPTERS directory -- never into hooks/. So a globally
+# installed machine had sprint-gate.sh present under adapters/ while this loop
+# searched only hooks/, and Gate MS skipped on every push without complaint. Both
+# tiers are searched now: which directory `init` chose is an install detail this
+# gate should not depend on.
+for _sprint_gate_dir in "$PROJECT_ROOT/githooks" "$(dirname "$0")" \
+                        "$HOME/.config/xp-gate/hooks" "$HOME/.config/xp-gate/adapters"; do
   if [ -n "$_sprint_gate_dir" ] && [ -f "$_sprint_gate_dir/sprint-gate.sh" ]; then
     SPRINT_GATE_SCRIPT="$_sprint_gate_dir/sprint-gate.sh"
     break
@@ -440,7 +449,7 @@ if [ -n "$SPRINT_GATE_SCRIPT" ]; then
     exit 1
   fi
 else
-  echo "⏭️  SKIPPED - Gate MS: Sprint Flow (sprint-gate.sh not found; searched: $PROJECT_ROOT/githooks, $(dirname "$0"), $HOME/.config/xp-gate/hooks)"
+  echo "⏭️  SKIPPED - Gate MS: Sprint Flow (sprint-gate.sh not found; searched: $PROJECT_ROOT/githooks, $(dirname "$0"), $HOME/.config/xp-gate/hooks, $HOME/.config/xp-gate/adapters)"
   GATE_S_STATUS="SKIP"
 fi
 echo ""
