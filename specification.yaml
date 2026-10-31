@@ -4209,3 +4209,22 @@ specification:
         - id: AC-687-03
           criteria: 控制台表格含 Gate 13 行，评分循环从该列表取范围
           test_type: unit
+
+    # ============================================================
+    # REQ-688: sprint-flow 的校验脚本必须接受生产方写出的 schema。
+    #
+    # `verify-sprint-state.sh` 要求 `sprint_id`/`status`/`current_phase`/`phases`，
+    # 而 `xp-gate sprint-init` 写的是 `id`/`task_description`/`phase`/`status`/
+    # `_schema_version`。对 CLI 刚创建的 sprint 恒判失败——一个拒绝其自身生产者
+    # 输出的校验器比没有校验器更糟，它训练人们忽略它（#679）。
+    # ============================================================
+    - id: REQ-688
+      description: sprint-state 校验脚本的必需键必须与 sprint-init 的实际输出一致
+      priority: high
+      acceptance_criteria:
+        - id: AC-688-01
+          criteria: 由 `xp-gate sprint-init` 真实产出的状态文件能通过校验
+          test_type: integration
+        - id: AC-688-02
+          criteria: 真正缺键的状态文件仍被拒绝（不变成"什么都接受"）
+          test_type: integration
