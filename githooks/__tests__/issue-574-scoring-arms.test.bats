@@ -32,8 +32,10 @@ teardown() {
 }
 
 # The status tally from the hook's scoring loop.
+# #680: anchored on the loop opening rather than a literal 1..12 list -- a stale
+# literal is exactly what let Gate 13 fall out of the tally.
 tally_block() {
-  sed -n '/^  for gate in 1 2 3 4 5 6 7 8 9 10 11 12; do$/,/^  done$/p' "$PRE_COMMIT"
+  sed -n '/^  for gate in .*; do$/,/^  done$/p' "$PRE_COMMIT"
 }
 
 # Run the hook's real tally over a list of statuses and print `key=value` lines
@@ -61,7 +63,7 @@ tally_for() {
     export "GATE_${i}_STATUS=$st"
     i=$((i + 1))
   done
-  while [ "$i" -le 12 ]; do
+  while [ "$i" -le 13 ]; do
     export "GATE_${i}_STATUS=SKIP"
     i=$((i + 1))
   done
@@ -73,7 +75,8 @@ tally_for() {
     NONPASS_COUNT=0
     DEGRADED_COUNT=0
     DEGRADED_JSON=""
-    TOTAL_GATES=12
+    ALL_GATE_NUMBERS="1 2 3 4 5 6 7 8 9 10 11 12 13"
+    TOTAL_GATES=13
     # shellcheck disable=SC1090
     . "$TEST_DIR/tally.sh"
     printf 'PASSED=%s\n' "$PASSED_COUNT"
@@ -162,7 +165,7 @@ value_of() {
   # twelve skipped -- what matters is that SKIP lands in no other counter.
   out=$(tally_for SKIP)
 
-  [ "$(value_of "$out" SKIP)" = "12" ] || { echo "got: $out"; return 1; }
+  [ "$(value_of "$out" SKIP)" = "13" ] || { echo "got: $out"; return 1; }
   [ "$(value_of "$out" WARN)" = "0" ] || { echo "got: $out"; return 1; }
   [ "$(value_of "$out" DEGRADED)" = "0" ] || { echo "got: $out"; return 1; }
   [ "$(value_of "$out" NONPASS)" = "0" ] || { echo "got: $out"; return 1; }
