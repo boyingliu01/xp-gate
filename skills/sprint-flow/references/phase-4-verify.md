@@ -142,6 +142,22 @@ ELSE:
 - Web 前端附加: ui-review report + OPTIONAL QA/design-review/benchmark reports
 - 验证通过的 MVP
 
+### 完成定义（DoD 第 1–6 项）
+
+离开 VERIFY 前逐项过一遍 [`definition-of-done.md`](./definition-of-done.md)。**任何一项拿不出证据 → 不得进入 SHIP。**
+
+| # | 条目 | 在 VERIFY 的检查方式 |
+|---|------|----------------------|
+| 1 | 需求可追溯 | `npx vitest run scripts/__tests__/ac-reference-guard.test.cjs` 通过（测试引用的 AC 都在 spec 里） |
+| 2 | 测试先行 | 有 RED 证据（提交历史或记录），或说明为何不适用 |
+| 3 | **测试真的能失败** | 至少证明过一个变异体会被抓住——「测试通过」在从未运行时与「功能正确」无法区分 |
+| 4 | 验证命令已运行 | 记录实际命令 + 输出，不是「应该是绿的」 |
+| 5 | 门禁未降级 | 无 `--no-verify`；无为了本次改动新增的基线额度 |
+| 6 | 镜像已同步 | `bash scripts/check-hook-mirror.sh` → PASS |
+
+第 5 项值得单独说明：**加基线额度来吸收自己刚产生的告警，等于把门禁关掉一次。**
+`.warnings-baseline.json` 只应记录「改动之前就存在」的告警。
+
 ---
 
 ## Part B: FEEDBACK CAPTURE（反馈获取）

@@ -131,16 +131,64 @@ Phase 6: CLOSE ───────┘
 
 ## 5. Quality Gates Coverage
 
-### 6-Gate 架构（重构自 9-Gate）
+### 门禁成熟度（L0–L4）
 
-| Gate | 名称 | 覆盖内容 | 工具 |
-|------|------|---------|------|
-| Gate 1 | Code Quality | 静态分析 + Lint + Shell 检查 | tsc/ESLint/Ruff/shellcheck |
-| Gate 2 | Duplicate Code | 重复代码检测 | jscpd/pylint |
-| Gate 3 | Cyclomatic Complexity | 圈复杂度 | lizard (CCN >5 警告, >10 阻断) |
-| Gate 4 | Principles | Clean Code + SOLID | 14 规则引擎 |
-| Gate 5 | Tests & Coverage | 单元测试 + 覆盖率 | Jest/pytest/go test (≥80%) |
-| Gate 6 | Architecture + Boy Scout | 架构验证 + 童子军规则 | archlint + boy-scout.ts |
+成熟度描述的是**这道门能拦住什么**，不是它「存在」。分级沿用指南 §17：
+
+| 级别 | 含义 |
+|------|------|
+| **L0** 人工 | 靠人看，没有任何自动执行 |
+| **L1** 可见 | 自动执行并给出报告，但**不阻断**（警告/报告） |
+| **L2** 阻断 | 违规时**阻断**提交/推送 |
+| **L3** 闭环 | L2 + 违规存量被记账（基线/棘轮），可量化、只能收紧 |
+| **L4** 优化 | L3 + 有度量反馈驱动阈值调整（而非人工拍板） |
+
+**「配置模板」不等于「已阻断」**：一道门的等级写在这里，就必须有下表「证据」列指向的实现或测试。
+XP-Gate 历史上三次把没生效的东西当成生效了——#561（覆盖率阈值形状错，声明 80% 实际不生效）、
+#570（覆盖率 fail-open）、#585（Gate 5c 静默通过）。这份表的用处就是让下一次同类错误在
+「等级」这一列上看得出来。
+
+### Pre-commit（12 道编号门 + Gate 12 文件卫生）
+
+| Gate | 名称 | 覆盖内容 | 工具 | 成熟度 | 证据 |
+|------|------|---------|------|--------|------|
+| 0 | Version Consistency | VERSION ↔ 各 package.json | version-parser.ts | **L2** | `githooks/pre-commit` Gate 0 段 |
+| 1 | Code Quality | 静态分析 + Lint | tsc/ESLint/Ruff/shellcheck | **L2** | 语言适配器 `lint()` |
+| 2 | Duplicate Code | 重复代码检测 | jscpd/pylint | **L2** | `jscpd.conf.json` + 适配器 |
+| 3 | Cyclomatic Complexity | 圈复杂度（>5 警告，>10 阻断） | lizard / ccn-report | **L3** | `.ccn-baseline.json` 棘轮 `--check` |
+| 4 | Principles | Clean Code + SOLID（14 规则 × 9 语言） | 规则引擎 | **L2** | `.principlesrc` + `src/principles/` |
+| 5 | Tests & Coverage | 单元测试 + 覆盖率 | vitest/pytest/go test | **L3** | `vitest.config.ts` thresholds（78/78/84/81）+ pre-commit `COVERAGE_THRESHOLD` |
+| 6 | Architecture + Boy Scout | 架构验证 + 童子军规则 | archlint + boy-scout.ts | **L3** | `.architecture-baseline.json` + `.warnings-baseline.json` |
+| 7 | IaC Security | checkov/hadolint/kube-score/tflint | 同上 | **L2** | 工具缺失 → SKIP（非阻断） |
+| 8 | Secret Scanning | gitleaks | gitleaks | **L2（fail-closed）** | `githooks/adapters/gate-8.sh:26`——工具缺失即 BLOCK（#499） |
+| 9 | Build Integrity | tsc + import 检查 | tsc | **L2** | 适配器 build 段 |
+| 10 | SAST Security | semgrep | semgrep | **L2** | 判定取自 JSON severity，非 exit code（#518）；解析失败 fail-closed 到 SKIP |
+| 11 | Sprint Flow | 规格/阶段合规 | sprint-gate.sh | **L2** | `specification.yaml` + `.sprint-state/` |
+| 12 | File Hygiene | 冲突标记、YAML/JSON 语法 | gate-12-file-hygiene.sh | **L2（限冲突/语法）** | `gate-12-file-hygiene.sh:248-254`——冲突标记与 YAML/JSON 语法错误 `exit 1`，其余卫生问题只警告 |
+
+> **读这张表要注意的两件事**
+>
+> 1. **L2 不等于「装了工具就一定拦」**：Gate 7 和多数语言适配器在工具缺失时降级为 SKIP，
+>    这是有意设计（混合语言仓库不能被没装的分析器卡死）。**唯有 Gate 8 是 fail-closed**——
+>    一个跑不起来的密钥扫描不能报告成功。
+> 2. **L3 的门才是能自己收紧的**：Gate 3/5/6 有基线或棘轮，违规存量被记账，
+>    所以它们能回答「比上次更差了吗」，L2 的门只能回答「现在有没有违规」。
+
+### Pre-push（8 道门）
+
+| Gate | 名称 | 成熟度 | 证据 |
+|------|------|--------|------|
+| 10 | Build Integrity | **L2** | tsc + npm pack |
+| M | Incremental Mutation (TS) | **L2** | `stryker.prepush.conf.json` |
+| M-Python/Go/Java/Kotlin | 多语言变异 | **L2** | 内联于 `pre-push` |
+| M2 | Mock Density | **L1（仅警告）** | `>30%` 且无 `@mock-justified` 时只警告 |
+| ML | Mock Layering Policy | **L2** | `src/mock-policy/gate-m3.ts` |
+| UI | UI Sprint Quality Gates | **L2** | 内联于 `pre-push` |
+| MW | Code Walkthrough | **L2** | 校验 `.code-walkthrough-result.json` 与 HEAD 是否一致 |
+| S | Sprint Flow Enforcement | **L2** | sprint-gate.sh |
+
+> 推 main/master 时 **ML / UI / MW 三门按设计跳过**（PR 已预审）。「跳过」不是「通过」：
+> `xp-gate gate-coverage` 把这三门显示为 SKIP 并附原因，绝不会计为绿。
 
 ### Clean Code 规则 (9 条)
 
