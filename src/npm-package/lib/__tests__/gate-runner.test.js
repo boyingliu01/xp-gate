@@ -207,7 +207,7 @@ describe('gate-runner.js — runGateAdapter', () => {
       ].join('\n')
     );
 
-    const result = spawnSync(process.execPath, [cliPath, 'check', '9'], {
+    const result = spawnSync(process.execPath, [cliPath, 'check', '10'], {
       cwd: tmpProject,
       encoding: 'utf8',
       timeout: 30000,
@@ -244,7 +244,7 @@ describe('gate-runner.js — runGateAdapter', () => {
 
     const result = spawnSync(
       process.execPath,
-      [path.join(packageFixture, 'bin', 'xp-gate.js'), 'check', '9', targetProject],
+      [path.join(packageFixture, 'bin', 'xp-gate.js'), 'check', '10', targetProject],
       {
         cwd: callerProject,
         encoding: 'utf8',
@@ -302,7 +302,7 @@ describe('gate-runner.js — runGateAdapter', () => {
 
     const result = spawnSync(
       process.execPath,
-      [path.join(packageFixture, 'bin', 'xp-gate.js'), 'check', '9'],
+      [path.join(packageFixture, 'bin', 'xp-gate.js'), 'check', '10'],
       { cwd: tmpProject, encoding: 'utf8', timeout: 30000 }
     );
 
@@ -320,7 +320,7 @@ describe('gate-runner.js — runGateAdapter', () => {
 
     const result = spawnSync(
       process.execPath,
-      [path.join(packageFixture, 'bin', 'xp-gate.js'), 'check', '9', targetProject],
+      [path.join(packageFixture, 'bin', 'xp-gate.js'), 'check', '10', targetProject],
       { cwd: tmpProject, encoding: 'utf8', timeout: 30000 }
     );
 
