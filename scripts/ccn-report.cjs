@@ -856,13 +856,29 @@ async function main() {
       console.error('A ratchet with no baseline grades every function as new code. Run --write-baseline first.');
       process.exit(1);
     }
-    let baseline;
+    let baselineRaw;
     try {
-      baseline = JSON.parse(fs.readFileSync(baselinePath, 'utf8'));
+      baselineRaw = JSON.parse(fs.readFileSync(baselinePath, 'utf8'));
     } catch (e) {
       console.error(`FAIL — cannot parse baseline ${baselinePath}: ${String(e.message || e)}`);
       process.exit(1);
     }
+    // #617 turned the baseline file into `{ population, entries }` so it could
+    // declare what it covers, but this call was never updated: the whole document
+    // was handed to the ratchet, so `baseline["<file>::<fn>"]` was ALWAYS undefined
+    // and every function above the block threshold was reported as new code.
+    //
+    // The failure mode is the bad one: the ratchet kept a 976-entry record of
+    // accepted debt and could not read a single one of them, so it failed the build
+    // on eight functions that were all recorded at exactly their current CCN.
+    // A baseline that is never consulted is indistinguishable from no baseline --
+    // except that it looks like one.
+    //
+    // Accept both shapes: `entries` when present, otherwise the legacy flat map
+    // (a hand-edited or pre-#617 file).
+    const baseline = baselineRaw && typeof baselineRaw === 'object' && baselineRaw.entries
+      ? baselineRaw.entries
+      : baselineRaw;
     const warnThreshold = parseInt(get('--warn') || '5', 10);
     const blockThreshold = parseInt(get('--block') || '10', 10);
     const findings = ratchetFindings(report, baseline, warnThreshold, blockThreshold);

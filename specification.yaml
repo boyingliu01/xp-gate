@@ -2796,6 +2796,10 @@ specification:
           criteria: 接口的抽象方法（以分号结尾）须计入；泛型/数组返回类型与跨行 throws 不得导致漏计；
             注解不得成为成员
           test_type: unit
+        - id: AC-617-04
+          criteria: 棘轮须按 { population, entries } 结构读取基线；已记录函数不得被判为新代码，
+            未记录的超阈函数仍须阻断
+          test_type: unit
 
 
     # ============================================================
