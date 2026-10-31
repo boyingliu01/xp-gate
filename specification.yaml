@@ -4104,3 +4104,25 @@ specification:
         - id: AC-682-03
           criteria: 带冲突标记的文本文件通过守卫，且冲突标记可被检出（BLOCK 级检查可用）
           test_type: unit
+
+    # ============================================================
+    # REQ-683: CLI 侧的复杂度门禁必须与钩子得出同样结论。
+    #
+    # `gates/gate-3.ts` 曾用 /^Warning cnt\s+(\d+)/m 解析 lizard 的告警数，但
+    # "Warning cnt" 是**表头中的一列**（行中间），且 lizard 在显式传入文件参数时
+    # 根本不打印汇总表——正是本门禁的调用方式。于是告警数恒为 0，同一个文件
+    # 钩子会拦（RC=1）而 CLI 恒放（RC=0）（#674）。
+    # ============================================================
+    - id: REQ-683
+      description: Gate 3 的 CLI 实现必须从 lizard 的机器可读输出判定复杂度，不得依赖表格文本
+      priority: high
+      acceptance_criteria:
+        - id: AC-683-01
+          criteria: 按 CSV 的 CCN 列统计超阈值函数（列 2），而非匹配表头文字
+          test_type: unit
+        - id: AC-683-02
+          criteria: lizard 无任何可解析行时报告"未验证"，不得当作零告警而放行
+          test_type: unit
+        - id: AC-683-03
+          criteria: 非数字的 CCN 列（表头/分隔线）不计入统计，也不被当成 0
+          test_type: unit

@@ -24,7 +24,7 @@ vi.mock('fs', async () => {
 });
 
 import { spawnSync } from 'child_process';
-import { runGate3 } from '../gate-3';
+import { runGate3, countCcnWarnings } from '../gate-3';
 
 const mockSpawnSync = vi.mocked(spawnSync);
 const mockExistsSync = vi.mocked(fs.existsSync);
@@ -92,10 +92,14 @@ describe('gate-3.ts', () => {
     // lizard run — no warnings
     mockSpawnSync.mockReturnValueOnce({
       status: 0,
-      stdout: '================================================\nfile: src/app.ts\n================================================\nWarning cnt   0\n',
+      // Real `lizard --csv` row shape: NLOC,CCN,token,PARAM,length,location,file,name.
+      // "Warning cnt" never appears in it -- that is a column HEADER in the middle
+      // of a table line, and lizard omits the table entirely when given explicit
+      // file arguments, which is how this gate always invokes it (#674).
+      stdout: '5,2,30,1,5,"src/app.ts@1-5@app","src/app.ts","app@1-5"\n',
       stderr: '',
       pid: 1,
-      output: ['', 'Warning cnt   0\n', ''],
+      output: ['', '', ''],
       signal: null,
     } as any);
 
@@ -109,13 +113,19 @@ describe('gate-3.ts', () => {
     mockSpawnSync.mockReturnValueOnce({
       status: 0, stdout: '/usr/bin/lizard\n', stderr: '', pid: 1, output: ['', '/usr/bin/lizard\n', ''], signal: null,
     } as any);
-    // lizard run — 3 warnings
+    // lizard run — three functions over CCN 5, in lizard's real CSV shape
     mockSpawnSync.mockReturnValueOnce({
       status: 0,
-      stdout: 'Warning cnt   3\n',
+      stdout: [
+        '20,18,90,1,20,"src/app.ts@1-20@classify","src/app.ts","classify@1-20"',
+        '10,9,40,1,10,"src/app.ts@22-31@other","src/app.ts","other@22-31"',
+        '8,7,30,1,8,"src/app.ts@33-40@third","src/app.ts","third@33-40"',
+        '5,2,20,1,5,"src/app.ts@42-46@ok","src/app.ts","ok@42-46"',
+        '',
+      ].join('\n'),
       stderr: '',
       pid: 1,
-      output: ['', 'Warning cnt   3\n', ''],
+      output: ['', '', ''],
       signal: null,
     } as any);
 
@@ -123,5 +133,43 @@ describe('gate-3.ts', () => {
     expect(result.status).toBe('FAIL');
     expect(result.exitCode).toBe(1);
     expect(result.messages.some(m => m.includes('3 functions with CCN'))).toBe(true);
+  });
+
+  // The parser is tested directly, against literal lizard output. Driving the
+  // gate end-to-end cannot prove this: the bug in #674 was that the pattern never
+  // matched, so the gate reported PASS -- and a PASS assertion on fabricated
+  // `Warning cnt N` text passed for years without ever exercising real output.
+  describe('countCcnWarnings (#674)', () => {
+    it('counts rows whose CCN exceeds the threshold', () => {
+      const csv = [
+        '20,18,90,1,20,"a.ts@1-20@f","a.ts","f@1-20"',
+        '5,2,20,1,5,"a.ts@22-26@g","a.ts","g@22-26"',
+        '8,7,30,1,8,"a.ts@28-35@h","a.ts","h@28-35"',
+      ].join('\n');
+      expect(countCcnWarnings(csv)).toEqual({ warnings: 2, analysed: true });
+    });
+
+    it('reports zero warnings but STILL "analysed" when every row is within threshold', () => {
+      const csv = '5,2,20,1,5,"a.ts@1-5@f","a.ts","f@1-5"';
+      expect(countCcnWarnings(csv)).toEqual({ warnings: 0, analysed: true });
+    });
+
+    it('reports "not analysed" on empty output, so the gate cannot claim a clean pass', () => {
+      // The other half of #674: a lizard that produced nothing would otherwise
+      // yield 0 warnings and read as PASSED on zero analysed functions.
+      expect(countCcnWarnings('')).toEqual({ warnings: 0, analysed: false });
+      expect(countCcnWarnings('Traceback: lizard crashed\n')).toEqual({ warnings: 0, analysed: false });
+    });
+
+    it('ignores non-numeric CCN columns instead of parsing garbage as 0', () => {
+      // Header rows and the table format both put non-numeric text in column 2;
+      // treating those as CCN 0 would silently deflate the count.
+      const csv = [
+        'NLOC,CCN,token,PARAM,length,location',
+        '================================================',
+        '20,18,90,1,20,"a.ts@1-20@f"',
+      ].join('\n');
+      expect(countCcnWarnings(csv)).toEqual({ warnings: 1, analysed: true });
+    });
   });
 });

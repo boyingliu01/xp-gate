@@ -53,29 +53,85 @@ export function runGate3(input: GateInput): GateOutput {
 
   messages.push('Checking complexity for source files...');
 
-  // Run lizard with CCN threshold
-  const result = runTool(lizardCmd, [...lizardArgs, '-C', String(CCN_THRESHOLD), ...ccFiles], {
-    cwd: input.cwd,
-  });
+  // CSV mode: the verdict comes from the numbers lizard uses, not its table
+  // formatting (#674). See countCcnWarnings() for why the old parser never matched.
+  const rawOutput = runLizardCsv(lizardCmd, lizardArgs, ccFiles, input.cwd);
+  const verdict = buildComplexityVerdict(countCcnWarnings(rawOutput), rawOutput);
+  messages.push(...verdict.messages);
+  recordAudit('gate-3', 'complexity', verdict.status, verdict.warnings, startMs);
+  return { status: verdict.status, messages, exitCode: verdict.exitCode };
+}
 
-  const combinedOutput = result.stdout + result.stderr;
+/** Run lizard in CSV mode and return its raw output (stdout + stderr). */
+function runLizardCsv(cmd: string, baseArgs: string[], files: string[], cwd: string | undefined): string {
+  const result = runTool(cmd, [...baseArgs, '--csv', '-C', String(CCN_THRESHOLD), ...files], { cwd });
+  return result.stdout + result.stderr;
+}
 
-  // Parse warning count from summary table: "Warning cnt   8"
-  const warningMatch = combinedOutput.match(/^Warning cnt\s+(\d+)/m);
-  const warnings = warningMatch ? parseInt(warningMatch[1], 10) : 0;
-
-  if (warnings > 0) {
-    messages.push(combinedOutput);
-    messages.push('');
-    messages.push(`❌ BLOCKED - ${warnings} functions with CCN > ${CCN_THRESHOLD} found.`);
-    messages.push(`Refactor high-complexity functions to keep below ${CCN_THRESHOLD} complexity.`);
-    recordAudit('gate-3', 'complexity', 'FAIL', warnings, startMs);
-    return { status: 'FAIL', messages, exitCode: 1 };
+/**
+ * Turn a CCN count into the gate's verdict and messages.
+ *
+ * Split from runGate3 so the three-way outcome (WARN on unparsable output, FAIL
+ * on violations, PASS) is visible in one place and testable without driving
+ * lizard. Notably `!analysed` must NOT fall through to PASS: a lizard that
+ * produced no parsable row would otherwise report success on zero analysed
+ * functions -- the same silent-success failure as #674.
+ */
+export function buildComplexityVerdict(
+  counts: { warnings: number; analysed: boolean },
+  rawOutput: string
+): { status: 'PASS' | 'FAIL' | 'WARN'; messages: string[]; exitCode: number; warnings: number } {
+  if (!counts.analysed) {
+    return {
+      status: 'WARN',
+      messages: ['⚠️  WARN - lizard produced no parsable results; complexity not verified'],
+      exitCode: 0,
+      warnings: 0,
+    };
   }
+  if (counts.warnings > 0) {
+    return {
+      status: 'FAIL',
+      messages: [
+        rawOutput,
+        '',
+        `❌ BLOCKED - ${counts.warnings} functions with CCN > ${CCN_THRESHOLD} found.`,
+        `Refactor high-complexity functions to keep below ${CCN_THRESHOLD} complexity.`,
+      ],
+      exitCode: 1,
+      warnings: counts.warnings,
+    };
+  }
+  return {
+    status: 'PASS',
+    messages: [`✅ PASSED - All functions within complexity threshold (${CCN_THRESHOLD}).`],
+    exitCode: 0,
+    warnings: 0,
+  };
+}
 
-  messages.push(`✅ PASSED - All functions within complexity threshold (${CCN_THRESHOLD}).`);
-  recordAudit('gate-3', 'complexity', 'PASS', 0, startMs);
-  return { status: 'PASS', messages, exitCode: 0 };
+/**
+ * Count functions whose CCN exceeds the threshold from lizard's --csv output.
+ *
+ * Split out so the parse can be tested against literal lizard output instead of
+ * by driving the tool: a parser bug here is invisible in exactly the same way
+ * (#674) -- it returns "clean" and the gate reports PASS.
+ *
+ * `analysed` distinguishes "lizard found nothing over the threshold" from
+ * "lizard produced nothing at all". Only the first is a pass.
+ */
+export function countCcnWarnings(csv: string): { warnings: number; analysed: boolean } {
+  let warnings = 0;
+  let analysed = false;
+  for (const line of csv.split('\n')) {
+    const columns = line.split(',');
+    if (columns.length < 2) continue;
+    // Location column carries ":name" style text, so only trust numeric CCN.
+    if (!/^\s*\d+\s*$/.test(columns[1])) continue;
+    analysed = true;
+    if (parseInt(columns[1], 10) > CCN_THRESHOLD) warnings++;
+  }
+  return { warnings, analysed };
 }
 
 // ── CLI Entry Point ──
