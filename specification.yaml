@@ -4059,3 +4059,26 @@ specification:
         - id: AC-680-02
           criteria: 修饰符与 get/set 访问器正确还原为成员名；空类计零（反空转）
           test_type: unit
+
+    # ============================================================
+    # REQ-681: 已装好的工具不该经 npx 启动。
+    #
+    # `npx <tool>` 比直接跑同一个二进制多花约 1.4-1.6 s（实测 eslint 1654 vs 348 ms,
+    # vitest 1799 vs 250 ms, archlinter 1909 vs 319 ms）——多出来的是 npm 在启动工具
+    # 之前先解析包，冷缓存时还会走网络。pre-commit 每次提交要走其中若干条，
+    # 于是质量门禁的执行时间里有相当一部分花在"找到工具"而不是"用工具"。
+    # ============================================================
+    - id: REQ-681
+      description: pre-commit 启动仓库本地已安装的 Node 工具时不得经过 npx
+      priority: medium
+      acceptance_criteria:
+        - id: AC-681-01
+          criteria: 本地存在工具入口时直接执行该入口，且完全不调用 npx
+          test_type: unit
+        - id: AC-681-02
+          criteria: 本地入口缺失时退回 npx（全局工具链仍是有效安装方式）
+          test_type: unit
+        - id: AC-681-03
+          criteria: 不依赖本地入口的 exec 位——用 node 执行而非直接执行文件
+            （反空转：改用直接执行会让本用例变红）
+          test_type: unit
