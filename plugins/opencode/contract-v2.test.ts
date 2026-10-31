@@ -26,6 +26,12 @@ import fs from "node:fs"
 import path from "node:path"
 import { fileURLToPath } from "node:url"
 
+// A real function, used as a stand-in for the `setup` export when feeding the v2
+// validator. Named rather than inline `() => {}` because eslint's
+// no-empty-function fires on the inline form -- and a named no-op reads as
+// "deliberately does nothing" instead of "someone forgot to fill this in".
+const noop = (): void => undefined
+
 const PLUGIN_DIR = path.dirname(fileURLToPath(import.meta.url))
 const pkg = JSON.parse(fs.readFileSync(path.join(PLUGIN_DIR, "package.json"), "utf8"))
 
@@ -67,7 +73,7 @@ describe("OpenCode v2 模块契约 (#639)", () => {
     const verdict = v2Accepts({
       id: hasId ? "xp-gate" : undefined,
       effect: hasEffect ? {} : undefined,
-      setup: hasSetup ? () => {} : undefined,
+      setup: hasSetup ? noop : undefined,
     })
     expect(verdict.reason).toBeUndefined()
     expect(verdict.ok).toBe(true)
