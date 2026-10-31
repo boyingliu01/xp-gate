@@ -361,11 +361,52 @@ function resolveNpxInvocation(args) {
   return ['npx', args];
 }
 
+/**
+ * A project-local gate variant, if the project declares one.
+ *
+ * `<consumer cwd>/githooks/gates/gate-<n>-<name>.sh` is where a PROJECT puts its
+ * own variant of a gate: the hyphenated name is the point, because it lets one
+ * project keep several variants where a flat `gate-<n>.sh` cannot express the
+ * choice (#672, restored by 7b43666a). `xp-gate init` never creates that
+ * directory, so a stock project simply falls through to the built-in
+ * implementation and nothing changes for it.
+ *
+ * This is deliberately NOT the same as `<project>/src/gates/<gate>.ts`, which
+ * `findTsGateEntry` refuses to read (#672): that path let the party being
+ * checked supply the implementation, so `process.exit(0)` passed every gate.
+ * Declaring a variant under `githooks/gates/` is an explicit, named opt-in;
+ * dropping a file into `src/gates/` is not.
+ *
+ * @param {string} gateModule e.g. 'gate-9'
+ * @param {string} cwd project root to search
+ * @returns {string|null}
+ */
+function findConsumerGateVariant(gateModule, cwd) {
+  const gateNum = gateModule.replace('gate-', '');
+  // Strictly the project's own declaration. `resolveGateScript` additionally
+  // probes the flat `githooks/gate-<n>.sh` and the global install
+  // (~/.config/xp-gate/adapters/); treating either as "the project declared a
+  // variant" would hand every gate to whichever bash copy happens to be
+  // installed -- on a machine with a global install that is *always*. A variant
+  // is a file the project deliberately named, so only `githooks/gates/` counts.
+  const gatesDir = path.join(cwd, 'githooks', 'gates');
+  const declared = matchGateFileIn(gatesDir, gateNum);
+  return declared ? path.join(gatesDir, declared) : null;
+}
+
 function runTsGate(gateModule, targetPath, opts = {}) {
   const targetCwd = resolveGateCwd(targetPath);
+
+  // A project-local variant wins over the built-in implementation: the project
+  // asked for it by name, and the built-in one is still there to fall back to if
+  // the variant is removed.
+  const variant = findConsumerGateVariant(gateModule, targetCwd);
+  if (variant) {
+    return runGateAdapter(variant, targetCwd, opts);
+  }
+
   const entry = findTsGateEntry(gateModule);
   if (!entry) {
-    // Fallback to bash script
     const gateNum = gateModule.replace('gate-', '');
     const script = resolveGateScript(gateNum, targetCwd);
     if (script) {
@@ -718,4 +759,4 @@ async function runGate(gateId, targetPath, opts = {}) {
   return 1;
 }
 
-module.exports = { GATE_REGISTRY, GATE_NOT_RUN, getGateInfo, getAllGates, runGate, resolveAlias, getAliases, runGateAdapter, findTsGateEntry, resolveGateScript, SOURCE_FILE_EXTENSIONS, resolveAllModeChangedFiles, describeEmptyChangedFiles, describeChangedFilesScope };
+module.exports = { findConsumerGateVariant, GATE_REGISTRY, GATE_NOT_RUN, getGateInfo, getAllGates, runGate, resolveAlias, getAliases, runGateAdapter, findTsGateEntry, resolveGateScript, SOURCE_FILE_EXTENSIONS, resolveAllModeChangedFiles, describeEmptyChangedFiles, describeChangedFilesScope };

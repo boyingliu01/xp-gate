@@ -9,6 +9,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 const os = require('node:os');
 const { execFileSync, spawnSync } = require('node:child_process');
+const { findConsumerGateVariant } = require('../gate-runner');
 
 let tmpProject;
 let tmpAdapters;
@@ -307,4 +308,30 @@ describe('gate-runner.js — runGateAdapter', () => {
 
     expect(result.status).toBe(1);
   }, 30000);
+
+  // The mirror image of the tests above, asserted on the resolver rather than on
+  // CLI output. A project that declares no variant must resolve to nothing, so
+  // the built-in implementation still runs.
+  //
+  // Asserted here, not through `check 9`: BOTH implementations print "Semgrep"
+  // (githooks/gate-9.sh says it five times too), and a bash fallback that finds
+  // no script prints neither banner, so every stdout-based assertion passed even
+  // with the TypeScript module hard-disabled -- the guard proved nothing.
+  it('resolves no variant when the project declares none (REQ-standalone-gates-05)', () => {
+    const plainProject = path.join(tmpProject, 'plain-target');
+    fs.mkdirSync(plainProject, { recursive: true });
+
+    expect(findConsumerGateVariant('gate-9', plainProject)).toBe(null);
+  });
+
+  it('resolves the declared variant when the project has one (REQ-standalone-gates-05)', () => {
+    const variantProject = path.join(tmpProject, 'variant-target');
+    const gatesDir = path.join(variantProject, 'githooks', 'gates');
+    fs.mkdirSync(gatesDir, { recursive: true });
+    const variantPath = path.join(gatesDir, 'gate-9-project-choice.sh');
+    fs.writeFileSync(variantPath, 'exit 0\n');
+
+    const resolved = findConsumerGateVariant('gate-9', variantProject);
+    expect(resolved).toBe(variantPath);
+  });
 });
