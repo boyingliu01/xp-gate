@@ -394,24 +394,36 @@ function findConsumerGateVariant(gateModule, cwd) {
   return declared ? path.join(gatesDir, declared) : null;
 }
 
-function runTsGate(gateModule, targetPath, opts = {}) {
-  const targetCwd = resolveGateCwd(targetPath);
-
-  // A project-local variant wins over the built-in implementation: the project
-  // asked for it by name, and the built-in one is still there to fall back to if
-  // the variant is removed.
+/**
+ * Which implementation runs this gate: a project-declared variant, the built-in
+ * TypeScript module, or a bash fallback.
+ *
+ * Split out of `runTsGate` so that function stays about running the gate. The
+ * precedence is a contract with two sides -- `githooks/gates/` is the project's
+ * opt-in, and the built-in module must remain reachable when nobody opted in --
+ * so it is named here rather than inlined in the runner.
+ *
+ * @returns {{kind: 'variant', script: string} | {kind: 'module', entry: string} | {kind: 'fallback', script: string} | {kind: 'none'}}
+ */
+function resolveGateImplementation(gateModule, targetCwd) {
   const variant = findConsumerGateVariant(gateModule, targetCwd);
-  if (variant) {
-    return runGateAdapter(variant, targetCwd, opts);
-  }
+  if (variant) return { kind: 'variant', script: variant };
 
   const entry = findTsGateEntry(gateModule);
-  if (!entry) {
-    const gateNum = gateModule.replace('gate-', '');
-    const script = resolveGateScript(gateNum, targetCwd);
-    if (script) {
-      return runGateAdapter(script, targetCwd, opts);
-    }
+  if (entry) return { kind: 'module', entry };
+
+  const script = resolveGateScript(gateModule.replace('gate-', ''), targetCwd);
+  return script ? { kind: 'fallback', script } : { kind: 'none' };
+}
+
+function runTsGate(gateModule, targetPath, opts = {}) {
+  const targetCwd = resolveGateCwd(targetPath);
+  const impl = resolveGateImplementation(gateModule, targetCwd);
+
+  if (impl.kind === 'variant' || impl.kind === 'fallback') {
+    return runGateAdapter(impl.script, targetCwd, opts);
+  }
+  if (impl.kind === 'none') {
     // #618: nothing ran. Before this, the function fell through to `return 0`
     // and the --all summary counted the gate as passed.
     console.log(`Gate ${gateModule}: TypeScript module not found and no bash fallback available.`);
@@ -419,7 +431,7 @@ function runTsGate(gateModule, targetPath, opts = {}) {
     return GATE_NOT_RUN;
   }
 
-  const args = ['-y', 'tsx', entry, '--run'];
+  const args = ['-y', 'tsx', impl.entry, '--run'];
   if (targetPath) args.push('--cwd', targetPath);
 
   // spawnSync reports a spawn failure (npx missing) on `error`, throws only on a

@@ -26,15 +26,26 @@ afterEach(() => {
   }
 });
 
+// Fixture writers run in every `beforeAll`; swallowing their failure would turn a
+// broken fixture into "the gate under test misbehaved", which is the opposite of
+// what the assertion is checking. Report which file could not be written.
+function writeFixture(filePath, content) {
+  try {
+    fs.writeFileSync(filePath, content);
+  } catch (err) {
+    throw new Error(`Cannot write test fixture ${filePath}: ${err.message}`);
+  }
+}
+
 function writeAdapterCommon() {
-  fs.writeFileSync(
+  writeFixture(
     path.join(tmpAdapters, 'adapter-common.sh'),
     'detect_project_lang() { echo "typescript"; }'
   );
 }
 
 function writeGateFragment(fragmentLines) {
-  fs.writeFileSync(
+  writeFixture(
     path.join(tmpAdapters, 'gate-9.sh'),
     ['# gate-9 fragment', ...fragmentLines, 'exit 0'].join('\n')
   );
@@ -56,14 +67,21 @@ function hostilePathSegment() {
 }
 
 function initializeGitProject() {
-  execFileSync('git', ['init', '-q'], { cwd: tmpProject });
-  execFileSync('git', ['config', 'user.email', 'test@example.com'], { cwd: tmpProject });
-  execFileSync('git', ['config', 'user.name', 'XP-Gate Test'], { cwd: tmpProject });
-  fs.writeFileSync(path.join(tmpProject, 'tracked.ts'), 'const value = 1;\n');
-  execFileSync('git', ['add', 'tracked.ts'], { cwd: tmpProject });
-  execFileSync('git', ['-c', 'core.hooksPath=/dev/null', 'commit', '-qm', 'initial'], {
-    cwd: tmpProject,
-  });
+  try {
+    execFileSync('git', ['init', '-q'], { cwd: tmpProject });
+    execFileSync('git', ['config', 'user.email', 'test@example.com'], { cwd: tmpProject });
+    execFileSync('git', ['config', 'user.name', 'XP-Gate Test'], { cwd: tmpProject });
+    writeFixture(path.join(tmpProject, 'tracked.ts'), 'const value = 1;\n');
+    execFileSync('git', ['add', 'tracked.ts'], { cwd: tmpProject });
+    execFileSync('git', ['-c', 'core.hooksPath=/dev/null', 'commit', '-qm', 'initial'], {
+      cwd: tmpProject,
+    });
+  } catch (err) {
+    // Without this the failure surfaces as a downstream assertion on the gate's
+    // output. Name the setup step instead: a repo fixture that never initialised
+    // is not a gate defect.
+    throw new Error(`Cannot initialise the fixture git repo at ${tmpProject}: ${err.message}`);
+  }
 }
 
 // Runs runGateAdapter in a child node process (worker threads forbid process
