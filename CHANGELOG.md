@@ -1,5 +1,53 @@
 # Changelog
 
+## [0.35.16.0] - 2026-10-31
+
+本轮把 CI 从「Gate 3 / 5b / 5c / 6 全红」修到全绿。多数失败是同一个形状：
+**后面某次改动引入了新的前置条件，前面的守卫/断言没有跟着更新，于是它测的东西
+悄悄变了** —— 而每一条都表现为「测试挂了」，看起来像测试的问题。
+
+### Fixed
+
+- **功能分支上 Gate 6 架构检查被静默跳过（严重影响）**：`#640` 加的
+  `XP_STAGED_ACM` 缓存被写在 `if [ "$is_protected" = "true" ]` 里面，只有往
+  master/main/develop 提交时才赋值。功能分支上它恒为空，于是
+  「这次提交有没有动源码」永远匹配不到，**每个改了源码的功能分支提交都跳过 archlint**，
+  还打印「no source files changed」。日常开发几乎都在功能分支上，等于把 Gate 6 关掉了，
+  而输出完全正常。已把赋值提到分支判断之前并 export。
+- **`xp-gate audit` 四个子命令全部无法运行**：`--tail` / `--stats` / `--check` /
+  `record` 都以 `require(<repo>/lib/gate-audit.ts)` 加载实现，Node 不能 require .ts，
+  全部直接抛 `require is not defined in ES module scope`。一直没被发现，是因为 CI 写的是
+  `xp-gate audit --check || npx tsx ... audit --check` —— 回退分支才是真正执行的那条。
+  按包内既有约定改为 tsx 子进程求值（值一律走 JSON，不往源码拼字符串）。
+- **Gate 3 棘轮从未读到基线**：`#617` 把 `.ccn-baseline.json` 改成
+  `{ population, entries }`，而 `--check` 把整份文档当扁平 map 用，`baseline[key]`
+  永远是 undefined，976 条记录等于没有。CI 因此把 8 个「记录值等于实测值」的函数
+  报成「新增函数超阈」。同一个误读也存在于 `issue-582` 的测试里，一并修正。
+- **Gate 5c 在 CI 上恒红**：它自己注释写着「on a clean checkout this scans 0 entries」，
+  但 Gate 5b 的 1300+ 个 BATS 用例在仓库根直接跑真 hook，写进真实台账；fixture 从不走
+  post-commit 回填，所以每条都恒缺 `commit_hash`、全部读作「未归属」。
+  改为先快照台账、丢掉「本次运行期间写入且无 commit 归属」的行，再用新增的
+  `--ledger <path>` 判定快照（真实提交写入的行带 hash，不受影响）。
+
+### Added
+- `xp-gate audit --check --ledger <path>`：判定指定台账文件；文件不存在时报错退出，
+  而不是「扫 0 条 → 通过」。
+- `REQ-673` / `AC-673-01..03` 与 `audit-cli-contract.test.ts`：端到端断言命令真的产出
+  结论，**同时**断言含未归属条目时仍返回非 0 ——「能跑」不能被当成「能过」。
+
+### Fixed（测试侧）
+- `issue-450`：断言里的 `grep -qF "... "'g'it commit"` 括号错配，BATS 无法解析该文件，
+  **三条 AC 从未注册、从未执行**。一个从未注册的测试和一个通过的测试无法区分。
+- `fixture-hygiene`：按引号边界切分后才判 `git commit`，字面量不再需要靠 `g'it`
+  这种拼写变体豁免（那些变体正是上一条的成因）。
+- `gate-5a-block` / `issue-537` / `issue-571` / `issue-578` / `issue-640` / `issue-649` /
+  `gate-4-exit-code` / `issue-546`：分别补齐后续改动引入的前置条件
+  （Gate 0 版本检查、Gate 5d 恒真断言、`PSScriptAnalyzerSettings.psd1`、
+  `_rct_value` 只在 resolver 调用后存在、`_XP_HOOK_START_MS` 的实际名称、
+  `filter_project_paths` 的遗漏站点、`WARN` 取代 `SKIPPED` 的语义、CRLF 报错位置漂移）。
+- `issue-649` 本身是个真 bug：`STAGED_TEST_FILES` 是唯一漏掉 `filter_project_paths`
+  的扫描点，`node_modules/**/*.test.ts` 会被当作待配对测试。
+
 ## [0.35.15.0] - 2026-10-30
 
 ### Fixed
