@@ -4126,3 +4126,22 @@ specification:
         - id: AC-683-03
           criteria: 非数字的 CCN 列（表头/分隔线）不计入统计，也不被当成 0
           test_type: unit
+
+    # ============================================================
+    # REQ-684: CLI 的密钥扫描必须与钩子扫同一份内容（暂存区）。
+    #
+    # gitleaks `git --pre-commit` 走的是已提交历史；在 pre-commit 场景下它报告
+    # "0 commits scanned" 并退出 0。于是暂存区里的密钥钩子能拦、CLI 拦不住——
+    # 而 CLI 正是 CI 与插件用的那条路。`--staged` 扫 `git diff --cached`，
+    # 即 pre-commit 的真实载荷（#675，对应适配器 #449 的修复）。
+    # ============================================================
+    - id: REQ-684
+      description: Gate 8 的 CLI 实现必须扫描暂存区，不得依赖 gitleaks 的历史遍历模式
+      priority: critical
+      acceptance_criteria:
+        - id: AC-684-01
+          criteria: 暂存区内的密钥会被 CLI 扫描发现（真实 gitleaks 端到端验证）
+          test_type: integration
+        - id: AC-684-02
+          criteria: 记录 `--pre-commit` 漏扫 0 字节的事实，使切换理由本身也被测试固定
+          test_type: integration
