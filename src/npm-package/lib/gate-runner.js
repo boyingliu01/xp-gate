@@ -561,20 +561,27 @@ const GATE_REGISTRY = {
       return runTsGate('gate-8', targetPath);
     },
   },
+  // Numbering follows the HOOK, which is where gates actually execute (#677).
+  // These two were swapped here: the CLI called 9 "SAST" and 10 "Build Integrity"
+  // while the hook runs 9=Build integrity and 10=Semgrep SAST. A user reading
+  // "❌ BLOCKED - Gate 9: Build integrity check failed" in their commit output and
+  // then running `xp-gate check --gates 9` got semgrep -- a different gate, reported
+  // green. The hook is the majority implementation and the one the error message
+  // names, so its numbering wins.
   '9': {
+    name: 'Build Integrity',
+    description: 'TypeScript compilation, npm pack, and import validation',
+    aliases: ['build', '9'],
+    preCommitOnly: true,
+    reason: 'Build integrity checks require language detection and build tool context',
+  },
+  '10': {
     name: 'SAST Security',
     description: 'semgrep static application security testing',
-    aliases: ['sast', 'semgrep', '9'],
+    aliases: ['sast', 'semgrep', '10'],
     run: (targetPath) => {
       return runTsGate('gate-9', targetPath);
     },
-  },
-  '10': {
-    name: 'Build Integrity',
-    description: 'TypeScript compilation, npm pack, and import validation',
-    aliases: ['build', '10'],
-    preCommitOnly: true,
-    reason: 'Build integrity checks require language detection and build tool context',
   },
   '11': {
     name: 'Sprint Flow Enforcement',
@@ -582,6 +589,26 @@ const GATE_REGISTRY = {
     aliases: ['sprint', '11'],
     preCommitOnly: true,
     reason: 'Requires sprint state (.sprint-state/) and git branch context',
+  },
+  // Gates 12 and 13 block commits in the hook but were absent here entirely, so
+  // `xp-gate check --gates 12` answered "Unknown gate(s)" for a gate that had just
+  // blocked the user (#677). Registered with an explicit reason rather than
+  // pretending to re-implement them: both need the staged-diff and per-language
+  // build context the hook assembles, and a half-correct reimplementation that
+  // answered PASS would be worse than saying so.
+  '12': {
+    name: 'File Hygiene',
+    description: 'conflict markers (blocking) + YAML/JSON syntax (blocking) + whitespace warnings',
+    aliases: ['hygiene', 'file-hygiene', '12'],
+    preCommitOnly: true,
+    reason: 'File hygiene inspects the staged diff, which only exists inside the hook',
+  },
+  '13': {
+    name: 'Compiler Strictness',
+    description: 'gcc/g++ -Wall -Wextra, javac -Xlint, Maven/Gradle warnings on changed files',
+    aliases: ['compiler', 'strictness', '13'],
+    preCommitOnly: true,
+    reason: 'Compiler strictness needs the changed-file set and a discovered toolchain',
   },
   'python-health': {
     name: 'Python Environment Health',
