@@ -29,12 +29,24 @@ function cleanupTempDir(dir) {
   fs.rmSync(dir, { recursive: true, force: true });
 }
 
+// Fixture writers. These run in `beforeAll`; an uncaught write failure there
+// surfaces as "sync script must exit 0" or as a missing-file assertion, neither
+// of which names the file that could not be written. Wrapping the I/O once keeps
+// every fixture helper reporting what actually failed.
+function writeFixture(filePath, content) {
+  try {
+    fs.writeFileSync(filePath, content, 'utf8');
+  } catch (err) {
+    throw new Error(`Cannot write test fixture ${filePath}: ${err.message}`);
+  }
+}
+
 function writeScript(filePath, content) {
-  fs.writeFileSync(filePath, content, 'utf8');
+  writeFixture(filePath, content);
 }
 
 function writeDoc(filePath, content) {
-  fs.writeFileSync(filePath, content, 'utf8');
+  writeFixture(filePath, content);
 }
 
 /**
@@ -45,26 +57,58 @@ function writeDoc(filePath, content) {
  * list from rotting: syncModules() gains a module, this helper needs no edit.
  * Only reads from the real checkout -- nothing is ever written back to it.
  */
+/**
+ * Copy every `src/` module except the package itself.
+ *
+ * Does `name` under `srcRoot` need copying into the package's source seed?
+ *
+ * The package itself is the DESTINATION of the sync, not a canonical source;
+ * copying it would let the test compare a mirror against a stale mirror. Only
+ * directories are copied -- a stray file at that level is not a module.
+ *
+ * Answers false rather than throwing on an unreadable entry: an entry that cannot
+ * be stat'd is not a directory this helper can copy, and `seedSrcModules` reports
+ * the resulting gap against the path it was seeding. Swallowing this into a throw
+ * here would leave the caller unable to name which tree was incomplete.
+ */
+function isSeedableModule(srcRoot, name) {
+  if (name === 'npm-package') return false;
+  try {
+    return fs.statSync(path.join(srcRoot, name)).isDirectory();
+  } catch {
+    return false;
+  }
+}
+
+function seedSrcModules(srcRoot, dest) {
+  try {
+    for (const name of fs.readdirSync(srcRoot)) {
+      if (!isSeedableModule(srcRoot, name)) continue;
+      fs.cpSync(path.join(srcRoot, name), path.join(dest, 'src', name), { recursive: true });
+    }
+  } catch (err) {
+    throw new Error(`Cannot copy src modules from ${srcRoot} into ${dest}: ${err.message}`);
+  }
+}
+
 function seedCanonicalSources(realRoot, destRoot) {
   const real = realRoot || path.resolve(__dirname, '..', '..', '..', '..');
   const dest = destRoot;
-  for (const tree of ['githooks', 'skills', 'plugins']) {
-    const from = path.join(real, tree);
-    if (fs.existsSync(from)) fs.cpSync(from, path.join(dest, tree), { recursive: true });
-  }
-  const srcRoot = path.join(real, 'src');
-  for (const name of fs.readdirSync(srcRoot)) {
-    // The package itself is the DESTINATION of the sync, not a canonical source;
-    // copying it would let the test compare a mirror against a stale mirror.
-    if (name === 'npm-package') continue;
-    const from = path.join(srcRoot, name);
-    if (fs.statSync(from).isDirectory()) {
-      fs.cpSync(from, path.join(dest, 'src', name), { recursive: true });
+  try {
+    for (const tree of ['githooks', 'skills', 'plugins']) {
+      const from = path.join(real, tree);
+      if (fs.existsSync(from)) fs.cpSync(from, path.join(dest, tree), { recursive: true });
     }
-  }
-  fs.mkdirSync(path.join(dest, 'src', 'npm-package', 'scripts'), { recursive: true });
-  for (const rel of ['scripts/sync-package-content.js', 'package.json']) {
-    fs.copyFileSync(path.join(srcRoot, 'npm-package', rel), path.join(dest, 'src', 'npm-package', rel));
+    const srcRoot = path.join(real, 'src');
+    seedSrcModules(srcRoot, dest);
+    fs.mkdirSync(path.join(dest, 'src', 'npm-package', 'scripts'), { recursive: true });
+    for (const rel of ['scripts/sync-package-content.js', 'package.json']) {
+      fs.copyFileSync(path.join(srcRoot, 'npm-package', rel), path.join(dest, 'src', 'npm-package', rel));
+    }
+  } catch (err) {
+    // A half-seeded worktree makes the sync mirror a partial tree, which then
+    // reads as a sync defect. Name the seeding direction instead.
+    throw new Error(`Cannot seed canonical sources from ${real} into ${dest}: ${err.message}`);
   }
 }
 
@@ -339,17 +383,21 @@ describe('syncHooks', () => {
    */
   function seedTempWorktree() {
     seedCanonicalSources(REAL_REPO_ROOT, WORKTREE_PATH);
-    fs.mkdirSync(path.join(PKG_ROOT, 'scripts'), { recursive: true });
-    fs.copyFileSync(
-      path.join(REAL_REPO_ROOT, 'src', 'npm-package', 'scripts', 'sync-package-content.js'),
-      syncScript,
-    );
-    // The script resolves its package root relative to its own location, so it
-    // must sit at <temp>/src/npm-package/scripts/ exactly as in the real tree.
-    fs.copyFileSync(
-      path.join(REAL_REPO_ROOT, 'src', 'npm-package', 'package.json'),
-      path.join(PKG_ROOT, 'package.json'),
-    );
+    try {
+      fs.mkdirSync(path.join(PKG_ROOT, 'scripts'), { recursive: true });
+      fs.copyFileSync(
+        path.join(REAL_REPO_ROOT, 'src', 'npm-package', 'scripts', 'sync-package-content.js'),
+        syncScript,
+      );
+      // The script resolves its package root relative to its own location, so it
+      // must sit at <temp>/src/npm-package/scripts/ exactly as in the real tree.
+      fs.copyFileSync(
+        path.join(REAL_REPO_ROOT, 'src', 'npm-package', 'package.json'),
+        path.join(PKG_ROOT, 'package.json'),
+      );
+    } catch (err) {
+      throw new Error(`Cannot stage the sync script into ${PKG_ROOT}: ${err.message}`);
+    }
   }
 
   beforeAll(() => {
@@ -581,15 +629,19 @@ describe('sync-package-content subprocess invocation', () => {
 
   function seedTempWorktree() {
     seedCanonicalSources(REAL_REPO_ROOT, WORKTREE_PATH);
-    fs.mkdirSync(path.join(PKG_ROOT, 'scripts'), { recursive: true });
-    fs.copyFileSync(
-      path.join(REAL_REPO_ROOT, 'src', 'npm-package', 'scripts', 'sync-package-content.js'),
-      path.join(PKG_ROOT, 'scripts', 'sync-package-content.js'),
-    );
-    fs.copyFileSync(
-      path.join(REAL_REPO_ROOT, 'src', 'npm-package', 'package.json'),
-      path.join(PKG_ROOT, 'package.json'),
-    );
+    try {
+      fs.mkdirSync(path.join(PKG_ROOT, 'scripts'), { recursive: true });
+      fs.copyFileSync(
+        path.join(REAL_REPO_ROOT, 'src', 'npm-package', 'scripts', 'sync-package-content.js'),
+        path.join(PKG_ROOT, 'scripts', 'sync-package-content.js'),
+      );
+      fs.copyFileSync(
+        path.join(REAL_REPO_ROOT, 'src', 'npm-package', 'package.json'),
+        path.join(PKG_ROOT, 'package.json'),
+      );
+    } catch (err) {
+      throw new Error(`Cannot stage the sync script into ${PKG_ROOT}: ${err.message}`);
+    }
   }
 
   beforeAll(() => {
