@@ -103,10 +103,17 @@ assert_crlf_hook_fails_identifiably() {
     return 0
   fi
 
-  if [[ "$stderr" == *"syntax error"* && "$stderr" == *'{\r'* ]]; then
+  if [[ "$stderr" == *"syntax error"* && "$stderr" == *'\r'* ]]; then
     # Path B: bash refused to parse the script, and the diagnostic names the CR
     # literal — still unambiguous, and still a failure. This is what Linux CI
     # produces and what the header explains cannot be avoided.
+    #
+    # Match any CR-bearing diagnostic, not one exact token. The original check
+    # pinned `{\r` because the first construct bash choked on happened to be a
+    # brace; #640 added a timestamp block right after the guard, so on Linux the
+    # first parse error moved to `case "$_xp_up" in\r`. The guarantee this test
+    # exists for is "the failure is visibly a line-ending problem", not "bash
+    # fails on one particular construct first".
     return 0
   fi
 
