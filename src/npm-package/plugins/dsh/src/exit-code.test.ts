@@ -19,6 +19,7 @@
  * @covers AC-669-01, AC-669-02, AC-669-03, AC-669-04
  */
 import { execFileSync } from "node:child_process"
+import { describe, expect, it } from "vitest"
 import { buildCommand, detectDialectForShell } from "./command.js"
 import { classifyGateRun } from "./gate-runner.js"
 
@@ -68,6 +69,11 @@ describe("#669 命令串的退出码必须真实传递", () => {
     // 两者不一致时不能静默采信其中之一。
     const base = {
       timedOut: false,
+      // ShellRunResult requires both liveness fields. These fixtures represent a
+      // run that ended by itself, so "no signal" and "not aborted" are the honest
+      // values — omitting them only typechecked because this file never ran.
+      signal: null,
+      aborted: false,
       timeoutMs: 1000,
       stdout: { text: "some output\n[XP-Gate] exit:7\n", truncated: false },
       stderr: { text: "", truncated: false },
