@@ -18,7 +18,7 @@ PRE_COMMIT_MIRROR="$REPO_ROOT/src/npm-package/hooks/pre-commit"
 @test "AC-450-01: the hint names the env var as the escape hatch" {
   local text
   text=$(cat "$PRE_COMMIT_COPY")
-  echo "$text" | grep -qF "SKIP_VERSION_CHECK=1 "'g'it commit"
+  echo "$text" | grep -qF 'SKIP_VERSION_CHECK=1 git commit'
   echo "$text" | grep -q "adapters/, scripts/, hooks/"
   echo "$text" | grep -q "build-tooling-only"
 }
@@ -28,7 +28,7 @@ PRE_COMMIT_MIRROR="$REPO_ROOT/src/npm-package/hooks/pre-commit"
     if grep -qF "[skip-version-check] chore: <description>" "$copy"; then
       fail "dead message-prefix recipe still advertised in $copy (#624)"
     fi
-    grep -qF "SKIP_VERSION_CHECK=1 "'g'it commit" "$copy" || fail "env-var hint missing in $copy"
+    grep -qF 'SKIP_VERSION_CHECK=1 git commit' "$copy" || fail "env-var hint missing in $copy"
   done
 }
 
@@ -40,7 +40,7 @@ PRE_COMMIT_MIRROR="$REPO_ROOT/src/npm-package/hooks/pre-commit"
   local tmp_fixture
   tmp_fixture="$(mktemp)"
   printf '#!/bin/sh\nOr use --no-verify (discouraged) or include [skip-version-check] in commit message.\n' > "$tmp_fixture"
-  if grep -qF "SKIP_VERSION_CHECK=1 "'g'it commit" "$tmp_fixture"; then
+  if grep -qF 'SKIP_VERSION_CHECK=1 git commit' "$tmp_fixture"; then
     rm -f "$tmp_fixture"
     fail "matcher accepted a copy lacking the env-var hint"
   fi
