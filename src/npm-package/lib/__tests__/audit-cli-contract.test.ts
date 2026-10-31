@@ -18,6 +18,12 @@ const HERE = path.dirname(fileURLToPath(import.meta.url));
 const CLI = path.resolve(HERE, '..', '..', 'bin', 'xp-gate.js');
 const REPO_ROOT = path.resolve(HERE, '..', '..', '..', '..');
 
+// The audit CLI builds a tsx child process on every call, so the first one pays
+// cold-start cost; the per-test timeout has to clear that.
+const TEST_TIMEOUT_MS = 200_000;
+const CLI_TIMEOUT_MS = 180_000;
+const SAMPLE_DURATION_MS = 1200;
+
 let dir: string;
 
 beforeAll(() => {
@@ -27,17 +33,27 @@ afterAll(() => {
   rmSync(dir, { recursive: true, force: true });
 });
 
-function runAudit(args: string[], cwd: string) {
-  return spawnSync(process.execPath, [CLI, 'audit', ...args], {
-    cwd,
-    encoding: 'utf8',
-    timeout: 180000,
-  });
+function runAudit(args: string[], cwd: string): ReturnType<typeof spawnSync> {
+  try {
+    return spawnSync(process.execPath, [CLI, 'audit', ...args], {
+      cwd,
+      encoding: 'utf8',
+      timeout: CLI_TIMEOUT_MS,
+    });
+  } catch (err) {
+    // A spawn failure (missing binary, EACCES) must surface as itself, not as a
+    // mysterious "status was undefined" several assertions later.
+    throw new Error(`failed to run audit ${args.join(' ')}: ${(err as Error).message}`);
+  }
 }
 
 function ledgerWith(rows: object[]): string {
   const file = join(dir, `ledger-${Math.random().toString(36).slice(2)}.jsonl`);
-  writeFileSync(file, rows.map((r) => JSON.stringify(r)).join('\n') + '\n');
+  try {
+    writeFileSync(file, rows.map((r) => JSON.stringify(r)).join('\n') + '\n');
+  } catch (err) {
+    throw new Error(`failed to write ledger ${file}: ${(err as Error).message}`);
+  }
   return file;
 }
 
@@ -47,7 +63,7 @@ const ATTRIBUTED = {
   gate_name: 'code-quality',
   passed: true,
   issues_found: 0,
-  duration_ms: 1200,
+  duration_ms: SAMPLE_DURATION_MS,
   trigger: 'commit',
   commit_hash: 'abc123def456',
 };
@@ -66,7 +82,7 @@ describe('xp-gate audit CLI', () => {
     expect(r.stdout).toContain('Audit health');
     expect(r.stdout).toContain('OK: no new audit anomalies.');
     expect(r.status).toBe(0);
-  }, 200000);
+  }, TEST_TIMEOUT_MS);
 
   it('AC-673-02: an unattributed commit still fails the check', () => {
     // Anti-vacuity for AC-673-01: proving the command runs must not be mistaken
@@ -78,7 +94,7 @@ describe('xp-gate audit CLI', () => {
     expect(r.status).not.toBe(0);
     expect(r.stdout).toContain('missing commit       : 1');
     expect(r.stderr).toContain('FAIL: 1 audit anomaly');
-  }, 200000);
+  }, TEST_TIMEOUT_MS);
 
   it('AC-673-03: --ledger grades the named file, not the cwd ledger', () => {
     // Run from a directory with no .xp-gate/ at all: without --ledger the check
@@ -90,12 +106,12 @@ describe('xp-gate audit CLI', () => {
 
     expect(r.stdout).toContain('entries scanned      : 1');
     expect(r.status).not.toBe(0);
-  }, 200000);
+  }, TEST_TIMEOUT_MS);
 
   it('AC-673-03: --ledger rejects a missing file instead of scanning nothing', () => {
     const r = runAudit(['--check', '--ledger', join(dir, 'does-not-exist.jsonl')], REPO_ROOT);
 
     expect(r.status).not.toBe(0);
     expect(r.stderr).toContain('--ledger file not found');
-  }, 200000);
+  }, TEST_TIMEOUT_MS);
 });
