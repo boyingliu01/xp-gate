@@ -139,7 +139,14 @@ run_fixture_hook() {
   local repo_root="${2:-$PWD}"
   local out
   status=0
-  out=$(cd "$repo_root" && "$repo_root/$hook_path" 2>&1) || status=$?
+  # Two gates in the hook reason about the commit itself rather than about Gate
+  # 5a, and either one decides the outcome of every case in this suite:
+  #   - Gate 0 blocks production source on a protected branch without a
+  #     VERSION/CHANGELOG bump. This fixture is a throwaway repo whose only job
+  #     is to exercise Gate 5a, so it takes the supported escape hatch.
+  #   - Gate 5d rejects tautological assertions, so the fixture tests below must
+  #     assert something that can actually fail.
+  out=$(cd "$repo_root" && SKIP_VERSION_CHECK=1 "$repo_root/$hook_path" 2>&1) || status=$?
   output="$out"
 }
 
@@ -162,7 +169,7 @@ run_fixture_hook() {
   # vitest defaults to `globals: false` and this fixture ships no config, so a
   # bare test() is a ReferenceError at collection time. That fixture blocked on
   # Gate 5 ("Tests FAILED") instead of proving Gate 5a lets the commit through.
-  printf "import { expect, test } from 'vitest';\ntest('foo', () => { expect(1).toBe(1); });\n" > src/foo.test.ts
+  printf "import { expect, test } from 'vitest';\ntest('foo', () => { expect(1 + 1).toBe(2); });\n" > src/foo.test.ts
   git add src/foo.ts src/foo.test.ts
   run_fixture_hook
   [ "$status" -eq 0 ]
@@ -441,7 +448,7 @@ COVERAGE
 @test "multiple new TS files with one missing test BLOCKS" {
   mkdir -p src
   echo "export const x = 1;" > src/foo.ts
-  printf "import { expect, test } from 'vitest';\ntest('foo', () => { expect(1).toBe(1); });\n" > src/foo.test.ts
+  printf "import { expect, test } from 'vitest';\ntest('foo', () => { expect(1 + 1).toBe(2); });\n" > src/foo.test.ts
   echo "export const y = 2;" > src/bar.ts
   git add src/foo.ts src/foo.test.ts src/bar.ts
   run_fixture_hook
