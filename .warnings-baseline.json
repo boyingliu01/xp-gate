@@ -1,62 +1,50 @@
 {
   "src/npm-package/lib/test-alignment.ts": {
     "totalWarnings": 13,
-    "lastAnalyzed": "2026-10-02T12:35:14.851Z"
+    "lastAnalyzed": "2026-10-31T07:31:43.881Z"
   },
   "src/build-integrity/__tests__/import-resolver.test.ts": {
     "totalWarnings": 19,
-    "lastAnalyzed": "2026-10-08T19:22:51.574Z"
-  },
-  "src/mutation/runners/mutmut-runner.ts": {
-    "totalWarnings": 11,
-    "lastAnalyzed": "2026-10-14T15:41:31.674Z"
+    "lastAnalyzed": "2026-10-31T07:31:43.881Z"
   },
   "src/npm-package/lib/init.js": {
     "totalWarnings": 14,
-    "lastAnalyzed": "2026-10-14T15:41:31.676Z"
+    "lastAnalyzed": "2026-10-31T07:31:43.881Z"
   },
   "src/npm-package/lib/phase-transition.js": {
     "totalWarnings": 10,
-    "lastAnalyzed": "2026-10-14T15:41:31.676Z"
-  },
-  "src/npm-package/mutation/runners/mutmut-runner.ts": {
-    "totalWarnings": 11,
-    "lastAnalyzed": "2026-10-14T15:41:31.676Z"
-  },
-  "src/principles/adapters/typescript.ts": {
-    "totalWarnings": 4,
-    "lastAnalyzed": "2026-10-18T18:33:22.046Z"
+    "lastAnalyzed": "2026-10-31T07:31:43.881Z"
   },
   "src/build-integrity/__tests__/gate-10.test.ts": {
     "totalWarnings": 7,
-    "lastAnalyzed": "2026-10-26T18:46:18.357Z"
+    "lastAnalyzed": "2026-10-31T07:31:43.881Z"
   },
   "src/mutation/runners/pitest-runner.ts": {
-    "totalWarnings": 8,
-    "lastAnalyzed": "2026-10-26T19:50:16.403Z"
+    "totalWarnings": 5,
+    "lastAnalyzed": "2026-10-31T07:31:43.881Z"
   },
   "src/mutation/__tests__/pitest-runner.test.ts": {
     "totalWarnings": 4,
-    "lastAnalyzed": "2026-10-26T20:03:53.041Z"
+    "lastAnalyzed": "2026-10-31T07:31:43.881Z"
   },
   "src/npm-package/mutation/__tests__/pitest-runner.test.ts": {
     "totalWarnings": 4,
-    "lastAnalyzed": "2026-10-26T20:05:00.275Z"
+    "lastAnalyzed": "2026-10-31T07:31:43.881Z"
   },
   "src/npm-package/mutation/runners/pitest-runner.ts": {
-    "totalWarnings": 8,
-    "lastAnalyzed": "2026-10-26T20:05:00.275Z"
+    "totalWarnings": 5,
+    "lastAnalyzed": "2026-10-31T07:31:43.881Z"
   },
   "src/npm-package/scripts/sync-package-content.js": {
     "totalWarnings": 14,
-    "lastAnalyzed": "2026-10-26T20:05:00.275Z"
+    "lastAnalyzed": "2026-10-31T07:31:43.881Z"
   },
   "src/mock-policy/__tests__/integration.test.ts": {
     "totalWarnings": 9,
-    "lastAnalyzed": "2026-10-27T11:30:00.000Z"
+    "lastAnalyzed": "2026-10-31T07:31:43.881Z"
   },
   "plugins/dsh/src/delphi-run.test.ts": {
     "totalWarnings": 1,
-    "lastAnalyzed": "2026-10-30T17:51:07.340Z"
+    "lastAnalyzed": "2026-10-31T07:31:43.881Z"
   }
 }

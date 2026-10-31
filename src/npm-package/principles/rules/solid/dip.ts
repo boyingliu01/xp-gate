@@ -1,8 +1,14 @@
 import { Rule, Violation, Severity } from '../../types';
 import { getActiveConfig } from '../../config';
 
+// Value objects, not collaborators. Every entry here is a type that ordinary
+// code CONSTRUCTS from data it already has, and that has no injectable
+// alternative: you cannot pass in a Date/Map/RegExp factory any more usefully
+// than you can pass in the number 1. Constructing one is not the inversion being
+// bypassed, so reporting it teaches the wrong lesson (#676).
 const DEFAULT_EXCLUDED_CLASSES = [
-  'Date', 'Map', 'Set', 'Error', 'Array', 'Object', 'Promise'
+  'Date', 'Map', 'Set', 'Error', 'Array', 'Object', 'Promise',
+  'RegExp', 'Number', 'String', 'Boolean', 'BigInt', 'Symbol', 'WeakMap', 'WeakSet',
 ];
 
 /**
@@ -10,9 +16,16 @@ const DEFAULT_EXCLUDED_CLASSES = [
  *
  * A module-load snapshot was #457: a project's `.principlesrc` override was
  * parsed but never consulted.
+ *
+ * The config entry EXTENDS the built-in value-object list rather than replacing
+ * it (#676). Replacing meant a project that added one name silently lost every
+ * default exemption -- `.principlesrc` here lists 7 entries, so `new RegExp()`
+ * was reported even though the default list would have excused it. A project
+ * cannot reasonably be expected to restate the built-ins it never knew about.
  */
 function excludedClasses(): (string | number)[] {
-  return getActiveConfig().rules['solid']['dip'].exclude ?? DEFAULT_EXCLUDED_CLASSES;
+  const configured = getActiveConfig().rules['solid']['dip'].exclude ?? [];
+  return [...new Set([...DEFAULT_EXCLUDED_CLASSES, ...configured])];
 }
 
 function shouldSkipInstantiation(className: string): boolean {
