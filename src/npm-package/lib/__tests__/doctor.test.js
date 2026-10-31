@@ -13,7 +13,16 @@ const util = require('util');
 // tests run in parallel across worker threads.
 const DESCRIBE_ID = String(Math.random().toString(36).slice(2, 8));
 
+// Budget for every case in this file. `doctor --fix` walks the whole install
+// surface (hooks, adapters, config, version cache) and the default 5 s budget is
+// a measurement of an idle machine, not of one running a full suite: under
+// concurrent load the same passing case times out, which reads as a doctor
+// defect. 30 s keeps real hangs bounded while leaving the CPU contention room.
+const DOCTOR_TIMEOUT_MS = 30000;
+
 describe('doctor', () => {
+  // Applies to every `it` below (the per-test arg is only needed when overriding).
+  vi.setConfig({ testTimeout: DOCTOR_TIMEOUT_MS });
   let tmpHome;
   let tmpProject;
   let originalHome;

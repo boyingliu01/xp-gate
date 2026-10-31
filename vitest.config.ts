@@ -111,23 +111,31 @@ export default defineConfig({
       // goes green and the commit is then rejected. Until the two are reconciled,
       // `xp-gate gate-coverage` prints the conflict rather than leaving it to be
       // discovered at commit time.
-      // #562 (ratchet): lines/statements 60 -> 70.
+      // #562 (ratchet): lines/statements 60 -> 70 -> 78, functions 83 -> 84,
+      // branches 81 -> 81. Each step is a MEASUREMENT, not a target: the number
+      // below is what this tree actually reports, rounded down.
       //
-      // This is the first ratchet that reflects a MEASUREMENT FIX rather than new
-      // tests. The old 62% was never the tree's real coverage: 11688 lines of
+      // The old 62% was never the tree's real coverage: 11688 lines of
       // byte-identical mirror copies were counted at 0.00% because the tests import
       // the canonical path and can never touch the copies. Excluding them moved the
-      // figure to 82.77%; with the 0.35.15.0 additions it now measures 78.80%.
+      // figure to 82.77%; with the 0.35.15.0 additions it measured 78.80%.
       //
-      // 70 leaves ~8.8pp of headroom below the measurement, so ordinary run-to-run
-      // fluctuation cannot produce a spurious block, while still being high enough
-      // that re-adding a mirror subtree (the failure this ratchet guards) fails
-      // immediately instead of being absorbed. The remaining gap to the 80% target
-      // is real coverage debt, tracked in #562.
+      // Measured on afed8b63 (`--coverage.enabled`, full suite):
+      //   lines 78.78% (29637/37619)  statements 78.78% (29637/37619)
+      //   functions 84.47% (1126/1333)  branches 81.86% (5453/6661)
+      //
+      // The 70s left ~8.8pp of headroom, which absorbed exactly the regression
+      // this ratchet exists to catch: coverage could fall ten points and still
+      // pass. 78 keeps ~0.8pp -- enough that run-to-run fluctuation cannot produce
+      // a spurious block, small enough that dropping a mirror subtree (or losing a
+      // suite) fails immediately. functions/branches ratchet by the same rule.
+      //
+      // Still 1.2pp short of the documented 80% target; that remainder is real
+      // coverage debt, not a threshold to lower, and stays tracked in #562.
       thresholds: {
-        lines: 70,
-        statements: 70,
-        functions: 83,
+        lines: 78,
+        statements: 78,
+        functions: 84,
         branches: 81,
       },
     },

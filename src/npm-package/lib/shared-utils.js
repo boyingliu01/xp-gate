@@ -8,6 +8,19 @@ const path = require('path');
 /**
  * Recursively copy a directory.
  * Pure function: only uses fs/path params, no global config.
+ *
+ * A file that disappears between `readdirSync` and `copyFileSync` is skipped
+ * rather than crashing the whole copy. That is not defensive padding: the
+ * mirrored trees this walks (`hooks/`, `adapters/`) are rewritten in place by
+ * `scripts/sync-package-content.js`, which unlinks and recreates each entry. A
+ * concurrent `xp-gate init` (or a test suite that runs init while another test
+ * invokes the sync) enumerates the directory, then finds the entry gone --
+ * `ENOENT` on a file that will exist again microseconds later. Aborting the
+ * install there would report a broken package for a transient race.
+ *
+ * Copies the CONTENT instead of `copyFileSync` so the read and the write both
+ * see a consistent snapshot, and only ENOENT is tolerated -- permission and
+ * disk errors still surface, because those are real failures.
  */
 function copyDirRecursive(src, dest) {
   fs.mkdirSync(dest, { recursive: true });
@@ -18,9 +31,22 @@ function copyDirRecursive(src, dest) {
     if (entry.isDirectory()) {
       copyDirRecursive(srcPath, destPath);
     } else {
-      fs.copyFileSync(srcPath, destPath);
+      copyFileContents(srcPath, destPath);
     }
   }
+}
+
+/** Copy one file, treating "vanished mid-copy" as a skip. @returns {boolean} whether it was copied */
+function copyFileContents(srcPath, destPath) {
+  let data;
+  try {
+    data = fs.readFileSync(srcPath);
+  } catch (err) {
+    if (err.code === 'ENOENT') return false;
+    throw err;
+  }
+  fs.writeFileSync(destPath, data);
+  return true;
 }
 
 function readXpGateConfig() {
