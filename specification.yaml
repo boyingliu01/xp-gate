@@ -4250,3 +4250,29 @@ specification:
         - id: AC-689-03
           criteria: "方括号 WARNING 行上的类别即使与打包类型同名也不被吞掉"
           test_type: unit
+
+    # ============================================================
+    # REQ-684: doctor delphi 必须与 runner 用同一套配置解析。
+    #
+    # SKILL.md 推荐「机器级只放一份配置，仓库里不带」的布局，runner 确实实现了
+    # 全局回退，所以评审能正常跑。doctor 只查 `<cwd>/.delphi-config.json`，
+    # 在这种布局下报 FAIL，并让用户「复制示例配置到项目里」——恰好制造出
+    # #541 专门加过 shadow 警告的那种重复配置。诊断工具在这里起了反作用。
+    #
+    # 显式传入的 configPath 是一个「答案」而非「线索」：调用方点名了某个文件，
+    # 就只认那个文件。否则测试或调用方钉住一个不存在的路径时，会静默读到开发者
+    # 真实的全局配置并报 PASS——正是本批在修的「空洞通过」。
+    # ============================================================
+    - id: REQ-684
+      description: doctor delphi 的配置检查须与 runner 一致地回退到全局配置，且不得为此牺牲「无配置」的失败判定
+      priority: high
+      acceptance_criteria:
+        - id: AC-684-01
+          criteria: 仅有合法全局配置、项目内无配置时，配置检查须 PASS 并标注使用的是 global 作用域
+          test_type: unit
+        - id: AC-684-02
+          criteria: 项目与全局都没有配置时仍须 FAIL（回退不得掩盖真实损坏的安装）
+          test_type: unit
+        - id: AC-684-03
+          criteria: 项目内存在配置时优先使用项目配置，不得被全局配置顶替
+          test_type: unit
