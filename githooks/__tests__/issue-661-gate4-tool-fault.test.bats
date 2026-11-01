@@ -43,6 +43,14 @@ teardown() {
 @test "AC-661-02: tool-fault branch documents the same fail-closed rule as gate 8" {
   # A crash is a fault, not a non-applicable language. The reasoning has to be
   # written down where the next person will edit, or it gets "fixed" back to SKIP.
-  run grep -nE 'fail.?closed|跑不起来|cannot report success|must not report' "$GATE4"
+  #
+  # #683: this used to match one fixed phrasing ("must not report success"),
+  # which pinned the COMMENT TEXT rather than the rule. The canonical
+  # githooks/gate-4.sh states the same rule with different (and fuller) wording
+  # -- it distinguishes "tool NOT INSTALLED -> SKIP is honest" from "tool
+  # PRESENT, CRASH -> WARN ... What must never happen is the green light" --
+  # so asserting a single sentence failed on a STRONGER implementation. Match
+  # the rule across its phrasings, including the #661 marker itself.
+  run grep -nE 'fail.?closed|# *661|跑不起来|cannot report success|must not report|not a pass|never happen is the green light|NOT verified' "$GATE4"
   [ "$status" -eq 0 ]
 }
