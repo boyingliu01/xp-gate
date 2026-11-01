@@ -3,7 +3,22 @@
 - 日期：2026-10-30
 - 基线版本：`v0.32.1.0`，`@archlinter/cli@0.16.0`
 - 配套分析：`docs/plans/2026-10-30-archunit-33-rules-gap-analysis.md`
+- 全语言工具版图：`docs/plans/2026-10-30-cross-language-architecture-tooling.md`
 - 用途：供后续开发逐个领取处理。每个 issue 自带验收标准（AC），可直接转成测试用例。
+
+> **已同步到 GitHub**：索引单 [#685](https://github.com/boyingliu01/xp-gate/issues/685)，15 个子 issue #686–#700。
+> 后续讨论与状态跟踪以 GitHub issue 为准，本文档保留为设计与验收标准的完整来源。
+
+| 编号 | GitHub | 编号 | GitHub |
+|---|---|---|---|
+| ARCH-01 | #686 | ARCH-09 | #696 |
+| ARCH-02 | #687 | ARCH-10 | #697 |
+| ARCH-03 | #690 | ARCH-11 | #698 |
+| ARCH-04 | #691 | ARCH-12 | #699 |
+| ARCH-05 | #692 | ARCH-13 | #688 |
+| ARCH-06 | #693 | ARCH-14 | #689 |
+| ARCH-07 | #694 | ARCH-15 | #700 |
+| ARCH-08 | #695 | | |
 
 ## 依赖关系总览
 

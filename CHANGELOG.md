@@ -1,5 +1,40 @@
 # Changelog
 
+## [0.35.19.0] - 2026-11-01
+
+四个「诊断工具说没事、实际有事」的缺陷。共同形状：**一个从不触发的检测器，
+与「没有漂移」无法区分** —— 每一次表现都是「没有发现问题」，而实际上是没有检查。
+
+### Fixed
+
+- **`doctor delphi` 不套用文档化的全局配置回退（#684）**：SKILL.md 推荐的布局是
+  「机器级只放一份 `~/.config/xp-gate/.delphi-config.json`」，runner 实现了回退，
+  评审能正常跑；doctor 只查 `cwd/.delphi-config.json`，在这种布局下报 FAIL 并让用户
+  「往项目里复制一份示例」—— 恰好制造出 `#541` 专门加过 shadow 警告的重复配置。
+  配置解析改为与 runner 同一条链，PASS 行现在标注实际读的是 `[project: …]` 还是
+  `[global: …]`。显式传入的 `configPath` 关闭回退：调用方点名了文件就只认那个文件。
+- **`update-skill --all` 恒为空转（#682）**：`init` / `setup-global` 把 skill 拷到磁盘
+  但从不写 `config.installedSkills`，`--all` 遍历那个恒空的字典，打印
+  `Updating all skills...` 后 exit 0 —— 12 个 skill 一个都没动。枚举源改为文件系统
+  （与 `doctor` 在 #635 的解法一致），注册表做并集去重。空跑现在明确说
+  `No skills installed — nothing to update.`
+- **skill 内容改了但没 bump version，doctor 仍报「Up to date」（#681）**：新鲜度判定在
+  `compareSemver(...) === 0` 时直接短路，从不比对正文。实测 `delphi-review/SKILL.md`
+  包内 45164 字节、已安装 41496 字节（差的是 #604 的「输入安全」整章），doctor 报健康。
+  版本号相等时仍比对正文，不同则 WARN —— 但不据此推荐 `update-skill`（安装副本可能
+  比 main 还新，那条命令只会降级）。
+- **adapters 下的 gate 脚本副本陈旧，缺 #632 的实际修复（#683）**：
+  `githooks/adapters/` 下 5 份 gate 副本 4 份落后于 canonical，`gate-3.sh` 差 4953 字节。
+  一直没出事只因为发布包写入顺序让包根副本覆盖了它 —— **靠顺序，不靠正确性**。
+  副本已对齐为逐字节镜像，`syncAdapters()` 增加自愈（幂等），并新增三条镜像守卫
+  （含 anti-vacuity）。
+
+### 一条附带教训
+
+`#683` 的修复一度让 CI 的 Gate 5b 变红：`AC-661-02` 断言的是 gate-4 里的一句**注释措辞**
+（`must not report success`），而 canonical 版用了不同且更完整的表达，于是**更强的实现
+反而判红**。守卫断言的是规则是否被写下来，不是某句话 —— 已放宽并在测试里写明原因。
+
 ## [0.35.16.0] - 2026-10-31
 
 本轮把 CI 从「Gate 3 / 5b / 5c / 6 全红」修到全绿。多数失败是同一个形状：
