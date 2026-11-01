@@ -280,8 +280,29 @@ function diagnoseSkillsInDir(skillNames, userSkillsDir, bundledSkillsDir, checks
         });
         issues++;
       } else {
-        // cmp >= 0: installed version is same or newer than bundled
-        checks.push({ name: label(name), status: 'PASS', detail: 'Up to date' });
+        // cmp >= 0: installed version is same or newer than bundled.
+        //
+        // #681: an EQUAL version is a claim, not a fact. A skill that gained a
+        // whole chapter without a version bump reported "Up to date" while the
+        // installed copy was ~20k characters behind, and `update-skill` agreed.
+        // So when the versions tie, still compare the bodies — and do NOT
+        // prescribe `update-skill` on a difference: the installed copy may be
+        // NEWER than main (the same asymmetry the versionless branch below
+        // already respects), so the advice is "compare manually".
+        const sameBody = sameContentIgnoringLineEndings(
+          withoutVersionLine(bundledContent),
+          withoutVersionLine(userContent)
+        );
+        if (!sameBody) {
+          checks.push({
+            name: label(name),
+            status: 'WARN',
+            detail: `Content differs at the same version ${userVersion} — the version was not bumped when the skill changed; compare manually before running update-skill`,
+          });
+          issues++;
+        } else {
+          checks.push({ name: label(name), status: 'PASS', detail: 'Up to date' });
+        }
       }
     } else {
       // No version in at least one file — compare content, but not byte-for-byte:

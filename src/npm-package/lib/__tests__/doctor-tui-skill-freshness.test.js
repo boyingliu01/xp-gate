@@ -294,3 +294,77 @@ describe('doctor-tui installed skills enumerate the filesystem (#635)', () => {
     expect(row.status).toBe('PASS');
   });
 });
+
+// ── #681: equal version is not proof of equal content ────────────────────────
+// The freshness check short-circuits on `compareSemver(...) === 0` and answers
+// "Up to date" without ever reading the bodies. A skill that gained a whole
+// chapter without a version bump therefore reported healthy while the installed
+// copy was ~20k characters behind — and `update-skill` agreed with it.
+//
+// The version number is a claim the publisher makes; the content is the fact.
+// When the claim says "same" the fact still has to be checked.
+describe('doctor-tui skill freshness #681 equal version, different content', () => {
+  let tmpHome;
+  let originalHome;
+  const bundledSkillsDir = path.join(__dirname, '..', '..', 'skills');
+
+  beforeEach(() => {
+    originalHome = process.env.HOME;
+    tmpHome = fs.mkdtempSync(path.join(os.tmpdir(), 'xpgate-fresh681-'));
+    process.env.HOME = tmpHome;
+    vi.resetModules();
+    delete require.cache[require.resolve('../doctor-tui')];
+    delete require.cache[require.resolve('../shared-paths')];
+  });
+
+  afterEach(() => {
+    process.env.HOME = originalHome;
+    fs.rmSync(tmpHome, { recursive: true, force: true });
+    vi.restoreAllMocks();
+  });
+
+  function installSkill(name, content) {
+    const dir = path.join(tmpHome, '.config', 'opencode', 'skills', name);
+    fs.mkdirSync(dir, { recursive: true });
+    fs.writeFileSync(path.join(dir, 'SKILL.md'), content);
+  }
+
+  function runFreshness(name) {
+    const { diagnoseInstalledSkills } = require('../doctor-tui');
+    const checks = [];
+    const issues = diagnoseInstalledSkills({ installedSkills: { [name]: {} } }, checks);
+    return { issues, check: checks.find((c) => c.name === `Skill: ${name}`) };
+  }
+
+  it('AC-681-01: same version but a missing chapter is WARN, not "Up to date"', () => {
+    const bundled = fs.readFileSync(path.join(bundledSkillsDir, 'delphi-review', 'SKILL.md'), 'utf8');
+    // Keep the frontmatter (version included), drop a large slice of the body.
+    const idx = bundled.indexOf('\n---', 4);
+    const head = bundled.slice(0, idx + 4);
+    const body = bundled.slice(idx + 4);
+    const truncated = head + body.slice(0, Math.floor(body.length / 2));
+    installSkill('delphi-review', truncated);
+
+    const { issues, check } = runFreshness('delphi-review');
+    expect(check).toBeDefined();
+    expect(check.detail).not.toMatch(/Up to date/);
+    expect(check.status).toBe('WARN');
+    expect(issues).toBe(1);
+  });
+
+  it('AC-681-02: same version and same content is still "Up to date" (no false alarm)', () => {
+    const bundled = fs.readFileSync(path.join(bundledSkillsDir, 'delphi-review', 'SKILL.md'), 'utf8');
+    installSkill('delphi-review', bundled);
+    const { issues, check } = runFreshness('delphi-review');
+    expect(check.detail).toMatch(/Up to date/);
+    expect(issues).toBe(0);
+  });
+
+  it('AC-681-03: line endings alone still do not count as a difference', () => {
+    const bundled = fs.readFileSync(path.join(bundledSkillsDir, 'delphi-review', 'SKILL.md'), 'utf8');
+    installSkill('delphi-review', bundled.replace(/\r\n/g, '\n').replace(/\n/g, '\r\n'));
+    const { issues, check } = runFreshness('delphi-review');
+    expect(check.detail).toMatch(/Up to date/);
+    expect(issues).toBe(0);
+  });
+});
