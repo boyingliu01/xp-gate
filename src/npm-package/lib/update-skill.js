@@ -7,6 +7,57 @@ const HOME = process.env.HOME || process.env.USERPROFILE || os.homedir();
 
 const CONFIG_DIR = path.join(HOME, '.config', 'xp-gate');
 
+/**
+ * The skill names that are actually deployed on this machine.
+ *
+ * `xp-gate init` / `setup-global` copy skills onto disk but never write
+ * `config.installedSkills`, so the config registry is empty on a fully
+ * deployed machine. Iterating it made `update-skill --all` print
+ * "Updating all skills..." and exit 0 having touched nothing (#682) -- the
+ * same defect #635 fixed for `doctor`, with the same fix: ask the filesystem.
+ *
+ * The explicit registry is still unioned in, so a skill that is merely
+ * registered (or was installed on a platform this scan cannot see) keeps
+ * working for callers that rely on it.
+ *
+ * @returns {string[]} de-duplicated skill names, in a stable order
+ */
+function installedSkillNames() {
+  const names = new Set();
+  const config = getConfig();
+  for (const name of Object.keys(config.installedSkills || {})) names.add(name);
+
+  let platforms = [];
+  try {
+    platforms = Object.keys(require('./detect-deps.js').PLATFORM_PROFILES);
+  } catch {
+    // detect-deps unavailable: fall back to the registry only rather than
+    // reporting "nothing installed" for a machine that has skills on disk.
+    platforms = [];
+  }
+  const detect = require('./detect-deps.js');
+  for (const platform of platforms) {
+    let dir;
+    try {
+      dir = detect.getSkillsDirs(platform)[0];
+    } catch {
+      continue;
+    }
+    let entries;
+    try {
+      entries = fs.readdirSync(dir, { withFileTypes: true });
+    } catch {
+      continue;
+    }
+    for (const entry of entries) {
+      if (!entry.isDirectory()) continue;
+      // A skill is `<dir>/<name>/SKILL.md` — the shape install-skill writes.
+      if (fs.existsSync(path.join(dir, entry.name, 'SKILL.md'))) names.add(entry.name);
+    }
+  }
+  return [...names].sort();
+}
+
 function handleCheckMode() {
   console.log('Checking for updates...');
   const config = getConfig();
@@ -19,11 +70,16 @@ function handleCheckMode() {
 }
 
 async function handleAllMode(verbose) {
-  const config = getConfig();
-  const skills = config.installedSkills || {};
+  const names = installedSkillNames();
   console.log('Updating all skills...');
+  // #635/#682: an empty run must say so. Exiting 0 after "Updating all skills..."
+  // with no further output reads as success, and was how this stayed broken.
+  if (names.length === 0) {
+    console.log('No skills installed — nothing to update.');
+    return 0;
+  }
   let hasErrors = false;
-  for (const skillName of Object.keys(skills)) {
+  for (const skillName of names) {
     try {
       await updateSingleSkill(skillName, verbose);
     } catch (err) {

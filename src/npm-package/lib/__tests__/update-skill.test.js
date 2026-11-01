@@ -288,3 +288,80 @@ describe('update-skill', () => {
     });
   });
 });
+
+// ── #682: `--all` must enumerate what is on disk, not the config registry ────
+// `xp-gate init` / `setup-global` deploy skills to disk but never write
+// `config.installedSkills`, so `--all` iterated an always-empty object: it
+// printed "Updating all skills..." and exited 0 having touched nothing. doctor
+// solved the identical problem in #635 by enumerating the filesystem; this
+// block pins the same contract for update-skill, plus the honesty requirement
+// that a run which updates nothing must not look like a successful one.
+describe('update-skill #682 filesystem enumeration', () => {
+  let tmpHome;
+  let originalHome;
+  let installSkillMock;
+  let logSpy;
+  let errorSpy;
+
+  beforeEach(() => {
+    originalHome = process.env.HOME;
+    tmpHome = fs.mkdtempSync(path.join(os.tmpdir(), 'xpgate-up682-'));
+    process.env.HOME = tmpHome;
+    vi.resetModules();
+    delete require.cache[require.resolve('../update-skill')];
+    delete require.cache[require.resolve('../install-skill.js')];
+    installSkillMock = vi.fn().mockResolvedValue(0);
+    const p = require.resolve('../install-skill.js');
+    require.cache[p] = { id: p, filename: p, loaded: true, exports: { installSkill: installSkillMock } };
+    logSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
+    errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+  });
+
+  afterEach(() => {
+    process.env.HOME = originalHome;
+    fs.rmSync(tmpHome, { recursive: true, force: true });
+    delete require.cache[require.resolve('../install-skill.js')];
+    delete require.cache[require.resolve('../update-skill')];
+    vi.restoreAllMocks();
+  });
+
+  function deploySkill(platform, name) {
+    const dir = path.join(tmpHome, '.config', platform, 'skills', name);
+    fs.mkdirSync(dir, { recursive: true });
+    fs.writeFileSync(path.join(dir, 'SKILL.md'), 'old content');
+    return dir;
+  }
+
+  it('AC-682-01: --all updates skills found on disk even when config.installedSkills is absent', async () => {
+    deploySkill('opencode', 'sprint-flow');
+    deploySkill('opencode', 'delphi-review');
+    const { updateSkill } = require('../update-skill');
+    const code = await updateSkill(null, { all: true });
+    expect(code).toBe(0);
+    const names = installSkillMock.mock.calls.map((c) => c[0]);
+    expect(names).toContain('sprint-flow');
+    expect(names).toContain('delphi-review');
+  });
+
+  it('AC-682-02: --all does not update the same skill twice for the same platform', async () => {
+    deploySkill('opencode', 'sprint-flow');
+    fs.mkdirSync(path.join(tmpHome, '.config', 'xp-gate'), { recursive: true });
+    fs.writeFileSync(
+      path.join(tmpHome, '.config', 'xp-gate', 'xp-gate.json'),
+      JSON.stringify({ installedSkills: { 'sprint-flow': { version: '1.0.0' } } })
+    );
+    const { updateSkill } = require('../update-skill');
+    await updateSkill(null, { all: true });
+    const sprintCalls = installSkillMock.mock.calls.filter((c) => c[0] === 'sprint-flow');
+    expect(sprintCalls.length).toBe(1);
+  });
+
+  it('AC-682-03: --all with nothing installed says so instead of silently succeeding', async () => {
+    const { updateSkill } = require('../update-skill');
+    const code = await updateSkill(null, { all: true });
+    const said = [...logSpy.mock.calls, ...errorSpy.mock.calls].map((c) => c.join(' ')).join('\n');
+    expect(said).toMatch(/nothing to update|no skills installed|not installed/i);
+    expect(installSkillMock).not.toHaveBeenCalled();
+    expect(code).toBe(0);
+  });
+});

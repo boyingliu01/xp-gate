@@ -4276,3 +4276,28 @@ specification:
         - id: AC-684-03
           criteria: 项目内存在配置时优先使用项目配置，不得被全局配置顶替
           test_type: unit
+
+    # ============================================================
+    # REQ-682: update-skill 的枚举源必须是磁盘，不是配置注册表。
+    #
+    # `xp-gate init` / `setup-global` 把 skill 拷到磁盘，但从不写
+    # `config.installedSkills`。`--all` 遍历那个恒空的字典，打印一行
+    # "Updating all skills..." 然后 exit 0——用户以为更新了，实际一个都没动。
+    # `doctor` 在 #635 修过同一个问题（改为枚举文件系统），这里沿用同一解法。
+    #
+    # 空跑必须说出来。「打印标题 + exit 0 + 无后续输出」会被读成成功，
+    # 这正是它一直没被发现的原因。
+    # ============================================================
+    - id: REQ-682
+      description: update-skill --all 须枚举磁盘上实际部署的 skill，并在无 skill 时明确告知而非静默成功
+      priority: medium
+      acceptance_criteria:
+        - id: AC-682-01
+          criteria: config.installedSkills 缺失时，--all 仍须更新磁盘上已部署的 skill
+          test_type: unit
+        - id: AC-682-02
+          criteria: 同一 skill 同时出现在注册表与磁盘时不得重复更新
+          test_type: unit
+        - id: AC-682-03
+          criteria: 无任何 skill 时须明确提示无可更新项，且不调用安装
+          test_type: unit
