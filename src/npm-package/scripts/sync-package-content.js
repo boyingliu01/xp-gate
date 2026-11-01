@@ -205,7 +205,38 @@ function syncAdapters() {
   if (gateFiles.length > 0) {
     console.error(`[sync] gate scripts: ${gateFiles.join(', ')}`);
   }
-  return copied + gateFiles.length;
+
+  // #683: `githooks/adapters/` carries a handful of the same gate scripts,
+  // because `resolveGateScript()` falls back to `<adapterDir>/gate-<n>.sh` in a
+  // TS-less install, and #532 requires the gate-9 verdict block to stay
+  // byte-identical across those copies. Four of them had silently lagged the
+  // canonical gates (gate-3.sh by 4953 bytes, missing the #632 fix). Nothing
+  // failed only because the package-root copy is written later and wins.
+  //
+  // Re-mirror them here so the invariant is maintained, not merely observed.
+  // The names are taken FROM the adapters directory: this only refreshes copies
+  // that already exist, it never adds a gate script to `adapters/` that was not
+  // deliberately placed there.
+  const adaptersRoot = path.join(githooksDir, 'adapters');
+  let refreshed = 0;
+  let adaptersNames = [];
+  try {
+    adaptersNames = fs.readdirSync(adaptersRoot);
+  } catch {
+    adaptersNames = [];
+  }
+  for (const f of adaptersNames) {
+    const isGateScript = f.endsWith('.sh') && (f.startsWith('gate-') || f === 'sprint-gate.sh');
+    const canonical = path.join(githooksDir, f);
+    if (!isGateScript || !fs.existsSync(canonical)) continue;
+    const mirror = path.join(adaptersRoot, f);
+    const a = fs.readFileSync(canonical);
+    if (fs.existsSync(mirror) && fs.readFileSync(mirror).equals(a)) continue;
+    fs.copyFileSync(canonical, mirror);
+    console.error(`[sync] refreshed stale adapter gate mirror: ${f}`);
+    refreshed += 1;
+  }
+  return copied + gateFiles.length + refreshed;
 }
 
 function syncHooks() {

@@ -32,8 +32,20 @@ if [ -z "$SEMGREP_CMD" ]; then
   echo "     Gate 9: SAST Security (WARN, semgrep not installed)"
   GATE_9_STATUS="WARN"
 else
-  # Get staged files filtered to Semgrep-supported languages
-  SEMGREP_FILES=$(git diff --cached --name-only --diff-filter=ACM 2>/dev/null | grep -E '\.(ts|tsx|js|jsx|py|go|java|c|cpp|cs|rb|php|scala|swift)$' || true)
+  # Get staged files filtered to Semgrep-supported languages.
+  #
+  # #616: under `--all` the index is usually empty, so the staged diff yielded no
+  # files and the gate reported SKIPPED -- "no supported language files changed"
+  # -- for a run whose whole purpose was to scan the tree. Same fail-open shape
+  # #589 fixed in Gate 3, one layer down: the CLI says the tree was checked and
+  # the fragment checks a diff that does not exist. The runner exports GATE_SCOPE;
+  # read it and enumerate tracked files instead.
+  if [ "${GATE_SCOPE:-diff}" = "all" ]; then
+    echo "     Scope: --all (scanning tracked files, not the index)"
+    SEMGREP_FILES=$(git ls-files 2>/dev/null | grep -E '\.(ts|tsx|js|jsx|py|go|java|c|cpp|cs|rb|php|scala|swift)$' || true)
+  else
+    SEMGREP_FILES=$(git diff --cached --name-only --diff-filter=ACM 2>/dev/null | grep -E '\.(ts|tsx|js|jsx|py|go|java|c|cpp|cs|rb|php|scala|swift)$' || true)
+  fi
 
   if [ -z "$SEMGREP_FILES" ]; then
     echo "     ⏭️  SKIPPED - SAST (no supported language files changed)"

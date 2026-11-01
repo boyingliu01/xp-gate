@@ -46,7 +46,14 @@ java_coverage_note() {
     esac
   done
   [ -n "$_has_java" ] || return 0
-  echo "ℹ️  Java rule coverage: $JAVA_COVERAGE_EFFECTIVE/$JAVA_COVERAGE_TOTAL rules effective (inert on Java: $JAVA_COVERAGE_INERT -- see docs/java-principles-coverage.md)"
+  # #628: `docs/` is not in the npm package's `files` list, so pointing a user at
+  # `docs/java-principles-coverage.md` was a dead path in every installed project --
+  # the note told them to read a file that does not exist on their machine. Cite the
+  # upstream URL instead, and keep the local path only when the doc is actually
+  # present (i.e. when running inside this repo).
+  local _where="https://github.com/boyingliu01/xp-gate/blob/main/docs/java-principles-coverage.md"
+  [ -f "docs/java-principles-coverage.md" ] && _where="docs/java-principles-coverage.md"
+  echo "ℹ️  Java rule coverage: $JAVA_COVERAGE_EFFECTIVE/$JAVA_COVERAGE_TOTAL rules effective (inert on Java: $JAVA_COVERAGE_INERT -- see $_where)"
 }
 
  2>&1 echo ""
@@ -165,42 +172,30 @@ else
         rm -f "$PRINCIPLES_STDERR"
 
         if [ "$PRINCIPLES_EXIT" -ge 2 ]; then
-          # Fail-closed (#661), same rule as Gate 8 (#499): a gate that cannot run
-          # must not report success.
+          # #661: exit>=2 means the checker did not RUN (crash, module not found,
+          # bad invocation). This used to record SKIP, and pre-commit treats SKIP
+          # as non-blocking, so a tool failure was absorbed into the green light --
+          # the reproduction printed a module-not-found stack trace and then
+          # "✅ PASSED - Principles checker (no errors found)".
           #
-          # This branch used to settle on SKIP, which the caller reads as
-          # non-blocking -- so a checker that crashed on startup
-          # (`Cannot find module 'C:\c\Users\...'`, the POSIX-path-to-native-node
-          # bug) still printed "PASSED - Principles checker (no errors found)".
-          # The path conversion fixed that one cause; any other way of breaking
-          # the launch (missing tsx, corrupt module, OOM) lands here too, and all
-          # of them would have been absorbed into a green light.
+          # The distinction the gate must keep:
+          #   - tool NOT INSTALLED  -> SKIP is honest; nothing is being claimed.
+          #   - tool PRESENT, CRASH -> WARN. Not a pass (nothing was checked) and
+          #     not a silent skip (the user must know their code went unaudited).
           #
-          # SKIP stays reserved for "language not applicable / tool not
-          # installed", which is not what this is: the checker exists and failed.
-          echo ""
-          echo "❌ BLOCKED - Principles checker failed to execute (exit $PRINCIPLES_EXIT)"
-          echo "This is a tool fault, NOT a clean result. A gate that cannot run must not pass."
-          echo "  Fix the checker, or set PRINCIPLES_SKIP_TOOL_FAULT=1 to downgrade to a warning."
-          echo "  (downgrade is audit-logged and never allowed on main/master)"
-          GATE_4_STATUS="FAIL"
+          # WARN rather than FAIL on purpose: the commit itself is not necessarily
+          # bad, the TOOL is broken, and blocking every commit until node/tsx is
+          # repaired would blame the change for an environment fault. What must
+          # never happen is the green light.
+          echo "⚠️  Principles checker did not run (exit ${PRINCIPLES_EXIT}) — this code is NOT verified."
+          echo "     Gate 4 cannot claim a pass for a check that never executed."
+          echo "     Fix the checker invocation above (or run 'npx xp-gate check principles .')."
+          echo "⏭️  WARN - Principles check (checker execution error)"
+          GATE_4_STATUS="WARN"
+          # Consumed by the sourcing parent, not here (see #548).
           # shellcheck disable=SC2034
           GATE_4_REASON="checker_execution_error"
           rm -f "$PRINCIPLES_JSON"
-          if [ "${PRINCIPLES_SKIP_TOOL_FAULT:-0}" = "1" ]; then
-            echo "⚠️  ESCAPE VALVE: PRINCIPLES_SKIP_TOOL_FAULT=1 — downgrading to SKIP"
-            # Same asymmetry as Gate 5a: a downgrade is tolerable on a feature
-            # branch, never on main/master, where it would green-light the trunk.
-            _g4_branch="$(git rev-parse --abbrev-ref HEAD 2>/dev/null || echo unknown)"
-            if [ "$_g4_branch" = "main" ] || [ "$_g4_branch" = "master" ]; then
-              echo "❌ ESCAPE VALVE BLOCKED: PRINCIPLES_SKIP_TOOL_FAULT not allowed on $_g4_branch"
-              GATE_4_STATUS="FAIL"
-              exit 1
-            fi
-            GATE_4_STATUS="SKIP"
-          else
-            exit 1
-          fi
         else
           # Check severity levels. The reporter emits JSON.stringify(out, null, 2),
           # i.e. `"severity": "warning"` WITH a space; tolerate any whitespace so a

@@ -4326,3 +4326,31 @@ specification:
         - id: AC-681-03
           criteria: 仅行尾风格不同时仍须视为相同（沿用 #439 的判定）
           test_type: unit
+
+    # ============================================================
+    # REQ-683: adapters/ 下的 gate 副本必须是 canonical 的逐字节镜像。
+    #
+    # `githooks/adapters/gate-9.sh` 不是死重：它是 TS-less 安装下
+    # `resolveGateScript(9)` 的回退，#532 要求 gate-9 的判决块在三份副本间逐字节
+    # 一致。但实测 5 份里 4 份落后于 canonical——`gate-3.sh` 差 4953 字节，
+    # 缺的正是 #632 的实际修复。
+    #
+    # 一直没出事，只因为发布包的 `adapters/gate-N.sh` 会被随后写入的包根副本覆盖。
+    # 那是**复制顺序**，不是正确性：陈旧文件仍然在树里、仍然随包发布、仍然会赢得
+    # 任何直接读 `adapters/` 的消费者。
+    #
+    # 被下游覆盖的陈旧镜像与正确镜像无法区分，直到顺序改变。
+    # ============================================================
+    - id: REQ-683
+      description: githooks/adapters 下的 gate 脚本须与 githooks/ 根部的 canonical 副本逐字节一致，并由 sync 自愈
+      priority: medium
+      acceptance_criteria:
+        - id: AC-683-01
+          criteria: adapters 下确有 gate 副本存在（防止断言空洞通过）
+          test_type: unit
+        - id: AC-683-02
+          criteria: 每个 adapters gate 副本须与 githooks/<name> 逐字节一致
+          test_type: unit
+        - id: AC-683-03
+          criteria: npm 包的 adapters 镜像须与 githooks/adapters 一致
+          test_type: unit
