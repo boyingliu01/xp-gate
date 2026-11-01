@@ -3394,9 +3394,26 @@ async function doctorDelphi(options = {}) {
 
   // 5. Config ping: parseable, three distinct callable models. A duplicate
   // model here is a review that will BLOCK later — say so now.
-  const cfgPath = configPath || path.join(process.cwd(), '.delphi-config.json');
+  //
+  // #684: resolve the SAME way the runner does. A project-local config wins; a
+  // machine-level one under XDG_CONFIG_HOME (or ~/.config) is the documented
+  // fallback, and a review keeps working on it. Checking only `cwd` reported
+  // FAIL on the layout SKILL.md recommends and told the user to copy the example
+  // into the project — manufacturing the drifted duplicate #541 warns about.
+  //
+  // An explicit `configPath` is an ANSWER, not a hint: a caller that names a
+  // file means that file, so it disables the fallback. Otherwise a test (or a
+  // caller) pinning an absent path silently reads the developer's real global
+  // config and reports PASS — the same vacuous-pass shape this batch is fixing.
+  const projectCfgPath = configPath
+    || path.join(options.projectDir || process.cwd(), '.delphi-config.json');
+  const usingGlobalConfig = !configPath
+    && !fs.existsSync(projectCfgPath)
+    && fs.existsSync(globalConfigPath);
+  const cfgPath = usingGlobalConfig ? globalConfigPath : projectCfgPath;
+  const cfgLabel = 'Delphi config (.delphi-config.json)';
   if (!fs.existsSync(cfgPath)) {
-    add('Delphi config (.delphi-config.json)', 'FAIL',
+    add(cfgLabel, 'FAIL',
       `${cfgPath} not found (copy .delphi-config.json.example from the skill directory)`);
   } else {
     try {
@@ -3404,7 +3421,7 @@ async function doctorDelphi(options = {}) {
       const profileName = raw.active_profile || 'default';
       const profile = raw.profiles && raw.profiles[profileName];
       if (!profile) {
-        add('Delphi config (.delphi-config.json)', 'FAIL', `profile "${profileName}" not found`);
+        add(cfgLabel, 'FAIL', `profile "${profileName}" not found`);
       } else {
         const experts = profile.experts || {};
         const models = roles.map((r) => experts[r] && experts[r].model);
@@ -3422,10 +3439,14 @@ async function doctorDelphi(options = {}) {
           if (missingRoles.length > 0) problems.push(`missing experts: ${missingRoles.join(', ')}`);
           if (duplicates.length > 0) problems.push(`duplicate models: ${[...new Set(duplicates)].join(', ')}`);
           if (badProviders.length > 0) problems.push(`unusable provider binding: ${badProviders.join(', ')}`);
-          add('Delphi config (.delphi-config.json)', 'FAIL', problems.join('; '));
+          add(cfgLabel, 'FAIL', problems.join('; '));
         } else {
-          add('Delphi config (.delphi-config.json)', 'PASS',
-            `profile "${profileName}": ${models.join(' / ')}`);
+          // Always name the file that was actually read. Without it a user with
+          // both scopes present cannot tell which one the review will use — the
+          // exact ambiguity that made #684 hard to see.
+          const scopeNote = usingGlobalConfig ? ` [global: ${cfgPath}]` : ` [project: ${cfgPath}]`;
+          add(cfgLabel, 'PASS',
+            `profile "${profileName}": ${models.join(' / ')}${scopeNote}`);
           // #574: non-local seats are reported, not blocked. The local-only rule
           // is an operator preference (the 2026-10-03 quota burn), so doctor
           // surfaces the cost exposure without failing a deliberately hosted
@@ -3483,7 +3504,7 @@ async function doctorDelphi(options = {}) {
         }
       }
     } catch (err) {
-      add('Delphi config (.delphi-config.json)', 'FAIL', `unparseable: ${err.message}`);
+      add(cfgLabel, 'FAIL', `unparseable: ${err.message}`);
     }
   }
 

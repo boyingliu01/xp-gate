@@ -337,3 +337,117 @@ describe('doctor delphi (#414 REQ-3/REQ-6)', () => {
     }
   });
 });
+
+// ── #684: the documented global-config fallback ──────────────────────────────
+// SKILL.md tells users to keep ONE machine-level config at
+// `~/.config/xp-gate/.delphi-config.json` and carry no repo-local copy. The
+// runner resolves that fallback, so a review works; the doctor did not, and
+// reported FAIL on a layout its own documentation recommends. Worse, the FAIL
+// detail told the user to copy the example into the project — which manufactures
+// exactly the drifted duplicate that #541 added a shadow warning for.
+//
+// The distinction this batch pins: "no config anywhere" is still a FAIL
+// (that is a genuinely broken install); "no project config but a valid global
+// one" is not.
+describe('doctor delphi #684 global config fallback', () => {
+  let tmpDirs;
+  let tmpHome;
+  let originalHome;
+
+  beforeEach(() => {
+    tmpDirs = makeTempDirs(['doctor-684-home']);
+    tmpHome = tmpDirs['doctor-684-home'];
+    originalHome = process.env.HOME;
+    process.env.HOME = tmpHome;
+    fs.mkdirSync(path.join(tmpHome, '.qoder'), { recursive: true });
+    resetLibModules(vi, LIB_MODULES);
+    muteConsole(vi);
+  });
+
+  afterEach(() => {
+    if (originalHome === undefined) delete process.env.HOME; else process.env.HOME = originalHome;
+    removeTempDirs(tmpDirs);
+    vi.restoreAllMocks();
+  });
+
+  // Local copy: the suite above keeps its own writeConfig inside its describe
+  // scope, so this block cannot reach it.
+  function writeConfig(configPath) {
+    fs.writeFileSync(configPath, JSON.stringify({
+      active_profile: 'default',
+      profiles: {
+        default: {
+          providers: {
+            gw: { base_url: 'https://gw.example/v1', api_key: 'k' },
+          },
+          experts: {
+            architecture: { provider: 'gw', model: 'model-a' },
+            technical: { provider: 'gw', model: 'model-b' },
+            feasibility: { provider: 'gw', model: 'model-c' },
+          },
+        },
+      },
+    }));
+    return configPath;
+  }
+
+  function writeGlobalConfig() {
+    const dir = path.join(tmpHome, '.config', 'xp-gate');
+    fs.mkdirSync(dir, { recursive: true });
+    return writeConfig(path.join(dir, '.delphi-config.json'));
+  }
+
+  function captureLogs() {
+    const logs = [];
+    const spy = vi.spyOn(console, 'log').mockImplementation((...args) => logs.push(args.join(' ')));
+    return { logs, restore: () => spy.mockRestore() };
+  }
+
+  it('AC-684-01: a valid global config with no project copy PASSes instead of failing', async () => {
+    const globalPath = writeGlobalConfig();
+    const project = path.join(tmpHome, 'a-project-with-no-config');
+    fs.mkdirSync(project, { recursive: true });
+    const { logs, restore } = captureLogs();
+    const { doctorDelphi } = require('../doctor');
+    await doctorDelphi({ projectDir: project, globalConfigPath: globalPath, npmLatest: null });
+    restore();
+    const cfgLine = logs.find((l) => l.includes('Delphi config'));
+    expect(cfgLine).toBeDefined();
+    expect(cfgLine).not.toMatch(/FAIL/);
+    expect(cfgLine).toMatch(/global/i);
+  });
+
+  it('AC-684-02: no config in either scope still FAILs (fallback must not mask a broken install)', async () => {
+    const project = path.join(tmpHome, 'bare-project');
+    fs.mkdirSync(project, { recursive: true });
+    const { logs, restore } = captureLogs();
+    const { doctorDelphi } = require('../doctor');
+    const code = await doctorDelphi({
+      projectDir: project,
+      globalConfigPath: path.join(tmpHome, 'no-such-global.json'),
+      npmLatest: null,
+    });
+    restore();
+    expect(code).toBe(1);
+    // The rendered line carries a ✗ marker, not the literal word FAIL.
+    const cfgLine = logs.find((l) => l.includes('Delphi config (.delphi-config.json)'));
+    expect(cfgLine).toBeDefined();
+    expect(cfgLine).toContain('✗');
+    expect(cfgLine).toMatch(/not found/);
+  });
+
+  it('AC-684-03: a project config still wins over the global one', async () => {
+    const globalPath = writeGlobalConfig();
+    const project = path.join(tmpHome, 'project-with-own-config');
+    fs.mkdirSync(project, { recursive: true });
+    const localPath = writeConfig(path.join(project, '.delphi-config.json'));
+    const { logs, restore } = captureLogs();
+    const { doctorDelphi } = require('../doctor');
+    await doctorDelphi({ projectDir: project, globalConfigPath: globalPath, npmLatest: null });
+    restore();
+    const cfgLine = logs.find((l) => l.includes('Delphi config'));
+    expect(cfgLine).toBeDefined();
+    expect(cfgLine).toContain(localPath);
+    expect(cfgLine).not.toMatch(/global/i);
+  });
+});
