@@ -1,5 +1,41 @@
 # Changelog
 
+## [0.35.22.0] - 2026-11-02
+
+**「规则存在」不等于「规则被执行」。** 2026-10-30 诊断后往 AGENTS.md 写了三条
+运行时纪律，2026-11-02 复核发现只有规则 1 真正生效（纯读取 shell 32.7% → 0.2%），
+规则 2/3 基本没执行——而当时**没有任何入口能量出这件事**，只能靠人工翻日志。
+本版本补上这个入口，并修掉一个必然触发的镜像守卫假失败。
+
+### Added
+
+- **`xp-gate runtime-journal`（#712）**：从 agent 自己的会话日志里量化规则执行度——
+  阻塞 `job_output`（含显式 `wait:true`）、字面 `sleep`、CI 轮询、超长 `timeout`、
+  calls/step 批量率。设计取向：**报 NOT MEASURABLE 而不是报 0**，因为零会被读成
+  「没问题」；跳过损坏行并计数、排除不合理耗时，绝不静默吞掉。始终 exit 0
+  （它是诊断，不是门禁）。这是「规则是否真的被执行」唯一可信的来源。
+- **`xp-gate sync-mirrors`（#713）**：统一报告并修复所有 canonical ↔ mirror 对的漂移。
+  **默认 dry-run**，因为一条写错的配对会静默批量覆盖；比对的是 *git 已跟踪* 文件集，
+  所以 `__pycache__` 这类产物不会被误判成漂移，而已跟踪但被删除的文件仍计入
+  （否则「可修复」就无从谈起）。刻意**不**纳入 `githooks/` → `src/npm-package/hooks/`：
+  那一对在守卫里是精选文件清单而非整目录，整树同步会提议拷 504 个文件。
+
+### Fixed
+
+- **`check-hook-lib-mirror.sh` 的必然假失败（#713）**：只要有人 import 过一次
+  `prepush-score.py`，`githooks/lib/` 下就会出现 `__pycache__/`，普通 `find` 于是为
+  一个没人添加过的文件报 `file sets differ`——一个**阻断 push** 的故障，而操作者唯一
+  的解法是手工去删缓存目录。同源的 `check-hook-mirror.sh` 早已过滤它（#587/#588），
+  两个脚本口径不一致导致同一产物过一个挂另一个。现统一排除。
+
+### Verification
+
+- 新增 49 条测试；全量 `npx vitest run` **299 文件 / 3292 测试全绿**，零回归；
+  `npx tsc --noEmit` 与 `npm run lint` 干净；四个镜像守卫全部 PASS（修复前
+  `check-hook-lib-mirror` FAIL）。Delphi code-walkthrough 3/3 专家 APPROVED。
+- **未声称性能提升**：本版本交付的是测量能力与一个缺陷修复，改善幅度需在工具被
+  采用后用 `runtime-journal` 前后对比才可断言。
+
 ## [0.35.21.0] - 2026-11-02
 
 一个在真实消费者仓库里实测发现的缺陷：**门禁阻断了自己写出的文件**。
