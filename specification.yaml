@@ -4354,3 +4354,22 @@ specification:
         - id: AC-683-03
           criteria: npm 包的 adapters 镜像须与 githooks/adapters 一致
           test_type: unit
+
+    # ============================================================
+    # REQ-709: 工具必须暴露自己的运行版本，否则「没生效」与「没做」不可区分。
+    # 与 #451（hook 漂移）、#681（skill 内容漂移）同属一类：运行的东西
+    # 与你以为在运行的东西不一致，且没有任何机制告诉你。
+    # ============================================================
+    - id: REQ-709
+      description: delphi-review 的输出必须携带插件版本号，使陈旧模块加载
+        可以被识别，而不是表现为「修复没生效」
+      priority: high
+      acceptance_criteria:
+        - id: AC-709-01
+          criteria: 版本号读取自插件自身 package.json，不得硬编码字面量
+            （硬编码会在下一次发布后开始撒谎）
+          test_type: unit
+        - id: AC-709-02
+          criteria: "delphi-review 的 footer 含 plugin 版本字段，且原有的
+            Provider 与 Seats 字段保持不变"
+          test_type: unit
