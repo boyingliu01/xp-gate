@@ -1,5 +1,46 @@
 # Changelog
 
+## [0.35.21.0] - 2026-11-02
+
+一个在真实消费者仓库里实测发现的缺陷：**门禁阻断了自己写出的文件**。
+发布 0.35.20 后用 npm 包实测才发现——本地测试全绿，因为本地仓库不是空的。
+
+### Fixed
+
+- **Gate 12 阻断 pre-commit 自己写出的报告（#710）**：在尚无提交的仓库里，
+  `git rev-parse --abbrev-ref HEAD` 会**先打印 `HEAD` 再以非零退出**。而代码是
+  `$(git rev-parse --abbrev-ref HEAD 2>/dev/null || echo "unknown")` —— `$( )`
+  捕获命令的**全部** stdout，`||` 只决定是否再追加回退值，于是得到
+  `"HEAD\nunknown"` 两行。裸换行不能出现在 JSON 字符串字面量里，报告因此无效。
+  伤害在下一步：Gate 12 读那份报告，报 `Bad control character in string literal`
+  并 BLOCK。**每一个刚 `git init` 的消费仓库，第一次提交都会因为一个与它无关的
+  原因失败一次**，而提示让用户去修一个他既没写、也不该手动编辑的产物。
+  三处同类（报告用的 `COMMIT_HASH` / `BRANCH`，以及 `ROOT_DIR`）统一改为
+  「先捕获再判空」，并加 `tr -d '\r\n'` 作第二道防线。detached HEAD 报的 `HEAD`
+  是事实，予以保留。
+- **pre-push 的 bypass 审计记录可被它所审计的东西破坏（#710）**：审计记录用 shell
+  插值拼 JSON，`XP_GATE_BYPASS_REASON` 是用户自由输入——reason 里一个双引号就能
+  提前闭合字符串，把整行变成垃圾。一条能被它所审计的东西破坏的审计轨迹，不算
+  审计轨迹。改为经环境变量交给 node，由 `JSON.stringify` 序列化，没有任何 shell
+  引号层能碰到内容。同一函数里的三处 git 捕获也一并修正。
+
+### Verification
+
+- `githooks/__tests__/issue-711-*.bats` 4 条 + `empty-repo-head-resolution.bats` 4 条
+  + `issue-686-*.bats` 5 条，13 条全绿，且从仓库外运行同样全绿（cwd 无关）
+- 变异验证：还原 `|| echo` 写法 → AC-01 精确失败；抽掉 `_AJ_REASON` 传递 →
+  AC-711-04 精确失败；恢复后全绿
+- 端到端：空仓库装 hooks 后连续两次提交，第二次 Gate 12 PASS（修复前必失败）
+- `scripts/check-hook-mirror.sh` PASS
+
+### Note
+
+本轮两次差点造出恒真守卫，都在变异验证时被抓：
+测试 1 用了不存在的 `$run_output`（bats 是 `$output`），判断恒假、永远显示绿色；
+sed 版转义器被多层 shell 引号吃坏，`2>/dev/null` 让错误消失、`reason` 变成空串——
+**审计记录看起来正常生成，内容却是空的**。两次都是本项目反复出现的形态：
+一个从不失败的检测器，与「没有漂移」无法区分。
+
 ## [0.35.20.0] - 2026-11-02
 
 四个「静默失效」缺陷 + 一个可观测性缺口。共同形状延续 0.35.19.0：
