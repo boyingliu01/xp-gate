@@ -1,8 +1,8 @@
 # PLUGINS KNOWLEDGE BASE
 
 **Generated:** 2026-11-02
-**Commit:** 1432ea89
-**Branch:** fix/p1-bugs-20261102
+**Commit:** 8a968080
+**Branch:** main
 **Version:** 0.35.23.0
 
 ## OVERVIEW
