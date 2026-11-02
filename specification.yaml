@@ -4314,6 +4314,62 @@ specification:
           test_type: unit
 
     # ============================================================
+    # REQ-705: 5xx 分支不得丢弃 provider 的结构化错误体。
+    #
+    # 同一个函数里 429 分支已经把 body 用得很好（区分 category_quota 要管理员配
+    # 额度、cost_quota 等日额度重置），5xx 却什么都不读，只报「Server error (500)」。
+    # 实测于 whalecloud 网关：prompt 里含 `new ProcessBuilder(args).start()` 时
+    # 网关在响应处理阶段返 500，body 写着 type=response_processing_error、
+    # param=non_stream_chat_response。这三个字面值正是区分「网关抖动」「上游超时」
+    # 「内容触发处理失败」的全部依据——三者处置完全不同。
+    #
+    # 另一半是可重试性：内容相关的失败重试必然同样失败，标成 retryable 只会让
+    # 编排层白白烧掉重试预算。读 body 失败时不得改变原有判定。
+    # ============================================================
+    - id: REQ-705
+      description: 外部评审的 5xx 分支须保留 provider 的结构化错误体，并把内容相关失败标为非可重试
+      priority: high
+      acceptance_criteria:
+        - id: AC-705-01
+          criteria: 5xx 响应体的 error.type / error.param 须出现在失败信息里
+          test_type: unit
+        - id: AC-705-02
+          criteria: 识别为 response_processing_error 的失败须标为非可重试（内容不变，重试必然重复失败）
+          test_type: unit
+        - id: AC-705-03
+          criteria: 响应体不可解析时保持原有判定（5xx 且可重试），读 body 失败不得改变结论
+          test_type: unit
+        - id: AC-705-04
+          criteria: 无结构化错误体的真实瞬时 5xx 仍须可重试
+          test_type: unit
+
+    # ============================================================
+    # REQ-707: base_url 须支持 ${VAR} 展开，且未展开时在校验层报错。
+    #
+    # ${VAR} 展开原本只挂在 api_key 上。把 base_url 写成占位符是「内网地址不入库」
+    # 最自然的直觉做法，而占位符是合法的非空字符串，所以校验通过、字面量被当成
+    # URL 发出去，在**网络层**以连接失败的形式失败——配置看起来完全正常。
+    # 调用方 whale-sql-audit 因此被迫把组织内网网关地址硬编码进随仓库分发的配置。
+    # 退回字面量正是本缺陷的成因，所以未设置时必须报错并点名变量。
+    # ============================================================
+    - id: REQ-707
+      description: delphi-external 的 base_url 须与 api_key 一致地支持 ${VAR} 展开，环境变量缺失时在配置加载阶段报错
+      priority: high
+      acceptance_criteria:
+        - id: AC-707-01
+          criteria: base_url 里的 ${VAR} 须用环境变量展开
+          test_type: unit
+        - id: AC-707-02
+          criteria: 环境变量缺失时须在配置加载阶段报错，且错误信息点名该变量
+          test_type: unit
+        - id: AC-707-03
+          criteria: 不得退回字面量占位符（那正是该缺陷的成因）
+          test_type: unit
+        - id: AC-707-04
+          criteria: 字面量 base_url 不受影响（不得把正常配置当占位符处理）
+          test_type: unit
+
+    # ============================================================
     # REQ-684: doctor delphi 必须与 runner 用同一套配置解析。
     #
     # SKILL.md 推荐「机器级只放一份配置，仓库里不带」的布局，runner 确实实现了
