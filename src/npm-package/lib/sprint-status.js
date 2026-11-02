@@ -221,32 +221,65 @@ function jsonMode(state) {
 const FIX_RE = /^(fix(\(.+\))?:)|\b(fix|bugfix|hotfix|patch|修复)\b/i;
 
 /**
- * Count fix commits in a git repo since a given date (#369).
- * Scans all branches (--all) per Round 1 repo-wide decision.
- * @param {string} repoDir - Repository root
- * @param {string} sinceDate - ISO 8601 date string
- * @returns {number} Count of fix commits
+ * Git env with every repo-redirecting variable stripped, so `cwd` is the only
+ * thing that decides which repository is inspected.
  */
-function getFixCommitCount(repoDir, sinceDate) {
+function cleanGitEnv() {
+  const gitEnv = { ...process.env };
+  for (const name of [
+    'GIT_ALTERNATE_OBJECT_DIRECTORIES', 'GIT_CONFIG', 'GIT_CONFIG_PARAMETERS',
+    'GIT_CONFIG_COUNT', 'GIT_OBJECT_DIRECTORY', 'GIT_DIR', 'GIT_WORK_TREE',
+    'GIT_IMPLICIT_WORK_TREE', 'GIT_GRAFT_FILE', 'GIT_INDEX_FILE',
+    'GIT_NO_REPLACE_OBJECTS', 'GIT_REPLACE_REF_BASE', 'GIT_PREFIX',
+    'GIT_SHALLOW_FILE', 'GIT_COMMON_DIR',
+  ]) {
+    delete gitEnv[name];
+  }
+  return gitEnv;
+}
+
+/**
+ * Commit counts for a sprint's own time window: start → completion (#704).
+ *
+ * The old signature took only a lower bound, and the caller passed
+ * `completed_at` — by definition the moment the sprint ENDED. Every sprint
+ * commit happened before it, so `git log --since <completed_at>` returned an
+ * empty set and the rework rate was structurally 0. The interval that matters
+ * is "sprint start → sprint end", so both bounds are now explicit and neither
+ * can drift away from the other.
+ *
+ * Returns BOTH numbers from a single `git log` call: the rate is `fix / total`,
+ * and `total` was previously read from `state.metrics.total_sprint_commits`,
+ * which nothing ever wrote — it was always 0, then floored to 1 by
+ * `Math.max(total, 1)`, which is what turned "no data" into a confident 0%.
+ *
+ * `total === 0` is a meaningful answer (nothing to measure in the window) and is
+ * reported as such rather than being dressed up as 0% rework.
+ *
+ * @param {string} repoDir - Repository root
+ * @param {string|undefined} sinceDate - Sprint start (ISO 8601); omitted = unbounded
+ * @param {string|undefined} untilDate - Sprint completion (ISO 8601); omitted = unbounded
+ * @returns {{fix: number, total: number}} counts within the window
+ */
+function getWindowCommitCounts(repoDir, sinceDate, untilDate) {
+  const empty = { fix: 0, total: 0 };
+  if (!sinceDate) return empty;
   try {
-    const gitEnv = { ...process.env };
-    for (const name of [
-      'GIT_ALTERNATE_OBJECT_DIRECTORIES', 'GIT_CONFIG', 'GIT_CONFIG_PARAMETERS',
-      'GIT_CONFIG_COUNT', 'GIT_OBJECT_DIRECTORY', 'GIT_DIR', 'GIT_WORK_TREE',
-      'GIT_IMPLICIT_WORK_TREE', 'GIT_GRAFT_FILE', 'GIT_INDEX_FILE',
-      'GIT_NO_REPLACE_OBJECTS', 'GIT_REPLACE_REF_BASE', 'GIT_PREFIX',
-      'GIT_SHALLOW_FILE', 'GIT_COMMON_DIR',
-    ]) {
-      delete gitEnv[name];
-    }
-    const out = execFileSync(
-      'git',
-      ['log', '--all', '--since', sinceDate, '--pretty=format:%s'],
-      { cwd: repoDir, env: gitEnv, encoding: 'utf8', stdio: ['pipe', 'pipe', 'pipe'] }
-    );
-    return out.split('\n').filter(l => l.trim() && FIX_RE.test(l.trim())).length;
+    const args = ['log', '--all'];
+    // --since/--until compare committer dates; missing or unparsable values are
+    // ignored by git, which would silently widen the window back to "everything".
+    // So only pass a bound that is actually a valid timestamp.
+    if (!Number.isNaN(new Date(sinceDate).getTime())) args.push('--since', sinceDate);
+    if (untilDate && !Number.isNaN(new Date(untilDate).getTime())) args.push('--until', untilDate);
+    args.push('--pretty=format:%s');
+
+    const out = execFileSync('git', args, {
+      cwd: repoDir, env: cleanGitEnv(), encoding: 'utf8', stdio: ['pipe', 'pipe', 'pipe'],
+    });
+    const subjects = out.split('\n').map(l => l.trim()).filter(Boolean);
+    return { fix: subjects.filter(s => FIX_RE.test(s)).length, total: subjects.length };
   } catch {
-    return 0;
+    return empty;
   }
 }
 
@@ -302,13 +335,37 @@ async function handleReworkCheck(searchDir, windowDays) {
   console.log('─'.repeat(60));
 
   let hasAlert = false;
+  let hasUnmeasurable = false;
   for (const { id, state, file } of inWindow) {
-    const totalCommits = state.metrics.total_sprint_commits || 0;
-    const fixCommits = getFixCommitCount(searchDir, state.metrics.completed_at);
-    const rate = fixCommits / Math.max(totalCommits, 1);
+    // #704: the window is the sprint itself (start → completion), and both
+    // counts come from one `git log` over that window. Previously the total was
+    // read from a field nothing wrote, and the `--since` bound was the END of
+    // the sprint, so both numbers were structurally 0 and the rate could only
+    // ever be 0 — while the summary line still said "within acceptable rate".
+    const { fix: fixCommits, total: totalCommits } = getWindowCommitCounts(
+      searchDir,
+      state.started_at,
+      state.metrics.completed_at,
+    );
 
-    // Write rework_rate back to the source file
+    // No commits in the window means the rate is undefined, not zero. Reporting
+    // 0.0% here would rebuild the same false reassurance one level down, so the
+    // sprint is surfaced as unmeasurable and never counts as "within threshold".
+    if (totalCommits === 0) {
+      hasUnmeasurable = true;
+      console.log(`  ${id}: 0 fix / 0 total commits — NOT MEASURABLE (no commits in sprint window)`);
+      continue;
+    }
+
+    const rate = fixCommits / totalCommits;
+
+    // Persist what was actually measured. The previous code wrote the rate
+    // unconditionally, which meant a transposed 0 could overwrite a value a
+    // human had already corrected; now the denominator is persisted alongside
+    // it so the next run can be checked against its own evidence.
     state.metrics.rework_rate = rate;
+    state.metrics.total_sprint_commits = totalCommits;
+    state.metrics.fix_sprint_commits = fixCommits;
     try {
       fs.writeFileSync(file, JSON.stringify(state, null, 2));
     } catch { /* non-fatal */ }
@@ -324,6 +381,10 @@ async function handleReworkCheck(searchDir, windowDays) {
   console.log('─'.repeat(60));
   if (hasAlert) {
     console.log('⚠️  Rework rate alert: one or more sprints exceed 30% threshold');
+  } else if (hasUnmeasurable) {
+    // "All sprints within acceptable rate" would be a claim about sprints that
+    // were never measured. Say which is which instead of picking the cheerful one.
+    console.log('⚠️  Some sprints could not be measured (no commits in window) — not certified as within threshold');
   } else {
     console.log('All sprints within acceptable rework rate (≤30%)');
   }
@@ -493,4 +554,8 @@ module.exports = {
   jsonMode,
   isStale,
   handleSprintStatus,
+  // Exported for #704: the rework-rate arithmetic was only reachable through
+  // the CLI, so the only way to test it was to shell out and parse console
+  // output. A function nobody can call directly is a function nobody can pin.
+  handleReworkCheck,
 };
