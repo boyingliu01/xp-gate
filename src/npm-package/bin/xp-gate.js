@@ -17,6 +17,8 @@ const { arch } = require('../lib/arch.js');
 const { upgrade } = require('../lib/upgrade.js');
 const { bootstrap } = require('../lib/bootstrap.js');
 const { updateHooks } = require('../lib/update-hooks.js');
+const { handleRuntimeJournal } = require('../lib/runtime-journal.js');
+const { handleSyncMirrors } = require('../lib/mirror-sync.js');
 const gateRunner = require('../lib/gate-runner.js');
 
 // #392-#6: a user-supplied path embedded in a shell command string lets cmd.exe
@@ -349,6 +351,16 @@ const COMMANDS = {
       handleRetro(subargs).then(code => process.exit(code));
     },
     usage: 'xp-gate retro [--days N] [--all] [--json] [--sprint <id>]'
+  },
+  'runtime-journal': {
+    description: 'Measure the AGENTS.md runtime rules (blocking waits, sleep/polling, call batching) from agent session journals (#712)',
+    run: subargs => process.exit(handleRuntimeJournal(subargs)),
+    usage: 'xp-gate runtime-journal [--days N] [--json] [--sessions-dir <path>]'
+  },
+  'sync-mirrors': {
+    description: 'Report or repair drift between canonical trees and their npm-package mirrors; dry-run unless --write (#713)',
+    run: subargs => process.exit(handleSyncMirrors(subargs)),
+    usage: 'xp-gate sync-mirrors [--write] [--json]'
   },
   'gate-coverage': {
     description: 'One view of compliance against every gate: PASS / DEBT / SKIP / FAIL, with debt and evidence (#636)',
