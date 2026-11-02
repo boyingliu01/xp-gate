@@ -175,7 +175,9 @@ Subcommands registered in 0.8.8.0 (verified against bin source):
 | `.flaky-quarantine.yaml` | Flaky-test quarantine ledger (#603). Every entry requires `owner` and `expiry`; `xp-gate doctor` warns on expired entries, and an entry with no expiry counts as already expired. `critical_path: true` is reported even before expiry. `xp-gate retro` prints first-pass rate, flaky recoveries and quarantine violations — and reports **NOT MEASURABLE** rather than 0% when the journal holds no re-run records |
 | `xp-gate gate-coverage [--json] [--debt] [--strict] [--branch <name>]` | One view of compliance against every gate with FOUR states — PASS / **DEBT** / **SKIP** / **FAIL**. SKIP always carries a reason (`hook-only` / `not-applicable`) so a gate that never ran can never be read as green; DEBT is quantified with an evidence path (e.g. `136 warnings / 14 files` → `.warnings-baseline.json`). Marks the report **STALE** when the artifact's `commit` differs from HEAD rather than presenting another commit's results as current. Exit 0 unless a gate FAILed; `--strict` also fails on DEBT (#636) |
 | `xp-gate rework [--top N] [--dir <path>] [--json]` | Rework report from the gate journal: first-pass rate (**NOT MEASURABLE** rather than 100% when the journal holds no failures), rounds before a landing (median/mean/worst), and top-N blocking reasons grouped by `failure_reason`. Excludes implausible `duration_ms` values whether or not they carry `duration_anomaly` (#651). Advisory only — always exits 0 |
+| `xp-gate runtime-journal [--days N] [--json] [--sessions-dir <path>]` | Measures `AGENTS.md` §AGENT RUNTIME DISCIPLINE from the agent's own session journals: blocking `job_output` waits (and explicit `wait:true`), literal `sleep`, CI polling loops, oversized `timeout`, and calls/step batching (#712). **Advisory only — always exits 0**; reports **NOT MEASURABLE** rather than 0% when no journal is found. This is the only trustworthy source for "has the rule taken effect" |
 | `xp-gate crap [--top N] [--threshold N] [--json] [--paths <p...>] [--include-mirrors]` | Rank functions by CRAP = CCN² × (1 − coverage) + CCN, worst first (#404). **Advisory only — always exits 0.** Needs `coverage/coverage-final.json`; functions whose file no test ever loaded are counted as `unmeasured`, never scored as 0% or 100% |
+| `xp-gate sync-mirrors [--write] [--json]` | Drift report + repair for every canonical ↔ mirror pair (`githooks/adapters`, `githooks/lib`, `src/principles`, `src/build-integrity`, `skills`), (#713). **Dry-run unless `--write`** — a mis-declared pair silently mass-overwrites, so writing is opt-in. Compares the *tracked* file set, so an untracked artefact such as `githooks/lib/__pycache__/` is never read as drift; a tracked-but-deleted file still counts, which is what makes repair possible |
 | `xp-gate --version` | Print version (from VERSION file) |
 
 > Older docs said "8 commands"; 0.8.8 grew to ≥11; 0.8.9 added `check`/`principles`/`arch` for parity with the OpenCode plugin (fixes #208). v0.8.16 added `sprint-status`, bringing the total to ≥16. v0.18.0 added `retro` and `sprint-status --rework-check` (#369). v0.30.2 added `crap` (#404).
@@ -268,13 +270,23 @@ All 10 documented drift items (Gate count, pre-push gates, Delphi threshold, Spr
 **规则 2 — 独立调用必须同一步并发**
 - 任何 ≥2 个**互不依赖**的调用，必须放进同一个 assistant 消息里并发发出，不得一个一个发。
   工具契约已支持同一 block 内多个 `invoke`。串行只在有数据依赖时才允许。
-- 现状：calls/step=1.03，仅 2.7% 的步骤做到批量。目标 calls/step ≥2.0。
+- 现状：calls/step=1.08，仅 4.8% 的步骤做到批量。目标 calls/step ≥2.0。
 
 **规则 3 — 后台任务用完成通知，禁止阻塞轮询**
 - 长任务用 `run_in_background` 起 job，收到完成通知再取结果；**禁止** `job_output`
   设 `wait:true` 反复阻塞等待，也禁止 `sleep` 轮询。需要结果时再用短超时取一次。
-- 现状：`job_output` 1851 次 / 66.5 h，p90 单次 600 s，仅 14.5% 真在“still running”。
-  目标调用数下降 ≥50%。
+- 现状（2026-11-02 复测，最近 3 天）：`job_output` 阻塞 >30 s **96 次 / 8.9 h**，其中
+  **显式 `wait:true` 103 次**；字面 `sleep` 166 次 / 6.9 h；CI 轮询 236 次 / 4.9 h。
+  这三项合计约占工具忙碌时长的 **22–27%**，是当前**最大**的可回收项。
+
+> **实测入口（规则 1–3 的唯一可信来源）**
+> ```bash
+> xp-gate runtime-journal --days 3          # 一屏摘要
+> xp-gate runtime-journal --days 3 --json   # 机器可读，可做 A/B
+> ```
+> 该命令直接读 agent 会话日志，永远 exit 0（是诊断不是门禁）。**任何“规则已生效”的
+> 结论必须以它的数字为准，而不是以规则是否存在为准**——2026-11-02 的复核就发现：
+> 规则 1 生效（纯读取 shell 32.7% → 0.2%），而规则 2/3 几乎没有执行。
 
 **规则 4 — 契约先测（发布流水线类改动）**
 - 触及打包/发布/插件产物的改动，先写集成/契约测试（范式见 `plugins/dsh/src/contract.test.ts`），
