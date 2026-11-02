@@ -55,6 +55,21 @@ function daysAgo(n) {
   return new Date(Date.now() - n * 86400000).toISOString();
 }
 
+/**
+ * Hour-level offset, needed to express a sprint window that actually CONTAINS
+ * the fixture's commits (#704).
+ *
+ * The commits are made "now", so a window built from daysAgo(9)→daysAgo(2) held
+ * no commits at all. The old fixtures compensated by hand-writing
+ * `total_sprint_commits: 10` — a number nothing in the code ever produced — which
+ * pinned the expected rate against a value that could only exist in the test.
+ * Negative = in the future; used for `completed_at`, which in the real CLOSE
+ * ordering is stamped after the last commit.
+ */
+function hoursAgo(n) {
+  return new Date(Date.now() - n * 3600000).toISOString();
+}
+
 beforeAll(() => {
   TMP_DIR = fs.mkdtempSync(path.join(os.tmpdir(), 'rework-test-'));
   cwdSpy = vi.spyOn(process, 'cwd');
@@ -101,9 +116,14 @@ describe('sprint-status --rework-check (#369)', () => {
     git('init', dir);
     git('config user.email "test@test.com"', dir);
     git('config user.name "Test"', dir);
+    // 10 commits, 2 of them fixes => 20%, below the 30% threshold.
+    // The count has to come from real history: the old fixture made 3 commits
+    // and declared 'total_sprint_commits: 10' by hand, so the expected 20%
+    // could only ever be produced by the fabricated number (#704).
     makeCommit('feat: initial', dir);
     makeCommit('fix: resolve login bug', dir);
     makeCommit('fix(auth): handle timeout', dir);
+    for (let i = 0; i < 7; i += 1) makeCommit(`feat: feature ${i}`, dir);
 
     writeSprintState({
       _schema_version: 1,
@@ -111,10 +131,10 @@ describe('sprint-status --rework-check (#369)', () => {
       task_description: 'Sprint B',
       phase: 6,
       status: 'completed',
-      started_at: daysAgo(9),
+      started_at: hoursAgo(1),
       isolation: { worktree_path: null, branch: 'main' },
       phase_history: [],
-      metrics: { completed_at: daysAgo(2), total_sprint_commits: 10 },
+      metrics: { completed_at: hoursAgo(-1) },
     }, dir);
 
     const logSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
@@ -142,12 +162,13 @@ describe('sprint-status --rework-check (#369)', () => {
     git('init', dir);
     git('config user.email "test@test.com"', dir);
     git('config user.name "Test"', dir);
+    // 10 commits, 5 of them fixes => 50%, above the 30% threshold.
     makeCommit('fix: one', dir);
     makeCommit('fix: two', dir);
     makeCommit('bugfix: three', dir);
     makeCommit('hotfix: four', dir);
     makeCommit('patch: five', dir);
-    makeCommit('feat: six', dir);
+    for (let i = 0; i < 5; i += 1) makeCommit(`feat: feature ${i}`, dir);
 
     writeSprintState({
       _schema_version: 1,
@@ -155,10 +176,10 @@ describe('sprint-status --rework-check (#369)', () => {
       task_description: 'Sprint C',
       phase: 6,
       status: 'completed',
-      started_at: daysAgo(9),
+      started_at: hoursAgo(1),
       isolation: { worktree_path: null, branch: 'main' },
       phase_history: [],
-      metrics: { completed_at: daysAgo(2), total_sprint_commits: 10 },
+      metrics: { completed_at: hoursAgo(-1) },
     }, dir);
 
     const logSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
@@ -208,6 +229,10 @@ describe('sprint-status --rework-check (#369)', () => {
     }
     makeCommit('feat: target initial', targetDir);
     makeCommit('fix: target bug', targetDir);
+    // 8 more target commits => 10 total, 1 fix => 10%. The count must come from
+    // real history; the old fixture declared it in the state file by hand, and
+    // this test's actual subject is GIT_DIR precedence, not arithmetic (#704).
+    for (let i = 0; i < 8; i += 1) makeCommit(`feat: target feature ${i}`, targetDir);
     makeCommit('fix: outer one', outerDir);
     makeCommit('fix: outer two', outerDir);
     makeCommit('fix: outer three', outerDir);
@@ -218,10 +243,10 @@ describe('sprint-status --rework-check (#369)', () => {
       task_description: 'Hook environment sprint',
       phase: 6,
       status: 'completed',
-      started_at: daysAgo(9),
+      started_at: hoursAgo(1),
       isolation: { worktree_path: null, branch: 'main' },
       phase_history: [],
-      metrics: { completed_at: daysAgo(2), total_sprint_commits: 10 },
+      metrics: { completed_at: hoursAgo(-1) },
     }, targetDir);
     cwdSpy.mockReturnValue(targetDir);
 

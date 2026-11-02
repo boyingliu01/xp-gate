@@ -4405,3 +4405,32 @@ specification:
           criteria: 测试断言 @archlinter/cli 主版本仍为 0.16；版本变化时失败并
             提示复核设计文档，防止「分层不可用」这一假设静默过期
           test_type: unit
+
+    # ============================================================
+    # REQ-704: 返工率必须真正可测。
+    # 统计区间的下界用了 completed_at（sprint 结束时刻），而全部 sprint
+    # 提交都在它之前 —— 要统计的区间是「开始 → 结束」，实际统计的是
+    # 「结束 → 现在」，恰好是空的。分母 total_sprint_commits 又从未被计算，
+    # 经 Math.max(_, 1) 兜底，使 0/1 恒等于 0。这是质量指标的 fail-open：
+    # 返工永远不可观测，而 CLI 还会主动打印「全部达标」。
+    # ============================================================
+    - id: REQ-704
+      description: sprint-status --rework-check 必须从 sprint 自身的时间区间
+        （started_at → completed_at）统计提交，并如实区分「0% 返工」与
+        「区间内无提交，无法测量」
+      priority: high
+      acceptance_criteria:
+        - id: AC-704-01
+          criteria: fix 提交数与总提交数均取自 started_at → completed_at 区间，
+            而非 completed_at 之后
+          test_type: unit
+        - id: AC-704-02
+          criteria: 真实比率超过 30% 时必须输出告警且不得同时打印「全部达标」
+          test_type: unit
+        - id: AC-704-03
+          criteria: 回写 rework_rate 的同时持久化分母 total_sprint_commits，
+            使下次运行可以对照自身证据复核
+          test_type: unit
+        - id: AC-704-04
+          criteria: 区间内无提交时报告 0 fix / 0 total，不得呈现为有把握的 0%
+          test_type: unit
