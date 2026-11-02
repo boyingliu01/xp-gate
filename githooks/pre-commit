@@ -3699,10 +3699,40 @@ else
         if [ "${PARTIAL_TEST_RUN:-false}" = "true" ]; then
           echo "⚠️  No JaCoCo report found (subset test run) — not blocking."
         else
+          # (#703) Diagnose BEFORE advising. The old message sent every user to
+          # `mvn verify`; on a build path containing non-ASCII characters that
+          # command is a dead end. Measured on a zh_CN Windows box at
+          # D:\projects\SQL审计工具: the JaCoCo agent never writes jacoco.exec, it
+          # does not throw, and Maven reports BUILD SUCCESS with
+          #   [INFO] Skipping JaCoCo execution due to missing execution data file.
+          # so `mvn verify` "fixes" nothing and the user loops. Splitting the
+          # diagnosis out lets each case get an action that can actually work.
           echo "❌ BLOCKED - No JaCoCo report found, so the ${COVERAGE_THRESHOLD:-80}% Java coverage"
-          echo "   floor cannot be verified. Run 'mvn verify' or 'gradle jacocoTestReport'"
-          echo "   so that target/site/jacoco/jacoco.csv exists (see also: JaCoCo detection"
-          echo "   in adapters/java.sh)."
+          echo "   floor cannot be verified."
+          # The distinguishing symptom is the jacoco.exec execution data file, not
+          # a missing report: a report that failed to be GENERATED and an agent
+          # that never WROTE are different problems with different fixes.
+          echo "   Likely cause: the JaCoCo agent did not write its execution data file"
+          echo "   (target/jacoco.exec), which is what 'Skipping JaCoCo execution due to"
+          echo "   missing execution data file' in the Maven log means."
+          # A non-ASCII working directory is the one common cause where the usual
+          # advice actively does not work, so it must be called out by name rather
+          # than left for the user to discover by trying.
+          case "$PWD" in
+            *[!-~]*)
+              echo "   ⚠️  This build path contains non-ASCII characters: ${PWD}"
+              echo "   ⚠️  Re-running 'mvn verify' will NOT help on this path — JaCoCo"
+              echo "       silently skips writing execution data there. Build through an"
+              echo "       ASCII-only directory instead (e.g. a junction to the same tree,"
+              echo "       entered with cmd's 'pushd'/'cd /d' — Git Bash's cd resolves the"
+              echo "       junction back to the non-ASCII path, so it does not help)."
+              ;;
+            *)
+              echo "   To produce it, run 'mvn verify' or 'gradle jacocoTestReport' so that"
+              echo "   target/site/jacoco/jacoco.csv exists (see also: JaCoCo detection"
+              echo "   in adapters/java.sh)."
+              ;;
+          esac
           exit 1
         fi
       fi
@@ -4546,6 +4576,91 @@ resolve_build_integrity_timeout() {
   esac
 }
 
+# (#708) A Java build failure has one overwhelmingly common cause that the gate
+# used to say nothing about: the wrong JDK. The real reason is buried in the last
+# 20 lines of Maven output, while the gate's own verdict line was only
+# "❌ Java build failed (exit 1)".
+#
+# Measured: a pom with <maven.compiler.release>8</maven.compiler.release> built
+# with JDK 8 fails with "无效的标记: --release" (invalid flag: --release) — a
+# message that points at the compiler ARGUMENTS and at the project CONFIG while
+# actually pointing at the JDK on PATH. Getting from that message to "change the
+# JDK" takes one inference, and the gate's verdict line supplied no premise for
+# it. The person debugging this suspected the release setting, then the plugin
+# version, then .mvn/jvm.config — all wrong; the fix was a different JDK.
+#
+# So: on failure, print what JDK actually ran, what the project asks for, and —
+# when the output carries the tell — state the conclusion instead of the symptom.
+# Diagnostics must never change the verdict; this only adds lines.
+java_bi_report_jdk_context() {
+  local build_out="$1"
+  local java_version="" java_home_val="${JAVA_HOME:-}"
+  # `java -version` writes to stderr on every JDK. Take the version line verbatim
+  # rather than parsing it: this is a diagnostic, and the raw line is what a
+  # person would paste into a bug report.
+  if command -v java >/dev/null 2>&1; then
+    java_version=$(java -version 2>&1 | sed -n '1p')
+  fi
+  if [ -n "$java_version" ]; then
+    echo "     JDK in use: ${java_version}"
+  else
+    echo "     JDK in use: (java not on PATH)"
+  fi
+  if [ -n "$java_home_val" ]; then
+    echo "     JAVA_HOME: ${java_home_val}"
+  else
+    echo "     JAVA_HOME: (unset)"
+  fi
+
+  # What the project requires. Maven declares it three ways; Gradle declares it in
+  # its build script. Report whichever exists — the comparison is the user's, but
+  # only if both halves are visible.
+  local declared=""
+  if [ -f "pom.xml" ]; then
+    local mvn_release mvn_source
+    mvn_release=$(grep -o '<maven\.compiler\.release>[[:space:]]*[0-9][0-9]*' pom.xml 2>/dev/null \
+      | sed 's/.*>[[:space:]]*//' | head -1)
+    mvn_source=$(grep -o '<maven\.compiler\.source>[[:space:]]*[0-9][0-9]*' pom.xml 2>/dev/null \
+      | sed 's/.*>[[:space:]]*//' | head -1)
+    if [ -n "$mvn_release" ]; then
+      declared="maven.compiler.release=${mvn_release}"
+    elif [ -n "$mvn_source" ]; then
+      declared="maven.compiler.source=${mvn_source}"
+    fi
+  fi
+  if [ -z "$declared" ] && [ -f "build.gradle" ]; then
+    local g_compat
+    g_compat=$(grep -o "sourceCompatibility[[:space:]]*=[[:space:]]*['\"]\{0,1\}[0-9][0-9]*" build.gradle 2>/dev/null \
+      | sed "s/.*[=][[:space:]]*['\"]\{0,1\}//" | head -1)
+    [ -n "$g_compat" ] && declared="sourceCompatibility=${g_compat}"
+  fi
+  if [ -z "$declared" ] && [ -f "build.gradle.kts" ]; then
+    local k_compat
+    k_compat=$(grep -o 'sourceCompatibility[[:space:]]*=[[:space:]]*JavaVersion\.VERSION_[0-9_]*' build.gradle.kts 2>/dev/null \
+      | sed 's/.*VERSION_//' | tr '_' '.' | head -1)
+    [ -n "$k_compat" ] && declared="sourceCompatibility=${k_compat}"
+  fi
+
+  if [ -n "$declared" ]; then
+    echo "     Project requires: ${declared}"
+  else
+    echo "     Project requires: (no JDK floor declared in pom.xml/build.gradle)"
+  fi
+
+  # The tell. `--release` only exists from JDK 9, so its rejection is a direct
+  # statement about the JDK, not about the pom. Saying so converts a search into
+  # a fix.
+  case "$build_out" in
+    *--release*)
+      if printf '%s' "$build_out" | grep -qiE 'invalid flag|无效的标记|illegal option|unrecognized|unknown option'; then
+        echo "     💡 The build passed '--release' to javac and the JDK rejected it."
+        echo "        '--release' requires JDK 9 or newer; the JDK above is older than that."
+        echo "        Switch to a JDK >= 9 (or remove the release/source setting if it is not intended)."
+      fi
+      ;;
+  esac
+}
+
 run_java_build_integrity() {
   local timeout_s build_bin
   # Wrapper first: mvnw pins the project's own Maven version.
@@ -4560,12 +4675,17 @@ run_java_build_integrity() {
   fi
 
   timeout_s=$(resolve_build_integrity_timeout)
+  # (#708) Keep the output: the failure branch has to read it to tell a wrong-JDK
+  # failure from any other one. Displayed through `tail -20` exactly as before, so
+  # the visible build log is unchanged.
+  local bi_out
   if command -v timeout >/dev/null 2>&1; then
-    timeout "$timeout_s" "$build_bin" -q -DskipTests compile 2>&1 | tail -20
+    bi_out=$(timeout "$timeout_s" "$build_bin" -q -DskipTests compile 2>&1)
   else
-    "$build_bin" -q -DskipTests compile 2>&1 | tail -20
+    bi_out=$("$build_bin" -q -DskipTests compile 2>&1)
   fi
-  local rc="${PIPESTATUS[0]}"
+  local rc=$?
+  printf '%s\n' "$bi_out" | tail -20
   if [ "$rc" -eq 0 ]; then
     echo "     ✅ Java build integrity verified (mvn -q -DskipTests compile)."
     return 0
@@ -4576,6 +4696,7 @@ run_java_build_integrity() {
     return 3
   fi
   echo "     ❌ Java build failed (exit $rc)"
+  java_bi_report_jdk_context "$bi_out"
   return 2
 }
 
