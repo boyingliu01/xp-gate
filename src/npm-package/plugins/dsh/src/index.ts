@@ -1,4 +1,5 @@
 import { writeFile } from "node:fs/promises"
+import { createRequire } from "node:module"
 import { join } from "node:path"
 import { fileURLToPath } from "node:url"
 
@@ -328,6 +329,42 @@ export function findPlaceholderName(value: string): string | undefined {
   return envStyle ? envStyle[1] : undefined
 }
 
+/**
+ * The running plugin's version, read from its own package.json (#709).
+ *
+ * Delphi's tool result used to carry no version at all, which made "the fix did
+ * not take effect" indistinguishable from "the fix was never made". That cost a
+ * real investigation: four design reviews returned verdicts without a single
+ * line of expert reasoning, the design was rewritten twice on the assumption it
+ * must be wrong, and the same reviews reached 100% consensus on round two once
+ * the reasoning was readable. Nothing was wrong with the design.
+ *
+ * Read rather than injected so dev runs and packed installs report the same
+ * thing, and so a stale load is visible as an old number instead of silence.
+ * Falls back to "unknown" rather than throwing: a version banner must never be
+ * the reason a review fails to start.
+ */
+export function pluginVersion(): string {
+  try {
+    const require_ = createRequire(import.meta.url)
+    const pkg = require_("../package.json") as { version?: string }
+    return typeof pkg.version === "string" && pkg.version !== "" ? pkg.version : "unknown"
+  } catch {
+    return "unknown"
+  }
+}
+
+/**
+ * The provider/seats banner that closes every Delphi tool result (#709).
+ *
+ * Extracted from the inline template so the version claim has exactly one
+ * definition — and so it can be asserted against package.json instead of being
+ * pinned to a literal that silently starts lying at the next release.
+ */
+export function formatPluginFooter(provider: string, described: string): string {
+  return `Provider: ${provider} | plugin: ${pluginVersion()}\nSeats: ${described}`
+}
+
 async function runDelphiReview(subject: string, request: ReviewRequest): Promise<string> {
   const { addressed, cwd, resolveApiKey, signal, writeEvidence } = request
   try {
@@ -336,7 +373,7 @@ async function runDelphiReview(subject: string, request: ReviewRequest): Promise
     const suffix = writeEvidence && cfg !== undefined
       ? await writeWalkthroughEvidence(cwd, cfg, outcome)
       : ""
-    return `${formatOutcome(outcome)}\n\nProvider: ${provider}\nSeats: ${described}${suffix}`
+    return `${formatOutcome(outcome)}\n\n${formatPluginFooter(provider, described)}${suffix}`
   } catch (e) {
     // Config problems are the common failure; report them as guidance
     // rather than a stack trace.
