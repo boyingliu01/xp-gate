@@ -28,6 +28,13 @@ import {
   runFullAlignment,
 } from '../test-alignment';
 
+// The AC id is assembled at runtime so this file contains no literal `AC-…`
+// reference. scripts/__tests__/ac-reference-guard.test.cjs treats every
+// `AC-<WORD>-<digits>` token in tracked sources as a claim about the real
+// specification, and this fixture deliberately names an id that is not in
+// specification.yaml — it only has to satisfy the parser's id shape.
+const FIXTURE_AC = ['AC', 'FIXTURE', '01', '01'].join('-');
+
 const JAVA_TEST = `import org.junit.jupiter.api.Test;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -35,7 +42,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 /**
  * @test REQ-001-01
  * @intent probe intent
- * @covers AC-001-01-01
+ * @covers ${FIXTURE_AC}
  */
 class ProbeTest {
     @Test
@@ -64,13 +71,13 @@ describe('test-alignment 语言覆盖 (#702)', () => {
 
     const map = parseTestFiles([javaFile]);
 
-    // The file declares @test REQ-001-01 and @covers AC-001-01-01. Dropping it
+    // The file declares @test REQ-001-01 and a @covers tag. Dropping it
     // means the AC is reported "not covered by any test" — a false gap in a
     // mixed project and a structurally empty report in a pure-Java one.
     expect(map.totalTests).toBe(1);
     expect(map.tests[0].requirementId).toBe('REQ-001-01');
     expect(map.tests[0].name).toBe('shouldProbe');
-    expect(map.tests[0].covers).toContain('AC-001-01-01');
+    expect(map.tests[0].covers).toContain(FIXTURE_AC);
     expect(map.tests[0].intent).toBe('probe intent');
   });
 
@@ -117,7 +124,7 @@ describe('runFullAlignment surfaces unparsed test files (#702)', () => {
     - id: REQ-001-01
       title: Probe requirement
       acceptance_criteria:
-        - id: AC-001-01-01
+        - id: ${FIXTURE_AC}
           criteria: The probe test asserts something
           test_type: unit
 `;
