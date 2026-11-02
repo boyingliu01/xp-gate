@@ -75,6 +75,8 @@ src/npm-package/
 | `xp-gate ui-review` | Visual review for UI-bearing changes |
 | `xp-gate sprint-status [--json] [--watch] [--dir <path>]` | Show Sprint Flow progress (reads `.sprint-state/sprint-state.json`) |
 | `xp-gate gate-coverage [--json] [--debt] [--strict]` | Compliance view across every gate with four states (PASS/DEBT/SKIP/FAIL), debt quantification, evidence pointers, STALE detection (#636) |
+| `xp-gate runtime-journal [--days N] [--json] [--sessions-dir <path>]` | Measures the AGENTS.md runtime rules from agent session journals: blocking `job_output` waits, literal `sleep`, CI polling loops, calls/step batching (#712). Advisory — always exits 0, and reports NOT MEASURABLE rather than 0% when no journal is found |
+| `xp-gate sync-mirrors [--write] [--json]` | Reports drift between each canonical tree and its mirror under this package, and repairs it with `--write` (#713). **Dry-run by default** — a wrong pair declaration silently mass-overwrites, so writing is opt-in. Compares the *tracked* file set so untracked artefacts like `githooks/lib/__pycache__/` are never read as drift |
 | `xp-gate --version` | Print version (sourced from VERSION file) |
 
 ## CONVENTIONS

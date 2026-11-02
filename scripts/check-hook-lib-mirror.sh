@@ -12,8 +12,16 @@ fail() {
 [ -d "$canonical_dir" ] || fail "missing canonical hook library directory: $canonical_dir"
 [ -d "$mirror_dir" ] || fail "missing generated hook library directory: $mirror_dir"
 
-canonical_files=$(find "$canonical_dir" -mindepth 1 -maxdepth 1 -printf '%f\n' | sort)
-mirror_files=$(find "$mirror_dir" -mindepth 1 -maxdepth 1 -printf '%f\n' | sort)
+# #587/#588: build artefacts live in the tree without being part of it.
+# `__pycache__` appears the moment anything imports prepush-score.py, and a
+# plain `find` then reports "file sets differ" for a file nobody added — a
+# push-blocking failure whose only operator fix is deleting a cache directory by
+# hand. `check-hook-mirror.sh` already filters this; the two scripts disagreed,
+# so the same artefact passed one guard and failed the other.
+canonical_files=$(find "$canonical_dir" -mindepth 1 -maxdepth 1 \
+  -not -name '__pycache__' -printf '%f\n' | sort)
+mirror_files=$(find "$mirror_dir" -mindepth 1 -maxdepth 1 \
+  -not -name '__pycache__' -printf '%f\n' | sort)
 [ "$canonical_files" = "$mirror_files" ] || fail "hook library file sets differ"
 
 while IFS= read -r name; do
