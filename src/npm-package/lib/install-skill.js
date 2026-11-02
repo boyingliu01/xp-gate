@@ -19,12 +19,27 @@ function getSkillsDir() {
 // The npm package ships the canonical skill content; `files` includes skills/.
 const BUNDLED_SKILLS_DIR = path.join(__dirname, '..', 'skills');
 
+/**
+ * The version of the CLI that is actually running.
+ *
+ * This used to read `../../../VERSION` relative to __dirname. Two things were
+ * wrong with that (#713): three levels up from `node_modules/@boyingliu01/
+ * xp-gate/lib` is `node_modules/`, and the package does not ship VERSION at all
+ * (`files` omits it). The catch therefore returned `0.0.0` on every installed
+ * machine, so `xp-gate 0.0.0 bundles: ...` -- printed as help when an unknown
+ * skill is requested -- read as a corrupt installation rather than as a typo.
+ *
+ * package.json travels with the package by definition, so it is the only source
+ * that is always present and always current.
+ *
+ * @returns {string} the package version, or 'unknown' if it cannot be read
+ */
 function getCliVersion() {
   try {
-    const versionFile = path.join(__dirname, '..', '..', '..', 'VERSION');
-    return fs.readFileSync(versionFile, 'utf8').trim();
+    const pkg = JSON.parse(fs.readFileSync(path.join(__dirname, '..', 'package.json'), 'utf8'));
+    return typeof pkg.version === 'string' && pkg.version ? pkg.version : 'unknown';
   } catch {
-    return '0.0.0';
+    return 'unknown';
   }
 }
 
