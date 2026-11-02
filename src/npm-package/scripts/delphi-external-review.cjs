@@ -199,6 +199,28 @@ function readConfig(configPath, profileOverride) {
         process.exit(1);
       }
     }
+
+    // (#707) base_url supports ${VAR} for the same reason api_key does: writing a
+    // gateway address as a placeholder is the natural way to keep an internal
+    // endpoint out of version control. Without expansion the placeholder is a
+    // perfectly valid non-empty string, so validation passed and the literal text
+    // `${PG_GATEWAY}/v1/chat/completions` went out as a URL — failing at the
+    // NETWORK layer with a DNS/connection error while the config looked correct.
+    // A caller (whale-sql-audit) had to hardcode its gateway into a distributed
+    // repo because of this.
+    //
+    // Failing here, at config load, names the variable; falling back to the
+    // literal is exactly what caused the original misdiagnosis, so it does not.
+    if (typeof prov.base_url === 'string'
+        && prov.base_url.startsWith('${') && prov.base_url.endsWith('}')) {
+      const envName = prov.base_url.slice(2, -1);
+      const envVal = process.env[envName];
+      if (!envVal) {
+        console.error(`[delphi-review] ERROR: Environment variable ${envName} is not set (profiles.${profileName}.providers.${name}.base_url). Export it or point that provider at a literal URL.`);
+        process.exit(1);
+      }
+      prov.base_url = envVal;
+    }
   }
 
   const experts = Object.fromEntries(Object.entries(profile.experts || {}).map(([role, expert]) => [
@@ -701,7 +723,52 @@ async function callModelAPI(providerConfig, model, systemPrompt, userPrompt, opt
     }
 
     if (response.status >= 500) {
-      return { error: true, retryable: true, message: `Server error (${response.status}).` };
+      // (#705) Read the provider's structured error body, the same way the 429
+      // branch above does, instead of discarding it.
+      //
+      // Measured on the whalecloud gateway: a prompt containing
+      // `new ProcessBuilder(args).start()` makes the gateway fail in its
+      // response-processing stage and return 500 with
+      //   {"error":{"type":"response_processing_error",
+      //             "param":"non_stream_chat_response","code":"500"}}
+      // The old code threw that away and reported "Server error (500).", which
+      // reads as a transient outage. `type`/`param` are what tell an operator
+      // apart gateway flapping vs. upstream timeout vs. content-triggered
+      // processing failure — three problems with three different responses.
+      //
+      // Retryability is the other half: a content-dependent failure cannot clear
+      // by retrying (the content did not change), so marking it retryable burns
+      // the orchestrator's retry budget on a guaranteed repeat. Only an
+      // explicitly recognised response_processing_error is demoted; every other
+      // 5xx keeps the previous retryable=true, and an unparseable body keeps the
+      // previous behaviour entirely — reading the body must not change the
+      // verdict on its own.
+      let detail = '';
+      let processingError = false;
+      try {
+        const body = await response.json();
+        if (body && body.error && typeof body.error === 'object') {
+          const type = typeof body.error.type === 'string' ? body.error.type : '';
+          const param = typeof body.error.param === 'string' ? body.error.param : '';
+          if (type === 'response_processing_error') {
+            processingError = true;
+          }
+          const parts = [type, param].filter(Boolean);
+          if (parts.length > 0) {
+            detail = ` Provider reported: ${parts.join('/')}.`;
+          }
+        }
+      } catch {
+        // body is not JSON; keep the previous behaviour untouched
+      }
+      if (processingError) {
+        return {
+          error: true,
+          retryable: false,
+          message: `Server error (${response.status}).${detail} This is a content-dependent upstream processing failure, so retrying the same prompt will fail the same way.`,
+        };
+      }
+      return { error: true, retryable: true, message: `Server error (${response.status}).${detail}` };
     }
 
     if (!response.ok) {

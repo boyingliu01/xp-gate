@@ -525,7 +525,21 @@ gate13_javac_args() {
 gate13_count_lint_findings() {
   local src="${1:-}"
   [ -n "$src" ] || src=$(cat)
-  printf '%s\n' "$src" | awk '
+  # (#701) Pin the locale to C for this awk, on purpose. In a UTF-8 locale gawk
+  # refuses to let `.` span bytes that are not valid UTF-8, and a Maven build on a
+  # zh_CN Windows box writes its reactor summary in GBK (stdout.encoding=GBK), so a
+  # module name such as "验证程序" arrives as d1 e9 d6 a4 b3 cc d0 f2 -- invalid
+  # UTF-8. The #673 exclusion rule (`/^\[INFO\].*\[jar\].../`) then fails to match
+  # and the line falls through to the open-category rule as a phantom finding.
+  # Measured (#701): the same input counts 0 under LC_ALL=C and 1 under
+  # LC_ALL=C.UTF-8, i.e. the verdict depended on the caller's environment rather
+  # than on the build. C locale makes `.` byte-oriented, so the match no longer
+  # depends on whether the module name happens to be ASCII.
+  #
+  # This costs nothing in matching power: every marker below (packaging types,
+  # `[category]`, `warning:`) is ASCII, and the localised unchecked/unsafe
+  # wordings are matched as byte sequences, which C locale handles exactly.
+  printf '%s\n' "$src" | LC_ALL=C awk '
     BEGIN { n = 0 }
     # (#673) Maven 3.9.7+ reactor summary appends the packaging type per module:
     #     [INFO] whaleaudit-core  [jar]

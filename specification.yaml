@@ -4252,8 +4252,179 @@ specification:
           test_type: unit
 
     # ============================================================
-    # REQ-684: doctor delphi 必须与 runner 用同一套配置解析。
+    # REQ-701: Gate 13 的计数结论不得取决于调用方的 locale。
     #
+    # #673 的排除规则是 `/^\[INFO\].*\[(pom|jar|...)\].../`，而 `.*` 在 UTF-8
+    # locale 下的 gawk 里无法跨越非法 UTF-8 字节。Windows zh_CN 上 Maven 重定向
+    # 到文件时用 GBK 写 stdout（stdout.encoding=GBK），模块名里的中文于是以
+    # d1 e9 d6 a4 b3 cc d0 f2 这类非法 UTF-8 字节出现，排除规则失配、整行落到
+    # 开放类别规则上被计成发现。实测同一输入 LC_ALL=C 得 0、LC_ALL=C.UTF-8 得 1
+    # ——即门禁结论由开发者机器的环境变量决定，而非由构建决定。这类分歧比任何
+    # 单一错值都难排查，且只在非 C locale 的机器上复现（容器/CI 一直绿）。
+    # ============================================================
+    - id: REQ-701
+      description: Gate 13 的 javac 告警计数在任意 locale 下须对同一构建给出同一结论，含非 ASCII 模块名的 reactor summary 不得产生假发现
+      priority: high
+      acceptance_criteria:
+        - id: AC-701-01
+          criteria: "GBK 编码的 reactor summary 在 UTF-8 locale 下计为 0 个发现"
+          test_type: unit
+        - id: AC-701-02
+          criteria: 同一输入在 C 与 C.UTF-8 两个 locale 下的计数结论一致
+          test_type: unit
+        - id: AC-701-03
+          criteria: 非 ASCII 路径上的真实 javac 诊断仍被计数（不得靠「见非 ASCII 就不数」实现修复）
+          test_type: unit
+        - id: AC-701-04
+          criteria: "非 ASCII 的 [INFO] 行若携带真实类别标记仍须计数（修复不得吞掉整类 [INFO] 行）"
+          test_type: unit
+
+    # ============================================================
+    # REQ-706: Kotlin 静态分析须在构建链不可用时仍给出可用工具的判定。
+    #
+    # 三层叠加。第 1、2 层是夹具缺陷：kotlin-gate.test.bats 的 setup() 只拷了
+    # pre-commit，而 hook 从自身目录加载 hook-module-resolution.sh 与 lib/ 十个
+    # helper，缺失即 FATAL —— 于是一个 gate 都没跑，断言靠 CI 上的 skip 才是绿的。
+    #
+    # 第 3 层是判定语义：run_static_analysis 在 Gradle/Maven 编译失败时直接
+    # `return 1`，而 detekt 不依赖构建、直接读 .kt 源码，本可以发现真实违规。
+    # 同一份代码上 detekt 报了 2 条发现，钩子却报「SKIPPED - tools unavailable」。
+    # 另外 ktlint 1.8.0 对 `**/*.kt` 报 "No files matched" 却 exit 0，elif 链
+    # 因此让 detekt 永远轮不到——「命令存在」不等于「工具给出了判定」。
+    #
+    # 另修一处独立缺陷：pre-commit 用 `run_static_analysis | head -30` 后取 `$?`，
+    # 拿到的是 head 的退出码（恒 0），adapter 的判定被管道吞掉，使「工具不可用或
+    # 失败」这一分支成为死代码。
+    # ============================================================
+    - id: REQ-706
+      description: Kotlin 静态分析须在构建链失败或首选工具未真正执行时，仍由可用的独立分析器给出判定
+      priority: high
+      acceptance_criteria:
+        - id: AC-706-01
+          criteria: 构建失败不得阻止独立分析器（detekt）运行，其发现须体现在输出与退出码上
+          test_type: unit
+        - id: AC-706-02
+          criteria: ktlint 匹配不到文件（未真正检查）时须回落 detekt，而非计为干净
+          test_type: unit
+        - id: AC-706-03
+          criteria: 完全无可用分析器时须明确报告未检查，不得静默返回通过
+          test_type: unit
+        - id: AC-706-04
+          criteria: 构建成功且分析器无违规时判定须为通过（不得把构建失败变成永久阻断）
+          test_type: unit
+
+    # ============================================================
+    # REQ-705: 5xx 分支不得丢弃 provider 的结构化错误体。
+    #
+    # 同一个函数里 429 分支已经把 body 用得很好（区分 category_quota 要管理员配
+    # 额度、cost_quota 等日额度重置），5xx 却什么都不读，只报「Server error (500)」。
+    # 实测于 whalecloud 网关：prompt 里含 `new ProcessBuilder(args).start()` 时
+    # 网关在响应处理阶段返 500，body 写着 type=response_processing_error、
+    # param=non_stream_chat_response。这三个字面值正是区分「网关抖动」「上游超时」
+    # 「内容触发处理失败」的全部依据——三者处置完全不同。
+    #
+    # 另一半是可重试性：内容相关的失败重试必然同样失败，标成 retryable 只会让
+    # 编排层白白烧掉重试预算。读 body 失败时不得改变原有判定。
+    # ============================================================
+    - id: REQ-705
+      description: 外部评审的 5xx 分支须保留 provider 的结构化错误体，并把内容相关失败标为非可重试
+      priority: high
+      acceptance_criteria:
+        - id: AC-705-01
+          criteria: 5xx 响应体的 error.type / error.param 须出现在失败信息里
+          test_type: unit
+        - id: AC-705-02
+          criteria: 识别为 response_processing_error 的失败须标为非可重试（内容不变，重试必然重复失败）
+          test_type: unit
+        - id: AC-705-03
+          criteria: 响应体不可解析时保持原有判定（5xx 且可重试），读 body 失败不得改变结论
+          test_type: unit
+        - id: AC-705-04
+          criteria: 无结构化错误体的真实瞬时 5xx 仍须可重试
+          test_type: unit
+
+    # ============================================================
+    # REQ-707: base_url 须支持 ${VAR} 展开，且未展开时在校验层报错。
+    #
+    # ${VAR} 展开原本只挂在 api_key 上。把 base_url 写成占位符是「内网地址不入库」
+    # 最自然的直觉做法，而占位符是合法的非空字符串，所以校验通过、字面量被当成
+    # URL 发出去，在**网络层**以连接失败的形式失败——配置看起来完全正常。
+    # 调用方 whale-sql-audit 因此被迫把组织内网网关地址硬编码进随仓库分发的配置。
+    # 退回字面量正是本缺陷的成因，所以未设置时必须报错并点名变量。
+    # ============================================================
+    - id: REQ-707
+      description: delphi-external 的 base_url 须与 api_key 一致地支持 ${VAR} 展开，环境变量缺失时在配置加载阶段报错
+      priority: high
+      acceptance_criteria:
+        - id: AC-707-01
+          criteria: base_url 里的 ${VAR} 须用环境变量展开
+          test_type: unit
+        - id: AC-707-02
+          criteria: 环境变量缺失时须在配置加载阶段报错，且错误信息点名该变量
+          test_type: unit
+        - id: AC-707-03
+          criteria: 不得退回字面量占位符（那正是该缺陷的成因）
+          test_type: unit
+        - id: AC-707-04
+          criteria: 字面量 base_url 不受影响（不得把正常配置当占位符处理）
+          test_type: unit
+
+    # ============================================================
+    # REQ-703: Gate 5 的 JaCoCo 缺失诊断须先诊断再建议。
+    #
+    # JaCoCo agent 在含非 ASCII 字符的构建路径下静默不写 jacoco.exec：不抛异常、
+    # 不写文件，Maven 只看到「文件不存在」，于是打印 Skipping JaCoCo execution due
+    # to missing execution data file 并 BUILD SUCCESS 退出 0。Gate 5 因此阻断，
+    # 但它的补救建议是「Run 'mvn verify'」——在同一个路径下 mvn verify 一样静默
+    # 跳过，跑一百次也一样。用户照做无效之后，只剩下 --no-verify 一条路，正好撞上
+    # 本项目明令禁止的做法。
+    #
+    # 门禁阻断本身是对的（没有数据就不能证实 80% 下限），错的是把环境问题当代码
+    # 问题告警，并给出在此环境下必然无效的补救动作。
+    # ============================================================
+    - id: REQ-703
+      description: Gate 5 在 JaCoCo 报告缺失时须先给出真实成因诊断，并在非 ASCII 构建路径下明确说明 mvn verify 无效
+      priority: high
+      acceptance_criteria:
+        - id: AC-703-01
+          criteria: 缺失报告的诊断须指出执行数据文件（jacoco.exec）未写出这一真实原因，而非只报症状
+          test_type: unit
+        - id: AC-703-02
+          criteria: 非 ASCII 构建路径下须明确提示该路径上重跑 mvn verify 无效，并给出可行的替代路径
+          test_type: unit
+        - id: AC-703-03
+          criteria: ASCII 路径下的既有补救指引须保留（不得为新场景牺牲老场景）
+          test_type: unit
+
+    # ============================================================
+    # REQ-708: Java 构建失败须带 JDK 上下文，使「是否换错 JDK」成为第一个假设。
+    #
+    # Java 构建失败最常见的成因之一是用错 JDK，而 Gate 9 的判定行原本只有
+    # 「❌ Java build failed (exit 1)」，不含任何环境线索；真实原因藏在被 tail -20
+    # 截断的构建输出里。实测：pom 写 maven.compiler.release=8、用 JDK 8 构建时
+    # 报「无效的标记: --release」——这句话指向编译器参数与项目配置，实际指向环境里的
+    # JDK。排查者据此先怀疑 release 配置、再怀疑 plugin 版本、再怀疑 jvm.config，
+    # 全是错的，真正的解法只是换一个 JDK。
+    # ============================================================
+    - id: REQ-708
+      description: Java 构建失败时 Gate 9 须打印实际使用的 JDK、项目声明的 JDK 下限，并在 --release 被拒时直接给出 JDK 9 下限结论
+      priority: high
+      acceptance_criteria:
+        - id: AC-708-01
+          criteria: Java 构建失败须报告实际使用的 JDK 版本与 JAVA_HOME
+          test_type: unit
+        - id: AC-708-02
+          criteria: 须读出并展示项目声明的 JDK 下限（maven.compiler.release/source 或 sourceCompatibility）
+          test_type: unit
+        - id: AC-708-03
+          criteria: 构建输出显示 --release 被拒时须明确给出「需要 JDK 9 或更新」的结论
+          test_type: unit
+        - id: AC-708-04
+          criteria: 与 JDK 无关的构建失败不得被断言为 JDK 问题（避免该提示沦为噪音）
+          test_type: unit
+
+    # ============================================================
+
     # SKILL.md 推荐「机器级只放一份配置，仓库里不带」的布局，runner 确实实现了
     # 全局回退，所以评审能正常跑。doctor 只查 `<cwd>/.delphi-config.json`，
     # 在这种布局下报 FAIL，并让用户「复制示例配置到项目里」——恰好制造出
