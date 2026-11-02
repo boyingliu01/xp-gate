@@ -4557,3 +4557,27 @@ specification:
         - id: AC-713-06
           criteria: 每对镜像支持各自的排除项，与对应守卫脚本的语义一致（如 src/principles 排除 __tests__）
           test_type: unit
+
+    # ============================================================
+    # REQ-714 — 运行时纪律必须是可审计的：有基线、有目标、有测量出处
+    # 2026-11-02 复测：AGENTS.md 的三条运行时规则里只有规则 1 生效，
+    # 规则 2 的 calls/step 仍是 1.086（目标 ≥2.0，仅 5.1% 的步骤批量），
+    # 原因不是"没写规则"，而是规则只表达了意图、没有可对照的判据。
+    # ============================================================
+    - id: REQ-714
+      description: AGENTS.md 的每一条 AGENT RUNTIME DISCIPLINE 规则都必须带有
+        可复测的基线与数值目标，以及能直接照做的判据，使"规则是否生效"可被验证
+      priority: medium
+      acceptance_criteria:
+        - id: AC-714-01
+          criteria: 每条运行时规则都带有含数字的基线与"目标"表述，禁止只有意图没有度量
+          test_type: unit
+        - id: AC-714-02
+          criteria: 每条规则都标明基线的测量出处（runtime-journal 命令或测量日期），使读者能判断数字是否过期
+          test_type: unit
+        - id: AC-714-03
+          criteria: 规则章节统一给出 xp-gate runtime-journal 入口，并同时提供 --json 形式以便机械化 A/B 对比
+          test_type: unit
+        - id: AC-714-04
+          criteria: 规则 2 给出可照做的并发清单与自查判据，而不是只写"必须并发"
+          test_type: unit
