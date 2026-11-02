@@ -265,12 +265,24 @@ All 10 documented drift items (Gate count, pre-push gates, Delphi threshold, Spr
   `type`/`head`/`tail`/`sed -n`/`Select-String`/`findstr`/`grep`/`rg`/`Get-ChildItem`/
   `find`/`ls` 去读取或搜索内容——这些会各起一个 pwsh/bash 进程，单次往返 10–30 s，
   而原生工具是毫秒级且可并行。shell 只留给真正的执行（构建、测试、git、脚本）。
-- 现状：32.7% 的 shell 调用是纯读取/搜索。目标 <5%。
+- 现状（2026-11-02 复测，最近 3 天）：纯读取/搜索的 shell 调用已从 32.7% 降到 ~0.2%。
+  目标 <5%（已达成，保持）。
 
 **规则 2 — 独立调用必须同一步并发**
 - 任何 ≥2 个**互不依赖**的调用，必须放进同一个 assistant 消息里并发发出，不得一个一个发。
   工具契约已支持同一 block 内多个 `invoke`。串行只在有数据依赖时才允许。
-- 现状：calls/step=1.08，仅 4.8% 的步骤做到批量。目标 calls/step ≥2.0。
+- **判据：发下一条消息前自查「这一批里有没有 2 个调用互不依赖？有就并进去」。**
+- 典型该并发的清单（这张表就是为了免去判断）：
+  - 读多个已知路径的文件；`grep` + `glob` + `read` 组合摸底
+  - 多个互不相干的 `git` 查询（`status` / `log` / `diff` / `config`）
+  - 检查多个环境事实（版本、路径、端口、开关）
+  - 写完后并行跑**互不依赖**的校验（`lint` ∥ `tsc` ∥ 定向测试）
+  - 查多个不同目录/多个候选位置
+- **不能并发的**：后一个调用的参数依赖前一个的输出（先 `rev-parse` 再 `git show <sha>`）；
+  有写冲突的操作（同一文件、同一 git 索引）。
+- 现状（2026-11-02 复测，最近 3 天）：calls/step=**1.086**，仅 **5.1%**（283/5528）
+  的步骤做到批量。目标 calls/step **≥2.0**。按 2.0 折算约可省 **2764 次**往返，
+  是四条规则里**最大**的一笔未兑现收益。
 
 **规则 3 — 后台任务用完成通知，禁止阻塞轮询**
 - 长任务用 `run_in_background` 起 job，收到完成通知再取结果；**禁止** `job_output`
@@ -278,6 +290,7 @@ All 10 documented drift items (Gate count, pre-push gates, Delphi threshold, Spr
 - 现状（2026-11-02 复测，最近 3 天）：`job_output` 阻塞 >30 s **96 次 / 8.9 h**，其中
   **显式 `wait:true` 103 次**；字面 `sleep` 166 次 / 6.9 h；CI 轮询 236 次 / 4.9 h。
   这三项合计约占工具忙碌时长的 **22–27%**，是当前**最大**的可回收项。
+- 目标：阻塞式 `job_output`（>30 s）与字面 `sleep` 各自下降 **≥50%**。
 
 > **实测入口（规则 1–3 的唯一可信来源）**
 > ```bash
@@ -292,3 +305,8 @@ All 10 documented drift items (Gate count, pre-push gates, Delphi threshold, Spr
 - 触及打包/发布/插件产物的改动，先写集成/契约测试（范式见 `plugins/dsh/src/contract.test.ts`），
   让“`npm pack --json` 被 stdout 污染”这类问题在本地就红，而不是等发布 CI 用 `jq` 语法错误才发现
   （0.32.2 的 dsh 插件正是这样漏发的）。
+- 现状（2026-11-02）：本规则**没有时间型指标**——它的产物是「发布前就红」，不是「更快」。
+  该有的度量是缺陷逃逸次数：0.32.2 的 dsh 插件 1 次漏发（契约测试引入前）。
+- 目标：触及打包/发布的改动，契约测试先于实现提交；漏发次数保持 **0**。
+  验证方式不是 `runtime-journal`（它只测工具调用效率），而是发布前
+  `npm pack --json` + 契约测试是否真的跑过。
