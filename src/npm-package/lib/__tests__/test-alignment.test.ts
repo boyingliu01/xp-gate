@@ -384,6 +384,7 @@ describe('REQ-ALIGN-003: verifyAlignment()', () => {
         { name: 'testA', file: 'a.test.ts', requirementId: 'REQ-A', intent: 'test A', covers: ['AC-A-01'], assertions: 2, edgeCases: [] },
       ],
       totalTests: 1,
+      unsupportedFiles: [],
       totalAssertions: 2,
     };
 
@@ -420,6 +421,7 @@ describe('REQ-ALIGN-003: verifyAlignment()', () => {
       }],
       totalTests: 1,
       totalAssertions: 2,
+      unsupportedFiles: [],
     };
 
     const report = verifyAlignment(specMap, testMap);
@@ -447,6 +449,7 @@ describe('REQ-ALIGN-003: verifyAlignment()', () => {
       }],
       totalTests: 1,
       totalAssertions: 1,
+      unsupportedFiles: [],
     };
 
     const report = verifyAlignment(specMap, testMap);
@@ -553,7 +556,7 @@ specification:
     const spec = parseSpecification(specFile);
     expect(spec.requirements).toHaveLength(0);
 
-    const testMap = { tests: [], totalTests: 0, totalAssertions: 0 };
+    const testMap = { tests: [], totalTests: 0, totalAssertions: 0, unsupportedFiles: [] };
     const report = verifyAlignment(spec, testMap);
     // 0/0 = division by zero must be handled gracefully
     expect(report.coverage.requirementsTotal).toBe(0);
@@ -576,7 +579,7 @@ specification:
 `;
     const specFile = writeTempFile('no-tests-spec.yaml', specYaml);
     const spec = parseSpecification(specFile);
-    const testMap = { tests: [], totalTests: 0, totalAssertions: 0 };
+    const testMap = { tests: [], totalTests: 0, totalAssertions: 0, unsupportedFiles: [] };
     const report = verifyAlignment(spec, testMap);
 
     expect(report.coverage.requirementsCovered).toBe(0);
@@ -747,6 +750,7 @@ specification:
       }],
       totalTests: 1,
       totalAssertions: 3,
+      unsupportedFiles: [],
     };
     const report = verifyAlignment(spec, testMap);
     const score = calculateScore(report.issues, report.coverage, testMap);

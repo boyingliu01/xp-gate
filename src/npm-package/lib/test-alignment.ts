@@ -73,7 +73,41 @@ export interface TestMap {
   tests: TestCase[];
   totalTests: number;
   totalAssertions: number;
+  /**
+   * Test files whose extension has no parser (#702).
+   *
+   * These used to be dropped on the floor: the file was read, its extension
+   * taken, and then no branch matched. A pure-Java project therefore reported
+   * `totalTests: 0` and computed its alignment score over an empty set, with
+   * nothing distinguishing "no tests" from "tests I could not read". Callers
+   * must surface this instead of treating the map as complete.
+   */
+  unsupportedFiles: string[];
 }
+
+/**
+ * Test-file extensions that this module can parse (#702).
+ *
+ * Listed explicitly rather than implied by the presence of an `if` branch,
+ * because that is exactly how `.java` disappeared: an if/else chain with a
+ * missing arm looks identical to a complete one at the call site. This list is
+ * the contract the branches are checked against.
+ */
+export const SUPPORTED_TEST_EXTENSIONS: readonly string[] = [
+  '.ts', '.tsx', '.js', '.jsx', '.py', '.go', '.java',
+];
+
+/**
+ * Test-file extensions this module deliberately does NOT parse, but recognises
+ * as tests (#702).
+ *
+ * Being on this list means "report it", not "ignore it". The distinction
+ * matters: before, both "not a test file" and "a test file I cannot read"
+ * produced the same silent skip.
+ */
+export const UNSUPPORTED_TEST_EXTENSIONS: readonly string[] = [
+  '.kt', '.kts', '.cs', '.rb', '.rs', '.swift', '.php', '.scala',
+];
 
 export type IssueType =
   | 'MISSING_REQUIREMENT_TEST'
@@ -211,7 +245,13 @@ function extractAllTags(text: string, tag: string): string[] {
 }
 
 function countAssertions(content: string): number {
-  // Count common assertion patterns
+  // Count common assertion patterns.
+  //
+  // #702: the JUnit 5 family was absent, so a parsed Java test would have been
+  // recorded as zero-assertion — the same "detector that never fires" shape as
+  // the missing branch itself. A test with assertions that reports 0 is worse
+  // than no test at all: it drags the coverage dimension down without any hint
+  // that the number is unmeasured.
   const patterns = [
     /expect\(/g,
     /assert\./g,
@@ -220,6 +260,12 @@ function countAssertions(content: string): number {
     /expect\./g,
     /toEqual\(/g,
     /toBe\(/g,
+    // JUnit 5 / Jupiter assertions (Java, Kotlin). Matched by the assert-prefix
+    // family rather than an enumeration of every overload, so assertAll,
+    // assertThat, assertThrows, assertDoesNotThrow etc. are all counted.
+    /\bassert[A-Z]\w*\s*\(/g,
+    // AssertJ fluent style, common in the same test suites.
+    /\bassertThat\s*\(/g,
   ];
   let count = 0;
   for (const pattern of patterns) {
@@ -387,6 +433,23 @@ function extractGoTestBody(content: string, funcIndex: number): string {
   return extractCallbackBody(content, braceIdx);
 }
 
+/**
+ * Body of a Java test method, from its opening brace (#702).
+ *
+ * Assertions are counted against the per-test body, not the whole file, for the
+ * same reason as the Go/Python paths: a file-level count multiplies assertions
+ * by the number of tests in the file (#392-#1).
+ *
+ * Java has no multi-line lambda-less ambiguity here — a method body is the
+ * brace-delimited block that follows the parameter list — so the same brace
+ * scan used for Go is sufficient.
+ */
+function extractJavaTestBody(content: string, methodIndex: number): string {
+  const braceIdx = content.indexOf('{', methodIndex);
+  if (braceIdx === -1) return '';
+  return extractCallbackBody(content, braceIdx);
+}
+
 function pushTestWithCovers(
   tests: TestCase[],
   testPath: string,
@@ -423,6 +486,7 @@ function pushTestWithCovers(
 export function parseTestFiles(testPaths: string[]): TestMap {
   const tests: TestCase[] = [];
   const totalAssertionsObj = { value: 0 };
+  const unsupportedFiles: string[] = [];
 
   for (const testPath of testPaths) {
     if (!fs.existsSync(testPath)) continue;
@@ -470,6 +534,48 @@ export function parseTestFiles(testPaths: string[]): TestMap {
         const body = extractGoTestBody(content, funcStart);
         pushTestWithCovers(tests, testPath, m[3]!, m[2]!, intentMatch?.[1]?.trim(), content, body, totalAssertionsObj);
       }
+    } else if (ext === '.java') {
+      // #702: JUnit 5 annotations are matched against the Javadoc block that
+      // precedes the method, because that is where this project's @test/@intent
+      // contract lives.
+      //
+      // Two phases rather than one regex, because the Javadoc may sit above the
+      // class declaration (`class Foo { @Test void a() {...} }`) or directly
+      // above the method. Scanning forward from the end of each Javadoc for the
+      // first `@Test` and then for the method name handles both without the
+      // fragile "skip N tokens" shape that a single expression needs.
+      const javaDocPattern = /\/\*\*([\s\S]*?)\*\//g;
+      let docMatch: RegExpExecArray | null;
+      while ((docMatch = javaDocPattern.exec(content)) !== null) {
+        const docBlock = docMatch[1]!;
+        const reqMatch = docBlock.match(/@test\s+(REQ-[A-Z0-9]+-[A-Z0-9]+)/);
+        // Without a requirement tag this is not an annotated test in this
+        // project's sense; skip it rather than inventing a TestCase.
+        if (!reqMatch) continue;
+
+        const afterDoc = docMatch.index + docMatch[0].length;
+        const rest = content.slice(afterDoc);
+        const testAnnotation = rest.match(/@Test\b/);
+        if (!testAnnotation) continue;
+
+        // Method name = the identifier right before the first `(` after @Test.
+        const afterAnnotation = rest.slice(testAnnotation.index! + '@Test'.length);
+        const nameMatch = afterAnnotation.match(/\b(\w+)\s*\(/);
+        if (!nameMatch) continue;
+
+        const intentMatch = docBlock.match(/@intent\s+(.+)/);
+        const methodStart = afterDoc + testAnnotation.index! + afterAnnotation.indexOf(nameMatch[1]!);
+        const body = extractJavaTestBody(content, methodStart);
+        pushTestWithCovers(
+          tests, testPath, nameMatch[1]!, reqMatch[1]!, intentMatch?.[1]?.trim(),
+          content, body, totalAssertionsObj,
+        );
+      }
+    } else if (UNSUPPORTED_TEST_EXTENSIONS.includes(ext)) {
+      // Recognised as a test file, but no parser exists. Recording it is the
+      // whole point: previously this arm did not exist, so the file vanished
+      // and the caller could not tell "no tests" from "tests I could not read".
+      unsupportedFiles.push(testPath);
     }
   }
 
@@ -477,6 +583,7 @@ export function parseTestFiles(testPaths: string[]): TestMap {
     tests,
     totalTests: tests.length,
     totalAssertions: totalAssertionsObj.value,
+    unsupportedFiles,
   };
 }
 
@@ -702,6 +809,31 @@ export function writeReport(report: TestAlignmentReportFile, outputPath: string)
 // Orchestrator: runFullAlignment()
 // ============================================================================
 
+/**
+ * Whether a file name looks like a test file (#702).
+ *
+ * There were TWO silent gates, and fixing only the parser would have left the
+ * outer one closed: this walker previously matched only
+ * `\.(test|spec)\.(ts|tsx|js|jsx|py|go)$`. A JUnit file is conventionally
+ * `ProbeTest.java` — no `.test.` infix at all — so it was excluded before
+ * parseTestFiles ever saw it, and no amount of parser work could help.
+ *
+ * Two accepted shapes:
+ *  - the JS/Python convention:  `<name>.test.<ext>` / `<name>.spec.<ext>`
+ *  - the Java/C#/Kotlin convention: `*Test.<ext>` / `*Tests.<ext>` / `*Spec.<ext>`
+ *
+ * Both are matched against the same extension lists as the parser, so a file
+ * can never be collected but unparseable, or parseable but never collected.
+ */
+function isTestFileName(name: string): boolean {
+  const ext = path.extname(name);
+  const knownExt = SUPPORTED_TEST_EXTENSIONS.includes(ext) || UNSUPPORTED_TEST_EXTENSIONS.includes(ext);
+  if (!knownExt) return false;
+  if (/\.(test|spec)\.[^.]+$/.test(name)) return true;
+  // Java convention: the class name carries the marker, not the file name infix.
+  return /(?:Test|Tests|Spec)\.[^.]+$/.test(name);
+}
+
 export interface AlignmentOptions {
   specPath: string;
   testDirs?: string[];
@@ -743,7 +875,7 @@ export function runFullAlignment(options: AlignmentOptions): TestAlignmentReport
           const fullPath = path.join(d, entry.name);
           if (entry.isDirectory() && entry.name !== 'node_modules') {
             walkDir(fullPath);
-          } else if (entry.isFile() && /\.(test|spec)\.(ts|tsx|js|jsx|py|go)$/.test(entry.name)) {
+          } else if (entry.isFile() && isTestFileName(entry.name)) {
             testFiles.push(fullPath);
           }
         }
@@ -759,9 +891,23 @@ export function runFullAlignment(options: AlignmentOptions): TestAlignmentReport
   const alignmentReport = verifyAlignment(spec, testMap);
   const score = calculateScore(alignmentReport.issues, alignmentReport.coverage, testMap);
 
+  // #702: files that were recognised as tests but could not be parsed must not
+  // leave the report looking complete. Without this, `totalTests: 0` from a
+  // pure-Java project is indistinguishable from "this project has no tests",
+  // and the score is computed over an empty set while the status reads "ran".
+  const unsupportedErrors = testMap.unsupportedFiles.map(
+    file => `Test file not parsed (no parser for ${path.extname(file)}): ${file}`,
+  );
+  // A project whose ONLY test files are unparsed is the worst case: the report
+  // would otherwise be a confident verdict about nothing at all.
+  const noParsedTestsAtAll = testMap.totalTests === 0 && testMap.unsupportedFiles.length > 0;
+  // Unparsed files make the score untrustworthy even when it happens to be
+  // high, so they block PASS rather than merely being annotated.
+  const canPass = score >= 80 && testMap.unsupportedFiles.length === 0;
+
   const report: TestAlignmentReportFile = {
-    alignment_status: score >= 80 ? 'PASS' : 'FAIL',
-    phase: score >= 80 ? 2 : 1,
+    alignment_status: canPass ? 'PASS' : 'FAIL',
+    phase: canPass ? 2 : 1,
     score,
     head_commit: headCommit || 'unknown',
     spec_hash: specHash,
@@ -771,8 +917,8 @@ export function runFullAlignment(options: AlignmentOptions): TestAlignmentReport
       spec_requirement: issue.requirementId || 'unknown',
       gap: issue.message,
     })),
-    anti_pattern_detected: false,
-    errors: [],
+    anti_pattern_detected: noParsedTestsAtAll,
+    errors: unsupportedErrors,
   };
 
   // Step 5: Write output. A failure is recorded on `report.errors` by writeReport
