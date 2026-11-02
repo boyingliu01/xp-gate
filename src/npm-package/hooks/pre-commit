@@ -2237,15 +2237,22 @@ else
       ADAPTER_FILE=$(resolve_adapter_path "$CURRENT_LANG")
       if [ -n "$ADAPTER_FILE" ] && source "$ADAPTER_FILE" 2>/dev/null; then
         echo "Running static analysis for $CURRENT_LANG..."
+        # (#706) Capture the ADAPTER's verdict, not `head`'s.
+        #
+        # `run_static_analysis | head -30` makes `$?` the exit status of `head`,
+        # which is 0 whenever it manages to read anything -- so ANALYSIS_EXIT was
+        # always 0 and the "tools unavailable or failed" branch below was dead
+        # code. Measured: an adapter returning 1 through this pipe still produced
+        # PASSED. PIPESTATUS[0] carries the adapter's real status.
         run_static_analysis | head -30 2>/dev/null
-        ANALYSIS_EXIT=$?
+        ANALYSIS_EXIT=${PIPESTATUS[0]}
         if [ "$ANALYSIS_EXIT" -ne 0 ]; then
           echo "⚠️  Static analysis had issues (may be non-blocking)"
         fi
-    
+
         echo "Running lint check for $CURRENT_LANG..."
         run_lint | head -30 2>/dev/null
-        LINT_EXIT=$?
+        LINT_EXIT=${PIPESTATUS[0]}
         if [ "$LINT_EXIT" -ne 0 ]; then
           echo "ℹ️  Lint check had issues (may be non-blocking)"
         fi

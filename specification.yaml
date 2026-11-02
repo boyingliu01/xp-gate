@@ -4280,6 +4280,40 @@ specification:
           test_type: unit
 
     # ============================================================
+    # REQ-706: Kotlin 静态分析须在构建链不可用时仍给出可用工具的判定。
+    #
+    # 三层叠加。第 1、2 层是夹具缺陷：kotlin-gate.test.bats 的 setup() 只拷了
+    # pre-commit，而 hook 从自身目录加载 hook-module-resolution.sh 与 lib/ 十个
+    # helper，缺失即 FATAL —— 于是一个 gate 都没跑，断言靠 CI 上的 skip 才是绿的。
+    #
+    # 第 3 层是判定语义：run_static_analysis 在 Gradle/Maven 编译失败时直接
+    # `return 1`，而 detekt 不依赖构建、直接读 .kt 源码，本可以发现真实违规。
+    # 同一份代码上 detekt 报了 2 条发现，钩子却报「SKIPPED - tools unavailable」。
+    # 另外 ktlint 1.8.0 对 `**/*.kt` 报 "No files matched" 却 exit 0，elif 链
+    # 因此让 detekt 永远轮不到——「命令存在」不等于「工具给出了判定」。
+    #
+    # 另修一处独立缺陷：pre-commit 用 `run_static_analysis | head -30` 后取 `$?`，
+    # 拿到的是 head 的退出码（恒 0），adapter 的判定被管道吞掉，使「工具不可用或
+    # 失败」这一分支成为死代码。
+    # ============================================================
+    - id: REQ-706
+      description: Kotlin 静态分析须在构建链失败或首选工具未真正执行时，仍由可用的独立分析器给出判定
+      priority: high
+      acceptance_criteria:
+        - id: AC-706-01
+          criteria: 构建失败不得阻止独立分析器（detekt）运行，其发现须体现在输出与退出码上
+          test_type: unit
+        - id: AC-706-02
+          criteria: ktlint 匹配不到文件（未真正检查）时须回落 detekt，而非计为干净
+          test_type: unit
+        - id: AC-706-03
+          criteria: 完全无可用分析器时须明确报告未检查，不得静默返回通过
+          test_type: unit
+        - id: AC-706-04
+          criteria: 构建成功且分析器无违规时判定须为通过（不得把构建失败变成永久阻断）
+          test_type: unit
+
+    # ============================================================
     # REQ-684: doctor delphi 必须与 runner 用同一套配置解析。
     #
     # SKILL.md 推荐「机器级只放一份配置，仓库里不带」的布局，runner 确实实现了
