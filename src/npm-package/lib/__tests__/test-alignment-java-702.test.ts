@@ -47,18 +47,6 @@ class ProbeTest {
 }
 `;
 
-const JS_TEST = `/**
- * @test REQ-001-01
- * @intent probe intent
- * @covers AC-001-01-01
- */
-describe('probe', () => {
-  it('should probe', () => {
-    expect(1).toBe(1);
-  });
-});
-`;
-
 describe('test-alignment 语言覆盖 (#702)', () => {
   let dir: string;
 
