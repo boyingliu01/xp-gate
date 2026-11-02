@@ -857,9 +857,14 @@ echo ""
 GATE_0_START=$(gate_start_ms)
 GATE_0_STATUS="PASS"
 
-CURRENT_BRANCH=$(git symbolic-ref --short HEAD 2>/dev/null || git rev-parse --abbrev-ref HEAD 2>/dev/null || echo "HEAD")
+CURRENT_BRANCH=$(git symbolic-ref --short HEAD 2>/dev/null || git rev-parse --abbrev-ref HEAD 2>/dev/null) || CURRENT_BRANCH=""
+CURRENT_BRANCH=$(printf '%s' "$CURRENT_BRANCH" | tr -d '\r\n'); [ -n "$CURRENT_BRANCH" ] || CURRENT_BRANCH="HEAD"
 PROTECTED_BRANCHES="master develop trunk mainline"
-ROOT_DIR=$(git rev-parse --show-toplevel 2>/dev/null || echo ".")
+# #711: same shape as the branch/commit captures above — `git rev-parse` can
+# print a partial line before failing, so `|| echo "."` can yield "<something>\n."
+# and every later `cd "$ROOT_DIR"` / path join would silently use a two-line value.
+ROOT_DIR=$(git rev-parse --show-toplevel 2>/dev/null) || ROOT_DIR=""
+ROOT_DIR=$(printf '%s' "$ROOT_DIR" | tr -d '\r\n'); [ -n "$ROOT_DIR" ] || ROOT_DIR="."
 
 # Optional: project-level .protected-branches config file
 if [ -f "$ROOT_DIR/.protected-branches" ]; then
@@ -2664,7 +2669,8 @@ else
 
   SKIP_5A_BLOCK=false
   if [ "${SKIP_GATE_5A_BLOCK:-0}" = "1" ]; then
-    CURRENT_BRANCH=$(git symbolic-ref --short HEAD 2>/dev/null || git rev-parse --abbrev-ref HEAD 2>/dev/null || echo "HEAD")
+    CURRENT_BRANCH=$(git symbolic-ref --short HEAD 2>/dev/null || git rev-parse --abbrev-ref HEAD 2>/dev/null) || CURRENT_BRANCH=""
+    CURRENT_BRANCH=$(printf '%s' "$CURRENT_BRANCH" | tr -d '\r\n'); [ -n "$CURRENT_BRANCH" ] || CURRENT_BRANCH="HEAD"
     if [ "$CURRENT_BRANCH" != "main" ] && [ "$CURRENT_BRANCH" != "master" ]; then
       REASON="${SKIP_GATE_5A_BLOCK_REASON:-not specified}"
       mkdir -p .xp-gate/reports
@@ -4988,8 +4994,26 @@ generate_quality_report() {
   local WARN_COUNT=0
   local NONPASS_COUNT=0
 
-  COMMIT_HASH=$(git rev-parse HEAD 2>/dev/null || echo "unknown")
-  BRANCH=$(git rev-parse --abbrev-ref HEAD 2>/dev/null || echo "unknown")
+  # #711: capture the probe output first, then fall back — never `|| echo` a
+  # command whose stdout is only shown on success.
+  #
+  # On a repository with no commits yet, `git rev-parse --abbrev-ref HEAD`
+  # PRINTS "HEAD" and then exits non-zero. With `$(cmd || echo unknown)` the
+  # captured value becomes "HEAD\nunknown" — two lines — and it is embedded
+  # verbatim into the JSON report as `"branch": "HEAD\nunknown"`, which is not
+  # valid JSON (a raw newline cannot appear inside a string literal).
+  #
+  # Gate 12 then reads that report on the NEXT commit and BLOCKS with
+  # "YAML/JSON syntax errors" against a file the gate itself wrote. The first
+  # commit of every freshly-initialised consumer repo therefore fails once for a
+  # reason that has nothing to do with the user's change.
+  COMMIT_HASH=$(git rev-parse HEAD 2>/dev/null) || COMMIT_HASH=""
+  [ -n "$COMMIT_HASH" ] || COMMIT_HASH="unknown"
+  BRANCH=$(git rev-parse --abbrev-ref HEAD 2>/dev/null) || BRANCH=""
+  # A detached HEAD reports the literal word "HEAD"; keep it (it is the truth)
+  # but never allow a multi-line value into the report.
+  BRANCH=$(printf '%s' "$BRANCH" | tr -d '\r\n')
+  [ -n "$BRANCH" ] || BRANCH="unknown"
   TIMESTAMP=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
 
   # Scoring per #507 S3: SKIP removes a gate from the denominator (a missing

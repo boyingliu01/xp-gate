@@ -4465,3 +4465,25 @@ specification:
         - id: AC-702-06
           criteria: 高分不得抵消未解析文件的存在，仍须判 FAIL
           test_type: unit
+
+    # ============================================================
+    # REQ-711: pre-commit 的 JSON 报告不得被自身写坏。
+    # 在尚无提交的仓库里 `git rev-parse --abbrev-ref HEAD` 会先打印 "HEAD"
+    # 再以非零退出，`$(cmd || echo unknown)` 因此捕获到 "HEAD\nunknown"。
+    # 裸换行不能出现在 JSON 字符串里，报告即是无效 JSON；Gate 12 在下一次
+    # 提交时读到它并 BLOCK —— 门禁阻断了自己写出的文件。
+    # ============================================================
+    - id: REQ-711
+      description: pre-commit 报告字段必须单行，且不得用 `|| echo` 捕获可能
+        已产生部分输出的 git 命令
+      priority: high
+      acceptance_criteria:
+        - id: AC-711-01
+          criteria: 报告字段不得由 "$(git ... || echo ...)" 形式构造
+          test_type: unit
+        - id: AC-711-02
+          criteria: branch 与 commit 在写入报告前去除换行
+          test_type: unit
+        - id: AC-711-03
+          criteria: npm 包镜像携带同一修复，不得只改源头
+          test_type: unit
