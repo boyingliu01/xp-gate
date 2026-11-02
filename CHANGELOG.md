@@ -1,5 +1,65 @@
 # Changelog
 
+## [0.35.20.0] - 2026-11-02
+
+四个「静默失效」缺陷 + 一个可观测性缺口。共同形状延续 0.35.19.0：
+**一个从不触发的检测器，与「没有漂移」无法区分**。本轮在此基础上补上一格——
+当工具本身不可观测时，连「修好了没有」都无法判断。
+
+### Added
+
+- **`delphi-review` 输出携带插件版本（#709）**：工具结果里没有任何版本信息，
+  于是「修复没生效」与「修复没做」无法区分。这不是假设性风险：#686 的设计评审
+  因此连续 4 次只拿到票型、拿不到任何意见正文（累计约 60 次模型调用），据此判定
+  设计有实质缺陷并两次重写；改用源码渠道拿到真实意见后，第 2 轮就达成 100% 共识。
+  排查结论是**代码一直是对的**——差异只来自工具实际加载的模块 ≠ 磁盘上的模块。
+  footer 现为 `Provider: … | plugin: 0.35.20`，版本读取自 package.json
+  （非硬编码，硬编码会在下次发布后开始撒谎）。与 #451（hook 漂移）、#681（skill
+  内容漂移）同类：运行的东西与你以为在运行的东西不一致，且没有任何机制告诉你。
+
+### Fixed
+
+- **Gate 6 为从未测量过的维度背书，并主动教用户写无效配置（#686）**：
+  Gate 6 只检查 `architecture.yaml` 是否存在，archlint 从不消费它。更严重的是配置
+  缺失时它**阻断提交并打印推荐示例**，而那个示例是顶层 `layers:` 格式，被
+  @archlinter/cli 0.16.0 静默忽略——完整链路是：阻断提交 → 教写无效配置 → 用户照做
+  → 提交通过 → 以为分层已校验。实测 7 种配置组合全部零 layer 结果；决定性证据是
+  `archlint -d layer_violation scan .` 明确指定该检测器，返回的却是 Code Clone，
+  说明 ID 被静默忽略并回退到默认集。因此**不**补 `--config`（archlint 静默容忍未知键，
+  补参数只产生「看起来修好、实际仍不检测」），也不启用 layer_violation。
+  改为：提示改写为实际解析的 `rules:` 格式并写明「未被 0.16.0 强制」；存在配置时输出
+  机器可读标记 `[WARN:LAYERS_UNCHECKED]`，并把 `layers_config_not_enforced` 写入
+  `GATE_6_REASON_BY_LANG`，使质量报告不能把该维度评为 covered。新增 AC-06 版本护栏，
+  把一个会过期的假设变成会主动报错的假设。
+- **`sprint-status --rework-check` 返工率恒为 0（#704）**：两层根因。区间下界用了
+  `completed_at`——按定义是 sprint **结束**的时刻，而全部提交都在它之前，于是
+  `git log --since <completed_at>` 返回空集；分母 `total_sprint_commits` 又从未被
+  任何代码写入，恒为 0，经 `Math.max(total, 1)` 兜底成 1，使 0/1 恒等于 0。
+  修好前两层后还暴露出第三层：区间内零提交被渲染成 `0.0%` 并计入「全部达标」。
+  现在分子分母从同一次 `git log` 一起算出并持久化，空区间报告
+  `NOT MEASURABLE` 而非有把握的 0%。既有 #369 测试此前是**用假数据把缺陷钉成正确**：
+  只造 3~6 个提交却手写 `total_sprint_commits: 10`，那个 10 是代码里任何路径都产生
+  不出的数字，测试在证明一个只存在于测试中的事实。
+- **`check-alignment` 静默丢弃 Java 测试文件（#702）**：是三道门而非一道。
+  外层目录遍历只认 `.test.` / `.spec.` 命名，JUnit 惯例的 `ProbeTest.java` 在进入
+  解析器之前就被排除——只修内层不会有任何效果；内层 `parseTestFiles` 没有 `.java`
+  分支；`countAssertions` 只认 JS/Python 模式，修好前两层后 Java 测试仍会被记成
+  0 断言。现在扩展名集合显式声明（`SUPPORTED_TEST_EXTENSIONS` /
+  `UNSUPPORTED_TEST_EXTENSIONS`），文件命名同时接受两种约定，未适配语言
+  **上报而非静默丢弃**，且有未解析文件时一律不判 PASS——高分不能抵消「这个数字建立
+  在未读到的文件之上」。`TestMap.unsupportedFiles` 设为必填而非可选，因为可选字段
+  会被调用方顺理成章地忘记处理。
+
+### Verification
+
+- `npx vitest run src/npm-package/lib/` → 106 files / 1158 passed / 2 skipped
+- `npx vitest run plugins/dsh/src/` → 28 files / 207 passed
+- `npx tsc --noEmit` → 0 errors
+- Gate 6 相关 BATS 4 文件 20 tests 全绿；`scripts/check-hook-mirror.sh` PASS
+- 每个修复都做了变异验证（只改决策、不动控制流）：#686 3 次、#704 2 次、#702 4 次，
+  每次变异精确命中对应 AC，恢复后全绿
+- delphi 评审：#686 设计与实现均 3/3 APPROVED 100% 共识
+
 ## [0.35.19.0] - 2026-11-01
 
 四个「诊断工具说没事、实际有事」的缺陷。共同形状：**一个从不触发的检测器，
