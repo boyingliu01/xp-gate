@@ -4434,3 +4434,34 @@ specification:
         - id: AC-704-04
           criteria: 区间内无提交时报告 0 fix / 0 total，不得呈现为有把握的 0%
           test_type: unit
+
+    # ============================================================
+    # REQ-702: 测试文件的语言覆盖必须显式化，未适配的语言要报出来。
+    # 两道静默门：目录遍历只认 `.test.`/`.spec.` 命名且扩展名列表里没有
+    # .java（JUnit 惯例是 ProbeTest.java，根本进不了解析器），
+    # parseTestFiles 又没有 .java 分支。两层都静默，纯 Java 工程的对齐
+    # 报告在空集上计算却显示「跑过了」。
+    # ============================================================
+    - id: REQ-702
+      description: test-alignment 必须解析 Java 测试，且对已识别但无解析器的
+        语言做到 fail-loud，不得静默丢弃
+      priority: high
+      acceptance_criteria:
+        - id: AC-702-01
+          criteria: .java 测试文件产出 TestCase，含 REQ、@intent 与 @covers
+          test_type: unit
+        - id: AC-702-02
+          criteria: JUnit 5 断言调用被计入断言数
+          test_type: unit
+        - id: AC-702-03
+          criteria: 无解析器的测试扩展名被记录并上报，不得静默丢弃
+          test_type: unit
+        - id: AC-702-04
+          criteria: 已支持与未支持的扩展名集合显式声明，.java 属于已支持
+          test_type: unit
+        - id: AC-702-05
+          criteria: 纯不可解析工程不得在空集上判定 PASS
+          test_type: unit
+        - id: AC-702-06
+          criteria: 高分不得抵消未解析文件的存在，仍须判 FAIL
+          test_type: unit
