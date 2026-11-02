@@ -4372,4 +4372,36 @@ specification:
         - id: AC-709-02
           criteria: "delphi-review 的 footer 含 plugin 版本字段，且原有的
             Provider 与 Seats 字段保持不变"
+    # REQ-686: 门禁不得为「从未测量」的维度报绿，也不得教用户写无效配置。
+    # #686 / 父单 #685。archlint 0.16.0 的 layer_violation 检测器可见、可配置、
+    # 可指定，但运行后静默无输出；Gate 6 只检查 architecture.yaml 是否存在，
+    # 且曾推荐一个被静默忽略的顶层 `layers:` 格式。
+    # ============================================================
+    - id: REQ-686
+      description: Gate 6 必须暴露 architecture.yaml 的死配置——分层规则未被任何
+        检测器消费时如实报告，且不得推荐 archlint 不解析的配置格式
+      priority: critical
+      acceptance_criteria:
+        - id: AC-686-01
+          criteria: 存在 architecture.yaml 时，Gate 6 输出机器可读标记
+            [WARN:LAYERS_UNCHECKED]，说明分层规则未被校验
+          test_type: unit
+        - id: AC-686-02
+          criteria: 该场景下每个语言的 reason 记为 layers_config_not_enforced
+            并写入 GATE_6_REASON_BY_LANG，使质量报告不能将其评为 covered
+          test_type: unit
+        - id: AC-686-03
+          criteria: classify_coverage_reason 对该 reason 返回恰为 unknown
+            （covered 的语义是「已测量且通过」，仅报告缺口不构成测量）
+          test_type: unit
+        - id: AC-686-04
+          criteria: "配置缺失时的提示不再打印顶层 layers: 映射及其 allowed_imports
+            条目，改为 archlint 实际解析的 rules: 格式，并说明分层不被校验"
+          test_type: unit
+        - id: AC-686-05
+          criteria: 既有 Gate 6 测试全绿，无回归
+          test_type: regression
+        - id: AC-686-06
+          criteria: 测试断言 @archlinter/cli 主版本仍为 0.16；版本变化时失败并
+            提示复核设计文档，防止「分层不可用」这一假设静默过期
           test_type: unit

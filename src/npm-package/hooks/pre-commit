@@ -4017,6 +4017,30 @@ else
 
   # Check if architecture config exists (use $PROJECT_ROOT — hook may have cd'd to a subdir via ARCH-03)
   if [ -f "$PROJECT_ROOT/architecture.yaml" ] || [ -f "$PROJECT_ROOT/.architecturerc" ] || [ -f "$PROJECT_ROOT/.archlint.yaml" ]; then
+    # #686: an `architecture.yaml` is NOT evidence that layer boundaries are
+    # checked. Gate 6 only ever tested for the file's existence; archlint is
+    # invoked without --config, and even with a config it cannot enforce layers:
+    # @archlinter/cli 0.16.0 lists a `layer_violation` detector but produces no
+    # results for it under any configuration (-A, -d layer_violation, enabled:
+    # true, globs, exact paths — all exit 0 with zero layer findings). See
+    # docs/plans/2026-11-02-arch-01-gate6-layers-not-enforced-design.md §2.2.
+    #
+    # So a repo that declares layers gets a generic-smell check and a green
+    # verdict, which reads as "layers are clean". It is not: nothing looked.
+    # This block records that fact as a per-language reason so the quality
+    # report cannot score the dimension as covered, and emits a marker the
+    # terminal output can be asserted against.
+    #
+    # Deliberately NOT a capability probe: archlint silently tolerates unknown
+    # config keys, so "it did not complain" is a tautological guard — it would
+    # return "supported" no matter what. File presence is the only honest input.
+    GATE_6_LAYERS_UNCHECKED=0
+    if [ -f "$PROJECT_ROOT/architecture.yaml" ] || [ -f "$PROJECT_ROOT/.architecturerc" ]; then
+      GATE_6_LAYERS_UNCHECKED=1
+      echo "     ⚠️  [WARN:LAYERS_UNCHECKED] 分层规则未校验：architecture.yaml 声明的层边界当前不被任何检测器消费"
+      echo "        (实测 @archlinter/cli 0.16.0 的 layer_violation 启用后亦无输出；见 #686)"
+      echo "        本次仅校验通用架构坏味道（循环依赖 / 上帝类 / 死代码）。"
+    fi
     # #537: per-language reason bookkeeping. Gate 3/4 are single-language gates
     # and get away with one scalar reason; Gate 6 loops, so a scalar would lose
     # information ("TS passed, PS has no detector" cannot be one string).
@@ -4265,6 +4289,20 @@ JAVAARCHROOTS
     GATE_6_LANG_REASONS=""
     _g6_seen=""
     _g6_mixed=0
+    # #686: a language that archlint actually measured and passed still carries a
+    # reason when the repo declared layer boundaries, because the layer dimension
+    # itself was never measured. Only languages WITHOUT a reason get this stamp —
+    # an existing reason (tool missing, tests failed, ...) is more specific and
+    # must not be overwritten. The `-z` test is what keeps this honest: stamping
+    # unconditionally would erase the real reason and make every language look
+    # alike in the report.
+    if [ "${GATE_6_LAYERS_UNCHECKED:-0}" = "1" ] && [ "${BASH_VERSINFO[0]:-0}" -ge 4 ]; then
+      for _g6_lang in $PROJECT_LANGS; do
+        if [ -z "${GATE_6_REASON_BY_LANG[$_g6_lang]:-}" ]; then
+          GATE_6_REASON_BY_LANG["$_g6_lang"]="layers_config_not_enforced"
+        fi
+      done
+    fi
     for _g6_lang in $PROJECT_LANGS; do
       _g6_r=""
       if [ "${BASH_VERSINFO[0]:-0}" -ge 4 ]; then
@@ -4313,19 +4351,27 @@ JAVAARCHROOTS
       echo "   Required configuration file (.archlint.yaml / architecture.yaml) is NOT found."
       echo "   Architecture Quality Gate requires explicit architecture constraints."
       echo ""
-  echo "   Quick fix: create .archlint.yaml with: npx archlint init --no-interactive"
-      echo "   Or architecture.yaml for custom Clean Architecture layer definitions:"
-      echo "     layers:"
-      echo "       - name: api"
-      echo "         paths: [\"src/api/**\"]"
-      echo "       - name: domain"
-      echo "         paths: [\"src/domain/**\"]"
-      echo "         allowed_imports: [domain]"
-      echo "       - name: infrastructure"
-      echo "         paths: [\"src/infrastructure/**\"]"
-      echo "         allowed_imports: [domain, infrastructure]"
+      echo "   Quick fix: create .archlint.yaml with: npx archlint init --no-interactive"
+      echo "   Or write one by hand — this is archlint's own config format, and the"
+      echo "   only one it actually reads:"
+      echo "     rules:"
+      echo "       cyclic_dependency:"
+      echo "         severity: high"
+      echo "       god_module:"
+      echo "         severity: high"
       echo ""
-      echo "   After creating architecture.yaml, retry the commit."
+      # #686: this used to recommend a top-level `layers:` block. That format is
+      # silently ignored by @archlinter/cli 0.16.0 (verified against a fixture
+      # with a textbook domain->infra violation: the layer_violation detector is
+      # listed by `archlint detectors list` but produces no results under any
+      # configuration, including -A and an explicit -d layer_violation). The hint
+      # therefore taught users to write a file that bought them nothing while
+      # Gate 6 reported green — the worst possible combination.
+      echo "   NOTE: layer-boundary rules are NOT enforced by archlint 0.16.0."
+      echo "   Do not write a top-level 'layers:' block expecting it to be checked;"
+      echo "   Gate 6 will tell you when that changes. See #686 / #690 / #692."
+      echo ""
+      echo "   After creating the config, retry the commit."
       echo "   (To skip with warning, create .architecture-skip file)"
       exit 1
     fi
