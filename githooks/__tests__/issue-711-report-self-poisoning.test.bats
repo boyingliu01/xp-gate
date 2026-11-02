@@ -70,3 +70,26 @@ find_or_echo_git_capture() {
         return 1
     fi
 }
+
+@test "AC-711-04: pre-push audit entries escape user-supplied reasons" {
+    # 审计日志曾经用 shell 插值拼 JSON：reason 里的一个双引号就能提前闭合
+    # 字符串，把整行变成垃圾。一条能被它所审计的东西破坏的审计轨迹，
+    # 不算审计轨迹。
+    local PRE_PUSH="$REPO_ROOT/githooks/pre-push"
+
+    # reason 必须经环境变量交给过程化的序列化器，而不是被内联进字面量
+    grep -qE '_AJ_REASON="\$XP_GATE_BYPASS_REASON"' "$PRE_PUSH" || {
+        echo "reason 未通过 _AJ_REASON 环境变量传递"
+        return 1
+    }
+    grep -q 'JSON.stringify' "$PRE_PUSH" || {
+        echo "未见过程化序列化（JSON.stringify）"
+        return 1
+    }
+
+    # 反向断言：不得再把 reason 直接内联进 JSON 字面量
+    if grep -qF '\"reason\":\"$XP_GATE_BYPASS_REASON\"' "$PRE_PUSH"; then
+        echo "reason 仍被直接插值进 JSON 字面量"
+        return 1
+    fi
+}

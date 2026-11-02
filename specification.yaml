@@ -4487,3 +4487,7 @@ specification:
         - id: AC-711-03
           criteria: npm 包镜像携带同一修复，不得只改源头
           test_type: unit
+        - id: AC-711-04
+          criteria: pre-push 的 bypass 审计记录转义用户输入，不得被引号或换行写坏
+          test_type: unit
+

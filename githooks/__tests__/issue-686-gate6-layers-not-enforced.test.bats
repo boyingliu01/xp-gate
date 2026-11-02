@@ -159,7 +159,11 @@ teardown() {
     skip "archlint not installed"
   fi
 
-  _ver="$(node -e "console.log(require('$_pkg').version)" 2>/dev/null)"
+  # Read + parse rather than require(): require() treats a Windows absolute path
+  # with backslashes as a bare module specifier, so this line passed or failed
+  # depending on the cwd — a test whose result depends on where you run it is
+  # not measuring archlint's version.
+  _ver="$(node -e "const fs=require('fs');try{console.log(JSON.parse(fs.readFileSync(process.argv[1],'utf8')).version)}catch(e){}" "$_pkg" 2>/dev/null)"
   [ -n "$_ver" ]
 
   case "$_ver" in

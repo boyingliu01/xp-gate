@@ -53,7 +53,11 @@ write_pre_push_report() {
   report_ts=$(date -u +"%Y-%m-%d-%H%M%S")
   reports_dir=".xp-gate/reports/pre-push"
   report_file="${reports_dir}/${report_ts}.json"
-  commit_hash=$(git rev-parse HEAD 2>/dev/null || echo "unknown")
+  # #710: `git rev-parse` prints a partial line before it fails, so
+  # `$(cmd || echo x)` captures "<partial>\nx". Strip newlines before the value
+  # reaches this JSON journal — a raw newline cannot appear inside a JSON string.
+  commit_hash=$(git rev-parse HEAD 2>/dev/null) || commit_hash=""
+  commit_hash=$(printf '%s' "$commit_hash" | tr -d '\r\n'); [ -n "$commit_hash" ] || commit_hash="unknown"
   verdict=$([ "$exit_code" -eq 0 ] && echo "PASS" || echo "BLOCKED")
   mkdir -p "$reports_dir"
   # #544: the survivor detail is a JSON document, so it cannot be interpolated
@@ -352,7 +356,9 @@ _mp_now_ms() {
   esac
 }
 MP_START_MS="$(_mp_now_ms)"
-MP_ROOT="$(git rev-parse --show-toplevel 2>/dev/null || echo .)"
+MP_ROOT=$(git rev-parse --show-toplevel 2>/dev/null) || MP_ROOT=""
+MP_ROOT=$(printf '%s' "$MP_ROOT" | tr -d '
+'); [ -n "$MP_ROOT" ] || MP_ROOT="."
 if [ -f "$MP_ROOT/scripts/check-hook-mirror.sh" ]; then
   if (cd "$MP_ROOT" && bash scripts/check-hook-mirror.sh); then
     GATE_MP_STATUS="PASS"
@@ -418,7 +424,9 @@ fi
 # Uses sprint-gate.sh for standalone validation logic
 # ============================================================================
 GATE_S_STATUS="PASS"
-PROJECT_ROOT="$(git rev-parse --show-toplevel 2>/dev/null || echo ".")"
+PROJECT_ROOT=$(git rev-parse --show-toplevel 2>/dev/null) || PROJECT_ROOT=""
+PROJECT_ROOT=$(printf '%s' "$PROJECT_ROOT" | tr -d '
+'); [ -n "$PROJECT_ROOT" ] || PROJECT_ROOT="."
 SPRINT_GATE_SCRIPT=""
 
 # Same chain as pre-commit's Gate 11 (#476). The two tiers here both point at
@@ -1128,7 +1136,36 @@ if [[ "$XP_GATE_SKIP_UI_GATES" == "1" ]]; then
     exit 1
   fi
   echo "⚠️  UI Gate BYPASSED — reason: $XP_GATE_BYPASS_REASON"
-  AUDIT_ENTRY="{\"timestamp\":\"$(date -u +%Y-%m-%dT%H:%M:%SZ)\",\"branch\":\"$CURRENT_BRANCH\",\"commit\":\"$(git rev-parse HEAD)\",\"user\":\"$(git config user.name || echo 'unknown')\",\"reason\":\"$XP_GATE_BYPASS_REASON\",\"bypass_type\":\"ui-gates\"}"
+  # #710: build the whole record in node rather than interpolating shell
+  # variables into a JSON string. Values come from the environment so no shell
+  # quoting layer can mangle them (an earlier sed-based escaper silently
+  # dropped the reason entirely when its backslash expression broke).
+  #
+  # The reason is free-form USER INPUT: one double quote in it used to end the
+  # JSON string early and turn the audit line into garbage. An audit trail that
+  # can be corrupted by the thing it is auditing is not an audit trail.
+  AUDIT_ENTRY=$(
+    _AJ_TS=$(date -u +"%Y-%m-%dT%H:%M:%SZ") \
+    _AJ_BRANCH="$CURRENT_BRANCH" \
+    _AJ_COMMIT="$(git rev-parse HEAD 2>/dev/null)" \
+    _AJ_USER="$(git config user.name 2>/dev/null)" \
+    _AJ_REASON="$XP_GATE_BYPASS_REASON" \
+    node -e '
+      const env = process.env;
+      const clean = (v, fallback) => {
+        const s = String(v === undefined ? "" : v).replace(/[\r\n]+/g, " ").trim();
+        return s === "" ? fallback : s;
+      };
+      process.stdout.write(JSON.stringify({
+        timestamp: env._AJ_TS,
+        branch: clean(env._AJ_BRANCH, "unknown"),
+        commit: clean(env._AJ_COMMIT, "unknown"),
+        user: clean(env._AJ_USER, "unknown"),
+        reason: clean(env._AJ_REASON, ""),
+        bypass_type: "ui-gates",
+      }));
+    ' 2>/dev/null
+  )
   echo "$AUDIT_ENTRY" >> .audit-log.jsonl
 else
     # Detect UI changes in pushed files.
@@ -1310,7 +1347,9 @@ CURRENT_TIME=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
 # evidence (#574). It is passed explicitly instead of letting the validator
 # infer it from cwd: the gate's subject is the repo being pushed, and a cwd-
 # derived lookup would bind xp-gate's own config whenever the suite runs here.
-MW_PROJECT_ROOT=$(git rev-parse --show-toplevel 2>/dev/null || echo "")
+MW_PROJECT_ROOT=$(git rev-parse --show-toplevel 2>/dev/null) || MW_PROJECT_ROOT=""
+MW_PROJECT_ROOT=$(printf '%s' "$MW_PROJECT_ROOT" | tr -d '
+')
 if ! VALIDATION_ERROR=$(node "$MW_VALIDATOR" "$RESULT_FILE" "$EXPECTED_COMMIT" "$CURRENT_BRANCH" "$CURRENT_TIME" "$MW_PROJECT_ROOT" 2>&1); then
   echo ""
   echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
