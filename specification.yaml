@@ -4252,6 +4252,34 @@ specification:
           test_type: unit
 
     # ============================================================
+    # REQ-701: Gate 13 的计数结论不得取决于调用方的 locale。
+    #
+    # #673 的排除规则是 `/^\[INFO\].*\[(pom|jar|...)\].../`，而 `.*` 在 UTF-8
+    # locale 下的 gawk 里无法跨越非法 UTF-8 字节。Windows zh_CN 上 Maven 重定向
+    # 到文件时用 GBK 写 stdout（stdout.encoding=GBK），模块名里的中文于是以
+    # d1 e9 d6 a4 b3 cc d0 f2 这类非法 UTF-8 字节出现，排除规则失配、整行落到
+    # 开放类别规则上被计成发现。实测同一输入 LC_ALL=C 得 0、LC_ALL=C.UTF-8 得 1
+    # ——即门禁结论由开发者机器的环境变量决定，而非由构建决定。这类分歧比任何
+    # 单一错值都难排查，且只在非 C locale 的机器上复现（容器/CI 一直绿）。
+    # ============================================================
+    - id: REQ-701
+      description: Gate 13 的 javac 告警计数在任意 locale 下须对同一构建给出同一结论，含非 ASCII 模块名的 reactor summary 不得产生假发现
+      priority: high
+      acceptance_criteria:
+        - id: AC-701-01
+          criteria: "GBK 编码的 reactor summary 在 UTF-8 locale 下计为 0 个发现"
+          test_type: unit
+        - id: AC-701-02
+          criteria: 同一输入在 C 与 C.UTF-8 两个 locale 下的计数结论一致
+          test_type: unit
+        - id: AC-701-03
+          criteria: 非 ASCII 路径上的真实 javac 诊断仍被计数（不得靠「见非 ASCII 就不数」实现修复）
+          test_type: unit
+        - id: AC-701-04
+          criteria: "非 ASCII 的 [INFO] 行若携带真实类别标记仍须计数（修复不得吞掉整类 [INFO] 行）"
+          test_type: unit
+
+    # ============================================================
     # REQ-684: doctor delphi 必须与 runner 用同一套配置解析。
     #
     # SKILL.md 推荐「机器级只放一份配置，仓库里不带」的布局，runner 确实实现了
