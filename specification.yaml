@@ -4491,3 +4491,69 @@ specification:
           criteria: pre-push 的 bypass 审计记录转义用户输入，不得被引号或换行写坏
           test_type: unit
 
+    # ============================================================
+    # REQ-712 — Agent 运行时纪律必须可被实测，而不是只写在 AGENTS.md 里
+    # 2026-11-02 复核发现：AGENTS.md §AGENT RUNTIME DISCIPLINE 的三条规则中，
+    # 规则 1 生效（纯读取 shell 32.7% → 0.2%），规则 2/3 几乎未执行
+    # （calls/step 1.02，显式 wait:true 103 次）。规则存在 ≠ 规则生效，
+    # 因此需要一个从会话日志直接取数的入口。
+    # ============================================================
+    - id: REQ-712
+      description: 提供 `xp-gate runtime-journal`，从 agent 会话日志实测
+        AGENTS.md 运行时纪律的执行情况（阻塞等待、sleep/轮询、调用批量率）
+      priority: high
+      acceptance_criteria:
+        - id: AC-712-01
+          criteria: 会话日志读取同时支持 zstd 压缩与未压缩两种形态，损坏行被跳过而不是整份放弃
+          test_type: unit
+        - id: AC-712-02
+          criteria: 阻塞式 job_output 等待按调用耗时统计，并单独计入显式 wait:true 次数
+          test_type: unit
+        - id: AC-712-03
+          criteria: 字面 sleep、轮询循环、CI 状态轮询、超长 timeout 分别归类统计
+          test_type: unit
+        - id: AC-712-04
+          criteria: 调用批量率以 calls/step 与批量步骤占比两个口径输出
+          test_type: unit
+        - id: AC-712-05
+          criteria: 明显不合理的耗时（进程挂起/日志刷盘产物）被排除并计数，不得污染统计
+          test_type: unit
+        - id: AC-712-06
+          criteria: 支持按时间窗口（--days / sinceMs / untilMs）统计，窗口外调用不得计入
+          test_type: unit
+        - id: AC-712-07
+          criteria: 找不到会话日志时报告 NOT MEASURABLE 并 exit 0，不得输出全零报告冒充「没问题」
+          test_type: unit
+        - id: AC-712-08
+          criteria: 本命令始终 exit 0；它是诊断项，不是门禁
+          test_type: unit
+
+    # ============================================================
+    # REQ-713 — 镜像漂移必须能一键发现并修复，且不得被构建产物误报
+    # 2026-11-02 诊断：最近 3 天 141 次提交中 29 次（20.6%）只改镜像/版本/
+    # AGENTS/CHANGELOG，同步脚本被调用 306 次；同时 check-hook-lib-mirror.sh
+    # 因 githooks/lib/__pycache__/ 这一未跟踪产物而假失败。
+    # ============================================================
+    - id: REQ-713
+      description: 提供 `xp-gate sync-mirrors`，统一报告并修复 canonical 目录与
+        npm 包镜像之间的漂移；比对口径与守卫脚本一致，避免假失败
+      priority: high
+      acceptance_criteria:
+        - id: AC-713-01
+          criteria: 比对基于 git 已跟踪文件集，未跟踪的构建产物（如 __pycache__）不得被判为漂移
+          test_type: unit
+        - id: AC-713-02
+          criteria: 仅在 canonical 与 mirror 两侧都存在时才视为一对，不得凭空创建目录
+          test_type: unit
+        - id: AC-713-03
+          criteria: 能补齐缺失文件、覆盖差异文件、清理孤儿文件，且第二次运行无任何变更（幂等）
+          test_type: unit
+        - id: AC-713-04
+          criteria: canonical 侧缺失时拒绝同步而不是当作空目录清空镜像；同步保留可执行位
+          test_type: unit
+        - id: AC-713-05
+          criteria: 默认 dry-run，写盘必须显式 --write；存在待办时 dry-run 以非零退出
+          test_type: unit
+        - id: AC-713-06
+          criteria: 每对镜像支持各自的排除项，与对应守卫脚本的语义一致（如 src/principles 排除 __tests__）
+          test_type: unit
