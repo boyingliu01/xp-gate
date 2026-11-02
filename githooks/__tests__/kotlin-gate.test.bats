@@ -14,6 +14,22 @@ setup() {
   mkdir -p .git/hooks
   cp "${BATS_TEST_DIRNAME}/../pre-commit" .git/hooks/pre-commit
   chmod +x .git/hooks/pre-commit
+
+  # (#706) The hook loads its own modules from ITS OWN directory, so the fixture
+  # needs them next to the copy or it dies before any gate runs:
+  #     FATAL: cannot load hook-module-resolution.sh
+  #     FATAL: cannot load .git/hooks/lib/now-ms.sh (missing)
+  # Every other suite that runs the real hook copies these (gate-5a-block,
+  # gate-m2-threshold, gate9-architecture, gate-cjs-source-detection); this one
+  # did not, and the gap only surfaced on a machine with detekt installed —
+  # on CI the affected case is skipped, so it never went red there.
+  #
+  # Copy the WHOLE lib/ directory, not a list of names: pre-commit sources ten
+  # helpers and listing them by name is exactly what let gate9-architecture.bats
+  # drift nine helpers behind (#592).
+  cp "${BATS_TEST_DIRNAME}/../hook-module-resolution.sh" .git/hooks/hook-module-resolution.sh
+  mkdir -p .git/hooks/lib
+  cp -R "${BATS_TEST_DIRNAME}/../lib/." .git/hooks/lib/
 }
 
 teardown() {
@@ -182,7 +198,19 @@ EOF
   run .git/hooks/pre-commit
 
   [ "$status" -ne 0 ]
-  [[ "$output" == *"detekt"* ]] || [[ "$output" == *"Commit blocked"* ]]
+
+  # (#706) 断言原本是 `*"detekt"*` 或 `*"Commit blocked"*`，在装了 detekt 的机器上
+  # 永远不成立：一行输出里既没有 "detekt" 这个词（detekt 打印的是它的发现内容，
+  # 例如 "[MagicNumber] ... magic number"），也没有 "Commit blocked"（拦下提交的
+  # 是 Gate 5 的 "Tests FAILED"，因为本机 Gradle 解析不到 Kotlin 插件）。
+  #
+  # 这条断言真正应该钉住的是：**detekt 作为独立分析器是否真的给出了判定**。
+  # 修复前它在 Gradle 编译失败时提前 return，detekt 一次都没被调用，所以断言
+  # 失败是对的；修复后 detekt 一定运行，其发现必须出现在输出里。
+  #
+  # 断言 detekt 的发现内容（而不是它的名字）也顺带排除了「只打印了工具名却没
+  # 真的检查」这种假通过。MagicNumber 是该夹具里最稳定的发现。
+  [[ "$output" == *"MagicNumber"* ]] || [[ "$output" == *"magic number"* ]] || [[ "$output" == *"Commit blocked"* ]]
 }
 
 @test "detekt CLI passes when no violations found" {
