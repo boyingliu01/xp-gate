@@ -52,19 +52,40 @@ teardown() {
   while IFS= read -r line; do
     # Every CURRENT_BRANCH resolution must go through symbolic-ref first.
     [[ "$line" == *'symbolic-ref --short HEAD'* ]]
-    # And must keep a literal fallback so the value is never empty.
-    [[ "$line" == *'echo "HEAD"'* ]]
   done <<< "$output"
+
+  # #710: the literal fallback moved to the FOLLOWING line, because
+  # `|| echo "HEAD"` appended to a command that already printed a partial line
+  # produced the two-line value "HEAD\nunknown". The guarantee still holds —
+  # it is now enforced by a non-empty check on the next line instead of by an
+  # inline `|| echo`. Assert that shape rather than the old one-liner.
+  local count
+  count=$(grep -c 'CURRENT_BRANCH="HEAD"' "$PRE_COMMIT" || true)
+  [ "${count:-0}" -ge 2 ] || {
+    echo "期望两个 CURRENT_BRANCH 站点都有字面量兜底，实际 ${count:-0}"
+    return 1
+  }
+
+  # And the fallback must be guarded against multi-line captures.
+  grep -qF "CURRENT_BRANCH=\$(printf '%s' \"\$CURRENT_BRANCH\" | tr -d '\r\n')" "$PRE_COMMIT" || {
+    echo "CURRENT_BRANCH 未做换行清理"
+    return 1
+  }
 }
 
 @test "Issue #463: pre-commit contains no unguarded 'rev-parse --abbrev-ref HEAD'" {
   # An unguarded call is exactly what regressed. Match only lines lacking a
   # stderr redirect, which every safe call site must have.
+  #
+  # #710: skip comment lines. The fix documents the failing command by name in
+  # a comment, and this assertion is about EXECUTABLE call sites — flagging a
+  # comment here would force the explanation out of the file that needs it.
   run grep -n 'git rev-parse --abbrev-ref HEAD' "$PRE_COMMIT"
   [ "$status" -eq 0 ]
 
   local line
   while IFS= read -r line; do
+    [[ "$line" =~ ^[0-9]+:[[:space:]]*# ]] && continue
     [[ "$line" == *'2>/dev/null'* ]]
   done <<< "$output"
 }
