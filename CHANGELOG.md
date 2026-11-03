@@ -1,5 +1,55 @@
 # Changelog
 
+## [0.35.24.0] - 2026-11-03
+
+**文档说的和代码做的必须是同一件事。** 这一批多数不是加功能，而是把「声称已生效」
+改成「如实说明当前状态」，并拆掉两处会让守卫永远绿/永远红的规范结构缺陷。
+
+### Fixed
+
+- **`npm pack --json` 的 stdout 不再被污染（#723）**：根 `package.json` 的
+  `prepare` 钩子跑 `sync-version.cjs`，它用 `console.log` 把 12 行诊断写进 stdout，
+  真正的 JSON 被挤到第 13 行——任何 `npm pack --json | jq` 都会以
+  `Invalid numeric literal` 失败，正是 0.32.2 漏发 dsh 插件的那个原因。
+  既有守卫 `AC-DSH-019` 只扫 `src/npm-package/scripts/`，管不到根上的 `prepare`，
+  于是「教训记下了」和「根因修掉了」成了两件事。诊断改走 stderr，并新增守卫覆盖
+  所有 pack 期脚本入口；同时补一条 AC 要求诊断信息本身必须保留，避免修污染时
+  顺手把信息一起删掉。
+- **ARCH-001..014 如实标注为未实现（#687）**：文档与 `architecture.yaml` 一直声称
+  14 条架构规则「默认启用」，实际 `src/architecture/` 只有 `version-parser.ts`，
+  `grep -rn "ARCH-0" src/` 零命中。修正 `docs/ARCHITECTURE.md`、`architecture.yaml`、
+  `TOOL-INSTALLATION-GUIDE.md`、`README.md`、`CAPABILITIES.md`、`AGENTS.md` 共 5 处
+  无保留表述，并给出可复现的判据。此前读者无从判断这些规则到底跑没跑。
+- **修好长期常红的 ac-reference-guard（#718）**：uninstall 测试以 issue 号当 AC 前缀
+  写 `AC-714-xx`，而 `REQ-714` 已被「AGENTS.md 运行时纪律」占用，`AC-714-05/06`
+  更是从未登记。按守卫语义补登记（新增 `REQ-717`），**而不是把条目塞进 frozen
+  baseline**——那样会把守卫调教成永远绿。
+- **拆开 5 组撞号需求（#719）**：`REQ-681/682/683/684/686` 各有两次定义且描述不同，
+  导致 `AC-xxx` 引用失去唯一性。按「先定义者保留原号」把后插入的 5 个改为
+  `REQ-718..722`，并同步 5 个测试文件的 `@covers`。
+
+### Removed
+
+- **删除无调用方的适配器分派器（#688）**：`route_to_adapter()` 零调用方
+  （pre-commit 是 source 适配器后直接调 `run_*`），连带删除它的两个死依赖
+  `run_architecture()`。issue 原设想是「接上即可」，但 Gate 6 早已内联实现且更完善
+  （Python 查 4 种配置载体 vs 适配器的 2 种；工具缺失直接 BLOCK vs 适配器
+  `|| return 0` 静默通过；Go 用 `PIPESTATUS[0]` 取真实退出码），接回去是行为倒退。
+  删除处均留下理由与测试指针。
+
+## [0.35.23.0] - 2026-11-02
+
+六个 P1 缺陷，全部属于「检测器从不失败，于是看起来一切正常」这一类。
+
+### Fixed
+
+- **Gate 13 计数结论不再依赖调用方 locale（#701）**：含中文模块名的工程会被误判 FAIL。
+- **Java 构建失败与覆盖率缺失都先诊断再建议（#703 #708）**：与 JDK 无关的构建失败
+  不再被断言成 JDK 问题。
+- **Kotlin 构建链失败不再吞掉独立分析器（#706）**：夹具补齐模块。
+- **delphi-external 5xx 不再丢弃 provider 错误体（#705 #707）**：`base_url` 支持
+  `${VAR}` 插值。
+
 ## [0.35.22.0] - 2026-11-02
 
 **「规则存在」不等于「规则被执行」。** 2026-10-30 诊断后往 AGENTS.md 写了三条
