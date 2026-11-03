@@ -273,11 +273,35 @@ mvn test -Dtest=*ArchitectureTest && echo "✅ ArchUnit tests passing"
 
 ## architecture.yaml 配置指南 (Gate 6)
 
+> ### ⚠️ 本节的规则定义当前不被执行 —— 请先读这段
+>
+> 下面的 `layers:` / `rules:` 写法**不会启用任何架构规则**。Gate 6 只检查本文件
+> 是否存在（缺失则 BLOCK），其内容不被任何代码消费。
+>
+> 原因（实测于 archlint 0.16.0）：
+>
+> 1. `layers:` / `rules:` 是 xp-gate 自拟的结构，**不是 archlint 的配置格式**。
+>    archlint 原生读的是 `.archlint.yaml`（键为 `ignore:` / `entry_points:` / `rules:`）。
+> 2. 构造一个 `allowedImports: []` 却跨层导入的工程，
+>    `archlint scan --config architecture.yaml` 只报 Dead Code，**不报层级违规**。
+>    archlint 有 `layer_violation` 检测器，但它默认 disabled，且不读本文件的 `layers:`。
+> 3. `ARCH-001`~`ARCH-014` 是**规划编号、当前无实现**（全仓 `grep -rn "ARCH-0" src/` 零命中实现）。
+>
+> **所以你照着本节配置，仍然得不到层级保护。** 真正在跑的是 archlint 的 built-in
+> 检测器（dead_code、cyclic_dependency、code_clone、god_module 等），它们在
+> `.archlint.yaml` 里配置。
+>
+> 本节保留作为**规划参考**。落地路径见 #685 / #690 / #691 与
+> `docs/plans/2026-10-30-archunit-33-rules-gap-analysis.md`。
+
 ### ⚠️ 重要提示
 
 **Gate 6 现在遵循零容忍原则**：如果 `architecture.yaml` 或 `.architecturerc` 缺失，commit 将被 **阻塞**。
 
 这与 Gate 1-5 的行为一致（工具缺失 = 阻塞）。
+
+> 注意：这里阻塞的是**文件缺失**，不是「规则违规」。文件存在但规则未实现时，
+> Gate 6 不会因此报告任何架构问题 —— 见上方警示框。
 
 ### 必需字段
 
@@ -285,7 +309,7 @@ mvn test -Dtest=*ArchitectureTest && echo "✅ ArchUnit tests passing"
 |------|------|---------|
 | `version` | 配置版本，当前为 `1` | **必需** |
 | `layers` | 层级定义，至少定义一个 layer | **必需** |
-| `rules` | 架构规则配置 | 可选（默认启用 ARCH-001-010） |
+| `rules` | 架构规则配置 | 可选（⚠️ 所谓「默认启用 ARCH-001-010」**不成立**——规则当前无实现，见上方警示框） |
 
 ### 最小配置示例
 
