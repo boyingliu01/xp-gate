@@ -58,23 +58,29 @@ function journalText(events) {
 function toolPair(callId, name, args, startT, endT, result = {}, pos = {}) {
   const turn = pos.turn ?? 1;
   const step = pos.step ?? 1;
-  return [
-    { type: 'tool/call', time: startT, data: { turn, step, callId, name, arguments: JSON.stringify(args) } },
-    {
-      type: 'tool/result',
-      time: endT,
-      data: {
-        turn,
-        step,
-        message: {
-          role: 'tool',
-          toolCallId: callId,
-          isError: !!result.isError,
-          content: [{ type: 'text', text: result.text ?? 'ok' }],
-        },
-      },
-    },
-  ];
+  const call = {
+    type: 'tool/call',
+    time: startT,
+    data: { turn, step, callId, name, arguments: JSON.stringify(args) },
+  };
+  // Built separately so the pair stays flat: inlining it put the event five
+  // objects deep, which trips clean-code.deep-nesting (max 4) on every run.
+  const reply = {
+    type: 'tool/result',
+    time: endT,
+    data: { turn, step, message: toolResultMessage(callId, result) },
+  };
+  return [call, reply];
+}
+
+/** The `message` payload of a tool/result event. */
+function toolResultMessage(callId, result) {
+  return {
+    role: 'tool',
+    toolCallId: callId,
+    isError: !!result.isError,
+    content: [{ type: 'text', text: result.text ?? 'ok' }],
+  };
 }
 
 describe('parseSessionBuffer', () => {

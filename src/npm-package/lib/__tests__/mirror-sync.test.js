@@ -49,8 +49,15 @@ afterEach(() => {
  */
 function write(root, rel, content) {
   const full = path.join(root, rel);
-  fs.mkdirSync(path.dirname(full), { recursive: true });
-  fs.writeFileSync(full, content);
+  try {
+    fs.mkdirSync(path.dirname(full), { recursive: true });
+    fs.writeFileSync(full, content);
+  } catch (err) {
+    // Swallowing this would turn a broken fixture into a confusing assertion
+    // failure further down ("expected undefined"), so rethrow with the path that
+    // actually failed. The rule wants the IO handled, not hidden.
+    throw new Error(`failed to write fixture ${rel}: ${err instanceof Error ? err.message : String(err)}`);
+  }
 }
 
 /**
