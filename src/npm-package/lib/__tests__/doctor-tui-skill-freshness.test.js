@@ -336,7 +336,7 @@ describe('doctor-tui skill freshness #681 equal version, different content', () 
     return { issues, check: checks.find((c) => c.name === `Skill: ${name}`) };
   }
 
-  it('AC-681-01: same version but a missing chapter is WARN, not "Up to date"', () => {
+  it('AC-718-01: same version but a missing chapter is WARN, not "Up to date"', () => {
     const bundled = fs.readFileSync(path.join(bundledSkillsDir, 'delphi-review', 'SKILL.md'), 'utf8');
     // Keep the frontmatter (version included), drop a large slice of the body.
     const idx = bundled.indexOf('\n---', 4);
@@ -352,7 +352,7 @@ describe('doctor-tui skill freshness #681 equal version, different content', () 
     expect(issues).toBe(1);
   });
 
-  it('AC-681-02: same version and same content is still "Up to date" (no false alarm)', () => {
+  it('AC-718-02: same version and same content is still "Up to date" (no false alarm)', () => {
     const bundled = fs.readFileSync(path.join(bundledSkillsDir, 'delphi-review', 'SKILL.md'), 'utf8');
     installSkill('delphi-review', bundled);
     const { issues, check } = runFreshness('delphi-review');
@@ -360,7 +360,7 @@ describe('doctor-tui skill freshness #681 equal version, different content', () 
     expect(issues).toBe(0);
   });
 
-  it('AC-681-03: line endings alone still do not count as a difference', () => {
+  it('AC-718-03: line endings alone still do not count as a difference', () => {
     const bundled = fs.readFileSync(path.join(bundledSkillsDir, 'delphi-review', 'SKILL.md'), 'utf8');
     installSkill('delphi-review', bundled.replace(/\r\n/g, '\n').replace(/\n/g, '\r\n'));
     const { issues, check } = runFreshness('delphi-review');

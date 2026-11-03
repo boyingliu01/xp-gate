@@ -1,5 +1,5 @@
 /**
- * @test REQ-683
+ * @test REQ-720
  * @intent Every `gate-*.sh` that also exists under `githooks/adapters/` must be a
  *          byte-identical copy of its canonical `githooks/gate-*.sh`.
  *
@@ -20,7 +20,7 @@
  *          A stale mirror that is merely overwritten downstream is
  *          indistinguishable from a correct one until the order changes. So the
  *          mirror is asserted directly.
- * @covers AC-683-01, AC-683-02
+ * @covers AC-720-01, AC-720-02
  */
 'use strict';
 
@@ -44,15 +44,15 @@ function adaptersGateNames() {
   ).sort();
 }
 
-describe('REQ-683 adapter gate copies are mirrors of the canonical gates', () => {
-  it('AC-683-01: the adapter gate copies exist at all (anti-vacuity)', () => {
+describe('REQ-720 adapter gate copies are mirrors of the canonical gates', () => {
+  it('AC-720-01: the adapter gate copies exist at all (anti-vacuity)', () => {
     // If this list is empty the parity assertions below would pass vacuously —
     // exactly the failure shape #683 is about.
     const names = adaptersGateNames();
     expect(names).toEqual(expect.arrayContaining(['gate-9.sh']));
   });
 
-  it('AC-683-02: every adapter gate copy is byte-identical to githooks/<name>', () => {
+  it('AC-720-02: every adapter gate copy is byte-identical to githooks/<name>', () => {
     const drifted = [];
     for (const name of adaptersGateNames()) {
       const canonical = path.join(GITHOOKS, name);
@@ -70,7 +70,7 @@ describe('REQ-683 adapter gate copies are mirrors of the canonical gates', () =>
     expect(drifted).toEqual([]);
   });
 
-  it('AC-683-03: the npm package mirrors every adapter, gate copies included', () => {
+  it('AC-720-03: the npm package mirrors every adapter, gate copies included', () => {
     // The package's adapters/ is what `copyAdapters()` reads, so a drift there
     // is the drift users install.
     const pkgAdapters = path.join(REPO_ROOT, 'src', 'npm-package', 'adapters');

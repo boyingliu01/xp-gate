@@ -27,15 +27,24 @@ function globalSkillRoots() {
 }
 
 /**
- * Directories inside ~/.config/xp-gate/ that `setup-global` creates and that
- * `uninstall` used to leave behind (#663).
+ * Directories and files inside ~/.config/xp-gate/ that `setup-global` creates
+ * and that `uninstall` used to leave behind (#663).
+ *
+ * `ownedByPath: true` marks entries the installer writes at a FIXED path under
+ * our own config directory -- there is no other way they got there, so a content
+ * signature is the wrong test for them (#714). It matters most for
+ * `package.json`: its body is nothing but dependency pins (`js-yaml`, `zod`), so
+ * no signature string can ever match it, and demanding one meant the file was
+ * scheduled for deletion and then skipped at delete time. `xp-gate.json` is
+ * equally ours -- the uninstaller itself writes `mode: "uninstalled"` into it
+ * moments earlier -- and was likewise reported as foreign.
  */
 const GLOBAL_INSTALL_RESIDUE = [
-  { key: 'modules', label: 'modules/' },
-  { key: 'node_modules', label: 'node_modules/' },
-  { key: 'package.json', label: 'package.json' },
-  { key: 'package-lock.json', label: 'package-lock.json' },
-  { key: 'xp-gate.json', label: 'xp-gate.json' },
+  { key: 'modules', label: 'modules/', ownedByPath: true },
+  { key: 'node_modules', label: 'node_modules/', ownedByPath: true },
+  { key: 'package.json', label: 'package.json', ownedByPath: true },
+  { key: 'package-lock.json', label: 'package-lock.json', ownedByPath: true },
+  { key: 'xp-gate.json', label: 'xp-gate.json', ownedByPath: true },
 ];
 
 /** User DATA that must survive an uninstall, and must be reported as retained. */
@@ -325,7 +334,12 @@ function buildPlan(mode) {
           type: isDir ? 'dir' : 'file',
           path: target,
           label: `~/.config/xp-gate/${item.label}`,
-          critical: false
+          critical: false,
+          // #714: a fixed-path file we install ourselves needs no content
+          // signature. Carrying the flag through the plan is what makes the
+          // delete actually happen instead of stopping at "does not contain
+          // xp-gate signature".
+          ownedByPath: item.ownedByPath === true
         });
       }
     }
@@ -365,6 +379,20 @@ function buildPlan(mode) {
  * @returns {boolean} true on success, false on skip (not xp-gate owned)
  */
 function removeFile(item, config) {
+  // #714: `ownedByPath` entries are files the installer writes at a fixed path
+  // inside our own ~/.config/xp-gate/ directory, so ownership is established by
+  // the path itself. Without this branch the residue files fell through to
+  // verifyFileOwnership() with neither a manifest entry nor a signature, and
+  // isXpGateFile() evaluated `content.includes(undefined)` -- always false. The
+  // file was listed in the plan, "uninstall complete" was printed, and the file
+  // stayed.
+  if (item.ownedByPath === true) {
+    if (!fs.existsSync(item.path)) return false;
+    fs.unlinkSync(item.path);
+    console.log(`  Removed ${item.label}`);
+    return true;
+  }
+
   const manifestEntry = config.manifest && config.manifest.files
     ? config.manifest.files[item.manifestKey]
     : null;
@@ -740,8 +768,17 @@ function planHooksDirRemoval(hooksDir) {
     : { action: 'remove-all', foreign: [], owned };
 }
 
-/** Hook entry points xp-gate installs. */
-const OWNED_HOOK_NAMES = ['pre-commit', 'pre-push', 'post-merge'];
+/**
+ * Hook entry points xp-gate installs.
+ *
+ * This must stay in sync with `copyHooks()`'s `hookFiles` list, which is what
+ * actually puts them on disk. `post-commit` was missing here (#714), so the
+ * uninstaller classified its own hook as a third party's and kept it -- the
+ * file contains nine `xp-gate` references and is installed unconditionally by
+ * setup-global. The set is derived from the installer's list rather than
+ * retyped, so the two cannot drift apart again.
+ */
+const OWNED_HOOK_NAMES = ['pre-commit', 'pre-push', 'post-merge', 'post-commit'];
 
 /** 'git-lfs' when the file proves it, else null. Content-based: see doctor.js. */
 function foreignHookSource(filePath) {

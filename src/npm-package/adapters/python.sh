@@ -180,17 +180,12 @@ run_lint() {
   fi
 }
 
-run_architecture() {
-  if [ ! -f ".import-linter.yml" ] && [ ! -f "import_linter_config.yml" ]; then
-    return 0
-  fi
-
-  require_tool lint-imports "import-linter" || return 0
-
-  echo "Running Python architecture checks (import-linter)..."
-  lint-imports
-  return $?
-}
+# REMOVED in #688: run_architecture()
+# Never invoked -- its only would-be caller, route_to_adapter(), had no callers
+# either. Gate 6 implements import-linter in pre-commit (grep "import-linter"),
+# and more thoroughly: it detects 4 config carriers instead of the 2 checked
+# here, and BLOCKs on a missing lint-imports rather than `|| return 0` passing.
+# See githooks/adapter-common.sh for the full rationale.
 
 run_tests() {
   require_tool pytest "pytest" || return 1
