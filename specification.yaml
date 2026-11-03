@@ -4500,17 +4500,17 @@ specification:
     # 就只认那个文件。否则测试或调用方钉住一个不存在的路径时，会静默读到开发者
     # 真实的全局配置并报 PASS——正是本批在修的「空洞通过」。
     # ============================================================
-    - id: REQ-684
+    - id: REQ-721
       description: doctor delphi 的配置检查须与 runner 一致地回退到全局配置，且不得为此牺牲「无配置」的失败判定
       priority: high
       acceptance_criteria:
-        - id: AC-684-01
+        - id: AC-721-01
           criteria: 仅有合法全局配置、项目内无配置时，配置检查须 PASS 并标注使用的是 global 作用域
           test_type: unit
-        - id: AC-684-02
+        - id: AC-721-02
           criteria: 项目与全局都没有配置时仍须 FAIL（回退不得掩盖真实损坏的安装）
           test_type: unit
-        - id: AC-684-03
+        - id: AC-721-03
           criteria: 项目内存在配置时优先使用项目配置，不得被全局配置顶替
           test_type: unit
 
@@ -4525,17 +4525,17 @@ specification:
     # 空跑必须说出来。「打印标题 + exit 0 + 无后续输出」会被读成成功，
     # 这正是它一直没被发现的原因。
     # ============================================================
-    - id: REQ-682
+    - id: REQ-719
       description: update-skill --all 须枚举磁盘上实际部署的 skill，并在无 skill 时明确告知而非静默成功
       priority: medium
       acceptance_criteria:
-        - id: AC-682-01
+        - id: AC-719-01
           criteria: config.installedSkills 缺失时，--all 仍须更新磁盘上已部署的 skill
           test_type: unit
-        - id: AC-682-02
+        - id: AC-719-02
           criteria: 同一 skill 同时出现在注册表与磁盘时不得重复更新
           test_type: unit
-        - id: AC-682-03
+        - id: AC-719-03
           criteria: 无任何 skill 时须明确提示无可更新项，且不调用安装
           test_type: unit
 
@@ -4550,17 +4550,17 @@ specification:
     # 但内容不同时不得据此推荐 `update-skill`：安装副本可能比 main 还新
     # （与无版本号分支已遵守的同一条不对称性），所以只提示人工比对。
     # ============================================================
-    - id: REQ-681
+    - id: REQ-718
       description: doctor 的技能新鲜度判定须在版本号相同时仍比对内容，避免内容漂移被报成最新
       priority: medium
       acceptance_criteria:
-        - id: AC-681-01
+        - id: AC-718-01
           criteria: 版本号相同但正文缺失整章时须报 WARN，不得报 Up to date
           test_type: unit
-        - id: AC-681-02
+        - id: AC-718-02
           criteria: 版本号与正文均相同时仍须报 Up to date（不得引入误报）
           test_type: unit
-        - id: AC-681-03
+        - id: AC-718-03
           criteria: 仅行尾风格不同时仍须视为相同（沿用 #439 的判定）
           test_type: unit
 
@@ -4578,17 +4578,17 @@ specification:
     #
     # 被下游覆盖的陈旧镜像与正确镜像无法区分，直到顺序改变。
     # ============================================================
-    - id: REQ-683
+    - id: REQ-720
       description: githooks/adapters 下的 gate 脚本须与 githooks/ 根部的 canonical 副本逐字节一致，并由 sync 自愈
       priority: medium
       acceptance_criteria:
-        - id: AC-683-01
+        - id: AC-720-01
           criteria: adapters 下确有 gate 副本存在（防止断言空洞通过）
           test_type: unit
-        - id: AC-683-02
+        - id: AC-720-02
           criteria: 每个 adapters gate 副本须与 githooks/<name> 逐字节一致
           test_type: unit
-        - id: AC-683-03
+        - id: AC-720-03
           criteria: npm 包的 adapters 镜像须与 githooks/adapters 一致
           test_type: unit
 
@@ -4614,31 +4614,31 @@ specification:
     # 可指定，但运行后静默无输出；Gate 6 只检查 architecture.yaml 是否存在，
     # 且曾推荐一个被静默忽略的顶层 `layers:` 格式。
     # ============================================================
-    - id: REQ-686
+    - id: REQ-722
       description: Gate 6 必须暴露 architecture.yaml 的死配置——分层规则未被任何
         检测器消费时如实报告，且不得推荐 archlint 不解析的配置格式
       priority: critical
       acceptance_criteria:
-        - id: AC-686-01
+        - id: AC-722-01
           criteria: 存在 architecture.yaml 时，Gate 6 输出机器可读标记
             [WARN:LAYERS_UNCHECKED]，说明分层规则未被校验
           test_type: unit
-        - id: AC-686-02
+        - id: AC-722-02
           criteria: 该场景下每个语言的 reason 记为 layers_config_not_enforced
             并写入 GATE_6_REASON_BY_LANG，使质量报告不能将其评为 covered
           test_type: unit
-        - id: AC-686-03
+        - id: AC-722-03
           criteria: classify_coverage_reason 对该 reason 返回恰为 unknown
             （covered 的语义是「已测量且通过」，仅报告缺口不构成测量）
           test_type: unit
-        - id: AC-686-04
+        - id: AC-722-04
           criteria: "配置缺失时的提示不再打印顶层 layers: 映射及其 allowed_imports
             条目，改为 archlint 实际解析的 rules: 格式，并说明分层不被校验"
           test_type: unit
-        - id: AC-686-05
+        - id: AC-722-05
           criteria: 既有 Gate 6 测试全绿，无回归
           test_type: regression
-        - id: AC-686-06
+        - id: AC-722-06
           criteria: 测试断言 @archlinter/cli 主版本仍为 0.16；版本变化时失败并
             提示复核设计文档，防止「分层不可用」这一假设静默过期
           test_type: unit
