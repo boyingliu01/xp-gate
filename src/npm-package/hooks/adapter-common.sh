@@ -104,41 +104,30 @@ detect_project_lang() {
   fi
 }
 
-route_to_adapter() {
-  local action="$1"
-  local lang
-  lang=$(detect_project_lang)
-  
-  local adapter_file=""
-
-  # 3-tier resolution matching pre-commit ADAPTER_DIR logic
-  # Tier 1: Global flat layout (~/.config/xp-gate/adapters/lang.sh)
-  if [ -f "$HOME/.config/xp-gate/adapters/${lang}.sh" ]; then
-    adapter_file="$HOME/.config/xp-gate/adapters/${lang}.sh"
-  # Tier 2: Project nested layout (githooks/adapters/lang.sh)
-  elif [ -f "githooks/adapters/${lang}.sh" ]; then
-    adapter_file="githooks/adapters/${lang}.sh"
-  elif [ -f "./githooks/adapters/${lang}.sh" ]; then
-    adapter_file="./githooks/adapters/${lang}.sh"
-  fi
-
-  if [ -n "$adapter_file" ]; then
-    # shellcheck source=./githooks/adapters/lang.sh
-    source "$adapter_file"
-    
-    # Execute the requested action
-    case "$action" in
-      "static_analysis") run_static_analysis ;;
-      "lint") run_lint ;;
-      "tests") run_tests ;;
-      "coverage") run_coverage ;;
-      *) return 1 ;;
-    esac
-  else
-    echo "No adapter found for language: $lang (searched: ~/.config/xp-gate/adapters/, githooks/adapters/)"
-    return 1
-  fi
-}
+# ---------------------------------------------------------------------------
+# REMOVED in #688: route_to_adapter()
+#
+# It was a dispatcher with zero production callers. pre-commit sources an
+# adapter and calls `run_static_analysis` / `run_lint` / `run_tests` /
+# `run_coverage` directly; nothing ever went through this function, so its
+# `case "$action"` enumeration was dead too -- including the "add an
+# `architecture` arm and it'll work" assumption in #688, which would have been
+# a no-op.
+#
+# Its two never-invoked dependants are gone with it: `run_architecture()` in
+# adapters/python.sh and adapters/go.sh. Gate 6 already implements both checks
+# INLINE in pre-commit, and does it better than the adapter versions did:
+#   * Python: detects 4 config carriers (.import-linter.yml /
+#     import_linter_config.yml / .importlinter / pyproject [tool.importlinter]),
+#     where the adapter checked 2, and BLOCKs when lint-imports is missing
+#     instead of `require_tool ... || return 0` silently passing.
+#   * Go: reads the checker's own exit status via PIPESTATUS[0] (#630), where a
+#     `arch-go check | head` pipeline would have reported head's status.
+# Wiring the adapter version back in would therefore have been a regression,
+# so the dead code was deleted instead of connected.
+#
+# tests: githooks/__tests__/issue-688-dead-dispatcher-removed.test.bats
+# ---------------------------------------------------------------------------
 
 check_if_tool_available() {
   local tool_name="$1"

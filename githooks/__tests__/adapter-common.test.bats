@@ -154,12 +154,12 @@ EOF
   rm -f /tmp/test-tsconfig.json
 }
 
-@test "route_to_adapter routes to correct adapter for current language" {
-  # In xp-gate project (has tsconfig.json), should route to typescript adapter
-  run route_to_adapter "static_analysis"
-  # Should succeed because we're in xp-gate project with tsconfig.json
-  [ "$status" -eq 0 ]
-}
+# REMOVED in #688: the previous test here exercised `route_to_adapter`, which
+# had zero production callers. It passed by asserting only `status -eq 0` on a
+# dispatcher nothing invoked -- a green test protecting a dead path reads as
+# "this is wired up", which is exactly the false confidence #688 is about.
+# The removal itself is pinned by
+# __tests__/issue-688-dead-dispatcher-removed.test.bats.
 
 # ============================================================================
 # resolve_adapter_path: flat (global) vs nested (project) layout
