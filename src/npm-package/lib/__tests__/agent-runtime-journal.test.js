@@ -78,12 +78,30 @@ function toolPair(callId, name, args, startT, endT, result = {}, pos = {}) {
 }
 
 describe('parseSessionBuffer', () => {
-  it('reads a zstd-compressed session journal', () => {
+  // `zlib.zstdCompressSync` / `zstdDecompressSync` landed in Node 22. CI pins
+  // Node 20.x, so without this guard the test throws "zstdCompressSync is not a
+  // function" there and turns Gate 5 red on a machine difference rather than a
+  // code defect. Locally (Node 24) it passed, which is exactly why the gap
+  // survived. Feature-detected rather than version-sniffed, so a backport or a
+  // future rename cannot silently disable the coverage.
+  const hasZstd = typeof zlib.zstdCompressSync === 'function' && typeof zlib.zstdDecompressSync === 'function';
+
+  it.skipIf(!hasZstd)('reads a zstd-compressed session journal', () => {
     const events = toolPair('c1', 'read', { file_path: '/a.ts' }, 1000, 1010);
     const buf = zlib.zstdCompressSync(Buffer.from(journalText(events), 'utf8'));
     const parsed = parseSessionBuffer(buf);
     expect(parsed).toHaveLength(2);
     expect(parsed[0].type).toBe('tool/call');
+  });
+
+  it('skips a zstd-magic buffer it cannot decode, rather than throwing', () => {
+    // The counterpart to the test above: on a runtime without zstd the magic
+    // number still gets recognised, `zstdDecompressSync` is missing, and the
+    // catch must degrade to "no events" instead of crashing the whole journal.
+    // This runs on every Node version, so the degraded path is never untested.
+    const magic = Buffer.from([0x28, 0xb5, 0x2f, 0xfd, 0x00, 0x00, 0x00, 0x00]);
+    expect(() => parseSessionBuffer(magic)).not.toThrow();
+    expect(parseSessionBuffer(magic)).toEqual([]);
   });
 
   it('reads an uncompressed journal too, so fixtures need no encoder', () => {
