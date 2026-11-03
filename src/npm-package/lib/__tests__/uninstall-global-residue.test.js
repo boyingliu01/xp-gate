@@ -243,11 +243,11 @@ describe('uninstall --global actually removes the residue (#714)', () => {
   }
 
   /**
-   * @test REQ-714 Uninstall completeness
+   * @test REQ-717 Uninstall completeness
    * @intent A file step in the residue plan must be deleted, not skipped for lack of a signature
-   * @covers AC-714-01
+   * @covers AC-717-01
    */
-  it('AC-714-01: package.json, package-lock.json and xp-gate.json are gone after uninstall', async () => {
+  it('AC-717-01: package.json, package-lock.json and xp-gate.json are gone after uninstall', async () => {
     seedRealisticInstall();
     const { uninstall } = freshRequire('../uninstall');
     await uninstall(['--global', '--force']);
@@ -262,7 +262,7 @@ describe('uninstall --global actually removes the residue (#714)', () => {
     // xp-gate.json is deliberately retained: the state machine rewrites it with
     // `mode: "uninstalled"` so a second `uninstall` is a clean no-op (AC-09).
     // What #714 broke was not the retention but the CLAIM about it -- the run
-    // called this file "not xp-gate's" while rewriting it. AC-714-04 pins that.
+    // called this file "not xp-gate's" while rewriting it. AC-717-04 pins that.
     const manifestFile = path.join(configDir(), 'xp-gate.json');
     expect(fs.existsSync(manifestFile)).toBe(true);
     const manifest = JSON.parse(fs.readFileSync(manifestFile, 'utf8'));
@@ -270,11 +270,11 @@ describe('uninstall --global actually removes the residue (#714)', () => {
   });
 
   /**
-   * @test REQ-714 Uninstall completeness
+   * @test REQ-717 Uninstall completeness
    * @intent The two residue directories must go too, so a later setup-global cannot reuse them
-   * @covers AC-714-02
+   * @covers AC-717-02
    */
-  it('AC-714-02: modules/ and node_modules/ are gone after uninstall', async () => {
+  it('AC-717-02: modules/ and node_modules/ are gone after uninstall', async () => {
     seedRealisticInstall();
     const { uninstall } = freshRequire('../uninstall');
     await uninstall(['--global', '--force']);
@@ -285,11 +285,11 @@ describe('uninstall --global actually removes the residue (#714)', () => {
   });
 
   /**
-   * @test REQ-714 Uninstall completeness
+   * @test REQ-717 Uninstall completeness
    * @intent User data must still survive the now-working deletion path
-   * @covers AC-714-03
+   * @covers AC-717-03
    */
-  it('AC-714-03: .delphi-config.json survives the completed uninstall', async () => {
+  it('AC-717-03: .delphi-config.json survives the completed uninstall', async () => {
     seedRealisticInstall();
     const { uninstall } = freshRequire('../uninstall');
     await uninstall(['--global', '--force']);
@@ -298,11 +298,11 @@ describe('uninstall --global actually removes the residue (#714)', () => {
   });
 
   /**
-   * @test REQ-714 Uninstall completeness
+   * @test REQ-717 Uninstall completeness
    * @intent The uninstall must not report success while leaving its own residue behind
-   * @covers AC-714-04
+   * @covers AC-717-04
    */
-  it('AC-714-04: uninstall does not warn that its own residue files are foreign', async () => {
+  it('AC-717-04: uninstall does not warn that its own residue files are foreign', async () => {
     seedRealisticInstall();
     const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
     const logSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
@@ -343,11 +343,11 @@ describe('uninstall hooks directory ownership (#714)', () => {
   });
 
   /**
-   * @test REQ-714 Hook ownership
+   * @test REQ-717 Hook ownership
    * @intent post-commit is installed by copyHooks(), so it must count as xp-gate's own
-   * @covers AC-714-05
+   * @covers AC-717-05
    */
-  it('AC-714-05: post-commit is classified as xp-gate-owned, not foreign', () => {
+  it('AC-717-05: post-commit is classified as xp-gate-owned, not foreign', () => {
     const { planHooksDirRemoval } = freshRequire('../uninstall');
     const hooksDir = path.join(process.env.HOME, '.config', 'xp-gate', 'hooks');
     fs.mkdirSync(hooksDir, { recursive: true });
@@ -362,11 +362,11 @@ describe('uninstall hooks directory ownership (#714)', () => {
   });
 
   /**
-   * @test REQ-714 Hook ownership
+   * @test REQ-717 Hook ownership
    * @intent A genuinely foreign hook (git-lfs) must still be protected
-   * @covers AC-714-06
+   * @covers AC-717-06
    */
-  it('AC-714-06: a third-party hook is still classified as foreign and kept', () => {
+  it('AC-717-06: a third-party hook is still classified as foreign and kept', () => {
     const { planHooksDirRemoval } = freshRequire('../uninstall');
     const hooksDir = path.join(process.env.HOME, '.config', 'xp-gate', 'hooks');
     fs.mkdirSync(hooksDir, { recursive: true });
