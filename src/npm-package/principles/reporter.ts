@@ -1,60 +1,60 @@
 import { AnalysisResult, Violation } from './analyzer';
 
-export function formatSARIF(result: AnalysisResult): string {
+/** Width of the horizontal rule that separates file blocks in console output. */
+const CONSOLE_RULE_WIDTH = 40;
+
+/** SARIF severity for a violation. SARIF calls `info` a "note". */
+function toSarifLevel(severity: Violation['severity']): string {
+  if (severity === 'error') return 'error';
+  if (severity === 'warning') return 'warning';
+  return 'note';
+}
+
+/** Map one violation to its SARIF result entry. */
+function toSarifResult(v: Violation): Record<string, unknown> {
+  const region = { startLine: v.line, startColumn: v.column || 1 };
+  const physicalLocation = { artifactLocation: { uri: v.file }, region };
+  return {
+    ruleId: v.ruleId,
+    level: toSarifLevel(v.severity),
+    message: { text: v.message },
+    locations: [{ physicalLocation }],
+  };
+}
+
+/** The `runs[0]` object: tool driver metadata plus every result. */
+function buildSarifRun(result: AnalysisResult): Record<string, unknown> {
   const ruleDescriptors = Object.keys(result.ruleResults).map(ruleId => ({
     id: ruleId,
-    shortDescription: {
-      text: getRuleDescription(ruleId)
-    },
-    defaultConfiguration: {
-      level: getRuleLevel(ruleId)
-    }
+    shortDescription: { text: getRuleDescription(ruleId) },
+    defaultConfiguration: { level: getRuleLevel(ruleId) },
   }));
-  
-  const sarifResults = result.violations.map(v => ({
-    ruleId: v.ruleId,
-    level: v.severity === 'error' ? 'error' : v.severity === 'warning' ? 'warning' : 'note',
-    message: {
-      text: v.message
+
+  return {
+    tool: {
+      driver: {
+        name: 'Principles Checker',
+        version: '1.0.0',
+        informationUri: 'https://github.com/boyingliu01/xp-gate',
+        rules: ruleDescriptors,
+      },
     },
-    locations: [
-      {
-        physicalLocation: {
-          artifactLocation: {
-            uri: v.file
-          },
-          region: {
-            startLine: v.line,
-            startColumn: v.column || 1
-          }
-        }
-      }
-    ]
-  }));
-  
+    results: result.violations.map(toSarifResult),
+    properties: {
+      filesChecked: result.summary.filesChecked,
+      rulesRun: result.summary.rulesRun,
+      executionTimeMs: result.executionTimeMs,
+    },
+  };
+}
+
+export function formatSARIF(result: AnalysisResult): string {
   const sarif = {
     $schema: 'https://raw.githubusercontent.com/oasis-tcs/sarif-spec/master/Schemata/sarif-schema-2.1.0.json',
     version: '2.1.0',
-    runs: [
-      {
-        tool: {
-          driver: {
-            name: 'Principles Checker',
-            version: '1.0.0',
-            informationUri: 'https://github.com/boyingliu01/xp-gate',
-            rules: ruleDescriptors
-          }
-        },
-        results: sarifResults,
-        properties: {
-          filesChecked: result.summary.filesChecked,
-          rulesRun: result.summary.rulesRun,
-          executionTimeMs: result.executionTimeMs
-        }
-      }
-    ]
+    runs: [buildSarifRun(result)],
   };
-  
+
   return JSON.stringify(sarif, null, 2);
 }
 
@@ -73,7 +73,13 @@ function getRuleDescription(ruleId: string): string {
     'solid.ocp': 'Open/Closed Principle violation',
     'solid.lsp': 'Liskov Substitution Principle violation',
     'solid.isp': 'Interface Segregation Principle violation',
-    'solid.dip': 'Dependency Inversion Principle violation'
+    'solid.dip': 'Dependency Inversion Principle violation',
+    'arch.controller': 'Class in interfaces/rest must be named *Controller',
+    'arch.service': 'Class in application/service must be named *Service or *ServiceImpl',
+    'arch.repository': 'Class in infrastructure must be named *Mapper, *DAO or *Repository',
+    'arch.dto-layering': 'DTO must not depend on a service or repository',
+    'arch.domain-event': 'Domain event must not depend on the infrastructure layer',
+    'arch.util-service': 'Utility depends on an application service'
   };
   
   return descriptions[ruleId] || ruleId;
@@ -113,7 +119,7 @@ function formatViolationLines(violation: Violation): string[] {
 function formatFileViolations(lines: string[], filesMap: Record<string, Violation[]>): void {
   for (const [file, violations] of Object.entries(filesMap)) {
     lines.push(`\n📁 ${file}`);
-    lines.push('─'.repeat(40));
+    lines.push('─'.repeat(CONSOLE_RULE_WIDTH));
     for (const v of violations) {
       lines.push(...formatViolationLines(v));
     }
@@ -147,7 +153,7 @@ export function formatConsole(result: AnalysisResult): string {
   formatFileViolations(lines, filesMap);
   
   lines.push('');
-  lines.push('─'.repeat(40));
+  lines.push('─'.repeat(CONSOLE_RULE_WIDTH));
   lines.push(formatSummary(result));
   lines.push(`Execution time: ${result.executionTimeMs}ms`);
   

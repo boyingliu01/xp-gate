@@ -50,6 +50,28 @@ const LANGUAGE_REGISTRY = {
         optional: false,
         gates: ['Gate 1 (Code Quality)'],
       },
+      {
+        name: '@archlinter/cli',
+        checkCmd: 'npx --no-install archlint --version',
+        install: {
+          darwin: 'npm install --save-dev @archlinter/cli',
+          linux: 'npm install --save-dev @archlinter/cli',
+          win32: 'npm install --save-dev @archlinter/cli',
+        },
+        optional: true,
+        gates: ['Gate 4 (Architecture)'],
+      },
+      {
+        name: 'dependency-cruiser',
+        checkCmd: 'npx --no-install depcruise --version',
+        install: {
+          darwin: 'npm install --save-dev dependency-cruiser',
+          linux: 'npm install --save-dev dependency-cruiser',
+          win32: 'npm install --save-dev dependency-cruiser',
+        },
+        optional: true,
+        gates: ['Gate 4 (Architecture)'],
+      },
     ],
   },
 
@@ -113,6 +135,17 @@ const LANGUAGE_REGISTRY = {
         optional: true,
         gates: ['Gate 1 (Code Formatting)'],
       },
+      {
+        name: 'import-linter',
+        checkCmd: 'lint-imports --version',
+        install: {
+          darwin: 'pip install import-linter',
+          linux: 'pip install import-linter',
+          win32: 'pip install import-linter',
+        },
+        optional: true,
+        gates: ['Gate 4 (Architecture)'],
+      },
     ],
   },
 
@@ -165,6 +198,19 @@ const LANGUAGE_REGISTRY = {
         optional: true,
         gates: ['Gate 1 (Code Quality)'],
       },
+      {
+        // A BUILD dependency, not a CLI: there is no `archunit` binary to probe,
+        // so checkCmd cannot work here. Detected by scanning the build files.
+        name: 'archunit',
+        detectBy: 'build-file',
+        install: {
+          darwin: 'add "com.tngtech.archunit:archunit-junit5" to pom.xml / build.gradle',
+          linux: 'add "com.tngtech.archunit:archunit-junit5" to pom.xml / build.gradle',
+          win32: 'add "com.tngtech.archunit:archunit-junit5" to pom.xml / build.gradle',
+        },
+        optional: true,
+        gates: ['Gate 4 (Architecture)'],
+      },
     ],
   },
 
@@ -195,6 +241,17 @@ const LANGUAGE_REGISTRY = {
         optional: true,
         gates: ['Gate 1 (Code Quality)'],
       },
+      {
+        name: 'arch-go',
+        checkCmd: 'arch-go --version',
+        install: {
+          darwin: 'go install github.com/fdaines/arch-go@latest',
+          linux: 'go install github.com/fdaines/arch-go@latest',
+          win32: 'go install github.com/fdaines/arch-go@latest',
+        },
+        optional: true,
+        gates: ['Gate 4 (Architecture)'],
+      },
     ],
   },
 
@@ -224,6 +281,18 @@ const LANGUAGE_REGISTRY = {
         },
         optional: true,
         gates: ['Gate 1 (Code Quality)'],
+      },
+      {
+        // Konsist is a build dependency too -- see the Java ArchUnit note above.
+        name: 'konsist',
+        detectBy: 'build-file',
+        install: {
+          darwin: 'add "com.lemonappdev:konsist" to build.gradle(.kts)',
+          linux: 'add "com.lemonappdev:konsist" to build.gradle(.kts)',
+          win32: 'add "com.lemonappdev:konsist" to build.gradle(.kts)',
+        },
+        optional: true,
+        gates: ['Gate 4 (Architecture)'],
       },
     ],
   },
@@ -590,7 +659,11 @@ function getToolsForLanguages(languages) {
     result[lang] = [];
 
     for (const tool of langDef.tools) {
-      const status = checkTool(tool.name, tool.checkCmd);
+      // Build-file tools have no binary to probe; running checkCmd on them
+      // would report "missing" permanently (#689 AC-3).
+      const status = tool.detectBy === 'build-file'
+        ? detectBuildFileDependency(lang)
+        : checkTool(tool.name, tool.checkCmd);
       result[lang].push({
         tool,
         status: status.available ? 'available' : 'missing',
@@ -682,6 +755,92 @@ function readProjectConfig(projectRoot) {
   }
 }
 
+/**
+ * Files that declare a build dependency. The version catalog is included because
+ * a Gradle project may describe the coordinate ONLY there, never in
+ * build.gradle.kts -- checking just the build script would report a genuinely
+ * installed tool as missing (AC-689-06).
+ *
+ * Only the ROOT of the project is scanned: a multi-module build aggregates its
+ * dependencies at the root, and walking every submodule would cost a directory
+ * traversal per language for no gain (AC-689-09).
+ */
+const BUILD_FILE_CANDIDATES = [
+  'pom.xml',
+  'build.gradle',
+  'build.gradle.kts',
+  'gradle/libs.versions.toml',
+];
+
+/**
+ * The coordinate each language's architecture tool is declared under.
+ *
+ * Split per language on purpose: Konsist is a Kotlin tool, but nothing stops a
+ * Java project from also depending on it. Matching a single shared list would
+ * let one language's declaration turn another language's row green, so doctor
+ * would stop reporting the real gap (AC-689-07).
+ */
+const ARCH_DEPENDENCY_COORDINATES = {
+  java: 'com.tngtech.archunit',
+  kotlin: 'com.lemonappdev',
+};
+
+/**
+ * Whether a build-file-declared architecture tool is present.
+ *
+ * Tools with `detectBy: 'build-file'` have no CLI to probe -- ArchUnit and
+ * Konsist are libraries. Probing them with checkCmd reports "missing" forever,
+ * which is what #689 is about: doctor told Java users their architecture tool
+ * was absent no matter what they did.
+ *
+ * @param {string} lang - Language key from LANGUAGE_REGISTRY
+ * @param {string} [projectRoot] - Project root; defaults to cwd
+ * @returns {{available: boolean, version: string, path: string|null}}
+ */
+function detectBuildFileDependency(lang, projectRoot) {
+  const root = projectRoot || process.cwd();
+  const coordinate = ARCH_DEPENDENCY_COORDINATES[lang];
+  if (!coordinate) return { available: false, version: 'N/A', path: null };
+
+  for (const relPath of BUILD_FILE_CANDIDATES) {
+    const candidate = path.join(root, relPath);
+    if (!fs.existsSync(candidate)) continue;
+    let contents;
+    try {
+      contents = fs.readFileSync(candidate, 'utf-8');
+    } catch {
+      // An unreadable build file is not evidence the tool is absent, but it is
+      // not evidence it is present either. Try the next candidate rather than
+      // claiming either way.
+      continue;
+    }
+    if (contents.includes(coordinate)) {
+      return { available: true, version: `declared in ${relPath}`, path: candidate };
+    }
+  }
+  return { available: false, version: 'N/A', path: null };
+}
+
+/**
+ * The architecture tools registered for each language.
+ *
+ * "Architecture tool" is recognised by its Gate 4 label rather than by a second
+ * parallel list: one source of truth means a tool cannot be registered and
+ * simultaneously missing from the doctor view.
+ *
+ * @returns {Object<string, Array>} language -> tool definitions
+ */
+function getArchitectureTools() {
+  const result = {};
+  for (const [lang, langDef] of Object.entries(LANGUAGE_REGISTRY)) {
+    const arch = langDef.tools.filter(tool =>
+      tool.gates.some(gate => gate.includes('Architecture'))
+    );
+    if (arch.length > 0) result[lang] = arch;
+  }
+  return result;
+}
+
 module.exports = {
   LANGUAGE_REGISTRY,
   detectProjectLanguages,
@@ -693,6 +852,8 @@ module.exports = {
   handleDetectLanguages,
   handleCheckTools,
   handleInstallTools,
+  getArchitectureTools,
+  detectBuildFileDependency,
 };
 
 /**
