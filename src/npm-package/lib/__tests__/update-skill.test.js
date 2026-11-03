@@ -372,7 +372,7 @@ describe('update-skill #682 filesystem enumeration', () => {
     return fx.deploySkill(platform, name, 'old content');
   }
 
-  it('AC-682-01: --all updates skills found on disk even when config.installedSkills is absent', async () => {
+  it('AC-719-01: --all updates skills found on disk even when config.installedSkills is absent', async () => {
     deploySkill('opencode', 'sprint-flow');
     deploySkill('opencode', 'delphi-review');
     const { updateSkill } = require('../update-skill');
@@ -383,7 +383,7 @@ describe('update-skill #682 filesystem enumeration', () => {
     expect(names).toContain('delphi-review');
   });
 
-  it('AC-682-02: --all does not update the same skill twice for the same platform', async () => {
+  it('AC-719-02: --all does not update the same skill twice for the same platform', async () => {
     deploySkill('opencode', 'sprint-flow');
     fs.mkdirSync(path.join(fx.tmpHome, '.config', 'xp-gate'), { recursive: true });
     fs.writeFileSync(
@@ -396,7 +396,7 @@ describe('update-skill #682 filesystem enumeration', () => {
     expect(sprintCalls.length).toBe(1);
   });
 
-  it('AC-682-03: --all with nothing installed says so instead of silently succeeding', async () => {
+  it('AC-719-03: --all with nothing installed says so instead of silently succeeding', async () => {
     const { updateSkill } = require('../update-skill');
     const code = await updateSkill(null, { all: true });
     expect(fx.output()).toMatch(/nothing to update|no skills installed|not installed/i);

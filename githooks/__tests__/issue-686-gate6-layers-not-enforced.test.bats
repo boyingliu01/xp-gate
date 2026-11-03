@@ -1,5 +1,5 @@
 #!/usr/bin/env bats
-# @test REQ-686
+# @test REQ-722
 # @intent Gate 6 对 architecture.yaml 只做存在性检查，archlint 从不消费它。
 #         项目写了层边界配置，Gate 6 完全不校验分层，却报告全绿 ——
 #         **门禁为从未测量过的维度背书**。
@@ -11,9 +11,9 @@
 #
 #         修复只做一件事：让 Gate 6 如实报告"分层未校验"，
 #         不实现分层检测本身（那属 ARCH-03/05/15）。
-# @covers AC-686-01, AC-686-02, AC-686-03, AC-686-04, AC-686-05, AC-686-06
+# @covers AC-722-01, AC-722-02, AC-722-03, AC-722-04, AC-722-05, AC-722-06
 #
-# AC-686-05 (no regression in the existing Gate 6 tests) is covered by this file
+# AC-722-05 (no regression in the existing Gate 6 tests) is covered by this file
 # plus the pre-existing issue-602 / issue-630 suites: they assert the Java and Go
 # arms still judge by PIPESTATUS and still report a skip reason. It is listed
 # here because a requirement with no claiming test is the same drift this issue
@@ -31,7 +31,7 @@ teardown() {
 }
 
 # ---------------------------------------------------------------------------
-# AC-686-04: Gate 6 不再教用户写无效配置
+# AC-722-04: Gate 6 不再教用户写无效配置
 #
 # 这是本 issue 的入口缺陷。Gate 6 在配置缺失时打印的推荐示例是顶层 `layers:`，
 # 而 archlint 0.16.0 对该键静默忽略（见设计文档 §2.2 的 7 组实测）。
@@ -39,7 +39,7 @@ teardown() {
 # 断言用 CODE 而非注释：旧的示例若只出现在解释"为什么删掉它"的注释里，
 # 那不是缺陷复发。所以先剥掉注释行再匹配 —— 与 #602 的做法一致。
 # ---------------------------------------------------------------------------
-@test "#686 AC-686-04: the config-missing hint no longer recommends top-level layers:" {
+@test "#686 AC-722-04: the config-missing hint no longer recommends top-level layers:" {
   [ -f "$PRE_COMMIT" ]
 
   # Isolate the config-missing block: from "ARCHITECTURE CONFIG MISSING" to the
@@ -76,7 +76,7 @@ teardown() {
 }
 
 # ---------------------------------------------------------------------------
-# AC-686-01 / AC-686-02: 终端输出必须自身无法被误读
+# AC-722-01 / AC-722-02: 终端输出必须自身无法被误读
 #
 # 用户通常只看终端，看不到 quality report 里的 reason。仅加一行 WARN 然后
 # 照常打印 "Architecture validation passed"，读者仍会以为分层已被管。
@@ -84,7 +84,7 @@ teardown() {
 # 用机器可读标记而不是散文（评审意见 A-2/T-02）：措辞微调或本地化都不会
 # 让守卫失效，而守卫失效会让这个 bug 静默复活。
 # ---------------------------------------------------------------------------
-@test "#686 AC-686-01: layers-declared emits the machine-readable WARN marker" {
+@test "#686 AC-722-01: layers-declared emits the machine-readable WARN marker" {
   run grep -F '[WARN:LAYERS_UNCHECKED]' "$PRE_COMMIT"
   [ "$status" -eq 0 ]
 
@@ -94,7 +94,7 @@ teardown() {
   [ "$status" -eq 0 ]
 }
 
-@test "#686 AC-686-02: a non-covered reason is recorded for the gate" {
+@test "#686 AC-722-02: a non-covered reason is recorded for the gate" {
   run grep -F 'layers_config_not_enforced' "$PRE_COMMIT"
   [ "$status" -eq 0 ]
 
@@ -105,18 +105,18 @@ teardown() {
 }
 
 # ---------------------------------------------------------------------------
-# AC-686-03: covered 的语义
+# AC-722-03: covered 的语义
 #
 # `classify_coverage_reason` 的 "*)" 分支返回 unknown，所以任何未识别的 reason
 # 自动非 covered。这使"断言非 covered"成为恒真 —— 单看这一条没有判别力。
 #
-# 真正的判别力来自与 AC-686-02 配对：AC-02 证明 reason 确实被写入，
+# 真正的判别力来自与 AC-722-02 配对：AC-02 证明 reason 确实被写入，
 # 本条证明该 reason 的语义是"未测量"而不是"已覆盖"。
 #
 # 断言精确返回值而不是"非 covered"：若有人把这个 reason 加进 covered 白名单
 # （理由可能是"我们已经报告它了"），本条必须变红 —— 报告缺口不等于测量通过。
 # ---------------------------------------------------------------------------
-@test "#686 AC-686-03: layers_config_not_enforced classifies as unknown, not covered" {
+@test "#686 AC-722-03: layers_config_not_enforced classifies as unknown, not covered" {
   # Source the function without running the hook: extract it verbatim.
   _fn="$(sed -n '/^classify_coverage_reason()/,/^}/p' "$PRE_COMMIT")"
   [ -n "$_fn" ]
@@ -138,14 +138,14 @@ teardown() {
 }
 
 # ---------------------------------------------------------------------------
-# AC-686-06: 版本护栏
+# AC-722-06: 版本护栏
 #
 # 整个设计依赖「archlint 0.16.0 的 layer_violation 不产出结果」这一实测事实。
 # 若上游修复，本设计输出的 WARN 会变成错误的警告。
 #
 # 这不是防御性代码，而是把一个会过期的假设变成一个会主动报错的假设。
 # ---------------------------------------------------------------------------
-@test "#686 AC-686-06: archlint major.minor is still 0.16, or this design must be revisited" {
+@test "#686 AC-722-06: archlint major.minor is still 0.16, or this design must be revisited" {
   # A git worktree has no node_modules of its own; the repo that owns the
   # worktree does. Probe both rather than skipping, because a skip here is the
   # difference between "the assumption still holds" and "nobody checked".

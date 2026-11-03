@@ -403,7 +403,7 @@ describe('doctor delphi #684 global config fallback', () => {
     return { logs, restore: () => spy.mockRestore() };
   }
 
-  it('AC-684-01: a valid global config with no project copy PASSes instead of failing', async () => {
+  it('AC-721-01: a valid global config with no project copy PASSes instead of failing', async () => {
     const globalPath = writeGlobalConfig();
     const project = path.join(tmpHome, 'a-project-with-no-config');
     fs.mkdirSync(project, { recursive: true });
@@ -417,7 +417,7 @@ describe('doctor delphi #684 global config fallback', () => {
     expect(cfgLine).toMatch(/global/i);
   });
 
-  it('AC-684-02: no config in either scope still FAILs (fallback must not mask a broken install)', async () => {
+  it('AC-721-02: no config in either scope still FAILs (fallback must not mask a broken install)', async () => {
     const project = path.join(tmpHome, 'bare-project');
     fs.mkdirSync(project, { recursive: true });
     const { logs, restore } = captureLogs();
@@ -436,7 +436,7 @@ describe('doctor delphi #684 global config fallback', () => {
     expect(cfgLine).toMatch(/not found/);
   });
 
-  it('AC-684-03: a project config still wins over the global one', async () => {
+  it('AC-721-03: a project config still wins over the global one', async () => {
     const globalPath = writeGlobalConfig();
     const project = path.join(tmpHome, 'project-with-own-config');
     fs.mkdirSync(project, { recursive: true });
