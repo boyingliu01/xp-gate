@@ -43,17 +43,12 @@ run_lint() {
   return $?
 }
 
-run_architecture() {
-  if ! require_tool arch-go "arch-go (Go architecture checker)" 2>/dev/null; then
-    echo "⚠ arch-go not available, installing..."
-    go install github.com/arch-go/arch-go@latest 2>/dev/null
-    require_tool arch-go "arch-go" || return 0
-  fi
-
-  echo "Running Go architecture checks (arch-go)..."
-  arch-go check
-  return $?
-}
+# REMOVED in #688: run_architecture()
+# Never invoked -- its only would-be caller, route_to_adapter(), had no callers
+# either. Gate 6 implements arch-go in pre-commit (grep "arch-go"), and reads
+# the checker's own exit status via PIPESTATUS[0] (#630) instead of letting a
+# `| head` pipeline report head's. See githooks/adapter-common.sh for the full
+# rationale.
 
 run_tests() {
   require_tool go "Go SDK" || return 1

@@ -4458,6 +4458,39 @@ specification:
 
     # ============================================================
 
+    # #688 的前提是「适配器里有写好的 run_architecture，只是没接上，接上即可」。
+    # 实测不成立：Gate 6 早已在 pre-commit 里内联实现 Python import-linter 与
+    # Go arch-go，且比适配器版本更完善——Python 查 4 种配置载体（适配器只查 2
+    # 种）、工具缺失时直接 BLOCK（适配器 `require_tool ... || return 0` 静默通过）、
+    # Go 用 PIPESTATUS[0] 取真实退出码（适配器的 `| head` 只会拿到 head 的状态，#630）。
+    # 把适配器版本接回去就是一次行为倒退。
+    #
+    # 更根本的是分派器 route_to_adapter() 自己也没人调：pre-commit 是 source
+    # 适配器后直接调 run_* 函数。所以「往它的 case 里加一行 architecture」是空操作。
+    # 结论：删除死代码并留下理由，而不是为了消除「死代码」告警去激活一条更劣的路径。
+    # ============================================================
+    - id: REQ-716
+      description: 无调用方的适配器分派器与其私有死函数须被删除并留下理由，不得为消除死代码而激活更劣的路径
+      priority: medium
+      acceptance_criteria:
+        - id: AC-716-01
+          criteria: adapter-common.sh 不再定义无调用方的 route_to_adapter
+          test_type: unit
+        - id: AC-716-02
+          criteria: python.sh 与 go.sh 不再定义永不执行的 run_architecture
+          test_type: unit
+        - id: AC-716-03
+          criteria: 删除处须注明理由并指向 #688，且说明架构检查由 Gate 6 内联实现
+          test_type: unit
+        - id: AC-716-04
+          criteria: 仅删除死代码，detect_project_lang 等活函数必须保留
+          test_type: unit
+        - id: AC-716-05
+          criteria: githooks 与 src/npm-package 两份副本保持字节一致
+          test_type: unit
+
+    # ============================================================
+
     # SKILL.md 推荐「机器级只放一份配置，仓库里不带」的布局，runner 确实实现了
     # 全局回退，所以评审能正常跑。doctor 只查 `<cwd>/.delphi-config.json`，
     # 在这种布局下报 FAIL，并让用户「复制示例配置到项目里」——恰好制造出
