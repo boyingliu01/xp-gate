@@ -659,10 +659,129 @@ async function callExpertWithSchemaRetry({ provider, model, systemPrompt, userPr
 }
 
 // ── API call ───────────────────────────────────────────────────────────
-async function callModelAPI(providerConfig, model, systemPrompt, userPrompt, options = {}) {
-  const url = `${providerConfig.base_url.replace(/\/$/, '')}/chat/completions`;
 
-  const body = {
+/**
+ * Map a 429 to a verdict. Not every 429 is a transient rate limit — WhaleCloud
+ * returns `type: "budget_exceeded"` in two distinct non-retryable cases, and a
+ * blind retry cannot clear either and would burn two round-trips before failing:
+ *   - `error.param === "category_quota"`: the account has no ECONOMY/STANDARD
+ *     quota configured for the model ("需要专项额度...尚未配置") — needs an admin.
+ *   - `error.param === "cost_quota"`: the account's daily spending cap is
+ *     exhausted ("今日额度已耗尽...限额: 100.00元") — resets the next day.
+ * Surface which kind it is so the caller knows whether to wait or to ask for an
+ * admin change, rather than treating both as a generic rate limit.
+ *
+ * Extracted from `callModelAPI` so the branch reads as one rule (#722 follow-up:
+ * the enclosing function was CCN 33 against a block threshold of 10).
+ */
+async function classifyRateLimitResponse(response) {
+  let quotaType = '';
+  try {
+    const body = await response.json();
+    if (body && body.error && body.error.type === 'budget_exceeded') {
+      quotaType = body.error.param === 'cost_quota' ? 'daily budget exhausted' : 'quota not configured';
+    }
+  } catch {
+    // body is not JSON; fall through to the generic rate-limit handling
+  }
+  if (quotaType) {
+    return { error: true, retryable: false, message: `WhaleCloud budget_exceeded: ${quotaType} for this model.` };
+  }
+  return { error: true, retryable: true, message: 'Rate limit exceeded (429).' };
+}
+
+/**
+ * Map a 5xx to a verdict, reading the provider's structured error body the same
+ * way the 429 branch does instead of discarding it (#705).
+ *
+ * Measured on the whalecloud gateway: a prompt containing
+ * `new ProcessBuilder(args).start()` makes the gateway fail in its
+ * response-processing stage and return 500 with
+ *   {"error":{"type":"response_processing_error",
+ *             "param":"non_stream_chat_response","code":"500"}}
+ * The old code threw that away and reported "Server error (500).", which reads
+ * as a transient outage. `type`/`param` are what tell an operator apart gateway
+ * flapping vs. upstream timeout vs. content-triggered processing failure —
+ * three problems with three different responses.
+ *
+ * Retryability is the other half: a content-dependent failure cannot clear by
+ * retrying (the content did not change), so marking it retryable burns the
+ * orchestrator's retry budget on a guaranteed repeat. Only an explicitly
+ * recognised response_processing_error is demoted; every other 5xx keeps the
+ * previous retryable=true, and an unparseable body keeps the previous behaviour
+ * entirely — reading the body must not change the verdict on its own.
+ */
+async function classifyServerErrorResponse(response) {
+  let detail = '';
+  let processingError = false;
+  try {
+    const body = await response.json();
+    if (body && body.error && typeof body.error === 'object') {
+      const type = typeof body.error.type === 'string' ? body.error.type : '';
+      const param = typeof body.error.param === 'string' ? body.error.param : '';
+      if (type === 'response_processing_error') {
+        processingError = true;
+      }
+      const parts = [type, param].filter(Boolean);
+      if (parts.length > 0) {
+        detail = ` Provider reported: ${parts.join('/')}.`;
+      }
+    }
+  } catch {
+    // body is not JSON; keep the previous behaviour untouched
+  }
+  if (processingError) {
+    return {
+      error: true,
+      retryable: false,
+      message: `Server error (${response.status}).${detail} This is a content-dependent upstream processing failure, so retrying the same prompt will fail the same way.`,
+    };
+  }
+  return { error: true, retryable: true, message: `Server error (${response.status}).${detail}` };
+}
+
+/**
+ * Map a 2xx response body to a verdict.
+ *
+ * The gateway must echo which model actually served the request. Writing `null`
+ * here used to be tolerated downstream, which let a run that never resolved a
+ * model count as a successful expert call (#423). Fail at the source instead,
+ * so the evidence never records an unverifiable expert.
+ */
+async function readSuccessfulResponse(response) {
+  const data = await response.json();
+  if (!isPlainObject(data) || !Array.isArray(data.choices)) {
+    return { error: true, message: 'Invalid response from model.' };
+  }
+  const firstChoice = data.choices[0];
+  const message = isPlainObject(firstChoice) ? firstChoice.message : null;
+  const content = isPlainObject(message) ? message.content : null;
+  if (typeof content !== 'string' || content.trim() === '') {
+    return { error: true, message: 'Invalid response from model.' };
+  }
+
+  const resolvedModel = typeof data.model === 'string' ? data.model.trim() : '';
+  if (resolvedModel === '') {
+    return {
+      error: true,
+      message: 'Gateway response did not include a resolved model id; cannot prove which model ran.',
+    };
+  }
+
+  return {
+    success: true,
+    content: content.trim(),
+    resolved_model: resolvedModel,
+  };
+}
+
+/**
+ * Build the request body. `temperature: 0.3` is a Delphi-review choice: low
+ * enough to keep verdicts reproducible, non-zero so three experts on the same
+ * model are not literally identical runs.
+ */
+function buildChatBody(model, systemPrompt, userPrompt) {
+  return {
     model: model,
     messages: [
       { role: 'system', content: systemPrompt },
@@ -671,6 +790,11 @@ async function callModelAPI(providerConfig, model, systemPrompt, userPrompt, opt
     temperature: 0.3,
     response_format: { type: 'json_object' },
   };
+}
+
+async function callModelAPI(providerConfig, model, systemPrompt, userPrompt, options = {}) {
+  const url = `${providerConfig.base_url.replace(/\/$/, '')}/chat/completions`;
+  const body = buildChatBody(model, systemPrompt, userPrompt);
 
   // Same constant as the runner default: a second literal here silently
   // diverges whenever the default is retuned (#429).
@@ -696,113 +820,18 @@ async function callModelAPI(providerConfig, model, systemPrompt, userPrompt, opt
     }
 
     if (response.status === 429) {
-      // A 429 is not always a transient rate limit. WhaleCloud returns 429 with
-      // `type: "budget_exceeded"` in two distinct non-retryable cases, which a
-      // blind retry cannot clear and would otherwise burn two round-trips before
-      // failing:
-      //   - `error.param === "category_quota"`: the account has no ECONOMY/STANDARD
-      //     quota configured for the model ("需要专项额度...尚未配置") — needs an
-      //     admin to add it.
-      //   - `error.param === "cost_quota"`: the account's daily spending cap is
-      //     exhausted ("今日额度已耗尽...限额: 100.00元") — resets the next day.
-      // Surface which kind it is so the caller knows whether to wait or to request
-      // an admin change, rather than treating both as a generic rate limit.
-      let quotaType = '';
-      try {
-        const body = await response.json();
-        if (body && body.error && body.error.type === 'budget_exceeded') {
-          quotaType = body.error.param === 'cost_quota' ? 'daily budget exhausted' : 'quota not configured';
-        }
-      } catch {
-        // body is not JSON; fall through to the generic rate-limit handling
-      }
-      if (quotaType) {
-        return { error: true, retryable: false, message: `WhaleCloud budget_exceeded: ${quotaType} for this model.` };
-      }
-      return { error: true, retryable: true, message: 'Rate limit exceeded (429).' };
+      return await classifyRateLimitResponse(response);
     }
 
     if (response.status >= 500) {
-      // (#705) Read the provider's structured error body, the same way the 429
-      // branch above does, instead of discarding it.
-      //
-      // Measured on the whalecloud gateway: a prompt containing
-      // `new ProcessBuilder(args).start()` makes the gateway fail in its
-      // response-processing stage and return 500 with
-      //   {"error":{"type":"response_processing_error",
-      //             "param":"non_stream_chat_response","code":"500"}}
-      // The old code threw that away and reported "Server error (500).", which
-      // reads as a transient outage. `type`/`param` are what tell an operator
-      // apart gateway flapping vs. upstream timeout vs. content-triggered
-      // processing failure — three problems with three different responses.
-      //
-      // Retryability is the other half: a content-dependent failure cannot clear
-      // by retrying (the content did not change), so marking it retryable burns
-      // the orchestrator's retry budget on a guaranteed repeat. Only an
-      // explicitly recognised response_processing_error is demoted; every other
-      // 5xx keeps the previous retryable=true, and an unparseable body keeps the
-      // previous behaviour entirely — reading the body must not change the
-      // verdict on its own.
-      let detail = '';
-      let processingError = false;
-      try {
-        const body = await response.json();
-        if (body && body.error && typeof body.error === 'object') {
-          const type = typeof body.error.type === 'string' ? body.error.type : '';
-          const param = typeof body.error.param === 'string' ? body.error.param : '';
-          if (type === 'response_processing_error') {
-            processingError = true;
-          }
-          const parts = [type, param].filter(Boolean);
-          if (parts.length > 0) {
-            detail = ` Provider reported: ${parts.join('/')}.`;
-          }
-        }
-      } catch {
-        // body is not JSON; keep the previous behaviour untouched
-      }
-      if (processingError) {
-        return {
-          error: true,
-          retryable: false,
-          message: `Server error (${response.status}).${detail} This is a content-dependent upstream processing failure, so retrying the same prompt will fail the same way.`,
-        };
-      }
-      return { error: true, retryable: true, message: `Server error (${response.status}).${detail}` };
+      return await classifyServerErrorResponse(response);
     }
 
     if (!response.ok) {
       return { error: true, message: `API request failed (${response.status}). Provider response was not included.` };
     }
 
-    const data = await response.json();
-    if (!isPlainObject(data) || !Array.isArray(data.choices)) {
-      return { error: true, message: 'Invalid response from model.' };
-    }
-    const firstChoice = data.choices[0];
-    const message = isPlainObject(firstChoice) ? firstChoice.message : null;
-    const content = isPlainObject(message) ? message.content : null;
-    if (typeof content !== 'string' || content.trim() === '') {
-      return { error: true, message: 'Invalid response from model.' };
-    }
-
-    // The gateway must echo which model actually served the request. Writing
-    // `null` here used to be tolerated downstream, which let a run that never
-    // resolved a model count as a successful expert call (#423). Fail at the
-    // source instead, so the evidence never records an unverifiable expert.
-    const resolvedModel = typeof data.model === 'string' ? data.model.trim() : '';
-    if (resolvedModel === '') {
-      return {
-        error: true,
-        message: 'Gateway response did not include a resolved model id; cannot prove which model ran.',
-      };
-    }
-
-    return {
-      success: true,
-      content: content.trim(),
-      resolved_model: resolvedModel,
-    };
+    return await readSuccessfulResponse(response);
   } catch (err) {
     if (err instanceof Error && err.name === 'AbortError') {
       return { error: true, retryable: true, message: `Request timed out (${timeoutMs}ms). Raise --timeout-ms or the provider's timeout_ms.` };
