@@ -128,15 +128,144 @@ function readSkillsDirEntries(detect, platform) {
   return entries.map((entry) => ({ name: entry.name, isDirectory: entry.isDirectory(), dir }));
 }
 
+/**
+ * The version of the CLI that is running, for comparing against what is on disk.
+ *
+ * Same source as install-skill.js reads (#713): the installed package.json, not
+ * the repo-root VERSION file, which the published tarball does not ship.
+ *
+ * @returns {string} semver, or 'unknown' when the package metadata is unreadable
+ */
+function getCliVersion() {
+  try {
+    const pkg = JSON.parse(fs.readFileSync(path.join(__dirname, '..', 'package.json'), 'utf8'));
+    return typeof pkg.version === 'string' && pkg.version ? pkg.version : 'unknown';
+  } catch {
+    return 'unknown';
+  }
+}
+
+/**
+ * Compare a 4-part release stamp against a 3-part npm semver.
+ *
+ * A trailing `.0` is the only difference between the two schemes, so trimming it
+ * is enough -- this is deliberately not a full semver comparison, which would
+ * imply support for pre-release ordering that neither source produces.
+ *
+ * @returns {boolean} true when both name the same release
+ */
+function sameVersion(a, b) {
+  const norm = (v) => String(v).replace(/.0+$/, '');
+  return norm(a) === norm(b);
+}
+
+/**
+ * Whether a deployed copy is byte-identical to the bundle this CLI ships.
+ *
+ * Most skills carry no AGENTS.md, so their only version marker is `unknown`. That
+ * is not evidence of staleness -- treating it as such flagged every skill on a
+ * healthy machine. Content comparison answers the question the version stamp was
+ * standing in for, and answers it for those skills too.
+ *
+ * Only SKILL.md is compared: it is the file every skill has, and it is the one
+ * `update-skill` rewrites. Anything else a user added locally must not make their
+ * copy look outdated.
+ *
+ * @param {string} skillName
+ * @param {{dir: string}} entry a deployed copy
+ * @returns {boolean} true when the copy already matches the bundle
+ */
+function copyMatchesBundle(skillName, entry) {
+  const bundled = path.join(__dirname, '..', 'skills', skillName, 'SKILL.md');
+  const installed = path.join(entry.dir, 'SKILL.md');
+  try {
+    return fs.readFileSync(installed, 'utf8') === fs.readFileSync(bundled, 'utf8');
+  } catch {
+    // Unreadable either way: fall back to the version stamp's verdict rather than
+    // asserting a match we could not verify.
+    return false;
+  }
+}
+
 function handleCheckMode() {
   console.log('Checking for updates...');
   const config = getConfig();
   const skills = config.installedSkills || {};
+
+  // #725: this used to print config.installedSkills[name].version and call it a
+  // day. That value is what the last install WROTE DOWN, not what is on disk, so
+  // a copy left behind by a single-platform update reported the new version while
+  // its files still said the old one. Reporting the registry as if it were the
+  // installation is how a stale skill looked healthy.
+  const bundledVersion = getCliVersion();
+  let stale = 0;
+
   for (const [skillName, info] of Object.entries(skills)) {
-    console.log(`  ${skillName}: ${info.version || 'unknown'}`);
+    const registry = info.version || 'unknown';
+    const onDisk = deployedSkillVersions(skillName);
+    if (onDisk.length === 0) {
+      console.log(`  ${skillName}: ${registry} (registry only - no copy found on disk)`);
+      continue;
+    }
+    // AGENTS.md stamps the 4-part release version (0.35.24.0) while package.json
+    // carries the 3-part npm semver (0.35.24). Comparing them raw marked every
+    // copy on a healthy machine as behind -- a false alarm is as useless as no
+    // check at all, so normalize before comparing.
+    // A copy is behind when its version stamp says so. Only a copy with NO stamp
+    // falls back to content comparison -- a known-old stamp must not be excused by
+    // an identical SKILL.md, which is exactly the delphi-review case: the two
+    // platform copies differ only in the generated AGENTS.md header.
+    const behind = onDisk.filter((entry) => (entry.version === 'unknown'
+      ? !copyMatchesBundle(skillName, entry)
+      : !sameVersion(entry.version, bundledVersion)));
+    if (behind.length > 0) {
+      stale += behind.length;
+      for (const entry of behind) {
+        console.log(`  ${skillName} [${entry.platform}]: ${entry.version} -> ${bundledVersion} available`);
+      }
+    } else {
+      console.log(`  ${skillName}: ${bundledVersion} (up to date on ${onDisk.length} platform(s))`);
+    }
   }
-  console.log('Update check complete');
+
+  console.log(stale > 0 ? `Update check complete — ${stale} copy(ies) behind.` : 'Update check complete');
   return 0;
+}
+
+/**
+ * Versions actually written into each platform's copy of \`skillName\`.
+ *
+ * Reads the \`**Version:**\` stamp from the generated AGENTS.md, which is the only
+ * per-copy version marker an installed skill carries. A copy without one (older
+ * layouts, or a hand-written skill) reports \`unknown\` rather than being skipped --
+ * silently omitting it would hide exactly the stale copy this check exists for.
+ *
+ * @param {string} skillName
+ * @returns {Array<{platform: string, version: string, dir: string}>} one entry per deployed copy
+ */
+function deployedSkillVersions(skillName) {
+  let detect;
+  try {
+    detect = require('./detect-deps.js');
+  } catch {
+    return [];
+  }
+  const found = [];
+  for (const platform of Object.keys(detect.PLATFORM_PROFILES)) {
+    for (const entry of readSkillsDirEntries(detect, platform)) {
+      if (!entry.isDirectory || entry.name !== skillName) continue;
+      const agentsFile = path.join(entry.dir, entry.name, 'AGENTS.md');
+      let version = 'unknown';
+      try {
+        const match = fs.readFileSync(agentsFile, 'utf8').match(/^\*\*Version:\*\*\s*(\S+)/m);
+        if (match) version = match[1];
+      } catch {
+        // No AGENTS.md: still count the copy, with an unknown stamp.
+      }
+      found.push({ platform, version, dir: path.join(entry.dir, entry.name) });
+    }
+  }
+  return found;
 }
 
 async function handleAllMode(verbose) {

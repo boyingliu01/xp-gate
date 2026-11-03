@@ -228,18 +228,25 @@ const COMMANDS = {
   'update-skill': {
     description: 'Update installed skill(s)',
     run: subargs => {
-      // Detect --all flag BEFORE extracting name (fix #347)
-      const allFlagIndex = subargs.indexOf('--all');
-      let name, options;
-      if (allFlagIndex !== -1) {
-        // Remove --all from args before parsing, name is undefined
-        options = parseOptions([...subargs.slice(0, allFlagIndex), ...subargs.slice(allFlagIndex + 1)], 'update-skill');
-        options.all = true;
-        name = undefined;  // explicit: no single name when --all is used
-      } else {
-        name = subargs[0];
-        options = parseOptions(subargs.slice(1), 'update-skill');
+      // Extract the valueless flags BEFORE taking subargs[0] as the name.
+      //
+      // #347 fixed this for --all only, so `xp-gate update-skill --check` still
+      // took `--check` as a skill name and failed with "--check is not
+      // installed" (#725). Splitting the flags out once keeps the two cases from
+      // drifting apart again.
+      // Read the flag list from SKILL_FLAGS_BY_COMMAND so a flag added there is
+      // never mistaken for a skill name here -- that drift is what broke #347 and
+      // then #725 in the same place.
+      const flags = SKILL_FLAGS_BY_COMMAND['update-skill'] || [];
+      const present = flags.filter((f) => subargs.includes(f));
+      const rest = subargs.filter((s) => !flags.includes(s));
+
+      const options = parseOptions(rest.slice(1), 'update-skill');
+      for (const flag of present) {
+        options[flag.replace(/^--/, '')] = true;
       }
+      // An explicit name wins for the single-skill path; --all/--check ignore it.
+      const name = present.length > 0 ? undefined : rest[0];
       updateSkill(name, options).then(code => process.exit(code));
     },
     usage: 'xp-gate update-skill [<name>] [--all] [--check]'

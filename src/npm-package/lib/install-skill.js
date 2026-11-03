@@ -16,6 +16,49 @@ function getSkillsDir() {
   return path.join(HOME_DIR, '.config', 'opencode', 'skills');
 }
 
+/**
+ * Every platform skills directory that already holds an installed skill.
+ *
+ * #725: `detectPlatform()` short-circuits on the first marker it finds (`.qoder`
+ * wins outright), so a machine that carries both Qoder and OpenCode only ever
+ * had the Qoder copy updated -- the OpenCode copy was frozen at whatever version
+ * last wrote it, and nothing reported it. Migration periods make two platforms
+ * normal, not exotic: the user switched tools and both trees are still live.
+ *
+ * Only directories that already contain skills are returned. A platform the user
+ * never installed into is left alone rather than seeded by an update, which would
+ * be a surprising side effect of `update-skill`.
+ *
+ * @returns {string[]} home-relative skills directories, de-duplicated
+ */
+function deployedSkillsDirs() {
+  const candidates = [
+    path.join(HOME_DIR, '.qoder', 'skills'),
+    path.join(HOME_DIR, '.config', 'opencode', 'skills'),
+    path.join(HOME_DIR, '.claude', 'skills'),
+  ];
+  const found = [];
+  for (const dir of candidates) {
+    if (dirHasInstalledSkill(dir)) found.push(dir);
+  }
+  // A machine with no deployed skill anywhere still needs one target: fall back
+  // to the detected platform so a plain `install-skill` keeps working.
+  return found.length > 0 ? found : [getSkillsDir()];
+}
+
+/** @returns {boolean} true when `dir` contains at least one `<name>/SKILL.md` */
+function dirHasInstalledSkill(dir) {
+  let entries;
+  try {
+    entries = fs.readdirSync(dir, { withFileTypes: true });
+  } catch {
+    return false;
+  }
+  return entries.some(
+    (entry) => entry.isDirectory() && fs.existsSync(path.join(dir, entry.name, 'SKILL.md'))
+  );
+}
+
 // The npm package ships the canonical skill content; `files` includes skills/.
 const BUNDLED_SKILLS_DIR = path.join(__dirname, '..', 'skills');
 
@@ -87,26 +130,44 @@ async function installSkill(name, options = {}) {
     return 1;
   }
 
-  const targetDir = path.join(getSkillsDir(), name);
-  const dupError = checkDuplicateInstall(targetDir, force);
-  if (dupError) {
-    console.error(dupError);
-    return 1;
+  // #725: update EVERY platform that already carries this skill, not just the
+  // one `detectPlatform()` picks. A machine with both Qoder and OpenCode used to
+  // get one silently-frozen copy. Each target is installed independently so a
+  // failure on one platform does not abort the others -- a half-updated machine
+  // that reports success is exactly the bug being fixed.
+  //
+  // deployedSkillsDirs() already falls back to the detected platform when nothing
+  // is deployed anywhere, so it never returns an empty list.
+  const finalTargets = deployedSkillsDirs().map((dir) => path.join(dir, name));
+
+  let lastError = 0;
+  for (const targetDir of finalTargets) {
+    const dupError = checkDuplicateInstall(targetDir, force);
+    if (dupError) {
+      console.error(dupError);
+      lastError = 1;
+      continue;
+    }
+
+    // The platform segment keeps concurrent per-platform backups distinct; a bare
+    // `Date.now()` collided when both platforms were written in the same tick.
+    const platformTag = path.basename(path.dirname(targetDir));
+    const installId = `${name}-${Date.now()}-${platformTag}`;
+    const backupDir = path.join(CONFIG_DIR, 'backup', installId);
+    backupExisting(targetDir, installId, backupDir);
+
+    try {
+      if (verbose && finalTargets.length > 1) console.log(`Target: ${targetDir}`);
+      const result = await performInstall(name, targetDir, verbose);
+      if (result !== 0) lastError = result;
+    } catch (err) {
+      console.error(`Error: Install failed - ${err.message}`);
+      await rollback(installId);
+      lastError = 1;
+    }
   }
 
-  const installId = `${name}-${Date.now()}`;
-  const backupDir = path.join(CONFIG_DIR, 'backup', installId);
-  backupExisting(targetDir, installId, backupDir);
-
-  try {
-    const result = await performInstall(name, targetDir, verbose);
-    if (result !== 0) return result;
-    return 0;
-  } catch (err) {
-    console.error(`Error: Install failed - ${err.message}`);
-    await rollback(installId);
-    return 1;
-  }
+  return lastError;
 }
 
 function checkDuplicateInstall(targetDir, force) {
