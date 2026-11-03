@@ -27,7 +27,7 @@ XP-Gate — deterministic git quality gates + AI-driven multi-expert review (Del
 │   │   ├── plugins/                    # claude-code/, opencode/, qoder/ bundled at publish time
 │   │   └── scripts/sync-package-content.js  # prepack hook that copies skills+plugins in
 │   ├── principles/     # 14 Clean Code/SOLID rules × 9 language adapters (Gate 4)
-│   ├── architecture/   # version-parser.ts + __tests__/  (used by ARCH-001..014 + Gate 0)
+│   ├── architecture/   # version-parser.ts + __tests__/  (Gate 0 only; ARCH-001..014 NOT implemented)
 │   ├── debugger/       # trace-collector.ts + summarizer.ts + types.ts (debug trace pipeline)
 │   ├── mock-policy/    # Gate M3: scope scanner + mock decision engine + per-file validator
 │   ├── mutation/       # Gate M (incremental mutation) + Gate M2 helpers (detect-ai-test) + baselines
@@ -66,7 +66,7 @@ XP-Gate — deterministic git quality gates + AI-driven multi-expert review (Del
 ├── dashboard/          # Quality dashboard (serve.js + dashboard.js → localhost:3333)
 ├── .github/workflows/  # 5 CI pipelines: quality-gates (~948 LOC), npm-publish, cross-platform-ci,
 │                       #   security-audit, mutation-test
-├── architecture.yaml   # ARCH-001..014 rule definitions
+├── architecture.yaml   # ARCH-001..014 rule definitions (NOT ENFORCED — see #687)
 ├── specification.yaml  # Requirements (auto-generated from APPROVED design docs)
 ├── VERSION             # Single source of truth: 0.18.0.0 (MAJOR.MINOR.PATCH.MICRO)
 ├── .architecture-baseline.json  # ARCH baseline snapshot (~20 KB)
@@ -105,7 +105,7 @@ XP-Gate — deterministic git quality gates + AI-driven multi-expert review (Del
 | Test Alignment | skills/test-specification-alignment/SKILL.md | Phase 1 modifiable / Phase 2 frozen |
 | Principles Engine | src/principles/ | analyzer.ts + index.ts CLI; SARIF 2.1.0 output |
 | Boy Scout Rule | src/principles/boy-scout.ts | Differential warning enforcement (Gate 6) |
-| Architecture rules | src/architecture/version-parser.ts + architecture.yaml | ARCH-001..014 |
+| Architecture rules | `src/architecture/version-parser.ts` (Gate 0 only) + `architecture.yaml` (**NOT ENFORCED** — see #687) | ARCH-001..014 是规划编号，当前无实现 |
 | Mutation Gate M | src/mutation/gate-m.ts | Incremental mutation on changed TS files |
 | Mock Policy Gate M3 | src/mock-policy/gate-m3.ts | runGateM3() orchestrator |
 | Debugger | src/debugger/ | trace-collector.ts + summarizer.ts |
