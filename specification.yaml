@@ -4955,34 +4955,34 @@ specification:
         构建依赖工具；架构工具缺失不得改变 doctor 退出码语义
       priority: medium
       acceptance_criteria:
-        - id: AC-689-01
+        - id: AC-726-01
           criteria: xp-gate doctor 能报告各语言架构工具的安装状态
           test_type: unit
-        - id: AC-689-02
+        - id: AC-726-02
           criteria: CLI 型架构工具缺失时输出该平台安装命令，字符串与 LANGUAGE_REGISTRY 中
             install[process.platform] 完全一致；不自动安装
           test_type: unit
-        - id: AC-689-03
+        - id: AC-726-03
           criteria: Java/Kotlin 这类构建依赖而非 CLI 的工具，检测逻辑正确，不误判为缺失
           test_type: unit
-        - id: AC-689-04
+        - id: AC-726-04
           criteria: 不影响现有语言/工具的 doctor 输出
           test_type: unit
-        - id: AC-689-05
+        - id: AC-726-05
           criteria: 单测覆盖已安装 / 未安装 / 构建依赖三种状态
           test_type: unit
-        - id: AC-689-06
+        - id: AC-726-06
           criteria: Gradle version catalog（gradle/libs.versions.toml）声明的 ArchUnit/Konsist
             也能被识别为已安装
           test_type: unit
-        - id: AC-689-07
+        - id: AC-726-07
           criteria: 每种语言只认自己的坐标——Kotlin 项目只声明 Konsist 时 Java 的 archunit
             仍报未安装，反之亦然
           test_type: unit
-        - id: AC-689-08
+        - id: AC-726-08
           criteria: 架构工具全部 optional，缺失不改变 doctor 退出码语义（仍是 0），只在报告中列出
           test_type: unit
-        - id: AC-689-09
+        - id: AC-726-09
           criteria: 多模块项目只在根构建文件与 catalog 声明坐标时也能识别；子模块目录不逐个扫描
           test_type: unit
         - id: AC-COMPAT-01
@@ -5003,29 +5003,29 @@ specification:
         的类名后缀，路径判定须支持 Maven 多模块并排除测试目录
       priority: medium
       acceptance_criteria:
-        - id: AC-694-01
+        - id: AC-727-01
           criteria: interfaces/rest 下的 UserAPI 违规
           test_type: unit
-        - id: AC-694-02
+        - id: AC-727-02
           criteria: interfaces/rest 下的 UserController 通过
           test_type: unit
-        - id: AC-694-03
+        - id: AC-727-03
           criteria: application/service 下的 OrderManager 违规
           test_type: unit
-        - id: AC-694-04
+        - id: AC-727-04
           criteria: application/service 下的 OrderServiceImpl 通过
           test_type: unit
-        - id: AC-694-05
+        - id: AC-727-05
           criteria: infrastructure/repository 下的 UserDao 违规（白名单是 DAO 大写，大小写敏感）
           test_type: unit
-        - id: AC-694-06
+        - id: AC-727-06
           criteria: infrastructure/repository 下的 UserMapper 通过
           test_type: unit
-        - id: AC-694-07
+        - id: AC-727-07
           criteria: Maven 多模块路径 core/src/main/java/... 正确识别；路径含两处 src/main/java 时
             锚定最后一处
           test_type: unit
-        - id: AC-694-08
+        - id: AC-727-08
           criteria: 非目标包（如 util/FooHelper.java）不误报
           test_type: unit
 
@@ -5039,45 +5039,45 @@ specification:
         Util 依赖应用服务仅告警不阻塞
       priority: medium
       acceptance_criteria:
-        - id: AC-699-01
+        - id: AC-728-01
           criteria: UserDTO import UserService 违规
           test_type: unit
-        - id: AC-699-02
+        - id: AC-728-02
           criteria: OrderVO import OrderRepository 违规
           test_type: unit
-        - id: AC-699-03
+        - id: AC-728-03
           criteria: UserDTO 只 import javax.validation 注解则通过
           test_type: unit
-        - id: AC-699-04
+        - id: AC-728-04
           criteria: domain/event 下的 OrderCompletedEvent import infrastructure 违规
           test_type: unit
-        - id: AC-699-05
+        - id: AC-728-05
           criteria: domain/event 只 import domain/model 则通过
           test_type: unit
-        - id: AC-699-06
+        - id: AC-728-06
           criteria: StringUtils import OrderService 告警
           test_type: unit
-        - id: AC-699-07
+        - id: AC-728-07
           criteria: FileHelper import java.io 系列则通过
           test_type: unit
-        - id: AC-699-08
+        - id: AC-728-08
           criteria: W01 默认规则配置为 warning，不阻塞提交
           test_type: unit
-        - id: AC-699-09
+        - id: AC-728-09
           criteria: UserDTO import OrderServiceConstants 不报（排除后缀优先于命中）
           test_type: unit
-        - id: AC-699-10
+        - id: AC-728-10
           criteria: W01 产出中没有 error 级违规
           test_type: unit
-        - id: AC-699-11
+        - id: AC-728-11
           criteria: W01 仍然出现在结果里——不阻塞不等于不上报
           test_type: unit
-        - id: AC-699-12
+        - id: AC-728-12
           criteria: OrderHelper import 框架包中的 DiscoveryService 不报（框架包前缀排除）
           test_type: unit
-        - id: AC-699-13
+        - id: AC-728-13
           criteria: OrderHelper import 本项目的 OrderService 报出，证明排除只对框架包生效
           test_type: unit
-        - id: AC-699-14
+        - id: AC-728-14
           criteria: 通配 import 不参与类名后缀判定；同样不会出现在 adapter.imports 中
           test_type: unit

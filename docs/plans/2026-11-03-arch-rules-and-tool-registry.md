@@ -43,7 +43,7 @@ Maven/ArchUnit，全部在 pre-commit 内完成。
 | java | `archunit` | *构建依赖*，见下 | true | 不按 CLI 判定 |
 | kotlin | `konsist` | *构建依赖*，见下 | true | 同 Java |
 
-**关键难点（AC-689-03）：Java/Kotlin 的 ArchUnit/Konsist 是构建依赖，不是 CLI。**
+**关键难点（AC-726-03）：Java/Kotlin 的 ArchUnit/Konsist 是构建依赖，不是 CLI。**
 若沿用 `checkCmd` 探测，永远报「未安装」，是假阴性。判定改为扫描构建文件。
 
 **每种语言只认自己的坐标**（架构专家 R1 第二轮指出：不区分会互相误判）：
@@ -68,7 +68,7 @@ Gradle 的 `libs.versions.toml` 场景下坐标写在 catalog 文件而非 `buil
 （子模块坐标经由根聚合或 catalog 声明，逐子目录扫描成本高且收益低）。
 
 这需要给 `ToolDef` 增加一个可选字段 `detectBy`，取值为 `'cli'`（默认）或 `'build-file'`。
-这是对现有结构的**增量扩展**，不改既有条目行为（AC-689-04）。
+这是对现有结构的**增量扩展**，不改既有条目行为（AC-726-04）。
 
 ### 3.2 #694 —— Java 命名规则 R10 / R11 / R12
 
@@ -86,7 +86,7 @@ Gradle 的 `libs.versions.toml` 场景下坐标写在 catalog 文件而非 `buil
 （`core/src/main/java/com/x/...`）：判定锚定 `src/main/java/` 之后的相对包路径，
 `src/test/java` 整棵排除。
 
-一个易错点：`UserDao` 不在白名单（白名单是 `DAO` 大写），issue #694 的 AC-694-05 明确要求报违规。
+一个易错点：`UserDao` 不在白名单（白名单是 `DAO` 大写），issue #694 的 AC-727-05 明确要求报违规。
 实现需**区分大小写**，不能 `toLowerCase()` 后比较。
 
 ### 3.3 #699 —— 依赖方向规则 R08 / R15 / W01
@@ -147,7 +147,7 @@ R08 的「Service / Repository」如何识别？不靠包路径全匹配（各�
 `*Builder` / `*DTO` / `*VO` / `*Util`。排除优先于命中。
 `UserService` 报违规，`OrderServiceConstants` 不报——两者后缀相同，靠排除区分。
 
-W01 必须是 warning（AC-699-08：不阻塞提交）。交互语义已在 §6.2 关闭：
+W01 必须是 warning（AC-728-08：不阻塞提交）。交互语义已在 §6.2 关闭：
 恒为 warning、不升级、不进 error 通道、不计入 Gate 4 阻塞判定，
 但计入 Boy Scout 的 warning 总数并始终出现在报告中。
 
@@ -165,13 +165,27 @@ W01 必须是 warning（AC-699-08：不阻塞提交）。交互语义已在 §6.
 
 ### 4.1 REQ 编号（`specification.yaml` 追加）
 
+> **编号修正（Phase 4 VERIFY 发现，非事后合理化）**：本设计初稿把 AC 写成
+> `AC-689-*` / `AC-694-*` / `AC-699-*`，沿用 Issue 号。但 `specification.yaml`
+> 已存在 `REQ-689`（Maven reactor summary 的打包类型不得计为 javac 告警），
+> 它占用 `AC-689-01/02/03` —— 与本次架构工具的 `AC-689-01/02/03` **编号相同、
+> 含义完全不同**。同一个 AC id 指向两条互不相干的验收标准。
+>
+> 后果不是审美问题：`check-alignment` 报 `AC-689-01 未被任何测试覆盖`，而它
+> 实际被 REQ-689 的测试覆盖着；反过来，任何人按 AC id 追溯都会追错需求。
+>
+> 现按 `specification.yaml` 的既有惯例（AC 前缀 = 所属 REQ 号）改为
+> `AC-726-* / AC-727-* / AC-728-*`。REQ 号与 GitHub Issue 号的对应关系保留在
+> 第 3 节各小节标题中，可追溯性不受影响。
+
+
 `specification.yaml` 现有最大 REQ 号为 `REQ-725`，本 Sprint 追加三条：
 
 | REQ | 对应 issue | 描述 | AC 映射 |
 |---|---|---|---|
-| `REQ-726` | `#689` | `doctor` 必须能诊断各语言架构工具的安装状态，并区分 CLI 工具与构建依赖工具 | AC-689-01 … AC-689-09 |
-| `REQ-727` | `#694` | Java 命名规则 R10/R11/R12：按包路径约束 Controller/Service/Repository 类名后缀 | AC-694-01 … AC-694-08 |
-| `REQ-728` | `#699` | Java 依赖方向规则 R08/R15/W01：DTO 不得依赖服务、领域事件不得依赖基础设施、Util 告警 | AC-699-01 … AC-699-14 |
+| `REQ-726` | `#689` | `doctor` 必须能诊断各语言架构工具的安装状态，并区分 CLI 工具与构建依赖工具 | AC-726-01 … AC-726-09 |
+| `REQ-727` | `#694` | Java 命名规则 R10/R11/R12：按包路径约束 Controller/Service/Repository 类名后缀 | AC-727-01 … AC-727-08 |
+| `REQ-728` | `#699` | Java 依赖方向规则 R08/R15/W01：DTO 不得依赖服务、领域事件不得依赖基础设施、Util 告警 | AC-728-01 … AC-728-14 |
 
 兼容性两条（`AC-COMPAT-01/02`）归属 `REQ-726`——它们约束的是同一件事的副作用
 （新增 `arch` 分组），不单独开 REQ。
@@ -181,9 +195,9 @@ W01 必须是 warning（AC-699-08：不阻塞提交）。交互语义已在 §6.
 
 | 测试文件 | `@test` | 覆盖 |
 |---|---|---|
-| `src/npm-package/lib/__tests__/doctor-arch-tools.test.js` | `REQ-726` | AC-689-* |
-| `src/principles/__tests__/rules/arch-naming.test.ts` | `REQ-727` | AC-694-* |
-| `src/principles/__tests__/rules/arch-dependency.test.ts` | `REQ-728` | AC-699-* |
+| `src/npm-package/lib/__tests__/doctor-arch-tools.test.js` | `REQ-726` | AC-726-* |
+| `src/principles/__tests__/rules/arch-naming.test.ts` | `REQ-727` | AC-727-* |
+| `src/principles/__tests__/rules/arch-dependency.test.ts` | `REQ-728` | AC-728-* |
 | `src/principles/__tests__/config-arch-group.test.ts` | `REQ-726` | AC-COMPAT-01/02 |
 
 **AC-COMPAT-01/02 的归属说明**（架构专家 R1 第 5 轮 MC-03 要求补齐）：
@@ -231,7 +245,7 @@ mC-04 指出原文只写「见 docs/adr/」而未给编号，交付物不可定�
 ```
 
 因此三条规则对通配 import 的行为是统一的：**都看不到**。这不是三条规则各自
-取舍的结果，而是解析层的事实。AC-699-14b 改为直接钉住该正则行为——
+取舍的结果，而是解析层的事实。AC-728-14b 改为直接钉住该正则行为——
 如果将来把正则放宽到支持 `*`，这个测试会红，届时需要重新决定 R15 是否应当报。
 
 这是有意的取舍而非遗漏：宁可不报，也不产生无法解释的误报。
@@ -245,62 +259,62 @@ mC-04 指出原文只写「见 docs/adr/」而未给编号，交付物不可定�
 
 ### #689 — 架构工具进 doctor 注册表（9 条）
 
-- [ ] AC-689-01：`xp-gate doctor` 能报告各语言架构工具的安装状态
-- [ ] AC-689-02：**CLI 型**工具缺失时输出该平台的安装命令，字符串与
+- [ ] AC-726-01：`xp-gate doctor` 能报告各语言架构工具的安装状态
+- [ ] AC-726-02：**CLI 型**工具缺失时输出该平台的安装命令，字符串与
       `LANGUAGE_REGISTRY` 中 `install[process.platform]` **完全一致**（§6.5）；不自动安装。
       构建依赖型（Java/Kotlin）不适用本条——它们没有包管理器安装命令，
-      改由 AC-689-03 约束
-- [ ] AC-689-03：Java/Kotlin 这类「构建依赖而非 CLI」的工具，检测逻辑正确
+      改由 AC-726-03 约束
+- [ ] AC-726-03：Java/Kotlin 这类「构建依赖而非 CLI」的工具，检测逻辑正确
       （不误判为缺失）
-- [ ] AC-689-04：不影响现有语言/工具的 doctor 输出
-- [ ] AC-689-05：单测覆盖「已安装 / 未安装 / 构建依赖」三种状态
-- [ ] AC-689-06：Gradle version catalog（`gradle/libs.versions.toml`）声明的
+- [ ] AC-726-04：不影响现有语言/工具的 doctor 输出
+- [ ] AC-726-05：单测覆盖「已安装 / 未安装 / 构建依赖」三种状态
+- [ ] AC-726-06：Gradle version catalog（`gradle/libs.versions.toml`）声明的
       ArchUnit/Konsist 也能被识别为已安装
-- [ ] AC-689-07：Kotlin 项目只声明 Konsist 时，Java 的 archunit 条目**仍报未安装**
+- [ ] AC-726-07：Kotlin 项目只声明 Konsist 时，Java 的 archunit 条目**仍报未安装**
       （证明没有跨语言误判）；反之亦然
-- [ ] AC-689-08：架构工具全部 `optional: true`，缺失**不改变** `doctor` 退出码语义
+- [ ] AC-726-08：架构工具全部 `optional: true`，缺失**不改变** `doctor` 退出码语义
       （仍是 0），只在报告中列出
-- [ ] AC-689-09：多模块 Maven/Gradle 项目只在**根**构建文件与 catalog 声明坐标时，
+- [ ] AC-726-09：多模块 Maven/Gradle 项目只在**根**构建文件与 catalog 声明坐标时，
       也能识别为已安装；子模块目录不逐个扫描（§3.1 明确的行为，需测钉住）
 
 ### #694 — Java 命名规则 R10/R11/R12（8 条）
 
-- [ ] AC-694-01：`interfaces/rest/UserAPI.java` → R10 违规
-- [ ] AC-694-02：`interfaces/rest/UserController.java` → 通过
-- [ ] AC-694-03：`application/service/OrderManager.java` → R11 违规
-- [ ] AC-694-04：`application/service/OrderServiceImpl.java` → 通过
-- [ ] AC-694-05：`infrastructure/repository/UserDao.java` → R12 违规（`DAOs` 白名单是
+- [ ] AC-727-01：`interfaces/rest/UserAPI.java` → R10 违规
+- [ ] AC-727-02：`interfaces/rest/UserController.java` → 通过
+- [ ] AC-727-03：`application/service/OrderManager.java` → R11 违规
+- [ ] AC-727-04：`application/service/OrderServiceImpl.java` → 通过
+- [ ] AC-727-05：`infrastructure/repository/UserDao.java` → R12 违规（`DAOs` 白名单是
       大写 `DAO`，大小写敏感）
-- [ ] AC-694-06：`infrastructure/repository/UserMapper.java` → 通过
-- [ ] AC-694-07：Maven 多模块路径 `core/src/main/java/...` 正确识别
-- [ ] AC-694-08：非目标包（如 `util/FooHelper.java`）不误报
+- [ ] AC-727-06：`infrastructure/repository/UserMapper.java` → 通过
+- [ ] AC-727-07：Maven 多模块路径 `core/src/main/java/...` 正确识别
+- [ ] AC-727-08：非目标包（如 `util/FooHelper.java`）不误报
 
 ### #699 — 依赖方向规则 R08/R15/W01（14 条）
 
-- [ ] AC-699-01：`UserDTO` import `UserService` → R08 违规
-- [ ] AC-699-02：`OrderVO` import `OrderRepository` → R08 违规
-- [ ] AC-699-03：`UserDTO` 只 import `javax.validation` 注解 → 通过
-- [ ] AC-699-04：`domain/event/OrderCompletedEvent` import
+- [ ] AC-728-01：`UserDTO` import `UserService` → R08 违规
+- [ ] AC-728-02：`OrderVO` import `OrderRepository` → R08 违规
+- [ ] AC-728-03：`UserDTO` 只 import `javax.validation` 注解 → 通过
+- [ ] AC-728-04：`domain/event/OrderCompletedEvent` import
       `infrastructure/kafka/KafkaClient` → R15 违规
-- [ ] AC-699-05：`domain/event/*` import `domain/model/*` → 通过
-- [ ] AC-699-06：`StringUtils` import `OrderService` → W01 告警
-- [ ] AC-699-07：`FileHelper` import `java.io.*` → 通过
-- [ ] AC-699-08：W01 为 WARNING 不阻塞提交
-- [ ] AC-699-09：`UserDTO` import `OrderServiceConstants` → **不报** R08
+- [ ] AC-728-05：`domain/event/*` import `domain/model/*` → 通过
+- [ ] AC-728-06：`StringUtils` import `OrderService` → W01 告警
+- [ ] AC-728-07：`FileHelper` import `java.io.*` → 通过
+- [ ] AC-728-08：W01 为 WARNING 不阻塞提交
+- [ ] AC-728-09：`UserDTO` import `OrderServiceConstants` → **不报** R08
       （排除后缀优先于命中，防止常量类/门面被当成服务）
-- [ ] AC-699-10：W01 单独存在时 `analyze` 产出的 violations 中**无**
+- [ ] AC-728-10：W01 单独存在时 `analyze` 产出的 violations 中**无**
       `severity === 'error'` 项
-- [ ] AC-699-11：W01 单独存在时结果仍**出现在报告里**
+- [ ] AC-728-11：W01 单独存在时结果仍**出现在报告里**
       （反向断言：不阻塞 ≠ 不上报）
-- [ ] AC-699-12：`OrderHelper` import
+- [ ] AC-728-12：`OrderHelper` import
       `org.springframework.cloud.client.discovery.DiscoveryService` → **不报** W01。
       该目标以 `Service` 结尾，本会命中 W01 的目标条件，仅因 FQN 前缀属框架包而被排除
       ——**这才是真正触发排除机制的最小用例**。
       （原写法用 `StringUtils` 是错的：它不以 `Service` 结尾，根本不进入目标判定，
       测的是「后缀不命中」而非「框架包排除」，无法证伪。架构专家 R1 第 5 轮 MC-01）
-- [ ] AC-699-13：`OrderHelper` import `com.acme.order.OrderService` → **报** W01。
-      与 AC-699-12 成对，证明排除只对框架包生效，不会误伤本项目的服务依赖
-- [ ] AC-699-14：`OrderVO` 中的 `import com.acme.service.*;`（通配）→ **不报** R08。
+- [ ] AC-728-13：`OrderHelper` import `com.acme.order.OrderService` → **报** W01。
+      与 AC-728-12 成对，证明排除只对框架包生效，不会误伤本项目的服务依赖
+- [ ] AC-728-14：`OrderVO` 中的 `import com.acme.service.*;`（通配）→ **不报** R08。
       通配 import 无类名信息，不参与后缀判定（§4.3）；但 `domain/event` 下的
       `import com.acme.infrastructure.*;` 仍报 R15
 
@@ -387,7 +401,7 @@ Boy Scout 计数口径：W01 计入该文件的 warning 总数，与现有 `miss
 （`pom.xml` 通常几 KB）在量级上可忽略。**本 Sprint 不引入缓存**——
 没有测量就优化是过早优化，且缓存会引入失效问题。若实测有影响，另开 issue 处理。
 
-### 6.5 AC-689-02「可执行的安装提示」→ 定义为纯输出契约
+### 6.5 AC-726-02「可执行的安装提示」→ 定义为纯输出契约
 
 MC-04 指出该条不可测。**收敛为可断言的契约：**
 
@@ -409,4 +423,4 @@ MC-04 指出该条不可测。**收敛为可断言的契约：**
 | R08 后缀判定误报（MC-01） | §6.3 增加排除后缀，排除优先 |
 | W01 与 Boy Scout 边界未定（MC-02） | §6.2 明确 + 三条可测断言（含反向断言） |
 | `detectBy` 性能影响未评估（MC-03） | §6.4 说明现有检测已是串行起进程，不做过早优化 |
-| AC-689-02 不可测（MC-04） | §6.5 收敛为字符串精确匹配契约 |
+| AC-726-02 不可测（MC-04） | §6.5 收敛为字符串精确匹配契约 |
