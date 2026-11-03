@@ -5,6 +5,12 @@
 // 根 package.json 使用完整的 MAJOR.MINOR.PATCH.MICRO
 // src/npm-package/package.json 使用 MAJOR.MINOR.PATCH（npm semver）
 //
+// ⚠️ 所有输出必须走 console.error（stderr），不能走 console.log（stdout）。
+//    本脚本挂在根 package.json 的 `prepare` 钩子上，`npm pack` 会触发它；
+//    写 stdout 会把 `npm pack --json` 的 JSON 挤到后面，`jq` 直接报
+//    "Invalid numeric literal"。0.32.2 的 dsh 插件就是这样漏发的（#723）。
+//    守卫：scripts/__tests__/pack-stdout-clean.test.cjs
+//
 // 使用方式：
 //   修改 VERSION 后，运行此脚本自动同步
 //   或作为 prepare/postinstall hook 自动执行
@@ -117,7 +123,7 @@ const syncTargets = [
 for (const target of syncTargets) {
   if (fs.existsSync(target.file)) {
     syncJsonVersion(target.file, target.version);
-    console.log(`[sync-version] ${target.label} -> ${target.version}`);
+    console.error(`[sync-version] ${target.label} -> ${target.version}`);
   }
 }
 
@@ -154,5 +160,5 @@ for (const agentsFile of agentsFiles) {
   }
 }
 
-console.log(`[sync-version] AGENTS.md headers refreshed: ${agentsCount} files (date=${today} commit=${headSha} branch=${branch} version=${FULL_VERSION})`);
-console.log(`[sync-version] OK — all package.json version fields synced from VERSION (${FULL_VERSION})`);
+console.error(`[sync-version] AGENTS.md headers refreshed: ${agentsCount} files (date=${today} commit=${headSha} branch=${branch} version=${FULL_VERSION})`);
+console.error(`[sync-version] OK — all package.json version fields synced from VERSION (${FULL_VERSION})`);
