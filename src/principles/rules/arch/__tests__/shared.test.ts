@@ -3,7 +3,7 @@
  * @intent shared.ts 是 arch 两组规则的公共基础：包路径提取、类名/import 读取、
  *         severity 回退。这些函数一旦错了，上面的规则会以「没有任何违规」的
  *         方式静默失效——所以单独钉住，而不是只靠规则测试间接覆盖。
- * @covers AC-694-07 AC-689-01
+ * @covers AC-727-07 AC-726-01
  */
 import { describe, it, expect } from 'vitest';
 import {

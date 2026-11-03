@@ -3,8 +3,8 @@
  * @intent doctor 必须能诊断架构工具的安装状态。难点是 Java/Kotlin 的 ArchUnit/Konsist
  *         是构建依赖而非 CLI —— 用 checkCmd 永远探不到，会误报「未安装」。
  *         另外每种语言只认自己的坐标，否则 Kotlin 声明 Konsist 会让 Java 误判已装。
- * @covers AC-689-01 AC-689-02 AC-689-03 AC-689-04 AC-689-05 AC-689-06 AC-689-07
- *         AC-689-08 AC-689-09
+ * @covers AC-726-01 AC-726-02 AC-726-03 AC-726-04 AC-726-05 AC-726-06 AC-726-07
+ *         AC-726-08 AC-726-09
  */
 import { describe, it, expect } from 'vitest';
 import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from 'fs';
@@ -56,7 +56,7 @@ const GRADLE_KONSIST = `dependencies { testImplementation("com.lemonappdev:konsi
 const CATALOG_ARCHUNIT = `[libraries]
 archunit = { module = "com.tngtech.archunit:archunit-junit5", version = "1.2.1" }`;
 
-describe('AC-689-01/05 — 架构工具在注册表中可见', () => {
+describe('AC-726-01/05 — 架构工具在注册表中可见', () => {
   it('每个支持的语言都暴露架构工具条目', () => {
     const arch = getArchitectureTools();
     expect(Object.keys(arch).sort()).toEqual(['go', 'java', 'kotlin', 'python', 'typescript']);
@@ -80,7 +80,7 @@ describe('AC-689-01/05 — 架构工具在注册表中可见', () => {
   });
 });
 
-describe('AC-689-08 — 架构工具必须 optional，缺失不改变退出码语义', () => {
+describe('AC-726-08 — 架构工具必须 optional，缺失不改变退出码语义', () => {
   it('所有架构工具都是 optional', () => {
     for (const tools of Object.values(getArchitectureTools())) {
       for (const tool of tools) {
@@ -90,7 +90,7 @@ describe('AC-689-08 — 架构工具必须 optional，缺失不改变退出码�
   });
 });
 
-describe('AC-689-04 — 不影响既有工具条目', () => {
+describe('AC-726-04 — 不影响既有工具条目', () => {
   it('既有的 mvn / gradle / eslint 条目仍在且形态未变', () => {
     expect(LANGUAGE_REGISTRY.java.tools.some((t) => t.name === 'mvn')).toBe(true);
     expect(LANGUAGE_REGISTRY.java.tools.some((t) => t.name === 'gradle')).toBe(true);
@@ -101,7 +101,7 @@ describe('AC-689-04 — 不影响既有工具条目', () => {
   });
 });
 
-describe('AC-689-03 — 构建依赖检测（ArchUnit / Konsist）', () => {
+describe('AC-726-03 — 构建依赖检测（ArchUnit / Konsist）', () => {
   it('Maven pom.xml 声明 ArchUnit -> 已安装', () => {
     const dir = projectWith({ 'pom.xml': MAVEN_ARCHUNIT });
     const result = detectBuildFileDependency('java', dir);
@@ -122,7 +122,7 @@ describe('AC-689-03 — 构建依赖检测（ArchUnit / Konsist）', () => {
     cleanup();
   });
 
-  it('AC-689-06: 坐标只在 gradle/libs.versions.toml 声明时也识别为已安装', () => {
+  it('AC-726-06: 坐标只在 gradle/libs.versions.toml 声明时也识别为已安装', () => {
     const dir = projectWith({ 'gradle/libs.versions.toml': CATALOG_ARCHUNIT });
     expect(detectBuildFileDependency('java', dir).available).toBe(true);
     cleanup();
@@ -131,30 +131,30 @@ describe('AC-689-03 — 构建依赖检测（ArchUnit / Konsist）', () => {
   // Cross-language isolation: declaring Konsist does NOT mean ArchUnit is
   // present. Without this split, a Kotlin project's build file would turn the
   // Java row green and doctor would stop reporting the real gap.
-  it('AC-689-07: Kotlin 项目只声明 Konsist 时，Java 的 archunit 仍报未安装', () => {
+  it('AC-726-07: Kotlin 项目只声明 Konsist 时，Java 的 archunit 仍报未安装', () => {
     const dir = projectWith({ 'build.gradle.kts': GRADLE_KONSIST });
     expect(detectBuildFileDependency('kotlin', dir).available).toBe(true);
     expect(detectBuildFileDependency('java', dir).available).toBe(false);
     cleanup();
   });
 
-  it('AC-689-07b: Java 项目只声明 ArchUnit 时，Kotlin 的 konsist 仍报未安装', () => {
+  it('AC-726-07b: Java 项目只声明 ArchUnit 时，Kotlin 的 konsist 仍报未安装', () => {
     const dir = projectWith({ 'pom.xml': MAVEN_ARCHUNIT });
     expect(detectBuildFileDependency('java', dir).available).toBe(true);
     expect(detectBuildFileDependency('kotlin', dir).available).toBe(false);
     cleanup();
   });
 
-  // AC-689-09: submodules are not scanned one by one -- the root pom plus the
+  // AC-726-09: submodules are not scanned one by one -- the root pom plus the
   // version catalog is the whole search space.
-  it('AC-689-09: 仅在子模块 pom.xml 声明时不被识别（只扫根构建文件）', () => {
+  it('AC-726-09: 仅在子模块 pom.xml 声明时不被识别（只扫根构建文件）', () => {
     const dir = projectWith({ 'core/pom.xml': MAVEN_ARCHUNIT });
     expect(detectBuildFileDependency('java', dir).available).toBe(false);
     cleanup();
   });
 });
 
-describe('AC-689-02 — CLI 型工具的安装提示与注册表完全一致', () => {
+describe('AC-726-02 — CLI 型工具的安装提示与注册表完全一致', () => {
   it('每个 CLI 架构工具在三大平台都有非空安装命令', () => {
     for (const tools of Object.values(getArchitectureTools())) {
       for (const tool of tools) {
