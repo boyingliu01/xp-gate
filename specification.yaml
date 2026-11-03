@@ -3817,7 +3817,8 @@ specification:
           criteria: check --gates 传文件路径时 gate 真正执行而非报 spawn 失败
           test_type: integration
         - id: AC-653-05
-          criteria: 单文件自检在 2 秒内给出结论
+          criteria: 单文件自检的时间开销须以相对基线的比值判定，不得用绝对墙钟阈值
+            （绝对阈值实际测的是机器负载而非功能快慢，会随并行度翻红，见 #722）
           test_type: integration
         - id: AC-668-01
           criteria: audit assertions 列出全仓存量断言债务并按文件分组
