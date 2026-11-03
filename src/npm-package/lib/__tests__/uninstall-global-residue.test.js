@@ -76,6 +76,40 @@ function seedGlobalInstall() {
   fs.writeFileSync(path.join(configDir, '.delphi-config.json'), '{}\n');
 }
 
+/**
+ * A REAL setup-global layout at an arbitrary config dir.
+ *
+ * The three manifest-ish files carry the content `setup-global` actually writes,
+ * so a signature check has to succeed or fail on realistic input rather than on
+ * `{}`. Shared by every block below -- the per-describe copies were identical
+ * and tripped the clone detector.
+ *
+ * @param {string} configDir the ~/.config/xp-gate directory to populate
+ */
+function seedRealisticLayout(configDir) {
+  for (const rel of ['hooks', 'adapters', 'modules/principles', 'node_modules/js-yaml']) {
+    fs.mkdirSync(path.join(configDir, rel), { recursive: true });
+    fs.writeFileSync(path.join(configDir, rel, 'index.js'), 'module.exports = {};\n');
+  }
+  fs.writeFileSync(
+    path.join(configDir, 'package.json'),
+    JSON.stringify({ dependencies: { 'js-yaml': '^5.2.2', zod: '^4.4.3' } }, null, 2)
+  );
+  fs.writeFileSync(
+    path.join(configDir, 'package-lock.json'),
+    JSON.stringify({ name: 'xp-gate-global', lockfileVersion: 3, packages: {} }, null, 2)
+  );
+  // `mode: 'global'` is what uninstall() reads to decide there is anything to
+  // do; without it the run exits "No xp-gate installation found" and the test
+  // would pass while touching nothing.
+  fs.writeFileSync(
+    path.join(configDir, 'xp-gate.json'),
+    JSON.stringify({ lastInit: new Date().toISOString(), mode: 'global', manifest: { files: {} } }, null, 2)
+  );
+  // User data: must survive the uninstall, and must be reported as retained.
+  fs.writeFileSync(path.join(configDir, '.delphi-config.json'), '{ "active_profile": "default" }\n');
+}
+
 
 describe('uninstall --global plans the whole installation, not just hooks (#663)', () => {
   let home;
@@ -212,34 +246,7 @@ describe('uninstall --global actually removes the residue (#714)', () => {
    * on realistic input rather than on `{}`.
    */
   function seedRealisticInstall() {
-    for (const rel of ['hooks', 'adapters', 'modules/principles', 'node_modules/js-yaml']) {
-      fs.mkdirSync(path.join(configDir(), rel), { recursive: true });
-      fs.writeFileSync(path.join(configDir(), rel, 'index.js'), 'module.exports = {};\n');
-    }
-    fs.writeFileSync(
-      path.join(configDir(), 'package.json'),
-      JSON.stringify({ dependencies: { 'js-yaml': '^5.2.2', zod: '^4.4.3' } }, null, 2)
-    );
-    fs.writeFileSync(
-      path.join(configDir(), 'package-lock.json'),
-      JSON.stringify({ name: 'xp-gate-global', lockfileVersion: 3, packages: {} }, null, 2)
-    );
-    // `mode: 'global'` is what uninstall() reads to decide there is anything to
-    // do; without it the run exits "No xp-gate installation found" and the test
-    // would pass while touching nothing.
-    fs.writeFileSync(
-      path.join(configDir(), 'xp-gate.json'),
-      JSON.stringify(
-        {
-          lastInit: new Date().toISOString(),
-          mode: 'global',
-          manifest: { files: {} },
-        },
-        null,
-        2
-      )
-    );
-    fs.writeFileSync(path.join(configDir(), '.delphi-config.json'), '{ "active_profile": "default" }\n');
+    seedRealisticLayout(configDir());
   }
 
   /**
@@ -377,5 +384,162 @@ describe('uninstall hooks directory ownership (#714)', () => {
     const foreignNames = (result.foreign || []).map((f) => f.name);
     expect(foreignNames).toContain('post-checkout');
     expect(result.action).toBe('remove-owned-only');
+  });
+});
+
+describe('uninstall --global does not grow the config directory (#724)', () => {
+  let home;
+  const savedEnv = {};
+  const realArgv = process.argv;
+
+  beforeEach(() => {
+    home = makeHome();
+    savedEnv.HOME = process.env.HOME;
+    savedEnv.USERPROFILE = process.env.USERPROFILE;
+    process.env.HOME = home;
+    process.env.USERPROFILE = home;
+    process.argv = ['node', 'xp-gate', 'uninstall', '--global', '--force'];
+  });
+
+  afterEach(() => {
+    process.argv = realArgv;
+    process.env.HOME = savedEnv.HOME;
+    process.env.USERPROFILE = savedEnv.USERPROFILE;
+    fs.rmSync(home, { recursive: true, force: true });
+  });
+
+  function configDir() {
+    return path.join(home, '.config', 'xp-gate');
+  }
+
+  /**
+   * Same realistic layout as the #714 block. Delegates to the file-scope helper:
+   * two copies of this body tripped the clone detector, and they had to stay
+   * byte-identical to remain correct.
+   */
+  function seedInstall() {
+    seedRealisticLayout(configDir());
+  }
+
+  function countFiles(dir) {
+    if (!fs.existsSync(dir)) return 0;
+    let n = 0;
+    for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
+      const p = path.join(dir, entry.name);
+      n += entry.isDirectory() ? countFiles(p) : 1;
+    }
+    return n;
+  }
+
+  function snapshotDirs() {
+    const base = path.join(configDir(), '.uninstall-backup');
+    if (!fs.existsSync(base)) return [];
+    return fs.readdirSync(base, { withFileTypes: true })
+      .filter((e) => e.isDirectory() && e.name.startsWith('uninstall-'))
+      .map((e) => e.name);
+  }
+
+  /**
+   * @test REQ-724 Uninstall leaves no growing residue
+   * @intent A dependency tree has no rollback value and must not be copied into the snapshot
+   * @covers AC-724-01
+   */
+  it('AC-724-01: the rollback snapshot does not copy node_modules/ or modules/', async () => {
+    seedInstall();
+    const { uninstall } = freshRequire('../uninstall');
+    await uninstall(['--global', '--force']);
+
+    const sessions = snapshotDirs();
+    expect(sessions.length, 'one snapshot per uninstall run').toBe(1);
+    const snap = path.join(configDir(), '.uninstall-backup', sessions[0]);
+
+    // The config is worth restoring; the dependency tree is not. Copying it was
+    // what made an uninstall write ~1000 files / 12 MB and leave the deleted
+    // directory LARGER than it found it.
+    expect(fs.existsSync(path.join(snap, 'node_modules')), 'node_modules must not be snapshotted').toBe(false);
+    expect(fs.existsSync(path.join(snap, 'modules')), 'modules must not be snapshotted').toBe(false);
+    expect(fs.existsSync(path.join(snap, 'xp-gate.json')), 'the manifest IS worth restoring').toBe(true);
+  });
+
+  /**
+   * @test REQ-724 Uninstall leaves no growing residue
+   * @intent Repeated uninstalls must not accumulate unbounded snapshots
+   * @covers AC-724-02
+   */
+  it('AC-724-02: snapshots are pruned to a bounded number', async () => {
+    const { uninstall } = freshRequire('../uninstall');
+    // Five separate setups/uninstalls in the same HOME -- the shape of a user
+    // re-running install/uninstall while debugging.
+    for (let i = 0; i < 5; i += 1) {
+      seedInstall();
+      await uninstall(['--global', '--force']);
+    }
+
+    const sessions = snapshotDirs();
+    expect(sessions.length, 'snapshots must not accumulate without bound').toBeLessThanOrEqual(3);
+
+    // Retention keeps the NEWEST snapshots. Names are `uninstall-<epoch-ms>`, so
+    // the survivors must be the highest-numbered ones -- a prune that kept the
+    // oldest would discard the recovery point the user is most likely to want.
+    const stamps = sessions.map((n) => Number(n.replace('uninstall-', '')));
+    const newest = Math.max(...stamps);
+    expect(
+      stamps.includes(newest),
+      'the most recent snapshot must survive pruning'
+    ).toBe(true);
+    // Five runs, three retained: the two oldest are the ones evicted.
+    expect(sessions.length).toBe(3);
+  });
+
+  /**
+   * @test REQ-724 Uninstall leaves no growing residue
+   * @intent Retained user data must be advertised as retained, not listed for removal
+   * @covers AC-724-03
+   */
+  it('AC-724-03: the preview puts .delphi-config.json under KEPT, not "will be removed"', async () => {
+    seedInstall();
+    const logSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
+    let said;
+    try {
+      // The spy must be installed BEFORE freshRequire. Dropping the module cache
+      // re-runs uninstall.js, and the module binds its own `console` reference at
+      // load time -- a spy taken afterwards captures nothing, so every assertion
+      // below would pass vacuously against an empty string.
+      const { uninstall } = freshRequire('../uninstall');
+      await uninstall(['--global', '--force']);
+      said = logSpy.mock.calls.map((c) => c.join(' ')).join('\n');
+    } finally {
+      logSpy.mockRestore();
+    }
+
+    // #724: the preview announced it would be removed and then kept it, with no
+    // mention anywhere. Anyone scripting cleanup from that preview would delete
+    // a directory they had been told was already gone.
+    const keptHeader = said.indexOf('KEPT');
+    expect(keptHeader, 'the output must name a KEPT group').toBeGreaterThan(-1);
+
+    const removedSection = said.slice(0, keptHeader);
+    expect(removedSection).not.toContain('.delphi-config.json');
+    expect(said.slice(keptHeader)).toContain('.delphi-config.json');
+    // And it is restated in the summary, which is the last thing users read.
+    expect(said).toMatch(/Kept: .*delphi-config\.json/);
+  });
+
+  /**
+   * @test REQ-724 Uninstall leaves no growing residue
+   * @intent The snapshot must not be written where deleting the config dir destroys it
+   * @covers AC-724-04
+   */
+  it('AC-724-04: the snapshot lives inside the config dir it backs up (documented tradeoff)', async () => {
+    seedInstall();
+    const { uninstall } = freshRequire('../uninstall');
+    await uninstall(['--global', '--force']);
+
+    // Pins the CURRENT location so a future move to an out-of-tree path is a
+    // deliberate, tested change rather than a silent behaviour shift. The
+    // summary now prints the path, which is what makes it discoverable.
+    const sessions = snapshotDirs();
+    expect(sessions.length).toBe(1);
+    expect(path.join(configDir(), '.uninstall-backup', sessions[0])).toContain('.uninstall-backup');
   });
 });
