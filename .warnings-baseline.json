@@ -46,5 +46,13 @@
   "plugins/dsh/src/delphi-run.test.ts": {
     "totalWarnings": 1,
     "lastAnalyzed": "2026-10-31T07:31:43.881Z"
+  },
+  "src/principles/reporter.ts": {
+    "totalWarnings": 2,
+    "lastAnalyzed": "2026-11-03T16:15:18.021Z"
+  },
+  "src/principles/rules/index.ts": {
+    "totalWarnings": 1,
+    "lastAnalyzed": "2026-11-03T16:15:18.022Z"
   }
 }

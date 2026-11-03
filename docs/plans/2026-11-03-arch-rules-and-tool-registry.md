@@ -216,13 +216,23 @@ mC-04 指出原文只写「见 docs/adr/」而未给编号，交付物不可定�
 
 通配形式 `import com.acme.service.*;` **没有具体类名**，无法判定被依赖的类是谁。
 
-**结论：通配 import 不参与 R08/W01 的类名后缀判定，但参与 R15 的包段判定。**
+**结论（BUILD 期实测修正）：通配 import 不参与任何 arch 规则。**
 
-- R08/W01 依赖「被 import 的简单类名」，通配 import 无此信息；强行推断只能靠命名猜测，
-  那正是 R08 本要避免的误报来源。故跳过。
-- R15 依赖「目标 FQN 的包段」，通配 import 的 FQN（`com.acme.infrastructure.*`）
-  本身可判定，故照常生效。
-- 行为需测钉住：DTO 中的 `import com.acme.service.*;` **不**触发 R08。
+原设计写的是「R08/W01 跳过，但 R15 照常生效」。实测推翻了后半句：
+
+`java.ts` 的 import 正则是 `/^\s*import\s+(?:static\s+)?([\w.]+)\s*;\s*$/`，
+字符类 `[\w.]` **不含 `*`**，因此 `import com.acme.infrastructure.*;` 连
+`adapter.imports` 都进不去，R15 根本看不到它，谈不上「照常生效」。
+
+验证方式：
+```js
+/^\s*import\s+(?:static\s+)?([\w.]+)\s*;\s*$/.exec('import com.acme.infrastructure.*;')
+// => null
+```
+
+因此三条规则对通配 import 的行为是统一的：**都看不到**。这不是三条规则各自
+取舍的结果，而是解析层的事实。AC-699-14b 改为直接钉住该正则行为——
+如果将来把正则放宽到支持 `*`，这个测试会红，届时需要重新决定 R15 是否应当报。
 
 这是有意的取舍而非遗漏：宁可不报，也不产生无法解释的误报。
 
