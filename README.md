@@ -419,7 +419,9 @@ XP-Gate 内置 12 个专业 AI 技能，另在 Sprint Flow 中集成了多个外
 如确需自带配置，用 opt-in 的 `xp-gate arch --use-config <file>`（`--config` 为 deprecated 别名）：
 文件将原样传给 archlint `--config`，**schema 版本责任由用户自行承担**（archlint 会拒绝 pre-0.16 结构）。
 
-历史规则清单（ARCH-001 至 ARCH-014 的语义说明）仍保留在仓库根目录的 `architecture.yaml` 注释中，仅供参考。
+历史规则清单（ARCH-001 至 ARCH-014 的语义说明）保留在仓库根目录 `architecture.yaml` 的
+`rules:` 块（**不是**注释）中，仅作**规划参考**——这 14 条编号当前**无实现**，
+全仓 `grep -rn "ARCH-0" src/` 除一组无关测试标签外零命中。详见 #685 / #687。
 
 ### .delphi-config.json（Delphi 评审配置）
 

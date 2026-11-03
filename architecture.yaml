@@ -1,18 +1,36 @@
 # Architecture Configuration for Gate 6
 # Version: 1
-# 
-# This file defines Clean Architecture layer boundaries and rules.
-# Place this file in your project root to enable Gate 6 architecture validation.
+#
+# ⚠️ NOT ENFORCED by archlint 0.16 — see #686 / #687
+#
+# 本文件目前**不被任何代码消费**。Gate 6 会检查它是否存在（缺失则 BLOCK，
+# 见 TOOL-INSTALLATION-GUIDE.md「零容忍」一节），但不会执行其中的任何一条规则：
+#
+#   1. `layers:` / `rules:` 用的是 xp-gate 自拟的结构，不是 archlint 的配置格式。
+#      archlint 原生读的是 `.archlint.yaml`（键为 `ignore:` / `entry_points:` /
+#      `rules:`，见本仓库根目录那份），两者 schema 不同。
+#   2. 实测（archlint 0.16.0）：构造一个 `allowedImports: []` 却跨层导入的工程，
+#      `archlint scan --config architecture.yaml` 只报 Dead Code，不报层级违规。
+#      archlint 确实**有**一个 `layer_violation` 检测器，但它默认 **disabled**，
+#      而且不从这个文件的 `layers:` 读取层级定义。
+#   3. `ARCH-001`~`ARCH-014` 是规划编号，无实现。全仓 `grep -rn "ARCH-0" src/`
+#      除一组无关的 `REQ-ARCH-001-02` 测试标签外零命中。
+#
+# 保留本文件的原因：它记录了规划中的层级语义，是 #690 / #691 落地的输入。
+# 但**不要认为它正在保护你的代码**。
+#
+# 规划落地路径：docs/plans/2026-10-30-archunit-33-rules-gap-analysis.md
 #
 # Installation:
 #   npm install -g @archlinter/cli
 #   # or use npx
-#   npx @archlinter/cli check --config architecture.yaml
+#   npx @archlinter/cli scan . --config .archlint.yaml   # 注意：原生配置是 .archlint.yaml
 
 version: 1
 
 # Layer definitions (project-specific)
-# Customize these patterns to match your project structure
+# ⚠️ 本块无消费方：archlint 0.16 不从 architecture.yaml 读取层级定义。
+#    改这里不会改变任何门禁行为。见文件头说明。
 layers:
   domain:
     pattern: "src/domain/**"
@@ -46,8 +64,9 @@ layers:
 #   - info: Informational only, no blocking
 #
 # Architecture Rules:
+#   （以下均为规划描述，当前无实现 — 见文件头 NOT ENFORCED 说明）
 #   ARCH-001: Domain isolation - Domain must not import from outer layers
-#   ARCH-002: Application boundary - Application must not import Infrastructure/Presentation
+#   ARCH-002: Application boundary - Application must not import from Infrastructure/Presentation
 #   ARCH-003: Presentation boundary - Presentation must not import Domain directly
 #   ARCH-004: Infrastructure boundary - Infrastructure must not import Presentation
 #   ARCH-005: Cross-layer cycles - No circular dependencies across layers
@@ -60,6 +79,10 @@ layers:
 #   ARCH-012: CBO threshold - Coupling Between Objects metric
 #   ARCH-013: Fan-out threshold - Number of outgoing dependencies
 #   ARCH-014: Fan-in threshold - Number of incoming dependencies
+#
+# ⚠️ 本块在 archlint 0.16 下**不被执行**。`enabled: true` 是规划意图，不是现状。
+#    真实原因见文件头：archlint 不从本文件读取规则定义。
+#    要真正启用某项检查，改的是 `.archlint.yaml` 的 `rules:` 块（archlint 原生格式）。
 
 rules:
   ARCH-001:  # Domain isolation
@@ -176,6 +199,12 @@ integration:
   toolRequired: true
   
   # Language-specific settings
+  #
+  # ⚠️ 本块无消费方。实测 `grep -rn "minVersion" src/ githooks/` 的命中全部无关
+  #    （python-health 的 Python 版本检查、detect-deps 的 skill 依赖检测），
+  #    没有任何代码读取这里的 tool / minVersion。
+  #    因此修改它不会让 Gate 6 改用别的架构工具，也不会触发版本校验。
+  #    实际的语言支持判断在 githooks/pre-commit 的 Gate 6 探测逻辑里，与本块无关。
   languages:
     typescript:
       tool: "@archlinter/cli"

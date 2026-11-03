@@ -4425,6 +4425,39 @@ specification:
 
     # ============================================================
 
+    # 一个「文档声称已启用、实现并不存在」的检测器，与「没有漂移」无法区分。
+    # docs/ARCHITECTURE.md 给 ARCH-001..010 标「已启用=是」，但 src/ 里除一组
+    # 无关的 REQ-ARCH-001-02 测试标签外零命中，architecture.yaml 也不被任何代码
+    # 消费。实测（archlint 0.16.0）构造 allowedImports: [] 却跨层导入的工程，
+    # `archlint scan --config architecture.yaml` 只报 Dead Code，不报层级违规 —
+    # archlint 的 layer_violation 检测器确实存在，但默认 disabled 且不读
+    # architecture.yaml 的 layers:。
+    #
+    # 这类缺陷的危险不在于功能缺失（缺功能是可见的），而在于文档替它做了背书：
+    # 用户以为自己被保护着。修法是把「规划中」写下，而不是假装已实现。
+    # ============================================================
+    - id: REQ-715
+      description: 架构规则文档须如实标注 ARCH-001..014 当前无实现，不得声称已启用
+      priority: medium
+      acceptance_criteria:
+        - id: AC-715-01
+          criteria: docs/ARCHITECTURE.md 不得出现无保留的「ARCH-00x 已启用=是」
+          test_type: unit
+        - id: AC-715-02
+          criteria: architecture.yaml 须注明 rules 块在 archlint 0.16 下不被执行
+          test_type: unit
+        - id: AC-715-03
+          criteria: architecture.yaml 的 languages 块须注明无消费方
+          test_type: unit
+        - id: AC-715-04
+          criteria: 全仓每一处 ARCH-001..014 引用均带「未生效/规划中」限定语或指向父单 #685
+          test_type: unit
+        - id: AC-715-05
+          criteria: TOOL-INSTALLATION-GUIDE.md 的 architecture.yaml 配置指南须有醒目警示
+          test_type: unit
+
+    # ============================================================
+
     # SKILL.md 推荐「机器级只放一份配置，仓库里不带」的布局，runner 确实实现了
     # 全局回退，所以评审能正常跑。doctor 只查 `<cwd>/.delphi-config.json`，
     # 在这种布局下报 FAIL，并让用户「复制示例配置到项目里」——恰好制造出

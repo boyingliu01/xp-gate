@@ -347,7 +347,7 @@ git push ──→ CI/CD Pipeline ──→ Build/Test/Deploy
 | 文件 | 用途 |
 |------|------|
 | `.principlesrc` | 自定义检查阈值 |
-| `architecture.yaml` | 架构层边界规则 |
+| `architecture.yaml` | 架构层边界规则（⚠️ **当前不被执行**，仅 Gate 6 检查其存在性；`layers:`/`rules:` 无消费方，见 #687） |
 | `specification.yaml` | 需求规范（自动生成） |
 | `.delphi-config.json` | Delphi 专家配置（OpenCode 平台） |
 | `.qoder/agents/delphi-*.md` | Delphi 专家配置（Qoder 平台，`xp-gate init` 自动部署） |
