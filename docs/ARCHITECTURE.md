@@ -51,7 +51,7 @@ XP-Gate 将确定性质量门禁（纯代码）与 AI 智能评审（多专家�
 │                             └─ baseline: {}                                 │
 │                                                                              │
 │   Clean Architecture: Domain <- Application <- Infrastructure <- Presentation│
-│   14 条架构规则 (ARCH-001 至 ARCH-014)                                       │
+│   14 条架构规则编号 (ARCH-001..014) — 规划中，当前无实现（见 3.3.3）          │
 └─────────────────────────────────────────────────────────────────────────────┘
                                        │
                                        ▼
@@ -291,22 +291,34 @@ layers:
 
 #### 3.3.3 14 条架构规则
 
-| 规则 | 名称 | 说明 | 默认启用 |
-|------|------|------|----------|
-| ARCH-001 | Domain Isolation | 领域层不得导入外层 | 是 |
-| ARCH-002 | Application Boundary | 应用层不得导入基础设施/表示层 | 是 |
-| ARCH-003 | Presentation Boundary | 表示层不得直接导入领域层 | 是 |
-| ARCH-004 | Infrastructure Boundary | 基础设施层不得导入表示层 | 是 |
-| ARCH-005 | Cross-layer Cycles | 禁止跨层循环依赖 | 是 |
-| ARCH-006 | Within-layer Cycles | 禁止同层循环依赖 | 否 |
-| ARCH-007 | Module-level Cycles | 禁止模块间循环依赖 | 否 |
-| ARCH-008 | Repository Location | 仓库接口在领域层，实现在基础设施层 | 是 |
-| ARCH-009 | Service Location | 领域服务必须在领域层 | 是 |
-| ARCH-010 | Controller Location | 控制器必须在表示层 | 是 |
-| ARCH-011 | LCOM Threshold | 方法内聚缺乏度阈值 | 否 |
-| ARCH-012 | CBO Threshold | 对象间耦合度阈值 | 否 |
-| ARCH-013 | Fan-out Threshold | 出度阈值 | 否 |
-| ARCH-014 | Fan-in Threshold | 入度阈值 | 否 |
+> ⚠️ **这些编号当前没有实现。** `ARCH-001`~`ARCH-014` 是**规划编号**，不是已落地的检测规则。
+>
+> 本仓库 `src/architecture/` 只有 `version-parser.ts`（给 Gate 0 比对版本号用），
+> 全仓 `grep -rn "ARCH-0" src/` 除一组无关的 `REQ-ARCH-001-02` 测试标签外零命中。
+> Gate 6 真正执行的是 archlint 的 built-in 检测器（dead_code、cyclic_dependency、
+> code_clone、god_module 等），它们与下表编号**没有对应关系**。
+>
+> 下表的「设计意图」一栏说明的是规划语义，保留它是因为这些语义仍然是对的规划方向；
+> 但**不要据此认为某项检查正在保护你**。落地路径见 #685 / #690 / #691。
+> 核实依据：`archlint 0.16.0` 实测——构造一个 `allowedImports: []` 却跨层导入的
+> 工程，`archlint scan --config architecture.yaml` 只报 Dead Code，不报任何层级违规。
+
+| 规则 | 名称 | 说明 | 设计意图（当前无实现） |
+|------|------|------|------------------------|
+| ARCH-001 | Domain Isolation | 领域层不得导入外层 | 规划中 |
+| ARCH-002 | Application Boundary | 应用层不得导入基础设施/表示层 | 规划中 |
+| ARCH-003 | Presentation Boundary | 表示层不得直接导入领域层 | 规划中 |
+| ARCH-004 | Infrastructure Boundary | 基础设施层不得导入表示层 | 规划中 |
+| ARCH-005 | Cross-layer Cycles | 禁止跨层循环依赖 | 规划中 |
+| ARCH-006 | Within-layer Cycles | 禁止同层循环依赖 | 规划中 |
+| ARCH-007 | Module-level Cycles | 禁止模块间循环依赖 | 规划中 |
+| ARCH-008 | Repository Location | 仓库接口在领域层，实现在基础设施层 | 规划中 |
+| ARCH-009 | Service Location | 领域服务必须在领域层 | 规划中 |
+| ARCH-010 | Controller Location | 控制器必须在表示层 | 规划中 |
+| ARCH-011 | LCOM Threshold | 方法内聚缺乏度阈值 | 规划中 |
+| ARCH-012 | CBO Threshold | 对象间耦合度阈值 | 规划中 |
+| ARCH-013 | Fan-out Threshold | 出度阈值 | 规划中 |
+| ARCH-014 | Fan-in Threshold | 入度阈值 | 规划中 |
 
 #### 3.3.4 语言特定工具
 

@@ -8,6 +8,32 @@ const HOME = process.env.HOME || process.env.USERPROFILE || os.homedir();
 const CONFIG_DIR = path.join(HOME, '.config', 'xp-gate');
 
 /**
+ * The skill names this package ships.
+ *
+ * `skills/` is the bundle contract: a skill the installed package does not carry
+ * is not ours to touch. Resolved lazily so a caller that stubs out the package
+ * layout still gets a sensible empty set instead of a throw at require() time.
+ *
+ * @returns {Set<string>} bundled skill directory names
+ */
+function bundledSkillNames() {
+  const dir = path.join(__dirname, '..', 'skills');
+  try {
+    return new Set(
+      fs
+        .readdirSync(dir, { withFileTypes: true })
+        .filter(
+          (entry) =>
+            entry.isDirectory() && fs.existsSync(path.join(dir, entry.name, 'SKILL.md'))
+        )
+        .map((entry) => entry.name)
+    );
+  } catch {
+    return new Set();
+  }
+}
+
+/**
  * The skill names that are actually deployed on this machine.
  *
  * `xp-gate init` / `setup-global` copy skills onto disk but never write
@@ -16,46 +42,90 @@ const CONFIG_DIR = path.join(HOME, '.config', 'xp-gate');
  * "Updating all skills..." and exit 0 having touched nothing (#682) -- the
  * same defect #635 fixed for `doctor`, with the same fix: ask the filesystem.
  *
+ * Enumerating the filesystem alone is too wide, though (#713). A skill
+ * directory is a shared namespace -- every skill tool uses the same
+ * `<dir>/<name>/SKILL.md` layout -- so on a machine that also carries other
+ * bundles, `--all` walked all of them, printed `Error: Unknown skill: <name>`
+ * for each, and advised `npm install -g xp-gate@latest` to obtain a skill this
+ * package does not and will never ship. Scanned names are therefore filtered
+ * against the bundle: the candidate set is the intersection, not the union.
+ *
  * The explicit registry is still unioned in, so a skill that is merely
  * registered (or was installed on a platform this scan cannot see) keeps
- * working for callers that rely on it.
+ * working for callers that rely on it -- but only when the package really
+ * carries it, for the same reason as above.
  *
  * @returns {string[]} de-duplicated skill names, in a stable order
  */
 function installedSkillNames() {
+  const bundled = bundledSkillNames();
   const names = new Set();
-  const config = getConfig();
-  for (const name of Object.keys(config.installedSkills || {})) names.add(name);
 
-  let platforms = [];
-  try {
-    platforms = Object.keys(require('./detect-deps.js').PLATFORM_PROFILES);
-  } catch {
-    // detect-deps unavailable: fall back to the registry only rather than
-    // reporting "nothing installed" for a machine that has skills on disk.
-    platforms = [];
+  // Registry first: a skill can be registered on a platform this scan cannot see.
+  for (const name of Object.keys(getConfig().installedSkills || {})) {
+    if (bundled.has(name)) names.add(name);
   }
-  const detect = require('./detect-deps.js');
-  for (const platform of platforms) {
-    let dir;
-    try {
-      dir = detect.getSkillsDirs(platform)[0];
-    } catch {
-      continue;
-    }
-    let entries;
-    try {
-      entries = fs.readdirSync(dir, { withFileTypes: true });
-    } catch {
-      continue;
-    }
-    for (const entry of entries) {
-      if (!entry.isDirectory()) continue;
-      // A skill is `<dir>/<name>/SKILL.md` — the shape install-skill writes.
-      if (fs.existsSync(path.join(dir, entry.name, 'SKILL.md'))) names.add(entry.name);
-    }
-  }
+
+  for (const name of bundledNamesOnDisk(bundled)) names.add(name);
   return [...names].sort();
+}
+
+/**
+ * Bundled skill names that are actually deployed on this machine.
+ *
+ * Split out of installedSkillNames() because the per-platform probing is three
+ * nested try/catch levels deep on its own: reading a directory that may not
+ * exist, on a platform whose detection may itself throw. Flattening it into a
+ * named loop keeps each failure mode visible instead of piling onto one
+ * function's complexity budget.
+ *
+ * Every unreadable location is skipped silently -- an absent platform is the
+ * normal case on any given machine, not an error worth reporting mid-update.
+ *
+ * @param {Set<string>} bundled names the package ships; anything else is not ours
+ * @returns {string[]} deployed-and-bundled skill names
+ */
+function bundledNamesOnDisk(bundled) {
+  const found = [];
+  let detect;
+  let platforms;
+  try {
+    detect = require('./detect-deps.js');
+    platforms = Object.keys(detect.PLATFORM_PROFILES);
+  } catch {
+    // detect-deps unavailable: the registry half of installedSkillNames() still
+    // applies, so returning nothing here does not report "no skills installed".
+    return found;
+  }
+
+  for (const platform of platforms) {
+    for (const entry of readSkillsDirEntries(detect, platform)) {
+      if (!entry.isDirectory || !bundled.has(entry.name)) continue;
+      if (fs.existsSync(path.join(entry.dir, entry.name, 'SKILL.md'))) found.push(entry.name);
+    }
+  }
+  return found;
+}
+
+/**
+ * Read one platform's skills directory as plain records, so callers get the
+ * directory back without depending on dirent internals.
+ * @returns {Array<{name: string, isDirectory: boolean, dir: string}>} empty when unreadable
+ */
+function readSkillsDirEntries(detect, platform) {
+  let dir;
+  try {
+    dir = detect.getSkillsDirs(platform)[0];
+  } catch {
+    return [];
+  }
+  let entries;
+  try {
+    entries = fs.readdirSync(dir, { withFileTypes: true });
+  } catch {
+    return [];
+  }
+  return entries.map((entry) => ({ name: entry.name, isDirectory: entry.isDirectory(), dir }));
 }
 
 function handleCheckMode() {
