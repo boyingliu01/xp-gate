@@ -4818,3 +4818,38 @@ specification:
         - id: AC-714-04
           criteria: 规则 2 给出可照做的并发清单与自查判据，而不是只写"必须并发"
           test_type: unit
+
+    # ============================================================
+
+    # uninstall 完整性需求（issue #663 + #714）。
+    #
+    # 这两批工作原本只把 issue 号当 AC 前缀写在测试里（`@test REQ-714`、
+    # `AC-714-01..06`），但 REQ-714 在 spec 中已被「AGENTS.md 运行时纪律」占用
+    # ——同一个编号指两个毫不相干的需求，`AC-714-05/06` 更是根本没登记，
+    # 于是 ac-reference-guard 长期报「新增 AC 引用未在 spec 登记」（#718）。
+    #
+    # 此处为 uninstall 完整性单独立 REQ 编号 REQ-717，让 AC 引用有唯一归属。
+    # 编号本身仍沿用 714 前缀会继续撞车，故 AC 一并改号为 AC-717-xx。
+    # ============================================================
+    - id: REQ-717
+      description: xp-gate uninstall 须真正移除 setup-global 装下的全部产物，且只删自有文件、保留用户数据与第三方 hook
+      priority: high
+      acceptance_criteria:
+        - id: AC-717-01
+          criteria: 残留计划须覆盖 modules/、node_modules/、package.json、package-lock.json、xp-gate.json，而非仅 hooks/ 与 adapters/
+          test_type: unit
+        - id: AC-717-02
+          criteria: 计划中的目录步骤与文件步骤都须实际执行删除，不得因缺少内容签名而跳过
+          test_type: unit
+        - id: AC-717-03
+          criteria: 用户数据（如已安装 skill 记录之外的用户文件）在删除路径可用之后仍须存活
+          test_type: unit
+        - id: AC-717-04
+          criteria: 不得在仍有残留时打印卸载成功
+          test_type: unit
+        - id: AC-717-05
+          criteria: post-commit 须被归类为 xp-gate 自有 hook，而非 foreign
+          test_type: unit
+        - id: AC-717-06
+          criteria: 第三方 hook（如 git-lfs 的 post-checkout）须仍判为 foreign 并保留，动作须为 remove-owned-only
+          test_type: unit
