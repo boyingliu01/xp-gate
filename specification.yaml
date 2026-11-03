@@ -4644,6 +4644,32 @@ specification:
           test_type: unit
 
     # ============================================================
+
+    # `npm pack --json` 的 stdout 必须只有 JSON。#723 的起因是根 package.json 的
+    # prepare 钩子（node scripts/sync-version.cjs）用 console.log 往 stdout 写诊断，
+    # 把 JSON 挤到第 13 行，任何 `npm pack --json | jq` 都以 Invalid numeric literal
+    # 失败——0.32.2 的 dsh 插件正是这样漏发的。
+    #
+    # 当时的守卫 AC-DSH-019 只扫 src/npm-package/scripts/，管不到根上的 prepare，
+    # 于是「教训被记下」与「根因被修掉」成了两件事。本需求把守卫扩到所有
+    # pack 期脚本入口，并保留「诊断仍可见，只是改走 stderr」这一条——
+    # 否则修污染会顺手把信息也删掉。
+    # ============================================================
+    - id: REQ-723
+      description: npm pack 期间执行的脚本不得写 stdout，使 --json 的机器可读通道保持纯净
+      priority: high
+      acceptance_criteria:
+        - id: AC-723-01
+          criteria: 守卫须能发现所有 pack 期脚本入口（根与 src/npm-package 的 prepare/prepack/postpack），且发现结果非空
+          test_type: unit
+        - id: AC-723-02
+          criteria: pack 期脚本不得使用 console.log 或 process.stdout.write，诊断一律走 stderr
+          test_type: unit
+        - id: AC-723-03
+          criteria: 修污染不得删除诊断信息本身，[sync-version] 进度行须仍输出（改走 stderr）
+          test_type: unit
+
+    # ============================================================
     # REQ-704: 返工率必须真正可测。
     # 统计区间的下界用了 completed_at（sprint 结束时刻），而全部 sprint
     # 提交都在它之前 —— 要统计的区间是「开始 → 结束」，实际统计的是
