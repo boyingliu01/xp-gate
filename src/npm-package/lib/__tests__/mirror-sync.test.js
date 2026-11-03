@@ -264,13 +264,24 @@ describe('syncMirrors — AC-713-04 safety', () => {
   it('preserves the executable bit so hooks stay runnable', () => {
     write(TMP_REPO, 'canonical/hook.sh', '#!/bin/sh\necho a\n');
     fs.chmodSync(path.join(TMP_REPO, 'canonical/hook.sh'), 0o755);
-    write(TMP_REPO, 'mirror/hook.sh', '#!/bin/sh\necho a\n');
+    // The mirror must start as *drift*. The sync loop only touches files that
+    // are `missing` or `differing`, so identical content is skipped and the mode
+    // never gets rewritten. An earlier version gave both sides the same bytes,
+    // so the file never entered `toWrite`; on Linux the assertion then failed
+    // ("expected +0 to be truthy") while Windows skipped the whole block, which
+    // is how it stayed invisible locally. The test was measuring nothing.
+    write(TMP_REPO, 'mirror/hook.sh', '#!/bin/sh\necho stale\n');
     trackAll(TMP_REPO);
 
-    syncMirrors(TMP_REPO, [{ canonical: 'canonical', mirror: 'mirror' }]);
-    const mode = fs.statSync(path.join(TMP_REPO, 'mirror/hook.sh')).mode;
+    const result = syncMirrors(TMP_REPO, [{ canonical: 'canonical', mirror: 'mirror' }]);
+    // Prove the copy actually happened, so a green result cannot come from
+    // "nothing was touched".
+    expect(result.copied).toContain('hook.sh');
+    expect(fs.readFileSync(path.join(TMP_REPO, 'mirror/hook.sh'), 'utf8')).toBe('#!/bin/sh\necho a\n');
+
     // On Windows the exec bit is not meaningful; only assert where it applies.
     if (process.platform !== 'win32') {
+      const mode = fs.statSync(path.join(TMP_REPO, 'mirror/hook.sh')).mode;
       expect(mode & 0o111).toBeTruthy();
     }
   });
