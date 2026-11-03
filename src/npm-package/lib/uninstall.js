@@ -53,6 +53,27 @@ const GLOBAL_USER_DATA = [
 ];
 
 /**
+ * Directories under the config dir that the uninstall snapshot must NOT copy.
+ *
+ * #724: `createBackupSnapshot()` copied every plan entry, so an uninstall wrote a
+ * full second copy of `node_modules/` (~1000 files, ~12 MB) into
+ * `.uninstall-backup/`. That is the one thing here with no rollback value: it is
+ * a dependency tree npm regenerates from `package.json` in seconds, and it was
+ * the difference between a snapshot of a few config files and a 12 MB directory.
+ */
+const UNBACKUPABLE_DIRS = new Set(['node_modules', 'modules']);
+
+/**
+ * How many uninstall snapshots to keep.
+ *
+ * #724: the snapshot directory is named `uninstall-<timestamp>` and nothing ever
+ * pruned it, so every uninstall added another full copy and the directory only
+ * grew. Keeping the most recent few preserves the "I uninstalled by accident"
+ * recovery path without letting the directory become unbounded.
+ */
+const BACKUP_RETENTION = 3;
+
+/**
  * Signature strings used to verify file ownership.
  * Each hook/adapter file contains a unique marker string.
  */
@@ -149,6 +170,11 @@ function unsetHooksPath() {
 
 /**
  * Create a backup snapshot of files/dirs before deletion.
+ *
+ * #724: two scoping rules keep this proportionate. `node_modules/` and
+ * `modules/` are skipped outright -- they are regenerable from package.json, and
+ * copying them made the snapshot ~1000 files / 12 MB. Everything else is copied
+ * as before, so the recovery path for real config is unchanged.
  */
 function createBackupSnapshot(plan) {
   // Use a unique backup dir for this uninstall session
@@ -159,6 +185,9 @@ function createBackupSnapshot(plan) {
 
   for (const item of plan) {
     if (!item.path || !fs.existsSync(item.path)) continue;
+    // Retained user data is not being deleted, so there is nothing to roll back.
+    if (item.retain === true) continue;
+    if (UNBACKUPABLE_DIRS.has(path.basename(item.path))) continue;
 
     const relPath = path.basename(item.path);
     const destPath = path.join(sessionBackup, relPath);
@@ -176,7 +205,47 @@ function createBackupSnapshot(plan) {
     }
   }
 
+  pruneOldBackups(sessionBackup);
+
   return backupMeta;
+}
+
+/**
+ * Keep only the newest BACKUP_RETENTION uninstall snapshots (#724).
+ *
+ * Snapshots are named `uninstall-<epoch-ms>`, so a plain reverse-sort of the
+ * directory names is a correct newest-first order without reading any metadata.
+ * An empty snapshot (every entry was skipped) is removed rather than counted
+ * toward the retention budget -- otherwise a run that backed up nothing would
+ * evict a snapshot that actually held config.
+ */
+function pruneOldBackups(sessionBackup) {
+  try {
+    if (isDirEmpty(sessionBackup)) {
+      fs.rmdirSync(sessionBackup);
+      return;
+    }
+    const sessions = fs
+      .readdirSync(BACKUP_DIR, { withFileTypes: true })
+      .filter((e) => e.isDirectory() && e.name.startsWith('uninstall-'))
+      .map((e) => e.name)
+      .sort()
+      .reverse();
+    for (const stale of sessions.slice(BACKUP_RETENTION)) {
+      fs.rmSync(path.join(BACKUP_DIR, stale), { recursive: true, force: true });
+    }
+  } catch {
+    // Pruning is housekeeping. Failing it must never fail the uninstall, which
+    // has already done the work the user asked for.
+  }
+}
+
+function isDirEmpty(dir) {
+  try {
+    return fs.readdirSync(dir).length === 0;
+  } catch {
+    return false;
+  }
 }
 
 function copyDirSync(src, dest) {
@@ -561,11 +630,27 @@ async function uninstall(args) {
   // §4.3 Step 4: Print plan
   console.log(`XP-Gate Uninstall (${mode} mode)`);
   console.log('=======================\n');
-  console.log('The following will be removed:\n');
 
-  for (const item of plan) {
+  // #724: 'retain' entries used to be printed under "The following will be
+  // removed" and then kept, with no further mention anywhere in the output.
+  // A user scripting cleanup from this preview would delete a directory they
+  // had been told was gone. The two groups are now stated separately, and the
+  // retained list is echoed again at the end.
+  const removable = plan.filter((item) => item.retain !== true);
+  const retained = plan.filter((item) => item.retain === true);
+
+  console.log('The following will be removed:\n');
+  for (const item of removable) {
     console.log(`  • ${item.label}`);
   }
+
+  if (retained.length > 0) {
+    console.log('\nThe following will be KEPT (your data):\n');
+    for (const item of retained) {
+      console.log(`  • ${item.label}`);
+    }
+  }
+
   if (options.purge) {
     console.log('\nPurge mode — additional cleanup:');
     for (const d of purgeDirs) {
@@ -642,6 +727,15 @@ async function uninstall(args) {
   console.log('Note: Qoder Delphi expert agents (.qoder/agents/delphi-*.md) are user-owned files');
   console.log('      that init never overwrites, so they were left in place — delete them by hand');
   console.log('      (then restart the Qoder session) if you want them gone.');
+  // #724: restate the retained data. The preview said it once, but the last thing
+  // a user reads before closing the terminal is the summary -- and an uninstall
+  // that leaves files behind owes them an explicit accounting of what it kept.
+  for (const item of retained) {
+    console.log(`Kept: ${item.label}`);
+  }
+  if (backupMeta && backupMeta.entries.length > 0) {
+    console.log(`Rollback snapshot: ${backupMeta.sessionBackup}`);
+  }
   if (hadErrors) {
     console.log('Some items could not be removed. Run doctor for diagnostics.');
   }

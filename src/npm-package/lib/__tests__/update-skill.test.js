@@ -114,8 +114,14 @@ describe('update-skill', () => {
     const result = await updateSkill(null, { check: true });
     expect(result).toBe(0);
     expect(logSpy).toHaveBeenCalledWith('Checking for updates...');
-    expect(logSpy).toHaveBeenCalledWith('  foo: 1.2.3');
-    expect(logSpy).toHaveBeenCalledWith('  bar: 2.0.0');
+
+    // #725: the check reads the DISK now, not the registry. These skills have no
+    // copy anywhere on this fixture HOME, so the honest answer is "registry only"
+    // -- printing the recorded version as though it were verified is what let a
+    // stale multi-platform copy look up to date.
+    const lines = logSpy.mock.calls.map((c) => c[0]);
+    expect(lines.some((l) => /foo: 1\.2\.3 \(registry only/.test(l))).toBe(true);
+    expect(lines.some((l) => /bar: 2\.0\.0 \(registry only/.test(l))).toBe(true);
     expect(logSpy).toHaveBeenCalledWith('Update check complete');
   });
 
@@ -124,7 +130,8 @@ describe('update-skill', () => {
     const { updateSkill } = require('../update-skill');
     const result = await updateSkill(null, { check: true });
     expect(result).toBe(0);
-    expect(logSpy).toHaveBeenCalledWith('  baz: unknown');
+    const lines = logSpy.mock.calls.map((c) => c[0]);
+    expect(lines.some((l) => /baz: unknown/.test(l))).toBe(true);
   });
 
   it('check=true with empty config returns 0 and prints only headers', async () => {
@@ -487,5 +494,108 @@ describe('update-skill #713 bundled-skill ownership', () => {
     expect(fx.output()).toMatch(/nothing to update|no skills installed/i);
     expect(fx.installSkillMock).not.toHaveBeenCalled();
     expect(code).toBe(0);
+  });
+});
+
+describe('update-skill #725 --check reads the disk, not the registry', () => {
+  let tmpHome;
+  let originalHome;
+  let logSpy;
+
+  beforeEach(() => {
+    originalHome = process.env.HOME;
+    tmpHome = fs.mkdtempSync(path.join(os.tmpdir(), 'xpgate-725-'));
+    process.env.HOME = tmpHome;
+    vi.resetModules();
+    delete require.cache[require.resolve('../update-skill')];
+    logSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
+  });
+
+  afterEach(() => {
+    if (originalHome === undefined) delete process.env.HOME; else process.env.HOME = originalHome;
+    logSpy.mockRestore();
+    fs.rmSync(tmpHome, { recursive: true, force: true });
+  });
+
+  function writeConfig(installedSkills) {
+    const dir = path.join(tmpHome, '.config', 'xp-gate');
+    fs.mkdirSync(dir, { recursive: true });
+    fs.writeFileSync(path.join(dir, 'xp-gate.json'), JSON.stringify({ installedSkills }));
+  }
+
+  /** Deploy a copy of a shipped skill into one platform, with a chosen stamp. */
+  function deploy(platformRel, name, version) {
+    const dir = path.join(tmpHome, platformRel, name);
+    fs.mkdirSync(dir, { recursive: true });
+    // SKILL.md is copied verbatim so a content comparison would call it current;
+    // the version stamp is what must decide.
+    const bundled = path.join(__dirname, '..', '..', 'skills', name, 'SKILL.md');
+    fs.copyFileSync(bundled, path.join(dir, 'SKILL.md'));
+    if (version) {
+      fs.writeFileSync(
+        path.join(dir, 'AGENTS.md'),
+        `# KB\n\n**Version:** ${version}\n`
+      );
+    }
+    return dir;
+  }
+
+  function lines() {
+    return logSpy.mock.calls.map((c) => String(c[0]));
+  }
+
+  /**
+   * @test REQ-725
+   * @intent A copy stamped with an older version must be reported even when the registry says it is current
+   * @covers AC-725-04
+   */
+  it('AC-725-04: reports a stale on-disk copy the registry calls current', async () => {
+    writeConfig({ 'delphi-review': { version: '0.35.24' } });
+    deploy(path.join('.qoder', 'skills'), 'delphi-review', '0.35.24.0');
+    deploy(path.join('.config', 'opencode', 'skills'), 'delphi-review', '0.32.0.0');
+
+    const { updateSkill } = require('../update-skill');
+    await updateSkill(null, { check: true });
+
+    const said = lines().join('\n');
+    // The registry claims 0.35.24 for this skill, and it is right about Qoder.
+    // It is wrong about OpenCode, and only reading the disk can say so.
+    expect(said).toMatch(/delphi-review \[opencode\]: 0\.32\.0\.0/);
+    expect(said).toMatch(/behind/i);
+  });
+
+  /**
+   * @test REQ-725
+   * @intent Two matching copies must report as up to date
+   * @covers AC-725-04
+   */
+  it('AC-725-04: both copies current reports up to date and no shortfall', async () => {
+    writeConfig({ 'delphi-review': { version: '0.35.24' } });
+    deploy(path.join('.qoder', 'skills'), 'delphi-review', '0.35.24.0');
+    deploy(path.join('.config', 'opencode', 'skills'), 'delphi-review', '0.35.24.0');
+
+    const { updateSkill } = require('../update-skill');
+    await updateSkill(null, { check: true });
+
+    const said = lines().join('\n');
+    expect(said).not.toMatch(/behind/i);
+    expect(said).toMatch(/up to date on 2 platform/i);
+  });
+
+  /**
+   * @test REQ-725
+   * @intent A skill with no version stamp must not be flagged merely for lacking one
+   * @covers AC-725-05
+   */
+  it('AC-725-05: an unstamped copy identical to the bundle is not reported as behind', async () => {
+    // Most skills ship no AGENTS.md, so "unknown" is their normal state. Measuring
+    // staleness by absence of a stamp flagged every skill on a healthy machine.
+    writeConfig({ 'admin-template-guidelines': { version: '0.35.24' } });
+    deploy(path.join('.qoder', 'skills'), 'admin-template-guidelines', null);
+
+    const { updateSkill } = require('../update-skill');
+    await updateSkill(null, { check: true });
+
+    expect(lines().join('\n')).not.toMatch(/behind/i);
   });
 });

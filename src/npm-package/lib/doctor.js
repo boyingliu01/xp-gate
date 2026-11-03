@@ -3357,24 +3357,27 @@ async function doctorDelphi(options = {}) {
       add('Delphi skill install parity', 'FAIL',
         `bundled skill directory missing or empty: ${bundledSkillDir} — reinstall xp-gate`);
     } else {
+      // #725: check every platform that has the skill deployed, not only the one
+      // `detectPlatform()` selects. On a machine with both Qoder and OpenCode the
+      // OpenCode copy was frozen at an old version and this check reported PASS,
+      // because it never looked there -- the drifted copy was invisible to both
+      // `update-skill` and `doctor`.
+      const deployedDirs = otherDeployedSkillDirs(installedSkillDir);
       const drifted = [];
-      for (const rel of bundledFiles) {
-        const installedPath = path.join(installedSkillDir, rel);
-        const bundledPath = path.join(bundledSkillDir, rel);
-        if (!fs.existsSync(installedPath)) {
-          drifted.push(`${rel}: missing`);
-        } else if (sha256(installedPath) !== sha256(bundledPath)) {
-          drifted.push(`${rel}: differs from bundle`);
+      for (const dir of deployedDirs) {
+        const dirDrift = collectSkillDrift(dir, bundledFiles, bundledSkillDir, sha256);
+        if (dirDrift.length > 0) {
+          drifted.push(`${platformTag(dir)}: ${dirDrift.join(', ')}`);
         }
       }
       if (drifted.length > 0) {
         add('Delphi skill install parity', 'FAIL',
-          `${drifted.length} file(s) differ from the ${getCliVersionSafe()} bundle: `
-          + `${drifted.slice(0, 5).join('; ')}${drifted.length > 5 ? '; ...' : ''} `
+          `installed copy differs from the ${getCliVersionSafe()} bundle — `
+          + `${drifted.slice(0, 3).join('; ')}${drifted.length > 3 ? '; ...' : ''} `
           + '(reinstall: xp-gate install-skill delphi-review --force)');
       } else {
         add('Delphi skill install parity', 'PASS',
-          `${bundledFiles.length} file(s) match the bundle`);
+          `${bundledFiles.length} file(s) match the bundle across ${deployedDirs.length} platform(s)`);
       }
     }
   }
@@ -3589,6 +3592,63 @@ function getCliVersionSafe() {
   } catch {
     return '0.0.0';
   }
+}
+
+/**
+ * Skills directories that hold the delphi-review skill, including the detected one.
+ *
+ * #725: `detectPlatform()` returns a single platform, so on a machine carrying
+ * both Qoder and OpenCode the OpenCode copy of the skill was never examined —
+ * `update-skill` did not refresh it and `doctor` reported PASS anyway. Both were
+ * looking at the same one directory. A migration period (user moved between AI
+ * tools, both trees still live) is the normal case that produces this, and the
+ * frozen copy is exactly what a parity check exists to catch.
+ *
+ * @param {string} detectedDir the platform `detectPlatform()` selected
+ * @returns {string[]} directories that actually contain the skill
+ */
+function otherDeployedSkillDirs(detectedDir) {
+  const candidates = [
+    detectedDir,
+    path.join(HOME_DIR(), '.qoder', 'skills', 'delphi-review'),
+    path.join(HOME_DIR(), '.config', 'opencode', 'skills', 'delphi-review'),
+    path.join(HOME_DIR(), '.claude', 'skills', 'delphi-review'),
+  ];
+  const seen = new Set();
+  const found = [];
+  for (const dir of candidates) {
+    if (seen.has(dir)) continue;
+    seen.add(dir);
+    if (fs.existsSync(path.join(dir, 'SKILL.md'))) found.push(dir);
+  }
+  return found;
+}
+
+/**
+ * A short label for a skills directory: the platform segment, not the full path.
+ * Keeps the doctor line readable when two platforms disagree.
+ */
+function platformTag(skillDir) {
+  const parent = path.basename(path.dirname(path.dirname(skillDir)));
+  return parent === 'opencode' ? 'opencode' : parent;
+}
+
+/**
+ * Files in `skillDir` that are missing or differ from the bundle.
+ * @returns {string[]} `rel: reason` entries; empty when the copy is clean
+ */
+function collectSkillDrift(skillDir, bundledFiles, bundledSkillDir, sha256) {
+  const drifted = [];
+  for (const rel of bundledFiles) {
+    const installedPath = path.join(skillDir, rel);
+    const bundledPath = path.join(bundledSkillDir, rel);
+    if (!fs.existsSync(installedPath)) {
+      drifted.push(`${rel}: missing`);
+    } else if (sha256(installedPath) !== sha256(bundledPath)) {
+      drifted.push(`${rel}: differs`);
+    }
+  }
+  return drifted;
 }
 
 module.exports = {

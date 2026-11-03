@@ -451,3 +451,123 @@ describe('doctor delphi #684 global config fallback', () => {
     expect(cfgLine).not.toMatch(/global/i);
   });
 });
+
+describe('doctor delphi #725 multi-platform skill parity', () => {
+  let tmpDirs;
+  let tmpHome;
+  let originalHome;
+  let originalUserProfile;
+
+  beforeEach(() => {
+    tmpDirs = makeTempDirs(['doctor-725-home']);
+    tmpHome = tmpDirs['doctor-725-home'];
+    originalHome = process.env.HOME;
+    originalUserProfile = process.env.USERPROFILE;
+    process.env.HOME = tmpHome;
+    process.env.USERPROFILE = tmpHome;
+    resetLibModules(vi, LIB_MODULES);
+    muteConsole(vi);
+  });
+
+  afterEach(() => {
+    if (originalHome === undefined) delete process.env.HOME; else process.env.HOME = originalHome;
+    if (originalUserProfile === undefined) delete process.env.USERPROFILE;
+    else process.env.USERPROFILE = originalUserProfile;
+    removeTempDirs(tmpDirs);
+    vi.restoreAllMocks();
+  });
+
+  /** Copy the shipped bundle into \`<home>/<rel>/delphi-review\`. */
+  function deploySkillAt(rel, mutate) {
+    const dest = path.join(tmpHome, rel, 'delphi-review');
+    fs.mkdirSync(dest, { recursive: true });
+    const src = bundledSkillDir();
+    for (const entry of fs.readdirSync(src, { withFileTypes: true })) {
+      const from = path.join(src, entry.name);
+      const to = path.join(dest, entry.name);
+      if (entry.isDirectory()) {
+        fs.mkdirSync(to, { recursive: true });
+        for (const inner of fs.readdirSync(from)) {
+          if (fs.statSync(path.join(from, inner)).isFile()) {
+            fs.copyFileSync(path.join(from, inner), path.join(to, inner));
+          }
+        }
+      } else {
+        fs.copyFileSync(from, to);
+      }
+    }
+    if (mutate) mutate(dest);
+    return dest;
+  }
+
+  /** Minimal agent set so only skill parity is under test. */
+  function seedAgents() {
+    fs.mkdirSync(path.join(tmpHome, '.qoder', 'agents'), { recursive: true });
+    for (const role of ['architecture', 'technical', 'feasibility']) {
+      fs.copyFileSync(
+        path.join(repoRoot(), 'plugins', 'qoder', 'agents', `delphi-${role}.md`),
+        path.join(tmpHome, '.qoder', 'agents', `delphi-${role}.md`),
+      );
+    }
+  }
+
+  function captureResults() {
+    const lines = [];
+    const spy = vi.spyOn(console, 'log').mockImplementation((...args) => lines.push(args.join(' ')));
+    return { lines, spy };
+  }
+
+  /**
+   * @test REQ-725 Multi-platform skill parity
+   * @intent A second platform whose copy drifted must fail the parity check instead of being invisible
+   * @covers AC-725-01
+   */
+  it('AC-725-01: a drifted OpenCode copy FAILs parity even though Qoder is clean', async () => {
+    seedAgents();
+    deploySkillAt(path.join('.qoder', 'skills'));
+    // Qoder is selected by detectPlatform(), so this is the copy the check used
+    // to look at -- and it is clean. The OpenCode copy is the one that rotted.
+    deploySkillAt(path.join('.config', 'opencode', 'skills'), (dest) => {
+      fs.writeFileSync(path.join(dest, 'AGENTS.md'), '# stale copy from 0.32.0.0\n');
+    });
+    fs.mkdirSync(path.join(tmpHome, '.config', 'xp-gate'), { recursive: true });
+    fs.writeFileSync(
+      path.join(tmpHome, '.config', 'xp-gate', 'xp-gate.json'),
+      JSON.stringify({ installedSkills: {} }),
+    );
+
+    const { doctorDelphi } = require('../doctor');
+    const { lines, spy } = captureResults();
+    await doctorDelphi({ skipLatestProbe: true });
+    spy.mockRestore();
+
+    const parity = lines.filter((l) => /parity/i.test(l)).join('\n');
+    expect(parity, 'a stale second-platform copy must be reported').toMatch(/✗/);
+    expect(parity).toMatch(/opencode/i);
+  });
+
+  /**
+   * @test REQ-725 Multi-platform skill parity
+   * @intent Both platforms matching must still PASS, and say how many were compared
+   * @covers AC-725-02
+   */
+  it('AC-725-02: two clean platform copies PASS together', async () => {
+    seedAgents();
+    deploySkillAt(path.join('.qoder', 'skills'));
+    deploySkillAt(path.join('.config', 'opencode', 'skills'));
+    fs.mkdirSync(path.join(tmpHome, '.config', 'xp-gate'), { recursive: true });
+    fs.writeFileSync(
+      path.join(tmpHome, '.config', 'xp-gate', 'xp-gate.json'),
+      JSON.stringify({ installedSkills: {} }),
+    );
+
+    const { doctorDelphi } = require('../doctor');
+    const { lines, spy } = captureResults();
+    await doctorDelphi({ skipLatestProbe: true });
+    spy.mockRestore();
+
+    const parity = lines.filter((l) => /parity/i.test(l)).join('\n');
+    expect(parity).toMatch(/✓/);
+    expect(parity).toMatch(/2 platform/i);
+  });
+});
