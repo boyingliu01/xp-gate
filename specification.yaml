@@ -4671,6 +4671,71 @@ specification:
           test_type: unit
 
     # ============================================================
+    # REQ-724: 卸载不得让配置目录变大。
+    # 实测 `uninstall --global` 完成后 ~/.config/xp-gate/ 从 1351 个文件
+    # 变成 1354 个 / 15MB：node_modules 被整棵复制进回滚快照，快照目录
+    # 无上限累积，而 .delphi-config.json 在预览里列为「将被删除」却实际保留、
+    # 全程零说明。用户按预览写清理脚本，会删掉一个被告知已经不存在的目录。
+    # ============================================================
+    - id: REQ-724
+      description: 卸载产生的回滚快照必须与回滚价值相称，且被保留的用户数据
+        必须在输出中如实声明
+      priority: high
+      acceptance_criteria:
+        - id: AC-724-01
+          criteria: 回滚快照不得复制 node_modules/ 与 modules/（可从 package.json 重建，
+            无回滚价值），快照只包含真正需要还原的配置文件
+          test_type: unit
+        - id: AC-724-02
+          criteria: 卸载快照数量必须受限并保留最新的若干份，不得随卸载次数无界增长
+          test_type: unit
+        - id: AC-724-03
+          criteria: 保留的用户数据（.delphi-config.json）必须在预览中列于「KEPT」分组，
+            且不得出现在「will be removed」之下，并在结束摘要中再次说明
+          test_type: unit
+        - id: AC-724-04
+          criteria: 快照路径必须在完成摘要中打印，使「删掉整个配置目录」的用户
+            能够意识到快照随之一并消失
+          test_type: unit
+
+    # ============================================================
+    # REQ-725: 多平台共存时不得只更新一个平台。
+    # detectPlatform() 按优先级短路返回单个平台（.qoder 存在即返回 qoder），
+    # 而 install-skill 与 doctor 都只用它选中的目录。结果：同时装了 Qoder 与
+    # OpenCode 的机器上，OpenCode 副本长期冻结在 0.32.0.0，update-skill 报
+    # 「✓ updated」、doctor 报「✓ Up to date」——两个命令互相背书，坏掉的
+    # 副本对任何检查都不可见。迁移期两套并存是常态，不是边缘场景。
+    # ============================================================
+    - id: REQ-725
+      description: skill 的安装、更新与一致性检查必须覆盖机器上所有已部署平台，
+        且 --check 必须比对的磁盘实际内容而非登记版本号
+      priority: high
+      acceptance_criteria:
+        - id: AC-725-01
+          criteria: doctor 的 skill parity 检查必须覆盖所有已部署该 skill 的平台，
+            任一平台副本与包内容不一致即判失败并指明平台
+          test_type: unit
+        - id: AC-725-02
+          criteria: 多平台副本均一致时判通过，并说明参与比对的平台数量
+          test_type: unit
+        - id: AC-725-03
+          criteria: update-skill 的 --check 必须被识别为标志而非 skill 名
+            （单独使用不得报 "--check is not installed"），与 --all 一致
+          test_type: unit
+        - id: AC-725-04
+          criteria: update-skill --check 必须读取磁盘上各平台副本的实际版本，
+            登记版本与磁盘不一致时报出落后平台，而非回显登记表
+          test_type: unit
+        - id: AC-725-05
+          criteria: 无版本戳的副本不得仅因缺少戳记被判落后；须以与包内内容比对
+            作为判定依据
+          test_type: unit
+        - id: AC-725-06
+          criteria: update-skill 更新单个 skill 时必须写入所有已部署平台，
+            各平台独立成败，不得因一个平台失败而静默跳过其余
+          test_type: unit
+
+    # ============================================================
     # REQ-704: 返工率必须真正可测。
     # 统计区间的下界用了 completed_at（sprint 结束时刻），而全部 sprint
     # 提交都在它之前 —— 要统计的区间是「开始 → 结束」，实际统计的是

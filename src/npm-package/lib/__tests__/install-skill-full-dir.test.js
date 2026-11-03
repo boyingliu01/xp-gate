@@ -102,6 +102,11 @@ describe('install-skill full skill directory (#416)', () => {
   it('updates the skills directory of the platform actually in use', async () => {
     // update-skill used to hardcode the opencode path while install-skill wrote
     // to the platform dir, so on Qoder it deleted nothing (or the wrong copy).
+    //
+    // #725 changed the other half of this: a platform that ALSO has the skill
+    // deployed is updated too, because leaving it behind froze it at an old
+    // version while the command reported success. Both trees below are live, so
+    // both are updated -- "untouched" is no longer the expected end state.
     for (const name of ['superpowers', 'gstack']) {
       const dir = path.join(tmpHome, '.qoder', 'skills', name);
       fs.mkdirSync(dir, { recursive: true });
@@ -125,9 +130,15 @@ describe('install-skill full skill directory (#416)', () => {
     const { updateSkill } = require('../update-skill');
     expect(await updateSkill('ralph-loop', {})).toBe(0);
 
+    const bundled = listFiles(path.join(BUNDLED_SKILLS, 'ralph-loop'));
+
+    // qoder keeps its #416 guarantee: stale files removed, full bundle written.
     expect(fs.existsSync(path.join(qoderSkills, 'obsolete.md'))).toBe(false);
-    expect(listFiles(qoderSkills)).toEqual(listFiles(path.join(BUNDLED_SKILLS, 'ralph-loop')));
-    expect(fs.readFileSync(path.join(opencodeSkills, 'SKILL.md'), 'utf8')).toBe('untouched');
+    expect(listFiles(qoderSkills)).toEqual(bundled);
+
+    // #725: the opencode copy is a second live deployment, so it is updated too
+    // rather than silently frozen at `untouched`.
+    expect(listFiles(opencodeSkills)).toEqual(bundled);
   });
 
   it('keeps the installed directory when the package no longer bundles the skill', async () => {
