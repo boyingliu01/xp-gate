@@ -561,10 +561,13 @@ export function apply(ctx: Context, config: unknown = {}): void {
   // delphi-review work on a machine whose key lives in the credential store rather
   // than in the host process's inherited environment.
   //
-  // The cast is needed because the service is attached by a peer package's module
-  // augmentation, which only applies when that package is in the compilation; a
-  // consumer may install this plugin without it.
-  const credentials = (ctx as unknown as { credentials?: CredentialProvider }).credentials
+  // Read via ctx.get() rather than a bare ctx.credentials (#721): Cordis's context
+  // proxy throws "cannot get property ... without inject" on any property that is
+  // neither a declared service nor in this plugin's inject list. "credentials" is
+  // deliberately NOT in inject — adding it would stop the plugin from loading on a
+  // host without the service, discarding the process.env fallback below. ctx.get()
+  // is the inject-free read and returns undefined when the host provides none.
+  const credentials: CredentialProvider | undefined = ctx.get?.("credentials")
   const resolveApiKey = createCredentialResolver(credentials, process.env)
   ctx.tools.register(gateCheckTool(shell, dialect))
   ctx.tools.register(gatePrinciplesTool(shell, dialect))

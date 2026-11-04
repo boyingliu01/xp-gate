@@ -81,6 +81,31 @@ describe("apply", () => {
   })
 
   /**
+   * @test REQ-721
+   * @intent 验证 apply(ctx) 在宿主未提供 credentials 服务时仍能启动。Cordis 的
+   *         上下文是一个代理：对既未在 inject 声明、也未 provide 的服务做裸属性
+   *         读取会直接抛 "cannot get property ... without inject"（#721 根因）。
+   *         credentials 是可选服务，必须经 ctx.get() 读取（未提供时返回 undefined，
+   *         走 process.env 回落），而不是 ctx.credentials。
+   * @covers AC-721-01
+   */
+  it("applies without a credentials service (Cordis throws on undeclared property reads)", () => {
+    const { ctx, captured } = makeCtx("ok")
+    // 复现 Cordis 的 context proxy 语义：目标上不存在、也未声明的属性读取抛错，
+    // 而不是返回 undefined —— 裸的 ctx.credentials 会在这里把整个插件启动炸掉。
+    const cordisLike = new Proxy(ctx as object, {
+      get(target, prop, receiver) {
+        if (prop === "get") return (_name: string) => undefined
+        if (Reflect.has(target, prop)) return Reflect.get(target, prop, receiver)
+        throw new Error(`cannot get property "${String(prop)}" without inject`)
+      },
+    })
+    expect(() => apply(cordisLike as unknown as Context)).not.toThrow()
+    // apply 存活后，工具仍按契约注册。
+    expect(captured.map((c) => (c as CapturedTool).name)).toContain("gate-check")
+  })
+
+  /**
    * @test REQ-DSH-006
    * @intent 验证 apply(ctx) 通过 ctx.skills.registerProvider 注册了 bundled skill provider，
    *         且该 provider 能列出 12 个 skill —— 这是 skill 对模型可见的唯一通路
