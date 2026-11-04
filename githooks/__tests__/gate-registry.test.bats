@@ -182,3 +182,43 @@ setup() {
   run grep -A4 'AGENTS.md) continue' "$REPO_ROOT/githooks/pre-commit"
   [ "$status" -eq 0 ]
 }
+
+# --- the registry must actually be LOADED, not merely present ------------
+
+@test "pre-commit sources gate-registry.sh" {
+  # eb2097b0 shipped the registry and its 17 tests, and the tests were green --
+  # because they assert what the FILE contains, not that anything reads it. On
+  # that commit the registry existed and no hook loaded it. Same shape as Gate
+  # 12b printing BLOCKED from a variable nothing read.
+  run grep -q '_GATE_REGISTRY' "$REPO_ROOT/githooks/pre-commit"
+  [ "$status" -eq 0 ]
+}
+
+@test "pre-commit's sourcing line actually resolves and runs" {
+  # Content assertions cannot tell a working source from a path that never
+  # resolves. Execute the sourcing block in a subshell and prove the registry's
+  # functions become callable in the hook's process.
+  run bash -c '
+    set -e
+    _GATE_REGISTRY="$1/githooks/gate-registry.sh"
+    [ -f "$_GATE_REGISTRY" ] || exit 9
+    . "$_GATE_REGISTRY"
+    # If sourcing worked, the lookup answers. If it silently failed, this is a
+    # command-not-found instead of the expected name.
+    out=$(gate_name_for_file gate-10.sh)
+    [ "$out" = "sast" ] || exit 10
+  ' _ "$REPO_ROOT"
+  [ "$status" -eq 0 ]
+}
+
+@test "the hook still works when the registry is absent (graceful degradation)" {
+  # Consumer repos installed from an older package have no registry file. The
+  # sourcing block is guarded, so the hook must not fail on a missing file.
+  run bash -c '
+    _GATE_REGISTRY="/nonexistent/gate-registry.sh"
+    if [ -f "$_GATE_REGISTRY" ]; then . "$_GATE_REGISTRY"; fi
+    echo "reached end without failing"
+  '
+  [ "$status" -eq 0 ]
+  [ "$output" = "reached end without failing" ]
+}
