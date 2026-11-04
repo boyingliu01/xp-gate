@@ -163,6 +163,80 @@ describe('reporter.ts - Output Formatting', () => {
       expect(output).toContain('FAIL');
     });
 
+    it('should not read a missing summary as FAIL (NaN must not decide the verdict)', () => {
+      // Round 3 of the Delphi review, three seats independently: `undefined + 0`
+      // is NaN, and `NaN === 0` is false, so an incomplete summary would make
+      // this report FAIL unconditionally -- the exact symptom the info fix
+      // removed, reintroduced through a different door. formatSummary is
+      // exported, so it cannot assume its caller honoured the type.
+      const noSummary = {
+        violations: [],
+        fileResults: {},
+        ruleResults: {},
+        executionTimeMs: 1,
+        errors: []
+      } as unknown as AnalysisResult;
+
+      const output = formatSummary(noSummary);
+      expect(output).toContain('PASS');
+      expect(output).not.toContain('NaN');
+    });
+
+    it('should flag a malformed summary instead of silently treating it as clean', () => {
+      // Round 5, three seats independently: zeroing a non-numeric count stops the
+      // permanent-FAIL bug but also swallows an upstream defect -- a corrupted
+      // summary would read as "nothing to report". Keep the non-blocking verdict
+      // (crashing the reporter would be worse) but say so in the output.
+      const corrupted = {
+        violations: [],
+        summary: { totalViolations: 1, errorCount: Number.NaN, warningCount: 0, infoCount: 0, filesChecked: 1, rulesRun: 1 },
+        fileResults: {},
+        ruleResults: {},
+        executionTimeMs: 1,
+        errors: []
+      } as unknown as AnalysisResult;
+
+      const output = formatSummary(corrupted);
+      expect(output).toMatch(/malformed|invalid|corrupt/i);
+      // The damaged field must be named, so a reader can tell WHICH count is
+      // untrustworthy. Echoing the raw value is the point of the diagnostic --
+      // only the verdict must never be decided by it.
+      expect(output).toContain('errorCount');
+      expect(output).toContain('PASS');
+    });
+
+    it('should show PASS when the only findings are info (info is log-only)', () => {
+      // AGENTS.md: info = "log only". An info finding is how a rule says "I
+      // could not judge this file" (the arch layout diagnostic), so treating it
+      // as a failure would block a commit for a blind spot rather than a defect.
+      const infoOnly: AnalysisResult = {
+        violations: [
+          {
+            file: 'java/com/acme/UserController.java',
+            line: 1,
+            ruleId: 'arch.controller',
+            message: 'Skipped: no recognisable Java source root',
+            severity: 'info'
+          }
+        ],
+        summary: {
+          totalViolations: 1,
+          errorCount: 0,
+          warningCount: 0,
+          infoCount: 1,
+          filesChecked: 1,
+          rulesRun: 1
+        },
+        fileResults: {},
+        ruleResults: {},
+        executionTimeMs: 1,
+        errors: []
+      };
+      const output = formatSummary(infoOnly);
+      expect(output).toContain('PASS');
+      expect(output).not.toContain('FAIL');
+    });
+
     it('should show PASS when no violations', () => {
       const emptyResult: AnalysisResult = {
         violations: [],

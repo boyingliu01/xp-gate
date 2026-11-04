@@ -1,5 +1,5 @@
 /**
- * @test audit CLI runs at all
+ * @test REQ-673
  * @intent The four `xp-gate audit` subcommands used to require() a .ts file, which
  *         Node cannot do, so every one of them died. This pins that they execute,
  *         that --check still FAILS on a real anomaly (so "it runs" is not mistaken

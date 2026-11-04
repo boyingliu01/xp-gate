@@ -1,8 +1,9 @@
 /**
- * @test detect-deps
+ * @test REQ-424
  * @intent Verify checkDeps() correctly detects missing/present/outdated dependencies across platforms,
  *         detectPlatform() identifies the correct AI agent platform,
  *         and autoInstallDeps() handles install scenarios
+ * @covers AC-424-01, AC-424-02, AC-424-03, AC-424-04
  */
 const fs = require('fs');
 const path = require('path');

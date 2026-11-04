@@ -31,6 +31,19 @@ interface PrinciplesConfig {
       'isp': RuleConfig;
       'dip': RuleConfig;
     };
+    // Architecture (ARCH-07 / ARCH-12, #694 / #699). A separate group rather
+    // than more `clean-code` entries: these rules constrain package layout and
+    // dependency direction, which is neither a Clean Code smell nor a SOLID
+    // principle. Filing them under `clean-code` would give users the
+    // self-contradictory key `clean-code.arch-naming` to configure.
+    'arch': {
+      'controller': RuleConfig;
+      'service': RuleConfig;
+      'repository': RuleConfig;
+      'dto-layering': RuleConfig;
+      'domain-event': RuleConfig;
+      'util-service': RuleConfig;
+    };
   };
   output?: {
     format?: string;
@@ -103,6 +116,23 @@ const DEFAULT_SOLID_RULES = {
 } satisfies PrinciplesConfig['rules']['solid'];
 
 /**
+ * Architecture rule defaults (#694 / #699).
+ *
+ * All six are `error` except `util-service`, which is `warning` by design:
+ * a helper depending on a service is a smell worth surfacing, but blocking a
+ * commit on it would fail builds over code that works (AC-699-08, AC-699-10,
+ * AC-699-11).
+ */
+const DEFAULT_ARCH_RULES = {
+  controller: { enabled: true, severity: 'error' },
+  service: { enabled: true, severity: 'error' },
+  repository: { enabled: true, severity: 'error' },
+  'dto-layering': { enabled: true, severity: 'error' },
+  'domain-event': { enabled: true, severity: 'error' },
+  'util-service': { enabled: true, severity: 'warning' }
+} satisfies PrinciplesConfig['rules']['arch'];
+
+/**
  * Deep-clone a rule group so callers cannot mutate the module constants.
  *
  * Without this, `getDefaultConfig()` would hand out references to
@@ -125,7 +155,8 @@ export function getDefaultConfig(): PrinciplesConfig {
   return {
     rules: {
       'clean-code': cloneRules(DEFAULT_CLEAN_CODE_RULES),
-      'solid': cloneRules(DEFAULT_SOLID_RULES)
+      'solid': cloneRules(DEFAULT_SOLID_RULES),
+      'arch': cloneRules(DEFAULT_ARCH_RULES)
     },
     output: {
       format: 'console',
@@ -241,7 +272,11 @@ function mergeConfig(
         defaults.rules['clean-code'],
         user.rules?.['clean-code']
       ),
-      'solid': mergeGroup(defaults.rules['solid'], user.rules?.['solid'])
+      'solid': mergeGroup(defaults.rules['solid'], user.rules?.['solid']),
+      // A `.principlesrc` written before the arch group existed has no `arch`
+      // key at all; `mergeGroup` then returns the defaults unchanged, which is
+      // what AC-COMPAT-01 pins down.
+      'arch': mergeGroup(defaults.rules['arch'], user.rules?.['arch'])
     }
   };
 }

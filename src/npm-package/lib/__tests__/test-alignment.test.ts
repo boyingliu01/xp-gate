@@ -2,7 +2,7 @@
  * @test REQ-ALIGN-001 Parse specification.yaml into requirement map
  * @intent Verify that parseSpecification() correctly extracts REQ IDs and AC IDs
  *   from the canonical specification.yaml format (specification.requirements wrapper)
- * @covers AC-ALIGN-001-01, AC-ALIGN-001-02, AC-ALIGN-001-03, AC-ALIGN-001-04
+ * @covers AC-ALIGN-001-01, AC-ALIGN-001-02, AC-ALIGN-001-03, AC-ALIGN-001-04, AC-670-63
  *
  * @test REQ-ALIGN-002 Parse test files for @test/@intent/@covers annotations
  * @intent Verify that parseTestFiles() extracts annotations from TS, Python, and Go

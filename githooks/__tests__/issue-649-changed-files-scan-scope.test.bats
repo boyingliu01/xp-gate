@@ -23,7 +23,7 @@
 #         SURVIVE, (3) the sites that still query git directly actually call the
 #         helper. A filter that swallowed everything passes (1) and (3) while
 #         silently turning the gates off, so (2) is the anti-vacuity half.
-# @covers AC-649-01, AC-649-02, AC-649-03, AC-649-04, AC-649-05
+# @covers AC-649-01, AC-649-02, AC-649-03, AC-649-04, AC-649-05, AC-649-03b, AC-649-03c, AC-649-05b, AC-649-06, AC-649-07
 
 setup() {
   REPO_ROOT="$(cd "$BATS_TEST_DIRNAME/../.." && pwd)"

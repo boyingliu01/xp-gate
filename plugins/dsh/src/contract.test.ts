@@ -26,7 +26,7 @@ describe("packaging contract", () => {
   /**
    * @test REQ-DSH-001
    * @intent 验证 package.json 声明 dsh.bundle.patch 且 cordis.patch.yml 插入 id=tool-xp-gate + 包名
-   * @covers AC-DSH-001-01
+   * @covers AC-DSH-001-01, AC-DSH-019
    */
   it("declares dsh.bundle.patch and a cordis patch entry", () => {
     expect(readPkg().dsh?.bundle?.patch).toBe("./cordis.patch.yml")

@@ -1,5 +1,5 @@
 /**
- * @test position-analysis
+ * @test REQ-674
  * @intent The extraction regexes match `name(` for both a method declaration and
  *         a call. `isCallPosition` is what tells them apart -- without it
  *         `if (existsSync(p))` is extracted as a method named existsSync and

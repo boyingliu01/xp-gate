@@ -1,5 +1,5 @@
 /**
- * @test quote and position analysis helpers
+ * @test REQ-674 and position analysis helpers
  * @intent The param-list and brace scanners depend on "is this delimiter inside a
  *         string?" and "is this identifier being called or declared?". Both were
  *         inline in typescript.ts, reached the 1050-line budget, and could not be

@@ -4,7 +4,7 @@
  * @intent Expose the four AGENTS.md runtime anti-patterns (blocking job_output,
  *   literal sleep, CI polling loops, serial tool calls) as machine-checkable
  *   numbers instead of a prose rule that nobody measures.
- * @covers AC-712-01
+ * @covers AC-712-01, AC-712-06
  * @covers AC-712-02
  * @covers AC-712-03
  * @covers AC-712-04
