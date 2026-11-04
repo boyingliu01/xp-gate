@@ -104,3 +104,46 @@ describe('PLATFORM_PROFILES covers dsh (#635)', () => {
     expect(getSkillsDirs('claude-code')[0]).toBe(path.join(tmpHome, '.claude', 'skills'));
   });
 });
+
+/**
+ * @test REQ-725
+ * @intent 多平台共存时 detectPlatform() 按优先级短路返回单个平台，install-skill/
+ *         update-skill 与 doctor 都只拿它选中的目录，其余平台（含 detectPlatform()
+ *         从不返回的 dsh）被永久冻结。detectInstalledPlatforms() 是「检测所有已安装
+ *         agent」的原始能力：按 PLATFORM_PROFILES 里目录真实存在的平台返回全集。
+ * @covers AC-725-01, AC-725-06
+ */
+describe('detectInstalledPlatforms (#725 detect-all)', () => {
+  let tmpHome;
+  let originalHome;
+
+  beforeEach(() => {
+    originalHome = process.env.HOME;
+    tmpHome = fs.mkdtempSync(path.join(os.tmpdir(), 'xpgate-detectall-'));
+    process.env.HOME = tmpHome;
+    vi.resetModules();
+    delete require.cache[require.resolve('../detect-deps')];
+    delete require.cache[require.resolve('../shared-paths')];
+  });
+
+  afterEach(() => {
+    process.env.HOME = originalHome;
+    fs.rmSync(tmpHome, { recursive: true, force: true });
+  });
+
+  it('returns every platform whose directory exists, including dsh', () => {
+    fs.mkdirSync(path.join(tmpHome, '.qoder'), { recursive: true });
+    fs.mkdirSync(path.join(tmpHome, '.config', 'opencode'), { recursive: true });
+    fs.mkdirSync(path.join(tmpHome, '.dsh'), { recursive: true });
+
+    const { detectInstalledPlatforms } = require('../detect-deps');
+    const installed = detectInstalledPlatforms();
+    expect(installed).toEqual(expect.arrayContaining(['opencode', 'qoder', 'dsh']));
+    expect(installed).not.toContain('claude-code');
+  });
+
+  it('returns an empty list when no platform directory exists', () => {
+    const { detectInstalledPlatforms } = require('../detect-deps');
+    expect(detectInstalledPlatforms()).toEqual([]);
+  });
+});
