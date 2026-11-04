@@ -4945,3 +4945,73 @@ specification:
         - id: AC-717-06
           criteria: 第三方 hook（如 git-lfs 的 post-checkout）须仍判为 foreign 并保留，动作须为 remove-owned-only
           test_type: unit
+
+
+    # ============================================================
+
+    # C#/.NET 适配器需求（issue #717）。
+    #
+    # ⚠️ 编号冲突说明：本段的 issue 号 #717 与上面 REQ-717（uninstall 完整性）
+    # 撞号 —— 那次立 REQ-717 是为了解 #718 的编号冲突，但没注意 #717 已被这个
+    # C# 需求占用。测试侧一直按「#717 = C#」写 AC-717-01..24，而 spec 里
+    # REQ-717 讲的是 uninstall，两边含义完全无关。
+    #
+    # 此处将 C# 需求另立 REQ-732（不与任何已有 REQ 冲突），但**保留 AC-717-xx
+    # 前缀不变**：AC 号已被 10 个测试文件、上百处注释引用，改号的风险远大于收益。
+    # 因此 AC 前缀与 REQ 号在此**有意不一致**，原因写在这里，而不是留给下一个人猜。
+    # ============================================================
+    - id: REQ-732
+      description: 补齐 C#/.NET 语言支持，使 .cs 不再被 Gate 1/3/4/5/6/9/10/13 静默跳过，且每个声称"能拦住"的门禁都有实测证据
+      priority: high
+      acceptance_criteria:
+        - id: AC-717-07
+          criteria: csharp.sh 适配器存在并遵守 run_static_analysis / run_lint / run_tests / run_coverage 契约
+          test_type: unit
+        - id: AC-717-08
+          criteria: 适配器的 npm 镜像与 canonical 版本逐字节一致
+          test_type: unit
+        - id: AC-717-09
+          criteria: run_tests 在 C# 测试通过时返回 0
+          test_type: unit
+        - id: AC-717-10
+          criteria: 能力矩阵是被测试断言的事实，而不是文档里的散文
+          test_type: unit
+        - id: AC-717-11
+          criteria: 完全没有测试工程时 run_tests 返回 2（无法执行），而不是 0（通过）
+          test_type: unit
+        - id: AC-717-13
+          criteria: 双语言路由 —— 同一仓库同时含 C# 与另一种语言时，C# 不会被检测吞掉
+          test_type: unit
+        - id: AC-717-14
+          criteria: Gate 5 对适配器的"消费"行为也被验证，而不只验证适配器本身
+          test_type: unit
+        - id: AC-717-15
+          criteria: csharp.sh 四个函数的完整返回码矩阵被固定
+          test_type: unit
+        - id: AC-717-16
+          criteria: 两种 testhost 崩溃输入给出相反的判定（"测试失败"与"测不了"不得混为一谈）
+          test_type: unit
+        - id: AC-717-17
+          criteria: 本 sprint 触及的每个文件都有镜像一致性校验，而不只是适配器一个
+          test_type: unit
+        - id: AC-717-18
+          criteria: Gate 13 有 C# 路径，且 --no-incremental 被强制，避免增量构建吞掉警告
+          test_type: integration
+        - id: AC-717-19
+          criteria: Gate 10 (SAST) 会选中暂存的 .cs 文件交给 semgrep 扫描
+          test_type: integration
+        - id: AC-717-20
+          criteria: Gate 3/4 真实处理 .cs 文件，而不只是在扩展名过滤器里列了 cs
+          test_type: integration
+        - id: AC-717-21
+          criteria: 阻塞矩阵被断言而非仅文档化 —— 每个"能拦住"的门禁都有可复现的拒绝证据
+          test_type: integration
+        - id: AC-717-22
+          criteria: CI workflow 与本地 hook 对 C# 的判断一致
+          test_type: integration
+        - id: AC-717-23
+          criteria: Gate 4/6 都具备真实 C# 路径，且 fail-open 形状已消除
+          test_type: integration
+        - id: AC-717-24
+          criteria: 代码走查发现的"声称覆盖但未测量"项已修正并各有一条钉住它的测试
+          test_type: integration
