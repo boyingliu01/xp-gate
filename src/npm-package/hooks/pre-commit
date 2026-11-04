@@ -271,6 +271,17 @@ if [ -z "$GATE_DIR" ]; then
   GATE_DIR="$ADAPTER_DIR"
 fi
 
+# Gate registry (#717 walkthrough): binds each gate's NAME to the file that
+# runs it, so a gate can be referred to by what it does rather than by a
+# positional number. Optional by design — a consumer repo installed from an
+# older package will not have it, and the hooks must keep working there.
+_GATE_REGISTRY="$GATE_DIR/gate-registry.sh"
+[ -f "$_GATE_REGISTRY" ] || _GATE_REGISTRY="$(git rev-parse --show-toplevel 2>/dev/null)/githooks/gate-registry.sh"
+if [ -f "$_GATE_REGISTRY" ]; then
+  # shellcheck source=/dev/null
+  . "$_GATE_REGISTRY"
+fi
+
 # Trap: ensure quality report generated on ANY exit (pass or fail).
 # Using a guard prevents recursion when 'exit' is called from inside the trap.
 # IMPORTANT: Captures exit status FIRST so generate_quality_report cannot override it.

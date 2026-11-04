@@ -1,9 +1,9 @@
 # PROJECT KNOWLEDGE BASE
 
-**Generated:** 2026-11-03
-**Commit:** fa007d1f
-**Branch:** main
-**Version:** 0.35.24.0
+**Generated:** 2026-11-04
+**Commit:** eb2097b0
+**Branch:** sprint/2026-11-03-02
+**Version:** 0.36.0.0
 
 ## OVERVIEW
 XP-Gate — deterministic git quality gates + AI-driven multi-expert review (Delphi) + Sprint Flow pipeline (6 phases: PREP, DESIGN, BUILD, VERIFY, SHIP, CLOSE) + npm zero-install distribution + cross-platform plugin system (Claude Code / OpenCode / Qoder). Pre-commit runs **12 numbered gates (Gate 0–11) plus Gate 12 (File Hygiene, warning-only)**. Pre-push runs **8 gates: Gate 10 (Build Integrity), Gate M/M-Python/M-Go/M-Java/M-Kotlin (Mutation), Gate M2 (Mock Density, WARNING), Gate ML (Mock Layering), Gate UI (UI Sprint Gates), Gate MW (Code Walkthrough), and Gate S (Sprint Flow)**. Implements 14 Clean Code/SOLID rules across 9 language adapters (TypeScript engine), 13 shell adapters (gate routing), Boy Scout Rule baseline enforcement, test-specification alignment, mock policy enforcement, and incremental mutation testing.
@@ -129,7 +129,22 @@ XP-Gate — deterministic git quality gates + AI-driven multi-expert review (Del
 | 6 | Architecture + Boy Scout | `.archlint.yaml` + `boy-scout.ts` | New warnings on modified files |
 | 7 | IaC Security | checkov / hadolint / kube-score / tflint | High-severity finding |
 | 8 | Secret Scanning | gitleaks (`.gitleaks.toml`) | Any leaked secret |
-| 9 | Semgrep SAST | semgrep ruleset | High-severity finding |
+| 9 | Build Integrity | tsc + npm pack + import check | Build/compilation failure |
+| 10 | SAST Security | semgrep (`githooks/gate-10.sh`) | High-severity finding |
+| 11 | Sprint Flow | `sprint-gate.sh` | Sprint compliance violation |
+| 12 | File Hygiene | `gate-12-file-hygiene.sh` | WARNING only (conflict markers) |
+| 13 | Compiler Strictness | `gate-13-compiler-strictness.sh` | Warnings under the strict tier |
+
+> **Gate numbers are labels, not identities.** `githooks/gate-registry.sh` is the
+> single source of truth binding each gate's **name** to the **file that runs
+> it**. Use the name in prose, commits, and tests; the number is positional only.
+>
+> This matters concretely: this table previously listed Gate 9 as "Semgrep SAST"
+> while the hook ran Build Integrity. In #717 that inaccuracy sent a C# SAST fix
+> into `githooks/gate-9.sh` — a file no hook sources — so the fix changed nothing
+> while appearing to land. `githooks/__tests__/gate-registry.test.bats` now
+> asserts this table against the registry, so the drift fails a test instead of
+> misleading the next reader.
 
 > **Conceptual grouping in README/docs/CAPABILITIES.md (still called "6 Gates"):**
 > CodeQ (1+2+5) · Complexity (3) · Principles (4) · Tests (3+4+5) · Architecture (6) · plus newer Security gates (7+8+9). Gate 0 is treated as a pre-flight check.

@@ -1,5 +1,66 @@
 # Changelog
 
+## [0.36.0.0] - 2026-11-04
+
+**C#/.NET 成为一等支持语言，门禁有了名字。** 一个 C# 项目此前会「静默通过」全部
+门禁——不是检查了没问题，而是根本没有适配器接手。这一版把缺口逐个补上，并且每补
+一处都用「先测出它是坏的、再测出它变好了」证明，而不是声称。
+
+### Added
+
+- **C#/.NET 适配器（#717）**：新增 `githooks/adapters/csharp.sh` 与
+  `src/principles/adapters/csharp.ts`，`.cs`/`.csx` 不再落到 `unknown`。覆盖四个
+  契约函数与 Gate 4 的 14 条规则。
+- **`githooks/gate-registry.sh` —— 门禁注册表（#717）**：每个门禁一行，绑定
+  **名字、编号、执行文件、能否阻塞**。`gate_name_for_file gate-10.sh → sast`，
+  `gate_name_for_file gate-9.sh → 无`（该文件不被任何 hook 引用）。`pre-commit`
+  在文件存在时 source 它，不存在时静默降级，所以老版本安装的消费者仓库不受影响。
+
+### Fixed
+
+- **Gate 5 / Gate 13 的 C# 路径**：`dotnet test` 与 `dotnet build` 现在真的会被调用。
+  过程中修掉 5 个靠测量才发现的缺陷：增量构建会吞掉警告（改为强制
+  `--no-incremental`）、裸 `dotnet build` 报 `MSB1003`、Windows 路径分隔符不匹配
+  导致匹配失败（改为 `tr '\\' '/'` + 后缀匹配）。
+- **Gate 4 从来没有检查过 C#（#717）**：扩展名过滤器一直列着 `cs`，但没有任何
+  adapter 认领它。过滤器看起来像覆盖，这是本 issue 反复出现的缺陷类型。
+- **Gate 6 没有 `csharp` 分支（#717）**：在 `for CURRENT_LANG` 循环里补上，
+  并读取 `PIPESTATUS` 以免 fail-open。
+- **Gate 10 SAST 对 C# 完全失明（#717 走查 R1）**：`gate-10.sh` 的过滤器一直
+  包含 `cs`，但 semgrep 只加载 `p/security-audit`——该规则集没有任何 C# 规则。
+  实测同一段代码（字符串拼接 `SqlCommand` + `Process.Start`）：`p/security-audit`
+  报 **0 条**，`p/csharp` 报 **1 条 ERROR**（`csharp-sqli`）。现在在两条 semgrep
+  调用路径（超时路径与直接路径）上都按需追加 `--config=p/csharp`。
+  修这个问题时先把补丁写进了 `gate-9.sh`——一个没有任何 hook source 的死文件；
+  `gate-9.sh` 在报告里是 Build Integrity，SAST 是 `gate-10.sh`。
+- **根 `AGENTS.md` 的门禁表与代码矛盾（#717）**：该表把 Gate 9 写成「Semgrep
+  SAST」（实际是 Build Integrity），且条目止于 Gate 9，10–13 完全没列。上面那次
+  改错文件就是读了这张表导致的。已改正并补全，表格上方加了「编号只是标签」的说明。
+
+### Changed
+
+- **`.code-walkthrough-result.json` 与 `test-alignment-report.json` 现在绑定 HEAD**，
+  并在对齐报告里带上 `spec_hash`。
+- **`specification.yaml` 登记 `REQ-732`**：C# 需求的 17 条 AC（`AC-717-07..11,13..24`）
+  此前被 10 个测试文件引用却从未登记，`ac-reference-guard` 长期报红。根因是
+  `REQ-717` 已被 uninstall 完整性占用（那次是为解 #718 撞号而立的，没注意 #717
+  已被 C# 占用）。保留 `AC-717-xx` 前缀不变——十来个测试文件依赖它，改号的风险
+  大于收益，因此前缀与 REQ 号**有意不一致**，原因写在 spec 里该块旁边。
+  `AC-717-12` 未登记：没有任何测试引用它。
+
+### 不修的，如实记着
+
+- **Gate 5 的 C# 在本仓库内无法端到端验证**：`dotnet test` 在 `D:\projects\xp-gate\`
+  下抛 `Win32Exception (5)`，同一工程在 `Temp` 下通过。属宿主问题，因此 C# 测试
+  门禁是逻辑验证而非端到端验证。
+- **`p/csharp` 覆盖不完整**：抓到 SQLi，但样本里的 `Process.Start` 命令注入未被
+  任何规则集报出。C# 注入覆盖是部分的，不是完整的。
+- **CLI 侧门禁编号仍与钩子相反（#738，低优先级）**：`gate-coverage.js` 把 Gate 9
+  登记为 SAST，且把 `gate9_build_integrity` 的报告结果反向映射到 10 号。钩子侧
+  （真正决定提交能否通过的地方）是对的，因此只影响可观测性，不影响拦截。
+- **#730 / #731**：`LANGUAGE_REGISTRY` 尚无 csharp 条目（CLI 侧自动扫描未覆盖），
+  CI 未加 `actions/setup-dotnet`（当前 warn-and-skip）。
+
 ## [0.35.24.0] - 2026-11-03
 
 **文档说的和代码做的必须是同一件事。** 这一批多数不是加功能，而是把「声称已生效」
