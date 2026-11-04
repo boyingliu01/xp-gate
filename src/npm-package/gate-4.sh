@@ -76,7 +76,7 @@ if [ "$PROJECT_LANG" = "documentation-only" ]; then
   
 else
   # Get source files to check against principles
-  PRINCIPLES_FILES=$(echo "$CHANGED_FILES" | grep -E '\.(ts|tsx|js|jsx|py|go|java|kt|dart|swift|cpp|c|hpp|h|m|mm)$' || true)
+  PRINCIPLES_FILES=$(echo "$CHANGED_FILES" | grep -E '\.(ts|tsx|js|jsx|py|go|java|kt|dart|swift|cpp|c|hpp|h|m|mm|cs)$' || true)
 
   # One path per line, into an array. Passing $PRINCIPLES_FILES unquoted relies on
   # word splitting to turn the list into separate argv entries, which also splits

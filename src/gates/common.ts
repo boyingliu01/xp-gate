@@ -183,8 +183,15 @@ export function getTempDir(): string {
 
 // ── File Filtering Helpers ──
 
-/** Source file extensions that lizard can analyze. */
-const LIZARD_EXTENSIONS = /\.(ts|tsx|js|jsx|py|go|java|swift|cpp|c|hpp|h|m|mm|kt)$/;
+/**
+ * Source file extensions that lizard can analyze.
+ *
+ * `cs` belongs here because lizard parses C# natively (#717). Omitting it was
+ * never a tool limitation: lizard reports the CCN 11-22 functions the issue
+ * names, and the gate dropped those files before lizard was invoked, so the
+ * report said "no source files to check" for a tree full of them.
+ */
+const LIZARD_EXTENSIONS = /\.(ts|tsx|js|jsx|py|go|java|swift|cpp|c|hpp|h|m|mm|kt|cs)$/;
 
 /** File extensions that semgrep supports. */
 const SEMGREP_EXTENSIONS = /\.(ts|tsx|js|jsx|py|go|java|c|cpp|cs|rb|php|scala|swift)$/;

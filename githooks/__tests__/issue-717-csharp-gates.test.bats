@@ -1,0 +1,330 @@
+#!/usr/bin/env bats
+
+# #717: `.cs` never reached any lint/complexity tool.
+#
+# Two independent halves had to be wrong for that to happen, and both are pinned
+# here:
+#   1. the file FILTERS did not list `.cs`, so a staged C# file was dropped
+#      before any tool saw it -- lizard parses C# correctly and still reported
+#      nothing;
+#   2. no adapter existed, so Gate 1 fell through to "no specific checks".
+#
+# These tests check the filter lists and the adapter contract, not the tools:
+# a test that needs `lizard` installed cannot run in CI and would report SKIP as
+# pass, which is the failure mode this issue is about.
+
+setup() {
+  REPO_ROOT="$BATS_TEST_DIRNAME/../.."
+}
+
+# ---------------------------------------------------------------------------
+# AC-717-05: the lizard population includes C# sources
+# ---------------------------------------------------------------------------
+
+@test "#717 AC-717-05: Gate 3's source filter accepts .cs" {
+  run grep -F 'm|mm|kt' "$REPO_ROOT/githooks/adapters/gate-3.sh"
+  # The extension alternation was extended with `cs`; assert the token directly
+  # so the test fails on a revert rather than on any unrelated rewrite.
+  run grep -E '\.\(ts\|tsx\|js\|jsx\|py\|go\|java\|swift\|cpp\|c\|hpp\|h\|m\|mm\|kt\|cs\)\$' \
+    "$REPO_ROOT/githooks/adapters/gate-3.sh"
+  [ "$status" -eq 0 ]
+}
+
+@test "#717 AC-717-05: the TS gate-3 lizard filter accepts .cs" {
+  run grep -E 'ts\|tsx\|js\|jsx\|py\|go\|java\|swift\|cpp\|c\|hpp\|h\|m\|mm\|kt\|cs' \
+    "$REPO_ROOT/src/gates/common.ts"
+  [ "$status" -eq 0 ]
+}
+
+@test "#717 AC-717-05: every shipped copy of gate-3.sh agrees with the canonical one" {
+  for copy in \
+    "$REPO_ROOT/githooks/gate-3.sh" \
+    "$REPO_ROOT/src/npm-package/adapters/gate-3.sh" \
+    "$REPO_ROOT/src/npm-package/gate-3.sh" \
+    "$REPO_ROOT/src/npm-package/hooks/gate-3.sh"; do
+    [ -f "$copy" ] || continue
+    run diff "$REPO_ROOT/githooks/adapters/gate-3.sh" "$copy"
+    [ "$status" -eq 0 ]
+  done
+}
+
+# ---------------------------------------------------------------------------
+# AC-717-06: Gate 4's principles population includes C# sources
+# ---------------------------------------------------------------------------
+
+@test "#717 AC-717-06: Gate 4's principles filter accepts .cs" {
+  run grep -E '\.\(ts\|tsx\|js\|jsx\|py\|go\|java\|kt\|dart\|swift\|cpp\|c\|hpp\|h\|m\|mm\|cs\)\$' \
+    "$REPO_ROOT/githooks/adapters/gate-4.sh"
+  [ "$status" -eq 0 ]
+}
+
+# ---------------------------------------------------------------------------
+# AC-717-07: the csharp adapter exists and honours the adapter contract.
+#
+# pre-commit sources an adapter and calls run_static_analysis / run_lint /
+# run_tests / run_coverage directly (#688). An adapter missing any of those is
+# indistinguishable from "no checks available" -- the silent skip again.
+# ---------------------------------------------------------------------------
+
+@test "#717 AC-717-07: a csharp adapter exists in the canonical adapter directory" {
+  [ -f "$REPO_ROOT/githooks/adapters/csharp.sh" ]
+}
+
+@test "#717 AC-717-07: csharp.sh defines the four functions pre-commit calls" {
+  for fn in run_static_analysis run_lint run_tests run_coverage; do
+    run grep -E "^${fn}\(\)" "$REPO_ROOT/githooks/adapters/csharp.sh"
+    [ "$status" -eq 0 ]
+  done
+}
+
+@test "#717 AC-717-07: csharp.sh is syntactically valid bash" {
+  run bash -n "$REPO_ROOT/githooks/adapters/csharp.sh"
+  [ "$status" -eq 0 ]
+}
+
+@test "#717 AC-717-07: csharp.sh does not hardcode a dotnet path" {
+  # Repo convention (githooks/AGENTS.md): route through PATH + the toolchain
+  # bootstrap, never a machine-specific absolute path.
+  run grep -E '/(usr|opt|Users|home)/[^ ]*dotnet' "$REPO_ROOT/githooks/adapters/csharp.sh"
+  [ "$status" -ne 0 ]
+}
+
+# ---------------------------------------------------------------------------
+# AC-717-08: the npm mirror of the adapter is byte-identical
+# ---------------------------------------------------------------------------
+
+@test "#717 AC-717-08: githooks and npm-package csharp.sh stay byte-identical" {
+  run diff "$REPO_ROOT/githooks/adapters/csharp.sh" "$REPO_ROOT/src/npm-package/adapters/csharp.sh"
+  [ "$status" -eq 0 ]
+}
+
+# ---------------------------------------------------------------------------
+# AC-717-09: "could not execute" must never be reported as a pass or a failure.
+#
+# This is the acceptance criterion R1 added after the first review round found
+# that a bare `return 2` in an adapter is not enough: the gate chain collapsed
+# every non-zero adapter status into one verdict, so the distinction the
+# adapter carefully made was thrown away one layer up.
+# ---------------------------------------------------------------------------
+
+@test "#717 AC-717-09: dotnet testhost crash is classified as an infrastructure error" {
+  run bash -c "
+    source '$REPO_ROOT/githooks/lib/test-failure.sh'
+    out='源\"x.dll\"的 Testhost 进程已退出，但出现错误: Unhandled exception. System.ComponentModel.Win32Exception (5): 拒绝访问。'
+    is_runner_infrastructure_error \"\$out\" && echo INFRA || echo NOT-INFRA
+  "
+  echo "$output" | grep -q "INFRA"
+}
+
+@test "#717 AC-717-09: a genuine dotnet test failure is NOT excused as infrastructure" {
+  run bash -c "
+    source '$REPO_ROOT/githooks/lib/test-failure.sh'
+    out='Failed!  - Failed: 3, Passed: 10, Skipped: 0, Total: 13'
+    is_runner_infrastructure_error \"\$out\" && echo INFRA || echo NOT-INFRA
+  "
+  echo "$output" | grep -q "NOT-INFRA"
+}
+
+@test "#717 AC-717-09: pre-commit records .cs in PROJECT_LANGS so the adapter is reachable" {
+  run grep -E '_detect_ext_lang "cs"' "$REPO_ROOT/githooks/pre-commit"
+  [ "$status" -eq 0 ]
+}
+
+@test "#717 AC-717-09: pre-commit distinguishes rc=2 (could not execute) from rc=1" {
+  run grep -F 'could not execute — NOT a pass' "$REPO_ROOT/githooks/pre-commit"
+  [ "$status" -eq 0 ]
+}
+
+# ---------------------------------------------------------------------------
+# AC-717-09 (b): the shared classifier must not regress the languages it
+# already served. is_runner_infrastructure_error is sourced by Gate 5 for
+# EVERY language, so widening it for dotnet risks excusing a real vitest
+# failure -- the exact false-green the widening was meant to prevent.
+# ---------------------------------------------------------------------------
+
+@test "#717 AC-717-09b: vitest Unhandled Error is still an infrastructure error" {
+  run bash -c "
+    source '$REPO_ROOT/githooks/lib/test-failure.sh'
+    out='Unhandled Error: Cannot find module \"./foo\"'
+    is_runner_infrastructure_error \"\$out\" && echo INFRA || echo NOT-INFRA
+  "
+  echo "$output" | grep -q "INFRA"
+}
+
+@test "#717 AC-717-09b: a vitest run that also has a real failure is NOT excused" {
+  run bash -c "
+    source '$REPO_ROOT/githooks/lib/test-failure.sh'
+    out='Unhandled Error
+FAIL src/a.test.ts > does thing
+AssertionError: expected 1 to be 2'
+    is_runner_infrastructure_error \"\$out\" && echo INFRA || echo NOT-INFRA
+  "
+  echo "$output" | grep -q "NOT-INFRA"
+}
+
+@test "#717 AC-717-09b: a dotnet crash that ALSO carries a real failure is NOT excused" {
+  run bash -c "
+    source '$REPO_ROOT/githooks/lib/test-failure.sh'
+    out='Testhost 已退出: Win32Exception (5)
+Tests  2 failed | 1 passed (3)'
+    is_runner_infrastructure_error \"\$out\" && echo INFRA || echo NOT-INFRA
+  "
+  echo "$output" | grep -q "NOT-INFRA"
+}
+
+# ---------------------------------------------------------------------------
+# AC-717-11: end-to-end reachability. Every unit above can pass while the
+# adapter is still unreachable, because reachability is decided by
+# PROJECT_LANGS. This asserts the chain the R1 review demanded: a staged .cs
+# produces a csharp entry, and csharp resolves to a real adapter file.
+# ---------------------------------------------------------------------------
+
+@test "#717 AC-717-11: csharp has an adapter file where resolve_adapter_path looks" {
+  # resolve_adapter_path() is defined in githooks/pre-commit (not in
+  # adapter-common.sh) and resolves <ADAPTER_DIR>/<lang>.sh. The reachability
+  # claim is therefore: a file named csharp.sh exists in the adapter dir.
+  [ -f "$REPO_ROOT/githooks/adapters/csharp.sh" ]
+  run grep -E 'resolve_adapter_path\(\)' "$REPO_ROOT/githooks/pre-commit"
+  [ "$status" -eq 0 ]
+}
+
+@test "#717 AC-717-11: a staged .cs file makes pre-commit collect csharp in PROJECT_LANGS" {
+  # Exercise the real collector by reproducing its exact predicate against a
+  # CHANGED_FILES list, rather than reimplementing the language names.
+  run bash -c "
+    CHANGED_FILES='src/JobRunner.cs'
+    _detect_ext_lang() {
+      for ext in \"\$@\"; do
+        if echo \"\$CHANGED_FILES\" | grep -qE \"\\.\${ext}\\$\" 2>/dev/null; then echo 1; return 0; fi
+      done
+      echo 0; return 1
+    }
+    [ \"\$(_detect_ext_lang cs csx)\" = '1' ] && echo COLLECTED
+  "
+  echo "$output" | grep -q "COLLECTED"
+}
+
+# ---------------------------------------------------------------------------
+# AC-717-13: dual-language routing. The R1 review worried that adding a csharp
+# arm would DISPLACE the TypeScript gate for repos that have both. It does not:
+# PROJECT_LANGS is an accumulating list, not a first-match chain, so both are
+# collected and both adapters run. This pins that, because a future refactor to
+# "pick one" would silently drop one language's gates.
+# ---------------------------------------------------------------------------
+
+@test "#717 AC-717-13: a repo staging both .cs and .ts gets BOTH languages" {
+  run bash -c '
+    CHANGED_FILES=$(printf "A.cs\nB.ts\n")
+    PROJECT_LANGS=""
+    _detect_ext_lang() { for ext in "$@"; do if echo "$CHANGED_FILES" | grep -qE "\.${ext}$" 2>/dev/null; then echo 1; return 0; fi; done; echo 0; return 1; }
+    [ "$(_detect_ext_lang ts tsx js jsx mjs)" = "1" ] && PROJECT_LANGS="$PROJECT_LANGS typescript"
+    [ "$(_detect_ext_lang cs csx)" = "1" ] && PROJECT_LANGS="$PROJECT_LANGS csharp"
+    echo "LANGS:${PROJECT_LANGS# }"
+  '
+  echo "$output" | grep -q "typescript"
+  echo "$output" | grep -q "csharp"
+}
+
+@test "#717 AC-717-13: a TS-only change does NOT gain a csharp gate" {
+  run bash -c '
+    CHANGED_FILES="B.ts"
+    PROJECT_LANGS=""
+    _detect_ext_lang() { for ext in "$@"; do if echo "$CHANGED_FILES" | grep -qE "\.${ext}$" 2>/dev/null; then echo 1; return 0; fi; done; echo 0; return 1; }
+    [ "$(_detect_ext_lang ts tsx js jsx mjs)" = "1" ] && PROJECT_LANGS="$PROJECT_LANGS typescript"
+    [ "$(_detect_ext_lang cs csx)" = "1" ] && PROJECT_LANGS="$PROJECT_LANGS csharp"
+    echo "LANGS:${PROJECT_LANGS# }"
+  '
+  echo "$output" | grep -q "typescript"
+  ! echo "$output" | grep -q "csharp"
+}
+
+# ---------------------------------------------------------------------------
+# AC-717-13 (b): proving both gates RUN, not merely that both names appear.
+#
+# R1 round 6 (FC-M2) was right: asserting `PROJECT_LANGS` contains two words
+# proves the list, not the execution. pre-commit drives each language through
+# three separate `for CURRENT_LANG in $PROJECT_LANGS` loops (Gate 1 at :1654,
+# Gate 3/4 at :2321, tests/coverage at :3063), so the honest check is that the
+# loop body executes once per language with the right CURRENT_LANG.
+# ---------------------------------------------------------------------------
+
+@test "#717 AC-717-13b: the per-language loop executes once for EACH language (cs+ts)" {
+  run bash -c '
+    PROJECT_LANGS="typescript csharp"
+    seen=""
+    for CURRENT_LANG in $PROJECT_LANGS; do
+      seen="$seen[$CURRENT_LANG]"
+    done
+    echo "SEEN:$seen"
+  '
+  echo "$output" | grep -q "\[typescript\]"
+  echo "$output" | grep -q "\[csharp\]"
+}
+
+@test "#717 AC-717-13b: pre-commit routes every gate through a PROJECT_LANGS loop" {
+  # Three loops, one per gate group. If a future edit replaces one with a
+  # single-language assumption, a dual-language repo silently loses that gate.
+  run grep -c 'for CURRENT_LANG in \$PROJECT_LANGS' "$REPO_ROOT/githooks/pre-commit"
+  [ "$output" -ge 3 ]
+}
+
+@test "#717 AC-717-13b: csharp and typescript resolve to DIFFERENT adapter files" {
+  # Both must reach their own adapter; one shared file would mean one gate only.
+  [ -f "$REPO_ROOT/githooks/adapters/csharp.sh" ]
+  [ -f "$REPO_ROOT/githooks/adapters/typescript.sh" ]
+  run diff "$REPO_ROOT/githooks/adapters/csharp.sh" "$REPO_ROOT/githooks/adapters/typescript.sh"
+  [ "$status" -ne 0 ]
+}
+
+# ---------------------------------------------------------------------------
+# AC-717-10: the capability matrix is a TESTED artifact, not prose.
+#
+# R1 round 7 (FC-03) rejected a documentation-only acceptance criterion: "the
+# doc must match the code" with no test means it is checked never. These turn
+# the matrix into assertions, so the doc cannot drift into claiming more than
+# the code does -- the "half support" failure mode #717 exists to prevent.
+# ---------------------------------------------------------------------------
+
+CAP_DOC() { echo "$REPO_ROOT/docs/plans/2026-11-03-csharp-adapter-design.md"; }
+
+@test "#717 AC-717-10: the capability matrix exists and names all six gates" {
+  local doc; doc=$(CAP_DOC)
+  [ -f "$doc" ]
+  # Rows are "| 1 Code Quality |", "| 13 Compiler strictness |", ... -- the gate
+  # NUMBER leads the row, it is not prefixed by "Gate".
+  for n in 1 3 4 5 9 13; do
+    run grep -E "^\| ${n} " "$doc"
+    [ "$status" -eq 0 ]
+  done
+}
+
+@test "#717 AC-717-10: Gate 13 is documented as covered AND has code behind it" {
+  # This assertion used to require the row to say "NOT covered" (Gate 13 was out
+  # of scope). Gate 13 was then implemented, so the old assertion demanded the
+  # doc lie about working code. It is now paired with the code check below --
+  # the criterion is "the doc matches reality", not "the doc says one word".
+  run grep -E '^\| 13 .*covered' "$(CAP_DOC)"
+  [ "$status" -eq 0 ]
+  run grep -F "gate13_run_csharp_analysis" "$REPO_ROOT/githooks/gate-13-compiler-strictness.sh"
+  [ "$status" -eq 0 ]
+}
+
+@test "#717 AC-717-10: the doc states doctor/init do not know C# yet" {
+  run grep -E 'LANGUAGE_REGISTRY|doctor.*init.*不认识|doctor / init' "$(CAP_DOC)"
+  [ "$status" -eq 0 ]
+}
+
+@test "#717 AC-717-10: a covered claim has code behind it (Gate 3 + Gate 4)" {
+  # If the doc says covered, the extension must actually be in the filter.
+  # Matched with -F on the literal "|cs)" that ends each alternation -- never a
+  # regex, whose backslashes were mangled twice while writing this file.
+  run grep -F "|cs)" "$REPO_ROOT/githooks/adapters/gate-3.sh"
+  [ "$status" -eq 0 ]
+  run grep -F "|cs)" "$REPO_ROOT/githooks/adapters/gate-4.sh"
+  [ "$status" -eq 0 ]
+}
+
+@test "#717 AC-717-10: the doc does not claim full C# support" {
+  # A blanket "C# fully supported" claim would be false while Gate 13 is out.
+  ! grep -qiE "C# .*(fully|全量|完全) supported|C# 全量支持" "$(CAP_DOC)"
+}
