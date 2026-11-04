@@ -1,4 +1,4 @@
-import { AnalysisResult, Violation } from './analyzer';
+import { AnalysisResult, AnalysisSummary, Violation } from './analyzer';
 
 /** Width of the horizontal rule that separates file blocks in console output. */
 const CONSOLE_RULE_WIDTH = 40;
@@ -175,48 +175,48 @@ export function formatJSON(result: AnalysisResult): string {
   return JSON.stringify(output, null, 2);
 }
 
+/**
+ * A summary field read defensively, with every substitution recorded.
+ *
+ * `formatSummary` is exported, so it cannot assume its caller honoured the
+ * AnalysisResult type: a missing summary used to throw, and a partial one
+ * computed `undefined + 0 = NaN` -- where `NaN === 0` is false, so every commit
+ * reported FAIL forever. Zeroing alone is not enough either; it would turn a
+ * corrupted summary into "nothing to report", so each substitution is named.
+ */
+function readCounts(summary: AnalysisSummary | undefined, damaged: string[]): number[] {
+  const fields: Array<keyof AnalysisSummary> = [
+    'totalViolations', 'errorCount', 'warningCount', 'infoCount', 'filesChecked', 'rulesRun',
+  ];
+  return fields.map((field) => {
+    const value = summary?.[field];
+    if (typeof value === 'number' && Number.isFinite(value)) return value;
+    damaged.push(`${field}=${String(value)}`);
+    return 0;
+  });
+}
+
 export function formatSummary(result: AnalysisResult): string {
   // `info` is "log only" (AGENTS.md). Counting it as a failure turned every
   // rule's way of saying "I could not judge this file" into a blocked commit --
   // the arch layout diagnostic surfaced exactly that. Only error and warning
-  // are blocking severities.
-  //
-  // Read the counts defensively. This function is exported, so it cannot assume
-  // its caller honoured the type: a missing summary used to throw here, and a
-  // partial one would compute `undefined + 0 = NaN`, where `NaN === 0` is false
-  // -- FAIL for every commit, the very symptom this change removes.
-  //
-  // Zeroing silently is not enough, though: it would turn a corrupted summary
-  // into "nothing to report". Every substitution is recorded and printed, so the
-  // report stays non-blocking without hiding that its own input was damaged.
-  const malformed: string[] = [];
-  const counted = (value: unknown, field: string): number => {
-    if (typeof value === 'number' && Number.isFinite(value)) return value;
-    malformed.push(`${field}=${String(value)}`);
-    return 0;
-  };
-  const blocking =
-    counted(result.summary?.errorCount, 'errorCount') +
-    counted(result.summary?.warningCount, 'warningCount');
-  const status = blocking === 0 ? 'PASS' : 'FAIL';
-  const statusIcon = blocking === 0 ? '✓' : '✗';
-  
-  const lines: string[] = [];
-  lines.push(`${statusIcon} ${status}`);
-  lines.push('');
-  // Counted through the same guard so a partial summary prints `0` instead of
-  // `undefined`, which would read as a broken report rather than an empty one.
-  lines.push(`${counted(result.summary?.totalViolations, 'totalViolations')} violations total`);
-  lines.push(`  ${counted(result.summary?.errorCount, 'errorCount')} errors`);
-  lines.push(`  ${counted(result.summary?.warningCount, 'warningCount')} warnings`);
-  lines.push(`  ${counted(result.summary?.infoCount, 'infoCount')} info`);
-  lines.push('');
-  lines.push(`${counted(result.summary?.filesChecked, 'filesChecked')} files checked`);
-  lines.push(`${counted(result.summary?.rulesRun, 'rulesRun')} rules run`);
-  if (malformed.length > 0) {
-    lines.push('');
-    lines.push(`! malformed summary: ${malformed.join(', ')} (read as 0; the counts above cannot be trusted)`);
+  // are blocking severities, so PASS/FAIL reads from those two alone.
+  const damaged: string[] = [];
+  const [total, errors, warnings, info, files, rules] = readCounts(result.summary, damaged);
+  const pass = errors + warnings === 0;
+  const lines = [
+    pass ? 'PASS' : 'FAIL',
+    '',
+    `${total} violations total`,
+    `  ${errors} errors`,
+    `  ${warnings} warnings`,
+    `  ${info} info`,
+    '',
+    `${files} files checked`,
+    `${rules} rules run`,
+  ];
+  if (damaged.length > 0) {
+    lines.push('', `! malformed summary: ${damaged.join(', ')} (read as 0; the counts above cannot be trusted)`);
   }
-  
   return lines.join('\n');
 }
