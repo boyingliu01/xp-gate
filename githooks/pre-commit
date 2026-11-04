@@ -5081,6 +5081,11 @@ if [ -n "$MIRROR_STAGED" ] && printf '%s\n' "$MIRROR_STAGED" | grep -qE '^(githo
       # each other, and the only way past was to edit a generated file by hand.
       case "$_mf" in
         */__tests__/*) continue ;;
+        # AGENTS.md is documentation, not a hook artifact: sync-package-content.js
+        # copies the hook suite, and no AGENTS.md exists under hooks/. Demanding a
+        # mirror for it reported a BLOCK on every doc edit (harmless only because
+        # GATE_FAILED was never read -- see below).
+        */AGENTS.md) continue ;;
         githooks/*) _mm="src/npm-package/hooks/${_mf#githooks/}" ;;
         plugins/*/src/*) _mm=$(printf '%s' "$_mf" | sed 's|^plugins/\([^/]*\)/src/|src/npm-package/plugins/\1/src/|') ;;
         *) continue ;;
@@ -5100,7 +5105,15 @@ if [ -n "$MIRROR_STAGED" ] && printf '%s\n' "$MIRROR_STAGED" | grep -qE '^(githo
       echo "❌ BLOCKED - Gate 12b: $MIRROR_FAIL mirror parity violation(s)."
       echo "   The mirror is what gets published; a mirror-only fix is silently"
       echo "   reverted by the next prepack (v0.27.3 shipped that bug)."
-      GATE_FAILED=1
+      # BLOCKS, and must actually block. This used to set GATE_FAILED=1, a
+      # variable that appears exactly once in this file -- the assignment --
+      # and is read nowhere, so the gate printed BLOCKED on every doc edit and
+      # let the commit through. A gate that reports a verdict nobody consumes is
+      # the same failure as a filter that accepts a file no adapter claims:
+      # it looks like enforcement. exit is the contract every other blocking
+      # gate here uses (see Gate 13: `exit "$_g13_worst"`).
+      GATE_12_STATUS=WARN
+      exit 1
     else
       echo "✅ PASSED - Gate 12b: mirror parity (touched files)"
     fi
