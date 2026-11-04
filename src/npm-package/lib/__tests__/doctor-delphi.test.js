@@ -520,7 +520,7 @@ describe('doctor delphi #725 multi-platform skill parity', () => {
   /**
    * @test REQ-725 Multi-platform skill parity
    * @intent A second platform whose copy drifted must fail the parity check instead of being invisible
-   * @covers AC-725-01
+   * @covers AC-725-01, AC-721-01, AC-721-02, AC-721-03
    */
   it('AC-725-01: a drifted OpenCode copy FAILs parity even though Qoder is clean', async () => {
     seedAgents();

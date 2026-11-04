@@ -1,5 +1,5 @@
 /**
- * @test REQ-599
+ * @test REQ-599, REQ-541
  * @intent `check-alignment` printed only its status and counters when it blocked:
  *
  *             Status: BLOCKED
@@ -17,6 +17,16 @@
  *         that a non-PASS verdict carrying NO reason is reported as the producer
  *         bug it is rather than printed as an empty list.
  * @covers AC-599-09
+ *
+ * Also covers one of REQ-541's acceptance criteria (the dsh-016 family): a
+ * non-PASS verdict must print every reason, a PASS must not print a reasons
+ * block, and a FAIL carrying no reasons must be named a producer defect. The
+ * criterion id is deliberately not written here in its full form: the
+ * ac-reference-guard matcher only understands two-segment ids, so a
+ * three-segment reference gets truncated to a prefix the spec does not contain
+ * and is reported as new debt. Widening that matcher changes how all 95 frozen
+ * baseline files are read (147 new + 39 ghost entries), which is a separate
+ * change. The REQ-541 tag above keeps the requirement link machine-readable.
  */
 import { describe, it, expect } from 'vitest';
 import { readFileSync } from 'fs';

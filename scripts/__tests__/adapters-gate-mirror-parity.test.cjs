@@ -20,7 +20,7 @@
  *          A stale mirror that is merely overwritten downstream is
  *          indistinguishable from a correct one until the order changes. So the
  *          mirror is asserted directly.
- * @covers AC-720-01, AC-720-02
+ * @covers AC-720-01, AC-720-02, AC-720-03
  */
 'use strict';
 

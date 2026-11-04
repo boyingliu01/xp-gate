@@ -5,7 +5,7 @@
  *         key, and — most importantly — the settings write op format
  *         `{ op: 'set', path: [...], value }`, which a shipped third-party plugin got
  *         wrong (it sent `{ type, key, value }`, so every save failed silently).
- * @covers AC-DSH-018-01 AC-DSH-018-02 AC-DSH-018-03
+ * @covers AC-DSH-018
  *
  * The bundle is plain CommonJS executed by DSH's own module loader, not by Node, so
  * these tests evaluate it with a minimal `window.__ModuleLoader__` and a stub

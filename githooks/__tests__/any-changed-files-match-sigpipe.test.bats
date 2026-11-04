@@ -1,10 +1,12 @@
 #!/usr/bin/env bats
+# @test REQ-649
 # @intent 钉住 any_changed_files_match 在 set -o pipefail 下不得把"匹配"读成"不匹配"。
 #         `printf | grep -q` 会在 grep 命中后让 printf 吃 SIGPIPE，管道返回 141，
 #         于是 `if` 走进"无匹配"分支 —— 这直接让 Gate 1 打印
 #         "No code files changed, skipping lint"，而 Gate 2 读同一个变量却能扫到文件。
 #         这个 bug 一直是尺寸相关的：列表短时正常，长时才翻车，所以 CI 的 first-commit
 #         fixture（暂存 19 个 .sh）会撞上，真实项目反而不一定。
+# @covers AC-649-03c, AC-649-08, AC-649-09, AC-649-10
 
 setup() {
   HOOK="$BATS_TEST_DIRNAME/../pre-commit"
