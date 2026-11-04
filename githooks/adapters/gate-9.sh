@@ -1,5 +1,23 @@
 #!/usr/bin/env bash
 # ============================================================================
+# ⚠️  DEAD CODE — NOT EXECUTED. Read this before changing anything here.       
+# ============================================================================
+# This file is NOT sourced by githooks/pre-commit or githooks/pre-push (both
+# source count = 0; verify with: grep -c "gate-9.sh" githooks/pre-commit).
+# It is shipped by githooks/install.sh but never runs.
+#
+# The gate that actually runs semgrep SAST is githooks/gate-10.sh, and it
+# reports as `gate10_sast`. Gate 9 in the report is `gate9_build_integrity`
+# (Build Integrity), a different gate entirely.
+#
+# This mislabelling is not cosmetic: in #717 a C# SAST fix was first written
+# into THIS file, where it changed nothing, while .cs stayed ungoverned. The
+# C# ruleset loading that works lives in gate-10.sh. Do not relocate it here.
+#
+# Kept rather than deleted because githooks/install.sh:GATE_SCRIPTS ships it;
+# removing it is a separate change. See issue #717 walkthrough MC-03.
+# ============================================================================
+# ============================================================================
 # GATE 9: Semgrep SAST Security Scan
 # Detects security vulnerabilities (SQL injection, XSS, etc.) in staged files
 # Tool: semgrep -- https://semgrep.dev
