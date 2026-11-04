@@ -3343,7 +3343,13 @@ async function doctorDelphi(options = {}) {
     }
     return out;
   };
-  if (!fs.existsSync(path.join(installedSkillDir, 'SKILL.md'))) {
+  // #725 follow-up: decide "installed anywhere?" from the full platform set, not
+  // just the directory `detectPlatform()` selects — a dsh-only machine has no
+  // marker detectPlatform() keys on, so the opencode fallback directory never
+  // exists and the old check falsely reported "not installed" even though the
+  // copy IS deployed under ~/.dsh/skills.
+  const deployedDirs = otherDeployedSkillDirs(installedSkillDir);
+  if (deployedDirs.length === 0) {
     add('Delphi skill install parity', 'FAIL',
       `not installed at ${installedSkillDir} (install: xp-gate install-skill delphi-review)`);
   } else {
@@ -3362,7 +3368,6 @@ async function doctorDelphi(options = {}) {
       // OpenCode copy was frozen at an old version and this check reported PASS,
       // because it never looked there -- the drifted copy was invisible to both
       // `update-skill` and `doctor`.
-      const deployedDirs = otherDeployedSkillDirs(installedSkillDir);
       const drifted = [];
       for (const dir of deployedDirs) {
         const dirDrift = collectSkillDrift(dir, bundledFiles, bundledSkillDir, sha256);

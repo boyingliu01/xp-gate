@@ -598,4 +598,31 @@ describe('doctor delphi #725 multi-platform skill parity', () => {
     expect(parity, 'a stale dsh copy must be reported').toMatch(/✗/);
     expect(parity).toMatch(/dsh/i);
   });
+
+  /**
+   * @test REQ-725 Multi-platform skill parity
+   * @intent a machine whose only installed agent is dsh has no marker detectPlatform()
+   *         keys on, so the opencode fallback falsely FAILs "not installed" even though
+   *         the skill IS deployed under ~/.dsh/skills
+   * @covers AC-725-01
+   */
+  it('AC-725-01: a dsh-only machine PASSes parity instead of "not installed at opencode"', async () => {
+    // No seedAgents(): keep .qoder/.claude/.config-opencode absent so detectPlatform()
+    // falls back to opencode while dsh is the only live tree.
+    deploySkillAt(path.join('.dsh', 'skills'));
+    fs.mkdirSync(path.join(tmpHome, '.config', 'xp-gate'), { recursive: true });
+    fs.writeFileSync(
+      path.join(tmpHome, '.config', 'xp-gate', 'xp-gate.json'),
+      JSON.stringify({ installedSkills: {} }),
+    );
+
+    const { doctorDelphi } = require('../doctor');
+    const { lines, spy } = captureResults();
+    await doctorDelphi({ skipLatestProbe: true });
+    spy.mockRestore();
+
+    const parity = lines.filter((l) => /parity/i.test(l)).join('\n');
+    expect(parity, 'a deployed dsh copy must be found and verified').toMatch(/✓/);
+    expect(parity).not.toMatch(/not installed/i);
+  });
 });
