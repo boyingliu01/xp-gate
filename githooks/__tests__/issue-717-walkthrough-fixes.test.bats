@@ -102,3 +102,47 @@ setup() {
   run bash -n "$REPO_ROOT/githooks/gate-10.sh"
   [ "$status" -eq 0 ]
 }
+
+# --- Both semgrep arms must load p/csharp (MC-01) ---------------------------
+
+@test "both semgrep call sites use the ruleset array, none hardcode a config" {
+  # gate-10.sh runs semgrep twice: a timeout-guarded path and a direct path.
+  # Only verifying one leaves the other as an assertion, which is the defect
+  # that sent the first fix to the wrong file.
+  run grep -cF 'SEMGREP_RULES[@]' "$REPO_ROOT/githooks/gate-10.sh"
+  [ "$status" -eq 0 ]
+  # The definition site uses the bare name; the two call sites use [@].
+  [ "$output" -ge 2 ]
+}
+
+@test "no semgrep invocation in gate-10 hardcodes security-audit" {
+  # Only real invocations count; the remediation hint legitimately names the
+  # ruleset, so match on the `scan` subcommand preceded by the semgrep binary.
+  run grep -E '\"$SEMGREP_CMD\" scan[^|]*--config=p/security-audit' "$REPO_ROOT/githooks/gate-10.sh"
+  [ "$status" -ne 0 ]
+}
+
+@test "the ruleset array is built before its first use" {
+  local arr first
+  arr=$(grep -n 'SEMGREP_RULES=(--config=p/security-audit)' "$REPO_ROOT/githooks/gate-10.sh" | cut -d: -f1 | head -1)
+  first=$(grep -nF 'SEMGREP_RULES[@]' "$REPO_ROOT/githooks/gate-10.sh" | cut -d: -f1 | head -1)
+  [ -n "$arr" ]
+  [ -n "$first" ]
+  [ "$arr" -lt "$first" ]
+}
+
+# --- Gate numbering seam: the file that runs is gate-10, not gate-9 --------
+
+@test "gate-9.sh is not sourced by any hook, and says so" {
+  # A future contributor reading gate-9.sh will see C# code and assume it runs.
+  # Both halves are asserted: the fact, and the warning about the fact.
+  run bash -c "grep -c 'gate-9.sh' '$REPO_ROOT/githooks/pre-commit' '$REPO_ROOT/githooks/pre-push'"
+  [ "$status" -ne 0 ]
+  run grep -q 'DEAD CODE' "$REPO_ROOT/githooks/gate-9.sh"
+  [ "$status" -eq 0 ]
+}
+
+@test "gate-10.sh is the file pre-commit actually loads for SAST" {
+  run grep -q 'gate-10.sh' "$REPO_ROOT/githooks/pre-commit"
+  [ "$status" -eq 0 ]
+}
