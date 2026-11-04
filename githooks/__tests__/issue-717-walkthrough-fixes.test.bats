@@ -16,27 +16,27 @@ setup() {
   REPO_ROOT="$(cd "$BATS_TEST_DIRNAME/../.." && pwd)"
 }
 
-# --- Gate 9: the ruleset must actually contain C# rules ---------------------
+# --- SAST: the ruleset must actually contain C# rules ----------------------
 
-@test "gate-9 loads p/csharp in addition to p/security-audit" {
-  run grep -q "p/csharp" "$REPO_ROOT/githooks/adapters/gate-9.sh"
+@test "gate-10 loads p/csharp in addition to p/security-audit" {
+  run grep -q "p/csharp" "$REPO_ROOT/githooks/gate-10.sh"
   [ "$status" -eq 0 ]
 }
 
-@test "gate-9 keeps p/security-audit so other languages stay covered" {
-  run grep -q "SEMGREP_RULES=(--config=p/security-audit)" "$REPO_ROOT/githooks/adapters/gate-9.sh"
+@test "gate-10 keeps p/security-audit so other languages stay covered" {
+  run grep -q "SEMGREP_RULES=(--config=p/security-audit)" "$REPO_ROOT/githooks/gate-10.sh"
   [ "$status" -eq 0 ]
 }
 
-@test "gate-9 adds p/csharp conditionally, keyed off a staged .cs file" {
+@test "gate-10 adds p/csharp conditionally, keyed off a staged .cs file" {
   # Unconditional loading would slow every commit; keyed off the file list keeps
   # non-C# commits at the old cost.
-  run grep -qE 'grep -qE "\.cs\$"' "$REPO_ROOT/githooks/adapters/gate-9.sh"
+  run grep -qE 'grep -qE "\.cs\$"' "$REPO_ROOT/githooks/gate-10.sh"
   [ "$status" -eq 0 ]
 }
 
-@test "gate-9 passes the whole ruleset array to semgrep, not a single hardcoded config" {
-  run grep -q 'scan "\${SEMGREP_RULES\[@\]}"' "$REPO_ROOT/githooks/adapters/gate-9.sh"
+@test "gate-10 passes the whole ruleset array to semgrep, not a single hardcoded config" {
+  run grep -q 'scan "\${SEMGREP_RULES\[@\]}"' "$REPO_ROOT/githooks/gate-10.sh"
   [ "$status" -eq 0 ]
 }
 
@@ -96,9 +96,9 @@ setup() {
   [ "$status" -eq 0 ]
 }
 
-@test "pre-commit and gate-9 still parse after the walkthrough fixes" {
+@test "pre-commit and gate-10 still parse after the walkthrough fixes" {
   run bash -n "$REPO_ROOT/githooks/pre-commit"
   [ "$status" -eq 0 ]
-  run bash -n "$REPO_ROOT/githooks/adapters/gate-9.sh"
+  run bash -n "$REPO_ROOT/githooks/gate-10.sh"
   [ "$status" -eq 0 ]
 }
