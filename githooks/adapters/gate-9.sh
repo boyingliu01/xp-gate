@@ -1,3 +1,4 @@
+#!/usr/bin/env bash
 # ============================================================================
 # GATE 9: Semgrep SAST Security Scan
 # Detects security vulnerabilities (SQL injection, XSS, etc.) in staged files
@@ -112,8 +113,22 @@ EOF
     # code is demoted to "did the tool itself run". --error stays OFF: it would
     # add nothing the JSON does not already provide, and keeping it off leaves
     # failure exit codes unambiguous for the #475 diagnostics path.
+    # #717: p/security-audit carries NO C# rules. Measured: a .cs file with a
+    # textbook SQL injection (string-concatenated SqlCommand) and a
+    # Process.Start command injection produced 0 findings under
+    # p/security-audit and 1 ERROR under p/csharp. Since gate-9.sh:45 lists
+    # `cs` in the file filter, .cs was accepted and then scanned by a ruleset
+    # that cannot see C# -- the identical "filter looks like coverage" defect
+    # this issue removed from Gate 4. p/csharp is loaded IN ADDITION to
+    # p/security-audit (not instead of: the security-audit rules still apply
+    # to the other languages in a mixed commit).
+    SEMGREP_RULES=(--config=p/security-audit)
+    if printf "%s
+" "$SEMGREP_FILES" | grep -qE ".cs$"; then
+      SEMGREP_RULES+=(--config=p/csharp)
+    fi
     SEMGREP_STDOUT_FILE=$(mktemp)
-    SEMGREP_OUTPUT=$("$SEMGREP_CMD" scan --config=p/security-audit --json --disable-version-check "${SEMGREP_ARGS[@]}" 2>&1 >"$SEMGREP_STDOUT_FILE")
+    SEMGREP_OUTPUT=$("$SEMGREP_CMD" scan "${SEMGREP_RULES[@]}" --json --disable-version-check "${SEMGREP_ARGS[@]}" 2>&1 >"$SEMGREP_STDOUT_FILE")
     SEMGREP_EXIT=$?
 
     # One node pass over the JSON: first line = verdict counts, remaining lines =
@@ -191,7 +206,9 @@ console.log("");});
       echo "  ❌ BLOCKED — blocking-severity vulnerability found"
       echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
       echo "$FINDING_DETAILS"
-      echo "  Run 'semgrep scan --config=p/security-audit' to review all findings."
+      # #717: name BOTH rulesets. A C# finding comes from p/csharp, so
+      # pointing the author at p/security-audit alone reproduces zero hits.
+      echo "  Run 'semgrep scan --config=p/security-audit --config=p/csharp' to review all findings."
       GATE_9_STATUS="FAIL"
       exit 1
     else
