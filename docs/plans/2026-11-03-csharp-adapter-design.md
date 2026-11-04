@@ -329,12 +329,13 @@ blocking matrix, read from the code paths rather than assumed:
 |---|---|---|
 | 1 Code Quality | **No** | Generic adapter branch prints `SKIPPED`/`PASSED` and falls through (`pre-commit:2278-2284`). It never `exit`s. Its job is to report honestly, not to reject. |
 | 3 Complexity | **Yes** | `gate-3.sh:262` / `:303` `exit 1` on CCN over threshold. |
-| 4 Principles | **Yes** | `gate-4.sh:219` `exit 1` when ERROR count > 0. |
+| 4 Principles | **Yes** | `gate-4.sh:219` `exit 1` when ERROR count > 0. C#-reachable since §12 added `adapters/csharp.ts`; before that the filter accepted `.cs` and the analyzer dropped it. |
 | 5 Tests + Coverage | **Yes** | Non-TS branch blocks on any non-zero `run_tests` (`pre-commit:3212-3224`); a genuine C# test failure therefore blocks, while a testhost startup fault is excused via `handle_test_failure`. |
+| 6 Architecture | **Yes** | New `csharp` arm (§13) blocks on a failing architecture test project via `PIPESTATUS[0]`. |
 | 9 SAST | **Yes (semgrep verdicts)** | Blocks on ERROR/CRITICAL/HIGH severity per the #518 JSON verdict rules. |
 | 13 Compiler strictness | **Yes** | `pre-commit:5102-5106` blocks when `GATE_13_STATUS` is FAIL or BLOCK. |
 
-So a C# project is genuinely enforced: four independent gates (3, 4, 5, 13)
+So a C# project is genuinely enforced: five independent gates (3, 4, 5, 6, 13)
 plus SAST can each stop a commit. Gate 1's non-blocking behaviour is the
 repository-wide convention for the generic adapter branch, not something C#
 introduced, and AC-717-15 pins it so the log can never claim a pass it did not
@@ -387,3 +388,85 @@ AC-717-22), including the ordering check and a tab-indentation guard.
 not add a .NET SDK install step to CI, so on a runner without dotnet the C#
 branch warns and skips. Adding `actions/setup-dotnet` is a separate decision with
 its own cost, tracked rather than smuggled in here.
+
+## 12. Gate 4 Principles — the C# adapter (`src/principles/adapters/csharp.ts`)
+
+**Correction to an earlier claim in this document.** Gate 4 was previously
+described as covering C# because `gate-4.sh`'s extension filter
+(`gate-4.sh:79`) includes `cs`. That reasoning was wrong, and it was the same
+"filter looks like coverage" mistake this whole issue is about:
+
+```
+getAdapterForFile('A.cs')  ->  null     // analyzer.ts had no '.cs' entry
+getAdapterForFile('A.cpp') ->  CppAdapter
+```
+
+So the filter accepted the file and the analyzer then dropped it. Nothing was
+checked, and the gate still printed that it was checking.
+
+The fix is an adapter plus its analyzer registration, and the registration is
+the load-bearing half — an adapter file that nothing maps to is unreachable
+(the exact defect `detect_project_langs()` had before it was deleted).
+
+Design follows `adapters/cpp.ts` rather than an AST parser: this package ships
+zero runtime dependencies, and C# has the same lexical hazard (a `}` inside a
+literal or comment truncates the body and under-measures every rule that reads
+`length`/`nestingDepth`). Three extra states beyond C++ are handled because C#
+has them and C++ does not:
+
+| Construct | Why it matters to the brace scan |
+|---|---|
+| `@"..."` verbatim | terminates on a **doubled** quote; backslash is literal |
+| `"""..."""` raw string | closes only on a quote run of the opening length |
+| `'c'` char literal | same as C++, kept explicit |
+
+Metrics attached per match, because a match missing the field the rule reads is
+how 12 of 14 rules were structurally unable to fire on TypeScript before #446:
+`paramCount`, `length`, `nestingDepth`, `hasTryCatch` on functions; `methodCount`
+on classes.
+
+Tests: `src/principles/__tests__/adapter-csharp.test.ts` (11 assertions) and
+`githooks/__tests__/issue-717-gate4-gate6-csharp.test.bats`.
+
+## 13. Gate 6 Architecture — the `csharp` arm
+
+Gate 6's per-language `case` had arms for `typescript`, `python`, `go`, `java`
+only. `csharp` reached the loop and fell to the `*)` default, so a C# project was
+reported "architecture not configured for csharp" with no way to configure it —
+the config file was never looked for.
+
+.NET has no universal architecture CLI; layering is normally asserted by *tests*
+(NetArchTest, ArchUnitNET, or a plain xUnit project). So the arm keys off an
+opt-in `arch-csharp.yaml` / `.xp-gate/arch-csharp.yaml`, mirrors the Go arm's
+`arch-go.yaml` contract, and discovers the architecture test project by scanning
+tracked `.csproj` files for an architecture-related name or package reference.
+Discovering it is deliberate: guessing one fixed path is the #602 defect that
+reported "not configured" for repos that had the tests.
+
+The verdict comes from `PIPESTATUS[0]`, not from the pipeline, for the same
+reason #630 fixed the Go arm: `cmd | tail` yields *tail's* status, so the arm
+printed "completed" unconditionally and a failing architecture test landed.
+
+## 14. Mixed-language projects (scope note)
+
+`PROJECT_LANGS` accumulates every language found among the staged files
+(`pre-commit:1219-1284`), and the per-language loops run once per entry. Verified
+by staging `.cs` + `.js` + `.java` + `.sh` together: the result is
+`typescript java shell csharp`, so mixed projects are gated per language rather
+than collapsing to one.
+
+Two limits worth stating, neither introduced here and neither fixed here:
+
+1. **The manifest fallback is single-valued.** It only runs when no extension
+   matched (`pre-commit:1287`), and it assigns rather than appends, so a repo
+   with several manifests and no staged code files resolves to one language.
+2. **Gates 3 and 4 are filter-based, not loop-based.** They select from
+   `CHANGED_FILES` by extension (`gate-3.sh`, `gate-4.sh:79`) and therefore handle
+   every language in one pass — but only for the languages their engines actually
+   parse. `.cs` was in Gate 4's filter without an adapter until §12.
+
+A first-class "scan the project, register all languages, refresh incrementally on
+commit/push" capability is **out of scope for this sprint** and tracked as a
+follow-up issue, because it needs the same `detectBy`-style infrastructure the
+concurrently-running arch-rules sprint is building in `language-tools.js`.
+Implementing it here would either duplicate that work or collide with it.

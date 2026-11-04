@@ -4326,8 +4326,72 @@ JAVAARCHROOTS
           fi
         fi
         ;;
+      "csharp")
+        # #717: C# had no arm at all, so it fell through to the `*)` default
+        # below and was reported as "not configured for csharp" -- a language
+        # the gate silently could not measure, with no way to configure it
+        # either, because the config file was never looked for.
+        #
+        # Architecture for .NET is normally expressed as *tests* (NetArchTest,
+        # ArchUnitNET, or a plain xUnit project asserting layering). There is no
+        # universal CLI, so this arm keys off a config the project opts into,
+        # exactly like the Go arm's arch-go.yaml.
+        if [ -f "arch-csharp.yaml" ] || [ -f ".xp-gate/arch-csharp.yaml" ]; then
+          _cs_arch_cfg="arch-csharp.yaml"
+          [ -f "$_cs_arch_cfg" ] || _cs_arch_cfg=".xp-gate/arch-csharp.yaml"
+          # Find an architecture test project: a .csproj whose name or contents
+          # mention architecture tests. Guessing one fixed path is the #602
+          # defect, which reported "not configured" for repos that had them.
+          _cs_arch_proj=""
+          while IFS= read -r _p; do
+            [ -n "$_p" ] || continue
+            if grep -qiE "architecture|archunit|netarchtest" "$_p" 2>/dev/null; then
+              _cs_arch_proj="$_p"
+              break
+            fi
+          done <<CSARCHPROJ
+$(git ls-files '*.csproj' 2>/dev/null)
+CSARCHPROJ
+
+          if [ -z "$_cs_arch_proj" ]; then
+            echo "     ℹ️  No architecture test project found - skipping C# architecture"
+            echo "     ⏭️  SKIPPED - C# architecture validation (no arch test project)"
+            if [ "${BASH_VERSINFO[0]:-0}" -ge 4 ]; then
+              GATE_6_REASON_BY_LANG["$CURRENT_LANG"]="architecture_not_configured"
+            fi
+          elif ! command -v dotnet >/dev/null 2>&1; then
+            echo "     ⏭️  SKIPPED - C# architecture validation (dotnet SDK not installed)"
+            if [ "${BASH_VERSINFO[0]:-0}" -ge 4 ]; then
+              GATE_6_REASON_BY_LANG["$CURRENT_LANG"]="tool_missing"
+            fi
+          else
+            echo "     Running C# architecture tests ($_cs_arch_proj)..."
+            # Same reading as the Go/Java arms (#630/#602): the checker's own
+            # status decides the verdict. Piping into `tail` and printing
+            # "completed" unconditionally is the fail-open shape those issues
+            # removed; PIPESTATUS[0] is what keeps this arm from repeating it.
+            dotnet test "$_cs_arch_proj" --nologo 2>&1 | tail -20
+            _cs_arch_rc="${PIPESTATUS[0]}"
+            if [ "$_cs_arch_rc" -ne 0 ]; then
+              echo ""
+              echo "❌ BLOCKED - C# architecture violations ($_cs_arch_proj, exit $_cs_arch_rc)"
+              echo "Fix the layering violation(s) above before committing."
+              if [ "${BASH_VERSINFO[0]:-0}" -ge 4 ]; then
+                GATE_6_REASON_BY_LANG["$CURRENT_LANG"]="architecture_tests_failed"
+              fi
+              exit 1
+            fi
+            echo "     ✅ C# architecture validation completed."
+          fi
+        else
+          echo "     ℹ️  No arch-csharp.yaml found - skipping C# architecture"
+          echo "     ⏭️  SKIPPED - C# architecture validation (no config)"
+          if [ "${BASH_VERSINFO[0]:-0}" -ge 4 ]; then
+            GATE_6_REASON_BY_LANG["$CURRENT_LANG"]="architecture_not_configured"
+          fi
+        fi
+        ;;
       *)
-        echo "     ℹ️  Architecture validation not configured for $CURRENT_LANG"
         echo "     ⏭️  SKIPPED - Architecture validation (not configured for $CURRENT_LANG)"
         # #537: archlint ships no detector for this language. Say so in a way
         # the quality report can read, instead of leaving the dimension silent.
