@@ -1328,7 +1328,20 @@ EXPECTED_COMMIT=$(git rev-parse HEAD)
 
 # Validate the complete evidence contract without interpolating JSON into shell.
 HOOK_DIR=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
-MW_VALIDATOR="$HOOK_DIR/lib/validate-code-walkthrough.cjs"
+# #739: under Git Bash $HOOK_DIR is a POSIX path (/d/projects/...). `test -f`
+# accepts it because MSYS resolves that form itself, but node.exe does not: it
+# reads a leading "/d" as drive-relative and reports
+# "Cannot find module 'D:\d\projects\...'". So the guard below PASSED and the
+# consumer crashed, which is why this surfaced as a Node stack trace instead of
+# the intended "Gate MW validator is missing" message. cygpath is the documented
+# conversion; where it is absent (plain POSIX, no MSYS) the path is already
+# native and is left untouched.
+if command -v cygpath >/dev/null 2>&1; then
+  HOOK_DIR_FOR_NODE=$(cygpath -w "$HOOK_DIR")
+else
+  HOOK_DIR_FOR_NODE="$HOOK_DIR"
+fi
+MW_VALIDATOR="$HOOK_DIR_FOR_NODE/lib/validate-code-walkthrough.cjs"
 if [ ! -f "$MW_VALIDATOR" ]; then
   echo ""
   echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
