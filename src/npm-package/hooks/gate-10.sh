@@ -170,12 +170,25 @@ EOF
     # --no-verify, which is worse than any verdict it could have produced.
     # `-k` after the primary signal: pysemgrep spinning in a syscall ignores
     # SIGTERM, and the shipped 0.29 code used the same `-k 10` shape.
+    # #717: p/security-audit carries NO C# rules. Measured on a .cs file with
+    # a textbook SQL injection (string-concatenated SqlCommand) plus a
+    # Process.Start command injection: p/security-audit 0 findings, p/csharp 1
+    # ERROR (csharp-sqli). Line 69 has listed `cs` in the filter all along, so
+    # .cs was accepted and then scanned by a ruleset that cannot see C# -- the
+    # identical "filter looks like coverage" defect this issue removed from
+    # Gate 4. p/csharp is loaded IN ADDITION so the security-audit rules still
+    # cover the other languages in a mixed commit.
+    SEMGREP_RULES=(--config=p/security-audit)
+    if printf '%s
+' "$SEMGREP_FILES" | grep -qE ".cs$"; then
+      SEMGREP_RULES+=(--config=p/csharp)
+    fi
     SEMGREP_TIMEOUT_S="${XP_GATE_SEMGREP_TIMEOUT:-180}"
     SEMGREP_TIMED_OUT=false
     if command -v timeout >/dev/null 2>&1; then
       SEMGREP_STDOUT_FILE=$(mktemp)
       SEMGREP_OUTPUT=$(timeout -k 10 "$SEMGREP_TIMEOUT_S" \
-        "$SEMGREP_CMD" scan --config=p/security-audit --json --disable-version-check \
+        "$SEMGREP_CMD" scan "${SEMGREP_RULES[@]}" --json --disable-version-check \
         "${SEMGREP_ARGS[@]}" 2>&1 >"$SEMGREP_STDOUT_FILE")
       SEMGREP_EXIT=$?
       # 124 = timeout's own "I gave up" code. 137 = 128+SIGKILL, which is what
@@ -194,7 +207,7 @@ EOF
       # trade -- but the unbounded window is now stated.
       echo "     ⚠️  'timeout' command not available — semgrep runs UNBOUNDED (install coreutils or set up gtimeout)"
       SEMGREP_STDOUT_FILE=$(mktemp)
-      SEMGREP_OUTPUT=$("$SEMGREP_CMD" scan --config=p/security-audit --json --disable-version-check \
+      SEMGREP_OUTPUT=$("$SEMGREP_CMD" scan "${SEMGREP_RULES[@]}" --json --disable-version-check \
         "${SEMGREP_ARGS[@]}" 2>&1 >"$SEMGREP_STDOUT_FILE")
       SEMGREP_EXIT=$?
     fi
@@ -299,7 +312,9 @@ console.log("");});
       echo "  ❌ BLOCKED — blocking-severity vulnerability found"
       echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
       echo "$FINDING_DETAILS"
-      echo "  Run 'semgrep scan --config=p/security-audit' to review all findings."
+      # #717: a C# finding comes from p/csharp; naming only security-audit
+      # would send the author to a ruleset that reproduces zero hits.
+      echo "  Run 'semgrep scan --config=p/security-audit --config=p/csharp' to review all findings."
       GATE_10_STATUS="FAIL"
       # Consumed by the sourcing parent (pre-commit report JSON), not here.
       # shellcheck disable=SC2034
