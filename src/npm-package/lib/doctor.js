@@ -21,7 +21,7 @@ const CONFIG_FILE = () => sharedPaths.CONFIG_FILE;
 const GLOBAL_HOOKS_DIR = () => sharedPaths.GLOBAL_HOOKS_DIR;
 const GLOBAL_ADAPTERS_DIR = () => sharedPaths.GLOBAL_ADAPTERS_DIR;
 const { checkUpgrade, formatUpgradeMsg } = require('./check-version.js');
-const { GATE_CLI_TOOLS, checkCliTool, getToolInstallCmd, checkBash } = require('./detect-deps.js');
+const { GATE_CLI_TOOLS, checkCliTool, getToolInstallCmd, checkBash, detectInstalledPlatforms, getSkillsDirs } = require('./detect-deps.js');
 // #505: the single source of truth for module resolution order. The hook reads a
 // generated shell projection of this same module.
 const { RESOLUTION_ORDER } = require('./hook-module-resolution.js');
@@ -3604,16 +3604,19 @@ function getCliVersionSafe() {
  * tools, both trees still live) is the normal case that produces this, and the
  * frozen copy is exactly what a parity check exists to catch.
  *
+ * The original fix still hardcoded the three pre-dsh platforms, so the DSH copy
+ * (`~/.dsh/skills/delphi-review`) — which `detectPlatform()` never returns and
+ * `PLATFORM_PROFILES` does carry — stayed invisible. Derive the candidates from
+ * the profiles so every installed platform is examined.
+ *
  * @param {string} detectedDir the platform `detectPlatform()` selected
  * @returns {string[]} directories that actually contain the skill
  */
 function otherDeployedSkillDirs(detectedDir) {
-  const candidates = [
-    detectedDir,
-    path.join(HOME_DIR(), '.qoder', 'skills', 'delphi-review'),
-    path.join(HOME_DIR(), '.config', 'opencode', 'skills', 'delphi-review'),
-    path.join(HOME_DIR(), '.claude', 'skills', 'delphi-review'),
-  ];
+  const candidates = [detectedDir];
+  for (const platform of detectInstalledPlatforms()) {
+    candidates.push(path.join(getSkillsDirs(platform)[0], 'delphi-review'));
+  }
   const seen = new Set();
   const found = [];
   for (const dir of candidates) {

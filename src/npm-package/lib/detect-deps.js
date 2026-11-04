@@ -303,6 +303,29 @@ function getSkillsDirs(platform) {
 }
 
 /**
+ * Every AI-agent platform whose directory actually exists in the home dir.
+ *
+ * `detectPlatform()` short-circuits to a single platform (opencode is the
+ * fallback), which is right for "which one do I target by default" but wrong for
+ * "which agents does this machine actually run" -- a migration period, or a user
+ * who keeps two tools, has several live trees, and an update must reach all of
+ * them. Each profile's `skillsDirs` lists home-relative path segments; a platform
+ * counts as installed when any of its directories exists.
+ *
+ * @returns {string[]} installed platform names, in PLATFORM_PROFILES order
+ */
+function detectInstalledPlatforms() {
+  const home = require('./shared-paths.js').HOME_DIR;
+  const installed = [];
+  for (const [platform, profile] of Object.entries(PLATFORM_PROFILES)) {
+    if (profile.skillsDirs.some((segments) => fs.existsSync(path.join(home, ...segments)))) {
+      installed.push(platform);
+    }
+  }
+  return installed;
+}
+
+/**
  * Resolve a bash that can actually run the hooks.
  *
  * On Windows, `bash` on PATH is ambiguous: WSL installs C:\Windows\System32\
@@ -659,6 +682,7 @@ module.exports = {
   autoInstallDeps,
   detectPlatform,
   getSkillsDirs,
+  detectInstalledPlatforms,
   PLATFORM_PROFILES,
   REQUIRED_DEPS,
   GATE_CLI_TOOLS,

@@ -141,6 +141,38 @@ describe('install-skill full skill directory (#416)', () => {
     expect(listFiles(opencodeSkills)).toEqual(bundled);
   });
 
+  it('updates a skill deployed under ~/.dsh too (#725 AC-725-06)', async () => {
+    // Qoder keeps the dep gate green AND is the platform detectPlatform() picks.
+    for (const name of ['superpowers', 'gstack']) {
+      const dir = path.join(tmpHome, '.qoder', 'skills', name);
+      fs.mkdirSync(dir, { recursive: true });
+      fs.writeFileSync(path.join(dir, 'package.json'), JSON.stringify({ version: '2.0.0' }));
+    }
+    const qoderSkills = path.join(tmpHome, '.qoder', 'skills', 'ralph-loop');
+    fs.mkdirSync(qoderSkills, { recursive: true });
+    fs.writeFileSync(path.join(qoderSkills, 'SKILL.md'), '# old qoder copy');
+
+    // DSH is a live second deployment that detectPlatform() never returns.
+    const dshSkills = path.join(tmpHome, '.dsh', 'skills', 'ralph-loop');
+    fs.mkdirSync(dshSkills, { recursive: true });
+    fs.writeFileSync(path.join(dshSkills, 'SKILL.md'), '# old dsh copy');
+    fs.writeFileSync(path.join(dshSkills, 'obsolete.md'), 'stale');
+
+    const configDir = path.join(tmpHome, '.config', 'xp-gate');
+    fs.mkdirSync(configDir, { recursive: true });
+    fs.writeFileSync(
+      path.join(configDir, 'xp-gate.json'),
+      JSON.stringify({ installedSkills: { 'ralph-loop': { version: '0.0.1' } } })
+    );
+
+    const { updateSkill } = require('../update-skill');
+    expect(await updateSkill('ralph-loop', {})).toBe(0);
+
+    const bundled = listFiles(path.join(BUNDLED_SKILLS, 'ralph-loop'));
+    expect(listFiles(dshSkills)).toEqual(bundled);
+    expect(fs.existsSync(path.join(dshSkills, 'obsolete.md'))).toBe(false);
+  });
+
   it('keeps the installed directory when the package no longer bundles the skill', async () => {
     // update-skill used to rmSync the target before delegating to install, so a
     // skill the installed package does not carry was destroyed first and the

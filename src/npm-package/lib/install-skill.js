@@ -1,6 +1,6 @@
 const fs = require('fs');
 const path = require('path');
-const { checkDeps } = require('./detect-deps.js');
+const { checkDeps, detectInstalledPlatforms, getSkillsDirs } = require('./detect-deps.js');
 const { rollback } = require('./rollback.js');
 const { HOME_DIR, CONFIG_DIR, detectPlatform } = require('./shared-paths.js');
 const { copyDirRecursive } = require('./shared-utils');
@@ -17,46 +17,26 @@ function getSkillsDir() {
 }
 
 /**
- * Every platform skills directory that already holds an installed skill.
+ * Every skills directory that belongs to an installed platform.
  *
- * #725: `detectPlatform()` short-circuits on the first marker it finds (`.qoder`
- * wins outright), so a machine that carries both Qoder and OpenCode only ever
- * had the Qoder copy updated -- the OpenCode copy was frozen at whatever version
- * last wrote it, and nothing reported it. Migration periods make two platforms
- * normal, not exotic: the user switched tools and both trees are still live.
+ * #725 fixed the single-platform assumption, but the enumeration still hardcoded
+ * the three pre-dsh platforms (`.qoder`, `.config/opencode`, `.claude`) and so
+ * missed `~/.dsh/skills` -- the DSH platform `detectPlatform()` never returns and
+ * `PLATFORM_PROFILES` does carry. Derive the target set from the profiles instead
+ * of a parallel list: a machine with Qoder, OpenCode and DSH all present must
+ * have all three updated, and a migration period (two tools live) must not leave
+ * one silently frozen.
  *
- * Only directories that already contain skills are returned. A platform the user
- * never installed into is left alone rather than seeded by an update, which would
- * be a surprising side effect of `update-skill`.
+ * A machine with no agent installed yet still needs one target, so fall back to
+ * the platform `detectPlatform()` selects and keep plain `install-skill` working.
  *
  * @returns {string[]} home-relative skills directories, de-duplicated
  */
 function deployedSkillsDirs() {
-  const candidates = [
-    path.join(HOME_DIR, '.qoder', 'skills'),
-    path.join(HOME_DIR, '.config', 'opencode', 'skills'),
-    path.join(HOME_DIR, '.claude', 'skills'),
-  ];
-  const found = [];
-  for (const dir of candidates) {
-    if (dirHasInstalledSkill(dir)) found.push(dir);
-  }
-  // A machine with no deployed skill anywhere still needs one target: fall back
-  // to the detected platform so a plain `install-skill` keeps working.
-  return found.length > 0 ? found : [getSkillsDir()];
-}
-
-/** @returns {boolean} true when `dir` contains at least one `<name>/SKILL.md` */
-function dirHasInstalledSkill(dir) {
-  let entries;
-  try {
-    entries = fs.readdirSync(dir, { withFileTypes: true });
-  } catch {
-    return false;
-  }
-  return entries.some(
-    (entry) => entry.isDirectory() && fs.existsSync(path.join(dir, entry.name, 'SKILL.md'))
-  );
+  const installed = detectInstalledPlatforms();
+  if (installed.length === 0) return [getSkillsDir()];
+  const dirs = installed.map((platform) => getSkillsDirs(platform)[0]);
+  return [...new Set(dirs)];
 }
 
 // The npm package ships the canonical skill content; `files` includes skills/.

@@ -570,4 +570,32 @@ describe('doctor delphi #725 multi-platform skill parity', () => {
     expect(parity).toMatch(/✓/);
     expect(parity).toMatch(/2 platform/i);
   });
+
+  /**
+   * @test REQ-725 Multi-platform skill parity
+   * @intent dsh is a first-class deploy target but detectPlatform() never returns
+   *         it, so a drifted dsh copy must fail parity exactly like opencode
+   * @covers AC-725-01
+   */
+  it('AC-725-01: a drifted dsh copy FAILs parity even though Qoder is clean', async () => {
+    seedAgents();
+    deploySkillAt(path.join('.qoder', 'skills'));
+    deploySkillAt(path.join('.dsh', 'skills'), (dest) => {
+      fs.writeFileSync(path.join(dest, 'AGENTS.md'), '# stale dsh copy\n');
+    });
+    fs.mkdirSync(path.join(tmpHome, '.config', 'xp-gate'), { recursive: true });
+    fs.writeFileSync(
+      path.join(tmpHome, '.config', 'xp-gate', 'xp-gate.json'),
+      JSON.stringify({ installedSkills: {} }),
+    );
+
+    const { doctorDelphi } = require('../doctor');
+    const { lines, spy } = captureResults();
+    await doctorDelphi({ skipLatestProbe: true });
+    spy.mockRestore();
+
+    const parity = lines.filter((l) => /parity/i.test(l)).join('\n');
+    expect(parity, 'a stale dsh copy must be reported').toMatch(/✗/);
+    expect(parity).toMatch(/dsh/i);
+  });
 });
