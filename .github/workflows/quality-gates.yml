@@ -78,6 +78,15 @@ jobs:
             fi
           elif [[ -f "pom.xml" ]]; then
             echo "java" > project_language.txt
+          elif [[ -n "$(find . -maxdepth 1 \( -name "*.sln" -o -name "*.csproj" -o -name "*.fsproj" -o -name "*.vbproj" \) -type f | head -n 1)" ]]; then
+            # #717: C# must be detected BEFORE the powershell/shell arms below.
+            # Those arms match on `find . -name "*.ps1"` / `*.sh`, and a .NET
+            # solution routinely ships either as a build helper -- so a C#
+            # repo was being classified powershell/shell and its C# gate never
+            # ran. The manifest is checked at depth 1 only: a stray .csproj in a
+            # vendored subtree should not claim the whole repository, which is
+            # the same rule the local adapter uses.
+            echo "csharp" > project_language.txt
           elif [[ -f "pubspec.yaml" ]]; then
             if grep -q "flutter:" "pubspec.yaml" 2>/dev/null || [[ -f ".metadata" ]]; then
               echo "flutter" > project_language.txt
@@ -325,6 +334,27 @@ jobs:
               fi
             else
               echo "⚠️ golangci-lint not available - skipping Go quality check"
+            fi
+          elif [[ "$PROJECT_LANGUAGE" == "csharp" ]]; then
+            # #717: C# had no branch here at all, so a C# repo fell through to
+            # "No specific quality rules ... Skipping Gate 1" while the local
+            # pre-commit DID run dotnet format. That local-vs-CI split is what
+            # the architecture expert (CI-01/CI-02) flagged: a developer could
+            # pass locally and CI would never look.
+            #
+            # Tool-missing degrades to a warning, not a block -- the repository
+            # convention for every language here, and Gate 8 is the documented
+            # fail-closed exception.
+            if command -v dotnet >/dev/null 2>&1; then
+              echo "Running dotnet format --verify-no-changes..."
+              if dotnet format --verify-no-changes --verbosity diagnostic; then
+                echo "✅ Gate 1: C# code quality check completed successfully"
+              else
+                echo "❌ dotnet format reported formatting violations"
+                exit 1
+              fi
+            else
+              echo "⚠️ dotnet SDK not available - skipping C# quality check"
             fi
           elif [[ "$PROJECT_LANGUAGE" == "unknown" ]]; then
             echo "⚠️ Unknown project language - Skipping Gate 1"

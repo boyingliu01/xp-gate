@@ -31,6 +31,20 @@ has_real_failure_marker() {
 is_runner_infrastructure_error() {
   local _out="$1"
   [ -n "$_out" ] || return 1
+  # #717: dotnet/VSTest's testhost failing to START is the same class of event
+  # -- the runner could not run, so no test was judged. Its signature is a
+  # Win32Exception from ProcessManager.OpenProcess (the testhost cannot open a
+  # handle to its own parent) followed by "Testhost process exited with error".
+  # Without this arm, a .NET repo on a machine with that permission fault would
+  # report "Tests FAILED" on every commit for a reason that has nothing to do
+  # with its tests.
+  #
+  # A real dotnet failure ("Failed!", "Failed: 3") never carries these strings,
+  # so the has_real_failure_marker guard below still lets genuine failures block.
+  if printf '%s' "$_out" | grep -qE 'Win32Exception|Testhost.*(exited with error|已退出)|test host.*(could not|did not) start'; then
+    has_real_failure_marker "$_out" && return 1
+    return 0
+  fi
   printf '%s' "$_out" | grep -qE 'Unhandled Error' || return 1
   has_real_failure_marker "$_out" && return 1
   return 0
@@ -116,10 +130,21 @@ handle_test_failure() {
   local _ctx="$2"
   if is_runner_infrastructure_error "$_out"; then
     echo ""
-    echo "⏭️  SKIPPED - vitest runner infrastructure error (no test failed)"
-    echo "    Detected: Unhandled Errors with 0 failed tests."
-    echo "    Known Windows issue: EPERM on vitest temp/ssr cache (#454)."
-    echo "    Workaround: npx vitest run --no-file-parallelism <targets>"
+    # The advice has to match the runner that failed (#717). A C# developer
+    # handed the vitest EPERM workaround would chase a cache problem in a
+    # language they are not using, and the real cause -- the testhost could not
+    # open a handle to its own parent -- would never be named.
+    if printf '%s' "$_out" | grep -qE 'Win32Exception|Testhost.*(exited with error|已退出)|test host.*(could not|did not) start'; then
+      echo "⏭️  SKIPPED - dotnet test host could not start (no test was judged)"
+      echo "    Detected: VSTest testhost exited before running a test."
+      echo "    This is an environment fault, NOT a test verdict -- it must not block."
+      echo "    Check: antivirus / endpoint protection blocking process handles, or run the suite outside this path."
+    else
+      echo "⏭️  SKIPPED - vitest runner infrastructure error (no test failed)"
+      echo "    Detected: Unhandled Errors with 0 failed tests."
+      echo "    Known Windows issue: EPERM on vitest temp/ssr cache (#454)."
+      echo "    Workaround: npx vitest run --no-file-parallelism <targets>"
+    fi
     TESTS_SKIPPED=true
     TESTS_EXIT_CODE=0
     return 0

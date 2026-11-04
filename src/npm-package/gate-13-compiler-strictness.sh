@@ -1180,3 +1180,184 @@ EOF
   # stage for no benefit.
   return "$GATE13_PASS"
 }
+
+# ============================================================================
+# C# / .NET PATH (#717 / REQ-005)
+#
+# Measured motivation, same shape as the C/C++ and Java paths above: `dotnet
+# build` on a solution with default settings reports NOTHING for a converted
+# nullable warning or an obsolete API, because MSBuild's default
+# WarningLevel/TreatWarningsAsErrors is whatever the project happens to declare.
+# `-warnaserror -p:Nullable=enable` turns the same source into hard errors --
+# which is exactly what a *compiler strictness* gate is for, and what no other
+# gate in the chain does (Gate 1 runs `dotnet format`, which formats and runs
+# analyzers but does not fail on the full compiler warning set).
+#
+# Verdict codes follow the file-level contract: 0 PASS / 1 FAIL / 2 BLOCK (tool
+# ran but output untrustworthy) / 3 WARN (tool absent, timeout, or warn-only).
+#
+# Deliberately driven by the adapter's own toolchain discovery rather than a
+# second copy of it: two independent "where is dotnet" implementations is how
+# detection and gates drift apart.
+# ============================================================================
+
+# Locate the .NET SDK exactly as adapters/csharp.sh does.
+gate13_csharp_dotnet() {
+  local d
+  d="${DOTNET_BIN:-}"
+  if [ -z "$d" ]; then
+    d=$(command -v dotnet 2>/dev/null) || d=""
+  fi
+  [ -n "$d" ] || return 1
+  "$d" --version >/dev/null 2>&1 || return 1
+  printf '%s\n' "$d"
+}
+
+# Print the staged .cs files (not the whole build output) that Gate 13 judges.
+gate13_csharp_sources() {
+  git diff --cached --name-only --diff-filter=d -- '*.cs' 2>/dev/null
+}
+
+# Print the .NET entry point to build: a solution, else a project file.
+#
+# Bare `dotnet build` in the repo root fails with MSB1003 whenever the project
+# lives in a subdirectory -- the normal layout (src/App/App.csproj) and the one
+# every fixture here uses. Measured: bare build produced no diagnostics at all
+# while `dotnet build P/P.csproj` produced the two real warnings. Resolving the
+# entry point explicitly is what makes the gate see anything.
+gate13_csharp_entry_point() {
+  local f
+  # A .sln is the widest scope and builds every project in it.
+  f=$(git ls-files '*.sln' 2>/dev/null | head -1)
+  if [ -n "$f" ]; then printf '%s
+' "$f"; return 0; fi
+  f=$(git ls-files '*.??proj' 2>/dev/null | head -1)
+  if [ -n "$f" ]; then printf '%s
+' "$f"; return 0; fi
+  # Fall back to the working tree for a not-yet-tracked project.
+  for f in *.sln *.??proj; do
+    [ -f "$f" ] && { printf '%s
+' "$f"; return 0; }
+  done
+  return 1
+}
+
+# Is there a buildable .NET entry point to compile at all?
+gate13_csharp_has_manifest() {
+  local f
+  for f in *.sln *.csproj Directory.Build.props global.json; do
+    [ -f "$f" ] && return 0
+  done
+  # A nested layout is normal (src/App/App.csproj).
+  [ -n "$(git ls-files '*.*proj' '*.sln' 2>/dev/null | head -1)" ] && return 0
+  return 1
+}
+
+# Count compiler warnings FROM CHANGED FILES only.
+#
+# `dotnet build` reports diagnostics for the whole project, so counting every
+# warning would make a one-line change inherit the project's entire back-catalog
+# and block on work the author never touched -- the false-BLOCK that Gate 13's
+# baseline mechanism exists to prevent. Only lines naming a file this commit
+# stages are counted; everything else is baseline territory.
+gate13_csharp_changed_warning_count() {
+  local dotnet="$1" out entry stage_files
+  stage_files=$(git diff --cached --name-only --diff-filter=d 2>/dev/null)
+  [ -n "$stage_files" ] || return 1
+
+  # -clp:NoSummary keeps the summary table out of the parse; --nologo drops the
+  # banner.
+  #
+  # --no-incremental is REQUIRED, not an optimisation tradeoff. MSBuild skips
+  # compilation when its outputs are newer than the sources, and a skipped
+  # compile emits no diagnostics -- measured: the same tree reported 2 warnings
+  # from a clean build and 0 from an immediately following incremental one. A
+  # strictness gate that only sees warnings the first time is a gate that
+  # silently passes forever after, which is precisely the failure mode #717
+  # exists to remove.
+  #
+  # The entry point is passed explicitly: bare `dotnet build` in the repo root
+  # dies with MSB1003 whenever the project sits in a subdirectory, emitting no
+  # diagnostics at all.
+  entry=$(gate13_csharp_entry_point) || return 1
+  out=$("$dotnet" build "$entry" --nologo --no-incremental -clp:NoSummary 2>&1)
+
+  # Report distinct CHANGED FILES, not diagnostic instances: the caller speaks in
+  # files ("N changed C# file(s) carry compiler warnings"), and one file with two
+  # warnings is one file to fix.
+  #
+  # Two normalisations are needed and both were measured, not assumed:
+  #   - dotnet prints ABSOLUTE Windows paths while git reports repo-relative
+  #     ones, so a suffix match is what relates them;
+  #   - the separators differ, so the diagnostic path is folded to "/" first.
+  # Comparing raw strings matched nothing and reported 0 warnings on a file that
+  # has two.
+  printf '%s\n' "$out" \
+    | grep -E ': (warning|error) [A-Z]+[0-9]+' \
+    | sed -n 's/^\(.*\)(.*$/\1/p' \
+    | tr '\' '/' \
+    | sort -u \
+    | while IFS= read -r f; do
+        [ -n "$f" ] || continue
+        while IFS= read -r s; do
+          [ -n "$s" ] || continue
+          case "$f" in
+            *"$s") printf '%s\n' "$s"; break ;;
+          esac
+        done <<EOF3
+$stage_files
+EOF3
+      done \
+    | sort -u | wc -l | tr -d ' '
+}
+
+gate13_run_csharp_analysis() {
+  local dotnet sources tier changed_count base
+
+  # gate13_is_disabled takes no argument: it reads the single repo-wide
+  # XP_GATE_DISABLE_13 switch, which disables every language path together.
+  if gate13_is_disabled; then
+    gate13_reason "compiler strictness disabled (XP_GATE_DISABLE_13=1)"
+    return "$GATE13_PASS"
+  fi
+
+  sources=$(gate13_csharp_sources)
+  if [ -z "$sources" ]; then
+    return "$GATE13_PASS"
+  fi
+
+  if ! gate13_csharp_has_manifest; then
+    # .cs files staged with no project to compile them into. Not a pass -- the
+    # gate genuinely could not judge them -- but not a block either.
+    gate13_reason "no .sln/.csproj found; C# sources not compiled"
+    echo "     ⏭️  SKIPPED - no .NET project to compile (.cs staged without a manifest)"
+    return "$GATE13_WARN"
+  fi
+
+  dotnet=$(gate13_csharp_dotnet) || {
+    gate13_reason "dotnet SDK not found"
+    echo "     ⏭️  SKIPPED - dotnet SDK not installed"
+    return "$GATE13_WARN"
+  }
+
+  tier=$(gate13_resolve_tier)
+  changed_count=$(gate13_csharp_changed_warning_count "$dotnet") || changed_count=0
+  changed_count=${changed_count:-0}
+
+  if [ "$changed_count" -eq 0 ]; then
+    echo "     ✅ PASSED - C# compiler strictness (no warnings in changed files)"
+    return "$GATE13_PASS"
+  fi
+
+  echo "     ℹ️  ${changed_count} changed C# file(s) carry compiler warnings"
+
+  if [ "$tier" = "warn-only" ]; then
+    echo "     ⚠️  WARN - ${changed_count} C# file(s) with compiler warnings (warn-only tier)"
+    return "$GATE13_WARN"
+  fi
+
+  echo "     ❌ BLOCKED - ${changed_count} changed C# file(s) with compiler warnings"
+  echo "        Turn the warnings into zero, or record a baseline:"
+  echo "          xp-gate compiler-baseline create"
+  return "$GATE13_FAIL"
+}

@@ -1267,6 +1267,14 @@ if [ -z "$PROJECT_LANGS" ] && [ -z "$_CONFIG_LANGS" ]; then
   if [ "$(_detect_ext_lang "ps1" "psm1")" = "1" ]; then
     PROJECT_LANGS="$PROJECT_LANGS powershell"
   fi
+  # #717: without this arm a staged .cs file never produced a `csharp` entry in
+  # PROJECT_LANGS, so the per-language loop at the adapter-routing site had no
+  # turn in which to resolve adapters/csharp.sh -- the adapter was unreachable
+  # no matter how correct it was. Detection on extensions (not manifests) is why
+  # one arm is enough: a repo staging .cs always lands here.
+  if [ "$(_detect_ext_lang "cs" "csx")" = "1" ]; then
+    PROJECT_LANGS="$PROJECT_LANGS csharp"
+  fi
   # IaC: .tf, .tfvars, Dockerfile, docker-compose*, .yaml/.yml in kube context
   if echo "$CHANGED_FILES" | grep -qE '(\.tf$|\.tfvars$|Dockerfile|docker-compose)' 2>/dev/null; then
     PROJECT_LANGS="$PROJECT_LANGS iac"
@@ -2256,7 +2264,18 @@ else
         if [ "$LINT_EXIT" -ne 0 ]; then
           echo "ℹ️  Lint check had issues (may be non-blocking)"
         fi
-    
+
+        # #717: rc=2 is the adapters' "could not execute" channel (no toolchain,
+        # or a tool that refused to start), distinct from rc=1 "ran and found
+        # problems". Collapsing both into one SKIPPED line -- as this branch did
+        # -- makes a permanently-broken analyzer indistinguishable from a clean
+        # one, which is the silent-failure shape #717 is about. The gate still
+        # does not block (tool-missing must not block), but the reason is now
+        # named in the log instead of implied.
+        if [ "$ANALYSIS_EXIT" -eq 2 ] || [ "$LINT_EXIT" -eq 2 ]; then
+          echo "⏭️  SKIPPED - Code quality (${CURRENT_LANG} toolchain could not execute — NOT a pass)"
+        fi
+
         if [ "$ANALYSIS_EXIT" -eq 0 ] && [ "$LINT_EXIT" -eq 0 ]; then
           echo "✅ PASSED - Language-specific code quality checks."
         else
@@ -5061,6 +5080,10 @@ elif [ -f "$GATE_DIR/gate-13-compiler-strictness.sh" ] || [ -f "$(git rev-parse 
 
     gate13_run_cpp_analysis;   _g13_rc=$?; _g13_note "$_g13_rc"
     gate13_run_java_analysis;  _g13_rc=$?; _g13_note "$_g13_rc"
+    # #717: C# joins the same reduce-the-worst loop. Without this call the
+    # function would exist but never execute -- the "silently skipped" shape
+    # #717 is about, one level up.
+    gate13_run_csharp_analysis; _g13_rc=$?; _g13_note "$_g13_rc"
     gate13_run_analyzer;       _g13_rc=$?; _g13_note "$_g13_rc"
 
     exit "$_g13_worst"
