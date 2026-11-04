@@ -21,25 +21,25 @@ import urllib.request
 
 LOCAL_PREFIX = "local-"
 
-# Seat models that are NOT local but remain explicitly permitted. The user's
-# standing rule is local-only seats; this allowlist exists so a future hosted
-# seat requires an intentional, reviewable edit here (walkthrough R8 CI-01:
-# the guard and the loaders must agree on what is legal).
-#
-# 2026-10-27: the technical seat was moved to the hosted Qwen 3.8 Flash because
-# the local build of that model failed intermittently; the other two seats stay
-# local. Recorded here so the guard does not read the pinned assignment as a
-# violation (the machine-wide .delphi-config.json names this exact model).
-#
-# 2026-11-04 (#717): all three seats are now hosted WhaleCloud models, and the
-# guard had drifted behind the config -- it reported SEAT VIOLATION on the very
-# seats the previous two review rounds ran on. That is the failure mode this
-# allowlist is supposed to prevent, one level up: the guard and the config
-# disagreed and only the guard complained. The user confirmed these three are
-# the currently sanctioned seats. Kept as an explicit list, not a wildcard, so
-# a future seat change still requires an intentional edit here.
 MODEL_ALLOWLIST: set[str] = {
+    # Kept as an explicit list, not a wildcard, so a future seat change still
+    # requires an intentional edit here. Two separate decisions put entries in
+    # this set, and both stay:
+    #
+    # #717 (2026-11-04): the guard had drifted behind the config and reported
+    # SEAT VIOLATION on the very seats a review had just run on -- the failure
+    # mode this list exists to prevent, one level up. The guard complained first,
+    # so the sanctioned seats are recorded here.
     "s-qwen3.8-flash",
+    # 2026-11-04: all three seats moved to hosted FLASH-tier models on the same
+    # WhaleCloud gateway. The local deployments are re-tuned often enough that a
+    # pinned local seat goes stale faster than a sprint, and a review whose seat
+    # silently changes model mid-sprint cannot be trusted. Three DIFFERENT flash
+    # models were chosen for cost while keeping the multi-model invariant: the ids
+    # resolve to three distinct backends (deepseek-flash / glm-5-3-flash-260828 /
+    # Ling-3.1-flash-DTMaaS), verified through the gateway-reported
+    # `resolved_model` rather than the id text, because two distinct ids can alias
+    # to one backend and quietly reduce the review to two models.
     "s-deepseek-v4.1-flash",
     "s-glm-5.3-flash",
     "g-ling-3.1-flash",

@@ -3,7 +3,7 @@
  * @intent Gate 5 must distinguish a real test failure from a vitest *runner
  *         infrastructure* error (EPERM on the temp/ssr module cache), so the
  *         guard cannot silently regress to a blanket "Tests FAILED" message.
- * @covers AC-454-01, AC-454-02, AC-454-03, AC-454-04, AC-454-06, AC-454-07, AC-454-08, AC-473-02
+ * @covers AC-454-01, AC-454-02, AC-454-03, AC-454-04, AC-454-06, AC-454-07, AC-454-08, AC-473-02, AC-454-05
  *
  * Background: on Windows vitest 1.6.x can exit non-zero while reporting zero
  * failed tests. `is_runner_infrastructure_error` already existed, but only ONE

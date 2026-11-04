@@ -12,6 +12,8 @@
  * @covers AC-713-02
  * @covers AC-713-03
  * @covers AC-713-04
+ * @covers AC-713-05
+ * @covers AC-713-06
  */
 'use strict';
 

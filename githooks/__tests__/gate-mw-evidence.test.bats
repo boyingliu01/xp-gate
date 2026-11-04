@@ -2,7 +2,7 @@
 
 # @test REQ-DELPHI-MW-001
 # @intent Reject incomplete or untrustworthy walkthrough evidence on feature branches
-# @covers AC-DELPHI-MW-001-01 through AC-DELPHI-MW-001-15
+# @covers AC-DELPHI-MW-001-01 through AC-DELPHI-MW-001-15 AC-634-01
 
 VALIDATOR="$BATS_TEST_DIRNAME/../lib/validate-code-walkthrough.cjs"
 

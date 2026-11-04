@@ -16,7 +16,7 @@
  *
  *         The binding is therefore: when a `.delphi-config.json` exists, each
  *         expert's requested_model must be THAT role's configured seat.
- * @covers AC-574-01, AC-574-02, AC-574-03, AC-574-04, AC-574-05, AC-574-06, AC-574-07,
+ * @covers AC-574-01, AC-574-02, AC-574-03, AC-574-04, AC-574-05, AC-574-06, AC-574-07,, AC-574-09, AC-574-10
  *         AC-636-01, AC-636-02, AC-636-03
  *
  * DESIGN NOTE (why the binding is opt-in on config presence, and why the
