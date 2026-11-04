@@ -120,6 +120,12 @@ async function installSkill(name, options = {}) {
   // is deployed anywhere, so it never returns an empty list.
   const finalTargets = deployedSkillsDirs().map((dir) => path.join(dir, name));
 
+  // `lastError` alone was wrong: an unreadable platform (e.g. ~/.qoder/skills is
+  // a file, so readdir throws ENOTDIR) set it to 1 and nothing reset it when the
+  // other platform installed fine -- the CLI then reported failure for a machine
+  // that had in fact been updated. Track successes instead: the command failed
+  // only when EVERY target failed.
+  let succeeded = 0;
   let lastError = 0;
   for (const targetDir of finalTargets) {
     const dupError = checkDuplicateInstall(targetDir, force);
@@ -140,6 +146,7 @@ async function installSkill(name, options = {}) {
       if (verbose && finalTargets.length > 1) console.log(`Target: ${targetDir}`);
       const result = await performInstall(name, targetDir, verbose);
       if (result !== 0) lastError = result;
+      else succeeded += 1;
     } catch (err) {
       console.error(`Error: Install failed - ${err.message}`);
       await rollback(installId);
@@ -147,7 +154,8 @@ async function installSkill(name, options = {}) {
     }
   }
 
-  return lastError;
+  if (succeeded > 0) return 0;
+  return lastError || 1;
 }
 
 function checkDuplicateInstall(targetDir, force) {

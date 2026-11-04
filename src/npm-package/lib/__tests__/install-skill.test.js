@@ -1,7 +1,9 @@
 /**
- * @test install-skill
- * @intent Verify installSkill() handles deps check, bundle lookup, config, backup, and errors
- * @covers AC-416-01, AC-416-05
+ * @test REQ-416, REQ-725
+ * @intent Verify installSkill() handles deps check, bundle lookup, config, backup, and errors,
+ *         and that it writes EVERY platform already carrying the skill rather than only the
+ *         one detectPlatform() short-circuits to.
+ * @covers AC-416-01, AC-416-05, AC-725-06
  */
 const fs = require('fs');
 const path = require('path');
@@ -331,5 +333,84 @@ describe('install-skill #713 CLI version reporting', () => {
     expect(said).toMatch(/Unknown skill/);
     expect(said).not.toContain('0.0.0');
     expect(said).toContain(`xp-gate ${pkg.version} bundles:`);
+  });
+
+  /**
+   * AC-725-06: a machine carrying the same skill on more than one platform must
+   * have every copy updated. `detectPlatform()` short-circuits to the first
+   * marker it finds, so the single-target path froze the other copy while
+   * reporting success -- and `doctor` then agreed, because both read the same
+   * short-circuited answer. Migration-era machines with Qoder AND OpenCode are
+   * the normal case, not an edge one.
+   */
+  it('AC-725-06: updates every deployed platform, not just the detected one', async () => {
+    // Two platforms carry the skill; detectPlatform() would only ever see one.
+    const qoderSkills = path.join(fx.tmpHome, '.qoder', 'skills');
+    const opencodeSkills = path.join(fx.tmpHome, '.config', 'opencode', 'skills');
+    const SKILL = 'sprint-flow';
+    for (const root of [qoderSkills, opencodeSkills]) {
+      fs.mkdirSync(path.join(root, SKILL), { recursive: true });
+      fs.writeFileSync(path.join(root, SKILL, 'SKILL.md'), '# stale copy\n');
+    }
+
+    const detectPath = require.resolve('../detect-deps.js');
+    require.cache[detectPath] = {
+      id: detectPath,
+      filename: detectPath,
+      loaded: true,
+      exports: {
+        ...require('../detect-deps.js'),
+        checkDeps: async () => ({ ok: true }),
+      },
+    };
+
+    const { installSkill } = require('../install-skill');
+    const code = await installSkill(SKILL, { force: true });
+    expect(code).toBe(0);
+
+    // Both copies must now carry the shipped content, not the stale fixture.
+    for (const root of [qoderSkills, opencodeSkills]) {
+      const installed = path.join(root, SKILL, 'SKILL.md');
+      expect(fs.existsSync(installed)).toBe(true);
+      const body = fs.readFileSync(installed, 'utf8');
+      expect(body).not.toBe('# stale copy\n');
+      expect(body.length).toBeGreaterThan(100);
+    }
+  });
+
+  it('AC-725-06: a platform whose copy cannot be read does not abort the others', async () => {
+    // Qoder's skills root is a FILE, so readdir throws ENOTDIR for it. That
+    // platform must be skipped, and OpenCode -- which is readable -- must still
+    // be updated. The prior single-target code never reached this case because
+    // detectPlatform() would have picked one platform and ignored the other.
+    const qoderSkills = path.join(fx.tmpHome, '.qoder', 'skills');
+    const opencodeSkills = path.join(fx.tmpHome, '.config', 'opencode', 'skills');
+    const SKILL = 'sprint-flow';
+    fs.mkdirSync(path.dirname(qoderSkills), { recursive: true });
+    fs.writeFileSync(qoderSkills, 'not a directory');
+    fs.mkdirSync(path.join(opencodeSkills, SKILL), { recursive: true });
+    fs.writeFileSync(path.join(opencodeSkills, SKILL, 'SKILL.md'), '# stale copy\n');
+
+    const detectPath = require.resolve('../detect-deps.js');
+    require.cache[detectPath] = {
+      id: detectPath,
+      filename: detectPath,
+      loaded: true,
+      exports: {
+        ...require('../detect-deps.js'),
+        checkDeps: async () => ({ ok: true }),
+      },
+    };
+
+    const { installSkill } = require('../install-skill');
+    const code = await installSkill(SKILL, { force: true });
+
+    // The readable platform must still have been written.
+    const healthy = path.join(opencodeSkills, SKILL, 'SKILL.md');
+    expect(fs.existsSync(healthy)).toBe(true);
+    expect(fs.readFileSync(healthy, 'utf8')).not.toBe('# stale copy\n');
+    // The unreadable root must not have been silently "updated" into a file.
+    expect(fs.statSync(qoderSkills).isFile()).toBe(true);
+    expect(code).toBe(0);
   });
 });
