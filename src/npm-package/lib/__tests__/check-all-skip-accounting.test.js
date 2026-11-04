@@ -19,7 +19,7 @@
  *         ran and silent about the five that did not. `verdict: PARTIAL` in the
  *         hook's own report exists for the same reason; the CLI had no such
  *         notion. This is report §5 phase-0 action 0.2.
- * @covers AC-568-01, AC-568-02, AC-568-03
+ * @covers AC-568-01, AC-568-02, AC-568-03, AC-568-04
  */
 const gateRunner = require('../gate-runner.js');
 const { checkAllGates, formatGateTally } = require('../check.js');

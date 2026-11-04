@@ -23,7 +23,7 @@
 #         Pin: whenever the workflow requires a tool fail-closed, it must also
 #         install that tool. The guard and the install have to arrive together, or
 #         the gate is guaranteed to fail on every run.
-# @covers AC-583-01, AC-583-02
+# @covers AC-583-01, AC-583-02, AC-583-03
 
 setup() {
   REPO_ROOT="$(cd "$BATS_TEST_DIRNAME/../.." && pwd)"

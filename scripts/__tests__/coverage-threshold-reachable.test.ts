@@ -1,5 +1,5 @@
 /**
- * @test vitest.config coverage thresholds are reachable
+ * @test REQ-589
  * @intent A coverage floor is only a ratchet if the tree actually clears it. Set
  *         one threshold point above reality and every build goes red for a reason
  *         nobody can act on; set the whole block to 80% against a 60% tree and the
@@ -12,7 +12,7 @@
  *
  *         The rule the config itself states — "whole numbers below the measured
  *         figure" — is what this file enforces, against a recorded measurement.
- * @covers AC-589-01, AC-589-02
+ * @covers AC-589-01, AC-589-02, AC-589-03
  */
 import { describe, test, expect } from 'vitest';
 import { readFileSync, existsSync } from 'fs';

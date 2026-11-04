@@ -3,7 +3,7 @@
  * @intent doctor 判技能新鲜度必须行尾无关：frontmatter 正则只认 LF + 退化分支做
  *         字节比较，导致 autocrlf 工作树下 12/13 个技能被假报 Outdated，真差异
  *         反而被噪声淹没（#439）
- * @covers AC-439-01, AC-439-02, AC-439-03
+ * @covers AC-439-01, AC-439-02, AC-439-03, AC-439-04, AC-718-01, AC-718-02, AC-718-03
  */
 const fs = require('fs');
 const path = require('path');

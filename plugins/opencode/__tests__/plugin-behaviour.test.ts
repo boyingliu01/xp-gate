@@ -14,7 +14,7 @@
  *         Everything that touches the user's ~/.xp-gate or the network is
  *         stubbed at the boundary: the suite must not read or write a real
  *         home-directory cache, and must not depend on npm being reachable.
- * @covers AC-625-01, AC-625-02, AC-625-03
+ * @covers AC-625-01, AC-625-02, AC-625-03, AC-625-05, AC-625-06, AC-625-07
  */
 
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
@@ -412,16 +412,23 @@ describe('AC-625-06: session model reload reports each precondition failure by n
     expect(out).toContain('could not parse oh-my-openagent.json');
   });
 
+  // Hoisted so the test bodies stay shallow. Written inline, each of these
+  // object literals sat three levels deep inside the `it` callback and tripped
+  // the deep-nesting rule (5 levels vs a max of 4) -- a warning on a test body
+  // that says nothing about the code under test.
+  const OMO_NO_MODEL = { omo: { agents: { sisyphus: {} } } };
+  const OMO_BAD_MODEL = { omo: { agents: { sisyphus: { model: 'gpt-4' } } } };
+
   it('reports a missing sisyphus.model', async () => {
     const { __test } = await loadPlugin();
-    seedReloadInputs({ omo: { agents: { sisyphus: {} } } });
+    seedReloadInputs(OMO_NO_MODEL);
     const out = __test.reloadSessionModel('s1');
     expect(out).toContain('could not find sisyphus.model');
   });
 
   it('rejects a model that is not provider/model', async () => {
     const { __test } = await loadPlugin();
-    seedReloadInputs({ omo: { agents: { sisyphus: { model: 'gpt-4' } } } });
+    seedReloadInputs(OMO_BAD_MODEL);
     const out = __test.reloadSessionModel('s1');
     expect(out).toContain('is not in provider/model format');
   });

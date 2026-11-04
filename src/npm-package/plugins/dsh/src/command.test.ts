@@ -20,7 +20,7 @@ describe("shq (POSIX single-quote escaping)", () => {
   /**
    * @test REQ-DSH-009
    * @intent 验证 shq() 对命令替换/反引号等 shell 元字符做 POSIX 单引号转义，防止命令注入
-   * @covers AC-DSH-009-01
+   * @covers AC-DSH-009-01 AC-DSH-013-04
    */
   it("neutralizes shell metacharacters by quoting them literally", () => {
     const payload = "$(touch /tmp/pwned); `id`"

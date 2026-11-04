@@ -29,7 +29,21 @@ LOCAL_PREFIX = "local-"
 # the local build of that model failed intermittently; the other two seats stay
 # local. Recorded here so the guard does not read the pinned assignment as a
 # violation (the machine-wide .delphi-config.json names this exact model).
-MODEL_ALLOWLIST: set[str] = {"s-qwen3.8-flash"}
+#
+# 2026-11-04: all three seats moved to hosted FLASH-tier models on the same
+# WhaleCloud gateway. The local deployments are re-tuned often enough that a
+# pinned local seat goes stale faster than a sprint, and a review whose seat
+# silently changes model mid-sprint cannot be trusted. Three DIFFERENT flash
+# models were chosen for cost while keeping the multi-model invariant: the ids
+# resolve to three distinct backends (deepseek-flash / glm-5-3-flash-260828 /
+# Ling-3.1-flash-DTMaaS), verified through the gateway-reported
+# `resolved_model` rather than the id text, because two distinct ids can alias
+# to one backend and quietly reduce the review to two models.
+MODEL_ALLOWLIST: set[str] = {
+    "s-deepseek-v4.1-flash",
+    "s-glm-5.3-flash",
+    "g-ling-3.1-flash",
+}
 
 CONFIGS = [
     os.path.expanduser("~/.config/xp-gate/.delphi-config.json"),

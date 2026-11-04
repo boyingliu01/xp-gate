@@ -2,9 +2,19 @@
   "$comment": [
     "Delphi Review Configuration Template",
     "======================================",
-    "Copy this file to .delphi-config.json and fill in your API keys.",
+    "Copy this file to .delphi-config.json and fill in your API key.",
     "Place this file alongside SKILL.md in the delphi-review skill directory.",
     "Exactly three roles are required, with distinct trimmed executable model IDs.",
+    "",
+    "The default profile routes all three seats through one WhaleCloud gateway so a",
+    "single token plan covers the review. The three ids are deliberately different",
+    "FLASH-tier models (cheap, fast, and good enough for review):",
+    "  architecture -> s-deepseek-v4.1-flash",
+    "  technical    -> s-glm-5.3-flash",
+    "  feasibility  -> g-ling-3.1-flash",
+    "Check that the seat ids resolve to three DISTINCT backend models on your",
+    "gateway -- two different ids can be aliased to the same backend, which defeats",
+    "the multi-model invariant while still looking correct in the config.",
     "",
     "Provider and vendor are unrestricted. provider=local is a fallback and cannot count as a successful expert execution.",
     "cross_provider_required is deprecated and ignored with warning code cross_provider_required_ignored."
@@ -15,23 +25,23 @@
   "profiles": {
     "default": {
       "providers": {
-        "bailian-tp": {
-          "base_url": "https://dashscope.aliyuncs.com/compatible-mode/v1",
-          "api_key": "YOUR_API_KEY"
+        "whalecloud": {
+          "base_url": "https://lab.iwhalecloud.com/gpt-proxy",
+          "api_key": "${WHALECLOUD_API_KEY}"
         }
       },
       "experts": {
         "architecture": {
-          "provider": "bailian-tp",
-          "model": "qwen-plus"
+          "provider": "whalecloud",
+          "model": "s-deepseek-v4.1-flash"
         },
         "technical": {
-          "provider": "bailian-tp",
-          "model": "deepseek-v3"
+          "provider": "whalecloud",
+          "model": "s-glm-5.3-flash"
         },
         "feasibility": {
-          "provider": "bailian-tp",
-          "model": "glm-4.5"
+          "provider": "whalecloud",
+          "model": "g-ling-3.1-flash"
         }
       }
     },
@@ -39,23 +49,23 @@
     "starter": {
       "$comment": "One provider and token plan serving three distinct models",
       "providers": {
-        "bailian-tp": {
-          "base_url": "https://dashscope.aliyuncs.com/compatible-mode/v1",
-          "api_key": "YOUR_API_KEY"
+        "whalecloud": {
+          "base_url": "https://lab.iwhalecloud.com/gpt-proxy",
+          "api_key": "${WHALECLOUD_API_KEY}"
         }
       },
       "experts": {
         "architecture": {
-          "provider": "bailian-tp",
-          "model": "qwen-plus"
+          "provider": "whalecloud",
+          "model": "s-deepseek-v4.1-flash"
         },
         "technical": {
-          "provider": "bailian-tp",
-          "model": "deepseek-v3"
+          "provider": "whalecloud",
+          "model": "s-glm-5.3-flash"
         },
         "feasibility": {
-          "provider": "bailian-tp",
-          "model": "glm-4.5"
+          "provider": "whalecloud",
+          "model": "g-ling-3.1-flash"
         }
       }
     }
@@ -77,14 +87,14 @@
     "model or gateway changes. See docs/plans/2026-10-14-sprint-c-design.md section 2.",
     "Example expert entry:",
     "  \"architecture\": {",
-    "    \"provider\": \"bailian-tp\",",
-    "    \"model\": \"qwen-plus\",",
+    "    \"provider\": \"whalecloud\",",
+    "    \"model\": \"s-deepseek-v4.1-flash\",",
     "    \"seat_id\": \"architecture\",",
     "    \"max_prompt_bytes\": 26624,",
     "    \"prompt_calibration\": {",
-    "      \"measured_at\": \"2026-10-05\",",
-    "      \"model_id\": \"qwen-plus\",",
-    "      \"gateway\": \"bailian\",",
+    "      \"measured_at\": \"2026-11-04\",",
+    "      \"model_id\": \"s-deepseek-v4.1-flash\",",
+    "      \"gateway\": \"whalecloud\",",
     "      \"last_pass_bytes\": 26624,",
     "      \"last_fail_bytes\": 36897",
     "    }",

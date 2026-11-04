@@ -1,5 +1,5 @@
 /**
- * @test member-scan
+ * @test REQ-680
  * @intent `countTopLevelMembers` decides what `solid.srp` and `clean-code.god-class`
  *         grade, so a wrong count grades classes against an invented number. It
  *         counts by brace depth rather than by the character before the name,

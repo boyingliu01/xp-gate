@@ -1,7 +1,7 @@
 /**
- * @test update-skill
+ * @test REQ-719
  * @intent Verify updateSkill() handles check/all/single-name modes, config parsing, and delegates to installSkill correctly
- * @covers AC-416-04
+ * @covers AC-416-04, AC-719-01, AC-719-02, AC-719-03
  */
 const fs = require('fs');
 const path = require('path');

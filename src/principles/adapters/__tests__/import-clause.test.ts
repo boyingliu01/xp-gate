@@ -1,5 +1,5 @@
 /**
- * @test import-clause parsing
+ * @test REQ-677 parsing
  * @intent The `imports` getter scores unused imports, so every symbol an import
  *         statement binds must be reported exactly once and under its LOCAL name.
  *         Splitting the clause grammar out of the getter makes each of the four
