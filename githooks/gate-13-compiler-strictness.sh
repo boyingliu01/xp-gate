@@ -1295,7 +1295,7 @@ gate13_csharp_changed_warning_count() {
   printf '%s\n' "$out" \
     | grep -E ': (warning|error) [A-Z]+[0-9]+' \
     | sed -n 's/^\(.*\)(.*$/\1/p' \
-    | tr '\' '/' \
+    | tr '\\' '/' \
     | sort -u \
     | while IFS= read -r f; do
         [ -n "$f" ] || continue
