@@ -155,3 +155,30 @@ setup() {
   run gate_can_block build-integrity
   [ "$output" = "NO" ]
 }
+
+# --- a gate that reports BLOCK must actually block ------------------------
+
+@test "gate-12b exits non-zero on a mirror violation, not just prints" {
+  # #717: the failure branch set GATE_FAILED=1, an identifier assigned once in
+  # pre-commit and read nowhere. The gate printed BLOCKED on every doc edit and
+  # the commit landed. Same defect class as a filter that accepts a language no
+  # adapter claims: the mechanism looks like enforcement but enforces nothing.
+  run grep -A14 'BLOCKED - Gate 12b: \$MIRROR_FAIL mirror parity' "$REPO_ROOT/githooks/pre-commit"
+  printf '%s' "$output" | grep -q 'exit 1' || {
+    echo "Gate 12b's failure branch does not exit -- a printed BLOCK would not block"
+    false
+  }
+}
+
+@test "no gate writes a failure to a variable nobody reads" {
+  # GATE_FAILED was exactly that. Assert it is gone rather than merely unused.
+  run grep -E '^\s*GATE_FAILED=' "$REPO_ROOT/githooks/pre-commit"
+  [ "$status" -ne 0 ]
+}
+
+@test "gate-12b skips documentation files, which have no mirror by design" {
+  # githooks/AGENTS.md has no hooks/AGENTS.md counterpart; requiring one made
+  # every doc refresh a false BLOCK.
+  run grep -A4 'AGENTS.md) continue' "$REPO_ROOT/githooks/pre-commit"
+  [ "$status" -eq 0 ]
+}
