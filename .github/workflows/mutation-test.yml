@@ -127,7 +127,7 @@ jobs:
           test -f plugins/dsh/lib/index.js \
             || { echo "::error::plugins/dsh build produced no lib/index.js"; exit 1; }
 
-      # Guards the invariant that made this job red on every branch (#757).
+      # Guards the invariant that made this job red on every branch (#752).
       #
       # The root cause was NOT this workflow: `npm ci` below runs the root
       # `prepare` hook, which ran scripts/sync-version.cjs, which stamped the
@@ -142,7 +142,7 @@ jobs:
       # sync-version.cjs now writes only the version, which is a property of the
       # content. This step makes a regression fail HERE, with the offending file
       # named, instead of as an unexplained dry-run failure 3 minutes later.
-      - name: Assert the install did not dirty the tree (#757)
+      - name: Assert the install did not dirty the tree (#752)
         run: |
           # -e must stay OFF: the whole point is to report before failing.
           # GitHub runs steps with -eo pipefail; under -e a non-empty diff makes
@@ -157,7 +157,7 @@ jobs:
           # file that would explain the failure.
           dirty=$(git status --porcelain -uall)
           if [ -n "$dirty" ]; then
-            echo "::error::install/prepare step dirtied the working tree (#757)"
+            echo "::error::install/prepare step dirtied the working tree (#752)"
             # Full list, not a head: the whole point is to name every file.
             echo "$dirty"
             echo "--- changed line counts ---"
