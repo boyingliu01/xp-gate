@@ -5086,6 +5086,14 @@ if [ -n "$MIRROR_STAGED" ] && printf '%s\n' "$MIRROR_STAGED" | grep -qE '^(githo
         # mirror for it reported a BLOCK on every doc edit (harmless only because
         # GATE_FAILED was never read -- see below).
         */AGENTS.md) continue ;;
+        # `githooks/adapters/` mirrors to `src/npm-package/adapters/`, NOT under
+        # `hooks/` -- that is what scripts/check-hook-mirror.sh declares (line 6)
+        # and what sync-package-content.js writes. The blanket `githooks/*` rule
+        # below sent it to `src/npm-package/hooks/adapters/<f>`, a path that has
+        # never existed, so ANY edit to an adapter was un-committable with
+        # "has no mirror at". It stayed hidden because nobody had edited an
+        # adapter since this gate was narrowed to diff files.
+        githooks/adapters/*) _mm="src/npm-package/adapters/${_mf#githooks/adapters/}" ;;
         githooks/*) _mm="src/npm-package/hooks/${_mf#githooks/}" ;;
         plugins/*/src/*) _mm=$(printf '%s' "$_mf" | sed 's|^plugins/\([^/]*\)/src/|src/npm-package/plugins/\1/src/|') ;;
         *) continue ;;
