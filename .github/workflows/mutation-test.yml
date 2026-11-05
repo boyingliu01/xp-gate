@@ -127,33 +127,37 @@ jobs:
           test -f plugins/dsh/lib/index.js \
             || { echo "::error::plugins/dsh build produced no lib/index.js"; exit 1; }
 
-      # The Stryker dry run executes the WHOLE vitest suite, including the
-      # in-tree drift guards. When one of those guards fails, Stryker reports
-      # only the test name and "expected [ Array(1) ] to deeply equal []" -- the
-      # single element that would say WHAT drifted is collapsed. Print the
-      # actual drift here so a failing dry run is diagnosable from the log
-      # instead of requiring a re-run with extra instrumentation.
-      # TODO(#757): TEMPORARY. Remove this step once the principles-tree drift in
-      # this job is root-caused and fixed -- the job has never reached its
-      # assertion on any branch, so there is no baseline to compare against yet.
-      - name: Snapshot mirror drift (diagnostic)
+      # Guards the invariant that made this job red on every branch (#757).
+      #
+      # The root cause was NOT this workflow: `npm ci` below runs the root
+      # `prepare` hook, which ran scripts/sync-version.cjs, which stamped the
+      # AGENTS.md headers with the current date, HEAD sha and branch name. On a
+      # fresh CI checkout those values differ from the committed content, so the
+      # install step left 32 tracked files modified -- including
+      # src/npm-package/principles/AGENTS.md. The Stryker dry run then executed
+      # the in-tree drift guard, which compares that file against its canonical
+      # copy, and failed with `expected [ Array(1) ] to deeply equal []` (Stryker
+      # collapses the one element that names the file).
+      #
+      # sync-version.cjs now writes only the version, which is a property of the
+      # content. This step makes a regression fail HERE, with the offending file
+      # named, instead of as an unexplained dry-run failure 3 minutes later.
+      - name: Assert the install did not dirty the tree (#757)
         run: |
-          # -e must stay OFF here, and GitHub already runs steps with -eo
-          # pipefail: under `-e`, a differing tree makes `diff` exit 1, pipefail
-          # propagates it, and the step aborts exactly in the only scenario it
-          # exists to explain -- the remaining output never prints and the job
-          # fails on the diagnostic instead of on the real cause.
+          # -e must stay OFF: the whole point is to print the diff before
+          # failing. GitHub runs steps with -eo pipefail, and under -e a
+          # non-empty diff makes `diff` exit 1 and kill the step mid-report.
           set +e
           set -uo pipefail
-          echo "--- git status (untracked files listed individually) ---"
-          # -uall, not the default: the default collapses an untracked directory
-          # to "dir/" and hides the very file that would explain the drift.
-          git status --porcelain -uall | head -80
-          echo "--- src/principles vs src/npm-package/principles ---"
-          diff -rq src/principles src/npm-package/principles 2>&1 | head -30 || true
-          echo "--- first differing bytes ---"
-          diff -ru src/principles src/npm-package/principles 2>&1 | head -60 || true
-          echo "--- end ---"
+          dirty=$(git status --porcelain -uall -- src/principles src/npm-package/principles)
+          if [ -n "$dirty" ]; then
+            echo "::error::install/prepare step dirtied the mirrored principles tree (#757)"
+            echo "$dirty"
+            echo "--- byte-level differences ---"
+            diff -ru src/principles src/npm-package/principles 2>&1 | head -60 || true
+            exit 1
+          fi
+          echo "OK: principles tree is clean after install"
 
       - name: Determine changed principles files
         id: changed

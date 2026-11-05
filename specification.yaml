@@ -5030,3 +5030,32 @@ specification:
         - id: AC-717-29
           criteria: package-lock.json 的两处版本号（顶层与 packages[""]）随 VERSION 同步，不再滞留旧版本
           test_type: unit
+
+    # ============================================================
+    # REQ-757: 安装钩子不得弄脏它正在准备的工作树。
+    #
+    # 根 package.json 的 prepare 挂 scripts/sync-version.cjs，而 `npm ci` 会执行
+    # prepare。该脚本把当天日期、HEAD sha、当前分支名写进全部 35 个 AGENTS.md 头部。
+    # 在全新检出上这些值与提交内容必然不同，于是安装阶段就留下 32 个被修改的跟踪文件，
+    # 其中包括 src/npm-package/principles/AGENTS.md。
+    #
+    # 后果：mutation job 的 Stryker dry run 跑整套 vitest，in-tree drift guard 比对
+    # src/principles 与 src/npm-package/principles，命中上述文件后以
+    # `expected [ Array(1) ] to deeply equal []` 失败（Stryker 把唯一指出文件名的那
+    # 个元素折叠掉了）。该 job 在每一个分支、每一次运行上都因此失败，看起来像测试坏了，
+    # 实则是安装钩子污染了工作树。这类「准备动作破坏被准备对象」的缺陷会自我掩盖：
+    # 失败信息指向下游的守卫，而不指向真正的写入者。
+    # ============================================================
+    - id: REQ-757
+      description: prepare/install 阶段的同步脚本须对同一内容保持幂等，不得因运行时属性（日期、commit、分支）弄脏工作树
+      priority: high
+      acceptance_criteria:
+        - id: AC-757-01
+          criteria: AGENTS.md 头部不再写入当前日期、HEAD sha 或分支名
+          test_type: unit
+        - id: AC-757-02
+          criteria: 仍从 VERSION 同步版本号这一内容属性
+          test_type: unit
+        - id: AC-757-03
+          criteria: 仅在值实际变化时才写文件，重复运行不产生任何改动
+          test_type: unit
