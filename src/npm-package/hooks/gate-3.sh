@@ -363,7 +363,7 @@ else
     LIZARD_PATH=$(eval echo "$LIZARD_CMD")
     
     # Get changed source files for complexity check (includes test files)
-    CC_FILES=$(echo "$CHANGED_FILES" | grep -E '\.(ts|tsx|js|jsx|py|go|java|swift|cpp|c|hpp|h|m|mm|kt)$' || true)
+    CC_FILES=$(echo "$CHANGED_FILES" | grep -E '\.(ts|tsx|js|jsx|py|go|java|swift|cpp|c|hpp|h|m|mm|kt|cs)$' || true)
 
     # Grade exactly the population the baseline was written from. The two must
     # match or the ratchet reports pre-existing code as "new", which is a false

@@ -78,7 +78,47 @@ run_static_analysis() {
   local exit_code=0
   
   # Try checkov first (recommended - supports multiple platforms)
-  if command -v checkov >/dev/null 2>&1; then
+  # Resolve to an executable that actually RUNS, not merely one that exists. On
+  # MSYS2/Git Bash pip leaves an extensionless `checkov` shim whose shebang
+  # hands a MSYS path to the Windows interpreter, which fails every time:
+  #   can't open file 'D:\\c\\Users\\...\\Scripts\\checkov'
+  # `command -v checkov` still succeeds, so a presence-only probe picks the
+  # broken shim and the gate reports "the scanner crashed" on IaC commits that
+  # are perfectly fine. Probing the version is the only way to tell the two
+  # apart; checkov.cmd is the form that works here.
+  #
+  # A timeout wraps the probe because the failure mode being screened for is a
+  # shim that does not answer. Observed breakage exits 2 at once, but a hung
+  # wrapper must not block the commit forever. `timeout` is absent on stock
+  # macOS, so it is used only when available; the probe is a local version
+  # print either way.
+  local checkov_bin=""
+  local _checkov_candidate
+  local _checkov_seen_nonexec=0
+  local _checkov_probe
+  for _checkov_candidate in checkov checkov.exe checkov.cmd; do
+    command -v "$_checkov_candidate" >/dev/null 2>&1 || continue
+    if command -v timeout >/dev/null 2>&1; then
+      _checkov_probe="timeout 20 $_checkov_candidate --version"
+    else
+      _checkov_probe="$_checkov_candidate --version"
+    fi
+    if $_checkov_probe >/dev/null 2>&1; then
+      checkov_bin=$(command -v "$_checkov_candidate")
+      break
+    fi
+    _checkov_seen_nonexec=1
+  done
+  # "Not installed" and "installed but unusable" both end up without a scanner,
+  # and the fallbacks below keep the gate useful -- but they are not the same
+  # situation, and silently treating a broken install as absent hides a lost
+  # scanner. Say which one it is.
+  if [ -z "$checkov_bin" ] && [ "$_checkov_seen_nonexec" -eq 1 ]; then
+    echo "     ⚠️  checkov is on PATH but none of its forms could be executed;"
+    echo "         treating it as unusable and falling back to other scanners."
+    echo "         Reinstall with: pip install -U checkov"
+  fi
+  if [ -n "$checkov_bin" ]; then
     echo "Running checkov IaC security scan..."
 
     # checkov 3.x exits 0 on "found failures" (we parse the output for those),
@@ -114,7 +154,7 @@ run_static_analysis() {
       echo "Scanning Terraform files..."
       for file in $tf_files; do
         if [ -f "$file" ]; then
-          checkov --file "$file" $checkov_args >> "$checkov_log" 2>&1
+          "$checkov_bin" --file "$file" $checkov_args >> "$checkov_log" 2>&1
           record_checkov_run $? "$file"
         fi
       done
@@ -135,7 +175,7 @@ run_static_analysis() {
         echo "Scanning Kubernetes manifests..."
         for file in $k8s_only; do
           if [ -f "$file" ]; then
-            checkov --file "$file" $checkov_args --framework kubernetes >> "$checkov_log" 2>&1
+            "$checkov_bin" --file "$file" $checkov_args --framework kubernetes >> "$checkov_log" 2>&1
           record_checkov_run $? "$file"
           fi
         done
@@ -145,7 +185,7 @@ run_static_analysis() {
         echo "Scanning GitHub Actions workflows..."
         for file in $gh_files; do
           if [ -f "$file" ]; then
-            checkov --file "$file" $checkov_args --framework github_actions >> "$checkov_log" 2>&1
+            "$checkov_bin" --file "$file" $checkov_args --framework github_actions >> "$checkov_log" 2>&1
             record_checkov_run $? "$file"
           fi
         done
@@ -156,7 +196,7 @@ run_static_analysis() {
       echo "Scanning Dockerfiles..."
       for file in $docker_files; do
         if [ -f "$file" ]; then
-          checkov --file "$file" $checkov_args >> "$checkov_log" 2>&1
+          "$checkov_bin" --file "$file" $checkov_args >> "$checkov_log" 2>&1
           record_checkov_run $? "$file"
         fi
       done

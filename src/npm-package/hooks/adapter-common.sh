@@ -38,8 +38,46 @@ run_without_git_context() (
   "$@"
 )
 
+# ---------------------------------------------------------------------------
+# C# / .NET manifests (#717)
+#
+# A .NET tree can declare itself three ways: a project file (*.csproj), a
+# solution (*.sln), or a Directory.Build.props that carries the real settings
+# for a whole directory subtree with no project file of its own. All three are
+# checked, because a repo may carry only the latter two.
+# ---------------------------------------------------------------------------
+
+# Succeeds when the current directory holds a .NET manifest at depth 1.
+has_dotnet_manifest() {
+  [ -f "global.json" ] && return 0
+  [ -f "Directory.Build.props" ] && return 0
+  [ -f "Directory.Build.targets" ] && return 0
+  # `find -maxdepth 1` rather than a glob loop: a repo with thousands of files
+  # in one directory would expand a `*.csproj` glob into an unusable argv.
+  # -not -path "./.*" keeps a stray file under .git/.vscode from declaring the
+  # project language.
+  [ -n "$(find . -maxdepth 1 -type f \( -name '*.csproj' -o -name '*.sln' \) 2>/dev/null | sed -n '1p; 1q')" ]
+}
+
+# Succeeds when a .cs source exists below the current directory.
+has_csharp_sources() {
+  [ -n "$(find . -name "*.cs" -type f -not -path "./.git/*" -not -path "*/node_modules/*" -not -path "*/bin/*" -not -path "*/obj/*" 2>/dev/null | sed -n '1p; 1q')" ]
+}
+
 detect_project_lang() {
-  if [ -f "tsconfig.json" ]; then
+  # #717: the C# arms come FIRST, before tsconfig.json / package.json /
+  # .sh sniffing. Detection below is an exclusive first-match chain, and a .NET
+  # repo routinely carries a JS or shell half (the dsh-aot-runner shape in the
+  # issue is 2031 lines of C# plus ~900 lines of JS). Ordered after the
+  # TypeScript arm, that repo reported "typescript" and every C# file was
+  # invisible to language-routed gates -- the silent skip #717 is about.
+  #
+  # Placing C# first cannot steal an existing project: none of the languages
+  # matched afterwards ever ship a .csproj/.sln/Directory.Build.props, so the
+  # pre-existing arms are reached unchanged whenever those files are absent.
+  if has_dotnet_manifest; then
+    echo "csharp"
+  elif [ -f "tsconfig.json" ]; then
     echo "typescript"
   elif [ -f "pyproject.toml" ] || [ -f "requirements.txt" ] || [ -f "setup.py" ]; then
     echo "python"
@@ -88,6 +126,8 @@ detect_project_lang() {
       else
         echo "dart"
       fi
+    elif [ -n "$(find . -name "*.cs" -type f -not -path "./.git/*" -not -path "*/bin/*" -not -path "*/obj/*" | sed -n '1p; 1q')" ]; then
+      echo "csharp"
     elif [ -n "$(find . -name "*.swift" -type f | sed -n '1p; 1q')" ]; then
       echo "swift"
     elif [ -n "$(find . -name "*.cpp" -o -name "*.cc" -o -name "*.c" -o -name "*.h" -type f | sed -n '1p; 1q')" ]; then
@@ -103,6 +143,18 @@ detect_project_lang() {
     fi
   fi
 }
+
+# ---------------------------------------------------------------------------
+# NOTE (#717): a `detect_project_langs()` collector was added here and then
+# REMOVED before this change landed. It had zero production callers -- only its
+# own tests -- which is exactly the dead-dispatch shape #688 deleted from this
+# same file (see below). The gates do NOT route through it: pre-commit collects
+# languages with its own `_detect_ext_lang` into `PROJECT_LANGS`, and that is
+# what actually decides which adapters run (AC-717-13/13b pin the dual-language
+# case). Keeping a second, unconsumed collector beside it would have meant two
+# language-detection paths drifting apart, with the untested one looking
+# authoritative. If multi-language routing is ever reworked, the change belongs
+# in pre-commit's collector, not in a parallel helper here.
 
 # ---------------------------------------------------------------------------
 # REMOVED in #688: route_to_adapter()
@@ -210,7 +262,8 @@ detect_iac_project() {
   
   # Check for Kubernetes manifests (YAML with apiVersion/kind)
   if [ -n "$(find . -maxdepth 2 \( -name "*.yaml" -o -name "*.yml" \) -not -path "./.git/*" 2>/dev/null | sed -n '1p; 1q')" ]; then
-    local yaml_file=$(find . -maxdepth 2 \( -name "*.yaml" -o -name "*.yml" \) -not -path "./.git/*" 2>/dev/null | sed -n '1p; 1q')
+    local yaml_file
+    yaml_file=$(find . -maxdepth 2 \( -name "*.yaml" -o -name "*.yml" \) -not -path "./.git/*" 2>/dev/null | sed -n '1p; 1q')
     if grep -qE "^(apiVersion|kind):" "$yaml_file" 2>/dev/null; then
       has_iac=true
     fi

@@ -271,6 +271,17 @@ if [ -z "$GATE_DIR" ]; then
   GATE_DIR="$ADAPTER_DIR"
 fi
 
+# Gate registry (#717 walkthrough): binds each gate's NAME to the file that
+# runs it, so a gate can be referred to by what it does rather than by a
+# positional number. Optional by design — a consumer repo installed from an
+# older package will not have it, and the hooks must keep working there.
+_GATE_REGISTRY="$GATE_DIR/gate-registry.sh"
+[ -f "$_GATE_REGISTRY" ] || _GATE_REGISTRY="$(git rev-parse --show-toplevel 2>/dev/null)/githooks/gate-registry.sh"
+if [ -f "$_GATE_REGISTRY" ]; then
+  # shellcheck source=/dev/null
+  . "$_GATE_REGISTRY"
+fi
+
 # Trap: ensure quality report generated on ANY exit (pass or fail).
 # Using a guard prevents recursion when 'exit' is called from inside the trap.
 # IMPORTANT: Captures exit status FIRST so generate_quality_report cannot override it.
@@ -1267,6 +1278,14 @@ if [ -z "$PROJECT_LANGS" ] && [ -z "$_CONFIG_LANGS" ]; then
   if [ "$(_detect_ext_lang "ps1" "psm1")" = "1" ]; then
     PROJECT_LANGS="$PROJECT_LANGS powershell"
   fi
+  # #717: without this arm a staged .cs file never produced a `csharp` entry in
+  # PROJECT_LANGS, so the per-language loop at the adapter-routing site had no
+  # turn in which to resolve adapters/csharp.sh -- the adapter was unreachable
+  # no matter how correct it was. Detection on extensions (not manifests) is why
+  # one arm is enough: a repo staging .cs always lands here.
+  if [ "$(_detect_ext_lang "cs" "csx")" = "1" ]; then
+    PROJECT_LANGS="$PROJECT_LANGS csharp"
+  fi
   # IaC: .tf, .tfvars, Dockerfile, docker-compose*, .yaml/.yml in kube context
   if echo "$CHANGED_FILES" | grep -qE '(\.tf$|\.tfvars$|Dockerfile|docker-compose)' 2>/dev/null; then
     PROJECT_LANGS="$PROJECT_LANGS iac"
@@ -2256,7 +2275,18 @@ else
         if [ "$LINT_EXIT" -ne 0 ]; then
           echo "ℹ️  Lint check had issues (may be non-blocking)"
         fi
-    
+
+        # #717: rc=2 is the adapters' "could not execute" channel (no toolchain,
+        # or a tool that refused to start), distinct from rc=1 "ran and found
+        # problems". Collapsing both into one SKIPPED line -- as this branch did
+        # -- makes a permanently-broken analyzer indistinguishable from a clean
+        # one, which is the silent-failure shape #717 is about. The gate still
+        # does not block (tool-missing must not block), but the reason is now
+        # named in the log instead of implied.
+        if [ "$ANALYSIS_EXIT" -eq 2 ] || [ "$LINT_EXIT" -eq 2 ]; then
+          echo "⏭️  SKIPPED - Code quality (${CURRENT_LANG} toolchain could not execute — NOT a pass)"
+        fi
+
         if [ "$ANALYSIS_EXIT" -eq 0 ] && [ "$LINT_EXIT" -eq 0 ]; then
           echo "✅ PASSED - Language-specific code quality checks."
         else
@@ -4307,8 +4337,72 @@ JAVAARCHROOTS
           fi
         fi
         ;;
+      "csharp")
+        # #717: C# had no arm at all, so it fell through to the `*)` default
+        # below and was reported as "not configured for csharp" -- a language
+        # the gate silently could not measure, with no way to configure it
+        # either, because the config file was never looked for.
+        #
+        # Architecture for .NET is normally expressed as *tests* (NetArchTest,
+        # ArchUnitNET, or a plain xUnit project asserting layering). There is no
+        # universal CLI, so this arm keys off a config the project opts into,
+        # exactly like the Go arm's arch-go.yaml.
+        if [ -f "arch-csharp.yaml" ] || [ -f ".xp-gate/arch-csharp.yaml" ]; then
+          _cs_arch_cfg="arch-csharp.yaml"
+          [ -f "$_cs_arch_cfg" ] || _cs_arch_cfg=".xp-gate/arch-csharp.yaml"
+          # Find an architecture test project: a .csproj whose name or contents
+          # mention architecture tests. Guessing one fixed path is the #602
+          # defect, which reported "not configured" for repos that had them.
+          _cs_arch_proj=""
+          while IFS= read -r _p; do
+            [ -n "$_p" ] || continue
+            if grep -qiE "architecture|archunit|netarchtest" "$_p" 2>/dev/null; then
+              _cs_arch_proj="$_p"
+              break
+            fi
+          done <<CSARCHPROJ
+$(git ls-files '*.csproj' 2>/dev/null)
+CSARCHPROJ
+
+          if [ -z "$_cs_arch_proj" ]; then
+            echo "     ℹ️  No architecture test project found - skipping C# architecture"
+            echo "     ⏭️  SKIPPED - C# architecture validation (no arch test project)"
+            if [ "${BASH_VERSINFO[0]:-0}" -ge 4 ]; then
+              GATE_6_REASON_BY_LANG["$CURRENT_LANG"]="architecture_not_configured"
+            fi
+          elif ! command -v dotnet >/dev/null 2>&1; then
+            echo "     ⏭️  SKIPPED - C# architecture validation (dotnet SDK not installed)"
+            if [ "${BASH_VERSINFO[0]:-0}" -ge 4 ]; then
+              GATE_6_REASON_BY_LANG["$CURRENT_LANG"]="tool_missing"
+            fi
+          else
+            echo "     Running C# architecture tests ($_cs_arch_proj)..."
+            # Same reading as the Go/Java arms (#630/#602): the checker's own
+            # status decides the verdict. Piping into `tail` and printing
+            # "completed" unconditionally is the fail-open shape those issues
+            # removed; PIPESTATUS[0] is what keeps this arm from repeating it.
+            dotnet test "$_cs_arch_proj" --nologo 2>&1 | tail -20
+            _cs_arch_rc="${PIPESTATUS[0]}"
+            if [ "$_cs_arch_rc" -ne 0 ]; then
+              echo ""
+              echo "❌ BLOCKED - C# architecture violations ($_cs_arch_proj, exit $_cs_arch_rc)"
+              echo "Fix the layering violation(s) above before committing."
+              if [ "${BASH_VERSINFO[0]:-0}" -ge 4 ]; then
+                GATE_6_REASON_BY_LANG["$CURRENT_LANG"]="architecture_tests_failed"
+              fi
+              exit 1
+            fi
+            echo "     ✅ C# architecture validation completed."
+          fi
+        else
+          echo "     ℹ️  No arch-csharp.yaml found - skipping C# architecture"
+          echo "     ⏭️  SKIPPED - C# architecture validation (no config)"
+          if [ "${BASH_VERSINFO[0]:-0}" -ge 4 ]; then
+            GATE_6_REASON_BY_LANG["$CURRENT_LANG"]="architecture_not_configured"
+          fi
+        fi
+        ;;
       *)
-        echo "     ℹ️  Architecture validation not configured for $CURRENT_LANG"
         echo "     ⏭️  SKIPPED - Architecture validation (not configured for $CURRENT_LANG)"
         # #537: archlint ships no detector for this language. Say so in a way
         # the quality report can read, instead of leaving the dimension silent.
@@ -4987,6 +5081,19 @@ if [ -n "$MIRROR_STAGED" ] && printf '%s\n' "$MIRROR_STAGED" | grep -qE '^(githo
       # each other, and the only way past was to edit a generated file by hand.
       case "$_mf" in
         */__tests__/*) continue ;;
+        # AGENTS.md is documentation, not a hook artifact: sync-package-content.js
+        # copies the hook suite, and no AGENTS.md exists under hooks/. Demanding a
+        # mirror for it reported a BLOCK on every doc edit (harmless only because
+        # GATE_FAILED was never read -- see below).
+        */AGENTS.md) continue ;;
+        # `githooks/adapters/` mirrors to `src/npm-package/adapters/`, NOT under
+        # `hooks/` -- that is what scripts/check-hook-mirror.sh declares (line 6)
+        # and what sync-package-content.js writes. The blanket `githooks/*` rule
+        # below sent it to `src/npm-package/hooks/adapters/<f>`, a path that has
+        # never existed, so ANY edit to an adapter was un-committable with
+        # "has no mirror at". It stayed hidden because nobody had edited an
+        # adapter since this gate was narrowed to diff files.
+        githooks/adapters/*) _mm="src/npm-package/adapters/${_mf#githooks/adapters/}" ;;
         githooks/*) _mm="src/npm-package/hooks/${_mf#githooks/}" ;;
         plugins/*/src/*) _mm=$(printf '%s' "$_mf" | sed 's|^plugins/\([^/]*\)/src/|src/npm-package/plugins/\1/src/|') ;;
         *) continue ;;
@@ -5006,7 +5113,15 @@ if [ -n "$MIRROR_STAGED" ] && printf '%s\n' "$MIRROR_STAGED" | grep -qE '^(githo
       echo "❌ BLOCKED - Gate 12b: $MIRROR_FAIL mirror parity violation(s)."
       echo "   The mirror is what gets published; a mirror-only fix is silently"
       echo "   reverted by the next prepack (v0.27.3 shipped that bug)."
-      GATE_FAILED=1
+      # BLOCKS, and must actually block. This used to set GATE_FAILED=1, a
+      # variable that appears exactly once in this file -- the assignment --
+      # and is read nowhere, so the gate printed BLOCKED on every doc edit and
+      # let the commit through. A gate that reports a verdict nobody consumes is
+      # the same failure as a filter that accepts a file no adapter claims:
+      # it looks like enforcement. exit is the contract every other blocking
+      # gate here uses (see Gate 13: `exit "$_g13_worst"`).
+      GATE_12_STATUS=WARN
+      exit 1
     else
       echo "✅ PASSED - Gate 12b: mirror parity (touched files)"
     fi
@@ -5061,6 +5176,10 @@ elif [ -f "$GATE_DIR/gate-13-compiler-strictness.sh" ] || [ -f "$(git rev-parse 
 
     gate13_run_cpp_analysis;   _g13_rc=$?; _g13_note "$_g13_rc"
     gate13_run_java_analysis;  _g13_rc=$?; _g13_note "$_g13_rc"
+    # #717: C# joins the same reduce-the-worst loop. Without this call the
+    # function would exist but never execute -- the "silently skipped" shape
+    # #717 is about, one level up.
+    gate13_run_csharp_analysis; _g13_rc=$?; _g13_note "$_g13_rc"
     gate13_run_analyzer;       _g13_rc=$?; _g13_note "$_g13_rc"
 
     exit "$_g13_worst"

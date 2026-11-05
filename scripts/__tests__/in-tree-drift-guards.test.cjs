@@ -13,6 +13,28 @@ const fs = require('fs');
 const path = require('path');
 
 const ROOT = path.resolve(__dirname, '..', '..');
+
+/**
+ * True when the suite is running inside a Stryker sandbox.
+ *
+ * Stryker copies the tree to `.stryker-tmp/sandbox-*` and then INJECTS a mutation
+ * into the file under test — `--mutate src/principles/analyzer.ts` leaves the
+ * canonical copy mutated and the mirror untouched, by design. Any assertion that
+ * two mirrored copies are byte-identical is therefore guaranteed to fail there,
+ * for a reason that has nothing to do with drift.
+ *
+ * That is what kept the `mutation` job red on every branch (#757): the Stryker
+ * dry run's failure named AC-433-01 and `expected [ Array(1) ] to deeply equal []`,
+ * which reads like a broken drift guard and is actually the mutation doing its
+ * job. Measured inside the sandbox: `problems=["byte drift: src/principles/analyzer.ts"]`
+ * while the same check passes on the pre-run tree.
+ *
+ * Mirror parity is still enforced on every real run — `npm test` and Gate 5 both
+ * execute it outside the sandbox.
+ */
+const IN_MUTATION_SANDBOX = /[\\/]\.stryker-tmp[\\/]sandbox-/.test(__dirname) ||
+  /[\\/]\.stryker-tmp[\\/]sandbox-/.test(ROOT);
+
 const MANIFESTS = [
   'plugins/claude-code/.claude-plugin/plugin.json',
   'plugins/qoder/plugin.json',
@@ -77,6 +99,14 @@ describe('AC-433-01: hook mirror parity (githooks ↔ npm mirrors, byte-level)',
   });
 
   it('principles tree mirrors are byte-identical to src/principles/', () => {
+    // A mutation run intentionally makes the canonical copy differ from its
+    // mirror, so this assertion cannot hold there. Guard the SPECIFIC test rather
+    // than disabling the file: the githooks/ and root-shell parity checks above
+    // stay live, and so does everything in AC-433-02 below.
+    if (IN_MUTATION_SANDBOX) {
+      expect(IN_MUTATION_SANDBOX).toBe(true);
+      return;
+    }
     const srcDir = path.join(ROOT, 'src', 'principles');
     const mirrorDir = path.join(ROOT, 'src', 'npm-package', 'principles');
     expect(fs.existsSync(srcDir)).toBe(true);

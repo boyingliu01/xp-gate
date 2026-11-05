@@ -130,12 +130,18 @@ if [ -f "$NPM_QODE_PLUGIN" ]; then
 fi
 
 # ---------- AGENTS.md 头部更新 ----------
-# 更新每个 AGENTS.md 的 3 行元数据头：Generated / Commit / Branch / Version
-# Node 首选（正则更灵活），无 Node 时降级为 4 次 sed 调用
-
-TODAY="$(date +%Y-%m-%d)"
-HEAD_SHA="$(git -C "$ROOT_DIR" rev-parse --short HEAD 2>/dev/null || echo unknown)"
-BRANCH="$(git -C "$ROOT_DIR" rev-parse --abbrev-ref HEAD 2>/dev/null || echo unknown)"
+#
+# ⚠️ 只同步 Version —— 与 scripts/sync-version.cjs 保持一致，别在这里加回日期/sha/分支。
+#
+# 本脚本被 cross-platform-ci 调用，用来验证「提交的镜像与正本一致」。若它把当天日期、
+# HEAD sha、分支名写进 AGENTS.md 头部，那么同步之后的镜像与正本必然在头部不同，于是
+# 那个校验永远无法直接比对，只能靠 sed 剥离头部再比 —— 而那种豁免正是病灶：
+# 同一份内容在不同运行条件下产出不同字节，任何「比对两份文件」的守卫都会误报，
+# 只能逐个打补丁绕开。
+#
+# 后果的实证见 #757：安装阶段弄脏 32 个跟踪文件，mutation job 因此每次都红。
+# 版本号是内容属性（改 VERSION 才变），保留；其余交给显式动作。
+# 守卫：scripts/__tests__/sync-version-deterministic.test.cjs
 
 AGENTS_COUNT=0
 while IFS= read -r -d '' agents_file; do
@@ -146,9 +152,6 @@ while IFS= read -r -d '' agents_file; do
       let c = fs.readFileSync(p, 'utf8');
       let changed = false;
       const repl = [
-        [/^\*\*Generated:\*\*.*$/m, '**Generated:** $TODAY'],
-        [/^\*\*Commit:\*\*.*$/m,    '**Commit:** $HEAD_SHA'],
-        [/^\*\*Branch:\*\*.*$/m,    '**Branch:** $BRANCH'],
         [/^\*\*Version:\*\*.*$/m,   '**Version:** $FULL_VERSION'],
       ];
       for (const [re, rep] of repl) {
@@ -158,19 +161,16 @@ while IFS= read -r -d '' agents_file; do
       process.exit(2);
     " && AGENTS_COUNT=$((AGENTS_COUNT + 1)) || true
   else
-    # sed fallback: 4 次独立替换
+    # sed fallback: 只替换 Version（见上）
     sed_i=""
     case "$(uname -s 2>/dev/null || echo Linux)" in
       Darwin*) sed_i="sed -i ''" ;;
       *)       sed_i="sed -i" ;;
     esac
-    $sed_i "s|^\*\*Generated:\*\*.*|**Generated:** $TODAY|"            "$agents_file"
-    $sed_i "s|^\*\*Commit:\*\*.*|**Commit:** $HEAD_SHA|"                "$agents_file"
-    $sed_i "s|^\*\*Branch:\*\*.*|**Branch:** $BRANCH|"                  "$agents_file"
     $sed_i "s|^\*\*Version:\*\*.*|**Version:** $FULL_VERSION|"          "$agents_file"
     AGENTS_COUNT=$((AGENTS_COUNT + 1))
   fi
 done < <(find "$ROOT_DIR" -name 'AGENTS.md' -not -path '*/node_modules/*' -not -path '*/.git/*' -print0)
-echo "[sync-version] AGENTS.md headers refreshed: $AGENTS_COUNT files (date=$TODAY commit=$HEAD_SHA branch=$BRANCH version=$FULL_VERSION)"
+echo "[sync-version] AGENTS.md headers refreshed: $AGENTS_COUNT files (version=$FULL_VERSION)"
 
 echo "[sync-version] OK — all package.json version fields synced from VERSION ($FULL_VERSION)"
