@@ -411,14 +411,13 @@ function findBraceAfterReturnType(body: string, from: number, to: number): numbe
   return -1;
 }
 
-/** How one character of a type annotation affects the type scan. */
+/** One classified step of an arrow return-type scan. */
 type TypeScanStep = 'stop' | 'open-brace' | 'close-brace' | 'open-angle' | 'close-angle' | 'skip';
 
 /**
- * How one character of a type annotation affects the type scan.
- *
- * An arrow's return type may itself be an object literal
- * (`(x): { ok: boolean } =>`), so a `{` opens a type brace.
+ * Classify one character of an arrow's return type. An arrow's return type may
+ * itself be an object literal (`(x): { ok: boolean } =>`), so a `{` opens a type
+ * brace.
  */
 function classifyTypeChar(body: string, i: number, braces: number, angles: number): TypeScanStep {
   const c = body[i];
