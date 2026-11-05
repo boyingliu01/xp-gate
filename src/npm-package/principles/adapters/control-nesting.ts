@@ -155,10 +155,18 @@ function locateControlBody(body: string, from: number, to: number): { bodyStart:
   if (body[i] === '{') {
     return { bodyStart: i + 1, bodyEnd: skipBalancedBrace(body, i) - 1 };
   }
-  // Brace-less body: it ends at the statement end, which for JavaScript is a
-  // newline as much as a `;`. Stopping only at `;` would swallow every following
-  // statement of the enclosing block and score sequential guard clauses as
-  // nesting.
+  // Brace-less body. When the body is itself a control structure, the region to
+  // scan starts at that structure's keyword and ends where its own body ends --
+  // each level then adds its own +1 as the scan descends, so `if (a)\n if (b)\n
+  // if (c) { }` nests three deep. Returning the innermost range directly would
+  // skip the intermediate levels.
+  const head = readWord(body, i);
+  if (head && NESTING_KEYWORDS.has(head.word) && !isMemberAccess(body, i) && !isKeyOrLabel(body, head.end)) {
+    return { bodyStart: i, bodyEnd: locateControlBody(body, head.end, to).bodyEnd };
+  }
+  // Otherwise it ends at the statement end, which for JavaScript is a newline as
+  // much as a `;`. Stopping only at `;` would swallow every following statement
+  // and score sequential guard clauses as nesting.
   let end = i;
   while (end < to && body[end] !== ';' && body[end] !== '\n') end++;
   if (end < to && body[end] === ';') end++;
