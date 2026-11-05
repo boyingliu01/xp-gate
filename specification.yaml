@@ -5015,3 +5015,18 @@ specification:
         - id: AC-717-24
           criteria: 代码走查发现的"声称覆盖但未测量"项已修正并各有一条钉住它的测试
           test_type: integration
+        - id: AC-717-25
+          criteria: 门禁注册表被 pre-commit 真实加载（而非仅文件存在），且缺失时可优雅降级
+          test_type: integration
+        - id: AC-717-26
+          criteria: 混合 C# + JS + shell 仓库检测为 csharp，同仓其它语言不致静默丢失
+          test_type: integration
+        - id: AC-717-27
+          criteria: 无 .NET 清单时既有语言（TypeScript/Python/Go/shell）检测结果不发生回归
+          test_type: integration
+        - id: AC-717-28
+          criteria: has_csharp_sources 忽略 obj/ 与 bin/ 构建产物，避免构建残留被误判为 C# 仓库
+          test_type: unit
+        - id: AC-717-29
+          criteria: package-lock.json 的两处版本号（顶层与 packages[""]）随 VERSION 同步，不再滞留旧版本
+          test_type: unit
