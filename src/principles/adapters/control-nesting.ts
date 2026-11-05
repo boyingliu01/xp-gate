@@ -191,6 +191,11 @@ function isNestedFunctionIntro(body: string, wordStart: number, wordEnd: number)
  * Locate the `{` that opens the body of a nested function whose intro ends at
  * `from`.
  *
+ * A destructured or defaulted parameter carries braces of its own
+ * (`const h = ({id}) => {`, `function f(a = {}) {`), so the parameter list is
+ * skipped first -- otherwise the parameter's brace is mistaken for the body and
+ * the real body is charged to the enclosing function.
+ *
  * @returns the index of the body's `{`, or `-1` when the body is an expression
  *   with no braces (`const f = () => 1;`). The two cases must be distinguished:
  *   a caller that treated `-1` as `from` would hand a non-brace position to
@@ -198,7 +203,15 @@ function isNestedFunctionIntro(body: string, wordStart: number, wordEnd: number)
  *   and silently drops every control structure after the arrow.
  */
 function findFunctionBodyBrace(body: string, from: number, to: number): number {
-  for (let i = from; i < to; i++) {
+  // Walk to the parameters (if any) and step over the whole list, including
+  // nested braces inside it.
+  let start = from;
+  for (; start < to; start++) {
+    if (body[start] === '(' || body[start] === '{' || body[start] === ';') break;
+  }
+  let i = start;
+  if (body[i] === '(') i = skipSpaces(body, skipBalancedParen(body, i), to);
+  for (; i < to; i++) {
     if (body[i] === '{') return i;
     // No braced body before the statement ends: an expression-bodied arrow or a
     // `function` whose `{` never appears. Report -1 so the caller resumes the
