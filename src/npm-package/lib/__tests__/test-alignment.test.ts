@@ -57,8 +57,16 @@ afterEach(() => {
 function writeTempFile(filename: string, content: string): string {
   const filepath = path.join(tempDir, filename);
   const dir = path.dirname(filepath);
-  if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
-  fs.writeFileSync(filepath, content, 'utf8');
+  try {
+    if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+    fs.writeFileSync(filepath, content, 'utf8');
+  } catch (error) {
+    // A silent failure here would surface as an unrelated assertion error far
+    // from the real cause (an unwritable temp dir), so name the file and the
+    // underlying reason in the thrown message.
+    const reason = error instanceof Error ? error.message : String(error);
+    throw new Error(`Failed to write temp file ${filepath}: ${reason}`);
+  }
   return filepath;
 }
 

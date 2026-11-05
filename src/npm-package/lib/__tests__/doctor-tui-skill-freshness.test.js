@@ -196,9 +196,16 @@ describe('doctor-tui installed skills enumerate the filesystem (#635)', () => {
   /** Deploy a real bundled skill into one platform's skills dir. */
   function deploy(platformDirs, name) {
     const dir = path.join(tmpHome, ...platformDirs, name);
-    fs.mkdirSync(dir, { recursive: true });
-    const bundled = fs.readFileSync(path.join(bundledSkillsDir, name, 'SKILL.md'), 'utf8');
-    fs.writeFileSync(path.join(dir, 'SKILL.md'), bundled);
+    try {
+      fs.mkdirSync(dir, { recursive: true });
+      const bundled = fs.readFileSync(path.join(bundledSkillsDir, name, 'SKILL.md'), 'utf8');
+      fs.writeFileSync(path.join(dir, 'SKILL.md'), bundled);
+    } catch (error) {
+      // Naming the skill keeps a misplaced fixture from looking like a
+      // doctor() behaviour failure.
+      const reason = error instanceof Error ? error.message : String(error);
+      throw new Error(`Failed to deploy bundled skill ${name}: ${reason}`);
+    }
   }
 
   // AC-635-01: a machine with skills deployed and NO installedSkills config key
@@ -325,8 +332,13 @@ describe('doctor-tui skill freshness #681 equal version, different content', () 
 
   function installSkill(name, content) {
     const dir = path.join(tmpHome, '.config', 'opencode', 'skills', name);
-    fs.mkdirSync(dir, { recursive: true });
-    fs.writeFileSync(path.join(dir, 'SKILL.md'), content);
+    try {
+      fs.mkdirSync(dir, { recursive: true });
+      fs.writeFileSync(path.join(dir, 'SKILL.md'), content);
+    } catch (error) {
+      const reason = error instanceof Error ? error.message : String(error);
+      throw new Error(`Failed to install test skill ${name}: ${reason}`);
+    }
   }
 
   function runFreshness(name) {
