@@ -38,6 +38,12 @@ const NESTING_KEYWORDS = new Set(['if', 'for', 'while', 'switch', 'catch', 'do',
  * True when the string/template/comment contents still contain unbalanced
  * braces -- evidence that `maskLiterals` was skipped. A masked body cannot have
  * a `{` or `}` inside a literal, so any imbalance is a masking gap.
+ *
+ * Braces are checked rather than parens because they are what the scanner's
+ * block pairing depends on. A paren check would additionally fire on
+ * `maskLiterals`' own gaps (it misses regex literals inside array literals, whose
+ * escaped `\(` reads as an open paren), which is a separate defect: widening the
+ * assertion here would turn that gap into a crash on valid code.
  */
 function hasUnbalancedBraces(body: string): boolean {
   let depth = 0;
