@@ -100,6 +100,20 @@ describe('maxControlNesting counts control structures, not braces', () => {
     `)).toBe(1);
   });
 
+  it('does not skip the rest of the body after an expression-bodied arrow', () => {
+    // A nested function with no braces has no body to skip. Treating the
+    // "no brace found" sentinel as a brace position would scan to the end of
+    // the enclosing function and drop everything after the arrow.
+    expect(maxControlNesting(`
+      const f = () => 1;
+      if (a) { return 1; }
+    `)).toBe(1);
+    expect(maxControlNesting(`
+      const f = () => 1;
+      if (a) { if (b) { return 2; } }
+    `)).toBe(2);
+  });
+
   it('does not charge the enclosing body for a nested function definition', () => {
     // The inner `for` belongs to `process`, which is reported as its own
     // function; the outer level stays flat. Matches lizard `-ENS`.

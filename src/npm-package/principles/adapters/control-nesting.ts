@@ -105,7 +105,11 @@ function consumeStructure(
     // Skipping it here keeps this function's score from being charged for
     // nesting a reader never sees at this level, and matches lizard's `-ENS`,
     // which attributes a callback's nesting to the callback.
-    return skipBalancedBrace(body, findFunctionBodyBrace(body, word.end, to));
+    const brace = findFunctionBodyBrace(body, word.end, to);
+    // Expression-bodied (`const f = () => 1;`): no body to skip, so drop only
+    // the intro. Skipping a range here would swallow the rest of the function.
+    if (brace < 0) return word.end;
+    return skipBalancedBrace(body, brace);
   }
   return word.end;
 }
@@ -114,8 +118,11 @@ function consumeStructure(
  * Locate the payload of a control body starting at `from`.
  *
  * `from` is the position just past the keyword (`consumeStructure` already
- * consumed it), so `else if (...) {` arrives here pointing at `if` and the
- * condition scan below handles it -- one level, not two.
+ * consumed it), so for `else if (...) {` this starts at the `if` word rather
+ * than at `(`. The condition scan below is therefore skipped and the brace-less
+ * branch would mis-time the body -- except that `consumeStructure` recurses into
+ * the `if` keyword itself and reaches this function again from its own `)`.
+ * The body returned here is only the fallback for a structure with no condition.
  *
  * @returns the half-open range to scan at the deeper level.
  */
@@ -181,14 +188,23 @@ function isNestedFunctionIntro(body: string, wordStart: number, wordEnd: number)
 
 /**
  * Locate the `{` that opens the body of a nested function whose intro ends at
- * `from`, returning its index (or `from` when there is no braced body).
+ * `from`.
+ *
+ * @returns the index of the body's `{`, or `-1` when the body is an expression
+ *   with no braces (`const f = () => 1;`). The two cases must be distinguished:
+ *   a caller that treated `-1` as `from` would hand a non-brace position to
+ *   `skipBalancedBrace`, which then scans to the end of the enclosing function
+ *   and silently drops every control structure after the arrow.
  */
 function findFunctionBodyBrace(body: string, from: number, to: number): number {
   for (let i = from; i < to; i++) {
     if (body[i] === '{') return i;
-    if (body[i] === ';' || body[i] === '}') return from;
+    // No braced body before the statement ends: an expression-bodied arrow or a
+    // `function` whose `{` never appears. Report -1 so the caller resumes the
+    // scan instead of skipping a bogus range.
+    if (body[i] === ';' || body[i] === '}') return -1;
   }
-  return from;
+  return -1;
 }
 
 /**
