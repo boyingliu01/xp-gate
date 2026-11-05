@@ -23,7 +23,7 @@ const ROOT = path.resolve(__dirname, '..', '..');
  * two mirrored copies are byte-identical is therefore guaranteed to fail there,
  * for a reason that has nothing to do with drift.
  *
- * That is what kept the `mutation` job red on every branch (#757): the Stryker
+ * That is what kept the `mutation` job red on every branch (#752): the Stryker
  * dry run's failure named AC-433-01 and `expected [ Array(1) ] to deeply equal []`,
  * which reads like a broken drift guard and is actually the mutation doing its
  * job. Measured inside the sandbox: `problems=["byte drift: src/principles/analyzer.ts"]`
