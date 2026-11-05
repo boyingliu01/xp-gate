@@ -45,10 +45,10 @@ const HEADER = ['# FIXTURE MODULE', '', '**Generated:** 2000-01-01', '**Commit:*
   '**Branch:** some/branch', '**Version:** 0.0.0.0', '', 'Body text that must survive.', ''].join('\n');
 
 /**
- * Build a minimal repo the script recognises, run it `times`, and return the
- * resulting AGENTS.md plus the package.json contents it synced.
+ * Build a minimal repo the script recognises. Returns the fixture dir, its
+ * AGENTS.md path, and a runner that executes the script in place.
  */
-function runFixture({ times = 1, script = REAL_SCRIPT, name = 'sync-version.cjs' } = {}) {
+function makeFixture({ script = REAL_SCRIPT, name = 'sync-version.cjs' } = {}) {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'sync-version-fixture-'));
 
   // A COPY of the script, so its root resolves inside the fixture, not the repo.
@@ -66,17 +66,24 @@ function runFixture({ times = 1, script = REAL_SCRIPT, name = 'sync-version.cjs'
   const agents = path.join(dir, 'AGENTS.md');
   fs.writeFileSync(agents, HEADER);
 
-  for (let i = 0; i < times; i++) {
-    execFileSync(process.execPath, [path.join(dir, 'scripts', name)], {
+  return {
+    dir,
+    agents,
+    run: () => execFileSync(process.execPath, [path.join(dir, 'scripts', name)], {
       cwd: dir, stdio: 'pipe',
-    });
-  }
-
-  const result = {
-    agents: fs.readFileSync(agents, 'utf8'),
-    rootPkg: JSON.parse(fs.readFileSync(path.join(dir, 'package.json'), 'utf8')),
+    }),
+    read: () => fs.readFileSync(agents, 'utf8'),
+    rootPkg: () => JSON.parse(fs.readFileSync(path.join(dir, 'package.json'), 'utf8')),
+    cleanup: () => fs.rmSync(dir, { recursive: true, force: true }),
   };
-  fs.rmSync(dir, { recursive: true, force: true });
+}
+
+/** Convenience: build a fixture, run it `times`, return the observed output. */
+function runFixture({ times = 1, ...opts } = {}) {
+  const fx = makeFixture(opts);
+  for (let i = 0; i < times; i++) fx.run();
+  const result = { agents: fx.read(), rootPkg: fx.rootPkg() };
+  fx.cleanup();
   return result;
 }
 
@@ -103,18 +110,38 @@ describe('sync-version.cjs is idempotent (REQ-757)', () => {
   });
 
   it('AC-757-03: a second run over unchanged content changes nothing', () => {
-    const once = runFixture({ times: 1 });
-    const twice = runFixture({ times: 2 });
-    // This is the property that makes `npm ci` safe: the install step must not
-    // leave the tree different from what was committed.
-    expect(twice.agents).toBe(once.agents);
-    expect(twice.rootPkg.version).toBe(once.rootPkg.version);
+    // Same fixture, snapshotted BEFORE and AFTER a second run. Comparing two
+    // SEPARATE fixtures was the earlier version of this test and it was vacuous:
+    // if the volatile writes came back, two fixtures built in the same second
+    // would converge on the same date/sha/branch and compare equal, so the
+    // defect would pass. Only "the tree did not move" tests the property.
+    const fx = makeFixture();
+    try {
+      fx.run();
+      const afterFirst = fx.read();
+      const pkgAfterFirst = JSON.stringify(fx.rootPkg());
+      fx.run();
+      expect(fx.read()).toBe(afterFirst);
+      expect(JSON.stringify(fx.rootPkg())).toBe(pkgAfterFirst);
+      // And the second run must not be a no-op that silently skipped the work:
+      // the version must still be the one from VERSION.
+      expect(afterFirst).toContain('**Version:** 9.9.9.9');
+    } finally {
+      fx.cleanup();
+    }
   });
 
-  it('AC-757-04: the shell sibling writes no per-run values either', () => {
-    // scripts/sync-version.sh is the writer cross-platform-ci.yml runs before its
-    // mirror check. Leaving it unfixed would keep the defect reachable from CI
-    // even after the .cjs is corrected -- the reviewer's second finding.
+  it('AC-757-04: the shell sibling shares the same contract', () => {
+    // scripts/sync-version.sh is the writer cross-platform-ci.yml calls before its
+    // mirror check, so leaving it unfixed keeps the defect reachable from CI.
+    //
+    // The .sh cannot be copied into a temp fixture the way the .cjs can -- it
+    // locates the repo with `git -C` and `find`, and its sed fallback differs per
+    // platform -- so this case pins its CONTRACT rather than executing it. That is
+    // weaker than AC-757-01/03 and is stated as such: what it guarantees is that
+    // no per-run value is ever substituted into the header, which is exactly the
+    // write that dirtied the tree. Executing both platform branches is tracked in
+    // the follow-up for the sed fallback (#758).
     const src = fs.readFileSync(REAL_SHELL_SCRIPT, 'utf8');
     // Written-out values, not merely derived: a variable computed but never
     // substituted cannot dirty anything.
@@ -124,6 +151,8 @@ describe('sync-version.cjs is idempotent (REQ-757)', () => {
       '**Branch:** $BRANCH',
     ].filter((needle) => src.includes(needle));
     expect(volatileWrites).toEqual([]);
+    // Neither may it inline the value at the call site.
+    expect(src).not.toMatch(/\*\*Generated:\*\*.*\$\(date/);
     // The version must survive, or the script stops doing its job.
     expect(src).toContain('**Version:** $FULL_VERSION');
   });

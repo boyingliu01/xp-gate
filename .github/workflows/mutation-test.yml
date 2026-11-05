@@ -144,21 +144,24 @@ jobs:
       # named, instead of as an unexplained dry-run failure 3 minutes later.
       - name: Assert the install did not dirty the tree (#757)
         run: |
-          # -e must stay OFF: the whole point is to print the diff before
-          # failing. GitHub runs steps with -eo pipefail, and under -e a
-          # non-empty diff makes `diff` exit 1 and kill the step mid-report.
+          # -e must stay OFF: the whole point is to report before failing.
+          # GitHub runs steps with -eo pipefail; under -e a non-empty diff makes
+          # `diff` exit 1 and kill the step mid-report.
           set +e
           set -uo pipefail
-          # Check the WHOLE tree, not just the principles pair. The defect dirtied
-          # 32 tracked files (every AGENTS.md); the principles pair is merely the
-          # one a test happened to compare. Scoping the guard to the known victim
-          # would let the same cause re-appear any other place it later breaks.
-          dirty=$(git status --porcelain -uall -- '*.md' '*.json' '*.yml' '*.yaml' '*.sh' '*.js' '*.cjs' '*.ts' '*.mjs')
+          # Scope is the WHOLE tree -- no pathspec, no extension allowlist.
+          # The defect dirtied 32 tracked AGENTS.md files; an allowlist would
+          # have to enumerate every extension a writer might touch, and the one
+          # it forgot would be the next silent pass. `-uall` is required: the
+          # default collapses an untracked directory to "dir/" and hides the
+          # file that would explain the failure.
+          dirty=$(git status --porcelain -uall)
           if [ -n "$dirty" ]; then
             echo "::error::install/prepare step dirtied the working tree (#757)"
-            echo "$dirty" | head -40
-            echo "--- changed line total ---"
-            git diff --stat | tail -3
+            # Full list, not a head: the whole point is to name every file.
+            echo "$dirty"
+            echo "--- changed line counts ---"
+            git diff --stat | tail -5
             exit 1
           fi
           echo "OK: working tree is clean after install"
