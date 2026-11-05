@@ -16,20 +16,32 @@ setup() {
 }
 
 @test "anti-vacuity: gate-10 still invokes semgrep scan with JSON output" {
-  grep -q 'scan --config=p/security-audit' "$GATE10"
+  # Anchor on the invocation, not the ruleset flag: see the note below on why
+  # `scan --config=p/security-audit` alone can be satisfied by a hint string.
+  grep -qF '"$SEMGREP_CMD" scan' "$GATE10"
   grep -q 'SEMGREP_EXIT=' "$GATE10"
 }
 
 @test "the semgrep invocation is wrapped in a timeout" {
-  # Assert on the command group, not a physical line: the call spans several
-  # lines now, and a layout change must not fail a semantic test.
-  grep -q 'scan --config=p/security-audit' "$GATE10"
+  # Anchor on the INVOCATION, not on a ruleset flag. The call used to read
+  # `semgrep scan --config=p/security-audit ...` on one line; #717 turned the
+  # config into the SEMGREP_RULES array (`scan "${SEMGREP_RULES[@]}"`) so a
+  # second ruleset could be added for .cs. The literal
+  # `scan --config=p/security-audit` then survived ONLY inside a remediation
+  # hint string, and this test matched that hint -- it went on passing the
+  # anti-vacuity check while asserting nothing about the real call.
+  local call_pattern='"$SEMGREP_CMD" scan'
+  grep -qF "$call_pattern" "$GATE10"
   # The bounded form must exist and must guard the scan: `timeout -k N T`
-  # appearing between the timeout setup and the exit-code capture.
+  # appearing between the timeout setup and the exit-code capture. Anchor both
+  # on the invocation line, so neither can be satisfied by an unrelated line.
   local first_timeout scan_line exit_line
   first_timeout=$(grep -n 'timeout -k' "$GATE10" | head -1 | cut -d: -f1)
-  scan_line=$(grep -n 'scan --config=p/security-audit' "$GATE10" | head -1 | cut -d: -f1)
-  exit_line=$(grep -n 'SEMGREP_EXIT=\$?' "$GATE10" | head -1 | cut -d: -f1)
+  scan_line=$(grep -nF "$call_pattern" "$GATE10" | head -1 | cut -d: -f1)
+  # `SEMGREP_EXIT=$?` is captured once in the timeout branch and once in the
+  # fallback branch; the first capture AFTER the invocation is the one that
+  # records the bounded run's status.
+  exit_line=$(awk -v scan="$scan_line" 'NR > scan && /SEMGREP_EXIT=\$\?/ { print NR; exit }' "$GATE10")
   [ -n "$first_timeout" ] && [ -n "$scan_line" ] && [ -n "$exit_line" ]
   [ "$first_timeout" -le "$scan_line" ]
   [ "$scan_line" -lt "$exit_line" ]
