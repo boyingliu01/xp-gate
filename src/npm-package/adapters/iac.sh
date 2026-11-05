@@ -86,15 +86,38 @@ run_static_analysis() {
   # broken shim and the gate reports "the scanner crashed" on IaC commits that
   # are perfectly fine. Probing the version is the only way to tell the two
   # apart; checkov.cmd is the form that works here.
+  #
+  # A timeout wraps the probe because the failure mode being screened for is a
+  # shim that does not answer. Observed breakage exits 2 at once, but a hung
+  # wrapper must not block the commit forever. `timeout` is absent on stock
+  # macOS, so it is used only when available; the probe is a local version
+  # print either way.
   local checkov_bin=""
   local _checkov_candidate
+  local _checkov_seen_nonexec=0
+  local _checkov_probe
   for _checkov_candidate in checkov checkov.exe checkov.cmd; do
     command -v "$_checkov_candidate" >/dev/null 2>&1 || continue
-    if "$_checkov_candidate" --version >/dev/null 2>&1; then
+    if command -v timeout >/dev/null 2>&1; then
+      _checkov_probe="timeout 20 $_checkov_candidate --version"
+    else
+      _checkov_probe="$_checkov_candidate --version"
+    fi
+    if $_checkov_probe >/dev/null 2>&1; then
       checkov_bin=$(command -v "$_checkov_candidate")
       break
     fi
+    _checkov_seen_nonexec=1
   done
+  # "Not installed" and "installed but unusable" both end up without a scanner,
+  # and the fallbacks below keep the gate useful -- but they are not the same
+  # situation, and silently treating a broken install as absent hides a lost
+  # scanner. Say which one it is.
+  if [ -z "$checkov_bin" ] && [ "$_checkov_seen_nonexec" -eq 1 ]; then
+    echo "     ⚠️  checkov is on PATH but none of its forms could be executed;"
+    echo "         treating it as unusable and falling back to other scanners."
+    echo "         Reinstall with: pip install -U checkov"
+  fi
   if [ -n "$checkov_bin" ]; then
     echo "Running checkov IaC security scan..."
 

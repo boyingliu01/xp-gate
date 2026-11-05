@@ -104,13 +104,19 @@ jobs:
       # quality-gates.yml already builds this for the same reason (#586 follow-up);
       # this job ran the dry run without it, so every run since has failed here.
       - name: Build dsh plugin (tsc artifact, gitignored)
-        if: hashFiles('plugins/dsh/tsconfig.build.json') != ''
         run: |
           set -euo pipefail
+          # No `if: hashFiles(...)` guard here on purpose. A conditional skip would be
+          # SILENT: if the tsconfig were ever renamed, this step would vanish, the tsc
+          # artifact would be missing again, and the failure would resurface as the
+          # same misleading "syncHooks ... sync script must exit 0" above. Failing
+          # loudly on a missing prerequisite beats skipping it quietly.
+          test -f plugins/dsh/package.json \
+            || { echo "::error::plugins/dsh/package.json is missing — this job cannot build the plugin."; exit 1; }
+
           # plugins/dsh is not a workspace and its package-lock.json is gitignored,
-          # so root `npm ci` does not install its dependencies. Use `install`, and
-          # only when they are not already present, so a future cache hit is not
-          # punished with a redundant network round trip.
+          # so root `npm ci` does not install its dependencies. Install only when
+          # they are absent, so a cache hit is not charged a network round trip.
           if [[ ! -d plugins/dsh/node_modules ]]; then
             npm --prefix plugins/dsh install --no-audit --no-fund
           fi
