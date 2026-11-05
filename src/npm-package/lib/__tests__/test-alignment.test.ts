@@ -63,9 +63,11 @@ function writeTempFile(filename: string, content: string): string {
   } catch (error) {
     // A silent failure here would surface as an unrelated assertion error far
     // from the real cause (an unwritable temp dir), so name the file and the
-    // underlying reason in the thrown message.
+    // underlying reason in the thrown message. `cause` keeps the original error
+    // reachable: readers need its code (EACCES/ENOENT) and stack, which a
+    // message string alone would discard.
     const reason = error instanceof Error ? error.message : String(error);
-    throw new Error(`Failed to write temp file ${filepath}: ${reason}`);
+    throw new Error(`Failed to write temp file ${filepath}: ${reason}`, { cause: error });
   }
   return filepath;
 }

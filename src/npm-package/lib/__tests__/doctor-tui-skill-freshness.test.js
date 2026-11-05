@@ -202,9 +202,10 @@ describe('doctor-tui installed skills enumerate the filesystem (#635)', () => {
       fs.writeFileSync(path.join(dir, 'SKILL.md'), bundled);
     } catch (error) {
       // Naming the skill keeps a misplaced fixture from looking like a
-      // doctor() behaviour failure.
+      // doctor() behaviour failure. `cause` keeps the original error's code and
+      // stack reachable instead of flattening it to a message.
       const reason = error instanceof Error ? error.message : String(error);
-      throw new Error(`Failed to deploy bundled skill ${name}: ${reason}`);
+      throw new Error(`Failed to deploy bundled skill ${name}: ${reason}`, { cause: error });
     }
   }
 
@@ -336,8 +337,10 @@ describe('doctor-tui skill freshness #681 equal version, different content', () 
       fs.mkdirSync(dir, { recursive: true });
       fs.writeFileSync(path.join(dir, 'SKILL.md'), content);
     } catch (error) {
+      // `cause` keeps the original error's code and stack reachable instead of
+      // flattening it to a message string.
       const reason = error instanceof Error ? error.message : String(error);
-      throw new Error(`Failed to install test skill ${name}: ${reason}`);
+      throw new Error(`Failed to install test skill ${name}: ${reason}`, { cause: error });
     }
   }
 
