@@ -206,10 +206,19 @@ setup() {
   # precisely the false confidence this feature exists to remove.
   eval "$(sed -n '/^classify_coverage_reason()/,/^}/p' "$PRE_COMMIT")"
   [ "$(classify_coverage_reason architecture_not_configured SKIP)" = "tool_missing" ]
-  # Each config-missing else-branch must record it.
+  # Every config-missing branch must record the reason. Asserted as a lower
+  # bound rather than an exact count: the count said 3 and went to 5 when #717
+  # added the C# config-missing branches, failing a test whose property was
+  # still true. An exact count also stays green if one branch is deleted while
+  # another is duplicated, which is the wrong direction entirely.
   run grep -c 'GATE_6_REASON_BY_LANG\["\$CURRENT_LANG"\]="architecture_not_configured"' "$PRE_COMMIT"
   [ "$status" -eq 0 ]
-  [ "$output" -eq 3 ]
+  [ "$output" -ge 3 ]
+  # The C# dimension added in #717 must be among them: its absence would put
+  # an unmeasured language back on the "covered" path this issue removed.
+  run grep -B4 'GATE_6_REASON_BY_LANG\["\$CURRENT_LANG"\]="architecture_not_configured"' "$PRE_COMMIT"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *arch-csharp* || "$output" == *_cs_arch* ]]
 }
 
 @test "no language branch can reach the matrix with no reason and no measurement" {
