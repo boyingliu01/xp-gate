@@ -90,6 +90,18 @@ function nestingOfRange(body: string, from: number, to: number, depth: number): 
 function consumeStructure(
   body: string, i: number, to: number, depth: number, setMax: (v: number) => void,
 ): number {
+  // Anonymous arrow with a parenthesized parameter list: `items.map((x) => {`.
+  // The scan reaches `(` before any word, so this has to be checked here rather
+  // than in isNestedFunctionIntro. Without it the parenthesized form is charged
+  // to the enclosing function while `x => {` is not -- the same construct scored
+  // two different ways (#749 walkthrough).
+  if (body[i] === '(') {
+    const close = skipBalancedParen(body, i);
+    if (body.startsWith('=>', skipSpaces(body, close, to))) {
+      const brace = findFunctionBodyBrace(body, close, to);
+      return brace < 0 ? close : skipBalancedBrace(body, brace);
+    }
+  }
   const word = readWord(body, i);
   if (!word) return i + 1;
   if (NESTING_KEYWORDS.has(word.word) && !isMemberAccess(body, i) && !isKeyOrLabel(body, word.end)) {
@@ -163,6 +175,12 @@ function locateControlBody(body: string, from: number, to: number): { bodyStart:
 function isNestedFunctionIntro(body: string, wordStart: number, wordEnd: number): boolean {
   const current = body.slice(wordStart, wordEnd);
   if (current === 'function') return true;
+  // Unparenthesized single-parameter arrow: `items.map(x => { ... })`,
+  // `async x => { ... }`. Without this the callback's nesting is charged to the
+  // enclosing function, while the parenthesized form `(x) => { ... }` is skipped
+  // correctly -- the same construct scored two different ways.
+  const afterWord = skipSpaces(body, wordEnd, body.length);
+  if (body.startsWith('=>', afterWord)) return true;
   // `const name = (...) => {` / `let name = function (...) {`
   let k = wordEnd;
   if (current === 'const' || current === 'let' || current === 'var') {

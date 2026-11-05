@@ -93,6 +93,15 @@ describe('maxControlNesting counts control structures, not braces', () => {
     expect(maxControlNesting(`outer: for (;;) { if (a) { break outer; } }`)).toBe(2);
   });
 
+  it('skips an inline callback body in both arrow parameter forms', () => {
+    // lizard -ENS attributes a callback's nesting to the callback, so the
+    // enclosing function sees 0. The parenthesized and bare-parameter forms are
+    // the same construct and must score identically.
+    expect(maxControlNesting(`items.map((x) => { if (a) { b(); } });`)).toBe(0);
+    expect(maxControlNesting(`items.map(x => { if (a) { b(); } });`)).toBe(0);
+    expect(maxControlNesting(`items.map(async x => { if (a) { b(); } });`)).toBe(0);
+  });
+
   it('counts a switch as one level and its case labels as none', () => {
     expect(maxControlNesting(`
       switch (kind) {
