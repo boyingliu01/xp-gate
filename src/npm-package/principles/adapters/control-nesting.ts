@@ -324,9 +324,11 @@ function findFunctionBodyBrace(body: string, from: number, to: number): number {
   let i = start;
   if (body[i] === '(') i = skipSpaces(body, skipBalancedParen(body, i), to);
   // A return-type annotation sits between the parameter list and the body
-  // (`function inner(): { a: number } { ... }`), and its object literal is not
-  // the body. Step over it before looking for the `{`.
-  i = skipSpaces(body, skipBodyReturnType(body, i, to), to);
+  // (`function inner(): { a: number } { ... }`), and braces inside it are not
+  // the body. When an annotation is present the body brace is located directly.
+  if (body[skipSpaces(body, i, to)] === ':') {
+    return findBraceAfterReturnType(body, i, to);
+  }
   for (; i < to; i++) {
     if (body[i] === '{') return i;
     // No braced body before the statement ends: an expression-bodied arrow or a
@@ -368,29 +370,45 @@ function skipArrowReturnType(body: string, from: number, to: number): number {
   if (body[start] !== ':') return start;
   // An arrow's return type may be an object literal, so inner braces are part of
   // the type.
-  return scanTypeTo(body, start + 1, to, true);
+  return scanTypeTo(body, start + 1, to);
 }
 
 /**
- * Index just past a function/method return-type annotation.
+ * Index of the `{` that opens a function/method body, given a position just
+ * after the parameter list.
  *
- * Unlike an arrow's, this type is followed directly by the body brace, so a
- * `{` may end the type -- but the type itself may also be an object literal
- * (`m(): { a: number } { ... }`). A `{` is therefore only treated as ending the
- * type when it is not the start of an object type; `scanTypeTo` resolves this by
- * checking whether the brace group is followed by another `{`.
+ * The return-type annotation may nest braces arbitrarily --
+ * `m(): Promise<{ ok: boolean }>`, `m(): { a: number } | null`, `m(): void`.
+ * So every balanced `{...}` that is part of the type is skipped, and the first
+ * brace that is followed by anything other than a continuation of the type is
+ * taken as the body. Walking the type token by token is what tells the two
+ * apart: a body brace is preceded by a complete type and is not inside `<>`.
+ *
+ * @returns the index of the body's `{`, or -1 when none is found before the
+ *   statement ends.
  */
-function skipBodyReturnType(body: string, from: number, to: number): number {
-  const start = skipSpaces(body, from, to);
-  if (body[start] !== ':') return start;
-  const afterColon = skipSpaces(body, start + 1, to);
-  // `m(): { ... } { ... }` -- an object return type. Skip it, then the body brace
-  // is the next one. `m(): R { ... }` has no leading brace, so nothing to skip.
-  if (body[afterColon] === '{') {
-    const afterType = skipBalancedBrace(body, afterColon);
-    if (body[skipSpaces(body, afterType, to)] === '{') return afterType;
+function findBraceAfterReturnType(body: string, from: number, to: number): number {
+  let i = skipSpaces(body, from, to);
+  if (body[i] !== ':') return i;
+  i = skipSpaces(body, i + 1, to);
+  let angles = 0;
+  for (; i < to; i++) {
+    const c = body[i];
+    if (c === ';' || c === '\n') return -1;
+    if (c === '<') { angles++; continue; }
+    if (c === '>' && angles > 0) { angles--; continue; }
+    if (c !== '{') continue;
+    const afterBrace = skipBalancedBrace(body, i);
+    // Inside `<>` the braces are type arguments (`Promise<{ok:boolean}>`).
+    if (angles > 0) { i = afterBrace - 1; continue; }
+    const rest = skipSpaces(body, afterBrace, to);
+    if (rest >= to) return i;
+    // A `|`/`&`/`[` continues the type; another `{` means this brace was an
+    // object type and the real body follows (`m(): {a:number} { ... }`).
+    if ('|&'.includes(body[rest]) || body[rest] === '[') { i = afterBrace - 1; continue; }
+    return body[rest] === '{' ? rest : i;
   }
-  return scanTypeTo(body, start + 1, to, false);
+  return -1;
 }
 
 /** How one character of a type annotation affects the type scan. */
@@ -399,17 +417,12 @@ type TypeScanStep = 'stop' | 'open-brace' | 'close-brace' | 'open-angle' | 'clos
 /**
  * How one character of a type annotation affects the type scan.
  *
- * `allowObjectTypeBrace` distinguishes the two callers: an arrow's return type
- * may be an object literal (`(x): { ok: boolean } =>`), whereas a function or
- * method return type is followed directly by the body brace
- * (`function f(): R {`, `m(): void {`). Treating the latter's `{` as an opening
- * type brace would swallow the body.
+ * An arrow's return type may itself be an object literal
+ * (`(x): { ok: boolean } =>`), so a `{` opens a type brace.
  */
-function classifyTypeChar(
-  body: string, i: number, braces: number, angles: number, allowObjectTypeBrace: boolean,
-): TypeScanStep {
+function classifyTypeChar(body: string, i: number, braces: number, angles: number): TypeScanStep {
   const c = body[i];
-  if (c === '{') return allowObjectTypeBrace || braces > 0 ? 'open-brace' : 'stop';
+  if (c === '{') return 'open-brace';
   // A `}` at depth 0 closes the enclosing block, so the type cannot extend past it.
   if (c === '}') return braces === 0 ? 'stop' : 'close-brace';
   if (c === '<') return 'open-angle';
@@ -430,11 +443,11 @@ function typeDepthDelta(step: TypeScanStep): { braces: number; angles: number } 
 }
 
 /** Scan a type annotation, returning the index of the `=>` (or terminator). */
-function scanTypeTo(body: string, from: number, to: number, allowObjectTypeBrace: boolean): number {
+function scanTypeTo(body: string, from: number, to: number): number {
   let braces = 0;
   let angles = 0;
   for (let i = from; i < to; i++) {
-    const step = classifyTypeChar(body, i, braces, angles, allowObjectTypeBrace);
+    const step = classifyTypeChar(body, i, braces, angles);
     if (step === 'stop') return i;
     const delta = typeDepthDelta(step);
     braces += delta.braces;
