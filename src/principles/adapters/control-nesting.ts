@@ -97,9 +97,13 @@ function consumeStructure(
   // two different ways (#749 walkthrough).
   if (body[i] === '(') {
     const close = skipBalancedParen(body, i);
-    if (body.startsWith('=>', skipSpaces(body, close, to))) {
-      const brace = findFunctionBodyBrace(body, close, to);
-      return brace < 0 ? close : skipBalancedBrace(body, brace);
+    // A return-type annotation may sit between the parameter list and `=>`
+    // (`items.map((x): { ok: boolean } => { ... })`). Skip past it so the arrow
+    // is still recognized and its body is not charged to the enclosing function.
+    const afterParams = skipArrowReturnType(body, close, to);
+    if (body.startsWith('=>', afterParams)) {
+      const brace = findFunctionBodyBrace(body, afterParams, to);
+      return brace < 0 ? afterParams : skipBalancedBrace(body, brace);
     }
   }
   const word = readWord(body, i);
@@ -159,10 +163,22 @@ function locateControlBody(body: string, from: number, to: number): { bodyStart:
   // scan starts at that structure's keyword and ends where its own body ends --
   // each level then adds its own +1 as the scan descends, so `if (a)\n if (b)\n
   // if (c) { }` nests three deep. Returning the innermost range directly would
-  // skip the intermediate levels.
+  // skip the intermediate levels. A trailing `else` belongs to that inner `if`
+  // (`if (a) if (b) { } else { }`), so it is included or the `else` body would be
+  // rescanned at the outer depth.
   const head = readWord(body, i);
   if (head && NESTING_KEYWORDS.has(head.word) && !isMemberAccess(body, i) && !isKeyOrLabel(body, head.end)) {
-    return { bodyStart: i, bodyEnd: locateControlBody(body, head.end, to).bodyEnd };
+    const inner = locateControlBody(body, head.end, to);
+    // `inner.bodyEnd` is inclusive of the closing `}`, so step past it before
+    // looking for a trailing `else`/`catch`/`finally`.
+    let afterInner = inner.bodyEnd;
+    if (body[afterInner] === '}') afterInner++;
+    afterInner = skipSpaces(body, afterInner, to);
+    const tail = readWord(body, afterInner);
+    if (tail && (tail.word === 'else' || tail.word === 'catch' || tail.word === 'finally')) {
+      return { bodyStart: i, bodyEnd: locateControlBody(body, tail.end, to).bodyEnd };
+    }
+    return { bodyStart: i, bodyEnd: inner.bodyEnd };
   }
   // Otherwise it ends at the statement end, which for JavaScript is a newline as
   // much as a `;`. Stopping only at `;` would swallow every following statement
@@ -174,7 +190,29 @@ function locateControlBody(body: string, from: number, to: number): { bodyStart:
 }
 
 /**
- * True when the token at `wordStart` declares a nested function
+ * True when the parameter list starting at `open` is followed by a method body
+ * or return-type annotation -- i.e. method shorthand rather than a call.
+ */
+function isMethodSignature(body: string, open: number): boolean {
+  const close = skipSpaces(body, skipBalancedParen(body, open), body.length);
+  return body[close] === '{' || body[close] === ':';
+}
+
+/** Index just past the balanced `<...>` at `open`, or `open` when unbalanced. */
+function skipBalancedAngle(body: string, open: number): number {
+  let depth = 0;
+  for (let i = open; i < body.length; i++) {
+    if (body[i] === '<') depth++;
+    else if (body[i] === '>') {
+      depth--;
+      if (depth === 0) return i + 1;
+    }
+  }
+  return open;
+}
+
+/**
+ * True when the word at `wordStart` declares a nested function
  * (`function name(...)`, `const name = async (...) =>`, `= function (...)`).
  *
  * Named functions are scored on their own; the enclosing function is not charged
@@ -183,20 +221,27 @@ function locateControlBody(body: string, from: number, to: number): { bodyStart:
 function isNestedFunctionIntro(body: string, wordStart: number, wordEnd: number): boolean {
   const current = body.slice(wordStart, wordEnd);
   if (current === 'function') return true;
+  const afterWord = skipSpaces(body, wordEnd, body.length);
   // Unparenthesized single-parameter arrow: `items.map(x => { ... })`,
   // `async x => { ... }`. Without this the callback's nesting is charged to the
-  // enclosing function, while the parenthesized form `(x) => { ... }` is skipped
-  // correctly -- the same construct scored two different ways.
-  const afterWord = skipSpaces(body, wordEnd, body.length);
+  // enclosing function, while the parenthesized form is skipped correctly -- the
+  // same construct scored two different ways.
   if (body.startsWith('=>', afterWord)) return true;
-  // Method shorthand: `{ m() { ... } }`, `class C { async m() { ... } }`.
-  // lizard -ENS reports the method as its own function with its own NS, and the
-  // enclosing body sees 0, so the method body must not be charged outward.
-  if (body[afterWord] === '(') {
-    const close = skipBalancedParen(body, afterWord);
-    if (body[skipSpaces(body, close, body.length)] === '{') return true;
+  // Method shorthand: `{ m() { } }`, `m(): void { }`, `m<T>() { }`. lizard -ENS
+  // reports the method as its own function and the enclosing body as 0.
+  if (body[afterWord] === '(' && isMethodSignature(body, afterWord)) return true;
+  if (body[afterWord] === '<') {
+    const afterGeneric = skipSpaces(body, skipBalancedAngle(body, afterWord), body.length);
+    if (body[afterGeneric] === '(' && isMethodSignature(body, afterGeneric)) return true;
   }
-  // `const name = (...) => {` / `let name = function (...) {`
+  return isAssignedFunctionIntro(body, current, wordEnd);
+}
+
+/**
+ * True for `const name = (...) => {` / `let name = function (...) {` /
+ * `x = async () => {`, where the value assigned at `wordEnd` is a function.
+ */
+function isAssignedFunctionIntro(body: string, current: string, wordEnd: number): boolean {
   let k = wordEnd;
   if (current === 'const' || current === 'let' || current === 'var') {
     const name = readWord(body, skipSpaces(body, k, body.length));
@@ -213,11 +258,9 @@ function isNestedFunctionIntro(body: string, wordStart: number, wordEnd: number)
     k = skipSpaces(body, k + 5, body.length);
   }
   if (body.startsWith('function', k)) return true;
-  if (body[k] === '(') {
-    const close = skipBalancedParen(body, k);
-    return body.startsWith('=>', skipSpaces(body, close, body.length));
-  }
-  return false;
+  if (body[k] !== '(') return false;
+  const close = skipBalancedParen(body, k);
+  return body.startsWith('=>', skipArrowReturnType(body, close, body.length));
 }
 
 /**
@@ -271,6 +314,58 @@ function skipBalancedBrace(body: string, open: number): number {
     }
   }
   return body.length;
+}
+
+/**
+ * Index just past an arrow's return-type annotation, when one is present.
+ *
+ * `(x): number =>` and `(x): { ok: boolean } =>` both put a type between the
+ * parameter list and `=>`. Skips a `:`-introduced type (walking balanced `{}`
+ * and `<>` inside it) so the arrow is still recognized.
+ */
+function skipArrowReturnType(body: string, from: number, to: number): number {
+  const start = skipSpaces(body, from, to);
+  if (body[start] !== ':') return start;
+  return scanTypeTo(body, start + 1, to);
+}
+
+/** How one character of a type annotation affects the type scan. */
+type TypeScanStep = 'stop' | 'open-brace' | 'close-brace' | 'open-angle' | 'close-angle' | 'skip';
+
+function classifyTypeChar(body: string, i: number, braces: number, angles: number): TypeScanStep {
+  const c = body[i];
+  if (c === '{') return 'open-brace';
+  // A `}` at depth 0 closes the enclosing block, so the type cannot extend past it.
+  if (c === '}') return braces === 0 ? 'stop' : 'close-brace';
+  if (c === '<') return 'open-angle';
+  if (c === '>' && angles > 0) return 'close-angle';
+  const flat = braces === 0 && angles === 0;
+  if (flat && c === '=' && body[i + 1] === '>') return 'stop';
+  if (flat && (c === ';' || c === '\n')) return 'stop';
+  return 'skip';
+}
+
+/** Depth adjustment for one step of a type scan. */
+function typeDepthDelta(step: TypeScanStep): { braces: number; angles: number } {
+  if (step === 'open-brace') return { braces: 1, angles: 0 };
+  if (step === 'close-brace') return { braces: -1, angles: 0 };
+  if (step === 'open-angle') return { braces: 0, angles: 1 };
+  if (step === 'close-angle') return { braces: 0, angles: -1 };
+  return { braces: 0, angles: 0 };
+}
+
+/** Scan a type annotation, returning the index of the `=>` (or terminator). */
+function scanTypeTo(body: string, from: number, to: number): number {
+  let braces = 0;
+  let angles = 0;
+  for (let i = from; i < to; i++) {
+    const step = classifyTypeChar(body, i, braces, angles);
+    if (step === 'stop') return i;
+    const delta = typeDepthDelta(step);
+    braces += delta.braces;
+    angles += delta.angles;
+  }
+  return to;
 }
 
 /** Index just past the `)` matching the `(` at `open`. */
