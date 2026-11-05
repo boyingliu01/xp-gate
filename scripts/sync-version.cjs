@@ -54,6 +54,16 @@ function syncJsonVersion(filePath, newVersion) {
   const content = fs.readFileSync(filePath, 'utf8');
   const pkg = JSON.parse(content);
   pkg.version = newVersion;
+  // npm's lockfile mirrors the root manifest's version a second time under
+  // packages[""]. Writing only the top-level field leaves the two disagreeing,
+  // which `npm install` then "fixes" on its own schedule — the drift returns as
+  // an unexplained diff instead of failing here.
+  if (pkg.lockfileVersion !== undefined && pkg.packages) {
+    const rootKey = '';
+    if (pkg.packages[rootKey] && typeof pkg.packages[rootKey].version === 'string') {
+      pkg.packages[rootKey].version = newVersion;
+    }
+  }
   fs.writeFileSync(filePath, JSON.stringify(pkg, null, 2) + '\n');
 }
 
@@ -118,6 +128,12 @@ const syncTargets = [
   { file: path.join(ROOT_DIR, 'src', 'npm-package', 'plugins', 'opencode', 'package.json'), version: NPM_VERSION, label: 'src/npm-package/plugins/opencode/package.json' },
   { file: path.join(ROOT_DIR, 'src', 'npm-package', 'plugins', 'qoder', 'plugin.json'), version: NPM_VERSION, label: 'src/npm-package/plugins/qoder/plugin.json' },
   { file: path.join(ROOT_DIR, 'src', 'npm-package', 'plugins', 'dsh', 'package.json'), version: NPM_VERSION, label: 'src/npm-package/plugins/dsh/package.json' },
+  // package-lock.json carries the root string version in TWO places (top-level and
+  // packages[""]). It was absent from this list, so it sat at 0.22.0.0 while VERSION
+  // read 0.36.0.0 — every `npm install` then rewrote it and left an unexplained diff
+  // in an otherwise clean tree, and the lockfile a consumer's npm reads disagreed with
+  // the published version. See #741.
+  { file: path.join(ROOT_DIR, 'package-lock.json'), version: FULL_VERSION, label: 'package-lock.json' },
 ];
 
 for (const target of syncTargets) {
