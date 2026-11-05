@@ -152,10 +152,22 @@ function getCliVersion() {
  * is enough -- this is deliberately not a full semver comparison, which would
  * imply support for pre-release ordering that neither source produces.
  *
+ * The trailing segment is dropped, not "every trailing zero": a naive
+ * `.replace(/.0+$/, '')` also ate the dot of the segment before it, so
+ * `0.36.0.0` normalized to `0.36.0` while `0.36.0` normalized to `0.36` and a
+ * current copy was reported as behind. That stayed hidden while releases ended
+ * in a non-zero micro digit (`0.35.24.0` vs `0.35.24` agree either way) and
+ * broke the first time the micro digit was 0.
+ *
  * @returns {boolean} true when both name the same release
  */
 function sameVersion(a, b) {
-  const norm = (v) => String(v).replace(/.0+$/, '');
+  // A 4-part stamp whose micro digit is 0 names the same release as its 3-part
+  // form; anything else is compared as-is so a real difference is never hidden.
+  const norm = (v) => {
+    const parts = String(v).split('.');
+    return parts.length === 4 && parts[3] === '0' ? parts.slice(0, 3).join('.') : String(v);
+  };
   return norm(a) === norm(b);
 }
 

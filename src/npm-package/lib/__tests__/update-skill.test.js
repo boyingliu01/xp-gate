@@ -523,6 +523,23 @@ describe('update-skill #725 --check reads the disk, not the registry', () => {
     fs.writeFileSync(path.join(dir, 'xp-gate.json'), JSON.stringify({ installedSkills }));
   }
 
+  // The bundled version these tests compare against is whatever the package under
+  // test actually declares. Reading it keeps the fixtures honest across a release
+  // bump: hardcoded stamps silently turn "up to date" fixtures into "behind" ones
+  // the moment VERSION moves, and the failure then names /behind/i rather than the
+  // stale literal that caused it.
+  function bundledVersion() {
+    return JSON.parse(
+      fs.readFileSync(path.join(__dirname, '..', '..', 'package.json'), 'utf8'),
+    ).version;
+  }
+
+  /** The same release in the 4-part stamp form AGENTS.md files carry. */
+  function bundledStamp() {
+    const v = bundledVersion();
+    return /^\d+\.\d+\.\d+$/.test(v) ? `${v}.0` : v;
+  }
+
   /** Deploy a copy of a shipped skill into one platform, with a chosen stamp. */
   function deploy(platformRel, name, version) {
     const dir = path.join(tmpHome, platformRel, name);
@@ -550,15 +567,15 @@ describe('update-skill #725 --check reads the disk, not the registry', () => {
    * @covers AC-725-04
    */
   it('AC-725-04: reports a stale on-disk copy the registry calls current', async () => {
-    writeConfig({ 'delphi-review': { version: '0.35.24' } });
-    deploy(path.join('.qoder', 'skills'), 'delphi-review', '0.35.24.0');
+    writeConfig({ 'delphi-review': { version: bundledVersion() } });
+    deploy(path.join('.qoder', 'skills'), 'delphi-review', bundledStamp());
     deploy(path.join('.config', 'opencode', 'skills'), 'delphi-review', '0.32.0.0');
 
     const { updateSkill } = require('../update-skill');
     await updateSkill(null, { check: true });
 
     const said = lines().join('\n');
-    // The registry claims 0.35.24 for this skill, and it is right about Qoder.
+    // The registry claims the bundled version for this skill, and it is right about Qoder.
     // It is wrong about OpenCode, and only reading the disk can say so.
     expect(said).toMatch(/delphi-review \[opencode\]: 0\.32\.0\.0/);
     expect(said).toMatch(/behind/i);
@@ -570,9 +587,9 @@ describe('update-skill #725 --check reads the disk, not the registry', () => {
    * @covers AC-725-04
    */
   it('AC-725-04: both copies current reports up to date and no shortfall', async () => {
-    writeConfig({ 'delphi-review': { version: '0.35.24' } });
-    deploy(path.join('.qoder', 'skills'), 'delphi-review', '0.35.24.0');
-    deploy(path.join('.config', 'opencode', 'skills'), 'delphi-review', '0.35.24.0');
+    writeConfig({ 'delphi-review': { version: bundledVersion() } });
+    deploy(path.join('.qoder', 'skills'), 'delphi-review', bundledStamp());
+    deploy(path.join('.config', 'opencode', 'skills'), 'delphi-review', bundledStamp());
 
     const { updateSkill } = require('../update-skill');
     await updateSkill(null, { check: true });
@@ -584,13 +601,39 @@ describe('update-skill #725 --check reads the disk, not the registry', () => {
 
   /**
    * @test REQ-725
+   * @intent A release whose micro digit is 0 must not be read as a different release
+   * @covers AC-725-04
+   */
+  it('AC-725-04: a micro .0 stamp matches its own 3-part version', async () => {
+    // The stamp and the packaged version name the SAME release; only their digit
+    // count differs. This regressed once: normalization stripped every trailing
+    // zero instead of the last segment, so `X.Y.0.0` became `X.Y.0` while
+    // `X.Y.0` became `X.Y`, and a current copy was reported as behind. It was
+    // invisible while releases ended in a non-zero micro digit, which is why the
+    // assertion is built from the live packaged version rather than a literal:
+    // it only has teeth on releases whose micro digit is 0.
+    const three = bundledVersion();
+    const four = bundledStamp();
+
+    writeConfig({ 'delphi-review': { version: three } });
+    deploy(path.join('.qoder', 'skills'), 'delphi-review', four);
+
+    const { updateSkill } = require('../update-skill');
+    await updateSkill(null, { check: true });
+
+    const said = lines().join('\n');
+    expect(said, `${four} and ${three} name the same release`).not.toMatch(/behind/i);
+  });
+
+  /**
+   * @test REQ-725
    * @intent A skill with no version stamp must not be flagged merely for lacking one
    * @covers AC-725-05
    */
   it('AC-725-05: an unstamped copy identical to the bundle is not reported as behind', async () => {
     // Most skills ship no AGENTS.md, so "unknown" is their normal state. Measuring
     // staleness by absence of a stamp flagged every skill on a healthy machine.
-    writeConfig({ 'admin-template-guidelines': { version: '0.35.24' } });
+    writeConfig({ 'admin-template-guidelines': { version: bundledVersion() } });
     deploy(path.join('.qoder', 'skills'), 'admin-template-guidelines', null);
 
     const { updateSkill } = require('../update-skill');

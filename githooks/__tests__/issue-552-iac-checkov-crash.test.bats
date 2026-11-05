@@ -16,18 +16,48 @@ setup() {
 }
 
 @test "anti-vacuity: the checkov invocation is still in iac.sh" {
-  grep -q 'checkov --file' "$IAC"
+  # Match any resolution of the binary, not the literal `checkov --file`. The
+  # adapter probes checkov / .exe / .cmd because the extensionless MSYS shim
+  # cannot be executed on Git Bash, so the invocation is `"$checkov_bin" --file`.
+  # Pinning the bare word made a correct fix look like a regression.
+  grep -qE '("[$][A-Za-z_{][^"]*"|checkov) +--file +"\$file"' "$IAC"
+  grep -q 'checkov_bin' "$IAC"
 }
 
 @test "every checkov invocation is followed by a status recording" {
   # The defect was a bare invocation whose status went nowhere. Counting lines
-  # does not need a regex that pins indentation: every `checkov --file` line must
-  # be immediately followed by record_checkov_run.
-  local total recorded
-  total=$(grep -cE '^\s*checkov --file ' "$IAC")
-  recorded=$(grep -A1 -E '^\s*checkov --file ' "$IAC" | grep -c 'record_checkov_run')
+  # does not need a regex that pins indentation OR the command spelling: every
+  # invocation -- whichever resolvable form of checkov it names -- must be
+  # immediately followed by record_checkov_run.
+  local total recorded any_invocation bound
+  total=$(grep -cE '^\s*("[$][A-Za-z_{][^"]*"|checkov) +--file ' "$IAC")
+  # `grep -A1` encodes an implicit contract: the recording must be the line
+  # IMMEDIATELY after the invocation, and an invocation on the file's last line
+  # would have nothing to follow it. Both hold here, and keeping the recording
+  # adjacent is the property this test is pinning -- not an accident of layout.
+  recorded=$(grep -A1 -E '^\s*("[$][A-Za-z_{][^"]*"|checkov) +--file ' "$IAC" | grep -c 'record_checkov_run')
   [ "$total" -ge 1 ]
   [ "$total" -eq "$recorded" ]
+  # The two counts above are blind on their own: swap ONE invocation's binary for
+  # something unrelated and the remaining valid calls still satisfy total>=1 and
+  # total==recorded. (Measured: injecting a bogus binary name passed both, because
+  # the bogus line simply fell out of the general pattern.) Anchor from the other
+  # side instead -- count EVERY --file invocation in the file, whatever command
+  # it names, and require all of them to be the resolved checkov binary. A stray
+  # or hardcoded command then surfaces as a mismatch instead of being filtered
+  # out of the assertion by construction.
+  #
+  # Deliberately broad: this counts ANY non-comment line containing ` --file `,
+  # including an echo hint or a variable assignment that mentions it. That is the
+  # point -- the assertion is a lower bound on how many commands must be the
+  # resolved binary, so extra mentions can only make it stricter, never weaker.
+  # The earlier `|checkov` branch in the two counts above is kept because a
+  # legitimate future bare invocation should satisfy total==recorded; the
+  # any==bound check below is what rejects it unless it is also resolved.
+  any_invocation=$(grep -cE '^[[:space:]]*[^#[:space:]].* +--file ' "$IAC")
+  bound=$(grep -cE '^[[:space:]]*"\$checkov_bin" +--file ' "$IAC")
+  [ "$bound" -ge 1 ]
+  [ "$any_invocation" -eq "$bound" ]
 }
 
 @test "the adapter tracks whether any checkov run crashed" {

@@ -13,6 +13,7 @@ Usage:
     python scripts/check_delphi_local_models.py            # check files only
     python scripts/check_delphi_local_models.py --probe    # also probe gateway
 """
+
 import json
 import os
 import sys
@@ -29,11 +30,27 @@ LOCAL_PREFIX = "local-"
 # the local build of that model failed intermittently; the other two seats stay
 # local. Recorded here so the guard does not read the pinned assignment as a
 # violation (the machine-wide .delphi-config.json names this exact model).
-MODEL_ALLOWLIST: set[str] = {"s-qwen3.8-flash"}
+#
+# 2026-11-04 (#717): all three seats are now hosted WhaleCloud models, and the
+# guard had drifted behind the config -- it reported SEAT VIOLATION on the very
+# seats the previous two review rounds ran on. That is the failure mode this
+# allowlist is supposed to prevent, one level up: the guard and the config
+# disagreed and only the guard complained. The user confirmed these three are
+# the currently sanctioned seats. Kept as an explicit list, not a wildcard, so
+# a future seat change still requires an intentional edit here.
+MODEL_ALLOWLIST: set[str] = {
+    "s-qwen3.8-flash",
+    "s-deepseek-v4.1-flash",
+    "s-glm-5.3-flash",
+    "g-ling-3.1-flash",
+}
 
 CONFIGS = [
     os.path.expanduser("~/.config/xp-gate/.delphi-config.json"),
-    os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), ".delphi-config.json"),
+    os.path.join(
+        os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+        ".delphi-config.json",
+    ),
     # The loader's third resolution tier: a project-local override in the
     # current directory, when it is neither of the two paths above
     # (walkthrough R9 MA-02: guard coverage must match loader resolution).
@@ -66,17 +83,21 @@ def check_file(path, cfg):
         if not allowed:
             ok = False
         note = "" if local else (" (allowlisted)" if allowed else "")
-        print(f"{mark} [{os.path.basename(os.path.dirname(path))}] profile={profile} role={role} model={model}{note}")
+        print(
+            f"{mark} [{os.path.basename(os.path.dirname(path))}] profile={profile} role={role} model={model}{note}"
+        )
     return ok
 
 
 def probe_one_seat(base, key, role, model):
     """One chat completion proving the seat resolves. Returns ok."""
-    body = json.dumps({
-        "model": model,
-        "messages": [{"role": "user", "content": "reply OK"}],
-        "max_tokens": 4,
-    }).encode()
+    body = json.dumps(
+        {
+            "model": model,
+            "messages": [{"role": "user", "content": "reply OK"}],
+            "max_tokens": 4,
+        }
+    ).encode()
     req = urllib.request.Request(
         base.rstrip("/") + "/v1/chat/completions",
         data=body,
@@ -90,7 +111,9 @@ def probe_one_seat(base, key, role, model):
         # A 200 whose body carries no model id means the seat did not
         # actually resolve — status alone is not proof (R9 MA-01).
         resolved = payload.get("model") or payload.get("data", [{}])[0].get("id", "")
-        print(f"PROBE OK   role={role} model={model} -> resolved={resolved or 'NO-MODEL-FIELD'}")
+        print(
+            f"PROBE OK   role={role} model={model} -> resolved={resolved or 'NO-MODEL-FIELD'}"
+        )
         return bool(resolved)
     except urllib.error.HTTPError as exc:
         # 401/403 = credential problem, not a missing model; report it
@@ -110,7 +133,9 @@ def active_profile(cfg):
     inactive profile used to fail the whole guard while its real target never
     got tested (R9 CI-01 follow-up)."""
     profiles = cfg.get("profiles", {})
-    active_name = cfg.get("active_profile") or ("default" if "default" in profiles else None)
+    active_name = cfg.get("active_profile") or (
+        "default" if "default" in profiles else None
+    )
     return profiles.get(active_name)
 
 
@@ -137,11 +162,17 @@ def probe(cfg_by_path):
     for path, cfg in cfg_by_path.items():
         prof = active_profile(cfg)
         if not prof:
-            print(f"PROBE SKIP {path}: no resolvable active profile (active_profile={cfg.get('active_profile')!r})")
+            print(
+                f"PROBE SKIP {path}: no resolvable active profile (active_profile={cfg.get('active_profile')!r})"
+            )
             continue
         providers = prof.get("providers", {})
         experts = prof.get("experts", {})
-        items = experts.items() if isinstance(experts, dict) else [(e.get("role", i), e) for i, e in enumerate(experts)]
+        items = (
+            experts.items()
+            if isinstance(experts, dict)
+            else [(e.get("role", i), e) for i, e in enumerate(experts)]
+        )
         for role, seat in items:
             # Route each seat through ITS OWN provider (R10 CI-01); only when
             # the profile declares exactly ONE provider may a seat without an
@@ -151,11 +182,15 @@ def probe(cfg_by_path):
             name = seat.get("provider") or prof.get("provider") or ""
             base = providers.get(name, {}).get("base_url")
             if not base:
-                bases = {p.get("base_url") for p in providers.values() if p.get("base_url")}
+                bases = {
+                    p.get("base_url") for p in providers.values() if p.get("base_url")
+                }
                 if len(bases) == 1:
                     base = bases.pop()
                 else:
-                    print(f"PROBE FAIL role={role}: provider {name!r} unresolved among {len(providers)} providers")
+                    print(
+                        f"PROBE FAIL role={role}: provider {name!r} unresolved among {len(providers)} providers"
+                    )
                     ok = False
                     continue
             ok = probe_one_seat(base, key, role, str(seat.get("model") or "")) and ok

@@ -9,6 +9,7 @@ import { DartAdapter } from './adapters/dart';
 import { SwiftAdapter } from './adapters/swift';
 import { ObjectiveCAdapter } from './adapters/objectivec';
 import { CppAdapter } from './adapters/cpp';
+import { CSharpAdapter } from './adapters/csharp';
 import { extname } from 'path';
 
 export type { Violation } from './types';
@@ -63,6 +64,10 @@ export function getAdapterForFile(filePath: string): Adapter | null {
     '.swift': SwiftAdapter,
     '.m': ObjectiveCAdapter,
     '.mm': ObjectiveCAdapter,
+    // #717: without this entry `getAdapterForFile('A.cs')` returned null while
+    // gate-4.sh had already accepted the file, so Gate 4 inspected no C# at all.
+    '.cs': CSharpAdapter,
+    '.csx': CSharpAdapter,
     '.cpp': CppAdapter,
     '.cxx': CppAdapter,
     '.cc': CppAdapter,

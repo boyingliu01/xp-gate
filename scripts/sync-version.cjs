@@ -54,7 +54,31 @@ function syncJsonVersion(filePath, newVersion) {
   const content = fs.readFileSync(filePath, 'utf8');
   const pkg = JSON.parse(content);
   pkg.version = newVersion;
+  syncLockfileRootVersion(pkg, newVersion);
   fs.writeFileSync(filePath, JSON.stringify(pkg, null, 2) + '\n');
+}
+
+/**
+ * 同步 npm lockfile 中第二处根版本号
+ *
+ * npm 会把根 manifest 的 version 存两份：顶层 `version` 与 `packages[""].version`。
+ * 只写顶层会让两份互相矛盾，随后 `npm install` 会按自己的节奏"修正"其中一份
+ * —— 漂移就以一份来由不明的 diff 形式回来，而不是在这里失败。
+ *
+ * 只对真正的 lockfile 生效（有 lockfileVersion 且存在 packages 映射），
+ * 避免误改恰好带 packages 字段的普通 JSON。
+ *
+ * @param {object} pkg - 已解析的 JSON 对象（原地修改）
+ * @param {string} newVersion - 新版本号
+ */
+function syncLockfileRootVersion(pkg, newVersion) {
+  if (pkg.lockfileVersion === undefined || !pkg.packages) {
+    return;
+  }
+  const rootEntry = pkg.packages[''];
+  if (rootEntry && typeof rootEntry.version === 'string') {
+    rootEntry.version = newVersion;
+  }
 }
 
 /**
@@ -118,6 +142,12 @@ const syncTargets = [
   { file: path.join(ROOT_DIR, 'src', 'npm-package', 'plugins', 'opencode', 'package.json'), version: NPM_VERSION, label: 'src/npm-package/plugins/opencode/package.json' },
   { file: path.join(ROOT_DIR, 'src', 'npm-package', 'plugins', 'qoder', 'plugin.json'), version: NPM_VERSION, label: 'src/npm-package/plugins/qoder/plugin.json' },
   { file: path.join(ROOT_DIR, 'src', 'npm-package', 'plugins', 'dsh', 'package.json'), version: NPM_VERSION, label: 'src/npm-package/plugins/dsh/package.json' },
+  // package-lock.json carries the root string version in TWO places (top-level and
+  // packages[""]). It was absent from this list, so it sat at 0.22.0.0 while VERSION
+  // read 0.36.0.0 — every `npm install` then rewrote it and left an unexplained diff
+  // in an otherwise clean tree, and the lockfile a consumer's npm reads disagreed with
+  // the published version. See #741.
+  { file: path.join(ROOT_DIR, 'package-lock.json'), version: FULL_VERSION, label: 'package-lock.json' },
 ];
 
 for (const target of syncTargets) {
@@ -128,18 +158,25 @@ for (const target of syncTargets) {
 }
 
 // ---------- AGENTS.md 头部更新 ----------
-
-const today = new Date().toISOString().slice(0, 10); // YYYY-MM-DD
-const headSha = gitCmd(['rev-parse', '--short', 'HEAD'], 'unknown');
-const branch = gitCmd(['rev-parse', '--abbrev-ref', 'HEAD'], 'unknown');
+//
+// ⚠️ 只同步「内容属性」，不写「本次运行的属性」。
+//
+// 本脚本挂在 `prepare` 上，而 `npm ci` 会执行 `prepare`。如果这里写日期 / HEAD sha /
+// 分支名，那么每一次全新安装都会产出与提交内容不同的 AGENTS.md —— 工作树在安装阶段
+// 就被弄脏了。实测后果：mutation job 的 Stryker dry run 跑整套 vitest，其中
+// in-tree drift guard 比对 src/principles 与 src/npm-package/principles，
+// 而 `src/npm-package/principles/AGENTS.md` 与正本不一致，于是每个分支、每次运行
+// 都失败在 `expected [ Array(1) ] to deeply equal []`，看上去像测试坏了，
+// 实际是安装钩子污染了它正在准备的工作树（#757）。
+//
+// Version 是内容的属性（改 VERSION 才变），保留同步；其余的交给 /init-deep 这类
+// 显式动作去写，不放在安装路径上。
+// 守卫：scripts/__tests__/sync-version-deterministic.test.cjs
 
 const agentsFiles = findFiles(ROOT_DIR, 'AGENTS.md');
 let agentsCount = 0;
 
 const replacements = [
-  { pattern: /^\*\*Generated:\*\*.*$/m, value: `**Generated:** ${today}` },
-  { pattern: /^\*\*Commit:\*\*.*$/m, value: `**Commit:** ${headSha}` },
-  { pattern: /^\*\*Branch:\*\*.*$/m, value: `**Branch:** ${branch}` },
   { pattern: /^\*\*Version:\*\*.*$/m, value: `**Version:** ${FULL_VERSION}` },
 ];
 
@@ -160,5 +197,5 @@ for (const agentsFile of agentsFiles) {
   }
 }
 
-console.error(`[sync-version] AGENTS.md headers refreshed: ${agentsCount} files (date=${today} commit=${headSha} branch=${branch} version=${FULL_VERSION})`);
+console.error(`[sync-version] AGENTS.md headers refreshed: ${agentsCount} files (version=${FULL_VERSION})`);
 console.error(`[sync-version] OK — all package.json version fields synced from VERSION (${FULL_VERSION})`);
