@@ -145,6 +145,12 @@ function consumeStructure(
  */
 function locateControlBody(body: string, from: number, to: number): { bodyStart: number; bodyEnd: number } {
   let i = skipSpaces(body, from, to);
+  // `for await (...)` puts the `await` modifier between the keyword and the
+  // condition. Without skipping it the loop body looked brace-less and was cut
+  // at the newline, losing a level.
+  if (body.startsWith('await', i) && !/[\w$]/.test(body[i + 5] ?? '')) {
+    i = skipSpaces(body, i + 5, to);
+  }
   if (body[i] === '(') {
     let parens = 0;
     for (; i < to; i++) {
