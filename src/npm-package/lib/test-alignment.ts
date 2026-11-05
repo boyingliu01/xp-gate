@@ -518,11 +518,15 @@ const ANNOTATED_JSDOC = /@test\s+REQ-/;
 const REQ_TAG = /@test\s+(REQ-[A-Z0-9]+(?:-[A-Z0-9]+)*)/;
 
 /**
- * First annotation pass: `test.each([...])('name', () => { ... })`.
+ * First annotation pass: a declaration that carries an extra argument list
+ * before the name string.
  *
- * `.each` variants carry an extra argument list before the name string, so they
- * need their own pattern. The callback open paren ends the match, which lets the
- * body be recovered by brace matching.
+ * Measured caveat: this pattern currently matches NOTHING in this repo, and
+ * neither did the `testPattern` it is copied from -- the `.each([...])('name')`
+ * shape it targets does not satisfy the `\([^)]*\)\s*,` requirement. It is kept
+ * because it is byte-identical to the inherited behaviour and dropping it would
+ * be an unrequested semantic change, not because it is known to fire. The TODO
+ * on AC-002-02 tracks actually supporting `.each`.
  */
 const TEST_PATTERN_WITH_ARGS = /\/\*\*((?:(?!\*\/)[\s\S])*)\*\/(?:[\s\n]*)(?:test|it|describe)(?:\.(?:each|skip|todo|only))?\s*\([^)]*\)\s*,\s*\(\s*(?:['"]([^'"]+)['"]|`([^`]*)`)\s*\)?\s*,?\s*(?:\([^)]*\)\s*=>)?\s*/g;
 
