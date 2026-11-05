@@ -157,6 +157,23 @@ describe('maxControlNesting counts control structures, not braces', () => {
     expect(maxControlNesting(`const v = lib.for;`)).toBe(0);
   });
 
+  it('recognises a method whose return type is an object literal', () => {
+    // The return type's `{...}` is not the method body; treating it as the body
+    // charged the real body's `if` to the enclosing function.
+    expect(maxControlNesting(`const o = { m(): { a: number } { if (x) { y(); } } };`)).toBe(0);
+    expect(maxControlNesting(`const o = { m(): Promise<void> { if (a) { b(); } } };`)).toBe(0);
+  });
+
+  it('rejects unmasked input instead of silently under-reporting', () => {
+    // skipBalancedBrace returns the end of input when the brace never closes, so
+    // an unmasked `}` inside a string would swallow every following structure and
+    // report a lower score with no signal. Failing loudly is the only safe option
+    // for a quality gate.
+    expect(() => maxControlNesting(`if (a) { const s = "}"; if (b) { } }`)).toThrow(RangeError);
+    // The masked form -- braces blanked out -- scores normally.
+    expect(maxControlNesting(`if (a) { const s = ""; if (b) { } }`)).toBe(2);
+  });
+
   it('treats `for await` as a loop with a condition', () => {
     // The `await` modifier sits between `for` and `(`, so without skipping it the
     // body looked brace-less and was cut at the newline, losing a level.
