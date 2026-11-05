@@ -82,15 +82,44 @@ jobs:
       #     expected false to be true
       #
       # Run the prepack script itself, exactly as quality-gates.yml does for #586.
-      # Deliberately NOT `npm run build`: the skills come from prepack.cjs, which
-      # only copies directories, whereas `build` also runs tsc and needs the
-      # plugin's own sub-package dependencies (plugins/dsh is not a workspace, and
-      # its package-lock.json is gitignored, so root `npm ci` does not install
-      # them). Compiling is not necessary to answer this question, so this job
-      # does not pay for it.
       - name: Bundle plugin skills (prepack artifact, gitignored)
         if: hashFiles('plugins/dsh/scripts/prepack.cjs') != ''
         run: node plugins/dsh/scripts/prepack.cjs
+
+      # plugins/dsh/lib/ is a SECOND gitignored artifact (.gitignore:164), and one
+      # prepack does not produce: it is tsc output. src/npm-package/scripts/__tests__/
+      # sync-package-content.test.js spawns sync-package-content.js, whose
+      # syncPlugins() ends with assertDshBundleEntry() -- a deliberate fail-closed
+      # guard, because the published package exports "./dsh" from that path and a
+      # missing entry means the bundle would not load on a user's machine.
+      #
+      # Skipping the build made that guard fire as:
+      #
+      #   ERROR DryRunExecutor One or more tests failed in the initial test run:
+      #     syncHooks syncHooks copies pre-commit to hooks dir
+      #       sync script must exit 0: expected false to be true
+      #
+      # which names a hook-copy assertion and says nothing about a missing tsc
+      # output, so it read as a flaky test rather than a missing prerequisite.
+      # quality-gates.yml already builds this for the same reason (#586 follow-up);
+      # this job ran the dry run without it, so every run since has failed here.
+      - name: Build dsh plugin (tsc artifact, gitignored)
+        if: hashFiles('plugins/dsh/tsconfig.build.json') != ''
+        run: |
+          set -euo pipefail
+          # plugins/dsh is not a workspace and its package-lock.json is gitignored,
+          # so root `npm ci` does not install its dependencies. Use `install`, and
+          # only when they are not already present, so a future cache hit is not
+          # punished with a redundant network round trip.
+          if [[ ! -d plugins/dsh/node_modules ]]; then
+            npm --prefix plugins/dsh install --no-audit --no-fund
+          fi
+          npm --prefix plugins/dsh run build
+          # Assert the tsc artifact itself. The mirror under src/npm-package/ is
+          # written by syncPlugins() during the test, so checking it here would
+          # test the wrong thing at the wrong time.
+          test -f plugins/dsh/lib/index.js \
+            || { echo "::error::plugins/dsh build produced no lib/index.js"; exit 1; }
 
       - name: Determine changed principles files
         id: changed

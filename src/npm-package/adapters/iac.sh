@@ -78,7 +78,24 @@ run_static_analysis() {
   local exit_code=0
   
   # Try checkov first (recommended - supports multiple platforms)
-  if command -v checkov >/dev/null 2>&1; then
+  # Resolve to an executable that actually RUNS, not merely one that exists. On
+  # MSYS2/Git Bash pip leaves an extensionless `checkov` shim whose shebang
+  # hands a MSYS path to the Windows interpreter, which fails every time:
+  #   can't open file 'D:\\c\\Users\\...\\Scripts\\checkov'
+  # `command -v checkov` still succeeds, so a presence-only probe picks the
+  # broken shim and the gate reports "the scanner crashed" on IaC commits that
+  # are perfectly fine. Probing the version is the only way to tell the two
+  # apart; checkov.cmd is the form that works here.
+  local checkov_bin=""
+  local _checkov_candidate
+  for _checkov_candidate in checkov checkov.exe checkov.cmd; do
+    command -v "$_checkov_candidate" >/dev/null 2>&1 || continue
+    if "$_checkov_candidate" --version >/dev/null 2>&1; then
+      checkov_bin=$(command -v "$_checkov_candidate")
+      break
+    fi
+  done
+  if [ -n "$checkov_bin" ]; then
     echo "Running checkov IaC security scan..."
 
     # checkov 3.x exits 0 on "found failures" (we parse the output for those),
@@ -114,7 +131,7 @@ run_static_analysis() {
       echo "Scanning Terraform files..."
       for file in $tf_files; do
         if [ -f "$file" ]; then
-          checkov --file "$file" $checkov_args >> "$checkov_log" 2>&1
+          "$checkov_bin" --file "$file" $checkov_args >> "$checkov_log" 2>&1
           record_checkov_run $? "$file"
         fi
       done
@@ -135,7 +152,7 @@ run_static_analysis() {
         echo "Scanning Kubernetes manifests..."
         for file in $k8s_only; do
           if [ -f "$file" ]; then
-            checkov --file "$file" $checkov_args --framework kubernetes >> "$checkov_log" 2>&1
+            "$checkov_bin" --file "$file" $checkov_args --framework kubernetes >> "$checkov_log" 2>&1
           record_checkov_run $? "$file"
           fi
         done
@@ -145,7 +162,7 @@ run_static_analysis() {
         echo "Scanning GitHub Actions workflows..."
         for file in $gh_files; do
           if [ -f "$file" ]; then
-            checkov --file "$file" $checkov_args --framework github_actions >> "$checkov_log" 2>&1
+            "$checkov_bin" --file "$file" $checkov_args --framework github_actions >> "$checkov_log" 2>&1
             record_checkov_run $? "$file"
           fi
         done
@@ -156,7 +173,7 @@ run_static_analysis() {
       echo "Scanning Dockerfiles..."
       for file in $docker_files; do
         if [ -f "$file" ]; then
-          checkov --file "$file" $checkov_args >> "$checkov_log" 2>&1
+          "$checkov_bin" --file "$file" $checkov_args >> "$checkov_log" 2>&1
           record_checkov_run $? "$file"
         fi
       done
