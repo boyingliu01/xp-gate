@@ -35,6 +35,23 @@ interface NestingScanState {
 const NESTING_KEYWORDS = new Set(['if', 'for', 'while', 'switch', 'catch', 'do', 'try', 'else', 'finally']);
 
 /**
+ * True when the string/template/comment contents still contain unbalanced
+ * braces -- evidence that `maskLiterals` was skipped. A masked body cannot have
+ * a `{` or `}` inside a literal, so any imbalance is a masking gap.
+ */
+function hasUnbalancedBraces(body: string): boolean {
+  let depth = 0;
+  for (let i = 0; i < body.length; i++) {
+    if (body[i] === '{') depth++;
+    else if (body[i] === '}') {
+      depth--;
+      if (depth < 0) return true;
+    }
+  }
+  return depth !== 0;
+}
+
+/**
  * Max control-structure nesting in a function body (0 = flat).
  *
  * The brace pairing below (`skipBalancedBrace`, `skipBalancedParen`) counts raw
@@ -44,10 +61,23 @@ const NESTING_KEYWORDS = new Set(['if', 'for', 'while', 'switch', 'catch', 'do',
  * its own, but that does not rescue the brace pairing -- masking is required,
  * not optional.
  *
+ * Unbalanced braces are rejected rather than scored: `skipBalancedBrace` returns
+ * the end of input when it never finds the close, so an unmasked body would
+ * silently swallow every following control structure and report an artificially
+ * low nesting score. A wrong number that looks like a clean result is the worst
+ * possible outcome for a quality gate, so this fails loudly instead.
+ *
  * @param body The function body from `maskLiterals`.
  * @returns The deepest control-structure nesting observed.
+ * @throws RangeError when `body` still contains unbalanced braces (unmasked).
  */
 export function maxControlNesting(body: string): number {
+  if (hasUnbalancedBraces(body)) {
+    throw new RangeError(
+      'maxControlNesting requires masked input: unbalanced braces, so a literal '
+      + 'was not blanked. Pass maskLiterals(body) instead of raw source.',
+    );
+  }
   return nestingOfRange(body, 0, body.length, 0);
 }
 
@@ -293,6 +323,10 @@ function findFunctionBodyBrace(body: string, from: number, to: number): number {
   }
   let i = start;
   if (body[i] === '(') i = skipSpaces(body, skipBalancedParen(body, i), to);
+  // A return-type annotation sits between the parameter list and the body
+  // (`function inner(): { a: number } { ... }`), and its object literal is not
+  // the body. Step over it before looking for the `{`.
+  i = skipSpaces(body, skipBodyReturnType(body, i, to), to);
   for (; i < to; i++) {
     if (body[i] === '{') return i;
     // No braced body before the statement ends: an expression-bodied arrow or a
@@ -332,15 +366,50 @@ function skipBalancedBrace(body: string, open: number): number {
 function skipArrowReturnType(body: string, from: number, to: number): number {
   const start = skipSpaces(body, from, to);
   if (body[start] !== ':') return start;
-  return scanTypeTo(body, start + 1, to);
+  // An arrow's return type may be an object literal, so inner braces are part of
+  // the type.
+  return scanTypeTo(body, start + 1, to, true);
+}
+
+/**
+ * Index just past a function/method return-type annotation.
+ *
+ * Unlike an arrow's, this type is followed directly by the body brace, so a
+ * `{` may end the type -- but the type itself may also be an object literal
+ * (`m(): { a: number } { ... }`). A `{` is therefore only treated as ending the
+ * type when it is not the start of an object type; `scanTypeTo` resolves this by
+ * checking whether the brace group is followed by another `{`.
+ */
+function skipBodyReturnType(body: string, from: number, to: number): number {
+  const start = skipSpaces(body, from, to);
+  if (body[start] !== ':') return start;
+  const afterColon = skipSpaces(body, start + 1, to);
+  // `m(): { ... } { ... }` -- an object return type. Skip it, then the body brace
+  // is the next one. `m(): R { ... }` has no leading brace, so nothing to skip.
+  if (body[afterColon] === '{') {
+    const afterType = skipBalancedBrace(body, afterColon);
+    if (body[skipSpaces(body, afterType, to)] === '{') return afterType;
+  }
+  return scanTypeTo(body, start + 1, to, false);
 }
 
 /** How one character of a type annotation affects the type scan. */
 type TypeScanStep = 'stop' | 'open-brace' | 'close-brace' | 'open-angle' | 'close-angle' | 'skip';
 
-function classifyTypeChar(body: string, i: number, braces: number, angles: number): TypeScanStep {
+/**
+ * How one character of a type annotation affects the type scan.
+ *
+ * `allowObjectTypeBrace` distinguishes the two callers: an arrow's return type
+ * may be an object literal (`(x): { ok: boolean } =>`), whereas a function or
+ * method return type is followed directly by the body brace
+ * (`function f(): R {`, `m(): void {`). Treating the latter's `{` as an opening
+ * type brace would swallow the body.
+ */
+function classifyTypeChar(
+  body: string, i: number, braces: number, angles: number, allowObjectTypeBrace: boolean,
+): TypeScanStep {
   const c = body[i];
-  if (c === '{') return 'open-brace';
+  if (c === '{') return allowObjectTypeBrace || braces > 0 ? 'open-brace' : 'stop';
   // A `}` at depth 0 closes the enclosing block, so the type cannot extend past it.
   if (c === '}') return braces === 0 ? 'stop' : 'close-brace';
   if (c === '<') return 'open-angle';
@@ -361,11 +430,11 @@ function typeDepthDelta(step: TypeScanStep): { braces: number; angles: number } 
 }
 
 /** Scan a type annotation, returning the index of the `=>` (or terminator). */
-function scanTypeTo(body: string, from: number, to: number): number {
+function scanTypeTo(body: string, from: number, to: number, allowObjectTypeBrace: boolean): number {
   let braces = 0;
   let angles = 0;
   for (let i = from; i < to; i++) {
-    const step = classifyTypeChar(body, i, braces, angles);
+    const step = classifyTypeChar(body, i, braces, angles, allowObjectTypeBrace);
     if (step === 'stop') return i;
     const delta = typeDepthDelta(step);
     braces += delta.braces;
