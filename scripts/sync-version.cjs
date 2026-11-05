@@ -54,17 +54,31 @@ function syncJsonVersion(filePath, newVersion) {
   const content = fs.readFileSync(filePath, 'utf8');
   const pkg = JSON.parse(content);
   pkg.version = newVersion;
-  // npm's lockfile mirrors the root manifest's version a second time under
-  // packages[""]. Writing only the top-level field leaves the two disagreeing,
-  // which `npm install` then "fixes" on its own schedule — the drift returns as
-  // an unexplained diff instead of failing here.
-  if (pkg.lockfileVersion !== undefined && pkg.packages) {
-    const rootKey = '';
-    if (pkg.packages[rootKey] && typeof pkg.packages[rootKey].version === 'string') {
-      pkg.packages[rootKey].version = newVersion;
-    }
-  }
+  syncLockfileRootVersion(pkg, newVersion);
   fs.writeFileSync(filePath, JSON.stringify(pkg, null, 2) + '\n');
+}
+
+/**
+ * 同步 npm lockfile 中第二处根版本号
+ *
+ * npm 会把根 manifest 的 version 存两份：顶层 `version` 与 `packages[""].version`。
+ * 只写顶层会让两份互相矛盾，随后 `npm install` 会按自己的节奏"修正"其中一份
+ * —— 漂移就以一份来由不明的 diff 形式回来，而不是在这里失败。
+ *
+ * 只对真正的 lockfile 生效（有 lockfileVersion 且存在 packages 映射），
+ * 避免误改恰好带 packages 字段的普通 JSON。
+ *
+ * @param {object} pkg - 已解析的 JSON 对象（原地修改）
+ * @param {string} newVersion - 新版本号
+ */
+function syncLockfileRootVersion(pkg, newVersion) {
+  if (pkg.lockfileVersion === undefined || !pkg.packages) {
+    return;
+  }
+  const rootEntry = pkg.packages[''];
+  if (rootEntry && typeof rootEntry.version === 'string') {
+    rootEntry.version = newVersion;
+  }
 }
 
 /**
