@@ -752,6 +752,11 @@ export class TypeScriptAdapter extends BaseAdapter implements Adapter {
 
     const bodyEnd = findBlockEnd(this.maskedSource, arrow.bodyOpen);
     const code = src.substring(arrow.bodyOpen, bodyEnd);
+    // Scan the MASKED slice, matching the named-function path above: a `}` or
+    // `)` inside a string literal would otherwise unbalance the brace pairing
+    // and drop the nesting inside that block. `code` stays raw for the reported
+    // source and the regex-based checks below.
+    const maskedCode = this.maskedSource.substring(arrow.bodyOpen, bodyEnd);
     const endLine = lineOf(src, bodyEnd);
     return {
       name,
@@ -761,7 +766,7 @@ export class TypeScriptAdapter extends BaseAdapter implements Adapter {
       endLine: startLine,
       length: Math.max(1, endLine - startLine + 1),
       paramCount: arrow.parenIndex === -1 ? 1 : countParams(readParenGroup(src, arrow.parenIndex).inner),
-      nestingDepth: maxControlNesting(code),
+      nestingDepth: maxControlNesting(maskedCode),
       hasTryCatch: /\btry\s*\{/.test(code),
       ioOperations: ioOperationsIn(code),
       code,

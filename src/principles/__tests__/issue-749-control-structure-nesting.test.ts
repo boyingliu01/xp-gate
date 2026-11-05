@@ -101,6 +101,21 @@ function render(value) {
     expect(fact.nestingDepth).toBe(1);
   });
 
+  it('counts nesting inside an arrow body even when a string holds a brace', () => {
+    // The arrow path used to hand `maxControlNesting` raw source while the
+    // named-function path handed it masked source. A `}` inside a string
+    // unbalances the brace pairing, so the arrow scored 1 where lizard -ENS
+    // reports NS=2.
+    const source = `
+export const arrow = (a, b) => {
+  if (a) { const s = "}"; if (b) { return 1; } }
+  return 0;
+};
+`;
+    const fact = functionFactOf(source, 'arrow');
+    expect(fact.nestingDepth).toBe(2);
+  });
+
   it('keeps a flat function at 0 (no control structures)', () => {
     const source = `
 function plain(a, b) {

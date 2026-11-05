@@ -37,13 +37,14 @@ const NESTING_KEYWORDS = new Set(['if', 'for', 'while', 'switch', 'catch', 'do',
 /**
  * Max control-structure nesting in a function body (0 = flat).
  *
- * Accepts either masked or raw source: the scanner carries its own
- * string/comment state machine, so literals and comments are skipped whether or
- * not the caller blanked them first. The adapter is not consistent about this
- * (one call site masks, the arrow path passes raw text), and making the function
- * independent of that choice is what keeps both paths correct.
+ * The brace pairing below (`skipBalancedBrace`, `skipBalancedParen`) counts raw
+ * characters, so a `}` or `)` inside a string literal unbalances it. Callers
+ * MUST pass a source whose string/template/comment contents are already blanked
+ * (`maskLiterals`). The keyword state machine does skip comments and literals on
+ * its own, but that does not rescue the brace pairing -- masking is required,
+ * not optional.
  *
- * @param body The function body, masked or raw.
+ * @param body The function body from `maskLiterals`.
  * @returns The deepest control-structure nesting observed.
  */
 export function maxControlNesting(body: string): number {
