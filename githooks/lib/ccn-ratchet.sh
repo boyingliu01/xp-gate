@@ -262,6 +262,7 @@ evaluate_ccn_ratchet() {
     # bare double-quote pair that the shell re-pairs across the awk text. The
     # anonymous marker is therefore passed in as a -v value, not written inline.
     $2 ~ /^[0-9]+$/ {
+      graded++
       ccn = $2 + 0
       n2 = split($6, parts, "@")
       name = parts[1]
@@ -287,6 +288,15 @@ evaluate_ccn_ratchet() {
         else if (ccn > warn) printf "WARN %s CCN=%d (%s new/over warn threshold)\n", name, ccn, path
         else                 printf "OK %s CCN=%d\n", name, ccn
       }
+    }
+    END {
+      # Zero parsable rows means "unverified", never "clean". Before this the
+      # verdict came back empty, every counter read 0, and Gate 3 graded a tree
+      # nobody measured as compliant (#683). Header-only output, a separator
+      # line, and a genuinely empty scan all mean the same thing: no number was
+      # read, so no verdict may be claimed.
+      if (graded == 0)
+        printf "UNVERIFIED no parsable CCN row (lizard produced no measurable function)\n"
     }
   '
 }

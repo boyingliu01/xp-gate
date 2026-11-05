@@ -25,7 +25,7 @@
 #
 #         Pin: a test file that asserts a platform-specific fact must declare its
 #         platform, and the repo must run tests somewhere that platform exists.
-# @covers AC-586-01, AC-586-02
+# @covers AC-586-01, AC-586-02, AC-586-03, AC-586-04
 
 setup() {
   REPO_ROOT="$(cd "$BATS_TEST_DIRNAME/../.." && pwd)"

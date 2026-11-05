@@ -4,7 +4,7 @@
  *         modules used to snapshot config at module load, so a project's
  *         threshold was silently ignored and the checker enforced the built-in
  *         default instead -- a fail-open gate.
- * @covers AC-457-01, AC-457-02, AC-457-03, AC-457-04, AC-457-05, AC-457-06, AC-457-07, AC-457-14, AC-457-15, AC-457-16
+ * @covers AC-457-01, AC-457-02, AC-457-03, AC-457-04, AC-457-05, AC-457-06, AC-457-07, AC-457-14, AC-457-15, AC-457-16, AC-457-10, AC-457-11, AC-457-13
  *
  * The pre-existing `config.test.ts` asserted only `expect(config).toBeDefined()`
  * for `loadConfig`, which is why the defect survived: the loader returned the

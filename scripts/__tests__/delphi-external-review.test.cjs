@@ -1,3 +1,14 @@
+/**
+ * @test REQ-429
+ * @intent Pin the three silent failures in delphi-external-review: the 30000 ms
+ *         timeout default was expressed twice, so changing one copy forked the
+ *         behaviour; an api_key referencing an unset environment variable only
+ *         WARNed and then sent the literal placeholder, so the run failed with
+ *         "check .delphi-config.json" while the real fault was the environment;
+ *         and provider-level fields were validated only for providers an expert
+ *         happened to use, so a typo survived until runtime.
+ * @covers AC-429-01, AC-429-02, AC-429-03, AC-429-04, AC-457-19, AC-457-20
+ */
 // vitest globals: true — no import needed
 const path = require('path');
 const fs = require('fs');
