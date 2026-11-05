@@ -32,9 +32,37 @@ Then replace the provider/model placeholders:
 "model": "YOUR_PROVIDER/YOUR_MODEL_A"
 
 // After (your config):
-"model": "bailian-tp/qwen-plus"
+"model": "whalecloud/s-deepseek-v4.1-flash"
 // The other two role model fields must be different trimmed IDs.
 ```
+
+The shipped `.delphi-config.json.example` defaults to three cheap FLASH-tier
+models on one WhaleCloud gateway, which is what most setups want:
+
+| seat | model | purpose |
+|------|-------|---------|
+| architecture | `s-deepseek-v4.1-flash` | structure, boundaries, coupling |
+| technical | `s-glm-5.3-flash` | correctness, implementation risk |
+| feasibility | `g-ling-3.1-flash` | cost, schedule, operability |
+
+Before trusting a profile, confirm the three ids resolve to three **distinct
+backend** models on your gateway. Gateway aliases can map two different ids to
+the same backend, which satisfies the "distinct ids" check while actually
+running one model twice:
+
+```bash
+# prints the backend each id really reached
+for m in s-deepseek-v4.1-flash s-glm-5.3-flash g-ling-3.1-flash; do
+  curl -s https://YOUR_GATEWAY/v1/chat/completions \
+    -H "Authorization: Bearer $WHALECLOUD_API_KEY" -H 'Content-Type: application/json' \
+    -d "{\"model\":\"$m\",\"messages\":[{\"role\":\"user\",\"content\":\"hi\"}],\"max_tokens\":5}" \
+  | python -c 'import sys,json; print(json.load(sys.stdin).get("model"))'
+done
+```
+
+`xp-gate doctor delphi` reports the configured seats, and every expert result
+records the gateway-reported `resolved_model` so a silent alias collision shows
+up in the review evidence rather than passing unnoticed.
 
 ### Step 3: Ensure provider configuration exists
 

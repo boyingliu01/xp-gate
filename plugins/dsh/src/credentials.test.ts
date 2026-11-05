@@ -3,7 +3,7 @@
  * @intent Verify the plugin can obtain the Delphi API key from DSH's credential store
  *         when the process environment does not carry it, and that resolution is
  *         single-layer — a store miss must not silently fall back to process.env.
- * @covers AC-DSH-014-01 AC-DSH-014-02 AC-DSH-014-03
+ * @covers AC-DSH-014-01 AC-DSH-014-02 AC-DSH-014-03 AC-DSH-014-07
  *
  * Why this exists: the machine that motivated this release has WHALECLOUD_API_KEY in
  * a user-level environment variable and in ~/.dsh/.credentials.yaml, but NOT in the

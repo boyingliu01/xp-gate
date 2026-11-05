@@ -2,7 +2,7 @@
 
 # @test REQ-TDD-004
 # @intent Verify Gate 5a-BLOCK behavior for new TypeScript files
-# @covers AC-TDD-001-01 through AC-TDD-001-14
+# @covers AC-TDD-001-01 through AC-TDD-001-14 AC-675-01, AC-675-02
 #
 # Test matrix:
 #   - New .ts file without test → BLOCK

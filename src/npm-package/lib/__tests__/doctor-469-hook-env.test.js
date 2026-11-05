@@ -169,7 +169,13 @@ describeWin('doctor PATH staleness (#469, Windows-only)', () => {
     // a fresh one PASSes — both are legal, a missing check is not.
     expect(['PASS', 'WARN']).toContain(checks[0].status);
     expect(checks[0].name).toBe('PATH freshness');
-  });
+    // This case shells out to `reg query` AND probes for bash -- both multi-
+    // hundred-millisecond system calls that stretch past vitest's 5s default
+    // when the full suite runs in parallel on Windows. It timed out by load,
+    // not by hanging: it passes in ~2.8s in isolation. Raising the bound keeps
+    // every assertion strict while removing a false red from the pre-commit
+    // full-suite path (that suite is what blocks the commit).
+  }, 30000);
 
   it('AC-469-03: stale registry entries WARN and mention --refresh-env', async () => {
     const { diagnosePathStaleness } = mod();

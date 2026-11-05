@@ -14,24 +14,14 @@ import { ocpRule } from './solid/ocp';
 import { lspRule } from './solid/lsp';
 import { ispRule } from './solid/isp';
 import { dipRule } from './solid/dip';
+import { archNamingRules } from './arch/naming';
+import { archDependencyRules } from './arch/dependency';
 
-export {
-  longFunctionRule,
-  largeFileRule,
-  magicNumbersRule,
-  godClassRule,
-  deepNestingRule,
-  tooManyParamsRule,
-  missingErrorHandlingRule,
-  unusedImportsRule,
-  codeDuplicationRule,
-  manyExportsRule,
-  srpRule,
-  ocpRule,
-  lspRule,
-  ispRule,
-  dipRule,
-};
+// The individual rule objects are re-exported from `./exports` so that this
+// module stays a pure aggregator. Both halves are part of the module's public
+// surface: `GET /rules` consumers import the named rules, while the engine
+// imports only the arrays below.
+export * from './exports';
 
 const CLEAN_CODE_RULES: Rule[] = [
   longFunctionRule,
@@ -48,8 +38,11 @@ const CLEAN_CODE_RULES: Rule[] = [
 
 const SOLID_RULES: Rule[] = [srpRule, ocpRule, lspRule, ispRule, dipRule];
 
+/** Architecture rules: package naming (#694) + dependency direction (#699). */
+const ARCH_RULES: Rule[] = archNamingRules.concat(archDependencyRules);
+
 export function getAllPrincipleRules(): Rule[] {
-  return [...CLEAN_CODE_RULES, ...SOLID_RULES];
+  return [...CLEAN_CODE_RULES, ...SOLID_RULES, ...ARCH_RULES];
 }
 
 export function getCleanCodeRules(): Rule[] {
