@@ -189,6 +189,13 @@ function isNestedFunctionIntro(body: string, wordStart: number, wordEnd: number)
   // correctly -- the same construct scored two different ways.
   const afterWord = skipSpaces(body, wordEnd, body.length);
   if (body.startsWith('=>', afterWord)) return true;
+  // Method shorthand: `{ m() { ... } }`, `class C { async m() { ... } }`.
+  // lizard -ENS reports the method as its own function with its own NS, and the
+  // enclosing body sees 0, so the method body must not be charged outward.
+  if (body[afterWord] === '(') {
+    const close = skipBalancedParen(body, afterWord);
+    if (body[skipSpaces(body, close, body.length)] === '{') return true;
+  }
   // `const name = (...) => {` / `let name = function (...) {`
   let k = wordEnd;
   if (current === 'const' || current === 'let' || current === 'var') {

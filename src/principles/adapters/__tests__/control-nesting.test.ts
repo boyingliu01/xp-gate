@@ -157,6 +157,14 @@ describe('maxControlNesting counts control structures, not braces', () => {
     expect(maxControlNesting(`const v = lib.for;`)).toBe(0);
   });
 
+  it('skips a method shorthand body, as lizard scores it separately', () => {
+    // lizard -ENS reports the method as its own function (NS=1) and the
+    // enclosing body as 0, so the method's nesting must not be charged outward.
+    expect(maxControlNesting(`const obj = { m() { if (a) { b(); } } };`)).toBe(0);
+    expect(maxControlNesting(`class C { m() { if (a) { b(); } } }`)).toBe(0);
+    expect(maxControlNesting(`class C { async m() { if (a) { b(); } } }`)).toBe(0);
+  });
+
   it('counts a brace-less chain of nested controls at its real depth', () => {
     // lizard -ENS reports NS=3 here. Stopping the outer body at the first
     // newline would report 2 and understate exactly the deep nesting this rule
