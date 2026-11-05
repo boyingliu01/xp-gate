@@ -167,7 +167,7 @@ for (const target of syncTargets) {
 // in-tree drift guard 比对 src/principles 与 src/npm-package/principles，
 // 而 `src/npm-package/principles/AGENTS.md` 与正本不一致，于是每个分支、每次运行
 // 都失败在 `expected [ Array(1) ] to deeply equal []`，看上去像测试坏了，
-// 实际是安装钩子污染了它正在准备的工作树（#757）。
+// 实际是安装钩子污染了它正在准备的工作树（#752）。
 //
 // Version 是内容的属性（改 VERSION 才变），保留同步；其余的交给 /init-deep 这类
 // 显式动作去写，不放在安装路径上。
