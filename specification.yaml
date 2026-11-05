@@ -5059,3 +5059,9 @@ specification:
         - id: AC-757-03
           criteria: 仅在值实际变化时才写文件，重复运行不产生任何改动
           test_type: unit
+        - id: AC-757-04
+          criteria: 同一缺陷的另一个写入者 scripts/sync-version.sh 也不再写入日期/commit/分支，仅同步版本号
+          test_type: integration
+        - id: AC-757-05
+          criteria: cross-platform-ci 的镜像比对不再需要 sed 剥离 AGENTS.md 头部，改为直接比较
+          test_type: integration

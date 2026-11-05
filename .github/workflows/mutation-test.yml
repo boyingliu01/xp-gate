@@ -149,15 +149,19 @@ jobs:
           # non-empty diff makes `diff` exit 1 and kill the step mid-report.
           set +e
           set -uo pipefail
-          dirty=$(git status --porcelain -uall -- src/principles src/npm-package/principles)
+          # Check the WHOLE tree, not just the principles pair. The defect dirtied
+          # 32 tracked files (every AGENTS.md); the principles pair is merely the
+          # one a test happened to compare. Scoping the guard to the known victim
+          # would let the same cause re-appear any other place it later breaks.
+          dirty=$(git status --porcelain -uall -- '*.md' '*.json' '*.yml' '*.yaml' '*.sh' '*.js' '*.cjs' '*.ts' '*.mjs')
           if [ -n "$dirty" ]; then
-            echo "::error::install/prepare step dirtied the mirrored principles tree (#757)"
-            echo "$dirty"
-            echo "--- byte-level differences ---"
-            diff -ru src/principles src/npm-package/principles 2>&1 | head -60 || true
+            echo "::error::install/prepare step dirtied the working tree (#757)"
+            echo "$dirty" | head -40
+            echo "--- changed line total ---"
+            git diff --stat | tail -3
             exit 1
           fi
-          echo "OK: principles tree is clean after install"
+          echo "OK: working tree is clean after install"
 
       - name: Determine changed principles files
         id: changed
