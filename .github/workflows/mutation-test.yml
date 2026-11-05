@@ -166,6 +166,30 @@ jobs:
           fi
           echo "OK: working tree is clean after install"
 
+      - name: Diagnose principles mirror parity (temporary, #757)
+        run: |
+          set +e
+          set -uo pipefail
+          echo "--- top-level files compared by the guard ---"
+          for f in src/principles/*; do
+            [ -f "$f" ] || continue
+            rel=$(basename "$f")
+            m="src/npm-package/principles/$rel"
+            if [ ! -e "$m" ]; then echo "MISSING: $m"; continue; fi
+            if ! cmp -s "$f" "$m"; then
+              echo "DIFFERS: $rel"
+              echo "--- sizes: canonical=$(wc -c < "$f") mirror=$(wc -c < "$m")"
+              echo "--- first differing bytes ---"
+              cmp "$f" "$m" 2>&1 | head -2
+              echo "--- diff ---"
+              diff "$f" "$m" | head -20
+              echo "--- eol: canonical=$(file "$f" | sed 's/.*: //')"
+            fi
+          done
+          echo "--- git status of tree (for contrast with the guard above) ---"
+          git status --porcelain -uall | head -20
+          echo "--- done ---"
+
       - name: Determine changed principles files
         id: changed
         run: |
