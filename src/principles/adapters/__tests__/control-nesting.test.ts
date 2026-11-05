@@ -149,9 +149,27 @@ describe('maxControlNesting counts control structures, not braces', () => {
     `)).toBe(0);
   });
 
-  it('ignores `if` in a member access position', () => {
-    // `obj.if` is not valid JS, but a keyword-shaped member must not be counted
-    // as a branch if it ever appears inside an already-masked fragment.
-    expect(maxControlNesting(`const x = lib.interface;`)).toBe(0);
+  it('ignores a keyword-shaped name in a member access position', () => {
+    // `promise.catch(...)` / `obj.for` -- the word follows `.`, so it is a
+    // property name, not a branch. (The previous fixture used `lib.interface`,
+    // which is not in the keyword set, so it never exercised this guard.)
+    expect(maxControlNesting(`promise.catch(handler);`)).toBe(0);
+    expect(maxControlNesting(`const v = lib.for;`)).toBe(0);
+  });
+
+  it('counts a brace-less chain of nested controls at its real depth', () => {
+    // lizard -ENS reports NS=3 here. Stopping the outer body at the first
+    // newline would report 2 and understate exactly the deep nesting this rule
+    // exists to catch.
+    expect(maxControlNesting(`
+if (a)
+  if (b)
+    if (c) { x(); }
+`)).toBe(3);
+    // Sequential guard clauses must stay flat.
+    expect(maxControlNesting(`
+if (a) return 1;
+if (b) return 2;
+`)).toBe(1);
   });
 });
