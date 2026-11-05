@@ -136,10 +136,14 @@ jobs:
       - name: Snapshot mirror drift (diagnostic)
         run: |
           set -uo pipefail
-          echo "--- git status (tracked changes) ---"
-          git status --porcelain | head -50
+          echo "--- git status (untracked files listed individually) ---"
+          # -uall, not the default: the default collapses an untracked directory
+          # to "dir/" and hides the very file that would explain the drift.
+          git status --porcelain -uall | head -80
           echo "--- src/principles vs src/npm-package/principles ---"
-          diff -rq src/principles src/npm-package/principles 2>&1 | head -30 || true
+          diff -rq src/principles src/npm-package/principles 2>&1 | head -30
+          echo "--- first differing bytes ---"
+          diff -ru src/principles src/npm-package/principles 2>&1 | head -60
           echo "--- end ---"
 
       - name: Determine changed principles files
