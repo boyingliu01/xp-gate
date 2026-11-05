@@ -104,7 +104,7 @@ function nestingOfRange(body: string, from: number, to: number, depth: number): 
 
   for (let i = from; i < to;) {
     const consumed = advanceNestingState(body, i, state);
-    if (consumed === 2) {
+    if (consumed === PAIR_CONSUMED) {
       // The pair (escape, comment close, comment open) is consumed whole. A
       // comment opener must not also be read as a brace-less character below.
       i += 2;
@@ -512,13 +512,22 @@ function isKeyOrLabel(body: string, end: number): boolean {
 }
 
 /**
+ * Characters consumed when `advanceNestingState` reads a two-character pair:
+ * an escaped backslash, a comment open, or a comment close.
+ *
+ * Named so the scan below cannot silently treat a future three-character
+ * consumption as one -- only this value is special-cased.
+ */
+const PAIR_CONSUMED = 2;
+
+/**
  * Advance the quoting/commenting state machine by one character.
  *
  * Pure with respect to depth: it only updates `state` and reports how many
  * characters were consumed, so the counting and the lexing can be reasoned about
  * separately (#602).
  *
- * @returns 2 when a two-character pair was consumed whole, else 1.
+ * @returns `PAIR_CONSUMED` when a two-character pair was consumed whole, else 1.
  */
 function advanceNestingState(body: string, i: number, state: NestingScanState): number {
   const c = body[i];
