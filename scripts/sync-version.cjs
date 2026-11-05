@@ -158,18 +158,25 @@ for (const target of syncTargets) {
 }
 
 // ---------- AGENTS.md 头部更新 ----------
-
-const today = new Date().toISOString().slice(0, 10); // YYYY-MM-DD
-const headSha = gitCmd(['rev-parse', '--short', 'HEAD'], 'unknown');
-const branch = gitCmd(['rev-parse', '--abbrev-ref', 'HEAD'], 'unknown');
+//
+// ⚠️ 只同步「内容属性」，不写「本次运行的属性」。
+//
+// 本脚本挂在 `prepare` 上，而 `npm ci` 会执行 `prepare`。如果这里写日期 / HEAD sha /
+// 分支名，那么每一次全新安装都会产出与提交内容不同的 AGENTS.md —— 工作树在安装阶段
+// 就被弄脏了。实测后果：mutation job 的 Stryker dry run 跑整套 vitest，其中
+// in-tree drift guard 比对 src/principles 与 src/npm-package/principles，
+// 而 `src/npm-package/principles/AGENTS.md` 与正本不一致，于是每个分支、每次运行
+// 都失败在 `expected [ Array(1) ] to deeply equal []`，看上去像测试坏了，
+// 实际是安装钩子污染了它正在准备的工作树（#757）。
+//
+// Version 是内容的属性（改 VERSION 才变），保留同步；其余的交给 /init-deep 这类
+// 显式动作去写，不放在安装路径上。
+// 守卫：scripts/__tests__/sync-version-deterministic.test.cjs
 
 const agentsFiles = findFiles(ROOT_DIR, 'AGENTS.md');
 let agentsCount = 0;
 
 const replacements = [
-  { pattern: /^\*\*Generated:\*\*.*$/m, value: `**Generated:** ${today}` },
-  { pattern: /^\*\*Commit:\*\*.*$/m, value: `**Commit:** ${headSha}` },
-  { pattern: /^\*\*Branch:\*\*.*$/m, value: `**Branch:** ${branch}` },
   { pattern: /^\*\*Version:\*\*.*$/m, value: `**Version:** ${FULL_VERSION}` },
 ];
 
@@ -190,5 +197,5 @@ for (const agentsFile of agentsFiles) {
   }
 }
 
-console.error(`[sync-version] AGENTS.md headers refreshed: ${agentsCount} files (date=${today} commit=${headSha} branch=${branch} version=${FULL_VERSION})`);
+console.error(`[sync-version] AGENTS.md headers refreshed: ${agentsCount} files (version=${FULL_VERSION})`);
 console.error(`[sync-version] OK — all package.json version fields synced from VERSION (${FULL_VERSION})`);
