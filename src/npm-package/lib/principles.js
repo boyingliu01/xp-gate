@@ -209,10 +209,18 @@ function findPrinciplesEntry() {
 // Extensions the principles engine has an adapter for. Kept as a literal rather
 // than imported from src/principles/analyzer.ts because this file must stay
 // loadable by plain Node with no transpile step (the package ships zero runtime
-// dependencies and no build). Must match `getAdapterForFile`'s adapterMap.
+// dependencies and no build). Must match `getAdapterForFile`'s adapterMap —
+// `__tests__/principles-csharp-coverage.test.js` now derives the expected set
+// from that adapterMap and fails when the two drift, because "kept in sync by
+// comment" did not survive contact with #717.
+//
+// `.cs`/`.csx` were the gap: analyzer.ts registered CSharpAdapter, this walk
+// never offered the files, so `xp-gate principles <csharp-dir>` reported
+// "Files checked: 0" — indistinguishable from "no violations".
 const SOURCE_EXTENSIONS = new Set([
   '.ts', '.tsx', '.js', '.jsx', '.mjs', '.cjs',
   '.py', '.go', '.java', '.kt', '.kts',
+  '.cs', '.csx',
   '.dart', '.swift', '.cpp', '.cc', '.cxx', '.c', '.h', '.hpp',
   '.m', '.mm',
 ]);
