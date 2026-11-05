@@ -157,6 +157,12 @@ describe('maxControlNesting counts control structures, not braces', () => {
     expect(maxControlNesting(`const v = lib.for;`)).toBe(0);
   });
 
+  it('treats `for await` as a loop with a condition', () => {
+    // The `await` modifier sits between `for` and `(`, so without skipping it the
+    // body looked brace-less and was cut at the newline, losing a level.
+    expect(maxControlNesting(`for await (const x of xs) { if (a) { b(); } }`)).toBe(2);
+  });
+
   it('skips a method shorthand body, as lizard scores it separately', () => {
     // lizard -ENS reports the method as its own function (NS=1) and the
     // enclosing body as 0, so the method's nesting must not be charged outward.
