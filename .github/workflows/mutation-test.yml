@@ -133,17 +133,26 @@ jobs:
       # single element that would say WHAT drifted is collapsed. Print the
       # actual drift here so a failing dry run is diagnosable from the log
       # instead of requiring a re-run with extra instrumentation.
+      # TODO(#757): TEMPORARY. Remove this step once the principles-tree drift in
+      # this job is root-caused and fixed -- the job has never reached its
+      # assertion on any branch, so there is no baseline to compare against yet.
       - name: Snapshot mirror drift (diagnostic)
         run: |
+          # -e must stay OFF here, and GitHub already runs steps with -eo
+          # pipefail: under `-e`, a differing tree makes `diff` exit 1, pipefail
+          # propagates it, and the step aborts exactly in the only scenario it
+          # exists to explain -- the remaining output never prints and the job
+          # fails on the diagnostic instead of on the real cause.
+          set +e
           set -uo pipefail
           echo "--- git status (untracked files listed individually) ---"
           # -uall, not the default: the default collapses an untracked directory
           # to "dir/" and hides the very file that would explain the drift.
           git status --porcelain -uall | head -80
           echo "--- src/principles vs src/npm-package/principles ---"
-          diff -rq src/principles src/npm-package/principles 2>&1 | head -30
+          diff -rq src/principles src/npm-package/principles 2>&1 | head -30 || true
           echo "--- first differing bytes ---"
-          diff -ru src/principles src/npm-package/principles 2>&1 | head -60
+          diff -ru src/principles src/npm-package/principles 2>&1 | head -60 || true
           echo "--- end ---"
 
       - name: Determine changed principles files
