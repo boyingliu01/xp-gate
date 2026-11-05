@@ -256,6 +256,17 @@ jobs:
           echo "duration_seconds=$SECONDS" >> "$GITHUB_OUTPUT"
           exit $exit_code
 
+      - name: Print principles diagnostic (temporary, #757)
+        if: always()
+        run: |
+          echo "--- diag file (written by the guard test inside Stryker's sandbox) ---"
+          f="${RUNNER_TEMP:-/tmp}/diag-principles.txt"
+          for cand in "$f" "$(node -e "console.log(require('os').tmpdir())" 2>/dev/null)/diag-principles.txt"; do
+            if [ -f "$cand" ]; then echo "found: $cand"; cat "$cand"; echo; fi
+          done
+          echo "--- also search the runner temp dir ---"
+          find "${RUNNER_TEMP:-/tmp}" -name 'diag-principles.txt' 2>/dev/null | head -5 | while read -r x; do echo "== $x"; cat "$x"; done
+
       - name: Upload Mutation Report
         if: always()
         uses: actions/upload-artifact@v4

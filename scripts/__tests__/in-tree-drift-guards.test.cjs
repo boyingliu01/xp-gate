@@ -95,10 +95,21 @@ describe('AC-433-01: hook mirror parity (githooks ↔ npm mirrors, byte-level)',
         problems.push(`byte drift: src/principles/${rel}`);
       }
     }
-    if (problems.length) {
-      // eslint-disable-next-line no-console
-      console.log('DIAG ROOT=' + ROOT + ' srcDir=' + srcDir + ' problems=' + JSON.stringify(problems));
-    }
+    // TEMP DIAG (#757): write unconditionally -- Stryker's dry run swallows
+    // console output, so the report has to go to a file the workflow uploads.
+    try {
+      const lines = [
+        'ROOT=' + ROOT, 'tmpdir=' + require('os').tmpdir(),
+        'srcDir=' + srcDir,
+        'mirrorDir=' + mirrorDir,
+        'srcExists=' + fs.existsSync(srcDir),
+        'mirrorExists=' + fs.existsSync(mirrorDir),
+        'problems=' + JSON.stringify(problems),
+        'srcEntries=' + JSON.stringify(fs.existsSync(srcDir) ? fs.readdirSync(srcDir) : null),
+        'mirrorEntries=' + JSON.stringify(fs.existsSync(mirrorDir) ? fs.readdirSync(mirrorDir) : null),
+      ];
+      fs.writeFileSync(require('os').tmpdir() + '/diag-principles.txt', lines.join(String.fromCharCode(10)));
+    } catch (e) { /* diagnostic must never itself fail the test */ }
     expect(problems).toEqual([]);
   });
 });
