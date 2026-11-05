@@ -514,43 +514,92 @@ function extractCallbackBody(content: string, callbackStart: number): string {
  */
 const ANNOTATED_JSDOC = /@test\s+REQ-/;
 
-function extractJSDocBeforeTest(content: string, sourcePath?: string): Array<{ jsdoc: string; testBody: string; testName: string }> {
-  const results: Array<{ jsdoc: string; testBody: string; testName: string }> = [];
+/** The `@test REQ-...` tag of a JSDoc block, or undefined when absent. */
+const REQ_TAG = /@test\s+(REQ-[A-Z0-9]+(?:-[A-Z0-9]+)*)/;
 
-  // Match: /** JSDOC */ (test|it|describe)[.modifier]( [args], )'name', ( [params] ) => {
-  // `.each` variants have an extra `()` before the test name string.
-  // Group 4 (bodyStart) points at the callback open paren so we can brace-match
-  // the real function body.
-  const testPattern = /\/\*\*((?:(?!\*\/)[\s\S])*)\*\/(?:[\s\n]*)(?:test|it|describe)(?:\.(?:each|skip|todo|only))?\s*\([^)]*\)\s*,\s*\(\s*(?:['"]([^'"]+)['"]|`([^`]*)`)\s*\)?\s*,?\s*(?:\([^)]*\)\s*=>)?\s*/g;
+/**
+ * First annotation pass: a declaration that carries an extra argument list
+ * before the name string.
+ *
+ * Measured caveat: this pattern currently matches NOTHING in this repo, and
+ * neither did the `testPattern` it is copied from -- the `.each([...])('name')`
+ * shape it targets does not satisfy the `\([^)]*\)\s*,` requirement. It is kept
+ * because it is byte-identical to the inherited behaviour and dropping it would
+ * be an unrequested semantic change, not because it is known to fire. The TODO
+ * on AC-002-02 tracks actually supporting `.each`.
+ */
+const TEST_PATTERN_WITH_ARGS = /\/\*\*((?:(?!\*\/)[\s\S])*)\*\/(?:[\s\n]*)(?:test|it|describe)(?:\.(?:each|skip|todo|only))?\s*\([^)]*\)\s*,\s*\(\s*(?:['"]([^'"]+)['"]|`([^`]*)`)\s*\)?\s*,?\s*(?:\([^)]*\)\s*=>)?\s*/g;
 
-  let match: RegExpExecArray | null;
-  while ((match = testPattern.exec(content)) !== null) {
+/**
+ * Second annotation pass: plain `test('name', () => { ... })` and `.skip` /
+ * `.todo` / `.only` forms, which have no preceding argument list.
+ */
+const TEST_PATTERN_PLAIN = /\/\*\*((?:(?!\*\/)[\s\S])*)\*\/(?:[\s\n]*)(?:test|it|describe)(?:\.(?:skip|todo|only))?\s*\(\s*(?:['"]([^'"]+)['"]|`([^`]*)`)\s*\)?\s*,?\s*(?:\([^)]*\)\s*=>)?\s*/g;
+
+/** A test record recovered from one JSDoc block. */
+interface TestAnnotation {
+  jsdoc: string;
+  testBody: string;
+  testName: string;
+}
+
+/**
+ * Run one annotation-scanning pass and append every annotated match to
+ * `results`.
+ *
+ * `dedupe` is required rather than always-on because the two passes have
+ * different contracts: the first pass must not drop a legitimate second test
+ * that repeats an identical doc block, while the second pass re-finds everything
+ * the first pass already matched. Only the second pass may skip.
+ */
+function collectAnnotatedTests(
+  content: string,
+  pattern: RegExp,
+  results: TestAnnotation[],
+  dedupe: boolean,
+): void {
+  // `matchAll` clones the regex internally, so no `lastIndex` is read or
+  // written: the scan cannot leave state behind for the next caller, and a
+  // caller cannot inherit state from a previous one. The patterns stay
+  // module-level constants (they are byte-identical to the inherited inline
+  // literals), but their mutable state is no longer reachable from here.
+  for (const match of content.matchAll(pattern)) {
     const jsdoc = match[1]!;
     const testName = match[2] || match[3] || '';
-    if (testName && ANNOTATED_JSDOC.test(jsdoc)) {
-      const body = extractCallbackBody(content, match.index + match[0].length);
-      // JSDoc + declaration + function body gives a self-contained test body.
-      const testBody = content.slice(match.index, match.index + match[0].length) + body;
-      results.push({ jsdoc, testBody, testName });
-    }
+    if (!testName || !ANNOTATED_JSDOC.test(jsdoc)) continue;
+    if (dedupe && results.some(r => r.jsdoc === jsdoc)) continue;
+    const declaration = content.slice(match.index, match.index + match[0].length);
+    // JSDoc + declaration + function body gives a self-contained test body.
+    const testBody = declaration + extractCallbackBody(content, match.index + match[0].length);
+    results.push({ jsdoc, testBody, testName });
   }
+}
 
-  // Second pass: match standard test/it/describe without .each
-  const simplePattern = /\/\*\*((?:(?!\*\/)[\s\S])*)\*\/(?:[\s\n]*)(?:test|it|describe)(?:\.(?:skip|todo|only))?\s*\(\s*(?:['"]([^'"]+)['"]|`([^`]*)`)\s*\)?\s*,?\s*(?:\([^)]*\)\s*=>)?\s*/g;
+/**
+ * Decide whether the file-level block adds something the per-test records do
+ * not already say.
+ *
+ * The header is redundant only when a per-test record already carries BOTH its
+ * REQ and every AC it lists. Comparing the REQ alone was wrong: a file whose
+ * header covers AC-1..AC-5 while one case below happens to name the same REQ for
+ * its own AC-9 lost the header, and AC-1..AC-5 were reported uncovered even
+ * though the file is annotated for them.
+ */
+function needsFileLevelRecord(header: string, results: TestAnnotation[]): boolean {
+  const headerReq = header.match(REQ_TAG)?.[1];
+  const headerAcs = expandAcCovers(extractAllTags(header, 'covers'));
+  const coveredReqs = new Set(results.map(r => r.jsdoc.match(REQ_TAG)?.[1]).filter(Boolean));
+  const coveredAcs = new Set(results.flatMap(r => expandAcCovers(extractAllTags(r.jsdoc, 'covers'))));
+  const reqMissing = !headerReq || !coveredReqs.has(headerReq);
+  const acsMissing = headerAcs.some(ac => !coveredAcs.has(ac));
+  return results.length === 0 || reqMissing || acsMissing;
+}
 
-  while ((match = simplePattern.exec(content)) !== null) {
-    const jsdoc = match[1]!;
-    const testName = match[2] || match[3] || '';
-    if (testName && ANNOTATED_JSDOC.test(jsdoc)) {
-      // Don't duplicate if already found in first pass
-      const alreadyFound = results.some(r => r.jsdoc === jsdoc);
-      if (!alreadyFound) {
-        const body = extractCallbackBody(content, match.index + match[0].length);
-        const testBody = content.slice(match.index, match.index + match[0].length) + body;
-        results.push({ jsdoc, testBody, testName });
-      }
-    }
-  }
+function extractJSDocBeforeTest(content: string, sourcePath?: string): TestAnnotation[] {
+  const results: TestAnnotation[] = [];
+
+  collectAnnotatedTests(content, TEST_PATTERN_WITH_ARGS, results, false);
+  collectAnnotatedTests(content, TEST_PATTERN_PLAIN, results, true);
 
   // File-level block: the dominant convention in this repo is ONE `@test` /
   // `@covers` block at the top of the file with plain `it('...')` calls below
@@ -565,32 +614,15 @@ function extractJSDocBeforeTest(content: string, sourcePath?: string): Array<{ j
   //     module-level REQ plus per-case ACs). Dropping it reported that REQ as
   //     having no test even though the file is annotated for it.
   const fileLevelJsdoc = extractFileLevelJsdoc(content);
-  if (fileLevelJsdoc) {
-    // The header is redundant only when a per-test record already carries BOTH
-    // its REQ and every AC it lists. Comparing the REQ alone was wrong: a file
-    // whose header covers AC-1..AC-5 while one case below happens to name the
-    // same REQ for its own AC-9 lost the header, and AC-1..AC-5 were reported
-    // uncovered even though the file is annotated for them.
-    const headerReq = fileLevelJsdoc.match(/@test\s+(REQ-[A-Z0-9]+(?:-[A-Z0-9]+)*)/)?.[1];
-    const headerAcs = expandAcCovers(extractAllTags(fileLevelJsdoc, 'covers'));
-    const coveredReqs = new Set(
-      results
-        .map(r => r.jsdoc.match(/@test\s+(REQ-[A-Z0-9]+(?:-[A-Z0-9]+)*)/)?.[1])
-        .filter(Boolean),
-    );
-    const coveredAcs = new Set(results.flatMap(r => expandAcCovers(extractAllTags(r.jsdoc, 'covers'))));
-    const reqMissing = !headerReq || !coveredReqs.has(headerReq);
-    const acsMissing = headerAcs.some(ac => !coveredAcs.has(ac));
-    if (results.length === 0 || reqMissing || acsMissing) {
-      // One record for the whole file, NOT one per `it()`. The block annotates
-      // the file rather than each case; a record per test made every case
-      // without its own `@intent` look unannotated (2448 false findings).
-      results.push({
-        jsdoc: fileLevelJsdoc,
-        testBody: content,
-        testName: sourcePath || 'file-level',
-      });
-    }
+  if (fileLevelJsdoc && needsFileLevelRecord(fileLevelJsdoc, results)) {
+    // One record for the whole file, NOT one per `it()`. The block annotates
+    // the file rather than each case; a record per test made every case
+    // without its own `@intent` look unannotated (2448 false findings).
+    results.push({
+      jsdoc: fileLevelJsdoc,
+      testBody: content,
+      testName: sourcePath || 'file-level',
+    });
   }
 
   return results;
