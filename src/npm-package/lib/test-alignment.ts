@@ -558,12 +558,12 @@ function collectAnnotatedTests(
   results: TestAnnotation[],
   dedupe: boolean,
 ): void {
-  // The patterns are module-level `/g` regexes, so lastIndex survives between
-  // calls: reset it, otherwise a caller that returns early would leave the scan
-  // resuming mid-file and silently miss annotations.
-  pattern.lastIndex = 0;
-  let match: RegExpExecArray | null;
-  while ((match = pattern.exec(content)) !== null) {
+  // `matchAll` clones the regex internally, so no `lastIndex` is read or
+  // written: the scan cannot leave state behind for the next caller, and a
+  // caller cannot inherit state from a previous one. The patterns stay
+  // module-level constants (they are byte-identical to the inherited inline
+  // literals), but their mutable state is no longer reachable from here.
+  for (const match of content.matchAll(pattern)) {
     const jsdoc = match[1]!;
     const testName = match[2] || match[3] || '';
     if (!testName || !ANNOTATED_JSDOC.test(jsdoc)) continue;
