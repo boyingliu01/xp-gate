@@ -1,5 +1,35 @@
 # Changelog
 
+## [0.36.1.0] - 2026-11-05
+
+**修复：C# 项目里 `xp-gate principles` 报「找不到源码」。** 0.36.0 让 C# 成为一等地
+支持语言，但 CLI 侧的目录遍历仍不认 `.cs`——**支持建好了，路径没通**。
+
+### Fixed
+
+- **`xp-gate principles <csharp-dir>` 看不到任何 C# 文件（#758）**：报
+  ```
+  [xp-gate principles] no analysable source files under: ...
+    Supported: .ts .tsx ... .m .mm
+  ```
+  `Supported:` 清单里没有 `.cs`。真因是 `analyzer.ts` 的 `adapterMap` 自 #717 起
+  已注册 `.cs`/`.csx`，而 `src/npm-package/lib/principles.js` 为「纯 Node 可加载」
+  自己维护的第二份字面量 `SOURCE_EXTENSIONS` 没跟着改——注释写着
+  「Must match adapterMap」，实际没 match。遍历在交给检查器前就丢掉了全部 C#，
+  外壳只能报 `Files checked: 0`，而这个 0 与「确实没有违规」无法区分。
+  补上 `.cs`/`.csx`。
+- **漂移守卫（#758）**：新增测试从 `adapterMap` 派生期望扩展名集合并逐项验证遍历
+  能收集。前两版设计都被变异实测证伪并弃用：用正则解析源码时，`'.ts'`→`".ts"`
+  这种纯风格重构会让期望集从 21 项静默缩到 20 项而测试照样通过；用手写候选清单
+  时，给 `adapterMap` 和遍历同时加一个未知扩展名仍全绿。最终改用 TypeScript
+  编译器 API 解析，六项变异矩阵验证：撤销修复会红、候选盲区会红、引号重构仍绿。
+
+### Known limitations
+
+- 双清单根因未消除：彻底修法是单一共享数据文件，会改变包的模块产出方式，未在本次
+  处理。当前测试在两者漂移时会指名失败，作为过渡期安全网。
+- `Files checked: 0` 仍与「无违规」不可区分，需独立退出码或显著警告，属独立设计问题。
+
 ## [0.36.0.0] - 2026-11-04
 
 **C#/.NET 成为一等支持语言，门禁有了名字。** 一个 C# 项目此前会「静默通过」全部
