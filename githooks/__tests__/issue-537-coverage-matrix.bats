@@ -214,11 +214,26 @@ setup() {
   run grep -c 'GATE_6_REASON_BY_LANG\["\$CURRENT_LANG"\]="architecture_not_configured"' "$PRE_COMMIT"
   [ "$status" -eq 0 ]
   [ "$output" -ge 3 ]
-  # The C# dimension added in #717 must be among them: its absence would put
-  # an unmeasured language back on the "covered" path this issue removed.
-  run grep -B4 'GATE_6_REASON_BY_LANG\["\$CURRENT_LANG"\]="architecture_not_configured"' "$PRE_COMMIT"
+  # The C# dimension added in #717 must be among them: without it, a C# commit
+  # with no arch-csharp.yaml returns to the "no reason + PASS => covered" path
+  # this issue exists to remove.
+  #
+  # C# has TWO config-missing decision points, each ending in its own recording:
+  #   1. an arch-csharp.yaml exists but no .csproj is found beneath it
+  #   2. no arch-csharp.yaml at all
+  # An "at least one C# recording exists" check is satisfied by either one, so
+  # breaking the other stays green (measured: removing branch 1's recording
+  # passed such an assertion). Both decision points must be accounted for.
+  run awk '
+    /if \[ -z "\$_cs_arch_proj" \]/ { pending = 1; next }
+    /No arch-csharp\.yaml found/ { pending = 1; next }
+    /GATE_6_REASON_BY_LANG\["\$CURRENT_LANG"\]="architecture_not_configured"/ {
+      if (pending) { recorded++; pending = 0 }
+      next
+    }
+    END { exit(recorded >= 2 ? 0 : 1) }
+  ' "$PRE_COMMIT"
   [ "$status" -eq 0 ]
-  [[ "$output" == *arch-csharp* || "$output" == *_cs_arch* ]]
 }
 
 @test "no language branch can reach the matrix with no reason and no measurement" {

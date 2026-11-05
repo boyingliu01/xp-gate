@@ -33,11 +33,14 @@ setup() {
   local call_pattern='"$SEMGREP_CMD" scan'
   grep -qF "$call_pattern" "$GATE10"
   # The bounded form must exist and must guard the scan: `timeout -k N T`
-  # appearing between the timeout setup and the exit-code capture. Anchor both
-  # on the invocation line, so neither can be satisfied by an unrelated line.
+  # appearing between the timeout setup and the exit-code capture. Anchor all
+  # three on the invocation line so none can be satisfied by an unrelated line:
+  # the LAST `timeout -k` BEFORE the scan, not the first in the file — any
+  # earlier tool's wrapper would otherwise satisfy an ordering check that says
+  # nothing about this call.
   local first_timeout scan_line exit_line
-  first_timeout=$(grep -n 'timeout -k' "$GATE10" | head -1 | cut -d: -f1)
   scan_line=$(grep -nF "$call_pattern" "$GATE10" | head -1 | cut -d: -f1)
+  first_timeout=$(awk -v scan="$scan_line" 'NR < scan && /timeout -k/ { line = NR } END { print line }' "$GATE10")
   # `SEMGREP_EXIT=$?` is captured once in the timeout branch and once in the
   # fallback branch; the first capture AFTER the invocation is the one that
   # records the bounded run's status.
