@@ -127,6 +127,21 @@ jobs:
           test -f plugins/dsh/lib/index.js \
             || { echo "::error::plugins/dsh build produced no lib/index.js"; exit 1; }
 
+      # The Stryker dry run executes the WHOLE vitest suite, including the
+      # in-tree drift guards. When one of those guards fails, Stryker reports
+      # only the test name and "expected [ Array(1) ] to deeply equal []" -- the
+      # single element that would say WHAT drifted is collapsed. Print the
+      # actual drift here so a failing dry run is diagnosable from the log
+      # instead of requiring a re-run with extra instrumentation.
+      - name: Snapshot mirror drift (diagnostic)
+        run: |
+          set -uo pipefail
+          echo "--- git status (tracked changes) ---"
+          git status --porcelain | head -50
+          echo "--- src/principles vs src/npm-package/principles ---"
+          diff -rq src/principles src/npm-package/principles 2>&1 | head -30 || true
+          echo "--- end ---"
+
       - name: Determine changed principles files
         id: changed
         run: |

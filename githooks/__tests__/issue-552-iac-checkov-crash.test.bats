@@ -16,16 +16,22 @@ setup() {
 }
 
 @test "anti-vacuity: the checkov invocation is still in iac.sh" {
-  grep -q 'checkov --file' "$IAC"
+  # Match any resolution of the binary, not the literal `checkov --file`. The
+  # adapter probes checkov / .exe / .cmd because the extensionless MSYS shim
+  # cannot be executed on Git Bash, so the invocation is `"$checkov_bin" --file`.
+  # Pinning the bare word made a correct fix look like a regression.
+  grep -qE '("[^"]*"|checkov) +--file +"\$file"' "$IAC"
+  grep -q 'checkov_bin' "$IAC"
 }
 
 @test "every checkov invocation is followed by a status recording" {
   # The defect was a bare invocation whose status went nowhere. Counting lines
-  # does not need a regex that pins indentation: every `checkov --file` line must
-  # be immediately followed by record_checkov_run.
+  # does not need a regex that pins indentation OR the command spelling: every
+  # invocation -- whichever resolvable form of checkov it names -- must be
+  # immediately followed by record_checkov_run.
   local total recorded
-  total=$(grep -cE '^\s*checkov --file ' "$IAC")
-  recorded=$(grep -A1 -E '^\s*checkov --file ' "$IAC" | grep -c 'record_checkov_run')
+  total=$(grep -cE '^\s*("[^"]*"|checkov) +--file ' "$IAC")
+  recorded=$(grep -A1 -E '^\s*("[^"]*"|checkov) +--file ' "$IAC" | grep -c 'record_checkov_run')
   [ "$total" -ge 1 ]
   [ "$total" -eq "$recorded" ]
 }
