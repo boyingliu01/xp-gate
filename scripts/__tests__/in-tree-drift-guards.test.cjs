@@ -82,6 +82,9 @@ describe('AC-433-01: hook mirror parity (githooks ↔ npm mirrors, byte-level)',
     expect(fs.existsSync(srcDir)).toBe(true);
     expect(fs.existsSync(mirrorDir)).toBe(true);
     const problems = [];
+    // TEMP DIAG (#757): report the actual paths and problems when running under
+    // Stryker's sandbox, where a difference appears that the pre-run node check
+    // does not reproduce.
     for (const e of fs.readdirSync(srcDir, { withFileTypes: true })) {
       const rel = e.name;
       const a = path.join(srcDir, rel);
@@ -91,6 +94,10 @@ describe('AC-433-01: hook mirror parity (githooks ↔ npm mirrors, byte-level)',
       if (!fs.readFileSync(a).equals(fs.readFileSync(b))) {
         problems.push(`byte drift: src/principles/${rel}`);
       }
+    }
+    if (problems.length) {
+      // eslint-disable-next-line no-console
+      console.log('DIAG ROOT=' + ROOT + ' srcDir=' + srcDir + ' problems=' + JSON.stringify(problems));
     }
     expect(problems).toEqual([]);
   });
