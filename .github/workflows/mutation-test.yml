@@ -166,34 +166,6 @@ jobs:
           fi
           echo "OK: working tree is clean after install"
 
-      - name: Diagnose principles mirror parity (temporary, #757)
-        run: |
-          set +e
-          set -uo pipefail
-          echo "--- unreported / ignored files inside the two trees ---"
-          git status --porcelain -uall --ignored=matching -- src/principles src/npm-package/principles | head -30
-          echo "--- node-level byte parity over TOP-LEVEL files (what the test does) ---"
-          node -e '
-            const fs=require("fs"),path=require("path");
-            const src="src/principles", mir="src/npm-package/principles";
-            const problems=[];
-            for (const e of fs.readdirSync(src,{withFileTypes:true})) {
-              if (e.isDirectory()) continue;
-              const a=path.join(src,e.name), b=path.join(mir,e.name);
-              if (!fs.existsSync(b)) { problems.push("missing: "+e.name); continue; }
-              const ba=fs.readFileSync(a), bb=fs.readFileSync(b);
-              if (!ba.equals(bb)) {
-                problems.push("drift: "+e.name+" ("+ba.length+" vs "+bb.length+" bytes)");
-                let i=0; while(i<ba.length&&i<bb.length&&ba[i]===bb[i]) i++;
-                console.log("first differing byte offset: "+i);
-                console.log("canonical around: "+JSON.stringify(ba.slice(Math.max(0,i-40),i+40).toString()));
-                console.log("mirror    around: "+JSON.stringify(bb.slice(Math.max(0,i-40),i+40).toString()));
-              }
-            }
-            console.log("PROBLEMS: "+JSON.stringify(problems));
-          '
-          echo "--- done ---"
-
       - name: Determine changed principles files
         id: changed
         run: |
@@ -255,17 +227,6 @@ jobs:
           exit_code=$?
           echo "duration_seconds=$SECONDS" >> "$GITHUB_OUTPUT"
           exit $exit_code
-
-      - name: Print principles diagnostic (temporary, #757)
-        if: always()
-        run: |
-          echo "--- diag file (written by the guard test inside Stryker's sandbox) ---"
-          f="${RUNNER_TEMP:-/tmp}/diag-principles.txt"
-          for cand in "$f" "$(node -e "console.log(require('os').tmpdir())" 2>/dev/null)/diag-principles.txt"; do
-            if [ -f "$cand" ]; then echo "found: $cand"; cat "$cand"; echo; fi
-          done
-          echo "--- also search the runner temp dir ---"
-          find "${RUNNER_TEMP:-/tmp}" -name 'diag-principles.txt' 2>/dev/null | head -5 | while read -r x; do echo "== $x"; cat "$x"; done
 
       - name: Upload Mutation Report
         if: always()
