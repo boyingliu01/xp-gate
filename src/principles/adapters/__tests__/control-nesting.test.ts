@@ -68,6 +68,16 @@ describe('maxControlNesting counts control structures, not braces', () => {
     `)).toBe(2);
   });
 
+  it('counts a finally block as a level, like catch', () => {
+    // lizard -ENS reports NS=2 for each of these (verified against 1.25.0).
+    expect(maxControlNesting(
+      `try { x(); } catch (e) { y(); } finally { if (z) { w(); } }`,
+    )).toBe(2);
+    expect(maxControlNesting(
+      `try { x(); } finally { if (z) { w(); } }`,
+    )).toBe(2);
+  });
+
   it('counts a switch as one level and its case labels as none', () => {
     expect(maxControlNesting(`
       switch (kind) {

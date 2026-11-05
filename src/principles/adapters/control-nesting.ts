@@ -32,13 +32,18 @@ interface NestingScanState {
  * tracks it as nesting, and `-ENS` counts it the same way. `case`/`default` are
  * deliberately absent -- they label arms of a switch, not new levels.
  */
-const NESTING_KEYWORDS = new Set(['if', 'for', 'while', 'switch', 'catch', 'do', 'try', 'else']);
+const NESTING_KEYWORDS = new Set(['if', 'for', 'while', 'switch', 'catch', 'do', 'try', 'else', 'finally']);
 
 /**
  * Max control-structure nesting in a function body (0 = flat).
  *
- * @param body The function body, with string/template/comment contents already
- *   blanked by the caller (`maskLiterals`), so only real structure remains.
+ * Accepts either masked or raw source: the scanner carries its own
+ * string/comment state machine, so literals and comments are skipped whether or
+ * not the caller blanked them first. The adapter is not consistent about this
+ * (one call site masks, the arrow path passes raw text), and making the function
+ * independent of that choice is what keeps both paths correct.
+ *
+ * @param body The function body, masked or raw.
  * @returns The deepest control-structure nesting observed.
  */
 export function maxControlNesting(body: string): number {
@@ -108,15 +113,14 @@ function consumeStructure(
 /**
  * Locate the payload of a control body starting at `from`.
  *
+ * `from` is the position just past the keyword (`consumeStructure` already
+ * consumed it), so `else if (...) {` arrives here pointing at `if` and the
+ * condition scan below handles it -- one level, not two.
+ *
  * @returns the half-open range to scan at the deeper level.
  */
 function locateControlBody(body: string, from: number, to: number): { bodyStart: number; bodyEnd: number } {
   let i = skipSpaces(body, from, to);
-  // `else` takes no condition of its own: `else if (...)` continues with the
-  // `if` keyword, and `else { ... }` goes straight to the block. Skipping the
-  // keyword here keeps `else if` counted as one nested level, not two.
-  const head = readWord(body, i);
-  if (head && head.word === 'else') i = skipSpaces(body, head.end, to);
   if (body[i] === '(') {
     let parens = 0;
     for (; i < to; i++) {
