@@ -92,7 +92,7 @@ function consumeStructure(
 ): number {
   const word = readWord(body, i);
   if (!word) return i + 1;
-  if (NESTING_KEYWORDS.has(word.word) && !isMemberAccess(body, i)) {
+  if (NESTING_KEYWORDS.has(word.word) && !isMemberAccess(body, i) && !isKeyOrLabel(body, word.end)) {
     // A control structure owns a nested region: count whatever nests inside it
     // one level deeper, then resume past that region so its braces cannot be
     // mistaken for the enclosing level's.
@@ -261,6 +261,20 @@ function isMemberAccess(body: string, i: number): boolean {
   let k = i - 1;
   while (k >= 0 && /\s/.test(body[k])) k--;
   return k >= 0 && body[k] === '.';
+}
+
+/**
+ * True when the word spanning `[start, end)` is an object key or a labeled
+ * statement rather than a control keyword: `{ for: 1 }`, `{ try: t }`, `o = { if: 1 }`.
+ *
+ * A control keyword is followed by `(` or `{` (`else` by `{` or `if`), never by
+ * `:`. The colon has to be checked immediately after the word so a real ternary
+ * or a typed arrow body is not caught, and the word must end a token so `forEach`
+ * is unaffected.
+ */
+function isKeyOrLabel(body: string, end: number): boolean {
+  const next = skipSpaces(body, end, body.length);
+  return body[next] === ':';
 }
 
 /**

@@ -78,6 +78,21 @@ describe('maxControlNesting counts control structures, not braces', () => {
     )).toBe(2);
   });
 
+  it('does not read keyword-shaped object keys as control structures', () => {
+    // `{ for: 1, while: 2 }` is a flat config object. lizard -ENS reports NS=2
+    // here because it matches keywords as tokens with no syntactic context;
+    // this scanner is context-aware on purpose, which is what #749 asks for
+    // ("do not penalise config literals").
+    expect(maxControlNesting(`const o = { for: 1, while: 2 };`)).toBe(0);
+    expect(maxControlNesting(`const o = { if: parseIf, while: parseWhile };`)).toBe(0);
+    // A real structure after such a literal still counts.
+    expect(maxControlNesting(`const o = { for: 1 }; if (a) { b(); }`)).toBe(1);
+  });
+
+  it('still counts labeled loops, which use a colon too', () => {
+    expect(maxControlNesting(`outer: for (;;) { if (a) { break outer; } }`)).toBe(2);
+  });
+
   it('counts a switch as one level and its case labels as none', () => {
     expect(maxControlNesting(`
       switch (kind) {
