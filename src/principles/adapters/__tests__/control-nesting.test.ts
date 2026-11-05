@@ -1,0 +1,109 @@
+/**
+ * @test REQ-DSH-021
+ * @intent 验证 `maxControlNesting` 计的是控制结构嵌套而非花括号深度。#749：
+ *         原 maxNesting() 只做花括号配平，一个纯配置对象
+ *         `{db:{pool:{retry:{max}}}}` 与 `if > try > for > if` 都得到 5，
+ *         规则无法区分「配置字面量」与「需要人跟着读的控制流」。
+ *         正确语义来自 lizard `-ENS`（cognitive_brace.py）：嵌套层级由拥有
+ *         函数体的结构压栈，`case`/`default` 不是独立结构。
+ * @covers AC-DSH-021-01
+ *
+ * 期望值基准：lizard 1.25.0 `-ENS --csv` 实测。
+ */
+
+import { describe, it, expect } from 'vitest';
+import { maxControlNesting } from '../control-nesting';
+
+/** Real control flow nesting 4 deep: if > try > for > if. */
+const CONTROL_FLOW = `
+if (items) {
+  try {
+    for (const item of items) {
+      if (item) { return item; }
+    }
+  } catch (e) { return null; }
+}
+`;
+
+/** A config literal: five brace levels, one control structure. */
+const CONFIG_LITERAL = `
+const config = { db: { pool: { retry: { max: 3 } } } };
+if (enable) { return config; }
+`;
+
+describe('maxControlNesting counts control structures, not braces', () => {
+  it('reports 4 for if > try > for > if', () => {
+    expect(maxControlNesting(CONTROL_FLOW)).toBe(4);
+  });
+
+  it('reports 1 for a five-level config literal with one if', () => {
+    expect(maxControlNesting(CONFIG_LITERAL)).toBe(1);
+  });
+
+  it('separates the two shapes the brace counter conflated', () => {
+    expect(maxControlNesting(CONFIG_LITERAL))
+      .toBeLessThan(maxControlNesting(CONTROL_FLOW));
+  });
+
+  it('treats sequential ifs as depth 1 each, not a growing chain', () => {
+    expect(maxControlNesting(`
+      if (a) { return 1; }
+      if (b) { return 2; }
+      if (c) { return 3; }
+    `)).toBe(1);
+  });
+
+  it('treats brace-less guard clauses as depth 1, not swallowing later code', () => {
+    expect(maxControlNesting(`
+      if (a) return 1;
+      if (b) return 2;
+      if (c) return 3;
+    `)).toBe(1);
+  });
+
+  it('counts else-if as one extra level', () => {
+    expect(maxControlNesting(`
+      if (a) { return 1; }
+      else if (b) { return 2; }
+    `)).toBe(2);
+  });
+
+  it('counts a switch as one level and its case labels as none', () => {
+    expect(maxControlNesting(`
+      switch (kind) {
+        case 'a': return 1;
+        case 'b': return 2;
+        default: return 0;
+      }
+    `)).toBe(1);
+  });
+
+  it('reports 0 for a flat function with no control structures', () => {
+    expect(maxControlNesting(`const sum = a + b; return sum;`)).toBe(0);
+  });
+
+  it('ignores braces and arrow shapes inside string and template literals', () => {
+    expect(maxControlNesting(`
+      const text = "{ not a brace }";
+      const tpl = \`\${v} { still not }\`;
+      if (v) { return text + tpl; }
+    `)).toBe(1);
+  });
+
+  it('does not charge the enclosing body for a nested function definition', () => {
+    // The inner `for` belongs to `process`, which is reported as its own
+    // function; the outer level stays flat. Matches lizard `-ENS`.
+    expect(maxControlNesting(`
+      const process = async () => {
+        for (const f of files) { await f; }
+      };
+      return process;
+    `)).toBe(0);
+  });
+
+  it('ignores `if` in a member access position', () => {
+    // `obj.if` is not valid JS, but a keyword-shaped member must not be counted
+    // as a branch if it ever appears inside an already-masked fragment.
+    expect(maxControlNesting(`const x = lib.interface;`)).toBe(0);
+  });
+});
