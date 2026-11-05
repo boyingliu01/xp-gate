@@ -5065,3 +5065,29 @@ specification:
         - id: AC-757-05
           criteria: cross-platform-ci 的镜像比对不再需要 sed 剥离 AGENTS.md 头部，改为直接比较
           test_type: integration
+
+    # ============================================================
+    # REQ-758: principles 目录遍历的扩展名清单与 analyzer 的 adapterMap 漂移
+    #   (#717 为 C# 建了 adapter，但 CLI 侧的 SOURCE_EXTENSIONS 漏了 .cs/.csx，
+    #    于是 `xp-gate principles <csharp-dir>` 报 "Supported: ..." 不含 .cs，
+    #    并输出 Files checked: 0 —— 与「没有违规」无法区分。)
+    # ============================================================
+    - id: REQ-758
+      description: principles 目录遍历必须覆盖 analyzer 已注册 adapter 的每一种源码扩展名，C#（.cs/.csx）不得被静默排除
+      priority: high
+      acceptance_criteria:
+        - id: AC-758-01
+          criteria: 目标目录下的 .cs 文件会被收集并交给检查器
+          test_type: unit
+        - id: AC-758-02
+          criteria: adapterMap 中登记的每个扩展名都会被遍历收集——期望集由 TypeScript 编译器 API 解析 adapterMap 得到，不受引号/注释/换行等合法重构影响，且不依赖任何手写候选清单
+          test_type: unit
+        - id: AC-758-03
+          criteria: 只含 C# 源码的目录不会被报告为空（Files checked 不为 0）
+          test_type: unit
+        - id: AC-758-04
+          criteria: adapterMap 中每个扩展名都确实可分析（经 getAdapterForFile 验证，不只是列在表里）
+          test_type: unit
+        - id: AC-758-05
+          criteria: .cs 的大小写变体（.CS/.Cs）同样被收集——遍历与 adapter 的大小写归一化一致
+          test_type: unit
