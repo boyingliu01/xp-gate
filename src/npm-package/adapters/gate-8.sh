@@ -11,6 +11,18 @@
  2>&1 echo "→ Gate 8: Secret scanning (gitleaks + detect-secrets)..."
 GATE_8_START=$(gate_start_ms)
 
+# Temp files created below (the normalized-baseline copy and the hook output)
+# are registered here and removed by this EXIT trap. Installed at FILE scope
+# because a trap body runs at exit time, when a function-local variable is no
+# longer visible — the first cleanup attempt called a function that read a
+# function-local DS_BASELINE and therefore removed nothing.
+GATE8_TEMP=""
+gate8_cleanup() {
+  # shellcheck disable=SC2086  # deliberate word splitting over the temp list
+  rm -f $GATE8_TEMP 2>/dev/null
+}
+trap gate8_cleanup EXIT
+
 # Gitleaks availability check
 GITLEAKS_CMD=""
 if command -v gitleaks >/dev/null 2>&1; then
@@ -237,8 +249,18 @@ if command -v detect-secrets-hook >/dev/null 2>&1 && [ -f ".secrets.baseline" ];
     if command -v cygpath >/dev/null 2>&1; then
       ds_norm_arg="$(cygpath -w "$ds_norm" 2>/dev/null || printf '%s' "$ds_norm")"
     fi
-    DS_BASELINE="$(dirname "$(mktemp -u)")/ds-baseline.$$"
-    cp .secrets.baseline "$DS_BASELINE" 2>/dev/null || DS_BASELINE=".secrets.baseline"
+    # The copy lives next to the original, not in $TMPDIR. Two different path
+    # dialects consume this one path: node.exe is native and needs a Windows
+    # form, while detect-secrets-hook is a Python script that resolves the path
+    # itself and REJECTS the Windows form ("Invalid path"). A bare filename in
+    # the current directory is the only spelling both accept, and it is also
+    # what `git add`/`git status` see, so the file is unmistakably temporary.
+    DS_BASELINE=".secrets.baseline.gate8.$$"
+    if cp .secrets.baseline "$DS_BASELINE" 2>/dev/null; then
+      GATE8_TEMP="$GATE8_TEMP $DS_BASELINE"
+    else
+      DS_BASELINE=".secrets.baseline"
+    fi
     if [ "$DS_BASELINE" != ".secrets.baseline" ]; then
       # NOT `>/dev/null 2>&1 || true`: that swallowed exit 2 (unparsable JSON)
       # and any runtime throw, so the gate reported a clean comparison while the
@@ -255,7 +277,15 @@ if command -v detect-secrets-hook >/dev/null 2>&1 && [ -f ".secrets.baseline" ];
       fi
     fi
   fi
+  # The normalized copy and the hook output are both temp files. The first
+  # version of this block removed neither DS_BASELINE (leaked one copy PER
+  # gated commit) nor DS_TMP on the early `exit 1` paths. They are registered in
+  # the global GATE8_TEMP list, which the EXIT trap installed at the top of this
+  # file cleans up — a trap calling a function that reads a FUNCTION-LOCAL
+  # variable sees an empty value at exit time, which is exactly how the first
+  # fix attempt silently cleaned nothing.
   DS_TMP="$(dirname "$(mktemp -u)")/ds-output.$$"
+  GATE8_TEMP="$GATE8_TEMP $DS_TMP"
   # #616: same scope split as the gitleaks call above. Under `--all` the index is
   # usually empty, so piping `git diff --cached -z` into xargs fed the hook zero
   # files and it reported success without reading anything.
@@ -274,7 +304,6 @@ if command -v detect-secrets-hook >/dev/null 2>&1 && [ -f ".secrets.baseline" ];
       echo "   this gate only inspects changed files. A whole-tree scan can silently"
       echo "   drop the entries of files it no longer reaches, un-allowlisting a"
       echo "   historical finding. Commit the baseline alone so that stays visible."
-      rm -f "$DS_TMP"
       exit 1
     fi
   elif git diff --cached --name-only --diff-filter=ACM -z \
@@ -292,10 +321,9 @@ if command -v detect-secrets-hook >/dev/null 2>&1 && [ -f ".secrets.baseline" ];
     echo "   this gate only inspects changed files. A whole-tree scan can silently"
     echo "   drop the entries of files it no longer reaches, un-allowlisting a"
     echo "   historical finding. Commit the baseline alone so that stays visible."
-    rm -f "$DS_TMP"
     exit 1
   fi
-  rm -f "$DS_TMP"
+  # Temp cleanup is owned by the gate8_cleanup trap; no rm here.
 else
   echo "     ⚠️  detect-secrets-hook unavailable (install: pip install -e \".[dev]\") — gitleaks only."
 fi
