@@ -275,9 +275,13 @@ if command -v detect-secrets-hook >/dev/null 2>&1 && [ -f ".secrets.baseline" ];
     # the current directory is the only spelling both accept, and it is also
     # what `git add`/`git status` see, so the file is unmistakably temporary.
     DS_BASELINE=".secrets.baseline.gate8.$$"
-    if cp .secrets.baseline "$DS_BASELINE" 2>/dev/null; then
-      GATE8_TEMP+=("$DS_BASELINE")
-    else
+    # Register BEFORE creating it. Registering after a successful `cp` leaves a
+    # window in which a signal or an errexit abort between the two lines leaves
+    # the copy on disk with nothing tracking it — the trap only removes what it
+    # knows about. rm -f on a name that was never created is a no-op, so the
+    # early registration costs nothing.
+    GATE8_TEMP+=("$DS_BASELINE")
+    if ! cp .secrets.baseline "$DS_BASELINE" 2>/dev/null; then
       DS_BASELINE=".secrets.baseline"
     fi
     if [ "$DS_BASELINE" != ".secrets.baseline" ]; then
