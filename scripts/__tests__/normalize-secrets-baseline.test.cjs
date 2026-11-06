@@ -90,6 +90,21 @@ describe('normalizeBaseline', () => {
     expect(lines).toEqual([10, 20]);
   });
 
+  it('refuses a non-array entry list instead of deleting it', () => {
+    // A file key whose value is not an array is malformed. Coercing it to `[]`
+    // would silently drop every finding recorded for that file — the exact
+    // "losing an entry" outcome the merge path is written to avoid — so the
+    // normalizer throws and the caller reports exit 2. Measured against the
+    // coercing version: it returned normally with the key's entries gone.
+    const data = baselineWith({ 'src/a.ts': { type: 'Secret Keyword' } });
+    expect(() => normalizeBaseline(data)).toThrow(TypeError);
+  });
+
+  it('refuses a null entry list', () => {
+    const data = baselineWith({ 'src/a.ts': null });
+    expect(() => normalizeBaseline(data)).toThrow(/expected an array/);
+  });
+
   it('does not throw when a colliding array holds a non-object entry', () => {
     // A hand-edited or partially written baseline can contain `null`. The first
     // merge implementation dereferenced `entry.type` directly and threw a
