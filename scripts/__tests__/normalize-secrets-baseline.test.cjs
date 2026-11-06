@@ -176,6 +176,18 @@ describe('CLI contract', () => {
     expect(Object.keys(after.results)).toEqual(['src/a.ts']);
   });
 
+  it('exits 2 — not 1, and no stack trace — on a malformed entry list', () => {
+    // Exit 1 means "normalization needed", so a malformed baseline that exited
+    // 1 would send a caller looking for a rewrite instead of a repair. The
+    // uncaught TypeError this guards against printed a raw stack and exited 1
+    // even under --check.
+    const p = write(baselineWith({ 'src/a.ts': { type: 'Secret Keyword' } }));
+    const r = run([p, '--check']);
+    expect(r.status).toBe(2);
+    expect(r.stderr).toMatch(/FAIL — baseline is malformed/);
+    expect(r.stderr).not.toMatch(/at Object\./);
+  });
+
   it('--check exits 1 when normalization is needed, and leaves the file alone', () => {
     const p = write(baselineWith({ [`src${BS}a.ts`]: [entry(`src${BS}a.ts`, 1)] }));
     const original = fs.readFileSync(p, 'utf8');
