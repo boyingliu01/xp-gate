@@ -130,6 +130,41 @@ describe('maskTextQuotes contract', () => {
     expect(masked).toContain("'./real'");
   });
 
+  it('keeps length when a file ends on an escape INSIDE a literal', () => {
+    // Regression: `stepEscape` pushed two characters but advanced past a
+    // one-character remainder, so this input came out LONGER than it went in
+    // (13 -> 14) and every line number after it would have been wrong. The
+    // unrelated `trailing backslash` sample above missed it because that
+    // backslash sits in code mode and never reaches stepEscape.
+    const content = "const e = 'a" + BS;
+    expect(maskTextQuotesForTest(content).length).toBe(content.length);
+  });
+
+  it('keeps length for EVERY truncation point of a tricky file', () => {
+    // Exhaustive rather than representative: a fixpoint over every prefix of
+    // several shapes is what actually proves the length invariant, because the
+    // escape bug above lived at exactly ONE truncation point out of many.
+    const DQ = String.fromCharCode(34);
+    const NL = String.fromCharCode(10);
+    const seeds = [
+      "const a = 'x' + " + DQ + 'y' + DQ + ';',
+      'const t = ' + BT + '${a + ' + BT + '${b}' + BT + '}' + BT + ';',
+      '/* c */ const z = 1; // tail',
+      "const e = 'a" + BS + "'b';",
+      "const l = 'a" + BS + NL + " b';",
+      'const m = ' + BT + '${' + BT + '${v}' + BT + '}' + BT + ';',
+    ];
+    for (const seed of seeds) {
+      for (let n = 0; n <= seed.length; n++) {
+        const prefix = seed.slice(0, n);
+        expect(
+          maskTextQuotesForTest(prefix).length,
+          'prefix ' + n + ' of ' + JSON.stringify(seed),
+        ).toBe(prefix.length);
+      }
+    }
+  });
+
   it('terminates on an unterminated literal instead of spinning', () => {
     // A truncated file leaves `mode` non-code for the rest of the input. Each
     // handler advances the cursor, so the loop is bounded by the input length —
