@@ -336,17 +336,26 @@ function stepBlockComment(state: MaskState): void {
  * Handle an escape sequence inside a literal: both characters are text.
  *
  * The backslash is emitted as a space and the escaped character as the quote
- * sentinel. Emitting the sentinel TWICE (one per character) is a genuinely
- * equivalent mutation — verified by a mutation run, every test stays green.
- * Either way neither slot equals a quote, so the state machine cannot be closed
- * early, which is the only property that matters. Recorded so the next reader
- * does not "fix" one form into the other and believe it changed something: what
- * keeps the escaped-quote case from leaking a phantom import is that both slots
- * are non-quote characters, not WHICH non-quote character they are.
+ * sentinel, so neither slot can be read as a quote.
+ *
+ * A NEWLINE must survive here. `\` immediately followed by a newline is a legal
+ * line continuation inside a string literal, and emitting a space for it
+ * deleted a line from the masked source — every import reported after that
+ * point then carried a line number one too low. Measured: a two-line string
+ * followed by an import on line 3 reported `line: 2`. Line numbers are the one
+ * thing the masker promises to preserve, so this is a correctness bug, not a
+ * cosmetic one.
+ *
+ * Emitting the sentinel TWICE (one per character) is a provably equivalent
+ * mutation — a mutation run kept every test green. Either way neither slot
+ * equals a quote, so the state machine cannot be closed early, which is the
+ * only property that matters. Recorded so the next reader does not "fix" one
+ * form into the other and believe it changed something.
  */
 function stepEscape(state: MaskState): void {
+  const escaped = state.content[state.i + 1];
   state.out.push(' ');
-  state.out.push(QUOTE_SENTINEL);
+  state.out.push(escaped === '\n' ? '\n' : QUOTE_SENTINEL);
   state.i += 2;
 }
 

@@ -219,29 +219,40 @@ if command -v detect-secrets-hook >/dev/null 2>&1 && [ -f ".secrets.baseline" ];
   # hook speak, never abort the gate silently.
   ds_norm=""
   ds_here="$(dirname "${BASH_SOURCE[0]}")"
-  for cand in \
-      "$ds_here/../../scripts/normalize-secrets-baseline.cjs" \
-      "$ds_here/../scripts/normalize-secrets-baseline.cjs" \
-      "$XP_GATE_HOME/scripts/normalize-secrets-baseline.cjs"; do
+  for cand in       "$ds_here/../../scripts/normalize-secrets-baseline.cjs"       "$ds_here/../scripts/normalize-secrets-baseline.cjs"       "$XP_GATE_HOME/scripts/normalize-secrets-baseline.cjs"; do
     if [ -n "$cand" ] && [ -f "$cand" ]; then ds_norm="$cand"; break; fi
   done
+  # Normalize a TEMP COPY, never the tracked file.
+  #
+  # The first version rewrote `.secrets.baseline` in place and did not re-stage
+  # it, so the commit still carried the mixed-separator version (#735 relocated
+  # rather than resolved) and every gated commit left a tracked file dirty for a
+  # reason the user never asked for. Comparing against a normalized copy leaves
+  # the working tree untouched and makes the guarantee unconditional: the
+  # comparison always sees one canonical form, whether or not the committed
+  # baseline is clean.
+  DS_BASELINE=".secrets.baseline"
   if [ -n "$ds_norm" ] && command -v node >/dev/null 2>&1; then
     ds_norm_arg="$ds_norm"
     if command -v cygpath >/dev/null 2>&1; then
       ds_norm_arg="$(cygpath -w "$ds_norm" 2>/dev/null || printf '%s' "$ds_norm")"
     fi
-    # NOT `>/dev/null 2>&1 || true`: that swallowed exit 2 (missing baseline or
-    # unparsable JSON) and any runtime throw, so the gate reported a clean
-    # comparison while the file had never been normalized — the same
-    # "looked patched, did nothing" shape the path probing above exists to fix.
-    # Still best-effort (the hook below must get to speak), but a failure is now
-    # VISIBLE instead of silent, and it says which file was skipped.
-    ds_norm_out="$(node "$ds_norm_arg" .secrets.baseline 2>&1)"
-    ds_norm_rc=$?
-    if [ "$ds_norm_rc" -ne 0 ]; then
-      echo "     ⚠️  detect-secrets baseline NOT normalized (exit $ds_norm_rc);"
-      echo "         comparing with mixed path separators. Reason:"
-      printf '%s\n' "$ds_norm_out" | sed 's/^/           /'
+    DS_BASELINE="$(dirname "$(mktemp -u)")/ds-baseline.$$"
+    cp .secrets.baseline "$DS_BASELINE" 2>/dev/null || DS_BASELINE=".secrets.baseline"
+    if [ "$DS_BASELINE" != ".secrets.baseline" ]; then
+      # NOT `>/dev/null 2>&1 || true`: that swallowed exit 2 (unparsable JSON)
+      # and any runtime throw, so the gate reported a clean comparison while the
+      # copy had never been normalized — the same "looked patched, did nothing"
+      # shape the path probing above exists to fix. A failure is now VISIBLE.
+      # `if !` rather than `cmd; rc=$?` because the enclosing hook may run under
+      # errexit, where a bare failing assignment would abort before the message
+      # could print.
+      if ! ds_norm_out="$(node "$ds_norm_arg" "$DS_BASELINE" 2>&1)"; then
+        echo "     ⚠️  detect-secrets baseline NOT normalized; comparing with"
+        echo "         whatever separators the committed file uses. Reason:"
+        printf '%s
+' "$ds_norm_out" | sed 's/^/           /'
+      fi
     fi
   fi
   DS_TMP="$(dirname "$(mktemp -u)")/ds-output.$$"
@@ -249,7 +260,7 @@ if command -v detect-secrets-hook >/dev/null 2>&1 && [ -f ".secrets.baseline" ];
   # usually empty, so piping `git diff --cached -z` into xargs fed the hook zero
   # files and it reported success without reading anything.
   if [ "${GATE_SCOPE:-diff}" = "all" ]; then
-    if git ls-files -z | xargs -0 detect-secrets-hook --baseline .secrets.baseline > "$DS_TMP" 2>&1; then
+    if git ls-files -z | xargs -0 detect-secrets-hook --baseline "$DS_BASELINE" > "$DS_TMP" 2>&1; then
       echo "     ✅ detect-secrets PASSED - no new secrets beyond baseline (scope: --all)."
     else
       cat "$DS_TMP"
@@ -267,7 +278,7 @@ if command -v detect-secrets-hook >/dev/null 2>&1 && [ -f ".secrets.baseline" ];
       exit 1
     fi
   elif git diff --cached --name-only --diff-filter=ACM -z \
-      | xargs -0 detect-secrets-hook --baseline .secrets.baseline > "$DS_TMP" 2>&1; then
+      | xargs -0 detect-secrets-hook --baseline "$DS_BASELINE" > "$DS_TMP" 2>&1; then
     echo "     ✅ detect-secrets PASSED - no new secrets beyond baseline."
   else
     cat "$DS_TMP"
