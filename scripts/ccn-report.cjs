@@ -52,6 +52,22 @@ function measureFileArgs(relPath) {
   return ['--csv', path.normalize(relPath)];
 }
 
+/** True when `p` exists and is a directory we can list (issue #737). */
+function isReadableDir(p) {
+  try {
+    return fs.statSync(p).isDirectory();
+  } catch {
+    return false;
+  }
+}
+
+/** Attach a stable code to an Error so `main` can map it to an exit status. */
+function taggedError(code, message) {
+  const err = new Error(message);
+  err.code = code;
+  return err;
+}
+
 function findSourceFiles(root) {
   const out = [];
   const skipDirs = new Set(['.git', 'node_modules', 'dist', '.worktrees', '.codegraph', '.sprint-state', '.xp-gate']);
@@ -677,8 +693,29 @@ function resolveLizard() {
 
 async function run(options = {}) {
   const root = path.resolve(options.root || process.cwd());
+  // "No evidence" must never look like "clean tree" (issue #737). A scan that
+  // reads zero files produces a report where every bucket is 0, which is
+  // indistinguishable from a debt-free codebase — and the exit code was 0. This
+  // was reachable whenever --root was mistyped or pointed at a tree with no
+  // matching sources.
+  //
+  // Only an EXPLICITLY named root is fatal. The default root is process.cwd(),
+  // and callers legitimately run this from a directory holding no sources (a
+  // tools/ subdir, a CI step that only wants --check against a baseline).
+  // Making that fatal would break every such caller, so it stays tolerant.
+  if (options.rootExplicit && !isReadableDir(root)) {
+    throw taggedError('ENOROOT', `scan root does not exist or is not a directory: ${root}`);
+  }
   const lizard = options.lizardCmd || resolveLizard();
   const files = findSourceFiles(root);
+  if (options.rootExplicit && files.length === 0) {
+    throw taggedError(
+      'ENOFILES',
+      `scan root contains no source files: ${root}\n` +
+        'A report over zero files says nothing about complexity. Check the path, ' +
+        'or drop --root to scan the current directory.'
+    );
+  }
   // Sequential on purpose. A shared pool of concurrent lizards corrupts rows
   // in ways that silently zero the report (observed: 779 -> 0 with an 8-wide
   // pool on Windows). Per-file isolation is the whole point of this tool;
@@ -882,7 +919,23 @@ function ratchetFindings(report, baseline, warnThreshold = 5, blockThreshold = 1
 async function main() {
   const argv = process.argv.slice(2);
   const get = (flag) => { const i = argv.indexOf(flag); return i >= 0 ? argv[i + 1] : undefined; };
-  const report = await run({ root: get('--root') || process.cwd() });
+  const explicitRoot = get('--root');
+  // Pass `rootExplicit` so `run` can distinguish "the user pointed me at a tree"
+  // from "I defaulted to the cwd" — only the former is fatal when it is empty
+  // (issue #737).
+  let report;
+  try {
+    report = await run({ root: explicitRoot || process.cwd(), rootExplicit: Boolean(explicitRoot) });
+  } catch (err) {
+    if (err && (err.code === 'ENOROOT' || err.code === 'ENOFILES')) {
+      console.error(`FAIL — ${err.message}`);
+      // Exit 2, deliberately distinct from 1 ("debt found"): "no evidence" is a
+      // different verdict from "too much debt", and conflating them is what made
+      // this bug silent for so long.
+      process.exit(2);
+    }
+    throw err;
+  }
 
   // CI / local enforcement mode (slice E). Without this the report only ever
   // printed numbers; nothing in the pipeline could fail a build for complexity.

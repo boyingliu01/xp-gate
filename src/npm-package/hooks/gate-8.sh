@@ -11,6 +11,25 @@
  2>&1 echo "→ Gate 8: Secret scanning (gitleaks + detect-secrets)..."
 GATE_8_START=$(gate_start_ms)
 
+# Temp files created below (the normalized-baseline copy and the hook output)
+# are registered here and removed by this EXIT trap. Installed at FILE scope
+# because a trap body runs at exit time, when a function-local variable is no
+# longer visible — the first cleanup attempt called a function that read a
+# function-local DS_BASELINE and therefore removed nothing.
+#
+# An ARRAY, not a space-separated string: `rm -f $LIST` word-splits, so a
+# TMPDIR containing a space (`/c/Users/Some Name/...` is entirely ordinary on
+# Windows) would be torn into fragments, none of which exist, and every gated
+# commit would leak one temp file again — the exact failure this trap exists to
+# prevent.
+GATE8_TEMP=()
+gate8_cleanup() {
+  if [ "${#GATE8_TEMP[@]}" -gt 0 ]; then
+    rm -f "${GATE8_TEMP[@]}" 2>/dev/null
+  fi
+}
+trap gate8_cleanup EXIT
+
 # Gitleaks availability check
 GITLEAKS_CMD=""
 if command -v gitleaks >/dev/null 2>&1; then
@@ -196,35 +215,138 @@ fi
 # both detect-secrets-hook and .secrets.baseline. The pipeline lives inside an
 # if-condition (errexit-exempt); a non-zero hook exit lands in the else branch.
 if command -v detect-secrets-hook >/dev/null 2>&1 && [ -f ".secrets.baseline" ]; then
+  # #735: normalize path separators BEFORE comparing against the baseline.
+  # detect-secrets writes backslash paths on Windows and forward slashes on
+  # Linux, and the baseline is committed, so the two forms fight: a Windows scan
+  # rewrites ~322 lines, a Linux run rewrites them back, and every commit
+  # carries a pure formatting diff. That destroys the only signal the baseline
+  # has - "did a NEW secret appear" - because a real new entry no longer stands
+  # out from churn. Normalizing HERE (not only in the repair hint) makes the
+  # comparison see one canonical form regardless of which platform last touched
+  # the file.
+  #
+  # Two traps had to be handled, both found by RUNNING it rather than reading it:
+  #  (1) this script lives at different depths in the source tree
+  #      (githooks/adapters/) and in the install (~/.config/xp-gate/adapters/), so
+  #      a fixed ../../ silently resolved to nothing in the installed copy;
+  #  (2) on Git Bash the resolved path is POSIX-style (/c/Users/...), and handing
+  #      it to the native node.exe makes MSYS rewrite it into D:\c\Users\... -
+  #      node then dies with MODULE_NOT_FOUND, which `|| true` swallowed. The
+  #      gate looked patched and normalised nothing at all.
+  # Hence: probe several layouts, then cygpath the winner to a Windows path.
+  # Best-effort on purpose - a missing node or unparsable baseline must let the
+  # hook speak, never abort the gate silently.
+  ds_norm=""
+  ds_here="$(dirname "${BASH_SOURCE[0]}")"
+  for cand in       "$ds_here/../../scripts/normalize-secrets-baseline.cjs"       "$ds_here/../scripts/normalize-secrets-baseline.cjs"       "$XP_GATE_HOME/scripts/normalize-secrets-baseline.cjs"; do
+    if [ -n "$cand" ] && [ -f "$cand" ]; then ds_norm="$cand"; break; fi
+  done
+  # Normalize a TEMP COPY, never the tracked file.
+  #
+  # The first version rewrote `.secrets.baseline` in place and did not re-stage
+  # it, so the commit still carried the mixed-separator version (#735 relocated
+  # rather than resolved) and every gated commit left a tracked file dirty for a
+  # reason the user never asked for. Comparing against a normalized copy leaves
+  # the working tree untouched and makes the guarantee unconditional: the
+  # comparison always sees one canonical form, whether or not the committed
+  # baseline is clean.
+  DS_BASELINE=".secrets.baseline"
+  # Every degradation path below prints WHY, including the two that are not
+  # failures: a missing normalizer or a missing node used to fall through in
+  # total silence, so the comparison ran on mixed separators and a resulting
+  # BLOCK read as "found secrets" with no way to connect it to the real cause.
+  # #735 is precisely about that mismatch, so it must never be invisible.
+  if [ -z "$ds_norm" ]; then
+    echo "     ⚠️  baseline normalizer not found (looked next to the hook, in"
+    echo "         ../scripts and \$XP_GATE_HOME/scripts) — comparing with the"
+    echo "         committed separators; Windows/Linux baselines may disagree."
+  elif ! command -v node >/dev/null 2>&1; then
+    echo "     ⚠️  node not found — cannot normalize the detect-secrets baseline;"
+    echo "         comparing with the committed separators."
+  else
+    ds_norm_arg="$ds_norm"
+    if command -v cygpath >/dev/null 2>&1; then
+      ds_norm_arg="$(cygpath -w "$ds_norm" 2>/dev/null || printf '%s' "$ds_norm")"
+    fi
+    # The copy lives next to the original, not in $TMPDIR. Two different path
+    # dialects consume this one path: node.exe is native and needs a Windows
+    # form, while detect-secrets-hook is a Python script that resolves the path
+    # itself and REJECTS the Windows form ("Invalid path"). A bare filename in
+    # the current directory is the only spelling both accept, and it is also
+    # what `git add`/`git status` see, so the file is unmistakably temporary.
+    DS_BASELINE=".secrets.baseline.gate8.$$"
+    # Register BEFORE creating it. Registering after a successful `cp` leaves a
+    # window in which a signal or an errexit abort between the two lines leaves
+    # the copy on disk with nothing tracking it — the trap only removes what it
+    # knows about. rm -f on a name that was never created is a no-op, so the
+    # early registration costs nothing.
+    GATE8_TEMP+=("$DS_BASELINE")
+    if ! cp .secrets.baseline "$DS_BASELINE" 2>/dev/null; then
+      DS_BASELINE=".secrets.baseline"
+    fi
+    if [ "$DS_BASELINE" != ".secrets.baseline" ]; then
+      # NOT `>/dev/null 2>&1 || true`: that swallowed exit 2 (unparsable JSON)
+      # and any runtime throw, so the gate reported a clean comparison while the
+      # copy had never been normalized — the same "looked patched, did nothing"
+      # shape the path probing above exists to fix. A failure is now VISIBLE.
+      # `if !` rather than `cmd; rc=$?` because the enclosing hook may run under
+      # errexit, where a bare failing assignment would abort before the message
+      # could print.
+      if ! ds_norm_out="$(node "$ds_norm_arg" "$DS_BASELINE" 2>&1)"; then
+        echo "     ⚠️  detect-secrets baseline NOT normalized; comparing with"
+        echo "         whatever separators the committed file uses. Reason:"
+        printf '%s
+' "$ds_norm_out" | sed 's/^/           /'
+      fi
+    fi
+  fi
+  # The normalized copy and the hook output are both temp files. The first
+  # version of this block removed neither DS_BASELINE (leaked one copy PER
+  # gated commit) nor DS_TMP on the early `exit 1` paths. They are registered in
+  # the global GATE8_TEMP list, which the EXIT trap installed at the top of this
+  # file cleans up — a trap calling a function that reads a FUNCTION-LOCAL
+  # variable sees an empty value at exit time, which is exactly how the first
+  # fix attempt silently cleaned nothing.
   DS_TMP="$(dirname "$(mktemp -u)")/ds-output.$$"
+  GATE8_TEMP+=("$DS_TMP")
   # #616: same scope split as the gitleaks call above. Under `--all` the index is
   # usually empty, so piping `git diff --cached -z` into xargs fed the hook zero
   # files and it reported success without reading anything.
   if [ "${GATE_SCOPE:-diff}" = "all" ]; then
-    if git ls-files -z | xargs -0 detect-secrets-hook --baseline .secrets.baseline > "$DS_TMP" 2>&1; then
+    if git ls-files -z | xargs -0 detect-secrets-hook --baseline "$DS_BASELINE" > "$DS_TMP" 2>&1; then
       echo "     ✅ detect-secrets PASSED - no new secrets beyond baseline (scope: --all)."
     else
       cat "$DS_TMP"
       echo ""
       echo "     ❌ BLOCKED - detect-secrets found secrets not in .secrets.baseline."
-      echo "   If these are false positives, regenerate the baseline (cross-platform):"
-      echo "     detect-secrets scan --update .secrets.baseline && git add .secrets.baseline"
-      rm -f "$DS_TMP"
+      echo "   If these are false positives, mark them in the baseline:"
+      echo "     detect-secrets scan --baseline .secrets.baseline && git add .secrets.baseline"
+      echo "   (--update does not exist; detect-secrets exits with"
+      echo "    \"unrecognized arguments: --update\".)"
+      echo "   Then REVIEW the diff: scan --baseline re-scans the WHOLE tree, whereas"
+      echo "   this gate only inspects changed files. A whole-tree scan can silently"
+      echo "   drop the entries of files it no longer reaches, un-allowlisting a"
+      echo "   historical finding. Commit the baseline alone so that stays visible."
       exit 1
     fi
   elif git diff --cached --name-only --diff-filter=ACM -z \
-      | xargs -0 detect-secrets-hook --baseline .secrets.baseline > "$DS_TMP" 2>&1; then
+      | xargs -0 detect-secrets-hook --baseline "$DS_BASELINE" > "$DS_TMP" 2>&1; then
     echo "     ✅ detect-secrets PASSED - no new secrets beyond baseline."
   else
     cat "$DS_TMP"
     echo ""
     echo "     ❌ BLOCKED - detect-secrets found secrets not in .secrets.baseline."
-    echo "   If these are false positives, regenerate the baseline (cross-platform):"
-    echo "     detect-secrets scan --update .secrets.baseline && git add .secrets.baseline"
-    rm -f "$DS_TMP"
+    echo "   If these are false positives, mark them in the baseline:"
+    echo "     detect-secrets scan --baseline .secrets.baseline && git add .secrets.baseline"
+    echo "   (--update does not exist; detect-secrets exits with"
+    echo "    \"unrecognized arguments: --update\".)"
+    echo "   Then REVIEW the diff: scan --baseline re-scans the WHOLE tree, whereas"
+    echo "   this gate only inspects changed files. A whole-tree scan can silently"
+    echo "   drop the entries of files it no longer reaches, un-allowlisting a"
+    echo "   historical finding. Commit the baseline alone so that stays visible."
     exit 1
   fi
-  rm -f "$DS_TMP"
+  # Temp cleanup is owned by the gate8_cleanup trap; no rm here.
 else
   echo "     ⚠️  detect-secrets-hook unavailable (install: pip install -e \".[dev]\") — gitleaks only."
 fi
