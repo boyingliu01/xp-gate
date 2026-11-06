@@ -167,7 +167,18 @@ function main(argv) {
     process.exit(2);
   }
 
-  const changed = normalizeBaseline(parsed);
+  // A malformed structure is "no usable evidence", which this script reports as
+  // exit 2 everywhere else. Without this guard the TypeError from
+  // normalizeBaseline escaped as an uncaught exception: exit 1 plus a raw stack
+  // trace, which under `--check` reads as "needs normalizing" — the one verdict
+  // that would send a caller looking for a rewrite instead of a broken baseline.
+  let changed;
+  try {
+    changed = normalizeBaseline(parsed);
+  } catch (err) {
+    console.error(`FAIL — baseline is malformed: ${err.message}`);
+    process.exit(2);
+  }
   const next = serialize(parsed, detectEol(original));
 
   if (next === original) {
