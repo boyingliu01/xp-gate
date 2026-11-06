@@ -340,6 +340,116 @@ function readSourceLines(root, relPath) {
   }
 }
 
+// The "verifyRowCcn could not pin the body" branch of csvRows, extracted so
+// csvRows stays inside the complexity ratchet. All three outcomes are about
+// CLASSIFYING an unverified row, not about the CSV rewrite itself, so they read
+// as one decision: rescue by name, or count against a category.
+//
+// Returns { ccn, corrected } when the row was rescued, otherwise only the
+// category it belongs to. The caller owns the counters, so this function stays
+// free of side effects it cannot report.
+function classifyUnverifiedRow({ body, ccn, reportedSpan }) {
+  if (body) {
+    // `corrected` must mean "the number leaving this function was read from
+    // source", not "the number changed". When verification happens to agree
+    // with the linter, the row is still VERIFIED — reporting it as unverified
+    // would be a false accusation. The feasibility seat caught that the
+    // `res.ccn !== ccn` test collapsed those two meanings.
+    return { ccn: ccnOfBody(body), corrected: true, category: 'rescued' };
+  }
+  if (reportedSpan > 250) {
+    // Unlocatable AND an implausibly long span: the known lizard brace-loss
+    // artefact. Counting it as unverified would blame the code for a parser
+    // defect; discarding it silently would hide a real number. Recorded as a
+    // distinct, visible category.
+    return { category: 'span_artefact' };
+  }
+  // Only rows the GATE would act on are allowed to fail the gate. A row at or
+  // below the block threshold has no verdict riding on it, and lizard emits
+  // rows for non-declarations (`String`, `clearTimeout`, anonymous callbacks)
+  // that are unlocatable by construction — counting those would block every
+  // commit on noise.
+  return { category: ccn > 10 ? 'unverified' : 'unverified_low' };
+}
+
+// Rewrite ONE `lizard --csv` row so its CCN column carries the VERIFIED value,
+// or return the row unchanged when it is not a row / not verifiable. Extracted
+// from csvRows so the loop there is a loop, not a parser.
+//
+// Returns the row text to emit. `tally` is mutated with the classification of an
+// unverified row; csvRows aggregates it and decides whether to fail.
+function rewriteCsvRow(line, { srcPath, root, sourceLines, tally }) {
+  if (/^NLOC\b/.test(line) || !/^\d+,/.test(line)) return line;
+  const row = parseCsvRowIdentity(line, srcPath, root);
+  if (!row) return line;
+  const verified = verifyCcnForRow({ sourceLines, ...row, tally });
+  if (!verified.corrected) return line;
+  const cols = parseCsvLine(line);
+  // Field 1 is the CCN column — writing to field 4 would silently overwrite
+  // location_size and leave the wrong complexity in place.
+  cols[1] = String(verified.ccn);
+  return cols.map((c) => (/[",]/.test(c) ? `"${c.replace(/"/g, '""')}"` : c)).join(',');
+}
+
+// Decode one CSV row into the fields the verifier needs, or null when the row
+// does not carry a usable CCN + location.
+//
+// Column order (lizard 1.21.3 --csv, NO header row, 11 fields):
+//   0 NLOC | 1 CCN | 2 token_len | 3 param_count | 4 location_size
+//   5 "name@start-end@path" | 6 path | 7 name | 8 signature | 9 start | 10 end
+// The signature column contains commas, so it must be parsed quote-aware —
+// parseCsvLine does that. CCN is field 1; field 4 is the span SIZE and
+// reading it as CCN understates nothing but is simply a different number.
+function parseCsvRowIdentity(line, srcPath, root) {
+  const f = parseCsvLine(line);
+  const ccn = parseInt(f[1], 10);
+  const loc = f[5] || '';
+  if (!Number.isFinite(ccn) || !loc.includes('@')) return null;
+  const at = loc.split('@');
+  const span = (at[1] || '').split('-');
+  return {
+    name: firstNonEmpty(at[0], f[7], '(anon)'),
+    ccn,
+    lineNo: intOrZero(span[0]),
+    endNo: intOrZero(span[1]),
+    // The CSV path field lizard prints is the path it was handed; resolve it
+    // against the repo root so cached lines match the measured file.
+    rowPath: firstNonEmpty(f[6], path.relative(root, srcPath)),
+  };
+}
+
+// First value that is a non-empty string after trimming, else ''.
+function firstNonEmpty(...candidates) {
+  for (const c of candidates) {
+    const trimmed = (c || '').trim();
+    if (trimmed) return trimmed;
+  }
+  return '';
+}
+
+function intOrZero(value) {
+  return parseInt(value, 10) || 0;
+}
+
+// Verify one row's CCN, falling back to findFunctionBody when verifyRowCcn
+// cannot pin the body. The architecture seat caught that this second search
+// previously only decided whether to count the row as unverified — if it FOUND
+// the body, the row kept its unvalidated CCN and passed through as if it had
+// been verified.
+function verifyCcnForRow({ sourceLines, rowPath, name, ccn, lineNo, endNo, tally }) {
+  const res = verifyRowCcn({ srcLines: sourceLines(rowPath), name, ccn, lineNo, endNo });
+  if (res.corrected) return res;
+  const body = findFunctionBody((sourceLines(rowPath) || []).slice(lineNo - 1, lineNo - 1 + 400), name);
+  const reportedSpan = endNo > lineNo ? endNo - lineNo + 1 : 0;
+  const verdict = classifyUnverifiedRow({ body, ccn, reportedSpan });
+  tally[verdict.category] += 1;
+  if (verdict.category === 'rescued') {
+    res.ccn = verdict.ccn;
+    res.corrected = true;
+  }
+  return res;
+}
+
 // Gate 3 (#544): rewrite `lizard --csv` rows with the VERIFIED CCN so the gate
 // and the ratchet baseline speak the same numbers. Fatal (exit 1) on a row
 // whose span cannot be verified above threshold — Gate 3 is fail-closed, so an
@@ -352,93 +462,20 @@ function csvRows(srcPath, root, opts = {}) {
     return lineCache.get(rel);
   };
   const out = [];
-  let unverified = 0;
-  // Rows rescued by findFunctionBody after verifyRowCcn could not pin the body.
-  // Reported so "0 unverified" is a measured statement rather than a silent one.
-  let _rescued = 0;
-  // Rows that are unlocatable AND carry a >250-line span: the known lizard
-  // brace-loss artefact. Counted separately so they are visible rather than
-  // silently trusted or wrongly blamed on the source code.
-  let _spanArtefacts = 0;
-  // Rows that could not be located but are BELOW the block threshold, so no
-  // verdict rides on them. Counted for observability, never used to gate.
-  let _unverifiedLow = 0;
+  // One counter per classification, so the tally in the row loop is a lookup
+  // instead of a four-way branch chain — the chain was part of what pushed this
+  // function past the complexity ratchet.
+  //   unverified     — rows at/above the block threshold that could not be located
+  //   rescued        — rows findFunctionBody located after verifyRowCcn failed
+  //   span_artefact  — unlocatable AND a >250-line span: lizard brace-loss artefact
+  //   unverified_low — unlocatable but below the threshold, so no verdict rides on it
+  const tally = { unverified: 0, rescued: 0, span_artefact: 0, unverified_low: 0 };
   for (const line of lines) {
-    if (/^NLOC\b/.test(line) || !/^\d+,/.test(line)) { out.push(line); continue; }
-    const f = parseCsvLine(line);
-    // Column order (lizard 1.21.3 --csv, NO header row, 11 fields):
-    //   0 NLOC | 1 CCN | 2 token_len | 3 param_count | 4 location_size
-    //   5 "name@start-end@path" | 6 path | 7 name | 8 signature | 9 start | 10 end
-    // The signature column contains commas, so it must be parsed quote-aware —
-    // parseCsvLine does that. CCN is field 1; field 4 is the span SIZE and
-    // reading it as CCN understates nothing but is simply a different number.
-    const ccn = parseInt(f[1], 10);
-    const loc = f[5] || '';
-    if (!Number.isFinite(ccn) || !loc.includes('@')) { out.push(line); continue; }
-    const at = loc.split('@');
-    const span = (at[1] || '').split('-');
-    const name = (at[0] || f[7] || '(anon)').trim() || '(anon)';
-    const lineNo = parseInt(span[0], 10) || 0;
-    const endNo = parseInt(span[1], 10) || 0;
-    // The CSV path field lizard prints is the path it was handed; resolve it
-    // against the repo root so cached lines match the measured file.
-    const rowPath = (f[6] || '').trim() || path.relative(root, srcPath);
-    const res = verifyRowCcn({ srcLines: sourceLines(rowPath), name, ccn, lineNo, endNo });
-    if (!res.corrected) {
-      // verifyRowCcn could not pin the body. Before falling through with the raw
-      // number, give it one more chance: findFunctionBody locates a declaration
-      // by name over a wider window. The architecture seat caught that this
-      // second search previously only decided whether to count the row as
-      // unverified — if it FOUND the body, the row kept its unvalidated CCN and
-      // passed through as if it had been verified. Finding the body is exactly
-      // the evidence needed to correct it, so correct it.
-      const body = findFunctionBody((sourceLines(rowPath) || []).slice(lineNo - 1, lineNo - 1 + 400), name);
-      const reportedSpan = endNo > lineNo ? endNo - lineNo + 1 : 0;
-      if (body) {
-        _rescued++;
-        res.ccn = ccnOfBody(body);
-        // `corrected` must mean "the number leaving this function was read from
-        // source", not "the number changed". When verification happens to agree
-        // with the linter, the row is still VERIFIED — reporting it as
-        // unverified would be a false accusation, and letting it leave as
-        // uncorrected would hand the caller an unvalidated value under a flag
-        // that says otherwise. The feasibility seat caught that the
-        // `res.ccn !== ccn` test collapsed those two meanings.
-        res.corrected = true;
-      } else if (reportedSpan <= 250) {
-        // Only rows the GATE would act on are allowed to fail the gate. A row at
-        // or below the block threshold has no verdict riding on it, and lizard
-        // emits rows for non-declarations (`String`, `clearTimeout`, anonymous
-        // callbacks) that are unlocatable by construction — counting those would
-        // block every commit on noise. Every row is still VERIFIED (so the
-        // ratchet sees real numbers); only the count that gates the commit is
-        // limited to rows where being wrong actually matters.
-        if (ccn > 10) {
-          unverified++;
-        } else {
-          _unverifiedLow++;
-        }
-      } else {
-        // Unlocatable AND an implausibly long span: the known lizard brace-loss
-        // artefact. verifyRowCcn already tried this window internally; if it
-        // still failed, the row is neither corrected nor provably fine. Counting
-        // it as unverified would blame the code for a parser defect and (with
-        // the default fail-closed behaviour) block on it; discarding it silently
-        // would hide a real number. So it is recorded as a distinct, visible
-        // category and the caller decides — the important part is that it stops
-        // being invisible.
-        _spanArtefacts++;
-      }
-    }
-    if (!res.corrected) { out.push(line); continue; }
-    const cols = parseCsvLine(line);
-    // Field 1 is the CCN column — writing to field 4 would silently overwrite
-    // location_size and leave the wrong complexity in place.
-    cols[1] = String(res.ccn);
-    out.push(cols.map((c) => (/[",]/.test(c) ? `"${c.replace(/"/g, '""')}"` : c)).join(','));
+    const rewritten = rewriteCsvRow(line, { srcPath, root, sourceLines, tally });
+    out.push(rewritten);
   }
-  if (unverified > 0 && !opts.allowUnverified) {
-    console.error(`FAIL - ${unverified} function(s) above CCN 10 could not be span-verified (${srcPath}); refusing to emit unverified complexity`);
+  if (tally.unverified > 0 && !opts.allowUnverified) {
+    console.error(`FAIL - ${tally.unverified} function(s) above CCN 10 could not be span-verified (${srcPath}); refusing to emit unverified complexity`);
     process.exit(1);
   }
   // Say what the verification actually did. These counters were incremented and
@@ -446,7 +483,7 @@ function csvRows(srcPath, root, opts = {}) {
   // examined anything" — the same unobservable-state problem this sprint exists
   // to remove. Reported on stderr so stdout stays exactly the rewritten CSV.
   if (opts.reportStats) {
-    console.error(`[ccn-report] ${srcPath}: ${_rescued} row(s) rescued by name, ${_spanArtefacts} span artefact(s), ${unverified} unverified`);
+    console.error(`[ccn-report] ${srcPath}: ${tally.rescued} row(s) rescued by name, ${tally.span_artefact} span artefact(s), ${tally.unverified} unverified`);
   }
   // Only rows were rewritten; the trailing summary table is emitted by lizard
   // on a separate stream (stderr) when no --csv, so nothing else to fix here.

@@ -297,6 +297,52 @@ const LANGUAGE_REGISTRY = {
     ],
   },
 
+  // #730: C# was supported by every gate (adapter, principles engine, Gate 4/5/6/10/13
+  // arms) but absent here, so `detect-languages` produced a config WITHOUT csharp.
+  // A hook that reads the generated config trusts it and does not fall back to
+  // extension sniffing, so C# was never routed — the whole feature was invisible in
+  // exactly the mixed .NET+JS repos it targets (the dsh-aot-runner shape: .csproj plus
+  // ~900 lines of JS). Registry membership is what makes detection emit the entry.
+  csharp: {
+    name: 'C#/.NET',
+    extensions: ['cs', 'csx'],
+    // `.csproj`/`.sln` are SUFFIXES of project-specific filenames (Foo.csproj), so
+    // they must be written as globs — the matcher only globs entries containing '*'
+    // and otherwise stats the exact name, which would never find DshAotRunner.csproj.
+    // Directory.Build.props carries repo-wide MSBuild settings; global.json pins the
+    // SDK, so a repo with only that plus sources still deserves the C# arm.
+    configFiles: ['*.csproj', '*.sln', '*.csproj.user', 'Directory.Build.props', 'global.json'],
+    tools: [
+      {
+        // The adapter drives everything through the SDK: `dotnet format` for Gate 1,
+        // `dotnet build -warnaserror` for Gate 13, `dotnet test` for Gate 5.
+        name: 'dotnet',
+        checkCmd: 'dotnet --version',
+        install: {
+          darwin: 'brew install --cask dotnet-sdk',
+          linux: 'See https://learn.microsoft.com/dotnet/core/install/linux',
+          win32: 'winget install Microsoft.DotNet.SDK.8',
+        },
+        optional: false,
+        gates: ['Gate 1 (Code Quality)', 'Gate 5 (Tests)', 'Gate 13 (Compiler Strictness)'],
+      },
+      {
+        // Coverage collection rides on the SDK's built-in coverlet integration
+        // (`--collect:"XPlat Code Coverage"`); no separate install is required, so it
+        // is reported as detected-by-project rather than advertised as a missing tool.
+        name: 'coverlet',
+        detectBy: 'csproj-package-reference',
+        install: {
+          darwin: 'add PackageReference coverlet.collector to the test .csproj',
+          linux: 'add PackageReference coverlet.collector to the test .csproj',
+          win32: 'add PackageReference coverlet.collector to the test .csproj',
+        },
+        optional: true,
+        gates: ['Gate 5 (Coverage)'],
+      },
+    ],
+  },
+
   swift: {
     name: 'Swift',
     extensions: ['swift'],
