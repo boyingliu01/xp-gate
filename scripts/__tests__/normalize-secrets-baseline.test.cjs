@@ -12,7 +12,7 @@ const path = require('node:path');
 const { spawnSync } = require('node:child_process');
 
 const script = path.resolve(__dirname, '..', 'normalize-secrets-baseline.cjs');
-const { normalizeBaseline, normalizePath } = require(script);
+const { normalizeBaseline, normalizePath, detectEol } = require(script);
 
 const BS = '\\';
 
@@ -232,6 +232,42 @@ describe('CLI contract', () => {
 describe('line-ending fidelity', () => {
   const CRLF = String.fromCharCode(13, 10);
   const LF = String.fromCharCode(10);
+
+  /**
+   * `detectEol` is tested DIRECTLY, because the CLI-level test above cannot
+   * distinguish it from the naive version it replaced.
+   *
+   * Measured: a mutant that restores `text.includes(CRLF)` SURVIVES the whole
+   * suite. The reason is that `serialize` re-encodes the parsed JSON, and
+   * `JSON.stringify` escapes a control character inside a string value — so a
+   * baseline whose only CRLF sits inside a string converges to LF whichever
+   * detector ran, and the CLI test sees identical output. Only calling
+   * `detectEol` on the raw text observes the difference.
+   */
+  describe('detectEol', () => {
+    it('reports CRLF for a CRLF-terminated file', () => {
+      expect(detectEol('a' + CRLF + 'b' + CRLF)).toBe(CRLF);
+    });
+
+    it('reports LF for an LF-terminated file', () => {
+      expect(detectEol('a' + LF + 'b' + LF)).toBe(LF);
+    });
+
+    it('reports LF when the ONLY CRLF sits inside a string value', () => {
+      // The whole point of the fix: `text.includes(CRLF)` says CRLF here and
+      // rewrites every line of a perfectly good LF baseline.
+      expect(detectEol('{"note":"a' + CRLF + 'b",' + LF + '"x":1' + LF + '}')).toBe(LF);
+    });
+
+    it('reports LF for text with no line ending at all', () => {
+      expect(detectEol('no newlines here')).toBe(LF);
+    });
+
+    it('reports CRLF when CRLF terminators dominate', () => {
+      const mixed = 'a' + CRLF + 'b' + CRLF + 'c' + CRLF + 'd' + LF;
+      expect(detectEol(mixed)).toBe(CRLF);
+    });
+  });
 
   /** Write a baseline whose every newline is `eol`. */
   function writeWithEol(data, eol) {
