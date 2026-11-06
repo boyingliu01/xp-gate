@@ -230,7 +230,19 @@ if command -v detect-secrets-hook >/dev/null 2>&1 && [ -f ".secrets.baseline" ];
     if command -v cygpath >/dev/null 2>&1; then
       ds_norm_arg="$(cygpath -w "$ds_norm" 2>/dev/null || printf '%s' "$ds_norm")"
     fi
-    node "$ds_norm_arg" .secrets.baseline >/dev/null 2>&1 || true
+    # NOT `>/dev/null 2>&1 || true`: that swallowed exit 2 (missing baseline or
+    # unparsable JSON) and any runtime throw, so the gate reported a clean
+    # comparison while the file had never been normalized — the same
+    # "looked patched, did nothing" shape the path probing above exists to fix.
+    # Still best-effort (the hook below must get to speak), but a failure is now
+    # VISIBLE instead of silent, and it says which file was skipped.
+    ds_norm_out="$(node "$ds_norm_arg" .secrets.baseline 2>&1)"
+    ds_norm_rc=$?
+    if [ "$ds_norm_rc" -ne 0 ]; then
+      echo "     ⚠️  detect-secrets baseline NOT normalized (exit $ds_norm_rc);"
+      echo "         comparing with mixed path separators. Reason:"
+      printf '%s\n' "$ds_norm_out" | sed 's/^/           /'
+    fi
   fi
   DS_TMP="$(dirname "$(mktemp -u)")/ds-output.$$"
   # #616: same scope split as the gitleaks call above. Under `--all` the index is

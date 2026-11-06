@@ -55,6 +55,19 @@ function normalizePath(p) {
 }
 
 /**
+ * A stable identity for one baseline entry, safe on a non-object entry.
+ *
+ * `null`/`undefined`/primitives can appear in a hand-edited or partially
+ * written baseline. They cannot be deduplicated meaningfully, so each gets a
+ * unique identity and survives the merge — losing an entry is always worse than
+ * keeping a malformed one, which the human review of the diff will catch.
+ */
+function entryId(entry) {
+  if (!entry || typeof entry !== 'object') return `\u0001${String(entry)}`;
+  return `${entry.type}\u0000${entry.hashed_secret}\u0000${entry.line_number}`;
+}
+
+/**
  * Rewrite a parsed baseline in place, returning the number of fields changed.
  * Exported for the idempotency test.
  */
@@ -79,12 +92,17 @@ function normalizeBaseline(parsed) {
     // separator). Merge rather than overwrite: dropping entries would silently
     // un-allowlist a finding, which is the exact failure this whole issue is
     // about. Deduplicate on the fields that identify an entry.
+    //
+    // The identity is built through `entryId`, which tolerates a non-object
+    // entry. The old code dereferenced `entry.type` directly, so a baseline
+    // holding a `null` in a colliding array threw a TypeError — and the gate's
+    // `|| true` swallowed it, leaving the file un-normalized while the
+    // comparison ran on mixed separators. Measured before the guard:
+    // `normalizeBaseline({results:{'a\\b.ts':[null],'a/b.ts':[...]}})` threw.
     if (Object.prototype.hasOwnProperty.call(rebuilt, key)) {
-      const seen = new Set(
-        rebuilt[key].map((e) => `${e.type}\u0000${e.hashed_secret}\u0000${e.line_number}`)
-      );
+      const seen = new Set(rebuilt[key].map(entryId));
       for (const entry of list) {
-        const id = `${entry.type}\u0000${entry.hashed_secret}\u0000${entry.line_number}`;
+        const id = entryId(entry);
         if (!seen.has(id)) {
           seen.add(id);
           rebuilt[key].push(entry);

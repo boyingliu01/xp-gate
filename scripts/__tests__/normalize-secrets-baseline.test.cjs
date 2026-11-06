@@ -90,6 +90,21 @@ describe('normalizeBaseline', () => {
     expect(lines).toEqual([10, 20]);
   });
 
+  it('does not throw when a colliding array holds a non-object entry', () => {
+    // A hand-edited or partially written baseline can contain `null`. The first
+    // merge implementation dereferenced `entry.type` directly and threw a
+    // TypeError, which the gate's `|| true` then swallowed — leaving the file
+    // un-normalized while the comparison ran on mixed separators. Verified
+    // against that implementation: it threw; this one keeps both entries.
+    const data = baselineWith({
+      [`src${BS}a.ts`]: [null],
+      'src/a.ts': [entry('src/a.ts', 20, 'bbb')],
+    });
+    expect(() => normalizeBaseline(data)).not.toThrow();
+    expect(data.results['src/a.ts']).toHaveLength(2);
+    expect(data.results['src/a.ts'][1].line_number).toBe(20);
+  });
+
   it('does not duplicate an entry that appears in both separator forms', () => {
     const data = baselineWith({
       [`src${BS}a.ts`]: [entry(`src${BS}a.ts`, 10, 'same')],
