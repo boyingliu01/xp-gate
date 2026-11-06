@@ -2323,7 +2323,12 @@ else
             exit 1
             ;;
           2)
-            echo "❌ BLOCKED - ${CURRENT_LANG} static analysis unusable (fail-closed): ${G1A_REASON:-toolchain could not execute}"
+            # The substring "(… could not execute — NOT a pass)" is kept from the
+            # #717 wording: issue-717-mirror-parity.test.bats asserts that exact
+            # text in the npm mirror. An earlier draft of this rewrite dropped it
+            # and turned a green main red — the contract is the string, not the
+            # author's preference for how to phrase it.
+            echo "❌ BLOCKED - ${CURRENT_LANG} toolchain could not execute — NOT a pass (fail-closed): ${G1A_REASON:-unknown}"
             echo "   A tool that could not run is not a clean tree. Install the toolchain,"
             echo "   or set the adapter's documented escape valve if you accept the risk."
             GATE_1_STATUS="BLOCK"
