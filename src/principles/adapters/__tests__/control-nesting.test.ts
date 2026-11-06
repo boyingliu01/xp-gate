@@ -11,7 +11,9 @@
  * 期望值基准：lizard 1.25.0 `-ENS --csv` 实测。
  */
 
+import { execFileSync } from 'node:child_process';
 import { describe, it, expect } from 'vitest';
+import { TypeScriptAdapter } from '../typescript';
 import { maxControlNesting } from '../control-nesting';
 
 /** Real control flow nesting 4 deep: if > try > for > if. */
@@ -202,5 +204,62 @@ if (a)
 if (a) return 1;
 if (b) return 2;
 `)).toBe(1);
+  });
+
+  it('scopes a multi-line brace-less body to its own statement', () => {
+    // A brace-less body may span lines inside an open call. Its scope must still
+    // end at the statement, so the following guard clause is not folded into it.
+    expect(maxControlNesting(`
+if (a)
+  get({
+    x: 1,
+  });
+if (b) { if (c) { d(); } }
+`)).toBe(2);
+  });
+
+  it('documents the accepted maskLiterals gap for a regex inside an array', () => {
+    // `maskLiterals` does not recognise a regex literal that starts an array
+    // element, so an escaped `\(` survives masking as an opening paren. The guard
+    // below checks braces only, deliberately: widening it to parens would turn
+    // this pre-existing gap into a crash on valid code. Pinned here so the
+    // accepted behaviour is explicit rather than discovered later.
+    expect(maxControlNesting(`
+const R = [ /\\(/g ];
+if (a) { return R; }
+return R;
+`)).toBe(1);
+  });
+});
+
+/**
+ * Corpus guard: the masking assertion must never fire on real source.
+ *
+ * `maxControlNesting` throws rather than under-report, which is the right
+ * trade-off for a gate — but it means a masking regression would turn into a
+ * crash on codes that used to score fine. Running the whole tracked TypeScript
+ * corpus makes that regression fail here, on the branch that causes it, instead
+ * of surfacing later as a mysterious Gate 4 failure.
+ */
+describe('the masking assertion holds across the real corpus', () => {
+  it('scans every tracked TypeScript file without throwing', () => {
+    const repoRoot = new URL('../../../../', import.meta.url).pathname.replace(/^\/([A-Za-z]:)/, '$1');
+    const files = execFileSync('git', ['ls-files', '*.ts', '*.tsx'], {
+      cwd: repoRoot, encoding: 'utf8', maxBuffer: 1 << 28,
+    }).split(/\r?\n/).filter(Boolean);
+    expect(files.length).toBeGreaterThan(100);
+
+    const failures: string[] = [];
+    for (const rel of files) {
+      try {
+        const adapter = new TypeScriptAdapter(`${repoRoot}/${rel}`);
+        for (const fn of adapter.extractFunctions() as Array<{ nestingDepth: number }>) {
+          expect(typeof fn.nestingDepth).toBe('number');
+        }
+      } catch (error) {
+        failures.push(`${rel}: ${(error as Error).message}`);
+      }
+    }
+    expect(failures).toEqual([]);
   });
 });
