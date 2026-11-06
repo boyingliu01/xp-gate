@@ -10,6 +10,22 @@
 setup() {
   REPO_ROOT="$BATS_TEST_DIRNAME/../.."
   FIXTURE=$(mktemp -d)
+  # These cases run `git add` / `git commit` inside a throwaway repo. On a
+  # developer box `core.hooksPath` points at the INSTALLED hooks
+  # (~/.config/xp-gate/hooks), so the commit fired the real pre-commit and was
+  # blocked by Gate 6 — the fixture has no .archlint.yaml, and a throwaway repo
+  # cannot satisfy the architecture gate:
+  #     ❌ ARCHITECTURE CONFIG MISSING - COMMIT BLOCKED
+  # `&& git commit` then short-circuited, so the git command this case exists to
+  # exercise never ran and the case failed for a reason that has nothing to do
+  # with Gate 9's .cs selection. The same case passed in CI (no hooksPath) and
+  # failed locally — machine-dependent, which is the worst kind of red.
+  # An empty hooksPath keeps the throwaway repo hermetic: `git config --get
+  # core.hooksPath` is still consulted, but resolves to a directory with no
+  # hooks in it, so no gate can run and none can block.
+  export GIT_CONFIG_COUNT=1
+  export GIT_CONFIG_KEY_0=core.hooksPath
+  export GIT_CONFIG_VALUE_0="$FIXTURE/.git/no-hooks"
 }
 
 teardown() {
