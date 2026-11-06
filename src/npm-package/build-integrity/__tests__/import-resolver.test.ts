@@ -276,6 +276,18 @@ describe('extractImports', () => {
       expect(extractImports(content)).toEqual([{ path: './real', line: 1 }]);
     });
 
+    it('keeps line numbers truthful across a line continuation', () => {
+      // A backslash immediately followed by a newline is a legal continuation
+      // inside a string literal. Masking it as a plain space deleted a line, so
+      // an import on line 3 was reported as line 2 — measured against the
+      // version that emitted a space for the newline.
+      const NL = String.fromCharCode(10);
+      const content =
+        "const s = 'aaa" + BS + NL + "bbb';" + NL +
+        "import real from './real';" + NL;
+      expect(extractImports(content)).toEqual([{ path: './real', line: 3 }]);
+    });
+
     it('resumes scanning after an unterminated-looking line comment', () => {
       const content = "const u = 'http://x'; import real from './real';\n";
       // The `//` sits inside a string, so it is text — the import is real code.
