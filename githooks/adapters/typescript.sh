@@ -45,16 +45,30 @@ run_lint() {
     return 0
   fi
 
-  # Fall back to ESLint if no Biome config exists
-  if [ -f ".eslintrc.json" ] || [ -f ".eslintrc.js" ] || [ -f ".eslintrc.cjs" ] || [ -f "eslint.config.js" ]; then
-    echo "Running ESLint linting..."
-    npx eslint . --ext .ts,.tsx
-    return $?
-  fi
+  # Fall back to ESLint if no Biome config exists.
+  #
+  # #766: the flat-config era renamed and extended these files. `.mjs` is what
+  # `eslint --init` produces for an ESM project, and `.ts`/`.mts`/`.cts` appear in
+  # monorepos that share one config across packages -- none of them were probed,
+  # so a project whose ONLY config was `eslint.config.mjs` was told "No linter
+  # configuration found" and Gate 1 skipped linting entirely. That is a fail-open
+  # on the whole TypeScript arm, not a cosmetic gap.
+  #
+  # Kept as one list so the message below cannot drift from the probe. `--ext` is
+  # dropped: it is ignored under flat config (and warns), while the config itself
+  # owns the file set.
+  _eslint_configs=".eslintrc.json .eslintrc .eslintrc.js .eslintrc.cjs .eslintrc.yml .eslintrc.yaml eslint.config.js eslint.config.mjs eslint.config.cjs eslint.config.ts eslint.config.mts eslint.config.cts"
+  for _cfg in $_eslint_configs; do
+    if [ -f "$_cfg" ]; then
+      echo "Running ESLint linting (config: $_cfg)..."
+      npx eslint .
+      return $?
+    fi
+  done
 
   echo "❌ BLOCKED - No linter configuration found for TypeScript project."
   echo "   TypeScript projects require a linter: either Biome (biome.json/biome.jsonc)"
-  echo "   or ESLint (.eslintrc.json/.eslintrc.js/eslint.config.js)."
+  echo "   or ESLint (any of: $(printf '%s' "$_eslint_configs" | tr ' ' '/'))."
   echo "   Create one of these configuration files to enable linting."
   return 1
 }
