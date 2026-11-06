@@ -299,4 +299,33 @@ describe('line-ending fidelity', () => {
       fs.rmSync(dir, { recursive: true, force: true });
     }
   });
+
+  it('does not convert an LF baseline because a STRING VALUE holds a CRLF', () => {
+    // The old detector was `text.includes('\r\n')`, so a CRLF inside a JSON
+    // string value — a filename recorded with an odd byte, a hashed_secret —
+    // declared the whole file CRLF and rewrote all ~1900 lines. Whether the
+    // file is CRLF must be decided by its line TERMINATORS, not by any
+    // occurrence of the byte pair.
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'secrets-eol-'));
+    const p = path.join(dir, '.secrets.baseline');
+    try {
+      const data = sample();
+      // A raw CRLF inside a string value, preserved verbatim in the file.
+      const body = JSON.stringify(data, null, 2).replace(
+        '"generated_at"',
+        '"note": "a' + String.fromCharCode(13, 10) + 'b", "generated_at"'
+      );
+      fs.writeFileSync(p, body.split(LF).join(LF) + LF);
+      expect(runOn(p).status).toBe(0);
+      const after = fs.readFileSync(p, 'utf8');
+      // The file stays LF-terminated. The embedded CRLF is not preserved
+      // verbatim either (JSON.stringify escapes control characters inside
+      // string values), so the invariant to pin is the one that matters:
+      // the ~1900 real terminators were NOT converted to CRLF.
+      expect(countEol(after, CRLF)).toBe(0);
+      expect(countEol(after, LF)).toBeGreaterThan(10);
+    } finally {
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+  });
 });

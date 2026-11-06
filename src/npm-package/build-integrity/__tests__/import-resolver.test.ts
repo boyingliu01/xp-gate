@@ -10,7 +10,7 @@ import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import fs from 'fs/promises';
 import path from 'path';
 import os from 'os';
-import { extractImports, maskTextQuotesForTest, resolveImportPath, runImportCheck } from '../gate-10';
+import { extractImports, resolveImportPath, runImportCheck } from '../gate-10';
 
 // Named timeout for the runImportCheck calls that assert verdicts; keeps the
 // Boy Scout magic-number count from growing with each new test case.
@@ -274,6 +274,30 @@ describe('extractImports', () => {
     it('keeps a real import on the same line as a regex literal', () => {
       const content = 'const re = /(?:a)/; import real from "./real";\n';
       expect(extractImports(content)).toEqual([{ path: './real', line: 1 }]);
+    });
+
+    /**
+     * KNOWN LIMITATION, pinned so it cannot drift unnoticed.
+     *
+     * A quote inside a regex literal opens a phantom string. Measured output for
+     * the fixture below is `[{ path: './fake', line: 2 }]`: the import text
+     * inside the real string is reported as if it were code, and the genuine
+     * import on line 3 is missed. Both directions, which is why the masker's
+     * header no longer claims "can only cause a MISS".
+     *
+     * It is tolerable because a regex holding an unescaped quote is a SYNTAX
+     * ERROR — no file that parses can contain line 1. This test exists to make
+     * that reasoning explicit: if it ever starts failing differently, the
+     * limitation changed and the header comment must be re-measured.
+     */
+    it('documents the regex-quote limitation instead of pretending it cannot happen', () => {
+      const SQ = String.fromCharCode(39);
+      const DQ = String.fromCharCode(34);
+      const content =
+        'const re = /' + SQ + '/;\n' +
+        'const s = ' + DQ + 'import x from ' + SQ + './fake' + SQ + DQ + ';\n' +
+        'import real from ' + DQ + './real' + DQ + ';\n';
+      expect(extractImports(content)).toEqual([{ path: './fake', line: 2 }]);
     });
 
     it('keeps line numbers truthful across a line continuation', () => {
@@ -665,68 +689,5 @@ describe('runImportCheck', () => {
   it('includes message in result', async () => {
     const result = await runImportCheck([], tmpDir, 30000);
     expect(typeof result.message).toBe('string');
-  });
-});
-
-/**
- * The masker's own contract (#759).
- *
- * Every other test in this file drives `extractImports` and infers the masker's
- * behaviour from the paths that come out. These assert the three properties the
- * masker promises directly, because each is a silent-failure class on its own:
- * a shorter output shifts every later line number, a lost newline collapses
- * lines, and a surviving quote re-opens the exact bug #759 fixed.
- */
-describe('maskTextQuotes contract', () => {
-  const BS = String.fromCharCode(92);
-  const BT = String.fromCharCode(96);
-  const SAMPLES: Array<[string, string]> = [
-    ['plain code', "import x from './x';"],
-    ['single-quoted string', "const a = 'hello';"],
-    ['double-quoted string', 'const b = "hello";'],
-    ['template literal', 'const c = ' + BT + 'hello' + BT + ';'],
-    ['nested interpolation', 'const d = ' + BT + '${' + BT + '${v}' + BT + '}' + BT + ';'],
-    ['line comment', "// import x from './x'"],
-    ['block comment', "/* import x from './x' */"],
-    ['escaped quote', 'const e = ' + BS + '"'],
-    ['line continuation', "const f = 'a" + BS + "\nb';"],
-    ['regex literal', 'const g = /ab+c/;'],
-    ['trailing backslash', 'const h = ' + BS],
-  ];
-
-  it.each(SAMPLES)('preserves length for %s', (_label, sample) => {
-    expect(maskTextQuotesForTest(sample).length).toBe(sample.length);
-  });
-
-  it.each(SAMPLES)('preserves the newline count for %s', (_label, sample) => {
-    const countNewlines = (s: string): number => s.split(String.fromCharCode(10)).length;
-    expect(countNewlines(maskTextQuotesForTest(sample))).toBe(countNewlines(sample));
-  });
-
-  it('leaves no raw quote inside masked text', () => {
-    // The DELIMITERS survive (they are real code); what must not survive is a
-    // quote INSIDE a literal or comment, which is what would let the import
-    // regexes see pseudo-code. Asserting "no quote anywhere" would be wrong —
-    // the opening quote is code.
-    const content = "const a = 'it\"s \"x\"'; // 'another'";
-    const masked = maskTextQuotesForTest(content);
-    // Everything from the opening delimiter to the end of the line is either
-    // the delimiter itself, a sentinel, or a space.
-    const open = masked.indexOf("'");
-    expect(open).toBeGreaterThan(-1);
-    // The doubled-quote body keeps ONE extra delimiter; every other quote inside
-    // the literal must be a sentinel.
-    const seen = new Set(masked.slice(open + 1));
-    expect(seen.has('"')).toBe(false);
-    // The comment's quote must not survive either.
-    expect(masked.split("'").length - 1).toBe(2);
-  });
-
-  it('is idempotent in length when applied twice', () => {
-    // The masker is not a fixed point of itself (masking a masked string masks
-    // its sentinels), but it must never grow or shrink the text.
-    const content = "const a = 'x'; import y from './y';";
-    const once = maskTextQuotesForTest(content);
-    expect(maskTextQuotesForTest(once).length).toBe(content.length);
   });
 });

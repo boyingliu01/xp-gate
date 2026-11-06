@@ -144,7 +144,28 @@ function serialize(parsed, eol = '\n') {
 
 /** The line ending a file already uses; LF for a file without any. */
 function detectEol(text) {
-  return text.includes('\r\n') ? '\r\n' : '\n';
+  // Count line TERMINATORS, not raw occurrences. `text.includes('\r\n')` also
+  // matched a CRLF embedded inside a JSON string value, and then rewrote the
+  // WHOLE file with CRLF while the parsed JSON still compared EQUAL — the same
+  // silent mass-rewrite shape as emitting LF into a CRLF baseline.
+  //
+  // A line terminator is a `\n` optionally preceded by `\r`; the `\r` itself is
+  // not a terminator and must not be counted, which is exactly the "preceded by
+  // CR" test below. (An earlier attempt required a CRLF to sit at the start of
+  // the text or after another newline — that counted ZERO terminators in a pure
+  // CRLF file, because a CRLF is preceded by the line's last character.)
+  const CR = String.fromCharCode(13);
+  const LF = String.fromCharCode(10);
+  let crlf = 0;
+  let lfOnly = 0;
+  for (let i = text.indexOf(LF); i !== -1; i = text.indexOf(LF, i + 1)) {
+    if (i > 0 && text[i - 1] === CR) crlf++;
+    else lfOnly++;
+  }
+  if (crlf === 0) return LF;
+  // Whichever terminator dominates; a tie goes to CRLF so a pure-CRLF file is
+  // never silently converted.
+  return crlf >= lfOnly ? CR + LF : LF;
 }
 
 function main(argv) {
