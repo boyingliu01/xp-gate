@@ -207,3 +207,8 @@ tsconfig.tsbuildinfo
 
 # Sprint scratch probes (not repo content)
 .delphi-work/
+
+# Local agent scratch files (never commit)
+.tmp-key
+.tmp-review/
+.agent-tmp/
