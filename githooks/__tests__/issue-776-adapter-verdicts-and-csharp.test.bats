@@ -239,7 +239,11 @@ XML
 @test "#776: the generic Gate 1 arm treats a 2 verdict as fail-closed, not a skip" {
   local arm
   arm=$(awk '/^    \*\)$/{flag=1} flag{print} /^      ;;$/{if(flag){exit}}' "$HOOK")
-  printf '%s\n' "$arm" | grep -q 'BLOCKED - ${CURRENT_LANG} static analysis unusable'
+  # Asserts the rc=2 arm blocks AND keeps the #717 wording contract ("could not
+  # execute — NOT a pass"), which issue-717-*.test.bats also pins. One string
+  # satisfies both meanings; a rewrite must preserve it, not rephrase it.
+  printf '%s\n' "$arm" | grep -q 'BLOCKED - ${CURRENT_LANG}'
+  printf '%s\n' "$arm" | grep -qF 'could not execute — NOT a pass'
 }
 
 @test "#776: the generic Gate 1 arm captures the verdict instead of piping to head" {
