@@ -91,13 +91,35 @@ function seedSrcModules(srcRoot, dest) {
   }
 }
 
+/**
+ * Directory names the sync script itself never mirrors (see SKIP_DIRS in
+ * sync-package-content.js). Seeding them is pure fixture cost: the run under
+ * test would skip them anyway, so copying them cannot change any assertion.
+ */
+const SEED_SKIP_DIRS = new Set([
+  'node_modules',
+  '.git',
+  'dist',
+  'coverage',
+  '.opencode',
+  '__pycache__',
+  '__tests__',
+]);
+
 function seedCanonicalSources(realRoot, destRoot) {
   const real = realRoot || path.resolve(__dirname, '..', '..', '..', '..');
   const dest = destRoot;
   try {
     for (const tree of ['githooks', 'skills', 'plugins']) {
       const from = path.join(real, tree);
-      if (fs.existsSync(from)) fs.cpSync(from, path.join(dest, tree), { recursive: true });
+      if (!fs.existsSync(from)) continue;
+      // `plugins/` carries 6,762 node_modules files that SKIP_DIRS excludes from
+      // every sync run; copying them cost ~37 s of the file's runtime and could
+      // not affect an assertion. Filter at copy time so the seed stays faithful.
+      fs.cpSync(from, path.join(dest, tree), {
+        recursive: true,
+        filter: (src) => !SEED_SKIP_DIRS.has(path.basename(src)),
+      });
     }
     const srcRoot = path.join(real, 'src');
     seedSrcModules(srcRoot, dest);

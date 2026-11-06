@@ -22,9 +22,18 @@ describe('init', () => {
     tmpProject = fs.mkdtempSync(path.join(os.tmpdir(), 'xpgate-proj-'));
     process.env.HOME = tmpHome;
     vi.resetModules();
-    delete require.cache[require.resolve('../init')];
-    delete require.cache[require.resolve('../detect-deps.js')];
-    delete require.cache[require.resolve('../shared-paths')];
+    // Evict EVERY cached module under lib/, not just the three names below.
+    // baseline.js / language-tools.js / bootstrap.js capture
+    // `const { execSync } = require('child_process')` AT LOAD TIME. Once test A
+    // loads one of them while the execSync spy is installed, the cached module
+    // keeps that (by then restored) reference -- so every LATER test reaching
+    // the same code path calls the REAL execSync and launches checkov/semgrep
+    // for real (7.9 s / 3.8 s each). Deleting three fixed names never evicts them.
+    // Built from char code 92 so no escape sequence is involved.
+    const __sep = String.fromCharCode(92);
+    for (const k of Object.keys(require.cache)) {
+      if (k.split(__sep).join('/').includes('/npm-package/lib/')) delete require.cache[k];
+    }
     logSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
     warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
     errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
@@ -38,6 +47,18 @@ describe('init', () => {
       }
       return { status: 0, stdout: Buffer.from(''), stderr: Buffer.from('') };
     });
+    // Mock execSync BY DEFAULT so init()'s tool probes don't really execute.
+    // init() unconditionally runs checkBash() + printCliToolStatus() +
+    // probeGitleaksNotice() before ANY mode branch (even `init([])` printing
+    // usage). Those probe GATE_CLI_TOOLS via checkCliTool(), whose
+    // `where <tool>` + `<tool> --version` really launch the tools. On this box
+    // `checkov --version` (a heavy Python package) alone took ~7.9 s and
+    // `semgrep --version` ~3.8 s, so 27 tests x ~14 s of probes = 383 s wall.
+    // Returning '' makes every probe fail FAST (where -> '', --version -> ''),
+    // so checkCliTool() reports {available:false} with zero subprocess work.
+    // The per-test mockExecSuccess()/mockExecGitDirOnly()/mockExecFail() still
+    // re-spyOn execSync and override this for the git-dir/config cases.
+    vi.spyOn(childProcess, 'execSync').mockImplementation(() => '');
   });
 
   afterEach(() => {
