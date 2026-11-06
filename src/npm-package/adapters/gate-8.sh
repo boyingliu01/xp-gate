@@ -16,10 +16,17 @@ GATE_8_START=$(gate_start_ms)
 # because a trap body runs at exit time, when a function-local variable is no
 # longer visible — the first cleanup attempt called a function that read a
 # function-local DS_BASELINE and therefore removed nothing.
-GATE8_TEMP=""
+#
+# An ARRAY, not a space-separated string: `rm -f $LIST` word-splits, so a
+# TMPDIR containing a space (`/c/Users/Some Name/...` is entirely ordinary on
+# Windows) would be torn into fragments, none of which exist, and every gated
+# commit would leak one temp file again — the exact failure this trap exists to
+# prevent.
+GATE8_TEMP=()
 gate8_cleanup() {
-  # shellcheck disable=SC2086  # deliberate word splitting over the temp list
-  rm -f $GATE8_TEMP 2>/dev/null
+  if [ "${#GATE8_TEMP[@]}" -gt 0 ]; then
+    rm -f "${GATE8_TEMP[@]}" 2>/dev/null
+  fi
 }
 trap gate8_cleanup EXIT
 
@@ -244,7 +251,19 @@ if command -v detect-secrets-hook >/dev/null 2>&1 && [ -f ".secrets.baseline" ];
   # comparison always sees one canonical form, whether or not the committed
   # baseline is clean.
   DS_BASELINE=".secrets.baseline"
-  if [ -n "$ds_norm" ] && command -v node >/dev/null 2>&1; then
+  # Every degradation path below prints WHY, including the two that are not
+  # failures: a missing normalizer or a missing node used to fall through in
+  # total silence, so the comparison ran on mixed separators and a resulting
+  # BLOCK read as "found secrets" with no way to connect it to the real cause.
+  # #735 is precisely about that mismatch, so it must never be invisible.
+  if [ -z "$ds_norm" ]; then
+    echo "     ⚠️  baseline normalizer not found (looked next to the hook, in"
+    echo "         ../scripts and \$XP_GATE_HOME/scripts) — comparing with the"
+    echo "         committed separators; Windows/Linux baselines may disagree."
+  elif ! command -v node >/dev/null 2>&1; then
+    echo "     ⚠️  node not found — cannot normalize the detect-secrets baseline;"
+    echo "         comparing with the committed separators."
+  else
     ds_norm_arg="$ds_norm"
     if command -v cygpath >/dev/null 2>&1; then
       ds_norm_arg="$(cygpath -w "$ds_norm" 2>/dev/null || printf '%s' "$ds_norm")"
@@ -257,7 +276,7 @@ if command -v detect-secrets-hook >/dev/null 2>&1 && [ -f ".secrets.baseline" ];
     # what `git add`/`git status` see, so the file is unmistakably temporary.
     DS_BASELINE=".secrets.baseline.gate8.$$"
     if cp .secrets.baseline "$DS_BASELINE" 2>/dev/null; then
-      GATE8_TEMP="$GATE8_TEMP $DS_BASELINE"
+      GATE8_TEMP+=("$DS_BASELINE")
     else
       DS_BASELINE=".secrets.baseline"
     fi
@@ -285,7 +304,7 @@ if command -v detect-secrets-hook >/dev/null 2>&1 && [ -f ".secrets.baseline" ];
   # variable sees an empty value at exit time, which is exactly how the first
   # fix attempt silently cleaned nothing.
   DS_TMP="$(dirname "$(mktemp -u)")/ds-output.$$"
-  GATE8_TEMP="$GATE8_TEMP $DS_TMP"
+  GATE8_TEMP+=("$DS_TMP")
   # #616: same scope split as the gitleaks call above. Under `--all` the index is
   # usually empty, so piping `git diff --cached -z` into xargs fed the hook zero
   # files and it reported success without reading anything.
