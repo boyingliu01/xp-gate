@@ -218,7 +218,7 @@ function main(argv) {
   console.log('Review before committing: this must contain no new secrets.');
 }
 
-module.exports = { normalizeBaseline, normalizePath, serialize };
+module.exports = { normalizeBaseline, normalizePath, serialize, detectEol };
 
 if (require.main === module) {
   main(process.argv.slice(2));
