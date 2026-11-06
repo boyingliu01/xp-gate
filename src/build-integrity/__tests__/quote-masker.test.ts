@@ -101,4 +101,42 @@ describe('maskTextQuotes contract', () => {
     expect(() => maskTextQuotesForTest(content)).not.toThrow();
     expect(maskTextQuotesForTest(content).length).toBe(content.length);
   });
+
+  it('preserves CR bytes on a CRLF-terminated file', () => {
+    // Windows-authored sources are everywhere in this repo. A masker that
+    // stripped or normalised `\r` would shift nothing on its own, but the
+    // length/newline invariants are what line numbers are derived from, so the
+    // CR bytes are pinned explicitly rather than assumed to survive.
+    const CR = String.fromCharCode(13);
+    const NL = String.fromCharCode(10);
+    const content =
+      "import a from './a';" + CR + NL +
+      "const s = 'x';" + CR + NL +
+      "import b from './b';" + CR + NL;
+    const masked = maskTextQuotesForTest(content);
+    expect(masked.length).toBe(content.length);
+    expect(masked.split(CR).length).toBe(content.split(CR).length);
+    expect(masked.split(NL).length).toBe(content.split(NL).length);
+  });
+
+  it('treats a division operator as code, not the start of a regex', () => {
+    // The masker has no regex support, so `a / b` must not be mistaken for the
+    // start of a literal. If it were, the quote in the following comment would
+    // open a phantom string and mask the rest of the file.
+    const content = "const r = a / b; // it's a comment\nimport real from './real';\n";
+    const masked = maskTextQuotesForTest(content);
+    expect(masked.length).toBe(content.length);
+    // The real import's delimiters survive: they are code, not text.
+    expect(masked).toContain("'./real'");
+  });
+
+  it('terminates on an unterminated literal instead of spinning', () => {
+    // A truncated file leaves `mode` non-code for the rest of the input. Each
+    // handler advances the cursor, so the loop is bounded by the input length —
+    // this test fails (by timing out) if a future handler ever forgets to.
+    for (const sample of ["const i = 'abc", '/* x', 'const k = ' + BT + 'abc']) {
+      const out = maskTextQuotesForTest(sample);
+      expect(out.length).toBe(sample.length);
+    }
+  });
 });
