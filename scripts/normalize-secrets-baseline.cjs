@@ -81,7 +81,18 @@ function normalizeBaseline(parsed) {
   for (const [rawKey, entries] of Object.entries(parsed.results)) {
     const key = normalizePath(rawKey);
     if (key !== rawKey) changed++;
-    const list = Array.isArray(entries) ? entries : [];
+    // A non-array value under a file key is malformed. Coercing it to `[]`
+    // silently DELETES every entry recorded for that file — the precise
+    // outcome ("losing an entry is always worse than keeping a malformed one")
+    // the merge below is written to avoid. Refusing is the honest response:
+    // the caller reports exit 2 and the gate compares against the untouched
+    // original rather than against a baseline that lost findings.
+    if (!Array.isArray(entries)) {
+      throw new TypeError(
+        `baseline entry for ${JSON.stringify(rawKey)} is ${entries === null ? 'null' : typeof entries}, expected an array`
+      );
+    }
+    const list = entries;
     for (const entry of list) {
       if (entry && typeof entry === 'object' && hasBackslash(entry.filename)) {
         entry.filename = normalizePath(entry.filename);
