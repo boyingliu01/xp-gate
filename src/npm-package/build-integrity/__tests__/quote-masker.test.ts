@@ -21,6 +21,7 @@ import { maskTextQuotesForTest } from '../quote-masker';
 describe('maskTextQuotes contract', () => {
   const BS = String.fromCharCode(92);
   const BT = String.fromCharCode(96);
+  const SQ = String.fromCharCode(39);
   const SAMPLES: Array<[string, string]> = [
     ['plain code', "import x from './x';"],
     ['single-quoted string', "const a = 'hello';"],
@@ -33,6 +34,16 @@ describe('maskTextQuotes contract', () => {
     ['line continuation', "const f = 'a" + BS + "\nb';"],
     ['regex literal', 'const g = /ab+c/;'],
     ['trailing backslash', 'const h = ' + BS],
+    // Unbalanced delimiters: the masker must never throw and never grow or
+    // shrink the text, even when the file simply ends mid-literal. Every one of
+    // these is a shape a truncated or generated file really contains.
+    ['unterminated single quote', "const i = 'abc"],
+    ['unterminated double quote', 'const j = "abc'],
+    ['unterminated template', 'const k = ' + BT + 'abc'],
+    ['unterminated block comment', 'const l = 1; /* abc'],
+    ['unterminated interpolation', 'const m = ' + BT + '${'],
+    ['regex holding a quote', 'const n = /' + SQ + '/;'],
+    ['empty input', ''],
   ];
 
   it.each(SAMPLES)('preserves length for %s', (_label, sample) => {
@@ -69,5 +80,25 @@ describe('maskTextQuotes contract', () => {
     const content = "const a = 'x'; import y from './y';";
     const once = maskTextQuotesForTest(content);
     expect(maskTextQuotesForTest(once).length).toBe(content.length);
+  });
+
+  it('never throws on any sample, including unbalanced delimiters', () => {
+    // `extractImports` runs over arbitrary real files, and a truncated file or a
+    // generated artefact can end mid-literal. A throw here would abort Gate 10
+    // for the whole file rather than mis-report one line, so this is checked
+    // across every sample rather than one representative case.
+    for (const [label, sample] of SAMPLES) {
+      expect(() => maskTextQuotesForTest(sample), label).not.toThrow();
+    }
+  });
+
+  it('never throws on a lone sentinel byte in the input', () => {
+    // QUOTE_SENTINEL is a NUL character. Source containing a literal NUL is
+    // unusual but legal in a string, and the masker must not treat it as
+    // anything special.
+    const NUL = String.fromCharCode(0);
+    const content = "const a = '" + NUL + "'; import y from './y';";
+    expect(() => maskTextQuotesForTest(content)).not.toThrow();
+    expect(maskTextQuotesForTest(content).length).toBe(content.length);
   });
 });
