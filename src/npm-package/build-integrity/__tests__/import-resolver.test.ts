@@ -150,6 +150,9 @@ describe('extractImports', () => {
    */
   describe('ignores import text inside strings, templates and comments (#759)', () => {
     const BS = String.fromCharCode(92);
+    // Built from a code point so a backtick in the fixture cannot end the
+    // surrounding template literal by accident (same trap as `BS` above).
+    const BT = String.fromCharCode(96);
 
     it('ignores import text inside a double-quoted string', () => {
       const content = `const x = "import foo from './missing';";`;
@@ -226,6 +229,56 @@ describe('extractImports', () => {
 
     it('still treats a template interpolation as code', () => {
       const content = "const x = `${import('./real')}`;";
+      expect(extractImports(content)).toEqual([{ path: './real', line: 1 }]);
+    });
+
+    /**
+     * Nested interpolations must return to the INNER template, not to code.
+     *
+     * A single integer depth counter cannot express that: on entering the inner
+     * `${`, assigning (instead of pushing) made the inner `}` look like the
+     * close of the outer one, so the masker stayed in template mode and every
+     * real import after the line was masked. Measured against the counter
+     * version, `extractImports` returned `[]` for the case below.
+     */
+    it('stays aligned through a nested template interpolation', () => {
+      const Q = BT;
+      const content =
+        'const a = ' + Q + '${' + Q + '${x}' + Q + '}' + Q + ';\n' +
+        "import real from './real';\n";
+      expect(extractImports(content)).toEqual([{ path: './real', line: 2 }]);
+    });
+
+    it('stays aligned through nested interpolation containing an import', () => {
+      const Q = BT;
+      const content =
+        'const a = ' + Q + '${' + Q + '${import("./inner")}' + Q + '}' + Q + ';\n' +
+        "import real from './real';\n";
+      // The inner import is inside code (an interpolation), so it counts; the
+      // outer import must survive the nesting too.
+      expect(extractImports(content)).toEqual([
+        { path: './inner', line: 1 },
+        { path: './real', line: 2 },
+      ]);
+    });
+
+    /**
+     * A regex literal that contains `//` used to open a phantom line comment.
+     * The masker does not parse regex literals (documented limitation), but a
+     * line holding both a URL-ish regex and a real import must not lose the
+     * import. The `/` of `//` inside a regex is escaped in real code, and an
+     * unescaped `//` in a regex is a syntax error, so the remaining risk is
+     * confined to generated/minified text — pinned here so it stays a KNOWN
+     * limitation rather than an untested assumption.
+     */
+    it('keeps a real import on the same line as a regex literal', () => {
+      const content = 'const re = /(?:a)/; import real from "./real";\n';
+      expect(extractImports(content)).toEqual([{ path: './real', line: 1 }]);
+    });
+
+    it('resumes scanning after an unterminated-looking line comment', () => {
+      const content = "const u = 'http://x'; import real from './real';\n";
+      // The `//` sits inside a string, so it is text — the import is real code.
       expect(extractImports(content)).toEqual([{ path: './real', line: 1 }]);
     });
 

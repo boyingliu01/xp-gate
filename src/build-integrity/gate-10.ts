@@ -288,7 +288,8 @@ interface MaskState {
   readonly out: string[];
   i: number;
   mode: MaskMode;
-  interpolationDepth: number;
+  /** One brace depth per open `${...}`; a stack, because interpolations nest. */
+  interpolationDepths: number[];
 }
 
 /** What the masker is currently inside of. `code` is depth 0. */
@@ -366,11 +367,19 @@ function stepLiteral(state: MaskState): boolean {
     return true;
   }
   if (mode === 'template' && ch === '$' && content[i + 1] === '{') {
-    // Interpolation body is code again. Emit `$` and `{` as themselves and
-    // remember that the matching `}` returns us to template text.
+    // Interpolation body is code again. Emit `$` and `{` as themselves and push
+    // a fresh brace depth for the matching `}`.
+    //
+    // A single integer counter CANNOT do this: an interpolation may itself open
+    // a nested template whose interpolation must return to the INNER template
+    // when it closes, not to code. Overwriting the counter on entry made the
+    // inner `}` look like the close of the outer one, so `` `${`${x}`}` `` left
+    // the masker in template mode and every real import after it was masked —
+    // measured before this was a stack: `extractImports` returned `[]` for a
+    // file whose only import was perfectly valid.
     state.out.push('$', '{');
     state.i += 2;
-    state.interpolationDepth = 1;
+    state.interpolationDepths.push(0);
     state.mode = 'code';
     return true;
   }
@@ -418,16 +427,22 @@ function stepQuoteOpen(state: MaskState): boolean {
  * interpolation closed and the masker went back to template text.
  */
 function stepInterpolationBrace(state: MaskState): boolean {
-  if (state.interpolationDepth === 0) return false;
+  const stack = state.interpolationDepths;
+  // Depth 0 means we are not inside any interpolation at all.
+  if (stack.length === 0) return false;
   const ch = state.content[state.i];
   if (ch === '{') {
-    state.interpolationDepth += 1;
+    stack[stack.length - 1] += 1;
     return false;
   }
   if (ch !== '}') return false;
-  state.interpolationDepth -= 1;
-  if (state.interpolationDepth > 0) return false;
-  // Close of the interpolation: resume template text.
+  if (stack[stack.length - 1] > 0) {
+    stack[stack.length - 1] -= 1;
+    return false;
+  }
+  // This `}` closes the innermost interpolation: resume the template that owns
+  // it. Popping (rather than zeroing a counter) is what makes nesting correct.
+  stack.pop();
   state.out.push('}');
   state.i += 1;
   state.mode = 'template';
@@ -464,7 +479,7 @@ function maskTextQuotes(content: string): string {
     out: [],
     i: 0,
     mode: 'code',
-    interpolationDepth: 0,
+    interpolationDepths: [],
   };
   while (state.i < content.length) {
     MASK_STEPS[state.mode](state);
