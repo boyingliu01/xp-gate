@@ -350,7 +350,7 @@ else
   }
 
   CCN_THRESHOLD=$(resolve_ccn_threshold)
-  
+
   # Check lizard availability
   LIZARD_CMD=""
   if command -v lizard > /dev/null 2>&1; then
@@ -358,10 +358,10 @@ else
   elif [ -f ~/.local/bin/lizard ]; then
     LIZARD_CMD=~/.local/bin/lizard
   fi
-  
+
   if [ -n "$LIZARD_CMD" ]; then
     LIZARD_PATH=$(eval echo "$LIZARD_CMD")
-    
+
     # Get changed source files for complexity check (includes test files)
     CC_FILES=$(echo "$CHANGED_FILES" | grep -E '\.(ts|tsx|js|jsx|py|go|java|swift|cpp|c|hpp|h|m|mm|kt|cs)$' || true)
 
@@ -398,7 +398,7 @@ else
 
     if [ -n "$CC_FILES" ]; then
       echo "Checking complexity for source files..."
-      
+
       # Run lizard in chunks. Two reasons, both load-bearing:
       #  - One path per line, into an array. Unquoted $CC_FILES relied on word
       #    splitting, which also splits any path containing a space -- handing
@@ -595,7 +595,17 @@ CC_POP_EOF
       # contain a function. If it produces rows, lizard works and the input
       # simply had no functions (SKIP, `no_functions_in_input`); if it does not,
       # the tool really is broken (WARN, `lizard_output_unparsable`).
-      if ! printf '%s\n' "$CC_CSV_FLAT" | awk -F, 'NF > 1 && $2 ~ /^[0-9]+$/ { found = 1; exit }
+      #
+      # #774: the probe must read the WHOLE stream. It used to `exit` on the
+      # first matching row, which left `printf` writing into a closed pipe; under
+      # the hook's `set -o pipefail` the pipeline then reported SIGPIPE (141)
+      # instead of awk's 0, and a run with 26 above-threshold functions announced
+      # itself as "no functions (pure data module)". Measured: the flip happens
+      # once the CSV exceeds the 64 KB pipe buffer -- 24 changed source files were
+      # enough -- and it is timing-dependent, so the same commit could pass or
+      # skip. Counting through to END also drops the dependency on how much stdin
+      # happened to be buffered.
+      if ! printf '%s\n' "$CC_CSV_FLAT" | awk -F, 'NF > 1 && $2 ~ /^[0-9]+$/ { found = 1 }
                                                  END { exit(found ? 0 : 1) }'; then
         _lizard_probe_dir=$(mktemp -d 2>/dev/null || echo "${TMPDIR:-/tmp}")
         _lizard_probe_file="$_lizard_probe_dir/xp-gate-lizard-probe.py"

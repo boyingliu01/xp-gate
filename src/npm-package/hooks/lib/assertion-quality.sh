@@ -49,12 +49,15 @@ classify_test_skip() {
 # silent pass.
 #
 # $1 = the source text to inspect (usually the staged file content).
+# Read to END rather than exiting on the first match: an early `exit` closes stdin
+# on the upstream pipeline, and under the hook's `set -o pipefail` the resulting
+# SIGPIPE (141) would be misread as "no match" (#774).
 is_skip_justified() {
   printf '%s\n' "$1" \
     | grep -oE '@skip-justified:[[:space:]]*[^[:space:]*].*' \
     | sed 's/^@skip-justified:[[:space:]]*//' \
     | tr -d '\r' \
-    | awk 'length($0) >= 10 { found = 1; exit } END { exit(found ? 0 : 1) }'
+    | awk 'length($0) >= 10 { found = 1 } END { exit(found ? 0 : 1) }'
 }
 
 # Files whose basename marks them as a test. Shared with classify_deleted_tests so
@@ -270,10 +273,13 @@ classify_weak_assertions() {
 # hatch from becoming the default.
 #
 # $1 = the source text to inspect.
+# Read to END rather than exiting on the first match: an early `exit` closes stdin
+# on the upstream pipeline, and under the hook's `set -o pipefail` the resulting
+# SIGPIPE (141) would be misread as "no match" (#774).
 is_assertion_justified() {
   printf '%s\n' "$1" \
     | grep -oE '@assertion-justified:[[:space:]]*[^[:space:]*].*' \
     | sed 's/^@assertion-justified:[[:space:]]*//' \
     | tr -d '\r' \
-    | awk 'length($0) >= 10 { found = 1; exit } END { exit(found ? 0 : 1) }'
+    | awk 'length($0) >= 10 { found = 1 } END { exit(found ? 0 : 1) }'
 }
