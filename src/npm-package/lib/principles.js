@@ -304,25 +304,40 @@ function expandTargets(targets) {
 }
 
 function principles(args) {
-  const target = args[0];
-  if (!target) {
-    console.error('Usage: xp-gate principles <file_or_directory> [--format console|json|sarif]');
+  // #761: the CLI advertises `<file_or_directory>` while the implementation read
+  // `args[0]` only. `xp-gate principles a.ts b.ts c.ts` therefore analysed `a.ts`
+  // and dropped the rest without saying so -- the caller asked for three files,
+  // one was checked, and the report looked complete. Collect every positional
+  // argument instead, skipping the value that belongs to --format.
+  const formatIdx = args.indexOf('--format');
+  const positional = [];
+  for (let i = 0; i < args.length; i += 1) {
+    const arg = args[i];
+    if (arg === '--format') {
+      i += 1; // its value is not a target
+      continue;
+    }
+    if (arg.startsWith('--')) continue;
+    positional.push(arg);
+  }
+
+  if (positional.length === 0) {
+    console.error('Usage: xp-gate principles <file_or_directory>... [--format console|json|sarif]');
     return Promise.resolve(1);
   }
 
-  const formatIdx = args.indexOf('--format');
   const format = formatIdx >= 0 ? args[formatIdx + 1] : 'console';
 
   // Expand directories before handing them to the checker (#565). Passing a
   // directory straight through made the checker examine zero files while the
   // CLI printed "No violations found" and exited 0.
-  const files = expandTargets([target]);
+  const files = expandTargets(positional);
   if (files.length === 0) {
     // Nothing to analyse is NOT a pass. Saying so is the whole point: silence
     // here is indistinguishable from a clean directory. Exit 2 mirrors the
     // checker's own "examined nothing" contract, which reserves 1 for
     // "examined files and found violations".
-    console.error(`[xp-gate principles] no analysable source files under: ${target}`);
+    console.error(`[xp-gate principles] no analysable source files under: ${positional.join(' ')}`);
     console.error('  Supported: ' + Array.from(SOURCE_EXTENSIONS).join(' '));
     return Promise.resolve(2);
   }
