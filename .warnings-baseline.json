@@ -1,6 +1,6 @@
 {
   "src/npm-package/lib/test-alignment.ts": {
-    "totalWarnings": 13,
+    "totalWarnings": 12,
     "lastAnalyzed": "2026-10-31T07:31:43.881Z"
   },
   "src/build-integrity/__tests__/import-resolver.test.ts": {
@@ -8,43 +8,39 @@
     "lastAnalyzed": "2026-10-31T07:31:43.881Z"
   },
   "src/npm-package/lib/init.js": {
-    "totalWarnings": 14,
-    "lastAnalyzed": "2026-10-31T07:31:43.881Z"
+    "totalWarnings": 11,
+    "lastAnalyzed": "2026-11-05T10:35:00.000Z"
   },
   "src/npm-package/lib/phase-transition.js": {
-    "totalWarnings": 10,
-    "lastAnalyzed": "2026-10-31T07:31:43.881Z"
+    "totalWarnings": 8,
+    "lastAnalyzed": "2026-11-05T10:35:00.000Z"
   },
   "src/build-integrity/__tests__/gate-10.test.ts": {
     "totalWarnings": 7,
     "lastAnalyzed": "2026-10-31T07:31:43.881Z"
   },
   "src/mutation/runners/pitest-runner.ts": {
-    "totalWarnings": 5,
-    "lastAnalyzed": "2026-10-31T07:31:43.881Z"
+    "totalWarnings": 3,
+    "lastAnalyzed": "2026-11-05T10:35:00.000Z"
   },
   "src/mutation/__tests__/pitest-runner.test.ts": {
-    "totalWarnings": 4,
-    "lastAnalyzed": "2026-10-31T07:31:43.881Z"
+    "totalWarnings": 3,
+    "lastAnalyzed": "2026-11-05T10:35:00.000Z"
   },
   "src/npm-package/mutation/__tests__/pitest-runner.test.ts": {
-    "totalWarnings": 4,
-    "lastAnalyzed": "2026-10-31T07:31:43.881Z"
+    "totalWarnings": 3,
+    "lastAnalyzed": "2026-11-05T10:35:00.000Z"
   },
   "src/npm-package/mutation/runners/pitest-runner.ts": {
-    "totalWarnings": 5,
-    "lastAnalyzed": "2026-10-31T07:31:43.881Z"
+    "totalWarnings": 3,
+    "lastAnalyzed": "2026-11-05T10:35:00.000Z"
   },
   "src/npm-package/scripts/sync-package-content.js": {
-    "totalWarnings": 14,
-    "lastAnalyzed": "2026-10-31T07:31:43.881Z"
+    "totalWarnings": 13,
+    "lastAnalyzed": "2026-11-05T10:35:00.000Z"
   },
   "src/mock-policy/__tests__/integration.test.ts": {
     "totalWarnings": 9,
-    "lastAnalyzed": "2026-10-31T07:31:43.881Z"
-  },
-  "plugins/dsh/src/delphi-run.test.ts": {
-    "totalWarnings": 1,
     "lastAnalyzed": "2026-10-31T07:31:43.881Z"
   }
 }

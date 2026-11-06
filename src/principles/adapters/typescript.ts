@@ -6,6 +6,7 @@ import { parseImportClause } from './import-clause';
 import {
   type QuoteState, newQuoteState, inQuotedState, advanceQuoteState, applyDelimiter, isQuote,
 } from './quote-state';
+import { maxControlNesting } from './control-nesting';
 
 /** IO-ish callees that the missing-error-handling rule cares about. */
 const IO_CALLEES = [
@@ -274,135 +275,6 @@ function readParenGroup(src: string, open: number): { inner: string; end: number
     i = step.next;
   }
   return { inner: src.substring(open + 1), end: src.length };
-}
-
-/**
- * The lexical states `maxNesting` tracks while counting braces. Braces inside
- * any of these are data, not structure, so they must not change the count.
- */
-interface NestingScanState {
-  inSingle: boolean;
-  inDouble: boolean;
-  inTemplate: boolean;
-  inLineComment: boolean;
-  inBlockComment: boolean;
-}
-
-/**
- * One handler per lexical state. Each returns how many characters were
- * consumed, and mutates `state` only when the construct actually ends.
- *
- * Split out of a single 22-CCN dispatcher (#602): every state's exit condition
- * is independent, so keeping them in one body bought nothing but branch count.
- */
-type StateAdvance = (body: string, i: number, state: NestingScanState) => number;
-
-const advanceLineComment: StateAdvance = (body, i, state) => {
-  if (body[i] === '\n') state.inLineComment = false;
-  return 1;
-};
-
-const advanceBlockComment: StateAdvance = (body, i, state) => {
-  if (body[i] === '*' && body[i + 1] === '/') {
-    state.inBlockComment = false;
-    return 2;
-  }
-  return 1;
-};
-
-/** Shared shape of the three quoted states: honour `\`, close on the delimiter. */
-const advanceSingleQuote: StateAdvance = (body, i, state) => {
-  if (body[i] === '\\') return 2;
-  if (body[i] === "'") state.inSingle = false;
-  return 1;
-};
-
-const advanceDoubleQuote: StateAdvance = (body, i, state) => {
-  if (body[i] === '\\') return 2;
-  if (body[i] === '"') state.inDouble = false;
-  return 1;
-};
-
-const advanceTemplate: StateAdvance = (body, i, state) => {
-  if (body[i] === '\\') return 2;
-  if (body[i] === '`') state.inTemplate = false;
-  return 1;
-};
-
-/**
- * Enter a construct when the current character opens one.
- * @returns characters consumed, or 0 when nothing was opened.
- */
-function openConstruct(body: string, i: number, state: NestingScanState): number {
-  const c = body[i];
-  const next = body[i + 1];
-  if (c === '/' && next === '/') { state.inLineComment = true; return 2; }
-  if (c === '/' && next === '*') { state.inBlockComment = true; return 2; }
-  if (c === "'") { state.inSingle = true; return 1; }
-  if (c === '"') { state.inDouble = true; return 1; }
-  if (c === '`') { state.inTemplate = true; return 1; }
-  return 0;
-}
-
-/**
- * Advance the quoting/commenting state machine by one character.
- *
- * Pure with respect to depth: it only updates `state` and reports how many
- * characters were consumed. Extracted from `maxNesting` (#602) so the brace
- * counting and the lexing can be reasoned about separately -- the combined body
- * carried every branch of both.
- *
- * @returns the number of characters consumed (1, or 2 for the escape/close
- *          pairs that swallow the next character).
- */
-function advanceNestingState(
-  body: string,
-  i: number,
-  state: NestingScanState,
-): number {
-  if (state.inLineComment) return advanceLineComment(body, i, state);
-  if (state.inBlockComment) return advanceBlockComment(body, i, state);
-  if (state.inSingle) return advanceSingleQuote(body, i, state);
-  if (state.inDouble) return advanceDoubleQuote(body, i, state);
-  if (state.inTemplate) return advanceTemplate(body, i, state);
-  const opened = openConstruct(body, i, state);
-  return opened === 0 ? 1 : opened;
-}
-
-/** True when the character at `i` is structural (not inside a literal/comment). */
-function isStructuralAt(state: NestingScanState): boolean {
-  return !state.inSingle && !state.inDouble && !state.inTemplate &&
-    !state.inLineComment && !state.inBlockComment;
-}
-
-/** Max brace nesting depth inside a function body (1 = body itself). */
-function maxNesting(body: string): number {
-  let depth = 0;
-  let max = 0;
-  const state: NestingScanState = {
-    inSingle: false,
-    inDouble: false,
-    inTemplate: false,
-    inLineComment: false,
-    inBlockComment: false,
-  };
-
-  for (let i = 0; i < body.length;) {
-    const consumed = advanceNestingState(body, i, state);
-    if (consumed === 2) {
-      // The pair (escape, comment close, comment open) is consumed whole. A
-      // comment opener must not also be read as a brace-less character below.
-      i += 2;
-      continue;
-    }
-    if (isStructuralAt(state)) {
-      const c = body[i];
-      if (c === '{') { depth++; if (depth > max) max = depth; }
-      else if (c === '}') depth--;
-    }
-    i += 1;
-  }
-  return max;
 }
 
 /** Which IO callees appear in this body. */
@@ -741,7 +613,7 @@ export class TypeScriptAdapter extends BaseAdapter implements Adapter {
       endLine,
       length: hasBraces ? Math.max(1, endLine - startLine + 1) : 1,
       paramCount: countParams(inner),
-      nestingDepth: hasBraces ? maxNesting(maskLiterals(body)) : 0,
+      nestingDepth: hasBraces ? maxControlNesting(maskLiterals(body)) : 0,
       // The RAW body: `on('error', ...)` needs its string literal intact, and
       // masking blanks string bodies. try/catch is a keyword and is unaffected.
       hasTryCatch: hasErrorHandling(body),
@@ -880,6 +752,11 @@ export class TypeScriptAdapter extends BaseAdapter implements Adapter {
 
     const bodyEnd = findBlockEnd(this.maskedSource, arrow.bodyOpen);
     const code = src.substring(arrow.bodyOpen, bodyEnd);
+    // Scan the MASKED slice, matching the named-function path above: a `}` or
+    // `)` inside a string literal would otherwise unbalance the brace pairing
+    // and drop the nesting inside that block. `code` stays raw for the reported
+    // source and the regex-based checks below.
+    const maskedCode = this.maskedSource.substring(arrow.bodyOpen, bodyEnd);
     const endLine = lineOf(src, bodyEnd);
     return {
       name,
@@ -889,7 +766,7 @@ export class TypeScriptAdapter extends BaseAdapter implements Adapter {
       endLine: startLine,
       length: Math.max(1, endLine - startLine + 1),
       paramCount: arrow.parenIndex === -1 ? 1 : countParams(readParenGroup(src, arrow.parenIndex).inner),
-      nestingDepth: maxNesting(code),
+      nestingDepth: maxControlNesting(maskedCode),
       hasTryCatch: /\btry\s*\{/.test(code),
       ioOperations: ioOperationsIn(code),
       code,
