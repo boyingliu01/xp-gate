@@ -277,6 +277,29 @@ describe('extractImports', () => {
     });
 
     /**
+     * A line that STARTS with a comment can still carry a real import.
+     *
+     * The original guard asked `trimmed.startsWith('/*')` on the raw line and
+     * skipped the whole line, so `/* eslint-disable *&#47; import real from ...`
+     * was never scanned — a MISS, which is the one direction a compliance gate
+     * must not fail in. Measured before the fix: `[]`.
+     */
+    it('keeps an import that follows a leading block comment', () => {
+      const content = '/* eslint-disable */ import real from "./real";\n';
+      expect(extractImports(content)).toEqual([{ path: './real', line: 1 }]);
+    });
+
+    it('still ignores import text that is only a comment', () => {
+      const content = '/* import fake from "./fake" */\n';
+      expect(extractImports(content)).toEqual([]);
+    });
+
+    it('still ignores import text on a JSDoc continuation line', () => {
+      const content = ' * import fake from "./fake"\n';
+      expect(extractImports(content)).toEqual([]);
+    });
+
+    /**
      * KNOWN LIMITATION, pinned so it cannot drift unnoticed.
      *
      * A quote inside a regex literal opens a phantom string. Measured output for
