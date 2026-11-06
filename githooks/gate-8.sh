@@ -196,6 +196,42 @@ fi
 # both detect-secrets-hook and .secrets.baseline. The pipeline lives inside an
 # if-condition (errexit-exempt); a non-zero hook exit lands in the else branch.
 if command -v detect-secrets-hook >/dev/null 2>&1 && [ -f ".secrets.baseline" ]; then
+  # #735: normalize path separators BEFORE comparing against the baseline.
+  # detect-secrets writes backslash paths on Windows and forward slashes on
+  # Linux, and the baseline is committed, so the two forms fight: a Windows scan
+  # rewrites ~322 lines, a Linux run rewrites them back, and every commit
+  # carries a pure formatting diff. That destroys the only signal the baseline
+  # has - "did a NEW secret appear" - because a real new entry no longer stands
+  # out from churn. Normalizing HERE (not only in the repair hint) makes the
+  # comparison see one canonical form regardless of which platform last touched
+  # the file.
+  #
+  # Two traps had to be handled, both found by RUNNING it rather than reading it:
+  #  (1) this script lives at different depths in the source tree
+  #      (githooks/adapters/) and in the install (~/.config/xp-gate/adapters/), so
+  #      a fixed ../../ silently resolved to nothing in the installed copy;
+  #  (2) on Git Bash the resolved path is POSIX-style (/c/Users/...), and handing
+  #      it to the native node.exe makes MSYS rewrite it into D:\c\Users\... -
+  #      node then dies with MODULE_NOT_FOUND, which `|| true` swallowed. The
+  #      gate looked patched and normalised nothing at all.
+  # Hence: probe several layouts, then cygpath the winner to a Windows path.
+  # Best-effort on purpose - a missing node or unparsable baseline must let the
+  # hook speak, never abort the gate silently.
+  ds_norm=""
+  ds_here="$(dirname "${BASH_SOURCE[0]}")"
+  for cand in \
+      "$ds_here/../../scripts/normalize-secrets-baseline.cjs" \
+      "$ds_here/../scripts/normalize-secrets-baseline.cjs" \
+      "$XP_GATE_HOME/scripts/normalize-secrets-baseline.cjs"; do
+    if [ -n "$cand" ] && [ -f "$cand" ]; then ds_norm="$cand"; break; fi
+  done
+  if [ -n "$ds_norm" ] && command -v node >/dev/null 2>&1; then
+    ds_norm_arg="$ds_norm"
+    if command -v cygpath >/dev/null 2>&1; then
+      ds_norm_arg="$(cygpath -w "$ds_norm" 2>/dev/null || printf '%s' "$ds_norm")"
+    fi
+    node "$ds_norm_arg" .secrets.baseline >/dev/null 2>&1 || true
+  fi
   DS_TMP="$(dirname "$(mktemp -u)")/ds-output.$$"
   # #616: same scope split as the gitleaks call above. Under `--all` the index is
   # usually empty, so piping `git diff --cached -z` into xargs fed the hook zero
@@ -207,8 +243,14 @@ if command -v detect-secrets-hook >/dev/null 2>&1 && [ -f ".secrets.baseline" ];
       cat "$DS_TMP"
       echo ""
       echo "     ❌ BLOCKED - detect-secrets found secrets not in .secrets.baseline."
-      echo "   If these are false positives, regenerate the baseline (cross-platform):"
-      echo "     detect-secrets scan --update .secrets.baseline && git add .secrets.baseline"
+      echo "   If these are false positives, mark them in the baseline:"
+      echo "     detect-secrets scan --baseline .secrets.baseline && git add .secrets.baseline"
+      echo "   (--update does not exist; detect-secrets exits with"
+      echo "    \"unrecognized arguments: --update\".)"
+      echo "   Then REVIEW the diff: scan --baseline re-scans the WHOLE tree, whereas"
+      echo "   this gate only inspects changed files. A whole-tree scan can silently"
+      echo "   drop the entries of files it no longer reaches, un-allowlisting a"
+      echo "   historical finding. Commit the baseline alone so that stays visible."
       rm -f "$DS_TMP"
       exit 1
     fi
@@ -219,8 +261,14 @@ if command -v detect-secrets-hook >/dev/null 2>&1 && [ -f ".secrets.baseline" ];
     cat "$DS_TMP"
     echo ""
     echo "     ❌ BLOCKED - detect-secrets found secrets not in .secrets.baseline."
-    echo "   If these are false positives, regenerate the baseline (cross-platform):"
-    echo "     detect-secrets scan --update .secrets.baseline && git add .secrets.baseline"
+    echo "   If these are false positives, mark them in the baseline:"
+    echo "     detect-secrets scan --baseline .secrets.baseline && git add .secrets.baseline"
+    echo "   (--update does not exist; detect-secrets exits with"
+    echo "    \"unrecognized arguments: --update\".)"
+    echo "   Then REVIEW the diff: scan --baseline re-scans the WHOLE tree, whereas"
+    echo "   this gate only inspects changed files. A whole-tree scan can silently"
+    echo "   drop the entries of files it no longer reaches, un-allowlisting a"
+    echo "   historical finding. Commit the baseline alone so that stays visible."
     rm -f "$DS_TMP"
     exit 1
   fi

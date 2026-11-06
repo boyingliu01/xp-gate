@@ -133,6 +133,120 @@ describe('extractImports', () => {
     const result = extractImports(content);
     expect(result).toEqual([{ path: './side-effect', line: 1 }]);
   });
+
+  /**
+   * Issue #759 — import TEXT that is not import CODE.
+   *
+   * Every case below is a shape that a real project contains on purpose (a test
+   * pinning a scanner's own behaviour, a doc block, a parser fixture) and that
+   * the scanner used to report as a violation for a path that never existed.
+   * Eight of these eleven were reproduced in dialog-survey, where they blocked
+   * pushes.
+   *
+   * The fixture strings are built with template literals so the nesting is
+   * visible; `BS` keeps a literal backslash unambiguous, because writing `\\'`
+   * inside a template literal silently yields just `'` and turns the test into
+   * one that passes against the bug.
+   */
+  describe('ignores import text inside strings, templates and comments (#759)', () => {
+    const BS = String.fromCharCode(92);
+
+    it('ignores import text inside a double-quoted string', () => {
+      const content = `const x = "import foo from './missing';";`;
+      expect(extractImports(content)).toEqual([]);
+    });
+
+    it('ignores import text inside a single-quoted string', () => {
+      const content = `const x = 'import foo from "./missing";';`;
+      expect(extractImports(content)).toEqual([]);
+    });
+
+    it('ignores require() text inside a string', () => {
+      const content = `const x = "require('./missing')";`;
+      expect(extractImports(content)).toEqual([]);
+    });
+
+    it('ignores dynamic import text inside a string', () => {
+      const content = `const x = "import('./missing')";`;
+      expect(extractImports(content)).toEqual([]);
+    });
+
+    it('ignores export-from text inside a string', () => {
+      const content = `const x = "export * from './missing'";`;
+      expect(extractImports(content)).toEqual([]);
+    });
+
+    it('ignores import text inside a single-line template literal', () => {
+      const content = "const x = `import foo from './missing';`;";
+      expect(extractImports(content)).toEqual([]);
+    });
+
+    it('ignores import text inside a multi-line template literal', () => {
+      const content = "const x = `\nimport foo from './missing';\n`;";
+      expect(extractImports(content)).toEqual([]);
+    });
+
+    it('ignores import text inside a trailing line comment', () => {
+      const content = `const y = 1; // import foo from './missing';`;
+      expect(extractImports(content)).toEqual([]);
+    });
+
+    it('ignores import text inside a block comment', () => {
+      const content = `/* import foo from './missing'; */`;
+      expect(extractImports(content)).toEqual([]);
+    });
+
+    it('ignores import text inside JSDoc', () => {
+      const content = `/**\n * import foo from './missing';\n */`;
+      expect(extractImports(content)).toEqual([]);
+    });
+
+    /**
+     * The other half of a comment: that it ENDS.
+     *
+     * The two cases above only prove text INSIDE a comment is ignored. A masker
+     * that never leaves block-comment mode keeps both green while swallowing
+     * every real import after the closing delimiter — found by mutation: making
+     * the closing check unreachable survived all 58 tests. These pin the resume.
+     */
+    it('resumes scanning after a block comment closes', () => {
+      const content = `/* import gone from './missing'; */\nimport real from './real';`;
+      expect(extractImports(content)).toEqual([{ path: './real', line: 2 }]);
+    });
+
+    it('resumes scanning after a JSDoc block closes', () => {
+      const content = `/**\n * import gone from './missing';\n */\nimport real from './real';`;
+      expect(extractImports(content)).toEqual([{ path: './real', line: 4 }]);
+    });
+
+    it('resumes scanning after a line comment ends at the newline', () => {
+      const content = `// import gone from './missing';\nimport real from './real';`;
+      expect(extractImports(content)).toEqual([{ path: './real', line: 2 }]);
+    });
+
+    it('still treats a template interpolation as code', () => {
+      const content = "const x = `${import('./real')}`;";
+      expect(extractImports(content)).toEqual([{ path: './real', line: 1 }]);
+    });
+
+    it('does not end a string early on an escaped quote', () => {
+      const content = `const x = 'it${BS}'s import foo from "./missing"';`;
+      expect(extractImports(content)).toEqual([]);
+    });
+
+    it('does not end a string early on an escaped double quote', () => {
+      const content = `const x = "say ${BS}"hi import foo from './missing'";`;
+      expect(extractImports(content)).toEqual([]);
+    });
+
+    it('reports the real import on a line that also holds import text', () => {
+      const content = [
+        `import real from './real';`,
+        `const doc = "import fake from './fake';";`,
+      ].join('\n');
+      expect(extractImports(content)).toEqual([{ path: './real', line: 1 }]);
+    });
+  });
 });
 
 /**

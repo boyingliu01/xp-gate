@@ -5228,3 +5228,24 @@ specification:
         - id: AC-728-14
           criteria: 通配 import 不参与类名后缀判定；同样不会出现在 adapter.imports 中
           test_type: unit
+
+    # ============================================================
+    # REQ-735 / 736 / 737 / 759: 门禁缺陷修复（GitHub issues）
+    # ============================================================
+    - id: REQ-735
+      description: detect-secrets 基线路径分隔符规范化——Windows 写反斜杠、Linux 写正斜杠，
+        两个形式互相覆盖导致每次提交都是纯格式 diff，把"是否出现新密钥"这个唯一信号淹没
+      priority: high
+      acceptance_criteria:
+        - id: AC-NORMALIZE-001
+          criteria: 规范化脚本同时改写顶层 results 键与每条 entry 的 filename，只改路径不改
+            hashed_secret/line_number/type/is_* 字段
+          test_type: unit
+        - id: AC-NORMALIZE-002
+          criteria: 幂等——对同一基线连续运行两次，第二次产出与第一次字节完全一致（CRLF 基线
+            不能被改写成全 LF，否则整文件 1896 行全部变更）
+          test_type: unit
+        - id: AC-NORMALIZE-003
+          criteria: 规范化后发生碰撞的两个分隔符键必须合并而非覆盖；缺失基线与非法 JSON 退出码为
+            2（没有证据），绝不为 0
+          test_type: unit
