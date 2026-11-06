@@ -156,3 +156,64 @@ describe('check-tools language selection (#468)', () => {
     expect(Object.keys(reported)).toContain('shell');
   });
 });
+
+/**
+ * @test REQ-717
+ * @intent C# 有完整的门禁支持（adapter、principles 引擎、Gate 4/5/6/10/13），却从未进入
+ *         LANGUAGE_REGISTRY：detect-languages 生成的配置里没有 csharp，而读配置的 hook
+ *         不会回退到扩展名嗅探，于是 C# 在任何混合 .NET+JS 仓库里都不会被路由(#730)
+ * @covers AC-717-01, AC-717-02, AC-717-03
+ */
+describe('detectProjectLanguages C# registry membership (#730)', () => {
+  let loadModule;
+
+  beforeEach(() => {
+    vi.resetModules();
+    delete require.cache[require.resolve('../language-tools')];
+    loadModule = () => require('../language-tools');
+    vi.spyOn(console, 'log').mockImplementation(() => {});
+  });
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  function detectIn(spec) {
+    const root = makeFixture(spec);
+    try {
+      return loadModule().detectProjectLanguages(root);
+    } finally {
+      fs.rmSync(root, { recursive: true, force: true });
+    }
+  }
+
+  // The .csproj name is project-specific, so detection must glob it. A registry
+  // entry listing the literal '.csproj' would stat a file of that exact name and
+  // never match -- the config would look corrected while detection stayed broken.
+  it('detects csharp from a project-specific .csproj filename', () => {
+    const { detected, configFiles } = detectIn({ 'DshAotRunner.csproj': '<Project/>' });
+    expect(detected).toContain('csharp');
+    expect(configFiles.csharp).toContain('DshAotRunner.csproj');
+  });
+
+  it('detects csharp from a .sln in a solution-only repo', () => {
+    expect(detectIn({ 'App.sln': 'Microsoft Visual Studio Solution File' }).detected).toContain('csharp');
+  });
+
+  // The bug's actual shape: a .NET repo that also has package.json for its JS
+  // tooling. Before the fix this reported typescript alone, so the hook took the
+  // TypeScript path for a C# codebase.
+  it('reports csharp alongside typescript in a mixed .NET + JS repo', () => {
+    const { detected } = detectIn({
+      'Runner.csproj': '<Project/>',
+      'Program.cs': 'class P { static void Main() {} }',
+      'package.json': '{"name":"runner"}',
+    });
+    expect(detected).toEqual(expect.arrayContaining(['csharp', 'typescript']));
+  });
+
+  it('does not report csharp for a repo with no .NET artifact', () => {
+    const { detected } = detectIn({ 'package.json': '{}', 'index.js': '' });
+    expect(detected).not.toContain('csharp');
+  });
+});
