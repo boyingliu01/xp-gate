@@ -300,6 +300,37 @@ describe('extractImports', () => {
     });
 
     /**
+     * A static import whose path sits on a LATER line. Multi-line imports are
+     * ordinary formatting, and a strictly per-line scan misses them entirely —
+     * measured `[]` before joining, which is a MISS in the direction that
+     * matters (a real boundary violation would not be reported).
+     */
+    it('finds an import whose path is on a continuation line', () => {
+      const content = 'import {\n  foo,\n} from "./bar";\n';
+      expect(extractImports(content)).toEqual([{ path: './bar', line: 1 }]);
+    });
+
+    it('does not double-report a multi-line import, and keeps the next line', () => {
+      const content = 'import {\n  a,\n} from "./b";\nimport c from "./c";\n';
+      expect(extractImports(content)).toEqual([
+        { path: './b', line: 1 },
+        { path: './c', line: 4 },
+      ]);
+    });
+
+    it('finds a dynamic import written with a space before the paren', () => {
+      // `import ('./x')` is legal and appears in formatted code; the pattern
+      // required `import(` exactly and measured `[]`.
+      const content = "const m = import ('./x');\n";
+      expect(extractImports(content)).toEqual([{ path: './x', line: 1 }]);
+    });
+
+    it('does not report import.meta as a dynamic import', () => {
+      const content = 'const u = import.meta.url;\n';
+      expect(extractImports(content)).toEqual([]);
+    });
+
+    /**
      * KNOWN LIMITATION, pinned so it cannot drift unnoticed.
      *
      * A quote inside a regex literal opens a phantom string. Measured output for

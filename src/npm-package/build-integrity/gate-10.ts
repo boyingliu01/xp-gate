@@ -224,7 +224,7 @@ export function extractImports(content: string): Array<{ path: string; line: num
   const staticImportExportRe =
     /(?:import|export)\s+(?:(?:[^'"]*?\s+from\s+)?['"]([^'"]+)['"]|['"]([^'"]+)['"])/g;
   const requireRe = /require\(\s*['"]([^'"]+)['"]\s*\)/g;
-  const dynamicImportRe = /(?<!\w)import\(\s*['"]([^'"]+)['"]\s*\)/g;
+  const dynamicImportRe = /(?<!\w)import\s*\(\s*['"]([^'"]+)['"]\s*\)/g;
 
   // The scanner runs over a version of the source in which every quote that is
   // NOT a code-level delimiter has been replaced by a sentinel. Length and line
@@ -246,18 +246,84 @@ export function extractImports(content: string): Array<{ path: string; line: num
   // pattern-major passes; a line containing both a require and an import
   // would then swap positions.
   for (let i = 0; i < lines.length; i++) {
-    const line = lines[i];
     // Scan unless everything on the line is comment; see
     // `hasCodeAfterLeadingComment` for why a raw-prefix test was not enough.
     if (!hasCodeAfterLeadingComment(originalLines[i])) {
       continue;
     }
-    scanLine(line, i + 1, staticImportExportRe, (m) => m[1] ?? m[2], push);
-    scanLine(line, i + 1, requireRe, (m) => m[1], push);
-    scanLine(line, i + 1, dynamicImportRe, (m) => m[1], push);
+    i += scanImportAt(lines, i, { staticImportExportRe, requireRe, dynamicImportRe }, push);
   }
 
   return results;
+}
+
+/** The three patterns, grouped so the per-line scanner takes one argument. */
+interface ImportPatterns {
+  staticImportExportRe: RegExp;
+  requireRe: RegExp;
+  dynamicImportRe: RegExp;
+}
+
+/**
+ * Scan one line for imports and return how many FOLLOWING lines it consumed.
+ *
+ * Returns 0 for the ordinary single-line case and >0 when the line opens a
+ * static statement whose path sits further down, which the caller adds to its
+ * cursor. Extracted from `extractImports` to stay under Gate 4's 50-line limit.
+ */
+function scanImportAt(
+  lines: string[],
+  i: number,
+  patterns: ImportPatterns,
+  push: (path: string, line: number) => void,
+): number {
+  const line = lines[i];
+  scanLine(line, i + 1, patterns.requireRe, (m) => m[1], push);
+  scanLine(line, i + 1, patterns.dynamicImportRe, (m) => m[1], push);
+  // A static import that fits on ONE line is scanned in place, so the common
+  // case reports the import's own line. Only a line that OPENS a statement
+  // whose path sits further down needs joining:
+  // `import {\n  foo,\n} from './bar';` is ordinary formatting, and a per-line
+  // pattern misses it entirely (measured: `[]` before this).
+  const statement = joinImportStatement(lines, i);
+  if (!statement) {
+    scanLine(line, i + 1, patterns.staticImportExportRe, (m) => m[1] ?? m[2], push);
+    return 0;
+  }
+  scanLine(statement.text, i + 1, patterns.staticImportExportRe, (m) => m[1] ?? m[2], push);
+  // Skip the continuation lines: they hold no import of their own, and
+  // re-scanning them would let the static pattern match a fragment and report
+  // the import twice at the wrong line.
+  return statement.consumed;
+}
+
+/**
+ * Assemble a multi-line `import`/`export ... from '...'` statement starting at
+ * `start`, or return null when that line does not open one.
+ *
+ * Returns the joined text and how many FOLLOWING lines were consumed, so the
+ * caller can advance past them. The joining character is a space, which keeps
+ * `from` adjacent to its quotes without disturbing `['"]` matching; the text is
+ * only used for matching, never for the reported line number, so collapsing
+ * newlines cannot shift a position that is reported.
+ */
+function joinImportStatement(
+  lines: string[],
+  start: number,
+): { text: string; consumed: number } | null {
+  const first = lines[start];
+  // Only a line that BEGINS a static import/export can open a statement, and
+  // only a statement without its path yet needs joining.
+  if (!/^\s*(?:import|export)\b/.test(first)) return null;
+  if (/\bfrom\s*['"]|^\s*(?:import|export)\s*['"]/.test(first)) return null; // already complete
+  const parts: string[] = [first];
+  for (let k = start + 1; k < lines.length && parts.length <= 40; k++) {
+    parts.push(lines[k]);
+    if (/\bfrom\s*['"]|^\s*(?:import|export)\s*['"]/.test(lines[k])) {
+      return { text: parts.join(' '), consumed: k - start };
+    }
+  }
+  return null; // not a statement after all (or absurdly long): leave it alone
 }
 
 /**

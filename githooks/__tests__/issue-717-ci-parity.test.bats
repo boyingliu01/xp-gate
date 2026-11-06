@@ -54,16 +54,27 @@ setup() {
 }
 
 @test "#717 AC-717-22: the workflow file is still valid YAML" {
-  run node -e "
-    const fs=require('fs');
-    // No yaml dep is shipped; assert the structural things a hand-edit breaks:
-    // no tab indentation, and the csharp arm is inside the Gate 1 run block.
-    const s=fs.readFileSync('$CI','utf8');
-    if (/\t/.test(s)) { console.error('tab indentation'); process.exit(1); }
-    const gate1=s.indexOf('Gate 1: Code Quality');
-    const cs=s.indexOf('echo \"csharp\" > project_language.txt');
-    if (gate1 === -1 || cs === -1) { console.error('missing section'); process.exit(1); }
-    process.exit(0);
-  "
+  # The needle has to survive TWO quoting layers (bats -> bash -> `node -e "..."`).
+  # Written as `s.indexOf('echo \"csharp\" > project_language.txt')` bash consumed
+  # the `\"`, leaving a bare `"` that closed the JS string early:
+  #     SyntaxError: missing ) after argument list
+  # node exited 1 on a SYNTAX error, so this case failed identically on every
+  # platform -- and would have kept failing no matter what the workflow said.
+  # A script file removes both layers, which is the only version that cannot
+  # silently rot back into checking nothing.
+  local script="$BATS_TEST_TMPDIR/check-yaml.js"
+  cat > "$script" <<'JSEOF'
+const fs = require('fs');
+const file = process.argv[2];
+const s = fs.readFileSync(file, 'utf8');
+// No yaml dep is shipped; assert the structural things a hand-edit breaks:
+// no tab indentation, and the csharp arm is inside the Gate 1 run block.
+if (/\t/.test(s)) { console.error('tab indentation'); process.exit(1); }
+const gate1 = s.indexOf('Gate 1: Code Quality');
+const cs = s.indexOf('echo "csharp" > project_language.txt');
+if (gate1 === -1 || cs === -1) { console.error('missing section'); process.exit(1); }
+process.exit(0);
+JSEOF
+  run node "$script" "$CI"
   [ "$status" -eq 0 ]
 }
