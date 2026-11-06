@@ -90,5 +90,40 @@ describe('index.ts - CLI Entry Point', () => {
       
       expect(result).toBe(0);
     });
+
+    /**
+     * A directory must not be reported as a clean file.
+     *
+     * `--files src/principles` used to reach analyze(), which could not read it
+     * and filed no error, so the run printed "Files checked: 0" with
+     * "✓ No violations found" and exit 0 — a pass for a path never examined.
+     * Measured before the guard: exit 0. An unreadable FILE at least produced
+     * "Analysis incomplete"; a directory produced nothing at all.
+     */
+    it('should return 2 when given a directory instead of a file', async () => {
+      const result = await main(['--files', 'src/principles']);
+
+      expect(result).toBe(2);
+      expect(console.error).toHaveBeenCalled();
+    });
+
+    it('should name the offending directory so the operator can act', async () => {
+      const errors: string[] = [];
+      vi.mocked(console.error).mockImplementation((...args: unknown[]) => {
+        errors.push(args.map(String).join(' '));
+      });
+
+      await main(['--files', 'src/principles']);
+
+      expect(errors.join('\n')).toContain('src/principles');
+    });
+
+    it('should still analyse a real file given alongside no directory', async () => {
+      // The guard must not reject ordinary file input: same call shape, one
+      // path that IS a file.
+      const result = await main(['--files', 'src/principles/types.ts']);
+
+      expect(result).toBe(0);
+    });
   });
 });
