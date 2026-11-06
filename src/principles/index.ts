@@ -3,6 +3,7 @@ import { formatConsole, formatJSON, formatSARIF } from './reporter';
 import { loadConfig, setActiveConfig } from './config';
 import { getAllPrincipleRules } from './rules';
 import { isDirectExecution } from './direct-execution.js';
+import { statSync } from 'node:fs';
 
 interface CLIOptions {
   files: string[];
@@ -149,11 +150,47 @@ function exitStatusFor(result: { errors: string[]; summary: { errorCount: number
   return result.summary.errorCount > 0 ? 1 : 0;
 }
 
+/**
+ * Reject a DIRECTORY passed where a file is expected.
+ *
+ * `--files src/utils` (or any bare directory path) reached `analyze`, which
+ * could not read it, filed NO error, and reported `Files checked: 0` with
+ * "✓ No violations found" and exit 0. That is the same false-clean shape #623
+ * fixed for unreadable files, except an unreadable file at least produced
+ * "Analysis incomplete"; a directory produced silence because reading it fails
+ * differently from opening a file.
+ *
+ * Returns the offending paths so the caller can name them. An operator who
+ * points the checker at a directory needs to be told to expand it or use the
+ * gate wrapper, not handed a pass.
+ */
+function findDirectories(paths: readonly string[]): string[] {
+  const dirs: string[] = [];
+  for (const p of paths) {
+    try {
+      if (statSync(p).isDirectory()) dirs.push(p);
+    } catch {
+      // Missing paths are analyze()'s job to report, not this check's.
+    }
+  }
+  return dirs;
+}
+
 export async function main(args: string[]): Promise<number> {
   const options = parseArgs(args);
 
   if (options.files.length === 0) {
     usageMessage();
+    return USAGE_EXIT;
+  }
+
+  const directories = findDirectories(options.files);
+  if (directories.length > 0) {
+    console.error(
+      `Cannot analyse a directory: ${directories.length} path(s) are directories, not files`,
+    );
+    for (const dir of directories) console.error(`  ${dir}`);
+    console.error('Pass individual files, or run the gate wrapper: xp-gate check 4 <dir>');
     return USAGE_EXIT;
   }
 
