@@ -496,6 +496,22 @@ function maskTextQuotes(content: string): string {
   return state.out.join('');
 }
 
+/**
+ * Test-only view of the masker.
+ *
+ * `maskTextQuotes` is the only new algorithm in #759 and it makes three
+ * properties that `extractImports` can honour only by accident: output length
+ * equals input length, the newline count is unchanged (line numbers come from
+ * it), and no raw quote survives inside masked text in a way the import regexes
+ * could use. Asserting those directly is what turns the masker's contract into
+ * a fail-fast check instead of a behaviour inferred from a dozen indirect
+ * import assertions. Kept behind an explicit name so production callers do not
+ * reach for it.
+ */
+export function maskTextQuotesForTest(content: string): string {
+  return maskTextQuotes(content);
+}
+
 /** Apply one pattern to a single line; every relative hit is pushed with its line number. */
 function scanLine(
   line: string,
