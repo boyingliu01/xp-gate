@@ -211,6 +211,20 @@ run_tests() {
 # Silently returning 0 here would let Gate 5 read "no coverage file" as "no
 # coverage requirement". The output just tells the caller which artifact the
 # gate is looking for; the threshold verdict stays with the caller.
+# Newest coverage.cobertura.xml under $1, honouring an optional find time filter
+# in $2. Extracted so the "which report is the current one" rule lives in one
+# place: run_coverage and Gate 5's own discovery must agree, or the adapter and
+# the gate will quote different numbers for the same run.
+_csharp_newest_cobertura() {
+  local root="$1" time_filter="${2:-}"
+  # shellcheck disable=SC2086  # $time_filter is deliberately word-split
+  find "$root" -name "coverage.cobertura.xml" -type f $time_filter 2>/dev/null \
+    | while IFS= read -r f; do
+        printf '%s\t%s\n' "$(stat -c %Y "$f" 2>/dev/null || stat -f %m "$f" 2>/dev/null || echo 0)" "$f"
+      done \
+    | sort -rn | head -1 | cut -f2-
+}
+
 run_coverage() {
   local dotnet_root dotnet
   dotnet_root=$(_detect_dotnet_root) || { echo "No .NET project marker found"; return 0; }
@@ -223,16 +237,57 @@ run_coverage() {
     return 2
   fi
 
+  # A project that ships its own .runsettings must be honoured. Coverlet's
+  # defaults (IncludeTestAssembly=false, no Include filter) are wrong for any
+  # solution whose tests link the production sources via <Compile Include> rather
+  # than project-referencing them: the assembly under test IS the test assembly,
+  # so coverlet instruments nothing and writes a syntactically valid report with
+  # line-rate="0" and an EMPTY <packages/>. Gate 5 then blocks on "0% coverage"
+  # for a suite that measures 67% when run the project's own way -- a false
+  # negative that looks exactly like a real coverage failure.
+  #
+  # Measured on dsh-aot-runner: without --settings the report was
+  # `<coverage line-rate="0" ... lines-valid="0">` with `<packages />`; with the
+  # project's runsettings the same command produced line-rate="0.6724".
+  local settings_arg="" rs
+  for rs in tests/*/coverage.runsettings tests/coverage.runsettings \
+            coverage.runsettings .runsettings coverage/.runsettings; do
+    if [ -f "$rs" ]; then settings_arg="--settings $rs"; break; fi
+  done
+  if [ -z "$settings_arg" ]; then
+    # Fall back to any runsettings anywhere in the tree before giving up.
+    rs=$(find . -name '*.runsettings' -type f -not -path './.git/*' 2>/dev/null \
+      | while IFS= read -r f; do printf '%s\t%s\n' "$(stat -c %Y "$f" 2>/dev/null || stat -f %m "$f" 2>/dev/null || echo 0)" "$f"; done \
+      | sort -rn | head -1 | cut -f2-)
+    [ -n "$rs" ] && settings_arg="--settings $rs"
+  fi
+  if [ -n "$settings_arg" ]; then
+    echo "   Using project runsettings: ${settings_arg#--settings }"
+  fi
+
   echo "Collecting coverage: dotnet test --collect:\"XPlat Code Coverage\""
   local out rc
-  out=$("$dotnet" test "$test_proj" --nologo --collect:"XPlat Code Coverage" 2>&1)
+  # shellcheck disable=SC2086  # $settings_arg is deliberately word-split
+  out=$("$dotnet" test "$test_proj" --nologo --collect:"XPlat Code Coverage" $settings_arg 2>&1)
   rc=$?
   printf '%s\n' "$out" | sed -n '1,15p'
 
+  # #768: pick the report THIS run produced, not an arbitrary one.
+  #
+  # `find ... | sed -n '1p; 1q'` returned whichever directory the filesystem
+  # enumerated first. TestResults accumulates one <guid>/ per run, so after a
+  # second run the "first" hit can be an earlier run's report -- and when that run
+  # was from a different test target, its report legitimately says 0%. Measured on
+  # a real repo: live coverage was 67%, the adapter announced the stale 0% report,
+  # and Gate 5 blocked with "csharp coverage 0% below 80% threshold".
+  #
+  # Sort by modification time so "the report" means "the one just written". The
+  # stat arm is guarded for both GNU (-c) and BSD/macOS (-f) spellings, with 0 as
+  # a last resort so an unsupported stat cannot empty the list.
   local report
-  report=$(find "$dotnet_root" -name "coverage.cobertura.xml" -type f -newermt "-10 minutes" 2>/dev/null | sed -n '1p; 1q')
+  report=$(_csharp_newest_cobertura "$dotnet_root" "-newermt -10 minutes")
   if [ -z "$report" ]; then
-    report=$(find "$dotnet_root" -name "coverage.cobertura.xml" -type f 2>/dev/null | sed -n '1p; 1q')
+    report=$(_csharp_newest_cobertura "$dotnet_root" "")
   fi
 
   if [ -z "$report" ]; then
