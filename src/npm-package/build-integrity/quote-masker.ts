@@ -101,7 +101,14 @@ function stepBlockComment(state: MaskState): void {
 function stepEscape(state: MaskState): void {
   const escaped = state.content[state.i + 1];
   state.out.push(' ');
-  state.out.push(escaped === '\n' ? '\n' : QUOTE_SENTINEL);
+  // A trailing backslash at EOF (a truncated file, or one that simply ends
+  // mid-escape) used to push TWO characters while advancing past a ONE-char
+  // remainder, so the output came out one character LONGER than the input —
+  // breaking the length invariant every line number depends on. Measured on
+  // `const e = 'a<BS>` (13 chars) producing 14. Push only what exists.
+  if (escaped !== undefined) {
+    state.out.push(escaped === '\n' ? '\n' : QUOTE_SENTINEL);
+  }
   state.i += 2;
 }
 
