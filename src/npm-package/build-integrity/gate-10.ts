@@ -247,11 +247,9 @@ export function extractImports(content: string): Array<{ path: string; line: num
   // would then swap positions.
   for (let i = 0; i < lines.length; i++) {
     const line = lines[i];
-    // Skip whole-line comments (// or leading * in JSDoc blocks), judged on the
-    // ORIGINAL line: the masker blanks comment bodies but keeps the markers, so
-    // either would work — using the original keeps this check readable.
-    const trimmed = originalLines[i].trim();
-    if (trimmed.startsWith('//') || trimmed.startsWith('*') || trimmed.startsWith('/*')) {
+    // Scan unless everything on the line is comment; see
+    // `hasCodeAfterLeadingComment` for why a raw-prefix test was not enough.
+    if (!hasCodeAfterLeadingComment(originalLines[i])) {
       continue;
     }
     scanLine(line, i + 1, staticImportExportRe, (m) => m[1] ?? m[2], push);
@@ -260,6 +258,38 @@ export function extractImports(content: string): Array<{ path: string; line: num
   }
 
   return results;
+}
+
+/**
+ * Does any CODE follow the comment that starts this line?
+ *
+ * Returns true when the line does not start with a comment at all, so callers
+ * can treat it as the single "should this line be scanned?" question. Only
+ * three prefixes can begin a comment line and each closes in exactly one way,
+ * so this needs no lexer — the masker has already established that the line is
+ * not inside a literal or template.
+ *
+ * Skipping on the raw prefix alone was a real MISS: `/* eslint-disable *&#47;
+ * import real from './real';` starts with `/*`, so the whole line was dropped
+ * and the genuine import on it was never checked — the one direction a
+ * compliance gate must not fail in. Measured before this fix: `[]`.
+ *
+ *   `//...`      -> nothing can follow on the same line
+ *   `/* ... *&#47;`  -> whatever follows the first `*&#47;` is code
+ *   `* ...`      -> a JSDoc continuation; `*&#47;` ends it, else nothing follows
+ */
+function hasCodeAfterLeadingComment(originalLine: string): boolean {
+  const trimmed = originalLine.trim();
+  if (trimmed.startsWith('//')) return false; // nothing can follow on this line
+  if (trimmed.startsWith('/*') || trimmed.startsWith('*')) {
+    // A `/*` opener and a JSDoc `*` continuation both end at the first `*/`.
+    const close = trimmed.indexOf('*/');
+    // An unterminated block comment runs to the end of the file: no code here.
+    if (close === -1) return false;
+    const rest = trimmed.slice(close + 2).trim();
+    return rest.length > 0 && !rest.startsWith('//');
+  }
+  return true;
 }
 
 /** Apply one pattern to a single line; every relative hit is pushed with its line number. */
