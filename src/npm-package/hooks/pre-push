@@ -986,19 +986,39 @@ else
 
   for test_file in $ALL_PUSHED_TEST_FILES; do
     if [ -f "$test_file" ]; then
-      # Count mock keyword references (precise patterns only)
-      # Use grep -o piped to wc -l for reliable single-number output (grep -c can emit
-      # multi-line output with filenames under some grep versions, causing bash arithmetic
-      # syntax errors). grep -o extracts each match on its own line, wc -l counts them.
+      # Count mock keyword references (precise patterns only).
+      #
+      # This used to be `for kw in ...; do grep -o "$kw" | wc -l; done`: 20
+      # keywords x (grep + wc) = 40 process creations, for a scan of ONE file.
+      # Process creation is the dominant cost in this hook (a single pre-push
+      # run executes ~359 commands), so that loop alone measured ~5.5 s of the
+      # ~25 s pre-push on the reference 100-line fixture.
+      #
+      # The file is read ONCE and the same per-keyword arithmetic runs with bash
+      # builtins, which forks nothing. This is deliberately NOT a single
+      # `grep -oE 'a|b|c'`: that form counts each keyword's matches once, while
+      # the loop double-counts overlaps ("vi.mockResolvedValue" matches both
+      # `vi.mock` and `mockResolvedValue`). Switching to one alternation would
+      # silently LOWER the density and weaken Gate M2. Equivalence with the old
+      # loop was verified on 40 real test files plus overlap/edge fixtures (0
+      # mismatches).
+      local _mock_content _mock_kw _mock_rest _mock_c
+      _mock_content="$(cat "$test_file" 2>/dev/null)" || _mock_content=""
       MOCK_COUNT=0
-      for kw in 'jest\.mock' 'vi\.mock' 'jest\.spyOn' 'vi\.spyOn' 'jest\.fn' 'vi\.fn' \
-                'mockResolvedValue' 'mockRejectedValue' 'mockReturnValue' 'mockImplementation' \
-                'createMock' 'mockReset' 'mockClear' 'mockRestore' 'MagicMock' 'unittest\.mock' \
-                '\.patch(' 'gomock' 'mockgen' '.EXPECT()'; do
-        c=$(grep -o "$kw" "$test_file" 2>/dev/null | wc -l || true)
-        c=${c//[^0-9]/}
-        c=${c:-0}
-        MOCK_COUNT=$((MOCK_COUNT + c))
+      for _mock_kw in "jest.mock" "vi.mock" "jest.spyOn" "vi.spyOn" "jest.fn" "vi.fn" \
+                      "mockResolvedValue" "mockRejectedValue" "mockReturnValue" \
+                      "mockImplementation" "createMock" "mockReset" "mockClear" \
+                      "mockRestore" "MagicMock" "unittest.mock" ".patch(" "gomock" \
+                      "mockgen" ".EXPECT()"; do
+        _mock_rest="$_mock_content"
+        _mock_c=0
+        while :; do
+          case "$_mock_rest" in
+            *"$_mock_kw"*) _mock_c=$((_mock_c + 1)); _mock_rest="${_mock_rest#*"$_mock_kw"}" ;;
+            *) break ;;
+          esac
+        done
+        MOCK_COUNT=$((MOCK_COUNT + _mock_c))
       done
 
       # Count total non-empty, non-comment lines for density denominator

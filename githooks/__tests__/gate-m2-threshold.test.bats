@@ -53,6 +53,13 @@ MOCK
   chmod +x .git/hooks/pre-push
   mkdir -p .git/hooks/lib
   cp "$SOURCE_GITHOOKS/lib/validate-code-walkthrough.cjs" .git/hooks/lib/validate-code-walkthrough.cjs
+  # #569/#580: the pre-push journal needs the scorer, and its absence is
+  # fail-CLOSED (pre-push `return 1`). Without this copy every case in THIS file
+  # hit "❌ Gate M journal: prepush-score.py not found" — and because pre-push
+  # still exits 0 there, every assertion passed while the journal had produced
+  # nothing. Measured without the copy: the failure text appears and
+  # `status -eq 0` still holds, so the suite reported coverage it did not have.
+  cp "$SOURCE_GITHOOKS/lib/prepush-score.py" .git/hooks/lib/prepush-score.py 2>/dev/null || true
   # adapter-common.sh is sourced by pre-push at Gate M
   cp "$SOURCE_GITHOOKS/adapter-common.sh" .git/hooks/adapter-common.sh 2>/dev/null || true
   cp "$SOURCE_GITHOOKS/hook-module-resolution.sh" .git/hooks/hook-module-resolution.sh 2>/dev/null || true
