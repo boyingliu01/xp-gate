@@ -2252,47 +2252,95 @@ else
       ;;
 
     *)
-      # Route to appropriate adapter for other languages
+      # Route to appropriate adapter for other languages.
+      #
+      # #776: this arm used to PRINT findings and then leave GATE_1_STATUS
+      # untouched. An adapter returning 1 -- "I ran and found violations" -- got
+      # one cosmetic "may be non-blocking" line, then `⏭️ SKIPPED ... (tools
+      # unavailable or failed)`, and the gate ended PASS. Every language without
+      # its own arm above (C#, C/C++, Objective-C, Swift, Kotlin, Go, Python,
+      # Dart, Flutter) was therefore fail-open, and the java/powershell arms' one
+      # hard-won verdict protocol (#507 S1, #547, #717) was reachable by exactly
+      # two languages.
+      #
+      # Why that matters for adoption, measured in a real project: a net8.0
+      # project with TreatWarningsAsErrors=true + WarningLevel=9999 whose
+      # `dotnet format --verify-no-changes` FAILED produced the three lines above
+      # and a PASS. The project's own build.sh hard-failed on the identical tree,
+      # so the gate was strictly weaker than the compiler it was meant to
+      # institutionalise -- the exact opposite of the purpose of a shared gate.
+      #
+      # The protocol now applies here verbatim, per adapter verdict:
+      #   0 = PASS   1 = BLOCK (ran, found problems)   2 = BLOCK (could not
+      #   execute, fail-closed)   3 = WARN (skipped for a stated reason, stays in
+      #   the scoring denominator so an unmeasured language is visible).
+      #
+      # Two mechanics are load-bearing and copied together, because either one
+      # alone is a defect:
+      #   - The verdict is captured into a variable, NOT read from `cmd | head`.
+      #     #706 fixed `$?` becoming head's status; the java arm documents the
+      #     remaining trap: a long report makes the writer die of SIGPIPE, so the
+      #     verdict would depend on how much output happened to be produced. The
+      #     `|| G1R_EXIT=$?` form (not a bare assignment) keeps a non-zero verdict
+      #     from aborting the host hook under set -e before it is mapped.
+      #   - Reasons cross the command-substitution subshell as `XP_G1_REASON:`
+      #     stdout lines, since an `export` in the adapter can never reach this
+      #     process (#507 Delphi round-1 B-MAJOR-1).
       ADAPTER_FILE=$(resolve_adapter_path "$CURRENT_LANG")
       if [ -n "$ADAPTER_FILE" ] && source "$ADAPTER_FILE" 2>/dev/null; then
         echo "Running static analysis for $CURRENT_LANG..."
-        # (#706) Capture the ADAPTER's verdict, not `head`'s.
-        #
-        # `run_static_analysis | head -30` makes `$?` the exit status of `head`,
-        # which is 0 whenever it manages to read anything -- so ANALYSIS_EXIT was
-        # always 0 and the "tools unavailable or failed" branch below was dead
-        # code. Measured: an adapter returning 1 through this pipe still produced
-        # PASSED. PIPESTATUS[0] carries the adapter's real status.
-        run_static_analysis | head -30 2>/dev/null
-        ANALYSIS_EXIT=${PIPESTATUS[0]}
-        if [ "$ANALYSIS_EXIT" -ne 0 ]; then
-          echo "⚠️  Static analysis had issues (may be non-blocking)"
+        G1A_OUTPUT=""
+        G1A_EXIT=0
+        G1A_OUTPUT=$(run_static_analysis 2>&1) || G1A_EXIT=$?
+        G1A_REASON=$(printf '%s\n' "$G1A_OUTPUT" | sed -n 's/^XP_G1_REASON: //p' | head -1)
+        if [ -n "$G1A_REASON" ]; then
+          G1A_OUTPUT=$(printf '%s\n' "$G1A_OUTPUT" | grep -v '^XP_G1_REASON: ')
         fi
+        [ -n "$G1A_OUTPUT" ] && printf '%s\n' "$G1A_OUTPUT" | head -30
 
         echo "Running lint check for $CURRENT_LANG..."
-        run_lint | head -30 2>/dev/null
-        LINT_EXIT=${PIPESTATUS[0]}
-        if [ "$LINT_EXIT" -ne 0 ]; then
-          echo "ℹ️  Lint check had issues (may be non-blocking)"
-        fi
+        G1L_OUTPUT=""
+        G1L_EXIT=0
+        G1L_OUTPUT=$(run_lint 2>&1) || G1L_EXIT=$?
+        [ -n "$G1L_OUTPUT" ] && printf '%s\n' "$G1L_OUTPUT" | head -30
 
-        # #717: rc=2 is the adapters' "could not execute" channel (no toolchain,
-        # or a tool that refused to start), distinct from rc=1 "ran and found
-        # problems". Collapsing both into one SKIPPED line -- as this branch did
-        # -- makes a permanently-broken analyzer indistinguishable from a clean
-        # one, which is the silent-failure shape #717 is about. The gate still
-        # does not block (tool-missing must not block), but the reason is now
-        # named in the log instead of implied.
-        if [ "$ANALYSIS_EXIT" -eq 2 ] || [ "$LINT_EXIT" -eq 2 ]; then
-          echo "⏭️  SKIPPED - Code quality (${CURRENT_LANG} toolchain could not execute — NOT a pass)"
-        fi
+        # The stricter of the two verdicts wins. Note 3 (WARN) must not mask a 1
+        # or 2 from the other command: a clean formatter plus a failing analyzer
+        # is still a failing source tree.
+        case "${G1L_EXIT}" in
+          1|2) G1_VERDICT="$G1L_EXIT" ;;
+          *)   G1_VERDICT="$G1A_EXIT" ;;
+        esac
 
-        if [ "$ANALYSIS_EXIT" -eq 0 ] && [ "$LINT_EXIT" -eq 0 ]; then
-          echo "✅ PASSED - Language-specific code quality checks."
-        else
-          # Tools unavailable or failed — skip non-blockingly
-          echo "⏭️  SKIPPED - Code quality (tools unavailable or failed)"
-        fi
+        case "$G1_VERDICT" in
+          0)
+            echo "✅ PASSED - Language-specific code quality checks."
+            ;;
+          1)
+            echo "❌ BLOCKED - ${CURRENT_LANG} code quality violations (fix or add suppressions)"
+            GATE_1_STATUS="BLOCK"
+            GATE_1_DETAIL="${CURRENT_LANG}: analyzer findings"
+            exit 1
+            ;;
+          2)
+            echo "❌ BLOCKED - ${CURRENT_LANG} static analysis unusable (fail-closed): ${G1A_REASON:-toolchain could not execute}"
+            echo "   A tool that could not run is not a clean tree. Install the toolchain,"
+            echo "   or set the adapter's documented escape valve if you accept the risk."
+            GATE_1_STATUS="BLOCK"
+            GATE_1_DETAIL="${CURRENT_LANG}: ${G1A_REASON:-unusable}"
+            exit 1
+            ;;
+          3)
+            echo "⚠️  WARN - ${CURRENT_LANG} code quality NOT verified: ${G1A_REASON:-adapter reported a non-blocking skip}"
+            GATE_1_STATUS="WARN"
+            GATE_1_DETAIL="${CURRENT_LANG}: ${G1A_REASON:-unavailable (warn)}"
+            ;;
+          *)
+            echo "⚠️  WARN - ${CURRENT_LANG} code quality NOT verified (unexpected verdict $G1_VERDICT)"
+            GATE_1_STATUS="WARN"
+            GATE_1_DETAIL="${CURRENT_LANG}: unexpected verdict $G1_VERDICT"
+            ;;
+        esac
       else
         # If no adapter exists for this language, skip
         echo "ℹ️  No specific adapter for $CURRENT_LANG — using generic checks if any"
@@ -3042,7 +3090,13 @@ else
   # or similar non-code files, skip the test run entirely.
   # Gate 5a (new file pairing) and 5b (mock density) are cheap and still run.
   # ============================================================================
-  CODE_EXTENSIONS="\.(ts|tsx|js|jsx|py|go|java|kt|kts|cpp|cc|cxx|c|swift|m|mm|dart|sh|ps1)$"
+  # #763: `cs`/`csx` were missing from this list, so a commit touching ONLY C#
+  # files produced an empty CHANGED_CODE_FILES and took the "no code files
+  # changed" early skip below -- the full test suite never ran, and the absence
+  # of a test result was reported as the absence of a need for one. The
+  # Principles extensions list got `.cs` in ac214d38; this one was left behind,
+  # which is why the C# arm looked like it worked while Gate 5 stood down.
+  CODE_EXTENSIONS="\.(ts|tsx|js|jsx|mjs|cjs|py|go|java|kt|kts|cs|csx|cpp|cc|cxx|c|h|hpp|swift|m|mm|dart|sh|ps1)$"
   CHANGED_CODE_FILES=$(echo "$CHANGED_FILES" | grep -E "$CODE_EXTENSIONS" || true)
   if [ -z "$CHANGED_CODE_FILES" ]; then
     # #554: this branch DID stand down deliberately, but "PASS" is a claim that
@@ -3131,6 +3185,7 @@ else
               handle_test_failure "$TESTS_OUTPUT" "full test suite" || exit 1
             else
               echo "✅ PASSED - Full test suite passed (with coverage)."
+              TESTS_RAN_ANY=true
             fi
           elif [ "$CHANGED_TEST_FILE_COUNT" -gt 0 ] 2>/dev/null; then
             # Run only changed test files with coverage
@@ -3148,6 +3203,7 @@ else
               handle_test_failure "$TESTS_OUTPUT" "changed test files" || exit 1
             else
               echo "✅ PASSED - Changed test files passed (with coverage)."
+              TESTS_RAN_ANY=true
             fi
           elif [ "$CHANGED_SRC_COUNT" -gt 0 ] 2>/dev/null; then
             # Source files changed but no test files → find related tests or run full
@@ -3190,6 +3246,7 @@ else
                 handle_test_failure "$TESTS_OUTPUT" "related test files" || exit 1
               else
                 echo "✅ PASSED - Related test files passed (with coverage)."
+                TESTS_RAN_ANY=true
               fi
             else
               # No related tests found → full run is safest
@@ -3201,6 +3258,7 @@ else
                 handle_test_failure "$TESTS_OUTPUT" "full test suite" || exit 1
               else
                 echo "✅ PASSED - Full test suite passed (with coverage)."
+                TESTS_RAN_ANY=true
               fi
             fi
           else
@@ -3254,6 +3312,9 @@ else
             fi
           else
             echo "✅ PASSED - Unit tests passed."
+            # #760: a runner really executed for this language, so the coverage
+            # guard below must not treat this pass as "nothing was measured".
+            TESTS_RAN_ANY=true
           fi
         fi
       fi
@@ -3268,7 +3329,25 @@ else
   fi  # End: if [ -n "$CHANGED_CODE_FILES" ] (Issue #312 early skip)
    
   # Next, run coverage check (skip if tests were skipped — Issue #312)
-  if [ "${TESTS_SKIPPED:-false}" = "true" ]; then
+  #
+  # #760: TESTS_SKIPPED is one global flag written inside the per-language test
+  # loop, but it is read HERE, outside that loop. A project that resolves to
+  # several languages therefore had its coverage check cancelled by whichever
+  # language stood down first -- and the loop order is the detection order, not
+  # a statement about which language matters.
+  #
+  # Measured on a real repo (.xp-gate-config.json -> typescript, shell, csharp):
+  # the typescript arm found no changed .ts file, set TESTS_SKIPPED=true, and the
+  # csharp arm's dotnet test result (139 passing, full coverage data present) was
+  # then discarded with "Test run was skipped — skipping coverage check". Gate 5
+  # reported a PASS on a coverage floor it never evaluated.
+  #
+  # The flag now only speaks for language selection that produced nothing at all:
+  # if any language actually RAN tests, coverage is evaluated for every language
+  # that has an adapter. Languages that ran nothing fall through to their own
+  # adapter's coverage branch, which already distinguishes "no evidence" (a
+  # documented failure) from "not applicable" (iac).
+  if [ "${TESTS_SKIPPED:-false}" = "true" ] && [ "${TESTS_RAN_ANY:-false}" != "true" ]; then
     echo "ℹ️  Test run was skipped — skipping coverage check."
   else
   echo "Running coverage check..."
@@ -3907,6 +3986,52 @@ else
           COVERAGE_PERCENT=$(grep -oP 'SF:.*' coverage/lcov.info 2>/dev/null | wc -l || echo "0")
           # Simple fallback: check lcov for coverage percentage
           COVERAGE_PERCENT=$(grep -oP 'coverage: \K[0-9]+%' coverage/lcov.info 2>/dev/null | head -1 | tr -d '%') || COVERAGE_PERCENT=""
+        fi
+      else
+        # #768: Cobertura is what the .NET/C# and several JVM toolchains actually
+        # emit -- `dotnet test --collect:"XPlat Code Coverage"` writes ONE
+        # cobertura XML per test target under TestResults/<guid>/coverage.cobertura.xml,
+        # never coverage-summary.json or lcov.info. This branch only knew the two
+        # JS-oriented filenames, so a C# project with full coverage data fell into
+        # "Could not determine coverage percentage" and was BLOCKED with an
+        # instruction to "produce coverage data" it had already produced.
+        #
+        # Discovery order: the conventional root file first, then the newest
+        # TestResults artifact, so both `coverlet`'s default layout and a
+        # hand-placed report work. Newest-first matters because TestResults
+        # accumulates one directory per run and an old report must not win.
+        _cob_file=""
+        for _candidate in coverage/cobertura.xml coverage.cobertura.xml coverage/coverage.cobertura.xml; do
+          if [ -f "$_candidate" ]; then _cob_file="$_candidate"; break; fi
+        done
+        if [ -z "$_cob_file" ]; then
+          _cob_file=$(find . -name 'coverage.cobertura.xml' \
+            -path '*TestResults*' -not -path './.git/*' 2>/dev/null \
+            | while IFS= read -r _f; do printf '%s\t%s\n' "$(stat -c %Y "$_f" 2>/dev/null || stat -f %m "$_f" 2>/dev/null || echo 0)" "$_f"; done \
+            | sort -rn | head -1 | cut -f2-)
+        fi
+        if [ -n "$_cob_file" ] && [ -f "$_cob_file" ]; then
+          # Cobertura's root <coverage line-rate="..."> is the fraction covered
+          # (0..1) and is authoritative; summing per-class lines double-counts.
+          # A report that exists but has no parseable line-rate is `parse_error`,
+          # which the caller treats as "no evidence" rather than 0% -- 0% would
+          # be a *measured* value and block with the wrong reason.
+          COVERAGE_PERCENT=$(node -e "
+            try {
+              const fs = require('fs');
+              const xml = fs.readFileSync(process.argv[1], 'utf8');
+              const root = xml.match(/<coverage\b[^>]*>/);
+              if (!root) { console.log('parse_error'); process.exit(0); }
+              const rate = root[0].match(/line-rate\s*=\s*[\"']([0-9.]+)[\"']/);
+              if (!rate) { console.log('parse_error'); process.exit(0); }
+              const value = Number(rate[1]);
+              if (!Number.isFinite(value) || value < 0 || value > 1) { console.log('parse_error'); process.exit(0); }
+              console.log(Math.round(value * 100));
+            } catch (e) { console.log('parse_error'); }
+          " "$_cob_file" 2>/dev/null) || COVERAGE_PERCENT=""
+          if [ -n "$COVERAGE_PERCENT" ] && [ "$COVERAGE_PERCENT" != "parse_error" ]; then
+            echo "   (coverage source: $_cob_file)"
+          fi
         fi
       fi
       # #579: `-ge 0`, not `-gt 0`. A measured 0% is DATA -- coverage.py ran and
