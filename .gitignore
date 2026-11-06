@@ -215,3 +215,8 @@ tsconfig.tsbuildinfo
 .qoder/agents/
 # xp-gate: per-language adapter copies installed into this project
 githooks/csharp.sh
+
+# Local agent scratch files (never commit)
+.tmp-key
+.tmp-review/
+.agent-tmp/

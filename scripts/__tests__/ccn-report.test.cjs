@@ -521,4 +521,73 @@ describe('ccn-report (per-file trustworthy measurement)', () => {
       }
     });
   });
+
+  /**
+   * Issue #737 — "no evidence" must never be reported as "clean tree".
+   *
+   * A scan over zero files yields every bucket at 0, which reads identically to a
+   * debt-free codebase, and the process used to exit 0. Two paths reached it:
+   * a mistyped --root, and a root that exists but holds no matching sources.
+   * Both are only fatal when the root was named EXPLICITLY — the default root is
+   * the cwd, and callers legitimately run this from a directory with no sources.
+   *
+   * These run the real CLI as a subprocess because the defect lived in the exit
+   * status, which no in-process assertion would have caught.
+   */
+  describe('an explicit root that yields nothing is a failure, not a clean tree (#737)', () => {
+    const runCli = (args) =>
+      spawnSync(process.execPath, [reportPath, ...args], { encoding: 'utf8' });
+
+    it('exits 2 for a nonexistent --root and says so', () => {
+      const dir = path.join(os.tmpdir(), `ccn-no-such-root-${process.pid}-${Date.now()}`);
+      const r = runCli(['--root', dir]);
+      expect(r.status).toBe(2);
+      expect(r.stderr).toMatch(/scan root does not exist or is not a directory/);
+      // The dangerous old shape: a zeroed table printed as if it were a verdict.
+      expect(r.stdout).not.toMatch(/files scanned:\s+0/);
+    });
+
+    it('exits 2 for an --root with no source files and says so', () => {
+      const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'ccn-empty-root-'));
+      try {
+        fs.writeFileSync(path.join(dir, 'notes.txt'), 'not source');
+        const r = runCli(['--root', dir]);
+        expect(r.status).toBe(2);
+        expect(r.stderr).toMatch(/contains no source files/);
+      } finally {
+        fs.rmSync(dir, { recursive: true, force: true });
+      }
+    });
+
+    it('still succeeds on the default root, which may legitimately hold sources', () => {
+      // No --root: the cwd has sources, so this must stay exit 0. This is the
+      // control proving the new check did not simply make every run fail.
+      const r = spawnSync(process.execPath, [reportPath], {
+        encoding: 'utf8',
+        cwd: path.resolve(__dirname, '..', '..'),
+      });
+      expect(r.status).toBe(0);
+      expect(r.stdout).toMatch(/files scanned:\s+[1-9]/);
+    });
+
+    it('does NOT fail when the DEFAULT root holds no sources', () => {
+      // The other half of the control, and the bug a mutation exposed: widening
+      // the zero-files guard to fire unconditionally (`if (files.length === 0)`
+      // instead of gating it on `rootExplicit`) survived every other case,
+      // because they all pass --root. Running with no --root from a directory
+      // that holds no sources is legitimate — a tools/ subdir, a CI step that
+      // only wants `--check` against a baseline — so making it fatal would break
+      // real callers while every test above stayed green.
+      //
+      // Empty on purpose: the point is that nothing is there to scan.
+      const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'ccn-default-empty-'));
+      try {
+        const r = spawnSync(process.execPath, [reportPath], { encoding: 'utf8', cwd: dir });
+        expect(r.status).toBe(0);
+        expect(r.stderr).not.toMatch(/contains no source files/);
+      } finally {
+        fs.rmSync(dir, { recursive: true, force: true });
+      }
+    });
+  });
 });

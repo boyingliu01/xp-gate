@@ -3,6 +3,7 @@ import { promisify } from 'util';
 import * as fs from 'fs/promises';
 import * as fsNative from 'fs';
 import path from 'path';
+import { maskTextQuotes } from './quote-masker';
 import { fileURLToPath } from 'url';
 import type {
   CheckResult,
@@ -209,16 +210,35 @@ export async function runTscCheck(
  *   import('./foo')
  *   export { x } from './foo'
  *   export * from './foo'
+ *
+ * Import TEXT inside a string, template literal or comment is not an import and
+ * must not be reported (issue #759). Projects legitimately contain such text — a
+ * test pinning a scanner's own behaviour, a doc block showing the syntax, a
+ * parser fixture — and before this was handled, the regexes below matched them
+ * and reported violations for paths that never existed.
  */
 export function extractImports(content: string): Array<{ path: string; line: number }> {
   const results: Array<{ path: string; line: number }> = [];
-  const lines = content.split('\n');
   const push = (path: string, line: number) => { results.push({ path, line }); };
 
   const staticImportExportRe =
     /(?:import|export)\s+(?:(?:[^'"]*?\s+from\s+)?['"]([^'"]+)['"]|['"]([^'"]+)['"])/g;
   const requireRe = /require\(\s*['"]([^'"]+)['"]\s*\)/g;
-  const dynamicImportRe = /(?<!\w)import\(\s*['"]([^'"]+)['"]\s*\)/g;
+  const dynamicImportRe = /(?<!\w)import\s*\(\s*['"]([^'"]+)['"]\s*\)/g;
+
+  // The scanner runs over a version of the source in which every quote that is
+  // NOT a code-level delimiter has been replaced by a sentinel. Length and line
+  // breaks are preserved, so the line numbers reported below stay truthful.
+  //
+  // The distinction that matters is not "inside a string" but "is this quote a
+  // delimiter". A real import's path quotes are code-level (depth 0) and must
+  // stay visible — the path is the thing we extract. A quote nested inside an
+  // outer string is text and must not be. Framing it as nesting depth rather
+  // than as "mask all string content" is what keeps `import x from './bar'`
+  // working while `const s = "import x from './bar'"` is ignored.
+  const scanSource = maskTextQuotes(content);
+  const lines = scanSource.split('\n');
+  const originalLines = content.split('\n');
 
   // LINE-major order is the contract (import-resolver.test pins it): one pass
   // over the lines, three patterns per line in static → require → dynamic
@@ -226,18 +246,116 @@ export function extractImports(content: string): Array<{ path: string; line: num
   // pattern-major passes; a line containing both a require and an import
   // would then swap positions.
   for (let i = 0; i < lines.length; i++) {
-    const line = lines[i];
-    // Skip comment lines (// or leading * in JSDoc blocks)
-    const trimmed = line.trim();
-    if (trimmed.startsWith('//') || trimmed.startsWith('*') || trimmed.startsWith('/*')) {
+    // Scan unless everything on the line is comment; see
+    // `hasCodeAfterLeadingComment` for why a raw-prefix test was not enough.
+    if (!hasCodeAfterLeadingComment(originalLines[i])) {
       continue;
     }
-    scanLine(line, i + 1, staticImportExportRe, (m) => m[1] ?? m[2], push);
-    scanLine(line, i + 1, requireRe, (m) => m[1], push);
-    scanLine(line, i + 1, dynamicImportRe, (m) => m[1], push);
+    i += scanImportAt(lines, i, { staticImportExportRe, requireRe, dynamicImportRe }, push);
   }
 
   return results;
+}
+
+/** The three patterns, grouped so the per-line scanner takes one argument. */
+interface ImportPatterns {
+  staticImportExportRe: RegExp;
+  requireRe: RegExp;
+  dynamicImportRe: RegExp;
+}
+
+/**
+ * Scan one line for imports and return how many FOLLOWING lines it consumed.
+ *
+ * Returns 0 for the ordinary single-line case and >0 when the line opens a
+ * static statement whose path sits further down, which the caller adds to its
+ * cursor. Extracted from `extractImports` to stay under Gate 4's 50-line limit.
+ */
+function scanImportAt(
+  lines: string[],
+  i: number,
+  patterns: ImportPatterns,
+  push: (path: string, line: number) => void,
+): number {
+  const line = lines[i];
+  scanLine(line, i + 1, patterns.requireRe, (m) => m[1], push);
+  scanLine(line, i + 1, patterns.dynamicImportRe, (m) => m[1], push);
+  // A static import that fits on ONE line is scanned in place, so the common
+  // case reports the import's own line. Only a line that OPENS a statement
+  // whose path sits further down needs joining:
+  // `import {\n  foo,\n} from './bar';` is ordinary formatting, and a per-line
+  // pattern misses it entirely (measured: `[]` before this).
+  const statement = joinImportStatement(lines, i);
+  if (!statement) {
+    scanLine(line, i + 1, patterns.staticImportExportRe, (m) => m[1] ?? m[2], push);
+    return 0;
+  }
+  scanLine(statement.text, i + 1, patterns.staticImportExportRe, (m) => m[1] ?? m[2], push);
+  // Skip the continuation lines: they hold no import of their own, and
+  // re-scanning them would let the static pattern match a fragment and report
+  // the import twice at the wrong line.
+  return statement.consumed;
+}
+
+/**
+ * Assemble a multi-line `import`/`export ... from '...'` statement starting at
+ * `start`, or return null when that line does not open one.
+ *
+ * Returns the joined text and how many FOLLOWING lines were consumed, so the
+ * caller can advance past them. The joining character is a space, which keeps
+ * `from` adjacent to its quotes without disturbing `['"]` matching; the text is
+ * only used for matching, never for the reported line number, so collapsing
+ * newlines cannot shift a position that is reported.
+ */
+function joinImportStatement(
+  lines: string[],
+  start: number,
+): { text: string; consumed: number } | null {
+  const first = lines[start];
+  // Only a line that BEGINS a static import/export can open a statement, and
+  // only a statement without its path yet needs joining.
+  if (!/^\s*(?:import|export)\b/.test(first)) return null;
+  if (/\bfrom\s*['"]|^\s*(?:import|export)\s*['"]/.test(first)) return null; // already complete
+  const parts: string[] = [first];
+  for (let k = start + 1; k < lines.length && parts.length <= 40; k++) {
+    parts.push(lines[k]);
+    if (/\bfrom\s*['"]|^\s*(?:import|export)\s*['"]/.test(lines[k])) {
+      return { text: parts.join(' '), consumed: k - start };
+    }
+  }
+  return null; // not a statement after all (or absurdly long): leave it alone
+}
+
+/**
+ * Does any CODE follow the comment that starts this line?
+ *
+ * Returns true when the line does not start with a comment at all, so callers
+ * can treat it as the single "should this line be scanned?" question. Only
+ * three prefixes can begin a comment line and each closes in exactly one way,
+ * so this needs no lexer — the masker has already established that the line is
+ * not inside a literal or template.
+ *
+ * Skipping on the raw prefix alone was a real MISS: `/* eslint-disable *&#47;
+ * import real from './real';` starts with `/*`, so the whole line was dropped
+ * and the genuine import on it was never checked — the one direction a
+ * compliance gate must not fail in. Measured before this fix: `[]`.
+ *
+ *   `//...`      -> nothing can follow on the same line
+ *   `/* ... *&#47;`  -> whatever follows the first `*&#47;` is code
+ *   `* ...`      -> a JSDoc continuation; `*&#47;` ends it, else nothing follows
+ */
+function hasCodeAfterLeadingComment(originalLine: string): boolean {
+  const trimmed = originalLine.trim();
+  if (trimmed.startsWith('//')) return false; // nothing can follow on this line
+  if (trimmed.startsWith('/*') || trimmed.startsWith('*')) {
+    // A `/*` opener and a JSDoc `*` continuation both end at the first `*/`.
+    const close = trimmed.indexOf('*/');
+    // An unterminated block comment runs to the end of the file: no code here.
+    if (close === -1) return false;
+    const rest = trimmed.slice(close + 2).trim();
+    return rest.length > 0 && !rest.startsWith('//');
+  }
+  return true;
 }
 
 /** Apply one pattern to a single line; every relative hit is pushed with its line number. */
