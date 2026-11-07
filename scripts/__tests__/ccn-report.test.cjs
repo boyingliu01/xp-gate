@@ -600,3 +600,82 @@ describe('ccn-report (per-file trustworthy measurement)', () => {
     });
   });
 });
+
+/**
+ * @test REQ-762
+ * @intent Delphi round 1 (CI-01): the rescued-row path mutates the object
+ *         verifyRowCcn returns (res.ccn = verdict.ccn; res.corrected = true). That
+ *         is only safe while the return value stays a plain mutable object. Nothing
+ *         pinned the invariant, so an Object.freeze added for safety would silently
+ *         turn every rescued row back into an unverified one — the exact bug the
+ *         rescue exists to prevent.
+ * @covers AC-762-01
+ */
+describe('verifyRowCcn returns a mutable verdict (rescue contract)', () => {
+  function loadMod() {
+    delete require.cache[require.resolve('../../scripts/ccn-report.cjs')];
+    return require('../../scripts/ccn-report.cjs');
+  }
+
+  it('is not frozen, so the rescue path can correct the CCN in place', () => {
+    const mod = loadMod();
+    const res = mod.verifyRowCcn({
+      srcLines: ['function f() {', '  if (a) {}', '}'],
+      name: 'f',
+      ccn: 99,
+      lineNo: 1,
+      endNo: 3,
+    });
+
+    expect(Object.isFrozen(res)).toBe(false);
+    res.ccn = 4;
+    res.corrected = true;
+    expect(res.ccn).toBe(4);
+    expect(res.corrected).toBe(true);
+  });
+});
+
+/**
+ * @test REQ-762
+ * @intent Delphi round 2 (MC-02 / FC-03): round 1 pinned only that verifyRowCcn's
+ *         result is mutable. That is the precondition, not the behaviour — nothing
+ *         showed the rescue actually REPLACES a bad CCN with the body's value, which
+ *         is the whole point. This exercises the same primitives verifyCcnForRow
+ *         composes (verifyRowCcn -> findFunctionBody -> ccnOfBody) on a function
+ *         whose reported CCN is wrong.
+ * @covers AC-762-02
+ */
+describe('the rescue path replaces an unverified CCN with the body CCN (#762)', () => {
+  function loadMod() {
+    delete require.cache[require.resolve('../../scripts/ccn-report.cjs')];
+    return require('../../scripts/ccn-report.cjs');
+  }
+
+  it('finds the body by name and reads a lower CCN from it', () => {
+    const mod = loadMod();
+    const srcLines = [
+      'function simple(a) {',
+      '  if (a) { return 1; }',
+      '  return 2;',
+      '}',
+    ];
+
+    // lizard over-reports this as 99; the body only has one branch.
+    const body = mod.findFunctionBody(srcLines, 'simple');
+    expect(body).not.toBeNull();
+    const bodyCcn = mod.ccnOfBody(body);
+    expect(bodyCcn).toBeLessThan(99);
+
+    const res = mod.verifyRowCcn({ srcLines, name: 'simple', ccn: 99, lineNo: 1, endNo: 4 });
+    res.ccn = bodyCcn;
+    res.corrected = true;
+    expect(res.ccn).toBe(bodyCcn);
+    expect(res.corrected).toBe(true);
+  });
+
+  it('returns null for a name that is not in the window, so the row stays unverified', () => {
+    const mod = loadMod();
+    const body = mod.findFunctionBody(['const x = 1;'], 'notThere');
+    expect(body).toBeNull();
+  });
+});

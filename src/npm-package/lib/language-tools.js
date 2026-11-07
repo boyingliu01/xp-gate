@@ -324,22 +324,14 @@ const LANGUAGE_REGISTRY = {
           win32: 'winget install Microsoft.DotNet.SDK.8',
         },
         optional: false,
-        gates: ['Gate 1 (Code Quality)', 'Gate 5 (Tests)', 'Gate 13 (Compiler Strictness)'],
+        gates: ['Gate 1 (Code Quality)', 'Gate 5 (Tests + Coverage)', 'Gate 13 (Compiler Strictness)'],
       },
-      {
-        // Coverage collection rides on the SDK's built-in coverlet integration
-        // (`--collect:"XPlat Code Coverage"`); no separate install is required, so it
-        // is reported as detected-by-project rather than advertised as a missing tool.
-        name: 'coverlet',
-        detectBy: 'csproj-package-reference',
-        install: {
-          darwin: 'add PackageReference coverlet.collector to the test .csproj',
-          linux: 'add PackageReference coverlet.collector to the test .csproj',
-          win32: 'add PackageReference coverlet.collector to the test .csproj',
-        },
-        optional: true,
-        gates: ['Gate 5 (Coverage)'],
-      },
+      // No second C# entry for coverage. `dotnet test --collect` supplies it, and
+      // the only project-provided detector this module implements is
+      // `detectBy: 'build-file'`, which reads ARCH_DEPENDENCY_COORDINATES — a table
+      // with no C# entry. Listing coverlet under a detectBy value nothing consumes
+      // would make check-tools probe a tool with no checkCmd and report a
+      // permanently-missing entry for a dependency that is already satisfied.
     ],
   },
 
