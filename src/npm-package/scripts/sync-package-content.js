@@ -393,7 +393,13 @@ function checkPrePushDrift(prePushPath, readmePath) {
     return true;
   }
 
-  const readmeGates = extractReadmeGateNumbers(readmeContent, /\| Gate (M\d*) \|/g);
+  // The README labels a gate either as `| Gate M2 |` or with a descriptive
+  // suffix as `| Gate M2 (Mock Density) |`, and the suffixed form is what this
+  // table actually uses. A pattern anchored to `| Gate M2 |` matched NONE of
+  // the suffixed rows, so a gate documented on its own README line read as
+  // "in script but NOT in README" — the guard failed on a correct table.
+  // The optional suffix accepts both spellings.
+  const readmeGates = extractReadmeGateNumbers(readmeContent, /\| Gate (M\d*)(?: [^|]*)?\|/g);
 
   if (scriptGates.size > 0 && readmeGates.size > 0) {
     const { scriptOnly, readmeOnly } = compareGateSets(scriptGates, readmeGates, 'Pre-push');
@@ -559,5 +565,5 @@ if (require.main === module) {
   // Requiring this script must not mutate the work tree: a test that only wants
   // checkDocsDrift/checkAdapterDrift used to trigger a full mirror sync at
   // require-time, which vitest-worktree-guard rightly reported as pollution.
-  module.exports = { checkDocsDrift, checkAdapterDrift };
+  module.exports = { checkDocsDrift, checkAdapterDrift, checkPrePushDrift, checkPreCommitDrift };
 }

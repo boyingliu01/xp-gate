@@ -5340,3 +5340,23 @@ specification:
             受保护分支上拒绝使用该选择器；生效中的选择必须打印可见的 PARTIAL GATE RUN
             横幅。
           test_type: integration
+
+    # ============================================================
+    # REQ-776-DRIFT: pre-push 门禁表漂移守卫必须认得带后缀的单元格
+    # 注：#776 已被 Gate 1 判定协议占用，本条目以 -DRIFT 后缀区分。
+    # ============================================================
+    - id: REQ-776-DRIFT
+      description: >-
+        sync-package-content.js 的漂移守卫从 githooks/pre-push 里抓 GATE Mx 字样，
+        再与 README 表格比对。README 把 Gate M2 写成「| Gate M2 (Mock Density) |」，
+        而守卫的正则要求「| Gate M2 |」，于是这一行永远匹配不到，M2 被判为
+        「脚本有、文档没有」——守卫在一张正确的表格上失败。
+      priority: high
+      acceptance_criteria:
+        - id: AC-776-01
+          criteria: >-
+            守卫必须认得带描述后缀的表格单元格（| Gate M2 (Mock Density) |）与裸写法
+            （| Gate M2 |）两种形式；真实 README 与真实 pre-push 比对必须通过；但某个
+            脚本确实运行、README 确实缺失的门禁仍必须让守卫失败——修复只能放宽识别，
+            不能关掉检查。
+          test_type: unit
