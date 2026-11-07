@@ -54,10 +54,13 @@ function fixture(spec) {
   // adapter-common.sh (githooks/pre-commit:34) and gate-3.sh (:80) live in it.
   // Without them the fixture describes a tier the hook never resolves to, and the
   // comparison silently targets a directory outside the test (#495 Round 3).
+  //
+  // The anchors go to the GLOBAL tier only. Precedence is project-first
+  // (AC-495-23), so anchoring both trees would make the repo tier execute and
+  // these global-vs-repo comparisons would have no executed counterpart left.
   const ANCHOR = '#!/bin/bash\nanchor\n';
   for (const anchor of ['adapter-common.sh', 'gate-3.sh']) {
     if (spec[anchor]) continue;
-    write(join(repoHooks, anchor), ANCHOR);
     write(join(installedAdapters, anchor), ANCHOR);
   }
 
