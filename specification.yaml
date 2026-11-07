@@ -5426,3 +5426,37 @@ specification:
             覆盖不能退化成「全局安装失效」：没有跑过 xp-gate init 的仓库（没有
             githooks/）必须继续解析到全局安装。
           test_type: unit
+
+    # ============================================================
+    # REQ-TS-GATE-STARTUP: TypeScript 门禁直调 tsx，不经 `npx -y tsx`
+    # ============================================================
+    - id: REQ-TS-GATE-STARTUP
+      title: TypeScript 门禁直接运行 tsx，且不依赖 shell
+      status: implemented
+      description: >-
+        `npx -y tsx` 每次启动都要重新解析包位置，实测 4.5-5.8s，而用当前 node
+        直接运行 tsx 的 cli.mjs 只要 0.79-0.82s——每道 TS 门禁白付约 4 秒。
+        改为直调后，用来兜底的 npx 也必须以「node 运行 npx-cli.js」的形式启动：
+        shell 在 Windows 上会因 DEP0190 的拼接转义问题产生畸形命令行，直接调
+        npx.cmd 又会被 CVE-2024-27980 之后的 node 以 EINVAL 拒绝。
+      acceptance_criteria:
+        - id: AC-TS-GATE-STARTUP-01
+          criteria: >-
+            已安装 tsx 时，门禁以当前 node 运行 tsx 的 cli.mjs，命令行不含
+            `npx -y tsx`。
+          test_type: unit
+        - id: AC-TS-GATE-STARTUP-02
+          criteria: >-
+            未安装 tsx 时回退到 npm 自己的 npx-cli.js，仍由当前 node 启动，不使用
+            shell，也不出现裸 `npx` 命令。
+          test_type: unit
+        - id: AC-TS-GATE-STARTUP-03
+          criteria: >-
+            存在 tsx/ 目录但缺少 dist/cli.mjs 的半安装状态按「未安装」处理。
+          test_type: unit
+        - id: AC-TS-GATE-STARTUP-04
+          criteria: >-
+            npx-cli.js 的定位必须同时覆盖 Node 的两种安装布局：与 node 可执行文件
+            同级的 node_modules，以及 setup-node 在 Linux 上产生的
+            lib/node_modules。只覆盖其一会让本机退化到裸 `npx`。
+          test_type: unit
