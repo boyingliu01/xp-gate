@@ -41,6 +41,23 @@ const MIRROR_PREFIX = /^src\/npm-package\//;
 const PLUGIN_BUNDLE_PREFIX = /^plugins\/[^/]+\/src\//;
 const ANOMALY_MAX_MS = 2 * 3600 * 1000; // anything above a 2h gate run is poisoned bookkeeping
 
+// A lizard row whose reported span exceeds this is not a real function extent:
+// lizard loses brace balance on some inputs and emits a span covering the rest of
+// the file. Shared by verifyRowCcn and classifyUnverifiedRow, which must agree —
+// two independent 250s drifting apart would classify the same row differently
+// depending on which path reached it.
+const SPAN_ARTEFACT_MAX_LINES = 250;
+
+// The CCN the gate blocks on, named so the classification and the FAIL message
+// cannot disagree about which rows carry a verdict.
+const CCN_BLOCK_THRESHOLD = 10;
+
+// How far below a row's reported start findFunctionBody will search for the body.
+// Must exceed SPAN_ARTEFACT_MAX_LINES: a row whose real body sits well inside the
+// span it claims has to be findable, or the rescue window and the artefact
+// threshold would disagree about the same row.
+const RESCUE_WINDOW_LINES = 400;
+
 function bucketFor(relPath) {
   const p = relPath.replace(/\\/g, '/');
   if (MIRROR_PREFIX.test(p) || PLUGIN_BUNDLE_PREFIX.test(p)) return 'mirror';
@@ -323,7 +340,7 @@ function verifyRowCcn({ srcLines, name, ccn, lineNo, endNo }) {
   let recomputed;
   if (body) {
     recomputed = ccnOfBody(srcLines.slice(body.start, body.end + 1));
-  } else if (reportedSpan > 250) {
+  } else if (reportedSpan > SPAN_ARTEFACT_MAX_LINES) {
     // Unlocatable body AND an implausibly long span: recompute over the
     // reported window rather than trust a number with a broken span.
     recomputed = ccnOfBody(srcLines.slice(startLine - 1, startLine - 1 + reportedSpan));
@@ -373,11 +390,19 @@ function classifyUnverifiedRow({ body, ccn, reportedSpan }) {
     // `res.ccn !== ccn` test collapsed those two meanings.
     return { ccn: ccnOfBody(body), corrected: true, category: 'rescued' };
   }
-  if (reportedSpan > 250) {
+  if (reportedSpan > SPAN_ARTEFACT_MAX_LINES) {
     // Unlocatable AND an implausibly long span: the known lizard brace-loss
     // artefact. Counting it as unverified would blame the code for a parser
     // defect; discarding it silently would hide a real number. Recorded as a
     // distinct, visible category.
+    //
+    // This category is OBSERVABILITY ONLY and deliberately does not fail the
+    // gate — matching the pre-refactor behaviour, where the exit condition was
+    // `unverified > 0` and the artefact counter never appeared in it. The
+    // feasibility seat read the old "the caller decides" wording as a promise the
+    // code did not keep; the honest statement is that the gate does NOT block on
+    // a parser artefact, and the count is surfaced on stderr so it cannot be
+    // mistaken for a clean run.
     return { category: 'span_artefact' };
   }
   // Only rows the GATE would act on are allowed to fail the gate. A row at or
@@ -385,7 +410,7 @@ function classifyUnverifiedRow({ body, ccn, reportedSpan }) {
   // rows for non-declarations (`String`, `clearTimeout`, anonymous callbacks)
   // that are unlocatable by construction — counting those would block every
   // commit on noise.
-  return { category: ccn > 10 ? 'unverified' : 'unverified_low' };
+  return { category: ccn > CCN_BLOCK_THRESHOLD ? 'unverified' : 'unverified_low' };
 }
 
 // Rewrite ONE `lizard --csv` row so its CCN column carries the VERIFIED value,
@@ -453,9 +478,14 @@ function intOrZero(value) {
 // the body, the row kept its unvalidated CCN and passed through as if it had
 // been verified.
 function verifyCcnForRow({ sourceLines, rowPath, name, ccn, lineNo, endNo, tally }) {
-  const res = verifyRowCcn({ srcLines: sourceLines(rowPath), name, ccn, lineNo, endNo });
+  // Read the file ONCE. Calling sourceLines(rowPath) separately for the verify and
+  // for the rescue would let the two see different text if the cache missed
+  // between the calls, so a rescue could be computed against source the verifier
+  // never saw.
+  const srcLines = sourceLines(rowPath);
+  const res = verifyRowCcn({ srcLines, name, ccn, lineNo, endNo });
   if (res.corrected) return res;
-  const body = findFunctionBody((sourceLines(rowPath) || []).slice(lineNo - 1, lineNo - 1 + 400), name);
+  const body = findFunctionBody((srcLines || []).slice(lineNo - 1, lineNo - 1 + RESCUE_WINDOW_LINES), name);
   const reportedSpan = endNo > lineNo ? endNo - lineNo + 1 : 0;
   const verdict = classifyUnverifiedRow({ body, ccn, reportedSpan });
   tally[verdict.category] += 1;
@@ -491,7 +521,7 @@ function csvRows(srcPath, root, opts = {}) {
     out.push(rewritten);
   }
   if (tally.unverified > 0 && !opts.allowUnverified) {
-    console.error(`FAIL - ${tally.unverified} function(s) above CCN 10 could not be span-verified (${srcPath}); refusing to emit unverified complexity`);
+    console.error(`FAIL - ${tally.unverified} function(s) above CCN ${CCN_BLOCK_THRESHOLD} could not be span-verified (${srcPath}); refusing to emit unverified complexity`);
     process.exit(1);
   }
   // Say what the verification actually did. These counters were incremented and
@@ -628,7 +658,7 @@ function locateBodyAtRow(lines, name, startLine) {
   // which is exact when the row starts ON a literal and merely approximate for
   // member rows — either way it beats trusting an unverified span.
   for (let k = from; k >= 0 && k >= from - DECL_LOOKBACK; k--) {
-    const span = findFunctionBody(lines.slice(k, Math.min(lines.length, k + 400)), name);
+    const span = findFunctionBody(lines.slice(k, Math.min(lines.length, k + RESCUE_WINDOW_LINES)), name);
     if (!span) continue;
     const absStart = k + span[0];
     if (absStart >= from && mentionOnly) continue;

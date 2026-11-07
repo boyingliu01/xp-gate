@@ -449,7 +449,19 @@ function ensureGitignoreEntries(root) {
   if (missing.length === 0) return [];
   const prefix = existing.length > 0 && !existing.endsWith('\n') ? '\n' : '';
   const block = `${prefix}${existing.length > 0 ? '\n' : ''}${missing.join('\n')}\n`;
-  fs.writeFileSync(gitignorePath, existing + block);
+  // Write via a temp file + rename. A plain writeFileSync truncates first, so an
+  // ENOSPC or a killed process mid-write would leave the user's .gitignore
+  // truncated — destroying rules we promised to preserve, in a file we do not own.
+  // rename() is atomic within a directory: the file is either the old content or
+  // the complete new content.
+  const tmpPath = `${gitignorePath}.xp-gate-tmp`;
+  try {
+    fs.writeFileSync(tmpPath, existing + block);
+    fs.renameSync(tmpPath, gitignorePath);
+  } catch (e) {
+    try { fs.rmSync(tmpPath, { force: true }); } catch { /* best effort */ }
+    throw e;
+  }
   // Report only rules, not the explanatory comments.
   return missing.filter((line) => !line.startsWith('#'));
 }
@@ -500,13 +512,37 @@ async function init(args) {
   // source — a zero-tolerance Gate 6 BLOCK the user cannot repair except by hand.
   // Done AFTER the install so it only claims files that actually exist.
   if (code === 0) {
-    try {
-      const added = ensureGitignoreEntries(process.cwd());
-      if (added.length > 0) {
-        console.log(`\u2705 .gitignore updated \u2014 ${added.length} xp-gate entr${added.length === 1 ? 'y' : 'ies'} added (generated files are not project source).`);
+    // Root comes from getGitDir(), the SAME resolution installLocal used. Reading
+    // process.cwd() instead would write .gitignore to whatever subdirectory the
+    // user happened to run from while the adapters landed at the repo root — the
+    // rules would then guard the wrong tree.
+    //
+    // A failure here is a WARNING with a repair hint, never a silent skip: a
+    // read-only checkout leaves the user in exactly the #767 state, so exiting 0
+    // quietly would hide the defect this closes.
+    //
+    // Only filesystem errors are downgraded. A TypeError or a bad-regex bug in the
+    // helper is a defect in xp-gate, not a permissions problem, and telling the
+    // user to `chmod` would send them after the wrong thing — those rethrow.
+    // The failure check is on the error CODE, not on a message substring: getGitDir()
+    // signals "not a repo" by returning null, so there is no message to match and
+    // matching one would break the moment its wording changed.
+    const FS_ERROR_CODES = new Set(['EACCES', 'EPERM', 'EROFS', 'EBUSY', 'ENOSPC', 'EISDIR', 'ENOTDIR']);
+    const gitDir = getGitDir();
+    if (!gitDir) {
+      console.warn('\u26a0\ufe0f  Could not update .gitignore: not inside a git repository');
+    } else {
+      try {
+        const added = ensureGitignoreEntries(path.dirname(gitDir));
+        if (added.length > 0) {
+          console.log(`\u2705 .gitignore updated \u2014 ${added.length} xp-gate entr${added.length === 1 ? 'y' : 'ies'} added (generated files are not project source).`);
+        }
+      } catch (e) {
+        if (!FS_ERROR_CODES.has(e.code)) throw e;
+        console.warn(`\u26a0\ufe0f  Could not update .gitignore: ${e.message}`);
+        console.warn('   Generated files will show as untracked and can trip the file-hygiene gate.');
+        console.warn('   Make .gitignore writable and re-run `xp-gate init --full`, or add the rules by hand.');
       }
-    } catch (e) {
-      console.log(`\u2139\ufe0f  .gitignore update skipped: ${e.message}`);
     }
   }
   // Always create lint baseline for local installs (Boy Scout Rule needs it)
