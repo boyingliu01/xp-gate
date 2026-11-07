@@ -24,8 +24,8 @@ HOOK_GATE_PROBE="gate-3.sh"
 # Consumed by the sourcing parent, not here.
 # shellcheck disable=SC2034
 HOOK_ADAPTER_DIR_TIERS=(
-  'global|GLOBAL_ADAPTER_DIR|adapter-common.sh'
   'project|PROJECT_GITHOOKS|adapter-common.sh'
+  'global|GLOBAL_ADAPTER_DIR|adapter-common.sh'
   'script|SCRIPT_DIR|adapter-common.sh'
 )
 

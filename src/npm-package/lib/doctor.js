@@ -24,7 +24,12 @@ const { checkUpgrade, formatUpgradeMsg } = require('./check-version.js');
 const { GATE_CLI_TOOLS, checkCliTool, getToolInstallCmd, checkBash, detectInstalledPlatforms, getSkillsDirs } = require('./detect-deps.js');
 // #505: the single source of truth for module resolution order. The hook reads a
 // generated shell projection of this same module.
-const { RESOLUTION_ORDER } = require('./hook-module-resolution.js');
+const {
+  RESOLUTION_ORDER,
+  GATE_RESOLUTION_ORDER,
+  ADAPTER_DIR_ORDER,
+  GATE_PROBE,
+} = require('./hook-module-resolution.js');
 const { inspectHookFile } = require('./hook-health.js');
 const { parseQuarantine, findPolicyViolations } = require('./flaky.js');
 
@@ -1165,18 +1170,34 @@ function resolveExecutedModuleDirs(ctx = {}) {
   const scriptDir = ctx.scriptDir || GLOBAL_HOOKS_DIR();
 
   const has = (dir, file) => fs.existsSync(path.join(dir, file));
+  const roots = { adapterDir: scriptDir, globalAdapterDir, projectGithooks, scriptDir };
+  const dirFor = (tier) => dirForTierBase(tier.base, roots);
 
+  // Read the cascade from ADAPTER_DIR_ORDER instead of restating it. The order
+  // used to be typed here a second time, and when the spec moved to
+  // project-first this copy kept answering global-first -- so doctor reported a
+  // module surface the hook had already stopped executing. That is the same
+  // duplication #505 exists to prevent, one level down.
   let adapterDir = scriptDir;
-  if (has(globalAdapterDir, 'adapter-common.sh')) {
-    adapterDir = globalAdapterDir;
-  } else if (has(projectGithooks, 'adapter-common.sh')) {
-    adapterDir = projectGithooks;
+  for (const tier of ADAPTER_DIR_ORDER) {
+    const dir = dirFor(tier);
+    if (dir && has(dir, tier.probe)) {
+      adapterDir = dir;
+      break;
+    }
   }
 
+  // Gate scripts: same tier list, probed for the gate sentinel rather than for
+  // adapter-common.sh (GATE_RESOLUTION_ORDER's bases mirror ADAPTER_DIR_ORDER's).
   let gateDir = adapterDir;
-  if (!has(adapterDir, 'gate-3.sh')) {
-    if (has(projectGithooks, 'gate-3.sh')) gateDir = projectGithooks;
-    else if (has(scriptDir, 'gate-3.sh')) gateDir = scriptDir;
+  if (!has(adapterDir, GATE_PROBE)) {
+    for (const tier of ADAPTER_DIR_ORDER) {
+      const dir = dirFor(tier);
+      if (dir && has(dir, GATE_PROBE)) {
+        gateDir = dir;
+        break;
+      }
+    }
   }
 
   return { adapterDir, gateDir, globalAdapterDir, projectGithooks, scriptDir };
@@ -1259,15 +1280,58 @@ function executedModulePath(name, dirs) {
     const sourced = path.join(dirs.adapterDir, name);
     return fs.existsSync(sourced) ? sourced : null;
   }
-  const candidates = isGateModuleFile(name)
-    ? [path.join(dirs.gateDir, name)]
-    : [
-      path.join(dirs.adapterDir, name),
-      path.join(dirs.adapterDir, 'adapters', name),
-      path.join(dirs.projectGithooks, 'adapters', name),
-      path.join(dirs.scriptDir, 'adapters', name),
-    ];
+  // The candidate chain is projected from RESOLUTION_ORDER rather than typed out
+  // here. This used to be a second copy of the order, and it went stale the
+  // moment the tiers changed: it began the chain with `adapterDir/<name>.sh`
+  // (the FLAT layout) even when ADAPTER_DIR was the project tier, so a stray file
+  // at the repo root shadowed the repo's own nested adapter.
+  if (isGateModuleFile(name)) {
+    // Gate modules have exactly one executed location: whatever GATE_DIR resolved
+    // to. GATE_DIR already ran the full tier fallback in
+    // resolveExecutedModuleDirs(), so re-walking the tiers here would report a
+    // copy that tier holds but the gate suite does not actually run from.
+    const gatePath = path.join(dirs.gateDir, name);
+    return fs.existsSync(gatePath) ? gatePath : null;
+  }
+  // Adapter templates carry their own extension ('{name}.sh'), so the
+  // substitution needs the bare stem here -- unlike the gate call above, which
+  // takes the filename as-is. Same split as the hook's
+  // resolve_adapter_path ("bare language name") vs _hook_resolve.
+  const stem = name.replace(/\.[^./\\]+$/, '');
+  const candidates = RESOLUTION_ORDER
+    .map((tier) => {
+      const root = dirForTierBase(tier.base, dirs);
+      return root ? path.join(root, tier.template.replace('{name}', stem)) : null;
+    })
+    .filter(Boolean);
   return candidates.find((candidate) => fs.existsSync(candidate)) || null;
+}
+
+/**
+ * The directory a resolution tier's `base` names, from
+ * `resolveExecutedModuleDirs()` output.
+ *
+ * An unknown base returns null rather than ''. A '' base makes `path.join` emit a
+ * relative path, and `existsSync` then probes the CWD -- silently testing a
+ * different tree instead of failing.
+ *
+ * @param {string} base
+ * @param {ReturnType<typeof resolveExecutedModuleDirs>} dirs
+ * @returns {string|null}
+ */
+function dirForTierBase(base, dirs) {
+  switch (base) {
+    case 'ADAPTER_DIR':
+      return dirs.adapterDir;
+    case 'GLOBAL_ADAPTER_DIR':
+      return dirs.globalAdapterDir;
+    case 'PROJECT_GITHOOKS':
+      return dirs.projectGithooks;
+    case 'SCRIPT_DIR':
+      return dirs.scriptDir;
+    default:
+      return null;
+  }
 }
 
 /**
