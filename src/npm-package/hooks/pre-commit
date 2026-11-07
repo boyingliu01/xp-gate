@@ -558,6 +558,48 @@ gate_start_ms() {
   now_ms
 }
 
+# ── A2: run a SUBSET of gates, for iteration speed ────────────────────────
+#
+# A full commit takes ~26 s on an idle box, and the time is spread evenly across
+# gates that have nothing to do with each other (measured: startup 3.5 s,
+# Gate 1 4.8 s, Gate 2 3.1 s, Gate 4 4.2 s, Gate 5 2.1 s). While iterating on one
+# gate you re-run all of them to re-check one, which is the single largest
+# avoidable cost in the edit→commit loop.
+#
+#   XP_GATE_ONLY_GATE=4,5 git commit ...     # run only Gates 4 and 5
+#   XP_GATE_ONLY_GATE=1    git commit ...    # re-check lint only
+#
+# Everything not named is reported as SKIP with detail "not_selected", and the
+# SKIP goes through record_gate_audit exactly like every other skip — so the
+# journal can never read a deselected gate as a passing one. That is the whole
+# point: a filter that silently dropped gates would produce green history for
+# checks that never ran.
+#
+# Deliberately NOT offered on protected branches: the escape-valve precedent in
+# this file is that narrowing what a commit is checked against is a local
+# iteration tool, not something that reaches main.
+XP_GATE_ONLY_GATE_STATE=""
+gate_selection_active() {
+  if [ -z "$XP_GATE_ONLY_GATE_STATE" ]; then
+    if [ -n "${XP_GATE_ONLY_GATE:-}" ]; then
+      XP_GATE_ONLY_GATE_STATE="active"
+    else
+      XP_GATE_ONLY_GATE_STATE="inactive"
+    fi
+  fi
+  [ "$XP_GATE_ONLY_GATE_STATE" = "active" ]
+}
+
+# True when gate $1 should run in this invocation. Empty XP_GATE_ONLY_GATE means
+# "run everything", which is the only state a real commit should be in.
+gate_enabled() {
+  gate_selection_active || return 0
+  case ",${XP_GATE_ONLY_GATE//[[:space:]]/}," in
+    *",$1,"*) return 0 ;;
+    *) return 1 ;;
+  esac
+}
+
 # ---------------------------------------------------------------------------
 # #537: per-language coverage classification.
 #
@@ -890,6 +932,25 @@ for branch in $PROTECTED_BRANCHES; do
   fi
 done
 
+# A2 guard: narrowing the gate set is a local iteration tool, never a way to
+# commit onto a protected branch with fewer checks. Same reasoning as
+# SKIP_GATE_5A_BLOCK's main/master refusal further down, and refused outright
+# rather than silently ignored so a scripted `XP_GATE_ONLY_GATE=1 git commit` on
+# main cannot quietly appear to have run the full chain.
+if gate_selection_active && [ "$is_protected" = true ]; then
+  echo ""
+  echo "❌ BLOCKED - XP_GATE_ONLY_GATE=${XP_GATE_ONLY_GATE} is not allowed on protected branch '$CURRENT_BRANCH'."
+  echo "   Run the full gate chain here: unset XP_GATE_ONLY_GATE."
+  exit 1
+fi
+
+if gate_selection_active; then
+  echo ""
+  echo "⚠️  PARTIAL GATE RUN — XP_GATE_ONLY_GATE=${XP_GATE_ONLY_GATE} (branch: $CURRENT_BRANCH)"
+  echo "   Gates not named are recorded as SKIP/not_selected, never as PASS."
+  echo "   This commit has NOT been checked against the gates it skips."
+fi
+
 has_version_change=false
 has_changelog_change=false
 
@@ -916,7 +977,11 @@ export XP_STAGED_ACM
 if [ "$is_protected" = "true" ]; then
   # Env var bypass: SKIP_VERSION_CHECK=1 skips Gate 0 entirely
   # Useful for: SKIP_VERSION_CHECK=1 git commit -m "chore: ..."
-  if [ "${SKIP_VERSION_CHECK:-}" = "1" ]; then
+  if ! gate_enabled 0; then
+    echo "⏭️  SKIPPED - Gate 0: Version consistency (not selected by XP_GATE_ONLY_GATE)"
+    GATE_0_STATUS="SKIP"
+    GATE_0_DETAIL="not_selected"
+  elif [ "${SKIP_VERSION_CHECK:-}" = "1" ]; then
     echo "⏭️  SKIPPED - Gate 0: Version consistency (SKIP_VERSION_CHECK=1 env var)"
   else
   for file in $STAGED_FILES; do
@@ -1650,7 +1715,11 @@ fi
 GATE_1_START=$(gate_start_ms)
 GATE_1_STATUS="PASS"
 GATE_1_DETAIL=""
-if ! any_changed_files_match "\.(ts|tsx|js|jsx|py|go|java|kt|cpp|c|swift|m|mm|dart|sh|ps1|psm1)$" "\.ya?ml$" "\.json$" "Dockerfile" "\.tf$"; then
+if ! gate_enabled 1; then
+  echo "⏭️  SKIPPED - Gate 1: Code quality (not selected by XP_GATE_ONLY_GATE)"
+  GATE_1_STATUS="SKIP"
+  GATE_1_DETAIL="not_selected"
+elif ! any_changed_files_match "\.(ts|tsx|js|jsx|py|go|java|kt|cpp|c|swift|m|mm|dart|sh|ps1|psm1)$" "\.ya?ml$" "\.json$" "Dockerfile" "\.tf$"; then
   echo "✅ PASSED - No code files changed, skipping lint."
   GATE_1_STATUS="SKIP"
   GATE_1_DETAIL="no_matching_files"
@@ -2372,7 +2441,12 @@ record_gate_audit "gate-1" "code-quality" "$GATE_1_STATUS" "0" "$GATE_1_START" "
 GATE_2_START=$(gate_start_ms)
 GATE_2_STATUS="PASS"
 
-if [ "$PROJECT_LANG" = "documentation-only" ] || [ "$DOCS_ONLY_COMMIT" = true ]; then
+if ! gate_enabled 2; then
+  echo "⏭️  SKIPPED - Gate 2: Duplicate code (not selected by XP_GATE_ONLY_GATE)"
+  GATE_2_STATUS="SKIP"
+  GATE_2_DETAIL="not_selected"
+
+elif [ "$PROJECT_LANG" = "documentation-only" ] || [ "$DOCS_ONLY_COMMIT" = true ]; then
 echo "⏭️  SKIPPED - Duplicate code (documentation-only ${DOCS_ONLY_COMMIT:+commit})."
 GATE_2_STATUS="SKIP"
  # GATE_2_DETAIL feeds record_gate_audit's detail field. The previous
@@ -2532,13 +2606,42 @@ record_gate_audit "gate-2" "duplicate-code" "$GATE_2_STATUS" "0" "$GATE_2_START"
 # GATE 3: Cyclomatic Complexity Check
 # Extracted to gate-3.sh for maintainability
 # ============================================================================
-source "$GATE_DIR/gate-3.sh"
+#
+# A2 gates the SOURCE, not a branch inside gate-3.sh. GATE_DIR resolves through
+# three tiers and, on an installed machine, lands on
+# ~/.config/xp-gate/adapters/ -- a COPY that predates this change. An edit
+# inside gate-N.sh is therefore inert exactly where it matters most, which is
+# the same trap githooks/AGENTS.md documents for the hooks themselves (verified:
+# a build here reports GATE_DIR=/c/Users/think/.config/xp-gate/adapters, whose
+# gate-4.sh has none of this change). Checking here works against either copy.
+if gate_enabled 3; then
+  source "$GATE_DIR/gate-3.sh"
+else
+  echo ""
+  echo "→ Gate 3: Cyclomatic complexity..."
+  echo "⏭️  SKIPPED - Gate 3: Complexity (not selected by XP_GATE_ONLY_GATE)"
+  GATE_3_START=$(gate_start_ms)
+  GATE_3_STATUS="SKIP"
+  GATE_3_REASON="not_selected"
+  record_gate_audit "gate-3" "complexity" "$GATE_3_STATUS" "0" "$GATE_3_START" "not_selected"
+fi
 
 # ============================================================================
 # GATE 4: Principles Checker (Clean Code + SOLID)
 # Extracted to gate-4.sh for maintainability
 # ============================================================================
-source "$GATE_DIR/gate-4.sh"
+if gate_enabled 4; then
+  source "$GATE_DIR/gate-4.sh"
+else
+  echo ""
+  echo "→ Gate 4: Principles checker..."
+  echo "⏭️  SKIPPED - Gate 4: Principles (not selected by XP_GATE_ONLY_GATE)"
+  GATE_4_START=$(gate_start_ms)
+  GATE_4_STATUS="SKIP"
+  GATE_4_REASON="not_selected"
+  WARNING_COUNT=0
+  record_gate_audit "gate-4" "principles" "$GATE_4_STATUS" "0" "$GATE_4_START" "not_selected"
+fi
 
 # ============================================================================
 # GATE 5: Tests & Coverage Combined (Combines Old Gates 3 - Tests and 4 - Coverage)
@@ -2562,7 +2665,12 @@ GATE_5_START=$(gate_start_ms)
 # assign at all.
 GATE_5_STATUS=""
 
-if [ "$PROJECT_LANG" = "documentation-only" ] || [ "$DOCS_ONLY_COMMIT" = true ]; then
+if ! gate_enabled 5; then
+  echo "⏭️  SKIPPED - Gate 5: Tests & coverage (not selected by XP_GATE_ONLY_GATE)"
+  GATE_5_STATUS="SKIP"
+  GATE_5_DETAIL="not_selected"
+
+elif [ "$PROJECT_LANG" = "documentation-only" ] || [ "$DOCS_ONLY_COMMIT" = true ]; then
   echo "⏭️  SKIPPED - Tests & coverage (documentation-only commit — no code changed to test)."
   GATE_5_STATUS="SKIP"
   GATE_5_DETAIL="docs_only_change"
