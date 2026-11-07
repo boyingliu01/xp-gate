@@ -1,5 +1,69 @@
 # Changelog
 
+## [0.37.0.0] - 2026-11-07
+
+**主轴：把「门禁说自己通过了」和「门禁真的检查过了」分开。** 这一版修掉的 42 个缺陷里，
+绝大多数属于同一类——某个环节**静默地什么都没做，却报告成功**：Gate 1 的通用分支把非零
+退出码当成崩溃而不是失败；Gate 3 的探测在 64 KB 处因 SIGPIPE 翻转结论；Gate 5 把「vitest
+覆盖率插件缺失」当成测试失败；Gate 10 把字符串里的 `import` 当真 import；C/C++ 的 Gate 1
+从未真正运行过。它们共同的特征是**红变绿很容易，绿变红没人发现**。
+
+### Added
+
+- **pre-commit 门禁选择器（A2）**：`XP_GATE_ONLY_GATE=3,4` 让一次提交只跑指定门禁，解决
+  迭代期逐个等待的成本。未选中的门禁记为 **SKIP 而非 PASS**——这条是整个特性的安全边界，
+  「没跑」与「通过」在报告里不可能混淆；受保护分支上拒绝使用，生效时打印
+  `PARTIAL GATE RUN` 横幅。
+- **Java 架构规则 R10/R11/R12 + R08/R15/W01**，`doctor` 纳入架构工具检查。
+- **C# 成为完整一等语言**：`LANGUAGE_REGISTRY` 注册、`CODE_EXTENSIONS`、`SOURCE_EXTENSIONS`、
+  `adapterMap`、ESLint flat config 探测全线补齐。此前支持是「建好了一半，路径没通」。
+
+### Fixed
+
+- **Gate 1 通用分支没有真正的判定协议（#776）**：非零退出码被当成「无法执行」而非「失败」，
+  于是工具崩溃与检查失败混为一谈，而检查失败本应阻断。补齐 0 PASS / 1 BLOCK /
+  2 BLOCK fail-closed / 3 WARN 四态。
+- **C/C++ Gate 1 从未工作过（#776）**：clang-tidy/cppcheck 的发现被无条件丢弃。
+- **Gate 3 在 64 KB 处翻转结论（#774）**：`set -o pipefail` 与 awk 提前 `exit` 组合产生
+  SIGPIPE 141，文件一大就从 FAIL 变 PASS。改为读完整后再判定。
+- **Gate 8 在 Windows 上把反斜杠写进基线（#735）**：每次提交产生纯格式 diff，把「是否出现
+  新密钥」这个唯一信号淹没。新增 `normalize-secrets-baseline.cjs` 做路径规范化。
+- **Gate 8 的修复提示指向不存在的命令（#736）**，以及基线损坏时抛未捕获异常（改为 exit 2）。
+- **Gate 10 把字符串里的 import 当真 import（#759）**：新增 `quote-masker.ts`（266 行）
+  在扫描前屏蔽字符串/注释字面量。同时修复尾随转义导致的文件增长与行号错位。
+- **Gate 3 的数据源读不到不报错（#737）**：`ccn-report.cjs` 对不存在的 `--root` 现在抛出
+  带标签的错误，而非静默返回空报告。
+- **Gate 4 的 `deep-nesting` 数的是花括号深度（#749）**：改为按真实控制结构嵌套计数，
+  572 行新适配器 + 13 轮走查修正。
+- **`lib/principles.js` 只接受第一个路径参数（#761）**、**`SOURCE_EXTENSIONS` 缺 `.cs`（#762）**。
+- **Gate 5 的 `CODE_EXTENSIONS` 缺 `cs`（#763）**：只改 `.cs` 的提交绕过全部测试检查。
+- **Gate 5 不解析 C# 适配器的 coverage 产物（#768）**，且把插件缺失当成测试失败（#760）。
+- **Gate 1 的 ESLint 配置探测漏掉 flat config（#766）**：`eslint.config.js/.mjs/.cjs/.ts/...`。
+- **`xp-gate init` 把自己的实现写进项目（#767）**：生成的适配器副本与模块镜像以未跟踪条目
+  出现在 `git status` 里，file-hygiene 门禁把生成物当成未提交源码，造成用户无法自行修复的
+  Gate 6 零容忍 BLOCK。现在 init 会写 `.gitignore`，且**原子写入**（临时文件 + rename），
+  不会因中途失败截断用户已有的 `.gitignore`。
+- **`.gitignore` 写到错误的根**：从 `process.cwd()` 改为 `getGitDir()`，与适配器安装位置一致。
+
+### Changed
+
+- **pre-push 的 mock 密度统计不再 fork 40 次进程**：20 个关键词 × (grep + wc) 改为读一次
+  文件后用 bash 内建计算。**故意不合并成单条 `grep -oE 'a|b|c'`**——那样会把重叠匹配
+  （`vi.mockResolvedValue` 同时命中两个）只算一次，静默降低密度、削弱 Gate M2。等价性在
+  939 个文件、3158 个匹配上验证，0 差异。
+- **`ccn-report.cjs` 的魔法数字命名化**：`SPAN_ARTEFACT_MAX_LINES`、`CCN_BLOCK_THRESHOLD`，
+  使两条复核路径不可能对同一行给出不同判定。
+- **测试套件不再真的启动 checkov/semgrep**：`init.test.js` 逐模块驱逐缓存并默认 mock
+  `execSync`，此前 27 个用例各付 ~14 秒真实工具探测。
+
+### Known limitations
+
+- **`specification.yaml` 中存在 18 个重复的 AC 编号**（AC-636-xx、AC-603-xx、AC-605-xx 等），
+  是历史遗留，本次未处理——修它需要判定每个重复项应归哪个 REQ，属于语义决策。
+- Gate 4 的 `--files <目录>` 静默返回「✓ No violations found」在本版修复；`#764` 的
+  warnings-only 三方不一致（display 说 FAIL、退出码 0、hook 说 PASS）**仍未解决**。
+- `architecture.yaml` 的 ARCH-001..014 依然不被任何检测器消费（#687）。
+
 ## [0.36.1.0] - 2026-11-05
 
 **修复：C# 项目里 `xp-gate principles` 报「找不到源码」。** 0.36.0 让 C# 成为一等地
