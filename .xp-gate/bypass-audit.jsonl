@@ -19,3 +19,8 @@
 {"commit":"4e7c3cedd909ad1dc1fdd15d86e0c2f030a059c8","timestamp":"2026-11-07T14:01:42+08:00","type":"precommit_bypass","branch":"main"}
 {"commit":"9825dabe45f9071a59952e96a75e068bb3ef7e00","timestamp":"2026-11-07T14:05:00+08:00","type":"bypass_entry_correction","branch":"main","reason":"FALSE POSITIVE: this commit was created by cherry-pick, which does not run pre-commit, so the post-commit marker was absent and the detector read it as --no-verify. The identical change had already passed all 13 gates as b751eae0 on the source branch."}
 {"commit":"4e7c3cedd909ad1dc1fdd15d86e0c2f030a059c8","timestamp":"2026-11-07T14:05:00+08:00","type":"bypass_entry_correction","branch":"main","reason":"FALSE POSITIVE: cherry-picked from b0edaa51, which passed all 13 gates (only Gate 12 WARN for pre-existing trailing whitespace). cherry-pick skips pre-commit, so no marker was written and post-commit logged a bypass that did not happen."}
+{"commit":"e66b3120562dc9f6d72d15134bb317ab750442fb","timestamp":"2026-11-07T23:47:01+08:00","type":"precommit_bypass","branch":"merge/gate-6-and-cli-perf"}
+{"commit":"15a7a5238f0b7f262e58d6b95b328993a06c7197","timestamp":"2026-11-07T23:47:13+08:00","type":"precommit_bypass","branch":"merge/gate-6-and-cli-perf"}
+{"commit":"ece7a4dce9757bc1e038f3705a0be98b0fef4654","timestamp":"2026-11-07T23:47:23+08:00","type":"precommit_bypass","branch":"merge/gate-6-and-cli-perf"}
+{"commit":"36a350bb39bffddd25cb1291f0819cff8e10146c","timestamp":"2026-11-07T23:47:34+08:00","type":"precommit_bypass","branch":"merge/gate-6-and-cli-perf"}
+{"commit":"779ff990fb44c17609931fdb57caa8cd5e575908","timestamp":"2026-11-07T23:47:44+08:00","type":"precommit_bypass","branch":"merge/gate-6-and-cli-perf"}
