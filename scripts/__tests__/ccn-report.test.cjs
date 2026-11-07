@@ -560,14 +560,23 @@ describe('ccn-report (per-file trustworthy measurement)', () => {
     });
 
     it('still succeeds on the default root, which may legitimately hold sources', () => {
-      // No --root: the cwd has sources, so this must stay exit 0. This is the
+      // No --root: a cwd that holds sources must stay exit 0. This is the
       // control proving the new check did not simply make every run fail.
-      const r = spawnSync(process.execPath, [reportPath], {
-        encoding: 'utf8',
-        cwd: path.resolve(__dirname, '..', '..'),
-      });
-      expect(r.status).toBe(0);
-      expect(r.stdout).toMatch(/files scanned:\s+[1-9]/);
+      //
+      // Runs from a TWO-FILE fixture, not the repo. What the control asserts is
+      // "a non-empty default root is not fatal" -- the file count is irrelevant
+      // to that. Scanning the real checkout made it spawn lizard once per source
+      // file: 731 files x ~275 ms measured on this machine = ~200 s for a single
+      // assertion, and 247 s in the suite.
+      const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'ccn-default-src-'));
+      try {
+        fs.writeFileSync(path.join(dir, 'a.js'), 'function f(a) {\n  return a ? 1 : 2;\n}\nmodule.exports = { f };\n');
+        const r = spawnSync(process.execPath, [reportPath], { encoding: 'utf8', cwd: dir });
+        expect(r.status).toBe(0);
+        expect(r.stdout).toMatch(/files scanned:\s+[1-9]/);
+      } finally {
+        fs.rmSync(dir, { recursive: true, force: true });
+      }
     });
 
     it('does NOT fail when the DEFAULT root holds no sources', () => {
