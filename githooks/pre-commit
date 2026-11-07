@@ -229,13 +229,19 @@ fi
 PROJECT_GITHOOKS="$(run_without_git_context git rev-parse --show-toplevel 2>/dev/null)/githooks"
 GATES_DIR="$SCRIPT_DIR/gates"
 
-if [ -f "$GLOBAL_ADAPTER_DIR/adapter-common.sh" ]; then
-  ADAPTER_DIR="$GLOBAL_ADAPTER_DIR"
-elif [ -f "$PROJECT_GITHOOKS/adapter-common.sh" ]; then
-  ADAPTER_DIR="$PROJECT_GITHOOKS"
-else
-  ADAPTER_DIR="$SCRIPT_DIR"
-fi
+# ADAPTER_DIR decides which tree every later lookup searches, so its ORDER comes
+# from HOOK_ADAPTER_DIR_TIERS (generated from lib/hook-module-resolution.js) and
+# never from a cascade typed here. This block used to be a hand-written
+# `if global ... elif project ...`, which meant the generated table was loaded and
+# then ignored: flipping the spec to project-first changed nothing at runtime
+# while the data file and doctor both already reported the new order.
+#
+# _hook_resolve, not _hook_resolve_dir: the ADAPTER table's third field is the
+# probe FILENAME ('adapter-common.sh'), so resolving it as a module template is
+# what yields "<tier_dir>/adapter-common.sh". _hook_resolve_dir treats that field
+# as a directory suffix and would build "<tier_dir>adapter-common.sh/...".
+ADAPTER_DIR="$(_hook_resolve 'adapter-common' HOOK_ADAPTER_DIR_TIERS)" || ADAPTER_DIR="$SCRIPT_DIR"
+ADAPTER_DIR="${ADAPTER_DIR%/adapter-common.sh}"
 source "$ADAPTER_DIR/adapter-common.sh" 2>/dev/null || {
   echo "Error: Cannot source adapter-common.sh from $ADAPTER_DIR"
   echo "Run: xp-gate init (per-project) or xp-gate setup-global (all projects)"

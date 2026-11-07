@@ -49,7 +49,10 @@ function tree(overrides = {}) {
   // Canonical repo source of truth: nested language adapter, flat gate module.
   write(join(repoHooks, 'adapter-common.sh'), '#!/bin/bash\nshared\n');
   write(join(repoHooks, 'pre-commit'), '#!/bin/bash\necho repo\n');
-  write(join(repoHooks, 'adapters', 'iac.sh'), REPO_ADAPTER);
+  // The project tree owns adapter-common.sh, so precedence (AC-495-23) makes it
+  // the ADAPTER_DIR -- this nested copy is what actually runs unless a test says
+  // otherwise, which is why its content is overridable.
+  write(join(repoHooks, 'adapters', 'iac.sh'), overrides.projectNestedIac || REPO_ADAPTER);
   write(join(repoHooks, 'gate-4.sh'), '#!/bin/bash\ngate_a\ngate_b\n');
 
   // Installed global tier: the installer's nested copy is current...
@@ -94,28 +97,39 @@ function checkOf(result, name) {
 }
 
 describe('doctor executed surface (#495 Round 3)', () => {
-  it('AC-495-14: the executed copy is the flat global one the hook resolves first, so its staleness is a FAIL', () => {
+  it('AC-495-14: this repo carries its own githooks/, so the PROJECT copy is executed and a stale global flat copy is only residue', () => {
+    // Precedence is project-first (AC-495-23): the global install is the DEFAULT
+    // for repos with no githooks/ of their own, not an override of one. This tree
+    // has adapter-common.sh in the project tier, so it supplies ADAPTER_DIR and
+    // the global flat copy is no longer what runs.
     const t = tree({ globalFlatIac: STALE_FLAT });
     const result = drift(t);
-    const check = checkOf(result, 'Module drift: iac.sh');
-    expect(check, 'a stale copy the hook executes must FAIL').toBeDefined();
-    expect(check.status).toBe('FAIL');
-    expect(result.issues).toBe(1);
+    expect(
+      checkOf(result, 'Module drift: iac.sh'),
+      'with the project tier winning, the stale global flat copy must not read as executed',
+    ).toBeUndefined();
+    const shadowed = result.checks.find((c) => /Non-executed copy: iac\.sh/.test(c.name));
+    expect(shadowed, 'the shadowed global copy must still be surfaced').toBeDefined();
+    expect(shadowed.status).not.toBe('FAIL');
   });
 
-  it('AC-495-15: with a global install present, a flat copy in the project githooks/ does NOT execute and is reported as residue, not as drift', () => {
+  it('AC-495-15: with the project tier winning, a flat copy in the project githooks/ DOES execute and is judged as drift', () => {
+    // Corrected premise. This test used to assert that a flat project copy never
+    // executes, on the reading that the hook only looks for
+    // $PROJECT_GITHOOKS/adapters/<lang>.sh there. That is not what the hook does:
+    // HOOK_ADAPTER_TIERS starts with 'adapter_flat|ADAPTER_DIR|{name}.sh', and
+    // ADAPTER_DIR is now allowed to BE the project tier (AC-495-23), so the flat
+    // path is $PROJECT_GITHOOKS/<name>.sh -- the project root. Driving the hook's
+    // own _hook_resolve over this fixture returns exactly that file.
+    //
+    // So the flat project copy is the executed one, and a stale version of it is
+    // real drift: a FAIL the developer must fix, not residue to be ignored.
     const t = tree({ projectFlatIac: undefined });
     const result = drift(t);
-    const residue = result.checks.find((c) => /Non-executed copy: iac\.sh/.test(c.name));
-    expect(residue, 'the project-tier flat copy must still be surfaced').toBeDefined();
-    // The hook consults $PROJECT_GITHOOKS/adapters/<lang>.sh only (pre-commit:67-69),
-    // never a flat project copy, so claiming it "executes" would repeat the R1-2 defect.
-    expect(residue.status).not.toBe('FAIL');
-    expect(result.issues, 'a copy nothing executes cannot be an unrepairable FAIL').toBe(0);
-    // Actionable: the offending absolute path, and the manual remedy (#500 is still open).
-    expect(residue.detail).toContain(t.projectFlatIac);
-    expect(residue.detail, 'residue must name itself as not executed').toMatch(/not executed|does not execute/i);
-    expect(residue.detail, 'residue must say how to get rid of it').toMatch(/gitignore|residue|remove/i);
+    const executed = result.checks.find((c) => /iac\.sh/.test(c.name) && !/Non-executed/.test(c.name));
+    expect(executed, 'the executed project-tier flat copy must be diagnosed').toBeDefined();
+    expect(executed.status).toBe('FAIL');
+    expect(result.issues).toBeGreaterThanOrEqual(1);
   });
 
   it('AC-495-16: the same project-tier flat copy IS executed once ADAPTER_DIR resolves to the project tier, and then it FAILs', () => {
@@ -169,24 +183,31 @@ describe('doctor executed surface (#495 Round 3)', () => {
   });
 
   it('AC-495-18: every FAIL the resolution can produce, syncModulesFromRepo can clear', () => {
+    // With the project tier owning ADAPTER_DIR, the executed copy is the project's
+    // flat iac.sh (AC-495-15). A stale one there is drift against the repo's
+    // nested source, and the repair must reach that same tier -- otherwise the
+    // FAIL is permanent, which is exactly what this AC forbids.
     const { syncModulesFromRepo, diagnoseModuleDrift } = require('../doctor');
-    const t = tree({ globalFlatIac: SUBSET_FLAT, projectFlatIac: null });
+    const t = tree({ globalFlatIac: undefined, projectFlatIac: SUBSET_FLAT });
     const ctx = ctxFor(t);
-    expect(diagnoseModuleDrift(ctx).issues).toBe(1);
+    expect(diagnoseModuleDrift(ctx).issues).toBeGreaterThanOrEqual(1);
 
     const synced = syncModulesFromRepo(ctx);
     expect(synced.synced).toContain('iac.sh');
-    expect(readFileSync(join(t.globalAdapters, 'iac.sh'), 'utf8')).toContain('fixed_count_guard');
+    expect(readFileSync(t.projectFlatIac, 'utf8')).toContain('fixed_count_guard');
     expect(diagnoseModuleDrift(ctx).issues).toBe(0);
   });
 
   it('AC-495-18b: the sync never deletes or rewrites non-executed residue on its own initiative', () => {
+    // A flat project copy IS executed now (AC-495-15), so residue has to be a
+    // copy in a tier that the resolution does not pick: the global flat one,
+    // shadowed by the project tier that owns ADAPTER_DIR.
     const { syncModulesFromRepo } = require('../doctor');
-    const t = tree({ globalFlatIac: SUBSET_FLAT });
-    const before = readFileSync(t.projectFlatIac, 'utf8');
+    const t = tree({ globalFlatIac: SUBSET_FLAT, projectFlatIac: null });
+    const before = readFileSync(join(t.globalAdapters, 'iac.sh'), 'utf8');
     const synced = syncModulesFromRepo(ctxFor(t));
-    expect(synced.synced).toContain('iac.sh');
-    expect(readFileSync(t.projectFlatIac, 'utf8')).toBe(before);
+    expect(synced.synced).not.toContain('iac.sh');
+    expect(readFileSync(join(t.globalAdapters, 'iac.sh'), 'utf8')).toBe(before);
   });
 
   it('AC-495-19: an unreadable destination is refused, not overwritten', () => {

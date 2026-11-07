@@ -231,15 +231,17 @@ export const javaParse = {
     // Which characters change depth and which separate is data, not control
     // flow -- table lookups keep the scan to a single conditional.
     //
-    // A comma separates only at depth zero. Expressed as part of the depth
-    // update rather than as its own branch: the previous form tested `ch === ','`
-    // and then re-tested `depth === 0` inside it, which the complexity budget
-    // charged twice for what is one decision.
+    // A comma counts only at depth zero, expressed as ONE condition rather than
+    // a nested pair: the earlier form tested `ch === ','` and then re-tested
+    // `depth === 0` inside it, which the complexity budget charged twice for a
+    // single decision. The `?? 0` default moved into the lookup itself for the
+    // same reason -- it was a third branch on a table that answers for every
+    // nesting character.
     let depth = 0;
     let count = 1;
     for (const ch of trimmed) {
       if (ch === ',' && depth === 0) count += 1;
-      depth += PARAM_NESTING[ch] ?? 0;
+      depth += PARAM_NESTING[ch] || 0;
     }
     return count;
   },

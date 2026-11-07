@@ -91,19 +91,31 @@ const GATE_RESOLUTION_ORDER = Object.freeze([
  * tree every later lookup searches, so it must have one definition.
  *
  * `probe` is the file whose presence in `base` makes that tier win.
+ *
+ * PRECEDENCE IS PROJECT-FIRST, on purpose. The two install modes exist to make
+ * the global copy a DEFAULT, not an override: a repo that never ran
+ * `xp-gate init` gets the global gate suite, and a repo that carries its own
+ * `githooks/` gets that one instead. The tiers used to be tried global-first,
+ * which made every per-project `githooks/` unreachable on any machine with a
+ * global install -- including this repo, whose own gate scripts therefore never
+ * ran while `git log` said they had. A project copy that cannot win is not a
+ * customisation, it is dead weight (#495 AC-495-23).
+ *
+ * Narrow -> broad: project (specific to this repo) beats global (machine-wide
+ * default) beats the hook's own directory (last resort).
  */
 const ADAPTER_DIR_ORDER = Object.freeze([
-  Object.freeze({
-    tier_id: 'global',
-    base: 'GLOBAL_ADAPTER_DIR',
-    probe: 'adapter-common.sh',
-    comment: '~/.config/xp-gate/adapters — global install',
-  }),
   Object.freeze({
     tier_id: 'project',
     base: 'PROJECT_GITHOOKS',
     probe: 'adapter-common.sh',
-    comment: '<repo>/githooks — per-project init',
+    comment: '<repo>/githooks — per-project init; OVERRIDES the global install',
+  }),
+  Object.freeze({
+    tier_id: 'global',
+    base: 'GLOBAL_ADAPTER_DIR',
+    probe: 'adapter-common.sh',
+    comment: '~/.config/xp-gate/adapters — global install (the default)',
   }),
   Object.freeze({
     tier_id: 'script',
