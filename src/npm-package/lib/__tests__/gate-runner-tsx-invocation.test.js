@@ -3,7 +3,7 @@
  * @intent 证明 TypeScript 门禁不再经 `npx -y tsx` 启动，而是用当前 node.exe 直接
  *   运行 tsx 的 cli.mjs。`npx -y` 每次都要重新解析包位置，实测 4.5-5.8s，而
  *   node 直调 0.79-0.82s —— 每道 TS 门禁白付约 4 秒。
- * @covers AC-TS-GATE-STARTUP-01, AC-TS-GATE-STARTUP-02, AC-TS-GATE-STARTUP-03
+ * @covers AC-TS-GATE-STARTUP-01, AC-TS-GATE-STARTUP-02, AC-TS-GATE-STARTUP-03, AC-TS-GATE-STARTUP-04
  */
 const fs = require('node:fs');
 const path = require('node:path');
@@ -92,5 +92,58 @@ describe('resolveTsxInvocation — AC-TS-GATE-STARTUP-03', () => {
     const { command, args } = resolveTsxInvocation(['gate.ts'], { cwd: tmpDir });
     expect(command).toBe(process.execPath);
     expect(fs.existsSync(args[0])).toBe(true);
+  });
+});
+
+describe('resolveTsxInvocation — AC-TS-GATE-STARTUP-04 (npm layout varies by install)', () => {
+  /**
+   * Restore `process.execPath` after the probe. Kept as a helper because the
+   * override is only sound if it is undone even when an assertion throws, and an
+   * unrestored execPath would corrupt every later test in this process.
+   */
+  function withExecPath(fakeNode, fn) {
+    const real = process.execPath;
+    Object.defineProperty(process, 'execPath', { value: fakeNode, configurable: true });
+    try {
+      return fn();
+    } finally {
+      Object.defineProperty(process, 'execPath', { value: real, configurable: true });
+      delete require.cache[require.resolve('../gate-runner')];
+    }
+  }
+
+  it('finds npm under lib/node_modules — the layout actions/setup-node produces on Linux', () => {
+    // This is the shape CI actually runs on: /opt/hostedtoolcache/node/<v>/x64/bin/node
+    // with npm's library at <...>/lib/node_modules/npm, not alongside the binary.
+    // Probe order matters only because the plain layout is tried first; what this
+    // asserts is that the `lib/` layout is tried at all.
+    const root = path.join(tmpDir, 'node-install');
+    const fakeNode = path.join(root, 'x64', 'bin', 'node');
+    const libNpm = path.join(root, 'x64', 'lib', 'node_modules', 'npm', 'bin', 'npx-cli.js');
+    fs.mkdirSync(path.dirname(libNpm), { recursive: true });
+    fs.writeFileSync(libNpm, '');
+
+    withExecPath(fakeNode, () => {
+      const { command, args } = resolveTsxInvocation(['gate.ts'], { cwd: tmpDir });
+      // A bare `npx` here is the defect: unresolvable without a shell on Windows,
+      // and a PATH hop that silently runs whatever npx happens to be first.
+      expect(command).toBe(fakeNode);
+      expect(args.some((a) => String(a).includes('npx-cli.js'))).toBe(true);
+      expect(fs.existsSync(args[0])).toBe(true);
+    });
+  });
+
+  it('finds npm alongside the binary — the Windows MSI / official tarball layout', () => {
+    const root = path.join(tmpDir, 'win-install');
+    const fakeNode = path.join(root, 'node.exe');
+    const plainNpm = path.join(root, 'node_modules', 'npm', 'bin', 'npx-cli.js');
+    fs.mkdirSync(path.dirname(plainNpm), { recursive: true });
+    fs.writeFileSync(plainNpm, '');
+
+    withExecPath(fakeNode, () => {
+      const { command, args } = resolveTsxInvocation(['gate.ts'], { cwd: tmpDir });
+      expect(command).toBe(fakeNode);
+      expect(args.some((a) => String(a).includes('npx-cli.js'))).toBe(true);
+    });
   });
 });

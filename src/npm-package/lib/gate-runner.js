@@ -356,9 +356,39 @@ function resolveGateCwd(targetPath) {
  * plain argv, no shell, no batch wrapper.
  */
 function resolveNpxInvocation(args) {
-  const npxCli = path.join(path.dirname(process.execPath), 'node_modules', 'npm', 'bin', 'npx-cli.js');
-  if (fs.existsSync(npxCli)) return [process.execPath, [npxCli, ...args]];
+  const npxCli = findNpxCli();
+  if (npxCli) return [process.execPath, [npxCli, ...args]];
   return ['npx', args];
+}
+
+/**
+ * npm's own shell-free entry point (`npx-cli.js`), or null.
+ *
+ * The previous form looked only in `dirname(process.execPath)/node_modules/npm`,
+ * which is the layout of a Node installed from the Windows MSI or the official
+ * tarball. GitHub's `actions/setup-node` on Linux runs node from
+ * `/opt/hostedtoolcache/node/<version>/x64/bin/node`, where npm's library lives
+ * under `lib/node_modules/npm` instead — so the probe missed, the fallback became
+ * a bare `npx`, and that is unresolvable without a shell on Windows and a PATH hop
+ * everywhere else. CI caught it as two red assertions; the same install shape
+ * would have made the gate spawn the wrong thing on a developer's Linux box.
+ *
+ * Searches the same way `findTsxCli` does — one directory at a time, both the
+ * plain and the `lib/` npm layout — because "npm sits next to node" is an
+ * assumption about how Node was packaged, not a guarantee.
+ */
+function findNpxCli() {
+  let dir = path.dirname(process.execPath);
+  for (let depth = 0; depth < TSX_SEARCH_DEPTH; depth += 1) {
+    for (const npmRoot of ['node_modules', path.join('lib', 'node_modules')]) {
+      const candidate = path.join(dir, npmRoot, 'npm', 'bin', 'npx-cli.js');
+      if (fs.existsSync(candidate)) return candidate;
+    }
+    const parent = path.dirname(dir);
+    if (parent === dir) break;
+    dir = parent;
+  }
+  return null;
 }
 
 /**
