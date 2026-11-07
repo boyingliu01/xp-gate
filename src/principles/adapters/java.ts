@@ -230,13 +230,15 @@ export const javaParse = {
     // parameter, so the commas inside its arguments must not be counted.
     // Which characters change depth and which separate is data, not control
     // flow -- table lookups keep the scan to a single conditional.
+    //
+    // A comma separates only at depth zero. Expressed as part of the depth
+    // update rather than as its own branch: the previous form tested `ch === ','`
+    // and then re-tested `depth === 0` inside it, which the complexity budget
+    // charged twice for what is one decision.
     let depth = 0;
     let count = 1;
     for (const ch of trimmed) {
-      if (ch === ',') {
-        if (depth === 0) count += 1;
-        continue;
-      }
+      if (ch === ',' && depth === 0) count += 1;
       depth += PARAM_NESTING[ch] ?? 0;
     }
     return count;

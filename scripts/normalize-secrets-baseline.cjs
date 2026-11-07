@@ -68,57 +68,82 @@ function entryId(entry) {
 }
 
 /**
+ * Assert that the value recorded under a file key really is an array.
+ *
+ * A non-array value is malformed. Coercing it to `[]` silently DELETES every
+ * entry recorded for that file — the precise outcome ("losing an entry is
+ * always worse than keeping a malformed one") the merge below is written to
+ * avoid. Refusing is the honest response: the caller reports exit 2 and the
+ * gate compares against the untouched original rather than against a baseline
+ * that lost findings.
+ */
+function requireEntryArray(rawKey, entries) {
+  if (Array.isArray(entries)) return entries;
+  throw new TypeError(
+    `baseline entry for ${JSON.stringify(rawKey)} is ${entries === null ? 'null' : typeof entries}, expected an array`
+  );
+}
+
+/**
+ * Normalize every `filename` field inside one file's entry list, in place.
+ * Returns the number of fields rewritten.
+ */
+function normalizeEntryFilenames(list) {
+  let changed = 0;
+  for (const entry of list) {
+    if (entry && typeof entry === 'object' && hasBackslash(entry.filename)) {
+      entry.filename = normalizePath(entry.filename);
+      changed++;
+    }
+  }
+  return changed;
+}
+
+/**
+ * Union `list` into `rebuilt[key]` rather than overwriting it.
+ *
+ * Two keys can collide after normalization (a file recorded once with each
+ * separator). Dropping entries would silently un-allowlist a finding, which is
+ * the exact failure this whole issue is about, so the lists are merged and
+ * deduplicated on the fields that identify an entry.
+ *
+ * The identity is built through `entryId`, which tolerates a non-object entry.
+ * The old code dereferenced `entry.type` directly, so a baseline holding a
+ * `null` in a colliding array threw a TypeError — and the gate's `|| true`
+ * swallowed it, leaving the file un-normalized while the comparison ran on
+ * mixed separators. Measured before the guard:
+ * `normalizeBaseline({results:{'a\\b.ts':[null],'a/b.ts':[...]}})` threw.
+ */
+function mergeEntryList(rebuilt, key, list) {
+  const seen = new Set(rebuilt[key].map(entryId));
+  for (const entry of list) {
+    const id = entryId(entry);
+    if (seen.has(id)) continue;
+    seen.add(id);
+    rebuilt[key].push(entry);
+  }
+}
+
+/**
  * Rewrite a parsed baseline in place, returning the number of fields changed.
  * Exported for the idempotency test.
  */
 function normalizeBaseline(parsed) {
-  let changed = 0;
   if (!parsed || typeof parsed !== 'object' || !parsed.results || typeof parsed.results !== 'object') {
-    return changed;
+    return 0;
   }
 
+  let changed = 0;
   const rebuilt = {};
   for (const [rawKey, entries] of Object.entries(parsed.results)) {
     const key = normalizePath(rawKey);
     if (key !== rawKey) changed++;
-    // A non-array value under a file key is malformed. Coercing it to `[]`
-    // silently DELETES every entry recorded for that file — the precise
-    // outcome ("losing an entry is always worse than keeping a malformed one")
-    // the merge below is written to avoid. Refusing is the honest response:
-    // the caller reports exit 2 and the gate compares against the untouched
-    // original rather than against a baseline that lost findings.
-    if (!Array.isArray(entries)) {
-      throw new TypeError(
-        `baseline entry for ${JSON.stringify(rawKey)} is ${entries === null ? 'null' : typeof entries}, expected an array`
-      );
-    }
-    const list = entries;
-    for (const entry of list) {
-      if (entry && typeof entry === 'object' && hasBackslash(entry.filename)) {
-        entry.filename = normalizePath(entry.filename);
-        changed++;
-      }
-    }
-    // Two keys can collide after normalization (a file recorded once with each
-    // separator). Merge rather than overwrite: dropping entries would silently
-    // un-allowlist a finding, which is the exact failure this whole issue is
-    // about. Deduplicate on the fields that identify an entry.
-    //
-    // The identity is built through `entryId`, which tolerates a non-object
-    // entry. The old code dereferenced `entry.type` directly, so a baseline
-    // holding a `null` in a colliding array threw a TypeError — and the gate's
-    // `|| true` swallowed it, leaving the file un-normalized while the
-    // comparison ran on mixed separators. Measured before the guard:
-    // `normalizeBaseline({results:{'a\\b.ts':[null],'a/b.ts':[...]}})` threw.
+
+    const list = requireEntryArray(rawKey, entries);
+    changed += normalizeEntryFilenames(list);
+
     if (Object.prototype.hasOwnProperty.call(rebuilt, key)) {
-      const seen = new Set(rebuilt[key].map(entryId));
-      for (const entry of list) {
-        const id = entryId(entry);
-        if (!seen.has(id)) {
-          seen.add(id);
-          rebuilt[key].push(entry);
-        }
-      }
+      mergeEntryList(rebuilt, key, list);
     } else {
       rebuilt[key] = list;
     }
