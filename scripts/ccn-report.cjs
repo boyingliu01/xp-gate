@@ -690,33 +690,51 @@ function findDeclarationLine(lines, name) {
 // any row, rather than assuming.
 const SUPPORTED_LIZARD_MAJOR = 1;
 
+/**
+ * Lizard version resolved from `--version`, or null when the probe is
+ * unsupported.
+ *
+ * The version is RETURNED, not just validated, because a major-only check is not
+ * enough to make a ratchet sound. Measured on this repo: lizard 1.25.0 and
+ * 1.21.3 both report major 1, and they disagree about the same functions —
+ * `csharp.extractFunctions` measures 9 under one and 18 under the other, because
+ * they differ on how nested callback and regex-literal bodies are charged. A
+ * baseline written by one and enforced by the other therefore reports a wall of
+ * violations that no code change caused, and "fixes" them by inflating the
+ * ceiling of whichever analyzer happened to run last. The pin in
+ * `.lizard-version` only helps CI; nothing stopped a developer machine from
+ * silently grading against a different analyzer. Recording the exact version in
+ * the baseline is what lets the ratchet refuse that comparison instead of
+ * inventing debt.
+ */
 function checkLizardVersion(lizardCmd) {
   let out;
   try {
     out = execFileSync(lizardCmd, ['--version'], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] });
   } catch {
-    return; // version probe unsupported; the row-shape check below still guards
+    return null; // version probe unsupported; the row-shape check below still guards
   }
   const m = String(out).match(/(\d+)\.(\d+)(?:\.(\d+))?/);
-  if (!m) return;
+  if (!m) return null;
   const major = Number(m[1]);
   if (major !== SUPPORTED_LIZARD_MAJOR) {
     throw new Error(
       `lizard ${m[0]} is not the supported ${SUPPORTED_LIZARD_MAJOR}.x series; the CSV column layout in this file was verified against 1.21.3 and a different major may reorder it`
     );
   }
+  return m[0];
 }
 
 function resolveLizard() {
   try {
     execFileSync('lizard', ['--version'], { stdio: ['ignore', 'pipe', 'pipe'] });
-    checkLizardVersion('lizard');
-    return 'lizard';
+    const version = checkLizardVersion('lizard');
+    return { cmd: 'lizard', version };
   } catch { /* fall through */ }
   const local = path.join(process.env.HOME || '', '.local', 'bin', 'lizard');
   if (fs.existsSync(local)) {
-    checkLizardVersion(local);
-    return local;
+    const version = checkLizardVersion(local);
+    return { cmd: local, version };
   }
   throw new Error('lizard not found (pip install lizard)');
 }
@@ -736,7 +754,13 @@ async function run(options = {}) {
   if (options.rootExplicit && !isReadableDir(root)) {
     throw taggedError('ENOROOT', `scan root does not exist or is not a directory: ${root}`);
   }
-  const lizard = options.lizardCmd || resolveLizard();
+  // `resolveLizard()` returns both the command and the exact version it
+  // measured. The version travels with the report so `--write-baseline` can
+  // record it and `--check` can refuse to grade against a baseline written by a
+  // different analyzer (see checkLizardVersion).
+  const resolved = options.lizardCmd ? { cmd: options.lizardCmd, version: null } : resolveLizard();
+  const lizard = resolved.cmd;
+  const lizardVersion = resolved.version ?? null;
   const files = findSourceFiles(root);
   if (options.rootExplicit && files.length === 0) {
     throw taggedError(
@@ -848,7 +872,7 @@ async function run(options = {}) {
       functions.push({ file: rel.replace(/\\/g, '/'), bucket, name: '(no parsable output)', ccn: 0, nloc: 0, line: 0 });
     }
   }
-  return { root, filesScanned: files.length, functions, unverified_rows: unverifiedRows };
+  return { root, filesScanned: files.length, functions, unverified_rows: unverifiedRows, lizardVersion };
 }
 
 /**
@@ -999,6 +1023,31 @@ async function main() {
     const baseline = baselineRaw && typeof baselineRaw === 'object' && baselineRaw.entries
       ? baselineRaw.entries
       : baselineRaw;
+
+    // A ratchet is only sound if the same analyzer wrote the ceiling and took
+    // today's measurement. lizard releases inside the supported 1.x series
+    // disagree about the same functions -- measured on this repo, 1.21.3 calls
+    // `csharp.extractFunctions` 18 where 1.25.0 calls it 9 -- so comparing
+    // across versions produces violations no code change caused, and the only
+    // way to clear them is to inflate the ceiling to whichever analyzer ran
+    // last. Refuse the comparison and say how to repair it.
+    //
+    // A baseline with no `analyzer` block predates this record; it is compared
+    // anyway with a warning rather than rejected, so an older file is not a hard
+    // outage. `null` means the writer could not probe a version, which is
+    // unknown rather than a mismatch.
+    const recordedAnalyzer = baselineRaw && typeof baselineRaw === 'object' ? baselineRaw.analyzer : null;
+    const recordedVersion = recordedAnalyzer && typeof recordedAnalyzer === 'object' ? recordedAnalyzer.version : null;
+    const currentVersion = report.lizardVersion ?? null;
+    if (recordedVersion && currentVersion && recordedVersion !== currentVersion) {
+      console.error(`FAIL — ${path.basename(baselinePath)} was written by lizard ${recordedVersion}, but this run measured with lizard ${currentVersion}.`);
+      console.error('Different lizard releases disagree about the same functions, so this comparison would report debt that no change caused.');
+      console.error(`Fix: install the pinned analyzer (\`pip install lizard==${recordedVersion}\`, see .lizard-version), or refresh the baseline deliberately with --write-baseline.`);
+      process.exit(1);
+    }
+    if (!recordedVersion && currentVersion) {
+      console.error(`WARN — ${path.basename(baselinePath)} does not record which lizard wrote it; comparing against lizard ${currentVersion}. Run --write-baseline to record it.`);
+    }
     const warnThreshold = parseInt(get('--warn') || '5', 10);
     const blockThreshold = parseInt(get('--block') || '10', 10);
     const findings = ratchetFindings(report, baseline, warnThreshold, blockThreshold);
@@ -1054,9 +1103,16 @@ async function main() {
         .map((f) => path.extname(f.file).toLowerCase())
         .filter(Boolean))].sort(),
     };
-    const document = { population, entries: baseline };
+    // Which analyzer produced these numbers. Without it a baseline is
+    // indistinguishable from one written by any other lizard release, and the
+    // ratchet happily compares across versions that disagree about the same
+    // functions (see checkLizardVersion). Recorded as `null` when the version
+    // probe is unsupported; the reader treats null as "unknown, compare anyway"
+    // rather than as a mismatch, so an older toolchain still works.
+    const document = { analyzer: { tool: 'lizard', version: report.lizardVersion ?? null }, population, entries: baseline };
     fs.writeFileSync(target, JSON.stringify(document, null, 2) + '\n');
     console.log(`wrote ${Object.keys(baseline).length} entries -> ${target}`);
+    console.log(`  analyzer: lizard ${report.lizardVersion ?? '(version unknown)'}`);
     // The reader accepts both shapes (see ccn-ratchet.sh), so an older gate can
     // still load this file: a flat map and {population, entries} both parse.
     return;
