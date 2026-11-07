@@ -372,6 +372,58 @@ describe('doctor module resolution parity with pre-commit (#495)', () => {
     }
   });
 
+  it('AC-495-23: a project install OVERRIDES the global install (project is the higher tier)', () => {
+    // The install modes exist so the global copy is a DEFAULT that a project can
+    // override: "no per-project customisation -> use the global gate suite; this
+    // project has special needs -> its own copy wins". The cascade used to try
+    // GLOBAL first, which made a project's githooks/ unreachable whenever the
+    // machine had a global install -- so editing the repo's own gate scripts
+    // changed nothing, silently.
+    const idxGlobal = ADAPTER_DIR_ORDER.findIndex((t) => t.tier_id === 'global');
+    const idxProject = ADAPTER_DIR_ORDER.findIndex((t) => t.tier_id === 'project');
+    expect(idxProject, 'no project tier in ADAPTER_DIR_ORDER').toBeGreaterThanOrEqual(0);
+    expect(idxGlobal, 'no global tier in ADAPTER_DIR_ORDER').toBeGreaterThanOrEqual(0);
+    expect(
+      idxProject,
+      'project must be consulted BEFORE global, or a per-project gate suite can never take effect',
+    ).toBeLessThan(idxGlobal);
+
+    // And the hook, driven by the generated data, must actually pick the project
+    // copy when both trees carry the module.
+    const { resolveExecutedModuleDirs, executedModulePath } = require('../doctor');
+    const t = fourTierTree({
+      'adapter-common.sh': ['globalFlat', 'projectFlat'],
+      'typescript.sh': ['globalFlat', 'projectNested'],
+      'gate-3.sh': ['globalFlat', 'projectFlat'],
+    });
+    const dirs = resolveExecutedModuleDirs({
+      globalAdapterDir: t.globalAdapters,
+      projectGithooks: t.projectGithooks,
+      scriptDir: t.scriptDir,
+    });
+    const hook = hookResolvesAll(blocks, resolverText, t, 'typescript', 'gate-3.sh');
+
+    expect(
+      samePath(hook.adapterDir, t.projectGithooks),
+      `ADAPTER_DIR resolved to ${hook.adapterDir}; the project tier must win over global`,
+    ).toBe(true);
+    expect(samePath(hook.langPath, join(t.projectGithooks, 'adapters', 'typescript.sh'))).toBe(true);
+    expect(samePath(executedModulePath('typescript.sh', dirs), hook.langPath)).toBe(true);
+  });
+
+  it('AC-495-24: a project with no githooks/ still uses the global install', () => {
+    // The override must not become "the global install stops working": a repo
+    // that never ran `xp-gate init` has to keep resolving to the global tree.
+    const t = fourTierTree({
+      'adapter-common.sh': ['globalFlat'],
+      'typescript.sh': ['globalFlat'],
+      'gate-3.sh': ['globalFlat'],
+    });
+    const hook = hookResolvesAll(blocks, resolverText, t, 'typescript', 'gate-3.sh');
+    expect(samePath(hook.adapterDir, t.globalAdapters)).toBe(true);
+    expect(samePath(hook.langPath, join(t.globalAdapters, 'typescript.sh'))).toBe(true);
+  });
+
   it('AC-495-22: a module no tier installs resolves to nothing on both sides', () => {
     const { resolveExecutedModuleDirs, executedModulePath } = require('../doctor');
     const t = fourTierTree({

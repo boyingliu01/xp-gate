@@ -18,7 +18,7 @@ import { describe, expect, it } from 'vitest';
  * Build a repo + global-install pair. `spec` names each module's repo copy and
  * installed copy; null means "not present on that side".
  */
-function fixture(spec) {
+function fixture(spec, options = {}) {
   const root = mkdtempSync(join(tmpdir(), 'xp-gate-drift-'));
   const repoHooks = join(root, 'githooks');
   const installedHooks = join(root, 'hooks');
@@ -49,15 +49,21 @@ function fixture(spec) {
   write(join(repoHooks, 'pre-commit'), '#!/bin/bash\necho repo\n');
   write(join(installedHooks, 'pre-commit'), '#!/bin/bash\necho repo\n');
 
-  // Resolution anchors: pre-commit only makes the installed dir the ADAPTER_DIR
-  // when `adapter-common.sh` is in it (:34), and only reads gate modules from it
-  // when `gate-3.sh` is (:80). Without both, the fixture describes a tier the hook
-  // never resolves to, and the comparison silently targets some other directory
-  // (#495 Round 3 -- the tier list is no longer an assumption).
+  // Resolution anchors. Which tier OWNS the anchor decides which tier executes:
+  // precedence is project-first (AC-495-23), so writing adapter-common.sh into
+  // the repo tree would make the repo tier run and these global-vs-repo drift
+  // comparisons would have no executed counterpart to describe.
+  //
+  // The default here is therefore the GLOBAL-anchored world: a repo that carries
+  // faithful copies in githooks/ but has not taken the tier over. Consumers that
+  // never run `xp-gate init` are in exactly this shape, and it is what the drift
+  // surface is for. Tests that want the project tier to win pass
+  // { projectTakesOver: true }.
   const ANCHOR = '#!/bin/bash\nanchor\n';
+  const projectOwnsAnchor = options.projectTakesOver === true;
   for (const anchor of ['adapter-common.sh', 'gate-3.sh']) {
     if (spec[anchor]) continue;
-    write(join(repoHooks, anchor), ANCHOR);
+    if (projectOwnsAnchor) write(join(repoHooks, anchor), ANCHOR);
     write(join(installedAdapters, anchor), ANCHOR);
   }
 
