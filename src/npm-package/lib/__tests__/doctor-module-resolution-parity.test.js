@@ -250,11 +250,31 @@ describe('doctor module resolution parity with pre-commit (#495)', () => {
     // Anti-vacuity for the whole feature: if the hook re-grew a literal cascade,
     // the single-source-of-truth claim would be false even while scenarios pass.
     expect(PRE_COMMIT).toContain('hook-module-resolution.sh');
-    expect(PRE_COMMIT).toContain('HOOK_ADAPTER_TIERS');
-    expect(PRE_COMMIT).toContain('HOOK_GATE_TIERS');
+    // MENTIONING the array is not enough -- this assertion used to stop at
+    // `toContain('HOOK_ADAPTER_TIERS')`, which the array's own declaration
+    // satisfies. The hook sourced the generated file and then resolved
+    // ADAPTER_DIR with a hand-written global-first cascade that never read the
+    // array, so the data was dead weight and the spec change had no effect at
+    // runtime while this test stayed green. Require an actual consumption.
+    //
+    // The readers expand the table indirectly (`eval "set -- ${tiers_var}[@]"`,
+    // because the same helper serves both tables), so look for the call sites
+    // that name each table rather than for a literal `${NAME[@]}`.
+    expect(PRE_COMMIT, 'ADAPTER_DIR is never resolved from HOOK_ADAPTER_DIR_TIERS').toMatch(
+      /_hook_resolve(?:_dir)?\s+['"][^'"]+['"]\s+HOOK_ADAPTER_DIR_TIERS/,
+    );
+    expect(PRE_COMMIT, 'GATE_DIR is never resolved from HOOK_GATE_TIERS').toMatch(
+      /_hook_resolve(?:_dir)?\s+['"][^'"]+['"]\s+HOOK_GATE_TIERS/,
+    );
     // The old hand-written chains must be gone.
     expect(PRE_COMMIT).not.toContain('$ADAPTER_DIR/${lang}.sh');
     expect(PRE_COMMIT).not.toMatch(/if \[ -f "\$ADAPTER_DIR\/gate-3\.sh" \]; then/);
+    // And the ADAPTER_DIR cascade specifically must not be re-typed: a literal
+    // "global first, then project" if/elif is exactly the order this data
+    // replaces.
+    expect(PRE_COMMIT, 'ADAPTER_DIR still has a hand-written global-first cascade').not.toMatch(
+      /if \[ -f "\$GLOBAL_ADAPTER_DIR\/adapter-common\.sh" \][\s\S]{0,120}ADAPTER_DIR="\$GLOBAL_ADAPTER_DIR"/,
+    );
     // And every tier the JS declares must appear in the emitted shell data.
     for (const t of RESOLUTION_ORDER) {
       expect(RESOLUTION_DATA).toContain(`${t.tier_id}|${t.base}|${t.template}`);
