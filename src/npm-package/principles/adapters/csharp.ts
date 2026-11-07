@@ -49,6 +49,35 @@ export class CSharpAdapter extends BaseAdapter implements Adapter {
     return this.createParseResult('csharp');
   }
 
+  /**
+   * Scan `regex` over the file and record one code match per surviving hit.
+   *
+   * Methods and constructors are found by two different patterns, but they
+   * produce the same shape (name, paramCount, body metrics) and share the
+   * reserved-word guard. Keeping the two loops separate duplicated that logic
+   * and raised this method's complexity for no benefit.
+   */
+  private collectDeclarations(
+    regex: RegExp,
+    kind: 'function' | 'constructor',
+    into: unknown[],
+  ): void {
+    regex.lastIndex = 0;
+    let match: RegExpExecArray | null;
+    while ((match = regex.exec(this.fileContent)) !== null) {
+      const name = match[1];
+      // Constructors and `new` expressions look like the patterns above; the
+      // reserved words are not method names as far as the rules care.
+      if (CSharpAdapter.RESERVED.has(name)) continue;
+
+      const params = match[2].trim();
+      const codeMatch = this.createCodeMatch(name, kind, match.index);
+      this.annotate(codeMatch, 'paramCount', params === '' ? 0 : params.split(',').length);
+      this.annotateBodyMetrics(codeMatch);
+      into.push(codeMatch);
+    }
+  }
+
   extractFunctions(): unknown[] {
     const matches: unknown[] = [];
 
@@ -56,38 +85,19 @@ export class CSharpAdapter extends BaseAdapter implements Adapter {
     // then either a block `{`, an expression body `=>`, or `;` (abstract /
     // interface members). `async` and generics (`Task<int>`) must be tolerated
     // or every async method in a modern codebase is invisible.
-    const methodRegex =
-      /(?:^|\n)[ \t]*(?:(?:public|private|protected|internal|static|async|override|virtual|sealed|abstract|extern|unsafe|new|partial)\s+)*(?:[\w.<>\[\],?]+\s+)?([A-Za-z_]\w*)\s*(?:<[^>]*>)?\s*\(([^)]*)\)\s*(?:where\s[^{;]*)?(?:=>|\{|;)/g;
-
-    let match: RegExpExecArray | null;
-    while ((match = methodRegex.exec(this.fileContent)) !== null) {
-      const name = match[1];
-      // Constructors and `new` expressions look like the pattern above; the
-      // reserved words are not method names as far as the rules care.
-      if (CSharpAdapter.RESERVED.has(name)) continue;
-
-      const params = match[2].trim();
-      const paramCount = params === '' ? 0 : params.split(',').length;
-
-      matches.push(this.createCodeMatch(name, 'function', match.index));
-      const fnMatch = matches[matches.length - 1];
-      this.annotate(fnMatch, 'paramCount', paramCount);
-      this.annotateBodyMetrics(fnMatch);
-    }
+    this.collectDeclarations(
+      /(?:^|\n)[ \t]*(?:(?:public|private|protected|internal|static|async|override|virtual|sealed|abstract|extern|unsafe|new|partial)\s+)*(?:[\w.<>\[\],?]+\s+)?([A-Za-z_]\w*)\s*(?:<[^>]*>)?\s*\(([^)]*)\)\s*(?:where\s[^{;]*)?(?:=>|\{|;)/g,
+      'function',
+      matches,
+    );
 
     // Constructors: `public Foo(...)` has no return type, so the regex above
     // can miss it when the modifier list is empty or minimal.
-    const ctorRegex = /(?:^|\n)[ \t]*(?:(?:public|private|protected|internal|static)\s+)*([A-Za-z_]\w*)\s*\(([^)]*)\)\s*(?::\s*(?:base|this)\s*\([^)]*\)\s*)?\{/g;
-    while ((match = ctorRegex.exec(this.fileContent)) !== null) {
-      const name = match[1];
-      if (CSharpAdapter.RESERVED.has(name)) continue;
-      const params = match[2].trim();
-      const paramCount = params === '' ? 0 : params.split(',').length;
-      matches.push(this.createCodeMatch(name, 'constructor', match.index));
-      const ctorMatch = matches[matches.length - 1];
-      this.annotate(ctorMatch, 'paramCount', paramCount);
-      this.annotateBodyMetrics(ctorMatch);
-    }
+    this.collectDeclarations(
+      /(?:^|\n)[ \t]*(?:(?:public|private|protected|internal|static)\s+)*([A-Za-z_]\w*)\s*\(([^)]*)\)\s*(?::\s*(?:base|this)\s*\([^)]*\)\s*)?\{/g,
+      'constructor',
+      matches,
+    );
 
     return matches;
   }

@@ -187,6 +187,32 @@ function lineOf(src: string, index: number): number {
   return src.substring(0, index).split('\n').length;
 }
 
+/**
+ * Offsets of the literals that are the initializer of a named constant.
+ *
+ * `const NAME = 3` / `const NAME: T = 3`. The magic-number rule skips a number
+ * that IS the initializer of a named constant, because the rule's own advice is
+ * "consider using a named constant instead" — reporting the constant it just
+ * asked for made the violation unfixable.
+ *
+ * The value's OFFSET is captured rather than the value itself so the literal can
+ * be matched positionally: the same number appearing twice must be judged
+ * separately, and only the declaration occurrence is exempt.
+ *
+ * Lives at module scope: as a method it pushed `TypeScriptAdapter` to 16
+ * methods, past the god-class threshold of 15, for a pure helper that never
+ * reads instance state.
+ */
+function namedConstLiteralOffsets(masked: string): Set<number> {
+  const namedConstRe = /\b(?:const|readonly)\s+[A-Za-z_$][\w$]*\s*(?::[^=;]+)?=\s*(-?\d+(?:\.\d+)?)\s*;/g;
+  const offsets = new Set<number>();
+  let c: RegExpExecArray | null;
+  while ((c = namedConstRe.exec(masked)) !== null) {
+    offsets.add(c.index + c[0].lastIndexOf(c[1]));
+  }
+  return offsets;
+}
+
 /** The three quoted states shared by the parameter/paren scanners. */
 /** Count top-level, comma-separated parameters in a raw parameter list. */
 function countParams(rawList: string): number {
@@ -499,17 +525,9 @@ export class TypeScriptAdapter extends BaseAdapter implements Adapter {
    */
   extract(): Array<{ value: number; line: number }> {
     const src = this.fileContent;
-    const results: Array<{ value: number; line: number }> = [];
     const masked = this.maskedSource;
-
-    // `const NAME = 3` / `const NAME: T = 3` -- capture the value's offset so the
-    // literal can be matched positionally rather than by value.
-    const namedConstRe = /\b(?:const|readonly)\s+[A-Za-z_$][\w$]*\s*(?::[^=;]+)?=\s*(-?\d+(?:\.\d+)?)\s*;/g;
-    const namedConstOffsets = new Set<number>();
-    let c: RegExpExecArray | null;
-    while ((c = namedConstRe.exec(masked)) !== null) {
-      namedConstOffsets.add(c.index + c[0].lastIndexOf(c[1]));
-    }
+    const namedConstOffsets = namedConstLiteralOffsets(masked);
+    const results: Array<{ value: number; line: number }> = [];
 
     const numRe = /(?<![\w$.])(-?\d+(?:\.\d+)?)(?![\w$])/g;
     let m: RegExpExecArray | null;
