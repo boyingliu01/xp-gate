@@ -236,3 +236,67 @@ TS 版的文件头自己写着：
 - 不变量只存在于人的记忆里
 
 **治理的起点不是加更多门禁，是让 XP-Gate 先通过它自己要求别人通过的那些门禁。**
+
+---
+
+## 9. 补充实测（2026-11-07，写本文档时发现）
+
+### 9.1 三路径不一致，且有实测数字（#778）
+
+一个只有 `src/bad.ts`（CCN 6）的 fixture 项目：
+
+| 路径 | 结果 |
+|---|---|
+| git hook | 跑全 13 道门禁 |
+| CLI `xp-gate check --all` | **9 passed / 1 failed / 7 skipped / 17 total** |
+| skill（sprint-flow VERIFY） | 直接继承 CLI 结果 |
+
+CLI 自己的输出写着：
+
+```
+not run from the CLI: 0, 1, 5, 9, 11, 12, 13 (pre-commit only; `git commit` runs them)
+```
+
+**17 个面里有 7 个在 CLI 路径上结构性缺席**，而汇总行照样输出成 verdict。
+sprint-flow 在 VERIFY 阶段调 `xp-gate check --all`，拿到「9 passed / 1 failed」，
+**无从知道 Code Quality / Tests / Build Integrity / Sprint Flow / File Hygiene /
+Compiler Strictness 从未被咨询过**。
+
+这是 #575（SKIP 不进 verdict）的同类问题，只是往外一层：那里是「一次运行里跳过几道门」，
+这里是「整条执行路径跑不了那几道门」。
+
+### 9.2 CLI 路径慢到不可用（#779）
+
+同一个单文件项目，`xp-gate check --all` 实测：
+
+```
+101s / 117s / >120s(被杀)
+```
+
+根因 `gate-runner.js:434`：
+
+```js
+const args = ['-y', 'tsx', impl.entry, '--run'];
+```
+
+每道 TS 门禁都付一次完整 `npx` 解析。实测 `npx -y tsx` = **2.79s**，`node` = **0.21s**，
+**13 倍**。三道 TS 门禁串行就是 8 秒起步，而且这还没算它们真正的工作。
+
+**这是 #640 的 CLI 版本。** #640 分析的是 pre-commit（7.3 分钟里 80% 是冷启动），
+CLI 路径是同一批 gate fragments 的另一个消费者，有它自己的冷启动剖面，
+**没被那次分析覆盖**。
+
+更荒谬的是：没有 Python 文件的项目，`python-health` 仍要启动 tsx 才能发现
+「没有 Python 文件」。性能任务的 O5（无内容可检时 0 成本短路）从来没应用到 CLI 路径。
+
+### 9.3 这两条如何印证本文档的论点
+
+- **9.1 是「不变量只存在于记忆里」的直接证据**：三条路径应一致，但没有任何东西检查
+- **9.2 是「加门禁 = 加进程」的直接证据**：17 道门禁 = 17 次冷启动起步
+- 两者都**不是某个函数写错了**，是结构允许它们发生
+
+### 9.4 顺带发现的一处 AI 生成痕迹
+
+`gate-runner.js:437-445` 同一段注释**完整重复了两遍**。不影响功能，但它是
+「AI 生成、作者不看代码」的一个可观测后果——重复注释没有测试能抓，只有人眼能看出来。
+若治理方案完全依赖自动化，这类问题会持续累积。
