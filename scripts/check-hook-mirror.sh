@@ -221,4 +221,42 @@ Fix: node src/npm-package/scripts/sync-package-content.js --fix"
   done
 fi
 
+# Whole-tree mirrors with no guard, discovered rather than listed.
+#
+# Every block above was added one incident at a time -- principles after a
+# hand-copied 280-line java.ts (#507), mutation after a fix shipped only to this
+# repo (#544), mock-policy after three fixes landed canonical-only, plugins after
+# a mirror-only edit was silently rolled back by prepack (#542), scripts after
+# delphi-external-review.cjs drifted 327 lines. Each guard closed the hole that
+# had just been found; none asked which trees were still unguarded.
+#
+# Measured 2026-11-07: 775 files / 110,282 lines under src/npm-package/ are
+# byte-identical copies with no parity coverage and no lint coverage
+# (pre-commit's MIRROR_PATH_FILTER excludes the whole tree) -- 59.7% of the
+# mirror. src/build-integrity and the root skills/ tree were among the gaps.
+#
+# The list below is explicit rather than globbed on purpose. A blanket walk over
+# src/npm-package/*/ demands equality for trees the sync step deliberately does
+# not ship (plugins/AGENTS.md, plugins/shared/, most of scripts/), and a guard
+# that fails on a correct tree gets disabled instead of fixed. Adding a mirror
+# tree therefore means adding its name here -- one line, next to the reason.
+for mirror_tree in src/npm-package/build-integrity src/npm-package/skills; do
+  tree_name="${mirror_tree#src/npm-package/}"
+  tree_name="${tree_name#src/}"
+
+  canonical_tree=""
+  if [ -d "src/$tree_name" ]; then
+    canonical_tree="src/$tree_name"
+  elif [ -d "$tree_name" ]; then
+    canonical_tree="$tree_name"
+  fi
+  [ -n "$canonical_tree" ] || continue
+  [ -d "$mirror_tree" ] || continue
+
+  tree_diff=$(diff -rq -x '__tests__' "$canonical_tree" "$mirror_tree" 2>&1 || true)
+  [ -z "$tree_diff" ] || fail "mirror tree drift ($canonical_tree vs $mirror_tree):
+$tree_diff
+Fix: node src/npm-package/scripts/sync-package-content.js --fix"
+done
+
 printf '%s\n' "PASS: canonical githooks and npm package mirrors are byte- and mode-identical"
