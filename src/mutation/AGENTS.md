@@ -3,7 +3,7 @@
 **Generated:** 2026-11-04
 **Commit:** eb2097b0
 **Branch:** sprint/2026-11-03-02
-**Version:** 0.36.1.0
+**Version:** 0.37.0.0
 
 ## OVERVIEW
 **Gate M** (incremental mutation testing) + **Gate M2** helpers (test-layer detection used by `src/mock-policy/`). Pre-push quality gate. TypeScript-only; uses Stryker.

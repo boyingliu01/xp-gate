@@ -5249,3 +5249,94 @@ specification:
           criteria: 规范化后发生碰撞的两个分隔符键必须合并而非覆盖；缺失基线与非法 JSON 退出码为
             2（没有证据），绝不为 0
           test_type: unit
+
+
+    # ============================================================
+    # REQ-762: ccn-report 的 rescue 契约
+    # ============================================================
+    - id: REQ-762
+      description: >-
+        ccn-report.cjs 的 CCN 复核走两条路：verifyRowCcn 定位到函数体就重算，定位不到则在
+        250 行跨度内视为 lizard 解析伪影。rescue 路径原地改写 verifyRowCcn 的返回对象
+        （res.ccn / res.corrected），因此该返回值必须保持普通可变对象。
+      priority: high
+      acceptance_criteria:
+        - id: AC-762-01
+          criteria: >-
+            verifyRowCcn 的返回值未被冻结，可原地赋 ccn 与 corrected；为其加 Object.freeze
+            会让所有 rescued 行静默退回 unverified，正是 rescue 要防的缺陷。
+          test_type: unit
+        - id: AC-762-02
+          criteria: >-
+            rescue 真的用函数体重算值替换错误的 CCN（verifyRowCcn -> findFunctionBody ->
+            ccnOfBody 组合），而非只满足可变性这个前提；函数名不在搜索窗口内时返回 null，
+            该行保持 unverified。
+          test_type: unit
+
+    # ============================================================
+    # REQ-767: init 写 .gitignore，不把自己的产物当成项目源码
+    # ============================================================
+    - id: REQ-767
+      description: >-
+        xp-gate init 往项目里写 githooks 适配器副本、.xp-gate/ 模块镜像和生成的
+        .xp-gate-config.json，却从不写 .gitignore。这些机器相关产物全部以未跟踪条目出现在
+        git status 里，file-hygiene/debt 门禁把生成物当成未提交源码，造成用户无法自行修复的
+        Gate 6 零容忍 BLOCK。
+      priority: high
+      acceptance_criteria:
+        - id: AC-767-01
+          criteria: >-
+            项目没有 .gitignore 时创建之，且内容含 .xp-gate-config.json 等 init 生成的
+            产物路径。
+          test_type: unit
+        - id: AC-767-02
+          criteria: >-
+            用户已有的规则原样保留，不被覆盖、不被重排；只追加缺失的规则，已在文件中存在的
+            规则（含首尾有空白的写法）不重复追加。
+          test_type: unit
+        - id: AC-767-03
+          criteria: 幂等——第二次运行不追加任何规则，文件级字节完全一致。
+          test_type: unit
+        - id: AC-767-04
+          criteria: >-
+            绝不忽略可提交的 git 入口与注册表（githooks/pre-commit、pre-push、
+            gate-*.sh、adapter-common.sh、gate-registry.sh、githooks/lib/），只忽略 init
+            实际安装的按语言适配器副本；文件末尾无换行时用空行与已有内容分隔。
+          test_type: unit
+        - id: AC-767-05
+          criteria: >-
+            写入是原子的——写入失败（如 ENOSPC）时用户原有 .gitignore 保持完整不被截断，
+            且不残留 .xp-gate-tmp 临时文件；写入失败向上抛出而非报成功。
+          test_type: unit
+
+    # ============================================================
+    # REQ-GATESEL: pre-commit 允许迭代期只跑部分门禁
+    # 注：测试文件里写作 AC-A2-*（A2 是该特性的内部代号），但 AC-A2-01/02
+    #     这一编号已被 REQ-A2（#537 覆盖矩阵）占用，因此 spec 侧改用
+    #     AC-GATESEL-* 以保证全局唯一。
+    # ============================================================
+    - id: REQ-GATESEL
+      description: >-
+        迭代过程中逐个门禁等待成本过高，pre-commit 提供 XP_GATE_ONLY_GATE 选择器，让一次
+        提交只跑指定的门禁。风险在于未选中的门禁若被当成 PASS，等于静默关掉了它们，因此
+        未选中必须以 SKIP 显式记录，且受保护分支上拒绝使用。
+      priority: high
+      acceptance_criteria:
+        - id: AC-GATESEL-01
+          criteria: 未设置或设置为空时选择器不生效，全部门禁照常运行。
+          test_type: integration
+        - id: AC-GATESEL-02
+          criteria: >-
+            指定单个 id 时只启用该门禁；逗号分隔列表逐项生效且不影响其他门禁；多位数字 id
+            不被前导数字误匹配（如 13 不应被 1 选中）；id 两侧空白可容忍。
+          test_type: integration
+        - id: AC-GATESEL-03
+          criteria: >-
+            未被选中的门禁记为 SKIP 而非 PASS——每个 consulted 选择器的分支都要写入 SKIP
+            明细，使"没跑"与"通过"在报告里不可能混淆。
+          test_type: integration
+        - id: AC-GATESEL-04
+          criteria: >-
+            受保护分支上拒绝使用该选择器；生效中的选择必须打印可见的 PARTIAL GATE RUN
+            横幅。
+          test_type: integration
