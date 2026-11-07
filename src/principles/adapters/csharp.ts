@@ -23,6 +23,30 @@ interface CSharpLexState {
 }
 
 /**
+ * C# method declaration: optional modifiers, return type, name, params, then
+ * either a block `{`, an expression body `=>`, or `;` (abstract / interface
+ * members). `async` and generics (`Task<int>`) must be tolerated or every async
+ * method in a modern codebase is invisible.
+ *
+ * Module scope, not a local in `extractFunctions`: the complexity analyzer
+ * counts branches by scanning the function body text, and a regex literal is
+ * dense in `|` and `?`. Kept inline, these two patterns alone put
+ * `extractFunctions` at CCN 18 — a number that described the regex source
+ * rather than the code. The patterns are constant, so module scope is also where
+ * they belong.
+ */
+const METHOD_DECLARATION =
+  /(?:^|\n)[ \t]*(?:(?:public|private|protected|internal|static|async|override|virtual|sealed|abstract|extern|unsafe|new|partial)\s+)*(?:[\w.<>\[\],?]+\s+)?([A-Za-z_]\w*)\s*(?:<[^>]*>)?\s*\(([^)]*)\)\s*(?:where\s[^{;]*)?(?:=>|\{|;)/g;
+
+/**
+ * Constructors: `public Foo(...)` has no return type, so METHOD_DECLARATION can
+ * miss it when the modifier list is empty or minimal. Same module-scope
+ * rationale.
+ */
+const CONSTRUCTOR_DECLARATION =
+  /(?:^|\n)[ \t]*(?:(?:public|private|protected|internal|static)\s+)*([A-Za-z_]\w*)\s*\(([^)]*)\)\s*(?::\s*(?:base|this)\s*\([^)]*\)\s*)?\{/g;
+
+/**
  * C# language adapter for the principles checker (Gate 4).
  *
  * Why this file exists: `analyzer.ts`'s `adapterMap` had no `.cs` entry, so
@@ -80,25 +104,8 @@ export class CSharpAdapter extends BaseAdapter implements Adapter {
 
   extractFunctions(): unknown[] {
     const matches: unknown[] = [];
-
-    // C# method declaration: optional modifiers, return type, name, params,
-    // then either a block `{`, an expression body `=>`, or `;` (abstract /
-    // interface members). `async` and generics (`Task<int>`) must be tolerated
-    // or every async method in a modern codebase is invisible.
-    this.collectDeclarations(
-      /(?:^|\n)[ \t]*(?:(?:public|private|protected|internal|static|async|override|virtual|sealed|abstract|extern|unsafe|new|partial)\s+)*(?:[\w.<>\[\],?]+\s+)?([A-Za-z_]\w*)\s*(?:<[^>]*>)?\s*\(([^)]*)\)\s*(?:where\s[^{;]*)?(?:=>|\{|;)/g,
-      'function',
-      matches,
-    );
-
-    // Constructors: `public Foo(...)` has no return type, so the regex above
-    // can miss it when the modifier list is empty or minimal.
-    this.collectDeclarations(
-      /(?:^|\n)[ \t]*(?:(?:public|private|protected|internal|static)\s+)*([A-Za-z_]\w*)\s*\(([^)]*)\)\s*(?::\s*(?:base|this)\s*\([^)]*\)\s*)?\{/g,
-      'constructor',
-      matches,
-    );
-
+    this.collectDeclarations(METHOD_DECLARATION, 'function', matches);
+    this.collectDeclarations(CONSTRUCTOR_DECLARATION, 'constructor', matches);
     return matches;
   }
 

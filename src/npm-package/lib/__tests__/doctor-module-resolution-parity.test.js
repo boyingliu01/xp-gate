@@ -250,11 +250,31 @@ describe('doctor module resolution parity with pre-commit (#495)', () => {
     // Anti-vacuity for the whole feature: if the hook re-grew a literal cascade,
     // the single-source-of-truth claim would be false even while scenarios pass.
     expect(PRE_COMMIT).toContain('hook-module-resolution.sh');
-    expect(PRE_COMMIT).toContain('HOOK_ADAPTER_TIERS');
-    expect(PRE_COMMIT).toContain('HOOK_GATE_TIERS');
+    // MENTIONING the array is not enough -- this assertion used to stop at
+    // `toContain('HOOK_ADAPTER_TIERS')`, which the array's own declaration
+    // satisfies. The hook sourced the generated file and then resolved
+    // ADAPTER_DIR with a hand-written global-first cascade that never read the
+    // array, so the data was dead weight and the spec change had no effect at
+    // runtime while this test stayed green. Require an actual consumption.
+    //
+    // The readers expand the table indirectly (`eval "set -- ${tiers_var}[@]"`,
+    // because the same helper serves both tables), so look for the call sites
+    // that name each table rather than for a literal `${NAME[@]}`.
+    expect(PRE_COMMIT, 'ADAPTER_DIR is never resolved from HOOK_ADAPTER_DIR_TIERS').toMatch(
+      /_hook_resolve(?:_dir)?\s+['"][^'"]+['"]\s+HOOK_ADAPTER_DIR_TIERS/,
+    );
+    expect(PRE_COMMIT, 'GATE_DIR is never resolved from HOOK_GATE_TIERS').toMatch(
+      /_hook_resolve(?:_dir)?\s+['"][^'"]+['"]\s+HOOK_GATE_TIERS/,
+    );
     // The old hand-written chains must be gone.
     expect(PRE_COMMIT).not.toContain('$ADAPTER_DIR/${lang}.sh');
     expect(PRE_COMMIT).not.toMatch(/if \[ -f "\$ADAPTER_DIR\/gate-3\.sh" \]; then/);
+    // And the ADAPTER_DIR cascade specifically must not be re-typed: a literal
+    // "global first, then project" if/elif is exactly the order this data
+    // replaces.
+    expect(PRE_COMMIT, 'ADAPTER_DIR still has a hand-written global-first cascade').not.toMatch(
+      /if \[ -f "\$GLOBAL_ADAPTER_DIR\/adapter-common\.sh" \][\s\S]{0,120}ADAPTER_DIR="\$GLOBAL_ADAPTER_DIR"/,
+    );
     // And every tier the JS declares must appear in the emitted shell data.
     for (const t of RESOLUTION_ORDER) {
       expect(RESOLUTION_DATA).toContain(`${t.tier_id}|${t.base}|${t.template}`);
@@ -370,6 +390,58 @@ describe('doctor module resolution parity with pre-commit (#495)', () => {
       expect(samePath(executedModulePath('gate-4.sh', dirs), hook.gateModule), `${scenario.name} (gate-4.sh)`).toBe(true);
       expect(samePath(executedModulePath('adapter-common.sh', dirs), hook.common), `${scenario.name} (adapter-common.sh)`).toBe(true);
     }
+  });
+
+  it('AC-495-23: a project install OVERRIDES the global install (project is the higher tier)', () => {
+    // The install modes exist so the global copy is a DEFAULT that a project can
+    // override: "no per-project customisation -> use the global gate suite; this
+    // project has special needs -> its own copy wins". The cascade used to try
+    // GLOBAL first, which made a project's githooks/ unreachable whenever the
+    // machine had a global install -- so editing the repo's own gate scripts
+    // changed nothing, silently.
+    const idxGlobal = ADAPTER_DIR_ORDER.findIndex((t) => t.tier_id === 'global');
+    const idxProject = ADAPTER_DIR_ORDER.findIndex((t) => t.tier_id === 'project');
+    expect(idxProject, 'no project tier in ADAPTER_DIR_ORDER').toBeGreaterThanOrEqual(0);
+    expect(idxGlobal, 'no global tier in ADAPTER_DIR_ORDER').toBeGreaterThanOrEqual(0);
+    expect(
+      idxProject,
+      'project must be consulted BEFORE global, or a per-project gate suite can never take effect',
+    ).toBeLessThan(idxGlobal);
+
+    // And the hook, driven by the generated data, must actually pick the project
+    // copy when both trees carry the module.
+    const { resolveExecutedModuleDirs, executedModulePath } = require('../doctor');
+    const t = fourTierTree({
+      'adapter-common.sh': ['globalFlat', 'projectFlat'],
+      'typescript.sh': ['globalFlat', 'projectNested'],
+      'gate-3.sh': ['globalFlat', 'projectFlat'],
+    });
+    const dirs = resolveExecutedModuleDirs({
+      globalAdapterDir: t.globalAdapters,
+      projectGithooks: t.projectGithooks,
+      scriptDir: t.scriptDir,
+    });
+    const hook = hookResolvesAll(blocks, resolverText, t, 'typescript', 'gate-3.sh');
+
+    expect(
+      samePath(hook.adapterDir, t.projectGithooks),
+      `ADAPTER_DIR resolved to ${hook.adapterDir}; the project tier must win over global`,
+    ).toBe(true);
+    expect(samePath(hook.langPath, join(t.projectGithooks, 'adapters', 'typescript.sh'))).toBe(true);
+    expect(samePath(executedModulePath('typescript.sh', dirs), hook.langPath)).toBe(true);
+  });
+
+  it('AC-495-24: a project with no githooks/ still uses the global install', () => {
+    // The override must not become "the global install stops working": a repo
+    // that never ran `xp-gate init` has to keep resolving to the global tree.
+    const t = fourTierTree({
+      'adapter-common.sh': ['globalFlat'],
+      'typescript.sh': ['globalFlat'],
+      'gate-3.sh': ['globalFlat'],
+    });
+    const hook = hookResolvesAll(blocks, resolverText, t, 'typescript', 'gate-3.sh');
+    expect(samePath(hook.adapterDir, t.globalAdapters)).toBe(true);
+    expect(samePath(hook.langPath, join(t.globalAdapters, 'typescript.sh'))).toBe(true);
   });
 
   it('AC-495-22: a module no tier installs resolves to nothing on both sides', () => {
