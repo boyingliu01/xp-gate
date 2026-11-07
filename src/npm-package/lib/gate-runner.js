@@ -316,9 +316,10 @@ const TS_GATE_TIMEOUT_MS = 120000;
 const GATE_NOT_RUN = 'NOT_RUN';
 
 /**
- * Run a TypeScript gate module via npx tsx.
- * Finds the .ts entry point, spawns tsx with --run flag.
- * Falls back to bash script if TypeScript module not found.
+ * Run a TypeScript gate module.
+ * Finds the .ts entry point, spawns it through the fastest available runner
+ * (a local tsx via `node`, else `npx tsx`), with the --run flag.
+ * Falls back to a bash script if the TypeScript module is not found.
  */
 /**
  * Resolve the working directory for a gate run.
@@ -326,7 +327,7 @@ const GATE_NOT_RUN = 'NOT_RUN';
  * `targetPath` is documented as "file or directory" (that is what
  * `xp-gate check <file>` passes), but spawnSync's `cwd` must be a directory.
  * Resolving a FILE path into cwd made spawnSync fail with a bare ENOENT that read
- * as "Gate 3 failed to run npx tsx" — a tool failure reported under the label of a
+ * as "Gate 3 failed to run" — a tool failure reported under the label of a
  * code verdict. The file's own directory is the meaningful cwd in that case.
  */
 function resolveGateCwd(targetPath) {
@@ -359,6 +360,70 @@ function resolveNpxInvocation(args) {
   const npxCli = path.join(path.dirname(process.execPath), 'node_modules', 'npm', 'bin', 'npx-cli.js');
   if (fs.existsSync(npxCli)) return [process.execPath, [npxCli, ...args]];
   return ['npx', args];
+}
+
+/**
+ * Locate an installed `tsx` entry, so a TS gate can be started with `node`
+ * directly instead of through npx.
+ *
+ * Measured on this repo (Windows, warm caches): `npx -y tsx <entry> --run`
+ * takes 6.9-7.8 s, `node <tsx-cli.mjs> <entry> --run` takes 1.7-1.9 s. The
+ * ~5 s difference is npm resolving the package on every single gate; the gate's
+ * own work is a small part of either number. With three TS-backed gates in
+ * `check --all`, that is ~15 s spent deciding where tsx lives.
+ *
+ * This is the same trade the pre-commit hook already makes for archlint
+ * ("1909 ms via npx vs 319 ms direct" — githooks/pre-commit). The CLI path
+ * never got it.
+ *
+ * Search order, cheapest-and-most-certain first:
+ *   1. this package's own node_modules (a global install has its deps beside it)
+ *   2. the consumer project's node_modules (a devDependency on a dev machine)
+ *   3. beside the running node binary (npm's own layout)
+ *
+ * Returns null when none exists, and the caller falls back to npx. That
+ * fallback is load-bearing: the published package declares zero dependencies
+ * and `engines.node >= 18`, so tsx is genuinely absent on a clean install.
+ * This must stay a fast path, never a requirement.
+ *
+ * @param {string} [consumerCwd]
+ * @returns {string|null} absolute path to tsx's cli entry
+ */
+function findTsxEntry(consumerCwd) {
+  const candidates = [
+    path.join(__dirname, '..', 'node_modules', 'tsx', 'dist', 'cli.mjs'),
+    consumerCwd && path.join(consumerCwd, 'node_modules', 'tsx', 'dist', 'cli.mjs'),
+    path.join(path.dirname(process.execPath), 'node_modules', 'tsx', 'dist', 'cli.mjs'),
+  ].filter(Boolean);
+
+  for (const candidate of candidates) {
+    try {
+      if (fs.existsSync(candidate)) return candidate;
+    } catch {
+      // A permission error on one candidate must not hide the others.
+    }
+  }
+  return null;
+}
+
+/**
+ * Build the argv that runs a TS gate entry.
+ *
+ * Prefers a direct `node` start and falls back to `npx -y tsx`. Both branches
+ * append the gate's own arguments identically, so the gate cannot tell which
+ * route started it — the difference is startup cost only.
+ *
+ * @param {string} entry gate module to run
+ * @param {string[]} gateArgs arguments belonging to the gate
+ * @param {string} [consumerCwd]
+ * @returns {[string, string[]]}
+ */
+function resolveTsRunner(entry, gateArgs, consumerCwd) {
+  const tsxEntry = findTsxEntry(consumerCwd);
+  if (tsxEntry) {
+    return [process.execPath, [tsxEntry, entry, ...gateArgs]];
+  }
+  return resolveNpxInvocation(['-y', 'tsx', entry, ...gateArgs]);
 }
 
 /**
@@ -431,19 +496,14 @@ function runTsGate(gateModule, targetPath, opts = {}) {
     return GATE_NOT_RUN;
   }
 
-  const args = ['-y', 'tsx', impl.entry, '--run'];
-  if (targetPath) args.push('--cwd', targetPath);
+  const gateArgs = ['--run'];
+  if (targetPath) gateArgs.push('--cwd', targetPath);
 
   // spawnSync reports a spawn failure (npx missing) on `error`, throws only on a
   // malformed argv, and reports a killed child (timeout, signal) as a null status.
   // All three mean "the gate did not report a verdict", which must not be read as
   // success: a gate that never ran is not a gate that passed.
-  //
-  // spawnSync reports a spawn failure (npx missing) on `error`, throws only on a
-  // malformed argv, and reports a killed child (timeout, signal) as a null status.
-  // All three mean "the gate did not report a verdict", which must not be read as
-  // success: a gate that never ran is not a gate that passed.
-  const [command, commandArgs] = resolveNpxInvocation(args);
+  const [command, commandArgs] = resolveTsRunner(impl.entry, gateArgs, targetCwd);
   try {
     const result = spawnSync(command, commandArgs, {
       stdio: 'inherit',
@@ -451,12 +511,12 @@ function runTsGate(gateModule, targetPath, opts = {}) {
       timeout: TS_GATE_TIMEOUT_MS,
     });
     if (result.error) {
-      console.error(`Gate ${gateModule}: failed to run npx tsx: ${result.error.message}`);
+      console.error(`Gate ${gateModule}: failed to start (${command}): ${result.error.message}`);
       return 1;
     }
     return result.status === null ? 1 : result.status;
   } catch (err) {
-    console.error(`Gate ${gateModule}: could not spawn npx tsx: ${err.message}`);
+    console.error(`Gate ${gateModule}: could not spawn (${command}): ${err.message}`);
     return 1;
   }
 }
@@ -798,4 +858,4 @@ async function runGate(gateId, targetPath, opts = {}) {
   return 1;
 }
 
-module.exports = { findConsumerGateVariant, GATE_REGISTRY, GATE_NOT_RUN, getGateInfo, getAllGates, runGate, resolveAlias, getAliases, runGateAdapter, findTsGateEntry, resolveGateScript, SOURCE_FILE_EXTENSIONS, resolveAllModeChangedFiles, describeEmptyChangedFiles, describeChangedFilesScope };
+module.exports = { findConsumerGateVariant, findTsxEntry, resolveTsRunner, GATE_REGISTRY, GATE_NOT_RUN, getGateInfo, getAllGates, runGate, resolveAlias, getAliases, runGateAdapter, findTsGateEntry, resolveGateScript, SOURCE_FILE_EXTENSIONS, resolveAllModeChangedFiles, describeEmptyChangedFiles, describeChangedFilesScope };
