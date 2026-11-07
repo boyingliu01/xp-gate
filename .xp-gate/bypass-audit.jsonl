@@ -15,3 +15,7 @@
 {"commit":"7a162e5acf003d87b01ca64d8fe2a30226505974","timestamp":"2026-11-06T21:10:28+08:00","type":"precommit_bypass","branch":"main"}
 {"commit":"4156e00f0b732f7e63e5c73bcb6796285071d93d","timestamp":"2026-11-06T21:12:50+08:00","type":"precommit_bypass","branch":"main"}
 {"commit":"d74301f5f933b3073c1d132c4ed3a54f8fa37dc6","timestamp":"2026-11-06T23:17:28+08:00","type":"precommit_bypass","branch":"main"}
+{"commit":"9825dabe45f9071a59952e96a75e068bb3ef7e00","timestamp":"2026-11-07T00:12:18+08:00","type":"precommit_bypass","branch":"main"}
+{"commit":"4e7c3cedd909ad1dc1fdd15d86e0c2f030a059c8","timestamp":"2026-11-07T14:01:42+08:00","type":"precommit_bypass","branch":"main"}
+{"commit":"9825dabe45f9071a59952e96a75e068bb3ef7e00","timestamp":"2026-11-07T14:05:00+08:00","type":"bypass_entry_correction","branch":"main","reason":"FALSE POSITIVE: this commit was created by cherry-pick, which does not run pre-commit, so the post-commit marker was absent and the detector read it as --no-verify. The identical change had already passed all 13 gates as b751eae0 on the source branch."}
+{"commit":"4e7c3cedd909ad1dc1fdd15d86e0c2f030a059c8","timestamp":"2026-11-07T14:05:00+08:00","type":"bypass_entry_correction","branch":"main","reason":"FALSE POSITIVE: cherry-picked from b0edaa51, which passed all 13 gates (only Gate 12 WARN for pre-existing trailing whitespace). cherry-pick skips pre-commit, so no marker was written and post-commit logged a bypass that did not happen."}
