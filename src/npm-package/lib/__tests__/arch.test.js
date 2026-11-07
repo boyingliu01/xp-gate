@@ -58,6 +58,15 @@ let sandbox;
 
 beforeEach(() => {
   sandbox = fs.mkdtempSync(path.join(os.tmpdir(), 'xpgate-arch-'));
+  // A `.git` marker is load-bearing for RUNTIME, not just for findProjectRoot.
+  // archlint locates its own project root by walking up from the scan target.
+  // With no marker anywhere up the chain it settles on the user's home
+  // directory and walks every one of its trees -- measured on this machine:
+  // 97,423 ms for an EMPTY temp dir versus 208 ms once a `.git` exists here,
+  // and `--no-git` does not help (git-history churn is not the cost). Without
+  // this marker the file's ~20 real-archlint calls paid ~98 s each, which is
+  // where arch.test.js's 2,146 s came from.
+  fs.mkdirSync(path.join(sandbox, '.git'), { recursive: true });
 });
 
 afterEach(() => {

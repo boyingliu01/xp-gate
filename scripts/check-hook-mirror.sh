@@ -24,12 +24,49 @@ HOOK_MIRROR_FILES="adapter-common.sh hook-module-resolution.sh gate-3.sh gate-4.
 # pre-commit/pre-push live only under hooks/).
 ROOT_MIRROR_FILES="adapter-common.sh gate-registry.sh gate-3.sh gate-4.sh gate-7.sh gate-8.sh gate-9.sh gate-10.sh gate-12-file-hygiene.sh gate-13-compiler-strictness.sh sprint-gate.sh"
 
+# Mode lookup was one `git ls-files -s -- <path>` PER FILE, and compare_pair
+# calls it twice per pair. With 47 pairs that is ~94 git spawns; one spawn costs
+# ~200-260 ms here, so the mode check alone dominated a ~34 s run whose real
+# work is `cmp` and `diff` over a few hundred small files.
+#
+# One multi-path `git ls-files -s` now serves every lookup. A bash-side cache
+# was tried first and was WORSE (measured 100 s+): each `$(index_mode ...)` runs
+# in a subshell, so the array was rebuilt from scratch on every call. A single
+# `git ls-files -s` over ~2400 tracked paths costs ~250 ms, so the modes for
+# precisely the compared paths are fetched once and checked in pure bash.
+_IN_REPO=""
+_TAB=$(printf '\t')
+declare -A MODE_BY_PATH=()
+MODE_TABLE_READY=""
+
 in_git_repo() {
-  git rev-parse --is-inside-work-tree >/dev/null 2>&1
+  if [ -z "$_IN_REPO" ]; then
+    if git rev-parse --is-inside-work-tree >/dev/null 2>&1; then
+      _IN_REPO=yes
+    else
+      _IN_REPO=no
+    fi
+  fi
+  [ "$_IN_REPO" = "yes" ]
+}
+
+# Preload modes for the given paths in ONE git call. `git ls-files -s` prints
+# "<mode> <sha> <stage><TAB><path>"; the path is everything after the FIRST tab
+# and the mode everything before the FIRST space, so a path with spaces stays
+# intact and there is no field-count assumption to get wrong.
+preload_modes() {
+  [ -n "$MODE_TABLE_READY" ] && return 0
+  local line
+  # shellcheck disable=SC2086  # word splitting IS the intent: one path per arg
+  while IFS= read -r line; do
+    [ -n "$line" ] || continue
+    MODE_BY_PATH["${line#*"$_TAB"}"]="${line%% *}"
+  done < <(git -c core.quotepath=false ls-files -s -- "$@")
+  MODE_TABLE_READY=yes
 }
 
 index_mode() {
-  git -c core.quotepath=false ls-files -s -- "$1" | sed -n '1p' | cut -d' ' -f1
+  printf '%s' "${MODE_BY_PATH[$1]:-}"
 }
 
 compare_pair() {
@@ -59,6 +96,21 @@ expected_hook_mirrors=$(printf '%s\n' $HOOK_MIRROR_FILES | LC_ALL=C sort)
 actual_hook_mirrors=$([ -d src/npm-package/hooks ] && find src/npm-package/hooks -type f \
   -not -path '*/__pycache__/*' | sed 's|^src/npm-package/hooks/||' | LC_ALL=C sort || true)
 [ "$expected_hook_mirrors" = "$actual_hook_mirrors" ] || fail "hook mirror file set drifted (expected exactly: $(printf '%s' "$HOOK_MIRROR_FILES" | tr '\n' ' '))"
+
+# Every path compare_pair will ask about, in one list, fetched from the index
+# once. Doing it here (before the loops) is what removes the ~94 git spawns.
+if in_git_repo; then
+  _mode_paths=()
+  # shellcheck disable=SC2086  # word splitting IS the intent: one name per word
+  for rel in $HOOK_MIRROR_FILES; do
+    _mode_paths+=("githooks/$rel" "src/npm-package/hooks/$rel")
+  done
+  # shellcheck disable=SC2086
+  for rel in $ROOT_MIRROR_FILES; do
+    _mode_paths+=("githooks/$rel" "src/npm-package/$rel")
+  done
+  preload_modes "${_mode_paths[@]}"
+fi
 
 for rel in $HOOK_MIRROR_FILES; do
   compare_pair "githooks/$rel" "src/npm-package/hooks/$rel"
