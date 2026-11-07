@@ -86,6 +86,19 @@ if [ -n "$TRAILING_WS_FILES" ]; then
 fi
 
 # --- Check 2: Missing EOF newline ---
+# Reads the LAST BYTE from the raw blob. The previous form captured the content
+# with $(...) and then asked for its final character: command substitution
+# strips every trailing newline, so a file that ends correctly produced its last
+# visible character — never empty — and was reported as missing its newline.
+# Every staged text file was a false positive, which is how a check that always
+# fires looks exactly like a strict check. `git show | tail -c 1` keeps the byte.
+file_missing_eof_newline() {
+  local last_byte
+  last_byte=$(git show ":$1" 2>/dev/null | tail -c 1)
+  # Empty output means the blob is empty: there is no line to terminate.
+  [ -n "$last_byte" ]
+}
+
 NO_EOF_NEWLINE_FILES=""
 if [ "${GATE_12_DOCS_ONLY:-false}" != true ]; then
 while IFS= read -r file; do
@@ -94,13 +107,8 @@ while IFS= read -r file; do
   if is_binary_staged_file "$file"; then
     continue
   fi
-  # Check if file content ends with newline
-  FILE_CONTENT=$(git show ":$file" 2>/dev/null)
-  if [ -n "$FILE_CONTENT" ]; then
-    LAST_CHAR=$(printf '%s' "$FILE_CONTENT" | tail -c 1)
-    if [ "$LAST_CHAR" != "" ]; then
-      NO_EOF_NEWLINE_FILES="$NO_EOF_NEWLINE_FILES $file"
-    fi
+  if file_missing_eof_newline "$file"; then
+    NO_EOF_NEWLINE_FILES="$NO_EOF_NEWLINE_FILES $file"
   fi
 done <<EOF
 $STAGED_FILES
