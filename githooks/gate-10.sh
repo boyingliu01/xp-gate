@@ -28,6 +28,56 @@ GATE_10_REASON=""
 # shellcheck disable=SC2034
 GATE_10_SCANNED_FILES=0
 
+# ---------------------------------------------------------------------------
+# Which path runs semgrep: the sastd daemon (fast) or a direct invocation.
+#
+# A direct `semgrep scan` costs ~9s on Windows, and the bill is almost entirely
+# Python import tax: `--version` alone takes 4-5s because semgrep's CLI eagerly
+# imports commands.ci -> app.auth -> telemetry -> opentelemetry -> requests ->
+# urllib3. Paying that once per machine in a resident process is the point of
+# sastd (measured: a second in-process import costs 0ms).
+#
+# GATE_10_SEMGREP_PATH records what actually happened, so a reader of the report
+# can tell a fast run from a degraded one without timing it.
+#
+# The daemon does not exist yet (that is E2/E3). Until it does, EVERY value of
+# XP_GATE_SASTD resolves to "direct", which is what makes shipping E1 a no-op:
+# the switch, the degrade flag and the tests land first so the fast path is added
+# onto a base that is already proven to behave exactly as today.
+# ---------------------------------------------------------------------------
+# Consumed by the sourcing parent (pre-commit report JSON), not here.
+# shellcheck disable=SC2034
+GATE_10_SEMGREP_PATH="direct"
+# Set to 1 when sastd was requested but unusable, so "we fell back" is a fact in
+# the report rather than an inference from a missing log line. Never set when the
+# daemon was not requested at all -- a plain direct run is not a degraded run.
+# Consumed by the sourcing parent (pre-commit report JSON), not here.
+# shellcheck disable=SC2034
+GATE_10_SASTD_DEGRADED=0
+
+# shellcheck disable=SC2034
+case "${XP_GATE_SASTD:-direct}" in
+  off|direct|0|false|"")
+    # Explicitly or implicitly off: the direct path. Not a degradation.
+    GATE_10_SEMGREP_PATH="direct"
+    ;;
+  on|auto|1|true)
+    # A daemon was requested. E2/E3 will resolve an endpoint here; with no
+    # endpoint implemented, the honest answer is "direct, and say so". This is
+    # the branch that must never become "skip the scan and call it a pass".
+    GATE_10_SEMGREP_PATH="direct"
+    GATE_10_SASTD_DEGRADED=1
+    echo "     ℹ️  sastd requested but not available — using direct semgrep (degraded)"
+    ;;
+  *)
+    # An unrecognised value is a configuration mistake, not a reason to scan
+    # less. Use the direct path and name the value so it can be fixed.
+    GATE_10_SEMGREP_PATH="direct"
+    GATE_10_SASTD_DEGRADED=1
+    echo "     ⚠️  XP_GATE_SASTD='${XP_GATE_SASTD}' is not recognised (expected off|on) — using direct semgrep"
+    ;;
+esac
+
 # Semgrep availability check
 SEMGREP_CMD=""
 if command -v semgrep >/dev/null 2>&1; then
