@@ -84,14 +84,30 @@ teardown() {
 # 用机器可读标记而不是散文（评审意见 A-2/T-02）：措辞微调或本地化都不会
 # 让守卫失效，而守卫失效会让这个 bug 静默复活。
 # ---------------------------------------------------------------------------
-@test "#686 AC-722-01: layers-declared emits the machine-readable WARN marker" {
-  run grep -F '[WARN:LAYERS_UNCHECKED]' "$PRE_COMMIT"
-  [ "$status" -eq 0 ]
-
-  # The marker must be reachable from the architecture.yaml branch, not just
-  # present somewhere in the file. Locate the Gate 6 config-form probe.
+# AC-722-01 was originally "a declaring repo prints [WARN:LAYERS_UNCHECKED]",
+# because the honest message then was "nothing looks at this config". #691/#728
+# changed the fact, not the requirement: the config IS read now, by
+# gate-6-layers.sh, so printing "layers are unchecked" became the misleading
+# statement. Asserting the old marker would have pinned a defect in place.
+#
+# What must still hold is the property the marker existed to protect: a repo that
+# declares layer boundaries must never be told the dimension was measured when it
+# was not. That now means the gate actually runs the checker rather than merely
+# noticing the file.
+@test "#686 AC-722-01: layers-declared runs the checker, and does not claim it was unmeasured" {
+  # The config-form probe still gates the whole block.
   run grep -nE 'architecture\.yaml' "$PRE_COMMIT"
   [ "$status" -eq 0 ]
+
+  # The block must invoke gate-6-layers.sh, which is what makes the dimension
+  # measured. A presence check alone is the original bug.
+  run grep -F 'gate-6-layers.sh' "$PRE_COMMIT"
+  [ "$status" -eq 0 ]
+
+  # And the stale wording must be gone: "unchecked" is now false, and a reader
+  # who sees it would distrust a gate that is in fact doing the work.
+  run grep -F '[WARN:LAYERS_UNCHECKED]' "$PRE_COMMIT"
+  [ "$status" -ne 0 ]
 }
 
 @test "#686 AC-722-02: a non-covered reason is recorded for the gate" {
