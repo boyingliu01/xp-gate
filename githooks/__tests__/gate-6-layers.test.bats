@@ -77,7 +77,7 @@ seed_clean_tree() {
   [[ "$output" == *"domain -> infrastructure"* ]]
 }
 
-@test "the violation is named, not just counted — a count alone is unactionable" {
+@test "the violation is named, not just counted -- a count alone is unactionable" {
   write_config
   seed_clean_tree
   printf 'import { x } from "../infrastructure/db";\nexport const y = x;\n' \
@@ -216,7 +216,7 @@ YAML
   [ "$status" -eq 0 ]
 }
 
-@test "an untracked file is scanned — agent-authored code is the case that matters" {
+@test "an untracked file is scanned -- agent-authored code is the case that matters" {
   # Regression: the first version used `git ls-files` (tracked only), so a
   # violation written into a not-yet-added file was invisible. That is exactly
   # the moment a check needs to fire, and it would have looked like a pass.
@@ -245,4 +245,89 @@ YAML
   printf 'import { x } from "../infrastructure/db";\n' > dist/bundle.ts
   run bash "$GATE"
   [ "$status" -eq 0 ]
+}
+
+# ── Round 5 review findings ──────────────────────────────────────────────────
+# Both cases below cover paths that were missing from the first version and that
+# each reproduce the #686 defect class one level deeper: a verdict that reads
+# like "checked and clean" when nothing was checked.
+
+@test "config whose layers match no file reports WARN, not PASS (vacuous run)" {
+  # Declared layers exist in the config but classify none of the files present.
+  # Before this case existed, that produced "0 violations" and exit 0, which is
+  # exactly the silent-pass shape Gate 6 was built to remove. XP-Gate's own repo
+  # is this situation: architecture.yaml ships a Clean Architecture template whose
+  # directories do not exist here.
+  cat > "$XP_GATE_LAYER_CONFIG" <<'YAML'
+version: 1
+layers:
+  domain:
+    patterns: ["src/domain/**"]
+    allowedImports: ["src/shared/**"]
+  infrastructure:
+    patterns: ["src/infrastructure/**"]
+    allowedImports: []
+YAML
+  mkdir -p src/somewhere
+  printf 'export const x = 1;\n' > src/somewhere/thing.ts
+  run bash "$GATE"
+  [ "$status" -eq 3 ]
+  [[ "$output" == *"nothing was actually checked"* ]]
+  [[ "$output" == *"layer_config_matches_no_files"* ]]
+}
+
+@test "a classifying config still PASSes, so the vacuous guard is not over-broad" {
+  # The counterpart to the case above: the guard must fire only when NOTHING was
+  # classified. A config that classifies at least one file and finds no violation
+  # is a real pass and must stay exit 0.
+  write_config
+  seed_clean_tree
+  run bash "$GATE"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"file(s) classified"* ]]
+}
+
+@test "a 'patterns:' array classifies files, same as singular 'pattern:'" {
+  # The parser originally read only `pattern:`. A config using the natural
+  # plural form -- the one a layer owning two directories has to write -- parsed
+  # to an empty pattern list, matched nothing, and reported "0 violations". That
+  # is the same silent pass as the vacuous-config case above, reached from a
+  # valid-looking config instead of a mismatched one.
+  cat > "$XP_GATE_LAYER_CONFIG" <<'YAML'
+version: 1
+layers:
+  domain:
+    patterns: ["src/domain/**", "src/shared/**"]
+    allowedImports: []
+  infrastructure:
+    patterns: ["src/infrastructure/**"]
+    allowedImports: ["src/domain/**", "src/shared/**"]
+YAML
+  mkdir -p src/domain src/shared src/infrastructure
+  printf 'export const v = 1;\n' > src/domain/a.ts
+  printf 'export const s = 1;\n' > src/shared/b.ts
+  printf 'import { v } from "../domain/a";\nexport const i = v;\n' > src/infrastructure/c.ts
+  run bash "$GATE"
+  [ "$status" -eq 0 ]
+  # 3 files across 2 layers, all classified -- not the zero-classified warn.
+  [[ "$output" == *"3 file(s) classified"* ]]
+}
+
+@test "a 'patterns:' array still catches a violation" {
+  cat > "$XP_GATE_LAYER_CONFIG" <<'YAML'
+version: 1
+layers:
+  domain:
+    patterns: ["src/domain/**", "src/shared/**"]
+    allowedImports: []
+  infrastructure:
+    patterns: ["src/infrastructure/**"]
+    allowedImports: ["src/domain/**"]
+YAML
+  mkdir -p src/domain src/infrastructure
+  printf 'import { i } from "../infrastructure/c";\nexport const d = i;\n' > src/domain/a.ts
+  printf 'export const i = 1;\n' > src/infrastructure/c.ts
+  run bash "$GATE"
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"domain -> infrastructure"* ]]
 }

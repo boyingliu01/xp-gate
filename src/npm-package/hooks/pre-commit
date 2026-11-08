@@ -4391,18 +4391,33 @@ else
           GATE_6_LAYER_STATUS="BLOCK"
           GATE_6_STATUS="FAIL"
           ;;
-        *)
-          # 3 = WARN (no layer config, or only baselined violations).
+        3)
+          # WARN (no layer config, or only baselined violations).
           GATE_6_LAYER_STATUS="WARN"
           ;;
+        *)
+          # Any other exit means the checker itself did not complete: 126/127
+          # (not executable / not found), 137 (killed), or a bash error. Mapping
+          # those to WARN would let a crashed checker pass as "not checked",
+          # which is #686's defect one level deeper — the gate would look like it
+          # covered layers while nothing ran. Fail closed.
+          GATE_6_LAYER_STATUS="BLOCK"
+          GATE_6_STATUS="FAIL"
+          GATE_6_LAYER_REASON="layer_checker_crashed_rc_${LAYER_RC}"
+          GATE_6_LAYER_CRASHED=1
+          ;;
       esac
-      GATE_6_LAYER_REASON=$(printf '%s\n' "$LAYER_OUT" | sed -n 's/^ *reason: *//p' | head -1)
+      GATE_6_LAYER_REASON=${GATE_6_LAYER_REASON:-$(printf '%s\n' "$LAYER_OUT" | sed -n 's/^ *reason: *//p' | head -1)}
     else
       # The checker is missing, so the dimension is unmeasured — say so rather
       # than letting the gate look like it covered layers.
       GATE_6_LAYER_STATUS="WARN"
       GATE_6_LAYER_REASON="layer_checker_missing"
       echo "     ⚠️  [WARN:LAYER_CHECKER_MISSING] gate-6-layers.sh not found — layer boundaries NOT checked."
+    fi
+    if [ "${GATE_6_LAYER_CRASHED:-0}" = "1" ]; then
+      echo "     ❌ [BLOCK:LAYER_CHECKER_CRASHED] gate-6-layers.sh exited $LAYER_RC without a verdict."
+      echo "        A checker that did not finish has not checked anything — fail closed."
     fi
     # #537: per-language reason bookkeeping. Gate 3/4 are single-language gates
     # and get away with one scalar reason; Gate 6 loops, so a scalar would lose
