@@ -5502,3 +5502,31 @@ specification:
             不属于任何已声明层的导入不算违规；被注释掉的导入不算违规；未跟踪的文件
             必须被扫描（agent 新写的代码正是要紧的情形），被 gitignore 的文件不扫描。
           test_type: unit
+
+    # ============================================================
+    # REQ-GATE-IDENTITY: 工具到门禁的归属必须与 gate-registry.sh 一致
+    # ============================================================
+    - id: REQ-GATE-IDENTITY
+      title: 工具到门禁的归属必须与 gate-registry.sh 一致
+      status: implemented
+      description: >-
+        `xp-gate doctor` 用 GATE_CLI_TOOLS 里的 gates[] 告诉用户「这个工具服务哪道
+        门禁」。这份编号是一份手工副本，而不是从权威来源读出来的，于是它漂移了：
+        semgrep 被写成 Gate 9，而 Gate 9 是 Build Integrity，SAST 是 Gate 10。
+        这正是 #717 的同一类漂移——当时根 AGENTS.md 声称 Gate 9 是 SAST，导致一个
+        C# SAST 修复被写进 gate-9.sh，那个文件从不被 hook 引用，修复因此永远无法
+        执行。手工副本的危险不在于它某天会错，而在于它错了以后每一个读者都会相信它。
+        权威来源是 githooks/gate-registry.sh；测试从它读取而不是硬编码期望值——
+        硬编码只能证明两边今天写的一样，读 registry 才能证明两边不会各自漂走。
+      acceptance_criteria:
+        - id: AC-GATE-IDENTITY-01
+          criteria: >-
+            每个工具的 gates[] 编号必须与 gate-registry.sh 中该门禁名对应的编号一致；
+            semgrep 必须归属 SAST 门禁而不是 Build Integrity。
+          test_type: unit
+        - id: AC-GATE-IDENTITY-02
+          criteria: >-
+            任何工具的标签都不得指向与其编号不符的门禁。标签是手写注解而非规范标题，
+            因此不要求与标题逐字相等（同义词合法），但标签所指的门禁与编号解析出的
+            门禁必须一致。
+          test_type: unit
