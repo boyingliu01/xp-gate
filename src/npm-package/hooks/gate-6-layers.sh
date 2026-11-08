@@ -86,6 +86,21 @@ LAYER_TSV=$(awk '
   # unset variable compares a string to a number and never fires, so the layer
   # indent was never recorded and every layer was silently skipped — the same
   # class of defect this gate exists to catch. Initialise explicitly.
+  # Emit one row per pattern so a layer can own several directories. Patterns
+  # are matched independently and longest-pattern-wins still resolves nesting.
+  # A layer with no pattern is emitted with an empty column: it can never match
+  # a file, and the scanner zero-classified guard reports that instead of
+  # treating it as clean.
+  function flush(   k, i, p) {
+    if (name == "") return
+    k = split(pattern, p, ",")
+    if (k == 0) { print name "\t\t" allowed "\t" forbidden; name = ""; return }
+    for (i = 1; i <= k; i++) {
+      if (p[i] == "") continue
+      print name "\t" p[i] "\t" allowed "\t" forbidden
+    }
+    name = ""
+  }
   BEGIN {
     inlayers = 0; layerindent = -1
     name = ""; pattern = ""; allowed = ""; forbidden = ""
@@ -103,19 +118,24 @@ LAYER_TSV=$(awk '
     # A \"<name>:\" line at the layer indent starts a new layer record.
     # Supports both the map form (domain:) and an explicit name: field.
     if (indent == layerindent && body ~ /^[A-Za-z0-9_-]+:[ \t]*$/) {
-      if (name != "") print name "\t" pattern "\t" allowed "\t" forbidden
+      flush()
       name = substr(body, 1, index(body, ":") - 1)
-      pattern = ""; allowed = ""; forbidden = ""
       next
     }
     if (indent == layerindent && body ~ /^- /) { next }
     if (name == "") next
     if (body ~ /^name:/)            { name      = unq(substr(body, 6)) }
-    else if (body ~ /^pattern:/)    { pattern   = clean(substr(body, 9)) }
+    # `pattern:` and `patterns:` are both accepted. The singular form is the one
+    # the first tests happened to write; a layer that owns a directory plus a
+    # shared root needs more than one pattern, which is why `patterns:` occurs
+    # naturally. Accepting only one of the two made a correct config parse to an
+    # empty pattern list, which then matched no file and reported "0 violations"
+    # — the silent-pass shape this gate exists to remove.
+    else if (body ~ /^patterns?:/)  { pattern = clean(substr(body, index(body, ":") + 1)) }
     else if (body ~ /^allowedImports:/   || body ~ /^allowed_imports:/)   { allowed   = clean(substr(body, index(body, ":") + 1)) }
     else if (body ~ /^forbiddenImports:/ || body ~ /^forbidden_imports:/) { forbidden = clean(substr(body, index(body, ":") + 1)) }
   }
-  END { if (name != "") print name "\t" pattern "\t" allowed "\t" forbidden }
+  END { flush() }
 ' "$LAYER_CONFIG" 2>/dev/null)
 
 # ─── 3. Config present but unparseable → BLOCK (fail-closed) ───────────────
@@ -162,11 +182,19 @@ fi
 LAYER_TSV_FILE="${TMPDIR:-/tmp}/xp-layer-tsv.$$"
 printf '%s\n' "$LAYER_TSV" > "$LAYER_TSV_FILE"
 
+# Side channel for the scan's own bookkeeping (files seen / files classified).
+# Defaults to 0/0 so a scan that dies before writing it reads as "classified
+# nothing", which lands on the WARN path rather than a silent pass.
+LAYER_STATS_FILE="${TMPDIR:-/tmp}/xp-layer-stats.$$"
+: > "$LAYER_STATS_FILE"
+LAYER_CLASSIFIED_FILES=0
+LAYER_CLASSIFIED=0
+
 # The file list goes in as ARGV, not on stdin: awk builds FILENAME from ARGV,
 # and a stdin-driven loop leaves FILENAME empty — every file would be assigned
 # layer 0 and the scan would report a clean tree. That is exactly the failure
 # mode this gate exists to prevent, so the plumbing has to be right first.
-FINDINGS=$(XP_LAYER_TSV="$LAYER_TSV_FILE" awk '
+FINDINGS=$(XP_LAYER_TSV="$LAYER_TSV_FILE" XP_LAYER_STATS="$LAYER_STATS_FILE" awk '
   BEGIN {
     n = 0
     while ((getline row < ENVIRON["XP_LAYER_TSV"]) > 0) {
@@ -245,6 +273,12 @@ FINDINGS=$(XP_LAYER_TSV="$LAYER_TSV_FILE" awk '
     file = FILENAME
     sub(/^[.][/]/, "", file)
     src = layer_of(file)
+    # Classified-file accounting (#REVIEW-R5): a run where the config declares
+    # layers but no file matches any of them is indistinguishable from a clean
+    # tree, and reporting that as PASS is how "declared but unenforced" survives
+    # one level deeper. Count both sides so the verdict can tell them apart.
+    seen++
+    if (src != 0) classified++
   }
   {
     line = $0
@@ -266,16 +300,43 @@ FINDINGS=$(XP_LAYER_TSV="$LAYER_TSV_FILE" awk '
       printf "%s\t%s\t%s\t%s\n", file, lname[src], lname[dst], tgt
     }
   }
+  END {
+    # Classified-file counts go to a side file, not stdout: stdout is the
+    # findings stream the verdict reads, and mixing a summary line into it would
+    # be parsed as a violation.
+    if (ENVIRON["XP_LAYER_STATS"]) {
+      printf "%d %d\n", seen, classified > ENVIRON["XP_LAYER_STATS"]
+      close(ENVIRON["XP_LAYER_STATS"])
+    }
+  }
 ' $FILE_LIST 2>/dev/null)
 rm -f "$LAYER_TSV_FILE"
 
+if [ -s "$LAYER_STATS_FILE" ]; then
+  read -r LAYER_CLASSIFIED_FILES LAYER_CLASSIFIED < "$LAYER_STATS_FILE" || true
+fi
+rm -f "$LAYER_STATS_FILE"
+case "$LAYER_CLASSIFIED_FILES" in ''|*[!0-9]*) LAYER_CLASSIFIED_FILES=0 ;; esac
+case "$LAYER_CLASSIFIED" in ''|*[!0-9]*) LAYER_CLASSIFIED=0 ;; esac
+
 # ─── 6. Verdict ─────────────────────────────────────────────────────────────
 if [ -z "$FINDINGS" ]; then
+  # Zero findings means one of two very different things: every classified file
+  # obeyed the rules, or NO FILE was classified at all because the config and the
+  # tree disagree. The first is a pass; the second is a config/reality drift and
+  # calling it a pass is the "declared but unenforced" defect Gate 6 exists to
+  # catch. Tell them apart before saying anything good.
+  if [ "$LAYER_CLASSIFIED" -eq 0 ]; then
+    _layers_verdict 3 \
+      "⚠️  0 of $LAYER_CLASSIFIED_FILES scanned file(s) match any of the $LAYER_COUNT declared layer(s) — nothing was actually checked." \
+      "layer_config_matches_no_files" \
+      "   Declared patterns are checked against repo-relative paths." \
+      "   A config for a different layout than this tree will never enforce anything."
+  fi
   _layers_verdict 0 \
-    "✅ Layer boundaries verified ($LAYER_COUNT layers, 0 violations)." \
+    "✅ Layer boundaries verified ($LAYER_COUNT layers, $LAYER_CLASSIFIED file(s) classified, 0 violations)." \
     "layers_checked"
 fi
-
 TOTAL=$(printf '%s\n' "$FINDINGS" | grep -c . || true)
 
 # Ratchet: a recorded baseline is a debt ledger, not an amnesty.
