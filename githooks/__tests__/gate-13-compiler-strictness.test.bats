@@ -288,3 +288,215 @@ EOF
   run gate13_run_cpp_analysis
   [ "$status" -eq "$GATE13_WARN" ]
 }
+
+# ------------------------------------------- #780 C# strictness flags
+#
+# The C# path used to run a bare `dotnet build`, inheriting whatever the audited
+# project declared. A project with TreatWarningsAsErrors=false therefore passed
+# with real warnings: measured "1 warning, 0 errors, build succeeded" on a
+# fixture holding an unused field (CS0414) and a method that could be static
+# (CA1822). The gate decides BLOCK from the build's exit code, so it saw nothing
+# it could act on -- a strictness gate that only mirrors the project's own
+# settings is not a gate.
+#
+# These cases pin that the flags are produced here, from outside the project,
+# and that they actually promote both compiler diagnostics AND analyzer rules.
+
+@test "#780: balanced tier promotes warnings to errors" {
+  load_gate
+  run gate13_csharp_flags balanced
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"-warnaserror"* ]]
+}
+
+@test "#780: balanced tier raises the warning level and analyzer level" {
+  load_gate
+  run gate13_csharp_flags balanced
+  [ "$status" -eq 0 ]
+  # -warnaserror alone only covers CS*; CA* severity comes from AnalysisLevel.
+  [[ "$output" == *"-p:WarningLevel=9999"* ]]
+  [[ "$output" == *"-p:AnalysisLevel=latest-recommended"* ]]
+}
+
+@test "#780: balanced tier does NOT force Nullable on the audited project" {
+  load_gate
+  run gate13_csharp_flags balanced
+  [ "$status" -eq 0 ]
+  # Measured: -p:Nullable=enable opts the project into a language feature it
+  # may not be written for (CS8632 -> CS8603 on the same line). Raising the bar
+  # on existing code is this gate's job; changing compilation semantics is not.
+  [[ "$output" != *"Nullable"* ]]
+}
+
+@test "#780: balanced tier does NOT force code-style enforcement" {
+  load_gate
+  run gate13_csharp_flags balanced
+  [ "$status" -eq 0 ]
+  # Measured: EnforceCodeStyleInBuild emits ZERO IDE diagnostics on a project
+  # with no .editorconfig -- it only amplifies config the project already has,
+  # so it cannot be sold as part of the strictness guarantee.
+  [[ "$output" != *"EnforceCodeStyleInBuild"* ]]
+}
+
+@test "#780: strict tier adds AnalysisMode on top of balanced" {
+  load_gate
+  run gate13_csharp_flags strict
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"-p:AnalysisMode=AllEnabledByDefault"* ]]
+  # and keeps everything balanced had
+  [[ "$output" == *"-warnaserror"* ]]
+  [[ "$output" == *"-p:AnalysisLevel=latest-recommended"* ]]
+}
+
+@test "#780: balanced tier does NOT enable every analyzer by default" {
+  load_gate
+  run gate13_csharp_flags balanced
+  [ "$status" -eq 0 ]
+  # AnalysisMode=AllEnabledByDefault surfaces rules that are suggestion/hidden
+  # by default (CA1707 among them); it must stay opt-in via the strict tier.
+  [[ "$output" != *"AllEnabledByDefault"* ]]
+}
+
+@test "#780: warn-only tier injects no flags at all" {
+  load_gate
+  run gate13_csharp_flags warn-only
+  [ "$status" -eq 0 ]
+  [ -z "$output" ]
+}
+
+@test "#780: an unknown tier falls back to balanced, never to nothing" {
+  load_gate
+  run gate13_csharp_flags not-a-tier
+  [ "$status" -eq 0 ]
+  # Falling back to "no flags" would silently disable the gate; the caller
+  # already normalises unknown tiers via gate13_resolve_tier, but the flag
+  # builder must not be the weaker link.
+  [[ "$output" == *"-warnaserror"* ]]
+}
+
+@test "#780: no tier default means balanced" {
+  load_gate
+  run gate13_csharp_flags
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"-warnaserror"* ]]
+  [[ "$output" != *"AllEnabledByDefault"* ]]
+}
+
+# --------------------------------- #780 integration: real build, not strings
+#
+# The unit cases above assert flag *composition*. They cannot catch a flag that
+# is syntactically wrong or that csc rejects -- which is the exact class of bug
+# a strictness gate must not have. This case actually invokes dotnet on a
+# fixture, so the flag set is proven to work as a whole.
+#
+# Skipped when no .NET SDK is present (CI on Linux runners often lacks one);
+# the gate itself already returns WARN in that case, so skipping the test keeps
+# the suite honest instead of silently passing.
+
+@test "#780 integration: injected flags turn a warning into a BLOCK on a real build" {
+  if ! command -v dotnet >/dev/null 2>&1 || ! dotnet --version >/dev/null 2>&1; then
+    skip "dotnet SDK not installed"
+  fi
+
+  mkdir -p loose
+  cat > loose/Loose.csproj <<'CSPROJ'
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>net8.0</TargetFramework>
+    <OutputType>Library</OutputType>
+    <TreatWarningsAsErrors>false</TreatWarningsAsErrors>
+  </PropertyGroup>
+</Project>
+CSPROJ
+  cat > loose/Probe.cs <<'CSPROJ'
+namespace Loose;
+public sealed class Probe
+{
+    private static int _unused = 42;
+    public int InstanceMethod() => 1;
+}
+CSPROJ
+
+  load_gate
+  local flags
+  flags=$(gate13_csharp_flags balanced)
+
+  # Baseline: how the gate used to build -- project settings only.
+  run dotnet build loose/Loose.csproj --nologo --no-incremental -clp:NoSummary
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"CS0414"* ]]
+
+  # With injected flags the same tree must fail, and must surface BOTH a
+  # compiler diagnostic (CS0414) and an analyzer one (CA1822) -- the pair that
+  # proves -warnaserror and AnalysisLevel are both doing work.
+  run dotnet build loose/Loose.csproj --nologo --no-incremental -clp:NoSummary $flags
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"CS0414"* ]]
+  [[ "$output" == *"CA1822"* ]]
+}
+
+@test "#780 integration: a project that already fails still fails, not less" {
+  if ! command -v dotnet >/dev/null 2>&1 || ! dotnet --version >/dev/null 2>&1; then
+    skip "dotnet SDK not installed"
+  fi
+
+  mkdir -p strict
+  cat > strict/Strict.csproj <<'CSPROJ'
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>net8.0</TargetFramework>
+    <OutputType>Library</OutputType>
+    <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
+  </PropertyGroup>
+</Project>
+CSPROJ
+  cat > strict/Probe.cs <<'CSPROJ'
+namespace Strict;
+public sealed class Probe
+{
+    private static int _unused = 42;
+}
+CSPROJ
+
+  load_gate
+  local flags
+  flags=$(gate13_csharp_flags balanced)
+
+  # The gate must never *relax* a project that was stricter on its own.
+  run dotnet build strict/Strict.csproj --nologo --no-incremental -clp:NoSummary $flags
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"CS0414"* ]]
+}
+
+@test "#780 integration: warn-only tier leaves the project's own verdict intact" {
+  if ! command -v dotnet >/dev/null 2>&1 || ! dotnet --version >/dev/null 2>&1; then
+    skip "dotnet SDK not installed"
+  fi
+
+  mkdir -p wo
+  cat > wo/Wo.csproj <<'CSPROJ'
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>net8.0</TargetFramework>
+    <OutputType>Library</OutputType>
+    <TreatWarningsAsErrors>false</TreatWarningsAsErrors>
+  </PropertyGroup>
+</Project>
+CSPROJ
+  cat > wo/Probe.cs <<'CSPROJ'
+namespace Wo;
+public sealed class Probe
+{
+    private static int _unused = 42;
+}
+CSPROJ
+
+  load_gate
+  local flags
+  flags=$(gate13_csharp_flags warn-only)
+
+  # warn-only injects nothing, so a lax project still builds: the caller is the
+  # one that downgrades the verdict to WARN. This pins that contract.
+  run dotnet build wo/Wo.csproj --nologo --no-incremental -clp:NoSummary $flags
+  [ "$status" -eq 0 ]
+}

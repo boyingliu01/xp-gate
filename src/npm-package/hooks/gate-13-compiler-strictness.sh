@@ -1201,6 +1201,79 @@ EOF
 # detection and gates drift apart.
 # ============================================================================
 
+# The strictness flag set for C#, decided by tier.
+#
+# Why this exists: unlike the C/C++/Java paths, the C# path used to run a bare
+# `dotnet build`, which inherits whatever the project happens to declare. A
+# project with `<TreatWarningsAsErrors>false</TreatWarningsAsErrors>` -- or one
+# that simply never set it, which is the common case -- sailed through with real
+# warnings. Measured on a fixture holding an unused field and an instance method
+# that could be static: "1 warning, 0 errors, build succeeded". The gate saw a
+# warning it could not act on, because it decides BLOCK from the build's exit
+# code. A strictness gate that depends on the audited project having declared
+# strictness is not a gate; it is a mirror.
+#
+# Passing these on the command line overrides the project-level properties --
+# measured: a project declaring TreatWarningsAsErrors=false still failed the
+# build once -warnaserror was passed. So this does not force downstream projects
+# to edit their own files.
+#
+# DELIBERATELY NOT INCLUDED -- these change compilation semantics rather than
+# raising the bar on existing code, and the C/C++/Java paths have no equivalent:
+#
+#   -p:Nullable=enable
+#       Turns on nullable *reference type* analysis, i.e. it opts the project
+#       into a language feature it never asked for. Measured: a project without
+#       it reports CS8632 ("nullable reference types only inside #nullable
+#       context"); with it, the same line becomes CS8603 (possible null return).
+#       Gating a legacy codebase on warnings it cannot even parse today is
+#       exactly the false-BLOCK this gate must not produce.
+#
+#   -p:EnforceCodeStyleInBuild=true
+#       Measured to emit ZERO IDE diagnostics on a project with no .editorconfig
+#       and no explicit analyzer reference -- it only amplifies configuration the
+#       project already has, so it contributes nothing for the projects that most
+#       need the gate and is a no-op for the rest.
+#
+# Tiers mirror the C++/Java paths:
+#   balanced (default) -- warnings are errors at the highest meaningful warning
+#                         level, with the recommended analyzer set.
+#   strict             -- balanced plus every rule that is only suggestion/hidden
+#                         by default promoted via AnalysisMode. Measured to add
+#                         CA1707 (identifier contains underscore), which balanced
+#                         does not report at all.
+#   warn-only          -- no promotion (the caller downgrades the verdict to WARN
+#                         on its own, so an empty flag set is correct here).
+#
+# ANALYSISLEVEL IS NOT REDUNDANT with -warnaserror: the latter only promotes
+# compiler diagnostics (CS*), while analyzer rules (CA*) take their severity from
+# AnalysisLevel. Measured on the fixture above: -warnaserror alone caught CS0414
+# only; adding AnalysisLevel also caught CA1822. Passing one without the other
+# blocks half of what this gate is for.
+#
+# WARNINGLEVEL=9999 is intentional and safe: csc accepts /warn:N for N > 4 --
+# measured /warn:4, /warn:9, /warn:100, /warn:9999 and /warn:999999 all compile
+# identically with no CS1900. Only /warn:0 suppresses; there is no upper bound.
+# 9999 is used instead of 4 so that any warning level a future SDK introduces is
+# covered without this file needing a change.
+gate13_csharp_flags() {
+  local tier="${1:-balanced}"
+
+  if [ "$tier" = "warn-only" ]; then
+    printf '%s\n' ""
+    return 0
+  fi
+
+  local base="-warnaserror -p:WarningLevel=9999 -p:AnalysisLevel=latest-recommended"
+
+  if [ "$tier" = "strict" ]; then
+    printf '%s %s\n' "$base" "-p:AnalysisMode=AllEnabledByDefault"
+    return 0
+  fi
+
+  printf '%s\n' "$base"
+}
+
 # Locate the .NET SDK exactly as adapters/csharp.sh does.
 gate13_csharp_dotnet() {
   local d
@@ -1280,7 +1353,14 @@ gate13_csharp_changed_warning_count() {
   # dies with MSB1003 whenever the project sits in a subdirectory, emitting no
   # diagnostics at all.
   entry=$(gate13_csharp_entry_point) || return 1
-  out=$("$dotnet" build "$entry" --nologo --no-incremental -clp:NoSummary 2>&1)
+
+  # Strictness flags come from OUTSIDE the project, so the gate does not depend
+  # on the audited repository having declared them. Empty in the warn-only tier.
+  local flags
+  flags=$(gate13_csharp_flags "$(gate13_resolve_tier)")
+
+  # shellcheck disable=SC2086  # $flags is a deliberately word-split flag list
+  out=$("$dotnet" build "$entry" --nologo --no-incremental -clp:NoSummary $flags 2>&1)
 
   # Report distinct CHANGED FILES, not diagnostic instances: the caller speaks in
   # files ("N changed C# file(s) carry compiler warnings"), and one file with two
