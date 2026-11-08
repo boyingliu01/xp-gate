@@ -5460,3 +5460,45 @@ specification:
             同级的 node_modules，以及 setup-node 在 Linux 上产生的
             lib/node_modules。只覆盖其一会让本机退化到裸 `npx`。
           test_type: unit
+
+    # ============================================================
+    # REQ-LAYERS-01: Gate 6 必须真正执行 architecture.yaml 的层边界
+    # ============================================================
+    - id: REQ-LAYERS-01
+      title: Gate 6 真正执行 architecture.yaml 声明的层边界
+      status: implemented
+      description: >-
+        Gate 6 名下的层边界规则在 architecture.yaml 里存在了七个月，却从未被执行——
+        问题不在配置写错了，而在没有任何东西去读它。因此门禁的测试必须断言「每种输入
+        对应的判定」，而不只是断言脚本没有崩溃：一个在确实违规的代码树上报告
+        「0 处违规」的层检查器，与一个正常工作的检查器在输出上无法区分，这正是该缺陷
+        能存活七个月的原因。
+        判定沿用 pre-commit 里 java.sh / powershell.sh 的既有契约：0 = PASS，
+        1 = FAIL（新增违规），2 = BLOCK（配置存在但不可用，fail-closed），
+        3 = WARN（无配置，或只剩已基线化的违规）。
+      acceptance_criteria:
+        - id: AC-LAYERS-01
+          criteria: >-
+            没有违规的代码树必须以 0 通过；内层导入外层必须以 1 失败，且报出具体的
+            违规文件与导入目标，而不是只给一个计数。
+          test_type: unit
+        - id: AC-LAYERS-02
+          criteria: >-
+            没有层配置时必须以 3 明确报告原因，绝不能静默通过；配置存在但没有任何
+            可用层时必须以 2 fail-closed，同样不能静默通过。
+          test_type: unit
+        - id: AC-LAYERS-03
+          criteria: >-
+            已记录在基线里的既有违规降级为 WARN（3），但基线不能豁免新增违规——
+            否则基线就成了让棘轮失效的手段。
+          test_type: unit
+        - id: AC-LAYERS-04
+          criteria: >-
+            allowedImports 必须同时接受路径 glob 和裸层名两种写法；多个模式匹配时
+            以最长匹配为准，使嵌套层优先于其父层。
+          test_type: unit
+        - id: AC-LAYERS-05
+          criteria: >-
+            不属于任何已声明层的导入不算违规；被注释掉的导入不算违规；未跟踪的文件
+            必须被扫描（agent 新写的代码正是要紧的情形），被 gitignore 的文件不扫描。
+          test_type: unit
