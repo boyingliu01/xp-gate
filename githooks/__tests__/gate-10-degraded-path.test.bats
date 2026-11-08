@@ -23,10 +23,34 @@ setup() {
     esac
     command git "$@"
   }
+
+  # Pretend semgrep is installed.
+  #
+  # Gate 10 checks for semgrep BEFORE it looks at staged files, and reports WARN
+  # (reason: tool_not_installed) when it is missing. That ordering is correct — a
+  # security gate that cannot run must say so rather than skip quietly — but it
+  # means every assertion about a later branch silently depends on whether the
+  # machine running the suite happens to have semgrep.
+  #
+  # E1-04 passed locally (semgrep present) and failed on CI (semgrep absent) for
+  # exactly this reason: it asserted the empty-staged-set verdict, and on CI the
+  # tool check returned first. A stub removes the dependency: the fast path being
+  # tested is the semgrep INVOCATION, which these cases stub out anyway, so the
+  # real binary is never needed. Tests that care about the missing-tool path
+  # override SEMGREP_CMD themselves.
+  STUB_BIN="$BATS_TEST_TMPDIR/bin"
+  mkdir -p "$STUB_BIN"
+  printf '#!/bin/sh\nexit 0\n' > "$STUB_BIN/semgrep"
+  chmod +x "$STUB_BIN/semgrep"
+  PATH="$STUB_BIN:$PATH"
 }
 
 teardown() {
   unset XP_GATE_SASTD
+  # Keep the stub out of the parent environment: PATH is exported by source(1)
+  # semantics in some shells, and a leaked stub would make a later suite believe
+  # semgrep is installed.
+  PATH="${PATH#"$STUB_BIN:"}"
 }
 
 @test "E1-01: XP_GATE_SASTD=off selects the direct path" {
