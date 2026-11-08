@@ -7825,6 +7825,51 @@
           "description": "Type 'AcceptanceCriterion' is never used"
         }
       ]
+    },
+    {
+      "id": "clone:c983f1b90d7652e0cd31b5dd4c7d4ddc49f46a76f56cdbe4b0944b97d2ed6817",
+      "smellType": "CodeClone",
+      "severity": "High",
+      "files": [
+        "\\\\?\\D:\\projects\\xp-gate\\src\\npm-package\\lib\\layer-baseline.cjs",
+        "\\\\?\\D:\\projects\\xp-gate\\src\\npm-package\\hooks\\lib\\layer-baseline.cjs"
+      ],
+      "metrics": {
+        "cloneHash": "c983f1b90d7652e0cd31b5dd4c7d4ddc49f46a76f56cdbe4b0944b97d2ed6817",
+        "cloneInstances": 2,
+        "tokenCount": 219
+      },
+      "details": {
+        "type": "codeClone",
+        "clone_hash": "c983f1b90d7652e0cd31b5dd4c7d4ddc49f46a76f56cdbe4b0944b97d2ed6817",
+        "token_count": 219
+      },
+      "locations": [
+        {
+          "file": "\\\\?\\D:\\projects\\xp-gate\\src\\npm-package\\hooks\\lib\\layer-baseline.cjs",
+          "line": 26,
+          "column": 1,
+          "range": {
+            "end_column": 53,
+            "end_line": 88,
+            "start_column": 1,
+            "start_line": 26
+          },
+          "description": "Duplicated code (219 tokens, lines 26-88). Also found in: src\\npm-package\\lib\\layer-baseline.cjs:26-88"
+        },
+        {
+          "file": "\\\\?\\D:\\projects\\xp-gate\\src\\npm-package\\lib\\layer-baseline.cjs",
+          "line": 26,
+          "column": 1,
+          "range": {
+            "end_column": 53,
+            "end_line": 88,
+            "start_column": 1,
+            "start_line": 26
+          },
+          "description": "Duplicated code (219 tokens, lines 26-88). Also found in: src\\npm-package\\hooks\\lib\\layer-baseline.cjs:26-88"
+        }
+      ]
     }
   ],
   "summary": {
@@ -7835,8 +7880,8 @@
     "deadCode": 35,
     "deadSymbols": 8,
     "layerViolations": 0,
-    "highCyclomaticComplexity": 50,
-    "highCognitiveComplexity": 83,
+    "highCyclomaticComplexity": 51,
+    "highCognitiveComplexity": 84,
     "hubModules": 0
   },
   "grade": "ArchitectureGrade { score: 5.119247, level: Moderate, density: 10.523012 }"

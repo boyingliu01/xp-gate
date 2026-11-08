@@ -22,6 +22,7 @@
     "scripts/",
     "gate-3.sh",
     "gate-4.sh",
+    "gate-6-layers.sh",
     "gate-7.sh",
     "gate-8.sh",
     "gate-9.sh",
