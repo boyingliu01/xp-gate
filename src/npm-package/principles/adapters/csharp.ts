@@ -47,6 +47,26 @@ const CONSTRUCTOR_DECLARATION =
   /(?:^|\n)[ \t]*(?:(?:public|private|protected|internal|static)\s+)*([A-Za-z_]\w*)\s*\(([^)]*)\)\s*(?::\s*(?:base|this)\s*\([^)]*\)\s*)?\{/g;
 
 /**
+ * A C# type declaration.
+ *
+ * The trailing group accepts BOTH shapes a type declaration takes: a body (`{`)
+ * and a body-less primary-constructor record (`record Delta(int X);`, C# 9+).
+ * Requiring `{` made every such record invisible to the god-class / large-file
+ * rules. Module scope for the same reason as METHOD_DECLARATION: a regex literal
+ * is dense in `|` and `?`, which the complexity analyzer counts as branches.
+ */
+const CLASS_DECLARATION =
+  /\b(?:(?:public|private|protected|internal|static|sealed|abstract|partial|readonly|unsafe|new)\s+)*(class|interface|struct|record|enum)\s+([A-Za-z_]\w*)\s*(?:<[^>]*>)?\s*(?:\([^)]*\))?\s*(?::\s*[^{\n;]+)?\s*(?:\{|;)/g;
+
+/** One member declaration inside a type body, for the god-class rule. */
+const MEMBER_DECLARATION = /\b(?:public|private|protected|internal)\s+[^;{}]*\([^)]*\)\s*(?:=>|\{)/g;
+
+/** How many accessor-prefixed members a type body declares. */
+function countMemberDeclarations(body: string): number {
+  return (body.match(MEMBER_DECLARATION) || []).length;
+}
+
+/**
  * C# language adapter for the principles checker (Gate 4).
  *
  * Why this file exists: `analyzer.ts`'s `adapterMap` had no `.cs` entry, so
@@ -111,21 +131,15 @@ export class CSharpAdapter extends BaseAdapter implements Adapter {
 
   extractClasses(): unknown[] {
     const matches: unknown[] = [];
-    // The trailing group accepts BOTH shapes a type declaration takes: a body
-    // (`{`) and a body-less primary-constructor record (`record Delta(int X);`,
-    // C# 9+). Requiring `{` made every such record invisible to the god-class /
-    // large-file rules.
-    const classRegex =
-      /\b(?:(?:public|private|protected|internal|static|sealed|abstract|partial|readonly|unsafe|new)\s+)*(class|interface|struct|record|enum)\s+([A-Za-z_]\w*)\s*(?:<[^>]*>)?\s*(?:\([^)]*\))?\s*(?::\s*[^{\n;]+)?\s*(?:\{|;)/g;
 
     let match: RegExpExecArray | null;
-    while ((match = classRegex.exec(this.fileContent)) !== null) {
-      matches.push(this.createCodeMatch(match[2], match[1], match.index));
+    while ((match = CLASS_DECLARATION.exec(this.fileContent)) !== null) {
+      const codeMatch = this.createCodeMatch(match[2], match[1], match.index);
       const body = this.extractCodeBlock(match.index);
       // methodCount feeds the god-class rule; counting declarations in the body
       // is the only signal available without a real parser.
-      const methodCount = (body.match(/\b(?:public|private|protected|internal)\s+[^;{}]*\([^)]*\)\s*(?:=>|\{)/g) || []).length;
-      this.annotate(matches[matches.length - 1], 'methodCount', methodCount);
+      this.annotate(codeMatch, 'methodCount', countMemberDeclarations(body));
+      matches.push(codeMatch);
     }
 
     return matches;

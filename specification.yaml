@@ -5381,3 +5381,82 @@ specification:
             确实缺少结尾换行的文件必须被报告——修复只能消除假阳性，不能把检查变成
             永不报警。
           test_type: unit
+    # ============================================================
+    # REQ-GATE3-ANALYZER: Gate 3 棘轮必须记录并校验测量所用的分析器版本
+    # ============================================================
+    - id: REQ-GATE3-ANALYZER
+      title: Gate 3 的棘轮必须记录并校验测量所用的分析器版本
+      status: implemented
+      description: >-
+        复杂度棘轮是一次比较：基线记录的 CCN 上限，与本次测量的 CCN。只有两次
+        测量出自同一个分析器时，这个比较才有意义。此前棘轮只校验 lizard 的主版本
+        号，1.21.3 与 1.25.0 都能通过该检查，却对同一批函数给出不同结论（实测
+        csharp.extractFunctions 分别为 18 与 9）。结果是每个版本各自报告一批与
+        代码改动无关的「违规」，而清除它们唯一的手段是把上限抬到最后一次运行的
+        那个分析器的读数——棘轮就此再也看不见它本该拦住的回归。.lizard-version
+        只约束了 CI；本机运行没有任何办法发现自己在跨版本比较。
+      acceptance_criteria:
+        - id: AC-GATE3-ANALYZER
+          criteria: >-
+            --write-baseline 必须在基线中记录生成它的 lizard 版本；--check 在
+            基线记录的版本与本次测量版本不一致时必须拒绝比较并给出修复方式
+            （不得把版本差异报告成复杂度债务）；未记录版本的旧基线仍需照常比较
+            并给出警告；无法探测版本时记录为未知而非拒绝写入。
+          test_type: unit
+
+    # ============================================================
+    # REQ-495: 项目自带的 githooks/ 必须优先于全局安装
+    # ============================================================
+    - id: REQ-495
+      title: 项目自带的 githooks/ 优先于全局安装
+      status: implemented
+      description: >-
+        三层解析把「项目」排在「全局安装」之前，文档也一直这么写，但 ADAPTER_DIR
+        只从全局安装的平铺目录里取，于是项目自己的 githooks/ 从来没有真正生效过。
+        一个用自己门禁脚本的仓库，实际执行的是全局那份——它以为自己在跑自己的
+        规则。优先级必须真的落实，否则「项目覆盖全局」只是一句注释。
+      acceptance_criteria:
+        - id: AC-495-23
+          criteria: >-
+            当项目自带 githooks/ 时，适配器解析必须落在项目层而不是全局安装；
+            ADAPTER_DIR 允许指向项目层，且必须以项目层为优先。
+          test_type: unit
+        - id: AC-495-24
+          criteria: >-
+            覆盖不能退化成「全局安装失效」：没有跑过 xp-gate init 的仓库（没有
+            githooks/）必须继续解析到全局安装。
+          test_type: unit
+
+    # ============================================================
+    # REQ-TS-GATE-STARTUP: TypeScript 门禁直调 tsx，不经 `npx -y tsx`
+    # ============================================================
+    - id: REQ-TS-GATE-STARTUP
+      title: TypeScript 门禁直接运行 tsx，且不依赖 shell
+      status: implemented
+      description: >-
+        `npx -y tsx` 每次启动都要重新解析包位置，实测 4.5-5.8s，而用当前 node
+        直接运行 tsx 的 cli.mjs 只要 0.79-0.82s——每道 TS 门禁白付约 4 秒。
+        改为直调后，用来兜底的 npx 也必须以「node 运行 npx-cli.js」的形式启动：
+        shell 在 Windows 上会因 DEP0190 的拼接转义问题产生畸形命令行，直接调
+        npx.cmd 又会被 CVE-2024-27980 之后的 node 以 EINVAL 拒绝。
+      acceptance_criteria:
+        - id: AC-TS-GATE-STARTUP-01
+          criteria: >-
+            已安装 tsx 时，门禁以当前 node 运行 tsx 的 cli.mjs，命令行不含
+            `npx -y tsx`。
+          test_type: unit
+        - id: AC-TS-GATE-STARTUP-02
+          criteria: >-
+            未安装 tsx 时回退到 npm 自己的 npx-cli.js，仍由当前 node 启动，不使用
+            shell，也不出现裸 `npx` 命令。
+          test_type: unit
+        - id: AC-TS-GATE-STARTUP-03
+          criteria: >-
+            存在 tsx/ 目录但缺少 dist/cli.mjs 的半安装状态按「未安装」处理。
+          test_type: unit
+        - id: AC-TS-GATE-STARTUP-04
+          criteria: >-
+            npx-cli.js 的定位必须同时覆盖 Node 的两种安装布局：与 node 可执行文件
+            同级的 node_modules，以及 setup-node 在 Linux 上产生的
+            lib/node_modules。只覆盖其一会让本机退化到裸 `npx`。
+          test_type: unit
