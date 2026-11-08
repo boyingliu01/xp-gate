@@ -61,20 +61,36 @@ case "${XP_GATE_SASTD:-direct}" in
     # Explicitly or implicitly off: the direct path. Not a degradation.
     GATE_10_SEMGREP_PATH="direct"
     ;;
-  on|auto|1|true)
-    # A daemon was requested. E2/E3 will resolve an endpoint here; with no
-    # endpoint implemented, the honest answer is "direct, and say so". This is
-    # the branch that must never become "skip the scan and call it a pass".
+  auto)
+    # "Use the daemon if one is available, otherwise just scan." Absence of a
+    # daemon is the normal state for most users, not a fault, so `auto` does NOT
+    # set the degraded flag -- marking it would make every ordinary run look
+    # degraded the moment E2 lands and train readers to ignore the flag.
+    # E2 MUST add a probe INSIDE this branch rather than flipping the value:
+    # a daemon that is ABSENT keeps degraded=0 (normal), but a daemon that is
+    # PRESENT BUT UNUSABLE must set degraded=1 -- otherwise `auto` silently
+    # swallows the same failure `on` reports. Get that distinction right here;
+    # it is the whole reason the two branches are separate.
+    GATE_10_SEMGREP_PATH="direct"
+    ;;
+  on|1|true)
+    # The user asserted a daemon SHOULD be here. If it is not, that is a
+    # degradation worth reporting: their configuration is not being honoured.
+    # This is the branch that must never become "skip the scan and call it a pass".
     GATE_10_SEMGREP_PATH="direct"
     GATE_10_SASTD_DEGRADED=1
-    echo "     ℹ️  sastd requested but not available — using direct semgrep (degraded)"
+    # stderr, not stdout: this file is SOURCED by pre-commit, so stdout belongs to
+    # the parent's report stream. A notice written there would land inside output
+    # that another consumer may parse. stderr still reaches the developer's
+    # terminal, which is the only audience a notice needs.
+    echo "     ℹ️  sastd requested but not available — using direct semgrep (degraded)" >&2
     ;;
   *)
     # An unrecognised value is a configuration mistake, not a reason to scan
     # less. Use the direct path and name the value so it can be fixed.
     GATE_10_SEMGREP_PATH="direct"
     GATE_10_SASTD_DEGRADED=1
-    echo "     ⚠️  XP_GATE_SASTD='${XP_GATE_SASTD}' is not recognised (expected off|on) — using direct semgrep"
+    echo "     ⚠️  XP_GATE_SASTD='${XP_GATE_SASTD}' is not recognised (expected off|auto|on) — using direct semgrep" >&2
     ;;
 esac
 
