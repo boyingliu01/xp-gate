@@ -5837,6 +5837,8 @@ generate_quality_report() {
       "status": "${GATE_10_STATUS:-SKIP}",
       "reason": "${GATE_10_REASON:-}",
       "scanned_files": ${GATE_10_SCANNED_FILES:-0},
+      "path": "${GATE_10_SEMGREP_PATH:-direct}",
+      "degraded": ${GATE_10_SASTD_DEGRADED:-0},
       "tool": "semgrep"
     },
     "gate11_sprint_flow": {
