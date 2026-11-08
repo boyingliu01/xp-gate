@@ -86,7 +86,13 @@ const GATE_CLI_TOOLS = [
   },
   {
     tool: 'semgrep',
-    gates: ['Gate 9 (SAST Security)'],
+    // Gate 10, not 9. `githooks/gate-registry.sh` is the single source of truth
+    // (`"sast|10|gate-10.sh|YES"`); gate 9 is Build Integrity. This entry said 9,
+    // which is the same drift that made #717 write a C# SAST fix into gate-9.sh —
+    // a fix applied to a gate that never runs. Anything reporting "which gate does
+    // this tool serve" has to agree with the registry or it sends the reader to
+    // the wrong file.
+    gates: ['Gate 10 (SAST Security)'],
     checkCmd: 'semgrep --version',
     install: {
       darwin: 'brew install semgrep',
