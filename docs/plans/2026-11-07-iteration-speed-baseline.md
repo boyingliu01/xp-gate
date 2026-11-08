@@ -197,7 +197,11 @@ time (git add -A && git commit -m bench && git push -q origin bench/iteration-sp
 | # | 缺陷 | 影响 |
 |---|---|---|
 | D1 | `githooks/gate-12-file-hygiene.sh` 缺 `# shellcheck shell=bash`，自身有 6 处 shellcheck 告警 | 任何提交只要暂存了含此文件变更的 .sh 集合，Gate 1 直接 BLOCK |
-| D2 | `.xp-gate/lint-baseline.json` 内容是 `{}` | Boy Scout 基线为空 ⇒ shellcheck 的 11 处既存告警会把所有 .sh 提交 BLOCK |
-| D3 | `githooks/gate-2.sh`、`githooks/gate-5.sh`、`githooks/gate-6.sh` 不存在 | 向它们追加内容会**创建新文件**，导致 shellcheck 报"缺少 shebang"，且 Gate 12b 报镜像缺失 |
-| D4 | Gate 13 用 g++ 做"编译器严格度"检查，但仓库无 C/C++ 源文件 | 每次固定 ~3 s 无产出 |
-| D5 | Gate 11 在非 sprint 项目仍跑完整脚本 | 每次固定 ~2.6 s |
+| D2 | `.xp-gate/lint-baseline.json` 内容是 `{}`（且被 gitignore） | Boy Scout 基线为空 ⇒ shellcheck 的 11 处既存告警会把所有 .sh 提交 BLOCK |
+| D3 | `githooks/gate-2.sh`、`gate-5.sh`、`gate-6.sh` 不存在 | 向它们追加内容会**创建新文件**，导致 shellcheck 报"缺少 shebang"，且 Gate 12b 报镜像缺失 |
+| D4 | Gate 13 用 g++ 做"编译器严格度"检查，但仓库无 C/C++ 源文件 | 每次固定 ~3–5 s 无产出（g++ 0.5s + javac 2.4s + dotnet 0.7s 全为工具探测） |
+| D5 | Gate 11 在非 sprint 项目仍起子进程跑 `sprint-gate.sh` | 每次固定 ~2.6 s，只为打印 `{"decision":"skip"}` |
+| **D6** | **Gate 10 用 `--config=p/security-audit`（registry 引用），每次联网拉规则；本机 `semgrep.dev` read timeout，一路重试到 180 s 超时** | **每次 TS 提交白付 100–200 s，且实际什么都没扫，然后降级 SKIP**。审计日志里 Gate 10 的 200 s 样本即由此产生 |
+| **D7** | **Gate 5 跑 `vitest run --coverage`，即使只跑 1 个测试文件也给整棵树插桩** | **单测试文件 5.1 s → 34.7 s**。算出的 0.12% 覆盖率被 hook 用"字符串匹配错误文案"吞掉（#473 的已知 workaround），既慢又无意义 |
+
+> D6 与 D7 是本次基线测量中**收益最大**的两项，它们不是"慢"，而是"做了无用功还号称跑过"。
