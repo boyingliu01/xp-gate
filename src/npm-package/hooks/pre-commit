@@ -4353,10 +4353,56 @@ else
     # return "supported" no matter what. File presence is the only honest input.
     GATE_6_LAYERS_UNCHECKED=0
     if [ -f "$PROJECT_ROOT/architecture.yaml" ] || [ -f "$PROJECT_ROOT/.architecturerc" ]; then
+      # The declaration is now read by a checker of our own, so the warning
+      # below is no longer "nothing looked at this" — it is "archlint did not".
+      # The verdict on layer boundaries comes from gate-6-layers.sh; this flag
+      # only records that archlint's generic-smell pass measured no layers.
       GATE_6_LAYERS_UNCHECKED=1
-      echo "     ⚠️  [WARN:LAYERS_UNCHECKED] 分层规则未校验：architecture.yaml 声明的层边界当前不被任何检测器消费"
-      echo "        (实测 @archlinter/cli 0.16.0 的 layer_violation 启用后亦无输出；见 #686)"
-      echo "        本次仅校验通用架构坏味道（循环依赖 / 上帝类 / 死代码）。"
+    fi
+
+    # Layer-boundary enforcement (#686 / #691 / #728).
+    # This runs in addition to archlint, not instead of it: archlint checks
+    # generic smells (cycles, god modules, dead code) and its layer_violation
+    # detector is a measured no-op, so the dependency direction has to be
+    # checked directly. The checker always builds the whole-repo import graph —
+    # a layer violation is an edge between two directories, so an incremental
+    # per-directory scan structurally cannot see one.
+    LAYER_CHECKER=""
+    if [ -f "$GATE_DIR/gate-6-layers.sh" ]; then
+      LAYER_CHECKER="$GATE_DIR/gate-6-layers.sh"
+    elif [ -f "$(git rev-parse --show-toplevel 2>/dev/null)/githooks/gate-6-layers.sh" ]; then
+      LAYER_CHECKER="$(git rev-parse --show-toplevel)/githooks/gate-6-layers.sh"
+    fi
+    if [ -n "$LAYER_CHECKER" ]; then
+      LAYER_OUT=$(cd "$PROJECT_ROOT" && bash "$LAYER_CHECKER" 2>&1)
+      LAYER_RC=$?
+      printf '%s\n' "$LAYER_OUT" | sed 's/^/  /'
+      case "$LAYER_RC" in
+        0)
+          GATE_6_LAYER_STATUS="PASS"
+          ;;
+        1)
+          GATE_6_LAYER_STATUS="FAIL"
+          GATE_6_STATUS="FAIL"
+          ;;
+        2)
+          # Config present but unusable: fail closed. Reporting PASS here is the
+          # exact defect #686 documented, one level deeper.
+          GATE_6_LAYER_STATUS="BLOCK"
+          GATE_6_STATUS="FAIL"
+          ;;
+        *)
+          # 3 = WARN (no layer config, or only baselined violations).
+          GATE_6_LAYER_STATUS="WARN"
+          ;;
+      esac
+      GATE_6_LAYER_REASON=$(printf '%s\n' "$LAYER_OUT" | sed -n 's/^ *reason: *//p' | head -1)
+    else
+      # The checker is missing, so the dimension is unmeasured — say so rather
+      # than letting the gate look like it covered layers.
+      GATE_6_LAYER_STATUS="WARN"
+      GATE_6_LAYER_REASON="layer_checker_missing"
+      echo "     ⚠️  [WARN:LAYER_CHECKER_MISSING] gate-6-layers.sh not found — layer boundaries NOT checked."
     fi
     # #537: per-language reason bookkeeping. Gate 3/4 are single-language gates
     # and get away with one scalar reason; Gate 6 loops, so a scalar would lose
