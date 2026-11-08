@@ -316,10 +316,9 @@ const TS_GATE_TIMEOUT_MS = 120000;
 const GATE_NOT_RUN = 'NOT_RUN';
 
 /**
- * Run a TypeScript gate module.
- * Finds the .ts entry point, spawns it through the fastest available runner
- * (a local tsx via `node`, else `npx tsx`), with the --run flag.
- * Falls back to a bash script if the TypeScript module is not found.
+ * Run a TypeScript gate module via npx tsx.
+ * Finds the .ts entry point, spawns tsx with --run flag.
+ * Falls back to bash script if TypeScript module not found.
  */
 /**
  * Resolve the working directory for a gate run.
@@ -327,7 +326,7 @@ const GATE_NOT_RUN = 'NOT_RUN';
  * `targetPath` is documented as "file or directory" (that is what
  * `xp-gate check <file>` passes), but spawnSync's `cwd` must be a directory.
  * Resolving a FILE path into cwd made spawnSync fail with a bare ENOENT that read
- * as "Gate 3 failed to run" — a tool failure reported under the label of a
+ * as "Gate 3 failed to run npx tsx" — a tool failure reported under the label of a
  * code verdict. The file's own directory is the meaningful cwd in that case.
  */
 function resolveGateCwd(targetPath) {
@@ -357,73 +356,101 @@ function resolveGateCwd(targetPath) {
  * plain argv, no shell, no batch wrapper.
  */
 function resolveNpxInvocation(args) {
-  const npxCli = path.join(path.dirname(process.execPath), 'node_modules', 'npm', 'bin', 'npx-cli.js');
-  if (fs.existsSync(npxCli)) return [process.execPath, [npxCli, ...args]];
+  const npxCli = findNpxCli();
+  if (npxCli) return [process.execPath, [npxCli, ...args]];
   return ['npx', args];
 }
 
 /**
- * Locate an installed `tsx` entry, so a TS gate can be started with `node`
- * directly instead of through npx.
+ * npm's own shell-free entry point (`npx-cli.js`), or null.
  *
- * Measured on this repo (Windows, warm caches): `npx -y tsx <entry> --run`
- * takes 6.9-7.8 s, `node <tsx-cli.mjs> <entry> --run` takes 1.7-1.9 s. The
- * ~5 s difference is npm resolving the package on every single gate; the gate's
- * own work is a small part of either number. With three TS-backed gates in
- * `check --all`, that is ~15 s spent deciding where tsx lives.
+ * The previous form looked only in `dirname(process.execPath)/node_modules/npm`,
+ * which is the layout of a Node installed from the Windows MSI or the official
+ * tarball. GitHub's `actions/setup-node` on Linux runs node from
+ * `/opt/hostedtoolcache/node/<version>/x64/bin/node`, where npm's library lives
+ * under `lib/node_modules/npm` instead — so the probe missed, the fallback became
+ * a bare `npx`, and that is unresolvable without a shell on Windows and a PATH hop
+ * everywhere else. CI caught it as two red assertions; the same install shape
+ * would have made the gate spawn the wrong thing on a developer's Linux box.
  *
- * This is the same trade the pre-commit hook already makes for archlint
- * ("1909 ms via npx vs 319 ms direct" — githooks/pre-commit). The CLI path
- * never got it.
- *
- * Search order, cheapest-and-most-certain first:
- *   1. this package's own node_modules (a global install has its deps beside it)
- *   2. the consumer project's node_modules (a devDependency on a dev machine)
- *   3. beside the running node binary (npm's own layout)
- *
- * Returns null when none exists, and the caller falls back to npx. That
- * fallback is load-bearing: the published package declares zero dependencies
- * and `engines.node >= 18`, so tsx is genuinely absent on a clean install.
- * This must stay a fast path, never a requirement.
- *
- * @param {string} [consumerCwd]
- * @returns {string|null} absolute path to tsx's cli entry
+ * Searches the same way `findTsxCli` does — one directory at a time, both the
+ * plain and the `lib/` npm layout — because "npm sits next to node" is an
+ * assumption about how Node was packaged, not a guarantee.
  */
-function findTsxEntry(consumerCwd) {
-  const candidates = [
-    path.join(__dirname, '..', 'node_modules', 'tsx', 'dist', 'cli.mjs'),
-    consumerCwd && path.join(consumerCwd, 'node_modules', 'tsx', 'dist', 'cli.mjs'),
-    path.join(path.dirname(process.execPath), 'node_modules', 'tsx', 'dist', 'cli.mjs'),
-  ].filter(Boolean);
-
-  for (const candidate of candidates) {
-    try {
+function findNpxCli() {
+  let dir = path.dirname(process.execPath);
+  for (let depth = 0; depth < TSX_SEARCH_DEPTH; depth += 1) {
+    for (const npmRoot of ['node_modules', path.join('lib', 'node_modules')]) {
+      const candidate = path.join(dir, npmRoot, 'npm', 'bin', 'npx-cli.js');
       if (fs.existsSync(candidate)) return candidate;
-    } catch {
-      // A permission error on one candidate must not hide the others.
     }
+    const parent = path.dirname(dir);
+    if (parent === dir) break;
+    dir = parent;
   }
   return null;
 }
 
 /**
- * Build the argv that runs a TS gate entry.
+ * How deep to look for a hoisted `node_modules/tsx` before giving up.
  *
- * Prefers a direct `node` start and falls back to `npx -y tsx`. Both branches
- * append the gate's own arguments identically, so the gate cannot tell which
- * route started it — the difference is startup cost only.
- *
- * @param {string} entry gate module to run
- * @param {string[]} gateArgs arguments belonging to the gate
- * @param {string} [consumerCwd]
- * @returns {[string, string[]]}
+ * Four is enough for the layouts that actually occur — `<repo>/node_modules`,
+ * `<repo>/src/npm-package/node_modules`, a git worktree's shared parent, and one
+ * level of monorepo nesting — without turning a miss into an unbounded walk up to
+ * the filesystem root.
  */
-function resolveTsRunner(entry, gateArgs, consumerCwd) {
-  const tsxEntry = findTsxEntry(consumerCwd);
-  if (tsxEntry) {
-    return [process.execPath, [tsxEntry, entry, ...gateArgs]];
+const TSX_SEARCH_DEPTH = 4;
+
+/**
+ * The nearest installed `tsx` CLI entry, or null.
+ *
+ * #779: every TypeScript gate used to be launched as `npx -y tsx <entry> --run`, and
+ * `npx -y` re-resolves where the package lives on EVERY call. Measured on this
+ * machine: `npx -y tsx --version` takes 4547-5811 ms while `node <tsx-cli> --version`
+ * takes 787-821 ms. That is ~4 s of pure package-resolution paid once per TS gate,
+ * and `xp-gate check --all` runs several — which is how a one-file project reached
+ * 117 s (the /tmp measurement in the governance review).
+ *
+ * Searching upward matters because the CLI is normally invoked from a CONSUMER
+ * project whose `node_modules` lives at the project root, while the gate module is
+ * resolved from the xp-gate install.
+ *
+ * @param {string} [cwd] directory to start from; defaults to process.cwd()
+ * @returns {string|null}
+ */
+function findTsxCli(cwd = process.cwd()) {
+  let dir = path.resolve(cwd);
+  for (let depth = 0; depth < TSX_SEARCH_DEPTH; depth += 1) {
+    const candidate = path.join(dir, 'node_modules', 'tsx', 'dist', 'cli.mjs');
+    if (fs.existsSync(candidate)) return candidate;
+    const parent = path.dirname(dir);
+    if (parent === dir) break;
+    dir = parent;
   }
-  return resolveNpxInvocation(['-y', 'tsx', entry, ...gateArgs]);
+  return null;
+}
+
+/**
+ * The executable + argv for running one TypeScript gate module.
+ *
+ * Prefers `node <tsx-cli> <args>`: no shim, no shell, no network, and no repeated
+ * package resolution. Falls back to npm's own `npx-cli.js` (still under the current
+ * node binary, still shell-free) only when no tsx is installed — the shape
+ * `resolveNpxInvocation` already guarantees.
+ *
+ * A `tsx/` directory with no `dist/cli.mjs` is treated as "not installed": a
+ * half-written install would otherwise be spawned and fail with a message about
+ * missing files, which reads like a gate defect rather than an install one.
+ *
+ * @param {string[]} args tsx argv (entry path, then the gate's own flags)
+ * @param {{cwd?: string}} [opts]
+ * @returns {{command: string, args: string[], viaNpx: boolean}}
+ */
+function resolveTsxInvocation(args, opts = {}) {
+  const tsxCli = findTsxCli(opts.cwd);
+  if (tsxCli) return { command: process.execPath, args: [tsxCli, ...args], viaNpx: false };
+  const [command, argv] = resolveNpxInvocation(['-y', 'tsx', ...args]);
+  return { command, args: argv, viaNpx: true };
 }
 
 /**
@@ -496,14 +523,21 @@ function runTsGate(gateModule, targetPath, opts = {}) {
     return GATE_NOT_RUN;
   }
 
-  const gateArgs = ['--run'];
-  if (targetPath) gateArgs.push('--cwd', targetPath);
+  const args = [impl.entry, '--run'];
+  if (targetPath) args.push('--cwd', targetPath);
 
   // spawnSync reports a spawn failure (npx missing) on `error`, throws only on a
   // malformed argv, and reports a killed child (timeout, signal) as a null status.
   // All three mean "the gate did not report a verdict", which must not be read as
   // success: a gate that never ran is not a gate that passed.
-  const [command, commandArgs] = resolveTsRunner(impl.entry, gateArgs, targetCwd);
+  //
+  // spawnSync reports a spawn failure (npx missing) on `error`, throws only on a
+  // malformed argv, and reports a killed child (timeout, signal) as a null status.
+  // All three mean "the gate did not report a verdict", which must not be read as
+  // success: a gate that never ran is not a gate that passed.
+  // #779: node + tsx's own CLI, not `npx -y tsx`. Same no-shell guarantee, no
+  // per-gate package re-resolution (~4 s saved per TS gate).
+  const { command, args: commandArgs, viaNpx } = resolveTsxInvocation(args, { cwd: targetCwd });
   try {
     const result = spawnSync(command, commandArgs, {
       stdio: 'inherit',
@@ -511,12 +545,12 @@ function runTsGate(gateModule, targetPath, opts = {}) {
       timeout: TS_GATE_TIMEOUT_MS,
     });
     if (result.error) {
-      console.error(`Gate ${gateModule}: failed to start (${command}): ${result.error.message}`);
+      console.error(`Gate ${gateModule}: failed to run tsx (${viaNpx ? 'npx fallback' : 'local cli'}): ${result.error.message}`);
       return 1;
     }
     return result.status === null ? 1 : result.status;
   } catch (err) {
-    console.error(`Gate ${gateModule}: could not spawn (${command}): ${err.message}`);
+    console.error(`Gate ${gateModule}: could not spawn tsx (${viaNpx ? 'npx fallback' : 'local cli'}): ${err.message}`);
     return 1;
   }
 }
@@ -858,4 +892,4 @@ async function runGate(gateId, targetPath, opts = {}) {
   return 1;
 }
 
-module.exports = { findConsumerGateVariant, findTsxEntry, resolveTsRunner, GATE_REGISTRY, GATE_NOT_RUN, getGateInfo, getAllGates, runGate, resolveAlias, getAliases, runGateAdapter, findTsGateEntry, resolveGateScript, SOURCE_FILE_EXTENSIONS, resolveAllModeChangedFiles, describeEmptyChangedFiles, describeChangedFilesScope };
+module.exports = { findConsumerGateVariant, GATE_REGISTRY, GATE_NOT_RUN, getGateInfo, getAllGates, runGate, resolveAlias, getAliases, runGateAdapter, findTsGateEntry, resolveGateScript, resolveTsxInvocation, findTsxCli, SOURCE_FILE_EXTENSIONS, resolveAllModeChangedFiles, describeEmptyChangedFiles, describeChangedFilesScope };
