@@ -456,27 +456,33 @@ function exchange(daemon, request, timeoutMs) {
     daemon.pending += 1;
     const sequence = daemon.pending;
 
+    // Exactly one release per request. finish() is reachable from three paths -- the
+    // reply, the outer timeout, and the write failure -- and more than one can fire
+    // (a timeout landing while a late reply arrives; a write failure racing the read
+    // timer). A second releaseProc decrements inFlight below the real number of live
+    // requests and unrefs a process still in use, letting Node exit mid-scan.
+    let released = false;
+    let timer = null;
     const finish = (result) => {
+      if (released) return;
+      released = true;
+      clearTimeout(timer);
       releaseProc(proc);
       resolve(result);
     };
 
-    const timer = setTimeout(() => {
+    timer = setTimeout(() => {
       finish({ ok: false, error: `daemon did not reply within ${timeoutMs}ms` });
       // A daemon that missed its deadline may be wedged; do not keep feeding it.
       resetDaemon(`timeout on request ${sequence}`);
     }, timeoutMs);
     timer.unref?.();
 
-    readOneLine(socket, (line, err) => {
-      clearTimeout(timer);
-      finish(interpretReply(line, err));
-    }, timeoutMs);
+    readOneLine(socket, (line, err) => finish(interpretReply(line, err)), timeoutMs);
 
     try {
       proc.stdin.write(JSON.stringify(request) + '\n');
     } catch (writeErr) {
-      clearTimeout(timer);
       resetDaemon(`write failed: ${writeErr.message}`);
       finish({ ok: false, error: `write failed: ${writeErr.message}` });
     }

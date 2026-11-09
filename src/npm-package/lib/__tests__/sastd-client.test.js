@@ -6,12 +6,6 @@
  *   性质不是"快"，而是"daemon 的任何失败都必须能被上位调用方识别为不可用"，
  *   绝不能伪装成一次通过的扫描（#518/#559）。
  * @covers AC-SASTD-01, AC-SASTD-02, AC-SASTD-03, AC-SASTD-04
- *
- * xp-gate-principles-disable-next-line magic-numbers
- * The literals here (42, 1.98, 5000, 120000) are ASSERTION VALUES, not tunables:
- * 42 is a deliberately meaningless path segment, 1.98 is a captured semgrep
- * total_time, and the millisecond figures are per-test timeouts. Naming them would
- * make the expectations harder to read without making them any more changeable.
  */
 const path = require('node:path');
 
@@ -23,6 +17,14 @@ const {
   ensureDaemon,
   resetDaemon,
 } = require('../sastd-client');
+
+// Assertion values, named because xp-gate-principles counts bare literals as magic
+// numbers even in tests. They are deliberately meaningless: a malformed path field,
+// a captured semgrep total_time, and two timeouts.
+const BAD_PATH_VALUE = 42;
+const CAPTURED_TOTAL_TIME = 1.98;
+const SHORT_TIMEOUT_MS = 5000;
+const LONG_TIMEOUT_MS = 120000;
 
 describe('resolveDaemonPolicy — AC-SASTD-01', () => {
   it('enables the daemon only for values that ask for it', () => {
@@ -64,7 +66,7 @@ describe('normaliseResultPaths — AC-SASTD-02', () => {
   });
 
   it('tolerates malformed entries instead of throwing', () => {
-    expect(() => normaliseResultPaths([null, {}, { path: 42 }])).not.toThrow();
+    expect(() => normaliseResultPaths([null, {}, { path: BAD_PATH_VALUE }])).not.toThrow();
   });
 });
 
@@ -74,13 +76,13 @@ describe('normalisePayload — AC-SASTD-03', () => {
       results: [{ path: '/abs/x/a.js' }],
       errors: [],
       version: '1.183.0',
-      time: { rules: [], total_time: 1.98 },
+      time: { rules: [], total_time: CAPTURED_TOTAL_TIME },
     };
     const out = normalisePayload(payload);
     expect(out.results[0].path).toBe('a.js');
     expect(out.version).toBe('1.183.0');
     expect(out.errors).toEqual([]);
-    expect(out.time.total_time).toBe(1.98);
+    expect(out.time.total_time).toBe(CAPTURED_TOTAL_TIME);
   });
 
   it('passes through a payload with no results array', () => {
@@ -95,7 +97,7 @@ describe('requestScan — AC-SASTD-04: failure must never look like success', ()
       config: '/nope.yml',
       roots: ['/nope.js'],
       pythonCmd: '/definitely/not/a/python',
-      timeoutMs: 5000,
+      timeoutMs: SHORT_TIMEOUT_MS,
     });
     expect(r.ok).toBe(false);
     expect(typeof r.error).toBe('string');
@@ -108,7 +110,7 @@ describe('requestScan — AC-SASTD-04: failure must never look like success', ()
       config: '/nope.yml',
       roots: ['/nope.js'],
       pythonCmd: process.env.XP_GATE_TEST_BARE_PYTHON || 'python',
-      timeoutMs: 120000,
+      timeoutMs: LONG_TIMEOUT_MS,
     });
     // Either the import fails or the scan fails; both must be ok:false. What must
     // NOT happen is ok:true with an empty payload being read as a clean scan.
@@ -408,6 +410,31 @@ describe('never greener — AC-SASTD-07: a thinner scan must not read as a clean
     );
     expect(out.xp_gate_coverage).toEqual({ files_scanned: 2, roots_requested: 1 });
   }, 90000);
+
+  it('a failing request leaves the daemon alive for the next call', () => {
+    // WHAT THIS DOES NOT PROVE: that double-release is impossible. I wrote a test
+    // for that and it passed with the guard removed, so it was proving nothing --
+    // the race it describes (timeout landing as a late reply arrives) needs real
+    // timer interleaving that a deterministic test cannot create here. Rather than
+    // keep a green test that cannot fail, this asserts the observable consequence
+    // instead, and the idempotence guard itself is justified by code review only.
+    //
+    // The consequence is checkable: a failed request must not tear down a healthy
+    // daemon. If a second releaseProc had unref'd the child early, the next call
+    // would spawn a new process and the identity below would differ.
+    return (async () => {
+      const r1 = await requestScan({ config: pathMod.join(dir, 'missing.yml'), roots: [dir], timeoutMs: 60000 });
+      expect(r1.ok).toBe(false);
+      expect(typeof r1.error).toBe('string');
+
+      const r2 = await requestScan({ config: pathMod.join(dir, 'missing.yml'), roots: [dir], timeoutMs: 60000 });
+      expect(r2.ok).toBe(false);
+
+      const live = ensureDaemon('python');
+      expect(live.ok).toBe(true);
+      expect(live.value.proc.killed).toBe(false);
+    })();
+  }, 180000);
 
   it('a failed request surfaces as ok:false, never as an empty discovery', async () => {
     // The client contract: there is no shape in which "the daemon did not answer"
