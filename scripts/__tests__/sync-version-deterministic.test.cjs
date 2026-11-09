@@ -135,26 +135,27 @@ describe('sync-version.cjs is idempotent (REQ-757)', () => {
     // scripts/sync-version.sh is the writer cross-platform-ci.yml calls before its
     // mirror check, so leaving it unfixed keeps the defect reachable from CI.
     //
-    // The .sh cannot be copied into a temp fixture the way the .cjs can -- it
-    // locates the repo with `git -C` and `find`, and its sed fallback differs per
-    // platform -- so this case pins its CONTRACT rather than executing it. That is
-    // weaker than AC-757-01/03 and is stated as such: what it guarantees is that
-    // no per-run value is ever substituted into the header, which is exactly the
-    // write that dirtied the tree. Executing both platform branches is tracked in
-    // the follow-up for the sed fallback (#758).
+    // As of REQ-VERSION-SINGLE-SOURCE the .sh no longer writes anything itself --
+    // it execs scripts/sync-version.cjs, which is the one place the header format
+    // lives. That makes this case simpler, not weaker: instead of pattern-matching
+    // a second implementation's sed, it pins the two properties that matter.
     const src = fs.readFileSync(REAL_SHELL_SCRIPT, 'utf8');
-    // Written-out values, not merely derived: a variable computed but never
-    // substituted cannot dirty anything.
+
+    // 1. It delegates. A wrapper that stopped delegating would either do nothing
+    //    or reintroduce the second implementation that drifted before.
+    expect(src).toContain('sync-version.cjs');
+
+    // 2. Nothing per-run is written by it. This is the #757/#752 defect -- a
+    //    header stamped with the current date/sha/branch can never compare equal
+    //    to its mirror, so every "are the two copies identical" guard needs a
+    //    permanent exemption. It must stay impossible to reintroduce.
     const volatileWrites = [
       '**Generated:** $TODAY',
       '**Commit:** $HEAD_SHA',
       '**Branch:** $BRANCH',
     ].filter((needle) => src.includes(needle));
     expect(volatileWrites).toEqual([]);
-    // Neither may it inline the value at the call site.
     expect(src).not.toMatch(/\*\*Generated:\*\*.*\$\(date/);
-    // The version must survive, or the script stops doing its job.
-    expect(src).toContain('**Version:** $FULL_VERSION');
   });
 
   it('AC-757-05: cross-platform CI no longer needs to strip headers before comparing', () => {
