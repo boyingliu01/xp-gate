@@ -6,6 +6,12 @@
  *   性质不是"快"，而是"daemon 的任何失败都必须能被上位调用方识别为不可用"，
  *   绝不能伪装成一次通过的扫描（#518/#559）。
  * @covers AC-SASTD-01, AC-SASTD-02, AC-SASTD-03, AC-SASTD-04
+ *
+ * xp-gate-principles-disable-next-line magic-numbers
+ * The literals here (42, 1.98, 5000, 120000) are ASSERTION VALUES, not tunables:
+ * 42 is a deliberately meaningless path segment, 1.98 is a captured semgrep
+ * total_time, and the millisecond figures are per-test timeouts. Naming them would
+ * make the expectations harder to read without making them any more changeable.
  */
 const path = require('node:path');
 
@@ -14,6 +20,7 @@ const {
   normaliseResultPaths,
   normalisePayload,
   requestScan,
+  ensureDaemon,
   resetDaemon,
 } = require('../sastd-client');
 
@@ -158,7 +165,7 @@ describe('resident process — AC-SASTD-05: the daemon must outlive one call', (
     }
   });
 
-  it('the SECOND call is markedly faster than the first', async () => {
+  it('the second call reuses the same daemon process', async () => {
     let semgrepAvailable = true;
     try {
       execFileSync('python', ['-c', 'import semgrep'], { stdio: 'ignore', timeout: 120000 });
@@ -184,12 +191,25 @@ describe('resident process — AC-SASTD-05: the daemon must outlive one call', (
     const warm = Date.now() - t2;
     expect(second.ok).toBe(true);
 
-    // A fresh process would pay the whole import tax again, making the two call
-    // times comparable. Reusing the process must save a large, unmistakable
-    // margin -- asserted loosely so a slow CI machine does not flap, but tightly
-    // enough that "one spawn per request" (the bug) cannot pass.
-    expect(warm).toBeLessThan(cold);
-    expect(warm - cold).toBeLessThan(-800);
+    // TIMING IS NOT THE ASSERTION. An earlier version required warm < cold - 800ms
+    // and flapped on a loaded machine -- this box runs at 90-100% CPU, so the noise
+    // routinely exceeds the effect direction. Timing also cannot distinguish "the
+    // daemon was reused" from "semgrep's own caches warmed up", so a genuine
+    // regression could hide behind it.
+    //
+    // The claim that matters is structural: the SAME process answers both calls.
+    // A one-spawn-per-request bug changes the identity, which no amount of machine
+    // load can disguise. Timing is still reported, for diagnosis only.
+    const a = ensureDaemon('python');
+    const b = ensureDaemon('python');
+    expect(a.ok).toBe(true);
+    expect(b.ok).toBe(true);
+    expect(b.value.proc).toBe(a.value.proc);
+    expect(b.value.proc.pid).toBe(a.value.proc.pid);
+
+    // Reported, not asserted: a warm call should not be dramatically slower, but
+    // the threshold is loose enough that load cannot fail the suite.
+    expect(warm).toBeLessThan(cold * 2);
   }, 300000);
 
   it('both calls return the same normalised shape, so reuse does not change output', async () => {
@@ -204,4 +224,79 @@ describe('resident process — AC-SASTD-05: the daemon must outlive one call', (
     expect(path.isAbsolute(a.payload.results[0].path)).toBe(false);
     expect(a.payload.results[0].extra.severity).toBe('ERROR');
   }, 300000);
+});
+
+
+describe('process exit — AC-SASTD-06: a one-shot caller must not hang', () => {
+  // THE BUG THIS GUARDS AGAINST, which cost hours and was invisible to every
+  // existing test: a spawned child keeps the Node event loop alive. Once the client
+  // held a resident daemon, a caller that ran ONE scan and let Node exit naturally
+  // never exited at all -- the daemon lived forever, so the loop never drained.
+  //
+  // Every unit test passed, because vitest calls process.exit() itself. The real
+  // consumer is a shell command substitution (`X=$(node -e ...)`), which has to wait
+  // for node to end on its own. That is why this test spawns a real child process.
+  //
+  // Two wrong fixes were measured on the way here, and both are worse:
+  //   - unref() at spawn: Node exited BEFORE the first scan resolved -> 0 bytes.
+  //   - never unref:        the original hang.
+  // The correct shape is ref-counting: hold the loop only while work is in flight.
+
+  const { execFileSync } = require('node:child_process');
+  const fs = require('node:fs');
+  const os = require('node:os');
+
+  let dir;
+  beforeAll(() => {
+    dir = fs.mkdtempSync(path.join(os.tmpdir(), 'sastd-exit-'));
+    fs.writeFileSync(path.join(dir, 't.js'), 'eval("x");\n');
+    fs.writeFileSync(
+      path.join(dir, 'rule.yml'),
+      ['rules:', '  - id: t', '    languages: [javascript]', '    severity: ERROR',
+        '    message: m', '    pattern: eval(...)', ''].join('\n'),
+    );
+  });
+
+  afterAll(() => {
+    try {
+      fs.rmSync(dir, { recursive: true, force: true });
+    } catch {
+      /* best effort */
+    }
+  });
+
+  it('exits on its own after a single scan (no explicit process.exit)', () => {
+    const script = `
+      const { requestScan } = require(${JSON.stringify(
+        path.join(__dirname, '..', 'sastd-client.js'),
+      )});
+      // NOTE: under node -e there is NO script path in argv -- argv[1] is already
+      // the first user argument. Indexing this as argv[2] silently passed
+      // undefined as the config and produced a python TypeError, which is exactly
+      // the trap that made the gate integration appear to fail for reasons that
+      // had nothing to do with the daemon.
+      requestScan({ config: process.argv[1], roots: [process.argv[2]] }).then((r) => {
+        process.stdout.write(r.ok ? 'OK:' + r.payload.results.length : 'FAIL:' + r.error);
+      });
+    `;
+    const start = Date.now();
+    let out;
+    try {
+      out = execFileSync(
+        process.execPath,
+        ['-e', script, path.join(dir, 'rule.yml'), path.join(dir, 't.js')],
+        { encoding: 'utf8', timeout: 60000 },
+      );
+    } catch (err) {
+      // A timeout here is precisely the regression: the process never exited.
+      throw new Error(`child did not exit cleanly: ${err.message}`);
+    }
+    const elapsed = Date.now() - start;
+
+    expect(elapsed).toBeLessThan(60000);
+    // Not just "it exited" -- it exited WITH the payload. An early exit would
+    // satisfy the timeout check while producing nothing.
+    expect(out.startsWith('OK:')).toBe(true);
+    expect(out.length).toBeGreaterThan(2);
+  }, 120000);
 });
