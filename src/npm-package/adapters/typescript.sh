@@ -33,8 +33,18 @@ run_lint() {
   # Prefer Biome if biome.json/biome.jsonc exists (covers lint + format in one pass)
   if [ -f "biome.json" ] || [ -f "biome.jsonc" ]; then
     echo "Running Biome linting..."
-    npx biome check . --no-errors-on-unmatched 2>&1 | head -50
+    # `$?` here is Biome's, and it has to be: this used to read
+    #   npx biome check . 2>&1 | head -50
+    #   local EXIT_CODE=$?
+    # and in a POSIX pipeline `$?` is the status of the LAST command -- `head` --
+    # so it was always 0. The failure branch below could never run and a project
+    # with Biome errors was told "PASSED". Capture the status first, then trim
+    # the output. This repo has no biome.json so its own commits never showed it;
+    # every downstream project using Biome was affected (#437).
+    local BIOME_OUTPUT
+    BIOME_OUTPUT=$(npx biome check . --no-errors-on-unmatched 2>&1)
     local EXIT_CODE=$?
+    printf '%s\n' "$BIOME_OUTPUT" | head -50
     if [ $EXIT_CODE -ne 0 ]; then
       echo ""
       echo "❌ Biome check failed"
