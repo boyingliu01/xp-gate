@@ -348,14 +348,33 @@ fi
 #
 # `run_node_bin <tool> <node-entry> [args...]`. Falls back to npx when the local
 # entry is absent (a globally-installed toolchain is still a valid setup).
+#
+# The npx fallback is correct for RUNNING a tool but wrong for DETECTING one:
+# `npx <tool> --version` downloads the package when it is missing, so it always
+# succeeds and answers a question about the local environment by installing into
+# it. Gate 5 used exactly that as its "is vitest available?" probe, so on a repo
+# with no vitest it ran a downloaded vitest, failed on a missing
+# @vitest/coverage-v8, and reported "TESTS FAILED" -- while no test had run.
+#
+# `--probe` (as the first argument, before the tool) restricts the lookup to the
+# project's own node_modules and returns 127 when absent, which is the honest
+# answer. Every detection site uses it; real runs keep the npx fallback, so a
+# project relying on a global toolchain behaves as before.
 if ! declare -F run_node_bin >/dev/null 2>&1; then
   run_node_bin() {
+    local _probe=0
+    if [ "$1" = "--probe" ]; then
+      _probe=1
+      shift
+    fi
     local _tool="$1" _entry="$2"
     shift 2
     local _root="${PROJECT_ROOT:-$(pwd)}"
     local _local="$_root/node_modules/$_entry"
     if [ -f "$_local" ] && command -v node >/dev/null 2>&1; then
       node "$_local" "$@"
+    elif [ "$_probe" -eq 1 ]; then
+      return 127
     else
       npx "$_tool" "$@"
     fi
@@ -3250,7 +3269,11 @@ else
     if source "$ADAPTER_FILE" 2>/dev/null; then
       # TypeScript: vitest with smart test selection
       if [ "$CURRENT_LANG" = "typescript" ] && { [ -f "package.json" ] || [ -f "$PROJECT_ROOT/package.json" ]; }; then
-        if run_without_git_context run_node_bin vitest vitest/vitest.mjs --version >/dev/null 2>&1; then
+        # `--probe`: answer "is vitest installed HERE?" without letting npx
+        # download it. A probe that installs what it is checking for always
+        # reports success, which is how repos with no vitest ended up blocking on
+        # a downloaded one's missing @vitest/coverage-v8 (#21, dsh-aot-runner).
+        if run_without_git_context run_node_bin --probe vitest vitest/vitest.mjs --version >/dev/null 2>&1; then
           # Count changed test files to decide strategy. `grep -c '.'` prints its
           # own zero AND exits 1 on an empty list, so `|| echo "0"` used to yield
           # $'0\n0' -- the same two-value bug that false-blocked Gate 8 (#493).
@@ -3391,6 +3414,15 @@ else
           TESTS_OUTPUT=$(run_without_git_context run_tests 2>&1)
           TESTS_EXIT_CODE=$?
           echo "$TESTS_OUTPUT" | head -50
+          # No runner installed is a SKIP, not a pass. The adapter returns 0 in
+          # that case (it measured nothing), so the exit code alone cannot tell
+          # "all tests passed" from "no tests could run". Without this, the
+          # coverage arm further down finds no report and blocks with
+          # "coverage/coverage-summary.json not found" -- blaming a missing
+          # artifact for a runner that was never installed (dsh-aot-runner #21).
+          if [ "$TESTS_EXIT_CODE" -eq 0 ] && printf '%s' "$TESTS_OUTPUT" | grep -q "No test runner installed locally"; then
+            TESTS_SKIPPED=true
+          fi
           if [ "$TESTS_EXIT_CODE" -ne 0 ]; then
             # This branch is reached from the typescript adapter, so run_tests ran
             # vitest (adapters/typescript.sh) and its output is vitest-shaped: the
@@ -3430,10 +3462,18 @@ else
               exit 1
             fi
           else
-            echo "✅ PASSED - Unit tests passed."
-            # #760: a runner really executed for this language, so the coverage
-            # guard below must not treat this pass as "nothing was measured".
-            TESTS_RAN_ANY=true
+            # Same distinction as the branch above: the adapter returns 0 both for
+            # "tests passed" and for "no runner installed", so the output is the
+            # only evidence of which one happened. Setting TESTS_RAN_ANY here
+            # unconditionally would claim a measurement that never took place.
+            if printf '%s' "$TESTS_OUTPUT" | grep -q "No test runner installed locally"; then
+              TESTS_SKIPPED=true
+            else
+              echo "✅ PASSED - Unit tests passed."
+              # #760: a runner really executed for this language, so the coverage
+              # guard below must not treat this pass as "nothing was measured".
+              TESTS_RAN_ANY=true
+            fi
           fi
         fi
       fi
