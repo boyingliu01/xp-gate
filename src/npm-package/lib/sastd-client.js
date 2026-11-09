@@ -205,6 +205,17 @@ function spawnDaemon(pythonCmd) {
     activeDaemon = null;
   });
 
+  // A broken pipe on the request stream is reported as an 'error' event, asynchronously.
+  // Node tolerates EPIPE on a child's stdin (verified: writing after the child exited
+  // does not throw and does not crash), so this is defence rather than a known crash.
+  // It is here because the alternative -- if that tolerance ever changed -- is an
+  // unhandled event taking down the whole gate, and losing the daemon must never be
+  // worse than not having one.
+  proc.stdin?.on('error', (err) => {
+    spawnError = err;
+    resetDaemon(`stdin error: ${err.message}`);
+  });
+
   return { ok: true, value: { proc, getSpawnError: () => spawnError } };
 }
 
