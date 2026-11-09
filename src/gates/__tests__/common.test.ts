@@ -55,14 +55,16 @@ describe('common.ts', () => {
     });
 
     it('returns available=false when tool is not found anywhere', () => {
-      // PATH check fails
-      mockSpawnSync.mockReturnValueOnce({ status: 1, stdout: '', stderr: '', pid: 1, output: ['', '', ''], signal: null } as any);
-      // npx check fails
+      // PATH check fails. The npx fallback is OFF by default (XP_GATE_NPX_PROBE,
+      // see AC-GATE-PROBE-05), so there is no second spawn to queue — queueing one
+      // would leak into the NEXT test's return value.
       mockSpawnSync.mockReturnValueOnce({ status: 1, stdout: '', stderr: '', pid: 1, output: ['', '', ''], signal: null } as any);
 
       const result = isToolAvailable('nonexistent-tool');
       expect(result.available).toBe(false);
       expect(result.via).toBe('none');
+      // Exactly one probe: the PATH lookup. No npx spawn unless explicitly opted in.
+      expect(mockSpawnSync).toHaveBeenCalledTimes(1);
     });
   });
 
