@@ -5556,3 +5556,27 @@ specification:
             本地无 typescript 时仍须回落 npx，行为与修复前一致。
             测试须在两个方向各有一个用例：本地存在时不得调用 npx，本地缺失时必须能回落到 npx。
           test_type: unit
+
+    # 单源真理的失败形态：同一件事有两份实现，各自维护、无人比对。
+    # 2026-11-09 审计发现 scripts/sync-version 正是如此，且两份已经漂移。
+    - id: REQ-VERSION-SINGLE-SOURCE
+      title: 版本同步只能有一份实现，两个入口必须等价
+      status: implemented
+      description: >-
+        VERSION 文件是版本号的唯一源。同步逻辑同样必须唯一：任何入口脚本只能是
+        同一实现的前置包装，不得各自维护一份目标清单。两份清单在无人比对的情况下
+        必然漂移，而漂移的表现是「脚本报告成功，但某个文件没被更新」——这类静默
+        失效正是本仓库反复出现的缺陷主轴。
+      priority: high
+      acceptance_criteria:
+        - id: AC-VERSION-SINGLE-SOURCE-01
+          criteria: >-
+            scripts/sync-version.sh 必须委托给 scripts/sync-version.cjs 执行，
+            自身不得携带目标文件清单。任何重新引入第二份清单的改动都必须让测试变红。
+          test_type: unit
+        - id: AC-VERSION-SINGLE-SOURCE-02
+          criteria: >-
+            对任意版本目标注入漂移后，用文档指定的入口执行同步，全部目标都必须被修复到
+            VERSION 值（含 package-lock.json 与 plugins/dsh/package.json）；
+            且不得改写 .stryker-tmp 等非源码目录下的 AGENTS.md 副本。
+          test_type: unit
