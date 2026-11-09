@@ -42,11 +42,29 @@ function git(command, cwd) {
   }).trim();
 }
 
-function createRepository(dir, message) {
+// A pre-initialised repository, created once per test FILE rather than once per
+// test. `git init` + three `git config` + `git add` is four process launches that
+// have nothing to do with what these tests assert; on Windows each launch costs
+// ~130 ms, so this fixture was ~0.5 s of pure process overhead per repository and
+// the file builds 20 of them (84 s measured, the single slowest test file in the
+// suite). Copying the prepared tree is one filesystem operation instead.
+let _repoTemplate = null;
+
+function repoTemplate() {
+  if (_repoTemplate) return _repoTemplate;
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'phase-transition-template-'));
   git('init --quiet --template=', dir);
   git('config core.hooksPath /dev/null', dir);
   git('config user.email "test@test.com"', dir);
   git('config user.name "Test"', dir);
+  _repoTemplate = dir;
+  return dir;
+}
+
+function createRepository(dir, message) {
+  // Copy the prepared template (init + config already done, so no process is
+  // launched for either), then make the one commit that encodes `message`.
+  fs.cpSync(repoTemplate(), dir, { recursive: true });
   fs.writeFileSync(path.join(dir, 'file.txt'), message);
   git('add file.txt', dir);
   git(`commit --quiet -m "${message}"`, dir);
