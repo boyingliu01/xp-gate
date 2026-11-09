@@ -5690,9 +5690,13 @@ specification:
         - id: AC-DEPLOY-01
           criteria: >-
             deploy-manifest.js 导出 HOOK_FILES（含 pre-commit/pre-push/post-commit/
-            post-merge/hook-module-resolution.sh）、GATE_FILES（含 gate-registry.sh 与
-            gate-6-layers.sh）、ADAPTER_COMMON、HOOKS_LIB；其 HOOK_FILES 覆盖包内 hooks/
-            顶层每个普通 hook 文件，GATE_FILES 覆盖包内每个 gate-*.sh（防漏改断言）。
+            post-merge/hook-module-resolution.sh）、GATE_FILES（11 个：gate-3.sh/
+            gate-4.sh/gate-6-layers.sh/gate-7.sh/gate-8.sh/gate-9.sh/gate-10.sh/
+            gate-12-file-hygiene.sh/gate-13-compiler-strictness.sh/gate-registry.sh/
+            sprint-gate.sh）、ADAPTER_COMMON、HOOKS_LIB；其 HOOK_FILES 覆盖包内 hooks/
+            顶层每个普通 hook 文件，GATE_FILES 覆盖包内每个 gate-*.sh 与 sprint-gate.sh
+            （防漏改断言遍历包内比对，拦截新增 gate 脚本时漏改清单——v1 手抄漏
+            gate-12-file-hygiene.sh 即此缺陷的活例）。
           test_type: unit
         - id: AC-DEPLOY-02
           criteria: >-
@@ -5745,16 +5749,24 @@ specification:
     # ============================================================
     - id: REQ-DEPLOY-002
       description: >-
-        安装链路（install.sh / setup-global / update-hooks）部署 gate-*.sh 到用户 hooks
-        目录——打包链路已把 gate-*.sh 拷进 tarball，问题全在安装链路不部署；doctor 的
-        EXPECTED_GATE_SCRIPTS 从清单派生（不再漏报 gate-registry.sh/gate-6-layers.sh）。
+        安装链路部署 gate-*.sh 到正确的部署目标——全局 setup-global/copyAdapters 部署到
+        ~/.config/xp-gate/adapters/（pre-commit GATE_DIR 的 gate_adapter_dir tier 搜
+        adapters/，probe gate-3.sh），项目内 install.sh 部署到 .git/hooks/（pre-commit
+        gate_script_dir tier）。实证（v2 勘误）：全局安装的 gate 部署已由 copyAdapters
+        前缀过滤覆盖（2d6390a9），#783 剩余真实缺陷是①项目内 install.sh 枚举白名单漏
+        gate-6-layers/gate-registry/gate-12 三个 gate（只拷 7/10）②copyHooks/update-hooks
+        硬编码白名单结构性易漏③doctor EXPECTED_GATE_SCRIPTS 漏报④LAYER_CHECKER_MISSING
+        仍 WARN。doctor 的 EXPECTED_GATE_SCRIPTS 从清单派生（不再漏报
+        gate-registry.sh/gate-6-layers.sh/gate-12-file-hygiene.sh）。
       priority: critical
       acceptance_criteria:
         - id: AC-DEPLOY-10
           criteria: >-
-            install.sh / setup-global 部署 GATE_FILES 全集（含 gate-registry.sh 与
-            gate-6-layers.sh）到目标 hooks 目录——修复 #783 实测"安装后
-            ~/.config/xp-gate/hooks/ 一个 gate-*.sh 都没有"。
+            install.sh / setup-global / update-hooks 部署 GATE_FILES 全集（11 个，
+            含 gate-registry.sh/gate-6-layers.sh/gate-12-file-hygiene.sh/sprint-gate.sh）
+            到正确部署目标（全局 adapters/ 或项目内 .git/hooks/，非 hooks/）——
+            修复 #783 剩余缺陷：项目内 install.sh 枚举白名单漏 3 个 gate
+            （.git/hooks/ 的 Gate 6/registry/12 不执行）。
           test_type: integration
         - id: AC-DEPLOY-11
           criteria: >-
@@ -5763,7 +5775,8 @@ specification:
           test_type: unit
         - id: AC-DEPLOY-12
           criteria: >-
-            全局安装后 source <dest>/gate-registry.sh 成功（契约测试）。
+            全局安装后 source <adapters>/gate-registry.sh 成功、项目内安装后 source
+            <.git/hooks>/gate-registry.sh 成功（契约测试，覆盖两种部署目标）。
           test_type: integration
         - id: AC-DEPLOY-13
           criteria: >-
@@ -5793,7 +5806,9 @@ specification:
         - id: AC-DEPLOY-15
           criteria: >-
             契约测试（plugins/dsh/src/contract.test.ts 范式）在 npm pack 后断言 tarball
-            hooks/ 含 HOOK_FILES + GATE_FILES 全集。
+            包根（src/npm-package/）含 HOOK_FILES + GATE_FILES 全集（gate-*.sh 由
+            sync-package-content 打包链路拷入包根，实证已含 10 个 gate + sprint-gate.sh），
+            且安装后部署目标（全局 adapters/ 或项目内 .git/hooks/）含全集。
           test_type: integration
         - id: AC-DEPLOY-16
           criteria: >-
@@ -5809,8 +5824,10 @@ specification:
         - id: AC-DEPLOY-18
           criteria: >-
             doctor --fix 迁移路径：LAYER_CHECKER_MISSING 且 architecture.yaml 存在时，
-            doctor（无 --fix）报告 + doctor --fix 自动补部署 gate-6-layers.sh；幂等
-            （连续两次结果一致）；离线（从本地包内 hooks/ 取，不依赖网络）；
+            doctor（无 --fix）报告 + doctor --fix 自动补部署 gate-6-layers.sh 到
+            GATE_DIR 解析目标（全局 ~/.config/xp-gate/adapters/ 或项目内 .git/hooks/，
+            依安装链路）；幂等（连续两次结果一致）；离线（从本地包内 hooks/ 取，
+            不依赖网络）；
             escape hatch XP_GATE_SKIP_LAYER_CHECK=1 作用域严格限定 LAYER_CHECKER_MISSING、
             每次使用 log WARN（时间戳+remediation）、CI 环境（CI truthy）拒绝该变量、
             sunset v0.39.0 无条件移除（迁移路径上线时长仅作 justification 非 gate）。
