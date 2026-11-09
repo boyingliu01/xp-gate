@@ -5369,7 +5369,14 @@ fi
 # first place.
 # ============================================================================
 MIRROR_STAGED=$(git diff --cached --name-only --diff-filter=ACMR 2>/dev/null || true)
-if [ -n "$MIRROR_STAGED" ] && printf '%s\n' "$MIRROR_STAGED" | grep -qE '^(githooks/|plugins/[^/]+/src/)'; then
+# `src/npm-package/` is in this filter because a mirror-only edit is the
+# dangerous direction, not the harmless one. Keying off the canonical paths
+# alone meant staging just the mirror skipped the whole block, so a fix written
+# into the published copy could be committed while its source stayed wrong --
+# v0.27.3 shipped exactly that (#542). The reverse mapping below resolves each
+# staged mirror back to its canonical file and compares the pair either way.
+if [ -n "$MIRROR_STAGED" ] && printf '%s
+' "$MIRROR_STAGED" | grep -qE '^(githooks/|plugins/[^/]+/src/|src/npm-package/(adapters|hooks|principles|build-integrity)/)'; then
   # Reuse PROJECT_ROOT: `git rev-parse` costs ~90ms per fork on Windows and this
   # gate must not add two of them to every commit (#640).
   MIRROR_REPO_ROOT="${PROJECT_ROOT:-}"
@@ -5401,6 +5408,15 @@ if [ -n "$MIRROR_STAGED" ] && printf '%s\n' "$MIRROR_STAGED" | grep -qE '^(githo
         githooks/adapters/*) _mm="src/npm-package/adapters/${_mf#githooks/adapters/}" ;;
         githooks/*) _mm="src/npm-package/hooks/${_mf#githooks/}" ;;
         plugins/*/src/*) _mm=$(printf '%s' "$_mf" | sed 's|^plugins/\([^/]*\)/src/|src/npm-package/plugins/\1/src/|') ;;
+        # Reverse direction: the staged file IS the mirror. Resolve it back to
+        # the canonical file and let the same comparison below decide. Without
+        # this arm the widened filter above matches nothing and the gate stays
+        # blind to a mirror-only edit -- the v0.27.3 shape (#542).
+        src/npm-package/adapters/*) _mf="githooks/adapters/${_mf#src/npm-package/adapters/}"; _mm="src/npm-package/adapters/${_mf#githooks/adapters/}" ;;
+        src/npm-package/hooks/lib/*) _mf="githooks/lib/${_mf#src/npm-package/hooks/lib/}"; _mm="src/npm-package/hooks/lib/${_mf#githooks/lib/}" ;;
+        src/npm-package/hooks/*) _mf="githooks/${_mf#src/npm-package/hooks/}"; _mm="src/npm-package/hooks/${_mf#githooks/}" ;;
+        src/npm-package/principles/*) _mf="src/principles/${_mf#src/npm-package/principles/}"; _mm="src/npm-package/principles/${_mf#src/principles/}" ;;
+        src/npm-package/build-integrity/*) _mf="src/build-integrity/${_mf#src/npm-package/build-integrity/}"; _mm="src/npm-package/build-integrity/${_mf#src/build-integrity/}" ;;
         *) continue ;;
       esac
       if [ ! -f "$MIRROR_REPO_ROOT/$_mm" ]; then

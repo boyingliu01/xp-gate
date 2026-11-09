@@ -23,9 +23,13 @@ setup() {
   [ "$output" -ge 1 ]
 }
 
-@test "AC-654-01: the gate only inspects githooks/ and plugins/*/src/ paths" {
+@test "AC-654-01: the gate is scoped by path, not run over the whole tree" {
   # A full-tree scan on every commit is what pushed this check to pre-push. The
-  # path filter is the reason it can run per-commit at all.
+  # path filter is the reason it can run per-commit at all. It matches four
+  # families now, not two: the mirror roots were added because a mirror-only
+  # edit is the dangerous direction (see AC-654-03), so the earlier "only
+  # githooks/ and plugins/*/src/" title described a filter that no longer
+  # exists.
   run grep -cF "MIRROR_STAGED" "$REPO_ROOT/githooks/pre-commit"
   [ "$status" -eq 0 ]
   [ "$output" -ge 1 ]
@@ -48,4 +52,17 @@ setup() {
   "
   [ "$status" -eq 0 ]
   [ "$output" = "ok" ]
+}
+
+@test "AC-654-03: a mirror edited WITHOUT its canonical source is still caught" {
+  # #542 shipped a mirror-only fix that prepack silently reverted (v0.27.3), and
+  # that is exactly the edit Gate 12b could not see: the gate keys off
+  # `^githooks/|^plugins/[^/]+/src/`, so staging ONLY
+  # src/npm-package/adapters/x.sh leaves MIRROR_STAGED empty and the whole block
+  # is skipped. The dangerous direction was unguarded.
+  #
+  # Asserted structurally: the gate's path filter must also accept the mirror
+  # roots, otherwise no mirror-only edit can ever reach the comparison.
+  run grep -E 'MIRROR_STAGED.*grep -qE.*src/npm-package|MIRROR_STAGED.*src/npm-package' "$REPO_ROOT/githooks/pre-commit"
+  [ "$status" -eq 0 ]
 }
