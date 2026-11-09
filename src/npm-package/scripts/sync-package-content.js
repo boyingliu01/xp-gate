@@ -285,6 +285,16 @@ function syncHooks() {
     copied += gateFiles.length;
   }
 
+  // #505 先例（hook-module-resolution.sh）：生成的 shell 投影 deploy-manifest.sh
+  // 本身也必须镜像到包内（install.sh source 它，Gate 12b parity 强制）。投影
+  // 非 hook/gate 清单成员，故显式同步；漏同步由 Gate 12b 镜像 parity 拦截
+  // （本会话实证：投影首次落地时 Gate 12b BLOCK 了提交）。
+  const projectionSrc = path.join(SRC, 'deploy-manifest.sh');
+  if (fs.existsSync(projectionSrc)) {
+    fs.copyFileSync(projectionSrc, path.join(DST, 'deploy-manifest.sh'));
+    copied += 1;
+  }
+
   console.error(`[sync] hooks/ (${copied} entries)`);
   return copied;
 }
@@ -565,5 +575,5 @@ if (require.main === module) {
   // Requiring this script must not mutate the work tree: a test that only wants
   // checkDocsDrift/checkAdapterDrift used to trigger a full mirror sync at
   // require-time, which vitest-worktree-guard rightly reported as pollution.
-  module.exports = { checkDocsDrift, checkAdapterDrift, checkPrePushDrift, checkPreCommitDrift };
+  module.exports = { checkDocsDrift, checkAdapterDrift, checkPrePushDrift, checkPreCommitDrift, syncHooks };
 }
