@@ -5674,3 +5674,245 @@ specification:
             空 .sln（无 Project 条目）不得被选为 workspace：它检查 0 个文件并返回 0，
             会造成门禁空跑；此情形须回退到 .csproj。
           test_type: unit
+
+    # ============================================================
+    # REQ-DEPLOY-001: 部署清单单一事实源（#789 根因②，sprint-20261109-15 P1-A）
+    # 设计：docs/plans/2026-11-09-deploy-resolution-design.md §1.2
+    # ============================================================
+    - id: REQ-DEPLOY-001
+      description: >-
+        新建 src/npm-package/lib/deploy-manifest.js 作为"包内文件→安装目标"的唯一事实源
+        （zero-dependency 数据契约 v1：HOOK_FILES/GATE_FILES/ADAPTER_COMMON/HOOKS_LIB），
+        替代四处手写且互不一致的部署清单；六个消费方（shared-utils/update-hooks/init/
+        install.sh/doctor/uninstall）全部经该清单取得文件列表，禁止持有私有字面量清单。
+      priority: critical
+      acceptance_criteria:
+        - id: AC-DEPLOY-01
+          criteria: >-
+            deploy-manifest.js 导出 HOOK_FILES（含 pre-commit/pre-push/post-commit/
+            post-merge/hook-module-resolution.sh）、GATE_FILES（含 gate-registry.sh 与
+            gate-6-layers.sh）、ADAPTER_COMMON、HOOKS_LIB；其 HOOK_FILES 覆盖包内 hooks/
+            顶层每个普通 hook 文件，GATE_FILES 覆盖包内每个 gate-*.sh（防漏改断言）。
+          test_type: unit
+        - id: AC-DEPLOY-02
+          criteria: >-
+            HOOK_FILES 与 GATE_FILES 无交集（hooks 与 gates 是两类部署目标）。
+          test_type: unit
+        - id: AC-DEPLOY-03
+          criteria: >-
+            generate-deploy-manifest.cjs 把清单投影为 githooks/deploy-manifest.sh
+            （shell 数组，供 install.sh source），带 --check（stale 退出非 0）；
+            生成的投影与 deploy-manifest.js 数据一致（--check 范式防双投影漂移）。
+          test_type: unit
+        - id: AC-DEPLOY-04
+          criteria: >-
+            generate-deploy-manifest.cjs --check 进 CI 构建门（prepack / quality-gates 步骤），
+            stale 投影在发布前就红，不进 tarball。
+          test_type: integration
+        - id: AC-DEPLOY-05
+          criteria: >-
+            copyAdapters 部署的 adapter-common 恰是清单 ADAPTER_COMMON 字段（require 清单
+            而非字面量）；uninstall 的移除枚举 require deploy-manifest.js（不成为第五份手写清单）。
+          test_type: unit
+        - id: AC-DEPLOY-06
+          criteria: >-
+            生成的 deploy-manifest.sh 首行 #!/bin/bash 且仅从 bash 上下文 source；
+            install.sh 断言 $BASH_VERSION 非空（POSIX sh 下数组静默坏），缺失时 fail-closed
+            提示用 bash 执行。
+          test_type: unit
+        - id: AC-DEPLOY-07
+          criteria: >-
+            六个消费方的 hook/gate 文件清单全部经 deploy-manifest.js 导出常量取得，
+            无任何硬编码字面量清单（AST 解析 Node 方 ArrayExpression + shell 标记块扫描，
+            排除注释/docblock/测试 fixture/文档示例）；六消费方列表写入本 specification
+            作为断言覆盖范围契约，新增消费方 import 必须同步更新断言范围（meta-断言）。
+          test_type: unit
+        - id: AC-DEPLOY-08
+          criteria: >-
+            update-hooks 与 init 通过 shared-utils.copyHooks 间接消费 deploy-manifest.js，
+            不持有独立清单（调用点行为不变，数据源统一）。
+          test_type: unit
+        - id: AC-DEPLOY-09
+          criteria: >-
+            update-hooks 后目标目录含 HOOK_FILES 全集（含 hook-module-resolution.sh 与
+            post-commit）——修复 update-hooks --scope hooks 装出缺 hook-module-resolution.sh
+            目录导致 pre-commit fail-closed FATAL 的活 bug。
+          test_type: integration
+
+    # ============================================================
+    # REQ-DEPLOY-002: gate 脚本部署 + install fail-closed（#783/#769，P1-A）
+    # 设计：docs/plans/2026-11-09-deploy-resolution-design.md §1.3
+    # ============================================================
+    - id: REQ-DEPLOY-002
+      description: >-
+        安装链路（install.sh / setup-global / update-hooks）部署 gate-*.sh 到用户 hooks
+        目录——打包链路已把 gate-*.sh 拷进 tarball，问题全在安装链路不部署；doctor 的
+        EXPECTED_GATE_SCRIPTS 从清单派生（不再漏报 gate-registry.sh/gate-6-layers.sh）。
+      priority: critical
+      acceptance_criteria:
+        - id: AC-DEPLOY-10
+          criteria: >-
+            install.sh / setup-global 部署 GATE_FILES 全集（含 gate-registry.sh 与
+            gate-6-layers.sh）到目标 hooks 目录——修复 #783 实测"安装后
+            ~/.config/xp-gate/hooks/ 一个 gate-*.sh 都没有"。
+          test_type: integration
+        - id: AC-DEPLOY-11
+          criteria: >-
+            doctor 的 EXPECTED_GATE_SCRIPTS 从 deploy-manifest.js 的 GATE_FILES 派生
+            （仅限 gate-script 部署清单派生，不含 registry 派生 CLI——那是 P1-B 非目标）。
+          test_type: unit
+        - id: AC-DEPLOY-12
+          criteria: >-
+            全局安装后 source <dest>/gate-registry.sh 成功（契约测试）。
+          test_type: integration
+        - id: AC-DEPLOY-13
+          criteria: >-
+            install.sh source deploy-manifest.sh 前加 fail-closed guard：投影文件存在性
+            + 非空检查，缺失/stale 时 exit 非 0 并输出可操作提示（含 regenerate 命令），
+            禁止静默装出残缺 hooks；契约测试覆盖 missing 投影 + stale 投影（--check 红）
+            两种情形。
+          test_type: integration
+        - id: AC-DEPLOY-14
+          criteria: >-
+            update-hooks 同时修复 gate 脚本部署（不只 hooks）——update-hooks 后目标目录
+            含 HOOK_FILES + GATE_FILES 全集，消除"升级后未跑 doctor 的用户提交遇未解释
+            FATAL"窗口。
+          test_type: integration
+
+    # ============================================================
+    # REQ-DEPLOY-003: 发布契约测试 + LAYER_CHECKER BLOCK 化迁移（P1-A，D1）
+    # 设计：docs/plans/2026-11-09-deploy-resolution-design.md §1.3/§1.4
+    # ============================================================
+    - id: REQ-DEPLOY-003
+      description: >-
+        发布前契约测试断言 tarball 部署全集；architecture.yaml 存在时 LAYER_CHECKER_MISSING
+        升 BLOCK（fail-closed，Gate 8 #499 先例），配套 doctor --fix 自动迁移 + 一次性
+        escape hatch + 滚动升级 partial/stale 预期行为。
+      priority: critical
+      acceptance_criteria:
+        - id: AC-DEPLOY-15
+          criteria: >-
+            契约测试（plugins/dsh/src/contract.test.ts 范式）在 npm pack 后断言 tarball
+            hooks/ 含 HOOK_FILES + GATE_FILES 全集。
+          test_type: integration
+        - id: AC-DEPLOY-16
+          criteria: >-
+            模拟全局安装到临时目录后 source <dest>/hook-module-resolution.sh 成功且
+            project-first（HOOK_ADAPTER_DIR_TIERS 项目在前）。
+          test_type: integration
+        - id: AC-DEPLOY-17
+          criteria: >-
+            architecture.yaml 存在时 pre-commit 的 LAYER_CHECKER_MISSING（gate-6-layers.sh
+            未部署）升 BLOCK；BLOCK 输出必须含可操作修复命令（xp-gate doctor --fix 或
+            setup-global），不得只报缺失名。
+          test_type: integration
+        - id: AC-DEPLOY-18
+          criteria: >-
+            doctor --fix 迁移路径：LAYER_CHECKER_MISSING 且 architecture.yaml 存在时，
+            doctor（无 --fix）报告 + doctor --fix 自动补部署 gate-6-layers.sh；幂等
+            （连续两次结果一致）；离线（从本地包内 hooks/ 取，不依赖网络）；
+            escape hatch XP_GATE_SKIP_LAYER_CHECK=1 作用域严格限定 LAYER_CHECKER_MISSING、
+            每次使用 log WARN（时间戳+remediation）、CI 环境（CI truthy）拒绝该变量、
+            sunset v0.39.0 无条件移除（迁移路径上线时长仅作 justification 非 gate）。
+          test_type: integration
+        - id: AC-DEPLOY-19
+          criteria: >-
+            滚动升级窗口：partial 安装（hooks/ 部分到位）按 fail-closed 报缺失文件名
+            （不笼统 FAIL、不假装 PASS）；stale 部署清单投影由 --check 检测并提示 regenerate；
+            两态均有 fixture 测试。
+          test_type: integration
+        - id: AC-DEPLOY-20
+          criteria: >-
+            升级路径测试：architecture.yaml 存在 + 检查器缺失 → doctor --fix 后
+            gate-6-layers.sh 到位 → 再次提交不再 BLOCK。
+          test_type: integration
+
+    # ============================================================
+    # REQ-RESOLVE-001: pre-push 接入生成解析表（#789 根因④，P1-C）
+    # 设计：docs/plans/2026-11-09-deploy-resolution-design.md §2
+    # ============================================================
+    - id: REQ-RESOLVE-001
+      description: >-
+        pre-push 顶部加载 hook-module-resolution.sh（对齐 pre-commit:78-86 两级 fallback
+        + fail-closed），把手写 global-first 级联（pre-push:534-545）替换为
+        _hook_resolve 'adapter-common' HOOK_ADAPTER_DIR_TIERS，与 pre-commit 同源
+        （单一解析实现，消除 project-first vs global-first 优先级反转）。
+      priority: critical
+      acceptance_criteria:
+        - id: AC-RESOLVE-01
+          criteria: >-
+            pre-push 引用 hook-module-resolution.sh / HOOK_ADAPTER_DIR_TIERS / _hook_resolve
+            （当前引用计数=0 → 变为 >0）。
+          test_type: unit
+        - id: AC-RESOLVE-02
+          criteria: >-
+            全局安装 + 项目自带 githooks/adapter-common.sh 时，pre-push 与 pre-commit
+            解析到同一份（构造 global+project 双副本 fixture，断言两路解析路径相同）。
+          test_type: integration
+        - id: AC-RESOLVE-03
+          criteria: >-
+            pre-push 对项目级 adapter-common 的解析顺序与 pre-commit 一致
+            （project-first）——HOOK_ADAPTER_DIR_TIERS 在 pre-push 上下文与 pre-commit 相同。
+          test_type: integration
+        - id: AC-RESOLVE-04
+          criteria: >-
+            两条 fail 路径显式区分：(a) hook-module-resolution.sh 本身缺失 → pre-push
+            FATAL exit 1（解析表是判断任何 tier 优先级的先验条件，fail-closed）；
+            (b) 解析表可用但 adapter-common.sh 在所有 tier 都不存在 → pre-push SKIP
+            Gate M + GATE_M_SKIP_REASON（#404 P0 语义），不得因 (b) 回归成 FATAL。
+            bats 同时断言 (a) exit≠0 且 (b) exit=0 + reason 非空。
+          test_type: integration
+        - id: AC-RESOLVE-05
+          criteria: >-
+            存量无表安装的升级窗口：update-hooks/init 再生解析表（hook-module-resolution.sh
+            在 HOOK_FILES，P1-A 修复后到位；pre-push 加载对齐 pre-commit 两级 fallback）；
+            版本化 fallback——pre-push 对无表安装降级 SKIP Gate M + reason 含
+            "run xp-gate update-hooks"，不 FATAL（缓冲期）；测试断言有表→正常解析、
+            无表→SKIP+reason 非 FATAL 两态。
+          test_type: integration
+
+    # ============================================================
+    # REQ-RESOLVE-002: 删除顶层死副本 + sync 防再生（P1-C）
+    # 设计：docs/plans/2026-11-09-deploy-resolution-design.md §2.3
+    # ============================================================
+    - id: REQ-RESOLVE-002
+      description: >-
+        删除 src/npm-package/hook-module-resolution.sh 顶层死副本（global-first 过期内容，
+        三重盲区：无消费者/无 parity/无 sync），并在 sync-package-content 加断言防再生。
+      priority: high
+      acceptance_criteria:
+        - id: AC-RESOLVE-06
+          criteria: >-
+            git rm src/npm-package/hook-module-resolution.sh；删除前 grep 全仓核实零消费者
+            （无 import/require/source 引用该路径）。
+          test_type: unit
+        - id: AC-RESOLVE-07
+          criteria: >-
+            sync-package-content.js 加断言：src/npm-package/ 顶层不得出现
+            hook-module-resolution.sh（防再生）；check-hook-mirror.sh parity 覆盖该约束。
+          test_type: unit
+        - id: AC-RESOLVE-08
+          criteria: >-
+            sync --fix 后 src/npm-package/ 顶层无 hook-module-resolution.sh；
+            镜像链路（githooks/ ↔ src/npm-package/）对该文件无 parity 失败。
+          test_type: integration
+
+    # ============================================================
+    # REQ-RESOLVE-FOLLOWUP-01: pre-push 无表 SKIP 缓冲期收紧（后续版本）
+    # 设计：docs/plans/2026-11-09-deploy-resolution-design.md §2.2 AC-C1-5(b)
+    # ============================================================
+    - id: REQ-RESOLVE-FOLLOWUP-01
+      description: >-
+        本次 sprint 登记的 follow-up：pre-push 无表降级 SKIP 是有版本号的临时态
+        （升级缓冲期），目标 v0.39.0 收紧为 FATAL（与 pre-commit 对齐）。
+        移除标准：v0.39.0 发布即强制收紧（无条件）；doctor 统计的无表安装占比<1%
+        仅作提前收紧的可选项（数据源 opt-in doctor telemetry/CI 聚合，未接入不触发），
+        不作 gate。
+      priority: medium
+      acceptance_criteria:
+        - id: AC-RESOLVE-09
+          criteria: >-
+            v0.39.0 发布时 pre-push 无表安装由 SKIP+reason 收紧为 FATAL（与 pre-commit
+            对齐）；本次 sprint 的 specification.yaml 登记此 follow-up REQ 使缓冲期有
+            契约过期（非部落记忆）。
+          test_type: unit
