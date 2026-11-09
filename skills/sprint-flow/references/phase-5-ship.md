@@ -45,8 +45,12 @@
    - 添加新版本条目 (## [X.Y.Z.W] - YYYY-MM-DD)
    - 按 ### Added / ### Fixed / ### Changed 分类
 
-4. 运行 sync-version.sh:
-   bash scripts/sync-version.sh
+4. 运行 sync-version:
+   bash scripts/sync-version.sh      # 薄包装，实际执行 sync-version.cjs
+   # 两个入口等价——.sh 只是 exec 同一个 .cjs，目标清单只有一份。
+   # 2026-11-09 之前它们是两份独立实现且已经漂移：bash 版不处理
+   # package-lock.json 与 plugins/dsh/package.json，还会把 .stryker-tmp
+   # 下的副本一起改写（报 401 files 而非 41）。按本文档执行会静默漏掉两个文件。
 
 5. 验证:
    git diff VERSION              # 确认版本号变更

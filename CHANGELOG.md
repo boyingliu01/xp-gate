@@ -27,6 +27,25 @@
 - **`gate-registry.sh` 的 `blocks` 列对两个门禁是错的**：`code-quality` 与 `build-integrity`
   标为 `NO`，而 `pre-commit` 里它们确实会设 `BLOCK` 并 `exit 1`。原测试断言的是**错的值**，
   等于把缺陷写进了规格。改为从代码行为推导，并用变异验证（把值改回去，测试必须变红）。
+- **版本同步有两个实现，且已经漂移**：`scripts/sync-version.sh` 和
+  `scripts/sync-version.cjs` 各自维护一份目标清单。实测把它俩的分歧打出来——把三个文件
+  改回 `0.0.0` 后执行 `bash scripts/sync-version.sh`：
+
+  | 文件 | 修复前 | 修复后 |
+  |---|---|---|
+  | `package.json` | `0.37.1.0` ✅ | `0.37.1.0` |
+  | `package-lock.json` | `0.0.0.0` ❌ 未处理 | `0.37.1.0` |
+  | `plugins/dsh/package.json` | `0.0.0` ❌ 未处理 | `0.37.1` |
+
+  bash 版还会把 `.stryker-tmp` 下的 AGENTS.md 副本一起改写，报 **401 files**，而 .cjs 报
+  **41**——多出的 360 个全是突变测试沙箱。这比数字难看更要紧：文件计数是「同步真的发生了」
+  的唯一可观测信号。
+
+  **这条比对 sprint-flow 规范特别要紧**：`phase-5-ship.md` 第 4 步写的就是
+  `bash scripts/sync-version.sh`。照文档做，就会静默漏掉两个文件。
+
+  修法不是在两处各修一遍（那正是漂移的成因），而是让 `.sh` 变成薄包装、`exec` 同一个
+  `.cjs`——目标清单只留一份（REQ-VERSION-SINGLE-SOURCE）。CI 的调用点与文档入口都保留。
 
 ### Performance
 
