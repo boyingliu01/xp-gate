@@ -148,8 +148,8 @@ def _config_prefix(config):
 
     Measured: semgrep uses the config FILE'S DIRECTORY and drops the filename --
     Given a rules file in %TEMP%, the prefix is the flattened TEMP directory,
-    filename dropped. Three attempts were needed to get this right; each wrong
-    wrong version failed the same silent way (matched nothing, did nothing):
+    filename dropped. Three attempts were needed; each wrong version failed the
+    same silent way, matching nothing and therefore cleaning nothing:
       - replacing ":" and then "\\" separately produced a double dot, "C..Users";
       - using the whole path left the ".yml" segment in the prefix;
       - only collapsing the two together, from the parent directory, matches.
