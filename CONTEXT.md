@@ -4,52 +4,77 @@
 
 XP-Gate 是确定性 git 质量门禁 + AI 多专家评审（Delphi）+ Sprint Flow 流水线的工具集，核心是 `xp-gate` CLI + 12 道确定性门禁（纯 shell/CLI，零 AI 耦合）。
 
-- 门禁链：G0 版本一致性 → G1 语言适配器（lint/静态分析）→ G2 jscpd → G3 复杂度(CCN) → G4 principles → G5 测试+覆盖率 → G6 架构 → G7 → G8 密钥扫描(fail-closed) → G9 build integrity → G10 → G11 sprint 报告 → G12 环境
-- 语言适配器在 `githooks/adapters/*.sh`（java.sh / typescript.sh / python.sh / powershell.sh …），评分与审计在 `src/npm-package/lib/gate-audit.ts`
+- 门禁链：G0 版本一致性 → G1 语言适配器 → G2 jscpd → G3 复杂度 → G4 principles → G5 测试+覆盖率 → G6 架构 → G7 IaC → G8 密钥扫描(fail-closed) → G9 build integrity → G10 SAST → G11 sprint → G12 文件卫生（warn-only）
+- 语言适配器在 `githooks/adapters/*.sh`，评分与审计在 `src/npm-package/lib/gate-audit.ts`
 - 镜像纪律：`src/npm-package/**` 是 `githooks/**` 等规范源的字节级镜像，改规范源后必须 `sync-package-content.js --fix`
+- 解析层单一事实源：`src/npm-package/lib/hook-module-resolution.js`（project-first），`githooks/hook-module-resolution.sh` 由 `scripts/generate-hook-resolution.cjs` 生成
 
-## 本次特性（#507：Java 质量门禁支持强化）
+## 本次特性（sprint-20261109-15：P1-A 部署链路单一事实源 + P1-C 解析层收敛）
 
-来源：whaleAudit（Java 8 / Maven 多模块 / Druid Filter SQL 审计组件）实战使用 xp-gate v0.20.0 的反馈。浩鲸 Java 规范组官方静态检查工具 **wc-java-lint**（捆绑 checkstyle 10.21 / pmd 7.7 / spotbugs 4.8.4+findsecbugs+自研 / simian / lizard，规则集带 manifest 验签）已可用，支持 `check --changed --format json` 增量。
+来源：架构正交分解（#789 索引 + docs/plans/2026-11-09-architecture-orthogonal-decomposition.md 实测）。用户已确认本次 sprint 范围 = P1-A + P1-C。
 
-五个短板 → 五个切片：
-1. **S1（最关键）**：G1 java.sh 的 checkstyle/pmd 依赖 `command -v`，不在 PATH 时静默跳过；插件目录缺失也无提示 → Java 项目 G1 实际只剩 `mvn compile` 兜底却报 PASS。改为：检测到 `wc-java-lint` 在 PATH 时优先 `wc-java-lint check --changed --format json`；插件目录缺失输出明确 WARN 而非静默 PASS。
-2. **S2**：G3 `CCN_THRESHOLD=5` 写死，对 AST 解析类 Java 代码过于激进且与官方阈值(CCN>10)不一致 → 三级覆盖：`.xp-gate/ccn-threshold` 项目文件 > `XP_GATE_CCN_THRESHOLD` 环境变量 > 默认 5。
-3. **S3**：文档/配置类提交导致 G3/G4/G9 SKIP 时，SKIP 计入分母把综合分拉到 6.0-6.7（PARTIAL）尽管 0 失败 → 评分口径区分 SKIP（不适用）与 FAIL，报告标注「有效门禁通过率」。
-4. **S4**：G4 principles checker（TS 实现）对 Java 文件的实际规则覆盖不明 → 显式化：不支持 Java 就明确 SKIP 并说明原因，不含糊。
-5. **S5**：G9 build integrity 仅适用 TypeScript，Java 项目永久 SKIP → 按 PROJECT_LANG 分派（Java 用 `mvn verify` 或 wc-java-lint aux-classpath 增量）。
+### P1-A 部署链路单一事实源（根因②）
+同一份「装哪些文件」清单手写 4 处且互不一致：
+- `src/npm-package/lib/shared-utils.js:70`（copyHooks 5 文件 flat：pre-commit/pre-push/post-commit/post-merge/hook-module-resolution.sh）
+- `src/npm-package/lib/update-hooks.js:165`（copyHooks 3 文件 nested，缺 post-commit + hook-module-resolution.sh + lib/）
+- `src/npm-package/scripts/sync-package-content.js:255`（prepack HOOK_FILES 6 文件）
+- `scripts/check-hook-mirror.sh:20`（HOOK_MIRROR_FILES 47 对）
+- 另有 `githooks/install.sh:20` GATE_SCRIPTS、`src/npm-package/lib/doctor.js` EXPECTED_GATE_SCRIPTS、`uninstall.js:868` 同步注释
+
+后果（活 bug）：
+- `update-hooks --scope hooks` 装出缺 hook-module-resolution.sh 的 hooks 目录 → pre-commit fail-closed FATAL（把能用的安装破坏成提交不可用）
+- registry / gate-6-layers.sh 随包发布但不部署（#769 / #783）
+- update-hooks copyAdapters 拷 nested → 全局安装造出 `adapters/adapters/` 双层
+
+### P1-C 解析层收敛（根因④）
+- `githooks/pre-push:534-545` 手写 global→project→script 级联（与设计意图 project-first 相反），对 hook-module-resolution/HOOK_ADAPTER_DIR_TIERS 引用计数 = 0
+- `githooks/pre-commit:243` 已正确消费 HOOK_ADAPTER_DIR_TIERS（project-first）
+- 后果：全局安装 + 项目自带 githooks/ 的机器上，同一 push 的 pre-commit 用项目副本、pre-push 用全局副本（优先级反转）
+- 附带：`src/npm-package/hook-module-resolution.sh` 顶层死副本（global-first 过期，三重盲区：无消费者/无 parity/无 sync）
 
 ## 分工边界
 
-- wc-java-lint：Java 五件套静态检查 + 官方规则集 + 工具/规则自动同步（`--changed`/`--staged` 原生增量）
-- xp-gate：流程编排（12 门禁）、sprint 强制、覆盖率（G5 jacoco）、架构分层（G6）、密钥/SAST（G8/G10）
+- 部署清单（数据）：声明「包内 hooks/ 各文件 → 安装目标位置」，是唯一事实源
+- 安装器（init/update-hooks/install.sh/setup-global/uninstall）：消费清单，保留 3 套但数据源统一（D2）
+- 解析层（hook-module-resolution）：pre-commit 与 pre-push 都 source 同一生成表（D5）
+- 契约测试：发布/安装链路改动先写契约测试（AGENTS.md 规则 4，plugins/dsh/src/contract.test.ts 范式）
 
 ## 关键环境
 
-- whaleAudit 侧：Windows 11 + Git Bash，hooks via core.hooksPath；Java 8 target / Maven 多模块
-- wc-java-lint 契约（已知）：`wc-java-lint check --changed --format json` 一次跑齐五件套；不在 PATH 时 xp-gate 不得假装检查过
+- 开发机：Windows 11 + Git Bash；worktree 隔离（.worktrees/sprint-20261109-arch）
+- core.hooksPath = ~/.config/xp-gate/hooks（全局）——改 githooks/ 脚本对本地提交不生效，需 `xp-gate doctor --sync-hooks` 同步后验证（#451 陷阱）
+- npm registry：npmmirror.com 滞后，安装/验证用 --registry=https://registry.npmjs.org
 
 ## 领域术语
 
-- **SKIP**：门禁不适用（无变更/语言不符），与 FAIL 语义必须区分
-- **有效门禁通过率（effective_pass_rate）**：分母剔除 SKIP 后的通过率 = PASS / (TOTAL - SKIP)
-- **CCN**：圈复杂度（cyclomatic complexity number）
-- **wc-java-lint**：浩鲸官方 Java 静态检查 CLI（五件套 + 官方规则集 + manifest 验签），`check --staged --format json` 增量契约见 DR-002
-- **aux-classpath**：spotbugs 分析字节码所需的类路径参数（本期不采用，记 ADR 备选）
+- **部署清单**：包内文件 → 安装目标位置的映射数据，替代 4 处手写清单
 - **fail-closed**：无法得出确定结论时必须 BLOCK 而非放行（同 Gate 8 #499 哲学）
+- **优先级反转**：pre-push 全局优先 vs pre-commit 项目优先，同一机器两套结论
+- **死副本**：被 git 跟踪但无消费者/无 parity/无 sync 的文件（三重盲区）
+- **契约测试**：发布/安装前就红的集成测试（先于实现提交）
 
-## 关键决策（详见 .sprint-state/decisions.md 与设计文档 / ADR）
+## 用户画像（R1 Delphi 吸收后补全：原 4 个 + R1 缺口#4 补 3 个）
 
-1. wc-java-lint 走「可用则优先，缺失则显式 WARN/降级」，不内置、不自动下载（DR-006：命中时替换 legacy checkstyle/pmd 直调与 p3c/whalecloud 插件链；缺失时旧链回退+插件目录缺失各自 WARN）
-2. wc-java-lint 执行失败=BLOCK（fail-closed），逃生阀 `XP_GATE_WC_JAVA_LINT=soft`（DR-001）；调用契约与 exit code 语义由 stub fixture 测试钉住（DR-002）
-3. 评分口径向后兼容：`SCORE = PASS / (TOTAL - SKIP) * 10`，WARN 计入分母，有效分母 0 → score=N/A/verdict=SKIP-ALL，新增 effective_pass_rate/skip_count 字段（DR-005）；无 SKIP 时与旧口径逐字节一致
-4. S4 先审计 java.ts 实际覆盖再裁决，禁止盲目 SKIP（DR-004）；S5 目标=pre-commit 内联 Build Integrity 段 + src/build-integrity/gate-10.ts（gate-9.sh 是 SAST，勿改错），Java 走 `mvn -q -DskipTests compile`（DR-003）
-5. CCN 阈值覆盖链：项目文件 > 环境变量 > 默认 5；非法值 WARN+回退，生效阈值写入审计输出（DR-008）
-6. Java 项目判定沿用 multilang 机制（staged 含 .java 即激活），polyglot 各适配器并行（DR-007）
-7. DoD 统一含镜像同步 + 用例更新 + Windows Git Bash 实测项 + 非 Java 回归断言（DR-009）
+1. **全局安装用户**（xp-gate setup-global）：升级后 update-hooks 不应把能用的安装破坏成 FATAL；gate 脚本应被部署
+2. **项目自带 githooks/ 的用户**：pre-commit 与 pre-push 应解析到同一份 adapter-common（优先级一致）
+3. **存量 architecture.yaml 用户**：D1 BLOCK 化后应有 doctor --fix 自动迁移路径 + 一次性 escape hatch，而非仅 release notes
+4. **xp-gate 维护者**：新增 gate/hook 脚本时漏改部署清单应被测试拦截（防漏改）
+5. **CI / 非交互安装用户**（R1 缺口#4）：install.sh 在 CI 无 TTY 环境跑，AC-A2-4 的 fail-closed guard 改变其失败模式——从"静默装残缺"变为"明确 exit 非 0 + 可操作提示"。验证路径：CI fixture 断言 install.sh 在投影缺失时 exit≠0 且 stderr 含 regenerate 命令（非交互可读）
+6. **install.sh-only 用户**（R1 缺口#4，技术 B3）：只用 `bash githooks/install.sh`（从不跑 xp-gate init/update-hooks）的群体——正是 #783 实测"GATE_SCRIPTS 声明 9 个却不拷"的受害者。验证路径：install.sh 契约测试独立覆盖（不依赖 init/update-hooks）
+7. **从不重跑 update-hooks 的存量用户**（R1 缺口#4，技术 B3）：升级 xp-gate 后不重跑 update-hooks，hooks 目录停留在旧版。验证路径：AC-A2-5（update-hooks 修复 gate 脚本）+ AC-C1-5(b)（pre-push 无表降级 SKIP 缓冲期）共同覆盖此群体的升级窗口
+
+## 关键决策（grill-with-docs 敲定，2026-11-09；详见 .sprint-state/decisions.md DR-004）
+
+1. **D1 BLOCK 时机**：architecture.yaml 存在时 LAYER_CHECKER_MISSING 升 BLOCK（本次一起）。存量未部署成功用户升级后提交失败——但 #783 修复后 gate-6-layers.sh 正确部署，新安装用户不再触发；存量用户的失败是逼其重装/更新的信号，符合 fail-closed 哲学（Gate 8 #499 先例）
+2. **D2 安装器统一范围**：只统一白名单来源（数据化），安装器保留 3 套（init/update-hooks/install.sh）消费同一清单。不合并安装器代码（改动面大，回归风险超目标）
+3. **D3 已修未关关单**：授权核实测试绿后直接 close #754 #740 #779（#789 step 0）
+4. **D4 顶层死副本**：删除 src/npm-package/hook-module-resolution.sh + sync 断言防再生（它是 global-first 过期内容，保留=保留错误）
+5. **D5 pre-push 接入**：pre-push source 生成的 hook-module-resolution.sh（HOOK_ADAPTER_DIR_TIERS），与 pre-commit 同源；删手写 global-first 级联。单一解析实现（#789 Delphi 结论：解析只能有一份实现）
 
 ## 关键证据源
 
-- Issue #507 原文（含 whaleAudit 实测数据：340 core 测试、SKIP 拉分实例）
-- `githooks/adapters/java.sh`、`githooks/gate-3.sh`、`src/npm-package/lib/gate-audit.ts`
-- 已有设计文档命名规范：`docs/plans/YYYY-MM-DD-<topic>-design.md`
+- Issue #789（索引，4 根因/5 sprint/14 症状）、#790（镜像 A/B/C，P1-E 前置，本次不做）、#791（Gate 10 性能负结果，P1-F，本次不做）
+- #783（gate-6-layers.sh 不部署）、#769（registry 不部署）、#771/#770（uninstall 误删）、#741/#756
+- docs/plans/2026-11-09-architecture-orthogonal-decomposition.md（根因实测）
+- docs/plans/2026-11-09-architecture-sprint-breakdown.md（REQ/AC 边界 + 依赖图）
+- 实测：update-hooks 白名单 3 文件 vs shared-utils 5 文件；pre-push 解析表引用计数=0；顶层死副本 global-first
