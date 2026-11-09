@@ -5530,3 +5530,29 @@ specification:
             因此不要求与标题逐字相等（同义词合法），但标签所指的门禁与编号解析出的
             门禁必须一致。
           test_type: unit
+
+    # 门禁自身的「静默失效」类缺陷。共同点：门禁报告成功，但从没读过真正的
+    # 判据——退出码来自管道末端、或判据根本没被执行。2026-11-08 一次审计里
+    # 找到两处，形态与 #717（修复写进不被 source 的文件）同族。
+    - id: REQ-GATE-INTEGRITY
+      title: 门禁的判定必须来自工具本身，不得被管道或分辨率细节吞掉
+      status: implemented
+      description: >-
+        门禁的价值等于「它真的读了判据」的概率。任何让门禁在工具失败时仍报 PASS 的
+        实现细节——管道末端的退出码、不被执行的副本、拿不到本地二进制就静默跳过——
+        都必须被修复并用测试钉住，否则该门禁等于不存在。
+      priority: high
+      acceptance_criteria:
+        - id: AC-GATE-INTEGRITY-01
+          criteria: >-
+            TypeScript 适配器的 Biome 分支必须把 Biome 自身的退出码作为判定依据。
+            在 POSIX 管道里 `$?` 是管道末端命令（head）的状态，因此
+            `biome check . | head -50` 之后的 `$?` 恒为 0，失败分支不可达。
+            测试须证明 Biome 报错时 run_lint 返回非零且不输出 PASSED，且干净时仍通过。
+          test_type: unit
+        - id: AC-GATE-INTEGRITY-02
+          criteria: >-
+            类型检查必须优先使用本地已安装的 tsc，而不是每次都经 npx 解析包。
+            本地无 typescript 时仍须回落 npx，行为与修复前一致。
+            测试须在两个方向各有一个用例：本地存在时不得调用 npx，本地缺失时必须能回落到 npx。
+          test_type: unit

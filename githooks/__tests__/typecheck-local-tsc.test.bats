@@ -1,6 +1,6 @@
 #!/usr/bin/env bats
 #
-# @test REQ-438 Typecheck must not pay npx resolution when tsc is installed locally
+# @test REQ-GATE-INTEGRITY Typecheck must not pay npx resolution when tsc is installed locally
 # @intent `npx tsc --version` measured 1941 ms against `node
 #         node_modules/typescript/bin/tsc --version` at 234 ms in this repo --
 #         the same compiler, the same answer, 1.7 s of package resolution in
@@ -16,7 +16,7 @@
 #         provides the fallback so a consumer repo without a local install keeps
 #         working exactly as before.
 #
-# @covers AC-438-01, AC-438-02
+# @covers AC-GATE-INTEGRITY-02
 #
 # ASCII only.
 
@@ -25,13 +25,13 @@ setup() {
   TYPECHECK="$REPO_ROOT/githooks/lib/typecheck.sh"
 }
 
-@test "AC-438-01: typecheck.sh resolves a local tsc before falling back to npx" {
+@test "AC-GATE-INTEGRITY-02: typecheck.sh resolves a local tsc before falling back to npx" {
   # A resolver function must exist and be reachable.
   run bash -c "grep -qE '^_tsc_command\\(\\)|^tsc_command\\(\\)' '$TYPECHECK'"
   [ "$status" -eq 0 ]
 }
 
-@test "AC-438-02: with typescript installed locally, no `npx tsc` is executed" {
+@test "AC-GATE-INTEGRITY-02: with typescript installed locally, no `npx tsc` is executed" {
   # Runs the resolver in a fixture that has node_modules/typescript/bin/tsc and a
   # stub npx that fails loudly. If the resolver still reaches for npx, the stub
   # makes the run fail instead of silently succeeding.
@@ -61,7 +61,7 @@ STUB
   [[ "$output" != *"NXP-WAS-CALLED"* ]]
 }
 
-@test "AC-438-02: without a local install, the npx fallback is still used" {
+@test "AC-GATE-INTEGRITY-02: without a local install, the npx fallback is still used" {
   # A consumer repo that has not installed typescript must keep the historical
   # behaviour -- a fix that broke this would turn every local typecheck into a
   # SKIP.
