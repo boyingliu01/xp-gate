@@ -260,21 +260,35 @@ EOF
     # the direct scan. The daemon may make this gate SLOWER; it must never make it
     # greener (#518/#559).
     if [ "$GATE_10_SEMGREP_PATH" = "daemon" ] && command -v node >/dev/null 2>&1; then
+      # The protocol carries exactly ONE config. Counting rather than overwriting
+      # matters: the previous loop kept only the last --config, so a repo with two
+      # would have been scanned with one and reported on as if fully checked.
       rules_for_daemon=""
+      config_count=0
       for _arg in "${SEMGREP_RULES[@]}"; do
         case "$_arg" in
-          --config=*) rules_for_daemon="${_arg#--config=}" ;;
+          --config=*)
+            rules_for_daemon="${_arg#--config=}"
+            config_count=$((config_count + 1))
+            ;;
         esac
       done
-      # Only one config is expressible over the protocol. Gate 10 adds
-      # --config=p/csharp for C# repos; silently dropping a rule set would narrow
-      # the scan without saying so, so that combination stays on direct.
+      # Anything the protocol cannot express exactly is left to the direct path
+      # rather than approximated:
+      #  - more than one config (nothing would report the dropped one);
+      #  - p/csharp (Gate 10 adds it for C# repos);
+      #  - "auto" (semgrep's own rule selection, not a spec we can pass through);
+      #  - anything with a comma, which is semgrep's multi-config shorthand;
+      #  - a remote URL, which the daemon would resolve against its own cwd and
+      #    registry cache instead of the one the CLI would have used.
+      if [ "$config_count" -ne 1 ]; then
+        rules_for_daemon=""
+      fi
       case "$rules_for_daemon" in
-        *p/csharp*|*",="*|"") rules_for_daemon="" ;;
+        *p/csharp*|*","*|*"://"*|auto|"") rules_for_daemon="" ;;
       esac
       if [ -n "$rules_for_daemon" ]; then
-        daemon_roots=$(printf '%s
-' "${SEMGREP_ARGS[@]}" | grep -v '^--include=' || true)
+        daemon_roots=$(printf '%s\n' "${SEMGREP_ARGS[@]}" | grep -v '^--include=' || true)
         # ARGV TRAP: under `node -e` there is NO script path in argv, so the first
         # user argument is argv[1]. Indexing it as argv[2] passes undefined as the
         # config, semgrep raises a python TypeError, and the gate "degrades" for a

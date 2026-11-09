@@ -300,3 +300,113 @@ describe('process exit — AC-SASTD-06: a one-shot caller must not hang', () => 
     expect(out.length).toBeGreaterThan(2);
   }, 120000);
 });
+
+
+describe('never greener — AC-SASTD-07: a thinner scan must not read as a clean one', () => {
+  // The safety claim for this feature is "the daemon can make the gate slower, never
+  // greener". Code review is not evidence for that, so these tests drive the paths
+  // where a thinner result could slip through unnoticed.
+  //
+  // The dangerous shape is the VALID but EMPTY document: semgrep can return
+  // results: [] and errors: [] after failing to resolve a registry pack or after
+  // skipping every target, and gate-10 reads zero blocking findings as PASS.
+  // Truncated JSON needs no test here -- it fails to parse and the gate fails closed.
+
+  const { execFileSync } = require('node:child_process');
+  const fs = require('node:fs');
+  const os = require('node:os');
+  const pathMod = require('node:path');
+
+  const sastdDir = pathMod.resolve(__dirname, '..', '..', '..', 'sastd');
+  // A REAL registry pack and a SMALL directory. An earlier version used "p/x" and
+  // cwd: the invalid pack failed before the scan ran, so no coverage check happened
+  // and the test looked like a broken guard rather than a broken test.
+  const CONFIG = 'p/r2c-best-practices';
+
+  /** Run a snippet in a python process that has sastd importable. */
+  function runPython(body) {
+    const script = [
+      'import json, sys',
+      'sys.path.insert(0, sys.argv[1])',
+      'import sastd',
+      'CONFIG, ROOT = sys.argv[2], sys.argv[3]',
+      body,
+    ].join('\n');
+    const raw = execFileSync('python', ['-c', script, sastdDir, CONFIG, dir], {
+      encoding: 'utf8',
+      timeout: 120000,
+    });
+    const reply = JSON.parse(raw);
+    // _handle wraps a scan in {"ok": true, "data": {...}}. Unwrap so tests assert on
+    // the scan result itself; forgetting this layer made a working guard look broken.
+    return reply && reply.ok === true && reply.data ? reply.data : reply;
+  }
+
+  let dir;
+  beforeAll(() => {
+    dir = fs.mkdtempSync(pathMod.join(os.tmpdir(), 'sastd-green-'));
+    fs.writeFileSync(pathMod.join(dir, 't.js'), 'eval("x");\n');
+  });
+
+  afterAll(() => {
+    try {
+      fs.rmSync(dir, { recursive: true, force: true });
+    } catch {
+      /* best effort */
+    }
+  });
+
+  it('the scan HANDLER marks a scan that covered none of its roots', () => {
+    // Drives _handle, NOT _verify_coverage. An earlier version of this test called
+    // the helper directly, so deleting the helper's call site left it green: it
+    // proved the function worked, not that anything used it. Reverting the call in
+    // _handle now turns this red (verified).
+    const out = runPython(
+      [
+        'import semgrep.run_scan as rs',
+        'inner = rs.run_scan_and_return_json',
+        'def stub(**kw):',
+        '    r = inner(**kw)',
+        '    r["results"] = []',
+        '    r["paths"] = {"scanned": []}',
+        '    return r',
+        'rs.run_scan_and_return_json = stub',
+        'print(json.dumps(sastd._handle({"op": "scan", "config": CONFIG, "roots": [ROOT]})))',
+      ].join('\n'),
+    );
+    expect((out.errors || []).map((e) => e.type)).toContain('Coverage');
+  }, 90000);
+
+  it('the scan HANDLER leaves a fully-covering scan untouched', () => {
+    // The negative half: a guard that fires on every scan would push every run onto
+    // the direct path and make the daemon permanently useless while looking "safe".
+    const out = runPython(
+      [
+        'import semgrep.run_scan as rs',
+        'inner = rs.run_scan_and_return_json',
+        'def stub(**kw):',
+        '    r = inner(**kw)',
+        '    r["results"] = []',
+        '    r["paths"] = {"scanned": ["t.js"]}',
+        '    return r',
+        'rs.run_scan_and_return_json = stub',
+        'print(json.dumps(sastd._handle({"op": "scan", "config": CONFIG, "roots": [ROOT]})))',
+      ].join('\n'),
+    );
+    expect(out.errors || []).toEqual([]);
+  }, 90000);
+
+  it('a failed request surfaces as ok:false, never as an empty discovery', async () => {
+    // The client contract: there is no shape in which "the daemon did not answer"
+    // is expressed as "the daemon found nothing". Were this ever {ok:true,
+    // payload:{results:[]}}, the gate would report PASS on a dead daemon.
+    const r = await requestScan({
+      config: pathMod.join(dir, 'no-such-rules.yml'),
+      roots: [pathMod.join(dir, 't.js')],
+      timeoutMs: 60000,
+    });
+    expect(r.ok).toBe(false);
+    expect(typeof r.error).toBe('string');
+    expect(r.payload).toBeUndefined();
+  }, 120000);
+});

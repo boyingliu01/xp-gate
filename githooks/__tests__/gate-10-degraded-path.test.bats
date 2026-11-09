@@ -152,3 +152,41 @@ teardown() {
   [ "$GATE_10_SASTD_DEGRADED" = "1" ]
   grep -q "bogus-mode" "$BATS_TEST_TMPDIR/err"
 }
+
+
+@test "E1-09: the gate refuses daemon-inexpressible rulesets" {
+  # Gate 10 hardcodes SEMGREP_RULES=(--config=p/security-audit) today, so the shipped
+  # gate cannot be driven into the multi-config case end to end. This runs the
+  # ACTUAL guard block cut out of gate-10.sh -- not a retyped copy. A copy would pass
+  # even if the shipped guard were reverted, which is what the first version of this
+  # test did: it proved the test agreed with itself.
+  #
+  # Why the guard matters: the extract loop originally kept only the LAST --config. A
+  # second config would have been dropped silently, scanning with fewer rules and
+  # reporting the result as if fully checked. Gate 10 already adds --config=p/csharp
+  # for C# repos, so this is one edit away from being live.
+  local block
+  block=$(sed -n '/^      rules_for_daemon=""/,/^      esac$/p' "$BATS_TEST_DIRNAME/../gate-10.sh")
+  [ -n "$block" ] || {
+    echo "could not locate the config guard in gate-10.sh"
+    return 1
+  }
+
+  run_guard() {
+    # $@ becomes SEMGREP_RULES; the block is executed verbatim from the gate.
+    (
+      SEMGREP_RULES=("$@")
+      # shellcheck disable=SC2034
+      eval "$block"
+      printf '%s' "$rules_for_daemon"
+    )
+  }
+
+  # Control first: without it, a guard that always returned "" would look correct.
+  [ "$(run_guard --config=p/security-audit)" = "p/security-audit" ]
+  [ -z "$(run_guard --config=p/a --config=p/b)" ]
+  [ -z "$(run_guard --config=auto)" ]
+  [ -z "$(run_guard --config=p/a,p/b)" ]
+  [ -z "$(run_guard --config=https://example.com/r.yml)" ]
+  [ -z "$(run_guard --config=p/csharp)" ]
+}
