@@ -3,7 +3,7 @@
 **Generated:** 2026-11-04
 **Commit:** eb2097b0
 **Branch:** sprint/2026-11-03-02
-**Version:** 0.37.0.0
+**Version:** 0.37.1.0
 
 ## OVERVIEW
 Reference guides, design history, postmortems, and weekly retros. **30+ chronologically-archived design plans** under `plans/`. Plan docs follow `YYYY-MM-DD-topic.md` and each typically corresponds to a Delphi consensus report or implementation plan.
