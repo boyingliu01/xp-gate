@@ -1,6 +1,6 @@
 #!/usr/bin/env bats
 #
-# @test REQ-437 TypeScript adapter's Biome branch must propagate Biome's verdict
+# @test REQ-GATE-INTEGRITY TypeScript adapter's Biome branch must propagate Biome's verdict
 # @intent The Biome arm of run_lint() ended a command with `| head -50` and then
 #         read `$?` on the next line. In a POSIX pipeline `$?` is the exit status
 #         of the LAST command -- `head` -- not of the tool in front of the pipe,
@@ -14,7 +14,7 @@
 #         the same shape as #717: a gate that reports success because nothing was
 #         ever read.
 #
-# @covers AC-437-01, AC-437-02
+# @covers AC-GATE-INTEGRITY-01
 #
 # ASCII only.
 
@@ -23,7 +23,7 @@ setup() {
   ADAPTER="$REPO_ROOT/githooks/adapters/typescript.sh"
 }
 
-@test "AC-437-01: the Biome arm does not pipe the tool into head" {
+@test "AC-GATE-INTEGRITY-01: the Biome arm does not pipe the tool into head" {
   # The failure has two halves: piping into head, and reading $? afterwards. The
   # pipe is the cause, so it is asserted on its own.
   #
@@ -35,7 +35,7 @@ setup() {
   [ "$status" -ne 0 ]
 }
 
-@test "AC-437-02: a failing Biome run makes run_lint() fail, not print PASSED" {
+@test "AC-GATE-INTEGRITY-01: a failing Biome run makes run_lint() fail, not print PASSED" {
   # Executes the adapter's real run_lint() against a fake `npx` that reports a
   # Biome failure. A green assertion here means the adapter's exit status now
   # comes from the tool rather than from head.
@@ -67,7 +67,7 @@ STUB
   [[ "$output" != *"PASSED - Biome check"* ]]
 }
 
-@test "AC-437-02: a clean Biome run still passes" {
+@test "AC-GATE-INTEGRITY-01: a clean Biome run still passes" {
   # The fix must not turn the arm fail-closed for everyone -- a passing project
   # has to keep passing.
   local work
