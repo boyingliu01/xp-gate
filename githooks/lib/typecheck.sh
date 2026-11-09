@@ -56,12 +56,35 @@ resolve_typecheck_command() {
   return 0
 }
 
+# Runs tsc, preferring the locally installed compiler over npx.
+#
+# `npx tsc --version` measured 1941 ms here against 234 ms for
+# `node node_modules/typescript/bin/tsc --version` -- identical output, 1.7 s of
+# package resolution in between. typecheck.sh called `npx tsc` at five sites and
+# a single commit reaches several of them, so the whole typecheck half of Gate 1
+# paid that toll repeatedly. pre-commit:4324-4345 already made exactly this
+# change for archlint ("measured: 1909 ms via npx vs 319 ms direct"); typecheck
+# never got it.
+#
+# npx stays as the fallback so a consumer repo with no local install behaves
+# exactly as before. Nothing is cached: resolving a path is a couple of `test -f`
+# calls, and a cache would have to be invalidated whenever node_modules changes.
+_tsc_command() {
+  if [ -f "node_modules/typescript/bin/tsc" ] && command -v node >/dev/null 2>&1; then
+    node "node_modules/typescript/bin/tsc" "$@"
+    return $?
+  fi
+  # The fallback stays a real `npx` call. Rewording this line into a recursive
+  # _tsc_command call is a stack overflow, not a fallback.
+  npx tsc "$@"
+}
+
 # The #293 extra pass: projects commonly exclude test files from tsconfig.json, so
 # their type errors accumulate silently. Only meaningful for the tsc fallback —
 # a project checker covers the files its own config declares.
 run_test_file_pass() {
   local has_tests_in_tsc=false
-  if npx tsc --noEmit --skipLibCheck --listFiles 2>/dev/null | grep -qE '__tests__/|\.test\.ts|\.spec\.ts'; then
+  if _tsc_command --noEmit --skipLibCheck --listFiles 2>/dev/null | grep -qE '__tests__/|\.test\.ts|\.spec\.ts'; then
     has_tests_in_tsc=true
   fi
   [ "$has_tests_in_tsc" = false ] || return 0
@@ -69,7 +92,7 @@ run_test_file_pass() {
   local test_pass_exit=0
   if [ -f "tsconfig.tests.json" ]; then
     echo "Checking test files with tsconfig.tests.json..."
-    npx tsc --noEmit --project tsconfig.tests.json 2>&1 | head -30
+    _tsc_command --noEmit --project tsconfig.tests.json 2>&1 | head -30
     test_pass_exit=${PIPESTATUS[0]}
   else
     echo "Checking test files for type errors..."
@@ -81,7 +104,7 @@ run_test_file_pass() {
       cfg.include.push('src/**/__tests__/**','src/**/*.test.ts','src/**/*.spec.ts');
       require('fs').writeFileSync('$temp_tsconfig', JSON.stringify(cfg, null, 2));
     " 2>/dev/null
-    npx tsc --noEmit --project "$temp_tsconfig" --skipLibCheck 2>&1 | head -30
+    _tsc_command --noEmit --project "$temp_tsconfig" --skipLibCheck 2>&1 | head -30
     test_pass_exit=${PIPESTATUS[0]}
     rm -f "$temp_tsconfig"
   fi
@@ -122,7 +145,7 @@ run_typescript_typecheck() {
 
   # Verify tsc is the real compiler (npx may fetch the deprecated tsc@2.0.4 placeholder).
   local tsc_version
-  tsc_version=$(npx tsc --version 2>&1)
+  tsc_version=$(_tsc_command --version 2>&1)
   if ! echo "$tsc_version" | grep -q "Version"; then
     echo "ℹ️  SKIP - tsc not properly installed ($tsc_version)"
     echo "Install typescript (npm install typescript --save-dev) for type checking."
@@ -135,7 +158,7 @@ run_typescript_typecheck() {
   fi
 
   echo "Running TypeScript static analysis ($tsc_version)..."
-  npx tsc --noEmit --skipLibCheck 2>&1 | head -30
+  _tsc_command --noEmit --skipLibCheck 2>&1 | head -30
   if [ "${PIPESTATUS[0]}" -ne 0 ]; then
     echo ""
     echo "❌ BLOCKED - TYPE ERRORS detected"
