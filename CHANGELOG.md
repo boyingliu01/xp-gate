@@ -1,5 +1,52 @@
 # Changelog
 
+## [0.37.2.0] - 2026-11-09
+
+**单一数据源。** 这一版只做一件事：把「同一件事有两份实现」这一类缺陷清掉一处，
+并补上防止它再回来的测试。
+
+### Fixed
+
+- **版本同步有两个实现，且已经漂移**：`scripts/sync-version.sh` 与
+  `scripts/sync-version.cjs` 各自维护一份目标清单，无人比对。实测把三个文件改回
+  `0.0.0` 后执行 `bash scripts/sync-version.sh`：
+
+  | 文件 | 修复前 | 修复后 |
+  |---|---|---|
+  | `package.json` | `0.37.1.0` ✅ | `0.37.1.0` |
+  | `package-lock.json` | `0.0.0.0` ❌ 未处理 | `0.37.2.0` |
+  | `plugins/dsh/package.json` | `0.0.0` ❌ 未处理 | `0.37.2` |
+
+  bash 版还会改写 `.stryker-tmp` 下的 AGENTS.md 副本，报 **401 files**，而 .cjs 报
+  **41**——多出的 360 个全是突变测试沙箱。文件计数是「同步真的发生了」的唯一可观测
+  信号，所以这个数字不能错。
+
+  **这与下游用户直接相关**：`skills/sprint-flow/references/phase-5-ship.md` 的
+  VERSION-GATE 第 4 步写的就是 `bash scripts/sync-version.sh`。0.37.1 及更早版本随包
+  发布的这份文档，会让照着做的用户静默漏掉两个文件。
+
+  修法不是在两处各修一遍——那正是漂移的成因——而是让 `.sh` 变成薄包装、`exec` 同一个
+  `.cjs`，目标清单只留一份。CI 调用点与文档入口都保留，因为二者引用的就是 `.sh`。
+
+### Added
+
+- **REQ-VERSION-SINGLE-SOURCE** 及其两条 AC，钉住「两个入口必须等价」和「注入漂移后
+  必须全部修复」。
+- **`scripts/__tests__/sync-version-single-source.test.bats`**：3 个用例，先红后绿，
+  并用变异验证——把旧的 bash 实现塞回去，三个用例全部变红。
+
+### Changed
+
+- `AC-757-04` 原本断言 `.sh` 里字面存在 `**Version:** $FULL_VERSION`，这会钉住本次删除
+  的实现。改为断言它真正关心的两点（委托、不写易变头部值），继续守住 #752/#757，
+  又不绑定已不存在的函数体。
+
+### Note on packaging
+
+`scripts/sync-version.*` **不由 npm 包分发**（包内 `scripts/` 只含 5 个文件），所以这个
+缺陷从未影响下游用户直接执行同步。0.37.2 重新发布的原因是 skill 文档：
+`phase-5-ship.md` 在包里，0.37.1 带的是旧版指引。
+
 ## [0.37.1.0] - 2026-11-08
 
 **主轴：迭代速度。** 这一版不加门禁，只把「等门禁」和「等测试」的时间压下去，并顺手修掉
