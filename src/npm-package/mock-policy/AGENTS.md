@@ -3,7 +3,7 @@
 **Generated:** 2026-11-04
 **Commit:** eb2097b0
 **Branch:** sprint/2026-11-03-02
-**Version:** 0.37.2.0
+**Version:** 0.37.3.0
 
 ## OVERVIEW
 Mock layering policy enforcement — Gate M3 of pre-push hook. Ensures integration tests use real implementations for internal dependencies, mock external dependencies, and annotate pending mocks with removal plans. Combines project scope scanning, mock decision engine, and per-file validation into a single pipeline.
