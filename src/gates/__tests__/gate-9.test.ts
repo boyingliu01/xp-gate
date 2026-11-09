@@ -44,13 +44,13 @@ describe('gate-9.ts', () => {
   });
 
   it('SKIPs when no supported language files changed', () => {
-    // semgrep found
-    mockSpawnSync.mockReturnValueOnce({
-      status: 0, stdout: '/usr/bin/semgrep\n', stderr: '', pid: 1, output: ['', '/usr/bin/semgrep\n', ''], signal: null,
-    } as any);
-
+    // No mock queued on purpose: the input filter runs BEFORE the tool probe
+    // (#782 / AC-GATE-PROBE-01), so a change set with no semgrep-supported file
+    // must not spawn anything. Queueing a probe response here would go unconsumed
+    // and desync every later test's mockReturnValueOnce queue.
     const result = runGate9({ changedFiles: ['README.md', 'data.json'], projectLang: 'typescript' });
     expect(result.status).toBe('SKIP');
+    expect(mockSpawnSync).not.toHaveBeenCalled();
   });
 
   it('PASSes when semgrep finds no vulnerabilities', () => {

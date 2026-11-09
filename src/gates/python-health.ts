@@ -8,6 +8,8 @@
 import {
   isToolAvailable, runTool,
 } from './common';
+import fs from 'fs';
+import path from 'path';
 
 // ── Types ──
 
@@ -18,12 +20,110 @@ export interface PythonHealthResult {
   environment: { type: 'system' | 'venv' | 'conda' | 'pyenv' | 'uv'; path: string | null };
   tools: Array<{ name: string; available: boolean; version: string; required: boolean }>;
   issues: string[];
+  /**
+   * Whether the project showed any Python signal. When false, `tools` entries were
+   * NOT probed and must not be read as "not installed" (#782 / REQ-GATE-PROBE-SHORTCUT).
+   */
+  toolProbesRan: boolean;
 }
 
 // ── Python Tool Registry (sync with language-tools.js LANGUAGE_REGISTRY.python) ──
 
 const PYTHON_REQUIRED_TOOLS = ['mypy', 'pytest'];
 const PYTHON_OPTIONAL_TOOLS = ['ruff', 'flake8', 'black'];
+
+// ── Python Signal Detection ──
+
+/**
+ * Files whose presence declares "this is a Python project", independent of whether
+ * any `.py` file currently exists. A freshly-scaffolded project, or one whose
+ * Python sources are generated/ignored, still needs its tool diagnostics.
+ */
+const PYTHON_MARKER_FILES = [
+  'pyproject.toml',
+  'requirements.txt',
+  'requirements-dev.txt',
+  'setup.py',
+  'setup.cfg',
+  'Pipfile',
+  'poetry.lock',
+  'uv.lock',
+  '.python-version',
+];
+
+/** Directories never worth walking when looking for a `.py` file. */
+const SIGNAL_SKIP_DIRS = new Set([
+  'node_modules', '.git', '.venv', 'venv', '__pycache__',
+  '.stryker-tmp', 'dist', 'build', '.tox', '.mypy_cache', '.pytest_cache',
+]);
+
+const SIGNAL_MAX_DEPTH = 4;
+const SIGNAL_MAX_ENTRIES = 5000;
+
+/**
+ * Does this project show any sign of being Python at all?
+ *
+ * This exists to answer the ONE question that must be asked BEFORE paying for
+ * tool probes: "is there anything here for Python tooling to check?" On a
+ * JavaScript/TypeScript project the answer is no, yet `checkPythonHealth` used to
+ * probe mypy/pytest/ruff/flake8/black anyway — measured 3.2 s on this repo, where
+ * those probes cannot possibly produce information about the code.
+ *
+ * The predicate is deliberately BROAD (marker file OR any `.py` file OR a Python
+ * venv directory), because the failure mode of a too-narrow predicate is
+ * "claimed to check Python, checked nothing" — the worst defect class in this
+ * repo. A false positive only costs the old behaviour.
+ *
+ * Note on scope: this is a signal about the PROJECT, not about the change set —
+ * the right question here, because python-health reports environment health rather
+ * than scanning specific files. A project with ANY Python anywhere (this repo has
+ * a real `tests/*.py` suite plus `githooks/lib/prepush-score.py`) correctly keeps
+ * full diagnostics. The saving lands on genuinely single-language consumer
+ * projects, which is the common case and the one the measurement fixture models.
+ * Gitignored scratch trees cannot trigger it: any dot-directory is skipped.
+ *
+ * @param cwd project root to inspect; defaults to process.cwd()
+ */
+export function hasPythonSignal(cwd?: string): boolean {
+  const root = cwd || process.cwd();
+
+  for (const marker of PYTHON_MARKER_FILES) {
+    try {
+      if (fs.existsSync(path.join(root, marker))) return true;
+    } catch { /* unreadable root → fall through to the walk */ }
+  }
+
+  // Virtualenv directories are themselves a Python project signal even with no
+  // marker file (common for `python -m venv .venv`-only setups).
+  for (const venv of ['.venv', 'venv']) {
+    try {
+      if (fs.existsSync(path.join(root, venv))) return true;
+    } catch { /* ignore */ }
+  }
+
+  let seen = 0;
+  const walk = (dir: string, depth: number): boolean => {
+    if (depth > SIGNAL_MAX_DEPTH || seen > SIGNAL_MAX_ENTRIES) return false;
+    let entries: import('fs').Dirent[];
+    try {
+      entries = fs.readdirSync(dir, { withFileTypes: true });
+    } catch {
+      return false;
+    }
+    for (const entry of entries) {
+      if (seen++ > SIGNAL_MAX_ENTRIES) return false;
+      if (entry.isDirectory()) {
+        if (SIGNAL_SKIP_DIRS.has(entry.name) || entry.name.startsWith('.')) continue;
+        if (walk(path.join(dir, entry.name), depth + 1)) return true;
+      } else if (entry.name.endsWith('.py')) {
+        return true;
+      }
+    }
+    return false;
+  };
+
+  return walk(root, 0);
+}
 
 // ── Python Detection ──
 
@@ -172,7 +272,64 @@ function checkPythonTool(
   return { name, available: false, version: '' };
 }
 
+/**
+ * Build the "never probed" tool list.
+ *
+ * The report SHAPE must not change when the probes are skipped: every tool is
+ * still listed, just as not-probed rather than probed-and-missing. Returning an
+ * empty array would be a silent lie to any consumer that counts tools.
+ */
+function unprobedTools(): PythonHealthResult['tools'] {
+  const entry = (name: string, required: boolean) => ({ name, available: false, version: '', required });
+  return [
+    ...PYTHON_REQUIRED_TOOLS.map(n => entry(n, true)),
+    ...PYTHON_OPTIONAL_TOOLS.map(n => entry(n, false)),
+  ];
+}
+
+/**
+ * Resolve the Python tool list, honouring the input short-circuit (#782, P0-A).
+ *
+ * Probing mypy/pytest/ruff/flake8/black costs ~2.6 s of subprocess starts
+ * (measured on this machine: 547+550+291+807+394 ms) and tells you nothing about
+ * a project with no Python in it. The signal question is free, so it goes first.
+ */
+function resolvePythonTools(
+  pythonExe: string,
+  cwd: string | undefined,
+  pythonSignal: boolean,
+): { tools: PythonHealthResult['tools']; missingRequired: PythonHealthResult['tools'] } {
+  const tools = pythonSignal ? checkTools(pythonExe, cwd) : unprobedTools();
+  return { tools, missingRequired: tools.filter(t => t.required && !t.available) };
+}
+
 // ── Main Health Check ──
+
+/**
+ * Check the Python version, pip, and virtualenv, appending an issue for each
+ * one that is missing or below minimum.
+ */
+function inspectEnvironment(
+  python: { exe: string; version: string },
+  cwd: string | undefined,
+  issues: string[],
+): { pip: PythonHealthResult['pip']; environment: PythonHealthResult['environment'] } {
+  if (!checkPythonVersion(python.version)) {
+    issues.push(`Python ${python.version} < 3.8.0 minimum. Upgrade recommended.`);
+  }
+
+  const pip = detectPip(python.exe);
+  if (!pip.available) {
+    issues.push(`pip not available. Install: ${python.exe} -m ensurepip`);
+  }
+
+  const environment = detectEnvironment(cwd);
+  if (environment.type === 'system') {
+    issues.push('No virtual environment detected. Consider using venv/conda/uv.');
+  }
+
+  return { pip, environment };
+}
 
 /**
  * Run comprehensive Python environment health check.
@@ -191,38 +348,32 @@ export function checkPythonHealth(cwd?: string): PythonHealthResult {
       environment: { type: 'system', path: null },
       tools: [],
       issues,
+      // Python itself is absent, so no tool could have been probed.
+      toolProbesRan: false,
     };
   }
 
-  // 2. Check version
-  if (!checkPythonVersion(python.version)) {
-    issues.push(`Python ${python.version} < 3.8.0 minimum. Upgrade recommended.`);
-  }
+  // 2-4. Version, pip, and virtualenv — each appends its own issue if unhappy.
+  const { pip, environment } = inspectEnvironment(python, cwd, issues);
 
-  // 3. Detect pip
-  const pip = detectPip(python.exe);
-  if (!pip.available) {
-    issues.push(`pip not available. Install: ${python.exe} -m ensurepip`);
-  }
+  // 5. Check tools (input short-circuit — see resolvePythonTools)
+  const pythonSignal = hasPythonSignal(cwd);
+  const { tools, missingRequired } = resolvePythonTools(python.exe, cwd, pythonSignal);
 
-  // 4. Detect environment
-  const environment = detectEnvironment(cwd);
-  if (environment.type === 'system') {
-    issues.push('No virtual environment detected. Consider using venv/conda/uv.');
-  }
-
-  // 5. Check tools
-  const tools = checkTools(python.exe, cwd);
-  const missingRequired = tools.filter(t => t.required && !t.available);
-  if (missingRequired.length > 0) {
+  // Only report missing tools when the project is actually Python — otherwise this
+  // is a non-signal, and telling a TS project to install mypy is noise.
+  if (missingRequired.length > 0 && pythonSignal) {
     const names = missingRequired.map(t => t.name).join(', ');
     issues.push(`Required tools missing: ${names}. Install: ${python.exe} -m pip install ${names}`);
   }
 
+  // `missingRequired` counts only when it was actually PROBED. On a non-Python
+  // project the tools are unknown-and-irrelevant, not missing: counting them would
+  // report "unhealthy" for a repo that has nothing for Python tooling to check.
   const healthy = issues.filter(i => i.includes('not found') || i.includes('minimum')).length === 0
-    && missingRequired.length === 0;
+    && (!pythonSignal || missingRequired.length === 0);
 
-  return { healthy, python, pip, environment, tools, issues };
+  return { healthy, python, pip, environment, tools, issues, toolProbesRan: pythonSignal };
 }
 
 // ── CLI Entry Point ──
@@ -241,11 +392,13 @@ if (process.argv.includes('--run')) {
   console.log('');
 
   if (result.tools.length > 0) {
-    console.log('  Tools:');
+    const probed = result.toolProbesRan;
+    console.log(probed ? '  Tools:' : '  Tools: (not probed — no Python signal in this project)');
     for (const t of result.tools) {
-      const icon = t.available ? '✅' : (t.required ? '❌' : '⚠️');
+      const icon = probed ? (t.available ? '✅' : (t.required ? '❌' : '⚠️')) : '·';
       const req = t.required ? '(required)' : '(optional)';
-      console.log(`    ${icon} ${t.name} ${t.available ? t.version : 'not installed'} ${req}`);
+      const state = probed ? (t.available ? t.version : 'not installed') : 'skipped';
+      console.log(`    ${icon} ${t.name} ${state} ${req}`);
     }
     console.log('');
   }

@@ -29,12 +29,6 @@ export interface PowerShellInfo {
 
 // ── Tool Detection ──
 
-/**
- * Cross-platform tool detection with 3-tier fallback:
- * 1. PATH lookup (command -v equivalent)
- * 2. npx fallback (for npm-installed tools)
- * 3. Custom path (~/.local/bin/ on Unix)
- */
 /** Tier 1: PATH lookup. */
 function probeToolPath(tool: string): ToolAvailability {
   const whichCmd = process.platform === 'win32' ? 'where' : 'which';
@@ -47,8 +41,34 @@ function probeToolPath(tool: string): ToolAvailability {
   return { available: false, path: '', via: 'none' };
 }
 
-/** Tier 2: npx fallback (check if tool is available via npx). */
+/**
+ * Is the npx fallback probe enabled?
+ *
+ * `probeToolNpx` answers "is this tool installed?" by running
+ * `npx --yes <tool> --version`. `--yes` means "do not ask, just download and
+ * install it" — so to answer a question about the LOCAL environment, XP-Gate
+ * could reach the npm registry, download a whole package, and execute it. On
+ * this machine that costs 4-6 s per tool, hangs for the full 15 s timeout when
+ * offline, and installs packages on someone else's machine without asking.
+ *
+ * That is the wrong default for a quality gate, so it is OFF unless explicitly
+ * requested. Measured on this machine (2026-11-09): the probe is the single
+ * largest avoidable per-tool cost, and every tool this repo's gates use
+ * (semgrep, lizard, gitleaks, mypy, ruff) is normally on PATH anyway.
+ *
+ * Setting `XP_GATE_NPX_PROBE=1` restores the old behaviour for projects that
+ * deliberately rely on npx-provided tooling (typically CI).
+ */
+function npxProbeEnabled(): boolean {
+  const raw = process.env.XP_GATE_NPX_PROBE;
+  if (raw === undefined) return false;
+  const v = raw.trim().toLowerCase();
+  return v === '1' || v === 'true' || v === 'yes';
+}
+
+/** Tier 2: npx fallback. No-op unless `XP_GATE_NPX_PROBE=1` (see npxProbeEnabled). */
 function probeToolNpx(tool: string, cwd?: string): ToolAvailability {
+  if (!npxProbeEnabled()) return { available: false, path: '', via: 'none' };
   try {
     const npxCheck = spawnSync('npx', ['--yes', tool, '--version'], {
       encoding: 'utf-8',
@@ -63,6 +83,15 @@ function probeToolNpx(tool: string, cwd?: string): ToolAvailability {
   return { available: false, path: '', via: 'none' };
 }
 
+/**
+ * Cross-platform tool detection with 3-tier fallback:
+ * 1. PATH lookup (command -v equivalent)
+ * 2. npx fallback (for npm-installed tools) — OPT-IN, see npxProbeEnabled()
+ * 3. Custom path (~/.local/bin/ on Unix)
+ *
+ * Tier 2 is skipped unless `XP_GATE_NPX_PROBE=1`, because it installs packages
+ * to answer a question about the local environment.
+ */
 export function isToolAvailable(tool: string, cwd?: string): ToolAvailability {
   // Tier 1: PATH lookup
   const pathProbe = probeToolPath(tool);

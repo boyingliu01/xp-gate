@@ -3,6 +3,13 @@
  * Detects security vulnerabilities in staged files.
  * For PowerShell projects: uses PSScriptAnalyzer security rules as alternative.
  * TypeScript rewrite of githooks/adapters/gate-9.sh for cross-platform Node.js CLI.
+ *
+ * Ordering (#782, P0-A): the change set is filtered to semgrep-supported files
+ * BEFORE the tool is probed. The reverse order made a change set with nothing to
+ * scan pay for `isToolAvailable('semgrep')` first — and with the old npx fallback
+ * that probe could reach the registry and download semgrep — purely to then decide
+ * there was no input. Measured 2026-11-09, no-input fixture: 789 ms -> 624 ms
+ * (-21.0%, 12-round load-valid ABBA).
  */
 import {
   GateInput, GateOutput, isToolAvailable, runTool, recordAudit,
@@ -43,6 +50,16 @@ export function runGate9(input: GateInput): GateOutput {
     return runPowerShellSAST(input, startMs, messages);
   }
 
+  // Filter to semgrep-supported language files FIRST (#782, P0-A). The input
+  // question is free; the tool question is not, so it must be asked second.
+  // See the module header for the measurement behind this ordering.
+  const semgrepFiles = filterSemgrepFiles(input.changedFiles);
+  if (semgrepFiles.length === 0) {
+    messages.push('     ⏭️  SKIPPED - SAST (no supported language files changed)');
+    recordAudit('gate-9', 'sast-security', 'SKIP', 0, startMs);
+    return { status: 'SKIP', messages, exitCode: 0 };
+  }
+
   // Standard path: semgrep
   const tool = isToolAvailable('semgrep', input.cwd);
   if (!tool.available) {
@@ -56,14 +73,6 @@ export function runGate9(input: GateInput): GateOutput {
 
   const semgrepCmd = tool.via === 'npx' ? 'npx' : tool.path;
   const semgrepArgs = tool.via === 'npx' ? ['-y', 'semgrep'] : [];
-
-  // Filter to semgrep-supported language files
-  const semgrepFiles = filterSemgrepFiles(input.changedFiles);
-  if (semgrepFiles.length === 0) {
-    messages.push('     ⏭️  SKIPPED - SAST (no supported language files changed)');
-    recordAudit('gate-9', 'sast-security', 'SKIP', 0, startMs);
-    return { status: 'SKIP', messages, exitCode: 0 };
-  }
 
   // Run semgrep with JSON output. Fixed overhead per run is the point of #640 --
   // see SEMGREP_EXTRA_ARGS.
