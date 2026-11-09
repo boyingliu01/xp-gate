@@ -37,6 +37,18 @@ const GATES = [
  */
 const TRANSIENT_DIRS = [BASE_DIR, FIXTURE];
 
+/**
+ * Git ref the baseline arm is built from.
+ *
+ * Defaults to HEAD, which is only correct while the change under test is
+ * UNCOMMITTED. Once it lands, HEAD already contains it and both arms run the same
+ * code — the comparison then reports ~0% and looks like a failed optimisation.
+ * Point this at the parent commit to re-measure a landed change:
+ *
+ *   BASELINE_REF=HEAD~1 node .perf-measure/paired-ab.cjs 12
+ */
+const BASE_REF = process.env.BASELINE_REF || 'HEAD';
+
 function cleanupTransient() {
   for (const dir of TRANSIENT_DIRS) {
     try {
@@ -51,7 +63,7 @@ function prepareBaselineSources() {
   // Copy the whole gate source tree at HEAD so relative imports resolve.
   const files = ['common.ts', 'common-process.ts', 'gate-9.ts', 'python-health.ts'];
   for (const f of files) {
-    const r = spawnSync('git', ['show', `HEAD:src/gates/${f}`], { cwd: REPO, encoding: 'utf-8' });
+    const r = spawnSync('git', ['show', `${BASE_REF}:src/gates/${f}`], { cwd: REPO, encoding: 'utf-8' });
     if (r.status !== 0) throw new Error(`git show failed for ${f}: ${r.stderr}`);
     fs.writeFileSync(path.join(BASE_DIR, f), r.stdout);
   }
@@ -90,39 +102,56 @@ function median(xs) {
   return s.length % 2 ? s[m] : (s[m - 1] + s[m]) / 2;
 }
 
+/** Empty per-gate result bucket. */
+function emptyResult() {
+  const res = {};
+  for (const g of GATES) {
+    res[g.name] = { baseline: { ms: [], load: [], verdict: [] }, current: { ms: [], load: [], verdict: [] } };
+  }
+  return res;
+}
+
+/** Extract a comparable verdict word from a gate's output. */
+function verdictOf(out) {
+  const m = out.match(/SKIPPED[^\n]*|WARN[^\n]*|PASSED[^\n]*|BLOCKED[^\n]*/);
+  return m ? m[0].trim().slice(0, 55) : '?';
+}
+
+/** Run one round for one gate in both arms, in ABBA order. */
+function runRound(arms, g, roundIndex, res) {
+  const order = roundIndex % 2 === 0 ? ['baseline', 'current'] : ['current', 'baseline'];
+  for (const arm of order) {
+    const load = cpuLoad();
+    const out = runOne(arms[arm].entry(g));
+    res[g.name][arm].ms.push(out.ms);
+    res[g.name][arm].load.push(load);
+    res[g.name][arm].verdict.push(verdictOf(out.out));
+  }
+}
+
+/** Install the cleanup handlers that keep transient dirs out of the worktree. */
+function installCleanupHandlers() {
+  process.on('exit', cleanupTransient);
+  process.on('SIGINT', () => { cleanupTransient(); process.exit(130); });
+  process.on('SIGTERM', () => { cleanupTransient(); process.exit(143); });
+}
+
 function main() {
   const rounds = +(process.argv[2] || 6);
   prepareBaselineSources();
   makeFixture();
   // Whatever happens below (including a throw mid-measurement), the transient
   // source copy must not survive into the working tree — see TRANSIENT_DIRS.
-  process.on('exit', cleanupTransient);
-  process.on('SIGINT', () => { cleanupTransient(); process.exit(130); });
-  process.on('SIGTERM', () => { cleanupTransient(); process.exit(143); });
+  installCleanupHandlers();
 
   const arms = {
     baseline: { entry: (g) => path.join(BASE_DIR, g.rel) },
     current: { entry: (g) => path.join(REPO, 'src', 'gates', g.rel) },
   };
 
-  const res = {};
-  for (const g of GATES) {
-    res[g.name] = { baseline: { ms: [], load: [], verdict: [] }, current: { ms: [], load: [], verdict: [] } };
-  }
-
+  const res = emptyResult();
   for (let r = 0; r < rounds; r++) {
-    // ABBA: odd rounds run current-first, even rounds baseline-first.
-    const order = r % 2 === 0 ? ['baseline', 'current'] : ['current', 'baseline'];
-    for (const g of GATES) {
-      for (const arm of order) {
-        const load = cpuLoad();
-        const out = runOne(arms[arm].entry(g));
-        res[g.name][arm].ms.push(out.ms);
-        res[g.name][arm].load.push(load);
-        const m = out.out.match(/SKIPPED[^\n]*|WARN[^\n]*|PASSED[^\n]*|BLOCKED[^\n]*/);
-        res[g.name][arm].verdict.push(m ? m[0].trim().slice(0, 55) : '?');
-      }
-    }
+    for (const g of GATES) runRound(arms, g, r, res);
   }
 
   console.log(`\n=== PAIRED A/B (ABBA interval, ${rounds} rounds/gate) ===`);
