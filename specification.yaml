@@ -5626,3 +5626,51 @@ specification:
             isToolAvailable 不得发起任何 npx 调用（spawnSync 的 command 不得为 npx）；
             只有显式设置 XP_GATE_NPX_PROBE=1 时才允许经 npx 探测。
           test_type: unit
+    # ============================================================
+    # #783 C# workspace 消歧
+    # 根目录同时存在 .sln 与 .csproj 时，把目录交给 dotnet 会被工具拒绝：
+    #   dotnet format <dir> → FileNotFoundException（"同时找到项目文件和解决方案文件"）
+    #   dotnet build  <dir> → MSB1050
+    # 两者退出码都是 1，与"1 change required"/"编译失败"无法区分，于是干净源码被报成
+    # 代码质量失败。必须显式指定文件；但空 .sln（无 Project 条目）会检查 0 个文件并
+    # 返回 0，反而把门禁变成空跑，所以只在 .sln 真正引用项目时才用它。
+    # ============================================================
+    - id: REQ-783
+      description: C# 适配器须在根目录 .sln 与 .csproj 并存时显式指定 workspace 文件，避免工具崩溃被误报为源码问题
+      priority: high
+      acceptance_criteria:
+        - id: AC-783-01
+          criteria: >-
+            .sln 含 Project 条目且根目录同时存在 .csproj 时，workspace 参数必须是 .sln 路径。
+          test_type: unit
+        - id: AC-783-02
+          criteria: >-
+            根目录只有单个 .csproj（无 .sln）时，workspace 参数必须是该 .csproj 路径，不得是目录。
+          test_type: unit
+        - id: AC-783-03
+          criteria: >-
+            .sln 引用了项目时，workspace 参数必须是该 .sln。
+          test_type: unit
+        - id: AC-783-04
+          criteria: >-
+            根目录无任何项目文件时，workspace 参数回退为目录（无可消歧对象，保持原路径不变）。
+          test_type: unit
+        - id: AC-783-05
+          criteria: >-
+            根目录存在多个 .csproj 且无 .sln 时，workspace 参数保持为目录，不得任意挑一个
+            （挑一个会静默停止检查其余项目）。
+          test_type: unit
+        - id: AC-783-06
+          criteria: >-
+            workspace 参数解析在相对根（如 "."）下同样正确，不得只在绝对路径下成立。
+          test_type: unit
+        - id: AC-783-07
+          criteria: >-
+            真实的同层 .sln+.csproj 工程中，命名 workspace 后 dotnet format 必须返回 0
+            （干净源码不得被判失败），且目录形式在同一环境下确实复现失败（否则测试须 skip 而非空过）。
+          test_type: integration
+        - id: AC-783-08
+          criteria: >-
+            空 .sln（无 Project 条目）不得被选为 workspace：它检查 0 个文件并返回 0，
+            会造成门禁空跑；此情形须回退到 .csproj。
+          test_type: unit

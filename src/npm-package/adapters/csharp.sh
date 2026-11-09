@@ -29,6 +29,53 @@
 # Project discovery
 # ---------------------------------------------------------------------------
 
+# Print the workspace argument `dotnet build` / `dotnet format` should be given.
+#
+# Both commands accept a directory, a .sln or a .csproj — but a DIRECTORY is
+# ambiguous when a solution and a project file sit at the same level:
+#
+#   `dotnet format <dir>`  → Unhandled exception: System.IO.FileNotFoundException:
+#                            已在 '<dir>' 中同时找到 MSBuild 项目文件和解决方案文件
+#   `dotnet build <dir>`   → MSBUILD : error MSB1050: "<dir>" 文件夹中包含多个
+#                            项目或解决方案文件
+#
+# Neither is a source verdict, but the callers cannot tell them apart from a real
+# finding -- format's abort exits 1 like "1 change required", and build's abort
+# exits 1 like "compilation failed". Measured on this host with a root .sln and a
+# root .csproj: directory form rc=1 for both, rc=0 for both when the file is
+# named. Naming the file removes the ambiguity the tools refuse to guess about.
+#
+# WHICH file, though, is not a matter of preference:
+#
+#   * The .sln only governs what it REFERENCES. `dotnet new sln` produces a valid
+#     solution that references nothing, and `dotnet format <that .sln>` then
+#     checks zero files and exits 0 — a silently empty gate. Measured: violated
+#     sources, sln with no Project(...) entries -> rc=0 and no findings.
+#   * The same violated sources with the project added to the sln -> the
+#     WHITESPACE errors are reported.
+#
+# So a solution is used only when it actually contains a Project entry; otherwise
+# the single .csproj is named; otherwise the directory is returned and the tool
+# decides (correct when no ambiguity exists).
+_workspace_arg() {
+  local root="$1"
+  local sln csproj count
+  sln=$(find "$root" -maxdepth 1 -name "*.sln" -type f 2>/dev/null | sed -n '1p; 1q')
+  if [ -n "$sln" ] && grep -qE '^Project\(' "$sln" 2>/dev/null; then
+    printf '%s\n' "$sln"
+    return 0
+  fi
+  # No usable solution at this root. A single .csproj is unambiguous; several are
+  # not, and the tools want the directory in that case (they walk the tree).
+  count=$(find "$root" -maxdepth 1 -name "*.csproj" -type f 2>/dev/null | wc -l | tr -d ' ')
+  if [ "$count" = "1" ]; then
+    csproj=$(find "$root" -maxdepth 1 -name "*.csproj" -type f 2>/dev/null | sed -n '1p; 1q')
+    printf '%s\n' "$csproj"
+    return 0
+  fi
+  printf '%s\n' "$root"
+}
+
 # Print the directory that owns the build, or nothing.
 #
 # A .sln at the root is the usual shape; a bare .csproj is the single-project
@@ -99,7 +146,14 @@ run_static_analysis() {
   # --- build (recorded, not authoritative) -------------------------------
   # `--nologo` keeps the banner out; `-warnaserror` is Gate 13's job, not Gate
   # 1's, so the build here only needs to answer "does this compile".
-  build_out=$("$dotnet" build "$dotnet_root" --nologo -v quiet 2>&1)
+  #
+  # Same ambiguity as `format` below, with a different symptom: `dotnet build`
+  # on a directory holding both markers fails with MSB1050 ("the folder contains
+  # more than one project or solution file"). That is a build that could not be
+  # ATTEMPTED, not a build that failed, and it would report an otherwise clean
+  # project as BUILD FAILED.
+  build_target=$(_workspace_arg "$dotnet_root")
+  build_out=$("$dotnet" build "$build_target" --nologo -v quiet 2>&1)
   build_rc=$?
   if [ "$build_rc" -ne 0 ]; then
     echo "BUILD FAILED (dotnet build exited $build_rc):"
@@ -112,7 +166,13 @@ run_static_analysis() {
   # `dotnet format --verify-no-changes` is the closest C# equivalent of
   # `eslint --max-warnings 0`: formatting + the configured analyzers, exit 0
   # only when everything is clean.
-  format_out=$("$dotnet" format "$dotnet_root" --verify-no-changes --verbosity quiet 2>&1)
+  #
+  # The workspace argument is the FILE when the root carries both a .sln and a
+  # .csproj — see _workspace_arg. Handing it the bare directory there
+  # makes the tool abort with an ambiguity exception and exit 1, which is
+  # indistinguishable from "1 change required".
+  format_target=$(_workspace_arg "$dotnet_root")
+  format_out=$("$dotnet" format "$format_target" --verify-no-changes --verbosity quiet 2>&1)
   format_rc=$?
 
   # (#717) A command that could not RUN is not a command that found problems.
