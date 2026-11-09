@@ -162,7 +162,13 @@ def _verify_coverage(payload, roots):
     if not isinstance(payload, dict):
         return payload
 
-    scanned = (payload.get("paths") or {}).get("scanned") or []
+    # A payload can omit `paths` entirely or return a non-list there. Treat any shape
+    # that is not a list as "scanned nothing known", which is the conservative reading:
+    # it routes to SKIP rather than PASS. Assuming an absent field means "everything was
+    # fine" is exactly the mistake that makes a thinner scan look clean.
+    raw_paths = payload.get("paths")
+    raw_scanned = raw_paths.get("scanned") if isinstance(raw_paths, dict) else None
+    scanned = raw_scanned if isinstance(raw_scanned, list) else []
     requested = [str(r) for r in roots]
     # Recorded so the caller can compare this run against a direct scan. The daemon
     # cannot express the CLI's --include filter (the in-process API has no equivalent
