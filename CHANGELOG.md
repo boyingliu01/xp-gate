@@ -1,5 +1,59 @@
 # Changelog
 
+## [0.37.1.0] - 2026-11-08
+
+**主轴：迭代速度。** 这一版不加门禁，只把「等门禁」和「等测试」的时间压下去，并顺手修掉
+两个**门禁报告成功但从未读过判据**的缺陷——它们和 0.37.0 那批是同族，只是这次是在门禁
+自身的执行路径里找到的。
+
+### Added
+
+- **REQ-GATE-INTEGRITY**：门禁的判定必须来自工具本身，不得被管道或分辨率细节吞掉。
+  两条 AC 分别钉住本版修掉的两个形态。这条需求存在的意义是给「静默失效」一个归属编号——
+  此前这类缺陷只能借不相干的 REQ 编号，而测试里的 AC 引用必须能解析到真需求。
+- **`githooks/__tests__/typecheck-local-tsc.test.bats`**、**`githooks/__tests__/adapter-typescript-biome-exit.test.bats`**：
+  两个方向的用例。前者同时断言「本地存在时不得调用 npx」与「本地缺失时必须回落 npx」，
+  后者断言 Biome 报错时 `run_lint` 非零且不打印 PASSED。
+
+### Fixed
+
+- **TypeScript 适配器的 Biome 分支永远无法失败**：`biome check . --no-errors-on-unmatched 2>&1 | head -50`
+  之后的 `local EXIT_CODE=$?` 取到的是**管道末端 `head`** 的状态，恒为 0，于是
+  `if [ $EXIT_CODE -ne 0 ]` 是死代码，Biome 找到违规也打印「✅ PASSED - Biome check」。
+  现在先取状态再裁剪输出。本仓库没有 `biome.json`，自己的提交走 ESLint 分支从不触发这段，
+  所以它一直没被发现——中招的是所有用 Biome 的下游项目。
+- **Gate 12b 只认 canonical 路径**：镜像文件被单独修改（v0.27.3 那个形态）时，
+  过滤器匹配不到、门禁不触发、漂移被放行。补上反向映射，让「只改镜像不改源」同样被拦。
+- **`gate-registry.sh` 的 `blocks` 列对两个门禁是错的**：`code-quality` 与 `build-integrity`
+  标为 `NO`，而 `pre-commit` 里它们确实会设 `BLOCK` 并 `exit 1`。原测试断言的是**错的值**，
+  等于把缺陷写进了规格。改为从代码行为推导，并用变异验证（把值改回去，测试必须变红）。
+
+### Performance
+
+- **测试用例：不再每个用例重建 git 仓库。** `phase-transition`（85.0 s → 49.9 s）、
+  `sprint-status-rework`（80.5 s → 40.7 s）、`gate-runner`（54.5 s → 22.9 s）改为
+  每个文件建一次仓库模板、各用例 `cpSync` 复制。Windows 上每次 `git init` + 3 次
+  `git config` 是 130–180 ms 的进程启动成本，乘上用例数就是分钟级。
+- **`doctor.test.js`（67.5 s → 35.1 s）**：48 个用例原本各跑一次真实 `node --version`。
+  改为补丁 `child_process` **模块对象**。注意这里踩过的坑：该模块用解构方式
+  `const { spawnSync } = require('child_process')`，在 require 时就捕获了函数引用，
+  因此事后替换 `cp.spawnSync` 无效——两次尝试都是 68.8 s → 67.5 s，即毫无作用。
+- **类型检查不再为 npx 的包解析付费**：`npx tsc --version` 1941 ms，而
+  `node node_modules/typescript/bin/tsc --version` 234 ms，同一个编译器。`typecheck.sh`
+  五处 `npx tsc` 改为优先本地二进制、保留 npx 回落。一次 `run_typescript_typecheck`
+  17,357 ms → 12,278 ms。这与 `pre-commit` 里 archlint 早已做过的优化（1909 ms → 319 ms）
+  是同一个改动，只是当时没覆盖到 typecheck。
+
+### Known limitations
+
+- **端到端提交时间尚未变快，且单次测量不可信**：三次实测 223 / 145.6 / 145.6 s，中位数
+  与优化前的 142 s 持平。类型检查省下的 5 s 是真实的（17.4 s → 12.3 s，可重复），但它被
+  机器负载噪声盖住了。真正的时间大头在于**门禁数量本身**：仅启动 + Gate 0 就要 7 s。
+- **镜像重复仍未消除**：429 个文件、约 30,404 行重复（`githooks/adapters` ↔
+  `src/npm-package/adapters` 占 293 个）。本版只补上了防线（Gate 12b 双向），
+  彻底消除需要改 `prepack` / `files` / 发布链路，方案与取舍见
+  `docs/plans/2026-11-08-mirror-duplication-decision.md`。
+
 ## [0.37.0.0] - 2026-11-07
 
 **主轴：把「门禁说自己通过了」和「门禁真的检查过了」分开。** 这一版修掉的 42 个缺陷里，
