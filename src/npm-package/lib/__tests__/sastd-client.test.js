@@ -396,6 +396,19 @@ describe('never greener — AC-SASTD-07: a thinner scan must not read as a clean
     expect(out.errors || []).toEqual([]);
   }, 90000);
 
+  it('records how many files were scanned, so a caller can compare against direct', () => {
+    // The daemon cannot express the CLI's --include filter, so it scans whole
+    // directories: a superset. Recording the count makes that checkable instead of
+    // assumed -- if root selection ever changed, this number would move and a
+    // comparison against the direct path would notice.
+    const out = runPython(
+      [
+        'print(json.dumps(sastd._verify_coverage({"results": [], "errors": [], "paths": {"scanned": ["a.js", "b.js"]}}, ["."])))',
+      ].join('\n'),
+    );
+    expect(out.xp_gate_coverage).toEqual({ files_scanned: 2, roots_requested: 1 });
+  }, 90000);
+
   it('a failed request surfaces as ok:false, never as an empty discovery', async () => {
     // The client contract: there is no shape in which "the daemon did not answer"
     // is expressed as "the daemon found nothing". Were this ever {ok:true,

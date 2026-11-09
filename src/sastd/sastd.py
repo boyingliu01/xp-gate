@@ -164,6 +164,15 @@ def _verify_coverage(payload, roots):
 
     scanned = (payload.get("paths") or {}).get("scanned") or []
     requested = [str(r) for r in roots]
+    # Recorded so the caller can compare this run against a direct scan. The daemon
+    # cannot express the CLI's --include filter (the in-process API has no equivalent
+    # parameter), so it scans whole directories: a SUPERSET of what the direct path
+    # looks at. That direction is safe -- a wider scan can report more, never less.
+    # It is recorded rather than assumed, because "wider" is only true while the
+    # roots are the same, and a future change to root selection would break it
+    # silently.
+    payload.setdefault("xp_gate_coverage", {})["files_scanned"] = len(scanned)
+    payload["xp_gate_coverage"]["roots_requested"] = len(requested)
 
     if requested and not scanned:
         # Every root was requested, none was scanned. That is never a clean result.
