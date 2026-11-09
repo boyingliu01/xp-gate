@@ -140,7 +140,43 @@ def _handle_scan(request):
     if isinstance(result, str):
         result = json.loads(result)
 
-    return _clean_check_ids(result, config)
+    result = _clean_check_ids(result, config)
+    return _verify_coverage(result, roots)
+
+
+def _verify_coverage(payload, roots):
+    """Refuse to hand back a scan that did not actually look at the roots.
+
+    THE FAILURE THIS BLOCKS is the quiet one: semgrep can return a perfectly valid
+    document with results:[] and errors:[] after failing to resolve a registry pack
+    or skipping every target. The gate reads that as "no findings" and reports PASS.
+    A truncated payload is already caught (it fails to parse and the gate fails
+    closed), so the danger is not malformed output -- it is well-formed output that
+    quietly covers less than it claims.
+
+    The check is deliberately narrow: it reports the roots semgrep says it scanned and
+    lets the caller compare. It does not try to be clever about globs or directories,
+    because a wrong completeness check is its own kind of failure.
+    """
+
+    if not isinstance(payload, dict):
+        return payload
+
+    scanned = (payload.get("paths") or {}).get("scanned") or []
+    requested = [str(r) for r in roots]
+
+    if requested and not scanned:
+        # Every root was requested, none was scanned. That is never a clean result.
+        payload.setdefault("errors", []).append(
+            {
+                "code": 0,
+                "level": "warning",
+                "type": "Coverage",
+                "message": f"no files were scanned for {len(requested)} requested root(s); "
+                "treating as an incomplete scan rather than a clean one",
+            }
+        )
+    return payload
 
 
 def _config_prefix(config):
