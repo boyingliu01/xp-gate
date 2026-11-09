@@ -25,8 +25,10 @@ describe('deploy-manifest (REQ-DEPLOY-001)', () => {
       const plainHooks = topLevel.filter(f => {
         const p = path.join(GITHOOKS_DIR, f);
         if (!fs.statSync(p).isFile()) return false;
-        if (f.endsWith('.sh')) return false;
-        if (f.startsWith('gate-')) return false;
+        // 普通 hook 无扩展名（pre-commit/pre-push/post-commit/post-merge）。
+        // 带扩展名的全部排除：.sh（gate-*/sprint-gate/adapter-common/
+        // hook-module-resolution/install/verify 单独分类）、.md（文档）。
+        if (f.includes('.')) return false;
         return true;
       });
       expect(plainHooks.sort()).toEqual(
