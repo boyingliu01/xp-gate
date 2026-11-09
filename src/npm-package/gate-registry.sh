@@ -50,7 +50,7 @@
 # name|number|impl|blocks
 GATE_REGISTRY_ROWS=(
   "version-consistency|0|inline|YES"
-  "code-quality|1|inline|NO"
+  "code-quality|1|inline|YES"
   "duplicate-code|2|inline|NO"
   "complexity|3|gate-3.sh|YES"
   "principles|4|gate-4.sh|YES"
@@ -58,7 +58,7 @@ GATE_REGISTRY_ROWS=(
   "architecture|6|inline|YES"
   "iac-security|7|gate-7.sh|YES"
   "secret-scanning|8|gate-8.sh|YES"
-  "build-integrity|9|inline|NO"
+  "build-integrity|9|inline|YES"
   "sast|10|gate-10.sh|YES"
   "sprint-flow|11|sprint-gate.sh|YES"
   "file-hygiene|12|gate-12-file-hygiene.sh|NO"

@@ -143,17 +143,54 @@ setup() {
   [ "$output" = "YES" ]
 }
 
-@test "registry says code-quality cannot block (matches pre-commit behaviour)" {
-  # Gate 1's adapter branch prints SKIPPED/PASSED and never exits. Pinned in
-  # issue-717-blocking-matrix.test.bats; asserted here so the registry cannot
-  # silently claim a blocking power the gate does not have.
+@test "registry says code-quality CAN block (Gate 1's language arm exits 1)" {
+  # This test used to assert NO, with the reasoning that "Gate 1's adapter
+  # branch prints SKIPPED/PASSED and never exits". That is true of the TS
+  # special-case arms and false of the generic adapter arm every adaptive
+  # language goes through: pre-commit:2389-2401 sets GATE_1_STATUS="BLOCK" and
+  # `exit 1` whenever run_lint() returns 1. The registry said NO while the hook
+  # could reject a commit, and this assertion is what kept the two in step --
+  # pinning the wrong answer makes a drift test into a drift guard.
   run gate_can_block code-quality
-  [ "$output" = "NO" ]
+  [ "$output" = "YES" ]
 }
 
-@test "registry says gate-9 build-integrity cannot block" {
+@test "registry says build-integrity CAN block (Gate 9 exits 1 on a failed build)" {
+  # pre-commit:5156-5162: GATE_9_TS_STATUS="BLOCK" is followed by `exit 1`.
+  # Claiming NO meant a reader could believe a red build still lands.
   run gate_can_block build-integrity
-  [ "$output" = "NO" ]
+  [ "$output" = "YES" ]
+}
+
+@test "every gate the registry marks NO really cannot exit" {
+  # The blocks column is only worth reading if it is derived from behaviour
+  # rather than maintained by hand -- #769 recorded that it was already wrong
+  # on the day it shipped. For each NO row, fail if any assignment of that
+  # gate's status to BLOCK is immediately followed by an exit.
+  #
+  # Iterates GATE_REGISTRY_ROWS (raw "name|number|impl|blocks"), not
+  # gate_registry_dump -- the dump is a space-aligned human table, so an IFS='|'
+  # read over it parses nothing and the loop silently passes without testing
+  # a single gate. That is the same vacuous-assertion shape this file exists
+  # to prevent.
+  local row name num impl blocks statusvar
+  local checked=0
+  for row in "${GATE_REGISTRY_ROWS[@]}"; do
+    IFS='|' read -r name num impl blocks <<< "$row"
+    [ "$blocks" = "NO" ] || continue
+    checked=$((checked + 1))
+    statusvar="GATE_${num}_STATUS"
+    run grep -n -A4 "${statusvar}=\"BLOCK\"" "$REPO_ROOT/githooks/pre-commit"
+    if printf '%s' "$output" | grep -q 'exit 1'; then
+      echo "registry says $name cannot block, but ${statusvar}=\"BLOCK\" is followed by exit 1"
+      false
+    fi
+  done
+  # Anti-vacuity: if the loop never ran, this test proves nothing.
+  [ "$checked" -gt 0 ] || {
+    echo "no NO rows were inspected -- the loop did not execute"
+    false
+  }
 }
 
 # --- a gate that reports BLOCK must actually block ------------------------
