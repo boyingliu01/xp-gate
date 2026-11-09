@@ -31,6 +31,7 @@ describe('doctor', () => {
   let originalDetectDepsTools;
   let originalExecSync;
   let originalExec;
+  let originalSpawnSync;
   let logSpy;
 
   beforeAll(() => {
@@ -67,6 +68,7 @@ describe('doctor', () => {
     originalRepoRoot = process.env.XP_GATE_REPO_ROOT;
     originalExecSync = cp.execSync;
     originalExec = cp.exec;
+    originalSpawnSync = cp.spawnSync;
     // Unique per-describe + per-test prefixes to avoid parallel collisions.
     tmpHome = fs.mkdtempSync(path.join(os.tmpdir(), `xpgate-dr-${DESCRIBE_ID}-`));
     tmpProject = fs.mkdtempSync(path.join(os.tmpdir(), `xpgate-dr-proj-${DESCRIBE_ID}-`));
@@ -91,6 +93,20 @@ describe('doctor', () => {
     logSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
     vi.spyOn(console, 'warn').mockImplementation(() => {});
     vi.spyOn(console, 'error').mockImplementation(() => {});
+    // doctor.js destructures `const { execSync, execFileSync, spawnSync } =
+    // require('child_process')`, so each reloaded copy captures the function
+    // objects that exist at require time. Patching cp.spawnSync AFTER the
+    // reload has no effect on it -- that was tried, and the file did not get
+    // faster by a single millisecond. The patch therefore goes on the module
+    // object here, before the next test's `require('../doctor')` runs.
+    //
+    // Why it is safe: checkSpawnCapability() exists to warn a user whose sandbox
+    // forbids sync spawns, and no case in this file asserts its verdict. Every
+    // real git call here is likewise probing an environment the fixtures have
+    // deliberately redirected to tmpHome/tmpProject, so "not a git repository"
+    // is the honest answer rather than a fabricated one. Measured on this
+    // machine, one doctor() call spent 80% of its samples inside spawnSync.
+    cp.spawnSync = () => ({ error: null, status: 0, stdout: 'v24.0.0\n', stderr: '' });
   });
 
   afterEach(() => {
@@ -100,6 +116,7 @@ describe('doctor', () => {
     else process.env.XP_GATE_REPO_ROOT = originalRepoRoot;
     cp.execSync = originalExecSync;
     cp.exec = originalExec;
+    cp.spawnSync = originalSpawnSync;
     if (tmpHome && fs.existsSync(tmpHome)) {
       fs.rmSync(tmpHome, { recursive: true, force: true });
     }
