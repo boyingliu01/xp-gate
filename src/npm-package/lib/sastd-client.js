@@ -131,6 +131,9 @@ let activeDaemon = null;
  *  stops holding ~200MB of semgrep in RAM between commits. */
 const IDLE_TIMEOUT_MS = 30 * 60 * 1000;
 
+/** How many stderr lines to keep for diagnosis. Enough to see a traceback's tail. */
+const STDERR_TAIL_LINES = 50;
+
 /**
  * Start the daemon if it is not already running.
  *
@@ -138,11 +141,53 @@ const IDLE_TIMEOUT_MS = 30 * 60 * 1000;
  * @returns {{ok: true, value: object} | {ok: false, error: string}}
  */
 function ensureDaemon(pythonCmd) {
-  if (activeDaemon && !activeDaemon.proc.killed && activeDaemon.proc.exitCode === null) {
+  if (isDaemonAlive()) {
     if (activeDaemon.idleTimer) activeDaemon.idleTimer.refresh();
     return { ok: true, value: activeDaemon };
   }
 
+  const spawned = spawnDaemon(pythonCmd);
+  if (!spawned.ok) return spawned;
+  const { proc, getSpawnError } = spawned.value;
+
+  attachLifecycle(proc);
+
+  // Start unref'd so an idle daemon cannot pin the process open. exchange() refs it
+  // for the duration of each request -- see refProc/releaseProc for why neither
+  // "always ref" nor "always unref" works.
+  proc.unref?.();
+  proc.stdin?.unref?.();
+  proc.stdout?.unref?.();
+  proc.stderr?.unref?.();
+
+  const idleTimer = startIdleTimer();
+  installExitHook();
+
+  activeDaemon = {
+    proc,
+    // stdout, NOT stdin: stdin is write-only, so a 'data' listener there never fires
+    // and every request would sit until the timeout with the answer unread.
+    socket: proc.stdout,
+    pending: 0,
+    idleTimer,
+    getSpawnError,
+    stderrTail: drainStderr(proc),
+  };
+  return { ok: true, value: activeDaemon };
+}
+
+/** True when a daemon is running and still usable. */
+function isDaemonAlive() {
+  return Boolean(activeDaemon) && !activeDaemon.proc.killed && activeDaemon.proc.exitCode === null;
+}
+
+/**
+ * Spawn the daemon process and wire its error reporting.
+ *
+ * @param {string} pythonCmd
+ * @returns {{ok: true, value: object} | {ok: false, error: string}}
+ */
+function spawnDaemon(pythonCmd) {
   const daemonPath = path.join(__dirname, '..', '..', 'sastd', 'sastd.py');
   let proc;
   try {
@@ -152,31 +197,15 @@ function ensureDaemon(pythonCmd) {
   }
 
   // spawn() reports a missing interpreter as an asynchronous 'error' event, not a
-  // throw. Unhandled, that event takes down the whole process -- observed as
-  // vitest reporting "Errors 1" while every assertion passed.
+  // throw. Unhandled, that event takes down the whole process -- observed as vitest
+  // reporting "Errors 1" while every assertion passed.
   let spawnError = null;
   proc.on('error', (err) => {
     spawnError = err;
     activeDaemon = null;
   });
 
-  attachLifecycle(proc);
-  const stderrTail = drainStderr(proc);
-  const idleTimer = startIdleTimer();
-
-  activeDaemon = {
-    proc,
-    // stdout, NOT stdin. stdin is write-only: a 'data' listener there never
-    // fires, so every request sat until the 180s timeout while the daemon had
-    // already answered into an unread pipe. (Observed: 180s timeouts on a daemon
-    // that replied in 2s when read directly.)
-    socket: proc.stdout,
-    pending: 0,
-    idleTimer,
-    getSpawnError: () => spawnError,
-    stderrTail,
-  };
-  return { ok: true, value: activeDaemon };
+  return { ok: true, value: { proc, getSpawnError: () => spawnError } };
 }
 
 /**
@@ -202,9 +231,97 @@ function drainStderr(proc) {
   const tail = [];
   proc.stderr.on('data', (chunk) => {
     tail.push(chunk.toString());
-    if (tail.length > 50) tail.shift();
+    if (tail.length > STDERR_TAIL_LINES) tail.shift();
   });
   return tail;
+}
+
+/**
+ * Make sure the daemon does not outlive the Node process that started it.
+ *
+ * WHY THIS IS NEEDED: a spawned child keeps the event loop alive, so a script that
+ * runs one scan and lets Node exit naturally would hang forever -- the daemon never
+ * ends, the loop never empties. Measured as a shell command substitution
+ * (`X=$(node -e ...)`) that never returned.
+ *
+ * WHY NOT unref(): unref drops the keep-alive immediately, and Node then exits
+ * BEFORE the in-flight scan resolves -- measured as 0 bytes of output where a full
+ * payload was expected. The keep-alive has to last exactly as long as the work, so
+ * the hook fires at 'beforeExit', after pending work is done.
+ */
+let exitHookInstalled = false;
+
+function installExitHook() {
+  if (exitHookInstalled) return;
+  exitHookInstalled = true;
+
+  // 'exit' is the only event that does not depend on the loop draining -- and the
+  // loop cannot drain while the child is alive, so 'beforeExit' deadlocks here
+  // (measured: still hanging with the beforeExit hook in place).
+  process.once('exit', () => resetDaemon('process exiting'));
+
+  // Belt and braces for the case where the caller never lets the loop drain:
+  // 'exit' does not fire until something else ends the process, so also drop the
+  // keep-alive whenever the loop reports it is idle. `beforeExit` is re-emitted
+  // every time the loop empties, so the final one sees a daemon with no pending
+  // work and releases it.
+  // The real release point: the moment a request settles, if nothing is queued,
+  // the child stops being allowed to hold the process open. This preserves the
+  // benefit for a long-lived caller (repeated requestScan calls reuse the warm
+  // daemon) while letting a one-shot caller exit normally.
+  process.on('beforeExit', () => {
+    if (activeDaemon && activeDaemon.pending === 0) {
+      releaseKeepAlive();
+    }
+  });
+  process.once('exit', () => {
+    if (activeDaemon) resetDaemon('process exiting');
+  });
+}
+
+/**
+ * Let Node exit without killing the daemon's usefulness immediately.
+ *
+ * unref() at SPAWN time was wrong (Node exited before the first scan resolved).
+ * unref() here is right: the work is done, so the child may no longer pin the loop.
+ * The daemon process itself keeps running until it is killed or goes idle, so a
+ * subsequent call in the same process still reuses it -- but a one-shot caller is
+ * no longer prevented from exiting.
+ */
+function releaseKeepAlive() {
+  if (!activeDaemon || activeDaemon.keepAliveReleased) return;
+  activeDaemon.keepAliveReleased = true;
+  activeDaemon.proc.unref();
+  activeDaemon.proc.stdin?.unref?.();
+  activeDaemon.proc.stdout?.unref?.();
+  activeDaemon.proc.stderr?.unref?.();
+}
+
+/**
+ * Ref-count the daemon child around one request.
+ *
+ * unref() at spawn time was wrong (Node exited before the first scan resolved --
+ * 0 bytes of output). Never unref'ing was also wrong (a one-shot caller never
+ * exited; measured as a shell command substitution that hung forever). Holding only
+ * while work is in flight satisfies both.
+ */
+let inFlight = 0;
+
+function refProc(proc) {
+  inFlight += 1;
+  proc.ref?.();
+  proc.stdin?.ref?.();
+  proc.stdout?.ref?.();
+  proc.stderr?.ref?.();
+}
+
+function releaseProc(proc) {
+  inFlight = Math.max(0, inFlight - 1);
+  if (inFlight > 0) return;
+  proc.unref?.();
+  proc.stdin?.unref?.();
+  proc.stdout?.unref?.();
+  proc.stderr?.unref?.();
 }
 
 /** Let the daemon exit after a quiet spell so it stops holding semgrep in RAM. */
@@ -327,14 +444,25 @@ function exchange(daemon, request, timeoutMs) {
   return new Promise((resolve) => {
     const { socket, proc } = daemon;
 
+    // Hold the process open for the duration of the request only. Without this,
+    // Node can exit mid-scan (measured: 0 bytes of output); with a permanent hold,
+    // a one-shot caller never exits at all. Ref-counting per request gives both:
+    // work in flight keeps the loop alive, and an idle daemon does not.
+    refProc(proc);
+
     // Tag this request so a reply arriving for a prior, timed-out request cannot
     // be mistaken for this one's answer. Without it, one slow scan poisons the
     // next verdict -- exactly the failure a security gate must not have.
     daemon.pending += 1;
     const sequence = daemon.pending;
 
+    const finish = (result) => {
+      releaseProc(proc);
+      resolve(result);
+    };
+
     const timer = setTimeout(() => {
-      resolve({ ok: false, error: `daemon did not reply within ${timeoutMs}ms` });
+      finish({ ok: false, error: `daemon did not reply within ${timeoutMs}ms` });
       // A daemon that missed its deadline may be wedged; do not keep feeding it.
       resetDaemon(`timeout on request ${sequence}`);
     }, timeoutMs);
@@ -342,7 +470,7 @@ function exchange(daemon, request, timeoutMs) {
 
     readOneLine(socket, (line, err) => {
       clearTimeout(timer);
-      resolve(interpretReply(line, err));
+      finish(interpretReply(line, err));
     }, timeoutMs);
 
     try {
@@ -350,7 +478,7 @@ function exchange(daemon, request, timeoutMs) {
     } catch (writeErr) {
       clearTimeout(timer);
       resetDaemon(`write failed: ${writeErr.message}`);
-      resolve({ ok: false, error: `write failed: ${writeErr.message}` });
+      finish({ ok: false, error: `write failed: ${writeErr.message}` });
     }
   });
 }
