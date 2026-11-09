@@ -61,6 +61,12 @@ const SIGNAL_MAX_DEPTH = 4;
 const SIGNAL_MAX_ENTRIES = 5000;
 
 /**
+ * Virtualenv directory names. Their presence alone is a Python signal even with
+ * no marker file, common for `python -m venv .venv`-only setups.
+ */
+const VENV_DIR_NAMES = ['.venv', 'venv'];
+
+/**
  * Does this project show any sign of being Python at all?
  *
  * This exists to answer the ONE question that must be asked BEFORE paying for
@@ -86,43 +92,75 @@ const SIGNAL_MAX_ENTRIES = 5000;
  */
 export function hasPythonSignal(cwd?: string): boolean {
   const root = cwd || process.cwd();
+  return hasMarkerFile(root) || hasVenvDir(root) || containsPythonFile(root);
+}
 
-  for (const marker of PYTHON_MARKER_FILES) {
+/** Is any marker file present? An unreadable root is not evidence either way. */
+function hasMarkerFile(root: string): boolean {
+  return PYTHON_MARKER_FILES.some((marker) => {
     try {
-      if (fs.existsSync(path.join(root, marker))) return true;
-    } catch { /* unreadable root → fall through to the walk */ }
-  }
-
-  // Virtualenv directories are themselves a Python project signal even with no
-  // marker file (common for `python -m venv .venv`-only setups).
-  for (const venv of ['.venv', 'venv']) {
-    try {
-      if (fs.existsSync(path.join(root, venv))) return true;
-    } catch { /* ignore */ }
-  }
-
-  let seen = 0;
-  const walk = (dir: string, depth: number): boolean => {
-    if (depth > SIGNAL_MAX_DEPTH || seen > SIGNAL_MAX_ENTRIES) return false;
-    let entries: import('fs').Dirent[];
-    try {
-      entries = fs.readdirSync(dir, { withFileTypes: true });
+      return fs.existsSync(path.join(root, marker));
     } catch {
       return false;
     }
-    for (const entry of entries) {
-      if (seen++ > SIGNAL_MAX_ENTRIES) return false;
-      if (entry.isDirectory()) {
-        if (SIGNAL_SKIP_DIRS.has(entry.name) || entry.name.startsWith('.')) continue;
-        if (walk(path.join(dir, entry.name), depth + 1)) return true;
-      } else if (entry.name.endsWith('.py')) {
-        return true;
-      }
-    }
-    return false;
-  };
+  });
+}
 
-  return walk(root, 0);
+/**
+ * Is a virtualenv directory present? Only the signal matters here, so an
+ * unreadable root still counts as a hit rather than being silently skipped.
+ */
+function hasVenvDir(root: string): boolean {
+  return VENV_DIR_NAMES.some((venv) => {
+    try {
+      return fs.existsSync(path.join(root, venv));
+    } catch {
+      return true;
+    }
+  });
+}
+
+/** Should this directory be skipped during the .py walk? */
+function shouldSkipDir(entry: import('fs').Dirent): boolean {
+  return SIGNAL_SKIP_DIRS.has(entry.name) || entry.name.startsWith('.');
+}
+
+/** A non-directory entry is a hit only if it is a .py file. */
+function isPythonFileEntry(entry: import('fs').Dirent): boolean {
+  return !entry.isDirectory() && entry.name.endsWith('.py');
+}
+
+/**
+ * One directory level: does this directory or any descendant hold a .py file?
+ * Split from containsPythonFile so the bounds and the traversal stay separately
+ * readable, and bounded by depth and entry count so a pathological tree cannot
+ * make a gate hang.
+ */
+function walkForPythonFile(dir: string, depth: number, counter: { seen: number }): boolean {
+  if (depth > SIGNAL_MAX_DEPTH || counter.seen > SIGNAL_MAX_ENTRIES) return false;
+  let entries: import('fs').Dirent[];
+  try {
+    entries = fs.readdirSync(dir, { withFileTypes: true });
+  } catch {
+    return false;
+  }
+  for (const entry of entries) {
+    counter.seen += 1;
+    if (counter.seen > SIGNAL_MAX_ENTRIES) return false;
+    if (isPythonFileEntry(entry)) return true;
+    if (entry.isDirectory() && !shouldSkipDir(entry) && walkForPythonFile(path.join(dir, entry.name), depth + 1, counter)) {
+      return true;
+    }
+  }
+  return false;
+}
+
+/**
+ * Look for any .py file under root. Returns false on a read error: "could not
+ * look" must never be reported as "definitely not Python".
+ */
+function containsPythonFile(root: string): boolean {
+  return walkForPythonFile(root, 0, { seen: 0 });
 }
 
 // ── Python Detection ──
