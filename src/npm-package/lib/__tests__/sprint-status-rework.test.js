@@ -51,6 +51,28 @@ function makeCommit(msg, dir) {
   git(`commit --no-verify -m "${msg}"`, d);
 }
 
+// A repository with identity already configured, built once per test FILE
+// instead of once per test. `git init` plus two `git config` launches cost
+// ~130 ms each on Windows and none of it is what these tests assert; copying the
+// prepared tree is one filesystem operation instead of three process launches.
+let _repoTemplate = null;
+
+/** Build the template exactly once. Never copies from itself. */
+function repoTemplate() {
+  if (_repoTemplate) return _repoTemplate;
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'rework-template-'));
+  git('init', dir);
+  git('config user.email "test@test.com"', dir);
+  git('config user.name "Test"', dir);
+  _repoTemplate = dir;
+  return dir;
+}
+
+/** Create a configured repo at `dir`, replacing the init + 2x config triple. */
+function initRepo(dir) {
+  fs.cpSync(repoTemplate(), dir, { recursive: true });
+}
+
 function daysAgo(n) {
   return new Date(Date.now() - n * 86400000).toISOString();
 }
@@ -73,6 +95,12 @@ function hoursAgo(n) {
 beforeAll(() => {
   TMP_DIR = fs.mkdtempSync(path.join(os.tmpdir(), 'rework-test-'));
   cwdSpy = vi.spyOn(process, 'cwd');
+  // Build the shared repo template HERE, before any test mocks process.cwd().
+  // repoTemplate() calls os.tmpdir(), which resolves through process.cwd(); once
+  // cwdSpy is stubbing it to TMP_DIR, a lazily-created template would be made
+  // inside TMP_DIR and then copied into itself.
+  _repoTemplate = null;
+  repoTemplate();
 });
 
 beforeEach(() => {
@@ -113,9 +141,7 @@ describe('sprint-status --rework-check (#369)', () => {
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'rework-b-'));
     cwdSpy.mockReturnValue(dir);
 
-    git('init', dir);
-    git('config user.email "test@test.com"', dir);
-    git('config user.name "Test"', dir);
+    initRepo(dir);
     // 10 commits, 2 of them fixes => 20%, below the 30% threshold.
     // The count has to come from real history: the old fixture made 3 commits
     // and declared 'total_sprint_commits: 10' by hand, so the expected 20%
@@ -159,9 +185,7 @@ describe('sprint-status --rework-check (#369)', () => {
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'rework-c-'));
     cwdSpy.mockReturnValue(dir);
 
-    git('init', dir);
-    git('config user.email "test@test.com"', dir);
-    git('config user.name "Test"', dir);
+    initRepo(dir);
     // 10 commits, 5 of them fixes => 50%, above the 30% threshold.
     makeCommit('fix: one', dir);
     makeCommit('fix: two', dir);
@@ -223,9 +247,7 @@ describe('sprint-status --rework-check (#369)', () => {
     const outerDir = fs.mkdtempSync(path.join(os.tmpdir(), 'rework-outer-'));
 
     for (const dir of [targetDir, outerDir]) {
-      git('init', dir);
-      git('config user.email "test@test.com"', dir);
-      git('config user.name "Test"', dir);
+      initRepo(dir);
     }
     makeCommit('feat: target initial', targetDir);
     makeCommit('fix: target bug', targetDir);
@@ -279,9 +301,7 @@ describe('sprint-status --rework-check (#369)', () => {
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'rework-injection-'));
     const markerFile = path.join(dir, 'injection-marker');
     cwdSpy.mockReturnValue(dir);
-    git('init', dir);
-    git('config user.email "test@test.com"', dir);
-    git('config user.name "Test"', dir);
+    initRepo(dir);
     makeCommit('fix: target bug', dir);
 
     writeSprintState({

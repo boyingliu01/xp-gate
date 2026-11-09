@@ -66,16 +66,32 @@ function hostilePathSegment() {
   return 'space $HOME `marker` "quoted"';
 }
 
+// One initialised repository, shared by every test in this file.
+let _gitProjectTemplate = null;
+
+function gitProjectTemplate() {
+  if (_gitProjectTemplate) return _gitProjectTemplate;
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'xpgate-runner-template-'));
+  execFileSync('git', ['init', '-q'], { cwd: dir });
+  execFileSync('git', ['config', 'user.email', 'test@example.com'], { cwd: dir });
+  execFileSync('git', ['config', 'user.name', 'XP-Gate Test'], { cwd: dir });
+  fs.writeFileSync(path.join(dir, 'tracked.ts'), 'const value = 1;\n');
+  execFileSync('git', ['add', 'tracked.ts'], { cwd: dir });
+  execFileSync('git', ['-c', 'core.hooksPath=/dev/null', 'commit', '-qm', 'initial'], {
+    cwd: dir,
+  });
+  _gitProjectTemplate = dir;
+  return dir;
+}
+
 function initializeGitProject() {
   try {
-    execFileSync('git', ['init', '-q'], { cwd: tmpProject });
-    execFileSync('git', ['config', 'user.email', 'test@example.com'], { cwd: tmpProject });
-    execFileSync('git', ['config', 'user.name', 'XP-Gate Test'], { cwd: tmpProject });
+    // Copy a pre-initialised template rather than launching five git processes.
+    // `init` + two `config` + `add` + `commit` is ~700 ms of pure process
+    // startup on Windows, and three tests rebuild this fixture. The copied tree
+    // already carries the identity and the initial commit.
+    fs.cpSync(gitProjectTemplate(), tmpProject, { recursive: true });
     writeFixture(path.join(tmpProject, 'tracked.ts'), 'const value = 1;\n');
-    execFileSync('git', ['add', 'tracked.ts'], { cwd: tmpProject });
-    execFileSync('git', ['-c', 'core.hooksPath=/dev/null', 'commit', '-qm', 'initial'], {
-      cwd: tmpProject,
-    });
   } catch (err) {
     // Without this the failure surfaces as a downstream assertion on the gate's
     // output. Name the setup step instead: a repo fixture that never initialised
