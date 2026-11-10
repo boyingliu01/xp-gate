@@ -131,9 +131,36 @@ const ADAPTER_DIR_ORDER = Object.freeze([
  */
 const GATE_PROBE = 'gate-3.sh';
 
+/**
+ * Schema version of this module's contract (REQ-RESOLVE-003, P1-C).
+ *
+ * WHY A VERSION AND NOT JUST THE DATA
+ * -----------------------------------
+ * The shell projection used to carry data only: four `HOOK_*` arrays and zero
+ * functions. Every consumer therefore wrote its own resolution loop, and
+ * pre-push's hand-written loop ordered the tiers GLOBAL-first while
+ * ADAPTER_DIR_ORDER says PROJECT-first — the exact defect P1-C exists to fix.
+ * Data cannot prevent a second implementation of the traversal; a function can,
+ * because there is nothing left to re-implement.
+ *
+ * Schema 2 adds to schema 1:
+ *   - `HOOK_RESOLUTION_SCHEMA=<n>` in the projection, so a consumer (or an
+ *     upgrade path) can detect an old file without guessing at its shape.
+ *   - `_hook_resolve` — the single traversal implementation.
+ *   - `_hook_resolve_selfcheck` — a load-time contract check. A file whose
+ *     syntax is valid and whose function exists but whose behaviour is wrong
+ *     would otherwise fail mid-push at whatever call site happens to run first;
+ *     the selfcheck turns that into a deterministic failure at source time.
+ *
+ * BUMPING THIS IS A BREAKING CHANGE for any consumer holding the old shape.
+ * update-hooks/install report an upgrade path for `HOOK_RESOLUTION_SCHEMA < 2`.
+ */
+const HOOK_RESOLUTION_SCHEMA = 2;
+
 module.exports = {
   RESOLUTION_ORDER,
   GATE_RESOLUTION_ORDER,
   ADAPTER_DIR_ORDER,
   GATE_PROBE,
+  HOOK_RESOLUTION_SCHEMA,
 };

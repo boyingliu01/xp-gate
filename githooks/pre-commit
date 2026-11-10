@@ -90,6 +90,22 @@ fi
 # shellcheck source=/dev/null
 . "$HOOK_RESOLUTION_SH"
 
+# Same contract check pre-push performs, and for the same reason: a file that
+# sources cleanly but predates schema 2 provides NO _hook_tier_dir, so every
+# tier lookup below would return empty and the hook would degrade silently --
+# resolving adapters only from the script dir, which is #495 in miniature. This
+# hook fails closed rather than degrading, so the check must be fatal here.
+if ! declare -F _hook_tier_dir >/dev/null 2>&1; then
+  echo "FATAL: hook-module-resolution.sh is STALE (schema ${HOOK_RESOLUTION_SCHEMA:-1}, need 2)." >&2
+  echo "Fix: node scripts/generate-hook-resolution.cjs, or xp-gate doctor --sync-hooks." >&2
+  exit 1
+fi
+if [ -n "${_HOOK_RESOLVE_BROKEN:-}" ]; then
+  echo "FATAL: hook-module-resolution.sh failed its contract selfcheck: ${_HOOK_RESOLVE_BROKEN}" >&2
+  echo "Fix: node scripts/generate-hook-resolution.cjs, or xp-gate doctor --sync-hooks." >&2
+  exit 1
+fi
+
 # --- Coverage threshold: ONE resolver, one number (#555) --------------------
 # The threshold used to exist three times with two different values: the report
 # printed a literal 80, coverage-total.sh compared against a literal 80, and the
@@ -156,15 +172,33 @@ _resolve_coverage_threshold() {
 _resolve_coverage_threshold >/dev/null
 COVERAGE_THRESHOLD="$_rct_value"
 
-# Look up one tier's directory variable by name without eval-ing arbitrary input:
-# the base names are a closed set baked into the generated file.
+# Tier lookups delegate to the generated projection (schema 2).
+#
+# WHAT THIS REPLACED
+# ------------------
+# Three local functions -- `_hook_tier_base`, `_hook_resolve`, `_hook_resolve_dir`
+# -- each with its own `eval "set -- \"${${tiers_var}[@]}\""` walk and its own
+# copy of the same indirection. pre-push carried a FOURTH, hand-written, with the
+# tier order inverted (global first). Four traversals of the same table is how a
+# table ends up describing one order and the code running another.
+#
+# `_hook_tier_dir` now comes from hook-module-resolution.sh and answers only
+# "what directory is tier X rooted at". The two functions below keep their
+# distinct jobs -- one yields a FILE, one yields a DIRECTORY -- but neither
+# re-implements the walk or the order.
+# NOTE on the split: only tiers that appear in HOOK_ADAPTER_DIR_TIERS can go
+# through the projection. ADAPTER_DIR is declared in HOOK_ADAPTER_TIERS (a
+# different table with different entries) and SCRIPT_DIR is the hook's own
+# location, which needs no resolution at all -- both read their variable
+# directly, exactly as before. Routing them through the projection would have
+# returned empty for ADAPTER_DIR and silently disabled the flat adapter tier.
 _hook_tier_base() {
   case "$1" in
-    ADAPTER_DIR)      printf '%s' "$ADAPTER_DIR" ;;
-    GLOBAL_ADAPTER_DIR) printf '%s' "$GLOBAL_ADAPTER_DIR" ;;
-    PROJECT_GITHOOKS) printf '%s' "$PROJECT_GITHOOKS" ;;
-    SCRIPT_DIR)       printf '%s' "$SCRIPT_DIR" ;;
-    *)                printf '%s' "" ;;
+    ADAPTER_DIR)        printf '%s' "$ADAPTER_DIR" ;;
+    SCRIPT_DIR)         printf '%s' "$SCRIPT_DIR" ;;
+    GLOBAL_ADAPTER_DIR) _hook_tier_dir global GLOBAL_ADAPTER_DIR ;;
+    PROJECT_GITHOOKS)   _hook_tier_dir project PROJECT_GITHOOKS ;;
+    *)                  printf '%s' "" ;;
   esac
 }
 

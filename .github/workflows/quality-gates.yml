@@ -464,6 +464,25 @@ jobs:
             exit 1
           fi
 
+      # Design evidence check — every concrete value asserted in a design doc must
+      # carry a citation to where it was measured, or be labelled as a new design
+      # decision. Rationale: sprint-20261110-33 fabricated API details four separate
+      # times (an invented field name, an invented field list, a wrong description of
+      # the author's own test output, and a to-be-added field written as existing).
+      # Discipline was falsified four times; this is the mechanism that replaces it.
+      - name: 'Design evidence: cited values only'
+        run: |
+          if [[ ! -f scripts/check-design-evidence.cjs ]]; then
+            echo "❌ scripts/check-design-evidence.cjs is missing."
+            echo "A check that cannot run must not report success (#499 rationale)."
+            exit 1
+          fi
+          # The checker's own tests must pass first — a checker with no test is the
+          # exact failure shape it exists to catch.
+          npm run test:design-evidence
+          # Then run it over the design doc added by this sprint.
+          node scripts/check-design-evidence.cjs docs/plans/2026-11-10-resolve-p1c-design.md
+
       # Gate 4: Principles Checker (Clean Code + SOLID)
       - name: 'Gate 4: Principles Checker (Clean Code + SOLID)'
         run: |

@@ -23,7 +23,10 @@ const TARGET = path.join(ROOT, 'githooks/hook-module-resolution.sh');
 function render() {
   // Fresh require each run so --check and write always agree.
   delete require.cache[require.resolve(SOURCE)];
-  const { RESOLUTION_ORDER, GATE_RESOLUTION_ORDER, ADAPTER_DIR_ORDER, GATE_PROBE } = require(SOURCE);
+  const {
+    RESOLUTION_ORDER, GATE_RESOLUTION_ORDER, ADAPTER_DIR_ORDER, GATE_PROBE,
+    HOOK_RESOLUTION_SCHEMA,
+  } = require(SOURCE);
 
   const lines = [];
   lines.push('#!/bin/bash');
@@ -79,7 +82,98 @@ function render() {
   }
   lines.push(')');
   lines.push('');
+  lines.push(...renderSchemaAndResolver(HOOK_RESOLUTION_SCHEMA));
   return lines.join('\n');
+}
+
+/**
+ * Emit the schema marker, the single traversal implementation, and its
+ * load-time contract check (REQ-RESOLVE-003, schema 2).
+ *
+ * WHY THE FUNCTION IS GENERATED AND NOT HAND-WRITTEN IN THE HOOK
+ * --------------------------------------------------------------
+ * Data alone does not prevent a second implementation. pre-push used to walk
+ * HOOK_ADAPTER_DIR_TIERS itself, in a hand-written global-first cascade that
+ * contradicted the project-first order the data declares. Emitting the
+ * traversal here leaves consumers nothing to re-implement: they call
+ * `_hook_tier_dir <tier_id> <base_var>` and get the directory or an empty string.
+ */
+function renderSchemaAndResolver(schemaVersion) {
+  return [
+    '# ── Contract (schema ' + schemaVersion + ') ──────────────────────────────',
+    '# Consumed by the sourcing parent, not here.',
+    '# shellcheck disable=SC2034',
+    `HOOK_RESOLUTION_SCHEMA=${schemaVersion}`,
+    '',
+    '# Resolve the directory for one tier of HOOK_ADAPTER_DIR_TIERS.',
+    '#',
+    '#   _hook_tier_dir <tier_id> <base_var>',
+    '#     tier_id   project | global | script   (see HOOK_ADAPTER_DIR_TIERS)',
+    "#     base_var  name of the variable holding that tier's root, e.g.",
+    "#               PROJECT_GITHOOKS. Passed by NAME so the caller's scope decides",
+    '#               the value — this function never guesses.',
+    '#',
+    '# Prints the resolved directory on stdout, or nothing when the tier is not',
+    '# declared. Callers must treat empty output as "this tier is unavailable",',
+    '# never as "use the current directory".',
+    '#',
+    '# shellcheck disable=SC2154,SC2086,SC2295',
+    '_hook_tier_dir() {',
+    '  local _tier_id="$1"',
+    '  local _base_var="$2"',
+    '  local _entry _entry_tier _entry_base _base_value',
+    '',
+    '  [ -n "$_tier_id" ] && [ -n "$_base_var" ] || return 0',
+    '',
+    '  for _entry in "${HOOK_ADAPTER_DIR_TIERS[@]}"; do',
+    '    _entry_tier="${_entry%%|*}"',
+    '    [ "$_entry_tier" = "$_tier_id" ] || continue',
+    '    # "tier_id|base_var|probe_file" -> take the base_var field',
+    '    _entry_base="${_entry#*|}"',
+    '    _entry_base="${_entry_base%%|*}"',
+    '    [ "$_entry_base" = "$_base_var" ] || continue',
+    '    # Shape check before eval. Table membership already makes injection',
+    '    # impossible TODAY, but that argument lives in a comment a future caller',
+    '    # will not read. This makes it a property of the code: $_base_var must be',
+    '    # a plain shell identifier, so nothing can reach eval that could execute.',
+    '    case "$_base_var" in',
+    '      *[!A-Za-z0-9_]*|"") return 0 ;;',
+    '    esac',
+    '    # Indirect expansion: the caller owns the variable, we only read it.',
+    '    eval "_base_value=\\${$_base_var:-}"',
+    '    [ -n "$_base_value" ] || return 0',
+    "    printf '%s\\n' \"$_base_value\"",
+    '    return 0',
+    '  done',
+    '  return 0',
+    '}',
+    '',
+    '# Load-time contract check. A projection whose syntax is valid and whose',
+    '# function exists, but whose behaviour does not match what consumers call,',
+    '# would otherwise blow up mid-push at whichever call site runs first —',
+    '# indistinguishable, in a passing suite, from a file that is fine.',
+    '# Failing here turns it into a deterministic SKIP at source time.',
+    '# Consumed by the sourcing parent, not here.',
+    '# shellcheck disable=SC2034',
+    '_HOOK_RESOLVE_BROKEN=""',
+    '_hook_tier_dir_selfcheck() {',
+    '  local _probe_out',
+    '  if ! declare -F _hook_tier_dir >/dev/null 2>&1; then',
+    '    _HOOK_RESOLVE_BROKEN="missing _hook_tier_dir"',
+    '    return 1',
+    '  fi',
+    '  # Smoke call against a known input; the resolver takes the base by name,',
+    '  # so overriding PROJECT_GITHOOKS for one command proves the indirection.',
+    '  _probe_out="$(PROJECT_GITHOOKS="/__selfcheck__" _hook_tier_dir project PROJECT_GITHOOKS 2>/dev/null)"',
+    '  if [ "$_probe_out" != "/__selfcheck__" ]; then',
+    '    _HOOK_RESOLVE_BROKEN="selfcheck failed: tier_dir(project,PROJECT_GITHOOKS)=[${_probe_out}]"',
+    '    return 1',
+    '  fi',
+    '  return 0',
+    '}',
+    '_hook_tier_dir_selfcheck || :',
+    '',
+  ];
 }
 
 const expected = render();

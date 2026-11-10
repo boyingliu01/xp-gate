@@ -73,9 +73,80 @@ const ADAPTER_COMMON = 'adapter-common.sh';
 /** hooks/lib/（now-ms.sh 等，被 pre-commit 运行时 source），整目录部署。 */
 const HOOKS_LIB = 'lib';
 
+/**
+ * 既非「无扩展名的普通 hook」也非 `gate-*.sh` 的部署脚本（REQ-DEPLOY-002）。
+ *
+ * WHY A THIRD LIST IS NEEDED
+ * --------------------------
+ * 既有断言按类别检查：`HOOK_FILES` 覆盖「顶层无扩展名的普通文件」，
+ * `GATE_FILES` 覆盖 `gate-*.sh` + `sprint-gate.sh`。于是下面这些文件落进了
+ * 类别的缝里——它们既不是普通 hook，也不是 gate-*.sh，因此从来没有任何一条
+ * 断言问过「它们在哪份清单里」，而它们确实在 `src/npm-package/hooks/` 下：
+ *
+ *   adapter-common.sh      适配器基础设施（被 pre-commit/pre-push source）
+ *   deploy-manifest.sh     本清单自身的 shell 投影（供 shell 侧安装器读取）
+ *   install.sh             项目内安装器
+ *   lib/**                 hooks/lib/ 下被运行时 source 的模块
+ *
+ * 「按类别断言」的失效方式很隐蔽：新增一类文件时，它不匹配任何既有类别，
+ * 于是所有断言继续通过，而文件不被部署。这正是 #783 第三次重演的机制。
+ *
+ * 因此本清单的断言方式是**枚举目录**（见 deploy-manifest-completeness.test.js），
+ * 不比对手写清单：漏了一项就是红的，不需要有人记得加断言。
+ *
+ * 路径一律相对 `src/npm-package/hooks/`，正斜杠分隔。
+ * `lib/` 下逐个文件列出（而不是写目录名 'lib'）——写目录名会让「目录里新增
+ * 一个模块」再次逃脱断言，正是本清单要消灭的那种漏。
+ */
+const MODULE_FILES = Object.freeze([
+  ADAPTER_COMMON,
+  'deploy-manifest.sh',
+  'install.sh',
+  'lib/Measure-PowerShellComplexity.ps1',
+  'lib/assertion-quality.sh',
+  'lib/audit-sanitize.sh',
+  'lib/ccn-ratchet.sh',
+  'lib/coverage-total.sh',
+  'lib/diff-coverage.sh',
+  'lib/docs-only.sh',
+  'lib/gate-5c-alignment.sh',
+  'lib/java-test-selection.sh',
+  'lib/jscpd-run.sh',
+  'lib/layer-baseline.cjs',
+  'lib/native-path.sh',
+  'lib/now-ms.sh',
+  'lib/prepush-score.py',
+  'lib/python-incremental-typecheck.sh',
+  'lib/python-test-selection.sh',
+  'lib/sprint-gate-report.sh',
+  'lib/test-failure.sh',
+  'lib/toolchain-path.sh',
+  'lib/typecheck.sh',
+  'lib/validate-code-walkthrough.cjs',
+]);
+
+/**
+ * `src/npm-package/hooks/` 下**确实不该部署**的文件。
+ *
+ * 实测结论：当前为空。`hooks/` 下 39 个文件（递归）每一个都应该被部署，
+ * 没有例外——这不是假设，是 `find src/npm-package/hooks -type f` 的实测结果。
+ *
+ * 保留这个空数组而不是删掉概念，是因为「不需要豁免」本身是需要被断言的：
+ * 一旦有人往这里加一项，测试会同时检查三件事——
+ *   (a) 名单逐项等于期望值（现在是空，加一项就红，迫使那次决策被显式做出）；
+ *   (b) 名单里不含 .sh、不含非点开头的文件；
+ *   (c) 名单里的每一项都真实存在于 hooks/ 下（防死字符串式豁免）。
+ *
+ * 初版曾把 `.DS_Store` / `.gitkeep` 写在这里，但 `hooks/` 下并没有这两个文件
+ * ——那正是 (c) 要抓的「豁免了不存在的东西，等于豁免失效却看不出来」。
+ */
+const NON_DEPLOYABLE = Object.freeze([]);
+
 module.exports = Object.freeze({
   HOOK_FILES,
   GATE_FILES,
+  MODULE_FILES,
+  NON_DEPLOYABLE,
   ADAPTER_COMMON,
   HOOKS_LIB,
 });

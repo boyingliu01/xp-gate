@@ -27,7 +27,9 @@
     "principles": "npx tsx src/principles/index.ts",
     "archlint": "npx @archlinter/cli scan .",
     "dashboard": "node dashboard/serve.js",
-    "test:bats": "node scripts/run-bats.cjs"
+    "test:bats": "node scripts/run-bats.cjs",
+    "check:design-evidence": "node scripts/check-design-evidence.cjs docs/plans/2026-11-10-resolve-p1c-design.md",
+    "test:design-evidence": "node --test scripts/__tests__/check-design-evidence.test.cjs"
   },
   "dependencies": {
     "@ast-grep/cli": "^0.36.2",
