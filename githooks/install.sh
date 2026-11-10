@@ -78,20 +78,29 @@ for gate in "${DEPLOY_GATE_FILES[@]}" hook-module-resolution.sh; do
   fi
 done
 
-# Install the hook libraries. A hook resolves them against its own directory
-# ($SCRIPT_DIR/lib/...), so they have to sit next to the installed copy: without
-# lib/, pre-commit loses now_ms() and, since #473, Gate 5's handle_test_failure
-# — whose absence fails closed into a block on every commit.
-if [ -d "$HOOKS_DIR/lib" ]; then
-  mkdir -p "$TARGET_HOOKS/lib"
-  for libfile in "$HOOKS_DIR"/lib/*; do
-    [ -f "$libfile" ] || continue
-    libname=$(basename "$libfile")
-    cp "$libfile" "$TARGET_HOOKS/lib/$libname"
-    chmod +x "$TARGET_HOOKS/lib/$libname"
-    echo "  + lib/$libname -> .git/hooks/lib/"
-  done
-fi
+# Install the non-hook modules (lib/*, adapter-common.sh, deploy-manifest.sh,
+# install.sh) from the manifest.
+#
+# A hook resolves them against its own directory ($SCRIPT_DIR/lib/...), so they
+# have to sit next to the installed copy: without lib/, pre-commit loses now_ms()
+# and, since #473, Gate 5's handle_test_failure — whose absence fails closed into
+# a block on every commit.
+#
+# REQ-DEPLOY-002: this loop used to glob "$HOOKS_DIR"/lib/*, which installed
+# whatever happened to be in that directory whether or not any manifest declared
+# it. Two consequences: adapter-common.sh / deploy-manifest.sh / install.sh (not
+# under lib/) were never installed, and a file added to lib/ shipped with no
+# manifest entry — so "is the manifest complete" could not be answered by
+# reading the manifest.
+for module in "${DEPLOY_MODULE_FILES[@]}"; do
+  src="$HOOKS_DIR/$module"
+  if [ -f "$src" ]; then
+    mkdir -p "$TARGET_HOOKS/$(dirname "$module")"
+    cp "$src" "$TARGET_HOOKS/$module"
+    chmod +x "$TARGET_HOOKS/$module"
+    echo "  + $module -> .git/hooks/$module"
+  fi
+done
 
 if [ -d "$TARGET_GITHOOKS" ]; then
   if [ "$1" != "--force" ]; then

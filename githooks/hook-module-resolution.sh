@@ -51,3 +51,69 @@ HOOK_GATE_TIERS=(
   'gate_project|PROJECT_GITHOOKS|'
   'gate_script_dir|SCRIPT_DIR|'
 )
+
+# ── Contract (schema 2) ──────────────────────────────
+# Consumed by the sourcing parent, not here.
+# shellcheck disable=SC2034
+HOOK_RESOLUTION_SCHEMA=2
+
+# Resolve the directory for one tier of HOOK_ADAPTER_DIR_TIERS.
+#
+#   _hook_resolve <tier_id> <base_var>
+#     tier_id   project | global | script   (see HOOK_ADAPTER_DIR_TIERS)
+#     base_var  name of the variable holding that tier's root, e.g.
+#               PROJECT_GITHOOKS. Passed by NAME so the caller's scope decides
+#               the value — this function never guesses.
+#
+# Prints the resolved directory on stdout, or nothing when the tier is not
+# declared. Callers must treat empty output as "this tier is unavailable",
+# never as "use the current directory".
+#
+# shellcheck disable=SC2154,SC2086,SC2295
+_hook_resolve() {
+  local _tier_id="$1"
+  local _base_var="$2"
+  local _entry _entry_tier _entry_base _base_value
+
+  [ -n "$_tier_id" ] && [ -n "$_base_var" ] || return 0
+
+  for _entry in "${HOOK_ADAPTER_DIR_TIERS[@]}"; do
+    _entry_tier="${_entry%%|*}"
+    [ "$_entry_tier" = "$_tier_id" ] || continue
+    # "tier_id|base_var|probe_file" -> take the base_var field
+    _entry_base="${_entry#*|}"
+    _entry_base="${_entry_base%%|*}"
+    [ "$_entry_base" = "$_base_var" ] || continue
+    # Indirect expansion: the caller owns the variable, we only read it.
+    eval "_base_value=\${$_base_var:-}"
+    [ -n "$_base_value" ] || return 0
+    printf '%s\n' "$_base_value"
+    return 0
+  done
+  return 0
+}
+
+# Load-time contract check. A projection whose syntax is valid and whose
+# function exists, but whose behaviour does not match what consumers call,
+# would otherwise blow up mid-push at whichever call site runs first —
+# indistinguishable, in a passing suite, from a file that is fine.
+# Failing here turns it into a deterministic SKIP at source time.
+# Consumed by the sourcing parent, not here.
+# shellcheck disable=SC2034
+_HOOK_RESOLVE_BROKEN=""
+_hook_resolve_selfcheck() {
+  local _probe_out
+  if ! declare -F _hook_resolve >/dev/null 2>&1; then
+    _HOOK_RESOLVE_BROKEN="missing _hook_resolve"
+    return 1
+  fi
+  # Smoke call against a known input; the resolver takes the base by name,
+  # so overriding PROJECT_GITHOOKS for one command proves the indirection.
+  _probe_out="$(PROJECT_GITHOOKS="/__selfcheck__" _hook_resolve project PROJECT_GITHOOKS 2>/dev/null)"
+  if [ "$_probe_out" != "/__selfcheck__" ]; then
+    _HOOK_RESOLVE_BROKEN="selfcheck failed: resolve(project,PROJECT_GITHOOKS)=[${_probe_out}]"
+    return 1
+  fi
+  return 0
+}
+_hook_resolve_selfcheck || :

@@ -80,12 +80,30 @@ function copyHooks(srcDir, destDir) {
     }
   });
 
-  // Copy lib/ directory (e.g. now-ms.sh) — sourced by pre-commit at runtime
-  const libSrc = path.join(srcDir, 'hooks', 'lib');
-  const libDest = path.join(destDir, 'lib');
-  if (fs.existsSync(libSrc)) {
-    copyDirRecursive(libSrc, libDest);
-  }
+  // Copy the non-hook modules (lib/*.sh, lib/*.cjs, lib/*.py, lib/*.ps1,
+  // adapter-common.sh, deploy-manifest.sh, install.sh) from the manifest.
+  //
+  // REQ-DEPLOY-002: this used to be `copyDirRecursive(path.join(srcDir,'hooks','lib'))`
+  // — a hardcoded directory copy that bypassed the manifest entirely. Two problems,
+  // and the second is worse than the first:
+  //   1. adapter-common.sh, deploy-manifest.sh and install.sh were never installed,
+  //      because they are not under lib/ and HOOK_FILES did not list them.
+  //   2. Copying an entire directory means the manifest cannot describe what gets
+  //      installed. A file added under hooks/lib/ appeared on users' disks with no
+  //      manifest entry, so "is the manifest complete" was unanswerable by reading
+  //      the manifest — the exact question REQ-DEPLOY-002 exists to make answerable.
+  // Copying the declared list makes the manifest the actual install plan.
+  const { MODULE_FILES } = require('./deploy-manifest.js');
+  MODULE_FILES.forEach(rel => {
+    const src = path.join(srcDir, 'hooks', rel);
+    if (!fs.existsSync(src)) return;
+    const dest = path.join(destDir, rel);
+    fs.mkdirSync(path.dirname(dest), { recursive: true });
+    fs.copyFileSync(src, dest);
+    // Only executables need the bit; a .ps1/.cjs/.py helper does not, but setting
+    // it is harmless and keeps shell modules runnable the way they were before.
+    fs.chmodSync(dest, 0o755);
+  });
 }
 
 function copyAdapters(srcDir, destDir) {
