@@ -20,12 +20,14 @@
  *
  *        Two data hazards drive the rest of the design:
  *
- *        - The producer artifact numbers its gates `gate9_build_integrity` and
- *          `gate10_sast`, but the CLI calls Build Integrity Gate 10 and SAST
- *          Gate 9 -- the two are SWAPPED. Rendering the artifact naively shows
- *          the user the wrong gate name, which is worse than showing nothing.
- *          The mapping is therefore keyed on the artifact's own taxonomy and
- *          pinned by a test.
+ *        - The artifact emits `gate9_build_integrity` and `gate10_sast`. An
+ *          earlier version of this comment claimed the CLI numbered those the
+ *          other way round and that the two were SWAPPED. That was false: the
+ *          registry, gate-runner.js and the artifact all say 9=Build Integrity,
+ *          10=SAST. gate-coverage alone disagreed, via a swap table written for
+ *          an inversion that never existed (#738). The table is deleted; the
+ *          table and report keys are now DERIVED from githooks/gate-registry.sh
+ *          so a fresh copy of the mapping cannot reappear here.
  *
  *        - `quality-status/<branch>.json` records the commit it was generated
  *          from. Rendering it for a different HEAD silently presents stale
@@ -81,17 +83,28 @@ describe('gate coverage — four states, never a false green (#636)', () => {
     expect(version.reason).toMatch(/hook|git commit|not run/i);
   });
 
-  it('AC-636-02: the artifact gate-number swap does not mislabel the gates', () => {
-    // The producer says gate9_* = Build Integrity; the CLI says Gate 10 is Build
-    // Integrity. Rendering the artifact's own key would show SAST as Gate 10.
+  it('AC-636-02: gate 9 is Build Integrity and gate 10 is SAST, matching the artifact keys', () => {
+    // This assertion replaces an earlier one that pinned 9=SAST / 10=Build
+    // Integrity and called it "the CLI's numbering, not the artifact's". That
+    // claim was false: githooks/pre-commit emits `gate9_build_integrity` and
+    // `gate10_sast`, exactly like gate-registry.sh and gate-runner.js. Only
+    // gate-coverage disagreed, via a swap table asserting the producer numbered
+    // them "the other way round" (#738).
+    //
+    // The old assertion is DELETED rather than inverted in place: an inverted
+    // assertion would still be a hand-written number->name mapping — a second
+    // copy of the fact, which is the defect class itself. The expectation now
+    // comes from the registry through the derived table, and
+    // scripts/__tests__/gate-identity-cross-surface.test.cjs compares every
+    // surface so a fresh copy fails a test instead of misleading a reader.
     const rows = buildCoverageRows(artifact(), { headCommit: 'a0bceb9c0000000000000000000000000000000' });
     const build = rows.find((r) => r.name === 'Build Integrity');
     const sast = rows.find((r) => r.name === 'SAST Security');
     expect(build, 'Build Integrity row must exist').toBeDefined();
     expect(sast, 'SAST row must exist').toBeDefined();
-    // Both rows exist and carry the CLI's numbering, not the artifact's.
-    expect(build.gate).toBe(10);
-    expect(sast.gate).toBe(9);
+    // Evidence: the real artifact keys (hooked at pre-commit:6158/6163).
+    expect(build.gate).toBe(9);
+    expect(sast.gate).toBe(10);
   });
 
   it('AC-636-03: a stale artifact is marked STALE instead of presented as current', () => {
@@ -133,5 +146,59 @@ describe('gate coverage — four states, never a false green (#636)', () => {
     for (const row of rows) {
       expect(row.evidence, `Gate ${row.gate} (${row.name}) has no evidence pointer`).toBeTruthy();
     }
+  });
+});
+
+describe('REQ-GATEID-007 — artifact selection is deterministic or fails', () => {
+  const fs = require('node:fs');
+  const os = require('node:os');
+  const pathMod = require('node:path');
+  const { readQualityStatus } = require('../gate-coverage.js');
+
+  function makeRepo(artifacts) {
+    const root = fs.mkdtempSync(pathMod.join(os.tmpdir(), 'xp-gate-coverage-'));
+    const dir = pathMod.join(root, '.xp-gate', 'quality-status');
+    fs.mkdirSync(dir, { recursive: true });
+    for (const [name, body] of Object.entries(artifacts)) {
+      fs.writeFileSync(pathMod.join(dir, `${name}.json`), JSON.stringify(body));
+    }
+    return root;
+  }
+
+  it('AC-GATEID-007-01/04: several artifacts refuse to pick by directory order', () => {
+    // This is the second cause of the wrong output this sprint fixes: bare
+    // `xp-gate gate-coverage` used to read whichever file readdirSync returned
+    // first -- here `land-pr438.json` (commit 33672f6d) rather than the branch's
+    // own `main.json`. Reading the wrong object beats reading a stale one for
+    // danger, and the `stale: true` notice masked it.
+    const root = makeRepo({ 'cam-a': { commit: 'aaa' }, 'cam-b': { commit: 'bbb' } });
+    const status = readQualityStatus(root);
+    expect(status.artifact).toBeNull();
+    expect(status.error).toBeTruthy();
+    // The migration path must be discoverable from the message itself.
+    expect(status.error).toMatch(/--branch/);
+    expect(status.candidates.sort()).toEqual(['cam-a', 'cam-b']);
+    // Every candidate must be named, not merely "there are several".
+    expect(status.error).toMatch(/cam-a/);
+    expect(status.error).toMatch(/cam-b/);
+  });
+
+  it('AC-GATEID-007-02: a single artifact still works', () => {
+    const root = makeRepo({ only: { commit: 'ccc', gates: {} } });
+    const status = readQualityStatus(root);
+    expect(status.error).toBeUndefined();
+    expect(status.artifact.commit).toBe('ccc');
+  });
+
+  it('AC-GATEID-007-03: an explicit --branch that does not exist errors instead of falling back', () => {
+    const root = makeRepo({ other: { commit: 'ddd', gates: {} } });
+    const status = readQualityStatus(root, 'missing');
+    expect(status.artifact).toBeNull();
+    expect(status.error).toMatch(/missing/);
+  });
+
+  it('AC-GATEID-007-03: an explicit --branch reads exactly that artifact', () => {
+    const root = makeRepo({ 'cam-a': { commit: 'aaa' }, 'cam-b': { commit: 'bbb' } });
+    expect(readQualityStatus(root, 'cam-b').artifact.commit).toBe('bbb');
   });
 });
