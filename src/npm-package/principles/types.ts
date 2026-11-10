@@ -32,6 +32,29 @@ export interface Violation {
   severity: Severity;
 }
 
+/**
+ * Duplication measured for one file.
+ *
+ * `blocks` exists so a caller can explain the percentage rather than only assert
+ * it; the rule reports the number, the CLI can point at the lines.
+ */
+export interface DuplicationReport {
+  /** Share of the file's significant lines that repeat elsewhere in the file. */
+  percentage: number;
+  /** Each repeated region, longest first. */
+  blocks: DuplicationBlock[];
+}
+
+export interface DuplicationBlock {
+  /** 1-based inclusive line range of the first occurrence. */
+  startLine: number;
+  endLine: number;
+  /** How many further occurrences of this block exist in the same file. */
+  occurrences: number;
+  /** Normalised text shared by the occurrences, for human diagnosis. */
+  snippet: string;
+}
+
 export interface Adapter {
   detectLanguage: () => string;
   parseAST: () => unknown;
@@ -39,4 +62,20 @@ export interface Adapter {
   extractClasses: () => unknown[];
   extractExports: () => unknown[];
   countLines: () => number;
+  /**
+   * Measure intra-file duplication.
+   *
+   * REQUIRED, deliberately. The first version of this member was optional, and
+   * that re-created the very defect it was added to fix: an optional member plus
+   * a `undefined`-means-no-violation branch is still "a rule configured
+   * `enabled: true` that silently never fires" — the failure just moved from
+   * "the field was never declared" to "the adapter forgot to implement it".
+   * A silent capability gap is the same lie as a silent field gap.
+   *
+   * Every in-repo adapter extends `BaseAdapter`, which implements this, so
+   * requiring it costs nothing here. A third-party adapter written against the
+   * old interface gets a compile error — which is the point: it must decide,
+   * not default into silence.
+   */
+  getDuplication: () => DuplicationReport;
 }

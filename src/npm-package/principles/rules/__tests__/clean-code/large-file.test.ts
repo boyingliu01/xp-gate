@@ -8,7 +8,8 @@ const mockAdapter = {
   extractFunctions: () => [],
   extractClasses: () => [],
   extractExports: () => [],
-  countLines: (_fileName: string) => 10 // Default to small file
+  countLines: (_fileName: string) => 10, // Default to small file
+  getDuplication: () => ({ percentage: 0, blocks: [] })
 };
 
 describe('largeFileRule', () => {

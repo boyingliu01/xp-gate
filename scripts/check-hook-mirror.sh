@@ -17,7 +17,10 @@ fail() {
   exit 1
 }
 
-HOOK_MIRROR_FILES="adapter-common.sh hook-module-resolution.sh gate-3.sh gate-4.sh gate-7.sh gate-8.sh gate-9.sh gate-10.sh gate-12-file-hygiene.sh gate-13-compiler-strictness.sh gate-6-layers.sh gate-registry.sh post-merge post-commit pre-commit pre-push sprint-gate.sh lib/layer-baseline.cjs lib/coverage-total.sh lib/gate-5c-alignment.sh lib/toolchain-path.sh lib/native-path.sh lib/python-test-selection.sh lib/java-test-selection.sh lib/python-incremental-typecheck.sh lib/now-ms.sh lib/audit-sanitize.sh lib/jscpd-run.sh lib/sprint-gate-report.sh lib/test-failure.sh lib/assertion-quality.sh lib/typecheck.sh lib/diff-coverage.sh lib/ccn-ratchet.sh lib/docs-only.sh lib/validate-code-walkthrough.cjs lib/prepush-score.py lib/Measure-PowerShellComplexity.ps1"
+# install.sh is repo-side tooling rather than a published hook, but Gate 12b
+# (pre-commit) requires a package mirror for every githooks/* file a diff
+# touches, so syncHooks() now copies it and this list must expect it (REQ-DEPLOY-001).
+HOOK_MIRROR_FILES="adapter-common.sh hook-module-resolution.sh install.sh deploy-manifest.sh gate-3.sh gate-4.sh gate-7.sh gate-8.sh gate-9.sh gate-10.sh gate-12-file-hygiene.sh gate-13-compiler-strictness.sh gate-6-layers.sh gate-registry.sh post-merge post-commit pre-commit pre-push sprint-gate.sh lib/layer-baseline.cjs lib/coverage-total.sh lib/gate-5c-alignment.sh lib/toolchain-path.sh lib/native-path.sh lib/python-test-selection.sh lib/java-test-selection.sh lib/python-incremental-typecheck.sh lib/now-ms.sh lib/audit-sanitize.sh lib/jscpd-run.sh lib/sprint-gate-report.sh lib/test-failure.sh lib/assertion-quality.sh lib/typecheck.sh lib/diff-coverage.sh lib/ccn-ratchet.sh lib/docs-only.sh lib/validate-code-walkthrough.cjs lib/prepush-score.py lib/Measure-PowerShellComplexity.ps1"
 
 # Root-level shell copies (githooks/<f> -> src/npm-package/<f>). Same set as
 # the hooks/ copies minus hook-only entry points (post-merge/post-commit/
