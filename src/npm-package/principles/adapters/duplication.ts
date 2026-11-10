@@ -122,6 +122,13 @@ export function measureDuplication(content: string): DuplicationReport {
   }
 
   const blocks = buildBlocks(lines, duplicated);
+  // TODO(REQ-PRINCIPLES-DUP): `occurrences` is only meaningful for blocks[0].
+  // Every other block keeps the builder's default of 1, and the count below is
+  // the file-wide repeat total, not a per-block count. Harmless today because
+  // the rule reads only `percentage` and no CLI surfaces blocks -- but a future
+  // consumer would read wrong data silently, so this is a trap, not a feature.
+  // Correct fix is to count occurrences per fingerprint group inside
+  // buildBlocks (code-walkthrough R2, A4/F5).
   if (blocks.length > 0) blocks[0].occurrences = repeatCount + 1;
   return { percentage: (duplicated.size / total) * 100, blocks };
 }

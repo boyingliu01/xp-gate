@@ -2,18 +2,28 @@ import { Rule, Violation, Severity, DuplicationReport } from '../../types';
 import { getActiveConfig } from '../../config';
 
 /**
- * Resolve the duplication percentage to judge, in priority order:
+ * Resolve the duplication percentage to judge.
  *
- *  1. `duplicationPercentage` supplied by the caller — a caller that measured
- *     duplication elsewhere (a token-level clone detector, a cached report) must
- *     not be silently overruled.
- *  2. `getDuplication()` on the adapter — the production path. Before this
- *     existed nothing supplied (1) either, so the rule never fired at all
- *     (REQ-PRINCIPLES-DUP).
+ * `getDuplication()` on the adapter is the supported source. `duplicationPercentage`
+ * is a DEPRECATED compatibility shim, kept only so an integrator that already
+ * measures duplication elsewhere (a token-level clone detector, a cached report)
+ * is not broken by this rebuild.
  *
- * If neither is available the caller passes `duplicationUnavailable` back to
- * us so the rule can say so out loud; silently judging nothing is the defect
- * this rule was rebuilt to remove, not an acceptable fallback.
+ * Precedence: explicit `duplicationPercentage` wins, then `getDuplication()`.
+ * The explicit field wins because it is a deliberate caller override -- a value
+ * computed out-of-band must not be silently overruled by the adapter's own
+ * cheaper estimate.
+ *
+ * DEPRECATION (code-walkthrough R2, A1/F2/F-3): callers should move to
+ * `Adapter.getDuplication()`. The shim is the one remaining path that can still
+ * satisfy the rule without the typed contract -- it is read structurally, so a
+ * third-party adapter need not implement the REQUIRED interface member. That
+ * gap is deliberate and bounded: the shim is being retired, not extended. When
+ * it is removed, every consumer must implement `getDuplication`.
+ *
+ * If neither is available the result says so explicitly; the caller turns that
+ * into a visible diagnostic. Silently judging nothing is the defect this rule
+ * was rebuilt to remove, not an acceptable fallback.
  */
 function resolveDuplicationPercentage(
   adapter: unknown,
@@ -54,7 +64,7 @@ export const codeDuplicationRule: Rule = {
     const resolved = resolveDuplicationPercentage(adapter);
 
     // A capability gap is reported, never swallowed. Returning [] here is
-    // exactly how this rule spent its whole life looking enabled while fireing
+    // exactly how this rule spent its whole life looking enabled while firing
     // nothing (REQ-PRINCIPLES-DUP): silence and "measured clean" were
     // indistinguishable. `info`, not `warning`, because a third-party adapter
     // can trigger it and it must not block a commit — but it IS visible, and
