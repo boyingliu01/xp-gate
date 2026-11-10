@@ -250,12 +250,19 @@ function syncHooks() {
     fs.copyFileSync(adapterCommonSrc, path.join(PKG_ROOT, 'adapter-common.sh'));
   }
 
-  // #505: hook-module-resolution.sh is GENERATED, but it must still ship beside
-  // pre-commit — the hook aborts with FATAL when it is missing, by design.
-  const HOOK_FILES = ['pre-commit', 'pre-push', 'post-commit', 'post-merge', 'adapter-common.sh', 'hook-module-resolution.sh'];
+  // REQ-DEPLOY-001: the hook list is the deploy manifest's, not a local retyped
+  // array. Gate 12b requires a package mirror for every `githooks/*` file the
+  // diff touches, so this list and the manifest must not disagree — when they
+  // did, `sync --fix` (the command Gate 12b itself prints) could not produce
+  // the mirror and the commit was un-committable.
+  const manifest = require(path.join(__dirname, '..', 'lib', 'deploy-manifest.js'));
+  const HOOK_FILES = [...manifest.HOOK_FILES, manifest.ADAPTER_COMMON];
+  // Installers are repo-side tooling rather than published hooks, but Gate 12b
+  // treats every githooks/* file alike, so they get a mirror too.
+  const INSTALLER_FILES = ['install.sh'];
   let copied = 0;
 
-  for (const name of HOOK_FILES) {
+  for (const name of [...HOOK_FILES, ...INSTALLER_FILES]) {
     const srcPath = path.join(SRC, name);
     const dstPath = path.join(DST, name);
     if (fs.existsSync(srcPath)) {
@@ -283,6 +290,16 @@ function syncHooks() {
   if (gateFiles.length > 0) {
     console.error(`[sync] hooks/ gate scripts: ${gateFiles.join(', ')}`);
     copied += gateFiles.length;
+  }
+
+  // #505 先例（hook-module-resolution.sh）：生成的 shell 投影 deploy-manifest.sh
+  // 本身也必须镜像到包内（install.sh source 它，Gate 12b parity 强制）。投影
+  // 非 hook/gate 清单成员，故显式同步；漏同步由 Gate 12b 镜像 parity 拦截
+  // （本会话实证：投影首次落地时 Gate 12b BLOCK 了提交）。
+  const projectionSrc = path.join(SRC, 'deploy-manifest.sh');
+  if (fs.existsSync(projectionSrc)) {
+    fs.copyFileSync(projectionSrc, path.join(DST, 'deploy-manifest.sh'));
+    copied += 1;
   }
 
   console.error(`[sync] hooks/ (${copied} entries)`);
@@ -565,5 +582,5 @@ if (require.main === module) {
   // Requiring this script must not mutate the work tree: a test that only wants
   // checkDocsDrift/checkAdapterDrift used to trigger a full mirror sync at
   // require-time, which vitest-worktree-guard rightly reported as pollution.
-  module.exports = { checkDocsDrift, checkAdapterDrift, checkPrePushDrift, checkPreCommitDrift };
+  module.exports = { checkDocsDrift, checkAdapterDrift, checkPrePushDrift, checkPreCommitDrift, syncHooks };
 }

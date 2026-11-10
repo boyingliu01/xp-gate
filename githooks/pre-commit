@@ -5487,10 +5487,65 @@ if [ -n "$MIRROR_STAGED" ] && printf '%s
       # the same failure as a filter that accepts a file no adapter claims:
       # it looks like enforcement. exit is the contract every other blocking
       # gate here uses (see Gate 13: `exit "$_g13_worst"`).
-      GATE_12_STATUS=WARN
+      #
+      # No GATE_12_STATUS assignment here: `exit 1` runs immediately after, so
+      # the journal/summary writes at the end of the hook never execute and the
+      # assignment would be dead -- the same "verdict nobody consumes" defect
+      # one line up. Dropped rather than kept as a misleading WARN label
+      # (code-walkthrough R2, A2/F1).
       exit 1
     else
       echo "✅ PASSED - Gate 12b: mirror parity (touched files)"
+    fi
+  fi
+
+  # ---------------------------------------------------------------------------
+  # Gate 12b (second half): deploy-manifest projection freshness (REQ-DEPLOY-001).
+  #
+  # `src/npm-package/lib/deploy-manifest.js` is the single source of truth and
+  # `githooks/deploy-manifest.sh` is a GENERATED projection of it (bash cannot
+  # require() JS, so the manifest is emitted as shell arrays rather than typed a
+  # second time). A generated projection whose generator is never run rots back
+  # into the hand-copied lists this whole change set removed -- the 11 lists
+  # that had already drifted apart before #789.
+  #
+  # The check lives HERE, in the gate that already owns "two files that must
+  # agree", rather than in a test: a test only runs when someone runs it, and
+  # the drift appears at the moment the source is edited, which is a commit.
+  #
+  # Only run when the source or the projection is in the change set. Unrelated
+  # commits must not pay for a node spawn.
+  # ---------------------------------------------------------------------------
+  if printf '%s\n' "$CHANGED_FILES" | grep -qE '^(src/npm-package/lib/deploy-manifest\.js|githooks/deploy-manifest\.sh|src/npm-package/hooks/deploy-manifest\.sh|scripts/generate-deploy-manifest\.cjs)$'; then
+    if [ ! -f "$PROJECT_ROOT/scripts/generate-deploy-manifest.cjs" ]; then
+      # The generator is gone. The manifest/projection pair is in this change
+      # set, so the projection is demonstrably in play and cannot be verified.
+      echo "❌ BLOCKED - Gate 12b: deploy-manifest projection cannot be verified"
+      echo "   scripts/generate-deploy-manifest.cjs is missing but the manifest or"
+      echo "   its projection changed in this commit."
+      exit 1
+    elif ! command -v node >/dev/null 2>&1; then
+      # node missing while the projection is being edited: degrading this to a
+      # notice would hand the silent-pass outcome to exactly the contributor who
+      # cannot run the generator -- and hand-editing the projection is the drift
+      # this check exists to catch (code-walkthrough R2, F-1).
+      echo "❌ BLOCKED - Gate 12b: node is required to verify the deploy-manifest projection"
+      echo "   The manifest or its projection changed but node is not on PATH."
+      echo "   Install node, or regenerate on a machine that has it:"
+      echo "   node scripts/generate-deploy-manifest.cjs && git add githooks/deploy-manifest.sh"
+      exit 1
+    else
+      echo "Checking deploy-manifest projection freshness..."
+      if _dm_out=$(cd "$PROJECT_ROOT" && node scripts/generate-deploy-manifest.cjs --check 2>&1); then
+        echo "✅ PASSED - Gate 12b: deploy-manifest projection is current"
+      else
+        echo "❌ BLOCKED - Gate 12b: deploy-manifest.sh is STALE vs deploy-manifest.js"
+        printf '%s\n' "$_dm_out" | sed 's/^/   /'
+        # As above: no GATE_12_STATUS assignment -- `exit 1` means the summary
+        # writes never run, so the assignment would be dead (A2/F1).
+        echo "   Fix: node scripts/generate-deploy-manifest.cjs && git add githooks/deploy-manifest.sh"
+        exit 1
+      fi
     fi
   fi
 fi

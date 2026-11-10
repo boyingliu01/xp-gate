@@ -1,5 +1,55 @@
-import { Rule, Violation, Severity } from '../../types';
+import { Rule, Violation, Severity, DuplicationReport } from '../../types';
 import { getActiveConfig } from '../../config';
+
+/**
+ * Resolve the duplication percentage to judge.
+ *
+ * `getDuplication()` on the adapter is the supported source. `duplicationPercentage`
+ * is a DEPRECATED compatibility shim, kept only so an integrator that already
+ * measures duplication elsewhere (a token-level clone detector, a cached report)
+ * is not broken by this rebuild.
+ *
+ * Precedence: explicit `duplicationPercentage` wins, then `getDuplication()`.
+ * The explicit field wins because it is a deliberate caller override -- a value
+ * computed out-of-band must not be silently overruled by the adapter's own
+ * cheaper estimate.
+ *
+ * DEPRECATION (code-walkthrough R2, A1/F2/F-3): callers should move to
+ * `Adapter.getDuplication()`. The shim is the one remaining path that can still
+ * satisfy the rule without the typed contract -- it is read structurally, so a
+ * third-party adapter need not implement the REQUIRED interface member. That
+ * gap is deliberate and bounded: the shim is being retired, not extended. When
+ * it is removed, every consumer must implement `getDuplication`.
+ *
+ * If neither is available the result says so explicitly; the caller turns that
+ * into a visible diagnostic. Silently judging nothing is the defect this rule
+ * was rebuilt to remove, not an acceptable fallback.
+ */
+function resolveDuplicationPercentage(
+  adapter: unknown,
+): { percentage: number } | { unavailable: string } {
+  const supplier = adapter as {
+    duplicationPercentage?: number;
+    getDuplication?: () => DuplicationReport;
+  };
+
+  if (typeof supplier.duplicationPercentage === 'number') {
+    return { percentage: supplier.duplicationPercentage };
+  }
+  if (typeof supplier.getDuplication === 'function') {
+    return { percentage: supplier.getDuplication().percentage };
+  }
+  return {
+    unavailable:
+      'adapter supplies neither duplicationPercentage nor getDuplication()',
+  };
+}
+
+/** Format a percentage so a small non-zero value never prints as "0%". */
+function formatPercentage(value: number): string {
+  if (value > 0 && value < 1) return value.toFixed(2);
+  return String(Math.round(value * 10) / 10);
+}
 
 export const codeDuplicationRule: Rule = {
   id: 'clean-code.code-duplication',
@@ -10,20 +60,36 @@ export const codeDuplicationRule: Rule = {
     const violations: Violation[] = [];
     // Read the ACTIVE config per invocation; a module-load snapshot was #457.
     const settings = getActiveConfig().rules['clean-code']['code-duplication'];
-    
-    const typedAdapter = adapter as { duplicationPercentage?: number };
-    const duplicationPercentage = typedAdapter.duplicationPercentage;
-    
-    if (duplicationPercentage && duplicationPercentage > (settings.threshold ?? 0)) {
+
+    const resolved = resolveDuplicationPercentage(adapter);
+
+    // A capability gap is reported, never swallowed. Returning [] here is
+    // exactly how this rule spent its whole life looking enabled while firing
+    // nothing (REQ-PRINCIPLES-DUP): silence and "measured clean" were
+    // indistinguishable. `info`, not `warning`, because a third-party adapter
+    // can trigger it and it must not block a commit — but it IS visible, and
+    // `xp-gate gate-coverage` can therefore surface it.
+    if ('unavailable' in resolved) {
       violations.push({
         file,
         line: 1,
         ruleId: 'clean-code.code-duplication',
-        message: `Code duplication detected: ${duplicationPercentage}% (threshold: ${settings.threshold}%). Consider refactoring duplicated code.`,
+        message: `Duplication not measured: ${resolved.unavailable}. The rule cannot judge this file, so it is NOT reporting it clean — implement getDuplication() on the adapter.`,
+        severity: 'info',
+      });
+      return violations;
+    }
+
+    if (resolved.percentage > (settings.threshold ?? 0)) {
+      violations.push({
+        file,
+        line: 1,
+        ruleId: 'clean-code.code-duplication',
+        message: `Code duplication detected: ${formatPercentage(resolved.percentage)}% (threshold: ${settings.threshold}%). Consider refactoring duplicated code.`,
         severity: (settings.severity as Severity) ?? 'warning'
       });
     }
-    
+
     return violations;
   }
 };

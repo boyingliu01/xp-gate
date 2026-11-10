@@ -3,6 +3,25 @@ set -e
 
 HOOKS_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
+# The deploy manifest is a bash array projection generated from
+# src/npm-package/lib/deploy-manifest.js (REQ-DEPLOY-001). Arrays only exist in
+# bash: under POSIX sh they expand to nothing, so the installer would copy zero
+# files and still exit 0. Fail closed before doing anything else.
+if [ -z "${BASH_VERSION:-}" ]; then
+  echo "Error: githooks/install.sh must run under bash (the deployment manifest is a bash array)." >&2
+  echo "       Try: bash githooks/install.sh" >&2
+  exit 1
+fi
+
+DEPLOY_MANIFEST="$HOOKS_DIR/deploy-manifest.sh"
+if [ ! -f "$DEPLOY_MANIFEST" ]; then
+  echo "Error: missing $DEPLOY_MANIFEST" >&2
+  echo "       Regenerate it with: node scripts/generate-deploy-manifest.cjs" >&2
+  exit 1
+fi
+# shellcheck source=/dev/null
+. "$DEPLOY_MANIFEST"
+
 if ! git rev-parse --git-dir &>/dev/null; then
   echo "Error: Not a git repository. Must be run from within a project."
   exit 1
@@ -16,13 +35,10 @@ TARGET_HOOKS="$GIT_DIR/hooks"
 mkdir -p "$TARGET_HOOKS"
 TARGET_GITHOOKS="$PROJECT_ROOT/githooks"
 
-HOOKS_LIST="pre-commit pre-push post-merge"
-GATE_SCRIPTS="gate-3.sh gate-4.sh gate-7.sh gate-8.sh gate-9.sh gate-10.sh gate-13-compiler-strictness.sh"
-
 echo "Installing OpenCode quality gates..."
 echo ""
 
-for hook in $HOOKS_LIST; do
+for hook in "${DEPLOY_HOOK_FILES[@]}"; do
   src="$HOOKS_DIR/$hook"
   if [ -f "$src" ]; then
     cp "$src" "$TARGET_HOOKS/$hook"
@@ -50,8 +66,10 @@ if [ ! -f "$HOOKS_DIR/hook-module-resolution.sh" ]; then
   fi
 fi
 
-# Install gate-*.sh scripts and the generated resolution order pre-commit needs.
-for gate in $GATE_SCRIPTS hook-module-resolution.sh; do
+# Install the gate scripts from the manifest. The old hand-written list named 7
+# of 11 and silently omitted gate-6-layers.sh, gate-12-file-hygiene.sh and
+# gate-registry.sh — gates that then never ran in an installed repo.
+for gate in "${DEPLOY_GATE_FILES[@]}" hook-module-resolution.sh; do
   src="$HOOKS_DIR/$gate"
   if [ -f "$src" ]; then
     cp "$src" "$TARGET_HOOKS/$gate"

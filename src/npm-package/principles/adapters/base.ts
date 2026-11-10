@@ -1,6 +1,8 @@
 import { readFileSync } from 'fs';
 import { extname } from 'path';
-import { Adapter } from '../types';
+import { Adapter, DuplicationReport } from '../types';
+import { measureDuplication } from './duplication';
+
 
 export abstract class BaseAdapter implements Adapter {
   protected readonly filePath: string;
@@ -57,6 +59,17 @@ export abstract class BaseAdapter implements Adapter {
 
   countLines(): number {
     return this.fileContent.split('\n').length;
+  }
+
+  /**
+   * Measure intra-file duplication.
+   *
+   * Delegates to ./duplication so the algorithm stays testable on its own and
+   * BaseAdapter does not grow into a subsystem. See that module for why the
+   * measurement is line-level and which lines are excluded.
+   */
+  getDuplication(): DuplicationReport {
+    return measureDuplication(this.fileContent);
   }
 
   protected readFileContent(filePath: string): string {

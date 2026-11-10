@@ -67,7 +67,10 @@ function copyHooks(srcDir, destDir) {
   // hook-module-resolution.sh (#655/#631) is loaded by pre-commit BEFORE any tier
   // decision and fails closed — omitting it made every commit FATAL on a fresh
   // install. It is generated, but it must still ship beside the hooks.
-  const hookFiles = ['pre-commit', 'pre-push', 'post-commit', 'post-merge', 'hook-module-resolution.sh'];
+  // REQ-DEPLOY-001: the list comes from the single deploy-manifest module. A
+  // hand-kept copy here was one of four divergent ones (#789 root cause ②), and
+  // it is exactly how post-commit silently stopped being installed before.
+  const hookFiles = require('./deploy-manifest.js').HOOK_FILES;
   hookFiles.forEach(hook => {
     const src = path.join(srcDir, 'hooks', hook);
     const dest = path.join(destDir, hook);
@@ -87,9 +90,10 @@ function copyHooks(srcDir, destDir) {
 
 function copyAdapters(srcDir, destDir) {
   const adaptersDir = path.join(srcDir, 'adapters');
-  const adapterCommon = path.join(srcDir, 'adapter-common.sh');
+  const { ADAPTER_COMMON } = require('./deploy-manifest.js');
+  const adapterCommon = path.join(srcDir, ADAPTER_COMMON);
   if (fs.existsSync(adapterCommon)) {
-    fs.copyFileSync(adapterCommon, path.join(destDir, 'adapter-common.sh'));
+    fs.copyFileSync(adapterCommon, path.join(destDir, ADAPTER_COMMON));
   }
   // Shared shell helpers the fragments `source` at runtime (ccn-ratchet.sh and
   // friends). Without this, gate-3.sh resolves $GATE_DIR/lib/ccn-ratchet.sh to a
