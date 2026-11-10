@@ -85,8 +85,11 @@ interface StubResult {
 }
 
 /** Hook output can be large (the whole hook log); give the buffer room. */
+/** The repo's checked-in files are CRLF on Windows; generated fixtures match it. */
+const NEWLINE = '\r\n';
 const MEBIBYTE = 1024 * 1024;
-const MAX_BUFFER_BYTES = 32 * MEBIBYTE;
+const MAX_BUFFER_MEBIBYTES = 32;
+const MAX_BUFFER_BYTES = MAX_BUFFER_MEBIBYTES * MEBIBYTE;
 
 /**
  * End-to-end budget for one real hook run (#504).
@@ -175,7 +178,69 @@ function writeStubNpx(bin: string, sandbox: string, output: string, exit: number
  * coverage; without it vitest aborts with "MISSING DEPENDENCY", a *different*
  * non-zero exit that would mask the guard under test.
  */
-function createProjectFixture(sandbox: string): string {
+/**
+ * Plant a project-local `vitest` that replays `output` and exits with `exit`.
+ *
+ * Both artefacts exist in a real `npm install` and both are needed:
+ *   - `node_modules/.bin/vitest` is the wrapper the adapter executes;
+ *   - `node_modules/vitest/vitest.mjs` is the entry file the hook's Gate 5 probe
+ *     resolves before it will run the suite WITH coverage.
+ *
+ * Planting only the `.bin` wrapper sends the probe to 127 and drops Gate 5 onto
+ * the adapter's no-coverage fallback -- a different branch, whose message shapes
+ * are not what these tests assert. Planting only a stub `npx` no longer works at
+ * all since #785: probes stopped going through npx, so Gate 5 correctly SKIPs and
+ * the anti-vacuity assertion would be reporting a real absence.
+ *
+ * `--version` must answer 0 regardless of `exit`: whether vitest is INSTALLED and
+ * what this run RETURNED are two different questions, and conflating them makes
+ * the probe report "not installed" for a fixture whose whole point is that it is.
+ */
+function plantLocalVitest(
+  project: string,
+  callsFile: string,
+  output: string,
+  exit: number
+): void {
+  try {
+  const localVitest = join(project, 'node_modules', '.bin', 'vitest');
+  mkdirSync(join(project, 'node_modules', '.bin'), { recursive: true });
+  writeFileSync(
+    localVitest,
+    [
+      '#!/bin/bash',
+      `echo "vitest $*" >> "${toBashPath(callsFile)}"`,
+      `cat <<'XPGATE_VITEST_OUT'`,
+      output,
+      'XPGATE_VITEST_OUT',
+      `exit ${exit}`,
+      '',
+    ].join(NEWLINE),
+    'utf8'
+  );
+  chmodSync(localVitest, 0o755);
+
+  const vitestEntry = join(project, 'node_modules', 'vitest', 'vitest.mjs');
+  mkdirSync(join(project, 'node_modules', 'vitest'), { recursive: true });
+  writeFileSync(
+    vitestEntry,
+    [
+      `import { appendFileSync } from 'node:fs';`,
+      `const args = process.argv.slice(2);`,
+      `appendFileSync(${JSON.stringify(toBashPath(callsFile))}, 'vitest ' + args.join(' ') + ${JSON.stringify(NEWLINE)});`,
+      `if (args.includes('--version')) { console.log('1.6.1'); process.exit(0); }`,
+      `process.stdout.write(${JSON.stringify(output)});`,
+      `process.exit(${exit});`,
+      '',
+    ].join(NEWLINE),
+    'utf8'
+  );
+  } catch (err) {
+    throw new Error(`Cannot plant the local vitest fixture under ${project}: ${String(err)}`);
+  }
+}
+
+function createProjectFixture(sandbox: string, callsFile: string, output: string, exit: number): string {
   const project = join(sandbox, 'project');
   const coveragePkg = join(project, 'node_modules', '@vitest', 'coverage-v8');
   const source = 'export const x = 1;\n';
@@ -188,6 +253,8 @@ function createProjectFixture(sandbox: string): string {
     );
     writeFileSync(join(project, 'src', 'index.ts'), source, 'utf8');
     writeFileSync(join(project, 'src', '__tests__', 'sample.test.ts'), source, 'utf8');
+
+    plantLocalVitest(project, callsFile, output, exit);
 
     mkdirSync(coveragePkg, { recursive: true });
     writeFileSync(
@@ -248,7 +315,7 @@ function runHookWithVitestOutput(vitestOutput: string, vitestExit: number): Stub
 
   const bin = join(sandbox, 'bin');
   const callsFile = writeStubNpx(bin, sandbox, vitestOutput, vitestExit);
-  const project = createProjectFixture(sandbox);
+  const project = createProjectFixture(sandbox, callsFile, vitestOutput, vitestExit);
 
   const script = [
     `cd "${toBashPath(project)}"`,

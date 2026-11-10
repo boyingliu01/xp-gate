@@ -253,12 +253,17 @@ resolve_tool_path() {
     return 0
   fi
 
-  # npx knows about the project's own node_modules.
-  if tool_is_available npx; then
-    if npx --no-install "$_tool" --version >/dev/null 2>&1; then
-      printf '%s\n' "$_tool"
-      return 0
-    fi
+  # Project-local node_modules/.bin.
+  #
+  # This replaced an `npx --no-install <tool> --version` probe. `--no-install`
+  # does stop the package being installed, but the probe still ASKS the registry
+  # every time (measured: 697 ms cache miss, 105 ms revalidating on a hit) and
+  # can even answer yes for a tool the project never depended on once the npx
+  # cache has been populated. Resolving the binary's real path is both cheaper
+  # and truthful. See docs/incidents/2026-11-09-command-could-not-run-*.
+  if [ -x "$_base/node_modules/.bin/$_tool" ]; then
+    printf '%s\n' "$_base/node_modules/.bin/$_tool"
+    return 0
   fi
 
   # Subproject node_modules/.bin, shallow then one level deep. A monorepo's ui/ or
@@ -271,6 +276,45 @@ resolve_tool_path() {
     fi
   done
 
+  return 1
+}
+
+# Is the npx fallback explicitly enabled?
+#
+# Same convention as src/gates/common-process.ts (#21 / REQ-GATE-PROBE-SHORTCUT):
+# `npx <tool> --version` answers "is it installed?" by hitting the registry and,
+# when it is not, INSTALLING it -- so the probe changes the environment it was
+# asked about. It stays off unless the project opts in.
+probe_npx_enabled() {
+  case "${XP_GATE_NPX_PROBE:-}" in
+    1 | true | TRUE | yes | YES) return 0 ;;
+    *) return 1 ;;
+  esac
+}
+
+# Can Gate 6 run archlint? Local artefacts only, unless opted in.
+#
+# Gate 6 used to answer this with `npx @archlinter/cli --version`, the last
+# registry-consulting probe in the hooks. On a machine without archlint that
+# downloaded the package, printed a version, and let the gate run a tool the
+# project never depended on -- while every sibling branch above it checked a
+# local artefact. A missing archlint is BLOCK-with-hint here (Gate 6 is not
+# fail-open like the tool-missing SKIP path), so the honest answer matters.
+probe_archlint_available() {
+  local _root="${1:-.}"
+  if [ -f "$_root/node_modules/@archlinter/cli/bin/archlint.js" ] && command -v node >/dev/null 2>&1; then
+    return 0
+  fi
+  if [ -x "$_root/node_modules/.bin/archlint" ]; then
+    return 0
+  fi
+  if command -v archlint >/dev/null 2>&1; then
+    return 0
+  fi
+  if probe_npx_enabled && command -v npx >/dev/null 2>&1; then
+    (cd "$_root" 2>/dev/null && npx @archlinter/cli --version) >/dev/null 2>&1
+    return $?
+  fi
   return 1
 }
 

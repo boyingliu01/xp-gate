@@ -2,6 +2,48 @@
 
 # TypeScript adapter for quality gates
 
+# Print the path of a LOCALLY installed Node tool, or nothing.
+#
+# `npx <tool> --version` must never be used to answer "is this tool installed?".
+# When the package is absent, npx DOWNLOADS it from the registry and runs it, so
+# the probe succeeds no matter what the project actually depends on. Measured on
+# a repo with no vitest at all:
+#
+#   $ npx vitest --version
+#   vitest/5.1.0 win32-x64 node-v24.22.1     # rc=0
+#   $ ls node_modules/vitest
+#   (absent)
+#
+# The gate then ran a vitest that the project never declared, failed on a missing
+# @vitest/coverage-v8, and reported that as "tests failed". Answering a question
+# about the local environment must not install packages to do it -- the same rule
+# AGENTS.md states for XP_GATE_NPX_PROBE, which src/gates/common-process.ts
+# already honours on the TypeScript side.
+#
+# Only the project's own node_modules/.bin is consulted, which is what a real
+# install populates. Nothing outside the project can satisfy this check.
+_local_bin() {
+  local tool="$1"
+  if [ -x "node_modules/.bin/$tool" ]; then
+    printf '%s\n' "node_modules/.bin/$tool"
+    return 0
+  fi
+  return 1
+}
+
+# Run a locally installed Node tool with the given arguments.
+#
+# Uses the resolved binary directly rather than `npx <tool>`, for the same reason:
+# npx would fetch the tool when the local binary is missing, so a typo'd tool name
+# would silently test with a downloaded copy instead of failing.
+_run_local_tool() {
+  local tool="$1"
+  shift
+  local bin
+  bin=$(_local_bin "$tool") || return 127
+  run_without_git_context "$bin" "$@"
+}
+
 run_static_analysis() {
   # The type-check decision is shared with pre-commit's Gate 1 (#436): a project's
   # own checker (typecheck script, or GATE_TS_TYPECHECK_CMD) is used when declared,
@@ -84,63 +126,85 @@ run_lint() {
 }
 
 run_tests() {
-  if command -v npx >/dev/null 2>&1; then
-    echo "Running TypeScript tests..."
-    if run_without_git_context npx vitest --version >/dev/null 2>&1; then
-      run_without_git_context npx vitest run
-    elif run_without_git_context npx jest --version >/dev/null 2>&1; then
-      run_without_git_context npx jest --passWithNoTests
-    else
-      echo "No test runner available (vitest or jest required)"
-      return 1
-    fi
-    return $?
+  echo "Running TypeScript tests..."
+  if _local_bin vitest >/dev/null; then
+    _run_local_tool vitest run
+  elif _local_bin jest >/dev/null; then
+    _run_local_tool jest --passWithNoTests
   else
-    echo "npx not available, skipping TypeScript tests"
+    # SKIP, not BLOCK: no runner is installed, so no test was expected to run.
+    # Returning non-zero here is what turned "this project does not use
+    # vitest/jest" into "TESTS FAILED" for every downstream repo with .js files.
+    echo "⏭️  SKIP - No test runner installed locally (node_modules/.bin has no vitest or jest)"
+    echo "   Install the runner this project uses, or declare its test command."
     return 0
   fi
 }
 
 run_coverage() {
-  if command -v npx >/dev/null 2>&1; then
-    echo "Running TypeScript coverage..."
-    if run_without_git_context npx vitest --version >/dev/null 2>&1; then
-      run_without_git_context npx vitest run --coverage
-    elif run_without_git_context npx jest --version >/dev/null 2>&1; then
-      run_without_git_context npx jest --coverage
-    else
-      echo "No test runner available for coverage"
-      return 1
-    fi
-    return $?
+  echo "Running TypeScript coverage..."
+  local runner bin out_file rc
+  if _local_bin vitest >/dev/null; then
+    runner=vitest
+    bin=$(_local_bin vitest)
+  elif _local_bin jest >/dev/null; then
+    runner=jest
+    bin=$(_local_bin jest)
   else
-    echo "npx not available, skipping TypeScript coverage"
+    echo "⏭️  SKIP - No test runner installed locally (node_modules/.bin has no vitest or jest)"
     return 0
   fi
+
+  out_file=$(mktemp)
+  if [ "$runner" = "vitest" ]; then
+    run_without_git_context "$bin" run --coverage 2>&1 | tee "$out_file"
+  else
+    run_without_git_context "$bin" --coverage 2>&1 | tee "$out_file"
+  fi
+  rc=${PIPESTATUS[0]}
+
+  if [ "$rc" -ne 0 ]; then
+    # A runner that could not RUN is not a runner that found failing tests. The
+    # common real case is a missing optional peer such as
+    # `@vitest/coverage-v8`; reporting that as "tests failed" sends the reader
+    # looking for a broken test that does not exist.
+    if grep -qiE "MISSING DEPENDENCY|cannot find (dependency|module)" "$out_file"; then
+      echo "⏭️  SKIP - $runner could not run (missing dependency), not a test failure"
+      echo "   Install the missing package, or drop --coverage from this gate."
+      rm -f "$out_file"
+      return 0
+    fi
+    rm -f "$out_file"
+    return "$rc"
+  fi
+  rm -f "$out_file"
+  return 0
 }
 
 # ── Biome linting (if installed) ──
 
 run_biome_lint() {
-  # Only run if biome is available
-  if ! command -v npx >/dev/null 2>&1; then
-    return 0
-  fi
-  if ! npx biome --version >/dev/null 2>&1; then
-    return 0  # biome not installed → SKIP (same as other tools)
-  fi
+  # Detection must not go through npx: `npx biome --version` downloads biome from
+  # the registry when the project does not have it, so the probe would always say
+  # "installed" and then lint with a package the project never depended on.
+  local BIOME_BIN
+  BIOME_BIN=$(_local_bin biome) || return 0  # not installed → SKIP (same as other tools)
 
   echo "Running Biome linting..."
   local BIOME_EXIT=0
-  npx biome lint . 2>&1 || BIOME_EXIT=$?
+  run_without_git_context "$BIOME_BIN" lint . 2>&1 || BIOME_EXIT=$?
 
   # Check for known conflict: useLiteralKeys vs TypeScript TS4111
   # When biome reports useLiteralKeys on Record<string,unknown> usage,
   # it conflicts with TypeScript strict index-signature access (TS4111).
   # We only warn — we do NOT block — because both rules are correct in their domain.
-  if npx biome lint . 2>&1 | grep -q "useLiteralKeys"; then
+  if run_without_git_context "$BIOME_BIN" lint . 2>&1 | grep -q "useLiteralKeys"; then
     local TSC_CHECK=0
-    npx tsc --noEmit 2>&1 | grep -q "TS4111" || TSC_CHECK=$?
+    if [ -x "node_modules/.bin/tsc" ]; then
+      run_without_git_context node_modules/.bin/tsc --noEmit 2>&1 | grep -q "TS4111" || TSC_CHECK=$?
+    else
+      TSC_CHECK=1  # no local tsc → cannot confirm the conflict; stay quiet
+    fi
     if [ $TSC_CHECK -eq 0 ]; then
       echo ""
       echo "ℹ️  NOTE: Biome useLiteralKeys conflicts with TypeScript TS4111"
