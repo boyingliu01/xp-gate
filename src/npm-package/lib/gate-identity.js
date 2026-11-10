@@ -83,9 +83,21 @@ function discoverRegistryCopies(repoRoot) {
     for (const entry of entries) {
       const full = path.join(dir, entry.name);
       if (entry.isDirectory()) {
-        // `.git` is the only exclusion: mirror risk can live under
-        // node_modules too, so excluding it would hide a real disagreement.
-        if (entry.name === '.git') continue;
+        // Two exclusions, for two different reasons:
+        //
+        //  * `.git` holds no shipped copy; walking it only costs time.
+        //  * `.worktrees` holds OTHER CHECKOUTS of this same repository. Their
+        //    registry files are not copies of this checkout's declaration, they
+        //    are another branch's -- so counting them turns "is this checkout
+        //    consistent" into "are all branches identical", which fails during
+        //    any ordinary merge or feature branch and reports disagreement at
+        //    paths belonging to some other working tree. Found while merging
+        //    this very sprint: main discovered 6 copies, 3 of them the sprint
+        //    worktree's.
+        //
+        // node_modules is deliberately NOT excluded: a packaged copy there is a
+        // real mirror, and hiding it would suppress a real disagreement.
+        if (entry.name === '.git' || entry.name === '.worktrees') continue;
         walk(full);
         continue;
       }
