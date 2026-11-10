@@ -46,7 +46,13 @@ describe('REQ-RESOLVE-002 删除顶层死副本', () => {
       const found = [];
       const walk = (dir) => {
         for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
-          if (['node_modules', '.git', '.worktrees', 'dist', 'coverage'].includes(entry.name)) continue;
+          // `.stryker-tmp` holds Stryker's sandbox copies of the whole tree. They
+          // are byte-copies of files this test already checks at their real
+          // path, so scanning them turns "is there a SECOND declaration" into
+          // "how many sandboxes are lying around" — measured: a leftover run
+          // contributed 6 phantom hits and failed the assertion with no defect
+          // behind it. Same reason `dist`/`coverage` are excluded.
+          if (['node_modules', '.git', '.worktrees', 'dist', 'coverage', '.stryker-tmp'].includes(entry.name)) continue;
           const full = path.join(dir, entry.name);
           if (entry.isDirectory()) {
             walk(full);
