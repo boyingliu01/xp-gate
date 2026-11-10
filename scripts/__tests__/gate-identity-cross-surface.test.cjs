@@ -161,3 +161,4 @@ test('AC-GATEID-002-04/05: cross-surface checker is injectable and reports the i
   assert.ok(reportedNumbers.includes('9'), `violation must name gate 9, got ${JSON.stringify(violations)}`);
   assert.ok(reportedNumbers.includes('10'), `violation must name gate 10, got ${JSON.stringify(violations)}`);
 });
+
