@@ -24,7 +24,6 @@
 'use strict';
 
 const test = require('node:test');
-const assert = require('node:assert');
 const fs = require('node:fs');
 const path = require('node:path');
 
@@ -35,10 +34,20 @@ const REGISTRY_PATH = path.join(REPO_ROOT, 'githooks', 'gate-registry.sh');
 // second copy of the parsing rules is the same "copied fact" defect this file
 // exists to catch — it would agree with itself while disagreeing with reality.
 const identity = require(path.join(REPO_ROOT, 'src', 'npm-package', 'lib', 'gate-identity.js'));
+const assert = require('node:assert');
+// Works under BOTH runners, which is what the hooks need: Gate 5 collects
+// scripts/__tests__/*.cjs with vitest, while `node --test` is the local
+// one-command repro. vitest injects describe/it as globals; node:test does not,
+// so fall back to it only when the global is absent. A test file that runs under
+// one runner and reports "No test suite found" under the other is not a passing
+// test -- it is a skipped one wearing a green badge.
+const { test: nodeTest } = require('node:test');
+const it = typeof globalThis.it === 'function' ? globalThis.it : nodeTest;
+
 
 const registryRows = identity.parseRegistry(fs.readFileSync(REGISTRY_PATH, 'utf8'));
 
-test('AC-GATEID-002-01: registry parses to the gates the hooks actually run', () => {
+it('AC-GATEID-002-01: registry parses to the gates the hooks actually run', () => {
   assert.ok(registryRows.length >= 14, `expected at least 14 registry rows, got ${registryRows.length}`);
 
   const byNumber = new Map(registryRows.map((row) => [row.number, row.name]));
@@ -53,7 +62,7 @@ test('AC-GATEID-002-01: registry parses to the gates the hooks actually run', ()
   assert.strictEqual(new Set(names).size, names.length, 'duplicate gate names in registry');
 });
 
-test('AC-GATEID-002-02: every declared impl exists on disk', () => {
+it('AC-GATEID-002-02: every declared impl exists on disk', () => {
   const missing = [];
   for (const row of registryRows) {
     if (row.impl === 'inline') continue;
@@ -66,7 +75,7 @@ test('AC-GATEID-002-02: every declared impl exists on disk', () => {
   assert.deepStrictEqual(missing, [], `registry declares impls that do not exist: ${missing.join(', ')}`);
 });
 
-test('AC-GATEID-002-03 / AC-GATEID-001-01: gate-coverage no longer declares its own number->name table', () => {
+it('AC-GATEID-002-03 / AC-GATEID-001-01: gate-coverage no longer declares its own number->name table', () => {
   const coverageSource = fs.readFileSync(
     path.join(REPO_ROOT, 'src', 'npm-package', 'lib', 'gate-coverage.js'),
     'utf8',
@@ -88,7 +97,7 @@ test('AC-GATEID-002-03 / AC-GATEID-001-01: gate-coverage no longer declares its 
   );
 });
 
-test('AC-GATEID-001-05: no production code hardcodes a number->name gate mapping', () => {
+it('AC-GATEID-001-05: no production code hardcodes a number->name gate mapping', () => {
   // Scan roots are PRODUCTION code only. Test fixtures legitimately carry
   // synthetic gate numbers — that is how a bad input is constructed — so they
   // are exempt. The exemption does not re-open the revert loop: restoring the
@@ -126,7 +135,7 @@ test('AC-GATEID-001-05: no production code hardcodes a number->name gate mapping
   assert.deepStrictEqual(offenders, [], `handwritten gate number->name literals in production code: ${offenders.join(', ')}`);
 });
 
-test('AC-GATEID-002-04/05: cross-surface checker is injectable and reports the inverted row', () => {
+it('AC-GATEID-002-04/05: cross-surface checker is injectable and reports the inverted row', () => {
   // The checker is required to be a PURE function so a corrupt row can be
   // injected. Modifying the real registry inside a test would pollute the
   // worktree and could not run under parallel CI.
@@ -175,7 +184,7 @@ test('AC-GATEID-002-04/05: cross-surface checker is injectable and reports the i
 // a change of exclusion mechanism: no discovered copy may live under .worktrees,
 // and the count must equal the number the three packaged locations declare.
 // ---------------------------------------------------------------------------
-test('AC-GATEID-002-07: discovery never counts another worktree\'s copy as this checkout\'s', () => {
+it('AC-GATEID-002-07: discovery never counts another worktree\'s copy as this checkout\'s', () => {
   const copies = identity.discoverRegistryCopies(REPO_ROOT);
   const fromOtherWorktrees = copies.filter((copy) => {
     const relative = path.relative(REPO_ROOT, copy).split(path.sep);
@@ -212,7 +221,7 @@ test('AC-GATEID-002-07: discovery never counts another worktree\'s copy as this 
 // nothing, so its correction stops applying while the file still looks
 // consistent. Nothing about the file's shape would reveal it.
 // ---------------------------------------------------------------------------
-test('AC-GATEID-001-06: every report-key override names a gate the registry declares', () => {
+it('AC-GATEID-001-06: every report-key override names a gate the registry declares', () => {
   const registry = identity.loadRegistry();
   const rows = identity.parseRegistry(registry.text);
   const overrides = identity.parseReportKeyOverrides(registry.text);
@@ -261,7 +270,7 @@ test('AC-GATEID-001-06: every report-key override names a gate the registry decl
 // EMPTY -- no error, no warning -- and code-quality would have emitted the wrong
 // report key. That is the same silent-mismatch shape as #738, so it gets a test.
 // ---------------------------------------------------------------------------
-test('AC-GATEID-001-07: the override block parses with and without the export keyword', () => {
+it('AC-GATEID-001-07: the override block parses with and without the export keyword', () => {
   const body = '"code-quality|gate1_static_analysis"';
   const plain = 'GATE_REPORT_KEY_OVERRIDES=(\n  ' + body + '\n)\n';
   const exported = 'export GATE_REPORT_KEY_OVERRIDES=(\n  ' + body + '\n)\n';
