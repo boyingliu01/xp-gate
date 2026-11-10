@@ -163,6 +163,46 @@ test('AC-GATEID-002-04/05: cross-surface checker is injectable and reports the i
 });
 
 // ---------------------------------------------------------------------------
+// AC-GATEID-002-07: discovery counts THIS checkout's copies, not other branches'.
+//
+// Found while merging this sprint into main: main's loadRegistry discovered SIX
+// copies, three of which were the sprint worktree's under .worktrees/. That is
+// not "the repo is inconsistent" -- those files belong to another branch -- but
+// it fails exactly like a real disagreement, and its message points at paths the
+// reader does not own. Every merge, rebase or feature branch would trip it.
+//
+// The predicate is stated as an obligation on the discovered set, so it survives
+// a change of exclusion mechanism: no discovered copy may live under .worktrees,
+// and the count must equal the number the three packaged locations declare.
+// ---------------------------------------------------------------------------
+test('AC-GATEID-002-07: discovery never counts another worktree\'s copy as this checkout\'s', () => {
+  const copies = identity.discoverRegistryCopies(REPO_ROOT);
+  const fromOtherWorktrees = copies.filter((copy) => {
+    const relative = path.relative(REPO_ROOT, copy).split(path.sep);
+    return relative.includes('.worktrees');
+  });
+  assert.deepStrictEqual(
+    fromOtherWorktrees,
+    [],
+    'a copy inside .worktrees belongs to another branch, so counting it reports a '
+      + 'disagreement the reader cannot act on:' + JSON.stringify(fromOtherWorktrees),
+  );
+
+  // And the shipped set is exactly the three packaged locations -- one canonical
+  // plus two mirrors. A fourth appearing here means a new copy was introduced
+  // without updating the mirror contract.
+  const relativeCopies = copies
+    .map((copy) => path.relative(REPO_ROOT, copy).split(path.sep).join('/'))
+    .filter((relative) => !relative.includes('node_modules'))
+    .sort();
+  assert.deepStrictEqual(relativeCopies, [
+    'githooks/gate-registry.sh',
+    'src/npm-package/gate-registry.sh',
+    'src/npm-package/hooks/gate-registry.sh',
+  ]);
+});
+
+// ---------------------------------------------------------------------------
 // AC-GATEID-001-06: the report-key override set cannot drift away from the rows.
 //
 // The single override (code-quality -> gate1_static_analysis) lives beside the
