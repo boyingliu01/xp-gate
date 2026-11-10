@@ -123,8 +123,17 @@ function discoverRegistryCopies(repoRoot) {
 function loadRegistry(repoRoot = path.resolve(__dirname, '..', '..', '..')) {
   const copies = discoverRegistryCopies(repoRoot);
   if (copies.length === 0) {
+    // Actionable on purpose. The most likely reader of this message is someone
+    // whose consumer repo was installed by a package that predates the registry:
+    // the gate still runs, but nothing can be looked up by name. Telling them
+    // only "cannot be determined" leaves them to guess that an upgrade fixes it.
     throw new Error(
-      `gate-identity: no ${REGISTRY_FILENAME} found under ${repoRoot}. Gate identity cannot be determined.`,
+      `gate-identity: no ${REGISTRY_FILENAME} found under ${repoRoot}. `
+        + 'Gate identity cannot be determined.\n'
+        + `  Expected the registry shipped with the hooks (${REGISTRY_FILENAME} in githooks/).\n`
+        + '  An installation predating it is missing. Fix: upgrade to a package that '
+        + 'ships the registry and re-sync the hooks:\n'
+        + '    npx @boyingliu01/xp-gate@latest doctor --sync-hooks',
     );
   }
 
