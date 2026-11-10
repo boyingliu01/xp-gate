@@ -5933,3 +5933,44 @@ specification:
             对齐）；本次 sprint 的 specification.yaml 登记此 follow-up REQ 使缓冲期有
             契约过期（非部落记忆）。
           test_type: unit
+
+    # ============================================================
+    # REQ-PRINCIPLES-DUP: 修活 code-duplication 死规则（DRY 门禁真正生效）
+    # ============================================================
+    - id: REQ-PRINCIPLES-DUP
+      description: >-
+        `.principlesrc` 中 `clean-code.code-duplication` 显示 enabled:true、severity:warning，
+        但它依赖 `adapter.duplicationPercentage`，而 `Adapter` 接口（types.ts:35-42）从未
+        定义该字段，全仓无任何 adapter/analyzer 赋值。生产路径上该值恒为 undefined，
+        判定式恒假，规则永不触发——是一条「显示开着、实测零触发」的假门禁。
+        本次把它修活：由 BaseAdapter 基于既有 fileContent 自算重复率，使规则在生产路径
+        真正可达；同时保留 Gate 4 的 warning 严重度与 Boy Scout 差分管控，避免修活后
+        以存量重复阻断全仓提交（Gate 4 仅 ERROR_COUNT>0 时 FAIL，见 gate-4.sh:203-225）。
+        修复动机见 2026-11-09 复盘：DRY 检测三套机制（jscpd 阈值 50 tokens 且不阻断、
+        archlint code_clone 被 exclude 覆盖关键路径、本规则为死代码）全部结构性失明。
+      priority: high
+      acceptance_criteria:
+        - id: AC-PRINCIPLES-DUP-01
+          criteria: >-
+            Adapter 契约补齐重复率能力：`Adapter` 接口新增 `getDuplication()`，
+            `BaseAdapter` 提供默认实现（基于 fileContent 的滑动窗口行指纹），
+            10 个语言 adapter 无需各自实现即获得该能力；类型检查 tsc --noEmit 通过。
+          test_type: unit
+        - id: AC-PRINCIPLES-DUP-02
+          criteria: >-
+            规则在生产路径可达：对一份真实高重复源文件，`codeDuplicationRule.check(file,
+            new TypeScriptAdapter(file))` 返回 ≥1 条违规且 message 含实际百分比；
+            对一份低重复文件返回 0 条。即不再依赖外部注入 duplicationPercentage。
+          test_type: unit
+        - id: AC-PRINCIPLES-DUP-03
+          criteria: >-
+            向后兼容：显式提供 `duplicationPercentage` 的 adapter（存量第三方/测试注入）
+            仍以显式值为准，不被自算值覆盖；antipattern——把「undefined 就返回空」的旧
+            测试契约改为「undefined 时自行计算」，而非删除断言。
+          test_type: unit
+        - id: AC-PRINCIPLES-DUP-04
+          criteria: >-
+            修活不导致存量阻断：在仓库根对 src/principles/ 自身运行 principles CLI，
+            Gate 4 判定仍不进 FAIL（error 数为 0），warning 经 Boy Scout 差分管控。
+            若出现新 error，视为方案不满足 AC，需降级为 info 或加 count 阈值。
+          test_type: integration

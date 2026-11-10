@@ -32,6 +32,29 @@ export interface Violation {
   severity: Severity;
 }
 
+/**
+ * Duplication measured for one file.
+ *
+ * `blocks` exists so a caller can explain the percentage rather than only assert
+ * it; the rule reports the number, the CLI can point at the lines.
+ */
+export interface DuplicationReport {
+  /** Share of the file's significant lines that repeat elsewhere in the file. */
+  percentage: number;
+  /** Each repeated region, longest first. */
+  blocks: DuplicationBlock[];
+}
+
+export interface DuplicationBlock {
+  /** 1-based inclusive line range of the first occurrence. */
+  startLine: number;
+  endLine: number;
+  /** How many further occurrences of this block exist in the same file. */
+  occurrences: number;
+  /** Normalised text shared by the occurrences, for human diagnosis. */
+  snippet: string;
+}
+
 export interface Adapter {
   detectLanguage: () => string;
   parseAST: () => unknown;
@@ -39,4 +62,14 @@ export interface Adapter {
   extractClasses: () => unknown[];
   extractExports: () => unknown[];
   countLines: () => number;
+  /**
+   * Measure intra-file duplication.
+   *
+   * Optional on purpose: a third-party adapter written before this existed keeps
+   * compiling and keeps the pre-existing "no duplication data ⇒ no violation"
+   * behaviour. Without this member the `clean-code.code-duplication` rule was
+   * unreachable in production — nothing ever supplied the number it judged, so
+   * a rule configured `enabled: true` never fired (REQ-PRINCIPLES-DUP).
+   */
+  getDuplication?: () => DuplicationReport;
 }
