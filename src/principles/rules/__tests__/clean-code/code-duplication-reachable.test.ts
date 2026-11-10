@@ -174,9 +174,12 @@ describe('code-duplication rule is reachable on the production path', () => {
     expect(violations[0].message).toContain(`${FIXTURE_DUPLICATION}%`);
   });
 
-  it('AC-PRINCIPLES-DUP-03: undefined stays safe for adapters that cannot compute', () => {
-    // A third-party adapter predating getDuplication() must keep the old
-    // behaviour (no violation) rather than crash the whole Gate 4 run.
+  it('AC-PRINCIPLES-DUP-04: an adapter with no duplication source is NOT reported clean', () => {
+    // The original defect was silence: nothing supplied a number, so the rule
+    // returned [] and a rule configured `enabled: true` looked green while
+    // judging nothing. An adapter missing the capability must produce a visible
+    // diagnostic, because "not measured" and "measured clean" are different
+    // facts and the rule must not conflate them.
     const legacyAdapter = {
       detectLanguage: () => 'typescript',
       parseAST: () => undefined,
@@ -188,6 +191,25 @@ describe('code-duplication rule is reachable on the production path', () => {
 
     const violations = codeDuplicationRule.check('legacy.ts', legacyAdapter as never);
 
-    expect(violations).toEqual([]);
+    expect(violations.length).toBe(1);
+    expect(violations[0].message).toContain('Duplication not measured');
+    expect(violations[0].message).toContain('NOT reporting it clean');
+    // `info`, not `warning`: a third-party adapter must not block a commit --
+    // visible, not fatal.
+    expect(violations[0].severity).toBe('info');
+  });
+
+  it('AC-PRINCIPLES-DUP-04: every in-repo adapter supplies a duplication report', () => {
+    // The capability gap must not be reachable from this repo's own adapters.
+    // BaseAdapter implements getDuplication, and every adapter extends it; this
+    // asserts that stays true instead of trusting the inheritance graph.
+    const file = writeTempSource('clean.ts', LOW_DUPLICATION_SOURCE);
+    const adapter = new TypeScriptAdapter(file);
+
+    const report = adapter.getDuplication();
+
+    expect(typeof report.percentage).toBe('number');
+    expect(Number.isFinite(report.percentage)).toBe(true);
+    expect(Array.isArray(report.blocks)).toBe(true);
   });
 });

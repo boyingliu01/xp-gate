@@ -50,10 +50,18 @@ describe('code-duplication.ts - Code Duplication Rule', () => {
     expect(codeDuplicationRule.severity).toBe('warning');
   });
 
-  it('should return empty array when adapter.duplicationPercentage is undefined', () => {
+  it('reports an unmeasured file instead of silently calling it clean', () => {
+    // This assertion used to demand `[]` for an adapter with no duplication
+    // source. That demand WAS the defect: it froze "no data ⇒ no violation" as
+    // the expected contract, which is why the rule could advertise
+    // `enabled: true` for its whole life while judging nothing (REQ-PRINCIPLES-DUP).
+    // The contract is now "not measured must be visible", and the severity is
+    // `info` so a third-party adapter cannot block a commit.
     const violations = codeDuplicationRule.check('test.ts', mockAdapter as never);
-    
-    expect(violations).toEqual([]);
+
+    expect(violations.length).toBe(1);
+    expect(violations[0].severity).toBe('info');
+    expect(violations[0].message).toContain('Duplication not measured');
   });
 
   it('should propagate adapter errors (no empty catch, #392)', () => {

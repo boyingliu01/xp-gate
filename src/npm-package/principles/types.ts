@@ -65,11 +65,17 @@ export interface Adapter {
   /**
    * Measure intra-file duplication.
    *
-   * Optional on purpose: a third-party adapter written before this existed keeps
-   * compiling and keeps the pre-existing "no duplication data ⇒ no violation"
-   * behaviour. Without this member the `clean-code.code-duplication` rule was
-   * unreachable in production — nothing ever supplied the number it judged, so
-   * a rule configured `enabled: true` never fired (REQ-PRINCIPLES-DUP).
+   * REQUIRED, deliberately. The first version of this member was optional, and
+   * that re-created the very defect it was added to fix: an optional member plus
+   * a `undefined`-means-no-violation branch is still "a rule configured
+   * `enabled: true` that silently never fires" — the failure just moved from
+   * "the field was never declared" to "the adapter forgot to implement it".
+   * A silent capability gap is the same lie as a silent field gap.
+   *
+   * Every in-repo adapter extends `BaseAdapter`, which implements this, so
+   * requiring it costs nothing here. A third-party adapter written against the
+   * old interface gets a compile error — which is the point: it must decide,
+   * not default into silence.
    */
-  getDuplication?: () => DuplicationReport;
+  getDuplication: () => DuplicationReport;
 }

@@ -23,7 +23,8 @@ describe('analyzer.ts - Rule Orchestration Engine', () => {
       ]),
       extractClasses: vi.fn().mockReturnValue([]),
       extractExports: vi.fn().mockReturnValue([]),
-      countLines: vi.fn().mockReturnValue(100)
+      countLines: vi.fn().mockReturnValue(100),
+      getDuplication: vi.fn().mockReturnValue({ percentage: 0, blocks: [] })
     };
     
     // Mock rule that detects violations
