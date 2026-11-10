@@ -3,6 +3,7 @@ const path = require('path');
 const crypto = require('crypto');
 const { checkDeps, checkBash, autoInstallDeps, detectPlatform, GATE_CLI_TOOLS, checkCliTool } = require('./detect-deps.js');
 const { copyHooks, copyAdapters } = require('./shared-utils.js');
+const { ARCH_CONFIG_TEMPLATE, CONFIG_FILENAME: ARCH_CONFIG_FILENAME } = require('./arch-config-template.js');
 const {
   HOME_DIR,
   CONFIG_DIR,
@@ -649,6 +650,50 @@ async function detectAndReportLanguages(projectRoot, autoYes) {
   console.log(`\n  Generated .xp-gate-config.json`);
 }
 
+/**
+ * Write the default architecture config so Gate 6's precondition holds
+ * (REQ-DEPLOY-003).
+ *
+ * Gate 6 blocks any commit in a project without an architecture config file
+ * (githooks/pre-commit:4838), and it decides this purely by file existence —
+ * it never parses the contents. Without this step `xp-gate init` installs every
+ * gate successfully and then blocks the user's first commit for a reason that
+ * has nothing to do with their code.
+ *
+ * PROJECT-LEVEL ONLY. Global installs must not write this: the file describes a
+ * project's own architecture, so putting it in the user's HOME would turn
+ * something project-scoped into a machine-wide side effect (user decision,
+ * sprint-20261110-33). setupGlobal therefore never calls this.
+ *
+ * NEVER OVERWRITES. An existing architecture.yaml, .architecturerc or
+ * .archlint.yaml means the project already made this decision.
+ *
+ * @param {string} projectRoot
+ */
+function ensureArchConfig(projectRoot) {
+  const existing = ['architecture.yaml', '.architecturerc', ARCH_CONFIG_FILENAME]
+    .find((name) => fs.existsSync(path.join(projectRoot, name)));
+
+  if (existing) {
+    console.log(`  architecture config: kept existing ${existing}`);
+    return;
+  }
+
+  const target = path.join(projectRoot, ARCH_CONFIG_FILENAME);
+  try {
+    fs.writeFileSync(target, ARCH_CONFIG_TEMPLATE, 'utf8');
+    // Say what it does and does not do. A file that appears without explanation
+    // reads as "architecture is configured" — the exact false confidence this
+    // template is written to avoid.
+    console.log(`  architecture config: created ${ARCH_CONFIG_FILENAME} (no rule overrides — archlint defaults apply)`);
+  } catch (err) {
+    // Non-fatal: the install itself succeeded. The user can create the file, and
+    // Gate 6's own message already tells them how.
+    console.warn(`  architecture config: could NOT create ${ARCH_CONFIG_FILENAME} (${err.message})`);
+    console.warn(`    Gate 6 will block commits until an architecture config exists.`);
+  }
+}
+
 async function installLocal(args) {
   const gitDir = getGitDir();
   if (!gitDir) {
@@ -696,6 +741,7 @@ async function installLocal(args) {
   const manifest = generateManifest(srcDir, projectRoot);
   updateConfig({ lastInit: new Date().toISOString(), mode: 'local', templateDir: TEMPLATE_DIR, manifest });
 
+  ensureArchConfig(projectRoot);
   injectKarpathyPrinciples(projectRoot);
   configureOpenCodePlugin(srcDir, projectRoot);
   deployQoderDelphiAgents(srcDir, projectRoot);
@@ -1122,4 +1168,23 @@ function injectKarpathyPrinciples(projectRoot) {
 // setupGlobal is exported so the global-install wiring (agents deployed to the
 // real HOME) can be audited under a sandboxed HOME, not just asserted to exist
 // — the historical miss was "local deployed, global did not" (#417, #429).
-module.exports = { init, promptBootstrap, installModuleRuntimeDeps, deployQoderDelphiAgents, configureQoderDelphiAgents, readQoderModelId, setupGlobal, probeGitleaksNotice, ensureGitignoreEntries, gitignoreEntriesForInit };
+module.exports = {
+  init,
+  promptBootstrap,
+  installModuleRuntimeDeps,
+  deployQoderDelphiAgents,
+  configureQoderDelphiAgents,
+  readQoderModelId,
+  setupGlobal,
+  probeGitleaksNotice,
+  ensureGitignoreEntries,
+  gitignoreEntriesForInit,
+  // Exported so the install paths can be exercised directly. `init()` spends most
+  // of its time probing and auto-installing CLI tools, which makes an end-to-end
+  // test of WHAT GETS WRITTEN both slow and dependent on the machine's tool set
+  // (demonstrated: `init --core-only --yes` did not finish in 120s on a machine
+  // whose dependency probe was slow). The file-writing contract needs to be
+  // testable without that.
+  installLocal,
+  ensureArchConfig,
+};

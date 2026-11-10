@@ -46,3 +46,38 @@ DEPLOY_GATE_FILES=(
 # shellcheck disable=SC2034
 DEPLOY_ADAPTER_COMMON='adapter-common.sh'
 DEPLOY_HOOKS_LIB='lib'
+
+# 非 hook 模块全集（lib/* 逐个列出，加 adapter-common.sh、deploy-manifest.sh、
+# install.sh）——REQ-DEPLOY-002。
+#
+# 这里刻意逐文件列出，而不是给一个 `lib` 目录名让安装器自己 glob。目录名形态
+# 让「清单是否完整」无法通过读清单来回答：装到用户磁盘上的文件可能没有任何
+# 清单条目，于是「都在清单里」永远为真。逐文件列出使清单成为真正的安装计划。
+# Consumed by the sourcing parent, not here.
+# shellcheck disable=SC2034
+DEPLOY_MODULE_FILES=(
+  'adapter-common.sh'
+  'deploy-manifest.sh'
+  'install.sh'
+  'lib/Measure-PowerShellComplexity.ps1'
+  'lib/assertion-quality.sh'
+  'lib/audit-sanitize.sh'
+  'lib/ccn-ratchet.sh'
+  'lib/coverage-total.sh'
+  'lib/diff-coverage.sh'
+  'lib/docs-only.sh'
+  'lib/gate-5c-alignment.sh'
+  'lib/java-test-selection.sh'
+  'lib/jscpd-run.sh'
+  'lib/layer-baseline.cjs'
+  'lib/native-path.sh'
+  'lib/now-ms.sh'
+  'lib/prepush-score.py'
+  'lib/python-incremental-typecheck.sh'
+  'lib/python-test-selection.sh'
+  'lib/sprint-gate-report.sh'
+  'lib/test-failure.sh'
+  'lib/toolchain-path.sh'
+  'lib/typecheck.sh'
+  'lib/validate-code-walkthrough.cjs'
+)
