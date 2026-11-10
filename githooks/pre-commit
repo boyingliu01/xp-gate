@@ -4488,7 +4488,13 @@ else
         elif command -v archlint >/dev/null 2>&1; then
           ARCHLINT_KIND="binary"
           ARCHLINT_BIN="$(command -v archlint)"
-        elif (cd "$PROJECT_ROOT" && npx @archlinter/cli --version) >/dev/null 2>&1; then
+        elif probe_archlint_available "$PROJECT_ROOT"; then
+          # The three branches above are what this helper checks locally; it only
+          # reaches for npx when the probe is explicitly enabled
+          # (XP_GATE_NPX_PROBE=1). The old form always did, so on a machine with
+          # no archlint it downloaded the package, answered --version, and ran a
+          # tool the project never depended on -- see
+          # docs/incidents/2026-11-09-command-could-not-run-*.
           ARCHLINT_KIND="npx"
         else
           echo "     ❌ BLOCKED - archlint not installed"
