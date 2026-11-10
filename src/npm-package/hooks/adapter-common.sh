@@ -225,7 +225,15 @@ require_tool() {
     return 0
   fi
 
-  if command -v npx >/dev/null 2>&1 && npx --no-install "$tool_name" --version >/dev/null 2>&1; then
+  # Project-local node_modules/.bin. This replaces an `npx --no-install <tool>
+  # --version` probe: `--no-install` does prevent the package from being
+  # INSTALLED, but it still asks the registry every time (measured: 697 ms on a
+  # cache miss, 105 ms revalidating on a hit), inside a pre-commit hook. And once
+  # any earlier misuse populates the npx cache the same probe returns rc=0 for a
+  # tool the project never depended on, so the answer can be corrupted, not just
+  # slow. Checking the directory the tool would actually live in is both cheaper
+  # and honest. See docs/incidents/2026-11-09-command-could-not-run-*.
+  if [ -x "node_modules/.bin/$tool_name" ]; then
     return 0
   fi
 
@@ -289,7 +297,9 @@ detect_mutation_testable() {
   if [ -f "package.json" ] && grep -qE '"@stryker-mutator[^"]*"' package.json 2>/dev/null; then
     return 0
   fi
-  if command -v npx >/dev/null 2>&1 && npx --no-install stryker --version >/dev/null 2>&1; then
+  # Project-local install. Replaces `npx --no-install stryker --version`, which
+  # still queried the registry on every call (see require_tool above).
+  if [ -x "node_modules/.bin/stryker" ]; then
     return 0
   fi
   # Legacy config files (backwards compatibility — deprecated)

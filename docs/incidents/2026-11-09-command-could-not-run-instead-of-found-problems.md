@@ -182,31 +182,73 @@ eval "$(awk '/^if ! declare -F run_node_bin/,/^fi$/' "$HOOK")"
 4. **修完后启动一次完整流程**（本轮是 `sh .githooks/pre-commit`），
    报错从"致命"变成"另一个致命"也是进展 —— 说明这一层真的通了。
 
-## 仍未解决
+## 后续修复（#785）
 
-### 1. `npx --no-install` 的探测点仍未收口
+本文最初把三处 `npx --no-install` 探测点列为"未验证，不能认为安全"。
+后续在干净目录（只有一个空 `package.json`）实测，确认了危害的**准确形态**，
+并已全部修掉。
 
-本轮修了 `adapters/typescript.sh` 与 `pre-commit`，但下列位置仍在用
-`npx --no-install <tool> --version` 作为探测：
+### 实测：`--no-install` 拦得住安装，拦不住联网
 
-| 位置 | 工具 |
+```
+$ npx --no-install --loglevel=verbose stryker --version
+npm http fetch GET 200 https://registry.npmmirror.com/stryker 697ms (cache miss)
+npm error npx canceled due to missing packages and no YES option
+rc=1
+```
+
+与 vitest 那一例的关键区别：
+
+| | 判定 | 联网 | 危害 |
+|---|---|---|---|
+| vitest（缓存已被污染） | **错**：rc=0 报"已安装" | 是 | 跑了项目不依赖的工具 |
+| stryker（干净机器） | 对：rc=1 | 是，697 ms | 每次探测一次请求；离线阻塞到 npm 超时 |
+
+所以 `--no-install` **不是安全写法**，只是**不会安装**。它依然每次都问注册中心，
+而这些问题都发生在 pre-commit 里。
+
+### 修复
+
+三处改为只查本地产物（`node_modules/.bin/`），不再经过 npx：
+
+| 位置 | 改法 |
 |---|---|
-| `githooks/adapter-common.sh:228` | `$tool_name` |
-| `githooks/adapter-common.sh:292` | `stryker` |
-| `githooks/lib/toolchain-path.sh:258` | `$_tool` |
+| `adapter-common.sh` `require_tool` | 查 `node_modules/.bin/<tool>` |
+| `adapter-common.sh` `detect_mutation_testable` | 查 `node_modules/.bin/stryker` |
+| `lib/toolchain-path.sh` `resolve_tool_path` | 直接返回 `node_modules/.bin/<tool>` 的真实路径 |
 
-**没有验证过它们在"干净机器"（无 npx 缓存）上的行为。** 按本轮的实测结论，
-它们很可能同样会联网取包——只是本机缓存已经存在，缺陷被掩盖了。
-**不能因为"目前没出问题"就认为它们安全。**
+测试 `issue-785-probe-local-only.test.bats`（5 用例）对每处同时断言
+"不碰 npx"与"本地已装的仍能找到"。
 
-### 2. 建议的机械化防御
+**第二条断言不是凑数**：修复前它也是红的，说明原来的 npx 分支确实在承担
+`node_modules/.bin` 的检测职责。这项能力只能被**替换**，不能被删掉——
+只写"不碰 npx"会得到一个永远返回"未安装"的假修复。
 
-靠人记住"不要用 npx 探测"不可靠。建议加一条静态检查，禁止 `githooks/` 下出现
-`npx` 与 `--version` 同现的探测形式（`--no-install` 一并禁止，理由见规律二）。
-这比依赖人的记性可靠，且能在 CI 上持续生效。
+### 连带的测试契约失效（值得记住）
 
-### 3. 缓存污染不会自愈
+改完 probe 后，`gate-5-runner-error.test.ts` 的 5 个用例报 anti-vacuity 失败：
+"桩 npx 跑过，但从没被要求跑 vitest"。
 
-npx 缓存 `…/_npx/69c381f8ad94b576/` 里的 vitest 5.1.0 是本轮误用留下的。
-清掉它只是让本机恢复干净，**缺陷本身仍在代码里**——所以本条修的是证据，
-不是原因，原因见上面两条。
+这是**真的红**，不是噪声：该测试的夹具只种了桩 `npx`，靠"hook 会用 npx 探测
+vitest"这一前提成立。探测改本地后 Gate 5 正确 SKIP，夹具的前置假设就失效了。
+
+修法是让夹具种出 npm 安装后本该存在的东西——`node_modules/.bin/vitest` 与
+`node_modules/vitest/vitest.mjs`——而不是把断言放宽。附带一个易错点：
+桩的 `--version` 必须恒返回 0，它与"本次运行的结果码"是两个不同判定，
+混用会让探测报"未安装"。
+
+## 仍然开放
+
+### 1. 机械化防御尚未落地
+
+靠人记住"不要用 npx 探测"不可靠。建议加静态检查，禁止 `githooks/` 下出现
+`npx` … `--version` 同现的探测形式（`--no-install` 一并禁止，理由见上）。
+这比依赖记性可靠，且能在 CI 上持续生效。**目前没有实现。**
+
+注意写这类检查时排除注释行：两个文件都保留了对已删除 npx 形式的解释，
+裸 grep 会把"说明为什么删掉它"报成"它还在"。
+
+### 2. 缓存污染不会自愈
+
+npx 缓存 `…/_npx/69c381f8ad94b576/` 里的 vitest 5.1.0 是误用留下的。
+清掉它只是让本机恢复干净，**缺陷本身在代码里**——本条修的是证据，不是原因。
