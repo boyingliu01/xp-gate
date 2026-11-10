@@ -5494,6 +5494,38 @@ if [ -n "$MIRROR_STAGED" ] && printf '%s
     fi
   fi
 fi
+
+# ============================================================================
+# Gate 12c: probe discipline
+#
+# A command that could not RUN is not a command that found problems. The hooks
+# used to answer "is this tool installed?" with `npx <tool> --version`, whose
+# contract is "install it if missing, then run it" -- so the probe changed the
+# environment it was asked about. `--no-install` prevents the install and
+# nothing else: it still queries the registry on every call (measured 697 ms
+# cold, 105 ms revalidating) inside a commit, and once an earlier misuse fills
+# the npx cache the same probe starts answering "installed" for a tool the
+# project never depended on.
+#
+# Scoped to commits that touch hook sources: the rule can only be broken by
+# editing one, and scanning 51 files on every docs-only commit is exactly the
+# fixed cost the input short-circuit convention exists to avoid.
+if printf '%s\n' "$STAGED_FILES" 2>/dev/null | grep -qE '^githooks/(adapters/|lib/|adapter-common\.sh|pre-commit|pre-push|post-commit|post-merge)'; then
+  _probe_root="${PROJECT_ROOT:-}"
+  if [ -n "$_probe_root" ] && [ -f "$_probe_root/scripts/check-no-npx-probe.sh" ]; then
+    echo ""
+    echo "→ Gate 12c: probe discipline..."
+    if (cd "$_probe_root" && bash scripts/check-no-npx-probe.sh); then
+      echo "✅ PASSED - Gate 12c: no gate probes tool availability through npx"
+    else
+      echo ""
+      echo "❌ BLOCKED - Gate 12c: a gate answers \"is this tool installed?\" by"
+      echo "   asking the registry. A probe that installs the tool it was asked"
+      echo "   about does not measure the environment, it changes it."
+      exit 1
+    fi
+  fi
+fi
 # ============================================================================
 
 # The compiler is the first and cheapest static analyser for a compiled language
