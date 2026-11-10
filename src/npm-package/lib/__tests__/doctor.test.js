@@ -1101,7 +1101,11 @@ describe('doctor', () => {
     expect(fs.existsSync(path.join(projectAdaptersDir(), 'gate-4.sh'))).toBe(true);
     expect(fs.existsSync(path.join(projectAdaptersDir(), 'gate-7.sh'))).toBe(true);
     expect(fs.existsSync(path.join(projectAdaptersDir(), 'gate-8.sh'))).toBe(true);
-    expect(fs.existsSync(path.join(projectAdaptersDir(), 'gate-9.sh'))).toBe(true);
+    // gate-9.sh was deleted (#738/#717). It carried a "DEAD CODE — NOT
+    // EXECUTED" banner and no hook sourced it; the SAST gate is gate-10.sh.
+    // Restoring it would re-ship a script that cannot run into every consumer
+    // repo — which is how a C# SAST fix once landed in a file nothing executes.
+    expect(fs.existsSync(path.join(projectAdaptersDir(), 'gate-9.sh'))).toBe(false);
     expect(fs.existsSync(path.join(projectAdaptersDir(), 'gate-10.sh'))).toBe(true);
     expect(logSpy).toHaveBeenCalledWith(
       expect.stringContaining('Restored')

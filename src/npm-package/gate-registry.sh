@@ -47,22 +47,58 @@
 #    look up by name — which is how #717's wrong-file patch happened.
 # ============================================================================
 
-# name|number|impl|blocks
+# name|number|impl|blocks|hook
+#
+# The `hook` field is LAST so a 4-field reader (any consumer installed from an
+# older package) keeps working: appending a field does not move the ones it
+# already reads.
+#
+# Numbers are POSITIONAL LABELS, never identities, and nothing here orders them
+# numerically — pre-push numbers are strings (M, M2, ML, UI, MW, S). Do not add
+# `-gt`/`-lt`/`$((` logic against this field;
+# scripts/__tests__/gate-identity-cross-surface.test.cjs greps for it.
+#
+# `impl` names the file that DECIDES the gate. Where a gate is an inline block
+# plus a helper that renders the verdict, name the helper: `impl` answers "which
+# file do I edit to change this gate", and `inline` answered that wrongly for
+# gate 6 (#715) — the layer verdict comes from gate-6-layers.sh.
 GATE_REGISTRY_ROWS=(
-  "version-consistency|0|inline|YES"
-  "code-quality|1|inline|YES"
-  "duplicate-code|2|inline|NO"
-  "complexity|3|gate-3.sh|YES"
-  "principles|4|gate-4.sh|YES"
-  "tests-coverage|5|inline|YES"
-  "architecture|6|inline|YES"
-  "iac-security|7|gate-7.sh|YES"
-  "secret-scanning|8|gate-8.sh|YES"
-  "build-integrity|9|inline|YES"
-  "sast|10|gate-10.sh|YES"
-  "sprint-flow|11|sprint-gate.sh|YES"
-  "file-hygiene|12|gate-12-file-hygiene.sh|NO"
-  "compiler-strictness|13|gate-13-compiler-strictness.sh|YES"
+  "version-consistency|0|inline|YES|pre-commit"
+  "code-quality|1|inline|YES|pre-commit"
+  "duplicate-code|2|inline|NO|pre-commit"
+  "complexity|3|gate-3.sh|YES|pre-commit"
+  "principles|4|gate-4.sh|YES|pre-commit"
+  "tests-coverage|5|inline|YES|pre-commit"
+  "architecture|6|gate-6-layers.sh|YES|pre-commit"
+  "iac-security|7|gate-7.sh|YES|pre-commit"
+  "secret-scanning|8|gate-8.sh|YES|pre-commit"
+  "build-integrity|9|inline|YES|pre-commit"
+  "sast|10|gate-10.sh|YES|pre-commit"
+  "sprint-flow|11|sprint-gate.sh|YES|pre-commit"
+  "file-hygiene|12|gate-12-file-hygiene.sh|NO|pre-commit"
+  "compiler-strictness|13|gate-13-compiler-strictness.sh|YES|pre-commit"
+  # pre-push. Registering these is identity bookkeeping only — pre-push keeps
+  # deciding its own execution order and skip semantics. Before this the
+  # registry knew nothing about half the gates this project runs (#769).
+  "mutation|M|inline|YES|pre-push"
+  "mock-density|M2|inline|NO|pre-push"
+  "mock-layering|ML|inline|YES|pre-push"
+  "ui-sprint|UI|inline|YES|pre-push"
+  "code-walkthrough|MW|inline|YES|pre-push"
+  "prepush-sprint|S|sprint-gate.sh|YES|pre-push"
+)
+
+# Report-key overrides for rows whose historical artifact key is not derivable
+# as gate{number}_{name}. ONE entry today. Kept beside the rows so a second
+# mapping cannot appear next to the comparison logic where it would be invisible.
+# Compare on NAME, never on these keys: an override must not excuse a mismatch.
+#
+# Not read by any shell code here -- it exists for the Node reader in
+# src/npm-package/lib/gate-identity.js, which parses this block directly. Some
+# shells do not inherit unexported array variables across a `source`, so it is
+# exported rather than left dangling (which also keeps shellcheck honest).
+export GATE_REPORT_KEY_OVERRIDES=(
+  "code-quality|gate1_static_analysis"
 )
 
 # Human-readable title for each name. Kept separate from the row above so the

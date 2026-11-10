@@ -43,92 +43,190 @@ const QUALITY_STATUS_DIR = path.join('.xp-gate', 'quality-status');
 
 /** The Boy Scout debt lives in its baseline, not in a gate status. */
 /**
- * The quality-status producer's own keys, in ITS numbering.
+ * The gate table and the producer's artifact keys are DERIVED from
+ * `githooks/gate-registry.sh`, never declared here.
  *
- * Kept as an array of pairs rather than an object literal so the table below
- * stays free of `name: 'literal'` shapes -- a generic-api-key scanner reads
- * those as credentials, and teaching the secret gate to ignore this file would
- * be a worse trade than reshaping the data.
+ * This file used to carry two handwritten tables: a number->name array and a
+ * "producer keys" array that also mapped artifact key -> number. The second one
+ * contained this comment:
+ *
+ *     // NOTE the swap: the producer calls Build Integrity gate9 and SAST
+ *     // gate10, while this project numbers them the other way round.
+ *
+ * That claim was FALSE. `githooks/pre-commit` emits `gate9_build_integrity` and
+ * `gate10_sast` — exactly what the registry says. The swap table encoded an
+ * inversion that never existed, so `gate-coverage` answered questions about one
+ * artifact using another artifact's numbering: with an artifact reporting
+ * `gate9_build_integrity=PASS` it printed "9 SAST Security PASS" (#738).
+ *
+ * Deleting the table alone would not fix the class: it removes one copy of a
+ * fact without removing the act of copying. So both tables are derived, and
+ * scripts/__tests__/gate-identity-cross-surface.test.cjs compares the derived
+ * surfaces against the registry. Restore a handwritten mapping here and that
+ * test fails.
+ *
+ * The derived table deliberately keeps the field shape `{ gate, name, ... }`
+ * with a string `name` value. An earlier version avoided that shape because a
+ * generic-api-key scanner reads `name: 'literal'` as a credential; the values
+ * now come from the registry at runtime rather than appearing as literals in
+ * this file, so the scanner has nothing to match.
  */
-const PRODUCER_KEYS = [
-  ['gate0_version_consistency', 0],
-  ['gate1_static_analysis', 1],
-  ['gate2_dup_code', 2],
-  ['gate3_complexity', 3],
-  ['gate4_principles', 4],
-  ['gate5_tests', 5],
-  ['gate6_arch_boyscout', 6],
-  ['gate7_iac_security', 7],
-  ['gate8_secret_scanning', 8],
-  // NOTE the swap: the producer calls Build Integrity gate9 and SAST gate10,
-  // while this project numbers them the other way round.
-  ['gate10_sast', 9],
-  ['gate9_build_integrity', 10],
-  ['gate11_sprint_flow', 11],
-  ['gate12_file_hygiene', 12],
-  ['gate13_compiler_strictness', 13],
-];
-
-/** Producer key -> this project's gate number. */
-const PRODUCER_GATE_NUMBER = new Map(PRODUCER_KEYS);
-
-/** This project's gate number -> producer key. */
-const GATE_NUMBER_TO_PRODUCER = new Map(PRODUCER_KEYS.map(([k, n]) => [n, k]));
+const { loadRegistry, parseRegistry, parseReportKeyOverrides, deriveGateTable, reportKey } = require('./gate-identity');
 
 /**
- * The canonical gate table: number, name, whether the CLI can run it, and the
- * artifact that decides its verdict.
+ * The derived gate table, computed ON FIRST USE rather than at require() time.
  *
- * Gate names deliberately match `xp-gate gate-list`; the producer's differing
- * numbering is absorbed by PRODUCER_KEYS above.
+ * A copy disagreement in the registry is a real, fatal condition for anything
+ * that renders gates -- but it is not a fact about arithmetic on an artifact.
+ * Computing it eagerly meant `require('gate-coverage')` threw for consumers that
+ * only wanted `STATUS` or `exitCodeFor`, so a packaging bug in a file the caller
+ * never reads would take down an unrelated code path. Deferring it keeps the
+ * fail-closed behaviour where it belongs: the throw now fires on the first call
+ * that actually needs gate identity, and the message still names every differing
+ * copy (see loadRegistry).
  */
-const GATE_TABLE = [
-  { gate: 0, name: 'Version Consistency', hookOnly: true, evidence: 'VERSION and package.json' },
-  { gate: 1, name: 'Code Quality', hookOnly: true, evidence: 'adapter lint output' },
-  { gate: 2, name: 'Duplicate Code', hookOnly: false, evidence: 'jscpd configuration' },
-  { gate: 3, name: 'Cyclomatic Complexity', hookOnly: false, evidence: 'ccn baseline' },
-  { gate: 4, name: 'Principles', hookOnly: false, evidence: 'principles rc' },
-  { gate: 5, name: 'Tests + Coverage', hookOnly: true, evidence: 'coverage summary' },
-  { gate: 6, name: 'Architecture + Boy Scout', hookOnly: false, evidence: 'warnings baseline (see .warnings-baseline.json)' },
-  { gate: 7, name: 'IaC Security', hookOnly: false, evidence: 'iac scanner configuration' },
-  { gate: 8, name: 'Secret Scanning', hookOnly: false, evidence: 'secret scanner configuration' },
-  { gate: 9, name: 'SAST Security', hookOnly: false, evidence: 'sast ruleset' },
-  { gate: 10, name: 'Build Integrity', hookOnly: true, evidence: 'typecheck and pack' },
-  { gate: 11, name: 'Sprint Flow', hookOnly: true, evidence: 'specification' },
-  { gate: 12, name: 'File Hygiene', hookOnly: false, evidence: 'file hygiene script' },
-  { gate: 13, name: 'Compiler Strictness', hookOnly: false, evidence: 'compiler strictness script' },
-];
+let _gateTableCache = null;
+
+function gateTable() {
+  if (_gateTableCache === null) {
+    const registry = loadRegistry();
+    _gateTableCache = deriveGateTable(
+      parseRegistry(registry.text),
+      parseReportKeyOverrides(registry.text),
+    );
+  }
+  return _gateTableCache;
+}
+
+/**
+ * Registry rows, keyed by number, with the artifact report key attached.
+ * Replaces the deleted PRODUCER_KEYS / GATE_NUMBER_TO_PRODUCER pair.
+ */
+// Built per call from the same lazy table, so a renumbering can never leave a
+// stale number->row index behind.
+function gateByNumber() {
+  return new Map(gateTable().map((row) => [row.gate, row]));
+}
+
+/**
+ * Evidence pointer per gate. This is the ONE thing this file still owns: the
+ * human-readable description of where a verdict comes from. It is keyed by
+ * registry NAME (not number), so renumbering a gate cannot orphan an entry.
+ */
+const EVIDENCE_BY_NAME = {
+  'version-consistency': 'VERSION and package.json',
+  'code-quality': 'adapter lint output',
+  'duplicate-code': 'jscpd configuration',
+  complexity: 'ccn baseline',
+  principles: 'principles rc',
+  'tests-coverage': 'coverage summary',
+  architecture: 'warnings baseline (see .warnings-baseline.json)',
+  'iac-security': 'iac scanner configuration',
+  'secret-scanning': 'secret scanner configuration',
+  'build-integrity': 'typecheck and pack',
+  sast: 'sast ruleset',
+  'sprint-flow': 'specification',
+  'file-hygiene': 'file hygiene script',
+  'compiler-strictness': 'compiler strictness script',
+};
+
+/**
+ * Display names, keyed by registry SLUG.
+ *
+ * The slug is the identity and every comparison uses it. This map only makes
+ * the report readable ("build-integrity" -> "Build Integrity"); a missing entry
+ * degrades to the slug rather than to nothing, so adding a gate to the registry
+ * never produces a blank row. Keying by slug (not number) means renumbering
+ * cannot orphan an entry — which is the failure this whole sprint removes.
+ */
+const GATE_DISPLAY_NAME = {
+  'version-consistency': 'Version Consistency',
+  'code-quality': 'Code Quality',
+  'duplicate-code': 'Duplicate Code',
+  complexity: 'Cyclomatic Complexity',
+  principles: 'Principles',
+  'tests-coverage': 'Tests + Coverage',
+  architecture: 'Architecture + Boy Scout',
+  'iac-security': 'IaC Security',
+  'secret-scanning': 'Secret Scanning',
+  'build-integrity': 'Build Integrity',
+  sast: 'SAST Security',
+  'sprint-flow': 'Sprint Flow',
+  'file-hygiene': 'File Hygiene',
+  'compiler-strictness': 'Compiler Strictness',
+};
 
 const BOY_SCOUT_GATE = 6;
 
 /**
  * Read `.xp-gate/quality-status/<branch>.json` if present.
+ *
+ * Deterministic or explicit failure (REQ-GATEID-007). This used to fall through
+ * to `readdirSync` over every `.json` and take the first parseable one, so a
+ * bare `xp-gate gate-coverage` read whichever file the filesystem happened to
+ * list first. In this repo that was `land-pr438.json` (commit 33672f6d) rather
+ * than the current branch's `main.json` — so the command reported another
+ * commit's SAST result as if it were this one's, printing `stale: true` as a
+ * notice while presenting the wrong object. Reading the wrong object is worse
+ * than reading a stale one, and "stale" masked it.
+ *
+ * Now: one candidate -> use it. Several -> REFUSE and say how to disambiguate.
+ * Explicit `--branch` that does not exist -> error, never a silent fallback.
+ *
  * @param {string} repoRoot
  * @param {string} [branch]
- * @returns {{artifact: object|null, file: string|null}}
+ * @returns {{artifact: object|null, file: string|null, error?: string, candidates?: string[]}}
  */
 function readQualityStatus(repoRoot, branch) {
   const dir = path.join(repoRoot, QUALITY_STATUS_DIR);
-  const candidates = [];
-  if (branch) candidates.push(path.join(dir, `${branch}.json`));
-  // Fall back to any artifact: a branch name mismatch should still surface the
-  // data (as STALE) rather than pretending nothing exists.
-  try {
-    for (const name of fs.readdirSync(dir)) {
-      if (name.endsWith('.json')) candidates.push(path.join(dir, name));
+
+  if (branch) {
+    const wanted = path.join(dir, `${branch}.json`);
+    if (!fs.existsSync(wanted)) {
+      return {
+        artifact: null,
+        file: null,
+        error: `no quality-status artifact for branch "${branch}": ${wanted} does not exist`,
+      };
     }
+    return { artifact: parseArtifact(wanted), file: wanted };
+  }
+
+  let names;
+  try {
+    names = fs.readdirSync(dir).filter((name) => name.endsWith('.json')).sort();
   } catch {
     return { artifact: null, file: null };
   }
-  for (const file of candidates) {
-    try {
-      const parsed = JSON.parse(fs.readFileSync(file, 'utf8'));
-      if (parsed && typeof parsed === 'object') return { artifact: parsed, file };
-    } catch {
-      /* malformed artifact: treat as absent, never as clean */
-    }
+
+  if (names.length === 0) return { artifact: null, file: null };
+
+  if (names.length > 1) {
+    const candidates = names.map((name) => name.replace(/\.json$/, ''));
+    return {
+      artifact: null,
+      file: null,
+      candidates,
+      error: `found ${names.length} quality-status artifacts (${candidates.join(', ')}); `
+        + 'refusing to pick one by directory order — pass --branch <name> to choose',
+    };
   }
-  return { artifact: null, file: null };
+
+  const only = path.join(dir, names[0]);
+  return { artifact: parseArtifact(only), file: only };
+}
+
+/**
+ * Parse one artifact file. A malformed artifact is ABSENT, never clean.
+ * @param {string} file
+ */
+function parseArtifact(file) {
+  try {
+    const parsed = JSON.parse(fs.readFileSync(file, 'utf8'));
+    return parsed && typeof parsed === 'object' ? parsed : null;
+  } catch {
+    return null;
+  }
 }
 
 /**
@@ -142,12 +240,18 @@ function buildCoverageRows(artifact, ctx) {
   const context = ctx || {};
   const gates = (artifact && artifact.gates) || {};
 
-  return GATE_TABLE.map((spec) => {
-    const entry = gates[GATE_NUMBER_TO_PRODUCER.get(spec.gate)];
+  const table = gateTable();
+  const byNumber = gateByNumber();
+
+  return table.map((spec) => {
+    // Look the gate up by its OWN report key, derived from the registry. The
+    // deleted swap table used to translate between two numberings here; there
+    // was only ever one numbering (#738).
+    const entry = gates[reportKey({ name: spec.slug, number: spec.gate })];
     const row = {
       gate: spec.gate,
-      name: spec.name,
-      evidence: spec.evidence,
+      name: GATE_DISPLAY_NAME[spec.slug] || spec.slug,
+      evidence: EVIDENCE_BY_NAME[spec.slug] || spec.impl,
     };
 
     if (!entry) {
@@ -194,9 +298,12 @@ function buildCoverageRows(artifact, ctx) {
  * it yet" -- not "it can never run".
  */
 function missingGateReason(spec) {
-  return spec.hookOnly
-    ? 'no result recorded — runs via git commit'
-    : 'no result recorded — not run in the last report';
+  // `hook` comes from the registry: a pre-commit gate absent from the artifact
+  // means no commit has run it yet; a pre-push gate absent means it was not in
+  // the last pre-push report. Both are "no verdict", neither is "clean".
+  return spec.hook === 'pre-push'
+    ? 'no result recorded — runs via git push'
+    : 'no result recorded — runs via git commit';
 }
 
 /**
@@ -455,7 +562,20 @@ function main(argv, deps) {
 
   const branchIdx = args.indexOf('--branch');
   const branch = branchIdx !== -1 ? args[branchIdx + 1] : ctx.branch;
-  const { artifact, file } = readQualityStatus(repoRoot, branch);
+  const status = readQualityStatus(repoRoot, branch);
+
+  if (status.error) {
+    // Deterministic-or-fail (REQ-GATEID-007). The migration hint lives IN the
+    // error text: turning a silent wrong answer into a bare error would be a
+    // worse failure mode than the bug it replaces.
+    const hint = status.candidates
+      ? `\n  Retry with one of: ${status.candidates.map((name) => `--branch ${name}`).join(' | ')}`
+      : '';
+    process.stderr.write(`\n  [gate-coverage] ${status.error}${hint}\n\n`);
+    return 2;
+  }
+
+  const { artifact, file } = status;
   const headCommit = ctx.headCommit;
 
   const stale = Boolean(artifact && headCommit && artifact.commit && artifact.commit !== headCommit);
@@ -493,7 +613,7 @@ function main(argv, deps) {
 
 module.exports = {
   STATUS,
-  GATE_TABLE,
+  gateTable,
   buildCoverageRows,
   renderGateCoverage,
   exitCodeFor,

@@ -58,7 +58,12 @@ describe('deploy-manifest (REQ-DEPLOY-001)', () => {
       expect(GATE_FILES).toContain('gate-12-file-hygiene.sh');
       expect(GATE_FILES).toContain('gate-registry.sh');
       expect(GATE_FILES).toContain('gate-6-layers.sh');
-      expect(GATE_FILES).toHaveLength(11);
+      // 11 -> 10 after githooks/gate-9.sh was deleted (#738/#717). That file was
+      // never sourced by any hook: the SAST gate is gate-10.sh. Shipping it to
+      // consumer repos advertised a gate script that could not run, and it let
+      // a SAST fix be written into a file nothing executes. If this count grows
+      // again, the new member must be a script some hook actually sources.
+      expect(GATE_FILES).toHaveLength(10);
     });
   });
 

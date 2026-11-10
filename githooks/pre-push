@@ -46,6 +46,28 @@ REMOTE="$1"
 URL="$2"
 _PRE_PUSH_REPORT_DONE=0
 
+# The gate registry answers "what is gate MW called and which file decides it"
+# without reading 1200 lines of this hook. Optional by design: a consumer repo
+# installed from an older package has no registry, and this hook must keep
+# working there -- same contract as pre-commit:318-323.
+#
+# Registering is BOOKKEEPING, not execution policy: the gates below keep their
+# own order and skip semantics. Before this, the registry knew nothing about any
+# pre-push gate, so half the gates this project runs could not be looked up by
+# name at all (#769).
+_PRE_PUSH_GATE_DIR="$(cd "$(dirname "$0")" 2>/dev/null && pwd)"
+_PRE_PUSH_REGISTRY="$_PRE_PUSH_GATE_DIR/gate-registry.sh"
+[ -f "$_PRE_PUSH_REGISTRY" ] || _PRE_PUSH_REGISTRY="$(git rev-parse --show-toplevel 2>/dev/null)/githooks/gate-registry.sh"
+if [ -f "$_PRE_PUSH_REGISTRY" ]; then
+  # shellcheck source=/dev/null
+  . "$_PRE_PUSH_REGISTRY"
+  PRE_PUSH_REGISTRY_STATUS="loaded"
+else
+  # Absent is not a failure: record it so a missing registry is visible in the
+  # journal instead of silently indistinguishable from "nothing to report".
+  PRE_PUSH_REGISTRY_STATUS="missing"
+fi
+
 write_pre_push_report() {
   local exit_code="$1"
   local timestamp report_ts reports_dir report_file commit_hash verdict
