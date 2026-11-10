@@ -5493,6 +5493,43 @@ if [ -n "$MIRROR_STAGED" ] && printf '%s
       echo "✅ PASSED - Gate 12b: mirror parity (touched files)"
     fi
   fi
+
+  # ---------------------------------------------------------------------------
+  # Gate 12b (second half): deploy-manifest projection freshness (REQ-DEPLOY-001).
+  #
+  # `src/npm-package/lib/deploy-manifest.js` is the single source of truth and
+  # `githooks/deploy-manifest.sh` is a GENERATED projection of it (bash cannot
+  # require() JS, so the manifest is emitted as shell arrays rather than typed a
+  # second time). A generated projection whose generator is never run rots back
+  # into the hand-copied lists this whole change set removed -- the 11 lists
+  # that had already drifted apart before #789.
+  #
+  # The check lives HERE, in the gate that already owns "two files that must
+  # agree", rather than in a test: a test only runs when someone runs it, and
+  # the drift appears at the moment the source is edited, which is a commit.
+  #
+  # Only run when the source or the projection is in the change set. Unrelated
+  # commits must not pay for a node spawn.
+  # ---------------------------------------------------------------------------
+  if printf '%s\n' "$CHANGED_FILES" | grep -qE '^(src/npm-package/lib/deploy-manifest\.js|githooks/deploy-manifest\.sh|src/npm-package/hooks/deploy-manifest\.sh|scripts/generate-deploy-manifest\.cjs)$'; then
+    if [ -f "$PROJECT_ROOT/scripts/generate-deploy-manifest.cjs" ] && command -v node >/dev/null 2>&1; then
+      echo "Checking deploy-manifest projection freshness..."
+      if _dm_out=$(cd "$PROJECT_ROOT" && node scripts/generate-deploy-manifest.cjs --check 2>&1); then
+        echo "✅ PASSED - Gate 12b: deploy-manifest projection is current"
+      else
+        echo "❌ BLOCKED - Gate 12b: deploy-manifest.sh is STALE vs deploy-manifest.js"
+        printf '%s\n' "$_dm_out" | sed 's/^/   /'
+        echo "   Fix: node scripts/generate-deploy-manifest.cjs && git add githooks/deploy-manifest.sh"
+        GATE_12_STATUS=WARN
+        exit 1
+      fi
+    else
+      # The generator or node is absent: say so instead of reporting green. A
+      # silent skip here would be the same "looks like enforcement" failure the
+      # mirror half above documents at length.
+      echo "⚠️  Gate 12b: deploy-manifest staleness NOT CHECKED (generator or node missing)"
+    fi
+  fi
 fi
 # ============================================================================
 
