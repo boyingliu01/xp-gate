@@ -253,12 +253,17 @@ resolve_tool_path() {
     return 0
   fi
 
-  # npx knows about the project's own node_modules.
-  if tool_is_available npx; then
-    if npx --no-install "$_tool" --version >/dev/null 2>&1; then
-      printf '%s\n' "$_tool"
-      return 0
-    fi
+  # Project-local node_modules/.bin.
+  #
+  # This replaced an `npx --no-install <tool> --version` probe. `--no-install`
+  # does stop the package being installed, but the probe still ASKS the registry
+  # every time (measured: 697 ms cache miss, 105 ms revalidating on a hit) and
+  # can even answer yes for a tool the project never depended on once the npx
+  # cache has been populated. Resolving the binary's real path is both cheaper
+  # and truthful. See docs/incidents/2026-11-09-command-could-not-run-*.
+  if [ -x "$_base/node_modules/.bin/$_tool" ]; then
+    printf '%s\n' "$_base/node_modules/.bin/$_tool"
+    return 0
   fi
 
   # Subproject node_modules/.bin, shallow then one level deep. A monorepo's ui/ or
