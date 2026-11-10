@@ -41,18 +41,18 @@ describe('REQ-RESOLVE-003 生成器单一来源', () => {
     });
   });
 
-  describe('AC-RESOLVE-003-02: 生成物提供 _hook_resolve 函数（消费者不再手写顺序）', () => {
-    it('生成物定义 _hook_resolve 函数', () => {
+  describe('AC-RESOLVE-003-02: 生成物提供 _hook_tier_dir 函数（消费者不再手写顺序）', () => {
+    it('生成物定义 _hook_tier_dir 函数', () => {
       const content = readTarget();
-      expect(content).toMatch(/_hook_resolve\s*\(\s*\)\s*\{/);
+      expect(content).toMatch(/_hook_tier_dir\s*\(\s*\)\s*\{/);
     });
 
-    it('_hook_resolve 接受 tier_id 与 base 变量名两个参数', () => {
+    it('_hook_tier_dir 接受 tier_id 与 base 变量名两个参数', () => {
       // 签名必须是 2 个参数：('project', 'PROJECT_GITHOOKS')。
       // 旧的手写级联是"先 if 全局、再 elif 项目"——顺序被写死在控制流里，
       // 无法从数据推导，也就无法与 ADAPTER_DIR_ORDER 保持一致。
       const content = readTarget();
-      const fnMatch = content.match(/_hook_resolve\s*\(\s*\)\s*\{[\s\S]*?\n\}/);
+      const fnMatch = content.match(/_hook_tier_dir\s*\(\s*\)\s*\{[\s\S]*?\n\}/);
       expect(fnMatch).not.toBeNull();
       const body = fnMatch[0];
       expect(body).toMatch(/\$1/);
@@ -96,8 +96,8 @@ describe('REQ-RESOLVE-003 生成器单一来源', () => {
       const content = readTarget();
       // case D（设计文档 §3.2）：文件语法正确、函数存在，但签名/返回契约不符时，
       // 必须在加载期确定性发现，而不是在 push 中途随机炸开。
-      expect(content).toMatch(/_hook_resolve_selfcheck\s*\(\s*\)\s*\{/);
-      expect(content).toMatch(/_hook_resolve_selfcheck\s*(?:\|\||&&|$)/m);
+      expect(content).toMatch(/_hook_tier_dir_selfcheck\s*\(\s*\)\s*\{/);
+      expect(content).toMatch(/_hook_tier_dir_selfcheck\s*(?:\|\||&&|$)/m);
     });
 
     it('自检失败时设置 _HOOK_RESOLVE_BROKEN 标记供消费者读取', () => {

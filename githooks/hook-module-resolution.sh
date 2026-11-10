@@ -59,7 +59,7 @@ HOOK_RESOLUTION_SCHEMA=2
 
 # Resolve the directory for one tier of HOOK_ADAPTER_DIR_TIERS.
 #
-#   _hook_resolve <tier_id> <base_var>
+#   _hook_tier_dir <tier_id> <base_var>
 #     tier_id   project | global | script   (see HOOK_ADAPTER_DIR_TIERS)
 #     base_var  name of the variable holding that tier's root, e.g.
 #               PROJECT_GITHOOKS. Passed by NAME so the caller's scope decides
@@ -70,7 +70,7 @@ HOOK_RESOLUTION_SCHEMA=2
 # never as "use the current directory".
 #
 # shellcheck disable=SC2154,SC2086,SC2295
-_hook_resolve() {
+_hook_tier_dir() {
   local _tier_id="$1"
   local _base_var="$2"
   local _entry _entry_tier _entry_base _base_value
@@ -84,6 +84,13 @@ _hook_resolve() {
     _entry_base="${_entry#*|}"
     _entry_base="${_entry_base%%|*}"
     [ "$_entry_base" = "$_base_var" ] || continue
+    # Shape check before eval. Table membership already makes injection
+    # impossible TODAY, but that argument lives in a comment a future caller
+    # will not read. This makes it a property of the code: $_base_var must be
+    # a plain shell identifier, so nothing can reach eval that could execute.
+    case "$_base_var" in
+      *[!A-Za-z0-9_]*|"") return 0 ;;
+    esac
     # Indirect expansion: the caller owns the variable, we only read it.
     eval "_base_value=\${$_base_var:-}"
     [ -n "$_base_value" ] || return 0
@@ -101,19 +108,19 @@ _hook_resolve() {
 # Consumed by the sourcing parent, not here.
 # shellcheck disable=SC2034
 _HOOK_RESOLVE_BROKEN=""
-_hook_resolve_selfcheck() {
+_hook_tier_dir_selfcheck() {
   local _probe_out
-  if ! declare -F _hook_resolve >/dev/null 2>&1; then
-    _HOOK_RESOLVE_BROKEN="missing _hook_resolve"
+  if ! declare -F _hook_tier_dir >/dev/null 2>&1; then
+    _HOOK_RESOLVE_BROKEN="missing _hook_tier_dir"
     return 1
   fi
   # Smoke call against a known input; the resolver takes the base by name,
   # so overriding PROJECT_GITHOOKS for one command proves the indirection.
-  _probe_out="$(PROJECT_GITHOOKS="/__selfcheck__" _hook_resolve project PROJECT_GITHOOKS 2>/dev/null)"
+  _probe_out="$(PROJECT_GITHOOKS="/__selfcheck__" _hook_tier_dir project PROJECT_GITHOOKS 2>/dev/null)"
   if [ "$_probe_out" != "/__selfcheck__" ]; then
-    _HOOK_RESOLVE_BROKEN="selfcheck failed: resolve(project,PROJECT_GITHOOKS)=[${_probe_out}]"
+    _HOOK_RESOLVE_BROKEN="selfcheck failed: tier_dir(project,PROJECT_GITHOOKS)=[${_probe_out}]"
     return 1
   fi
   return 0
 }
-_hook_resolve_selfcheck || :
+_hook_tier_dir_selfcheck || :
