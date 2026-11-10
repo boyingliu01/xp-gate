@@ -38,8 +38,9 @@ function getProjectHooksDir() {
 function detectLocalModifications(srcDir, hooksDestDir, adaptersDestDir) {
   const modified = [];
 
-  // Check hook files: pre-commit, pre-push, post-merge
-  ['pre-commit', 'pre-push', 'post-merge'].forEach(hook => {
+  // Check hook files — the list is the manifest's, so a hook that gets installed
+  // is also a hook whose local modifications get detected (REQ-DEPLOY-001).
+  require('./deploy-manifest.js').HOOK_FILES.forEach(hook => {
     const srcPath = path.join(srcDir, 'hooks', hook);
     const destPath = path.join(hooksDestDir, hook);
     if (fs.existsSync(destPath) && fs.existsSync(srcPath)) {
@@ -158,7 +159,13 @@ function atomicCopyFile(src, dest, dryRun, noBackup, label) {
  */
 function copyHooks(srcDir, destDir, dryRun, noBackup) {
   const hooksSrcDir = path.join(srcDir, 'hooks');
-  ['pre-commit', 'pre-push', 'post-merge'].forEach(hook => {
+  // REQ-DEPLOY-001 (AC-DEPLOY-09): this listed only three hooks, so
+  // `update-hooks --scope hooks` produced a directory with no
+  // hook-module-resolution.sh — and pre-commit loads that file before any tier
+  // decision and fails closed, making every commit FATAL. post-commit was
+  // missing too (its audit-attribution flush never ran). Both now come from the
+  // manifest, so the installer and the updater cannot disagree again.
+  require('./deploy-manifest.js').HOOK_FILES.forEach(hook => {
     const src = path.join(hooksSrcDir, hook);
     const dest = path.join(destDir, hook);
     atomicCopyFile(src, dest, dryRun, noBackup, hook);
