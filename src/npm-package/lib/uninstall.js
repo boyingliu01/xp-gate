@@ -10,6 +10,7 @@ const {
   GLOBAL_ADAPTERS_DIR,
   GLOBAL_MODULES_DIR,
 } = require('./shared-paths.js');
+const { HOOK_FILES } = require('./deploy-manifest.js');
 
 const BACKUP_DIR = path.join(CONFIG_DIR, '.uninstall-backup');
 
@@ -865,14 +866,16 @@ function planHooksDirRemoval(hooksDir) {
 /**
  * Hook entry points xp-gate installs.
  *
- * This must stay in sync with `copyHooks()`'s `hookFiles` list, which is what
- * actually puts them on disk. `post-commit` was missing here (#714), so the
- * uninstaller classified its own hook as a third party's and kept it -- the
- * file contains nine `xp-gate` references and is installed unconditionally by
- * setup-global. The set is derived from the installer's list rather than
- * retyped, so the two cannot drift apart again.
+ * This must stay in sync with the list of hooks actually installed, which is
+ * what `copyHooks()` puts on disk. `post-commit` was missing here once (#714),
+ * so the uninstaller classified its own hook as a third party's and kept it —
+ * the file contains nine `xp-gate` references and is installed unconditionally
+ * by setup-global. The set is now read from the deploy manifest (REQ-DEPLOY-001,
+ * AC-DEPLOY-05) rather than retyped, so installer and uninstaller cannot drift
+ * apart again — and hook-module-resolution.sh is claimed too, which the old
+ * retyped list missed.
  */
-const OWNED_HOOK_NAMES = ['pre-commit', 'pre-push', 'post-merge', 'post-commit'];
+const OWNED_HOOK_NAMES = HOOK_FILES;
 
 /** 'git-lfs' when the file proves it, else null. Content-based: see doctor.js. */
 function foreignHookSource(filePath) {

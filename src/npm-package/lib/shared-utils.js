@@ -90,9 +90,10 @@ function copyHooks(srcDir, destDir) {
 
 function copyAdapters(srcDir, destDir) {
   const adaptersDir = path.join(srcDir, 'adapters');
-  const adapterCommon = path.join(srcDir, 'adapter-common.sh');
+  const { ADAPTER_COMMON } = require('./deploy-manifest.js');
+  const adapterCommon = path.join(srcDir, ADAPTER_COMMON);
   if (fs.existsSync(adapterCommon)) {
-    fs.copyFileSync(adapterCommon, path.join(destDir, 'adapter-common.sh'));
+    fs.copyFileSync(adapterCommon, path.join(destDir, ADAPTER_COMMON));
   }
   // Shared shell helpers the fragments `source` at runtime (ccn-ratchet.sh and
   // friends). Without this, gate-3.sh resolves $GATE_DIR/lib/ccn-ratchet.sh to a
