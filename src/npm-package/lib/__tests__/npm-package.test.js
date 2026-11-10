@@ -124,14 +124,17 @@ describe('Issue #411: every gate-*.sh at package root is listed in "files"', () 
     expect(missing).toEqual([]);
   });
 
-  it('files array covers doctor EXPECTED_GATE_SCRIPTS', () => {
-    const doctorSrc = fs.readFileSync(path.join(pkgDir, 'lib', 'doctor.js'), 'utf8');
-    const match = doctorSrc.match(/EXPECTED_GATE_SCRIPTS\s*=\s*\[([^\]]*)\]/);
-    expect(match).not.toBeNull();
-    const expected = [...match[1].matchAll(/'([^']+)'/g)].map(m => m[1]);
-    expect(expected).toContain('gate-10.sh');
+  it('files array covers every GATE_FILES entry (REQ-DEPLOY-001)', () => {
+    // Was: a regex over doctor.js's EXPECTED_GATE_SCRIPTS literal. That list is
+    // now derived from the deploy manifest, so the source of truth is read
+    // directly — and asserting on the manifest instead of one consumer's copy
+    // makes this cover every gate the package is supposed to ship. It caught a
+    // real gap on first run: gate-registry.sh, the routing table the hooks
+    // source, was absent from "files", so a published tarball would not have it.
+    const { GATE_FILES } = require('../deploy-manifest.js');
+    expect(GATE_FILES.length).toBeGreaterThan(0);
     const files = pkg.files || [];
-    const missing = expected.filter(f => !files.includes(f));
+    const missing = GATE_FILES.filter(f => !files.includes(f));
     expect(missing).toEqual([]);
   });
 });

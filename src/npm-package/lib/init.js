@@ -142,8 +142,10 @@ function generateManifest(srcDir, projectRoot) {
   const hooksDir = path.join(gitDir, 'hooks');
   const githooksDir = path.join(projectRoot, 'githooks');
 
-  // Hooks
-  ['pre-commit', 'pre-push', 'post-merge'].forEach(hook => {
+  // Hooks. The list is the deploy manifest's (REQ-DEPLOY-001): recording a
+  // different set than the installer writes would make the recorded manifest
+  // describe a repository that does not exist.
+  require('./deploy-manifest.js').HOOK_FILES.forEach(hook => {
     const hookPath = path.join(hooksDir, hook);
     if (fs.existsSync(hookPath)) {
       const stat = fs.statSync(hookPath);
@@ -203,8 +205,8 @@ function generateGlobalManifest(srcDir) {
     gitConfig: {}
   };
 
-  // Global hooks
-  ['pre-commit', 'pre-push', 'post-merge'].forEach(hook => {
+  // Global hooks (same manifest list as above, REQ-DEPLOY-001)
+  require('./deploy-manifest.js').HOOK_FILES.forEach(hook => {
     const hookPath = path.join(GLOBAL_HOOKS_DIR, hook);
     if (fs.existsSync(hookPath)) {
       const stat = fs.statSync(hookPath);
