@@ -17,15 +17,23 @@
  */
 const fs = require('node:fs');
 const path = require('node:path');
-const assert = require('node:assert');
-const { test } = require('node:test');
 const childProcess = require('node:child_process');
+const assert = require('node:assert');
+// Works under BOTH runners, which is what the hooks need: Gate 5 collects
+// scripts/__tests__/*.cjs with vitest, while `node --test` is the local
+// one-command repro. vitest injects describe/it as globals; node:test does not,
+// so fall back to it only when the global is absent. A test file that runs under
+// one runner and reports "No test suite found" under the other is not a passing
+// test -- it is a skipped one wearing a green badge.
+const { test: nodeTest } = require('node:test');
+const it = typeof globalThis.it === 'function' ? globalThis.it : nodeTest;
+
 
 const REPO_ROOT = path.resolve(__dirname, '..', '..');
 const PRE_PUSH = path.join(REPO_ROOT, 'githooks', 'pre-push');
 const NL = String.fromCharCode(10);
 
-test('AC-GATEID-003-03: pre-push sources the gate registry', () => {
+it('AC-GATEID-003-03: pre-push sources the gate registry', () => {
   const source = fs.readFileSync(PRE_PUSH, 'utf8');
   const orders = source
     .split(NL)
@@ -44,7 +52,7 @@ test('AC-GATEID-003-03: pre-push sources the gate registry', () => {
   );
 });
 
-test('AC-GATEID-003-04: the source is guarded, so an older consumer repo still runs', () => {
+it('AC-GATEID-003-04: the source is guarded, so an older consumer repo still runs', () => {
   // "Optional by contract" was asserted in a comment and nowhere else. An
   // unguarded `. "$REGISTRY"` in a repo installed before the registry existed
   // aborts the hook with "No such file or directory" on every push -- a
@@ -73,7 +81,7 @@ test('AC-GATEID-003-04: the source is guarded, so an older consumer repo still r
   );
 });
 
-test('AC-GATEID-003-05: sourcing the registry is insertion-only, never execution policy', () => {
+it('AC-GATEID-003-05: sourcing the registry is insertion-only, never execution policy', () => {
   // The oracle: diff pre-push against the root commit, which predates the
   // registry source. Any removed line means a pre-existing statement changed,
   // i.e. gate order or skip semantics moved. Comparing gate-result multisets
