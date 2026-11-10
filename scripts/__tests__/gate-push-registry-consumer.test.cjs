@@ -44,6 +44,35 @@ test('AC-GATEID-003-03: pre-push sources the gate registry', () => {
   );
 });
 
+test('AC-GATEID-003-04: the source is guarded, so an older consumer repo still runs', () => {
+  // "Optional by contract" was asserted in a comment and nowhere else. An
+  // unguarded `. "$REGISTRY"` in a repo installed before the registry existed
+  // aborts the hook with "No such file or directory" on every push -- a
+  // behaviour change no line-insertion diff can reveal. This pins the guard
+  // rather than trusting the comment.
+  const lines = fs.readFileSync(PRE_PUSH, 'utf8').split(NL);
+  const sourceIdx = lines.findIndex((line) => /^\.\s.*registry/i.test(line.trim()));
+  assert.notStrictEqual(sourceIdx, -1, 'pre-push should source the registry');
+
+  // Walk back to the nearest `if`/`fi` enclosing control statement and require it
+  // to test the registry path's existence.
+  const before = lines.slice(Math.max(0, sourceIdx - 8), sourceIdx).join(NL);
+  assert.match(
+    before,
+    /if\s+\[\s+-f\s+"\$_PRE_PUSH_REGISTRY"\s+\]/,
+    'the registry source must sit inside `if [ -f "$_PRE_PUSH_REGISTRY" ]`, '
+      + `otherwise a repo without the registry dies on every push. Context:\n${before}`,
+  );
+
+  // And the else branch must record absence rather than exiting.
+  const after = lines.slice(sourceIdx, sourceIdx + 8).join(NL);
+  assert.match(after, /PRE_PUSH_REGISTRY_STATUS="missing"/);
+  assert.ok(
+    !/exit\s+[1-9]/.test(after),
+    'a missing registry must NOT abort the hook -- absence is not a push failure',
+  );
+});
+
 test('AC-GATEID-003-05: sourcing the registry is insertion-only, never execution policy', () => {
   // The oracle: diff pre-push against the root commit, which predates the
   // registry source. Any removed line means a pre-existing statement changed,

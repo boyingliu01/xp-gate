@@ -73,15 +73,40 @@ const QUALITY_STATUS_DIR = path.join('.xp-gate', 'quality-status');
  */
 const { loadRegistry, parseRegistry, parseReportKeyOverrides, deriveGateTable, reportKey } = require('./gate-identity');
 
-const _registry = loadRegistry();
-const _rows = parseRegistry(_registry.text);
-const GATE_TABLE = deriveGateTable(_rows, parseReportKeyOverrides(_registry.text));
+/**
+ * The derived gate table, computed ON FIRST USE rather than at require() time.
+ *
+ * A copy disagreement in the registry is a real, fatal condition for anything
+ * that renders gates -- but it is not a fact about arithmetic on an artifact.
+ * Computing it eagerly meant `require('gate-coverage')` threw for consumers that
+ * only wanted `STATUS` or `exitCodeFor`, so a packaging bug in a file the caller
+ * never reads would take down an unrelated code path. Deferring it keeps the
+ * fail-closed behaviour where it belongs: the throw now fires on the first call
+ * that actually needs gate identity, and the message still names every differing
+ * copy (see loadRegistry).
+ */
+let _gateTableCache = null;
+
+function gateTable() {
+  if (_gateTableCache === null) {
+    const registry = loadRegistry();
+    _gateTableCache = deriveGateTable(
+      parseRegistry(registry.text),
+      parseReportKeyOverrides(registry.text),
+    );
+  }
+  return _gateTableCache;
+}
 
 /**
  * Registry rows, keyed by number, with the artifact report key attached.
  * Replaces the deleted PRODUCER_KEYS / GATE_NUMBER_TO_PRODUCER pair.
  */
-const GATE_BY_NUMBER = new Map(GATE_TABLE.map((row) => [row.gate, row]));
+// Built per call from the same lazy table, so a renumbering can never leave a
+// stale number->row index behind.
+function gateByNumber() {
+  return new Map(gateTable().map((row) => [row.gate, row]));
+}
 
 /**
  * Evidence pointer per gate. This is the ONE thing this file still owns: the
@@ -215,7 +240,10 @@ function buildCoverageRows(artifact, ctx) {
   const context = ctx || {};
   const gates = (artifact && artifact.gates) || {};
 
-  return GATE_TABLE.map((spec) => {
+  const table = gateTable();
+  const byNumber = gateByNumber();
+
+  return table.map((spec) => {
     // Look the gate up by its OWN report key, derived from the registry. The
     // deleted swap table used to translate between two numberings here; there
     // was only ever one numbering (#738).
@@ -585,7 +613,7 @@ function main(argv, deps) {
 
 module.exports = {
   STATUS,
-  GATE_TABLE,
+  gateTable,
   buildCoverageRows,
   renderGateCoverage,
   exitCodeFor,

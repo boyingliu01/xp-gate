@@ -39,11 +39,19 @@ const HOOKS_OF_RECORD = new Set(['pre-commit', 'pre-push']);
  * fourteen rows: the rule derives by default, and only genuine deviations are
  * written down, so the deviation set is enumerable and reviewable.
  *
- * Read from the registry file itself (`GATE_REPORT_KEY_OVERRIDES`) so the
- * override lives beside the rows it patches — a second mapping added near the
- * comparison logic would be invisible.
+ * The override is READ FROM `GATE_REPORT_KEY_OVERRIDES` in the registry file,
+ * never restated here. An earlier revision of this module exported a hardcoded
+ * `Map([['code-quality', 'gate1_static_analysis']])` as a fallback -- which is
+ * precisely the defect this module exists to remove: a second declaration of a
+ * gate fact, sitting outside the row it modifies, able to drift silently. There
+ * is no fallback now: if the registry lacks the block, the override set is
+ * EMPTY, and a report-key mismatch becomes a visible cross-surface violation
+ * instead of being papered over by a JS copy nobody updates.
+ *
+ * `EMPTY_OVERRIDES` is not a declaration of any gate; it is the honest answer
+ * "the registry lists no deviations".
  */
-const DEFAULT_REPORT_KEY_OVERRIDES = new Map([['code-quality', 'gate1_static_analysis']]);
+const EMPTY_OVERRIDES = new Map();
 
 /**
  * Find every copy of the registry, deterministically.
@@ -210,8 +218,13 @@ function parseRegistry(text) {
  */
 function parseReportKeyOverrides(text) {
   const lines = text.split('\n');
-  const start = lines.findIndex((line) => /^GATE_REPORT_KEY_OVERRIDES=\($/.test(line.trim()));
-  if (start === -1) return new Map(DEFAULT_REPORT_KEY_OVERRIDES);
+  // `export` is optional: the shell side marks the array exported so shellcheck
+  // accepts it, but a registry without that prefix must still parse. Anchoring on
+  // the bare assignment is what let the `export` keyword silently DISABLE this
+  // override during this sprint -- the set came back EMPTY and `code-quality`
+  // would have emitted the wrong report key with no error anywhere.
+  const start = lines.findIndex((line) => /^(?:export\s+)?GATE_REPORT_KEY_OVERRIDES=\($/.test(line.trim()));
+  if (start === -1) return new Map(EMPTY_OVERRIDES);
 
   const overrides = new Map();
   for (let i = start + 1; i < lines.length; i++) {
@@ -236,7 +249,7 @@ function parseReportKeyOverrides(text) {
  * @param {Map<string, string>} [overrides]
  * @returns {string}
  */
-function reportKey(row, overrides = DEFAULT_REPORT_KEY_OVERRIDES) {
+function reportKey(row, overrides = EMPTY_OVERRIDES) {
   const override = overrides.get(row.name);
   if (override) return override;
   return `gate${row.number}_${row.name.replace(/-/g, '_')}`;
@@ -249,7 +262,7 @@ function reportKey(row, overrides = DEFAULT_REPORT_KEY_OVERRIDES) {
  * @param {Array<object>} rows
  * @param {Map<string, string>} [overrides]
  */
-function deriveGateTable(rows, overrides = DEFAULT_REPORT_KEY_OVERRIDES) {
+function deriveGateTable(rows, overrides = EMPTY_OVERRIDES) {
   return rows.map((row) => ({
     // `gate` is numeric for pre-commit gates (0..13) — existing consumers
     // compare it with numbers (`r.gate === 0`, `row.gate === BOY_SCOUT_GATE`).
@@ -304,7 +317,7 @@ function checkCrossSurface(registryRows, surfaces = {}) {
 module.exports = {
   REGISTRY_FILENAME,
   HOOKS_OF_RECORD,
-  DEFAULT_REPORT_KEY_OVERRIDES,
+  EMPTY_OVERRIDES,
   discoverRegistryCopies,
   loadRegistry,
   parseRegistry,
