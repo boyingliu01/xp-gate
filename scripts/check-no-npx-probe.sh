@@ -22,7 +22,7 @@
 # never depended on -- a corrupted verdict that hides itself, because the cached
 # path is faster and quieter than a real install.
 #
-# Context: docs/incidents/2026-11-09-command-could-not-run-instead-of-found-problems.md
+# Context: #795, and docs/incidents/2026-11-09-command-could-not-run-instead-of-found-problems.md
 # Convention: AGENTS.md sec.REQ-GATE-PROBE-SHORTCUT (XP_GATE_NPX_PROBE=1 opt-in).
 #
 # Scope: the hook sources and adapters that run inside a commit. Test fixtures
