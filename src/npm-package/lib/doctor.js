@@ -451,8 +451,16 @@ function pathsEquivalent(a, b) {
  * exist on both sides are compared, so a repo without post-merge is not flagged.
  * The lib/ shared libraries (sourced by pre-commit at runtime) are covered
  * separately by diagnoseHookDrift/syncGlobalHooksFromRepo (#488).
+ *
+ * Selected by name from the deploy manifest rather than retyped (REQ-DEPLOY-001):
+ * post-commit and hook-module-resolution.sh are deliberately excluded — the
+ * former is written only at install time, the latter is generated on both sides
+ * from the same source, so comparing them reports drift that does not exist.
  */
-const DRIFT_COMPARED_HOOKS = ['pre-commit', 'pre-push', 'post-merge'];
+const DRIFT_EXCLUDED_HOOKS = new Set(['post-commit', 'hook-module-resolution.sh']);
+const DRIFT_COMPARED_HOOKS = require('./deploy-manifest.js').HOOK_FILES.filter(
+  h => !DRIFT_EXCLUDED_HOOKS.has(h),
+);
 
 /**
  * Classify the contents of an installed hooks directory (#664).
@@ -1759,16 +1767,16 @@ function shouldParseCheck(hookPath) {
 
 /**
  * Expected gate scripts that should be present in the adapters directory.
- * gate-5.sh and gate-6.sh are inline in pre-commit, so they are NOT expected here.
+ * Derived from the deploy manifest (REQ-DEPLOY-001, AC-DEPLOY-07): doctor can
+ * only report "missing gate scripts" for gates that something actually tries to
+ * deploy, and that set lives in exactly one place.
+ *
+ * The gate registry is excluded on purpose — it is the routing table the hooks
+ * source, and is validated by its own check rather than by presence here.
  */
-const EXPECTED_GATE_SCRIPTS = [
-  'gate-3.sh',
-  'gate-4.sh',
-  'gate-7.sh',
-  'gate-8.sh',
-  'gate-9.sh',
-  'gate-10.sh',
-];
+const EXPECTED_GATE_SCRIPTS = require('./deploy-manifest.js').GATE_FILES.filter(
+  g => g !== 'gate-registry.sh',
+);
 
 async function checkAdapters(checks, mode, gitDirPromise) {
   const gitDir = typeof gitDirPromise === 'string' ? gitDirPromise : await gitDirPromise;
@@ -2755,7 +2763,7 @@ function fixStaleHooks(config) {
  * the very installer residue #500 is about (#495 Round 3).
  */
 function staleSyncEntries(label, srcDir, hooksDestDir, adaptersDestDir) {
-  if (['pre-commit', 'pre-push', 'post-merge', 'sprint-gate.sh'].includes(label)) {
+  if (DRIFT_COMPARED_HOOKS.includes(label) || label === 'sprint-gate.sh') {
     const hooksSource = label === 'sprint-gate.sh'
       ? path.join(srcDir, label)
       : path.join(srcDir, 'hooks', label);

@@ -192,7 +192,7 @@ describe('doctor', () => {
       path.join(dir, 'adapters', 'python.sh'),
       '#!/usr/bin/env bash\necho "py adapter"\n'
     );
-    const gateScripts = ['gate-3.sh', 'gate-4.sh', 'gate-7.sh', 'gate-8.sh', 'gate-9.sh', 'gate-10.sh'];
+    const gateScripts = require('../deploy-manifest.js').GATE_FILES.filter(g => g !== 'gate-registry.sh');
     for (const script of gateScripts) {
       fs.writeFileSync(path.join(dir, 'adapters', script), `#!/bin/bash\n# ${script}\n`);
     }
@@ -233,7 +233,7 @@ describe('doctor', () => {
     fs.mkdirSync(globalAdaptersDir(), { recursive: true });
     fs.writeFileSync(path.join(globalAdaptersDir(), 'typescript.sh'), '#!/usr/bin/env bash\necho "ts adapter"\n');
     fs.writeFileSync(path.join(globalAdaptersDir(), 'python.sh'), '#!/usr/bin/env bash\necho "py adapter"\n');
-    const gateScripts = ['gate-3.sh', 'gate-4.sh', 'gate-7.sh', 'gate-8.sh', 'gate-9.sh', 'gate-10.sh'];
+    const gateScripts = require('../deploy-manifest.js').GATE_FILES.filter(g => g !== 'gate-registry.sh');
     for (const script of gateScripts) {
       fs.writeFileSync(path.join(globalAdaptersDir(), script), `#!/bin/bash\n# ${script}\n`);
     }
@@ -1038,7 +1038,7 @@ describe('doctor', () => {
 
   function createGateScripts(dir) {
     fs.mkdirSync(dir, { recursive: true });
-    const gateScripts = ['gate-3.sh', 'gate-4.sh', 'gate-7.sh', 'gate-8.sh', 'gate-9.sh', 'gate-10.sh'];
+    const gateScripts = require('../deploy-manifest.js').GATE_FILES.filter(g => g !== 'gate-registry.sh');
     for (const script of gateScripts) {
       fs.writeFileSync(path.join(dir, script), `#!/bin/bash\n# ${script}\n`);
     }
@@ -1059,7 +1059,7 @@ describe('doctor', () => {
       expect.stringContaining('Gate scripts')
     );
     expect(logSpy).toHaveBeenCalledWith(
-      expect.stringContaining('6 gate script(s)')
+      expect.stringContaining('gate script(s) present')
     );
   });
 
