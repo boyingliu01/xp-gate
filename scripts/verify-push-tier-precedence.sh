@@ -3,7 +3,7 @@
 #
 # Runs the REAL pre-push resolution block in a fixture directory, once per
 # layout, and prints which adapter-common.sh it chose. This is the check that
-# matters: a text assertion can pass while `_hook_resolve` is called with the
+# matters: a text assertion can pass while `_hook_tier_dir` is called with the
 # wrong arguments.
 set -u
 

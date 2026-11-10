@@ -75,10 +75,10 @@ describe('REQ-RESOLVE-001 pre-push 接入生成解析表', () => {
     });
   });
 
-  describe('AC-RESOLVE-001-03: 通过 _hook_resolve 取 ADAPTER_DIR', () => {
-    it('pre-push 调用 _hook_resolve 而非自己遍历 tier 数组', () => {
+  describe('AC-RESOLVE-001-03: 通过 _hook_tier_dir 取 ADAPTER_DIR', () => {
+    it('pre-push 调用 _hook_tier_dir 而非自己遍历 tier 数组', () => {
       const content = readPrePush();
-      expect(content).toMatch(/_hook_resolve\s/);
+      expect(content).toMatch(/_hook_tier_dir\s/);
     });
 
     it('pre-push 遍历 tier 数组时，顺序取自数组本身而非另写一份优先级', () => {
@@ -107,7 +107,7 @@ describe('REQ-RESOLVE-001 pre-push 接入生成解析表', () => {
       /**
        * 行为断言而非文本断言：在临时目录里造出"项目版 + 全局版都存在"的真实布局，
        * source 生成物后按 pre-push 的方式解析，断言选中项目版。
-       * 只做文本断言的话，把 _hook_resolve 调错参数也能通过。
+       * 只做文本断言的话，把 _hook_tier_dir 调错参数也能通过。
        */
       const tmp = fs.mkdtempSync(path.join(require('node:os').tmpdir(), 'pc1-'));
       try {
@@ -122,7 +122,7 @@ describe('REQ-RESOLVE-001 pre-push 接入生成解析表', () => {
           `source "${path.join(REPO_ROOT, 'githooks', 'hook-module-resolution.sh')}"`,
           `PROJECT_GITHOOKS="${projectGithooks}"`,
           `GLOBAL_ADAPTER_DIR="${globalDir}"`,
-          '_hook_resolve project PROJECT_GITHOOKS',
+          '_hook_tier_dir project PROJECT_GITHOOKS',
         ].join('\n');
 
         const out = execFileSync('bash', ['-c', script], { encoding: 'utf8' }).trim();
@@ -151,14 +151,14 @@ describe('REQ-RESOLVE-001 pre-push 接入生成解析表', () => {
   describe('AC-RESOLVE-001-06: 四种失败形态都必须显式，不得静默', () => {
     /**
      * case A: 生成物缺失
-     * case B: 生成物陈旧（schema < 2，无 _hook_resolve）
+     * case B: 生成物陈旧（schema < 2，无 _hook_tier_dir）
      * case C: 生成物语法损坏
      * case D: 生成物语法正确、函数存在，但契约不符
      *
      * 四种情况的共同要求：pre-push 必须**要么明确失败，要么明确 SKIP 并记录原因**，
      * 不允许"不确定地通过"。
      */
-    it('case B：旧 schema 的生成物应被识别为陈旧（缺 _hook_resolve）', () => {
+    it('case B：旧 schema 的生成物应被识别为陈旧（缺 _hook_tier_dir）', () => {
       const tmp = fs.mkdtempSync(path.join(require('node:os').tmpdir(), 'pc1-legacy-'));
       try {
         // 实测的旧形态：4 个 HOOK_* 常量、零个函数
@@ -172,7 +172,7 @@ describe('REQ-RESOLVE-001 pre-push 接入生成解析表', () => {
 
         const script = [
           `source "${legacy}"`,
-          'if declare -F _hook_resolve >/dev/null 2>&1; then echo "HAS_FUNC"; else echo "NO_FUNC"; fi',
+          'if declare -F _hook_tier_dir >/dev/null 2>&1; then echo "HAS_FUNC"; else echo "NO_FUNC"; fi',
           'echo "schema=${HOOK_RESOLUTION_SCHEMA:-unset}"',
         ].join('\n');
         const out = execFileSync('bash', ['-c', script], { encoding: 'utf8' });
@@ -192,19 +192,19 @@ describe('REQ-RESOLVE-001 pre-push 接入生成解析表', () => {
           '#!/bin/bash',
           'HOOK_RESOLUTION_SCHEMA=2',
           "HOOK_ADAPTER_DIR_TIERS=('project|PROJECT_GITHOOKS|adapter-common.sh')",
-          '_hook_resolve() { return 0; }',
-          '_hook_resolve_selfcheck() {',
+          '_hook_tier_dir() { return 0; }',
+          '_hook_tier_dir_selfcheck() {',
           '  local _probe_out',
-          '  if ! declare -F _hook_resolve >/dev/null 2>&1; then',
-          '    _HOOK_RESOLVE_BROKEN="missing _hook_resolve"; return 1',
+          '  if ! declare -F _hook_tier_dir >/dev/null 2>&1; then',
+          '    _HOOK_RESOLVE_BROKEN="missing _hook_tier_dir"; return 1',
           '  fi',
-          '  _probe_out="$(PROJECT_GITHOOKS="/__selfcheck__" _hook_resolve project PROJECT_GITHOOKS 2>/dev/null)"',
+          '  _probe_out="$(PROJECT_GITHOOKS="/__selfcheck__" _hook_tier_dir project PROJECT_GITHOOKS 2>/dev/null)"',
           '  if [ "$_probe_out" != "/__selfcheck__" ]; then',
           '    _HOOK_RESOLVE_BROKEN="selfcheck failed: got [${_probe_out}]"; return 1',
           '  fi',
           '  return 0',
           '}',
-          '_hook_resolve_selfcheck || :',
+          '_hook_tier_dir_selfcheck || :',
           '',
         ].join('\n'));
 

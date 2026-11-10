@@ -549,7 +549,7 @@ echo "━━━━━━━━━━━━━━━━━━━━━━━━�
 # was unreachable — including this repository's, whose own gate scripts
 # therefore never ran while the log said they had (#495 AC-495-23).
 #
-# The order is not restated here. `_hook_resolve` comes from the generated file,
+# The order is not restated here. `_hook_tier_dir` comes from the generated file,
 # so there is no second implementation left to drift. If somebody adds a fourth
 # tier to ADAPTER_DIR_ORDER, this hook picks it up with no edit.
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
@@ -578,7 +578,7 @@ elif ! source "$HOOK_RESOLUTION_FILE" 2>/dev/null; then
   echo "⚠️ Could not source hook-module-resolution.sh. SKIP — Gate M."
   GATE_M_SKIP_REASON="hook-module-resolution.sh failed to source: $HOOK_RESOLUTION_FILE"
   GATE_M_SKIP_KIND="corrupt"
-elif ! declare -F _hook_resolve >/dev/null 2>&1; then
+elif ! declare -F _hook_tier_dir >/dev/null 2>&1; then
   # Schema < 2: the file parses and sources cleanly but predates the resolver.
   # A file that installs without error and provides nothing is the worst case —
   # it looks like a successful install.
@@ -604,7 +604,7 @@ else
     _tier_rest="${_tier#*|}"
     _tier_base="${_tier_rest%%|*}"
     _tier_probe="${_tier_rest#*|}"
-    _tier_dir="$(_hook_resolve "$_tier_id" "$_tier_base")"
+    _tier_dir="$(_hook_tier_dir "$_tier_id" "$_tier_base")"
     [ -n "$_tier_dir" ] || continue
     if [ -f "$_tier_dir/$_tier_probe" ]; then
       ADAPTER_COMMON="$_tier_dir/$_tier_probe"
@@ -629,7 +629,7 @@ elif [ -z "$GATE_M_SKIP_KIND" ]; then
     _tier_id="${_tier%%|*}"
     _tier_rest="${_tier#*|}"
     _tier_base="${_tier_rest%%|*}"
-    _tier_dir="$(_hook_resolve "$_tier_id" "$_tier_base")"
+    _tier_dir="$(_hook_tier_dir "$_tier_id" "$_tier_base")"
     _tried="$_tried $_tier_id=${_tier_dir:-<unset>}"
   done
   echo "⚠️ adapter-common.sh not found in any tier:${_tried}"

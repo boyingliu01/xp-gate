@@ -47,10 +47,10 @@ function resolveAllTiers(artifactPath, layout) {
     `PROJECT_GITHOOKS="${layout.project}"`,
     `GLOBAL_ADAPTER_DIR="${layout.global}"`,
     `SCRIPT_DIR="${layout.script}"`,
-    'if ! declare -F _hook_resolve >/dev/null 2>&1; then echo "NO_RESOLVER"; exit 0; fi',
+    'if ! declare -F _hook_tier_dir >/dev/null 2>&1; then echo "NO_RESOLVER"; exit 0; fi',
     'for _t in "project PROJECT_GITHOOKS" "global GLOBAL_ADAPTER_DIR" "script SCRIPT_DIR"; do',
     '  set -- $_t',
-    '  printf "%s=%s\\n" "$1" "$(_hook_resolve "$1" "$2")"',
+    '  printf "%s=%s\\n" "$1" "$(_hook_tier_dir "$1" "$2")"',
     'done',
   ].join('\n');
   return execFileSync('bash', ['-c', script], { encoding: 'utf8' }).trim();
@@ -73,7 +73,7 @@ function buildLayout(root) {
 
 describe('REQ-RESOLVE-004 升级路径等价性', () => {
   describe('AC-RESOLVE-004-01: 旧生成物没有解析函数（升级的起点）', () => {
-    it('schema 1 的生成物 source 后没有 _hook_resolve', () => {
+    it('schema 1 的生成物 source 后没有 _hook_tier_dir', () => {
       const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'pc1-legacy-'));
       try {
         const legacy = path.join(tmp, 'hook-module-resolution.sh');
@@ -149,7 +149,7 @@ describe('REQ-RESOLVE-004 升级路径等价性', () => {
   });
 
   describe('AC-RESOLVE-004-03: 升级后不再出现 command-not-found（正负双向）', () => {
-    it('正向主证据：升级后 _hook_resolve 可调用且返回非空', () => {
+    it('正向主证据：升级后 _hook_tier_dir 可调用且返回非空', () => {
       const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'pc1-positive-'));
       try {
         const layout = buildLayout(tmp);
@@ -169,7 +169,7 @@ describe('REQ-RESOLVE-004 升级路径等价性', () => {
         const out = execFileSync('bash', ['-c', [
           `source "${GENERATED}" 2>&1`,
           `PROJECT_GITHOOKS="${layout.project}"`,
-          '_hook_resolve project PROJECT_GITHOOKS 2>&1',
+          '_hook_tier_dir project PROJECT_GITHOOKS 2>&1',
         ].join('\n')], { encoding: 'utf8' });
         expect(out).not.toMatch(/command not found/);
       } finally {
