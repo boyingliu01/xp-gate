@@ -162,3 +162,69 @@ test('AC-GATEID-002-04/05: cross-surface checker is injectable and reports the i
   assert.ok(reportedNumbers.includes('10'), `violation must name gate 10, got ${JSON.stringify(violations)}`);
 });
 
+// ---------------------------------------------------------------------------
+// AC-GATEID-001-06: the report-key override set cannot drift away from the rows.
+//
+// The single override (code-quality -> gate1_static_analysis) lives beside the
+// rows rather than in a JS map, because a JS copy is the exact defect this
+// sprint removes. But living beside them is not the same as being BOUND to them:
+// rename or delete the code-quality row and the override silently points at
+// nothing, so its correction stops applying while the file still looks
+// consistent. Nothing about the file's shape would reveal it.
+// ---------------------------------------------------------------------------
+test('AC-GATEID-001-06: every report-key override names a gate the registry declares', () => {
+  const registry = identity.loadRegistry();
+  const rows = identity.parseRegistry(registry.text);
+  const overrides = identity.parseReportKeyOverrides(registry.text);
+  const slugs = new Set(rows.map((row) => row.name));
+
+  const orphans = [...overrides.keys()].filter((key) => !slugs.has(key));
+  assert.deepStrictEqual(
+    orphans,
+    [],
+    'these overrides point at gates the registry does not declare, so their '
+      + 'correction is dead code:' + JSON.stringify(orphans),
+  );
+
+  // An override equal to the default derivation is a no-op dressed as a
+  // deviation: it advertises an exception that does not exist, and it makes a
+  // genuine future override indistinguishable from this one.
+  for (const [slug, key] of overrides.entries()) {
+    const row = rows.find((candidate) => candidate.name === slug);
+    assert.notStrictEqual(
+      key,
+      identity.reportKey(row, identity.EMPTY_OVERRIDES),
+      `override for ${slug} matches the default derivation, so it declares a `
+        + 'deviation that does not exist',
+    );
+  }
+});
+
+// ---------------------------------------------------------------------------
+// AC-GATEID-001-07: the override is READ, not restated.
+//
+// During this sprint the override was briefly disabled by a one-word edit: the
+// shell side began marking the array `export GATE_REPORT_KEY_OVERRIDES=(`, and a
+// parser anchored on the bare assignment stopped matching. The set came back
+// EMPTY -- no error, no warning -- and code-quality would have emitted the wrong
+// report key. That is the same silent-mismatch shape as #738, so it gets a test.
+// ---------------------------------------------------------------------------
+test('AC-GATEID-001-07: the override block parses with and without the export keyword', () => {
+  const body = '"code-quality|gate1_static_analysis"';
+  const plain = 'GATE_REPORT_KEY_OVERRIDES=(\n  ' + body + '\n)\n';
+  const exported = 'export GATE_REPORT_KEY_OVERRIDES=(\n  ' + body + '\n)\n';
+
+  for (const [label, text] of [['plain', plain], ['export', exported]]) {
+    const parsed = identity.parseReportKeyOverrides(text);
+    assert.strictEqual(parsed.get('code-quality'), 'gate1_static_analysis',
+      `the ${label} form must parse; an unmatched form returns an EMPTY map, `
+        + 'which silently disables the correction instead of failing');
+  }
+
+  // The real registry must actually declare it, or the override silently stops
+  // existing the day someone deletes the block.
+  const live = identity.parseReportKeyOverrides(identity.loadRegistry().text);
+  assert.strictEqual(live.get('code-quality'), 'gate1_static_analysis',
+    'the shipped registry must still declare the one known deviation');
+});
+
