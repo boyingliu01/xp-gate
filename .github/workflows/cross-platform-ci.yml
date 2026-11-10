@@ -339,6 +339,13 @@ jobs:
           bash scripts/check-delphi-runner-mirror.sh
           bash scripts/check-hook-mirror.sh
 
+          # No gate may answer "is this tool installed?" by consulting the
+          # registry. `npx <tool> --version` installs the tool when it is
+          # missing, so the probe changes the environment it was asked about;
+          # `--no-install` prevents the install but still queries the registry
+          # on every call. See docs/incidents/2026-11-09-command-could-not-run-*.
+          bash scripts/check-no-npx-probe.sh
+
           # Sync canonical sources to npm-package mirror directory
           bash scripts/sync-version.sh
           node src/npm-package/scripts/sync-package-content.js
