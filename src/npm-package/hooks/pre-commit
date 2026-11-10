@@ -1744,8 +1744,14 @@ if ! gate_enabled 1; then
   echo "⏭️  SKIPPED - Gate 1: Code quality (not selected by XP_GATE_ONLY_GATE)"
   GATE_1_STATUS="SKIP"
   GATE_1_DETAIL="not_selected"
-elif ! any_changed_files_match "\.(ts|tsx|js|jsx|py|go|java|kt|cpp|c|swift|m|mm|dart|sh|ps1|psm1)$" "\.ya?ml$" "\.json$" "Dockerfile" "\.tf$"; then
-  echo "✅ PASSED - No code files changed, skipping lint."
+elif ! any_changed_files_match "\.(ts|tsx|js|jsx|py|go|java|kt|cpp|c|swift|m|mm|dart|sh|ps1|psm1|cs|csx|fs|vb|rs|php|rb|lua|pl)$" "\.ya?ml$" "\.json$" "Dockerfile" "\.tf$"; then
+  # #798: this branch did NOT run a lint check, so it must not report PASSED.
+  # "No code files changed" is a SKIP: the same wording Gate 3 already uses
+  # ("⏭️  SKIPPED - Complexity: no changed source files in this run"). Reporting
+  # ✅ PASSED here meant a project whose main language was missing from the
+  # extension list got a green Gate 1 on every single commit, having analysed
+  # nothing. C# was exactly that case before `.cs` was added below.
+  echo "⏭️  SKIPPED - Code quality: no changed code files in this run (scope: diff)."
   GATE_1_STATUS="SKIP"
   GATE_1_DETAIL="no_matching_files"
 else
@@ -2586,7 +2592,7 @@ EOF_CHANGED
     ;;
     
     *)
-  SOURCE_FILES=$(echo "$CHANGED_FILES" | grep -E '\.(ts|tsx|js|jsx|py|go|java|scala|kt|cpp|c|h|rs|php|dart|swift)$' || true)
+  SOURCE_FILES=$(echo "$CHANGED_FILES" | grep -E '\.(ts|tsx|js|jsx|py|go|java|scala|kt|cpp|c|h|rs|php|dart|swift|cs|csx|fs|vb)$' || true)
   if [ -n "$SOURCE_FILES" ]; then
     if ! require_tool "jscpd" "Gate 2" "npm install -D jscpd"; then
       exit 1
@@ -4506,7 +4512,7 @@ else
           # violation cannot be introduced by a commit that touches no source file.
           # Gating on "did any source change" removes the single largest fixed cost
           # from docs/config-only commits without weakening the check at all.
-          if ! printf '%s\n' "${XP_STAGED_ACM:-}" | grep -qE '\.(ts|tsx|js|jsx|mjs|cjs|py|go|java|kt|kts|rs|cpp|cc|cxx|c|h|hpp|swift|dart)$'; then
+          if ! printf '%s\n' "${XP_STAGED_ACM:-}" | grep -qE '\.(ts|tsx|js|jsx|mjs|cjs|py|go|java|kt|kts|rs|cpp|cc|cxx|c|h|hpp|swift|dart|cs|csx|fs|vb)$'; then
             echo "     ⏭️  SKIPPED - Architecture validation (no source files changed)"
             ARCHLINT_OUTPUT=""
             ARCHLINT_EXIT=0
@@ -5278,7 +5284,7 @@ echo ""
 # v0.14.3+ (Issue #312): Skip if no code files changed
 # v0.18.5 (Issue #397): Fix gate status variable collision — SAST now sets GATE_10_STATUS
 # ============================================================================
-if any_changed_files_match "\.(ts|tsx|js|jsx|py|go|java|kt|cpp|c|swift|m|dart|sh|ps1|psm1)$"; then
+if any_changed_files_match "\.(ts|tsx|js|jsx|py|go|java|kt|cpp|c|swift|m|dart|sh|ps1|psm1|cs|csx|fs|vb|rs|php|rb|lua|pl)$"; then
   if [ -f "$GATE_DIR/gate-10.sh" ]; then
     source "$GATE_DIR/gate-10.sh"
   else
