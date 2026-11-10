@@ -87,4 +87,34 @@ describe('deploy-manifest projection freshness is enforced, not just implemented
     const tail = hook.slice(callSite, callSite + 600);
     expect(tail).toContain('exit 1');
   });
+
+  it('AC-DEPLOY-13: the freshness check sits under a guard keyed on the manifest path', () => {
+    // A source-text assertion alone can pass while the call sits in a branch
+    // that never runs for a manifest edit (code-walkthrough R2, A3/F2/F-2).
+    // This extracts the enclosing guard and proves it is keyed on the manifest,
+    // so relocating the call into a dead branch fails the test.
+    const hook = fs.readFileSync(PRE_COMMIT, 'utf8');
+    const callSite = hook.indexOf('generate-deploy-manifest.cjs --check');
+
+    expect(callSite).toBeGreaterThan(-1);
+    const guardStart = hook.lastIndexOf('if printf', callSite);
+    expect(guardStart).toBeGreaterThan(-1);
+    const guard = hook.slice(guardStart, callSite);
+
+    expect(guard).toContain('CHANGED_FILES');
+    expect(guard).toContain('deploy-manifest\\.js');
+  });
+
+  it('AC-DEPLOY-13: no dead status assignment before the blocking exit', () => {
+    // `exit 1` makes every later line unreachable, so a GATE_12_STATUS=WARN
+    // written just before it would be dead -- the same "verdict nobody
+    // consumes" defect the mirror half of Gate 12b documents at length.
+    const hook = fs.readFileSync(PRE_COMMIT, 'utf8');
+    const callSite = hook.indexOf('generate-deploy-manifest.cjs --check');
+    const block = hook.slice(callSite, callSite + 900);
+    const staleBranchEnd = block.indexOf('git add githooks/deploy-manifest.sh');
+
+    expect(staleBranchEnd).toBeGreaterThan(-1);
+    expect(block.slice(0, staleBranchEnd)).not.toContain('GATE_12_STATUS=');
+  });
 });
