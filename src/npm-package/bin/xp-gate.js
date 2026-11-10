@@ -512,8 +512,13 @@ const COMMANDS = {
   }
 };
 
-for (let i = 0; i <= 11; i++) {
-  const gateId = String(i);
+// Numbered gate subcommands are DERIVED from gateRunner.GATE_REGISTRY, which
+// builds its metadata from githooks/gate-registry.sh. This loop used to be
+// `for (let i = 0; i <= 11; i++)`, a hardcoded ceiling that silently excluded
+// gate-12 (file hygiene) and gate-13 (compiler strictness) — both had scripts
+// and hook coverage but no way to run them from the CLI (#783). Adding a row to
+// the registry now yields a subcommand; nothing here needs editing.
+for (const { id: gateId } of gateRunner.getAllGates().filter((gate) => /^\d+$/.test(gate.id))) {
   const gateInfo = gateRunner.GATE_REGISTRY[gateId];
   COMMANDS[`gate-${gateId}`] = {
     description: `Run Gate ${gateId}: ${gateInfo?.name || 'Unknown'}`,
