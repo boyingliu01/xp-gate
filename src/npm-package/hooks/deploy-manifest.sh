@@ -33,7 +33,6 @@ DEPLOY_GATE_FILES=(
   'gate-6-layers.sh'
   'gate-7.sh'
   'gate-8.sh'
-  'gate-9.sh'
   'gate-10.sh'
   'gate-12-file-hygiene.sh'
   'gate-13-compiler-strictness.sh'
