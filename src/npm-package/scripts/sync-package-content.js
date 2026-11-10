@@ -250,12 +250,19 @@ function syncHooks() {
     fs.copyFileSync(adapterCommonSrc, path.join(PKG_ROOT, 'adapter-common.sh'));
   }
 
-  // #505: hook-module-resolution.sh is GENERATED, but it must still ship beside
-  // pre-commit — the hook aborts with FATAL when it is missing, by design.
-  const HOOK_FILES = ['pre-commit', 'pre-push', 'post-commit', 'post-merge', 'adapter-common.sh', 'hook-module-resolution.sh'];
+  // REQ-DEPLOY-001: the hook list is the deploy manifest's, not a local retyped
+  // array. Gate 12b requires a package mirror for every `githooks/*` file the
+  // diff touches, so this list and the manifest must not disagree — when they
+  // did, `sync --fix` (the command Gate 12b itself prints) could not produce
+  // the mirror and the commit was un-committable.
+  const manifest = require(path.join(__dirname, '..', 'lib', 'deploy-manifest.js'));
+  const HOOK_FILES = [...manifest.HOOK_FILES, manifest.ADAPTER_COMMON];
+  // Installers are repo-side tooling rather than published hooks, but Gate 12b
+  // treats every githooks/* file alike, so they get a mirror too.
+  const INSTALLER_FILES = ['install.sh'];
   let copied = 0;
 
-  for (const name of HOOK_FILES) {
+  for (const name of [...HOOK_FILES, ...INSTALLER_FILES]) {
     const srcPath = path.join(SRC, name);
     const dstPath = path.join(DST, name);
     if (fs.existsSync(srcPath)) {
