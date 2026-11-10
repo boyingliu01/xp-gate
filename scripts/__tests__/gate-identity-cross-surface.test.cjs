@@ -197,6 +197,18 @@ test('AC-GATEID-001-06: every report-key override names a gate the registry decl
       `override for ${slug} matches the default derivation, so it declares a `
         + 'deviation that does not exist',
     );
+
+    // The TARGET must look like a report key too. A typo in the override target
+    // is worse than a missing override: it reads as "this gate is handled", so
+    // nobody re-derives it, while the emitted key matches no artifact entry at
+    // all and the gate silently reports "no result recorded".
+    assert.match(
+      key,
+      /^gate(?:\d+|[A-Z][A-Za-z0-9]*)_[a-z0-9]+(?:_[a-z0-9]+)*$/,
+      `override target for ${slug} ("${key}") is not shaped like a report key `
+        + '(gate<number or tag>_<snake_case_name>); a typo here reads as handled '
+        + 'while matching nothing in the artifact',
+    );
   }
 });
 
