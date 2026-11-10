@@ -55,17 +55,20 @@ setup() {
 }
 
 @test "TypeScript adapter clears hook Git context before running tests" {
-  fake_bin=$(mktemp -d)
-  cat > "$fake_bin/npx" <<'EOF'
+  # The runner is a project-LOCAL binary, not npx (#785: probes must not reach
+  # the registry, so the adapter resolves node_modules/.bin directly). The stub
+  # still asserts the invariant under test -- that the hook's Git context is
+  # cleared -- and fails loudly if it is not.
+  fake_proj=$(mktemp -d)
+  mkdir -p "$fake_proj/node_modules/.bin"
+  cat > "$fake_proj/node_modules/.bin/vitest" <<'EOF'
 #!/usr/bin/env bash
-[ -z "${GIT_DIR-}" ]
-[ -z "${GIT_INDEX_FILE-}" ]
-if [ "$2" = "--version" ]; then
-  exit 0
-fi
+[ -z "${GIT_DIR-}" ] || exit 9
+[ -z "${GIT_INDEX_FILE-}" ] || exit 9
+exit 0
 EOF
-  chmod +x "$fake_bin/npx"
-  PATH="$fake_bin:$PATH"
+  chmod +x "$fake_proj/node_modules/.bin/vitest"
+  cd "$fake_proj"
   export GIT_DIR=/missing/hook/git-dir
   export GIT_INDEX_FILE=/missing/hook/index
   source "$BATS_TEST_DIRNAME/../adapters/typescript.sh"
@@ -76,17 +79,27 @@ EOF
 }
 
 @test "TypeScript test runner discovery clears hook Git context" {
-  run grep -F 'if run_without_git_context npx vitest --version' "$BATS_TEST_DIRNAME/../adapters/typescript.sh"
-  [ "$status" -eq 0 ]
+  # The invariant is that the runner executes WITHOUT the hook's Git context (a
+  # stale GIT_DIR makes vitest resolve the wrong project). Which binary performs
+  # the run is an implementation detail, and it has changed twice: #640 moved
+  # pre-commit off npx onto the repo-local entry, and #785 removed the npx
+  # fallback from the probe entirely (it queried the registry on every call).
+  # Pinning the literal invocation would freeze one historical form instead of
+  # the contract, so this asserts the SURVIVING guarantee instead: every path
+  # that actually launches a runner goes through run_without_git_context.
+  run grep -cE 'run_without_git_context "\$bin"' "$BATS_TEST_DIRNAME/../adapters/typescript.sh"
+  [ "$output" -ge 1 ]
 
-  # The invariant is that the version probe runs WITHOUT the hook's Git context
-  # (a stale GIT_DIR makes vitest resolve the wrong project). Which binary
-  # performs it is an implementation detail: #640 moved pre-commit off npx onto
-  # the repo-local entry, so pinning the literal `npx vitest` here would freeze
-  # the slower path instead of the invariant. Either form satisfies the contract;
-  # an unguarded probe does not.
-  run grep -E 'if run_without_git_context (npx vitest|run_node_bin vitest)' "$BATS_TEST_DIRNAME/../pre-commit"
-  [ "$status" -eq 0 ]
+  # And no probe may consult npx at all, in either file.
+  #
+  # Comment lines are excluded: both files explain the removed npx form so the
+  # next reader sees why it is gone, and a bare grep reports the explanation as
+  # the defect -- flagging a fix for describing what it fixed. Hint text such as
+  # "run 'npx vitest run --coverage'" is user guidance, not a probe.
+  run bash -c "grep -vE '^[[:space:]]*#' '$BATS_TEST_DIRNAME/../adapters/typescript.sh' | grep -E 'npx +(--no-install +)?(vitest|jest)'"
+  [ "$status" -ne 0 ]
+  run bash -c "grep -vE '^[[:space:]]*#' '$BATS_TEST_DIRNAME/../pre-commit' | grep -E 'npx +(--no-install +)?(vitest|jest)' | grep -vE 'echo |Run ''''"
+  [ "$status" -ne 0 ]
 }
 
 @test "pre-commit uses project-root package metadata from nested directories" {
