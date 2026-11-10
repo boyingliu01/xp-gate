@@ -152,7 +152,7 @@ write_pre_push_report() {
     printf '%s\n' '    survivors_detail = json.loads(_survivors_raw) if _survivors_raw else None'
     printf '%s\n' 'except (ValueError, TypeError):'
     printf '%s\n' '    survivors_detail = None'
-    printf '%s\n' "_m_details = {'skip_reason': '${GATE_M_SKIP_REASON:-}', 'duration_ms': '${M_DURATION_MS:-0}', 'mutation_score': '${M_SCORE:-}'}"
+    printf '%s\n' "_m_details = {'skip_reason': '${GATE_M_SKIP_REASON:-}', 'skip_kind': '${GATE_M_SKIP_KIND:-}', 'duration_ms': '${M_DURATION_MS:-0}', 'mutation_score': '${M_SCORE:-}'}"
     printf '%s\n' 'if survivors_detail is not None:'
     printf '%s\n' "    _m_details['survivors'] = json.dumps(survivors_detail, sort_keys=True)"
     printf '%s\n' 'report = {'
@@ -531,23 +531,112 @@ echo "━━━━━━━━━━━━━━━━━━━━━━━━�
 echo "   GATE M: MUTATION TESTING"
 echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
 
-# Source adapter-common.sh — 3-tier resolution (global → project → script dir)
-ADAPTER_COMMON=""
-GLOBAL_ADAPTER_DIR="$HOME/.config/xp-gate/adapters"
+# Source adapter-common.sh through the GENERATED resolution table (REQ-RESOLVE-001).
+#
+# WHAT THIS REPLACED
+# ------------------
+# This block used to be hand-written:
+#
+#     if   [[ -f "$GLOBAL_ADAPTER_DIR/adapter-common.sh" ]]; then ...
+#     elif [[ -f "$PROJECT_GITHOOKS/adapter-common.sh"    ]]; then ...
+#     elif [[ -f "$(dirname "$0")/adapter-common.sh"      ]]; then ...
+#
+# Three lines that looked obviously correct and were inverted. The generated
+# data (`ADAPTER_DIR_ORDER`, in hook-module-resolution.js) declares PROJECT
+# first, on purpose: the global install is a machine-wide DEFAULT that a repo's
+# own githooks/ must be able to override. The hand-written cascade tried GLOBAL
+# first, so on any machine with a global install, every per-project githooks/
+# was unreachable — including this repository's, whose own gate scripts
+# therefore never ran while the log said they had (#495 AC-495-23).
+#
+# The order is not restated here. `_hook_tier_dir` comes from the generated file,
+# so there is no second implementation left to drift. If somebody adds a fourth
+# tier to ADAPTER_DIR_ORDER, this hook picks it up with no edit.
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 PROJECT_GITHOOKS="$(git rev-parse --show-toplevel 2>/dev/null)/githooks"
+GLOBAL_ADAPTER_DIR="$HOME/.config/xp-gate/adapters"
 
-if [[ -f "$GLOBAL_ADAPTER_DIR/adapter-common.sh" ]]; then
-  ADAPTER_COMMON="$GLOBAL_ADAPTER_DIR/adapter-common.sh"
-elif [[ -f "$PROJECT_GITHOOKS/adapter-common.sh" ]]; then
-  ADAPTER_COMMON="$PROJECT_GITHOOKS/adapter-common.sh"
-elif [[ -f "$(dirname "$0")/adapter-common.sh" ]]; then
-  ADAPTER_COMMON="$(dirname "$0")/adapter-common.sh"
+ADAPTER_COMMON=""
+GATE_M_SKIP_KIND=""
+
+# Locate the generated table next to this hook. It ships in HOOK_FILES, so it is
+# present wherever the hooks are installed; a missing copy is a real install
+# defect and must be reported, never papered over by falling back to a private
+# copy of the order.
+HOOK_RESOLUTION_FILE="$SCRIPT_DIR/hook-module-resolution.sh"
+
+if [ ! -f "$HOOK_RESOLUTION_FILE" ]; then
+  echo "⚠️  hook-module-resolution.sh not found at $HOOK_RESOLUTION_FILE"
+  echo "    Run: xp-gate init   (or reinstall the hooks)"
+  echo "⚠️ Could not resolve adapter-common.sh. SKIP — Gate M."
+  GATE_M_SKIP_REASON="hook-module-resolution.sh not found: $HOOK_RESOLUTION_FILE"
+  GATE_M_SKIP_KIND="missing"
+# shellcheck source=githooks/hook-module-resolution.sh
+elif ! source "$HOOK_RESOLUTION_FILE" 2>/dev/null; then
+  echo "⚠️  hook-module-resolution.sh is corrupt: $HOOK_RESOLUTION_FILE"
+  echo "    Run: node scripts/generate-hook-resolution.cjs   (or reinstall)"
+  echo "⚠️ Could not source hook-module-resolution.sh. SKIP — Gate M."
+  GATE_M_SKIP_REASON="hook-module-resolution.sh failed to source: $HOOK_RESOLUTION_FILE"
+  GATE_M_SKIP_KIND="corrupt"
+elif ! declare -F _hook_tier_dir >/dev/null 2>&1; then
+  # Schema < 2: the file parses and sources cleanly but predates the resolver.
+  # A file that installs without error and provides nothing is the worst case —
+  # it looks like a successful install.
+  echo "⚠️  hook-module-resolution.sh is STALE (schema ${HOOK_RESOLUTION_SCHEMA:-1}, need 2)."
+  echo "    Run: xp-gate update-hooks   (regenerates the resolution table)"
+  echo "⚠️ Could not resolve adapter-common.sh. SKIP — Gate M."
+  GATE_M_SKIP_REASON="hook-module-resolution.sh is stale: schema ${HOOK_RESOLUTION_SCHEMA:-1}, need 2"
+  GATE_M_SKIP_KIND="stale"
+elif [ -n "$_HOOK_RESOLVE_BROKEN" ]; then
+  # case D: valid syntax, function present, contract wrong. Caught at load time
+  # by the generated selfcheck instead of blowing up mid-push at a random call.
+  echo "⚠️  hook-module-resolution.sh contract selfcheck failed: $_HOOK_RESOLVE_BROKEN"
+  echo "    Run: xp-gate update-hooks"
+  echo "⚠️ Could not resolve adapter-common.sh. SKIP — Gate M."
+  GATE_M_SKIP_REASON="hook-module-resolution.sh contract mismatch: $_HOOK_RESOLVE_BROKEN"
+  GATE_M_SKIP_KIND="contract_mismatch"
+else
+  # Walk the declared tiers IN ORDER and take the first one whose probe exists.
+  # The order comes from HOOK_ADAPTER_DIR_TIERS; this loop does not know which
+  # tier "should" win, which is the point.
+  for _tier in "${HOOK_ADAPTER_DIR_TIERS[@]}"; do
+    _tier_id="${_tier%%|*}"
+    _tier_rest="${_tier#*|}"
+    _tier_base="${_tier_rest%%|*}"
+    _tier_probe="${_tier_rest#*|}"
+    _tier_dir="$(_hook_tier_dir "$_tier_id" "$_tier_base")"
+    [ -n "$_tier_dir" ] || continue
+    if [ -f "$_tier_dir/$_tier_probe" ]; then
+      ADAPTER_COMMON="$_tier_dir/$_tier_probe"
+      break
+    fi
+  done
 fi
-# shellcheck source=githooks/adapter-common.sh
-source "$ADAPTER_COMMON" 2>/dev/null || {
+
+if [ -n "$ADAPTER_COMMON" ]; then
+  # shellcheck source=githooks/adapter-common.sh
+  if ! source "$ADAPTER_COMMON" 2>/dev/null; then
+    echo "⚠️ Could not source adapter-common.sh from $ADAPTER_COMMON. SKIP — Gate M."
+    GATE_M_SKIP_REASON="adapter-common.sh could not be sourced: $ADAPTER_COMMON"
+    GATE_M_SKIP_KIND="source_failed"
+    ADAPTER_COMMON=""
+  fi
+elif [ -z "$GATE_M_SKIP_KIND" ]; then
+  # No tier held adapter-common.sh. Report every tier that was tried, so the
+  # message says WHERE it looked rather than only that it failed.
+  _tried=""
+  for _tier in "${HOOK_ADAPTER_DIR_TIERS[@]}"; do
+    _tier_id="${_tier%%|*}"
+    _tier_rest="${_tier#*|}"
+    _tier_base="${_tier_rest%%|*}"
+    _tier_dir="$(_hook_tier_dir "$_tier_id" "$_tier_base")"
+    _tried="$_tried $_tier_id=${_tier_dir:-<unset>}"
+  done
+  echo "⚠️ adapter-common.sh not found in any tier:${_tried}"
   echo "⚠️ Could not source adapter-common.sh. SKIP — Gate M."
-  GATE_M_SKIP_REASON="adapter-common.sh could not be sourced"
-}
+  GATE_M_SKIP_REASON="adapter-common.sh not found in any resolution tier:$_tried"
+  GATE_M_SKIP_KIND="missing"
+fi
 
 # #404 P0: every Gate M skip records WHY. Without this the journals carried
 # `details: {}` on 62 of 68 runs, so the RFC's "SKIP rate" question was
@@ -556,12 +645,14 @@ source "$ADAPTER_COMMON" 2>/dev/null || {
 if [[ ! -f "package.json" ]] || [[ ! -f "tsconfig.json" ]]; then
   echo "📚 Not a TypeScript project. SKIP — Gate M."
   GATE_M_SKIP_REASON="not a TypeScript project (package.json+tsconfig.json required)"
+  GATE_M_SKIP_KIND="not_applicable"
 else
   # Check if mutation testing is configured
   if ! detect_mutation_testable 2>/dev/null; then
     echo "⚠️ Stryker config not found or @stryker-mutator not installed."
     echo "   SKIP — Gate M mutation testing."
     GATE_M_SKIP_REASON="stryker config missing or @stryker-mutator not installed"
+    GATE_M_SKIP_KIND="tool_missing"
   else
     # Filter to source files (exclude tests). The tree-segment grep excludes
     # test infrastructure (helpers/fixtures under tests/, test/, __tests__/)
@@ -572,6 +663,7 @@ else
     if [ -z "$CHANGED_SOURCE_FILES" ]; then
       echo "📚 No changed TypeScript source files. SKIP — Gate M."
       GATE_M_SKIP_REASON="no changed TypeScript source files in this push"
+      GATE_M_SKIP_KIND="no_input"
     else
       echo "🧬 Running mutation tests on changed files..."
       echo "$CHANGED_SOURCE_FILES"
@@ -589,6 +681,7 @@ else
       if [[ -z "$MUTATION_SCRIPT" ]]; then
         echo "⚠️ Gate M script not found. SKIP — Gate M."
         GATE_M_SKIP_REASON="gate-m.ts not found in .xp-gate/modules, src/mutation, or global modules"
+        GATE_M_SKIP_KIND="module_missing"
       else
         # Run mutation gate with timeout matching stryker.conf.json (timeoutMS: 600000 = 10min)
         MUTATION_OUTPUT=$(mktemp)
@@ -641,6 +734,7 @@ else
             echo "   Allowing push with warning — review mutation coverage manually."
             GATE_M_STATUS="TIMEOUT"
             GATE_M_SKIP_REASON="mutation run exceeded the 600s timeout; score is unknown"
+            GATE_M_SKIP_KIND="timeout"
             ;;
           *)
             echo "⚠️ Gate M: Unexpected exit code $MUTATION_EXIT"
@@ -648,6 +742,7 @@ else
             echo "   Allowing push with warning."
             GATE_M_STATUS="WARN"
             GATE_M_SKIP_REASON="gate-m.ts exited $MUTATION_EXIT (unexpected); score is unknown"
+            GATE_M_SKIP_KIND="error"
             ;;
         esac
 

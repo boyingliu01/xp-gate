@@ -35,7 +35,7 @@ function loadManifest() {
 
 /** Render the shell projection text from the JS manifest (pure, no I/O). */
 function renderProjection() {
-  const { HOOK_FILES, GATE_FILES, ADAPTER_COMMON, HOOKS_LIB } = loadManifest();
+  const { HOOK_FILES, GATE_FILES, MODULE_FILES, ADAPTER_COMMON, HOOKS_LIB } = loadManifest();
   const lines = [];
   lines.push('#!/bin/bash');
   lines.push('# GENERATED FILE — DO NOT EDIT.');
@@ -75,6 +75,20 @@ function renderProjection() {
   lines.push('# shellcheck disable=SC2034');
   lines.push(`DEPLOY_ADAPTER_COMMON='${ADAPTER_COMMON}'`);
   lines.push(`DEPLOY_HOOKS_LIB='${HOOKS_LIB}'`);
+  lines.push('');
+  lines.push('# 非 hook 模块全集（lib/* 逐个列出，加 adapter-common.sh、deploy-manifest.sh、');
+  lines.push('# install.sh）——REQ-DEPLOY-002。');
+  lines.push('#');
+  lines.push('# 这里刻意逐文件列出，而不是给一个 `lib` 目录名让安装器自己 glob。目录名形态');
+  lines.push('# 让「清单是否完整」无法通过读清单来回答：装到用户磁盘上的文件可能没有任何');
+  lines.push('# 清单条目，于是「都在清单里」永远为真。逐文件列出使清单成为真正的安装计划。');
+  lines.push('# Consumed by the sourcing parent, not here.');
+  lines.push('# shellcheck disable=SC2034');
+  lines.push('DEPLOY_MODULE_FILES=(');
+  for (const m of MODULE_FILES) {
+    lines.push(`  '${m}'`);
+  }
+  lines.push(')');
   lines.push('');
   return lines.join('\n');
 }

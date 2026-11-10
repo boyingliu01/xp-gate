@@ -170,21 +170,23 @@ function copyHooks(srcDir, destDir, dryRun, noBackup) {
     const dest = path.join(destDir, hook);
     atomicCopyFile(src, dest, dryRun, noBackup, hook);
   });
-  const libSrcDir = path.join(hooksSrcDir, 'lib');
-  if (fs.existsSync(libSrcDir)) {
-    fs.readdirSync(libSrcDir, { withFileTypes: true })
-      .filter(entry => entry.isFile())
-      .forEach(entry => {
-        const label = `lib/${entry.name}`;
-        atomicCopyFile(
-          path.join(libSrcDir, entry.name),
-          path.join(destDir, label),
-          dryRun,
-          noBackup,
-          label
-        );
-      });
-  }
+  // Non-hook modules (lib/*, adapter-common.sh, deploy-manifest.sh, install.sh)
+  // come from MODULE_FILES rather than a directory enumeration.
+  //
+  // REQ-DEPLOY-002: enumerating `hooks/lib/` meant the updater installed whatever
+  // happened to be in that directory — including files no manifest declared — and
+  // left adapter-common.sh / deploy-manifest.sh / install.sh uninstalled entirely.
+  // Enumerating the manifest instead makes the install plan readable.
+  const { MODULE_FILES } = require('./deploy-manifest.js');
+  MODULE_FILES.forEach(rel => {
+    atomicCopyFile(
+      path.join(hooksSrcDir, rel),
+      path.join(destDir, rel),
+      dryRun,
+      noBackup,
+      rel
+    );
+  });
 }
 
 /**
