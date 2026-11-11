@@ -285,6 +285,17 @@ _csharp_newest_cobertura() {
     | sort -rn | head -1 | cut -f2-
 }
 
+# #798 / #794: run_coverage() below is `dotnet test --collect:...`, i.e. it runs
+# and validates the SAME suite run_tests() runs. #798 measured one commit at
+# 28.5s for run_tests + 30.0s for run_coverage with identical results (319
+# passing both times) — the first pass contributed no verdict at all.
+#
+# Declaring it here is what lets Gate 5 run the suite once. The decision lives in
+# the adapter because the adapter is what knows its toolchain; a hook-level
+# `if [ "$CURRENT_LANG" = ... ]` had already been written twice (#794) and would
+# need writing again for every new language.
+coverage_runs_tests() { return 0; }
+
 run_coverage() {
   local dotnet_root dotnet
   dotnet_root=$(_detect_dotnet_root) || { echo "No .NET project marker found"; return 0; }

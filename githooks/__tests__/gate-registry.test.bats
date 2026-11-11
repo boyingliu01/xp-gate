@@ -44,16 +44,24 @@ setup() {
   [ "$status" -ne 0 ]
 }
 
-# --- every declared implementation must really be sourced by pre-commit ----
+# --- every declared implementation must really be sourced by the gate chain ---
 
 @test "every non-inline gate script is sourced by pre-commit" {
-  local impl missing=""
+  # #798 split the hook: the `source "$GATE_DIR/gate-N.sh"` lines now live in
+  # gate-entries/gate-N-entry.sh, which the driver sources. The invariant this
+  # guards is unchanged -- "a registry row must name a script some gate really
+  # sources" -- so it reads the whole chain. That is the #717/#738 failure this
+  # test exists for: a SAST fix landed in gate-9.sh, a file no hook sourced.
+  local chain impl missing=""
+  chain=$(cat "$REPO_ROOT/githooks/pre-commit" \
+            "$REPO_ROOT/githooks/gate-driver.sh" \
+            "$REPO_ROOT"/githooks/gate-entries/*.sh 2>/dev/null)
   while IFS= read -r impl; do
     [ -n "$impl" ] || continue
-    grep -q "$impl" "$REPO_ROOT/githooks/pre-commit" || missing="$missing $impl"
+    printf '%s' "$chain" | grep -q "$impl" || missing="$missing $impl"
   done < <(gate_all_impls)
   [ -z "$missing" ] || {
-    echo "gate script(s) declared in the registry but never sourced by pre-commit:$missing"
+    echo "gate script(s) declared in the registry but never sourced by the gate chain:$missing"
     false
   }
 }
@@ -173,16 +181,25 @@ setup() {
   # read over it parses nothing and the loop silently passes without testing
   # a single gate. That is the same vacuous-assertion shape this file exists
   # to prevent.
-  local row name num impl blocks statusvar
+  local row name num impl blocks statusvar chain
   local checked=0
+  # #798 moved the gate bodies into gate-entries/, so the status assignments and
+  # their terminal statements live there, not in pre-commit. Reading the whole
+  # chain is also what keeps this from becoming a vacuous pass: an empty grep over
+  # pre-commit alone finds no BLOCK assignment and silently "succeeds".
+  chain=$(cat "$REPO_ROOT/githooks/pre-commit" \
+            "$REPO_ROOT/githooks/gate-driver.sh" \
+            "$REPO_ROOT"/githooks/gate-entries/*.sh 2>/dev/null)
   for row in "${GATE_REGISTRY_ROWS[@]}"; do
     IFS='|' read -r name num impl blocks <<< "$row"
     [ "$blocks" = "NO" ] || continue
     checked=$((checked + 1))
     statusvar="GATE_${num}_STATUS"
-    run grep -n -A4 "${statusvar}=\"BLOCK\"" "$REPO_ROOT/githooks/pre-commit"
-    if printf '%s' "$output" | grep -q 'exit 1'; then
-      echo "registry says $name cannot block, but ${statusvar}=\"BLOCK\" is followed by exit 1"
+    # `return 1` counts as terminating for the same reason as `exit 1`: the gate
+    # body is a function now, and the driver turns a non-zero return into the
+    # hook's exit status.
+    if printf '%s' "$chain" | grep -n -A4 "${statusvar}=\"BLOCK\"" | grep -qE '(exit|return) 1'; then
+      echo "registry says $name cannot block, but ${statusvar}=\"BLOCK\" is followed by a non-zero exit/return"
       false
     fi
   done
@@ -200,9 +217,20 @@ setup() {
   # pre-commit and read nowhere. The gate printed BLOCKED on every doc edit and
   # the commit landed. Same defect class as a filter that accepts a language no
   # adapter claims: the mechanism looks like enforcement but enforces nothing.
-  run grep -A14 'BLOCKED - Gate 12b: \$MIRROR_FAIL mirror parity' "$REPO_ROOT/githooks/pre-commit"
-  printf '%s' "$output" | grep -q 'exit 1' || {
-    echo "Gate 12b's failure branch does not exit -- a printed BLOCK would not block"
+  #
+  # #798 wrapped every gate body in `gate_N_run()`, so the terminal statement is
+  # now `return 1` rather than `exit 1`: the driver turns a non-zero return into
+  # the hook's exit status (see scripts/wrap-gate-entries.cjs). The property being
+  # asserted is unchanged -- "the failure branch TERMINATES the gate with a
+  # non-zero status" -- so both spellings satisfy it, and allowing only `exit 1`
+  # would fail a gate that still blocks perfectly.
+  local text
+  text=$(cat "$REPO_ROOT/githooks/pre-commit" \
+           "$REPO_ROOT/githooks/gate-driver.sh" \
+           "$REPO_ROOT"/githooks/gate-entries/*.sh 2>/dev/null)
+  printf '%s' "$text" | grep -A14 'BLOCKED - Gate 12b: \$MIRROR_FAIL mirror parity' \
+    | grep -qE '(exit|return) 1' || {
+    echo "Gate 12b's failure branch does not terminate with a non-zero status -- a printed BLOCK would not block"
     false
   }
 }
@@ -216,8 +244,14 @@ setup() {
 @test "gate-12b skips documentation files, which have no mirror by design" {
   # githooks/AGENTS.md has no hooks/AGENTS.md counterpart; requiring one made
   # every doc refresh a false BLOCK.
-  run grep -A4 'AGENTS.md) continue' "$REPO_ROOT/githooks/pre-commit"
-  [ "$status" -eq 0 ]
+  #
+  # #798 moved this loop into gate-entries/gate-12b-entry.sh, so the assertion
+  # reads the whole chain instead of pre-commit alone.
+  local text
+  text=$(cat "$REPO_ROOT/githooks/pre-commit" \
+           "$REPO_ROOT/githooks/gate-driver.sh" \
+           "$REPO_ROOT"/githooks/gate-entries/*.sh 2>/dev/null)
+  printf '%s' "$text" | grep -q -A4 'AGENTS.md) continue'
 }
 
 # --- the registry must actually be LOADED, not merely present ------------

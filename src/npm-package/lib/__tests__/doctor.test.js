@@ -85,11 +85,42 @@ describe('doctor', () => {
     // and reloading it would restore the full tool list, breaking the test mock setup.
     const modulesToInvalidate = [
       '../doctor', '../uninstall', '../init', '../shared-paths',
-      '../check-version.js', '../doctor-tui',
+      '../check-version.js', '../doctor-tui', '../language-tools.js',
     ];
     for (const mod of modulesToInvalidate) {
       try { delete require.cache[require.resolve(mod)]; } catch { /* first load */ }
     }
+    // Language-tool and registry probing are not what this file tests, but
+    // doctor() reaches both on every call:
+    //
+    //  1. diagnoseLanguageTools() scans process.cwd() -- and a vitest worker
+    //     cannot be chdir'd ("process.chdir() is not supported in workers"), so
+    //     cwd is always the real xp-gate checkout. That tree is recognised as a
+    //     TypeScript/Shell/... project, so `checkTool()` runs real subprocesses
+    //     (`eslint --version`, `npx --no-install archlint --version`,
+    //     `shellcheck --version`, `pwsh --version`, `terraform --version`, ...).
+    //  2. diagnoseUpgrade() -> checkUpgrade() issues a real HTTPS request to
+    //     https://registry.npmjs.org/-/package/<pkg>/dist-tags and waits on it.
+    //     Seeding version-cache.json does not prevent the fetch, so every case
+    //     paid the network round trip -- this was the larger half of the cost.
+    //
+    // Measured 2026-11-11 on one doctor() call with a config present (i.e. the
+    // full check suite): 2140 ms / 1064 ms unstubbed versus 239 ms / 248 ms with
+    // both stubbed (ABBA). XP_GATE_REPO_ROOT already redirects the hook-drift
+    // check to an empty dir for the same reason; this closes the remaining paths.
+    //
+    // Why it is safe: no case in this file asserts anything about language-tool
+    // detection or upgrade advice -- neither the "Language-Specific Tools"
+    // section nor the upgrade message is matched in any expectation. Both stubs
+    // are re-applied on every test because vi.resetModules() above discards
+    // them, and they must be installed BEFORE require('../doctor') captures its
+    // destructured imports.
+    const languageTools = require('../language-tools.js');
+    languageTools.getToolsForLanguages = () => ({});
+    languageTools.detectProjectLanguages = () => ({ detected: [], configFiles: {} });
+    const checkVersion = require('../check-version.js');
+    checkVersion.checkUpgrade = async () => ({ status: 'current' });
+    checkVersion.formatUpgradeMsg = () => '';
     logSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
     vi.spyOn(console, 'warn').mockImplementation(() => {});
     vi.spyOn(console, 'error').mockImplementation(() => {});
@@ -637,8 +668,17 @@ describe('doctor', () => {
   it('AC-488: doctor still accepts its documented flags', async () => {
     const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
     const { doctor } = require('../doctor');
-    await doctor(['--fix', '--sync-hooks']);
+    const result = await doctor(['--fix', '--sync-hooks']);
+    // Asserted on the RETURN VALUE as well as the absence of flag errors. "No
+    // error was printed" alone cannot tell "the flags were understood" from "the
+    // function never got far enough to print anything", which is exactly the
+    // regression this case exists for: an unrecognised flag makes doctor bail out
+    // before it reports anything, and silence reads as success.
     expect(errorSpy).not.toHaveBeenCalled();
+    // AC-488 is about flag PARSING, not about this machine being healthy: the exit
+    // code legitimately varies with the install state, so the assertion is that it
+    // is a doctor verdict (0/1) rather than a crash or an undefined return.
+    expect([0, 1]).toContain(result);
     errorSpy.mockRestore();
   });
 

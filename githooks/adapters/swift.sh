@@ -33,6 +33,12 @@ run_tests() {
   fi
 }
 
+# #798 / #794: does run_coverage() also execute AND validate the test suite?
+# Yes: `swift test --enable-code-coverage` runs the same suite and reports the
+# same failures, so a separate run_tests() pass adds no verdict -- only time.
+# Undeclared adapters keep the safe double-run default.
+coverage_runs_tests() { return 0; }
+
 run_coverage() {
   if command -v swift &>/dev/null && [ -f "Package.swift" ]; then
     swift test --enable-code-coverage 2>&1 | tail -10

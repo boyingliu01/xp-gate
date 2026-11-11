@@ -105,6 +105,12 @@ run_tests() {
   fi
 }
 
+# #798 / #794: run_coverage() below re-runs the test phase itself (`mvn test` /
+# `gradle jacocoTestReport` both execute the suite), so a separate run_tests()
+# pass adds no verdict -- only time. Undeclared adapters keep the double-run
+# default, which is slower but never skips test verification.
+coverage_runs_tests() { return 0; }
+
 run_coverage() {
   local build_system
   build_system=$(_detect_kotlin_build)

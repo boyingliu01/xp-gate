@@ -27,17 +27,17 @@ const { spawnSync } = require('child_process');
 
 const reportPath = path.resolve(__dirname, '..', 'ccn-report.cjs');
 
-/** lizard must exist for these cases: they measure real CCN values. */
-function hasLizard() {
-  return spawnSync('lizard', ['--version'], { encoding: 'utf8' }).status === 0;
-}
-
 /**
  * The lizard version the local `lizard` command reports, or null.
  *
  * The cases below need a REAL version string to write into the baseline; a
  * hard-coded one would test the string comparison against a version that may not
  * be installed, and the "matches" case would never be reachable.
+ *
+ * Probing once answers both questions this file needs: whether lizard is
+ * installed, and which version it is. A separate `hasLizard()` used to spawn
+ * `lizard --version` a second time for the first question alone; on this machine
+ * that probe measured 690-895 ms, and "is lizard installed" cannot change mid-run.
  */
 function currentLizardVersion() {
   const result = spawnSync('lizard', ['--version'], { encoding: 'utf8' });
@@ -87,8 +87,10 @@ function runCheck(baselinePath) {
   );
 }
 
-const describeIfLizard = hasLizard() ? describe : describe.skip;
-const version = hasLizard() ? currentLizardVersion() : null;
+// One probe answers both "is lizard available" and "which version": a null
+// version already means the analyzer is absent.
+const version = currentLizardVersion();
+const describeIfLizard = version === null ? describe.skip : describe;
 
 describeIfLizard('ccn ratchet refuses to compare across analyzer versions', () => {
   it('AC-GATE3-ANALYZER: a baseline recording the SAME version is compared normally', () => {

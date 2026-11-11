@@ -696,6 +696,12 @@ _run_gradle_tests() {
   return "${PIPESTATUS[0]}"
 }
 
+# #798 / #794: run_coverage() below drives jacoco via the build tool's `test`
+# phase, so it executes and validates the same suite run_tests() does. Declaring
+# that here lets Gate 5 run the suite once; undeclared adapters keep the safe
+# double-run default rather than risk skipping test verification.
+coverage_runs_tests() { return 0; }
+
 run_coverage() {
   local build_system
   build_system=$(_detect_java_build)

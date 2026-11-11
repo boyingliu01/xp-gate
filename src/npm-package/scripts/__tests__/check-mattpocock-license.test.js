@@ -13,7 +13,7 @@ const fs = require('fs');
 const path = require('path');
 const os = require('os');
 const http = require('http');
-const { spawnSync } = require('child_process');
+const { spawn, spawnSync } = require('child_process');
 
 const SCRIPT = path.resolve(__dirname, '..', 'check-mattpocock-license.cjs');
 
@@ -79,6 +79,39 @@ function runScript(args, env) {
     stdout: (result.stdout || Buffer.alloc(0)).toString(),
     verdict: fs.existsSync(verdictPath) ? JSON.parse(fs.readFileSync(verdictPath, 'utf8')) : null,
   };
+}
+
+/**
+ * Async variant of runScript, for cases that talk to an in-process HTTP server.
+ *
+ * spawnSync blocks this process's event loop, so a server started by the test
+ * cannot accept the connection or write its response until the child has
+ * already given up: the child then reports "timeout after 10000ms" twice
+ * (NETWORK_TIMEOUT_MS x (MAX_RETRIES + 1)) and the case takes 20 s while
+ * asserting a behaviour it never actually exercised. Async spawn leaves the
+ * loop free, so the HTTP status the test intends is the one the child sees.
+ *
+ * Observed 2026-11-11: (b2) and (c) took 20.12 s each this way, 40.2 s of this
+ * file's 41.7 s total; both dropped to well under a second once the server
+ * could respond.
+ */
+function runScriptAsync(args, env) {
+  return new Promise((resolve) => {
+    const child = spawn(process.execPath, [SCRIPT, ...args], { env, stdio: 'pipe' });
+    let stderr = '';
+    let stdout = '';
+    child.stderr.on('data', (chunk) => { stderr += chunk.toString(); });
+    child.stdout.on('data', (chunk) => { stdout += chunk.toString(); });
+    child.on('close', (code) => {
+      const verdictPath = env.XPGATE_LICENSE_VERDICT;
+      resolve({
+        status: code,
+        stderr,
+        stdout,
+        verdict: fs.existsSync(verdictPath) ? JSON.parse(fs.readFileSync(verdictPath, 'utf8')) : null,
+      });
+    });
+  });
 }
 
 /** Start a localhost HTTP server that always returns 404 (fake dead license URL). */
@@ -147,7 +180,7 @@ describe('check-mattpocock-license (C0 gate)', () => {
       const env = buildEnv(tmpDir, url);
       // No cache file written → license entirely missing.
 
-      const r = runScript([], env);
+      const r = await runScriptAsync([], env);
 
       // Exit 2 per MUST-DO §6: "LICENSE missing or unrecognizable" triggers the clean-room path.
       expect(r.status).toBe(2);
@@ -168,7 +201,7 @@ describe('check-mattpocock-license (C0 gate)', () => {
       fs.writeFileSync(env.XPGATE_LICENSE_CACHE, VALID_MIT_LICENSE, 'utf8');
 
       // No --offline flag: network is attempted first, fails (404), then falls back to cache.
-      const r = runScript([], env);
+      const r = await runScriptAsync([], env);
 
       expect(r.status).toBe(0);
       expect(r.verdict).not.toBeNull();

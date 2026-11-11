@@ -538,8 +538,26 @@ function gitLfsHookSource(filePath) {
  * the hooks source them and die without them:
  *   - hook-module-resolution.sh (#505): pre-commit aborts FATAL when the module
  *     resolution order is missing. It is generated from lib/hook-module-resolution.js.
+ *   - gate-driver.sh and gate-entries/*.sh (#798): pre-commit now loads its gate
+ *     chain from the driver, so an installed copy without them aborts with
+ *     "FATAL: could not load gate-driver.sh" and NO commit can land at all.
+ *
+ * The #798 entries are DERIVED from the deploy manifest, not listed here. A
+ * hand-maintained list is precisely how this drifted: the driver and its entries
+ * were added to HOOK_FILES/MODULE_FILES and to the mirror check, but this module
+ * kept its own one-element list, so `doctor --sync-hooks` reported success while
+ * leaving the installed copy unable to run a single gate. Deriving removes the
+ * second declaration of the same fact.
  */
-const HOOK_SUPPORT_FILES = ['hook-module-resolution.sh'];
+const HOOK_SUPPORT_FILES = [
+  'hook-module-resolution.sh',
+  // #798: the driver, its gate entries, and the lib/ helpers they source
+  // (now-ms.sh is required by both hooks for the single-clock duration rule).
+  // Derived from the deploy manifest so this list cannot fall behind it.
+  ...require('./deploy-manifest.js').MODULE_FILES.filter(
+    (rel) => rel === 'gate-driver.sh' || rel.startsWith('gate-entries/') || rel.startsWith('lib/'),
+  ),
+];
 
 /**
  * Compare the hooks that actually execute (the installed copy under
@@ -1644,6 +1662,12 @@ function syncGlobalHooksFromRepo(ctx = {}) {
       }
       const backup = backupBeforeOverwrite(target, backupsDir);
       if (backup) backups.push(backup);
+      // #798: support files may live in a subdirectory (gate-entries/*.sh). The
+      // install directory has no such subdirectory yet on an upgraded install, and
+      // copyFileSync does not create parents -- the entries failed with ENOENT
+      // while gate-driver.sh succeeded, leaving a half-synced hook that dies on
+      // its first gate instead of before any.
+      fs.mkdirSync(path.dirname(target), { recursive: true });
       fs.copyFileSync(source, target);
       appendDeployLogEntry(deployLog, { file: name, version, backup });
       synced.push(name);

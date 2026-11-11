@@ -124,8 +124,18 @@ function seedCanonicalSources(realRoot, destRoot) {
     const srcRoot = path.join(real, 'src');
     seedSrcModules(srcRoot, dest);
     fs.mkdirSync(path.join(dest, 'src', 'npm-package', 'scripts'), { recursive: true });
-    for (const rel of ['scripts/sync-package-content.js', 'package.json']) {
-      fs.copyFileSync(path.join(srcRoot, 'npm-package', rel), path.join(dest, 'src', 'npm-package', rel));
+    // `lib/deploy-manifest.js` is required unconditionally by syncHooks (REQ-DEPLOY-001):
+    // the hook list is read from the manifest rather than retyped. `seedSrcModules`
+    // deliberately skips the whole `src/npm-package/` tree, so without this entry the
+    // seeded worktree has no manifest and every syncHooks case fails with
+    // "Cannot find module .../lib/deploy-manifest.js" -- 11 false failures that read
+    // as a sync defect. Copy the one file the script actually requires, not the tree.
+    const seededLibFiles = [path.join('lib', 'deploy-manifest.js')];
+    for (const rel of ['scripts/sync-package-content.js', 'package.json', ...seededLibFiles]) {
+      const from = path.join(srcRoot, 'npm-package', rel);
+      if (!fs.existsSync(from)) continue;
+      fs.mkdirSync(path.dirname(path.join(dest, 'src', 'npm-package', rel)), { recursive: true });
+      fs.copyFileSync(from, path.join(dest, 'src', 'npm-package', rel));
     }
   } catch (err) {
     // A half-seeded worktree makes the sync mirror a partial tree, which then
