@@ -58,11 +58,63 @@ function findFilesByExt(extensions) {
     const result = execSync(`git ls-files ${patterns}`, {
       encoding: 'utf8',
       maxBuffer: 5 * 1024 * 1024,
+      cwd: process.cwd(),
     }).trim();
     return result ? result.split('\n') : [];
   } catch {
     return [];
   }
+}
+
+// Git hooks carry no .sh extension, so an extension glob cannot see them -- and
+// they are the largest shell programs in a gates repository. Same rule as the
+// adapter (githooks/adapters/shell.sh): a file is a shell script when it has a
+// shell extension OR a shell shebang.
+const SHELL_HOOK_NAMES = [
+  'pre-commit', 'pre-push', 'post-commit', 'post-merge',
+  'post-checkout', 'commit-msg', 'prepare-commit-msg',
+];
+
+/**
+ * Collect every shell script in the project: *.sh / *.bash plus git hooks,
+ * matched at any depth. Mirrors `_shell_script_files()` in the shell adapter so
+ * the baseline denominator and the gate numerator describe the same set --
+ * a baseline that measures fewer files than the gate reports can only ever
+ * conclude "debt unchanged".
+ *
+ * @returns {string[]} project-relative paths; empty when not in a git work tree
+ */
+function findShellScripts() {
+  // Both lookups run with cwd=process.cwd() for the same reason `handleBaseline`
+  // overrides process.cwd in tests: a bare execSync inherits the caller's cwd,
+  // so outside a work tree it would walk up into whatever repository happens to
+  // contain the temp directory and report that repo's files as this project's.
+  const cwd = process.cwd();
+  const byExt = findFilesByExt(['.sh', '.bash']).filter(f => !path.isAbsolute(f));
+  const hookPatterns = SHELL_HOOK_NAMES
+    .map(name => `"**/${name}" "${name}"`)
+    .join(' ');
+
+  let hooks = [];
+  try {
+    const result = execSync(`git ls-files ${hookPatterns}`, {
+      encoding: 'utf8',
+      maxBuffer: 5 * 1024 * 1024,
+      cwd,
+    }).trim();
+    hooks = result ? result.split('\n') : [];
+  } catch {
+    hooks = [];
+  }
+
+  const seen = new Set();
+  const files = [];
+  for (const f of [...byExt, ...hooks]) {
+    if (!f || seen.has(f)) continue;
+    seen.add(f);
+    files.push(f);
+  }
+  return files;
 }
 
 /**
@@ -178,7 +230,7 @@ async function createBaseline() {
   }
 
   // Shell — shellcheck
-  const shFiles = findFilesByExt(['.sh']);
+  const shFiles = findShellScripts();
   if (shFiles.length > 0) {
     try {
       execSync('shellcheck --version', { encoding: 'utf8' });
@@ -416,4 +468,4 @@ Examples:
   }
 }
 
-module.exports = { handleBaseline, createBaseline, showBaseline, resetBaseline, diffBaseline, countBaselineByTool, compareBaselines };
+module.exports = { handleBaseline, createBaseline, showBaseline, resetBaseline, diffBaseline, countBaselineByTool, compareBaselines, findShellScripts };
