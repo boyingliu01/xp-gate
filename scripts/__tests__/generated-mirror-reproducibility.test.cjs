@@ -126,3 +126,42 @@ it('REQ-E1-03: publishing still ships the adapters', () => {
   assert.match(String(pkg.scripts.prepare || ''), /generate-mirrors\.cjs/,
     'prepare must generate the mirrors so a fresh clone can run the test suite');
 });
+
+it('REQ-E1-04: generating never writes the canonical tree', () => {
+  // P1-E step 1 makes the generator the only producer of the mirror. A generator
+  // that also repairs its own source is a build step mutating the source of truth,
+  // and it becomes reachable now that the mirror is gitignored: the old #683
+  // "refresh stale adapter gate copy" logic wrote githooks/adapters/<f>, which
+  // created an untracked githooks/adapters/sprint-gate.sh that nothing had ever
+  // committed, and left the freshly generated mirror holding a file its source did
+  // not. Drift in the canonical adapter copies is reported, never rewritten.
+  //
+  // Checked by taking a snapshot of every file's bytes and mtime before and after
+  // a full generation: an in-place edit with identical content would still be a
+  // write, and it is the write that corrupts a reviewer's diff.
+  const snapshot = () => {
+    const map = new Map();
+    for (const relative of listFiles(CANONICAL)) {
+      const full = path.join(CANONICAL, relative);
+      const stat = fs.statSync(full);
+      map.set(relative, `${stat.size}:${stat.mtimeMs}:${fs.readFileSync(full).toString('base64')}`);
+    }
+    return map;
+  };
+
+  const before = snapshot();
+  const run = childProcess.spawnSync(process.execPath, [GENERATOR, '--quiet'], {
+    cwd: REPO_ROOT, encoding: 'utf8', timeout: 180000,
+  });
+  assert.strictEqual(run.status, 0, 'generation must succeed: ' + String(run.stderr).slice(0, 300));
+  const after = snapshot();
+
+  const created = [...after.keys()].filter((k) => !before.has(k));
+  const removed = [...before.keys()].filter((k) => !after.has(k));
+  const changed = [...before.keys()].filter((k) => after.has(k) && before.get(k) !== after.get(k));
+  assert.deepStrictEqual(
+    { created, removed, changed },
+    { created: [], removed: [], changed: [] },
+    'generating must not create, delete or modify anything under githooks/adapters/',
+  );
+});

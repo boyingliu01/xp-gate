@@ -210,33 +210,53 @@ function syncAdapters() {
   // because `resolveGateScript()` falls back to `<adapterDir>/gate-<n>.sh` in a
   // TS-less install, and #532 requires the gate-9 verdict block to stay
   // byte-identical across those copies. Four of them had silently lagged the
-  // canonical gates (gate-3.sh by 4953 bytes, missing the #632 fix). Nothing
-  // failed only because the package-root copy is written later and wins.
+  // canonical gates (gate-3.sh by 4953 bytes, missing the #632 fix).
   //
-  // Re-mirror them here so the invariant is maintained, not merely observed.
-  // The names are taken FROM the adapters directory: this only refreshes copies
-  // that already exist, it never adds a gate script to `adapters/` that was not
-  // deliberately placed there.
+  // P1-E step 1 changed WHERE this can be repaired. The old code wrote the
+  // canonical copies (`githooks/adapters/<f>`) to fix them — which is a build step
+  // MUTATING the source of truth. That was survivable while the mirror was tracked
+  // and hand-maintained, because a human reviewed the diff. Now that the mirror is
+  // generated and gitignored, the same write CREATES files in the canonical tree:
+  // running the generator once produced an untracked `githooks/adapters/sprint-gate.sh`
+  // that nothing had ever committed, and the freshly generated mirror then held a
+  // file its source did not.
+  //
+  // So the canonical tree is read-only here. A canonical adapter gate copy that
+  // disagrees with `githooks/<f>` is REPORTED rather than silently rewritten: the
+  // fix belongs in a commit that a reviewer can see, not in a side effect of a
+  // publish step. The generated mirror always takes the canonical adapter copy
+  // verbatim (syncAdapters copies the tree), so drift shows up as a mirror-vs-source
+  // mismatch in `check-hook-mirror.sh` instead of being papered over.
   const adaptersRoot = path.join(githooksDir, 'adapters');
-  let refreshed = 0;
   let adaptersNames = [];
   try {
     adaptersNames = fs.readdirSync(adaptersRoot);
   } catch {
     adaptersNames = [];
   }
+  const staleAdapterGates = [];
   for (const f of adaptersNames) {
     const isGateScript = f.endsWith('.sh') && (f.startsWith('gate-') || f === 'sprint-gate.sh');
     const canonical = path.join(githooksDir, f);
     if (!isGateScript || !fs.existsSync(canonical)) continue;
-    const mirror = path.join(adaptersRoot, f);
-    const a = fs.readFileSync(canonical);
-    if (fs.existsSync(mirror) && fs.readFileSync(mirror).equals(a)) continue;
-    fs.copyFileSync(canonical, mirror);
-    console.error(`[sync] refreshed stale adapter gate mirror: ${f}`);
-    refreshed += 1;
+    const adapterCopy = path.join(adaptersRoot, f);
+    try {
+      if (fs.readFileSync(adapterCopy).equals(fs.readFileSync(canonical))) continue;
+    } catch {
+      continue;
+    }
+    staleAdapterGates.push(f);
   }
-  return copied + gateFiles.length + refreshed;
+  if (staleAdapterGates.length > 0) {
+    // Loud, not fatal: the generated mirror still carries the adapter copy verbatim,
+    // so the package is consistent; what is inconsistent is the canonical tree, and
+    // that needs a human to commit the refresh.
+    console.error(
+      `[sync] WARNING: canonical adapter gate copies differ from githooks/<name>: ${staleAdapterGates.join(', ')}`
+        + ' — refresh them in a commit; this script no longer writes the source tree.',
+    );
+  }
+  return copied + gateFiles.length;
 }
 
 function syncHooks() {
